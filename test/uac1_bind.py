@@ -11,7 +11,8 @@ what the car reads in the configuration descriptor. The attributes are tools/iap
 p_chmask 3, p_ssize 2, p_srate 44100). The probe links ffs.c2 (the HID) after uac1.car, so the HID's interface is the
 next number usb_interface_id gives. Checked: the HID is interface 2, as on a real iPhone (the BMW reads interface 2's
 HID descriptor), UAC1's interfaces are the numbers it was given and no others, and the AC header's bInCollection,
-baInterfaceNr and wTotalLength agree with the descriptors that follow it. Instructions are stepped one at a time with
+baInterfaceNr and wTotalLength agree with the descriptors that follow it, and the AS IN format lists 32, 44.1 and 48
+kHz (docs/iphone-mode.md#per-song-rate). Instructions are stepped one at a time with
 a fresh integer context after each branch, as test/aic.py does, for Unicorn's MIPS chaining bug. Exit 0 when all hold.
 """
 import argparse
@@ -32,16 +33,21 @@ uac1_build = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(uac1_build)
 OFF_FUNC_FI = uac1_build.STOCK['q2_off_func_fi'][0]          # usb_function.fi, which usb_get_function sets
 OFF_CONFIG_CDEV = uac1_build.STOCK['q2_off_config_cdev'][0]  # usb_configuration.cdev
+OFF_FUNC_CONFIG = uac1_build.STOCK['q2_off_func_config'][0]  # usb_function.config
 # f_uac1_opts after func_inst, as f_audio_alloc_inst sets them (u_uac1.h's UAC1_DEF_*): c_chmask, c_srate, c_ssize,
 # p_chmask, p_srate, p_ssize, req_number
 DEFAULTS = (3, 48000, 2, 3, 48000, 2, 2)
 PROBE = {'c_chmask': 0, 'p_chmask': 3, 'p_ssize': 2, 'p_srate': 44100}  # q2-iap-probe.sh's uac1 attributes
 IPHONE_HID = 2
+# The AS IN format's rates: the module's p_srates when p_srate is one of them (docs/iphone-mode.md#per-song-rate),
+# the three a BMW's iAP2 identification lists (rate indexes 6, 7 and 8)
+RATES = [32000, 44100, 48000]
+IN_EP = 0x81  # the address usb_ep_autoconfig gives the playback endpoint (modeled)
 
 REGS = [UC_MIPS_REG_0 + n for n in range(1, 32)] + [UC_MIPS_REG_HI, UC_MIPS_REG_LO]
 reg = lambda n: UC_MIPS_REG_0 + n
 KERNEL, HEAP, STACK = 0x80000000, 0x05000000, 0x040f8000
-USB_DT_INTERFACE, USB_DT_CS_INTERFACE, UAC_HEADER = 4, 0x24, 1
+USB_DT_INTERFACE, USB_DT_CS_INTERFACE, UAC_HEADER, UAC_FORMAT_TYPE = 4, 0x24, 1, 2
 
 
 class Machine:
@@ -92,7 +98,8 @@ class Machine:
         if name == 'usb_interface_id':
             self.interfaces += 1
             return self.interfaces - 1
-        if name == 'usb_ep_autoconfig':
+        if name == 'usb_ep_autoconfig':  # the endpoint's address, as the UDC's would be
+            self.uc.mem_write(a[1] + 2, bytes([IN_EP if self.read(a[1] + 2, 1)[0] & 0x80 else 0x01]))
             return self.alloc(0x40)
         if name == 'usb_assign_descriptors':
             self.fs = []
@@ -122,7 +129,7 @@ class Machine:
             u.reg_write(reg(4 + n), v)
         u.reg_write(reg(29), STACK)
         u.reg_write(reg(31), self.halt)
-        pc = self.symbols[fn]
+        pc = self.symbols[fn] if isinstance(fn, str) else fn  # a name, or an address (a function pointer)
         for _ in range(200000):
             if pc == self.halt:
                 return u.reg_read(reg(2))
@@ -154,12 +161,18 @@ class Machine:
 
 def bind(data):
     """(full-speed descriptors, interface numbers UAC1 took) of the module bound with the probe's attributes."""
-    m = Machine(data)
+    m = bound(data)
+    return m.fs, list(range(m.interfaces))
+
+
+def bound(data, cls=Machine, opts=PROBE):
+    """A cls whose module is bound with opts: its function at .function, the composite device at .cdev."""
+    m = cls(data)
     fi = m.call('f_audio_alloc_inst')
     words = [m.read(fi + 4 * i) for i in range(0x60)]
     at = next(i for i in range(len(words)) if tuple(words[i:i + 7]) == DEFAULTS)  # c_chmask
-    names = ['c_chmask', 'c_srate', 'c_ssize', 'p_chmask', 'p_srate', 'p_ssize']
-    for k, v in PROBE.items():
+    names = ['c_chmask', 'c_srate', 'c_ssize', 'p_chmask', 'p_srate', 'p_ssize', 'req_number']
+    for k, v in opts.items():
         m.write(fi + 4 * (at + names.index(k)), v)
     f = m.call('f_audio_alloc', fi)
     m.write(f + OFF_FUNC_FI, fi)
@@ -168,10 +181,12 @@ def bind(data):
     m.write(cdev, gadget)  # usb_composite_dev.gadget, its first field
     c = m.alloc(0x100)
     m.write(c + OFF_CONFIG_CDEV, cdev)
+    m.write(f + OFF_FUNC_CONFIG, c)  # as usb_add_function sets it
     status = m.call('f_audio_bind', c, f)
     assert status == 0, f'f_audio_bind returned {status - (1 << 32) if status >> 31 else status}'
     assert m.fs is not None, 'f_audio_bind assigned no descriptors'
-    return m.fs, list(range(m.interfaces))
+    m.function, m.cdev, m.gadget = f, cdev, gadget
+    return m
 
 
 def check(fs, taken):
@@ -194,7 +209,11 @@ def check(fs, taken):
         cs += 1
     if total != sum(len(d) for d in fs[i:cs]):
         wrong.append(f'AC header: wTotalLength {total}, the class-specific AC descriptors {sum(len(d) for d in fs[i:cs])}')
-    return wrong, hid, ifaces, list(h[8:8 + n]), total
+    fmt = [d for d in fs if d[1] == USB_DT_CS_INTERFACE and d[2] == UAC_FORMAT_TYPE]
+    rates = [int.from_bytes(fmt[-1][8 + 3 * k:11 + 3 * k], 'little') for k in range(fmt[-1][7])] if fmt else []
+    if rates != RATES or fmt and len(fmt[-1]) != 8 + 3 * len(rates):
+        wrong.append(f'AS IN format: rates {rates} (bLength {len(fmt[-1]) if fmt else None}), not {RATES}')
+    return wrong, hid, ifaces, list(h[8:8 + n]), total, rates
 
 
 def main(argv):
@@ -202,9 +221,9 @@ def main(argv):
     ap.add_argument('ko', type=Path, help='a usb_f_uac1.ko from tools/uac1_module/uac1_build.py')
     a = ap.parse_args(argv)
     fs, taken = bind(a.ko.read_bytes())
-    wrong, hid, ifaces, ba, total = check(fs, taken)
+    wrong, hid, ifaces, ba, total, rates = check(fs, taken)
     print(f'{a.ko}: {len(fs)} descriptors; UAC1 interfaces {ifaces}, baInterfaceNr {ba}, wTotalLength {total}; '
-          f'HID at interface {hid}')
+          f'HID at interface {hid}; playback rates {rates}')
     for w in wrong:
         print('FAIL  ' + w)
     print('ok' if not wrong else f'{len(wrong)} wrong')

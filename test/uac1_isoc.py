@@ -15,6 +15,11 @@ and hw_ptr moves 1.5 times what the host got: the pattern recorded at the desk o
 and 2 requests the same (a resent packet would follow later samples, so the module does not resend). With
 resend_missed on and 1 request (the module's default and the probe's setting) the host gets every frame in order and
 hw_ptr moves exactly what the host got. in_missed and in_sent count the two kinds of completion.
+Then the rate (docs/iphone-mode.md#per-song-rate, rate_run): the module bound with the probe's attributes and the
+playback interface at alt 1, a host's GET_CUR answers 44100 and the packets are 176 or 180 bytes; after SET_CUR 48000
+GET_CUR answers 48000, every packet is 192 bytes (48 frames) and p_rate, rate_sets and rate_asked say so; a SET_CUR of
+96000, which the format does not list, changes nothing but rate_asked; and alt 0 and back keeps 48 kHz. On a module
+built before q2-uac1-playback-rates.patch the packets stay 44.1 kHz's and GET_CUR answers whatever ep0's buffer held.
 Kernel calls are modeled as test/uac1_bind.py models them. Exit 0 when all hold."""
 import argparse
 import importlib.util
@@ -116,6 +121,152 @@ def run(data, resend, reqs, steps=900):
     return host, moved, m.read(sym['in_missed']), m.read(sym['in_sent'])
 
 
+# struct g_audio's in_ep, uac and params.p_srate; struct usb_gadget's ep0 and speed (STOCK); usb_composite_dev.req;
+# usb_request's complete and actual, ep->desc and the maxpacket halfword (STOCK, uac1_build.py's q2_maxpacket check)
+GA_IN_EP, GA_UAC, GA_P_SRATE = 0x70, 0x80, 0x88
+GADGET_EP0, GADGET_SPEED, USB_SPEED_HIGH = 0x18, 0x24, 3
+CDEV_REQ, REQ_COMPLETE, REQ_ACTUAL, EP_DESC, EP_MAXPACKET = 0x4, 0x1c, 0x34, 0x24, 0x1a
+PRM_RBUF, PRM_MAX_PSIZE, PRM_UREQ = 16, 20, 24
+AS_IN = 1  # the playback interface, uac1_bind.py's check
+SET_CUR, GET_CUR, SAMPLE_RATE = (0x22, 0x01), (0xa2, 0x81), 0x0100  # to the endpoint; wValue's control selector 1
+
+
+class Bound(Machine):
+    """Machine with the calls set_alt and ep0's requests make: ep0's queued request is .ep0_req, the playback
+    endpoint's go to .queue"""
+    ep0 = None
+    ep0_req = None
+
+    def service(self, name, a):
+        if name == 'usb_ep_queue' and a[0] == self.ep0:
+            self.ep0_req = a[1]
+            return 0
+        if name == 'config_ep_by_speed':  # the full-speed endpoint descriptor, its wMaxPacketSize
+            d = next(d for d in self.fs if d[1] == 5)
+            desc = self.alloc(len(d))
+            self.uc.mem_write(desc, d)
+            self.write(a[2] + EP_DESC, desc)
+            self.uc.mem_write(a[2] + EP_MAXPACKET, d[4:6])
+            return 0
+        if name == 'usb_ep_alloc_request':
+            return self.alloc(0x40)
+        if name in ('usb_ep_enable', 'usb_ep_disable', 'usb_ep_dequeue', 'composite_setup_complete'):
+            return 0
+        return super().service(name, a)
+
+
+def control(m, kind, wlength, data=None):
+    """(the bytes of ep0's reply, or None when the module stalled) of a class request to the playback endpoint; data
+    is a SET's data stage, given to the request's completion as the controller would"""
+    req = m.read(m.cdev + CDEV_REQ)
+    m.write(req + REQ_COMPLETE, m.external('composite_setup_complete'))  # as composite_setup sets them each time
+    m.write(req + REQ_CONTEXT, m.cdev)
+    ctrl = m.alloc(8)
+    m.uc.mem_write(ctrl, struct.pack('<BBHHH', *kind, SAMPLE_RATE, uac1_bind.IN_EP, wlength))
+    m.ep0_req = None
+    status = m.call('f_audio_setup', m.function, ctrl)
+    if status >> 31 or m.ep0_req is None:
+        return None
+    n = m.read(req + REQ_LENGTH)
+    if data is not None:
+        m.uc.mem_write(m.read(req + REQ_BUF), data)
+        m.write(req + REQ_ACTUAL, len(data))
+        m.write(req + REQ_STATUS, 0)
+        m.call(m.read(req + REQ_COMPLETE), m.ep0, req)
+    return m.read(m.read(req + REQ_BUF), n)
+
+
+def rate_run(data):
+    """What is wrong with the rate the host sets (docs/iphone-mode.md#per-song-rate), one line each, and what was seen.
+    The module is bound with the probe's attributes and req_number 1, the playback interface set to alt 1 at high
+    speed (bInterval 4: one packet a millisecond), then as a host does: GET_CUR, SET_CUR 48000 while streaming,
+    GET_CUR, SET_CUR 96000 (not offered), the interface to alt 0 and back. Each step's packets are the next 20
+    completions' lengths."""
+    m = uac1_bind.bound(data, Bound, {**uac1_bind.PROBE, 'req_number': 1})
+    f = m.function
+    m.ep0 = m.alloc(0x40)
+    m.write(m.gadget + GADGET_EP0, m.ep0)
+    m.write(m.gadget + GADGET_SPEED, USB_SPEED_HIGH)
+    req = m.alloc(0x40)
+    m.write(m.cdev + CDEV_REQ, req)
+    m.write(req + REQ_BUF, m.alloc(64))
+    m.uc.mem_write(m.read(req + REQ_BUF), b'\xee' * 64)  # what an earlier request left there
+    # u_audio's chip, as g_audio_setup (modeled) would leave it, and an open PCM as test/uac1_isoc.py's run has
+    uac = m.alloc(0x80)
+    prm = uac + UAC_P_PRM
+    m.write(f + GA_UAC, uac)
+    m.write(uac, f)
+    m.write(prm + PRM_UAC, uac)
+    m.write(prm + PRM_RBUF, m.alloc(200))
+    m.write(prm + PRM_MAX_PSIZE, 200)
+    m.write(prm + PRM_UREQ, m.alloc(8))
+    sub, rt, st, ring = m.alloc(0x100), m.alloc(0x300), m.alloc(0x40), m.alloc(RING_FRAMES * 4)
+    m.write(sub + SUB_RUNTIME, rt)
+    m.write(rt + RT_STATUS, st)
+    m.write(st, SNDRV_PCM_STATE_RUNNING)
+    m.write(rt + RT_PERIOD_SIZE, PERIOD_FRAMES)
+    m.write(rt + RT_FRAME_BITS, 32)
+    m.write(rt + RT_DMA_AREA, ring)
+    m.write(rt + RT_DMA_BYTES, RING_FRAMES * 4)
+    ep = m.read(f + GA_IN_EP)
+
+    def packets(n=20):
+        out = []
+        for _ in range(n):
+            r = m.queue.pop(0)
+            m.write(r + REQ_STATUS, 0)
+            m.call('u_audio_iso_complete', ep, r)
+            out.append(m.read(r + REQ_LENGTH))
+        return out
+
+    def rate(reply):
+        return None if reply is None else int.from_bytes(reply[:3], 'little')
+
+    def param(name):
+        return m.read(m.symbols[name]) if name in m.symbols else None
+
+    wrong, seen = [], []
+    status = m.call('f_audio_set_alt', f, AS_IN, 1)
+    if status:
+        return [f'set_alt(1, 1) returned {status}'], seen
+    m.write(prm + PRM_SS, sub)  # the PCM's trigger
+    first = packets()
+    seen.append(f'alt 1 at 44.1 kHz: packets {sorted(set(first))}')
+    if sorted(set(first)) != [176, 180]:
+        wrong.append(f'at 44.1 kHz the packets are {sorted(set(first))} bytes, not 176 and 180 (44 or 45 frames)')
+    got = rate(control(m, GET_CUR, 3))
+    seen.append(f'GET_CUR {got}')
+    if got != 44100:
+        wrong.append(f'GET_CUR before any SET_CUR answers {got}, not p_srate 44100')
+    control(m, SET_CUR, 3, (48000).to_bytes(3, 'little'))
+    after = packets()
+    got = rate(control(m, GET_CUR, 3))
+    seen.append(f'SET_CUR 48000: packets {sorted(set(after))}, GET_CUR {got}, p_rate {param("p_rate")}, '
+                f'rate_sets {param("rate_sets")}, rate_asked {param("rate_asked")}')
+    if set(after) != {192}:
+        wrong.append(f'after SET_CUR 48000 the packets are {sorted(set(after))} bytes, not 192 (48 frames)')
+    if got != 48000:
+        wrong.append(f'GET_CUR after SET_CUR 48000 answers {got}')
+    if (param('p_rate'), param('rate_sets'), param('rate_asked')) != (48000, 1, 48000):
+        wrong.append(f'p_rate {param("p_rate")}, rate_sets {param("rate_sets")}, rate_asked {param("rate_asked")}, '
+                     'not 48000, 1 and 48000')
+    control(m, SET_CUR, 3, (96000).to_bytes(3, 'little'))
+    odd = packets()
+    got = rate(control(m, GET_CUR, 3))
+    seen.append(f'SET_CUR 96000: packets {sorted(set(odd))}, GET_CUR {got}')
+    if set(odd) != {192} or got != 48000 or param('rate_asked') != 96000:
+        wrong.append(f'SET_CUR 96000, not offered, changed the stream: packets {sorted(set(odd))}, GET_CUR {got}, '
+                     f'rate_asked {param("rate_asked")}')
+    m.call('f_audio_set_alt', f, AS_IN, 0)
+    m.queue.clear()  # dequeued
+    m.call('f_audio_set_alt', f, AS_IN, 1)
+    again = packets()[1:]  # the first is the request queued again as it was
+    seen.append(f'alt 0 and back: packets {sorted(set(again))}')
+    if set(again) != {192}:
+        wrong.append(f'after alt 0 and back the packets are {sorted(set(again))} bytes, not 192')
+    return wrong, seen
+
+
 def runs(host):
     """[(frames in order, frames skipped after them)] of the host's counter frames after the zeroed first packets,
     the last run with 0"""
@@ -157,6 +308,9 @@ def main(argv):
                 wrong.append(f'{what}: not the desk pattern (88 or 89 frames, then 44 or 45 skipped): {steady[:6]}')
             if abs(moved / got - 1.5) > 0.01:
                 wrong.append(f'{what}: hw_ptr moved {moved / got:.3f} times what the host got, not 1.5')
+    rate_wrong, seen = rate_run(data)
+    print('rates: ' + '; '.join(seen))
+    wrong += rate_wrong
     for w in wrong:
         print('FAIL  ' + w)
     print('ok' if not wrong else f'{len(wrong)} wrong')
