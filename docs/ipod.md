@@ -799,8 +799,9 @@ Shuffle. The wheel then moves the ring across Shuffle, Repeat and the heart, cha
 Center works the ringed control as a tap does (Shuffle on or off, Repeat Off, All, One, the heart's
 like on or off) and the ring stays. While a radio plays the ring has only the heart; under a theme
 without the pair there is no ring and the scrub's press ends the cycle. Return, a touch or 3
-seconds without a key end the ring. A short hold (`NP_HOLD_MS`, 400 ms) turns the
-screen off, and a long hold is still Shut Down. The presses work the same while the volume shows
+seconds without a key end the ring. A double press (within `DOUBLE_CLICK_MS`, 250 ms, the wheel
+not turned) or a short hold (`NP_HOLD_MS`, 400 ms) turns the screen off, and a long hold is
+still Shut Down. The presses work the same while the volume shows
 `patch/offsets.inc`; see [internals.md](internals.md#scrub-ipod).
 
 The top row's text and icons, the bar's ends and the times keep clear of the corners

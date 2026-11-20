@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Now Playing: a double press of Center turns the screen off (and so locks the buttons when Buttons Lock is on) again, as on every other page, instead of starting a seek and then ringing Shuffle. A single press still starts seeking at once.
   - Logs: the Q2's log now includes what each running card app (Subsonic and the others) writes to its own log, under the app's name, and **Send Logs** also sends each app's own logs, so a download that fails while you are away from home can be seen afterwards.
   - Typing (OLED): the Wi-Fi password and Add Network show the status row with the page's title at the top again, instead of Shanling's old "Please enter password" box and back arrow, and no page you type on has a thin white outline round it any more.
   - Display (OLED): a confirmation's answers are now evenly spaced, like Shut Down's: a red answer (Forget, Remove, Erase, Reset) no longer sits apart from Cancel after a gap.

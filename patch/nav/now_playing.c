@@ -429,12 +429,21 @@ static unsigned np_stop_next(unsigned stage, int dir) {
  * on or off (its click, ratings.c rate_fav_click). The song's stars are the rating page's alone.
  * Under a theme without the pair there is no ring and the scrub's press ends the cycle. A press
  * held NP_HOLD_MS or longer, short of stock's long press (Shut Down), turns the screen off
- * instead, as stock's release does. */
+ * instead, as stock's release does. So does a double press, as on every other page: the first
+ * press scrubs at once, and a second within DOUBLE_CLICK_MS of the release that started that
+ * scrub, the wheel not moved between, undoes it unseeked (np_cancel: scrub_end seeks only a
+ * moved target) and turns the screen off, where it would end the scrub and ring shuffle. */
 #define NP_HOLD_MS 400
+static struct {
+    unsigned at; /* that release's time */
+    int armed;   /* ... and the next press may be its double */
+} np_dc __attribute__((section(".scratch")));
 static int np_centre(unsigned now) {
     int held = st.center_down_at && now - st.center_down_at >= NP_HOLD_MS;
+    int dbl = np_dc.armed && now - np_dc.at < DOUBLE_CLICK_MS;
     st.center_down_at = 0; /* this press's: a release with no press stamped is a press */
-    if (held && !st.scrub) {
+    np_dc.armed = 0;
+    if ((held && !st.scrub) || (dbl && st.scrub && !st.scrub_moved)) {
         np_cancel();
         np_single();
         return STOP;
@@ -448,8 +457,10 @@ static int np_centre(unsigned now) {
     if (st.scrub) {
         scrub_end();
         np_stage(np_stop_next(NP_STAGE_REST, 1));
-    } else if (stage == NP_STAGE_REST)
+    } else if (stage == NP_STAGE_REST) {
         scrub_start();
+        if (st.scrub) np_dc.at = now, np_dc.armed = 1; /* a second press soon is a double */
+    }
     else if (!np_stop_ok(stage)) {
         np_stage(NP_STAGE_REST);
     } else if (stage == NP_STAGE_HEART) {

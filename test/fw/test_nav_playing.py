@@ -1253,6 +1253,25 @@ def test_a_short_hold_turns_the_screen_off(fw, ui, mcl, st):
     assert st.scrub == 0 and releases == [1]
 
 
+@pytest.mark.parametrize('gap', [120, O['DOUBLE_CLICK_MS'] - 1])
+def test_a_double_press_turns_the_screen_off_and_a_single_still_scrubs(fw, ui, mcl, st, gap):
+    """docs/changelog.md (OLED the one theme): on Now Playing a single Center press starts seeking and a double press
+    turns the screen off, as on every other page. The user, 2026-11-19: the double press went into the select mode
+    (the first press's scrub, the second's ring on shuffle). The first press still scrubs at once; a second within
+    DOUBLE_CLICK_MS of it, the wheel not moved between, undoes that scrub unseeked and turns the screen off."""
+    theme(fw, st)
+    releases = []
+    fw.mock('on_wm_keyup_fun', lambda w, event, *_: releases.append(1))
+    now = Now(fw, ui, mcl, st)
+    assert cpress(now, 200000) == STOP and st.scrub == 1 and releases == []  # a single press: seeking, at once
+    assert cpress(now, 200000 + gap) == STOP
+    assert releases == [1] and st.scrub == 0 and st.np_stage == REST and not st.scrub_moved
+    assert not fw.calls('player_seek_time') and not fw.calls('mclSetSeek')  # the first press's scrub moved nothing
+    cpress(now, 210000)  # a press later on: a scrub again, and one after DOUBLE_CLICK_MS the ring, as before
+    cpress(now, 210000 + O['DOUBLE_CLICK_MS'])
+    assert st.np_stage == SHUFFLE and releases == [1]
+
+
 def test_a_short_hold_is_timed_from_the_press_not_its_repeats(fw, ui, mcl, st):
     """A Q2's held Centre repeats its key-down every 50 ms after about 258 ms; each passes chord_gate and
     ringnav_keydown, and the hold is still the press's."""
