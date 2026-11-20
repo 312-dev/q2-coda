@@ -11,8 +11,9 @@
 #
 # start returns at once; the work runs detached (setsid), because parking the ADB gadget ends adb's own shell. A
 # plan is phases run in order, each a gadget made, probed and removed: a phase is full or min (four configurations,
-# or configuration 2 alone), with :echo (echo iAP2's detect), :noaudio (no UAC2 function) or :tone (play a -20 dBFS
-# 1 kHz tone into the gadget's sound card while it is up). desk is "full:echo:tone" until --for runs out; car is
+# or configuration 2 alone), with :echo (echo iAP2's detect), :noaudio (no audio function), :uac1 (USB Audio 1.0
+# from tools/uac1_module's usb_f_uac1.ko, loaded from beside this script if it is not yet: at the desk only) or :tone
+# (play a -20 dBFS 1 kHz tone into the gadget's sound card while it is up). desk is "full:echo:tone" until --for runs out; car is
 # "full full:echo min:echo", one session (a plug, docs/iphone-mode.md#sessions) each, then the restore.
 # --for (default 900, at most 3600) is the hard limit from start: the runner stops there, and a separate watchdog
 # forces the stop 60 s later if the runner has not. --delay waits that long first, with adb still up, so the cable
@@ -52,6 +53,7 @@ gadget_up() {
         full | min) configs=$w ;;
         echo) echo=--echo ;;
         noaudio) audio=none ;;
+        uac1) audio=uac1 ;;
         tone) tone=1 ;;
         esac
     done
@@ -86,26 +88,35 @@ gadget_up() {
         echo "PTP + Apple Mobile Device + Apple USB Ethernet" > $G/configs/c.4/strings/0x409/configuration
     fi
     echo "iPod USB Interface" > $G/configs/c.2/strings/0x409/configuration
-    if [ $audio = uac2 ]; then
+    if [ $audio = uac1 ] && [ ! -d /sys/module/usb_f_uac1 ]; then
+        # tools/uac1_module's build, pushed beside this script; loaded once, left loaded (a restart clears it)
+        if [ -f $HERE/usb_f_uac1.ko ] && insmod $HERE/usb_f_uac1.ko 2>>"$LOG"; then
+            log "usb_f_uac1.ko loaded: $(dmesg | tail -n 5 | tr '\n' '|')"
+        else
+            log "usb_f_uac1.ko would not load: $(dmesg | tail -n 8 | tr '\n' '|')"
+            return 1
+        fi
+    fi
+    if [ $audio = uac2 ] || [ $audio = uac1 ]; then
         # The Q2 is the source here: the reverse of stock's USB DAC gadget (uac_device_config.sh). Shanling's
         # f_uac2 is not upstream's, so every attribute is written only if it exists, and all are logged.
-        U=$G/functions/uac2.car
+        U=$G/functions/$audio.car
         if mkdir $U; then
             for kv in c_chmask=0 p_chmask=3 p_ssize=2 p_srate=44100 \
                 p_mute_present=0 p_volume_present=0 c_mute_present=0 c_volume_present=0; do
                 k=${kv%%=*} v=${kv#*=}
-                [ -e $U/$k ] || { log "uac2: no attribute $k"; continue; }
-                echo $v > $U/$k 2>/dev/null || log "uac2: $k refused $v"
+                [ -e $U/$k ] || { log "$audio: no attribute $k"; continue; }
+                echo $v > $U/$k 2>/dev/null || log "$audio: $k refused $v"
             done
-            log "uac2 attributes: $(for f in $U/*; do printf '%s=%s ' "${f##*/}" "$(tr '\n' ' ' < $f 2>/dev/null)"; done)"
+            log "$audio attributes: $(for f in $U/*; do printf '%s=%s ' "${f##*/}" "$(tr '\n' ' ' < $f 2>/dev/null)"; done)"
         else
-            log "uac2: mkdir $U failed (no uac2 function?)"
+            log "$audio: mkdir $U failed (no $audio function?)"
             audio=none
         fi
     fi
     # Link order is interface order: audio first (interfaces 0 and 1), then the HID (interface 2).
     [ "$configs" = full ] && ln -s $G/functions/ffs.c1 $G/configs/c.1/
-    [ $audio = uac2 ] && ln -s $G/functions/uac2.car $G/configs/c.2/
+    [ $audio != none ] && ln -s $G/functions/$audio.car $G/configs/c.2/
     ln -s $G/functions/ffs.c2 $G/configs/c.2/
     [ "$configs" = full ] && ln -s $G/functions/ffs.c3 $G/configs/c.3/ && ln -s $G/functions/ffs.c4 $G/configs/c.4/
     args=
@@ -133,7 +144,7 @@ gadget_up() {
     log "bound to $udc: phase $1, configurations $cfgs, audio $audio, max speed $(cat /sys/class/udc/$udc/maximum_speed 2>/dev/null)"
     usleep 300000
     CARD=
-    if [ $audio = uac2 ]; then
+    if [ $audio != none ]; then
         log "sound cards now: $(tr '\n' '|' < /proc/asound/cards)"
         CARD=$(cat /proc/asound/cards | grep -E '^ *[0-9]+ \[' | while read -r line; do
             echo "$cards0" | grep -qF "$line" || echo "$line"
@@ -196,7 +207,7 @@ gadget_down() {
     killall aplay 2>/dev/null
     for n in 1 2 3 4; do mountpoint -q $FFS/iap$n && umount $FFS/iap$n; done
     if [ -d $G ]; then
-        rm -f $G/configs/c.*/ffs.c* $G/configs/c.*/uac2.car
+        rm -f $G/configs/c.*/ffs.c* $G/configs/c.*/uac2.car $G/configs/c.*/uac1.car
         rmdir $G/configs/c.*/strings/0x409 $G/configs/c.* 2>/dev/null
         rmdir $G/functions/* $G/strings/0x409 2>/dev/null
         rmdir $G 2>/dev/null || log "could not remove $G: $(ls -R $G 2>&1 | tr '\n' ' ')"
