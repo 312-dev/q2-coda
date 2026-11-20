@@ -224,7 +224,8 @@ runner() {
     STOP=
     trap 'STOP=1; p=$(pidof_file probe); alive "$p" && kill "$p"' TERM INT HUP
     log "runner: plan '$PLAN', until $(date -d @$DEADLINE 2>/dev/null || echo $DEADLINE), delay $DELAY s, sessions $SESSIONS"
-    while [ -z "$STOP" ] && [ $(($(date +%s) - START)) -lt $DELAY ]; do sleep 1; done
+    # at least 2 s, so start's own lines reach the computer before parking ends adb's shell
+    while [ -z "$STOP" ] && [ $(($(date +%s) - START)) -lt $((DELAY < 2 ? 2 : DELAY)) ]; do sleep 1; done
     if [ -z "$STOP" ]; then
         $ADBG park >/dev/null 2>&1
         log "q2adb parked"
@@ -302,8 +303,14 @@ start() {
     DEADLINE=$((START + FOR))
     log "start: plan '$PLAN', for $FOR s, delay $DELAY s, sessions $SESSIONS, kernel $(uname -r), $(cat /proc/version | cut -c1-120)"
     export PLAN DEADLINE DELAY SESSIONS START CARPLAY ECHO_FROM
+    # adb's shell ends as soon as this returns, and its hangup reached the children before setsid had moved them
+    # to their own session (seen on the Q2: the runner never logged). Ignored here, it is ignored in them too.
+    trap '' HUP
     setsid sh "$0" _runner </dev/null >/dev/null 2>>"$LOG" &
     setsid sh "$0" _watchdog $DEADLINE </dev/null >/dev/null 2>&1 &
+    i=0
+    while ! alive "$(pidof_file runner)" && [ $i -lt 30 ]; do usleep 100000; i=$((i + 1)); done
+    alive "$(pidof_file runner)" || { echo "q2-iap-probe: the runner did not start; see $LOG" >&2; exit 1; }
     echo "q2-iap-probe: started, plan '$PLAN', restores by itself within $FOR s (watchdog at +60 s)."
     [ "$DELAY" -gt 0 ] && echo "adb stays up for $DELAY s; then the Q2 becomes an iPhone on its USB port." ||
         echo "adb goes away now; it comes back when the run ends."
