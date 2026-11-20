@@ -941,8 +941,10 @@ int ringnav(void *ctx, void *event) {
     st.touch_mode = 0;
     if (is_home(top, w)) {
         if (coverflow_wheel_on(w)) return STOP; /* a tick queued as the wheel went raw */
-        int speed = ramp(top, w, g_menu.scope, g_menu.ctx, dir, now, CF_FIRST_MS, LIST_RAMP_MS);
-        home_step(w, dir, now, speed > 1);
+        /* the lists' momentum (wheel_accel.c), rows only: a length of 0, under WA_LETTER_ROWS, so
+         * Cover Flow never jumps by letter */
+        static wheel_accel_t cf_wa __attribute__((section(".scratch")));
+        home_step(w, dir, now, wheel_accel(&cf_wa, w, dir, now, 0));
         widget_invalidate_force(w, (void *)0);
         return STOP;
     }

@@ -1722,7 +1722,7 @@ void cf_thumb(float *out) {
     out[0] = th.pos, out[1] = th.vel, out[2] = th.goal, out[3] = th.lead, out[4] = th.rate;
     out[5] = (float)th.on, out[6] = (float)th.jump, out[7] = (float)th.lean;
     out[8] = (float)th.fold, out[9] = th.enter, out[10] = th.fold_off, out[11] = th.fold_vel;
-    out[12] = th.arch;
+    out[12] = th.arch, out[13] = (float)th.rebased;
 }
 void cf_thumb_lead(float lead) { th.on = lead >= 0, th.lead = lead >= 0 ? lead : 0; }
 /* For test/coverflow.py: the arch formed so far (0: none), to render at. */

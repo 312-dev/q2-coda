@@ -253,7 +253,6 @@ extern int album_only(void *, void *, int), coverflow_split(void *);
 #define WHEEL_MAX_STEP 8  /* one more per this much spin, up to this many */
 #define LIST_FIRST_MS 300 /* iPod row lists: one row per step for this long, */
 #define LIST_RAMP_MS 200  /* then one row more per this much spin */
-#define CF_FIRST_MS 700   /* Coverflow: one cover per step this long before it jumps by letter */
 #define SHORT_LIST_MAX 16
 scratch_t st __attribute__((section(".scratch")));
 

@@ -1064,21 +1064,21 @@ for key in (O['KEY_PREV'],O['KEY_NEXT']):
     assert not m.dispatched()
 passed()
 
-# Ticks (the covers' wheel when the thumb isn't on): slow steps stay precise. Continuous 50ms ticks cross Coverflow's 700ms threshold and jump groups.
+# Ticks (the covers' wheel when the thumb isn't on, and Home's carousel): the lists' momentum (wheel_accel.c), rows only.
+# 50 ms ticks move an album a tick for WA_FIRST_MS (300), then one more each WA_RAMP_MS (200): 14 ticks (runs 0 to 650 ms)
+# are 6 x 1 + 4 x 2 + 4 x 3 = 26 albums, the 15th (700 ms) 4 more; never a letter's jump and no letter over the covers.
 m=CoverflowMachine(albums=19)
 for r,name in zip(m.albums,['A1','A2','A3','D1','D2','D3']+[f'G{i}' for i in range(1,12)]+['Z1','Z2']): m.word(r+O['REC_ALBUM'],m.string(name))
 m.open()
 stride=m.call(address=syms['slide_menu_item_width'],args=(m.slide,0,0,0),gap=0)+m.get(m.slide+O['SLIDE_SPACER'])
 for _ in range(14): assert m.call(gap=50)==11
-assert m.get(m.slide+O['SLIDE_INDEX'])==0 and slide(m,m.slide)[2]==-14*stride
+assert m.get(m.slide+O['SLIDE_INDEX'])==0 and slide(m,m.slide)[2]==-26*stride
 assert m.call(gap=50)==11
-assert slide(m,m.slide)[2]==-17*stride  # intended index 14 jumps to Z at 17
-m.paint(m.slide,gap=0); assert any(t['text']=='Z' for t in m.letters)
-a=slide(m,m.slide)[0]
-m.advance(400); assert m.get(m.slide+O['SLIDE_INDEX'])==17
-m.paint(m.slide,gap=0); assert not any(t['text']=='Z' for t in m.letters)
-assert m.call(O['KEY_PREV'],gap=50)==11  # reversal resets sustained scrolling
-m.advance(200); assert m.get(m.slide+O['SLIDE_INDEX'])==16; passed()
+assert slide(m,m.slide)[2]==-30*stride
+m.paint(m.slide,gap=0); assert not any(len(t['text'])==1 for t in m.letters)
+m.advance(400); assert m.get(m.slide+O['SLIDE_INDEX'])==30%19
+assert m.call(O['KEY_PREV'],gap=50)==11  # reversal starts over: one album back
+m.advance(200); assert m.get(m.slide+O['SLIDE_INDEX'])==30%19-1; passed()
 # A reversal while moving reuses the animator and returns to the adjacent live cover.
 m=CoverflowMachine(albums=10); m.open(); m.call(gap=0); m.call(gap=20)
 a=slide(m,m.slide)[0]; assert m.call(O['KEY_PREV'],gap=20)==11 and slide(m,m.slide)[0]==a

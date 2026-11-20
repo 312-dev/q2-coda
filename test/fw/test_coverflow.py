@@ -3863,12 +3863,16 @@ def test_a_level_slides_in_from_the_side_it_comes_from_where_the_theme_moves_lev
 
 # The covers' captions
 
+class WheelAccel(C.Structure):  # patch/wheel_accel.h wheel_accel_t
+    _fields_ = [('key', C.c_void_p), ('last', C.c_uint), ('run', C.c_uint), ('dir', C.c_int)]
+
+
 class Th(C.Structure):
-    _fields_ = [*((k, C.c_float) for k in 'pos vel goal lead lead_v rate tau ticks seen seen_lead stretch'.split()),
-                *((k, C.c_uint) for k in 'at tick_at edge_at letter_at'.split()),
-                *((k, C.c_int) for k in 'raw on finger held dir dead early clicked bounced capped jump beat jump_to lean fold'.split()),
+    _fields_ = [*((k, C.c_float) for k in 'pos vel goal lead lead_v rate tau ticks seen seen_lead'.split()),
+                *((k, C.c_uint) for k in 'at tick_at edge_at'.split()),
+                *((k, C.c_int) for k in 'raw on finger held dir dead early clicked bounced jump tick_acc rebased lean fold'.split()),
                 ('fold_at', C.c_uint), *((k, C.c_float) for k in 'enter fold_off fold_vel hold_lead hold_run hold_xrun hold_xs'.split()),
-                ('hold_k', C.c_int), ('arch', C.c_float), ('seen_arch', C.c_float)]
+                ('hold_k', C.c_int), ('arch', C.c_float), ('seen_arch', C.c_float), ('wa', WheelAccel)]
 
 
 def captions(fw, scoped=0, albums=(('Abbey', 'Beatles'), ('Help', 'Beatles'))):

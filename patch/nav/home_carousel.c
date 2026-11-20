@@ -143,7 +143,8 @@ int carousel_glide(void *w, int goal, unsigned ms, int easing) {
     return 1;
 }
 
-/* Cover Flow's big letter over w for LETTER_MS, or none: the wheel's jumps and the thumb's. */
+/* Cover Flow's big letter over w for LETTER_MS, or none. ponytail: nothing calls it with a letter
+ * now (docs/internals.md#coverflow-thumb, No letters); it goes with the letters' cleanup. */
 void coverflow_letter(void *w, unsigned letter, unsigned now) {
     st.cf_letter = letter;
     st.cf_letter_at = now;
@@ -162,7 +163,10 @@ void coverflow_letter_hold(void *w, unsigned letter) {
     st.cf_letter = letter, st.cf_letter_held = 1;
 }
 
-static void home_step(void *w, int dir, unsigned now, int jump) {
+/* A tick's step of n albums (wheel_accel's rows: Cover Flow never jumps by letter), the covers
+ * passing every album between; a bounded row (coverflow_bounded) stops on its end, and a step
+ * from the end itself kicks out and springs back. */
+static void home_step(void *w, int dir, unsigned now, int steps) {
     int n = slide_count(w);
     int stride = slide_menu_item_width(w) + I(w, SLIDE_SPACER);
     int fast =
@@ -177,18 +181,18 @@ static void home_step(void *w, int dir, unsigned now, int jump) {
         if (dir > 0 ? goal >= live : goal <= live) goal -= dir * stride;
     } else
         goal -= dir * stride;
-    unsigned letter = 0;
-    int from = (I(w, SLIDE_INDEX) - goal / stride - dir) % n;
-    if (from < 0) from += n;
-    int steps = jump ? coverflow_jump(w, from, dir, &letter) : 1;
     goal -= dir * stride * (steps - 1);
     int to = I(w, SLIDE_INDEX) - goal / stride;
     if (coverflow_bounded(w) && (to < 0 || to >= n)) {
-        goal += dir * stride * steps;
-        if (a && (goal - live) * dir < 0) return; /* still arriving at the end */
-        I(w, SLIDE_OFFSET) = live = goal - (motion_reduced() ? 0 : dir * stride / CF_BOUNCE);
+        int over = to < 0 ? -to : to - (n - 1);
+        if (over < steps)
+            goal += dir * stride * over; /* on the end, not past it */
+        else {
+            goal += dir * stride * steps;
+            if (a && (goal - live) * dir < 0) return; /* still arriving at the end */
+            I(w, SLIDE_OFFSET) = live = goal - (motion_reduced() ? 0 : dir * stride / CF_BOUNCE);
+        }
     }
-    coverflow_letter(w, letter, now);
     const motion_t *glide =
         motion_row((coverflow_slide(w) ? MOTION_COVERFLOW_STEP : MOTION_STEP) + fast);
     if (!carousel_glide(w, goal, glide->ms, glide->easing)) {

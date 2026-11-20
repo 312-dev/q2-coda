@@ -1023,6 +1023,9 @@ def test_a_list_takes_no_overscroll_once_bound(fw, ui):
 ANIM_X_TO, ANIM_DURATION, SLIDE_OFFSET, SLIDE_INDEX = O['ANIM_X_TO'], O['ANIM_DURATION'], O['SLIDE_OFFSET'], O['SLIDE_INDEX']
 
 
+WA = host.defines('wheel_accel.h')
+
+
 class Carousel:
     """Home's slide_menu of n cards on home_page, a card's width plus the spacer apart; its animator
     a block whose goal (ANIM_X_TO) and run (ANIM_DURATION) the C sets. The live offset is the test's."""
@@ -1142,6 +1145,29 @@ def test_a_follow_glide_runs_as_long_as_coverflows_aim_says(fw, ui):
     assert fw.calls('widget_animator_scroll_create')[0][1][3] == 0  # AWTK gets no easing it lacks
     easing = struct.unpack_from('<Q', home.animator, O['ANIM_EASING'])[0]
     assert easing == C.cast(fw.lib.coverflow_follow, C.c_void_p).value
+
+
+def test_the_carousels_momentum_is_the_lists_rows_never_a_letter(fw, ui):
+    """The user, 2026-11-19: Cover Flow scrolls as the lists do, through every cover, never by letter. Timed ticks
+    on a long carousel: one card a tick turned slowly, more as a sustained spin goes on (wheel_accel.c: 2 from
+    WA_FIRST_MS, one more each WA_RAMP_MS, at most WA_MAX_ROWS), however long, and no letter shown; a pause past
+    WA_RUN_MS starts over at one."""
+    home = Carousel(fw, ui, n=400)
+    goal, steps, t = 0, [], 1000
+    for i in range(3):  # slow
+        key(fw, ui, KEY_NEXT, t)
+        steps.append((goal - home.goal) // home.stride)
+        goal, t = home.goal, t + 300
+    for i in range(90):  # a sustained spin, a tick each 30 ms for 2.7 s
+        key(fw, ui, KEY_NEXT, t)
+        steps.append((goal - home.goal) // home.stride)
+        goal, t = home.goal, t + 30
+    fast = steps[3:]
+    assert steps[:3] == [1, 1, 1] and fast[0] == 1 and max(fast) == WA['WA_MAX_ROWS'] and fast[-1] == WA['WA_MAX_ROWS']
+    assert all(b >= a for a, b in zip(fast, fast[1:]))  # rising while it goes on, never a letter's jump
+    assert not ui.due('cf_letter_expire')  # no letter over the covers
+    key(fw, ui, KEY_NEXT, t + WA['WA_RUN_MS'] + 100)  # after a pause: one again
+    assert (goal - home.goal) // home.stride == 1
 
 
 def test_coverflows_letter_shows_for_its_time_then_repaints_away(fw, ui):
