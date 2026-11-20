@@ -691,7 +691,7 @@ has no place for keeps a place of its own:
   `reach=down <code>`) and the song is the pressed one or one the player waits for, the times row's centre first reads
   why beside the spinner while the app tries again, "Server error 502 · trying again" (Inter 13 px, Text Secondary;
   "Server not answering", "Server not found", else "Can't reach the server", the words of the
-  [server toast](#toasts)), for 10 s; then why alone in the spinner's place, and the state row is the empty states'
+  [server toast](#dialogs-and-toasts)), for 10 s; then why alone in the spinner's place, and the state row is the empty states'
   capsule pair, Retry (selected) and Skip ([buttons](#buttons)). Nothing is skipped without a word. A tap takes either; Centre at rest is Retry; the
   wheel stays the volume's. Retry asks the app to try again now; Skip is Next.
 - **The volume** and the scrub draw on the bar where it is. The volume (the "A: iPod speakers"
