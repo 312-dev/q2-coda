@@ -230,7 +230,7 @@ enum { SS_SECRET_NONE, SS_SECRET_PASS, SS_SECRET_WIFI };
 #define SS_ERASE_HOLD_MS 450
 #define SS_ERASE_GAP_MS 500
 #define SS_ERASE_MIN_MS 110
-enum { SS_SONG, SS_ARTIST, SS_ALBUM };                                     /* a result's kind */
+enum { SS_SONG, SS_ARTIST, SS_ALBUM, SS_NAME };                            /* a result's kind */
 enum { SS_TAB_ALL, SS_TAB_SONGS, SS_TAB_ARTISTS, SS_TAB_ALBUMS, SS_TABS }; /* tab, kind + 1 */
 enum { SS_ON_STRIP, SS_ON_LIST, SS_ON_TABS, SS_ON_FIELD };                 /* what has the wheel */
 
@@ -289,6 +289,38 @@ static struct {
     unsigned char
         fpress; /* a finger went down on the query while the strip had no wheel (ss_grab) */
 } ss __attribute__((section(".scratch")));
+
+/* A list page's own search (search_bar.c, docs/oled-design.md#search-bar): the page's rows, its
+ * object type in its context, filtered as the text is typed. SC_SONGS: a song table over
+ * p_deque_showlist (Songs, an album's, a genre's), each found by its title, artist or album as
+ * Search's songs are; SC_NAMES: a name table over it (Albums, Artists, Composers, Genres), by
+ * field; SC_ROWS: a page's own rows (Playlists, Years, an artist's albums and songs, a playlist's
+ * songs), by their first label's text. rec holds the page's rows as they were when it opened, in
+ * the page's order, n of them; a result opens its row on the page (ss_scope_open): the page's
+ * selection on it and a Centre press, so it does what the row does there. */
+enum { SC_NONE, SC_SONGS, SC_NAMES, SC_ROWS };
+static struct {
+    int kind, field, n, target; /* target: the row to open once the page is on top again, + 1 */
+    void **rec;
+    void *page, *surface; /* the list page and its rows' surface (a table_client or scroll view) */
+    unsigned timer;
+    char label[48]; /* "Search Songs", the bar's words */
+} sc __attribute__((section(".scratch")));
+/* Search's results with no tabs: Add Songs' and a list page's own */
+static int ss_alone(void) { return ss.pick || sc.kind; }
+/* SC_ROWS' row w's words, its first hscroll_label's (or label's), into out */
+static const char *sc_words(void *w, char *out, unsigned n) {
+    out[0] = 0;
+    for (unsigned i = 0, k = w ? widget_count_children(w) : 0; i < k && !out[0]; ++i) {
+        void *c = widget_get_child(w, i);
+        const char *t = widget_get_type(c);
+        if (!tk_strcmp(t, "hscroll_label") || !tk_strcmp(t, "label"))
+            widget_get_text_utf8(c, out, n);
+        else if (widget_count_children(c))
+            sc_words(c, out, n);
+    }
+    return out;
+}
 /* Return's hold closed the page: stock's long press, if it comes, is the hold's
  * (search_strip_hold), not the page under it */
 static unsigned ss_hold_closed __attribute__((section(".scratch"))); /* when (time_now_ms | 1) */
@@ -358,10 +390,15 @@ static int ss_by_name(const void *a, const void *b) {
  * its artists and albums in the order their songs come; a group's own tab all of them, the
  * artists and albums A to Z (sorted, so a big library's thousand artists are not each checked
  * against the rest). Any song matching is any match at all: an artist's or album's song does. */
+static void ss_scope_filter(void);
 static void ss_filter(void) {
     int n = ss.songs ? (int)deque_size(ss.songs) : 0, all = ss.tab == SS_TAB_ALL;
     ss.nmatch = ss.sel = ss.top = ss.nsongs = ss.any = 0;
     if (!ss.text[0] || !ss.match) return;
+    if (sc.kind) {
+        ss_scope_filter();
+        return;
+    }
     int songs = all ? SS_GROUP : ss.tab == SS_TAB_SONGS ? n : 0;
     for (int i = 0; i < n && (ss.nmatch < songs || !ss.any); ++i) {
         void *r = deque_at(ss.songs, (unsigned)i);
@@ -395,6 +432,25 @@ static void ss_filter(void) {
                 ss.match[to++] = ss.match[i];
         ss.nmatch = to;
     }
+}
+
+/* A list page's own search's results: its rows that hold the text, in the page's order, the page's
+ * object type alone (no other groups): a song's title, artist or album, a name's own field, a
+ * row's words. */
+static void ss_scope_filter(void) {
+    for (int i = 0; i < sc.n; ++i) {
+        void *r = sc.rec[i];
+        char name[512];
+        int hit = sc.kind == SC_SONGS ? ss_has(track_name(name, sizeof name, r)) ||
+                                            ss_has(P(r, REC_ARTIST)) || ss_has(P(r, REC_ALBUM))
+                  : sc.kind == SC_NAMES ? I(r, REC_ID) >= 0 && ss_has(P(r, sc.field))
+                                        : ss_has(sc_words(r, name, sizeof name));
+        if (!hit) continue;
+        ss.kind[ss.nmatch] = sc.kind == SC_SONGS ? SS_SONG : SS_NAME;
+        ss.match[ss.nmatch++] = r;
+    }
+    ss.any = ss.nmatch != 0;
+    ss.nsongs = sc.kind == SC_SONGS ? ss.nmatch : 0;
 }
 
 /* A password's last character typed has shown its second: the text is dots again. */
@@ -597,9 +653,14 @@ static void ss_box_cancel(void) {
  * as Now Playing's Artist info does; an album its tracks in Cover Flow, as Era's albums do. Under
  * Add Songs, the song in or out of the playlist. */
 extern int coverflow_goto_album(void *r);
+static void ss_scope_go(void *r);
 static void ss_play(void) {
     if (ss.sel >= ss.nmatch) return;
     void *r = ss.match[ss.sel], *dq;
+    if (sc.kind) { /* a list page's own: its row, opened on the page (ss_scope_open) */
+        ss_scope_go(r);
+        return;
+    }
     if (ss.pick) { /* Add Songs: in or out of the playlist, its mark changed in place */
         add_songs_toggle(r);
         return;
@@ -689,7 +750,7 @@ static void ss_pop_paint(void *canvas) {
 /* Whether the tabs show: while the wheel is off the strip, never under Add Songs (nor naming a
  * playlist, where it never leaves the strip). The rows showing, and the first one's top: under
  * the tabs while they show. */
-static int ss_tabs(void) { return ss.focus && !ss_named() && !ss.pick; }
+static int ss_tabs(void) { return ss.focus && !ss_named() && !ss_alone(); }
 static int ss_list_y(void) { return ss_tabs() ? SS_LIST_Y : SS_QUERY_H; }
 /* The results' foot on the sheet: the strip's top while it is open, else the screen's foot (shut,
  * the strip is not drawn and the results fill the page; the sheet runs from the status row's foot
@@ -818,9 +879,9 @@ static void ss_submit(void) {
     else if (ss_named())
         ss_save();
     else /* the strip closes: on the results, else the tabs, else the query (nothing matches) */
-        ss.focus = ss.nmatch            ? SS_ON_LIST
-                   : ss.any && !ss.pick ? SS_ON_TABS
-                                        : SS_ON_FIELD,
+        ss.focus = ss.nmatch               ? SS_ON_LIST
+                   : ss.any && !ss_alone() ? SS_ON_TABS
+                                           : SS_ON_FIELD,
         ss.sel = ss.top;
 }
 
@@ -870,7 +931,7 @@ int search_strip_key(void *top, unsigned key) {
         }
     }
     if (ss.focus == SS_ON_LIST && (button < 0 || (wheel < 0 && !ss.sel))) {
-        ss.focus = button ? SS_ON_STRIP : ss.pick ? SS_ON_FIELD : SS_ON_TABS;
+        ss.focus = button ? SS_ON_STRIP : ss_alone() ? SS_ON_FIELD : SS_ON_TABS;
         wheel = button = 0, key = 0;
     }
     if (ss.focus && key == KEY_PLAY && ss_named())
@@ -894,7 +955,7 @@ int search_strip_key(void *top, unsigned key) {
         if (key == KEY_CENTER)
             ss.focus = SS_ON_STRIP;
         else if (wheel > 0 && !ss_named())
-            ss.focus = ss.pick ? (ss.nmatch ? SS_ON_LIST : SS_ON_FIELD) : SS_ON_TABS,
+            ss.focus = ss_alone() ? (ss.nmatch ? SS_ON_LIST : SS_ON_FIELD) : SS_ON_TABS,
             ss.sel = ss.top;
     } else if (ss.focus == SS_ON_LIST) {
         if (wheel && ss.sel + wheel >= 0 && ss.sel + wheel < ss.nmatch) ss.sel += wheel;
@@ -1320,29 +1381,57 @@ void search_strip_overlay(void *w, void *canvas) {
  * query in 20 px from SS_QUERY_X with its cursor while the strip has the wheel (ss_field; or the
  * placeholder, ss.label, in Text Tertiary while it is empty), and a 1 px rule in the raised grey
  * under it. */
+/* The magnifier, its ring's centre at x, y in canvas's own coordinates, in rgb. */
+static void ss_glass(void *canvas, int x0, int y0, unsigned rgb) {
+    void *vg = canvas_get_vgcanvas(canvas);
+    if (!vg) return;
+    float cx = (float)(I(canvas, CANVAS_X) + x0), cy = (float)(I(canvas, CANVAS_Y) + y0);
+    vgcanvas_save(vg);
+    vgcanvas_set_line_width(vg, 1.8f);
+    vgcanvas_set_stroke_color(vg, RGBA(rgb));
+    vgcanvas_begin_path(vg);
+    vgcanvas_arc(vg, cx, cy, SS_GLASS_R, 0, 6.2831853f, 0);
+    vgcanvas_stroke(vg);
+    vgcanvas_begin_path(vg);
+    vgcanvas_move_to(vg, cx + 4.5f, cy + 4.5f);
+    vgcanvas_line_to(vg, cx + 9, cy + 9);
+    vgcanvas_stroke(vg);
+    vgcanvas_restore(vg);
+}
+
+/* The search bar (docs/oled-design.md#search-bar, approved as mock_search_filter v3 on
+ * 2026-11-19): a Raised 2 pill from x 16 to 359, SEARCH_PILL_H high round cy, the magnifier and,
+ * with words (the empty text's placeholder), them after it: in Text Secondary while lit, when a 2
+ * px accent outline goes round the pill and its inside stays as it was, else in Text Tertiary. A
+ * list page's bar (search_bar.c) and its search's query line, the same bar. */
+void search_pill_paint(void *canvas, int cy, int lit, const char *words) {
+    rect_t r = { SEARCH_PILL_X, cy - SEARCH_PILL_H / 2, 375 - 2 * SEARCH_PILL_X, SEARCH_PILL_H };
+    unsigned ink = tok(lit ? TOK_SECONDARY : TOK_TERTIARY);
+    if (lit)
+        fill_box(canvas, &(rect_t){ r.x - 2, r.y - 2, r.w + 4, r.h + 4 }, RGBA(accent_tone(2)),
+                 SEARCH_PILL_R + 2);
+    fill_box(canvas, &r, RGBA(tok(TOK_RAISED_2)), SEARCH_PILL_R);
+    ss_glass(canvas, SS_GLASS_X, cy - 2, ink);
+    if (words)
+        ss_text(canvas, 0, words, SS_QUERY_X, cy - SS_PITCH / 2, SS_PITCH,
+                SS_RIGHT + 4 - SS_QUERY_X, SS_PX_QUERY, ink);
+}
+
 static void ss_query_paint(void *canvas, unsigned primary, unsigned secondary, unsigned tertiary,
                            unsigned accent) {
+    if (sc.kind) { /* a list page's own: its bar, lit while the strip or the wheel is on the text */
+        int lit = ss.focus == SS_ON_STRIP || ss.focus == SS_ON_FIELD;
+        search_pill_paint(canvas, SS_QUERY_Y, lit, ss.text[0] ? (const char *)0 : ss.label);
+        ss_field(canvas, ss.text, ss_chars(ss.cur), SS_QUERY_X, SS_RIGHT + 4, SS_QUERY_Y, 0,
+                 SS_PX_QUERY, 25, 0, primary);
+        return;
+    }
     if (ss.focus == SS_ON_FIELD) { /* the wheel is on the line: the selection bar, white on it */
         fill_box(canvas, &(rect_t){ 16, SS_QUERY_Y - SS_PITCH / 2, 375 - 32, SS_PITCH },
                  RGBA(accent), 8);
         primary = secondary = tertiary = 0xffffff;
     }
-    void *vg = canvas_get_vgcanvas(canvas);
-    if (vg) {
-        float x = (float)I(canvas, CANVAS_X), y = (float)I(canvas, CANVAS_Y), cx = x + SS_GLASS_X,
-              cy = y + SS_QUERY_Y - 2;
-        vgcanvas_save(vg);
-        vgcanvas_set_line_width(vg, 1.8f);
-        vgcanvas_set_stroke_color(vg, RGBA(secondary));
-        vgcanvas_begin_path(vg);
-        vgcanvas_arc(vg, cx, cy, SS_GLASS_R, 0, 6.2831853f, 0);
-        vgcanvas_stroke(vg);
-        vgcanvas_begin_path(vg);
-        vgcanvas_move_to(vg, cx + 4.5f, cy + 4.5f);
-        vgcanvas_line_to(vg, cx + 9, cy + 9);
-        vgcanvas_stroke(vg);
-        vgcanvas_restore(vg);
-    }
+    ss_glass(canvas, SS_GLASS_X, SS_QUERY_Y - 2, secondary);
     if (!ss.text[0]) /* the placeholder, the cursor before it */
         ss_text(canvas, 0, ss.label ? ss.label : "Search", SS_QUERY_X, SS_QUERY_Y - SS_PITCH / 2,
                 SS_PITCH, SS_RIGHT + 4 - SS_QUERY_X, SS_PX_QUERY, tertiary);
@@ -1440,15 +1529,19 @@ void search_strip_paint(void *w, void *canvas) {
         char name[512];
         if (on) fill_box(canvas, &(rect_t){ 16, y, 375 - 32, SS_PITCH }, RGBA(accent), 8);
         int kind = ss.kind[ss.top + i];
-        const char *title = kind == SS_ARTIST  ? P(r, REC_ARTIST)
-                            : kind == SS_ALBUM ? P(r, REC_ALBUM)
-                                               : track_name(name, sizeof name, r);
+        const char *title =
+            kind == SS_ARTIST  ? P(r, REC_ARTIST)
+            : kind == SS_ALBUM ? P(r, REC_ALBUM)
+            : kind == SS_NAME
+                ? (sc.kind == SC_NAMES ? P(r, sc.field) : sc_words(r, name, sizeof name))
+                : track_name(name, sizeof name, r);
         /* a row that can't play now (docs/server-library.md#grayed-rows): a server song offline,
          * an artist or album none of whose songs can play; its text CAT_GREY, on the bar the
          * bar's white at 70%, and the offline mark at its right, the text ending clear of it */
-        int grey = kind == SS_ARTIST  ? catalogue_artist_unavailable(r)
-                   : kind == SS_ALBUM ? catalogue_album_unavailable(r)
-                                      : catalogue_unavailable(r),
+        int grey = kind == SS_NAME     ? 0
+                   : kind == SS_ARTIST ? catalogue_artist_unavailable(r)
+                   : kind == SS_ALBUM  ? catalogue_album_unavailable(r)
+                                       : catalogue_unavailable(r),
             right = grey ? SS_MARK_X - CAT_MARK_W / 2 - SS_MARK_GAP : SS_RIGHT;
         /* the playing song's: its title in the accent and its bars on the right column
          * (song_rows.c, docs/oled-design.md#song-rows) */
@@ -1466,7 +1559,7 @@ void search_strip_paint(void *w, void *canvas) {
         /* beside it, what the row is, as an iPod's result icons say: "Artist", "Album" and its
          * artist, or a song's artist */
         char what[300];
-        const char *artist = P(r, REC_ARTIST);
+        const char *artist = kind == SS_NAME ? (const char *)0 : P(r, REC_ARTIST);
         if (kind == SS_ARTIST)
             artist = "Artist";
         else if (kind == SS_ALBUM) {
@@ -1774,6 +1867,10 @@ static int ss_closed(void *ctx, void *event) {
     stop_timer(&ss.loupe_timer);
     stop_timer(&ss.nudge_timer);
     ss_band_back();
+    if (sc.kind && !sc.target) { /* a list page's own search, nothing to open after it */
+        free(sc.rec);
+        memset(&sc, 0, sizeof sc);
+    }
     if (ss.under) bitmap_destroy(ss.under);
     if (ss.songs) deque_destroy(ss.songs);
     free(ss.match);
@@ -1823,6 +1920,91 @@ static void ss_place(void *under, int form, void *edit) {
 
 /* The Library's Search row and Local Songs' pull: the strip under a list.entry.ipod theme, stock's
  * search dialog under the others. */
+/* The page's rows into sc.rec: a table's records (p_deque_showlist, its rows' own), else the
+ * surface's rows, each a widget. The kind, as search_strip_scoped says it. */
+static int sc_take(void *surface) {
+    void *list = P(p_deque_showlist, 0), *win = window_of(surface);
+    const char *page = win ? widget_get_prop_str(win, "name", "") : "";
+    int table = !tk_strcmp(widget_get_type(surface), "table_client"), cls = I(g_class_type, 0);
+    int n = table ? I(surface, TABLE_ROWS) : (int)widget_count_children(surface);
+    if (table && (!list || (int)deque_size(list) != n)) return SC_NONE;
+    if (n <= 0 || !(sc.rec = calloc((unsigned)n, sizeof *sc.rec))) return SC_NONE;
+    for (int i = 0; i < n; ++i)
+        sc.rec[i] = table ? deque_at(list, (unsigned)i) : widget_get_child(surface, (unsigned)i);
+    sc.n = n;
+    if (!table) return SC_ROWS;
+    static const unsigned char field[] = { REC_ALBUM, REC_ARTIST, 0x20,
+                                           REC_STYLE }; /* az_index.c's */
+    if ((!tk_strcmp(page, "localclass_page") || !tk_strcmp(page, "album_page")) &&
+        cls >= CLASS_ALBUMS && cls <= 0xf006) {
+        sc.field = field[cls - CLASS_ALBUMS];
+        return SC_NAMES;
+    }
+    return SC_SONGS;
+}
+
+/* A list page's search bar's Centre (search_bar.c): the strip over the page's own rows, titled as
+ * the page, the bar's words "Search <title>"; Return shuts the strip, the wheel then on the text
+ * and the results kept, and Return again goes back to the page, its bar lit; the go key goes to the
+ * first result, or with none to the text. 1 when it opened. */
+int search_strip_scoped(void *page, void *surface, const char *title) {
+    if (ss.page || !page || !surface) return 0;
+    memset(&sc, 0, sizeof sc);
+    int kind = sc_take(surface);
+    if (!kind || !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup))) {
+        free(sc.rec);
+        memset(&sc, 0, sizeof sc);
+        return 0;
+    }
+    sc.kind = kind, sc.page = page, sc.surface = surface;
+    ss.match = calloc((unsigned)sc.n + 1, sizeof *ss.match);
+    ss.kind = ss.match ? calloc((unsigned)sc.n + 1, 1) : (void *)0;
+    if (!ss.kind) free(ss.match), ss.match = (void *)0;
+    ss.set = SS_SET_LOWER, ss.stop = 1;
+    ss.ret = STRIP_SEARCH;
+    tk_snprintf(sc.label, sizeof sc.label, "Search %s", title && *title ? title : "");
+    ss.label = sc.label;
+    ss_sheet(title && *title ? title : "Search");
+    ss_place(0, SS_FORM_QUERY, 0);
+    return 1;
+}
+
+/* Once the page is on top again, settled: its row target - 1 selected and Centre pressed, as
+ * through the window manager's input, so it does there what it does. */
+extern int ringnav_input(void *wm, void *e);
+static int ss_scope_due(const void *unused) {
+    void *wm = window_manager(), *top = window_manager_get_top_window(wm);
+    if (!sc.target || !sc.page) return sc.timer = 0, 0;
+    if (top != sc.page || window_manager_is_animating(wm)) return 8; /* RET_REPEAT */
+    int id = sc.target - 1;
+    sc.target = 0, sc.timer = 0;
+    search_bar_off(); /* the selection on the row, the bar out of sight */
+    if (!tk_strcmp(widget_get_type(sc.surface), "table_client"))
+        ringnav_jump(sc.surface, id);
+    else
+        ringnav_select(sc.surface, id, sc.n);
+    unsigned e[16] = { 0 };
+    e[0] = EVT_KEY_DOWN;
+    e[EVENT_KEY / 4] = KEY_CENTER;
+    e[EVENT_TIME / 4] = (unsigned)time_now_ms();
+    ringnav_input(wm, e);
+    e[0] = EVT_KEY_UP;
+    ringnav_input(wm, e);
+    free(sc.rec);
+    memset(&sc, 0, sizeof sc);
+    return 0;
+}
+/* Centre on result r: the strip's page goes, and the page opens r's row (ss_scope_due). */
+static void ss_scope_go(void *r) {
+    int i = 0;
+    while (i < sc.n && sc.rec[i] != r) ++i;
+    if (i == sc.n) return;
+    sc.target = i + 1;
+    void *page = ss.page;
+    sc.timer = timer_add(ss_scope_due, (void *)0, 16);
+    window_close(page);
+}
+
 int library_search_open(void *ctx, void *event) {
     if (!theme()->entry_ipod) return stock_search(ctx, event);
     if (ss.page || !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup))) return 0;
@@ -1931,7 +2113,8 @@ static void ss_band_back(void) {
 /* ringnav_paint_bg, the status row's background (w the system bar): black under its glyphs while
  * a Wi-Fi dialog's band is cleared, over the highlighter's picture. */
 void search_strip_bar_ground(void *w, void *canvas) {
-    void *lcd = band.win && w && w == *(void *const *)system_bar ? P(canvas, CANVAS_LCD) : (void *)0;
+    void *lcd =
+        band.win && w && w == *(void *const *)system_bar ? P(canvas, CANVAS_LCD) : (void *)0;
     if (!lcd) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
     stock_canvas_set_fill_color(canvas, ui_ink(RGBA(0)));

@@ -1084,7 +1084,15 @@ painted it white, which drew the box at rest.
   selected row's artist on the right column), Right (every row's) or Off. **Song Length**: Albums (the default), All
   Lists or Off; with a length on the right column, Right and Selected Row put the artist inline. Lists Q2 Muse builds
   itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep their own rows.
-- <a id="search"></a>**Search.** The Library's Search row (and Songs' pull) opens an iPod classic's letter strip, not
+- **A list's search bar** ([oled-design](oled-design.md#search-bar), `patch/search_bar.c`): on every music list
+  page (Songs, Artists, Albums, Genres, Playlists, Years, Ratings, Most Played, Long Songs, and inside a playlist,
+  an artist or an album) a turn up from the first row brings in a search bar above it, "Search <the page's title>";
+  Centre opens the letter strip below, which filters the page's own rows as the text is typed. Return closes the
+  strip and lights the bar, the text and the filtered rows kept; a turn down goes into them, Return again goes back
+  to the page with its bar lit, and a third leaves the page. The go key goes to the first match, or with none lights
+  the bar over No Matches. Erasing on the strip clears the text. A match opens its row on the page, as the row
+  itself does there. Home's Search searches everything.
+- <a id="search"></a>**Search.** Home's Search row (and Songs' pull) opens an iPod classic's letter strip, not
   stock's search box and keyboard (`list.entry.ipod`, `patch/search_strip.c`, the user's mock-up
   `keyboard-inscreen/strip.html`). The query reads on the page's first line: a magnifier in Text Secondary at x 31,
   the text in 20 px white from x 48 with a steady 2 px cursor while the strip has the wheel, or "Search your music"

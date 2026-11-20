@@ -1288,6 +1288,30 @@ Recently Added, Artists, Albums and Songs, each with the chevron.
   already in ("Added N songs", "Already added").
 - Return goes back a level; from the chooser, back to the playlist, which reads its songs again.
 
+### Search bar
+
+<a id="search-bar"></a>Every music list page has its own search (approved as `mock_search_filter.py` v3 on
+2026-11-19, `patch/search_bar.c`): Songs, Artists, Albums, Genres, Playlists, Years, Ratings, Most Played and Long
+Songs, and inside a playlist, an artist (its albums and songs) or an album.
+
+- **Where:** one wheel step above the first row. As the page opens it is out of sight: the first row lit, nothing
+  above it, and no fade or vignette hinting at it. A turn up from the first row brings it in: the list moves down
+  40 px and the bar takes that band; a turn down puts the list back with its first row lit.
+- **Look:** a Raised 2 pill from x 16 to 359, 36 px high with 10 px corners, centred in the band; a magnifier at
+  x 31 and "Search <the page's title>" ("Search Songs", "Search Road Trip", "Search The Killers") in 20 px from
+  x 48. Lit (the wheel on it, or typing) a 2 px accent outline goes round the pill, its inside unchanged, and the
+  words are Text Secondary; otherwise Text Tertiary.
+- **Typing:** Centre opens the [letter strip](#text-entry) on the same page title, the bar at the top holding the
+  text with its cursor and the page's own rows that hold the text under it, in the page's order, as they live: no
+  tabs and no other kind of result. While the strip is open the wheel picks letters.
+- **Return** closes the strip and lights the bar, the text and the filtered rows kept; the wheel turned down goes
+  into the rows. Return on the lit bar goes back to the page, its bar still lit; Return there leaves the page.
+  The text is cleared by erasing on the strip.
+- **The go key** (the accent's disc) closes the strip and lights the first match; with none it lights the bar,
+  which shows the text, over the empty state's No Matches.
+- **A match** opens as its row does on the page: the search goes and the page's selection moves to the row.
+- Home's Search row stays the one search across everything ([Text entry](#text-entry)).
+
 ### Text entry
 
 One letter strip for every text the wheel types (approved as 05b and 05c from the audit2 mock-ups on
