@@ -386,6 +386,7 @@ void catalogue_playlist_covers(void) {}
 int catalogue_playlist_cover(int list, char *url) { return 0; }
 int library_search_open(void *ctx, void *event) { return 0; }
 int games_open(void *ctx, void *event) { return 0; } /* games.c: Home's Games row */
+int tuner_open(void *ctx, void *event) { return 0; } /* radio_tuner.c: Home's Radio Tuner row */
 void storage_scanned(void) {}                        /* storage.c: a whole scan's end, saved */
 /* library_artist.c's own artist page: never up in these tests, so the page under is closed as before */
 int artist_local_on(void *win) { return 0; }
