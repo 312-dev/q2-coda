@@ -48,7 +48,8 @@ static struct rt {
     void *page, *sheet, *title;
     int screen, n, freq, playing, y0, sel, zi, feed;
     float from; /* the needle's glide: from, toward freq, since glide_at */
-    unsigned glide_at, fetch_at, anim, land, warm, polled, shown_at, leave;
+    unsigned glide_at, fetch_at, anim, land, warm, polled, shown_at, leave,
+        ended;            /* ended: the receiver's */
     float scroll, target; /* the list's, px */
     int zip[5], audio, sock, volume;
     int touch, tx, tf, moved; /* a finger on the dial or the list */
@@ -154,6 +155,8 @@ static void animate(void) {
 /* The dial moved to rt->freq (or play or pause): the needle glides there, the stream it lands on
  * starts LAND_MS later, a stream the dial left stays warm WARM_MS. */
 static void tune(void) {
+    if (!rt->audio && time_now_ms() - rt->ended > 3000) /* gone: started again, at most every 3 s */
+        rt->audio = video_start("-", 2), rt->volume = 0;
     float n = needle();
     if ((float)rt->freq != n) rt->from = n, rt->glide_at = time_now_ms();
     int s = rt->playing ? source() : -1;
@@ -305,8 +308,13 @@ void tuner_poll(void) {
         else if (rt && done)
             show_list(); /* a refresh that ended after the list was on show: the newer one */
     }
-    if (!rt || !rt->audio) return;
+    if (!rt) return;
     unsigned now = time_now_ms();
+    int status;
+    if (rt->audio && waitpid(rt->audio, &status,
+                             1)) /* the receiver gone (no output to open): tune starts it again */
+        rt->audio = 0, rt->ended = now | 1, rt->feed = -1;
+    if (!rt->audio) return;
     if (now - rt->polled < STATE_MS) return;
     rt->polled = now;
     char raw[600];
@@ -509,9 +517,6 @@ static void list_screen(void *canvas) {
     float most = (float)((items() > LIST_ROWS ? items() - LIST_ROWS : 0) * ROW);
     if (rt->target > most) rt->target = most;
     if (rt->target < 0) rt->target = 0;
-    int old[4], clip[4];
-    if (!clip_within(canvas, old, clip, 0, 40 - rt->y0, 375, 280)) return;
-    canvas_set_clip_rect(canvas, clip);
     for (int i = 0; i < items(); ++i) {
         int y = LIST_TOP + i * ROW - (int)(rt->scroll + 0.5f);
         if (y < 10 || y > 320) continue;
@@ -536,7 +541,6 @@ static void list_screen(void *canvas) {
         rt_text(canvas, f, 0, 20, on ? RGB_PRIMARY : RGB_SECONDARY, 375 - 28, y + 16, 120, 3);
         if (playing) bars(canvas, 375 - 28 - rw - 20, y + 16, on ? RGB_PRIMARY : RGB_ACCENT_TEXT);
     }
-    canvas_set_clip_rect(canvas, old);
     int more = items() - LIST_ROWS;
     for (int k = 0; k < 34 && rt->scroll > 1;
          ++k) /* the fades where the list goes on past an edge */

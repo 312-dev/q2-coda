@@ -24,7 +24,7 @@ class Station(C.Structure):
 class Rt(C.Structure):
     _fields_ = [('page', C.c_void_p), ('sheet', C.c_void_p), ('title', C.c_void_p),
                 *((k, C.c_int) for k in 'screen n freq playing y0 sel zi feed'.split()), ('from_', C.c_float),
-                *((k, C.c_uint) for k in 'glide_at fetch_at anim land warm polled shown_at leave'.split()),
+                *((k, C.c_uint) for k in 'glide_at fetch_at anim land warm polled shown_at leave ended'.split()),
                 ('scroll', C.c_float), ('target', C.c_float), ('zip', C.c_int * 5),
                 *((k, C.c_int) for k in 'audio sock volume touch tx tf moved'.split()),
                 ('place', C.c_char * 48), ('err', C.c_char * 64), ('title_text', C.c_char * 256), ('state', C.c_char * 12),
@@ -45,7 +45,7 @@ class Tuner:
         self.fw, self.now, self.sent, self.timers, self.forks = fw, 100000, [], [], []
         self.rt = Rt()
         fw.var('radio_tuner__rt', C.c_void_p).value = C.addressof(self.rt)
-        self.rt.page, self.rt.sheet, self.rt.playing, self.rt.feed = PAGE, 0x5151, 1, -1
+        self.rt.page, self.rt.sheet, self.rt.playing, self.rt.feed, self.rt.audio = PAGE, 0x5151, 1, -1, 999
         fw.mock('time_now_ms', lambda *_: self.now)
         fw.mock('fw_sendto', self.sendto)
         fw.mock('fw_socket', lambda *_: 7)
