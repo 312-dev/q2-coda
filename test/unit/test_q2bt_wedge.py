@@ -288,3 +288,32 @@ def test_demo_answer_parse(L):
     assert L.bt_answer_parse(b'ack 0\ncancel 0\ncard -\nbt 4 off\n', C.byref(off)) == 4 and off.value
     assert L.bt_answer_parse(b'ack 0\ncancel 0\ncard -\n', C.byref(off)) == 0
     assert L.bt_answer_parse(b'', C.byref(off)) == 0
+
+
+# /proc/tty/driver/INGENIC serial as a Q2 printed it on 2026-11-20 with Bluetooth off, and port 0 as serial_core's
+# uart_line_info prints a port that has seen errors (each error count only when it is not 0)
+SERIAL = b'''serinfo:1.0 driver revision:
+0: uart:uart0 mmio:0x10030000 irq:55 tx:0 rx:0
+1: uart:uart1 mmio:0x10031000 irq:54 tx:0 rx:0
+3: uart:uart3 mmio:0x10033000 irq:52 tx:273 rx:0 RTS|DTR
+'''
+SERIAL_ERR = SERIAL.replace(b'0: uart:uart0 mmio:0x10030000 irq:55 tx:0 rx:0',
+                            b'0: uart:uart0 mmio:0x10030000 irq:55 tx:81234 rx:912345 fe:2 oe:17 bo:3 RTS|CTS|DTR')
+
+
+def uart(L, text, port):
+    v = (C.c_uint * 7)(*[99] * 7)
+    return L.bt_uart_counts(text, port, v), list(v)
+
+
+def test_uart_counts(L):
+    """The H5 port's counters, tx rx fe pe brk oe bo, from serial_core's proc file: the ones it leaves out are 0, and
+    a port the file does not list (or one whose number is a prefix of another's) is not read."""
+    assert uart(L, SERIAL, 0) == (1, [0, 0, 0, 0, 0, 0, 0])
+    assert uart(L, SERIAL, 3) == (1, [273, 0, 0, 0, 0, 0, 0])
+    assert uart(L, SERIAL_ERR, 0) == (1, [81234, 912345, 2, 0, 0, 17, 3])
+    assert uart(L, SERIAL_ERR + b'10: uart:uart10 mmio:0x1003a000 irq:45 tx:5 rx:6\n', 1)[1] == [0] * 7
+    assert uart(L, SERIAL, 2)[0] == 0
+    assert uart(L, SERIAL + b'13: uart:uart13 mmio:0 irq:1 tx:7 rx:8\n', 1)[0] == 1  # 1, not 13's line
+    assert uart(L, b'', 0)[0] == 0
+    assert uart(L, b'0: uart:unknown port:00000000 irq:0\n', 0)[0] == 0  # a port with no counts

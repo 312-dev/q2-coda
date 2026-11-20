@@ -292,6 +292,12 @@ int bt_kmsg_sign(const char *msg);
 /* /dev/kmsg's record "PRI,SEQ,USEC,FLAGS;message": the time in ms since boot (modulo 2^32) and the
  * message; 0 when it is not one */
 int bt_kmsg_split(const char *rec, unsigned *ms, const char **msg);
+/* The H5 UART's counters since boot from /proc/tty/driver's text (serial_core): v[] is tx, rx, fe, pe, brk, oe, bo
+ * (framing, parity, break, FIFO overrun, flip buffer overrun), the ones the line leaves out 0. 1 when port's line has
+ * tx and rx, else 0. The Q2's controller is on ttyS0 (stock's rtk_hciattach), the file "INGENIC serial". */
+enum { BT_UART_N = 7, BT_UART_PORT = 0 };
+#define BT_UART_PROC "/proc/tty/driver/INGENIC serial"
+int bt_uart_counts(const char *text, int port, unsigned *v);
 enum { BT_W_NONE, BT_W_PROBE, BT_W_RESET, BT_W_HEALTHY, BT_W_GIVEUP, BT_W_DEFER, BT_W_LATE };
 struct bt_wedge {
     unsigned h5[BT_H5_STORM]; /* the kernel times of the last H5 error lines, a ring at h5_i */
