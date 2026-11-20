@@ -8,6 +8,9 @@
 # says so.
 #
 #   uac1-steps.sh run [SECONDS]   load, make, bind, play the tone for SECONDS (default 40), unbind, remove
+#   uac1-steps.sh reopen [N]      the same, but the PCM opened N times (default 40) for half a second each, and the
+#                                 opens that failed counted: u_audio allocated its buffer at each open, which failed
+#                                 once memory was fragmented ("page allocation failure: order:5")
 #   uac1-steps.sh log             the last run's log
 HERE=$(cd "$(dirname "$0")" && pwd)
 KO=$HERE/usb_f_uac1.ko
@@ -77,11 +80,40 @@ run() {
     fi
     step "6 bound: $(cat /sys/class/udc/*/state); cards: $(tr '\n' '|' < /proc/asound/cards)"
     card=$(grep -E '^ *[0-9]+ \[UAC1Gadget' /proc/asound/cards | sed -n 's/^ *\([0-9]*\) .*/\1/p')
+    i=0
+    while [ "$(cat /sys/class/udc/*/state)" != configured ] && [ $i -lt 100 ]; do usleep 100000; i=$((i + 1)); done
+    step "6 the computer: $(cat /sys/class/udc/*/state) after $((i / 10)) s" 
+    if [ -n "$REOPEN" ]; then
+        bad=0
+        for k in $(seq 1 $REOPEN); do
+            if ! head -c 88200 "$TONE" | aplay -q -D hw:$card,0 -t raw -f S16_LE -r 44100 -c 2 2>/tmp/uac1-aplay.err; then
+                bad=$((bad + 1))
+                [ $bad -le 2 ] && step "7 open $k failed: $(head -n 2 /tmp/uac1-aplay.err | tr '\n' ' ')"
+            fi
+        done
+        step "7 reopen: $REOPEN opens, $bad failed; allocation failures in dmesg: $(dmesg | grep -c 'page allocation failure')"
+        secs=0
+    fi
     step "7 tone into card ${card:-none} for $secs s (the computer records it)"
+    # the module's own debug lines (u_audio_iso_complete logs a failed isochronous transfer at pr_debug)
+    mountpoint -q /sys/kernel/debug || mount -t debugfs none /sys/kernel/debug 2>/dev/null
+    echo 'module usb_f_uac1 +p' > /sys/kernel/debug/dynamic_debug/control 2>>"$LOG"
+    # each second: the controller, the PCM's state and its hardware and application pointers
+    ( e=$(($(date +%s) + secs)); while [ "$(date +%s)" -lt $e ]; do
+          st=/proc/asound/card${card:-x}/pcm0p/sub0/status
+          echo "$(cut -d' ' -f1 /proc/uptime) 7 sample udc=$(cat /sys/class/udc/*/state) $(tr '\n' ' ' < $st 2>/dev/null)" >> "$LOG"
+          sleep 1
+      done; sync ) &
     end=$(($(date +%s) + secs))
-    while [ -n "$card" ] && [ "$(date +%s)" -lt $end ]; do
-        aplay -q -D hw:$card,0 -t raw -f S16_LE -r 44100 -c 2 "$TONE" 2>>"$LOG" || { step "7 aplay failed"; sleep 1; }
-    done
+    # one PCM for the whole tone, as the player keeps one: an aplay a loop of the 2 s file failed after a while to get
+    # its buffer ("Unable to install hw params" beside the kernel's memory report)
+    if [ -n "$card" ]; then
+        ( while :; do cat "$TONE"; done ) | aplay -q -D hw:$card,0 -t raw -f S16_LE -r 44100 -c 2 2>>"$LOG" &
+        ap=$!
+        while [ "$(date +%s)" -lt $end ]; do sleep 1; done
+        kill $ap 2>/dev/null
+        killall aplay 2>/dev/null
+    fi
     step "8 unbind"
     ( echo "" > UDC; echo "$(cut -d' ' -f1 /proc/uptime) 8 unbind returned $?" >> "$LOG"; sync ) &
     up=$!
@@ -112,6 +144,11 @@ run)
     echo "uac1-steps: started; log $LOG; adb back in about ${2:-40} s plus a few if all goes well"
     ;;
 _run) run "$2" ;;
+reopen)
+    trap '' HUP
+    REOPEN=${2:-40} setsid sh "$0" _run 0 </dev/null >/dev/null 2>&1 &
+    echo "uac1-steps: reopen ${2:-40} started; log $LOG"
+    ;;
 log) cat "$LOG" ;;
 *) echo "usage: $0 run [SECONDS] | log" >&2; exit 2 ;;
 esac
