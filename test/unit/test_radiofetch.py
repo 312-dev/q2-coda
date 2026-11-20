@@ -212,6 +212,19 @@ def test_iheart(L):
     assert not streams(station(lst, 'WTMX'))  # Hubbard's: not on iHeart
 
 
+def test_names_lose_a_leading_frequency(L):
+    lst = near(L)
+
+    def hit(call, name):
+        return dict(callLetters=call, name=name, streams=dict(secure_shoutcast_stream=f'https://s/{call}'))
+    body = json.dumps(dict(hits=[hit('WLIT-FM', '93.9 Lite FM'), hit('WCHI-FM', 'Rock 95.5'), hit('WGCI-FM', '107.5'),
+                                 hit('WBBM-AM', '780 AM - Newsradio'), hit('WVAZ-FM', '102.7 FM V103')])).encode()
+    assert L.rf_iheart(C.byref(lst), body, len(body)) == 5
+    names = {c: station(lst, c).name for c in ('WLIT-FM', 'WCHI-FM', 'WGCI-FM', 'WBBM', 'WVAZ')}
+    assert names == {'WLIT-FM': b'Lite FM', 'WCHI-FM': b'Rock 95.5', 'WGCI-FM': b'107.5', 'WBBM': b'Newsradio',
+                     'WVAZ': b'V103'}
+
+
 def test_radiobrowser(L):
     lst = near(L)
     total = 0
@@ -248,7 +261,7 @@ def test_tunein(L):
     body = (FIX/'tunein_local.json').read_bytes()
     assert L.rf_tunein_local(C.byref(lst), body, len(body)) >= 8
     wdrv = station(lst, 'WDRV')
-    assert wdrv.tunein == b's28340' and wdrv.name == b'97.1 The Drive'  # by frequency: the only 97.1
+    assert wdrv.tunein == b's28340' and wdrv.name == b'The Drive'  # by frequency: the only 97.1
     assert station(lst, 'WKQX').tunein == b's30358'                     # "101 WKQX": by call sign
     tune = (FIX/'tunein_tune.json').read_bytes()
     assert L.rf_tunein_tune(C.byref(wdrv), tune, len(tune)) == 1

@@ -109,7 +109,7 @@ def test_chicago_end_to_end(built, web, tmp_path):
     assert rows['WCFS-FM'][6] == 'amperwave=https://live.amperwave.net/direct/audacy-wcfsfmaac-imc'
     assert sources(rows['WEEF']) == ['soundstack']
     assert 'tunein' in sources(rows['WDRV'])
-    assert rows['WGCI-FM'][4] == '107.5 WGCI'
+    assert rows['WGCI-FM'][4] == 'WGCI'  # iHeart's "107.5 WGCI", the frequency the tuner shows already left off
     # the probes only went to stations the first round left without a stream
     probed = {p.split('mount=')[1] for p in web.seen if 'mount=' in p}
     assert 'WTBCFMAAC' in probed and 'WXRTFMAAC' not in probed

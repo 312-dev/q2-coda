@@ -316,9 +316,25 @@ int rf_add(rf_station *st, const char *src, const char *url) {
     return 1;
 }
 
-/* A display name, kept from the first source that gives one. */
+static void freq_text(const rf_station *st, char *out, unsigned cap);
+
+/* A display name, kept from the first source that gives one, without a leading frequency, which the
+ * tuner and the list show beside it already: "93.9 Lite FM" is Lite FM, "107.5 WGCI" WGCI. A
+ * frequency after the name is the brand's own ("Rock 95.5", "ESPN 1000") and stays; so does a name
+ * that is only its frequency. */
 static void name(rf_station *st, const char *s) {
-    if (!st->name[0] && s[0]) put(st->name, sizeof st->name, s);
+    if (st->name[0] || !s[0]) return;
+    char f[8];
+    freq_text(st, f, sizeof f);
+    unsigned fl = strlen(f);
+    const char *rest = s;
+    if (!strncmp(s, f, fl) && s[fl] == ' ') {
+        rest = s + fl + 1;
+        if (!strncmp(rest, st->flags & RF_AM ? "AM " : "FM ", 3)) rest += 3;
+        while (*rest == ' ' || *rest == '-') ++rest;
+        if (!*rest) rest = s;
+    }
+    put(st->name, sizeof st->name, rest);
 }
 
 /* ---- iHeart: api.iheart.com's liveStations near a point, a market's stations whatever their owner
