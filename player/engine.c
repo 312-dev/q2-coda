@@ -284,6 +284,14 @@ static int64_t heard_at(struct source *s, struct stretch *sx, const struct rewin
     return offset + source_frames(s) - origin - back;
 }
 
+/* source_read on the car's way, timed for its trace: a decode, or a wait for a file's bytes (grow.c) */
+static int timed_read(struct source *s, const uint8_t **data) {
+    int64_t t = car_trace_now();
+    int n = source_read(s, data);
+    car_trace_read(car_trace_now() - t);
+    return n;
+}
+
 static int play_through(struct source *s, const struct song *song, struct dsp *d, int untouched, struct stretch *sx) {
     struct ctl *c = &ctl;
     const struct pcm_format *f = source_format(s);
@@ -384,7 +392,7 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
             n = rw.n - rw.used < 4096 ? rw.n - rw.used : 4096;
             data = rw.buf + (size_t)rw.used * fb;
             rw.used += n, rw.fed += n;
-        } else if ((n = source_read(s, &data)) <= 0) {
+        } else if ((n = way == 3 ? timed_read(s, &data) : source_read(s, &data)) <= 0) {
             /* a song still arriving gives up its wait for a stop or a skip (grow.c): taken above */
             if (n < 0 && __atomic_load_n(&c->cut, __ATOMIC_RELAXED)) continue;
             return ENDED;
@@ -398,6 +406,7 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
             if (w == OUTPUT_CAR_GONE) gone = 1, output_car_gone(); /* the car stopped reading: off its way at once */
             else if (w < 0) return FAILED;
         }
+        if (way == 3 && !gone) car_trace_tick(out, 0); /* a line a second while the car plays (docs/iphone-mode.md#car-trace) */
         /* The car asks for its audio, or stops, while a song plays: the song moves to the other output where it is,
          * as a seek moves (the PCM's unplayed frames, under half a second, are not heard), as the car changes source. */
         int64_t now = now_ms();

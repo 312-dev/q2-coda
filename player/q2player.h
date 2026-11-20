@@ -132,6 +132,7 @@ int output_write(struct output *, const uint8_t *data, int frames);
 int output_car(char *device, unsigned cap, unsigned *rate);
 void output_car_gone(void);
 int64_t output_delay(struct output *); /* frames written and not yet played, at the rate written */
+void output_levels(struct output *, long *avail, long *delay); /* the device's own, in its frames */
 void output_pause(struct output *, int on);
 void output_drop(struct output *);     /* forget what is buffered: a seek, a skip, a stop */
 void output_drain(struct output *);    /* play what is buffered to its end */
@@ -191,6 +192,17 @@ double stretch_rate(const struct stretch *);        /* the speed in force, 0 for
 int64_t stretch_behind(const struct stretch *);     /* frames given that the output has not yet reached */
 /* frames of data in (the song's format): the frames to write, at *out; data itself while passing through */
 int stretch_run(struct stretch *, const uint8_t *data, int frames, const uint8_t **out);
+
+/* cartrace.c: way 3's line a second in the unified log and its tap of the car's PCM (docs/iphone-mode.md#car-trace).
+ * The playback thread's alone; output.c counts, engine.c times its reads and asks for the line. */
+int64_t car_trace_now(void);                          /* CLOCK_MONOTONIC in microseconds */
+void car_trace_open(int rate, const char *car_file);  /* a way-3 output opened at the device's rate */
+void car_trace_write(int frames, int64_t us);         /* a write to the device and how long it took */
+void car_trace_dry(int64_t frames);                   /* the PCM ran dry: the silence it put in */
+void car_trace_back(int64_t frames);                  /* written frames taken back unheard */
+void car_trace_read(int64_t us);                      /* a source read and how long it took */
+void car_tap(const uint8_t *data, int64_t bytes);     /* what is written to the device, for the tap */
+void car_trace_tick(struct output *, int closing);    /* the line, once its second is up or as the output closes */
 
 /* engine.c */
 void *engine_thread(void *);
