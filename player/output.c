@@ -731,7 +731,8 @@ int output_click(struct output *o, int kind) {
  * song stopped) or takes the paused song's (output_hold), then keeps IDLE_AHEAD_MS of silence written ahead of what
  * plays, each click mixed into that silence as into a song (output_click's rewind) or starting with the next of it,
  * until the session ends (output_idle_end) */
-#define IDLE_AHEAD_MS 80 /* more than a period (31 ms), so the PCM starts, and room for engine.c's 30 ms ticks */
+#define IDLE_AHEAD_MS 80 /* more than a period (31 ms asked; the DAC's driver caps one at 4096 bytes, 19 ms at
+                          * 44.1 kHz 16-bit, docs/player.md), so the PCM starts, and room for engine.c's 30 ms ticks */
 
 /* The frames written and not yet heard, the newest n of the history, into o->held; the PCM emptied, running. */
 void output_hold(struct output *o) {

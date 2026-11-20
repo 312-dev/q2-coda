@@ -614,6 +614,35 @@ int bt_kmsg_split(const char *rec, unsigned *ms, const char **msg) {
     *ms = v, *msg = m + 1;
     return 1;
 }
+/* serial_core's uart_line_info writes a port a line, "0: uart:uart0 mmio:0x10030000 irq:55 tx:N rx:N", then fe:,
+ * pe:, brk:, oe: and bo: each only when it is not 0, then the modem lines; the counts run from boot */
+int bt_uart_counts(const char *text, int port, unsigned *v) {
+    static const char *const key[BT_UART_N] = { "tx", "rx", "fe", "pe", "brk", "oe", "bo" };
+    char head[16];
+    int hn = snprintf(head, sizeof head, "%d: ", port);
+    for (const char *l = text; l && *l; l = strchr(l, '\n'), l = l ? l + 1 : 0) {
+        if (strncmp(l, head, (size_t)hn)) continue;
+        const char *end = strchr(l, '\n'), *t = l;
+        if (!end) end = l + strlen(l);
+        int got = 0;
+        memset(v, 0, BT_UART_N * sizeof *v);
+        while (t < end) {
+            while (t < end && *t == ' ') ++t;
+            for (int k = 0; k < BT_UART_N; ++k) {
+                size_t n = strlen(key[k]);
+                if (!strncmp(t, key[k], n) && t[n] == ':' && t[n + 1] >= '0' && t[n + 1] <= '9') {
+                    unsigned x = 0;
+                    for (const char *d = t + n + 1; *d >= '0' && *d <= '9'; ++d) x = x * 10 + (unsigned)(*d - '0');
+                    v[k] = x, got |= 1 << k;
+                    break;
+                }
+            }
+            while (t < end && *t != ' ') ++t;
+        }
+        return (got & 3) == 3; /* tx and rx: a port the driver counts */
+    }
+    return 0;
+}
 static int settling(const struct bt_wedge *w, unsigned now) {
     return w->asked || (w->have_reset && now - w->reset_at < BT_RESET_SETTLE_MS);
 }

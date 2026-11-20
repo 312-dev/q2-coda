@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Logs: the Bluetooth log now records the Bluetooth chip's serial line error counts when a stream starts and when Bluetooth is restarted after the link fails, to find out why it fails.
   - Now Playing (OLED): a server song's format badge shows only its format ("FLAC"), without the cloud before it.
   - Now Playing (OLED): the Favorite heart is smaller and turns pink-red when the song is a favorite, gray when it isn't, in its same place under the album.
   - Lists: each turn of the wheel now redraws the screen about 19 times instead of about 47 (an invisible scroll bar kept the screen redrawing for most of a second after every click), and each redraw reads the clock about a quarter as often, so scrolling Songs and other long lists is smoother and uses less battery.

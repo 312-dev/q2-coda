@@ -535,6 +535,19 @@ static void step(unsigned now, const struct bt_sample *ls, int own, int bufs) {
     bt.pcms_at = now - BT_PCMS_MS + STEP_ASK_MS;
 }
 
+/* The H5 UART's error counts since boot (bt_uart_counts), at each START and each storm's relaunch: the
+ * difference says whether a storm's damaged packets were bytes the UART dropped (oe, bo) or misread (fe)
+ * (docs/internals.md#bluetooth-controller-watchdog). */
+static void uart_note(const char *when, int unified) {
+    char b[768], line[112];
+    unsigned v[BT_UART_N];
+    if (slurp(BT_UART_PROC, b, sizeof b) <= 0 || !bt_uart_counts(b, BT_UART_PORT, v)) return;
+    snprintf(line, sizeof line, "UART %s tx=%u rx=%u fe=%u pe=%u brk=%u oe=%u bo=%u", when, v[0], v[1], v[2], v[3],
+             v[4], v[5], v[6]);
+    if (unified) say('I', line);
+    else note(line);
+}
+
 /* ---- a stream ---- */
 static void begin(unsigned now, const struct bt_counts *c) {
     int ok, cores;
@@ -558,6 +571,7 @@ static void begin(unsigned now, const struct bt_counts *c) {
     snprintf(line, sizeof line, "START h=%d mtu=%d bufs=%d raw=%s dev=%s", bt.link.handle,
              c->acl_mtu, c->acl_pkts, bt.raw >= 0 ? "ok" : "none", dev);
     note(line);
+    uart_note("start", 0);
     pcms_start(now);
     bt.flush = 1;
 }
@@ -706,6 +720,7 @@ int bt_watch(unsigned now, const char *ack) {
                  wedge.timeout ? (wedge.storm ? "+timeout" : "timeout") : "",
                  (now - wedge.first) / 1000u);
         say('W', line);
+        uart_note("reset", 1);
         break;
     case BT_W_DEFER:
         say('I', busy ? "BT RESET waits: a codec switch is running" : "BT RESET waits: too soon after the last");
