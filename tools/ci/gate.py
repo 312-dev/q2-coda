@@ -222,6 +222,7 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/pwm_build.py': ['{stockfs}'],
     'test/pwm_mcu.py': ['{stockfs}'],
     'test/q2_guest.py': [],
+    'test/q2bip.py': [],  # q2-bip on the host: a controller over a UNIX packet socket, a real ffmpeg, the L2CAP socket
     'test/q2eq.py': [],
     'test/q2update.py': [],
     'test/radiofetch.py': [],  # recorded answers from a local server; --live (the real services) is by hand
@@ -232,7 +233,9 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/server_catalogue.py': 'a generator of a catalogue file for a card (CARD_ROOT), not a test',
     'test/stock_sites.py': [],  # finds the stock zip itself (Q2_STOCK_ZIP)
     'test/suite_source.py': "test/patch.py's loader (and a line-number lookup by hand), not a test",
-    'test/tuner.py': [],  # Radio's receiver on a dropout and its restarts (tuner_core.c with fmrx.c), host cc
+    'test/tuner.py': [],  # Radio's receiver on a dropout, its restarts and the dial's click (tuner_core.c with fmrx.c), host cc
+    'test/uac1_bind.py': 'needs a usb_f_uac1.ko, which only tools/uac1_module/uac1_build.py makes (a cross gcc and a kernel tree); run it by hand',
+    'test/uac1_isoc.py': 'needs a usb_f_uac1.ko, which only tools/uac1_module/uac1_build.py makes (a cross gcc and a kernel tree); run it by hand',
     'test/thirdparty.py': ['{build}', '{qemu_static}', '--offline'],  # its TLS checks need the network, which a gate does not
 }
 STOCKFS_CACHE = pathlib.Path(os.environ.get('Q2_STOCKFS', pathlib.Path.home()/'.cache/q2-stockfs'))

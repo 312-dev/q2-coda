@@ -277,9 +277,19 @@ CODA_RC = 'usr/bin/coda-rc'
 CODA_RC_SOURCES = ['coda_rc', 'coda_rc_core', 'coda_rc_lib', 'coda_rc_ble', 'coda_rc_mdns', 'monocypher/monocypher',
                    'monocypher/monocypher-ed25519']
 CODA_RC_LIBS = ['lib/libc-2.28.so', 'usr/lib/libsqlite3.so.0.8.6']
+# Car Audio (docs/iphone-mode.md#car-audio-in-the-image): at a cable in with the USB setting on Automatic, demo
+# (patch/usb_ui.c) runs q2car, the iPhone gadget's script, which loads usb_f_uac1.ko (tools/uac1.py's pinned build;
+# beside the vendor modules, not among those S11module_driver_default loads) and runs q2-iap on its FunctionFS HID
+Q2CAR = 'usr/bin/q2car'
+Q2IAP = 'usr/bin/q2-iap'
+UAC1_KO = 'module_driver/usb_f_uac1.ko'
 # Guest Play's daemon (docs/internals.md#guest-play): demo starts it (patch/guest.c), libdbus talks to BlueZ,
 # bluealsa and bluetoothd's shanling.bluez; and the D-Bus policy its sink daemon needs.
 GUEST = 'usr/bin/q2-guest'
+# Cover art over Bluetooth's responder (docs/internals.md#bluetooth-cover-art): bluealsa2, stock's Bluetooth
+# launcher, starts it (BT_COVER_START), and it ends when that script does.
+BIP = 'usr/bin/q2-bip'
+BIP_SOURCES = ['q2bip', 'q2bip_core']
 # Car Remote across networks (docs/remote.md#car-remote-across-networks): q2-iroh, the iroh sidecar demo's shim
 # starts beside coda-rc (patch/coda_rc_shim.c), the pinned binary tools/iroh.py keeps (Rust: not built here unless
 # --build-iroh)
@@ -504,8 +514,30 @@ BLUETOOTHD_SHA = '6e6d45d66f958a028a523786ae661110b1853bf49b8a50946dd70a0518b4f3
 BT_META = 0x150000
 BT_META_SLOT = (0x12f698, 0x00000120, 0x00039454)  # (address, stock PDU and type word, stock handler)
 BT_META_GOT = {'TRACK_META': ('g_track_meta', -28700), 'NOTIFY_MUTEX': ('g_notify_mutex', -28244),
-               'LOCK': ('pthread_mutex_lock', -28204), 'UNLOCK': ('pthread_mutex_unlock', -27872)}
+               'LOCK': ('pthread_mutex_lock', -28204), 'UNLOCK': ('pthread_mutex_unlock', -27872),
+               'OPEN': ('open', -27244), 'READ': ('read', -27676), 'CLOSE': ('close', -28156)}
 BT_META_ROOM = 502  # an AVRCP PDU's parameters in one AVC frame (BlueZ's AVRCP_PDU_MTU)
+# Cover art over Bluetooth (docs/internals.md#bluetooth-cover-art). BT_COVER_FILE is where demo's payload keeps
+# the playing song's image handle and cover (patch/bt_cover.c): bt_meta.c reads the handle for AVRCP's attribute 8,
+# q2-bip (patch/q2bip.c) serves the cover. 16 bytes with its NUL: bt_meta.c builds it from four words.
+BT_COVER_FILE = '/tmp/q2-bip.now'
+# The AVRCP target's SDP record says so (AVRCP 1.6: version 0x0106, SupportedFeatures bit 8, and a second entry in
+# AdditionalProtocolDescriptorLists: L2CAP at BT_COVER_PSM, q2-bip's, then OBEX). Stock builds the record inline
+# in its adapter probe; BT_SDP_WORDS are (address, stock word, new word): the version, the features OR-ed in on the
+# browsing path, and the call to stock's browsing-list helper (0x383b8), sent to BT_SDP_JUMP instead. That is
+# stock's GetElementAttributes handler, unreachable since BT_META_SLOT took its table word: its first five words
+# become a jump to bt_meta.c's bt_cover_sdp at $gp + (bt_cover_sdp - BT_GP), which adds both lists with
+# bluetoothd's own SDP functions (BT_SDP_GOT: local GOT entries, read from the helper's and the builder's calls).
+BT_COVER_PSM = 0x1025  # BIP_PSM in patch/q2bip.h
+BT_GP = 0x13e420  # bluetoothd's canonical $gp (readelf -A)
+BT_SDP_WORDS = [(0x3a098, 0x24020105, 0x24020106),   # addiu $v0, $zero, 0x105: the profile version
+                (0x3a294, 0x34420040, 0x34420140),   # ori $v0, $v0, 0x40: browsing, and cover art (0x100)
+                (0x3a29c, 0x0411f846, 0x0411fc6d)]   # bal 0x383b8 -> bal BT_SDP_JUMP
+BT_SDP_JUMP = 0x39454
+BT_SDP_JUMP_STOCK = (0x3c1c0010, 0x279c4fcc)  # the handler's first words, as a guard (lui $gp; addiu $gp)
+BT_SDP_GOT = {'UUID16': ('sdp_uuid16_create', -31956), 'LIST_APPEND': ('sdp_list_append', -31952),
+              'DATA_ALLOC': ('sdp_data_alloc', -31940), 'LIST_FREE': ('sdp_list_free', -31924),
+              'SET_ADD_ACCESS_PROTOS': ('sdp_set_add_access_protos', -31360), 'FREE': ('free', -27732)}
 # Its launcher: keep the A2DP transport open 5 s after hciplayer closes the PCM (a stop, a skip, a cold start), so
 # a track change doesn't restart the stream (true-wireless buds started one ear first); and fdk-aac's afterburner on
 # for AAC (docs/internals.md#bluetooth-aac), which Shanling's forced AAC options (BT_AAC_SITES) leave as the option says.
@@ -515,6 +547,8 @@ BT_KEEPALIVE = (b'bluealsa -c LDAC', b'bluealsa --keep-alive=5 --aac-afterburner
 # guest's phone reaches q2-guest's own sink daemon (docs/internals.md#the-relay). Applied after BT_KEEPALIVE.
 BT_GUEST_SOURCE = (b'bluealsa --keep-alive=5', b'bluealsa $(grep -qx enabled=1 /mnt/data/q2-guest/config 2>/dev/null '
                    b'&& echo -p a2dp-source) --keep-alive=5')
+# ... and q2-bip beside it, in the background of the same script. Applied after BT_GUEST_SOURCE.
+BT_COVER_START = (b'bluealsa $(grep', b'q2-bip &\nbluealsa $(grep')
 SCROBBLE_CA = 'etc/scrobble-ca.pem'
 # BlueZ's settings. demo sets Discoverable each time it starts Bluetooth (openBluetooth), and stock's 0 kept the Q2
 # discoverable for as long as Bluetooth stayed on; 180 s gives a phone three minutes from then to find it.
@@ -1927,6 +1961,8 @@ FUNCTIONS = {
  'getBtLinkSize': ('int', 'void'), 'getBtLinkItem': ('int', 'int, int *, char *'),
  'getBtLinkStatus': ('int', 'char *'), 'addBtLinkItem': ('void', 'char *, int'),
  'updateBtLinkStatus': ('int', 'int, char *'), 'checkPairDev': ('int', 'char *'),
+ # boot's and Bluetooth on's connect to BTLINKMAC (its checkPairDev is BT_AUTOLINK's); headset.c's at a cable in
+ 'autoLinkBluetooth': ('int', 'void'),
  'btStartSearch': ('int', 'void'),  # Settings > Bluetooth's scan (bt_ui.c), as stock's Scan now row started it
  'btStopSearch': ('int', 'void'),  # its stop, as stock's row click calls it before a connect (bt_ui.c page_poll)
  # stock's Bluetooth switch: (1, 0) off, the stack stopped and the radio powered down; (0, 0) on, started again
@@ -2168,7 +2204,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_record.c', 'usb_ui.c', 'adb_trust.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'localsend_ui.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'search_bar.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'album_cover.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_ui.c', 'bt_trace.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'vol_pill.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'np_rate.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c', 'autozone.c', 'player_push.c', 'card_watch.c', 'offline.c', 'radio_tuner.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_record.c', 'usb_ui.c', 'usb_car.c', 'adb_trust.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'localsend_ui.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'search_bar.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'album_cover.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_ui.c', 'bt_trace.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'vol_pill.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'np_rate.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c', 'autozone.c', 'player_push.c', 'card_watch.c', 'offline.c', 'radio_tuner.c', 'bt_cover.c']
 
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
@@ -2322,7 +2358,10 @@ def bt_meta():
         d = pathlib.Path(d)
         run('clang', '--target=mipsel-linux-gnu', '-march=mips32r2', '-mabicalls', '-fpic', '-Os', '-ffreestanding',
             '-fno-builtin', '-fno-jump-tables', '-Wall', '-Wextra', '-Werror', f'-DBT_META_ROOM={BT_META_ROOM}',
-            *(f'-DBT_META_GOT_{k}={o}' for k, (_, o) in BT_META_GOT.items()), '-c', ROOT/'tools/bt_meta.c', '-o', d/'m.o')
+            *(f'-DBT_META_GOT_{k}={o}' for k, (_, o) in BT_META_GOT.items()),
+            *(f'-DBT_SDP_GOT_{k}={o}' for k, (_, o) in BT_SDP_GOT.items()), f'-DBT_COVER_PSM={BT_COVER_PSM:#x}',
+            *(f'-DBT_COVER_PATH_{i}={w:#x}u' for i, w in enumerate(struct.unpack('<4I', BT_COVER_FILE.encode().ljust(16, b'\0')))),
+            '-c', ROOT/'tools/bt_meta.c', '-o', d/'m.o')
         relocs = run('readelf', '-rW', d/'m.o')
         check(not re.search(r'R_MIPS_(?!PC16)\w+', relocs.split('.rel.pdr')[0]), 'bt_meta.c needs a relocation')
         check(not re.search(r'\.(rodata|data|bss)\S*\s+PROGBITS\s+\S+\s+\S+\s+0*[1-9a-f]', run('readelf', '-SW', d/'m.o')),
@@ -2332,7 +2371,8 @@ def bt_meta():
         return (d/'m.bin').read_bytes(), symbols(d/'m.elf')
 
 def patch_bluetoothd(raw):  # pragma: no mutate block
-    """Point stock bluetoothd's control-channel GetElementAttributes at tools/bt_meta.c."""
+    """Point stock bluetoothd's control-channel GetElementAttributes at tools/bt_meta.c, and have its AVRCP target
+    record name cover art (BT_SDP_WORDS, BT_SDP_JUMP)."""
     check(sha(raw) == BLUETOOTHD_SHA, 'Unexpected bluetoothd')
     image = bytearray(raw)
     code, sym = bt_meta()
@@ -2341,7 +2381,22 @@ def patch_bluetoothd(raw):  # pragma: no mutate block
     site, pdu, handler = BT_META_SLOT
     check(struct.unpack_from('<2I', raw, fileoff(raw, site)) == (pdu, handler), 'Unexpected bluetoothd handler table')
     struct.pack_into('<I', image, fileoff(raw, site + 4), sym['bt_meta_get_element_attributes'])
+    for site, stock, new in BT_SDP_WORDS:
+        check(struct.unpack_from('<I', raw, fileoff(raw, site))[0] == stock, f'Unexpected bluetoothd word at {site:#x}')
+        struct.pack_into('<I', image, fileoff(raw, site), new)
+    check(struct.unpack_from('<2I', raw, fileoff(raw, BT_SDP_JUMP)) == BT_SDP_JUMP_STOCK, 'Unexpected bluetoothd handler')
+    struct.pack_into('<5I', image, fileoff(raw, BT_SDP_JUMP), *bt_sdp_jump(sym['bt_cover_sdp']))
     return bytes(image)
+
+
+def bt_sdp_jump(target):
+    """The five words at BT_SDP_JUMP: a jump to target (a link-time address) wherever bluetoothd is loaded, from
+    its $gp, with $t9 at the target as position-independent code expects and $ra left as the caller's bal set it."""
+    delta = (target - BT_GP) & 0xffffffff
+    return (0x3c190000 | delta >> 16,      # lui $t9, delta's high half
+            0x37390000 | delta & 0xffff,   # ori $t9, $t9, its low half
+            0x033cc821,                    # addu $t9, $t9, $gp
+            0x03200008, 0)                 # jr $t9; nop
 
 def patch_bluealsa(raw):
     """Offer AAC at 48 kHz only. A headset that opens the stream itself (AirPods out of the case)
@@ -2838,7 +2893,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(bluealsa2.count(BT_KEEPALIVE[0]) == 1, 'Unexpected bluealsa2')
     bluealsa2 = bluealsa2.replace(*BT_KEEPALIVE)
     check(bluealsa2.count(BT_GUEST_SOURCE[0]) == 1, 'Unexpected bluealsa2')
-    (out/'bluealsa2').write_bytes(bluealsa2.replace(*BT_GUEST_SOURCE))
+    bluealsa2 = bluealsa2.replace(*BT_GUEST_SOURCE)
+    check(bluealsa2.count(BT_COVER_START[0]) == 1, 'Unexpected bluealsa2')
+    (out/'bluealsa2').write_bytes(bluealsa2.replace(*BT_COVER_START))
     logo_data = logo.read_bytes()
     check(jpeg_size(logo_data) == (320, 375), 'Logo must be 320x375 like the stock splash')
     # Package exactly the validated bytes, even if the input is edited during compression.
@@ -2855,7 +2912,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     alsa = out/'player-alsa/libasound.so.2.0.0'
     alsa.parent.mkdir(exist_ok=True)
     alsa.write_bytes(cat('usr/lib/libasound.so.2.0.0'))
-    q2player = build_player('mips', alsa=alsa, car_usb=dev)  # route 1's car output in --dev builds alone
+    q2player = build_player('mips', alsa=alsa, car_usb=True)  # Car Audio's output, way 3 (docs/iphone-mode.md#car-audio)
     player_added = []
     # The card apps the firmware carries (BUNDLED_APPS): folders as usr/lib is, the app and its launcher as a
     # stock program is, the rest as a stock data file is
@@ -2938,6 +2995,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     changed_assets = {}
     from art import theme_images
     import iroh
+    import uac1
     drawn = {xx+n+'.png': (xx+'list_tidal.png', d) for n, d in theme_images(builtin_themes()).items()}
     for path, (like, data) in {**{xx+n: (xx+l, d) for n, (l, d) in icons.items()}, **drawn,
                                'etc/init.d/S12usbcharge': ('etc/init.d/S20urandom', (ROOT/'patch/usb_charge.sh').read_bytes()),
@@ -2951,7 +3009,11 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                CODA_RC: (HELPER_LIKE, compile_helper(out, cat, CODA_RC_SOURCES, 'coda-rc', CODA_RC_LIBS)),
                                BT_CODEC: (HELPER_LIKE, compile_helper(out, cat, 'q2bt_codec', 'q2bt-codec', BT_CODEC_LIBS)),
                                GUEST: (HELPER_LIKE, compile_helper(out, cat, 'q2_guest', 'q2-guest', GUEST_LIBS)),
+                               BIP: (HELPER_LIKE, compile_helper(out, cat, BIP_SOURCES, 'q2-bip', HELPER_LIBS[:1])),
                                IROH: (HELPER_LIKE, iroh.binary(fresh=build_iroh)),
+                               Q2CAR: (HELPER_LIKE, (ROOT/'patch/q2car.sh').read_bytes()),
+                               Q2IAP: (HELPER_LIKE, compile_helper(out, cat, 'q2_iap', 'q2-iap', CODA_RC_LIBS)),  # libc and SQLite (q2_iap_lib.c)
+                               UAC1_KO: ('module_driver/soc_aic.ko', uac1.module()),
                                Q2SEND: (HELPER_LIKE, compile_helper(out, cat, Q2SEND_SOURCES, 'q2send', Q2SEND_LIBS)),
                                RADIOFETCH: (HELPER_LIKE, compile_helper(out, cat, RADIOFETCH_SOURCES, 'q2radiofetch',
                                                                         RADIOFETCH_LIBS)),
@@ -2966,7 +3028,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                    Q2EQ: (HELPER_LIKE, compile_helper(out, cat, 'q2eq', 'q2eq', HELPER_LIBS[:1]))} if dev else {})}.items():
         stock = need(inode(p, like.encode()), f'Missing stock inode for {path}')
         name = path.rsplit('/', 1)[-1]
-        if path not in (HELPER, BOOT, SPLASH, REMOTE, Q2EQ, CODA_RC, GUEST, Q2SEND, RADIOFETCH): (out/name).write_bytes(data)  # package the hashed bytes, as the logo
+        if path not in (HELPER, BOOT, SPLASH, REMOTE, Q2EQ, CODA_RC, GUEST, Q2SEND, RADIOFETCH, Q2IAP): (out/name).write_bytes(data)  # package the hashed bytes, as the logo
         if inode(p, path.encode()):  # stock has a file of that name (V1.36's own menu_coverflow*.png): ours takes its inode
             changed_assets[path] = dict(original_sha256=sha(cat(path)), sha256=sha(data))
             p = swap_inode(p, path.encode(), out/name)
@@ -3045,7 +3107,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         **({'aic_notifier': aic_notifier} if aic_notifier else {}),
         patch_bytes=len(payload), scratch_free_bytes=scratch_free, ring_step_pixels=RING_STEP,
         audio_extension_calls=[dict(address=hex(a), original='0x0320f809', replacement=hex(jal(ps['ringnav_audio_extension']))) for a in AUDIO_EXTENSION_CALLS],
-        version=version, dev=dev, update_repo=repo, signing_key=key.hex(), bluealsa_sha256=sha(bluealsa), bluetoothd_sha256=sha(bluetoothd), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), q2_iroh_sha256=sha((out/'q2-iroh').read_bytes()), q2_iroh_bytes=len((out/'q2-iroh').read_bytes()), q2_guest_sha256=sha((out/'q2-guest').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
+        version=version, dev=dev, update_repo=repo, signing_key=key.hex(), bluealsa_sha256=sha(bluealsa), bluetoothd_sha256=sha(bluetoothd), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), q2_iroh_sha256=sha((out/'q2-iroh').read_bytes()), q2_iroh_bytes=len((out/'q2-iroh').read_bytes()), q2_guest_sha256=sha((out/'q2-guest').read_bytes()), q2_iap_sha256=sha((out/'q2-iap').read_bytes()), q2_iap_bytes=len((out/'q2-iap').read_bytes()), usb_f_uac1_sha256=sha((out/'usb_f_uac1.ko').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
         **({'rotator_clock': rotator} if rotator else {}),
         **({'adbd': adbd_record(out)} if dev else {}),
         q2player_sha256=sha(q2player.read_bytes()),

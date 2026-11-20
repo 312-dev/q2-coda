@@ -601,8 +601,12 @@ def validate_assets(directory):
             assert read('rootfs.squashfs', 'usr/bin/' + n) == read('stock.squashfs', 'usr/bin/' + n), f'release {n} is not stock\'s'
     assert read('rootfs.squashfs', S90PLAY) == expected_start
     assert read('rootfs.squashfs', S11LOGO) == read('stock.squashfs', S11LOGO).replace(*LOGO_HOOK)  # the card's logo, if saved
-    # keep-alive 5 s, and the source role alone while Guest Play is on
-    assert read('rootfs.squashfs', BLUEALSA2) == read('stock.squashfs', BLUEALSA2).replace(*BT_KEEPALIVE).replace(*BT_GUEST_SOURCE)
+    # keep-alive 5 s, the source role alone while Guest Play is on, and q2-bip started on the line before bluealsa's
+    from build import BIP, BT_COVER_START
+    assert read('rootfs.squashfs', BLUEALSA2) == read('stock.squashfs', BLUEALSA2).replace(*BT_KEEPALIVE).replace(*BT_GUEST_SOURCE).replace(*BT_COVER_START)
+    assert BT_COVER_START[1].startswith(b'q2-bip &\n')
+    bip = read('rootfs.squashfs', BIP)  # cover art's responder, with the Q2's ABI flags
+    assert bip[:4] == b'\x7fELF' and bip[36:40] == read('rootfs.squashfs', GUEST)[36:40] and b'x-bt/img-thm' in bip
     # No password logs in and no getty runs on the serial pad (docs/building.md#what-the-rootfs-drops).
     from build import SHADOW, INITTAB, SERIAL_GETTY, lock_root, password_logins
     shadow = read('rootfs.squashfs', SHADOW)

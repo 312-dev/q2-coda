@@ -647,7 +647,13 @@ static void tick(unsigned now) {
     pcms_reap();
     cfg_reap();
     step_reap(now); /* a switch that outlived its stream, too */
-    if (!ctl_ok(now) || !counts(&c)) return;
+    if (!ctl_ok(now) || !counts(&c)) {
+        /* hci0 gone under a stream (Bluetooth switched off, the stack stopped or relaunched): the stream
+         * ends here, and the next controller's count is read afresh. Left on, no sample could run, so
+         * bt_sleep would find the next one always due and loop without sleeping. */
+        if (bt.det.on) bt.det.on = bt.det.have = 0, end();
+        return;
+    }
     int ev = bt_detect_step(&bt.det, now, c.byte_tx);
     if (ev == BT_EV_START) {
         begin(now, &c);

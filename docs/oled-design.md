@@ -259,7 +259,9 @@ All lists share one grid.
     Mode), so the shape keeps its size; Phosphor `wifi-x` (bold) connected with no internet; nothing with Wi-Fi
     off or not connected (`mock_wifi_status.py`, `mock_status_icons.py`).
   - **Sync**, left of the glyph before it: while a card app checks its server or its metadata, Phosphor
-    `arrows-clockwise` (bold) turning in Text Secondary (S1); while it downloads songs, a 14 px ring (1.6 px) in
+    `arrows-clockwise` (bold) turning in Text Primary, 30 frames a second, a half turn a second (S1, the user's
+    30 fps and white, 2026-11-20, `sync-heart-1120/sync-arrows-white.mp4`), its box its upright ink's 12 px so
+    the 6 px either side match the row's (turning, its corners pass up to 1 px nearer); while it downloads songs, a 14 px ring (1.6 px) in
     `#333333` filling clockwise from 12 o'clock in the accent, Phosphor `arrow-down` (bold, 8 px, Text Primary) in
     it (S2, `mock_sync_status.py`).
   - **Bluetooth** (P9 in `design/bt-redesign`): nothing while Bluetooth is off or nothing is connected; Phosphor
@@ -886,8 +888,8 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   "Fully charged" (battery-full, green), "Low battery · 12%" under 20 % (battery-warning, red) and
   otherwise "Battery 62%" (battery-high, Text Primary). No time-left estimate.
 - Every in-place action says what it did in a toast: the hold menu's Play Next ("Playing Next"),
-  Play Last ("Playing Last") and Add to and Remove from Favorites ("Added to Favorites",
-  "Removed from Favorites").
+  Play Last ("Playing Last"), Favorite ("Added to Favorites") and Unfavorite
+  ("Removed from Favorites").
 
 ### Confirmation card
 
@@ -1101,8 +1103,8 @@ pickers in them) open as a frosted page sheet over the page (the user's C3, 2026
 - **Sheet:** from y 40 to the screen's foot, edge to edge, its top corners 40 px, a 36 x 5 grab bar
   at y 46 (`#5A5A5E`; Light Mode `#A1A1A6`). Its material is the receding page blurred (about a
   20 px gaussian), its color raised 1.6 times, 28% of its brightness kept under a 6% white tint
-  (Light Mode: white at 75% over it), with a grain of +-3 levels. It is made once, when the sheet
-  first paints whole, never per frame.
+  (Light Mode: white at 75% over it), smooth, with no grain (the user's call, 2026-11-20). It is
+  made once, when the sheet first paints whole, never per frame.
 - **Header:** the item's cover (52 px, 6 px corners, at the text column from y 56; a `#2C2C2E` tile
   when it has none), its name in Inter Medium 20 at x 88 and a line under it in 15, Text Secondary:
   a song's artist and album (Now Playing's: the artist), an album's artist, "Playlist". A picker
@@ -1293,7 +1295,9 @@ page, On-The-Go) and `patch/add_songs.c`.
   hint "Choose Add Songs to fill it". A hold on a song opens its
   hold menu with **Remove from On-The-Go** last. It lasts across a restart.
 - **A song's hold menu**: Play Next, Play Last (to the end of Up Next's Playing Next), Add to
-  On-The-Go (while On-The-Go is on), Add to Playlist…, Favorite (Remove from Favorites when it is one), Sync Offline (a song
+  On-The-Go (while On-The-Go is on), Add to Playlist…, Favorite with Phosphor `heart` in Text Secondary (Unfavorite when it is one, with
+  `heart-fill` in Favorite `#FF375F`, white on the bar: the user's, 2026-11-20, `sync-heart-1120/menu-heart-*.png`;
+  an album's and Now Playing's ⋯ menu say the same, Favorite and Unfavorite: the user's, 2026-11-20), Sync Offline (a song
   from a signed-in server; Stop Syncing Offline once chosen, `cloud-arrow-down` and `cloud-slash`), then Go to Album, Go to
   Artist and Go to Folder. An album's and an artist's hold menu have Sync Offline after their own rows, a server
   playlist's before Rename and Delete, and Now Playing's ⋯ has it for the song playing; none while the app syncs its
@@ -1518,7 +1522,7 @@ and the blocks, the block and the right column, Now Playing and the sliders, the
 - <a id="cc-usb-row"></a>**USB row** (approved 2026-11-17 from `design/usb-row` `mock_usb_row.py`), only while a cable is
   in: 335 x 38 from (20, 258), 10 px under the blocks, fully round as the sliders, in the block's color: Phosphor's
   `usb` (fill, 20 px, Text Primary) centered 22 px in, "USB" in Inter Medium 15 from 40 px in, the remembered choice
-  (Ask Every Time, Transfer Files, USB Audio, Charge Only, USB Debugging) in 15 px Text Secondary ending 30 px from its
+  (Automatic, Transfer Files, USB Audio, Charge Only, Ask Every Time, USB Debugging) in 15 px Text Secondary ending 30 px from its
   end, and a 13 px bold `caret-right` in the chevron's gray centered 18 px from it. The wheel's ring round it is the
   mock's: 2 px wide, 5 px out. Center or a tap opens the [USB picker](#usb). No cable, no row: the sheet as before.
 - **Grab bar**: 36 x 5, `#5A5A5E`, centered, along the sheet's foot (the screen's, y 320): at y 309, 6 px off the edge, the gap the page sheets keep off their top. It is not part of the 10 px spacing; it stays on the foot whatever the blocks' height. It is where the swipe up that closes the page starts.
@@ -1552,13 +1556,15 @@ The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `desi
 
 - <a id="usb-picker"></a>**Picker**, "USB" (approved 2026-11-17 from `design/usb-row` `mock_usb_row.py`): Settings >
   General's USB row (after Storage, the remembered choice as its value) and Control Center's [USB row](#cc-usb-row)
-  open it. Ask Every Time, Transfer Files, USB Audio, Charge Only (and USB Debugging in a `--dev` build), the
-  remembered one with the [picker](#list-row)'s check; under the rows the checked choice's note, 13 px Text Tertiary
-  on the text column, its first line centered 19 px under the rows and the next 17 px lower ("Plug into a computer to
-  choose."; USB Debugging's "A computer gets adb on every cable." and "Stop on its page asks again next time."). A pick
+  open it. Automatic, Transfer Files, USB Audio, Charge Only, Ask Every Time (and USB Debugging in a `--dev` build),
+  the remembered one with the [picker](#list-row)'s check; under the rows the checked choice's note, 13 px Text
+  Tertiary on the text column, its first line centered 19 px under the rows and the next 17 px lower (Automatic's "A
+  car plays the Q2 through its speakers." and "A computer opens the SD card."; Ask Every Time's "Plug into a computer
+  to choose."; USB Debugging's "A computer gets adb on every cable." and "Stop on its page goes back to
+  Automatic."). Automatic's rows and toasts are [Car Audio's](iphone-mode.md#car-audio-in-the-image). A pick
   is remembered at once, and with a cable in that cable takes it at once; leaving Transfer Files while the computer
   has the card asks first on the [confirmation card](#confirmation-card), consequential: "Switch to USB Audio?", "Eject
-  the SD card on your computer first, or a copy in progress stops.", Cancel and Switch. Ask Every Time only forgets.
+  the SD card on your computer first, or a copy in progress stops.", Cancel and Switch. Automatic and Ask Every Time are the next cable's.
 - **Chooser**, "Use USB For": Charge Only, Transfer Files, USB Audio (and USB Debugging in a `--dev` build), each
   with its Phosphor symbol (regular, 19 px, Text Secondary, white on the selection) and its caption under it while
   selected, the row grown to hold it; then Always Do This, a switch row, after a gap.

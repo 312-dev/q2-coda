@@ -10,8 +10,14 @@
  * count, then each attribute (id, UTF-8 character set, length, text), in one packet: a text that would
  * pass BT_META_ROOM is cut short.
  *
+ * Attribute 8, AVRCP 1.6's cover art, is the playing song's image handle, which demo's payload keeps
+ * in BT_COVER_FILE's first seven bytes while the song has a cover (patch/bt_cover.c) and q2-bip
+ * serves (docs/internals.md#bluetooth-cover-art). It exists only for a controller whose own SDP
+ * record says it fetches covers (COVER_CT): for any other the file is never opened and 8 is no
+ * attribute, asked for or not.
+ *
  * bluetoothd is position independent, so this is too, by construction: every function is inlined into
- * the one entry (no jal), there is no data or constant pool (no absolute address), and libbtctl's
+ * its entry (no jal; there are two, this and bt_cover_sdp below), there is no data or constant pool (no absolute address), and libbtctl's
  * objects and pthread's functions are reached through bluetoothd's GOT at its $gp, which the caller
  * leaves set (BT_META_GOT_*: each slot's offset from $gp, filled in by -D). tools/build.py
  * (bt_meta) refuses an object with any relocation. */
@@ -35,17 +41,45 @@ INLINE void *got(char *gp, int offset) { return *(void *volatile *)(gp + offset)
 #define STATUS_INVALID_PARAM 0x01
 #define CHARSET_UTF8 106
 #define ATTR_LAST 7
+#define ATTR_COVER 8
+#define HANDLE_DIGITS 7
+/* A controller's AVRCP 1.6 feature bits for cover art: GetImageProperties, GetImage, GetLinkedThumbnail */
+#define COVER_CT 0x380
+/* struct avrcp's target, the remote controller's record as bluetoothd's data_init read it at connect
+ * (session + 0xc in stock), and its features (+8) */
+#define SESSION_TARGET 0xc
+#define TARGET_FEATURES 8
 
-/* pthread's lock or unlock on m, called with $t9 at it and bluetoothd's $gp, as its PLT stub expects */
-INLINE void call1(char *gp, void *fn, void *m) {
+/* An imported function (pthread's lock or unlock, libc's open, read or close) on up to three
+ * arguments, called with $t9 at it and bluetoothd's $gp, as its PLT stub expects; what it returns */
+INLINE int call3(char *gp, void *fn, void *x, void *y, unsigned z) {
     register void *t9 __asm__("$25") = fn;
-    register void *a0 __asm__("$4") = m;
+    register void *a0 __asm__("$4") = x;
+    register void *a1 __asm__("$5") = y;
+    register unsigned a2 __asm__("$6") = z;
     register char *g __asm__("$28") = gp;
-    __asm__ volatile("jalr $25\n\tnop"
-                     : "+r"(t9), "+r"(a0), "+r"(g)
+    register int v0 __asm__("$2");
+    __asm__ volatile("addiu $29, $29, -16\n\tjalr $25\n\tnop\n\taddiu $29, $29, 16"
+                     : "=r"(v0), "+r"(t9), "+r"(a0), "+r"(a1), "+r"(a2), "+r"(g)
                      :
-                     : "$1", "$2", "$3", "$5", "$6", "$7", "$8", "$9", "$10", "$11", "$12", "$13", "$14",
-                       "$15", "$24", "$31", "memory");
+                     : "$1", "$3", "$7", "$8", "$9", "$10", "$11", "$12", "$13", "$14", "$15", "$24", "$31",
+                       "memory");
+    return v0;
+}
+INLINE void call1(char *gp, void *fn, void *m) { (void)call3(gp, fn, m, 0, 0); }
+
+/* The playing song's image handle into out: 1 when BT_COVER_FILE starts with HANDLE_DIGITS digits.
+ * The path is built on the stack a word at a time (no constant pool). */
+INLINE int cover_handle(char *gp, char *out) {
+    volatile u32 path[4];
+    path[0] = BT_COVER_PATH_0, path[1] = BT_COVER_PATH_1, path[2] = BT_COVER_PATH_2, path[3] = BT_COVER_PATH_3;
+    int fd = call3(gp, got(gp, BT_META_GOT_OPEN), (void *)path, 0 /* O_RDONLY */, 0), n, ok = 1;
+    if (fd < 0) return 0;
+    n = call3(gp, got(gp, BT_META_GOT_READ), (void *)(long)fd, out, HANDLE_DIGITS);
+    (void)call3(gp, got(gp, BT_META_GOT_CLOSE), (void *)(long)fd, 0, 0);
+    if (n != HANDLE_DIGITS) return 0;
+    for (n = 0; n < HANDLE_DIGITS; ++n) ok &= out[n] >= '0' && out[n] <= '9';
+    return ok;
 }
 
 INLINE u32 be32(const u8 *p) { return (u32)p[0] << 24 | (u32)p[1] << 16 | (u32)p[2] << 8 | p[3]; }
@@ -116,9 +150,14 @@ __asm__(".text\n.globl bt_meta_get_element_attributes\n.set noreorder\n"
 
 u8 bt_meta_impl(void *session, u8 *pdu, u8 transaction, char *gp) {
     char space = ' ', none = 0; /* the no-track title and an empty value, on the stack: no constants */
-    (void)session, (void)transaction;
+    char handle[HANDLE_DIGITS];
+    (void)transaction;
     unsigned len = (unsigned)pdu[5] << 8 | pdu[6], nattr, i, pos = 1, count = 0;
-    u32 asked[ATTR_LAST];
+    u32 asked[ATTR_COVER];
+    /* the controller's record: one that fetches covers has an eighth attribute, when the song has one */
+    const char *target = *(const char *volatile *)((char *)session + SESSION_TARGET);
+    unsigned last = ATTR_LAST;
+    if (target && (*(const int *)(target + TARGET_FEATURES) & COVER_CT)) last = ATTR_COVER;
     u8 *params = pdu + 7;
     if (len < 9) return reject(pdu);
     nattr = params[8];
@@ -126,13 +165,16 @@ u8 bt_meta_impl(void *session, u8 *pdu, u8 transaction, char *gp) {
     /* the ids asked for, the valid ones once each, in order; none asked: all of them */
     unsigned n = 0;
     if (!nattr)
-        for (n = 0; n < ATTR_LAST; ++n) asked[n] = n + 1;
-    for (i = 0; i < nattr && n < ATTR_LAST; ++i) {
+        for (n = 0; n < last; ++n) asked[n] = n + 1;
+    for (i = 0; i < nattr && n < last; ++i) {
         u32 id = be32(params + 9 + i * 4), seen = 0;
         for (unsigned k = 0; k < n; ++k) seen |= asked[k] == id;
-        if (id >= 1 && id <= ATTR_LAST && !seen) asked[n++] = id;
+        if (id >= 1 && id <= last && !seen) asked[n++] = id;
     }
     if (!n) return reject(pdu);
+    int cover = 0; /* read before the lock: the file is demo's, not libbtctl's */
+    for (i = 0; i < n; ++i)
+        if (asked[i] == ATTR_COVER) cover = cover_handle(gp, handle);
     void *mutex = got(gp, BT_META_GOT_NOTIFY_MUTEX);
     call1(gp, got(gp, BT_META_GOT_LOCK), mutex);
     const struct track_meta *m = *(struct track_meta **)got(gp, BT_META_GOT_TRACK_META);
@@ -140,6 +182,7 @@ u8 bt_meta_impl(void *session, u8 *pdu, u8 transaction, char *gp) {
         char num[12];
         unsigned tl = 0, w;
         const char *t = m ? attr_text(m, asked[i], num, &tl) : 0;
+        if (m && asked[i] == ATTR_COVER && cover) t = handle, tl = HANDLE_DIGITS;
         if (!m && !nattr && asked[i] == 1) t = &space, tl = 1; /* no track: a title, as Shanling's browsing gives */
         if (!t && !(nattr && !m)) continue; /* an attribute with no value is left out */
         if (!t) t = &none, tl = 0;            /* asked for with no track: its empty value */
@@ -152,4 +195,41 @@ u8 bt_meta_impl(void *session, u8 *pdu, u8 transaction, char *gp) {
     pdu[4] = 0; /* a single packet */
     pdu[5] = (u8)(pos >> 8), pdu[6] = (u8)pos;
     return CTYPE_STABLE;
+}
+
+/* ---- the AVRCP target's SDP record (docs/internals.md#bluetooth-cover-art) ----
+ * Stock's record builder calls a helper (0x383b8) that adds the browsing channel to the record's
+ * AdditionalProtocolDescriptorLists. tools/build.py sends the target's call here (through a far jump
+ * laid over stock's GetElementAttributes, which nothing reaches any more), and this adds two lists
+ * where the helper added one: browsing as the helper wrote it (L2CAP PSM 0x1b, AVCTP at the version
+ * the caller holds), then cover art as AVRCP 1.6 has it (L2CAP at q2-bip's PSM, OBEX). The lists are
+ * built with bluetoothd's own SDP functions, reached through its GOT (BT_SDP_GOT_*). */
+#define SDP_UINT16 0x09
+#define UUID_L2CAP 0x0100
+#define UUID_AVCTP 0x0017
+#define UUID_OBEX 0x0008
+#define PSM_BROWSING 0x1b
+
+#define SDP(name, x, y) ((void *)(long)call3(gp, got(gp, BT_SDP_GOT_##name), (void *)(x), (void *)(y), 0))
+
+__asm__(".text\n.globl bt_cover_sdp\n.set noreorder\n"
+        "bt_cover_sdp:\n\tb bt_cover_sdp_impl\n\tmove $6, $28\n.set reorder\n");
+
+void bt_cover_sdp_impl(void *record, void *avctp_version, char *gp) {
+    u32 l2cap[5], avctp[5], obex[5]; /* BlueZ's uuid_t: 20 bytes */
+    volatile u16 psm_browsing = PSM_BROWSING, psm_cover = BT_COVER_PSM;
+    (void)SDP(UUID16, l2cap, UUID_L2CAP), (void)SDP(UUID16, avctp, UUID_AVCTP), (void)SDP(UUID16, obex, UUID_OBEX);
+    void *browse_psm = SDP(DATA_ALLOC, SDP_UINT16, &psm_browsing), *cover_psm = SDP(DATA_ALLOC, SDP_UINT16, &psm_cover);
+    void *b0 = SDP(LIST_APPEND, SDP(LIST_APPEND, 0, l2cap), browse_psm);
+    void *b1 = SDP(LIST_APPEND, SDP(LIST_APPEND, 0, avctp), avctp_version);
+    void *browse = SDP(LIST_APPEND, SDP(LIST_APPEND, 0, b0), b1);
+    void *c0 = SDP(LIST_APPEND, SDP(LIST_APPEND, 0, l2cap), cover_psm);
+    void *c1 = SDP(LIST_APPEND, 0, obex);
+    void *cover = SDP(LIST_APPEND, SDP(LIST_APPEND, 0, c0), c1);
+    void *all = SDP(LIST_APPEND, SDP(LIST_APPEND, 0, browse), cover);
+    (void)SDP(SET_ADD_ACCESS_PROTOS, record, all);
+    (void)SDP(FREE, browse_psm, 0), (void)SDP(FREE, cover_psm, 0);
+    (void)SDP(LIST_FREE, b0, 0), (void)SDP(LIST_FREE, b1, 0), (void)SDP(LIST_FREE, browse, 0);
+    (void)SDP(LIST_FREE, c0, 0), (void)SDP(LIST_FREE, c1, 0), (void)SDP(LIST_FREE, cover, 0);
+    (void)SDP(LIST_FREE, all, 0);
 }

@@ -1206,7 +1206,7 @@ for found,want in (((('b.mp3','/p/b.mp3',2,1),('a.mp3','/p/a.mp3',1,2),('c.mp3',
     f,ctx=m.handler(m.nodes[view]['children'][0],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
     assert [n.rsplit('.',1)[0] if n.endswith(('.mp3','.flac')) else n for n in m.names(m.plays[-1][1]&0xffffffff)]==want; passed()
 
-COVER_ALBUM=['Play Next','Play Last','Shuffle','Add to Favorites']  # a cover's menu, Go to artist aside
+COVER_ALBUM=['Play Next','Play Last','Shuffle','Favorite']  # a cover's menu, Go to artist aside
 # Album holds use the live carousel before tracks have ever been opened, and the same ordering.
 for action,want in ((0,['A','early','late','B','C']),(1,None)):
     m=CoverflowMachine(); m.found=[track(m,'late','/p/z',2,1),track(m,'early','/p/a',1,2)]
@@ -1305,7 +1305,7 @@ m.press(100); assert m.hold()==11 and m.release()==0 and m.nodes[m.title]['text'
 
 # Album favourites and ratings (ratings.c rate_*, coverflow.c album_id): a cover keeps 0-5 hearts of its own in
 # /mnt/data/ringnav-album-ratings by album_id, the low three bits its hearts, 5 its favourite and its songs My Fav's; songs'
-# ratings and the queue are untouched. Hold Play/Pause on a cover: Add/Remove from Favorites and Rate album, whose picker is Now
+# ratings and the queue are untouched. Hold Play/Pause on a cover: Favorite or Unfavorite and Rate album, whose picker is Now
 # Playing's on Coverflow's page: the wheel moves it, Centre or a heart saves, Return leaves it as it was.
 ALBUM_RATES='/mnt/data/ringnav-album-ratings'
 class FileMocks:

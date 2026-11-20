@@ -13,6 +13,7 @@ UDC = '/sys/class/udc/13500000.otg/state'
 EVT_DESTROY, EVT_KEY_UP = O['EVT_DESTROY'], O['EVT_KEY_UP']
 ROWS = ['Charge Only', 'Transfer Files', 'USB Audio']
 DEV_ROWS = ROWS + ['USB Debugging']
+CAR_START = '/usr/bin/q2car start >/dev/null 2>&1'  # usb_car.c usb_car_start, Automatic's iPhone
 KEY = 'QUFBQUIzTnphQzF5YzJF'  # adbd's public key line, base64 (its comment after a space)
 
 
@@ -24,7 +25,9 @@ class Usb:
         self.fw, self.ui = fw, Ui(fw)
         # AWTK's widget_on refuses a null handler (emitter_on's return_value_if_fail), as Allow's page_row_detail gives
         fw.mock('widget_on', lambda w, evt, fn, ctx, *_: (self.ui[w].on.append((evt, fn, ctx)) or len(self.ui[w].on)) if fn else 0)
-        self.ini, self.saved, self.commands, self.toasts, self.sent = dict(ini or {}), [], [], [], []
+        # Ask Every Time (5) unless a test names the setting: most of these are the probe's and the chooser's; the
+        # setting's own default, Automatic (0), is test_usb_car.py's
+        self.ini, self.saved, self.commands, self.toasts, self.sent = {'USBPICK': 5, **(ini or {})}, [], [], [], []
         self.now, self.socket, self.inbox = 1000, False, []
         self.files = Files(fw, {})
         self.det, self.link = fw.var('g_usbdet_value', C.c_ubyte), fw.var('g_usblink_status', C.c_ubyte)
@@ -212,9 +215,10 @@ def test_a_remembered_files_or_audio_sets_its_mode_for_the_cable(fw, pick, tile,
 
 
 def test_a_release_build_drops_a_remembered_usb_debugging(fw):
+    """A release build has no USB Debugging: a remembered one is Automatic, the iPhone first, never adb."""
     u = Usb(fw, ini={'USBPICK': 4, 'USBPICKMODE': 2})
     u.plug()
-    assert [t for t, _ in u.rows(u.page('usbchoose_page'))] == ROWS + ['Always Do This']
+    assert u.commands == [CAR_START] and not u.page('usbchoose_page') and not u.page('usbdebug_page')
 
 
 def test_the_mode_page_hides_stock_s_face_and_centre_is_its_stop(fw):
@@ -249,9 +253,9 @@ def mode_page(u):
 
 
 @pytest.mark.parametrize('pick', [2, 3])
-def test_stop_on_a_remembered_mode_forgets_it_and_the_next_cable_asks(fw, pick):
-    """Stop (Centre) on Transfer Files' or USB Audio's mode page puts the remembered choice back to asking
-    (USBPICK 0), so the next cable gets the chooser."""
+def test_stop_on_a_remembered_mode_forgets_it_and_the_next_cable_is_automatic(fw, pick):
+    """Stop (Centre) on Transfer Files' or USB Audio's mode page puts the setting back to Automatic (USBPICK 0), so the
+    next cable shows the iPhone first."""
     u = Usb(fw, ini={'USBPICK': pick})
     u.plug()
     win = mode_page(u)
@@ -259,7 +263,7 @@ def test_stop_on_a_remembered_mode_forgets_it_and_the_next_cable_asks(fw, pick):
     assert u.saved == [('Q2POD', 'USBPICK', 0)]
     u.unplug()
     u.plug()
-    assert u.page('usbchoose_page')
+    assert u.commands[-1] == CAR_START and not u.page('usbchoose_page')
 
 
 def test_centre_after_the_computer_ejected_leaves_but_keeps_the_choice(fw):
@@ -334,7 +338,8 @@ def test_a_remembered_usb_debugging_opens_its_page_once_a_computer_is_there(fw_d
     ignored."""
     u = Usb(fw_dev, ini={'USBPICK': 4, 'USBPICKMODE': 2}, tile=tile)
     u.plug(host=False)
-    assert not u.page('usbdebug_page') and not u.commands
+    # the ADB gadget back, in case Automatic's iPhone parked it on an earlier cable; no iPhone shown
+    assert not u.page('usbdebug_page') and u.commands == ['/usr/bin/q2adb-gadget unpark >/dev/null 2>&1']
     u.files.files[UDC] = b'configured\n'
     u.status(100)
     assert u.page('usbdebug_page') and not u.page('usbchoose_page')
@@ -353,9 +358,9 @@ def test_usb_debugging_s_stop_is_ringed_under_the_focus_rule_and_the_wheel_shows
 
 
 @pytest.mark.parametrize('key, forgets', [('KEY_CENTER', True), ('KEY_RETURN', False)])
-def test_stop_on_a_remembered_usb_debugging_forgets_it_and_the_next_cable_asks(fw_dev, key, forgets):
-    """Stop (Centre) on USB Debugging's page parks the gadget and puts the remembered choice back to asking, so the
-    next cable gets the chooser; Return only leaves the page and the choice holds."""
+def test_stop_on_a_remembered_usb_debugging_forgets_it_and_the_next_cable_is_automatic(fw_dev, key, forgets):
+    """Stop (Centre) on USB Debugging's page parks the gadget and puts the setting back to Automatic, so the next
+    cable shows the iPhone first; Return only leaves the page and the choice holds."""
     u = Usb(fw_dev, ini={'USBPICK': 4})
     u.plug()
     debug_key(u, u.page('usbdebug_page'), key)
@@ -363,7 +368,7 @@ def test_stop_on_a_remembered_usb_debugging_forgets_it_and_the_next_cable_asks(f
     assert u.saved == ([('Q2POD', 'USBPICK', 0)] if forgets else [])
     u.unplug()
     u.plug()
-    assert bool(u.page('usbchoose_page')) == forgets and bool(u.page('usbdebug_page')) != forgets
+    assert (u.commands[-1] == CAR_START) == forgets and bool(u.page('usbdebug_page')) != forgets
 
 
 def adb_question(fw_dev):
@@ -512,7 +517,7 @@ def test_a_dev_build_whose_adb_gadget_is_not_back_yet_probes_with_storage(fw_dev
 
 # The USB picker (usb_pick_open): Settings > General > USB and Control Center's USB row, the remembered choice.
 
-PICK = ['Ask Every Time', 'Transfer Files', 'USB Audio', 'Charge Only']
+PICK = ['Automatic', 'Transfer Files', 'USB Audio', 'Charge Only', 'Ask Every Time']
 DEV_PICK = PICK + ['USB Debugging']
 SORTSELECT = b'dialog/sortselect_dialog'  # the confirmation card's dialog (feedback.c confirm)
 
@@ -538,8 +543,8 @@ def asked(fw):
     return [C.string_at(a[0]) for _, a in fw.calls('navigator_to')].count(SORTSELECT)
 
 
-@pytest.mark.parametrize('pick, row', [(0, 'Ask Every Time'), (1, 'Charge Only'), (2, 'Transfer Files'),
-                                       (3, 'USB Audio')])
+@pytest.mark.parametrize('pick, row', [(0, 'Automatic'), (1, 'Charge Only'), (2, 'Transfer Files'),
+                                       (3, 'USB Audio'), (5, 'Ask Every Time')])
 def test_the_picker_lists_the_choices_and_checks_the_remembered_one(fw, pick, row):
     u = Usb(fw, ini={'USBPICK': pick})
     page = picker(u)
@@ -552,14 +557,15 @@ def test_a_dev_build_s_picker_offers_usb_debugging(fw_dev):
     assert [t for t, _ in u.rows(page)] == DEV_PICK and checked(u, page) == ['USB Debugging']
 
 
-def test_a_release_build_reads_a_remembered_usb_debugging_as_ask_every_time(fw):
+def test_a_release_build_reads_a_remembered_usb_debugging_as_automatic(fw):
     u = Usb(fw, ini={'USBPICK': 4})
-    assert checked(u, picker(u)) == ['Ask Every Time'] and value(fw) == 'Ask Every Time'
+    assert checked(u, picker(u)) == ['Automatic'] and value(fw) == 'Automatic'
 
 
 @pytest.mark.parametrize('pick, lines', [
-    (0, ['Plug into a computer to choose.']),
-    (4, ['A computer gets adb on every cable.', 'Stop on its page asks again next time.'])])
+    (0, ['A car plays the Q2 through its speakers.', 'A computer opens the SD card.']),
+    (5, ['Plug into a computer to choose.']),
+    (4, ['A computer gets adb on every cable.', 'Stop on its page goes back to Automatic.'])])
 def test_the_footer_says_what_the_checked_choice_does(fw_dev, st, pick, lines):
     """docs/oled-design.md#usb: the checked choice's note under the list, 13 px Text Tertiary on the text column, its
     lines 17 px apart."""
@@ -593,7 +599,7 @@ def test_a_swipe_back_takes_the_footer_along_with_the_page(fw_dev, st):
 def test_a_pick_with_no_cable_only_saves_it_and_ask_every_time_undoes_a_saved_charge_only(fw):
     """The gap feat/usb-mode-row left: a saved Charge Only had no way back. With no cable in a pick is only saved
     (Transfer Files with stock's mode, as Always Do This saves it); the link, which stock's USB-mode exit prompt may
-    still hold at 2, is left alone. Ask Every Time puts USBPICK back to 0, and the next cable gets the chooser."""
+    still hold at 2, is left alone. Ask Every Time saves USBPICK 5, and the next cable gets the chooser."""
     u = Usb(fw, ini={'USBPICK': 1}, tile=1)
     u.link.value = 2
     page = picker(u)
@@ -602,7 +608,7 @@ def test_a_pick_with_no_cable_only_saves_it_and_ask_every_time_undoes_a_saved_ch
     assert checked(u, page) == ['Transfer Files'] and u.page('usbpick_page') and (u.link.value, u.commands) == (2, [])
     u.ui.click(u.row(page, 'Transfer Files'))  # the checked one again: nothing
     u.ui.click(u.row(page, 'Ask Every Time'))
-    assert u.saved[2:] == [('Q2POD', 'USBPICK', 0)] and checked(u, page) == ['Ask Every Time']
+    assert u.saved[2:] == [('Q2POD', 'USBPICK', 5)] and checked(u, page) == ['Ask Every Time']
     assert value(fw) == 'Ask Every Time' and not asked(fw)
     u.link.value = 0
     u.plug()
@@ -665,10 +671,10 @@ def test_once_ejected_transfer_files_is_left_without_asking(fw):
     assert not asked(fw) and not u.page('usbmode_page') and u.saved == [('Q2POD', 'USBPICK', 1)]
 
 
-def test_ask_every_time_while_transfer_files_is_up_only_clears_the_choice(fw):
+def test_ask_every_time_while_transfer_files_is_up_only_saves_it(fw):
     u, page = files_mounted(fw)
     u.ui.click(u.row(page, 'Ask Every Time'))
-    assert not asked(fw) and u.page('usbmode_page') and u.saved == [('Q2POD', 'USBPICK', 0)]
+    assert not asked(fw) and u.page('usbmode_page') and u.saved == [('Q2POD', 'USBPICK', 5)]
 
 
 def test_a_dev_build_switches_debugging_off_and_on(fw_dev):
@@ -691,3 +697,71 @@ def test_the_cable_is_what_stock_reads(fw):
     assert cable() == 0
     u.det.value = 1
     assert cable() == 1
+
+
+# A cable in starts one Bluetooth connect to the saved device (headset.c headset_bt_usb,
+# docs/internals.md#bluetooth-on-usb-power). The car drive of 2026-11-20: the car ended the link at its switch-off
+# (reason 3, which BlueZ does not retry), and at the next start Bluetooth waited for the car to page the Q2 itself,
+# about 4.5 minutes after the car's USB enumerated it.
+
+def usb_power(fw, ini=None, since_on=30000):
+    """usb_ui.c and headset.c with test_bt_trace's Bluetooth: on, its stack up, nothing linked, the car saved and
+    paired, Bluetooth on since_on ms before. autoLinkBluetooth stands in for stock's: its checkPairDev site
+    (BT_AUTOLINK) is headset_bt_autolink, and a yes starts the link thread to the car."""
+    from test_bt_trace import CAR, Rig
+    u = Usb(fw, ini=ini)
+    r = Rig(fw)
+    r.set(init=0, conn=0)
+    fw.mock('checkPairDev', lambda *_: 1)
+    starts = []
+
+    def auto(*_):
+        if fw.fn('headset_bt_autolink', C.c_int, C.c_char_p)(CAR.encode()):
+            starts.append(CAR)
+            r.links = [(CAR, 1)]
+            r.set(conn=1)
+        return 1
+    fw.mock('autoLinkBluetooth', auto)
+    fw.fn('headset_status_register', None)()  # Bluetooth on
+    r.now += since_on
+    u.status()  # a pass with no cable: the next one in is a plug-in
+    r.poll()
+    r.said()
+    return u, r, starts
+
+
+def test_a_cable_in_starts_one_connect_to_the_saved_device_logged_as_usb(fw):
+    from test_bt_trace import CAR
+    u, r, starts = usb_power(fw)
+    u.plug(host=False)
+    assert starts == [CAR]
+    r.poll()
+    assert ('I', f'connect starts to {CAR} why=usb') in r.said()
+    for _ in range(5):  # the cable stays in and the thread ends: nothing pages again
+        r.now += 5000
+        r.set(conn=0)
+        u.status()
+        u.poll()
+    assert starts == [CAR]
+
+
+@pytest.mark.parametrize('case', ['connected', 'bluetooth off', 'stack starting', 'link thread running',
+                                  'no saved device', 'usb audio', 'otg bus power', 'just switched on'])
+def test_a_cable_in_starts_no_connect(fw, case):
+    from test_bt_trace import BUDS
+    u, r, starts = usb_power(fw, ini={'USBPICK': 3} if case == 'usb audio' else None,
+                             since_on=5000 if case == 'just switched on' else 30000)
+    if case == 'connected':
+        r.links = [(BUDS, 3)]
+    elif case == 'bluetooth off':
+        r.set(on=0)
+    elif case == 'stack starting':
+        r.set(init=101)
+    elif case == 'link thread running':
+        r.set(conn=1)
+    elif case == 'no saved device':
+        r.set(saved='')
+    elif case == 'otg bus power':
+        fw.var('g_last_otgid', C.c_byte).value = 1
+    u.plug(host=False)
+    assert starts == []

@@ -29,7 +29,8 @@ def L(tmp_path_factory):
     for name in ('guard_new', 'log_new', 'table_new', 'log_ram'):
         getattr(lib, name).restype = C.c_void_p
     lib.log_ram.argtypes = lib.log_used.argtypes = lib.guard_load.argtypes = [C.c_void_p]
-    lib.feed.argtypes = [C.c_void_p, C.c_uint, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.POINTER(C.c_int)]
+    lib.feed.argtypes = [C.c_void_p, C.c_uint, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int,
+                         C.POINTER(C.c_int)]
     lib.log_new.argtypes = [C.c_char_p]
     lib.log_dropped.argtypes = [C.c_void_p]
     lib.heat_add.argtypes = [C.c_void_p, C.c_char_p]
@@ -62,9 +63,9 @@ class Guard:
         self.L, self.g, self.now, self.out = L, L.guard_new(), 0, (C.c_int * 3)()
         self.events = []
 
-    def step(self, temp=NONE, busy=-1, cancel=0, acked=0, saved=0, dt=5000):
+    def step(self, temp=NONE, busy=-1, cancel=0, acked=0, saved=0, dt=5000, charge=0):
         self.now += dt
-        ev = self.L.feed(self.g, self.now, temp, busy, cancel, acked, saved, self.out)
+        ev = self.L.feed(self.g, self.now, temp, busy, cancel, acked, saved, charge, self.out)
         self.events.append(ev)
         return ev
 
@@ -165,6 +166,54 @@ def test_three_jumps_in_a_row_put_it_down_and_say_why(L):
     assert [g.step(340), g.step(260), g.step(340)] == [EV_NONE, EV_NONE, EV_SENSOR_DOWN]
     assert g.state() == 'nosensor' and g.why() == 'jumps'
     assert g.step(500) == EV_NONE and g.step(501) == EV_SENSOR_OK  # back: a fresh start, no old reference
+
+
+CABLE, CHARGING = 1, 2  # q2guard.h GUARD_CHARGE_*: the charger's supply online, the battery charging
+
+# The die's readings on a Q2 (q2-heat, 2026-11-20) at a cable plugged in (18:10:11, Discharging to Charging) and pulled
+# out (18:12:45, Charging to Discharging): the charger is on the PMIC's die, so its turning on or off steps the reading
+# 4.5 and 3.3 C in one sample, then it moves a few tenths a sample again.
+PLUG = [(357, 0), (402, CABLE | CHARGING), (409, CABLE | CHARGING), (423, CABLE | CHARGING),
+        (428, CABLE | CHARGING), (432, CABLE | CHARGING)]
+PULL = [(443, CABLE | CHARGING), (444, CABLE | CHARGING), (444, CABLE | CHARGING), (411, 0), (401, 0), (396, 0),
+        (389, 0)]
+
+
+@pytest.mark.parametrize('seq', [PLUG, PULL], ids=['plug', 'pull'])
+def test_the_step_at_a_charger_change_is_a_reading_not_a_sensor_down(L, seq):
+    g = Guard(L)
+    t0, c0 = seq[0]
+    g.step(t0 - 2, charge=c0), g.step(t0 - 1, charge=c0)  # trusted, the charger as it was
+    events = [g.step(t, charge=c) for t, c in seq]
+    assert EV_SENSOR_DOWN not in events and g.state() == 'ok'
+
+
+@pytest.mark.parametrize('seq', [PLUG, PULL], ids=['plug', 'pull'])
+def test_the_same_step_with_no_charger_change_is_still_a_jump(L, seq):
+    g = Guard(L)
+    t0, c0 = seq[0]
+    g.step(t0 - 2, charge=c0), g.step(t0 - 1, charge=c0)
+    events = [g.step(t, charge=c0) for t, _ in seq]
+    assert EV_SENSOR_DOWN in events and g.why() == 'jumps'
+
+
+def test_a_charger_change_waives_the_jump_for_two_readings_and_no_further(L):
+    """The change and the reading after it may step (the die may be read just before the cable is); a step three
+    readings on is a misread again, and three of them put the sensor down."""
+    g = Guard(L)
+    real(g, base=357)
+    assert [g.step(358, charge=CABLE), g.step(402, charge=CABLE)] == [EV_NONE, EV_NONE]
+    assert [g.step(t, charge=CABLE) for t in (450, 450, 450)] == [EV_NONE, EV_NONE, EV_SENSOR_DOWN]
+    assert g.why() == 'jumps'
+
+
+@pytest.mark.parametrize('bad', [900, 0, 2550])
+def test_a_charger_change_does_not_let_a_wild_reading_through(L, bad):
+    """The waiver is for a step the charger can make (6 C at most): a broken sensor's 90 C at a plug-in is still a
+    misread, and goes on putting the sensor down."""
+    g = Guard(L)
+    real(g, base=357)
+    assert [g.step(bad, charge=CABLE) for _ in range(3)] == [EV_NONE, EV_NONE, EV_SENSOR_DOWN]
 
 
 def test_a_trusted_sensor_stuck_while_the_load_swings_goes_down(L):

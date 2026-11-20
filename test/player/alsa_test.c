@@ -36,6 +36,7 @@ static int freed, fresh;
 static char opened[128]; /* the device the last open named */
 int snd_config_update_free_global(void) { freed = 1; return 0; }
 int usleep(useconds_t us) { sleeps++; return 0; }
+void plog(char level, const char *msg, int n) { (void)level, (void)msg, (void)n; } /* main.c's, for cartrace.c */
 int snd_pcm_open(snd_pcm_t **p, const char *name, int stream, int mode) {
     fresh += freed, freed = 0;
     snprintf(opened, sizeof opened, "%s", name);

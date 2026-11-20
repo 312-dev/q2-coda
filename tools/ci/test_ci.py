@@ -3,12 +3,19 @@ small made-up files and a fake repository.
 
     python3 -m pytest tools/ci -q     # no build, no stock ZIP; a second or two
 """
+import ast
+import errno
 import os
 import pathlib
 import re
+import shutil
+import signal
 import subprocess
 import sys
+import tempfile
 import time
+
+import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import affected  # noqa: E402
@@ -18,6 +25,7 @@ import gate  # noqa: E402
 import merge_batch  # noqa: E402
 import json  # noqa: E402
 import patch_shards  # noqa: E402
+import q2live  # noqa: E402
 import smoke  # noqa: E402
 
 ALL = affected.ALL
@@ -791,6 +799,105 @@ def test_a_card_is_not_reset_when_a_lease_is_reused_or_reserved_and_a_missing_fi
     assert '1' not in json.loads((tmp_path/'state/leases.json').read_text())
 
 
+def pool_on_another_disk(tmp_path, monkeypatch, other):
+    """The layout of 2026-11-20: ~/q2-emu-poolK symlinks onto other (the scratch disk), the fixture left in tmp_path."""
+    home = tmp_path/'home'
+    for k in (1, 2):
+        (other/f'q2-emu-pool{k}').mkdir(parents=True)
+        home.mkdir(exist_ok=True)
+        (home/f'q2-emu-pool{k}').symlink_to(other/f'q2-emu-pool{k}')
+    monkeypatch.setattr(emu_pool, 'STATE', tmp_path/'state')
+    monkeypatch.setattr(emu_pool, 'LEASES', tmp_path/'state/leases.json')
+    monkeypatch.setattr(emu_pool, 'K', 2)
+    monkeypatch.setattr(emu_pool, 'HOME', home)
+    monkeypatch.delenv('Q2_EMU_CARD', raising=False)
+    monkeypatch.delenv('Q2_EMU_DATA', raising=False)
+    monkeypatch.setattr(emu_pool, 'q2emu', lambda *a: type('P', (), {'returncode': 0, 'stdout': '', 'stderr': ''})())
+    monkeypatch.setattr(emu_pool, 'make_copy', lambda k: None)
+    source = tmp_path/'source'
+    card_tree(source, {'Music/A/B/01 one.flac': 'one', 'Test/t.flac': 'tt'})
+    card_tree(tmp_path/'datasrc', {'config.ini': '[SYSSET]\nBLUETOOTH=0\n'})
+    return emu_pool.make_fixture(source), emu_pool.make_data_fixture(tmp_path/'datasrc')
+
+
+def check_card_copied(fx):
+    card = emu_pool.copy_dir(1)/'state/mmc'
+    assert sorted(str(p.relative_to(card)) for p in card.rglob('*')) == sorted(str(p.relative_to(fx)) for p in fx.rglob('*'))
+    assert (card/'Music/A/B/01 one.flac').read_text() == 'one' and emu_pool.card_songs(1) == 2
+    assert not os.access(card/'Test/t.flac', os.W_OK) or os.geteuid() == 0  # read-only like the fixture's
+    assert (emu_pool.copy_dir(1)/'state/data/config.ini').read_text() == '[SYSSET]\nBLUETOOTH=0\n'
+
+
+def test_a_lease_copies_the_card_when_the_pool_is_on_another_filesystem(tmp_path, monkeypatch):
+    """After the pool copies moved to /mnt/wsl/q2scratch behind symlinks (2026-11-20), every `get` failed with
+    "Invalid cross-device link": the fixture stayed on / and a hardlink cannot cross filesystems. A file that
+    cannot be linked is now copied; any other link error still stops the lease."""
+    real = os.link
+
+    def cross(src, dst):
+        if pathlib.Path(dst).resolve().is_relative_to(tmp_path/'scratch'):
+            raise OSError(errno.EXDEV, os.strerror(errno.EXDEV))
+        return real(src, dst)
+    monkeypatch.setattr(os, 'link', cross)
+    fx, _ = pool_on_another_disk(tmp_path, monkeypatch, tmp_path/'scratch')
+    assert emu_pool.get('/b', 'w', 1, wait=False, avoid=(2,)) == 1
+    check_card_copied(fx)
+    assert (emu_pool.copy_dir(1)/'state/mmc/Test/t.flac').stat().st_ino != (fx/'Test/t.flac').stat().st_ino
+
+    def denied(src, dst):
+        raise OSError(errno.EPERM, os.strerror(errno.EPERM))
+    monkeypatch.setattr(os, 'link', denied)
+    emu_pool.put(1)
+    try:
+        emu_pool.get('/b', 'w', 1, wait=False, avoid=(2,))
+    except SystemExit as e:
+        assert 'cannot hardlink' in str(e)
+    else:
+        raise AssertionError('a link error other than EXDEV was copied over')
+
+
+def test_a_lease_copies_the_card_across_two_real_filesystems(tmp_path, monkeypatch):
+    """The same, on two real filesystems where this machine has them (/dev/shm beside the test's tmp)."""
+    shm = pathlib.Path('/dev/shm')
+    if not shm.is_dir() or not os.access(shm, os.W_OK) or shm.stat().st_dev == tmp_path.stat().st_dev:
+        pytest.skip('no second writable filesystem')
+    other = pathlib.Path(tempfile.mkdtemp(dir=shm, prefix='q2-emu-pool-test-'))
+    try:
+        fx, _ = pool_on_another_disk(tmp_path, monkeypatch, other)
+        assert emu_pool.get('/b', 'w', 1, wait=False, avoid=(2,)) == 1
+        check_card_copied(fx)
+    finally:
+        shutil.rmtree(other)
+
+
+def test_smoke_and_q2live_find_the_sandbox_of_a_copy_reached_through_a_symlink(tmp_path, monkeypatch):
+    """q2emu binds its copy's rootfs by the real path (readlink -f); with ~/q2-emu-poolK a symlink onto the
+    scratch disk (2026-11-20) smoke.py looked for the symlink's path, found no demo and failed every boot."""
+    real = tmp_path/'scratch/q2-emu-pool1'
+    real.mkdir(parents=True)
+    (tmp_path/'home').mkdir()
+    (tmp_path/'home/q2-emu-pool1').symlink_to(real)
+    monkeypatch.setattr(emu_pool, 'HOME', tmp_path/'home')
+    copy = emu_pool.copy_dir(1)
+    assert copy.is_symlink()
+    # a stand-in for run.sh's bwrap (its argv names the resolved rootfs) whose child looks like qemu running demo
+    child = "exec -a 'qemu-mipsel-binfmt-P /release/bin/de''mo' sleep 30"  # split: the parent's own argv must not match
+    sandbox = subprocess.Popen([sys.executable, '-c', 'import subprocess, sys; subprocess.run(["bash", "-c", sys.argv[1]])',
+                                child, '--die-with-parent', '--bind', f'{real}/rootfs', '/'], start_new_session=True)
+    try:
+        end, pid = time.monotonic() + 10, None
+        while pid is None and time.monotonic() < end:
+            pid = smoke.demo_pid(copy)
+            time.sleep(.05)
+        assert pid is not None and pid != sandbox.pid
+        assert pathlib.Path(f'/proc/{pid}/cmdline').read_bytes().startswith(b'qemu-mipsel-binfmt-P /release/bin/demo')
+    finally:
+        os.killpg(sandbox.pid, signal.SIGKILL)
+        sandbox.wait()
+    bwrap = f'bwrap --die-with-parent --unshare-pid --bind {real}/rootfs / --proc /proc'
+    assert re.search(q2live.ours(q2live.copy_dir({'slot': 1})), bwrap)
+
+
 def test_smoke_says_a_card_with_no_songs_apart_from_no_emulator(tmp_path, monkeypatch, capsys):
     build = tmp_path/'build'
     build.mkdir()
@@ -851,6 +958,19 @@ def test_a_lease_can_keep_off_a_slot_and_prepare_the_copy_before_its_boot(tmp_pa
     except RuntimeError:
         pass
     assert '3' not in json.loads((tmp_path/'leases.json').read_text())  # a failed prepare leaves no lease
+
+
+def test_smoke_counts_homes_and_settings_rows_as_ipod_lays_them_out():
+    """Radio Tuner's Home row went in under the Library (be2c32f3) and smoke's Home > Library opened the tuner;
+    Car Remote's Settings row before Display had its Settings > Display open Car Remote (2026-11-20)."""
+    tree = ast.parse((pathlib.Path(__file__).resolve().parents[1]/'ipod.py').read_text())
+    lists = {t.id: ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+             for t in n.targets if isinstance(t, ast.Name) and t.id in ('HOME_ROWS', 'HOME_SETS')}
+    rows, sets = lists['HOME_ROWS'], lists['HOME_SETS']
+    ids = {'settings': 'settings', 'search': 'home_search', 'cover flow': 'coverflow', 'library': 'localmusic'}
+    assert smoke.HOME_FROM_END == {label: len(rows) - 1 - rows.index(ids[label]) for label in ids}
+    ids = {'General': 'sysset', 'Playback': 'playset', 'Display': 'set_display', 'Battery': 'set_power'}
+    assert [(label, n) for label, n, _ in smoke.SETTINGS] == [(label, sets.index(ids[label])) for label, _, _ in smoke.SETTINGS]
 
 
 def test_smoke_compares_the_screen_in_upright_boxes():

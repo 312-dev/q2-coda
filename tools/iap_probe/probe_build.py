@@ -22,7 +22,7 @@ ROOT = HERE.parents[1]
 CFLAGS = ['--target=mipsel-linux-gnu', '-march=mips32r2', '-mabi=32', '-mfp64', '-mnan=2008', '-mabs=2008', '-mabicalls',
           '-fno-pic', '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-fno-unwind-tables',
           '-fno-asynchronous-unwind-tables', '-Oz', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter']
-LIBS = ['lib/libc-2.28.so']
+LIBS = ['lib/libc-2.28.so', 'usr/lib/libsqlite3.so.0.8.6']  # SQLite: the library on iDrive (patch/q2_iap_lib.c)
 TONE_RATE, TONE_HZ, TONE_DB, TONE_S = 44100, 1000, -20, 2
 
 
@@ -45,7 +45,7 @@ def build(rootfs, out):  # pragma: no mutate block (clang, ld.lld and the stock 
     obj.mkdir(exist_ok=True)
     for rel in LIBS:
         shutil.copyfile(rootfs/rel, obj/pathlib.Path(rel).name)
-    run('clang', *CFLAGS, '-c', HERE/'q2-iap-probe.c', '-o', obj/'probe.o')
+    run('clang', *CFLAGS, '-c', ROOT/'patch/q2_iap.c', '-o', obj/'probe.o')
     run('clang', *CFLAGS, '-c', ROOT/'patch/start.c', '-o', obj/'start.o')
     run('ld.lld', '-m', 'elf32ltsmip', '-e', '__start', '--dynamic-linker', '/lib/ld-linux-mipsn8.so.1',
         '--image-base=0x400000', '-z', 'noexecstack', '--gc-sections', '-s', '--hash-style=sysv', '--build-id=none',

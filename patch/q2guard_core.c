@@ -4,7 +4,10 @@
 
 /* ---- the sensor's verdict ----
  * A reading counts only inside GUARD_MIN_DC..GUARD_MAX_DC and within GUARD_JUMP_DC of the last one that
- * counted (the die's ADC moves a few tenths a sample; a jump is a misread). GUARD_ERRORS bad or missing
+ * counted (the die's ADC moves a few tenths a sample; a jump is a misread). The charger is on the same die,
+ * so its turning on or off (a cable in or out, charging begun or ended) steps the reading by a few degrees
+ * in one sample (+4.5 and -3.3 C on a Q2): for GUARD_SETTLE readings from such a change the bound is
+ * GUARD_STEP_DC, and the reading that steps becomes the one the next is held to. GUARD_ERRORS bad or missing
  * readings in a row put the sensor down. One that has read a single value for GUARD_VARY readings is a
  * constant (a placeholder, no thermistor) and is down too: before it was trusted, whatever the load;
  * after, when the CPU load swung GUARD_SWING points or more meanwhile, which moves a real die. It is
@@ -14,10 +17,13 @@ static void down(struct guard *g, int why, struct guard_out *o) {
     g->seen = g->same = 0;
     if (g->sensor != SENSOR_DOWN) g->sensor = SENSOR_DOWN, g->why = why, o->event = EV_SENSOR_DOWN;
 }
-static int sensor_read(struct guard *g, int t, int busy, struct guard_out *o) {
+static int sensor_read(struct guard *g, int t, int busy, int charge, struct guard_out *o) {
+    if (charge != g->charge) g->charge = charge, g->settle = GUARD_SETTLE;
+    int jump = g->settle ? GUARD_STEP_DC : GUARD_JUMP_DC;
+    if (g->settle) --g->settle;
     int bad = t == GUARD_NONE                             ? GUARD_WHY_NONE
               : t < GUARD_MIN_DC || t > GUARD_MAX_DC      ? GUARD_WHY_RANGE
-              : g->seen && (t - g->last > GUARD_JUMP_DC || g->last - t > GUARD_JUMP_DC) ? GUARD_WHY_JUMP
+              : g->seen && (t - g->last > jump || g->last - t > jump) ? GUARD_WHY_JUMP
                                                           : 0;
     if (bad) {
         if (++g->errors >= GUARD_ERRORS) down(g, bad, o);
@@ -98,7 +104,7 @@ void guard_step(struct guard *g, const struct guard_in *in, struct guard_out *o)
         if (due && !g->powered) g->powered = 1, o->power_off = 1;
         return;
     }
-    int counts = sensor_read(g, in->temp, in->busy, o);
+    int counts = sensor_read(g, in->temp, in->busy, in->charge, o);
     if (g->sensor == SENSOR_OK) {
         if (g->load == LOAD_COUNTING) o->event = EV_LOAD_CANCELLED;
         if (g->load != LOAD_ARMED) load_reset(g);

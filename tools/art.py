@@ -291,7 +291,7 @@ STATE_INKS = inks('primary', 'd', 'l')
 # Wi-Fi is iOS's fan, drawn here (wifi_fan): its levels light 1 to 3 of the dot and two bands over the rest in
 # STATUS_UNLIT. The play state and the padlock are 13 px boxes drawn as they were (their ink 10.6 and 11 px); the
 # sync arrows turn through STATUS_SPIN frames of a half turn (the glyph repeats every half turn), sized by their
-# longer side as they turn, in Text Secondary; the download's arrow sits in its ring, white.
+# longer side as they turn, in Text Primary (the user's, 2026-11-20); the download's arrow sits in its ring, white.
 STATUS_PX = 14
 STATUS_INK = 11.0
 STATUS_TOP = 1.0
@@ -307,7 +307,7 @@ STATUS_FIT = {'status_wifi_x': ('wifi-x-bold', STATUS_WIFI_W), 'status_bt': ('bl
               'status_vol': ('speaker-simple-high-fill', STATUS_PX), 'status_mute': ('speaker-simple-x-fill', STATUS_PX)}
 STATUS_UNLIT = {'d': 0x3a3a3c, 'l': 0xc7c7cc}
 STATUS_SECONDARY = inks('secondary', 'd', 'l')
-STATUS_SPIN = 8
+STATUS_SPIN = 30  # status_row.c SR_SPIN: a half turn a second at 30 fps
 KEYLOCK_CARD_PX = 56  # Buttons Lock's card's padlock (keylock.c CARD_GLYPH)
 # Now Playing's shuffle and repeat (playing.modes.icons, np_bar.c np_modes): bold, MODE_PX, off in Text Secondary per
 # half, on in the theme's own accent's top tone in both; repeat-once is repeat's on glyph for Repeat One.
@@ -364,7 +364,7 @@ TIDAL = ''.join(f'M{x - 3.3} {y}L{x} {y - 3.3}L{x + 3.3} {y}L{x} {y + 3.3}Z' for
 # The menu sheet's symbols (menu_modal.c, a set with modal): regular weight at MENU_ICON_PX in FOLDER_INKS, and the
 # picker's check in the accent off the bar
 MENU_ICON_PX = 19
-MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'heart-break', 'list-plus', 'shuffle',
+MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'shuffle',
               'vinyl-record', 'microphone-stage', 'folder', 'clock-counter-clockwise', 'list-numbers',
               'bookmark-simple', 'dots-three', 'plus', 'list-checks', 'skip-forward', 'skip-back', 'repeat', 'stack',
               'airplay', 'download-simple', 'cloud-arrow-down', 'trash', 'speedometer', 'pencil-simple',
@@ -496,7 +496,8 @@ EMPTY_GLYPHS = {g: g for g in (
     'radio', 'cloud-slash', 'download-simple', 'list-numbers', 'car-profile', 'broadcast', 'wifi-slash',
     'arrows-clockwise', 'check-circle', 'arrow-circle-down', 'cloud')} | {'sd-card': 'memory',  # the last four: Sync's states
     'heart-slash': 'q2coda/heart-slash'}
-USB_TOASTS = {'unplugged': ('plug-fill', token('secondary')), 'ejected': ('check-circle-fill', token('positive')), 'audio': ('speaker-hifi-fill', 0xffffff)}
+USB_TOASTS = {'unplugged': ('plug-fill', token('secondary')), 'ejected': ('check-circle-fill', token('positive')), 'audio': ('speaker-hifi-fill', 0xffffff),
+              'car': ('car-profile-fill', 0xffffff), 'carwarn': ('warning-fill', token('warning'))}  # Car Audio's (usb_car.c)
 # The status row's battery (list_marks.c battery_slim): charging, Phosphor's lightning, too weak a charger its warning,
 # fill weight at BATT_GLYPH_PX in Text Primary, with a BATT_GLYPH_GAP px gap in the Canvas cut round it (iOS's way of
 # keeping it off the charge's fill; over the body's empty black it is not seen), per half. The image is BATT_GLYPH_BOX,
@@ -719,7 +720,7 @@ def status_images(prefix):
     # its ink 13.6 px wide at 11 tall, so a STATUS_PX box
     out |= {f'{prefix}_status_offline_{k}': status_glyph('cloud-slash-bold', STATUS_PX, token('warning')) for k in STATE_INKS}
     out |= {f'{prefix}_status_sync_{f}_{k}': status_turn('arrows-clockwise-bold', STATUS_PX, STATUS_INK, c, f / STATUS_SPIN / 2)
-            for f in range(STATUS_SPIN) for k, c in STATUS_SECONDARY.items()}
+            for f in range(STATUS_SPIN) for k, c in STATE_INKS.items()}
     return out
 
 
@@ -780,6 +781,9 @@ def images(t):
     # the menu sheet's symbols (menu_modal.c)
     out |= {f'{prefix}_menu_{n}_{k}': phosphor(n, MENU_ICON_PX, c) for n in MENU_ICONS for k, c in FOLDER_INKS.items()}
     out[f'{prefix}_menu_check_a'] = phosphor('check', MENU_ICON_PX, on)
+    # Unfavorite's heart (hold_menu.c, the user's 2026-11-20): filled in Favorite, as Now Playing's liked heart, both
+    # halves, and white on the selection as every symbol there
+    out |= {f'{prefix}_menu_heart-fill_{k}': phosphor('heart-fill', MENU_ICON_PX, c) for k, c in inks('favorite', 'd', 'l', 'w').items()}
     # an artist's Shuffle and Radio panels and an album's Play (artist_page.c pair_paint): the accent's top tone at rest, white lit
     out |= {f'{prefix}_pair_{n}_{k}': phosphor(n, PAIR_ICON_PX, c) for n in PAIR_ICONS for k, c in {'a': on, 'w': 0xffffff}.items()}
     out |= {f'{prefix}_quality_{k}': phosphor('waveform-bold', QUALITY_PX, c) for k, c in STATE_INKS.items()}

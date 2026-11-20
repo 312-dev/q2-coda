@@ -3,8 +3,11 @@
  * ringnav_usb_status in usb_charge.c, which calls usb_ui_status around it) and, once a computer
  * configures it, opens usbmode_page in the mode Quick Settings' USB tile last chose. Here:
  *
- * - A cable in with no remembered choice keeps stock out (g_usblink_status 3, which its next pass
- *   leaves alone until the cable comes out) and starts stock's storage gadget with no card in it
+ * - A cable in on Automatic, the setting's default, keeps stock out (g_usblink_status 3, which its next
+ *   pass leaves alone until the cable comes out) and shows the host an iPhone (usb_car.c): a car keeps it
+ *   and plays the Q2 over USB (Car Audio); any other host gets Transfer Files (usb_car_storage); a charger
+ *   only charges. USB Debugging is never reached this way, only by picking it.
+ * - A cable in on Ask Every Time keeps stock out the same way and starts stock's storage gadget with no card in it
  *   (a reader with no medium), only to learn whether a computer answers. One that configures it
  *   within USB_PROBE_MS gets the chooser, "Use USB For": Charge Only, Transfer Files, USB Audio and,
  *   in a --dev build, USB Debugging, and Always Do This. Nothing answering is a charger: the probe
@@ -21,11 +24,11 @@
  * - The cable is seen in the UI pass after its edge (usb_event.c, usb_ui_poll), and a cable out
  *   stops the probe's gadget, answered or not (docs/internals.md#usb-cable-events).
  * - A remembered choice skips the chooser, Transfer Files and USB Audio in their own mode for the
- *   cable, and holds until a mode page's Stop forgets it (back to asking, so the next cable gets
- *   the chooser) or the USB picker changes it.
+ *   cable, and holds until a mode page's Stop forgets it (back to Automatic) or the USB picker
+ *   changes it.
  * - The USB picker, "USB" (usb_pick_open: Settings > General's USB row, usb_ui_row, and Control
- *   Center's while a cable is in): Ask Every Time, Transfer Files, USB Audio, Charge Only and, in a
- *   --dev build, USB Debugging, the remembered one checked and what it does under the list. A pick
+ *   Center's while a cable is in): Automatic, Transfer Files, USB Audio, Charge Only, Ask Every Time
+ *   and, in a --dev build, USB Debugging, the remembered one checked and what it does under the list. A pick
  *   is remembered; with a cable in it is that cable's mode at once (usb_switch), but leaving
  *   Transfer Files while the computer has the card asks first.
  * - Toasts: Unplugged, OK to Disconnect (the computer's eject while USB mode is not on top) and
@@ -39,7 +42,8 @@
 #define USB_UDC "/sys/class/udc/13500000.otg/state"
 #define USB_ADB_UDC "/sys/kernel/config/usb_gadget/q2adb/UDC" /* --dev: the ADB gadget's controller */
 #define USB_PICK_KEY "USBPICK" /* [Q2POD]: the remembered choice, USB_* */
-enum { USB_ASK, USB_CHARGE, USB_FILES, USB_AUDIO, USB_DEBUG, USB_CHOICES };
+/* The USB setting's values (USBPICK); 0, Automatic, is also the setting when nothing was ever picked */
+enum { USB_AUTO, USB_CHARGE, USB_FILES, USB_AUDIO, USB_DEBUG, USB_ASK, USB_CHOICES };
 #define USB_LINK_HELD 3 /* g_usblink_status: stock leaves the cable to us until it is out */
 #define USB_MODE_DAC 1  /* g_usbmode: Audio and DAC; anything else USB storage (2, stock's) */
 #define USB_MODE_FILES 2
@@ -105,15 +109,15 @@ static void usb_toast(const char *glyph, const char *text) {
     if (g_backlight_status) toast_later(glyph, text);
 }
 
-/* The choice this cable gets without asking, USB_ASK for none (USB Debugging's in a release build).
- * config_value takes a value under its count, so the read names the values it may hold. */
+/* The USB setting, USB_AUTO unless something else was picked (USB Debugging's is Automatic in a release
+ * build). config_value takes a value under its count, so the read names the values it may hold. */
 static int usb_remembered(void) {
-    int pick = config_value("Q2POD", USB_PICK_KEY, USB_CHOICES, USB_ASK);
-    return pick <= USB_ASK || (pick == USB_DEBUG && !Q2POD_DEV) ? USB_ASK : pick;
+    int pick = config_value("Q2POD", USB_PICK_KEY, USB_CHOICES, USB_AUTO);
+    return pick <= USB_AUTO || (pick == USB_DEBUG && !Q2POD_DEV) ? USB_AUTO : pick;
 }
 
-static const char *const usb_pick_names[USB_CHOICES] = { "Ask Every Time", "Charge Only", "Transfer Files",
-                                                         "USB Audio", "USB Debugging" };
+static const char *const usb_pick_names[USB_CHOICES] = { "Automatic",     "Charge Only",   "Transfer Files",
+                                                         "USB Audio",     "USB Debugging", "Ask Every Time" };
 /* The remembered choice's name: General's USB row's value and Control Center's USB row's. */
 const char *usb_ui_value(void) { return usb_pick_names[usb_remembered()]; }
 /* A cable in, as stock's pass reads it: Control Center's USB row shows only then. */
@@ -134,11 +138,11 @@ void usb_ui_row(void *label) {
     usb_row_text();
 }
 
-/* A mode page's Stop, or Ask Every Time picked: the remembered choice back to asking, so the next
- * cable gets the chooser. */
+/* A mode page's Stop: the mode it stops, if the setting holds it, back to Automatic for the next cable.
+ * Automatic and Ask Every Time are not a mode, and stay. */
 static void usb_forget(void) {
-    if (config_value("Q2POD", USB_PICK_KEY, USB_CHOICES, USB_ASK) != USB_ASK)
-        write_int_config(USB_ASK, "Q2POD", USB_PICK_KEY);
+    int pick = config_value("Q2POD", USB_PICK_KEY, USB_CHOICES, USB_AUTO);
+    if (pick != USB_AUTO && pick != USB_ASK) write_int_config(USB_AUTO, "Q2POD", USB_PICK_KEY);
     usb_row_text();
 }
 
@@ -146,11 +150,8 @@ static void usb_forget(void) {
  * with stock's own mode (SYSSET USBMODE), as its USB setting saved it, so no cable's mode is put
  * back when this one is out. */
 static void usb_remember(int pick) {
-    if (pick == USB_ASK) {
-        usb_forget();
-        return;
-    }
-    write_int_config(pick, "Q2POD", USB_PICK_KEY);
+    if (pick != USB_AUTO || config_value("Q2POD", USB_PICK_KEY, USB_CHOICES, USB_AUTO) != USB_AUTO)
+        write_int_config(pick, "Q2POD", USB_PICK_KEY);
     if (pick == USB_FILES || pick == USB_AUDIO) {
         g_usbmode = pick == USB_AUDIO ? USB_MODE_DAC : USB_MODE_FILES;
         write_int_config(g_usbmode, "SYSSET", "USBMODE"); /* stock's own */
@@ -379,8 +380,8 @@ int usb_ui_key(void *top, unsigned key) {
 
 /* Its rows' choices, top down, and the note under the list for the checked one (two lines at most,
  * USB_FOOT_DY and USB_FOOT_LINE: design/usb-row mock_usb_row.py, 13 px Text Tertiary). */
-static const unsigned char usb_pick_order[] = { USB_ASK, USB_FILES, USB_AUDIO, USB_CHARGE, USB_DEBUG };
-#define USB_PICK_ROWS (Q2POD_DEV ? 5 : 4)
+static const unsigned char usb_pick_order[] = { USB_AUTO, USB_FILES, USB_AUDIO, USB_CHARGE, USB_ASK, USB_DEBUG };
+#define USB_PICK_ROWS (Q2POD_DEV ? 6 : 5)
 #define USB_PICK_TICK "_usb_tick" /* a row's check image: stock's select, painted as the theme's check */
 #define USB_TICK_W 24
 #define USB_FOOT_H 48
@@ -388,15 +389,18 @@ static const unsigned char usb_pick_order[] = { USB_ASK, USB_FILES, USB_AUDIO, U
 #define USB_FOOT_LINE 17 /* and the next one's under it */
 #define USB_FOOT_PX TYPE(13)
 static const char *const usb_notes[USB_CHOICES][2] = {
-    { "Plug into a computer to choose.", 0 },
+    { "A car plays the Q2 through its speakers.", "A computer opens the SD card." },
     { "Every cable only charges, a computer's too.", 0 },
-    { "A computer opens the SD card on every cable.", "Stop on its page asks again next time." },
-    { "A computer plays its sound here on every cable.", "Stop on its page asks again next time." },
-    { "A computer gets adb on every cable.", "Stop on its page asks again next time." },
+    { "A computer opens the SD card on every cable.", "Stop on its page goes back to Automatic." },
+    { "A computer plays its sound here on every cable.", "Stop on its page goes back to Automatic." },
+    { "A computer gets adb on every cable.", "Stop on its page goes back to Automatic." },
+    { "Plug into a computer to choose.", 0 },
 };
 
-/* The cable's mode now: stock's mode page's, USB Debugging's page's, else the choice it got. */
+/* The cable's mode now: Automatic's while its iPhone is shown, stock's mode page's, USB Debugging's page's, else
+ * the choice it got. */
 static int usb_now(void) {
+    if (usb_car_on()) return USB_AUTO;
     if (u.mode) return g_usbmode == USB_MODE_DAC ? USB_AUDIO : USB_FILES;
     return u.debug ? USB_DEBUG : u.choice;
 }
@@ -425,6 +429,7 @@ static void usb_switch(int pick) {
                                 : "storage_config.sh stop >/dev/null 2>&1");
     }
     usb_page_close(&u.debug);
+    usb_car_stop(1); /* Automatic's iPhone off the controller before the pick's gadget */
     usb_apply(pick, 1);
     if (now == USB_DEBUG && pick == USB_CHARGE)
         system("/usr/bin/q2adb-gadget park >/dev/null 2>&1");
@@ -443,9 +448,10 @@ static void usb_pick_marks(void) {
     if (u.pick_foot) widget_invalidate_force(u.pick_foot, (void *)0);
 }
 
-/* pick remembered and, with a cable in, that cable's mode now; Ask Every Time only forgets. */
+/* pick remembered and, with a cable in, that cable's mode now; Automatic and Ask Every Time are the next
+ * cable's. */
 static void usb_pick_set(int pick) {
-    if (pick == USB_ASK || !usb_ui_cable())
+    if (pick == USB_AUTO || pick == USB_ASK || !usb_ui_cable())
         usb_remember(pick);
     else
         usb_switch(pick);
@@ -465,7 +471,7 @@ static int usb_pick_click(void *ctx, void *event) {
     static const char *const rows[] = { "Cancel", "Switch" };
     int i = (int)(long)ctx, pick = i >= 0 && i < USB_PICK_ROWS ? usb_pick_order[i] : -1;
     if (pick < 0) return 0;
-    int cable = usb_ui_cable() && pick != USB_ASK, now = cable ? usb_now() : -1;
+    int cable = usb_ui_cable() && pick != USB_AUTO && pick != USB_ASK, now = cable ? usb_now() : -1;
     if (pick == usb_remembered() && (!cable || pick == now)) return 0;
     if (cable && pick != now && u.mode && g_usbmode != USB_MODE_DAC && !u.ejected) {
         u.pending = pick; /* read only by this card's answer; another card up shows none */
@@ -607,18 +613,31 @@ void usb_ui_status(void) {
         else
             usb_log(det ? "cable in (stock's once-a-second read)" : "cable out (stock's once-a-second read)", -1);
     }
-    if (det && !u.det && u.det_known) charge_plugged(); /* charging.c: a dark Q2 lights for it */
+    if (det && !u.det && u.det_known) {
+        charge_plugged(); /* charging.c: a dark Q2 lights for it */
+        /* A car's USB coming on with the car (docs/internals.md#bluetooth-on-usb-power); not the
+         * Q2's own OTG bus power, nor a cable whose remembered choice is USB Audio, nor one Automatic
+         * shows the iPhone on: a car that takes it plays over USB, and a host that does not gets the
+         * connect then (usb_car_storage) */
+        if (g_last_otgid != 1 && usb_remembered() != USB_AUDIO && usb_remembered() != USB_AUTO) headset_bt_usb();
+    }
     u.det_known = 1;
     if (det && !u.det && g_usblink_status == 0) {
-        u.choice = USB_ASK, u.chosen = 0;
+        u.choice = USB_AUTO, u.chosen = 0;
         u.plug_at = (unsigned)time_now_ms();
         int pick = usb_remembered();
+        if (pick == USB_DEBUG) /* Automatic's iPhone parked the ADB gadget on an earlier cable */
+            system("/usr/bin/q2adb-gadget unpark >/dev/null 2>&1");
         if (pick == USB_FILES || pick == USB_AUDIO) {
             u.choice = pick; /* stock's own path, in the choice's mode for this cable */
             if ((g_usbmode == USB_MODE_DAC) != (pick == USB_AUDIO)) usb_mode(pick == USB_AUDIO);
         } else {
             g_usblink_status = USB_LINK_HELD;
-            if (pick == USB_ASK) {
+            if (pick == USB_AUTO) {
+                /* the iPhone first: a car keeps it, anything else gets Transfer Files (usb_car_storage) */
+                usb_log("Automatic: the iPhone shown", -1);
+                usb_car_start();
+            } else if (pick == USB_ASK) {
                 /* no medium: a probe; in a --dev build the ADB gadget already there is one */
                 u.probe_up = !usb_adb_bound();
                 if (u.probe_up) system("storage_config.sh start /dev/null >/dev/null 2>&1");
@@ -634,10 +653,11 @@ void usb_ui_status(void) {
          * next cable's probe could not start (docs/internals.md#usb-cable-events). */
         u.probing = 0;
         usb_probe_stop();
+        usb_car_stop(0);
         usb_page_close(&u.chooser);
         usb_page_close(&u.debug);
         if (u.mode_saved) g_usbmode = (unsigned char)(u.mode_saved - 1);
-        u.mode_saved = 0, u.choice = USB_ASK;
+        u.mode_saved = 0, u.choice = USB_AUTO;
         usb_toast("usbtoast_unplugged", "Unplugged");
     }
     u.det = det;
@@ -648,6 +668,15 @@ void usb_ui_status(void) {
     }
 }
 
+/* Automatic's host was not a car, and the iPhone gadget is gone (usb_car.c): Transfer Files for this cable,
+ * stock's storage gadget and its mode page, as the picker's Transfer Files; and the Bluetooth connect a cable
+ * in starts (headset_bt_usb), held back while the iPhone was shown. */
+static void usb_car_storage(void) {
+    usb_log("Automatic: not a car, Transfer Files", (int)((unsigned)time_now_ms() - u.plug_at));
+    u.chosen = 1;
+    usb_apply(USB_FILES, 0);
+    if (g_last_otgid != 1) headset_bt_usb();
+}
 
 /* ---- the ADB prompt (--dev builds) ---- */
 
@@ -711,6 +740,9 @@ void usb_ui_poll(void) {
         u.by_event = 0;
     }
     if (u.probing && (unsigned)time_now_ms() - u.probe_look_at >= USB_PROBE_LOOK_MS) usb_probe_look();
+    int car = usb_car_poll();
+    if (car == USB_CAR_STORAGE && g_usbdet_value == 1) usb_car_storage();
+    else if (car == USB_CAR_CHARGER) usb_charger_in();
     usb_record_poll();  /* usb_record.c: a cable edge's second line */
     charging_poll();    /* charging.c's plug-in screen and weak charger */
     toast_later_poll(); /* a toast USB or charging left */

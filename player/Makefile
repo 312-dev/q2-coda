@@ -7,7 +7,7 @@ TARGET ?= host
 # patch/peq.h's files' prefix: the Q2's own paths, or under the directory a host test runs the player in
 PEQ_ROOT ?= ""
 STRIP ?= strip
-SRC := main.c ipc.c engine.c source.c stream.c qq.c sacd.c grow.c output.c dsp.c dsd.c stretch.c ../patch/peq.c
+SRC := main.c ipc.c engine.c source.c stream.c qq.c sacd.c grow.c output.c cartrace.c dsp.c dsd.c stretch.c ../patch/peq.c
 OBJ := $(patsubst %.c,$(OUT)/%.o,$(notdir $(SRC)))
 CFLAGS := -std=c11 -D_GNU_SOURCE -O2 -g -Wall -Wextra -Wno-unused-parameter -ffunction-sections -fdata-sections -I$(FFMPEG)/include -I../patch -DPEQ_HOST -DPEQ_ROOT='$(PEQ_ROOT)'
 LIBS := -L$(FFMPEG)/lib -lavformat -lavcodec -lswresample -lavutil $(TLS) -lm -lpthread -ldl
@@ -16,7 +16,7 @@ CFLAGS += -DHAVE_ALSA
 # stock's libasound: linked by file, since the root filesystem has no libasound.so link and no headers
 LIBS += $(ALSA) -Wl,--allow-shlib-undefined -Wl,-Bstatic -latomic -Wl,-Bdynamic
 endif
-# EXTRA_CFLAGS: tools/player.py's build variants (-DQ2_CAR_USB for --dev builds: docs/iphone-mode.md#car-audio)
+# EXTRA_CFLAGS: tools/player.py's build variants (-DQ2_CAR_USB, Car Audio's output, for every image: docs/iphone-mode.md#car-audio)
 CFLAGS += $(EXTRA_CFLAGS)
 
 # FFmpeg's archives too: another configuration (tools/player.py) is another prefix, and must relink

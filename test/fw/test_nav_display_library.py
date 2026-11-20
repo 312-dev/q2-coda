@@ -688,8 +688,8 @@ def test_general_adds_its_rows_and_hides_stock_s_but_network(fw):
     assert fw.calls('window_create')
 
 
-@pytest.mark.parametrize('pick, shown', [(0, 'Ask Every Time'), (1, 'Charge Only'), (2, 'Transfer Files'),
-                                         (3, 'USB Audio')])
+@pytest.mark.parametrize('pick, shown', [(0, 'Automatic'), (1, 'Charge Only'), (2, 'Transfer Files'),
+                                         (3, 'USB Audio'), (5, 'Ask Every Time')])
 def test_general_s_usb_row_shows_the_remembered_choice_and_opens_its_picker(fw, pick, shown):
     """Settings > General > USB, after Storage (usb_ui.c usb_ui_row): Q2POD USBPICK as its value, beside the chevron;
     Centre opens the USB picker (usb_pick_open)."""

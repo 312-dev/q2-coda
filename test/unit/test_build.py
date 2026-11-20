@@ -967,6 +967,16 @@ def test_the_launcher_turns_the_afterburner_on():
     assert b' --aac-afterburner ' in line and b'--keep-alive=5' in line and line.endswith(b'-c AAC')
 
 
+def test_the_launcher_starts_q2_bip_behind_bluealsa():
+    """bluealsa2 with cover art's responder: in the background, on a line of its own, and bluealsa's line as it was,
+    still the script's last and in the foreground, so the script ends when bluealsa does (and q2-bip with it)."""
+    stock = b'bluealsa -c LDAC -c aptX-HD -c aptX -c AAC\n'
+    before = stock.replace(*build.BT_KEEPALIVE).replace(*build.BT_GUEST_SOURCE)
+    assert before.count(build.BT_COVER_START[0]) == 1
+    assert before.replace(*build.BT_COVER_START) == b'q2-bip &\n' + before
+    assert build.BIP == 'usr/bin/q2-bip' and build.BIP_SOURCES == ['q2bip', 'q2bip_core']
+
+
 def test_patch_bluealsa_refuses_sbc_bytes_elsewhere(silence):
     silence['sbc_pool'] += 4
     with pytest.raises(ValueError, match='^SBC bitpool bytes not at BT_SBC_POOL$'):

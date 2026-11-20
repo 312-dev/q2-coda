@@ -14,9 +14,9 @@
  * (docs/oled-design.md#status-row); the animated ones repaint only their own box. */
 #include "navigation.h"
 
-#define SR_FRAME_MS 125 /* the sync arrows: 8 frames a second */
+#define SR_TURN_MS 1000 /* the sync arrows' half turn (the glyph repeats every half turn) */
 #define SR_BAR_LO 3     /* the level bars' heights, lo to SR_INK px (ui_kit.h lvl_h16) */
-#define SR_SPIN 8       /* the arrows' frames, tools/art.py STATUS_SPIN: a half turn a second */
+#define SR_SPIN 30      /* the arrows' frames a half turn, tools/art.py STATUS_SPIN: 30 a second */
 #define SR_BARS_W 10    /* three 2 px bars, 4 px apart; paused, the pause in the same box */
 #define SR_BAR_W 2
 #define SR_BAR_PITCH 4
@@ -32,6 +32,7 @@
 #define SR_CAR_W 19    /* tools/art.py STATUS_CAR_W: car-profile 11 px tall is 18.5 wide */
 #define SR_LOCK 13     /* the padlock's box, tools/art.py STATE_PX */
 #define SR_RING 16     /* the download ring's box: a 14 px ring and its stroke */
+#define SR_SPIN_W 12   /* the turning arrows' box: frame 0's ink, 12 of its SR_GLYPH art's 14 */
 #define SR_RING_R 7.0f /* its centre line's radius */
 #define SR_RING_LINE 1.6f
 #define SR_DOWN 8       /* the arrow inside it */
@@ -67,7 +68,7 @@ static struct {
     int x[SLOT_N], w[SLOT_N]; /* the last layout, in the bar's pixels */
     int spin;                 /* the arrows' frame */
     lvl_clock_t clock;        /* the bars' time along their loop */
-    unsigned timer, sig, nav;
+    unsigned sig, nav;
     anim_t xfade;             /* the play state's dissolve from p_from to p_to */
     short p_from, p_to;       /* 0 the bars, 1000 the pause */
     unsigned char seen;       /* the play slot shown at the last sync */
@@ -132,7 +133,13 @@ static int play_shown(void) {
     return s == 2 || s == 3 ? SR_BARS_W : 0;
 }
 static int wifi_shown(void) { return wifi_level() ? SR_WIFI_W : 0; }
-static int sync_shown(void) { return addon_sync((int *)0) ? SR_RING : 0; }
+/* The sync's box: the ring while it downloads; while it checks, the arrows' upright ink, so the
+ * gaps beside them are SR_GAP of ground as every glyph's; turning, their corners pass up to 1 px
+ * into it (tools/art.py status_turn: 10 to 14 px of ink across the frames). */
+static int sync_shown(void) {
+    int kind = addon_sync((int *)0);
+    return kind == 2 ? SR_RING : kind ? SR_SPIN_W : 0;
+}
 /* The Bluetooth slot (docs/oled-design.md#status-row, P9): what the link is, BT_SLOT_*. Stock's
  * link list's last item is the device it links (status 3 connected, as its rows read it); a link
  * thread running (bt_connectstatus 1) is a device connecting. */
@@ -266,7 +273,7 @@ static void sync_paint(void *bar, void *canvas, int x, int cy) {
     if (addon_sync(&permille) != 2) {
         char stem[24];
         tk_snprintf(stem, sizeof stem, "status_sync_%d", sr.spin % SR_SPIN);
-        glyph(bar, canvas, stem, x, SR_RING, cy, SR_GLYPH);
+        glyph(bar, canvas, stem, x, SR_SPIN_W, cy, SR_GLYPH);
         return;
     }
     void *vg = canvas_get_vgcanvas(canvas);
@@ -507,22 +514,22 @@ void status_touch(unsigned type, int x, int y) {
 
 /* Whether the arrows turn: an app checks. */
 static int moving(void) { return addon_sync((int *)0) == 1; }
-/* Each frame, while lit and the arrows turn: the next one, and only their box repainted
- * (ringnav_paint_bg paints it with the bar's background under it). */
-static int sr_tick(const void *info) {
-    (void)info;
+/* The shared loop's (ui_kit.c motion_loop), MO_LOOP_MS apart while lit and the arrows turn, as the
+ * level bars' frames: their frame the clock's place in SR_TURN_MS, and only their art's box
+ * repainted when it changed, a px either side of the slot's (ringnav_paint_bg paints it with the
+ * bar's background under it); 0 (dropped) once they stop. A report of what the app does, so they
+ * turn under Reduce Motion too. */
+static int sr_spin_frame(void) {
     void *bar = *(void *const *)system_bar;
-    if (!g_backlight_status || !bar || !moving()) {
-        sr.timer = 0;
-        return 0; /* RET_REMOVE */
-    }
+    if (!g_backlight_status || !bar || !moving()) return 0;
     layout();
-    if (sr.w[SLOT_SYNC]) {
-        sr.spin = (sr.spin + 1) % SR_SPIN;
-        rect_t r = { sr.x[SLOT_SYNC], 0, SR_RING, I(bar, W_H) };
+    int spin = (int)((unsigned)time_now_ms() % SR_TURN_MS * SR_SPIN / SR_TURN_MS);
+    if (sr.w[SLOT_SYNC] && spin != sr.spin) {
+        sr.spin = spin;
+        rect_t r = { sr.x[SLOT_SYNC] - (SR_GLYPH - SR_SPIN_W) / 2, 0, SR_GLYPH, I(bar, W_H) };
         widget_invalidate_force(bar, &r);
     }
-    return 8; /* RET_REPEAT */
+    return 1;
 }
 
 /* The play box repainted, when the bar is lit and the slot shows (only that box: the rest of the
@@ -537,7 +544,7 @@ static void play_box_dirty(void) {
  * (MO_DECOR: still under Reduce Motion). Their clock runs only then. */
 static int bars_moving(void) {
     return g_backlight_status && bar_status() == 2 && play_shown() && !anim_running(&sr.xfade) &&
-           motion_ms(SR_FRAME_MS, MO_DECOR);
+           motion_ms(MO_LOOP_MS, MO_DECOR);
 }
 /* The shared loop timer's (ui_kit.c motion_loop), MO_LOOP_MS apart while the bars move: their box
  * repainted at the clock's time; 0 (dropped) once they stop. */
@@ -599,7 +606,7 @@ static int sr_strip_frame(void) {
 
 /* bar_state_sync, each bar paint and each second: the play state's dissolve started on a change,
  * the bars' loop while they move, the strip's marquee while it runs past its room (from rest when
- * it newly does), the arrows' timer while lit and they turn; 1 when what the slots show changed
+ * it newly does), the arrows' loop while lit and they turn; 1 when what the slots show changed
  * (which slots, the play state, Wi-Fi's level or its internet, the sync's kind and its ring to the
  * 50th, the Bluetooth slot's kind and the headset's level, the lock, a server out of reach, the
  * strip scrolling or not), so the bar repaints whole after the frame and, in Home's Split, the
@@ -615,8 +622,7 @@ int status_row_sync(void) {
             sr.marq_at = (unsigned)time_now_ms(), sr.off = 0; /* a new strip starts at rest */
         motion_loop(sr_strip_frame);
     }
-    if (!sr.timer && g_backlight_status && moving())
-        sr.timer = timer_add(sr_tick, (void *)0, SR_FRAME_MS);
+    if (g_backlight_status && moving()) motion_loop(sr_spin_frame);
     int permille = 0, kind = addon_sync(&permille), wifi = wifi_level(),
         head = bt_headset_battery();
     unsigned sig = (unsigned)bar_status() | (unsigned)(wifi && wifi_offline() ? 5 : wifi) << 3 |

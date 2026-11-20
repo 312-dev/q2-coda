@@ -28,8 +28,8 @@ const char *log_ram(const card_log *l) { return l->ring; }
 int guard_load(const struct guard *g) { return g->load; }
 
 /* One step; out: kill_player, flush, power_off. The event. */
-int feed(struct guard *g, unsigned now, int temp, int busy, int cancel, int acked, int saved, int *out) {
-    struct guard_in in = { now, temp, busy, cancel, acked, saved };
+int feed(struct guard *g, unsigned now, int temp, int busy, int cancel, int acked, int saved, int charge, int *out) {
+    struct guard_in in = { now, temp, busy, cancel, acked, saved, charge };
     struct guard_out o;
     guard_step(g, &in, &o);
     out[0] = o.kill_player, out[1] = o.flush, out[2] = o.power_off;
