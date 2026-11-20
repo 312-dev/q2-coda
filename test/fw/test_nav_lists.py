@@ -3044,3 +3044,22 @@ def test_an_ellipsis_never_follows_a_space(fw, width, kept):
 @pytest.mark.parametrize('text, ellipses', [('Short', 1), ('Sex Type Thing (2017 Remaster)', 0)])
 def test_a_text_that_fits_or_has_no_ellipsis_keeps_its_box(fw, text, ellipses):
     assert ellipsis(fw, text, 120, ellipses)[1] == 120
+
+
+def test_a_long_artist_is_cut_as_before_with_a_handful_of_measurements(fw):
+    """docs/internals.md#song-rows-cost: a Songs row's artist cut short to its box kept losing a character and measuring
+    again, once per character (and its font set each time), on every repaint of every row as the wheel scrolls. The cut
+    is the same, the ellipsis in the last place that fits, found by halving: a few measurements, not one a character."""
+    canvas = Canvas(fw)
+    measured = []
+    fw.mock('canvas_measure_text', lambda c, s, n, *_: measured.append(n) or 8.0 * n)  # every character 8 px
+    small_text = fw.fn('song_rows__small_text', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_void_p)
+    row = (C.c_int * 4)(0, 154, 375, 32)
+    text = 'Avenged Sevenfold and the Many Guests of the Long Night'
+    small_text(canvas.at, (C.c_uint * (len(text) + 1))(*map(ord, text), 0), 0, 80, 0, row)
+    (drawn, box, _), = canvas.boxes
+    n = len(text)  # the old loop's answer: from the whole text down, the last character the ellipsis, until it fits
+    while n > 1 and 8 * n > 80:
+        n -= 1
+    assert drawn == text[:n - 1] + '\u2026' and box[2] == 8 * n + 1
+    assert len(measured) <= 8, measured  # 55 characters: one a character was 46 measurements

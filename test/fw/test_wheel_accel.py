@@ -6,7 +6,7 @@ import re
 
 from conftest import ROOT
 
-WA = {k: int(v) for k, v in re.findall(r'^#define (WA_\w+) \(?(-?\d+)', (ROOT / 'patch/wheel_accel.h').read_text(), re.M)}
+WA = {k: int(v) for k, v in re.findall(r'^#define (WA_\w+)\s+\(?(-?\d+)', (ROOT / 'patch/wheel_accel.h').read_text(), re.M)}
 LETTER = WA['WA_LETTER']
 
 
