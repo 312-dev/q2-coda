@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Lists: spinning the wheel fast through a long list (Songs, Albums, Artists, Genres) now jumps a whole letter at a time once you keep it up for about a second, with the letter shown beside the list, as an iPod did; slow down and it moves by rows again.
   - Songs: scrolled down, the list no longer shows a song above the Shuffle row, which made Shuffle look stuck floating over the list; Shuffle stays as the list's fixed header.
   - Logs: Car Remote's own log now gives the time of each line, so what the phone or Android Auto asked for can be lined up with the rest of the Q2's log.
   - Logs: the Q2's log now notes where in a song the player was asked to start (as when a car takes over from headphones and the song is started again), and each pause and play, including one that came with no song open and so did nothing.
