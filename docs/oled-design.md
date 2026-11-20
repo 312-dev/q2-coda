@@ -686,9 +686,10 @@ has no place for keeps a place of its own:
   does not animate, no "Buffering…"; it goes once the song plays on (`np_stream.c`).
 - **A server song's badge** (streaming-v3): at the art's bottom line, from the title's column (x 192, bottom 208), on the
   art's page so a swipe takes it with the heart and More: a 20 px badge with 6 px corners and a 1 px Text Secondary
-  outline, Phosphor's `cloud` (12 px, Text Secondary, regular: the vendored set has no bold cloud) 11 px in and the
-  file's format ("FLAC", Inter Medium 13 px, Text Secondary) 21 px in, 30 px wider than the label. While the app says
-  the server can't be reached (`server=down` in its `.state`) the glyph is `cloud-slash`. A card file has none.
+  outline round the file's format ("FLAC", Inter Medium 13 px, Text Secondary) alone, 9 px in and 9 px past its end:
+  no glyph (the user's, 2026-11-19, "remove cloud icon from FLAC"; it was a cloud, or a crossed-out cloud while the
+  server was out of reach, which the status row's offline glyph and the message below still say). A card file has
+  none.
 - **A server song that can't go on** (streaming-v1 frame 5, as v3 keeps it: art never dimmed): while its app says the
   server can't be reached and the song is the pressed one or one the player waits for, the times row's centre reads
   "Can't reach the server" (Inter 13 px, Text Secondary) in the spinner's place, and the state row is the empty states'

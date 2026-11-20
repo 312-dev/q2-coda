@@ -7,8 +7,8 @@
  * Under OLED only (the status row's set). Nothing dims, no "Buffering…". The spinner reports
  * progress, so it turns under Reduce Motion too (motion_ms, MO_FEEDBACK). A server song (a card
  * app's stream download, or the pressed catalogue row) also has a format badge at the art's bottom
- * line, on the art's page so a swipe takes it with the heart and More: the file's format beside a
- * cloud, or the crossed-out cloud while the app says server=down. A server song that can't go on
+ * line, on the art's page so a swipe takes it with the heart and More: the file's format in a ring,
+ * no glyph (the user's, 2026-11-19). A server song that can't go on
  * while the server is down (pressed and not yet the player's, or one the player waits for) shows
  * "Can't reach the server" in the times row in the spinner's place and Retry (selected) and Skip,
  * the empty states' capsule pair, in the state row's place: Retry (a tap, or Centre at rest) asks
@@ -29,17 +29,14 @@
 #define NB_H 20 /* the badge (np_about.c's quality badge): 20 px high, 6 px corners */
 #define NB_R 6
 #define NB_GAP 18 /* from the art's right edge: the title's column (tools/ipod.py NP_GRID_GAP) */
-#define NB_GLYPH 12
-#define NB_GLYPH_X 11 /* the glyph's centre from the badge's left */
-#define NB_TEXT_X 21  /* the label from the badge's left */
-#define NB_PAD 30     /* the badge's width past its label's */
+#define NB_PAD 9 /* the label from the badge's left, and the ring past its end */
 
 static struct {
     int on, frame;
     unsigned have, total; /* bytes */
     unsigned timer, checked;
     rect_t box;      /* what was painted last, for the next frame's repaint */
-    int badge, down; /* a server song shows its badge; its app says server=down */
+    int badge, down; /* a server song shows its badge; its app says server=down (ns.error's) */
     int error;       /* that song can't go on with its server down: the message, Retry and Skip */
     char id[16];     /* its app */
     char label[8];   /* its format, the file's extension in capitals */
@@ -179,18 +176,13 @@ static int ns_tick(const void *unused) {
 /* The badge on the art's page (its widget's own coordinates): bottom-aligned with the art. */
 static void ns_badge_paint(void *w, void *canvas) {
     void *art = st.np_cover;
-    int light = ipod_light(), px = TYPE(13);
+    int px = TYPE(13);
     int x = I(art, W_X) + I(art, W_W) + NB_GAP, y = I(art, W_Y) + I(art, W_H) - NB_H;
     unsigned ink = tok(TOK_SECONDARY), fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
-    int bw = ui_text(canvas, ns.label, 1, px, ink, 1, x + NB_TEXT_X, y + NB_H / 2, 120, 2) + NB_PAD;
+    int bw = ui_text(canvas, ns.label, 1, px, ink, 1, x + NB_PAD, y + NB_H / 2, 120, 2) + 2 * NB_PAD;
     rect_t r = { x, y, bw, NB_H };
     round_ring(canvas, &r, NB_R, 0xff000000u | ink);
     stock_canvas_set_fill_color(canvas, fill);
-    unsigned bitmap[64]; /* bitmap_t */
-    char name[16];
-    tk_snprintf(name, sizeof name, "np%s_%c", ns.down ? "cloudoff" : "cloud", light ? 'l' : 'd');
-    if (!widget_load_image(w, theme_art(name), bitmap))
-        canvas_draw_icon(canvas, bitmap, x + NB_GLYPH_X, y + NB_H / 2);
 }
 
 void np_stream_paint(void *w, void *canvas) {

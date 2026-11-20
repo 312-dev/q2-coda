@@ -143,22 +143,25 @@ def badge(np, page):
     return [t for t, _ in np.texts], np.loads, np.icons
 
 
-def test_a_server_song_shows_its_format_and_the_cloud_on_the_art_page(fw, mcl, songs, scratch):
+def test_a_server_song_shows_its_format_alone_on_the_art_page(fw, mcl, songs, scratch):
+    """The format badge is its text in a ring, no glyph (the user's, 2026-11-19: "remove cloud icon from FLAC"): the
+    label NB_PAD px in from the badge's left, the ring that far past its end."""
     np = Np(fw, mcl, songs, scratch, status(b'done', 20_000_000), waits=False)
     page = art_page(np, scratch)
     texts, loads, icons = badge(np, page)
-    assert texts == ['FLAC'] and loads == ['oled_npcloud_d']
-    assert icons == [(192 + 11, 150 - 10)]  # the glyph 11 px into the badge, its centre on the badge's
+    assert texts == ['FLAC'] and loads == [] and icons == []
     x, _, _, _ = np.texts[0][1]
-    assert x == 192 + 21  # the label 21 px in
+    assert x == 192 + 9  # the label 9 px in
 
 
-def test_the_cloud_is_crossed_out_while_the_server_cant_be_reached(fw, mcl, songs, scratch):
+def test_the_badge_is_the_same_while_the_server_cant_be_reached(fw, mcl, songs, scratch):
+    """No crossed-out cloud either: a server out of reach is the status row's (offline glyph) and, for a song that
+    can't go on, the times row's message."""
     np = Np(fw, mcl, songs, scratch, status(b'done', 20_000_000), waits=False)
     np.world.files[b'/tmp/q2-subsonic.state'] = b'server=down\n'
     page = art_page(np, scratch)
     texts, loads, _ = badge(np, page)
-    assert texts == ['FLAC'] and loads == ['oled_npcloudoff_d']
+    assert texts == ['FLAC'] and loads == []
 
 
 def test_a_card_file_has_no_badge(fw, mcl, songs, scratch):

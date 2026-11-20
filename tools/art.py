@@ -472,9 +472,6 @@ NP_SPIN_PX = 14
 NP_SPIN_R = (3.25, 6.5)
 NP_SPIN_STROKE = 1.5
 NP_SPIN_INKS = inks('secondary', 'd', 'l')
-# Now Playing's format badge for a server song (np_stream.c, streaming-v3): the cloud, or the crossed-out cloud while
-# the server can't be reached, 12 px in Text Secondary per half, as About's quality badge's glyph (QUALITY_PX)
-NP_CLOUDS = {'cloud': 'cloud', 'cloudoff': 'cloud-slash'}
 # Software Update's offer (sw_update.c sw_offer_paint): its source's glyph, white on the accent's 60 px circle: the
 # internet's download tray, the card's file.
 SW_OFFER_PX = 30
@@ -854,7 +851,6 @@ def images(t):
     out[f'{prefix}_chargebolt'] = phosphor('lightning-fill', CHARGE_BOLT_PX, token('positive'))
     out |= {f'{prefix}_swspin_{k}_{f}': spinner(f, SW_SPIN_SPOKES, SW_SPIN_PX, SW_SPIN_R, SW_SPIN_STROKE, SW_SPIN_FADE, c)
             for k, c in STATE_INKS.items() for f in range(SW_SPIN_SPOKES)}
-    out |= {f'{prefix}_np{n}_{k}': phosphor(g, QUALITY_PX, c) for n, g in NP_CLOUDS.items() for k, c in NP_SPIN_INKS.items()}
     out |= {f'{prefix}_npspin_{k}_{f}': spinner(f, SW_SPIN_SPOKES, NP_SPIN_PX, NP_SPIN_R, NP_SPIN_STROKE, SW_SPIN_FADE, c)
             for k, c in NP_SPIN_INKS.items() for f in range(SW_SPIN_SPOKES)}
     out |= {f'{prefix}_empty_{n}_{k}': phosphor(g, EMPTY_PX, c) for n, g in EMPTY_GLYPHS.items()
