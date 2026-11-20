@@ -44,7 +44,7 @@ static int sb_gone(void *page, void *event) {
 void search_bar_off(void) {
     if (!sb.page) return;
     if (sb.moved) widget_move(sb.moved, I(sb.moved, W_X), sb.y);
-    if (sb.also) widget_move(sb.also, I(sb.also, W_X), sb.also_y);
+    if (sb.also) widget_move(sb.also, I(sb.also, W_X), sb.also_y), st.shuffle_on = sb.also;
     st.touch_mode = 0;
     widget_invalidate_force(sb.page, (void *)0);
     sb.page = sb.surface = sb.moved = sb.also = (void *)0;
@@ -72,6 +72,7 @@ int search_bar_up_with(void *top, void *w, void *also) {
         for (void *p = also; p && p != top; p = P(p, W_PARENT)) ay += I(p, W_Y);
         if (ay < sb.band) sb.band = ay; /* the band above the row too */
         widget_move(also, I(also, W_X), sb.also_y + SB_BAND);
+        st.shuffle_on = (void *)0; /* its lit state hidden while the bar has the wheel */
     }
     st.touch_mode = 1; /* the rows' selection hidden: the bar has the wheel */
     widget_invalidate_force(top, (void *)0);

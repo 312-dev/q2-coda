@@ -213,7 +213,7 @@ static int st_update(void *ctx, void *event) {
 /* library_scan's, on stock's scan thread, as a whole scan ends unstopped: its time, written whole. */
 void storage_scanned(void) {
     char b[24];
-    int n = tk_snprintf(b, sizeof b, "%lld", wall_time());
+    int n = tk_snprintf(b, sizeof b, "%u", (unsigned)wall_time()); /* 32 bits to 2106 */
     if (!blob_io(ST_SCANNED, ST_SCANNED ".tmp", b, (unsigned)n, 1)) unlink(ST_SCANNED ".tmp");
 }
 /* The saved time, 0 for none. */
