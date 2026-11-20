@@ -1391,7 +1391,7 @@ def song(recs, n, **kw):
                 artist=kw.pop('artist', 'The Beatles'), **kw)
 
 
-PLAYING_ROWS = ['Play Next', 'Play Last', 'View Queue', 'Add to Favorites', 'Add to Playlist', 'Go to Album',
+PLAYING_ROWS = ['Play Next', 'Play Last', 'View Queue', 'Favorite', 'Add to Playlist', 'Go to Album',
                 'Go to Artist', 'Shuffle', 'Repeat', 'Group by']
 
 
@@ -1420,7 +1420,7 @@ def test_a_favourite_reads_unfavorite(hold, recs, ui, st):
     hold.fw.mock('checkFavExist', lambda *_: 1)
     hold.hold()
     rows = hold.menu()
-    assert 'Unfavorite' in rows and 'Add to Favorites' not in rows
+    assert 'Unfavorite' in rows and 'Favorite' not in rows
     assert not [r for r in rows if r.startswith('Rate')]
 
 
@@ -1433,7 +1433,7 @@ def test_a_favourites_row_shows_the_filled_heart(hold, recs, ui, st, fav, icon):
     hold.hold()
     hold.menu()
     icons = {ui.label(item): ui.nodes[item].props.get('_mm_icon') for item in ui.kids(hold.view())}
-    row = [r for r in icons if r in ('Favorite', 'Add to Favorites', 'Unfavorite')]
+    row = [r for r in icons if r in ('Favorite', 'Unfavorite')]
     assert len(row) == 1 and icons[row[0]] == icon and (row[0] == 'Unfavorite') == bool(fav), icons
 
 
@@ -1480,7 +1480,7 @@ def test_add_to_favourites_tags_the_playing_song_alone(hold, recs, ui, st):
     hold.now_playing([song(recs, i) for i in range(3)])
     hold.hold()
     hold.menu()
-    hold.pick('Add to Favorites')
+    hold.pick('Favorite')
     assert hold.dialog not in ui.stack
     assert [a[0] for _, a in hold.fw.calls('batch_init_selectrecord')] == [3]
     assert [a[0] for _, a in hold.fw.calls('batch_set_selectitem')] == [1]
@@ -1498,7 +1498,7 @@ def test_remove_from_favourites_untags_the_song(hold, recs, ui, fw):
     assert [a[0] for _, a in fw.calls('deleteMusicFromFav')] == [songs[1]] and fw.var('g_delete_flag', C.c_ubyte).value == 0
 
 
-@pytest.mark.parametrize('row, state', [('Add to Favorites', b'1'), ('Unfavorite', b'0')])
+@pytest.mark.parametrize('row, state', [('Favorite', b'1'), ('Unfavorite', b'0')])
 def test_a_favourite_from_the_menu_is_told_to_the_song_s_card_app(hold, recs, fw, row, state):
     """A song in a card app's favdir (q2-jellyfin's synced Jellyfin): the row's My Fav change goes to its fav.log."""
     hold.now_playing([recs(path=f'/mnt/mmc/Jellyfin/{i}.flac', title=f'Song {i}') for i in range(3)])
@@ -1551,7 +1551,7 @@ def test_oled_says_what_an_in_place_action_did(hold, recs, ui, st, row, said):
 
 
 # OLED's inset modal names the rows in US English, as its toasts do
-@pytest.mark.parametrize('row, said', [('Add to Favorites', 'Added to Favorites'),
+@pytest.mark.parametrize('row, said', [('Favorite', 'Added to Favorites'),
                                        ('Unfavorite', 'Removed from Favorites')])
 def test_oled_says_a_favourite_was_kept(hold, recs, ui, fw, st, row, said):
     use_set(st)
@@ -2009,7 +2009,7 @@ def test_oled_draws_the_menu_as_the_sheet(fw, ui, st, recs, mcl):
     assert ui.nodes[head].name == '_mm_head' and tuple(ui.nodes[head].rect()) == (0, 0, 375, 72)
     assert ui.nodes[ui.items(hold.view())[0]].rect()[1] == 72
     assert all(tuple(ui.nodes[item].rect()[2:]) == (375, 32) for item in ui.items(hold.view()))
-    assert rows[:4] == ['Play Next', 'Play Last', 'View Queue', 'Add to Favorites'] and 'Group by' in rows
+    assert rows[:4] == ['Play Next', 'Play Last', 'View Queue', 'Favorite'] and 'Group by' in rows
     assert ui.prop(hold.view(), '_ringnav_index', -1) == 0
 
 
@@ -2125,7 +2125,7 @@ def test_an_album_rows_menu_shuffles_and_goes_to_its_artist(hold, recs, ui):
     albums = [recs(album=a, artist='The Beatles', kind=4, id_=i + 1) for i, a in enumerate(('Help!', 'Revolver'))]
     hold.songs_page('localclass_page', albums, sel=1, cls=0xf003)
     hold.hold()
-    assert hold.menu() == ['Play Next', 'Play Last', 'Shuffle', 'Add to Favorites', 'Add to Playlist', 'Go to Artist']
+    assert hold.menu() == ['Play Next', 'Play Last', 'Shuffle', 'Favorite', 'Add to Playlist', 'Go to Artist']
     assert hold.title() == 'Revolver'
 
 
@@ -2134,7 +2134,7 @@ def test_an_albums_favourite_is_kept_for_its_next_menu(hold, recs, ui):
     hold.songs_page('localclass_page', albums, sel=1, cls=0xf003)
     hold.hold()
     hold.menu()
-    hold.pick('Add to Favorites')
+    hold.pick('Favorite')
     assert not ui.toasts and '/mnt/data/ringnav-album-ratings' in hold.card.files
     hold.hold()
     rows = hold.menu()
@@ -2237,7 +2237,7 @@ def test_a_run_after_the_menu_closed_does_nothing(hold, recs, ui, fw):
     hold.now_playing([song(recs, i) for i in range(3)])
     hold.hold()
     hold.menu()
-    ui.click(ui.find(hold.view(), 'Add to Favorites'))
+    ui.click(ui.find(hold.view(), 'Favorite'))
     ui.key(hold.dialog, KEY_RETURN)
     ui.due('qm_run')
     assert not fw.calls('batch_add_file')
@@ -2247,7 +2247,7 @@ def test_a_second_click_before_the_run_is_dropped(hold, recs, ui, fw):
     hold.now_playing([song(recs, i) for i in range(3)])
     hold.hold()
     hold.menu()
-    ui.click(ui.find(hold.view(), 'Add to Favorites'))
+    ui.click(ui.find(hold.view(), 'Favorite'))
     ui.click(ui.find(hold.view(), 'View Queue'))
     ui.due('qm_run')
     assert [a[1] for _, a in fw.calls('batch_add_file')] == [0xf00a] and 'playerqueue_page' not in ui.went
@@ -3235,10 +3235,10 @@ def test_song_order_takes_the_sort_pickers_order_on_the_title_order(fw, st, recs
 
 
 @pytest.mark.parametrize('where, row, hearts', [('library', 'Favorite', 1), ('library', 'Unfavorite', 0),
-                                                ('playing', 'Add to Favorites', 1), ('playing', 'Unfavorite', 0)])
+                                                ('playing', 'Favorite', 1), ('playing', 'Unfavorite', 0)])
 def test_a_favourite_from_the_menu_on_a_server_song_goes_to_its_server(fw, ui, st, recs, mcl, tmp_path, row, hearts,
                                                                        where):
-    """Add to Favorites and Unfavorite on a server song, its Library row or its Stream Cache copy on Now Playing,
+    """Favorite and Unfavorite on a server song, its Library row or its Stream Cache copy on Now Playing,
     write the song's ratings.out line as Now Playing's heart does: the row's key and sid, like=1 or like=0, its
     kept stars left as they were. Remove on the copy takes the row out of My Fav too, where a star from the server
     put it."""

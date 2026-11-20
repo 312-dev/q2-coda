@@ -232,7 +232,7 @@ passed()
 # A Library song's menu sheet (hold_menu.c's own song; On-The-Go is on in these machines), and the
 # song rows Now Playing's own menu keeps around its View Queue and settings.
 SONG_MENU=['Play Next','Play Last','Add to On-The-Go','Add to Playlist…','Favorite','Go to Album','Go to Artist']
-NP_SONG=['Play Next','Play Last','Add to Favorites','Add to Playlist','Go to Album','Go to Artist']
+NP_SONG=['Play Next','Play Last','Favorite','Add to Playlist','Go to Album','Go to Artist']
 # Now Playing targets the queue even when the last browsed list has unrelated rows.
 def playing_menu(**kw):
     m=QueueMachine(page='playing_page',pos=1,**kw)
@@ -685,7 +685,7 @@ for kw,setup,want in (({},None,('Row 0',SONG_MENU)),
         ({},lambda m:m.open_pages.update({'artistinfo_page','playerjumpinfo_page'}),('Row 0',SONG_MENU[:5])),
         ({'cls':0xff10,'page':'album_page'},None,('Row 0',[*SONG_MENU[:5],'Go to Artist'])),
         ({},lambda m:m.word(m.row(0)+O['REC_ALBUM'],0),('Row 0',[*SONG_MENU[:5],'Go to Artist'])),
-        ({'cls':0xf003,'page':'album_page'},None,('Album',[*GROUP[:3],'Add to Favorites',GROUP[3],'Go to Artist'])),
+        ({'cls':0xf003,'page':'album_page'},None,('Album',[*GROUP[:3],'Favorite',GROUP[3],'Go to Artist'])),
         ({'cls':0xff01,'page':'album_page'},None,('Album',GROUP)),
         # An artist's tabs set classinfo +0, not g_class_type: Albums first, then Songs after an album.
         ({'cls':0xff07,'page':'artistinfo_page'},lambda m:m.word(syms['g_local_classinfo_save'],0xff01),('Album',GROUP)),

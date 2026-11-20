@@ -40,11 +40,11 @@ def light_half(machine,light,**kw):  # LIGHT stored before the constructor reads
     try: fm=machine(**kw)
     finally: SETUP.clear()
     fm.mock('strstr@GLIBC_2.0'); return fm
-# An album's menu has no Rate Album (the rating page is the one place to rate); its Add to Favorites likes it, the
+# An album's menu has no Rate Album (the rating page is the one place to rate); its Favorite likes it, the
 # album's own table keeping 5 and no song's stars touched, in either Light Mode half.
 for light in '01':
     fm=light_half(AlbumRateMachine,light); fm.open(); fm.word(fm.slide+O['SLIDE_INDEX'],1); a1=fm.aid(fm.albums[1])
-    assert hold_pick(fm,3) is None and fm.kept()==[(a1&~7)|5] and '/mnt/data/ringnav-ratings' not in fm.files  # Add to Favorites
+    assert hold_pick(fm,3) is None and fm.kept()==[(a1&~7)|5] and '/mnt/data/ringnav-ratings' not in fm.files  # Favorite
     fm=light_half(AlbumRateMachine,light); fm.open(); fm.word(fm.slide+O['SLIDE_INDEX'],1)
     assert hold_pick(fm,0)=='Playing Next' and fm.top==fm.page and fm.query[:1]==('getMusicByAlbum',); passed()  # Play Next finds the cover's album
 # A Play/Pause hold with no menu: stock has none, so its release plays or pauses.
@@ -53,12 +53,12 @@ def bare_hold(m,row=None):
     m.t=7001; m.press(m.t); return m.hold(),m.release()
 assert bare_hold(QueueMachine(page='sysset_page'))==(0,1); passed()
 assert bare_hold(QueueMachine(page='folder_page'),0)==(0,1); passed()  # a row no menu holds, as a playlist file in Folder
-# Add to Favorites, then Unfavorite: 5 hearts, then none; the other covers stay unrated.
+# Favorite, then Unfavorite: 5 hearts, then none; the other covers stay unrated.
 def fav_calls(m,name): return [c for c in m.calls if c[0]==name]
 assert m.run(3) is None and m.kept()==[(a1&~7)|5] and [c[2] for c in fav_calls(m,'batch_add_file')]==[0xf00a] and not fav_calls(m,'deleteMusicFromFav')
 assert m.menu()[3]=='Unfavorite'
 assert m.run(3) is None and m.kept()==[] and fav_calls(m,'deleteMusicFromFav') and not fav_calls(m,'batch_add_file')
-m.word(m.slide+O['SLIDE_INDEX'],0); assert m.menu()[3]=='Add to Favorites'
+m.word(m.slide+O['SLIDE_INDEX'],0); assert m.menu()[3]=='Favorite'
 m.word(m.slide+O['SLIDE_INDEX'],1); passed()
 # Kept across boots, apart from the songs' table.
 assert m.run(3) is None
@@ -69,11 +69,11 @@ full=b''.join(struct.pack('<I',(i+1)<<3|1) for i in range(O['RATE_SLOTS']))
 m=AlbumRateMachine(files={ALBUM_RATES:full}); m.open(); m.word(m.slide+O['SLIDE_INDEX'],1)
 assert m.run(3)=='Ratings are full' and m.files[ALBUM_RATES]==full; passed()
 m=AlbumRateMachine(); m.open(); m.word(m.slide+O['SLIDE_INDEX'],1); m.fail_write=True
-assert m.run(3)=='Rating not saved' and m.menu()[3]=='Add to Favorites' and ALBUM_RATES not in m.files; passed()
+assert m.run(3)=='Rating not saved' and m.menu()[3]=='Favorite' and ALBUM_RATES not in m.files; passed()
 # A malformed slot (6 or 7) reads as none; a truncated file reads empty.
 for data in (struct.pack('<I',(a1&~7)|7).ljust(4*O['RATE_SLOTS'],b'\0'),b'\x05\0'):
     m=AlbumRateMachine(files={ALBUM_RATES:data}); m.open(); m.word(m.slide+O['SLIDE_INDEX'],1)
-    assert m.menu()[3]=='Add to Favorites'; passed()
+    assert m.menu()[3]=='Favorite'; passed()
 # An album is album_cmp's: its name and album artist, else its folder (disc folders as one), ASCII case aside but
 # the folder's; the song artist never counts, so a compilation is one album. The Unknown card is one album.
 def rec(album='Album',aa=None,path='/m/A/1.mp3',artist='Artist',rid=1):

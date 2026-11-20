@@ -381,7 +381,7 @@ static int qm_open(const void *unused) {
     }
     if (held && qm_held.extra) acts[n++] = QA_REMOVE; /* destructive, last */
     static const char *const rows[] = {
-        "Play Next",       "Play Last",   "Shuffle",        "Add to Favorites", "Unfavorite",
+        "Play Next",       "Play Last",   "Shuffle",        "Favorite",         "Unfavorite",
         "Add to Playlist", "Go to Album", "Go to Artist",   "Shuffle",          "Repeat",
         "Group by",        "Next Album",  "Previous Album", "Resume",           "View Queue",
         "Go to Folder",    "Chapters",    "More…",          "Add to On-The-Go", "Play",
@@ -426,9 +426,7 @@ static int qm_open(const void *unused) {
                                     : acts[i] == QA_PREV_GROUP && playback_option(2)
                                         ? "Previous Folder"
                                     /* the menu sheet writes US English */
-                                    : acts[i] == QA_FAV && own      ? "Favorite"
                                     : acts[i] == QA_PLAYLIST && own ? "Add to Playlist\xe2\x80\xa6"
-                                    : acts[i] == QA_FAV             ? "Add to Favorites"
                                     : acts[i] == QA_REMOVE          ? qm_held.extra
                                     : acts[i] == QA_OFFLINE         ? offl
                                                                     : rows[acts[i] - 1]);

@@ -487,7 +487,7 @@ apart from each other, for server rows and for synced card files alike, whenever
   heart away takes the row out (stock's toggle would put the copy in instead).
 - **From the queue menu:** Favorite and Unfavorite on a song send a like line as Now Playing's
   heart does, its stars left alone, for a Library row and for the playing copy alike; Remove on a copy
-  takes its row out of My Fav too. An album's Add to Favorites sends a like line for each of its songs.
+  takes its row out of My Fav too. An album's Favorite sends a like line for each of its songs.
 - **Out:** each change on the Q2 is appended to `/mnt/mmc/.<id>/ratings.out` as one line
   (`<listen_key>\t<sid or empty>\t<value>\t<unix time>`), `<value>` being `stars=N` (0 to 5) or `like=1`
   or `like=0`; the app sends it when the server answers and removes the lines it sent. Offline changes wait

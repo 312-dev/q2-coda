@@ -3,6 +3,7 @@
 - **Unreleased (q2-coda)**:
   - Battery: plugging in or unplugging the cable no longer shows "No Temperature Sensor" for a few seconds. Charging warms the power chip's temperature reading by a few degrees at once, which was taken for a broken sensor.
   - Bluetooth: switching Bluetooth off while it is playing to a headset or car no longer leaves a background process using a whole processor core (and battery) until the Q2 restarts.
+  - Menus: an album's hold menu and Now Playing's say **Favorite**, as a song's does, where they said "Add to Favorites".
   - Menus (OLED): holding Play/Pause on a favorite song, album or cover (and Now Playing's ⋯) now offers **Unfavorite** with a filled pink-red heart (white while the row is selected), in place of "Remove from Favorites" and its broken heart.
   - Status bar: the turning sync arrows (while an app such as Subsonic checks its server) are white and turn smoothly at 30 frames a second, at the same speed; they were gray and stepped 8 times a second.
   - Menus (OLED): the frosted sheet a hold menu opens on is smooth, without the fine speckled grain it had.
