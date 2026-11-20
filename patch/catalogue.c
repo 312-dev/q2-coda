@@ -2096,13 +2096,15 @@ int catalogue_playlist_cover(int list, char *url) {
  * its app's playlists.out, which the app sends on to the server and then empties: "set PID SID..."
  * (its songs in their own order, after an add or a removal; a song with no server id, a card file
  * the server doesn't have, is left out), "name PID NAME" after a Rename, "delete PID" after a
- * Delete. A local playlist, or no signed-in app's rows indexed, writes nothing. On the UI thread: a lookup
- * of the playlist and one read of its songs' ids through stock's connection, with cat attached. */
+ * Delete. A local playlist, or no signed-in app's rows indexed, writes nothing. On the UI thread: a
+ * lookup of the playlist and one read of its songs' ids through stock's connection, with cat
+ * attached. */
 void catalogue_playlist_sync(int list, int what, const char *name) {
     void *db = 0, *f = 0;
     pls_t p = { "", "" };
     char sql[600], file[64];
-    if (!catalogue_has() || list < 0 || list >= 100 || stock_db_open("/mnt/data/database.db", &db)) goto done;
+    if (!catalogue_has() || list < 0 || list >= 100 || stock_db_open("/mnt/data/database.db", &db))
+        goto done;
     tk_snprintf(sql, sizeof sql, "select app,pid from cat.serverlists where list=%d", list);
     if (sqlite3_exec(db, sql, pls_one, &p, 0) || !p.app[0] || strstr(p.app, "/")) goto done;
     tk_snprintf(file, sizeof file, "/mnt/mmc/.%s/playlists.out", p.app);
