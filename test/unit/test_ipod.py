@@ -98,8 +98,8 @@ def test_ipod_home():
     assert root[3][2][2]['visible'] == 'false' and 'visible' not in root[3][1][2]
     rows = root[3][1][3][0][3]
     assert [r[2]['name'] for r in rows] == ['btn_' + r for r in ipod.HOME_ROWS]
-    assert [r[3][0][2].get('text') for r in rows] == [None, 'Library', 'Radio Tuner', 'Games', 'Folders', 'Cover Flow', 'Search',
-                                                     'Settings']  # 2026-11-19: Games, not Streaming; 2026-11-20: Radio Tuner
+    assert [r[3][0][2].get('text') for r in rows] == [None, 'Library', 'Radio', 'Games', 'Folders', 'Cover Flow', 'Search',
+                                                     'Settings']  # 2026-11-19: Games, not Streaming; 2026-11-20: Radio
     assert [r[3][1][2]['name'] for r in rows][2:7] == ['img_radio', 'img_games', 'img_folder', 'img_cover_flow', 'img_home_search']
     sets = root[3][2][3][0][3]
     assert [r[2]['name'] for r in sets] == ['btn_set_wifi', 'btn_set_bt', 'btn_sysset', 'btn_playset', 'btn_set_stream',

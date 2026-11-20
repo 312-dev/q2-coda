@@ -437,7 +437,7 @@ static int radio(int argc, char **argv) {
     return 0;
 }
 
-/* -t DEVICE [VOLUME]: the Radio Tuner's sound (radio_tuner.c, docs/internals.md#radio-tuner-static). One
+/* -t DEVICE [VOLUME]: Radio's sound (radio_tuner.c, docs/internals.md#radio-static). One
  * process for the tuner's whole stay: the FM receiver (fmrx.c) runs continuously on ALSA DEVICE, hiss between
  * stations, and a station's stream, when demo names one, is its programme: ffmpeg decodes the URL to 48 kHz
  * stereo into a TUNER_RING ring, which the receiver plays from once TUNER_PRIME of it is in. A ring that runs

@@ -76,7 +76,7 @@ enum { LR_LIBRARY, LR_HOME };
 const char lr_default[] = "hspalgerfncmqiLPAvUu";
 _Static_assert(sizeof lr_default <= LR_ROWS, "a row per letter");
 /* Home's main list's rows (tools/ipod.py HOME_ROWS) in their default order, each its letter in
- * LR_HOME_FILE, by its row's name: Now Playing, Library, Radio Tuner, Games, Folders, Cover Flow,
+ * LR_HOME_FILE, by its row's name: Now Playing, Library, Radio, Games, Folders, Cover Flow,
  * Search, Settings. The same rule: a new row takes a new letter. s named Streaming, which Settings
  * has since 2026-11-19: a saved order holding it loads without it, and a new row (Games, then Radio
  * Tuner, t) goes in after the row before it in this order (lr_resolve), so an older order keeps its

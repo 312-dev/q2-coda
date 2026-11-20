@@ -1,4 +1,4 @@
-/* The Radio Tuner's FM receiver (docs/internals.md#radio-tuner-static): a station's programme as an
+/* Radio's FM receiver (docs/internals.md#radio-static): a station's programme as an
  * FM receiver would hear it at a given carrier-to-noise ratio and tuning offset, with the hiss, the
  * soft mute, the stereo blend, multipath flutter and the next channel's splatter of a real one. The
  * reference is the approved prototype's fmRxWorklet (its spec: static-model.md, 2026-11-20); this

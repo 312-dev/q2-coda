@@ -5,7 +5,7 @@
  *                [--data DIR] [--ca FILE] [--out FILE] [-v]
  *
  * prints the list (radiofetch_core.c rf_text) on stdout, or with --out writes it to FILE whole
- * (beside it, then renamed), as the Radio Tuner reads it (radio_tuner.c). The place: the network's
+ * (beside it, then renamed), as Radio reads it (radio_tuner.c). The place: the network's
  * public address, raced over three geolocation services (--ip, the default), a ZIP looked up in the
  * bundled Census table, or a point. The stations come from the bundled FCC table, offline; only
  * their streams come from the web, on one libcurl multi handle under one deadline: iHeart's

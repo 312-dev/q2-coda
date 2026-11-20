@@ -1,4 +1,4 @@
-"""radio_tuner.c (docs/internals.md#radio-tuner): Home's Radio Tuner. The list from q2radiofetch read, the dial's keys
+"""radio_tuner.c (docs/internals.md#radio-home): Home's Radio. The list from q2radiofetch read, the dial's keys
 and what the receiver (q2video -t) is told for each: the needle's carrier, level, offset and fade, the stream started
 only once the dial lands, kept warm when it leaves, stopped on pause; seeking past stations with no stream; the
 stations list, the ZIP entry and the fetch they start; the StreamTitle as the tuner shows it."""

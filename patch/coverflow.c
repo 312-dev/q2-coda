@@ -3926,7 +3926,7 @@ extern void home_overflow(void *list, int bottom), home_pad(void *view),
     home_fades(void *canvas, void *list, int list_y, int cols, int split, int shift);
 extern int library_search_open(void *ctx, void *event);
 extern int games_open(void *ctx, void *event); /* games.c: Home's Games row */
-extern int tuner_open(void *ctx, void *event); /* radio_tuner.c: Home's Radio Tuner row */
+extern int tuner_open(void *ctx, void *event); /* radio_tuner.c: Home's Radio row */
 /* library_edit.c: Home's rows in the user's order and Edit Home; home.c: Folders' rule */
 extern void lr_home_tag(void *view), lr_home_apply(void *view, int np),
     lr_edit_labels(void *view, int on);

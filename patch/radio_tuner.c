@@ -1,4 +1,4 @@
-/* Radio Tuner (docs/internals.md#radio-tuner, docs/oled-design.md#radio-tuner): Home's row under
+/* Radio (docs/internals.md#radio-home, docs/oled-design.md#radio): Home's row under
  * the Library. The stations that reach the place, from q2radiofetch (radiofetch.c), laid out at
  * their real frequencies on an FM dial under a fixed needle; the wheel tunes in 0.2 MHz steps, the
  * needle glides to the step, and the sound is q2video -t's FM receiver (video.c, fmrx.c): hiss
@@ -245,7 +245,7 @@ static int list_read(void) {
 static void title(void) {
     const char *t = rt->screen == LIST  ? rt->place
                     : rt->screen == ZIP ? "Change Location"
-                                        : "Radio Tuner";
+                                        : "Radio";
     if (!rt->title) return;
     widget_set_text_utf8(rt->title, t);
     bar_title_sync(rt->page);
@@ -828,7 +828,7 @@ static int closed(void *ctx, void *event) {
     return 0;
 }
 
-/* Home's Radio Tuner row: the page, the receiver started (whatever else held the output stopped),
+/* Home's Radio row: the page, the receiver started (whatever else held the output stopped),
  * and the stations for the chosen ZIP or the network's place looked up. */
 int tuner_open(void *ctx, void *event) {
     if (rt || !(rt = calloc(1, sizeof *rt))) return 0;
@@ -841,7 +841,7 @@ int tuner_open(void *ctx, void *event) {
     rt->y0 = bar_foot(page);
     rt->sheet = widget_factory_create_widget(widget_factory(), "view", page, 0, rt->y0, 375,
                                              page_room(page));
-    rt->title = page_title(page, "Radio Tuner", 1);
+    rt->title = page_title(page, "Radio", 1);
     widget_on(rt->sheet, EVT_POINTER_DOWN, touch, 0);
     widget_on(page, EVT_POINTER_MOVE_BEFORE, touch, 0);
     widget_on(page, EVT_POINTER_UP_BEFORE, touch, 0);

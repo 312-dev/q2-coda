@@ -322,7 +322,7 @@ extern int spot_media(unsigned key), spot_key(void *top, unsigned key),
     spot_open(void *ctx, void *event), spot_hold(void *top);
 extern int radio_media(unsigned key), radio_open(void *ctx, void *event);
 extern int games_key(void *top, unsigned key), games_open(void *ctx, void *event);
-/* radio_tuner.c: Home's Radio Tuner (docs/internals.md#radio-tuner) */
+/* radio_tuner.c: Home's Radio (docs/internals.md#radio-home) */
 int tuner_open(void *ctx, void *event), tuner_key(void *top, unsigned key);
 void tuner_paint(void *w, void *canvas), tuner_poll(void);
 void tuner_title(const char *in, char *out, unsigned cap);

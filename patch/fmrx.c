@@ -1,4 +1,4 @@
-/* The Radio Tuner's FM receiver model (fmrx.h, docs/internals.md#radio-tuner-static), per sample:
+/* Radio's FM receiver model (fmrx.h, docs/internals.md#radio-static), per sample:
  * the transmitter's pre-emphasis and limiter, the IF filter's amplitude at the instantaneous
  * frequency, the carrier's phasor plus complex noise plus a wandering co-channel ghost at 19 kHz,
  * the discriminator and its S-curve, de-emphasis, a 30 Hz DC block, the 15 kHz lowpass, the stereo

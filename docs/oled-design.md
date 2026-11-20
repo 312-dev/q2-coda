@@ -1811,11 +1811,11 @@ Settings > Car Remote (approved 2026-11-16, `design/carremote-page`, `mock_carre
 - **Pairing:** the code's Dialog over whatever shows, then the icon toast "Pixel 10 Pro paired" (Positive
   `check-circle`). ponytail: the card form with the 120 s countdown on Cancel's row is the shared pairing card's, not on
   this branch yet.
-### Radio Tuner
+### Radio
 
-Home's Radio Tuner ([internals](internals.md#radio-tuner), `patch/radio_tuner.c`), as the approved prototype
+Home's Radio ([internals](internals.md#radio-home), `patch/radio_tuner.c`), as the approved prototype
 (`~/q2-emu/design/radio-tuner/index.html`, device shots in `~/q2-emu/design/radio-tuner/device-shots/`,
-2026-11-20). The status row names the page "Radio Tuner" on the tuner, loading and error screens, "Near <city>" on
+2026-11-20). The status row names the page "Radio" on the tuner, loading and error screens, "Near <city>" on
 the stations list and "Change Location" on the ZIP entry.
 
 - **Tuner:** the frequency in Inter Medium 64 (the one size past the type steps, as the plug-in screen's 30 is),
