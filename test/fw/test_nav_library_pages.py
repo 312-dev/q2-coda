@@ -2110,19 +2110,19 @@ def boot(fw, st):
 def test_the_library_s_rows_in_their_order(fw, ui, st):
     boot(fw, st)
     win, view = library(fw, ui)
-    # the menu review's order (2026-11-15), Search there (home.c ringnav_localmusic);
+    # the menu review's order (2026-11-15, home.c ringnav_localmusic), with no Search or Games since 2026-11-19;
     # My Fav and Frequent hidden, kept in the page for stock's index: Ratings and Most Played list theirs; Shuffle,
-    # Hi-Res and Long Songs hidden too, in their places
-    hidden = ('Shuffle', 'My Fav', 'Frequent', 'Hi-Res', 'Long Songs')
+    # Hi-Res and Long Songs hidden too, in their places; Update Local Music kept hidden, Storage's now
+    hidden = ('Shuffle', 'My Fav', 'Frequent', 'Hi-Res', 'Long Songs', 'Update Local Music')
     assert page_rows(ui, view) == [(c, c not in hidden) for c in ['Shuffle', 'All Songs', 'Playlist', 'Artist', 'Album',
-        'Search', 'Genre', 'Years', 'Ratings', 'My Fav', 'Recently Added', 'Recent', 'Most Played', 'Frequent', 'Hi-Res',
-        'Long Songs', 'Games', 'Update Local Music']]
+        'Genre', 'Years', 'Ratings', 'My Fav', 'Recently Added', 'Recent', 'Most Played', 'Frequent', 'Hi-Res',
+        'Long Songs', 'Update Local Music']]
 
 
 def test_the_library_adds_the_card_s_media_folders_and_upload(fw, ui):
     win, view = library(fw, ui, folders=['/mnt/mmc/podcasts', '/mnt/mmc/VIDEOS', '/mnt/mmc/Music'], token=b'x')
     rows = [c for c, _ in page_rows(ui, view)]
-    assert rows[rows.index('Long Songs'):] == ['Long Songs', 'Podcasts', 'Videos', 'Games', 'Upload Scrobbles',
+    assert rows[rows.index('Long Songs'):] == ['Long Songs', 'Podcasts', 'Videos', 'Upload Scrobbles',
                                                'Update Local Music']
 
 
@@ -2143,17 +2143,16 @@ def test_a_library_that_is_not_stock_s_is_left(fw, ui):
     assert [c for c, _ in page_rows(ui, view)] == LIBRARY_STOCK + ['more']
 
 
-def test_the_library_leads_with_search_and_drops_its_icons(fw, ui, st):
+def test_the_library_has_no_search_or_games_row_and_drops_its_icons(fw, ui, st):
+    """2026-11-19: each list page has its own search bar (search_bar.c) and Home has Games and its one Search."""
     boot(fw, st)
     win, view = library(fw, ui)
-    assert ('Search', True) in page_rows(ui, view) and ('Shuffle', False) in page_rows(ui, view)
+    names = [c for c, _ in page_rows(ui, view)]
+    assert 'Search' not in names and 'Games' not in names and ('Shuffle', False) in page_rows(ui, view)
     images = [w for item in ui.kids[view] for w in ui.subtree(item) if ui.kind[w] == 'image_create']
     icons = [w for w in images if ui.image[w] != 'list_into']
     assert icons and all(w in ui.hidden for w in icons)
     assert not [w for w in images if ui.image[w] == 'list_into' and w in ui.hidden]  # the chevrons stay
-    search, = [ui.kids[item][0] for item in ui.kids[view] if row_text(ui, item) == 'Search']
-    # search_strip.c's opener
-    assert [fn for w, e, fn, _ in ui.handlers if w == search and e == EVT_CLICK] == [C.cast(fw.lib.library_search_open, C.c_void_p).value]
 
 
 @in_fork

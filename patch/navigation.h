@@ -1160,6 +1160,7 @@ void coda_rc_note(const char *text); /* a toast, for the car (NowPlaying.notice)
 /* carremote_page.c: Settings > Car Remote, its phone page and Pair a Phone */
 int carremote_open(void *ctx, void *event);
 const char *day_or_date(char *out, unsigned n, unsigned when); /* Today, Yesterday, Nov 12 */
+const char *when_said(char *out, unsigned n, unsigned when); /* today, 18:11; yesterday, ...; Nov 12 */
 void carremote_poll(void), carremote_paired(const char *name),
     carremote_paint(void *w, void *canvas);
 /* song_radio.c: Now Playing's Radio (docs/internals.md#radio) */

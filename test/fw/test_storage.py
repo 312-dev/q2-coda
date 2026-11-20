@@ -160,9 +160,9 @@ def rows(st, fw):
 def test_the_page_shows_the_card_s_use_from_statfs_and_the_app_s_file(fw):
     st = Storage(fw)
     st.open()
-    assert st.captions == ['Your Music', 'Downloads', 'Stream Cache', 'Free']
+    assert st.captions == ['Your Music', 'Downloads', 'Stream Cache', 'Free', 'Update Library']
     # 64.0 GB of the card, 25.6 GB free; Your Music is the used less the app's 8.2 GB and 1.6 GB
-    assert rows(st, fw) == [['28.6 GB'], ['8.2 GB'], ['1.6 GB'], ['25.6 GB']]
+    assert rows(st, fw) == [['28.6 GB'], ['8.2 GB'], ['1.6 GB'], ['25.6 GB'], []]
     head, foot = st.views
     assert st.paint(head) == ['38.4 GB of 64 GB used']
     assert st.paint(foot) == ['Your Music is never changed by Sync.', 'Downloads stay under the limit you set.']
@@ -171,7 +171,7 @@ def test_the_page_shows_the_card_s_use_from_statfs_and_the_app_s_file(fw):
 def test_without_the_app_s_file_downloads_and_the_cache_read_nothing(fw):
     st = Storage(fw, tsv=None)
     st.open()
-    assert rows(st, fw) == [['38.4 GB'], ['0 MB'], ['0 MB'], ['25.6 GB']]
+    assert rows(st, fw) == [['38.4 GB'], ['0 MB'], ['0 MB'], ['25.6 GB'], []]
 
 
 def test_downloads_lists_the_limit_and_each_item_its_size_escapes_undone(fw):
@@ -214,3 +214,39 @@ def test_a_file_of_another_version_is_read_as_none(fw, head):
     st.open()
     st.tap(1)
     assert st.captions == ['Limit']
+
+
+SCANNED = '/mnt/data/q2-library-updated'
+NOW = 1795631460  # 2026-11-25T18:31:00Z, UTC as local time (test_adb_trust's localtime)
+
+
+@pytest.mark.parametrize('saved, line', [(None, None), (NOW - 20 * 60, 'Last updated today, 18:11'),
+                                         (NOW - 86400, 'Last updated yesterday, 18:31'),
+                                         (NOW - 9 * 86400, 'Last updated Nov 16')])
+def test_update_library_is_storage_s_row_with_when_the_last_scan_ended(fw, saved, line):
+    """docs/ipod.md#settings (2026-11-19): Update Library left the Library's page for Settings > General > Storage, its
+    second line when the last whole scan ended (coverflow.c library_scan saves it), none before one; it opens stock's
+    scan as Scan Music Now does."""
+    from test_adb_trust import localtime
+    st = Storage(fw)
+    fw.mock('fw_time', lambda *_: NOW)
+    fw.mock('fw_localtime_r', lambda t, out, *_: localtime(t, out))
+    fw.var('g_time24h_flag', C.c_ubyte).value = 1
+    if saved:
+        st.files.files[SCANNED] = str(saved).encode()
+    st.open()
+    item = st.items[4]
+    assert st.texts.get(st.children[item][0]) == 'Update Library'
+    second = [st.texts.get(c) for c in st.children[item][1:] if st.texts.get(c)]
+    assert second == ([line] if line else [])
+    opened = []
+    fw.mock('navigator_to_with_context', lambda name, info, *_: opened.append(C.string_at(name)) or 0)
+    st.tap(4)
+    assert opened == [b'dialog/updatemusic_dialog']
+
+
+def test_a_whole_scan_ending_saves_its_time(fw):
+    files = Files(fw, {})
+    fw.mock('fw_time', lambda *_: NOW)
+    fw.fn('storage_scanned', None)()
+    assert files.files[SCANNED] == str(NOW).encode()

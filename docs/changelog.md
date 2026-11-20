@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Menus: Home is now Playing, Library, **Games**, Folders, Cover Flow, Search and Settings: Games moved up from the Library, and **Streaming** moved to Settings, right after Playback. A Home order you saved keeps your choices, with Games added under the Library. The Library no longer has Search, Games or Update Local Music rows: **Update Library** is in Settings > General > Storage, with when the library was last updated under it.
   - Now Playing: a double press of Center turns the screen off (and so locks the buttons when Buttons Lock is on) again, as on every other page, instead of starting a seek and then ringing Shuffle. A single press still starts seeking at once.
   - Subsonic: when your music server can't be reached (no answer, or a proxy answering 502 for a server that is down), the Q2 now says so: a toast with a crossed-out cloud, "Server error 502", "Server not answering" or "Server not found", when it goes and for each song skipped because of it, and a crossed-out orange cloud in the status row, first after the clock, until the server answers again. Needs a Subsonic app that reports it (its next release); the one built in now shows nothing new.
   - Status row (OLED): the clock now stays in the middle on every page, with the page's name ending before it; when more icons show than fit between the clock and the battery, they scroll slowly instead of pushing the clock aside, fading at an edge where an icon is cut off.
