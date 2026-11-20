@@ -1,7 +1,8 @@
 #!/bin/sh
 # /tmp/uac1-steps.sh: the UAC1 module's desk test in steps (docs/iphone-mode.md#the-uac1-module). Desk only, from /tmp,
-# never in an image. Its first try (2026-11-20) hung in the gadget's bind: the write of the controller's name to UDC
-# never returned and q2guard's log stopped with it. Here each step is a line on the card and a sync before the next,
+# never in an image. Its first two tries (2026-11-20) oopsed in the gadget's bind (the module's struct usb_gadget was
+# not Shanling's), and the writer, killed holding the gadget's lock, left every later gadget call waiting, q2guard's
+# too: it looked like a hang. Here each step is a line on the card and a sync before the next,
 # the module's function bound alone (no FunctionFS, no iAP2, Linux's 1d6b:0106 so Windows' audio driver takes it),
 # and a bind that has not returned in BIND_WAIT seconds has its kernel stack, every blocked task's and the kernel log
 # written to the card before anything else is tried. A hung bind leaves the Q2 needing a restart (hold Power): the log
@@ -9,8 +10,9 @@
 #
 #   uac1-steps.sh run [SECONDS]   load, make, bind, play the tone for SECONDS (default 40), unbind, remove
 #   uac1-steps.sh reopen [N]      the same, but the PCM opened N times (default 40) for half a second each, and the
-#                                 opens that failed counted: u_audio allocated its buffer at each open, which failed
-#                                 once memory was fragmented ("page allocation failure: order:5")
+#                                 opens that failed counted: built for 16 kB pages, the module had ALSA ask for a
+#                                 128 kB contiguous block at each open, which a Q2 up a while never has ("page
+#                                 allocation failure: order:5"; docs/iphone-mode.md#the-uac1-module)
 #   uac1-steps.sh log             the last run's log
 HERE=$(cd "$(dirname "$0")" && pwd)
 KO=$HERE/usb_f_uac1.ko
