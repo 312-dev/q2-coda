@@ -226,7 +226,7 @@ extern void up_next(void);
 extern int un_hold(void *top), un_key(void *top, unsigned key, int owned);
 extern void un_keydown(unsigned key), upnext_paint(void *w, void *canvas);
 extern void radio_poll(void);
-extern void xfade_row(void *label), wheel_row(void *label), resume_row(void *label),
+extern void wheel_row(void *label), resume_row(void *label),
     mono_row(void *label), swap_row(void *label), night_row(void *label), volume_row(void *label);
 extern int mono_click(void *ctx, void *event), swap_click(void *ctx, void *event);
 extern int xfade_open(void *ctx, void *event), xfade_key(void *top, unsigned key), resume_min(void);
