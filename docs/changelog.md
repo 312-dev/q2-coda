@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Storage: opening Settings > Storage now has the Subsonic app recount its Stream Cache straight away, so the page shows a fresh size, and the app no longer recounts it every 10 minutes in the background (a few seconds of work each time).
   - Playback: a Q2 that starts up paused on the song it last played now stays paused. The song could start playing on its own straight after startup while Now Playing still showed it paused.
   - Now Playing (OLED): a server song's format badge shows only its format ("FLAC"), without the cloud before it.
   - Now Playing (OLED): the Favorite heart is smaller and turns pink-red when the song is a favorite, gray when it isn't, in its same place under the album.

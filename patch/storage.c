@@ -12,9 +12,10 @@
  * kept by the app on its own (auto), its key, its size, and the op and argument of the app's page
  * for it (an empty op: none). The firmware asks for a change by appending a line to
  * /mnt/mmc/.<id>/storage.out, "limit\t<MB>" or "remove\t<key>", and starts the app
- * (addon_wake) to take it; the app writes storage.tsv again. The firmware reads only statfs for the
- * card: Your Music is what is used less the app's downloads and cache, and the card is never
- * walked. Without such an app, Downloads and Stream Cache read 0 and open nothing. */
+ * (addon_wake) to take it; the app writes storage.tsv again. The page opening appends "look",
+ * without starting the app: one that runs counts its folder again for the cache's size. The
+ * firmware reads only statfs for the card: Your Music is what is used less the app's downloads and
+ * cache, and the card is never walked. Without such an app, Downloads and Stream Cache read 0 and open nothing. */
 #include "navigation.h"
 
 #define ST_ITEMS 64
@@ -146,9 +147,9 @@ static unsigned st_yours(void) {
     return used > app ? used - app : 0;
 }
 
-/* A request to the app, "\n<line>\n" appended (the LF before it ends a line a cut write left), the
- * app started to take it. 1 when the card took it. */
-static int st_ask(const char *line) {
+/* A line for the app, "\n<line>\n" appended to storage.out (the LF before it ends a line a cut
+ * write left); 1 when the card took it. */
+static int st_note(const char *line) {
     char path[64];
     tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/storage.out", so.id);
     void *f = so.id[0] ? fopen(path, "ab") : 0;
@@ -156,6 +157,11 @@ static int st_ask(const char *line) {
     int ok =
         f && fwrite("\n", 1, 1, f) == 1 && fwrite(line, n, 1, f) == 1 && fwrite("\n", 1, 1, f) == 1;
     if (f && fclose(f)) ok = 0;
+    return ok;
+}
+/* A request to the app, the app started to take it. 1 when the card took it. */
+static int st_ask(const char *line) {
+    int ok = st_note(line);
     if (ok) addon_wake(so.id);
     return ok;
 }
@@ -318,6 +324,9 @@ static int st_open_dl(void *ctx, void *event) {
 int storage_open(void *ctx, void *event) {
     if (so.page || !(so.page = page_open("storage_page", st_closed, page_keyup))) return 0;
     st_app();
+    /* the app counts its folder again for the page if it runs, or when it next starts; it isn't
+     * started for it (q2-subsonic's storage.go stOwn) */
+    st_note("look");
     so.hash = 0;
     st_read();
     so.view = 0;
