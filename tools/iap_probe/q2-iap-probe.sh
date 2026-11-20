@@ -5,7 +5,7 @@
 # as the source, then a FunctionFS HID interface), runs q2-iap-probe on its FunctionFS instances to log what the
 # host sends, and hands the controller back to the ADB gadget when done.
 #
-#   q2-iap-probe.sh start [--plan desk|car|m1|m3|PHASES] [--for S] [--delay S] [--sessions N] [--tone] [--carplay] [--force]
+#   q2-iap-probe.sh start [--plan desk|car|m1|m3|drive|PHASES] [--for S] [--delay S] [--sessions N] [--tone] [--carplay] [--force]
 #   q2-iap-probe.sh stop        tear the gadget down now and give the controller back to adb
 #   q2-iap-probe.sh status      what runs, the controller's state, the log's last lines
 #
@@ -17,8 +17,9 @@
 # FunctionFS ID 1d6b:0106 in place of Apple's, so Windows' own audio driver takes the audio function), or :iap2 (the probe speaks iAP2, milestone
 # M1). desk is "full:echo:tone" until --for runs out; car is "full full:echo min:echo", m1 "full:iap2 min:iap2" and
 # m3 "full:iap2:uac1 full:iap2" (USB Audio 1.0 first, as a real iPhone has; the kernel's UAC2 second), one session (a
-# plug, docs/iphone-mode.md#sessions) each, then the restore.
-# --for (default 900, at most 3600) is the hard limit from start: the runner stops there, and a separate watchdog
+# plug, docs/iphone-mode.md#sessions) each, then the restore; drive "full:iap2:uac1" for every plug until --for runs out
+# (a drive: replugs and the car off and on at stops are sessions of the one phase).
+# --for (default 900, at most 43200) is the hard limit from start: the runner stops there, and a separate watchdog
 # forces the stop 60 s later if the runner has not. --delay waits that long first, with adb still up, so the cable
 # can be moved from the computer to the car.
 #
@@ -306,12 +307,13 @@ start() {
     car) PLAN="full full:echo min:echo" SESSIONS=${SESSIONS:-1} ;;
     m1) PLAN="full:iap2 min:iap2" SESSIONS=${SESSIONS:-1} ;;
     m3) PLAN="full:iap2:uac1 full:iap2" SESSIONS=${SESSIONS:-1} ;;
+    drive) PLAN="full:iap2:uac1" SESSIONS=${SESSIONS:-0} ;;
     *) SESSIONS=${SESSIONS:-0} ;;
     esac
     [ -n "$TONEALL" ] && PLAN=$(for p in $PLAN; do printf '%s%s ' "$p" "$TONEALL"; done)
     case $FOR in '' | *[!0-9]*) echo "--for takes seconds" >&2; exit 2 ;; esac
     case $DELAY in '' | *[!0-9]*) echo "--delay takes seconds" >&2; exit 2 ;; esac
-    [ "$FOR" -gt 3600 ] && FOR=3600
+    [ "$FOR" -gt 43200 ] && FOR=43200
     [ "$FOR" -le "$DELAY" ] && { echo "--for must be longer than --delay" >&2; exit 2; }
     [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 1; }
     [ -x "$PROBE" ] || { echo "no $PROBE: push it first (tools/iap_probe/q2iap push)" >&2; exit 1; }
