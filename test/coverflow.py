@@ -88,7 +88,7 @@ canvas_draw_image slide_menu_set_spacer window_manager window_manager_get_top_wi
 widget_to_local widget_animator_pause window_manager_get_pointer_pressed image_manager image_manager_unload_bitmap_by_name image_manager_unload_all
 on_home_music_onclick on_home_stream_onclick widget_layout widget_destroy widget_paint canvas_translate widget_set_prop_str
 canvas_offline_create canvas_offline_begin_draw canvas_offline_end_draw canvas_offline_destroy
-sqlite3_open sqlite3_exec sqlite3_close reset_poweroptions_timer getMusicByPlayList getAllPlayList
+sqlite3_open sqlite3_exec sqlite3_close sqlite3_progress_handler reset_poweroptions_timer getMusicByPlayList getAllPlayList
 """.split() for r, a in [PROTOTYPES[n]]) + r"""
 int stock_canvas_set_fill_color(void *, unsigned);
 void *shim_calloc(size_t, size_t);
@@ -418,9 +418,6 @@ int canvas_offline_destroy(void *c) { return 0; }
 unsigned unflip(unsigned v) { return v; }
 unsigned mix(unsigned a, unsigned b, int j, int n) { return a; }
 void bar_title_sync(void *win) {}
-static volatile int spun_paints; /* the frames step_turning painted itself, for slow_open */
-int spinner_turn(void) { return 2; } /* list_marks.c's: a frame due */
-int ringnav_wm_paint(void *wm) { (void)wm; return ++spun_paints, 0; }
 void forget_rows(void *list) { (void)list; }
 int title_gone(void *w, void *event) { (void)w, (void)event; return 0; }
 int bar_title_fits(void *label) { return 1; }
@@ -665,14 +662,28 @@ static void album(const char *name, const char *art) {
 static int unknown_row, unknown_songs;
 static char unknown_record[0x60], untagged_song[0x60], untagged_more[0x60];
 static int untagged_two; /* getMusicByAlbum(NULL) finds untagged_more too */
-static unsigned all_ms, all_hold; /* what each getAllAlbum takes on the fake clock; held for paints (slow_open) */
+static unsigned all_ms; /* what each getAllAlbum takes on the fake clock */
+/* all_hold: getAllAlbum runs on until the test lets it go (all_hold 0) or the open gives up, which its progress
+   handler sees (coverflow_query_stop, as SQLite calls it between VM steps), for at most 3 s; all_running while it
+   runs, all_stopped once the handler stopped it (slow_open) */
+static volatile int all_hold, all_running, all_stopped;
 static int all_queries;
+/* weak: a build without it (before 2026-11-19) links, and its open is seen to hold the press */
+extern int coverflow_query_stop(void *) __attribute__((weak));
+static int query_stopped(void) { return coverflow_query_stop && coverflow_query_stop(0); }
 int getAllAlbum(void) {
     deque *d = shim_dir;
     ++queries, ++all_queries;
     clock_ms += all_ms;
-    for (int start = spun_paints, i = 0; all_hold && spun_paints < start + 3 && i < 2000; ++i)
-        usleep(1000); /* held on its thread until the waiting UI thread has painted three frames */
+    all_running = 1;
+    for (int i = 0; all_hold && i < 3000; ++i) {
+        if (query_stopped()) {
+            all_stopped = 1;
+            break;
+        }
+        usleep(1000);
+    }
+    all_running = 0;
     d->n = 0;
     for (int i = 0, j; i < albums; ++i) {
         for (j = 0; j < i && strcasecmp(names[j], names[i]); ++j) {}
@@ -728,7 +739,8 @@ int getMusicByAlbum(const char *a) {
    order, here the test's own order by name; a row may differ in case from the stock one, as the
    grouping allows. */
 static const char *ranked[16], *rank_sql;
-static unsigned rank_ms, rank_hold; /* what a ranking takes on the fake clock; held for paints (slow_sort) */
+static unsigned rank_ms; /* what a ranking takes on the fake clock */
+static volatile unsigned rank_hold; /* a ranking runs on until the test lets it go (slow_sort) */
 static pthread_t rank_thread;       /* the thread the last ranking ran on */
 static char rank_rows[16][0x60];
 static int rank_year[16]; /* the Year query's year column, each ranked row's (split_row's REC_YEAR) */
@@ -777,8 +789,8 @@ int toolsQueryDbTable(const char *db, const char *sql, void *row, int sort) {
     assert(strstr(sql, "time_create") || strstr(sql, "year"));
     rank_sql = sql, rank_thread = pthread_self();
     clock_ms += rank_ms;
-    for (int start = spun_paints, i = 0; rank_hold && spun_paints < start + 3 && i < 2000; ++i)
-        usleep(1000); /* held on its thread until the waiting UI thread has painted three frames */
+    for (int i = 0; rank_hold && i < 3000 && !query_stopped(); ++i)
+        usleep(1000); /* held on its thread until the test lets it go, or the open gives up */
     /* each row's columns as text, as SQLite hands them: id, album, songer, the art track,
        albumsonger, and YEAR_SQL's year */
     int added = strstr(sql, "max(time_create) from") != 0, cols = added || strstr(sql, "else 0 end) from") ? 6 : 5;
@@ -2005,57 +2017,74 @@ static void unknown_card(void) {
     rescan();
 }
 
-/* A cold open that takes a while (docs/internals.md#coverflow): once getAllAlbum has taken half of
-   150 ms, Home stays up with the spinner, each step on a thread of its own (step_turning) while the
-   UI thread paints the spinner's frames itself, a timer pass between steps; the keys, the wheel and
-   a second press go nowhere, and the page opens after the last step; Return gives the open up, and
-   the next open queries again. A quick one opens as it is pressed, the spinner never shown. */
+/* A cold open that takes a while (docs/internals.md#coverflow): once it has taken half of 150 ms, the press
+   returns with the albums' query still running on its own thread, and Home stays live with the spinner on its row:
+   the wheel's ticks go to Home, a timer collects the steps and the page opens after the last. Return's release
+   gives the open up, and so does any other key or a touch, which then goes on to Home: the query's statement is
+   stopped (its progress handler, coverflow_query_stop) and its thread joined before the input returns, and nothing
+   is kept, so the next open queries again. A quick one opens as it is pressed, the spinner never shown. */
 static void slow_open(void) {
     extern int coverflow_spinner(void), coverflow_wait_input(void *);
-    int down[16] = {0}, back[16] = {0}, touch[16] = {0};
+    int down[16] = {0}, back[16] = {0}, back_down[16] = {0}, touch[16] = {0}, tick[16] = {0};
     down[EVENT_TYPE / 4] = EVT_KEY_DOWN, down[EVENT_KEY / 4] = KEY_CENTER;
     back[EVENT_TYPE / 4] = EVT_KEY_UP, back[EVENT_KEY / 4] = KEY_RETURN;
+    back_down[EVENT_TYPE / 4] = EVT_KEY_DOWN, back_down[EVENT_KEY / 4] = KEY_RETURN;
     touch[EVENT_TYPE / 4] = EVT_POINTER_DOWN;
+    tick[EVENT_TYPE / 4] = EVT_KEY_DOWN, tick[EVENT_KEY / 4] = KEY_NEXT;
     widget home;
     memset(&home, 0, sizeof(home));
     coverflow_home(&home, 0);
-    int painted = spun_paints, q = all_queries;
+    int q = all_queries;
     rescan();
-    all_ms = 70; /* under half: the open does not wait */
+    all_ms = 70; /* under half: the open waits for it, as pressed */
     open_page();
-    assert(all_queries == q + 1 && slide() && spun_paints == painted && !coverflow_spinner());
+    assert(all_queries == q + 1 && slide() && !coverflow_spinner());
     close_page();
+    /* a slow one: the press returns while its query runs */
     rescan();
-    all_ms = 80;
-    page = &w[nw + 1];
-    all_hold = 1, painted = spun_paints;
-    home.click(home.ctx, 0); /* getAllAlbum alone, held until three frames painted, then a pass */
-    all_hold = 0;
-    assert(all_queries == q + 2 && timer_fn && !slide() && coverflow_spinner());
-    assert(spun_paints >= painted + 3); /* the spinner turned within the step */
-    assert(coverflow_wait_input(down) && coverflow_wait_input(touch)); /* taken */
-    home.click(home.ctx, 0); /* a second press opens nothing more */
-    assert(all_queries == q + 2);
-    run();
-    assert(slide() && !coverflow_spinner() && !coverflow_wait_input(down));
-    assert(slide_count(slide()) == albums);
-    close_page();
-    rescan();
+    all_ms = 80, all_hold = 1, all_stopped = 0;
     page = &w[nw + 1];
     home.click(home.ctx, 0);
-    assert(timer_fn && coverflow_spinner());
-    assert(coverflow_wait_input(back)); /* Return's release gives it up */
-    assert(!timer_fn && !coverflow_spinner());
+    assert(all_queries == q + 2 && all_running && timer_fn && !slide() && coverflow_spinner());
+    assert(!coverflow_wait_input(tick)); /* the wheel moves Home */
+    home.click(home.ctx, 0); /* a second press opens nothing more */
+    assert(all_queries == q + 2 && all_running);
+    all_hold = 0; /* the query ends: the steps go on, the page opens */
+    run();
+    assert(slide() && !coverflow_spinner() && !all_stopped && !coverflow_wait_input(down));
+    assert(slide_count(slide()) == albums);
+    close_page();
+    /* Return gives it up: the statement stopped, the thread joined, before the release returns */
+    rescan();
+    all_hold = 1, all_stopped = 0;
+    page = &w[nw + 1];
+    home.click(home.ctx, 0);
+    assert(all_running && timer_fn && coverflow_spinner());
+    assert(coverflow_wait_input(back_down) && all_running); /* Return's press goes nowhere */
+    assert(coverflow_wait_input(back)); /* its release gives it up */
+    assert(!all_running && all_stopped && !timer_fn && !coverflow_spinner());
     run();
     assert(!slide());
-    all_ms = 0, painted = spun_paints;
-    open_page(); /* the given-up query is not kept: this one queries again, in no time: no spinner */
-    assert(all_queries == q + 4 && slide() && slide_count(slide()) == albums && spun_paints == painted);
+    /* any other key, or a touch, gives it up as well, and goes on to Home */
+    int *gone[] = { down, touch };
+    for (unsigned k = 0; k < 2; ++k) {
+        all_hold = 1, all_stopped = 0;
+        page = &w[nw + 1];
+        home.click(home.ctx, 0);
+        assert(all_running && coverflow_spinner());
+        assert(!coverflow_wait_input(gone[k]));
+        assert(!all_running && all_stopped && !timer_fn && !coverflow_spinner());
+        run();
+        assert(!slide());
+    }
+    all_hold = 0, all_ms = 0;
+    open_page(); /* the given-up queries are not kept: this one queries again, in no time: no spinner */
+    assert(all_queries == q + 6 && slide() && slide_count(slide()) == albums && !coverflow_spinner());
     close_page();
 }
 
 /* A Sort that ranks (Recently Added's query; docs/internals.md#coverflow) runs on the open's thread too, as the
-   albums' query does, with Home and its spinner up: on a cold open after the albums' steps, and on an open that
+   albums' query does, with Home live and its spinner up: on a cold open after the albums' steps, and on an open that
    keeps the albums but has a new Sort to apply, which waits on its ranking as a cold open waits on its query. The
    page opens in the new order after it. */
 static void slow_sort(void) {
@@ -2068,28 +2097,29 @@ static void slow_sort(void) {
     rescan();
     coverflow_sort_set(3); /* Recently Added */
     all_ms = 0, rank_ms = 80, rank_hold = 1;
-    int painted = spun_paints, q = all_queries;
+    int q = all_queries;
     page = &w[nw + 1];
     home.click(home.ctx, 0); /* cold: the albums' steps, then the ranking past half of 150 ms */
     assert(all_queries == q + 1 && !pthread_equal(rank_thread, ui));
-    assert(spun_paints >= painted + 3); /* the spinner turned while it ranked */
+    assert(timer_fn && coverflow_spinner() && !slide()); /* the press returned while it ranks */
+    rank_hold = 0;
     run();
     assert(slide() && !coverflow_spinner() && saved_sort() == 2);
     order_is((const char *const[]){ "C", "A", 0 });
     close_page();
     coverflow_sort_set(1); /* Artist: the albums kept, only its ranking to wait on */
     ranked[0] = "B", ranked[1] = 0;
-    rank_thread = ui, painted = spun_paints;
+    rank_thread = ui, rank_hold = 1;
     page = &w[nw + 1];
     home.click(home.ctx, 0);
-    assert(all_queries == q + 1 && !pthread_equal(rank_thread, ui) && spun_paints >= painted + 3);
+    assert(all_queries == q + 1 && !pthread_equal(rank_thread, ui) && timer_fn && coverflow_spinner());
+    rank_hold = 0;
     run();
     assert(slide() && !coverflow_spinner() && saved_sort() == 1);
     close_page();
     coverflow_sort_set(0); /* Album: nothing to rank, the page at once */
-    painted = spun_paints;
     open_page();
-    assert(slide() && spun_paints == painted && saved_sort() == 0);
+    assert(slide() && !coverflow_spinner() && saved_sort() == 0);
     close_page();
     rank_ms = rank_hold = 0, ranked[0] = 0;
 }
@@ -6060,6 +6090,7 @@ static int pl_exec(void *db, const char *sql, int (*row)(void *, int, char **, c
     }
     return 0;
 }
+void sqlite3_progress_handler(void *db, int ops, int (*f)(void *), void *ctx) { (void)db, (void)ops, (void)f, (void)ctx; }
 int sqlite3_exec(void *db, const char *sql, int (*row)(void *, int, char **, char **), void *ctx, char **err) {
     int rows = 0, r;
     if (!strcmp(sql, "PRAGMA cache_size=64")) return 0;

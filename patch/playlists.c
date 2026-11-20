@@ -45,10 +45,12 @@ static int ple_number(void *ctx, int n, char **v, char **names) {
  * ponytail: a stock write that meets Home's or the update dialog's count (a read of the whole
  * songtable) now holds the UI up to 500 ms per statement before it fails as before; a shorter
  * timeout is the knob if that shows. */
+extern void coverflow_query_watch(void *db);
 int stock_db_open(const char *path, void **db) {
     int bad = sqlite3_open(path, db);
     if (!bad) sqlite3_exec(*db, "PRAGMA busy_timeout=500", 0, 0, 0);
-    if (!bad) catalogue_attach(db); /* the server library's songs, a server signed in */
+    if (!bad) coverflow_query_watch(*db); /* a given-up Cover Flow open's statement stops */
+    if (!bad) catalogue_attach(db);       /* the server library's songs, a server signed in */
     return bad;
 }
 /* The database for a write that waits out a reader, playlist_art.c's worker reading the table,

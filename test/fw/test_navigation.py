@@ -2430,6 +2430,9 @@ def test_stock_s_connection_waits_for_a_reader_once_open(fw, opened):
     db = C.c_void_p()
     assert fw.fn('stock_db_open', C.c_int, C.c_char_p, C.c_void_p)(b'/mnt/data/database.db', C.byref(db)) == opened
     assert sql.log == ([] if opened else [BUSY]) and [c[1][0] for c in fw.calls('sqlite3_exec')] == ([] if opened else [0xdb])
+    # and a given-up Cover Flow open's statement on it stops (coverflow.c coverflow_query_stop, every 1000 VM steps)
+    stop = C.cast(fw.lib.coverflow_query_stop, C.c_void_p).value
+    assert [c[1][:3] for c in fw.calls('fw_sqlite3_progress_handler')] == ([] if opened else [(0xdb, 1000, stop)])
 
 
 def test_a_cancelled_delete_changes_nothing(fw):
