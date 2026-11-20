@@ -280,12 +280,13 @@ void *rows_view(void *parent, int y, int w, int h, int n, int item_h);
 void *page_list_or(void *page, void *body, const char *name, const char *none, int n, int item_h);
 /* feedback.c: the empty state (docs/oled-design.md#empty-and-offline), an outline glyph
  * (tools/art.py EMPTY_GLYPHS; none in the compact form, under rows), a title, a hint (lines split at
- * '\n') and at most one button; a status page's (a card app's Sync, docs/oled-design.md#sync) also a
- * progress bar under the title (bar: its permille + 1, 0 for none) and a footer line (foot) */
+ * '\n') and at most one button. empty_extras, just before an empty_state or empty_list, gives that
+ * one a status page's (a card app's Sync, docs/oled-design.md#sync) progress bar under the title
+ * (bar: its permille + 1, 0 for none) and footer line (foot). */
 typedef struct {
-    const char *glyph, *title, *hint, *row, *foot;
-    int bar;
+    const char *glyph, *title, *hint, *row;
 } empty_t;
+void empty_extras(const char *foot, int bar);
 int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *ctx, void *event));
 int empty_row_y(int free_top);
 int empty_shown(void *page);
