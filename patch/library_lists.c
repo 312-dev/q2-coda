@@ -14,6 +14,31 @@ static struct {
 
 extern int coverflow_goto_album(void *r);
 
+/* all's songs in a random order, the one at at first; 0 when all has no server row. A list with
+ * server rows is handed to their app online (catalogue.c catalogue_load), which plays it in the
+ * order it was handed from the start on, so Shuffle Songs' own order, drawn over the queue
+ * play_folder loads, does not reach it (the drive, 2026-11-19: the Library's title order from a
+ * random start, "rockman", "rockstar", "rockstar"). */
+static void *shuffled_for_app(void *all, int at) {
+    unsigned n = deque_size(all), server = 0;
+    if (!catalogue_on()) return 0; /* Local Only: no list holds a server row */
+    for (unsigned i = 0; i < n && !server; ++i)
+        server = catalogue_path(P(deque_at(all, i), REC_PATH));
+    unsigned *ix = server ? calloc(n, sizeof *ix) : 0;
+    if (!ix) return 0;
+    for (unsigned i = 0; i < n; ++i) ix[i] = i;
+    ix[0] = (unsigned)at, ix[at] = 0;
+    for (unsigned i = n - 1; i > 1; --i) { /* Fisher-Yates over all but the first */
+        unsigned j = 1 + rand_below(i), t = ix[i];
+        ix[i] = ix[j], ix[j] = t;
+    }
+    void *out = _create_deque("stSongInfo");
+    deque_init(out);
+    for (unsigned i = 0; i < n; ++i) _deque_push_back(out, deque_at(all, ix[i]));
+    free(ix);
+    return out;
+}
+
 /* Collection Shuffle is Shuffle Songs over the collection. */
 int shuffle_play(void *all) {
     int size = (int)deque_size(all);
@@ -29,7 +54,9 @@ int shuffle_play(void *all) {
         int mode = playback_unshuffle();
         playback_clear(); /* stock Shuffle keeps Shuffle Albums/Folders otherwise */
         config_playmode(2, 1);
-        play_folder(all, at, 0xf001);
+        void *order = shuffled_for_app(all, at);
+        play_folder(order ? order : all, order ? 0 : at, 0xf001);
+        if (order) deque_destroy(order); /* playing_page copies the queue at once */
         playback_shuffle(mode); /* an order Up Next can list; stock's shuffle stays the fallback */
         feedback_shuffled("Shuffled Songs", size); /* OLED's confirmation */
     }

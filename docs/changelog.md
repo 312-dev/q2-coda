@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Shuffle Songs: shuffling a library that holds streaming songs (Subsonic) now plays them in a random order, all of them. It played the Library's title order from a random song instead, so a shuffle gave "Rockman", "Rockstar", "Rockstar" or "Best of Times", "Best Time", "Beta Love", and stopped at the end of the list. Shuffling from the phone (Car Remote, Android Auto) is fixed the same way.
   - Now Playing: a double press of Center turns the screen off (and so locks the buttons when Buttons Lock is on) again, as on every other page, instead of starting a seek and then ringing Shuffle. A single press still starts seeking at once.
   - Logs: the Q2's log now includes what each running card app (Subsonic and the others) writes to its own log, under the app's name, and **Send Logs** also sends each app's own logs, so a download that fails while you are away from home can be seen afterwards.
   - Typing (OLED): the Wi-Fi password and Add Network show the status row with the page's title at the top again, instead of Shanling's old "Please enter password" box and back arrow, and no page you type on has a thin white outline round it any more.

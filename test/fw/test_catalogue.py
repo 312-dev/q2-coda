@@ -472,6 +472,31 @@ def test_online_a_list_is_handed_to_the_app_and_played_offline_if_it_does_not_an
     assert len(rig.played) == 1
 
 
+def test_shuffle_songs_hands_the_app_every_song_in_a_shuffled_order(rig, fw, mcl):
+    """The drive, 2026-11-19: Library > Songs > Shuffle over a library of card and server songs played "rockman",
+    "rockstar", "rockstar", "rockstar", and pressed again, "the best is yet to come", "the best of my love", "best
+    of times": the Songs list's title order from a random start. Online the list goes to its app as a catplay,
+    which answers with an m3u from <start> on in the catplay's order, and Shuffle Songs' order (playback_shuffle)
+    was over the old queue, not the app's. The app is handed every song, card and server rows, already shuffled:
+    few songs follow their list neighbour."""
+    rig.online = True
+    app_running(rig)
+    sids = [f's{i:03}' for i in range(150)]
+    rig.write(1, [song_row(s, f'Title {s}', 'B', 'A', i + 1, 100, i + 1) for i, s in enumerate(sids)])
+    rig.poll()
+    rows = [url(s) if i % 4 else f'/mnt/mmc/Music/c{i:03}.flac' for i, s in enumerate(sids)]  # the Songs list
+    assert fw.fn('shuffle_play', C.c_int, C.c_void_p)(queue(rig, rows)) == len(rows)
+    # stock's playing_page loads the queue play_folder handed it (player_start: ringnav_load, catalogue_load)
+    paths, at = rig.played[-1]
+    assert load(rig, queue(rig, [p.decode() for p in paths]), at)[0] == 2
+    head, *lines = rig.files.files[f'/tmp/q2-{APP}.catplay'].decode().splitlines()
+    run = lines[int(head.split()[1]):]  # what the app's m3u plays: the rows from <start> on
+    assert sorted(run) == sorted(rows), f'the shuffle plays every song: {len(run)} of {len(rows)}'
+    place = {r: i for i, r in enumerate(rows)}
+    neighbours = sum(place[b] == place[a] + 1 for a, b in zip(run, run[1:]))
+    assert neighbours < 10, f'{neighbours} of {len(run) - 1} songs follow their list neighbour'
+
+
 def test_a_catalogue_app_not_running_is_started_and_handed_the_list_once_it_listens(rig, fw):
     """After a boot, or the app's own idle exit, nothing answers a catplay: the press starts the app, as its
     Streaming row does (the capability line written first, which it reads at its start), and the catplay is
