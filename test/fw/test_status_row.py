@@ -65,7 +65,7 @@ class Row(StatusRow):
         canvas.art = {n: (WIFI_W, 14) for n in ('oled_status_wifi_3_d', 'oled_status_wifi_2_d', 'oled_status_wifi_1_d', 'oled_status_wifi_x_d')}
         canvas.art |= {'oled_keylock_d': (14, 14), 'oled_status_bt_d': (14, 14), 'oled_status_down_d': (14, 14),
                        'oled_status_offline_d': (14, 14)}
-        canvas.art |= {f'oled_status_sync_{f}_d': (14, 14) for f in range(8)}
+        canvas.art |= {f'oled_status_sync_{f}_d': (14, 14) for f in range(30)}
         self.fw.fn('status_slots_paint', None, C.c_void_p, C.c_void_p)(self.bar.addr, canvas.addr)
         return canvas, names
 
@@ -332,21 +332,35 @@ def test_wifi_lights_arcs_by_its_bars_and_crosses_out_with_no_internet(fw, row, 
 
 
 def test_a_sync_check_turns_the_arrows_and_a_download_fills_its_ring(fw, row):
+    """The user's (2026-11-20): the arrows at 30 fps, a half turn a second as before. They ride ui_kit's one 33 ms loop
+    timer (no timer of their own), their frame the clock's place in the half turn's second (SR_TURN_MS over SR_SPIN
+    frames), and each new frame repaints only their art's box; a download's ring does not turn."""
+    now = [10_000]
+    fw.mock('time_now_ms', lambda *_: now[0])
     row.status = 0
     row.app(1)
     canvas, names = row.paint()
     # the 14 px art a px either side of the arrows' 12 px box, and that art's box repainted each frame
     assert names == ['oled_status_sync_0_d'] and canvas.images == [(BODY - GAP - 12 - 1, CY - 7, 14, 14)]
-    assert row.sync_sig() == 1 and len(row.timers) == 1
+    assert row.sync_sig() == 1 and [ms for _, ms in row.timers] == [33]
     tick = C.CFUNCTYPE(C.c_int, C.c_void_p)(row.timers[0][0])
+    now[0] += 34
     assert tick(None) == 8 and row.dirty == [(BODY - GAP - 12 - 1, 0, 14, 26)]
     assert row.paint()[1] == ['oled_status_sync_1_d']
+    row.dirty.clear()
+    assert tick(None) == 8 and row.dirty == []  # the same frame: nothing repainted
+    now[0] += 500
+    assert tick(None) == 8 and row.paint()[1] == ['oled_status_sync_16_d']
+    now[0] += 466
+    assert tick(None) == 8 and row.paint()[1] == ['oled_status_sync_0_d']  # a second: the half turn again
+    row.sync_sig()
+    assert len(row.timers) == 1  # one loop, added once
     row.app(2, 250)
     fw.mock('canvas_get_vgcanvas', lambda *_: 1)
     canvas, names = row.paint()
     assert names == ['oled_status_down_d'] and canvas.images == [(BODY - GAP - 16 + 4, CY - 4, 14, 14)]
     assert len(fw.calls('vgcanvas_arc')) == 2 and len(fw.calls('vgcanvas_stroke')) == 2  # the track, then the fill
-    assert tick(None) == 0  # a download does not turn
+    assert tick(None) == 7  # a download does not turn: the loop drops the arrows and, the last, ends
 
 
 def test_the_padlock_sits_where_buttons_lock_put_it(fw, row):

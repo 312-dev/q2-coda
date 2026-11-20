@@ -748,7 +748,7 @@ assert [b[:5] for b in m.bands]==[(*band,color_t(0))],m.bands
 assert [(r['rect'],r['radius'],r['color']) for r in m.rounded]==[(bar,bh//2,color_t(OLED['np_track_rgb'])),((*bar[:2],bar[2]*40//100,bh),bh//2,color_t(0xffffff))],m.rounded
 cy=lo[1]+bh//2-O['VOL_SPK_PX']//2
 assert not m.letters and m.image_loads==['oled_vol_lo_d','oled_vol_hi_d'] and [d[:2] for _,d in m.image_draws]==[(lo[0]+O['VOL_SPK_X']-O['VOL_SPK_PX']//2,cy),(lo[0]+lo[2]-O['VOL_SPK_X']-O['VOL_SPK_PX']//2,cy)],(m.image_loads,m.image_draws); passed()  # the dark half's speakers
-vol=[t for t,v in m.timers.items() if v[1]==payload_syms['vol_poll']]; assert len(vol)==1; poll=vol[0]  # beside the status row's bars (status_row.c sr_tick)
+vol=[t for t,v in m.timers.items() if v[1]==payload_syms['vol_poll']]; assert len(vol)==1; poll=vol[0]  # beside the shared loop's (ui_kit.c motion_loop: the status row's bars)
 inv=lambda: [c[0] for c in did('widget_invalidate_force') if c[0]==dlg]  # the status row's bars repaint their own box
 m.advance(O['VOL_POLL_MS']); assert not inv() and poll in m.timers  # unchanged: nothing
 m.nodes[sv]['value']=41; m.advance(O['VOL_POLL_MS'])  # changed: the whole dialog repaints

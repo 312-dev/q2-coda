@@ -246,7 +246,7 @@ def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(h
     so on the row it covers rows 17 to 27 with the digits: Wi-Fi iOS's fan, 15.6 x 11 in a 16 px box, its levels
     lighting the dot and bands over the rest in STATUS_UNLIT, the shape one box in every level; wifi-x, the
     Bluetooth rune (dim while connecting), headphones, the car and the volume pill's speakers (vol_pill.c) sized by their height (wifi-x and the car are wider
-    than tall: by the longer side Wi-Fi came out 8 px tall) in Text Primary; the offline cloud in Warning in both halves; the sync arrows' STATUS_SPIN frames in Text Secondary, each turned from the last."""
+    than tall: by the longer side Wi-Fi came out 8 px tall) in Text Primary; the offline cloud in Warning in both halves; the sync arrows' STATUS_SPIN frames in Text Primary (the user's, 2026-11-20: 30 fps, white), 30 to the half turn, each turned from the last."""
     got = art.images(theme.builtins()[0])
     def ink(name, cut=64):
         w, h, at = pixels(got[f'oled_status_{name}_{half}'])
@@ -273,7 +273,8 @@ def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(h
     size, lit, colours = ink('offline', 8)  # a card app's server out of reach: cloud-slash in Warning, both halves
     assert size == (art.STATUS_PX, art.STATUS_PX) and colours == {rgb(0xff9f0a)} and box(lit)[2:] == (1, 11)
     frames = [got[f'oled_status_sync_{f}_{half}'] for f in range(art.STATUS_SPIN)]
-    assert len(set(frames)) == art.STATUS_SPIN and all(ink(f'sync_{f}')[2] == {rgb(secondary)} for f in range(art.STATUS_SPIN))
+    assert art.STATUS_SPIN == 30
+    assert len(set(frames)) == art.STATUS_SPIN and all(ink(f'sync_{f}')[2] == {rgb(primary)} for f in range(art.STATUS_SPIN))
 
 
 def test_the_status_rows_wifi_is_a_fan_of_a_dot_and_two_bands_with_gaps():

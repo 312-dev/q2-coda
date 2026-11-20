@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Status bar: the turning sync arrows (while an app such as Subsonic checks its server) are white and turn smoothly at 30 frames a second, at the same speed; they were gray and stepped 8 times a second.
   - Menus (OLED): the frosted sheet a hold menu opens on is smooth, without the fine speckled grain it had.
   - Status bar: the turning sync arrows (while an app such as Subsonic checks its server) now sit as close to the icons beside them as the other status icons do; they stood 2 px further off.
   - Storage: opening Settings > Storage now has the Subsonic app recount its Stream Cache straight away, so the page shows a fresh size, and the app no longer recounts it every 10 minutes in the background (a few seconds of work each time).

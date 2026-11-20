@@ -205,7 +205,7 @@ void motion_hook(void (*fn)(void));
  * box then), and dropped when it returns 0; the timer ends with the last loop. Unlike motion_frames
  * it never repaints the top window. At most MO_LOOPS. */
 #define MO_LOOP_MS 33 /* 30 frames a second */
-#define MO_LOOPS 4
+#define MO_LOOPS 6 /* the status row's bars, strip and arrows, the volume pill, Home's and Up Next's bars */
 void motion_loop(int (*fn)(void));
 /* The level bars (docs/oled-design.md#level-bars): Up Next's header, Home's first row and the
  * status row draw the one motion. Bar i's height follows its column of LVL_KEYS keyframes

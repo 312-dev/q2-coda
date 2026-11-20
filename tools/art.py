@@ -291,7 +291,7 @@ STATE_INKS = inks('primary', 'd', 'l')
 # Wi-Fi is iOS's fan, drawn here (wifi_fan): its levels light 1 to 3 of the dot and two bands over the rest in
 # STATUS_UNLIT. The play state and the padlock are 13 px boxes drawn as they were (their ink 10.6 and 11 px); the
 # sync arrows turn through STATUS_SPIN frames of a half turn (the glyph repeats every half turn), sized by their
-# longer side as they turn, in Text Secondary; the download's arrow sits in its ring, white.
+# longer side as they turn, in Text Primary (the user's, 2026-11-20); the download's arrow sits in its ring, white.
 STATUS_PX = 14
 STATUS_INK = 11.0
 STATUS_TOP = 1.0
@@ -307,7 +307,7 @@ STATUS_FIT = {'status_wifi_x': ('wifi-x-bold', STATUS_WIFI_W), 'status_bt': ('bl
               'status_vol': ('speaker-simple-high-fill', STATUS_PX), 'status_mute': ('speaker-simple-x-fill', STATUS_PX)}
 STATUS_UNLIT = {'d': 0x3a3a3c, 'l': 0xc7c7cc}
 STATUS_SECONDARY = inks('secondary', 'd', 'l')
-STATUS_SPIN = 8
+STATUS_SPIN = 30  # status_row.c SR_SPIN: a half turn a second at 30 fps
 KEYLOCK_CARD_PX = 56  # Buttons Lock's card's padlock (keylock.c CARD_GLYPH)
 # Now Playing's shuffle and repeat (playing.modes.icons, np_bar.c np_modes): bold, MODE_PX, off in Text Secondary per
 # half, on in the theme's own accent's top tone in both; repeat-once is repeat's on glyph for Repeat One.
@@ -719,7 +719,7 @@ def status_images(prefix):
     # its ink 13.6 px wide at 11 tall, so a STATUS_PX box
     out |= {f'{prefix}_status_offline_{k}': status_glyph('cloud-slash-bold', STATUS_PX, token('warning')) for k in STATE_INKS}
     out |= {f'{prefix}_status_sync_{f}_{k}': status_turn('arrows-clockwise-bold', STATUS_PX, STATUS_INK, c, f / STATUS_SPIN / 2)
-            for f in range(STATUS_SPIN) for k, c in STATUS_SECONDARY.items()}
+            for f in range(STATUS_SPIN) for k, c in STATE_INKS.items()}
     return out
 
 
