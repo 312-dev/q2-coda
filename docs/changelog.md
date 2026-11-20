@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: a car that shows album covers over Bluetooth (AVRCP 1.6) now gets the playing song's cover from the Q2: the one Cover Flow shows for the album, or a `cover.jpg`, `folder.jpg` or `front.jpg` beside the song. Headsets and cars that don't ask for covers are told nothing new, but every device now reads the Q2 as AVRCP 1.6. Not yet tried in a car.
   - Storage: opening Settings > Storage now has the Subsonic app recount its Stream Cache straight away, so the page shows a fresh size, and the app no longer recounts it every 10 minutes in the background (a few seconds of work each time).
   - Playback: a Q2 that starts up paused on the song it last played now stays paused. The song could start playing on its own straight after startup while Now Playing still showed it paused.
   - Home: **Radio Tuner**, under the Library: the FM stations that reach where you are (found from your internet connection, or a ZIP Code you enter) on a radio dial. Turn the wheel to tune 0.2 MHz a click; Next and Previous jump to the next station you can stream; Centre lists the stations. Between stations you hear static, and a station fades in out of it as you tune onto it, as on a real radio. The list is kept on the card for each place, so it shows at once the next time and updates itself in the background.
