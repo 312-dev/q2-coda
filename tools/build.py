@@ -3011,7 +3011,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                BIP: (HELPER_LIKE, compile_helper(out, cat, BIP_SOURCES, 'q2-bip', HELPER_LIBS[:1])),
                                IROH: (HELPER_LIKE, iroh.binary(fresh=build_iroh)),
                                Q2CAR: (HELPER_LIKE, (ROOT/'patch/q2car.sh').read_bytes()),
-                               Q2IAP: (HELPER_LIKE, compile_helper(out, cat, 'q2_iap', 'q2-iap', HELPER_LIBS[:1])),
+                               Q2IAP: (HELPER_LIKE, compile_helper(out, cat, 'q2_iap', 'q2-iap', CODA_RC_LIBS)),  # libc and SQLite (q2_iap_lib.c)
                                UAC1_KO: ('module_driver/soc_aic.ko', uac1.module()),
                                Q2SEND: (HELPER_LIKE, compile_helper(out, cat, Q2SEND_SOURCES, 'q2send', Q2SEND_LIBS)),
                                RADIOFETCH: (HELPER_LIKE, compile_helper(out, cat, RADIOFETCH_SOURCES, 'q2radiofetch',
