@@ -4,9 +4,8 @@
  * reference is the approved prototype's fmRxWorklet (its spec: static-model.md, 2026-11-20); this
  * is the same model with cheaper parts for the Q2's MIPS core: table sines, a table Gaussian, a
  * polynomial arctangent. q2video's tuner (-t, video.c) runs it between ffmpeg's sound and ALSA;
- * test/fmrx.py holds it to the prototype's measured levels and spectra. No libc beyond what both
- * builds pass in: fmrx_init takes the few transcendental results it needs as tables it fills
- * itself. */
+ * test/fmrx.py holds it to the prototype's measured levels and spectra. It calls libm (exp, pow,
+ * log, log10, sqrt, sin, cos) at fmrx_init and once a block, never once a sample. */
 #ifndef FMRX_H
 #define FMRX_H
 
