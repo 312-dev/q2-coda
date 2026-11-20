@@ -1,6 +1,6 @@
 """bt_trace.c (docs/internals.md#bluetooth-connection-trace): each change of stock's Bluetooth connection state, as a
 bt line in the unified log through demo's stderr, every 500 ms from the UI loop; each connect the link thread starts,
-with its target and why (auto, tap, other); the page opening and the found devices it shows."""
+with its target and why (auto, usb, tap, other); the page opening and the found devices it shows."""
 import ctypes as C
 
 import pytest

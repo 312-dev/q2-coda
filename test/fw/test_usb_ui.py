@@ -691,3 +691,71 @@ def test_the_cable_is_what_stock_reads(fw):
     assert cable() == 0
     u.det.value = 1
     assert cable() == 1
+
+
+# A cable in starts one Bluetooth connect to the saved device (headset.c headset_bt_usb,
+# docs/internals.md#bluetooth-on-usb-power). The car drive of 2026-11-20: the car ended the link at its switch-off
+# (reason 3, which BlueZ does not retry), and at the next start its USB enumerated the Q2 at 14:48:01 while
+# Bluetooth waited for the car to page the Q2 itself, at 14:52:35.
+
+def usb_power(fw, ini=None, since_on=30000):
+    """usb_ui.c and headset.c with test_bt_trace's Bluetooth: on, its stack up, nothing linked, the car saved and
+    paired, Bluetooth on since_on ms before. autoLinkBluetooth stands in for stock's: its checkPairDev site
+    (BT_AUTOLINK) is headset_bt_autolink, and a yes starts the link thread to the car."""
+    from test_bt_trace import CAR, Rig
+    u = Usb(fw, ini=ini)
+    r = Rig(fw)
+    r.set(init=0, conn=0)
+    fw.mock('checkPairDev', lambda *_: 1)
+    starts = []
+
+    def auto(*_):
+        if fw.fn('headset_bt_autolink', C.c_int, C.c_char_p)(CAR.encode()):
+            starts.append(CAR)
+            r.links = [(CAR, 1)]
+            r.set(conn=1)
+        return 1
+    fw.mock('autoLinkBluetooth', auto)
+    fw.fn('headset_status_register', None)()  # Bluetooth on
+    r.now += since_on
+    u.status()  # a pass with no cable: the next one in is a plug-in
+    r.poll()
+    r.said()
+    return u, r, starts
+
+
+def test_a_cable_in_starts_one_connect_to_the_saved_device_logged_as_usb(fw):
+    from test_bt_trace import CAR
+    u, r, starts = usb_power(fw)
+    u.plug(host=False)
+    assert starts == [CAR]
+    r.poll()
+    assert ('I', f'connect starts to {CAR} why=usb') in r.said()
+    for _ in range(5):  # the cable stays in and the thread ends: nothing pages again
+        r.now += 5000
+        r.set(conn=0)
+        u.status()
+        u.poll()
+    assert starts == [CAR]
+
+
+@pytest.mark.parametrize('case', ['connected', 'bluetooth off', 'stack starting', 'link thread running',
+                                  'no saved device', 'usb audio', 'otg bus power', 'just switched on'])
+def test_a_cable_in_starts_no_connect(fw, case):
+    from test_bt_trace import BUDS
+    u, r, starts = usb_power(fw, ini={'USBPICK': 3} if case == 'usb audio' else None,
+                             since_on=5000 if case == 'just switched on' else 30000)
+    if case == 'connected':
+        r.links = [(BUDS, 3)]
+    elif case == 'bluetooth off':
+        r.set(on=0)
+    elif case == 'stack starting':
+        r.set(init=101)
+    elif case == 'link thread running':
+        r.set(conn=1)
+    elif case == 'no saved device':
+        r.set(saved='')
+    elif case == 'otg bus power':
+        fw.var('g_last_otgid', C.c_byte).value = 1
+    u.plug(host=False)
+    assert starts == []
