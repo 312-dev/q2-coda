@@ -643,6 +643,46 @@ int bt_uart_counts(const char *text, int port, unsigned *v) {
     }
     return 0;
 }
+int bt_wifi_ips(const char *text, unsigned *enter, unsigned *leave) {
+    static const char a[] = "IPS enter count:", b[] = ", IPS leave count:";
+    const char *s = strstr(text, a);
+    unsigned e = 0, l = 0;
+    if (!s) return 0;
+    s += sizeof a - 1;
+    if (*s < '0' || *s > '9') return 0;
+    for (; *s >= '0' && *s <= '9'; ++s) e = e * 10 + (unsigned)(*s - '0');
+    if (strncmp(s, b, sizeof b - 1)) return 0;
+    s += sizeof b - 1;
+    if (*s < '0' || *s > '9') return 0;
+    for (; *s >= '0' && *s <= '9'; ++s) l = l * 10 + (unsigned)(*s - '0');
+    *enter = e, *leave = l;
+    return 1;
+}
+int bt_h5dbg_kind(const char *msg) {
+    static const char *const part[BT_H5D_KINDS] = { " retransmitting ", "Request for pkt ", "Received seqno ",
+                                                    "Removing ", "Sending packet with seqno ",
+                                                    "We request packet no " };
+    for (int k = 0; k < BT_H5D_KINDS; ++k)
+        if (strstr(msg, part[k])) return k;
+    return -1;
+}
+int bt_h5dbg_line(struct bt_h5dbg *d, const char *msg) {
+    int k = bt_h5dbg_kind(msg);
+    if (k < 0 || d->lines >= BT_H5D_CAP || !strncmp(d->last[k], msg, BT_H5D_TEXT - 1)) return 0;
+    snprintf(d->last[k], BT_H5D_TEXT, "%s", msg);
+    ++d->lines;
+    return 1;
+}
+int bt_h5dbg_ctl(char *b, int cap, int on) {
+    static const char *const func[] = { "h5_timed_event", "h5_complete_rx_pkt", "h5_pkt_cull", "h5_prepare_pkt" };
+    int n = 0;
+    for (unsigned i = 0; i < sizeof func / sizeof *func; ++i) {
+        int m = snprintf(b + n, (size_t)(cap - n), "module " BT_H5D_MODULE " func %s %cp\n", func[i], on ? '+' : '-');
+        if (m < 0 || m >= cap - n) return 0;
+        n += m;
+    }
+    return n;
+}
 static int settling(const struct bt_wedge *w, unsigned now) {
     return w->asked || (w->have_reset && now - w->reset_at < BT_RESET_SETTLE_MS);
 }

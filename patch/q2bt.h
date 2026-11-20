@@ -298,6 +298,37 @@ int bt_kmsg_split(const char *rec, unsigned *ms, const char **msg);
 enum { BT_UART_N = 7, BT_UART_PORT = 0 };
 #define BT_UART_PROC "/proc/tty/driver/INGENIC serial"
 int bt_uart_counts(const char *text, int port, unsigned *v);
+/* The Wi-Fi driver's inactive power save counts from its ps_info (" IPS enter count:N, IPS leave count:N"): how often
+ * it has powered the Wi-Fi side of the RTL8733BS down and up since it loaded. 1 when the line is there, else 0. */
+#define BT_WIFI_PS_PROC "/proc/net/rtl8733bs/wlan0/ps_info"
+int bt_wifi_ips(const char *text, unsigned *enter, unsigned *leave);
+/* The H5 driver's own debug lines, which the kernel's dynamic debug prints once q2guard asks for them at an H5 error
+ * line (docs/internals.md#bluetooth-controller-watchdog): the sequence and acknowledgement numbers each side holds,
+ * which the error lines leave out. The module's pr_debug formats, by kind:
+ *   0 "hu %p retransmitting %u pkts"            h5_timed_event      the Q2 sends its unacknowledged packets again
+ *   1 "Request for pkt %u from card"            h5_complete_rx_pkt  the controller's acknowledgement number
+ *   2 "Received seqno %u from card"             h5_complete_rx_pkt  a reliable packet from the controller, in order
+ *   3 "Removing %u pkts out of %u, up to seqno %u"  h5_pkt_cull     what that acknowledgement took off the Q2's queue
+ *   4 "Sending packet with seqno %u"            h5_prepare_pkt      the Q2's sequence number
+ *   5 "We request packet no %u to card"         h5_prepare_pkt      the Q2's acknowledgement number */
+enum { BT_H5D_KINDS = 6, BT_H5D_TEXT = 56, BT_H5D_CAP = 240 };
+#define BT_H5D_MS 20000     /* the debug lines stay on this long after the last H5 error line; one later is a new event */
+#define BT_H5D_MAX_MS 60000 /* and no longer than this in all, however long a storm's error lines keep coming */
+#define BT_H5D_MODULE "hci_uart_h5_kernel_5_10_21"
+#define BT_H5D_CTL "/proc/dynamic_debug/control"
+#define BT_H5D_CTL_DEBUGFS "/sys/kernel/debug/dynamic_debug/control"
+struct bt_h5dbg {
+    char last[BT_H5D_KINDS][BT_H5D_TEXT]; /* the last line logged of each kind, cut to fit */
+    int lines;                            /* logged since it was zeroed */
+};
+/* A kernel message's kind as above, or -1 */
+int bt_h5dbg_kind(const char *msg);
+/* 1 to log msg: a debug line that differs from the last logged of its kind, under BT_H5D_CAP lines. A wedge repeats
+ * the same few lines, so each state is logged once and each change of a number once more. */
+int bt_h5dbg_line(struct bt_h5dbg *d, const char *msg);
+/* The text for dynamic debug's control file, a query a line, turning those four functions' lines on or off; its
+ * length, or 0 when cap is too small */
+int bt_h5dbg_ctl(char *b, int cap, int on);
 enum { BT_W_NONE, BT_W_PROBE, BT_W_RESET, BT_W_HEALTHY, BT_W_GIVEUP, BT_W_DEFER, BT_W_LATE };
 struct bt_wedge {
     unsigned h5[BT_H5_STORM]; /* the kernel times of the last H5 error lines, a ring at h5_i */

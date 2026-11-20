@@ -317,3 +317,76 @@ def test_uart_counts(L):
     assert uart(L, SERIAL + b'13: uart:uart13 mmio:0 irq:1 tx:7 rx:8\n', 1)[0] == 1  # 1, not 13's line
     assert uart(L, b'', 0)[0] == 0
     assert uart(L, b'0: uart:unknown port:00000000 irq:0\n', 0)[0] == 0  # a port with no counts
+
+
+H5D_KINDS, H5D_TEXT, H5D_CAP = 6, 56, 240
+H5_DEBUG = [b'hu 00000000a1b2c3d4 retransmitting 1 pkts', b'Request for pkt 0 from card', b'Received seqno 3 from card',
+            b'Removing 0 pkts out of 1, up to seqno 4', b'Sending packet with seqno 5',
+            b'We request packet no 3 to card']
+
+
+class H5Dbg(C.Structure):
+    _fields_ = [('last', (C.c_char * H5D_TEXT) * H5D_KINDS), ('lines', C.c_int)]
+
+
+def test_h5_debug_kind(L):
+    """The H5 driver's six debug lines (its pr_debug formats in stock's hci_uart_h5 module, read from the module's
+    __dyndbg section) are told apart; its error lines and anything else are not debug lines."""
+    L.bt_h5dbg_kind.argtypes = [C.c_char_p]
+    assert [L.bt_h5dbg_kind(m) for m in H5_DEBUG] == list(range(H5D_KINDS))
+    for m in (ACKED.encode(), CHECKSUM.encode(), b'hu 00000000a1b2c3d4 count 12 rx_state 1 rx_count 0', b''):
+        assert L.bt_h5dbg_kind(m) == -1
+
+
+def test_h5_debug_line(L):
+    """A debug line is logged when it differs from the last of its kind, so a wedge's repeating pair (the peer's ack and
+    what it removed, 64 times a second) is two lines and a changed number is a new one; H5D_CAP lines at most."""
+    L.bt_h5dbg_line.argtypes = [C.c_void_p, C.c_char_p]
+    d = H5Dbg()
+    storm = [H5_DEBUG[1], H5_DEBUG[3]] * 64
+    assert [L.bt_h5dbg_line(C.byref(d), m) for m in storm] == [1, 1] + [0] * 126
+    assert L.bt_h5dbg_line(C.byref(d), b'Request for pkt 1 from card') == 1  # the peer's ack moved
+    assert L.bt_h5dbg_line(C.byref(d), H5_DEBUG[1]) == 1  # and back: not the last of its kind any more
+    assert L.bt_h5dbg_line(C.byref(d), ACKED.encode()) == 0
+    assert d.lines == 4
+    d = H5Dbg()
+    seen = [L.bt_h5dbg_line(C.byref(d), b'Sending packet with seqno %d' % (i % 8)) for i in range(H5D_CAP + 40)]
+    assert seen == [1] * H5D_CAP + [0] * 40 and d.lines == H5D_CAP
+    long = b'Removing 0 pkts out of 1, up to seqno 4' + b' x' * 40  # longer than a kept line: compared as cut
+    d = H5Dbg()
+    assert [L.bt_h5dbg_line(C.byref(d), long), L.bt_h5dbg_line(C.byref(d), long)] == [1, 0]
+
+
+def test_h5_debug_ctl(L):
+    """What q2guard writes to dynamic debug's control file: one query a line, each naming the module and one of the
+    functions whose lines bt_h5dbg_kind knows, +p to turn them on and -p off; 0 when the text does not fit."""
+    L.bt_h5dbg_ctl.argtypes = [C.c_char_p, C.c_int, C.c_int]
+    b = C.create_string_buffer(512)
+    funcs = ['h5_timed_event', 'h5_complete_rx_pkt', 'h5_pkt_cull', 'h5_prepare_pkt']
+    for on, flag in ((1, '+p'), (0, '-p')):
+        n = L.bt_h5dbg_ctl(b, len(b), on)
+        assert n == len(b.value) > 0
+        assert b.value.decode().splitlines() == [f'module hci_uart_h5_kernel_5_10_21 func {f} {flag}' for f in funcs]
+    assert L.bt_h5dbg_ctl(b, 40, 1) == 0
+
+
+PS_INFO = b"""======Power Saving Info:======
+*IPS:
+ IPS mode: IPS_NORMAL
+ IPS enter count:990, IPS leave count:989
+ Is PreAllocDeepSleep :0, Is PreAllocFwSleep:0
+*LPS:
+ LPS enter count:12, LPS leave count:12
+"""
+
+
+def test_wifi_ips(L):
+    """The Wi-Fi driver's inactive power save counters from its ps_info: how often it has powered the radio's side of
+    the chip down and up since it loaded. 0 when the text has no such line."""
+    L.bt_wifi_ips.argtypes = [C.c_char_p, C.POINTER(C.c_uint), C.POINTER(C.c_uint)]
+    e, lv = C.c_uint(7), C.c_uint(7)
+    assert L.bt_wifi_ips(PS_INFO, C.byref(e), C.byref(lv)) == 1 and (e.value, lv.value) == (990, 989)
+    assert L.bt_wifi_ips(b' LPS enter count:12, LPS leave count:12\n', C.byref(e), C.byref(lv)) == 0
+    assert L.bt_wifi_ips(b' IPS enter count:, IPS leave count:3\n', C.byref(e), C.byref(lv)) == 0
+    assert L.bt_wifi_ips(b' IPS enter count:5 leave count:3', C.byref(e), C.byref(lv)) == 0
+    assert L.bt_wifi_ips(b'', C.byref(e), C.byref(lv)) == 0
