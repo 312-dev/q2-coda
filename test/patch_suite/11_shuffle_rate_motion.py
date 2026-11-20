@@ -39,27 +39,26 @@ view=m.node('scroll_view','scroll_view_localmusic',stock); m.top=m.node('window'
 assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0)==0
 assert m.calls[0][:3]==('stock_localmusic',m.top,5)
 # Library order: the rows in library_edit.c's lr_default order (its one table), each row known by its letter: stock's
-# by get_localmusic_showinfo index (home.c's stocks table), the added ones by their icon, Search (no icon) by its label.
-# No card media folders here and no scrobbles, so no Podcasts and the rest.
+# by get_localmusic_showinfo index (home.c's stocks table), the added ones by their icon (no Search or Games row since
+# 2026-11-19). No card media folders here and no scrobbles, so no Podcasts and the rest.
 LR_DEFAULT=re.search(r'lr_default\[\] = "(\w+)"',(ROOT/'patch/library_edit.c').read_text()).group(1)
 STOCK_LETTER={'u':0,'s':1,'l':2,'a':3,'g':4,'i':5,'f':6,'q':7,'c':8,'n':9,'p':10}  # home.c L_* by letter
-ADDED_LETTER={'local_shuffle':'h','local_era':'e','local_fav':'r','local_frequentplay':'m','local_longsongs':'L','local_games':'G'}
+ADDED_LETTER={'local_shuffle':'h','local_era':'e','local_fav':'r','local_frequentplay':'m','local_longsongs':'L'}
 def letter_of(k):
     if k in stock: return next(c for c,i in STOCK_LETTER.items() if stock[i]==k)
     first=m.nodes[m.nodes[m.nodes[k]['children'][0]]['children'][0]]
-    return 'S' if first.get('text')=='Search' else ADDED_LETTER[first['image']]
+    return ADDED_LETTER[first['image']]
 kids=m.nodes[view]['children']; letters=''.join(letter_of(k) for k in kids)
-assert letters==''.join(c for c in LR_DEFAULT if c in letters) and len(set(letters))==len(kids)==18,letters
+assert letters==''.join(c for c in LR_DEFAULT if c in letters) and len(set(letters))==len(kids)==16,letters
 by=dict(zip(letters,kids)); row,era,rated,top,long=by['h'],by['e'],by['r'],by['m'],by['L']
 assert m.nodes[row]['style']=='s_listitem_black'
 icon,label,into=m.nodes[m.nodes[era]['children'][0]]['children']
 assert m.nodes[icon]['image']=='local_era' and m.nodes[label]['text']=='Years' and m.nodes[into]['image']=='list_into'
-icon,label,into=m.nodes[m.nodes[by['G']]['children'][0]]['children']
-assert m.nodes[icon]['image']=='local_games' and m.nodes[label]['text']=='Games'
 icon,label,into=m.nodes[m.nodes[long]['children'][0]]['children']
 assert m.nodes[icon]['image']=='local_longsongs' and m.nodes[label]['text']=='Long Songs'
-# hidden: My Fav (Ratings' Loved), Frequent (Most Played is its list), and the menu review's Shuffle, Hi-Res, Long Songs
-assert {k for k in kids if not m.nodes[k].get('visible',1)}=={stock[6],stock[7],row,stock[5],long}
+# hidden: My Fav (Ratings' Loved), Frequent (Most Played is its list), the menu review's Shuffle, Hi-Res, Long Songs,
+# and Update Local Music (Settings > General > Storage's Update Library since 2026-11-19)
+assert {k for k in kids if not m.nodes[k].get('visible',1)}=={stock[6],stock[7],row,stock[5],long,stock[0]}
 icon,label,into=m.nodes[m.nodes[top]['children'][0]]['children']
 assert m.nodes[icon]['image']=='local_frequentplay' and m.nodes[label]['text']=='Most Played'
 icon,label,into=m.nodes[m.nodes[rated]['children'][0]]['children']
@@ -681,10 +680,10 @@ assert m.texts()==['Long Songs','A','Artist · 21:40','A','Artist · 11:40']; pa
 # starts, a second press finds it running, and a timer reports the result once the thread ends.
 m=ShuffleMachine(); m.config.update(USER='u',PASSWORD='p',API_KEY='k')  # no API_SECRET: no row
 view=m.node('scroll_view','scroll_view_localmusic',[m.node('list_item') for _ in range(11)]); m.top=m.node('window','localmusic_page',[view])
-assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0)==0 and len(m.nodes[view]['children'])==18
+assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0)==0 and len(m.nodes[view]['children'])==16  # no Search or Games row (2026-11-19)
 assert ('/mnt/mmc/.scrobble.ini','LASTFM','API_SECRET','') in m.config_reads
 m.config['TOKEN']='tok'; m.nodes[view]['children']=[m.node('list_item') for _ in range(11)]
-assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0)==0 and len(m.nodes[view]['children'])==19
+assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0)==0 and len(m.nodes[view]['children'])==17
 button=m.nodes[m.nodes[view]['children'][-2]]['children'][0]; icon,label=m.nodes[button]['children']
 assert m.nodes[icon]['image']=='local_scrobble' and m.nodes[label]['text']=='Upload Scrobbles' and not m.nodes[button].get('name')
 library_geometry(m,m.nodes[view]['children'][-2])
@@ -706,8 +705,8 @@ m=ShuffleMachine(); m.card=[('Music',4),('PODCASTS',4),('Audiobooks',8)]
 m.handlers[int(manifest['patch_symbols']['stock_folder_trampoline'],16)]='stock_folder'
 m.handlers[int(manifest['patch_symbols']['stock_folder_back_trampoline'],16)]='stock_folder_back'
 view=m.node('scroll_view','scroll_view_localmusic',[m.node('list_item') for _ in range(11)]); m.top=m.node('window','localmusic_page',[view])
-assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0)==0 and len(m.nodes[view]['children'])==19
-button=m.nodes[m.nodes[view]['children'][-3]]['children'][0]; icon,label,into=m.nodes[button]['children']
+assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0)==0 and len(m.nodes[view]['children'])==17
+button=m.nodes[m.nodes[view]['children'][-2]]['children'][0]; icon,label,into=m.nodes[button]['children']  # before Update
 assert m.nodes[icon]['image']=='local_podcasts' and m.nodes[label]['text']=='Podcasts' and not m.nodes[button].get('name')
 f,ctx=m.handler(button,O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and [m.text(c[1]) for c in m.calls if c[0]=='navigator_to']==['folder_page']
@@ -728,7 +727,7 @@ m.handlers[int(manifest['patch_symbols']['stock_folder_back_trampoline'],16)]='s
 view=m.node('scroll_view','scroll_view_localmusic',[m.node('list_item') for _ in range(11)])
 m.top=m.node('window','localmusic_page',[view])
 m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0)
-button=m.nodes[m.nodes[view]['children'][-3]]['children'][0]
+button=m.nodes[m.nodes[view]['children'][-2]]['children'][0]
 f,ctx=m.handler(button,O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
 win=m.node('window','folder_page'); m.call(address=HOOKS['folder_page_init'][0],args=(win,0,0,0),gap=0)
 assert m.text(syms['g_folder_path'])=='/mnt/mmc/Audiobooks' and m.u.mem_read(syms['g_folder_layer'],1)[0]==3
@@ -842,7 +841,7 @@ passed()
 # Podcasts keeps its own root, Back there leaving the page, whatever Folder Root says.
 m=RootMachine('Music'); view=m.node('scroll_view','scroll_view_localmusic',[m.node('list_item') for _ in range(11)])
 m.top=m.node('window','localmusic_page',[view]); m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0)
-f,ctx=m.handler(m.nodes[m.nodes[view]['children'][-3]]['children'][0],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
+f,ctx=m.handler(m.nodes[m.nodes[view]['children'][-2]]['children'][0],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
 assert m.open()==('/mnt/mmc/Podcasts',3) and m.back()[::2]==(0,0); passed()
 
 # Go to Folder: a card song's hold menu row, after Go to Artist, opens folder_page in the song's folder as a
