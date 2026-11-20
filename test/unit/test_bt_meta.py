@@ -218,3 +218,98 @@ def test_cover_and_no_track(code):
 
 def test_only_invalid_ids_is_rejected_with_cover(code):
     assert run(code, request(0, 9), SONG, CT_16_COVER, HANDLE)[0] == 0x0a
+
+
+# ---- the AVRCP target's SDP record (bt_cover_sdp) ----
+
+def sdp_lists(code, record=0x7000, version=0x7100):
+    """bt_cover_sdp on record with the caller's AVCTP version data, bluetoothd's SDP functions stood in for here:
+    (what sdp_set_add_access_protos was handed, as nested lists of ('uuid', n), ('u16', n) and the version; what
+    was allocated and never freed)."""
+    blob, _ = code
+    entry = build.bt_meta()[1]['bt_cover_sdp'] - build.BT_META
+    u = Uc(UC_ARCH_MIPS, UC_MODE_MIPS32 | UC_MODE_LITTLE_ENDIAN)
+    u.mem_map(CODE, 0x10000)
+    u.mem_map(DATA, 0x10000)
+    u.mem_map(STACK - 0x10000, 0x10000)
+    u.mem_write(CODE, blob)
+    stubs = {}
+    for i, (name, (_, slot)) in enumerate(build.BT_SDP_GOT.items()):
+        stubs[DATA + 0x200 + i * 16] = name
+        u.mem_write(DATA + 0x200 + i * 16, struct.pack('<2I', 0x03e00008, 0))
+        u.mem_write(GP + slot, struct.pack('<I', DATA + 0x200 + i * 16))
+    u.mem_write(RET, struct.pack('<2I', 0x03e00008, 0))
+    objects, live, set_on = {version: 'version'}, set(), []
+
+    def new(value):
+        at = 0x9000 + 16 * len(objects)
+        objects[at] = value
+        live.add(at)
+        return at
+
+    def hook(uc, address, size, _):
+        name = stubs.get(address)
+        if not name:
+            return
+        assert uc.reg_read(UC_MIPS_REG_25) == address and uc.reg_read(UC_MIPS_REG_28) == GP
+        a0, a1 = uc.reg_read(UC_MIPS_REG_4), uc.reg_read(UC_MIPS_REG_5)
+        v0 = 0
+        if name == 'UUID16':
+            objects[a0] = ('uuid', a1)  # filled in place, on the caller's stack
+            v0 = a0
+        elif name == 'DATA_ALLOC':
+            assert a0 == 0x09  # SDP_UINT16
+            v0 = new(('u16', struct.unpack('<H', uc.mem_read(a1, 2))[0]))
+        elif name == 'LIST_APPEND':
+            v0 = a0 or new([])
+            objects[v0].append(a1)
+        elif name == 'SET_ADD_ACCESS_PROTOS':
+            set_on.append((a0, a1))
+        else:  # LIST_FREE, with no function to free its data; FREE
+            assert name == 'FREE' or a1 == 0
+            assert a0 in live, 'freed twice, or never allocated'
+            live.discard(a0)
+        uc.reg_write(UC_MIPS_REG_2, v0)
+    u.hook_add(UC_HOOK_CODE, hook, begin=DATA, end=DATA + 0x1000)
+    u.reg_write(UC_MIPS_REG_4, record)
+    u.reg_write(UC_MIPS_REG_5, version)
+    u.reg_write(UC_MIPS_REG_28, GP)
+    u.reg_write(UC_MIPS_REG_29, STACK - 0x100)
+    u.reg_write(UC_MIPS_REG_31, RET)
+    u.reg_write(UC_MIPS_REG_25, CODE + entry)
+    u.emu_start(CODE + entry, RET, count=20000)
+
+    def tree(at):
+        v = objects[at]
+        return [tree(e) for e in v] if isinstance(v, list) else v
+    (rec, lists), = set_on
+    assert rec == record
+    return tree(lists), live
+
+
+def test_sdp_record_lists_browsing_then_cover_art(code):
+    lists, live = sdp_lists(code)
+    assert lists == [[[('uuid', 0x0100), ('u16', 0x001b)], [('uuid', 0x0017), 'version']],  # L2CAP, AVCTP: browsing
+                     [[('uuid', 0x0100), ('u16', build.BT_COVER_PSM)], [('uuid', 0x0008)]]]  # L2CAP, OBEX: cover art
+    assert not live  # every list and both PSMs freed: the record keeps its own copies
+
+
+def test_sdp_jump_reaches_the_code_from_gp_wherever_it_is_loaded(code):
+    target = build.bt_meta()[1]['bt_cover_sdp']
+    bias, jump = 0x2000000, 0x39000
+    u = Uc(UC_ARCH_MIPS, UC_MODE_MIPS32 | UC_MODE_LITTLE_ENDIAN)
+    u.mem_map(bias, 0x200000)
+    u.mem_write(bias + jump, struct.pack('<5I', *build.bt_sdp_jump(target)))
+    u.reg_write(UC_MIPS_REG_28, bias + build.BT_GP)
+    u.reg_write(UC_MIPS_REG_31, 0x1234)
+    u.emu_start(bias + jump, bias + target, count=10)
+    assert u.reg_read(UC_MIPS_REG_25) == bias + target  # $t9 at the function, as its code expects
+    assert u.reg_read(UC_MIPS_REG_31) == 0x1234  # and the caller's return address untouched
+
+
+def test_the_psm_is_the_one_q2_bip_listens_on():
+    import re
+    assert int(re.search(r'#define BIP_PSM (0x[0-9a-f]+)', (build.ROOT / 'patch/q2bip.h').read_text())[1], 16) \
+        == build.BT_COVER_PSM
+    assert build.BT_COVER_PSM & 0x0101 == 0x0001  # a valid dynamic PSM: odd, its high byte even
+    assert len(build.BT_COVER_FILE) == 15  # with its NUL, the four words bt_meta.c builds

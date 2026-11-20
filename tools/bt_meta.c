@@ -196,3 +196,40 @@ u8 bt_meta_impl(void *session, u8 *pdu, u8 transaction, char *gp) {
     pdu[5] = (u8)(pos >> 8), pdu[6] = (u8)pos;
     return CTYPE_STABLE;
 }
+
+/* ---- the AVRCP target's SDP record (docs/internals.md#bluetooth-cover-art) ----
+ * Stock's record builder calls a helper (0x383b8) that adds the browsing channel to the record's
+ * AdditionalProtocolDescriptorLists. tools/build.py sends the target's call here (through a far jump
+ * laid over stock's GetElementAttributes, which nothing reaches any more), and this adds two lists
+ * where the helper added one: browsing as the helper wrote it (L2CAP PSM 0x1b, AVCTP at the version
+ * the caller holds), then cover art as AVRCP 1.6 has it (L2CAP at q2-bip's PSM, OBEX). The lists are
+ * built with bluetoothd's own SDP functions, reached through its GOT (BT_SDP_GOT_*). */
+#define SDP_UINT16 0x09
+#define UUID_L2CAP 0x0100
+#define UUID_AVCTP 0x0017
+#define UUID_OBEX 0x0008
+#define PSM_BROWSING 0x1b
+
+#define SDP(name, x, y) ((void *)(long)call3(gp, got(gp, BT_SDP_GOT_##name), (void *)(x), (void *)(y), 0))
+
+__asm__(".text\n.globl bt_cover_sdp\n.set noreorder\n"
+        "bt_cover_sdp:\n\tb bt_cover_sdp_impl\n\tmove $6, $28\n.set reorder\n");
+
+void bt_cover_sdp_impl(void *record, void *avctp_version, char *gp) {
+    u32 l2cap[5], avctp[5], obex[5]; /* BlueZ's uuid_t: 20 bytes */
+    volatile u16 psm_browsing = PSM_BROWSING, psm_cover = BT_COVER_PSM;
+    (void)SDP(UUID16, l2cap, UUID_L2CAP), (void)SDP(UUID16, avctp, UUID_AVCTP), (void)SDP(UUID16, obex, UUID_OBEX);
+    void *browse_psm = SDP(DATA_ALLOC, SDP_UINT16, &psm_browsing), *cover_psm = SDP(DATA_ALLOC, SDP_UINT16, &psm_cover);
+    void *b0 = SDP(LIST_APPEND, SDP(LIST_APPEND, 0, l2cap), browse_psm);
+    void *b1 = SDP(LIST_APPEND, SDP(LIST_APPEND, 0, avctp), avctp_version);
+    void *browse = SDP(LIST_APPEND, SDP(LIST_APPEND, 0, b0), b1);
+    void *c0 = SDP(LIST_APPEND, SDP(LIST_APPEND, 0, l2cap), cover_psm);
+    void *c1 = SDP(LIST_APPEND, 0, obex);
+    void *cover = SDP(LIST_APPEND, SDP(LIST_APPEND, 0, c0), c1);
+    void *all = SDP(LIST_APPEND, SDP(LIST_APPEND, 0, browse), cover);
+    (void)SDP(SET_ADD_ACCESS_PROTOS, record, all);
+    (void)SDP(FREE, browse_psm, 0), (void)SDP(FREE, cover_psm, 0);
+    (void)SDP(LIST_FREE, b0, 0), (void)SDP(LIST_FREE, b1, 0), (void)SDP(LIST_FREE, browse, 0);
+    (void)SDP(LIST_FREE, c0, 0), (void)SDP(LIST_FREE, c1, 0), (void)SDP(LIST_FREE, cover, 0);
+    (void)SDP(LIST_FREE, all, 0);
+}

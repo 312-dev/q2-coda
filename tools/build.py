@@ -508,6 +508,23 @@ BT_META_ROOM = 502  # an AVRCP PDU's parameters in one AVC frame (BlueZ's AVRCP_
 # the playing song's image handle and cover (patch/bt_cover.c): bt_meta.c reads the handle for AVRCP's attribute 8,
 # q2-bip (patch/q2bip.c) serves the cover. 16 bytes with its NUL: bt_meta.c builds it from four words.
 BT_COVER_FILE = '/tmp/q2-bip.now'
+# The AVRCP target's SDP record says so (AVRCP 1.6: version 0x0106, SupportedFeatures bit 8, and a second entry in
+# AdditionalProtocolDescriptorLists: L2CAP at BT_COVER_PSM, q2-bip's, then OBEX). Stock builds the record inline
+# in its adapter probe; BT_SDP_WORDS are (address, stock word, new word): the version, the features OR-ed in on the
+# browsing path, and the call to stock's browsing-list helper (0x383b8), sent to BT_SDP_JUMP instead. That is
+# stock's GetElementAttributes handler, unreachable since BT_META_SLOT took its table word: its first five words
+# become a jump to bt_meta.c's bt_cover_sdp at $gp + (bt_cover_sdp - BT_GP), which adds both lists with
+# bluetoothd's own SDP functions (BT_SDP_GOT: local GOT entries, read from the helper's and the builder's calls).
+BT_COVER_PSM = 0x1025  # BIP_PSM in patch/q2bip.h
+BT_GP = 0x13e420  # bluetoothd's canonical $gp (readelf -A)
+BT_SDP_WORDS = [(0x3a098, 0x24020105, 0x24020106),   # addiu $v0, $zero, 0x105: the profile version
+                (0x3a294, 0x34420040, 0x34420140),   # ori $v0, $v0, 0x40: browsing, and cover art (0x100)
+                (0x3a29c, 0x0411f846, 0x0411fc6d)]   # bal 0x383b8 -> bal BT_SDP_JUMP
+BT_SDP_JUMP = 0x39454
+BT_SDP_JUMP_STOCK = (0x3c1c0010, 0x279c4fcc)  # the handler's first words, as a guard (lui $gp; addiu $gp)
+BT_SDP_GOT = {'UUID16': ('sdp_uuid16_create', -31956), 'LIST_APPEND': ('sdp_list_append', -31952),
+              'DATA_ALLOC': ('sdp_data_alloc', -31940), 'LIST_FREE': ('sdp_list_free', -31924),
+              'SET_ADD_ACCESS_PROTOS': ('sdp_set_add_access_protos', -31360), 'FREE': ('free', -27732)}
 # Its launcher: keep the A2DP transport open 5 s after hciplayer closes the PCM (a stop, a skip, a cold start), so
 # a track change doesn't restart the stream (true-wireless buds started one ear first); and fdk-aac's afterburner on
 # for AAC (docs/internals.md#bluetooth-aac), which Shanling's forced AAC options (BT_AAC_SITES) leave as the option says.
@@ -2320,6 +2337,7 @@ def bt_meta():
         run('clang', '--target=mipsel-linux-gnu', '-march=mips32r2', '-mabicalls', '-fpic', '-Os', '-ffreestanding',
             '-fno-builtin', '-fno-jump-tables', '-Wall', '-Wextra', '-Werror', f'-DBT_META_ROOM={BT_META_ROOM}',
             *(f'-DBT_META_GOT_{k}={o}' for k, (_, o) in BT_META_GOT.items()),
+            *(f'-DBT_SDP_GOT_{k}={o}' for k, (_, o) in BT_SDP_GOT.items()), f'-DBT_COVER_PSM={BT_COVER_PSM:#x}',
             *(f'-DBT_COVER_PATH_{i}={w:#x}u' for i, w in enumerate(struct.unpack('<4I', BT_COVER_FILE.encode().ljust(16, b'\0')))),
             '-c', ROOT/'tools/bt_meta.c', '-o', d/'m.o')
         relocs = run('readelf', '-rW', d/'m.o')
@@ -2340,7 +2358,22 @@ def patch_bluetoothd(raw):  # pragma: no mutate block
     site, pdu, handler = BT_META_SLOT
     check(struct.unpack_from('<2I', raw, fileoff(raw, site)) == (pdu, handler), 'Unexpected bluetoothd handler table')
     struct.pack_into('<I', image, fileoff(raw, site + 4), sym['bt_meta_get_element_attributes'])
+    for site, stock, new in BT_SDP_WORDS:
+        check(struct.unpack_from('<I', raw, fileoff(raw, site))[0] == stock, f'Unexpected bluetoothd word at {site:#x}')
+        struct.pack_into('<I', image, fileoff(raw, site), new)
+    check(struct.unpack_from('<2I', raw, fileoff(raw, BT_SDP_JUMP)) == BT_SDP_JUMP_STOCK, 'Unexpected bluetoothd handler')
+    struct.pack_into('<5I', image, fileoff(raw, BT_SDP_JUMP), *bt_sdp_jump(sym['bt_cover_sdp']))
     return bytes(image)
+
+
+def bt_sdp_jump(target):
+    """The five words at BT_SDP_JUMP: a jump to target (a link-time address) wherever bluetoothd is loaded, from
+    its $gp, with $t9 at the target as position-independent code expects and $ra left as the caller's bal set it."""
+    delta = (target - BT_GP) & 0xffffffff
+    return (0x3c190000 | delta >> 16,      # lui $t9, delta's high half
+            0x37390000 | delta & 0xffff,   # ori $t9, $t9, its low half
+            0x033cc821,                    # addu $t9, $t9, $gp
+            0x03200008, 0)                 # jr $t9; nop
 
 def patch_bluealsa(raw):
     """Offer AAC at 48 kHz only. A headset that opens the stream itself (AirPods out of the case)
