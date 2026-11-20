@@ -122,6 +122,8 @@ typedef struct {
     char dl[32]; /* q2app's downloads=: the card folder its synced songs are in, "" for none */
     int sync, sync_pm; /* its state file's sync=: addon_sync's kind, and a download's permille */
     unsigned polled, launch_at, restart_at, play; /* play: its .play as read last, hashed */
+    int reach;       /* its state file's reach=down: its server out of reach (addon_offline) */
+    char srverr[24]; /* its srverr= as read last: the server failure toasted last (reach_read) */
 } app_t;
 
 static struct {
@@ -1266,6 +1268,7 @@ static void sleep_check(void) {
  * screen still turns off. An app that stopped by itself (idle, or from the phone) is let go, and
  * one stopped for USB storage starts again once the card is back. */
 static void sync_read(app_t *a, const char *raw);
+static void reach_read(app_t *a, const char *raw);
 static void poll_one(app_t *a) {
     unsigned now = time_now_ms();
     if ((!a->launched && !a->relaunch && !a->restart) || now - a->polled < ADDON_POLL_MS) return;
@@ -1287,10 +1290,11 @@ static void poll_one(app_t *a) {
     a->hold = number(raw, "hold") == 1;
     if (a->hold) reset_poweroptions_timer(1, 1, 0); /* standby, auto power-off; not the screen's */
     sync_read(a, raw);
+    reach_read(a, raw);
     stream_poll(a);
     sleep_read(a);
     if (access(a->pid, 0) && now - a->launch_at > ADDON_START_MS)
-        a->launched = a->hold = a->sync = 0;
+        a->launched = a->hold = a->sync = a->reach = 0;
 }
 
 /* The status row's sync (status_row.c, docs/internals.md#card-app-sync): what each running app's
@@ -1326,6 +1330,46 @@ int addon_sync(int *permille) {
         kind = a->sync;
     }
     return kind;
+}
+
+/* A card app's server out of reach (docs/internals.md#card-app-reach): its state file's
+ * reach=down <code> while the server can't be reached, until a request to it succeeds, which the
+ * status row shows (status_row.c SLOT_OFFLINE, through addon_offline); and srverr=<unix> <code>,
+ * each failure to say once as the icon toast (docs/oled-design.md#dialogs-and-toasts). <code> is
+ * an HTTP status ("Server error 502"), none (no answer: "Server not answering") or dns (a name that
+ * doesn't resolve: "Server not found"). A srverr is said once, when it is new to this demo and no
+ * older than REACH_FRESH_S by the clock the app wrote it with (so a demo started beside a running
+ * app doesn't say an old one), and only while Wi-Fi is connected: with none the missing Wi-Fi glyph
+ * already says why, and the toast would blame the server. Read at poll_one's pace. */
+#define REACH_FRESH_S 10
+static void reach_read(app_t *a, const char *raw) {
+    char v[sizeof a->srverr], text[40];
+    field(raw, "reach", v, sizeof v);
+    a->reach = !strncmp(v, "down", 4);
+    field(raw, "srverr", v, sizeof v);
+    if (!v[0] || !strcmp(v, a->srverr)) return;
+    tk_snprintf(a->srverr, sizeof a->srverr, "%s", v);
+    const char *code = v;
+    long long at = (long long)digits(&code), now = time((void *)0);
+    while (*code == ' ') ++code;
+    if (at < now - REACH_FRESH_S || at > now + REACH_FRESH_S || !wifi_level()) return;
+    if (*code >= '1' && *code <= '9')
+        tk_snprintf(text, sizeof text, "Server error %s", code);
+    else if (!strcmp(code, "none"))
+        tk_snprintf(text, sizeof text, "Server not answering");
+    else if (!strcmp(code, "dns"))
+        tk_snprintf(text, sizeof text, "Server not found");
+    else
+        return;
+    toast_later("srvtoast", text);
+}
+/* Whether a running app's server is out of reach and Wi-Fi is connected: the status row's
+ * offline glyph. */
+int addon_offline(void) {
+    if (!wifi_level()) return 0;
+    for (int i = 0; i < ap.n; ++i)
+        if (ap.a[i].launched && ap.a[i].reach) return 1;
+    return 0;
 }
 
 /* Card games: Library's Games lists them after its own (games.c); a row runs the game's binary

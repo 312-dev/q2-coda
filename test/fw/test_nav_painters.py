@@ -3261,8 +3261,8 @@ def test_the_clocks_timer_shows_the_minute_and_rearms(fw, st, titled, shown):
     assert not fw.calls('timer_remove')  # the firing timer is done: nothing else to stop
 
 
-# OLED's status row clock (navigation.c clock_place): centred on a full-width page with no title, else at the right
-# beside the play state, its text ending CLOCK_BESIDE (24) left of the battery's body, the title short of it. Its box
+# OLED's status row clock (navigation.c clock_place): centred on every full-width row, the title short of it; on Home's
+# Split at the right beside the play state, its text ending CLOCK_BESIDE left of it. Its box
 # is its text's width (canvas_measure_text) and hscroll_label's two 2 px margins.
 
 CLOCK_W = 38  # canvas_measure_text's width of "00:00", the widest clock
@@ -3299,14 +3299,15 @@ def test_an_untitled_page_s_clock_is_centred_across_the_status_row(fw, st):
     assert clock.props['style:normal:text_color'] == i32(INK_ROW)  # Text Secondary, as Home's was
 
 
-def test_a_titled_page_s_clock_sits_beside_the_play_state_and_the_title_ends_short_of_it(fw, st):
+def test_a_titled_page_s_clock_holds_the_centre_and_the_title_ends_12_px_short_of_it(fw, st):
+    """The clock holds the row's centre on a titled page too (the user's, 2026-11-19, mock_subsonic_offline.py): its
+    text centred on x 187.5, and the title's ellipsis CLOCK_CLEAR (12 px) short of the widest clock, centred."""
     row = StatusRow(fw, st, 'A Long Album Name That Runs On Past The Clock')
     clock = row.place()
-    edge = 322 - 6 - 10 - 7  # the clock's text ends here, CLOCK_BESIDE 7 px left of the level bars (SR_GAP 6 px
-    # left of the battery, 10 wide), hscroll_label's 2 px margin inside its box
-    assert clock.box[0] + clock.box[2] - 2 == edge and clock.box[2] == CLOCK_W + 4
+    assert abs(clock.box[0] + clock.box[2] / 2 - 187.5) <= 0.5 and clock.box[2] == CLOCK_W + 4
     title = row.w['label_title']
-    assert title.box[0] + title.box[2] - 2 == edge - CLOCK_W - 12  # its ellipsis 12 px clear of the widest clock
+    widest_left = (375 - CLOCK_W - 4 + 1) // 2 + 2  # the widest clock's text, centred
+    assert title.box[0] + title.box[2] - 2 == widest_left - 12
     assert clock.props['style:normal:text_color'] == i32(INK_ROW)
 
 

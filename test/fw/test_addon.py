@@ -40,7 +40,8 @@ class App(C.Structure):
                 *((n, C.c_int) for n in ('qr', 'game', 'audio', 'hidden', 'present', 'launched', 'hold', 'relaunch', 'restart', 'nostop', 'radio',
                                          'lyrics', 'covers', 'resume')),
                 ('dl', C.c_char * 32), *((n, C.c_int) for n in ('sync', 'sync_pm')),
-                *((n, C.c_uint) for n in ('polled', 'launch_at', 'restart_at', 'play'))]
+                *((n, C.c_uint) for n in ('polled', 'launch_at', 'restart_at', 'play')),
+                ('reach', C.c_int), ('srverr', C.c_char * 24)]
 
 
 class Ap(C.Structure):

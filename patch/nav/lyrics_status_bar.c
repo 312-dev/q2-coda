@@ -251,15 +251,15 @@ int bar_repaint(const void *info) {
  * than batt_room allows. widget_set_visible does nothing for an unchanged state and relayouts the
  * view for a new one. */
 static int slider_page(void *top);
-/* A status row's clock (tools/ipod.py status_row; docs/ipod.md#status-bar-and-clock): on a page
- * with no title, centred on the screen (x 187.5); else (a title on the left, or Home's Split with
- * its art beside the list) at the right, its text ending CLOCK_BESIDE left of the leftmost shown
- * slot (status_row.c status_slots_left: the battery's body, or the level bars, Wi-Fi, a sync, a
- * headset or Buttons Lock's padlock left of it); a centred clock that would reach that edge goes
- * there too.
- * Over Split's art it is in Text Primary, so the art's ink (coverflow.c home_ink) covers it whole,
- * one ink with the slots. The title's box ends CLOCK_CLEAR short of the widest clock, "00:00", so
- * its ellipsis does. The box is sized to the text as measured in the bar's face, with
+/* A status row's clock (tools/ipod.py status_row; docs/oled-design.md#status-row): on a full-width
+ * row, titled or not, centred on the screen (x 187.5), the title's box ending CLOCK_CLEAR short of
+ * the widest clock, "00:00", centred, so its ellipsis does; the glyph slots left of the battery get
+ * the room from CLOCK_BESIDE past that widest clock's text (status_row.c status_strip_room), and
+ * scroll there when they run past it, so the clock never moves. On Home's Split, with its art
+ * beside the list, the clock goes at the right, its text ending CLOCK_BESIDE left of the leftmost
+ * shown slot (status_slots_left), and the title's box (empty there) CLOCK_CLEAR short of it. Over
+ * Split's art it is in Text Primary, so the art's ink (coverflow.c home_ink) covers it whole, one
+ * ink with the slots. The box is sized to the text as measured in the bar's face, with
  * hscroll_label's 2 px margins, so the label's own alignment plays no part. Runs in the bar's
  * background paint, before the clock draws; a move repaints the bar after. */
 #define CLOCK_BESIDE 7 /* the text's box: 8 px of ground between the digits' ink and the slot */
@@ -269,14 +269,20 @@ static int clock_width(void *canvas, const unsigned *s) {
     canvas_set_font(canvas, theme_face(s, n, &px), px);
     return (int)(canvas_measure_text(canvas, s, (unsigned)n) + 0.5f);
 }
-/* The widest clock, "00:00", as measured once in the bar's face (it holds until a restart); 0 before
- * the title has a canvas to measure on. */
+/* The widest clock, "00:00", as measured once in the bar's face (it holds until a restart); 0
+ * before the title has a canvas to measure on. */
 static int clock_widest(void) {
     static const unsigned zeros[] = { '0', '0', ':', '0', '0', 0 };
     static int widest;
     void *canvas = st.bar_title ? widget_get_canvas(st.bar_title) : (void *)0;
     if (!widest && canvas) widest = clock_width(canvas, zeros);
     return widest;
+}
+/* The left edge of the strip's room on a full-width row: CLOCK_BESIDE past the widest clock's
+ * text, centred; 0 before the widest is measured. */
+static int strip_left(int widest) {
+    int ww = widest + 4; /* the box: hscroll_label's 2 px margins */
+    return widest ? (375 - ww + 1) / 2 + ww - 2 + CLOCK_BESIDE : 0;
 }
 static void clock_place(void *bar, void *top) {
     static void *clock;
@@ -290,12 +296,14 @@ static void clock_place(void *bar, void *top) {
     }
     int widest = clock_widest();
     const unsigned *text = widget_get_text(clock);
-    int split = coverflow_home_split(top), edge = status_slots_left() - CLOCK_BESIDE,
+    int split = coverflow_home_split(top);
+    status_strip_room(split ? 0 : strip_left(widest));
+    int edge = status_slots_left() - CLOCK_BESIDE,
         w = (text && *text ? clock_width(canvas, text) : widest) + 4,
-        right = st.bar_titled || split || (375 - w + 1) / 2 + w - 2 > edge,
-        x = right ? edge + 2 - w : (375 - w + 1) / 2,
+        x = split ? edge + 2 - w : (375 - w + 1) / 2,
         color = split == 2 ? (int)RGBA(0xffffff) : ink,
-        title_w = edge - widest - CLOCK_CLEAR + 2 - I(st.bar_title, W_X);
+        title_w = (split ? edge - widest : (375 - widest - 4 + 1) / 2 + 2) - CLOCK_CLEAR + 2 -
+                  I(st.bar_title, W_X);
     if (I(st.bar_title, W_W) != title_w)
         widget_resize(st.bar_title, title_w, I(st.bar_title, W_H));
     else if (I(clock, W_X) == x && I(clock, W_W) == w && (set_color ? set_color : ink) == color)
@@ -331,8 +339,8 @@ static unsigned battery_now(void) {
         cable = g_usbdet_value == 1 || (icon && !tk_strcmp(icon, "bar_charge")) || fake > 0;
     while (t && *t >= '0' && *t <= '9') level = level * 10 + (int)(*t++ - '0');
     int held = cable && !charging, weak = charging && charge_weak();
-    int full = cable && !weak &&
-               (fake == 2 || I(g_power_chargestate, 0) == 2 || (held && st.charge_held));
+    int full =
+        cable && !weak && (fake == 2 || I(g_power_chargestate, 0) == 2 || (held && st.charge_held));
     unsigned key = (unsigned)(level > 100 ? 100 : level) << 4;
     if (weak)
         key |= BATT_KEY_WEAK;
@@ -343,14 +351,12 @@ static unsigned battery_now(void) {
     return key | (unsigned)((icon && !tk_strcmp(icon, "bar_lowcharge")) || (held && level < 15));
 }
 /* The room the battery and the slots left of it have on OLED's status row: from the battery's end
- * (STATUS_ROW_INSET in from the right edge) to where the title's box would end at its start, the
- * clock's room, CLOCK_BESIDE and CLOCK_CLEAR (clock_place) taken, so the glyphs never squeeze
- * the title out. Before the clock's widest is measured (no paint yet) there is no limit. */
+ * (STATUS_ROW_INSET in from the right edge) to the strip's room's edge past the centred clock
+ * (strip_left), so the percentage gives way to the icon before the glyphs would have to scroll.
+ * Before the clock's widest is measured (no paint yet) there is no limit. */
 static int batt_room(void) {
     int widest = clock_widest();
-    return widest ? 375 - STATUS_ROW_INSET - CLOCK_BESIDE - CLOCK_CLEAR + 2 - widest -
-                        I(st.bar_title, W_X)
-                  : 375;
+    return widest ? 375 - STATUS_ROW_INSET - strip_left(widest) : 375;
 }
 static void bar_sync(void *bar) {
     if (bar_state_sync(bar) && !st.bar_timer) st.bar_timer = timer_add(bar_repaint, (void *)0, 0);
@@ -575,8 +581,8 @@ int ringnav_table_drag(void *w, int y) {
 }
 
 /* A virtual table's release (TABLE_SCROLL_CALLS, table_client's pointer up: the fling's target, or
- * where an over-drag settles): stock's table_client_scroll_to clamps its target to the rows less the
- * client's height, the box's foot at the screen's, which a drag held to the list end
+ * where an over-drag settles): stock's table_client_scroll_to clamps its target to the rows less
+ * the client's height, the box's foot at the screen's, which a drag held to the list end
  * (ringnav_table_drag) would be sent back down to. It runs with the client's height cut to the
  * shown one, so the fling ends with the last row's foot on the list end too. */
 int ringnav_table_scroll(void *w, int y, int ms) {
@@ -596,4 +602,3 @@ const char *theme_face(const unsigned *s, int n, int *px) {
         if (px) *px = fallback_px(*px, face);
     return face ? font_faces[face] : (const char *)0;
 }
-

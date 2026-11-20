@@ -705,6 +705,9 @@ def status_images(prefix):
             for n in (1, 2, 3) for k, c in STATE_INKS.items()}
     # the Bluetooth slot while a device connects: the rune in Text Tertiary per half (status_row.c headset_paint)
     out |= {f'{prefix}_status_btdim_{k}': status_glyph('bluetooth-bold', STATUS_PX, c) for k, c in BT_SPIN_INKS.items()}
+    # a card app's server out of reach (status_row.c SLOT_OFFLINE): cloud-slash in Warning, the same in both halves;
+    # its ink 13.6 px wide at 11 tall, so a STATUS_PX box
+    out |= {f'{prefix}_status_offline_{k}': status_glyph('cloud-slash-bold', STATUS_PX, token('warning')) for k in STATE_INKS}
     out |= {f'{prefix}_status_sync_{f}_{k}': status_turn('arrows-clockwise-bold', STATUS_PX, STATUS_INK, c, f / STATUS_SPIN / 2)
             for f in range(STATUS_SPIN) for k, c in STATUS_SECONDARY.items()}
     return out
@@ -829,6 +832,8 @@ def images(t):
     out |= {f'{prefix}_status_relay_{k}': phosphor('caret-right-bold', 8, c) for k, c in STATUS_SECONDARY.items()}
     out |= {f'{prefix}_batt{n}_{k}': inset_glyph(g, *inks) for n, g in BATT_GLYPHS.items() for k, inks in BATT_GLYPH_INKS.items()}
     out |= {f'{prefix}_chargetoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in CHARGE_TOASTS.items()}
+    # a card app's server error (addon.c reach_read): the icon toast's cloud-slash, Warning
+    out[f'{prefix}_srvtoast'] = phosphor('cloud-slash-fill', USB_TOAST_PX, token('warning'))
     out |= {f'{prefix}_chargetoast_battery_{k}': phosphor('battery-high-fill', USB_TOAST_PX, c) for k, c in CHARGE_TOAST_BATTERY.items()}
     out[f'{prefix}_chargebolt'] = phosphor('lightning-fill', CHARGE_BOLT_PX, token('positive'))
     out |= {f'{prefix}_swspin_{k}_{f}': spinner(f, SW_SPIN_SPOKES, SW_SPIN_PX, SW_SPIN_R, SW_SPIN_STROKE, SW_SPIN_FADE, c)

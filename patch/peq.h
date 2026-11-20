@@ -454,6 +454,7 @@ int addon_wake(const char *id), addon_ready(const char *id);
  * docs/internals.md#card-app-sync): 0 nothing, 1 checking, 2 downloading with *permille (unless 0)
  * how far */
 int addon_sync(int *permille);
+int addon_offline(void); /* a running app's server out of reach (status_row.c) */
 /* addon.c's card games (q2app game=1), Games' rows after its own: how many (a scan), one's name,
  * its start over the screen (1 when it runs), whether one runs, and ringnav_input's events for it
  */
@@ -730,6 +731,8 @@ const unsigned char *corner_cover(int r);
 #define SPOT_GREY 0xffaaaaaau
 void radio_search(void);      /* radio.c */
 void toast(const char *text); /* navigation.c */
+void toast_later(const char *glyph, const char *text); /* feedback.c */
+int wifi_level(void); /* status_row.c: Wi-Fi's bars, 0 not connected */
 /* smart_wifi.c: its radio woken, 1 while its link comes up; its radio off; off or coming
  * back; an action held for that link (fn(ctx, 0) once it is up, if page, or any page when 0,
  * is still in use) */

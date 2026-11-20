@@ -14,7 +14,7 @@ CY = 23  # OLED's status_y: the glyphs' centre row
 GAP = 6  # SR_GAP: the ground between two glyphs
 INK = 11  # SR_INK: every glyph's height, the clock's digits' (rows 17 to 27)
 WIFI_W = 16  # SR_WIFI_W
-SLOT_BATTERY, SLOT_PLAY, SLOT_WIFI, SLOT_SYNC, SLOT_HEADSET, SLOT_LOCK = range(6)
+SLOT_BATTERY, SLOT_PLAY, SLOT_WIFI, SLOT_SYNC, SLOT_HEADSET, SLOT_LOCK, SLOT_OFFLINE = range(7)
 TOUCH_DOWN, TOUCH_UP = 0xff, 0x103
 BARS = [(7, 10, 3), (9, 8, 3), (11, 5, 5), (11, 3, 7), (9, 3, 10), (7, 4, 11), (5, 6, 11), (3, 9, 9), (3, 11, 7), (5, 11, 4)]
 
@@ -50,8 +50,12 @@ class Row(StatusRow):
     def left(self):
         return self.fw.fn('status_slots_left', C.c_int)()
 
-    def paint(self):
+    def paint(self, clips=None):
+        """The slots painted on a fresh canvas: it and the art names loaded; clips, a list, gets each clip set."""
         canvas = Canvas(self.fw)
+        if clips is not None:
+            set_clip = lambda c, r, *_: clips.append(struct.unpack('<4i', C.string_at(r, 16))) or setattr(canvas, 'clip', list(clips[-1]))
+            self.fw.mock('canvas_set_clip_rect', set_clip)
         names: list = []
         load = canvas.load_image
         def loaded(w, name, bitmap, *_):
@@ -59,7 +63,8 @@ class Row(StatusRow):
             return load(w, name, bitmap)
         self.fw.mock('widget_load_image', loaded)
         canvas.art = {n: (WIFI_W, 14) for n in ('oled_status_wifi_3_d', 'oled_status_wifi_2_d', 'oled_status_wifi_1_d', 'oled_status_wifi_x_d')}
-        canvas.art |= {'oled_keylock_d': (14, 14), 'oled_status_bt_d': (14, 14), 'oled_status_down_d': (14, 14)}
+        canvas.art |= {'oled_keylock_d': (14, 14), 'oled_status_bt_d': (14, 14), 'oled_status_down_d': (14, 14),
+                       'oled_status_offline_d': (14, 14)}
         canvas.art |= {f'oled_status_sync_{f}_d': (14, 14) for f in range(8)}
         self.fw.fn('status_slots_paint', None, C.c_void_p, C.c_void_p)(self.bar.addr, canvas.addr)
         return canvas, names
@@ -390,25 +395,152 @@ def test_a_tap_on_the_bars_opens_now_playing_after_the_dispatch(fw, row):
     assert len(row.timers) == 1
 
 
-def test_a_centred_clock_that_would_reach_the_slots_goes_beside_them(fw, row):
-    fw.mock('canvas_measure_text', lambda *_: 250.0)  # centred, it would end at 313
+CLOCK_W = 38  # test_nav_painters.StatusRow's widest clock, "00:00"
+ROOM = (375 - CLOCK_W - 4 + 1) // 2 + CLOCK_W + 4 - 2 + 7  # the strip's left edge: CLOCK_BESIDE past the centred clock
+OFFLINE_W = 14  # SR_OFFLINE: cloud-slash's 13.6 px of ink at 11 tall
+
+
+def crowd(fw, row):
+    """Every slot shown: bars 10, Wi-Fi 16, a sync 16, a headset 33, the padlock 13 and the offline cloud 14, with
+    their six gaps: 138 px left of the battery's body, 30 more than the room from the centred clock."""
+    row.wifi(3)
+    row.app(1)
+    row.ap.a[0].reach = 1
+    bt_link(fw, status=3, level=70)
+    fw.var('g_keylock_flag', C.c_ubyte).value = 1
+    row.place()
+    return 10 + WIFI_W + 16 + 33 + 13 + OFFLINE_W + 6 * GAP
+
+
+def test_a_centred_clock_stays_centred_and_the_strip_that_reaches_it_marquees(fw, row):
+    """The clock holds the row's centre however many glyphs show (the user's, 2026-11-19, mock_subsonic_offline.py);
+    the glyphs left of the battery then start CLOCK_BESIDE past it, and the strip, wider than that room, rests with
+    its left end (the first glyph after the clock) in view, the rest under the battery's gap."""
+    over = ROOM - (BODY - crowd(fw, row))
     clock = row.place()
-    edge = BODY - GAP - 10 - 7  # CLOCK_BESIDE
-    assert clock.box[0] + clock.box[2] - 2 == edge
+    assert abs(clock.box[0] + clock.box[2] / 2 - 187.5) <= 0.5
+    assert over == 30 and row.left() == ROOM
+    sr_x = (C.c_int * 7).in_dll(fw.lib, 'status_row__sr')
+    assert sr_x[SLOT_OFFLINE] == ROOM  # at rest: the leftmost glyph at the room's edge
+    assert sr_x[SLOT_PLAY] == BODY - GAP - 10 + over  # the bars, past the strip's box, out of sight
+
+
+def test_a_strip_that_fits_keeps_its_place_by_the_battery(fw, row):
+    row.wifi(3)
+    row.place()
+    assert row.left() == BODY - GAP - 10 - GAP - WIFI_W
+    assert fw.fn('status_row__strip_off', C.c_int, C.c_int, C.c_uint)(0, 99999) == 0
+
+
+@pytest.mark.parametrize('t, off', [(0, 0), (2749, 0), (2750, 0), (2750 + 1000, 35), (2750 + 2000, 60),
+                                    (2750 + 1714 + 1499, 60), (2750 + 1714 + 1500, 0), (2750 + 1714 + 1500 + 2750 + 1000, 35)])
+def test_the_strip_rests_slides_at_35_px_a_second_holds_at_its_end_and_starts_again(fw, t, off):
+    """As Now Playing's lines (np_marquee.c): 2.75 s at rest, 35 px/s until its right end is in view (60 px: 1714 ms),
+    MARQUEE_HOLD_MS there, then back to rest."""
+    assert fw.fn('status_row__strip_off', C.c_int, C.c_int, C.c_uint)(60, t) == off
+
+
+def test_the_strip_paints_inside_its_box_with_6_px_fades_on_its_cut_ends(fw, row):
+    crowd(fw, row)
+    clips: list = []
+    canvas, names = row.paint(clips)
+    assert clips[0][:3] == (ROOM, 0, BODY - GAP - ROOM) and clips[-1] == (0, 0, 375, 320)  # the strip's box, then the frame's clip again
+    assert names[-1] == 'oled_status_offline_d'
+    ends = fw.fn('status_row__strip_ends', C.c_int)
+    assert ends() == 2  # at rest only the right end is cut
+    sr_off = C.c_int.from_address(C.addressof(C.c_char.in_dll(fw.lib, 'status_row__sr')) + fw.sizes['status_row__sr'] - 8)  # sr.off, before marq_at
+    sr_off.value = 12
+    assert ends() == 3  # mid-slide both are
+    sr_off.value = 30
+    assert ends() == 1  # at its end, the left
+
+
+def test_a_glyph_scrolled_out_of_the_strip_takes_no_tap(fw, row):
+    crowd(fw, row)
+    at = fw.fn('status_slot_at', C.c_int, C.c_int, C.c_int)
+    assert at(ROOM + 7, 13) == SLOT_OFFLINE
+    assert at(BODY - GAP - 5, 13) not in (SLOT_PLAY,)  # the bars' place by the battery, scrolled away at rest
+
+
+def test_the_marquee_runs_on_the_shared_loop_repainting_only_the_strip(fw, row):
+    crowd(fw, row)
+    now = [1000]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    row.sync_sig()
+    loops = (C.c_void_p * 4).in_dll(fw.lib, 'ui_kit__loops')
+    frame = fw.fn('status_row__sr_strip_frame', C.c_int)
+    assert C.cast(fw.lib.status_row__sr_strip_frame, C.c_void_p).value in list(loops)
+    row.dirty.clear()
+    assert frame() == 1 and row.dirty == []  # at rest: nothing to repaint
+    now[0] += 2750 + 400
+    assert frame() == 1 and row.dirty == [(ROOM, 0, BODY - GAP - ROOM, 26)]
+    fw.var('g_keylock_flag', C.c_ubyte).value = 0
+    bt_link(fw)
+    assert frame() == 0  # it fits again: the loop drops it
+
+
+def test_a_server_out_of_reach_shows_the_offline_glyph_first_after_the_clock(fw, row):
+    """Phosphor cloud-slash (bold) in Warning, the leftmost slot, while a running app says reach=down and Wi-Fi is
+    connected; with no Wi-Fi the missing fan says why, so it hides."""
+    row.status = 0
+    row.wifi(3)
+    row.app(0)
+    row.ap.a[0].reach = 1
+    assert row.left() == BODY - GAP - WIFI_W - GAP - OFFLINE_W
+    canvas, names = row.paint()
+    assert names == ['oled_status_wifi_3_d', 'oled_status_offline_d']
+    assert canvas.images[-1] == (BODY - GAP - WIFI_W - GAP - OFFLINE_W, CY - 7, OFFLINE_W, 14)
+    assert row.sync_sig() == 1 and row.sync_sig() == 0
+    row.wifi(None)
+    assert row.left() == BODY and row.sync_sig() == 1
+    row.wifi(3)
+    row.ap.a[0].launched = 0  # a stopped app says nothing
+    assert row.left() == BODY - GAP - WIFI_W
+
+
+class Later(C.Structure):
+    _fields_ = [('glyph', C.c_char * 32), ('text', C.c_char * 48)]
+
+
+@pytest.mark.parametrize('raw, toast', [(b'\nreach=down 502\nsrverr=1700000000 502\n', b'Server error 502'),
+                                        (b'\nsrverr=1700000000 none\n', b'Server not answering'),
+                                        (b'\nsrverr=1700000000 dns\n', b'Server not found'),
+                                        (b'\nsrverr=1699999989 502\n', b''),  # older than 10 s: a demo started late
+                                        (b'\nsrverr=1700000000 what\n', b''),
+                                        (b'\nreach=down none\n', b'')])
+def test_an_apps_server_error_toasts_once_with_the_cloud(fw, row, raw, toast):
+    row.wifi(3)
+    row.app(0)
+    fw.mock('fw_time', lambda *_: 1700000000)
+    later = fw.var('feedback__later', Later)
+    read = fw.fn('addon__reach_read', None, C.c_void_p, C.c_char_p)
+    read(C.addressof(row.ap.a[0]), raw)
+    assert later.text == toast and later.glyph == (b'srvtoast' if toast else b'')
+    assert row.ap.a[0].reach == int(raw.startswith(b'\nreach=down'))
+    later.text = b''
+    read(C.addressof(row.ap.a[0]), raw)
+    assert later.text == b''  # the same one again: said once
+
+
+def test_no_toast_without_wifi(fw, row):
+    row.app(0)
+    fw.mock('fw_time', lambda *_: 1700000000)
+    fw.fn('addon__reach_read', None, C.c_void_p, C.c_char_p)(C.addressof(row.ap.a[0]), b'\nsrverr=1700000000 502\n')
+    assert fw.var('feedback__later', Later).text == b''
 
 
 def test_the_percentage_gives_way_to_the_icon_where_the_glyphs_would_squeeze_the_title_out(fw, st):
-    """batt_room: from the battery's end to the title's start, less the clock's widest and its two gaps. Percent alone
-    (42 px) and the play state's bars fit it; with Wi-Fi, a sync and the padlock too they do not, and the icon stays."""
+    """batt_room: from the battery's end to the strip's room past the centred clock. Percent alone (42 px) and the play
+    state's bars fit it; with Wi-Fi, a sync and the padlock too they do not, and the icon stays."""
     row = Row(fw, st, 'A Title')
     st('battery').value = 1
     st('pct_digit').value = st('pct_sign').value = 10
-    fw.mock('canvas_measure_text', lambda *_: 200.0)  # the widest clock: a room of 375 - 62 - 7 - 12 + 2 - 200 - 22 = 74
+    fw.mock('canvas_measure_text', lambda *_: 80.0)  # the widest clock: a room of 375 - 62 - (146 + 82 + 7) = 78
     sync = lambda: fw.fn('navigation__bar_sync', None, C.c_void_p)(row.bar.addr)
     width = lambda: row.w['view_battery'].box[2]
     sync()
     percent = width()
-    assert percent > O['BATT_NUB_W'] + 10  # the digits: the bars alone leave room (16 px of 74)
+    assert percent > O['BATT_NUB_W'] + 10  # the digits: the bars alone leave room (16 px of 78)
     row.wifi(3)
     row.app(1)
     fw.var('g_keylock_flag', C.c_ubyte).value = 1

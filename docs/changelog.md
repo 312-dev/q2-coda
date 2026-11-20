@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Subsonic: when your music server can't be reached (no answer, or a proxy answering 502 for a server that is down), the Q2 now says so: a toast with a crossed-out cloud, "Server error 502", "Server not answering" or "Server not found", when it goes and for each song skipped because of it, and a crossed-out orange cloud in the status row, first after the clock, until the server answers again. Needs a Subsonic app that reports it (its next release); the one built in now shows nothing new.
+  - Status row (OLED): the clock now stays in the middle on every page, with the page's name ending before it; when more icons show than fit between the clock and the battery, they scroll slowly instead of pushing the clock aside, fading at an edge where an icon is cut off.
   - Logs: the Q2's log now includes what each running card app (Subsonic and the others) writes to its own log, under the app's name, and **Send Logs** also sends each app's own logs, so a download that fails while you are away from home can be seen afterwards.
   - Typing (OLED): the Wi-Fi password and Add Network show the status row with the page's title at the top again, instead of Shanling's old "Please enter password" box and back arrow, and no page you type on has a thin white outline round it any more.
   - Display (OLED): a confirmation's answers are now evenly spaced, like Shut Down's: a red answer (Forget, Remove, Erase, Reset) no longer sits apart from Cancel after a gap.
