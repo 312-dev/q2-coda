@@ -768,6 +768,10 @@ HSCROLL_ONCE = (0x5fb870, 0x1440002f, 0x1000002f)
 # lw $t9 at 0x5fc060, the 1st of hscroll_label_on_paint_self's 2 calls; the 2nd draws without): jal
 # ringnav_ellipsis_text, which narrows the box so the cut before stock's "..." never ends on a space.
 HSCROLL_ELLIPSIS = (0x5fc074, 0x0320f809)
+# glyph_cache_lookup stamps every hit with time_now_ms (jalr at 0x6b2bb8, lw $t9 at 0x6b2bb4), a clock_gettime system
+# call a glyph measured or drawn, about 950 a Songs frame: jal ringnav_glyph_stamp, the frame's time while a frame
+# paints (docs/internals.md#song-rows-cost). The stamp only orders the cache's glyphs for eviction.
+GLYPH_STAMP = (0x6b2bb8, 0x0320f809)
 # Since V1.36 set_hscroll_label_attribute gives a label a loop_interval_distance of its own width (widget_set_prop_int,
 # its jalr): the text runs off the label and comes back in after that gap, without an end to hold. Q2 Muse's labels hold
 # at the start and the end and snap back (ringnav_hscroll_start, ringnav_hscroll_lull), so the call goes and the
@@ -2156,7 +2160,7 @@ PAYLOAD_ROOTS = ['compact_set_row_layout', 'kb_host_open', 'kb_open_hint', 'ipod
                  'ringnav_albumcovers', 'ringnav_art_header', 'ringnav_art_name', 'ringnav_artist_art_name',
                  'ringnav_artist_covers', 'ringnav_batt_level', 'ringnav_batt_status', 'ringnav_batt_voltage', 'ringnav_boot', 'ringnav_bt_connect_start', 'ringnav_class_icon',
                  'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text',
-                 'ringnav_dark_usleep', 'ringnav_dialog_close', 'ringnav_ellipsis_text', 'ringnav_gbk_tag',
+                 'ringnav_dark_usleep', 'ringnav_dialog_close', 'ringnav_ellipsis_text', 'ringnav_gbk_tag', 'ringnav_glyph_stamp',
                  'ringnav_hold_info', 'ringnav_hold_timer', 'ringnav_hscroll_lull', 'ringnav_id3_path',
                  'ringnav_lyric_follow', 'ringnav_lyric_rows', 'ringnav_mainscheduling', 'ringnav_play_cover_wait', 'ringnav_scan_dir',
                  'ringnav_scan_refresh', 'ringnav_shuffle', 'ringnav_song_unknown', 'ringnav_table_drag',
@@ -2595,6 +2599,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, 0x5fc060))[0] == 0x8f99ccd0,
           'hscroll ellipsis: expected widget_draw_text_in_rect import')
     patch_word(patched, *HSCROLL_ELLIPSIS, jal(ps['ringnav_ellipsis_text']), 'an ellipsis never follows a space')
+    check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, GLYPH_STAMP[0] - 4))[0] == 0x8f99bfdc,
+          'glyph stamp: expected time_now_ms import')
+    patch_word(patched, *GLYPH_STAMP, jal(ps['ringnav_glyph_stamp']), "a frame's glyphs stamped with its time")
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, HSCROLL_GAP[0] - 4))[0] == 0x8f99aebc,
           'hscroll gap: expected widget_set_prop_int')
     patch_word(patched, *HSCROLL_GAP, 'a scrolling label ends its pass at its end')

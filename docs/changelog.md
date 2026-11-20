@@ -1,7 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
-  - Lists: each turn of the wheel now redraws the screen about 19 times instead of about 47 (an invisible scroll bar kept the screen redrawing for most of a second after every click), so scrolling Songs and other long lists is smoother and uses less battery.
+  - Lists: each turn of the wheel now redraws the screen about 19 times instead of about 47 (an invisible scroll bar kept the screen redrawing for most of a second after every click), and each redraw reads the clock about a quarter as often, so scrolling Songs and other long lists is smoother and uses less battery.
   - Songs: scrolling a long list with long artist names does less work per row, so it stutters less.
   - Lists: spinning the wheel fast through a long list (Songs, Albums, Artists, Genres) now jumps a whole letter at a time once you keep it up for about a second, with the letter shown beside the list, as an iPod did; slow down and it moves by rows again.
   - Songs: scrolled down, the list no longer shows a song above the Shuffle row, which made Shuffle look stuck floating over the list; Shuffle stays as the list's fixed header.
