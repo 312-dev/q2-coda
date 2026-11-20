@@ -242,8 +242,9 @@ QUEUE_LEAF = ('main_loop_queue_event', 0x65c418, 'ringnav_queue_event', (0x10800
 # Videos' player (patch/video.c): a separate executable against the rootfs's own libraries,
 # with display_logo's inode metadata.
 HELPER, HELPER_LIKE = 'usr/bin/q2video', 'usr/bin/display_logo'
-# with Radio's FM receiver (fmrx.c, docs/internals.md#radio-static), which takes libm too
-HELPER_SOURCES = ['video', 'fmrx']
+# with Radio's FM receiver (fmrx.c, docs/internals.md#radio-static), which takes libm too, and its stream's
+# decisions (tuner_core.c)
+HELPER_SOURCES = ['video', 'fmrx', 'tuner_core']
 HELPER_LIBS = ['lib/libc-2.28.so', 'lib/libpthread-2.28.so', 'usr/lib/libasound.so.2.0.0']
 # Rockbox dual boot (docs/boot.md#rockbox): S90play starts Rockbox whenever the card has it, as an
 # iPod with Rockbox does. Play/Pause held at power-on (patch/boot.c reads the key) or Rockbox's

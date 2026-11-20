@@ -47,6 +47,7 @@ def main():
           f'{RETRY_MAX_MS} ms (waits {waits})')
     check(waits == sorted(waits) and waits[0] <= 1000, 'each wait as long as the last or longer, the first a second')
     check(num('tries_after_sound') == 0, 'a stream that sounds again starts the count over')
+    check(num('wait_after_nudge_ms') == 1000, 'demo\'s nudge (Wi-Fi back) starts the count over too')
     assert not bad, f'{len(bad)} failed: {bad}'
     print('all passed')
 

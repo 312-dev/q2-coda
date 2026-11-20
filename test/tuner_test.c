@@ -77,5 +77,10 @@ int main(void) {
     tuner_ended(&s), tuner_ended(&s), tuner_ended(&s);
     tuner_take(&s, TUNER_PRIME);
     printf("tries_after_sound %d\n", s.tries);
+    /* seven ends, then demo's nudge (the Wi-Fi link back): the next restart without the wait */
+    tuner_feed n = { 0, 0, 0 };
+    for (int k = 0; k < 7; ++k) tuner_ended(&n);
+    tuner_nudge(&n);
+    printf("wait_after_nudge_ms %u\n", tuner_wait_ms(&n));
     return 0;
 }

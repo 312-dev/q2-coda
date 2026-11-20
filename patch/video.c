@@ -137,6 +137,7 @@ int meta(const char *s, const char *key, char *out, unsigned n) {
 
 #ifndef PEQ_HOST
 #include "fmrx.h"
+#include "tuner_core.h"
 struct timespec {
     long sec, nsec;
 };
@@ -441,23 +442,24 @@ static int radio(int argc, char **argv) {
  * process for the tuner's whole stay: the FM receiver (fmrx.c) runs continuously on ALSA DEVICE, hiss between
  * stations, and a station's stream, when demo names one, is its programme: ffmpeg decodes the URL to 48 kHz
  * stereo into a TUNER_RING ring, which the receiver plays from once TUNER_PRIME of it is in. A ring that runs
- * dry (the network stalled) drops the carrier until it is primed again, as a fading signal would. demo sends
- * datagrams to TUNER_SOCK: u and a URL (that station's stream, the last one's stopped), x (no stream), p and
- * "level offset fade gain station" as integers (fmrx_params: dB, kHz, thousandths, 0 or 1, an id), v and a byte (the volume, as radio's), q (quit). Gain 0 is a
- * pause: once the receiver has faded out nothing more is computed or written until the gain comes back.
- * TUNER_STATE says state= (idle, connecting, playing, stalled, error), the stream's title=, codec= and url=. */
+ * dry (the network stalled) drops the carrier, the empty channel's hiss, until it is primed again, as a fading
+ * signal would; a stream whose ffmpeg ends is started again for as long as its station is tuned, later each time
+ * (tuner_core.c). demo sends datagrams to TUNER_SOCK: u and a URL (that station's stream, the last one's
+ * stopped), x (no stream), r (the network is back: a stream not sounding is started again now), p and "level
+ * offset fade gain station" as integers (fmrx_params: dB, kHz, thousandths, 0 or 1, an id), v and a byte (the
+ * volume, as radio's), q (quit). Gain 0 is a pause: once the receiver has faded out nothing more is computed or
+ * written until the gain comes back. TUNER_STATE says state= (idle, connecting, playing, stalled, or error for an
+ * output it could not open), the stream's title=, codec= and url=. */
 #define TUNER_SOCK "/tmp/q2tuner.sock"
 #define TUNER_STATE "/tmp/q2tuner.state"
 #define TUNER_RING (2 * RATE)   /* frames: two seconds of the stream */
-#define TUNER_PRIME (RATE / 4)  /* frames in before the carrier comes up, and again after a stall */
-#define TUNER_FRAMES 512        /* frames a write, as the writer's CHUNK */
-#define TUNER_RESTARTS 5        /* a stream that ends is started again this often, a second more each time */
 
 static struct {
     short *ring;
     volatile unsigned head, tail; /* frames in and out, counting on */
-    volatile int primed, stalled, run, reading, quit;
-    int pid, ep, ap, tries;
+    volatile int run, reading, quit;
+    tuner_feed feed; /* the writer's: sounding, dry, the stream's ends (tuner_core.c) */
+    int pid, ep, ap;
     unsigned long reader;
     long long ended; /* when the stream's ffmpeg ended, to start it again */
     fmrx_params p;   /* demo's; the writer copies it a write at a time */
@@ -510,7 +512,7 @@ static void tuner_halt(void) {
     if (tu.ap >= 0) close(tu.ap);
     if (tu.ep >= 0) close(tu.ep);
     tu.pid = 0, tu.reader = 0, tu.ap = tu.ep = -1;
-    tu.primed = tu.stalled = 0;
+    tu.feed.primed = tu.feed.stalled = 0;
     tu.tail = tu.head;
 }
 
@@ -537,10 +539,7 @@ static void *tuner_writer(void *unused) {
     static float in[2 * TUNER_FRAMES], out[2 * TUNER_FRAMES];
     int idle = 0;
     while (!tu.quit) {
-        unsigned have = tu.head - tu.tail;
-        if (!tu.primed && have >= TUNER_PRIME) tu.primed = 1, tu.stalled = 0;
-        int prog = tu.primed && have >= TUNER_FRAMES;
-        if (tu.primed && !prog) tu.primed = 0, tu.stalled = 1; /* dry: the carrier drops until primed again */
+        int prog = tuner_take(&tu.feed, tu.head - tu.tail); /* dry: the carrier drops until primed again */
         for (unsigned i = 0; prog && i < TUNER_FRAMES; ++i) {
             unsigned at = (tu.tail + i) % TUNER_RING;
             in[2 * i] = tu.ring[2 * at] / 32768.0f, in[2 * i + 1] = tu.ring[2 * at + 1] / 32768.0f;
@@ -581,7 +580,8 @@ static void tuner_key(int sock, int soft) {
     if (k[0] == 'q') tu.quit = 1;
     if (k[0] == 'v' && n > 1) au.gain = soft ? bt_gain((unsigned char)k[1]) : 65536;
     if (k[0] == 'x') tu.url[0] = 0, tuner_halt(), tuner_state("idle");
-    if (k[0] == 'u' && strcmp(tu.url, k + 1)) snprintf(tu.url, sizeof tu.url, "%s", k + 1), tu.tries = 0, tuner_start();
+    if (k[0] == 'u' && strcmp(tu.url, k + 1)) snprintf(tu.url, sizeof tu.url, "%s", k + 1), tu.feed.tries = 0, tuner_start();
+    if (k[0] == 'r' && tu.url[0] && !tu.feed.primed) tuner_nudge(&tu.feed), tu.ended = 0, tuner_start();
     int v[5];
     if (k[0] == 'p' && sscanf(k + 1, "%d %d %d %d %d", v, v + 1, v + 2, v + 3, v + 4) == 5) {
         fmrx_params p = { (float)v[0], (float)v[1], v[2] / 1000.0f, (float)v[3], v[4] };
@@ -605,14 +605,15 @@ static int tuner(int argc, char **argv) {
         struct pollfd p[2] = { { sock, 1, 0 }, { tu.ep, 1, 0 } };
         poll(p, tu.ep >= 0 ? 2 : 1, 200);
         if (p[0].revents) tuner_key(sock, soft);
-        if (tu.url[0] && tu.pid > 0 && tu.primed && strcmp(tu.state, "playing")) tuner_state("playing");
-        if (tu.url[0] && tu.pid > 0 && tu.stalled && !strcmp(tu.state, "playing")) tuner_state("stalled");
+        if (tu.url[0] && tu.pid > 0 && tu.feed.primed && strcmp(tu.state, "playing")) tuner_state("playing");
+        if (tu.url[0] && tu.pid > 0 && tu.feed.stalled && !strcmp(tu.state, "playing")) tuner_state("stalled");
         if (tu.ep >= 0 && p[1].revents) {
             char c;
-            if (read(tu.ep, &c, 1) <= 0) { /* ffmpeg ended: started again, a second more each time */
+            if (read(tu.ep, &c, 1) <= 0) { /* ffmpeg ended: started again, later each time (tuner_wait_ms) */
                 tuner_halt();
                 tu.ended = now_ms();
-                tuner_state(++tu.tries > TUNER_RESTARTS ? "error" : "connecting");
+                tuner_ended(&tu.feed);
+                tuner_state("connecting");
                 continue;
             }
             if (c != '\n' && c != '\r') {
@@ -628,7 +629,7 @@ static int tuner(int argc, char **argv) {
             }
             if (meta(line, "StreamTitle", tu.title, sizeof tu.title)) tuner_state(tu.state);
         }
-        if (tu.url[0] && tu.pid <= 0 && tu.tries <= TUNER_RESTARTS && tu.ended && now_ms() - tu.ended > 1000 * tu.tries)
+        if (tu.url[0] && tu.pid <= 0 && tu.ended && tuner_retry_due(&tu.feed, (unsigned)(now_ms() - tu.ended)))
             tu.ended = 0, tuner_start();
     }
     tuner_halt();
