@@ -45,16 +45,13 @@ int fast_rotate_bgra8888(void *dst, void *src, const int *r, int o) {
     unsigned char *dp = d + (dx * 4 + dy * dll);
     const unsigned char *sp = s + ((unsigned)x * 4 + (unsigned)y * sll);
     int aligned = !(((unsigned)dp | (unsigned)sp | dll | sll) & 3);
-    /* each source row: its pixels in order along it, to dst's next pixel by step */
-    int step;
-    if (o == 90)
-        sp += rw * 4 - 4, step = (int)dll; /* the row read right to left, down a column of dst */
-    else if (o == 180)
-        step = -4; /* left along a row of dst */
-    else
-        step = (int)dll; /* down a column of dst */
-    int across = o == 90 ? 4 : o == 180 ? -(int)dll : -4; /* dst's start, row to row */
+    /* Each source row is read along (src_step) and laid down by step: at 90 right to left and
+     * down a column of dst, at 180 left along a row of dst, at 270 down a column. across moves
+     * dst's start from one source row to the next. */
+    if (o == 90) sp += rw * 4 - 4;
     int src_step = o == 90 ? -4 : 4;
+    int step = o == 180 ? -4 : (int)dll;
+    int across = o == 90 ? 4 : o == 180 ? -(int)dll : -4;
     for (int row = 0; row < rh; ++row, dp += across, sp += sll) {
         unsigned char *q = dp;
         const unsigned char *p = sp;
