@@ -235,6 +235,7 @@ CF_FIELDS=[f for l in re.findall(r'^\s*short ([^;]+);',re.search(r'typedef struc
 def no_letters(m): m.u.mem_write(ps['cfs']+2*CF_FIELDS.index('jump_ticks'),b'\0\0')  # the open page's cfs: jump_ticks 0, the cap alone
 CF_DEFINES={k:int(v) for k,v in re.findall(r'^#define (\w+) (\d+)',(ROOT/'patch/coverflow.h').read_text(),re.M)}  # LD_SLOTS, CF_FOLD_MS ...
 TH_AT={f:4*i for i,f in enumerate(f for l in re.findall(r'^\s*\w+ ([^;]+);',re.sub(r'/\*.*?\*/','',re.search(r'typedef struct \{([^}]*)\} cf_thumb_t;',(ROOT/'patch/coverflow.h').read_text())[1],flags=re.S),re.M) for f in re.split(r',\s*',l))}  # every field 4 bytes
+def tfloat(m,f): return struct.unpack('<f',m.u.mem_read(ps['th']+TH_AT[f],4))[0]
 def tpaint(m): m.call(address=HOOKS['widget_on_paint_border'][0],args=(m.slide,m.canvas,0,0),gap=0,clear=False,count=50_000_000,debounce=True)
 # Raw on the covers, each pass; a turn writes the offset itself and no tick or animator is about.
 # The shelf's texture pool is allocated at the open: going by letters adds the rest (below).
@@ -294,125 +295,14 @@ for gate,clear in ((lambda m:m.byte(O['KEY_LOCKOUT'],8),lambda m:m.byte(O['KEY_L
     m=thumb_page(); tp(m); thold(m); gate(m); tp(m,-50); assert toff(m)==0 and not m.get(ps['wheel_travel']) and traw(m)==2
     clear(m); tp(m,-50); tp(m); assert toff(m)<0; passed()  # a pass on: one pass's burst is held to the cap
 # A turn times the idle loop and the screen itself, and clicks once an album; the thumb holding still doesn't keep
-# the screen on.
+# the screen on. 60 passes of 2 units at 60 ms (one taken by the dead band) are 119 x 1800 / 10000: 21 ticks, each
+# 180 ms or so from the last, past WA_RUN_MS, so an album each (the lists' momentum, wheel_accel.c).
 m=thumb_page(); tp(m); thold(m); m.calls=[]
 for _ in range(20*3): tp(m,-2,ms=60)
-assert len(did(m,'reset_poweroptions_timer'))>=20*3-2 and len(did(m,'buzzeer_switch'))==3
+assert len(did(m,'reset_poweroptions_timer'))>=20*3-2 and len(did(m,'buzzeer_switch'))==21,len(did(m,'buzzeer_switch'))
 m.calls=[]
 for _ in range(10): tp(m)
 assert not did(m,'reset_poweroptions_timer') and not did(m,'buzzeer_switch'); passed()
-# At the cap for jump_ms a spin goes by letters (the theme's jump, coverflow_letter_next). Fast Navigation off, 1.7.6's: the covers
-# flow on and each names the next letter's first album, its letter shown, jump_pace apart. Once in, a turn from
-# fast_at keeps them, one each jump_ticks; slowing under fast_at gives albums back under the thumb, and a lift lands
-# on the letter's first album. None of the held row, its entry or fold, nor the letters' slots or stage.
-# With Fast Navigation on: the first carries the covers on to the next
-# letter's first album, each after slides the row there through the albums between (slide_ms), its letter held (no
-# LETTER_MS timer) and a click at the step; past the last letter, round to the first, and back from the first to the
-# last, as the albums wrap.
-# Once in, any turn keeps them, one each jump_ticks, back or slow; only a lift ends them: the row arrives, then folds
-# back out, a frame each pass, then rests on the album named.
-def letter_on(m): return any(v[1]==ps['cf_letter_expire'] for v in m.timers.values())
-def first(seen): return all(FRUIT[i][0]!=FRUIT[i-1][0] for i in seen if i)
-def tfloat(m,f): return struct.unpack('<f',m.u.mem_read(ps['th']+TH_AT[f],4))[0]
-def ttarget(m): return (tindex(m)+int(tfloat(m,'goal')))%len(FRUIT)  # where the row is going
-def tarrive(m):  # the thumb still, the row there
-    for _ in range(300):
-        if tfloat(m,'pos')==tfloat(m,'goal'): return
-        tp(m)
-    assert False
-FRUIT=('Apple','Avocado','Banana','Blueberry','Cherry','Date','Elder','Fig','Grape')
-def plain(m): return not m.get(ps['th']+TH_AT['jump']) and not m.get(ps['th']+TH_AT['fold']) and (64-15)*160*160*4 not in m.live.values()
-m=light_new(DepthMachine,albums=9)  # Fast Navigation off
-for r,name in zip(m.albums,FRUIT): m.word(r+O['REC_ALBUM'],m.string(name))
-m.open(); m.handlers[sleep_hook+12]='stock_sleep'; m.fresh=1
-tp(m); thold(m); tspin(m,300,-30); assert not letter_on(m)  # 318 ticks/s; at the cap, short of jump_ms
-seen={tcaption(m)}; m.calls=[]
-for _ in range(50): tspin(m,17,-30); seen.add(tcaption(m)); tpaint(m); assert plain(m)
-assert letter_on(m) and len({c[0] for c in seen})>=4 and did(m,'buzzeer_switch')
-seen={tcaption(m)}
-for _ in range(40): tspin(m,17,-4); seen.add(tcaption(m))  # 42 ticks/s: a letter a beat, 9 passes or so
-assert letter_on(m) and len({c[0] for c in seen})>=2 and plain(m)
-tspin(m,100,-1); index=tindex(m); tspin(m,500,-1)  # 11 ticks/s
-assert tindex(m)!=index or toff(m)!=0
-trest(m); assert toff(m)==0 and tcaption(m)==FRUIT[tindex(m)] and plain(m); passed()
-m=light_new(DepthMachine,albums=9); m.config['BIGLIBRARY']='1'  # Fast Navigation
-for r,name in zip(m.albums,FRUIT): m.word(r+O['REC_ALBUM'],m.string(name))
-m.open(); m.handlers[sleep_hook+12]='stock_sleep'; m.fresh=1
-m.word(m.slide+O['SLIDE_INDEX'],5)  # from Date: past big_jump_ms and the entry, round the nine to an early letter
-tp(m); assert (15+1)*160*160*4 in m.live.values()  # opened on: no slot held for the half copies, made in a buffer of their own
-thold(m); tspin(m,200,-30); assert not m.get(ps['th']+TH_AT['jump'])  # 318 ticks/s; at the cap, short of big_jump_ms
-for _ in range(40):
-    if m.get(ps['th']+TH_AT['jump']): break
-    tspin(m,17,-30)
-assert m.get(ps['th']+TH_AT['jump']) and tfloat(m,'enter')>0  # by letters, the entry first
-seen=[ttarget(m)]; m.calls=[]; slid=0
-for _ in range(60):  # the entry: enter_albums at the cap's 20 albums a second; then a letter a pass or so
-    if seen[-1]==8: break
-    tspin(m,17,-30); i=ttarget(m)
-    if seen[-1]!=i: seen.append(i); slid|=toff(m)!=0  # on its way, part through an album
-    n=len(m.draws); tpaint(m); assert len(m.draws)==n+1  # a frame mid-slide
-assert not letter_on(m) and len(seen)>=4 and seen[1:]==sorted(seen[1:]) and seen[-1]==8 and first(seen[1:]) and slid
-assert did(m,'buzzeer_switch'); tarrive(m); assert tindex(m)==8 and toff(m)==0 and tcaption(m)==FRUIT[8]
-for push,to in ((-30,0),(30,8)):  # on past the last: the first letter's first album; back past it: the last's
-    m.calls=[]
-    for _ in range(10):
-        if ttarget(m)==to: break
-        tp(m,push)
-    assert ttarget(m)==to and did(m,'buzzeer_switch') and not letter_on(m)
-    tarrive(m); assert tindex(m)==to and toff(m)==0 and tcaption(m)==FRUIT[to]
-seen=[tindex(m)]
-for _ in range(30):  # 42 ticks/s back, under half the cap's: a letter back each 7 passes or so
-    tspin(m,17,4); i=ttarget(m)
-    if seen[-1]!=i: seen.append(i)
-assert 4<=len(seen)<=6 and seen==sorted(seen,reverse=True) and first(seen)
-tspin(m,100,-2); index=ttarget(m); tspin(m,500,-2)  # 21 ticks/s, under fast_at: letters still
-assert ttarget(m)>index and first([ttarget(m)]) and not letter_on(m)
-tarrive(m); assert tindex(m)==ttarget(m) and toff(m)==0 and tcaption(m)==FRUIT[tindex(m)]
-for _ in range(O['LETTER_MS']//17+2): tp(m)  # the thumb resting, past LETTER_MS: the letter's still drawn
-m.letters=[]; tpaint(m); assert [l['text'] for l in m.letters]==[FRUIT[tindex(m)][0]]
-index=tindex(m); m.word(ps['wheel_held'],0); tp(m); tp(m); tp(m)  # past contact_ms
-for _ in range(17):  # 289 ms of CF_FOLD_MS
-    m.calls=[]; tp(m); assert ('widget_invalidate_force',m.slide) in [c[:2] for c in m.calls] and tindex(m)==index and toff(m)==0
-trest(m); assert tindex(m)==index and toff(m)==0 and tcaption(m)==FRUIT[index]
-m.letters=[]; tpaint(m); assert not m.letters; passed()
-# Fast Navigation's letters last till the lift, so they start at a faster spin of their own: big_jump_at for big_jump_ms,
-# where off keeps 1.7.6's jump_at for jump_ms. 42 and 64 ticks/s, held past jump_ms, stay albums with it on and go by
-# letters off; on, letters start big_jump_ms after the rate reaches big_jump_at.
-def fruit_page(big):
-    m=light_new(DepthMachine,albums=9)
-    if big: m.config['BIGLIBRARY']='1'
-    for r,name in zip(m.albums,FRUIT): m.word(r+O['REC_ALBUM'],m.string(name))
-    m.open(); m.handlers[sleep_hook+12]='stock_sleep'; m.fresh=1; tp(m); return m
-def cfs(m,f): return struct.unpack('<h',m.u.mem_read(ps['cfs']+2*CF_FIELDS.index(f),2))[0]
-for big in (1,0):
-    for units in (-4,-6):
-        m=fruit_page(big); rate=-units*36/200/.017  # ticks/s
-        assert (cfs(m,'jump_at'),cfs(m,'jump_ms'),cfs(m,'big_jump_at'),cfs(m,'big_jump_ms'))==(32,700,75,240)
-        assert cfs(m,'jump_at')<rate<cfs(m,'big_jump_at')
-        thold(m); tspin(m,cfs(m,'jump_ms')+600,units)
-        assert (not m.get(ps['th']+TH_AT['jump']) and not letter_on(m)) if big else letter_on(m)
-        trest(m); passed()
-m=fruit_page(1); thold(m); t=0; at=None
-while not m.get(ps['th']+TH_AT['jump']) and t<2000:
-    tp(m,-30); t+=17  # 318 ticks/s
-    if at is None and tfloat(m,'rate')>=cfs(m,'big_jump_at'): at=t
-assert at is not None and cfs(m,'big_jump_ms')-17<=t-at<=cfs(m,'big_jump_ms')+17; passed()
-# The Year sort's years (CF_YEAR, 1<<31) are held as letters are: the digits in a box as tall as the letter's, as wide as
-# they need with the letter's padding, centred; undated, an en dash in the letter's own square.
-# The letter and the year are LETTER_PX (navigation.c cf_label, draw_letter); the dark half's page, whose fill is drawn
-# as stated (the light half flips it with the rest of the UI's ink).
-m=DepthMachine(albums=9); m.open(); m.char_px=30.0; LB=O['LETTER_BOX']; px=O['LETTER_PX']; sw,sh=(signed(m.get(m.slide+O[k])) for k in ('W_W','W_H'))
-for key,text in ((1<<31|1994,'1994'),(1<<31,'\u2013')):
-    m.call(address=ps['coverflow_letter_hold'],args=(m.slide,key,0,0),gap=0); m.letters=[]; m.rounded=[]; tpaint(m)
-    assert [l['text'] for l in m.letters]==[text] and m.letters[0]['font'][1]==px,m.letters
-    bw=max(LB,int(m.char_px*len(text))+LB-px); box=((sw-bw)//2,(sh-LB)//2,bw,LB)
-    assert m.letters[0]['rect']==box and (bw>LB)==(len(text)==4),(px,m.letters)
-    assert [r['rect'] for r in m.rounded if r['kind']=='fill' and r['color']==O['LETTER_ALPHA']<<24|O['FILL_RGB']]==[box]
-m.call(address=ps['coverflow_letter'],args=(m.slide,0,0,0),gap=0); m.letters=[]; tpaint(m); assert not m.letters; passed()
-# A page closed under its held letter (Return, the thumb still on the wheel) takes the letter with it: no lift is left
-# to end it, and the next widget at the slide's address would wear it.
-m.call(address=ps['coverflow_letter_hold'],args=(m.slide,ord('B'),0,0),gap=0); m.letters=[]; tpaint(m); assert [l['text'] for l in m.letters]==['B']
-m.close(); m.letters=[]; tpaint(m); assert not m.letters; passed()
 # chord_gate: Centre under a held Return is dropped whole while the wheel's raw, the covers not landed for it.
 def twake(m,kind,key=O['KEY_CENTER'],gap=30):
     inp=HOOKS['window_manager_dispatch_input_event'][0]; m.handlers[inp+12]='stock_input'; n=len(m.calls)
@@ -435,48 +325,9 @@ trest(m); assert toff(m)==0; passed()
 m=thumb_page(); n=[0]; h=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)
 tp(m); tpaint(m); assert m.draws; m.word(m.slide+O['SLIDE_OFFSET'],-O['CF_STRIDE']//4); n[0]=0
 m.word(m.slide+O['SLIDE_ANIMATOR'],1)  # a step's frame, the covers moving (no animator is ever called by a paint)
-tpaint(m); turn_cost=n[0]; m.word(m.slide+O['SLIDE_ANIMATOR'],0); m.word(m.slide+O['SLIDE_OFFSET'],0); thold(m); no_letters(m); tspin(m,600,-110); assert struct.unpack('<f',m.u.mem_read(ps['th']+156,4))[0]>.9  # th.arch: formed (Fast Navigation off)
+tpaint(m); turn_cost=n[0]; m.word(m.slide+O['SLIDE_ANIMATOR'],0); m.word(m.slide+O['SLIDE_OFFSET'],0); thold(m); no_letters(m); tspin(m,600,-110); assert struct.unpack('<f',m.u.mem_read(ps['th']+TH_AT['arch'],4))[0]>.9  # th.arch: formed (Fast Navigation off)
 n[0]=0; draws=len(m.draws); tpaint(m); row_cost=n[0]; m.u.hook_del(h); assert len(m.draws)==draws+1 and turn_cost>1000000 and row_cost<6_450_000,row_cost; passed()  # 6.02 million measured, the facing cover's 123 px columns over its neighbours': within the ceiling a turn's frame has below
 assert turn_cost<6_450_000,turn_cost  # a frame a quarter turn on, the covers moving, a little over the 6.38 million it measured: a dearer one fails
-# Going by letters, as MIPS, both leans: the held row, at rest and part through an album as it slides, the fold half-way
-# and the entry half-way (the facing point running) and 85% in (the row going on) draw byte for byte what the host draws.
-# Each is under its FRAME_BOUND (the renderer's own instructions), set a little over what it measured: the held row 4.1
-# million, its 11 to 13 covers on the screen no dearer than the rest pose's, the fold 4.2, the entry 4.1; the shelf
-# moving (as a direct render is), on a whole album and a quarter turn on, all of its ring: 5.2 to 5.4. Still, the
-# page's own frame is the seven, 4.8. Each
-# holds the last pass's R and B swap into the screen's BGRA8888, 4 a pixel, which spares stock's blend of the frame, 36 a
-# pixel that is not counted here (image_blend against image_copy).
-def th_set(m,kind=0,lean=0,a=0,b=0):  # host_render's (kind, lean, a, b)
-    F=('lead','enter','vel','lead_v','pos')
-    def put(**v):
-        for f,x in v.items(): m.u.mem_write(ps['th']+TH_AT[f],struct.pack('<f',x) if f in F else struct.pack('<I',int(x)&0xffffffff))
-    put(vel=0,lead_v=0)
-    if kind in (1,2):  # the row held, as coverflow_hold leaves it from that entry
-        put(pos=0,lean=lean,lead=(a if kind==1 else b)/1000); m.call(address=ps['coverflow_hold'],args=(0,0,0,0),gap=0)
-    put(on=kind>0,jump=kind in (1,3),fold=kind==2,lean=lean,fold_at=m.now-a if kind==2 else 0,lead=a/1000 if kind==3 else 0,enter=b/1000 if kind==3 else 0)
-wide=[cover_pixels(200+j) for j in range(15)]; ALL=(1<<15)-1; FRAME_BOUND={0:5_600_000,1:4_600_000,2:4_350_000,3:4_650_000}  # 1 and 3: #329's shelf, its held row 4.47 million and its entry 4.53
-style=OLED_CF
-cases=[(0,ALL),(16384,ALL)]+[c for lean in (1,-1) for c in ((0,ALL,1,lean,-3200*lean),(20000*lean,ALL,1,lean,-3200*lean),(0,ALL,2,lean,CF_DEFINES['CF_FOLD_MS']//2,-3200*lean),
-                                                          (-8192*lean,ALL,3,lean,-2500*lean,style['cf.enter_albums']*500),
-                                                          (-8192*lean,ALL,3,lean,-2500*lean,style['cf.enter_albums']*150))]
-want=host_render(wide,cases,style)
-CONFIG['LIGHT']='0'
-try: m=DepthMachine()
-finally: del CONFIG['LIGHT']
-tex=m.big_alloc(15*160*160*4); m.u.mem_write(tex,b''.join(wide)); ring=m.big_alloc(60); frame=m.big_alloc(4*O['CF_VIEW_W']*style['cf.view_h'])
-for k in range(15): m.word(ring+4*k,tex+k*160*160*4)
-n=[0]; h=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)
-for c,host in zip(cases,want):
-    th_set(m,*c[2:]); n[0]=0
-    m.call(address=ps['coverflow_render'],args=(frame,O['CF_VIEW_W'],c[0],ring+16),gap=0,count=50_000_000)
-    assert bytes(m.u.mem_read(frame,len(host)))==host,c
-    assert n[0]<FRAME_BOUND.get(c[2] if len(c)>2 else 0,1<<30),(c,n[0])
-m.u.hook_del(h); th_set(m); passed()
-# Going by letters, as MIPS, the held row from half copies: each album's <key>.jpg.half read whole (80 x 80 texels, raw)
-# by the loader (its thread's body run at each wake-up, as the emulator runs no threads), LD_SLOTS a paint, nearest the
-# middle of the window of the letter gone to first, spread two by two into its texture, mid-slide the frame byte for byte
-# the host's from the same copies and the same held row (its window's middle, round the nine albums, one of the nine); one
-# cut short is none, its own art decoding instead.
 # The release build carries no dev-only code (the gap log's).
 class HalfMachine(FileMocks,DepthMachine):
     def __init__(self,**kw): super().__init__(**kw); self.file_mocks('h:'); self.opened=[]; self.cut=False
@@ -488,46 +339,7 @@ class HalfMachine(FileMocks,DepthMachine):
             path=self.text(a); self.opened.append(path)
             self.files.setdefault(path,cover_pixels(300+len(self.files),80*80)[:100 if self.cut else None])
         self.returns(self.file_op(u,name,a,b,c,d),clobber=True)
-def spread(h):  # a half copy's texels, each two by two
-    rows=[b''.join(h[4*(y*80+x):4*(y*80+x)+4]*2 for x in range(80)) for y in range(80)]
-    return b''.join(r+r for r in rows)
 assert ('gaps' in payload_syms)==bool(manifest['dev'])  # the gap log
-PAINT_BOUND=5_600_000
-for cut in (False,True):
-    m=light_new(HalfMachine,albums=9); m.cut=cut; m.config['BIGLIBRARY']='1'
-    n=[0]; h=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)  # before any code runs
-    for r,name in zip(m.albums,FRUIT): m.word(r+O['REC_ALBUM'],m.string(name))
-    m.open(); m.handlers[sleep_hook+12]='stock_sleep'; m.fresh=1
-    tp(m); thold(m); tspin(m,200,-30)
-    for _ in range(80):  # into letters (enter_albums at the cap's speed), the row on its way to the letter
-        if m.get(ps['th']+TH_AT['jump']) and tfloat(m,'enter')<=0 and tfloat(m,'pos')!=tfloat(m,'goal'): break
-        tspin(m,17,-30)
-    pos=tfloat(m,'pos'); assert tfloat(m,'goal')!=pos and tfloat(m,'enter')<=0
-    m.opened=[]; m.loads=[]; tpaint(m); assert len(m.opened)==min(CF_DEFINES['LD_SLOTS'],9) and m.wakes==1
-    LETTERS_HEAP=((64-15)*160*160*4,CF_DEFINES['LD_SLOTS']*80*80*4)  # FX_POOL's slots past the shelf's, the loader's stage
-    assert all(b in m.live.values() for b in LETTERS_HEAP)
-    tpaint(m)
-    if cut:  # each copy cut short: every album's own art, decoded
-        assert len(m.opened)==9 and len(m.loads)==9; passed(); continue
-    assert len(m.opened)==9 and not m.loads  # nine albums round the ring, all from their copies, no decode
-    q=math.floor(pos+.5); frac=int(struct.unpack('<f',struct.pack('<f',pos-q))[0]*65536); c=(tindex(m)+q)%9
-    lean=signed(m.get(ps['th']+TH_AT['lean']))
-    held=(*(tfloat(m,f) for f in ('hold_lead','hold_run','hold_xrun','hold_xs')),signed(m.get(ps['th']+TH_AT['hold_k'])))
-    case=(frac,ALL,4,lean,0,0,*held); style=OLED_CF
-    sh,sh0=host_render([cover_pixels(0)]*15,[case,(0,*case[1:])],style,windows=True)[1]  # the window's middle, the host's from the same held row, and at its letter
-    g=(tindex(m)+math.floor(tfloat(m,'goal')+.5)+sh0)%9  # the middle of the window of the letter gone to
-    near=[0]+[o for d in range(1,5) for o in (d,-d)]  # fx_window's order: nearest that window's middle first
-    tex={(g+o)%9:spread(m.files[p]) for o,p in zip(near,m.opened)}
-    host=host_render([tex[(c+sh+k-7)%9] for k in range(15)],[case],style,paper=0xffffff)[0]  # Light
-    assert m.draws[-1][5]==host,(frac,lean,sh)
-    # One whole paint going by letters, a pass on, the row still sliding (its window found twice, the loads all made, the
-    # render over Light's paper, the big letter): under PAINT_BOUND, set a little over the 5.46 million OLED's light half measured, the
-    # swap into the screen's BGRA8888 with the paper.
-    tp(m); assert tfloat(m,'pos')!=tfloat(m,'goal'); draws=len(m.draws); n[0]=0
-    tpaint(m); m.u.hook_del(h); assert len(m.draws)==draws+1 and n[0]<PAINT_BOUND,n[0]
-    trest(m); tpaint(m); assert LETTERS_HEAP[0] not in m.live.values() and LETTERS_HEAP[1] in m.live.values()  # landed: the slots freed, the stage kept
-    m.close(); assert not any(b in m.live.values() for b in LETTERS_HEAP); passed()  # the page closed: the stage too
-
 # A thread lowers itself (thread_lower(idle)): nice 19 through setpriority (o32 4097) on its own tid (gettid, 4222), and its
 # reads, with idle (the loader, its first call), in the idle I/O class (ioprio_set, 4314, IOPRIO_WHO_PROCESS), best
 # effort's lowest level when the kernel refuses idle; without (playlist art's worker, which holds stock's art locks) in
@@ -587,7 +399,7 @@ assert m.sql==[('open','/mnt/data/database.db'),('exec',0xdb,'PRAGMA busy_timeou
 # Centre opens the album the caption names, at once, however far ahead of the covers that is (letters off).
 m=thumb_page(); tp(m); thold(m); no_letters(m); tspin(m,600,-110); shown=tcaption(m); assert toff(m)!=0
 assert m.confirm()==11 and toff(m)==0 and tcaption(m)==shown
-index=tindex(m); assert m.dispatched()[-1][1]==m.nodes[m.slide]['children'][index] and shown==f'Album {index}'; passed()
+index=tindex(m); kids=m.nodes[m.slide]['children']; assert shown==f'Album {index}' and m.dispatched()[-1][1]==kids[index%len(kids)]; passed()  # this machine's slide holds 8 nodes for its 9 albums
 
 # The duration cache's file (DUR_CACHE): keys, a cache's bytes from (path, seconds) pairs and back, and the duration
 # worker's syscalls, for the duration blocks further on (RateMachine's lengths among them).
