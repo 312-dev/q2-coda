@@ -93,7 +93,7 @@ def run(built, web, tmp_path, *args, timeout=20):
 
 
 def sources(row):
-    return sorted({f.split('=', 1)[0] for f in row[6:]})
+    return sorted({f.split('=', 1)[0] for f in row[7:]})
 
 
 def test_chicago_end_to_end(built, web, tmp_path):
@@ -104,12 +104,13 @@ def test_chicago_end_to_end(built, web, tmp_path):
     assert sources(rows['WXRT']) == ['iheart', 'radiobrowser']
     assert sources(rows['WTBC-FM']) == ['triton']      # probed: no first-round source has it
     # no AAC mount: the MP3 one, asked for only after the AAC one said 404
-    assert rows['WSBC'][6:] == ['triton=https://playerservices.streamtheworld.com/api/livestream-redirect/WSBCAM.mp3']
+    assert rows['WSBC'][7:] == ['triton=https://playerservices.streamtheworld.com/api/livestream-redirect/WSBCAM.mp3']
     assert sources(rows['WCFS-FM']) == ['amperwave'], rows['WCFS-FM']  # Audacy's, probed on Amperwave
-    assert rows['WCFS-FM'][6] == 'amperwave=https://live.amperwave.net/direct/audacy-wcfsfmaac-imc'
+    assert rows['WCFS-FM'][7] == 'amperwave=https://live.amperwave.net/direct/audacy-wcfsfmaac-imc'
     assert sources(rows['WEEF']) == ['soundstack']
     assert 'tunein' in sources(rows['WDRV'])
-    assert rows['WGCI-FM'][4] == 'WGCI'  # iHeart's "107.5 WGCI", the frequency the tuner shows already left off
+    assert rows['WGCI-FM'][4] == '80' and int(rows['WPPN'][4]) < 60  # the strength: near and strong, far
+    assert rows['WGCI-FM'][5] == 'WGCI'  # iHeart's "107.5 WGCI", the frequency the tuner shows already left off
     # the probes only went to stations the first round left without a stream
     probed = {p.split('mount=')[1] for p in web.seen if 'mount=' in p}
     assert 'WTBCFMAAC' in probed and 'WXRTFMAAC' not in probed
@@ -216,11 +217,11 @@ def live(built, tmp):
             rows = [line.split('\t') for line in r.stdout.splitlines()[1:]]
             by: dict[str, int] = {}
             for row in rows:
-                for src in {f.split('=', 1)[0] for f in row[6:]}:
+                for src in {f.split('=', 1)[0] for f in row[7:]}:
                     by[src] = by.get(src, 0) + 1
             fm, am = [x for x in rows if x[1] == 'FM'], [x for x in rows if x[1] == 'AM']
-            print(f'{label:18} {how:4} {took * 1000:6.0f} ms  FM {sum(len(x) > 6 for x in fm)}/{len(fm)}  '
-                  f'AM {sum(len(x) > 6 for x in am)}/{len(am)}  {dict(sorted(by.items()))}  exit {r.returncode}')
+            print(f'{label:18} {how:4} {took * 1000:6.0f} ms  FM {sum(len(x) > 7 for x in fm)}/{len(fm)}  '
+                  f'AM {sum(len(x) > 7 for x in am)}/{len(am)}  {dict(sorted(by.items()))}  exit {r.returncode}')
             if how == 'cold' and r.stderr.strip():
                 print('   ', r.stderr.strip().splitlines()[-1])
 

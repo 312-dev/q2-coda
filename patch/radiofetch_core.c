@@ -78,6 +78,7 @@ static void consider(int fd, unsigned pool, const unsigned char *rec, double lat
     st->freq = u16(rec + 8);
     st->flags = rec[10];
     st->km = km;
+    st->reach = reach;
     char city[RF_CITY]; /* the last city of the pool ends nearer the file's end than its size */
     city[pread_some(fd, pool + u32(rec + 20), city, sizeof city - 1)] = 0;
     put(st->city, sizeof st->city, city);
@@ -744,10 +745,22 @@ static unsigned field(char *out, unsigned cap, const char *s) {
     return n;
 }
 
+/* How strong st is at the place, as the tuner's static model wants it: a carrier-to-noise ratio in
+ * dB, 24 to 80. The FCC contour is the 60 dBu line and field strength falls about 35 dB a decade
+ * beyond it, so the ratio is a constant plus 35 log10(reach / km). The prototype's figure was 92 +
+ * 10 log10(kW) - 35 log10(km), from power the table does not keep; 47 puts this within 3 dB of it
+ * for its two Chicago checks (WMBI, 100 kW at 32 km: 56 against 59; WPPN, 50 kW at 42 km: 54
+ * against 52.5). */
+int rf_signal(const rf_station *st) {
+    double km = st->km < 1 ? 1 : st->km, db = 47 + 35 * log10(st->reach / km);
+    return db < 24 ? 24 : db > 80 ? 80 : (int)(db + 0.5);
+}
+
 /* The list as text into out (cap bytes): the header
  *   #Q2RADIO 1 <fetched, Unix time> <latitude> <longitude> <complete|partial> <label>
  * then a line per station, its fields separated by tabs:
- *   call  FM|AM  frequency (93.1, 780)  km  name  city  then source=url for each stream
+ *   call  FM|AM  frequency (93.1, 780)  km  dB (rf_signal)  name  city  then source=url for each
+ *   stream
  * Its length, or 0 if it did not fit. */
 int rf_text(const rf_list *l, char *out, unsigned cap, long fetched, int complete,
             const char *label) {
@@ -761,8 +774,8 @@ int rf_text(const rf_list *l, char *out, unsigned cap, long fetched, int complet
         freq_text(st, f, sizeof f);
         field(nm, sizeof nm, st->name);
         field(city, sizeof city, st->city);
-        n += snprintf(out + n, cap - n, "%s\t%s\t%s\t%.1f\t%s\t%s", st->call,
-                      st->flags & RF_AM ? "AM" : "FM", f, st->km, nm, city);
+        n += snprintf(out + n, cap - n, "%s\t%s\t%s\t%.1f\t%d\t%s\t%s", st->call,
+                      st->flags & RF_AM ? "AM" : "FM", f, st->km, rf_signal(st), nm, city);
         for (int k = 0; k < st->n && (unsigned)n < cap; ++k)
             n += snprintf(out + n, cap - n, "\t%s=%s", st->s[k].src, st->s[k].url);
         if ((unsigned)n < cap) n += snprintf(out + n, cap - n, "\n");

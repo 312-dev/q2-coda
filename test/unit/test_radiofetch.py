@@ -23,6 +23,7 @@ class Stream(C.Structure):
 class Station(C.Structure):
     _fields_ = [('call', C.c_char * 8), ('base', C.c_char * 6), ('name', C.c_char * 48), ('city', C.c_char * 40),
                 ('tunein', C.c_char * 16), ('freq', C.c_ushort), ('flags', C.c_ubyte), ('km', C.c_float),
+                ('reach', C.c_float),
                 ('n', C.c_int), ('s', Stream * RF_STREAMS)]
 
 
@@ -312,6 +313,18 @@ def test_states(L):
     assert L.rf_state_name(b'ILL') is None
 
 
+def test_signal(L):
+    lst = near(L)
+    L.rf_signal.argtypes = [C.POINTER(Station)]
+    wmbi, wppn = station(lst, 'WMBI-FM'), station(lst, 'WPPN')
+    # the static model's own figures for these two (static-model.md): 59 and 52.5
+    assert abs(L.rf_signal(C.byref(wmbi)) - 59) <= 3 and abs(L.rf_signal(C.byref(wppn)) - 52.5) <= 3
+    assert L.rf_signal(C.byref(station(lst, 'WXRT'))) == 80  # 3 km: the top of the range
+    far = Station(km=200.0, reach=20.0)
+    near_ = Station(km=0.1, reach=20.0)
+    assert L.rf_signal(C.byref(far)) == 24 and L.rf_signal(C.byref(near_)) == 80
+
+
 def test_text_round_trip(L):
     lst = near(L)
     body = (FIX/'iheart.json').read_bytes()
@@ -324,8 +337,8 @@ def test_text_round_trip(L):
     lines = text.splitlines()
     assert lines[0] == '#Q2RADIO 1 1795160000 41.8708 -87.6242 complete ZIP 60605'
     wxrt = next(line.split('\t') for line in lines if line.startswith('WXRT\t'))
-    assert wxrt[:6] == ['WXRT', 'FM', '93.1', wxrt[3], '93 XRT', 'Chicago, IL'] and float(wxrt[3]) < 10
-    assert wxrt[6] == 'iheart=https://live.amperwave.net/direct/audacy-wxrtfmaac-imc'
+    assert wxrt[:7] == ['WXRT', 'FM', '93.1', wxrt[3], '80', '93 XRT', 'Chicago, IL'] and float(wxrt[3]) < 10
+    assert wxrt[7] == 'iheart=https://live.amperwave.net/direct/audacy-wxrtfmaac-imc'
     assert next(line for line in lines if line.startswith('WBBM\t')).split('\t')[1:3] == ['AM', '780']
     when, whole = C.c_long(), C.c_int()
     assert L.rf_header(text.encode(), C.byref(when), C.byref(whole)) == 1 and (when.value, whole.value) == (1795160000, 1)

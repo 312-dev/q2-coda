@@ -41,7 +41,7 @@ struct timespec {
     long tv_sec, tv_nsec;
 };
 int clock_gettime(int, struct timespec *);
-double sin(double), cos(double), asin(double), atan2(double, double), sqrt(double);
+double sin(double), cos(double), asin(double), atan2(double, double), sqrt(double), log10(double);
 #define O_RDONLY 0
 #define O_WRONLY 1
 #define O_CREAT 0x100
@@ -84,8 +84,9 @@ typedef struct {
     char call[8], base[6], name[RF_NAME], city[RF_CITY], tunein[16];
     unsigned short freq; /* FM in 100 kHz, AM in kHz */
     unsigned char flags;
-    float km; /* from the transmitter */
-    int n;    /* streams */
+    float km;    /* from the transmitter */
+    float reach; /* the station's reach toward the place, km (its contour there) */
+    int n;       /* streams */
     rf_stream s[RF_STREAMS];
 } rf_station;
 
@@ -119,6 +120,7 @@ int rf_soundstack(rf_station *st, const char *body);
 void rf_mount(const rf_station *st, char *out, int aac);
 const char *rf_state_name(const char *code);
 int rf_states(const rf_list *l, const char **out, int max);
+int rf_signal(const rf_station *st);
 int rf_text(const rf_list *l, char *out, unsigned cap, long fetched, int complete,
             const char *label);
 int rf_header(const char *text, long *fetched, int *complete);
