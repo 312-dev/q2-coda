@@ -163,7 +163,8 @@ def tree(work):  # pragma: no mutate block (kernel.org's tarball and make)
     field = '\tenum usb_device_speed\t\tmax_speed;\n'
     pad = field + '\tunsigned int\t\t\tq2_ssp_rate, q2_max_ssp_rate; /* tools/uac1_module/uac1_build.py */\n'
     text = g.read_text()
-    if pad not in text:
+    # A tree padded by an earlier run carries the fields already, whatever its comment names the script
+    if 'q2_ssp_rate, q2_max_ssp_rate;' not in text:
         if text.count(field) != 1:
             sys.exit('build.py: include/linux/usb/gadget.h has no single max_speed field to pad after')
         g.write_text(text.replace(field, pad))
