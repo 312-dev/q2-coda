@@ -476,13 +476,14 @@ class BmwCar(Car):
 
 def bmw_up(probe, tmp_path, *more):
     """A probe in --iap2 up to identification with the BMW's link parameters; (process, car, log, files)."""
-    files = {'car': tmp_path/'q2-iap.audio', 'cmd': tmp_path/'coda-rc.cmd', 'np': tmp_path/'now', 'art': tmp_path/'art'}
+    files = {'car': tmp_path/'q2-iap.audio', 'cmd': tmp_path/'coda-rc.cmd', 'np': tmp_path/'now', 'art': tmp_path/'art',
+             'rate': tmp_path/'q2-iap.rate'}
     files['art'].mkdir()
     files['np'].write_text('state=1\npos=61000\nlen=245\ntitle=Teardrop\nartist=Massive Attack\nalbum=Mezzanine\n'
                            'path=/nowhere/a.flac\nshuffle=0\nrepeat=2\n')
     p, ffs, log = start(probe, tmp_path, '--iap2', '--np', str(files['np']), '--car-pcm', 'hw:CARD=UAC1Gadget,0',
                         '--car-file', str(files['car']), '--cmd-file', str(files['cmd']), '--art-dir', str(files['art']),
-                        *more)
+                        '--rate-file', str(files['rate']), *more)
     fd = os.open(ffs.path/'ep1', os.O_RDONLY | os.O_NONBLOCK)
     car = BmwCar(ffs, fd)
     ffs.event(ENABLE)
@@ -590,6 +591,41 @@ def test_bmw_audio_and_seek(probe, tmp_path):
     finally:
         stop(p, fd)
     assert not files['car'].exists(), 'and with the probe'
+
+
+def test_bmw_audio_rate_follows_the_player(probe, tmp_path):
+    """USBDeviceModeAudioInformation carries the rate index of the song about to play, as the player writes it to the
+    rate file (docs/iphone-mode.md#per-song-rate): at StartUSBDeviceModeAudio, the car file's second line the same
+    rate, then again at each change of index while the car takes audio: 32, 44.1 and 48 kHz are 6, 7 and 8, the 48
+    kHz family above it 8, 88.2 kHz and anything unreadable 7. Nothing is sent after StopUSBDeviceModeAudio."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path)
+    try:
+        files['rate'].write_text('48000\n')
+        time.sleep(0.1)
+        car.send(message(0xDA00))
+        mid, ps = car.msg()
+        assert mid == 0xDA01 and ps[0] == b'\x08' and ps[1] == ps[2] == bytes(4), (hex(mid), ps)
+        time.sleep(0.1)
+        assert files['car'].read_text() == 'hw:CARD=UAC1Gadget,0\n48000\n'
+        seen = []
+        for rate, index in (('44100', 7), ('96000', 8), ('192000', 8), ('88200', 7), ('32000', 6), ('junk', 7),
+                            ('176400', 7)):
+            files['rate'].write_text(rate + '\n')
+            if seen and seen[-1] == index:
+                time.sleep(0.15)
+                continue
+            mid, ps = car.msg()
+            assert mid == 0xDA01, hex(mid)
+            seen.append(ps[0][0])
+            assert seen[-1] == index, (rate, seen)
+        car.send(message(0xDA02))
+        time.sleep(0.15)
+        files['rate'].write_text('48000\n')
+        with pytest.raises(Exception):
+            car.msg(timeout=0.4)
+    finally:
+        stop(p, fd)
+    assert 'audio: 48000 Hz announced (DA01 index 8)' in log.read_text()
 
 
 def test_bmw_artwork(probe, tmp_path):

@@ -308,6 +308,7 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
     if (untouched && f->dsd != dsd_out(way, song->hw, c->dsdmode)) return MOVED;
     dac_song(way, f->dsd);
     int natural = 0; /* a preloaded change that reopens: the old song played out first, and nobody pressed */
+    if (way == 3) output_car_song(f->rate, dsp_tail_held()); /* the car's rate for it (docs/iphone-mode.md#per-song-rate) */
     if (out && !output_take(out, f, way)) {
         if (!out_cut) output_drain(out), natural = 1;
         dac_mute(out_way);
@@ -420,6 +421,7 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
                 dac_mute(way);
                 close_output(0);
                 way = want_way;
+                if (way == 3) output_car_song(f->rate, 0);
                 if (!(out = output_open(f, way, song->hw))) return FAILED;
                 out_way = way;
                 volume_at_start(way);

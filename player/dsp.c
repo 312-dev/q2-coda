@@ -369,6 +369,8 @@ void dsp_eq_changed(struct dsp *s) {
     if (s && !s->pass && peq_load_active(&p) && memcmp(&p, &s->preset, sizeof p) && peq_update(&s->dsp, &p)) s->preset = p;
 }
 
+int dsp_tail_held(void) { return xf.len != 0; }
+
 void dsp_close(struct dsp *s, int ended) {
     if (!s) return;
     if (!s->pass) leave(s);

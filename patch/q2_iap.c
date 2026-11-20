@@ -10,8 +10,8 @@
  * audio (below, "Car Audio in the image").
  *
  *   q2-iap [--echo] [--echo-from N] [--iap2] [--np FILE] [--uuid HEX] [--car-pcm DEV] [--car-file F]
- *          [--cmd-file F] [--art-dir D] [--sessions N] [--for S] [--gap-ms MS] [--carplay] [--phase NAME]
- *          [--state F] [--udc F] [--counters DIR] [--under F] [--auto-ms MS] [--car-ms MS]
+ *          [--cmd-file F] [--rate-file F] [--art-dir D] [--sessions N] [--for S] [--gap-ms MS] [--carplay]
+ *          [--phase NAME] [--state F] [--udc F] [--counters DIR] [--under F] [--auto-ms MS] [--car-ms MS]
  *          LOG DIR:KIND...
  *   q2-iap --descs KIND     the descriptor and strings blobs for KIND on stdout (tests)
  *
@@ -259,7 +259,7 @@ static const char *np_file = "/tmp/coda-rc.now";
 /* What the player and the shim read (player/output.c output_car, patch/coda_rc_shim.c cr_command), and Cover Flow's
  * cache of covers (patch/coverflow.c art_path); each can be moved for the host tests. */
 static const char *car_file = "/tmp/q2-iap.audio", *car_pcm = "null", *cmd_file = "/tmp/coda-rc.cmd",
-                  *art_dir = "/mnt/mmc/.coverflow";
+                  *art_dir = "/mnt/mmc/.coverflow", *rate_file = "/tmp/q2-iap.rate";
 static char uuid[40] = "51320000-0000-4000-8000-000000000000", library_id[64];
 
 /* The input reports go out through a child that writes them to the HID instance's ep1 one at a time: a write there
@@ -359,15 +359,30 @@ static int write_whole(const char *path, const char *b, unsigned n) {
     return 0;
 }
 
-/* The car wants USB audio: the player's car way (player/output.c output_car) takes over while the file is there. */
+/* The car wants USB audio: the player's car way (player/output.c output_car) takes over while the file is there. Its
+ * second line is the rate the car was told (send_audio_rate). */
 static void io_audio(int on) {
     char b[160];
     if (!on) {
         unlink(car_file);
         return;
     }
-    int n = snprintf(b, sizeof b, "%s\n44100\n", car_pcm);
+    int n = snprintf(b, sizeof b, "%s\n%u\n", car_pcm, iap2_rates[iap2_rate_index(audio_hz)]);
     if (write_whole(car_file, b, (unsigned)n)) logline("iap2", "audio: the car's file could not be written");
+}
+
+/* The player's rate for the song about to play (player/output.c car_ask, docs/iphone-mode.md#per-song-rate), read
+ * every RATE_POLL_MS and handed to q2_iap2.c, which tells the car when it changes; none written, 44.1 kHz. */
+#define RATE_POLL_MS 20
+static void rate_poll(long now) {
+    static long at;
+    char b[16];
+    if (at && now - at < RATE_POLL_MS) return;
+    at = now;
+    int fd = open(rate_file, O_RDONLY), n = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
+    if (fd >= 0) close(fd);
+    b[n > 0 ? n : 0] = 0;
+    iap2_audio_rate(atoi(b) > 0 ? (unsigned)atoi(b) : 44100);
 }
 
 /* A button or a seek, as the Remote app's commands reach the shim (Car Remote on). Its numbers start high, so an ack
@@ -739,6 +754,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(o, "--np")) np_file = v, ++a;
         else if (!strcmp(o, "--car-pcm")) car_pcm = v, ++a;
         else if (!strcmp(o, "--car-file")) car_file = v, ++a;
+        else if (!strcmp(o, "--rate-file")) rate_file = v, ++a;
         else if (!strcmp(o, "--cmd-file")) cmd_file = v, ++a;
         else if (!strcmp(o, "--art-dir")) art_dir = v, ++a;
         else if (!strcmp(o, "--state")) state_file = v, ++a;
@@ -809,7 +825,7 @@ int main(int argc, char **argv) {
             int r = read(in[k].ep0, e, sizeof e); /* one event at a time: a SETUP must be answered first */
             if (r == (int)sizeof e) event(&in[k], e);
         }
-        if (iap2_mode) iap2_tick();
+        if (iap2_mode) rate_poll(mono_ms()), iap2_tick();
         long now = mono_ms();
         host_poll(now);
         health_poll(now);

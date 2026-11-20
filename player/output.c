@@ -142,6 +142,83 @@ void output_car_gone(void) {
 #endif
 }
 
+/* ---- the car's rate, song by song (docs/iphone-mode.md#per-song-rate) ----
+ *
+ * The gadget's module (tools/uac1_module, q2-uac1-playback-rates.patch) offers 32, 44.1 and 48 kHz and plays at the
+ * one the car last set (its SET_CUR); P_RATE_FILE is that rate. The player is the one that knows the next song's rate,
+ * so it writes the rate it wants to CAR_RATE_FILE, q2-iap tells the car (DA01, patch/q2_iap.c rate_poll), and the
+ * car sets it. The PCM is only ever opened at P_RATE_FILE's rate: the car's packets are sized by it, and a PCM at
+ * another would play off speed. A song at a rate the car is not at is resampled to the car's. A module with no
+ * P_RATE_FILE (one rate) is left at the car file's rate, and nothing is asked. */
+#define CAR_RATE_FILE "/tmp/q2-iap.rate"
+#define P_RATE_FILE "/sys/module/usb_f_uac1/parameters/p_rate"
+/* how long a rate change waits for the car to follow; how often a song playing looks at P_RATE_FILE; the silence
+ * written after the last song's tail before the PCM closes, so the closed PCM's repeated packet is silence */
+enum { CAR_FOLLOW_MS = 500, CAR_CHECK_MS = 50, CAR_PAD_MS = 60, CAR_DRAIN_MS = 600 };
+
+/* The car's rate for a song at rate: 32, 44.1 and 48 kHz as they are; above 48 kHz the family's, 48 kHz for 96 and
+ * 192 kHz and 44.1 kHz for 88.2 and 176.4 kHz, so the resampler's ratio is a whole number; anything else 44.1 kHz. */
+int car_rate_for(int rate) {
+    if (rate == 32000 || rate == 44100 || rate == 48000) return rate;
+    return rate > 48000 && rate % 48000 == 0 ? 48000 : 44100;
+}
+
+/* P_RATE_FILE (Q2PLAYER_P_RATE in a host test), or 0 with no such file */
+static int car_p_rate(void) {
+    const char *path = getenv("Q2PLAYER_P_RATE") ? getenv("Q2PLAYER_P_RATE") : P_RATE_FILE;
+    char b[16];
+    int fd = open(path, O_RDONLY | O_CLOEXEC), n = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
+    if (fd >= 0) close(fd);
+    if (n <= 0) return 0;
+    b[n] = 0;
+    return atoi(b) > 0 ? atoi(b) : 0;
+}
+
+/* The rate wanted, for q2-iap: written whole (a rename), and only when it changes. Q2PLAYER_CAR_RATE in a host test. */
+static int car_asked;
+
+static void car_ask(int rate) {
+    if (rate == car_asked) return;
+    const char *path = getenv("Q2PLAYER_CAR_RATE") ? getenv("Q2PLAYER_CAR_RATE") : CAR_RATE_FILE;
+    char tmp[1100];
+    snprintf(tmp, sizeof tmp, "%s.new", path);
+    FILE *f = fopen(tmp, "w");
+    if (!f) return;
+    fprintf(f, "%d\n", rate);
+    if (fclose(f) || rename(tmp, path)) { unlink(tmp); return; }
+    car_asked = rate;
+}
+
+/* A rate the car was asked for and did not set, or set another over: not waited for again (each song of an album
+ * would wait) until another is asked for. */
+static int car_refused;
+
+/* Asks for want, then waits up to CAR_FOLLOW_MS for the car to set it: the rate the car plays at after, and in
+ * *waited_ms how long that took. */
+static int car_follow(int want, int *waited_ms) {
+    int64_t t = car_trace_now();
+    car_ask(want);
+    int r = car_p_rate();
+    while (r != want && car_trace_now() - t < CAR_FOLLOW_MS * 1000LL) usleep(2000), r = car_p_rate();
+    *waited_ms = (int)((car_trace_now() - t) / 1000);
+    car_refused = r == want ? 0 : want;
+    return r;
+}
+
+/* The one-off line for each change of the car's rate, beside the trace's line a second (cartrace.c) */
+static void car_rate_line(const char *what, int from, int to, int waited_ms, int gap_ms) {
+    char line[160];
+    int n = gap_ms < 0 ? snprintf(line, sizeof line, "car rate %d->%d %s: wait=%dms", from, to, what, waited_ms)
+                       : snprintf(line, sizeof line, "car rate %d->%d %s: wait=%dms gap=%dms", from, to, what, waited_ms, gap_ms);
+    plog('I', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
+}
+
+/* engine.c's word for the song about to start on way 3 (output_car_song): its rate, and whether a crossfade carries
+ * the last song's tail into it. Taken by the next output_open or output_take on way 3; a click's PCM has none. */
+static int car_song_rate, car_song_keep;
+
+void output_car_song(int rate, int keep) { car_song_rate = rate, car_song_keep = keep; }
+
 #ifdef HAVE_ALSA
 /* The headset connected last, whatever /mnt/data/asound.conf names (docs/player.md#output, "Which headset"):
  * bluealsa's plugin takes 00:00:00:00:00:00 as the PCM with the highest Sequence, the device that connected most
@@ -192,10 +269,8 @@ static int alsa_sw(struct output *o) {
 
 static int alsa_open(struct output *o, int outputway, int hw) {
     snd_pcm_hw_params_t *p = NULL;
-    unsigned car_rate = CAR_RATE;
-    if (outputway == 3) output_car(NULL, 0, &car_rate);
-    unsigned want = outputway == 1 ? BT_ASK : outputway == 3 ? car_rate : (unsigned)o->f.rate, rate = want, buffer = BUFFER_US,
-             periods = PERIODS;
+    /* way 3's o->f.rate is the car's (car_open_rate, car_reopen) */
+    unsigned want = outputway == 1 ? BT_ASK : (unsigned)o->f.rate, rate = want, buffer = BUFFER_US, periods = PERIODS;
     const char *name = device(outputway, hw);
     /* alsa-lib reads its configuration again only when alsa.conf itself changes, not /mnt/data/asound.conf, which
      * its hook loads and demo rewrites at each link (SaveBlueAlsa), so the rest of bluealsa's defaults there would
@@ -327,12 +402,7 @@ static int sink_open(struct output *o, const char *dir, int outputway) {
     }
     if (i == n) return -1;
     o->f.bytes = c[i][0], o->f.is_float = c[i][1];
-    if (outputway == 1) o->f.rate = bt && atoi(bt) > 0 ? atoi(bt) : BT_ASK;
-    if (outputway == 3) {
-        unsigned r = CAR_RATE;
-        output_car(NULL, 0, &r);
-        o->f.rate = (int)r;
-    }
+    if (outputway == 1) o->f.rate = bt && atoi(bt) > 0 ? atoi(bt) : BT_ASK; /* way 3's is the car's already */
     char path[1024];
     snprintf(path, sizeof path, "%s/%04d_%d_%d_%s%s.raw", dir, opens++, o->f.rate, o->f.channels, sink_name(&o->f),
              outputway == 1 ? "_bt" : outputway == 2 ? "_usb" : outputway == 3 ? "_car" : "");
@@ -358,6 +428,21 @@ static int resampler(struct output *o) {
     return 0;
 }
 
+/* The rate a way-3 PCM opens at: with a song's word (output_car_song), the car is asked for its rate and followed
+ * for CAR_FOLLOW_MS; a click's PCM takes the car's rate as it is; a one-rate module, the car file's. */
+static int car_open_rate(void) {
+    unsigned line = CAR_RATE;
+    output_car(NULL, 0, &line);
+    int now = car_p_rate(), want = car_song_rate ? car_rate_for(car_song_rate) : 0, waited = 0;
+    car_song_rate = 0;
+    if (!now) return (int)line;
+    if (want == now) car_ask(want); /* q2-iap's DA01 stays the song's */
+    if (!want || want == now || want == car_refused || car_song_keep) return now;
+    int r = car_follow(want, &waited);
+    car_rate_line(r == want ? "at the open" : "not followed at the open, resampled", now, want, waited, -1);
+    return r ? r : now;
+}
+
 struct output *output_open(const struct pcm_format *f, int outputway, int hw) {
     struct output *o = calloc(1, sizeof *o);
     const char *dir = getenv("Q2PLAYER_PCM");
@@ -368,6 +453,7 @@ struct output *output_open(const struct pcm_format *f, int outputway, int hw) {
     o->speed = getenv("Q2PLAYER_SPEED") ? atof(getenv("Q2PLAYER_SPEED")) : 1;
     if (o->speed <= 0) o->speed = 1;
     int r = -1;
+    if (outputway == 3) o->f.rate = car_open_rate();
     if (dir) r = sink_open(o, dir, outputway);
 #ifdef HAVE_ALSA
     else r = alsa_open(o, outputway, hw);
@@ -436,6 +522,8 @@ void output_volume(struct output *o, int volume) {
     for (int i = 0; i < 2; ++i) o->vol16[i] = (int)(255.0 * o->gain[i]);
 }
 
+static int car_switch(struct output *o, int want);
+
 int output_take(struct output *o, const struct pcm_format *f, int outputway) {
     if (!o || outputway != o->way) return 0;
     /* Bluetooth and the car play at their own fixed rate: a song at another goes through the resampler, and the PCM,
@@ -444,7 +532,13 @@ int output_take(struct output *o, const struct pcm_format *f, int outputway) {
     if (f->channels != o->in.channels) return 0;
     /* stock asks the song's width of Bluetooth; the car's device is 16-bit whatever the song, and converted to */
     if (outputway == 1 && (f->bytes != o->in.bytes || f->is_float != o->in.is_float)) return 0;
-    if (f->rate != o->in.rate) { /* the old rate's resampler: what it holds back is played, then a fresh one */
+    /* way 3: a song for another of the car's rates, unless a crossfade carries the last one's tail into it */
+    int want = outputway == 3 && car_song_rate && !car_song_keep && car_p_rate() ? car_rate_for(car_song_rate) : 0;
+    car_song_rate = 0;
+    if (want && want == o->f.rate) car_ask(want); /* q2-iap's DA01 stays the song's; a change asks after the drain */
+    if (want == car_refused || want == o->f.rate) want = 0;
+    if (f->rate != o->in.rate || (want && want != o->f.rate)) {
+        /* the old rate's resampler: what it holds back is played, then a fresh one */
         if (o->swr) {
             int n = swr_get_out_samples(o->swr, 0);
             if (n > 0 && !grow((void **)&o->rbuf, &o->rcap, n * o->f.channels, sizeof(float))) {
@@ -452,6 +546,7 @@ int output_take(struct output *o, const struct pcm_format *f, int outputway) {
                 if (n > 0) output_write(o, NULL, n);
             }
         }
+        if (want && want != o->f.rate && car_switch(o, want) < 0) return 0;
         o->in = *f;
         if (resampler(o) < 0) return 0;
     }
@@ -778,8 +873,92 @@ static uint8_t *scratch(struct output *o, int frames) {
 
 /* frames of data, the song's (NULL: as many of the resampler's tail, in o->rbuf), out through the volume and the
  * resampler to the device, with a click that is sounding mixed in. */
+/* ---- way 3 at another of the car's rates (docs/iphone-mode.md#per-song-rate) ---- */
+
+/* The way-3 PCM opened again at rate, its old one closed: what it held is gone, and the trace's window ends with it.
+ * The caller makes the resampler for the new rate. */
+static int car_reopen(struct output *o, int rate) {
+    car_trace_tick(o, 1);
+    o->f.rate = rate;
+#ifdef HAVE_ALSA
+    if (o->pcm) {
+        snd_pcm_close(o->pcm);
+        o->pcm = NULL;
+        if (alsa_open(o, 3, 0) < 0) return -1;
+    } else
+#endif
+    {
+        const char *dir = getenv("Q2PLAYER_PCM");
+        if (o->file) fclose(o->file), o->file = NULL;
+        o->written = 0;
+        if (!dir || sink_open(o, dir, 3) < 0) return -1;
+    }
+    free(o->hist);
+    o->hist = NULL, o->hist_at = o->hist_n = 0, o->clk_at = o->clk_len;
+    history(o);
+    o->dry_ok = 1; /* the new PCM starting is not an underrun */
+    car_trace_open(o->f.rate, car_path());
+    return 0;
+}
+
+/* The last song's tail played out, then CAR_PAD_MS of silence, so the car hears silence while the rate changes and
+ * a closed PCM's repeated packet (output_drop) is silence too; the wait bounded, as output_close's */
+static void car_quiet(struct output *o) {
+    int pad = o->f.rate * CAR_PAD_MS / 1000;
+    void *z = calloc((size_t)pad, (size_t)frame_bytes(o));
+    if (z) remember(o, z, pad), sink(o, z, pad), free(z);
+    int64_t d = dev_delay(o) - pad;
+    if (d > 0) {
+        long us = (long)(d * 1000000 / o->f.rate / o->speed);
+        usleep((useconds_t)(us < CAR_DRAIN_MS * 1000 ? us : CAR_DRAIN_MS * 1000));
+    }
+}
+
+/* At a song's start, the car moved to want: the tail drained to silence, want asked for and waited for, and the PCM
+ * opened again at the car's rate. A car that does not follow keeps its rate and the song is resampled to it. */
+static int car_switch(struct output *o, int want) {
+    int from = o->f.rate, waited;
+    car_quiet(o);
+    int64_t t = car_trace_now();
+    int r = car_follow(want, &waited);
+    if (!r || r == from) {
+        car_rate_line("not followed, resampled", from, want, waited, -1);
+        return 0;
+    }
+    if (car_reopen(o, r) < 0) return -1;
+    car_rate_line(r == want ? "followed" : "set by the car", from, r, waited,
+                  (int)((car_trace_now() - t) / 1000) + CAR_PAD_MS);
+    return 0;
+}
+
+/* The player is the car's rate's source of truth, but the car may set one by itself (late, after car_switch gave
+ * up, or unasked): every CAR_CHECK_MS a song playing on way 3 looks at P_RATE_FILE, and a PCM at another rate
+ * than the car's is taken back unheard (off speed) and opened again at the car's, the song resampled to it. */
+static int car_check(struct output *o) {
+    static int64_t at;
+    int64_t now = car_trace_now();
+    if (now - at < CAR_CHECK_MS * 1000LL) return 0;
+    at = now;
+    int r = car_p_rate();
+    if (!r || r == o->f.rate) return 0;
+    int from = o->f.rate;
+    /* the rate last asked for is the car's choice no longer: not waited for again (q2-iap sends it only when it
+     * changes, so the car is not told it again) until the player asks for another */
+    car_refused = car_asked;
+#ifdef HAVE_ALSA
+    if (o->pcm) {
+        snd_pcm_sframes_t can = snd_pcm_rewindable(o->pcm);
+        if (can > 0 && snd_pcm_rewind(o->pcm, (snd_pcm_uframes_t)can) > 0) car_trace_back(can);
+    }
+#endif
+    if (car_reopen(o, r) < 0 || resampler(o) < 0) return -1;
+    car_rate_line("set by the car, reopened", from, r, 0, -1);
+    return 0;
+}
+
 int output_write(struct output *o, const uint8_t *data, int frames) {
     uint8_t *t;
+    if (o->way == 3 && data && car_check(o) < 0) return -1;
     if ((frames = convert(o, data, frames, &data)) <= 0) return frames;
     if (o->clk_at < o->clk_len && (t = scratch(o, frames))) { /* a click still sounding goes on in these frames */
         memcpy(t, data, (size_t)frames * frame_bytes(o));

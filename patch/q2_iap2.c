@@ -967,13 +967,36 @@ static void send_library_updates(void) {
     msg_start(0x4C04), param_str(0, H->library_id), param_str(1, "1"), param_u8(7, 100), msg_send();
 }
 
-/* The rate as an index into an iPhone's nine (8000 to 48000); an iPhone at 44100 sends 7, then two uint32s, both 0. */
+/* The rate as an index into an iPhone's nine (8000 to 48000); an iPhone at 44100 sends 7, then two uint32s, both 0.
+ * The rate is the player's for the song about to play (iap2_audio_rate, docs/iphone-mode.md#per-song-rate), sent at
+ * StartUSBDeviceModeAudio and again at each song whose rate differs: 32, 44.1 and 48 kHz (6, 7, 8), the 48 kHz family
+ * above it 8, anything else 44.1 kHz's 7. */
+static const unsigned iap2_rates[9] = { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 };
+static unsigned audio_hz = 44100;
+static int audio_sent = -1;
+
+static int iap2_rate_index(unsigned hz) {
+    if (hz == 32000) return 6;
+    if (hz == 48000 || (hz > 48000 && hz % 48000 == 0)) return 8;
+    return 7;
+}
+
 static void send_audio_rate(void) {
+    char t[64];
+    audio_sent = iap2_rate_index(audio_hz);
+    snprintf(t, sizeof t, "audio: %u Hz announced (DA01 index %d)", iap2_rates[audio_sent], audio_sent);
+    H->log(t);
     msg_start(0xDA01);
-    param_u8(0, 7);
+    param_u8(0, (u8)audio_sent);
     param_u32(1, 0);
     param_u32(2, 0);
     msg_send();
+}
+
+/* The player's rate for the song about to play (q2_iap.c rate_poll): told the car while it takes USB audio. */
+static void iap2_audio_rate(unsigned hz) {
+    audio_hz = hz;
+    if (audio_on && iap2_rate_index(hz) != audio_sent) send_audio_rate();
 }
 
 static u32 np_hash(const struct iap2_np *n) {
@@ -1080,7 +1103,7 @@ static void iap2_control_receive(const u8 *msg, unsigned len) {
         send_library_updates();
         break;
     case 0xDA00:
-        H->log("audio: the car asks for USB audio (44.1 kHz announced; M3 plays into it)");
+        H->log("audio: the car asks for USB audio");
         send_audio_rate();
         set_audio(1);
         break;

@@ -131,6 +131,11 @@ int output_write(struct output *, const uint8_t *data, int frames);
  * ALSA device and rate when asked; output_car_gone forgets that until the car asks again. */
 int output_car(char *device, unsigned cap, unsigned *rate);
 void output_car_gone(void);
+/* The song about to start on way 3 is at rate: the next output_open or output_take there asks the car for its rate
+ * (car_rate_for) and opens the PCM again at the rate the car then plays at (docs/iphone-mode.md#per-song-rate). keep:
+ * a crossfade carries the last song's tail into it, and the car's rate stays as it is. */
+void output_car_song(int rate, int keep);
+int car_rate_for(int rate); /* 32000, 44100 or 48000 */
 int64_t output_delay(struct output *); /* frames written and not yet played, at the rate written */
 void output_levels(struct output *, long *avail, long *delay); /* the device's own, in its frames */
 void output_pause(struct output *, int on);
@@ -162,6 +167,7 @@ struct dsp *dsp_open(const struct pcm_format *, int untouched, float replaygain,
 int dsp_run(struct dsp *, const uint8_t *data, int frames, double pts, const uint8_t **out);
 void dsp_eq_changed(struct dsp *);
 void dsp_close(struct dsp *, int ended); /* ended: the song played to its end, nobody cut it */
+int dsp_tail_held(void); /* crossfade holds a song's tail for the next one to mix in */
 void dsp_meter(const struct pcm_format *, int untouched, const uint8_t *data, int frames, int uv[2]);
 
 /* dsd.c: DSD packets made into DoP or Native frames */

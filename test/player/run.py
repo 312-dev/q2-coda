@@ -1028,6 +1028,138 @@ def test_car_way_needs_the_car_build(player, songs, tmp):
     return 'Bluetooth, as without a car'
 
 
+def tones(d, *rates, secs=5):
+    """A 1 kHz sine at each rate (t44100.flac and so on), so that a stretch of any PCM says the speed it plays at."""
+    d.mkdir(parents=True, exist_ok=True)
+    for r in rates:
+        if not (d/f't{r}.flac').exists():
+            music.ff('-f', 'lavfi', '-i', f'sine=f=1000:r={r}:d={secs}', '-af', 'volume=0.5,aformat=channel_layouts=stereo',
+                     '-c:a', 'flac', '-sample_fmt', 's16', d/f't{r}.flac')
+    return [d/f't{r}.flac' for r in rates]
+
+
+def tone_hz(pcm, rate, window=0.1):
+    """The tone's frequency in each window of a car PCM (S16 stereo) heard at its file's rate, from the left channel's
+    zero crossings; windows with silence in them (a song's edge, the pad before a rate change) are left out."""
+    left = array.array('h', pcm[:len(pcm) - len(pcm) % 4])[::2]
+    n, out = int(rate * window), []
+    for at in range(0, len(left) - n, n):
+        w = left[at:at + n]
+        if max(map(abs, w)) < 1000 or any(not any(w[i:i + 8]) for i in range(0, n - 8, 8)): continue
+        signs = [x > 0 for x in w if x]
+        out.append(sum(a != b for a, b in zip(signs, signs[1:])) / 2 / window)
+    return out
+
+
+class Car:
+    """The car and its gadget's module in a host test: the player's rate file (Q2PLAYER_CAR_RATE) read every 5 ms
+    and, after delay_ms, the rate asked for written to p_rate (Q2PLAYER_P_RATE), as q2-iap's DA01 and the car's
+    SET_CUR do; with follow off the car never sets it. set() is the car setting a rate by itself."""
+    def __init__(self, d, follow=True, delay_ms=30, start=44100):
+        import threading
+        d.mkdir(parents=True, exist_ok=True)
+        self.asked, self.p_rate, self.follow, self.delay = d/'q2-iap.rate', d/'p_rate', follow, delay_ms / 1000
+        self.p_rate.write_text(f'{start}\n')
+        self.asked.unlink(missing_ok=True)
+        self.seen, self.stop = [], threading.Event()
+        threading.Thread(target=self.run, daemon=True).start()
+
+    def env(self): return {'Q2PLAYER_CAR_RATE': str(self.asked), 'Q2PLAYER_P_RATE': str(self.p_rate)}
+
+    def set(self, rate): self.p_rate.write_text(f'{rate}\n')
+
+    def run(self):
+        import time
+        while not self.stop.wait(0.005):
+            try: want = int(self.asked.read_text())
+            except (OSError, ValueError): continue
+            if self.seen and self.seen[-1] == want: continue
+            self.seen.append(want)
+            if self.follow: time.sleep(self.delay); self.set(want)
+
+
+def car_rates(player, songs, tmp, name, files, car, extra=()):
+    """files played gapless one after another into the car's way at four times speed (each 5 s, its preload 2 s
+    before its end); (pcm file names, their bytes, the log)."""
+    cf = tmp/f'{name}.audio'
+    cf.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    steps = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'),
+             (1.0, fakedemo.song('set-songurl', str(files[0]), flag=1))]
+    steps += [(1.0 + 5 * i - 2, fakedemo.gapless(str(f), flag=1)) for i, f in enumerate(files) if i]
+    steps = sorted(steps + list(extra), key=lambda st: st[0]) + [(1.0 + 5 * len(files) + 3, '{mcl-stop\\null}'),
+                                                                 (1.0 + 5 * len(files) + 4, None)]
+    s = fakedemo.Session(tmp/name)
+    s.music = songs
+    env = {'Q2PLAYER_CAR': str(cf), 'Q2PLAYER_FORMATS': 's16', **car.env()}
+    try: s.run(steps, fakedemo.launch_host(player, str(songs), 4, env), 4)
+    finally: car.stop.set()
+    pcm = sorted((tmp/name/'pcm').glob('*.raw'))
+    return [p.name.split('_', 1)[1] for p in pcm], [p.read_bytes() for p in pcm], (tmp/name/'player.log').read_text()
+
+
+def at_speed(names, pcm):
+    """Every window of every car PCM a 1 kHz tone at the PCM's own rate: nothing played off speed."""
+    for name, b in zip(names, pcm):
+        hz = tone_hz(b, int(name.split('_')[0]))
+        assert hz and all(abs(h - 1000) <= 15 for h in hz), f'{name}: {[round(h) for h in hz if abs(h - 1000) > 15][:8]} of {len(hz)} windows'
+    return sum(len(tone_hz(b, int(n.split('_')[0]))) for n, b in zip(names, pcm))
+
+
+RATE_LINE = re.compile(r' I player car rate (\d+)->(\d+) ([^:]+): wait=(\d+)ms(?: gap=(\d+)ms)?$', re.M)
+
+
+def test_car_rate_per_song(player, songs, tmp):
+    """Per-song rate (docs/iphone-mode.md#per-song-rate): 44.1, 48, 96 then 44.1 kHz songs into the car's way, the car
+    following each rate asked for 30 ms later. The player asks for 48 kHz at the 48 kHz song (the 96 kHz one maps to
+    it, so no change there) and 44.1 kHz at the last; at each change it plays the last song's tail out, waits for
+    the car's p_rate, and opens the PCM again at it: three PCMs, 44.1, 48 and 44.1 kHz, every stretch of each at
+    its own speed, and a line for each change with the wait and the gap."""
+    cp, car = car_player(), Car(tmp/'rate-follow')
+    files = tones(tmp/'tones', 44100, 48000, 96000) + tones(tmp/'tones2', 44100)
+    names, pcm, log = car_rates(cp, songs, tmp, 'rate-follow', files, car)
+    assert names == ['44100_2_s16_car.raw', '48000_2_s16_car.raw', '44100_2_s16_car.raw'], (names, log[-1500:])
+    assert car.seen == [44100, 48000, 44100], car.seen
+    # the second PCM carries two songs (48 and 96 kHz, the latter resampled), the others one each
+    assert [round(len(b) / 4 / int(n.split('_')[0])) for n, b in zip(names, pcm)] == [5, 10, 5], [len(b) for b in pcm]
+    windows = at_speed(names, pcm)
+    lines = RATE_LINE.findall(log)
+    assert [(a, b, what) for a, b, what, *_ in lines] == [('44100', '48000', 'followed'), ('48000', '44100', 'followed')], lines
+    assert all(int(w) < 400 and int(g) < 1000 for *_, w, g in lines), lines
+    return f'{names}, {windows} windows at 1 kHz; switches {[(w + "ms", g + "ms") for *_, w, g in lines]}'
+
+
+def test_car_rate_not_followed(player, songs, tmp):
+    """A car that never sets the rate asked for: the 48 kHz song waits CAR_FOLLOW_MS for it once, then is resampled
+    into the car's 44.1 kHz PCM, which stays open; the 44.1 kHz song after it asks for nothing new. One PCM, all of
+    it at speed."""
+    cp, car = car_player(), Car(tmp/'rate-stay', follow=False)
+    files = tones(tmp/'tones', 44100, 48000) + tones(tmp/'tones2', 44100)
+    names, pcm, log = car_rates(cp, songs, tmp, 'rate-stay', files, car)
+    assert names == ['44100_2_s16_car.raw'], (names, log[-1500:])
+    assert car.seen == [44100, 48000, 44100], car.seen  # each song's rate asked for, though the PCM stays at 44.1
+    lines = RATE_LINE.findall(log)
+    assert [(a, b, what) for a, b, what, *_ in lines] == [('44100', '48000', 'not followed, resampled')], lines
+    assert 480 <= int(lines[0][3]) < 900, lines
+    windows = at_speed(names, pcm)
+    return f'one PCM, {windows} windows at 1 kHz; waited {lines[0][3]} ms'
+
+
+def test_car_rate_set_by_the_car(player, songs, tmp):
+    """The car sets 48 kHz by itself while a 44.1 kHz song plays: the PCM at 44.1 kHz would now play fast, so the
+    player sees p_rate differ, logs it and opens the PCM again at 48 kHz, the song resampled to it: never off speed
+    after it. The next song, at 44.1 kHz too, is the rate last asked for, which the car went over: it is not waited
+    for again but resampled into the 48 kHz PCM, which stays open."""
+    cp, car = car_player(), Car(tmp/'rate-car')
+    files = tones(tmp/'tones', 44100) + tones(tmp/'tones2', 44100)
+    names, pcm, log = car_rates(cp, songs, tmp, 'rate-car', files, car, extra=[(3.0, lambda s: car.set(48000))])
+    assert names == ['44100_2_s16_car.raw', '48000_2_s16_car.raw'], (names, log[-1500:])
+    lines = RATE_LINE.findall(log)
+    assert [(a, b, what) for a, b, what, *_ in lines] == [('44100', '48000', 'set by the car, reopened')], lines
+    assert round(len(pcm[1]) / 4 / 48000) >= 7, 'the rest of the first song and all of the second at 48 kHz'
+    windows = at_speed(names[1:], pcm[1:])
+    return f'{names}, {windows} windows after the car\'s change at 1 kHz'
+
+
 CAR_LINE = re.compile(r' I player car (\d+)ms: frames=(\d+) writes=(\d+) wmax=(\d+)ms slow=(\d+) dry=(\d+)/(\d+)ms '
                       r'back=(\d+)/(\d+)ms avail=(-?\d+) delay=(-?\d+) rmax=(\d+)ms cpu=(\d+)ms tap=(\d+)/(\d+) under=(\d+)$', re.M)
 CAR_FIELDS = ('ms', 'frames', 'writes', 'wmax', 'slow', 'dry', 'dry_ms', 'back', 'back_ms', 'avail', 'delay', 'rmax', 'cpu',
