@@ -406,7 +406,8 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
             pthread_mutex_lock(&c->mu);
             int want_way = car_way(c->outputway);
             pthread_mutex_unlock(&c->mu);
-            if (want_way != way) {
+            /* the car's coming and going alone: demo's own mcl-setoutputway waits for the next song, as stock's */
+            if ((want_way == 3) != (way == 3)) {
                 dac_mute(way);
                 close_output(0);
                 way = want_way;
