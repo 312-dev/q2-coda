@@ -5,9 +5,9 @@
  * (bt_connectstatus), a scan starting and ending (bt_searchtime), a link being set up
  * (bt_a2dp_direction), the link list's last item (its address and status), the saved device
  * (BTLINKMAC), and each connect the link thread starts, with its target and why: auto (headset.c's
- * autolink, at boot and at each Bluetooth on), tap (a row or Connect, through bt_stock_click) or
- * other (stock started it with neither). q2guard's lines beside them say what the kernel did
- * (docs/internals.md#bluetooth-devices).
+ * autolink, at boot and at each Bluetooth on), usb (the same at a cable in, headset_bt_usb), tap
+ * (a row or Connect, through bt_stock_click) or other (stock started it with neither). q2guard's
+ * lines beside them say what the kernel did (docs/internals.md#bluetooth-devices).
  *
  * bt_acl_up answers whether the kernel holds a connected ACL link to an address (HCIGETCONNLIST on
  * an unbound HCI socket), which the Bluetooth page goes by where stock's state stays behind the
@@ -81,8 +81,8 @@ int bt_acl_up(const char *mac) {
     return up;
 }
 
-/* The reason for the next connect the link thread starts: "auto" (headset.c's autolink) or "tap"
- * (bt_stock_click), for mac when known. */
+/* The reason for the next connect the link thread starts: "auto" or "usb" (headset.c's autolink)
+ * or "tap" (bt_stock_click), for mac when known. */
 void bt_trace_why(const char *why, const char *mac) {
     tk_snprintf(tr.why, sizeof tr.why, "%s", why ? why : "");
     tr.why_at = time_now_ms() | 1;

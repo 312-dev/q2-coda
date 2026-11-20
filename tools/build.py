@@ -1926,6 +1926,8 @@ FUNCTIONS = {
  'getBtLinkSize': ('int', 'void'), 'getBtLinkItem': ('int', 'int, int *, char *'),
  'getBtLinkStatus': ('int', 'char *'), 'addBtLinkItem': ('void', 'char *, int'),
  'updateBtLinkStatus': ('int', 'int, char *'), 'checkPairDev': ('int', 'char *'),
+ # boot's and Bluetooth on's connect to BTLINKMAC (its checkPairDev is BT_AUTOLINK's); headset.c's at a cable in
+ 'autoLinkBluetooth': ('int', 'void'),
  'btStartSearch': ('int', 'void'),  # Settings > Bluetooth's scan (bt_ui.c), as stock's Scan now row started it
  'btStopSearch': ('int', 'void'),  # its stop, as stock's row click calls it before a connect (bt_ui.c page_poll)
  # stock's Bluetooth switch: (1, 0) off, the stack stopped and the radio powered down; (0, 0) on, started again

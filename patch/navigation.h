@@ -1061,6 +1061,7 @@ int ringnav_btrows(void *win, void *ctx); /* nav/rows_settings.c: stock's btmenu
  * (docs/internals.md#bluetooth-connection-trace); whether the kernel holds an ACL link to a MAC */
 void bt_trace_poll(void), bt_trace_why(const char *why, const char *mac), bt_trace_page(void);
 void bt_trace_shown(const char *mac);
+void headset_bt_usb(void); /* headset.c: a cable in, one connect to the saved device */
 int bt_acl_up(const char *mac), bt_acl_listed(const unsigned char *req, int max, const char *mac);
 void bt_dev_rename(int i, const char *name);
 /* bt_detail.c: a Bluetooth device's page */

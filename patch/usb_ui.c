@@ -607,7 +607,12 @@ void usb_ui_status(void) {
         else
             usb_log(det ? "cable in (stock's once-a-second read)" : "cable out (stock's once-a-second read)", -1);
     }
-    if (det && !u.det && u.det_known) charge_plugged(); /* charging.c: a dark Q2 lights for it */
+    if (det && !u.det && u.det_known) {
+        charge_plugged(); /* charging.c: a dark Q2 lights for it */
+        /* A car's USB coming on with the car (docs/internals.md#bluetooth-on-usb-power); not the
+         * Q2's own OTG bus power, nor a cable whose remembered choice is USB Audio */
+        if (g_last_otgid != 1 && usb_remembered() != USB_AUDIO) headset_bt_usb();
+    }
     u.det_known = 1;
     if (det && !u.det && g_usblink_status == 0) {
         u.choice = USB_ASK, u.chosen = 0;

@@ -22,9 +22,16 @@ static void headset_bt_status(int event, char *address, char *name, void *data) 
     }
     ((void (*)(int, char *, char *, void *))0x4fc180)(event, address, name, data);
 }
+/* Bluetooth's start (boot, the switch, a relaunch) and a connect headset_bt_usb is starting */
+#define BT_USB_QUIET_MS 20000 /* the stack-up auto-link and its 15 s wait, with room */
+static struct {
+    unsigned on_at;
+    int usb;
+} hl __attribute__((section(".scratch")));
 void bt_name_apply(void); /* bt_name.c */
 /* openBluetooth's registration (BT_STATUS), at each Bluetooth on: also the Q2's name to BlueZ. */
 void headset_status_register(void) {
+    hl.on_at = time_now_ms() | 1;
     btctl_device_status_callback(headset_bt_status, 0);
     bt_name_apply();
     guest_bt_on();
@@ -37,12 +44,27 @@ static int bt_connected(char *mac) {
 }
 void bt_trace_why(const char *why, const char *mac); /* bt_trace.c */
 /* Auto-link would append its target after a connected incoming link; its failure clears both. A
- * connect it goes ahead with is logged as auto (docs/internals.md#bluetooth-connection-trace). */
+ * connect it goes ahead with is logged as auto, or usb from headset_bt_usb
+ * (docs/internals.md#bluetooth-connection-trace). */
 int headset_bt_autolink(char *address) {
     char item[32];
     int go = !bt_connected(item) && checkPairDev(address);
-    if (go) bt_trace_why("auto", address);
+    if (go) bt_trace_why(hl.usb ? "usb" : "auto", address);
     return go;
+}
+/* A cable in (usb_ui.c usb_ui_status): stock's auto-link once more, as at Bluetooth on, since a car
+ * that ended the link at its switch-off is paged by nothing else
+ * (docs/internals.md#bluetooth-on-usb-power). Not while Bluetooth is off, its stack not up or
+ * within BT_USB_QUIET_MS of its start (where the stack-up pass auto-links), with a link thread
+ * running or no saved device; autoLinkBluetooth checks these again, and headset_bt_autolink skips
+ * while a listed device is connected. */
+void headset_bt_usb(void) {
+    if (!g_bluetoothflag || I(bt_initstatus, 0) || I(bt_connectstatus, 0) || !hl.on_at ||
+        time_now_ms() - hl.on_at < BT_USB_QUIET_MS || !*(const char *)0xa4c0d8)
+        return;
+    hl.usb = 1;
+    autoLinkBluetooth();
+    hl.usb = 0;
 }
 /* The control thread can discover a boot reconnect before openBluetooth powers the radio. */
 int headset_bt_init(void *thread) {
