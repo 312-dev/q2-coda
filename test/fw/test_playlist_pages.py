@@ -205,9 +205,11 @@ def test_a_held_song_opens_its_whole_menu_with_remove_last_on_the_card(fw, ui, s
     assert pages.table.songs(3) == ['One', 'Three'] and ui.toasts[-1] == 'Removed'
 
 
-def server(fw, files, pages):
-    fw.fn('pod_settings', None)()  # read, so the source stays as set
-    fw.var('catalogue_source', C.c_int).value = 1
+def server(fw, files, pages, catalogue=True):
+    """A server playlist at 3 and its songs' ids; catalogue: a signed-in app's rows indexed (catalogue_has), set
+    through test_catalogue's mirror of the index's count alone, which these calls read and nothing here walks."""
+    from test_catalogue import cat_head
+    cat_head(fw).ix.n = int(catalogue)
     pages.table.servers[3] = ('subsonic', 'pl7')
     pages.table.sids = {'/mnt/mmc/a.flac': 's1', '/mnt/mmc/c.flac': 's%3'}
     return lambda: files.files.get('/mnt/mmc/.subsonic/playlists.out', b'')
@@ -229,14 +231,13 @@ def test_a_rename_and_a_delete_of_a_server_playlist_go_to_its_app(fw, ui, pages)
     assert out() == b'name\tpl7\tRoad%09Trip\ndelete\tpl7\n'
 
 
-def test_a_local_playlist_or_local_only_writes_nothing(fw, ui, pages):
+@pytest.mark.parametrize('catalogue', [True, False])
+def test_a_local_playlist_or_no_catalogue_writes_nothing(fw, ui, pages, catalogue):
+    """A local playlist's change, or any with no signed-in app's rows indexed, sends nothing."""
     files = Files(fw)
-    server(fw, files, pages)
-    fw.var('catalogue_source', C.c_int).value = 0
-    fw.fn('playlist_rename', C.c_int, C.c_int, C.c_char_p)(3, b'New')
-    fw.var('catalogue_source', C.c_int).value = 1
-    fw.fn('playlist_rename', C.c_int, C.c_int, C.c_char_p)(1, b'Gym 2')  # not a server playlist
-    assert not files.files
+    server(fw, files, pages, catalogue)
+    fw.fn('playlist_rename', C.c_int, C.c_int, C.c_char_p)(1 if catalogue else 3, b'Gym 2')
+    assert '/mnt/mmc/.subsonic/playlists.out' not in files.files
 
 
 def test_a_server_playlist_s_cover_is_its_app_s_pl_file_once_it_is_there(fw, ui, pages):

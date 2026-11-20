@@ -99,6 +99,8 @@ static int qm_run(const void *unused) {
     if (r && a >= 100) {
         if (!playback_set(st.qm_choice - 1, a - 100)) toast("Queue unchanged");
         st.qm_choice = 0;
+    } else if (a == QA_OFFLINE) { /* the item worked out for its row (offline.c) */
+        offline_press();
     } else if (r && a == QA_CHAPTERS) {
         chapters_open(r);
     } else if (r && a == QA_QUEUE) {
@@ -335,6 +337,14 @@ static int qm_open(const void *unused) {
      * On-The-Go (while it is on), Add to Playlist…, Favorite, then the Go to rows; its playlist:
      * Play, Shuffle, Rename and, after a gap, Delete */
     int list = st.qm_kind == QM_PLAYLIST, own = song && st.qm_kind != QM_PLAYING;
+    /* Sync Offline for a server's song, album, artist or playlist (offline.c): a playlist's before
+     * its Rename and Delete, any other's after its Favorite and Add to Playlist rows */
+    int okind = song                                                    ? OFF_SONG
+                : st.qm_kind == QM_ALBUM || st.qm_kind == QM_COVERALBUM ? OFF_ALBUM
+                : st.qm_kind == QM_GROUP && cls == 0xf004               ? OFF_ARTIST
+                : list                                                  ? OFF_PLAYLIST
+                                                                        : 0;
+    const char *offl = offline_row(okind, r, list ? (int)st.qm_idx : -1);
     if (list) acts[n++] = QA_PLAY;
     if (!list) acts[n++] = QA_NEXT, acts[n++] = QA_ADD;
     if (own && ringnav_otg()) acts[n++] = QA_OTG;
@@ -344,12 +354,14 @@ static int qm_open(const void *unused) {
     }
     if (own) acts[n++] = QA_PLAYLIST;
     if (!song) acts[n++] = QA_SHUFFLE;
+    if (list && offl) acts[n++] = QA_OFFLINE;
     if (list) acts[n++] = QA_RENAME, acts[n++] = QA_DELETE;
     if (song) acts[n++] = rate_fav(r) ? QA_UNFAV : QA_FAV;
     /* an album's own favourite, its hearts' 5 (ratings.c rate_album_favs) */
     unsigned aid = song ? 0 : qm_album_id(r);
     if (aid) acts[n++] = rate_kept(1, aid) == 5 ? QA_UNFAV : QA_FAV;
     if (!own && (st.qm_kind < QM_COVERFLOW || st.qm_kind == QM_PLAYING)) acts[n++] = QA_PLAYLIST;
+    if (!list && offl) acts[n++] = QA_OFFLINE;
     /* a card app's song isn't in the Library: Go to only to the app's own page */
     int hidden = song && !addon_goes(P(r, REC_PATH));
     int held = qm_held_on(page); /* a playlist's page: a song's whole menu, then its Remove */
@@ -390,7 +402,8 @@ static int qm_open(const void *unused) {
                                         "Play",
                                         "Rename",
                                         "Delete",
-                                        "Remove" };
+                                        "Remove",
+                                        "Sync Offline" };
     /* the menu sheet's symbols (tools/art.py MENU_ICONS), by row */
     static const char *const icons[] = { "arrow-bend-down-right",
                                          "queue",
@@ -414,7 +427,8 @@ static int qm_open(const void *unused) {
                                          "play",
                                          "pencil-simple",
                                          "trash",
-                                         "trash" };
+                                         "trash",
+                                         "cloud-arrow-down" };
     /* stock sortselect row styles; the menu sheet's rows */
     int pitch = MODAL_PITCH, width = modal_row_w();
     for (int i = 0; i < n; ++i) {
@@ -433,6 +447,7 @@ static int qm_open(const void *unused) {
                                     : acts[i] == QA_FAV             ? "Add to Favorites"
                                     : acts[i] == QA_UNFAV           ? "Remove from Favorites"
                                     : acts[i] == QA_REMOVE          ? qm_held.extra
+                                    : acts[i] == QA_OFFLINE         ? offl
                                                                     : rows[acts[i] - 1]);
         if (acts[i] == QA_REMOVE) /* red, as the card's losing verb */
             widget_set_prop_int(label, "style:normal:text_color", (int)RGBA(RGB_NEGATIVE));
@@ -441,7 +456,8 @@ static int qm_open(const void *unused) {
         if (acts[i] == QA_DELETE || acts[i] == QA_REMOVE)
             modal_gap(view); /* destructive, last after a gap */
         widget_restack(item, widget_count_children(view) - 1);
-        modal_row(item, label, icons[acts[i] - 1], value, setting ? MM_SETTING : MM_ACTION);
+        modal_row(item, label, acts[i] == QA_OFFLINE ? offline_icon() : icons[acts[i] - 1], value,
+                  setting ? MM_SETTING : MM_ACTION);
         if (acts[i] == QA_DELETE || acts[i] == QA_REMOVE) modal_red(item);
         if (setting) {
             char name[16];

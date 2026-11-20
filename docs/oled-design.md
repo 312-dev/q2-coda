@@ -580,7 +580,7 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   `subsonic`, with or without its own icon files) q2-coda's submarine with two sonar arcs. Any other card app with its
   own icon shows that icon scaled into the same 20 px box, grayed as every card app icon is under this theme
   (`icons.addon_mono`) rather than inked: a tint would turn an icon drawn on a filled tile into a solid square.
-- **Where a song lives** (with Library: Local + Server): a song row's right column says where the song is, as the
+- **Where a song lives** (with a server's app signed in): a song row's right column says where the song is, as the
   user approved from `mock_radio.py`'s storage sheet on 2026-11-15: nothing for the user's own file, Phosphor
   `arrow-circle-down` for one a card app downloaded (its `q2app`'s `downloads=` folder, q2-subsonic's `Subsonic/`),
   `cloud` for a server song that streams; regular, 18 px, Text Tertiary, white on the selection, centered where the
@@ -984,7 +984,7 @@ the gray one.
 | Composers | `music-notes-simple` | No Composers | Songs need a composer tag | |
 | Folders | `folder` | No Folders | Copy music to the SD card | |
 | Cover Flow, no card music | `cards` | No Albums | Copy music to the SD card | |
-| Cover Flow, a streaming app signed in | `cards` | No Albums | Streaming albums can show here | **Turn on Streaming** (while Streaming Songs is off) |
+| Cover Flow, a streaming app signed in | `cards` | No Albums | Streaming albums can show here | none: its albums join once its catalogue is in |
 | Cover Flow, the card's music not scanned | `cards` | No Albums Yet | Music on the card isn't scanned | **Scan Music Now** |
 | Playlists | none (compact) | No Playlists | Make one with New Playlist | none: under On-The-Go's row; New Playlist is in a song's hold menu (Add to Playlist…), not on this page. The picker keeps its rows alone |
 | Favorites | `heart-slash` | No Favorites | Hold Play/Pause on a song to add it | |
@@ -1018,6 +1018,28 @@ Settings, and a payload list's other messages (Internet Radio's "Loading…", Ba
 
 - Busy: no stock spinner (Playlists' while it adds a song); the toast that follows says it is done. A page still
   being fetched is the [loading overlay](#loading). A library list whose open sorts thousands of records (the first open after a library change) shows the payload's own spinner while it sorts, in every theme: a 64 px `#1C1C1E` square with 12 px corners at the screen's center, eight dots turning clockwise (internals, [Name order](internals.md#name-order)).
+
+### Sync
+
+A card app's Sync (q2-subsonic's) is one centred stack per state, iOS's Software Update's way (the user's, 2026-11-19,
+`mock_sync_apple.py`), the [empty state](#empty-and-offline)'s form: the state's glyph in outline (60 px, Text
+Secondary), its title in Inter Medium 20, its lines in 15 px Text Secondary each on a 20 px band, at most one
+[button](#buttons) (the focus rule's ring), and a footer in 13 px Text Tertiary centred on y 304, clear of the glass;
+syncing, a 4 px bar 232 px wide in Track filled in the accent sits 10 px under the title. Sync asks the server every
+time it opens.
+
+| State | Glyph | Title | Lines | Button | Footer |
+| --- | --- | --- | --- | --- | --- |
+| Checking | `arrows-clockwise` | Checking for changes… | Asking music.example.net | | Last synced yesterday at 21:40 |
+| Up to date | `check-circle` | Up to date | Your offline songs match the server. | | Checked just now · last synced yesterday at 21:40 |
+| Changes | `arrow-circle-down` | 12 new songs | 380 MB · 21 GB free / 2 songs will be removed | **Sync Now** | Last synced yesterday at 21:40 |
+| Syncing | `arrow-circle-down` | Syncing 4 of 12 | the bar, then Rockstar · Post Malone | **Stop** | Keep the Q2 on Wi-Fi until it finishes |
+| Failure | `cloud-slash` | Couldn't reach the server | Server error 502. / Offline songs still play. | **Try Again** | Last synced yesterday at 21:40 |
+| Nothing chosen | `cloud` | Nothing to sync yet | Hold a song, album or artist / and choose Sync Offline. | | |
+
+The app sends each state as a reply led by an info row `status` (its context the glyph, its subtitle the lines,
+`\n` apart, its position the bar's permille), its first action row the button and an info row `foot` the footer
+(`addon.c` `status_view`, the caps word `status`; [internals](internals.md#card-apps)).
 
 ### Loading
 
@@ -1154,7 +1176,7 @@ the pair, the rows) and `patch/addon.c` `artist_view` (which reply rows go where
 - **Hold menu:** Play/Pause held on the page opens the menu sheet of its sync rows, Add to Sync
   (or Remove from Sync), Quality and Sync Now, each with its symbol. Play is gone: Shuffle plays
   the artist.
-- **A Library artist** (card songs and, with Local + Server, server-library songs; from Library >
+- **A Library artist** (card songs and a signed-in server's songs; from Library >
   Artists, Go to Artist, Search or Now Playing's artist tap: stock's artist page) is the same page,
   built by `patch/library_artist.c` from the Library's songs ([internals](internals.md#library-artist-page)):
   the counts read "8 albums · 96 songs" and the genre is the artist's songs' commonest. **Shuffle**
@@ -1261,8 +1283,12 @@ page, On-The-Go) and `patch/add_songs.c`.
   hint "Choose Add Songs to fill it". A hold on a song opens its
   hold menu with **Remove from On-The-Go** last. It lasts across a restart.
 - **A song's hold menu**: Play Next, Play Last (to the end of Up Next's Playing Next), Add to
-  On-The-Go (while On-The-Go is on), Add to Playlist…, Favorite (Remove from Favorites when it is one), then Go to Album, Go to Artist and Go to
-  Folder. Add to Playlist… is a picker in the same panel: New Playlist (`plus`) first, which makes
+  On-The-Go (while On-The-Go is on), Add to Playlist…, Favorite (Remove from Favorites when it is one), Sync Offline (a song
+  from a signed-in server; Stop Syncing Offline once chosen, `cloud-arrow-down` and `cloud-slash`), then Go to Album, Go to
+  Artist and Go to Folder. An album's and an artist's hold menu have Sync Offline after their own rows, a server
+  playlist's before Rename and Delete, and Now Playing's ⋯ has it for the song playing; none while the app syncs its
+  Entire Library ([internals](internals.md#sync-offline)). The app toasts its answer: "Syncing offline · 12 songs",
+  "Stopped syncing offline", "Offline via Entire Library" (the user's, 2026-11-19). Add to Playlist… is a picker in the same panel: New Playlist (`plus`) first, which makes
   "New Playlist N" with the song in it (renamed later from its own hold), then the playlists; a
   pick adds at once and toasts "Added to name" ("Already in name").
 

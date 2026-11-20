@@ -1,7 +1,9 @@
 /* The server library (docs/internals.md#server-library, docs/server-library.md): a card app that
  * knows a music server (q2app catalogue=1) writes the server's songs and playlists to
- * /mnt/mmc/.<id>/catalogue.tsv, and with Local + Server on (LIBRARYSOURCE 1) they join the
- * Library's lists beside the card's. The firmware never speaks to the server.
+ * /mnt/mmc/.<id>/catalogue.tsv, and while the app is signed in (its credentials file on the card)
+ * they join the Library's lists beside the card's; there is no setting (the user's, 2026-11-19).
+ * Signed out, or the file gone, a job takes the app's rows out. The firmware never speaks to the
+ * server.
  *
  * Where they are kept: /mnt/mmc/.q2pod/catalogue.db, attached as schema cat to stock's shared
  * connection (stock_db_open) and to Era's, so library_query's union reads servertable there.
@@ -45,8 +47,6 @@
 #define CAT_PLAYLISTS 100      /* stock's playlist headers are ids 0 to 99 */
 #define CAT_ART_PX 18          /* OLED's cloud and arrow (tools/art.py MARK_PX) */
 
-int catalogue_source __attribute__((section(".scratch"))); /* LIBRARYSOURCE: 1 Local + Server */
-
 typedef struct {
     unsigned long long key; /* the path's FNV-1a 64: a server row's fileurl, a linked card file's */
     unsigned sid, local;    /* offsets in the index's strings, 0 for none */
@@ -74,6 +74,7 @@ typedef struct {
     unsigned *by_sid;         /* e's indices, by sid_key */
     cat_set cards[G_KINDS];   /* every card song's names, by group */
     cat_set servers[G_KINDS]; /* every server row's */
+    unsigned apps;            /* a bit per app slot with rows in it (cat_ent.app) */
 } cat_ix;
 
 typedef struct {
@@ -148,11 +149,6 @@ static unsigned long long fnv64(const char *s) {
     unsigned long long h = 0xcbf29ce484222325ull;
     while (s && *s) h = (h ^ (unsigned char)*s++) * 0x100000001b3ull;
     return h;
-}
-
-int catalogue_on(void) {
-    pod_settings();
-    return catalogue_source == 1;
 }
 
 /* ---- The index (built on the job's thread, read on the UI thread once swapped in) ---- */
@@ -817,8 +813,7 @@ static int import_file(int slot, const char *id, const char *seq, char *why, uns
  * by the library extension, so a stock playlist of that name holding those card files in that
  * order) is its twin: the catalogue's takes the twin's place rather than showing beside it, and is
  * only unlinked, not deleted, when it leaves the catalogue. A playlist of the user's with that name
- * and other songs keeps the name, and the catalogue's is left out. Turning Local + Server off
- * keeps them all (server rows greyed: catalogue_unavailable). ---- */
+ * and other songs keeps the name, and the catalogue's is left out. ---- */
 
 static int one_int(void *ctx, int n, char **v, char **c) {
     *(int *)ctx = v[0] ? atoi(v[0]) : -1;
@@ -972,6 +967,7 @@ static int ix_row(void *ctx, int n, char **v, char **c) {
     e->sid = ix_put(x, v[1]), e->local = e->dup ? 0 : ix_put(x, v[2]);
     e->sec = v[3] ? atoi(v[3]) : 0;
     e->app = (unsigned char)(v[5] ? atoi(v[5]) : 0);
+    x->apps |= 1u << e->app;
     for (int k = 0; k < 4; ++k) e->grp[k] = e->dup ? 0 : group_hash(v[6 + k]);
     return 0;
 }
@@ -1027,7 +1023,9 @@ static void *cat_worker(void *unused) {
         job_exec("begin");
         job_exec(SCHEMA);
         copy_old(slot >= 0 ? cat.app[slot].id : 0);
-        if (slot >= 0 && !jb.bad) import_file(slot, cat.app[slot].id, cat.job_seq, why, sizeof why);
+        /* a job with no seq only takes the app's rows out (signed out, its file gone) */
+        if (slot >= 0 && cat.job_seq[0] && !jb.bad)
+            import_file(slot, cat.app[slot].id, cat.job_seq, why, sizeof why);
         if (!why[0]) cat_match();
         if (!jb.bad && job_exec("commit")) tk_snprintf(why, sizeof why, "Couldn't save");
         if (!why[0] && jb.bad) tk_snprintf(why, sizeof why, "Couldn't write the catalog");
@@ -1048,14 +1046,13 @@ static void *cat_worker(void *unused) {
 /* ---- The UI thread ---- */
 
 /* Stock's shared connection (opened again after any error) and each other one stock_db_open
- * opens: cat attached while Local + Server is on and the file is there. stock_db_open runs on
- * stock's scan thread too, so this reads the setting as the UI thread loaded it (pod_settings),
- * never the config file: before that load nothing is attached, and cat_live attaches later. */
+ * opens: cat attached while a signed-in app's rows are indexed and the file is there.
+ * stock_db_open runs on stock's scan thread too; cat_live attaches later where this could not. */
 void catalogue_attach(void **slot) {
     /* stock's own global: in demo's image, below the payload (0xb00000, tools/build.py BASE) */
     if ((unsigned long)slot >= 0x400000 && (unsigned long)slot < 0xb00000) cat.stock_slot = slot;
     if (slot == cat.stock_slot) cat.attached = 0;
-    if (catalogue_source != 1 || access(CAT_DB, 0) || !*slot) return;
+    if (!cat.ix.n || access(CAT_DB, 0) || !*slot) return;
     if (!sqlite3_exec(*slot, "attach '" CAT_DB "' as cat", 0, 0, 0) && slot == cat.stock_slot)
         cat.attached = *slot;
 }
@@ -1064,10 +1061,10 @@ static void cat_detach(void) {
     if (db && cat.attached == db) sqlite3_exec(db, "detach cat", 0, 0, 0);
     cat.attached = 0;
 }
-/* Whether stock's Library queries may read servertable now: attached to its live handle. Run on
- * stock's scan thread too, so the setting as loaded, as catalogue_attach reads it. */
+/* Whether stock's Library queries may read servertable now: an index built and the file attached
+ * to its live handle. Run on stock's scan thread too. */
 static int cat_live(void) {
-    if (catalogue_source != 1 || !cat.ix.n || !cat.stock_slot) return 0;
+    if (!cat.ix.n || !cat.stock_slot) return 0;
     void *db = *cat.stock_slot;
     if (db && cat.attached != db && !access(CAT_DB, 0) &&
         !sqlite3_exec(db, "attach '" CAT_DB "' as cat", 0, 0, 0))
@@ -1075,14 +1072,14 @@ static int cat_live(void) {
     return db && cat.attached == db;
 }
 
-/* Era's and the counts' worker threads ask too: the setting as loaded, never the config file. */
-static int cat_ready(void) { return catalogue_source == 1 && cat.ix.n && !access(CAT_DB, 0); }
+/* Era's and the counts' worker threads ask too: an index built and the file there. */
+static int cat_ready(void) { return cat.ix.n && !access(CAT_DB, 0); }
 /* library_query's: the server's rows beside songtable's, while stock's connection has them. */
 const char *catalogue_rows(void) {
     return cat_live() ? " union all select * from servertable" : "";
 }
 /* sql with each " from songtable" reading the union of the card's and the server's songs, or 0
- * (Local only, no catalogue, no memory). The caller frees it. */
+ * (no catalogue, no memory). The caller frees it. */
 char *catalogue_union(const char *sql) {
     static const char from[] = " from songtable",
                       with[] =
@@ -1127,11 +1124,10 @@ static const char *cat_local(const char *path) {
     return e && !e->dup && e->local ? ix_str(&cat.ix, e->local) : 0;
 }
 static int cat_online(void) { return cat.online; }
-/* Whether path, a server row's, cannot play now: no offline copy while offline, or Local only (its
- * playlist kept, docs/server-library.md#compatibility). Any other path can. */
+/* Whether path, a server row's, cannot play now: no offline copy while offline. Any other path
+ * can. */
 static int path_unavailable(const char *path) {
     if (!catalogue_path(path)) return 0;
-    if (!catalogue_on()) return 1;
     return !cat_local(path) && !(cat_online() && cat_lookup(path));
 }
 int catalogue_unavailable(void *r) { return path_unavailable(r ? P(r, REC_PATH) : 0); }
@@ -1272,7 +1268,7 @@ static int tags_row(void *ctx, int n, char **v, char **c) {
 }
 /* r's title, album, artist and album artist from the server row its path is a Stream Cache copy
  * of (cat_copy_of), for a song not yet played (tags.c card_record_tags); 1 when a row named it. 0
- * with Local Only or before an import, when there is no index. */
+ * with no server signed in or before an import, when there is no index. */
 int catalogue_copy_tags(void *r) {
     const char *path = r && cat.ix.n ? P(r, REC_PATH) : 0;
     const cat_ent *e = path && !catalogue_path(path) ? cat_copy_of(path) : 0;
@@ -1397,7 +1393,7 @@ static void local_sets(void) {
  * its name with a card album (another artist's "Greatest Hits"), or a server-only artist named as
  * a card song's album artist, is not greyed; never the other way round. */
 static int group_unavailable(int kind, unsigned h) {
-    if (!h || !cat.ix.n || (catalogue_on() && cat_online())) return 0;
+    if (!h || !cat.ix.n || cat_online()) return 0;
     if (set_has(&cat.ix.cards[kind], h) || !set_has(&cat.ix.servers[kind], h)) return 0;
     local_sets();
     return !set_has(&cat.local[kind], h);
@@ -1462,6 +1458,8 @@ int catalogue_greyed(void *w, unsigned *color) {
 }
 /* How many rows are greyed or marked now: none, and nothing needs a mark. */
 int catalogue_greys(void) { return (int)cat.ngrey; }
+/* Whether a signed-in app's songs are in the Library now: its rows indexed. */
+int catalogue_has(void) { return cat.ix.n > 0; }
 /* Whether row (as catalogue_row_ink takes it) is a greyed or marked row's, so carries a mark. */
 int catalogue_row_greyed(void *row) { return grey_of(row, 4) >= 0; }
 /* Whether row (a list's entry, or a widget a few levels inside its row) is a greyed row's, and that
@@ -1628,7 +1626,7 @@ static void cat_swap(void) {
     ix_free(&cat.job_ix);
     if (slot >= 0) {
         tk_snprintf(cat.app[slot].seq, sizeof cat.app[slot].seq, "%s", cat.job_seq);
-        cat_answer(slot, cat.job_seq, cat.job_why, cat.job_rows);
+        if (cat.job_seq[0]) cat_answer(slot, cat.job_seq, cat.job_why, cat.job_rows);
     }
 }
 
@@ -1669,19 +1667,24 @@ static void cat_avail(int slot) {
     fclose(f);
 }
 
-/* Autostart: with Streaming Songs on, each catalogue app signed in (catalogue_signed's test) is
- * started in the background once, at boot or when the setting is turned on, as a catplay starts it
- * (addon.c addon_wake), so its catalogue, covers and play reports catch up without its page opened;
- * it idle-exits as it would from its page. A signed-out app, or Streaming Songs off, starts
- * nothing. cat_started: done since the setting last turned on (catalogue_changed clears it). */
+/* Whether app slot i is signed in to its server: its credentials file on the card (looked for,
+ * never opened; signing out deletes it, q2-subsonic). Only a signed-in app's catalogue is in the
+ * Library. */
+static int cat_signed_in(int i) {
+    char path[64];
+    tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/credentials", cat.app[i].id);
+    return !access(path, 0);
+}
+
+/* Autostart: each catalogue app signed in is started in the background once, at boot, as a
+ * catplay starts it (addon.c addon_wake), so its catalogue, covers and play reports catch up
+ * without its page opened; it idle-exits as it would from its page. A signed-out app starts
+ * nothing. cat_started: done since boot. */
 static int cat_started __attribute__((section(".scratch")));
 static void cat_autostart(void) {
-    char path[64];
     cat_started = 1;
-    for (int i = 0; i < cat.napps; ++i) {
-        tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/credentials", cat.app[i].id);
-        if (!access(path, 0)) addon_wake(cat.app[i].id);
-    }
+    for (int i = 0; i < cat.napps; ++i)
+        if (cat_signed_in(i)) addon_wake(cat.app[i].id);
 }
 
 static void ratings_in(int slot);
@@ -1690,8 +1693,10 @@ void catalogue_poll(void) {
     unsigned now = time_now_ms();
     if (cat.running && __atomic_load_n(&cat.done, __ATOMIC_ACQUIRE)) cat_swap();
     if (now - cat.polled < CAT_POLL_MS) return;
+    /* nothing indexed and the screen off: no app's files looked at, so a Q2 with no server signed
+     * in leaves the card alone while it is dark */
+    if (!cat.ix.n && !cat.running && !g_backlight_status) return;
     cat.polled = now;
-    if (!catalogue_on()) return;
     /* not while a job runs: it reads the slots */
     if (!cat.running && (!cat.scanned || now - cat.scanned >= CAT_SCAN_MS)) {
         cat.scanned = now | 1, cat_scan();
@@ -1718,26 +1723,18 @@ void catalogue_poll(void) {
     if (cat.running || library_scanning() || !card_mounted()) return;
     for (int i = 0; i < cat.napps; ++i) {
         char seq[24];
-        if (cat_seq(cat.app[i].id, seq) && strcmp(seq, cat.app[i].seq)) {
+        int has = cat_signed_in(i) && cat_seq(cat.app[i].id, seq);
+        if (has && strcmp(seq, cat.app[i].seq)) {
             cat_start(i, seq);
+            return;
+        }
+        if (!has && cat.ix.apps >> i & 1) { /* signed out, or its file gone: its rows leave */
+            cat_start(i, 0);
             return;
         }
     }
     /* the card's library changed: matched again, so a song copied there leaves the server rows */
     if (cat.ix.n && library_gen != cat.gen) cat_start(-1, 0);
-}
-
-/* Streaming Songs turned off asks first while this is 1: a catalogue app (q2app catalogue=1) has
- * its catalogue.tsv on the card (library_settings.c). The apps looked for again unless a job is
- * reading them. */
-int catalogue_kept(void) {
-    if (!cat.running) cat_scan();
-    char path[64];
-    for (int i = 0; i < cat.napps; ++i) {
-        tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/catalogue.tsv", cat.app[i].id);
-        if (!access(path, 0)) return 1;
-    }
-    return 0;
 }
 
 /* A catalogue app signed in to its server: its id (16 bytes) and its q2app's name (size bytes, the
@@ -1760,14 +1757,6 @@ int catalogue_signed(char *id, char *name, unsigned size) {
     return 0;
 }
 
-/* The setting, turned on or off: the union starts or stops, lists query again. */
-void catalogue_changed(void) {
-    if (!catalogue_on()) cat_detach();
-    cat_started = 0; /* on again: the signed-in apps start at the next poll */
-    cat.scanned = 0, cat.polled = 0;
-    ++library_gen;
-    cat.gen = library_gen;
-}
 /* The card going away (USB storage, addon_card_away): nothing of ours keeps it open. */
 void catalogue_card_away(void) { cat_detach(); }
 
@@ -1949,7 +1938,7 @@ int catalogue_load(void *q, int *at, void **own) {
     if (!server) return 0;
     void *start = *at >= 0 && (unsigned)*at < n ? deque_at(q, (unsigned)*at) : 0;
     if (start && catalogue_unavailable(start)) {
-        toast(catalogue_on() ? "Not available offline" : "Turn on Streaming Songs to play it");
+        toast("Not available offline");
         return 2;
     }
     const char *sp = start ? P(start, REC_PATH) : 0;
@@ -1958,7 +1947,7 @@ int catalogue_load(void *q, int *at, void **own) {
         const char *p = P(deque_at(q, i), REC_PATH);
         if (catalogue_path(p)) slot = cat_app_of(p);
     }
-    if (catalogue_on() && cat_online() && slot >= 0 && !cat.app[slot].down) {
+    if (cat_online() && slot >= 0 && !cat.app[slot].down) {
         /* Smart Wi-Fi's link first (woken now); then, or with the link up, its app started when it
          * isn't running (after a boot, or its idle exit) */
         int link = !smart_wifi_wait(), woke = link ? addon_wake(cat.app[slot].id) : 0;
@@ -2082,11 +2071,11 @@ static int plc_row(void *ctx, int n, char **v, char **names) {
     ++plc.n;
     return 0;
 }
-/* The mapping read again (Local + Server on), for catalogue_playlist_cover's asks that follow. */
+/* The mapping read again, for catalogue_playlist_cover's asks that follow. */
 void catalogue_playlist_covers(void) {
     void *db = 0;
     plc.n = 0;
-    if (!catalogue_on() || (!plc.at && !(plc.at = calloc(100, sizeof *plc.at))) ||
+    if (!catalogue_has() || (!plc.at && !(plc.at = calloc(100, sizeof *plc.at))) ||
         stock_db_open("/mnt/data/database.db", &db))
         goto done;
     sqlite3_exec(db, "select list,app,pid from cat.serverlists", plc_row, 0, 0);
@@ -2110,13 +2099,14 @@ int catalogue_playlist_cover(int list, char *url) {
  * its app's playlists.out, which the app sends on to the server and then empties: "set PID SID..."
  * (its songs in their own order, after an add or a removal; a song with no server id, a card file
  * the server doesn't have, is left out), "name PID NAME" after a Rename, "delete PID" after a
- * Delete. A local playlist, or the server library off, writes nothing. On the UI thread: a lookup
- * of the playlist and one read of its songs' ids through stock's connection, with cat attached. */
+ * Delete. A local playlist, or no signed-in app's rows indexed, writes nothing. On the UI thread: a
+ * lookup of the playlist and one read of its songs' ids through stock's connection, with cat
+ * attached. */
 void catalogue_playlist_sync(int list, int what, const char *name) {
     void *db = 0, *f = 0;
     pls_t p = { "", "" };
     char sql[600], file[64];
-    if (!catalogue_on() || list < 0 || list >= 100 || stock_db_open("/mnt/data/database.db", &db))
+    if (!catalogue_has() || list < 0 || list >= 100 || stock_db_open("/mnt/data/database.db", &db))
         goto done;
     tk_snprintf(sql, sizeof sql, "select app,pid from cat.serverlists where list=%d", list);
     if (sqlite3_exec(db, sql, pls_one, &p, 0) || !p.app[0] || strstr(p.app, "/")) goto done;
@@ -2139,6 +2129,60 @@ void catalogue_playlist_sync(int list, int what, const char *name) {
 done:
     if (f) fclose(f);
     if (db) sqlite3_close(db);
+}
+
+/* ---- Sync Offline (docs/internals.md#sync-offline) ---- */
+
+/* What a Library item is on its server, for its app's Sync Offline (offline.c): its app's id into
+ * app (16 bytes) and "<kind> <id>" into key (n bytes), 1; 0 for an item no signed-in server has.
+ * kind OFF_SONG: the record r, a server row or a card file linked to one, by its sid; OFF_ALBUM: an
+ * album list's record, by the album id in the path of one of its server rows (cat/<album>/<sid>),
+ * a row whose album and album artist (or artist) are r's; OFF_ARTIST: an artist list's record, by
+ * name ("artistname <name>"), when a server row has that artist or album artist; OFF_PLAYLIST:
+ * stock's playlist list (0 to 99), a server playlist by its id (cat.serverlists). */
+int catalogue_offline_key(int kind, void *r, int list, char *app, char *key, unsigned n) {
+    *app = *key = 0;
+    if (!catalogue_has()) return 0;
+    if (kind == OFF_PLAYLIST) {
+        void *db = 0;
+        pls_t pl = { "", "" };
+        char sql[96];
+        if (list < 0 || list >= 100 || stock_db_open("/mnt/data/database.db", &db)) return 0;
+        tk_snprintf(sql, sizeof sql, "select app,pid from cat.serverlists where list=%d", list);
+        sqlite3_exec(db, sql, pls_one, &pl, 0);
+        sqlite3_close(db);
+        if (!pl.app[0] || !pl.pid[0]) return 0;
+        tk_snprintf(app, 16, "%s", pl.app);
+        tk_snprintf(key, n, "playlist %s", pl.pid);
+        return 1;
+    }
+    if (!r) return 0;
+    const cat_ent *e = 0;
+    if (kind == OFF_SONG) {
+        if (!(e = cat_lookup(P(r, REC_PATH))) || e->app >= cat.napps) return 0;
+        tk_snprintf(key, n, "song %s", ix_str(&cat.ix, e->sid));
+    } else {
+        const char *name = P(r, kind == OFF_ALBUM ? REC_ALBUM : REC_ARTIST);
+        unsigned h = group_hash(name), by = kind == OFF_ALBUM ? group_hash(P(r, REC_ARTIST)) : 0;
+        for (unsigned i = 0; h && i < cat.ix.n && !e; ++i) {
+            const cat_ent *c = &cat.ix.e[i];
+            if (c->dup || c->app >= cat.napps) continue;
+            if (kind == OFF_ALBUM ? c->grp[0] == h && (!by || c->grp[1] == by || c->grp[2] == by)
+                                  : c->grp[1] == h || c->grp[2] == h)
+                e = c;
+        }
+        if (!e) return 0;
+        if (kind == OFF_ARTIST)
+            tk_snprintf(key, n, "artistname %s", name);
+        else { /* the album id: the path's folder under cat/ */
+            const char *path = ix_str(&cat.ix, e->path), *at = strstr(path, "/cat/"),
+                       *end = at ? strstr(at + 5, "/") : 0;
+            if (!end || end == at + 5) return 0;
+            tk_snprintf(key, n, "album %.*s", (int)(end - at - 5), at + 5);
+        }
+    }
+    tk_snprintf(app, 16, "%s", cat.app[e->app].id);
+    return 1;
 }
 
 /* ---- Ratings (docs/server-library.md#ratings-and-favorites) ---- */

@@ -279,10 +279,12 @@ void *page_list(void *page, void *body, void **title, const char *caption, int n
 void *rows_view(void *parent, int y, int w, int h, int n, int item_h);
 void *page_list_or(void *page, void *body, const char *name, const char *none, int n, int item_h);
 /* feedback.c: the empty state (docs/oled-design.md#empty-and-offline), an outline glyph
- * (tools/art.py EMPTY_GLYPHS; none in the compact form, under rows), a title, a hint and at most
- * one button */
+ * (tools/art.py EMPTY_GLYPHS; none in the compact form, under rows), a title, a hint (lines split at
+ * '\n') and at most one button; a status page's (a card app's Sync, docs/oled-design.md#sync) also a
+ * progress bar under the title (bar: its permille + 1, 0 for none) and a footer line (foot) */
 typedef struct {
-    const char *glyph, *title, *hint, *row;
+    const char *glyph, *title, *hint, *row, *foot;
+    int bar;
 } empty_t;
 int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *ctx, void *event));
 int empty_row_y(int free_top);
@@ -455,6 +457,7 @@ int addon_wake(const char *id), addon_ready(const char *id);
  * how far */
 int addon_sync(int *permille);
 int addon_offline(void); /* a running app's server out of reach (status_row.c) */
+int addon_offline_ok(const char *id), addon_offline_ask(const char *id, int add, const char *key);
 /* addon.c's card games (q2app game=1), Games' rows after its own: how many (a scan), one's name,
  * its start over the screen (1 when it runs), whether one runs, and ringnav_input's events for it
  */
@@ -516,14 +519,13 @@ int addon_dir(const char *id, char *dir, unsigned n), addon_version_cmp(const ch
 /* addon.c: whether the firmware carries app id as its own alone, never the App Store's (netupdate.c) */
 int addon_builtin(const char *id);
 void addon_q2app(const char *id, char *path, unsigned n);
-/* catalogue.c: the server library (docs/internals.md#server-library). catalogue_on: Local + Server;
- * catalogue_path: a server row's path; catalogue_unavailable: a record that can't play now;
+/* catalogue.c: the server library (docs/internals.md#server-library), a signed-in catalogue app's
+ * songs in the Library. catalogue_has: any are in it now; catalogue_path: a server row's path; catalogue_unavailable: a record that can't play now;
  * catalogue_album_unavailable: an album list's record none of whose songs can play now, and
  * catalogue_artist_unavailable an artist's;
  * catalogue_union: a Library query reading servertable too (0: as it is; the caller frees it);
  * catalogue_load: ringnav_load's queue (0 as it is, 1 *own instead, 2 nothing loaded). */
-extern int catalogue_source;
-int catalogue_on(void), catalogue_path(const char *path), catalogue_unavailable(void *r);
+int catalogue_has(void), catalogue_path(const char *path), catalogue_unavailable(void *r);
 /* catalogue.c: the server row (its fileurl) record r's Stream Cache copy plays, or 0 */
 const char *catalogue_row_path(void *r);
 int catalogue_album_unavailable(void *r), catalogue_artist_unavailable(void *r);
@@ -537,16 +539,18 @@ unsigned catalogue_fav_gen(void);
 char *catalogue_union(const char *sql), *catalogue_search(const char *sql);
 const char *catalogue_rows(void); /* library_query's union, "" without one */
 void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_poll(void);
-void catalogue_changed(void), catalogue_card_away(void);
+void catalogue_card_away(void);
 void catalogue_rated(void *r, int stars), catalogue_liked(void *r, int on);
-int catalogue_kept(void); /* a catalogue app's catalogue.tsv is on the card */
 int catalogue_signed(char *id, char *name, unsigned size); /* a catalogue app signed in */
+/* catalogue.c: a Library item's server identity for Sync Offline (offline.c), by OFF_* kind */
+enum { OFF_SONG = 1, OFF_ALBUM, OFF_ARTIST, OFF_PLAYLIST };
+int catalogue_offline_key(int kind, void *r, int list, char *app, char *key, unsigned n);
+void offline_np_row(void *win, void *view); /* offline.c: Now Playing's ⋯ row */
 /* cf_empty.c: Cover Flow's page with no albums, by what is missing; 0 under a theme without it */
 int cf_empty(void *page, void *body);
-/* library_settings.c: Streaming Songs' state for card apps (/tmp/q2-addon.library), and a needslib
- * row's check, which asks to turn it on: 1 when it is on */
+/* library_settings.c: the server library's state for card apps (/tmp/q2-addon.library): always
+ * "server" */
 void library_source_file(void);
-int library_needs(void);
 /* a server playlist changed on the Q2: its songs (PLS_SET), its name, or its deletion, to its app
  */
 enum { PLS_SET, PLS_NAME, PLS_DELETE };

@@ -80,10 +80,11 @@ class Q2:
 
     @staticmethod
     def serve(root, songs, cat=False):
-        """Local + Server: config.ini's LIBRARYSOURCE=1 and the catalogue on the card, made with catalogue.c's
+        """A signed-in server: its catalogue on the card, read whatever an older build saved as LIBRARYSOURCE (0 here:
+        there is no setting since 2026-11-19), made with catalogue.c's
         own schema (servertable, and servermeta, which has a track column of its own); cat: the songs at catalogue.c's
         own paths, /mnt/mmc/.subsonic/cat/<album>/<sid>.flac, whose album is the art id's."""
-        (root / 'mnt/data/config.ini').write_text('[Q2POD]\nLIBRARYSOURCE=1\n')
+        (root / 'mnt/data/config.ini').write_text('[Q2POD]\nLIBRARYSOURCE=0\n')
         src = (PATCH / 'catalogue.c').read_text()
         schema = src[src.index('static const char *const SCHEMA ='):]
         schema = ''.join(re.findall(r'"((?:[^"\\]|\\.)*)"', schema[:schema.index(';\n')])).replace('nw.', '')
@@ -148,7 +149,7 @@ SERVER = [('Echo', 'Eve', 'Third', 500), ('Foxtrot', 'Eve', 'Third', 600)]
 ])
 def test_local_and_server_lists_hold_both_libraries(lib, tmp_path, node, want):
     """A catalogue's servermeta has a track column as servertable does: the songs' view must name whose it reads
-    (2026-11-16: every browse answered INTERNAL "query" once a card app's catalogue was in, LIBRARYSOURCE=1)."""
+    (2026-11-16: every browse answered INTERNAL "query" once a card app's catalogue was in)."""
     q2 = Q2(lib, tmp_path, server=SERVER)
     assert titles(q2.browse(node)) == want
 

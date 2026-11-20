@@ -354,7 +354,7 @@ MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'heart
               'vinyl-record', 'microphone-stage', 'folder', 'clock-counter-clockwise', 'list-numbers',
               'bookmark-simple', 'dots-three', 'plus', 'list-checks', 'skip-forward', 'skip-back', 'repeat', 'stack',
               'airplay', 'download-simple', 'cloud-arrow-down', 'trash', 'speedometer', 'pencil-simple',
-              'caret-up', 'caret-down', 'check', 'sliders-horizontal', 'info', 'sneaker-move', 'play')
+              'caret-up', 'caret-down', 'check', 'sliders-horizontal', 'info', 'sneaker-move', 'play', 'cloud-slash')
 PAIR_ICON_PX = 16  # an artist's or album's page's action pair (artist_page.c PAIR_ICON)
 BUMP_PX = 16  # Up Next's bump arrow (upnext.c)
 BUMP_INKS = inks('tertiary', 'd', 'l', 'w')
@@ -482,7 +482,8 @@ EMPTY_PX = 60
 EMPTY_GLYPHS = {g: g for g in (
     'cards', 'music-notes', 'vinyl-record', 'microphone-stage', 'music-notes-simple', 'guitar', 'folder', 'playlist',
     'clock-counter-clockwise', 'chart-bar', 'sparkle', 'timer', 'calendar-blank', 'star', 'magnifying-glass',
-    'radio', 'cloud-slash', 'download-simple', 'list-numbers', 'car-profile', 'broadcast', 'wifi-slash')} | {'sd-card': 'memory',
+    'radio', 'cloud-slash', 'download-simple', 'list-numbers', 'car-profile', 'broadcast', 'wifi-slash',
+    'arrows-clockwise', 'check-circle', 'arrow-circle-down', 'cloud')} | {'sd-card': 'memory',  # the last four: Sync's states
     'heart-slash': 'q2coda/heart-slash'}
 USB_TOASTS = {'unplugged': ('plug-fill', token('secondary')), 'ejected': ('check-circle-fill', token('positive')), 'audio': ('speaker-hifi-fill', 0xffffff)}
 # The status row's battery (list_marks.c battery_slim): charging, Phosphor's lightning, too weak a charger its warning,

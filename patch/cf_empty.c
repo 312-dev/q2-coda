@@ -3,10 +3,10 @@
  * card but none in the library (CF_UNSCANNED): "No Albums Yet", "Music on the card isn't
  * scanned", Scan Music Now (stock's scan, its own dialog). No card music and a catalogue app
  * signed in (CF_STREAMING, catalogue.c catalogue_signed): "No Albums", "Streaming albums can show
- * here", and while Streaming Songs is off Turn on Streaming (library_settings.c library_needs,
- * which asks first). Neither (CF_NONE): "No Albums", "Copy music to the SD card", no row; with no
- * card in, "No SD Card", "Insert an SD card with music" (feedback.c empty_card).
- * coverflow.c loads the covers again once the library changes. */
+ * here", no row: its albums join by themselves once its catalogue is in. Neither (CF_NONE): "No
+ * Albums", "Copy music to the SD card", no row; with no card in, "No SD Card", "Insert an SD card
+ * with music" (feedback.c empty_card). coverflow.c loads the covers again once the library changes.
+ */
 #include "navigation.h"
 
 enum { CF_NONE, CF_STREAMING, CF_UNSCANNED };
@@ -49,14 +49,13 @@ static int card_has_music(void) {
     return walk(path, strlen(path), 0, &budget);
 }
 
-/* The page's row: Scan Music Now or Turn on Streaming. coverflow.c's poll loads the covers again
- * once either has changed the library. */
+/* The page's row: Scan Music Now. coverflow.c's poll loads the covers again once it has changed
+ * the library. */
 static int row_click(void *ctx, void *event) {
     if (cf_cause == CF_UNSCANNED) {
         int scan[4] = { 0 };
         navigator_to_with_context("dialog/updatemusic_dialog", scan);
-    } else if (cf_cause == CF_STREAMING)
-        library_needs();
+    }
     return 0;
 }
 
@@ -67,9 +66,7 @@ int cf_empty(void *page, void *body) {
     char id[16], name[32];
     int signed_in = catalogue_signed(id, name, sizeof name);
     cf_cause = card_has_music() ? CF_UNSCANNED : signed_in ? CF_STREAMING : CF_NONE;
-    const char *row = cf_cause == CF_UNSCANNED                      ? "Scan Music Now"
-                      : cf_cause == CF_STREAMING && !catalogue_on() ? "Turn on Streaming"
-                                                                    : (const char *)0;
+    const char *row = cf_cause == CF_UNSCANNED ? "Scan Music Now" : (const char *)0;
     empty_t e = { "cards", cf_cause == CF_UNSCANNED ? "No Albums Yet" : "No Albums",
                   cf_cause == CF_UNSCANNED   ? "Music on the card isn't scanned"
                   : cf_cause == CF_STREAMING ? "Streaming albums can show here"

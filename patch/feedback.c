@@ -64,7 +64,7 @@ void toast_icon(const char *glyph, const char *text) {
  * USB's and charging's. glyph is a theme image's name without the art prefix; the last one asked
  * for wins. Dropped while the screen is dark. */
 static struct {
-    char glyph[32], text[48];
+    char glyph[32], text[96]; /* a card app's Sync Offline answer names an album (addon.c) */
 } later __attribute__((section(".scratch")));
 void toast_later(const char *glyph, const char *text) {
     tk_snprintf(later.glyph, sizeof later.glyph, "%s", glyph ? glyph : "");
@@ -289,16 +289,34 @@ int feedback_empty(void *parent, int free, const char *message, const char *hint
 #define ES_HINT_PX TYPE(15)  /* Inter 15 */
 #define ES_WORDS (ES_TITLE_H + ES_HINT_H)
 #define ES_TEXT (ES_GLYPH + ES_GLYPH_GAP + ES_WORDS)
+/* a status page's progress bar: this far under the title, and over its lines */
+#define ES_BAR_GAP 10
+#define ES_BAR_H 4
+#define ES_BAR_W 232
+#define ES_FOOT_Y 304 /* its footer's centre on screen, 13 px Text Tertiary, clear of the glass */
+#define ES_FOOT_PX TYPE(13)
 /* Whether the empty state under free_top is the compact form: rows above it on the page. */
 int empty_compact(int free_top) { return free_top > geom_val(V_BAR) && free_top > ES_TOP; }
-/* The stack's height down to its button's gap: the glyph's part only in the full form. */
-static int es_text(int compact) { return compact ? ES_WORDS : ES_TEXT; }
-/* The stack's top, centred between free_top (the status row's foot at least) and free_end. */
-int empty_top(int free_top, int free_end, int row) {
-    int stack = es_text(empty_compact(free_top)) + (row ? CTA_GAP_ABOVE + CTA_H : 0),
+/* The lines of a hint ('\n' apart; at least one band, as one empty hint had) */
+static int es_lines(const char *hint) {
+    int n = 1;
+    for (const char *s = hint; s && *s; ++s) n += *s == '\n';
+    return n;
+}
+/* The stack's height down to its button's gap: the glyph's part only in the full form, a status
+ * page's bar and each further line of its hint. */
+static int es_text_e(int compact, const char *hint, int bar) {
+    return (compact ? ES_WORDS : ES_TEXT) + (es_lines(hint) - 1) * ES_HINT_H +
+           (bar ? 2 * ES_BAR_GAP + ES_BAR_H : 0);
+}
+static int es_text(int compact) { return es_text_e(compact, 0, 0); }
+static int es_top(int free_top, int free_end, int row, const char *hint, int bar) {
+    int stack = es_text_e(empty_compact(free_top), hint, bar) + (row ? CTA_GAP_ABOVE + CTA_H : 0),
         from = free_top > ES_TOP ? free_top : ES_TOP;
     return from + (free_end - from - stack) / 2;
 }
+/* The stack's top, centred between free_top (the status row's foot at least) and free_end. */
+int empty_top(int free_top, int free_end, int row) { return es_top(free_top, free_end, row, 0, 0); }
 /* The button's screen y, for a page whose own widget is the button (Songs' Scan Music Now). */
 int empty_row_y(int free_top) {
     return empty_top(free_top, ES_END, 1) + es_text(empty_compact(free_top)) + CTA_GAP_ABOVE;
@@ -314,7 +332,7 @@ int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *
         if (row) widget_set_visible(row, 0, 0);
         return 0;
     }
-    int y = screen_y(page), top = empty_top(free_top, ES_END, e->row != 0),
+    int y = screen_y(page), top = es_top(free_top, ES_END, e->row != 0, e->hint, e->bar),
         compact = empty_compact(free_top);
     if (!art) {
         art = widget_factory_create_widget(widget_factory(), "view", page, 0, 0, 375, I(page, W_H));
@@ -325,14 +343,16 @@ int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *
     widget_set_prop_str(art, "_es_title", e->title ? e->title : "");
     widget_set_prop_str(art, "_es_hint", e->hint ? e->hint : "");
     widget_set_prop_str(art, "_es_row", e->row && on_row ? e->row : "");
+    widget_set_prop_str(art, "_es_foot", e->foot ? e->foot : "");
+    widget_set_prop_int(art, "_es_bar", e->bar);
     widget_set_prop_int(art, "_es_top", top);
     widget_set_visible(art, 1, 0);
     widget_invalidate_force(art, 0);
     if (row)
         widget_set_visible(row, e->row && on_row, 0);
     else if (e->row && on_row) {
-        void *view =
-            rows_view(page, top + es_text(compact) + CTA_GAP_ABOVE - y, 375, CTA_H, 1, CTA_H);
+        void *view = rows_view(page, top + es_text_e(compact, e->hint, e->bar) + CTA_GAP_ABOVE - y,
+                               375, CTA_H, 1, CTA_H);
         widget_set_name(P(view, W_PARENT), ES_ROW_NAME);
         widget_set_prop_int(P(view, W_PARENT), "style:normal:bg_color",
                             0);                  /* the capsule under it */
@@ -351,6 +371,17 @@ int empty_button(void *list) {
     void *p = list ? P(list, W_PARENT) : (void *)0;
     return p && !tk_strcmp(widget_get_prop_str(p, "name", ""), ES_ROW_NAME);
 }
+/* A status page's bar: a w x h capsule at x, y (the canvas's), in rgb */
+static void es_fill(void *canvas, int x, int y, int w, int h, int r, unsigned rgb) {
+    void *vg = canvas_get_vgcanvas(canvas);
+    if (!vg) return;
+    vgcanvas_save(vg);
+    vgcanvas_translate(vg, (float)I(canvas, CANVAS_X), (float)I(canvas, CANVAS_Y));
+    round_path(vg, (float)x, (float)y, (float)w, (float)h, (float)r);
+    vgcanvas_set_fill_color(vg, RGBA(rgb));
+    vgcanvas_fill(vg);
+    vgcanvas_restore(vg);
+}
 /* The stack painted in w at top (a y in w); its button, when e->row, selected or not. No glyph
  * (0 or ""): the compact form, the title at top. */
 void empty_paint(void *w, void *canvas, const empty_t *e, int top) {
@@ -362,14 +393,34 @@ void empty_paint(void *w, void *canvas, const empty_t *e, int top) {
     /* Text Primary: white, which ui_ink turns black on Light Mode's paper */
     ui_text(canvas, e->title ? e->title : "", 1, ES_TITLE_PX, 0xffffff, 0, 375 / 2,
             ty + ES_TITLE_H / 2 - 1, 375 - 48, 1);
-    ui_text(canvas, e->hint ? e->hint : "", 0, ES_HINT_PX, tok(TOK_SECONDARY), 0, 375 / 2,
-            ty + ES_TITLE_H + ES_HINT_H / 2, 375 - 48, 1);
+    ty += ES_TITLE_H;
+    if (e->bar) { /* a status page's progress: Track, filled in the accent to the permille */
+        int x = (375 - ES_BAR_W) / 2, fill = ES_BAR_W * (e->bar > 1001 ? 1000 : e->bar - 1) / 1000;
+        es_fill(canvas, x, ty + ES_BAR_GAP, ES_BAR_W, ES_BAR_H, ES_BAR_H / 2, tok(TOK_TRACK));
+        if (fill > 0)
+            es_fill(canvas, x, ty + ES_BAR_GAP, fill, ES_BAR_H, ES_BAR_H / 2,
+                    scheme()->tones[0] & 0xffffffu);
+        ty += 2 * ES_BAR_GAP + ES_BAR_H;
+    }
+    char line[128];
+    for (const char *s = e->hint ? e->hint : ""; s; ty += ES_HINT_H) {
+        const char *nl = strstr(s, "\n");
+        unsigned k = nl ? (unsigned)(nl - s) : (unsigned)strlen(s);
+        tk_snprintf(line, sizeof line, "%.*s", (int)k, s);
+        ui_text(canvas, line, 0, ES_HINT_PX, tok(TOK_SECONDARY), 0, 375 / 2, ty + ES_HINT_H / 2,
+                375 - 48, 1);
+        s = nl ? nl + 1 : 0;
+    }
+    if (e->foot && *e->foot)
+        ui_text(canvas, e->foot, 0, ES_FOOT_PX, tok(TOK_TERTIARY), 0, 375 / 2,
+                ES_FOOT_Y - screen_y(w), 375 - 96, 1);
 }
 void empty_state_paint(void *w, void *canvas) {
     if (!w || !P(canvas, CANVAS_LCD) || tk_strcmp(widget_get_prop_str(w, "name", ""), ES_NAME))
         return;
     empty_t e = { widget_get_prop_str(w, "_es_glyph", ""), widget_get_prop_str(w, "_es_title", ""),
-                  widget_get_prop_str(w, "_es_hint", ""), 0 };
+                  widget_get_prop_str(w, "_es_hint", ""), 0, widget_get_prop_str(w, "_es_foot", ""),
+                  widget_get_prop_int(w, "_es_bar", 0) };
     int top = widget_get_prop_int(w, "_es_top", ES_TOP) - screen_y(w);
     empty_paint(w, canvas, &e, top);
     const char *label = widget_get_prop_str(w, "_es_row", "");
@@ -378,8 +429,8 @@ void empty_state_paint(void *w, void *canvas) {
     if (list && widget_get_visible(row)) {
         /* selected: the wheel's list is the button's, on its one row */
         int sel = g_menu.w == list && widget_get_prop_int(list, SEL, -1) == 0 ? 0 : -1;
-        ui_cta_paint(canvas, &label, 1, top + es_text(!*e.glyph) + CTA_GAP_ABOVE, sel,
-                     pointer_down() && !sel);
+        ui_cta_paint(canvas, &label, 1, top + es_text_e(!*e.glyph, e.hint, e.bar) + CTA_GAP_ABOVE,
+                     sel, pointer_down() && !sel);
     }
 }
 /* A list page with nothing listed (page_list's, no rows): the empty state in body, the page's name

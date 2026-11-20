@@ -46,9 +46,8 @@ enum {
     POD_PL_CF,   /* Display's Playlist View: List or Cover Flow, as Artist View */
     POD_SCAN_DURATIONS,
     POD_CF_POSITION,
-    POD_LIBRARY_SOURCE, /* Local Only or Local + Server (catalogue.c) */
-    POD_OTG,            /* Library's On-The-Go (playlist_pages.c), on unless chosen */
-    POD_AUTOZONE,       /* Automatic Time Zone (autozone.c), on unless chosen */
+    POD_OTG,      /* Library's On-The-Go (playlist_pages.c), on unless chosen */
+    POD_AUTOZONE, /* Automatic Time Zone (autozone.c), on unless chosen */
     POD_COUNT
 };
 
@@ -393,6 +392,11 @@ int clock_due(const void *info);
 int bar_repaint(const void *info);
 void clock_text(void *label, int negative, int t);
 void *list_row(void *view, const char *icon, int (*click)(void *, void *), void *ctx);
+/* offline.c: Sync Offline's row for a Library item (OFF_* kind, peq.h), its symbol and its press;
+ * Now Playing's ⋯ row is peq.h's offline_np_row */
+const char *offline_row(int kind, void *r, int list), *offline_icon(void);
+void offline_press(void);
+int offline_state(const char *app, const char *key);
 void *list_row_core(void *view, const char *icon, int (*click)(void *, void *), void *ctx, int w,
                     int into);
 int media_find(int kind, char *path);
@@ -1268,7 +1272,6 @@ enum { LIB_LIBRARY = 1, LIB_SORTING, LIB_PLAYLISTS, LIB_FOLDERS };
 void library_page(void *win, void *view, int page);
 int picker_rows(void *win); /* a picker's rows on stock's Buttons Lock page */
 void cf_sort_open(void);
-int library_source_toggle(void);
 /* navigation.c */
 int library_open(void *ctx, void *event); /* Library's page ctx (LIB_*) */
 void *list_row_into(void *view, const char *icon, int (*click)(void *, void *), void *ctx);

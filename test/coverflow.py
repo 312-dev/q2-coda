@@ -149,7 +149,7 @@ const char *duration_text(char *text, unsigned size, void *song) {
 
 /* Server boundary: catalogue.c with no server rows, a card library under Local; Cover Flow's server
  * rows and art are test/fw/test_catalogue.py's, against the real catalogue.c. */
-int catalogue_on(void) { return 0; }
+int catalogue_has(void) { return 0; }
 int catalogue_path(const char *path) { return 0; }
 int catalogue_missing(const char *path) { return access(path, 0); } /* a card row: its file gone */
 int catalogue_album_unavailable(void *r) { return 0; }

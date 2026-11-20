@@ -383,11 +383,8 @@ Its pages are stock's Playback page opened again (`library_open`, `playset_sub` 
 rows dropped, each page's own built; each keeps its own place in position memory (`SUB_PAGE`):
 
 - Library: an **On-The-Go** switch first (`Q2POD OTG`, on by default: Playlists' On-The-Go row and the hold menu's
-  Add to On-The-Go), then a **Streaming Songs** switch (`Q2POD LIBRARYSOURCE`, off by default; caption "Streaming songs join your
-  Library"): on, the songs and playlists of a music server that a card app such as the Subsonic app lists join the
-  Library, grayed while they can't play ([Server library](internals.md#server-library)). Off asks first, "Hide
-  streaming songs?" (Cancel, Turn Off, a footer saying Show in Library pauses), while a card app has a catalogue on
-  the card; then Sorting, "Artists: Artist" or "Album Artist" (stock's `PLAYSET ARTISTTYPE`), "Artist View: Cover
+  Add to On-The-Go; there is no Streaming Songs switch: a signed-in card app's server songs and playlists are always
+  in the Library, grayed while they can't play, [Server library](internals.md#server-library)); then Sorting, "Artists: Artist" or "Album Artist" (stock's `PLAYSET ARTISTTYPE`), "Artist View: Cover
   Flow" (`Q2POD ARTISTCF`, the default; Grid and List; on Cover Flow or List, Go to Album opens the album's tracks in
   Cover Flow, see [internals.md](internals.md#artist-view-and-go-to-album-in-coverflow)), Playlists, Folders, and a "Scan Song Durations" switch
   (`Q2POD SCANDURATIONS`, off; caption "Measures lengths after each update"; durations.c).
@@ -404,8 +401,8 @@ rows built by `picker_rows` from `ringnav_keylock_rows`; a pick stays on the pag
 (Settings, Playback, Library); its Sorting, Playlists and Folders pages are depth 4, and the Songs picker depth 5.
 From Home with Now Playing selected, counting detents and Center presses straight down (Settings is 6 detents and
 Center, Playback, its fourth row, 3 and Center, Library, Playback's second, 1 and Center: 13 to open it), a row's own
-press included: On-The-Go 14, Streaming Songs 15, Artists 17, Artist View 18, Scan Song Durations 21; the Songs picker
-17, Artist's Albums 18, Years 19; Playlist View 20; Folder Root 21. Elsewhere: Sleep Timer's page 20, Enlarged Album
+press included: On-The-Go 14, Artists 16, Artist View 17, Scan Song Durations 20; the Songs picker
+16, Artist's Albums 17, Years 18; Playlist View 19; Folder Root 20. Elsewhere: Sleep Timer's page 20, Enlarged Album
 Art 20, Cover Flow's Sort picker 20.
 
 Stock's Wireless page (Wi-Fi, Bluetooth and SyncLink) is not reached from Settings, whose own rows open Wi-Fi's and Bluetooth's pages; SyncLink stays off ([internals](internals.md#synclink)).
@@ -974,7 +971,7 @@ drops the stock rows, takes the sub-page's title and builds only its own rows:
   `playset_covermode`): letters held until the lift and years on a fast spin, and the half copies they read, a
   "Position Bar" switch (`Q2POD CFPOSITION`, off; `playset_covermode`; coverflow_position.c), then after a 12 px gap
   "Refresh Cover Flow" (`system_update`; it empties `.coverflow/`, the playlists' art with the albums', which builds
-  again). The Library's own settings (Artist View, Playlist View, Scan Song Durations, Streaming Songs) are on
+  again). The Library's own settings (Artist View, Playlist View, Scan Song Durations) are on
   [Settings > Playback > Library](#settings).
 - Controls: Wheel Sensitivity, which opens its slider page; "Hold Return: Recent"
   (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); "Clicker: Both", Key Tone's row, cycling Speaker, Headphones, Both and Off (`IPOD CLICKER`, Off being Key Tone off; [Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; and "Wake: Single Press".
