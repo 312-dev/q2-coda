@@ -3,10 +3,10 @@
  * work ends the wait at once: every event an input thread or another thread posts
  * (ringnav_queue_event, the one way into AWTK's queue, posts timers and idles from other threads
  * too), the wheel's raw travel (wheel_sample, for the thumb and the bar's lean, which post
- * nothing), a headset key (headset.c), BlueZ's volume signal (bt_vol_event.c) and a Cover Flow half
- * loaded (coverflow_loader.c). With that, the wait may run past ringnav_sleep's fixed idles when
- * nothing needs the loop sooner (loop_span). Without an eventfd (the kernel refused one) it is the
- * plain sleep it replaces, at the same length. */
+ * nothing), a headset key (headset.c) and BlueZ's volume signal (bt_vol_event.c). With that, the
+ * wait may run past ringnav_sleep's fixed idles when nothing needs the loop sooner (loop_span).
+ * Without an eventfd (the kernel refused one) it is the plain sleep it replaces, at the same
+ * length. */
 #include "navigation.h"
 
 #define SYS_EVENTFD2 4325 /* o32 */
@@ -14,7 +14,7 @@
 #define EFD_FLAGS (0x80 | 0x80000) /* EFD_NONBLOCK | EFD_CLOEXEC: O_NONBLOCK, O_CLOEXEC on MIPS */
 
 /* The o32 syscall nr(a, b, c): its result, or -1 when the kernel reports an error ($a3). A name of
- * its own, not coverflow_loader.c's, so test/patch.py's machine can answer the loop's alone. */
+ * its own, not thread_lower.c's, so test/patch.py's machine can answer the loop's alone. */
 #ifndef PEQ_HOST
 __asm__(".globl lw_syscall\nlw_syscall:\n.set push\n.set noreorder\nmove $v0, $a0\nmove $a0, $a1\n"
         "move $a1, $a2\nmove $a2, $a3\nsyscall\nbnez $a3, 1f\nnop\njr $ra\nnop\n1:\njr $ra\n"

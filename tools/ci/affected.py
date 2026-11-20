@@ -54,10 +54,11 @@ ALL = 'all'
 # tools/ modules the build or the fw host build imports: a change reaches the payload or the fw library.
 BUILD_INPUTS = {'build', 'ipod', 'theme', 'art', 'peq', 'aic', 'rotator', 'pwm', 'mcu_park', 'module_elf',
                 'splash', 'player', 'thirdparty', 'signing'}
-# test/coverflow.py compiles patch/coverflow*.c and .h on the host with stand-ins for the behaviour of home.c,
-# page_parallax.c and playlist_art.c, so a change to any of these plans it (in `other`). It is one of
-# gate.PLANNED, which a plan that runs everything also names.
-COVERFLOW_SOURCES = ('patch/coverflow*.[ch]', 'patch/home.c', 'patch/page_parallax.c', 'patch/playlist_art.c')
+# test/coverflow.py compiles patch/coverflow*.c and .h, thread_lower.c and wheel_accel.c on the host with stand-ins
+# for the behaviour of home.c, page_parallax.c and playlist_art.c, so a change to any of these plans it (in `other`).
+# It is one of gate.PLANNED, which a plan that runs everything also names.
+COVERFLOW_SOURCES = ('patch/coverflow*.[ch]', 'patch/thread_lower.c', 'patch/wheel_accel.[ch]', 'patch/home.c',
+                     'patch/page_parallax.c', 'patch/playlist_art.c')
 # gate.py's type-check suites, planned in `other`: a .py under tools/ or test/unit/ (or the mypy config)
 # needs mypy-tools, one under test/fw/ needs mypy-fw. A merge batch runs them, so a branch that skips them
 # here is rejected there.

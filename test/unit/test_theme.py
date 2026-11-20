@@ -114,11 +114,10 @@ def own(key, label, names, default=-1, preset=-1, keep=-1):  # a theme's own opt
     return {**opt('SETTING_OWN', default, preset, keep), 'key': key, 'label': label, 'names': list(names)}
 
 
-THUMB = dict(thumb=1, ticks_turn=36, ticks_album=7, fast_at=23, fast_full=90, top_speed=20, track=30, snap=25, spin=130, far_left=250,
+THUMB = dict(thumb=1, ticks_turn=36, fast_at=23, fast_full=90, track=30, snap=25, spin=130, far_left=250,
              detent=80, hold_ms=5000, stop_ms=60, stop_left=60, rate_up=120, rate_down=50, back=50, dead=1, contact_ms=40, aim_snap=30,
              lead_from=25, lead_full=100, lead_ms=45, row_shift=20, row_from=100, row_full=300, row_shrink=8, row_flat=200, row_out=33,
-             row_edge=160, row_width=40, row_key=72, jump_ms=700, jump_ticks=5, jump_at=32, jump_pace=140,
-             big_jump_at=75, big_jump_ms=240, enter_albums=8, slide_ms=160, fold_near=50,
+             row_edge=160, row_width=40, row_key=72,
              arch_at=8, arch_full=16, arch_span=500, arch_in=100, arch_out=62, arch_tau=56)
 
 
@@ -419,9 +418,7 @@ def with_role(monkeypatch, **cf):
 @pytest.mark.parametrize('field,value', [('eye', 2047), ('eye', 0), ('xs', 800), ('zs', 800), ('x1', 1024), ('reflect', 0),
     ('bright2', 0), ('text_y', 169), ('name_px', 33), ('artist_px', 29), ('radius', 84), ('stride', 0),
     ('tilt', 29), ('tilt', 91), ('horizon', 0), ('horizon', 100), ('third', 2), ('swing', 3), ('lift', 41), ('eye_turn', 401), ('view_h', 209), ('view_h', 295),
-    ('thumb', 2), ('detent', 101), ('hold_ms', 30001), ('dead', 21), ('row_width', 101), ('art_persp', 101),
-    ('jump_ms', 5001), ('jump_ticks', 201), ('jump_at', 1001), ('jump_pace', 2001), ('big_jump_at', 1001), ('big_jump_ms', 5001),
-    ('enter_albums', 13), ('slide_ms', 1001), ('fold_near', 51)])
+    ('thumb', 2), ('detent', 101), ('hold_ms', 30001), ('dead', 21), ('row_width', 101), ('art_persp', 101)])
 def test_coverflow_range_rejects(monkeypatch, field, value):
     if f'cf.{field}' not in theme.ROLE_MACROS['oled']:  # OLED's theme.xml states the thumb, where the covers stand and the caption
         e = 'caption' if f'coverflow.caption.{field}' in theme.SCHEMA else 'shelf'
@@ -437,7 +434,7 @@ def test_coverflow_range_rejects(monkeypatch, field, value):
     ('cf.top', 15, 'top \\+ 160 \\+ reflect = 221 exceeds 220'), ('cf.reflect', 48, 'top \\+ 160 \\+ reflect = 221 exceeds 220'),
     ('cf.view_h', 263, 'view_h 263 exceeds the client height 262'),
     ('cf.bright2', 193, 'bright2 193 exceeds bright1 192'), ('cf.text_y', 208, 'text_y \\+ 55 = 263 exceeds the client height 262'),
-    ('cf.row_out', 29, 'row_out 29 puts 16 covers of the held row on the screen, past CF_WIDE 15')])
+    ('cf.row_out', 29, 'row_out 29 puts 16 covers of the row at speed on the screen, past CF_WIDE 15')])
 def test_coverflow_cross_rejects(field, value, message):
     with pytest.raises(theme.ThemeError, match=message):
         theme.validate({**oled(), field: value}, 't.xml')
@@ -463,14 +460,13 @@ def test_coverflow_arch_needs_its_numbers():  # th_arch's divisors, and a span o
     theme.validate({**c, 'cf.arch_span': 0, 'cf.arch_tau': 0, 'cf.arch_full': 0}, 't.xml')  # no arch: the row at speed, none read
 
 
-@pytest.mark.parametrize('field', ['ticks_turn', 'ticks_album', 'track', 'snap', 'spin', 'far_left', 'rate_up', 'rate_down', 'lead_ms', 'row_edge',
-                                   'enter_albums', 'slide_ms'])
+@pytest.mark.parametrize('field', ['ticks_turn', 'track', 'snap', 'spin', 'far_left', 'rate_up', 'rate_down', 'lead_ms', 'row_edge'])
 def test_coverflow_thumb_needs_its_divisors(field):
     with pytest.raises(theme.ThemeError, match=f'coverflow.shelf: thumb needs {field}'):
         theme.validate({**oled(), f'cf.{field}': 0}, 't.xml')
 
 
-@pytest.mark.parametrize('lo,hi', [('fast_at', 'fast_full'), ('fast_at', 'big_jump_at'), ('lead_from', 'lead_full'), ('row_from', 'row_full')])
+@pytest.mark.parametrize('lo,hi', [('fast_at', 'fast_full'), ('lead_from', 'lead_full'), ('row_from', 'row_full')])
 def test_coverflow_thumb_ranges_run_upward(lo, hi):
     c = oled()
     with pytest.raises(theme.ThemeError, match=f'coverflow.shelf: {hi} {c[f"cf.{lo}"]} must pass {lo} {c[f"cf.{lo}"]}'):

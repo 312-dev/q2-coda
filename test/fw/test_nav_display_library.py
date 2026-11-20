@@ -483,20 +483,20 @@ class Prompts:
 
 
 def test_cover_flow_page_holds_only_what_changes_cover_flow(fw):
-    """Sort (a picker's row, with a chevron), Fast Navigation and Position Bar, then Refresh Cover Flow after a gap;
+    """Sort (a picker's row, with a chevron) and Position Bar, then Refresh Cover Flow after a gap;
     the Library's own settings are on Playback > Library."""
     ui = Ui(fw)
     page = display(fw, ui)
     ui.click(button_of(page.view(), 'Cover Flow'))
     assert page.title() == 'Cover Flow'
     view = page.view()
-    assert [item.kind for item in view.children] == ['list_item'] * 3 + ['label', 'list_item']
+    assert [item.kind for item in view.children] == ['list_item'] * 2 + ['label', 'list_item']
     assert [item.said() for item in view.children if item.kind == 'list_item'] == [
-        'Sort: Album', 'Fast Navigation', 'Position Bar', 'Refresh Cover Flow']
-    assert view.children[3].box[3] == 12  # the gap
+        'Sort: Album', 'Position Bar', 'Refresh Cover Flow']
+    assert view.children[2].box[3] == 12  # the gap
     into = [any(c.props.get('image') == b'list_into' for c in item.children[0].children)
             for item in view.children if item.kind == 'list_item']
-    assert into == [True, False, False, False]
+    assert into == [True, False, False]
 
 
 class Pages(Display):
@@ -736,9 +736,7 @@ def test_display_s_rows_carry_their_captions(fw):
                                          'playset_covermode': 'Shows the art full screen after 10s on Now Playing',
                                          'Reduce Motion': 'Fades in place of slides, zooms and bounces'}
     ui.click(button_of(page.view(), 'Cover Flow'))
-    assert captions(fw, page.view()) == {
-        'Fast Navigation': 'Year sort spins by year too; letters stay till you lift',
-        'Position Bar': 'Shows your place in the covers while you browse'}
+    assert captions(fw, page.view()) == {'Position Bar': 'Shows your place in the covers while you browse'}
 
 
 def test_controls_rows_carry_their_captions(fw):

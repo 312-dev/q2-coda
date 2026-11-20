@@ -2,6 +2,7 @@
 
 - **Unreleased (q2-coda)**:
   - Cover Flow: the wheel now moves the covers as it moves a list's rows: one cover a click turned slowly, faster (up to 8 a click) as a quick turn keeps going, and back to one as soon as you slow down, sliding through every cover in order. It no longer jumps by letter or shows a big letter, and turning slowly moves a cover every click instead of every seven. Home's Cover Flow carousel does the same.
+  - Cover Flow: **Fast Navigation** (Settings → Display → Cover Flow) is gone, with the letters it held while you spun the wheel. Cover Flow always bends its covers into the arch at speed, also if you had Fast Navigation on.
   - Cover Flow: while it loads a large library, Home no longer freezes. The wheel scrolls Home's menu, Return cancels the opening, and pressing into another menu (or a touch) cancels it and goes there straight away instead of jumping into Cover Flow later.
   - Lists: spinning the wheel fast through a long list (Songs, Albums, Artists, Genres) now jumps a whole letter at a time once you keep it up for about a second, with the letter shown beside the list, as an iPod did; slow down and it moves by rows again.
   - Songs: scrolled down, the list no longer shows a song above the Shuffle row, which made Shuffle look stuck floating over the list; Shuffle stays as the list's fixed header.

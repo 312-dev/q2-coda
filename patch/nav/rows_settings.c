@@ -335,9 +335,8 @@ int ringnav_quick_settings(void *win, void *ctx) {
  * docs/ipod.md#hold-return), and Power's Standby limit (STANDBYLIMIT, ringnav_standby;
  * docs/internals.md#standby-limit), and Bluetooth's Link Volume (BTVOLLINK,
  * bt_audio_ready; docs/internals.md#headset-controls-and-volume), and Power's Smart Wi-Fi
- * (SMARTWIFI, smart_poll; docs/internals.md#smart-wi-fi), and Display's Fast Navigation
- * (BIGLIBRARY, Cover Flow's letters; docs/internals.md#coverflow-thumb) and Playlist View
- * (PLAYLISTCF).
+ * (SMARTWIFI, smart_poll; docs/internals.md#smart-wi-fi), and Display's Playlist View
+ * (PLAYLISTCF). A BIGLIBRARY key an older build saved (Fast Navigation) is never read.
  */
 /* Bluetooth's Link Volume as saved, -1 never chosen (bt_link): on, the Q2's volume is the device's
  * own (bt_audio_ready). */
@@ -367,7 +366,6 @@ static int *const pod_values[] = { &st.charge_limit,
                                    &st.smart_wifi,
                                    0,
                                    0,
-                                   &st.big_library,
                                    &st.playlist_cf,
                                    &st.scan_durations,
                                    &st.cf_position,
@@ -392,7 +390,6 @@ static const char *const pod_keys[] = { "CHARGELIMIT",
                                         "SMARTWIFI",
                                         0,
                                         0,
-                                        "BIGLIBRARY",
                                         "PLAYLISTCF",
                                         "SCANDURATIONS",
                                         "CFPOSITION",
@@ -444,12 +441,6 @@ void autozone_off(void) {
 int ringnav_playlist_coverflow(void) {
     pod_settings();
     return st.playlist_cf;
-}
-/* Fast Navigation: Cover Flow's letters and their half copies (coverflow_thumb.c, lettered,
- * coverflow_halves); off unless the key is 1. */
-int ringnav_big_library(void) {
-    pod_settings();
-    return st.big_library;
 }
 int coverflow_position_enabled(void) {
     pod_settings();
@@ -517,7 +508,6 @@ static void pod_text(int i) {
         { 0 }, /* Smart Wi-Fi: a switch */
         { 0 }, /* Enlarged Album Art: a switch */
         { 0 }, /* Folder Album Cover: a switch */
-        { 0 }, /* Fast Navigation: a switch */
         { "Playlist View: List", "Playlist View: Cover Flow" },
         { 0 }, /* Scan Song Durations: a switch */
         { 0 }, /* Position Bar: a switch */
@@ -549,7 +539,6 @@ static void pod_text(int i) {
                          : i == POD_SMART_WIFI     ? "Smart Wi-Fi"
                          : i == POD_COVERMODE      ? "Enlarged Album Art"
                          : i == POD_FOLDERCOVER    ? "Folder Album Cover"
-                         : i == POD_BIG_LIB        ? "Fast Navigation"
                          : i == POD_SCAN_DURATIONS ? "Scan Song Durations"
                          : i == POD_CF_POSITION    ? "Position Bar"
                          : i == POD_OTG            ? "On-The-Go"
@@ -569,8 +558,7 @@ void pod_text_again(int i) {
 }
 /* Centre or tap toggles and saves. Charge limit takes effect on the next UI loop pass
  * (power_poll), Smart Wi-Fi within SMART_POLL_MS; Artists on the next load of an artist list, as
- * the artist page's switch does; Fast Navigation's letters at the next spin, its half copies at
- * Cover Flow's next idle pass; Standby limit at the next Standby; Refresh Cover Flow at Cover
+ * the artist page's switch does; Standby limit at the next Standby; Refresh Cover Flow at Cover
  * Flow's next open (coverflow.c), with a toast, as it changes nothing in view. Cover Flow's Sort
  * opens its picker. */
 static int pod_click(void *ctx, void *event) {
