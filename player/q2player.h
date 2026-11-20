@@ -119,7 +119,9 @@ void grow_close(struct grow *);
 struct output;
 struct output *output_open(const struct pcm_format *, int outputway, int hw);
 /* Whether an open output goes on with format f on outputway (a gapless change): Bluetooth takes the same channels
- * and width at any rate and resamples it; the others the same format. 1 when it does, and f is then what is written. */
+ * and width at any rate and resamples it; the car the same channels at any rate and width, its PCM opened again at
+ * the car's next rate first (output_car_song); the others the same format. 1 when it does, and f is then what is
+ * written. */
 int output_take(struct output *, const struct pcm_format *f, int outputway);
 /* Software volume, mcl-setvol's L << 8 | R by stock's law (output.c); 0x6464, 100 each, is unity */
 void output_volume(struct output *, int volume);

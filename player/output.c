@@ -107,7 +107,7 @@ static int candidates(const struct pcm_format *f, int out[4][2]) {
 
 /* The iPhone gadget's probe writes CAR_FILE when the car asks for USB audio (StartUSBDeviceModeAudio) and removes it
  * when the car stops, the link drops or the cable comes out: the gadget's ALSA device on its first line, the rate the
- * car was told on its second. While it is there, way 3 takes the place of the DAC's and Bluetooth's. Every image's
+ * car was told on its second (the PCM's rate only with a one-rate module: car_open_rate). While it is there, way 3 takes the place of the DAC's and Bluetooth's. Every image's
  * player has it (Q2_CAR_USB, tools/build.py); the host's default build has not, so test/player's other suites never
  * meet a car. */
 #define CAR_FILE "/tmp/q2-iap.audio"
@@ -526,8 +526,9 @@ static int car_switch(struct output *o, int want);
 
 int output_take(struct output *o, const struct pcm_format *f, int outputway) {
     if (!o || outputway != o->way) return 0;
-    /* Bluetooth and the car play at their own fixed rate: a song at another goes through the resampler, and the PCM,
-     * and with it the car's stream, stays open across it */
+    /* Bluetooth and the car play at their own rate: a song at another goes through the resampler, and the PCM, and
+     * with it the car's stream, stays open across it; on way 3 a song for another of the car's rates moves the car
+     * there first (car_switch) */
     if ((outputway != 1 && outputway != 3) || f->dsd || o->in.dsd) return same_format(f, &o->in);
     if (f->channels != o->in.channels) return 0;
     /* stock asks the song's width of Bluetooth; the car's device is 16-bit whatever the song, and converted to */
