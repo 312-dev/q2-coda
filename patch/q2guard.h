@@ -112,6 +112,8 @@ int card_mounted(void); /* card_store.c asks: q2guard.c's (the writing child's),
 #define GUARD_MIN_DC 0        /* a plausible reading lies in GUARD_MIN_DC..GUARD_MAX_DC */
 #define GUARD_MAX_DC 1000
 #define GUARD_JUMP_DC 30      /* a reading further than this from the last good one is not believed */
+#define GUARD_STEP_DC 60      /* the most a reading may move at a charger change (GUARD_SETTLE readings) */
+#define GUARD_SETTLE 2        /* readings from a charger change that may step: the die can be read before the cable */
 #define GUARD_ERRORS 3        /* unreadable or implausible readings in a row: the sensor is down */
 #define GUARD_VARY 60         /* readings (5 min at 5 s) a sensor has to vary in, or it is a constant */
 #define GUARD_SWING 40        /* a trusted sensor stuck GUARD_VARY readings while the load swung this much: down */
@@ -128,11 +130,14 @@ enum { SENSOR_PENDING, SENSOR_OK, SENSOR_DOWN };
 /* why a sensor went down (guard_why's words): none read, out of range, a jump, a constant, stuck under load */
 enum { GUARD_WHY_NONE = 'N', GUARD_WHY_RANGE = 'R', GUARD_WHY_JUMP = 'J', GUARD_WHY_CONST = 'C', GUARD_WHY_STUCK = 'S' };
 enum { LOAD_ARMED, LOAD_COUNTING, LOAD_CANCELLED };
+/* guard_in's charge, bits: the charger's supply online, the battery charging */
+enum { GUARD_CHARGE_CABLE = 1, GUARD_CHARGE_CHARGING = 2 };
 
 struct guard {
     int sensor, errors, seen, lo, hi;  /* the sensor's verdict, and what it has read so far */
     int last, same, busy_lo, busy_hi;  /* the last good reading, how many in a row read it, the load meanwhile */
     int why;                            /* why the sensor went down: GUARD_WHY_* */
+    int charge, settle;                 /* the charger's last state; readings left that may step */
     int warn_n, shut_n, warned;         /* readings in a row over each threshold; toast shown */
     int busy[GUARD_WIN], busy_n, busy_i; /* the load window */
     int load, calm;                     /* the load warning's state; samples under, cancelled */
@@ -150,6 +155,7 @@ struct guard_in {
     int cancel; /* demo's Cancel on the load warning */
     int acked;  /* demo answered the power-off */
     int saved;  /* the log flush after the power-off began has finished (written or given up) */
+    int charge; /* the charger's state, GUARD_CHARGE_*: a change steps the die's reading (q2guard_core.c) */
 };
 
 enum { EV_NONE, EV_SENSOR_DOWN, EV_SENSOR_OK, EV_WARN, EV_LOAD_WARN, EV_LOAD_CANCELLED, EV_OFF };

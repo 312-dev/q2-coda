@@ -2,8 +2,8 @@
  * watching when demo is hung (docs/internals.md#overheat-guardian). S90play starts it before demo
  * and again if it ends: q2guard [--dev] VERSION LAST, LAST how the previous session ended (clean,
  * forced, stall; respawn after a restart of q2guard itself). Every GUARD_TICK_MS it reads the
- * temperature (the PMIC's die, q2guard_pmic.c, or anything else real that reports one) and the CPU's
- * busy share, and q2guard_core.c decides;
+ * temperature (the PMIC's die, q2guard_pmic.c, or anything else real that reports one), the CPU's
+ * busy share and the charger's state, and q2guard_core.c decides;
  * a log line (q2guard.h heat_line) goes to RAM every LINE_MS, every GUARD_TICK_MS while warm,
  * plugged in or busy, and the lines go to the card's /mnt/mmc/.q2muse/logs in batches. demo draws
  * the cards it is told about in /tmp/q2guard.state and answers in /tmp/q2guard.ack (heatguard.c).
@@ -128,6 +128,16 @@ static int read_temp(int *raw, int die) {
     word(PS "battery/manufacturer", b, sizeof b);
     if (*raw != GUARD_NONE && strcmp(b, "X-POWERS")) return *raw;
     return GUARD_NONE;
+}
+
+/* The charger's state, GUARD_CHARGE_*, read each tick: the charger is on the PMIC's die, so its turning
+ * on or off steps the die's reading, which q2guard_core.c then does not take for a misread. */
+static int charge_state(void) {
+    int v;
+    char st[12];
+    word(PS "battery/status", st, sizeof st);
+    return (!read_int(PS "ac/online", &v) && v == 1 ? GUARD_CHARGE_CABLE : 0) |
+           (!strcmp(st, "Charging") ? GUARD_CHARGE_CHARGING : 0);
 }
 
 /* /proc/stat's first line: all ticks and the idle ones (idle + iowait), and the cores */
@@ -543,7 +553,7 @@ int main(int argc, char **argv) {
         /* the Bluetooth controller watched (not while powering off): a probe waits up to BT_PROBE_MS,
          * only while it is suspect */
         int bt_req = g.off ? 0 : bt_watch(now_ms(), ack_text);
-        struct guard_in in = { now, temp, busy, 0, 0, 0 };
+        struct guard_in in = { now, temp, busy, 0, 0, 0, charge_state() };
         in.cancel = !strcmp(card, "loadwarn") && cancel == seq && cancel != cancel_seen;
         if (in.cancel) cancel_seen = cancel;
         in.acked = g.off && ack >= (int)off_seq;
