@@ -93,7 +93,10 @@ def demo_build(base):
 
 
 def copy_dir(state):
-    return emu_pool.copy_dir(state['slot'])
+    """The leased copy's real folder: q2emu resolves its own (readlink -f) before run.sh binds its rootfs, so ours()
+    matches its sandbox, and a restart here binds the same path, only when ~/q2-emu-poolK, a symlink onto another
+    disk, is resolved too."""
+    return emu_pool.copy_dir(state['slot']).resolve()
 
 
 def ours(e):

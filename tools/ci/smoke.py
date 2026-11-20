@@ -93,8 +93,10 @@ class Deadline(BaseException):
 
 
 def demo_pid(copy):
-    """The pid of copy's demo (its qemu process), or None: as the viewer finds it, by a parent's bwrap."""
-    root = f'--bind {copy}/rootfs / '
+    """The pid of copy's demo (its qemu process), or None: as the viewer finds it, by a parent's bwrap. q2emu
+    resolves its own folder (readlink -f) before run.sh binds its rootfs, so the bwrap names the real path, not
+    ~/q2-emu-poolK when that is a symlink onto another disk: the copy is resolved the same way here."""
+    root = f'--bind {pathlib.Path(copy).resolve()}/rootfs / '
     out = subprocess.run(['pgrep', '-f', '[m]ipsel-binfmt-P /release/bin/demo'], capture_output=True, text=True).stdout
     for pid in map(int, out.split()):
         p = pid
@@ -356,10 +358,12 @@ def differ(a, b, box=None):
     return n
 
 
-# Home's rows counted from its last (Settings), as Now Playing's row comes and goes at the top.
-HOME_FROM_END = {'settings': 0, 'search': 1, 'cover flow': 2, 'library': 5}
-SETTINGS = (('General', 2, 'sysset_page'), ('Playback', 3, 'playset_page'), ('Display', 5, 'display_page'),
-            ('Battery', 7, 'powermanager_page'))
+# Home's rows counted from its last (Settings), as Now Playing's row comes and goes at the top: tools/ipod.py's
+# HOME_ROWS read from its end (test_ci.py holds the two together; Radio Tuner's row under the Library moved it).
+HOME_FROM_END = {'settings': 0, 'search': 1, 'cover flow': 2, 'library': 6}
+# Settings' rows from its first, tools/ipod.py's HOME_SETS (Car Remote's row before Display moved the last two).
+SETTINGS = (('General', 2, 'sysset_page'), ('Playback', 3, 'playset_page'), ('Display', 6, 'display_page'),
+            ('Battery', 8, 'powermanager_page'))
 
 
 def steps(e, say):

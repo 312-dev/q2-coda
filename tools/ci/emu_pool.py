@@ -13,8 +13,8 @@
 lasts --hours (2) and is renewed with `renew`; an expired one is stopped and handed to the next `get`.
 A lease asked for a build a copy already runs, by the same NAME, reuses it without a reboot.
 Every lease's card (state/mmc, /mnt/mmc) starts as the fixture, ~/.cache/q2-emu-pool/card (Q2_EMU_CARD): `get` removes
-whatever the last lease left there and hardlinks the fixture's tree in, so no data is copied and a changed card never
-outlives its lease. With the library the fixture was scanned into (`fixture DIR --library DB`, kept as card.db beside
+whatever the last lease left there and hardlinks the fixture's tree in (copies it, about 6 MB, when the copy is on
+another filesystem than the fixture), so a changed card never outlives its lease. With the library the fixture was scanned into (`fixture DIR --library DB`, kept as card.db beside
 it), `get` copies that over the copy's state/data/database.db too, so Library > Songs lists the card's songs and no
 other; a new fixture without one drops the old library, and the copy's database.db is then left as it was.
 A fresh lease also starts with the settings of state/data (/mnt/data) the data fixture holds, ~/.cache/q2-emu-pool/data
@@ -33,6 +33,7 @@ laptop down on 2026-11-16, so `get` waits when every copy is leased (--wait, def
 Leases live in ~/.cache/q2-emu-pool/leases.json, changed under a lock. docs/building.md#emulator-pool.
 """
 import argparse
+import errno
 import fcntl
 import json
 import os
@@ -161,8 +162,20 @@ def fixture_dir():
     return pathlib.Path(os.environ.get('Q2_EMU_CARD') or STATE/'card')
 
 
+def link_or_copy(src, dst):
+    """dst as a hardlink of src, or a copy of it (mode kept, so a read-only fixture file stays read-only) when the
+    two are on different filesystems: the pool copies can live on another disk than ~/.cache through symlinks
+    (~/q2-emu-poolK -> /mnt/wsl/q2scratch/..., docs/building.md#emulator-pool), where a link fails with EXDEV."""
+    try:
+        os.link(src, dst)
+    except OSError as e:
+        if e.errno != errno.EXDEV:
+            raise SystemExit(f'cannot hardlink {src} to {dst}: {e.strerror}') from None
+        shutil.copy2(src, dst)
+
+
 def link_tree(src, dst):
-    """dst made to hold src's tree: directories new, files hardlinked (nothing is copied), symlinks kept."""
+    """dst made to hold src's tree: directories new, files hardlinked (copied across filesystems), symlinks kept."""
     dst.mkdir()
     for entry in sorted(src.iterdir()):
         to = dst/entry.name
@@ -171,11 +184,7 @@ def link_tree(src, dst):
         elif entry.is_dir():
             link_tree(entry, to)
         else:
-            try:
-                os.link(entry, to)
-            except OSError as e:
-                raise SystemExit(f'cannot hardlink {entry} to {to}: {e.strerror} (the card fixture and the pool copies '
-                                 f'must share a filesystem; nothing is copied instead)') from None
+            link_or_copy(entry, to)
 
 
 def library_fixture():
@@ -240,11 +249,7 @@ def make_data_fixture(src):
     new.mkdir()
     for f in sorted(src.iterdir()):
         if f.is_file() and f.name != 'database.db':
-            try:
-                os.link(f, new/f.name)
-            except OSError as e:
-                raise SystemExit(f'cannot hardlink {f} to {new/f.name}: {e.strerror} (the data fixture and the source '
-                                 f'must share a filesystem)') from None
+            link_or_copy(f, new/f.name)
             (new/f.name).chmod((new/f.name).stat().st_mode & ~0o222)
     if not any(new.iterdir()):
         shutil.rmtree(new)
@@ -283,14 +288,14 @@ def card_songs(k):
 
 def reset_card(k):
     """Copy k's card (state/mmc) put back to the fixture: whatever the last lease added, switched or removed is
-    unlinked and the fixture's tree hardlinked in, and its library (state/data/database.db) a copy of the
+    unlinked and the fixture's tree hardlinked (or, across filesystems, copied) in, and its library (state/data/database.db) a copy of the
     fixture's, when there is one: stock's database.db is not rescanned at boot, so one left by another card lists
     songs this card does not hold. Called for a copy this lease holds, its emulator stopped; the rest of
     state/data (/mnt/data) is reset_data's."""
     fx = fixture_dir()
     if not fx.is_dir() or not any(fx.iterdir()):
         raise SystemExit(f'no card fixture at {fx}: make it with `python3 {pathlib.Path(__file__).resolve()} fixture DIR` '
-                         f'(DIR: a card to start every lease from; its files are hardlinked, not copied)')
+                         f'(DIR: a card to start every lease from; its files are hardlinked, or copied across filesystems)')
     card = copy_dir(k)/'state/mmc'
     if card.is_symlink() or card.is_file():
         card.unlink()
