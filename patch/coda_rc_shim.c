@@ -20,6 +20,8 @@
  * reachable by anyone else. A thread waits on the read end and wakes the UI loop, and the files are read on the
  * pass after, else every CR_FILES_MS; without the pipe (a daemon this demo did not start, the pipe refused or
  * closed) they are read every CR_POLL_MS (docs/internals.md#car-remote-tell).
+ * While Car Audio's iPhone is on the cable (usb_car.c) Now Playing is written and the commands taken with the switch
+ * off too, every CR_POLL_MS, for q2-iap, which reads and writes the same files; the daemon is not started for it.
  * Everything the protocol needs is in the daemon; here only a few words of state. */
 #include "navigation.h"
 
@@ -620,7 +622,12 @@ void coda_rc_poll(void) {
     if (!cr.at || now - cr.at >= CR_POLL_MS) {
         cr.at = now | !now;
         carremote_poll(); /* Settings > Car Remote's pages while open */
-        if (!coda_rc_enabled()) return;
+        if (!coda_rc_enabled()) {
+            /* Car Audio's q2-iap reads Now Playing and writes the car's buttons in the same files, with Car Remote
+             * on or off (docs/iphone-mode.md#car-audio-in-the-image); no daemon is started for it */
+            if (usb_car_on()) cr_now(), cr_settle(), cr_command();
+            return;
+        }
         int dead = !cr_running() || (!cr_alive(CR_IROH_PID) && !access(CR_IROH, 0)); /* the daemon, or the sidecar */
         if (!cr.started_at || (now - cr.started_at >= CR_RESTART_MS && dead)) cr_start();
         cr_now();

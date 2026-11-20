@@ -1,27 +1,30 @@
-/* q2-iap-probe: route 1's experiment 1 (docs/iphone-mode.md). It owns the FunctionFS instances of the
- * q2iap gadget that q2-iap-probe.sh makes, writes each one's descriptors (an iPhone's configuration 1, 2,
- * 3 or 4 shape), and logs every event and control request the host sends, answering only what an iPhone
- * in media mode answers: the HID report descriptor, Apple's C0 53 (four zero bytes), GET_REPORT with
- * zeros; everything OUT is read and logged, every other IN request stalled. With echo on, a SET_REPORT
- * carrying iAP2's detect (FF 55 02 00 EE 10) is echoed on the HID interrupt endpoint, so the host's
- * next reports carry its link SYN. With --iap2 it speaks iAP2 instead (iap2.c, milestone M1): the detect
- * answered, the link set up, the car authenticated and identified, and the answers an iPhone gives next, every
- * packet and message logged.
+/* q2-iap (/usr/bin/q2-iap): the iPhone gadget's daemon (docs/iphone-mode.md). It owns the FunctionFS instances of
+ * the iPhone-shaped gadget that patch/q2car.sh makes for Car Audio (and tools/iap_probe/q2-iap-probe.sh for the
+ * experiments), writes each one's descriptors (an iPhone's configuration 1, 2, 3 or 4 shape), and logs every event
+ * and control request the host sends, answering only what an iPhone in media mode answers: the HID report
+ * descriptor, Apple's C0 53 (four zero bytes), GET_REPORT with zeros; everything OUT is read and logged, every other
+ * IN request stalled. With echo on, a SET_REPORT carrying iAP2's detect (FF 55 02 00 EE 10) is echoed on the HID
+ * interrupt endpoint, so the host's next reports carry its link SYN. With --iap2 it speaks iAP2 instead (q2_iap2.c):
+ * the detect answered, the link set up, the car authenticated and identified, and the answers an iPhone gives next,
+ * every packet and message logged. With --state (Car Audio) it decides what the host is and watches the car's
+ * audio (below, "Car Audio in the image").
  *
- *   q2-iap-probe [--echo] [--echo-from N] [--iap2] [--np FILE] [--uuid HEX] [--car-pcm DEV] [--car-file F]
- *                [--cmd-file F] [--art-dir D] [--sessions N] [--for S] [--gap-ms MS] [--carplay] [--phase NAME]
- *                LOG DIR:KIND...
- *   q2-iap-probe --descs KIND     the descriptor and strings blobs for KIND on stdout (tests)
+ *   q2-iap [--echo] [--echo-from N] [--iap2] [--np FILE] [--uuid HEX] [--car-pcm DEV] [--car-file F]
+ *          [--cmd-file F] [--art-dir D] [--sessions N] [--for S] [--gap-ms MS] [--carplay] [--phase NAME]
+ *          [--state F] [--udc F] [--counters DIR] [--under F] [--auto-ms MS] [--car-ms MS]
+ *          LOG DIR:KIND...
+ *   q2-iap --descs KIND     the descriptor and strings blobs for KIND on stdout (tests)
  *
  * KIND is ptp (configuration 1), hid (2), ptpmux (3) or ptpmuxeth (4). A session is the time from an
  * ENABLE to a DISABLE or SUSPEND not followed by another ENABLE or RESUME within --gap-ms (a cable out, not a
  * reset: in the car a cable out was a SUSPEND, the controller left suspended with no VBUS); with
- * --sessions N the probe exits 10 after the Nth ends, and with --for S, 0 after S seconds. Exit 1 is a
- * set-up failure (an ep0 that would not take its descriptors). Every ep0 stays open until the end:
- * closing one unbinds the gadget.
+ * --sessions N it exits 10 after the Nth ends, and with --for S, 0 after S seconds. Exit 1 is a
+ * set-up failure (an ep0 that would not take its descriptors); 20 and 21 are --state's computer and silent host.
+ * Every ep0 stays open until the end: closing one unbinds the gadget.
  *
- * Built for the Q2 by tools/iap_probe/probe_build.py against the rootfs's libc with no headers (the
- * declarations and MIPS constants below), and for this machine with -DPROBE_HOST (test/iap_probe.py). */
+ * Built for the Q2 by tools/build.py's compile_helper (and tools/iap_probe/probe_build.py for the experiments)
+ * against the rootfs's libc with no headers (the declarations and MIPS constants below), and for this machine with
+ * -DPROBE_HOST (test/iap_probe.py). */
 #ifdef PROBE_HOST
 #include <errno.h>
 #include <fcntl.h>
@@ -249,7 +252,7 @@ static void on_signal(int s) { stopping = s; }
 
 /* ---- iAP2 (--iap2) ---- */
 
-#include "iap2.c"
+#include "q2_iap2.c"
 
 static int iap2_mode, writer_fd = -1, writer_pid;
 static const char *np_file = "/tmp/coda-rc.now";
@@ -407,6 +410,168 @@ static unsigned io_artwork(const struct iap2_np *n, unsigned char *out, unsigned
     return got;
 }
 
+/* ---- Car Audio in the image (--state; docs/iphone-mode.md#car-audio-in-the-image) ----
+ *
+ * What the host is, decided from what it asks the iPhone it was shown, and how the car's audio goes, written to the
+ * state file demo reads (patch/usb_ui.c). A car or dock: Apple's C0 53, or iAP2's detect in a SET_REPORT; it stays.
+ * A computer: configuration 1, 3 or 4 chosen, usbmux's C0 45, or the role switch 40 51 (wired CarPlay, which the Q2
+ * cannot be); q2-iap ends at once (exit 20) and q2car.sh removes the gadget. A host that has addressed the Q2 and
+ * asked nothing Apple's within auto_ms (3 s; car_ms, 30 s, once it chose configuration 2, which only an iPod
+ * accessory does): q2-iap ends (exit 21), the host taken for a computer. A host that never addresses it (a charger)
+ * changes nothing. A computer seen after C0 53 still wins; after the detect it does not. Apple's charging request
+ * 40 40 decides nothing. */
+static const char *state_file, *udc_file, *counters_dir, *under_file = "/tmp/q2-iap.under";
+static long auto_ms = 3000, car_ms = 30000;
+enum { V_WAIT, V_CAR, V_COMPUTER, V_SILENT };
+static const char *const verdicts[] = { "wait", "car", "computer", "silent" };
+static int verdict, apple, config2, leave; /* apple: 1 C0 53, 2 the detect; leave: main's exit code once decided */
+static long started_at, host_at = -1, verdict_ms = -1, udc_at;
+static char why[64];
+/* the car's audio: the module's playback counts (in_sent, in_missed, since it loaded) and the player's underruns
+ * on way 3 (player/cartrace.c car_trace_underrun), each read every HEALTH_MS while the car has asked for audio */
+#define HEALTH_MS 1000
+#define DROPOUT_PERMILLE 10  /* packets missed in a second above this, per thousand: dropouts */
+#define NOSTREAM_MS 5000     /* the car asked for audio and took no packet in this long: no sound */
+#define CLEAN_MS 10000       /* a problem is over after this long without one */
+static unsigned sent0, missed0, under0, sent_last, missed_last, under_last;
+static long audio_at = -1, flowing_at = -1, health_at, trouble_at;
+static int counted, flowing, troubles;
+static const char *trouble = "";
+
+static int read_uint(const char *path, unsigned *v) {
+    char b[24];
+    int fd = open(path, O_RDONLY), n = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
+    if (fd >= 0) close(fd);
+    if (n <= 0) return 0;
+    b[n] = 0;
+    *v = (unsigned)atoi(b);
+    return 1;
+}
+static void counters(unsigned *sent, unsigned *missed, unsigned *under) {
+    char p[160];
+    *sent = *missed = *under = 0;
+    if (counters_dir) {
+        snprintf(p, sizeof p, "%s/in_sent", counters_dir), read_uint(p, sent);
+        snprintf(p, sizeof p, "%s/in_missed", counters_dir), read_uint(p, missed);
+    }
+    read_uint(under_file, under);
+}
+
+/* The state file, written whole at each change. */
+static char state_name[sizeof car_name]; /* the car's name as the state file has it */
+static void state_write(void) {
+    char b[400];
+    if (!state_file) return;
+    snprintf(state_name, sizeof state_name, "%s", car_name);
+    int n = snprintf(b, sizeof b,
+                     "verdict=%s\nwhy=%s\nms=%ld\nhost=%d\nname=%s\naudio=%d\nflowing=%d\ntrouble=%s\ntroubles=%d\n",
+                     verdicts[verdict], why, verdict_ms, host_at >= 0, car_name, audio_on, flowing, trouble, troubles);
+    if (n > 0 && write_whole(state_file, b, (unsigned)n)) logline("car", "the state file could not be written");
+}
+
+static void decide(int v, const char *what) {
+    char msg[160];
+    long now = mono_ms();
+    verdict = v, verdict_ms = now - (host_at >= 0 ? host_at : started_at);
+    snprintf(why, sizeof why, "%s", what);
+    snprintf(msg, sizeof msg, "host: %s (%s), %ld ms after it %s", verdicts[v], what, verdict_ms,
+             host_at >= 0 ? "addressed the Q2" : "was bound");
+    logline("car", msg);
+    if (v == V_COMPUTER || v == V_SILENT) leave = v == V_COMPUTER ? 20 : 21;
+    state_write();
+}
+static void apple_seen(int strength, const char *what) {
+    if (!state_file || strength <= apple || leave) return;
+    apple = strength;
+    if (verdict != V_CAR || strength == 2) decide(V_CAR, what);
+}
+static void computer_seen(const char *what) {
+    if (!state_file || apple >= 2 || leave) return;
+    decide(V_COMPUTER, what);
+}
+
+/* The controller's state every 100 ms until the host has addressed the Q2; the time since then against the window. */
+static void host_poll(long now) {
+    if (!state_file || leave) return;
+    if (host_at < 0 && udc_file && now - udc_at >= 100) {
+        char s[24] = "";
+        udc_at = now;
+        int fd = open(udc_file, O_RDONLY), n = fd < 0 ? -1 : (int)read(fd, s, sizeof s - 1);
+        if (fd >= 0) close(fd);
+        if (n > 0 && (!strncmp(s, "addressed", 9) || !strncmp(s, "configured", 10))) {
+            host_at = now;
+            logline("car", "host: it addressed the Q2");
+            state_write();
+        }
+    }
+    if (verdict == V_WAIT && host_at >= 0 && now - host_at > (config2 ? car_ms : auto_ms)) {
+        char what[64];
+        snprintf(what, sizeof what, "nothing Apple's in %ld ms%s", config2 ? car_ms : auto_ms,
+                 config2 ? " on configuration 2" : "");
+        decide(V_SILENT, what);
+    }
+}
+
+/* Every HEALTH_MS while the car has asked for audio: is it flowing, and cleanly. */
+static void health_poll(long now) {
+    unsigned sent, missed, under;
+    char msg[200];
+    if (!state_file || now - health_at < HEALTH_MS) return;
+    health_at = now;
+    counters(&sent, &missed, &under);
+    if (!counted) counted = 1, sent0 = sent_last = sent, missed0 = missed_last = missed, under0 = under_last = under;
+    unsigned ds = sent - sent_last, dm = missed - missed_last, du = under - under_last;
+    sent_last = sent, missed_last = missed, under_last = under;
+    int changed = strcmp(state_name, car_name) != 0; /* identified since the last write */
+    if (!audio_on) {
+        changed |= flowing || *trouble;
+        audio_at = -1, flowing = 0, trouble = "";
+        if (changed) state_write();
+        return;
+    }
+    if (audio_at < 0) audio_at = now, changed = 1;
+    if (ds && !flowing) {
+        flowing = 1, changed = 1;
+        if (flowing_at < 0) flowing_at = now;
+        snprintf(msg, sizeof msg, "audio: the car takes it, %ld ms after it asked", now - audio_at);
+        logline("car", msg);
+    }
+    const char *t = (ds + dm) && dm * 1000 > (ds + dm) * DROPOUT_PERMILLE ? "dropouts"
+                    : du                                                  ? "underruns"
+                    : !flowing && now - audio_at > NOSTREAM_MS            ? "nostream"
+                                                                          : "";
+    if (*t) {
+        if (strcmp(t, trouble)) {
+            ++troubles, changed = 1;
+            snprintf(msg, sizeof msg, "audio problem: %s (in a second: %u sent, %u missed, %u underruns)", t, ds, dm, du);
+            logline("car", msg);
+        }
+        trouble = t, trouble_at = now;
+    } else if (*trouble && now - trouble_at > CLEAN_MS) {
+        trouble = "", changed = 1;
+        logline("car", "audio: clean again");
+    }
+    if (changed) state_write();
+}
+
+/* One line that judges the cable's session: what the host was, the car, the handshake, the audio and its counts. */
+static void summary(void) {
+    char msg[600];
+    unsigned sent, missed, under;
+    if (!state_file) return;
+    counters(&sent, &missed, &under);
+    if (!counted) sent0 = sent, missed0 = missed, under0 = under;
+    unsigned ds = sent - sent0, dm = missed - missed0;
+    snprintf(msg, sizeof msg,
+             "summary: host %s (%s, %ld ms), car \"%s\", identified %s, audio asked %s, flowing %s, in_sent %u in_missed %u"
+             " (%u.%u%%), underruns %u, problems %d",
+             verdicts[verdict], why[0] ? why : "-", verdict_ms, car_name, identified ? "yes" : "no",
+             audio_at >= 0 || flowing_at >= 0 ? "yes" : "no",
+             flowing_at >= 0 ? "yes" : "no", ds, dm, ds + dm ? dm * 100 / (ds + dm) : 0,
+             ds + dm ? dm * 1000 / (ds + dm) % 10 : 0, under - under0, troubles);
+    logline("car", msg);
+}
+
 static const struct iap2_host io = { io_send, mono_ms, io_log, io_now_playing, "Q2 Muse", uuid, library_id,
                                      io_audio, io_command, io_artwork };
 
@@ -450,6 +615,9 @@ static void setup(struct inst *i, const unsigned char *s) {
     char note[96] = "";
     char msg[3000], h[2600];
     long at = mono_ms();
+    if (rt == 0xc0 && rq == 0x53) apple_seen(1, "Apple's C0 53");
+    else if (rt == 0xc0 && rq == 0x45) computer_seen("usbmux's C0 45");
+    else if (rt == 0x40 && rq == 0x51) computer_seen("the role switch 40 51");
     if (rt & 0x80) {
         if (rt == 0x81 && rq == 6 && wv >> 8 == 0x22 && i->kind == K_HID)
             ans = hid_report, an = sizeof hid_report, snprintf(note, sizeof note, "HID report descriptor");
@@ -486,6 +654,8 @@ static void setup(struct inst *i, const unsigned char *s) {
     snprintf(msg, sizeof msg, "SETUP %02x %02x %04x %04x %04x -> read %d (errno %d, %ld ms)%s%s%s%s", rt, rq, wv, wi, wl,
              r, e, mono_ms() - at, note[0] ? ": " : "", note, r > 0 ? " data " : "", r > 0 ? h : "");
     logline(i->name, msg);
+    if (rt == 0x21 && rq == 0x09 && r >= 2 + (int)sizeof detect && !memcmp(buf + 2, detect, sizeof detect))
+        apple_seen(2, "iAP2's detect");
     if (iap2_mode && i->kind == K_HID && rt == 0x21 && rq == 0x09 && r > 0) {
         iap2_report(buf, (unsigned)r);
         return;
@@ -499,6 +669,10 @@ static void setup(struct inst *i, const unsigned char *s) {
 static void event(struct inst *i, const unsigned char *e) {
     int type = e[8];
     char msg[160];
+    if (state_file && host_at < 0 && (type == EV_SETUP || type == EV_ENABLE)) { /* a request: the host is there */
+        host_at = mono_ms();
+        state_write();
+    }
     if (type == EV_SETUP) {
         setup(i, e);
         return;
@@ -507,6 +681,10 @@ static void event(struct inst *i, const unsigned char *e) {
              type == EV_ENABLE ? " (the host chose this instance's configuration)" : "");
     logline(i->name, msg);
     if (type == EV_ENABLE) {
+        char what[32];
+        snprintf(what, sizeof what, "configuration %d", i->config);
+        if (i->kind == K_HID) config2 = 1;
+        else computer_seen(what);
         disabled_at = -1;
         if (!active) {
             active = 1, ++session;
@@ -563,6 +741,12 @@ int main(int argc, char **argv) {
         else if (!strcmp(o, "--car-file")) car_file = v, ++a;
         else if (!strcmp(o, "--cmd-file")) cmd_file = v, ++a;
         else if (!strcmp(o, "--art-dir")) art_dir = v, ++a;
+        else if (!strcmp(o, "--state")) state_file = v, ++a;
+        else if (!strcmp(o, "--udc")) udc_file = v, ++a;
+        else if (!strcmp(o, "--counters")) counters_dir = v, ++a;
+        else if (!strcmp(o, "--under")) under_file = v, ++a;
+        else if (!strcmp(o, "--auto-ms")) auto_ms = atoi(v), ++a;
+        else if (!strcmp(o, "--car-ms")) car_ms = atoi(v), ++a;
         else if (!strcmp(o, "--uuid")) {
             /* the serial's first 32 hex digits as a UUID */
             if (strlen(v) >= 32)
@@ -608,7 +792,9 @@ int main(int argc, char **argv) {
     if (iap2_mode) iap2_connect(&io);
     long end = for_s > 0 ? mono_ms() + for_s * 1000L : 0;
     int rc = 0;
-    while (!stopping) {
+    started_at = mono_ms();
+    state_write();
+    while (!stopping && !leave) {
         struct pollfd p[MAX_INST];
         for (int k = 0; k < ninst; ++k) p[k].fd = in[k].ep0, p[k].events = POLLIN, p[k].revents = 0;
         int n = poll(p, ninst, iap2_mode ? 10 : 500);
@@ -625,10 +811,13 @@ int main(int argc, char **argv) {
         }
         if (iap2_mode) iap2_tick();
         long now = mono_ms();
+        host_poll(now);
+        health_poll(now);
         if (active && disabled_at >= 0 && now - disabled_at > gap_ms) {
             active = 0, disabled_at = -1;
             snprintf(msg, sizeof msg, "session %d ended (no ENABLE within %ld ms of the DISABLE)", session, gap_ms);
             logline("probe", msg);
+            summary();
             if (sessions_max && session >= sessions_max) {
                 rc = 10;
                 break;
@@ -639,6 +828,8 @@ int main(int argc, char **argv) {
             break;
         }
     }
+    if (leave) rc = leave;
+    if (active || leave) summary();
     snprintf(msg, sizeof msg, "end: %s, %d session%s, exit %d", stopping ? "signalled" : "by itself", session,
              session == 1 ? "" : "s", rc);
     logline("probe", msg);

@@ -58,6 +58,25 @@ def test_off_starts_nothing_and_writes_nothing(fw, ui, mcl, recs):
     assert q2.system == [] and not any(p.startswith('/tmp/coda-rc') for p in q2.files)
 
 
+def test_car_audio_gets_now_playing_and_buttons_with_car_remote_off(fw, ui, mcl, recs):
+    """Car Audio's q2-iap (patch/q2_iap.c) reads Now Playing and writes the car's buttons in Car Remote's files: while
+    its iPhone is on the cable (usb_car.c) they work with the switch off, and no daemon starts; once it is off, none."""
+    q2 = Q2(fw, ui, recs, on=0)
+    q2.queue()
+    fw.fn('usb_car_start', None)()
+    q2.system.clear()
+    q2.tick()
+    assert q2.now()['title'] == 'Song 1' and q2.system == []
+    q2.files[CMD] = b'1359998977 next\n'
+    q2.tick()
+    assert len(fw.calls('player_next_music')) == 1 and q2.files.pop(ACK) == b'1359998977 0\n'
+    fw.fn('usb_car_stop', None, C.c_int)(1)
+    q2.files.pop(NOW)
+    q2.files[CMD] = b'1359998978 next\n'
+    q2.tick()
+    assert NOW not in q2.files and len(fw.calls('player_next_music')) == 1
+
+
 def test_on_starts_the_daemon_once_and_writes_now_playing(fw, ui, mcl, recs):
     q2 = Q2(fw, ui, recs)
     q2.queue(at=2)

@@ -1,5 +1,5 @@
 /* iAP2 with the Q2 in an iPhone's place, over the iPhone gadget's HID interface: milestone M1 of route 1
- * (docs/iphone-mode.md#iap2). Included by q2-iap-probe.c, which feeds it the car's output reports (SET_REPORT data)
+ * (docs/iphone-mode.md#iap2). Included by q2_iap.c, which feeds it the car's output reports (SET_REPORT data)
  * and sends its input reports; nothing here touches a file or the USB itself.
  *
  * A port of PodBox's firmware/usbstack/usb_iap2.c (the transport and link layer) and the M1 part of
@@ -547,6 +547,7 @@ static unsigned car_current;
 static u32 media_mask, playback_mask, rnd;
 static struct iap2_np np_last;
 static int np_sent, audio_on;
+static char car_name[64]; /* the car's identification name, for the status file (q2_iap.c state_write) */
 
 /* ---- the car's buttons: its StartHID report descriptor's consumer controls (PodBox parse_hid, one-bit ones) ---- */
 
@@ -618,15 +619,80 @@ static void press(unsigned usage) {
 
 static unsigned report_bit(const u8 *r, unsigned len, unsigned bit) { return bit / 8 < len && (r[bit / 8] >> (bit % 8) & 1); }
 
-/* Each control down now and up in the last report. */
+/* Hold to scan, as an iPod's wheel buttons: the BMW's descriptor has no fast-forward or rewind usage, only Next and
+ * Previous. Next or Previous is acted on at its release: up within HOLD_MS, a skip as before (the car's taps were up
+ * 13 to 120 ms after the press, 2026-11-20); held past it, the song moves through itself from where it was, a seek
+ * every SCAN_STEP_MS (the shim's command file is read every 500 ms with Car Remote off: a faster seek would only
+ * replace the one before it), SCAN_SLOW seconds a step for the first SCAN_SLOW_MS (4 times as fast as it plays),
+ * then SCAN_FAST (8 times), then SCAN_FASTEST (16 times), until the release, and the song plays on from there. */
+#define HOLD_MS 500
+#define SCAN_STEP_MS 500
+#define SCAN_SLOW 2
+#define SCAN_FAST 4
+#define SCAN_FASTEST 8
+#define SCAN_SLOW_MS 2000
+#define SCAN_FAST_MS 5000
+static unsigned held; /* Next's or Previous's usage while it is down, else 0 */
+static long held_at, scan_at;
+static int scanning;
+static long scan_pos_ms, scan_len_ms;
+
+static void scan_step(long now) {
+    char v[32], t[96];
+    long in = now - held_at - HOLD_MS, step = in < SCAN_SLOW_MS ? SCAN_SLOW : in < SCAN_FAST_MS ? SCAN_FAST : SCAN_FASTEST;
+    scan_pos_ms += (held == 0xB5 ? step : -step) * 1000L;
+    if (scan_pos_ms < 0) scan_pos_ms = 0;
+    if (scan_len_ms > 1000 && scan_pos_ms > scan_len_ms - 1000) scan_pos_ms = scan_len_ms - 1000;
+    scan_at = now;
+    snprintf(v, sizeof v, "seek %ld", scan_pos_ms / 1000);
+    snprintf(t, sizeof t, "hid: usage %02x held %ld ms: %s", held, now - held_at, v);
+    H->log(t);
+    if (H->command) H->command(v);
+}
+
+/* From iap2_tick: a hold that passed HOLD_MS starts the scan, and each SCAN_STEP_MS moves it. */
+static void scan_tick(long now) {
+    if (!held || now - held_at < HOLD_MS) return;
+    if (!scanning) {
+        struct iap2_np np;
+        memset(&np, 0, sizeof np);
+        if (H->now_playing) H->now_playing(&np);
+        scanning = 1, scan_pos_ms = np.pos_ms, scan_len_ms = np.len_ms;
+        scan_step(now);
+    } else if (now - scan_at >= SCAN_STEP_MS) {
+        scan_step(now);
+    }
+}
+
+static void release(unsigned usage) {
+    char t[96];
+    if (usage != held) return;
+    long ms = H->now() - held_at;
+    if (!scanning) press(usage); /* a tap: the skip */
+    else snprintf(t, sizeof t, "hid: usage %02x released after %ld ms: the scan ends", usage, ms), H->log(t);
+    held = 0, scanning = 0;
+}
+
+/* Each control down now and up in the last report, and up now and down in it. */
 static void take_hid_report(const u8 *r, unsigned len) {
     u8 id = 0;
     if (report_ids && len) id = *r++, --len;
     if (len > sizeof last_report) len = sizeof last_report;
-    for (unsigned i = 0; i < n_controls; ++i)
-        if (controls[i].report == id && report_bit(r, len, controls[i].bit) &&
-            !report_bit(last_report, len, controls[i].bit))
-            press(controls[i].usage);
+    for (unsigned i = 0; i < n_controls; ++i) {
+        if (controls[i].report != id) continue;
+        unsigned now = report_bit(r, len, controls[i].bit), was = report_bit(last_report, len, controls[i].bit),
+                 usage = controls[i].usage;
+        if (now && !was && (usage == 0xB5 || usage == 0xB6)) {
+            char t[64];
+            held = usage, held_at = H->now(), scanning = 0;
+            snprintf(t, sizeof t, "hid: usage %02x down", usage);
+            H->log(t);
+        } else if (now && !was) {
+            press(usage);
+        } else if (!now && was) {
+            release(usage);
+        }
+    }
     memset(last_report, 0, sizeof last_report);
     memcpy(last_report, r, len);
 }
@@ -771,7 +837,7 @@ static long due_in(long ms) {
 
 static void iap2_control_reset(void) {
     if (H) set_audio(0);
-    art_going = 0, art_id = 0, n_controls = 0;
+    art_going = 0, art_id = 0, n_controls = 0, held = 0, scanning = 0;
     identified = now_playing = 0;
     auth_due = ident_due = availability_due = 0;
     car_receives_n = 0, car_current = 0, bt_component = -1;
@@ -811,6 +877,7 @@ static void take_identification(const u8 *p, unsigned len) {
         if (v && n && !v[n - 1]) {
             snprintf(t, sizeof t, "ident: %s \"%s\"", fields[f], (const char *)v);
             H->log(t);
+            if (f == 0) snprintf(car_name, sizeof car_name, "%s", (const char *)v);
         }
     }
     for (unsigned which = 6; which <= 7; ++which) {
@@ -1093,6 +1160,7 @@ static void iap2_tick(void) {
         accept_identification();
     }
     if (availability_due && now >= availability_due) send_carplay_availability();
+    scan_tick(now);
     if (identified && now_playing) poll_now_playing(now);
     pump();
 }

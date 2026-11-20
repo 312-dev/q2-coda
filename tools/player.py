@@ -10,7 +10,7 @@ there. Results are cached under ~/.cache/q2-player (Q2_PLAYER_CACHE), keyed by t
 
     python3 tools/player.py ffmpeg host|mips    # build or reuse FFmpeg, print its prefix
     python3 tools/player.py build host|mips     # build player/ against it, print the binary
-    python3 tools/player.py build host|mips car # the same with route 1's car output (--dev builds: docs/iphone-mode.md#car-audio)
+    python3 tools/player.py build host|mips car # the same with Car Audio's output (every image's: docs/iphone-mode.md#car-audio)
     python3 tools/player.py sizes mips          # the binary's size and what each library adds
 """
 import hashlib, os, pathlib, shutil, subprocess, sys, tarfile
@@ -159,7 +159,7 @@ def ffmpeg(target):  # pragma: no mutate block
 
 def build(target, alsa=None, car_usb=False):  # pragma: no mutate block
     """player/ compiled and linked for target; the binary's path. For mips, alsa is the libasound.so.2 to link
-    against, by default an unpacked stock root filesystem's (Q2_STOCKFS). car_usb (--dev builds): route 1's car
+    against, by default an unpacked stock root filesystem's (Q2_STOCKFS). car_usb (every image's player): Car Audio's
     output, way 3 (docs/iphone-mode.md#car-audio), in a build directory of its own, so the two never share objects."""
     ff = ffmpeg(target)
     tls = mbedtls(target)

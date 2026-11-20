@@ -5,15 +5,16 @@
 
 Linux 5.10.21 from kernel.org (hash checked) is unpacked into --work (default ~/.cache/q2-uac1) without the other
 architectures, Documentation or most drivers' sources, configured as malta_defconfig plus q2.config, and prepared for
-modules; then this directory's Kbuild builds f_uac1.c with its own renamed u_audio.c. Needs mipsel-linux-gnu-gcc and
-binutils (Ubuntu: gcc-mipsel-linux-gnu), flex, bison, bc.
+modules; then this directory's Kbuild builds f_uac1.c, with the two upstream commits in patches/ applied (PATCHES),
+and its own renamed u_audio.c. Needs mipsel-linux-gnu-gcc and binutils (Ubuntu: gcc-mipsel-linux-gnu), flex, bison,
+bc, patch.
 
 Checked, each printed: the vermagic is the stock modules'; struct module's size and the offsets of init and exit are
 --stock-module's (a vendor .ko, default ~/q2-emu/stockfs/module_driver/soc_aic.ko); every symbol the module needs is
 exported by the kernel (--vmlinux: the stock kernel turned into an ELF with symbols by vmlinux-to-elf, its __ksymtab_
 names); no symbol the module exports is one the kernel has. The field offsets of q2_layout.ko are printed for the
-disassembly check docs/iphone-mode.md describes. The kernel's own sources are not in this repository; the tarball is
-where they come from."""
+disassembly check docs/iphone-mode.md describes. The kernel's own sources are not in this repository, but for the two
+upstream commits in patches/; the tarball is where the rest come from."""
 import argparse
 import pathlib
 import shutil
@@ -30,6 +31,50 @@ VERMAGIC = '5.10.21+ SMP preempt mod_unload MIPS32_R5 32BIT '  # the trailing sp
 ARCHES = ['alpha', 'arc', 'arm', 'arm64', 'c6x', 'csky', 'h8300', 'hexagon', 'ia64', 'm68k', 'microblaze', 'nds32',
           'nios2', 'openrisc', 'parisc', 'powerpc', 'riscv', 's390', 'sh', 'sparc', 'um', 'x86', 'xtensa']
 SOURCES = ['f_uac1.c', 'u_audio.c', 'u_audio.h', 'u_uac1.h']
+# Linux commits applied to f_uac1.c, from patches/ (each upstream's own patch, unchanged). 254cb1e0d78c gives the
+# function no AS OUT interface when c_chmask is 0, so with capture off UAC1 takes interfaces 0 (control) and 1 (AS IN)
+# and a function linked after it starts at 2, as a real iPhone's HID does in configuration 2; 5.10.21's f_uac1.c
+# always took three, and the BMW's GET_DESCRIPTOR(HID) for interface 2 went to f_uac1, which stalled it
+# (docs/iphone-mode.md#the-uac1-module). a59c68a6a3d1 is the commit before it, which it needs to apply.
+PATCHES = ['0001-usb-gadget-f_uac1-validate-input-parameters.patch',  # a59c68a6a3d1
+           '0002-usb-gadget-f_uac1-disable-IN-OUT-ep-if-unused.patch']  # 254cb1e0d78c
+# u_audio.c's changes for missed packets, (5.10.21's text, the module's), applied in order. The Q2's dwc2 has upstream's
+# BDMA isochronous flow (91bb163e1e4f: target_frame_elapsed's 0x3fff/0x7ff limit is in the stock kernel at
+# 0x804935f4), which completes an IN request whose (micro)frame went by with -ENODATA (-61, li a3,-61 at 0x804995c8)
+# and never sends it. u_audio_iso_complete ignored the status: it refilled the request from the ring and moved
+# hw_ptr past the packet the host never got. Now such a request is queued again unchanged, its buffer still the
+# packet, when resend_missed is set (the default) and req_number is 1 (the probe's): with a second request already
+# queued, holding the samples after it, the packet would go out of order. in_missed and in_sent count the playback
+# completions with and without a status, read in /sys/module/usb_f_uac1/parameters.
+MISSED = [
+    ('#define BUFF_SIZE_MAX\t(PAGE_SIZE * 16)\n',
+     '#define BUFF_SIZE_MAX\t(PAGE_SIZE * 16)\n\n'
+     '/* q2: a playback request the controller completed unsent is queued again unchanged\n'
+     ' * (docs/iphone-mode.md#missed-isochronous-packets) */\n'
+     'static bool resend_missed = true;\n'
+     'module_param(resend_missed, bool, 0644);\n'
+     'MODULE_PARM_DESC(resend_missed, "queue an unsent playback packet again, unchanged");\n'
+     'static unsigned int in_missed, in_sent;\n'
+     'module_param(in_missed, uint, 0444);\n'
+     'MODULE_PARM_DESC(in_missed, "playback requests completed with a status (unsent)");\n'
+     'module_param(in_sent, uint, 0444);\n'
+     'MODULE_PARM_DESC(in_sent, "playback requests completed with none");\n'),
+    ('\tif (status)\n\t\tpr_debug("%s: iso_complete status(%d) %d/%d\\n",\n'
+     '\t\t\t__func__, status, req->actual, req->length);\n',
+     '\tif (status)\n\t\tpr_debug("%s: iso_complete status(%d) %d/%d\\n",\n'
+     '\t\t\t__func__, status, req->actual, req->length);\n\n'
+     '\tif (prm == &uac->p_prm) {\n'
+     '\t\tif (!status) {\n'
+     '\t\t\tin_sent++;\n'
+     '\t\t} else {\n'
+     '\t\t\tin_missed++;\n'
+     '\t\t\t/* its buffer and length are still the packet the host has not had; with\n'
+     '\t\t\t * other requests queued behind it, it would go out after later samples */\n'
+     '\t\t\tif (resend_missed && uac->audio_dev->params.req_number == 1)\n'
+     '\t\t\t\tgoto exit;\n'
+     '\t\t}\n'
+     '\t}\n'),
+]
 # Offsets and sizes read in the stock kernel's own code (vmlinux-to-elf of the #303 kernel, docs/iphone-mode.md#the-uac1-module),
 # each with the instruction it came from: q2_layout.ko must agree with every one.
 STOCK = {
@@ -155,7 +200,8 @@ def tree(work):  # pragma: no mutate block (kernel.org's tarball and make)
     field = '\tenum usb_device_speed\t\tmax_speed;\n'
     pad = field + '\tunsigned int\t\t\tq2_ssp_rate, q2_max_ssp_rate; /* tools/uac1_module/uac1_build.py */\n'
     text = g.read_text()
-    if pad not in text:
+    # A tree padded by an earlier run carries the fields already, whatever its comment names the script
+    if 'q2_ssp_rate, q2_max_ssp_rate;' not in text:
         if text.count(field) != 1:
             sys.exit('build.py: include/linux/usb/gadget.h has no single max_speed field to pad after')
         g.write_text(text.replace(field, pad))
@@ -266,6 +312,9 @@ def main(argv):  # pragma: no mutate block (all of the above)
     mod.mkdir(exist_ok=True)
     for f in SOURCES:
         shutil.copyfile(src/'drivers/usb/gadget/function'/f, mod/f)
+    # Upstream's own commits from 5.12, in order, on the module's copy of f_uac1.c (PATCHES)
+    for p in PATCHES:
+        run('patch', '-p5', '-F0', '--no-backup-if-mismatch', '-d', mod, '-i', HERE/'patches'/p)
     # u_audio's PCM buffer from vmalloc: 5.10.21 asks ALSA for contiguous pages at each hw_params, 64 kB (order 4) for
     # the player's buffer, and the stock kernel has no compaction to make such a block on a fragmented Q2 (128 MB, no
     # swap). u_audio copies the samples with the CPU (memcpy into each request), so the buffer need not be
@@ -276,7 +325,15 @@ def main(argv):  # pragma: no mutate block (all of the above)
     text = ua.read_text()
     if text.count(call) != 1:
         sys.exit('build.py: u_audio.c has not the one snd_pcm_set_managed_buffer_all call 5.10.21 has')
-    ua.write_text(text.replace(call, call.replace('SNDRV_DMA_TYPE_CONTINUOUS', 'SNDRV_DMA_TYPE_VMALLOC')))
+    text = text.replace(call, call.replace('SNDRV_DMA_TYPE_CONTINUOUS', 'SNDRV_DMA_TYPE_VMALLOC'))
+    # A playback request the controller gives back unsent goes out again as it is (MISSED): the Q2's dwc2 completes
+    # a third of them with -ENODATA, and 5.10.21's u_audio counted those as sent, so the PCM drained 1.5 times as fast
+    # as the host read it and a third of the packets never reached it (docs/iphone-mode.md#missed-isochronous-packets).
+    for old, new in MISSED:
+        if text.count(old) != 1:
+            sys.exit('build.py: u_audio.c has not the one place 5.10.21 has for: ' + old.strip().splitlines()[0])
+        text = text.replace(old, new)
+    ua.write_text(text)
     for f in ('Kbuild', 'q2_rename.h', 'q2_layout.c'):
         shutil.copyfile(HERE/f, mod/f)
     run('make', '-s', '-C', src, f'M={mod}', 'modules')

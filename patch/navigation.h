@@ -1196,6 +1196,11 @@ void usb_ui_status(void), usb_ui_poll(void), usb_ui_mode_load(void *win), usb_ui
 void usb_ui_paint(void *w, void *canvas), usb_ui_row(void *label);
 const char *usb_ui_title(const char *name), *usb_ui_value(void);
 int usb_ui_key(void *top, unsigned key), usb_ui_cable(void), usb_pick_open(void *ctx, void *event);
+/* usb_car.c: Car Audio, the USB setting's Automatic (docs/iphone-mode.md#car-audio-in-the-image); usb_car_poll's
+ * answers to usb_ui.c */
+enum { USB_CAR_NONE, USB_CAR_STORAGE, USB_CAR_CHARGER };
+void usb_car_start(void), usb_car_stop(int wait);
+int usb_car_poll(void), usb_car_on(void);
 #if Q2POD_DEV
 /* adb_trust.c (docs/adb.md#authorization): adbd's question on the card, its answer back through
  * usb_ui.c; Settings > General > Developer Options and Trusted Computers */

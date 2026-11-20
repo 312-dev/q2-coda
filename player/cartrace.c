@@ -3,22 +3,24 @@
  * While a way-3 output is open, a line in the unified log (plog) about once a second, from the playback thread after
  * a write, and one more as the output closes:
  *
- *   car 1003ms: frames=44100 writes=43 wmax=23ms slow=0 dry=0/0ms back=0/0ms avail=5512 delay=16538 rmax=4ms cpu=37ms tap=176400/0
+ *   car 1003ms: frames=44100 writes=43 wmax=23ms slow=0 dry=0/0ms back=0/0ms avail=5512 delay=16538 rmax=4ms cpu=37ms tap=176400/0 under=0
  *
  * the window's length; frames handed to the device and the writes that took them; the longest write (the wait for
  * room included) and how many took over SLOW_MS; the times the PCM ran dry (output.c sink: ALSA played silence and
  * the write moved past it) and the silence that put in, in ms of audio; the times written frames were taken back
  * unheard (output_drop's and output_close's rewind on way 3) and how much; the PCM's avail and delay as the line is
  * made; the slowest source read in the window (the decode, or a wait for a file's bytes); q2player's own CPU time in
- * the window, every thread's; and the tap's bytes so far this session and bytes it could not keep.
+ * the window, every thread's; the tap's bytes so far this session and bytes it could not keep; and the times, since
+ * q2player started, the PCM ran dry while a song flowed into it (output.c sink: not after a pause, a seek or the
+ * open), also written to CAR_UNDER as the line is made, for q2-iap's health check (patch/q2_iap.c health_poll).
  *
  * The tap: the first TAP_S seconds of each car session's PCM, exactly as written to the device (S16, the car's rate,
  * stereo), go to TAP_FILE, unless TAP_OFF exists. A session is one car file (output.c car_path) as the probe wrote it:
  * a new file (another inode or mtime) starts the tap again, over the last one. The playback thread only copies into
  * a ring (TAP_RING bytes, about 3 s at 44.1 kHz); a thread of the session's own writes the ring to the card every
  * TAP_POLL_MS, so a slow card never holds a write to the car. What does not fit in the ring is counted (tap's second
- * number) and left out of the file, never waited for. All of this runs only on way 3, which only --dev builds have
- * (Q2_CAR_USB); Q2PLAYER_CAR_TAP_S stands for TAP_S in a host test. */
+ * number) and left out of the file, never waited for. All of this runs only on way 3, which every image's player has
+ * (Q2_CAR_USB); Q2PLAYER_CAR_TAP_S stands for TAP_S in a host test, Q2PLAYER_CAR_UNDER for CAR_UNDER. */
 #include "q2player.h"
 #include <fcntl.h>
 #include <stdio.h>
@@ -33,6 +35,7 @@
 #endif
 #define TAP_FILE PEQ_ROOT "/mnt/mmc/.q2muse/logs/car-pcm.raw"
 #define TAP_OFF PEQ_ROOT "/mnt/mmc/.q2muse/logs/car-pcm.off"
+#define CAR_UNDER "/tmp/q2-iap.under"
 enum { TAP_S = 120, TAP_RING = 512 * 1024, TAP_POLL_MS = 100, SLOW_MS = 50, LINE_MS = 1000 };
 
 static int64_t clock_us(clockid_t id) {
@@ -152,6 +155,8 @@ void car_trace_write(int frames, int64_t us) {
 
 void car_trace_dry(int64_t frames) { w.dry++, w.dry_frames += frames; }
 void car_trace_back(int64_t frames) { w.back++, w.back_frames += frames; }
+static unsigned underruns, underruns_told;
+void car_trace_underrun(void) { underruns++; }
 void car_trace_read(int64_t us) {
     if (us > w.rmax_us) w.rmax_us = us;
 }
@@ -163,15 +168,20 @@ void car_trace_tick(struct output *o, int closing) {
     long avail = 0, delay = 0;
     output_levels(o, &avail, &delay);
     int64_t cpu = clock_us(CLOCK_PROCESS_CPUTIME_ID);
-    char line[200];
+    char line[224];
     int n = snprintf(line, sizeof line,
                      "car %lldms: frames=%lld writes=%d wmax=%lldms slow=%d dry=%d/%lldms back=%d/%lldms avail=%ld "
-                     "delay=%ld rmax=%lldms cpu=%lldms tap=%lld/%lld",
+                     "delay=%ld rmax=%lldms cpu=%lldms tap=%lld/%lld under=%u",
                      (long long)((now - window_at) / 1000), (long long)w.frames, w.writes, (long long)(w.wmax_us / 1000),
                      w.slow, w.dry, (long long)(w.dry_frames * 1000 / rate), w.back,
                      (long long)(w.back_frames * 1000 / rate), avail, delay, (long long)(w.rmax_us / 1000),
-                     (long long)((cpu - cpu_at) / 1000), (long long)tap_put, (long long)tap_lost);
+                     (long long)((cpu - cpu_at) / 1000), (long long)tap_put, (long long)tap_lost, underruns);
     plog('I', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
+    if (underruns != underruns_told) {
+        const char *path = getenv("Q2PLAYER_CAR_UNDER") ? getenv("Q2PLAYER_CAR_UNDER") : CAR_UNDER;
+        FILE *f = fopen(path, "w");
+        if (f) fprintf(f, "%u\n", underruns), fclose(f), underruns_told = underruns;
+    }
     memset(&w, 0, sizeof w);
     window_at = now, cpu_at = cpu;
 }

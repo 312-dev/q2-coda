@@ -496,7 +496,8 @@ EMPTY_GLYPHS = {g: g for g in (
     'radio', 'cloud-slash', 'download-simple', 'list-numbers', 'car-profile', 'broadcast', 'wifi-slash',
     'arrows-clockwise', 'check-circle', 'arrow-circle-down', 'cloud')} | {'sd-card': 'memory',  # the last four: Sync's states
     'heart-slash': 'q2coda/heart-slash'}
-USB_TOASTS = {'unplugged': ('plug-fill', token('secondary')), 'ejected': ('check-circle-fill', token('positive')), 'audio': ('speaker-hifi-fill', 0xffffff)}
+USB_TOASTS = {'unplugged': ('plug-fill', token('secondary')), 'ejected': ('check-circle-fill', token('positive')), 'audio': ('speaker-hifi-fill', 0xffffff),
+              'car': ('car-profile-fill', 0xffffff), 'carwarn': ('warning-fill', token('warning'))}  # Car Audio's (usb_car.c)
 # The status row's battery (list_marks.c battery_slim): charging, Phosphor's lightning, too weak a charger its warning,
 # fill weight at BATT_GLYPH_PX in Text Primary, with a BATT_GLYPH_GAP px gap in the Canvas cut round it (iOS's way of
 # keeping it off the charge's fill; over the body's empty black it is not seen), per half. The image is BATT_GLYPH_BOX,

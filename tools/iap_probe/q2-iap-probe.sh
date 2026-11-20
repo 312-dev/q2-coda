@@ -5,7 +5,7 @@
 # as the source, then a FunctionFS HID interface), runs q2-iap-probe on its FunctionFS instances to log what the
 # host sends, and hands the controller back to the ADB gadget when done.
 #
-#   q2-iap-probe.sh start [--plan desk|car|m1|m3|PHASES] [--for S] [--delay S] [--sessions N] [--tone] [--carplay] [--force]
+#   q2-iap-probe.sh start [--plan desk|car|m1|m3|drive|PHASES] [--for S] [--delay S] [--sessions N] [--tone] [--carplay] [--force]
 #   q2-iap-probe.sh stop        tear the gadget down now and give the controller back to adb
 #   q2-iap-probe.sh status      what runs, the controller's state, the log's last lines
 #
@@ -14,11 +14,13 @@
 # or configuration 2 alone), with :echo (echo iAP2's detect), :noaudio (no audio function), :uac1 (USB Audio 1.0
 # from tools/uac1_module's usb_f_uac1.ko, loaded from beside this script if it is not yet: at the desk only) or :tone
 # (play a -20 dBFS 1 kHz tone into the gadget's sound card while it is up), :linuxid (desk only: Linux's
-# FunctionFS ID 1d6b:0106 in place of Apple's, so Windows' own audio driver takes the audio function), or :iap2 (the probe speaks iAP2, milestone
-# M1). desk is "full:echo:tone" until --for runs out; car is "full full:echo min:echo", m1 "full:iap2 min:iap2" and
+# FunctionFS ID 1d6b:0106 in place of Apple's, so Windows' own audio driver takes the audio function), :iap2 (the probe speaks iAP2, milestone
+# M1), :req2 (uac1 with upstream's two requests in flight, not one) or :noresend (uac1 without resending a packet the
+# controller gave back unsent). desk is "full:echo:tone" until --for runs out; car is "full full:echo min:echo", m1 "full:iap2 min:iap2" and
 # m3 "full:iap2:uac1 full:iap2" (USB Audio 1.0 first, as a real iPhone has; the kernel's UAC2 second), one session (a
-# plug, docs/iphone-mode.md#sessions) each, then the restore.
-# --for (default 900, at most 3600) is the hard limit from start: the runner stops there, and a separate watchdog
+# plug, docs/iphone-mode.md#sessions) each, then the restore; drive "full:iap2:uac1" for every plug until --for runs out
+# (a drive: replugs and the car off and on at stops are sessions of the one phase).
+# --for (default 900, at most 43200) is the hard limit from start: the runner stops there, and a separate watchdog
 # forces the stop 60 s later if the runner has not. --delay waits that long first, with adb still up, so the cable
 # can be moved from the computer to the car.
 #
@@ -50,7 +52,7 @@ pidof_file() { cat "$RUN/$1.pid" 2>/dev/null; }
 
 # gadget_up PHASE: q2iap made and bound for one phase; 1 if the controller would not take it.
 gadget_up() {
-    configs=full audio=uac2 echo= tone= iap2= vid=0x05ac pid=0x12a8 product=iPhone
+    configs=full audio=uac2 echo= tone= iap2= vid=0x05ac pid=0x12a8 product=iPhone reqs=1 resend=Y
     for w in $(echo "$1" | tr ':' ' '); do
         case $w in
         full | min) configs=$w ;;
@@ -60,6 +62,8 @@ gadget_up() {
         uac1) audio=uac1 ;;
         tone) tone=1 ;;
         linuxid) vid=0x1d6b pid=0x0106 product="Q2 car audio test" ;;
+        req[1-9]) reqs=${w#req} ;;
+        noresend) resend=N ;;
         esac
     done
     cfgs="2"
@@ -102,12 +106,19 @@ gadget_up() {
             return 1
         fi
     fi
+    # One request in flight, so a packet the controller gives back unsent can go out again in order; :reqN and
+    # :noresend are the desk's comparisons with upstream's two and no resend (docs/iphone-mode.md#missed-isochronous-packets)
+    P=/sys/module/usb_f_uac1/parameters
+    if [ $audio = uac1 ] && [ -e $P/resend_missed ]; then
+        echo $resend > $P/resend_missed
+        log "uac1: resend_missed=$(cat $P/resend_missed) in_missed=$(cat $P/in_missed) in_sent=$(cat $P/in_sent)"
+    fi
     if [ $audio = uac2 ] || [ $audio = uac1 ]; then
         # The Q2 is the source here: the reverse of stock's USB DAC gadget (uac_device_config.sh). Shanling's
         # f_uac2 is not upstream's, so every attribute is written only if it exists, and all are logged.
         U=$G/functions/$audio.car
         if mkdir $U; then
-            for kv in c_chmask=0 p_chmask=3 p_ssize=2 p_srate=44100 \
+            for kv in c_chmask=0 p_chmask=3 p_ssize=2 p_srate=44100 req_number=$reqs \
                 p_mute_present=0 p_volume_present=0 c_mute_present=0 c_volume_present=0; do
                 k=${kv%%=*} v=${kv#*=}
                 [ -e $U/$k ] || { log "$audio: no attribute $k"; continue; }
@@ -119,7 +130,8 @@ gadget_up() {
             audio=none
         fi
     fi
-    # Link order is interface order: audio first (interfaces 0 and 1), then the HID (interface 2).
+    # Link order is interface order: audio first (interfaces 0 and 1, control and AS IN; with c_chmask 0 there is no
+    # AS OUT, in uac1 by tools/uac1_module's patches), then the HID (interface 2), where a real iPhone has it.
     [ "$configs" = full ] && ln -s $G/functions/ffs.c1 $G/configs/c.1/
     [ $audio != none ] && ln -s $G/functions/$audio.car $G/configs/c.2/
     ln -s $G/functions/ffs.c2 $G/configs/c.2/
@@ -223,6 +235,8 @@ gadget_down() {
         rmdir $G 2>/dev/null || log "could not remove $G: $(ls -R $G 2>&1 | tr '\n' ' ')"
     fi
     stop_pid watch
+    P=/sys/module/usb_f_uac1/parameters
+    [ -e $P/in_missed ] && log "uac1 counts: in_sent=$(cat $P/in_sent) in_missed=$(cat $P/in_missed) (since the module loaded)"
     { echo "==== $(up) $1"; dmesg | tail -n 300; } >> "$LOG.dmesg"
 }
 
@@ -306,12 +320,13 @@ start() {
     car) PLAN="full full:echo min:echo" SESSIONS=${SESSIONS:-1} ;;
     m1) PLAN="full:iap2 min:iap2" SESSIONS=${SESSIONS:-1} ;;
     m3) PLAN="full:iap2:uac1 full:iap2" SESSIONS=${SESSIONS:-1} ;;
+    drive) PLAN="full:iap2:uac1" SESSIONS=${SESSIONS:-0} ;;
     *) SESSIONS=${SESSIONS:-0} ;;
     esac
     [ -n "$TONEALL" ] && PLAN=$(for p in $PLAN; do printf '%s%s ' "$p" "$TONEALL"; done)
     case $FOR in '' | *[!0-9]*) echo "--for takes seconds" >&2; exit 2 ;; esac
     case $DELAY in '' | *[!0-9]*) echo "--delay takes seconds" >&2; exit 2 ;; esac
-    [ "$FOR" -gt 3600 ] && FOR=3600
+    [ "$FOR" -gt 43200 ] && FOR=43200
     [ "$FOR" -le "$DELAY" ] && { echo "--for must be longer than --delay" >&2; exit 2; }
     [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 1; }
     [ -x "$PROBE" ] || { echo "no $PROBE: push it first (tools/iap_probe/q2iap push)" >&2; exit 1; }

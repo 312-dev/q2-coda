@@ -963,7 +963,7 @@ def test_bt_resample_44_96(player, songs, tmp): return check_bt_split(player, so
 
 
 def car_player():
-    """The player built with route 1's car output (--dev builds' Q2_CAR_USB, docs/iphone-mode.md#car-audio)."""
+    """The player built with Car Audio's output (Q2_CAR_USB, as every image's is: docs/iphone-mode.md#car-audio)."""
     return subprocess.run([sys.executable, ROOT/'tools/player.py', 'build', 'host', 'car'], check=True, capture_output=True,
                           text=True).stdout.strip()
 
@@ -1018,8 +1018,8 @@ def test_car_way_follows_the_car(player, songs, tmp):
     return f'Bluetooth, {len(mid) // 4} frames to the car, Bluetooth'
 
 
-def test_car_way_needs_the_dev_build(player, songs, tmp):
-    """A release build's player has no car way: the car's file changes nothing."""
+def test_car_way_needs_the_car_build(player, songs, tmp):
+    """A player built without Q2_CAR_USB (the host's default) has no car way: the car's file changes nothing."""
     car = tmp/'car-release.audio'
     car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
     steps = car_steps(songs, car) + [(3.0, '{mcl-stop\\null}'), (4.0, None)]
@@ -1029,9 +1029,9 @@ def test_car_way_needs_the_dev_build(player, songs, tmp):
 
 
 CAR_LINE = re.compile(r' I player car (\d+)ms: frames=(\d+) writes=(\d+) wmax=(\d+)ms slow=(\d+) dry=(\d+)/(\d+)ms '
-                      r'back=(\d+)/(\d+)ms avail=(-?\d+) delay=(-?\d+) rmax=(\d+)ms cpu=(\d+)ms tap=(\d+)/(\d+)$', re.M)
+                      r'back=(\d+)/(\d+)ms avail=(-?\d+) delay=(-?\d+) rmax=(\d+)ms cpu=(\d+)ms tap=(\d+)/(\d+) under=(\d+)$', re.M)
 CAR_FIELDS = ('ms', 'frames', 'writes', 'wmax', 'slow', 'dry', 'dry_ms', 'back', 'back_ms', 'avail', 'delay', 'rmax', 'cpu',
-              'tap', 'tap_lost')
+              'tap', 'tap_lost', 'under')
 
 
 def car_trace(log):
@@ -1041,7 +1041,8 @@ def car_trace(log):
 
 def test_car_trace(player, songs, tmp):
     """The car's trace (docs/iphone-mode.md#car-trace): while way 3 plays, a line a second in the unified log whose
-    frames add up to the car's PCM, and an underrun counted where it happens. a1 arrives as a card app writes it
+    frames add up to the car's PCM, and an underrun counted where it happens, once also as Car Audio's health count
+    (under=, Q2PLAYER_CAR_UNDER). a1 arrives as a card app writes it
     (player/grow.c), a quarter of it there at the start and the rest landing at 12 s, so the player waits in a read
     and the car's PCM runs dry: that second's line has the read's wait, the dry spell and the silence it put in. The
     tap holds the car's PCM, the first Q2PLAYER_CAR_TAP_S (3) seconds of it, frame for frame."""
@@ -1065,7 +1066,7 @@ def test_car_trace(player, songs, tmp):
     s.music = songs
     line('get', head)
     s.run(steps, fakedemo.launch_host(cp, str(songs), 4, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16',
-                                                          'Q2PLAYER_CAR_TAP_S': '3'}), 4)
+                                                          'Q2PLAYER_CAR_TAP_S': '3', 'Q2PLAYER_CAR_UNDER': str(out/'under')}), 4)
     pcm = sorted((out/'pcm').glob('*.raw'))
     assert [p.name.split('_', 1)[1] for p in pcm] == ['44100_2_s16_car.raw'], pcm
     got, log = pcm[0].read_bytes(), (out/'player.log').read_text()
@@ -1086,6 +1087,8 @@ def test_car_trace(player, songs, tmp):
     tap = (logs/'car-pcm.raw').read_bytes()
     assert tap == got[:3 * 44100 * 4], f'tap {len(tap)} bytes, the car PCM\'s first 3 s {3 * 44100 * 4}; same: {tap == got[:len(tap)]}'
     assert lines[-1]['tap'] == 3 * 44100 * 4 and not any(l['tap_lost'] for l in lines), lines[-1]
+    # the dry spell came while the song flowed (not a pause's, a seek's or the open's): Car Audio's health count
+    assert lines[-1]['under'] == 1 and (out/'under').read_text() == '1\n', (lines[-1], list(out.glob('under')))
     return f'{len(lines)} lines, {len(got) // 4} frames; dry once, {dry[0]["dry_ms"]} ms of silence, read {slowest} ms; tap {len(tap)} bytes'
 
 
