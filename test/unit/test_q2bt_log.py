@@ -231,3 +231,38 @@ def test_a_source_stall_shows_the_player_s_side():
     assert stall and 'pw 172->100' in stall[0] and 'dk 20->950' in stall[0]
     old = q2bt.parse([line(1)])[0][0].samples[0]
     assert old.f['pl'] is None and old.f['gw'] is None
+
+
+def test_a_start_with_no_stop_ends_the_last_stream_and_a_stray_stop_is_nothing():
+    log = [f'{t(0)} STOP\n', f'{t(1)} START h=1\n', line(2), f'{t(3)} START h=2 bufs=4\n', line(4), f'{t(5)} STOP\n']
+    streams, notes = q2bt.parse(log)
+    assert [(s.head, s.bufs, len(s.samples)) for s in streams] == [('h=1', 0, 1), ('h=2 bufs=4', 4, 1)]
+    assert streams[0].end == streams[1].start and notes == []
+
+
+def test_a_late_codec_note_with_no_gap_in_its_minute_cuts_where_it_lands():
+    """No second under a tenth of the median in the minute before the note: the new segment starts empty."""
+    log = [f'{t(0)} START h=1\n', f'{t(0)} CODEC SBC 48000 Hz delay=200.1 ms\n'] + [line(i, 260) for i in range(1, 20)]
+    log += [f'{t(20)} CODEC aptX-HD 48000 Hz delay=200.9 ms\n'] + [line(i, 614) for i in range(21, 25)]
+    streams, _ = q2bt.parse(log)
+    assert [(s.codec, len(s.samples)) for s in streams] == [('SBC', 19), ('aptX-HD', 4)]
+    assert streams[1].start == streams[0].end
+
+
+def test_a_late_codec_note_right_after_the_gap_leaves_the_new_segment_its_own_seconds():
+    """The gap is the last second before the note: nothing moves across, and the new one starts at the note."""
+    log = [f'{t(0)} START h=1\n', f'{t(0)} CODEC SBC 48000 Hz delay=200.1 ms\n'] + [line(i, 260) for i in range(1, 20)]
+    log += [line(20, 0), f'{t(21)} CODEC aptX-HD 48000 Hz delay=200.9 ms\n'] + [line(i, 614) for i in range(22, 25)]
+    streams, _ = q2bt.parse(log)
+    assert [(s.codec, len(s.samples)) for s in streams] == [('SBC', 20), ('aptX-HD', 3)]
+    assert streams[1].start == streams[0].end
+
+
+def test_a_new_codec_s_segment_with_no_seconds_yet():
+    """The log ends at the codec's note: the new segment holds no second, and classifying it marks none."""
+    log = [f'{t(0)} START h=1\n', f'{t(0)} ENCODER ba-a2dp-sbc\n'] + [line(i, 260) for i in range(1, 20)]
+    log += [f'{t(20)} ENCODER ba-a2dp-aptx-hd\n']
+    streams, _ = q2bt.parse(log)
+    for st in streams:
+        q2bt.classify(st)
+    assert [(s.codec, len(s.samples)) for s in streams] == [('SBC', 19), ('aptX-HD', 0)]
