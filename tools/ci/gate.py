@@ -204,6 +204,7 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/coverflow.py': [],
     'test/coverflow_position.py': [],
     'test/headset_io.py': ['{build}'],
+    'test/iap_probe.py': [],  # route 1's probe on the host against a synthetic car (docs/iphone-mode.md)
     'test/ldac.py': ['{build}'],
     'test/library_scope.py': [],
     'test/localsend_e2e.py': ['{build}'],  # takes a build and finds the CLI itself; without one it prints skip and passes

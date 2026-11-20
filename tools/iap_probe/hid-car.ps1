@@ -5,7 +5,10 @@
 # BMW's own StartHID and a Pause press (the probe's log names it: Pause, so a desk run skips no song), and a cover
 # asked for, set up on the file transfer session and taken in pieces; each step's answer checked and printed. Needs the probe in a min:iap2 phase (Apple's driver leaves configuration 2's HID
 # interface to Windows only then). Exit 0 when every step answered as an iPhone does.
-#   powershell -NoProfile -ExecutionPolicy Bypass -File hid-car.ps1
+#   powershell -NoProfile -ExecutionPolicy Bypass -File hid-car.ps1 [-Press 2]
+# -Press: the button pressed after StartHID, as the BMW's report has it: 2 Pause (default), 1 Play (the music run:
+# the song then plays into the car's USB audio), 4 Next, 8 Previous.
+param([int]$Press = 2)
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @'
 using System;
@@ -110,7 +113,7 @@ public static class Car {
     }
     static byte[] Ids(params int[] ids) { byte[] b = new byte[ids.Length * 2]; for (int i = 0; i < ids.Length; i++) { b[2 * i] = (byte)(ids[i] >> 8); b[2 * i + 1] = (byte)ids[i]; } return b; }
 
-    public static int Run() {
+    public static int Run(int press) {
         string path = Find();
         if (path == null) { Say("no HID device 05ac:12a8 (is a min:iap2 phase running?)"); return 2; }
         h = CreateFile(path, 0xC0000000, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
@@ -153,9 +156,9 @@ public static class Car {
         byte[] start = new byte[6 + hid.Length]; start[0] = 0x40; start[1] = 0x40; start[3] = (byte)start.Length; start[4] = 0x68;
         Array.Copy(hid, 0, start, 6, hid.Length);
         Send(start);
-        Send(Msg(0x6802, P(0, new byte[] { 0, 1 }), P(1, new byte[] { 0x02 })));
+        Send(Msg(0x6802, P(0, new byte[] { 0, 1 }), P(1, new byte[] { (byte)press })));
         Send(Msg(0x6802, P(0, new byte[] { 0, 1 }), P(1, new byte[] { 0x00 })));
-        Say("ok    StartHID (the BMW's) and a Pause press sent: the probe's log has 'usage b1 pressed: pause'");
+        Say("ok    StartHID (the BMW's) and a press of bit " + press + " sent: the probe's log names it");
         Send(Msg(0x5000, P(0, Cat(P(1, new byte[0]), P(0x1a, new byte[0]))), P(1, P(0, new byte[0]))));
         int np = Recv(out m);
         int at = 6; int tid = -1;
@@ -184,6 +187,6 @@ public static class Car {
     }
 }
 '@
-try { $rc = [Car]::Run() } catch { [Car]::Out.Add("FAIL  " + $_.Exception.InnerException.Message + $_.Exception.Message); $rc = 1 }
+try { $rc = [Car]::Run($Press) } catch { [Car]::Out.Add("FAIL  " + $_.Exception.InnerException.Message + $_.Exception.Message); $rc = 1 }
 [Car]::Out
 exit $rc
