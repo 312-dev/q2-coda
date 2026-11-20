@@ -1584,7 +1584,7 @@ void search_strip_paint(void *w, void *canvas) {
     }
     if (ss.text[0] && !ss.nmatch && !ss_named()) { /* the empty state, between the tabs and strip */
         int y = I(ss.page, W_Y) + I(ss.sheet, W_Y), free = y + ss_list_y(); /* screen ys */
-        static const empty_t none = { "magnifying-glass", "No Matches", "Try fewer letters", 0 };
+        static const empty_t none = { "magnifying-glass", "No Matches", "Try fewer letters", 0, 0, 0 };
         empty_t e = none;
         if (empty_compact(free)) e.glyph = 0; /* under the tabs, the compact form */
         empty_paint(ss.sheet, canvas, &e, empty_top(free, y + ss_foot(), 0) - y);

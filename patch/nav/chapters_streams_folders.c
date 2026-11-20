@@ -93,8 +93,8 @@ static int chapter_poll(const void *unused) {
     }
     st.ch->count = n;
     static const empty_t none[] = {
-        { "list-numbers", "No Chapters", "This file has no chapter marks", 0 },
-        { "list-numbers", "No Chapters", "This file's chapters couldn't be read", 0 },
+        { "list-numbers", "No Chapters", "This file has no chapter marks", 0, 0, 0 },
+        { "list-numbers", "No Chapters", "This file's chapters couldn't be read", 0, 0, 0 },
     };
     void *view = n ? page_list(st.ch_page, st.ch_page, 0, "Chapters", n, 64)
                    : empty_list(st.ch_page, st.ch_page, "Chapters", &none[!!st.ch->failed], 0);

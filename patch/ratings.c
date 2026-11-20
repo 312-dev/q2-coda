@@ -377,9 +377,9 @@ static int rated_open(void *ctx, void *event) {
     deque_destroy(songs);
     int count = (int)deque_size(list);
     static const empty_t none = { "star", "No Rated Songs Yet", "Swipe to the stars on Now Playing",
-                                  0 },
+                                  0, 0, 0 },
                          unloved = { "heart-slash", "No Loved Songs Yet",
-                                     "Tap the heart on Now Playing", 0 };
+                                     "Tap the heart on Now Playing", 0, 0, 0 };
     void *view = count ? page_list(st.rt_page, st.rt_page, 0, rt_names[k], count, 64)
                        : empty_list(st.rt_page, st.rt_page, rt_names[k],
                                     k == RT_LOVED ? &unloved : &none, 0);
