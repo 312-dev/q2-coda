@@ -136,19 +136,6 @@ int output_car(char *dev, unsigned cap, unsigned *rate) {
 #endif
 }
 
-/* The car's stream ran dry while a song flowed into it: the count, in CAR_UNDER, which q2-iap reads for Car Audio's
- * health (patch/q2_iap.c health_poll) and logs. */
-#define CAR_UNDER "/tmp/q2-iap.under"
-static void car_underrun(void) {
-#ifdef Q2_CAR_USB
-    static unsigned n;
-    const char *path = getenv("Q2PLAYER_CAR_UNDER") ? getenv("Q2PLAYER_CAR_UNDER") : CAR_UNDER;
-    FILE *f = fopen(path, "w");
-    if (f) fprintf(f, "%u\n", ++n), fclose(f);
-    fprintf(stderr, "q2player: the car's stream ran dry (%u)\n", n);
-#endif
-}
-
 void output_car_gone(void) {
 #ifdef Q2_CAR_USB
     unlink(car_path());
@@ -600,7 +587,7 @@ static int sink_to(struct output *o, const uint8_t *data, int frames) {
             if (o->way == 3) car_trace_dry((int64_t)avail - (int64_t)o->ring + (int64_t)o->period);
             snd_pcm_forward(o->pcm, (snd_pcm_uframes_t)avail - o->ring + o->period);
             o->hist_n = 0;
-            if (o->way == 3 && !o->dry_ok) car_underrun();
+            if (o->way == 3 && !o->dry_ok) car_trace_underrun(); /* Car Audio's health (cartrace.c) */
         }
         o->dry_ok = 0;
         while (frames > 0) {
@@ -630,10 +617,14 @@ static int sink_to(struct output *o, const uint8_t *data, int frames) {
     if (fwrite(data, (size_t)o->f.channels * o->f.bytes, frames, o->file) != (size_t)frames) return -1;
     int64_t due = (int64_t)(since(&o->t0) * o->speed * o->f.rate);
     if (due > o->written) { /* it ran dry: the clock starts again here */
-        if (o->way == 3 && o->written) car_trace_dry(due - o->written); /* the silence a device would have played */
+        if (o->way == 3 && o->written) {
+            car_trace_dry(due - o->written); /* the silence a device would have played */
+            if (!o->dry_ok) car_trace_underrun();
+        }
         clock_gettime(CLOCK_MONOTONIC, &o->t0);
         o->written = 0;
     }
+    o->dry_ok = 0;
     o->written += frames;
     int64_t ahead = dev_delay(o) - (int64_t)o->f.rate * BUFFER_US / 1000000;
     if (ahead > 0) usleep((useconds_t)(ahead * 1000000 / o->f.rate / o->speed));

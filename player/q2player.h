@@ -200,6 +200,7 @@ void car_trace_open(int rate, const char *car_file);  /* a way-3 output opened a
 void car_trace_write(int frames, int64_t us);         /* a write to the device and how long it took */
 void car_trace_dry(int64_t frames);                   /* the PCM ran dry: the silence it put in */
 void car_trace_back(int64_t frames);                  /* written frames taken back unheard */
+void car_trace_underrun(void);                         /* dry while a song flowed: not a pause's, a seek's or the open's */
 void car_trace_read(int64_t us);                      /* a source read and how long it took */
 void car_tap(const uint8_t *data, int64_t bytes);     /* what is written to the device, for the tap */
 void car_trace_tick(struct output *, int closing);    /* the line, once its second is up or as the output closes */
