@@ -216,13 +216,19 @@ void storage_scanned(void) {
     int n = tk_snprintf(b, sizeof b, "%lld", wall_time());
     if (!blob_io(ST_SCANNED, ST_SCANNED ".tmp", b, (unsigned)n, 1)) unlink(ST_SCANNED ".tmp");
 }
-/* "Last updated ..." into out from the saved time; 0 with none (or the clock unset then). */
-const char *st_updated(char *out, unsigned n) {
+/* The saved time, 0 for none. */
+static long long st_scanned_at(void) {
     char b[24] = "";
     void *f = fopen(ST_SCANNED, "rb");
     if (f) b[fread(b, 1, sizeof b - 1, f)] = 0, fclose(f);
     long long when = 0;
     for (const char *s = b; *s >= '0' && *s <= '9'; ++s) when = when * 10 + (*s - '0');
+    return when;
+}
+static long long st_shown_scan __attribute__((section(".scratch"))); /* the time the page shows */
+/* "Last updated ..." into out from the saved time; 0 with none (or the clock unset then). */
+const char *st_updated(char *out, unsigned n) {
+    long long when = st_shown_scan = st_scanned_at();
     char day[24];
     return when && when_said(day, sizeof day, (unsigned)when)
                ? (tk_snprintf(out, n, "Last updated %s", day), out)
@@ -262,7 +268,8 @@ static int st_poll(const void *unused) {
     if (st_read()) {
         if (so.dl) dl_fill();
         if (so.page) st_fill();
-    }
+    } else if (so.page && st_scanned_at() != st_shown_scan)
+        st_fill(); /* a scan ended since: Update Library's line */
     return 8; /* RET_REPEAT */
 }
 

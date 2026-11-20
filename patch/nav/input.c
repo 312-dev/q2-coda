@@ -535,7 +535,10 @@ static int shuffle_key(void *top, void *w, int dir) {
         reveal(&g_menu, 0, 1); /* the row under it in view */
     } else if (dir) {
         int stop = st.shuffle_stop - dir; /* up the stops, down to the songs */
-        if (stop > stops) return 1;       /* the last stop: nothing above */
+        if (stop > stops) { /* the last stop: above it only the search bar (search_bar.c) */
+            search_bar_up_with(top, w, row);
+            return 1;
+        }
         if (stop) {
             st.shuffle_stop = stop;
         } else {

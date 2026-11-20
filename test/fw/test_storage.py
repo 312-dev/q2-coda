@@ -250,3 +250,17 @@ def test_a_whole_scan_ending_saves_its_time(fw):
     fw.mock('fw_time', lambda *_: NOW)
     fw.fn('storage_scanned', None)()
     assert files.files[SCANNED] == str(NOW).encode()
+
+
+def test_a_scan_ending_while_storage_is_open_shows_its_line(fw):
+    """Update Library's scan runs over the page: when it ends, the page's poll finds the new time and its line."""
+    from test_adb_trust import localtime
+    st = Storage(fw)
+    fw.mock('fw_time', lambda *_: NOW)
+    fw.mock('fw_localtime_r', lambda t, out, *_: localtime(t, out))
+    fw.var('g_time24h_flag', C.c_ubyte).value = 1
+    st.open()
+    assert not [st.texts.get(c) for c in st.children[st.items[4]][1:] if st.texts.get(c)]
+    st.files.files[SCANNED] = str(NOW).encode()
+    fw.fn('storage__st_poll', C.c_int, C.c_void_p)(None)
+    assert [st.texts.get(c) for c in st.children[st.items[4]][1:] if st.texts.get(c)] == ['Last updated today, 18:31']

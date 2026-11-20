@@ -16,7 +16,8 @@
 
 static struct {
     void *page, *surface, *moved; /* the lit bar's page, its rows' surface, what moved down */
-    int y;                        /* moved's own y at rest */
+    void *also;                   /* ... and a row above the rows that moves with them (Songs' Shuffle) */
+    int y, also_y;                /* moved's and also's own y at rest */
     int band;                     /* the band's top, in the page's coordinates */
 } sb __attribute__((section(".scratch")));
 
@@ -43,14 +44,16 @@ static int sb_gone(void *page, void *event) {
 void search_bar_off(void) {
     if (!sb.page) return;
     if (sb.moved) widget_move(sb.moved, I(sb.moved, W_X), sb.y);
+    if (sb.also) widget_move(sb.also, I(sb.also, W_X), sb.also_y);
     st.touch_mode = 0;
     widget_invalidate_force(sb.page, (void *)0);
-    sb.page = sb.surface = sb.moved = (void *)0;
+    sb.page = sb.surface = sb.moved = sb.also = (void *)0;
 }
 
-/* navigation's wheel (input.c), a turn up that finds the first row of surface w selected on top: 1
- * when it brought the bar in. */
-int search_bar_up(void *top, void *w) {
+/* navigation's wheel (input.c), a turn up that finds the first row of surface w selected on top, or
+ * Songs' Shuffle row also lit over it (input.c shuffle_key, the row moving with the list): 1 when it
+ * brought the bar in, above them both. */
+int search_bar_up_with(void *top, void *w, void *also) {
     if (!theme()->entry_ipod || !w || !sb_page(top) || sb.page) return 0;
     void *moved = P(w, W_PARENT);
     if (!moved || moved == top) return 0;
@@ -63,10 +66,19 @@ int search_bar_up(void *top, void *w) {
     for (void *p = moved; p && p != top; p = P(p, W_PARENT)) y += I(p, W_Y);
     sb.band = y;
     widget_move(moved, I(moved, W_X), sb.y + SB_BAND);
+    if ((sb.also = also)) {
+        sb.also_y = I(also, W_Y);
+        int ay = 0;
+        for (void *p = also; p && p != top; p = P(p, W_PARENT)) ay += I(p, W_Y);
+        if (ay < sb.band) sb.band = ay; /* the band above the row too */
+        widget_move(also, I(also, W_X), sb.also_y + SB_BAND);
+    }
     st.touch_mode = 1; /* the rows' selection hidden: the bar has the wheel */
     widget_invalidate_force(top, (void *)0);
     return 1;
 }
+
+int search_bar_up(void *top, void *w) { return search_bar_up_with(top, w, (void *)0); }
 
 /* ringnav, before the list's own keys: the lit bar's. 1 when it took key. */
 int search_bar_key(void *top, unsigned key) {
