@@ -36,7 +36,26 @@ struct iap2_np {
     int state; /* 0 stopped, 1 playing, 2 paused */
     unsigned pos_ms, len_ms, qpos, qlen;
     int shuffle, repeat; /* repeat 0 off, 1 one, 2 all */
+    unsigned id, qgen; /* the song's library id (songtable's rid, 0 for none) and the queue's generation */
     char title[160], artist[160], album[160], path[400];
+};
+
+/* The Q2's library as the car is sent it (q2_iap_lib.c fills it): its songs in rid order, their strings as offsets
+ * into pool, each one's hash of what the car is sent of it, the revision, and what the car was last sent in full. */
+struct iap2_track {
+    unsigned rid, hash, album_id, artist_id, aartist_id, genre_id;
+    unsigned title, album, artist, aartist, genre; /* offsets into pool */
+    unsigned short track, disc;
+};
+struct iap2_sent {
+    unsigned rid, hash;
+};
+struct iap2_library {
+    struct iap2_track *tracks;
+    unsigned n;
+    char *pool, rev[40], sent_rev[40];
+    struct iap2_sent *sent;
+    unsigned sent_n;
 };
 
 struct iap2_host {
@@ -48,6 +67,11 @@ struct iap2_host {
     void (*audio)(int on);                         /* the car wants USB audio (1) or no longer (0) */
     void (*command)(const char *verb);             /* a button or a seek: the shim's verbs (coda_rc_shim.c cr_command) */
     unsigned (*artwork)(const struct iap2_np *np, u8 *out, unsigned cap); /* the song's cover, a JPEG, or 0 */
+    struct iap2_library *lib;   /* the library, filled by lib_load (-1: none to send) */
+    int (*lib_load)(void);
+    void (*lib_saved)(void);    /* the car holds lib's revision whole */
+    void (*play)(const unsigned *rids, unsigned n, unsigned at, int shuffle);
+    int (*queue)(unsigned *rids, unsigned cap); /* the playing queue's rids, or -1 */
 };
 
 static const struct iap2_host *H;
@@ -715,6 +739,12 @@ static unsigned art_len, art_sent;
 static u8 art_id, next_transfer = 0x80;
 static int art_going;
 
+/* Up Next's list on its way (ql_announce) */
+#define QLIST_MAX 2000
+static u8 ql[QLIST_MAX * 8], ql_id;
+static unsigned ql_len, ql_going;
+static long ql_seen_at;
+
 static void file_send(u8 id, u8 op, const u8 *d, unsigned n) {
     u8 b[MAX_PACKET];
     if (!file_session || n + 2 > sizeof b) return;
@@ -789,6 +819,22 @@ static void iap2_file(const u8 *d, unsigned n) {
     if (n < 2) return;
     snprintf(t, sizeof t, "file < transfer %02x op %02x (%u bytes)", d[0], d[1], n);
     H->log(t);
+    if (d[0] == ql_id && ql_going && d[1] == 0x01) { /* the queue list: every piece */
+        unsigned room = (peer_max - HEADER_LEN - 1 - 2 < MAX_PACKET - HEADER_LEN - 1 - 2 ? peer_max : MAX_PACKET) -
+                        HEADER_LEN - 1 - 2, sent = 0;
+        room -= room % 8;
+        while (sent < ql_len) {
+            unsigned k = ql_len - sent < room ? ql_len - sent : room;
+            u8 op = sent == 0 && sent + k == ql_len ? 0xC0 : sent == 0 ? 0x80 : sent + k == ql_len ? 0x40 : 0x00;
+            file_send(ql_id, op, ql + sent, k);
+            sent += k;
+        }
+        return;
+    }
+    if (d[0] == ql_id && (d[1] == 0x02 || d[1] == 0x05)) {
+        ql_going = 0;
+        return;
+    }
     if (d[0] != art_id || !art_going) return;
     if (d[1] == 0x01) { /* go: every piece, as the window allows */
         unsigned room = peer_max - HEADER_LEN - 1 - 2;
@@ -826,7 +872,9 @@ static void iap2_file(const u8 *d, unsigned n) {
 #define PB_APP_NAME 0x07
 #define PB_SPEED 0x0C
 #define PB_SEEKABLE 0x0D
+#define PB_QUEUE_LIST 0x0E    /* 1: the queue's list follows (ql_announce) */
 #define PB_APP_BUNDLE 0x10
+#define PB_QUEUE_LIST_ID 0x11 /* empty, with PB_QUEUE_LIST 1 */
 #define DEFAULT_MEDIA (1u << MI_PERSISTENT_ID | 1u << MI_TITLE | 1u << MI_DURATION | 1u << MI_ALBUM | 1u << MI_ARTIST)
 #define DEFAULT_PLAYBACK (1u << PB_STATE | 1u << PB_POSITION | 1u << PB_QUEUE_INDEX | 1u << PB_QUEUE_COUNT)
 
@@ -835,9 +883,11 @@ static long due_in(long ms) {
     return d ? d : 1;
 }
 
+static void lib_reset(void);
 static void iap2_control_reset(void) {
     if (H) set_audio(0);
     art_going = 0, art_id = 0, n_controls = 0, held = 0, scanning = 0;
+    lib_reset();
     identified = now_playing = 0;
     auth_due = ident_due = availability_due = 0;
     car_receives_n = 0, car_current = 0, bt_component = -1;
@@ -961,10 +1011,212 @@ static void send_library_info(void) {
     group_start(0), param_str(0, H->name), param_str(1, H->library_id), param_u8(2, 0), group_end();
     msg_send();
 }
-static void send_library_updates(void) {
+/* ---- the library on iDrive (docs/iphone-mode.md#the-library-on-idrive) ----
+ *
+ * To StartMediaLibraryUpdates (4C03: 1 the revision the car holds, 2 the item properties it wants) an iPhone's
+ * answers, as PodBox sends them: 8 00, 9 01 (it can play all songs), then MediaLibraryUpdates (4C04) with the songs
+ * as items (parameter 2, a group each), as many to a packet as it holds, the first opening with 6 (a reset); an update
+ * on the way carries LIB_PARTIAL and progress (7) 0, so a car cut off asks again; the last the revision and 100. A car
+ * that holds the revision gets the revision alone; one that holds the revision this Q2 last sent it whole
+ * (lib->sent_rev) gets only the songs added or changed since and, as 4 each, the ids of those gone, with no reset.
+ * Updates go only while nothing else waits to be sent and the window has a slot to spare, so the car's buttons and
+ * Now Playing are never behind the library. Each song's id is LIB_KEY's with its rid, and Now Playing sends the same
+ * id, so the car knows the song it plays; an album's, an artist's, an album artist's and a genre's ids are their
+ * names' hashes under their own high word. */
+#define LIB_KEY 0x51320001u
+#define LIB_ALBUM 0x5132000Au
+#define LIB_ARTIST 0x5132000Bu
+#define LIB_AARTIST 0x5132000Cu
+#define LIB_GENRE 0x5132000Du
+#define LIB_PARTIAL "q2.partial"
+enum { LIB_IDLE, LIB_ITEMS, LIB_GONE };
+static struct {
+    int phase, diff, reset;
+    unsigned next, gone, mask, items, updates;
+    long started;
+} ls;
+
+static const char *lib_str(unsigned off) { return H->lib->pool + off; }
+
+static void lib_named(unsigned mask, unsigned id_param, u32 hi, u32 id, const char *name) {
+    if (!*name) return;
+    if (mask & 1u << id_param) param_u64(id_param, hi, id);
+    if (mask & 1u << (id_param + 1)) param_str(id_param + 1, name);
+}
+
+static void lib_item(const struct iap2_track *t, unsigned mask) {
+    group_start(2);
+    param_u64(0, LIB_KEY, t->rid);
+    if (mask & 1u << 1) param_str(1, lib_str(t->title));
+    if (mask & 1u << 2) param_u8(2, 0);
+    lib_named(mask, 5, LIB_ALBUM, t->album_id, lib_str(t->album));
+    if ((mask & 1u << 7) && t->track) param_u16(7, t->track);
+    if ((mask & 1u << 9) && t->disc) param_u16(9, t->disc);
+    lib_named(mask, 11, LIB_ARTIST, t->artist_id, lib_str(t->artist));
+    lib_named(mask, 13, LIB_AARTIST, t->aartist_id, lib_str(t->aartist));
+    lib_named(mask, 15, LIB_GENRE, t->genre_id, lib_str(t->genre));
+    group_end();
+}
+
+/* Is the car's copy of this song the one it was last sent (diff), so it needs nothing? */
+static int lib_unchanged(const struct iap2_track *t) {
+    const struct iap2_library *l = H->lib;
+    unsigned lo = 0, hi = l->sent_n;
+    while (lo < hi) {
+        unsigned mid = (lo + hi) / 2;
+        if (l->sent[mid].rid < t->rid) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo < l->sent_n && l->sent[lo].rid == t->rid && l->sent[lo].hash == t->hash;
+}
+static int lib_kept(unsigned rid) { /* still in the library */
+    const struct iap2_library *l = H->lib;
+    unsigned lo = 0, hi = l->n;
+    while (lo < hi) {
+        unsigned mid = (lo + hi) / 2;
+        if (l->tracks[mid].rid < rid) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo < l->n && l->tracks[lo].rid == rid;
+}
+
+/* An update while there is room: songs (or the ids of songs gone), as many as a packet holds. */
+static void lib_pump(void) {
+    const struct iap2_library *l = H->lib;
+    char t[200];
+    while (ls.phase != LIB_IDLE && link_up && !q_count && (!rto || count + 1 < window)) {
+        int n = 0;
+        msg_start(0x4C04);
+        param_str(0, H->library_id);
+        if (ls.reset) param(6, 0, 0), ls.reset = 0;
+        while (ls.phase == LIB_ITEMS && ls.next < l->n) {
+            const struct iap2_track *tr = &l->tracks[ls.next];
+            if (ls.diff && lib_unchanged(tr)) {
+                ++ls.next;
+                continue;
+            }
+            unsigned mark = m.len;
+            lib_item(tr, ls.mask);
+            if (!m.ok || m.len + 4 + sizeof l->rev + 5 > sizeof m.b || m.len + 4 + sizeof l->rev + 5 > peer_max - HEADER_LEN - 1) {
+                m.len = mark, m.ok = 1;
+                if (!n) ++ls.next; /* a song no packet holds */
+                break;
+            }
+            ++ls.next, ++n, ++ls.items;
+        }
+        if (ls.phase == LIB_ITEMS && ls.next >= l->n) ls.phase = ls.diff ? LIB_GONE : LIB_IDLE + 99;
+        while (ls.phase == LIB_GONE && ls.gone < l->sent_n) {
+            unsigned rid = l->sent[ls.gone].rid;
+            if (lib_kept(rid)) {
+                ++ls.gone;
+                continue;
+            }
+            if (m.len + 12 + 4 + sizeof l->rev + 5 > sizeof m.b) break;
+            param_u64(4, LIB_KEY, rid);
+            ++ls.gone, ++n;
+        }
+        if (ls.phase == LIB_GONE && ls.gone >= l->sent_n) ls.phase = LIB_IDLE + 99;
+        int done = ls.phase == LIB_IDLE + 99;
+        param_str(1, done ? l->rev : LIB_PARTIAL);
+        param_u8(7, done ? 100 : 0);
+        msg_send();
+        ++ls.updates;
+        if (done) {
+            ls.phase = LIB_IDLE;
+            snprintf(t, sizeof t, "library: %s sent, %u songs of %u in %u updates, %ld ms", ls.diff ? "changes" : "whole",
+                     ls.items, l->n, ls.updates, H->now() - ls.started);
+            H->log(t);
+            if (H->lib_saved) H->lib_saved();
+        }
+    }
+}
+
+static void send_library_updates(const char *car_rev, unsigned mask) {
+    char t[200];
     msg_start(0x4C04), param_str(0, H->library_id), param_u8(8, 0), msg_send();
     msg_start(0x4C04), param_str(0, H->library_id), param_u8(9, 1), msg_send();
-    msg_start(0x4C04), param_str(0, H->library_id), param_str(1, "1"), param_u8(7, 100), msg_send();
+    if (!H->lib || !H->lib_load || H->lib_load() < 0) {
+        msg_start(0x4C04), param_str(0, H->library_id), param_str(1, "1"), param_u8(7, 100), msg_send();
+        return;
+    }
+    const struct iap2_library *l = H->lib;
+    memset(&ls, 0, sizeof ls);
+    ls.mask = mask, ls.started = H->now();
+    if (car_rev && !strcmp(car_rev, l->rev)) {
+        snprintf(t, sizeof t, "library: the car holds %s, %u songs: nothing to send", l->rev, l->n);
+        H->log(t);
+        msg_start(0x4C04), param_str(0, H->library_id), param_str(1, l->rev), param_u8(7, 100), msg_send();
+        return;
+    }
+    ls.diff = car_rev && l->sent_rev[0] && !strcmp(car_rev, l->sent_rev);
+    ls.reset = !ls.diff;
+    ls.phase = LIB_ITEMS;
+    snprintf(t, sizeof t, "library: the car holds %s; sending %s of %s (%u songs)", car_rev ? car_rev : "nothing",
+             ls.diff ? "the changes" : "the whole", l->rev, l->n);
+    H->log(t);
+    lib_pump();
+}
+
+/* ---- playing from iDrive: 4C06 to 4C09 (parameters logged whole as they come, in iap2_control_receive) ---- */
+
+static unsigned *play_rids(unsigned n) { return n ? malloc(n * sizeof(unsigned)) : 0; }
+
+/* PlayMediaLibraryItems: 0 the songs' ids back to back, 8 bytes each, 1 the index to start at. */
+static void play_items(const u8 *p, unsigned len) {
+    unsigned n, sn;
+    const u8 *v = find(p, len, 0, &n), *s = find(p, len, 1, &sn);
+    unsigned at = s && sn == 4 ? get_be(s, 4) : 0, k = 0, *rids = play_rids(n / 8);
+    for (unsigned i = 0; rids && v && i + 8 <= n; i += 8)
+        if (get_be(v + i, 4) == LIB_KEY && get_be(v + i + 4, 4)) rids[k++] = get_be(v + i + 4, 4);
+    if (k && H->play) H->play(rids, k, at, 0);
+    free(rids);
+}
+
+/* PlayMediaLibraryCollection: 0 the collection's id, 1 its type (1 an artist, 2 an album, 3 an album artist, 4 a
+ * genre; 0 a playlist and 5 a composer have none here), 2 the index to start at. Its songs in the library's order of
+ * an album: album artist, album, disc, track. */
+static void play_collection(const u8 *p, unsigned len) {
+    unsigned n, tn, sn;
+    const u8 *v = find(p, len, 0, &n), *ty = find(p, len, 1, &tn), *s = find(p, len, 2, &sn);
+    const struct iap2_library *l = H->lib;
+    if (!v || n != 8 || !ty || !tn || !l || !l->n) return;
+    unsigned id = get_be(v + 4, 4), type = ty[0], at = s && sn == 4 ? get_be(s, 4) : 0, k = 0;
+    unsigned *rids = play_rids(l->n);
+    for (unsigned i = 0; rids && i < l->n; ++i) {
+        const struct iap2_track *t = &l->tracks[i];
+        unsigned of = type == 1 ? t->artist_id : type == 2 ? t->album_id : type == 3 ? t->aartist_id : type == 4 ? t->genre_id : 0;
+        if (type >= 1 && type <= 4 && of == id) rids[k++] = i; /* indexes first, sorted below */
+    }
+    /* insertion sort by album artist, album, disc, track: a collection is an album or a few hundred songs */
+    for (unsigned i = 1; i < k; ++i) {
+        unsigned x = rids[i], j = i;
+        const struct iap2_track *a = &l->tracks[x];
+        while (j) {
+            const struct iap2_track *b = &l->tracks[rids[j - 1]];
+            int c = strcmp(lib_str(b->aartist), lib_str(a->aartist));
+            if (!c) c = strcmp(lib_str(b->album), lib_str(a->album));
+            if (!c) c = (int)b->disc - (int)a->disc;
+            if (!c) c = (int)b->track - (int)a->track;
+            if (c <= 0) break;
+            rids[j] = rids[j - 1], --j;
+        }
+        rids[j] = x;
+    }
+    for (unsigned i = 0; i < k; ++i) rids[i] = l->tracks[rids[i]].rid;
+    char t[96];
+    snprintf(t, sizeof t, "library: collection %08x of type %u: %u songs, from %u", id, type, k, at);
+    H->log(t);
+    if (k && H->play) H->play(rids, k, at, 0);
+    free(rids);
+}
+
+/* PlayMediaLibrarySpecial: every song (1, all songs), shuffled as the car's shuffle-all is. */
+static void play_all(void) {
+    const struct iap2_library *l = H->lib;
+    unsigned *rids = l ? play_rids(l->n) : 0;
+    for (unsigned i = 0; rids && i < l->n; ++i) rids[i] = l->tracks[i].rid;
+    if (rids && H->play) H->play(rids, l->n, 0, 1);
+    free(rids);
 }
 
 /* The rate as an index into an iPhone's nine (8000 to 48000); an iPhone at 44100 sends 7, then two uint32s, both 0. */
@@ -989,7 +1241,9 @@ static void send_now_playing(const struct iap2_np *n, int media) {
     msg_start(0x5001);
     if (media) {
         group_start(0);
-        if (media_mask & 1u << MI_PERSISTENT_ID) param_u64(MI_PERSISTENT_ID, 0x51320000u, np_hash(n));
+        /* the library's id for a song in it (lib_item), so the car knows the song it plays; else a hash */
+        if (media_mask & 1u << MI_PERSISTENT_ID)
+            param_u64(MI_PERSISTENT_ID, n->id ? LIB_KEY : 0x51320000u, n->id ? n->id : np_hash(n));
         if (media_mask & 1u << MI_TITLE) param_str(MI_TITLE, n->title[0] ? n->title : H->name);
         if (media_mask & 1u << MI_DURATION) param_u32(MI_DURATION, n->len_ms);
         if ((media_mask & 1u << MI_ALBUM) && n->album[0]) param_str(MI_ALBUM, n->album);
@@ -1023,6 +1277,39 @@ static void send_now_playing(const struct iap2_np *n, int media) {
 
 /* Every half second while the car takes Now Playing: everything again on a new song or state, else the position
  * while playing (PodBox: without it the car's bar sits at 0:00). */
+/* ---- Up Next on iDrive: the playing queue as a list (docs/iphone-mode.md#the-library-on-idrive) ----
+ * When the queue changes (the shim's qgen), once it has held still a second, an iPhone sends PB_QUEUE_LIST 1 and an
+ * empty PB_QUEUE_LIST_ID, then the queue as a file transfer, [ID, 04, size, 00 03] and the songs' ids, 8 bytes each,
+ * in the order they play (PodBox, from an iPhone in its car). A queue with a song outside the library (a card app's
+ * stream), or longer than QLIST_MAX, is PB_QUEUE_LIST 0 and no list: the car then shows only the place in it. */
+
+static void ql_announce(void) {
+    static unsigned rids[QLIST_MAX];
+    char t[96];
+    int n = H->queue ? H->queue(rids, QLIST_MAX) : -1, whole = n > 0 && file_session;
+    for (int i = 0; whole && i < n; ++i)
+        if (!rids[i]) whole = 0;
+    msg_start(0x5001), group_start(1), param_u8(PB_QUEUE_LIST, (u8)whole);
+    if (whole) param(PB_QUEUE_LIST_ID, 0, 0);
+    group_end(), msg_send();
+    snprintf(t, sizeof t, "queue: %d songs, %s", n, whole ? "sent as a list" : "no list");
+    H->log(t);
+    if (!whole) return;
+    if (ql_going && ql_id) file_send(ql_id, 0x02, 0, 0);
+    ql_id = next_transfer, next_transfer = next_transfer == 0xFF ? 0x80 : next_transfer + 1;
+    ql_len = 0;
+    for (int i = 0; i < n; ++i) {
+        u8 *k = ql + ql_len;
+        for (int b = 0; b < 4; ++b) k[b] = (u8)(LIB_KEY >> (24 - 8 * b)), k[4 + b] = (u8)(rids[i] >> (24 - 8 * b));
+        ql_len += 8;
+    }
+    ql_going = 1;
+    u8 setup[10] = { 0, 0, 0, 0, ql_len >> 24, ql_len >> 16, ql_len >> 8, ql_len, 0, 3 };
+    file_send(ql_id, 0x04, setup, sizeof setup);
+}
+
+static void lib_reset(void) { ls.phase = LIB_IDLE, ql_going = 0, ql_seen_at = 0; }
+
 static void poll_now_playing(long now) {
     struct iap2_np n;
     if (np_at && now - np_at < 500) return;
@@ -1034,7 +1321,9 @@ static void poll_now_playing(long now) {
     else if (n.state == 1) {
         msg_start(0x5001), group_start(1), param_u32(PB_POSITION, n.pos_ms), group_end(), msg_send();
     }
+    if ((playback_mask & 1u << PB_QUEUE_LIST) && n.qgen != np_last.qgen) ql_seen_at = now; /* the queue moved */
     np_last = n, np_sent = 1;
+    if (ql_seen_at && now - ql_seen_at >= 1000) ql_seen_at = 0, ql_announce();
 }
 
 static void iap2_control_receive(const u8 *msg, unsigned len) {
@@ -1076,8 +1365,26 @@ static void iap2_control_receive(const u8 *msg, unsigned len) {
     case 0x4C00:
         send_library_info();
         break;
-    case 0x4C03:
-        send_library_updates();
+    case 0x4C03: {
+        unsigned rn, wn;
+        const u8 *rev = find(p, plen, 1, &rn), *w = find(p, plen, 2, &wn);
+        send_library_updates(rev && rn && !rev[rn - 1] ? (const char *)rev : 0, wanted(w, wn, 0x0A0FFFFF));
+        break;
+    }
+    case 0x4C05:
+        ls.phase = LIB_IDLE;
+        break;
+    case 0x4C06:
+        if (H->command) H->command("resume");
+        break;
+    case 0x4C07:
+        play_items(p, plen);
+        break;
+    case 0x4C08:
+        play_collection(p, plen);
+        break;
+    case 0x4C09:
+        play_all();
         break;
     case 0xDA00:
         H->log("audio: the car asks for USB audio (44.1 kHz announced; M3 plays into it)");
@@ -1161,6 +1468,7 @@ static void iap2_tick(void) {
     }
     if (availability_due && now >= availability_due) send_carplay_availability();
     scan_tick(now);
+    lib_pump();
     if (identified && now_playing) poll_now_playing(now);
     pump();
 }

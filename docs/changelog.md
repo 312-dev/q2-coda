@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Audio: the car's own music browser (iDrive's) now lists the Q2's library by song, album, artist and genre and plays what you pick there, Shuffle All included, and its Up Next shows the Q2's queue. Plugging in again sends only what changed in the library.
   - Car Audio: holding the car's Next or Previous button (on the steering wheel or iDrive) now fast-forwards or rewinds through the song, faster the longer it is held, as an iPod does; a quick press still skips.
   - USB: **Car Audio**. Plug the Q2 into a car's USB port and it plays through the car's speakers over USB, as an iPhone does: the car shows the song, its artist and cover, its buttons and steering-wheel controls work, and the Q2 says "Playing through" and the car's name when the sound starts, or "Car audio problem" if it drops out. The new USB setting **Automatic**, the default, does this by itself: a car gets Car Audio, a computer gets Transfer Files (the SD card), a charger only charges. USB Debugging now starts only when picked in Settings > General > USB, and a mode page's Stop goes back to Automatic. Ask Every Time is still there for the chooser.
   - Menus (OLED): holding Play/Pause on a favorite song, album or cover (and Now Playing's ⋯) now offers **Unfavorite** with a filled pink-red heart (white while the row is selected), in place of "Remove from Favorites" and its broken heart.
