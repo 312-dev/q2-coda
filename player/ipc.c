@@ -104,17 +104,25 @@ static void reply(const char *fmt, ...) {
     ipc_send(b);
 }
 
-/* Each song demo hands over, and each stop, in the unified log: what the player was asked to play, beside what demo
- * showed (the device, 2026-11-18: a lost stop left one song playing under another's title). A URL's query is left
- * out, as it carries the app's token. */
-static void log_command(const char *name, const char *arg) {
+/* Each song demo hands over, each stop, pause and play, in the unified log: what the player was asked to play, beside
+ * what demo showed (the device, 2026-11-18: a lost stop left one song playing under another's title), and where in
+ * the song it starts when demo asks for a place (ss=, as a restart after an output change does: the drive of
+ * 2026-11-19 heard a song start over twice as a car took over from headphones, and the log could not say which
+ * start lost the place). A URL's query is left out, as it carries the app's token. A pause or play with no song open
+ * is noted as ignored, as command() ignores it. */
+static void log_command(const char *name, const char *arg, int idle) {
     char line[200];
     int n;
     if (!strcmp(name, "mcl-stop"))
         n = snprintf(line, sizeof line, "q2player: mcl-stop");
-    else if (!strcmp(name, "set-songurl") || !strcmp(name, "set-nexturl") || !strcmp(name, "set-gapless"))
+    else if (!strcmp(name, "mcl-pause") || !strcmp(name, "mcl-play"))
+        n = snprintf(line, sizeof line, "q2player: %s%s", name, idle ? " ignored, no song open" : "");
+    else if (!strcmp(name, "set-songurl") || !strcmp(name, "set-nexturl") || !strcmp(name, "set-gapless")) {
+        const char *ss = strstr(arg, "|ss=");
+        int at = ss ? atoi(ss + 4) : 0;
         n = snprintf(line, sizeof line, "q2player: %s %.*s", name, (int)strcspn(arg, strncmp(arg, "http", 4) ? "|" : "|?"), arg);
-    else
+        if (at > 0 && n > 0 && n < (int)sizeof line) n += snprintf(line + n, sizeof line - n, " from %d s", at);
+    } else
         return;
     plog('I', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
 }
@@ -122,7 +130,10 @@ static void log_command(const char *name, const char *arg) {
 static void command(const char *name, const char *arg) {
     struct ctl *c = &ctl;
     int wake = 0;
-    log_command(name, arg);
+    pthread_mutex_lock(&c->mu);
+    int idle = c->state == IDLE;
+    pthread_mutex_unlock(&c->mu);
+    log_command(name, arg, idle); /* not under mu: a full stderr pipe must not hold the engine up */
     pthread_mutex_lock(&c->mu);
     if (!strcmp(name, "player-status")) {
         if (!strcmp(arg, "request")) reply(c->state == PLAYING ? "{player-status\\playing}" : "{player-status\\ready}");

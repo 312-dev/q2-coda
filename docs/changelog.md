@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Logs: the Q2's log now notes where in a song the player was asked to start (as when a car takes over from headphones and the song is started again), and each pause and play, including one that came with no song open and so did nothing.
   - Bluetooth: a car's or headset's screen now shows the title, artist and album of what plays from the card and from streaming apps (Subsonic). Only Tidal's songs reached it; everything else showed as unknown.
   - Shuffle Songs: shuffling a library that holds streaming songs (Subsonic) now plays them in a random order, all of them. It played the Library's title order from a random song instead, so a shuffle gave "Rockman", "Rockstar", "Rockstar" or "Best of Times", "Best Time", "Beta Love", and stopped at the end of the list. Shuffling from the phone (Car Remote, Android Auto) is fixed the same way.
   - Now Playing: a double press of Center turns the screen off (and so locks the buttons when Buttons Lock is on) again, as on every other page, instead of starting a seek and then ringing Shuffle. A single press still starts seeking at once.
