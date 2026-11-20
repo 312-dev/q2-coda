@@ -1,0 +1,8 @@
+# usb_f_uac1.ko for the Q2's 5.10.21 kernel (docs/iphone-mode.md#the-uac1-module): Linux 5.10.21's f_uac1.c with
+# its own u_audio.c, whose exported names q2_rename.h changes so the module never binds to Shanling's modified
+# u_audio in the kernel. q2_layout.ko is never loaded: it records the offsets this module relies on, which build.py
+# prints to be checked against the stock kernel's own code.
+obj-m := usb_f_uac1.o q2_layout.o
+usb_f_uac1-y := f_uac1.o u_audio.o
+CFLAGS_f_uac1.o := -include $(src)/q2_rename.h
+CFLAGS_u_audio.o := -include $(src)/q2_rename.h
