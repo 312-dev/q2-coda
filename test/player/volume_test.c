@@ -1,6 +1,7 @@
 /* player/output.c's volume_gains for the levels run.py's test_volume_law checks, one line each: L R gainL gainR. */
 #include <stdio.h>
 void volume_gains(int volume, float gain[2]);
+void plog(char level, const char *msg, int n) { (void)level, (void)msg, (void)n; } /* main.c's, for cartrace.c */
 int main(void) {
     static const int levels[][2] = {{100, 100}, {100, 50}, {50, 50}, {40, 40}, {255, 255}, {80, 40}, {0, 0}};
     for (unsigned i = 0; i < sizeof levels / sizeof *levels; ++i) {

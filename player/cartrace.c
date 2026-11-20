@@ -20,7 +20,6 @@
  * number) and left out of the file, never waited for. All of this runs only on way 3, which only --dev builds have
  * (Q2_CAR_USB); Q2PLAYER_CAR_TAP_S stands for TAP_S in a host test. */
 #include "q2player.h"
-#include "peq.h" /* PEQ_ROOT: the Q2's paths, or a host test's directory */
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +28,9 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifndef PEQ_ROOT /* player/Makefile passes it: "" on the Q2, a host test's directory ("."); test/player's tools none */
+#define PEQ_ROOT ""
+#endif
 #define TAP_FILE PEQ_ROOT "/mnt/mmc/.q2muse/logs/car-pcm.raw"
 #define TAP_OFF PEQ_ROOT "/mnt/mmc/.q2muse/logs/car-pcm.off"
 enum { TAP_S = 120, TAP_RING = 512 * 1024, TAP_POLL_MS = 100, SLOW_MS = 50, LINE_MS = 1000 };
