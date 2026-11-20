@@ -2539,8 +2539,11 @@ def test_a_row_rebuilt_in_place_before_the_confirm_is_not_clicked(fw, ui):
     assert not clicks.seen
 
 
-@pytest.mark.parametrize('rows, parent, woken', [(40, 'list_view', True), (5, 'list_view', False), (40, 'view', False)])
-def test_a_tick_wakes_the_lists_own_scroll_bar_where_it_has_one(fw, ui, rows, parent, woken):
+@pytest.mark.parametrize('rows, parent', [(40, 'list_view'), (40, 'table_view'), (5, 'list_view')])
+def test_a_tick_leaves_the_lists_own_scroll_bar_asleep(fw, ui, rows, parent):
+    """docs/internals.md#song-rows-cost: the theme draws the wheel's indicator itself (list_marks.c); stock's mobile
+    bar, painted transparent, woken (scroll_bar_scroll_to at its own value) runs a 300 ms wait and a 500 ms opacity
+    fade as a widget animator, repainting its column every loop pass: ~45 frames a tick on Songs."""
     win = ui.widget('window', ui.wm, (0, 30, 375, 290), name='allmusic_page')
     holder = ui.widget(parent, win, (0, 0, 375, VIEW_H))
     scroll_list(ui, holder, titles(rows))
@@ -2548,8 +2551,8 @@ def test_a_tick_wakes_the_lists_own_scroll_bar_where_it_has_one(fw, ui, rows, pa
     bar.int(O['BAR_VALUE'], 123)
     ui.top = win
     key(fw, ui, KEY_NEXT)
-    seen = [a[:2] for _, a in fw.calls('scroll_bar_scroll_to')]
-    assert seen == ([(bar.at, 123)] if woken else [])  # its own value: the thumb stays stock's
+    called = {name for name, _ in fw.calls()}
+    assert called and not {n for n in called if n.startswith(('scroll_bar_', 'widget_animator_'))}
 
 
 def test_setting_keys_name_each_option_in_config(fw):

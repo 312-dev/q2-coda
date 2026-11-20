@@ -636,25 +636,6 @@ static int confirm_center(const void *info) {
     return 0;
 }
 
-/* Native scroll_to with the bar's current value only wakes its opacity lifecycle.
- * Stock setters retain ownership of thumb position. A transparent bar is still a bar.
- * The native same-value path shows immediately, waits 300 ms and fades over 500 ms. */
-static void native_scrollbar(menu_t *m) {
-    if (m->kind == 3 || max_top(m) <= 0) return;
-    void *parent = P(m->w, W_PARENT);
-    if (!parent) return;
-    const char *type = widget_get_type(parent);
-    if (tk_strcmp(type, "list_view") && tk_strcmp(type, "table_view")) return;
-    unsigned n = widget_count_children(parent);
-    for (unsigned i = 0; i < n; ++i) {
-        void *bar = widget_get_child(parent, i);
-        if (!tk_strcmp(widget_get_type(bar), "scroll_bar_m")) {
-            scroll_bar_scroll_to(bar, I(bar, BAR_VALUE), 500);
-            return;
-        }
-    }
-}
-
 #define PULL_BOUND "_pull_bound"
 #define PULL_SUPPRESS "_pull_suppress"
 #define PULL_PROMPT "_pull_prompt"

@@ -935,8 +935,7 @@ int ringnav(void *ctx, void *event) {
         st.wheel_run = 0;
         step = 1;
     }
-    native_scrollbar(&g_menu);
-    wheel_sb_arm(g_menu.w);
+    wheel_sb_arm(g_menu.w); /* the theme's indicator (list_marks.c); stock's bar stays asleep */
     if (g_menu.kind == 3) {
         if (dir > 0)
             slide_menu_scroll_to_next(w);

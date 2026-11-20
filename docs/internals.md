@@ -187,7 +187,7 @@ The press leaves its key in `tone_key`. Every key-down rewrites it and every key
 
 ## Scrollbar
 
-Wheel motion also wakes the native scrollbar of the controlled surface. `native_scrollbar()` finds the surface's `scroll_bar_m` sibling under its `list_view` or `table_view` parent and calls the stock `scroll_bar_scroll_to` with the bar's current value; the stock bar keeps ownership of the thumb value and runs its own show, wait and fade lifecycle. An initially transparent bar is still woken, and a surface without a native bar is unchanged. The payload retains no bar pointer and no fade timer, so page destruction and widget recycling need no extra handling.
+The wheel's indicator is the theme's (`list.scrollbar`, `list_marks.c` `wheel_sb_arm` and `wheel_sb_alpha`, drawn by `row_paint.c` `paint_scrollbar` from the list's paint), and every theme has one (`tools/theme.py`). Stock's mobile `scroll_bar_m` stays as the thumb's value (`BAR_VALUE`, which stock's scroll setters keep) and is painted transparent (`theme_titles_paint.c` `style_color`); a wheel tick leaves it asleep. Woken (`scroll_bar_scroll_to` at its own value), it runs a 300 ms wait and a 500 ms opacity fade as a widget animator whose timer repaints the bar's column on every loop pass: about 45 frames a tick for a bar nobody sees ([Songs scrolling cost](#song-rows-cost)).
 
 ## Center button
 
