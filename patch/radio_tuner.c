@@ -641,8 +641,8 @@ static int frame(const void *unused) {
 
 /* ---- input ---- */
 
-static void
-seek(int d) { /* Next or Previous: the next station up or down that streams, round the ends */
+/* Next or Previous: the next station up or down that streams, round the ends. */
+static void seek(int d) {
     int best = -1;
     for (int i = 0; i < rt->n; ++i) {
         rt_station *s = &rt->st[i];
@@ -651,7 +651,7 @@ seek(int d) { /* Next or Previous: the next station up or down that streams, rou
                   : s->freq < rt->freq && (best < 0 || s->freq > rt->st[best].freq))
             best = i;
     }
-    for (int i = 0; best < 0 && i < rt->n; ++i) /* round the end */
+    for (int i = 0, wrap = best < 0; wrap && i < rt->n; ++i) /* round the end */
         if (streams(&rt->st[i]) && (best < 0 || (d > 0 ? rt->st[i].freq < rt->st[best].freq
                                                        : rt->st[i].freq > rt->st[best].freq)))
             best = i;

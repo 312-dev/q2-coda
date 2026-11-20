@@ -31,7 +31,7 @@ class Rt(C.Structure):
                 ('zip_text', C.c_char * 8), ('st', Station * RT_MAX)]
 
 
-LIST = ('#Q2RADIO 2 1795160000 41.8708 -87.6242 complete ZIP 60605\n'
+LIST_TEXT = ('#Q2RADIO 2 1795160000 41.8708 -87.6242 complete ZIP 60605\n'
         'WCRX\tFM\t88.1\t0.4\t80\tWCRX\tChicago, IL\tiheart=https://wcrx/live\tiheart=http://wcrx/live\n'
         'WPWX\tFM\t92.3\t27.9\t56\tPower 92\tHammond, IN\tiheart=https://power92\n'
         'WXRT\tFM\t93.1\t3.1\t80\t93XRT\tChicago, IL\tiheart=https://xrt\tradiobrowser=http://xrt2\n'
@@ -51,7 +51,7 @@ class Tuner:
         fw.mock('fw_socket', lambda *_: 7)
         fw.mock('timer_add', self.timer_add)
         fw.mock('fw_fork', lambda *_: self.forks.append(1) or 4242)
-        self.files = Files(fw, {LIST_FILE: LIST.encode()})
+        self.files = Files(fw, {LIST_FILE: LIST_TEXT.encode()})
         fw.mock('fw_access', lambda p, *_: 0 if C.string_at(p).decode() in self.files.files else -1)
         self.key_fn = fw.fn('tuner_key', C.c_int, C.c_void_p, C.c_uint)
         fw.fn('radio_tuner__list_read', C.c_int)()
@@ -103,24 +103,24 @@ def test_the_list_read(tu):
 
 def test_wheel_tunes_and_the_receiver_follows(tu):
     rt = tu.rt
-    rt.screen, rt.freq = TUNER, 931
-    assert tu.key(KEY_NEXT) == 1 and rt.freq == 933
+    rt.screen, rt.freq = TUNER, 999
+    assert tu.key(KEY_NEXT) == 1 and rt.freq == 1001
     assert tu.params() == (-40, 0, 0, 1, 0)  # an empty channel: hiss, no carrier
-    assert tu.timers == [] or all(ms != 350 for _, ms in tu.timers)  # nothing to land on
-    assert tu.key(KEY_PREV) == 1 and rt.freq == 931
-    assert [ms for _, ms in tu.timers][-1:] == [350]  # the stream starts once the dial lands
+    assert all(ms != 350 for _, ms in tu.timers)  # nothing to land on
+    rt.freq = 929
+    tu.key(KEY_NEXT)
+    assert rt.freq == 931 and [ms for _, ms in tu.timers][-1] == 350  # the stream starts once the dial lands
     assert tu.fire('land') == 0
     assert tu.sent[0] == 'uhttps://xrt' and rt.feed == 2
-    assert tu.params()[:2] == (80, 0) and tu.params()[4] == 931
-    # off the station by 0.2 MHz: the same carrier, 200 kHz off (the IF filter makes it the next channel)
-    tu.now += 1000
-    tu.key(KEY_NEXT)
     assert tu.params()[0] == 80 and tu.params()[4] == 931
-    assert [ms for _, ms in tu.timers][-1] == 4000  # the stream stays warm while the dial is away
-    tu.now += 1000  # landed: the needle has glided to 93.3
+    tu.now += 1000  # landed
+    tu.key(KEY_NEXT)  # 93.3: the same carrier, the needle gliding off it
+    assert tu.params()[0] == 80 and tu.params()[4] == 931
+    tu.now += 1000
     tu.fw.fn('radio_tuner__receive', None)()
-    assert tu.params()[1] == 200
-    tu.key(KEY_NEXT)
+    assert tu.params()[1] == 200  # 0.2 MHz off: the IF filter makes it the next channel
+    tu.key(KEY_NEXT)  # 93.5: no neighbour strong enough, so the stream is left warm
+    assert [ms for _, ms in tu.timers][-1] == 4000 and rt.feed == 2
     tu.fire('cool')
     assert 'x' in tu.sent and rt.feed == -1
 
@@ -212,7 +212,8 @@ def test_use_my_location_fetches_again(tu, fw):
 def test_zip_entry(tu):
     rt = tu.rt
     rt.screen, rt.zi = ZIP, 0
-    rt.zip[:] = [6, 0, 6, 0, 1]
+    for i, d in enumerate([6, 0, 6, 0, 1]):
+        rt.zip[i] = d
     tu.key(KEY_PREV)
     assert rt.zip[0] == 5
     tu.key(KEY_NEXT)
