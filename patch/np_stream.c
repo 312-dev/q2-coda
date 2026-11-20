@@ -8,19 +8,22 @@
  * progress, so it turns under Reduce Motion too (motion_ms, MO_FEEDBACK). A server song (a card
  * app's stream download, or the pressed catalogue row) also has a format badge at the art's bottom
  * line, on the art's page so a swipe takes it with the heart and More: the file's format beside a
- * cloud, or the crossed-out cloud while the app says server=down. A server song that can't go on
- * while the server is down (pressed and not yet the player's, or one the player waits for) shows
- * "Can't reach the server" in the times row in the spinner's place and Retry (selected) and Skip,
- * the empty states' capsule pair, in the state row's place: Retry (a tap, or Centre at rest) asks
- * the app to try again now (/tmp/q2-<id>.retry), Skip plays the next song as Next does. The wheel
- * stays the volume's. */
+ * cloud, or the crossed-out cloud while the app says server=down or reach=down. A server song that
+ * can't go on while the server is out of reach (pressed and not yet the player's, or one the player
+ * waits for) first shows why beside the spinner while the app tries again, "Server error 502 ·
+ * trying again" (NS_TRYING_MS), then why alone in the times row in the spinner's place and Retry
+ * (selected) and Skip, the empty states' capsule pair, in the state row's place (the user's ruling,
+ * 2026-11-19: no silent skip; the app waits at such a song, never skipping it): Retry (a tap, or
+ * Centre at rest) asks the app to try again now (/tmp/q2-<id>.retry), Skip plays the next song as
+ * Next does. The wheel stays the volume's. */
 #include "navigation.h"
 #include "ui_kit.h"
 
-#define NS_CHECK_MS 500 /* the state read again */
-#define NS_FRAME_MS 83  /* a spoke a frame: one turn a second */
-#define NS_SPIN 14      /* tools/art.py NP_SPIN_PX */
-#define NS_GAP 6        /* between the spinner and the amount */
+#define NS_CHECK_MS 500    /* the state read again */
+#define NS_TRYING_MS 10000 /* why, with the spinner, before Retry and Skip */
+#define NS_FRAME_MS 83     /* a spoke a frame: one turn a second */
+#define NS_SPIN 14         /* tools/art.py NP_SPIN_PX */
+#define NS_GAP 6           /* between the spinner and the amount */
 /* The times row's centre on the screen (docs/oled-design.md Now Playing). Now Playing's window
  * is the whole screen, and a view's paint coordinates are its own: drawn at NS_Y less
  * the view's y. */
@@ -41,6 +44,9 @@ static struct {
     rect_t box;      /* what was painted last, for the next frame's repaint */
     int badge, down; /* a server song shows its badge; its app says server=down */
     int error;       /* that song can't go on with its server down: the message, Retry and Skip */
+    int trying;      /* ... and the app still tries: why beside the spinner (NS_TRYING_MS) */
+    unsigned since;  /* when it got stuck, 0 while it isn't */
+    char why[32];    /* why, in words: the app's reach= code's, else "Can't reach the server" */
     char id[16];     /* its app */
     char label[8];   /* its format, the file's extension in capitals */
 } ns __attribute__((section(".scratch")));
@@ -76,7 +82,7 @@ static int ns_server(const char *path, char *id, unsigned n) {
 
 /* The badge's state for the song Now Playing shows: ns.badge, ns.label, ns.down. */
 static void ns_badge_read(void) {
-    char id[16], file[48], raw[256], v[8];
+    char id[16], file[48], raw[512], v[8], reach[16];
     const char *p = ns_path(), *dot = p ? strrchr(p, '.') : 0;
     ns.badge = p && dot && !strstr(dot, "/") && ns_server(p, id, sizeof id);
     if (!ns.badge) return;
@@ -86,9 +92,19 @@ static void ns_badge_read(void) {
         ns.label[i] = dot[i] >= 'a' && dot[i] <= 'z' ? (char)(dot[i] - 32) : dot[i];
     ns.label[i] = 0;
     tk_snprintf(file, sizeof file, "/tmp/q2-%s.state", id);
-    v[0] = 0;
-    if (state_read(file, raw, sizeof raw)) field(raw, "server", v, sizeof v);
-    ns.down = tk_str_start_with(v, "down");
+    v[0] = reach[0] = 0;
+    if (state_read(file, raw, sizeof raw))
+        field(raw, "server", v, sizeof v), field(raw, "reach", reach, sizeof reach);
+    ns.down = tk_str_start_with(v, "down") || tk_str_start_with(reach, "down");
+    /* the words addon.c's toast says (reach_read): a proxy's code, no answer, a name not found */
+    const char *code = tk_str_start_with(reach, "down ") ? reach + 5 : "";
+    if (*code >= '1' && *code <= '9')
+        tk_snprintf(ns.why, sizeof ns.why, "Server error %s", code);
+    else
+        tk_snprintf(ns.why, sizeof ns.why, "%s",
+                    !strcmp(code, "none")  ? "Server not answering"
+                    : !strcmp(code, "dns") ? "Server not found"
+                                           : "Can't reach the server");
 }
 
 /* Whether the song Now Playing shows is loading, and its line. */
@@ -152,10 +168,18 @@ static int ns_tick(const void *unused) {
         ns_badge_read();
         unsigned at, n;
         const char *p = ns_path();
-        /* stuck: the pressed song, or one the player waits for, while its server is down */
-        ns.error =
+        /* stuck: the pressed song, or one the player waits for, while its server is down; why
+         * beside the spinner while the app tries again, then why alone with Retry and Skip */
+        int stuck =
             ns.badge && ns.down && (catalogue_np_now(&at, &n) || (p && stream_player_waits(p)));
-        if (ns.error) on = 0; /* the message in the spinner's place */
+        if (!stuck)
+            ns.since = 0;
+        else if (!ns.since)
+            ns.since = now - !now; /* never 0, nor past now */
+        ns.error = stuck && now - ns.since >= NS_TRYING_MS;
+        ns.trying = stuck && !ns.error;
+        if (ns.trying && !on) on = 1, l.have = l.total = 0; /* the spinner, with why beside it */
+        if (ns.error) on = 0;                               /* the message in the spinner's place */
         if (error != ns.error)
             widget_invalidate_force(win, (void *)0); /* the times and state rows */
         if (st.np_cover &&
@@ -201,16 +225,18 @@ void np_stream_paint(void *w, void *canvas) {
     }
     if (w != st.np_win) return;
     if (ns.error) {
-        ui_text(canvas, "Can't reach the server", 0, TYPE(NS_PX), tok(TOK_SECONDARY), 1,
-                375 / 2 - I(w, W_X), NS_Y - I(w, W_Y), 200, 1);
+        ui_text(canvas, ns.why, 0, TYPE(NS_PX), tok(TOK_SECONDARY), 1, 375 / 2 - I(w, W_X),
+                NS_Y - I(w, W_Y), 200, 1);
         return;
     }
     if (!ns.timer)
         ns.checked = (unsigned)time_now_ms() - NS_CHECK_MS, ns.timer = timer_add(ns_tick, 0, 0);
     if (!ns.on) return;
-    char s[40], a[12], b[12];
+    char s[56], a[12], b[12];
     ns_mb(a, sizeof a, ns.have, 1);
-    if (ns.total)
+    if (ns.trying)
+        tk_snprintf(s, sizeof s, "%s \xc2\xb7 trying again", ns.why);
+    else if (ns.total)
         ns_mb(b, sizeof b, ns.total, 0), tk_snprintf(s, sizeof s, "%s of %s MB", a, b);
     else
         tk_snprintf(s, sizeof s, "%s MB", a);
