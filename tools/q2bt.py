@@ -11,7 +11,7 @@ one a second while a stream runs (`ba` and `own` in percent of one core, written
 and `ew` in ms a second; `done` packets a second the controller delivered, `fly` packets in it, so fly/done is how long
 one waits there; `bp` SBC's bitpool on the last frame; `pl` the player's CPU as `ba`, `pr`, `pd` and `pw` its kB/s read,
 read from storage and written, `dk` the card's busy ms, `gw` 1 while the player waits for a song still arriving); a note
-is `TIME WORD ...` (START, ENCODER, CODEC, LINK, PLAY, STEP, UART, STOP). The card store's `== N lines lost while the
+is `TIME WORD ...` (START, ENCODER, CODEC, LINK, PLAY, STEP, UART, H5, STOP). The card store's `== N lines lost while the
 card was away` is a GAP. A stream is cut into one segment per codec, at each ENCODER note (bluealsa's encoder thread,
 named for its codec, seen within a second of a change) or CODEC note that names another codec; a CODEC note can come up
 to a minute late (older logs have no ENCODER notes), so the seconds since the last gap in sending before it go to the

@@ -535,15 +535,19 @@ static void step(unsigned now, const struct bt_sample *ls, int own, int bufs) {
     bt.pcms_at = now - BT_PCMS_MS + STEP_ASK_MS;
 }
 
-/* The H5 UART's error counts since boot (bt_uart_counts), at each START and each storm's relaunch: the
- * difference says whether a storm's damaged packets were bytes the UART dropped (oe, bo) or misread (fe)
- * (docs/internals.md#bluetooth-controller-watchdog). */
+/* The H5 UART's error counts since boot (bt_uart_counts), at each START, each H5 error line that turns the driver's
+ * debug lines on, and each storm's relaunch: the difference says whether the damaged packets were bytes the UART
+ * dropped (oe, bo) or misread (fe, pe, brk). With them the Wi-Fi driver's power-save counts (bt_wifi_ips), ips=
+ * entered/left, when its ps_info is there: the errors on record all came with Wi-Fi off or not joined, so a count
+ * that moved since the last line, or did not, is evidence (docs/internals.md#bluetooth-controller-watchdog). */
 static void uart_note(const char *when, int unified) {
-    char b[768], line[112];
-    unsigned v[BT_UART_N];
+    char b[768], line[128];
+    unsigned v[BT_UART_N], e, l;
     if (slurp(BT_UART_PROC, b, sizeof b) <= 0 || !bt_uart_counts(b, BT_UART_PORT, v)) return;
-    snprintf(line, sizeof line, "UART %s tx=%u rx=%u fe=%u pe=%u brk=%u oe=%u bo=%u", when, v[0], v[1], v[2], v[3],
-             v[4], v[5], v[6]);
+    int n = snprintf(line, sizeof line, "UART %s tx=%u rx=%u fe=%u pe=%u brk=%u oe=%u bo=%u", when, v[0], v[1], v[2],
+                     v[3], v[4], v[5], v[6]);
+    if (slurp(BT_WIFI_PS_PROC, b, sizeof b) > 0 && bt_wifi_ips(b, &e, &l))
+        snprintf(line + n, sizeof line - (size_t)n, " ips=%u/%u", e, l);
     if (unified) say('I', line);
     else note(line);
 }
@@ -663,14 +667,59 @@ static void tick(unsigned now) {
  * a raw socket of its own, and a confirmed wedge asks demo, through the state file's bt=, to
  * relaunch the stack (heatguard.c); demo answers "bt N done" (or "off") in the ack file. */
 static struct bt_wedge wedge;
+/* The H5 driver's debug lines (q2bt.h bt_h5dbg): an H5 error line turns them on through the kernel's dynamic debug,
+ * and they go to the q2-bt log, "H5 <kernel ms> <line>", each state once (bt_h5dbg_line), until BT_H5D_MS after the
+ * last error line, BT_H5D_MAX_MS after they came on, or BT_H5D_CAP lines. They are the numbers a storm's cause is read from: the controller's
+ * acknowledgement number against the Q2's sequence number, and whether the controller's packets are reliable ones.
+ * The lines cost a printk a packet while on, which is why they are not on all the time. */
+static struct bt_h5dbg h5dbg;
+static int h5dbg_on, h5dbg_seen, h5dbg_failed;
+static unsigned h5dbg_at, h5dbg_since; /* the last H5 error line; when the lines came on */
+static void h5dbg_set(int on) {
+    char q[320], line[64];
+    int n = bt_h5dbg_ctl(q, sizeof q, on), ok = 0;
+    for (int i = 0; n > 0 && !ok && i < 2; ++i) {
+        int fd = open(i ? BT_H5D_CTL_DEBUGFS : BT_H5D_CTL, O_WRONLY | O_CLOEXEC);
+        if (fd < 0) continue;
+        ok = write(fd, q, (size_t)n) == n;
+        close(fd);
+    }
+    if (!ok) {
+        if (!h5dbg_failed) note("H5 DEBUG unavailable: no dynamic debug control took the queries");
+        h5dbg_failed = 1, h5dbg_on = 0;
+        return;
+    }
+    h5dbg_on = on;
+    if (on) snprintf(line, sizeof line, "H5 DEBUG on");
+    else snprintf(line, sizeof line, "H5 DEBUG off after %d lines", h5dbg.lines);
+    note(line);
+}
+/* An H5 error line. One that comes BT_H5D_MS or more after the last is another event: the counters are noted and the
+ * debug lines asked for, all of them new. One that comes sooner belongs to the event going on, whose lines are being
+ * logged or have had their share. */
+static void h5dbg_sign(unsigned now) {
+    int fresh = !h5dbg_seen || now - h5dbg_at >= BT_H5D_MS;
+    h5dbg_at = now, h5dbg_seen = 1;
+    if (h5dbg_on || !fresh) return;
+    memset(&h5dbg, 0, sizeof h5dbg);
+    uart_note("sign", 0);
+    if (!h5dbg_failed) h5dbg_since = now, h5dbg_set(1);
+}
 void bt_kmsg(const char *rec, int n) {
-    char b[256];
+    char b[256], line[96];
     const char *msg;
-    unsigned kms;
+    unsigned kms, now = now_ms();
     if (n <= 0) return;
     if (n > (int)sizeof b - 1) n = (int)sizeof b - 1;
     memcpy(b, rec, (size_t)n), b[n] = 0;
-    if (bt_kmsg_split(b, &kms, &msg)) bt_wedge_line(&wedge, now_ms(), kms, msg);
+    if (!bt_kmsg_split(b, &kms, &msg)) return;
+    char *nl = strchr(b, 10); /* the record's continuation lines are not the message */
+    if (nl) *nl = 0;
+    if (bt_wedge_line(&wedge, now, kms, msg) == BT_SIGN_H5) h5dbg_sign(now);
+    else if (h5dbg_on && bt_h5dbg_line(&h5dbg, msg)) {
+        snprintf(line, sizeof line, "H5 %u %s", kms, msg);
+        note(line);
+    }
 }
 /* 1 answered, 0 not within BT_PROBE_MS, -1 no verdict (no hci0, or it is down) */
 static int probe(unsigned now) {
@@ -704,6 +753,8 @@ int bt_watch(unsigned now, const char *ack) {
     /* a q2guard started again numbers its asks on from demo's last answer, which would otherwise
      * read as the answer to an ask of the same number */
     if (!seeded) seeded = 1, wedge.req = n;
+    if (h5dbg_on && (now - h5dbg_at >= BT_H5D_MS || now - h5dbg_since >= BT_H5D_MAX_MS || h5dbg.lines >= BT_H5D_CAP))
+        h5dbg_set(0);
     if (wedge.asked && n == wedge.req) {
         bt_wedge_done(&wedge, now, n);
         say(off ? 'W' : 'I', off ? "BT RESET not made: Bluetooth is off" : "BT RESET demo relaunched the stack");
