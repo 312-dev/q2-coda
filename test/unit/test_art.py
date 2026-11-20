@@ -358,13 +358,15 @@ def test_the_software_updates_spinner_has_twelve_spokes_in_each_halfs_ink():
 
 def test_every_empty_states_glyph_is_drawn_and_every_drawn_one_is_named():
     """The glyphs the payload's empty states name (each empty_t's first string, feedback.c empty_state) are
-    EMPTY_GLYPHS' keys, no more and no fewer: a page naming one the build never drew paints no glyph."""
+    EMPTY_GLYPHS' keys, no more and no fewer but for Sync's states, which a card app's status reply names at run time
+    (addon.c, docs/oled-design.md#sync): a page naming one the build never drew paints no glyph."""
     named = set()
     for c in (pathlib.Path(__file__).parents[2]/'patch').glob('**/*.c'):
         src = c.read_text()
         for m in re.finditer(r'empty_t\b[^;(]*?=\s*\{|\(empty_t\)\s*\{', src):
             named |= set(re.findall(r'\{\s*"([a-z][a-z-]*)"', src[m.start():src.index(';', m.end())]))
-    assert named == set(art.EMPTY_GLYPHS)
+    sync = {'arrows-clockwise', 'check-circle', 'arrow-circle-down', 'cloud'}
+    assert named <= set(art.EMPTY_GLYPHS) and set(art.EMPTY_GLYPHS) - named <= sync
 
 
 def test_phosphor_fills_nonzero_so_an_inner_contour_is_a_hole():
