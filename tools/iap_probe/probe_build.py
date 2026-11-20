@@ -45,7 +45,7 @@ def build(rootfs, out):  # pragma: no mutate block (clang, ld.lld and the stock 
     obj.mkdir(exist_ok=True)
     for rel in LIBS:
         shutil.copyfile(rootfs/rel, obj/pathlib.Path(rel).name)
-    run('clang', *CFLAGS, '-c', HERE/'q2-iap-probe.c', '-o', obj/'probe.o')
+    run('clang', *CFLAGS, '-c', ROOT/'patch/q2_iap.c', '-o', obj/'probe.o')
     run('clang', *CFLAGS, '-c', ROOT/'patch/start.c', '-o', obj/'start.o')
     run('ld.lld', '-m', 'elf32ltsmip', '-e', '__start', '--dynamic-linker', '/lib/ld-linux-mipsn8.so.1',
         '--image-base=0x400000', '-z', 'noexecstack', '--gc-sections', '-s', '--hash-style=sysv', '--build-id=none',

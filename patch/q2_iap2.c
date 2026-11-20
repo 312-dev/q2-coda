@@ -1,5 +1,5 @@
 /* iAP2 with the Q2 in an iPhone's place, over the iPhone gadget's HID interface: milestone M1 of route 1
- * (docs/iphone-mode.md#iap2). Included by q2-iap-probe.c, which feeds it the car's output reports (SET_REPORT data)
+ * (docs/iphone-mode.md#iap2). Included by q2_iap.c, which feeds it the car's output reports (SET_REPORT data)
  * and sends its input reports; nothing here touches a file or the USB itself.
  *
  * A port of PodBox's firmware/usbstack/usb_iap2.c (the transport and link layer) and the M1 part of
@@ -547,6 +547,7 @@ static unsigned car_current;
 static u32 media_mask, playback_mask, rnd;
 static struct iap2_np np_last;
 static int np_sent, audio_on;
+static char car_name[64]; /* the car's identification name, for the status file (q2_iap.c state_write) */
 
 /* ---- the car's buttons: its StartHID report descriptor's consumer controls (PodBox parse_hid, one-bit ones) ---- */
 
@@ -811,6 +812,7 @@ static void take_identification(const u8 *p, unsigned len) {
         if (v && n && !v[n - 1]) {
             snprintf(t, sizeof t, "ident: %s \"%s\"", fields[f], (const char *)v);
             H->log(t);
+            if (f == 0) snprintf(car_name, sizeof car_name, "%s", (const char *)v);
         }
     }
     for (unsigned which = 6; which <= 7; ++which) {

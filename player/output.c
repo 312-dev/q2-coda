@@ -57,6 +57,7 @@ struct output {
     int held_n, holding, idle, zcap;
     FILE *file;
     int paused;
+    int dry_ok; /* way 3: a dry PCM at the next write is a pause's, a seek's or the open's, not an underrun */
     double speed;         /* file sink: how many seconds of sound pass in one */
     int64_t written;      /* frames, file sink */
     struct timespec t0;   /* when the file sink's clock started, moved on by each pause */
@@ -106,8 +107,9 @@ static int candidates(const struct pcm_format *f, int out[4][2]) {
 
 /* The iPhone gadget's probe writes CAR_FILE when the car asks for USB audio (StartUSBDeviceModeAudio) and removes it
  * when the car stops, the link drops or the cable comes out: the gadget's ALSA device on its first line, the rate the
- * car was told on its second. While it is there, way 3 takes the place of the DAC's and Bluetooth's. Only --dev
- * builds have it (Q2_CAR_USB); elsewhere there is never a car. */
+ * car was told on its second. While it is there, way 3 takes the place of the DAC's and Bluetooth's. Every image's
+ * player has it (Q2_CAR_USB, tools/build.py); the host's default build has not, so test/player's other suites never
+ * meet a car. */
 #define CAR_FILE "/tmp/q2-iap.audio"
 #define CAR_RATE 44100
 #define CAR_WAIT_MS 1000
@@ -129,6 +131,19 @@ int output_car(char *dev, unsigned cap, unsigned *rate) {
 #else
     (void)dev, (void)cap, (void)rate;
     return 0;
+#endif
+}
+
+/* The car's stream ran dry while a song flowed into it: the count, in CAR_UNDER, which q2-iap reads for Car Audio's
+ * health (patch/q2_iap.c health_poll) and logs. */
+#define CAR_UNDER "/tmp/q2-iap.under"
+static void car_underrun(void) {
+#ifdef Q2_CAR_USB
+    static unsigned n;
+    const char *path = getenv("Q2PLAYER_CAR_UNDER") ? getenv("Q2PLAYER_CAR_UNDER") : CAR_UNDER;
+    FILE *f = fopen(path, "w");
+    if (f) fprintf(f, "%u\n", ++n), fclose(f);
+    fprintf(stderr, "q2player: the car's stream ran dry (%u)\n", n);
 #endif
 }
 
@@ -358,6 +373,7 @@ struct output *output_open(const struct pcm_format *f, int outputway, int hw) {
     struct output *o = calloc(1, sizeof *o);
     const char *dir = getenv("Q2PLAYER_PCM");
     if (!o) return NULL;
+    o->dry_ok = 1;
     o->in = o->f = *f, o->way = outputway;
     o->gain[0] = o->gain[1] = 1;
     o->speed = getenv("Q2PLAYER_SPEED") ? atof(getenv("Q2PLAYER_SPEED")) : 1;
@@ -563,7 +579,9 @@ static int sink(struct output *o, const uint8_t *data, int frames) {
         if (avail > (snd_pcm_sframes_t)o->ring) {
             snd_pcm_forward(o->pcm, (snd_pcm_uframes_t)avail - o->ring + o->period);
             o->hist_n = 0;
+            if (o->way == 3 && !o->dry_ok) car_underrun();
         }
+        o->dry_ok = 0;
         while (frames > 0) {
             /* The car's stream moves only while the car reads it; a car that stopped (it changed source, the cable
              * came out) would hold a blocking write for ever. CAR_WAIT_MS with no room is taken as that. */
@@ -858,6 +876,7 @@ void output_pause(struct output *o, int on) {
         o->held = NULL, o->held_n = 0;
         return;
     }
+    o->dry_ok = 1;
     if (o->paused == on) return;
     o->paused = on;
 #ifdef HAVE_ALSA
@@ -877,6 +896,7 @@ void output_pause(struct output *o, int on) {
 }
 
 void output_drop(struct output *o) {
+    o->dry_ok = 1;
     o->hist_n = 0, o->clk_at = o->clk_len; /* what was written is gone, and a click with it */
     free(o->held); /* and a paused song's frames held for a click (output_hold) */
     o->held = NULL, o->held_n = o->holding = o->idle = 0;

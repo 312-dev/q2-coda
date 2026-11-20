@@ -35,7 +35,7 @@ static int dsd_out(int way, int hw, int mode) {
 }
 
 /* The output demo's way stands for: the car's USB audio (way 3, output.c output_car) while the iPhone gadget's car
- * wants it, in place of the DAC's or Bluetooth's; a USB DAC (way 2) is never in the car. --dev builds only
+ * wants it, in place of the DAC's or Bluetooth's; a USB DAC (way 2) is never in the car. Every image's player
  * (docs/iphone-mode.md#car-audio). The car's own knob is its volume: way 3 plays at unity. */
 static int car_way(int way) { return (way == 0 || way == 1) && output_car(NULL, 0, NULL) ? 3 : way; }
 

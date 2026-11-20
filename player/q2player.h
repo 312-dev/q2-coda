@@ -127,7 +127,7 @@ void volume_gains(int volume, float gain[2]); /* left, right */
 int output_write(struct output *, const uint8_t *data, int frames);
 /* output_write's answer when the car stopped taking audio (way 3, docs/iphone-mode.md#car-audio) */
 #define OUTPUT_CAR_GONE (-2)
-/* Route 1's car output, way 3 (--dev builds, Q2_CAR_USB): 1 while the iPhone gadget's car wants USB audio, with its
+/* Car Audio's output, way 3 (Q2_CAR_USB: every image's player): 1 while the iPhone gadget's car wants USB audio, with its
  * ALSA device and rate when asked; output_car_gone forgets that until the car asks again. */
 int output_car(char *device, unsigned cap, unsigned *rate);
 void output_car_gone(void);

@@ -17,7 +17,7 @@ import tty
 
 import pytest
 
-SRC = pathlib.Path(__file__).resolve().parents[1]/'tools/iap_probe/q2-iap-probe.c'
+SRC = pathlib.Path(__file__).resolve().parents[1]/'patch/q2_iap.c'
 SETUP, ENABLE, DISABLE = 4, 2, 3
 
 

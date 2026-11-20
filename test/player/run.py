@@ -963,7 +963,7 @@ def test_bt_resample_44_96(player, songs, tmp): return check_bt_split(player, so
 
 
 def car_player():
-    """The player built with route 1's car output (--dev builds' Q2_CAR_USB, docs/iphone-mode.md#car-audio)."""
+    """The player built with Car Audio's output (Q2_CAR_USB, as every image's is: docs/iphone-mode.md#car-audio)."""
     return subprocess.run([sys.executable, ROOT/'tools/player.py', 'build', 'host', 'car'], check=True, capture_output=True,
                           text=True).stdout.strip()
 
@@ -1018,8 +1018,8 @@ def test_car_way_follows_the_car(player, songs, tmp):
     return f'Bluetooth, {len(mid) // 4} frames to the car, Bluetooth'
 
 
-def test_car_way_needs_the_dev_build(player, songs, tmp):
-    """A release build's player has no car way: the car's file changes nothing."""
+def test_car_way_needs_the_car_build(player, songs, tmp):
+    """A player built without Q2_CAR_USB (the host's default) has no car way: the car's file changes nothing."""
     car = tmp/'car-release.audio'
     car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
     steps = car_steps(songs, car) + [(3.0, '{mcl-stop\\null}'), (4.0, None)]
