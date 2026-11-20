@@ -265,19 +265,23 @@ static void fine_turn(int n, int fast) {
     tune();
 }
 
-/* The touch wheel, raw while the tuner screen is the top window's (wheel_raw, playback.h): its
- * travel as steps, STEP_THIRDS thirds of a unit each, clockwise up; fast when they came under
- * FAST_MS apart. Given back to ticks anywhere else. */
+/* The touch wheel, raw while the tuner screen is the top window's and lit (wheel_raw, playback.h):
+ * its travel as steps, STEP_THIRDS thirds of a unit each, clockwise up; fast when they came under
+ * FAST_MS apart. No key event comes, so travel holds the screen on itself, as Now Playing's lyrics
+ * do. Given back to ticks anywhere else, and with the screen off, so a turn wakes it as a tick
+ * does. */
 static void wheel(unsigned now) {
-    int raw = rt->screen == TUNER && window_manager_get_top_window(window_manager()) == rt->page;
+    int raw = rt->screen == TUNER && g_backlight_status &&
+              window_manager_get_top_window(window_manager()) == rt->page;
     if (raw != rt->raw) {
         __sync_lock_test_and_set(&wheel_travel, 0);
         rt->raw = raw, rt->travel = 0;
         if (raw || wheel_raw == WHEEL_RAW) wheel_raw = raw ? WHEEL_RAW : WHEEL_TICKS;
     }
     if (!raw) return;
-    rt->travel -=
-        3 * __sync_lock_test_and_set(&wheel_travel, 0); /* the travel rises anticlockwise */
+    int travel = __sync_lock_test_and_set(&wheel_travel, 0);
+    if (travel) reset_poweroptions_timer(1, 1, 1);
+    rt->travel -= 3 * travel; /* the travel rises anticlockwise */
     int n = rt->travel / STEP_THIRDS;
     if (!n) return;
     rt->travel -= n * STEP_THIRDS;

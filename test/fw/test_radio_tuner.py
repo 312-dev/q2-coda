@@ -208,11 +208,16 @@ def test_the_wheel_turns_the_dial_by_its_travel(tu, fw):
     top = [PAGE]
     fw.mock('window_manager_get_top_window', lambda *_: top[0])
     raw, travel = fw.var('wheel_raw', C.c_int), fw.var('wheel_travel', C.c_int)
+    lit = fw.var('g_backlight_status', C.c_ubyte)
+    lit.value = 1
+    awake = []
+    fw.mock('reset_poweroptions_timer', lambda *a: awake.append(a[:3]))
     tu.poll()
     assert raw.value == 1
     travel.value = -20  # clockwise: the travel falls
     tu.poll(300)
     assert rt.freq == 9996 and travel.value == 0
+    assert (1, 1, 1) in awake  # no key event comes: the travel holds the screen on itself
     travel.value = -7  # a step and a little: the little is kept
     tu.poll(300)
     travel.value = -7
@@ -221,6 +226,10 @@ def test_the_wheel_turns_the_dial_by_its_travel(tu, fw):
     travel.value = 42  # anticlockwise, with the little kept 6 steps in 60 ms: fast
     tu.poll(60)
     assert rt.freq == 10000 - 6 * 6
+    lit.value = 0  # the screen off: ticks again, so the wheel wakes it as stock's do
+    tu.poll()
+    assert raw.value == 0
+    lit.value = 1
     rt.screen = LIST
     tu.poll()
     assert raw.value == 0
