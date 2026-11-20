@@ -625,18 +625,20 @@ def validate_assets(directory):
     assert b'\nName = Q2 Muse\n' in read('rootfs.squashfs', BT_MAIN) and b'Shanling' not in read('rootfs.squashfs', BT_MAIN)
     # The boot deletes Baidu Netdisk's saved sign-in.
     assert expected_start.count(b'\n        rm -f /mnt/data/baidu_token.conf\n') == 1
-    # bluealsa: AAC capability, the two DROP jumps, the silence sites, and one appended LOAD payload.
-    from build import BT_DROP, BT_DROP_HANDLER, BT_DROP_PAYLOAD, BT_SILENCE_SITES, patch_bluealsa, segments
+    # bluealsa: AAC capability, AAC's peak and VBR mode, the two DROP jumps, the silence sites, and one appended LOAD payload.
+    from build import BT_AAC_SITES, BT_DROP, BT_DROP_HANDLER, BT_DROP_PAYLOAD, BT_SILENCE_SITES, patch_bluealsa, segments
     old, new = read('stock.squashfs', BLUEALSA), read('rootfs.squashfs', BLUEALSA)
     header = segments(old)[-1][0]
     allowed = {AAC_44K1, *range(header, header+32)}
-    for address, size in ((BT_DROP, 8), (BT_DROP_HANDLER, 8), *((a, 4) for a, *_ in BT_SILENCE_SITES)):
+    for address, size in ((BT_DROP, 8), (BT_DROP_HANDLER, 8), *((a, 4) for a, *_ in BT_SILENCE_SITES), *((a, 4) for a, *_ in BT_AAC_SITES)):
         off = fileoff(old, address)
         allowed.update(range(off, off+size))
     assert {i for i in range(len(old)) if old[i] != new[i]} <= allowed
     assert new == patch_bluealsa(old)
     assert segments(new)[-1][1][2] == BT_DROP_PAYLOAD
     assert new[AAC_44K1] == 0 and manifest['bluealsa_sha256'] == sha(new)
+    assert all(struct.unpack_from('<I', old, fileoff(old, a))[0] == w0 and struct.unpack_from('<I', new, fileoff(old, a))[0] == w1
+               for a, w0, w1 in BT_AAC_SITES)  # the stock words where the build expects them, and the new ones
     from bluealsa import check as check_bluetooth_drop
     check_bluetooth_drop(directory)
     # bluetoothd: the control channel's GetElementAttributes from g_track_meta (tools/bt_meta.c)

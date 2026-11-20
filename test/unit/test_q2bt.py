@@ -1056,3 +1056,75 @@ def test_a_song_is_a_card_file_the_player_holds(L):
     assert L.bt_song_path(b'pipe:[1234]') == 0
     assert L.bt_song_path(b'socket:[99]') == 0
     assert L.bt_song_path(b'/mnt/data/config.ini') == 0
+
+
+# ---- the CODEC note's cfg= and cap= (docs/internals.md#bluetooth-link-monitor) ----
+
+CODECS = b'''method return time=1795464061.200 sender=:1.3 -> destination=:1.21 serial=41 reply_serial=2
+   array [
+      dict entry(
+         string "SBC"
+         array [
+            dict entry(
+               string "Capabilities"
+               variant                   array of bytes [
+                     ff ff 02 35
+                  ]
+            )
+         ]
+      )
+      dict entry(
+         string "AAC"
+         array [
+            dict entry(
+               string "Capabilities"
+               variant                   array of bytes [
+                     c0 01 84 84 e2 00
+                  ]
+            )
+         ]
+      )
+   ]
+'''
+TRANSPORT = b'''      dict entry(
+         object path "/org/bluez/hci0/dev_04_00_6E_D3_96_6D/sep1/fd0"
+         array [
+            dict entry(
+               string "org.bluez.MediaTransport1"
+               array [
+                  dict entry(
+                     string "Codec"
+                     variant                         byte 2
+                  )
+                  dict entry(
+                     string "Configuration"
+                     variant                         array of bytes [
+                           80 00 84 83 a9 80
+                        ]
+                  )
+               ]
+            )
+         ]
+      )
+'''
+
+
+def dbus_bytes(L, text, after, key):
+    out = C.create_string_buffer(64)
+    n = L.bt_dbus_bytes(text, after, key, out, 64)
+    return n, out.value.decode()
+
+
+def test_the_codec_s_configuration_and_capability_are_read(L):
+    """cfg=: BlueZ's MediaTransport1 Configuration, the six AAC bytes the stream was set up with (MPEG-4 LC, 48 kHz,
+    stereo, VBR, 240000 here); cap=: bluealsa's GetCodecs entry for the codec in use, not another codec's."""
+    L.bt_dbus_bytes.argtypes = [C.c_char_p, C.c_char_p, C.c_char_p, C.c_char_p, C.c_int]
+    assert dbus_bytes(L, CODECS + TRANSPORT, b'/fd', b'"Configuration"') == (6, "800084" "83a980")
+    assert dbus_bytes(L, CODECS, b'string "AAC"', b'"Capabilities"') == (6, 'c00184' '84e200')
+    assert dbus_bytes(L, CODECS, b'string "SBC"', b'"Capabilities"') == (4, 'ffff0235')
+    assert dbus_bytes(L, CODECS, b'string "LDAC"', b'"Capabilities"') == (0, '')  # not offered
+    assert dbus_bytes(L, CODECS, None, b'"Configuration"') == (0, '')
+    printed = b'string "Configuration"\n variant array of bytes "abc"\n'  # all printable: dbus-send's string form
+    assert dbus_bytes(L, printed, None, b'"Configuration"') == (0, '')
+    cut = TRANSPORT[:TRANSPORT.index(b'a9')]  # the read stopped mid-array
+    assert dbus_bytes(L, cut, b'/fd', b'"Configuration"') == (0, '')

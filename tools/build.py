@@ -495,9 +495,10 @@ BT_META_GOT = {'TRACK_META': ('g_track_meta', -28700), 'NOTIFY_MUTEX': ('g_notif
                'LOCK': ('pthread_mutex_lock', -28204), 'UNLOCK': ('pthread_mutex_unlock', -27872)}
 BT_META_ROOM = 502  # an AVRCP PDU's parameters in one AVC frame (BlueZ's AVRCP_PDU_MTU)
 # Its launcher: keep the A2DP transport open 5 s after hciplayer closes the PCM (a stop, a skip, a cold start), so
-# a track change doesn't restart the stream (true-wireless buds started one ear first).
+# a track change doesn't restart the stream (true-wireless buds started one ear first); and fdk-aac's afterburner on
+# for AAC (docs/internals.md#bluetooth-aac), which Shanling's forced AAC options (BT_AAC_SITES) leave as the option says.
 BLUEALSA2 = 'usr/bin/bluealsa2'
-BT_KEEPALIVE = (b'bluealsa -c LDAC', b'bluealsa --keep-alive=5 -c LDAC')
+BT_KEEPALIVE = (b'bluealsa -c LDAC', b'bluealsa --keep-alive=5 --aac-afterburner -c LDAC')
 # ... and while Guest Play is on, only the source role, so a device that is both (an Echo) connects as a sink and a
 # guest's phone reaches q2-guest's own sink daemon (docs/internals.md#the-relay). Applied after BT_KEEPALIVE.
 BT_GUEST_SOURCE = (b'bluealsa --keep-alive=5', b'bluealsa $(grep -qx enabled=1 /mnt/data/q2-guest/config 2>/dev/null '
@@ -539,6 +540,15 @@ def password_logins(shadow):
     return [l.split(b':')[0].decode() for l in shadow.split(b'\n')
             if l.strip() and not l.split(b':')[1].startswith((b'*', b'!'))]
 AAC_44K1 = 0x317b8
+# AAC's quality (docs/internals.md#bluetooth-aac), each (address, stock word, word): Shanling's main, once getopt_long
+# is done (0x403f00), forces aac_prefer_vbr on and aac_bitrate to 220000 whatever the options said: that 220000
+# (lui $2,3; addiu $2,$2,0x5b60) made 240000 (lui $2,4; addiu $2,$2,-0x5680), the peak and the bitrate the AAC source
+# endpoint offers, so a frame is at most 240000 * 1024 / 48000 / 8 = 640 bytes, under the 663 one packet carries at
+# BT_MTU_MAX (675 less RTP's 12): never split. And its encoder thread picks fdk-aac's VBR mode from upstream's table
+# (40000 to 192000 a step, modes 1 to 5) but caps it at 4: past the table (0x416f58) and turning a 5 down (0x4171a0);
+# both made 5, as upstream 4.0.0's a2dp_aac_get_fdk_vbr_mode.
+BT_AAC_SITES = ((0x403f2c, 0x3c020003, 0x3c020004), (0x403f3c, 0x24425b60, 0x2442a980),
+                (0x416f58, 0x24110004, 0x24110005), (0x4171a0, 0x24020004, 0x24020005))
 # DROP is acknowledged before the encoder handles its signal. Flush in the control
 # thread instead, so a delayed signal cannot discard the next track's first PCM.
 BT_DROP = 0x40cb50
@@ -2314,9 +2324,13 @@ def patch_bluetoothd(raw):  # pragma: no mutate block
 
 def patch_bluealsa(raw):
     """Offer AAC at 48 kHz only. A headset that opens the stream itself (AirPods out of the case)
-    picks 44.1 kHz, and bluealsa, still fed 48 kHz, drops about 8% of the AAC frames."""
+    picks 44.1 kHz, and bluealsa, still fed 48 kHz, drops about 8% of the AAC frames. AAC's peak
+    240000 and VBR mode 5 (BT_AAC_SITES)."""
     image = bytearray(raw)
     image[AAC_44K1] = 0
+    for address, old, new in BT_AAC_SITES:
+        check(struct.unpack_from('<I', raw, fileoff(raw, address))[0] == old, 'Bluetooth AAC site mismatch')
+        struct.pack_into('<I', image, fileoff(raw, address), new)
     # o32: preserve PCM and ra; hold its fd mutex while flushing the nonblocking
     # FIFO in 32 KiB batches, then send DROP. No encoder restart or codec change.
     words = [0x27bdffe0, 0xafbf001c, 0xafb00018, 0x00808025,
