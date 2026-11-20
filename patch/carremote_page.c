@@ -567,7 +567,7 @@ static int cr_page_show(const void *ctx) {
      * (empty_state keeps its place in the stack and leaves it to the page), so the wheel has the one list: two
      * lists that each hold a selection give it none (nav/lists.c surface_under), and it moved nothing. */
     static const empty_t none = { "car-profile", "No Paired Phones", "Open Q2 Muse Remote on your phone to pair",
-                                  "Pair a Phone" };
+                                  "Pair a Phone", 0, 0 };
     int free_top = cr_screen_y(view) + cr_switch_h(1);
     cp.cta_y = empty ? empty_row_y(free_top) - cr_screen_y(view) - CR_CTA_OUT : 0;
     if (empty) {

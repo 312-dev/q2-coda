@@ -507,10 +507,10 @@ int ringnav_art_header(char *buf, unsigned size, const char *fmt, const char *al
  * EMPTY_POLL_MS until it opens or stops being on top. */
 static int empty_class(const void *unused) {
     static const empty_t none[] = {
-        { "vinyl-record", "No Albums", "Copy music to the SD card", 0 },
-        { "microphone-stage", "No Artists", "Copy music to the SD card", 0 },
-        { "music-notes-simple", "No Composers", "Songs need a composer tag", 0 },
-        { "guitar", "No Genres", "Songs need a genre tag", 0 },
+        { "vinyl-record", "No Albums", "Copy music to the SD card", 0, 0, 0 },
+        { "microphone-stage", "No Artists", "Copy music to the SD card", 0, 0, 0 },
+        { "music-notes-simple", "No Composers", "Songs need a composer tag", 0, 0, 0 },
+        { "guitar", "No Genres", "Songs need a genre tag", 0, 0, 0 },
     };
     static const char *const names[] = { "Albums", "Artists", "Composers", "Genres" };
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);

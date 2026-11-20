@@ -356,7 +356,7 @@ static void ple_show(void) {
         free(in);
         /* a search that matches nothing: the empty state under the Search row, compact (its row
          * above it: no glyph), no button (oled-design.md Empty and offline) */
-        static const empty_t none = { 0, "No Matches", "Try fewer letters", 0 };
+        static const empty_t none = { 0, "No Matches", "Try fewer letters", 0, 0, 0 };
         if (!ple.nmatch)
             empty_state(ple.page, feedback_below(widget_get_child(ple.view, 0)), &none, 0);
     } else
@@ -1105,7 +1105,7 @@ static void pl_rows(void *win) {
      * rows alone, with no room under them */
     int shown = 0;
     for (int i = 0; i < count; ++i) shown += widget_get_visible(widget_get_child(view, i));
-    static const empty_t none = { "playlist", "No Playlists", "Make one with New Playlist", 0 };
+    static const empty_t none = { "playlist", "No Playlists", "Make one with New Playlist", 0, 0, 0 };
     empty_state(win, geom_val(V_BAR) + shown * pl_pitch(view),
                 n || add ? (const empty_t *)0 : &none, 0);
     widget_set_prop_int(win, PL_MARKING, marking);

@@ -71,7 +71,7 @@ int cf_empty(void *page, void *body) {
                   cf_cause == CF_UNSCANNED   ? "Music on the card isn't scanned"
                   : cf_cause == CF_STREAMING ? "Streaming albums can show here"
                                              : "Copy music to the SD card",
-                  row };
+                  row, 0, 0 };
     if (cf_cause == CF_NONE) empty_card(&e); /* no card in: "No SD Card" */
     return empty_list(page, body, "Cover Flow", &e, row_click) != (void *)0;
 }

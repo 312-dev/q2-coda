@@ -451,7 +451,7 @@ void *empty_list(void *page, void *body, const char *name, const empty_t *e,
  * so, with no row (oled-design.md Empty and offline: Library). 1 when e was rewritten. */
 int empty_card(empty_t *e) {
     if (!access("/tmp/mmc_add", 0)) return 0;
-    *e = (empty_t){ "sd-card", "No SD Card", "Insert an SD card with music", 0 };
+    *e = (empty_t){ "sd-card", "No SD Card", "Insert an SD card with music", 0, 0, 0 };
     return 1;
 }
 /* A page of its own holding only the empty state, its status row naming it (Albums, Artists,
@@ -499,7 +499,7 @@ static int offline_wifi(void *ctx, void *event) {
 }
 int feedback_offline(void) {
     static const empty_t e = { "cloud-slash", "Not Connected", "Turn on Wi-Fi to stream",
-                               "Turn on Wi-Fi" };
+                               "Turn on Wi-Fi", 0, 0 };
     return empty_open("empty_page", "Streaming", &e, offline_wifi) != (void *)0;
 }
 
@@ -567,15 +567,15 @@ void feedback_songs(void *top, void *row) {
     int cls = scan ? 0 : I(g_class_type, 0); /* stock's panel stands for the whole library */
     empty_t e =
         cls == 0xf00a
-            ? (empty_t){ "heart-slash", "No Favorites", "Hold Play/Pause on a song to add it", 0 }
+            ? (empty_t){ "heart-slash", "No Favorites", "Hold Play/Pause on a song to add it", 0, 0, 0 }
         : cls == 0xf007 ? (empty_t){ "clock-counter-clockwise", "Nothing Played Yet",
-                                     "Songs you play show up here", 0 }
+                                     "Songs you play show up here", 0, 0, 0 }
         : cls == 0xf008
-            ? (empty_t){ "chart-bar", "No Plays Yet", "Your most played songs show up here", 0 }
+            ? (empty_t){ "chart-bar", "No Plays Yet", "Your most played songs show up here", 0, 0, 0 }
         : cls == 0xf009
-            ? (empty_t){ "sparkle", "No Songs Added Yet", "New music on the card shows up here", 0 }
+            ? (empty_t){ "sparkle", "No Songs Added Yet", "New music on the card shows up here", 0, 0, 0 }
             : (empty_t){ "music-notes", "No Songs", "Copy music to the SD card",
-                         scan ? "Scan Music Now" : 0 };
+                         scan ? "Scan Music Now" : 0, 0, 0 };
     int card = cls < 0xf007 || cls > 0xf00a ? empty_card(&e) : 0; /* the library's songs */
     if (scan && card)
         widget_set_visible(P(scan, W_PARENT), 0, 0);
@@ -595,7 +595,7 @@ void feedback_folder(void *top) {
     int empty = list && !deque_size(list), was = widget_get_prop_int(top, "_empty_folder", 0);
     if (empty == was) return;
     widget_set_prop_int(top, "_empty_folder", empty);
-    empty_t e = { "folder", "No Folders", "Copy music to the SD card", 0 };
+    empty_t e = { "folder", "No Folders", "Copy music to the SD card", 0, 0, 0 };
     if (empty) empty_card(&e);
     empty_state(top, 0, empty ? &e : (const empty_t *)0, 0);
 }
