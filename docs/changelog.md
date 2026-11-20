@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Home: **Radio Tuner**, under the Library: the FM stations that reach where you are (found from your internet connection, or a ZIP Code you enter) on a radio dial. Turn the wheel to tune 0.2 MHz a click; Next and Previous jump to the next station you can stream; Centre lists the stations. Between stations you hear static, and a station fades in out of it as you tune onto it, as on a real radio. The list is kept on the card for each place, so it shows at once the next time and updates itself in the background.
   - Now Playing (OLED): a server song's format badge shows only its format ("FLAC"), without the cloud before it.
   - Now Playing (OLED): the Favorite heart is smaller and turns pink-red when the song is a favorite, gray when it isn't, in its same place under the album.
   - Lists: each turn of the wheel now redraws the screen about 19 times instead of about 47 (an invisible scroll bar kept the screen redrawing for most of a second after every click), and each redraw reads the clock about a quarter as often, so scrolling Songs and other long lists is smoother and uses less battery.

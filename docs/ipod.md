@@ -101,8 +101,10 @@ still lands on the row the page behind was left at ([internals](internals.md#pos
 Home splits the screen: the menu on the left, the current local track's art in the right panel.
 The selection is the lists' bar, and each row that opens a page has the chevron ([Theme](#theme)).
 
-The seven rows, by default in the order the menu review chose (2026-11-15, with Games and Streaming moved on
-2026-11-19), are the play state's row, Library, Games, Folders, Cover Flow, Search and Settings. **Games** opens the
+The eight rows, by default in the order the menu review chose (2026-11-15, with Games and Streaming moved on
+2026-11-19, and Radio Tuner added on 2026-11-20), are the play state's row, Library, Radio Tuner, Games, Folders,
+Cover Flow, Search and Settings. **Radio Tuner** opens the tuner (`tuner_open`,
+[internals: Radio Tuner](internals.md#radio-tuner)). **Games** opens the
 Games page (`games_open`, [Games](#games)), which the Library held before; Streaming is a Settings row, after
 Playback. **The first row** is stock's Now Playing row named for what plays
 (`patch/home_np.c`; approved 2026-11-16, `design/home-np-icon`): **Playing**, **Paused**, or **Guest Play** while a
