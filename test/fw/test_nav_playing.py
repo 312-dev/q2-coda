@@ -1270,6 +1270,11 @@ def test_a_double_press_turns_the_screen_off_and_a_single_still_scrubs(fw, ui, m
     cpress(now, 210000)  # a press later on: a scrub again, and one after DOUBLE_CLICK_MS the ring, as before
     cpress(now, 210000 + O['DOUBLE_CLICK_MS'])
     assert st.np_stage == SHUFFLE and releases == [1]
+    now.fw.fn('navigation__np_cancel', None)()
+    cpress(now, 220000)
+    now.key(KEY_PREV)  # a turn between, even one against the bar's start that moves nothing: the scrub's own press
+    cpress(now, 220100)
+    assert st.np_stage == SHUFFLE and releases == [1]
 
 
 def test_a_short_hold_is_timed_from_the_press_not_its_repeats(fw, ui, mcl, st):

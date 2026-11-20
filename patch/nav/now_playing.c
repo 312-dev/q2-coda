@@ -431,8 +431,9 @@ static unsigned np_stop_next(unsigned stage, int dir) {
  * held NP_HOLD_MS or longer, short of stock's long press (Shut Down), turns the screen off
  * instead, as stock's release does. So does a double press, as on every other page: the first
  * press scrubs at once, and a second within DOUBLE_CLICK_MS of the release that started that
- * scrub, the wheel not moved between, undoes it unseeked (np_cancel: scrub_end seeks only a
- * moved target) and turns the screen off, where it would end the scrub and ring shuffle. */
+ * scrub, the wheel not turned between (np_key), undoes it unseeked (np_cancel: the target has not
+ * moved, so scrub_end seeks nothing) and turns the screen off, where it would end the scrub and
+ * ring shuffle. */
 #define NP_HOLD_MS 400
 static struct {
     unsigned at; /* that release's time */
@@ -443,7 +444,7 @@ static int np_centre(unsigned now) {
     int dbl = np_dc.armed && now - np_dc.at < DOUBLE_CLICK_MS;
     st.center_down_at = 0; /* this press's: a release with no press stamped is a press */
     np_dc.armed = 0;
-    if ((held && !st.scrub) || (dbl && st.scrub && !st.scrub_moved)) {
+    if ((held && !st.scrub) || (dbl && st.scrub)) {
         np_cancel();
         np_single();
         return STOP;
@@ -484,6 +485,7 @@ static int np_centre(unsigned now) {
 static int np_key(void *top, unsigned key) {
     unsigned now = (unsigned)time_now_ms();
     if (key == KEY_CENTER) { return np_centre(now); }
+    np_dc.armed = 0; /* a turn between two presses: the second is the scrub's own, not a double */
     if (st.np_stage != NP_STAGE_REST && !st.scrub) {
         np_stage(np_stop_next(st.np_stage, key == KEY_NEXT ? 1 : -1)); /* its timeout from here */
         return STOP;

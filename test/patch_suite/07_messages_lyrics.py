@@ -252,7 +252,7 @@ for end in ('centre','timeout','bound'):
     m=scrub_page(value=225 if end=='bound' else 100); np_press(m)
     if end=='bound': assert step(m)==11 and m.nodes[m.slider]['value']==225
     if end=='timeout': step(m,O['SCRUB_MS'],wait=True)
-    else: np_press(m,50)
+    else: np_press(m,DC)  # a second press, not a double: within DOUBLE_CLICK_MS it turns the screen off
     step(m,O['SCRUB_MS'],wait=True); ended(m,[],end); passed()
 # Another press, Return (swallowed) and touch each end it, committing the target once.
 for end in ('centre','return','touch'):
