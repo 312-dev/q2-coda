@@ -667,6 +667,7 @@ int ringnav(void *ctx, void *event) {
     }
     /* A game's keys, before stock's lock filter, media keys and screen-off double Centre */
     if (usable() && games_key(window_manager_get_top_window(window_manager()), key)) return STOP;
+    if (usable() && tuner_key(window_manager_get_top_window(window_manager()), key)) return STOP;
     /* the row editors' keys, and the release of the Center hold that entered or left one */
     if (lr_edit_key(window_manager_get_top_window(window_manager()), key, owned)) return STOP;
     /* a grabbed inline slider's keys: the wheel sets it, Centre or Return sets it down */

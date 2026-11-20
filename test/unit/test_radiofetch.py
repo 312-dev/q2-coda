@@ -335,7 +335,7 @@ def test_text_round_trip(L):
     text = buf.value.decode()
     assert n == len(text)
     lines = text.splitlines()
-    assert lines[0] == '#Q2RADIO 1 1795160000 41.8708 -87.6242 complete ZIP 60605'
+    assert lines[0] == '#Q2RADIO 2 1795160000 41.8708 -87.6242 complete ZIP 60605'
     wxrt = next(line.split('\t') for line in lines if line.startswith('WXRT\t'))
     assert wxrt[:7] == ['WXRT', 'FM', '93.1', wxrt[3], '80', '93 XRT', 'Chicago, IL'] and float(wxrt[3]) < 10
     assert wxrt[7] == 'iheart=https://live.amperwave.net/direct/audacy-wxrtfmaac-imc'
@@ -343,8 +343,8 @@ def test_text_round_trip(L):
     when, whole = C.c_long(), C.c_int()
     assert L.rf_header(text.encode(), C.byref(when), C.byref(whole)) == 1 and (when.value, whole.value) == (1795160000, 1)
     assert L.rf_text(C.byref(lst), buf, 200, 1, 0, b'') == 0  # does not fit
-    assert L.rf_header(b'#Q2RADIO 1 5 1.0 2.0 partial \n', C.byref(when), C.byref(whole)) == 1 and whole.value == 0
-    for bad in (b'#Q2RADIO 2 5 1 2 complete x', b'#Q2RADIO 1 x', b'#Q2RADIO 1 5 1 2 maybe x', b''):
+    assert L.rf_header(b'#Q2RADIO 2 5 1.0 2.0 partial \n', C.byref(when), C.byref(whole)) == 1 and whole.value == 0
+    for bad in (b'#Q2RADIO 1 5 1 2 complete x', b'#Q2RADIO 2 x', b'#Q2RADIO 2 5 1 2 maybe x', b''):
         assert L.rf_header(bad, C.byref(when), C.byref(whole)) == 0
     key = C.create_string_buffer(32)
     L.rf_key(key, 32, b'60605', 0, 0)

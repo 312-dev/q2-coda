@@ -336,11 +336,11 @@ def home_card(menu, at, row, text):
 # stock's bound by the payload (navigation.c home_sets_bind). Search's name is none stock's visitor knows (stock's search
 # pages have an img_search).
 # Home's main list (the menu review's order, Games and Streaming moved on 2026-11-19: docs/ipod.md#home): Games
-# from the Library, Streaming to Settings, after Playback.
-HOME_ROWS = ['playing', 'localmusic', 'games', 'folder', 'coverflow', 'home_search', 'settings']
+# from the Library, Streaming to Settings, after Playback. Radio Tuner (2026-11-20, radio_tuner.c) under the Library.
+HOME_ROWS = ['playing', 'localmusic', 'radio', 'games', 'folder', 'coverflow', 'home_search', 'settings']
 HOME_SETS = ['set_wifi', 'set_bt', 'sysset', 'playset', 'set_stream', 'set_car', 'set_display', 'set_controls',
              'set_power']
-HOME_LITERAL = {'games': 'Games', 'set_stream': 'Streaming', 'coverflow': 'Cover Flow', 'home_search': 'Search',
+HOME_LITERAL = {'radio': 'Radio Tuner', 'games': 'Games', 'set_stream': 'Streaming', 'coverflow': 'Cover Flow', 'home_search': 'Search',
                 'settings': 'Settings', 'set_wifi': 'Wi-Fi',
                 'set_bt': 'Bluetooth', 'set_car': 'Car Remote', 'set_display': 'Display', 'set_controls': 'Controls',
                 'set_power': 'Battery'}

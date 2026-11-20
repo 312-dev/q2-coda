@@ -2,21 +2,22 @@
  * (docs/internals.md#local-radio-fetch).
  *
  *   q2radiofetch [--ip | --zip NNNNN | --at LAT,LON] [--refresh] [--deadline MS] [--cache DIR]
- * [--data DIR]
- *                [--ca FILE] [-v]
+ *                [--data DIR] [--ca FILE] [--out FILE] [-v]
  *
- * prints the list (radiofetch_core.c rf_text) on stdout. The place: the network's public address,
- * raced over three geolocation services (--ip, the default), a ZIP looked up in the bundled Census
- * table, or a point. The stations come from the bundled FCC table, offline; only their streams come
- * from the web, on one libcurl multi handle under one deadline: iHeart's stations near the point,
- * Radio Browser's for the stations' states and TuneIn's local list at once, then probes by call
- * sign (Triton, Amperwave, SoundStack, TuneIn's Tune) for the stations still without a stream. What
- * came by the deadline is the list; one cut short says partial.
+ * prints the list (radiofetch_core.c rf_text) on stdout, or with --out writes it to FILE whole
+ * (beside it, then renamed), as the Radio Tuner reads it (radio_tuner.c). The place: the network's
+ * public address, raced over three geolocation services (--ip, the default), a ZIP looked up in the
+ * bundled Census table, or a point. The stations come from the bundled FCC table, offline; only
+ * their streams come from the web, on one libcurl multi handle under one deadline: iHeart's
+ * stations near the point, Radio Browser's for the stations' states and TuneIn's local list at
+ * once, then probes by call sign (Triton, Amperwave, SoundStack, TuneIn's Tune) for the stations
+ * still without a stream. What came by the deadline is the list; one cut short says partial.
  *
  * Each list is cached on the card under its place (rf_key). A fresh one (RF_FRESH_S, RF_PARTIAL_S
  * for a partial one) is printed and that is all; an older one is printed at once, stdout is closed
  * (the reader sees its end) and the list is fetched again into the cache, under a lock so two runs
- * don't. Exit 0 with a list, 1 with none, 2 for a wrong argument. */
+ * don't, and into --out's FILE too, where the reader takes it up when this ends. Exit 0 with a
+ * list, 1 with none, 2 for a wrong argument. */
 #include "radiofetch.h"
 
 #define DATA_DIR "/usr/share/q2radio"
@@ -447,12 +448,12 @@ static void mkdirs(const char *dir) {
 static int usage(void) {
     say("usage: q2radiofetch [--ip | --zip NNNNN | --at LAT,LON] [--refresh] [--deadline MS] "
         "[--cache DIR] "
-        "[--data DIR] [--ca FILE] [-v]\n");
+        "[--data DIR] [--ca FILE] [--out FILE] [-v]\n");
     return 2;
 }
 
 int main(int argc, char **argv) {
-    const char *zip = 0, *data = DATA_DIR, *cache = CACHE_DIR, *at = 0;
+    const char *zip = 0, *data = DATA_DIR, *cache = CACHE_DIR, *at = 0, *out = 0;
     int refresh = 0;
     long budget = DEADLINE_MS;
     net.t0 = now_ms(), net.ca = CA_FILE;
@@ -472,6 +473,8 @@ int main(int argc, char **argv) {
             cache = v, ++i;
         else if (!strcmp(a, "--data") && v)
             data = v, ++i;
+        else if (!strcmp(a, "--out") && v)
+            out = v, ++i;
         else if (!strcmp(a, "--ca") && v)
             net.ca = v, ++i;
         else if (!strcmp(a, "-v"))
@@ -537,7 +540,10 @@ int main(int argc, char **argv) {
     int complete = 0, have_old = old && rf_header(old, &fetched, &complete);
     if (have_old) {
         save(last, key, strlen(key));
-        put_all(1, old, strlen(old));
+        if (out)
+            save(out, old, strlen(old));
+        else
+            put_all(1, old, strlen(old));
         long age = wall - fetched;
         if (lat == 999 || (age >= 0 && age < (complete ? RF_FRESH_S : RF_PARTIAL_S))) return 0;
         int devnull = open("/dev/null", O_WRONLY);
@@ -567,7 +573,8 @@ int main(int argc, char **argv) {
     int n = rf_text(l, text, TEXT_MAX, time(0), whole, label);
     int streaming = 0;
     for (int i = 0; i < l->n; ++i) streaming += l->st[i].n > 0;
-    if (!have_old) put_all(1, text, n);
+    if (n && (streaming || !have_old) && out) save(out, text, n); /* a refresh's newer list too */
+    if (!have_old && !out) put_all(1, text, n);
     if (n && (streaming || !have_old) && save(file, text, n)) save(last, key, strlen(key));
     if (net.verbose) {
         char line[160];

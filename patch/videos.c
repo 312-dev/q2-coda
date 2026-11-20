@@ -93,7 +93,9 @@ int video_start(const char *file, int radio) {
     if (!pid) {
         child_oom_first();
         const char *dev = out ? out : "plughw:0,0", *v = out ? vol : (char *)0;
-        if (radio)
+        if (radio == 2) /* the Radio Tuner's receiver (radio_tuner.c): no file */
+            execl(VIDEO_BIN, VIDEO_BIN, "-t", dev, v, (char *)0);
+        else if (radio)
             execl(VIDEO_BIN, VIDEO_BIN, "-r", dev, file, v, (char *)0);
         else
             execl(VIDEO_BIN, VIDEO_BIN, dev, file, v, (char *)0);

@@ -757,7 +757,7 @@ int rf_signal(const rf_station *st) {
 }
 
 /* The list as text into out (cap bytes): the header
- *   #Q2RADIO 1 <fetched, Unix time> <latitude> <longitude> <complete|partial> <label>
+ *   #Q2RADIO 2 <fetched, Unix time> <latitude> <longitude> <complete|partial> <label>
  * then a line per station, its fields separated by tabs:
  *   call  FM|AM  frequency (93.1, 780)  km  dB (rf_signal)  name  city  then source=url for each
  *   stream
@@ -766,7 +766,7 @@ int rf_text(const rf_list *l, char *out, unsigned cap, long fetched, int complet
             const char *label) {
     char lab[64];
     field(lab, sizeof lab, label);
-    int n = snprintf(out, cap, "#Q2RADIO 1 %ld %.4f %.4f %s %s\n", fetched, l->lat, l->lon,
+    int n = snprintf(out, cap, "#Q2RADIO 2 %ld %.4f %.4f %s %s\n", fetched, l->lat, l->lon,
                      complete ? "complete" : "partial", lab);
     for (int i = 0; i < l->n && n > 0 && (unsigned)n < cap; ++i) {
         const rf_station *st = &l->st[i];
@@ -786,7 +786,7 @@ int rf_text(const rf_list *l, char *out, unsigned cap, long fetched, int complet
 /* A list text's header: when it was fetched and whether it was complete; 1 if text starts with one.
  */
 int rf_header(const char *text, long *fetched, int *complete) {
-    if (strncmp(text, "#Q2RADIO 1 ", 11)) return 0;
+    if (strncmp(text, "#Q2RADIO 2 ", 11)) return 0;
     char *end;
     *fetched = strtol(text + 11, &end, 10);
     if (end == text + 11) return 0;

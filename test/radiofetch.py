@@ -100,7 +100,7 @@ def test_chicago_end_to_end(built, web, tmp_path):
     web.chicago()
     r, head, rows = run(built, web, tmp_path, '--at', '41.8708,-87.6242')
     assert r.returncode == 0, r.stderr
-    assert head.startswith('#Q2RADIO 1 ') and ' complete ' in head
+    assert head.startswith('#Q2RADIO 2 ') and ' complete ' in head
     assert sources(rows['WXRT']) == ['iheart', 'radiobrowser']
     assert sources(rows['WTBC-FM']) == ['triton']      # probed: no first-round source has it
     # no AAC mount: the MP3 one, asked for only after the AAC one said 404
@@ -135,7 +135,7 @@ def test_stale_cache_is_printed_then_refreshed(built, web, tmp_path):
     web.chicago()
     cache = tmp_path/'cache'
     cache.mkdir()
-    old = '#Q2RADIO 1 1000 41.8700 -87.6200 complete ZIP 60605\nWXRT\tFM\t93.1\t3.1\tOld\tChicago, IL\tx=http://old\n'
+    old = '#Q2RADIO 2 1000 41.8700 -87.6200 complete ZIP 60605\nWXRT\tFM\t93.1\t3.1\t80\tOld\tChicago, IL\tx=http://old\n'
     (cache/'z60605.tsv').write_text(old)
     r = run(built, web, tmp_path, '--zip', '60605')[0]
     assert r.returncode == 0 and r.stdout == old  # the old list at once; the new one goes to the cache
@@ -148,11 +148,23 @@ def test_stale_cache_is_printed_then_refreshed(built, web, tmp_path):
     assert web.seen
 
 
+def test_out_file_and_an_older_format(built, web, tmp_path):
+    web.chicago()
+    cache = tmp_path/'cache'
+    cache.mkdir()
+    (cache/'z60605.tsv').write_text('#Q2RADIO 1 %d 41.87 -87.62 complete ZIP 60605\nWXRT\tFM\t93.1\t3.1\tOld\tChicago, IL\n'
+                                    % int(time.time()))
+    r = run(built, web, tmp_path, '--zip', '60605', '--out', tmp_path/'list')[0]
+    text = (tmp_path/'list').read_text()  # the format before the strength column: fetched again, not shown
+    assert r.returncode == 0 and r.stdout == '' and text.startswith('#Q2RADIO 2 ') and 'iheart=' in text
+    assert (cache/'z60605.tsv').read_text() == text
+
+
 def test_stale_cache_refresh_held_by_a_lock(built, web, tmp_path):
     web.chicago()
     cache = tmp_path/'cache'
     cache.mkdir()
-    old = '#Q2RADIO 1 1000 41.8700 -87.6200 complete ZIP 60605\n'
+    old = '#Q2RADIO 2 1000 41.8700 -87.6200 complete ZIP 60605\n'
     (cache/'z60605.tsv').write_text(old)
     with open(cache/'.lock', 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)

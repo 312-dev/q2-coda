@@ -3926,6 +3926,7 @@ extern void home_overflow(void *list, int bottom), home_pad(void *view),
     home_fades(void *canvas, void *list, int list_y, int cols, int split, int shift);
 extern int library_search_open(void *ctx, void *event);
 extern int games_open(void *ctx, void *event); /* games.c: Home's Games row */
+extern int tuner_open(void *ctx, void *event); /* radio_tuner.c: Home's Radio Tuner row */
 /* library_edit.c: Home's rows in the user's order and Edit Home; home.c: Folders' rule */
 extern void lr_home_tag(void *view), lr_home_apply(void *view, int np),
     lr_edit_labels(void *view, int on);
@@ -5126,6 +5127,7 @@ int coverflow_home(void *win, void *ctx) {
     } else /* Full's sets: stock's Streaming page */
         widget_on(widget_lookup(win, "img_set_stream", 1), EVT_CLICK, on_home_stream_onclick, win);
     widget_on(widget_lookup(win, "img_games", 1), EVT_CLICK, games_open, 0);
+    widget_on(widget_lookup(win, "img_radio", 1), EVT_CLICK, tuner_open, 0); /* radio_tuner.c */
     static const char *const carousel[] = { "slide_menu", "img_left", "img_right" };
     for (int i = 0; i < 3; ++i) home.carousel[i] = widget_lookup(win, carousel[i], 1);
     /* The carousel's own Coverflow and Shortcut cards; the lists' come first in the window. */

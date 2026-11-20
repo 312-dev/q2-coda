@@ -14,6 +14,7 @@
 { "home_page", CTX_DYNAMIC, DRILL },
 { "coverflow_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/coverflow.c) */
 { "games_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/games.c) */
+{ "tuner_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/radio_tuner.c) */
 { "searchstrip_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/search_strip.c) */
 { "mostplayed_page", CTX_FIXED, 0 }, /* runtime window (patch/library_lists.c); fixed: the hold menu */
 { "shuffle_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/library_lists.c) */
