@@ -1,27 +1,30 @@
-/* q2-iap-probe: route 1's experiment 1 (docs/iphone-mode.md). It owns the FunctionFS instances of the
- * q2iap gadget that q2-iap-probe.sh makes, writes each one's descriptors (an iPhone's configuration 1, 2,
- * 3 or 4 shape), and logs every event and control request the host sends, answering only what an iPhone
- * in media mode answers: the HID report descriptor, Apple's C0 53 (four zero bytes), GET_REPORT with
- * zeros; everything OUT is read and logged, every other IN request stalled. With echo on, a SET_REPORT
- * carrying iAP2's detect (FF 55 02 00 EE 10) is echoed on the HID interrupt endpoint, so the host's
- * next reports carry its link SYN. With --iap2 it speaks iAP2 instead (iap2.c, milestone M1): the detect
- * answered, the link set up, the car authenticated and identified, and the answers an iPhone gives next, every
- * packet and message logged.
+/* q2-iap (/usr/bin/q2-iap): the iPhone gadget's daemon (docs/iphone-mode.md). It owns the FunctionFS instances of
+ * the iPhone-shaped gadget that patch/q2car.sh makes for Car Audio (and tools/iap_probe/q2-iap-probe.sh for the
+ * experiments), writes each one's descriptors (an iPhone's configuration 1, 2, 3 or 4 shape), and logs every event
+ * and control request the host sends, answering only what an iPhone in media mode answers: the HID report
+ * descriptor, Apple's C0 53 (four zero bytes), GET_REPORT with zeros; everything OUT is read and logged, every other
+ * IN request stalled. With echo on, a SET_REPORT carrying iAP2's detect (FF 55 02 00 EE 10) is echoed on the HID
+ * interrupt endpoint, so the host's next reports carry its link SYN. With --iap2 it speaks iAP2 instead (q2_iap2.c):
+ * the detect answered, the link set up, the car authenticated and identified, and the answers an iPhone gives next,
+ * every packet and message logged. With --state (Car Audio) it decides what the host is and watches the car's
+ * audio (below, "Car Audio in the image").
  *
- *   q2-iap-probe [--echo] [--echo-from N] [--iap2] [--np FILE] [--uuid HEX] [--car-pcm DEV] [--car-file F]
- *                [--cmd-file F] [--art-dir D] [--sessions N] [--for S] [--gap-ms MS] [--carplay] [--phase NAME]
- *                LOG DIR:KIND...
- *   q2-iap-probe --descs KIND     the descriptor and strings blobs for KIND on stdout (tests)
+ *   q2-iap [--echo] [--echo-from N] [--iap2] [--np FILE] [--uuid HEX] [--car-pcm DEV] [--car-file F]
+ *          [--cmd-file F] [--art-dir D] [--sessions N] [--for S] [--gap-ms MS] [--carplay] [--phase NAME]
+ *          [--state F] [--udc F] [--counters DIR] [--under F] [--auto-ms MS] [--car-ms MS]
+ *          LOG DIR:KIND...
+ *   q2-iap --descs KIND     the descriptor and strings blobs for KIND on stdout (tests)
  *
  * KIND is ptp (configuration 1), hid (2), ptpmux (3) or ptpmuxeth (4). A session is the time from an
  * ENABLE to a DISABLE or SUSPEND not followed by another ENABLE or RESUME within --gap-ms (a cable out, not a
  * reset: in the car a cable out was a SUSPEND, the controller left suspended with no VBUS); with
- * --sessions N the probe exits 10 after the Nth ends, and with --for S, 0 after S seconds. Exit 1 is a
- * set-up failure (an ep0 that would not take its descriptors). Every ep0 stays open until the end:
- * closing one unbinds the gadget.
+ * --sessions N it exits 10 after the Nth ends, and with --for S, 0 after S seconds. Exit 1 is a
+ * set-up failure (an ep0 that would not take its descriptors); 20 and 21 are --state's computer and silent host.
+ * Every ep0 stays open until the end: closing one unbinds the gadget.
  *
- * Built for the Q2 by tools/iap_probe/probe_build.py against the rootfs's libc with no headers (the
- * declarations and MIPS constants below), and for this machine with -DPROBE_HOST (test/iap_probe.py). */
+ * Built for the Q2 by tools/build.py's compile_helper (and tools/iap_probe/probe_build.py for the experiments)
+ * against the rootfs's libc with no headers (the declarations and MIPS constants below), and for this machine with
+ * -DPROBE_HOST (test/iap_probe.py). */
 #ifdef PROBE_HOST
 #include <errno.h>
 #include <fcntl.h>

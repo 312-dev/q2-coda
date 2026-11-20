@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Route 1's experiment 1 probe (tools/iap_probe/q2-iap-probe.c, docs/iphone-mode.md) built for this machine.
+"""q2-iap, the iPhone gadget's daemon and route 1's probe (patch/q2_iap.c, docs/iphone-mode.md), built for this machine.
 
 Each kind's FunctionFS blobs are parsed by the rules Linux 5.10's f_fs.c applies (ffs_do_descs, ffs_do_single_desc,
 __ffs_data_do_entity, __ffs_data_got_strings), and the probe is run against a stand-in ep0, a pseudo-terminal in raw
