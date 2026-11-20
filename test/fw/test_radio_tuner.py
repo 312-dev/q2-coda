@@ -412,3 +412,21 @@ def test_a_stall_with_the_link_up_is_static_and_no_toast(tu):
     tu.files.files['/tmp/q2tuner.state'] = b'state=stalled\ntitle=\ncodec=AAC\nurl=https://xrt\n'
     tu.poll()
     assert tu.rt.state == b'stalled' and tu.rt.no_wifi == 0 and 'r' not in tu.sent
+
+
+def test_a_stream_the_receiver_missed_is_named_again(tu):
+    """A receiver started again (tune, after the last one ended) binds its socket some time after demo's land has
+    named the stream, so that u can be lost: seen in the emulator, its state idle with no url while the page had the
+    station's feed. The state's url= not the feed's: u again, with the carrier; the receiver ignores a u it has."""
+    rt = tu.rt
+    rt.screen, rt.freq, rt.feed = TUNER, 9310, 2
+    tu.files.files['/tmp/q2tuner.state'] = b'state=idle\ntitle=\ncodec=\nurl=\n'
+    tu.poll()
+    assert 'uhttps://xrt' in tu.sent and tu.params()[4] == 9310
+    tu.files.files['/tmp/q2tuner.state'] = b'state=connecting\ntitle=\ncodec=\nurl=https://xrt\n'
+    tu.poll()
+    assert not [m for m in tu.sent if m.startswith('u')]
+    rt.feed = -1  # no stream wanted: nothing to name
+    tu.files.files['/tmp/q2tuner.state'] = b'state=idle\ntitle=\ncodec=\nurl=\n'
+    tu.poll()
+    assert not [m for m in tu.sent if m.startswith('u')]

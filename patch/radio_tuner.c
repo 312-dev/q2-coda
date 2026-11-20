@@ -458,6 +458,16 @@ void tuner_poll(void) {
         char t[256];
         field(raw, "state", rt->state, sizeof rt->state);
         field(raw, "title", t, sizeof t);
+        char url[RT_URL];
+        field(raw, "url", url, sizeof url);
+        /* A receiver started again binds its socket after land may have named the stream, so
+         * that u is lost: named again, with the carrier (a u it already has, it ignores). */
+        if (rt->feed >= 0 && tk_strcmp(url, rt->st[rt->feed].url)) {
+            char u[RT_URL + 2];
+            tk_snprintf(u, sizeof u, "u%s", rt->st[rt->feed].url);
+            rt_send(u);
+            receive();
+        }
         if (tk_strcmp(t, rt->title_text) && rt->screen == TUNER)
             widget_invalidate_force(rt->sheet, 0);
         tk_snprintf(rt->title_text, sizeof rt->title_text, "%s", t);
