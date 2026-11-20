@@ -1693,6 +1693,9 @@ void catalogue_poll(void) {
     unsigned now = time_now_ms();
     if (cat.running && __atomic_load_n(&cat.done, __ATOMIC_ACQUIRE)) cat_swap();
     if (now - cat.polled < CAT_POLL_MS) return;
+    /* nothing indexed and the screen off: no app's files looked at, so a Q2 with no server signed
+     * in leaves the card alone while it is dark */
+    if (!cat.ix.n && !cat.running && !g_backlight_status) return;
     cat.polled = now;
     /* not while a job runs: it reads the slots */
     if (!cat.running && (!cat.scanned || now - cat.scanned >= CAT_SCAN_MS)) {

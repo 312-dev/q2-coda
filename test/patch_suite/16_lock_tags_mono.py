@@ -274,7 +274,7 @@ assert m.call(address=payload_syms['folders_shared'],args=(m.deque([]),0,0,0),ga
 # Boot reads it too (ringnav_bootmode), so Audio settings shows it before any Library page has opened.
 for config,text in (({},'Artists: Album Artist'),({'ARTISTTYPE':'0'},'Artists: Artist')):
     shown=settings_page('audioset','scroll_view_playset',config,stock_rows=13,boot=True,sub=1)[2]
-    assert shown()[3]==text,config  # Library's fourth row (library_settings.c)
+    assert shown()[2]==text,config  # Library's third row (library_settings.c)
 passed()
 # Mono Audio (crossfade.c mono_click): saved as Q2POD MONO, the row's text following, and the int
 # hciplayer and q2video map (MONO_FILE) set live. No file until it is first turned on.

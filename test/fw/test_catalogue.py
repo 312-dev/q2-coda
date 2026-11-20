@@ -98,6 +98,7 @@ class Rig:
         db.executescript(f'{SONGTABLE};{PLAYLIST};{MYFAV}')
         db.commit()
         db.close()
+        fw.var('g_backlight_status', C.c_ubyte).value = 1  # lit: the poll runs (dark, it waits for an index)
         fw.mock('sqlite3_open', self.open)
         fw.mock('sqlite3_exec', self.exec)
         fw.mock('sqlite3_close', lambda db, *_: self.lib.sqlite3_close(db))
@@ -1687,6 +1688,25 @@ def test_a_signed_out_apps_catalogue_is_not_imported(rig, fw):
     rig.files.files[f'/mnt/mmc/.{APP}/credentials'] = b'{}'
     rig.poll()
     assert fw.fn('catalogue_has', C.c_int)() and rig.files.files[f'/tmp/q2-{APP}.catalogue.done'].startswith(b'1 ok')
+
+
+def test_a_dark_q2_with_nothing_indexed_leaves_the_card_alone(rig, fw):
+    """Screen off and no app's rows indexed, the poll looks at no file (17_power_smart_boot's screen-off pass); once
+    a signed-in app's rows are in, it polls dark too, as it must to take them out at a sign-out."""
+    opened = []
+    fw.mock('fw_opendir', lambda path, *_: opened.append(C.string_at(path)) or 0)
+    fw.var('g_backlight_status', C.c_ubyte).value = 0
+    rig.write(1, [song_row('s1', 'Server One', 'Band', 'Album', 2, 180, 5000)])
+    rig.poll(3)
+    assert opened == [] and not fw.fn('catalogue_has', C.c_int)()
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    fw.mock('fw_opendir', rig.opendir)
+    rig.poll()
+    assert fw.fn('catalogue_has', C.c_int)()
+    fw.var('g_backlight_status', C.c_ubyte).value = 0
+    del rig.files.files[f'/mnt/mmc/.{APP}/credentials']
+    rig.poll(13)
+    assert not fw.fn('catalogue_has', C.c_int)()
 
 
 @pytest.mark.parametrize('how', ['signed out', 'file gone'])
