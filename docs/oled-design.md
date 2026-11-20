@@ -869,7 +869,9 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   as wide as its text and 16 px each side, centered on y 252 (y 236 to 268), above the bottom
   glass curve. It is the only raised surface in the theme. The page stays in sight round it,
   with its status row and its selection; it lasts 1.5 s (stock's own toasts their own time).
-  Words in sentence case ("Playing Last", "Name can't be empty").
+  Words in sentence case ("Playing Last", "Name can't be empty"). A toast that says what holds for as long as it
+  holds stays up as the same pill, painted by its page (`feedback.c` `toast_stay`), and takes no keys: Radio's
+  "No Wi-Fi" while the link is down (2026-11-20).
 - A toast with an icon keeps the 16 px each side and puts a 15 px glyph (Phosphor, fill) after the
   left one, then 8 px before the words: 16 + 15 + 8 + words + 16. Every icon toast is this one
   (`feedback.c` `toast_icon`: USB's, charging's), approved from `mock_batt_toasts.py` on
@@ -1837,6 +1839,8 @@ the stations list and "Change Location" on the ZIP entry.
 - **ZIP entry:** "Enter ZIP Code" (20 Medium, y 92) and "Turn to choose, Centre for the next digit" (15
   Secondary, y 118); five 42 x 56 digit boxes 52 px apart from y 150, Raised with 10 px corners, the current one
   the accent, digits in Inter Medium 30; "Menu: back" in 13 Tertiary at y 250.
+- **No Wi-Fi:** while the Wi-Fi link is down, the standing toast ([Dialogs and toasts](#dialogs-and-toasts))
+  says "No Wi-Fi" over whichever screen is up, the dial and the keys still working; it goes when the link is back.
 - **Loading and error:** the spinner centred at y 130, "Finding stations near you…" (17 Medium, y 182) and the
   seconds so far (15 Tertiary, y 208); "Couldn’t find stations", the reason and "Centre: try again · Menu: enter
   a ZIP".

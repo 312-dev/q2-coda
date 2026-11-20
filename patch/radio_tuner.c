@@ -53,6 +53,7 @@ static struct rt {
     float scroll, target; /* the list's, px */
     int zip[5], audio, sock, volume;
     int touch, tx, tf, moved; /* a finger on the dial or the list */
+    int no_wifi;              /* the Wi-Fi link is down: "No Wi-Fi" stands (toast_stay) */
     char place[48], err[64], title_text[256], state[12], zip_text[8];
     rt_station st[RT_MAX];
 } *rt __attribute__((section(".scratch")));
@@ -310,7 +311,13 @@ void tuner_poll(void) {
     }
     if (!rt) return;
     unsigned now = time_now_ms();
-    int status;
+    int status, lost = get_wifisignal() <= 0;
+    if (lost !=
+        rt->no_wifi) { /* "No Wi-Fi" up or down; back, a stream not sounding starts again at once */
+        if (!lost) rt_send("r");
+        rt->no_wifi = lost;
+        widget_invalidate_force(rt->sheet, 0);
+    }
     if (rt->audio && waitpid(rt->audio, &status,
                              1)) /* the receiver gone (no output to open): tune starts it again */
         rt->audio = 0, rt->ended = now | 1, rt->feed = -1;
@@ -618,6 +625,7 @@ void tuner_paint(void *w, void *canvas) {
         loading_screen(canvas);
     else
         error_screen(canvas);
+    if (rt->no_wifi) toast_stay(canvas, rt->y0, "No Wi-Fi"); /* for as long as the link is down */
     stock_canvas_set_fill_color(canvas, fill);
 }
 
@@ -849,6 +857,8 @@ int tuner_open(void *ctx, void *event) {
     headset_manual();
     spot_yield(); /* librespot, Internet Radio and the player hold the output too */
     radio_stop();
+    smart_wake(); /* Smart Wi-Fi's radio back now; tuner_page holds it on (smart_wifi.c
+                     net_page_open) */
     rt->audio = video_start("-", 2);
     rt->volume = headset_gain() + 1;
     char z[8] = "";

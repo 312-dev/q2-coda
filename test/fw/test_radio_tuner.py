@@ -26,7 +26,7 @@ class Rt(C.Structure):
                 *((k, C.c_int) for k in 'screen n freq playing y0 sel zi feed'.split()), ('from_', C.c_float),
                 *((k, C.c_uint) for k in 'glide_at fetch_at anim land warm polled shown_at leave ended'.split()),
                 ('scroll', C.c_float), ('target', C.c_float), ('zip', C.c_int * 5),
-                *((k, C.c_int) for k in 'audio sock volume touch tx tf moved'.split()),
+                *((k, C.c_int) for k in 'audio sock volume touch tx tf moved no_wifi'.split()),
                 ('place', C.c_char * 48), ('err', C.c_char * 64), ('title_text', C.c_char * 256), ('state', C.c_char * 12),
                 ('zip_text', C.c_char * 8), ('st', Station * RT_MAX)]
 
@@ -55,6 +55,16 @@ class Tuner:
         fw.mock('fw_access', lambda p, *_: 0 if C.string_at(p).decode() in self.files.files else -1)
         self.key_fn = fw.fn('tuner_key', C.c_int, C.c_void_p, C.c_uint)
         fw.fn('radio_tuner__list_read', C.c_int)()
+        self.signal, self.waking = 3, 0  # the status bar's Wi-Fi bars (-1: not connected); Smart Wi-Fi's wake
+        fw.mock('get_wifisignal', lambda *_: self.signal)
+        fw.mock('fw_waitpid', lambda *_: 0)  # the receiver and any fetch still running
+        self.poll_fn = fw.fn('tuner_poll', None)
+
+    def poll(self, ms=600):
+        """tuner_poll after ms, the clock moved on."""
+        self.now += ms
+        self.sent.clear()
+        self.poll_fn()
 
     def sendto(self, s, data, n, flags, to, *_):
         self.sent.append(C.string_at(data, n).decode())
@@ -258,3 +268,30 @@ def test_titles(fw, raw, shown):
     out = C.create_string_buffer(256)
     fw.fn('tuner_title', None, C.c_char_p, C.c_char_p, C.c_uint)(raw.encode(), out, 256)
     assert out.value.decode() == shown
+
+
+def test_no_wi_fi_stands_until_the_link_is_back_and_then_the_station_is_started_again(tu, fw):
+    """Grayson, 2026-11-20: "shows a toast if wifi is lost that's persistent". Lost: "No Wi-Fi" stays up (no_wifi)
+    while Radio is open; back: it goes, and the receiver is told at once (r) to start a stream that isn't sounding."""
+    rt = tu.rt
+    rt.screen, rt.freq, rt.feed = TUNER, 931, 2
+    tu.poll()
+    assert rt.no_wifi == 0 and 'r' not in tu.sent
+    tu.signal = -1
+    for _ in range(20):  # 12 s without a link: it stays
+        tu.poll()
+        assert rt.no_wifi == 1
+    tu.signal = 2
+    tu.poll()
+    assert rt.no_wifi == 0 and tu.sent.count('r') == 1
+    tu.poll()
+    assert 'r' not in tu.sent  # once
+
+
+
+def test_a_stall_with_the_link_up_is_static_and_no_toast(tu):
+    """A stream that stalls while Wi-Fi stays up: the receiver's own static (q2video -t), and no "No Wi-Fi"."""
+    tu.rt.screen, tu.rt.feed = TUNER, 2
+    tu.files.files['/tmp/q2tuner.state'] = b'state=stalled\ntitle=\ncodec=AAC\nurl=https://xrt\n'
+    tu.poll()
+    assert tu.rt.state == b'stalled' and tu.rt.no_wifi == 0 and 'r' not in tu.sent
