@@ -19,11 +19,11 @@
 #define XF_MIN 1
 #define XF_MAX 15
 #define XF_DEFAULT 5
-#define XF_ROW "label_xfade"     /* the Playback row's label, found again by name */
-#define WHEEL_ROW "label_wheel"  /* and Display's Wheel sensitivity row's */
-#define RS_ROW "label_resumemin" /* and Playback's Resume Songs row's */
-#define NS_ROW "label_night"     /* and Display's Night Shift row's */
-#define VOL_ROW "label_volume"   /* and Playback's Volume row's */
+/* each setting row's label, found again by name (refresh) */
+#define WHEEL_ROW "label_wheel"  /* Display's Wheel sensitivity row */
+#define RS_ROW "label_resumemin" /* Playback's Resume Songs row */
+#define NS_ROW "label_night"     /* Display's Night Shift row */
+#define VOL_ROW "label_volume"   /* Playback's Volume row */
 #define RS_MIN 20
 #define RS_MAX 120
 #define RS_DEFAULT 30
@@ -52,18 +52,6 @@ static void settings(void) {
     xf.read = 1;
 }
 
-static void row_text(void *label) {
-    char t[32] = "Crossfade: Off";
-    if (xf.on) tk_snprintf(t, sizeof t, "Crossfade: %ds", xf.seconds);
-    row_value_text(label, t);
-}
-
-/* Playback's row (navigation.c ringnav_audioset makes it): the label, named for refresh(). */
-void xfade_row(void *label) {
-    settings();
-    widget_set_name(label, XF_ROW);
-    row_text(label);
-}
 
 static void wheel_text(void *label) {
     char t[32];
@@ -269,9 +257,8 @@ static void refresh(int save) {
         write_int_config(xf.on, "Q2POD", "XFADE");
         write_int_config(xf.seconds, "Q2POD", "XFADESEC");
     }
-    void *row = widget_lookup(window_manager(), XF_ROW, 1);
-    if (row) row_text(row);
-    if ((row = widget_lookup(window_manager(), WHEEL_ROW, 1))) wheel_text(row);
+    void *row = widget_lookup(window_manager(), WHEEL_ROW, 1);
+    if (row) wheel_text(row);
     if ((row = widget_lookup(window_manager(), RS_ROW, 1))) rs_text(row);
     if ((row = widget_lookup(window_manager(), NS_ROW, 1))) night_text(row);
     if ((row = widget_lookup(window_manager(), VOL_ROW, 1))) vol_text(row);

@@ -328,12 +328,6 @@ def digits(text):
     return ''.join(ch for ch in text if ch.isdigit())
 
 
-@pytest.mark.parametrize('values, shown', [({'XFADE': 1, 'XFADESEC': 9}, '9'), ({'XFADE': 1, 'XFADESEC': 99}, '5'),
-                                           ({'XFADE': 0, 'XFADESEC': 9}, ''), ({}, '')])
-def test_the_crossfade_row_shows_its_length_or_off(fw, values, shown):
-    assert digits(Page(fw, values).row_text('xfade_row')) == shown
-
-
 @pytest.mark.parametrize('values, shown', [({}, '30'), ({'RESUMEMIN': '45'}, '45'), ({'RESUMEMIN': '0'}, '')])
 def test_the_resume_row_shows_its_minutes_or_off(fw, values, shown):
     assert digits(Page(fw, values).row_text('resume_row')) == shown  # unset: the default half hour
@@ -449,7 +443,7 @@ def test_the_page_swaps_stock_boot_volumes_handlers_for_its_own(fw):
     assert is_page(PAGE) == 1 and is_page(BELOW) == 0 and is_page(0) == 0
 
 
-@pytest.mark.parametrize('mode, maker, switched', [(0, 'xfade_row', True), (1, 'wheel_row', False),
+@pytest.mark.parametrize('mode, maker, switched', [(1, 'wheel_row', False),
                                                     (2, 'resume_row', False), (3, 'night_row', True),
                                                     (4, 'volume_row', False)])
 def test_each_row_opens_the_page_under_its_own_name(fw, mode, maker, switched):
@@ -550,13 +544,13 @@ def test_the_slider_moves_only_to_a_new_value_and_its_own_move_is_no_release(fw)
 
 
 def test_the_rows_follow_the_page(fw):
-    page = Page(fw, {'XFADE': 1, 'XFADESEC': 5})
-    rows = {maker: page.make(maker) for maker in ('xfade_row', 'wheel_row', 'resume_row', 'night_row')}
+    page = Page(fw, {})
+    rows = {maker: page.make(maker) for maker in ('wheel_row', 'resume_row', 'night_row')}
     before = {label: page.row(label) for label in rows.values()}
-    assert page.open() == 0
+    assert page.open(2) == 0  # Resume Songs' page
     page.fire('img_add', CLICK)
-    assert '6' in page.row(rows['xfade_row']) and page.row(rows['xfade_row']) != before[rows['xfade_row']]
-    assert all(page.row(rows[m]) == before[rows[m]] for m in ('wheel_row', 'resume_row', 'night_row'))
+    assert page.row(rows['resume_row']) != before[rows['resume_row']]
+    assert all(page.row(rows[m]) == before[rows[m]] for m in ('wheel_row', 'night_row'))
 
 
 def test_the_wheel_sets_the_sensitivity_a_ten_a_tick(fw):

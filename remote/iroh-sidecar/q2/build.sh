@@ -35,14 +35,28 @@ for l in pthread.so.0 m.so.6 dl.so.2 rt.so.1 util.so.1 gcc_s.so.1; do ln -sf "li
 echo 'GROUP ( libc.so.6 libq2nonshared.a AS_NEEDED ( ld-linux-mipsn8.so.1 ) )' > "$L/libc.so"
 
 export Q2_SYSROOT="$OUT/sysroot" Q2_START="$OUT/start.o" Q2_INCLUDE="$GLIBC_INCLUDE" MIPSEL_INCLUDE="$GLIBC_INCLUDE"
-cd "$CRATE"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$CRATE/target}"
+# iroh with iroh-restun.patch (its header says why): the crate is built from a copy, so the patch's
+# path source never rewrites the crate's own Cargo.lock; iroh's source is the one Cargo.lock's
+# checksum fetched.
+BUILD="$OUT/crate"
+rm -rf "$BUILD" "$OUT/iroh"
+mkdir -p "$BUILD"
+cp -a "$CRATE/Cargo.toml" "$CRATE/Cargo.lock" "$CRATE/src" "$BUILD/"
+cd "$BUILD"
+cargo +nightly fetch --locked
+IROH_SRC=$(ls -d "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/iroh-1.5.0 | head -1)
+cp -a "$IROH_SRC" "$OUT/iroh"
+patch -s -p1 -d "$OUT/iroh" < "$HERE/iroh-restun.patch"
 CC_mipsel_q2_linux_gnu="$HERE/q2-cc" \
 AR_mipsel_q2_linux_gnu=llvm-ar \
 CARGO_TARGET_MIPSEL_Q2_LINUX_GNU_LINKER="$HERE/q2-link" \
 cargo +nightly build --release -Zbuild-std=std,panic_abort -Zjson-target-spec \
+    --config "patch.crates-io.iroh.path=\"$OUT/iroh\"" \
     --target "$HERE/mipsel-q2-linux-gnu.json"
+grep -q 'from_secs(300)' "$OUT/iroh/src/socket.rs" || { echo "q2-iroh: iroh-restun.patch not applied" >&2; exit 1; }
 
-BIN=${CARGO_TARGET_DIR:-$CRATE/target}/mipsel-q2-linux-gnu/release/q2-iroh
+BIN=$CARGO_TARGET_DIR/mipsel-q2-linux-gnu/release/q2-iroh
 # std's clock is only 64-bit (past January 2038) if its weak __clock_gettime64 bound to nonshared.c's.
 llvm-nm "$BIN" | grep -q ' T __clock_gettime64$' ||
     { echo "q2-iroh: std's __clock_gettime64 is unresolved; see nonshared.c" >&2; exit 1; }

@@ -224,6 +224,19 @@ def test_a_pause_with_no_song_open_is_logged_as_ignored(player, songs, tmp):
     return ', '.join(logged)
 
 
+def test_a_pause_right_after_a_song_holds_for_it(player, songs, tmp):
+    """Memory Playback's paused boot sends set-songurl and then mcl-pause at once (the device, 2026-11-20: the pause came
+    before the player had the song open, was dropped, and the song played on under a paused Now Playing for minutes).
+    The pause holds for the song asked for: nothing is written until mcl-play, then the song from its start (ss=5)."""
+    s, pcm, names = play(player, songs, 'start-paused', tmp/'start-paused')
+    logged = re.findall(r' I player (q2player: .*)', (tmp/'start-paused/player.log').read_text())
+    assert logged == [f'q2player: set-songurl {songs}/a1.flac from 5 s', 'q2player: mcl-pause', 'q2player: mcl-play'], logged
+    got, want = b''.join(pcm), reference(songs/'a1.flac')[5 * 44100 * 4:]
+    frames = len(got) // 4  # mcl-play at 3.0 and the end at 5.0: about 2 s, where a lost pause gives about 4
+    assert want.startswith(got) and 0 < frames < int(2.6 * 44100), f'{frames} frames written'
+    return f'{frames} frames, all after the play'
+
+
 def test_seek_exact(player, songs, tmp):
     """A seek to 9 s: what follows it is the reference from frame 9 x 44100, to the end; what came before is the
     reference's start."""

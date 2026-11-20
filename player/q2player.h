@@ -39,6 +39,7 @@ struct ctl {
     struct song play_song, preload_song;
     int seek_to;
     int paused;
+    int play_paused; /* a pause asked after play_song's command, before this thread took it: it opens paused */
     /* settings demo pushes; speed and mqa are stored and read by nothing (stock reads speed, docs/player.md) */
     int outputway, volume, softvol, dsdmode, replaygain, speed, explay, mqa, eq_on;
     int scan; /* mcl-scan: a held Previous or Next heard at speed, in hundredths, below 0 backwards; 0 none */

@@ -484,7 +484,7 @@ void *engine_thread(void *unused) {
              * a server song stopped the queue stock's player_start played again; it sends neither now (patch/playback.c
              * playback_start_refused), and a stop is still held so. */
             if (c->stop) {
-                c->play = c->next = c->stop = c->seek = c->paused = c->cut = 0;
+                c->play = c->next = c->stop = c->seek = c->paused = c->play_paused = c->cut = 0;
                 pthread_mutex_unlock(&c->mu);
                 if (out) dac_mute(out_way), output_drop(out);
                 close_output(0);
@@ -493,7 +493,8 @@ void *engine_thread(void *unused) {
             }
             song = c->play_song;
             song.dsd = dsd_out(car_way(c->outputway), song.hw, c->dsdmode);
-            c->play = c->next = c->seek = c->paused = c->cut = 0;
+            c->paused = c->play_paused; /* a pause after the song's command holds for it (ipc.c) */
+            c->play = c->next = c->seek = c->play_paused = c->cut = 0;
             c->state = OPENING;
             ipc_status_note(c);
             pthread_mutex_unlock(&c->mu);

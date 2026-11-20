@@ -118,6 +118,8 @@ q2-iroh bench ID [--count N] [--size BYTES] [--relay URL] [--relay-only]        
 
 A firmware build needs no Rust: `tools/build.py` installs the binary `tools/iroh.py` pins (`PIN`: its SHA-256, size and the crate's hash), taken from `~/.cache/q2-thirdparty/q2-iroh/<sha256>/`. A change to the crate stops the build (and `test/unit/test_iroh.py`) until it is built and pinned again:
 
+`q2/build.sh` builds the Q2's binary from a copy of the crate, with iroh 1.5.0's source patched by `q2/iroh-restun.patch`: iroh's periodic net report, QUIC probes to each of the relay regions every 20 to 26 s, cost the Q2 about 390 ms of CPU each (nearly all of q2-iroh's idle 2% of a core, measured 2026-11-20), so it runs every 300 to 330 s; a link change still sets one off at once. The patch's header has the trade-off. The laptop's side (`cargo build` below) is iroh as published.
+
 ```sh
 python3 tools/iroh.py           # build from remote/iroh-sidecar, keep it in the cache, print the new PIN
 python3 tools/iroh.py --check   # the pinned one is cached and the crate unchanged
@@ -125,7 +127,7 @@ python3 tools/build.py ZIP --out DIR --dev --build-iroh   # build it inside a fi
 cargo build --release --manifest-path remote/iroh-sidecar/Cargo.toml   # the laptop's side
 ```
 
-Building needs Rust nightly and `rust-src` (MIPS is a tier-3 target, so std is built from source), clang, lld, llvm-ar and llvm-strip, with the Codescape toolchain and the unpacked stock rootfs that `tools/thirdparty.py` keeps in its cache (or `Q2_STOCKFS`), as `tools/player.py` links against. `q2/build.sh` links against the Q2's own glibc 2.28 exactly as [librespot](librespot.md) is built (hard float, FP64, NaN-2008, `ld-linux-mipsn8.so.1`), with q2-librespot's target spec, linker wrapper and start files; `STOCK_LIB` and `GLIBC_INCLUDE` name another rootfs `/lib` or header tree. MIPS32 has no 64-bit atomics; the target spec's `max-atomic-width` of 32 is enough, as tokio and iroh's dependencies fall back on their own (`portable-atomic` among them) with no patch.
+Building needs Rust nightly (the pinned binary's: nightly-2026-11-18) and `rust-src` (MIPS is a tier-3 target, so std is built from source), clang, lld, llvm-ar and llvm-strip, with the Codescape toolchain and the unpacked stock rootfs that `tools/thirdparty.py` keeps in its cache (or `Q2_STOCKFS`), as `tools/player.py` links against. `q2/build.sh` links against the Q2's own glibc 2.28 exactly as [librespot](librespot.md) is built (hard float, FP64, NaN-2008, `ld-linux-mipsn8.so.1`), with q2-librespot's target spec, linker wrapper and start files; `STOCK_LIB` and `GLIBC_INCLUDE` name another rootfs `/lib` or header tree. MIPS32 has no 64-bit atomics; the target spec's `max-atomic-width` of 32 is enough, as tokio and iroh's dependencies fall back on their own (`portable-atomic` among them) with no patch.
 
 ### Measured
 

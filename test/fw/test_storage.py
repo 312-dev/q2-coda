@@ -189,8 +189,16 @@ def test_a_limit_picked_is_asked_of_the_app_and_shown_at_once(fw):
     st.open()
     st.tap(1)
     fw.fn('storage__st_limit_picked', None, C.c_int)(2)  # 8 GB
-    assert st.out() == '\nlimit\t8000\n'
+    assert st.out() == '\nlook\n\nlimit\t8000\n'
     assert rows(st, fw)[0] == ['8 GB']
+
+
+def test_the_page_opening_asks_the_app_to_count_its_folder(fw):
+    """q2-subsonic counts .subsonic/ file by file (seconds of CPU on a Q2) only when its size can be seen to change:
+    the page's opening says so with a look line (st_note: an app that isn't running is not started for it)."""
+    st = Storage(fw)
+    st.open()
+    assert st.out() == '\nlook\n'
 
 
 def test_play_pause_held_on_an_item_asks_the_app_to_remove_it(fw):
@@ -200,10 +208,10 @@ def test_play_pause_held_on_an_item_asks_the_app_to_remove_it(fw):
     dl = st.top = st.pages[1]  # the Downloads page, on top
     hold = fw.fn('storage_hold', C.c_int, C.c_void_p)
     st.props[(st.view, SEL)] = 0  # Limit: not an item
-    assert hold(dl) == 0 and st.out() == ''
+    assert hold(dl) == 0 and st.out() == '\nlook\n'
     st.props[(st.view, SEL)] = 3
     assert hold(dl) == 1
-    assert st.out() == '\nremove\tplaylist:p1\n'
+    assert st.out() == '\nlook\n\nremove\tplaylist:p1\n'
     assert st.captions == ['Limit', 'Caracal (Deluxe)', 'Favorites'] and st.toasts[-1] == 'Removed from Sync'
     assert hold(st.pages[0]) == 0  # the Storage page itself holds nothing
 

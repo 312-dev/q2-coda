@@ -109,7 +109,7 @@ static void reply(const char *fmt, ...) {
  * the song it starts when demo asks for a place (ss=, as a restart after an output change does: the drive of
  * 2026-11-19 heard a song start over twice as a car took over from headphones, and the log could not say which
  * start lost the place). A URL's query is left out, as it carries the app's token. A pause or play with no song open
- * is noted as ignored, as command() ignores it. */
+ * and none asked for is noted as ignored, as command() ignores it. */
 static void log_command(const char *name, const char *arg, int idle) {
     char line[200];
     int n;
@@ -131,7 +131,7 @@ static void command(const char *name, const char *arg) {
     struct ctl *c = &ctl;
     int wake = 0;
     pthread_mutex_lock(&c->mu);
-    int idle = c->state == IDLE;
+    int idle = c->state == IDLE && !c->play;
     pthread_mutex_unlock(&c->mu);
     log_command(name, arg, idle); /* not under mu: a full stderr pipe must not hold the engine up */
     pthread_mutex_lock(&c->mu);
@@ -155,7 +155,7 @@ static void command(const char *name, const char *arg) {
         reply("{mcl-pcmstate\\0}");
     } else if (!strcmp(name, "set-songurl") || !strcmp(name, "set-nexturl")) {
         parse_song(arg, &c->play_song, 1);
-        c->play = 1, c->stop = 0; /* a stop before this song is not this song's (engine.c engine_thread) */
+        c->play = 1, c->stop = 0, c->play_paused = 0; /* a stop before this song is not this song's (engine.c engine_thread) */
         c->preload = c->close_preload = 0;
         if (name[4] == 'n') c->next = 1, c->cut = 1;
         wake = 1;
@@ -166,8 +166,11 @@ static void command(const char *name, const char *arg) {
     } else if (!strcmp(name, "mcl-closegapless")) {
         c->preload = 0, c->close_preload = 1;
     } else if (!strcmp(name, "mcl-pause")) {
+        /* a song asked for and not yet taken (Memory Playback's paused boot sends its pause at once) opens paused */
+        if (c->play) c->play_paused = 1;
         if (c->state != IDLE) c->paused = 1, wake = 1;
     } else if (!strcmp(name, "mcl-play")) {
+        if (c->play) c->play_paused = 0;
         if (c->state != IDLE) c->paused = 0, wake = 1;
     } else if (!strcmp(name, "mcl-seek")) {
         if (c->state != IDLE) c->seek = 1, c->seek_to = atoi(arg), wake = 1;

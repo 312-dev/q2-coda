@@ -1,0 +1,29 @@
+q2/build.sh applies this to iroh 1.5.0's source before it builds q2-iroh (patch -p1, in a copy of the crate).
+
+iroh runs a net report on a timer, every 20 to 26 s at random: QUIC address discovery to every relay
+region it knows (n0's four), each a fresh QUIC handshake. On the Q2's MIPS that costs about 390 ms
+of CPU a report: measured 2026-11-20 on V1KXi, q2-iroh's ticks second by second were 0 between
+bursts of 39 about every 23 s, nearly all of its idle 2% of a core. With this the timer runs every
+300 to 330 s instead. Untouched: a report at once on a link change (netwatch: Wi-Fi lost or joined,
+an address changed), the relay connection's own 15 s ping, a connection's 5 s QUIC heartbeat, and
+pkarr's 5 min republish. The trade-off: a public address or NAT mapping that changes without a
+link event (rare on a home network) is noticed up to 5 min later instead of within 26 s, and the
+NAT mapping the periodic report kept open while nothing is connected may expire, so a phone's
+first connect after a long idle starts on the relay and moves to a direct path once hole punching
+opens one, as it does from any new network.
+
+--- a/src/socket.rs
++++ b/src/socket.rs
+@@ -2015,10 +2015,9 @@
+ }
+ 
+ fn new_re_stun_timer(initial_delay: bool) -> time::Interval {
+-    // Pick a random duration between 20 and 26 seconds (just under 30s,
+-    // a common UDP NAT timeout on Linux,etc)
++    // Q2 Muse: between 300 and 330 seconds, not 20 to 26 (remote/iroh-sidecar/q2/iroh-restun.patch).
+     let mut rng = rand::rng();
+-    let d: Duration = rng.random_range(Duration::from_secs(20)..=Duration::from_secs(26));
++    let d: Duration = rng.random_range(Duration::from_secs(300)..=Duration::from_secs(330));
+     if initial_delay {
+         debug!("scheduling periodic_stun to run in {}s", d.as_secs());
+         time::interval_at(time::Instant::now() + d, d)
