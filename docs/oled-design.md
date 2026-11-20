@@ -691,10 +691,13 @@ has no place for keeps a place of its own:
   no glyph (the user's, 2026-11-19, "remove cloud icon from FLAC"; it was a cloud, or a crossed-out cloud while the
   server was out of reach, which the status row's offline glyph and the message below still say). A card file has
   none.
-- **A server song that can't go on** (streaming-v1 frame 5, as v3 keeps it: art never dimmed): while its app says the
-  server can't be reached and the song is the pressed one or one the player waits for, the times row's centre reads
-  "Can't reach the server" (Inter 13 px, Text Secondary) in the spinner's place, and the state row is the empty states'
-  capsule pair, Retry (selected) and Skip ([buttons](#buttons)). A tap takes either; Centre at rest is Retry; the
+- **A server song that can't go on** (streaming-v1 frame 5, as v3 keeps it: art never dimmed; the reason in place,
+  sheet 5 option A, signed off 2026-11-19): while its app says the server can't be reached (`server=down`, or
+  `reach=down <code>`) and the song is the pressed one or one the player waits for, the times row's centre first reads
+  why beside the spinner while the app tries again, "Server error 502 · trying again" (Inter 13 px, Text Secondary;
+  "Server not answering", "Server not found", else "Can't reach the server", the words of the
+  [server toast](#dialogs-and-toasts)), for 10 s; then why alone in the spinner's place, and the state row is the empty states'
+  capsule pair, Retry (selected) and Skip ([buttons](#buttons)). Nothing is skipped without a word. A tap takes either; Centre at rest is Retry; the
   wheel stays the volume's. Retry asks the app to try again now; Skip is Next.
 - **The volume** and the scrub draw on the bar where it is. The volume (the "A: iPod speakers"
   mock-up) keeps the bar's rows, inset to x 48 to 323, white on the track, with Phosphor's

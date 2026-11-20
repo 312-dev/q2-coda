@@ -408,9 +408,10 @@ Then Now Playing's times row shows the spinner and `<bytes> of <total> MB` from 
 and the car remote's NowPlaying says buffering (below). Read at Now Playing's 500 ms tick, and only
 while a stream's `.stream` exists.
 
-**Retry** (firmware to app): while a server song can't go on because the app says `server=down`
-(the pressed song, or one q2player waits for), Now Playing shows "Can't reach the server" and Retry
-and Skip (`np_stream.c`). Retry writes `/tmp/q2-<id>.retry` (`1` and a newline); the app's stream
+**Retry** (firmware to app): while a server song can't go on because the app says `server=down` or
+`reach=down <code>` (the pressed song, or one q2player waits for), Now Playing shows why beside the
+spinner for 10 s ("Server error 502 · trying again"), then why with Retry and Skip (`np_stream.c`).
+The app waits at such a song rather than skip it, a proxy's 502, 503 or 504 included. Retry writes `/tmp/q2-<id>.retry` (`1` and a newline); the app's stream
 run takes it by deleting it and tries every song still to fetch at once, its backoff or a lost
 server's wait cut short (`takeRetry`). Skip is Next. An app without it leaves the file, and the
 next Retry writes it again.
