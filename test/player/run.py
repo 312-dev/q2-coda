@@ -1028,6 +1028,67 @@ def test_car_way_needs_the_dev_build(player, songs, tmp):
     return 'Bluetooth, as without a car'
 
 
+CAR_LINE = re.compile(r' I player car (\d+)ms: frames=(\d+) writes=(\d+) wmax=(\d+)ms slow=(\d+) dry=(\d+)/(\d+)ms '
+                      r'back=(\d+)/(\d+)ms avail=(-?\d+) delay=(-?\d+) rmax=(\d+)ms cpu=(\d+)ms tap=(\d+)/(\d+)$', re.M)
+CAR_FIELDS = ('ms', 'frames', 'writes', 'wmax', 'slow', 'dry', 'dry_ms', 'back', 'back_ms', 'avail', 'delay', 'rmax', 'cpu',
+              'tap', 'tap_lost')
+
+
+def car_trace(log):
+    """The car's trace lines in a player log (docs/iphone-mode.md#car-trace), each a dict of CAR_FIELDS."""
+    return [dict(zip(CAR_FIELDS, map(int, m.groups()))) for m in CAR_LINE.finditer(log)]
+
+
+def test_car_trace(player, songs, tmp):
+    """The car's trace (docs/iphone-mode.md#car-trace): while way 3 plays, a line a second in the unified log whose
+    frames add up to the car's PCM, and an underrun counted where it happens. a1 arrives as a card app writes it
+    (player/grow.c), a quarter of it there at the start and the rest landing at 12 s, so the player waits in a read
+    and the car's PCM runs dry: that second's line has the read's wait, the dry spell and the silence it put in. The
+    tap holds the car's PCM, the first Q2PLAYER_CAR_TAP_S (3) seconds of it, frame for frame."""
+    cp, car, out = car_player(), tmp/'car-trace.audio', tmp/'car-trace'
+    car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    card, status, logs = out/'mnt/mmc/.foo', out/'tmp/q2-foo.stream', out/'mnt/mmc/.q2muse/logs'
+    card.mkdir(parents=True, exist_ok=True), logs.mkdir(parents=True, exist_ok=True)
+    whole, path = (songs/'a1.flac').read_bytes(), card/'grow.flac'
+    head = len(whole) // 4
+    path.write_bytes(whole[:head])
+    line = lambda state, n: status.write_text(f'#Q2STREAM/1\tseq=1\n{state}\t{n}\t{len(whole)}\t20000\t/mnt/mmc/.foo/grow.flac\n')
+    beat = lambda s: line('get', head)  # the app's line, rewritten twice a second while the song arrives
+
+    def land(s):
+        with open(path, 'ab') as f: f.write(whole[head:])
+        line('done', len(whole))
+    steps = sorted([(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'),
+                    (1.0, fakedemo.song('set-songurl', str(path))), (12.0, land)] + [(t / 2, beat) for t in range(4, 24)],
+                   key=lambda st: st[0]) + [(30.0, None)]
+    s = fakedemo.Session(out)
+    s.music = songs
+    line('get', head)
+    s.run(steps, fakedemo.launch_host(cp, str(songs), 4, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16',
+                                                          'Q2PLAYER_CAR_TAP_S': '3'}), 4)
+    pcm = sorted((out/'pcm').glob('*.raw'))
+    assert [p.name.split('_', 1)[1] for p in pcm] == ['44100_2_s16_car.raw'], pcm
+    got, log = pcm[0].read_bytes(), (out/'player.log').read_text()
+    lines = car_trace(log)
+    assert len(lines) >= 4, f'{len(lines)} trace lines: {log[-1500:]}'
+    # a second's line waits for the write or read in hand: the window with the read that waited is that much longer
+    assert all(l['ms'] >= 900 and l['ms'] - l['rmax'] <= 1500 for l in lines[:-1]), [(l['ms'], l['rmax']) for l in lines]
+    assert sum(l['frames'] for l in lines) == len(got) // 4, f'{sum(l["frames"] for l in lines)} frames traced, {len(got) // 4} written'
+    assert all(0 <= l['delay'] <= 22050 and l['avail'] == 22050 - l['delay'] for l in lines), lines
+    dry = [l for l in lines if l['dry']]
+    # the read waits from the head's end to 12 s; at four times real speed the silence is four times that wait, less
+    # the PCM's half second that played on into it
+    assert len(dry) == 1 and dry[0]['dry'] == 1 and abs(dry[0]['dry_ms'] - (4 * dry[0]['rmax'] - 500)) < 1000 \
+        and dry[0]['dry_ms'] >= 3000, f'dry spells: {dry}'
+    slowest = max(l['rmax'] for l in lines)
+    assert slowest >= 700 and slowest == max(l['rmax'] for l in lines if l is dry[0] or lines.index(l) == lines.index(dry[0]) - 1), \
+        f'the read that waited is not the slowest by the dry spell: {[(l["rmax"], l["dry"]) for l in lines]}'
+    tap = (logs/'car-pcm.raw').read_bytes()
+    assert tap == got[:3 * 44100 * 4], f'tap {len(tap)} bytes, the car PCM\'s first 3 s {3 * 44100 * 4}; same: {tap == got[:len(tap)]}'
+    assert lines[-1]['tap'] == 3 * 44100 * 4 and not any(l['tap_lost'] for l in lines), lines[-1]
+    return f'{len(lines)} lines, {len(got) // 4} frames; dry once, {dry[0]["dry_ms"]} ms of silence, read {slowest} ms; tap {len(tap)} bytes'
+
+
 def test_bt_formats_and_volume(player, songs, tmp):
     """Bluetooth (the 'bt' scenario, as stock's capture of it): each song in its own format at the transport's 48 kHz,
     and the volume's levels in turn, measured against the song: 1, 25/256, 10/256, 484/256 (clipped), 163/256 left

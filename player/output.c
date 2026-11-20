@@ -112,9 +112,11 @@ static int candidates(const struct pcm_format *f, int out[4][2]) {
 #define CAR_RATE 44100
 #define CAR_WAIT_MS 1000
 
+static const char *car_path(void) { return getenv("Q2PLAYER_CAR") ? getenv("Q2PLAYER_CAR") : CAR_FILE; }
+
 int output_car(char *dev, unsigned cap, unsigned *rate) {
 #ifdef Q2_CAR_USB
-    const char *path = getenv("Q2PLAYER_CAR") ? getenv("Q2PLAYER_CAR") : CAR_FILE;
+    const char *path = car_path();
     char b[160] = "";
     FILE *f = fopen(path, "r");
     if (!f) return 0;
@@ -134,7 +136,7 @@ int output_car(char *dev, unsigned cap, unsigned *rate) {
 
 void output_car_gone(void) {
 #ifdef Q2_CAR_USB
-    unlink(getenv("Q2PLAYER_CAR") ? getenv("Q2PLAYER_CAR") : CAR_FILE);
+    unlink(car_path());
 #endif
 }
 
@@ -369,7 +371,11 @@ struct output *output_open(const struct pcm_format *f, int outputway, int hw) {
 #else
     else (void)hw, fprintf(stderr, "q2player: built without ALSA; set Q2PLAYER_PCM\n");
 #endif
-    if (r == 0 && resampler(o) == 0) return history(o);
+    if (r == 0 && resampler(o) == 0) {
+        if (outputway == 3) car_trace_open(o->f.rate, car_path()); /* docs/iphone-mode.md#car-trace */
+        return history(o);
+    }
+    o->way = -1; /* nothing was opened: no trace line at its close */
     output_close(o);
     return NULL;
 }
@@ -384,6 +390,19 @@ static int64_t dev_delay(struct output *o) {
 #endif
     int64_t played = (int64_t)((o->paused ? between(&o->t0, &o->paused_at) : since(&o->t0)) * o->speed * o->f.rate);
     return o->written > played ? o->written - played : 0;
+}
+
+void output_levels(struct output *o, long *avail, long *delay) {
+#ifdef HAVE_ALSA
+    if (o->pcm) {
+        snd_pcm_sframes_t d = 0;
+        *avail = (long)snd_pcm_avail(o->pcm);
+        *delay = snd_pcm_delay(o->pcm, &d) < 0 ? -1 : (long)d;
+        return;
+    }
+#endif
+    *delay = (long)dev_delay(o);
+    *avail = (long)((int64_t)o->f.rate * BUFFER_US / 1000000) - *delay; /* the file sink's buffer is BUFFER_US */
 }
 
 int64_t output_delay(struct output *o) {
@@ -551,7 +570,7 @@ static int bt_reopen(struct output *o) {
 }
 #endif
 
-static int sink(struct output *o, const uint8_t *data, int frames) {
+static int sink_to(struct output *o, const uint8_t *data, int frames) {
 #ifdef HAVE_ALSA
     if (o->pcm) {
         /* Off Bluetooth a PCM that ran dry plays on (alsa_sw): hw_ptr is past appl_ptr, and frames written there would
@@ -561,6 +580,8 @@ static int sink(struct output *o, const uint8_t *data, int frames) {
          * it. Bluetooth's plugin stops at its own underrun (docs/internals.md#bluetooth-resampler): EPIPE below. */
         snd_pcm_sframes_t avail = o->way != 1 ? snd_pcm_avail(o->pcm) : 0;
         if (avail > (snd_pcm_sframes_t)o->ring) {
+            /* on way 3 the car heard silence for what hw_ptr ran past, and hears the period skipped over now */
+            if (o->way == 3) car_trace_dry((int64_t)avail - (int64_t)o->ring + (int64_t)o->period);
             snd_pcm_forward(o->pcm, (snd_pcm_uframes_t)avail - o->ring + o->period);
             o->hist_n = 0;
         }
@@ -570,7 +591,10 @@ static int sink(struct output *o, const uint8_t *data, int frames) {
             if (o->way == 3 && snd_pcm_wait(o->pcm, CAR_WAIT_MS) == 0) return OUTPUT_CAR_GONE;
             snd_pcm_sframes_t n = snd_pcm_writei(o->pcm, data, frames);
             if (n == -EINTR || n == -EAGAIN) continue;
-            if (n == -EPIPE || n == -ESTRPIPE) n = snd_pcm_prepare(o->pcm); /* the buffer ran dry: start again here */
+            if (n == -EPIPE || n == -ESTRPIPE) { /* the buffer ran dry: start again here */
+                if (o->way == 3) car_trace_dry(0);
+                n = snd_pcm_prepare(o->pcm);
+            }
             if (n == -ENODEV && o->way == 1) { /* bluealsa's PCM went away: bt_reopen */
                 int r = bt_reopen(o);
                 if (r) return r < 0 ? -1 : 0;
@@ -586,7 +610,9 @@ static int sink(struct output *o, const uint8_t *data, int frames) {
 #endif
     if (!o->file) return -1; /* a Bluetooth PCM that did not come back (bt_reopen) */
     if (fwrite(data, (size_t)o->f.channels * o->f.bytes, frames, o->file) != (size_t)frames) return -1;
-    if ((int64_t)(since(&o->t0) * o->speed * o->f.rate) > o->written) { /* it ran dry: the clock starts again here */
+    int64_t due = (int64_t)(since(&o->t0) * o->speed * o->f.rate);
+    if (due > o->written) { /* it ran dry: the clock starts again here */
+        if (o->way == 3 && o->written) car_trace_dry(due - o->written); /* the silence a device would have played */
         clock_gettime(CLOCK_MONOTONIC, &o->t0);
         o->written = 0;
     }
@@ -594,6 +620,16 @@ static int sink(struct output *o, const uint8_t *data, int frames) {
     int64_t ahead = dev_delay(o) - (int64_t)o->f.rate * BUFFER_US / 1000000;
     if (ahead > 0) usleep((useconds_t)(ahead * 1000000 / o->f.rate / o->speed));
     return 0;
+}
+
+/* Every write to the device. On way 3 it is timed and tapped for the car's trace (docs/iphone-mode.md#car-trace). */
+static int sink(struct output *o, const uint8_t *data, int frames) {
+    if (o->way != 3) return sink_to(o, data, frames);
+    car_tap(data, (int64_t)frames * frame_bytes(o));
+    int64_t t = car_trace_now();
+    int r = sink_to(o, data, frames);
+    car_trace_write(frames, car_trace_now() - t);
+    return r;
 }
 
 /* ---- the Clicker's click in the headphones (docs/internals.md#key-tone): the payload sends {mcl-click\KIND} while
@@ -886,7 +922,7 @@ void output_drop(struct output *o) {
         /* The gadget's PCM stopped sends its last packet again and again, a buzz in the car (u_audio's completion
          * requeues it unchanged): taken back instead, it runs on, and ALSA's silence fills the room (alsa_sw) */
         snd_pcm_sframes_t can = snd_pcm_rewindable(o->pcm);
-        if (can > 0) snd_pcm_rewind(o->pcm, (snd_pcm_uframes_t)can);
+        if (can > 0 && snd_pcm_rewind(o->pcm, (snd_pcm_uframes_t)can) > 0) car_trace_back(can);
         o->paused = 0;
         return;
     }
@@ -921,7 +957,7 @@ void output_close(struct output *o) {
     if (o->pcm && o->way == 3) {
         /* the last packets silence before the stop (output_drop: a stopped gadget PCM repeats its last packet) */
         snd_pcm_sframes_t can = snd_pcm_rewindable(o->pcm);
-        if (can > 0) snd_pcm_rewind(o->pcm, (snd_pcm_uframes_t)can);
+        if (can > 0 && snd_pcm_rewind(o->pcm, (snd_pcm_uframes_t)can) > 0) car_trace_back(can);
         size_t bytes = (size_t)o->period * 2 * o->f.channels * o->f.bytes;
         void *z = bytes ? calloc(1, bytes) : NULL;
         if (z && snd_pcm_wait(o->pcm, CAR_WAIT_MS) > 0) snd_pcm_writei(o->pcm, z, o->period * 2);
@@ -933,6 +969,9 @@ void output_close(struct output *o) {
             usleep((useconds_t)(us < 600000 ? us : 600000));
         }
     }
+#endif
+    if (o->way == 3) car_trace_tick(o, 1); /* the last window's line (docs/iphone-mode.md#car-trace) */
+#ifdef HAVE_ALSA
     if (o->pcm) snd_pcm_close(o->pcm);
 #endif
     if (o->file) fclose(o->file);
