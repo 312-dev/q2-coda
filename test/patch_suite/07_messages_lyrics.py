@@ -261,11 +261,15 @@ for end in ('centre','return','touch'):
     elif end=='return': assert step(m,O['KEY_RETURN'],gap=50)==11
     else: step(m,address=HOOKS['on_wm_tsdown_before_fun'][0],event_type=O['EVT_POINTER_DOWN'],gap=50)
     step(m,O['SCRUB_MS'],wait=True); ended(m,[105],end); passed()
-# A quick second press ends the scrub the first started rather than turning the screen off.
-m=scrub_page(); np_press(m); np_press(m,100); step(m,DC,wait=True)
-assert not m.screens and m.seeks==[]; step(m,O['SCRUB_MS'],wait=True); ended(m,[]); passed()
+# A double press turns the screen off, as on every other page (the user's, 2026-11-19): a second press within
+# DOUBLE_CLICK_MS of the one that started the scrub, no turn between, undoes it unseeked; a turn between makes
+# the second press the scrub's own, which ends it.
+m=scrub_page(); np_press(m); assert step(m,O['KEY_CENTER'],gap=100)==11 and m.screens and m.seeks==[]
+step(m,O['SCRUB_MS'],wait=True); ended(m,[]); passed()
+m=scrub_page(); np_press(m); step(m,O['KEY_PREV'],gap=20); np_press(m,50); step(m,DC,wait=True)
+assert not m.screens; step(m,O["SCRUB_MS"],wait=True); ended(m,[95]); passed()
 # Centre over the volume's band on Now Playing is Now Playing's: starting the scrub closes the dialog, so
-# the wheel scrubs; a quick second press over the band ends the scrub the first started.
+# the wheel scrubs; a double press over the band turns the screen off, as on the page.
 def vol_up(m):
     m.dlg=m.node('dialog','volume_dialog'); m.word(m.dlg+O['W_PARENT'],m.wm)
     m.nodes[m.wm]={'children':[m.win,m.dlg]}; m.stack=[m.win,m.dlg]; m.top=m.dlg; m.word(m.wm+O['W_KEY_TARGET'],m.dlg)
@@ -274,8 +278,8 @@ assert did(m,'window_close')==[m.dlg] and m.top==m.win and did(m,'playing_timer_
 assert step(m)==11 and m.nodes[m.slider]['value']==105; np_press(m)
 step(m,DC+O['SCRUB_MS'],wait=True); assert not m.screens; ended(m,[105]); passed()
 m=scrub_page(); vol_up(m)
-assert m.call(O['KEY_CENTER'])==11 and m.call(O['KEY_CENTER'],gap=100,clear=False)==11 and not m.screens
-m.advance(DC,clear=False); assert not m.screens and did(m,'window_close')==[m.dlg]; passed()
+assert m.call(O['KEY_CENTER'])==11 and m.call(O['KEY_CENTER'],gap=100,clear=False)==11 and m.screens
+m.advance(DC,clear=False); assert did(m,'window_close')==[m.dlg] and not did(m,'player_seek_time'); passed()
 # Not directly over Now Playing (the panel), Centre is stock's at once and nothing closes.
 m=scrub_page(); vol_up(m); other=m.node('window','home_page'); m.word(other+O['W_PARENT'],m.wm)
 m.nodes[m.wm]['children']=[m.win,other,m.dlg]; assert m.call(O['KEY_CENTER'])==0
