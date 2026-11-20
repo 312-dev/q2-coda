@@ -212,7 +212,8 @@ int reset_list(void *list) {
  * what the code does: In-Vehicle Mode, stock's boot resume and its shutdown when the cable goes
  * (docs/internals.md#boot-resume-ipod); Standby Limit's alarm (system.c ringnav_standby); Charge
  * Limit's (system.c charge_poll); Wake's (navigation.c wake_gate); Hold Return's
- * (compact_now_playing); Scan Song Durations' (durations.c durations_scanned);
+ * (compact_now_playing); Fast Navigation's year letters and their hold (coverflow.c lettered,
+ * coverflow_thumb.c coverflow_wheel_poll); Scan Song Durations' (durations.c durations_scanned);
  * the Position Bar (coverflow_position.c); Enlarged Album Art's countdown (offsets.inc BC_IDLE);
  * On-The-Go's rows (playlists.c pl_dress, navigation.c qm_open); Automatic Time Zone's
  * lookup (autozone.c), which sends the network's address to the service only while on. Volume Guard
@@ -225,6 +226,7 @@ const unsigned *pod_caption(int i) {
             W("Stops charging at " STR(CHARGE_STOP) "%, starts again at " STR(CHARGE_RESUME) "%"),
         [POD_WAKE] = W("Center presses it takes to wake the screen"),
         [POD_HOLD_HOME] = W("What holding Return opens: Now Playing or Home"),
+        [POD_BIG_LIB] = W("Year sort spins by year too; letters stay till you lift"),
         [POD_SCAN_DURATIONS] = W("Measures song lengths after each library update"),
         [POD_CF_POSITION] = W("Shows your place in the covers while you browse"),
         [POD_COVERMODE] = W("Shows the art full screen after 10s on Now Playing"),

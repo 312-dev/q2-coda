@@ -431,6 +431,24 @@ static void paint_letter(void *w, void *canvas) {
     canvas_set_clip_rect(canvas, &old);
 }
 
+/* Cover Flow's big letter centred over w, or the Year sort's year (CF_YEAR): its four digits in a
+ * box as tall as the letter's and as wide as they need with the letter's padding, an en dash in
+ * the letter's square when undated. */
+static void cf_label(void *w, void *canvas) {
+    unsigned c = st.cf_letter, y = c & ~CF_YEAR, s[4] = { c & CF_YEAR ? 0x2013 : c }, n = 1;
+    int bw = LETTER_BOX;
+    if (c & CF_YEAR && y) {
+        for (int k = 3; k >= 0; --k, y /= 10) s[k] = '0' + y % 10;
+        n = 4;
+        int px = LETTER_PX;
+        canvas_set_font(canvas, theme_face(s, (int)n, &px), (unsigned)px);
+        int need = (int)canvas_measure_text(canvas, s, n) + LETTER_BOX - px;
+        bw = need > bw ? need : bw;
+    }
+    rect_t box = { (I(w, W_W) - bw) / 2, (I(w, W_H) - LETTER_BOX) / 2, bw, LETTER_BOX };
+    draw_letter(canvas, s, n, &box);
+}
+
 /* Playing art is rounded after scaling, so opposite corners share the same pixel grid.
  * NP_ART_RADIUS at 166px (or the theme's playing.art.radius, in px at any size), painted over it in
  * the page's black: each corner row outside the arc, then its edge pixel at the alpha of its
@@ -928,6 +946,13 @@ int ringnav_paint(void *w, void *canvas) {
     search_strip_overlay(w, canvas);
     search_bar_paint(w, canvas); /* a music list's lit search bar */
     confirm_bar_dim(w, canvas);
+    if (w == st.cf_letter_surface && st.cf_letter &&
+        (st.cf_letter_held || (unsigned)time_now_ms() - st.cf_letter_at < LETTER_MS) &&
+        P(canvas, CANVAS_LCD)) {
+        unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+        cf_label(w, canvas);
+        stock_canvas_set_fill_color(canvas, fill);
+    }
     edit_paint(w, canvas);
     spot_paint(w, canvas);
     if (theme()->sb_w && !reach_painting) {

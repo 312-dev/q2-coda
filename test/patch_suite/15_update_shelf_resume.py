@@ -559,11 +559,18 @@ passed()
 m,rows,texts,icons,click=settings_page('display','scroll_view_display',stock_rows=3,sub=3)
 assert texts()==['Wheel Sensitivity: 50%','Hold Return: Recent','Clicker: Off','system_keylock','Wake: Single Press']
 assert icons==['system_display','playset_folderjump','system_keytone','system_keylock','system_keylock']; passed()
-# Display's Cover Flow page: Sort, Position Bar, Refresh Cover Flow; a BIGLIBRARY an older build saved (Fast
-# Navigation) adds no row.
-for saved in ({},{'BIGLIBRARY':'1'}):
-    bm,brows,btexts,bicons,bclick=settings_page('display','scroll_view_display',saved,stock_rows=3,sub=2)
-    assert btexts()==['Sort: Album','Position Bar','Refresh Cover Flow'],(saved,btexts())
+# Fast Navigation (Display, Cover Flow's page, after Sort, before Position Bar and Refresh Cover Flow): off by default;
+# the row saves BIGLIBRARY, and Cover Flow reads it at once (ringnav_big_library: letters, years and half copies); a
+# stored value other than 1 is off.
+bm,brows,btexts,bicons,bclick=settings_page('display','scroll_view_display',stock_rows=3,sub=2)
+assert btexts()==['Sort: Album','Fast Navigation','Position Bar','Refresh Cover Flow'] and bicons[1]=='playset_covermode',(btexts(),bicons)
+big=lambda bm: bm.call(address=payload_syms['ringnav_big_library'],args=(0,0,0,0),gap=0)
+k=1
+assert big(bm)==0 and bclick(k)==[(1,'Q2POD','BIGLIBRARY')] and btexts()[k]=='Fast Navigation' and big(bm)==1
+assert bclick(k)==[(0,'Q2POD','BIGLIBRARY')] and btexts()[k]=='Fast Navigation' and big(bm)==0; passed()
+for v,on in (('1',1),('2',0),('0',0)):
+    bm,*_=settings_page('display','scroll_view_display',{'BIGLIBRARY':v},stock_rows=3,sub=2)
+    assert big(bm)==on,v
 passed()
 # The independent duration switch, Playback > Library's last row, is off, persists on/off, and cancels on off.
 dm,drows,dtexts,dicons,dclick=settings_page('audioset','scroll_view_playset',stock_rows=13,sub=1)

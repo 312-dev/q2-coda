@@ -949,6 +949,30 @@ assert m.call(address=payload_syms['album_lyrics_stop'],args=(0,0,0,0),gap=0)==0
 m.advance(500,clear=False); assert len(m.toasts)==n and m.nodes[label]['text']=='Get Album Lyrics'; passed()
 m.found=[]; press(); assert m.toasts[-1][3]=='No album songs on the card' and len(m.threads)==1; passed()
 
+# Sparse populated initials: one destination per sustained tick, both directions, utilities
+# and wrap edges. Album and Artist share article handling; nonalphabetical sorts stay single-step.
+def cf_jump(m,at,direction):
+    letter=m.alloc(4)
+    steps=m.call(address=payload_syms['coverflow_jump'],args=(m.slide,at,direction,letter),gap=0)
+    return steps,m.get(letter)
+m=CoverflowMachine(albums=8)
+for r,name in zip(m.albums,['Apple One','The Apple','Dawn','Dusk','Zulu','9 Lives','-Noise','Été']):
+    m.word(r+O['REC_ALBUM'],m.string(name))
+m.open()
+assert cf_jump(m,0,1)==(2,ord('D')) and cf_jump(m,3,-1)==(3,ord('A'))
+assert cf_jump(m,2,-1)==(2,ord('A')) and cf_jump(m,4,1)==(1,ord('#'))
+assert cf_jump(m,5,1)==(2,ord('É')) and cf_jump(m,7,1)==(1,0)
+assert cf_jump(m,0,-1)==(1,0) and cf_jump(m,1,-1)==(2,0)
+assert cf_jump(m,8,1)==(1,0) and cf_jump(m,9,1)==(1,0); passed()
+# Unicode punctuation/numbers and missing names share #; letters retain their codepoints.
+for name,want in (('١ Song',ord('#')),('० Song',ord('#')),('-Song',ord('#')),('',ord('#')),
+                  ('Жизнь',ord('Ж')),('東京',ord('東')),('Ａ Song',ord('Ａ')),('Ｂ Song',ord('Ｂ')),
+                  ('Ⰰ Song',ord('Ⰰ'))):
+    m=CoverflowMachine(albums=2)
+    m.word(m.albums[1]+O['REC_ALBUM'],m.string(name)); m.open()
+    assert cf_jump(m,0,1)==(1,want); passed()
+m=CoverflowMachine(albums=2); m.word(m.albums[1]+O['REC_ALBUM'],m.string('Unknown Album'))
+m.word(m.albums[1]+O['REC_ID'],0xffffffff); m.open(); assert cf_jump(m,0,1)==(1,ord('#')); passed()
 # Cover Flow's wheel step is its own kind, coverflow_step and coverflow_step_fast; OLED declares none, so they are
 # HOME_SLIDE_MS and HOME_FAST_SLIDE_MS with SLIDE_EASING, as the carousel's.
 m=CoverflowMachine(albums=3); m.open(); step_ticks(m,m.slide,(0,O['HOME_SLIDE_MS'],O['SLIDE_EASING']),(50,O['HOME_FAST_SLIDE_MS'],O['SLIDE_EASING']))

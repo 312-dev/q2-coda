@@ -520,7 +520,7 @@ Values are `coverflow.shelf` and `coverflow.caption` in OLED's `theme.xml` and `
 
 **Opening.** The first open after a restart, a library update or a server catalogue import reads the library's albums first ([internals](internals.md#coverflow)), half a second to a second for 2,000 albums in the emulator; later opens reuse them. Home's Cover Flow row keeps the selection meanwhile and its chevron turns into a spinner (eight spokes, white, in the chevron's 15 px place, [oled-design](oled-design.md#list-row)) until the covers show; Return stays on Home, and the wheel and the other buttons do nothing until it opens. An open quick enough never shows it.
 
-The wheel holds the covers directly ([internals](internals.md#coverflow-thumb)) and moves them as the lists move their rows ([internals](internals.md#wheel-acceleration)): one album a click of the wheel turned slowly, more a click as a fast turn keeps going (two after 0.3 s, one more each 0.2 s, at most 8), back to one as soon as it slows or pauses, and the covers slide through every album on the way; never by letter, and no letter shows over them. Let go, they settle on the album the caption names. From about a turn and a half a second the covers bend into an arch: the ones near the middle drop back level with the side covers and lean in gradually, none swinging out towards you, and as you slow or stop they open out again. Center, Return, a touch or the screen going dark land on the caption's album at once. The numbers are `coverflow.shelf`'s and `wheel_accel.h`'s.
+The wheel holds the covers directly ([internals](internals.md#coverflow-thumb)) and moves them as the lists move their rows ([internals](internals.md#wheel-acceleration)): one album a click of the wheel turned slowly, more a click as a fast turn keeps going (two after 0.3 s, one more each 0.2 s, at most 8), back to one as soon as it slows or pauses, and the covers slide through every album on the way; never by letter, and no letter shows over them. Let go, they settle on the album the caption names. From about a turn and a half a second the covers bend into an arch: the ones near the middle drop back level with the side covers and lean in gradually, none swinging out towards you, and as you slow or stop they open out again (with Fast Navigation on there is no arch: the side covers form a narrower row that slides along as the caption goes on ahead). Center, Return, a touch or the screen going dark land on the caption's album at once. The numbers are `coverflow.shelf`'s and `wheel_accel.h`'s.
 
 Center on a cover opens the album's tracks as a list in the page, the covers hidden behind it ([internals](internals.md#coverflow)); Return comes back to them.
 
@@ -967,7 +967,8 @@ drops the stock rows, takes the sub-page's title and builds only its own rows:
   another page, or ⋯'s About is over it (`np_about_page`), each `ringnav_sleep` pass holds stock's countdown (`BC_IDLE`) at its full 10 s.
   Before, the window opened and closed a pass later, flashing over the lyrics every 10 s (#153).
 - Cover Flow, what changes Cover Flow alone: "Sort: Album", a picker of Album, Artist, Year, Recently Added, Most
-  Played and Random (`coverflow_sort_set`), a
+  Played and Random (`coverflow_sort_set`), a "Fast Navigation" switch (`Q2POD BIGLIBRARY`, off;
+  `playset_covermode`): the narrower row at speed in place of the arch, a
   "Position Bar" switch (`Q2POD CFPOSITION`, off; `playset_covermode`; coverflow_position.c), then after a 12 px gap
   "Refresh Cover Flow" (`system_update`; it empties `.coverflow/`, the playlists' art with the albums', which builds
   again). The Library's own settings (Artist View, Playlist View, Scan Song Durations) are on

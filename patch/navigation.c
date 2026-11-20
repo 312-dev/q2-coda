@@ -196,7 +196,8 @@ int ringnav_content_query(const char *db, const char *sql, void *row, void *arg,
 }
 extern void *coverflow_tracks(void *page);
 extern const char *coverflow_bar_title(void);
-extern int coverflow_bounded(void *w), coverflow_slide(void *w);
+extern int coverflow_jump(void *w, int from, int dir, unsigned *letter), coverflow_bounded(void *w),
+    coverflow_slide(void *w);
 /* a slide_menu's indexes and the children standing for them (Cover Flow's pool, coverflow.c) */
 extern int slide_count(void *w), slide_child_index(void *w, int j);
 extern void *slide_child(void *w, int i);

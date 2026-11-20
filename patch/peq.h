@@ -384,13 +384,18 @@ extern volatile unsigned library_gen;
 int duration_seconds(void *song);
 const char *duration_text(char *text, unsigned size, void *song);
 void durations_scanned(void); /* a library scan's end, on its thread */
-int thread_lower(int idle);   /* thread_lower.c: a worker's nice 19 and its I/O class */
+int thread_lower(int idle);   /* coverflow_loader.c: a worker's nice 19 and its I/O class */
 /* coverflow.c: the o32 statx syscall, as demo imports none */
 int ringnav_statx(int dirfd, const char *path, int flags, unsigned mask, void *buf);
 void *coverflow_album_tracks(void *r);
 unsigned album_id(void *r), album_dir(const char *p, int disc);
-/* navigation.c: Cover Flow's glide */
+/* navigation.c: Cover Flow's glide and its letter */
 int carousel_glide(void *w, int goal, unsigned ms, int easing);
+void coverflow_letter(void *w, unsigned letter, unsigned now);
+void coverflow_letter_hold(void *w, unsigned letter);
+int ringnav_big_library(void); /* Display's Fast Navigation: letters, years and half copies */
+/* A letter with this bit is the Year sort's year instead, in its low bits, 0 undated. */
+#define CF_YEAR 0x80000000u
 int blob_io(const char *path, const char *tmp, void *buf, unsigned size, int write);
 #define BLOB_IO(file, buf, write) blob_io(file, file ".tmp", &(buf), sizeof(buf), write)
 int clip_within(void *canvas, int *old, int *clip, int x, int y, int w, int h);

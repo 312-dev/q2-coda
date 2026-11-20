@@ -218,7 +218,7 @@ def test_a_stock_script_is_run_on_the_builds_stock_files(monkeypatch, tmp_path):
 
 def test_a_coverflow_source_plans_the_coverflow_suite(tmp_path):
     # test/coverflow.py builds these on the host, so a change to any of them plans it, not only one to the script.
-    for path in ('patch/coverflow.c', 'patch/coverflow_speed.c', 'patch/coverflow.h', 'patch/home.c',
+    for path in ('patch/coverflow.c', 'patch/coverflow_loader.c', 'patch/coverflow.h', 'patch/home.c',
                  'patch/page_parallax.c', 'patch/playlist_art.c'):
         assert 'test/coverflow.py' in affected.plan_for({path: {1}}, tmp_path).as_dict()['other'], path
 

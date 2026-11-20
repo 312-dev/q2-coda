@@ -6,6 +6,8 @@ class DepthMachine(CoverflowMachine):
         self.frames=[]; self.destroyed=[]; self.draws=[]; self.loads=[]; self.unloads=0; self.pixels={}
         self.art_size=(160,160)  # the covers' decoded size; the placeholder is always 160 square
         self.art_sizes={}  # by URL ending, sizes other than art_size
+        self.handlers[syms['sem_post@GLIBC_2.2']]='loader_wake'  # the loader's thread can't run here: its body, at each wake-up
+        self.mock('strstr@GLIBC_2.0')  # mem_available_kb's, before the letters' pool: no /proc/meminfo here, so no estimate
         self.fast()
     def big_alloc(self,n):
         a=self.big; self.big+=(n+15)&~15; assert self.big<=BIG+BIG_SIZE; return a
@@ -18,6 +20,10 @@ class DepthMachine(CoverflowMachine):
             self.word(ret,a); self.word(ret+4,b); self.word(ret+8,c); self.u.mem_write(ret+0xc,struct.pack('<HH',0,d)); self.word(ret+0x14,data)
             self.frames.append(ret)
         elif name=='bitmap_destroy': self.destroyed.append(a); ret=0
+        elif name=='loader_wake':
+            self.wakes=getattr(self,'wakes',0)+1
+            while self.nested(payload_syms['ld_step']): pass
+            ret=0
         elif name=='bitmap_lock_buffer_for_read': ret=self.get(a+0x14)
         elif name=='widget_load_image':
             url=self.text(b); self.loads.append(url) if a==self.top else None  # Coverflow's, not iPod Home's
@@ -39,8 +45,10 @@ class DepthMachine(CoverflowMachine):
         self.returns(ret,clobber=True)
 
 def host_render(textures,cases,style=None,paper=None,windows=False,still=False):
-    """The same renderer source built for the host: frames for (frac, mask of drawn slots) cases, the thumb at rest. style: a theme's cf.*
-    values; paper: the light half's. 15 textures make the thumb's wide ring.
+    """The same renderer source built for the host: frames for (frac, mask of drawn slots) cases. style: a theme's cf.* values; paper: the light half's.
+    15 textures make the thumb's wide ring; a case's (kind, lean, a, b) then sets the thumb: 1 letters, the row held as an entry from the row at
+    lead a/1000 leaves it, 2 a ms into the fold from that row held at lead b/1000, 3 the entry, lead a/1000 and b/1000 albums to go, 4 letters
+    with the row held as the case's next five numbers have it (hold_lead, hold_run, hold_xrun, hold_xs, hold_k).
     windows: also each case's window middle from the album at the middle (cf_frame_window), as a second list.
     still: nothing moving, as the page's own frame at rest (the shelf's seven); else moving, as a direct render is."""
     import subprocess, tempfile
@@ -48,7 +56,7 @@ def host_render(textures,cases,style=None,paper=None,windows=False,still=False):
     from theme import ROLE_MACROS, builtins
     style=style or {f:v for f,v in builtins()[0].items() if f.startswith('cf.')}  # the theme's, as the payload has it: a thumb theme, its shelf draws seven covers a side
     if len(textures)==7:  # the seven round the centre, the wide ring's ends left out
-        textures=[textures[0]]*4+list(textures)+[textures[0]]*4; cases=[(frac,mask<<4) for frac,mask in cases]
+        textures=[textures[0]]*4+list(textures)+[textures[0]]*4; cases=[(c[0],c[1]<<4,*c[2:]) for c in cases]
     cf=', '.join(f'.{f[3:]} = {v}' for f,v in style.items()); rows=style['cf.view_h']
     main=r"""#include "theme.h"
 static theme_t t = { .cf = { %s } };
@@ -61,8 +69,11 @@ void *shim_calloc(size_t n, size_t size) { return calloc(n, size); }
 void coverflow_render(unsigned *, int, int, const unsigned *const[7]);
 int ipod_light(void) { return %d; }
 int ipod_square_art(void) { return 0; }
-unsigned time_now_ms(void) { return 0; }
-void cf_thumb_lead(float);
+unsigned time_now_ms(void) { return 0; } /* the fold's clock: fold_at counts back from 0 */
+int ringnav_big_library(void) { return 0; } /* the MIPS machines' own: Fast Navigation off */
+void cf_thumb_lead(float), cf_thumb_lean(int), cf_thumb_fold(int, unsigned), cf_thumb_enter(int, float, float);
+void cf_thumb_speed(float, float), cf_thumb_held(float, float, float, float, int);
+float cf_thumb_hold(int, float, int);
 int cf_frame_window(int);
 void cf_shelf_still(int);
 const scheme_t *scheme(void) { static scheme_t s = { .paper = %d }; return &s; }
@@ -72,10 +83,18 @@ int main(void) {
     const unsigned *ring[N];
     cf_shelf_still(%d);
     if (fread(tex, 4, N * 160 * 160, stdin) != N * 160 * 160) return 1;
-    int frac, mask;
-    while (scanf("%%d %%d", &frac, &mask) == 2) {
+    int frac, mask, kind, lean, a, b;
+    while (scanf("%%d %%d %%d %%d %%d %%d", &frac, &mask, &kind, &lean, &a, &b) == 6) {
         for (int j = 0; j < N; ++j) ring[j] = mask >> j & 1 ? tex[j] : 0;
-        cf_thumb_lead(-1);
+        float h[4];
+        int k;
+        if (kind == 4 && scanf("%%f %%f %%f %%f %%d", h, h + 1, h + 2, h + 3, &k) != 5) return 1;
+        cf_thumb_enter(0, 0, 0), cf_thumb_lead(-1), cf_thumb_speed(0, 0);
+        if (kind == 1 || kind == 2) cf_thumb_hold(lean, (kind == 1 ? a : b) / 1000.f, 0);
+        if (kind == 4) cf_thumb_held(h[0], h[1], h[2], h[3], k);
+        if (kind == 1 || kind == 4) cf_thumb_lean(lean);
+        if (kind == 2) cf_thumb_fold(lean, -(unsigned)a);
+        if (kind == 3) cf_thumb_enter(lean, a / 1000.f, b / 1000.f);
         coverflow_render(frame, %d, frac, ring + (N - 7) / 2);
         fwrite(frame, 4, sizeof(frame) / 4, stdout);
         fprintf(stderr, "window %%d\n", cf_frame_window(frac));
@@ -88,7 +107,7 @@ int main(void) {
         subprocess.run(['cc','-O1','-DPEQ_HOST','-DPEQ_ROOT=""','-D_GNU_SOURCE',
                         '-ffunction-sections','-fdata-sections','-Wl,--gc-sections','-I',str(ROOT/'patch'),'-include',str(d/'shim.h'),
                         str(d/'coverflow_all.c'),str(d/'main.c'),'-o',str(d/'render')],check=True)
-        feed=b''.join(textures)+''.join(f'{frac} {mask}\n' for frac,mask in cases).encode()
+        feed=b''.join(textures)+''.join(' '.join('%.9g'%x if isinstance(x,float) else str(x) for x in (*c,0,0,0,0)[:max(6,len(c))])+'\n' for c in cases).encode()
         run=subprocess.run([str(d/'render')],input=feed,capture_output=True,check=True); out=run.stdout
     size=4*O['CF_VIEW_W']*rows
     frames=[out[i*size:(i+1)*size] for i in range(len(cases))]
@@ -213,14 +232,16 @@ def tindex(m): return m.get(m.slide+O['SLIDE_INDEX'])
 def toff(m): return signed(m.get(m.slide+O['SLIDE_OFFSET']))
 def tcaption(m): return m.texts()[0]
 CF_FIELDS=[f for l in re.findall(r'^\s*short ([^;]+);',re.search(r'typedef struct \{([^}]*)\} cf_style_t;',(ROOT/'patch/theme.h').read_text())[1],re.M) for f in re.split(r',\s*',l)]
+def no_letters(m): m.u.mem_write(ps['cfs']+2*CF_FIELDS.index('jump_ticks'),b'\0\0')  # the open page's cfs: jump_ticks 0, the cap alone
+CF_DEFINES={k:int(v) for k,v in re.findall(r'^#define (\w+) (\d+)',(ROOT/'patch/coverflow.h').read_text(),re.M)}  # LD_SLOTS, CF_FOLD_MS ...
 TH_AT={f:4*i for i,f in enumerate(f for l in re.findall(r'^\s*\w+ ([^;]+);',re.sub(r'/\*.*?\*/','',re.search(r'typedef struct \{([^}]*)\} cf_thumb_t;',(ROOT/'patch/coverflow.h').read_text())[1],flags=re.S),re.M) for f in re.split(r',\s*',l))}  # every field 4 bytes
 def tfloat(m,f): return struct.unpack('<f',m.u.mem_read(ps['th']+TH_AT[f],4))[0]
 def tpaint(m): m.call(address=HOOKS['widget_on_paint_border'][0],args=(m.slide,m.canvas,0,0),gap=0,clear=False,count=50_000_000,debounce=True)
 # Raw on the covers, each pass; a turn writes the offset itself and no tick or animator is about.
-# The shelf's texture pool is allocated at the open.
+# The shelf's texture pool is allocated at the open: going by letters adds the rest (below).
 m=DepthMachine(albums=9); m.open(); m.handlers[sleep_hook+12]='stock_sleep'; m.fresh=1
 tp(m); assert traw(m)==2 and not m.slides
-assert (15+1)*160*160*4 in m.live.values()  # CF_WIDE and the placeholder
+assert (15+1)*160*160*4 in m.live.values()  # CF_WIDE and the placeholder, whatever Fast Navigation says
 thold(m); tp(m,-30); assert toff(m)<0 and not m.slides and m.get(m.slide+O['SLIDE_ANIMATOR'])==0 and not m.get(ps['wheel_travel'])
 trest(m); assert toff(m)==0; passed()
 # wheel_raw never stays set: each way off the covers gives the wheel back at the next pass, the travel gone, the
@@ -304,13 +325,23 @@ trest(m); assert toff(m)==0; passed()
 m=thumb_page(); n=[0]; h=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)
 tp(m); tpaint(m); assert m.draws; m.word(m.slide+O['SLIDE_OFFSET'],-O['CF_STRIDE']//4); n[0]=0
 m.word(m.slide+O['SLIDE_ANIMATOR'],1)  # a step's frame, the covers moving (no animator is ever called by a paint)
-tpaint(m); turn_cost=n[0]; m.word(m.slide+O['SLIDE_ANIMATOR'],0); m.word(m.slide+O['SLIDE_OFFSET'],0); thold(m); tspin(m,600,-110); assert struct.unpack('<f',m.u.mem_read(ps['th']+TH_AT['arch'],4))[0]>.9  # th.arch: formed
+tpaint(m); turn_cost=n[0]; m.word(m.slide+O['SLIDE_ANIMATOR'],0); m.word(m.slide+O['SLIDE_OFFSET'],0); thold(m); no_letters(m); tspin(m,600,-110); assert struct.unpack('<f',m.u.mem_read(ps['th']+TH_AT['arch'],4))[0]>.9  # th.arch: formed (Fast Navigation off)
 n[0]=0; draws=len(m.draws); tpaint(m); row_cost=n[0]; m.u.hook_del(h); assert len(m.draws)==draws+1 and turn_cost>1000000 and row_cost<6_450_000,row_cost; passed()  # 6.02 million measured, the facing cover's 123 px columns over its neighbours': within the ceiling a turn's frame has below
 assert turn_cost<6_450_000,turn_cost  # a frame a quarter turn on, the covers moving, a little over the 6.38 million it measured: a dearer one fails
 # The release build carries no dev-only code (the gap log's).
+class HalfMachine(FileMocks,DepthMachine):
+    def __init__(self,**kw): super().__init__(**kw); self.file_mocks('h:'); self.opened=[]; self.cut=False
+    def hook(self,u,address,size,unused):
+        name=self.handlers.get(address,'')
+        if not name.startswith('h:'): return super().hook(u,address,size,unused)
+        name=name[2:].split('@')[0]; a,b,c,d=[u.reg_read(r) for r in REGS]; self.calls.append((name,a,b,c))
+        if name=='fopen' and self.text(a).endswith('.jpg.half') and self.text(b)=='rb':  # each album's own copy
+            path=self.text(a); self.opened.append(path)
+            self.files.setdefault(path,cover_pixels(300+len(self.files),80*80)[:100 if self.cut else None])
+        self.returns(self.file_op(u,name,a,b,c,d),clobber=True)
 assert ('gaps' in payload_syms)==bool(manifest['dev'])  # the gap log
 # A thread lowers itself (thread_lower(idle)): nice 19 through setpriority (o32 4097) on its own tid (gettid, 4222), and its
-# reads, with idle (the song durations' worker), in the idle I/O class (ioprio_set, 4314, IOPRIO_WHO_PROCESS), best
+# reads, with idle (the loader, its first call), in the idle I/O class (ioprio_set, 4314, IOPRIO_WHO_PROCESS), best
 # effort's lowest level when the kernel refuses idle; without (playlist art's worker, which holds stock's art locks) in
 # best effort's lowest level alone. It returns what took (1: nice 19, plus the class << 1). Playlist art's worker does so
 # first, once, so its reads and the ffmpeg runs it forks (which inherit both) stay below the player and the UI.
@@ -365,8 +396,8 @@ assert m.call(address=0x5c8d30,args=(m.string('/mnt/data/database.db'),0,0,0),ga
 # stock's own pragma (since V1.36) on the connection it has just opened, after the hook's
 assert m.sql==[('open','/mnt/data/database.db'),('exec',0xdb,'PRAGMA busy_timeout=500'),('exec',0xdb,'PRAGMA auto_vacuum=INCREMENTAL;')],m.sql; passed()
 
-# Centre opens the album the caption names, at once, however far ahead of the covers that is.
-m=thumb_page(); tp(m); thold(m); tspin(m,600,-110); shown=tcaption(m); assert toff(m)!=0
+# Centre opens the album the caption names, at once, however far ahead of the covers that is (letters off).
+m=thumb_page(); tp(m); thold(m); no_letters(m); tspin(m,600,-110); shown=tcaption(m); assert toff(m)!=0
 assert m.confirm()==11 and toff(m)==0 and tcaption(m)==shown
 index=tindex(m); kids=m.nodes[m.slide]['children']; assert shown==f'Album {index}' and m.dispatched()[-1][1]==kids[index%len(kids)]; passed()  # this machine's slide holds 8 nodes for its 9 albums
 
@@ -924,10 +955,10 @@ keep_lit=kids[3]
 assert m.icons_set==['display_backlight','system_display','switch_on','display_backlight','list_into','system_display','list_into','playset_covermode','list_into','playset_covermode','switch_off','system_display','switch_off']  # Smart Awake on: its default; Reduce Motion off
 f,ctx=m.handler(m.nodes[kids[5]]['children'][0],O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==('systemset/display_page',None) and m.get(payload_syms['display_sub'])==0; passed()
-# Cover Flow: what changes Cover Flow alone, Sort (its picker's row, a chevron), Position Bar, then
+# Cover Flow: what changes Cover Flow alone, Sort (its picker's row, a chevron), Fast Navigation, Position Bar, then
 # Refresh Cover Flow after a 12 px gap; Controls, System's row: the wheel, the buttons and what they do.
-cfv=display_page(m,2); cf_sort,cf_position,cf_gap,cf_refresh=m.nodes[cfv]['children']
-assert m.icons_set==['playset_covermode','list_into','playset_covermode','switch_off','system_update'],m.icons_set
+cfv=display_page(m,2); cf_sort,cf_big,cf_position,cf_gap,cf_refresh=m.nodes[cfv]['children']
+assert m.icons_set==['playset_covermode','list_into']+['playset_covermode','switch_off']*2+['system_update'],m.icons_set
 assert m.nodes[cf_gap]['type']=='label' and m.get(cf_gap+O['W_H'])==12
 ctl=display_page(m,3); wheel,hold,tone,lock,wake=m.nodes[ctl]['children']  # tone: the Clicker
 assert [row_text(r) for r in (hold,tone)]==['Hold Return: Recent','Clicker: Off']; passed()
