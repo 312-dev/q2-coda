@@ -638,3 +638,44 @@ SEARCH_SITES={0x49d470:52,0x49e7b0:52,0x49f320:52,0x49d4a8:52,0x49e7e8:52,0x49f3
 imm=lambda m,a: m.get(a)&0xffff
 k=Machine(); assert {a:imm(k,a) for a in SEARCH_SITES}==SEARCH_SITES; passed()
 
+# The frame's turn onto the panel (fb_rotate.c, docs/internals.md#frame-rotation): fast_rotate_bgra8888 lays down the
+# bytes stock's own turn does, every pixel in place, for each angle and rect, aligned or not, with padded rows; what it
+# leaves to stock (another angle, a negative size) is stock's to the byte. Both run on bitmaps made by stock's own code.
+import random
+def rotate_case(m,o,sw,sh,rect,pad,shift,seed):
+    """(stock's result, fast's result) for src sw x sh turned by o into a fresh dst, rows pad bytes longer, data shift bytes in."""
+    rnd=random.Random(seed); dw,dh=(sw,sh) if o in (0,180) else (sh,sw); top=m.next  # the case's memory, given back at its end
+    def bitmap(w,h,fill):
+        ll=4*w+pad; data=m.alloc(ll*h+8)+shift; m.u.mem_write(data-shift,bytes(ll*h+8)); m.u.mem_write(data,fill(ll*h))
+        bm=m.alloc(0x48); m.u.mem_write(bm,bytes(0x48)); m.word(bm,w); m.word(bm+4,h); m.u.mem_write(bm+0xe,struct.pack('<H',3))
+        gb=m.call(address=syms['graphic_buffer_create_with_data'],args=(data,w,h,3),gap=0,clear=False)&0xffffffff
+        m.word(bm+0x14,gb); m.call(address=syms['bitmap_set_line_length'],args=(bm,ll,0,0),gap=0,clear=False)
+        return bm,data,ll*h
+    src,_,_=bitmap(sw,sh,lambda n: bytes(rnd.getrandbits(8) for _ in range(n)))
+    r=m.alloc(16); m.u.mem_write(r,struct.pack('<4i',*rect))
+    out=[]
+    for f in (payload_syms['stock_rotate_bgra8888_trampoline'],syms['rotate_bgra8888_image']):
+        dst,data,n=bitmap(dw,dh,lambda n: bytes([0x5a])*n)
+        ret=m.call(address=f,args=(dst,src,r,o),gap=0,clear=False,count=2000000)
+        out.append((ret,bytes(m.u.mem_read(data-shift,n+8))))
+    m.next=top
+    return out
+m=Machine()
+for n in ('bitmap_get_bpp','bitmap_get_physical_width','bitmap_get_physical_height','bitmap_get_physical_line_length',
+          'bitmap_lock_buffer_for_write','bitmap_lock_buffer_for_read','bitmap_unlock_buffer','bitmap_get_line_length'):
+    m.handlers.pop(syms[n],None)
+m.mock('tk_calloc','tk_free',prefix='alloc:')
+rnd=random.Random(1120); cases=0
+for o in (90,180,270,0,45):
+    for sw,sh in ((23,17),(17,23),(31,9)):
+        rects=[(0,0,sw,sh),(sw-1,sh-1,1,1),(0,sh-1,sw,1),(sw-1,0,1,sh),(3,2,0,5),(3,2,5,0),(2,3,-1,4)]
+        rects+=[(x,y,rnd.randint(1,sw-x),rnd.randint(1,sh-y)) for x,y in ((rnd.randrange(sw),rnd.randrange(sh)) for _ in range(6))]
+        for rect in rects:
+            for pad,shift in ((0,0),(8,0),(4,1),(12,2)):
+                if rect[2]<0 and o in (90,180,270): continue  # stock's loop runs to the int's wrap: both hand it to stock
+                (a_ret,a),(b_ret,b)=rotate_case(m,o,sw,sh,rect,pad,shift,cases)
+                assert a_ret==b_ret and a==b,(o,sw,sh,rect,pad,shift); cases+=1
+# the Q2's own: the 375 x 320 frame turned 270 onto the 320 x 375 page, whole and a status row's band
+for rect in ((0,0,375,320),(0,0,375,40),(196,141,179,179)):
+    (a_ret,a),(b_ret,b)=rotate_case(m,270,375,320,rect,0,0,cases); assert a_ret==b_ret==0 and a==b,rect; cases+=1
+assert cases>500,cases; passed()

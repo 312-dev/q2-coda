@@ -221,6 +221,8 @@ HOOKS = {
     'dmrActionStop': (0x50fe4c, 'guest_dlna_stop', 'dlna_stop'),
     # Now Playing's cover asked for: player_parsecover_thd is woken for it (cover_wake.c cover_set_info)
     'player_set_coverinfo': (0x51d7fc, 'cover_set_info', 'set_coverinfo'),
+    # Each frame's quarter turn onto the panel: stock's pixels, a word copy each (fb_rotate.c)
+    'rotate_bgra8888_image': (0x6e11a0, 'fast_rotate_bgra8888', 'rotate_bgra8888'),
 }
 # The payload's stock_<name>_trampoline, the hooks' third element, resumes each hook past its 3-word PIC
 # prologue.
@@ -1871,6 +1873,11 @@ FUNCTIONS = {
  'bitmap_create_ex': ('void *', 'unsigned, unsigned, unsigned, unsigned'),
  'bitmap_destroy': ('int', 'void *'),
  'bitmap_lock_buffer_for_read': ('const unsigned char *', 'void *'),
+ # the frame's turn onto the panel (fb_rotate.c): what stock's turn reads of its two bitmaps
+ 'bitmap_get_bpp': ('unsigned', 'const void *'),
+ 'bitmap_get_physical_width': ('unsigned', 'const void *'),
+ 'bitmap_get_physical_height': ('unsigned', 'const void *'),
+ 'bitmap_get_physical_line_length': ('unsigned', 'const void *'),
  'canvas_draw_image': ('int', 'void *, void *, const void *, const void *'),
  'canvas_set_global_alpha': ('int', 'void *, unsigned'),
  # a window animator of the payload's own (art_zoom.c): stock's factory and window_animator_t with its vtable
