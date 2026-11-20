@@ -479,14 +479,11 @@ HOLD_BACK_PX = 20  # search_strip.c's Return-held card: Phosphor arrow-u-up-left
 # mock-up's fallback (mock_placeholders.py FALLBACK). Nor a heart-slash: Favorites' is q2-coda's own, traced from the
 # approved mock-up (assets/icons/q2coda/heart-slash.svg).
 EMPTY_PX = 60
-# Glyphs a card app names for its status page (addon.c status_view: q2-subsonic's Sync states,
-# docs/oled-design.md#sync), drawn as the empty states' are; the app, not the payload, names them
-STATUS_PAGE_GLYPHS = ('arrows-clockwise', 'check-circle', 'arrow-circle-down', 'cloud')
 EMPTY_GLYPHS = {g: g for g in (
     'cards', 'music-notes', 'vinyl-record', 'microphone-stage', 'music-notes-simple', 'guitar', 'folder', 'playlist',
     'clock-counter-clockwise', 'chart-bar', 'sparkle', 'timer', 'calendar-blank', 'star', 'magnifying-glass',
-    'radio', 'cloud-slash', 'download-simple', 'list-numbers', 'car-profile', 'broadcast', 'wifi-slash'
-    ) + STATUS_PAGE_GLYPHS} | {'sd-card': 'memory',
+    'radio', 'cloud-slash', 'download-simple', 'list-numbers', 'car-profile', 'broadcast', 'wifi-slash',
+    'arrows-clockwise', 'check-circle', 'arrow-circle-down', 'cloud')} | {'sd-card': 'memory',  # the last four: Sync's states
     'heart-slash': 'q2coda/heart-slash'}
 USB_TOASTS = {'unplugged': ('plug-fill', token('secondary')), 'ejected': ('check-circle-fill', token('positive')), 'audio': ('speaker-hifi-fill', 0xffffff)}
 # The status row's battery (list_marks.c battery_slim): charging, Phosphor's lightning, too weak a charger its warning,

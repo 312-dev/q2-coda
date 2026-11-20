@@ -2556,7 +2556,8 @@ def test_control_center_s_cover_corners_are_the_block_s_colour_as_painted(fw, wo
 
 
 class EmptyT(C.Structure):
-    _fields_ = [('glyph', C.c_char_p), ('title', C.c_char_p), ('hint', C.c_char_p), ('row', C.c_char_p)]
+    _fields_ = [('glyph', C.c_char_p), ('title', C.c_char_p), ('hint', C.c_char_p), ('row', C.c_char_p),
+                ('foot', C.c_char_p), ('bar', C.c_int)]
 
 
 def test_a_status_pages_stack_has_its_lines_a_bar_and_a_footer(fw, st):
@@ -2566,9 +2567,8 @@ def test_a_status_pages_stack_has_its_lines_a_bar_and_a_footer(fw, st):
     canvas = Canvas(fw)
     fw.mock('canvas_get_vgcanvas', lambda *_: 1)
     w = C.create_string_buffer(0x200)
-    e = EmptyT(b'', b'Syncing 4 of 12', b'Rockstar\nPost Malone', None)
-    fw.fn('empty_paint_status', None, C.c_void_p, C.c_void_p, C.POINTER(EmptyT), C.c_int, C.c_char_p, C.c_int)(
-        C.addressof(w), canvas.addr, C.byref(e), 100, b'Keep the Q2 on Wi-Fi', 334)
+    e = EmptyT(b'', b'Syncing 4 of 12', b'Rockstar\nPost Malone', None, b'Keep the Q2 on Wi-Fi', 334)
+    fw.fn('empty_paint', None, C.c_void_p, C.c_void_p, C.POINTER(EmptyT), C.c_int)(C.addressof(w), canvas.addr, C.byref(e), 100)
     texts = [(t[0], t[1][1] + t[1][3] // 2) for t in canvas.texts]
     assert [t for t, _ in texts] == ['Syncing 4 of 12', 'Rockstar', 'Post Malone', 'Keep the Q2 on Wi-Fi']
     title, l1, l2, foot = (y for _, y in texts)

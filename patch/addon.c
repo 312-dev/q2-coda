@@ -2617,11 +2617,10 @@ static int status_view(lv_t *l) {
         if (foot < 0 && !strcmp(cell(i, 0), "info") && !strcmp(cell(i, 1), "foot")) foot = i;
     }
     const char *bar = cell(0, 5);
-    empty_t e = { cell(0, 4), cell(0, 2), cell(0, 3),
-                  button >= 0 ? cell(button, 2) : (const char *)0 };
+    empty_t e = { cell(0, 4), cell(0, 2), cell(0, 3), button >= 0 ? cell(button, 2) : (const char *)0,
+                  foot >= 0 ? cell(foot, 2) : (const char *)0,
+                  *bar >= '0' && *bar <= '9' ? atoi(bar) + 1 : 0 };
     status_btn = button;
-    empty_extras(foot >= 0 ? cell(foot, 2) : (const char *)0,
-                 *bar >= '0' && *bar <= '9' ? atoi(bar) + 1 : 0);
     pg.view = empty_list(pg.page, pg.page, l->title, &e, button >= 0 ? status_press : 0);
     return 1;
 }
