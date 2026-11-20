@@ -20,8 +20,8 @@ CACHE = pathlib.Path(os.environ.get('Q2_THIRDPARTY_CACHE') or pathlib.Path.home(
 WORK = pathlib.Path.home()/'.cache/q2-uac1'  # uac1_build.py's default --work: its module/ holds the build
 
 # (the module's SHA-256, its size, sources_sha256() of the tools/uac1_module it was built from)
-PIN = ('7daef085050936ac2fc75ba645357c9edea61746f320fab7b69c653fc71cb357', 31292,
-       '3d298e94f9f8d611916eadaf8cf4091f3cdfc6879f111e4b550ffdf29a4b4944')
+PIN = ('a5d0b5dc792ba590172d9a327a43e64a1b992837a141ddbe0aa49b1e8fafe82d', 34088,
+       '8b075c6a3e31bb6eb0ee72f9505b67a7d60e9206aba76f00091c0cd7f8f1823d')
 
 
 def sources_sha256():

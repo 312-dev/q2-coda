@@ -6,7 +6,7 @@
 Linux 5.10.21 from kernel.org (hash checked) is unpacked into --work (default ~/.cache/q2-uac1) without the other
 architectures, Documentation or most drivers' sources, configured as malta_defconfig plus q2.config, and prepared for
 modules; then this directory's Kbuild builds f_uac1.c, with the two upstream commits in patches/ applied (PATCHES),
-and its own renamed u_audio.c. Needs mipsel-linux-gnu-gcc and binutils (Ubuntu: gcc-mipsel-linux-gnu), flex, bison,
+and its own renamed u_audio.c, with this script's changes to it (MISSED) and Q2 Muse's own patch to both (OWN_PATCHES). Needs mipsel-linux-gnu-gcc and binutils (Ubuntu: gcc-mipsel-linux-gnu), flex, bison,
 bc, patch.
 
 Checked, each printed: the vermagic is the stock modules'; struct module's size and the offsets of init and exit are
@@ -75,6 +75,14 @@ MISSED = [
      '\t\t}\n'
      '\t}\n'),
 ]
+# Q2 Muse's patches to the module's f_uac1.c, u_audio.c and u_audio.h, from patches/, applied after PATCHES and
+# MISSED. q2-uac1-playback-rates.patch: the AS IN format lists the module parameter p_srates (32000, 44100 and 48000)
+# when the configfs p_srate is one of them, else p_srate alone; the host's SET_CUR of the playback endpoint's
+# sampling frequency takes an offered rate (the next packets are sized for it and the PCM opens at it), GET_CUR
+# answers the rate in use, where 5.10.21 discarded the one and answered the other with stale buffer bytes, and
+# p_rate, rate_sets and rate_asked in /sys/module/usb_f_uac1/parameters show the rate in use, the host's SET_CURs
+# and the last rate asked (docs/iphone-mode.md#per-song-rate).
+OWN_PATCHES = ['q2-uac1-playback-rates.patch']
 # Offsets and sizes read in the stock kernel's own code (vmlinux-to-elf of the #303 kernel, docs/iphone-mode.md#the-uac1-module),
 # each with the instruction it came from: q2_layout.ko must agree with every one.
 STOCK = {
@@ -334,6 +342,9 @@ def main(argv):  # pragma: no mutate block (all of the above)
             sys.exit('build.py: u_audio.c has not the one place 5.10.21 has for: ' + old.strip().splitlines()[0])
         text = text.replace(old, new)
     ua.write_text(text)
+    # Q2 Muse's own changes after those (OWN_PATCHES): several playback rates and the host's SET_CUR of one
+    for p in OWN_PATCHES:
+        run('patch', '-p1', '-F0', '--no-backup-if-mismatch', '-d', mod, '-i', HERE/'patches'/p)
     for f in ('Kbuild', 'q2_rename.h', 'q2_layout.c'):
         shutil.copyfile(HERE/f, mod/f)
     run('make', '-s', '-C', src, f'M={mod}', 'modules')

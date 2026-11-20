@@ -1,0 +1,186 @@
+q2: offer several playback rates and play at the one the host sets
+
+The AS IN format descriptor lists the module parameter p_srates (32000, 44100,
+48000) when the configfs p_srate is among them, else p_srate alone as 5.10.21
+does. The host's SET_CUR of the playback endpoint's sampling frequency
+is taken when the format lists the rate: the next packets are sized
+for it and the PCM opens at it. GET_CUR answers the rate in use. The module
+parameters p_rate, rate_sets and rate_asked show the rate in use, how many such
+SET_CURs came and the last rate asked (docs/iphone-mode.md#per-song-rate).
+Applied by uac1_build.py after upstream's patches and its own u_audio.c changes.
+
+--- a/f_uac1.c
++++ b/f_uac1.c
+@@ -195,7 +195,24 @@
+ 	.wLockDelay =		cpu_to_le16(1),
+ };
+ 
+-static struct uac_format_type_i_discrete_descriptor_1 as_in_type_i_desc = {
++/* q2: the AS IN format lists p_srates, the host picks one with SET_CUR to the endpoint, and the module plays
++ * at it from the next packet (docs/iphone-mode.md#per-song-rate). p_rate is the rate in use, rate_sets the
++ * host's sampling frequency SET_CURs to the playback endpoint, rate_asked the last rate one carried. */
++#define Q2_MAX_RATES	6
++DECLARE_UAC_FORMAT_TYPE_I_DISCRETE_DESC(Q2_MAX_RATES);
++static int p_srates[Q2_MAX_RATES] = { 32000, 44100, 48000 };
++static int p_srates_n = 3;
++module_param_array(p_srates, int, &p_srates_n, 0444);
++MODULE_PARM_DESC(p_srates, "playback rates offered; with p_srate not among them, p_srate alone is");
++static unsigned int p_rate, rate_sets, rate_asked;
++module_param(p_rate, uint, 0444);
++MODULE_PARM_DESC(p_rate, "the playback rate in use: the host's last SET_CUR of an offered rate, else p_srate");
++module_param(rate_sets, uint, 0444);
++MODULE_PARM_DESC(rate_sets, "sampling frequency SET_CURs to the playback endpoint");
++module_param(rate_asked, uint, 0444);
++MODULE_PARM_DESC(rate_asked, "the rate the last of them carried, offered or not");
++
++static struct uac_format_type_i_discrete_descriptor_Q2_MAX_RATES as_in_type_i_desc = {
+ 	.bLength =		UAC_FORMAT_TYPE_I_DISCRETE_DESC_SIZE(1),
+ 	.bDescriptorType =	USB_DT_CS_INTERFACE,
+ 	.bDescriptorSubtype =	UAC_FORMAT_TYPE,
+@@ -298,6 +315,35 @@
+  * This function is an ALSA sound card following USB Audio Class Spec 1.0.
+  */
+ 
++/* q2: a request for the sampling frequency control of the playback endpoint (the endpoint in wIndex's low byte) */
++static bool q2_playback_rate_control(u16 w_value, u16 w_index)
++{
++	return (w_value >> 8) == UAC_EP_CS_ATTR_SAMPLE_RATE &&
++		(w_index & 0xff) == as_in_ep_desc.bEndpointAddress;
++}
++
++/* q2: the data stage of the host's SET_CUR: a 3-byte rate, taken when the format lists it */
++static void q2_set_rate_complete(struct usb_ep *ep, struct usb_request *req)
++{
++	struct f_uac1 *uac1 = req->context;
++	u8 *buf = req->buf;
++	unsigned int rate, i;
++
++	if (req->status || req->actual != 3)
++		return;
++	rate = buf[0] | buf[1] << 8 | buf[2] << 16;
++	rate_asked = rate;
++	for (i = 0; i < as_in_type_i_desc.bSamFreqType; i++) {
++		u8 *f = as_in_type_i_desc.tSamFreq[i];
++
++		if ((f[0] | f[1] << 8 | f[2] << 16) == rate) {
++			p_rate = rate;
++			q2_u_audio_set_playback_srate(&uac1->g_audio, rate);
++			return;
++		}
++	}
++}
++
+ static int audio_set_endpoint_req(struct usb_function *f,
+ 		const struct usb_ctrlrequest *ctrl)
+ {
+@@ -312,6 +358,12 @@
+ 
+ 	switch (ctrl->bRequest) {
+ 	case UAC_SET_CUR:
++		if (q2_playback_rate_control(w_value, ep)) {
++			rate_sets++;
++			/* composite_setup sets both again for each request */
++			cdev->req->context = func_to_uac1(f);
++			cdev->req->complete = q2_set_rate_complete;
++		}
+ 		value = len;
+ 		break;
+ 
+@@ -339,15 +391,27 @@
+ {
+ 	struct usb_composite_dev *cdev = f->config->cdev;
+ 	int value = -EOPNOTSUPP;
+-	u8 ep = ((le16_to_cpu(ctrl->wIndex) >> 8) & 0xFF);
++	u8 ep = le16_to_cpu(ctrl->wIndex) & 0xff;
+ 	u16 len = le16_to_cpu(ctrl->wLength);
+ 	u16 w_value = le16_to_cpu(ctrl->wValue);
++	u8 *buf = cdev->req->buf;
++	unsigned int rate = func_to_g_audio(f)->params.p_srate;
+ 
+ 	DBG(cdev, "bRequest 0x%x, w_value 0x%04x, len %d, endpoint %d\n",
+ 			ctrl->bRequest, w_value, len, ep);
+ 
+ 	switch (ctrl->bRequest) {
+ 	case UAC_GET_CUR:
++		/* q2: the rate in use, where 5.10.21 sent whatever the buffer held */
++		if (q2_playback_rate_control(w_value, ep)) {
++			buf[0] = rate;
++			buf[1] = rate >> 8;
++			buf[2] = rate >> 16;
++			value = min_t(u16, len, 3);
++			break;
++		}
++		value = len;
++		break;
+ 	case UAC_GET_MIN:
+ 	case UAC_GET_MAX:
+ 	case UAC_GET_RES:
+@@ -628,7 +692,7 @@
+ 	struct usb_ep			*ep = NULL;
+ 	struct usb_string		*us;
+ 	u8				*sam_freq;
+-	int				rate;
++	int				rate, i, n;
+ 	int				ba_iface_id;
+ 	int				status;
+ 
+@@ -674,9 +738,18 @@
+ 	rate = audio_opts->c_srate;
+ 	sam_freq = as_out_type_i_desc.tSamFreq[0];
+ 	memcpy(sam_freq, &rate, 3);
+-	rate = audio_opts->p_srate;
+-	sam_freq = as_in_type_i_desc.tSamFreq[0];
+-	memcpy(sam_freq, &rate, 3);
++	/* q2: the playback format lists every rate of p_srates when p_srate is one of them, else p_srate alone */
++	n = 0;
++	for (i = 0; i < p_srates_n; i++)
++		if (p_srates[i] == audio_opts->p_srate)
++			n = p_srates_n;
++	for (i = 0; i < (n ? n : 1); i++) {
++		rate = n ? p_srates[i] : audio_opts->p_srate;
++		memcpy(as_in_type_i_desc.tSamFreq[i], &rate, 3);
++	}
++	as_in_type_i_desc.bSamFreqType = n ? n : 1;
++	as_in_type_i_desc.bLength = UAC_FORMAT_TYPE_I_DISCRETE_DESC_SIZE(as_in_type_i_desc.bSamFreqType);
++	p_rate = audio_opts->p_srate;
+ 
+ 	/* allocate instance-specific interface IDs, and patch descriptors */
+ 	status = usb_interface_id(c, f);
+--- a/u_audio.c
++++ b/u_audio.c
+@@ -510,6 +510,26 @@
+ }
+ EXPORT_SYMBOL_GPL(u_audio_stop_playback);
+ 
++/* q2: the host chose srate for the playback endpoint (f_uac1.c's SET_CUR). The PCM opens at it from now on;
++ * with the endpoint running, the next packet is sized for it, as u_audio_start_playback sizes the first. It runs
++ * from ep0's completion, which can meet a playback completion on the other CPU: that one packet may then be a
++ * frame long or short. */
++void q2_u_audio_set_playback_srate(struct g_audio *audio_dev, int srate)
++{
++	struct snd_uac_chip *uac = audio_dev->uac;
++	unsigned int maxpacket = audio_dev->in_ep->maxpacket;
++
++	audio_dev->params.p_srate = srate;
++	if (!uac->p_prm.ep_enabled)
++		return;
++	uac->p_pktsize = min_t(unsigned int, uac->p_framesize * (srate / uac->p_interval), maxpacket);
++	if (uac->p_pktsize < maxpacket)
++		uac->p_pktsize_residue = uac->p_framesize * (srate % uac->p_interval);
++	else
++		uac->p_pktsize_residue = 0;
++	uac->p_residue = 0;
++}
++
+ int g_audio_setup(struct g_audio *g_audio, const char *pcm_name,
+ 					const char *card_name)
+ {
+--- a/u_audio.h
++++ b/u_audio.h
+@@ -81,5 +81,6 @@
+ void u_audio_stop_capture(struct g_audio *g_audio);
+ int u_audio_start_playback(struct g_audio *g_audio);
+ void u_audio_stop_playback(struct g_audio *g_audio);
++void q2_u_audio_set_playback_srate(struct g_audio *g_audio, int srate);
+ 
+ #endif /* __U_AUDIO_H */
