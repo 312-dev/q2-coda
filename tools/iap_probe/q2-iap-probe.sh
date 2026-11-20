@@ -5,7 +5,7 @@
 # as the source, then a FunctionFS HID interface), runs q2-iap-probe on its FunctionFS instances to log what the
 # host sends, and hands the controller back to the ADB gadget when done.
 #
-#   q2-iap-probe.sh start [--plan desk|car|m1|PHASES] [--for S] [--delay S] [--sessions N] [--tone] [--carplay] [--force]
+#   q2-iap-probe.sh start [--plan desk|car|m1|m3|PHASES] [--for S] [--delay S] [--sessions N] [--tone] [--carplay] [--force]
 #   q2-iap-probe.sh stop        tear the gadget down now and give the controller back to adb
 #   q2-iap-probe.sh status      what runs, the controller's state, the log's last lines
 #
@@ -15,8 +15,9 @@
 # from tools/uac1_module's usb_f_uac1.ko, loaded from beside this script if it is not yet: at the desk only) or :tone
 # (play a -20 dBFS 1 kHz tone into the gadget's sound card while it is up), :linuxid (desk only: Linux's
 # FunctionFS ID 1d6b:0106 in place of Apple's, so Windows' own audio driver takes the audio function), or :iap2 (the probe speaks iAP2, milestone
-# M1). desk is "full:echo:tone" until --for runs out; car is "full full:echo min:echo" and m1 "full:iap2 min:iap2",
-# one session (a plug, docs/iphone-mode.md#sessions) each, then the restore.
+# M1). desk is "full:echo:tone" until --for runs out; car is "full full:echo min:echo", m1 "full:iap2 min:iap2" and
+# m3 "full:iap2:uac1 full:iap2" (USB Audio 1.0 first, as a real iPhone has; the kernel's UAC2 second), one session (a
+# plug, docs/iphone-mode.md#sessions) each, then the restore.
 # --for (default 900, at most 3600) is the hard limit from start: the runner stops there, and a separate watchdog
 # forces the stop 60 s later if the runner has not. --delay waits that long first, with adb still up, so the cable
 # can be moved from the computer to the car.
@@ -131,7 +132,10 @@ gadget_up() {
         args="$args $FFS/iap$n:$k"
     done
     left=$((DEADLINE - $(date +%s)))
-    $PROBE --phase "$1" --for $left --sessions $SESSIONS $echo $iap2 $ECHO_FROM $CARPLAY "$LOG" $args </dev/null >/dev/null 2>>"$LOG" &
+    # the gadget's card as the player opens it (player/output.c output_car): ALSA's id is the function's card name
+    # without its underscore (u_audio: "UAC1_Gadget", "UAC2_Gadget"; seen as [UAC2Gadget] in the car)
+    case $audio in uac1) pcm=hw:CARD=UAC1Gadget,0 ;; uac2) pcm=hw:CARD=UAC2Gadget,0 ;; *) pcm=null ;; esac
+    $PROBE --phase "$1" --for $left --sessions $SESSIONS $echo $iap2 --car-pcm $pcm $ECHO_FROM $CARPLAY "$LOG" $args </dev/null >/dev/null 2>>"$LOG" &
     echo $! > $RUN/probe.pid
     # every instance's endpoints exist once the probe has written its descriptors
     i=0
@@ -301,6 +305,7 @@ start() {
     desk) PLAN="full:echo:tone" SESSIONS=${SESSIONS:-0} ;;
     car) PLAN="full full:echo min:echo" SESSIONS=${SESSIONS:-1} ;;
     m1) PLAN="full:iap2 min:iap2" SESSIONS=${SESSIONS:-1} ;;
+    m3) PLAN="full:iap2:uac1 full:iap2" SESSIONS=${SESSIONS:-1} ;;
     *) SESSIONS=${SESSIONS:-0} ;;
     esac
     [ -n "$TONEALL" ] && PLAN=$(for p in $PLAN; do printf '%s%s ' "$p" "$TONEALL"; done)
@@ -376,5 +381,5 @@ stop) stop ;;
 status) status ;;
 _runner) runner ;;
 _watchdog) watchdog "$2" ;;
-*) echo "usage: $0 start [--plan desk|car|m1|PHASES] [--for S] [--delay S] [--sessions N] [--tone] [--carplay] [--force] | stop | status" >&2; exit 2 ;;
+*) echo "usage: $0 start [--plan desk|car|m1|m3|PHASES] [--for S] [--delay S] [--sessions N] [--tone] [--carplay] [--force] | stop | status" >&2; exit 2 ;;
 esac

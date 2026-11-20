@@ -39,6 +39,7 @@ int snd_pcm_delay(snd_pcm_t *, snd_pcm_sframes_t *);
 snd_pcm_sframes_t snd_pcm_avail(snd_pcm_t *);
 snd_pcm_sframes_t snd_pcm_forward(snd_pcm_t *, snd_pcm_uframes_t);
 snd_pcm_sframes_t snd_pcm_rewindable(snd_pcm_t *);
+int snd_pcm_wait(snd_pcm_t *, int);
 snd_pcm_sframes_t snd_pcm_rewind(snd_pcm_t *, snd_pcm_uframes_t);
 int snd_pcm_pause(snd_pcm_t *, int);
 int snd_pcm_drop(snd_pcm_t *);

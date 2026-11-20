@@ -1,8 +1,9 @@
 # Desk rehearsal of milestone M1 on Windows (docs/iphone-mode.md#iap2): a stand-in car, speaking iAP2 to the Q2's
 # iPhone HID interface through Windows' own HID driver, so the Q2's real kernel, FunctionFS, writer and interrupt
 # endpoint carry it. The detect, a SYN, the ACK, a 900-byte certificate in several output reports, the challenge's
-# answer, an identification, then StartPowerUpdates, StartNowPlayingUpdates and StartUSBDeviceModeAudio; each step's
-# answer checked and printed. Needs the probe in a min:iap2 phase (Apple's driver leaves configuration 2's HID
+# answer, an identification, then StartPowerUpdates, StartNowPlayingUpdates and StartUSBDeviceModeAudio, then the
+# BMW's own StartHID and a Pause press (the probe's log names it: Pause, so a desk run skips no song), and a cover
+# asked for, set up on the file transfer session and taken in pieces; each step's answer checked and printed. Needs the probe in a min:iap2 phase (Apple's driver leaves configuration 2's HID
 # interface to Windows only then). Exit 0 when every step answered as an iPhone does.
 #   powershell -NoProfile -ExecutionPolicy Bypass -File hid-car.ps1
 $ErrorActionPreference = 'Stop'
@@ -83,10 +84,21 @@ public static class Car {
     static byte[] Cat(params byte[][] a) { var l = new List<byte>(); foreach (var x in a) l.AddRange(x); return l.ToArray(); }
     static byte[] Msg(int id, params byte[][] ps) { byte[] body = Cat(ps); byte[] m = new byte[6 + body.Length]; m[0] = 0x40; m[1] = 0x40; m[2] = (byte)(m.Length >> 8); m[3] = (byte)m.Length; m[4] = (byte)(id >> 8); m[5] = (byte)id; Array.Copy(body, 0, m, 6, body.Length); return m; }
     static void Send(byte[] m) { seq++; Write(Pkt(0x40, seq, ack, 10, m)); }
+    static List<byte[]> files = new List<byte[]>();
+    // the next control message; file transfer packets (session 11) are kept in files, bare ACKs passed over
     static int Recv(out byte[] m) {
-        byte[] p = Packet(3000); ack = p[5];
-        m = new byte[p.Length - 10]; Array.Copy(p, 9, m, 0, m.Length);
-        return m[4] << 8 | m[5];
+        while (true) {
+            byte[] p = Packet(3000);
+            if (p.Length <= 9) continue;
+            ack = p[5];
+            m = new byte[p.Length - 10]; Array.Copy(p, 9, m, 0, m.Length);
+            if (p[7] == 11) { files.Add(m); continue; }
+            return m[4] << 8 | m[5];
+        }
+    }
+    static byte[] FilePacket() {
+        while (files.Count == 0) { byte[] m; int id = Recv(out m); Say("      (control " + id.ToString("X4") + " while waiting for the cover)"); }
+        byte[] f = files[0]; files.RemoveAt(0); return f;
     }
     static byte[] Ids(params int[] ids) { byte[] b = new byte[ids.Length * 2]; for (int i = 0; i < ids.Length; i++) { b[2 * i] = (byte)(ids[i] >> 8); b[2 * i + 1] = (byte)ids[i]; } return b; }
 
@@ -127,6 +139,39 @@ public static class Car {
         Check(id == 0x5001, "NowPlayingUpdate: " + System.Text.Encoding.UTF8.GetString(m, 6, Math.Min(m.Length - 6, 60)).Replace("\0", "|"));
         Send(Msg(0xDA00));
         Check(Recv(out m) == 0xDA01 && m[10] == 7, "USBDeviceModeAudioInformation, rate index 7 (44.1 kHz)");
+        byte[] hid = { 0x00,0x06,0x00,0x00,0x00,0x01, 0x00,0x06,0x00,0x01,0x05,0xac, 0x00,0x06,0x00,0x02,0x02,0x3c,
+            0x00,0x25,0x00,0x04, 0x05,0x0c,0x09,0x01,0xa1,0x01,0x15,0x00,0x25,0x01,0x75,0x01,0x95,0x05,
+            0x09,0xb0,0x09,0xb1,0x09,0xb5,0x09,0xb6,0x09,0xb9,0x81,0x02,0x75,0x01,0x95,0x03,0x81,0x03,0xc0 };
+        byte[] start = new byte[6 + hid.Length]; start[0] = 0x40; start[1] = 0x40; start[3] = (byte)start.Length; start[4] = 0x68;
+        Array.Copy(hid, 0, start, 6, hid.Length);
+        Send(start);
+        Send(Msg(0x6802, P(0, new byte[] { 0, 1 }), P(1, new byte[] { 0x02 })));
+        Send(Msg(0x6802, P(0, new byte[] { 0, 1 }), P(1, new byte[] { 0x00 })));
+        Say("ok    StartHID (the BMW's) and a Pause press sent: the probe's log has 'usage b1 pressed: pause'");
+        Send(Msg(0x5000, P(0, Cat(P(1, new byte[0]), P(0x1a, new byte[0]))), P(1, P(0, new byte[0]))));
+        int np = Recv(out m);
+        int at = 6; int tid = -1;
+        while (at + 4 <= m.Length) { int n = m[at] << 8 | m[at + 1], pid = m[at + 2] << 8 | m[at + 3];
+            if (pid == 0) { int g = at + 4; while (g + 4 <= at + n) { int gn = m[g] << 8 | m[g + 1], gid = m[g + 2] << 8 | m[g + 3]; if (gid == 0x1a) tid = m[g + 4]; g += gn; } }
+            at += n; }
+        Check(np == 0x5001 && tid >= 0x80, "NowPlayingUpdate names an artwork transfer: " + tid.ToString("X2"));
+        byte[] setup = FilePacket();
+        long size = 0; for (int i = 2; i < 10; i++) size = size << 8 | setup[i];
+        Check(setup[0] == tid && setup[1] == 4 && setup[10] == 0 && setup[11] == 2, "its setup on the file transfer session: " + size + " bytes");
+        seq++; Write(Pkt(0x40, seq, ack, 11, new byte[] { (byte)tid, 0x01 }));
+        long got = 0; int pieces = 0; bool end = size == 0;
+        var jpeg = new List<byte>();
+        while (!end) {
+            byte[] f = FilePacket(); pieces++;
+            for (int i = 2; i < f.Length; i++) jpeg.Add(f[i]);
+            got += f.Length - 2; end = f[1] == 0x40 || f[1] == 0xC0;
+        }
+        if (size == 0) { byte[] f = FilePacket(); Check(f[1] == 0xC0 && f.Length == 2, "no cover for this song: the empty transfer"); }
+        else {
+            Check(got == size && jpeg[0] == 0xff && jpeg[1] == 0xd8, "the cover in " + pieces + " pieces, " + got + " bytes, a JPEG");
+            File.WriteAllBytes(Environment.GetEnvironmentVariable("TEMP") + "\\q2-car-cover.jpg", jpeg.ToArray());
+        }
+        seq++; Write(Pkt(0x40, seq, ack, 11, new byte[] { (byte)tid, 0x05 }));
         return fails == 0 ? 0 : 1;
     }
 }

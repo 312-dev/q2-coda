@@ -936,6 +936,72 @@ def test_bt_resample_96_48(player, songs, tmp): return check_bt_split(player, so
 def test_bt_resample_44_96(player, songs, tmp): return check_bt_split(player, songs, tmp, 'bt-pair', 'bt-whole', 'whole.wav', 96000, 3840000)
 
 
+def car_player():
+    """The player built with route 1's car output (--dev builds' Q2_CAR_USB, docs/iphone-mode.md#car-audio)."""
+    return subprocess.run([sys.executable, ROOT/'tools/player.py', 'build', 'host', 'car'], check=True, capture_output=True,
+                          text=True).stdout.strip()
+
+
+def car_steps(songs, car, at_on=None, at_off=None, flag=0):
+    """Bluetooth at half volume (the car plays at unity whatever it is), a1 then c96; the car's file written at at_on
+    and removed at at_off (None: there from the start, and to the end)."""
+    on = lambda s: car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    off = lambda s: car.unlink()
+    steps = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'),
+             (0.1, fakedemo.vol(50, 50)), (1.0, fakedemo.song('set-songurl', f'{songs}/a1.flac', flag=flag))]
+    if at_on is not None: steps.append((at_on, on))
+    if at_off is not None: steps.append((at_off, off))
+    return steps
+
+
+def car_play(songs, tmp, name, steps, player, car, speed=4):
+    s = fakedemo.Session(tmp/name)
+    s.music = songs
+    # the gadget's card takes S16_LE alone (q2-iap-probe.sh: p_ssize 2)
+    s.run(steps, fakedemo.launch_host(player, str(songs), speed, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16'}), speed)
+    pcm = sorted((tmp/name/'pcm').glob('*.raw'))
+    return [p.name for p in pcm], [p.read_bytes() for p in pcm], (tmp/name/'player.log').read_text()
+
+
+def test_car_way(player, songs, tmp):
+    """While the car wants its audio (the probe's car file), demo's Bluetooth way is the car's: one PCM at the car's
+    44.1 kHz, 16-bit, at unity whatever Bluetooth's volume (the car's knob is its volume), a1 bit for bit, and a 96
+    kHz song after it resampled into the same PCM, which stays open, so the car's stream never stops."""
+    cp, car = car_player(), tmp/'car-on.audio'
+    car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    steps = car_steps(songs, car, flag=1) + [(16.0, fakedemo.gapless(f'{songs}/c96.flac', flag=1)), (24.0, '{mcl-stop\\null}'),
+                                             (25.0, None)]
+    names, pcm, log = car_play(songs, tmp, 'car-on', steps, cp, car, speed=8)
+    assert [n.split('_', 1)[1] for n in names] == ['44100_2_s16_car.raw'], names
+    a1 = reference(songs/'a1.flac')
+    assert pcm[0][:len(a1)] == a1, f'a1 into the car is the reference at unity; first difference at frame {(first_difference(pcm[0], a1) or 0) // 4}'
+    assert len(pcm[0]) > len(a1) + 44100 * 4 * 2, 'the 96 kHz song after it, gapless, resampled into the same PCM'
+    return f'{len(pcm[0]) // 4} frames into one car PCM, a1 exact'
+
+
+def test_car_way_follows_the_car(player, songs, tmp):
+    """The car asks for its audio while a1 plays over Bluetooth, then stops: a1 moves to the car's PCM where it is, then
+    back to Bluetooth's, three PCMs in turn, the car's a stretch of a1 itself, unbroken."""
+    cp, car = car_player(), tmp/'car-switch.audio'
+    steps = car_steps(songs, car, at_on=3.0, at_off=6.0) + [(8.0, '{mcl-stop\\null}'), (9.0, None)]
+    names, pcm, log = car_play(songs, tmp, 'car-switch', steps, cp, car)
+    assert [n.split('_', 1)[1] for n in names] == ['48000_2_s16_bt.raw', '44100_2_s16_car.raw', '48000_2_s16_bt.raw'], names
+    a1, mid = reference(songs/'a1.flac'), pcm[1]
+    assert len(mid) > 44100 * 4 and mid[:len(mid) - len(mid) % 4] in a1, 'the car heard a1 itself, one stretch of it'
+    assert 'output way 3 now' in log and 'output way 1 now' in log, log[-800:]
+    return f'Bluetooth, {len(mid) // 4} frames to the car, Bluetooth'
+
+
+def test_car_way_needs_the_dev_build(player, songs, tmp):
+    """A release build's player has no car way: the car's file changes nothing."""
+    car = tmp/'car-release.audio'
+    car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    steps = car_steps(songs, car) + [(3.0, '{mcl-stop\\null}'), (4.0, None)]
+    names, _, _ = car_play(songs, tmp, 'car-release', steps, player, car)
+    assert [n.split('_', 1)[1] for n in names] == ['48000_2_s16_bt.raw'], names
+    return 'Bluetooth, as without a car'
+
+
 def test_bt_formats_and_volume(player, songs, tmp):
     """Bluetooth (the 'bt' scenario, as stock's capture of it): each song in its own format at the transport's 48 kHz,
     and the volume's levels in turn, measured against the song: 1, 25/256, 10/256, 484/256 (clipped), 163/256 left

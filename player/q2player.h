@@ -124,6 +124,12 @@ int output_take(struct output *, const struct pcm_format *f, int outputway);
 void output_volume(struct output *, int volume);
 void volume_gains(int volume, float gain[2]); /* left, right */
 int output_write(struct output *, const uint8_t *data, int frames);
+/* output_write's answer when the car stopped taking audio (way 3, docs/iphone-mode.md#car-audio) */
+#define OUTPUT_CAR_GONE (-2)
+/* Route 1's car output, way 3 (--dev builds, Q2_CAR_USB): 1 while the iPhone gadget's car wants USB audio, with its
+ * ALSA device and rate when asked; output_car_gone forgets that until the car asks again. */
+int output_car(char *device, unsigned cap, unsigned *rate);
+void output_car_gone(void);
 int64_t output_delay(struct output *); /* frames written and not yet played, at the rate written */
 void output_pause(struct output *, int on);
 void output_drop(struct output *);     /* forget what is buffered: a seek, a skip, a stop */

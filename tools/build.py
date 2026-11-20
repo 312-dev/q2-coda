@@ -2817,7 +2817,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     alsa = out/'player-alsa/libasound.so.2.0.0'
     alsa.parent.mkdir(exist_ok=True)
     alsa.write_bytes(cat('usr/lib/libasound.so.2.0.0'))
-    q2player = build_player('mips', alsa=alsa)
+    q2player = build_player('mips', alsa=alsa, car_usb=dev)  # route 1's car output in --dev builds alone
     player_added = []
     # The card apps the firmware carries (BUNDLED_APPS): folders as usr/lib is, the app and its launcher as a
     # stock program is, the rest as a stock data file is

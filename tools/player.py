@@ -10,6 +10,7 @@ there. Results are cached under ~/.cache/q2-player (Q2_PLAYER_CACHE), keyed by t
 
     python3 tools/player.py ffmpeg host|mips    # build or reuse FFmpeg, print its prefix
     python3 tools/player.py build host|mips     # build player/ against it, print the binary
+    python3 tools/player.py build host|mips car # the same with route 1's car output (--dev builds: docs/iphone-mode.md#car-audio)
     python3 tools/player.py sizes mips          # the binary's size and what each library adds
 """
 import hashlib, os, pathlib, shutil, subprocess, sys, tarfile
@@ -156,12 +157,13 @@ def ffmpeg(target):  # pragma: no mutate block
     return prefix
 
 
-def build(target, alsa=None):  # pragma: no mutate block
+def build(target, alsa=None, car_usb=False):  # pragma: no mutate block
     """player/ compiled and linked for target; the binary's path. For mips, alsa is the libasound.so.2 to link
-    against, by default an unpacked stock root filesystem's (Q2_STOCKFS)."""
+    against, by default an unpacked stock root filesystem's (Q2_STOCKFS). car_usb (--dev builds): route 1's car
+    output, way 3 (docs/iphone-mode.md#car-audio), in a build directory of its own, so the two never share objects."""
     ff = ffmpeg(target)
     tls = mbedtls(target)
-    out = ROOT/'player/build'/target
+    out = ROOT/'player/build'/(target + ('-car' if car_usb else ''))
     cc = ['cc'] if target == 'host' else [f'{toolchain()}/{TRIPLE}-gcc', *ARCH]
     strip = 'strip' if target == 'host' else f'{toolchain()}/{TRIPLE}-strip'
     # patch/peq.h's files (the EQ state, the fade, the taps) under the directory a host test starts the player in
@@ -174,6 +176,8 @@ def build(target, alsa=None):  # pragma: no mutate block
             sys.exit(f'player: no {alsa}; set Q2_STOCKFS to an unpacked stock root filesystem')
         extra.append(f'ALSA={alsa}')
     extra.append(f'TLS=-L{tls}/lib -lmbedtls -lmbedx509 -lmbedcrypto')
+    if car_usb:
+        extra.append('EXTRA_CFLAGS=-DQ2_CAR_USB')
     run('make', '-C', ROOT/'player', f'OUT={out}', 'CC=' + ' '.join(map(str, cc)), f'STRIP={strip}', f'FFMPEG={ff}',
         f'TARGET={target}', f'-j{JOBS}', *extra, log=_log(target))
     return out/'q2player'
@@ -185,13 +189,15 @@ def _log(target):
 
 
 def main():
-    if len(sys.argv) != 3 or sys.argv[1] not in ('ffmpeg', 'build', 'sizes') or sys.argv[2] not in ('host', 'mips'):
+    car = sys.argv[3:] == ['car']
+    if len(sys.argv) not in (3, 4) or sys.argv[1] not in ('ffmpeg', 'build', 'sizes') or sys.argv[2] not in ('host', 'mips') \
+            or (len(sys.argv) == 4 and not car):
         sys.exit(__doc__)
-    what, target = sys.argv[1:]
+    what, target = sys.argv[1:3]
     if what == 'ffmpeg':
         print(ffmpeg(target))
     elif what == 'build':
-        print(build(target))
+        print(build(target, car_usb=car))
     else:
         binary = build(target)
         print(f'{binary}: {binary.stat().st_size} bytes')
