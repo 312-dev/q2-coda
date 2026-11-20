@@ -1,14 +1,17 @@
 /* The status row's glyph slots (docs/oled-design.md#status-row,
  * docs/internals.md#status-row-slots): right to left the battery, the play state's level bars,
- * Wi-Fi, a card app's sync, Bluetooth (its link, a headset's battery, a car) and Buttons Lock's
- * padlock. Each slot that shows takes its box and the gap before the one on its right; the clock
- * sits beside the leftmost (navigation.c clock_place), so nothing in the row ever wraps: the title
- * gives way. The battery is stock's view_battery, laid out by the bar's right group and painted by
- * navigation.c paint_battery; every other slot is painted here, from the bar's background
- * (ringnav_paint_bg), so Home in Split inks them with the clock over its art (coverflow.c home_ink,
- * one ink for the row). Every glyph is the clock's digits' height, 11 px on rows 17 to 27 (cy 23),
- * with SR_GAP of ground between two (docs/oled-design.md#status-row); the animated ones repaint
- * only their own box. */
+ * Wi-Fi, a card app's sync, Bluetooth (its link, a headset's battery, a car), Buttons Lock's
+ * padlock and a card app's server out of reach. Each slot that shows takes its box and the gap
+ * before the one on its right. On a full-width row the clock holds the centre (navigation.c
+ * clock_place) and the slots left of the battery are a strip with the room from the clock to the
+ * battery (status_strip_room); a strip wider than that scrolls in it as a marquee, its cut ends
+ * faded, and the battery never moves. Home in Split has no room set: there the clock sits beside
+ * the leftmost slot. Nothing in the row ever wraps. The battery is stock's view_battery, laid out
+ * by the bar's right group and painted by navigation.c paint_battery; every other slot is painted
+ * here, from the bar's background (ringnav_paint_bg), so Home in Split inks them with the clock
+ * over its art (coverflow.c home_ink, one ink for the row). Every glyph is the clock's digits'
+ * height, 11 px on rows 17 to 27 (cy 23), with SR_GAP of ground between two
+ * (docs/oled-design.md#status-row); the animated ones repaint only their own box. */
 #include "navigation.h"
 
 #define SR_FRAME_MS 125 /* the sync arrows: 8 frames a second */
@@ -40,6 +43,15 @@
 #define SR_TAP_W 44 /* a slot's tap target round its centre, as the battery's */
 #define SR_TAP_H 40
 #define SR_TAP_SLOP 12
+/* cloud-slash: 13.6 px of ink at 11 tall (tools/art.py status_offline) */
+#define SR_OFFLINE SR_GLYPH
+/* The strip's marquee (docs/oled-design.md#status-row): at rest SR_MARQ_HOLD_MS, its left end in
+ * view, then sliding left at SR_MARQ_PX_S until its right end meets the battery's gap, held there
+ * MARQUEE_HOLD_MS, then back to rest, as Now Playing's lines (np_marquee.c); a SR_MARQ_FADE px fade
+ * on each end whose glyphs are cut, the house marquee's 12 tightened (the user's, 2026-11-19). */
+#define SR_MARQ_HOLD_MS 2750
+#define SR_MARQ_PX_S 35
+#define SR_MARQ_FADE 6
 #define SR_TOUCH_DOWN 0xff /* the raw pointer events ringnav_input sees (EVT_POINTER_FIRST) */
 #define SR_TOUCH_UP 0x103
 
@@ -61,6 +73,9 @@ static struct {
     unsigned char seen;       /* the play slot shown at the last sync */
     unsigned char xf_dirty;   /* the dissolve's box still to repaint */
     int down, down_x, down_y; /* the slot a touch went down on, + 1 */
+    int room;                 /* the strip's left edge (status_strip_room), 0 for none */
+    int over, off;            /* px the strip runs past its room, and how far it is slid now */
+    unsigned marq_at;         /* the marquee's cycle's start */
 } sr __attribute__((section(".scratch")));
 
 #if Q2POD_DEV
@@ -159,6 +174,7 @@ static int headset_shown(void) {
                                      : SR_GLYPH;
 }
 static int lock_shown(void) { return g_keylock_flag ? SR_LOCK : 0; }
+static int offline_shown(void) { return addon_offline() ? SR_OFFLINE : 0; }
 
 /* The play state, in Text Primary as every glyph: playing, the level bars (ui_kit.h lvl_h16, the
  * motion Up Next's and Home's share), 2 px wide with round ends, SR_BAR_LO to SR_INK tall at their
@@ -316,6 +332,12 @@ static void lock_paint(void *bar, void *canvas, int x, int cy) {
     glyph(bar, canvas, "keylock", x, SR_LOCK, cy, SR_LOCK);
 }
 
+/* A card app's server out of reach (addon.c addon_offline): Phosphor's cloud-slash (bold) in
+ * Warning, in both halves. */
+static void offline_paint(void *bar, void *canvas, int x, int cy) {
+    status_art(bar, canvas, "status_offline", x, cy);
+}
+
 /* Right to left; the battery's own row is stock's widget (shown is never called for it). Every gap
  * is SR_GAP, iOS's (mock_status_icons.py): more than coverflow.c's INK_GAP, so Split still tells a
  * status colour's glyph from the rest. */
@@ -326,11 +348,28 @@ static const status_slot_t slots[SLOT_N] = {
     [SLOT_SYNC] = { sync_shown, SR_GAP, sync_paint },
     [SLOT_HEADSET] = { headset_shown, SR_GAP, headset_paint },
     [SLOT_LOCK] = { lock_shown, SR_GAP, lock_paint },
+    [SLOT_OFFLINE] = { offline_shown, SR_GAP, offline_paint },
 };
+
+/* The strip's room's left edge, the bar's pixels (clock_place: SR_GAP's worth past the centred
+ * clock's widest); 0 for none (Home in Split, where the clock goes beside the slots). */
+void status_strip_room(int left) { sr.room = left > 0 ? left : 0; }
+
+/* How far the marquee has slid at t ms into its cycle, 0 to over. */
+static int strip_off(int over, unsigned t) {
+    unsigned slide = (unsigned)over * 1000u / SR_MARQ_PX_S,
+             cycle = SR_MARQ_HOLD_MS + slide + MARQUEE_HOLD_MS;
+    t %= cycle;
+    if (t < SR_MARQ_HOLD_MS) return 0;
+    t -= SR_MARQ_HOLD_MS;
+    return t >= slide ? over : (int)(t * SR_MARQ_PX_S / 1000u);
+}
 
 /* The slots laid out from the battery's left, in the bar's pixels (its right group is a child of
  * the bar, which sits at the screen's top); returns the leftmost shown slot's left, or -1 with no
- * battery slot yet. */
+ * battery slot yet. A strip that runs past its room's left edge (sr.over px) is moved right by what
+ * the marquee has not slid yet, so at rest its left end is in view, and the room's edge is
+ * returned. */
 static int layout(void) {
     void *slot = st.bar_slot;
     if (!slot || !P(slot, W_PARENT)) return -1;
@@ -341,7 +380,21 @@ static int layout(void) {
         sr.w[i] = w;
         if (w) edge = sr.x[i] = edge - slots[i].gap - w;
     }
-    return edge;
+    sr.over = sr.room && edge < sr.room ? sr.room - edge : 0;
+    if (!sr.over) return sr.off = 0, edge;
+    if (sr.off > sr.over) sr.off = sr.over;
+    for (int i = SLOT_BATTERY + 1; i < SLOT_N; ++i)
+        if (sr.w[i]) sr.x[i] += sr.over - sr.off;
+    return sr.room;
+}
+
+/* The strip's ends that fade now: 1 the left while it is slid, 2 the right while it runs past */
+static int strip_ends(void) { return (sr.off > 0) | (sr.off < sr.over) << 1; }
+
+/* The strip's box while it scrolls: from its room's edge to SR_GAP short of the battery. */
+static rect_t strip_box(void *bar) {
+    rect_t r = { sr.room, 0, sr.x[SLOT_BATTERY] - SR_GAP - sr.room, bar ? I(bar, W_H) : 0 };
+    return r;
 }
 
 /* The leftmost shown slot's left (the battery's with no other), the edge the clock stands beside;
@@ -367,9 +420,30 @@ void status_slots_paint(void *bar, void *canvas) {
     void *lcd = P(canvas, CANVAS_LCD);
     if (!lcd || layout() < 0) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), raw = ui_ink_raw(1);
-    int cy = geom_val(V_STATUS_Y);
+    int cy = geom_val(V_STATUS_Y), was[4], faded = 0;
+    /* a strip that scrolls: clipped to its box (the vgcanvas takes the canvas's clip), its cut ends
+     * faded */
+    if (sr.over) {
+        rect_t box = strip_box(bar);
+        int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y);
+        canvas_get_clip_rect(canvas, was);
+        rect_t in = { box.x + ox, box.y + oy, box.w, box.h };
+        if (in.x < was[0]) in.w -= was[0] - in.x, in.x = was[0];
+        if (in.y < was[1]) in.h -= was[1] - in.y, in.y = was[1];
+        if (in.x + in.w > was[0] + was[2]) in.w = was[0] + was[2] - in.x;
+        if (in.y + in.h > was[1] + was[3]) in.h = was[1] + was[3] - in.y;
+        if (in.w < 0) in.w = 0;
+        if (in.h < 0) in.h = 0;
+        canvas_set_clip_rect(canvas, &in);
+        faded = text_fade_under_n(canvas, box.x, box.x + box.w, box.y, box.h, strip_ends(),
+                                  SR_MARQ_FADE);
+    }
     for (int i = SLOT_BATTERY + 1; i < SLOT_N; ++i)
         if (sr.w[i]) slots[i].paint(bar, canvas, sr.x[i], cy);
+    if (sr.over) {
+        if (faded) text_fade(canvas);
+        canvas_set_clip_rect(canvas, (rect_t *)was);
+    }
     vol_pill_paint(bar, canvas); /* a volume change's pill, in the clock's place (vol_pill.c) */
     ui_ink_raw(raw);
     stock_canvas_set_fill_color(canvas, fill);
@@ -386,10 +460,13 @@ int status_slot_at(int x, int y) {
     void *row = P(slot, W_PARENT);
     int cy = I(row, W_Y) + (I(row, W_H) + 1) / 2, best = -1, near = 1 << 30;
     if (y < cy - SR_TAP_H / 2 || y >= cy + SR_TAP_H / 2) return -1;
+    rect_t strip = strip_box(bar);
     for (int i = 0; i < SLOT_N; ++i) {
         if (i != SLOT_BATTERY && !sr.w[i]) continue;
         int cx = sr.x[i] + (i == SLOT_BATTERY && !st.batt_mode ? geom_val(V_BATT_W) : sr.w[i]) / 2,
             d = x - cx;
+        if (i != SLOT_BATTERY && sr.over && (cx < strip.x || cx >= strip.x + strip.w))
+            continue; /* scrolled out of the strip's box */
         if (d < -SR_TAP_W / 2 || d >= SR_TAP_W / 2) continue;
         if (d < 0) d = -d;
         if (d < near) near = d, best = i;
@@ -452,16 +529,15 @@ static int sr_tick(const void *info) {
  * row stays as it is). */
 static void play_box_dirty(void) {
     void *bar = *(void *const *)system_bar;
-    if (!bar || !g_backlight_status || layout() < 0 || !sr.w[SLOT_PLAY])
-        return;
+    if (!bar || !g_backlight_status || layout() < 0 || !sr.w[SLOT_PLAY]) return;
     rect_t r = { sr.x[SLOT_PLAY], 0, SR_BARS_W, I(bar, W_H) };
     widget_invalidate_force(bar, &r);
 }
 /* Whether the bars move: lit, playing, the slot shown and not dissolving, and motion allowed
  * (MO_DECOR: still under Reduce Motion). Their clock runs only then. */
 static int bars_moving(void) {
-    return g_backlight_status && bar_status() == 2 && play_shown() &&
-           !anim_running(&sr.xfade) && motion_ms(SR_FRAME_MS, MO_DECOR);
+    return g_backlight_status && bar_status() == 2 && play_shown() && !anim_running(&sr.xfade) &&
+           motion_ms(SR_FRAME_MS, MO_DECOR);
 }
 /* The shared loop timer's (ui_kit.c motion_loop), MO_LOOP_MS apart while the bars move: their box
  * repainted at the clock's time; 0 (dropped) once they stop. */
@@ -505,16 +581,40 @@ static void play_xfade_sync(void) {
     bars_sync();
 }
 
+/* The shared loop's (ui_kit.c motion_loop) while the strip runs past its room and the screen is
+ * lit: the marquee's offset at its cycle's time, the strip's box alone repainted when it moved; 0
+ * (dropped) once the strip fits. A report of what shows (MO_FEEDBACK's kind), so it runs under
+ * Reduce Motion too, as the house marquee does. */
+static int sr_strip_frame(void) {
+    void *bar = *(void *const *)system_bar;
+    if (!bar || !g_backlight_status || layout() < 0 || !sr.over) return sr.off = 0, 0;
+    int off = strip_off(sr.over, (unsigned)time_now_ms() - sr.marq_at);
+    if (off != sr.off) {
+        sr.off = off;
+        rect_t r = strip_box(bar);
+        widget_invalidate_force(bar, &r);
+    }
+    return 1;
+}
+
 /* bar_state_sync, each bar paint and each second: the play state's dissolve started on a change,
- * the bars' loop while they move, the arrows' timer while lit and they turn; 1 when what the slots
- * show changed (which slots, the play state, Wi-Fi's level or its internet, the sync's kind and its
- * ring to the 50th, the Bluetooth slot's kind and the headset's level, the lock), so the bar
- * repaints whole after the frame and the clock moves beside the new leftmost slot. */
+ * the bars' loop while they move, the strip's marquee while it runs past its room (from rest when
+ * it newly does), the arrows' timer while lit and they turn; 1 when what the slots show changed
+ * (which slots, the play state, Wi-Fi's level or its internet, the sync's kind and its ring to the
+ * 50th, the Bluetooth slot's kind and the headset's level, the lock, a server out of reach, the
+ * strip scrolling or not), so the bar repaints whole after the frame and, in Home's Split, the
+ * clock moves beside the new leftmost slot. */
 int status_row_sync(void) {
 #if Q2POD_DEV
     vol_pill_fake(); /* the emulator's stand-in for a headset's volume (vol_pill.c) */
 #endif
     play_xfade_sync();
+    int over = sr.over;
+    if (layout() >= 0 && sr.over && g_backlight_status) {
+        if (sr.over != over)
+            sr.marq_at = (unsigned)time_now_ms(), sr.off = 0; /* a new strip starts at rest */
+        motion_loop(sr_strip_frame);
+    }
     if (!sr.timer && g_backlight_status && moving())
         sr.timer = timer_add(sr_tick, (void *)0, SR_FRAME_MS);
     int permille = 0, kind = addon_sync(&permille), wifi = wifi_level(),
@@ -526,7 +626,8 @@ int status_row_sync(void) {
                                            : head)
                        << 14 |
                    (unsigned)!!g_keylock_flag << 21 | 1u << 22 | (unsigned)bt_slot() << 23 |
-                   (unsigned)home_np_lead() << 26;
+                   (unsigned)home_np_lead() << 26 | (unsigned)addon_offline() << 27 |
+                   (unsigned)!!sr.over << 28;
     if (sig == sr.sig) return 0;
     sr.sig = sig;
     return 1;

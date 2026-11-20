@@ -227,14 +227,13 @@ All lists share one grid.
 
 - No band: the status row is an overlay on the page's own ground, with no fill or rule, over the 58 px where content does not rest. Its glyphs center on y 23.
 - Left, from x 62: the page's title in Inter Medium 15 px, Text Secondary, ending with an
-  ellipsis 12 px short of the clock's widest ("00:00"), however long: a title never moves to a
+  ellipsis 12 px short of the clock's widest ("00:00") centred, however long: a title never moves to a
   row of its own, so the list keeps its place.
-- The clock, in the same face, size and color, its digits' ink 8 px left of the leftmost glyph
-  (the battery's body when it is alone); its figures stand on rows 17 to 27, and every glyph beside them is
-  their height. Home, Now Playing and Cover Flow's covers (but an artist's, titled by the
-  artist) have no title, and there the clock is centered across the row (x 187.5) instead, unless centered it would
-  reach the glyphs; Home in
-  Split keeps it at the right, over the art (approved from `mock_clock_center.py` and `mock_clock_right.py` on
+- The clock, in the same face, size and color, centered across the row (x 187.5) on every full-width row, titled
+  or not, and it never moves for the glyphs (the user's, 2026-11-19, `mock_subsonic_offline.py`); its figures stand
+  on rows 17 to 27, and every glyph beside them is their height. Home, Now Playing and Cover Flow's covers (but an
+  artist's, titled by the artist) have no title. Home in
+  Split keeps it at the right, its digits' ink 8 px left of the leftmost glyph, over the art (approved from `mock_clock_center.py` and `mock_clock_right.py` on
   2026-11-15), where the clock and every glyph take one ink, white or black, picked once for the row from the art's
   mean lightness under all of them, as iOS's status bar takes one style; the battery's green, red and orange keep
   their hue (`mock_status_icons.py`, the user's, 2026-11-16). Under Split's vignette the top of the art is darkened
@@ -268,6 +267,18 @@ All lists share one grid.
     ([Guest Play](#guest-play)), `device-mobile` (fill) in the accent, and while it is relayed to the Q2's
     Bluetooth device a `›` (8 px, Text Secondary) and that device's glyph.
   - **Buttons Lock**: the padlock (Phosphor `lock-simple`, fill, 13 px, Text Primary).
+  - **Offline**, the leftmost, so it reads first after the clock: Phosphor `cloud-slash` (bold) in Warning
+    `#FF9F0A`, 14 px wide at 11 tall, while a card app (Subsonic) says its server can't be reached (no answer, a
+    name that doesn't resolve, a proxy's 502, 503 or 504) and Wi-Fi is connected, until a request to the server
+    succeeds; with no Wi-Fi the missing fan already says why. On Now Playing too (`mock_subsonic_offline.py`, the
+    user's, 2026-11-19; [internals](internals.md#card-app-reach)).
+- **The strip.** On a full-width row the glyphs left of the battery have the room from 8 px past the widest clock,
+  centred, to the battery. When they need more, that strip (never the battery) scrolls as a marquee: at rest its
+  left end shows, the first glyph after the clock, for 2.75 s; then it slides left at 35 px/s until its right end
+  meets the battery's 6 px, holds there 1.5 s and goes back, as Now Playing's lines do. Each end whose glyphs are cut
+  fades over 6 px, the house marquee's 12 tightened: the right at rest, both while it slides, the left at its end.
+  It runs under Reduce Motion, as every marquee does; only the strip's box repaints as it moves (the user's,
+  2026-11-19, `mock_subsonic_offline.py` C and D).
 - Every glyph is 11 px tall, the clock's digits' height, on their rows (17 to 27): the Phosphor ones sized by
   their ink's height, not its longer side, so a wide one (`wifi-x`, the car) is as tall as the rest; strokes come
   out about 2 px (the fan's bands 2.3, the bars 2, the pause 3). 6 px of black part two glyphs, 8 px the clock
@@ -855,6 +866,11 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   left one, then 8 px before the words: 16 + 15 + 8 + words + 16. Every icon toast is this one
   (`feedback.c` `toast_icon`: USB's, charging's), approved from `mock_batt_toasts.py` on
   2026-11-15.
+- A card app's server error is the icon toast with Phosphor `cloud-slash` (fill) in Warning: "Server error 502"
+  (the HTTP status, a proxy's for a server that is down or the server's own 5xx for a song it couldn't send), "Server
+  not answering" (no answer, a timeout) or "Server not found" (a name that doesn't resolve), once as the server goes
+  out of reach and once for each streamed song skipped or stopped at for it, never with Wi-Fi off. It stays at its
+  usual place on Now Playing too (the user's, 2026-11-19: "stay put for 1.5s thats fine").
 - A tap on the status row's battery toasts its state, the glyph in its color: "Charging · 62%"
   (lightning, green), "Charger too weak · 41%" (warning, orange), "Charge Limit Reached (80%)" and
   "Fully charged" (battery-full, green), "Low battery · 12%" under 20 % (battery-warning, red) and
@@ -1382,7 +1398,7 @@ one is a bare one the strip takes in its first frame (`patch/keyboard.c` `kb_hos
   `heart-slash.svg` for Favorites' empty state: Phosphor's regular heart cut as its outline `bell-slash`
   is (a 16 unit slash from (48,40) to (208,216) joined to the ring below it, the ring above it ending in
   round caps 32 units from the slash), traced to filled paths.
-- Weights by role: `fill` for the padlock and a favorite's heart, `bold` for chevrons, the status row's `wifi-x`, sync and Bluetooth, Now
+- Weights by role: `fill` for the padlock and a favorite's heart, `bold` for chevrons, the status row's `wifi-x`, sync, Bluetooth and `cloud-slash`, Now
   Playing's and the confirmation's shuffle and repeat and About's quality badge, `regular` for row symbols and Now Playing's
   heart and More. Sizes are the design's: 13 px padlock, 11 px tall status glyphs ([Status row](#status-row)), 15 px chevron, 20 px row symbols,
   heart and More, 22 px state row, 56 px confirmation, 12 px for About's quality badge

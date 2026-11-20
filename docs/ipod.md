@@ -295,7 +295,7 @@ left and the clock, the payload's glyph slots and the battery on the right ([The
 slots](internals.md#status-row-slots)), every other widget stock updates kept off-screen at `x = -200`. Stock's tick also hides `img_state` whenever its own player is stopped, as it is under Spotify, radio or a video; `ringnav_showface` runs `bar_state_sync`, the play state and the `Q2` label alone, straight after the tick, so the payload's play state is back before any paint, dark or not (no file reads; a relayout waits for the paint); the codec badge, accent and Rockbox check wait for paint (`bar_sync`). A new battery level or charge state repaints the bar from the tick while lit ([Status bar](internals.md#status-bar-ipod)). Correcting it at paint time instead relaid the row twice a second, and EQ was drawn for a frame in the play icon's place. When `bar_sync` changes `img_state` while another window paints (Now Playing paints every 250 ms, so it usually sees a Play/Pause first), it arms a 0 ms timer that runs `widget_invalidate_force` on the bar after the frame: an invalidate made mid-paint is dropped with that frame's dirty rects, and `img_state` keeps its dirty flag (`+0x24` bit `0x200`), which makes stock `widget_invalidate` return early, so the 1 s tick's own invalidates skipped it until something else repainted the bar (#116). `bar_sync` updates its visibility without moving the clock. The payload paints the bar and writes the time into
 `label_clock` (see [internals.md](internals.md#status-bar-ipod)).
 
-**Time in Title.** There is no such setting: the status row names the page in a title of its own and keeps the clock beside it (`bar_title`). An `IPOD TIMETITLE` key an older build wrote is never read.
+**Time in Title.** There is no such setting: the status row names the page in a title of its own, the clock centred after it (`bar_title`). An `IPOD TIMETITLE` key an older build wrote is never read.
 
 **Codec.** The Bluetooth images are 42-pixel canvases with their ink at the right: the glyph takes
 10 pixels, while stock's codec badges take up to 40 (aptX HD). A new badge shows for a second
@@ -318,8 +318,8 @@ The playback, Bluetooth and Wi-Fi glyphs share smooth edges, rounded ends and a 
 In Icon and Icon + Percent, charging fills the icon solid green (`BATT_CHARGE_RGB`); low battery always uses
 `BATT_LOW_RGB` (`#FF1448`) under every accent; OLED's slim battery fills green while charging and
 red (`#FF453A`) under 20 %. The bar is black, or Light Mode's paper. The payload shows the icon alone where the
-battery and the status row's glyphs would squeeze the title out: `batt_room` (navigation.c) is the span from the battery's end
-(`STATUS_ROW_INSET`) to the title's start, less the clock's widest, `CLOCK_BESIDE` and `CLOCK_CLEAR`, and the group is the
+battery and the status row's glyphs would have to scroll: `batt_room` (navigation.c) is the span from the battery's end
+(`STATUS_ROW_INSET`) to `CLOCK_BESIDE` past the widest clock, centred (`strip_left`), and the group is the
 battery's form and `status_slots_reach`.
 
 The navbar is hidden, as on the local pages, on the settings pages
@@ -1035,14 +1035,15 @@ painted it white, which drew the box at rest.
   slim battery ending 62 px from the right edge (`STATUS_ROW_INSET`), three level bars while something plays (a pause
   in their place while paused, in the same white; a tap on either opens Now Playing), Wi-Fi's signal while connected
   (iOS's fan; a crossed glyph with no link past the access point), a card app's sync (turning arrows while it checks, a filling ring while it
-  downloads), a Bluetooth headset's battery, and a 13 px padlock while Buttons Lock is on, each the clock's digits' height (11 px) on their
+  downloads), a Bluetooth headset's battery, a 13 px padlock while Buttons Lock is on, and an orange crossed-out cloud while a card
+  app's server can't be reached, each the clock's digits' height (11 px) on their
   rows, 6 px apart, up in the glass's top curve and clear of it ([Status row slots](internals.md#status-row-slots)). A press Buttons Lock
   blocks with the screen off shows a card saying so for 1.5 s, as the iPod's Hold switch did ([Buttons
-  lock](internals.md#buttons-lock)). The clock, in the title's face and gray, sits 8 px left of the leftmost of them,
+  lock](internals.md#buttons-lock)). The clock, in the title's face and gray, is centered across the row,
   and the title ends with an ellipsis 12 px short of the widest clock ("00:00"), however long it is: under a status row a
-  page's caption never takes a row of its own (`bar_title_fits`), so the list keeps its top. A page with no title (Home, Now Playing, Cover Flow's covers;
-  an artist's are titled by the artist) has the clock centered across the row instead (at the right where centered it
-  would reach the glyphs), but Home in Split keeps it at the right, over the art, where it is inked white or black with
+  page's caption never takes a row of its own (`bar_title_fits`), so the list keeps its top. Glyphs that would reach the clock
+  scroll between it and the battery instead (the strip's marquee). A page with no title (Home, Now Playing, Cover Flow's covers;
+  an artist's are titled by the artist) has the clock centered too, but Home in Split keeps it at the right, 8 px left of the leftmost glyph, over the art, where it is inked white or black with
   the others, one ink for the row (`clock_place`, `home_ink`).
 - **The grid.** 32 px rows from y 58 with their text at x 24, seven to a screen: the list ends at y 282, above
   the bottom corners, and the strip below it stays black (`list_end`, `fit_rows`). Chevrons and values share one column 28 px

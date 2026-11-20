@@ -252,6 +252,7 @@ void chevron_muted(void *w, void *canvas, int right, int y) {
 static struct {
     void *label;    /* the label whose ends are copied, or &mf for text_fade's */
     int x[2], y, h; /* each end's first column (-1 none) and the rows, in the buffer */
+    int n;          /* the columns each end fades over, MARQUEE_FADE_PX at most */
     unsigned px[2][MARQUEE_FADE_ROWS][MARQUEE_FADE_PX];
 } mf __attribute__((section(".scratch")));
 
@@ -277,8 +278,12 @@ static int fade_ends(void *w, int *x0, int *x1) {
 
 /* Before text is drawn in the columns x0 to x1 (the canvas's coordinates), rows y to y + h: what
  * stands behind its fading ends (ends: 1 the left, 2 the right, 3 both), out of the buffer; 1 when
- * text_fade has something to blend. The column must hold MARQUEE_FADE_PX at a fading end. */
+ * text_fade has something to blend. Each end fades over px columns (at most MARQUEE_FADE_PX; the
+ * status row's strip fades over 6), which the column must hold at a fading end. */
 int text_fade_under(void *canvas, int x0, int x1, int y, int h, int ends) {
+    return text_fade_under_n(canvas, x0, x1, y, h, ends, MARQUEE_FADE_PX);
+}
+int text_fade_under_n(void *canvas, int x0, int x1, int y, int h, int ends, int px) {
     int pitch, fw, fh, clip[4];
     mf.label = (void *)0;
     unsigned *fb = canvas && ends ? fade_fb(canvas, &pitch, &fw, &fh) : (unsigned *)0;
@@ -286,11 +291,12 @@ int text_fade_under(void *canvas, int x0, int x1, int y, int h, int ends) {
     canvas_get_clip_rect(canvas, clip);
     int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y);
     if (h > MARQUEE_FADE_ROWS) h = MARQUEE_FADE_ROWS;
+    mf.n = px < 1 ? 1 : px > MARQUEE_FADE_PX ? MARQUEE_FADE_PX : px;
     mf.y = oy + y, mf.h = h;
     for (int e = 0; e < 2; ++e) {
-        int x = ox + (e ? x1 - MARQUEE_FADE_PX : x0);
-        mf.x[e] = ends >> e & 1 && x >= clip[0] && x + MARQUEE_FADE_PX <= clip[0] + clip[2] &&
-                          x >= 0 && x + MARQUEE_FADE_PX <= fw
+        int x = ox + (e ? x1 - mf.n : x0);
+        mf.x[e] = ends >> e & 1 && x >= clip[0] && x + mf.n <= clip[0] + clip[2] && x >= 0 &&
+                          x + mf.n <= fw
                       ? x
                       : -1;
     }
@@ -298,7 +304,8 @@ int text_fade_under(void *canvas, int x0, int x1, int y, int h, int ends) {
         int yy = mf.y + r;
         if (yy < 0 || yy >= fh || yy < clip[1] || yy >= clip[1] + clip[3]) continue;
         for (int e = 0; e < 2; ++e)
-            if (mf.x[e] >= 0) memcpy(mf.px[e][r], fb + yy * pitch + mf.x[e], sizeof mf.px[e][r]);
+            if (mf.x[e] >= 0)
+                memcpy(mf.px[e][r], fb + yy * pitch + mf.x[e], (unsigned)mf.n * sizeof **mf.px[e]);
     }
     mf.label = &mf;
     return 1;
@@ -316,13 +323,13 @@ static void fade_blend(void *canvas) {
         for (int e = 0; e < 2; ++e) {
             if (mf.x[e] < 0) continue;
             unsigned *row = fb + y * pitch + mf.x[e];
-            for (int i = 0; i < MARQUEE_FADE_PX; ++i) {
+            for (int i = 0; i < mf.n; ++i) {
                 /* the text's weight: 0 at the end column, nearly whole at the inside */
-                unsigned k = (unsigned)(e ? MARQUEE_FADE_PX - 1 - i : i), was = mf.px[e][r][i],
-                         now = row[i], out = 0;
+                unsigned k = (unsigned)(e ? mf.n - 1 - i : i), was = mf.px[e][r][i], now = row[i],
+                         out = 0;
                 for (int c = 0; c < 32; c += 8) {
                     int b = (int)(was >> c & 255), t = (int)(now >> c & 255);
-                    out |= (unsigned)(b + (t - b) * (int)k / MARQUEE_FADE_PX) << c;
+                    out |= (unsigned)(b + (t - b) * (int)k / mf.n) << c;
                 }
                 row[i] = out;
             }

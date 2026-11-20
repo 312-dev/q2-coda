@@ -87,9 +87,9 @@ int np_time_tap(void *ctx, void *event) {
 }
 
 /* The status row (tools/ipod.py status_row) names the page in its own label, label_title: the
- * title where the page has one, the clock beside it either way (navigation.c clock_place places
- * both). This runs in a paint, which drops the label's invalidate, so bar_repaint follows; the
- * clock waits for its timer. */
+ * title where the page has one, the clock centred after it either way (navigation.c clock_place
+ * places both). This runs in a paint, which drops the label's invalidate, so bar_repaint follows;
+ * the clock waits for its timer. */
 void bar_title(void *bar) {
     if (!st.bar_title) return; /* bar_sync has not found the row's labels */
     const unsigned *own = widget_get_text(st.bar_title);
@@ -424,7 +424,8 @@ static void glyph_framed(void *win, void *canvas, const char *name, int x, int y
         rect_t sq = { ink.x - p, ink.y - p, ink.w + 2 * p, ink.h + 2 * p };
         fill_box(canvas, &sq, RGBA(blend(NP_PRESS_INK, 0, press)), NP_FRAME_R);
     }
-    if (focus) { /* 2 px: the ink to its inner edge NP_FOCUS_PAD; fill_box's canvas inks Light Mode */
+    if (focus) { /* 2 px: the ink to its inner edge NP_FOCUS_PAD; fill_box's canvas inks Light Mode
+                  */
         int p = NP_FOCUS_PAD + 2;
         rect_t ring = { ink.x - p, ink.y - p, ink.w + 2 * p, ink.h + 2 * p },
                in = { ring.x + 2, ring.y + 2, ring.w - 4, ring.h - 4 };

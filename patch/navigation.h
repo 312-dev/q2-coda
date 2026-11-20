@@ -590,6 +590,7 @@ void marquee_fade(void *w, void *canvas), marquee_fade_under(void *w, void *canv
 /* ... and any text a painter draws itself into the columns x0 to x1, rows y to y + h (the canvas's
  * coordinates): its ends (1 left, 2 right) copied before it, faded after it; 1 when armed */
 int text_fade_under(void *canvas, int x0, int x1, int y, int h, int ends);
+int text_fade_under_n(void *canvas, int x0, int x1, int y, int h, int ends, int px);
 void text_fade(void *canvas);
 void sel_bar_flat(void *canvas, int x, int y, int w, int h); /* list_marks.c: the flat bar */
 /* np_marquee.c: Now Playing's lines as one marquee under a fading theme */
@@ -627,11 +628,22 @@ void battery_slim(void *w, void *canvas, int x, int y, int bw, int bh, unsigned 
 int charge_weak(void);
 void charge_tap(void);
 void charging_poll(void);
-/* status_row.c: the status row's glyph slots, right to left (docs/oled-design.md#status-row): their
- * clock edge (navigation.c clock_place), paint (ringnav_paint_bg), the slot under a touch, the sync
- * bar_state_sync runs (1: repaint the bar), ringnav_input's touches; the headset's battery, 0-100
- * or -1 */
-enum { SLOT_BATTERY, SLOT_PLAY, SLOT_WIFI, SLOT_SYNC, SLOT_HEADSET, SLOT_LOCK, SLOT_N };
+/* status_row.c: the status row's glyph slots, right to left (docs/oled-design.md#status-row): the
+ * strip's room left of the battery (status_strip_room: its left edge, 0 for none, from
+ * clock_place), their clock edge (navigation.c clock_place), paint (ringnav_paint_bg), the slot
+ * under a touch, the sync bar_state_sync runs (1: repaint the bar), ringnav_input's touches; the
+ * headset's battery, 0-100 or -1 */
+enum {
+    SLOT_BATTERY,
+    SLOT_PLAY,
+    SLOT_WIFI,
+    SLOT_SYNC,
+    SLOT_HEADSET,
+    SLOT_LOCK,
+    SLOT_OFFLINE,
+    SLOT_N
+};
+void status_strip_room(int left);
 int status_slots_left(void);
 int status_slots_reach(void);
 void status_slots_paint(void *bar, void *canvas);
