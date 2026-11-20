@@ -2,8 +2,9 @@
 """q2-iroh, Car Remote's iroh sidecar (docs/remote.md#car-remote-across-networks), for the image.
 
 The binary is Rust (remote/iroh-sidecar), cross-built for the Q2 by remote/iroh-sidecar/q2/build.sh with Rust
-nightly. A firmware build needs no Rust: it takes the binary from the third-party cache, where it is kept under
-its SHA-256, and PIN below names the one to take and the crate it was built from. A changed crate stops the
+nightly (PIN's: nightly-2026-11-18, rustc 1.102.0-nightly 59cbdee2e) and iroh patched by
+q2/iroh-restun.patch. A firmware build needs no Rust: it takes the binary from the third-party cache, where it is
+kept under its SHA-256, and PIN below names the one to take and the crate it was built from. A changed crate stops the
 build until it is built and pinned again:
 
     python3 tools/iroh.py            # build it from the crate, keep it in the cache, print the new PIN
@@ -20,8 +21,8 @@ CRATE = ROOT/'remote/iroh-sidecar'
 CACHE = pathlib.Path(os.environ.get('Q2_THIRDPARTY_CACHE') or pathlib.Path.home()/'.cache/q2-thirdparty')/'q2-iroh'
 
 # (the stripped binary's SHA-256, its size, crate_sha256() of the crate it was built from)
-PIN = ('7c80a9448c58a96700df92c075d8e3a5c01a1a61d1ced795b75b1b14d9fc5dac', 5383796,
-       'c7b1e2032789c8fdaa735e0d8ba671b2d9d9f150a984f91dff627fbcbfe62536')
+PIN = ('59dd6c843261bb8ba8cb2ff5ffdeb2e3f44015e452a07687816d90a47bf18526', 5318928,
+       'c560ab1bcc3d77b6dc645cfca52e9a69127657d3a2173cda8961517d6978d093')
 
 
 def crate_sha256():
