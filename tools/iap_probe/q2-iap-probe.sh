@@ -13,7 +13,8 @@
 # plan is phases run in order, each a gadget made, probed and removed: a phase is full or min (four configurations,
 # or configuration 2 alone), with :echo (echo iAP2's detect), :noaudio (no audio function), :uac1 (USB Audio 1.0
 # from tools/uac1_module's usb_f_uac1.ko, loaded from beside this script if it is not yet: at the desk only) or :tone
-# (play a -20 dBFS 1 kHz tone into the gadget's sound card while it is up), or :iap2 (the probe speaks iAP2, milestone
+# (play a -20 dBFS 1 kHz tone into the gadget's sound card while it is up), :linuxid (desk only: Linux's
+# FunctionFS ID 1d6b:0106 in place of Apple's, so Windows' own audio driver takes the audio function), or :iap2 (the probe speaks iAP2, milestone
 # M1). desk is "full:echo:tone" until --for runs out; car is "full full:echo min:echo" and m1 "full:iap2 min:iap2",
 # one session (a plug, docs/iphone-mode.md#sessions) each, then the restore.
 # --for (default 900, at most 3600) is the hard limit from start: the runner stops there, and a separate watchdog
@@ -48,7 +49,7 @@ pidof_file() { cat "$RUN/$1.pid" 2>/dev/null; }
 
 # gadget_up PHASE: q2iap made and bound for one phase; 1 if the controller would not take it.
 gadget_up() {
-    configs=full audio=uac2 echo= tone= iap2=
+    configs=full audio=uac2 echo= tone= iap2= vid=0x05ac pid=0x12a8 product=iPhone
     for w in $(echo "$1" | tr ':' ' '); do
         case $w in
         full | min) configs=$w ;;
@@ -57,6 +58,7 @@ gadget_up() {
         noaudio) audio=none ;;
         uac1) audio=uac1 ;;
         tone) tone=1 ;;
+        linuxid) vid=0x1d6b pid=0x0106 product="Q2 car audio test" ;;
         esac
     done
     cfgs="2"
@@ -66,8 +68,8 @@ gadget_up() {
         [ -d "$d" ] && { log "another gadget is there ($d): not starting"; return 1; }
     done
     mkdir $G || { log "mkdir $G failed"; return 1; }
-    echo 0x05ac > $G/idVendor
-    echo 0x12a8 > $G/idProduct
+    echo $vid > $G/idVendor
+    echo $pid > $G/idProduct
     echo 0x1001 > $G/bcdDevice
     echo 0x0200 > $G/bcdUSB
     echo 0x00 > $G/bDeviceClass
@@ -75,7 +77,7 @@ gadget_up() {
     echo 0x00 > $G/bDeviceProtocol
     mkdir $G/strings/0x409
     echo "Apple Inc." > $G/strings/0x409/manufacturer
-    echo "iPhone" > $G/strings/0x409/product
+    echo "$product" > $G/strings/0x409/product
     [ -s $SERIAL ] || head -c 20 /dev/urandom | hexdump -v -e '1/1 "%02x"' > $SERIAL
     cat $SERIAL > $G/strings/0x409/serialnumber
     for n in $cfgs; do

@@ -8,8 +8,9 @@
  * answered, the link set up, the car authenticated and identified, and the answers an iPhone gives next, every
  * packet and message logged.
  *
- *   q2-iap-probe [--echo] [--echo-from N] [--iap2] [--np FILE] [--uuid HEX] [--sessions N] [--for S]
- *                [--gap-ms MS] [--carplay] [--phase NAME] LOG DIR:KIND...
+ *   q2-iap-probe [--echo] [--echo-from N] [--iap2] [--np FILE] [--uuid HEX] [--car-pcm DEV] [--car-file F]
+ *                [--cmd-file F] [--art-dir D] [--sessions N] [--for S] [--gap-ms MS] [--carplay] [--phase NAME]
+ *                LOG DIR:KIND...
  *   q2-iap-probe --descs KIND     the descriptor and strings blobs for KIND on stdout (tests)
  *
  * KIND is ptp (configuration 1), hid (2), ptpmux (3) or ptpmuxeth (4). A session is the time from an
@@ -67,6 +68,9 @@ void *memmove(void *, const void *, size_t);
 int pipe(int *);
 int fcntl(int, int, ...);
 int kill(int, int);
+int rename(const char *, const char *);
+int unlink(const char *);
+char *strrchr(const char *, int);
 int *__errno_location(void);
 #define ERRNO (*__errno_location())
 #define O_RDONLY 0
@@ -74,6 +78,7 @@ int *__errno_location(void);
 #define O_RDWR 2
 #define O_APPEND 0x0008 /* MIPS */
 #define O_CREAT 0x0100  /* MIPS */
+#define O_TRUNC 0x0200  /* MIPS */
 #define POLLIN 1
 #define CLOCK_MONOTONIC 1
 #define F_SETFL 4
@@ -248,6 +253,10 @@ static void on_signal(int s) { stopping = s; }
 
 static int iap2_mode, writer_fd = -1, writer_pid;
 static const char *np_file = "/tmp/coda-rc.now";
+/* What the player and the shim read (player/output.c output_car, patch/coda_rc_shim.c cr_command), and Cover Flow's
+ * cache of covers (patch/coverflow.c art_path); each can be moved for the host tests. */
+static const char *car_file = "/tmp/q2-iap.audio", *car_pcm = "null", *cmd_file = "/tmp/coda-rc.cmd",
+                  *art_dir = "/mnt/mmc/.coverflow";
 static char uuid[40] = "51320000-0000-4000-8000-000000000000", library_id[64];
 
 /* The input reports go out through a child that writes them to the HID instance's ep1 one at a time: a write there
@@ -328,13 +337,78 @@ static int io_now_playing(struct iap2_np *n) {
             else if (!strcmp(line, "title")) snprintf(n->title, sizeof n->title, "%s", v);
             else if (!strcmp(line, "artist")) snprintf(n->artist, sizeof n->artist, "%s", v);
             else if (!strcmp(line, "album")) snprintf(n->album, sizeof n->album, "%s", v);
+            else if (!strcmp(line, "path")) snprintf(n->path, sizeof n->path, "%s", v);
         }
         line = end ? end + 1 : 0;
     }
     return 1;
 }
 
-static const struct iap2_host io = { io_send, mono_ms, io_log, io_now_playing, "Q2 Muse", uuid, library_id };
+/* A file written whole, through a temporary name, mode 0600 (the shim takes only root's own, private files). */
+static int write_whole(const char *path, const char *b, unsigned n) {
+    char tmp[200];
+    snprintf(tmp, sizeof tmp, "%s.iap", path);
+    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return -1;
+    int ok = write(fd, b, n) == (int)n;
+    close(fd);
+    if (!ok || rename(tmp, path)) return unlink(tmp), -1;
+    return 0;
+}
+
+/* The car wants USB audio: the player's car way (player/output.c output_car) takes over while the file is there. */
+static void io_audio(int on) {
+    char b[160];
+    if (!on) {
+        unlink(car_file);
+        return;
+    }
+    int n = snprintf(b, sizeof b, "%s\n44100\n", car_pcm);
+    if (write_whole(car_file, b, (unsigned)n)) logline("iap2", "audio: the car's file could not be written");
+}
+
+/* A button or a seek, as the Remote app's commands reach the shim (Car Remote on). Its numbers start high, so an ack
+ * of one is never taken for coda-rc's own. */
+static void io_command(const char *verb) {
+    static unsigned seq = 0x51000000u;
+    char b[96];
+    int n = snprintf(b, sizeof b, "%u %s\n", ++seq, verb);
+    if (write_whole(cmd_file, b, (unsigned)n)) logline("iap2", "command: the shim's file could not be written");
+}
+
+static unsigned read_file(const char *path, unsigned char *out, unsigned cap) {
+    int fd = open(path, O_RDONLY), got = 0, r;
+    if (fd < 0) return 0;
+    while (got < (int)cap && (r = (int)read(fd, out + got, cap - got)) > 0) got += r;
+    close(fd);
+    return got < (int)cap ? (unsigned)got : 0; /* too large: none */
+}
+
+/* Cover Flow's key (patch/coverflow.c tags_key, coda_rc_lib.c fnv32): FNV-1a with a separator after each part */
+static unsigned fnv_part(unsigned h, const char *s) {
+    while (*s) h = (h ^ (unsigned char)*s++) * 16777619u;
+    return h * 16777619u;
+}
+
+/* The song's cover: Cover Flow's 160 px copy (keyed by artist and album), else a cover beside the song. */
+static unsigned io_artwork(const struct iap2_np *n, unsigned char *out, unsigned cap) {
+    char p[600];
+    unsigned got = 0;
+    if (n->album[0]) {
+        snprintf(p, sizeof p, "%s/%08x.jpg", art_dir, fnv_part(fnv_part(2166136261u, n->artist), n->album));
+        got = read_file(p, out, cap);
+    }
+    static const char *const names[] = { "cover.jpg", "folder.jpg", "front.jpg" };
+    const char *slash = strrchr(n->path, '/');
+    for (unsigned i = 0; !got && slash && i < 3; ++i) {
+        snprintf(p, sizeof p, "%.*s/%s", (int)(slash - n->path), n->path, names[i]);
+        got = read_file(p, out, cap);
+    }
+    return got;
+}
+
+static const struct iap2_host io = { io_send, mono_ms, io_log, io_now_playing, "Q2 Muse", uuid, library_id,
+                                     io_audio, io_command, io_artwork };
 
 /* The input report that echoes payload (link control 0, whole): the smallest that fits, zero padded,
  * written to the HID instance's ep1 in a child so the event loop never waits on the host's poll. */
@@ -485,6 +559,10 @@ int main(int argc, char **argv) {
         else if (!strcmp(o, "--phase")) phase = v, ++a;
         else if (!strcmp(o, "--iap2")) iap2_mode = 1;
         else if (!strcmp(o, "--np")) np_file = v, ++a;
+        else if (!strcmp(o, "--car-pcm")) car_pcm = v, ++a;
+        else if (!strcmp(o, "--car-file")) car_file = v, ++a;
+        else if (!strcmp(o, "--cmd-file")) cmd_file = v, ++a;
+        else if (!strcmp(o, "--art-dir")) art_dir = v, ++a;
         else if (!strcmp(o, "--uuid")) {
             /* the serial's first 32 hex digits as a UUID */
             if (strlen(v) >= 32)
@@ -564,6 +642,7 @@ int main(int argc, char **argv) {
     snprintf(msg, sizeof msg, "end: %s, %d session%s, exit %d", stopping ? "signalled" : "by itself", session,
              session == 1 ? "" : "s", rc);
     logline("probe", msg);
+    if (iap2_mode) unlink(car_file); /* the player back to demo's output */
     if (writer_pid > 0) kill(writer_pid, SIGTERM);
     if (logfd != 2) fsync(logfd);
     for (int k = 0; k < ninst; ++k) close(in[k].ep0);

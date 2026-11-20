@@ -406,5 +406,210 @@ def test_iap2_never_sends_again_to_a_car_that_gives_no_retries(probe, tmp_path):
     assert '(again)' not in log.read_text()
 
 
+# The BMW's own: its SYN (link parameters: window 5, retransmit 200 ms, cumulative ACK 22 ms, 10 retries, ACK after
+# 3; sessions 1 control, 2 file transfer, 3) and its StartHID, from the M1 car run's log (2026-11-19)
+BMW_SYN = bytes.fromhex('0105ffff00c800160a03010001020102030201')
+BMW_START_HID = bytes.fromhex('00060000000100060001 05ac00060002 023c00250004050c0901a1011500250175019505'
+                              '09b009b109b509b609b9810275019503 8103c0'.replace(' ', ''))
+
+
+def fnv_part(h, s):
+    for c in s.encode():
+        h = ((h ^ c) * 16777619) & 0xffffffff
+    return (h * 16777619) & 0xffffffff
+
+
+def jpeg_segments(b):
+    """[(marker, body)] up to the scan."""
+    out, i = [], 2
+    while i + 4 <= len(b):
+        mk, n = b[i + 1], b[i + 2] << 8 | b[i + 3]
+        out.append((mk, b[i + 4:i + 2 + n]))
+        if mk == 0xDA:
+            break
+        i += 2 + n
+    return out
+
+
+class BmwCar(Car):
+    """The BMW's sessions and acknowledgements: it acknowledges what it takes unless told to hold back."""
+
+    def __init__(self, ffs, fd):
+        super().__init__(ffs, fd)
+        self.hold = False
+        self.files = []
+        self.peer, self.seen = 0, set()
+
+    def packet_any(self, timeout=3.0):
+        """The next packet, or None for one sent again (this car acknowledged late): dropped, and acknowledged unless
+        held, as a car does."""
+        ctl, seq, ack, session, pl = self.packet(timeout)
+        if pl and seq in self.seen:
+            if not self.hold:
+                self.write(packet(0x40, self.seq, self.peer, 0))
+            return None
+        if pl:
+            self.seen.add(seq)
+            self.peer = seq
+            if not self.hold:
+                self.write(packet(0x40, self.seq, seq, 0))
+        return ctl, seq, ack, session, pl
+
+    def msg(self, timeout=3.0):
+        while True:
+            got = self.packet_any(timeout)
+            if got is None:
+                continue
+            ctl, seq, ack, session, pl = got
+            if not pl:
+                continue  # a bare ACK: the BMW's SYN asks for them within 22 ms
+            if session == 2:
+                self.files.append(pl)
+                continue
+            assert session == 1 and pl[:2] == b'\x40\x40', (session, pl[:6].hex())
+            return pl[4] << 8 | pl[5], params(pl[6:])
+
+    def send(self, payload, session=1):
+        self.seq = (self.seq + 1) & 0xff
+        self.write(packet(0x40, self.seq, self.peer, session, payload))  # acknowledging the Q2's last, as the BMW does
+
+
+def bmw_up(probe, tmp_path, *more):
+    """A probe in --iap2 up to identification with the BMW's link parameters; (process, car, log, files)."""
+    files = {'car': tmp_path/'q2-iap.audio', 'cmd': tmp_path/'coda-rc.cmd', 'np': tmp_path/'now', 'art': tmp_path/'art'}
+    files['art'].mkdir()
+    files['np'].write_text('state=1\npos=61000\nlen=245\ntitle=Teardrop\nartist=Massive Attack\nalbum=Mezzanine\n'
+                           'path=/nowhere/a.flac\nshuffle=0\nrepeat=2\n')
+    p, ffs, log = start(probe, tmp_path, '--iap2', '--np', str(files['np']), '--car-pcm', 'hw:CARD=UAC1Gadget,0',
+                        '--car-file', str(files['car']), '--cmd-file', str(files['cmd']), '--art-dir', str(files['art']),
+                        *more)
+    fd = os.open(ffs.path/'ep1', os.O_RDONLY | os.O_NONBLOCK)
+    car = BmwCar(ffs, fd)
+    ffs.event(ENABLE)
+    car.write(bytes([0xff, 0x55, 0x02, 0x00, 0xee, 0x10]))
+    car.report()
+    car.write(packet(0x80, car.seq, 0, 0, BMW_SYN))
+    _, syn_seq, _, _, pl = car.packet()
+    assert pl[1] == 0x7f, 'an iPhone offers a window of 0x7F to a car that retransmits'
+    car.write(packet(0x40, car.seq, syn_seq, 0))
+    assert car.msg()[0] == 0xAA00
+    car.send(message(0xAA01, prm(0, bytes(608))))
+    assert car.msg()[0] == 0xAA02
+    car.send(message(0xAA03, prm(0, bytes(64))))
+    assert [car.msg()[0], car.msg()[0]] == [0xAA05, 0x1D00]
+    takes = b''.join(i.to_bytes(2, 'big') for i in (0x4E09, 0x4E0A, 0x4E0C, 0x5001, 0x6801, 0xDA01, 0x4C01, 0x4C04))
+    car.send(message(0x1D01, prm(0, b'BMW 83828\0'), prm(7, takes)))
+    assert [car.msg()[0] for _ in range(4)] == [0x1D02, 0x4E0C, 0x4E0A, 0x4E09]
+    return p, car, fd, log, files
+
+
+def stop(p, fd):
+    p.terminate()
+    p.wait(5)
+    os.close(fd)
+
+
+def test_bmw_buttons(probe, tmp_path):
+    """The BMW's StartHID descriptor (Play, Pause, Next, Previous, Random as five bits) and its presses from the car
+    run: 01 then 08 then 04, each released, as the shim's verbs in its command file."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path)
+    try:
+        car.send(bytes([0x40, 0x40, 0, 6 + len(BMW_START_HID), 0x68, 0x00]) + BMW_START_HID)
+        seen = []
+        for press in (0x01, 0x08, 0x04, 0x10):
+            for b in (press, 0x00):
+                car.send(message(0x6802, prm(0, b'\x00\x01'), prm(1, bytes([b]))))
+                time.sleep(0.15)
+            seen.append(files['cmd'].read_text().split(' ', 1)[1].strip())
+        assert seen == ['resume', 'previous', 'next', 'mode 1 2'], seen
+        assert oct(files['cmd'].stat().st_mode & 0o777) == '0o600'
+    finally:
+        stop(p, fd)
+    assert 'hid: the car starts HID: 5 buttons in its report descriptor' in log.read_text()
+
+
+def test_bmw_audio_and_seek(probe, tmp_path):
+    """StartUSBDeviceModeAudio writes the player's car file (its device, then 44100), StopUSBDeviceModeAudio removes
+    it; the car's seek is a seek in seconds."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path)
+    try:
+        car.send(message(0xDA00))
+        mid, ps = car.msg()
+        assert mid == 0xDA01 and ps[0] == b'\x07'
+        time.sleep(0.1)
+        assert files['car'].read_text() == 'hw:CARD=UAC1Gadget,0\n44100\n'
+        car.send(message(0x5003, prm(0, (125300).to_bytes(4, 'big'))))
+        time.sleep(0.15)
+        assert files['cmd'].read_text().split(' ', 1)[1] == 'seek 125\n'
+        car.send(message(0xDA02))
+        time.sleep(0.15)
+        assert not files['car'].exists(), 'the car file goes with StopUSBDeviceModeAudio'
+        car.send(message(0xDA00))
+        car.msg()
+        time.sleep(0.1)
+        assert files['car'].exists()
+    finally:
+        stop(p, fd)
+    assert not files['car'].exists(), 'and with the probe'
+
+
+def test_bmw_artwork(probe, tmp_path):
+    """The cover from Cover Flow's cache, named in attribute 26, set up on the file transfer session, sent in pieces
+    when the car says go, each table in a segment of its own (PodBox's car's need), the bytes otherwise the file's;
+    with the car withholding acknowledgements, never more than its window of 5 packets out."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path)
+    jpeg = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=160x160', '-frames:v', '1', '-q:v', '2',
+                           '-f', 'mjpeg', '-'], check=True, capture_output=True).stdout
+    key = fnv_part(fnv_part(2166136261, 'Massive Attack'), 'Mezzanine')
+    (files['art']/f'{key:08x}.jpg').write_bytes(jpeg)
+    try:
+        attrs = b''.join(prm(a) for a in (0, 1, 4, 6, 12, 0x1a, 0x1b))
+        car.send(message(0x5000, prm(0, attrs), prm(1, prm(0) + prm(1))))
+        mid, ps = car.msg()
+        media = params(ps[0])
+        assert mid == 0x5001 and media[0x1a] == b'\x80' and media[0x1b] == b'\x00\x00'
+        deadline = time.time() + 3
+        while not car.files and time.time() < deadline:
+            if (got := car.packet_any(1.0)) and got[3] == 2:
+                car.files.append(got[4])
+        setup = car.files.pop(0)
+        size = int.from_bytes(setup[2:10], 'big')
+        assert setup[:2] == b'\x80\x04' and setup[10:] == b'\x00\x02' and size > len(jpeg) - 64
+        car.hold = True
+        car.send(bytes([0x80, 0x01]), session=2)
+        held = time.time() + 0.6  # under the 10 tries of 200 ms after which the Q2 gives the link up
+        try:
+            while time.time() < held:  # new packets only: those sent again are dropped by packet_any
+                got = car.packet_any(max(0.05, held - time.time()))
+                if got and got[3] == 2:
+                    car.files.append(got[4])
+        except AssertionError:
+            pass
+        assert 0 < len(car.files) <= 5, f'{len(car.files)} packets out with none acknowledged: the car\'s window is 5'
+        car.hold = False
+        car.write(packet(0x40, car.seq, car.peer, 0))
+        while sum(len(f) - 2 for f in car.files) < size:
+            got = car.packet_any(3.0)
+            if got and got[3] == 2:
+                car.files.append(got[4])
+        ops = [f[1] for f in car.files]
+        assert all(f[0] == 0x80 for f in car.files) and ops[0] == 0x80 and ops[-1] == 0x40 and set(ops[1:-1]) <= {0}
+        got = b''.join(f[2:] for f in car.files)
+        assert len(got) == size and got[:2] == b'\xff\xd8'
+        segs, orig = jpeg_segments(got), jpeg_segments(jpeg)
+        for mk, body in segs:
+            if mk == 0xDB:
+                assert len(body) in (65, 129), 'one quantisation table a segment'
+            if mk == 0xC4:
+                assert len(body) == 17 + sum(body[1:17]), 'one Huffman table a segment'
+        tables = lambda ss, m: b''.join(b for k, b in ss if k == m)
+        assert tables(segs, 0xDB) == tables(orig, 0xDB) and tables(segs, 0xC4) == tables(orig, 0xC4)
+        assert got[got.index(b'\xff\xda'):] == jpeg[jpeg.index(b'\xff\xda'):], 'the scan as it was'
+        assert sum(1 for k, _ in orig if k in (0xDB, 0xC4)) < sum(1 for k, _ in segs if k in (0xDB, 0xC4)), \
+            'the test JPEG had tables to split'
+    finally:
+        stop(p, fd)
+
+
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-q', *sys.argv[1:]]))

@@ -36,7 +36,7 @@ struct iap2_np {
     int state; /* 0 stopped, 1 playing, 2 paused */
     unsigned pos_ms, len_ms, qpos, qlen;
     int shuffle, repeat; /* repeat 0 off, 1 one, 2 all */
-    char title[160], artist[160], album[160];
+    char title[160], artist[160], album[160], path[400];
 };
 
 struct iap2_host {
@@ -45,6 +45,9 @@ struct iap2_host {
     void (*log)(const char *msg);
     int (*now_playing)(struct iap2_np *np);       /* 1 and np filled, or 0: nothing known */
     const char *name, *uuid, *library_id;
+    void (*audio)(int on);                         /* the car wants USB audio (1) or no longer (0) */
+    void (*command)(const char *verb);             /* a button or a seek: the shim's verbs (coda_rc_shim.c cr_command) */
+    unsigned (*artwork)(const struct iap2_np *np, u8 *out, unsigned cap); /* the song's cover, a JPEG, or 0 */
 };
 
 static const struct iap2_host *H;
@@ -200,6 +203,18 @@ static void send_slot(struct slot *s) {
     send_bytes(s->packet, s->len);
 }
 
+/* Messages waiting for room in the car's window: with retransmission on (the BMW's SYN gives 10 retries), no more
+ * than its window may be unacknowledged, and a cover is a dozen packets. Sent in order as acknowledgements free the
+ * window (pump). */
+#define QUEUE 96
+static struct queued {
+    u8 session;
+    unsigned len;
+    u8 b[MAX_PACKET - HEADER_LEN - 1];
+} queue[QUEUE];
+static unsigned q_head, q_count;
+static void pump(void);
+
 static void iap2_control_reset(void);
 static void iap2_control_link_up(void);
 static void iap2_control_receive(const u8 *msg, unsigned len);
@@ -207,6 +222,7 @@ static void iap2_control_receive(const u8 *msg, unsigned len);
 static void reset_link(void) {
     synced = link_up = 0;
     count = 0;
+    q_head = q_count = 0;
     last_ack = my_seq;
     cs_len = unacked = 0;
     iap2_control_reset();
@@ -272,6 +288,7 @@ static void take_ack(u8 ack) {
     }
     last_ack = ack;
     if (rto) drop_acked();
+    pump();
 }
 
 static void take_control(const u8 *data, unsigned n) {
@@ -294,6 +311,8 @@ static void take_control(const u8 *data, unsigned n) {
     memmove(cs, cs + off, cs_len - off);
     cs_len -= off;
 }
+
+static void iap2_file(const u8 *d, unsigned n);
 
 static void take_packet(const u8 *p, unsigned len) {
     u8 control = p[4], seq = p[5], session = p[7];
@@ -327,7 +346,7 @@ static void take_packet(const u8 *p, unsigned len) {
             peer_seq = seq;
             if (cack && !unacked++) unacked_since = H->now();
             if (session == control_session) take_control(payload, n);
-            else if (file_session && session == file_session) H->log("file transfer: data not handled in M1");
+            else if (file_session && session == file_session) iap2_file(payload, n);
             if (cack && max_cacks && unacked >= max_cacks) send_ctl(CTL_ACK, 0, 0, my_seq);
         } else if (link_up && cack && (u8)(peer_seq - seq) < 128) {
             send_ctl(CTL_ACK, 0, 0, my_seq);
@@ -453,6 +472,33 @@ static void group_end(void) {
     m.b[m.group] = n >> 8, m.b[m.group + 1] = n;
 }
 
+/* A packet's payload to go: at once while the window has room, else in turn (pump). */
+static void enqueue(u8 session, const u8 *b, unsigned n) {
+    if (q_count == QUEUE || n > sizeof queue[0].b) {
+        H->log(q_count == QUEUE ? "link: the send queue is full; a packet dropped" : "link: a packet too long; dropped");
+        return;
+    }
+    struct queued *q = &queue[(q_head + q_count++) % QUEUE];
+    q->session = session, q->len = n;
+    memcpy(q->b, b, n);
+    pump();
+}
+
+static void pump(void) {
+    while (q_count && link_up && (!rto || (count < window && count < SLOTS))) {
+        struct queued *q = &queue[q_head];
+        struct slot *s = &slots[(head + count) % SLOTS];
+        s->len = HEADER_LEN + q->len + 1;
+        put_header(s->packet, s->len, CTL_ACK, ++my_seq, q->session);
+        memcpy(s->packet + HEADER_LEN, q->b, q->len);
+        s->packet[HEADER_LEN + q->len] = cksum(q->b, q->len);
+        s->tries = 0;
+        if (rto) ++count; /* kept for sending again; with no retransmission, done with once sent */
+        q_head = (q_head + 1) % QUEUE, --q_count;
+        send_slot(s);
+    }
+}
+
 /* One message to a packet: PodBox's car reads only the first message of a packet. */
 static void msg_send(void) {
     if (!m.ok || !link_up) {
@@ -463,18 +509,7 @@ static void msg_send(void) {
     }
     m.b[2] = m.len >> 8, m.b[3] = m.len;
     log_msg(1, m.b, m.len, 96);
-    if (rto && count == SLOTS) {
-        H->log("link: every slot awaits acknowledgement; message dropped");
-        return;
-    }
-    struct slot *s = &slots[(head + count) % SLOTS];
-    s->len = HEADER_LEN + m.len + 1;
-    put_header(s->packet, s->len, CTL_ACK, ++my_seq, control_session);
-    memcpy(s->packet + HEADER_LEN, m.b, m.len);
-    s->packet[HEADER_LEN + m.len] = cksum(m.b, m.len);
-    s->tries = 0;
-    if (rto) ++count; /* kept for sending again; with no retransmission, done with once sent */
-    send_slot(s);
+    enqueue(control_session, m.b, m.len);
 }
 
 static void send_empty(u16 id) {
@@ -511,13 +546,211 @@ static long auth_due, ident_due, availability_due, np_at; /* 0: not due */
 static unsigned car_current;
 static u32 media_mask, playback_mask, rnd;
 static struct iap2_np np_last;
-static int np_sent;
+static int np_sent, audio_on;
+
+/* ---- the car's buttons: its StartHID report descriptor's consumer controls (PodBox parse_hid, one-bit ones) ---- */
+
+#define MAX_CONTROLS 24
+static struct {
+    u8 report;  /* report id, or 0 */
+    u16 bit;    /* from the report's data */
+    u16 usage;
+} controls[MAX_CONTROLS];
+static unsigned n_controls, report_ids;
+static u8 last_report[16];
+
+static void parse_hid(const u8 *d, unsigned len) {
+    u32 page = 0, size = 0, count_ = 0, id = 0, usages[16], bits[8] = { 0 };
+    unsigned n_usages = 0;
+    n_controls = report_ids = 0;
+    for (unsigned i = 0; i < len;) {
+        u8 prefix = d[i];
+        if (prefix == 0xFE) { /* a long item */
+            i += 3 + (i + 1 < len ? d[i + 1] : 0);
+            continue;
+        }
+        unsigned n = (prefix & 3) == 3 ? 4 : prefix & 3;
+        if (i + 1 + n > len) break;
+        u32 v = n == 4 ? d[i + 1] | d[i + 2] << 8 | (u32)d[i + 3] << 16 | (u32)d[i + 4] << 24
+              : n == 2 ? (u32)(d[i + 1] | d[i + 2] << 8)
+              : n == 1 ? d[i + 1] : 0u;
+        i += 1 + n;
+        switch (prefix & 0xFC) {
+        case 0x04: page = v; break;
+        case 0x74: size = v; break;
+        case 0x84: id = v, report_ids = 1; break;
+        case 0x94: count_ = v; break;
+        case 0x08:
+            if (n_usages < 16) usages[n_usages++] = n == 4 ? v : page << 16 | v;
+            break;
+        case 0x80: { /* Input: each one-bit variable on the consumer page, as its usage */
+            u32 *at = &bits[id & 7];
+            if (!(v & 1) && (v & 2) && page == 0x0C && size == 1)
+                for (u32 k = 0; k < count_ && k < n_usages && n_controls < MAX_CONTROLS; ++k)
+                    if (usages[k] >> 16 == 0x0C)
+                        controls[n_controls].report = id, controls[n_controls].bit = *at + k,
+                        controls[n_controls++].usage = usages[k] & 0xFFFF;
+            *at += size * count_;
+            n_usages = 0; /* a main item clears the local items */
+            break;
+        }
+        case 0x90: case 0xB0: case 0xA0: case 0xC0:
+            n_usages = 0;
+            break;
+        }
+    }
+}
+
+/* A control pressed: what the Q2's own remotes send (patch/coda_rc_shim.c cr_command's verbs). */
+static void press(unsigned usage) {
+    char v[32], t[96];
+    struct iap2_np now;
+    memset(&now, 0, sizeof now);
+    if (H->now_playing) H->now_playing(&now); /* shuffle and repeat as they are now, not as last sent */
+    const char *verb = usage == 0xB0 ? "resume" : usage == 0xB1 ? "pause" : usage == 0xCD ? "toggle"
+                     : usage == 0xB5 ? "next" : usage == 0xB6 ? "previous" : 0;
+    if (!verb && usage == 0xB9) snprintf(v, sizeof v, "mode %d %d", !now.shuffle, now.repeat), verb = v;
+    if (!verb && usage == 0xBC) snprintf(v, sizeof v, "mode %d %d", now.shuffle, (now.repeat + 1) % 3), verb = v;
+    snprintf(t, sizeof t, "hid: usage %02x pressed: %s", usage, verb ? verb : "not mapped");
+    H->log(t);
+    if (verb && H->command) H->command(verb);
+}
+
+static unsigned report_bit(const u8 *r, unsigned len, unsigned bit) { return bit / 8 < len && (r[bit / 8] >> (bit % 8) & 1); }
+
+/* Each control down now and up in the last report. */
+static void take_hid_report(const u8 *r, unsigned len) {
+    u8 id = 0;
+    if (report_ids && len) id = *r++, --len;
+    if (len > sizeof last_report) len = sizeof last_report;
+    for (unsigned i = 0; i < n_controls; ++i)
+        if (controls[i].report == id && report_bit(r, len, controls[i].bit) &&
+            !report_bit(last_report, len, controls[i].bit))
+            press(controls[i].usage);
+    memset(last_report, 0, sizeof last_report);
+    memcpy(last_report, r, len);
+}
+
+static void set_audio(int on) {
+    if (on == audio_on) return;
+    audio_on = on;
+    H->log(on ? "audio: on (the player plays into the car)" : "audio: off");
+    if (H->audio) H->audio(on);
+}
+
+/* ---- artwork, on the file transfer session (PodBox): the song's attribute 26 names a transfer; the Q2 sets it
+ * up as [ID, 04, an 8-byte size, 00 02 (artwork)]; the car answers [ID, 01] to go; the JPEG follows as [ID, op,
+ * bytes], op C0 the only piece, else 80 the first, 00 the middle ones and 40 the last; [ID, 02] cancels either way.
+ * An empty one (size 0) when there is no cover: PodBox's car waits otherwise. ---- */
+
+#define ART_MAX 65536
+static u8 art[ART_MAX];
+static unsigned art_len, art_sent;
+static u8 art_id, next_transfer = 0x80;
+static int art_going;
+
+static void file_send(u8 id, u8 op, const u8 *d, unsigned n) {
+    u8 b[MAX_PACKET];
+    if (!file_session || n + 2 > sizeof b) return;
+    b[0] = id, b[1] = op;
+    if (n) memcpy(b + 2, d, n);
+    enqueue(file_session, b, n + 2);
+}
+
+/* A baseline JPEG as PodBox's car needed it: each quantisation and Huffman table in a segment of its own, the bytes
+ * otherwise as they are. 0 for anything else (a progressive JPEG, a PNG, a broken file). */
+static unsigned jpeg_tables_apart(const u8 *in, unsigned n, u8 *out, unsigned cap) {
+    unsigned i = 2, o = 2, baseline = 0;
+    if (n < 4 || in[0] != 0xFF || in[1] != 0xD8 || cap < 2) return 0;
+    out[0] = 0xFF, out[1] = 0xD8;
+    while (i + 4 <= n) {
+        if (in[i] != 0xFF) return 0;
+        u8 mk = in[i + 1];
+        unsigned seg = in[i + 2] << 8 | in[i + 3];
+        if (seg < 2 || i + 2 + seg > n) return 0;
+        if (mk == 0xC0 || mk == 0xC1) baseline = 1;
+        if (mk == 0xC2) return 0;
+        if (mk == 0xDB || mk == 0xC4) {
+            unsigned at = i + 4, end = i + 2 + seg;
+            while (at < end) {
+                unsigned t = mk == 0xDB ? 1 + ((in[at] >> 4) ? 128 : 64) : 0;
+                if (mk == 0xC4) {
+                    if (at + 17 > end) return 0;
+                    t = 17;
+                    for (unsigned k = 1; k <= 16; ++k) t += in[at + k];
+                }
+                if (at + t > end || o + 4 + t > cap) return 0;
+                out[o++] = 0xFF, out[o++] = mk, out[o++] = (t + 2) >> 8, out[o++] = t + 2;
+                memcpy(out + o, in + at, t), o += t, at += t;
+            }
+        } else {
+            if (o + 2 + seg > cap) return 0;
+            memcpy(out + o, in + i, 2 + seg), o += 2 + seg;
+        }
+        i += 2 + seg;
+        if (mk == 0xDA) { /* the scan, to the end */
+            if (o + (n - i) > cap) return 0;
+            memcpy(out + o, in + i, n - i), o += n - i;
+            return baseline ? o : 0;
+        }
+    }
+    return 0;
+}
+
+/* A new song's transfer, the last cancelled if it still went; its setup goes after the message naming it. */
+static u8 art_start(const struct iap2_np *n) {
+    static u8 raw[ART_MAX];
+    char t[120];
+    if (!file_session) return 0;
+    if (art_going && art_id) file_send(art_id, 0x02, 0, 0);
+    art_id = next_transfer, next_transfer = next_transfer == 0xFF ? 0x80 : next_transfer + 1;
+    unsigned got = H->artwork ? H->artwork(n, raw, sizeof raw) : 0;
+    art_len = got ? jpeg_tables_apart(raw, got, art, sizeof art) : 0;
+    art_sent = 0, art_going = 1;
+    snprintf(t, sizeof t, "art: transfer %02x, %u bytes (%u as found)", art_id, art_len, got);
+    H->log(t);
+    return art_id;
+}
+
+static void art_setup(void) {
+    u8 setup[10] = { 0, 0, 0, 0, art_len >> 24, art_len >> 16, art_len >> 8, art_len, 0, 2 };
+    file_send(art_id, 0x04, setup, sizeof setup);
+}
+
+/* The car's answers on the file transfer session. */
+static void iap2_file(const u8 *d, unsigned n) {
+    char t[96];
+    if (n < 2) return;
+    snprintf(t, sizeof t, "file < transfer %02x op %02x (%u bytes)", d[0], d[1], n);
+    H->log(t);
+    if (d[0] != art_id || !art_going) return;
+    if (d[1] == 0x01) { /* go: every piece, as the window allows */
+        unsigned room = peer_max - HEADER_LEN - 1 - 2;
+        if (room > MAX_PACKET - HEADER_LEN - 1 - 2) room = MAX_PACKET - HEADER_LEN - 1 - 2;
+        if (!art_len) file_send(art_id, 0xC0, 0, 0);
+        while (art_sent < art_len) {
+            unsigned k = art_len - art_sent < room ? art_len - art_sent : room;
+            u8 op = art_sent == 0 && art_sent + k == art_len ? 0xC0 : art_sent == 0 ? 0x80 : art_sent + k == art_len ? 0x40 : 0x00;
+            file_send(art_id, op, art + art_sent, k);
+            art_sent += k;
+        }
+    } else if (d[1] == 0x02 || d[1] == 0x05) {
+        art_going = 0;
+        H->log(d[1] == 0x05 ? "art: the car took it" : "art: the car cancelled it");
+    }
+}
 
 #define MI_PERSISTENT_ID 0x00
 #define MI_TITLE 0x01
 #define MI_DURATION 0x04
 #define MI_ALBUM 0x06
 #define MI_ARTIST 0x0C
+#define MI_LIKE_SUPPORTED 0x15 /* 0x15 to 0x18: like and ban, bools */
+#define MI_BANNED 0x18
+#define MI_ARTWORK 0x1A
+#define MI_CHAPTER_COUNT 0x1B
+#define PB_CHAPTER_INDEX 0x04
+#define PB_LIBRARY 0x08
 #define PB_STATE 0x00
 #define PB_POSITION 0x01
 #define PB_QUEUE_INDEX 0x02
@@ -537,6 +770,8 @@ static long due_in(long ms) {
 }
 
 static void iap2_control_reset(void) {
+    if (H) set_audio(0);
+    art_going = 0, art_id = 0, n_controls = 0;
     identified = now_playing = 0;
     auth_due = ident_due = availability_due = 0;
     car_receives_n = 0, car_current = 0, bt_component = -1;
@@ -692,6 +927,13 @@ static void send_now_playing(const struct iap2_np *n, int media) {
         if (media_mask & 1u << MI_DURATION) param_u32(MI_DURATION, n->len_ms);
         if ((media_mask & 1u << MI_ALBUM) && n->album[0]) param_str(MI_ALBUM, n->album);
         if ((media_mask & 1u << MI_ARTIST) && n->artist[0]) param_str(MI_ARTIST, n->artist);
+        for (unsigned a = MI_LIKE_SUPPORTED; a <= MI_BANNED; ++a)
+            if (media_mask & 1u << a) param_u8(a, 0);
+        if (media_mask & 1u << MI_CHAPTER_COUNT) param_u16(MI_CHAPTER_COUNT, 0);
+        if (media_mask & 1u << MI_ARTWORK) {
+            u8 id = art_start(n);
+            if (id) param_u8(MI_ARTWORK, id);
+        }
         group_end();
     }
     group_start(1);
@@ -701,12 +943,15 @@ static void send_now_playing(const struct iap2_np *n, int media) {
     if (playback_mask & 1u << PB_QUEUE_COUNT) param_u32(PB_QUEUE_COUNT, n->qlen);
     if (playback_mask & 1u << PB_SHUFFLE) param_u8(PB_SHUFFLE, n->shuffle ? 1 : 0);
     if (playback_mask & 1u << PB_REPEAT) param_u8(PB_REPEAT, n->repeat);
+    if (playback_mask & 1u << PB_CHAPTER_INDEX) param_u32(PB_CHAPTER_INDEX, 0);
+    if (playback_mask & 1u << PB_LIBRARY) param_str(PB_LIBRARY, H->library_id);
     if (playback_mask & 1u << PB_APP_NAME) param_str(PB_APP_NAME, H->name);
     if (playback_mask & 1u << PB_SPEED) param_u16(PB_SPEED, 100);
-    if (playback_mask & 1u << PB_SEEKABLE) param_u8(PB_SEEKABLE, 0);
+    if (playback_mask & 1u << PB_SEEKABLE) param_u8(PB_SEEKABLE, 1);
     if (playback_mask & 1u << PB_APP_BUNDLE) param_str(PB_APP_BUNDLE, "org.q2muse.player");
     group_end();
     msg_send();
+    if (media && art_id && art_going && !art_sent) art_setup();
 }
 
 /* Every half second while the car takes Now Playing: everything again on a new song or state, else the position
@@ -770,9 +1015,11 @@ static void iap2_control_receive(const u8 *msg, unsigned len) {
     case 0xDA00:
         H->log("audio: the car asks for USB audio (44.1 kHz announced; M3 plays into it)");
         send_audio_rate();
+        set_audio(1);
         break;
     case 0xDA02:
         H->log("audio: the car stops USB audio");
+        set_audio(0);
         break;
     case 0x5000:
         v = find(p, plen, 0, &n);
@@ -785,16 +1032,34 @@ static void iap2_control_receive(const u8 *msg, unsigned len) {
     case 0x5002:
         now_playing = 0;
         break;
-    case 0x6800:
-        H->log("hid: the car starts HID (its buttons; M2 acts on them)");
+    case 0x5003:
+        /* the car's seek: parameter 0, the position in ms */
+        if ((v = find(p, plen, 0, &n)) && n == 4 && H->command) {
+            char verb[32];
+            snprintf(verb, sizeof verb, "seek %u", get_be(v, 4) / 1000);
+            H->log(verb);
+            H->command(verb);
+        }
+        break;
+    case 0x6800: {
+        char t[80];
+        if ((v = find(p, plen, 4, &n))) parse_hid(v, n);
+        snprintf(t, sizeof t, "hid: the car starts HID: %u buttons in its report descriptor", n_controls);
+        H->log(t);
+        memset(last_report, 0, sizeof last_report);
         if (availability_due) send_carplay_availability();
         break;
+    }
     case 0x6802:
         if ((v = find(p, plen, 1, &n))) {
             char h[200];
             iap2_hex(h, sizeof h, v, n);
             iap2_log("hid: a button report", h);
+            take_hid_report(v, n);
         }
+        break;
+    case 0x6803:
+        n_controls = 0;
         break;
     default:
         break;
@@ -829,6 +1094,7 @@ static void iap2_tick(void) {
     }
     if (availability_due && now >= availability_due) send_carplay_availability();
     if (identified && now_playing) poll_now_playing(now);
+    pump();
 }
 
 /* A new connection: everything forgotten, the detect awaited. */
