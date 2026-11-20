@@ -5,6 +5,7 @@
 #include "chapters.h"
 #include "offsets.inc"
 #include "peq.h" /* libc/libcstl imports (deque_*, send) and the shared helpers */
+#include "wheel_accel.h" /* the wheel's momentum on a long list */
 #include "playback.h"
 #include "stock.h"
 #include "themes.h" /* tools/theme.py: the themes' enums and macros; theme_engine.c has the tables */
@@ -1241,6 +1242,7 @@ int tsv_split(char *line, char **f, int max); /* catalogue.c */
 int name_sorted(const char *page); /* the top page's list is a name-sorted Library list */
 void az_mark(void *w, int letter, int held, int bubble);
 void az_wheel(void *w, int id), az_paint(void *w, void *canvas);
+int az_letter_step(void *w, int id, int dir); /* a letter's jump on the wheel (wheel_accel.c) */
 int az_touch(void *w, void *event), az_held(void *event), az_on(void *w), az_right(void *w),
     az_bar_in(void *w);
 int az_initial(const char *s), az_target(const int *first, int letter), az_letter_at(int y),

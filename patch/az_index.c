@@ -120,6 +120,30 @@ static int az_letter_of(void *r, int k) {
     return I(r, REC_ID) < 0 ? -1 : az_initial(P(r, field[k - AZ_ALBUMS]));
 }
 
+/* navigation's wheel in its letter steps (wheel_accel.c): the row a whole-letter tick from row id of
+ * table w goes to, dir 1 or -1. Down: the next letter's first row (the list's last row from the
+ * last letter); up: the current letter's first row, or the one before's when id is that already.
+ * Never past the list's ends. -1 when w is no indexed list. The bubble shows the letter, as a
+ * fast spin's does. */
+int az_letter_step(void *w, int id, int dir) {
+    int k = az_kind(w);
+    void *list = P(p_deque_showlist, 0);
+    int n = list ? (int)deque_size(list) : 0;
+    if (!k || id < 0 || id >= n) return -1;
+    int at = az_letter_of(deque_at(list, (unsigned)id), k), i = id;
+    if (dir > 0) {
+        while (i + 1 < n && az_letter_of(deque_at(list, (unsigned)(i + 1)), k) == at) ++i;
+        i = i + 1 < n ? i + 1 : n - 1;
+    } else {
+        if (i > 0 && az_letter_of(deque_at(list, (unsigned)(i - 1)), k) != at) --i; /* at its start */
+        at = az_letter_of(deque_at(list, (unsigned)i), k);
+        while (i > 0 && az_letter_of(deque_at(list, (unsigned)(i - 1)), k) == at) --i;
+    }
+    int letter = az_letter_of(deque_at(list, (unsigned)i), k);
+    if (letter >= 0) az_mark(w, letter, 0, 1);
+    return i;
+}
+
 /* The row a letter jumps to: its first, else the next letter's that has rows, else the last
  * before it; -1 when the list has none. */
 int az_target(const int *first, int letter) {
