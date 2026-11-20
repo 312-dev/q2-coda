@@ -1033,6 +1033,7 @@ const char *bt_codec(void), *bt_kind(unsigned cls), *bt_dev_mac(int i), *bt_dev_
 unsigned bt_class(const char *mac);
 enum { BT_ROW_FOUND, BT_ROW_PAIRED, BT_ROW_CONNECTING, BT_ROW_CONNECTED };
 int bt_dev_state(int i), bt_stock_click(int dev, int x), bt_ui_hold(void *top);
+int ringnav_btrows(void *win, void *ctx); /* nav/rows_settings.c: stock's btmenu_rows, then the page's order */
 /* bt_trace.c: stock's Bluetooth connection state in the unified log
  * (docs/internals.md#bluetooth-connection-trace); whether the kernel holds an ACL link to a MAC */
 void bt_trace_poll(void), bt_trace_why(const char *why, const char *mac), bt_trace_page(void);

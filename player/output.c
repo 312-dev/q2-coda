@@ -51,6 +51,10 @@ struct output {
     int hist_cap, hist_at, hist_n, tmp_cap;
     const float *clk, *duck;
     int clk_len, clk_at;
+    /* a click with nothing playing (output_hold, output_idle_*): a paused song's frames not yet heard, held_n of them
+     * in the device's format; holding while they are kept; idle while silence is being written for clicks */
+    uint8_t *held, *zbuf;
+    int held_n, holding, idle, zcap;
     FILE *file;
     int paused;
     double speed;         /* file sink: how many seconds of sound pass in one */
@@ -364,12 +368,6 @@ void output_volume(struct output *o, int volume) {
     for (int i = 0; i < 2; ++i) o->vol16[i] = (int)(255.0 * o->gain[i]);
 }
 
-/* the gain a channel's samples are given: a 16-bit song's in steps of 1/256 */
-static float gain_of(const struct output *o, int ch) {
-    int k = ch < 2 ? ch : 0;
-    return o->in.bytes == 2 && !o->in.is_float ? o->vol16[k] / 256.0f : o->gain[k];
-}
-
 int output_take(struct output *o, const struct pcm_format *f, int outputway) {
     if (!o || outputway != o->way) return 0;
     if (outputway != 1 || f->dsd || o->in.dsd) return same_format(f, &o->in);
@@ -550,7 +548,11 @@ static int sink(struct output *o, const uint8_t *data, int frames) {
  * them again; where nothing can be rewound (no backlog, a device that cannot rewind) the click starts with the next
  * frames written. The mix makes room for the click: y = x * (1 - e) + e * s, with e the click's envelope (at most
  * its level) and |s| <= 1, so a sample within full scale stays within it and the conversion never clips. The level
- * is the PCM's, so the DAC's volume, the headphones' own, scales it with the music. */
+ * is its own, CLICK_DB of the PCM's full scale whatever the volume: software volume (Bluetooth with Link Volume off,
+ * a USB DAC with mcl-softvolflag 1) scales the music before the mix and never the click. What comes after the PCM
+ * still scales both: the headphone DAC's hardware volume, a USB DAC's own, a headset's own (its AVRCP absolute
+ * volume, which Link Volume sets from the Q2's). With nothing playing the click is played in silence of its own
+ * (output_idle_*, engine.c click_session). */
 #define CLICK_LEAD_MS 20 /* past the PCM's place, for the rewind and rewrite to land before it gets there */
 #define CLICK_DB (-20.0) /* the click's peak, dB of full scale: tune by ear */
 #define CLICK_ATTACK_MS 0.25 /* the envelope's rise and fall, so the music's dip under it has no step either */
@@ -639,15 +641,15 @@ static int click_table(int kind, int rate, const float **clk, const float **duck
     return m->len;
 }
 
-/* The click, from where it is, into frames of data in place, in the output's format. Software volume has scaled
- * what is written, so it scales the click too: x * (1 - e) + gain * c. */
+/* The click, from where it is, into frames of data in place, in the output's format: x * (1 - e) + c, the music x
+ * already through the software volume, the click c at its own level. */
 static void click_mix(struct output *o, uint8_t *data, int frames) {
     int ch = o->f.channels;
     for (int i = 0; i < frames && o->clk_at < o->clk_len; ++i, ++o->clk_at) {
         float g = 1 - o->duck[o->clk_at], c = o->clk[o->clk_at];
         for (int k = 0; k < ch; ++k) {
             int j = i * ch + k;
-            float cg = o->gained ? c * gain_of(o, k) : c;
+            float cg = c;
             if (o->f.is_float) ((float *)data)[j] = ((float *)data)[j] * g + cg;
             else if (o->f.bytes == 2) {
                 float v = (((int16_t *)data)[j] * (1.0f / 32768) * g + cg) * 32768;
@@ -701,6 +703,9 @@ static int rewind_by(struct output *o, int want) {
 #endif
     fflush(o->file);
     if (fseeko(o->file, -(off_t)want * frame_bytes(o), SEEK_END)) return 0;
+    /* the file ends where the next write goes, as a PCM's frames past appl_ptr are not there to be played: a held
+     * song's frames (output_hold) taken back are gone from it until written again */
+    if (ftruncate(fileno(o->file), ftello(o->file))) return 0;
     o->written -= want;
     return want;
 }
@@ -722,7 +727,82 @@ int output_click(struct output *o, int kind) {
     return sink(o, o->tmp, back);
 }
 
+/* ---- a click with nothing playing (docs/internals.md#key-tone): engine.c's click_session opens the output for it (a
+ * song stopped) or takes the paused song's (output_hold), then keeps IDLE_AHEAD_MS of silence written ahead of what
+ * plays, each click mixed into that silence as into a song (output_click's rewind) or starting with the next of it,
+ * until the session ends (output_idle_end) */
+#define IDLE_AHEAD_MS 80 /* more than a period (31 ms), so the PCM starts, and room for engine.c's 30 ms ticks */
+
+/* The frames written and not yet heard, the newest n of the history, into o->held; the PCM emptied, running. */
+void output_hold(struct output *o) {
+    if (!o || o->holding) return;
+    int fb = frame_bytes(o);
+    int64_t d = dev_delay(o);
+    int n = d < o->hist_n ? (int)d : o->hist_n;
+    if (n > 0 && (o->held = malloc((size_t)n * fb))) { /* no memory: the resume goes on from after them, a jump */
+        int from = (o->hist_at - n + o->hist_cap) % o->hist_cap, m = n < o->hist_cap - from ? n : o->hist_cap - from;
+        memcpy(o->held, o->hist + (size_t)from * fb, (size_t)m * fb);
+        memcpy(o->held + (size_t)m * fb, o->hist, (size_t)(n - m) * fb);
+        o->held_n = n;
+    }
+    o->hist_n = 0, o->clk_at = o->clk_len, o->holding = 1, o->paused = 0;
+#ifdef HAVE_ALSA
+    if (o->pcm) {
+        snd_pcm_drop(o->pcm); /* out of its pause too */
+        snd_pcm_prepare(o->pcm);
+        return;
+    }
+#endif
+    rewind_by(o, (int)d); /* the file sink: those frames are written again at the resume */
+    clock_gettime(CLOCK_MONOTONIC, &o->t0);
+    o->written = 0;
+}
+
+void output_idle_fill(struct output *o) {
+    if (!o || o->f.dsd) return;
+    int fb = o->in.channels * o->in.bytes, n = (int)((int64_t)o->in.rate * IDLE_AHEAD_MS / 1000 - output_delay(o));
+    if (n <= 0 || grow((void **)&o->zbuf, &o->zcap, n * fb, 1)) return;
+    memset(o->zbuf, 0, (size_t)n * fb); /* silence in the song's format: zero is silence in each, float's too */
+    o->idle = 1;
+    output_write(o, o->zbuf, n);
+}
+
+void output_idle_click(struct output *o, int kind) {
+    if (!o || o->f.dsd) return;
+    o->idle = 1;
+    output_click(o, kind);
+    output_idle_fill(o);
+}
+
+/* The silence not yet heard dropped; a held song's PCM left as paused, empty, for output_pause's resume. */
+void output_idle_end(struct output *o) {
+    if (!o || !o->idle) return;
+    o->idle = 0, o->clk_at = o->clk_len, o->hist_n = 0;
+#ifdef HAVE_ALSA
+    if (o->pcm) {
+        snd_pcm_drop(o->pcm);
+        snd_pcm_prepare(o->pcm);
+        o->paused = o->holding;
+        return;
+    }
+#endif
+    rewind_by(o, (int)dev_delay(o));
+    clock_gettime(CLOCK_MONOTONIC, &o->t0);
+    o->written = 0, o->paused = o->holding;
+    o->paused_at = o->t0;
+}
+
 void output_pause(struct output *o, int on) {
+    if (!on && o->holding) { /* the resume of a song held for a click: its frames not yet heard, then on as before */
+        output_idle_end(o);
+        o->holding = 0, o->paused = 0;
+        clock_gettime(CLOCK_MONOTONIC, &o->t0);
+        o->written = 0;
+        if (o->held_n) remember(o, o->held, o->held_n), sink(o, o->held, o->held_n);
+        free(o->held);
+        o->held = NULL, o->held_n = 0;
+        return;
+    }
     if (o->paused == on) return;
     o->paused = on;
 #ifdef HAVE_ALSA
@@ -743,6 +823,8 @@ void output_pause(struct output *o, int on) {
 
 void output_drop(struct output *o) {
     o->hist_n = 0, o->clk_at = o->clk_len; /* what was written is gone, and a click with it */
+    free(o->held); /* and a paused song's frames held for a click (output_hold) */
+    o->held = NULL, o->held_n = o->holding = o->idle = 0;
     resampler(o);                          /* and what the resampler held back of it */
 #ifdef HAVE_ALSA
     if (o->pcm) {
@@ -780,5 +862,6 @@ void output_close(struct output *o) {
     free(o->fbuf), free(o->rbuf), free(o->dbuf), free(o->sbuf);
     free(o->hist);
     free(o->tmp);
+    free(o->held), free(o->zbuf);
     free(o);
 }

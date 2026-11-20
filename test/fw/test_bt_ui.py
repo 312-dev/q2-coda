@@ -51,7 +51,10 @@ class Page:
         return 0
 
     def build(self, *_):
+        """btmenu_rows: the list's rows made again whole."""
         ui, view = self.ui, self.view
+        for k in list(ui.kids[view]):
+            ui.destroy(k)
         for i in range(5 if self.fw.var('g_bluetoothflag', C.c_ubyte).value else 1):
             item = ui.new('list_item_create', view, 0, 0, 375, 78)
             ui.name[item] = f's{i}'
@@ -1242,8 +1245,10 @@ def test_a_device_found_mid_scan_is_listed_within_a_second(fw):
     """V1JCi, 2026-11-19: the radio heard the Pixel Buds at 22:14:32.2Z (q2guard's found) and the page listed them
     at 22:14:37.2Z (page shows found): stock's page timer reads the search results (getSearchResult) only as a
     scan's count ends, so a device found early in a 10 s scan waited for its end. While the page scans, its poll
-    reads them each second and asks for a rebuild when the device list grew."""
+    reads them each second and rebuilds the list when they changed (stock's btmenu_rows, at once)."""
     s = Scan(fw)
+    builds = []
+    fw.mock('stock_btrows_trampoline', lambda *a: builds.append(s.p.now) or s.p.build())
     reads = []
     found = C.create_string_buffer(0x124)
     C.memmove(C.addressof(found) + 4, HEAD.encode() + b'\0', len(HEAD) + 1)
@@ -1251,20 +1256,17 @@ def test_a_device_found_mid_scan_is_listed_within_a_second(fw):
     fw.mock('getSearchResult', lambda *_: reads.append(s.p.now) or 0)
     s.p.poll()  # the scan starts
     assert s.started == 1
-    flag = fw.var('g_btsetting_flag', C.c_ubyte)
-    flag.value = 0
     s.p.poll()
     s.p.poll()
-    assert len(reads) == 1 and flag.value == 0  # read a second on; nothing new
+    assert len(reads) == 1 and not builds  # read a second on; nothing new
     listed.append(C.addressof(found))  # what getSearchResult would add: the Buds heard
     s.p.poll()
     s.p.poll()
-    assert len(reads) == 2 and flag.value == 1
-    flag.value = 0
+    assert len(reads) == 2 and len(builds) == 1
     fw.var('bt_searchtime', C.c_ubyte).value = 1  # stock's timer reads them itself at the count's end
     s.p.poll()
     s.p.poll()
-    assert len(reads) == 2 and flag.value == 0
+    assert len(reads) == 2 and len(builds) == 1
 
 
 def test_a_reconnect_with_no_link_thread_is_stock_s_connected_as_it_was(fw):
@@ -1286,3 +1288,48 @@ def test_a_reconnect_with_no_link_thread_is_stock_s_connected_as_it_was(fw):
     flag.value = 0
     p.poll()
     assert flag.value == 0
+
+
+def test_a_device_found_mid_scan_never_paints_on_another_s_row(fw):
+    """V1JDi, 2026-11-19: on the pairing page during a search, a Bluetooth glyph "blended with a headphone one as the
+    list shifted". A row knows its device by its place in pdeq_btshowlist (its button's name, which stock's click
+    reads too), and the mid-scan read (getSearchResult) refills that list: until the list was rebuilt, on stock's
+    200 ms page timer, the row titled JBL Flip 6 painted the place's new device, the Pixel Buds' headphones, and a
+    tap there went to the Buds. Stock's own timer reads and rebuilds in one call (0x4c4848); so does the page now."""
+    s = Scan(fw, [(CAR, 'BMW 83828', 'paired'), (SPEAKER, 'JBL Flip 6', 'found')])
+    p = s.p
+    p.files.files[CLASS_FILE] = f'{CAR} 2098208\n{HEAD} 2360324\n{SPEAKER} 256\n'.encode()
+    p.rebuild()
+    drawn = []
+    fw.mock('widget_load_image', lambda w, name, *_: drawn.append(C.string_at(name).decode()) or 1)
+    listed = p.ui.deques[fw.var('fw_ctx_pdeq_btshowlist', C.c_uint).value]
+    buds = C.create_string_buffer(0x124)
+    C.memmove(C.addressof(buds) + 4, HEAD.encode() + b'\0', len(HEAD) + 1)
+    C.memmove(C.addressof(buds) + 0x24, b'Pixel Buds\0', 11)
+
+    def found(*_):  # the Buds heard: stock's list refilled with them before the JBL
+        if len(listed) == 2:
+            listed.insert(1, C.addressof(buds))
+            p.devices.insert(1, (HEAD, 'Pixel Buds', 'found'))
+        return 0
+    fw.mock('getSearchResult', found)
+
+    def rows():
+        """Each device row as painted now: its title and the kind its glyph draws."""
+        out = []
+        for r in p.rows():
+            glyph = p.ui.lookup(r, '_bt_glyph', 1)
+            if not glyph:
+                continue
+            drawn.clear()
+            fw.fn('bt_ui_paint', None, C.c_void_p, C.c_void_p)(glyph, None)
+            title = next(p.ui.text[w] for w in p.ui.subtree(r) if p.ui.kind.get(w) == 'hscroll_label_create')
+            out.append((title, next(n.split('btdev_')[1].split('_')[0] for n in drawn if 'btdev_' in n)))
+        return out
+    p.layout()
+    assert rows() == [('BMW 83828', 'car'), ('JBL Flip 6', 'bt')]
+    for _ in range(4):  # the scan starts, and its results are read a second on; each frame laid out, then painted
+        p.poll()
+        p.layout()
+        assert all(kind == {'BMW 83828': 'car', 'Pixel Buds': 'headphones', 'JBL Flip 6': 'bt'}[t] for t, kind in rows()), rows()
+    assert [t for t, _ in rows()] == ['BMW 83828', 'Pixel Buds', 'JBL Flip 6']

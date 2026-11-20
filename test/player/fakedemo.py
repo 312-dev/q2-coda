@@ -146,10 +146,15 @@ def scenarios(m):
         # ReplayGain, track and album, every tag form, then an MP3 whose only gain is its LAME header's
         **{f'rg-{mode}': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\%d}' % n), (0.1, '{mcl-setoutputway\\0}')]
            + chain(m, [f for f, _, _ in REPLAYGAIN] + ['rglame.mp3'])[4:] for mode, n in (('track', 1), ('album', 2))},
-        # the Clicker's click: one of each into silence, a wheel's into a full-scale square; none while paused or idle
+        # the Clicker's click: one of each into silence, a wheel's into a full-scale square
         'click': boot + [(1.0, song('set-songurl', f'{m}/silence.wav')), (2.0, '{mcl-click\\wheel}'), (3.0, '{mcl-click\\button}'),
-                         (4.0, '{mcl-click\\beep}'), (4.5, '{mcl-pause\\null}'), (5.0, '{mcl-click\\wheel}'), (5.5, '{mcl-play\\null}'),
-                         (7.5, '{mcl-stop\\null}'), (8.0, '{mcl-click\\wheel}'), (8.5, None)],
+                         (4.0, '{mcl-click\\beep}'), (4.5, '{mcl-stop\\null}'), (5.0, None)],
+        # and with nothing playing: two wheel clicks 300 ms apart (past the DAC's 130 ms release, waited for before the
+        # first) while a song is paused, the song resumed after the hold has run out, then two more after the stop, in a
+        # PCM of their own, held open CLICK_HOLD_MS and closed
+        'click-idle': boot + [(1.0, song('set-songurl', f'{m}/a1.flac')), (3.0, '{mcl-pause\\null}'), (3.5, '{mcl-click\\wheel}'),
+                              (3.8, '{mcl-click\\wheel}'), (7.5, '{mcl-play\\null}'), (8.5, '{mcl-stop\\null}'),
+                              (9.5, '{mcl-click\\wheel}'), (9.8, '{mcl-click\\wheel}'), (14.0, None)],
         # the plug-in chirp (patch/charging.c): once into silence, then none while paused
         'chirp': boot + [(1.0, song('set-songurl', f'{m}/silence.wav')), (2.0, '{mcl-click\\charge}'), (3.0, '{mcl-pause\\null}'),
                          (3.5, '{mcl-click\\charge}'), (4.0, '{mcl-stop\\null}'), (4.5, None)],
@@ -194,7 +199,7 @@ def scenarios(m):
         # a USB DAC at unity: a song of each width, for the formats a DAC takes
         'usb-formats': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\2}'), (0.1, '{mcl-softvolflag\\0}'),
                         (1.0, song('set-songurl', a1)), (3.0, song('set-nexturl', f'{m}/f24.flac')), (10.0, song('set-nexturl', m4a)), (13.0, '{mcl-stop\\null}'), (14.0, None)],
-        # the click on a USB DAC with its volume in software at 50 (25/256): the click is scaled with the music
+        # the click on a USB DAC with its volume in software at 50 (25/256): the music is scaled, the click is not
         'click-usb': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\2}'), (0.1, '{mcl-softvolflag\\1}'),
                       (0.1, vol(50, 50)), (1.0, song('set-songurl', f'{m}/silence.wav')), (2.0, '{mcl-click\\wheel}'), (3.0, '{mcl-stop\\null}'), (3.5, None)],
         # a USB DAC with mcl-softvolflag 0: an mcl-setvol mid-song scales it (stock's quirk), and the next song starts at unity

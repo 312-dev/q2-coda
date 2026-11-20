@@ -1,10 +1,10 @@
 /* The Clicker (docs/internals.md#key-tone): where Key Tone's click is heard. System settings ->
  * Controls -> Clicker, the row that was Key Tone's, cycles Speaker, Headphones, Both and Off.
  * Speaker is the MCU's buzzer as Key Tone was, silent while headphones, Bluetooth or a USB DAC
- * listen. Headphones has q2player mix the click into what it plays ({mcl-click\KIND}) and never
- * sounds the buzzer: while nothing is mixed (a pause, nothing playing, the stock player) there is no
- * click. ponytail: a click while nothing plays would need its own PCM through the headphone DAC, as
- * a paused q2player takes none.
+ * listen. Headphones has q2player sound the click ({mcl-click\KIND}) and never sounds the buzzer:
+ * mixed into what it plays, or with nothing playing (a pause, a stop) in silence of its own, the
+ * output opened for it and held a few seconds (player/engine.c click_session); with the stock
+ * player there is no click.
  * Both has the mixed click and the buzzer whatever listens, as Click With Headphones lifted that
  * gate. Off is nothing: Key Tone off, stock's g_keytone_flag and SYSSET KEYTONE.
  * The output is IPOD CLICKER (0 Both, the default, 1 Speaker, 2 Headphones), so an absent key is
@@ -54,16 +54,18 @@ void clicker_step(void) {
     }
 }
 
-/* Whether a click sent now is mixed: q2player is the player (its file, looked for once a second)
- * and a song plays (mclGetPlayStatus 2; paused, its PCM takes nothing). */
-static int player_mixes(void) {
+/* Whether q2player is the player (its file, looked for once a second), which sounds a click playing
+ * or not. */
+static int player_there(void) {
     static unsigned long long looked;
     static int there;
     unsigned long long now = now_ms();
     if (!looked || now < looked || now - looked >= CLICKS_LOOK_MS)
         looked = now ? now : 1, there = !access(CLICKS_FILE, 0); /* F_OK */
-    return there && mclGetPlayStatus() == 2;
+    return there;
 }
+/* ... and a song plays (mclGetPlayStatus 2): what the chirp, mixed only into a song, needs */
+static int player_mixes(void) { return player_there() && mclGetPlayStatus() == 2; }
 
 /* ringnav_buzzer's routing of one click: the mixed one sent here (ROUTE_MIXED), and whether the
  * buzzer clicks too (ROUTE_BUZZER). listening: headphones, Bluetooth or a USB DAC take the sound,
@@ -73,7 +75,7 @@ int clicker_route(int listening) {
                                          "{mcl-click\\beep}" };
     int mode = shown(), mixed = 0;
     if (mode == SHOWN_OFF) return 0;
-    if ((mode == SHOWN_HEADPHONES || mode == SHOWN_BOTH) && player_mixes()) {
+    if ((mode == SHOWN_HEADPHONES || mode == SHOWN_BOTH) && player_there()) {
         int fd = *(volatile int *)MCL_FD, k = clicker_kind;
         const char *m =
             sends[k >= CLICK_KIND_WHEEL && k <= CLICK_KIND_BEEP ? k - CLICK_KIND_WHEEL : 0];

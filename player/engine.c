@@ -137,6 +137,62 @@ static void close_output(int drain) {
     out = NULL;
 }
 
+/* ---- the Clicker's click with nothing playing (docs/internals.md#key-tone): a song paused keeps its PCM, whose
+ * frames not yet heard are taken back (output_hold) and written again at the resume; with none, a PCM is opened for
+ * the clicks, CLICK_RATE stereo S16 on the output demo chose, with the type of the last song's device. Either way
+ * silence is written CLICK_TICK_MS apart a little ahead of what plays (output_idle_fill), each click mixed into it,
+ * and the PCM is held so for CLICK_HOLD_MS after the last click, so a turn of the wheel does not start and stop an
+ * A2DP stream at each tick; then the silence is dropped and a PCM of its own closed. Anything else asked of the
+ * player (a song, a resume, a stop, a seek, a preload, another output) ends it at once. On the headphone DAC the line
+ * is unmuted for it, its release waited for, and muted again after. A PCM that will not open is not tried again
+ * for CLICK_RETRY_MS (Bluetooth chosen with no headset's PCM yet). */
+enum { CLICK_HOLD_MS = 3000, CLICK_TICK_MS = 30, CLICK_RETRY_MS = 10000, CLICK_RATE = 48000 };
+static int last_hw = 17; /* the type of the device the last song was opened on (a Q2's) */
+
+static void click_session(int way, int kind, int paused) {
+    struct ctl *c = &ctl;
+    static int64_t failed_at;
+    if (!paused) {
+        int64_t now = now_ms();
+        if (failed_at && now - failed_at < CLICK_RETRY_MS) return;
+        struct pcm_format f = {CLICK_RATE, 2, 2, 0, DSD_PCM};
+        dac_song(way, DSD_PCM); /* the DAC may be in DoP mode from the last song */
+        dac_mute(way);
+        if (!(out = output_open(&f, way, last_hw))) { failed_at = now; return; }
+        out_way = way, failed_at = 0;
+        output_volume(out, UNITY);
+    } else {
+        if (!out || out_way != way) return;
+        output_hold(out);
+    }
+    dac_unmute(way, 1);
+    int64_t last = now_ms();
+    output_idle_click(out, kind);
+    for (;;) {
+        struct timespec until;
+        clock_gettime(CLOCK_REALTIME, &until);
+        until.tv_nsec += CLICK_TICK_MS * 1000000L;
+        if (until.tv_nsec >= 1000000000L) until.tv_sec++, until.tv_nsec -= 1000000000L;
+        pthread_mutex_lock(&c->mu);
+        /* paused: a resume ends it; with nothing playing an mcl-pause changes nothing */
+        int other = c->play || c->stop || c->seek || c->preload || c->close_preload || (paused && !c->paused) ||
+                    c->outputway != way;
+        if (!c->click && !other) pthread_cond_timedwait(&c->wake, &c->mu, &until);
+        int click = c->click;
+        other = c->play || c->stop || c->seek || c->preload || c->close_preload || (paused && !c->paused) ||
+                c->outputway != way;
+        c->click = 0;
+        pthread_mutex_unlock(&c->mu);
+        int64_t now = now_ms();
+        if (click) output_click(out, click), last = now;
+        if (other || now - last >= CLICK_HOLD_MS) break;
+        output_idle_fill(out);
+    }
+    dac_mute(way);
+    output_idle_end(out);
+    if (!paused) close_output(0);
+}
+
 /* Plays s to its end or to the request that cuts it short, through its DSP chain (dsp.c). The PCM stays open on
  * return. */
 static int play_through(struct source *s, const struct song *song, struct dsp *d, int untouched, struct stretch *sx);
@@ -247,6 +303,7 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
         dac_mute(way);
         if (!(out = output_open(f, way, song->hw))) return FAILED;
         out_way = way;
+        if (song->hw) last_hw = song->hw;
     }
     out_cut = 0;
     volume_at_start(way);
@@ -257,7 +314,7 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
 
     for (;;) {
         pthread_mutex_lock(&c->mu);
-        while (c->paused && !(c->play && c->next) && !c->stop && !c->seek && !c->preload && !c->close_preload) {
+        while (c->paused && !(c->play && c->next) && !c->stop && !c->seek && !c->preload && !c->close_preload && !c->click) {
             if (!pausing) dac_mute(way), output_pause(out, 1), pausing = 1;
             pthread_cond_wait(&c->wake, &c->mu);
         }
@@ -302,7 +359,10 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
         }
         if (want_scan != scan) stretch_speed(sx, (scan = want_scan) < 0 ? -scan / 100.0 : scan / 100.0);
         if (volume >= 0 && (way == 1 || way == 2)) output_volume(out, volume);
-        if (paused) continue; /* a preload or a seek taken while paused: back to waiting */
+        if (paused) { /* a preload or a seek taken while paused: back to waiting; a click sounds in silence first */
+            if (click && pausing) click_session(way, click, 1);
+            continue;
+        }
         if (pausing) dac_unmute(way, 1), output_pause(out, 0), pausing = 0; /* a resume is always a person's */
         if (eq) dsp_eq_changed(d);
         if (click) output_click(out, click);
@@ -377,6 +437,16 @@ void *engine_thread(void *unused) {
             ipc_status_note(c);
             while (!c->play) {
                 c->stop = c->seek = c->preload = c->close_preload = 0; /* nothing is playing: stock answers none of these */
+                if (c->click) { /* the Clicker's, with nothing open: a PCM of its own for it */
+                    int kind = c->click, way = c->outputway;
+                    c->click = 0;
+                    pthread_mutex_unlock(&c->mu);
+                    if (out) dac_mute(out_way), output_drop(out); /* a skip's PCM kept for a next song that never came */
+                    close_output(0);
+                    click_session(way, kind, 0);
+                    pthread_mutex_lock(&c->mu);
+                    continue;
+                }
                 pthread_cond_wait(&c->wake, &c->mu);
             }
             /* An mcl-stop after the song's command (a set-songurl or set-nexturl clears an older one: ipc.c) came before

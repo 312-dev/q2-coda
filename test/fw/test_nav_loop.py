@@ -1595,16 +1595,17 @@ class Player:
         return [m for _, m, _ in self.sent]
 
 
-# Clicker (IPOD CLICKER: 0 Both, 1 Speaker, 2 Headphones) against who listens and whether q2player mixes: the
+# Clicker (IPOD CLICKER: 0 Both, 1 Speaker, 2 Headphones) against who listens and whether q2player is the player: the
 # buzzer's clicks and the mixed ones sent. Speaker is Key Tone as it was; Headphones never sounds the buzzer, with
-# headphones in or not, mixed or not (a pause, the stock player: no click); Both has the buzzer whatever listens.
+# headphones in or not; q2player takes the click playing (2), paused (3) or stopped (1), the stock player none; Both
+# has the buzzer whatever listens.
 WHEEL = b'{mcl-click\\wheel}'
 @pytest.mark.parametrize('clicker, listening, there, status, buzzed, sent', [
     (b'1', False, True, 2, True, False), (b'1', True, True, 2, False, False),
     (b'2', False, True, 2, False, True), (b'2', True, True, 2, False, True),
-    (b'2', False, True, 3, False, False), (b'2', True, True, 3, False, False),
-    (b'2', False, False, 2, False, False), (b'2', True, False, 2, False, False), (b'2', False, True, 1, False, False),
-    (b'0', True, True, 2, True, True), (b'0', False, True, 1, True, False), (b'0', True, False, 2, True, False),
+    (b'2', False, True, 3, False, True), (b'2', True, True, 3, False, True),
+    (b'2', False, False, 2, False, False), (b'2', True, False, 2, False, False), (b'2', False, True, 1, False, True),
+    (b'0', True, True, 2, True, True), (b'0', False, True, 1, True, True), (b'0', True, False, 2, True, False),
 ])
 def test_the_clicker_routes_a_click(fw, clicker, listening, there, status, buzzed, sent):
     Config(fw, CLICKER=clicker)
