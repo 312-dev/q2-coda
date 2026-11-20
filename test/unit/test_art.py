@@ -125,8 +125,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     in Accent Blue and white and its kept-by-the-app arrows in Text Secondary (each half's) and white, and a card app's
     sign-in steps (fill, the done check bold, 44 px) in white for their solid circles, Control Center's glyphs (fill,
     white, its sliders' in the block's grey), the USB pages' rows, mode glyphs and toasts, and Up Next's bump arrow and
-    Now Playing's queue and radio glyphs, charging's toasts (fill, 15 px, each in its colour, the battery's in each
-    half's Text Primary) and the plug-in screen's bolt (fill, 26 px, Positive green), and Software Update's result glyphs
+    Now Playing's queue and radio glyphs, charging's toasts and a card app's server error's (fill, 15 px, each in its
+    colour, the battery's in each half's Text Primary) and the plug-in screen's bolt (fill, 26 px, Positive green), and Software Update's result glyphs
     (white, 44 px), its offer's (white, 30 px) and its spinner, and Car Remote's phone (20 px) in Text Secondary (each
     half's) and white. The status battery's inset glyphs have their own test."""
     t = theme.builtins()[0]
@@ -157,11 +157,12 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     upnext = [f'bump_{k}' for k in ('d', 'l', 'w')] + [f'mode_{n}' for n in ('queue_d', 'queue_l', 'radio_d', 'radio_l', 'radio_w',
                                                                               'shuffle_xd', 'shuffle_xl', 'repeat_xd', 'repeat_xl')]
     charge = {**{f'chargetoast_{n}': c for n, (_, c) in art.CHARGE_TOASTS.items()},
-              'chargetoast_battery_d': 0xffffff, 'chargetoast_battery_l': 0}  # charging.c's toasts
+              'chargetoast_battery_d': 0xffffff, 'chargetoast_battery_l': 0,  # charging.c's toasts
+              'srvtoast': 0xff9f0a}  # addon.c's server error: cloud-slash in Warning
     inset = [f'batt{n}_{k}' for n in art.BATT_GLYPHS for k in ('d', 'l')]  # list_marks.c battery_slim
     keylock = [f'keylock_{k}' for k in ('d', 'l')]  # status_row.c's padlock (the card's below)
     status = [f'status_{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bt', 'btdim', 'headphones', 'car', 'down',
-                                          'vol', 'mute',
+                                          'vol', 'mute', 'offline',
                                           *(f'sync_{f}' for f in range(art.STATUS_SPIN)))
               for k in ('d', 'l')]  # status_row.c's other glyphs: their own test
     # bt_ui.c's device kinds, its scan spinner and the connection toasts (a drop's in Text Secondary)
@@ -245,7 +246,7 @@ def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(h
     so on the row it covers rows 17 to 27 with the digits: Wi-Fi iOS's fan, 15.6 x 11 in a 16 px box, its levels
     lighting the dot and bands over the rest in STATUS_UNLIT, the shape one box in every level; wifi-x, the
     Bluetooth rune (dim while connecting), headphones, the car and the volume pill's speakers (vol_pill.c) sized by their height (wifi-x and the car are wider
-    than tall: by the longer side Wi-Fi came out 8 px tall) in Text Primary; the sync arrows' STATUS_SPIN frames in Text Secondary, each turned from the last."""
+    than tall: by the longer side Wi-Fi came out 8 px tall) in Text Primary; the offline cloud in Warning in both halves; the sync arrows' STATUS_SPIN frames in Text Secondary, each turned from the last."""
     got = art.images(theme.builtins()[0])
     def ink(name, cut=64):
         w, h, at = pixels(got[f'oled_status_{name}_{half}'])
@@ -269,6 +270,8 @@ def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(h
         assert (y0, y1) == (1, 11) and x1 - x0 + 1 <= w
     x0, x1, _, _ = box(ink('wifi_x', 8)[1])
     assert x1 - x0 + 1 == 14  # wider than its 11 rows
+    size, lit, colours = ink('offline', 8)  # a card app's server out of reach: cloud-slash in Warning, both halves
+    assert size == (art.STATUS_PX, art.STATUS_PX) and colours == {rgb(0xff9f0a)} and box(lit)[2:] == (1, 11)
     frames = [got[f'oled_status_sync_{f}_{half}'] for f in range(art.STATUS_SPIN)]
     assert len(set(frames)) == art.STATUS_SPIN and all(ink(f'sync_{f}')[2] == {rgb(secondary)} for f in range(art.STATUS_SPIN))
 
