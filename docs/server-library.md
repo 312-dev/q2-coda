@@ -77,6 +77,9 @@ i	<pid>	<sid>	<card path or empty>
   paths from the row at `<start>` on, Stream Cache copies for server songs, each waited for until
   it is there. A `.play` that changes within `CATPLAY_WAIT_MS` (4 s) is the answer; otherwise the
   firmware plays the list itself from card rows and offline copies.
+  Shuffle Songs (and every shuffle through `shuffle_play`: an album's, an artist's, a playlist's,
+  Car Remote's) hands the app its list already shuffled, its first song the one drawn and `<start>`
+  0, as the app plays the catplay's order (`library_lists.c` `shuffled_for_app`).
 - **Starting the app:** an app that isn't running when a list is played online (none since boot,
   or gone after its own idle exit) is started as its Streaming row starts it, the capability line
   written first, and the catplay is written once the app's `/tmp/q2-<id>.browse.sock` is there:

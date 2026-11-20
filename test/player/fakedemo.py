@@ -89,6 +89,7 @@ def scenarios(m):
         'restart-stop': boot + [(1.0, song('set-songurl', a1)), (4.0, song('set-nexturl', a1)), (4.02, '{mcl-stop\\null}'), (7.0, None)],
         # a song paused, then another picked from a list: demo's mclStartPlayer sees a song loaded and sends
         # set-nexturl, with nothing before it (demo 0x5bf6ac-0x5bf714; on the DAC its own mute and 100 ms first)
+        'pause-idle': boot + [(0.5, '{mcl-pause\\null}'), (1.0, song('set-songurl', a1)), (3.0, '{mcl-pause\\null}'), (4.0, None)],
         'pause-pick': boot + [(1.0, song('set-songurl', a1)), (3.0, '{mcl-pause\\null}'), (5.0, song('set-nexturl', a2)), (8.0, None)],
         # other formats: what media-info names them and how the PCM is opened
         'formats': boot + [(1.0, song('set-songurl', c96)), (4.0, song('set-nexturl', m4a)), (7.0, song('set-nexturl', ogg)), (10.0, '{mcl-stop\\null}'), (12.0, None)],
