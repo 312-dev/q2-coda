@@ -71,8 +71,9 @@ seventh of its brightness. At the foot the rows fade as Corners says, into black
 - **Which lists.** Every vertical list whose box starts at most 90 px down the screen (`REACH_TOP`): the
   settings pages, the Library's lists and tables (Songs, a playlist's songs), Home's lists and Edit Home, and the
   pages the payload builds (Recently Added, card apps' lists). A list lower down, under a page's own header or tabs (EQ's), keeps its
-  rows in its box. Songs' Shuffle row stays where it is: the rows pass behind it and show again above it, under the
-  status row; a table's rows never draw over it.
+  rows in its box. So does a list under Songs' Shuffle row (the user's, 2026-11-19): the row stays fixed under the
+  status row and the songs scroll under it, with no row above it, where one showing made Shuffle look as if it
+  floated over the list.
 - **A menu sheet's rows** (the menus, Up Next) stay in the sheet: the sheet's top is their edge, and they fade under
   y 50 as [Menus](#menus) says.
 - **Taps** on the band are the status row's, as on any page ([Full-bleed](#full-bleed)): a row shown under the

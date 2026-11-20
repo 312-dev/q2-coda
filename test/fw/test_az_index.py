@@ -197,3 +197,16 @@ def test_the_hidden_strip_paints_nothing_and_hides_no_scroll_indicator(fw, ui):
     assert not canvas.boxes and not canvas.fills and not canvas.rounds
     f = az(fw)
     assert not f['on'](table.client.at) and f['bar_in'](table.client.at) == 0
+
+
+def test_a_letter_step_goes_to_the_next_letters_first_row_or_back_to_this_ones_and_stops_at_the_ends(fw, ui):
+    """docs/internals.md#wheel-acceleration: a fast spin's letter tick (wheel_accel.c WA_LETTER) moves a whole letter on
+    a long name-sorted list, three songs a letter here: down to the next letter's first row, up to this letter's first
+    row or, from it, the one before's; never past either end. The bubble shows the letter."""
+    table, _ = touchable(fw, ui)
+    step = fw.fn('az_letter_step', C.c_int, C.c_void_p, C.c_int, C.c_int)
+    w = table.client.at
+    assert [step(w, 0, 1), step(w, 4, 1), step(w, 4, -1), step(w, 3, -1), step(w, 0, -1), step(w, 76, 1)] == \
+        [3, 6, 3, 0, 0, 77]
+    f = az(fw)
+    assert f['on'](w)  # the strip with its bubble, as a fast spin shows it

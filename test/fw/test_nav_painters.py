@@ -1845,6 +1845,19 @@ def test_a_list_at_its_top_or_low_on_the_screen_leaves_the_band_alone(fw, st, sc
     assert not r.painted and not r.band()
 
 
+@pytest.mark.parametrize('table', [False, True])
+def test_songs_scrolled_under_its_shuffle_row_paints_no_rows_above_the_row(fw, st, table):
+    """Songs (the user's screenshot, 2026-11-19): its action row, Shuffle, stands between the status row and the list,
+    from y 58 to 90. The band painted the list's rows above its top over the band alone, so a row showed above Shuffle
+    and Shuffle floated over the scrolled list. A page with the row showing keeps the list's rows in its box."""
+    r = Reach(fw, st, scroll=100, top=90, table=table)
+    shuffle = r.ui.add('view', r.win, (0, 58, 375, 32), name='view_navbar_allplay')
+    st('action_view', C.c_void_p).value = shuffle.addr
+    r.paint()
+    st('action_view', C.c_void_p).value = None  # the next test's page has none
+    assert not r.painted and not r.band()
+
+
 def test_the_band_repaints_when_its_list_scrolls_and_not_otherwise(fw, st):
     """The list's own invalidate keeps inside its box, so before a frame list_reach_due asks for the band once its list
     has moved since the band last showed it, and once more when the list is back at its top, its rows gone from it."""

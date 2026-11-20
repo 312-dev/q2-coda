@@ -950,6 +950,14 @@ int ringnav(void *ctx, void *event) {
             rearm(&st.letter_timer, letter_expire, LETTER_MS);
         int next = clamp_step(id < 0 ? (cur >= 0 ? g_menu.id[cur] : 0) : id, g_menu.rows - 1,
                               id < 0 ? 0 : dir * step);
+        /* a fast spin that goes on, on a long name-sorted table, moves a letter a tick (an iPod
+         * classic's, docs/internals.md#wheel-acceleration); back to rows once it slows */
+        static wheel_accel_t wa __attribute__((section(".scratch")));
+        if (id >= 0 && g_menu.kind == 2 &&
+            wheel_accel(&wa, g_menu.w, dir, now, g_menu.rows) == WA_LETTER) {
+            int to = az_letter_step(g_menu.w, id, dir);
+            if (to >= 0) next = to;
+        }
         if (next == 0 || next == g_menu.rows - 1) drop_wheel();
         if (next == id) { /* a list ends at its ends: no wrap; the bar leans against the end
                              (tilt.c), but above a music list's first row stands its search bar */

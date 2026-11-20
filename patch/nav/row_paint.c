@@ -1156,6 +1156,12 @@ static void *reach_find(void *win, int *x, int *y, int *off) {
     int budget = 96;
     void *v = win ? reach_walk(win, 0, 0, 0, &budget, x, y) : (void *)0;
     if (!v || modal_rows_of(v) || *y <= 0 || *y > REACH_TOP) return (void *)0;
+    /* Songs' action row (its Shuffle) stands between the band and the list: rows painted above
+     * the list would run on above the row, which then floats over the scrolled list (the user's,
+     * 2026-11-19). The list keeps its rows in its box there, under the fixed row. */
+    void *row = st.action_view, *p = row;
+    for (int k = 0; p && p != win && k < 8; ++k) p = P(p, W_PARENT);
+    if (p == win && row && widget_get_visible(row) && I(row, W_H) > 0) return (void *)0;
     *off = kind(v) == 2 ? I(v, TABLE_TOP) : I(v, SCROLL_Y);
     return *off > 0 ? v : (void *)0;
 }
