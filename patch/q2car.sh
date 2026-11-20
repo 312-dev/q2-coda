@@ -128,6 +128,12 @@ gadget_down() {
 }
 
 runner() {
+    # A stop still removing the last cable's gadget (a cable out and in again within a second or two) goes first: it
+    # holds the lock for its whole run (its waits are bounded, a few seconds at most), and this runner takes it only
+    # to start after it
+    exec 8>$RUN/lock
+    flock 8
+    flock -u 8
     echo $$ > $RUN/runner.pid
     trap 'p=$(cat $RUN/daemon.pid 2>/dev/null); alive "$p" && kill "$p"' TERM INT HUP
     # A --dev build's ADB gadget holds the controller between stock's gadgets: off it while the iPhone is shown
@@ -148,7 +154,6 @@ runner() {
 }
 
 start() {
-    alive "$(cat $RUN/runner.pid 2>/dev/null)" && { echo "q2car: already running" >&2; exit 1; }
     [ -f "$LOG" ] && mv -f "$LOG" "${LOG%.log}.prev.log" && mv -f "$LOG.dmesg" "${LOG%.log}.prev.log.dmesg" 2>/dev/null
     rm -f $STATE
     log "start: kernel $(uname -r)"
@@ -156,6 +161,8 @@ start() {
 }
 
 stop() {
+    exec 8>$RUN/lock
+    flock 8
     r=$(cat $RUN/runner.pid 2>/dev/null)
     if alive "$r"; then
         kill "$r"
