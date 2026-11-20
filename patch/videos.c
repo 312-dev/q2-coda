@@ -83,7 +83,8 @@ void dac_take(void) {
 }
 
 /* q2video on output_device, else the headphone DAC's plughw:0,0 (the only card), readied first, for
- * file or, with radio, Internet Radio's url (radio.c): its pid, 0 when it did not start. */
+ * file or, with radio 1, Internet Radio's url (radio.c), or with radio 2 the Radio Tuner's receiver
+ * (radio_tuner.c), which takes no file: its pid, 0 when it did not start. */
 int video_start(const char *file, int radio) {
     char vol[5];
     const char *out = output_device(vol);
