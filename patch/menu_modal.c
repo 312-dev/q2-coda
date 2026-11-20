@@ -574,9 +574,9 @@ static unsigned isqrt(unsigned v) {
 
 /* The material from the page under the sheet, whole in fb (its first whole paint): the page
  * receding and dimmed for the strip above the sheet, then that page blurred on a quarter-size grid,
- * scaled back, its colour raised, darkened and tinted (Light Mode: under white at 75%), with a
- * grain of +-3 levels, for the sheet. ponytail: made once, so a page that changes under an open
- * sheet (Now Playing's time) shows as it was; making it again on each whole paint would follow. */
+ * scaled back, its colour raised, darkened and tinted (Light Mode: under white at 75%), for the
+ * sheet. ponytail: made once, so a page that changes under an open sheet (Now Playing's time)
+ * shows as it was; making it again on each whole paint would follow. */
 static void sheet_build(const unsigned *fb) {
     unsigned n = (SH_STRIP + SH_H - SH_TOP) * SH_W;
     int *q = calloc(3 * SH_QW * SH_QH + SH_QW + SH_QH, sizeof *q), light = ipod_light();
@@ -623,14 +623,13 @@ static void sheet_build(const unsigned *fb) {
                     u = v[y1 * SH_QW + x0] * (256 - fx) + v[y1 * SH_QW + x1] * fx;
                 c[p] = (t * (256 - fy) + u * fy) >> 16;
             }
-            int luma = (77 * c[0] + 150 * c[1] + 29 * c[2]) >> 8,
-                grain = (int)(((unsigned)x * 73856093u ^ (unsigned)y * 19349663u) >> 8) % 7 - 3;
+            int luma = (77 * c[0] + 150 * c[1] + 29 * c[2]) >> 8;
             unsigned out = 0xff000000u;
             for (int p = 0; p < 3; ++p) {
                 int v = clampi(luma + ((c[p] - luma) * SH_SAT >> 8), 0, 255);
                 v = light ? (v * (256 - SH_TINT_L) + 255 * SH_TINT_L) >> 8
                           : ((v * SH_KEEP >> 8) * (256 - SH_TINT) + 255 * SH_TINT) >> 8;
-                out |= (unsigned)clampi(v + grain, 0, 255) << (16 - 8 * p);
+                out |= (unsigned)v << (16 - 8 * p);
             }
             mat[(y - SH_TOP) * SH_W + x] = out;
         }

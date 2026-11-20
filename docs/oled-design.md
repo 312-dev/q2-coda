@@ -1100,8 +1100,8 @@ pickers in them) open as a frosted page sheet over the page (the user's C3, 2026
 - **Sheet:** from y 40 to the screen's foot, edge to edge, its top corners 40 px, a 36 x 5 grab bar
   at y 46 (`#5A5A5E`; Light Mode `#A1A1A6`). Its material is the receding page blurred (about a
   20 px gaussian), its color raised 1.6 times, 28% of its brightness kept under a 6% white tint
-  (Light Mode: white at 75% over it), with a grain of +-3 levels. It is made once, when the sheet
-  first paints whole, never per frame.
+  (Light Mode: white at 75% over it), smooth, with no grain (the user's call, 2026-11-20). It is
+  made once, when the sheet first paints whole, never per frame.
 - **Header:** the item's cover (52 px, 6 px corners, at the text column from y 56; a `#2C2C2E` tile
   when it has none), its name in Inter Medium 20 at x 88 and a line under it in 15, Text Secondary:
   a song's artist and album (Now Playing's: the artist), an album's artist, "Playlist". A picker

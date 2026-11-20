@@ -3628,6 +3628,15 @@ def test_a_menu_sheet_recedes_the_page_and_frosts_it(fw, st):
     assert rgb(buf, 187, 300) == tuple((was[300 * 375 + 187] >> s) & 255 for s in (16, 8, 0))
 
 
+def test_a_menu_sheets_material_has_no_grain(fw, st):
+    """The user's "No grain on frosted" (2026-11-20): over a page that is one colour across, a row of the sheet's
+    material is that one colour too, with no hashed +-3 levels in it."""
+    ui, win, view, canvas, buf = sheet(fw, st)
+    fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
+    for y in (230, 250):
+        assert len({rgb(buf, x, y) for x in range(100, 276)}) == 1, y
+
+
 def test_a_menu_sheet_waits_for_a_whole_paint_to_make_its_material(fw, st):
     """A first paint of part of the screen can't see the whole page: the flat sheet until a whole one."""
     ui, win, view, canvas, buf = sheet(fw, st, risen=False)
