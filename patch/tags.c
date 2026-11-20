@@ -168,6 +168,10 @@ char *ringnav_id3_path(char *id3, const char *path) {
     card_tags(id3, path);
     /* last: now_tag and marked_empty read a matching path as the tags being complete */
     tk_snprintf(id3, 0x400, "%s", path); /* +0x400: the CUE start */
+    /* the song to bluetoothd's AVRCP record, which a car's GetElementAttributes reads: stock's
+     * track change sends it only for an online song, so a card file's never reached a car
+     * (docs/internals.md#track-metadata) */
+    sendBtHeadsetPlayInfo();
     return id3;
 }
 /* The library scan's folder walk (SCAN_DIRS in tools/build.py): its first exclusion, strcmp(name,

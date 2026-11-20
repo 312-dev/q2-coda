@@ -1367,8 +1367,8 @@ def test_music_info_of_no_path(fw, heap):
     assert not fw.calls('fw_fopen')
 
 
-def id3_path(fw, heap, tags, cue, path=b'/a/b.flac'):
-    id3 = heap.string(b'', 0xa84)
+def id3_path(fw, heap, tags, cue, path=b'/a/b.flac', id3=None):
+    id3 = id3 or heap.string(b'', 0xa84)
     for offset, value in tags.items():
         C.memmove(id3 + offset, value + b'\0', len(value) + 1)
     def info(_, out, *rest):
@@ -1397,6 +1397,17 @@ def test_a_full_sheet_reads_no_file(fw, heap, mcl):
 def test_no_cue_leaves_the_tags(fw, heap, mcl):
     id3, _ = id3_path(fw, heap, {}, 0)
     assert C.string_at(id3 + ALBUM) == b'' and C.string_at(id3) == b'/a/b.flac'
+
+
+def test_each_parse_hands_the_song_to_bluetooth_once_its_tags_are_in(fw, heap, mcl):
+    """The drive, 2026-11-19: a BMW's Bluetooth screen showed no title or artist for any song. Stock's track change
+    (player_mainscheduling) sends the AVRCP record (sendBtHeadsetPlayInfo) only for an online song; a card file's
+    change sends the play status alone, so bluetoothd's record never named a local song. Each parse sends it, once
+    the tags and the path are in g_play_id3_info, which it reads."""
+    seen, id3 = [], heap.string(b'', 0xa84)
+    fw.mock('sendBtHeadsetPlayInfo', lambda *_: seen.append(C.string_at(id3)) or 0)
+    id3_path(fw, heap, {}, 0, id3=id3)
+    assert seen == [b'/a/b.flac'], f'sendBtHeadsetPlayInfo at the parse: {seen}'
 
 
 # Rows and records.
