@@ -16,6 +16,8 @@ CFLAGS += -DHAVE_ALSA
 # stock's libasound: linked by file, since the root filesystem has no libasound.so link and no headers
 LIBS += $(ALSA) -Wl,--allow-shlib-undefined -Wl,-Bstatic -latomic -Wl,-Bdynamic
 endif
+# EXTRA_CFLAGS: tools/player.py's build variants (-DQ2_CAR_USB for --dev builds: docs/iphone-mode.md#car-audio)
+CFLAGS += $(EXTRA_CFLAGS)
 
 # FFmpeg's archives too: another configuration (tools/player.py) is another prefix, and must relink
 $(OUT)/q2player: $(OBJ) $(wildcard $(FFMPEG)/lib/*.a)

@@ -82,6 +82,7 @@ snd_pcm_sframes_t snd_pcm_avail(snd_pcm_t *p) { avail_calls++; return avail_now;
 snd_pcm_sframes_t snd_pcm_forward(snd_pcm_t *p, snd_pcm_uframes_t n) { forwarded = (long)n; return (snd_pcm_sframes_t)n; }
 snd_pcm_sframes_t snd_pcm_rewindable(snd_pcm_t *p) { return 0; }
 snd_pcm_sframes_t snd_pcm_rewind(snd_pcm_t *p, snd_pcm_uframes_t n) { return 0; }
+int snd_pcm_wait(snd_pcm_t *p, int ms) { return 1; } /* room at once: the car way (way 3) waits on it */
 int snd_pcm_pause(snd_pcm_t *p, int on) { return 0; }
 int snd_pcm_drop(snd_pcm_t *p) { return 0; }
 int snd_pcm_drain(snd_pcm_t *p) { return 0; }

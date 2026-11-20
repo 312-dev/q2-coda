@@ -24,14 +24,20 @@ static int out_way; /* the output way out was opened on */
 static int out_cut; /* out was dropped for a skip: its tail is not to be played out */
 
 enum { ENDED, NEXT, STOPPED, FAILED, MOVED /* reopen: opened for another output */ };
+enum { CAR_LOOK_MS = 250 }; /* how often a song playing looks for the car's wish (car_way) */
 
 /* How a DSD file goes out on an output, as stock decides it at each file (0x4210d4-0x421a24): on Bluetooth as PCM;
  * on a Q2's own DAC (hardware type 17) as DoP whatever mcl-dsdmode says; elsewhere, a USB DAC, as mcl-dsdmode says. */
 static int dsd_out(int way, int hw, int mode) {
-    if (way == 1) return DSD_PCM;
+    if (way == 1 || way == 3) return DSD_PCM;
     if (way == 0 && (hw == 17 || !hw)) return DSD_DOP; /* a preload's song has no type: the Q2's */
     return mode == 1 ? DSD_DOP : mode == 2 ? DSD_NATIVE : DSD_PCM;
 }
+
+/* The output demo's way stands for: the car's USB audio (way 3, output.c output_car) while the iPhone gadget's car
+ * wants it, in place of the DAC's or Bluetooth's; a USB DAC (way 2) is never in the car. --dev builds only
+ * (docs/iphone-mode.md#car-audio). The car's own knob is its volume: way 3 plays at unity. */
+static int car_way(int way) { return (way == 0 || way == 1) && output_car(NULL, 0, NULL) ? 3 : way; }
 
 /* Stock's software volume, set at each song (0x4235a8): always on Bluetooth, on a USB DAC with mcl-softvolflag 1,
  * and otherwise unity, since stock builds each song's filters afresh; while a song plays an mcl-setvol reaches it on
@@ -119,7 +125,7 @@ static void preload_start(const struct song *song) {
     preload_cancel();
     if (!(pre = calloc(1, sizeof *pre))) return;
     pre->song = *song;
-    pre->song.dsd = dsd_out(ctl.outputway, song->hw, ctl.dsdmode);
+    pre->song.dsd = dsd_out(car_way(ctl.outputway), song->hw, ctl.dsdmode);
     pthread_attr_init(&a);
     pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
     if (pthread_create(&t, &a, preload_thread, pre)) { /* no thread: the song's end opens it, as a cold start */
@@ -176,11 +182,11 @@ static void click_session(int way, int kind, int paused) {
         pthread_mutex_lock(&c->mu);
         /* paused: a resume ends it; with nothing playing an mcl-pause changes nothing */
         int other = c->play || c->stop || c->seek || c->preload || c->close_preload || (paused && !c->paused) ||
-                    c->outputway != way;
+                    car_way(c->outputway) != way;
         if (!c->click && !other) pthread_cond_timedwait(&c->wake, &c->mu, &until);
         int click = c->click;
         other = c->play || c->stop || c->seek || c->preload || c->close_preload || (paused && !c->paused) ||
-                c->outputway != way;
+                car_way(c->outputway) != way;
         c->click = 0;
         pthread_mutex_unlock(&c->mu);
         int64_t now = now_ms();
@@ -287,7 +293,7 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
     int fb = f->channels * f->bytes;
 
     pthread_mutex_lock(&c->mu);
-    int way = c->outputway;
+    int way = car_way(c->outputway);
     pthread_mutex_unlock(&c->mu);
     /* mcl-setoutputway takes effect here, at a song's start, as stock's: a song playing goes on where it is (captured).
      * A DSD song opened for another output (a preload) is opened again for this one. */
@@ -311,6 +317,7 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
     int64_t origin = source_frames(s); /* frames of this song written to the PCM count from here */
     int64_t offset = origin;           /* and this is where in the song that was */
     int heard = 0, pausing = 0;
+    int64_t car_look = now_ms();       /* when the car's wish (car_way) was last looked at */
 
     for (;;) {
         pthread_mutex_lock(&c->mu);
@@ -383,11 +390,34 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
             return ENDED;
         }
         if (sx) n = stretch_run(sx, data, n, &data);
-        int uv[2] = {0, 0};
+        int uv[2] = {0, 0}, gone = 0;
         if (n > 0) {
             n = dsp_run(d, data, n, (double)heard_at(s, sx, &rw, origin, offset) / f->rate, &data);
             if (metering) dsp_meter(f, untouched, data, n, uv);
-            if (output_write(out, data, n) < 0) return FAILED;
+            int w = output_write(out, data, n);
+            if (w == OUTPUT_CAR_GONE) gone = 1, output_car_gone(); /* the car stopped reading: off its way at once */
+            else if (w < 0) return FAILED;
+        }
+        /* The car asks for its audio, or stops, while a song plays: the song moves to the other output where it is,
+         * as a seek moves (the PCM's unplayed frames, under half a second, are not heard), as the car changes source. */
+        int64_t now = now_ms();
+        if (gone || now - car_look >= CAR_LOOK_MS) {
+            car_look = now;
+            pthread_mutex_lock(&c->mu);
+            int want_way = car_way(c->outputway);
+            pthread_mutex_unlock(&c->mu);
+            /* the car's coming and going alone: demo's own mcl-setoutputway waits for the next song, as stock's */
+            if ((want_way == 3) != (way == 3)) {
+                dac_mute(way);
+                close_output(0);
+                way = want_way;
+                if (!(out = output_open(f, way, song->hw))) return FAILED;
+                out_way = way;
+                volume_at_start(way);
+                dac_unmute(way, 1);
+                origin = offset = source_frames(s);
+                fprintf(stderr, "q2player: output way %d now (the car's audio %s)\n", way, way == 3 ? "asked for" : "gone");
+            }
         }
         if (scan && output_delay(out) > (int64_t)f->rate * SCAN_LEAD_MS / 1000) usleep(5000);
 
@@ -438,7 +468,7 @@ void *engine_thread(void *unused) {
             while (!c->play) {
                 c->stop = c->seek = c->preload = c->close_preload = 0; /* nothing is playing: stock answers none of these */
                 if (c->click) { /* the Clicker's, with nothing open: a PCM of its own for it */
-                    int kind = c->click, way = c->outputway;
+                    int kind = c->click, way = car_way(c->outputway);
                     c->click = 0;
                     pthread_mutex_unlock(&c->mu);
                     if (out) dac_mute(out_way), output_drop(out); /* a skip's PCM kept for a next song that never came */
@@ -462,7 +492,7 @@ void *engine_thread(void *unused) {
                 continue;
             }
             song = c->play_song;
-            song.dsd = dsd_out(c->outputway, song.hw, c->dsdmode);
+            song.dsd = dsd_out(car_way(c->outputway), song.hw, c->dsdmode);
             c->play = c->next = c->seek = c->paused = c->cut = 0;
             c->state = OPENING;
             ipc_status_note(c);
@@ -556,7 +586,7 @@ void *engine_thread(void *unused) {
         case MOVED: { /* a DSD song opened for another output than the one it starts on: opened again for this one */
             int error;
             pthread_mutex_lock(&c->mu);
-            song.dsd = dsd_out(c->outputway, song.hw, c->dsdmode);
+            song.dsd = dsd_out(car_way(c->outputway), song.hw, c->dsdmode);
             pthread_mutex_unlock(&c->mu);
             if ((cur = source_open(&song, &error, NULL))) break;
             close_output(0);

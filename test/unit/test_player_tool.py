@@ -96,15 +96,22 @@ def test_main_dispatch(tmp_path, monkeypatch, capsys):
     (tmp_path/'lib/notes.txt').write_bytes(b'1')
     binary = tmp_path/'q2player'
     binary.write_bytes(b'x' * 7)
-    calls = []
+    calls: list[tuple[str, ...]] = []
     monkeypatch.setattr(player, 'ffmpeg', lambda target: calls.append(('ffmpeg', target)) or tmp_path)
-    monkeypatch.setattr(player, 'build', lambda target: calls.append(('build', target)) or binary)
+    monkeypatch.setattr(player, 'build', lambda target, car_usb=False: calls.append(('build', target) + (('car',) if car_usb else ())) or binary)
     monkeypatch.setattr(player.sys, 'argv', ['player.py', 'ffmpeg', 'mips'])
     player.main()
     assert capsys.readouterr().out == f'{tmp_path}\n' and calls == [('ffmpeg', 'mips')]
     monkeypatch.setattr(player.sys, 'argv', ['player.py', 'build', 'host'])
     player.main()
     assert capsys.readouterr().out == f'{binary}\n' and calls[-1] == ('build', 'host')
+    # route 1's car output (docs/iphone-mode.md#car-audio): a fourth word, car, and nothing else
+    monkeypatch.setattr(player.sys, 'argv', ['player.py', 'build', 'host', 'car'])
+    player.main()
+    assert capsys.readouterr().out == f'{binary}\n' and calls[-1] == ('build', 'host', 'car')
+    monkeypatch.setattr(player.sys, 'argv', ['player.py', 'build', 'host', 'cars'])
+    with pytest.raises(SystemExit):
+        player.main()
     monkeypatch.setattr(player.sys, 'argv', ['player.py', 'sizes', 'mips'])
     player.main()
     assert capsys.readouterr().out == f'{binary}: 7 bytes\n  liba.a: 4 bytes (archive)\n  libb.a: 2 bytes (archive)\n'

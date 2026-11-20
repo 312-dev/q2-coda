@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Route 1's experiment 1 from a computer, over adb (docs/iphone-mode.md). One command each way:
+#   tools/iap_probe/q2iap start [OPTIONS]   build, push to the Q2's /tmp and start (q2-iap-probe.sh start OPTIONS)
+#   tools/iap_probe/q2iap stop              stop now, if adb is there (while the Q2 is an iPhone it is not:
+#                                           wait for the auto-restore, or use q2remote, or restart the Q2)
+#   tools/iap_probe/q2iap status | pull [DIR] | push | build
+# ADB names the adb to use (default: adb on PATH, else the Windows SDK's adb.exe); Q2_SERIAL the device (Q2CODA).
+set -euo pipefail
+HERE=$(cd "$(dirname "$0")" && pwd)
+OUT=${Q2IAP_OUT:-$HOME/.cache/q2-iap-probe/out}
+SERIAL=${Q2_SERIAL:-Q2CODA}
+if [ -z "${ADB:-}" ]; then
+    if command -v adb >/dev/null; then ADB=adb
+    else ADB=/mnt/c/Users/$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r')/AppData/Local/Android/Sdk/platform-tools/adb.exe; fi
+fi
+adb() { "$ADB" -s "$SERIAL" "$@"; }
+LOGS=/mnt/mmc/.q2muse/logs
+
+build() { python3 "$HERE/probe_build.py" --out "$OUT" >/dev/null; }
+push() {
+    build
+    # the UAC1 module too once tools/uac1_module/uac1_build.py has made it (only a :uac1 phase loads it)
+    ko=${Q2IAP_UAC1:-$HOME/.cache/q2-uac1/module/usb_f_uac1.ko}
+    [ -f "$ko" ] && cp "$ko" "$OUT/usb_f_uac1.ko"
+    for f in q2-iap-probe q2-iap-probe.sh q2-iap-tone.raw $([ -f "$OUT/usb_f_uac1.ko" ] && echo usb_f_uac1.ko); do
+        # adb.exe takes Windows paths; wslpath is there only under WSL
+        src=$OUT/$f
+        case $ADB in *.exe) src=$(wslpath -w "$src") ;; esac
+        adb push "$src" /tmp/ >/dev/null
+    done
+    adb shell 'chmod 755 /tmp/q2-iap-probe /tmp/q2-iap-probe.sh'
+}
+
+case ${1:-} in
+build) build; echo "$OUT" ;;
+push) push ;;
+start) shift; push; adb shell /tmp/q2-iap-probe.sh start "$@" | tr -d '\r' ;;
+stop) adb shell /tmp/q2-iap-probe.sh stop | tr -d '\r' ;;
+status) adb shell /tmp/q2-iap-probe.sh status | tr -d '\r' ;;
+pull)
+    dir=${2:-q2-iap-logs-$(date +%Y%m%d-%H%M%S)}
+    mkdir -p "$dir"
+    # exec-out, not shell: no terminal, so no colour codes or CR in the names
+    for p in $(adb exec-out "ls -1 $LOGS/q2-iap-probe* /tmp/q2-iap/q2-iap-probe* 2>/dev/null"); do
+        adb exec-out "cat '$p'" > "$dir/${p##*/}"
+    done
+    ls -la "$dir"
+    ;;
+*) sed -n '2,8p' "$0"; exit 2 ;;
+esac
