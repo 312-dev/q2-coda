@@ -152,6 +152,7 @@ void card_record_tags(void *r) {
  * PERFORMER (the track's, else the sheet's); a sheet without them takes the file's (issue #59).
  * ponytail: the playing track only; the database keeps the sheet's empty fields for Library. */
 unsigned id3_parses __attribute__((section(".scratch"))); /* each fresh parse: catalogue.c */
+extern void bt_cover_note(const char *id3, const char *path); /* bt_cover.c */
 char *ringnav_id3_path(char *id3, const char *path) {
     static const int fields[] = { ID3_ALBUM, ID3_ARTIST, ID3_ALBUM_ARTIST };
     ++id3_parses;
@@ -170,7 +171,9 @@ char *ringnav_id3_path(char *id3, const char *path) {
     tk_snprintf(id3, 0x400, "%s", path); /* +0x400: the CUE start */
     /* the song to bluetoothd's AVRCP record, which a car's GetElementAttributes reads: stock's
      * track change sends it only for an online song, so a card file's never reached a car
-     * (docs/internals.md#track-metadata) */
+     * (docs/internals.md#track-metadata); its cover's handle first, which that answer carries
+     * (bt_cover.c) */
+    bt_cover_note(id3, path);
     sendBtHeadsetPlayInfo();
     return id3;
 }
