@@ -338,7 +338,7 @@ static int qm_open(const void *unused) {
      * Play, Shuffle, Rename and, after a gap, Delete */
     int list = st.qm_kind == QM_PLAYLIST, own = song && st.qm_kind != QM_PLAYING;
     /* Sync Offline for a server's song, album, artist or playlist (offline.c): a playlist's before
-     * its Rename and Delete, any other's after Add to Playlist */
+     * its Rename and Delete, any other's after its Favorite and Add to Playlist rows */
     int okind = song                                                    ? OFF_SONG
                 : st.qm_kind == QM_ALBUM || st.qm_kind == QM_COVERALBUM ? OFF_ALBUM
                 : st.qm_kind == QM_GROUP && cls == 0xf004               ? OFF_ARTIST
