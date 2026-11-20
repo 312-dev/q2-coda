@@ -37,6 +37,32 @@ def song_row(sid, title, artist, album, track, seconds, size=0, mbid='', suffix=
                                                     track, seconds, 'Rock', suffix, local, size, mbid)) + '\n'
 
 
+class CatApp(C.Structure):
+    _fields_ = [('id', C.c_char * 16), ('ratings', C.c_int), ('dl', C.c_char * 32), ('seq', C.c_char * 24),
+                ('avail_at', C.c_long), ('down', C.c_int), ('play', C.c_uint)]
+
+
+class CatSet(C.Structure):
+    _fields_ = [('h', C.c_void_p), ('n', C.c_uint)]
+
+
+class CatIx(C.Structure):
+    _fields_ = [('e', C.c_void_p), ('n', C.c_uint), ('str', C.c_void_p), ('len', C.c_uint), ('cap', C.c_uint),
+                ('by_sid', C.c_void_p), ('cards', CatSet * 3), ('servers', CatSet * 3), ('apps', C.c_uint)]
+
+
+class CatHead(C.Structure):
+    """catalogue.c's state up to its index (cat.ix): a prefix of the struct, so read with in_dll, not fw.var."""
+    _fields_ = [('app', CatApp * 4), ('napps', C.c_int), ('scanned', C.c_uint), ('polled', C.c_uint), ('online', C.c_int),
+                ('thread', C.c_ulong), ('running', C.c_int), ('done', C.c_int), ('job_app', C.c_int),
+                ('job_seq', C.c_char * 24), ('job_why', C.c_char * 96), ('job_rows', C.c_uint), ('job_ix', CatIx),
+                ('gen', C.c_uint), ('pending', C.c_int), ('ix', CatIx)]
+
+
+def cat_head(fw):
+    return CatHead.in_dll(fw.lib, 'catalogue__cat')
+
+
 def catalogue(seq, rows):
     return (f'#Q2CAT/1\tseq={seq}\taccount=0123abcd\trows={len(rows)}\n' + ''.join(rows)).encode()
 
@@ -1670,6 +1696,7 @@ def test_signing_out_takes_the_apps_songs_out_of_the_library(rig, fw, how):
     rig.write(1, [song_row('s1', 'Server One', 'Band', 'Album', 2, 180, 5000)])
     rig.poll()
     assert fw.fn('catalogue_has', C.c_int)() and rig.query('select count(*) from cat.servermeta') == [(1,)]
+    assert cat_head(fw).ix.n == 1 and cat_head(fw).ix.apps == 1  # the mirror (other files' tests use it) reads true
     done = rig.files.files[f'/tmp/q2-{APP}.catalogue.done']
     del rig.files.files[f'/mnt/mmc/.{APP}/credentials' if how == 'signed out' else TSV]
     rig.poll()

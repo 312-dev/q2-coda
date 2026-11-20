@@ -1046,13 +1046,13 @@ static void *cat_worker(void *unused) {
 /* ---- The UI thread ---- */
 
 /* Stock's shared connection (opened again after any error) and each other one stock_db_open
- * opens: cat attached while the file is there. stock_db_open runs on stock's scan thread too;
- * cat_live attaches later where this could not. */
+ * opens: cat attached while a signed-in app's rows are indexed and the file is there.
+ * stock_db_open runs on stock's scan thread too; cat_live attaches later where this could not. */
 void catalogue_attach(void **slot) {
     /* stock's own global: in demo's image, below the payload (0xb00000, tools/build.py BASE) */
     if ((unsigned long)slot >= 0x400000 && (unsigned long)slot < 0xb00000) cat.stock_slot = slot;
     if (slot == cat.stock_slot) cat.attached = 0;
-    if (access(CAT_DB, 0) || !*slot) return;
+    if (!cat.ix.n || access(CAT_DB, 0) || !*slot) return;
     if (!sqlite3_exec(*slot, "attach '" CAT_DB "' as cat", 0, 0, 0) && slot == cat.stock_slot)
         cat.attached = *slot;
 }
@@ -2072,7 +2072,7 @@ static int plc_row(void *ctx, int n, char **v, char **names) {
 void catalogue_playlist_covers(void) {
     void *db = 0;
     plc.n = 0;
-    if ((!plc.at && !(plc.at = calloc(100, sizeof *plc.at))) ||
+    if (!catalogue_has() || (!plc.at && !(plc.at = calloc(100, sizeof *plc.at))) ||
         stock_db_open("/mnt/data/database.db", &db))
         goto done;
     sqlite3_exec(db, "select list,app,pid from cat.serverlists", plc_row, 0, 0);
@@ -2096,13 +2096,13 @@ int catalogue_playlist_cover(int list, char *url) {
  * its app's playlists.out, which the app sends on to the server and then empties: "set PID SID..."
  * (its songs in their own order, after an add or a removal; a song with no server id, a card file
  * the server doesn't have, is left out), "name PID NAME" after a Rename, "delete PID" after a
- * Delete. A local playlist, or the server library off, writes nothing. On the UI thread: a lookup
+ * Delete. A local playlist, or no signed-in app's rows indexed, writes nothing. On the UI thread: a lookup
  * of the playlist and one read of its songs' ids through stock's connection, with cat attached. */
 void catalogue_playlist_sync(int list, int what, const char *name) {
     void *db = 0, *f = 0;
     pls_t p = { "", "" };
     char sql[600], file[64];
-    if (list < 0 || list >= 100 || stock_db_open("/mnt/data/database.db", &db)) goto done;
+    if (!catalogue_has() || list < 0 || list >= 100 || stock_db_open("/mnt/data/database.db", &db)) goto done;
     tk_snprintf(sql, sizeof sql, "select app,pid from cat.serverlists where list=%d", list);
     if (sqlite3_exec(db, sql, pls_one, &p, 0) || !p.app[0] || strstr(p.app, "/")) goto done;
     tk_snprintf(file, sizeof file, "/mnt/mmc/.%s/playlists.out", p.app);
