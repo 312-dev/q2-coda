@@ -295,8 +295,8 @@ Q2SEND_LIBS = ['lib/libc-2.28.so', 'lib/libpthread-2.28.so', 'usr/lib/libssl.so.
 # updates are firmware updates. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
 BUNDLED_APPS = {
-    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-3825010.zip', 3656276,
-                 '10fe6380ebd31e0ce37faad0c6af0a56ccfe1872f98265828cd8b72f7e0208b9', True),
+    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-52c3097.zip', 3661698,
+                 '1db92978ec2dfa3dacc81f1e0841d0220da4e16063f58b29960c5289b27f51c8', True),
 }
 APPS_DIR = pathlib.Path.home()/'.cache/q2-apps'
 S90PLAY = 'etc/init.d/S90play'
