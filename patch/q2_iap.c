@@ -435,7 +435,7 @@ static int verdict, apple, config2, leave; /* apple: 1 C0 53, 2 the detect; leav
 static long started_at, host_at = -1, verdict_ms = -1, udc_at;
 static char why[64];
 /* the car's audio: the module's playback counts (in_sent, in_missed, since it loaded) and the player's underruns
- * on way 3 (player/output.c car_underrun), each read every HEALTH_MS while the car has asked for audio */
+ * on way 3 (player/cartrace.c car_trace_underrun), each read every HEALTH_MS while the car has asked for audio */
 #define HEALTH_MS 1000
 #define DROPOUT_PERMILLE 10  /* packets missed in a second above this, per thousand: dropouts */
 #define NOSTREAM_MS 5000     /* the car asked for audio and took no packet in this long: no sound */
