@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Menus: an album's hold menu and Now Playing's say **Favorite**, as a song's does, where they said "Add to Favorites".
   - Menus (OLED): holding Play/Pause on a favorite song, album or cover (and Now Playing's ⋯) now offers **Unfavorite** with a filled pink-red heart (white while the row is selected), in place of "Remove from Favorites" and its broken heart.
   - Status bar: the turning sync arrows (while an app such as Subsonic checks its server) are white and turn smoothly at 30 frames a second, at the same speed; they were gray and stepped 8 times a second.
   - Menus (OLED): the frosted sheet a hold menu opens on is smooth, without the fine speckled grain it had.
