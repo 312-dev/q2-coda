@@ -17,6 +17,8 @@ Route 1 of the car design has the Q2 present itself to a car as an iPhone in med
 | `tools/iap_probe/hid-car.ps1` | The desk's stand-in car on Windows: M1's whole conversation through Windows' HID driver. |
 | `tools/uac1_module/` | `usb_f_uac1.ko` for the stock kernel ([below](#the-uac1-module)). |
 | `test/iap_probe.py` | The probe on the host: its blobs parsed by `f_fs.c`'s rules, and its answers, echo and sessions against a pty standing in for ep0. |
+| `test/uac1_bind.py` | A built `usb_f_uac1.ko` bound under Unicorn with the probe's attributes: its configuration 2 interfaces, the HID's at 2. |
+| `test/uac1_isoc.py` | A built `usb_f_uac1.ko`'s playback completion under Unicorn against a controller that gives back one request in three unsent ([missed packets](#missed-isochronous-packets)). |
 
 ## The gadget and the probe
 
@@ -95,7 +97,7 @@ A real iPhone's configuration 2 is USB Audio Class 1, and the stock kernel has o
 - `q2.config` was taken whole;
 - the vermagic is `5.10.21+ SMP preempt mod_unload MIPS32_R5 32BIT ` (with the stock modules' trailing space);
 - `struct module` is 0x180 bytes with `init` at 0xe0 and `exit` at 0x16c, as in `soc_aic.ko`;
-- each of the 46 symbols the module needs is a `__ksymtab_` name of the stock kernel;
+- each of the 48 symbols the module needs is a `__ksymtab_` name of the stock kernel;
 - the module exports nothing the kernel does;
 - 47 offsets and sizes in `q2_layout.ko` equal those read in the stock kernel's own code, each with the instruction it came from (`STOCK` in `uac1_build.py`), and `ep->maxpacket` is loaded as the halfword stock writes.
 
@@ -127,6 +129,17 @@ tools/iap_probe/q2iap start --plan min:echo:uac1 --for 120 --force   # pushes it
 # 2 minutes later, adb is back:
 tools/iap_probe/q2iap pull desk-uac1                     # usb_f_uac1.ko loaded/would not load, dmesg, the uac1 attributes
 ```
+
+**In the car (2026-11-20, plan `drive`, `full:iap2:uac1`): the BMW chose configuration 2 and stopped.** At each `ENABLE` the kernel logged `configfs-gadget gadget: invalid control req81.06 v2100 i0002 l9`, `f_uac1`'s `f_audio_setup` refusing a request it does not know, and the car never sent iAP2's detect. The request is `GET_DESCRIPTOR` for the HID descriptor (0x21) of interface 2, where a real iPhone's HID is. 5.10.21's `f_uac1.c` makes three interfaces whatever the channel masks (control, AS OUT, AS IN), so with `c_chmask` 0 the module took 0 to 2, the HID was 3, and composite handed the car's request for interface 2 to `f_uac1`, which stalled it. Upstream gave `f_uac1` interfaces only for the directions in use in 5.12 (`254cb1e0d78c`, "usb: gadget: f_uac1: disable IN/OUT ep if unused"); `uac1_build.py` applies it and the commit before it (`a59c68a6a3d1`, which it needs to apply) from `tools/uac1_module/patches/`. With capture off the module has the control interface (0) and AS IN (1), the AC header lists one streaming interface, and the HID is 2. `test/uac1_bind.py KO` binds a built module under Unicorn with the probe's attributes and fails unless the HID is interface 2 and the AC header's `bInCollection`, `baInterfaceNr` and `wTotalLength` agree with the descriptors after it: the module the car ran fails it (HID at 3), and the patched build passes (control 0, AS IN 1, HID 2; `wTotalLength` 30). The desk and the car have not run the patched module yet.
+
+<a id="missed-isochronous-packets"></a>
+## Missed isochronous packets
+
+**In the car (2026-11-20, plan `drive`) the sound was garbled and warbly and cut out for half a second to a second at a time.** At the desk the same day a frame counter (each frame its own number; `aplay` into the gadget, the Mac recording through Core Audio's HAL with `sox` and through AVFoundation) came back with the same steady pattern in both recordings: 88 or 89 frames in order (two packets), then 44 or 45 missing (one packet), 500 times a second, while the counter moved 66,149 frames per second of recording, 1.5 times real time. The host got a full packet at every poll; a third of the packets the gadget took from the PCM never reached it. In the car that is a hole every 3 ms (the garble) and the player drained 1.5 times as fast as the car played (it runs dry: the cut-outs). A 1 kHz tone hides it (a 44-frame hole moves its phase by a tenth of a sample), which is why the earlier tone checks passed.
+
+The cause is in `u_audio`, with the controller's part read in the stock kernel. The Q2's `dwc2` has upstream's isochronous flow for buffer DMA (`91bb163e1e4f`, "usb: dwc2: gadget: Fix ISOC flow for BDMA and Slave": `dwc2_gadget_target_frame_elapsed` at 0x804935f4 has its 0x3fff and 0x7ff limits), which gives an IN request whose (micro)frame went by back with `-ENODATA` (-61, `li a3,-61` at 0x804995c8 in `dwc2_hsotg_epint`) and never sends it. 5.10.21's `u_audio_iso_complete` logs the status at debug level and otherwise ignores it: it refills the request from the ring and moves `hw_ptr` on, so the unsent packet's samples are gone and the PCM moves past what the host got. Upstream's `u_audio` still does so. Why `dwc2` misses one interval in three here was not worked out (its target-frame bookkeeping with two requests queued at a 1 ms `bInterval`); the module copes with it whatever the cause.
+
+`uac1_build.py` changes the module's `u_audio.c` (`MISSED`): a playback request given back with a status is queued again unchanged, its buffer still the unsent packet, when the module parameter `resend_missed` is set (the default) and `req_number` is 1. With a second request queued behind it, already holding the samples after it, the packet would go out of order, so with more requests the module only counts. `q2-iap-probe.sh` sets `req_number` 1 (the plan word `:req2` gives upstream's 2, `:noresend` turns the resend off, both for the desk's comparisons) and logs the module's counts, `in_sent` and `in_missed` (playback completions without and with a status, since the module loaded), at each phase's end. `test/uac1_isoc.py KO` runs the module's own completion under Unicorn against a controller that gives back every third request unsent: without the resend (or with two requests) the host's frames are the desk's pattern, 88 or 89 then 44 or 45 skipped, and `hw_ptr` moves 1.5 times what the host got; with the resend and one request the host gets every frame in order and `hw_ptr` moves what it got. It fails on a module built before the change, and failed on the first build of it, which resent with two requests queued (the host's frames out of order, 44 at a time). The desk has not run this module yet.
 
 ## Milestones after the experiments
 

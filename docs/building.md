@@ -113,6 +113,8 @@ python3 test/build.py 'Q2 Firmware V1.36.zip'   # packaging checks (custom logo,
 python3 test/build.py --build BUILD         # a finished build's payloads and packaging
 python3 test/aic.py STOCKFS               # stopped audio notifier: actual MIPS hooks and modeled wait races
 python3 test/aic_build.py STOCKFS BUILD    # notifier development guard, ABI, default/experimental packaging
+python3 test/uac1_bind.py KO              # a built usb_f_uac1.ko bound under Unicorn: the HID at interface 2 (iphone-mode.md#the-uac1-module)
+python3 test/uac1_isoc.py KO              # its playback completion against missed packets (iphone-mode.md#missed-isochronous-packets)
 python3 test/remote.py                     # q2remote protocol, auth, event and framebuffer checks
 python3 test/q2eq.py                       # the q2eq helper (adb.md#q2eq) against a fake demo: each command's request, the JSON, the wait (host cc)
 python3 test/q2update.py                   # the q2update helper (adb.md#installing-an-update-over-adb) under sh against a fake demo: the request, the wait, the words
