@@ -138,6 +138,7 @@ its glyphs' inks. A test fails on a colour literal equal to a token anywhere els
 | Positive       | `#34C759` | "Connected" dots, charging, OK to Disconnect, a song added                    | Green dot on Bluetooth                                     |
 | Warning        | `#FF9F0A` | A charger too weak, Charge to Update                                         |                                                            |
 | Negative       | `#FF453A` | The low battery (under 20%), a failed step                                  |                                                            |
+| Favorite       | `#FF375F` | Now Playing's heart while the song is liked (iOS's dark systemPink; not Negative, which means a failure) | the same in Light Mode |
 | Raised         | `#1C1C1E` | Toasts, cards, the modal's panel, keys                                       |                                                            |
 | Raised 2       | `#2C2C2E` | Pills and placeholders on a raised surface, a lifted row                     |                                                            |
 | Off            | `#3A3A3C` | A gray glyph's circle, a control that is off                                 |                                                            |
@@ -627,9 +628,11 @@ Built as the `oled` set's `np_art` and `np_bar_y` (`tools/ipod.py` `np_grid`) wi
 The album is one line ending in an ellipsis (the title and artist scroll), rather than two, so the heart under it keeps its place. What the design
 has no place for keeps a place of its own:
 
-- **The heart** stands in the gap under the album (the user's, 2026-11-18, `heartmove` mock-up): Phosphor `heart`,
-  34 px, at x 193 to 227 and y 146 to 180, outlined, or `heart-fill` while the song is liked, both Text Primary, no
-  colour. It is the like alone ([rating page](#rating-page)); its touch is x 182 to 238, y 142 to 184. The album is
+- **The heart** stands in the gap under the album (the user's, 2026-11-18, `heartmove` mock-up), drawn smaller and
+  pink-red when on (the user's, 2026-11-19, `mock_np_heart.py`): 18 px of ink tall, its left at x 194, two pixels left
+  of the text column, and its middle at y 164 (`tools/art.py` `np_heart`, in a 34 px image at x 193 to 227 and y 146
+  to 180); off, Phosphor `heart` (bold) in Text Secondary; on, `heart-fill` in Favorite (`#FF375F`, both halves). The
+  hold menu's Favorite rows keep the menu's own glyphs and colours. It is the like alone ([rating page](#rating-page)); its touch is x 182 to 238, y 142 to 184. The album is
   one line ending in an ellipsis, never scrolled, so the heart's place never moves.
 - **More** stands at the right end of the art's bottom line (baseline 208), on the art's page, so a swipe takes it
   away with it: Phosphor `dots-three` (regular, 20 px, Text Primary; pressed in Text Secondary), its ink ending on
@@ -1449,8 +1452,8 @@ one is a bare one the strip takes in its first frame (`patch/keyboard.c` `kb_hos
   is (a 16 unit slash from (48,40) to (208,216) joined to the ring below it, the ring above it ending in
   round caps 32 units from the slash), traced to filled paths.
 - Weights by role: `fill` for the padlock and a favorite's heart, `bold` for chevrons, the status row's `wifi-x`, sync, Bluetooth and `cloud-slash`, Now
-  Playing's and the confirmation's shuffle and repeat and About's quality badge, `regular` for row symbols and Now Playing's
-  heart and More. Sizes are the design's: 13 px padlock, 11 px tall status glyphs ([Status row](#status-row)), 15 px chevron, 20 px row symbols,
+  Playing's and the confirmation's shuffle and repeat, About's quality badge and Now Playing's heart while off, `regular`
+  for row symbols and Now Playing's More. Sizes are the design's: 13 px padlock, 11 px tall status glyphs ([Status row](#status-row)), 15 px chevron, 20 px row symbols,
   heart and More, 22 px state row, 56 px confirmation, 12 px for About's quality badge
   (`waveform-bold`).
 - **Missing art** is one placeholder everywhere stock shows its own (Now Playing, the album grids,

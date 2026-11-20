@@ -319,7 +319,21 @@ MODE_PILL_PX = 18  # the antenna in the radio's pill
 # full heart fill) at the 20 px row type's size
 ROW_ICON_PX = 20
 ROW_INK = 15.5  # a 20 px symbol's optical size: its ink's longer side (phosphor's ink)
-NP_HEART_PX = 34  # Now Playing's heart under the album (tools/ipod.py NP_GRID_HEART), Phosphor's own margins
+NP_HEART_PX = 34  # Now Playing's heart's image, centred in its target under the album (tools/ipod.py NP_GRID_HEART)
+# ... and its ink in that image (the user's mock-up, design/mockups/mock_np_heart.py, 2026-11-19): NP_HEART_INK px tall,
+# its left NP_HEART_LEFT px in, so on screen at x 194, the text column's left less 2, and its middle NP_HEART_MID down,
+# y 164; off, Phosphor's heart (bold) in Text Secondary; on, heart (fill) in the Favorite token
+NP_HEART_INK, NP_HEART_LEFT, NP_HEART_MID = 18, 1, 18
+
+
+def np_heart(name, rgb):
+    """Now Playing's heart, Phosphor's name, as an NP_HEART_PX square PNG in rgb: NP_HEART_INK px of ink tall, its
+    left NP_HEART_LEFT px in and its middle NP_HEART_MID px down."""
+    polys = phosphor_polys(name, 256)
+    xs, ys = [x for poly in polys for x, _ in poly], [y for poly in polys for _, y in poly]
+    k, mid = NP_HEART_INK / (max(ys) - min(ys)), (min(ys) + max(ys)) / 2
+    laid_polys = [[(NP_HEART_LEFT + (x - min(xs)) * k, NP_HEART_MID + (y - mid) * k) for x, y in poly] for poly in polys]
+    return glyph_png(laid_polys, NP_HEART_PX, rgb)
 VOL_SPK_PX = 16  # Now Playing's volume speakers (patch/offsets.inc VOL_SPK_PX, the same)
 FOLDER_INKS = inks('secondary', 'd', 'l', 'w')  # Text Secondary in each half, white on the bar
 CTA_RING_INKS = inks('primary', 'd', 'l')  # the buttons' focus ring (cta_ring_end), Text Primary per half
@@ -749,10 +763,11 @@ def images(t):
         out[f'{prefix}_mode_radio_w'] = phosphor('broadcast-bold', MODE_PILL_PX, 0xffffff)
         out |= {f'{prefix}_mode_{n}_x{k}': phosphor(f'{n}-bold', MODE_PX, c) for n in ('shuffle', 'repeat') for k, c in MODE_DIM_INKS.items()}
         # and its heart and More (np_bar.c np_glyphs), named after stock's play_fav, play_unfav, play_more and
-        # play_moredown: the heart NP_HEART_PX, outlined, or filled while liked, in Text Primary, no colour; More in Text
-        # Primary, pressed in Text Secondary; each half's
+        # play_moredown: the heart (np_heart), outlined in Text Secondary, or filled while liked in Favorite; More in
+        # Text Primary, pressed in Text Secondary; each half's
         for k, c in STATE_INKS.items():
-            out |= {f'{prefix}_np_fav_{k}': phosphor('heart-fill', NP_HEART_PX, c), f'{prefix}_np_unfav_{k}': phosphor('heart', NP_HEART_PX, c),
+            out |= {f'{prefix}_np_fav_{k}': np_heart('heart-fill', inks('favorite', k)[k]),
+                    f'{prefix}_np_unfav_{k}': np_heart('heart-bold', MODE_INKS[k]),
                     f'{prefix}_np_more_{k}': phosphor('dots-three', ROW_ICON_PX, c, ROW_INK),
                     f'{prefix}_np_moredown_{k}': phosphor('dots-three', ROW_ICON_PX, MODE_INKS[k], ROW_INK)}
         # the volume's speakers at the bar's ends (volume.c vol_paint, VOL_SPK_PX): Text Secondary per half

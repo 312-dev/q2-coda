@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Now Playing (OLED): the Favorite heart is smaller and turns pink-red when the song is a favorite, gray when it isn't, in its same place under the album.
   - Logs: Car Remote's own log now gives the time of each line, so what the phone or Android Auto asked for can be lined up with the rest of the Q2's log.
   - Logs: the Q2's log now notes where in a song the player was asked to start (as when a car takes over from headphones and the song is started again), and each pause and play, including one that came with no song open and so did nothing.
   - Bluetooth: a car's or headset's screen now shows the title, artist and album of what plays from the card and from streaming apps (Subsonic). Only Tidal's songs reached it; everything else showed as unknown.

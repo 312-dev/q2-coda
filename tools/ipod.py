@@ -678,8 +678,9 @@ NP_GRID_TIME_PX = 19
 NP_GRID_SECONDARY = '#ABABAB'  # Text Secondary; Light Mode flips it as every grey
 NP_GRID_ICON = 34  # More's target, the theme's 20 px glyph centred in it (np_bar.c np_glyphs)
 # The heart's target (the user's, 2026-11-18, docs/oled-design.md#now-playing): x from NP_GRID_HEART[0] left of the
-# text column, top on the album line's foot, w by h, the theme's 34 px heart (tools/art.py NP_HEART_PX) centred in it,
-# so it stands at screen x 193 to 227 and y 146 to 180 and the target covers x 182 to 238 and y 142 to 184
+# text column, top on the album line's foot, w by h, the theme's 34 px heart image (tools/art.py NP_HEART_PX) centred in
+# it, so it stands at screen x 193 to 227 and y 146 to 180 (its 18 px of ink from x 194, np_heart) and the target covers
+# x 182 to 238 and y 142 to 184
 NP_GRID_MORE_INSET = 7  # More's centre from the right column: Phosphor's dots-three, 12.5 px of ink, ends on it
 NP_GRID_HEART = (10, 56, 42)
 NP_GRID_BAR = 6
