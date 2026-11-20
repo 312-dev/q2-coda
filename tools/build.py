@@ -221,7 +221,7 @@ HOOKS = {
     'dmrActionStop': (0x50fe4c, 'guest_dlna_stop', 'dlna_stop'),
     # Now Playing's cover asked for: player_parsecover_thd is woken for it (cover_wake.c cover_set_info)
     'player_set_coverinfo': (0x51d7fc, 'cover_set_info', 'set_coverinfo'),
-    # Each frame's quarter turn onto the panel: stock's pixels, a word copy each (fb_rotate.c)
+    # Each frame's quarter turn onto the panel: stock's bytes, a cache line of the page at a time (fb_rotate.c)
     'rotate_bgra8888_image': (0x6e11a0, 'fast_rotate_bgra8888', 'rotate_bgra8888'),
 }
 # The payload's stock_<name>_trampoline, the hooks' third element, resumes each hook past its 3-word PIC
