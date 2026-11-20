@@ -1,45 +1,55 @@
-/* q2radiofetch: the stations that reach a place and their streams (docs/internals.md#local-radio-fetch).
+/* q2radiofetch: the stations that reach a place and their streams
+ * (docs/internals.md#local-radio-fetch).
  *
- *   q2radiofetch [--ip | --zip NNNNN | --at LAT,LON] [--refresh] [--deadline MS] [--cache DIR] [--data DIR]
+ *   q2radiofetch [--ip | --zip NNNNN | --at LAT,LON] [--refresh] [--deadline MS] [--cache DIR]
+ * [--data DIR]
  *                [--ca FILE] [-v]
  *
- * prints the list (radiofetch_core.c rf_text) on stdout. The place: the network's public address, raced over
- * three geolocation services (--ip, the default), a ZIP looked up in the bundled Census table, or a point.
- * The stations come from the bundled FCC table, offline; only their streams come from the web, on one libcurl
- * multi handle under one deadline: iHeart's stations near the point, Radio Browser's for the stations' states
- * and TuneIn's local list at once, then probes by call sign (Triton, Amperwave, SoundStack, TuneIn's Tune) for
- * the stations still without a stream. What came by the deadline is the list; one cut short says partial.
+ * prints the list (radiofetch_core.c rf_text) on stdout. The place: the network's public address,
+ * raced over three geolocation services (--ip, the default), a ZIP looked up in the bundled Census
+ * table, or a point. The stations come from the bundled FCC table, offline; only their streams come
+ * from the web, on one libcurl multi handle under one deadline: iHeart's stations near the point,
+ * Radio Browser's for the stations' states and TuneIn's local list at once, then probes by call
+ * sign (Triton, Amperwave, SoundStack, TuneIn's Tune) for the stations still without a stream. What
+ * came by the deadline is the list; one cut short says partial.
  *
- * Each list is cached on the card under its place (rf_key). A fresh one (RF_FRESH_S, RF_PARTIAL_S for a partial
- * one) is printed and that is all; an older one is printed at once, stdout is closed (the reader sees its end)
- * and the list is fetched again into the cache, under a lock so two runs don't. Exit 0 with a list, 1 with
- * none, 2 for a wrong argument. */
+ * Each list is cached on the card under its place (rf_key). A fresh one (RF_FRESH_S, RF_PARTIAL_S
+ * for a partial one) is printed and that is all; an older one is printed at once, stdout is closed
+ * (the reader sees its end) and the list is fetched again into the cache, under a lock so two runs
+ * don't. Exit 0 with a list, 1 with none, 2 for a wrong argument. */
 #include "radiofetch.h"
 
 #define DATA_DIR "/usr/share/q2radio"
 #define CACHE_DIR "/mnt/mmc/Radio/.local"
-#define CA_FILE "/etc/scrobble-ca.pem" /* every host here verifies against it (docs/internals.md#local-radio-fetch) */
-#define UA "Mozilla/5.0"               /* a generic one: nothing that names the device or the firmware */
-#define DEADLINE_MS 8000               /* the whole run, from start to the list */
-#define LOCATE_MS 3000                 /* the geolocation race's share of it */
-#define PHASE_MS 3500                  /* the probes start when the first round is in, or this long after it began */
-#define REQ_MS 3000                    /* one request, connection included */
-#define BIG_MS 4500                    /* a list request (iHeart, Radio Browser), which can be 200 KB */
-#define BIG_MAX (768u << 10)           /* the most one answer may hold, decoded: a big state's Radio Browser list */
-#define SMALL_MAX (64u << 10)          /* a probe's answer (SoundStack's page is about 34 KB) */
-#define PARALLEL 16                    /* transfers at once */
-#define PER_HOST 4                     /* connections to one host, reused by its later requests */
-#define RF_FRESH_S (7 * 86400L)        /* a complete list is fetched again after a week */
-#define RF_PARTIAL_S 3600L             /* a partial one after an hour */
+#define CA_FILE                                                                                    \
+    "/etc/scrobble-ca.pem" /* every host here verifies against it                                  \
+                              (docs/internals.md#local-radio-fetch) */
+#define UA "Mozilla/5.0"   /* a generic one: nothing that names the device or the firmware */
+#define DEADLINE_MS 8000   /* the whole run, from start to the list */
+#define LOCATE_MS 3000     /* the geolocation race's share of it */
+#define PHASE_MS                                                                                   \
+    3500 /* the probes start when the first round is in, or this long after it began... */
+#define PROBE_MS                                                                                   \
+    2000 /* ...or this long before the deadline, whichever is sooner: their time to answer */
+#define REQ_MS 3000 /* one request, connection included */
+#define BIG_MS 4500 /* a list request (iHeart, Radio Browser), which can be 200 KB */
+#define BIG_MAX                                                                                    \
+    (768u << 10) /* the most one answer may hold, decoded: a big state's Radio Browser list */
+#define SMALL_MAX (64u << 10)   /* a probe's answer (SoundStack's page is about 34 KB) */
+#define PARALLEL 16             /* transfers at once */
+#define PER_HOST 4              /* connections to one host, reused by its later requests */
+#define RF_FRESH_S (7 * 86400L) /* a complete list is fetched again after a week */
+#define RF_PARTIAL_S 3600L      /* a partial one after an hour */
 #define TEXT_MAX (96u << 10)
 
-/* ---- libcurl, as the rootfs's libcurl.so.4 exports it (no headers on this side: the option numbers are
- * curl.h's, stable since they were added) ---- */
+/* ---- libcurl, as the rootfs's libcurl.so.4 exports it (no headers on this side: the option
+ * numbers are curl.h's, stable since they were added) ---- */
 void *curl_easy_init(void);
 int curl_easy_setopt(void *, int, ...), curl_easy_getinfo(void *, int, ...), curl_global_init(long);
 void curl_easy_cleanup(void *);
 void *curl_multi_init(void);
-int curl_multi_add_handle(void *, void *), curl_multi_remove_handle(void *, void *), curl_multi_cleanup(void *);
+int curl_multi_add_handle(void *, void *), curl_multi_remove_handle(void *, void *),
+    curl_multi_cleanup(void *);
 int curl_multi_perform(void *, int *), curl_multi_poll(void *, void *, unsigned, int, int *);
 int curl_multi_setopt(void *, int, ...);
 typedef struct {
@@ -73,8 +83,8 @@ curl_msg *curl_multi_info_read(void *, int *);
 #define MSG_DONE 1
 
 enum { GEO, IHEART, RADIOBROWSER, TUNEIN, TUNE, TRITON, AMPERWAVE, SOUNDSTACK };
-static const char *const kind_name[] = {"geo", "iheart", "radiobrowser", "tunein", "tune", "triton", "amperwave",
-                                        "soundstack"};
+static const char *const kind_name[] = { "geo",  "iheart", "radiobrowser", "tunein",
+                                         "tune", "triton", "amperwave",    "soundstack" };
 
 typedef struct xfer {
     void *easy;
@@ -91,7 +101,8 @@ static struct {
     xfer *queue, *queue_tail, *running[PARALLEL];
     int active, verbose, requests;
     long t0;
-    const char *ca, *base; /* base: Q2RF_TEST_BASE: every host is a path under it (test/unit/test_radiofetch.py) */
+    const char *ca, *base; /* base: Q2RF_TEST_BASE: every host is a path under it
+                              (test/unit/test_radiofetch.py) */
 } net;
 
 static long now_ms(void) {
@@ -105,8 +116,10 @@ static void say(const char *s) { write(2, s, strlen(s)); }
 static unsigned got(char *data, unsigned size, unsigned count, void *p) {
     xfer *x = p;
     unsigned n = size * count;
-    if (x->n + n > x->max) return 0; /* past its cap: the transfer stops, and what came is read as far as it goes */
-    if (!x->body && !(x->body = malloc(x->max + 1))) return 0; /* one allocation, at its cap, on the first data */
+    if (x->n + n > x->max)
+        return 0; /* past its cap: the transfer stops, and what came is read as far as it goes */
+    if (!x->body && !(x->body = malloc(x->max + 1)))
+        return 0; /* one allocation, at its cap, on the first data */
     memcpy(x->body + x->n, data, n);
     x->n += n;
     x->body[x->n] = 0;
@@ -153,7 +166,8 @@ static void start_queued(void) {
         curl_easy_setopt(c, FOLLOWLOCATION, 1L);
         curl_easy_setopt(c, MAXREDIRS, 3L);
         curl_easy_setopt(c, PROTOCOLS_STR, "http,https");
-        curl_easy_setopt(c, ACCEPT_ENCODING, ""); /* gzip: iHeart's 120 KB list is about 15 KB on the wire */
+        curl_easy_setopt(c, ACCEPT_ENCODING,
+                         ""); /* gzip: iHeart's 120 KB list is about 15 KB on the wire */
         curl_easy_setopt(c, CONNECTTIMEOUT_MS, (long)REQ_MS);
         curl_easy_setopt(c, TIMEOUT_MS, (long)(x->max > SMALL_MAX ? BIG_MS : REQ_MS));
         x->started = now_ms();
@@ -175,10 +189,11 @@ static void drop(xfer *x) {
     free(x);
 }
 
-/* Run transfers until done(ctx) or the deadline (an absolute now_ms); each finished one goes to finished(ctx,
- * x, code). With last, what is still running or queued at the end is stopped and dropped; else it goes on in
- * the next run. */
-static void run(long deadline, int last, int (*done)(void *), void (*finished)(void *, xfer *, long), void *ctx) {
+/* Run transfers until done(ctx) or the deadline (an absolute now_ms); each finished one goes to
+ * finished(ctx, x, code). With last, what is still running or queued at the end is stopped and
+ * dropped; else it goes on in the next run. */
+static void run(long deadline, int last, int (*done)(void *),
+                void (*finished)(void *, xfer *, long), void *ctx) {
     for (;;) {
         if (now_ms() < deadline) start_queued();
         int running = 0, left;
@@ -192,8 +207,9 @@ static void run(long deadline, int last, int (*done)(void *), void (*finished)(v
             if (!m->data.result) curl_easy_getinfo(m->easy, RESPONSE_CODE, &code);
             if (net.verbose) {
                 char line[RF_URL + 64];
-                snprintf(line, sizeof line, "%6ld ms  %4ld ms  %3ld %6u B  %s %s\n", now_ms() - net.t0,
-                         now_ms() - x->started, code, x->n, kind_name[x->kind], x->url);
+                snprintf(line, sizeof line, "%6ld ms  %4ld ms  %3ld %6u B  %s %s\n",
+                         now_ms() - net.t0, now_ms() - x->started, code, x->n, kind_name[x->kind],
+                         x->url);
                 say(line);
             }
             if (!x->body && !(x->body = calloc(1, 1))) code = 0;
@@ -240,8 +256,9 @@ static void geo_finished(void *p, xfer *x, long code) {
 
 /* The network's place from the first of three services to answer with one; 1 if one did. */
 static int locate(double *lat, double *lon, long deadline) {
-    static const char *const services[] = {"ipinfo.io/json", "ipwho.is/", "get.geojs.io/v1/ip/geo.json"};
-    geo_ctx g = {0, 0, 0, ""};
+    static const char *const services[] = { "ipinfo.io/json", "ipwho.is/",
+                                            "get.geojs.io/v1/ip/geo.json" };
+    geo_ctx g = { 0, 0, 0, "" };
     for (unsigned i = 0; i < 3; ++i) fetch(GEO, -1, services[i], SMALL_MAX);
     run(deadline, 1, geo_done, geo_finished, &g); /* the race's losers are dropped */
     if (g.have) *lat = g.lat, *lon = g.lon;
@@ -294,11 +311,15 @@ static void probe_finished(void *p, xfer *x, long code) {
             char path[96], mount[16];
             xfer *y;
             rf_mount(st, mount, 0);
-            snprintf(path, sizeof path, "playerservices.streamtheworld.com/api/livestream?version=1.9&mount=%s", mount);
-            if ((y = fetch(TRITON, x->station, path, SMALL_MAX))) memcpy(y->mount, mount, sizeof mount);
+            snprintf(path, sizeof path,
+                     "playerservices.streamtheworld.com/api/livestream?version=1.9&mount=%s",
+                     mount);
+            if ((y = fetch(TRITON, x->station, path, SMALL_MAX)))
+                memcpy(y->mount, mount, sizeof mount);
         }
     } else if (x->kind == AMPERWAVE) {
-        if (code == 200 && !strncmp(x->body, "#EXTM3U", 7)) {
+        if (code == 200 && (!strncmp(x->body, "http", 4) ||
+                            !strncmp(x->body, "#EXTM3U", 7))) { /* a playlist: the mount is live */
             char url[RF_URL], call[8];
             unsigned i = 0;
             for (; st->base[i]; ++i) call[i] = st->base[i] | 32;
@@ -318,9 +339,10 @@ static void probe_finished(void *p, xfer *x, long code) {
 
 /* The streams for l's stations, until the deadline; 1 if every transfer finished in time. */
 static int streams(rf_list *l, long deadline) {
-    fetch_ctx f = {l, 0};
+    fetch_ctx f = { l, 0 };
     char path[RF_URL];
-    snprintf(path, sizeof path, "api.iheart.com/api/v2/content/liveStations?lat=%.4f&lng=%.4f&limit=100", l->lat,
+    snprintf(path, sizeof path,
+             "api.iheart.com/api/v2/content/liveStations?lat=%.4f&lng=%.4f&limit=100", l->lat,
              l->lon);
     f.first_left += !!fetch(IHEART, -1, path, BIG_MAX);
     const char *states[3];
@@ -329,21 +351,26 @@ static int streams(rf_list *l, long deadline) {
         char name[64];
         url_escape(name, sizeof name, states[i]);
         snprintf(path, sizeof path,
-                 "all.api.radio-browser.info/json/stations/search?countrycode=US&state=%s&hidebroken=true&limit=1500",
+                 "all.api.radio-browser.info/json/stations/"
+                 "search?countrycode=US&state=%s&hidebroken=true&limit=1500",
                  name);
         f.first_left += !!fetch(RADIOBROWSER, -1, path, BIG_MAX);
     }
-    snprintf(path, sizeof path, "opml.radiotime.com/Browse.ashx?c=local&render=json&latlon=%.4f,%.4f", l->lat, l->lon);
+    snprintf(path, sizeof path,
+             "opml.radiotime.com/Browse.ashx?c=local&render=json&latlon=%.4f,%.4f", l->lat, l->lon);
     f.first_left += !!fetch(TUNEIN, -1, path, BIG_MAX);
-    long phase = now_ms() + PHASE_MS;
-    run(phase < deadline ? phase : deadline, 0, first_done, first_finished, &f);
+    long start = now_ms(), phase = start + PHASE_MS;
+    if (phase > deadline - PROBE_MS)
+        phase = deadline - PROBE_MS > start ? deadline - PROBE_MS : start;
+    run(phase, 0, first_done, first_finished, &f);
 
     for (int i = 0; i < l->n; ++i) { /* the probes, for the stations still without a stream */
         rf_station *st = &l->st[i];
         if (st->n) continue;
         char mount[16];
         rf_mount(st, mount, 1);
-        snprintf(path, sizeof path, "playerservices.streamtheworld.com/api/livestream?version=1.9&mount=%s", mount);
+        snprintf(path, sizeof path,
+                 "playerservices.streamtheworld.com/api/livestream?version=1.9&mount=%s", mount);
         xfer *x = fetch(TRITON, i, path, SMALL_MAX);
         if (x) memcpy(x->mount, mount, sizeof mount), x->aac = 1;
         if (st->flags & RF_AUDACY) {
@@ -355,10 +382,12 @@ static int streams(rf_list *l, long deadline) {
                      st->flags & RF_AM ? "am" : "fm");
             fetch(AMPERWAVE, i, path, SMALL_MAX);
         }
-        snprintf(path, sizeof path, "live.mystreamplayer.com/%s%s", st->base, st->flags & RF_AM ? "AM" : "");
+        snprintf(path, sizeof path, "live.mystreamplayer.com/%s%s", st->base,
+                 st->flags & RF_AM ? "AM" : "");
         fetch(SOUNDSTACK, i, path, SMALL_MAX);
         if (st->tunein[0]) {
-            snprintf(path, sizeof path, "opml.radiotime.com/Tune.ashx?id=%s&render=json&formats=mp3,aac", st->tunein);
+            snprintf(path, sizeof path,
+                     "opml.radiotime.com/Tune.ashx?id=%s&render=json&formats=mp3,aac", st->tunein);
             fetch(TUNE, i, path, SMALL_MAX);
         }
     }
@@ -390,7 +419,8 @@ static void put_all(int fd, const char *s, unsigned n) {
     }
 }
 
-/* text as path, whole or not at all: written beside it, synced, then renamed over it. 1 when it is there. */
+/* text as path, whole or not at all: written beside it, synced, then renamed over it. 1 when it is
+ * there. */
 static int save(const char *path, const char *text, unsigned n) {
     char tmp[300];
     snprintf(tmp, sizeof tmp, "%s.tmp", path);
@@ -415,7 +445,8 @@ static void mkdirs(const char *dir) {
 }
 
 static int usage(void) {
-    say("usage: q2radiofetch [--ip | --zip NNNNN | --at LAT,LON] [--refresh] [--deadline MS] [--cache DIR] "
+    say("usage: q2radiofetch [--ip | --zip NNNNN | --at LAT,LON] [--refresh] [--deadline MS] "
+        "[--cache DIR] "
         "[--data DIR] [--ca FILE] [-v]\n");
     return 2;
 }
@@ -427,16 +458,26 @@ int main(int argc, char **argv) {
     net.t0 = now_ms(), net.ca = CA_FILE;
     for (int i = 1; i < argc; ++i) {
         const char *a = argv[i], *v = i + 1 < argc ? argv[i + 1] : 0;
-        if (!strcmp(a, "--ip")) zip = at = 0;
-        else if (!strcmp(a, "--zip") && v) zip = v, ++i;
-        else if (!strcmp(a, "--at") && v) at = v, ++i;
-        else if (!strcmp(a, "--refresh")) refresh = 1;
-        else if (!strcmp(a, "--deadline") && v) budget = strtol(v, 0, 10), ++i;
-        else if (!strcmp(a, "--cache") && v) cache = v, ++i;
-        else if (!strcmp(a, "--data") && v) data = v, ++i;
-        else if (!strcmp(a, "--ca") && v) net.ca = v, ++i;
-        else if (!strcmp(a, "-v")) net.verbose = 1;
-        else return usage();
+        if (!strcmp(a, "--ip"))
+            zip = at = 0;
+        else if (!strcmp(a, "--zip") && v)
+            zip = v, ++i;
+        else if (!strcmp(a, "--at") && v)
+            at = v, ++i;
+        else if (!strcmp(a, "--refresh"))
+            refresh = 1;
+        else if (!strcmp(a, "--deadline") && v)
+            budget = strtol(v, 0, 10), ++i;
+        else if (!strcmp(a, "--cache") && v)
+            cache = v, ++i;
+        else if (!strcmp(a, "--data") && v)
+            data = v, ++i;
+        else if (!strcmp(a, "--ca") && v)
+            net.ca = v, ++i;
+        else if (!strcmp(a, "-v"))
+            net.verbose = 1;
+        else
+            return usage();
     }
     long deadline = net.t0 + budget;
     net.base = getenv("Q2RF_TEST_BASE");
@@ -500,7 +541,9 @@ int main(int argc, char **argv) {
         long age = wall - fetched;
         if (lat == 999 || (age >= 0 && age < (complete ? RF_FRESH_S : RF_PARTIAL_S))) return 0;
         int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) dup2(devnull, 1), close(devnull); /* the reader has its list; the fetch goes on unseen */
+        if (devnull >= 0)
+            dup2(devnull, 1),
+                close(devnull); /* the reader has its list; the fetch goes on unseen */
     }
     free(old);
     if (lat == 999) {
@@ -509,7 +552,8 @@ int main(int argc, char **argv) {
     }
     snprintf(path, sizeof path, "%s/.lock", cache);
     int lock = open(path, O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
-    if (have_old && (lock < 0 || flock(lock, LOCK_EX | LOCK_NB))) return 0; /* another run is refreshing it */
+    if (have_old && (lock < 0 || flock(lock, LOCK_EX | LOCK_NB)))
+        return 0; /* another run is refreshing it */
 
     rf_list *l = calloc(1, sizeof *l);
     char *text = malloc(TEXT_MAX);
@@ -527,8 +571,8 @@ int main(int argc, char **argv) {
     if (n && (streaming || !have_old) && save(file, text, n)) save(last, key, strlen(key));
     if (net.verbose) {
         char line[160];
-        snprintf(line, sizeof line, "%d stations, %d with a stream, %d requests, %s, %ld ms\n", l->n, streaming,
-                 net.requests, whole ? "complete" : "partial", now_ms() - net.t0);
+        snprintf(line, sizeof line, "%d stations, %d with a stream, %d requests, %s, %ld ms\n",
+                 l->n, streaming, net.requests, whole ? "complete" : "partial", now_ms() - net.t0);
         say(line);
     }
     return n ? 0 : 1;

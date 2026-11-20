@@ -287,6 +287,13 @@ GUEST_HOTSPOT = 'usr/bin/q2-hotspot'  # its hotspot (docs/internals.md#guest-pla
 Q2SEND = 'usr/bin/q2send'
 Q2SEND_SOURCES = ['localsend', 'localsend_core']
 Q2SEND_LIBS = ['lib/libc-2.28.so', 'lib/libpthread-2.28.so', 'usr/lib/libssl.so.1.1', 'usr/lib/libcrypto.so.1.1']
+# The local radio fetcher (docs/internals.md#local-radio-fetch): the stations that reach a place and their streams,
+# printed for the Radio Tuner; its tables (tools/radiodata.py) in RADIO_DATA, a folder of its own
+RADIOFETCH = 'usr/bin/q2radiofetch'
+RADIOFETCH_SOURCES = ['radiofetch', 'radiofetch_core']
+RADIOFETCH_LIBS = ['lib/libc-2.28.so', 'lib/libm-2.28.so', 'usr/lib/libcurl.so.4.7.0']
+RADIO_DATA = 'usr/share/q2radio'
+RADIO_TABLES = ('stations.bin', 'zcta.bin')
 # Card apps the firmware carries (docs/internals.md#bundled-apps): id -> (version, release zip, its size, its
 # SHA-256, builtin), each the zip its release ships, read from --apps (APPS_DIR). Its .<id>/ files go
 # to BUNDLED_DIR/<id> (patch/addon.c BUNDLED) with a version file and bundled_launcher's run in place of the
@@ -2845,7 +2852,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     lib_dir = need(re.search(rb'^usr/lib D (\d+) (\d+) (\d+) (\d+)$', p, re.M), 'Missing usr/lib pseudo inode')
     program, data_file = need(inode(p, HELPER_LIKE.encode()), 'Missing program inode'), need(inode(p, b'etc/hosts'), 'Missing etc/hosts inode')
     bundled = {}
-    for d in [BUNDLED_DIR, *(f'{BUNDLED_DIR}/{i}' for i in BUNDLED_APPS)]:
+    for d in [BUNDLED_DIR, *(f'{BUNDLED_DIR}/{i}' for i in BUNDLED_APPS), RADIO_DATA]:
         p += d.encode() + b' D ' + b' '.join(lib_dir.groups()) + b'\n'
         player_added.append([d.encode(), b'D', *lib_dir.groups()])
     for app_id in BUNDLED_APPS:
@@ -2936,6 +2943,10 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                GUEST: (HELPER_LIKE, compile_helper(out, cat, 'q2_guest', 'q2-guest', GUEST_LIBS)),
                                IROH: (HELPER_LIKE, iroh.binary(fresh=build_iroh)),
                                Q2SEND: (HELPER_LIKE, compile_helper(out, cat, Q2SEND_SOURCES, 'q2send', Q2SEND_LIBS)),
+                               RADIOFETCH: (HELPER_LIKE, compile_helper(out, cat, RADIOFETCH_SOURCES, 'q2radiofetch',
+                                                                        RADIOFETCH_LIBS)),
+                               **{f'{RADIO_DATA}/{n}': ('etc/hosts', (ROOT/'assets/radio'/n).read_bytes())
+                                  for n in RADIO_TABLES},
                                GUEST_DBUS: ('etc/dbus-1/system.d/bluealsa.conf', (ROOT/'assets/dbus/bluealsa-sink.conf').read_bytes()),
                                GUEST_HOTSPOT: (HELPER_LIKE, (ROOT/'patch/q2_hotspot.sh').read_bytes()),
                                **{path: (FONT, data) for path, (data, _) in fonts.items()},
@@ -2945,7 +2956,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                    Q2EQ: (HELPER_LIKE, compile_helper(out, cat, 'q2eq', 'q2eq', HELPER_LIBS[:1]))} if dev else {})}.items():
         stock = need(inode(p, like.encode()), f'Missing stock inode for {path}')
         name = path.rsplit('/', 1)[-1]
-        if path not in (HELPER, BOOT, SPLASH, REMOTE, Q2EQ, CODA_RC, GUEST, Q2SEND): (out/name).write_bytes(data)  # package the hashed bytes, as the logo
+        if path not in (HELPER, BOOT, SPLASH, REMOTE, Q2EQ, CODA_RC, GUEST, Q2SEND, RADIOFETCH): (out/name).write_bytes(data)  # package the hashed bytes, as the logo
         if inode(p, path.encode()):  # stock has a file of that name (V1.36's own menu_coverflow*.png): ours takes its inode
             changed_assets[path] = dict(original_sha256=sha(cat(path)), sha256=sha(data))
             p = swap_inode(p, path.encode(), out/name)

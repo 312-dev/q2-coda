@@ -32,7 +32,7 @@ if 'MUTANT_UNDER_TEST' in os.environ:
     ctypes.CDLL(None).mallopt(-8, 4)  # M_ARENA_MAX
 sys.path.insert(0, str(ROOT))
 # build first: the others import it, or each other in this order, while they load.
-for name in ('build', 'signing', 'shelf', 'module_elf', 'rotator', 'ipod', 'theme', 'art', 'peq', 'aic', 'mcu_park', 'pwm', 'q2remote', 'release', 'rebase', 'lastfm_key', 'player', 'scan', 'thirdparty', 'coda_rc_crypto', 'coda_rc_client', 'splash'):
+for name in ('build', 'signing', 'shelf', 'module_elf', 'rotator', 'ipod', 'theme', 'art', 'peq', 'aic', 'mcu_park', 'pwm', 'q2remote', 'release', 'rebase', 'lastfm_key', 'player', 'scan', 'thirdparty', 'coda_rc_crypto', 'coda_rc_client', 'splash', 'radiodata'):
     sys.modules[name] = importlib.import_module('tools.' + name)
 
 # The compilers a test may run, and openssl, which tools/signing.py signs and checks with in files

@@ -222,6 +222,7 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/q2_guest.py': [],
     'test/q2eq.py': [],
     'test/q2update.py': [],
+    'test/radiofetch.py': [],  # recorded answers from a local server; --live (the real services) is by hand
     'test/release.py': [],
     'test/remote.py': [],
     'test/rotator.py': ['{stockfs}/module_driver/soc_rotator.ko'],

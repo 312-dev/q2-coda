@@ -33,7 +33,7 @@ MAGIC, VERSION = b'Q2RS', 1
 RADII = 16           # contour radii per station, every 22.5 degrees from true north
 RECORD = 40          # bytes per station: radiofetch.h RF_RECORD
 CALL_MAX = 8         # the call sign, NUL-padded
-AM, LPFM, AUDACY, NO_CONTOUR = 1, 2, 4, 8  # flags (radiofetch.h RF_AM ...)
+AM, LPFM, AUDACY, NO_CONTOUR = 1, 2, 4, 8  # flags (radiofetch.h RF_AM, RF_LPFM, RF_AUDACY, RF_ESTIMATED)
 ZIPS = 100000
 # An AM station's reach, which the FCC publishes no contour for: 30 km times the square root of its daytime
 # kilowatts, within 15 and 150 km (5 kW is 67 km, 50 kW 150). A rough rule of ours, not a propagation model.
