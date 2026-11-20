@@ -6,14 +6,20 @@ word as ld.so applies it, and GetElementAttributes called through that word with
 libbtctl record in its GOT: the song comes back; the stock binary's handler, given the same request, rejects it
 (no registered player).
 
+And the AVRCP target's SDP record (docs/internals.md#bluetooth-cover-art): the three changed words are stock's
+with the new values, and the record builder's call, taken as its bal takes it through the jump laid over stock's
+old handler, runs tools/bt_meta.c's bt_cover_sdp against bluetoothd's own SDP functions (malloc and memcpy answered
+here); the AdditionalProtocolDescriptorLists it leaves on a record, serialised as SDP sends it, is AVRCP 1.6's:
+browsing, then cover art on q2-bip's PSM. The stock binary's helper, called the same way, leaves browsing alone.
+
 Usage: python3 test/bluetoothd.py BUILD_DIRECTORY (needs unsquashfs, readelf and Unicorn).
 """
 import pathlib, struct, subprocess, sys
 from unicorn.mips_const import *
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'tools'))
-from build import (BLUETOOTHD, BLUETOOTHD_SHA, BT_META, BT_META_GOT, BT_META_SLOT, fileoff, load_elf, segments, sha,
-                   word)
-from unicorn import UC_ARCH_MIPS, UC_MODE_LITTLE_ENDIAN, UC_MODE_MIPS32, Uc
+from build import (BLUETOOTHD, BLUETOOTHD_SHA, BT_COVER_PSM, BT_META, BT_META_GOT, BT_META_SLOT, BT_SDP_GOT, BT_SDP_JUMP,
+                   BT_SDP_WORDS, fileoff, load_elf, segments, sha, word)
+from unicorn import UC_ARCH_MIPS, UC_HOOK_CODE, UC_MODE_LITTLE_ENDIAN, UC_MODE_MIPS32, Uc
 
 BIAS = 0x20000000  # a load address other than the link's
 GP = 0x13e420      # bluetoothd's canonical $gp (readelf -A)
@@ -86,6 +92,145 @@ def element_attributes(raw, handler, song):
     return u.reg_read(UC_MIPS_REG_V0) & 0xff, out
 
 
+# AdditionalProtocolDescriptorLists (attribute 0x000d) as SDP carries it. AVRCP 1.6.2, 8 (the target's record):
+# a sequence of protocol descriptor lists, browsing's {L2CAP (0x0100), PSM 0x001b}, {AVCTP (0x0017), its version}
+# and cover art's {L2CAP, the PSM}, {OBEX (0x0008)}. 0x35 n: a sequence of n bytes; 0x19: a 16-bit UUID; 0x09: a
+# 16-bit unsigned integer.
+BROWSING = bytes.fromhex('35 10  35 06 19 0100 09 001b  35 06 19 0017 09 0104')
+COVER_ART = bytes.fromhex('35 0d  35 06 19 0100 09') + struct.pack('>H', BT_COVER_PSM) + bytes.fromhex('35 03 19 0008')
+HEAP = 0x31000000
+SDP_UINT16, SDP_UUID16, SDP_SEQ8 = 0x09, 0x19, 0x35
+
+
+def sdp_data(u, at):
+    """A BlueZ sdp_data_t at at, as SDP's bytes: dtd at +0, the value at +8 (a uuid_t's 16 bits at +12, a
+    sequence's first element), the next element at +32."""
+    dtd = u.mem_read(at, 1)[0]
+    if dtd == SDP_UINT16:
+        return bytes([dtd]) + struct.pack('>H', struct.unpack('<H', u.mem_read(at + 8, 2))[0])
+    if dtd == SDP_UUID16:
+        return bytes([dtd]) + struct.pack('>H', struct.unpack('<H', u.mem_read(at + 12, 2))[0])
+    assert dtd == SDP_SEQ8, hex(dtd)
+    body, e = b'', struct.unpack('<I', u.mem_read(at + 8, 4))[0]
+    while e:
+        body += sdp_data(u, e)
+        e = struct.unpack('<I', u.mem_read(e + 32, 4))[0]
+    return bytes([dtd, len(body)]) + body
+
+
+def additional_protocols(raw, entry):
+    """entry (a link-time address: stock's helper, or the jump over the old handler) called as the record
+    builder's bal calls it, on an empty record and an AVCTP version of 1.4: the record's attributes as
+    {id: SDP bytes}, and how many allocations were not freed."""
+    u = Uc(UC_ARCH_MIPS, UC_MODE_MIPS32 | UC_MODE_LITTLE_ENDIAN)
+    load_elf(u, raw, BIAS)
+    u.mem_map(DATA, 0x10000)
+    u.mem_map(HEAP, 0x10000)
+    gp = GP + BIAS
+    stubs, local = {}, True
+    for line in readelf('-AW', raw).splitlines():
+        if 'Global entries' in line:
+            local = False
+        f = line.split()
+        if len(f) >= 3 and f[1].endswith('(gp)') and f[0] != 'Address':
+            slot, value = gp + int(f[1][:-4]), int(f[2], 16)
+            if local and value:
+                word(u, slot, value + BIAS)
+            elif not local and 'FUNC' in f and 'UND' in f:  # an import: a stand-in of its own, answered in hook
+                stub = DATA + 0x2000 + 8 * len(stubs)
+                stubs[stub] = f[-1]
+                word(u, stub, 0x03e00008), word(u, stub + 4, 0)
+                word(u, slot, stub)
+    word(u, RET, 0x03e00008), word(u, RET + 4, 0)
+    state = {'at': HEAP + 0x100, 'live': set()}
+
+    def hook(uc, address, size, _):
+        name = stubs.get(address)
+        if not name:
+            return
+        a = [uc.reg_read(r) for r in (UC_MIPS_REG_A0, UC_MIPS_REG_A1, UC_MIPS_REG_A2)]
+        if name in ('malloc', 'calloc'):
+            n = a[0] if name == 'malloc' else a[0] * a[1]
+            v0, state['at'] = state['at'], state['at'] + (n + 15 & ~15)
+            state['live'].add(v0)
+        elif name == 'free':
+            assert not a[0] or a[0] in state['live'], 'freed twice, or never allocated'
+            state['live'].discard(a[0])
+            v0 = 0
+        elif name == 'memcpy':
+            uc.mem_write(a[0], bytes(uc.mem_read(a[1], a[2])))
+            v0 = a[0]
+        elif name == 'memset':
+            uc.mem_write(a[0], bytes([a[1] & 0xff]) * a[2])
+            v0 = a[0]
+        elif name == 'memcmp':
+            x, y = bytes(uc.mem_read(a[0], a[2])), bytes(uc.mem_read(a[1], a[2]))
+            v0 = (x > y) - (x < y) & 0xffffffff
+        else:
+            raise AssertionError(f'{name} called')
+        uc.reg_write(UC_MIPS_REG_V0, v0)
+    u.hook_add(UC_HOOK_CODE, hook, begin=DATA, end=DATA + 0x10000)
+    record, version, psm = HEAP, HEAP + 0x40, HEAP + 0x80
+    # the version as the builder made it: sdp_data_alloc(SDP_UINT16, &0x0104), run here through the GOT's own slot
+    sdp_alloc = struct.unpack('<I', u.mem_read(gp + BT_SDP_GOT['DATA_ALLOC'][1], 4))[0]
+    u.mem_write(psm, struct.pack('<H', 0x0104))
+
+    def call(fn, a0, a1):
+        u.reg_write(UC_MIPS_REG_A0, a0), u.reg_write(UC_MIPS_REG_A1, a1)
+        u.reg_write(UC_MIPS_REG_GP, gp), u.reg_write(UC_MIPS_REG_SP, STACK), u.reg_write(UC_MIPS_REG_RA, RET)
+        u.reg_write(UC_MIPS_REG_T9, fn)
+        u.emu_start(fn, RET, count=400000)
+        assert u.reg_read(UC_MIPS_REG_PC) == RET, 'it did not return'
+        return u.reg_read(UC_MIPS_REG_V0)
+    version = call(sdp_alloc, SDP_UINT16, psm)
+    before = set(state['live'])
+    call(entry + BIAS, record, version)
+    attrs, node = {}, struct.unpack('<I', u.mem_read(record + 8, 4))[0]  # sdp_record_t's attrlist: {next, data}
+    while node:
+        nxt, data = struct.unpack('<2I', u.mem_read(node, 8))
+        attrs[struct.unpack('<H', u.mem_read(data + 2, 2))[0]] = sdp_data(u, data)
+        node = nxt
+    kept = set()  # what the record itself holds: its list nodes and their data, to the leaves
+    def keep(at):
+        kept.add(at)
+        if u.mem_read(at, 1)[0] == SDP_SEQ8:
+            e = struct.unpack('<I', u.mem_read(at + 8, 4))[0]
+            while e:
+                keep(e)
+                e = struct.unpack('<I', u.mem_read(e + 32, 4))[0]
+    node = struct.unpack('<I', u.mem_read(record + 8, 4))[0]
+    while node:
+        kept.add(node)
+        keep(struct.unpack('<I', u.mem_read(node + 4, 4))[0])
+        node = struct.unpack('<I', u.mem_read(node, 4))[0]
+    node = struct.unpack('<I', u.mem_read(record + 4, 4))[0]  # and its pattern: each UUID it names, copied
+    while node:
+        kept.add(node)
+        node, uuid = struct.unpack('<2I', u.mem_read(node, 8))
+        kept.add(uuid)
+    return attrs, len(state['live'] - before - kept)
+
+
+def check_sdp(stock, patched):
+    for site, old, new in BT_SDP_WORDS:
+        assert struct.unpack_from('<2I', stock + patched, fileoff(stock, site))[0] == old
+        assert struct.unpack_from('<I', patched, fileoff(stock, site))[0] == new
+    version, features, call = (new for _, _, new in BT_SDP_WORDS)
+    assert version == 0x24020106  # addiu $v0, $zero, 0x0106: AVRCP 1.6
+    assert features & 0xffff == 0x0140 and features >> 16 == 0x3442  # ori $v0, $v0: browsing (bit 6), cover art (bit 8)
+    site = BT_SDP_WORDS[2][0]
+    assert call >> 16 == 0x0411 and site + 4 + ((call & 0xffff) - 0x10000) * 4 == BT_SDP_JUMP  # bal to the jump
+    old = BT_SDP_WORDS[2][1]
+    helper = site + 4 + ((old & 0xffff) - 0x10000) * 4
+    attrs, leaked = additional_protocols(stock, helper)
+    assert attrs == {0x000d: bytes([0x35, len(BROWSING)]) + BROWSING} and not leaked, (attrs, leaked)
+    print("stock: the record's additional protocols are browsing alone")
+    attrs, leaked = additional_protocols(patched, BT_SDP_JUMP)
+    assert attrs == {0x000d: bytes([0x35, len(BROWSING + COVER_ART)]) + BROWSING + COVER_ART}, attrs
+    assert not leaked, leaked
+    print('patched: browsing, then cover art (L2CAP PSM %#x, OBEX):' % BT_COVER_PSM, attrs[0x000d].hex())
+
+
 def check(directory):
     directory = pathlib.Path(directory)
     def extract(name):
@@ -93,10 +238,12 @@ def check(directory):
     stock, patched = extract('stock.squashfs'), extract('rootfs.squashfs')
     assert sha(stock) == BLUETOOTHD_SHA
     site, pdu_word, handler = BT_META_SLOT
-    # Only the table word and the program header that maps the appended code differ.
+    # Only the table word, the program header that maps the appended code and the SDP record's sites differ.
     null_header = segments(stock)[-1][0]
     changed = [i for i in range(len(stock)) if stock[i] != patched[i]]
     allowed = set(range(fileoff(stock, site + 4), fileoff(stock, site + 8))) | set(range(null_header, null_header + 32))
+    for at, n in [(w[0], 4) for w in BT_SDP_WORDS] + [(BT_SDP_JUMP, 20)]:  # the record's words and the jump
+        allowed |= set(range(fileoff(stock, at), fileoff(stock, at) + n))
     assert changed and set(changed) <= allowed, [hex(c) for c in changed if c not in allowed][:8]
     t, o, v, _, f, m, flags, _ = segments(patched)[-1][1]
     assert (t, v, flags) == (1, BT_META, 5) and patched[o:o + f] and len(patched) == o + f
@@ -113,6 +260,7 @@ def check(directory):
     ctype, _ = element_attributes(stock, handler, song)
     assert ctype == 0x0a, ctype  # REJECTED: upstream's handler finds no registered player
     print('stock: the same request is rejected (no registered player)')
+    check_sdp(stock, patched)
 
 
 if __name__ == '__main__':

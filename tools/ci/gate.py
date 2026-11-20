@@ -222,6 +222,7 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/pwm_build.py': ['{stockfs}'],
     'test/pwm_mcu.py': ['{stockfs}'],
     'test/q2_guest.py': [],
+    'test/q2bip.py': [],  # q2-bip on the host: a controller over a UNIX packet socket, a real ffmpeg, the L2CAP socket
     'test/q2eq.py': [],
     'test/q2update.py': [],
     'test/radiofetch.py': [],  # recorded answers from a local server; --live (the real services) is by hand

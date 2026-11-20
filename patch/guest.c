@@ -126,9 +126,12 @@ static void net_follow(const char *state) {
     if (!strcmp(deny, gp.held)) gp.held[0] = 0;
 }
 
+extern void bt_cover_hold(int held); /* bt_cover.c */
+
 /* A guest started: the owner's music stops. The local player is stopped with its place kept, as a
  * paused hciplayer may hold its PCM, which bluealsa-aplay then can't open; the rest pause. */
 static void owner_stop(void) {
+    bt_cover_hold(1); /* the car is told of the guest's songs now: not the owner's cover */
     gp.was_playing = media_playing();
     int status = mclGetPlayStatus();
     gp.stopped = media_owner() == 1 && (status == 2 || status == 3);
@@ -148,6 +151,7 @@ static void owner_resume(void) {
     else if (resume)
         media_set_playing(1);
     gp.stopped = gp.was_playing = 0;
+    bt_cover_hold(0);
     sendBtHeadsetPlayInfo(); /* the car shows the owner's song again, not the guest's last */
     sendBtHeadsetPlayStatus();
 }

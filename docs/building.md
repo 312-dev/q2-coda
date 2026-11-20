@@ -117,6 +117,7 @@ python3 test/remote.py                     # q2remote protocol, auth, event and 
 python3 test/q2eq.py                       # the q2eq helper (adb.md#q2eq) against a fake demo: each command's request, the JSON, the wait (host cc)
 python3 test/q2update.py                   # the q2update helper (adb.md#installing-an-update-over-adb) under sh against a fake demo: the request, the wait, the words
 python3 test/q2_guest.py                   # Guest Play's q2-hotspot under sh, then q2-guest (internals.md#guest-play) on a private bus against stand-in BlueZ and bluealsa daemons: prompts, Trusted Guests, the relay's processes, the car's track record (host cc, dbus-daemon, dbus-python)
+python3 test/q2bip.py                      # q2-bip (internals.md#bluetooth-cover-art) built for this machine: a controller over a UNIX packet socket, a stand-in and a real ffmpeg (200 x 200, 4:2:2), the L2CAP socket where the kernel has Bluetooth
 python3 test/adb.py [BUILD]                # adbd under qemu-mipsel in bwrap (descriptors, authorization and the prompt's socket, shell, exec, push, pull) and q2adb-gadget on a stand-in configfs (adb.md)
 python3 test/coda_rc_e2e.py --emu DIR [--build BUILD] [--shots DIR]  # coda-rc end to end over TCP against a q2-emu copy with CARREMOTE=1: pair, browse (album numbers, NOT_FOUND), play an album, State pushes, Pause and Play acked once played, Next, Previous, a cover (docs/remote-protocol.md)
 python3 test/rotator.py STOCK_MODULE        # actual MIPS rotator clock ownership and failure paths
@@ -129,7 +130,7 @@ python3 test/player/run.py                  # the new player (player/): bit-exac
 python3 test/ldac.py /tmp/q2-build         # shipped LDAC intermediate rates and native adaptive controller
 python3 test/headset_io.py /tmp/q2-build   # real MIPS headset worker with simulated kernel I/O (cc)
 python3 test/bluealsa.py /tmp/q2-build     # the patched bluealsa's DROP paths against stock's, delayed encoder signal; SBC's bitpool; the write MTU through each encoder
-python3 test/bluetoothd.py /tmp/q2-build   # the patched bluetoothd's GetElementAttributes, at a load address of its own, against stock's
+python3 test/bluetoothd.py /tmp/q2-build   # the patched bluetoothd's GetElementAttributes and its AVRCP record's cover art entry, at a load address of its own, against stock's
 python3 test/alsa.py BUILD QEMU_MIPSEL     # ALSA startup lock regression (see internals.md)
 python3 test/thirdparty.py BUILD QEMU_MIPSEL  # the rebuilt OpenSSL, curl, zlib, SQLite, libpng, BusyBox, wpa_supplicant and FFmpeg in a bwrap chroot of BUILD's rootfs: versions, links, TLS (network; --offline skips it) (third-party.md)
 python3 -m pytest test/unit                # tools/: no stock ZIP, no build, no Q2 (pip install -r test/unit/requirements.txt); GitHub runs it on every pull request
