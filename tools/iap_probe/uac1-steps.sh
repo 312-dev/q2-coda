@@ -104,6 +104,8 @@ run() {
     ( e=$(($(date +%s) + secs)); while [ "$(date +%s)" -lt $e ]; do
           st=/proc/asound/card${card:-x}/pcm0p/sub0/status
           echo "$(cut -d' ' -f1 /proc/uptime) 7 sample udc=$(cat /sys/class/udc/*/state) $(tr '\n' ' ' < $st 2>/dev/null)" >> "$LOG"
+          [ -n "$hw" ] || { hw=$(tr '\n' ' ' < ${st%status}hw_params 2>/dev/null); [ "${hw#closed}" = "$hw" ] && [ -n "$hw" ] &&
+              echo "$(cut -d' ' -f1 /proc/uptime) 7 hw_params $hw" >> "$LOG" || hw=; }
           sleep 1
       done; sync ) &
     end=$(($(date +%s) + secs))

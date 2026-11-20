@@ -96,8 +96,16 @@ public static class Car {
             return m[4] << 8 | m[5];
         }
     }
+    // the next file transfer packet, read here: Recv() keeps them aside and waits on for a control message
     static byte[] FilePacket() {
-        while (files.Count == 0) { byte[] m; int id = Recv(out m); Say("      (control " + id.ToString("X4") + " while waiting for the cover)"); }
+        while (files.Count == 0) {
+            byte[] p = Packet(3000);
+            if (p.Length <= 9) continue;
+            ack = p[5];
+            byte[] m = new byte[p.Length - 10]; Array.Copy(p, 9, m, 0, m.Length);
+            if (p[7] == 11) files.Add(m);
+            else Say("      (control " + (m[4] << 8 | m[5]).ToString("X4") + " while waiting for the cover)");
+        }
         byte[] f = files[0]; files.RemoveAt(0); return f;
     }
     static byte[] Ids(params int[] ids) { byte[] b = new byte[ids.Length * 2]; for (int i = 0; i < ids.Length; i++) { b[2 * i] = (byte)(ids[i] >> 8); b[2 * i + 1] = (byte)ids[i]; } return b; }
