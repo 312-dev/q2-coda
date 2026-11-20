@@ -969,6 +969,7 @@ int ringnav_paint(void *w, void *canvas) {
     battery_paint(w, canvas);
     album_local_paint(w, canvas);
     games_paint(w, canvas);
+    tuner_paint(w, canvas);
     search_strip_paint(w, canvas);
     add_songs_paint(w, canvas);
     inline_slider_paint(w, canvas); /* Settings' inline sliders (inline_slider.c) */

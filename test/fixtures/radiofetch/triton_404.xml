@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>        
+<live_stream_config version="1.9" xmlns="http://provisioning.streamtheworld.com/player/livestream-1.9">
+    <mountpoints>
+                                <mountpoint>
+                <status>
+                    <status-code>404</status-code>
+                    <status-message>Not Found</status-message>
+                </status>
+                                    <mount>WSFSAMAAC</mount>
+                            </mountpoint>
+            </mountpoints>
+</live_stream_config>

@@ -203,6 +203,7 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/coda_rc_e2e.py': 'needs a q2-emu copy to boot (--emu DIR, a card with CARREMOTE=1) and a port; run it by hand',
     'test/coverflow.py': [],
     'test/coverflow_position.py': [],
+    'test/fmrx.py': [],  # the tuner's receiver against the prototype's figures; --mips OUT builds the Q2's bench
     'test/headset_io.py': ['{build}'],
     'test/iap_probe.py': [],  # route 1's probe on the host against a synthetic car (docs/iphone-mode.md)
     'test/ldac.py': ['{build}'],
@@ -223,6 +224,7 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/q2_guest.py': [],
     'test/q2eq.py': [],
     'test/q2update.py': [],
+    'test/radiofetch.py': [],  # recorded answers from a local server; --live (the real services) is by hand
     'test/release.py': [],
     'test/remote.py': [],
     'test/rotator.py': ['{stockfs}/module_driver/soc_rotator.ko'],

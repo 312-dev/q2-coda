@@ -11,7 +11,8 @@
  * q2video -r DEVICE URL [VOLUME] plays Internet Radio (radio.c): the stream's sound alone, ffmpeg
  * restarted when it drops, and its report's ICY tags in RADIO_STATE; keys come on RADIO_SOCK, v
  * and q as above. q2video -s DEVICE VOLUME is librespot's sink on Bluetooth or a USB DAC
- * (spotify.c): stdin's 44.1 kHz sound, v and q on SINK_SOCK. No MIPS sysroot: the declarations
+ * (spotify.c): stdin's 44.1 kHz sound, v and q on SINK_SOCK. q2video -t DEVICE [VOLUME] is the Radio
+ * Tuner's receiver (radio_tuner.c, tuner below). No MIPS sysroot: the declarations
  * below are glibc 2.28's and alsa-lib's, with MIPS o32 constants. */
 #define W 320 /* /dev/fb0: 320 x 375, 32 bpp, red at bit 16, two pages (docs/internals.md#videos) */
 #define H 375
@@ -135,6 +136,7 @@ int meta(const char *s, const char *key, char *out, unsigned n) {
 }
 
 #ifndef PEQ_HOST
+#include "fmrx.h"
 struct timespec {
     long sec, nsec;
 };
@@ -435,6 +437,210 @@ static int radio(int argc, char **argv) {
     return 0;
 }
 
+/* -t DEVICE [VOLUME]: the Radio Tuner's sound (radio_tuner.c, docs/internals.md#radio-tuner-static). One
+ * process for the tuner's whole stay: the FM receiver (fmrx.c) runs continuously on ALSA DEVICE, hiss between
+ * stations, and a station's stream, when demo names one, is its programme: ffmpeg decodes the URL to 48 kHz
+ * stereo into a TUNER_RING ring, which the receiver plays from once TUNER_PRIME of it is in. A ring that runs
+ * dry (the network stalled) drops the carrier until it is primed again, as a fading signal would. demo sends
+ * datagrams to TUNER_SOCK: u and a URL (that station's stream, the last one's stopped), x (no stream), p and
+ * "level offset fade gain station" as integers (fmrx_params: dB, kHz, thousandths, 0 or 1, an id), v and a byte (the volume, as radio's), q (quit). Gain 0 is a
+ * pause: once the receiver has faded out nothing more is computed or written until the gain comes back.
+ * TUNER_STATE says state= (idle, connecting, playing, stalled, error), the stream's title=, codec= and url=. */
+#define TUNER_SOCK "/tmp/q2tuner.sock"
+#define TUNER_STATE "/tmp/q2tuner.state"
+#define TUNER_RING (2 * RATE)   /* frames: two seconds of the stream */
+#define TUNER_PRIME (RATE / 4)  /* frames in before the carrier comes up, and again after a stall */
+#define TUNER_FRAMES 512        /* frames a write, as the writer's CHUNK */
+#define TUNER_RESTARTS 5        /* a stream that ends is started again this often, a second more each time */
+
+static struct {
+    short *ring;
+    volatile unsigned head, tail; /* frames in and out, counting on */
+    volatile int primed, stalled, run, reading, quit;
+    int pid, ep, ap, tries;
+    unsigned long reader;
+    long long ended; /* when the stream's ffmpeg ended, to start it again */
+    fmrx_params p;   /* demo's; the writer copies it a write at a time */
+    char url[512], state[12], title[256], codec[16];
+} tu;
+static fmrx rx;
+
+static void tuner_state(const char *state) {
+    snprintf(tu.state, sizeof tu.state, "%s", state);
+    char s[900];
+    int n = snprintf(s, sizeof s, "state=%s\ntitle=%s\ncodec=%s\nurl=%s\n", state, tu.title, tu.codec, tu.url),
+        fd = open(TUNER_STATE ".tmp", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd < 0) return;
+    write(fd, s, (unsigned)n < sizeof s ? (unsigned)n : sizeof s - 1);
+    close(fd);
+    rename(TUNER_STATE ".tmp", TUNER_STATE);
+}
+
+/* ffmpeg's sound into the ring, until it ends or the stream is stopped; a full ring waits for the writer. */
+static void *tuner_reader(void *unused) {
+    static short in[1024]; /* a read's frames, and a frame's bytes the read before left over at its front */
+    char tail[4];
+    unsigned part = 0;
+    while (tu.reading) {
+        if (tu.head - tu.tail > TUNER_RING - 1024) {
+            usleep(5000);
+            continue;
+        }
+        int r = read(tu.ap, (char *)in + part, sizeof in - part);
+        if (r <= 0) break;
+        r += (int)part;
+        unsigned frames = (unsigned)r / 4;
+        part = (unsigned)r % 4;
+        memcpy(tail, (char *)in + frames * 4, part);
+        for (unsigned i = 0; i < frames; ++i) {
+            unsigned at = (tu.head + i) % TUNER_RING;
+            tu.ring[2 * at] = in[2 * i], tu.ring[2 * at + 1] = in[2 * i + 1];
+        }
+        tu.head += frames;
+        memcpy(in, tail, part);
+    }
+    tu.reading = 0;
+    return 0;
+}
+
+static void tuner_halt(void) {
+    if (tu.pid > 0) kill(tu.pid, SIGKILL), waitpid(tu.pid, 0, 0);
+    tu.reading = 0;
+    if (tu.reader) pthread_join(tu.reader, 0);
+    if (tu.ap >= 0) close(tu.ap);
+    if (tu.ep >= 0) close(tu.ep);
+    tu.pid = 0, tu.reader = 0, tu.ap = tu.ep = -1;
+    tu.primed = tu.stalled = 0;
+    tu.tail = tu.head;
+}
+
+/* tu.url's stream started: ffmpeg's sound on a pipe to the reader, its report on another to the main loop. */
+static void tuner_start(void) {
+    int ap[2], ep[2];
+    tuner_halt();
+    tu.title[0] = tu.codec[0] = 0;
+    if (!tu.url[0] || pipe2(ap, O_CLOEXEC)) return tuner_state("idle");
+    if (pipe2(ep, O_CLOEXEC)) return close(ap[0]), close(ap[1]), tuner_state("error");
+    const char *args[] = { FFMPEG, "-nostdin", "-hide_banner", "-nostats", "-loglevel", "verbose", "-icy", "1",
+                           "-reconnect", "1", "-reconnect_streamed", "1", "-rw_timeout", "15000000", "-i", tu.url,
+                           "-vn", "-ac", "2", "-ar", "48000", "-f", "s16le", "pipe:4", 0 };
+    tu.pid = ffmpeg(args, ap[1], 4, ep[1], 2);
+    close(ap[1]), close(ep[1]);
+    tu.ap = ap[0], tu.ep = ep[0], tu.reading = 1;
+    if (tu.pid < 0 || pthread_create(&tu.reader, 0, tuner_reader, 0)) tu.reader = 0, tu.reading = 0;
+    tuner_state("connecting");
+}
+
+/* The receiver, a write at a time, from the ring when it is primed. */
+static void *tuner_writer(void *unused) {
+    static short pcm[2 * TUNER_FRAMES];
+    static float in[2 * TUNER_FRAMES], out[2 * TUNER_FRAMES];
+    int idle = 0;
+    while (!tu.quit) {
+        unsigned have = tu.head - tu.tail;
+        if (!tu.primed && have >= TUNER_PRIME) tu.primed = 1, tu.stalled = 0;
+        int prog = tu.primed && have >= TUNER_FRAMES;
+        if (tu.primed && !prog) tu.primed = 0, tu.stalled = 1; /* dry: the carrier drops until primed again */
+        for (unsigned i = 0; prog && i < TUNER_FRAMES; ++i) {
+            unsigned at = (tu.tail + i) % TUNER_RING;
+            in[2 * i] = tu.ring[2 * at] / 32768.0f, in[2 * i + 1] = tu.ring[2 * at + 1] / 32768.0f;
+        }
+        if (prog) tu.tail += TUNER_FRAMES;
+        fmrx_params p = tu.p;
+        if (!prog && tu.url[0]) p.level = FMRX_NO_CARRIER; /* its stream named but not sounding */
+        if (!fmrx_run(&rx, &p, prog ? in : 0, out, TUNER_FRAMES)) {
+            if (!idle) snd_pcm_drop(au.pcm), idle = 1; /* paused and faded: nothing to compute or play */
+            usleep(20000);
+            continue;
+        }
+        if (idle) snd_pcm_prepare(au.pcm), idle = 0;
+        for (int i = 0; i < 2 * TUNER_FRAMES; ++i) {
+            float v = out[i] * 32767.0f;
+            pcm[i] = (short)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+        }
+        if (au.gain < 65536) scale(pcm, 2 * TUNER_FRAMES, au.gain);
+        for (unsigned sent = 0; sent < TUNER_FRAMES;) {
+            long r = snd_pcm_writei(au.pcm, pcm + 2 * sent, TUNER_FRAMES - sent);
+            if (r < 0 && snd_pcm_recover(au.pcm, (int)r, 1)) {
+                snprintf(au.error, sizeof au.error, "write: %s", snd_strerror((int)r));
+                tu.quit = 1;
+                break;
+            }
+            if (r > 0) sent += (unsigned)r;
+        }
+    }
+    return 0;
+}
+
+/* A datagram from demo (TUNER_SOCK). */
+static void tuner_key(int sock, int soft) {
+    char k[600];
+    int n = recv(sock, k, sizeof k - 1, 0);
+    if (n <= 0) return;
+    k[n] = 0;
+    if (k[0] == 'q') tu.quit = 1;
+    if (k[0] == 'v' && n > 1) au.gain = soft ? bt_gain((unsigned char)k[1]) : 65536;
+    if (k[0] == 'x') tu.url[0] = 0, tuner_halt(), tuner_state("idle");
+    if (k[0] == 'u' && strcmp(tu.url, k + 1)) snprintf(tu.url, sizeof tu.url, "%s", k + 1), tu.tries = 0, tuner_start();
+    int v[5];
+    if (k[0] == 'p' && sscanf(k + 1, "%d %d %d %d %d", v, v + 1, v + 2, v + 3, v + 4) == 5) {
+        fmrx_params p = { (float)v[0], (float)v[1], v[2] / 1000.0f, (float)v[3], v[4] };
+        tu.p = p;
+    }
+}
+
+static int tuner(int argc, char **argv) {
+    int soft = argc > 2 && argv[2][0] != 'h', dac = sound_open(argv[1], argc > 2 ? argv[2] : 0, RATE), on = 1;
+    tu.ring = malloc(TUNER_RING * 4);
+    tu.ap = tu.ep = -1;
+    tu.p.level = FMRX_NO_CARRIER, tu.p.gain = 1;
+    fmrx_init(&rx, RATE, (unsigned)now_ms() | 1);
+    int sock = dgram_listen(TUNER_SOCK);
+    unsigned long writer_thread = 0;
+    if (!au.pcm || !tu.ring || pthread_create(&writer_thread, 0, tuner_writer, 0)) tu.quit = 1, writer_thread = 0;
+    tuner_state(au.pcm ? "idle" : "error");
+    char line[512];
+    int len = 0;
+    while (!tu.quit) {
+        struct pollfd p[2] = { { sock, 1, 0 }, { tu.ep, 1, 0 } };
+        poll(p, tu.ep >= 0 ? 2 : 1, 200);
+        if (p[0].revents) tuner_key(sock, soft);
+        if (tu.url[0] && tu.pid > 0 && tu.primed && strcmp(tu.state, "playing")) tuner_state("playing");
+        if (tu.url[0] && tu.pid > 0 && tu.stalled && !strcmp(tu.state, "playing")) tuner_state("stalled");
+        if (tu.ep >= 0 && p[1].revents) {
+            char c;
+            if (read(tu.ep, &c, 1) <= 0) { /* ffmpeg ended: started again, a second more each time */
+                tuner_halt();
+                tu.ended = now_ms();
+                tuner_state(++tu.tries > TUNER_RESTARTS ? "error" : "connecting");
+                continue;
+            }
+            if (c != '\n' && c != '\r') {
+                if (len < (int)sizeof line - 1) line[len++] = c;
+                continue;
+            }
+            line[len] = 0, len = 0;
+            if (!tu.codec[0] && meta(line, "Audio", tu.codec, sizeof tu.codec)) {
+                char *x = tu.codec;
+                for (; *x && *x != ' ' && *x != ','; ++x)
+                    if (*x >= 'a' && *x <= 'z') *x -= 32;
+                *x = 0;
+            }
+            if (meta(line, "StreamTitle", tu.title, sizeof tu.title)) tuner_state(tu.state);
+        }
+        if (tu.url[0] && tu.pid <= 0 && tu.tries <= TUNER_RESTARTS && tu.ended && now_ms() - tu.ended > 1000 * tu.tries)
+            tu.ended = 0, tuner_start();
+    }
+    tuner_halt();
+    tu.quit = 1;
+    if (writer_thread) pthread_join(writer_thread, 0);
+    unlink(TUNER_STATE);
+    unlink(TUNER_SOCK);
+    if (au.pcm) snd_pcm_close(au.pcm);
+    if (dac >= 0) ioctl(dac, DAC_MUTE, &on);
+    return 0;
+}
+
 /* -s DEVICE VOLUME: librespot's sink off the headphone DAC (spotify.c, the card's aplay.sh): its
  * 44.1 kHz S16 stereo from stdin until it ends or the device fails, at the soft volume, with v and
  * q on SINK_SOCK as radio's. */
@@ -471,6 +677,7 @@ int main(int argc, char **argv) {
     signal(SIGCHLD, 0); /* SIG_DFL, so waitpid sees ffmpeg */
     if (argc > 3 && !strcmp(argv[1], "-r")) return radio(argc - 1, argv + 1);
     if (argc > 3 && !strcmp(argv[1], "-s")) return sink(argv + 1);
+    if (!strcmp(argv[1], "-t")) return tuner(argc - 1, argv + 1);
     unsigned var[40], fix[17];
     int fb = open("/dev/fb0", O_RDWR | O_CLOEXEC);
     if (fb < 0 || ioctl(fb, FBIOGET_VSCREENINFO, var) || ioctl(fb, FBIOGET_FSCREENINFO, fix)) return 1;

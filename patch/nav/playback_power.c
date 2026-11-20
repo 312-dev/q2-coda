@@ -545,6 +545,7 @@ int ringnav_sleep(void *loop) {
     video_poll();
     spot_poll();
     radio_poll();
+    tuner_poll(); /* the Radio Tuner's list and receiver (radio_tuner.c) */
     addon_poll();
     coda_rc_poll();
     song_radio_poll();

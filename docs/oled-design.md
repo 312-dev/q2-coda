@@ -1811,6 +1811,36 @@ Settings > Car Remote (approved 2026-11-16, `design/carremote-page`, `mock_carre
 - **Pairing:** the code's Dialog over whatever shows, then the icon toast "Pixel 10 Pro paired" (Positive
   `check-circle`). ponytail: the card form with the 120 s countdown on Cancel's row is the shared pairing card's, not on
   this branch yet.
+### Radio Tuner
+
+Home's Radio Tuner ([internals](internals.md#radio-tuner), `patch/radio_tuner.c`), as the approved prototype
+(`~/q2-emu/design/radio-tuner/index.html`, device shots in `~/q2-emu/design/radio-tuner/device-shots/`,
+2026-11-20). The status row names the page "Radio Tuner" on the tuner, loading and error screens, "Near <city>" on
+the stations list and "Change Location" on the ZIP entry.
+
+- **Tuner:** the frequency in Inter Medium 64 (the one size past the type steps, as the plug-in screen's 30 is),
+  its baseline at y 116, with "FM" in Inter Medium 17 Text Secondary 6 px after it, the pair centred; the brand
+  in Inter Medium 20 at y 148; call sign and city in 15 Text Secondary at y 174; the song, "Paused", "Tuning…" or
+  "On air here, not available to stream" in 15 Text Tertiary at y 196. Between stations: "No station" and "Keep
+  turning, or press Next to seek". A station with no stream has its frequency and brand in Text Tertiary.
+- **Dial:** a scale under a fixed needle, 62 px a MHz, baseline y 270: a 7 px tick each 0.2 MHz (Text Tertiary),
+  14 px on the whole MHz (Text Secondary), the even MHz labelled in 13 Text Tertiary under it; a 7 px dot per
+  station 26 px above the baseline, filled Text Primary when it streams, hollow Text Tertiary when it is on air
+  but has no stream; both ends fading into black over 48 px; the needle a 3 x 44 px bar in Favorite red
+  (#FF375F) from y 230. The needle glides to each 0.2 MHz step (60 ms time constant).
+- **Stations list:** the house list's measures (32 px rows from y 58, Inter 20, the flat selection bar
+  `sel_bar_flat`, fades from y 40 to 74 and 266 to 310 where the list goes on, the 4 px scroll indicator at
+  x 366 while the wheel turns), painted by the page: the name left, the frequency right (Text Secondary, Text
+  Primary on the selection), a station with no stream in Text Tertiary; the station sounding carries the
+  now-playing mark left of its frequency, three 3 px bars 5 px apart, up to 14 px tall, moving out of step, in
+  Accent Text (white on the selection). The last rows are Use My Location and Enter ZIP Code…, with chevrons.
+- **ZIP entry:** "Enter ZIP Code" (20 Medium, y 92) and "Turn to choose, Centre for the next digit" (15
+  Secondary, y 118); five 42 x 56 digit boxes 52 px apart from y 150, Raised with 10 px corners, the current one
+  the accent, digits in Inter Medium 30; "Menu: back" in 13 Tertiary at y 250.
+- **Loading and error:** the spinner centred at y 130, "Finding stations near you…" (17 Medium, y 182) and the
+  seconds so far (15 Tertiary, y 208); "Couldn’t find stations", the reason and "Centre: try again · Menu: enter
+  a ZIP".
+
 ### Overlay motion
 
 A toast, the [confirmation card](#confirmation-card), the menu sheet and Up Next in it share one enter and exit

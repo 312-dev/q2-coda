@@ -808,6 +808,8 @@ def validate_assets(directory):
             for c in children:
                 slots[id(c)] = (cx, 0, c[1][2], h)
                 cx += c[1][2] + gap
+        if kind == 'scroll_view':  # its rows past its box scroll in: only what shows inside it is on the glass there
+            window = (max(window[0], y), min(window[1], y + h))
         for c in children: corners(short, c, x, y, window, slots.get(id(c)))
     full_bleed_windows = 0
     for rel in paths:
@@ -959,7 +961,7 @@ def validate_assets(directory):
             # The art fills the right panel below the status bar; the payload fits and crops it.
             assert art[0] == 'image' and art[1] == [0, 0, 375, 320 - GEOM.bar] and art[2]['draw_type'] == 'fill' and HOME_LIST_W == 375
             assert all(v == '#00000000' for k,v in root[3][1][2].items() if k.startswith('style:'))
-            assert [r[2]['name'] for r in sv[3]] == ['btn_'+n for n in HOME_ROWS] and HOME_ROWS[4] == 'coverflow'
+            assert [r[2]['name'] for r in sv[3]] == ['btn_'+n for n in HOME_ROWS] and HOME_ROWS[5] == 'coverflow'
             for name, (_, _, _, (label, image)) in zip(HOME_ROWS, sv[3]):
                 ours = HOME_OURS.get(name, name)  # stock V1.36 binds img_coverflow and translates label_coverflow: ours are named apart
                 assert label[2]['name'] == {'localmusic': 'label_library', 'folder': 'label_folders'}.get(name, 'label_'+ours)
@@ -967,7 +969,8 @@ def validate_assets(directory):
                 # Labels end before the chevron's glyph; longer ones scroll (only_focus) or end in an ellipsis.
                 assert label[1][0] + label[1][2] == image[1][2] - HOME_LABEL_END and label[1][2] >= 100
                 assert label[2]['only_focus'] == 'true' and label[2]['ellipses'] == 'true'
-            assert [r[3][0][2].get('text') for r in sv[3]] == [None, 'Library', 'Games', 'Folders', 'Cover Flow', 'Search', 'Settings']
+            assert [r[3][0][2].get('text') for r in sv[3]] == [None, 'Library', 'Radio Tuner', 'Games', 'Folders', 'Cover Flow', 'Search',
+                                                              'Settings']
             # Seven rows, all in the box at rest (HOME_REST): the payload would scroll any more (home.c home_overflow).
             assert lg == [0, HOME_TOP, HOME_LIST_W, 7*GEOM.home_row] and HOME_TOP + 7*GEOM.home_row <= 320 - GEOM.bar - HOME_TOP
             # Home: Carousel's: stock's carousel and arrows after the lists, hidden and taking no taps

@@ -104,6 +104,9 @@ Every build installs the player, `q2player` ([player-plan.md](player-plan.md)), 
 python3 test/peq.py                        # PEQ parser, storage, DSP, EQ page (both tabs), 3EQ filters, Videos' audio writer and scrobble upload (host cc; the writer needs -m32 libs, upload libcrypto)
 python3 test/coverflow_position.py          # position pixels, wheel/touch redraw and fade (host cc)
 python3 test/coverflow.py                  # Coverflow art cache and depth renderer (host cc -m32, pthreads)
+python3 test/radiofetch.py                 # q2radiofetch end to end against recorded answers (host cc, libcurl)
+python3 test/radiofetch.py --live          # the same against the real services: coverage and times
+python3 test/fmrx.py                       # the Radio Tuner's FM receiver against the prototype's figures (host cc)
 python3 test/coverflow.py --captures /tmp/cf  # the same, plus the renderer's frames as PNGs
 python3 test/build.py                      # JPEG headers, dev tags, and the boot scripts (S90play's dual boot and crash log, S11logo's splash) under the host sh; no ZIP or emulator
 python3 test/build.py 'Q2 Firmware V1.36.zip'   # packaging checks (custom logo, quoted paths)
