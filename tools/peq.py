@@ -57,6 +57,9 @@ LIBC = {
     # iPod status bar clock (navigation.c)
     'time': ('long', 'long *'),
     'localtime_r': ('const int *', 'const long *, int *'), 'tzset': ('void', 'void'),
+    # Cover Flow's open (coverflow.c): stops a cancelled step's statement; demo imports no such function, so it is
+    # reached from sqlite3_exec's resolved GOT entry by the rebuilt library's offset, as localtime_r is from tzset's
+    'sqlite3_progress_handler': ('void', 'void *, int, int (*)(void *), void *'),
     # Scrobble upload (scrobble.c): demo's libcurl and libcrypto
     'fseek': ('int', 'void *, long, int'), 'ftell': ('long', 'void *'), 'atoi': ('int', 'const char *'),
     'strtol': ('long', 'const char *, char **, int'),  # addon.c progress_row
@@ -102,6 +105,9 @@ UNFORMATTED = ['peq.c', 'peq_ui.c', 'coverflow.c', 'library_scope.c', 'scrobble.
                'nightshift.c', 'headset.c', 'chapters.c', 'lyrics.c', 'airplay.c',
                'monocypher/monocypher.c', 'monocypher/monocypher-ed25519.c']
 
+# sqlite3_progress_handler's place after sqlite3_exec in the rebuilt libsqlite3 (3.54.1, tools/thirdparty.py)
+SQLITE_PROGRESS_DELTA = -648348
+
 # libcstl's iterator, 28 bytes, which deque_begin returns and algo_sort_if takes by value
 CSTL_ITER = 'typedef struct { unsigned w[7]; } cstl_iter;'
 
@@ -141,6 +147,24 @@ def compile_common(out, binary):  # pragma: no mutate block
                     'lw $t9, 0($t8)', f'addiu $t9, $t9, {delta}',
                     'lui $t8, %hi(localtime_r_target)', 'sw $t9, %lo(localtime_r_target)($t8)',
                     '1:', 'jr $t9', 'nop']
+            continue
+        if name == 'sqlite3_progress_handler':
+            # sqlite3_exec's GOT entry plus the rebuilt libsqlite3's offset between the two (tools/thirdparty.py
+            # INSTALL ships it as usr/lib/libsqlite3.so.0.8.6). 0 when the entry is still demo's lazy stub (below
+            # 0x1000000, demo's own image): stock_db_open calls it only after its own sqlite3_exec has resolved it.
+            import thirdparty
+            lib = symbols(thirdparty.build('sqlite')/'usr/lib/libsqlite3.so.3.54.1')
+            delta = lib['sqlite3_progress_handler'] - lib['sqlite3_exec']
+            check(delta == SQLITE_PROGRESS_DELTA, f'Unexpected libsqlite3 sqlite3_progress_handler offset {delta}')
+            header.append(f'extern {ret} peq_lib_{name}({args});')
+            header.append(f'#define {name} peq_lib_{name}')
+            address = got['sqlite3_exec']
+            asm += [f'.section .text.peq_lib_{name},"ax",@progbits', f'.globl peq_lib_{name}', f'peq_lib_{name}:',
+                    f'lui $t8, {address >> 16}', f'ori $t8, $t8, {address & 65535}', 'lw $t9, 0($t8)',
+                    'lui $t8, 0x100', 'sltu $t8, $t9, $t8', 'bnez $t8, 1f', 'nop',
+                    f'addiu $t9, $t9, {delta}' if -32768 <= delta < 32768 else f'li $t8, {delta}',
+                    *([] if -32768 <= delta < 32768 else ['addu $t9, $t9, $t8']),
+                    'jr $t9', 'nop', '1:', 'jr $ra', 'nop']
             continue
         if alias not in got:
             header.append(f'extern {ret} {name}({args});')

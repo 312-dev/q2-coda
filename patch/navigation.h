@@ -485,7 +485,7 @@ void chevron_icon(void *w, void *canvas, int right, int y, int selected);
 #define VALUE_CHEVRON_GAP 21
 void chevron_muted(void *w, void *canvas, int right, int y);
 void spinner_icon(void *w, void *canvas, int right, int y);
-int spinner_frame(void), spinner_turn(void);
+int spinner_frame(void);
 void spinner_painted(void *w, const rect_t *r);
 int coverflow_spinner(void), coverflow_wait_input(void *e);
 
