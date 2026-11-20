@@ -1532,6 +1532,30 @@ def test_no_window_manager_is_stocks_bad_params(fw):
     assert Wm(fw).call(None) == 0x10
 
 
+def test_a_frames_glyphs_are_stamped_with_its_time_and_read_the_clock_once(fw):
+    """docs/internals.md#song-rows-cost: glyph_cache_lookup stamps each glyph it finds with time_now_ms (tools/build.py
+    GLYPH_STAMP), a clock_gettime system call a glyph, about 950 a Songs frame. While a frame paints, every stamp is the
+    frame's time, read once; outside a paint each is the time now, as stock's."""
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    clock = [1000]
+    fw.mock('time_now_ms', lambda *_: clock[0])
+    stamp = fw.fn('ringnav_glyph_stamp', C.c_ulonglong)
+    wm, seen = Wm(fw), []
+
+    def frame(_):
+        for _ in range(50):  # a frame's glyphs, the clock moving under them
+            clock[0] += 1
+            seen.append(stamp())
+        return 0
+    wm.paint = Wm.PAINT(frame)
+    struct.pack_into('<Q', wm.vtable, 0xc, C.cast(wm.paint, C.c_void_p).value)
+    reads = len(fw.calls('time_now_ms'))
+    assert wm.call(wm.p) == 0
+    assert seen == [1000] * 50 and len(fw.calls('time_now_ms')) - reads == 1
+    clock[0] = 5000
+    assert stamp() == 5000  # between frames: the time now
+
+
 # Key Tone (buzzeer_switch).
 class Buzzer:
     """pthread_create runs the click's worker at once, or leaves it running, or fails."""

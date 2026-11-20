@@ -265,10 +265,16 @@ int ringnav_input(void *wm, void *e) {
     return ret;
 }
 
+static unsigned long long glyph_ms __attribute__((section(".scratch"))); /* 0: no frame paints */
+/* Stock's time_now_ms whole: 64 bits ($v0, $v1), where FUNCTIONS declares its low 32 */
+static unsigned long long now_ms64(void) {
+    return ((unsigned long long (*)(void))(void *)time_now_ms)();
+}
 /* window_manager_paint, a leaf (tools/build.py WM_PAINT_LEAF): the window manager's own paint
  * (vtable +0xc), except while q2video or a card game has the framebuffer (each poll repaints after
  * it) and while the screen is off, unless a window animates (AWTK steps it from the paint); the
- * first lit pass repaints the whole screen (ringnav_sleep; docs/internals.md Battery). */
+ * first lit pass repaints the whole screen (ringnav_sleep; docs/internals.md Battery). While it
+ * paints, glyphs are stamped with the frame's time (ringnav_glyph_stamp). */
 int ringnav_wm_paint(void *wm) {
     if (wm && !g_backlight_status && !window_manager_is_animating(wm)) return 0; /* RET_OK */
     int away = video_on() || addon_game_on();
@@ -276,8 +282,21 @@ int ringnav_wm_paint(void *wm) {
     int (*paint)(void *) = vt ? (int (*)(void *))P(vt, 0xc) : (int (*)(void *))0;
     if (!paint) return away ? 0 : 0x10; /* RET_BAD_PARAMS, as stock */
     list_reach_due(); /* the status row's band, when the list under it moved (row_paint.c) */
-    return paint(wm);
+    unsigned long long outer = glyph_ms; /* a paint inside a paint (keylock.c, charging.c) */
+    glyph_ms = now_ms64();
+    int ret = paint(wm);
+    glyph_ms = outer;
+    return ret;
 }
+
+/* glyph_cache_lookup's stamp on a hit (tools/build.py GLYPH_STAMP, in place of its time_now_ms):
+ * the frame's time while a frame paints, else the time now. Stock stamps every glyph it finds,
+ * each a clock_gettime system call on the Q2, and every row's text is laid out again whatever the
+ * frame's dirty area: about 950 a Songs frame, 12% of demo's running time as the wheel scrolled.
+ * The cache only orders its glyphs by the stamp, dropping the least recent when it is full, which
+ * a frame's few milliseconds don't change (docs/internals.md#song-rows-cost). Here, beside the
+ * paint that sets the frame's time. */
+unsigned long long ringnav_glyph_stamp(void) { return glyph_ms ? glyph_ms : now_ms64(); }
 
 /* buzzeer_switch (0x4fe3f8), every Key Tone click, stock's and ringnav()'s: the Clicker's route
  * (clicker.c, docs/internals.md#key-tone). The buzzer is the MCU's (system("cmd_mcu write_str
@@ -935,8 +954,7 @@ int ringnav(void *ctx, void *event) {
         st.wheel_run = 0;
         step = 1;
     }
-    native_scrollbar(&g_menu);
-    wheel_sb_arm(g_menu.w);
+    wheel_sb_arm(g_menu.w); /* the theme's indicator (list_marks.c); stock's bar stays asleep */
     if (g_menu.kind == 3) {
         if (dir > 0)
             slide_menu_scroll_to_next(w);

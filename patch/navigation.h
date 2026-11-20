@@ -801,6 +801,8 @@ void keylock_paint(void *w, void *canvas);
 int overlay_scrim(void *w, void *canvas, unsigned argb, int *dy);
 void search_strip_overlay(void *w, void *canvas); /* search_strip.c: Return held's card */
 int ringnav_wm_paint(void *wm);                   /* window_manager_paint's leaf */
+/* nav/input.c: glyph_cache_lookup's stamp (tools/build.py GLYPH_STAMP) */
+unsigned long long ringnav_glyph_stamp(void);
 
 /* theme_engine.c */
 #define ACCENT_N SETTING_N_ACCENT /* the ACCENTS rows: theme_engine.c's accents[] has as many */

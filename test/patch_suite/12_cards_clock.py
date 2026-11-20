@@ -438,7 +438,7 @@ assert ('reset_poweroptions_timer',1,1,1) in [c[:4] for c in m.calls] and m.get(
 # Its end: the socket closes, the whole screen repaints once, and the UI has its input and paint again.
 m.waited=4242; m.calls=[]; m.call(address=sleep_hook,args=(0x1234,0,0,0),gap=0,clear=False)
 assert ('close',7) in [c[:2] for c in m.calls] and ('widget_invalidate_force',m.wm,0) in [c[:3] for c in m.calls]
-assert 'stock_input' in event(O['EVT_KEY_UP'],O['KEY_RETURN']) and not m.sent and wm_paint()==['wm_vt_paint']
+assert 'stock_input' in event(O['EVT_KEY_UP'],O['KEY_RETURN']) and not m.sent and wm_paint()==['time_now_ms','wm_vt_paint']  # the frame's time for its glyphs (ringnav_glyph_stamp)
 m.calls=[]; m.call(address=sleep_hook,args=(0x1234,0,0,0),gap=0,clear=False); assert 'waitpid' not in [c[0] for c in m.calls]
 passed()
 

@@ -494,6 +494,8 @@ demo	0x69fb5c	0x4	sub_69f638	1st of 2 calls to window_open, after "kb_phone"; to
 demo	0x69fbd0	0x4	sub_69f638	2nd of 2 calls to window_open, after "kb_phone"; tools/build.py KB_OPEN_SITES
 demo	0x69fef4	0x4	sub_69f638	3rd of 4 calls to widget_set_prop, after "popup"; tools/build.py KB_OPEN_HINT
 demo	0x6a0234	0x4	sub_69f638	`addiu $sp, $sp, -0x20`, after "input_method_default_request"; tools/build.py KB_REQUEST
+demo	0x6b2bb4	0x4	glyph_cache_lookup	the load of $25 for the only call to time_now_ms; tools/build.py GLYPH_STAMP
+demo	0x6b2bb8	0x4	glyph_cache_lookup	the only call to time_now_ms; tools/build.py GLYPH_STAMP
 demo	0x6b3514	0x4	input_device_status_handle_event	`sb $zero, 0xc($17)` (2nd of 2 such), after "double clicked"; patch/nav/hold_menu.c STALE_NOTES
 demo	0x6b35fc	0x4	input_device_status_handle_event	`beqz $2, +18 words` (6th of 9 such), before 1st of 2 calls to memset, after "double clicked"; tools/build.py KEY_ABORTED
 demo	0x6b3658	0x4	input_device_status_handle_event	the load of $25 for the only call to timer_add, after "double clicked"; tools/build.py HOLD_KEYS
