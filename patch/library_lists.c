@@ -387,7 +387,7 @@ int era_sql(const char *sql, int (*row)(void *, int, char **, char **), void *ct
     void *db = 0;
     /* Era uses SQLite directly rather than the stock library query wrappers. */
     char *expanded = library_scope_query(sql); /* none: the whole library, as library_query */
-    /* Local + Server: the server's songs too (catalogue.c), its file attached to this connection.
+    /* a signed-in server's songs too (catalogue.c), its file attached to this connection.
      * ponytail: the scope's folders (MUSIC_WHERE) apply to the union here, so a scope leaves the
      * server's songs out of Era; library_query scopes the card's alone. */
     char *both = catalogue_union(expanded ? expanded : sql);

@@ -338,7 +338,7 @@ static int ix_order(const void *a, const void *b) {
 }
 
 /* The listed ids as the library's records, in the list's order: the whole library's (with server songs
- * when Local + Server is on) sorted by id once, then each id looked up. */
+ * when a server is signed in) sorted by id once, then each id looked up. */
 static void *cr_songs(int want, int *at) {
     int n = 0;
     void *all = staged(songs_unsorted, (void *)1, &n), *out = _create_deque("stSongInfo");

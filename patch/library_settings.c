@@ -1,7 +1,7 @@
 /* Playback > Library (docs/ipod.md#settings): what the Library holds and how it is ordered and
  * shown, on one page with three of its own, each stock's Playback page opened again
  * (navigation.c library_open, ringnav_audioset):
- *   Library    On-The-Go, Streaming Songs, Sorting >, Artists, Artist View, Playlists >,
+ *   Library    On-The-Go, Sorting >, Artists, Artist View, Playlists >,
  *              Folders >, Scan Song Durations
  *   Sorting    Songs > (a picker), Artist's Albums, Years
  *   Playlists  Playlist View, then after a gap Import Playlists and Export Playlists
@@ -9,12 +9,10 @@
  * The pickers (Songs' order here, Display > Cover Flow's Sort) are stock's Buttons Lock page
  * opened again (picker_open), its rows ours.
  *
- * Streaming Songs is [Q2POD] LIBRARYSOURCE (1: a card app's server songs join the Library,
- * catalogue.c). The firmware is the only writer of the key; card apps read the state from
- * LIB_FILE, written with the caps file (addon.c addon_scan, so before any app starts) and at every
- * change. Turning it off while
- * an app has a catalogue on the card asks first, and so does a card app's needslib row while it is
- * off (addon.c), which turns it on (docs/internals.md#server-library). */
+ * A signed-in card app's server songs are always in the Library (catalogue.c; the user's,
+ * 2026-11-19: no setting). An older build's [Q2POD] LIBRARYSOURCE is never read. Card apps that
+ * still read the state find "server" in LIB_FILE, written with the caps file (addon.c
+ * addon_scan, so before any app starts) (docs/internals.md#server-library). */
 #include "navigation.h"
 
 #define LIB_FILE "/tmp/q2-addon.library"
@@ -117,55 +115,14 @@ static int picker_open(void *ctx, void *event) {
 /* Display > Cover Flow's Sort row (navigation.c pod_click) */
 void cf_sort_open(void) { picker_open((void *)PICK_CF_SORT, 0); }
 
-/* ---- Streaming Songs ---- */
+/* ---- The server library's state ---- */
 
-/* LIB_FILE: "server" while the server's songs are in the Library, else "local", for card apps
- * (the caps word libsource says the firmware writes it). /tmp empties at each start, so the file
- * is always the running firmware's. */
+/* LIB_FILE: "server", the server's songs in the Library, for card apps (the caps word libsource
+ * says the firmware writes it). /tmp empties at each start, so the file is always the running
+ * firmware's. */
 void library_source_file(void) {
-    pod_settings();
-    const char *v = catalogue_source == 1 ? "server\n" : "local\n";
-    blob_io(LIB_FILE, LIB_FILE ".tmp", (void *)v, strlen(v), 1);
-}
-static void library_source_set(int on) {
-    catalogue_source = on;
-    write_int_config(on, "Q2POD", "LIBRARYSOURCE");
-    catalogue_changed();
-    library_source_file();
-}
-/* the house confirm, with its footer's two lines */
-static int library_ask(const char *question, const char *verb, const char *foot) {
-    feedback_confirm_foot(foot);
-    int yes = playlist_confirm(question, verb);
-    feedback_confirm_foot((const char *)0);
-    return yes;
-}
-/* The Streaming Songs row's press (navigation.c pod_click): on at once; off at once too unless a
- * card app has a catalogue on the card, when it asks first. 0 when nothing changed. */
-int library_source_toggle(void) {
-    pod_settings();
-    if (catalogue_source != 1) {
-        library_source_set(1);
-        return 1;
-    }
-    if (catalogue_kept() &&
-        !library_ask(
-            "Hide streaming songs?", "Turn Off",
-            "Streaming songs leave the Library, and\nShow in Library pauses until they return."))
-        return 0;
-    library_source_set(0);
-    return 1;
-}
-/* A card app's needslib row (addon.c): 1 when Streaming Songs is on, asked for and turned on first
- * while it is off, as its Settings row does; 0 when it stays off. */
-int library_needs(void) {
-    pod_settings();
-    if (catalogue_source == 1) return 1;
-    if (!library_ask("Show streaming songs?", "Turn On",
-                     "Show in Library needs Streaming Songs on\n(Settings > Playback > Library)."))
-        return 0;
-    library_source_set(1);
-    return 1;
+    static const char v[] = "server\n";
+    blob_io(LIB_FILE, LIB_FILE ".tmp", (void *)v, sizeof v - 1, 1);
 }
 
 /* ---- The pages ---- */
@@ -180,10 +137,6 @@ void library_page(void *win, void *view, int page) {
     widget_set_text_utf8(list_row_into(view, icons[0], library_open, (void *)(ctx)), text)
     if (page == LIB_LIBRARY) {
         ROWS(POD_OTG, 1);
-        ROWS(POD_LIBRARY_SOURCE, 1);
-        /* a caption shows under the selected row (settings_pages.c) */
-        caption_row(st.pod_label[POD_LIBRARY_SOURCE],
-                    (const unsigned *)L"Streaming songs join your Library");
         INTO("Sorting", LIB_SORTING);
         ROWS(POD_ARTISTS, 1);
         ROWS(POD_ARTIST_CF, 1);

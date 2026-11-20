@@ -516,14 +516,13 @@ int addon_dir(const char *id, char *dir, unsigned n), addon_version_cmp(const ch
 /* addon.c: whether the firmware carries app id as its own alone, never the App Store's (netupdate.c) */
 int addon_builtin(const char *id);
 void addon_q2app(const char *id, char *path, unsigned n);
-/* catalogue.c: the server library (docs/internals.md#server-library). catalogue_on: Local + Server;
- * catalogue_path: a server row's path; catalogue_unavailable: a record that can't play now;
+/* catalogue.c: the server library (docs/internals.md#server-library), a signed-in catalogue app's
+ * songs in the Library. catalogue_has: any are in it now; catalogue_path: a server row's path; catalogue_unavailable: a record that can't play now;
  * catalogue_album_unavailable: an album list's record none of whose songs can play now, and
  * catalogue_artist_unavailable an artist's;
  * catalogue_union: a Library query reading servertable too (0: as it is; the caller frees it);
  * catalogue_load: ringnav_load's queue (0 as it is, 1 *own instead, 2 nothing loaded). */
-extern int catalogue_source;
-int catalogue_on(void), catalogue_path(const char *path), catalogue_unavailable(void *r);
+int catalogue_has(void), catalogue_path(const char *path), catalogue_unavailable(void *r);
 /* catalogue.c: the server row (its fileurl) record r's Stream Cache copy plays, or 0 */
 const char *catalogue_row_path(void *r);
 int catalogue_album_unavailable(void *r), catalogue_artist_unavailable(void *r);
@@ -537,16 +536,14 @@ unsigned catalogue_fav_gen(void);
 char *catalogue_union(const char *sql), *catalogue_search(const char *sql);
 const char *catalogue_rows(void); /* library_query's union, "" without one */
 void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_poll(void);
-void catalogue_changed(void), catalogue_card_away(void);
+void catalogue_card_away(void);
 void catalogue_rated(void *r, int stars), catalogue_liked(void *r, int on);
-int catalogue_kept(void); /* a catalogue app's catalogue.tsv is on the card */
 int catalogue_signed(char *id, char *name, unsigned size); /* a catalogue app signed in */
 /* cf_empty.c: Cover Flow's page with no albums, by what is missing; 0 under a theme without it */
 int cf_empty(void *page, void *body);
-/* library_settings.c: Streaming Songs' state for card apps (/tmp/q2-addon.library), and a needslib
- * row's check, which asks to turn it on: 1 when it is on */
+/* library_settings.c: the server library's state for card apps (/tmp/q2-addon.library): always
+ * "server" */
 void library_source_file(void);
-int library_needs(void);
 /* a server playlist changed on the Q2: its songs (PLS_SET), its name, or its deletion, to its app
  */
 enum { PLS_SET, PLS_NAME, PLS_DELETE };

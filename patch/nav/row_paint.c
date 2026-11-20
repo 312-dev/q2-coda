@@ -318,15 +318,15 @@ void *ringnav_search_rows(void *win, int *tab) {
     return (void *)0;
 }
 static void grey_rows(void *w) {
-    if ((catalogue_source != 1 && !catalogue_greys()) || !kind(w) || !load_rows(&g_menu, w)) return;
+    if ((!catalogue_has() && !catalogue_greys()) || !kind(w) || !load_rows(&g_menu, w)) return;
     void *win = window_of(w), *list = (void *)0;
     int tab = 0; /* Search's lit tab: 0 Songs */
     const char *page = widget_get_prop_str(win, "name", "");
-    if (g_menu.kind == 1 && catalogue_source == 1)
+    if (g_menu.kind == 1 && catalogue_has())
         list = !tk_strcmp(page, "albuminfo_page") || !tk_strcmp(page, "playerjumpinfo_page")
                    ? P(p_deque_showlist, 0)
                    : page_tracks(win);
-    if (!list && g_menu.kind == 1 && catalogue_source == 1) list = ringnav_search_rows(win, &tab);
+    if (!list && g_menu.kind == 1 && catalogue_has()) list = ringnav_search_rows(win, &tab);
     if (list && deque_size(list) != (unsigned)g_menu.rows) list = (void *)0;
     for (int i = 0; i < g_menu.n; ++i) {
         rect_t r = bounds(&g_menu, i);

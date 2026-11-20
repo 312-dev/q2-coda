@@ -206,8 +206,6 @@ def test_a_held_song_opens_its_whole_menu_with_remove_last_on_the_card(fw, ui, s
 
 
 def server(fw, files, pages):
-    fw.fn('pod_settings', None)()  # read, so the source stays as set
-    fw.var('catalogue_source', C.c_int).value = 1
     pages.table.servers[3] = ('subsonic', 'pl7')
     pages.table.sids = {'/mnt/mmc/a.flac': 's1', '/mnt/mmc/c.flac': 's%3'}
     return lambda: files.files.get('/mnt/mmc/.subsonic/playlists.out', b'')
@@ -229,12 +227,9 @@ def test_a_rename_and_a_delete_of_a_server_playlist_go_to_its_app(fw, ui, pages)
     assert out() == b'name\tpl7\tRoad%09Trip\ndelete\tpl7\n'
 
 
-def test_a_local_playlist_or_local_only_writes_nothing(fw, ui, pages):
+def test_a_local_playlist_writes_nothing(fw, ui, pages):
     files = Files(fw)
     server(fw, files, pages)
-    fw.var('catalogue_source', C.c_int).value = 0
-    fw.fn('playlist_rename', C.c_int, C.c_int, C.c_char_p)(3, b'New')
-    fw.var('catalogue_source', C.c_int).value = 1
     fw.fn('playlist_rename', C.c_int, C.c_int, C.c_char_p)(1, b'Gym 2')  # not a server playlist
     assert not files.files
 

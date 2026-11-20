@@ -57,7 +57,7 @@ class Rig:
     def __init__(self, fw, tmp_path, online=False):
         self.fw, self.tmp = fw, tmp_path
         self.now, self.online, self.toasts, self.played, self.keep = 100000, online, [], [], []
-        self.source = 1  # LIBRARYSOURCE: Local + Server
+        self.source = 0  # an older build's LIBRARYSOURCE as saved: never read, the server's songs join anyway
         self.card = {}  # a card file's path: (size, seconds, bytes at its start)
         self.lib = C.CDLL(ctypes.util.find_library('sqlite3'))
         self.lib.sqlite3_open.argtypes = [C.c_char_p, C.c_void_p]
@@ -66,6 +66,7 @@ class Rig:
         self.sqls = []
         self.files = Files(fw, {
             f'/mnt/mmc/.{APP}/q2app': b'name=Subsonic\ncatalogue=1\nratings=2\n',  # likes and stars apart
+            f'/mnt/mmc/.{APP}/credentials': b'{}',  # signed in: its catalogue is in the Library
             '/proc/mounts': b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n'})
         db = sqlite3.connect(tmp_path/'database.db')
         db.executescript(f'{SONGTABLE};{PLAYLIST};{MYFAV}')
@@ -191,6 +192,12 @@ class Rig:
 
     def write(self, seq, rows):
         self.files.files[TSV] = catalogue(seq, rows)
+
+    def sign_out(self, n=2):
+        """The app signed out, as q2-subsonic's Sign Out leaves the card: no credentials, no catalogue; n passes."""
+        self.files.files.pop(f'/mnt/mmc/.{APP}/credentials', None)
+        self.files.files.pop(TSV, None)
+        self.poll(n)
 
     def poll(self, n=2):
         """n passes of catalogue_poll a second apart: a job starts in one and is taken in the next."""
@@ -513,18 +520,18 @@ def test_a_catalogue_app_not_running_is_started_and_handed_the_list_once_it_list
     assert rig.files.files[catplay].startswith(b'2 2\n')  # never written for it
 
 
-@pytest.mark.parametrize('case', ['offline', 'local only', 'no app'])
-def test_no_app_is_started_offline_with_local_only_or_without_a_catalogue_app(rig, fw, case):
-    """Offline the list plays from the card at once, Local only refuses a server row, and a catalogue app whose
-    binary is not on the card is never started (its catplay goes unanswered, as before)."""
+@pytest.mark.parametrize('case', ['offline', 'signed out', 'no app'])
+def test_no_app_is_started_offline_signed_out_or_without_a_catalogue_app(rig, fw, case):
+    """Offline the list plays from the card at once, a signed-out app's row is gone from the Library and starts
+    nothing, and a catalogue app whose binary is not on the card is never started (its catplay goes unanswered, as
+    before)."""
     rig.online = case != 'offline'
     rig.write(1, [song_row('s1', 'Cached', 'B', 'A', 1, 100, 1, local='/mnt/mmc/.subsonic/stream/s1.flac')])
     rig.poll()
     if case != 'no app':
         rig.files.files[f'/mnt/mmc/.{APP}/q2-{APP}'] = b''
-    if case == 'local only':
-        fw.var('catalogue_source', C.c_int).value = rig.source = 0  # pod_click's change, then its call
-        fw.fn('catalogue_changed', None)()
+    if case == 'signed out':
+        rig.sign_out()
     started = []
     fw.mock('fw_system', lambda cmd, *_: started.append(C.string_at(cmd)) or 0)
     load(rig, queue(rig, [url('s1')]), 0)
@@ -738,7 +745,9 @@ def test_a_playlist_synced_as_an_m3u_is_shown_once_as_the_catalogue_s(rig):
 STOCK_SLOT = 0xa56000  # stock's shared connection's global: in demo's image, below the payload, so catalogue_attach keeps it
 
 
-def test_the_library_s_queries_read_the_server_s_songs_only_with_local_and_server(rig, fw):
+def test_the_library_s_queries_read_the_server_s_songs_only_while_its_app_is_signed_in(rig, fw):
+    """No setting (the user's, 2026-11-19): signed in, the server's songs are in the Library, an older build's
+    LIBRARYSOURCE=0 in config.ini notwithstanding (rig.source); signed out, a job takes them out."""
     from test_nav_lists import Loads
     rig.card_song('/mnt/mmc/Music/a.flac', 'Card Song', 'Me', 'Album', 1, 200, 1000)
     rig.write(1, [song_row('s1', 'Server One', 'Band', 'Album', 2, 180, 5000)])
@@ -752,12 +761,12 @@ def test_the_library_s_queries_read_the_server_s_songs_only_with_local_and_serve
     sql = loads.ran[-1]
     assert 'union all select * from servertable' in sql
     assert sorted(r[6] for r in rig.query(sql)) == ['Card Song', 'Server One']
-    # Local only: the card's songs alone, and the server's file let go
-    fw.var('catalogue_source', C.c_int).value = 0  # pod_click's change, then its call
-    fw.fn('catalogue_changed', None)()
+    # signed out: the card's songs alone, and the server's file let go
+    rig.sign_out()
     loads.music("select * from songtable where album='Album'")
-    assert 'servertable' not in loads.ran[-1]
+    assert 'servertable' not in loads.ran[-1] and not fw.fn('catalogue_has', C.c_int)()
     assert b'detach cat' in rig.sqls
+    assert rig.query('select count(*) from cat.servermeta') == [(0,)]
     rig.lib.sqlite3_close(slot)
     slot.value = 0
 
@@ -795,7 +804,7 @@ def test_under_oled_a_song_row_says_where_it_lives(rig, fw):
     rig.files.files[f'/mnt/mmc/.{APP}/q2app'] = b'name=Subsonic\ncatalogue=1\ndownloads=Subsonic\n'
     def config(path, section, key, out, default, *_):
         name = C.string_at(key)
-        v = b'3' if name == b'THEME' else str(rig.source).encode() if name == b'LIBRARYSOURCE' else C.string_at(default)
+        v = b'3' if name == b'THEME' else C.string_at(default)
         C.memmove(out, v + b'\0', len(v) + 1)
     fw.mock('toolsReadConfig', config)
     rig.write(1, [song_row('s2', 'Streamed', 'B', 'A', 2, 100, 2)])
@@ -827,9 +836,9 @@ def test_under_oled_a_song_row_says_where_it_lives(rig, fw):
     assert seen(2) == ([], 1)  # greyed: the offline mark is the payload's own, no art
 
 
-def test_search_finds_server_songs_with_local_and_server(rig, fw):
+def test_search_finds_server_songs_while_signed_in(rig, fw):
     """Stock's Search runs SearchMusicByName's SQL through toolsQueryDbTable (library_query) outside a music
-    load: with Local + Server it reads the union, so a server song is found; Local only, as stock's."""
+    load: with its app signed in it reads the union, so a server song is found; signed out, as stock's."""
     from test_nav_lists import Loads
     rig.card_song('/mnt/mmc/Music/a.flac', 'Wild Honey', 'Me', 'Album', 1, 200, 1000)
     rig.write(1, [song_row('s1', 'Wild Horses', 'Band', 'Sticky', 2, 180, 5000)])
@@ -845,8 +854,7 @@ def test_search_finds_server_songs_with_local_and_server(rig, fw):
     assert sorted(r[1] for r in rig.query(loads.ran[-1])) == ['Wild Horses', 'a.flac']
     loads.query(b'db', b"select * from songtable where album like 'Sticky'", None, 0)  # not a search: as it is
     assert 'servertable' not in loads.ran[-1]
-    fw.var('catalogue_source', C.c_int).value = 0
-    fw.fn('catalogue_changed', None)()
+    rig.sign_out()
     loads.query(b'db', search.encode(), None, 0)
     assert loads.ran[-1] == search
     rig.lib.sqlite3_close(slot)
@@ -1315,7 +1323,7 @@ def test_the_players_title_comes_back_after_a_pressed_song_though_stocks_flag_is
 
 
 def test_cover_flow_shows_server_albums_with_the_apps_cover_and_greys_them_offline(rig, fw):
-    """With Local + Server, Cover Flow's album queries read the server's songs too (as the Library's
+    """With its app signed in, Cover Flow's album queries read the server's songs too (as the Library's
     Albums list does), so its carousel has the server's albums; a server album's art is its app's cover,
     built only once the app has fetched it (the placeholder until then, no marker); and the centred
     album's captions are greyed, with the offline mark, while none of its songs can play."""
@@ -1335,14 +1343,11 @@ def test_cover_flow_shows_server_albums_with_the_apps_cover_and_greys_them_offli
     split = fw.fn('coverflow__split', C.c_void_p, C.c_void_p)  # ALBUM_SQL: each album's own row
     split(rig.rows.rows([]))
     assert sorted(r[1] for r in rig.query(loads.ran[-1])) == ['Mine', 'Not Fetched', 'Server Only']
-    fw.var('catalogue_source', C.c_int).value = 0
-    rig.source = 0
-    fw.fn('catalogue_changed', None)()
+    tsv = rig.files.files[TSV]
+    rig.sign_out()
     split(rig.rows.rows([]))
-    assert 'servertable' not in loads.ran[-1]  # Local only: the card's, as before
-    rig.source = 1
-    fw.var('catalogue_source', C.c_int).value = 1
-    fw.fn('catalogue_changed', None)()
+    assert 'servertable' not in loads.ran[-1]  # signed out: the card's, as before
+    rig.files.files[f'/mnt/mmc/.{APP}/credentials'], rig.files.files[TSV] = b'{}', tsv  # signed in again
     rig.poll()
 
     # the art: the app's cover, thumbnailed into the cache; none fetched yet, nothing written
@@ -1487,10 +1492,10 @@ def test_a_heart_tapped_on_a_stream_copy_is_the_server_rows_favourite(rig, fw, u
     assert rate_all(fw, ui, [rig.record(url('s1')), rig.record(url('s2'))], favs=[rig.record(copy)]) == [LIKED, 0]
 
 
-def test_the_ratings_lists_have_rated_server_songs_with_local_and_server(rig, fw, ui, song):
+def test_the_ratings_lists_have_rated_server_songs_while_signed_in(rig, fw, ui, song):
     """A Ratings list reads every card song (spoken ones too: getAllMusic(0)'s SQL, no music filter) and, with
-    Local + Server, the server's songs beside them, so a server song rated here or on the server is listed with
-    its stars; with Local only it is not."""
+    its app signed in, the server's songs beside them, so a server song rated here or on the server is listed
+    with its stars; signed out it is not."""
     from test_nav_library_pages import RATINGS, Library, call, ratings
     rig.card_song('/mnt/mmc/audiobooks/b.m4b', 'Book', 'Reader', 'Tales', 1, 900, 1)
     rig.write(1, [song_row('s1', 'Streamed', 'Server Band', 'Server Only', 1, 100, 1),
@@ -1512,14 +1517,12 @@ def test_the_ratings_lists_have_rated_server_songs_with_local_and_server(rig, fw
     fw.mock('stock_dbquery_trampoline', stock_query)
     fw.mock('getAllMusic', lambda sort, *_: query(b'db', b'select * from songtable order by name', None, sort))
     fw.mock('getAllFav', lambda *_: 0)
-    from conftest import Files as F
-    F(fw, {RATINGS: ratings((listen_key('/mnt/mmc/audiobooks/b.m4b'), 2), (listen_key(url('s1')), 4))})
+    rig.files.files[RATINGS] = ratings((listen_key('/mnt/mmc/audiobooks/b.m4b'), 2), (listen_key(url('s1')), 4))
     call(fw, 'rated_open', 3)  # All Rated
     assert [t for t, _ in ui.rows(ui.top())] == ['Streamed', 'Book']
     assert 'servertable' in ran[-1]
     ui.close(ui.top())
-    fw.var('catalogue_source', C.c_int).value = 0  # Local only
-    fw.fn('catalogue_changed', None)()
+    rig.sign_out()
     call(fw, 'rated_open', 3)
     assert [t for t, _ in ui.rows(ui.top())] == ['Book']
     rig.lib.sqlite3_close(slot)
@@ -1634,78 +1637,54 @@ def test_five_hearts_from_the_server_put_the_row_in_my_fav_in_place_of_its_copy(
     assert ui.image[heart.heart] == 'play_fav' and heart.stars() == 0
 
 
-# Streaming Songs (library_settings.c): [Q2POD] LIBRARYSOURCE, its state for card apps in /tmp/q2-addon.library, and the
-# house confirm (Cancel first, its verb the other answer, a footer) before it hides an app's catalogue or a needslib row
-# turns it on.
+# The server library has no setting (the user's, 2026-11-19): a signed-in catalogue app's songs are in the Library,
+# a signed-out one's are not. Card apps that read /tmp/q2-addon.library (the caps word libsource) find "server".
 LIBRARY = '/tmp/q2-addon.library'
 
 
-class Asks:
-    """The confirms asked: (question, footer as it was set while it showed); answer is what the confirm returns (10:
-    its verb)."""
-    def __init__(self, fw, answer):
-        self.fw, self.answer, self.seen = fw, answer, []
-        fw.mock('navigator_to_with_context', self.show)
-
-    def show(self, name, info, *_):
-        assert C.string_at(name) == b'dialog/confirminfo_dialog'
-        foot = C.c_char_p.in_dll(self.fw.lib, 'feedback__confirm_foot').value
-        self.seen.append((C.string_at(info + 8).decode(), foot.decode() if foot else None))
-        return self.answer
-
-
-def source_writes(fw):
-    return [C.c_int(a[0]).value for _, a in fw.calls('write_int_config') if C.string_at(a[2]) == b'LIBRARYSOURCE']
-
-
-def test_the_state_file_is_written_with_the_caps_and_not_at_the_settings_first_read(rig):
-    """Before any app starts (each start scans first, writing the caps), and never as a side effect of a read."""
+def test_the_state_file_says_server_with_the_caps_whatever_an_older_build_saved(rig):
+    """Before any app starts (each start scans first, writing the caps); an older build's LIBRARYSOURCE=0 is not read."""
     rig.source = 0
     rig.fw.fn('pod_settings', None)()
     assert LIBRARY not in rig.files.files
     rig.fw.fn('addon_scan', C.c_int)()
-    assert rig.files.files[LIBRARY] == b'local\n'
+    assert rig.files.files[LIBRARY] == b'server\n'
 
 
-@pytest.mark.parametrize('kept, answer, off', [(False, 0, True), (True, 0, False), (True, 10, True)])
-def test_streaming_songs_off_asks_only_while_an_app_keeps_a_catalogue(rig, kept, answer, off):
-    if kept:
-        rig.files.files[TSV] = catalogue(1, [])
-    asks = Asks(rig.fw, answer)
-    assert rig.fw.fn('library_source_toggle', C.c_int)() == off
-    assert asks.seen == ([('Hide streaming songs?', 'Streaming songs leave the Library, and\n'
-                           'Show in Library pauses until they return.')] if kept else [])
-    assert source_writes(rig.fw) == ([0] if off else [])
-    assert rig.files.files.get(LIBRARY) == (b'local\n' if off else None)  # written on a change alone
-    assert rig.fw.fn('catalogue_on', C.c_int)() == (not off)
-    assert C.c_char_p.in_dll(rig.fw.lib, 'feedback__confirm_foot').value is None  # the next confirm has none
+def test_a_signed_out_apps_catalogue_is_not_imported(rig, fw):
+    """Its catalogue.tsv on the card without its credentials (an older app that kept it): nothing joins the Library
+    and nothing is answered; once signed in, it is imported."""
+    del rig.files.files[f'/mnt/mmc/.{APP}/credentials']
+    rig.write(1, [song_row('s1', 'Server One', 'Band', 'Album', 2, 180, 5000)])
+    rig.poll(3)
+    assert not fw.fn('catalogue_has', C.c_int)() and f'/tmp/q2-{APP}.catalogue.done' not in rig.files.files
+    rig.files.files[f'/mnt/mmc/.{APP}/credentials'] = b'{}'
+    rig.poll()
+    assert fw.fn('catalogue_has', C.c_int)() and rig.files.files[f'/tmp/q2-{APP}.catalogue.done'].startswith(b'1 ok')
 
 
-def test_streaming_songs_on_is_at_once(rig):
-    rig.source = 0
-    rig.files.files[TSV] = catalogue(1, [])
-    asks = Asks(rig.fw, 0)
-    assert rig.fw.fn('library_source_toggle', C.c_int)() == 1
-    assert asks.seen == [] and source_writes(rig.fw) == [1] and rig.files.files[LIBRARY] == b'server\n'
-
-
-@pytest.mark.parametrize('source, answer, on', [(1, 0, 1), (0, 0, 0), (0, 10, 1)])
-def test_a_needslib_row_needs_streaming_songs_and_asks_to_turn_it_on(rig, source, answer, on):
-    rig.source = source
-    asks = Asks(rig.fw, answer)
-    assert rig.fw.fn('library_needs', C.c_int)() == on
-    assert asks.seen == ([] if source else [('Show streaming songs?', 'Show in Library needs Streaming Songs on\n'
-                                             '(Settings > Playback > Library).')])
-    assert source_writes(rig.fw) == ([1] if on and not source else [])
-    assert rig.files.files.get(LIBRARY) == (b'server\n' if on and not source else None)  # written on a change alone
+@pytest.mark.parametrize('how', ['signed out', 'file gone'])
+def test_signing_out_takes_the_apps_songs_out_of_the_library(rig, fw, how):
+    """Sign Out deletes the credentials and the catalogue (q2-subsonic); either alone is enough: a job with no seq
+    copies the old file less the app's rows, answers nothing, and the Library reads the card's alone."""
+    rig.write(1, [song_row('s1', 'Server One', 'Band', 'Album', 2, 180, 5000)])
+    rig.poll()
+    assert fw.fn('catalogue_has', C.c_int)() and rig.query('select count(*) from cat.servermeta') == [(1,)]
+    done = rig.files.files[f'/tmp/q2-{APP}.catalogue.done']
+    del rig.files.files[f'/mnt/mmc/.{APP}/credentials' if how == 'signed out' else TSV]
+    rig.poll()
+    assert not fw.fn('catalogue_has', C.c_int)() and rig.query('select count(*) from cat.servermeta') == [(0,)]
+    assert rig.files.files[f'/tmp/q2-{APP}.catalogue.done'] == done  # no answer for a drop
+    rig.poll(3)
+    assert not fw.fn('catalogue_has', C.c_int)()  # dropped once: no job again
 
 
 # Cover Flow's empty page (cf_empty.c) and autostart: a catalogue app is signed in while its card folder holds its
 # credentials file, looked for and never opened (its state file is in /tmp, gone at boot).
 @pytest.mark.parametrize('creds, name', [(True, b'Subsonic'), (False, None)])
 def test_a_catalogue_app_is_signed_in_while_its_credentials_file_is_on_the_card(rig, creds, name):
-    if creds:
-        rig.files.files[f'/mnt/mmc/.{APP}/credentials'] = b'{}'
+    if not creds:
+        del rig.files.files[f'/mnt/mmc/.{APP}/credentials']
     opened = []
     rig.fw.mock('fw_fopen', lambda path, mode, *_: opened.append(C.string_at(path)) or rig.files.fopen(path, mode))
     out, title = C.create_string_buffer(16), C.create_string_buffer(32)
@@ -1754,17 +1733,16 @@ def test_cover_flow_s_empty_page_looks_for_music_on_the_card(rig, tree, music):
     assert not [p for p in opened if '/.' in p]
 
 
-def autostart_rig(rig, fw, creds=True, source=1):
-    rig.source = source
+def autostart_rig(rig, fw, creds=True):
     rig.files.files[f'/mnt/mmc/.{APP}/q2-{APP}'] = b''
-    if creds:
-        rig.files.files[f'/mnt/mmc/.{APP}/credentials'] = b'{}'
+    if not creds:
+        del rig.files.files[f'/mnt/mmc/.{APP}/credentials']
     started = []
     fw.mock('fw_system', lambda cmd, *_: started.append(C.string_at(cmd)) or 0)
     return started
 
 
-def test_a_signed_in_catalogue_app_starts_once_at_boot_with_streaming_songs_on(rig, fw):
+def test_a_signed_in_catalogue_app_starts_once_at_boot(rig, fw):
     """Its catalogue, covers and play reports catch up without its page opened; it idle-exits as before."""
     started = autostart_rig(rig, fw)
     rig.poll(1)
@@ -1774,32 +1752,10 @@ def test_a_signed_in_catalogue_app_starts_once_at_boot_with_streaming_songs_on(r
     assert len(started) == 1
 
 
-@pytest.mark.parametrize('creds, source', [(False, 1), (True, 0), (False, 0)])
-def test_a_signed_out_app_or_streaming_songs_off_starts_nothing(rig, fw, creds, source):
-    started = autostart_rig(rig, fw, creds, source)
+def test_a_signed_out_app_starts_nothing(rig, fw):
+    started = autostart_rig(rig, fw, creds=False)
     rig.poll(25)
     assert started == []
-
-
-def test_turning_streaming_songs_on_starts_the_signed_in_app(rig, fw):
-    started = autostart_rig(rig, fw, source=0)
-    rig.poll(2)
-    assert started == []
-    assert fw.fn('library_source_toggle', C.c_int)() == 1
-    rig.poll(1)
-    assert started == [f'/bin/sh /mnt/mmc/.{APP}/run'.encode()]
-
-
-def test_streaming_songs_off_and_on_again_starts_the_app_again(rig, fw):
-    """Off pauses the app (it reads the state file); on again starts it if it has exited since."""
-    started = autostart_rig(rig, fw)
-    rig.poll(1)
-    toggle = fw.fn('library_source_toggle', C.c_int)
-    assert toggle() == 1 and rig.files.files['/tmp/q2-addon.library'] == b'local\n'  # no catalogue.tsv: no ask
-    rig.poll(2)
-    assert toggle() == 1
-    rig.poll(1)
-    assert started == [f'/bin/sh /mnt/mmc/.{APP}/run'.encode()] * 2
 
 
 def test_a_server_songs_row_is_the_playing_one_by_its_path(rig, fw, mcl, low):

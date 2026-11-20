@@ -376,8 +376,8 @@ static int artist_album(void *all, void *r) {
     return -1;
 }
 extern void coverflow_by_year(void *albums);
-/* The artist page's songs, as its Songs tab lists them (staged_music: with Local + Server, the
- * server library's too); also library_artist.c's. */
+/* The artist page's songs, as its Songs tab lists them (staged_music: with a server signed in,
+ * the server library's too); also library_artist.c's. */
 int artist_songs(void *unused) {
     return (I(artist_type, 0) == 1 ? getMusicByAlbumArtist : getMusicBySonger)(
         g_local_classinfo_save[0xa] ? (const char *)0

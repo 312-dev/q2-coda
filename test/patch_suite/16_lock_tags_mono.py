@@ -64,18 +64,15 @@ passed()
 # Playback > Library (library_settings.c): stock's Playback page again, its rows gone, ours built; a chevron row opens
 # its page the same way (playset_sub naming it while its init runs).
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13,sub=1)
-assert texts()==['On-The-Go','Streaming Songs','Sorting','Artists: Artist','Artist View: Cover Flow','Playlists','Folders','Scan Song Durations']
-assert icons==['playset_folderjump']*8 and m.nodes[m.settings_view]['children']==rows
+assert texts()==['On-The-Go','Sorting','Artists: Artist','Artist View: Cover Flow','Playlists','Folders','Scan Song Durations']  # no Streaming Songs: a signed-in server's songs always join
+assert icons==['playset_folderjump']*7 and m.nodes[m.settings_view]['children']==rows
 assert click(0)==[(0,'Q2POD','OTG')] and click(0)==[(1,'Q2POD','OTG')]  # On-The-Go, on unless chosen
-for i in (2,5,6):
+for i in (1,4,5):
     assert click(i)==[] and m.opened[-1]==('playset/playset_page',None) and m.get(payload_syms['playset_sub'])==0
-assert click(3)==[(1,'PLAYSET','ARTISTTYPE')] and m.get(syms['artist_type'])==1 and texts()[3]=='Artists: Album Artist'
-assert click(3)==[(0,'PLAYSET','ARTISTTYPE')] and m.get(syms['artist_type'])==0
+assert click(2)==[(1,'PLAYSET','ARTISTTYPE')] and m.get(syms['artist_type'])==1 and texts()[2]=='Artists: Album Artist'
+assert click(2)==[(0,'PLAYSET','ARTISTTYPE')] and m.get(syms['artist_type'])==0
 # Artist View (Q2POD ARTISTCF), Cover Flow unless chosen: List, Grid, then Cover Flow again
-assert [click(4) for _ in range(3)]==[[(2,'Q2POD','ARTISTCF')],[(0,'Q2POD','ARTISTCF')],[(1,'Q2POD','ARTISTCF')]] and texts()[4]=='Artist View: Cover Flow'
-# Streaming Songs (LIBRARYSOURCE, off unless chosen): on at once; off at once too with no app's catalogue on the card
-assert switch_image(m,rows[1])=='switch_off' and click(1)==[(1,'Q2POD','LIBRARYSOURCE')] and switch_image(m,rows[1])=='switch_on'
-assert click(1)==[(0,'Q2POD','LIBRARYSOURCE')] and switch_image(m,rows[1])=='switch_off'; passed()
+assert [click(3) for _ in range(3)]==[[(2,'Q2POD','ARTISTCF')],[(0,'Q2POD','ARTISTCF')],[(1,'Q2POD','ARTISTCF')]] and texts()[3]=='Artist View: Cover Flow'; passed()
 # Library > Sorting: Songs (its picker's row), Artist's Albums (ARTISTAZ) and Years (YEAROLD)
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13,sub=2)
 assert texts()==['Songs: Title \u2191',"Artist's Albums: Year",'Years: Newest First']

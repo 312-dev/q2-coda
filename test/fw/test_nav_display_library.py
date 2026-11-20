@@ -556,10 +556,10 @@ def test_playback_s_library_row_opens_the_library_page(fw):
     ui = Ui(fw)
     page = library(fw, ui)
     assert page.opened == ['playset/playset_page'] * 2 and page.title() == 'Library'
-    assert page.texts() == ['On-The-Go', 'Streaming Songs', 'Sorting', 'Artists: Artist', 'Artist View: Cover Flow',
+    assert page.texts() == ['On-The-Go', 'Sorting', 'Artists: Artist', 'Artist View: Cover Flow',
                             'Playlists', 'Folders', 'Scan Song Durations']  # stock's rows gone
     into = [any(c.props.get('image') == b'list_into' for c in item.children[0].children) for item in page.view().children]
-    assert into == [False, False, True, False, False, True, True, False]
+    assert into == [False, True, False, False, True, True, False]  # no Streaming Songs: always on (2026-11-19)
 
 
 @pytest.mark.parametrize('row, title, texts', [

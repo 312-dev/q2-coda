@@ -195,7 +195,7 @@ A server song pressed (a Play from the car, Shuffle Songs included) is `NowPlayi
 
 ## Playlist covers
 
-A row of `playlists` has an `art_id` like any other: its first song's album's, so `GetCover` sends that album's cover. A server playlist (Library on Local + Server, the playlist one of the card app's catalogue) has its server's own cover instead once the app has fetched it (Navidrome makes one from the playlist's albums): its `art_id` is then `p<playlist id>`, and `GetCover` sends the app's file of it, a JPEG of at most 160 px a side. Until the app has it, the row keeps its first album's. Art ids stay opaque to the phone; a new cover for the same playlist answers with a new `Cover` version (field 5).
+A row of `playlists` has an `art_id` like any other: its first song's album's, so `GetCover` sends that album's cover. A server playlist (one of a signed-in card app's catalogue) has its server's own cover instead once the app has fetched it (Navidrome makes one from the playlist's albums): its `art_id` is then `p<playlist id>`, and `GetCover` sends the app's file of it, a JPEG of at most 160 px a side. Until the app has it, the row keeps its first album's. Art ids stay opaque to the phone; a new cover for the same playlist answers with a new `Cover` version (field 5).
 
 ## A server album's cover
 

@@ -1747,7 +1747,7 @@ static int req_done(void) {
  * code, local plays from the card (uri: a song, or a folder to list; context "album": in track
  * order), field opens the text box too, whose text goes to its uri, after its context, the reply
  * taking the level's place with no level pushed and nothing titled with the text (field_sent),
- * needslib is an action that needs Streaming Songs on (needslib), info does nothing; its position,
+ * needslib is an action as action is (the server library is always on), info does nothing; its position,
  * when set, is the op a held Play/Pause sends. progress
  * (progress_row) draws a bar of its position, permille, under its title and subtitle; a press or a
  * held Play/Pause does nothing. page (caps word "window") shows the level's own list from the
@@ -1868,21 +1868,6 @@ static void action(int i, const char *op, const char *ctx) {
 }
 
 static int clicked(void *ctx, void *event);
-
-/* A needslib row's press: its action, once Streaming Songs is on (library_settings.c
- * library_needs, which asks first while it is off and writes the state file the app reads before
- * the action goes). The ask runs its own loop, where a reply may rebuild the list, so the action
- * goes only if the row is still the same row of the same level, its cells copied first. */
-static void needslib(lv_t *l, int i, const char *uri, const char *ctx) {
-    char op[64], arg[sizeof l->args];
-    unsigned id = l->id;
-    tk_snprintf(op, sizeof op, "%s", uri);
-    tk_snprintf(arg, sizeof arg, "%s", ctx);
-    if (!library_needs() || !pg.page || top() != l || l->id != id || l->state != K_READY ||
-        i >= l->n || pg.act || strcmp(cell(i, 0), "needslib") || strcmp(cell(i, 1), op))
-        return;
-    action(i, op, arg);
-}
 
 /* Whether row i opens a page (go()): a list (a sort row left as a row is one), the phone remote's
  * QR page or a folder on the card. Its row has a chevron. */
@@ -3135,10 +3120,10 @@ static int go(const void *unused) {
             if (lay && to && to != l) to->lay = (signed char)lay;
         } else if (!strcmp(kind, "page"))
             page_to(l, ctx, strcmp(uri, "prev") ? 1 : -1);
-        else if (!strcmp(kind, "action") && !pg.act) /* one in flight: this press does nothing */
+        /* one in flight: this press does nothing. needslib, an action that needed the server
+         * library on when it was a setting, is an action: it is always on */
+        else if ((!strcmp(kind, "action") || !strcmp(kind, "needslib")) && !pg.act)
             action(i, uri, ctx);
-        else if (!strcmp(kind, "needslib") && !pg.act)
-            needslib(l, i, uri, ctx);
         else if (!strcmp(kind, "remote"))
             qr_open(app()->state, app()->name);
         else if (!strcmp(kind, "local")) { /* a song, or a folder of them, on the card alone */

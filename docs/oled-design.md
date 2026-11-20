@@ -580,7 +580,7 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   `subsonic`, with or without its own icon files) q2-coda's submarine with two sonar arcs. Any other card app with its
   own icon shows that icon scaled into the same 20 px box, grayed as every card app icon is under this theme
   (`icons.addon_mono`) rather than inked: a tint would turn an icon drawn on a filled tile into a solid square.
-- **Where a song lives** (with Library: Local + Server): a song row's right column says where the song is, as the
+- **Where a song lives** (with a server's app signed in): a song row's right column says where the song is, as the
   user approved from `mock_radio.py`'s storage sheet on 2026-11-15: nothing for the user's own file, Phosphor
   `arrow-circle-down` for one a card app downloaded (its `q2app`'s `downloads=` folder, q2-subsonic's `Subsonic/`),
   `cloud` for a server song that streams; regular, 18 px, Text Tertiary, white on the selection, centered where the
@@ -984,7 +984,7 @@ the gray one.
 | Composers | `music-notes-simple` | No Composers | Songs need a composer tag | |
 | Folders | `folder` | No Folders | Copy music to the SD card | |
 | Cover Flow, no card music | `cards` | No Albums | Copy music to the SD card | |
-| Cover Flow, a streaming app signed in | `cards` | No Albums | Streaming albums can show here | **Turn on Streaming** (while Streaming Songs is off) |
+| Cover Flow, a streaming app signed in | `cards` | No Albums | Streaming albums can show here | none: its albums join once its catalogue is in |
 | Cover Flow, the card's music not scanned | `cards` | No Albums Yet | Music on the card isn't scanned | **Scan Music Now** |
 | Playlists | none (compact) | No Playlists | Make one with New Playlist | none: under On-The-Go's row; New Playlist is in a song's hold menu (Add to Playlist…), not on this page. The picker keeps its rows alone |
 | Favorites | `heart-slash` | No Favorites | Hold Play/Pause on a song to add it | |
@@ -1154,7 +1154,7 @@ the pair, the rows) and `patch/addon.c` `artist_view` (which reply rows go where
 - **Hold menu:** Play/Pause held on the page opens the menu sheet of its sync rows, Add to Sync
   (or Remove from Sync), Quality and Sync Now, each with its symbol. Play is gone: Shuffle plays
   the artist.
-- **A Library artist** (card songs and, with Local + Server, server-library songs; from Library >
+- **A Library artist** (card songs and a signed-in server's songs; from Library >
   Artists, Go to Artist, Search or Now Playing's artist tap: stock's artist page) is the same page,
   built by `patch/library_artist.c` from the Library's songs ([internals](internals.md#library-artist-page)):
   the counts read "8 albums · 96 songs" and the genre is the artist's songs' commonest. **Shuffle**

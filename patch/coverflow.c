@@ -1125,11 +1125,11 @@ static int split_row(void *a, int n, char **v, char **c) {
 static int rank_query(void *sql) {
     return toolsQueryDbTable("/mnt/data/database.db", sql, split_row, 0);
 }
-/* staged, with Local + Server reading the server library's songs too (catalogue.c): Cover Flow's
- * albums, their ranks and the rated albums, as the Library's Albums list reads them. */
+/* staged, reading a signed-in server's songs too (catalogue.c): Cover Flow's albums, their ranks
+ * and the rated albums, as the Library's Albums list reads them. */
 extern void *staged_music(int (*query)(void *), void *arg, int *count);
 static void *cf_staged(int (*query)(void *), void *arg, int *count) {
-    return catalogue_on() ? staged_music(query, arg, count) : staged(query, arg, count);
+    return catalogue_has() ? staged_music(query, arg, count) : staged(query, arg, count);
 }
 
 /* list's albums with music, in a new deque (list goes), using a music track for their art even when
@@ -2983,8 +2983,8 @@ static void cf_cold(unsigned t0) {
  * Coverflow): stock's sort converts both names to pinyin on every comparison. */
 static void load_albums(unsigned t0);
 static void load(void);
-/* The library's empty page waits for it: a scan, an import of a server's albums or Streaming Songs
- * turned on (each moves library_gen) loads the covers again. The timer is the page's (empty_page),
+/* The library's empty page waits for it: a scan, an import of a server's albums (each moves
+ * library_gen) loads the covers again. The timer is the page's (empty_page),
  * so it goes with it; one at a time. */
 static unsigned empty_gen __attribute__((section(".scratch")));
 static void *empty_page __attribute__((section(".scratch")));

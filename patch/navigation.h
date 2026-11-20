@@ -46,9 +46,8 @@ enum {
     POD_PL_CF,   /* Display's Playlist View: List or Cover Flow, as Artist View */
     POD_SCAN_DURATIONS,
     POD_CF_POSITION,
-    POD_LIBRARY_SOURCE, /* Local Only or Local + Server (catalogue.c) */
-    POD_OTG,            /* Library's On-The-Go (playlist_pages.c), on unless chosen */
-    POD_AUTOZONE,       /* Automatic Time Zone (autozone.c), on unless chosen */
+    POD_OTG,      /* Library's On-The-Go (playlist_pages.c), on unless chosen */
+    POD_AUTOZONE, /* Automatic Time Zone (autozone.c), on unless chosen */
     POD_COUNT
 };
 
@@ -1256,7 +1255,6 @@ enum { LIB_LIBRARY = 1, LIB_SORTING, LIB_PLAYLISTS, LIB_FOLDERS };
 void library_page(void *win, void *view, int page);
 int picker_rows(void *win); /* a picker's rows on stock's Buttons Lock page */
 void cf_sort_open(void);
-int library_source_toggle(void);
 /* navigation.c */
 int library_open(void *ctx, void *event); /* Library's page ctx (LIB_*) */
 void *list_row_into(void *view, const char *icon, int (*click)(void *, void *), void *ctx);

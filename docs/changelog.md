@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Library: while the Subsonic app is signed in, your server's songs, albums, artists and playlists are always in the Library, Cover Flow and Search beside the card's, grayed while they can't play; sign out and they leave. The **Streaming Songs** switch in **Settings > Playback > Library** is gone, and a setting saved before is ignored.
   - Subsonic: when your music server can't be reached (no answer, or a proxy answering 502 for a server that is down), the Q2 now says so: a toast with a crossed-out cloud, "Server error 502", "Server not answering" or "Server not found", when it goes and for each song skipped because of it, and a crossed-out orange cloud in the status row, first after the clock, until the server answers again. Needs a Subsonic app that reports it (its next release); the one built in now shows nothing new.
   - Status row (OLED): the clock now stays in the middle on every page, with the page's name ending before it; when more icons show than fit between the clock and the battery, they scroll slowly instead of pushing the clock aside, fading at an edge where an icon is cut off.
   - Logs: the Q2's log now includes what each running card app (Subsonic and the others) writes to its own log, under the app's name, and **Send Logs** also sends each app's own logs, so a download that fails while you are away from home can be seen afterwards.
