@@ -82,5 +82,28 @@ int main(void) {
     for (int k = 0; k < 7; ++k) tuner_ended(&n);
     tuner_nudge(&n);
     printf("wait_after_nudge_ms %u\n", tuner_wait_ms(&n));
+
+    /* the dial's click at each loudness demo asks for (tenths: 6 a held detent, 10 a step, 14 landing on a
+     * station), mixed into silence across two writes: its length, peak, brightness (zero crossings a ms) and tail */
+    static const int tenths[3] = { 6, 10, 14 };
+    for (int k = 0; k < 3; ++k) {
+        tuner_click c = { 0 }; /* the same noise each time: only the filter and loudness differ */
+        memset(out, 0, sizeof(float) * 2 * 2 * TUNER_FRAMES);
+        tuner_click_start(&c, tenths[k], FS);
+        tuner_click_mix(&c, out, TUNER_FRAMES);
+        tuner_click_mix(&c, out + 2 * TUNER_FRAMES, TUNER_FRAMES);
+        int last = 0, zc = 0;
+        double peak = 0;
+        for (int i = 0; i < 2 * TUNER_FRAMES; ++i) {
+            if (fabs(out[2 * i]) > 1e-4) last = i;
+            if (fabs(out[2 * i]) > peak) peak = fabs(out[2 * i]);
+            if (i && i < FS / 250 && (out[2 * i] < 0) != (out[2 * i - 2] < 0)) ++zc;
+        }
+        printf("click%d_ms %.2f\n", tenths[k], last * 1000.0 / FS);
+        printf("click%d_peak_db %.2f\n", tenths[k], db(peak));
+        printf("click%d_crossings_per_ms %.2f\n", tenths[k], zc / 4.0);
+        printf("click%d_tail_db %.2f\n", tenths[k], db(rms(FS / 100, 2 * TUNER_FRAMES - FS / 100)));
+        printf("click%d_stereo %d\n", tenths[k], out[2 * 10] == out[2 * 10 + 1]);
+    }
     return 0;
 }

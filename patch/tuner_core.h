@@ -1,6 +1,6 @@
 /* Radio's receiver (q2video -t, video.c tuner): when a stream's sound is the programme and when its
- * carrier is dropped, and when a stream that ended is started again
- * (docs/internals.md#radio-static). The decisions alone, with no clock, files or threads, so
+ * carrier is dropped, when a stream that ended is started again (docs/internals.md#radio-static),
+ * and the dial's click. The decisions alone, with no clock, files or threads, so
  * test/tuner.py runs them on this machine beside fmrx.c. */
 #ifndef TUNER_CORE_H
 #define TUNER_CORE_H
@@ -28,5 +28,21 @@ void tuner_nudge(tuner_feed *f);
 unsigned tuner_wait_ms(const tuner_feed *f);
 /* since_ms after that end: 1 when the stream should be started again now. */
 int tuner_retry_due(const tuner_feed *f, unsigned since_ms);
+
+/* The dial's click (the approved prototype's click()): a 4 ms noise burst decaying over a fifth of
+ * it, through a highpass at 2500 Hz, or 900 Hz for a louder one (over 10 tenths: landing on a
+ * station), so a detent sounds duller; its peak gain 0.18 a unit of loudness. */
+typedef struct {
+    int left, n;
+    unsigned rng;
+    float gain, b0, b1, b2, a1, a2, x1, x2, y1, y2;
+} tuner_click;
+
+/* A click at loudness tenths/10 (demo's k datagram: 6 a held detent, 10 a step, 14 a station) at
+ * sample rate fs, starting over any still sounding. */
+void tuner_click_start(tuner_click *c, int tenths, float fs);
+/* The click's next frames added into interleaved stereo out, both channels alike; nothing once it
+ * has ended. */
+void tuner_click_mix(tuner_click *c, float *out, int frames);
 
 #endif

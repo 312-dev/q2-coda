@@ -9,7 +9,8 @@ What it holds the receiver to: the prototype's cut-out (~/q2-emu/design/radio-tu
 a stream that stops delivering drops the carrier, so the dropout is the empty channel's hiss (the model's -25.9
 dBFS), never silence, and the station fades back in when its sound returns; and a stream that stays dead is
 started again for as long as the station is tuned, each wait longer, at most RETRY_MAX_MS, the count starting
-over once it sounds."""
+over once it sounds. And the dial's click (the prototype's click(): a 4 ms decaying noise burst through a highpass,
+louder and duller on a detent)."""
 import pathlib
 import subprocess
 import sys
@@ -48,6 +49,15 @@ def main():
     check(waits == sorted(waits) and waits[0] <= 1000, 'each wait as long as the last or longer, the first a second')
     check(num('tries_after_sound') == 0, 'a stream that sounds again starts the count over')
     check(num('wait_after_nudge_ms') == 1000, 'demo\'s nudge (Wi-Fi back) starts the count over too')
+    for t in (6, 10, 14):
+        check(3 < num(f'click{t}_ms') < 6, f'a click ({t}) is a 4 ms burst')
+        check(num(f'click{t}_tail_db') < -80, f'and leaves nothing ringing after 10 ms ({t})')
+        check(num(f'click{t}_stereo') == 1, f'in both channels alike ({t})')
+    check(num('click6_peak_db') < num('click10_peak_db') < num('click14_peak_db'), 'a held detent ticks softest, '
+          'landing on a station loudest')
+    check(-40 < num('click10_peak_db') < -6, 'a step clicks well under full scale')
+    check(num('click14_crossings_per_ms') < num('click10_crossings_per_ms'), 'landing on a station clicks duller '
+          '(highpassed at 900 Hz, a step at 2500)')
     assert not bad, f'{len(bad)} failed: {bad}'
     print('all passed')
 

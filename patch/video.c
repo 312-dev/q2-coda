@@ -445,7 +445,8 @@ static int radio(int argc, char **argv) {
  * dry (the network stalled) drops the carrier, the empty channel's hiss, until it is primed again, as a fading
  * signal would; a stream whose ffmpeg ends is started again for as long as its station is tuned, later each time
  * (tuner_core.c). demo sends datagrams to TUNER_SOCK: u and a URL (that station's stream, the last one's
- * stopped), x (no stream), r (the network is back: a stream not sounding is started again now), p and "level
+ * stopped), x (no stream), r (the network is back: a stream not sounding is started again now), k and a loudness in
+ * tenths (the dial's click, tuner_core.c, mixed in even while paused), p and "level
  * offset fade gain station" as integers (fmrx_params: dB, kHz, thousandths, 0 or 1, an id), v and a byte (the
  * volume, as radio's), q (quit). Gain 0 is a pause: once the receiver has faded out nothing more is computed or
  * written until the gain comes back. TUNER_STATE says state= (idle, connecting, playing, stalled, or error for an
@@ -459,6 +460,8 @@ static struct {
     volatile unsigned head, tail; /* frames in and out, counting on */
     volatile int run, reading, quit;
     tuner_feed feed; /* the writer's: sounding, dry, the stream's ends (tuner_core.c) */
+    tuner_click click;      /* the writer's: the dial's click sounding (tuner_core.c) */
+    volatile int click_req; /* demo's k: a click's loudness in tenths for the writer to start */
     int pid, ep, ap;
     unsigned long reader;
     long long ended; /* when the stream's ffmpeg ended, to start it again */
@@ -547,12 +550,16 @@ static void *tuner_writer(void *unused) {
         if (prog) tu.tail += TUNER_FRAMES;
         fmrx_params p = tu.p;
         if (!prog && tu.url[0]) p.level = FMRX_NO_CARRIER; /* its stream named but not sounding */
-        if (!fmrx_run(&rx, &p, prog ? in : 0, out, TUNER_FRAMES)) {
+        int click = __sync_lock_test_and_set(&tu.click_req, 0);
+        if (click) tuner_click_start(&tu.click, click, RATE);
+        int ran = fmrx_run(&rx, &p, prog ? in : 0, out, TUNER_FRAMES); /* 0: silence in out */
+        if (!ran && tu.click.left <= 0) {
             if (!idle) snd_pcm_drop(au.pcm), idle = 1; /* paused and faded: nothing to compute or play */
             usleep(20000);
             continue;
         }
         if (idle) snd_pcm_prepare(au.pcm), idle = 0;
+        tuner_click_mix(&tu.click, out, TUNER_FRAMES); /* paused or not, as the prototype's */
         for (int i = 0; i < 2 * TUNER_FRAMES; ++i) {
             float v = out[i] * 32767.0f;
             pcm[i] = (short)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
@@ -582,6 +589,7 @@ static void tuner_key(int sock, int soft) {
     if (k[0] == 'x') tu.url[0] = 0, tuner_halt(), tuner_state("idle");
     if (k[0] == 'u' && strcmp(tu.url, k + 1)) snprintf(tu.url, sizeof tu.url, "%s", k + 1), tu.feed.tries = 0, tuner_start();
     if (k[0] == 'r' && tu.url[0] && !tu.feed.primed) tuner_nudge(&tu.feed), tu.ended = 0, tuner_start();
+    if (k[0] == 'k') tu.click_req = atoi(k + 1) > 0 ? atoi(k + 1) : 0;
     int v[5];
     if (k[0] == 'p' && sscanf(k + 1, "%d %d %d %d %d", v, v + 1, v + 2, v + 3, v + 4) == 5) {
         fmrx_params p = { (float)v[0], (float)v[1], v[2] / 1000.0f, (float)v[3], v[4] };
