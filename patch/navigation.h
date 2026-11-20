@@ -322,7 +322,7 @@ extern int spot_media(unsigned key), spot_key(void *top, unsigned key),
     spot_open(void *ctx, void *event), spot_hold(void *top);
 extern int radio_media(unsigned key), radio_open(void *ctx, void *event);
 extern int games_key(void *top, unsigned key), games_open(void *ctx, void *event);
-/* radio_tuner.c: Home's Radio Tuner (docs/internals.md#radio-tuner) */
+/* radio_tuner.c: Home's Radio (docs/internals.md#radio-home) */
 int tuner_open(void *ctx, void *event), tuner_key(void *top, unsigned key);
 void tuner_paint(void *w, void *canvas), tuner_poll(void);
 void tuner_title(const char *in, char *out, unsigned cap);
@@ -1240,6 +1240,7 @@ void sw_update_paint(void *w, void *canvas), sw_update_restarting(void *win);
 const char *sw_update_title(const char *name);
 int sw_update_key(void *top, unsigned key);           /* its page's wheel and Centre */
 void toast_icon(const char *glyph, const char *text); /* feedback.c */
+void toast_stay(void *canvas, int top, const char *text); /* feedback.c: a toast a page paints while it holds */
 /* feedback.c: a toast with glyph (a theme image without its prefix) by the next loop pass */
 void toast_later(const char *glyph, const char *text), toast_later_poll(void);
 int tsv_split(char *line, char **f, int max); /* catalogue.c */

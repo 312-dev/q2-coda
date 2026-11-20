@@ -52,6 +52,22 @@ static int toast_gone(void *w, void *event) {
 
 int feedback_toast(void *top) { return top_named(top, "msginfo_dialog"); }
 
+/* A toast that stays (docs/oled-design.md#dialogs-and-toasts): the toast's pill and line, its tokens and its place,
+ * painted by a page on its own window w (top: the window's y on screen) for as long as what it says holds, as
+ * Radio's "No Wi-Fi" (radio_tuner.c). Stock's toast is a dialog that takes the keys and closes itself after its
+ * time, so a toast that must stay while the page is used is this, with no dialog. */
+void toast_stay(void *canvas, int top, const char *text) {
+    void *lcd = canvas ? P(canvas, CANVAS_LCD) : (void *)0;
+    if (!lcd || !text || !*text) return;
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
+    int pw = ui_text_w(canvas, text, 0, PILL_PX) + 2 * PILL_PAD;
+    if (pw > PILL_MAX) pw = PILL_MAX;
+    rect_t pill = { (375 - pw) / 2, PILL_Y - top, pw, PILL_H };
+    fill_box(canvas, &pill, RGBA(flip_if(ipod_light(), PILL_RGB)), PILL_R);
+    ui_text(canvas, text, 0, PILL_PX, ipod_light() ? 0 : 0xffffff, 1, 187, pill.y + PILL_H / 2, pw - 2 * PILL_PAD, 1);
+    stock_canvas_set_fill_color(canvas, fill);
+}
+
 /* A toast with a glyph before its words (docs/oled-design.md#dialogs-and-toasts): glyph a theme image's
  * whole name. */
 void toast_icon(const char *glyph, const char *text) {

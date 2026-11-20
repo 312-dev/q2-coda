@@ -1,4 +1,4 @@
-/* test/fmrx.py's measurements of patch/fmrx.c, the Radio Tuner's FM receiver, made as the prototype's
+/* test/fmrx.py's measurements of patch/fmrx.c, Radio's FM receiver, made as the prototype's
  * were (static-model.md, "Measurements"): each prints "name value" lines that fmrx.py compares with that
  * table. With --bench SECONDS it runs the receiver on a station with programme for that long and prints
  * the CPU time per second of audio, for the Q2 (built for MIPS by fmrx.py --mips) as for this machine. */

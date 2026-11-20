@@ -69,14 +69,15 @@ int ringnav_wifi_page(void *win, void *ctx) {
 /* A page that uses the network, open anywhere in the window stack: Streaming and its services'
  * pages (Spotify's, Internet Radio's, a card app's and its QR code, Tidal's but Tidal Downloads),
  * System settings' Apps, AirPlay's, Network service, the Wi-Fi page, LocalSend's page
- * (localsend_ui.c), the Wi-Fi page's dialogs, and the online lyrics and cover search. */
+ * (localsend_ui.c), the Wi-Fi page's dialogs, the online lyrics and cover search, and Home's Radio
+ * (radio_tuner.c), whose stations stream while it is open. */
 static int net_page_open(void) {
     static const char *const pages[] = {
         "stream_page",     "spotify_page",     "spotbrowse_page",   "radio_page",
         "radionp_page",    "addon_page",       "qrcode_page",       "apps_page",
         "airplay_page",    "netservice_page",  "wifi_page",         "localsend_",
         "editwifi_dialog", "kbwifiadd_dialog", "kbwifipass_dialog", "onlinematching_page",
-        "tidal_"
+        "tidal_",          "tuner_page"
     };
     void *wm = window_manager();
     for (unsigned i = 0, n = widget_count_children(wm); i < n; ++i) {

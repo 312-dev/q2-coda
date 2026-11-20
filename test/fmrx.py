@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The Radio Tuner's FM receiver (patch/fmrx.c, docs/internals.md#radio-tuner-static) against the approved prototype:
+"""Radio's FM receiver (patch/fmrx.c, docs/internals.md#radio-static) against the approved prototype:
 test/fmrx_test.c measures it as the prototype's measurements were made and this holds each figure to the
 prototype's own (static-model.md's table, and where a scenario here differs from how that table was taken, the
 prototype's fmRxWorklet run in Node on the same scenario, 2026-11-20: REFERENCE).

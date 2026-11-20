@@ -50,6 +50,17 @@ def test_car_remote_on_keeps_the_radio_on(fw, st, minutes):
     assert q2.switched == [] and not q2.off() and q2.wifi.value == 1
 
 
+@pytest.mark.parametrize('page', ['radio_page', 'tuner_page'])
+def test_a_page_that_streams_keeps_the_radio_on(fw, st, page):
+    """Internet Radio's lists and Home's Radio (radio_tuner.c, whose stations stream while it is open): Smart Wi-Fi
+    leaves the radio on however long the page stays up."""
+    q2 = Scans(fw, st, CARREMOTE=b'0')
+    st('smart_wifi').value = 1
+    q2.open('home_page', page)
+    q2.idle(3 * O['SMART_IDLE_MS'])
+    assert q2.switched == [] and not q2.off() and q2.wifi.value == 1
+
+
 HOLD, FREE = 'wpa_cli -i wlan0 scan_interval 3600 >/dev/null 2>&1', 'wpa_cli -i wlan0 scan_interval 5 >/dev/null 2>&1'
 
 
