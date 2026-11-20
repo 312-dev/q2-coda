@@ -964,8 +964,8 @@ def test_smoke_counts_homes_and_settings_rows_as_ipod_lays_them_out():
     """Radio Tuner's Home row went in under the Library (be2c32f3) and smoke's Home > Library opened the tuner;
     Car Remote's Settings row before Display had its Settings > Display open Car Remote (2026-11-20)."""
     tree = ast.parse((pathlib.Path(__file__).resolve().parents[1]/'ipod.py').read_text())
-    lists = {n.targets[0].id: ast.literal_eval(n.value) for n in tree.body
-             if isinstance(n, ast.Assign) and getattr(n.targets[0], 'id', '') in ('HOME_ROWS', 'HOME_SETS')}
+    lists = {t.id: ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+             for t in n.targets if isinstance(t, ast.Name) and t.id in ('HOME_ROWS', 'HOME_SETS')}
     rows, sets = lists['HOME_ROWS'], lists['HOME_SETS']
     ids = {'settings': 'settings', 'search': 'home_search', 'cover flow': 'coverflow', 'library': 'localmusic'}
     assert smoke.HOME_FROM_END == {label: len(rows) - 1 - rows.index(ids[label]) for label in ids}
