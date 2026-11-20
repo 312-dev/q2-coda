@@ -39,7 +39,7 @@ jobs:
       - name: Host suites  # build and rotator_build: only their checks that need no ZIP or build
         run: |
           export PATH="$PWD/test/coverage:$PATH"
-          for t in library_scope peq coverflow coverflow_position chapters remote build rotator_build radiofetch; do python3 "test/$t.py"; done
+          for t in library_scope peq coverflow coverflow_position chapters remote build rotator_build radiofetch fmrx; do python3 "test/$t.py"; done
       - name: C coverage  # of the plain runs; navigation.c's UI is mostly test/patch.py's, which needs a stock build
         if: ${{ !cancelled() }}
         run: >-
