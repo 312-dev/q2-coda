@@ -17,6 +17,19 @@
 #define ULOG_READ_MAX 16384  /* the most read of a feed in one tick; the rest waits for the next */
 #define ULOG_PART 512        /* a line read without its end yet is held up to this, then cut */
 
+/* The Bluetooth event log (docs/internals.md#bluetooth-event-log): q2-btev.0 to .3 beside it, every
+ * Bluetooth line of the unified log copied as it was, so a day's connects, drops and refused
+ * starts outlast the unified log's churn and a reboot. */
+#define BTEV_RAM 32768       /* its ring's bytes while the card is away or between flushes */
+#define BTEV_FILE_MAX 131072 /* q2-btev.0 is moved on when a flush finds it this big */
+#define BTEV_FILES 4         /* q2-btev.0 to .3: about 512 KB in all */
+#define BTEV_FLUSH_MS 60000  /* lines held in its ring are written at least this often */
+/* From here on each line into from (the unified ring) that ulog_bt_wanted keeps is also put in to */
+void ulog_bt_to(card_log *from, card_log *to);
+/* 1 for a Bluetooth line: source bt; a boot, snapshot or shutdown line; the player's errors; or
+ * one that names bluealsa, BlueZ, Bluetooth, A2DP, AVDTP, rtk_hci, hci0 or L2CAP */
+int ulog_bt_wanted(char level, const char *src, const char *s, int n);
+
 /* A level and source for a line that came without them (the player's, stock's helpers'), from
  * its words: E for an error or failure, W for a warning, else I; the source by who it names, else
  * ui. */

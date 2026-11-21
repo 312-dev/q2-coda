@@ -79,6 +79,7 @@ static struct {
     long wall;
     unsigned up_ms;
     char level, src[12];
+    int copied; /* the run's line went to the Bluetooth ring too: its count follows it */
 } rep;
 
 static unsigned fnv(const char *s, int n, unsigned h) {
@@ -86,18 +87,57 @@ static unsigned fnv(const char *s, int n, unsigned h) {
     return h;
 }
 
-static void stamp(card_log *l, long wall, unsigned up_ms, char level, const char *src,
-                  const char *s, int n) {
+/* ---- the Bluetooth event log's copy (docs/internals.md#bluetooth-event-log) ----
+ * Each line that goes into the unified log's ring and is about Bluetooth goes into q2guard's q2-btev
+ * ring too, as it was written, so the Bluetooth lines outlast the unified log's churn. */
+static card_log *bt_from, *bt_to;
+void ulog_bt_to(card_log *from, card_log *to) { bt_from = from, bt_to = to; }
+
+/* Words that make any source's line a Bluetooth one: bluealsa's own lines (an AVDTP start the
+ * headset refused is its "Couldn't acquire transport"), stock's parse_bluealsa_status_msg, the
+ * kernel's "Bluetooth: hci0: ..." */
+static const struct {
+    const char *word;
+    int whole;
+} bt_words[] = { { "bluealsa", 0 }, { "bluez", 0 },   { "bluetooth", 0 }, { "a2dp", 0 }, { "avdtp", 0 },
+                 { "rtk_hci", 0 },  { "hci0", 1 },    { "l2cap", 0 } };
+
+int ulog_bt_wanted(char level, const char *src, const char *s, int n) {
+    if (!strcmp(src, "bt")) return 1;
+    /* where a run of the Q2 begins and ends, so a reboot between two lines shows */
+    if (!strcmp(src, "guard") && ((n >= 5 && !memcmp(s, "boot ", 5)) || (n >= 9 && !memcmp(s, "snapshot ", 9))))
+        return 1;
+    if (n >= 9 && !memcmp(s, "shutdown:", 9)) return 1; /* demo's ulog_end */
+    if (!strcmp(src, "player") && level == 'E') return 1; /* a song that would not open, with its path */
+    for (unsigned i = 0; i < sizeof bt_words / sizeof *bt_words; ++i)
+        if (has(s, n, bt_words[i].word, bt_words[i].whole)) return 1;
+    return 0;
+}
+
+/* line (len bytes, its newline included) into the Bluetooth ring as well when l is the unified ring
+ * and copy says so: 1 yes, 0 no, -1 by ulog_bt_wanted. 1 when it went. */
+static int bt_copy(card_log *l, const char *line, int len, int copy, char level, const char *src,
+                   const char *s, int n) {
+    if (!bt_to || l != bt_from) return 0;
+    if (copy < 0) copy = ulog_bt_wanted(level, src, s, n);
+    if (copy) card_log_append(bt_to, line, (unsigned)len);
+    return copy;
+}
+
+/* 1 when the line was copied to the Bluetooth ring too (bt_copy's copy) */
+static int stamp(card_log *l, long wall, unsigned up_ms, char level, const char *src,
+                 const char *s, int n, int copy) {
     char line[ULOG_PART + 64];
     int len = ulog_line(line, sizeof line, wall, up_ms, level, src, s, n);
     card_log_append(l, line, (unsigned)len);
+    return bt_copy(l, line, len, copy, level, src, s, n);
 }
 
 void ulog_repeats(card_log *l) {
     if (rep.l != l || !rep.n) return;
     char b[64];
     int n = snprintf(b, sizeof b, "last line repeated %u more times", rep.n);
-    stamp(l, rep.wall, rep.up_ms, rep.level, rep.src, b, n);
+    stamp(l, rep.wall, rep.up_ms, rep.level, rep.src, b, n, rep.copied); /* where the line went */
     rep.n = 0; /* the run goes on being counted from here */
 }
 
@@ -121,7 +161,7 @@ static int repeated(card_log *l, long wall, unsigned up_ms, char level, const ch
 static int add_line(card_log *l, long wall, unsigned up_ms, char level, const char *src,
                     const char *s, int n) {
     if (repeated(l, wall, up_ms, level, src, s, n)) return 0;
-    stamp(l, wall, up_ms, level, src, s, n);
+    rep.copied = stamp(l, wall, up_ms, level, src, s, n, -1);
     return 1;
 }
 
@@ -151,12 +191,13 @@ char ulog_add_raw(card_log *l, long wall, unsigned up_ms, const char *s, int n) 
         memcpy(line, s, n);
         line[n] = '\n';
         card_log_append(l, line, (unsigned)n + 1);
+        rep.copied = bt_copy(l, line, n + 1, -1, level, src, s + m, n - m);
         return level;
     }
     const char *src;
     char level = ulog_guess(s + start, n - start, &src);
     if (repeated(l, wall, up_ms, level, src, s + start, n - start)) return 0;
-    stamp(l, wall, up_ms, level, src, s + start, n - start);
+    rep.copied = stamp(l, wall, up_ms, level, src, s + start, n - start, -1);
     return level;
 }
 

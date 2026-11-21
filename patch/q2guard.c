@@ -318,12 +318,12 @@ static void sample(struct heat_sample *s, int busy, int temp, int raw, int die, 
  * The watching process keeps every line in card_store.c's ring: card_mounted is false there, so
  * card_log_append only holds. The child is forked when card_ready and says the card is up, so its
  * card_log_flush appends the rings to the files; the watcher then drops what the child was given. */
-static card_log heat, btlog, ulog; /* q2-heat, q2bt.c's q2-bt and the unified q2-log */
+static card_log heat, btlog, ulog, btev; /* q2-heat, q2bt.c's q2-bt, the unified q2-log, q2-btev */
 static int in_writer;        /* true in the child */
 int card_mounted(void) { return in_writer; }
 static struct {
     pid_t pid;
-    unsigned len, dropped, bt_len, bt_dropped, u_len, u_dropped; /* what the child was given of each */
+    unsigned len, dropped, bt_len, bt_dropped, u_len, u_dropped, e_len, e_dropped; /* what the child was given of each */
     int done; /* the last flush ended (written, failed or given up) */
 } fl;
 static void flush_start(void) {
@@ -336,10 +336,12 @@ static void flush_start(void) {
     fl.len = heat.len, fl.dropped = heat.dropped, fl.done = 0;
     fl.bt_len = btlog.len, fl.bt_dropped = btlog.dropped;
     fl.u_len = ulog.len, fl.u_dropped = ulog.dropped;
+    fl.e_len = btev.len, fl.e_dropped = btev.dropped;
     pid_t pid = fork();
     if (!pid)
         in_writer = 1, _exit((heat_flush(&heat, LOGS) ? 1 : 0) | (bt_flush(&btlog, LOGS) ? 2 : 0) |
-                             (ulog_flush(&ulog, LOGS, "q2-log", ULOG_FILE_MAX, ULOG_FILES) ? 4 : 0));
+                             (ulog_flush(&ulog, LOGS, "q2-log", ULOG_FILE_MAX, ULOG_FILES) ? 4 : 0) |
+                             (ulog_flush(&btev, LOGS, "q2-btev", BTEV_FILE_MAX, BTEV_FILES) ? 8 : 0));
     fl.pid = pid;
     if (pid < 0) fl.pid = 0, fl.done = 1;
 }
@@ -354,10 +356,11 @@ static void flush_reap(void) {
     int status = 0;
     if (fl.pid <= 0 || waitpid(fl.pid, &status, WNOHANG) != fl.pid) return;
     fl.pid = 0, fl.done = 1;
-    int failed = status & 0x7f ? 7 : status >> 8 & 0xff; /* killed: none; else its exit's bits */
+    int failed = status & 0x7f ? 15 : status >> 8 & 0xff; /* killed: none; else its exit's bits */
     if (!(failed & 1)) written(&heat, fl.len, fl.dropped);
     if (!(failed & 2)) written(&btlog, fl.bt_len, fl.bt_dropped);
     if (!(failed & 4)) written(&ulog, fl.u_len, fl.u_dropped);
+    if (!(failed & 8)) written(&btev, fl.e_len, fl.e_dropped);
 }
 
 /* ---- demo ---- */
@@ -456,8 +459,9 @@ static void request(void) {
 }
 
 /* q2guard --dump (docs/adb.md): the running q2guard asked to write out what it holds (a "flush"
- * request, answered within FINAL_MS twice over), then q2-log.3 to .0 on stdout, oldest first. */
-static int dump(void) {
+ * request, answered within FINAL_MS twice over), then name.3 to .0 on stdout, oldest first: q2-log,
+ * or q2-btev for --dump-bt. */
+static int dump(const char *name, int files) {
     char b[4096];
     int fd = open(SNAP, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
     if (fd >= 0) write(fd, "flush\n", 6), close(fd);
@@ -465,8 +469,8 @@ static int dump(void) {
     if (pid > 1 && !kill(pid, SIGUSR1))
         for (int waited = 0; waited < 2 * FINAL_MS && slurp(SNAP, b, 8) >= 0; waited += 100) usleep(100000);
     unlink(SNAP);
-    for (int k = ULOG_FILES - 1; k >= 0; --k) {
-        snprintf(b, sizeof b, LOGS "/q2-log.%d", k);
+    for (int k = files - 1; k >= 0; --k) {
+        snprintf(b, sizeof b, LOGS "/%s.%d", name, k);
         if ((fd = open(b, O_RDONLY | O_CLOEXEC)) < 0) continue;
         for (int n; (n = (int)read(fd, b, sizeof b)) > 0;) write(1, b, n);
         close(fd);
@@ -476,7 +480,8 @@ static int dump(void) {
 
 int main(int argc, char **argv) {
     static struct guard g;
-    if (argc > 1 && !strcmp(argv[1], "--dump")) return dump();
+    if (argc > 1 && !strcmp(argv[1], "--dump")) return dump("q2-log", ULOG_FILES);
+    if (argc > 1 && !strcmp(argv[1], "--dump-bt")) return dump("q2-btev", BTEV_FILES);
     struct cpu cpu5 = { 0, 0 }, cpu_line = { 0, 0 };
     int lock = open(LOCK, O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
     if (lock >= 0 && flock(lock, LOCK_EX | LOCK_NB)) return 1; /* another is watching */
@@ -485,6 +490,7 @@ int main(int argc, char **argv) {
     signal(SIGUSR1, on_signal), signal(SIGTERM, on_signal);
     card_log_at(&heat, LOGS "/q2-heat.0", HEAT_RAM);
     card_log_at(&ulog, LOGS "/q2-log.0", ULOG_RAM);
+    ulog_bt_to(&ulog, card_log_at(&btev, LOGS "/q2-btev.0", BTEV_RAM));
     bt_init(card_log_at(&btlog, LOGS "/q2-bt.0", BT_RAM), &ulog);
     dev_build = argc > 1 && !strcmp(argv[1], "--dev");
     argv += dev_build, argc -= dev_build;
@@ -602,6 +608,7 @@ int main(int argc, char **argv) {
         if (o.kill_player) note("NOANSWER demo: player stopped"), kill_players();
         if (o.flush || (line_due && o.event != EV_NONE) || bt_flush_due() ||
             (warn_due && now - last_warn >= WARN_GAP_MS) ||
+            ((btev.len || btev.dropped) && now - last_flush >= BTEV_FLUSH_MS) ||
             now - last_flush >= (unsigned)flush_every(fast, bt_streaming())) {
             if (g.off && !card_ready()) note("CARD not mounted: log in RAM only");
             flush_start();

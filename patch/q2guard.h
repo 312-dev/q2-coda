@@ -93,6 +93,13 @@ int execl(const char *, const char *, ...);
 #define POLLIN 1
 #define HCIGETDEVINFO 0x400448d3u
 #define HCIGETCONNLIST 0x400448d4u
+/* q2dbus.c's: the system bus's socket */
+int connect(int, const void *, unsigned);
+ssize_t send(int, const void *, size_t, int);
+unsigned getuid(void);
+#define AF_UNIX 1
+#define SOCK_STREAM 2 /* MIPS's (SOCK_DGRAM is 1 there) */
+#define MSG_NOSIGNAL 0x4000
 #endif
 
 #ifndef PEQ_ROOT
