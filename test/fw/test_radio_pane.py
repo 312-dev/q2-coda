@@ -54,6 +54,9 @@ def test_the_k1_composition(fw):
         assert r > 150 and g < 70 and b < 90
         assert p.px(92, 205)[0] < p.px(40, 205)[0]  # the vignette darkens under the frequency
         assert (p.words.cx, p.words.cy, p.words.off, p.words.badge_a, p.words.freq_a) == (92, 138, 0, 255, 255)
+        # every pixel opaque: the frame is drawn as an opaque bitmap, and a pixel left at alpha 0 showed black on
+        # the emulator (the badge's top, which no vignette pixel lifted)
+        assert all(v >> 24 == 0xff for v in p.buf)
     finally:
         p.done()
 

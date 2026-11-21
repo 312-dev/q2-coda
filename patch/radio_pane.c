@@ -248,7 +248,9 @@ static void badge_at(unsigned *d, int pitch, int bx, int by, unsigned a) {
             int px = bx + x;
             if (px < 0 || px >= rp.w) continue;
             unsigned b = rp.badge[y * BADGE + x], ba = (b >> 24) * a >> 8;
-            if (ba) d[py * pitch + px] = rp_mix(d[py * pitch + px], b & 0xffffff, ba + (ba > 127));
+            if (ba)
+                d[py * pitch + px] =
+                    rp_mix(d[py * pitch + px], b & 0xffffff, ba + (ba > 127)) | 0xff000000u;
         }
     }
 }
