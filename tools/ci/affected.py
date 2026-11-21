@@ -3,7 +3,7 @@
 
     python3 tools/ci/affected.py                      # changes against the trunk's merge base, as a plan
     python3 tools/ci/affected.py --base main --json   # the same plan as JSON
-    python3 tools/ci/affected.py --run BUILD          # and run it (all of test/patch.py serially)
+    python3 tools/ci/affected.py --run BUILD          # and run it, the suites at once (test/patch.py in one process)
     python3 tools/ci/affected.py --all --run BUILD    # everything: what an integration branch runs
 
 A feature branch runs what its files map to; an integration branch (release/*, main) runs everything, as
@@ -36,17 +36,25 @@ test/patch.py, which executes the payload as one program. What gets narrowed:
   --smoke: it is optional for a worker, and a merge batch leaves it out (gate.OPTIONAL), as the queue runs it
   on the trunk's tip after landing, where a failure turns the tip red.
 
+--run hands the plan's suites to gate.run, as gate.py --plan-json would (gate.suites_for): they start at once as
+memory allows, the longest first, heavy ones under q2-heavy, test/patch.py whole as one serial process; each
+writes its own log under ~/.cache/q2-gate/, a failure's end is printed, and a table gives each suite's result
+and seconds. A suite that fails runs once more alone, and a pass then is `flaky`, counted as passed and logged
+to the flakes file (--no-retry: not); one that passed on this exact tree is `cached`, not run (--no-cache: run).
+Without BUILD only the suites that need none run. Exit status: 1 when any suite failed.
+
 Documented in docs/building.md#fast-test-runs; tools/ci/test_ci.py checks the rules.
 """
 import argparse
 import fnmatch
 import ast
 import json
-import os
 import pathlib
 import re
+import signal
 import subprocess
 import sys
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT/'tools'/'ci'))
@@ -209,11 +217,6 @@ def suite_starts(root):
     return out
 
 
-def mypy_argv(name, python):
-    """The command gate.py runs for the type-check suite `name`."""
-    return gate.full_suite(name, python, pathlib.Path('.'))().argv
-
-
 def cov_target(path, root=ROOT):
     """The tools/ module whose coverage a change to `path` can lower, else None: the module itself (not
     tools/ci/, which test/unit does not cover), or the test/unit/test_X.py of tools/X.py (a test dropped or
@@ -348,55 +351,69 @@ def changed(base, head='HEAD', root=ROOT):
     return out
 
 
-def run(plan, build, python, smoke=False):
-    """Run the plan; returns the number of suites that failed. smoke: run a planned smoke test too."""
-    failed = 0
-    q2heavy = os.environ.get('Q2_HEAVY', str(pathlib.Path.home()/'.local/bin/q2-heavy'))
-    heavy = [q2heavy] if pathlib.Path(q2heavy).exists() else []
+def build_options(build):
+    """The build's options as gate.py keys a pass by them: rebuild.py's record (rebuild.json) of what it was built
+    with, else the build's own path, so a pass is never taken for another build's. No build: the gate's default,
+    as only suites that need none then run, and their passes are then the gate's too."""
+    if build is None:
+        return ['--dev']
+    try:
+        return json.loads((pathlib.Path(build)/'rebuild.json').read_text())['options']
+    except (OSError, ValueError, KeyError):
+        return [f'build:{pathlib.Path(build).resolve()}']
 
-    def go(name, cmd, is_heavy=False):
-        nonlocal failed
-        print(f'== {name}: {" ".join(cmd)}', flush=True)
-        rc = subprocess.run((heavy if is_heavy else []) + cmd, cwd=ROOT).returncode
-        print(f'== {name}: {"ok" if not rc else f"FAILED (exit {rc})"}', flush=True)
-        failed += bool(rc)
 
+def suites(plan, build, python, logs, smoke=False):
+    """The gate's suites for the plan (gate.suites_for: each runs as a merge batch runs it, test/patch.py whole in
+    one process), with smoke when asked for and given a build, and without a build only what needs none."""
     d = plan.as_dict()
-    if d['unit']:
-        go('unit', [python, '-m', 'pytest', '-q', '-p', 'no:cacheprovider',
-                    *(['test/unit'] if d['unit'] == ALL else [f'test/unit/{f}' for f in d['unit']])])
-    if d['fw']:
-        go('fw', [python, str(ROOT/'tools/ci/fw.py'), *([] if d['fw'] == ALL else [f'test/fw/{f}' for f in d['fw']])])
-    if d['patch'] and build:
-        if d['patch'] == ALL:  # one process: a shard set replays most of the suite in every shard
-            go('patch', [python, 'test/patch.py', build], is_heavy=True)
+    out = gate.suites_for(d, [], python, logs)
+    if SMOKE in d['other']:
+        if smoke and build:
+            out[SMOKE] = gate.full_suite(SMOKE, python, logs)()
         else:
-            go('patch', [python, str(ROOT/'tools/ci/patch_shards.py'), build, '--lines', ','.join(d['patch'])])
-    for other in d['other']:
-        if other == SMOKE:
-            if smoke and build:
-                go(other, [python, str(ROOT/'tools/ci/smoke.py'), build], is_heavy=True)
-            else:
-                print(f'== {other}: optional; --run BUILD --smoke walks the build on a pooled emulator (about 2 min)')
-        elif other in MYPY_SUITES:
-            go(other, mypy_argv(other, python))
-        elif other.startswith(gate.COV):
-            go(other, [python, str(ROOT/'tools/ci/covcheck.py'), other[len(gate.COV):], '--python', python])
-        elif other.startswith('tools/ci/test_'):
-            go(other, [python, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', other])
-        elif other == 'test/build.py':
-            go(other, [python, other] + (['--build', build] if build else []))
-        elif other.startswith('test/') and other.endswith('.py'):
-            suite = gate.other_suite(other, python)
-            if suite is None:
-                print(f'== {other}: skipped: {gate.skip_reason(other)}')
-            elif suite.needs_build and not build:
-                print(f'== {other}: needs a build: run --run BUILD')
-            else:
-                go(other, suite.command(build or ''), is_heavy=True)
-        else:
-            print(f'== {other}: run it by hand (docs/building.md#tests says what it needs)')
-    return failed
+            print(f'== {SMOKE}: optional; --run BUILD --smoke walks the build on a pooled emulator (about 2 min)')
+    if not build:
+        for name, s in list(out.items()):
+            if name == 'test/build.py':  # its checks of the tree need no build
+                out[name] = gate.Suite(name, [python, name], heavy=True)
+            elif s.needs_build:
+                del out[name]
+                print(f'== {name}: needs a build: run --run BUILD')
+    return out
+
+
+def summary(results, wall):
+    """A row a suite: ok, FAILED (and the kind), flaky (failed, then passed alone) or cached, and its seconds."""
+    rows = [f'{"suite":24} {"result":14} {"seconds":>7}']
+    for name, r in results.items():
+        state = ('cached' if r.get('cached') else f'flaky ({r["flaky"]})' if r.get('flaky') else 'ok') \
+            if r['rc'] == 0 else f'FAILED ({r.get("kind", r["rc"])})'
+        rows.append(f'{name:24} {state:14} {r["seconds"]:7d}' + (f'  {r["log"]}' if r['rc'] != 0 else ''))
+    bad = [n for n, r in results.items() if r['rc'] != 0]
+    rows.append(f'{"wall":24} {"":14} {round(wall):7d}  ' + (f'FAILED: {", ".join(bad)}' if bad else 'all passed'))
+    return '\n'.join(rows)
+
+
+def run(plan, build, python, smoke=False, retry=True, cache=True, logs=None, poll=2.0):
+    """Run the plan through gate.run: the suites at once as memory allows, the longest first, heavy ones under
+    q2-heavy; a failure run once more alone (retry), a pass then reported as flaky; a suite that passed on this
+    tree (gate.tree_key, a clean worktree only) skipped as cached (cache). Returns the number that failed."""
+    logs = logs or pathlib.Path.home()/'.cache/q2-gate'/f'{ROOT.name}-affected-{time.strftime("%Y%m%d-%H%M%S")}'
+    todo = suites(plan, build, python, logs, smoke)
+    if not todo:
+        return 0
+    print(f'== {len(todo)} suites, as memory allows: {", ".join(todo)}; logs in {logs}', flush=True)
+    t = time.monotonic()
+    results = gate.run(todo, build_options(build), logs, python, build=build, log=lambda m: print(f'== {m}', flush=True),
+                       poll=poll, retry=retry, tree=gate.tree_key() if cache else None, flakes=gate.FLAKES)
+    for name, r in results.items():
+        if r['rc'] != 0 and pathlib.Path(r['log']).exists():
+            tail = pathlib.Path(r['log']).read_text(errors='replace').splitlines()[-30:]
+            # `== NAME: FAILED` is how merge_train.py names the suites that failed
+            print(f'\n== {name}: FAILED; the end of {r["log"]}:\n' + '\n'.join(tail), flush=True)
+    print('\n' + summary(results, time.monotonic() - t), flush=True)
+    return sum(r['rc'] != 0 for r in results.values())
 
 
 def main():
@@ -407,6 +424,8 @@ def main():
     ap.add_argument('--json', action='store_true')
     ap.add_argument('--run', metavar='BUILD', nargs='?', const='', help='run the plan; BUILD for the suites that need one')
     ap.add_argument('--smoke', action='store_true', help='with --run, also run a planned smoke test (tools/ci/smoke.py)')
+    ap.add_argument('--no-cache', action='store_true', help='with --run, run a suite even when it passed on this tree')
+    ap.add_argument('--no-retry', action='store_true', help='with --run, do not run a failed suite a second time')
     ap.add_argument('--python', default=sys.executable)
     ap.add_argument('--plan-json', metavar='FILE', help='take the plan from FILE (- for stdin), as merge_batch.py and merge_train.py hand it')
     args = ap.parse_args()
@@ -429,7 +448,9 @@ def main():
         for why in d['why']:
             print(f'  {why}')
     if args.run is not None:
-        return 1 if run(plan, args.run or None, args.python, args.smoke) else 0
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))  # so gate.run ends its suites
+        return 1 if run(plan, args.run or None, args.python, args.smoke, retry=not args.no_retry,
+                        cache=not args.no_cache) else 0
     return 0
 
 
