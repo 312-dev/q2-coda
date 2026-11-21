@@ -6,6 +6,8 @@ merged by time with the heat log (q2-heat, tools/q2heat.py) and the Bluetooth li
     python3 tools/q2log.py q2-log.3 q2-log.2 q2-log.1 q2-log.0     # the unified log alone, oldest file first
     python3 tools/q2log.py q2-log.* --heat q2-heat.3 q2-heat.2 q2-heat.1 q2-heat.0 --bt q2-bt.3 q2-bt.2 q2-bt.1 q2-bt.0
     python3 tools/q2log.py --adb --level W --src bt,usb            # warnings and errors of two sources only
+    python3 tools/q2log.py --adb --btev                            # the Bluetooth event log alone (q2-btev), days of it
+    python3 tools/q2log.py q2-btev.3 q2-btev.2 q2-btev.1 q2-btev.0 # the same from saved files: its lines are unified ones
 
 A unified line is `TIME UPTIME_MS LEVEL SOURCE message`; a heat or Bluetooth line `TIME up=S ...` or a note
 `TIME WORD ...`. Each line comes out as `TIME UPTIME LOG rest`, the uptime in seconds (with ms for the unified log's,
@@ -99,11 +101,17 @@ def main(argv=None):
     ap.add_argument('--heat', nargs='+', default=[], help='q2-heat.3 to q2-heat.0, oldest first')
     ap.add_argument('--bt', nargs='+', default=[], help='q2-bt.3 to q2-bt.0, oldest first')
     ap.add_argument('--adb', action='store_true', help='read all three from the Q2 over adb (q2guard --dump first)')
+    ap.add_argument('--btev', action='store_true',
+                    help="with --adb, the Bluetooth event log (q2-btev, q2guard --dump-bt) alone: the unified log's "
+                         'Bluetooth lines, kept longer')
     ap.add_argument('-s', '--serial', help="adb's -s")
     ap.add_argument('--level', choices=list(LEVELS), default='I', help='the unified log at this level or worse')
     ap.add_argument('--src', default='', help='the unified log of these sources only, comma-separated')
     a = ap.parse_args(argv)
-    if a.adb:
+    if a.adb and a.btev:
+        # the same flush, then q2-btev.3 to .0; its lines are copies of the unified log's, so nothing to merge
+        log, heat, bt = parse(adb('q2guard --dump-bt 2>/dev/null', a.serial), 'log'), [], []
+    elif a.adb:
         # q2guard --dump writes out what the running q2guard holds in RAM, then prints q2-log.3 to .0
         log = parse(adb('q2guard --dump 2>/dev/null', a.serial), 'log')
         heat = parse(adb(f'cd {LOGS}; cat q2-heat.3 q2-heat.2 q2-heat.1 q2-heat.0 2>/dev/null', a.serial), 'heat')
