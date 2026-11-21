@@ -603,6 +603,9 @@ static inline int arc_out(int r, int y) {
 #define WHEEL_ARM_MS 2000
 #define WHEEL_ESCAPE_TICK_MS 300
 #define WHEEL_STOP_TICKS 3
+/* A wheel tick posted and not taken by ringnav in this long no longer holds the bar's lean full
+ * (playback.c wheel_part): the UI takes one within a frame or two. */
+#define WHEEL_TAKE_MS 250
 #define BOOT_KEY_GUARD 0xa4bbf9 /* no symbol: set after a Standby resume, on_wm_keyup_fun drops the next centre release */
 #define NP_KEY_HELD 0xa4e880 /* Now Playing's long press of 222/223 sets it (0x53b4d0), its release clears it */
 #define NP_KEY_MODE 0xa4e881 /* 1 once a key-down stepped the slider with NP_KEY_HELD set (0x53e000) */

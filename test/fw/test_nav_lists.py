@@ -16,6 +16,7 @@ from conftest import NAVIGATION_SOURCE, O, Deques, Files, block, claim, in_fork,
 from test_coverflow import COVERS, TRACKS, Home, Rec, cf, deque_of  # coverflow.c's home struct, its page and an album
 from test_nav_display_library import Ple  # playlists.c's editor state
 from test_navigation import Config
+from test_tilt import Tilt  # tilt.c's state
 from test_corners import art as art_py  # tools/art.py: corner_cover, the corners' coverage
 
 W_PARENT, W_EMITTER = O['W_PARENT'], O['W_EMITTER']
@@ -286,6 +287,31 @@ def test_a_fresh_list_takes_its_first_whole_row_then_the_tick_moves_on(fw, ui):
     assert page.selected == 4
     key(fw, ui, KEY_NEXT)
     assert page.selected == 5 and page.offset == ROW_H * 4  # OLED's whole rows: row 4 lands on the top
+
+
+@pytest.mark.parametrize('row', [5, 39])  # mid-list, and the last row: the tick meets the end
+def test_ringnav_takes_the_wheels_posted_tick_as_the_row_steps(fw, ui, row):
+    """playback.c wheel_part holds a whole tick for one posted and not yet taken, so the bar leans full until the
+    step (tilt.c); the tick's release through ringnav takes it, and the lean the step paints with is the carry again
+    (0 here), or full against the list's end (tilt_end): never the bare carry for a frame on either row."""
+    page = Page(ui, titles(40))
+    paint(fw, page)
+    for _ in range(row):
+        key(fw, ui, KEY_NEXT, ui.now + SLOW)
+    pending, held = fw.var('playback__wh_pending', C.c_int), fw.var('wheel_held', C.c_int)
+    held.value, pending.value = 1, 1
+    fw.var('playback__wh_pending_dir', C.c_int).value = 1
+    fw.var('playback__wh_units', C.c_int).value = 448
+    fw.var('playback__wh_tick_at', C.c_uint).value = ui.now
+    part, tilt = fw.fn('wheel_part', C.c_int), fw.var('tilt__tilt', Tilt)
+    tilt.w, tilt.win = page.view.at, ui.top.at  # the bar tilt_bar last painted: this list's, in the top window
+    fw.fn('tilt_poll', None)()  # the UI loop's pass before the key
+    assert part() == 256 and tilt.p == 256
+    key(fw, ui, KEY_NEXT, ui.now + 1)
+    assert pending.value == 0 and part() == 0
+    assert page.selected == min(row + 1, 39)
+    assert tilt.p == (256 if row == 39 else 0)  # what the step's paint shows, before the next pass
+    held.value = 0
 
 
 def test_ticks_scroll_only_as_far_as_the_row_needs(fw, ui):

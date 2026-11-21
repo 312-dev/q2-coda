@@ -137,16 +137,18 @@ void wheel_set_pct(int n) {
     if (n != wheel_pct()) wheel_apply(n);
 }
 
-static void wheel_post(char *info, int key) {
+/* 1 when the key went into the UI loop's queue, 0 when its headroom was gone and the tick dropped */
+static int wheel_post(char *info, int key) {
     /* Read unlocked: off by one at worst, and the headroom covers it. */
     unsigned short *q = *(unsigned short **)(*(char **)(info + WHEEL_INFO_LOOP) + LOOP_QUEUE);
     int used = q[2] ? q[3] : (q[1] - q[0] + q[3]) % q[3];
-    if (q[3] - used < WHEEL_QUEUE_FREE + 2) return;
+    if (q[3] - used < WHEEL_QUEUE_FREE + 2) return 0;
     for (int type = 0x110; type <= 0x114; type += 4) { /* key down, then up */
         *(int *)(info + WHEEL_INFO_KEY) = key;
         *(int *)(info + WHEEL_INFO_EVENT) = type;
         ((void (*)(void *))WHEEL_POST)(info);
     }
+    return 1;
 }
 /* The wheel's thread and the threads reading it share these, a word each. wheel_frame_at: its last
  * frame with pressure. wh_tick_at, wh_since: its last tick wanted, and how many since Return armed
@@ -155,6 +157,11 @@ volatile unsigned wheel_frame_at __attribute__((section(".scratch")));
 static volatile unsigned wh_tick_at __attribute__((section(".scratch"))),
     wh_since __attribute__((section(".scratch"))), wh_armed_at __attribute__((section(".scratch")));
 static volatile int wh_armed __attribute__((section(".scratch")));
+/* Ticks posted that ringnav has not yet taken (wheel_tick_taken), and the way the last went, + toward
+ * Next: wheel_part holds a whole tick for them, as their travel has left wh_acc before the row
+ * steps. The wheel's thread adds, the UI thread takes away. */
+static volatile int wh_pending __attribute__((section(".scratch"))),
+    wh_pending_dir __attribute__((section(".scratch")));
 volatile int wheel_mute __attribute__((section(".scratch")));
 #if Q2POD_DEV
 /* ponytail: temporary, --dev builds only, comes out once the runaway report is explained. The last
@@ -351,6 +358,7 @@ void wheel_sample(int *s, int ret, char *info) {
         wh_acc = 0;
         wh_raw = 0;
         wh_speed = wh_moved = wh_dir = 0; /* a new touch starts from rest */
+        wh_pending = 0;
         wh_moved_at = at;
         wheel_held = 1;
         return;
@@ -388,17 +396,33 @@ void wheel_sample(int *s, int ret, char *info) {
         wh_since++;
         wl_note_tick(now, before);
         wheel_speed = wh_speed >> 8;
-        if (!wheel_mute) wheel_post(info, dir > 0 ? KEY_PREV : KEY_NEXT); /* x rising is back, as stock */
+        if (!wheel_mute && wheel_post(info, dir > 0 ? KEY_PREV : KEY_NEXT)) { /* x rising is back, as stock */
+            wh_pending_dir = -dir;
+            __sync_fetch_and_add(&wh_pending, 1);
+        }
     }
     s[0] = wh_anchor;
 }
 
 /* The wheel's way to its next tick, in 256ths of a tick: positive toward Next (clockwise), 0 with no
- * finger on it or while it posts no ticks (wheel_raw). Read on the UI thread: two words the
- * encoder thread writes whole, so at worst a sample stale (tilt.c). */
+ * finger on it or while it posts no ticks (wheel_raw). Read on the UI thread: words the encoder
+ * thread writes whole, so at worst a sample stale (tilt.c). A tick posted and not yet taken by
+ * ringnav is a whole one its way (256): its travel has left wh_acc, but its row has not stepped,
+ * and the carry alone would show the bar at rest for a frame on the row it is leaving, or against a
+ * list's end before tilt_end holds it (the About page's jump, docs/internals.md#wheel-movement). A
+ * tick no one takes in WHEEL_TAKE_MS (a key the UI dropped) is let go. */
 int wheel_part(void) {
     int acc = wh_acc, units = wh_units;
-    return wheel_held && !wheel_raw && units > 0 ? -acc * 256 / units : 0;
+    if (!wheel_held || wheel_raw || units <= 0) return 0;
+    if (wh_pending > 0 && (unsigned)time_now_ms() - wh_tick_at < WHEEL_TAKE_MS)
+        return wh_pending_dir * 256;
+    return -acc * 256 / units;
+}
+
+/* ringnav, on a wheel key's release: one posted tick reached the UI. A held turn's replayed ticks
+ * (input.c hold_wheel) were never posted, and find none left to take. */
+void wheel_tick_taken(void) {
+    if (wh_pending > 0) __sync_fetch_and_sub(&wh_pending, 1);
 }
 
 /* $t9 still holds ts_read, which stock loaded for its jalr; $s1 is the thread's info, which stock

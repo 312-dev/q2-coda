@@ -1521,6 +1521,40 @@ def test_the_dark_wheel_ticks_as_lit(fw):
     assert wheel.ticks() == ['prev']
 
 
+@in_fork
+def test_wheel_part_holds_a_full_tick_until_the_ui_takes_it(fw):
+    """The tick's travel leaves the wheel's thread at once, but the row steps only when ringnav takes the posted key:
+    until then wheel_part holds a whole tick that way, so the bar's lean (tilt.c) never drops to rest for a frame on the
+    row it is leaving, or against a list's end, before the step (docs/internals.md#wheel-movement)."""
+    wheel, part = Wheel(fw), fw.fn('wheel_part', C.c_int)
+    wheel.touch(100), wheel.touch(127)
+    assert part() == -27 * 256 // 28 + 1  # x rising is Previous: all but a unit of a tick that way
+    wheel.touch(129)
+    assert wheel.ticks() == ['prev']
+    assert part() == -256  # posted, not yet taken
+    taken = fw.fn('wheel_tick_taken', None)
+    taken()
+    assert part() == -(256 // 28)  # taken: the unit carried past it
+    taken()  # a replayed tick (a held turn's) takes nothing more
+    wheel.touch(101)
+    assert wheel.ticks() == ['prev', 'next'] and part() == 256  # x falling 28: Next, posted
+    wheel.now += O['WHEEL_TAKE_MS']
+    assert part() == 0  # a tick nobody took for that long is let go: the carry again
+
+
+@in_fork
+@pytest.mark.parametrize('case', ['queue full', 'stopped'])
+def test_wheel_part_holds_nothing_for_a_tick_not_posted(fw, case):
+    wheel, part = Wheel(fw), fw.fn('wheel_part', C.c_int)
+    wheel.touch(100)
+    if case == 'queue full':
+        wheel.q[:] = [0, 55, 0, 64]
+    else:
+        fw.var('wheel_mute', C.c_int).value = 1  # Return's stop (ringnav_queue_event)
+    wheel.touch(128)
+    assert wheel.ticks() == [] and part() == 0
+
+
 @pytest.fixture
 def wheel(fw):
     """The wheel outside a fork: the stand-in's bytes at WHEEL_POST go back after the test."""
