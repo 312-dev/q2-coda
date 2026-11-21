@@ -17,6 +17,7 @@ LOCK, UNLOCK = DATA + 0x200, DATA + 0x300  # pthread's stand-ins: jr $ra
 MUTEX, META, STRINGS = DATA + 0x400, DATA + 0x500, DATA + 0x600
 PDU = DATA + 0x1000
 OPEN, READ, CLOSE = DATA + 0x340, DATA + 0x360, DATA + 0x380  # libc's stand-ins, answered in hook
+CLOCK, PLAY_STATUS = DATA + 0x3a0, DATA + 0x3c0  # clock_gettime's stand-in; libbtctl's g_play_status
 SESSION, TARGET = DATA + 0x2000, DATA + 0x2040  # bluetoothd's struct avrcp and its target (the controller's record)
 FD = 9
 # A controller's SupportedFeatures (AVRCP 1.6.2, table 8.2): categories 1 and 2 and browsing, and the same with
@@ -27,22 +28,25 @@ CT_15, CT_16_COVER = 0x0043, 0x03c3
 @pytest.fixture(scope='module')
 def code():
     blob, sym = build.bt_meta()
-    return blob, sym['bt_meta_get_element_attributes'] - build.BT_META
+    return blob, sym['bt_meta_get_element_attributes'] - build.BT_META, sym['bt_meta_get_play_status'] - build.BT_META
 
 
-def run(code, request, meta=None, features=CT_15, cover=None, files=None):
+def run(code, request, meta=None, features=CT_15, cover=None, files=None, entry=None, play=None, status=0, now_ms=0):
     """The handler on pdu (an AVRCP header and params), meta (track, total, time, title, artist, album, genre) or none
     in g_track_meta, for a controller whose record has features (None: no record), with BT_COVER_FILE holding cover
     (None: no file): (its return, the pdu after, the calls to pthread as (function, mutex, $gp)). files takes the
-    calls to libc: ('open', path, flags), ('read', fd, size), ('close', fd)."""
-    blob, entry = code
+    calls to libc: ('open', path, flags), ('read', fd, size), ('close', fd). entry: another entry's offset in the code
+    (GetPlayStatus's), with play in BT_PLAY_FILE (None: no file), status in g_play_status and now_ms on the monotonic
+    clock."""
+    blob, first = code[0], code[1]
+    entry = first if entry is None else entry
     u = Uc(UC_ARCH_MIPS, UC_MODE_MIPS32 | UC_MODE_LITTLE_ENDIAN)
     u.mem_map(CODE, 0x10000)
     u.mem_map(DATA, 0x10000)
     u.mem_map(STACK - 0x10000, 0x10000)
     u.mem_write(CODE, blob)
     u.mem_write(STACK - 0x10000, b'5' * 0x10000)  # what a stack holds is not zeros: a short read must not pass as digits
-    for stub in (LOCK, UNLOCK, RET, OPEN, READ, CLOSE):
+    for stub in (LOCK, UNLOCK, RET, OPEN, READ, CLOSE, CLOCK):
         u.mem_write(stub, struct.pack('<2I', 0x03e00008, 0))  # jr $ra; nop
     got = {name: slot for name, (_, slot) in build.BT_META_GOT.items()}
     track_meta = DATA + 0x80  # libbtctl's g_track_meta, a pointer
@@ -50,8 +54,12 @@ def run(code, request, meta=None, features=CT_15, cover=None, files=None):
     u.mem_write(GP + got['NOTIFY_MUTEX'], struct.pack('<I', MUTEX))
     u.mem_write(GP + got['LOCK'], struct.pack('<I', LOCK))
     u.mem_write(GP + got['UNLOCK'], struct.pack('<I', UNLOCK))
-    for name, stub in (('OPEN', OPEN), ('READ', READ), ('CLOSE', CLOSE)):
+    for name, stub in (('OPEN', OPEN), ('READ', READ), ('CLOSE', CLOSE), ('CLOCK_GETTIME', CLOCK)):
         u.mem_write(GP + got[name], struct.pack('<I', stub))
+    u.mem_write(GP + got['PLAY_STATUS'], struct.pack('<I', PLAY_STATUS))
+    u.mem_write(PLAY_STATUS, struct.pack('<i', status))
+    content = {build.BT_COVER_FILE: cover, build.BT_PLAY_FILE: None if play is None else play.encode()}
+    opened = {}
     u.mem_write(SESSION + 0xc, struct.pack('<I', 0 if features is None else TARGET))
     u.mem_write(TARGET, struct.pack('<IHHi', 0, 0x0106, 0, features or 0))  # player, version, features
     files = [] if files is None else files
@@ -75,16 +83,23 @@ def run(code, request, meta=None, features=CT_15, cover=None, files=None):
         if address in (LOCK, UNLOCK):
             calls.append(({LOCK: 'lock', UNLOCK: 'unlock'}[address], uc.reg_read(UC_MIPS_REG_4), uc.reg_read(UC_MIPS_REG_28),
                           uc.reg_read(UC_MIPS_REG_25) == address))
-        if address in (OPEN, READ, CLOSE):
+        if address in (OPEN, READ, CLOSE, CLOCK):
             assert uc.reg_read(UC_MIPS_REG_25) == address and uc.reg_read(UC_MIPS_REG_28) == GP
             a0, a1, a2 = (uc.reg_read(r) for r in (UC_MIPS_REG_4, UC_MIPS_REG_5, UC_MIPS_REG_6))
-            if address == OPEN:
-                files.append(('open', bytes(uc.mem_read(a0, 32)).split(b'\0')[0].decode(), a1))
-                uc.reg_write(UC_MIPS_REG_2, 0xffffffff if cover is None else FD)
+            if address == CLOCK:
+                assert a0 == 1, 'CLOCK_MONOTONIC, the clock demo stamps BT_PLAY_FILE with'
+                uc.mem_write(a1, struct.pack('<2i', now_ms // 1000, now_ms % 1000 * 1000000 + 999))
+                uc.reg_write(UC_MIPS_REG_2, 0)
+            elif address == OPEN:
+                path = bytes(uc.mem_read(a0, 32)).split(b'\0')[0].decode()
+                files.append(('open', path, a1))
+                fd = FD + len(opened) if content.get(path) is not None else -1
+                if fd >= 0: opened[fd] = content[path]
+                uc.reg_write(UC_MIPS_REG_2, fd & 0xffffffff)
             elif address == READ:
                 files.append(('read', a0, a2))
-                uc.mem_write(a1, cover[:a2])
-                uc.reg_write(UC_MIPS_REG_2, len(cover[:a2]))
+                uc.mem_write(a1, opened[a0][:a2])
+                uc.reg_write(UC_MIPS_REG_2, len(opened[a0][:a2]))
             else:
                 files.append(('close', a0))
                 uc.reg_write(UC_MIPS_REG_2, 0)
@@ -226,7 +241,7 @@ def sdp_lists(code, record=0x7000, version=0x7100):
     """bt_cover_sdp on record with the caller's AVCTP version data, bluetoothd's SDP functions stood in for here:
     (what sdp_set_add_access_protos was handed, as nested lists of ('uuid', n), ('u16', n) and the version; what
     was allocated and never freed)."""
-    blob, _ = code
+    blob = code[0]
     entry = build.bt_meta()[1]['bt_cover_sdp'] - build.BT_META
     u = Uc(UC_ARCH_MIPS, UC_MODE_MIPS32 | UC_MODE_LITTLE_ENDIAN)
     u.mem_map(CODE, 0x10000)
@@ -315,3 +330,52 @@ def test_the_psm_is_the_one_q2_bip_listens_on():
     assert int(psm, 16) == build.BT_COVER_PSM
     assert build.BT_COVER_PSM & 0x0101 == 0x0001  # a valid dynamic PSM: odd, its high byte even
     assert len(build.BT_COVER_FILE) == 15  # with its NUL, the four words bt_meta.c builds
+
+
+# ---- GetPlayStatus (docs/internals.md#track-metadata): length, position and status ----
+
+def play_status(code, play, status, now_ms, meta=SONG, params=b''):
+    """GetPlayStatus asked with BT_PLAY_FILE holding play: (its return, (length, position, status) or the reject)."""
+    req = b'\x00\x19\x58\x30\x00' + struct.pack('>H', len(params)) + params
+    files = []
+    ctype, pdu, calls = run(code, req, meta, entry=code[2], play=play, status=status, now_ms=now_ms, files=files)
+    n = struct.unpack_from('>H', pdu, 5)[0]
+    if ctype != 0x0c: return ctype, pdu[7:7 + n], calls, files
+    assert n == 9 and pdu[4] == 0
+    return ctype, struct.unpack_from('>IIB', pdu, 7), calls, files
+
+
+def test_play_status_answers_the_position_demo_wrote_while_paused(code):
+    """Stock's handler answers position 0 and length 0xFFFFFFFF for every song: it reads a registered player, which
+    stock never has. Paused, the position is the file's as written, whatever the time since."""
+    ctype, got, calls, files = play_status(code, '61000 245000 5000\n', 2, 90000)
+    assert ctype == 0x0c and got == (245000, 61000, 2)
+    assert ('open', build.BT_PLAY_FILE, 0) in files and [c[0] for c in calls] == ['lock', 'unlock']
+
+
+def test_play_status_moves_on_from_the_stamp_while_playing(code):
+    """Playing (g_play_status 1, as demo's last status said), the position is the file's plus the time since its
+    stamp on the monotonic clock, so a car that asks every second sees it move between demo's writes."""
+    assert play_status(code, '61000 245000 5000\n', 1, 7500)[1] == (245000, 63500, 1)
+    assert play_status(code, '61000 245000 4294967000\n', 1, 704)[1] == (245000, 62000, 1), 'the clock wraps at 2^32 ms'
+
+
+def test_play_status_never_passes_the_length(code):
+    assert play_status(code, '244000 245000 0\n', 1, 9000)[1] == (245000, 245000, 1)
+
+
+def test_play_status_live_has_no_length_or_position(code):
+    """A radio stream: -1 for both, AVRCP's 0xFFFFFFFF, not supported."""
+    assert play_status(code, '-1 -1 0\n', 1, 3000)[1] == (0xffffffff, 0xffffffff, 1)
+
+
+@pytest.mark.parametrize('play', [None, '', 'x 1 2\n', '12'])
+def test_play_status_without_a_file_takes_the_record_s_length(code, play):
+    """No file, or one that does not parse: the record's length and no position, as before demo writes one."""
+    assert play_status(code, play, 3, 1000)[1] == (245000, 0xffffffff, 3)
+    assert play_status(code, play, 0, 1000, meta=None)[1] == (0xffffffff, 0xffffffff, 0)
+
+
+def test_play_status_with_parameters_is_rejected(code):
+    ctype, got, _, _ = play_status(code, '1 2 3\n', 1, 0, params=b'\x01')
+    assert ctype == 0x0a and got == b'\x01'

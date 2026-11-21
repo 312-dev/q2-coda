@@ -515,7 +515,13 @@ BT_META = 0x150000
 BT_META_SLOT = (0x12f698, 0x00000120, 0x00039454)  # (address, stock PDU and type word, stock handler)
 BT_META_GOT = {'TRACK_META': ('g_track_meta', -28700), 'NOTIFY_MUTEX': ('g_notify_mutex', -28244),
                'LOCK': ('pthread_mutex_lock', -28204), 'UNLOCK': ('pthread_mutex_unlock', -27872),
-               'OPEN': ('open', -27244), 'READ': ('read', -27676), 'CLOSE': ('close', -28156)}
+               'OPEN': ('open', -27244), 'READ': ('read', -27676), 'CLOSE': ('close', -28156),
+               'PLAY_STATUS': ('g_play_status', -27768), 'CLOCK_GETTIME': ('clock_gettime', -28120)}
+# GetPlayStatus's entry in the same table (PDU 0x30), upstream's in stock, which with no player answers length
+# 0xFFFFFFFF at position 0 for every song: bt_meta.c's bt_meta_get_play_status answers from BT_PLAY_FILE, the
+# length, position and its stamp demo's Now Playing (patch/now_source.c) keeps there, and g_play_status.
+BT_PLAY_SLOT = (0x12f6d0, 0x00000130, 0x00037324)
+BT_PLAY_FILE = '/tmp/q2-bt.play'  # 16 bytes with its NUL: bt_meta.c builds it from four words
 BT_META_ROOM = 502  # an AVRCP PDU's parameters in one AVC frame (BlueZ's AVRCP_PDU_MTU)
 # Cover art over Bluetooth (docs/internals.md#bluetooth-cover-art). BT_COVER_FILE is where demo's payload keeps
 # the playing song's image handle and cover (patch/bt_cover.c): bt_meta.c reads the handle for AVRCP's attribute 8,
@@ -2361,6 +2367,7 @@ def bt_meta():
             *(f'-DBT_META_GOT_{k}={o}' for k, (_, o) in BT_META_GOT.items()),
             *(f'-DBT_SDP_GOT_{k}={o}' for k, (_, o) in BT_SDP_GOT.items()), f'-DBT_COVER_PSM={BT_COVER_PSM:#x}',
             *(f'-DBT_COVER_PATH_{i}={w:#x}u' for i, w in enumerate(struct.unpack('<4I', BT_COVER_FILE.encode().ljust(16, b'\0')))),
+            *(f'-DBT_PLAY_PATH_{i}={w:#x}u' for i, w in enumerate(struct.unpack('<4I', BT_PLAY_FILE.encode().ljust(16, b'\0')))),
             '-c', ROOT/'tools/bt_meta.c', '-o', d/'m.o')
         relocs = run('readelf', '-rW', d/'m.o')
         check(not re.search(r'R_MIPS_(?!PC16)\w+', relocs.split('.rel.pdr')[0]), 'bt_meta.c needs a relocation')
@@ -2371,7 +2378,7 @@ def bt_meta():
         return (d/'m.bin').read_bytes(), symbols(d/'m.elf')
 
 def patch_bluetoothd(raw):  # pragma: no mutate block
-    """Point stock bluetoothd's control-channel GetElementAttributes at tools/bt_meta.c, and have its AVRCP target
+    """Point stock bluetoothd's control-channel GetElementAttributes and GetPlayStatus at tools/bt_meta.c, and have its AVRCP target
     record name cover art (BT_SDP_WORDS, BT_SDP_JUMP)."""
     check(sha(raw) == BLUETOOTHD_SHA, 'Unexpected bluetoothd')
     image = bytearray(raw)
@@ -2381,6 +2388,9 @@ def patch_bluetoothd(raw):  # pragma: no mutate block
     site, pdu, handler = BT_META_SLOT
     check(struct.unpack_from('<2I', raw, fileoff(raw, site)) == (pdu, handler), 'Unexpected bluetoothd handler table')
     struct.pack_into('<I', image, fileoff(raw, site + 4), sym['bt_meta_get_element_attributes'])
+    site, pdu, handler = BT_PLAY_SLOT
+    check(struct.unpack_from('<2I', raw, fileoff(raw, site)) == (pdu, handler), 'Unexpected bluetoothd handler table')
+    struct.pack_into('<I', image, fileoff(raw, site + 4), sym['bt_meta_get_play_status'])
     for site, stock, new in BT_SDP_WORDS:
         check(struct.unpack_from('<I', raw, fileoff(raw, site))[0] == stock, f'Unexpected bluetoothd word at {site:#x}')
         struct.pack_into('<I', image, fileoff(raw, site), new)
