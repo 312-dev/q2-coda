@@ -697,28 +697,57 @@ def np_updates(car):
     return params(ps.get(0, b'')), params(ps[1])
 
 
-def test_bmw_radio_is_live_with_no_cover(probe, tmp_path):
-    """A radio in Now Playing (coda_rc_shim.c cr_now: source=radio, live=1, no path): its song and artist, the station
-    as the album, and no duration, no position and no cover, even with a cover cached for those words; nor any
-    position after, as it plays (docs/internals.md#now-playing-source)."""
+def np_and_files(car, until, seconds=1.5):
+    """Packets for up to seconds, acknowledged as the BMW does: [(media, playback)] of each NowPlayingUpdate and
+    {transfer id: its setup's size} of the file transfer session, until until(updates) holds."""
+    updates, setups, end = [], {}, time.time() + seconds
+    while time.time() < end and not until(updates):
+        try:
+            got = car.packet_any(0.3)
+        except AssertionError:
+            continue
+        if not got or not got[4]:
+            continue
+        session, pl = got[3], got[4]
+        if session == 2 and pl[1] == 0x04:
+            setups[pl[0]] = int.from_bytes(pl[2:10], 'big')
+        elif session != 2 and pl[:2] == b'\x40\x40' and (pl[4] << 8 | pl[5]) == 0x5001:
+            ps = params(pl[6:])
+            updates.append((params(ps.get(0, b'')), params(ps.get(1, b''))))
+    return updates, setups
+
+
+def test_bmw_radio_is_live_and_clears_the_cover(probe, tmp_path):
+    """A radio in Now Playing (coda_rc_shim.c cr_now: source=radio, live=1, no path) after a Library song with a cover:
+    its song and artist, the station as the album, no duration and no position, and a new cover that is an empty file
+    transfer, even with a cover cached for its words. Leaving the cover out kept the song's on the BMW's cluster
+    (Radio over USB on q2muse-1123); an empty transfer is how an iPhone says there is none. No position
+    after either, as it plays (docs/internals.md#now-playing-source)."""
     p, car, fd, log, files = bmw_up(probe, tmp_path)
     jpeg = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=160x160', '-frames:v', '1',
                            '-f', 'mjpeg', '-'], check=True, capture_output=True).stdout
-    (files['art']/f'{fnv_part(fnv_part(2166136261, "System of a Down"), "93XRT 93.1 FM"):08x}.jpg').write_bytes(jpeg)
-    files['np'].write_text('state=1\npos=0\nlen=0\nsource=radio\nlive=1\nstation=93XRT\ntitle=Toxicity\n'
-                           'artist=System of a Down\nalbum=93XRT 93.1 FM\npath=\n')
+    for artist, album in (('Massive Attack', 'Mezzanine'), ('System of a Down', '93XRT 93.1 FM')):
+        (files['art']/f'{fnv_part(fnv_part(2166136261, artist), album):08x}.jpg').write_bytes(jpeg)
+    car.hold = False
     try:
-        media, play = np_updates(car)
-        assert media[1] == b'Toxicity\0' and media[6] == b'93XRT 93.1 FM\0' and media[12] == b'System of a Down\0'
-        assert 4 not in media and 0x1a not in media, media.keys()
-        assert play[0] == b'\x01' and 1 not in play, play.keys()
-        end = time.time() + 1.2
-        while time.time() < end:
-            try:
-                mid, ps = car.msg(0.3)
-            except AssertionError:
-                continue
-            assert not (mid == 0x5001 and 1 in ps and 1 in params(ps[1])), 'no position for a stream'
+        attrs = b''.join(prm(a) for a in (0, 1, 4, 6, 12, 0x1a))
+        car.send(message(0x5000, prm(0, attrs), prm(1, prm(0) + prm(1))))
+        updates, setups = np_and_files(car, lambda u: False, 0.8)
+        song = updates[0][0]
+        assert song[1] == b'Teardrop\0' and setups[song[0x1a][0]] > 0, 'the Library song\'s cover first'
+        files['np'].write_text('state=1\npos=0\nlen=0\nsource=radio\nlive=1\nstation=93XRT\ntitle=Toxicity\n'
+                               'artist=System of a Down\nalbum=93XRT 93.1 FM\npath=\n')
+        updates, more = np_and_files(car, lambda u: False, 1.5)
+        setups.update(more)
+        radio = [(m, pb) for m, pb in updates if m.get(1) == b'Toxicity\0']
+        assert radio, [m.get(1) for m, _ in updates]
+        media, play = radio[0]
+        assert media[6] == b'93XRT 93.1 FM\0' and media[12] == b'System of a Down\0'
+        assert 4 not in media and play[0] == b'\x01' and 1 not in play, (media.keys(), play.keys())
+        assert 0x1a in media, 'a cover named, or the car keeps the song\'s'
+        art = media[0x1a][0]
+        assert art != song[0x1a][0] and setups.get(art) == 0, (art, setups)
+        assert not any(1 in pb for _, pb in updates[updates.index(radio[0]):]), 'no position for a stream'
     finally:
         stop(p, fd)
 
