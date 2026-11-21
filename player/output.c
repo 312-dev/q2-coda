@@ -112,7 +112,8 @@ static int candidates(const struct pcm_format *f, int out[4][2]) {
  * meet a car. */
 #define CAR_FILE "/tmp/q2-iap.audio"
 #define CAR_RATE 44100
-#define CAR_WAIT_MS 1000
+#define CAR_WAIT_MS 1000 /* a close's silence waits at most this long for room (output_close) */
+#define CAR_LOOK_MS 250  /* a write waiting for the car looks at the car file this often (sink) */
 
 static const char *car_path(void) { return getenv("Q2PLAYER_CAR") ? getenv("Q2PLAYER_CAR") : CAR_FILE; }
 
@@ -135,6 +136,9 @@ int output_car(char *dev, unsigned cap, unsigned *rate) {
     return 0;
 #endif
 }
+
+static const volatile int *car_cut;
+void output_car_watch(const volatile int *cut) { car_cut = cut; }
 
 void output_car_gone(void) {
 #ifdef Q2_CAR_USB
@@ -687,9 +691,19 @@ static int sink_to(struct output *o, const uint8_t *data, int frames) {
         }
         o->dry_ok = 0;
         while (frames > 0) {
-            /* The car's stream moves only while the car reads it; a car that stopped (it changed source, the cable
-             * came out) would hold a blocking write for ever. CAR_WAIT_MS with no room is taken as that. */
-            if (o->way == 3 && snd_pcm_wait(o->pcm, CAR_WAIT_MS) == 0) return OUTPUT_CAR_GONE;
+            /* The car's stream moves only while the car reads it, and a car begins to read some time after it asks
+             * for audio (the BMW 2011 ms after, 2026-11-20: the one-second limit this had took that for the car gone,
+             * and the song went to Bluetooth for good). So a write waits for room as long as the car file says the
+             * car wants audio, looking at it every CAR_LOOK_MS: q2-iap removes it when the car stops (it changed
+             * source) and q2car.sh when the cable comes out, and that ends the car's way. A stop or a skip (the
+             * engine's cut, output_car_watch) ends the wait, the frames dropped, as the stop drops them. ponytail:
+             * a pause or a seek waits until the car reads; the BMW reads from about 2 s after it asks. */
+            if (o->way == 3) {
+                while (snd_pcm_wait(o->pcm, CAR_LOOK_MS) == 0) {
+                    if (!output_car(NULL, 0, NULL)) return OUTPUT_CAR_GONE;
+                    if (car_cut && *car_cut) return 0;
+                }
+            }
             snd_pcm_sframes_t n = snd_pcm_writei(o->pcm, data, frames);
             if (n == -EINTR || n == -EAGAIN) continue;
             if (n == -EPIPE || n == -ESTRPIPE) { /* the buffer ran dry: start again here */

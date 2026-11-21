@@ -12,7 +12,7 @@
  *   q2-iap [--echo] [--echo-from N] [--iap2] [--np FILE] [--uuid HEX] [--car-pcm DEV] [--car-file F]
  *          [--cmd-file F] [--rate-file F] [--art-dir D] [--sessions N] [--for S] [--gap-ms MS] [--carplay]
  *          [--phase NAME] [--state F] [--udc F] [--counters DIR] [--under F] [--auto-ms MS] [--car-ms MS]
- *          [--lib-db F] [--lib-sent F] [--list-file F] [--queue-file F]
+ *          [--lib-db F] [--lib-cat F] [--lib-sent F] [--list-file F] [--queue-file F]
  *          LOG DIR:KIND...
  *   q2-iap --descs KIND     the descriptor and strings blobs for KIND on stdout (tests)
  *
@@ -583,14 +583,20 @@ static void summary(void) {
     if (!state_file) return;
     counters(&sent, &missed, &under);
     if (!counted) sent0 = sent, missed0 = missed, under0 = under;
-    unsigned ds = sent - sent0, dm = missed - missed0;
+    unsigned ds = sent - sent0, dm = missed - missed0, rate[3] = { 0, 0, 0 };
+    static const char *const rates[] = { "p_rate", "rate_sets", "rate_asked" }; /* the car's rate, as the module has it */
+    for (int k = 0; counters_dir && k < 3; ++k) {
+        char path[160];
+        snprintf(path, sizeof path, "%s/%s", counters_dir, rates[k]);
+        read_uint(path, &rate[k]);
+    }
     snprintf(msg, sizeof msg,
              "summary: host %s (%s, %ld ms), car \"%s\", identified %s, audio asked %s, flowing %s, in_sent %u in_missed %u"
-             " (%u.%u%%), underruns %u, problems %d",
+             " (%u.%u%%), underruns %u, problems %d, p_rate %u rate_sets %u rate_asked %u",
              verdicts[verdict], why[0] ? why : "-", verdict_ms, car_name, identified ? "yes" : "no",
              audio_at >= 0 || flowing_at >= 0 ? "yes" : "no",
              flowing_at >= 0 ? "yes" : "no", ds, dm, ds + dm ? dm * 100 / (ds + dm) : 0,
-             ds + dm ? dm * 1000 / (ds + dm) % 10 : 0, under - under0, troubles);
+             ds + dm ? dm * 1000 / (ds + dm) % 10 : 0, under - under0, troubles, rate[0], rate[1], rate[2]);
     logline("car", msg);
 }
 
@@ -770,6 +776,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(o, "--state")) state_file = v, ++a;
         else if (!strcmp(o, "--lib-db")) lib_db = v, ++a;
         else if (!strcmp(o, "--lib-sent")) lib_sent_file = v, ++a;
+        else if (!strcmp(o, "--lib-cat")) lib_cat = v, ++a;
         else if (!strcmp(o, "--list-file")) list_file = v, ++a;
         else if (!strcmp(o, "--queue-file")) queue_file = v, ++a;
         else if (!strcmp(o, "--udc")) udc_file = v, ++a;

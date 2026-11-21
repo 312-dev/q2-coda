@@ -43,8 +43,8 @@ struct iap2_np {
 /* The Q2's library as the car is sent it (q2_iap_lib.c fills it): its songs in rid order, their strings as offsets
  * into pool, each one's hash of what the car is sent of it, the revision, and what the car was last sent in full. */
 struct iap2_track {
-    unsigned rid, hash, album_id, artist_id, aartist_id, genre_id;
-    unsigned title, album, artist, aartist, genre; /* offsets into pool */
+    unsigned rid, hash, album_id, artist_id, aartist_id, genre_id, composer_id, ms; /* ms: its length, 0 unknown */
+    unsigned title, album, artist, aartist, genre, composer; /* offsets into pool */
     unsigned short track, disc;
 };
 struct iap2_sent {
@@ -1028,6 +1028,7 @@ static void send_library_info(void) {
 #define LIB_ARTIST 0x5132000Bu
 #define LIB_AARTIST 0x5132000Cu
 #define LIB_GENRE 0x5132000Du
+#define LIB_COMPOSER 0x5132000Eu
 #define LIB_PARTIAL "q2.partial"
 enum { LIB_IDLE, LIB_ITEMS, LIB_GONE };
 static struct {
@@ -1049,12 +1050,14 @@ static void lib_item(const struct iap2_track *t, unsigned mask) {
     param_u64(0, LIB_KEY, t->rid);
     if (mask & 1u << 1) param_str(1, lib_str(t->title));
     if (mask & 1u << 2) param_u8(2, 0);
+    if ((mask & 1u << 4) && t->ms) param_u32(4, t->ms);
     lib_named(mask, 5, LIB_ALBUM, t->album_id, lib_str(t->album));
     if ((mask & 1u << 7) && t->track) param_u16(7, t->track);
     if ((mask & 1u << 9) && t->disc) param_u16(9, t->disc);
     lib_named(mask, 11, LIB_ARTIST, t->artist_id, lib_str(t->artist));
     lib_named(mask, 13, LIB_AARTIST, t->aartist_id, lib_str(t->aartist));
     lib_named(mask, 15, LIB_GENRE, t->genre_id, lib_str(t->genre));
+    lib_named(mask, 17, LIB_COMPOSER, t->composer_id, lib_str(t->composer));
     group_end();
 }
 
@@ -1173,7 +1176,7 @@ static void play_items(const u8 *p, unsigned len) {
 }
 
 /* PlayMediaLibraryCollection: 0 the collection's id, 1 its type (1 an artist, 2 an album, 3 an album artist, 4 a
- * genre; 0 a playlist and 5 a composer have none here), 2 the index to start at. Its songs in the library's order of
+ * genre, 5 a composer; 0 a playlist has none here), 2 the index to start at. Its songs in the library's order of
  * an album: album artist, album, disc, track. */
 static void play_collection(const u8 *p, unsigned len) {
     unsigned n, tn, sn;
@@ -1184,8 +1187,13 @@ static void play_collection(const u8 *p, unsigned len) {
     unsigned *rids = play_rids(l->n);
     for (unsigned i = 0; rids && i < l->n; ++i) {
         const struct iap2_track *t = &l->tracks[i];
-        unsigned of = type == 1 ? t->artist_id : type == 2 ? t->album_id : type == 3 ? t->aartist_id : type == 4 ? t->genre_id : 0;
-        if (type >= 1 && type <= 4 && of == id) rids[k++] = i; /* indexes first, sorted below */
+        unsigned of = type == 1   ? t->artist_id
+                      : type == 2 ? t->album_id
+                      : type == 3 ? t->aartist_id
+                      : type == 4 ? t->genre_id
+                      : type == 5 ? t->composer_id
+                                  : 0;
+        if (type >= 1 && type <= 5 && of == id) rids[k++] = i; /* indexes first, sorted below */
     }
     /* insertion sort by album artist, album, disc, track: a collection is an album or a few hundred songs */
     for (unsigned i = 1; i < k; ++i) {

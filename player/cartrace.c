@@ -16,7 +16,7 @@
  *
  * The tap: the first TAP_S seconds of each car session's PCM, exactly as written to the device (S16, the car's rate,
  * stereo), go to TAP_FILE, unless TAP_OFF exists. A session is one car file (output.c car_path) as the probe wrote it:
- * a new file (another inode or mtime) starts the tap again, over the last one. The playback thread only copies into
+ * a new file (another inode or mtime) starts the tap again, the last two kept as TAP_FILE.1 and .2. The playback thread only copies into
  * a ring (TAP_RING bytes, about 3 s at 44.1 kHz); a thread of the session's own writes the ring to the card every
  * TAP_POLL_MS, so a slow card never holds a write to the car. What does not fit in the ring is counted (tap's second
  * number) and left out of the file, never waited for. All of this runs only on way 3, which every image's player has
@@ -101,7 +101,10 @@ static void tap_start(int device_rate) {
     if (!access(TAP_OFF, F_OK)) return;
     struct tap *t = calloc(1, sizeof *t);
     if (!t || !(t->ring = malloc(TAP_RING))) { free(t); return; }
-    unlink(TAP_FILE);
+    /* the last three sessions' taps: car-pcm.raw, then .1 and .2 (a drive's first session was lost under its second,
+     * 2026-11-20) */
+    rename(TAP_FILE ".1", TAP_FILE ".2");
+    rename(TAP_FILE, TAP_FILE ".1");
     if ((t->fd = open(TAP_FILE, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644)) < 0) {
         free(t->ring), free(t);
         return;

@@ -5,6 +5,7 @@
  * (struct iap2_library) and never this file's I/O. The database is opened read-only and closed after the read. */
 
 #define LIB_DB "/mnt/data/database.db"
+#define LIB_CAT "/mnt/mmc/.q2pod/catalogue.db" /* a signed-in server's songs (docs/server-library.md) */
 #define LIB_SENT "/mnt/data/q2-iap.library" /* "rev\n" then "rid hash\n" a song, in rid order */
 #define LIB_WHERE                                                                                                     \
     "fileurl not like '/mnt/mmc/audiobooks/%' and fileurl not like '/mnt/mmc/podcasts/%' and fileurl not like '%.m4b'"
@@ -20,10 +21,11 @@ int sqlite3_finalize(sqlite3_stmt *);
 const unsigned char *sqlite3_column_text(sqlite3_stmt *, int);
 int sqlite3_column_int(sqlite3_stmt *, int);
 const char *sqlite3_errmsg(sqlite3 *);
+int sqlite3_exec(sqlite3 *, const char *, int (*)(void *, int, char **, char **), void *, char **);
 #define SQLITE_OPEN_READONLY 1
 #define SQLITE_ROW 100
 
-static const char *lib_db = LIB_DB, *lib_sent_file = LIB_SENT;
+static const char *lib_db = LIB_DB, *lib_cat = LIB_CAT, *lib_sent_file = LIB_SENT;
 static struct iap2_library lib_t; /* the tables q2_iap2.c reads */
 
 static unsigned lib_fnv(unsigned h, const char *s) {
@@ -88,20 +90,36 @@ static void lib_read_sent(void) {
     free(b);
 }
 
+/* The columns read of a song, songtable's and the catalogue's servertable's alike (stock's schema, which servertable
+ * copies): the rid, title, album, artist, album artist, genre, composer, track, disc and, for a server song, its
+ * length in seconds from servermeta (a card song's is not in the database: 0, none sent) */
+#define LIB_COLS(t)                                                                                                   \
+    "select " t ".id, ifnull(nullif(" t ".name,''),ifnull(" t ".filename,'')), ifnull(" t ".album,''), ifnull("       \
+    t ".songer,''), ifnull(nullif(" t ".albumsonger,''),ifnull(" t ".songer,'')), ifnull(" t ".style,''), ifnull(" t  \
+    ".composer,''), ifnull(" t ".track,0), ifnull(" t ".cd_num,0), "
+
 /* The songs into RAM, in rid order, each with the hash of what the car is sent of it; the revision their hashes'
- * hash. 0, or -1 with no database. */
+ * hash. The card's songs (songtable) and, while a server is signed in (its catalogue on the card, as Car Remote's
+ * library attaches it: coda_rc_lib.c lib_open), the server's (servertable, rids from 0x40000000): on the Q2 of the
+ * 2026-11-20 drive songtable was empty and every song the server's, 9,199 of them, and iDrive got none. 0, or -1 with
+ * no database. */
 static int lib_load(void) {
     sqlite3 *db = 0;
     sqlite3_stmt *st = 0;
-    char *pool = 0;
+    char *pool = 0, sql[900];
     unsigned len = 1, cap = 0, n = 0, tcap = 0, rev = 2166136261u;
     lib_free();
-    if (sqlite3_open_v2(lib_db, &db, SQLITE_OPEN_READONLY, 0) != 0 ||
-        sqlite3_prepare_v2(db,
-                           "select id, ifnull(nullif(name,''),ifnull(filename,'')), ifnull(album,''), ifnull(songer,''),"
-                           " ifnull(nullif(albumsonger,''),ifnull(songer,'')), ifnull(style,''), ifnull(track,0),"
-                           " ifnull(cd_num,0) from songtable where " LIB_WHERE " order by id",
-                           -1, &st, 0) != 0) {
+    int server = 0;
+    if (sqlite3_open_v2(lib_db, &db, SQLITE_OPEN_READONLY, 0) == 0 && !access(lib_cat, 0) && !strchr(lib_cat, '\'')) {
+        snprintf(sql, sizeof sql, "attach '%s' as cat", lib_cat);
+        server = sqlite3_exec(db, sql, 0, 0, 0) == 0;
+    }
+    snprintf(sql, sizeof sql, "%s%s%s", LIB_COLS("songtable") "0 from main.songtable where " LIB_WHERE,
+             server ? " union all " LIB_COLS("s") "ifnull(m.seconds,0) from cat.servertable s left join cat.servermeta m"
+                      " on m.fileurl = s.fileurl"
+                    : "",
+             " order by 1");
+    if (!db || sqlite3_prepare_v2(db, sql, -1, &st, 0) != 0) {
         char msg[200];
         snprintf(msg, sizeof msg, "library: no songs read (%s)", db ? sqlite3_errmsg(db) : "no database");
         logline("lib", msg);
@@ -117,19 +135,20 @@ static int lib_load(void) {
             lib_t.tracks = t;
         }
         struct iap2_track *t = &lib_t.tracks[n];
-        const char *f[5];
-        for (int k = 0; k < 5; ++k) f[k] = (const char *)sqlite3_column_text(st, 1 + k), f[k] = f[k] ? f[k] : "";
+        const char *f[6];
+        for (int k = 0; k < 6; ++k) f[k] = (const char *)sqlite3_column_text(st, 1 + k), f[k] = f[k] ? f[k] : "";
         t->rid = (unsigned)sqlite3_column_int(st, 0);
-        t->track = (unsigned short)sqlite3_column_int(st, 6), t->disc = (unsigned short)sqlite3_column_int(st, 7);
+        t->track = (unsigned short)sqlite3_column_int(st, 7), t->disc = (unsigned short)sqlite3_column_int(st, 8);
+        t->ms = (unsigned)sqlite3_column_int(st, 9) * 1000u;
         t->title = lib_put(&pool, &len, &cap, f[0]), t->album = lib_put(&pool, &len, &cap, f[1]);
         t->artist = lib_put(&pool, &len, &cap, f[2]), t->aartist = lib_put(&pool, &len, &cap, f[3]);
-        t->genre = lib_put(&pool, &len, &cap, f[4]);
+        t->genre = lib_put(&pool, &len, &cap, f[4]), t->composer = lib_put(&pool, &len, &cap, f[5]);
         unsigned h = 2166136261u;
-        for (int k = 0; k < 5; ++k) h = lib_fnv(h, f[k]);
-        t->hash = (h ^ t->track * 131u ^ t->disc * 65537u) * 16777619u;
+        for (int k = 0; k < 6; ++k) h = lib_fnv(h, f[k]);
+        t->hash = (h ^ t->track * 131u ^ t->disc * 65537u ^ t->ms) * 16777619u;
         t->album_id = lib_fnv(lib_fnv(2166136261u, f[3]), f[1]); /* an album is its album artist's */
         t->artist_id = lib_fnv(2166136261u, f[2]), t->aartist_id = lib_fnv(2166136261u, f[3]);
-        t->genre_id = lib_fnv(2166136261u, f[4]);
+        t->genre_id = lib_fnv(2166136261u, f[4]), t->composer_id = lib_fnv(2166136261u, f[5]);
         rev = (rev ^ t->rid) * 16777619u, rev = (rev ^ t->hash) * 16777619u;
         if (t->rid) ++n;
     }
@@ -138,9 +157,10 @@ static int lib_load(void) {
     lib_t.pool = pool, lib_t.n = n;
     snprintf(lib_t.rev, sizeof lib_t.rev, "q2.%u.%08x", n, rev);
     lib_read_sent();
-    char msg[160];
-    snprintf(msg, sizeof msg, "library: %u songs read, revision %s; the car was last sent %s (%u songs)", n, lib_t.rev,
-             lib_t.sent_rev[0] ? lib_t.sent_rev : "nothing", lib_t.sent_n);
+    char msg[240];
+    snprintf(msg, sizeof msg, "library: %u songs read (%s), revision %s; the car was last sent %s (%u songs)", n,
+             server ? "the card's and the server's" : "the card's", lib_t.rev, lib_t.sent_rev[0] ? lib_t.sent_rev : "nothing",
+             lib_t.sent_n);
     logline("lib", msg);
     return 0;
 }

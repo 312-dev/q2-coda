@@ -294,6 +294,7 @@ static int timed_read(struct source *s, const uint8_t **data) {
 
 static int play_through(struct source *s, const struct song *song, struct dsp *d, int untouched, struct stretch *sx) {
     struct ctl *c = &ctl;
+    output_car_watch(&c->cut); /* a stop or a skip ends a write's wait for the car (output.c sink) */
     const struct pcm_format *f = source_format(s);
     static struct rewind rw; /* its block's buffer kept for the next song */
     rw.on = 0;
@@ -404,7 +405,7 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
             n = dsp_run(d, data, n, (double)heard_at(s, sx, &rw, origin, offset) / f->rate, &data);
             if (metering) dsp_meter(f, untouched, data, n, uv);
             int w = output_write(out, data, n);
-            if (w == OUTPUT_CAR_GONE) gone = 1, output_car_gone(); /* the car stopped reading: off its way at once */
+            if (w == OUTPUT_CAR_GONE) gone = 1, output_car_gone(); /* the car's file or its card gone: off its way at once */
             else if (w < 0) return FAILED;
         }
         if (way == 3 && !gone) car_trace_tick(out, 0); /* a line a second while the car plays (docs/iphone-mode.md#car-trace) */

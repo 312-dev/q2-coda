@@ -799,6 +799,8 @@ def test_the_car_s_audio_health(probe, tmp_path):
     counters.mkdir()
     (counters/'in_sent').write_text('1000\n')
     (counters/'in_missed').write_text('7\n')
+    for k, v in (('p_rate', 48000), ('rate_sets', 2), ('rate_asked', 44100)):
+        (counters/k).write_text(f'{v}\n')
     p, car, fd, log, files = bmw_up(probe, tmp_path, '--state', str(tmp_path/'state'), '--counters', str(counters),
                                     '--under', str(tmp_path/'under'))
     state = tmp_path/'state'
@@ -830,7 +832,7 @@ def test_the_car_s_audio_health(probe, tmp_path):
         stop(p, fd)
     text = log.read_text()
     assert 'summary: host car (iAP2\'s detect' in text and 'car "BMW 83828", identified yes' in text
-    assert 'in_sent 3970 in_missed 30 (0.7%), underruns 1, problems 2' in text
+    assert 'in_sent 3970 in_missed 30 (0.7%), underruns 1, problems 2, p_rate 48000 rate_sets 2 rate_asked 44100' in text
 
 
 def test_no_sound_when_the_car_asks_and_takes_nothing(probe, tmp_path):
@@ -870,15 +872,45 @@ SONGS = [  # id, title, album, artist, album artist, genre, track, disc, path
 ]
 
 
+# Stock's songtable as the Q2's /mnt/data/database.db has it (read off the user's Q2, 2026-11-20), and the catalogue's
+# servertable and servermeta as /mnt/mmc/.q2pod/catalogue.db has them (patch/catalogue.c)
+SONGTABLE = ('CREATE TABLE songtable(id INTEGER PRIMARY KEY AUTOINCREMENT, filename VARCHAR(512), fileurl VARCHAR(1024),'
+             ' album VARCHAR(512), songer VARCHAR(256), style VARCHAR(128), name VARCHAR(512), composer VARCHAR(256),'
+             ' albumsonger VARCHAR(256), year INTEGER, track INTEGER, cd_num INTEGER, time INTEGER, time_end INTEGER,'
+             ' time_create INTEGER, Initial INTEGER, bitdepth INTEGER, samprate INTEGER)')
+SERVERTABLE = ('CREATE TABLE servertable(id INT, filename, fileurl, album, songer, style, name, composer, albumsonger,'
+               ' year INT, track INT, cd_num INT, time INT, time_end INT, time_create INT, Initial INT, bitdepth INT,'
+               ' samprate INT)')
+SERVERMETA = ('CREATE TABLE servermeta(id integer primary key, fileurl, app, sid, local, seconds integer, size integer,'
+              ' mbid, suffix, dup, ntitle integer, nartist integer, naa integer, nalbum integer, track integer)')
+
+
+def rows(db, table, songs):
+    for i, t, al, ar, aa, g, tr, d, url in songs:
+        db.execute(f'insert into {table} values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                   (i, url.rsplit('/', 1)[1], url, al, ar, g, t, 'Composer ' + ar if ar else '', aa, 1998, tr, d, 0, 0,
+                    0, 0, 16, 44100))
+
+
 def song_db(path, songs=SONGS):
     import sqlite3
     path.unlink(missing_ok=True)
     db = sqlite3.connect(path)
-    db.execute('create table songtable (id integer primary key, filename text, fileurl text, album text, songer text,'
-               ' albumsonger text, style text, name text, year text, track integer, cd_num integer, time_create integer)')
-    for i, t, al, ar, aa, g, tr, d, url in songs:
-        db.execute('insert into songtable values (?,?,?,?,?,?,?,?,?,?,?,?)',
-                   (i, url.rsplit('/', 1)[1], url, al, ar, aa, g, t, '1998', tr, d, 0))
+    db.execute(SONGTABLE)
+    rows(db, 'songtable', songs)
+    db.commit()
+    db.close()
+
+
+def catalogue_db(path, songs, seconds=245):
+    import sqlite3
+    path.unlink(missing_ok=True)
+    db = sqlite3.connect(path)
+    db.execute(SERVERTABLE)
+    db.execute(SERVERMETA)
+    rows(db, 'servertable', songs)
+    for i, *_, url in songs:
+        db.execute('insert into servermeta (id, fileurl, app, sid, seconds) values (?,?,?,?,?)', (i, url, 'subsonic', 'x', seconds))
     db.commit()
     db.close()
 
@@ -890,7 +922,8 @@ def lib_car(probe, tmp_path, *more, run='run1'):
     if not db.exists():
         song_db(db)
     (tmp_path/run).mkdir()
-    p, car, fd, log, files = bmw_up(probe, tmp_path/run, '--lib-db', str(db), '--lib-sent', str(sent), '--list-file',
+    p, car, fd, log, files = bmw_up(probe, tmp_path/run, '--lib-db', str(db), '--lib-cat', str(tmp_path/'catalogue.db'),
+                                    '--lib-sent', str(sent), '--list-file',
                                     str(tmp_path/'list'), '--queue-file', str(tmp_path/'queue'), *more)
     return p, car, fd, log, files, db, sent
 
@@ -963,6 +996,30 @@ def bmw_msg_keeping_body(self, timeout=3.0):
             continue
         self.last = pl[6:]
         return pl[4] << 8 | pl[5], params(pl[6:])
+
+
+def test_the_library_is_the_card_s_and_the_server_s(probe, tmp_path, monkeypatch):
+    """The user's Q2 (2026-11-20): songtable empty, every song a signed-in server's (9,199 in the catalogue), and iDrive
+    got 0 songs. With the catalogue on the card its servertable's songs go too (rids from 0x40000000, a length from
+    servermeta, composers), after the card's, and a server album plays from iDrive as the shim's list of those rids."""
+    monkeypatch.setattr(BmwCar, 'msg', bmw_msg_keeping_body)
+    song_db(tmp_path/'database.db', [SONGS[1]])
+    server = [(0x40000000 + k, t, 'Vide Noir', 'Lord Huron', '', 'Rock', k + 1, 1,
+               f'/mnt/mmc/.subsonic/cat/a/{k}.flac') for k, t in enumerate(('Lost in Time and Space', 'Never Ever'))]
+    catalogue_db(tmp_path/'catalogue.db', server)
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path)
+    try:
+        items, gone, rev, reset = library(car)
+        assert [int.from_bytes(i[0], 'big') & 0xffffffff for i in items] == [5, 0x40000000, 0x40000001]
+        assert items[1][1] == b'Lost in Time and Space\0' and items[1][4] == (245000).to_bytes(4, 'big')
+        assert items[1][18] == b'Composer Lord Huron\0' and 4 not in items[0], 'a card song: no length in the database'
+        car.send(message(0x4C08, prm(0, items[1][5]), prm(1, b'\x02'), prm(2, (1).to_bytes(4, 'big'))))
+        time.sleep(0.2)
+        assert (tmp_path/'list').read_text() == f'{0x40000000}\n{0x40000001}\n'
+        assert files['cmd'].read_text().split(' ', 1)[1] == 'play 1 0 2\n'
+    finally:
+        stop(p, fd)
+    assert "3 songs read (the card's and the server's)" in log.read_text()
 
 
 def test_playing_from_idrive(probe, tmp_path, monkeypatch):

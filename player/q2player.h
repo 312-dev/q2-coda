@@ -127,12 +127,14 @@ int output_take(struct output *, const struct pcm_format *f, int outputway);
 void output_volume(struct output *, int volume);
 void volume_gains(int volume, float gain[2]); /* left, right */
 int output_write(struct output *, const uint8_t *data, int frames);
-/* output_write's answer when the car stopped taking audio (way 3, docs/iphone-mode.md#car-audio) */
+/* output_write's answer when the car's way ended under a write: its file removed (the car stopped, the cable came out)
+ * or its card gone (way 3, docs/iphone-mode.md#car-audio) */
 #define OUTPUT_CAR_GONE (-2)
 /* Car Audio's output, way 3 (Q2_CAR_USB: every image's player): 1 while the iPhone gadget's car wants USB audio, with its
  * ALSA device and rate when asked; output_car_gone forgets that until the car asks again. */
 int output_car(char *device, unsigned cap, unsigned *rate);
 void output_car_gone(void);
+void output_car_watch(const volatile int *cut); /* the engine's cut flag: a stop or a skip ends a wait for the car */
 /* The song about to start on way 3 is at rate: the next output_open or output_take there asks the car for its rate
  * (car_rate_for) and opens the PCM again at the rate the car then plays at (docs/iphone-mode.md#per-song-rate). keep:
  * a crossfade carries the last song's tail into it, and the car's rate stays as it is. */

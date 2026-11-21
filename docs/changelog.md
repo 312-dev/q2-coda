@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Audio: the music stays on the car's USB audio once the car asks for it; it could fall back to Bluetooth for good when the car took two seconds to start listening. The car's browser now lists the songs of a signed-in server too (it showed none when every song was the server's), with composers. The car logs keep the last three cables and a summary of every cable.
   - Car Audio: songs at 48 kHz now play to the car at 48 kHz, and 44.1 kHz songs at 44.1 kHz, where everything was converted to 44.1 kHz: the Q2 tells the car each song's rate and changes with it between songs (a moment of silence between albums of different rates). Higher rates go to the nearest of the two, and a car that will not change is sent the song converted, never at the wrong speed.
   - Battery: plugging in or unplugging the cable no longer shows "No Temperature Sensor" for a few seconds. Charging warms the power chip's temperature reading by a few degrees at once, which was taken for a broken sensor.
   - Bluetooth: switching Bluetooth off while it is playing to a headset or car no longer leaves a background process using a whole processor core (and battery) until the Q2 restarts.

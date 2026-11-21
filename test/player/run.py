@@ -15,7 +15,7 @@ files in place of ALSA.
 - protocol: for each transcript in fixtures/ (stock's and Q2 Muse's hciplayer under qemu, captured by
   fakedemo.py), the same commands get the same events and answers from q2player.
 """
-import array, concurrent.futures, math, pathlib, re, struct, subprocess, sys, tempfile
+import array, concurrent.futures, math, os, pathlib, re, struct, subprocess, sys, tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -887,7 +887,8 @@ def test_alsa_sw_params(player, songs, tmp):
     """output.c against alsa_test.c's libasound: every way sets stock's software parameters (ao_alsa's init,
     0x438d64-0x438dc4: start at a period, stop_threshold and silence_size at the boundary), and off Bluetooth a write to
     a PCM that ran dry first moves appl_ptr to a period past hw_ptr (snd_pcm_forward by the deficit plus a period)."""
-    got = subprocess.run([tool(tmp, 'alsa_test', '-DHAVE_ALSA')], check=True, capture_output=True, text=True).stdout.split('\n')
+    got = subprocess.run([tool(tmp, 'alsa_test', '-DHAVE_ALSA', '-DQ2_CAR_USB')], check=True, capture_output=True, text=True,
+                         env={**os.environ, 'Q2PLAYER_CAR': str(tmp/'alsa-car.audio')}).stdout.split('\n')
     lines = {' '.join(l.split()[:3] if l.startswith(('open', 'reread', 'device')) else l.split()[:1]): l for l in got if l}
     for way in range(3):
         assert lines[f'open way {way}'].endswith(f'calls 1 start 1378 stop {0x56220000} silence {0x56220000} boundary {0x56220000}'), lines[f'open way {way}']
@@ -915,6 +916,14 @@ def test_alsa_sw_params(player, songs, tmp):
     # demo rewrites asound.conf only when its own link thread sets a headset up (SaveBlueAlsa), and on 2026-11-19 the
     # car's PCM was up 12 minutes before the file named it, so Bluetooth opens the headset connected last by name
     # (bluealsa's plugin: 00:00:00:00:00:00, the highest Sequence), not the file's address.
+    # The car's way (way 3): the BMW asked for USB audio and began to read it 2011 ms later (2026-11-20); the write
+    # that found no room for CAR_WAIT_MS was taken as the car gone, the car file removed and the song sent to Bluetooth
+    # in the same millisecond. Now a write waits while the car file is there, a look at it every 250 ms; the file gone
+    # ends the way (-2, OUTPUT_CAR_GONE); a stop or a skip (the engine's cut) ends the wait, the frames dropped.
+    car = {'car-late': 'r 0 waits 9 ms 2250 writes 1 file 1', 'car-left': 'r -2 waits 3 ms 750 writes 0 file 0',
+           'car-cut': 'r 0 waits 3 ms 750 writes 0 file 1'}
+    for k, v in car.items():
+        assert lines[k] == f'{k} {v}', lines[k]
     devices = {0: 'default', 1: "plug:'bluealsa:DEV=00:00:00:00:00:00,PROFILE=a2dp'", 2: 'hw:1,0'}
     for way, name in devices.items():
         assert lines[f'device way {way}'] == f'device way {way} {name}', lines[f'device way {way}']

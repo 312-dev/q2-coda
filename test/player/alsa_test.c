@@ -83,7 +83,18 @@ snd_pcm_sframes_t snd_pcm_avail(snd_pcm_t *p) { avail_calls++; return avail_now;
 snd_pcm_sframes_t snd_pcm_forward(snd_pcm_t *p, snd_pcm_uframes_t n) { forwarded = (long)n; return (snd_pcm_sframes_t)n; }
 snd_pcm_sframes_t snd_pcm_rewindable(snd_pcm_t *p) { return 0; }
 snd_pcm_sframes_t snd_pcm_rewind(snd_pcm_t *p, snd_pcm_uframes_t n) { return 0; }
-int snd_pcm_wait(snd_pcm_t *p, int ms) { return 1; } /* room at once: the car way (way 3) waits on it */
+/* The car way (way 3) waits on it. Room at once, unless wait_busy waits are to find none first (a car that has asked
+ * for audio and not begun to read: the BMW began 2011 ms after it asked, 2026-11-20); at wait_unlink the car file is
+ * removed (q2-iap: the car stopped, the cable came out), at wait_cut the engine's cut flag is set (a stop or a skip). */
+static int wait_busy, waits, wait_unlink = -1, wait_cut = -1, waited_ms;
+static volatile int cut;
+static const char *car_file;
+int snd_pcm_wait(snd_pcm_t *p, int ms) {
+    ++waits, waited_ms += ms;
+    if (waits == wait_unlink) unlink(car_file);
+    if (waits == wait_cut) cut = 1;
+    return waits > wait_busy;
+}
 int snd_pcm_pause(snd_pcm_t *p, int on) { return 0; }
 int snd_pcm_drop(snd_pcm_t *p) { return 0; }
 int snd_pcm_drain(snd_pcm_t *p) { return 0; }
@@ -120,6 +131,26 @@ static void gone_case(const char *name, int way, int err, int prep, int absent, 
     write_fails = prepare_fails = open_fails = 0, reopen_rate = 0;
 }
 
+/* One write of 100 frames on way 3 to a car that finds no room for `busy` waits: its result, the waits and their ms,
+ * the writes, and whether the car file is still there. */
+static void car_case(const char *name, int busy, int unlink_at, int cut_at) {
+    struct pcm_format f = {0};
+    f.rate = 44100, f.channels = 2, f.bytes = 2;
+    static int16_t silence[200];
+    FILE *c = fopen(car_file, "w");
+    if (c) fputs("hw:CARD=UAC1Gadget,0\n44100\n", c), fclose(c);
+    rate = 44100;
+    struct output *o = output_open(&f, 3, 17);
+    if (!o) { printf("%s open-failed\n", name); return; }
+    output_car_watch(&cut);
+    waits = waited_ms = writes = 0, cut = 0, wait_busy = busy, wait_unlink = unlink_at, wait_cut = cut_at, avail_now = 0;
+    int r = output_write(o, (const uint8_t *)silence, 100);
+    printf("%s r %d waits %d ms %d writes %d file %d\n", name, r, waits, waited_ms, writes, access(car_file, 0) == 0);
+    wait_busy = 0, wait_unlink = wait_cut = -1;
+    output_close(o);
+    output_car_watch(0);
+}
+
 int main(void) {
     unsetenv("Q2PLAYER_PCM");
     setenv("Q2PLAYER_DEVICE", "test", 1);
@@ -140,6 +171,14 @@ int main(void) {
     write_case("dry-usb", 2, RING + 44100);   /* a second past, on a USB DAC */
     rate = 48000;
     write_case("dry-bt", 1, RING + 5000);     /* Bluetooth: not looked at */
+    /* way 3: a car that asked for audio and reads it only 2 s later is waited for, not left (car run 2026-11-20); the
+     * car file gone while waiting ends the car's way; a stop or a skip ends the wait with the frames dropped */
+    car_file = getenv("Q2PLAYER_CAR");
+    if (car_file) {
+        car_case("car-late", 8, -1, -1);
+        car_case("car-left", 1000, 3, -1);
+        car_case("car-cut", 1000, -1, 3);
+    }
     avail_now = 0;
     gone_case("bt-gone", 1, -19, 0, 3, 0);         /* SelectCodec: the new PCM is there after three looks */
     gone_case("bt-gone-xrun", 1, -32, 1, 0, 0);    /* seen first as an underrun, the prepare then -ENODEV */

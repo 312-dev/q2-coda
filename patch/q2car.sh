@@ -14,7 +14,9 @@
 #
 # q2-iap writes what it decided to $STATE (key=value lines, read by demo); this script adds down=1 once the gadget is
 # gone, which is when demo may start another gadget. The log is /mnt/mmc/.q2muse/logs/q2car.log (Send Logs takes
-# it), the earlier one kept as q2car.prev.log; the kernel's last lines go to q2car.log.dmesg at the end.
+# it), the two before it kept as q2car.1.log and q2car.2.log; the kernel's last lines go to q2car.log.dmesg at the end.
+# Each cable's summary line and the module's counters at its end are added to q2car-summary.log (SUMMARY), which
+# is never rotated, only cut to its newer half past SUMMARY_MAX bytes, so a drive's cables are all in one file.
 
 RUN=/tmp/q2car
 STATE=/tmp/q2car.state
@@ -29,6 +31,8 @@ LOGDIR=/mnt/mmc/.q2muse/logs
 mkdir -p "$RUN"
 if [ -d "$LOGDIR" ] && touch "$LOGDIR/.q2car-w" 2>/dev/null; then rm -f "$LOGDIR/.q2car-w"; else LOGDIR=$RUN; fi
 LOG=$LOGDIR/q2car.log
+SUMMARY=$LOGDIR/q2car-summary.log
+SUMMARY_MAX=262144
 
 up() { cut -d' ' -f1 /proc/uptime; }
 log() { echo "$(up) sh $*" >> "$LOG"; }
@@ -125,6 +129,23 @@ gadget_down() {
     fi
     mountpoint -q $CFS && [ -z "$(ls $CFS/usb_gadget 2>/dev/null)" ] && umount $CFS 2>/dev/null
     { echo "==== $(up) $1"; dmesg | tail -n 120; } >> "$LOG.dmesg"
+    keep
+}
+
+# The cable's summary (q2-iap's last line) and the module's counters, once a cable, into SUMMARY.
+keep() {
+    [ -f $RUN/kept ] && return
+    : > $RUN/kept
+    P=/sys/module/usb_f_uac1/parameters
+    m=
+    for f in in_sent in_missed p_rate p_srates rate_sets rate_asked resend_missed; do
+        [ -e $P/$f ] && m="$m $f=$(cat $P/$f)"
+    done
+    { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $(up) $(grep ' car summary:' "$LOG" | tail -n 1 | cut -d' ' -f3-)"
+      echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $(up) module:$m"; } >> "$SUMMARY"
+    if [ "$(wc -c < "$SUMMARY")" -gt $SUMMARY_MAX ]; then
+        tail -c $((SUMMARY_MAX / 2)) "$SUMMARY" > "$SUMMARY.new" && mv -f "$SUMMARY.new" "$SUMMARY"
+    fi
 }
 
 runner() {
@@ -154,8 +175,13 @@ runner() {
 }
 
 start() {
-    [ -f "$LOG" ] && mv -f "$LOG" "${LOG%.log}.prev.log" && mv -f "$LOG.dmesg" "${LOG%.log}.prev.log.dmesg" 2>/dev/null
-    rm -f $STATE
+    # the last three cables' logs: q2car.log, q2car.1.log, q2car.2.log (and their .dmesg)
+    for k in 1 0; do
+        from=$LOG
+        [ $k = 1 ] && from=${LOG%.log}.1.log
+        [ -f "$from" ] && mv -f "$from" "${LOG%.log}.$((k + 1)).log" && mv -f "$from.dmesg" "${LOG%.log}.$((k + 1)).log.dmesg" 2>/dev/null
+    done
+    rm -f $STATE $RUN/kept
     log "start: kernel $(uname -r)"
     setsid sh "$0" _runner </dev/null >/dev/null 2>>"$LOG" &
 }
