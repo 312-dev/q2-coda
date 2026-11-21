@@ -75,8 +75,12 @@ class Machine(uac1_bind.Machine):
         return super().service(name, a)
 
 
-def run(data, resend, reqs, steps=900):
-    """(frames the host got, in order; hw_ptr's travel in frames; in_missed; in_sent) for steps completions"""
+def run(data, resend, reqs, steps=900, silent=False):
+    """(frames the host got, in order; hw_ptr's travel in frames; in_missed; in_sent) for steps completions. The
+    controller gives back every third request unsent with -ENODATA; with silent, every other request unsent with
+    status 0 and actual 0 instead, as the Q2's dwc2 did in the car and at the desk (2026-11-21: in_zero exactly half
+    of in_sent with one request, a third with two), its isochronous IN completed by the endpoint's disable after an
+    incomplete interval (dwc2_hsotg_complete_in: size_loaded less the untouched size_left)."""
     m = Machine(data)
     sym = m.symbols
     if 'resend_missed' not in sym:
@@ -101,6 +105,7 @@ def run(data, resend, reqs, steps=900):
     m.write(rt + RT_DMA_AREA, ring)
     m.write(rt + RT_DMA_BYTES, RING_FRAMES * 4)
     m.write(prm + PRM_UAC, uac)
+    m.write(prm + 20, 400)  # max_psize (PRM_MAX_PSIZE): the AS IN endpoint's wMaxPacketSize, uac1_build.py CARRY_F
     m.uc.mem_write(prm + PRM_ENABLED, b'\x01')
     m.write(prm + PRM_SS, sub)
     ep = m.alloc(0x40)
@@ -115,14 +120,14 @@ def run(data, resend, reqs, steps=900):
     host, moved, last = [], 0, 0
     for i in range(steps):
         req = m.queue.pop(0)
-        sent = i % 3 != 2
+        sent = i % 2 == 0 if silent else i % 3 != 2
         m.t += 1000000
         n = 0
         if sent:
             n = m.read(req + REQ_LENGTH)
             host += struct.unpack(f'<{n // 4}I', m.read(m.read(req + REQ_BUF), n))
         m.write(req + REQ_ACTUAL, n)
-        m.write(req + REQ_STATUS, 0 if sent else ENODATA)
+        m.write(req + REQ_STATUS, 0 if sent or silent else ENODATA)
         m.call('u_audio_iso_complete', ep, req)
         hw = m.read(prm + PRM_HW_PTR) // 4
         moved += (hw - last) % RING_FRAMES
@@ -230,6 +235,7 @@ def rate_run(data):
         for _ in range(n):
             r = m.queue.pop(0)
             m.write(r + REQ_STATUS, 0)
+            m.write(r + REQ_ACTUAL, m.read(r + REQ_LENGTH))  # sent whole, as a controller reports it
             m.call('u_audio_iso_complete', ep, r)
             out.append(m.read(r + REQ_LENGTH))
         return out
@@ -333,6 +339,19 @@ def main(argv):
                 wrong.append(f'{what}: not the desk pattern (88 or 89 frames, then 44 or 45 skipped): {steady[:6]}')
             if abs(moved / got - 1.5) > 0.01:
                 wrong.append(f'{what}: hw_ptr moved {moved / got:.3f} times what the host got, not 1.5')
+    # The car's stutter (2026-11-21, q2muse-1123): the controller sent every other packet empty, reporting it sent
+    # (status 0, actual 0). Each such packet's frames must still reach the host, in order, and the host must get a
+    # millisecond of audio a millisecond: 44.1 frames a completion over the run, hw_ptr moving what the host got.
+    host, moved, missed, sent, counted = run(data, 1, 1, silent=True)
+    r = runs(host)
+    got = len(host) - next(i for i, v in enumerate(host) if v) + 1
+    print(f'silent misses, 1 request: host got {got} counter frames in {len(r)} runs, hw_ptr moved {moved}; {counted}')
+    if len(r) != 1:
+        wrong.append(f'silent misses: the host\'s frames break {len(r) - 1} times: {r[:6]}')
+    if moved - got not in range(0, 91):
+        wrong.append(f'silent misses: hw_ptr moved {moved}, the host got {got}')
+    if got < 900 * 441 // 10 - 100:
+        wrong.append(f'silent misses: the host got {got} frames in 900 ms, not about {900 * 441 // 10}')
     rate_wrong, seen = rate_run(data)
     print('rates: ' + '; '.join(seen))
     wrong += rate_wrong
