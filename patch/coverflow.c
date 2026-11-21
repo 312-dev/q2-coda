@@ -5084,8 +5084,8 @@ void *coverflow_home_sublist(void *top) { return top && top == home.win ? home_o
 void *coverflow_home_pane(void) { return home.art; }
 
 /* For art_zoom.c's card (docs/internals.md#now-playing-motion): the playing cover the pane shows,
- * its texture (texel 0, 0 at *tex + tw + 4, rows tw + 3 words, a texel of border round it, as
- * slide_load makes it), its size and the pane's window now (1/256 texel, a texel a pixel); 0 when
+ * its texture (RGBA8888, texel 0, 0 at *tex + tw + 4, rows tw + 3 words, a texel of border round
+ * it, as slide_load makes it), its size and the pane's window now (1/256 texel, a texel a pixel); 0 when
  * the pane shows no playing cover of its own (a library cover, the still, a fade). */
 int coverflow_home_cover(const unsigned **tex, int *tw, int *th, int *u, int *v) {
     const slide_t *s = &home.sl[0];

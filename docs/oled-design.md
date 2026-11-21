@@ -1901,11 +1901,18 @@ interruptible: a turn mid-run starts from where it is.
   `cubic_out`; played, it grows back over 320 ms, no overshoot. A turn mid-way starts from where it is; a page opened
   on a paused song shows it small at once. The play/pause glyph is the cue, so Reduce Motion keeps the art its size
   ([internals](internals.md#now-playing-motion)).
-- **The cover grows into Now Playing**: opened from Home (its art pane) or an album page (its header), Now
-  Playing's art flies from that cover's place to its own over 300 ms, `cubic_out`, while the page fades out over
-  the first half and Now Playing fades in from 40%; Return runs it back over 240 ms to the cover it came from.
-  Opened from anywhere else Now Playing opens at once, as before. Reduce Motion cross-fades both ways over 150 ms
-  ([internals](internals.md#now-playing-motion)).
+- **The cover travels into Now Playing**, as Apple Music's shared element: opened from Home (its art pane) or an
+  album page (its header), the cover lifts off the page as one card and travels to Now Playing's art over 420 ms on a
+  damped spring (response 0.42 s, damping 0.86) along a gentle arc, 14 px high at its middle, under a soft shadow
+  that is darkest mid-flight; its box, crop and corners morph the whole way (from the pane's 179 x 320, square
+  corners and 1.10 zoom, the pan where Home had it, to the art's 150 x 150, 6 px corners and the whole cover), never
+  squashed. Around it the page fades and slides 28 px left, 40 ms behind the card, and Now Playing comes in from
+  0.96 of its size; Return runs it back to the cover it came from, the pane's vignette coming in over the last 45%,
+  so the card lands on the pane as Home shows it. Each page is drawn without its own cover, so the cover is never on
+  the screen twice. Approved from the `np-home-transition` mock-up on 2026-11-20, with a lite variant (the same morph
+  on a critically damped spring over 340 ms, straight, no shadow, no scale or slide: plain cross-fades) one build
+  define away (`AZ_HERO`). Opened from anywhere else Now Playing opens at once, as before. Reduce Motion
+  cross-fades both ways over 150 ms ([internals](internals.md#now-playing-motion)).
 - **Now Playing's track change**: on Next, Previous, a song ending or a headset's skip the old art and lines slide 16 px
   the way the queue moved (left for Next) and fade out over 120 ms, `cubic_in`, while the new ones come in from 16 px
   the other side over 200 ms, `cubic_out`, from 60 ms: 260 ms in all. The times, the bar and the heart change at once;

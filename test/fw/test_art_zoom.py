@@ -108,11 +108,12 @@ class Card:
     def texel(self, i, j):
         return self.tex[(j + 1) * self.ts + i + 1]
 
-    def draw(self, r, radius, u, v, step, vig):
+    def draw(self, r, radius, u, v, step, vig, rgba=0):
         rect = Rect(*r)
         self.fw.fn('art_zoom_card', None, C.c_void_p, C.c_int, C.c_void_p, C.c_int, C.c_void_p, C.c_int, C.c_int,
-                   C.c_int, C.c_int, C.c_int)(self.fb, W, C.addressof(rect), radius,
-                                              C.addressof(self.tex) + 4 * (self.ts + 1), self.ts, u, v, step, vig)
+                   C.c_int, C.c_int, C.c_int, C.c_int)(self.fb, W, C.addressof(rect), radius,
+                                                       C.addressof(self.tex) + 4 * (self.ts + 1), self.ts, u, v, step,
+                                                       vig, rgba)
 
     def at(self, x, y):
         return self.fb[y * W + x]
@@ -122,14 +123,20 @@ def dim(fw, c, k):
     return c & 0xff000000 | (c & 0xff00ff) * k >> 8 & 0xff00ff | (c & 0xff00) * k >> 8 & 0xff00
 
 
+def bgra(c):
+    return c & 0xff00ff00 | c >> 16 & 0xff | (c & 0xff) << 16
+
+
 def test_at_the_pane_the_card_is_the_panes_texels_at_its_pan_under_its_vignette(fw):
+    """The pane's texture is RGBA8888 (slide_load's) and the screen BGRA8888: each texel lands with red and blue
+    swapped (on the emulator, a gold cover flew blue before they were)."""
     card = Card(fw)
     u, v, s = window(fw, 179, 320, 1100, TW, TH, 1000, 9 * 256, 4 * 256)
-    card.draw(PANE, 0, u, v, s, 1000)
+    card.draw(PANE, 0, u, v, s, 1000, rgba=1)
     vig = fw.fn('coverflow_home_vig', C.c_uint, C.c_int, C.c_int)
     for y in range(H):
         for x in range(0, PANE[2], 7):
-            assert card.at(PANE[0] + x, y) == dim(fw, card.texel(9 + x, 4 + y), vig(y, 320)), (x, y)
+            assert card.at(PANE[0] + x, y) == dim(fw, bgra(card.texel(9 + x, 4 + y)), vig(y, 320)), (x, y)
     assert card.at(PANE[0] - 1, 100) == 0xff123456  # nothing left of the pane
 
 

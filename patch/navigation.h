@@ -616,7 +616,7 @@ void art_zoom_frame(int t, int open, int hero, const rect_t *src, int src_r, int
 void art_zoom_window(int w, int h, int zoom, int tw, int th, int pane, int pu, int pv, int pw,
                      int ph, int *u, int *v, int *step);
 void art_zoom_card(unsigned *fb, int pitch, const rect_t *r, int radius, const unsigned *tex,
-                   int ts, int u, int v, int step, int vig);
+                   int ts, int u, int v, int step, int vig, int rgba);
 void art_zoom_shadow(unsigned *fb, int pitch, const rect_t *r, unsigned a);
 void *coverflow_home_pane(void);
 /* coverflow.c: the pane's playing cover as a texture, and its vignette, for art_zoom.c's card */

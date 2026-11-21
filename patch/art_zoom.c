@@ -1,4 +1,4 @@
-/* The cover grows into Now Playing (docs/oled-design.md#motion): opened from a page that shows the
+/* The cover travels into Now Playing (docs/oled-design.md#motion): opened from a page that shows the
  * playing song's cover (Home's art pane, a dressed album page's header), the cover lifts off that
  * page and travels to Now Playing's art as one card, and Return carries it back, when the page
  * under is still the one it came from; over another it is a plain cross-fade. Opened anywhere
@@ -122,8 +122,8 @@ int art_zoom_source(void *top, rect_t *r) {
 static int az_smooth(int a, int b, int x) {
     if (x <= a) return 0;
     if (x >= b) return 1000;
-    long long s = (long long)(x - a) * 1000 / (b - a);
-    return (int)(s * s * (3000 - 2 * s) / 1000000);
+    int s = (x - a) * 1000 / (b - a); /* the payload has no 64-bit division: 32 bits throughout */
+    return s * s / 1000 * (3000 - 2 * s) / 1000;
 }
 
 /* The spring at t thousandths of the run (before 0: 0, after 1000: 1000), thousandths. */
@@ -138,11 +138,11 @@ static int az_spring(int t, int hero) {
 /* sin(pi x) for x in thousandths (Bhaskara's), thousandths. */
 static int az_sin(int x) {
     x = x < 0 ? 0 : x > 1000 ? 1000 : x;
-    long long p = (long long)x * (1000 - x); /* x(1-x) in millionths */
-    return (int)(16 * p * 1000 / (5000000 - 4 * p));
+    int p = x * (1000 - x); /* x(1-x) in millionths */
+    return 16 * p / ((5000000 - 4 * p) / 1000);
 }
 
-static int az_lerp(int a, int b, int k) { return a + (int)((long long)(b - a) * k / 1000); }
+static int az_lerp(int a, int b, int k) { return a + (b - a) * k / 1000; }
 
 /* At t thousandths of the run's time (time_percent), opening (Home to Now Playing) or not, from
  * the page's cover (src, its corners src_r, its zoom src_z: Home's pane 0, 6, AZ_PANE_ZOOM) to
@@ -188,17 +188,21 @@ void art_zoom_frame(int t, int open, int hero, const rect_t *src, int src_r, int
 void art_zoom_window(int w, int h, int zoom, int tw, int th, int pane, int pu, int pv, int pw,
                      int ph, int *u, int *v, int *step) {
     /* texels a pixel, 1/65536: the axis the cover fills (the smaller texels-a-pixel), over the
-     * zoom, rounded once, so a pane-sized card at the pane's zoom steps a texel a pixel exactly */
-    int by_w = (long long)tw * h <= (long long)th * w; /* tw / w <= th / h */
-    long long num = (long long)(by_w ? tw : th) * 65536 * 1000, den = (long long)(by_w ? w : h) * zoom;
-    long long s = den > 0 ? (num + den / 2) / den : 65536;
-    long long cu = ((long long)tw * 65536 - w * s) / 2, cv = ((long long)th * 65536 - h * s) / 2;
+     * zoom, so a pane-sized card at the pane's zoom steps a texel a pixel exactly. In float: the
+     * payload has no 64-bit division, and these are once a frame. */
+    int by_w = tw * h <= th * w; /* tw / w <= th / h */
+    float den = (float)(by_w ? w : h) * (float)zoom;
+    int s = den > 0 ? (int)((float)(by_w ? tw : th) * 65536000.0f / den + 0.5f) : 65536;
+    /* the window's room to move, and its centered place */
+    long long umax = (long long)tw * 65536 - (long long)w * s,
+              vmax = (long long)th * 65536 - (long long)h * s;
+    long long uu = umax >> 1, vv = vmax >> 1;
     /* the pane's own: a texel a pixel, its window where the pan has it, against its centered one */
-    long long du = (long long)pu * 256 - ((long long)tw * 65536 - (long long)pw * 65536) / 2,
-              dv = (long long)pv * 256 - ((long long)th * 65536 - (long long)ph * 65536) / 2;
-    if (!pw) du = dv = 0;
-    long long uu = cu + du * pane / 1000, vv = cv + dv * pane / 1000,
-              umax = (long long)tw * 65536 - w * s, vmax = (long long)th * 65536 - h * s;
+    if (pw && pane) {
+        int du = pu * 256 - (tw - pw) * 32768, dv = pv * 256 - (th - ph) * 32768; /* < 2^31 */
+        uu += pane >= 1000 ? du : (int)((float)du * (float)pane / 1000.0f);
+        vv += pane >= 1000 ? dv : (int)((float)dv * (float)pane / 1000.0f);
+    }
     uu = uu < 0 ? 0 : uu > umax ? (umax < 0 ? 0 : umax) : uu;
     vv = vv < 0 ? 0 : vv > vmax ? (vmax < 0 ? 0 : vmax) : vv;
     *u = (int)uu, *v = (int)vv, *step = (int)s;
@@ -223,29 +227,45 @@ static int az_inset(int y, int h, int r) {
     return r * 256 - (int)(dx / 2);
 }
 
+/* Per pixel: inlined, as -Os would call them (coverflow.c's HOT) */
+#define AZ_HOT static inline __attribute__((always_inline))
 /* a to b by k 256ths, per channel, opaque */
-static inline unsigned az_mix(unsigned a, unsigned b, unsigned k) {
+AZ_HOT unsigned az_mix(unsigned a, unsigned b, unsigned k) {
     return 0xff000000u | (((a & 0xff00ffu) * (256 - k) + (b & 0xff00ffu) * k) >> 8 & 0xff00ffu) |
            (((a & 0xff00u) * (256 - k) + (b & 0xff00u) * k) >> 8 & 0xff00u);
 }
 /* c (BGRA) darkened to k 256ths */
-static inline unsigned az_scale(unsigned c, unsigned k) {
+AZ_HOT unsigned az_scale(unsigned c, unsigned k) {
     return (c & 0xff000000u) | ((c & 0xff00ffu) * k >> 8 & 0xff00ffu) |
            ((c & 0xff00u) * k >> 8 & 0xff00u);
 }
+/* The texture at at_u (1/65536 texel along row, fy the row's 256ths down to the next): bilinear,
+ * red and blue swapped from RGBA when rgba, darkened to dim 256ths when under 256. */
+AZ_HOT unsigned az_texel(const unsigned *row, int ts, unsigned at_u, unsigned fy, int rgba,
+                         unsigned dim) {
+    const unsigned *t = row + (at_u >> 16);
+    unsigned fx = at_u >> 8 & 255, c = az_mix(az_mix(t[0], t[1], fx), az_mix(t[ts], t[ts + 1], fx), fy);
+    if (rgba) c = (c & 0xff00ff00u) | (c >> 16 & 0xffu) | (c & 0xffu) << 16;
+    return dim < 256 ? az_scale(c, dim) : c;
+}
+/* One stretch of a row, x from a to b, the loop specialized on rgba and dim */
+#define AZ_SPAN(RGBA, DIM)                                                                         \
+    for (int x = a; x < b; ++x, at_u += (unsigned)step)                                            \
+        d[x] = az_texel(row, ts, at_u, fy, RGBA, DIM);
 
-/* The card into fb (375 x 320, pitch words a row): box r (on screen) with corners radius px,
- * each pixel the texture tex (texel 0, 0 at tex, ts words a row, a texel of border right and below
- * it) at u + x step, v + y step (1/65536 texel), darkened by the pane's vignette at vig thousandths
+/* The card into fb (375 x 320, pitch words a row, BGRA8888): box r (on screen) with corners
+ * radius px, each pixel the texture tex (texel 0, 0 at tex, ts words a row, a texel of border right
+ * and below it; RGBA8888 when rgba, the pane's, else BGRA as a snapshot's) at u + x step,
+ * v + y step (1/65536 texel), bilinear, darkened by the pane's vignette at vig thousandths
  * (coverflow_home_vig, for the card's own height). The corners' edge pixels are blended by their
  * cover. Only what is on the screen is written. */
 void art_zoom_card(unsigned *fb, int pitch, const rect_t *r, int radius, const unsigned *tex,
-                   int ts, int u, int v, int step, int vig) {
+                   int ts, int u, int v, int step, int vig, int rgba) {
     if (r->w <= 0 || r->h <= 0) return;
     int x0 = r->x < 0 ? -r->x : 0, x1 = r->x + r->w > 375 ? 375 - r->x : r->w;
     for (int y = r->y < 0 ? -r->y : 0; y < r->h && r->y + y < 320; ++y) {
         int in = az_inset(y, r->h, radius), full = (in + 255) >> 8, edge = in >> 8;
-        unsigned cov = 256 - (unsigned)(in & 255), dim = 256;
+        unsigned dim = 256;
         if (vig) {
             unsigned k = coverflow_home_vig(y, r->h);
             dim = 256 - (256 - k) * (unsigned)vig / 1000;
@@ -253,39 +273,58 @@ void art_zoom_card(unsigned *fb, int pitch, const rect_t *r, int radius, const u
         unsigned at_v = (unsigned)v + (unsigned)y * (unsigned)step, fy = at_v >> 8 & 255;
         const unsigned *row = tex + (int)(at_v >> 16) * ts;
         unsigned *d = fb + (r->y + y) * pitch + r->x;
-        for (int x = x0; x < x1; ++x) {
-            int lo = x < edge || x >= r->w - edge, part = !lo && (x < full || x >= r->w - full);
-            if (lo) continue;
-            unsigned at_u = (unsigned)u + (unsigned)x * (unsigned)step, i = at_u >> 16;
-            const unsigned *t = row + i;
-            unsigned fx = at_u >> 8 & 255,
-                     c = az_mix(az_mix(t[0], t[1], fx), az_mix(t[ts], t[ts + 1], fx), fy);
-            if (dim < 256) c = az_scale(c, dim);
-            d[x] = part && in & 255 ? az_mix(d[x], c, cov) : c;
+        /* the corners' part-covered pixels, each blended by its share */
+        if (in & 255)
+            for (int k = 0, x = edge; k < 2; ++k, x = r->w - 1 - edge)
+                if (x >= x0 && x < x1)
+                    d[x] = az_mix(d[x],
+                                  az_texel(row, ts, (unsigned)u + (unsigned)x * (unsigned)step,
+                                           fy, rgba, dim),
+                                  256 - (unsigned)(in & 255));
+        int a = full > x0 ? full : x0, b = r->w - full < x1 ? r->w - full : x1;
+        unsigned at_u = (unsigned)u + (unsigned)a * (unsigned)step;
+        if (rgba && dim < 256) {
+            AZ_SPAN(1, dim)
+        } else if (rgba) {
+            AZ_SPAN(1, 256)
+        } else if (dim < 256) {
+            AZ_SPAN(0, dim)
+        } else {
+            AZ_SPAN(0, 256)
         }
     }
 }
 
 /* The shadow under box r, AZ_SHADOW_DY lower, at its darkest a 255ths: the screen darkened by the
- * product of az_edge's share across each axis, where the card will not cover it. */
+ * product of az_edge's share across each axis, where the card will not cover it. A product of two
+ * 255ths over 255 is taken as (p + (p >> 8) + 1) >> 8, with no division. */
 void art_zoom_shadow(unsigned *fb, int pitch, const rect_t *r, unsigned a) {
     if (!a) return;
     int top = r->y + AZ_SHADOW_DY, bot = top + r->h, left = r->x, right = r->x + r->w;
+    int lo = left - AZ_BLUR < 0 ? 0 : left - AZ_BLUR, hi = right + AZ_BLUR > 375 ? 375 : right + AZ_BLUR;
+    unsigned char col[375]; /* each column's share across, 255ths */
+    for (int x = lo; x < hi; ++x) {
+        int dl = x - left, dr = right - 1 - x;
+        unsigned p = (unsigned)az_edge[dl > AZ_BLUR ? 2 * AZ_BLUR : dl + AZ_BLUR] *
+                     az_edge[dr > AZ_BLUR ? 2 * AZ_BLUR : dr + AZ_BLUR];
+        col[x] = (unsigned char)((p + (p >> 8) + 1) >> 8);
+    }
     for (int y = top - AZ_BLUR; y < bot + AZ_BLUR; ++y) {
         if (y < 0 || y >= 320) continue;
         int dt = y - top, db = bot - 1 - y;
-        unsigned py = (unsigned)az_edge[dt > AZ_BLUR ? 2 * AZ_BLUR : dt + AZ_BLUR] *
-                      az_edge[db > AZ_BLUR ? 2 * AZ_BLUR : db + AZ_BLUR] / 255,
-                 ka = py * a / 255; /* this row's darkest, 255ths */
+        unsigned p = (unsigned)az_edge[dt > AZ_BLUR ? 2 * AZ_BLUR : dt + AZ_BLUR] *
+                     az_edge[db > AZ_BLUR ? 2 * AZ_BLUR : db + AZ_BLUR],
+                 py = (p + (p >> 8) + 1) >> 8, ka = py * a, k = (ka + (ka >> 8) + 1) >> 8;
+        if (!k) continue;
         int under = y >= r->y && y < r->y + r->h; /* the card's rows: only its sides */
-        for (int x = left - AZ_BLUR; x < right + AZ_BLUR; ++x) {
-            if (under && x == left) x = right;
-            if (x < 0 || x >= 375) continue;
-            int dl = x - left, dr = right - 1 - x;
-            unsigned px = (unsigned)az_edge[dl > AZ_BLUR ? 2 * AZ_BLUR : dl + AZ_BLUR] *
-                          az_edge[dr > AZ_BLUR ? 2 * AZ_BLUR : dr + AZ_BLUR] / 255,
-                     s = px * ka >> 8;
-            if (s) fb[y * pitch + x] = az_scale(fb[y * pitch + x], 256 - s);
+        unsigned *d = fb + y * pitch;
+        for (int x = lo; x < hi; ++x) {
+            if (under && x == left) {
+                x = right - 1;
+                continue;
+            }
+            unsigned s = col[x] * k >> 8;
+            if (s) d[x] = az_scale(d[x], 256 - s);
         }
     }
 }
@@ -302,8 +341,8 @@ static void az_holed(void *c, void *img, const rect_t *hole, unsigned alpha, int
     }
     int sx[4], sy[4];
     for (int i = 0; i < 4; ++i) /* scaled about 187.5, 160, rounded */
-        sx[i] = (int)(((long long)(2 * xs[i] - 375) * scale + 375000 + 1000) / 2000) + dx,
-        sy[i] = (int)(((long long)(2 * ys[i] - 320) * scale + 320000 + 1000) / 2000);
+        sx[i] = ((2 * xs[i] - 375) * scale + 375000 + 1000) / 2000 + dx,
+        sy[i] = ((2 * ys[i] - 320) * scale + 320000 + 1000) / 2000;
     canvas_set_global_alpha(c, alpha);
     for (int j = 0; j < 3; ++j)
         for (int i = 0; i < 3; ++i) {
@@ -402,7 +441,7 @@ static void az_draw_curr(void *c, void *img, void *prev, int t, int open, int fl
         ts = tw + 3;
         art_zoom_window(f.card.w, f.card.h, f.zoom, tw, th, f.pane, pu, pv, az.cover.w,
                         az.cover.h, &u, &v, &step);
-        art_zoom_card(fb, 375, &f.card, f.radius, tex + ts + 1, ts, u, v, step, f.vig);
+        art_zoom_card(fb, 375, &f.card, f.radius, tex + ts + 1, ts, u, v, step, f.vig, 1);
         drew = 1;
     } else if (fb && np.w > 2 * AZ_INSET + 1 && np.h > 2 * AZ_INSET + 1) {
         const unsigned *px = (const unsigned *)bitmap_lock_buffer_for_read(img);
@@ -412,7 +451,7 @@ static void az_draw_curr(void *c, void *img, void *prev, int t, int open, int fl
             art_zoom_window(f.card.w, f.card.h, f.zoom, tw, th, 0, 0, 0, 0, 0, &u, &v, &step);
             art_zoom_card(fb, 375, &f.card, f.radius,
                           px + (np.y + AZ_INSET) * ts + np.x + AZ_INSET, ts, u, v, step,
-                          az.kind == AZ_PANE ? f.vig : 0);
+                          az.kind == AZ_PANE ? f.vig : 0, 0);
             bitmap_unlock_buffer(img);
             drew = 1;
         }
