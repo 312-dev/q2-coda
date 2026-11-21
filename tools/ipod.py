@@ -93,7 +93,7 @@ class Geometry:
     search_meta_y: int = 41
     search_meta_h: int = 16
     # The status row in place of a bar band (status_row): its glyphs centred on screen row status_y, the page's title from
-    # STATUS_ROW_INSET in the bar's face and px (bar_px), the clock centred (beside the glyphs on Home's Split; navigation.c clock_place), the play state and
+    # STATUS_ROW_INSET in the bar's face and px (bar_px), the clock centred (at the row's left on Home's Split; navigation.c clock_place), the play state and
     # battery ending STATUS_ROW_INSET from the screen's right edge; the bar is drawn black, so the row reads as part of the page.
     status_y: int = 0
     right_x: int = 0  # the right column, from the screen's right edge: a row's chevron and value (0: stock's)
@@ -493,7 +493,7 @@ def status_row(root, g, widgets, left, right, eq):
     """The status row: no band, the bar black, its glyphs centred on row status_y, both ends STATUS_ROW_INSET in from
     the screen's sides, inside the glass's top curve. The title and the clock start in one box whose text starts on
     that inset, in the bar's face at bar_px in Text Secondary; the payload centres the clock (on Home's Split moves it
-    beside the glyphs) and ends the title's box short of it (navigation.c clock_place). The right group is the
+    to the row's left) and ends the title's box short of it (navigation.c clock_place). The right group is the
     battery, its nub's last column STATUS_ROW_INSET from the screen's edge; the payload paints the row's other glyphs
     left of it (status_row.c: the level bars, Wi-Fi, a sync, a headset's battery, Buttons Lock's padlock, a server out
     of reach). The play state, Bluetooth, Wi-Fi, EQ and the rest stay, off-screen,

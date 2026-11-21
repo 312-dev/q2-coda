@@ -662,9 +662,9 @@ void charge_tap(void);
 void charging_poll(void);
 /* status_row.c: the status row's glyph slots, right to left (docs/oled-design.md#status-row): the
  * strip's room left of the battery (status_strip_room: its left edge, 0 for none, from
- * clock_place), their clock edge (navigation.c clock_place), paint (ringnav_paint_bg), the slot
- * under a touch, the sync bar_state_sync runs (1: repaint the bar), ringnav_input's touches; the
- * headset's battery, 0-100 or -1 */
+ * clock_place), their left edge (status_slots_left: the title's box and the volume pill end short
+ * of it), paint (ringnav_paint_bg), the slot under a touch, the sync bar_state_sync runs (1:
+ * repaint the bar), ringnav_input's touches; the headset's battery, 0-100 or -1 */
 enum {
     SLOT_BATTERY,
     SLOT_PLAY,

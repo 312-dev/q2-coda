@@ -5,13 +5,13 @@
  * before the one on its right. On a full-width row the clock holds the centre (navigation.c
  * clock_place) and the slots left of the battery are a strip with the room from the clock to the
  * battery (status_strip_room); a strip wider than that scrolls in it as a marquee, its cut ends
- * faded, and the battery never moves. Home in Split has no room set: there the clock sits beside
- * the leftmost slot. Nothing in the row ever wraps. The battery is stock's view_battery, laid out
- * by the bar's right group and painted by navigation.c paint_battery; every other slot is painted
- * here, from the bar's background (ringnav_paint_bg), so Home in Split inks them with the clock
- * over its art (coverflow.c home_ink, one ink for the row). Every glyph is the clock's digits'
- * height, 11 px on rows 17 to 27 (cy 23), with SR_GAP of ground between two
- * (docs/oled-design.md#status-row); the animated ones repaint only their own box. */
+ * faded, and the battery never moves. Home in Split has no room set: there the clock stands at the
+ * row's left, over the list. Nothing in the row ever wraps. The battery is stock's view_battery,
+ * laid out by the bar's right group and painted by navigation.c paint_battery; every other slot is
+ * painted here, from the bar's background (ringnav_paint_bg), so Home in Split inks them over its
+ * art (coverflow.c home_ink, one ink for the row). Every glyph is the clock's digits' height, 11 px
+ * on rows 17 to 27 (cy 23), with SR_GAP of ground between two (docs/oled-design.md#status-row); the
+ * animated ones repaint only their own box. */
 #include "navigation.h"
 
 #define SR_TURN_MS 1000 /* the sync arrows' half turn (the glyph repeats every half turn) */
@@ -359,7 +359,7 @@ static const status_slot_t slots[SLOT_N] = {
 };
 
 /* The strip's room's left edge, the bar's pixels (clock_place: SR_GAP's worth past the centred
- * clock's widest); 0 for none (Home in Split, where the clock goes beside the slots). */
+ * clock's widest); 0 for none (Home in Split, where the clock is at the row's left). */
 void status_strip_room(int left) { sr.room = left > 0 ? left : 0; }
 
 /* How far the marquee has slid at t ms into its cycle, 0 to over. */
@@ -404,8 +404,8 @@ static rect_t strip_box(void *bar) {
     return r;
 }
 
-/* The leftmost shown slot's left (the battery's with no other), the edge the clock stands beside;
- * the screen's right edge before the bar is found. */
+/* The leftmost shown slot's left (the battery's with no other), the edge the volume pill and the
+ * title's box end short of; the screen's right edge before the bar is found. */
 int status_slots_left(void) {
     int left = layout();
     return left < 0 ? 375 : left;
