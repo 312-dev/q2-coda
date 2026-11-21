@@ -12,7 +12,9 @@ from test_nav_hold import use_set
 from test_nav_library_pages import LIBRARY_STOCK, Config, Disk, page_rows, scratch, st, stock_page, ui  # noqa: F401  (fixtures)
 
 SOURCE = (ROOT / 'patch' / 'library_edit.c').read_text()
-LR = {k: int(v) for k, v in re.findall(r'^#define (LR_\w+) (\d+)\b', SOURCE, re.M)}
+# library_edit.c's own LR_*, and navigation.h's LR_HOLD_MS, which Radio's hold shares
+LR = {k: int(v) for k, v in re.findall(r'^#define (LR_\w+) (\d+)\b',
+                                       SOURCE + (ROOT / 'patch' / 'navigation.h').read_text(), re.M)}
 DEFAULT = re.findall(r'lr_default\[\] = "(\w+)"', SOURCE)[0]
 FILE = '/mnt/data/ringnav-library-order'
 KEY_CENTER, KEY_RETURN, KEY_NEXT, KEY_PREV = O['KEY_CENTER'], O['KEY_RETURN'], O['KEY_NEXT'], O['KEY_PREV']

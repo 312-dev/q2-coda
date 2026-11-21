@@ -15,6 +15,9 @@
 #define STOP 11
 #define MAX_ENTRIES 512
 #define POS_MEM 64
+/* Centre or a finger held this long: Edit Library's editor (library_edit.c), Radio's stations list
+ * (radio_tuner.c); either removes stock's own Centre hold (Shut Down? at 1000 ms, st.centre_hold) */
+#define LR_HOLD_MS 550
 #define B(p, o) (*(unsigned char *)((char *)(p) + (o)))
 
 typedef struct {
@@ -341,6 +344,7 @@ void bt_cover_hold(int held); /* bt_cover.c */
 
 /* radio_tuner.c: Home's Radio (docs/internals.md#radio-home) */
 int tuner_open(void *ctx, void *event), tuner_key(void *top, unsigned key);
+void tuner_keydown(void *top, unsigned key); /* ringnav_keydown: Centre's hold on Radio's tuner */
 void tuner_paint(void *w, void *canvas), tuner_poll(void);
 void tuner_title(const char *in, char *out, unsigned cap);
 void tuner_song(const char *in, char *artist, char *song, unsigned cap);

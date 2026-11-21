@@ -1841,6 +1841,12 @@ error screens, "Near <city>" on the stations list and "Change Location" on the Z
   bar in Favorite red (#FF375F) from y 230, gliding after the dial (90 ms time constant). The wheel tunes 0.02
   MHz a step (one every 12 degrees of the touch wheel), 0.06 turned fast; each station is a detent that holds
   three steps, and every step clicks, louder and duller on a station.
+- **Centre** (approved 2026-11-20, `~/q2-emu/design/radio-tuner/centre-volume/sheet.png`; built:
+  `centre-volume/built/`): a tap swaps the dial for Now Playing's volume band on the dial's row (its bar's ends,
+  the two speakers, the inset track and white fill, the same ease), the wheel setting the volume; 3 s after the
+  last turn or press (Now Playing's scrub timeout) the dial returns and the wheel tunes. A tap while it shows ends
+  it; a double press turns the screen off. Held 550 ms (Edit Library's hold) Centre opens the stations list;
+  stock's Shut Down? hold is not reached from the tuner. Frequency, name and song stay where they are.
 - **Stations list:** the house list's measures (32 px rows from y 58, Inter 20, the flat selection bar
   `sel_bar_flat`, fades from y 40 to 74 and 266 to 310 where the list goes on, the 4 px scroll indicator at
   x 366 while the wheel turns), painted by the page: the name left, the frequency right (Text Secondary, Text

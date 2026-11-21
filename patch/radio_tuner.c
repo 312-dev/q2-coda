@@ -5,11 +5,13 @@
  * the sound is q2video -t's FM receiver (video.c, fmrx.c): hiss between stations, a station's
  * stream swelling out of it as the needle closes on it. A station's name and song wait for its
  * stream, as RDS does. The approved prototype (~/q2-emu/design/radio-tuner/index.html) is the
- * spec, screen for screen.
+ * spec, screen for screen. Centre tapped on the tuner shows the volume in the dial's place, held
+ * opens the stations list (~/q2-emu/design/radio-tuner/centre-volume/sheet.png, approved
+ * 2026-11-20).
  *
- * Screens: loading, the tuner, the stations list (Centre), the ZIP entry (the list's last row) and
- * the error. The state is on the heap while the page is open; the scratch holds its pointer and the
- * fetch's pid, reaped after the page has gone. */
+ * Screens: loading, the tuner, the stations list (Centre held), the ZIP entry (the list's last
+ * row) and the error. The state is on the heap while the page is open; the scratch holds its
+ * pointer and the fetch's pid, reaped after the page has gone. */
 #include "navigation.h"
 
 #define FETCH_BIN "/usr/bin/q2radiofetch"
@@ -93,6 +95,11 @@ static struct rt {
     unsigned words_at, locked_at, marq; /* locked_at: when the feed's stream first sounded */
     unsigned mq_at[2], mq_key[2];       /* the marquee lines' clocks, and their texts' hashes */
     int live; /* the last paint moved: the words fading in, a line scrolling */
+    int vol;  /* the volume band shows in the dial's place (Centre tapped), the wheel its steps */
+    unsigned vol_timer, hold; /* the band's SCRUB_MS since the last turn or press; Centre's hold */
+    int held;                 /* that hold went off: its release is taken */
+    unsigned tap_at;          /* a tap's release, and the next tap within DOUBLE_CLICK_MS ... */
+    int tap_armed;            /* ... is its double press, the wheel not turned between */
 } *rt __attribute__((section(".scratch")));
 static int rt_fetch_pid __attribute__((section(".scratch")));
 
@@ -271,7 +278,7 @@ static void fine_turn(int n, int fast) {
  * do. Given back to ticks anywhere else, and with the screen off, so a turn wakes it as a tick
  * does. */
 static void wheel(unsigned now) {
-    int raw = rt->screen == TUNER && g_backlight_status &&
+    int raw = rt->screen == TUNER && !rt->vol && g_backlight_status &&
               window_manager_get_top_window(window_manager()) == rt->page;
     if (raw != rt->raw) {
         __sync_lock_test_and_set(&wheel_travel, 0);
@@ -681,6 +688,27 @@ static int marq_tick(const void *unused) {
     return 8; /* RET_REPEAT */
 }
 
+/* The volume band in the dial's place (Centre tapped): Now Playing's (volume.c vol_paint over its
+ * progress bar), on the dial's row VOL_Y: its bar's ends (the OLED grid's text_x to the right
+ * column, VOL_X and VOL_W), a VOL_SPK_PX speaker VOL_SPK_X in from each, the track inset
+ * VOL_SPK_INSET between them in the theme's np_track_rgb, white to the volume as vol_bar eases. */
+#define VOL_X 24
+#define VOL_W 322
+#define VOL_Y 262
+static void vol_band(void *canvas) {
+    int h = theme()->np_bar ? theme()->np_bar : 6, cy = VOL_Y - rt->y0, L = ipod_light();
+    rect_t bar = { VOL_X + VOL_SPK_INSET, cy - h / 2, VOL_W - 2 * VOL_SPK_INSET, h };
+    int eased = clamp_step(0, 100 << 8, level_shown(&vol_bar, g_volume)),
+        w = bar.w * eased / (100 << 8);
+    fill_box(canvas, &bar, RGBA(theme()->np_track_rgb), (unsigned)h / 2);
+    rect_t on = { bar.x, bar.y, w < h ? h : w, h };
+    if (w) fill_box(canvas, &on, RGBA(0xffffff), (unsigned)h / 2);
+    paint_art(rt->sheet, canvas, theme_art(L ? "vol_lo_l" : "vol_lo_d"),
+              VOL_X + VOL_SPK_X - VOL_SPK_PX / 2, cy - VOL_SPK_PX / 2);
+    paint_art(rt->sheet, canvas, theme_art(L ? "vol_hi_l" : "vol_hi_d"),
+              VOL_X + VOL_W - VOL_SPK_X - VOL_SPK_PX / 2, cy - VOL_SPK_PX / 2);
+}
+
 /* The tuner (the prototype's layout): the frequency the needle is at, centred between the status
  * row and the dial; above it the station's name, below its song (or Paused) and its call sign and
  * city, once revealed (words_due) and while the needle is on it, fading in over REVEAL_MS. Between
@@ -718,7 +746,10 @@ static void tuner_screen(void *canvas) {
         }
     }
     if (rt->live && !rt->marq) rt->marq = timer_add(marq_tick, 0, MARQ_MS);
-    dial(canvas, nd);
+    if (rt->vol)
+        vol_band(canvas);
+    else
+        dial(canvas, nd);
 }
 
 /* The now-playing mark: three 3 px bars 5 px apart, up to 14 px tall, out of step, their foot at
@@ -865,6 +896,7 @@ static int frame(const void *unused) {
                   (f && rt->playing && at((float)rt->freq) == f);
     }
     moving |= rt->screen == LOADING;
+    if (rt->screen == TUNER && rt->vol && level_ease(&vol_bar, g_volume)) moving = 1;
     widget_invalidate_force(rt->sheet, 0);
     if (!moving) rt->anim = 0;
     return moving ? 8 : 0; /* RET_REPEAT */
@@ -914,12 +946,64 @@ static void act(void) { /* Centre on the list's row */
     }
 }
 
+/* The band's SCRUB_MS (Now Playing's scrub and Centre-cycle timeout) since the last turn or press
+ * have passed: the dial again, the wheel tuning. */
+static int vol_end(const void *unused) {
+    if (!rt) return 0;
+    rt->vol_timer = 0, rt->vol = 0;
+    animate();
+    return 0;
+}
+static void vol_open(int on) {
+    rt->vol = on;
+    if (on) {
+        vol_bar.easing = 0; /* the band opens on the volume */
+        rearm(&rt->vol_timer, vol_end, SCRUB_MS);
+    } else
+        stop_timer(&rt->vol_timer);
+    animate();
+}
+
+/* The stations list, on the station heard (Centre held on the tuner). */
+static void list_open(void) {
+    rt_station *here = at((float)rt->freq);
+    rt->sel = index_of(here) > 0 ? index_of(here) : 0;
+    rt->scroll = rt->target = (float)((rt->sel > 3 ? rt->sel - 3 : 0) * ROW);
+    if (rt->vol) vol_open(0);
+    screen(LIST);
+}
+
+/* Centre held LR_HOLD_MS on the tuner: the stations list, and stock's own Centre hold (Shut Down?
+ * at 1000 ms) removed, as Edit Library's hold removes it; the release is taken (tuner_key). */
+static int hold_due(const void *unused) {
+    if (!rt) return 0;
+    rt->hold = 0, rt->held = 1;
+    if (st.centre_hold) timer_remove(st.centre_hold), st.centre_hold = 0;
+    *(volatile unsigned char *)KEY_LOCKOUT = 0; /* the list's wheel at once */
+    list_open();
+    return 0;
+}
+
+/* ringnav_keydown: Centre pressed on the tuner starts its hold; released sooner, it is a tap
+ * (tuner_key). */
+void tuner_keydown(void *top, unsigned key) {
+    if (!rt || top != rt->page || key != KEY_CENTER || rt->screen != TUNER || rt->hold) return;
+    rt->held = 0;
+    rt->hold = timer_add(hold_due, 0, LR_HOLD_MS);
+}
+
 /* ringnav (nav/input.c): the page's keys, before stock's; 0 for those it leaves to stock (Return on
  * the tuner, which leaves the page through keyup). */
 int tuner_key(void *top, unsigned key) {
     if (!rt || top != rt->page) return 0;
     if (key == KEY_RETURN && *(volatile unsigned char *)RETURN_RELEASE_LATCH) return 0;
     int wheel = key == KEY_NEXT ? 1 : key == KEY_PREV ? -1 : 0, s = rt->screen;
+    if (key == KEY_CENTER && rt->held) { /* the release of the hold that opened the list */
+        rt->held = 0;
+        return 1;
+    }
+    if (key == KEY_CENTER) stop_timer(&rt->hold);
+    if (wheel) rt->tap_armed = 0; /* a turn between two taps: not a double press */
     if (key == KEY_PLAY && (s == TUNER || s == LIST)) {
         rt->playing = !rt->playing;
         tune();
@@ -927,18 +1011,30 @@ int tuner_key(void *top, unsigned key) {
     }
     if (s == TUNER) {
         if (key == KEY_RETURN) return 0;
-        if (wheel) { /* a tick a step: the touch wheel itself is read raw (wheel) */
+        if (wheel && rt->vol) { /* the volume, as Now Playing's wheel sets it (vol_next) */
+            int v = vol_next(key);
+            if (v != g_volume) {
+                g_volume = (unsigned char)v;
+                device_set_volume(v, 1);
+                write_int_config(v, "PLAYSET", "VOLUME");
+            }
+            vol_open(1);    /* its SCRUB_MS from this turn */
+        } else if (wheel) { /* a tick a step: the touch wheel itself is read raw (wheel) */
             unsigned now = time_now_ms();
             int fast = now - rt->tick_at < FAST_MS;
             rt->tick_at = now;
             fine_turn(wheel, fast);
         } else if (key == KEY_FWD_BTN || key == KEY_BACK_BTN)
             seek(key == KEY_FWD_BTN ? 1 : -1);
-        else if (key == KEY_CENTER) {
-            rt_station *here = at((float)rt->freq);
-            rt->sel = index_of(here) > 0 ? index_of(here) : 0;
-            rt->scroll = rt->target = (float)((rt->sel > 3 ? rt->sel - 3 : 0) * ROW);
-            screen(LIST);
+        else if (key == KEY_CENTER) { /* a tap: the volume shown, or a tap while it shows: gone */
+            unsigned now = time_now_ms();
+            int dbl = rt->tap_armed && now - rt->tap_at < DOUBLE_CLICK_MS;
+            rt->tap_armed = !dbl, rt->tap_at = now;
+            vol_open(!rt->vol);              /* a double press: the first undone ... */
+            if (dbl && g_backlight_status) { /* ... and the screen off, as on every page */
+                static const unsigned release[EVENT_KEY / 4 + 1] = { [EVENT_KEY / 4] = KEY_CENTER };
+                on_wm_keyup_fun((void *)0, (void *)release); /* stock's Centre release */
+            }
         }
     } else if (s == LIST) {
         if (key == KEY_RETURN)
@@ -1054,7 +1150,7 @@ static void audio_halt(void) {
 
 static int closed(void *ctx, void *event) {
     stop_timer(&rt->anim), stop_timer(&rt->land), stop_timer(&rt->warm), stop_timer(&rt->leave);
-    stop_timer(&rt->marq);
+    stop_timer(&rt->marq), stop_timer(&rt->vol_timer), stop_timer(&rt->hold);
     if (rt->raw && wheel_raw == WHEEL_RAW) wheel_raw = WHEEL_TICKS; /* the wheel's ticks back */
     audio_halt();
     if (rt->sock > 0) close(rt->sock);
