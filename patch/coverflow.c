@@ -4730,7 +4730,7 @@ static int bar_rows(void *canvas, int *r) {
 /* Whether top is Home in Split, its art beside the list (1), and 2 when the art runs up under the
  * status row (a split_art_up and a slide that fills the pane: a cover, or the placeholder with
  * none), where the bar's glyphs are inked
- * over it: navigation.c's clock_place puts the clock beside them. */
+ * over it; navigation.c's clock_place puts the clock at the row's left, over the list, either way. */
 int coverflow_home_split(void *top) {
     if (!home.art || top != home.win || !widget_get_visible(home.art)) return 0;
     return pane_up() && home.sl[0].tw ? 2 : 1;
@@ -4866,8 +4866,8 @@ static void art_beside(void *shown) {
 /* Both menus' lists span outer, their rows and tap targets inner; labels start at x and end end
  * before the row's edge. */
 /* Split's list top on the screen where the art runs up under the status row (a split_art_up):
- * the status row's left side holds nothing there (navigation.c clock_place puts the clock at the
- * right), so the list rises into it, its top rows under the row's overlay. */
+ * the list rises to just under the clock at the status row's left (navigation.c clock_place), its
+ * top rows under the row's overlay. */
 #define HOME_SPLIT_TOP 40
 /* w, one of Home's lists, and its rows: outer wide, the rows inner, their labels from x to end
  * short of the row; the list home.rows.top under the status row's foot, Split's main menu at

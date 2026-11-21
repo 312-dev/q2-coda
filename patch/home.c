@@ -419,7 +419,11 @@ static int lip(int x) {
 
 /* the corners' columns are faded this many at a time, at the middle one's dip */
 #define FADE_COL 8
-#define SPLIT_TOP_FADE 34  /* Split: the band from clear to the ground at the glass's top edge */
+/* Split: the top band from clear to the ground at the glass's top edge, the ground no higher than
+ * SPLIT_UNDER_CLOCK under the status row's centre, the row under the clock's digits (17 to 27 on
+ * cy 23), so no row shows through the clock */
+#define SPLIT_TOP_FADE 34
+#define SPLIT_UNDER_CLOCK 5
 #define SPLIT_FOOT_FADE 56 /* and at its bottom edge */
 #define FULL_TOP_CLEAR 14  /* Full: clear this far under the list's top, the ground 8 above it */
 #define FULL_TOP_GROUND 8
@@ -485,7 +489,8 @@ void list_top_fade(void *canvas, int top) {
  * left of the art), drawn shift columns left of there: at the top once it has scrolled, at the foot
  * while rows lie past the rest. In
  * Split they follow the glass's rounded edge, as far from it in a corner as on the straight part,
- * so a row dissolves the same way in both; in Full they run straight across. The selected row is
+ * so a row dissolves the same way in both, the top one reaching the ground no higher than just
+ * under the clock, which stands over the list at the status row's left; in Full they run straight across. The selected row is
  * never faded. Each row of the band one fill per FADE_COL columns in a corner, inside the canvas's
  * clip. */
 void home_fades(void *canvas, void *list, int list_y, int cols, int split, int shift) {
@@ -510,6 +515,7 @@ void home_fades(void *canvas, void *list, int list_y, int cols, int split, int s
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR),
              ground = ui_ink(RGBA(0)) & 0xffffffu;
     int dip[GLASS_R / FADE_COL + 1]; /* each run of columns' lip, then the straight part's 0 */
+    int under = geom_val(V_STATUS_Y) + SPLIT_UNDER_CLOCK;
     for (int i = 0; i <= GLASS_R / FADE_COL; ++i) dip[i] = lip(i * FADE_COL + FADE_COL / 2);
     for (int y = y0; y < y1; ++y) {
         /* not the selected row; in Full, only the list's own rows (list_reach_paint fades the
@@ -528,7 +534,7 @@ void home_fades(void *canvas, void *list, int list_y, int cols, int split, int s
         for (int x = 0; x < cols; x += FADE_COL) {
             int d = dip[x < GLASS_R ? x / FADE_COL : GLASS_R / FADE_COL],
                 w = x < GLASS_R ? FADE_COL : cols - x;
-            int k = above ? smooth(y - d, SPLIT_TOP_FADE) : 256;
+            int k = above ? smooth(y - (d > under ? d : under), SPLIT_TOP_FADE) : 256;
             if (below) {
                 int b = smooth(320 - y - d, SPLIT_FOOT_FADE);
                 if (b < k) k = b;

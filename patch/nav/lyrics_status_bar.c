@@ -257,10 +257,11 @@ static int slider_page(void *top);
  * the widest clock, "00:00", centred, so its ellipsis does; the glyph slots left of the battery get
  * the room from CLOCK_BESIDE past that widest clock's text (status_row.c status_strip_room), and
  * scroll there when they run past it, so the clock never moves. On Home's Split, with its art
- * beside the list, the clock goes at the right, its text ending CLOCK_BESIDE left of the leftmost
- * shown slot (status_slots_left), and the title's box (empty there) CLOCK_CLEAR short of it. Over
- * Split's art it is in Text Primary, so the art's ink (coverflow.c home_ink) covers it whole, one
- * ink with the slots. The box is sized to the text as measured in the bar's face, with
+ * beside the list, the clock goes over the list at the row's left, its text starting
+ * STATUS_ROW_INSET in, as the battery ends that far from the right; the slots keep the row's right
+ * with no room set, and the title's box (empty there) ends CLOCK_CLEAR short of a widest clock
+ * beside them. Where the art runs up under the row the clock is in Text Primary, as it was over the
+ * art. The box is sized to the text as measured in the bar's face, with
  * hscroll_label's 2 px margins, so the label's own alignment plays no part. Runs in the bar's
  * background paint, before the clock draws; a move repaints the bar after. */
 #define CLOCK_BESIDE 7 /* the text's box: 8 px of ground between the digits' ink and the slot */
@@ -301,7 +302,7 @@ static void clock_place(void *bar, void *top) {
     status_strip_room(split ? 0 : strip_left(widest));
     int edge = status_slots_left() - CLOCK_BESIDE,
         w = (text && *text ? clock_width(canvas, text) : widest) + 4,
-        x = split ? edge + 2 - w : (375 - w + 1) / 2,
+        x = split ? STATUS_ROW_INSET - 2 : (375 - w + 1) / 2,
         color = split == 2 ? (int)RGBA(0xffffff) : ink,
         title_w = (split ? edge - widest : (375 - widest - 4 + 1) / 2 + 2) - CLOCK_CLEAR + 2 -
                   I(st.bar_title, W_X);
