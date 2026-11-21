@@ -351,6 +351,31 @@ Approved 2026-11-16 (`design/home-np-icon`, 2a and the morph; `patch/home_np.c`)
   fades, the outer two widen and rise into the pause's bars, the accent turning Text Secondary; on resume the same
   backwards, then the bars move again. The words cross-fade in the same 250 ms. Under Reduce Motion both are a cut.
 
+### Home's art pane while Radio plays
+
+While Radio is Now Playing (playing or paused; `patch/radio_pane.c`, `coverflow.c` `SHOW_RADIO`), Split's art pane
+is Radio's, edge to edge where the cover goes: design K1, approved 2026-11-20
+(`~/q2-emu/design/radio-tuner/radio-now-playing/pane-v6`: `mock.py` holds every number, `sheet.png` the still,
+`K1-rings.mp4` the motion; built: `pane-v6/built/`).
+
+- **Ground:** dark red (20, 3, 7) at the top, 35% darker at the bottom; a glow of (88, 7, 22) behind the badge,
+  t = clamp(1 - r / 150)^2.2 x 0.45; a faint lighter line (+30, 7, 11) down the pane's left edge.
+- **Badge:** a 64 px circle centred at screen y 138 (the badge and the frequency centred together), a vertical
+  gradient (214, 46, 76) to (122, 10, 32) with a soft gloss high on it, the broadcast tower white at 39 px (62%;
+  the Car Remote app's ic_radio, `tools/art.py` `RADIO_TOWER`).
+- **Frequency only:** "93.1" in Inter Medium 30 white and "FM" in 15 Text Secondary 3 px after it, centred, its
+  baseline 70 px below the badge's centre, over a soft vignette (an ellipse 124 x 46, black 210/255, blurred 12 px).
+  No station name, song, call sign or city.
+- **Rings:** four, from the badge's centre, radius 40 to 170 as they travel, alpha 0.55 x (1 - u)^1.6, 1.2 to 2.8 px
+  wide, (205, 38, 66), with a 5 px bloom; one leaves every 2.4 s (each travels 9.6 s) while Radio plays and the pane
+  shows, the pane alone repainted every 33 ms; still while paused, and under Reduce Motion.
+- **The way in** (pane-v3 `anim.py`, approved as "Apple-like slide"): the cover recedes to 0.92, dims and drifts
+  18 px left over 350 ms while the pane slides in from the right on a damped spring (settling about 0.4 s, a slight
+  overshoot); the glow blooms from 180 ms over 500 ms; the badge from 300 ms, then the frequency from 380 ms, rise
+  8 px and fade in over 300 ms. Under Reduce Motion the pane is there at once.
+- **Light Mode:** the same; the pane is art, as the cover it replaces is, which Light Mode leaves as it is.
+- The covers come back when the Library takes over.
+
 ### Selection bar
 
 - Accent Blue, flat (raised at rest, see Press below), the full row pitch tall, inset 16 px each side on every row, 8 px corners,

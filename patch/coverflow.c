@@ -3882,8 +3882,9 @@ typedef struct {
 enum { SLIDE_STILL = 2 };
 enum {
     SHOW_NOW,
-    SHOW_LIB
-}; /* what the pane shows (art_source): the playing cover, the library's */
+    SHOW_LIB,
+    SHOW_RADIO
+}; /* what the pane shows (art_source): the playing cover, the library's, Radio's (radio_pane.c) */
 /* iPod Home (docs/ipod.md): the playing track's art, or the library's in turn, beside the list. */
 static struct {
     void *win, *art, *list, *sets; /* sets: the Settings list, in the list's place while open */
@@ -3916,6 +3917,7 @@ static struct {
      * while something is loaded; np_timer: np_due's; folders: Folders' rule at the last layout */
     int np, folders;
     unsigned np_stop, np_timer;
+    unsigned rtick; /* radio_tick's timer, while Radio's pane moves */
 } home __attribute__((section(".scratch")));
 extern int ipod_home(void), home_shortcut_open(void *, void *);
 extern void ipod_shortcut_seen(void), home_sets_bind(void *win); /* theme_engine.c, navigation.c */
@@ -4497,7 +4499,43 @@ static void slide_next(void) {
 
 /* What the pane shows (docs/ipod.md#home), as an iPod classic's main menu: the playing cover on a
  * Now Playing row, playing or paused, the library's covers in turn on every other row. */
-static int art_source(void) { return home.kind == PANE_LIBRARY ? SHOW_LIB : SHOW_NOW; }
+/* Radio the owner of Now Playing, playing or paused (radio_tuner.c tuner_state): its pane
+ * (radio_pane.c, approved 2026-11-20, design/radio-tuner/radio-now-playing/pane-v6, K1); else the
+ * row's: the playing cover, or the library's in turn. */
+static int art_source(void) {
+    return tuner_state() ? SHOW_RADIO : home.kind == PANE_LIBRARY ? SHOW_LIB : SHOW_NOW;
+}
+/* Radio's pane may move: Home on top and not sliding, the pane shown, the screen lit. */
+static int radio_live(void) {
+    void *wm = window_manager();
+    return home.show == SHOW_RADIO && widget_get_visible(home.art) && g_backlight_status &&
+           !g_lockscreen_pageflag && window_manager_get_top_window(wm) == home.win &&
+           !window_manager_is_animating(wm);
+}
+/* Radio's pane's frame tick (RADIO_TICK_MS) while it moves (radio_pane.c rp_moving: the way in, or
+ * rings leaving while Radio plays) and shows: a repaint of the pane alone; then it stops, and
+ * coverflow_home_art arms it again. */
+#define RADIO_TICK_MS 33
+static int radio_tick(const void *unused) {
+    if (!radio_live() || !rp_moving()) return (int)(home.rtick = 0); /* RET_REMOVE */
+    pane_invalidate();
+    return 8; /* RET_REPEAT */
+}
+/* The pane's frame for Radio, drawn into the frame bitmap, then the tower and the frequency. */
+static void home_radio_paint(void *canvas) {
+    if (!home.frame) home.frame = opaque_frame(pane_w(), pane_h(), 1);
+    unsigned *d = home.frame ? (unsigned *)bitmap_lock_buffer_for_write(home.frame) : 0;
+    if (!d) return;
+    rp_words_t k;
+    int ok = rp_frame(d, (int)(bitmap_get_line_length(home.frame) / 4), pane_w(), pane_h(),
+                      pane_y(), (unsigned)time_now_ms(), &k);
+    bitmap_unlock_buffer(home.frame);
+    home.drawn = 0; /* the covers' frame is gone: drawn again when they come back */
+    if (!ok) return;
+    int src[4] = { 0, 0, pane_w(), pane_h() }, dst[4] = { 0, 0, src[2], src[3] };
+    canvas_draw_image(canvas, home.frame, src, dst);
+    rp_words(home.art, canvas, &k);
+}
 
 /* The player's cover, else the Coverflow cache of the track's album (now_tag), else the theme's
  * pane or the placeholder; or under the slideshow (SHOW_LIB) the library's covers, which
@@ -4509,8 +4547,25 @@ static int art_source(void) { return home.kind == PANE_LIBRARY ? SHOW_LIB : SHOW
  * one showing, and a still one cuts; home_repaint then shows the new art whole. */
 void coverflow_home_art(void *top) {
     if (!home.art || top != home.win || !widget_get_visible(home.art)) return;
-    int show = art_source(), changed = show != home.show;
+    int show = art_source(), changed = show != home.show, was = home.show;
     home.show = show;
+    if (show == SHOW_RADIO) { /* no covers, no pan: Radio's pane, sliding in over the last cover */
+        unsigned key = (unsigned)tuner_dial() ^ (unsigned)tuner_state() << 20;
+        if (changed) {
+            stop_timer(&home.drift);
+            const unsigned *cover = home.frame && home.drawn
+                                        ? (const unsigned *)bitmap_lock_buffer_for_read(home.frame)
+                                        : 0;
+            rp_enter(cover, pane_w(), pane_h());
+            if (cover) bitmap_unlock_buffer(home.frame);
+            slides_drop(), art_frame();
+        }
+        if (!home.rtick && radio_live() && rp_moving())
+            home.rtick = timer_add(radio_tick, (void *)0, RADIO_TICK_MS);
+        if (changed || key != home.key) home.key = key, pane_invalidate();
+        return;
+    }
+    if (was == SHOW_RADIO) stop_timer(&home.rtick), rp_free(); /* the Library's again */
     if (!home.drift && drift_live()) {
         home.drift_last = time_now_ms();
         home.tick = DRIFT_TICK_MS;
@@ -4805,7 +4860,10 @@ void coverflow_home_clip(void *w, void *canvas, int begin) {
         (w != home.art && w != home.list && w != home.sets && w != home.lib && w != home.stream))
         return;
     if (!begin) {
-        if (w == home.art && home.sl[0].tw) home_paint(canvas);
+        if (w == home.art && home.show == SHOW_RADIO)
+            home_radio_paint(canvas);
+        else if (w == home.art && home.sl[0].tw)
+            home_paint(canvas);
         if (w == home.list) {
             int split = widget_get_visible(home.art);
             home_fades(canvas, w, I(canvas, CANVAS_Y), split ? pane_x() : 375, split, 0);

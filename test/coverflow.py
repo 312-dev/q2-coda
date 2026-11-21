@@ -387,6 +387,14 @@ int catalogue_playlist_cover(int list, char *url) { return 0; }
 int library_search_open(void *ctx, void *event) { return 0; }
 int games_open(void *ctx, void *event) { return 0; } /* games.c: Home's Games row */
 int tuner_open(void *ctx, void *event) { return 0; } /* radio_tuner.c: Home's Radio row */
+/* radio_tuner.c and radio_pane.c: Radio never the owner here, so Home's pane is always the covers' */
+int tuner_state(void) { return 0; }
+int tuner_dial(void) { return 0; }
+int rp_frame(unsigned *d, int pitch, int w, int h, int top, unsigned now, rp_words_t *words) { return 0; }
+void rp_words(void *w, void *canvas, const rp_words_t *k) {}
+void rp_enter(const unsigned *cover, int w, int h) {}
+void rp_free(void) {}
+int rp_moving(void) { return 0; }
 void storage_scanned(void) {}                        /* storage.c: a whole scan's end, saved */
 /* library_artist.c's own artist page: never up in these tests, so the page under is closed as before */
 int artist_local_on(void *win) { return 0; }

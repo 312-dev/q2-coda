@@ -673,6 +673,19 @@ int video_start(const char *file, int radio); /* videos.c */
  * (tuner_stop; tuner_yield, a pick, playback.c ringnav_load, its held song dropped too); its page
  * (tuner_open) */
 int tuner_state(void), tuner_open(void *ctx, void *event);
+int tuner_dial(void); /* ...the dial's frequency, 10 kHz, 0 with no receiver */
+/* radio_pane.c: Home's art pane while Radio is Now Playing (coverflow.c): a frame of it into an
+ * RGBA8888 pane-sized buffer (rp_frame; 0 out of memory), the tower and the frequency over it
+ * (rp_words, where rp_frame put them), the way in over the cover it replaces (rp_enter), whether it
+ * moves (rp_moving), its layers freed (rp_free) */
+#define RADIO_TOWER_PX 39 /* tools/art.py RADIO_TOWER_PX */
+typedef struct {
+    int off, badge_a, badge_dy, freq_a, freq_dy, cx, cy;
+} rp_words_t;
+int rp_frame(unsigned *d, int pitch, int w, int h, int top, unsigned now, rp_words_t *words);
+void rp_words(void *w, void *canvas, const rp_words_t *k);
+void rp_enter(const unsigned *cover, int w, int h), rp_free(void);
+int rp_moving(void);
 void tuner_set_playing(int playing), tuner_media(unsigned key), tuner_stop(void), tuner_yield(void);
 /* peq_ui.c's T9 edit, named EDIT_NAME: navigation.c's search_key cancels it on Return while its
  * keyboard is up. */

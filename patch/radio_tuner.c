@@ -656,6 +656,7 @@ void tuner_song(const char *in, char *artist, char *song, unsigned cap) {
  * the dial's frequency as "93.1 FM"; title the stream's raw StreamTitle (empty between stations or
  * before its first); each in cap bytes. */
 int tuner_state(void) { return !rt ? 0 : rt->playing ? 1 : 2; }
+int tuner_dial(void) { return rt ? rt->freq : 0; }
 int tuner_now(char *station, char *freq, char *title, unsigned cap) {
     if (!rt) return 0;
     const rt_station *s = rt->feed >= 0 ? &rt->st[rt->feed] : 0;

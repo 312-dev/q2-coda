@@ -56,7 +56,7 @@ class Home(C.Structure):
                 ('row', C.c_void_p), ('kind', C.c_int), ('pane_timer', C.c_uint),
                 ('ring', (C.c_uint * HOME_PW) * 4), ('clip', C.c_int * 4), ('clipped', C.c_int),
                 ('ink_bar', C.c_void_p), ('ground', C.c_uint), ('held', C.c_ubyte * HOME_PW),
-                ('np', C.c_int), ('np_stop', C.c_uint), ('np_timer', C.c_uint)]
+                ('np', C.c_int), ('folders', C.c_int), ('np_stop', C.c_uint), ('np_timer', C.c_uint), ('rtick', C.c_uint)]
 
 
 class Row(C.Structure):
@@ -4096,3 +4096,37 @@ def test_the_bar_paints_no_artist_header_over_a_code_built_page(fw, library):
     fw.fn('ringnav_paint_bg', C.c_int, C.c_void_p, C.c_void_p)(bar, canvas.p)
     assert not [r for r in canvas.rects if r[2] < 58]
     assert {name: len(fw.calls(name)) for name in mark} == mark
+
+
+SHOW_RADIO = 2
+
+
+def test_while_radio_owns_now_playing_the_pane_is_radio_s_and_ticks_only_while_it_moves(fw, mcl):
+    """Approved 2026-11-20 (design/radio-tuner/radio-now-playing/pane-v6, K1): while Radio is the owner, playing or
+    paused, Split's pane is Radio's (radio_pane.c) in place of the covers: no cover loaded, no pan, its own frame
+    tick (radio_tick) only while the pane moves and shows (rings while Radio plays, not paused); the Library chosen
+    again, the covers come back and the tick stops."""
+    from test_radio_tuner import Rt
+    _, ui, h, _ = home_open(fw, HOME='0')
+    home = drifting(fw)
+    fw.mock('window_manager_get_top_window', lambda *_: h.win)
+    rt = Rt()
+    rt.playing, rt.audio, rt.feed, rt.freq = 1, 999, -1, 9310
+    rt_var = fw.var('radio_tuner__rt', C.c_void_p)
+    rt_var.value = C.addressof(rt)
+    tick = address(fw, 'coverflow__radio_tick')
+    try:
+        loads = len(fw.calls('widget_load_image'))
+        fw.fn('coverflow_home_art', None, C.c_void_p)(h.win)
+        assert home.show == SHOW_RADIO and home.sl[0].tw == 0 and len(fw.calls('widget_load_image')) == loads
+        assert not ui.timer(address(fw, 'coverflow__home_drift')) and ui.timer(tick)
+        rt.playing = 0  # paused: the rings stand, nothing ticks once the way in is over
+        fw.var('coverflow__home', Home).show = SHOW_RADIO
+        assert fw.fn('coverflow__radio_tick', C.c_int, C.c_void_p)(None) in (0, 8)
+        fw.fn('rp_free', None)()  # no way in pending: paused, still
+        assert fw.fn('coverflow__radio_tick', C.c_int, C.c_void_p)(None) == 0
+        assert fw.var('coverflow__home', Home).show == SHOW_RADIO
+    finally:
+        rt_var.value = None
+    fw.fn('coverflow_home_art', None, C.c_void_p)(h.win)
+    assert home.show in (SHOW_NOW, SHOW_LIB) and len(fw.calls('widget_load_image')) > loads  # the covers again
