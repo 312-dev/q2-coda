@@ -20,7 +20,8 @@
  * watchdog (bt_kmsg, bt_watch, docs/internals.md#bluetooth-controller-watchdog), and bt_sleep waits
  * on the kernel's management channel, whose device events (connects and who began them, drops,
  * failures, pairings, Forgets, discoveries and the devices each found) go to the unified log as
- * they come (docs/internals.md#bluetooth-devices). */
+ * they come (docs/internals.md#bluetooth-devices), and on the system bus's socket, whose A2DP
+ * transport signals (q2dbus.c) do too (docs/internals.md#bluetooth-event-log). */
 #include "q2bt.h"
 #include "q2dbus.h"
 #include "q2log.h"

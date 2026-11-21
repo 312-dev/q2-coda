@@ -13,10 +13,14 @@
  * the state file's bt= (docs/internals.md#bluetooth-controller-watchdog). bt_sleep also listens to the
  * kernel's Bluetooth management channel and logs each device's connect, drop, failure, pairing and
  * Forget, and each discovery with the devices it found, to the unified log
- * (docs/internals.md#bluetooth-devices).
+ * (docs/internals.md#bluetooth-devices), and to the system bus for each A2DP transport BlueZ sets
+ * up, starts, suspends and closes (q2dbus.c).
  * It also writes the unified log, q2-log, beside them (q2log.h, docs/internals.md#unified-log): each
  * tick it reads what demo's stderr file and the kernel's /dev/kmsg gained, and adds its own notes;
  * demo (ulog.c ulog_end) and S90play ask for a snapshot through /tmp/q2guard.snap and a SIGUSR1.
+ * Every Bluetooth line of it is copied into the Bluetooth event log, q2-btev, kept longer
+ * (docs/internals.md#bluetooth-event-log): flushed with the others, and at least every
+ * BTEV_FLUSH_MS while it holds a line.
  * It writes nothing to /mnt/data. No MIPS sysroot: glibc 2.28's declarations, as boot.c. */
 #include "q2bt.h"
 #include "q2log.h"
