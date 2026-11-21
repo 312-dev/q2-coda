@@ -4096,3 +4096,40 @@ def test_the_bar_paints_no_artist_header_over_a_code_built_page(fw, library):
     fw.fn('ringnav_paint_bg', C.c_int, C.c_void_p, C.c_void_p)(bar, canvas.p)
     assert not [r for r in canvas.rects if r[2] < 58]
     assert {name: len(fw.calls(name)) for name in mark} == mark
+
+
+SHOW_RADIO = 2
+
+
+def test_while_radio_owns_now_playing_the_pane_shows_the_station(fw, mcl):
+    """Approved 2026-11-20 (~/q2-emu/design/radio-tuner/radio-now-playing/sheet.png, frame 5): while Radio is the
+    owner, playing or paused, Split's pane shows the station as the tuner does (radio_tuner.c tuner_pane) in place of
+    the covers, with no pan and no cover loaded; a new song or station repaints it; the Library chosen again, its
+    covers come back."""
+    from test_radio_tuner import Rt
+    _, ui, h, _ = home_open(fw, HOME='0')
+    home = drifting(fw)
+    rt = Rt()
+    rt.playing, rt.audio, rt.feed, rt.freq, rt.n, rt.shown = 1, 999, 0, 9310, 1, 1
+    rt.st[0].freq, rt.st[0].name, rt.st[0].call, rt.st[0].city = 9310, b'93XRT', b'WXRT', b'Chicago, IL'
+    rt.title_text = b'Wilco - Jesus, Etc.'
+    rt_var = fw.var('radio_tuner__rt', C.c_void_p)
+    rt_var.value = C.addressof(rt)
+    try:
+        loads = len(fw.calls('widget_load_image'))
+        fw.fn('coverflow_home_art', None, C.c_void_p)(h.win)
+        assert home.show == SHOW_RADIO and home.sl[0].tw == 0 and len(fw.calls('widget_load_image')) == loads
+        assert not ui.timer(address(fw, 'coverflow__home_drift'))
+        key = home.key
+        fw.fn('coverflow_home_art', None, C.c_void_p)(h.win)
+        assert home.key == key  # nothing new: no repaint
+        rt.title_text = b'Bill Withers - Lovely Day'
+        fw.fn('coverflow_home_art', None, C.c_void_p)(h.win)
+        assert home.key != key
+        rt.playing = 0  # paused: still the station
+        fw.fn('coverflow_home_art', None, C.c_void_p)(h.win)
+        assert home.show == SHOW_RADIO
+    finally:
+        rt_var.value = None
+    fw.fn('coverflow_home_art', None, C.c_void_p)(h.win)
+    assert home.show in (SHOW_NOW, SHOW_LIB) and len(fw.calls('widget_load_image')) > loads  # covers again

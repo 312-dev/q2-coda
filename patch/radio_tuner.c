@@ -771,6 +771,54 @@ static void tuner_screen(void *canvas) {
         dial(canvas, nd);
 }
 
+/* Home's art pane while Radio owns Now Playing (coverflow.c coverflow_home_art, approved
+ * 2026-11-20, ~/q2-emu/design/radio-tuner/radio-now-playing/sheet.png frame 5): black, the tuner's
+ * words smaller and centred in it, w x h with its top at screen row top: the frequency (Inter
+ * Medium 40, baseline at screen y 160) with "FM", once revealed the station's name above it (15
+ * Medium, y 112) and below its song or Paused (13 Text Secondary, y 184) and call sign and city (13
+ * Text Tertiary, y 204); before the words come, the frequency alone, as on the tuner. */
+#define PANE_IN 8 /* the words' column, in from each side of the pane */
+static rt_station *pane_station(void) {
+    rt_station *here = at((float)rt->freq);
+    return here && rt->shown == index_of(here) + 1 ? here : 0;
+}
+void tuner_pane(void *canvas, int w, int h, int top) {
+    if (!rt) return;
+    canvas_set_fill_color(canvas, rgba(RGB_CANVAS, 255));
+    canvas_fill_rect(canvas, 0, 0, w, h);
+    int cx = w / 2, col = w - 2 * PANE_IN, tenth = (rt->freq + 5) / 10;
+    char num[8], line[256], two[64];
+    tk_snprintf(num, sizeof num, "%d.%d", tenth / 10, tenth % 10);
+    int nw = ui_text_w(canvas, num, 1, TYPE(40)), fw = ui_text_w(canvas, "FM", 1, TYPE(13)),
+        x0 = (w - nw - 4 - fw) / 2, base = 160 - top;
+    ui_text(canvas, num, 1, TYPE(40), RGB_PRIMARY, 0, x0, base - (40 * 3635 + 5000) / 10000, nw + 8,
+            2);
+    ui_text(canvas, "FM", 1, TYPE(13), RGB_SECONDARY, 0, x0 + nw + 4,
+            base - (13 * 3635 + 5000) / 10000, fw + 8, 2);
+    rt_station *s = pane_station();
+    if (!s) return;
+    ui_text(canvas, s->name, 1, TYPE(15), RGB_PRIMARY, 0, cx, 112 - top, col, 1);
+    tuner_title(!rt->playing              ? "Paused"
+                : index_of(s) == rt->feed ? rt->title_text
+                                          : "",
+                line, sizeof line);
+    if (line[0]) ui_text(canvas, line, 0, TYPE(13), RGB_SECONDARY, 0, cx, 184 - top, col, 1);
+    tk_snprintf(two, sizeof two, "%s \xc2\xb7 %s", s->call, s->city);
+    char *comma = strrchr(two, ',');
+    if (comma) *comma = 0;
+    ui_text(canvas, two, 0, TYPE(13), RGB_TERTIARY, 0, cx, 204 - top, col, 1);
+}
+unsigned tuner_pane_key(void) {
+    if (!rt) return 0;
+    char k[320];
+    rt_station *s = pane_station();
+    tk_snprintf(k, sizeof k, "%d %d %d %s", rt->freq, s ? index_of(s) : -1, rt->playing,
+                s && index_of(s) == rt->feed ? rt->title_text : "");
+    unsigned h = 2166136261u;
+    for (const char *c = k; *c; ++c) h = (h ^ (unsigned char)*c) * 16777619u;
+    return h | 1;
+}
+
 /* The now-playing mark: three 3 px bars 5 px apart, up to 14 px tall, out of step, their foot at
  * y + 7 (the prototype's musicBars). */
 static void bars(void *canvas, int x, int y, unsigned rgb) {
