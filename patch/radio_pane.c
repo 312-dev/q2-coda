@@ -52,7 +52,9 @@ static const unsigned char GROUND[3] = { 20, 3, 7 }, GLOW_RGB[3] = { 88, 7, 22 }
 
 static struct {
     int w, h, top, cx, cy;    /* the pane, its top on the screen, the badge's centre in it */
+    int vx0, vy0, vx1, vy1;   /* the box the vignette reaches */
     unsigned *ground;         /* the ground without the glow, 0x00BBGGRR */
+    unsigned *lit;            /* ... and with it, as a frame draws it once the way in is over */
     unsigned char *glow;      /* the glow's t, 255 at 0.45 */
     unsigned short *d4;       /* each pixel's distance from the badge's centre, quarter px */
     unsigned char *vig;       /* the vignette's alpha */
@@ -101,8 +103,8 @@ static unsigned rp_mix(unsigned b, unsigned c, unsigned a) {
 }
 
 static void layers_free(void) {
-    free(rp.ground), free(rp.glow), free(rp.d4), free(rp.vig), free(rp.badge);
-    rp.ground = 0, rp.glow = 0, rp.d4 = 0, rp.vig = 0, rp.badge = 0;
+    free(rp.ground), free(rp.lit), free(rp.glow), free(rp.d4), free(rp.vig), free(rp.badge);
+    rp.ground = 0, rp.lit = 0, rp.glow = 0, rp.d4 = 0, rp.vig = 0, rp.badge = 0;
     rp.w = 0;
 }
 /* The pane gone (the Library's covers back): its layers and any way in freed. */
@@ -116,10 +118,10 @@ static int layers(int w, int h, int top) {
     if (rp.ground && rp.w == w && rp.h == h && rp.top == top) return 1;
     layers_free();
     unsigned n = (unsigned)(w * h);
-    rp.ground = calloc(n, 4), rp.glow = calloc(n, 1), rp.d4 = calloc(n, 2), rp.vig = calloc(n, 1),
-    rp.badge = calloc(BADGE * BADGE, 4);
+    rp.ground = calloc(n, 4), rp.lit = calloc(n, 4), rp.glow = calloc(n, 1), rp.d4 = calloc(n, 2),
+    rp.vig = calloc(n, 1), rp.badge = calloc(BADGE * BADGE, 4);
     float *row = calloc((unsigned)(w > h ? w : h), 4);
-    if (!rp.ground || !rp.glow || !rp.d4 || !rp.vig || !rp.badge || !row) {
+    if (!rp.ground || !rp.lit || !rp.glow || !rp.d4 || !rp.vig || !rp.badge || !row) {
         free(row);
         layers_free();
         return 0;
@@ -136,6 +138,10 @@ static int layers(int w, int h, int top) {
             float e = x ? 0 : 1; /* the faint lighter line down the pane's left edge */
             rp.ground[i] = pack(GROUND[0] * deep + EDGE[0] * e, GROUND[1] * deep + EDGE[1] * e,
                                 GROUND[2] * deep + EDGE[2] * e);
+            float gl = rp.glow[i] * 0.45f / 255;
+            rp.lit[i] = pack(GROUND[0] * deep + EDGE[0] * e + GLOW_RGB[0] * gl,
+                             GROUND[1] * deep + EDGE[1] * e + GLOW_RGB[1] * gl,
+                             GROUND[2] * deep + EDGE[2] * e + GLOW_RGB[2] * gl);
         }
     }
     /* the badge: a vertical gradient, a soft gloss high on it, its edge a pixel's coverage */
@@ -160,6 +166,7 @@ static int layers(int w, int h, int top) {
         y1 = base + VIG_DOWN + 3 * VIG_BLUR;
     x0 = x0 < 0 ? 0 : x0, y0 = y0 < 0 ? 0 : y0, x1 = x1 > w ? w : x1, y1 = y1 > h ? h : y1;
     int bw = x1 - x0, bh = y1 - y0;
+    rp.vx0 = x0, rp.vy0 = y0, rp.vx1 = x1, rp.vy1 = y1;
     float *box = bw > 0 && bh > 0 ? calloc((unsigned)(bw * bh), 4) : 0, k[3 * VIG_BLUR + 1], ks = 0;
     if (box) {
         for (int j = 0; j <= 3 * VIG_BLUR; ++j)
@@ -295,11 +302,14 @@ int rp_frame(unsigned *d, int pitch, int w, int h, int top, unsigned now, rp_wor
                 continue;
             }
             int i = y * w + rx;
-            unsigned gl = (unsigned)(rp.glow[i] * g * 0.45f);
-            unsigned v = rp.ground[i];
-            v = pack((float)(v & 255) + GLOW_RGB[0] * gl / 255.0f,
-                     (float)(v >> 8 & 255) + GLOW_RGB[1] * gl / 255.0f,
-                     (float)(v >> 16 & 255) + GLOW_RGB[2] * gl / 255.0f);
+            unsigned v = rp.lit[i]; /* the ground and its glow, whole once the glow has bloomed */
+            if (g < 1) {
+                unsigned gl = (unsigned)(rp.glow[i] * g * 0.45f);
+                v = rp.ground[i];
+                v = pack((float)(v & 255) + GLOW_RGB[0] * gl / 255.0f,
+                         (float)(v >> 8 & 255) + GLOW_RGB[1] * gl / 255.0f,
+                         (float)(v >> 16 & 255) + GLOW_RGB[2] * gl / 255.0f);
+            }
             unsigned ra = rp.ring[rp.d4[i]];
             if (ra) v = rp_mix(v, (unsigned)RING[0] | RING[1] << 8 | (unsigned)RING[2] << 16, ra);
             o[x] = v | 0xff000000u;
@@ -309,10 +319,10 @@ int rp_frame(unsigned *d, int pitch, int w, int h, int top, unsigned now, rp_wor
     int bdy = (int)(IN_RISE * (1 - ba) + 0.5f);
     badge_at(d, pitch, off + rp.cx - BADGE / 2, rp.cy - BADGE / 2 + bdy, (unsigned)(256 * ba));
     unsigned va = (unsigned)(256 * fa);
-    for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
+    for (int y = rp.vy0; y < rp.vy1; ++y) /* the box the vignette reaches */
+        for (int x = rp.vx0 + off; x < rp.vx1 + off; ++x) {
             int rx = x - off;
-            if (rx < 0 || rx >= w) continue;
+            if (x < 0 || x >= w) continue;
             unsigned a = rp.vig[y * w + rx] * va >> 8;
             if (a) d[y * pitch + x] = rp_mix(d[y * pitch + x], 0, a) | 0xff000000u;
         }
