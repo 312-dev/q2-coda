@@ -4,7 +4,8 @@
  * - starts the daemon (at boot and when the switch goes on; again if it dies) and stops it when the switch
  *   goes off: nothing listens while it is off; and beside it q2-iroh, the iroh sidecar that lets a phone on
  *   another network reach the daemon (docs/remote.md#car-remote-across-networks), on and off with it;
- * - writes Now Playing for it to /tmp/coda-rc.now (radio=1 while a radio plays; a pressed server song from the
+ * - writes Now Playing for it to /tmp/coda-rc.now, now_source.c's (radio=1 while a song radio plays; a Radio or
+ *   Internet Radio station as source=, live=1 and station=; a pressed server song from the
  *   press on, as Now Playing shows it; the last toast for CR_NOTE_MS), and the queue's song ids to /tmp/coda-rc.queue (a stream download's
  *   path, title and artist beside its id 0);
  * - takes its commands from /tmp/coda-rc.cmd: play a list of song ids from one of them, or shuffled (ids in
@@ -254,63 +255,50 @@ static void cr_modes(int *shuf, int *rep) {
     }
 }
 
-/* The length of a song shown before the player has it, in seconds: its server row's (a pressed catalogue row, or
- * the download a Next waits for), 0 unknown. */
-static int cr_pressed_len(const char *path) {
-    int s = path ? catalogue_seconds(path) : -1;
-    if (s <= 0 && path) s = catalogue_copy_seconds(path);
-    return s > 0 ? s : 0;
-}
-
-/* Now Playing as the Q2 Muse's own page shows it: a server song pressed (or a Next waiting for its download) from
- * the moment it is pressed, while it loads and before the player has it (catalogue_np_now, as np_bar.c shows it),
- * else the queue's song at MCL_POS. A pressed song is at 0 with no hearts until it plays, as the Q2's rating
- * works only on the song playing. */
+/* Now Playing as now_source.c has it (now_get: the Library's song as the Q2 Muse's own page shows it, a
+ * pressed server song from the press on, or a radio), with the queue, the modes and the hearts beside it. A
+ * pressed song is at 0 with no hearts until it plays, as the Q2's rating works only on the song playing. A
+ * radio is source=radio (Radio) or netradio (Internet Radio), live=1, with no length, no position and no
+ * hearts, its station in station= and no path, so nothing here names a cover for it. */
 static void cr_now(void) {
-    void *q = P(mcl_pdeqplaylist, 0), *r = 0;
-    unsigned pos = (unsigned)I(MCL_POS, 0), pat, pn;
-    if (q && pos < deque_size(q)) r = deque_at(q, pos);
-    cr_queue(q, pos);
-    void *pressed = catalogue_np_now(&pat, &pn);
-    if (pressed) r = pressed;
-    int status = mclGetPlayStatus(), sec = -1, total = 0;
-    player_playtime_and_length(&sec, &total);
-    if (pressed) sec = 0, total = cr_pressed_len(P(pressed, REC_PATH));
+    now_info now;
+    now_get(&now);
+    void *q = P(mcl_pdeqplaylist, 0);
+    cr_queue(q, (unsigned)I(MCL_POS, 0));
+    int live = now.source == NOW_RADIO || now.source == NOW_NETRADIO;
     /* the hold menu's extended play while it runs, else Now Playing's own pair (cr_modes) */
     int shuf, rep;
     cr_modes(&shuf, &rep);
     char b[1400];
     unsigned n = 0;
-    const char *title = r ? P(r, REC_TITLE) : 0;
-    if (r && (!title || !*title)) title = P(r, REC_NAME);
-    put_int(b, sizeof b, &n, "state", status == 2 ? 1 : status == 3 ? 2 : 0);
-    put_int(b, sizeof b, &n, "pos", sec > 0 ? sec * 1000 : 0);
-    unsigned lms = 0;
-    int cert = np_stream_length(&lms); /* a streamed song still arriving: the server's length, or 0 */
-    put_int(b, sizeof b, &n, "len",
-            cert == 1 ? (int)(lms / 1000) : cert == 2 ? 0 : total > 0 ? total : 0);
-    put_int(b, sizeof b, &n, "id", r ? I(r, REC_ID) : 0);
+    put_int(b, sizeof b, &n, "state", now.state);
+    put_int(b, sizeof b, &n, "pos", now.pos_ms > 0 ? now.pos_ms : 0);
+    put_int(b, sizeof b, &n, "len", now.len_ms > 0 ? now.len_ms / 1000 : 0);
+    put_int(b, sizeof b, &n, "id", now.id);
     put_int(b, sizeof b, &n, "shuffle", shuf);
     /* playback.c: 3 repeats the song, 4 and 5 wrap the queue (4 within an album or folder) */
     put_int(b, sizeof b, &n, "repeat", rep);
     put_int(b, sizeof b, &n, "volume", g_volume);
-    put_int(b, sizeof b, &n, "hearts", pressed ? -1 : cr_hearts(r ? (unsigned)I(r, REC_ID) : 0));
-    put_int(b, sizeof b, &n, "qpos", (int)pos);
-    put_int(b, sizeof b, &n, "qlen", q ? (int)deque_size(q) : 0);
+    put_int(b, sizeof b, &n, "hearts", now.pressed || live ? -1 : cr_hearts((unsigned)now.id));
+    put_int(b, sizeof b, &n, "qpos", (int)now.qpos);
+    put_int(b, sizeof b, &n, "qlen", (int)now.qlen);
     put_int(b, sizeof b, &n, "qgen", (int)cr.q_gen);
-    unsigned have, btotal, bms; /* a server song loading (np_stream.c), NowPlaying.buffering */
-    put_int(b, sizeof b, &n, "buf", np_stream_loading(&have, &btotal, &bms));
-    put_int(b, sizeof b, &n, "bhave", (int)have);
-    put_int(b, sizeof b, &n, "btotal", (int)btotal);
-    put_int(b, sizeof b, &n, "bms", (int)bms);
+    unsigned have = 0, btotal = 0, bms = 0; /* a server song loading (np_stream.c), NowPlaying.buffering */
+    put_int(b, sizeof b, &n, "buf", live ? 0 : np_stream_loading(&have, &btotal, &bms));
+    put_int(b, sizeof b, &n, "bhave", live ? 0 : (int)have);
+    put_int(b, sizeof b, &n, "btotal", live ? 0 : (int)btotal);
+    put_int(b, sizeof b, &n, "bms", live ? 0 : (int)bms);
     put_int(b, sizeof b, &n, "radio", song_radio_on());
+    put(b, sizeof b, &n, "source", now.source == NOW_RADIO ? "radio" : now.source == NOW_NETRADIO ? "netradio" : "library");
+    put_int(b, sizeof b, &n, "live", live);
+    put(b, sizeof b, &n, "station", now.station);
     if (cr.note_at && time_now_ms() - cr.note_at >= CR_NOTE_MS) cr.note_at = 0, cr.note[0] = 0;
     put_int(b, sizeof b, &n, "noten", (int)cr.note_n);
     put(b, sizeof b, &n, "note", cr.note);
-    put(b, sizeof b, &n, "path", r ? P(r, REC_PATH) : "");
-    put(b, sizeof b, &n, "title", title);
-    put(b, sizeof b, &n, "artist", r ? P(r, REC_ARTIST) : "");
-    put(b, sizeof b, &n, "album", r ? P(r, REC_ALBUM) : "");
+    put(b, sizeof b, &n, "path", now.path);
+    put(b, sizeof b, &n, "title", now.title);
+    put(b, sizeof b, &n, "artist", now.artist);
+    put(b, sizeof b, &n, "album", now.album);
     unsigned h = hash_bytes(FNV_SEED, (const unsigned char *)b, n);
     if (h == cr.now_hash) return;
     char seq[16];

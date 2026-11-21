@@ -847,6 +847,14 @@ int radio_open(void *ctx, void *event) {
 }
 int radio_status(void) { return rd.active ? (rd.pid || rd.wait ? 2 : 3) : 0; }
 unsigned radio_session(void) { return rd.serial; }
+/* What Internet Radio plays, for now_source.c: radio_status's 2 playing or 3 stopped (0 not the last
+ * thing played), with the station's name and the stream's StreamTitle as q2video last wrote it. */
+int radio_now(char *station, char *title, unsigned cap) {
+    if (!rd.active) return 0;
+    tk_snprintf(station, cap, "%s", rd.list.n ? name_of(&rd.list, rd.at) : "");
+    tk_snprintf(title, cap, "%s", rd.title);
+    return radio_status();
+}
 void radio_set_playing(int playing) {
     if (!rd.active) return;
     if (!playing)

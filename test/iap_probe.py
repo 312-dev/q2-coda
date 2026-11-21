@@ -687,6 +687,64 @@ def test_bmw_artwork(probe, tmp_path):
         stop(p, fd)
 
 
+def np_updates(car):
+    """The car's StartNowPlayingUpdates for title, duration, artist, album and the cover, and the state and position;
+    the first NowPlayingUpdate's (media, playback)."""
+    attrs = b''.join(prm(a) for a in (0, 1, 4, 6, 12, 0x1a))
+    car.send(message(0x5000, prm(0, attrs), prm(1, prm(0) + prm(1))))
+    mid, ps = car.msg()
+    assert mid == 0x5001
+    return params(ps.get(0, b'')), params(ps[1])
+
+
+def test_bmw_radio_is_live_with_no_cover(probe, tmp_path):
+    """A radio in Now Playing (coda_rc_shim.c cr_now: source=radio, live=1, no path): its song and artist, the station
+    as the album, and no duration, no position and no cover, even with a cover cached for those words; nor any
+    position after, as it plays (docs/iphone-mode.md#now-playing)."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path)
+    jpeg = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=160x160', '-frames:v', '1',
+                           '-f', 'mjpeg', '-'], check=True, capture_output=True).stdout
+    (files['art']/f'{fnv_part(fnv_part(2166136261, "System of a Down"), "93XRT 93.1 FM"):08x}.jpg').write_bytes(jpeg)
+    files['np'].write_text('state=1\npos=0\nlen=0\nsource=radio\nlive=1\nstation=93XRT\ntitle=Toxicity\n'
+                           'artist=System of a Down\nalbum=93XRT 93.1 FM\npath=\n')
+    try:
+        media, play = np_updates(car)
+        assert media[1] == b'Toxicity\0' and media[6] == b'93XRT 93.1 FM\0' and media[12] == b'System of a Down\0'
+        assert 4 not in media and 0x1a not in media, media.keys()
+        assert play[0] == b'\x01' and 1 not in play, play.keys()
+        end = time.time() + 1.2
+        while time.time() < end:
+            try:
+                mid, ps = car.msg(0.3)
+            except AssertionError:
+                continue
+            assert not (mid == 0x5001 and 1 in ps and 1 in params(ps[1])), 'no position for a stream'
+    finally:
+        stop(p, fd)
+
+
+def test_bmw_a_seek_while_paused_is_sent(probe, tmp_path):
+    """Paused, the position is sent when it moves (a seek from the Q2 or the phone), not only while playing: the car
+    shows where the song will go on from."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path)
+    files['np'].write_text(files['np'].read_text().replace('state=1', 'state=2'))
+    try:
+        media, play = np_updates(car)
+        assert play[0] == b'\x02' and int.from_bytes(play[1], 'big') == 61000
+        files['np'].write_text(files['np'].read_text().replace('pos=61000', 'pos=120000'))
+        end, seen = time.time() + 1.5, []
+        while time.time() < end and not seen:
+            try:
+                mid, ps = car.msg(0.3)
+            except AssertionError:
+                continue
+            if mid == 0x5001 and 1 in ps and 1 in params(ps[1]):
+                seen.append(int.from_bytes(params(ps[1])[1], 'big'))
+        assert seen == [120000], seen
+    finally:
+        stop(p, fd)
+
+
 # ---- Car Audio in the image (--state): what the host is, and the car's audio health ----
 
 def car_daemon(probe, tmp_path, *more, kinds=('ptp', 'hid', 'ptpmux', 'ptpmuxeth'), udc='default'):

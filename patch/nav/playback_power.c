@@ -547,6 +547,7 @@ int ringnav_sleep(void *loop) {
     radio_poll();
     tuner_poll(); /* Radio's list and receiver (radio_tuner.c) */
     addon_poll();
+    now_poll(); /* the car's Bluetooth told of a radio and of the position (now_source.c) */
     coda_rc_poll();
     song_radio_poll();
     airplay_poll();

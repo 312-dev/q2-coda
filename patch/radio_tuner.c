@@ -575,12 +575,12 @@ static void cased(char *s) {
     }
 }
 
-/* A StreamTitle as the tuner shows it: "Artist - Title" as sent, or iHeart's key="value" pairs
- * (title="R.I.P.",artist="MOTIONLESS IN WHITE",url="...") as "Artist - Title", or a spot's text=;
- * all capitals made title case (cased). Shared with test/fw. */
-void tuner_title(const char *in, char *out, unsigned cap) {
-    char artist[128] = "", song[128] = "", spot[128] = "";
+/* A StreamTitle's parts: iHeart's key="value" pairs (title="R.I.P.",artist="MOTIONLESS IN WHITE",url="...")
+ * into artist, song and a spot's text= (each 128 bytes), all capitals made title case (cased); 0 when it has
+ * no pairs. */
+static int icy_pairs(const char *in, char *artist, char *song, char *spot) {
     int pairs = 0;
+    artist[0] = song[0] = spot[0] = 0;
     for (const char *p = in; (p = strstr(p, "=\""));) {
         const char *k = p;
         while (k > in && ((k[-1] | 32) >= 'a' && (k[-1] | 32) <= 'z')) --k;
@@ -593,13 +593,50 @@ void tuner_title(const char *in, char *out, unsigned cap) {
         if (to) tk_snprintf(to, 128, "%.*s", (int)(e - v), v), cased(to);
         pairs = 1, p = e + 1;
     }
-    if (!pairs) {
+    return pairs;
+}
+
+/* A StreamTitle as the tuner shows it: "Artist - Title" as sent, or iHeart's pairs as "Artist - Title",
+ * or a spot's text=; all capitals made title case (cased). Shared with test/fw. */
+void tuner_title(const char *in, char *out, unsigned cap) {
+    char artist[128], song[128], spot[128];
+    if (!icy_pairs(in, artist, song, spot)) {
         tk_snprintf(out, cap, "%s", in);
         cased(out);
     } else if (artist[0] && song[0])
         tk_snprintf(out, cap, "%s - %s", artist, song);
     else
         tk_snprintf(out, cap, "%s", song[0] ? song : artist[0] ? artist : spot);
+}
+
+/* A StreamTitle as a car's Now Playing takes it (now_source.c): the artist and the song apart, from
+ * iHeart's pairs or from "Artist - Title" (no " - ": all of it the song), title case as the tuner's;
+ * a spot's text is the song. Either may be empty. */
+void tuner_song(const char *in, char *artist, char *song, unsigned cap) {
+    char a[128], s[128], spot[128];
+    if (!icy_pairs(in, a, s, spot)) {
+        const char *dash = strstr(in, " - ");
+        tk_snprintf(a, sizeof a, "%.*s", dash ? (int)(dash - in) : 0, in);
+        tk_snprintf(s, sizeof s, "%s", dash ? dash + 3 : in);
+        cased(a), cased(s);
+    } else if (!s[0] && !a[0])
+        tk_snprintf(s, sizeof s, "%s", spot);
+    tk_snprintf(artist, cap, "%s", a);
+    tk_snprintf(song, cap, "%s", s);
+}
+
+/* What Radio plays, for now_source.c: 0 while the page is shut (the receiver goes with it), else 1
+ * playing or 2 paused, with the station's name (its call sign without one) and the dial's frequency
+ * as "93.1 FM" in station, and the stream's raw StreamTitle in title (empty between stations or before
+ * its first). */
+int tuner_now(char *station, char *freq, char *title, unsigned cap) {
+    if (!rt) return 0;
+    const rt_station *s = rt->feed >= 0 ? &rt->st[rt->feed] : 0;
+    tk_snprintf(station, cap, "%s", !s ? "" : s->name[0] ? s->name : s->call);
+    int f = s ? s->freq : rt->freq;
+    tk_snprintf(freq, cap, "%d.%d FM", f / 100, f / 10 % 10);
+    tk_snprintf(title, cap, "%s", s ? rt->title_text : "");
+    return rt->playing && rt->audio ? 1 : 2;
 }
 
 /* The house marquee on line (0 the name, 1 the song) at screen row y: centred when it fits in

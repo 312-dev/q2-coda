@@ -321,8 +321,8 @@ static void io_send(const unsigned char *r, unsigned len) {
 }
 static void io_log(const char *m) { logline("iap2", m); }
 
-/* The shim's Now Playing (patch/coda_rc_shim.c cr_now: key=value lines; pos in ms, len in seconds), written while
- * Car Remote is on. */
+/* The shim's Now Playing (patch/coda_rc_shim.c cr_now, from now_source.c: key=value lines; pos in ms, len in
+ * seconds, live=1 for a radio's stream), written while Car Remote is on or the car's iPhone is on the cable. */
 static int io_now_playing(struct iap2_np *n) {
     char b[1600];
     int fd = open(np_file, O_RDONLY), len = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
@@ -337,6 +337,7 @@ static int io_now_playing(struct iap2_np *n) {
             const char *v = eq + 1;
             if (!strcmp(line, "state")) n->state = atoi(v);
             else if (!strcmp(line, "pos")) n->pos_ms = atoi(v);
+            else if (!strcmp(line, "live")) n->live = atoi(v);
             else if (!strcmp(line, "len")) n->len_ms = atoi(v) * 1000u;
             else if (!strcmp(line, "qpos")) n->qpos = atoi(v);
             else if (!strcmp(line, "qlen")) n->qlen = atoi(v);
