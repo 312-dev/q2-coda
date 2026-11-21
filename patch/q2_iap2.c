@@ -654,8 +654,8 @@ static unsigned report_bit(const u8 *r, unsigned len, unsigned bit) { return bit
 #define SCAN_SLOW 2
 #define SCAN_FAST 4
 #define SCAN_FASTEST 8
-#define SCAN_SLOW_MS 2000
-#define SCAN_FAST_MS 5000
+#define SCAN_SLOW_MS 1000
+#define SCAN_FAST_MS 3000
 static unsigned held; /* Next's or Previous's usage while it is down, else 0 */
 static long held_at, scan_at;
 static int scanning;

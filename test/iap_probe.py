@@ -533,7 +533,7 @@ def test_bmw_buttons(probe, tmp_path):
 def test_bmw_hold_to_scan(probe, tmp_path):
     """Next and Previous act at their release: a tap (the car's were up 13 to 120 ms after the press, 2026-11-20) is
     the skip; held past 500 ms the song moves through itself from where it is (61 s of 245), a seek every 500 ms, 2 s
-    a step for 2 s, then 4 s, and nothing else at the release."""
+    a step for 1 s, then 4 s, and nothing else at the release."""
     p, car, fd, log, files = bmw_up(probe, tmp_path)
 
     def hid(b):
@@ -556,8 +556,8 @@ def test_bmw_hold_to_scan(probe, tmp_path):
         time.sleep(3.2)
         hid(0x00)
         time.sleep(0.4)
-        assert seeks() == [63, 65, 67, 69, 73, 77], seeks()
-        assert files['cmd'].read_text().split(' ', 1)[1].strip() == 'seek 77', 'no skip after a scan'
+        assert seeks() == [63, 65, 69, 73, 77, 81], seeks()
+        assert files['cmd'].read_text().split(' ', 1)[1].strip() == 'seek 81', 'no skip after a scan'
         hid(0x08)                                    # Previous held 1.2 s, from where Now Playing says it is
         time.sleep(1.2)
         hid(0x00)
