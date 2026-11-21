@@ -453,7 +453,9 @@ def test_a_stream_the_receiver_missed_is_named_again(tu):
 
 
 SCRUB_MS = O['SCRUB_MS']
-HOLD_MS = int(re.search(r'^#define LR_HOLD_MS (\d+)', (ROOT / 'patch' / 'navigation.h').read_text(), re.M)[1])
+_hold = re.search(r'^#define LR_HOLD_MS (\d+)', (ROOT / 'patch' / 'navigation.h').read_text(), re.M)
+assert _hold, 'navigation.h defines LR_HOLD_MS'
+HOLD_MS = int(_hold[1])
 
 
 class Centre:
