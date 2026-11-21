@@ -1,6 +1,6 @@
-/* The cover travels into Now Playing (docs/oled-design.md#motion): opened from a page that shows the
- * playing song's cover (Home's art pane, a dressed album page's header), the cover lifts off that
- * page and travels to Now Playing's art as one card, and Return carries it back, when the page
+/* The cover travels into Now Playing (docs/oled-design.md#motion): opened from a page that shows
+ * the playing song's cover (Home's art pane, a dressed album page's header), the cover lifts off
+ * that page and travels to Now Playing's art as one card, and Return carries it back, when the page
  * under is still the one it came from; over another it is a plain cross-fade. Opened anywhere
  * else, Now Playing opens at once as before. Under Reduce Motion both are a MO_FADE_MS cross-fade
  * (AWTK's fade animator).
@@ -36,12 +36,12 @@
 #define AZ_HERO 1 /* 0: the lite variant (above) */
 #endif
 #define AZ_TYPE "art_zoom"
-#define AZ_HERO_MS 420 /* the hero's run, each way */
-#define AZ_LITE_MS 340 /* the lite variant's */
-#define AZ_ARC 14      /* the hero's path, px above the straight line at its middle */
-#define AZ_SLIDE 28    /* Home's list, px left of its place at the run's far end */
-#define AZ_LAG_MS 40   /* the list behind the card */
-#define AZ_SCALE 960   /* Now Playing drawn back to this, thousandths */
+#define AZ_HERO_MS 420    /* the hero's run, each way */
+#define AZ_LITE_MS 340    /* the lite variant's */
+#define AZ_ARC 14         /* the hero's path, px above the straight line at its middle */
+#define AZ_SLIDE 28       /* Home's list, px left of its place at the run's far end */
+#define AZ_LAG_MS 40      /* the list behind the card */
+#define AZ_SCALE 960      /* Now Playing drawn back to this, thousandths */
 #define AZ_PANE_ZOOM 1100 /* the pane's cover (coverflow.c DRIFT_ZOOM_PCT), thousandths */
 #define AZ_NP_R 6         /* Now Playing's art's corners (theme playing.art.radius) */
 #define AZ_SHADOW 200     /* the shadow's darkest, 255ths, mid-flight */
@@ -71,28 +71,27 @@ static struct {
 /* Each spring's value at 32 even steps of its run, thousandths, the last 1000 (normalized by the
  * value there, so the run ends at rest): the hero's response 0.42 s, damping 0.86 over 420 ms,
  * the lite variant's response 0.36 s, critically damped, over 340 ms. */
-static const short az_hero_spring[33] = { 0,   17,  61,  123, 196, 274, 353, 430, 504,
-                                          572, 635, 691, 742, 786, 824, 857, 885, 908,
-                                          928, 944, 957, 968, 976, 983, 988, 992, 995,
-                                          997, 998, 999, 1000, 1000, 1000 };
-static const short az_lite_spring[33] = { 0,   15,  55,  110, 174, 242, 311, 379, 445,
-                                          506, 564, 616, 664, 707, 746, 780, 811, 838,
-                                          862, 883, 901, 917, 931, 943, 954, 963, 971,
-                                          978, 984, 989, 993, 997, 1000 };
+static const short az_hero_spring[33] = {
+    0,   17,  61,  123, 196, 274, 353, 430, 504, 572, 635, 691, 742, 786,  824,  857, 885,
+    908, 928, 944, 957, 968, 976, 983, 988, 992, 995, 997, 998, 999, 1000, 1000, 1000
+};
+static const short az_lite_spring[33] = { 0,   15,  55,  110, 174, 242, 311, 379, 445, 506, 564,
+                                          616, 664, 707, 746, 780, 811, 838, 862, 883, 901, 917,
+                                          931, 943, 954, 963, 971, 978, 984, 989, 993, 997, 1000 };
 /* The shadow's pre-blurred edge: a Gaussian's (sigma 7 px) share inside an edge d px away, d from
  * -AZ_BLUR to AZ_BLUR, in 255ths. */
-static const unsigned char az_edge[2 * AZ_BLUR + 1] = {
-    0,   1,   3,   5,   8,   12,  17,  23,  30,  38,  48,  59,  71,  84,  98,  113, 128,
-    142, 157, 171, 184, 196, 207, 217, 225, 232, 238, 243, 247, 250, 252, 254, 255
-};
+static const unsigned char az_edge[2 * AZ_BLUR + 1] = { 0,   1,   3,   5,   8,   12,  17,  23,  30,
+                                                        38,  48,  59,  71,  84,  98,  113, 128, 142,
+                                                        157, 171, 184, 196, 207, 217, 225, 232, 238,
+                                                        243, 247, 250, 252, 254, 255 };
 
 int art_zoom_hero(void) { return az.force ? az.force == 1 : AZ_HERO; }
 void art_zoom_force(int v) { az.force = v; } /* test/fw */
 
-/* win's open_anim_hint or close_anim_hint, "" when it has none. Stock's window_base_get_prop answers
- * these itself with the window's own field, which is NULL until one is set, and widget_get_prop_str
- * passes that NULL on instead of its default: a window loaded new (Now Playing over a list, the
- * first time) has none. */
+/* win's open_anim_hint or close_anim_hint, "" when it has none. Stock's window_base_get_prop
+ * answers these itself with the window's own field, which is NULL until one is set, and
+ * widget_get_prop_str passes that NULL on instead of its default: a window loaded new (Now Playing
+ * over a list, the first time) has none. */
 const char *window_hint(void *win, const char *name) {
     const char *hint = widget_get_prop_str(win, name, "");
     return hint ? hint : "";
@@ -151,7 +150,9 @@ void art_zoom_frame(int t, int open, int hero, const rect_t *src, int src_r, int
                     const rect_t *np, art_zoom_frame_t *f) {
     t = t < 0 ? 0 : t > 1000 ? 1000 : t;
     int ms = hero ? AZ_HERO_MS : AZ_LITE_MS, k = az_spring(t, hero),
-        kc = k < 0 ? 0 : k > 1000 ? 1000 : k;
+        kc = k < 0      ? 0
+             : k > 1000 ? 1000
+                        : k;
     /* page: the page's end, 1000 at its cover, 0 at Now Playing's */
     int page = open ? 1000 - k : k, pc = open ? 1000 - kc : kc;
     const rect_t *a = open ? src : np, *b = open ? np : src;
@@ -166,11 +167,11 @@ void art_zoom_frame(int t, int open, int hero, const rect_t *src, int src_r, int
      * the way from it */
     f->vig = open ? 1000 - az_smooth(0, 450, kc) : az_smooth(550, 1000, kc);
     f->np_a = open ? az_smooth(300, 950, t) : 1000 - az_smooth(0, 550, t);
-    f->np_scale = !hero ? 1000
+    f->np_scale = !hero  ? 1000
                   : open ? az_lerp(AZ_SCALE, 1000, az_smooth(250, 1000, t))
                          : az_lerp(1000, AZ_SCALE, az_smooth(0, 1000, t));
     f->page_a = open ? 1000 - az_smooth(0, 450, t) : az_smooth(150, 700, t);
-    f->page_dx = !hero ? 0
+    f->page_dx = !hero  ? 0
                  : open ? -AZ_SLIDE * az_smooth(0, 1000, t) / 1000
                         : -AZ_SLIDE * (1000 - az_spring(t - AZ_LAG_MS * 1000 / ms, 1)) / 1000;
     int lift = t * 115 / 100;
@@ -213,8 +214,10 @@ static unsigned az_isqrt(unsigned n) {
     unsigned r = 0, b = 1u << 30;
     while (b > n) b >>= 2;
     for (; b; b >>= 2)
-        if (n >= r + b) n -= r + b, r = (r >> 1) + b;
-        else r >>= 1;
+        if (n >= r + b)
+            n -= r + b, r = (r >> 1) + b;
+        else
+            r >>= 1;
     return r;
 }
 
@@ -244,7 +247,8 @@ AZ_HOT unsigned az_scale(unsigned c, unsigned k) {
 AZ_HOT unsigned az_texel(const unsigned *row, int ts, unsigned at_u, unsigned fy, int rgba,
                          unsigned dim) {
     const unsigned *t = row + (at_u >> 16);
-    unsigned fx = at_u >> 8 & 255, c = az_mix(az_mix(t[0], t[1], fx), az_mix(t[ts], t[ts + 1], fx), fy);
+    unsigned fx = at_u >> 8 & 255,
+             c = az_mix(az_mix(t[0], t[1], fx), az_mix(t[ts], t[ts + 1], fx), fy);
     if (rgba) c = (c & 0xff00ff00u) | (c >> 16 & 0xffu) | (c & 0xffu) << 16;
     return dim < 256 ? az_scale(c, dim) : c;
 }
@@ -278,8 +282,8 @@ void art_zoom_card(unsigned *fb, int pitch, const rect_t *r, int radius, const u
             for (int k = 0, x = edge; k < 2; ++k, x = r->w - 1 - edge)
                 if (x >= x0 && x < x1)
                     d[x] = az_mix(d[x],
-                                  az_texel(row, ts, (unsigned)u + (unsigned)x * (unsigned)step,
-                                           fy, rgba, dim),
+                                  az_texel(row, ts, (unsigned)u + (unsigned)x * (unsigned)step, fy,
+                                           rgba, dim),
                                   256 - (unsigned)(in & 255));
         int a = full > x0 ? full : x0, b = r->w - full < x1 ? r->w - full : x1;
         unsigned at_u = (unsigned)u + (unsigned)a * (unsigned)step;
@@ -301,7 +305,8 @@ void art_zoom_card(unsigned *fb, int pitch, const rect_t *r, int radius, const u
 void art_zoom_shadow(unsigned *fb, int pitch, const rect_t *r, unsigned a) {
     if (!a) return;
     int top = r->y + AZ_SHADOW_DY, bot = top + r->h, left = r->x, right = r->x + r->w;
-    int lo = left - AZ_BLUR < 0 ? 0 : left - AZ_BLUR, hi = right + AZ_BLUR > 375 ? 375 : right + AZ_BLUR;
+    int lo = left - AZ_BLUR < 0 ? 0 : left - AZ_BLUR,
+        hi = right + AZ_BLUR > 375 ? 375 : right + AZ_BLUR;
     unsigned char col[375]; /* each column's share across, 255ths */
     for (int x = lo; x < hi; ++x) {
         int dl = x - left, dr = right - 1 - x;
@@ -334,7 +339,8 @@ void art_zoom_shadow(unsigned *fb, int pitch, const rect_t *r, unsigned a) {
  * snapshot), as up to four pieces around it, whose edges are scaled once each so they meet. */
 static void az_holed(void *c, void *img, const rect_t *hole, unsigned alpha, int scale, int dx) {
     if (!alpha) return;
-    int xs[4] = { 0, hole->x, hole->x + hole->w, 375 }, ys[4] = { 0, hole->y, hole->y + hole->h, 320 };
+    int xs[4] = { 0, hole->x, hole->x + hole->w, 375 },
+        ys[4] = { 0, hole->y, hole->y + hole->h, 320 };
     for (int i = 0; i < 4; ++i) {
         xs[i] = xs[i] < 0 ? 0 : xs[i] > 375 ? 375 : xs[i];
         ys[i] = ys[i] < 0 ? 0 : ys[i] > 320 ? 320 : ys[i];
@@ -439,8 +445,8 @@ static void az_draw_curr(void *c, void *img, void *prev, int t, int open, int fl
     int tw, th, pu = 0, pv = 0, ts, u, v, step, drew = 0;
     if (fb && az.kind == AZ_PANE && coverflow_home_cover(&tex, &tw, &th, &pu, &pv)) {
         ts = tw + 3;
-        art_zoom_window(f.card.w, f.card.h, f.zoom, tw, th, f.pane, pu, pv, az.cover.w,
-                        az.cover.h, &u, &v, &step);
+        art_zoom_window(f.card.w, f.card.h, f.zoom, tw, th, f.pane, pu, pv, az.cover.w, az.cover.h,
+                        &u, &v, &step);
         art_zoom_card(fb, 375, &f.card, f.radius, tex + ts + 1, ts, u, v, step, f.vig, 1);
         drew = 1;
     } else if (fb && np.w > 2 * AZ_INSET + 1 && np.h > 2 * AZ_INSET + 1) {
@@ -449,9 +455,8 @@ static void az_draw_curr(void *c, void *img, void *prev, int t, int open, int fl
             ts = (int)(bitmap_get_line_length(img) / 4);
             tw = np.w - 2 * AZ_INSET - 1, th = np.h - 2 * AZ_INSET - 1; /* the last for bilinear */
             art_zoom_window(f.card.w, f.card.h, f.zoom, tw, th, 0, 0, 0, 0, 0, &u, &v, &step);
-            art_zoom_card(fb, 375, &f.card, f.radius,
-                          px + (np.y + AZ_INSET) * ts + np.x + AZ_INSET, ts, u, v, step,
-                          az.kind == AZ_PANE ? f.vig : 0, 0);
+            art_zoom_card(fb, 375, &f.card, f.radius, px + (np.y + AZ_INSET) * ts + np.x + AZ_INSET,
+                          ts, u, v, step, az.kind == AZ_PANE ? f.vig : 0, 0);
             bitmap_unlock_buffer(img);
             drew = 1;
         }

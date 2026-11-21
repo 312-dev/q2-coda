@@ -595,16 +595,16 @@ void *under_snap(void *under); /* a window painted once into a whole-screen bitm
  * (docs/oled-design.md#motion) */
 enum { AZ_PANE = 1, AZ_ALBUM }; /* the page's cover: Home's art pane, an album page's header */
 typedef struct {
-    rect_t card;     /* the card's box on screen */
-    int radius;      /* its corners, px */
-    int zoom;        /* its cover's zoom over aspect-fill, thousandths */
-    int pane;        /* how far along toward the page's cover, thousandths (the pane's pan) */
-    int vig;         /* the pane's vignette on the card, thousandths */
-    int np_a;        /* Now Playing (its art cut out), thousandths */
-    int np_scale;    /* and its scale about the screen's middle, thousandths */
-    int page_a;      /* the page (its cover cut out), thousandths */
-    int page_dx;     /* and its x, px */
-    int shadow;      /* the card's shadow at its darkest, 255ths */
+    rect_t card;         /* the card's box on screen */
+    int radius;          /* its corners, px */
+    int zoom;            /* its cover's zoom over aspect-fill, thousandths */
+    int pane;            /* how far along toward the page's cover, thousandths (the pane's pan) */
+    int vig;             /* the pane's vignette on the card, thousandths */
+    int np_a;            /* Now Playing (its art cut out), thousandths */
+    int np_scale;        /* and its scale about the screen's middle, thousandths */
+    int page_a;          /* the page (its cover cut out), thousandths */
+    int page_dx;         /* and its x, px */
+    int shadow;          /* the card's shadow at its darkest, 255ths */
     int src_a, np_art_a; /* each end's own cover over the card, thousandths */
 } art_zoom_frame_t;
 void art_zoom_load(void *np_win);
