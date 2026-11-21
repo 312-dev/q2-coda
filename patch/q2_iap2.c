@@ -34,7 +34,7 @@ typedef unsigned int u32;
 /* What the Q2 is playing, for NowPlayingUpdate (the shim's /tmp/coda-rc.now, read by the caller). */
 struct iap2_np {
     int state; /* 0 stopped, 1 playing, 2 paused */
-    int live;  /* a radio's stream (the shim's live=1): no duration, position or cover */
+    int live;  /* a radio's stream (the shim's live=1): no duration or position, an empty cover */
     unsigned pos_ms, len_ms, qpos, qlen;
     int shuffle, repeat; /* repeat 0 off, 1 one, 2 all */
     unsigned id, qgen; /* the song's library id (songtable's rid, 0 for none) and the queue's generation */
@@ -784,7 +784,8 @@ static u8 art_start(const struct iap2_np *n) {
     if (!file_session) return 0;
     if (art_going && art_id) file_send(art_id, 0x02, 0, 0);
     art_id = next_transfer, next_transfer = next_transfer == 0xFF ? 0x80 : next_transfer + 1;
-    unsigned got = H->artwork ? H->artwork(n, raw, sizeof raw) : 0;
+    /* a stream has no cover, but is named one, empty: with none named the car keeps the last song's */
+    unsigned got = H->artwork && !n->live ? H->artwork(n, raw, sizeof raw) : 0;
     art_len = got ? jpeg_tables_apart(raw, got, art, sizeof art) : 0;
     art_sent = 0, art_going = 1;
     snprintf(t, sizeof t, "art: transfer %02x, %u bytes (%u as found)", art_id, art_len, got);
@@ -1251,7 +1252,7 @@ static u32 np_hash(const struct iap2_np *n) {
 }
 
 /* The song's attributes the car asked for (group 0) and its playback state (group 1). With nothing known, the
- * title is the Q2's name, stopped. A stream (live) has no duration, position or cover. */
+ * title is the Q2's name, stopped. A stream (live) has no duration or position, and an empty cover. */
 static void send_now_playing(const struct iap2_np *n, int media) {
     msg_start(0x5001);
     if (media) {
@@ -1266,7 +1267,7 @@ static void send_now_playing(const struct iap2_np *n, int media) {
         for (unsigned a = MI_LIKE_SUPPORTED; a <= MI_BANNED; ++a)
             if (media_mask & 1u << a) param_u8(a, 0);
         if (media_mask & 1u << MI_CHAPTER_COUNT) param_u16(MI_CHAPTER_COUNT, 0);
-        if ((media_mask & 1u << MI_ARTWORK) && !n->live) {
+        if (media_mask & 1u << MI_ARTWORK) { /* a stream's an empty transfer: no cover (art_start) */
             u8 id = art_start(n);
             if (id) param_u8(MI_ARTWORK, id);
         }
