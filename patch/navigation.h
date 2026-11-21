@@ -338,7 +338,6 @@ typedef struct {
 } now_info;
 void now_get(now_info *n), now_poll(void);
 int now_owner(void), now_status(void), now_scrobbles(void), now_time(int *sec, int *total);
-void now_hold(void), now_release(void), now_drop(void), now_take_back(void);
 void *now_song(unsigned *at, unsigned *n, int *pressed);
 void bt_cover_hold(int held); /* bt_cover.c */
 
@@ -1329,7 +1328,6 @@ int home_folders(void);
 void home_keep(int d, int k);
 void *coverflow_home_edit_view(void *top);
 void coverflow_home_layout(void);
-int play_hold_released(void); /* navigation.c: Play/Pause's release ends a hold that fired */
 /* library_settings.c: Playback > Library and its pages (docs/ipod.md#settings) */
 enum { LIB_LIBRARY = 1, LIB_SORTING, LIB_PLAYLISTS, LIB_FOLDERS };
 void library_page(void *win, void *view, int page);

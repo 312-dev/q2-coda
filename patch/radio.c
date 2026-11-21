@@ -309,6 +309,7 @@ static void radio_play(int i) {
     rd.at = (i % n + n) % n;
     radio_halt();
     spot_yield();
+    now_hold(); /* the Library paused where it was, not stopped and forgotten (now_source.c) */
     /* Smart Wi-Fi bringing the radio back: radio_poll starts the station once the link is up, and
      * the local track stops now, as video_start would stop it */
     if ((rd.wait = smart_wifi_wait())) player_stop();
@@ -370,6 +371,19 @@ int radio_media(unsigned key) {
         radio_halt();
     else
         radio_play(rd.at + (key == KEY_FWD_BTN) - (key == KEY_BACK_BTN));
+    return 1;
+}
+
+/* ringnav (nav/input.c): Play on the Library's own Now Playing while a station is the last thing
+ * played: the station ends and the Library's song plays on from where the station found it
+ * (now_take_back), as from Radio (radio_tuner.c tuner_key); 0 for any other key or page, where
+ * Play is the station's (radio_media). */
+int radio_take_back(void *top, unsigned key) {
+    if (!rd.active || key != KEY_PLAY || !top || play_hold_released() ||
+        tk_strcmp(widget_get_prop_str(top, "name", ""), "playing_page"))
+        return 0;
+    radio_stop();
+    now_take_back();
     return 1;
 }
 

@@ -118,13 +118,17 @@ static void video_play(const char *path) {
     for (int k = 0; k < MARKS_N; ++k)
         if (marks[k].key == vid.key) vid.at = marks[k].pos;
     BLOB_IO(VIDEO_PLACE, vid.at, 1);
+    now_hold(); /* the Library paused where it was, not stopped and forgotten (now_source.c) */
     vid.pid = video_start(path, 0);
     vid.seek = vid.paused = 0;
     vid.paused_at = 0;
     vid.volume = g_volume; /* the helper starts at output_device's level: nothing to send, no bar */
     vid.gain = headset_gain();
     unlink("/tmp/q2video.state");
-    if (vid.pid) vid.sock = socket(1, 1, 0); /* AF_UNIX, SOCK_DGRAM (MIPS numbering) */
+    if (vid.pid)
+        vid.sock = socket(1, 1, 0); /* AF_UNIX, SOCK_DGRAM (MIPS numbering) */
+    else
+        now_release(); /* no video: the Library's song back at once */
 }
 /* Folder view's file (navigation.c ringnav_folder_click): a video, not hidden, plays; 0 for
  * anything else, left to stock. */
@@ -177,6 +181,7 @@ void video_poll(void) {
     unsigned at;
     /* where it stopped; a video never resumed takes no slot from the others */
     if (BLOB_IO(VIDEO_PLACE, at, 0) && (at || vid.at)) mark(vid.key, at);
+    now_release(); /* the Library's song back, paused where the video found it */
     widget_invalidate_force(window_manager(), 0);
 }
 
