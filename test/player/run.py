@@ -916,11 +916,12 @@ def test_alsa_sw_params(player, songs, tmp):
     # demo rewrites asound.conf only when its own link thread sets a headset up (SaveBlueAlsa), and on 2026-11-19 the
     # car's PCM was up 12 minutes before the file named it, so Bluetooth opens the headset connected last by name
     # (bluealsa's plugin: 00:00:00:00:00:00, the highest Sequence), not the file's address.
-    # The car's way (way 3): the BMW asked for USB audio and began to read it 2011 ms later (2026-11-20); the write
+    # The car's way (way 3): the BMW asked for USB audio and began to read it 2011 ms later, and 3009 ms on the second
+    # drive (2026-11-20); the write
     # that found no room for CAR_WAIT_MS was taken as the car gone, the car file removed and the song sent to Bluetooth
     # in the same millisecond. Now a write waits while the car file is there, a look at it every 250 ms; the file gone
     # ends the way (-2, OUTPUT_CAR_GONE); a stop or a skip (the engine's cut) ends the wait, the frames dropped.
-    car = {'car-late': 'r 0 waits 9 ms 2250 writes 1 file 1', 'car-left': 'r -2 waits 3 ms 750 writes 0 file 0',
+    car = {'car-late': 'r 0 waits 9 ms 2250 writes 1 file 1', 'car-late3': 'r 0 waits 13 ms 3250 writes 1 file 1', 'car-left': 'r -2 waits 3 ms 750 writes 0 file 0',
            'car-cut': 'r 0 waits 3 ms 750 writes 0 file 1'}
     for k, v in car.items():
         assert lines[k] == f'{k} {v}', lines[k]

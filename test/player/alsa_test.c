@@ -176,6 +176,7 @@ int main(void) {
     car_file = getenv("Q2PLAYER_CAR");
     if (car_file) {
         car_case("car-late", 8, -1, -1);
+        car_case("car-late3", 12, -1, -1);           /* 3009 ms in the BMW, the second drive (2026-11-20) */
         car_case("car-left", 1000, 3, -1);
         car_case("car-cut", 1000, -1, 3);
     }
