@@ -38,14 +38,15 @@ SOURCES = ['f_uac1.c', 'u_audio.c', 'u_audio.h', 'u_uac1.h']
 # (docs/iphone-mode.md#the-uac1-module). a59c68a6a3d1 is the commit before it, which it needs to apply.
 PATCHES = ['0001-usb-gadget-f_uac1-validate-input-parameters.patch',  # a59c68a6a3d1
            '0002-usb-gadget-f_uac1-disable-IN-OUT-ep-if-unused.patch']  # 254cb1e0d78c
-# u_audio.c's changes for missed packets, (5.10.21's text, the module's), applied in order. The Q2's dwc2 has upstream's
-# BDMA isochronous flow (91bb163e1e4f: target_frame_elapsed's 0x3fff/0x7ff limit is in the stock kernel at
-# 0x804935f4), which completes an IN request whose (micro)frame went by with -ENODATA (-61, li a3,-61 at 0x804995c8)
-# and never sends it. u_audio_iso_complete ignored the status: it refilled the request from the ring and moved
-# hw_ptr past the packet the host never got. Now such a request is queued again unchanged, its buffer still the
-# packet, when resend_missed is set (the default) and req_number is 1 (the probe's): with a second request already
-# queued, holding the samples after it, the packet would go out of order. in_missed and in_sent count the playback
-# completions with and without a status, read in /sys/module/usb_f_uac1/parameters.
+# u_audio.c's changes for missed packets, (5.10.21's text, the module's), applied in order. A playback request given
+# back with a status is queued again unchanged, its buffer still the packet, when resend_missed is set (the default)
+# and req_number is 1: with a second request already queued, holding the samples after it, the packet would go out of
+# order. in_missed and in_sent count the playback completions with and without a status, read in
+# /sys/module/usb_f_uac1/parameters. ponytail: on the Q2 this never fires. Its dwc2 runs isochronous IN in descriptor
+# DMA (g_dma_desc 1 in its debugfs params, read 2026-11-21), which gives a packet it could not send back with status 0
+# and actual 0, never -ENODATA (the li a3,-61 at 0x804995c8 once read as the IN case is the OUT loop of
+# handle_ep_disabled); in_zero counts those, and patch/q2car.sh's four requests keep the chain from running dry
+# (docs/iphone-mode.md#empty-packets). Kept for a buffer-DMA controller, where a missed IN interval is -ENODATA.
 MISSED = [
     ('#define BUFF_SIZE_MAX\t(PAGE_SIZE * 16)\n',
      '#define BUFF_SIZE_MAX\t(PAGE_SIZE * 16)\n\n'
@@ -127,79 +128,6 @@ COUNTED = [
     ('int u_audio_start_playback(struct g_audio *audio_dev)\n{\n',
      'int u_audio_start_playback(struct g_audio *audio_dev)\n{\n'
      '\tin_last = 0; /* q2: a gap across a stop is no gap */\n'),
-]
-# A playback packet the controller gives back as sent with nothing sent (status 0, actual 0) is sent again with its
-# frames, and the next interval's after them (CARRY, CARRY_F; docs/iphone-mode.md#empty-packets). The Q2's dwc2
-# completes an isochronous IN request whose interval went by as an endpoint disable (dwc2_gadget_handle_incomplete_isoc_in
-# sets EPDIS; dwc2_gadget_handle_ep_disabled calls dwc2_hsotg_complete_in, whose size_done is size_loaded less an
-# untouched size_left: 0) with status 0; with one request in flight every other request went that way, in the car and at
-# the desk (2026-11-21: in_zero half of in_sent; with two requests a third), and u_audio counted each as sent: the
-# host got half the audio, and the car played about 300 ms of it, then 340 ms of silence. Sent again at once the packet
-# goes in the next interval, which the controller does not miss, so it carries that interval's frames too: two
-# intervals' frames, up to wMaxPacketSize, which CARRY_F doubles (400 bytes: two milliseconds at 48 kHz). The host gets
-# a millisecond of audio a millisecond, in order; in_zero still counts the empty intervals, in_carried the packets
-# sent again. With more requests in flight the packet would go after later samples: then it is only counted.
-# carry_missed (writable) turns it off for the desk's comparison.
-CARRY = [
-    ('static ktime_t in_last;\n',
-     'static ktime_t in_last;\n'
-     'static bool carry_missed = true;\n'
-     'module_param(carry_missed, bool, 0644);\n'
-     'static unsigned int in_carried;\n'
-     'module_param(in_carried, uint, 0444);\n'),
-    ('\tsubstream = prm->ss;\n\n\t/* Do nothing if ALSA isn\'t active */\n',
-     '\t/* q2: sent as nothing (uac1_build.py CARRY): again, with the next interval\'s frames after its own */\n'
-     '\tif (prm == &uac->p_prm && !status && !req->actual && req->length && carry_missed &&\n'
-     '\t    uac->audio_dev->params.req_number == 1) {\n'
-     '\t\tunsigned int add = 0, have = req->length;\n\n'
-     '\t\tin_carried++;\n'
-     '\t\tsubstream = prm->ss;\n'
-     '\t\tif (!substream)\n\t\t\tgoto exit;\n'
-     '\t\tsnd_pcm_stream_lock_irqsave(substream, flags2);\n'
-     '\t\truntime = substream->runtime;\n'
-     '\t\tif (runtime && snd_pcm_running(substream)) {\n'
-     '\t\t\tunsigned int residue;\n\n'
-     '\t\t\tspin_lock_irqsave(&prm->lock, flags);\n'
-     '\t\t\tadd = uac->p_pktsize;\n'
-     '\t\t\tresidue = uac->p_residue + uac->p_pktsize_residue;\n'
-     '\t\t\tif (residue / uac->p_interval >= uac->p_framesize) {\n'
-     '\t\t\t\tadd += uac->p_framesize;\n'
-     '\t\t\t\tresidue -= uac->p_framesize * uac->p_interval;\n'
-     '\t\t\t}\n'
-     '\t\t\tif (have + add > prm->max_psize)\n'
-     '\t\t\t\tadd = 0; /* carried once already: sent again as it is */\n'
-     '\t\t\telse\n'
-     '\t\t\t\tuac->p_residue = residue;\n'
-     '\t\t\thw_ptr = prm->hw_ptr;\n'
-     '\t\t\tspin_unlock_irqrestore(&prm->lock, flags);\n'
-     '\t\t\tif (add) {\n'
-     '\t\t\t\tpending = runtime->dma_bytes - hw_ptr;\n'
-     '\t\t\t\tif (pending < add) {\n'
-     '\t\t\t\t\tmemcpy(req->buf + have, runtime->dma_area + hw_ptr, pending);\n'
-     '\t\t\t\t\tmemcpy(req->buf + have + pending, runtime->dma_area, add - pending);\n'
-     '\t\t\t\t} else {\n'
-     '\t\t\t\t\tmemcpy(req->buf + have, runtime->dma_area + hw_ptr, add);\n'
-     '\t\t\t\t}\n'
-     '\t\t\t\tspin_lock_irqsave(&prm->lock, flags);\n'
-     '\t\t\t\tprm->hw_ptr = (hw_ptr + add) % runtime->dma_bytes;\n'
-     '\t\t\t\thw_ptr = prm->hw_ptr;\n'
-     '\t\t\t\tspin_unlock_irqrestore(&prm->lock, flags);\n'
-     '\t\t\t\treq->length = have + add;\n'
-     '\t\t\t}\n'
-     '\t\t}\n'
-     '\t\tsnd_pcm_stream_unlock_irqrestore(substream, flags2);\n'
-     '\t\tif (add && (hw_ptr % snd_pcm_lib_period_bytes(substream)) < add)\n'
-     '\t\t\tsnd_pcm_period_elapsed(substream);\n'
-     '\t\tgoto exit;\n'
-     '\t}\n\n'
-     '\tsubstream = prm->ss;\n\n\t/* Do nothing if ALSA isn\'t active */\n'),
-]
-CARRY_F = [
-    ('\t.bEndpointAddress =\tUSB_DIR_IN,\n\t.bmAttributes =\t\tUSB_ENDPOINT_SYNC_ASYNC\n\t\t\t\t| USB_ENDPOINT_XFER_ISOC,\n'
-     '\t.wMaxPacketSize\t=\tcpu_to_le16(UAC1_OUT_EP_MAX_PACKET_SIZE),\n',
-     '\t.bEndpointAddress =\tUSB_DIR_IN,\n\t.bmAttributes =\t\tUSB_ENDPOINT_SYNC_ASYNC\n\t\t\t\t| USB_ENDPOINT_XFER_ISOC,\n'
-     '\t/* q2: two intervals\' frames, for a packet sent again with the next one\'s (uac1_build.py CARRY) */\n'
-     '\t.wMaxPacketSize\t=\tcpu_to_le16(UAC1_OUT_EP_MAX_PACKET_SIZE * 2),\n'),
 ]
 COUNTED_F = [
     ('\t} else if (intf == uac1->as_in_intf) {\n\t\tuac1->as_in_alt = alt;\n',
@@ -475,9 +403,8 @@ def main(argv):  # pragma: no mutate block (all of the above)
     # Q2 Muse's own changes after those (OWN_PATCHES): several playback rates and the host's SET_CUR of one
     for p in OWN_PATCHES:
         run('patch', '-p1', '-F0', '--no-backup-if-mismatch', '-d', mod, '-i', HERE/'patches'/p)
-    # The car's stream counted (COUNTED, COUNTED_F), and a packet sent as nothing sent again with the next interval's
-    # frames (CARRY, CARRY_F)
-    for name, changes in (('u_audio.c', COUNTED + CARRY), ('f_uac1.c', COUNTED_F + CARRY_F)):
+    # The car's stream counted (COUNTED, COUNTED_F): nothing sent changes
+    for name, changes in (('u_audio.c', COUNTED), ('f_uac1.c', COUNTED_F)):
         text = (mod/name).read_text()
         for old, new in changes:
             if text.count(old) != 1:
