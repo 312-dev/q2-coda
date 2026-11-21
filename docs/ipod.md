@@ -600,7 +600,7 @@ drifts 30% of the width left and darkens, and Return reverses that over 200 ms; 
 not part of either page and stays still.
 
 Left immediate: Home (opened once, never closed), Now Playing (its open starts the player, which
-can hold the UI thread; opened from Home's art or an album page, its cover grows into it instead,
+can hold the UI thread; opened from Home's art or an album page, its cover travels into it instead,
 [internals](internals.md#now-playing-motion)), Cover Flow (its open loads the albums and covers), the dialogs and quick
 settings, the queue, More and jump pages over Now Playing, and the pages that keep their stock
 assets: Tidal and the other online pages and the firmware download. Moving between
