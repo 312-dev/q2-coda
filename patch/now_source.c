@@ -1,14 +1,23 @@
-/* Now Playing, one answer for every reader outside the Q2's own pages
- * (docs/internals.md#now-playing-source): what plays (the Library's song through q2player, Radio's
- * station through q2video -t, or Internet Radio's), its words, whether it plays and where it is.
- * now_get is that answer; Car Remote and the iPhone cable read it (coda_rc_shim.c cr_now, which
- * writes /tmp/coda-rc.now for coda-rc and q2-iap), and now_poll hands it to the car over Bluetooth:
- * - a radio as the song: its title and artist from the stream's StreamTitle (tuner_song), the
- *   station and its frequency as the album, no length, no cover (bt_cover_hold), playing or paused
- *   as the radio is; the Library's song and status again after it, as Guest Play hands back;
- * - NP_PLAY_FILE for bluetoothd's GetPlayStatus (tools/bt_meta.c): the position, the length and the
- *   monotonic time the position was read, written when any of them moves other than by the time
- *   passing, so bluetoothd adds the time since while playing.
+/* Now Playing, one answer for every reader (docs/internals.md#now-playing-source): who owns
+ * playback (the Library's song through q2player, Radio's station through q2video -t, Internet
+ * Radio's, Spotify's track through librespot, or a video), its words, whether it plays and where it
+ * is.
+ * - now_owner and now_status: the owner and its play state alone, cheap enough for a paint: Home's
+ *   first row (home_np.c), Control Center (control_center.c), the status row's play glyph
+ *   (lyrics_status_bar.c bar_status);
+ * - now_song and now_time: the Library's song as Now Playing shows it and its second, for the pages
+ *   that only ever show the Library (np_bar.c, nav/now_playing.c, lyrics.c) and for now_get; while
+ *   Radio has the output the Library is held paused where it was (now_hold, now_release);
+ * - now_scrobbles: the one rule for what is scrobbled (nav/playback_power.c scrobble);
+ * - now_get: all of it, for Car Remote and the iPhone cable (coda_rc_shim.c cr_now, which writes
+ *   /tmp/coda-rc.now for coda-rc and q2-iap) and for now_poll, which hands it to the car over
+ *   Bluetooth: an owner other than the Library as the song (a radio's title and artist from the
+ *   stream's StreamTitle, tuner_song, with the station and its frequency as the album; Spotify's
+ *   track; a video by name), no cover (bt_cover_hold), playing or paused as it is; the Library's
+ *   song and status again after it, as Guest Play hands back; and NP_PLAY_FILE for bluetoothd's
+ *   GetPlayStatus (tools/bt_meta.c): the position, the length and the monotonic time the position
+ *   was read, written when any of them moves other than by the time passing, so bluetoothd adds the
+ *   time since while playing.
  * A Library song's own words and status still reach bluetoothd as they did (tags.c's
  * sendBtHeadsetPlayInfo at each parse, stock's sendBtHeadsetPlayStatus at each play, pause and
  * stop). While Guest Play relays a guest's song, the guest's is the car's (q2_guest.c), and nothing
@@ -25,10 +34,12 @@ struct np_meta {
 };
 
 static struct {
-    unsigned key; /* the radio item the car was last told of; 0: the Library's, stock's to tell */
-    int status;   /* the radio's status as last sent, AVRCP's: 1 playing, 2 paused */
+    unsigned key; /* the other owner's item the car was last told of; 0: the Library's, stock's */
+    int status;   /* that item's status as last sent, AVRCP's: 1 playing, 2 paused */
     int pos, len, state, locked;
     unsigned at, item; /* the stamp and the item NP_PLAY_FILE was written with */
+    int held, held_sec,
+        held_total; /* the Library held for Radio (now_hold): its second and length */
 } np __attribute__((section(".scratch")));
 
 static unsigned np_ms(void) {
@@ -64,41 +75,116 @@ static void radio_words(now_info *n, const char *station, const char *freq, cons
     tk_snprintf(n->artist, sizeof n->artist, "%s", song[0] ? artist : freq);
 }
 
+/* Who owns playback: Radio while its page is open (its receiver lives with the page), else
+ * headset.c media_owner's order, a video, Internet Radio, Spotify, else the Library. */
+int now_owner(void) {
+    if (tuner_state()) return NOW_RADIO;
+    return video_status()   ? NOW_VIDEO
+           : radio_status() ? NOW_NETRADIO
+           : spot_status()  ? NOW_SPOTIFY
+                            : NOW_LIBRARY;
+}
+
+/* The owner's play state, AVRCP's and iAP2's order: 0 stopped (or nothing), 1 playing, 2 paused */
+int now_status(void) {
+    int s, sec, total, owner = now_owner();
+    if (owner == NOW_RADIO) return tuner_state();
+    s = owner == NOW_VIDEO      ? video_status()
+        : owner == NOW_NETRADIO ? radio_status()
+        : owner == NOW_SPOTIFY  ? spot_status()
+                                : now_time(&sec, &total); /* 2 playing, 3 paused, as theirs */
+    return s == 2 ? 1 : s == 3 ? 2 : 0;
+}
+
+/* What is scrobbled: the Library's songs alone, the card's files and the server songs its card
+ * apps stream (a card app's own scrobble=0 aside: addon_scrobbles); never a radio, Spotify or a
+ * video. */
+int now_scrobbles(void) { return now_owner() == NOW_LIBRARY; }
+
+/* The Library's song as Now Playing shows it: a server song pressed (or a Next waiting for its
+ * download) from the press on (catalogue_np_now; *pressed 1), else the queue's at MCL_POS
+ * (queue_now); *at and *n its place in that list. */
+void *now_song(unsigned *at, unsigned *n, int *pressed) {
+    void *r = catalogue_np_now(at, n);
+    if (pressed) *pressed = r != 0;
+    return r ? r : queue_now(at, n);
+}
+
+/* Radio takes the output (radio_tuner.c tuner_open): the Library's song, playing or paused, is
+ * stopped with its place kept (player_save_stop; a paused q2player would keep the PCM Radio needs,
+ * and stock's player_stop, which video_start calls, forgets the place), and now_time reads it
+ * paused there for as long as Radio has it. Radio's page shut (now_release), the song is loaded
+ * again paused at that place (player_save_start(1)) for the user's Play, never playing on its own.
+ * A Library that was stopped is left as it is. */
+void now_hold(void) {
+    int status = mclGetPlayStatus();
+    if (np.held || (status != 2 && status != 3)) return;
+    np.held_sec = -1, np.held_total = 0;
+    player_playtime_and_length(&np.held_sec, &np.held_total);
+    np.held = 1;
+    player_save_stop();
+}
+void now_release(void) {
+    if (!np.held) return;
+    np.held = 0;
+    player_save_start(1);
+}
+
+/* The Library's song's second and length as the player has them (-1 and 0 for none), and its play
+ * state, mclGetPlayStatus's: 1 stopped, 2 playing, 3 paused; held for Radio, paused where it was.
+ */
+int now_time(int *sec, int *total) {
+    if (np.held) {
+        *sec = np.held_sec, *total = np.held_total;
+        return 3;
+    }
+    *sec = -1, *total = 0;
+    player_playtime_and_length(sec, total);
+    return mclGetPlayStatus();
+}
+
 void now_get(now_info *n) {
     char station[256], freq[256], raw[256]; /* tuner_now and radio_now fill each to one cap */
     memset(n, 0, sizeof *n);
     n->pos_ms = n->len_ms = -1;
-    int t = tuner_now(station, freq, raw, sizeof station);
-    if (t) {
-        n->source = NOW_RADIO, n->state = t;
+    n->source = now_owner();
+    n->state = now_status();
+    if (n->source == NOW_RADIO) {
+        tuner_now(station, freq, raw, sizeof station);
         radio_words(n, station, freq, raw);
         return;
     }
-    int r = radio_now(station, raw, sizeof station);
-    if (r) {
-        n->source = NOW_NETRADIO, n->state = r == 2 ? 1 : 2;
+    if (n->source == NOW_NETRADIO) {
+        radio_now(station, raw, sizeof station);
         radio_words(n, station, "", raw);
         return;
     }
-    /* the Library: a server song pressed (or a Next waiting for its download) from the press on, as
-     * Now Playing shows it (catalogue_np_now), else the queue's song at MCL_POS */
-    void *q = P(mcl_pdeqplaylist, 0), *rec = 0;
-    unsigned pos = (unsigned)I(MCL_POS, 0), pat, pn;
-    if (q && pos < deque_size(q)) rec = deque_at(q, pos);
-    void *pressed = catalogue_np_now(&pat, &pn);
-    if (pressed) rec = pressed;
-    int status = mclGetPlayStatus(), sec = -1, total = 0;
-    player_playtime_and_length(&sec, &total);
-    if (pressed) sec = 0, total = pressed_len(P(pressed, REC_PATH));
+    if (n->source == NOW_SPOTIFY) {
+        unsigned pos = 0, len = 0;
+        spot_now(n->title, n->artist, n->album, sizeof n->title, &pos, &len);
+        n->pos_ms = (int)pos, n->len_ms = len ? (int)len : -1;
+        tk_snprintf(n->station, sizeof n->station, "Spotify");
+        return;
+    }
+    if (n->source == NOW_VIDEO) {
+        tk_snprintf(n->title, sizeof n->title, "Video");
+        return;
+    }
+    int pressed, sec, total;
+    unsigned at, count;
+    void *rec = now_song(&at, &count, &pressed);
+    now_time(&sec, &total); /* its state is now_status's, above */
+    if (pressed) sec = 0, total = pressed_len(P(rec, REC_PATH));
     unsigned lms = 0;
     /* a streamed song still arriving: the server's length, or 0 */
     int cert = np_stream_length(&lms);
-    n->source = NOW_LIBRARY, n->rec = rec, n->pressed = pressed != 0;
-    n->state = status == 2 ? 1 : status == 3 ? 2 : 0;
+    unsigned qat, qn;
+    queue_now(&qat, &qn);
+    n->rec = rec, n->pressed = pressed;
     n->pos_ms = sec > 0 ? sec * 1000 : 0;
     n->len_ms = cert == 1 ? (int)lms : cert == 2 ? 0 : total > 0 ? total * 1000 : 0;
     n->id = rec ? I(rec, REC_ID) : 0;
-    n->qpos = pos, n->qlen = q ? deque_size(q) : 0;
+    n->qpos = qat, n->qlen = qn;
     const char *title = rec ? P(rec, REC_TITLE) : 0;
     if (rec && (!title || !*title)) title = P(rec, REC_NAME);
     tk_snprintf(n->title, sizeof n->title, "%s", title ? title : "");
@@ -108,7 +194,7 @@ void now_get(now_info *n) {
     tk_snprintf(n->path, sizeof n->path, "%s", rec && P(rec, REC_PATH) ? P(rec, REC_PATH) : "");
 }
 
-/* A radio item's key: its source and words, never 0 */
+/* An item's key other than the Library's: its source and words, never 0 */
 static unsigned radio_key(const now_info *n) {
     unsigned h = hash_bytes(FNV_SEED, (const unsigned char *)&n->source, sizeof n->source);
     h = hash_bytes(h, (const unsigned char *)n->title, strlen(n->title));
@@ -117,10 +203,9 @@ static unsigned radio_key(const now_info *n) {
     return h | 1;
 }
 
-/* bluetoothd's record and status: a radio's while one is the source, the Library's again after */
+/* bluetoothd's record and status: another owner's while it plays, the Library's again after */
 static void tell_bluetooth(const now_info *n) {
-    int radio = n->source == NOW_RADIO || n->source == NOW_NETRADIO;
-    if (!radio) {
+    if (n->source == NOW_LIBRARY) {
         if (!np.key) return;
         np.key = 0, np.status = 0;
         bt_cover_hold(0);
@@ -130,11 +215,11 @@ static void tell_bluetooth(const now_info *n) {
     }
     unsigned key = radio_key(n);
     if (key != np.key) {
-        if (!np.key) bt_cover_hold(1); /* no cover for a stream: the Library's set aside */
-        /* -1: no track number, count or length */
-        struct np_meta m = { -1, -1, -1, n->title, n->artist, n->album, 0 };
+        if (!np.key) bt_cover_hold(1); /* no cover but the Library's: set aside */
+        /* -1: no track number or count, and no length for a stream or a video */
+        struct np_meta m = { -1, -1, n->len_ms, n->title, n->artist, n->album, 0 };
         btctl_notify_track_changed(&m);
-        if (!np.key) np.status = 0; /* from the Library: the radio's status told once */
+        if (!np.key) np.status = 0; /* from the Library: the new owner's status told once */
         np.key = key;
     }
     if (n->state != np.status) btctl_notify_playback_status_changed(n->state), np.status = n->state;

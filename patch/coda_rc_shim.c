@@ -4,8 +4,8 @@
  * - starts the daemon (at boot and when the switch goes on; again if it dies) and stops it when the switch
  *   goes off: nothing listens while it is off; and beside it q2-iroh, the iroh sidecar that lets a phone on
  *   another network reach the daemon (docs/remote.md#car-remote-across-networks), on and off with it;
- * - writes Now Playing for it to /tmp/coda-rc.now, now_source.c's (radio=1 while a song radio plays; a Radio or
- *   Internet Radio station as source=, live=1 and station=; a pressed server song from the
+ * - writes Now Playing for it to /tmp/coda-rc.now, now_source.c's (radio=1 while a song radio plays; another
+ *   owner as source=, a Radio or Internet Radio station live=1 with station=; a pressed server song from the
  *   press on, as Now Playing shows it; the last toast for CR_NOTE_MS), and the queue's song ids to /tmp/coda-rc.queue (a stream download's
  *   path, title and artist beside its id 0);
  * - takes its commands from /tmp/coda-rc.cmd: play a list of song ids from one of them, or shuffled (ids in
@@ -256,16 +256,17 @@ static void cr_modes(int *shuf, int *rep) {
 }
 
 /* Now Playing as now_source.c has it (now_get: the Library's song as the Q2 Muse's own page shows it, a
- * pressed server song from the press on, or a radio), with the queue, the modes and the hearts beside it. A
- * pressed song is at 0 with no hearts until it plays, as the Q2's rating works only on the song playing. A
- * radio is source=radio (Radio) or netradio (Internet Radio), live=1, with no length, no position and no
- * hearts, its station in station= and no path, so nothing here names a cover for it. */
+ * pressed server song from the press on, or another owner's), with the queue, the modes and the hearts beside
+ * it. A pressed song is at 0 with no hearts until it plays, as the Q2's rating works only on the song
+ * playing. Another owner is source=radio (Radio), netradio (Internet Radio), spotify or video, with no hearts
+ * and no path, so nothing here names a cover for it; a radio is live=1, with no length or position, its
+ * station in station=. */
 static void cr_now(void) {
     now_info now;
     now_get(&now);
     void *q = P(mcl_pdeqplaylist, 0);
     cr_queue(q, (unsigned)I(MCL_POS, 0));
-    int live = now.source == NOW_RADIO || now.source == NOW_NETRADIO;
+    int live = now.source == NOW_RADIO || now.source == NOW_NETRADIO, other = now.source != NOW_LIBRARY;
     /* the hold menu's extended play while it runs, else Now Playing's own pair (cr_modes) */
     int shuf, rep;
     cr_modes(&shuf, &rep);
@@ -279,17 +280,18 @@ static void cr_now(void) {
     /* playback.c: 3 repeats the song, 4 and 5 wrap the queue (4 within an album or folder) */
     put_int(b, sizeof b, &n, "repeat", rep);
     put_int(b, sizeof b, &n, "volume", g_volume);
-    put_int(b, sizeof b, &n, "hearts", now.pressed || live ? -1 : cr_hearts((unsigned)now.id));
+    put_int(b, sizeof b, &n, "hearts", now.pressed || other ? -1 : cr_hearts((unsigned)now.id));
     put_int(b, sizeof b, &n, "qpos", (int)now.qpos);
     put_int(b, sizeof b, &n, "qlen", (int)now.qlen);
     put_int(b, sizeof b, &n, "qgen", (int)cr.q_gen);
     unsigned have = 0, btotal = 0, bms = 0; /* a server song loading (np_stream.c), NowPlaying.buffering */
-    put_int(b, sizeof b, &n, "buf", live ? 0 : np_stream_loading(&have, &btotal, &bms));
-    put_int(b, sizeof b, &n, "bhave", live ? 0 : (int)have);
-    put_int(b, sizeof b, &n, "btotal", live ? 0 : (int)btotal);
-    put_int(b, sizeof b, &n, "bms", live ? 0 : (int)bms);
+    put_int(b, sizeof b, &n, "buf", other ? 0 : np_stream_loading(&have, &btotal, &bms));
+    put_int(b, sizeof b, &n, "bhave", (int)have);
+    put_int(b, sizeof b, &n, "btotal", (int)btotal);
+    put_int(b, sizeof b, &n, "bms", (int)bms);
     put_int(b, sizeof b, &n, "radio", song_radio_on());
-    put(b, sizeof b, &n, "source", now.source == NOW_RADIO ? "radio" : now.source == NOW_NETRADIO ? "netradio" : "library");
+    static const char *const sources[] = { "", "library", "radio", "netradio", "spotify", "video" };
+    put(b, sizeof b, &n, "source", sources[now.source]);
     put_int(b, sizeof b, &n, "live", live);
     put(b, sizeof b, &n, "station", now.station);
     if (cr.note_at && time_now_ms() - cr.note_at >= CR_NOTE_MS) cr.note_at = 0, cr.note[0] = 0;

@@ -274,7 +274,7 @@ static void cc_shape(void *canvas, rect_t r, int radius, unsigned rgb, int ring,
 static void cc_glyph(void *w, void *canvas, int i, int cx, int cy, int px) {
     char name[40], stem[16];
     tk_snprintf(stem, sizeof stem, "%s",
-                i == CC_PLAY && mclGetPlayStatus() != 2 ? "play"
+                i == CC_PLAY && now_status() != 1 ? "play"
                 : cc_glyphs[i]                          ? cc_glyphs[i]
                                                         : "");
     if (i == CC_WIFI) { /* the link's (cc_wifi), recorded for cc_wifi_poll */
@@ -335,10 +335,10 @@ static int cc_level(void *win, int i) {
                          (max - min))
                : 0;
 }
-/* Something loaded, as Home's Now Playing row is there for: playing or paused. */
+/* Something loaded, as Home's Now Playing row is there for: playing or paused (now_source.c). */
 static int cc_np_loaded(void) {
-    int status = media_status();
-    return status == 2 || status == 3;
+    int status = now_status();
+    return status == 1 || status == 2;
 }
 
 /* Whether the wheel's ring shows: a wheel tick or key within CC_RING_MS. */
@@ -433,9 +433,13 @@ void cc_paint(void *win, void *canvas) {
         cc_glyph(win, canvas, i, r.x + r.w / 2, r.y + r.h / 2, CC_ICON);
         cc_label(win, canvas, i, lit ? 0xffffff : RGB_SECONDARY, r.x + r.w / 2, r.y + r.h / 2);
     }
-    /* Now Playing: the cover, the title and artist beside it, and the transport */
+    /* Now Playing: the cover, the title and artist beside it, and the transport. The Library's
+     * song as Now Playing shows it (now_song), or another owner's words and no cover (now_get) */
     unsigned pos, n;
-    void *rec = queue_now(&pos, &n);
+    now_info now;
+    int other = now_owner() != NOW_LIBRARY;
+    if (other) now_get(&now);
+    void *rec = other ? 0 : now_song(&pos, &n, 0);
     rect_t art = { np.x + CC_ART_IN, np.y + CC_ART_IN, CC_ART, CC_ART };
     /* the song's cover as Home's pane finds it (coverflow.c song_cover_url), else the grey square.
      * The player writes every song's cover to one file: when the song or that file changes, the
@@ -459,11 +463,11 @@ void cc_paint(void *win, void *canvas) {
         fill_box(canvas, &art, RGBA(CC_OFF), CC_ART_R);
     int tx = art.x + CC_ART + CC_TEXT_GAP, tw = np.x + np.w - CC_ART_IN - tx,
         mid = art.y + CC_ART / 2;
-    ui_text(canvas, rec ? now_tag(rec, REC_TITLE) : "Not Playing", 1, TYPE(16), 0xffffff, 0, tx,
-            mid - 10, tw, 2);
-    if (rec)
-        ui_text(canvas, now_tag(rec, REC_ARTIST), 0, TYPE(13), RGB_SECONDARY, 0, tx, mid + 10, tw,
-                2);
+    ui_text(canvas, other ? now.title : rec ? now_tag(rec, REC_TITLE) : "Not Playing", 1, TYPE(16),
+            0xffffff, 0, tx, mid - 10, tw, 2);
+    if (rec || other)
+        ui_text(canvas, other ? now.artist : now_tag(rec, REC_ARTIST), 0, TYPE(13), RGB_SECONDARY,
+                0, tx, mid + 10, tw, 2);
     for (int i = CC_PREV; i <= CC_NEXT; ++i) {
         rect_t r = cc_box(i);
         cc_glyph(win, canvas, i, r.x + r.w / 2, r.y + r.h / 2, i == CC_PLAY ? 30 : CC_ICON);

@@ -77,6 +77,7 @@ char *scrobble_tag(char *o, char *end, const char *s) {
 }
 
 static void scrobble(void *r, int total, int heard) {
+    if (!now_scrobbles()) return; /* the Library's songs alone (now_source.c) */
     const char *artist = now_tag(r, REC_ARTIST), *album_artist = now_tag(r, REC_ALBUM_ARTIST);
     if (!album_artist || !*album_artist)
         album_artist = P(r, REC_ALBUM_ARTIST); /* CUE: none parsed */

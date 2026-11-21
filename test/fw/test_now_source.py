@@ -180,3 +180,77 @@ def test_tuner_song_takes_the_artist_and_the_song_apart(fw):
     assert parts('WXRT Chicago') == ('', 'WXRT Chicago')
     assert parts('text="Spot Block" amgTrackId="9"') == ('', 'Spot Block')
     assert parts('') == ('', '')
+
+
+def test_radio_holds_the_library_paused_where_it_was(fw, ui, mcl, recs):
+    """The Library playing at 61 s, then Radio's page opens: the player is stopped with its place kept
+    (player_save_stop: a paused q2player would keep the PCM Radio needs), and the Library reads paused at 61 s to
+    every reader for the whole of Radio, whatever the time; Radio's page shut, the song is loaded again paused at
+    61 s (player_save_start(1)), not playing and not at 0, and the car is told so."""
+    car = Car(fw, ui, recs)
+    fw.fn('usb_car_start', None)()  # the cable's Now Playing too (coda-rc.now, q2-iap's)
+    car.sec = 61
+    stops, saves, starts = [], [], []
+
+    def stop(*_):  # stock's: the player stopped, its place gone
+        stops.append(1)
+        car.status, car.sec = 1, -1
+    def save_stop(*_):
+        saves.append((car.status, car.sec))
+        car.status, car.sec = 1, -1
+    def save_start(paused, *_):
+        starts.append(paused)
+        car.status, car.sec = 3 if paused else 2, 61
+    fw.mock('player_stop', lambda *_: stop() or 0)
+    fw.mock('player_save_stop', lambda *_: save_stop() or 0)
+    fw.mock('player_save_start', lambda p, *_: save_start(p) or 0)
+    fw.mock('fw_fork', lambda *_: 4242)
+    fw.mock('fw_waitpid', lambda *_: 4242)  # the receiver goes when asked
+    fw.fn('tuner_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+    assert saves == [(2, 61)] and car.status == 1, 'the Library stopped with its place kept, not lost'
+    sec, total = C.c_int(), C.c_int()
+    time_ = fw.fn('now_time', C.c_int, C.POINTER(C.c_int), C.POINTER(C.c_int))
+    lyrics_sec = fw.fn('lyrics_sec', C.c_int)
+    for _ in range(4):
+        car.step(5000)  # Radio plays on: the Library's second stands, on the Library's own pages too
+        assert time_(C.byref(sec), C.byref(total)) == 3 and sec.value == 61 and total.value == 200
+        assert lyrics_sec() == 61000
+        car.tick(0)
+        assert car.now()['source'] == 'radio'
+    fw.fn('radio_tuner__closed', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+    assert starts == [1], 'loaded again paused, for the user\'s Play'
+    car.step()
+    assert time_(C.byref(sec), C.byref(total)) == 3 and sec.value == 61
+    assert car.play_file()[:2] == (61000, 200000) and len(fw.calls('sendBtHeadsetPlayStatus')) == 1
+    assert fw.fn('now_status', C.c_int)() == 2
+    car.tick()
+    assert (car.now()['source'], car.now()['state'], car.now()['pos']) == ('library', '2', '61000')
+
+
+def test_the_owner_s_state_for_home_control_center_and_the_status_row(fw, ui, mcl, recs):
+    """Home's first row, Control Center and the status row's play glyph read now_status: Radio playing is
+    playing (they read the Library alone, stopped by then, before), paused is paused; the Library's own as it was."""
+    car = Car(fw, ui, recs)
+    hn = fw.fn('home_np__hn_state', C.c_int)
+    cc = fw.fn('control_center__cc_np_loaded', C.c_int)
+    bar = fw.fn('bar_status', C.c_int)
+    assert (hn(), cc(), bar()) == (0, 1, 2)  # the Library playing: HN_PLAYING, loaded, 2
+    car.status = 3
+    assert (hn(), cc(), bar()) == (1, 1, 3)
+    car.status = 1  # Radio's page stopped the player
+    rt = car.radio()
+    assert (hn(), cc(), bar()) == (0, 1, 2), 'Radio playing'
+    rt.playing = 0
+    assert (hn(), cc(), bar()) == (1, 1, 3), 'Radio paused'
+    car.radio_off()
+    assert (hn(), cc(), bar()) == (1, 0, 1), 'nothing loaded'
+
+
+def test_only_the_library_is_scrobbled(fw, ui, mcl, recs):
+    car = Car(fw, ui, recs)
+    scrobbles = fw.fn('now_scrobbles', C.c_int)
+    assert scrobbles() == 1
+    car.radio()
+    assert scrobbles() == 0
+    car.radio_off()
+    assert scrobbles() == 1

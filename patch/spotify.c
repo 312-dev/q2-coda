@@ -1355,6 +1355,17 @@ int spot_status(void) {
     return sp.active ? (playing ? 2 : 3) : 0;
 }
 unsigned spot_session(void) { return fnv(FNV_SEED, (const unsigned char *)sp.track); }
+/* What Spotify plays, for now_source.c: spot_status's 2 playing or 3 paused (0 none), the track's
+ * words in cap bytes each, its position (moved on while playing) and its length in ms. */
+int spot_now(char *title, char *artist, char *album, unsigned cap, unsigned *pos, unsigned *len) {
+    int s = spot_status();
+    if (!s) return 0;
+    tk_snprintf(title, cap, "%s", sp.title);
+    tk_snprintf(artist, cap, "%s", sp.artist);
+    tk_snprintf(album, cap, "%s", sp.album);
+    *pos = spot_position(), *len = sp.duration;
+    return s;
+}
 /* Play or pause, whatever the page's state (guest.c's hold and release). */
 void spot_send_play(int playing) { dgram_send(&sp.sock, SPOT_SOCK, playing ? "P" : "s", 1); }
 

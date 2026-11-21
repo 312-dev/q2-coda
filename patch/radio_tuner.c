@@ -629,6 +629,7 @@ void tuner_song(const char *in, char *artist, char *song, unsigned cap) {
  * playing or 2 paused; station the station's name (its call sign without one), freq the station's
  * or the dial's frequency as "93.1 FM", title the stream's raw StreamTitle (empty between stations
  * or before its first), each in cap bytes. */
+int tuner_state(void) { return !rt ? 0 : rt->playing && rt->audio ? 1 : 2; }
 int tuner_now(char *station, char *freq, char *title, unsigned cap) {
     if (!rt) return 0;
     const rt_station *s = rt->feed >= 0 ? &rt->st[rt->feed] : 0;
@@ -636,7 +637,7 @@ int tuner_now(char *station, char *freq, char *title, unsigned cap) {
     int f = s ? s->freq : rt->freq;
     tk_snprintf(freq, cap, "%d.%d FM", f / 100, f / 10 % 10);
     tk_snprintf(title, cap, "%s", s ? rt->title_text : "");
-    return rt->playing && rt->audio ? 1 : 2;
+    return tuner_state();
 }
 
 /* The house marquee on line (0 the name, 1 the song) at screen row y: centred when it fits in
@@ -1059,6 +1060,7 @@ static int closed(void *ctx, void *event) {
     if (rt->sock > 0) close(rt->sock);
     free(rt);
     rt = 0;
+    now_release(); /* the Library's song back, paused where Radio found it */
     return 0;
 }
 
@@ -1085,6 +1087,7 @@ int tuner_open(void *ctx, void *event) {
     radio_stop();
     smart_wake(); /* Smart Wi-Fi's radio back now; tuner_page holds it on (smart_wifi.c
                      net_page_open) */
+    now_hold();   /* the Library paused where it was, not stopped and forgotten (now_source.c) */
     rt->audio = video_start("-", 2);
     rt->volume = headset_gain() + 1;
     char z[8] = "";

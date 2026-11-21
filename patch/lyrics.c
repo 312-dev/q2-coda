@@ -578,9 +578,8 @@ int lyrics_fit(void *lrc) {
 int lyrics_now(void) {
     int air;
     if (airplay_lyrics(&air)) return air; /* a speaker plays it, behind the Q2 */
-    int sec = -1, total = 0, playing = mclGetPlayStatus() == 2;
+    int sec, total, playing = now_time(&sec, &total) == 2; /* now_source.c */
     unsigned now = (unsigned)time_now_ms();
-    player_playtime_and_length(&sec, &total);
     if (sec < 0) {
         ly.sec = -1, ly.run = 0;
         return ly.pos = 0;
@@ -612,8 +611,8 @@ int lyrics_now(void) {
  * where a line's jump needs no more; the clock lets go of its bounds, which a dark or covered pass
  * no longer narrows, and starts again on the page. */
 int lyrics_sec(void) {
-    int sec = -1, total = 0;
-    player_playtime_and_length(&sec, &total);
+    int sec, total;
+    now_time(&sec, &total); /* now_source.c */
     ly.sec = -1, ly.run = 0;
     return sec < 0 ? 0 : sec * 1000;
 }

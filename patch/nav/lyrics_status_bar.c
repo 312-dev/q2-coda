@@ -188,10 +188,11 @@ static int pct_width(unsigned level) {
     return (level >= 100 ? 3 : level >= 10 ? 2 : 1) * st.pct_digit + st.pct_sign;
 }
 
-/* What the playing source reports: 2 playing, 3 paused. */
+/* What the playing source reports (now_source.c now_status), as mclGetPlayStatus says it: 2
+ * playing, 3 paused, 1 neither. */
 int bar_status(void) {
-    if (media_owner() == 1) return mclGetPlayStatus();
-    return video_status() ?: radio_status() ?: spot_status();
+    int s = now_status();
+    return s == 1 ? 2 : s == 2 ? 3 : 1;
 }
 /* img_state follows whichever player plays, stock's or Spotify's, radio's or a video's, and
  * label_idle shows when neither it nor label_eq does. Returns whether a state image changed. */
