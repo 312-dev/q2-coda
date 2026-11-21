@@ -811,10 +811,10 @@ as a menu's; a lit row's foot never passes y 282.
 - Nothing toasts. Center on a song plays it and closes Up Next at once; Return lets the sheet fall
   away. The list follows the queue as songs end, the header with it.
 - **A finger closes it too** (the user's, 2026-11-18): a tap on the dimmed page above the sheet
-  (over y 40), or a drag down of 48 px or more, more down than across (the swipe up that opens it,
-  reversed), that starts on the grab bar's strip or on the rows while they are at their top. The
+  (over y 40), or a drag down of 48 px or more that starts more down than across (the swipe up that
+  opens it, reversed), on the grab bar's strip or on the rows while they are at their top. The
   sheet follows the finger down as it drags, the page behind coming forward as it goes; let go 48 px
-  or more down and it falls away from there as on Return ([Overlay motion](#overlay-motion)), short
+  or more down, however far across a thumb's slant has carried it (2026-11-21), and it falls away from there as on Return ([Overlay motion](#overlay-motion)), short
   of that it rises back. A drag on rows scrolled down scrolls them. Under Reduce Motion the sheet
   stays put while the finger drags and the lift alone decides.
 
