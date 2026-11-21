@@ -1053,8 +1053,8 @@ def lib_car(probe, tmp_path, *more, run='run1'):
 
 
 def library(car, rev=None, timeout=3.0):
-    """The car's StartMediaLibraryUpdates and every update to the one with progress 100: (items, deleted, revision,
-    reset seen)."""
+    """The car's StartMediaLibraryUpdates and every update to the last, the one with progress 100 and the revision
+    itself (not a first update's or a checkpoint's partial one): (items, deleted, revision, reset seen)."""
     car.send(message(0x4C03, prm(0, b'lib\0'), *([prm(1, rev.encode() + b'\0')] if rev else [])))
     items, gone, reset = [], [], False
     while True:
@@ -1066,8 +1066,9 @@ def library(car, rev=None, timeout=3.0):
         reset |= 6 in ids
         items += [params(d) for i, d in ps if i == 2]
         gone += [int.from_bytes(d, 'big') for i, d in ps if i == 4]
-        if 7 in ids and dict(ps)[7] == b'\x64':
-            return items, gone, dict(ps)[1].rstrip(b'\0').decode(), reset
+        got = dict(ps).get(1, b'').rstrip(b'\0').decode()
+        if 7 in ids and dict(ps)[7] == b'\x64' and not got.startswith(('q2p.', 'q2d.')):
+            return items, gone, got, reset
 
 
 def test_the_library_whole_then_nothing_then_the_changes(probe, tmp_path, monkeypatch):
@@ -1267,6 +1268,151 @@ def test_the_whole_library_goes_at_the_wire_s_pace_and_resumes(probe, tmp_path, 
     print(f'{len(rest)} songs in {took:.1f} s here; {wire:.0f} s on the BMW\'s wire, '
           f'{wire * len(songs) / len(rest):.0f} s for all {len(songs)}')
     assert wire * len(songs) / len(rest) < 400 and '(again)' not in text, (wire, text.count('(again)'))
+
+
+def stock_lists(path, favs, recent, playlists):
+    """Stock's myfav, recentplay and playlist tables in the database at path, as the user's Q2 has them (2026-11-20:
+    40 favourites, 100 recently played, 32 playlist headers with 4,540 songs between 30 of them): favs and recent are
+    song ids (recent in the order played, the last last), playlists [(name, song ids)]; a song's path is its
+    '/mnt/mmc/m/<id>.flac'."""
+    import sqlite3
+    db = sqlite3.connect(path)
+    for t in ('myfav', 'recentplay', 'playlist'):
+        db.execute(SONGTABLE.replace('songtable', t))
+    url = lambda i: f'/mnt/mmc/m/{i}.flac'
+    db.executemany('insert into myfav (id, fileurl) values (?, ?)', [(k + 1, url(i)) for k, i in enumerate(favs)])
+    db.executemany('insert into recentplay (id, fileurl) values (?, ?)', [(k + 1, url(i)) for k, i in enumerate(recent)])
+    row = 101
+    for h, (name, ids) in enumerate(playlists):
+        db.execute("insert into playlist (id, filename, fileurl, name, cd_num) values (?, ?, '', ?, ?)", (h, name, name, h))
+        for i in ids:
+            db.execute('insert into playlist (id, fileurl, cd_num) values (?, ?, ?)', (row, url(i), h))
+            row += 1
+    db.commit()
+    db.close()
+
+
+# The user's playlists' sizes (2026-11-20), and two headers with no songs (stock's Audiobooks among them)
+PLAYLIST_SIZES = [711, 34, 0, 961, 19, 30, 666, 32, 30, 30, 27, 30, 25, 235, 363, 32, 100, 36, 34, 25, 30, 33, 300, 81, 39,
+                  229, 26, 84, 30, 235, 33, 0]
+
+
+@pytest.mark.timeout(600)
+def test_idrive_has_the_lists_first_within_seconds_at_the_bmw_s_pace(probe, tmp_path, monkeypatch):
+    """The user's 9,199 songs took six minutes to reach iDrive, which shows a library only once an update completes
+    (progress 100: PodBox found its BMW reloads at each one, and reads on while one is held back). At the BMW's pace
+    (--report-ms 16) a first update must complete within 15 s of the car's StartMediaLibraryUpdates: the queue's songs
+    from the playing one on, the favourites, the recently played and the first of the playlists' songs, and every
+    list's record (Favorites, Recently Played, the playlists with songs), each list's songs' ids then following in a
+    file transfer of type 4; the whole push goes on after it, and a cable out resumes it with no reset, every song
+    sent, none of the push's twice."""
+    monkeypatch.setattr(BmwCar, 'msg', bmw_msg_keeping_body)
+    monkeypatch.setattr(FakeFfs, '__init__', fast_ffs(FakeFfs.__init__))
+    import random
+    rnd = random.Random(1120)
+    n_songs = 9199
+    song_db(tmp_path/'database.db', [(i, f'Song number {i}', f'Album {i // 12}', f'Artist {i // 60}', '', 'Rock',
+                                      i % 12 + 1, 1, f'/mnt/mmc/m/{i}.flac') for i in range(1, n_songs + 1)])
+    favs, recent = rnd.sample(range(1, n_songs + 1), 40), rnd.sample(range(1, n_songs + 1), 100)
+    playlists = [(f'Playlist {k}', [rnd.randrange(1, n_songs + 1) for _ in range(size)])
+                 for k, size in enumerate(PLAYLIST_SIZES)]
+    stock_lists(tmp_path/'database.db', favs, recent, playlists)
+    queue = rnd.sample(range(1, n_songs + 1), 300)
+    (tmp_path/'queue').write_text('7 10 300\n' + ''.join(f'{r}\n' for r in queue))
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path, '--report-ms', '16')
+    files['np'].write_text(files['np'].read_text() + f'id={queue[10]}\nqgen=7\nqpos=10\nqlen=300\n')
+    jpeg = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=180x180', '-frames:v', '1',
+                           '-q:v', '2', '-f', 'mjpeg', '-'], check=True, capture_output=True).stdout
+    (files['art']/f'{fnv_part(fnv_part(2166136261, "Massive Attack"), "Mezzanine"):08x}.jpg').write_bytes(jpeg)
+    want = {0x5132000F00000000 | 1001: favs, 0x5132000F00000000 | 1002: recent[::-1]}
+    want.update({0x5132000F00000000 | k: ids for k, (_, ids) in enumerate(playlists) if ids})
+    first, pushed, records, setups, pieces, done = [], [], {}, {}, {}, {}
+    last_rev, t_first, t_lists = None, None, None
+    try:
+        t0 = time.time()
+        car.send(message(0x5000, prm(0, b''.join(prm(a) for a in (0, 1, 4, 6, 12, 0x1a))), prm(1, prm(0) + prm(1))))
+        car.send(message(0x4C03, prm(0, b'lib\0')))
+        while time.time() - t0 < 60 and (t_lists is None or time.time() - t_lists < 3):
+            got = car.packet_any(2.0)
+            if not got or not got[4]:
+                continue
+            session, pl = got[3], got[4]
+            if session == 2:
+                tid, op = pl[0], pl[1]
+                if op == 0x04:
+                    setups[tid] = pl[2:]
+                    car.send(bytes([tid, 0x01]), session=2)
+                else:
+                    pieces.setdefault(tid, b'')
+                    pieces[tid] += pl[2:]
+                    if op in (0x40, 0xC0):
+                        done[tid] = True
+                continue
+            if (pl[4] << 8 | pl[5]) != 0x4C04:
+                continue
+            ps = plist(pl[6:])
+            d = dict(ps)
+            songs = [int.from_bytes(params(v)[0], 'big') & 0xffffffff for i, v in ps if i == 2]
+            for i, v in ps:
+                if i == 3:
+                    r = params(v)
+                    records[int.from_bytes(r[0], 'big')] = (r[1].rstrip(b'\0').decode(), r[5][0])
+            lib_id = d[0]
+            if 1 not in d:
+                continue  # 8 00 and 9 01
+            last_rev = d[1].rstrip(b'\0').decode()
+            if t_first is None:
+                assert 6 in d or first, 'the first update opens with a reset'
+                first += songs
+                if d.get(7) == b'\x64':
+                    t_first = time.time() - t0
+                    first_rev = last_rev
+            else:
+                pushed += songs
+            lists_ids = {tid for _, tid in records.values()}
+            if t_first and t_lists is None and lists_ids and all(done.get(t) for t in lists_ids):
+                t_lists = time.time() - t0
+    finally:
+        stop(p, fd)
+    text = log.read_text()
+    assert t_first is not None and t_first < 15, f'the first update completed after {t_first} s'
+    assert first_rev.startswith('q2p.q2.9199.') and first_rev.endswith('.0'), first_rev
+    order = []
+    for r in queue[10:60] + favs + recent[::-1]:  # the queue on from the playing song, the favourites, the last played
+        if r not in order:
+            order.append(r)
+    assert first == order[:150], (len(first), first[:5], order[:5])
+    assert {k: v[0] for k, v in records.items()} == {**{0x5132000F00000000 | 1001: 'Favorites',
+                                                        0x5132000F00000000 | 1002: 'Recently Played'},
+                                                     **{0x5132000F00000000 | k: n for k, (n, ids) in enumerate(playlists) if ids}}
+    assert t_lists is not None, 'every list\'s songs sent'
+    for key, (_, tid) in records.items():
+        setup = setups[tid]
+        assert setup[:4] == bytes(4) and int.from_bytes(setup[4:8], 'big') == 8 * len(want[key])
+        assert setup[8:10] == b'\x00\x04' and setup[10:18] == key.to_bytes(8, 'big') and setup[18:] == lib_id
+        assert pieces[tid] == b''.join((0x5132000100000000 | r).to_bytes(8, 'big') for r in want[key]), key
+    assert pushed and not set(pushed) & set(first), 'the push leaves out the songs the first update had'
+    # the same on the BMW's wire: each input report's 64-byte transactions, 8 ms apart (a report of 95 bytes 16 ms)
+    sizes = {1: 5, 2: 9, 3: 13, 4: 17, 5: 25, 6: 49, 7: 95, 8: 193, 9: 257, 10: 385, 11: 513, 12: 767}
+    upto = text[text.index('< 4c03 StartMediaLibraryUpdates'):text.index('library: the first update complete')]
+    wire = sum(-(-(sizes[int(l.split(' report > ')[1][:2], 16)] + 1) // 64) * 0.008
+               for l in upto.splitlines() if ' report > ' in l)
+    print(f'first update ({wire:.1f} s on the BMW\'s wire): '
+          f'{len(first)} songs and {len(records)} lists complete in {t_first:.1f} s at 16 ms a report; '
+          f'every list\'s songs in {t_lists:.1f} s; then {len(pushed)} songs of the push before the cable came out '
+          f'({last_rev})')
+    assert 'link: lost' not in text and '(again)' not in text
+    # the next plug: the push resumes where the car's revision says, with the lists first again
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path, '--report-ms', str(PACE_MS), run='run2')
+    try:
+        items, gone, rev, reset = library(car, last_rev, timeout=10.0)
+    finally:
+        stop(p, fd)
+    rest = [int.from_bytes(i[0], 'big') & 0xffffffff for i in items]
+    every = first + pushed + rest
+    assert not reset and rev.startswith('q2.9199.') and set(every) == set(range(1, n_songs + 1))
+    assert len(pushed + rest) == len(set(pushed + rest)), 'no song of the push twice'
+    assert len(every) - n_songs <= 150, 'at most the first update\'s songs again'
 
 
 def test_playing_from_idrive(probe, tmp_path, monkeypatch):
