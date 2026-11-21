@@ -80,6 +80,7 @@ void *malloc(size_t);
 void *realloc(void *, size_t);
 void free(void *);
 unsigned long strtoul(const char *, char **, int);
+int access(const char *, int);
 #define ERRNO (*__errno_location())
 #define O_RDONLY 0
 #define O_WRONLY 1
