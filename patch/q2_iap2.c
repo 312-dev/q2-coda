@@ -645,47 +645,29 @@ static unsigned report_bit(const u8 *r, unsigned len, unsigned bit) { return bit
 
 /* Hold to scan, as an iPod's wheel buttons: the BMW's descriptor has no fast-forward or rewind usage, only Next and
  * Previous. Next or Previous is acted on at its release: up within HOLD_MS, a skip as before (the car's taps were up
- * 13 to 120 ms after the press, 2026-11-20); held past it, the song moves through itself from where it was, a seek
- * every SCAN_STEP_MS (the shim's command file is read every 500 ms with Car Remote off: a faster seek would only
- * replace the one before it), SCAN_SLOW seconds a step for the first SCAN_SLOW_MS (4 times as fast as it plays),
- * then SCAN_FAST (8 times), then SCAN_FASTEST (16 times), until the release, and the song plays on from there. */
+ * 13 to 120 ms after the press, 2026-11-20); held past it, the Q2's own scan of a held button (seek.c seek_car, heard
+ * at 2, 4 and 8 times and then in growing jumps), started with the shim's "scan 1" or "scan -1", said again every
+ * SCAN_KEEP_MS while the button stays down (seek.c lets a car's scan go after 2 s without it), and "scan 0" at the
+ * release; the song plays on from where the scan reached. The first drive's scan, a seek every 500 ms, came out uneven
+ * ("pretty inconsistent", 2026-11-20): each seek a mute, a drop and a fresh decode, read a loop pass apart. */
 #define HOLD_MS 500
-#define SCAN_STEP_MS 500
-#define SCAN_SLOW 2
-#define SCAN_FAST 4
-#define SCAN_FASTEST 8
-#define SCAN_SLOW_MS 1000
-#define SCAN_FAST_MS 3000
+#define SCAN_KEEP_MS 500
 static unsigned held; /* Next's or Previous's usage while it is down, else 0 */
 static long held_at, scan_at;
 static int scanning;
-static long scan_pos_ms, scan_len_ms;
 
-static void scan_step(long now) {
-    char v[32], t[96];
-    long in = now - held_at - HOLD_MS, step = in < SCAN_SLOW_MS ? SCAN_SLOW : in < SCAN_FAST_MS ? SCAN_FAST : SCAN_FASTEST;
-    scan_pos_ms += (held == 0xB5 ? step : -step) * 1000L;
-    if (scan_pos_ms < 0) scan_pos_ms = 0;
-    if (scan_len_ms > 1000 && scan_pos_ms > scan_len_ms - 1000) scan_pos_ms = scan_len_ms - 1000;
+static void scan_say(long now, const char *verb) {
+    char t[96];
     scan_at = now;
-    snprintf(v, sizeof v, "seek %ld", scan_pos_ms / 1000);
-    snprintf(t, sizeof t, "hid: usage %02x held %ld ms: %s", held, now - held_at, v);
+    snprintf(t, sizeof t, "hid: usage %02x held %ld ms: %s", held, now - held_at, verb);
     H->log(t);
-    if (H->command) H->command(v);
+    if (H->command) H->command(verb);
 }
 
-/* From iap2_tick: a hold that passed HOLD_MS starts the scan, and each SCAN_STEP_MS moves it. */
+/* From iap2_tick: a hold that passed HOLD_MS starts the scan, and every SCAN_KEEP_MS says it is still held. */
 static void scan_tick(long now) {
     if (!held || now - held_at < HOLD_MS) return;
-    if (!scanning) {
-        struct iap2_np np;
-        memset(&np, 0, sizeof np);
-        if (H->now_playing) H->now_playing(&np);
-        scanning = 1, scan_pos_ms = np.pos_ms, scan_len_ms = np.len_ms;
-        scan_step(now);
-    } else if (now - scan_at >= SCAN_STEP_MS) {
-        scan_step(now);
-    }
+    if (!scanning || now - scan_at >= SCAN_KEEP_MS) scanning = 1, scan_say(now, held == 0xB5 ? "scan 1" : "scan -1");
 }
 
 static void release(unsigned usage) {
@@ -693,7 +675,8 @@ static void release(unsigned usage) {
     if (usage != held) return;
     long ms = H->now() - held_at;
     if (!scanning) press(usage); /* a tap: the skip */
-    else snprintf(t, sizeof t, "hid: usage %02x released after %ld ms: the scan ends", usage, ms), H->log(t);
+    else snprintf(t, sizeof t, "hid: usage %02x released after %ld ms: the scan ends", usage, ms), H->log(t),
+                                                                                                  scan_say(H->now(), "scan 0");
     held = 0, scanning = 0;
 }
 

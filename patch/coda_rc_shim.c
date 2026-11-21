@@ -8,7 +8,7 @@
  *   press on, as Now Playing shows it; the last toast for CR_NOTE_MS), and the queue's song ids to /tmp/coda-rc.queue (a stream download's
  *   path, title and artist beside its id 0);
  * - takes its commands from /tmp/coda-rc.cmd: play a list of song ids from one of them, or shuffled (ids in
- *   /tmp/coda-rc.list), Play, Pause, Play/Pause, Next, Previous, seek, set the volume, set shuffle and
+ *   /tmp/coda-rc.list), Play, Pause, Play/Pause, Next, Previous, seek, scan (Car Audio's held Next or Previous: seek.c seek_car), set the volume, set shuffle and
  *   repeat, rate the playing song, play a song of the queue, start or stop a radio (song_radio.c); and
  *   answers each in /tmp/coda-rc.ack, a Pause or Play once the player shows it;
  * - starts a card app the daemon named in /tmp/coda-rc.wake, for a cover the car asked for (addon_cover_wake);
@@ -498,6 +498,9 @@ static void cr_command(void) {
         cr_settle();
     } else if (!strcmp(word, "next") || !strcmp(word, "previous")) {
         media_key(word[0] == 'n' ? KEY_FWD_BTN : KEY_BACK_BTN);
+        cr_ack(seq, 0);
+    } else if (verb && __isoc99_sscanf(verb, " scan %d", &v) == 1 && v >= -1 && v <= 1) {
+        seek_car(v); /* Car Audio's held Next or Previous (q2_iap2.c), and its release */
         cr_ack(seq, 0);
     } else if (verb && __isoc99_sscanf(verb, " seek %d", &v) == 1 && v >= 0) {
         player_seek_time(v);

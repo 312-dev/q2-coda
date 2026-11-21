@@ -791,6 +791,7 @@ void np_fill(int scrub);
 
 /* seek.c: a held Previous or Next scans the track; np_seek_bar is navigation.c's */
 int seek_input(void *e), seek_release(unsigned key), seek_held(unsigned key), seek_tick(void);
+void seek_car(int dir); /* the car's Next (1) or Previous (-1) held, 0 its release */
 int seek_step(unsigned held_ms), seek_target(int to, int dir, int step, int total);
 int seek_plan(int dir, int paused); /* a row of seek.c's seek_phases */
 void np_seek_bar(int phase, int to, int paused);

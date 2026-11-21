@@ -14,6 +14,7 @@
 #define SEEK_HOLD_MS 500        /* a press held this long scans instead of skipping */
 #define SEEK_CYCLE_MS 500       /* one jump and the stretch heard after it */
 #define SEEK_LOST_MS 700        /* no repeat for this long: the release was lost */
+#define SEEK_CAR_LOST_MS 2000   /* the car's scan (seek_car): no word from the car for this long, the release was lost */
 #define SCAN_FILE "/tmp/q2scan" /* player/q2player.h: there while q2player can scan the song */
 /* 1: Previous steps back by stretches played forward; 0: it runs the song backward */
 #ifndef SEEK_REWIND_SNIPPETS
@@ -67,7 +68,7 @@ enum { SEEK_PLAN_JUMPS, SEEK_PLAN_FORWARD, SEEK_PLAN_BACKWARD, SEEK_PLAN_SNIPPET
  * live while the phase is heard at speed without jumps. */
 static struct {
     unsigned key, at, seen, timer, track, eat;
-    int scanning, to, edge, paused, total, plan, sent, live;
+    int scanning, to, edge, paused, total, plan, sent, live, car;
 } sk __attribute__((section(".scratch")));
 
 static const seek_phase_t *seek_phase(int plan, unsigned held_ms) {
@@ -153,7 +154,7 @@ static void seek_stop(void) {
         if (sk.live) seek_now(&cue, &sec, &total);
         np_seek_bar(2, sk.live && sec >= 0 ? sec : sk.to, sk.paused);
     }
-    sk.scanning = sk.edge = sk.live = 0;
+    sk.scanning = sk.edge = sk.live = sk.car = 0;
     sk.key = 0;
 }
 
@@ -164,7 +165,7 @@ static void seek_stop(void) {
  * which the player starts as it would at the end of any track, Previous for the release. */
 int seek_tick(void) {
     unsigned now = (unsigned)time_now_ms();
-    if (!sk.key || now - sk.seen > SEEK_LOST_MS) {
+    if (!sk.key || now - sk.seen > (sk.car ? SEEK_CAR_LOST_MS : SEEK_LOST_MS)) {
         seek_stop();
         return 0;
     }
@@ -327,6 +328,28 @@ int seek_release(unsigned key) {
     *(volatile unsigned char *)NP_KEY_HELD = 0;
     *(volatile unsigned char *)NP_KEY_MODE = 0;
     return 1;
+}
+
+/* The car's Next or Previous held (patch/q2_iap2.c, through Car Remote's shim: coda_rc_shim.c "scan"): dir 1 or -1
+ * scans as a button held past SEEK_HOLD_MS does, from now, the player's own scan (mcl-scan) heard at speed where it
+ * can; the car's word again within SEEK_CAR_LOST_MS keeps it going (its button stays down); dir 0 is the release,
+ * and the song plays on from where the scan reached. The car held its buttons in the first drive (2026-11-20) through
+ * a seek every 500 ms, which jumped unevenly; this is the scan the Q2's own buttons make. A key of the Q2's own
+ * already scanning is left alone. */
+void seek_car(int dir) {
+    unsigned now = (unsigned)time_now_ms(), key = dir > 0 ? KEY_FWD_BTN : KEY_BACK_BTN;
+    if (!dir) {
+        if (sk.car) seek_stop();
+        return;
+    }
+    if (sk.key) {
+        if (sk.car && key == sk.key) sk.seen = now;
+        return;
+    }
+    if (!seek_allowed()) return;
+    sk.key = key, sk.car = 1, sk.eat = 0;
+    sk.at = now - SEEK_HOLD_MS, sk.seen = now;
+    if (seek_tick()) rearm(&sk.timer, seek_timer, SEEK_CYCLE_MS);
 }
 
 /* on_wm_keylong_fun (ringnav_keylong): a scan's long press does nothing more. */

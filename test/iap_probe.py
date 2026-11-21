@@ -532,15 +532,15 @@ def test_bmw_buttons(probe, tmp_path):
 
 def test_bmw_hold_to_scan(probe, tmp_path):
     """Next and Previous act at their release: a tap (the car's were up 13 to 120 ms after the press, 2026-11-20) is
-    the skip; held past 500 ms the song moves through itself from where it is (61 s of 245), a seek every 500 ms, 2 s
-    a step for 1 s, then 4 s, and nothing else at the release."""
+    the skip; held past 500 ms it is the Q2's own scan of a held button (seek.c seek_car): "scan 1" (Previous "scan
+    -1"), said again every 500 ms while held so the scan goes on, "scan 0" at the release, and no seek and no skip."""
     p, car, fd, log, files = bmw_up(probe, tmp_path)
 
     def hid(b):
         car.send(message(0x6802, prm(0, b'\x00\x01'), prm(1, bytes([b]))))
 
-    def seeks():
-        return [int(line.rsplit(' ', 1)[1]) for line in log.read_text().splitlines() if ': seek ' in line and 'held' in line]
+    def said():
+        return [line.split(': ', 2)[2] for line in log.read_text().splitlines() if ' held ' in line and ': scan ' in line]
     try:
         car.send(bytes([0x40, 0x40, 0, 6 + len(BMW_START_HID), 0x68, 0x00]) + BMW_START_HID)
         time.sleep(0.15)
@@ -552,21 +552,21 @@ def test_bmw_hold_to_scan(probe, tmp_path):
             time.sleep(0.15)
             assert files['cmd'].read_text().split(' ', 1)[1].strip() == verb
             files['cmd'].unlink()
-        hid(0x04)                                    # Next held 3.2 s
-        time.sleep(3.2)
+        hid(0x04)                                    # Next held 2.2 s
+        time.sleep(2.2)
         hid(0x00)
-        time.sleep(0.4)
-        assert seeks() == [63, 65, 69, 73, 77, 81], seeks()
-        assert files['cmd'].read_text().split(' ', 1)[1].strip() == 'seek 81', 'no skip after a scan'
-        hid(0x08)                                    # Previous held 1.2 s, from where Now Playing says it is
+        time.sleep(0.3)
+        assert said() == ['scan 1'] * 4 + ['scan 0'], said()
+        assert files['cmd'].read_text().split(' ', 1)[1].strip() == 'scan 0', 'no skip after a scan'
+        hid(0x08)                                    # Previous held 1.2 s
         time.sleep(1.2)
         hid(0x00)
-        time.sleep(0.4)
-        assert seeks()[6:] == [59, 57], seeks()
+        time.sleep(0.3)
+        assert said()[5:] == ['scan -1'] * 2 + ['scan 0'], said()
     finally:
         stop(p, fd)
     text = log.read_text()
-    assert 'hid: usage b5 released after' in text and 'the scan ends' in text
+    assert 'hid: usage b5 released after' in text and 'the scan ends' in text and ': seek ' not in text
 
 
 def test_bmw_audio_and_seek(probe, tmp_path):
