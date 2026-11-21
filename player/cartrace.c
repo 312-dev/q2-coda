@@ -16,7 +16,7 @@
  *
  * The tap: the first TAP_S seconds of each car session's PCM, exactly as written to the device (S16, the car's rate,
  * stereo), go to TAP_FILE, unless TAP_OFF exists. A session is one car file (output.c car_path) as the probe wrote it:
- * a new file (another inode or mtime) starts the tap again, over the last one. The playback thread only copies into
+ * a new file (another inode or mtime) starts the tap again, the last two kept as TAP_FILE.1 and .2. The playback thread only copies into
  * a ring (TAP_RING bytes, about 3 s at 44.1 kHz); a thread of the session's own writes the ring to the card every
  * TAP_POLL_MS, so a slow card never holds a write to the car. What does not fit in the ring is counted (tap's second
  * number) and left out of the file, never waited for. All of this runs only on way 3, which every image's player has
@@ -101,7 +101,10 @@ static void tap_start(int device_rate) {
     if (!access(TAP_OFF, F_OK)) return;
     struct tap *t = calloc(1, sizeof *t);
     if (!t || !(t->ring = malloc(TAP_RING))) { free(t); return; }
-    unlink(TAP_FILE);
+    /* the last three sessions' taps: car-pcm.raw, then .1 and .2 (a drive's first session was lost under its second,
+     * 2026-11-20) */
+    rename(TAP_FILE ".1", TAP_FILE ".2");
+    rename(TAP_FILE, TAP_FILE ".1");
     if ((t->fd = open(TAP_FILE, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644)) < 0) {
         free(t->ring), free(t);
         return;
@@ -161,6 +164,12 @@ void car_trace_read(int64_t us) {
     if (us > w.rmax_us) w.rmax_us = us;
 }
 
+/* The song's position as demo is told it, and the frames heard since the song's start or its last seek or move
+ * (engine.c play_through: until they pass 0 the position stays where it was), as the second's line ends */
+static int heard_s;
+static long long heard_frames;
+void car_trace_position(int position, int64_t played) { heard_s = position, heard_frames = (long long)played; }
+
 void car_trace_tick(struct output *o, int closing) {
     int64_t now = car_trace_now();
     if (!closing && now - window_at < LINE_MS * 1000) return;
@@ -168,14 +177,15 @@ void car_trace_tick(struct output *o, int closing) {
     long avail = 0, delay = 0;
     output_levels(o, &avail, &delay);
     int64_t cpu = clock_us(CLOCK_PROCESS_CPUTIME_ID);
-    char line[224];
+    char line[256];
     int n = snprintf(line, sizeof line,
                      "car %lldms: frames=%lld writes=%d wmax=%lldms slow=%d dry=%d/%lldms back=%d/%lldms avail=%ld "
-                     "delay=%ld rmax=%lldms cpu=%lldms tap=%lld/%lld under=%u",
+                     "delay=%ld rmax=%lldms cpu=%lldms tap=%lld/%lld under=%u pos=%ds played=%lld",
                      (long long)((now - window_at) / 1000), (long long)w.frames, w.writes, (long long)(w.wmax_us / 1000),
                      w.slow, w.dry, (long long)(w.dry_frames * 1000 / rate), w.back,
                      (long long)(w.back_frames * 1000 / rate), avail, delay, (long long)(w.rmax_us / 1000),
-                     (long long)((cpu - cpu_at) / 1000), (long long)tap_put, (long long)tap_lost, underruns);
+                     (long long)((cpu - cpu_at) / 1000), (long long)tap_put, (long long)tap_lost, underruns, heard_s,
+                     heard_frames);
     plog('I', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
     if (underruns != underruns_told) {
         const char *path = getenv("Q2PLAYER_CAR_UNDER") ? getenv("Q2PLAYER_CAR_UNDER") : CAR_UNDER;

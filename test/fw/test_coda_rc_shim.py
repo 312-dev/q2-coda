@@ -304,6 +304,17 @@ def test_a_newer_command_drops_the_waiting_ones_ack(fw, ui, mcl, recs):
     assert ACK not in q2.files
 
 
+def test_scan_is_car_audio_s_held_button(fw, ui, mcl, recs):
+    """scan 1, -1 and 0 (q2_iap2.c's held Next or Previous, and its release) go to seek.c's seek_car and are acked;
+    another number is refused."""
+    q2 = Q2(fw, ui, recs)
+    q2.tick()
+    for seq, verb, ack in ((21, 'scan 1', 0), (22, 'scan 0', 0), (23, 'scan -1', 0), (24, 'scan 2', 1)):
+        q2.files[CMD] = f'{seq} {verb}\n'.encode()
+        q2.tick()
+        assert q2.files.pop(ACK) == f'{seq} {ack}\n'.encode(), verb
+
+
 def test_next_and_previous_go_to_the_player(fw, ui, mcl, recs):
     q2 = Q2(fw, ui, recs)
     q2.tick()

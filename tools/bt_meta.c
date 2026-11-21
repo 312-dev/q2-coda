@@ -16,8 +16,15 @@
  * record says it fetches covers (COVER_CT): for any other the file is never opened and 8 is no
  * attribute, asked for or not.
  *
+ * GetPlayStatus (PDU 0x30) is upstream's in stock too, and with no player it answers every song as length
+ * 0xFFFFFFFF at position 0, so a car never learnt where the song was and ran its own clock.
+ * bt_meta_get_play_status answers the length and position demo's Now Playing (patch/now_source.c) keeps in
+ * BT_PLAY_FILE, "position length stamp" in ms (-1: none, a live stream), the stamp on the monotonic clock;
+ * while g_play_status says playing, the time since the stamp is added. The status is g_play_status's, as
+ * stock's.
+ *
  * bluetoothd is position independent, so this is too, by construction: every function is inlined into
- * its entry (no jal; there are two, this and bt_cover_sdp below), there is no data or constant pool (no absolute address), and libbtctl's
+ * its entry (no jal; there are three: this, GetPlayStatus's and bt_cover_sdp below), there is no data or constant pool (no absolute address), and libbtctl's
  * objects and pthread's functions are reached through bluetoothd's GOT at its $gp, which the caller
  * leaves set (BT_META_GOT_*: each slot's offset from $gp, filled in by -D). tools/build.py
  * (bt_meta) refuses an object with any relocation. */
@@ -68,15 +75,22 @@ INLINE int call3(char *gp, void *fn, void *x, void *y, unsigned z) {
 }
 INLINE void call1(char *gp, void *fn, void *m) { (void)call3(gp, fn, m, 0, 0); }
 
-/* The playing song's image handle into out: 1 when BT_COVER_FILE starts with HANDLE_DIGITS digits.
- * The path is built on the stack a word at a time (no constant pool). */
-INLINE int cover_handle(char *gp, char *out) {
+/* Up to cap bytes of the file whose path's four words are w0..w3 into out: how many, or -1 for no file. The
+ * path is built on the stack a word at a time (no constant pool). */
+INLINE int read_small(char *gp, u32 w0, u32 w1, u32 w2, u32 w3, char *out, unsigned cap) {
     volatile u32 path[4];
-    path[0] = BT_COVER_PATH_0, path[1] = BT_COVER_PATH_1, path[2] = BT_COVER_PATH_2, path[3] = BT_COVER_PATH_3;
-    int fd = call3(gp, got(gp, BT_META_GOT_OPEN), (void *)path, 0 /* O_RDONLY */, 0), n, ok = 1;
-    if (fd < 0) return 0;
-    n = call3(gp, got(gp, BT_META_GOT_READ), (void *)(long)fd, out, HANDLE_DIGITS);
+    path[0] = w0, path[1] = w1, path[2] = w2, path[3] = w3;
+    int fd = call3(gp, got(gp, BT_META_GOT_OPEN), (void *)path, 0 /* O_RDONLY */, 0), n;
+    if (fd < 0) return -1;
+    n = call3(gp, got(gp, BT_META_GOT_READ), (void *)(long)fd, out, cap);
     (void)call3(gp, got(gp, BT_META_GOT_CLOSE), (void *)(long)fd, 0, 0);
+    return n;
+}
+
+/* The playing song's image handle into out: 1 when BT_COVER_FILE starts with HANDLE_DIGITS digits. */
+INLINE int cover_handle(char *gp, char *out) {
+    int n = read_small(gp, BT_COVER_PATH_0, BT_COVER_PATH_1, BT_COVER_PATH_2, BT_COVER_PATH_3, out, HANDLE_DIGITS),
+        ok = 1;
     if (n != HANDLE_DIGITS) return 0;
     for (n = 0; n < HANDLE_DIGITS; ++n) ok &= out[n] >= '0' && out[n] <= '9';
     return ok;
@@ -194,6 +208,54 @@ u8 bt_meta_impl(void *session, u8 *pdu, u8 transaction, char *gp) {
     params[0] = (u8)count;
     pdu[4] = 0; /* a single packet */
     pdu[5] = (u8)(pos >> 8), pdu[6] = (u8)pos;
+    return CTYPE_STABLE;
+}
+
+/* ---- GetPlayStatus (PDU 0x30) ---- */
+#define PLAY_ROOM 40
+#define PLAYING 1 /* g_play_status: AVRCP's PLAY_STATUS, 1 playing */
+
+/* A decimal at *at in s (n bytes), after spaces, signed: 1 and *out, or 0 for none there */
+INLINE int number_at(const char *s, int n, int *at, int *out) {
+    int i = *at, neg = 0, any = 0;
+    unsigned v = 0;
+    while (i < n && s[i] == ' ') ++i;
+    if (i < n && s[i] == '-') neg = 1, ++i;
+    while (i < n && s[i] >= '0' && s[i] <= '9') v = v * 10 + (unsigned)(s[i++] - '0'), any = 1;
+    *at = i, *out = neg ? -(int)v : (int)v;
+    return any;
+}
+
+INLINE void put_be32(u8 *p, u32 v) { p[0] = (u8)(v >> 24), p[1] = (u8)(v >> 16), p[2] = (u8)(v >> 8), p[3] = (u8)v; }
+
+__asm__(".text\n.globl bt_meta_get_play_status\n.set noreorder\n"
+        "bt_meta_get_play_status:\n\tb bt_play_impl\n\tmove $7, $28\n.set reorder\n");
+
+u8 bt_play_impl(void *session, u8 *pdu, u8 transaction, char *gp) {
+    char b[PLAY_ROOM];
+    int pos = -1, len = -1, stamp = 0, at = 0;
+    volatile int ts[2]; /* struct timespec: seconds, nanoseconds */
+    (void)session, (void)transaction;
+    if (pdu[5] || pdu[6]) return reject(pdu);
+    int n = read_small(gp, BT_PLAY_PATH_0, BT_PLAY_PATH_1, BT_PLAY_PATH_2, BT_PLAY_PATH_3, b, PLAY_ROOM);
+    int known = n > 0 && number_at(b, n, &at, &pos) && number_at(b, n, &at, &len) && number_at(b, n, &at, &stamp);
+    (void)call3(gp, got(gp, BT_META_GOT_CLOCK_GETTIME), (void *)1 /* CLOCK_MONOTONIC */, (void *)ts, 0);
+    u32 now = (u32)ts[0] * 1000u + (u32)ts[1] / 1000000u;
+    void *mutex = got(gp, BT_META_GOT_NOTIFY_MUTEX);
+    call1(gp, got(gp, BT_META_GOT_LOCK), mutex);
+    int status = *(volatile int *)got(gp, BT_META_GOT_PLAY_STATUS);
+    const struct track_meta *m = *(struct track_meta **)got(gp, BT_META_GOT_TRACK_META);
+    int time = m ? m->time : -1;
+    call1(gp, got(gp, BT_META_GOT_UNLOCK), mutex);
+    if (!known) pos = -1, len = time > 0 ? time : -1;
+    else if (pos >= 0 && status == PLAYING) {
+        pos += (int)(now - (u32)stamp);
+        if (len > 0 && pos > len) pos = len;
+    }
+    put_be32(pdu + 7, len < 0 ? 0xffffffffu : (u32)len);
+    put_be32(pdu + 11, pos < 0 ? 0xffffffffu : (u32)pos);
+    pdu[15] = (u8)status;
+    pdu[4] = 0, pdu[5] = 0, pdu[6] = 9;
     return CTYPE_STABLE;
 }
 

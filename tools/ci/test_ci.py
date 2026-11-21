@@ -195,8 +195,10 @@ def test_a_python_change_plans_the_mypy_suite_that_checks_it(tmp_path):
 
 
 def test_mypy_suites_run_as_the_gate_runs_them(tmp_path):
-    for name in ('mypy-tools', 'mypy-fw'):
-        assert affected.mypy_argv(name, 'py') == gate.full_suite(name, 'py', tmp_path)().argv
+    plan = affected.Plan()
+    plan.other.update({'mypy-tools', 'mypy-fw'})
+    for name, suite in affected.suites(plan, None, 'py', tmp_path).items():
+        assert suite.argv == gate.full_suite(name, 'py', tmp_path)().argv
     every = affected.Plan()
     every.everything('x')
     assert {'mypy-tools', 'mypy-fw'} <= every.other
@@ -217,17 +219,27 @@ def test_every_folder_a_unit_test_globs_is_in_scanners():
     assert found <= {(folder, test) for folder, _, test in affected.SCANNERS}
 
 
+def handed(monkeypatch):
+    """Stands in for gate.run under affected.run: each call's (suites, build, kwargs), every suite passing."""
+    calls: list = []
+
+    def fake(suites, build_args, logs, py, build=None, **kw):
+        calls.append((suites, build, kw))
+        return {n: {'rc': 0, 'seconds': 0, 'log': ''} for n in suites}
+    monkeypatch.setattr(affected.gate, 'run', fake)
+    return calls
+
+
 def test_coverflow_suite_is_run_with_an_argv_it_accepts(monkeypatch):
     # test/coverflow.py compiles its own host build and takes no BUILD; the plan once handed it one and argparse
     # refused it, so the suite had not run for a day when anyone noticed.
     import subprocess
     root = pathlib.Path(__file__).resolve().parents[2]
-    real_run, ran = subprocess.run, []
-    monkeypatch.setattr(affected.subprocess, 'run', lambda cmd, **kw: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0))
+    real_run, calls = subprocess.run, handed(monkeypatch)
     plan = affected.Plan()
     plan.other.add('test/coverflow.py')
     assert affected.run(plan, '/some/build', 'python3') == 0
-    assert ran[-1][-1:] == ['test/coverflow.py']  # nothing after the script
+    assert calls[-1][0]['test/coverflow.py'].command('/some/build')[-1:] == ['test/coverflow.py']  # nothing after it
     assert gate.other_suite('test/coverflow.py', 'python3').argv[-1:] == ['test/coverflow.py']
     # and the suite does refuse an extra argument, so the line above is the one that matters
     refused = real_run([sys.executable, str(root/'test/coverflow.py'), '/some/build'], capture_output=True, text=True)
@@ -261,11 +273,9 @@ def test_a_script_the_gate_cannot_run_is_skipped_with_its_reason(capsys, monkeyp
         assert gate.SCRIPTS[path], path  # the reason
     plan = affected.Plan()
     plan.other.add('test/coda_rc_e2e.py')
-    ran = []
-    import subprocess
-    monkeypatch.setattr(affected.subprocess, 'run', lambda cmd, **kw: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0))
+    calls = handed(monkeypatch)
     assert affected.run(plan, '/b', 'python3') == 0
-    assert ran == [] and 'skipped' in capsys.readouterr().out
+    assert calls == [] and 'skipped' in capsys.readouterr().out
     assert gate.suites_for({'unit': [], 'fw': [], 'patch': [], 'other': ['test/coda_rc_e2e.py']}, None, 'python3',
                            pathlib.Path('/nowhere')) == {}
     assert 'test/coda_rc_e2e.py' in capsys.readouterr().out
@@ -986,13 +996,12 @@ def test_a_payload_change_plans_the_smoke_test_and_a_merge_batch_leaves_it_out(t
     assert 'leak-hunt' not in gate.suites_for(json.loads(plan.to_json()), [], 'py', tmp_path) and 'leak-hunt' not in gate.MERGE
     assert gate.suites_for(None, [], 'py', tmp_path, 'post')['leak-hunt'].argv[1:] == [str(gate.ROOT/'tools/ci/leak_hunt.py'), '{build}']
     # a worker runs it only when asked
-    import subprocess
-    ran: list = []
-    monkeypatch.setattr(affected.subprocess, 'run', lambda cmd, **kw: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0))
+    calls = handed(monkeypatch)
     only = affected.Plan()
     only.other.add('smoke')
-    assert affected.run(only, '/b', 'py') == 0 and ran == []
-    assert affected.run(only, '/b', 'py', smoke=True) == 0 and ran[-1][-2:] == [str(affected.ROOT/'tools/ci/smoke.py'), '/b']
+    assert affected.run(only, '/b', 'py') == 0 and calls == []
+    assert affected.run(only, '/b', 'py', smoke=True) == 0
+    assert calls[-1][0]['smoke'].command('/b')[-2:] == [str(affected.ROOT/'tools/ci/smoke.py'), '/b']
 
 
 def test_a_lease_can_keep_off_a_slot_and_prepare_the_copy_before_its_boot(tmp_path, monkeypatch):
@@ -1119,3 +1128,98 @@ def test_smoke_confirms_only_the_guardian_cards_demo_vouches_for_at_boot():
     assert smoke.boot_rule(card, '-') == 'fail'                                 # a confirm card of another kind
     assert smoke.boot_rule(card, None) == 'fail'
     assert smoke.boot_rule(home + [('dialog', 'confirminfo_dialog')], 'nosensor') == 'fail'
+
+
+def test_affected_run_hands_the_whole_plan_to_the_parallel_runner(monkeypatch, tmp_path):
+    """--run is one gate.run over every suite the plan names, as gate.py --plan-json would run them; test/patch.py
+    whole is the one serial process, never patch_shards.py."""
+    calls = handed(monkeypatch)
+    every = affected.Plan()
+    every.everything('x')
+    assert affected.run(every, '/b', 'py', logs=tmp_path) == 0
+    assert len(calls) == 1
+    suites, build, kw = calls[0]
+    assert build == '/b' and kw['retry'] and kw['flakes'] == gate.FLAKES
+    assert set(suites) == {*gate.MERGE, *gate.PLANNED}  # smoke only with --smoke
+    assert set(suites) == set(gate.suites_for(json.loads(every.to_json()), [], 'py', tmp_path))
+    assert suites['patch'].argv == ['py', 'test/patch.py', '{build}'] and suites['patch'].heavy
+    assert not any('patch_shards' in a for s in suites.values() for a in s.argv)
+    # a plan of some of its lines replays those alone, still one process
+    some = affected.Plan()
+    some.patch = {'10:20'}
+    affected.run(some, '/b', 'py', logs=tmp_path)
+    assert list(calls[-1][0]) == ['patch'] and calls[-1][0]['patch'].argv[-2:] == ['--lines', '10:20']
+    # no build: only what needs none, and test/build.py's own checks
+    affected.run(every, None, 'py', logs=tmp_path)
+    suites = calls[-1][0]
+    assert 'patch' not in suites and 'test/playback.py' not in suites and suites['test/build.py'].argv == ['py', 'test/build.py']
+    assert not any(s.needs_build for s in suites.values()) and calls[-1][1] is None
+
+
+def fake_python(tmp_path, fail):
+    """A python for affected.run that logs its argv and fails test/coverflow.py by the file `fail`: 'always' or
+    'once' (it then removes the file)."""
+    py = tmp_path/'py'
+    py.write_text(f'''#!/bin/sh
+echo "$*" >> {tmp_path}/calls
+case "$*" in *coverflow*)
+  if [ -e {fail} ]; then [ "$(cat {fail})" = once ] && rm {fail}; exit 1; fi;;
+esac
+exit 0
+''')
+    py.chmod(0o755)
+    return str(py)
+
+
+def calls_of(tmp_path):
+    f = tmp_path/'calls'
+    return f.read_text().splitlines() if f.exists() else []
+
+
+def test_affected_run_fails_retries_reports_flaky_and_skips_what_passed_on_this_tree(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(gate, 'HEAVY', tmp_path/'no-q2-heavy')
+    monkeypatch.setattr(gate, 'VERIFIED', tmp_path/'verified')
+    monkeypatch.setattr(gate, 'FLAKES', tmp_path/'flakes.jsonl')
+    monkeypatch.setattr(gate, 'tree_key', lambda root=None: 'tree1')
+    fail = tmp_path/'fail'
+    py = fake_python(tmp_path, fail)
+    plan = affected.Plan()
+    plan.other.update({'test/coverflow.py', 'test/peq.py'})
+
+    def go(**kw):
+        n = affected.run(plan, None, py, logs=tmp_path/'logs', poll=0.01, **kw)
+        return n, capsys.readouterr().out
+
+    fail.write_text('always')  # a failure is a failure: run once more alone, still failed, and nothing cached
+    n, out = go()
+    assert n == 1 and [c for c in calls_of(tmp_path) if 'coverflow' in c] == ['test/coverflow.py'] * 2
+    assert re.search(r'test/coverflow.py +FAILED \(fail\)', out) and 'FAILED: test/coverflow.py' in out
+    assert re.search(r'test/peq.py +ok ', out) and not gate.FLAKES.exists()
+    # merge_train.py names the failed suites from these lines
+    assert [line.split(':')[0][3:] for line in out.splitlines() if line.startswith('== ') and 'FAILED' in line] == ['test/coverflow.py']
+    fail.write_text('always')
+    assert go(retry=False)[0] == 1 and len([c for c in calls_of(tmp_path) if 'coverflow' in c]) == 3
+    # failed, then passed alone: flaky, counted as passed, logged, and not recorded as a pass on this tree
+    fail.write_text('once')
+    n, out = go()
+    assert n == 0 and re.search(r'test/coverflow.py +flaky \(fail\)', out)
+    assert json.loads(gate.FLAKES.read_text())['suite'] == 'test/coverflow.py'
+    # test/peq.py passed on this tree in the first run: cached; test/coverflow.py only now passes cleanly
+    before = len(calls_of(tmp_path))
+    n, out = go()
+    assert n == 0 and re.search(r'test/peq.py +cached ', out) and calls_of(tmp_path)[before:] == ['test/coverflow.py']
+    n, out = go()
+    assert n == 0 and len(calls_of(tmp_path)) == before + 1 and re.search(r'test/coverflow.py +cached ', out)
+    assert go(cache=False)[0] == 0 and len(calls_of(tmp_path)) == before + 3  # --no-cache runs both
+    # another tree is not this one
+    monkeypatch.setattr(gate, 'tree_key', lambda root=None: 'tree2')
+    fail.write_text('always')
+    assert go()[0] == 1
+
+
+def test_a_pass_is_keyed_by_the_options_the_build_was_made_with(tmp_path):
+    (tmp_path/'rebuild.json').write_text(json.dumps({'source_sha256': 'x', 'options': ['--dev']}))
+    assert affected.build_options(str(tmp_path)) == ['--dev'] == affected.build_options(None)  # the gate's key
+    other = tmp_path/'other'
+    other.mkdir()
+    assert affected.build_options(str(other)) == [f'build:{other.resolve()}']

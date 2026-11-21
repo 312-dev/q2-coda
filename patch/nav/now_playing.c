@@ -5,8 +5,7 @@
 #define SETTLE_MS 250
 #define SETTLE_PLAY_MS 2000
 static int settle_poll(const void *info) {
-    int sec = -1, total, status = mclGetPlayStatus();
-    player_playtime_and_length(&sec, &total);
+    int sec, total, status = now_time(&sec, &total); /* now_source.c */
     if (status == 2) st.settle_played += SETTLE_MS;
     if (st.np_win && np_track() == st.scrub_track &&
         (sec < st.scrub_to - 1 || sec > st.scrub_to + 1) &&
@@ -650,8 +649,8 @@ int ringnav_playing(void *win, void *ctx) {
     np_fill(0);
     np_theme();
     widget_on(win, EVT_DESTROY, np_gone, win);
-    int sec = -1, total = 0;
-    player_playtime_and_length(&sec, &total);
+    int sec, total;
+    now_time(&sec, &total); /* now_source.c */
     /* Stock's first update sets the value before the max, so the asset's max clamps it and the
      * bar sits short until the next tick: set them again, max first. */
     if (st.np_slider && total > 0) {

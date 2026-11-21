@@ -142,8 +142,9 @@ to). The menu runs on to the screen's bottom, and the rows below the seventh sho
 into the black: in Full a straight one from 16 px above the seventh's foot (y 266) to y 316, and
 once the menu has scrolled its rows run on under the status row, fading to black at the screen's top
 edge ([oled-design: List edges](oled-design.md#list-edges)); in Split both follow the glass's
-rounded edge, 34 px from its top edge and 56 px from its bottom one (`home_fades`, from the list's
-paint). A fade is drawn only while rows lie past it, and never over the selected
+rounded edge, 34 px from its top edge and 56 px from its bottom one, the top one reaching black no
+higher than the row under the clock's digits (y 28), so no row shows through the clock (`home_fades`,
+from the list's paint). A fade is drawn only while rows lie past it, and never over the selected
 row. The labels start at `home.rows.text_x` (OLED's 24) in the theme's Home face (Inter at 24 here,
 the design's 20), and end `home.rows.label_end_split` (44) before the art in Split and
 `HOME_LABEL_END` (41) from the screen edge in Full, where the chevron's box starts. Both menus are 375 pixels wide in the asset; the
@@ -254,7 +255,7 @@ down. An inset the zoom's margin cannot hold leaves the cover still in the zoom'
 timer runs. A theme with `home.lists.full` (OLED's) opens the lists Home's rows open in Split
 (Settings, and Library and Streaming where a set keeps them on Home) as pages: the list takes the
 screen's width in Full's rows (`sub_full`), the art is hidden while it shows and no pan runs, and
-Return brings the main list back beside the art, whose last frame shows at once. A set with `split_art_up` starts the pane that many rows above the status row's foot: Home's window is the whole screen ([oled-design: Full-bleed](oled-design.md#full-bleed)), so the pane is one widget from there to the screen's bottom and Home's own paint and its snapshot under a slide hold it all. OLED's `split_art_up` is the bar's whole 58, so the art reaches the top edge and the status row's clock, play state and battery stand over it; on the screen itself the bar lays its flat ground over the pane's rows before its glyphs (`coverflow_home_bar`) and its border paint puts the art back with them inked by contrast (`home_ink`). The main menu rises too: with the clock at the row's right, its left side is empty, so the list starts at y 40 (`HOME_SPLIT_TOP`), its top rows under the row's overlay. Settings and the other
+Return brings the main list back beside the art, whose last frame shows at once. A set with `split_art_up` starts the pane that many rows above the status row's foot: Home's window is the whole screen ([oled-design: Full-bleed](oled-design.md#full-bleed)), so the pane is one widget from there to the screen's bottom and Home's own paint and its snapshot under a slide hold it all. OLED's `split_art_up` is the bar's whole 58, so the art reaches the top edge and the status row's clock, play state and battery stand over it; on the screen itself the bar lays its flat ground over the pane's rows before its glyphs (`coverflow_home_bar`) and its border paint puts the art back with them inked by contrast (`home_ink`). The main menu rises too: the list starts at y 40 (`HOME_SPLIT_TOP`), just under the clock, which stands at the row's left, and its top rows go under the row's overlay. Settings and the other
 lists Home opens are full pages under OLED, and stay in the window. The clock and every glyph
 are drawn in one ink for the whole row, white or black, whichever has the higher WCAG contrast
 against the art under them all, as Scrolly's feed-end line does and as iOS's status bar takes one
@@ -599,7 +600,7 @@ drifts 30% of the width left and darkens, and Return reverses that over 200 ms; 
 not part of either page and stays still.
 
 Left immediate: Home (opened once, never closed), Now Playing (its open starts the player, which
-can hold the UI thread; opened from Home's art or an album page, its cover grows into it instead,
+can hold the UI thread; opened from Home's art or an album page, its cover travels into it instead,
 [internals](internals.md#now-playing-motion)), Cover Flow (its open loads the albums and covers), the dialogs and quick
 settings, the queue, More and jump pages over Now Playing, and the pages that keep their stock
 assets: Tidal and the other online pages and the firmware download. Moving between
@@ -1048,8 +1049,8 @@ painted it white, which drew the box at rest.
   and the title ends with an ellipsis 12 px short of the widest clock ("00:00"), however long it is: under a status row a
   page's caption never takes a row of its own (`bar_title_fits`), so the list keeps its top. Glyphs that would reach the clock
   scroll between it and the battery instead (the strip's marquee). A page with no title (Home, Now Playing, Cover Flow's covers;
-  an artist's are titled by the artist) has the clock centered too, but Home in Split keeps it at the right, 8 px left of the leftmost glyph, over the art, where it is inked white or black with
-  the others, one ink for the row (`clock_place`, `home_ink`).
+  an artist's are titled by the artist) has the clock centered too, but Home in Split puts it over the list at the row's left, its text 62 px in (`STATUS_ROW_INSET`), as the battery ends 62 px from
+  the right; the glyphs stay over the art at the right, inked white or black, one ink for the row (`clock_place`, `home_ink`).
 - **The grid.** 32 px rows from y 58 with their text at x 24, seven to a screen: the list ends at y 282, above
   the bottom corners, and the strip below it stays black (`list_end`, `fit_rows`). Chevrons and values share one column 28 px
   from the right edge on every row. Settings, the Library, Home (Full and Split) and stock's own list pages all

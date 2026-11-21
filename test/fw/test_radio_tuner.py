@@ -3,10 +3,12 @@ and what the receiver (q2video -t) is told for each: the needle's carrier, level
 only once the dial lands, kept warm when it leaves, stopped on pause; seeking past stations with no stream; the
 stations list, the ZIP entry and the fetch they start; the StreamTitle as the tuner shows it."""
 import ctypes as C
+import re
 
 import pytest
 
-from conftest import O, Files
+import host
+from conftest import O, ROOT, Files
 
 KEY_NEXT, KEY_PREV, KEY_CENTER, KEY_RETURN, KEY_PLAY, KEY_FWD_BTN, KEY_BACK_BTN = (
     O[k] for k in ('KEY_NEXT', 'KEY_PREV', 'KEY_CENTER', 'KEY_RETURN', 'KEY_PLAY', 'KEY_FWD_BTN', 'KEY_BACK_BTN'))
@@ -32,7 +34,9 @@ class Rt(C.Structure):
                 *((k, C.c_int) for k in 'det_f det_left det_d'.split()), ('tick_at', C.c_uint),
                 *((k, C.c_int) for k in 'travel shown raw'.split()),
                 *((k, C.c_uint) for k in 'words_at locked_at marq'.split()), ('mq_at', C.c_uint * 2),
-                ('mq_key', C.c_uint * 2)]
+                ('mq_key', C.c_uint * 2), ('live', C.c_int), ('vol', C.c_int),
+                *((k, C.c_uint) for k in 'vol_timer hold'.split()), ('held', C.c_int), ('tap_at', C.c_uint),
+                ('tap_armed', C.c_int)]
 
 
 LIST_TEXT = ('#Q2RADIO 2 1795160000 41.8708 -87.6242 complete ZIP 60605\n'
@@ -314,16 +318,23 @@ def test_return_on_the_tuner_is_left_to_stock(tu):
     assert tu.key_fn(0x9999, KEY_NEXT) == 0  # another window's keys are not the tuner's
 
 
+def hold_centre(tu):
+    """Centre held on the tuner until its hold goes off, then let go."""
+    tu.fw.fn('tuner_keydown', None, C.c_void_p, C.c_uint)(PAGE, KEY_CENTER)
+    tu.fw.fn('radio_tuner__hold_due', C.c_int, C.c_void_p)(None)
+    tu.key(KEY_CENTER)
+
+
 def test_the_stations_list(tu):
     rt = tu.rt
     rt.screen, rt.freq = TUNER, 9306
-    tu.key(KEY_CENTER)
+    hold_centre(tu)
     assert rt.screen == LIST and rt.sel == 2  # on the station heard (0.04 MHz off it)
     tu.key(KEY_NEXT)
     assert rt.sel == 3
     tu.key(KEY_CENTER)
     assert rt.screen == TUNER and rt.freq == 10590
-    tu.key(KEY_CENTER)
+    hold_centre(tu)
     for _ in range(10):
         tu.key(KEY_NEXT)
     assert rt.sel == rt.n + 1  # the last row, Enter ZIP Code, and no further
@@ -439,3 +450,237 @@ def test_a_stream_the_receiver_missed_is_named_again(tu):
     tu.files.files['/tmp/q2tuner.state'] = b'state=idle\ntitle=\ncodec=\nurl=\n'
     tu.poll()
     assert not [m for m in tu.sent if m.startswith('u')]
+
+
+SCRUB_MS = O['SCRUB_MS']
+_hold = re.search(r'^#define LR_HOLD_MS (\d+)', (ROOT / 'patch' / 'navigation.h').read_text(), re.M)
+assert _hold, 'navigation.h defines LR_HOLD_MS'
+HOLD_MS = int(_hold[1])
+
+
+class Centre:
+    """The tuner's Centre (approved 2026-11-20, ~/q2-emu/design/radio-tuner/centre-volume/sheet.png): a tap shows
+    Now Playing's volume band in the dial's place, the wheel the volume, gone SCRUB_MS after the last turn or press;
+    a hold of HOLD_MS opens the stations list, stock's Shut Down? hold (st.centre_hold) taken off it."""
+    def __init__(self, tu, fw):
+        self.tu, self.fw = tu, fw
+        self.volume, self.limit = fw.var('g_volume', C.c_ubyte), fw.var('g_maxvolume', C.c_ubyte)
+        self.volume.value, self.limit.value = 40, 100
+        self.set, self.saved, self.removed = [], [], []
+        fw.mock('device_set_volume', lambda v, *_: self.set.append(v) or 0)
+        fw.mock('write_int_config', lambda v, *_: self.saved.append(v) or 0)
+        fw.mock('timer_remove', lambda t, *_: self.removed.append(t) or 1)
+        self.down_fn = fw.fn('tuner_keydown', None, C.c_void_p, C.c_uint)
+        tu.rt.screen, tu.rt.freq = TUNER, 9990
+
+    def down(self):
+        self.tu.timers.clear()
+        self.down_fn(PAGE, KEY_CENTER)
+
+    def timers(self):
+        return [ms for _, ms in self.tu.timers]
+
+
+@pytest.fixture
+def ce(tu, fw):
+    return Centre(tu, fw)
+
+
+def test_a_tap_shows_the_volume_and_the_wheel_sets_it(tu, ce):
+    ce.down()
+    assert HOLD_MS in ce.timers() and tu.rt.vol == 0  # the hold's clock, nothing shown yet
+    tu.now += 200
+    assert tu.key(KEY_CENTER) == 1
+    assert tu.rt.vol == 1 and tu.rt.screen == TUNER and tu.rt.hold == 0
+    assert SCRUB_MS in [ms for _, ms in tu.timers]
+    tu.key(KEY_NEXT)
+    assert ce.volume.value == 41 and ce.set == [41] and ce.saved == [41]
+    assert tu.rt.freq == 9990 and not [m for m in tu.sent if m.startswith('k')]  # no tuning, no click
+    tu.key(KEY_PREV)
+    tu.key(KEY_PREV)
+    assert ce.volume.value == 39
+
+
+def test_the_volume_goes_after_the_timeout_and_the_wheel_tunes_again(tu, ce):
+    ce.down()
+    tu.key(KEY_CENTER)
+    tu.timers.clear()
+    tu.key(KEY_NEXT)
+    assert [ms for _, ms in tu.timers] == [SCRUB_MS]  # a turn starts the 3 s again
+    tu.fw.fn('radio_tuner__vol_end', C.c_int, C.c_void_p)(None)
+    assert tu.rt.vol == 0 and tu.rt.vol_timer == 0
+    tu.now += 1000
+    tu.key(KEY_NEXT)
+    assert tu.rt.freq == 9992 and ce.volume.value == 41
+
+
+def test_a_tap_while_it_shows_closes_it(tu, ce):
+    ce.down()
+    tu.key(KEY_CENTER)
+    ce.down()
+    tu.key(KEY_CENTER)
+    assert tu.rt.vol == 0
+
+
+def test_the_raw_wheel_waits_while_the_volume_shows(tu, ce, fw):
+    fw.mock('window_manager_get_top_window', lambda *_: PAGE)
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    raw = fw.var('wheel_raw', C.c_int)
+    tu.poll()
+    assert raw.value == 1
+    ce.down()
+    tu.key(KEY_CENTER)
+    tu.poll()
+    assert raw.value == 0  # ticks: the volume's steps at the wheel's speed, as Now Playing's
+    tu.fw.fn('radio_tuner__vol_end', C.c_int, C.c_void_p)(None)
+    tu.poll()
+    assert raw.value == 1
+
+
+def test_a_hold_opens_the_list(tu, ce):
+    tu.rt.freq = 9310
+    ce.down()
+    fn = tu.fw.fn('radio_tuner__hold_due', C.c_int, C.c_void_p)
+    assert fn(None) == 0
+    assert tu.rt.screen == LIST and tu.rt.sel == 2 and tu.rt.held == 1 and tu.rt.vol == 0
+    assert tu.key(KEY_CENTER) == 1  # its release: taken, no row picked
+    assert tu.rt.screen == LIST and tu.rt.held == 0
+    tu.key(KEY_CENTER)  # a later tap on the list picks the row, as before
+    assert tu.rt.screen == TUNER and tu.rt.freq == 9310
+
+
+@pytest.fixture(scope='module')
+def scratch(library):
+    return host.offsets(library.parent/'navigation.o', 'scratch_t')
+
+
+def test_the_hold_takes_stocks_shut_down_off(tu, ce, fw, scratch):
+    """Stock's own Centre hold (Shut Down? at 1000 ms, ringnav_hold_timer's st.centre_hold) is removed when the
+    list's hold goes off, as Edit Library's is (accepted with the sheet: Shut Down? is not on Radio's tuner)."""
+    centre_hold = C.c_uint.from_address(C.addressof(fw.var('st', C.c_char)) + scratch['centre_hold'])
+    centre_hold.value = 77
+    ce.down()
+    tu.fw.fn('radio_tuner__hold_due', C.c_int, C.c_void_p)(None)
+    assert ce.removed == [77] and centre_hold.value == 0
+
+
+def test_no_hold_off_the_tuner_screen(tu, ce):
+    tu.rt.screen = LIST
+    ce.down()
+    assert HOLD_MS not in ce.timers()
+
+
+def test_a_double_press_turns_the_screen_off(tu, ce, fw):
+    """As on Now Playing and every other page: a second tap within DOUBLE_CLICK_MS of the first, the wheel not turned
+    between, undoes the first (the band gone) and turns the screen off (stock's Centre release replayed)."""
+    off = []
+    fw.mock('on_wm_keyup_fun', lambda ctx, e, *_: off.append(C.c_uint.from_address(e + O['EVENT_KEY']).value) or 0)
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    ce.down()
+    tu.key(KEY_CENTER)
+    assert tu.rt.vol == 1
+    tu.now += O['DOUBLE_CLICK_MS'] - 50
+    ce.down()
+    tu.key(KEY_CENTER)
+    assert tu.rt.vol == 0 and off == [KEY_CENTER]
+    tu.now += 1000  # slower, or with a turn between: two taps
+    ce.down()
+    tu.key(KEY_CENTER)
+    tu.key(KEY_NEXT)
+    tu.now += 100
+    ce.down()
+    tu.key(KEY_CENTER)
+    assert tu.rt.vol == 0 and off == [KEY_CENTER]
+
+
+# Radio as Now Playing (the user's, 2026-11-20: "radio should remember place when leaving", "it should be Now
+# Playing when radio is playing until library is reselected", "going back on Radio to another menu should not stop
+# it"): the page is a view of a receiver that outlives it.
+FREQ_FILE = '/mnt/mmc/Radio/.local/freq'
+NP_PAGE = 0x6160
+NOW_LIBRARY, NOW_RADIO = 1, 2  # navigation.h's NOW_* order
+
+
+class Owner:
+    """The tuner on a list, its receiver running, and the Library's restarts recorded."""
+    def __init__(self, tu, fw):
+        self.tu, self.fw = tu, fw
+        tu.rt.screen, tu.rt.freq, tu.rt.feed = TUNER, 9310, 2
+        self.started = []
+        fw.mock('player_save_start', lambda pause, *_: self.started.append(pause) or 0)
+        fw.mock('fw_waitpid', lambda *_: 999)  # the receiver goes when asked
+        libc = C.CDLL(None)
+        libc.calloc.restype = C.c_void_p
+        heap = libc.calloc(1, C.sizeof(Rt))  # on the heap, as tuner_open's: closed and tuner_stop free it
+        C.memmove(heap, C.addressof(tu.rt), C.sizeof(Rt))
+        tu.rt = Rt.from_address(heap)
+        fw.var('radio_tuner__rt', C.c_void_p).value = heap
+        self.close = fw.fn('radio_tuner__closed', C.c_int, C.c_void_p, C.c_void_p)
+        self.state = fw.fn('tuner_state', C.c_int)
+        self.rt_var = fw.var('radio_tuner__rt', C.c_void_p)
+
+    def alive(self):
+        return bool(self.rt_var.value)
+
+
+@pytest.fixture
+def ow(tu, fw):
+    return Owner(tu, fw)
+
+
+def test_back_leaves_radio_playing(tu, ow):
+    """Back (Return on the tuner, left to stock, which closes the page): the station plays on, nothing stopped."""
+    assert tu.key(KEY_RETURN) == 0
+    tu.sent.clear()
+    ow.close(None, None)
+    assert ow.alive() and ow.state() == 1
+    assert not [m for m in tu.sent if m in ('q', 'x')]  # the receiver neither told to quit nor its stream dropped
+    assert not tu.rt.page and tu.rt.freq == 9310
+
+
+def test_back_on_a_page_that_found_nothing_ends_it(tu, ow):
+    tu.rt.screen, tu.rt.n, tu.rt.feed = ERROR, 0, -1
+    ow.close(None, None)
+    assert not ow.alive()
+
+
+def test_the_last_station_is_written_where_the_dial_lands(tu, ow):
+    """Landing on a station writes it to the card (FREQ_FILE), where a page opened with no receiver starts
+    (test_now_source.py), and tuner_stop leaves it there."""
+    tu.fire('land')
+    assert tu.files.files.get(FREQ_FILE) == b'9310'
+    ow.close(None, None)
+    tu.fw.fn('tuner_stop', None)()
+    assert not ow.alive() and tu.files.files.get(FREQ_FILE) == b'9310'
+
+
+def test_radio_is_the_owner_until_the_library_is_chosen(tu, ow, fw):
+    """library -> Radio -> left -> still Radio (headset and car keys its) -> the Library's Play on its Now Playing:
+    Radio stops, its place kept, and the Library plays on from where it was held."""
+    fw.mock('mclGetPlayStatus', lambda *_: 2)
+    fw.fn('now_hold', None)()  # the Library playing when Radio opened
+    ow.close(None, None)
+    assert fw.fn('now_owner', C.c_int)() == NOW_RADIO and fw.fn('media_status', C.c_int)() == 2
+    fw.fn('media_set_playing', None, C.c_int)(0)  # a headset's pause: Radio's
+    assert tu.rt.playing == 0 and not ow.started
+    fw.fn('media_set_playing', None, C.c_int)(1)
+    assert tu.rt.playing == 1
+    fw.mock('window_manager_get_top_window', lambda *_: NP_PAGE)
+    name = C.create_string_buffer(b'playing_page')
+    fw.mock('widget_get_prop_str', lambda w, k, d, *_: C.addressof(name) if w == NP_PAGE else d)
+    tu.sent.clear()
+    assert tu.key_fn(NP_PAGE, KEY_PLAY) == 1
+    assert not ow.alive() and 'q' in tu.sent
+    assert ow.started == [0]  # the held song, playing from its place
+    assert fw.fn('now_owner', C.c_int)() == NOW_LIBRARY
+
+
+def test_a_pick_in_the_library_ends_radio_and_drops_the_hold(tu, ow, fw):
+    fw.mock('mclGetPlayStatus', lambda *_: 2)
+    fw.fn('now_hold', None)()
+    ow.close(None, None)
+    fw.fn('tuner_yield', None)()  # playback.c ringnav_load, a user's pick
+    assert not ow.alive() and not ow.started  # the pick plays, not the held song
+    sec, total = C.c_int(), C.c_int()
+    fw.mock('mclGetPlayStatus', lambda *_: 2)
+    assert fw.fn('now_time', C.c_int, C.c_void_p, C.c_void_p)(C.byref(sec), C.byref(total)) == 2  # the player's

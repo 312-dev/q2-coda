@@ -15,6 +15,9 @@
 #define STOP 11
 #define MAX_ENTRIES 512
 #define POS_MEM 64
+/* Centre or a finger held this long: Edit Library's editor (library_edit.c), Radio's stations list
+ * (radio_tuner.c); either removes stock's own Centre hold (Shut Down? at 1000 ms, st.centre_hold) */
+#define LR_HOLD_MS 550
 #define B(p, o) (*(unsigned char *)((char *)(p) + (o)))
 
 typedef struct {
@@ -322,10 +325,30 @@ extern int spot_media(unsigned key), spot_key(void *top, unsigned key),
     spot_open(void *ctx, void *event), spot_hold(void *top);
 extern int radio_media(unsigned key), radio_open(void *ctx, void *event);
 extern int games_key(void *top, unsigned key), games_open(void *ctx, void *event);
+/* now_source.c: Now Playing for every reader (docs/internals.md#now-playing-source). source: who
+ * owns playback; state 0 stopped, 1 playing, 2 paused (AVRCP's and iAP2's order); pos_ms and len_ms
+ * -1 for none (a radio has neither); rec the Library's record (queue or pressed), 0 for another
+ * owner; station a radio's name, else its frequency. */
+enum { NOW_NONE, NOW_LIBRARY, NOW_RADIO, NOW_NETRADIO, NOW_SPOTIFY, NOW_VIDEO };
+typedef struct {
+    int source, state, pos_ms, len_ms, id, pressed;
+    unsigned qpos, qlen;
+    void *rec;
+    char title[160], artist[160], album[160], station[64], path[400];
+} now_info;
+void now_get(now_info *n), now_poll(void);
+int now_owner(void), now_status(void), now_scrobbles(void), now_time(int *sec, int *total);
+void now_hold(void), now_release(void), now_drop(void), now_take_back(void);
+void *now_song(unsigned *at, unsigned *n, int *pressed);
+void bt_cover_hold(int held); /* bt_cover.c */
+
 /* radio_tuner.c: Home's Radio (docs/internals.md#radio-home) */
-int tuner_open(void *ctx, void *event), tuner_key(void *top, unsigned key);
+int tuner_key(void *top, unsigned key);
+void tuner_keydown(void *top, unsigned key); /* ringnav_keydown: Centre's hold on Radio's tuner */
 void tuner_paint(void *w, void *canvas), tuner_poll(void);
 void tuner_title(const char *in, char *out, unsigned cap);
+void tuner_song(const char *in, char *artist, char *song, unsigned cap);
+int tuner_now(char *station, char *freq, char *title, unsigned cap), tuner_state(void);
 extern int games_keydown(void *top, unsigned key);
 /* search_strip.c: Search, the strip under a list.entry.ipod theme, else stock's dialog */
 int library_search_open(void *ctx, void *event), search_strip_key(void *top, unsigned key),
@@ -572,13 +595,37 @@ void swipe_back_paint(void *w, void *canvas);
 int page_ox(void *canvas, void *w);
 void *window_under(void *wm, void *top); /* the normal window under top, 0 none */
 void *under_snap(void *under); /* a window painted once into a whole-screen bitmap, 0 none */
-/* art_zoom.c: Now Playing's art grows from the cover it opened from (docs/oled-design.md#motion) */
+/* art_zoom.c: the cover travels between the page it opened from and Now Playing's art as one card
+ * (docs/oled-design.md#motion) */
+enum { AZ_PANE = 1, AZ_ALBUM }; /* the page's cover: Home's art pane, an album page's header */
+typedef struct {
+    rect_t card;         /* the card's box on screen */
+    int radius;          /* its corners, px */
+    int zoom;            /* its cover's zoom over aspect-fill, thousandths */
+    int pane;            /* how far along toward the page's cover, thousandths (the pane's pan) */
+    int vig;             /* the pane's vignette on the card, thousandths */
+    int np_a;            /* Now Playing (its art cut out), thousandths */
+    int np_scale;        /* and its scale about the screen's middle, thousandths */
+    int page_a;          /* the page (its cover cut out), thousandths */
+    int page_dx;         /* and its x, px */
+    int shadow;          /* the card's shadow at its darkest, 255ths */
+    int src_a, np_art_a; /* each end's own cover over the card, thousandths */
+} art_zoom_frame_t;
 void art_zoom_load(void *np_win);
 const char *window_hint(void *win, const char *name);
 int art_zoom_source(void *top, rect_t *r);
-void art_zoom_at(int k, const rect_t *a, const rect_t *b, unsigned *page, unsigned *np,
-                 rect_t *art);
+int art_zoom_hero(void);
+void art_zoom_frame(int t, int open, int hero, const rect_t *src, int src_r, int src_z,
+                    const rect_t *np, art_zoom_frame_t *f);
+void art_zoom_window(int w, int h, int zoom, int tw, int th, int pane, int pu, int pv, int pw,
+                     int ph, int *u, int *v, int *step);
+void art_zoom_card(unsigned *fb, int pitch, const rect_t *r, int radius, const unsigned *tex,
+                   int ts, int u, int v, int step, int vig, int rgba);
+void art_zoom_shadow(unsigned *fb, int pitch, const rect_t *r, unsigned a);
 void *coverflow_home_pane(void);
+/* coverflow.c: the pane's playing cover as a texture, and its vignette, for art_zoom.c's card */
+int coverflow_home_cover(const unsigned **tex, int *tw, int *th, int *u, int *v);
+unsigned coverflow_home_vig(int y, int h);
 int hero_cover_box(rect_t *r);
 /* page_parallax.c: a page's push and pop, the page under drifting and dimming */
 int parallax_under_x(int w, float percent);
@@ -639,9 +686,9 @@ void charge_tap(void);
 void charging_poll(void);
 /* status_row.c: the status row's glyph slots, right to left (docs/oled-design.md#status-row): the
  * strip's room left of the battery (status_strip_room: its left edge, 0 for none, from
- * clock_place), their clock edge (navigation.c clock_place), paint (ringnav_paint_bg), the slot
- * under a touch, the sync bar_state_sync runs (1: repaint the bar), ringnav_input's touches; the
- * headset's battery, 0-100 or -1 */
+ * clock_place), their left edge (status_slots_left: the title's box and the volume pill end short
+ * of it), paint (ringnav_paint_bg), the slot under a touch, the sync bar_state_sync runs (1:
+ * repaint the bar), ringnav_input's touches; the headset's battery, 0-100 or -1 */
 enum {
     SLOT_BATTERY,
     SLOT_PLAY,
@@ -791,6 +838,7 @@ void np_fill(int scrub);
 
 /* seek.c: a held Previous or Next scans the track; np_seek_bar is navigation.c's */
 int seek_input(void *e), seek_release(unsigned key), seek_held(unsigned key), seek_tick(void);
+void seek_car(int dir); /* the car's Next (1) or Previous (-1) held, 0 its release */
 int seek_step(unsigned held_ms), seek_target(int to, int dir, int step, int total);
 int seek_plan(int dir, int paused); /* a row of seek.c's seek_phases */
 void np_seek_bar(int phase, int to, int paused);

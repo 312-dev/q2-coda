@@ -34,7 +34,10 @@ int compact_now_playing(void) {
         if (st.hold_home && tk_strcmp(name, "home_page")) {
             st.np_origin = (void *)0;
             navigator_back_to_home();
-        } else if (!tk_strcmp(name, "playing_page")) {
+        } else if (tuner_state() && tk_strcmp(name, "tuner_page")) {
+            st.np_origin = top; /* Radio owns Now Playing: its page, as Now Playing's below */
+            tuner_open((void *)0, (void *)0);
+        } else if (!tk_strcmp(name, "playing_page") || !tk_strcmp(name, "tuner_page")) {
             /* ponytail: np_origin is only compared, never followed; a reused address goes Back
              * instead of Home */
             unsigned n = st.np_origin ? widget_count_children(wm) : 0;
@@ -782,7 +785,7 @@ void toast(const char *text) {
     } info = { 1, 1500, { 0 } };
     for (unsigned i = 0; text[i] && i < sizeof info.text - 1; ++i) info.text[i] = text[i];
     coda_rc_note(info.text); /* the car shows it too (coda_rc_shim.c) */
-    ++st.toasts; /* its loop runs the UI's polls, which may toast again */
+    ++st.toasts;             /* its loop runs the UI's polls, which may toast again */
     navigator_to_with_context("dialog/msginfo_dialog", &info);
     --st.toasts;
 }
@@ -838,5 +841,5 @@ static card_blob resume_store __attribute__((section(".scratch"))),
     plays_store __attribute__((section(".scratch")));
 #define RESUME_STORE                                                                               \
     card_blob_at(&resume_store, RESUME_FILE, "/mnt/data/ringnav-resume", sizeof st.spots)
-#define PLAYS_STORE card_blob_at(&plays_store, PLAYS_FILE, "/mnt/data/ringnav-plays", sizeof st.plays)
-
+#define PLAYS_STORE                                                                                \
+    card_blob_at(&plays_store, PLAYS_FILE, "/mnt/data/ringnav-plays", sizeof st.plays)

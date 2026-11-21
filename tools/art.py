@@ -185,6 +185,11 @@ def glyph_png(polys, px, rgb, ink=0.0):
     return png(px, px, laid(px, px, [(coverage_nonzero(polys, (0, 0, px, px)), lambda x, y: (rgb, 1))]))
 
 
+def radio_tower(px, rgb):
+    """The broadcast tower (RADIO_TOWER, a 24 unit box) as a px square PNG in rgb."""
+    return glyph_png([[(x * px / 24, y * px / 24) for x, y in poly] for poly in path(RADIO_TOWER)], px, rgb)
+
+
 def tidal_mark(px, rgb, ink=0.0):
     """TIDAL's mark (TIDAL, a 20 unit box) as a px square PNG in rgb (glyph_png's ink)."""
     return glyph_png([[(x * px / 20, y * px / 20) for x, y in poly] for poly in path(TIDAL)], px, rgb, ink)
@@ -360,6 +365,11 @@ NP_STAR_BIG_PX = 52
 STREAM_PX = 20
 STREAM_MARKS = {'spotify': 'spotify-logo', 'app': 'app-window', 'radio': 'radio', 'airplay': 'airplay', 'config': 'sliders-horizontal',
                 'subsonic': 'q2coda/subsonic'}
+# A broadcast tower, a mast under a dot and two pairs of waves, in a 24 unit box: the Car Remote app's ic_radio.xml
+# (q2-auto-remote app/src/main/res/drawable), the glyph in Home's pane while Radio is Now Playing (radio_pane.c), drawn
+# white at RADIO_TOWER_PX, 62% of its 64 px badge (approved 2026-11-20, design/radio-tuner/radio-now-playing/pane-v6)
+RADIO_TOWER = 'M8.19,18.35L11.14,11.74C10.72,11.47 10.45,10.99 10.45,10.46C10.45,9.6 11.15,8.92 12,8.92C12.85,8.92 13.55,9.6 13.55,10.46C13.55,10.99 13.28,11.47 12.86,11.74L15.81,18.35Q16.12,19.06 15.41,19.37Q14.71,19.69 14.39,18.98L13.56,17.12L10.44,17.12L9.61,18.98Q9.46,19.33 9.2,19.43Q8.94,19.54 8.59,19.37Q7.88,19.06 8.19,18.35ZM17.65,4.8Q20,7.15 20,10.46Q20,13.77 17.65,16.12Q17.11,16.67 16.57,16.12Q16.01,15.57 16.57,15.02Q18.45,13.14 18.45,10.46Q18.45,7.79 16.57,5.9Q16.28,5.63 16.28,5.35Q16.28,5.07 16.57,4.8Q17.11,4.26 17.65,4.8ZM7.43,5.9Q5.55,7.79 5.55,10.46Q5.55,13.14 7.43,15.02Q7.99,15.57 7.43,16.12Q7.16,16.39 6.89,16.39Q6.62,16.39 6.35,16.12Q4,13.77 4,10.46Q4,7.15 6.35,4.8Q6.89,4.26 7.43,4.8Q7.99,5.35 7.43,5.9ZM15.48,6.97Q16.93,8.41 16.93,10.46Q16.93,12.5 15.48,13.95Q14.94,14.5 14.4,13.95Q13.85,13.41 14.4,12.85Q15.38,11.86 15.38,10.46Q15.38,9.06 14.4,8.06Q14.12,7.79 14.12,7.52Q14.12,7.24 14.4,6.97Q14.94,6.43 15.48,6.97ZM9.6,8.06Q8.62,9.06 8.62,10.46Q8.62,11.86 9.6,12.85Q10.15,13.41 9.6,13.95Q9.33,14.22 9.06,14.22Q8.79,14.22 8.52,13.95Q7.07,12.5 7.07,10.46Q7.07,8.41 8.52,6.97Q9.06,6.43 9.6,6.97Q9.88,7.24 9.88,7.52Q9.88,7.79 9.6,8.06ZM12.88,15.57L12,13.6L11.12,15.57Z'
+RADIO_TOWER_PX = 39
 TIDAL = ''.join(f'M{x - 3.3} {y}L{x} {y - 3.3}L{x + 3.3} {y}L{x} {y + 3.3}Z' for x, y in ((3.4, 6.7), (10, 6.7), (16.6, 6.7), (10, 13.3)))
 # The menu sheet's symbols (menu_modal.c, a set with modal): regular weight at MENU_ICON_PX in FOLDER_INKS, and the
 # picker's check in the accent off the bar
@@ -746,6 +756,7 @@ def images(t):
     out |= {f'{prefix}_chevron_{k}': phosphor('caret-right-bold', CARET_PX, c) for k, c in (CHEVRON_INKS | CHEVRON_MUTED_INKS).items()}
     out |= {f'{prefix}_spin_{f}': spinner(f, SPIN_SPOKES, CARET_PX, SPIN_R, SPIN_STROKE, SPIN_FADE) for f in range(SPIN_SPOKES)}
     out |= status_images(prefix)
+    out[f'{prefix}_radio_tower'] = radio_tower(RADIO_TOWER_PX, 0xffffff)  # Home's pane for Radio (radio_pane.c)
     # Buttons Lock's card (keylock.c keylock_paint)
     out |= {f'{prefix}_keylock_card_{k}': phosphor('lock-simple-fill', KEYLOCK_CARD_PX, c) for k, c in STATE_INKS.items()}
     if t['np_modes']:

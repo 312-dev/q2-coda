@@ -49,7 +49,7 @@ static void motion_hint(void *win, int kind) {
 }
 /* A window as it loads. Themes with no window hints read nothing. */
 static void motion_load(void *root, int np) {
-    if (np) art_zoom_load(root); /* from a cover: it grows into the art (art_zoom.c) */
+    if (np) art_zoom_load(root); /* from a cover: it travels into the art (art_zoom.c) */
     if (!motion_row(MOTION_PAGE)->hint && !motion_row(MOTION_PLAYING)->hint) return;
     if (np && !window_hint(root, "open_anim_hint")[0])
         motion_hint(root, MOTION_PLAYING);

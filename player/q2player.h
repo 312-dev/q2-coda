@@ -127,12 +127,14 @@ int output_take(struct output *, const struct pcm_format *f, int outputway);
 void output_volume(struct output *, int volume);
 void volume_gains(int volume, float gain[2]); /* left, right */
 int output_write(struct output *, const uint8_t *data, int frames);
-/* output_write's answer when the car stopped taking audio (way 3, docs/iphone-mode.md#car-audio) */
+/* output_write's answer when the car's way ended under a write: its file removed (the car stopped, the cable came out)
+ * or its card gone (way 3, docs/iphone-mode.md#car-audio) */
 #define OUTPUT_CAR_GONE (-2)
 /* Car Audio's output, way 3 (Q2_CAR_USB: every image's player): 1 while the iPhone gadget's car wants USB audio, with its
  * ALSA device and rate when asked; output_car_gone forgets that until the car asks again. */
 int output_car(char *device, unsigned cap, unsigned *rate);
 void output_car_gone(void);
+void output_car_watch(const volatile int *cut); /* the engine's cut flag: a stop or a skip ends a wait for the car */
 /* The song about to start on way 3 is at rate: the next output_open or output_take there asks the car for its rate
  * (car_rate_for) and opens the PCM again at the rate the car then plays at (docs/iphone-mode.md#per-song-rate). keep:
  * a crossfade carries the last song's tail into it, and the car's rate stays as it is. */
@@ -210,6 +212,7 @@ void car_trace_dry(int64_t frames);                   /* the PCM ran dry: the si
 void car_trace_back(int64_t frames);                  /* written frames taken back unheard */
 void car_trace_underrun(void);                         /* dry while a song flowed: not a pause's, a seek's or the open's */
 void car_trace_read(int64_t us);                      /* a source read and how long it took */
+void car_trace_position(int position, int64_t played); /* the position told demo, the frames heard since its origin */
 void car_tap(const uint8_t *data, int64_t bytes);     /* what is written to the device, for the tap */
 void car_trace_tick(struct output *, int closing);    /* the line, once its second is up or as the output closes */
 

@@ -38,14 +38,15 @@ SOURCES = ['f_uac1.c', 'u_audio.c', 'u_audio.h', 'u_uac1.h']
 # (docs/iphone-mode.md#the-uac1-module). a59c68a6a3d1 is the commit before it, which it needs to apply.
 PATCHES = ['0001-usb-gadget-f_uac1-validate-input-parameters.patch',  # a59c68a6a3d1
            '0002-usb-gadget-f_uac1-disable-IN-OUT-ep-if-unused.patch']  # 254cb1e0d78c
-# u_audio.c's changes for missed packets, (5.10.21's text, the module's), applied in order. The Q2's dwc2 has upstream's
-# BDMA isochronous flow (91bb163e1e4f: target_frame_elapsed's 0x3fff/0x7ff limit is in the stock kernel at
-# 0x804935f4), which completes an IN request whose (micro)frame went by with -ENODATA (-61, li a3,-61 at 0x804995c8)
-# and never sends it. u_audio_iso_complete ignored the status: it refilled the request from the ring and moved
-# hw_ptr past the packet the host never got. Now such a request is queued again unchanged, its buffer still the
-# packet, when resend_missed is set (the default) and req_number is 1 (the probe's): with a second request already
-# queued, holding the samples after it, the packet would go out of order. in_missed and in_sent count the playback
-# completions with and without a status, read in /sys/module/usb_f_uac1/parameters.
+# u_audio.c's changes for missed packets, (5.10.21's text, the module's), applied in order. A playback request given
+# back with a status is queued again unchanged, its buffer still the packet, when resend_missed is set (the default)
+# and req_number is 1: with a second request already queued, holding the samples after it, the packet would go out of
+# order. in_missed and in_sent count the playback completions with and without a status, read in
+# /sys/module/usb_f_uac1/parameters. ponytail: on the Q2 this never fires. Its dwc2 runs isochronous IN in descriptor
+# DMA (g_dma_desc 1 in its debugfs params, read 2026-11-21), which gives a packet it could not send back with status 0
+# and actual 0, never -ENODATA (the li a3,-61 at 0x804995c8 once read as the IN case is the OUT loop of
+# handle_ep_disabled); in_zero counts those, and patch/q2car.sh's four requests keep the chain from running dry
+# (docs/iphone-mode.md#empty-packets). Kept for a buffer-DMA controller, where a missed IN interval is -ENODATA.
 MISSED = [
     ('#define BUFF_SIZE_MAX\t(PAGE_SIZE * 16)\n',
      '#define BUFF_SIZE_MAX\t(PAGE_SIZE * 16)\n\n'
@@ -83,6 +84,63 @@ MISSED = [
 # p_rate, rate_sets and rate_asked in /sys/module/usb_f_uac1/parameters show the rate in use, the host's SET_CURs
 # and the last rate asked (docs/iphone-mode.md#per-song-rate).
 OWN_PATCHES = ['q2-uac1-playback-rates.patch']
+# Counters for the car's stream (docs/iphone-mode.md#the-car-s-stream-counted), applied last, as text, to u_audio.c
+# (COUNTED) and f_uac1.c (COUNTED_F). They count and change nothing that is sent: playback completions by status (in_enodata
+# -61, the controller's missed interval; in_exdev; in_eshutdown; in_other), the resends (in_resent), the bytes the host
+# took (in_bytes) and the packets that carried none (in_zero), the smallest and largest packet and the longest gap
+# between two completions (in_pkt_min, in_pkt_max, in_gap_max in units of 1024 ns: writable, so q2-iap restarts each
+# window by writing them), the gaps over 2 ms (in_gaps2), and the AS IN interface set to alternate 1 and to 0 by the
+# host (in_alt_on, in_alt_off) with the last one's time since boot in units of 2^20 ns, about a millisecond (in_alt_ms). q2-iap reads them each second.
+COUNTED = [
+    ('static unsigned int in_missed, in_sent;\n',
+     'static unsigned int in_missed, in_sent;\n'
+     'static unsigned int in_bytes, in_zero, in_enodata, in_exdev, in_eshutdown, in_other, in_resent, in_gaps2;\n'
+     'static unsigned int in_pkt_min = ~0u, in_pkt_max, in_gap_max;\n'
+     'static ktime_t in_last;\n'
+     'module_param(in_bytes, uint, 0444);\nmodule_param(in_zero, uint, 0444);\n'
+     'module_param(in_enodata, uint, 0444);\nmodule_param(in_exdev, uint, 0444);\n'
+     'module_param(in_eshutdown, uint, 0444);\nmodule_param(in_other, uint, 0444);\n'
+     'module_param(in_resent, uint, 0444);\nmodule_param(in_gaps2, uint, 0444);\n'
+     'module_param(in_pkt_min, uint, 0644);\nmodule_param(in_pkt_max, uint, 0644);\n'
+     'module_param(in_gap_max, uint, 0644);\n'),
+    ('\t\tif (!status) {\n\t\t\tin_sent++;\n',
+     '\t\tif (!status) {\n\t\t\tktime_t q2_now = ktime_get();\n\n'
+     '\t\t\tin_sent++;\n'
+     '\t\t\tin_bytes += req->actual;\n'
+     '\t\t\tif (!req->actual)\n\t\t\t\tin_zero++;\n'
+     '\t\t\tif (req->actual < in_pkt_min)\n\t\t\t\tin_pkt_min = req->actual;\n'
+     '\t\t\tif (req->actual > in_pkt_max)\n\t\t\t\tin_pkt_max = req->actual;\n'
+     '\t\t\tif (in_last) {\n'
+     '\t\t\t\tu64 gap = ktime_to_ns(ktime_sub(q2_now, in_last));\n\n'
+     '\t\t\t\tif (gap > 2000000)\n\t\t\t\t\tin_gaps2++;\n'
+     '\t\t\t\tif ((u32)(gap >> 10) > in_gap_max)\n\t\t\t\t\tin_gap_max = (u32)(gap >> 10);\n'
+     '\t\t\t}\n'
+     '\t\t\tin_last = q2_now;\n'),
+    ('\t\t\tin_missed++;\n',
+     '\t\t\tin_missed++;\n'
+     '\t\t\tif (status == -ENODATA)\n\t\t\t\tin_enodata++;\n'
+     '\t\t\telse if (status == -EXDEV)\n\t\t\t\tin_exdev++;\n'
+     '\t\t\telse if (status == -ESHUTDOWN)\n\t\t\t\tin_eshutdown++;\n'
+     '\t\t\telse\n\t\t\t\tin_other++;\n'),
+    ('\t\t\tif (resend_missed && uac->audio_dev->params.req_number == 1)\n\t\t\t\tgoto exit;\n',
+     '\t\t\tif (resend_missed && uac->audio_dev->params.req_number == 1) {\n'
+     '\t\t\t\tin_resent++;\n\t\t\t\tgoto exit;\n\t\t\t}\n'),
+    ('int u_audio_start_playback(struct g_audio *audio_dev)\n{\n',
+     'int u_audio_start_playback(struct g_audio *audio_dev)\n{\n'
+     '\tin_last = 0; /* q2: a gap across a stop is no gap */\n'),
+]
+COUNTED_F = [
+    ('\t} else if (intf == uac1->as_in_intf) {\n\t\tuac1->as_in_alt = alt;\n',
+     '\t} else if (intf == uac1->as_in_intf) {\n\t\tuac1->as_in_alt = alt;\n'
+     '\t\tif (alt)\n\t\t\tin_alt_on++;\n\t\telse\n\t\t\tin_alt_off++;\n'
+     '\t\tin_alt_ms = (u32)(ktime_to_ns(ktime_get()) >> 20); /* 1.05 ms units: no 64-bit division */\n'),
+    ('static int f_audio_set_alt(struct usb_function *f, unsigned intf, unsigned alt)\n{\n',
+     '/* q2: the host\'s AS IN alternate settings (uac1_build.py COUNTED_F) */\n'
+     'static unsigned int in_alt_on, in_alt_off, in_alt_ms;\n'
+     'module_param(in_alt_on, uint, 0444);\nmodule_param(in_alt_off, uint, 0444);\n'
+     'module_param(in_alt_ms, uint, 0444);\n\n'
+     'static int f_audio_set_alt(struct usb_function *f, unsigned intf, unsigned alt)\n{\n'),
+]
 # Offsets and sizes read in the stock kernel's own code (vmlinux-to-elf of the #303 kernel, docs/iphone-mode.md#the-uac1-module),
 # each with the instruction it came from: q2_layout.ko must agree with every one.
 STOCK = {
@@ -345,6 +403,14 @@ def main(argv):  # pragma: no mutate block (all of the above)
     # Q2 Muse's own changes after those (OWN_PATCHES): several playback rates and the host's SET_CUR of one
     for p in OWN_PATCHES:
         run('patch', '-p1', '-F0', '--no-backup-if-mismatch', '-d', mod, '-i', HERE/'patches'/p)
+    # The car's stream counted (COUNTED, COUNTED_F): nothing sent changes
+    for name, changes in (('u_audio.c', COUNTED), ('f_uac1.c', COUNTED_F)):
+        text = (mod/name).read_text()
+        for old, new in changes:
+            if text.count(old) != 1:
+                sys.exit(f'build.py: {name} has not the one place for: ' + old.strip().splitlines()[0])
+            text = text.replace(old, new)
+        (mod/name).write_text(text)
     for f in ('Kbuild', 'q2_rename.h', 'q2_layout.c'):
         shutil.copyfile(HERE/f, mod/f)
     run('make', '-s', '-C', src, f'M={mod}', 'modules')

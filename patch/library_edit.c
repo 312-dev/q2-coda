@@ -39,7 +39,6 @@
 #define LR_SHOWN '+'       /* in the saved order, before a row's letter: the user showed it */
 #define LR_HIDDEN '-'      /* ... hid it */
 #define LR_MAX 64       /* the saved order's bytes, its letters and marks and a NUL: room for all */
-#define LR_HOLD_MS 550  /* Center or a finger held this long enters (or leaves) the editor */
 #define LR_SLIDE_MS 150 /* the rows a moved row passes slide aside over this */
 #define LR_STEP_MS 16   /* ... a frame at a time */
 #define LR_SLOP 8       /* a finger that moves this far before its hold is a scroll */

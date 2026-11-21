@@ -264,3 +264,41 @@ def test_the_other_button_while_scanning_is_dropped(scan):
     s.hold(NEXT, HOLD)
     downs = len(s.stock_downs())
     assert s.down(PREV) == 0 and len(s.stock_downs()) == downs  # dropped, not passed
+
+
+def car(s, ms, word=1, every=500):
+    """The car's Next (1) or Previous (-1) held ms: q2-iap's "scan" word at once and every `every` ms (the shim's
+    seek_car), the timers fired as they come due; 0 at the end for the release unless word is None."""
+    hold = s.fw.fn('seek_car', None, C.c_int)
+    start = s.clock.now
+    hold(word)
+    while s.clock.now - start + 100 <= ms:
+        s.clock.now += 100
+        if (s.clock.now - start) % every == 0:
+            hold(word)
+        s.fire_due()
+
+
+def test_the_car_s_held_next_is_the_q2_s_own_scan(scan):
+    """Car Audio's held Next (q2_iap2.c, "scan 1" through the shim): the scan a held button makes, from the word on,
+    at 2, 4 and 8 times on q2player with no seek; the release ("scan 0") plays on at its own speed. The first drive's
+    seek every 500 ms jumped unevenly (2026-11-20)."""
+    s = scan(sec=0, total=3600, q2player=True)
+    Moving(s)
+    car(s, 4600)
+    assert s.scans() == [200, 400, 800] and s.seeks() == []
+    s.fw.fn('seek_car', None, C.c_int)(0)
+    assert s.scans()[-1] == 0 and not s.ui.due('seek__seek_timer')
+    assert len(s.stock_downs()) == 0, 'no key reached stock: no skip'
+
+
+def test_the_car_s_scan_ends_without_its_word(scan):
+    """A release that never came (the cable out mid-hold): no word for SEEK_CAR_LOST_MS (2 s) ends the scan."""
+    s = scan(sec=60, total=240)
+    car(s, 1200)
+    first = len(s.seeks())
+    assert first >= 2
+    for _ in range(25):  # 2.5 s with no word
+        s.clock.now += 100
+        s.fire_due()
+    assert not s.ui.due('seek__seek_timer') and len(s.seeks()) <= first + 4

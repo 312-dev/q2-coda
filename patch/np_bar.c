@@ -28,7 +28,8 @@ int np_sync(void *top) {
     }
     unsigned at, n;
     /* a pressed server song while it loads (catalogue.c), else the playing one */
-    void *pressed = catalogue_np_now(&at, &n), *r = pressed ? pressed : queue_now(&at, &n);
+    int was_pressed;
+    void *r = now_song(&at, &n, &was_pressed), *pressed = was_pressed ? r : 0; /* now_source.c */
     const char *album = pressed ? P(pressed, REC_ALBUM) : now_tag(r, REC_ALBUM);
     catalogue_np_text(top);      /* the pressed song's lines, or the player's back after it */
     unsigned pos[2] = { at, n }; /* a new song of the same album restarts its marquee too */

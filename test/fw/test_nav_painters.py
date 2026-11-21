@@ -3275,7 +3275,7 @@ def test_the_clocks_timer_shows_the_minute_and_rearms(fw, st, titled, shown):
 
 
 # OLED's status row clock (navigation.c clock_place): centred on every full-width row, the title short of it; on Home's
-# Split at the right beside the play state, its text ending CLOCK_BESIDE left of it. Its box
+# Split at the left, its text starting STATUS_ROW_INSET in, as the battery ends that far from the right. Its box
 # is its text's width (canvas_measure_text) and hscroll_label's two 2 px margins.
 
 CLOCK_W = 38  # canvas_measure_text's width of "00:00", the widest clock
@@ -3324,17 +3324,20 @@ def test_a_titled_page_s_clock_holds_the_centre_and_the_title_ends_12_px_short_o
     assert clock.props['style:normal:text_color'] == i32(INK_ROW)
 
 
-def test_home_split_s_clock_goes_right_and_over_the_art_in_text_primary(fw, st):
+def test_home_split_s_clock_goes_left_its_inset_the_battery_s_from_the_right(fw, st):
+    """Home in Split (the user's, 2026-11-20, design/home-clock-left): the clock off the art, at the row's left, its text
+    starting STATUS_ROW_INSET in, the battery's nub ending as far from the right; its colour as it was over the art."""
     from test_coverflow import Home
     row = StatusRow(fw, st)
     home = fw.var('coverflow__home', Home)
     art = row.ui.add('view', row.ui.top, (196, 0, 179, 262), 'art')
     home.art, home.win = art.addr, row.ui.top.addr
     clock = row.place()
-    assert clock.box[0] + clock.box[2] - 2 == 322 - 6 - 10 - 7
+    assert clock.box[0] + 2 == O['STATUS_ROW_INSET'] and clock.box[2] == CLOCK_W + 4 and clock.box[1] == 25
     assert clock.props['style:normal:text_color'] == i32(INK_ROW)  # no cover under the bar: the row's grey
-    home.sl[0].tw = 128  # a cover that fills the pane, up under the status row: inked over it, whole
+    home.sl[0].tw = 128  # a cover that fills the pane, up under the status row
     clock = row.place()
+    assert clock.box[0] + 2 == O['STATUS_ROW_INSET']
     assert clock.props['style:normal:text_color'] == i32(0xffffffff)
     moves = len(fw.calls('widget_move_resize'))
     row.place()  # the next paint: nothing to move, so no repaint after it (the style reads back its own colour)

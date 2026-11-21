@@ -14,7 +14,9 @@
 #
 # q2-iap writes what it decided to $STATE (key=value lines, read by demo); this script adds down=1 once the gadget is
 # gone, which is when demo may start another gadget. The log is /mnt/mmc/.q2muse/logs/q2car.log (Send Logs takes
-# it), the earlier one kept as q2car.prev.log; the kernel's last lines go to q2car.log.dmesg at the end.
+# it), the two before it kept as q2car.1.log and q2car.2.log; the kernel's last lines go to q2car.log.dmesg at the end.
+# Each cable's summary line and the module's counters at its end are added to q2car-summary.log (SUMMARY), which
+# is never rotated, only cut to its newer half past SUMMARY_MAX bytes, so a drive's cables are all in one file.
 
 RUN=/tmp/q2car
 STATE=/tmp/q2car.state
@@ -29,6 +31,9 @@ LOGDIR=/mnt/mmc/.q2muse/logs
 mkdir -p "$RUN"
 if [ -d "$LOGDIR" ] && touch "$LOGDIR/.q2car-w" 2>/dev/null; then rm -f "$LOGDIR/.q2car-w"; else LOGDIR=$RUN; fi
 LOG=$LOGDIR/q2car.log
+SUMMARY=$LOGDIR/q2car-summary.log
+SUMMARY_MAX=262144
+RELINKS=3
 
 up() { cut -d' ' -f1 /proc/uptime; }
 log() { echo "$(up) sh $*" >> "$LOG"; }
@@ -67,11 +72,12 @@ gadget_up() {
     echo "iPod USB Interface" > $G/configs/c.2/strings/0x409/configuration
     echo "PTP + Apple Mobile Device" > $G/configs/c.3/strings/0x409/configuration
     echo "PTP + Apple Mobile Device + Apple USB Ethernet" > $G/configs/c.4/strings/0x409/configuration
-    # The Q2 is the source (the reverse of stock's USB DAC), 44.1 kHz 16-bit, one request in flight so a packet the
-    # controller gives back unsent goes out again in order (docs/iphone-mode.md#missed-isochronous-packets)
+    # The Q2 is the source (the reverse of stock's USB DAC), 44.1 kHz 16-bit, four requests in flight: the Q2's dwc2
+    # runs isochronous IN in descriptor DMA, whose chain runs dry with one or two (every other packet, or every third,
+    # sent empty: the car's stutter of 2026-11-21) and holds with three or more (docs/iphone-mode.md#empty-packets)
     U=$G/functions/uac1.car
     mkdir $U || { log "mkdir $U failed"; return 1; }
-    for kv in c_chmask=0 p_chmask=3 p_ssize=2 p_srate=44100 req_number=1; do
+    for kv in c_chmask=0 p_chmask=3 p_ssize=2 p_srate=44100 req_number=4; do
         echo ${kv#*=} > $U/${kv%%=*} 2>/dev/null || log "uac1: ${kv%%=*} refused ${kv#*=}"
     done
     # Link order is interface order: the audio function (0 and 1), then the HID (2), where an iPhone has it
@@ -125,6 +131,24 @@ gadget_down() {
     fi
     mountpoint -q $CFS && [ -z "$(ls $CFS/usb_gadget 2>/dev/null)" ] && umount $CFS 2>/dev/null
     { echo "==== $(up) $1"; dmesg | tail -n 120; } >> "$LOG.dmesg"
+    keep
+}
+
+# The cable's summary (q2-iap's last line) and the module's counters, once a cable, into SUMMARY.
+keep() {
+    [ -f $RUN/kept ] && return
+    : > $RUN/kept
+    P=/sys/module/usb_f_uac1/parameters
+    m=
+    for f in in_sent in_missed in_enodata in_exdev in_eshutdown in_other in_resent in_bytes in_zero in_gaps2 \
+        in_alt_on in_alt_off in_alt_ms p_rate p_srates rate_sets rate_asked resend_missed; do
+        [ -e $P/$f ] && m="$m $f=$(cat $P/$f)"
+    done
+    { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $(up) $(grep ' car summary:' "$LOG" | tail -n 1 | cut -d' ' -f3-)"
+      echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $(up) module:$m"; } >> "$SUMMARY"
+    if [ "$(wc -c < "$SUMMARY")" -gt $SUMMARY_MAX ]; then
+        tail -c $((SUMMARY_MAX / 2)) "$SUMMARY" > "$SUMMARY.new" && mv -f "$SUMMARY.new" "$SUMMARY"
+    fi
 }
 
 runner() {
@@ -138,24 +162,40 @@ runner() {
     trap 'p=$(cat $RUN/daemon.pid 2>/dev/null); alive "$p" && kill "$p"' TERM INT HUP
     # A --dev build's ADB gadget holds the controller between stock's gadgets: off it while the iPhone is shown
     [ -x $ADBG ] && $ADBG park >/dev/null 2>&1
-    if gadget_up; then
+    # A lost iAP2 link (q2-iap's exit 22) is a fresh iPhone for the car: the gadget off the controller and back, at
+    # most RELINKS times a cable (docs/iphone-mode.md#the-link-s-pace)
+    relinks=0
+    while :; do
+        if ! gadget_up; then
+            log "the gadget could not start"
+            grep -q '^verdict=' $STATE 2>/dev/null || echo "verdict=failed" >> $STATE
+            break
+        fi
         wait "$(cat $RUN/daemon.pid)"
         rc=$?
         p=$(cat $RUN/daemon.pid 2>/dev/null)
         alive "$p" && wait "$p"
         log "q2-iap ended (exit $rc)"
-    else
-        log "the gadget could not start"
-        grep -q '^verdict=' $STATE 2>/dev/null || echo "verdict=failed" >> $STATE
-    fi
+        [ "$rc" = 22 ] && [ $relinks -lt $RELINKS ] || break
+        relinks=$((relinks + 1))
+        log "the link was lost: the iPhone shown again ($relinks of $RELINKS)"
+        gadget_down "relink"
+        rm -f $RUN/kept # the next session's summary is kept too
+        sleep 1
+    done
     gadget_down "end"
     echo "down=1" >> $STATE
     rm -f $RUN/runner.pid
 }
 
 start() {
-    [ -f "$LOG" ] && mv -f "$LOG" "${LOG%.log}.prev.log" && mv -f "$LOG.dmesg" "${LOG%.log}.prev.log.dmesg" 2>/dev/null
-    rm -f $STATE
+    # the last three cables' logs: q2car.log, q2car.1.log, q2car.2.log (and their .dmesg)
+    for k in 1 0; do
+        from=$LOG
+        [ $k = 1 ] && from=${LOG%.log}.1.log
+        [ -f "$from" ] && mv -f "$from" "${LOG%.log}.$((k + 1)).log" && mv -f "$from.dmesg" "${LOG%.log}.$((k + 1)).log.dmesg" 2>/dev/null
+    done
+    rm -f $STATE $RUN/kept
     log "start: kernel $(uname -r)"
     setsid sh "$0" _runner </dev/null >/dev/null 2>>"$LOG" &
 }

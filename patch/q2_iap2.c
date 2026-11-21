@@ -26,6 +26,15 @@
 #define MAX_PACKET 1024 /* the longest the Q2 sends: the car's certificate, about 950 bytes, fits one */
 #define RX_PACKET 8192  /* the longest it takes, offered in the SYN+ACK (an iPhone offers 0xFFFF) */
 #define SLOTS 8
+/* The wire's pace (docs/iphone-mode.md#the-link-s-pace): the BMW takes input reports from an interrupt endpoint, 64
+ * bytes every 8 ms, so a 1,024-byte packet is about 170 ms on the wire and its window of 5 most of a second, longer
+ * than its 200 ms retransmission timer and its 10 tries. So a packet goes to the wire only while no more than
+ * BACKLOG_MAX reports wait for it (a bare acknowledgement always goes: one report), a packet is sent again only after
+ * the wire has been idle for the retransmission time, and the bulk (library updates, covers, the queue list) goes in
+ * packets of at most BULK_MAX bytes, so an acknowledgement waits behind no more than about 130 ms of it, well inside
+ * the car's 200 ms. */
+#define BACKLOG_MAX 4
+#define BULK_MAX 768
 
 typedef unsigned char u8;
 typedef unsigned short u16;
@@ -34,6 +43,7 @@ typedef unsigned int u32;
 /* What the Q2 is playing, for NowPlayingUpdate (the shim's /tmp/coda-rc.now, read by the caller). */
 struct iap2_np {
     int state; /* 0 stopped, 1 playing, 2 paused */
+    int live;  /* a radio's stream (the shim's live=1): no duration or position, an empty cover */
     unsigned pos_ms, len_ms, qpos, qlen;
     int shuffle, repeat; /* repeat 0 off, 1 one, 2 all */
     unsigned id, qgen; /* the song's library id (songtable's rid, 0 for none) and the queue's generation */
@@ -43,8 +53,8 @@ struct iap2_np {
 /* The Q2's library as the car is sent it (q2_iap_lib.c fills it): its songs in rid order, their strings as offsets
  * into pool, each one's hash of what the car is sent of it, the revision, and what the car was last sent in full. */
 struct iap2_track {
-    unsigned rid, hash, album_id, artist_id, aartist_id, genre_id;
-    unsigned title, album, artist, aartist, genre; /* offsets into pool */
+    unsigned rid, hash, album_id, artist_id, aartist_id, genre_id, composer_id, ms; /* ms: its length, 0 unknown */
+    unsigned title, album, artist, aartist, genre, composer; /* offsets into pool */
     unsigned short track, disc;
 };
 struct iap2_sent {
@@ -72,6 +82,8 @@ struct iap2_host {
     void (*lib_saved)(void);    /* the car holds lib's revision whole */
     void (*play)(const unsigned *rids, unsigned n, unsigned at, int shuffle);
     int (*queue)(unsigned *rids, unsigned cap); /* the playing queue's rids, or -1 */
+    int (*backlog)(void);     /* input reports handed over and not yet taken by the car */
+    void (*link_lost)(void);  /* the link given up on */
 };
 
 static const struct iap2_host *H;
@@ -177,6 +189,8 @@ static u8 my_seq, syn_seq, peer_seq, last_ack, control_session, file_session;
 static u8 syn_ack[48];
 static unsigned syn_ack_len, window, peer_max, max_sends, max_cacks, unacked;
 static long rto, cack, unacked_since; /* milliseconds; rto 0: never sent again */
+static long wire_busy_at; /* the last time reports were still waiting for the wire */
+static int backlog(void) { return H && H->backlog ? H->backlog() : 0; }
 
 struct slot {
     u8 packet[MAX_PACKET];
@@ -509,7 +523,7 @@ static void enqueue(u8 session, const u8 *b, unsigned n) {
 }
 
 static void pump(void) {
-    while (q_count && link_up && (!rto || (count < window && count < SLOTS))) {
+    while (q_count && link_up && (!rto || (count < window && count < SLOTS)) && backlog() <= BACKLOG_MAX) {
         struct queued *q = &queue[q_head];
         struct slot *s = &slots[(head + count) % SLOTS];
         s->len = HEADER_LEN + q->len + 1;
@@ -566,6 +580,7 @@ static u32 get_be(const u8 *p, unsigned n) {
 static u16 car_receives[96];
 static unsigned car_receives_n;
 static int identified, now_playing, bt_component = -1;
+static int ever_identified; /* this cable: identified kept after the link is lost, for the summary */
 static long auth_due, ident_due, availability_due, np_at; /* 0: not due */
 static unsigned car_current;
 static u32 media_mask, playback_mask, rnd;
@@ -645,47 +660,29 @@ static unsigned report_bit(const u8 *r, unsigned len, unsigned bit) { return bit
 
 /* Hold to scan, as an iPod's wheel buttons: the BMW's descriptor has no fast-forward or rewind usage, only Next and
  * Previous. Next or Previous is acted on at its release: up within HOLD_MS, a skip as before (the car's taps were up
- * 13 to 120 ms after the press, 2026-11-20); held past it, the song moves through itself from where it was, a seek
- * every SCAN_STEP_MS (the shim's command file is read every 500 ms with Car Remote off: a faster seek would only
- * replace the one before it), SCAN_SLOW seconds a step for the first SCAN_SLOW_MS (4 times as fast as it plays),
- * then SCAN_FAST (8 times), then SCAN_FASTEST (16 times), until the release, and the song plays on from there. */
+ * 13 to 120 ms after the press, 2026-11-20); held past it, the Q2's own scan of a held button (seek.c seek_car, heard
+ * at 2, 4 and 8 times and then in growing jumps), started with the shim's "scan 1" or "scan -1", said again every
+ * SCAN_KEEP_MS while the button stays down (seek.c lets a car's scan go after 2 s without it), and "scan 0" at the
+ * release; the song plays on from where the scan reached. The first drive's scan, a seek every 500 ms, came out uneven
+ * ("pretty inconsistent", 2026-11-20): each seek a mute, a drop and a fresh decode, read a loop pass apart. */
 #define HOLD_MS 500
-#define SCAN_STEP_MS 500
-#define SCAN_SLOW 2
-#define SCAN_FAST 4
-#define SCAN_FASTEST 8
-#define SCAN_SLOW_MS 2000
-#define SCAN_FAST_MS 5000
+#define SCAN_KEEP_MS 500
 static unsigned held; /* Next's or Previous's usage while it is down, else 0 */
 static long held_at, scan_at;
 static int scanning;
-static long scan_pos_ms, scan_len_ms;
 
-static void scan_step(long now) {
-    char v[32], t[96];
-    long in = now - held_at - HOLD_MS, step = in < SCAN_SLOW_MS ? SCAN_SLOW : in < SCAN_FAST_MS ? SCAN_FAST : SCAN_FASTEST;
-    scan_pos_ms += (held == 0xB5 ? step : -step) * 1000L;
-    if (scan_pos_ms < 0) scan_pos_ms = 0;
-    if (scan_len_ms > 1000 && scan_pos_ms > scan_len_ms - 1000) scan_pos_ms = scan_len_ms - 1000;
+static void scan_say(long now, const char *verb) {
+    char t[96];
     scan_at = now;
-    snprintf(v, sizeof v, "seek %ld", scan_pos_ms / 1000);
-    snprintf(t, sizeof t, "hid: usage %02x held %ld ms: %s", held, now - held_at, v);
+    snprintf(t, sizeof t, "hid: usage %02x held %ld ms: %s", held, now - held_at, verb);
     H->log(t);
-    if (H->command) H->command(v);
+    if (H->command) H->command(verb);
 }
 
-/* From iap2_tick: a hold that passed HOLD_MS starts the scan, and each SCAN_STEP_MS moves it. */
+/* From iap2_tick: a hold that passed HOLD_MS starts the scan, and every SCAN_KEEP_MS says it is still held. */
 static void scan_tick(long now) {
     if (!held || now - held_at < HOLD_MS) return;
-    if (!scanning) {
-        struct iap2_np np;
-        memset(&np, 0, sizeof np);
-        if (H->now_playing) H->now_playing(&np);
-        scanning = 1, scan_pos_ms = np.pos_ms, scan_len_ms = np.len_ms;
-        scan_step(now);
-    } else if (now - scan_at >= SCAN_STEP_MS) {
-        scan_step(now);
-    }
+    if (!scanning || now - scan_at >= SCAN_KEEP_MS) scanning = 1, scan_say(now, held == 0xB5 ? "scan 1" : "scan -1");
 }
 
 static void release(unsigned usage) {
@@ -693,7 +690,8 @@ static void release(unsigned usage) {
     if (usage != held) return;
     long ms = H->now() - held_at;
     if (!scanning) press(usage); /* a tap: the skip */
-    else snprintf(t, sizeof t, "hid: usage %02x released after %ld ms: the scan ends", usage, ms), H->log(t);
+    else snprintf(t, sizeof t, "hid: usage %02x released after %ld ms: the scan ends", usage, ms), H->log(t),
+                                                                                                  scan_say(H->now(), "scan 0");
     held = 0, scanning = 0;
 }
 
@@ -800,7 +798,8 @@ static u8 art_start(const struct iap2_np *n) {
     if (!file_session) return 0;
     if (art_going && art_id) file_send(art_id, 0x02, 0, 0);
     art_id = next_transfer, next_transfer = next_transfer == 0xFF ? 0x80 : next_transfer + 1;
-    unsigned got = H->artwork ? H->artwork(n, raw, sizeof raw) : 0;
+    /* a stream has no cover, but is named one, empty: with none named the car keeps the last song's */
+    unsigned got = H->artwork && !n->live ? H->artwork(n, raw, sizeof raw) : 0;
     art_len = got ? jpeg_tables_apart(raw, got, art, sizeof art) : 0;
     art_sent = 0, art_going = 1;
     snprintf(t, sizeof t, "art: transfer %02x, %u bytes (%u as found)", art_id, art_len, got);
@@ -820,8 +819,7 @@ static void iap2_file(const u8 *d, unsigned n) {
     snprintf(t, sizeof t, "file < transfer %02x op %02x (%u bytes)", d[0], d[1], n);
     H->log(t);
     if (d[0] == ql_id && ql_going && d[1] == 0x01) { /* the queue list: every piece */
-        unsigned room = (peer_max - HEADER_LEN - 1 - 2 < MAX_PACKET - HEADER_LEN - 1 - 2 ? peer_max : MAX_PACKET) -
-                        HEADER_LEN - 1 - 2, sent = 0;
+        unsigned room = (peer_max < BULK_MAX ? peer_max : BULK_MAX) - HEADER_LEN - 1 - 2, sent = 0;
         room -= room % 8;
         while (sent < ql_len) {
             unsigned k = ql_len - sent < room ? ql_len - sent : room;
@@ -837,8 +835,7 @@ static void iap2_file(const u8 *d, unsigned n) {
     }
     if (d[0] != art_id || !art_going) return;
     if (d[1] == 0x01) { /* go: every piece, as the window allows */
-        unsigned room = peer_max - HEADER_LEN - 1 - 2;
-        if (room > MAX_PACKET - HEADER_LEN - 1 - 2) room = MAX_PACKET - HEADER_LEN - 1 - 2;
+        unsigned room = (peer_max < BULK_MAX ? peer_max : BULK_MAX) - HEADER_LEN - 1 - 2;
         if (!art_len) file_send(art_id, 0xC0, 0, 0);
         while (art_sent < art_len) {
             unsigned k = art_len - art_sent < room ? art_len - art_sent : room;
@@ -949,7 +946,7 @@ static void take_identification(const u8 *p, unsigned len) {
 
 static void accept_identification(void) {
     send_empty(0x1D02);
-    identified = 1;
+    identified = ever_identified = 1;
     H->log("ident: accepted");
     /* What an iPhone sends next, in its order, a packet each; PodBox's car resets without the UUID. */
     if (car_takes(0x4E0C)) msg_start(0x4E0C), param_str(0, H->uuid), msg_send();
@@ -1016,7 +1013,11 @@ static void send_library_info(void) {
  * To StartMediaLibraryUpdates (4C03: 1 the revision the car holds, 2 the item properties it wants) an iPhone's
  * answers, as PodBox sends them: 8 00, 9 01 (it can play all songs), then MediaLibraryUpdates (4C04) with the songs
  * as items (parameter 2, a group each), as many to a packet as it holds, the first opening with 6 (a reset); an update
- * on the way carries LIB_PARTIAL and progress (7) 0, so a car cut off asks again; the last the revision and 100. A car
+ * on the way carries a partial revision and the progress (7) so far, under 100, so a car cut off asks again; the last
+ * the revision and 100. The partial revision names where the push had reached ("q2p." for the whole library, "q2d."
+ * for changes, then the revision and the songs gone so far): a car that comes back holding one of this revision's
+ * resumes from there with no reset, so a 9,199-song library goes over several short plugs (the BMW's wire takes about
+ * 6 KB a second: docs/iphone-mode.md#the-link-s-pace). A car
  * that holds the revision gets the revision alone; one that holds the revision this Q2 last sent it whole
  * (lib->sent_rev) gets only the songs added or changed since and, as 4 each, the ids of those gone, with no reset.
  * Updates go only while nothing else waits to be sent and the window has a slot to spare, so the car's buttons and
@@ -1028,7 +1029,7 @@ static void send_library_info(void) {
 #define LIB_ARTIST 0x5132000Bu
 #define LIB_AARTIST 0x5132000Cu
 #define LIB_GENRE 0x5132000Du
-#define LIB_PARTIAL "q2.partial"
+#define LIB_COMPOSER 0x5132000Eu
 enum { LIB_IDLE, LIB_ITEMS, LIB_GONE };
 static struct {
     int phase, diff, reset;
@@ -1049,12 +1050,14 @@ static void lib_item(const struct iap2_track *t, unsigned mask) {
     param_u64(0, LIB_KEY, t->rid);
     if (mask & 1u << 1) param_str(1, lib_str(t->title));
     if (mask & 1u << 2) param_u8(2, 0);
+    if ((mask & 1u << 4) && t->ms) param_u32(4, t->ms);
     lib_named(mask, 5, LIB_ALBUM, t->album_id, lib_str(t->album));
     if ((mask & 1u << 7) && t->track) param_u16(7, t->track);
     if ((mask & 1u << 9) && t->disc) param_u16(9, t->disc);
     lib_named(mask, 11, LIB_ARTIST, t->artist_id, lib_str(t->artist));
     lib_named(mask, 13, LIB_AARTIST, t->aartist_id, lib_str(t->aartist));
     lib_named(mask, 15, LIB_GENRE, t->genre_id, lib_str(t->genre));
+    lib_named(mask, 17, LIB_COMPOSER, t->composer_id, lib_str(t->composer));
     group_end();
 }
 
@@ -1084,7 +1087,7 @@ static int lib_kept(unsigned rid) { /* still in the library */
 static void lib_pump(void) {
     const struct iap2_library *l = H->lib;
     char t[200];
-    while (ls.phase != LIB_IDLE && link_up && !q_count && (!rto || count + 1 < window)) {
+    while (ls.phase != LIB_IDLE && link_up && !q_count && (!rto || count + 1 < window) && backlog() <= BACKLOG_MAX) {
         int n = 0;
         msg_start(0x4C04);
         param_str(0, H->library_id);
@@ -1097,7 +1100,8 @@ static void lib_pump(void) {
             }
             unsigned mark = m.len;
             lib_item(tr, ls.mask);
-            if (!m.ok || m.len + 4 + sizeof l->rev + 5 > sizeof m.b || m.len + 4 + sizeof l->rev + 5 > peer_max - HEADER_LEN - 1) {
+            if (!m.ok || m.len + 4 + sizeof l->rev + 5 > BULK_MAX - HEADER_LEN - 1 ||
+                m.len + 4 + sizeof l->rev + 5 > peer_max - HEADER_LEN - 1) {
                 m.len = mark, m.ok = 1;
                 if (!n) ++ls.next; /* a song no packet holds */
                 break;
@@ -1111,14 +1115,16 @@ static void lib_pump(void) {
                 ++ls.gone;
                 continue;
             }
-            if (m.len + 12 + 4 + sizeof l->rev + 5 > sizeof m.b) break;
+            if (m.len + 12 + 4 + sizeof l->rev + 5 > BULK_MAX - HEADER_LEN - 1) break;
             param_u64(4, LIB_KEY, rid);
             ++ls.gone, ++n;
         }
         if (ls.phase == LIB_GONE && ls.gone >= l->sent_n) ls.phase = LIB_IDLE + 99;
         int done = ls.phase == LIB_IDLE + 99;
-        param_str(1, done ? l->rev : LIB_PARTIAL);
-        param_u8(7, done ? 100 : 0);
+        char partial[64];
+        snprintf(partial, sizeof partial, "%s.%s.%u", ls.diff ? "q2d" : "q2p", l->rev, ls.next);
+        param_str(1, done ? l->rev : partial);
+        param_u8(7, done ? 100 : (u8)(l->n ? ls.next * 99u / l->n : 0));
         msg_send();
         ++ls.updates;
         if (done) {
@@ -1150,9 +1156,16 @@ static void send_library_updates(const char *car_rev, unsigned mask) {
     }
     ls.diff = car_rev && l->sent_rev[0] && !strcmp(car_rev, l->sent_rev);
     ls.reset = !ls.diff;
+    /* a push of this revision cut off: on from where it reached, with no reset (its kind from the prefix) */
+    unsigned rn = strlen(l->rev);
+    if (car_rev && (!strncmp(car_rev, "q2p.", 4) || !strncmp(car_rev, "q2d.", 4)) && !strncmp(car_rev + 4, l->rev, rn) &&
+        car_rev[4 + rn] == '.') {
+        unsigned at = (unsigned)atoi(car_rev + 5 + rn);
+        ls.diff = car_rev[2] == 'd', ls.reset = 0, ls.next = at < l->n ? at : l->n;
+    }
     ls.phase = LIB_ITEMS;
-    snprintf(t, sizeof t, "library: the car holds %s; sending %s of %s (%u songs)", car_rev ? car_rev : "nothing",
-             ls.diff ? "the changes" : "the whole", l->rev, l->n);
+    snprintf(t, sizeof t, "library: the car holds %s; sending %s of %s (%u songs) from %u", car_rev ? car_rev : "nothing",
+             ls.diff ? "the changes" : "the whole", l->rev, l->n, ls.next);
     H->log(t);
     lib_pump();
 }
@@ -1173,7 +1186,7 @@ static void play_items(const u8 *p, unsigned len) {
 }
 
 /* PlayMediaLibraryCollection: 0 the collection's id, 1 its type (1 an artist, 2 an album, 3 an album artist, 4 a
- * genre; 0 a playlist and 5 a composer have none here), 2 the index to start at. Its songs in the library's order of
+ * genre, 5 a composer; 0 a playlist has none here), 2 the index to start at. Its songs in the library's order of
  * an album: album artist, album, disc, track. */
 static void play_collection(const u8 *p, unsigned len) {
     unsigned n, tn, sn;
@@ -1184,8 +1197,13 @@ static void play_collection(const u8 *p, unsigned len) {
     unsigned *rids = play_rids(l->n);
     for (unsigned i = 0; rids && i < l->n; ++i) {
         const struct iap2_track *t = &l->tracks[i];
-        unsigned of = type == 1 ? t->artist_id : type == 2 ? t->album_id : type == 3 ? t->aartist_id : type == 4 ? t->genre_id : 0;
-        if (type >= 1 && type <= 4 && of == id) rids[k++] = i; /* indexes first, sorted below */
+        unsigned of = type == 1   ? t->artist_id
+                      : type == 2 ? t->album_id
+                      : type == 3 ? t->aartist_id
+                      : type == 4 ? t->genre_id
+                      : type == 5 ? t->composer_id
+                                  : 0;
+        if (type >= 1 && type <= 5 && of == id) rids[k++] = i; /* indexes first, sorted below */
     }
     /* insertion sort by album artist, album, disc, track: a collection is an album or a few hundred songs */
     for (unsigned i = 1; i < k; ++i) {
@@ -1259,7 +1277,7 @@ static u32 np_hash(const struct iap2_np *n) {
 }
 
 /* The song's attributes the car asked for (group 0) and its playback state (group 1). With nothing known, the
- * title is the Q2's name, stopped. Artwork (M6) is not offered. */
+ * title is the Q2's name, stopped. A stream (live) has no duration or position, and an empty cover. */
 static void send_now_playing(const struct iap2_np *n, int media) {
     msg_start(0x5001);
     if (media) {
@@ -1268,13 +1286,13 @@ static void send_now_playing(const struct iap2_np *n, int media) {
         if (media_mask & 1u << MI_PERSISTENT_ID)
             param_u64(MI_PERSISTENT_ID, n->id ? LIB_KEY : 0x51320000u, n->id ? n->id : np_hash(n));
         if (media_mask & 1u << MI_TITLE) param_str(MI_TITLE, n->title[0] ? n->title : H->name);
-        if (media_mask & 1u << MI_DURATION) param_u32(MI_DURATION, n->len_ms);
+        if ((media_mask & 1u << MI_DURATION) && !n->live) param_u32(MI_DURATION, n->len_ms);
         if ((media_mask & 1u << MI_ALBUM) && n->album[0]) param_str(MI_ALBUM, n->album);
         if ((media_mask & 1u << MI_ARTIST) && n->artist[0]) param_str(MI_ARTIST, n->artist);
         for (unsigned a = MI_LIKE_SUPPORTED; a <= MI_BANNED; ++a)
             if (media_mask & 1u << a) param_u8(a, 0);
         if (media_mask & 1u << MI_CHAPTER_COUNT) param_u16(MI_CHAPTER_COUNT, 0);
-        if (media_mask & 1u << MI_ARTWORK) {
+        if (media_mask & 1u << MI_ARTWORK) { /* a stream's an empty transfer: no cover (art_start) */
             u8 id = art_start(n);
             if (id) param_u8(MI_ARTWORK, id);
         }
@@ -1282,7 +1300,7 @@ static void send_now_playing(const struct iap2_np *n, int media) {
     }
     group_start(1);
     if (playback_mask & 1u << PB_STATE) param_u8(PB_STATE, n->state);
-    if (playback_mask & 1u << PB_POSITION) param_u32(PB_POSITION, n->pos_ms);
+    if ((playback_mask & 1u << PB_POSITION) && !n->live) param_u32(PB_POSITION, n->pos_ms);
     if (playback_mask & 1u << PB_QUEUE_INDEX) param_u32(PB_QUEUE_INDEX, n->qpos);
     if (playback_mask & 1u << PB_QUEUE_COUNT) param_u32(PB_QUEUE_COUNT, n->qlen);
     if (playback_mask & 1u << PB_SHUFFLE) param_u8(PB_SHUFFLE, n->shuffle ? 1 : 0);
@@ -1299,7 +1317,8 @@ static void send_now_playing(const struct iap2_np *n, int media) {
 }
 
 /* Every half second while the car takes Now Playing: everything again on a new song or state, else the position
- * while playing (PodBox: without it the car's bar sits at 0:00). */
+ * while playing (PodBox: without it the car's bar sits at 0:00), and paused when it moved (a seek); a stream's
+ * none. */
 /* ---- Up Next on iDrive: the playing queue as a list (docs/iphone-mode.md#the-library-on-idrive) ----
  * When the queue changes (the shim's qgen), once it has held still a second, an iPhone sends PB_QUEUE_LIST 1 and an
  * empty PB_QUEUE_LIST_ID, then the queue as a file transfer, [ID, 04, size, 00 03] and the songs' ids, 8 bytes each,
@@ -1339,9 +1358,10 @@ static void poll_now_playing(long now) {
     np_at = now;
     memset(&n, 0, sizeof n);
     if (!H->now_playing || !H->now_playing(&n)) n.state = 0;
-    int changed = !np_sent || np_hash(&n) != np_hash(&np_last) || n.state != np_last.state || n.len_ms != np_last.len_ms;
+    int changed = !np_sent || np_hash(&n) != np_hash(&np_last) || n.state != np_last.state ||
+                  n.len_ms != np_last.len_ms || n.live != np_last.live;
     if (changed) send_now_playing(&n, 1);
-    else if (n.state == 1) {
+    else if (!n.live && (n.state == 1 || n.pos_ms != np_last.pos_ms)) {
         msg_start(0x5001), group_start(1), param_u32(PB_POSITION, n.pos_ms), group_end(), msg_send();
     }
     if ((playback_mask & 1u << PB_QUEUE_LIST) && n.qgen != np_last.qgen) ql_seen_at = now; /* the queue moved */
@@ -1468,17 +1488,22 @@ static void iap2_control_receive(const u8 *msg, unsigned len) {
 static void iap2_tick(void) {
     long now = H->now();
     if (!seen) return;
-    if (link_up && count && rto) {
+    int bl = backlog();
+    if (bl) wire_busy_at = now;
+    if (link_up && count && rto && !bl) {
         struct slot *s = &slots[head];
-        if (s->tries && now - s->sent > rto) {
+        long since = s->sent > wire_busy_at ? s->sent : wire_busy_at; /* when it can have reached the car */
+        if (s->tries && now - since > rto) {
             if (s->tries >= max_sends) {
                 H->log("link: lost (a packet went unacknowledged through every retry)");
                 reset_link();
+                if (H->link_lost) H->link_lost();
                 return;
             }
             send_slot(s);
         }
     }
+    if (q_count) pump(); /* the wire has room again */
     if (link_up && unacked && cack && now - unacked_since >= cack) send_ctl(CTL_ACK, 0, 0, my_seq);
     if (auth_due && now >= auth_due) {
         auth_due = 0;

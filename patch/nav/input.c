@@ -348,6 +348,7 @@ int ringnav_keydown(void *ctx, void *event) {
     if (key == KEY_CENTER)
         st.center_down_at = st.centre_at ? st.centre_at : (unsigned)time_now_ms() | 1;
     lr_edit_keydown(key); /* Center held on the Library or Home: its editor (library_edit.c) */
+    tuner_keydown(top, key); /* ... on Radio's tuner: its stations list (radio_tuner.c) */
     search_strip_down(top, key); /* Return held on a letter strip: its card (search_strip.c) */
     cc_keydown(key);             /* ... on a Control Center stop: its page (control_center.c) */
     un_keydown(key);             /* ... on a queued song in Up Next: it lifts (upnext.c) */

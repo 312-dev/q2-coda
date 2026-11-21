@@ -110,6 +110,7 @@ class FakeFfs:
         os.mkfifo(path/'ep1')
         self.path = path
         self.buf = b''
+        self.data_delay = 0.05
 
     def read(self, n, timeout=3.0):
         end = time.time() + timeout
@@ -129,7 +130,7 @@ class FakeFfs:
     def setup(self, rt, rq, wv, wi, wl, data=b''):
         self.event(SETUP, struct.pack('<BBHHH', rt, rq, wv, wi, wl))
         if data:
-            time.sleep(0.05)
+            time.sleep(self.data_delay)  # the probe reads the event before the data (one stream stands for both)
             os.write(self.master, data)
 
 
@@ -451,6 +452,7 @@ class BmwCar(Car):
             return None
         if pl:
             self.seen.add(seq)
+            self.seen.discard((seq + 128) % 256)  # sequence numbers wrap: a seq half the space back is a new packet
             self.peer = seq
             if not self.hold:
                 self.write(packet(0x40, self.seq, seq, 0))
@@ -532,15 +534,15 @@ def test_bmw_buttons(probe, tmp_path):
 
 def test_bmw_hold_to_scan(probe, tmp_path):
     """Next and Previous act at their release: a tap (the car's were up 13 to 120 ms after the press, 2026-11-20) is
-    the skip; held past 500 ms the song moves through itself from where it is (61 s of 245), a seek every 500 ms, 2 s
-    a step for 2 s, then 4 s, and nothing else at the release."""
+    the skip; held past 500 ms it is the Q2's own scan of a held button (seek.c seek_car): "scan 1" (Previous "scan
+    -1"), said again every 500 ms while held so the scan goes on, "scan 0" at the release, and no seek and no skip."""
     p, car, fd, log, files = bmw_up(probe, tmp_path)
 
     def hid(b):
         car.send(message(0x6802, prm(0, b'\x00\x01'), prm(1, bytes([b]))))
 
-    def seeks():
-        return [int(line.rsplit(' ', 1)[1]) for line in log.read_text().splitlines() if ': seek ' in line and 'held' in line]
+    def said():
+        return [line.split(': ', 2)[2] for line in log.read_text().splitlines() if ' held ' in line and ': scan ' in line]
     try:
         car.send(bytes([0x40, 0x40, 0, 6 + len(BMW_START_HID), 0x68, 0x00]) + BMW_START_HID)
         time.sleep(0.15)
@@ -552,21 +554,21 @@ def test_bmw_hold_to_scan(probe, tmp_path):
             time.sleep(0.15)
             assert files['cmd'].read_text().split(' ', 1)[1].strip() == verb
             files['cmd'].unlink()
-        hid(0x04)                                    # Next held 3.2 s
-        time.sleep(3.2)
+        hid(0x04)                                    # Next held 2.2 s
+        time.sleep(2.2)
         hid(0x00)
-        time.sleep(0.4)
-        assert seeks() == [63, 65, 67, 69, 73, 77], seeks()
-        assert files['cmd'].read_text().split(' ', 1)[1].strip() == 'seek 77', 'no skip after a scan'
-        hid(0x08)                                    # Previous held 1.2 s, from where Now Playing says it is
+        time.sleep(0.3)
+        assert said() == ['scan 1'] * 4 + ['scan 0'], said()
+        assert files['cmd'].read_text().split(' ', 1)[1].strip() == 'scan 0', 'no skip after a scan'
+        hid(0x08)                                    # Previous held 1.2 s
         time.sleep(1.2)
         hid(0x00)
-        time.sleep(0.4)
-        assert seeks()[6:] == [59, 57], seeks()
+        time.sleep(0.3)
+        assert said()[5:] == ['scan -1'] * 2 + ['scan 0'], said()
     finally:
         stop(p, fd)
     text = log.read_text()
-    assert 'hid: usage b5 released after' in text and 'the scan ends' in text
+    assert 'hid: usage b5 released after' in text and 'the scan ends' in text and ': seek ' not in text
 
 
 def test_bmw_audio_and_seek(probe, tmp_path):
@@ -687,6 +689,93 @@ def test_bmw_artwork(probe, tmp_path):
         stop(p, fd)
 
 
+def np_updates(car):
+    """The car's StartNowPlayingUpdates for title, duration, artist, album and the cover, and the state and position;
+    the first NowPlayingUpdate's (media, playback)."""
+    attrs = b''.join(prm(a) for a in (0, 1, 4, 6, 12, 0x1a))
+    car.send(message(0x5000, prm(0, attrs), prm(1, prm(0) + prm(1))))
+    mid, ps = car.msg()
+    assert mid == 0x5001
+    return params(ps.get(0, b'')), params(ps[1])
+
+
+def np_and_files(car, until, seconds=1.5):
+    """Packets for up to seconds, acknowledged as the BMW does: [(media, playback)] of each NowPlayingUpdate and
+    {transfer id: its setup's size} of the file transfer session, until until(updates) holds."""
+    updates, setups, end = [], {}, time.time() + seconds
+    while time.time() < end and not until(updates):
+        try:
+            got = car.packet_any(0.3)
+        except AssertionError:
+            continue
+        if not got or not got[4]:
+            continue
+        session, pl = got[3], got[4]
+        if session == 2 and pl[1] == 0x04:
+            setups[pl[0]] = int.from_bytes(pl[2:10], 'big')
+        elif session != 2 and pl[:2] == b'\x40\x40' and (pl[4] << 8 | pl[5]) == 0x5001:
+            ps = params(pl[6:])
+            updates.append((params(ps.get(0, b'')), params(ps.get(1, b''))))
+    return updates, setups
+
+
+def test_bmw_radio_is_live_and_clears_the_cover(probe, tmp_path):
+    """A radio in Now Playing (coda_rc_shim.c cr_now: source=radio, live=1, no path) after a Library song with a cover:
+    its song and artist, the station as the album, no duration and no position, and a new cover that is an empty file
+    transfer, even with a cover cached for its words. Leaving the cover out kept the song's on the BMW's cluster
+    (Radio over USB on q2muse-1123); an empty transfer is how an iPhone says there is none. No position
+    after either, as it plays (docs/internals.md#now-playing-source)."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path)
+    jpeg = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=160x160', '-frames:v', '1',
+                           '-f', 'mjpeg', '-'], check=True, capture_output=True).stdout
+    for artist, album in (('Massive Attack', 'Mezzanine'), ('System of a Down', '93XRT 93.1 FM')):
+        (files['art']/f'{fnv_part(fnv_part(2166136261, artist), album):08x}.jpg').write_bytes(jpeg)
+    car.hold = False
+    try:
+        attrs = b''.join(prm(a) for a in (0, 1, 4, 6, 12, 0x1a))
+        car.send(message(0x5000, prm(0, attrs), prm(1, prm(0) + prm(1))))
+        updates, setups = np_and_files(car, lambda u: False, 0.8)
+        song = updates[0][0]
+        assert song[1] == b'Teardrop\0' and setups[song[0x1a][0]] > 0, 'the Library song\'s cover first'
+        files['np'].write_text('state=1\npos=0\nlen=0\nsource=radio\nlive=1\nstation=93XRT\ntitle=Toxicity\n'
+                               'artist=System of a Down\nalbum=93XRT 93.1 FM\npath=\n')
+        updates, more = np_and_files(car, lambda u: False, 1.5)
+        setups.update(more)
+        radio = [(m, pb) for m, pb in updates if m.get(1) == b'Toxicity\0']
+        assert radio, [m.get(1) for m, _ in updates]
+        media, play = radio[0]
+        assert media[6] == b'93XRT 93.1 FM\0' and media[12] == b'System of a Down\0'
+        assert 4 not in media and play[0] == b'\x01' and 1 not in play, (media.keys(), play.keys())
+        assert 0x1a in media, 'a cover named, or the car keeps the song\'s'
+        art = media[0x1a][0]
+        assert art != song[0x1a][0] and setups.get(art) == 0, (art, setups)
+        assert not any(1 in pb for _, pb in updates[updates.index(radio[0]):]), 'no position for a stream'
+    finally:
+        stop(p, fd)
+
+
+def test_bmw_a_seek_while_paused_is_sent(probe, tmp_path):
+    """Paused, the position is sent when it moves (a seek from the Q2 or the phone), not only while playing: the car
+    shows where the song will go on from."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path)
+    files['np'].write_text(files['np'].read_text().replace('state=1', 'state=2'))
+    try:
+        media, play = np_updates(car)
+        assert play[0] == b'\x02' and int.from_bytes(play[1], 'big') == 61000
+        files['np'].write_text(files['np'].read_text().replace('pos=61000', 'pos=120000'))
+        end, seen = time.time() + 1.5, []
+        while time.time() < end and not seen:
+            try:
+                mid, ps = car.msg(0.3)
+            except AssertionError:
+                continue
+            if mid == 0x5001 and 1 in ps and 1 in params(ps[1]):
+                seen.append(int.from_bytes(params(ps[1])[1], 'big'))
+        assert seen == [120000], seen
+    finally:
+        stop(p, fd)
+
+
 # ---- Car Audio in the image (--state): what the host is, and the car's audio health ----
 
 def car_daemon(probe, tmp_path, *more, kinds=('ptp', 'hid', 'ptpmux', 'ptpmuxeth'), udc='default'):
@@ -799,6 +888,8 @@ def test_the_car_s_audio_health(probe, tmp_path):
     counters.mkdir()
     (counters/'in_sent').write_text('1000\n')
     (counters/'in_missed').write_text('7\n')
+    for k, v in (('p_rate', 48000), ('rate_sets', 2), ('rate_asked', 44100)):
+        (counters/k).write_text(f'{v}\n')
     p, car, fd, log, files = bmw_up(probe, tmp_path, '--state', str(tmp_path/'state'), '--counters', str(counters),
                                     '--under', str(tmp_path/'under'))
     state = tmp_path/'state'
@@ -830,7 +921,42 @@ def test_the_car_s_audio_health(probe, tmp_path):
         stop(p, fd)
     text = log.read_text()
     assert 'summary: host car (iAP2\'s detect' in text and 'car "BMW 83828", identified yes' in text
-    assert 'in_sent 3970 in_missed 30 (0.7%), underruns 1, problems 2' in text
+    assert 'in_sent 3970 in_missed 30 (0.7%), underruns 1, problems 2, p_rate 48000 rate_sets 2 rate_asked 44100' in text
+
+
+def test_the_car_s_stream_a_line_a_second(probe, tmp_path):
+    """While the car has asked for audio, a line a second from the module's counters (uac1_build.py COUNTED): that
+    second's completions by status, resends, the frames the host took, packet sizes and the longest gap (windows the
+    line restarts by writing them back), gaps over 2 ms, AS IN alternate settings, rate changes; and the cable's
+    summary: the start latency, the longest gap, the toggles and the rate changes."""
+    c = tmp_path/'params'
+    c.mkdir()
+    base = dict(in_sent=1000, in_missed=0, in_enodata=0, in_exdev=0, in_eshutdown=0, in_other=0, in_resent=0, in_bytes=0,
+                in_zero=0, in_gaps2=0, in_alt_on=1, in_alt_off=0, rate_sets=1, in_pkt_min=4294967295, in_pkt_max=0,
+                in_gap_max=0, p_rate=44100, rate_asked=44100)
+    for k, v in base.items():
+        (c/k).write_text(f'{v}\n')
+    p, car, fd, log, files = bmw_up(probe, tmp_path, '--state', str(tmp_path/'state'), '--counters', str(c))
+    try:
+        car.send(message(0xDA00))
+        car.msg()
+        time.sleep(1.3)
+        # a second as the 00:24 clip might have been: the host toggling the stream, one gap of 340 ms
+        for k, v in dict(in_sent=1998, in_missed=3, in_enodata=2, in_other=1, in_resent=3, in_bytes=176400, in_zero=2,
+                         in_gaps2=1, in_alt_on=3, in_alt_off=2, rate_sets=2, in_pkt_min=176, in_pkt_max=180,
+                         in_gap_max=332031).items():
+            (c/k).write_text(f'{v}\n')
+        time.sleep(1.1)
+    finally:
+        stop(p, fd)
+    lines = [l.split(' car ', 1)[1] for l in log.read_text().splitlines() if ' car usb ' in l]
+    want = ('usb 1000ms: sent=998 missed=3 (enodata 2 exdev 0 shutdown 0 other 1) resent=3 zero=2 frames=44100 '
+            'pkt=176/180 gapmax=339.9ms gaps2=1 alt=+2/-2 rate_sets=1')
+    assert want in lines, lines
+    assert (c/'in_gap_max').read_text().strip() == '0' and (c/'in_pkt_min').read_text().strip() == '4294967295', \
+        'the windows restarted'
+    text = log.read_text()
+    assert 'longest gap 339.9 ms, alt toggles 4, rate changes 1' in text, text[-600:]
 
 
 def test_no_sound_when_the_car_asks_and_takes_nothing(probe, tmp_path):
@@ -870,15 +996,45 @@ SONGS = [  # id, title, album, artist, album artist, genre, track, disc, path
 ]
 
 
+# Stock's songtable as the Q2's /mnt/data/database.db has it (read off the user's Q2, 2026-11-20), and the catalogue's
+# servertable and servermeta as /mnt/mmc/.q2pod/catalogue.db has them (patch/catalogue.c)
+SONGTABLE = ('CREATE TABLE songtable(id INTEGER PRIMARY KEY AUTOINCREMENT, filename VARCHAR(512), fileurl VARCHAR(1024),'
+             ' album VARCHAR(512), songer VARCHAR(256), style VARCHAR(128), name VARCHAR(512), composer VARCHAR(256),'
+             ' albumsonger VARCHAR(256), year INTEGER, track INTEGER, cd_num INTEGER, time INTEGER, time_end INTEGER,'
+             ' time_create INTEGER, Initial INTEGER, bitdepth INTEGER, samprate INTEGER)')
+SERVERTABLE = ('CREATE TABLE servertable(id INT, filename, fileurl, album, songer, style, name, composer, albumsonger,'
+               ' year INT, track INT, cd_num INT, time INT, time_end INT, time_create INT, Initial INT, bitdepth INT,'
+               ' samprate INT)')
+SERVERMETA = ('CREATE TABLE servermeta(id integer primary key, fileurl, app, sid, local, seconds integer, size integer,'
+              ' mbid, suffix, dup, ntitle integer, nartist integer, naa integer, nalbum integer, track integer)')
+
+
+def rows(db, table, songs):
+    for i, t, al, ar, aa, g, tr, d, url in songs:
+        db.execute(f'insert into {table} values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                   (i, url.rsplit('/', 1)[1], url, al, ar, g, t, 'Composer ' + ar if ar else '', aa, 1998, tr, d, 0, 0,
+                    0, 0, 16, 44100))
+
+
 def song_db(path, songs=SONGS):
     import sqlite3
     path.unlink(missing_ok=True)
     db = sqlite3.connect(path)
-    db.execute('create table songtable (id integer primary key, filename text, fileurl text, album text, songer text,'
-               ' albumsonger text, style text, name text, year text, track integer, cd_num integer, time_create integer)')
-    for i, t, al, ar, aa, g, tr, d, url in songs:
-        db.execute('insert into songtable values (?,?,?,?,?,?,?,?,?,?,?,?)',
-                   (i, url.rsplit('/', 1)[1], url, al, ar, aa, g, t, '1998', tr, d, 0))
+    db.execute(SONGTABLE)
+    rows(db, 'songtable', songs)
+    db.commit()
+    db.close()
+
+
+def catalogue_db(path, songs, seconds=245):
+    import sqlite3
+    path.unlink(missing_ok=True)
+    db = sqlite3.connect(path)
+    db.execute(SERVERTABLE)
+    db.execute(SERVERMETA)
+    rows(db, 'servertable', songs)
+    for i, *_, url in songs:
+        db.execute('insert into servermeta (id, fileurl, app, sid, seconds) values (?,?,?,?,?)', (i, url, 'subsonic', 'x', seconds))
     db.commit()
     db.close()
 
@@ -890,7 +1046,8 @@ def lib_car(probe, tmp_path, *more, run='run1'):
     if not db.exists():
         song_db(db)
     (tmp_path/run).mkdir()
-    p, car, fd, log, files = bmw_up(probe, tmp_path/run, '--lib-db', str(db), '--lib-sent', str(sent), '--list-file',
+    p, car, fd, log, files = bmw_up(probe, tmp_path/run, '--lib-db', str(db), '--lib-cat', str(tmp_path/'catalogue.db'),
+                                    '--lib-sent', str(sent), '--list-file',
                                     str(tmp_path/'list'), '--queue-file', str(tmp_path/'queue'), *more)
     return p, car, fd, log, files, db, sent
 
@@ -963,6 +1120,153 @@ def bmw_msg_keeping_body(self, timeout=3.0):
             continue
         self.last = pl[6:]
         return pl[4] << 8 | pl[5], params(pl[6:])
+
+
+def test_the_library_is_the_card_s_and_the_server_s(probe, tmp_path, monkeypatch):
+    """The user's Q2 (2026-11-20): songtable empty, every song a signed-in server's (9,199 in the catalogue), and iDrive
+    got 0 songs. With the catalogue on the card its servertable's songs go too (rids from 0x40000000, a length from
+    servermeta, composers), after the card's, and a server album plays from iDrive as the shim's list of those rids."""
+    monkeypatch.setattr(BmwCar, 'msg', bmw_msg_keeping_body)
+    song_db(tmp_path/'database.db', [SONGS[1]])
+    server = [(0x40000000 + k, t, 'Vide Noir', 'Lord Huron', '', 'Rock', k + 1, 1,
+               f'/mnt/mmc/.subsonic/cat/a/{k}.flac') for k, t in enumerate(('Lost in Time and Space', 'Never Ever'))]
+    catalogue_db(tmp_path/'catalogue.db', server)
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path)
+    try:
+        items, gone, rev, reset = library(car)
+        assert [int.from_bytes(i[0], 'big') & 0xffffffff for i in items] == [5, 0x40000000, 0x40000001]
+        assert items[1][1] == b'Lost in Time and Space\0' and items[1][4] == (245000).to_bytes(4, 'big')
+        assert items[1][18] == b'Composer Lord Huron\0' and 4 not in items[0], 'a card song: no length in the database'
+        car.send(message(0x4C08, prm(0, items[1][5]), prm(1, b'\x02'), prm(2, (1).to_bytes(4, 'big'))))
+        time.sleep(0.2)
+        assert (tmp_path/'list').read_text() == f'{0x40000000}\n{0x40000001}\n'
+        assert files['cmd'].read_text().split(' ', 1)[1] == 'play 1 0 2\n'
+    finally:
+        stop(p, fd)
+    assert "3 songs read (the card's and the server's)" in log.read_text()
+
+
+def test_the_link_keeps_to_the_car_s_pace(probe, tmp_path, monkeypatch):
+    """The drive of 2026-11-21 (q2muse-1124): the BMW takes input reports at an interrupt endpoint's pace (64 bytes
+    every 8 ms, so a 95-byte report 16 ms: --report-ms 16 makes the writer that slow), and with the library's 1,024-byte
+    packets five deep in its window the Q2's acknowledgement of the car's own packet waited behind most of a second of
+    them; the car sent its packet again 10 times, gave the link up, and the Q2's packets went unacknowledged too. Here the
+    library flows (2,000 songs) and the car sends a packet; the Q2 must acknowledge it within the car's first two tries
+    (400 ms), send none of its own again for nothing, and never lose the link."""
+    monkeypatch.setattr(BmwCar, 'msg', bmw_msg_keeping_body)
+    song_db(tmp_path/'database.db', [(i, f'Song {i}', f'Album {i // 10}', f'Artist {i // 50}', '', 'Rock', i % 10 + 1, 1,
+                                      f'/mnt/mmc/m/{i}.flac') for i in range(1, 2001)])
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path, '--report-ms', '16')
+    waits = []
+    try:
+        car.send(message(0x4C03, prm(0, b'lib\0')))
+        for _ in range(3):
+            end = time.time() + 1.5
+            while time.time() < end:  # the library flowing, acknowledged as it comes
+                car.packet_any(1.0)
+            payload = message(0x5003, prm(0, (100000).to_bytes(4, 'big')))
+            car.send(payload)
+            mine, t0, last, tries, acked = car.seq, time.time(), time.time(), 1, None
+            while acked is None and time.time() - t0 < 2.2:
+                got = car.packet_any(1.0)
+                if got and (got[2] - mine) % 256 < 128:
+                    acked = time.time() - t0
+                elif time.time() - last > 0.2 and tries < 10:  # the BMW's 200 ms, 10 tries
+                    car.write(packet(0x40, mine, car.peer, 1, payload))
+                    last, tries = time.time(), tries + 1
+            waits.append(acked)
+    finally:
+        stop(p, fd)
+    text = log.read_text()
+    assert all(w is not None and w < 0.4 for w in waits), f"the car's packet acknowledged after {waits} s"
+    assert 'link: lost' not in text
+    assert text.count('(again)') <= 2, f"{text.count('(again)')} packets sent again"
+
+
+def test_a_lost_link_shows_the_iphone_again(probe, tmp_path):
+    """After the loss on 2026-11-21 the BMW sent nothing for two minutes, to the cable out. With --state a lost link
+    ends q2-iap with 22, for q2car.sh to take the gadget off the controller and back, and the car to start afresh."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path, '--state', str(tmp_path/'state'))
+    try:
+        car.hold = True  # the car acknowledges nothing more
+        car.send(message(0xDA00))
+        assert p.wait(6) == 22
+    finally:
+        p.kill()
+        os.close(fd)
+    text = log.read_text()
+    assert 'link: lost' in text and 'the iPhone shown again' in text and 'identified yes' in text
+
+
+def test_a_data_stage_that_never_comes_holds_nothing(probe, tmp_path):
+    """The 2026-11-21 05:3x session: a SET_REPORT whose data never came held q2-iap in the read for 35 s, and the car
+    dropped the link. The read gives up after 2 s and the next request is answered."""
+    p, ffs, log = start(probe, tmp_path)
+    try:
+        ffs.event(ENABLE)
+        ffs.setup(0x21, 9, 0x020e, 2, 10)  # no data follows
+        time.sleep(2.5)  # past the read's 2 s (the stand-in ep0 is one stream: a request sooner would be read as data)
+        ffs.setup(0x81, 6, 0x2200, 2, 0x1000)
+        assert len(ffs.read(208, timeout=2)) == 208
+    finally:
+        p.terminate()
+        p.wait(5)
+    assert 'read -1 (errno 4' in log.read_text()
+
+
+PACE_MS = int(os.environ.get('Q2IAP_PACE_MS', '2'))
+
+
+def fast_ffs(init):
+    """FakeFfs with the car's SET_REPORT data 5 ms after its request: the BMW's acknowledgements come within 22 ms"""
+    def wrapped(self, *a, **kw):
+        init(self, *a, **kw)
+        self.data_delay = 0.005
+    return wrapped  # the wire's report pace for the long push; the BMW's is 16
+
+
+@pytest.mark.timeout(900)
+def test_the_whole_library_goes_at_the_wire_s_pace_and_resumes(probe, tmp_path, monkeypatch):
+    """The user's 9,199 songs (2026-11-21): the push must finish at the wire's pace, partial updates naming where it
+    reached; a cable out mid-push resumes there at the next plug, no reset, no song twice; and the car's own packets are
+    acknowledged throughout. At --report-ms 2 (Q2IAP_PACE_MS) the time is an eighth of the BMW's (16 ms a report)."""
+    monkeypatch.setattr(BmwCar, 'msg', bmw_msg_keeping_body)
+    songs = [(i, f'Song number {i}', f'Album {i // 12}', f'Artist {i // 60}', '', 'Rock', i % 12 + 1, 1,
+              f'/mnt/mmc/m/{i}.flac') for i in range(1, 9200)]
+    song_db(tmp_path/'database.db', songs)
+    monkeypatch.setattr(FakeFfs, '__init__', fast_ffs(FakeFfs.__init__))
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path, '--report-ms', str(PACE_MS))
+    first, partial = [], None
+    try:
+        car.send(message(0x4C03, prm(0, b'lib\0')))
+        while len(first) < 1500:  # a short plug: cut off part way
+            mid, _ = car.msg(5.0)
+            ps = plist(car.last)
+            if mid == 0x4C04 and any(i == 2 for i, _ in ps):
+                first += [int.from_bytes(params(d)[0], 'big') & 0xffffffff for i, d in ps if i == 2]
+                partial = dict(ps)[1].rstrip(b'\0').decode()
+    finally:
+        stop(p, fd)
+    assert partial.startswith('q2p.q2.9199.') and int(partial.rsplit('.', 1)[1]) == len(first)
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path, '--report-ms', str(PACE_MS), run='run2')
+    try:
+        t = time.time()
+        items, gone, rev, reset = library(car, partial, timeout=10.0)
+        took = time.time() - t
+    finally:
+        stop(p, fd)
+    rest = [int.from_bytes(i[0], 'big') & 0xffffffff for i in items]
+    assert not reset and first + rest == [s[0] for s in songs], (len(first), len(rest))
+    assert rev.startswith('q2.9199.')
+    # the time on the BMW's wire: every input report the push took, at 16 ms each (two 64-byte transactions of its
+    # 8 ms interrupt endpoint); this harness's own acknowledgements, not the wire, set the time here
+    text = log.read_text()
+    sizes = {1: 5, 2: 9, 3: 13, 4: 17, 5: 25, 6: 49, 7: 95, 8: 193, 9: 257, 10: 385, 11: 513, 12: 767}
+    wire = sum(-(-(sizes[int(l.split(' report > ')[1][:2], 16)] + 1) // 64) * 0.008
+               for l in text.splitlines() if ' report > ' in l)  # each report's 64-byte transactions, 8 ms apart
+    print(f'{len(rest)} songs in {took:.1f} s here; {wire:.0f} s on the BMW\'s wire, '
+          f'{wire * len(songs) / len(rest):.0f} s for all {len(songs)}')
+    assert wire * len(songs) / len(rest) < 400 and '(again)' not in text, (wire, text.count('(again)'))
 
 
 def test_playing_from_idrive(probe, tmp_path, monkeypatch):

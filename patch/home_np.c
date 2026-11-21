@@ -42,7 +42,7 @@ static struct {
 
 static int hn_state(void) {
     if (guest_active()) return HN_GUEST;
-    return media_status() == 2 ? HN_PLAYING : HN_PAUSED;
+    return now_status() == 1 ? HN_PLAYING : HN_PAUSED; /* the owner's (now_source.c) */
 }
 /* Whether the glyph is the pause: the owner's paused, or the guest's */
 static int hn_paused(int state) {
@@ -171,10 +171,13 @@ static int hn_gone(void *win, void *event) {
     return 0;
 }
 
-/* Stock's click, unless a guest plays: then the guest's Now Playing (guest_ui.c guest_home_np). */
+/* Stock's click, unless a guest plays: then the guest's Now Playing (guest_ui.c guest_home_np);
+ * or Radio owns Now Playing: its page (radio_tuner.c tuner_open). */
 static int hn_click(void *ctx, void *event) {
     (void)ctx;
-    if (guest_home_np() || !hn.click) return 0;
+    if (guest_home_np()) return 0;
+    if (now_owner() == NOW_RADIO) return tuner_open((void *)0, (void *)0), STOP;
+    if (!hn.click) return 0;
     return ((int (*)(void *, void *))hn.click)(hn.click_ctx, event);
 }
 

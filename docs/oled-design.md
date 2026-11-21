@@ -235,8 +235,9 @@ All lists share one grid.
   or not, and it never moves for the glyphs (the user's, 2026-11-19, `mock_subsonic_offline.py`); its figures stand
   on rows 17 to 27, and every glyph beside them is their height. Home, Now Playing and Cover Flow's covers (but an
   artist's, titled by the artist) have no title. Home in
-  Split keeps it at the right, its digits' ink 8 px left of the leftmost glyph, over the art (approved from `mock_clock_center.py` and `mock_clock_right.py` on
-  2026-11-15), where the clock and every glyph take one ink, white or black, picked once for the row from the art's
+  Split puts it at the row's left, over the list, its text starting 62 px in (`STATUS_ROW_INSET`), as the battery ends
+  62 px from the right, in Text Primary where the art runs up under the row (the user's, 2026-11-20,
+  `design/home-clock-left`); the glyphs stay over the art at the right, where they take one ink, white or black, picked once for the row from the art's
   mean lightness under all of them, as iOS's status bar takes one style; the battery's green, red and orange keep
   their hue (`mock_status_icons.py`, the user's, 2026-11-16). Under Split's vignette the top of the art is darkened
   toward 25%, so that ink is white over almost any cover.
@@ -350,6 +351,31 @@ Approved 2026-11-16 (`design/home-np-icon`, 2a and the morph; `patch/home_np.c`)
 - Between playing and paused the glyph morphs over 250 ms, cubic out: the bars freeze, the middle one narrows and
   fades, the outer two widen and rise into the pause's bars, the accent turning Text Secondary; on resume the same
   backwards, then the bars move again. The words cross-fade in the same 250 ms. Under Reduce Motion both are a cut.
+
+### Home's art pane while Radio plays
+
+While Radio is Now Playing (playing or paused; `patch/radio_pane.c`, `coverflow.c` `SHOW_RADIO`), Split's art pane
+is Radio's, edge to edge where the cover goes: design K1, approved 2026-11-20
+(`~/q2-emu/design/radio-tuner/radio-now-playing/pane-v6`: `mock.py` holds every number, `sheet.png` the still,
+`K1-rings.mp4` the motion; built: `pane-v6/built/`).
+
+- **Ground:** dark red (20, 3, 7) at the top, 35% darker at the bottom; a glow of (88, 7, 22) behind the badge,
+  t = clamp(1 - r / 150)^2.2 x 0.45; a faint lighter line (+30, 7, 11) down the pane's left edge.
+- **Badge:** a 64 px circle centred at screen y 138 (the badge and the frequency centred together), a vertical
+  gradient (214, 46, 76) to (122, 10, 32) with a soft gloss high on it, the broadcast tower white at 39 px (62%;
+  the Car Remote app's ic_radio, `tools/art.py` `RADIO_TOWER`).
+- **Frequency only:** "93.1" in Inter Medium 30 white and "FM" in 15 Text Secondary 3 px after it, centred, its
+  baseline 70 px below the badge's centre, over a soft vignette (an ellipse 124 x 46, black 210/255, blurred 12 px).
+  No station name, song, call sign or city.
+- **Rings:** four, from the badge's centre, radius 40 to 170 as they travel, alpha 0.55 x (1 - u)^1.6, 1.2 to 2.8 px
+  wide, (205, 38, 66), with a 5 px bloom; one leaves every 2.4 s (each travels 9.6 s) while Radio plays and the pane
+  shows, the pane alone repainted every 33 ms; still while paused, and under Reduce Motion.
+- **The way in** (pane-v3 `anim.py`, approved as "Apple-like slide"): the cover recedes to 0.92, dims and drifts
+  18 px left over 350 ms while the pane slides in from the right on a damped spring (settling about 0.4 s, a slight
+  overshoot); the glow blooms from 180 ms over 500 ms; the badge from 300 ms, then the frequency from 380 ms, rise
+  8 px and fade in over 300 ms. Under Reduce Motion the pane is there at once.
+- **Light Mode:** the same; the pane is art, as the cover it replaces is, which Light Mode leaves as it is.
+- The covers come back when the Library takes over.
 
 ### Selection bar
 
@@ -1841,6 +1867,12 @@ error screens, "Near <city>" on the stations list and "Change Location" on the Z
   bar in Favorite red (#FF375F) from y 230, gliding after the dial (90 ms time constant). The wheel tunes 0.02
   MHz a step (one every 12 degrees of the touch wheel), 0.06 turned fast; each station is a detent that holds
   three steps, and every step clicks, louder and duller on a station.
+- **Centre** (approved 2026-11-20, `~/q2-emu/design/radio-tuner/centre-volume/sheet.png`; built:
+  `centre-volume/built/`): a tap swaps the dial for Now Playing's volume band on the dial's row (its bar's ends,
+  the two speakers, the inset track and white fill, the same ease), the wheel setting the volume; 3 s after the
+  last turn or press (Now Playing's scrub timeout) the dial returns and the wheel tunes. A tap while it shows ends
+  it; a double press turns the screen off. Held 550 ms (Edit Library's hold) Centre opens the stations list;
+  stock's Shut Down? hold is not reached from the tuner. Frequency, name and song stay where they are.
 - **Stations list:** the house list's measures (32 px rows from y 58, Inter 20, the flat selection bar
   `sel_bar_flat`, fades from y 40 to 74 and 266 to 310 where the list goes on, the 4 px scroll indicator at
   x 366 while the wheel turns), painted by the page: the name left, the frequency right (Text Secondary, Text
@@ -1901,11 +1933,18 @@ interruptible: a turn mid-run starts from where it is.
   `cubic_out`; played, it grows back over 320 ms, no overshoot. A turn mid-way starts from where it is; a page opened
   on a paused song shows it small at once. The play/pause glyph is the cue, so Reduce Motion keeps the art its size
   ([internals](internals.md#now-playing-motion)).
-- **The cover grows into Now Playing**: opened from Home (its art pane) or an album page (its header), Now
-  Playing's art flies from that cover's place to its own over 300 ms, `cubic_out`, while the page fades out over
-  the first half and Now Playing fades in from 40%; Return runs it back over 240 ms to the cover it came from.
-  Opened from anywhere else Now Playing opens at once, as before. Reduce Motion cross-fades both ways over 150 ms
-  ([internals](internals.md#now-playing-motion)).
+- **The cover travels into Now Playing**, as Apple Music's shared element: opened from Home (its art pane) or an
+  album page (its header), the cover lifts off the page as one card and travels to Now Playing's art over 420 ms on a
+  damped spring (response 0.42 s, damping 0.86) along a gentle arc, 14 px high at its middle, under a soft shadow
+  that is darkest mid-flight; its box, crop and corners morph the whole way (from the pane's 179 x 320, square
+  corners and 1.10 zoom, the pan where Home had it, to the art's 150 x 150, 6 px corners and the whole cover), never
+  squashed. Around it the page fades and slides 28 px left, 40 ms behind the card, and Now Playing comes in from
+  0.96 of its size; Return runs it back to the cover it came from, the pane's vignette coming in over the last 45%,
+  so the card lands on the pane as Home shows it. Each page is drawn without its own cover, so the cover is never on
+  the screen twice. Approved from the `np-home-transition` mock-up on 2026-11-20, with a lite variant (the same morph
+  on a critically damped spring over 340 ms, straight, no shadow, no scale or slide: plain cross-fades) one build
+  define away (`AZ_HERO`). Opened from anywhere else Now Playing opens at once, as before. Reduce Motion
+  cross-fades both ways over 150 ms ([internals](internals.md#now-playing-motion)).
 - **Now Playing's track change**: on Next, Previous, a song ending or a headset's skip the old art and lines slide 16 px
   the way the queue moved (left for Next) and fade out over 120 ms, `cubic_in`, while the new ones come in from 16 px
   the other side over 200 ms, `cubic_out`, from 60 ms: 260 ms in all. The times, the bar and the heart change at once;
@@ -1958,7 +1997,7 @@ pattern.
 | Q2 Muse screen                       | Pattern                     | Notes                                                                                                      |
 | ----------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock, centered. Seven rows from y 58, all at rest; a list with more (Settings' eight) fades the rows below into black from y 266 to 316, and once scrolled runs on under the status row to the screen's top edge ([List edges](#list-edges)); scrolled to the end the last row's foot is at y 282: every list's ending ([Corners](#corners)) |
-| Home (Split)                        | List row beside art         | Rows from y 40 (into the status row's empty left, the clock at its right) to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges: the playing cover panning slowly while a song plays, else the library's covers in turn, each zooming and drifting and cross-fading into the next; the art's top 50 px and bottom 40 px darkened toward 25% brightness (a vignette, approved as V4 on 2026-11-15); the status row's clock, play state and battery over it at the right, each glyph white or black by contrast with the darkened art under it. Seven rows, all at rest (the last's foot at y 264); a list with more (Settings' eight) fades the rows past them into black within 56 px of the glass's bottom edge and, once scrolled, the row above y 40 within 34 px of its top edge, both following its rounded corners |
+| Home (Split)                        | List row beside art         | Rows from y 40 (just under the status row, the clock at its left) to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges: the playing cover panning slowly while a song plays, else the library's covers in turn, each zooming and drifting and cross-fading into the next; the art's top 50 px and bottom 40 px darkened toward 25% brightness (a vignette, approved as V4 on 2026-11-15); the status row's play state and battery over it at the right (the clock at the row's left, over the list), each glyph white or black by contrast with the darkened art under it. Seven rows, all at rest (the last's foot at y 264); a list with more (Settings' eight) fades the rows past them into black within 56 px of the glass's bottom edge and, once scrolled, the row above y 40 within 34 px of its top edge, both following its rounded corners |
 | Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
 | Now Playing's About                 | [Track details](#track-details) | Header, quality line, then a grid of name over value                                                   |
 | Library                             | List row                    | Rows in the user's order and choice: [Edit Library](#edit-library)                                         |
