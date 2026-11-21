@@ -32,7 +32,7 @@ class Car(Q2):
                                                                                     self.ms % 1000 * 1000000), 16) and 0)
         self.tracks = []
         fw.mock('btctl_notify_track_changed', self.track)
-        self.rt = None
+        self.rt: Rt | None = None
         self.now_poll = fw.fn('now_poll', None)
         self.files[COVER] = b'1234567\n/mnt/mmc/a/cover.jpg\n'  # the Library song's cover (bt_cover.c)
         self.queue()
@@ -50,13 +50,14 @@ class Car(Q2):
         pos, length, at = self.files[PLAY].decode().split()
         return int(pos), int(length), int(at)
 
-    def radio(self, playing=1, title=ICY, name=b'93XRT', call=b'WXRT', freq=9310):
-        """Radio's page open on a station's stream (test_radio_tuner's Rt), as tuner_poll leaves it"""
-        self.rt = Rt()
+    def radio(self, playing=1, title=ICY, name=b'93XRT', call=b'WXRT', freq=9310) -> Rt:
+        """Radio's page open on a station's stream (test_radio_tuner's Rt), as tuner_poll leaves it: that Rt"""
+        rt = self.rt = Rt()
         self.rt.playing, self.rt.audio, self.rt.feed, self.rt.freq = playing, 999, 0, freq
         self.rt.st[0].freq, self.rt.st[0].name, self.rt.st[0].call = freq, name, call
         self.rt.title_text = title.encode()
-        self.fw.var('radio_tuner__rt', C.c_void_p).value = C.addressof(self.rt)
+        self.fw.var('radio_tuner__rt', C.c_void_p).value = C.addressof(rt)
+        return rt
 
     def radio_off(self):
         self.fw.var('radio_tuner__rt', C.c_void_p).value = 0
@@ -111,7 +112,7 @@ def test_radio_is_the_car_s_song_and_the_library_comes_back_after(fw, ui, mcl, r
     car = Car(fw, ui, recs)
     car.status = 1  # video_start stopped the player
     car.step()
-    car.radio()
+    rt = car.radio()
     car.step()
     assert car.tracks == [(-1, -1, -1, 'Toxicity', 'System of a Down', '93XRT 93.1 FM', None)]
     assert [a[0] for _, a in fw.calls('btctl_notify_playback_status_changed')] == [1]
@@ -119,10 +120,10 @@ def test_radio_is_the_car_s_song_and_the_library_comes_back_after(fw, ui, mcl, r
     assert car.play_file()[:2] == (-1, -1)
     car.step()
     assert len(car.tracks) == 1, 'nothing new: nothing sent'
-    car.rt.title_text = b'title="Chop Suey!",artist="SYSTEM OF A DOWN",url="x"'
+    rt.title_text = b'title="Chop Suey!",artist="SYSTEM OF A DOWN",url="x"'
     car.step()
     assert car.tracks[-1][3:6] == ('Chop Suey!', 'System of a Down', '93XRT 93.1 FM')
-    car.rt.playing = 0
+    rt.playing = 0
     car.step()
     assert [a[0] for _, a in fw.calls('btctl_notify_playback_status_changed')] == [1, 2]
     assert not fw.calls('sendBtHeadsetPlayInfo')

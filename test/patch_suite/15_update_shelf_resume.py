@@ -213,8 +213,9 @@ class ResumeMachine(QueueMachine):
             path,mode=self.text(a),self.text(b)
             # the boot logo's lit-only mount poll, and Guest Play's state read (guest.c guest_poll, each GUEST_READ_MS
             # from the headset poll whether or not a guest plays); dark, any other open counts
-            # and the USB record at a Standby (usb_record.c): the controller's state, and its line on the card, not the flash
-            self.opens+=path not in (RECORD,'/tmp/q2-guest.state',*USB_RECORD_READS) and (path!='/proc/mounts' or not self.u.mem_read(syms['g_backlight_status'],1)[0])
+            # and the USB record at a Standby (usb_record.c): the controller's state, and its line on the card, not the flash;
+            # and bluetoothd's position file in /tmp (now_source.c), written when the song, state or position jumps
+            self.opens+=path not in (RECORD,'/tmp/q2-guest.state','/tmp/q2-bt.play.tmp',*USB_RECORD_READS) and (path!='/proc/mounts' or not self.u.mem_read(syms['g_backlight_status'],1)[0])
             if mode=='rb' and path not in self.files: ret=0
             else: ret=0x2000000+len(self.calls); self.open[ret]=[path,mode,0,b'' if mode=='wb' else self.files.get(path,b'')]
         elif name=='fread':
