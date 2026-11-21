@@ -217,6 +217,7 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/module_regions.py': 'a library the module tests import, with nothing to run',
     'test/patch.py': ['{build}'],
     'test/peq.py': [],
+    'test/q2dbus_bus.py': [],  # q2guard's D-Bus watcher against a dbus-daemon of its own; without one, skip
     'test/playback.py': ['{build}'],
     'test/pwm.py': ['{stockfs}'],
     'test/pwm_build.py': ['{stockfs}'],

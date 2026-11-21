@@ -51,6 +51,21 @@ static void volume_at_start(int way) {
     output_volume(out, on ? v : UNITY);
 }
 
+/* A song that would not open or play, with its path, in the unified log and so the Bluetooth event log
+ * (docs/internals.md#bluetooth-event-log): demo shows a dialog or moves on, and the drive of 2026-11-19 left some
+ * songs silent with no word of which. A URL's query is left out, as it carries the app's token. */
+static void log_failed(const char *what, const struct song *s, int error) {
+    char line[256];
+    const char *u = s->url;
+    const char *why = error == ERR_MISSING       ? "missing"
+                      : error == ERR_UNSUPPORTED ? "unsupported"
+                      : error == ERR_NONE        ? "the output would not open or take audio"
+                                                 : "other";
+    int n = snprintf(line, sizeof line, "q2player: %s (%s): %.*s", what, why,
+                     (int)strcspn(u, strncmp(u, "http", 4) ? "|" : "|?"), u);
+    plog('E', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
+}
+
 static void touch(const char *path) {
     int fd = open(path, O_WRONLY | O_CREAT, 0644);
     if (fd >= 0) close(fd);
@@ -525,6 +540,7 @@ void *engine_thread(void *unused) {
                     ipc_event(stopped ? "{player-stopstatus\\exit}" : "{player-nextstatus\\exit}");
                     continue;
                 }
+                log_failed("open failed", &song, error);
                 touch(error == ERR_MISSING ? "/tmp/notfile" : "/tmp/notsupport");
                 ipc_event("{player-status\\error}");
                 continue;
@@ -603,12 +619,14 @@ void *engine_thread(void *unused) {
             song.dsd = dsd_out(car_way(c->outputway), song.hw, c->dsdmode);
             pthread_mutex_unlock(&c->mu);
             if ((cur = source_open(&song, &error, NULL))) break;
+            log_failed("open for the new output failed", &song, error);
             close_output(0);
             touch("/tmp/notsupport");
             ipc_event("{player-status\\error}");
             break;
         }
         case FAILED:
+            log_failed("play failed", &song, ERR_NONE); /* output_open or a write failed */
             close_output(0);
             preload_cancel();
             touch("/tmp/notsupport");

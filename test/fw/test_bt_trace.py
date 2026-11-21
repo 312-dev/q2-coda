@@ -164,3 +164,21 @@ def test_the_page_opening_and_each_found_device_it_shows(fw):
     page()
     shown(BUDS.encode())
     assert r.said() == [('I', 'page opened'), ('I', f'page shows found {BUDS}')]
+
+
+@pytest.mark.parametrize('links, paired, target, want', [
+    ([], 1, CAR, ('I', f'auto-connect (auto) picks {CAR}: the saved device, paired, nothing connected')),
+    ([], 0, CAR, ('W', f'auto-connect (auto) skips {CAR}: the saved device, not paired')),
+    ([(BUDS, 3)], 1, CAR, ('I', f'auto-connect (auto) skips {CAR}: {BUDS} is connected')),
+    ([], 1, BUDS, ('I', f'auto-connect (auto) picks {BUDS}: not the saved device, paired, nothing connected')),
+])
+def test_each_auto_connect_says_which_device_it_pages_and_why(fw, links, paired, target, want):
+    """The boot of 2026-11-19 paged the car (====auto bt[60:E6:F0:A1:1F:09]==) and never the Buds, and a skip said
+    nothing: each decision of headset_bt_autolink is a bt line, its target, whether it is the saved device
+    (BTLINKMAC), and what stopped it."""
+    r = Rig(fw)
+    r.links = links
+    fw.mock('checkPairDev', lambda *_: paired)
+    go = fw.fn('headset_bt_autolink', C.c_int, C.c_char_p)(target.encode())
+    assert go == (want[1].split()[2] == 'picks')
+    assert r.said() == [want]

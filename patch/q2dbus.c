@@ -269,7 +269,7 @@ int dbus_transport(const unsigned char *p, int n, struct dbus_tr *t) {
     if (!strcmp(iface, "org.freedesktop.DBus.ObjectManager") &&
         ((!strcmp(member, "InterfacesAdded") && !strcmp(sig, "oa{sa{sv}}")) ||
          (!strcmp(member, "InterfacesRemoved") && !strcmp(sig, "oas")))) {
-        int added = member[9] == 'A';
+        int added = member[10] == 'A'; /* InterfacesAdded */
         const char *obj = get_str(&r);
         if (!obj || !path_device(obj, t)) return 0;
         unsigned k = get_u32(&r);
@@ -347,9 +347,9 @@ static int dbus_open(const char *path) {
         "type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',"
         "arg0='" DBUS_TRANSPORT "'",
         "type='signal',interface='org.freedesktop.DBus.ObjectManager',member='InterfacesAdded',"
-        "path_namespace='/org/bluez'",
+        "arg0path='/org/bluez/'",
         "type='signal',interface='org.freedesktop.DBus.ObjectManager',member='InterfacesRemoved',"
-        "path_namespace='/org/bluez'",
+        "arg0path='/org/bluez/'",
     };
     unsigned char m[1024];
     n = 0;

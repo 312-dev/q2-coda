@@ -43,13 +43,17 @@ static int bt_connected(char *mac) {
     return status == 3;
 }
 void bt_trace_why(const char *why, const char *mac); /* bt_trace.c */
-/* Auto-link would append its target after a connected incoming link; its failure clears both. A
- * connect it goes ahead with is logged as auto, or usb from headset_bt_usb
- * (docs/internals.md#bluetooth-connection-trace). */
+void bt_trace_autolink(const char *why, const char *target, const char *connected, int go);
+/* Auto-link would append its target after a connected incoming link; its failure clears both. Each
+ * decision is logged with its target and why (bt_trace_autolink), and a connect it goes ahead with
+ * as auto, or usb from headset_bt_usb (docs/internals.md#bluetooth-connection-trace). */
 int headset_bt_autolink(char *address) {
     char item[32];
-    int go = !bt_connected(item) && checkPairDev(address);
-    if (go) bt_trace_why(hl.usb ? "usb" : "auto", address);
+    int linked = bt_connected(item);
+    int go = !linked && checkPairDev(address);
+    const char *why = hl.usb ? "usb" : "auto";
+    bt_trace_autolink(why, address, linked ? item : 0, go);
+    if (go) bt_trace_why(why, address);
     return go;
 }
 /* A cable in (usb_ui.c usb_ui_status): stock's auto-link once more, as at Bluetooth on, since a car

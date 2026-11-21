@@ -314,7 +314,10 @@ def test_bad_preload(player, songs, tmp):
     events = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
     assert events == ['{player-status\\exit}', '{player-status\\error}'], events
     assert pathlib.Path('/tmp/notsupport').exists(), '/tmp/notsupport not made'
-    return 'played to the end, then exit, error and /tmp/notsupport'
+    # the song that would not open, with its path, an E line the Bluetooth event log copies (engine.c log_failed)
+    failed = re.findall(r' E player (q2player: open failed.*)', (tmp/'badnext/player.log').read_text())
+    assert failed == [f'q2player: open failed (unsupported): {songs}/junk.flac'], failed
+    return 'played to the end, then exit, error and /tmp/notsupport, the path logged'
 
 
 def test_status_push(player, songs, tmp):
@@ -1401,7 +1404,10 @@ def test_http_missing(player, songs, tmp):
     """A 404: error, as stock's (which makes /tmp/notfile, captured)."""
     s, pcm, names = play(player, songs, 'http-missing', tmp/'http-missing')
     assert events(s) == ['{player-status\\error}'] and not pcm, (events(s), names)
-    return 'error'
+    failed = re.findall(r' E player (q2player: open failed.*)', (tmp/'http-missing/player.log').read_text())
+    assert len(failed) == 1 and failed[0].startswith('q2player: open failed (missing): http') and \
+        failed[0].endswith('nothing.flac'), failed
+    return 'error, ' + failed[0]
 
 
 def test_https_checks(player, songs, tmp):
