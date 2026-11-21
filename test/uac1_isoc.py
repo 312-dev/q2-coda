@@ -75,8 +75,14 @@ class Machine(uac1_bind.Machine):
         return super().service(name, a)
 
 
-def run(data, resend, reqs, steps=900):
-    """(frames the host got, in order; hw_ptr's travel in frames; in_missed; in_sent) for steps completions"""
+def run(data, resend, reqs, steps=900, ddma=False):
+    """(frames the host got, in order; hw_ptr's travel in frames; in_missed; in_sent) for steps completions. The
+    controller gives back every third request unsent with -ENODATA; with ddma, as the Q2's dwc2 does instead (its
+    isochronous IN in descriptor DMA, g_dma_desc 1 in its debugfs params): the core runs the chain of requests queued
+    when it was built; a request queued again while fewer than two of the chain's are left to fetch comes after the
+    chain's last descriptor, the core runs off the end (BNA), gives that request back unsent with status 0 and actual
+    0 and builds the chain afresh from the queue. With one request every other completion is empty, with two every
+    third, with three or more none: the desk's sweep on the Q2 (2026-11-21)."""
     m = Machine(data)
     sym = m.symbols
     if 'resend_missed' not in sym:
@@ -101,6 +107,7 @@ def run(data, resend, reqs, steps=900):
     m.write(rt + RT_DMA_AREA, ring)
     m.write(rt + RT_DMA_BYTES, RING_FRAMES * 4)
     m.write(prm + PRM_UAC, uac)
+    m.write(prm + 20, 400)  # max_psize (PRM_MAX_PSIZE): the AS IN endpoint's wMaxPacketSize, uac1_build.py CARRY_F
     m.uc.mem_write(prm + PRM_ENABLED, b'\x01')
     m.write(prm + PRM_SS, sub)
     ep = m.alloc(0x40)
@@ -113,17 +120,29 @@ def run(data, resend, reqs, steps=900):
         m.write(req + REQ_CONTEXT, ur)
         m.queue.append(req)
     host, moved, last = [], 0, 0
+    chain, late = list(m.queue), set()  # ddma: the requests the core fetched, and those queued after its end
     for i in range(steps):
         req = m.queue.pop(0)
         sent = i % 3 != 2
+        if ddma:
+            sent = req not in late
+            late.discard(req)
+            if req in chain:
+                chain.remove(req)
         m.t += 1000000
         n = 0
         if sent:
             n = m.read(req + REQ_LENGTH)
             host += struct.unpack(f'<{n // 4}I', m.read(m.read(req + REQ_BUF), n))
         m.write(req + REQ_ACTUAL, n)
-        m.write(req + REQ_STATUS, 0 if sent else ENODATA)
+        m.write(req + REQ_STATUS, 0 if sent or ddma else ENODATA)
         m.call('u_audio_iso_complete', ep, req)
+        if ddma and not sent:  # BNA: the chain built afresh from what is queued
+            chain, late = list(m.queue), set()
+        elif ddma and len(chain) >= 2:  # queued in time: the chain grows
+            chain.append(req)
+        elif ddma:
+            late.add(req)
         hw = m.read(prm + PRM_HW_PTR) // 4
         moved += (hw - last) % RING_FRAMES
         last = hw
@@ -230,6 +249,7 @@ def rate_run(data):
         for _ in range(n):
             r = m.queue.pop(0)
             m.write(r + REQ_STATUS, 0)
+            m.write(r + REQ_ACTUAL, m.read(r + REQ_LENGTH))  # sent whole, as a controller reports it
             m.call('u_audio_iso_complete', ep, r)
             out.append(m.read(r + REQ_LENGTH))
         return out
@@ -333,6 +353,26 @@ def main(argv):
                 wrong.append(f'{what}: not the desk pattern (88 or 89 frames, then 44 or 45 skipped): {steady[:6]}')
             if abs(moved / got - 1.5) > 0.01:
                 wrong.append(f'{what}: hw_ptr moved {moved / got:.3f} times what the host got, not 1.5')
+    # The car's stutter (2026-11-21, q2muse-1123): the Q2's dwc2 in descriptor DMA sent every other packet empty with
+    # one request in flight, and the car got half the audio. With one or two requests the model's core gives back that
+    # share empty and its frames are lost; with three or four none, and the host gets 44.1 frames a millisecond, in
+    # order: patch/q2car.sh's req_number is 4.
+    for reqs, empty in ((1, 450), (2, 300), (3, 0), (4, 0)):
+        host, moved, missed, sent, counted = run(data, 1, reqs, ddma=True)
+        r = runs(host)
+        got = len(host) - next(i for i, v in enumerate(host) if v) + 1
+        zero = counted.get('in_zero', -1)
+        print(f'descriptor DMA, {reqs} requests: host got {got} frames in {len(r)} runs, hw_ptr moved {moved}, '
+              f'empty {zero}')
+        if 'in_zero' in counted and zero != empty:
+            wrong.append(f'descriptor DMA, {reqs} requests: {zero} empty completions, not {empty}')
+        if not empty and (len(r) != 1 or moved - got not in range(0, 45 * reqs + 1)):
+            wrong.append(f'descriptor DMA, {reqs} requests: the host\'s frames break or lag: {r[:4]}, moved {moved}, got {got}')
+    import re
+    car = re.search(r'req_number=(\d+)', (ROOT/'patch/q2car.sh').read_text())
+    print(f'patch/q2car.sh: req_number {car.group(1) if car else None}')
+    if not car or int(car.group(1)) < 3:
+        wrong.append(f'patch/q2car.sh gives the car {car.group(1) if car else "no"} requests: descriptor DMA needs 3 or more')
     rate_wrong, seen = rate_run(data)
     print('rates: ' + '; '.join(seen))
     wrong += rate_wrong

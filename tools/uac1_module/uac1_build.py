@@ -38,14 +38,15 @@ SOURCES = ['f_uac1.c', 'u_audio.c', 'u_audio.h', 'u_uac1.h']
 # (docs/iphone-mode.md#the-uac1-module). a59c68a6a3d1 is the commit before it, which it needs to apply.
 PATCHES = ['0001-usb-gadget-f_uac1-validate-input-parameters.patch',  # a59c68a6a3d1
            '0002-usb-gadget-f_uac1-disable-IN-OUT-ep-if-unused.patch']  # 254cb1e0d78c
-# u_audio.c's changes for missed packets, (5.10.21's text, the module's), applied in order. The Q2's dwc2 has upstream's
-# BDMA isochronous flow (91bb163e1e4f: target_frame_elapsed's 0x3fff/0x7ff limit is in the stock kernel at
-# 0x804935f4), which completes an IN request whose (micro)frame went by with -ENODATA (-61, li a3,-61 at 0x804995c8)
-# and never sends it. u_audio_iso_complete ignored the status: it refilled the request from the ring and moved
-# hw_ptr past the packet the host never got. Now such a request is queued again unchanged, its buffer still the
-# packet, when resend_missed is set (the default) and req_number is 1 (the probe's): with a second request already
-# queued, holding the samples after it, the packet would go out of order. in_missed and in_sent count the playback
-# completions with and without a status, read in /sys/module/usb_f_uac1/parameters.
+# u_audio.c's changes for missed packets, (5.10.21's text, the module's), applied in order. A playback request given
+# back with a status is queued again unchanged, its buffer still the packet, when resend_missed is set (the default)
+# and req_number is 1: with a second request already queued, holding the samples after it, the packet would go out of
+# order. in_missed and in_sent count the playback completions with and without a status, read in
+# /sys/module/usb_f_uac1/parameters. ponytail: on the Q2 this never fires. Its dwc2 runs isochronous IN in descriptor
+# DMA (g_dma_desc 1 in its debugfs params, read 2026-11-21), which gives a packet it could not send back with status 0
+# and actual 0, never -ENODATA (the li a3,-61 at 0x804995c8 once read as the IN case is the OUT loop of
+# handle_ep_disabled); in_zero counts those, and patch/q2car.sh's four requests keep the chain from running dry
+# (docs/iphone-mode.md#empty-packets). Kept for a buffer-DMA controller, where a missed IN interval is -ENODATA.
 MISSED = [
     ('#define BUFF_SIZE_MAX\t(PAGE_SIZE * 16)\n',
      '#define BUFF_SIZE_MAX\t(PAGE_SIZE * 16)\n\n'

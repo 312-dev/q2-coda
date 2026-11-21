@@ -21,7 +21,7 @@ WORK = pathlib.Path.home()/'.cache/q2-uac1'  # uac1_build.py's default --work: i
 
 # (the module's SHA-256, its size, sources_sha256() of the tools/uac1_module it was built from)
 PIN = ('db61bc1716276ccdec1395592c49411c5420a71d2c70be1ed1f2d2dd9b978409', 38124,
-       '2793c3e6d4f89afe8ea2e3a77f76e62fa3d9b8c1f11b5838a6d9c2ae0c23b988')
+       '884e9a294147d49bfc4ba9ea169b3d3eaca105a00324bb9d9ab4932f465a72c2')
 
 
 def sources_sha256():

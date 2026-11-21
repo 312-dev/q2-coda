@@ -71,11 +71,12 @@ gadget_up() {
     echo "iPod USB Interface" > $G/configs/c.2/strings/0x409/configuration
     echo "PTP + Apple Mobile Device" > $G/configs/c.3/strings/0x409/configuration
     echo "PTP + Apple Mobile Device + Apple USB Ethernet" > $G/configs/c.4/strings/0x409/configuration
-    # The Q2 is the source (the reverse of stock's USB DAC), 44.1 kHz 16-bit, one request in flight so a packet the
-    # controller gives back unsent goes out again in order (docs/iphone-mode.md#missed-isochronous-packets)
+    # The Q2 is the source (the reverse of stock's USB DAC), 44.1 kHz 16-bit, four requests in flight: the Q2's dwc2
+    # runs isochronous IN in descriptor DMA, whose chain runs dry with one or two (every other packet, or every third,
+    # sent empty: the car's stutter of 2026-11-21) and holds with three or more (docs/iphone-mode.md#empty-packets)
     U=$G/functions/uac1.car
     mkdir $U || { log "mkdir $U failed"; return 1; }
-    for kv in c_chmask=0 p_chmask=3 p_ssize=2 p_srate=44100 req_number=1; do
+    for kv in c_chmask=0 p_chmask=3 p_ssize=2 p_srate=44100 req_number=4; do
         echo ${kv#*=} > $U/${kv%%=*} 2>/dev/null || log "uac1: ${kv%%=*} refused ${kv#*=}"
     done
     # Link order is interface order: the audio function (0 and 1), then the HID (2), where an iPhone has it
