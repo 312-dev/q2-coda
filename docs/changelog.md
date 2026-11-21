@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: **Other Devices** lists only the devices the Q2 can hear right now. A device whose pairing never finished stayed there for good, wherever the Q2 was, with no way to remove it; the Q2 now forgets such a leftover by itself. Paired devices are never touched.
   - Car Audio: songs at 48 kHz now play to the car at 48 kHz, and 44.1 kHz songs at 44.1 kHz, where everything was converted to 44.1 kHz: the Q2 tells the car each song's rate and changes with it between songs (a moment of silence between albums of different rates). Higher rates go to the nearest of the two, and a car that will not change is sent the song converted, never at the wrong speed.
   - Battery: plugging in or unplugging the cable no longer shows "No Temperature Sensor" for a few seconds. Charging warms the power chip's temperature reading by a few degrees at once, which was taken for a broken sensor.
   - Bluetooth: switching Bluetooth off while it is playing to a headset or car no longer leaves a background process using a whole processor core (and battery) until the Q2 restarts.

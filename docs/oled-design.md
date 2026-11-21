@@ -1602,7 +1602,7 @@ Settings > Bluetooth and its pages ([internals](internals.md#bluetooth-page), `p
 `patch/bt_stopped.c`; approved from `design/bt-redesign`, its `NOTES.md` and sheets, on 2026-11-16):
 
 - **Devices before settings.** The switch, Name (the name as its value), then My Devices (the paired ones) and
-  Other Devices (the found ones), each a section header in 15 px Text Tertiary a whole row high, then Audio:
+  Other Devices (the ones a scan heard while the page is open), each a section header in 15 px Text Tertiary a whole row high, then Audio:
   Quality (its choice as the value, "Auto" by default), Headset Volume, Resume on Connect and Link Volume. With Bluetooth off, the
   switch, Name and a line in 13 px Text Tertiary: "Turn on to play to headphones, a car or a speaker."
 - **Scanning is automatic** while the page is open, the list's spinner (Text Tertiary) beside "Other Devices"
