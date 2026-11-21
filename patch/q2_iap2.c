@@ -26,6 +26,15 @@
 #define MAX_PACKET 1024 /* the longest the Q2 sends: the car's certificate, about 950 bytes, fits one */
 #define RX_PACKET 8192  /* the longest it takes, offered in the SYN+ACK (an iPhone offers 0xFFFF) */
 #define SLOTS 8
+/* The wire's pace (docs/iphone-mode.md#the-link-s-pace): the BMW takes input reports from an interrupt endpoint, 64
+ * bytes every 8 ms, so a 1,024-byte packet is about 170 ms on the wire and its window of 5 most of a second, longer
+ * than its 200 ms retransmission timer and its 10 tries. So a packet goes to the wire only while no more than
+ * BACKLOG_MAX reports wait for it (a bare acknowledgement always goes: one report), a packet is sent again only after
+ * the wire has been idle for the retransmission time, and the bulk (library updates, covers, the queue list) goes in
+ * packets of at most BULK_MAX bytes, so an acknowledgement waits behind no more than about 130 ms of it, well inside
+ * the car's 200 ms. */
+#define BACKLOG_MAX 4
+#define BULK_MAX 768
 
 typedef unsigned char u8;
 typedef unsigned short u16;
@@ -73,6 +82,8 @@ struct iap2_host {
     void (*lib_saved)(void);    /* the car holds lib's revision whole */
     void (*play)(const unsigned *rids, unsigned n, unsigned at, int shuffle);
     int (*queue)(unsigned *rids, unsigned cap); /* the playing queue's rids, or -1 */
+    int (*backlog)(void);     /* input reports handed over and not yet taken by the car */
+    void (*link_lost)(void);  /* the link given up on */
 };
 
 static const struct iap2_host *H;
@@ -178,6 +189,8 @@ static u8 my_seq, syn_seq, peer_seq, last_ack, control_session, file_session;
 static u8 syn_ack[48];
 static unsigned syn_ack_len, window, peer_max, max_sends, max_cacks, unacked;
 static long rto, cack, unacked_since; /* milliseconds; rto 0: never sent again */
+static long wire_busy_at; /* the last time reports were still waiting for the wire */
+static int backlog(void) { return H && H->backlog ? H->backlog() : 0; }
 
 struct slot {
     u8 packet[MAX_PACKET];
@@ -510,7 +523,7 @@ static void enqueue(u8 session, const u8 *b, unsigned n) {
 }
 
 static void pump(void) {
-    while (q_count && link_up && (!rto || (count < window && count < SLOTS))) {
+    while (q_count && link_up && (!rto || (count < window && count < SLOTS)) && backlog() <= BACKLOG_MAX) {
         struct queued *q = &queue[q_head];
         struct slot *s = &slots[(head + count) % SLOTS];
         s->len = HEADER_LEN + q->len + 1;
@@ -567,6 +580,7 @@ static u32 get_be(const u8 *p, unsigned n) {
 static u16 car_receives[96];
 static unsigned car_receives_n;
 static int identified, now_playing, bt_component = -1;
+static int ever_identified; /* this cable: identified kept after the link is lost, for the summary */
 static long auth_due, ident_due, availability_due, np_at; /* 0: not due */
 static unsigned car_current;
 static u32 media_mask, playback_mask, rnd;
@@ -805,8 +819,7 @@ static void iap2_file(const u8 *d, unsigned n) {
     snprintf(t, sizeof t, "file < transfer %02x op %02x (%u bytes)", d[0], d[1], n);
     H->log(t);
     if (d[0] == ql_id && ql_going && d[1] == 0x01) { /* the queue list: every piece */
-        unsigned room = (peer_max - HEADER_LEN - 1 - 2 < MAX_PACKET - HEADER_LEN - 1 - 2 ? peer_max : MAX_PACKET) -
-                        HEADER_LEN - 1 - 2, sent = 0;
+        unsigned room = (peer_max < BULK_MAX ? peer_max : BULK_MAX) - HEADER_LEN - 1 - 2, sent = 0;
         room -= room % 8;
         while (sent < ql_len) {
             unsigned k = ql_len - sent < room ? ql_len - sent : room;
@@ -822,8 +835,7 @@ static void iap2_file(const u8 *d, unsigned n) {
     }
     if (d[0] != art_id || !art_going) return;
     if (d[1] == 0x01) { /* go: every piece, as the window allows */
-        unsigned room = peer_max - HEADER_LEN - 1 - 2;
-        if (room > MAX_PACKET - HEADER_LEN - 1 - 2) room = MAX_PACKET - HEADER_LEN - 1 - 2;
+        unsigned room = (peer_max < BULK_MAX ? peer_max : BULK_MAX) - HEADER_LEN - 1 - 2;
         if (!art_len) file_send(art_id, 0xC0, 0, 0);
         while (art_sent < art_len) {
             unsigned k = art_len - art_sent < room ? art_len - art_sent : room;
@@ -934,7 +946,7 @@ static void take_identification(const u8 *p, unsigned len) {
 
 static void accept_identification(void) {
     send_empty(0x1D02);
-    identified = 1;
+    identified = ever_identified = 1;
     H->log("ident: accepted");
     /* What an iPhone sends next, in its order, a packet each; PodBox's car resets without the UUID. */
     if (car_takes(0x4E0C)) msg_start(0x4E0C), param_str(0, H->uuid), msg_send();
@@ -1001,7 +1013,11 @@ static void send_library_info(void) {
  * To StartMediaLibraryUpdates (4C03: 1 the revision the car holds, 2 the item properties it wants) an iPhone's
  * answers, as PodBox sends them: 8 00, 9 01 (it can play all songs), then MediaLibraryUpdates (4C04) with the songs
  * as items (parameter 2, a group each), as many to a packet as it holds, the first opening with 6 (a reset); an update
- * on the way carries LIB_PARTIAL and progress (7) 0, so a car cut off asks again; the last the revision and 100. A car
+ * on the way carries a partial revision and the progress (7) so far, under 100, so a car cut off asks again; the last
+ * the revision and 100. The partial revision names where the push had reached ("q2p." for the whole library, "q2d."
+ * for changes, then the revision and the songs gone so far): a car that comes back holding one of this revision's
+ * resumes from there with no reset, so a 9,199-song library goes over several short plugs (the BMW's wire takes about
+ * 6 KB a second: docs/iphone-mode.md#the-link-s-pace). A car
  * that holds the revision gets the revision alone; one that holds the revision this Q2 last sent it whole
  * (lib->sent_rev) gets only the songs added or changed since and, as 4 each, the ids of those gone, with no reset.
  * Updates go only while nothing else waits to be sent and the window has a slot to spare, so the car's buttons and
@@ -1014,7 +1030,6 @@ static void send_library_info(void) {
 #define LIB_AARTIST 0x5132000Cu
 #define LIB_GENRE 0x5132000Du
 #define LIB_COMPOSER 0x5132000Eu
-#define LIB_PARTIAL "q2.partial"
 enum { LIB_IDLE, LIB_ITEMS, LIB_GONE };
 static struct {
     int phase, diff, reset;
@@ -1072,7 +1087,7 @@ static int lib_kept(unsigned rid) { /* still in the library */
 static void lib_pump(void) {
     const struct iap2_library *l = H->lib;
     char t[200];
-    while (ls.phase != LIB_IDLE && link_up && !q_count && (!rto || count + 1 < window)) {
+    while (ls.phase != LIB_IDLE && link_up && !q_count && (!rto || count + 1 < window) && backlog() <= BACKLOG_MAX) {
         int n = 0;
         msg_start(0x4C04);
         param_str(0, H->library_id);
@@ -1085,7 +1100,8 @@ static void lib_pump(void) {
             }
             unsigned mark = m.len;
             lib_item(tr, ls.mask);
-            if (!m.ok || m.len + 4 + sizeof l->rev + 5 > sizeof m.b || m.len + 4 + sizeof l->rev + 5 > peer_max - HEADER_LEN - 1) {
+            if (!m.ok || m.len + 4 + sizeof l->rev + 5 > BULK_MAX - HEADER_LEN - 1 ||
+                m.len + 4 + sizeof l->rev + 5 > peer_max - HEADER_LEN - 1) {
                 m.len = mark, m.ok = 1;
                 if (!n) ++ls.next; /* a song no packet holds */
                 break;
@@ -1099,14 +1115,16 @@ static void lib_pump(void) {
                 ++ls.gone;
                 continue;
             }
-            if (m.len + 12 + 4 + sizeof l->rev + 5 > sizeof m.b) break;
+            if (m.len + 12 + 4 + sizeof l->rev + 5 > BULK_MAX - HEADER_LEN - 1) break;
             param_u64(4, LIB_KEY, rid);
             ++ls.gone, ++n;
         }
         if (ls.phase == LIB_GONE && ls.gone >= l->sent_n) ls.phase = LIB_IDLE + 99;
         int done = ls.phase == LIB_IDLE + 99;
-        param_str(1, done ? l->rev : LIB_PARTIAL);
-        param_u8(7, done ? 100 : 0);
+        char partial[64];
+        snprintf(partial, sizeof partial, "%s.%s.%u", ls.diff ? "q2d" : "q2p", l->rev, ls.next);
+        param_str(1, done ? l->rev : partial);
+        param_u8(7, done ? 100 : (u8)(l->n ? ls.next * 99u / l->n : 0));
         msg_send();
         ++ls.updates;
         if (done) {
@@ -1138,9 +1156,16 @@ static void send_library_updates(const char *car_rev, unsigned mask) {
     }
     ls.diff = car_rev && l->sent_rev[0] && !strcmp(car_rev, l->sent_rev);
     ls.reset = !ls.diff;
+    /* a push of this revision cut off: on from where it reached, with no reset (its kind from the prefix) */
+    unsigned rn = strlen(l->rev);
+    if (car_rev && (!strncmp(car_rev, "q2p.", 4) || !strncmp(car_rev, "q2d.", 4)) && !strncmp(car_rev + 4, l->rev, rn) &&
+        car_rev[4 + rn] == '.') {
+        unsigned at = (unsigned)atoi(car_rev + 5 + rn);
+        ls.diff = car_rev[2] == 'd', ls.reset = 0, ls.next = at < l->n ? at : l->n;
+    }
     ls.phase = LIB_ITEMS;
-    snprintf(t, sizeof t, "library: the car holds %s; sending %s of %s (%u songs)", car_rev ? car_rev : "nothing",
-             ls.diff ? "the changes" : "the whole", l->rev, l->n);
+    snprintf(t, sizeof t, "library: the car holds %s; sending %s of %s (%u songs) from %u", car_rev ? car_rev : "nothing",
+             ls.diff ? "the changes" : "the whole", l->rev, l->n, ls.next);
     H->log(t);
     lib_pump();
 }
@@ -1463,17 +1488,22 @@ static void iap2_control_receive(const u8 *msg, unsigned len) {
 static void iap2_tick(void) {
     long now = H->now();
     if (!seen) return;
-    if (link_up && count && rto) {
+    int bl = backlog();
+    if (bl) wire_busy_at = now;
+    if (link_up && count && rto && !bl) {
         struct slot *s = &slots[head];
-        if (s->tries && now - s->sent > rto) {
+        long since = s->sent > wire_busy_at ? s->sent : wire_busy_at; /* when it can have reached the car */
+        if (s->tries && now - since > rto) {
             if (s->tries >= max_sends) {
                 H->log("link: lost (a packet went unacknowledged through every retry)");
                 reset_link();
+                if (H->link_lost) H->link_lost();
                 return;
             }
             send_slot(s);
         }
     }
+    if (q_count) pump(); /* the wire has room again */
     if (link_up && unacked && cack && now - unacked_since >= cack) send_ctl(CTL_ACK, 0, 0, my_seq);
     if (auth_due && now >= auth_due) {
         auth_due = 0;

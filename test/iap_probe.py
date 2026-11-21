@@ -110,6 +110,7 @@ class FakeFfs:
         os.mkfifo(path/'ep1')
         self.path = path
         self.buf = b''
+        self.data_delay = 0.05
 
     def read(self, n, timeout=3.0):
         end = time.time() + timeout
@@ -129,7 +130,7 @@ class FakeFfs:
     def setup(self, rt, rq, wv, wi, wl, data=b''):
         self.event(SETUP, struct.pack('<BBHHH', rt, rq, wv, wi, wl))
         if data:
-            time.sleep(0.05)
+            time.sleep(self.data_delay)  # the probe reads the event before the data (one stream stands for both)
             os.write(self.master, data)
 
 
@@ -451,6 +452,7 @@ class BmwCar(Car):
             return None
         if pl:
             self.seen.add(seq)
+            self.seen.discard((seq + 128) % 256)  # sequence numbers wrap: a seq half the space back is a new packet
             self.peer = seq
             if not self.hold:
                 self.write(packet(0x40, self.seq, seq, 0))
@@ -1142,6 +1144,129 @@ def test_the_library_is_the_card_s_and_the_server_s(probe, tmp_path, monkeypatch
     finally:
         stop(p, fd)
     assert "3 songs read (the card's and the server's)" in log.read_text()
+
+
+def test_the_link_keeps_to_the_car_s_pace(probe, tmp_path, monkeypatch):
+    """The drive of 2026-11-21 (q2muse-1124): the BMW takes input reports at an interrupt endpoint's pace (64 bytes
+    every 8 ms, so a 95-byte report 16 ms: --report-ms 16 makes the writer that slow), and with the library's 1,024-byte
+    packets five deep in its window the Q2's acknowledgement of the car's own packet waited behind most of a second of
+    them; the car sent its packet again 10 times, gave the link up, and the Q2's packets went unacknowledged too. Here the
+    library flows (2,000 songs) and the car sends a packet; the Q2 must acknowledge it within the car's first two tries
+    (400 ms), send none of its own again for nothing, and never lose the link."""
+    monkeypatch.setattr(BmwCar, 'msg', bmw_msg_keeping_body)
+    song_db(tmp_path/'database.db', [(i, f'Song {i}', f'Album {i // 10}', f'Artist {i // 50}', '', 'Rock', i % 10 + 1, 1,
+                                      f'/mnt/mmc/m/{i}.flac') for i in range(1, 2001)])
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path, '--report-ms', '16')
+    waits = []
+    try:
+        car.send(message(0x4C03, prm(0, b'lib\0')))
+        for _ in range(3):
+            end = time.time() + 1.5
+            while time.time() < end:  # the library flowing, acknowledged as it comes
+                car.packet_any(1.0)
+            payload = message(0x5003, prm(0, (100000).to_bytes(4, 'big')))
+            car.send(payload)
+            mine, t0, last, tries, acked = car.seq, time.time(), time.time(), 1, None
+            while acked is None and time.time() - t0 < 2.2:
+                got = car.packet_any(1.0)
+                if got and (got[2] - mine) % 256 < 128:
+                    acked = time.time() - t0
+                elif time.time() - last > 0.2 and tries < 10:  # the BMW's 200 ms, 10 tries
+                    car.write(packet(0x40, mine, car.peer, 1, payload))
+                    last, tries = time.time(), tries + 1
+            waits.append(acked)
+    finally:
+        stop(p, fd)
+    text = log.read_text()
+    assert all(w is not None and w < 0.4 for w in waits), f"the car's packet acknowledged after {waits} s"
+    assert 'link: lost' not in text
+    assert text.count('(again)') <= 2, f"{text.count('(again)')} packets sent again"
+
+
+def test_a_lost_link_shows_the_iphone_again(probe, tmp_path):
+    """After the loss on 2026-11-21 the BMW sent nothing for two minutes, to the cable out. With --state a lost link
+    ends q2-iap with 22, for q2car.sh to take the gadget off the controller and back, and the car to start afresh."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path, '--state', str(tmp_path/'state'))
+    try:
+        car.hold = True  # the car acknowledges nothing more
+        car.send(message(0xDA00))
+        assert p.wait(6) == 22
+    finally:
+        p.kill()
+        os.close(fd)
+    text = log.read_text()
+    assert 'link: lost' in text and 'the iPhone shown again' in text and 'identified yes' in text
+
+
+def test_a_data_stage_that_never_comes_holds_nothing(probe, tmp_path):
+    """The 2026-11-21 05:3x session: a SET_REPORT whose data never came held q2-iap in the read for 35 s, and the car
+    dropped the link. The read gives up after 2 s and the next request is answered."""
+    p, ffs, log = start(probe, tmp_path)
+    try:
+        ffs.event(ENABLE)
+        ffs.setup(0x21, 9, 0x020e, 2, 10)  # no data follows
+        time.sleep(2.5)  # past the read's 2 s (the stand-in ep0 is one stream: a request sooner would be read as data)
+        ffs.setup(0x81, 6, 0x2200, 2, 0x1000)
+        assert len(ffs.read(208, timeout=2)) == 208
+    finally:
+        p.terminate()
+        p.wait(5)
+    assert 'read -1 (errno 4' in log.read_text()
+
+
+PACE_MS = int(os.environ.get('Q2IAP_PACE_MS', '2'))
+
+
+def fast_ffs(init):
+    """FakeFfs with the car's SET_REPORT data 5 ms after its request: the BMW's acknowledgements come within 22 ms"""
+    def wrapped(self, *a, **kw):
+        init(self, *a, **kw)
+        self.data_delay = 0.005
+    return wrapped  # the wire's report pace for the long push; the BMW's is 16
+
+
+@pytest.mark.timeout(900)
+def test_the_whole_library_goes_at_the_wire_s_pace_and_resumes(probe, tmp_path, monkeypatch):
+    """The user's 9,199 songs (2026-11-21): the push must finish at the wire's pace, partial updates naming where it
+    reached; a cable out mid-push resumes there at the next plug, no reset, no song twice; and the car's own packets are
+    acknowledged throughout. At --report-ms 2 (Q2IAP_PACE_MS) the time is an eighth of the BMW's (16 ms a report)."""
+    monkeypatch.setattr(BmwCar, 'msg', bmw_msg_keeping_body)
+    songs = [(i, f'Song number {i}', f'Album {i // 12}', f'Artist {i // 60}', '', 'Rock', i % 12 + 1, 1,
+              f'/mnt/mmc/m/{i}.flac') for i in range(1, 9200)]
+    song_db(tmp_path/'database.db', songs)
+    monkeypatch.setattr(FakeFfs, '__init__', fast_ffs(FakeFfs.__init__))
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path, '--report-ms', str(PACE_MS))
+    first, partial = [], None
+    try:
+        car.send(message(0x4C03, prm(0, b'lib\0')))
+        while len(first) < 1500:  # a short plug: cut off part way
+            mid, _ = car.msg(5.0)
+            ps = plist(car.last)
+            if mid == 0x4C04 and any(i == 2 for i, _ in ps):
+                first += [int.from_bytes(params(d)[0], 'big') & 0xffffffff for i, d in ps if i == 2]
+                partial = dict(ps)[1].rstrip(b'\0').decode()
+    finally:
+        stop(p, fd)
+    assert partial.startswith('q2p.q2.9199.') and int(partial.rsplit('.', 1)[1]) == len(first)
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path, '--report-ms', str(PACE_MS), run='run2')
+    try:
+        t = time.time()
+        items, gone, rev, reset = library(car, partial, timeout=10.0)
+        took = time.time() - t
+    finally:
+        stop(p, fd)
+    rest = [int.from_bytes(i[0], 'big') & 0xffffffff for i in items]
+    assert not reset and first + rest == [s[0] for s in songs], (len(first), len(rest))
+    assert rev.startswith('q2.9199.')
+    # the time on the BMW's wire: every input report the push took, at 16 ms each (two 64-byte transactions of its
+    # 8 ms interrupt endpoint); this harness's own acknowledgements, not the wire, set the time here
+    text = log.read_text()
+    sizes = {1: 5, 2: 9, 3: 13, 4: 17, 5: 25, 6: 49, 7: 95, 8: 193, 9: 257, 10: 385, 11: 513, 12: 767}
+    wire = sum(-(-(sizes[int(l.split(' report > ')[1][:2], 16)] + 1) // 64) * 0.008
+               for l in text.splitlines() if ' report > ' in l)  # each report's 64-byte transactions, 8 ms apart
+    print(f'{len(rest)} songs in {took:.1f} s here; {wire:.0f} s on the BMW\'s wire, '
+          f'{wire * len(songs) / len(rest):.0f} s for all {len(songs)}')
+    assert wire * len(songs) / len(rest) < 400 and '(again)' not in text, (wire, text.count('(again)'))
 
 
 def test_playing_from_idrive(probe, tmp_path, monkeypatch):

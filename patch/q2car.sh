@@ -33,6 +33,7 @@ if [ -d "$LOGDIR" ] && touch "$LOGDIR/.q2car-w" 2>/dev/null; then rm -f "$LOGDIR
 LOG=$LOGDIR/q2car.log
 SUMMARY=$LOGDIR/q2car-summary.log
 SUMMARY_MAX=262144
+RELINKS=3
 
 up() { cut -d' ' -f1 /proc/uptime; }
 log() { echo "$(up) sh $*" >> "$LOG"; }
@@ -161,16 +162,27 @@ runner() {
     trap 'p=$(cat $RUN/daemon.pid 2>/dev/null); alive "$p" && kill "$p"' TERM INT HUP
     # A --dev build's ADB gadget holds the controller between stock's gadgets: off it while the iPhone is shown
     [ -x $ADBG ] && $ADBG park >/dev/null 2>&1
-    if gadget_up; then
+    # A lost iAP2 link (q2-iap's exit 22) is a fresh iPhone for the car: the gadget off the controller and back, at
+    # most RELINKS times a cable (docs/iphone-mode.md#the-link-s-pace)
+    relinks=0
+    while :; do
+        if ! gadget_up; then
+            log "the gadget could not start"
+            grep -q '^verdict=' $STATE 2>/dev/null || echo "verdict=failed" >> $STATE
+            break
+        fi
         wait "$(cat $RUN/daemon.pid)"
         rc=$?
         p=$(cat $RUN/daemon.pid 2>/dev/null)
         alive "$p" && wait "$p"
         log "q2-iap ended (exit $rc)"
-    else
-        log "the gadget could not start"
-        grep -q '^verdict=' $STATE 2>/dev/null || echo "verdict=failed" >> $STATE
-    fi
+        [ "$rc" = 22 ] && [ $relinks -lt $RELINKS ] || break
+        relinks=$((relinks + 1))
+        log "the link was lost: the iPhone shown again ($relinks of $RELINKS)"
+        gadget_down "relink"
+        rm -f $RUN/kept # the next session's summary is kept too
+        sleep 1
+    done
     gadget_down "end"
     echo "down=1" >> $STATE
     rm -f $RUN/runner.pid

@@ -64,6 +64,8 @@ void *memset(void *, int, size_t);
 int memcmp(const void *, const void *, size_t);
 int atoi(const char *);
 int fork(void);
+int nanosleep(const struct timespec *, struct timespec *);
+int siginterrupt(int, int);
 void _exit(int);
 unsigned alarm(unsigned);
 void (*signal(int, void (*)(int)))(int);
@@ -255,12 +257,26 @@ static int echo_from = -1, sessions_max, session, active, carplay;
 static long disabled_at = -1, gap_ms = 8000;
 
 static void on_signal(int s) { stopping = s; }
+static void on_alarm(int s) { (void)s; } /* only to end a read that waits too long (setup's data stage) */
+#define DATA_STAGE_S 2
+/* SIGALRM ends a read rather than restarting it (signal's BSD default would restart it) */
+static void alarm_interrupts(void) {
+#ifdef PROBE_HOST
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = on_alarm;
+    sigaction(SIGALRM, &sa, 0);
+#else
+    signal(SIGALRM, on_alarm), siginterrupt(SIGALRM, 1);
+#endif
+}
 
 /* ---- iAP2 (--iap2) ---- */
 
 #include "q2_iap2.c"
 
-static int iap2_mode, writer_fd = -1, writer_pid;
+static int iap2_mode, writer_fd = -1, writer_pid, done_fd = -1, report_ms;
+static unsigned wr_queued, wr_done; /* input reports handed to the writer, and those it has written to ep1 */
 static const char *np_file = "/tmp/coda-rc.now";
 /* What the player and the shim read (player/output.c output_car, patch/coda_rc_shim.c cr_command), and Cover Flow's
  * cache of covers (patch/coverflow.c art_path); each can be moved for the host tests. */
@@ -272,8 +288,9 @@ static char uuid[40] = "51320000-0000-4000-8000-000000000000", library_id[64];
  * waits for the host to collect it, and the event loop must never wait (the car's control requests go unanswered
  * meanwhile). The pipe is non-blocking on this side, so a host that stops collecting costs reports, not the loop. */
 static void writer_start(const char *dir) {
-    int fds[2];
+    int fds[2], dn[2];
     char path[160];
+    if (pipe(dn)) dn[0] = dn[1] = -1;
     if (pipe(fds)) {
         logline("iap2", "pipe failed: no input reports");
         return;
@@ -283,6 +300,7 @@ static void writer_start(const char *dir) {
     if (writer_pid == 0) {
         signal(SIGTERM, SIG_DFL), signal(SIGINT, SIG_DFL), signal(SIGHUP, SIG_DFL); /* the probe's only set a flag */
         close(fds[1]);
+        if (dn[0] >= 0) close(dn[0]);
         int ep = open(path, O_RDWR), fails = 0;
         unsigned char b[2 + 128];
         for (;;) {
@@ -302,9 +320,19 @@ static void writer_start(const char *dir) {
             } else {
                 fails = 0;
             }
+            /* the bus's own pace, for the host tests (--report-ms): a write to the real ep1 returns once the car has
+             * taken the report, one an interrupt interval */
+            if (report_ms) {
+                struct timespec ts = { report_ms / 1000, (report_ms % 1000) * 1000000L };
+                nanosleep(&ts, 0);
+            }
+            if (dn[1] >= 0) write(dn[1], "", 1); /* one more report gone (io_backlog) */
         }
     }
     close(fds[0]);
+    if (dn[1] >= 0) close(dn[1]);
+    done_fd = dn[0];
+    if (done_fd >= 0) fcntl(done_fd, F_SETFL, O_NONBLOCK);
     writer_fd = fds[1];
     fcntl(writer_fd, F_SETFL, O_NONBLOCK);
 }
@@ -316,11 +344,21 @@ static void io_send(const unsigned char *r, unsigned len) {
     b[0] = len;
     memcpy(b + 1, r, len);
     int w = writer_fd < 0 ? -1 : (int)write(writer_fd, b, len + 1);
+    if (w == (int)len + 1) ++wr_queued;
     hex(h, sizeof h, r, len < 24 ? len : 24);
     snprintf(msg, sizeof msg, "report > %s%s", h, w == (int)len + 1 ? "" : " (dropped: the writer is behind)");
     logline("iap2", msg);
 }
 static void io_log(const char *m) { logline("iap2", m); }
+
+/* The input reports handed to the writer and not yet taken by the car: at the BMW's pace (an interrupt endpoint of 64
+ * bytes every 8 ms, a 95-byte report two of them) a 1024-byte packet is about 170 ms on the wire. */
+static int io_backlog(void) {
+    char b[256];
+    int n;
+    while (done_fd >= 0 && (n = (int)read(done_fd, b, sizeof b)) > 0) wr_done += (unsigned)n;
+    return done_fd < 0 ? 0 : (int)(wr_queued - wr_done);
+}
 
 /* The shim's Now Playing (patch/coda_rc_shim.c cr_now, from now_source.c: key=value lines; pos in ms, len in
  * seconds, live=1 for a radio's stream), written while Car Remote is on or the car's iPhone is on the cable. */
@@ -640,7 +678,7 @@ static void summary(void) {
              "summary: host %s (%s, %ld ms), car \"%s\", identified %s, audio asked %s, flowing %s, in_sent %u in_missed %u"
              " (%u.%u%%), underruns %u, problems %d, p_rate %u rate_sets %u rate_asked %u, start %ld ms, longest gap"
              " %u.%u ms, alt toggles %u, rate changes %u",
-             verdicts[verdict], why[0] ? why : "-", verdict_ms, car_name, identified ? "yes" : "no",
+             verdicts[verdict], why[0] ? why : "-", verdict_ms, car_name, ever_identified ? "yes" : "no",
              audio_at >= 0 || flowing_at >= 0 ? "yes" : "no",
              flowing_at >= 0 ? "yes" : "no", ds, dm, ds + dm ? dm * 100 / (ds + dm) : 0,
              ds + dm ? dm * 1000 / (ds + dm) % 10 : 0, under - under0, troubles, rate[0], rate[1], rate[2],
@@ -652,9 +690,16 @@ static void summary(void) {
 
 #include "q2_iap_lib.c"
 
+/* The link lost (the car stopped acknowledging through every retry): with --state, q2-iap ends (exit 22) and q2car.sh
+ * shows the car the iPhone again (the gadget off the controller and back), which is how a car starts a session
+ * afresh; it sent nothing more by itself after the loss on 2026-11-21 (126 s, to the cable out). */
+static void io_link_lost(void) {
+    if (state_file && !leave) leave = 22, logline("car", "link: lost; the iPhone shown again");
+}
+
 static const struct iap2_host io = { io_send,   mono_ms,    io_log,  io_now_playing, "Q2 Muse", uuid,     library_id,
                                      io_audio,  io_command, io_artwork, &lib_t,      lib_load,  lib_saved, lib_play,
-                                     lib_queue };
+                                     lib_queue, io_backlog, io_link_lost };
 
 /* The input report that echoes payload (link control 0, whole): the smallest that fits, zero padded,
  * written to the HID instance's ep1 in a child so the event loop never waits on the host's poll. */
@@ -725,7 +770,11 @@ static void setup(struct inst *i, const unsigned char *s) {
         return;
     }
     unsigned want = wl < sizeof buf ? wl : sizeof buf;
-    r = read(i->ep0, buf, want); /* the data stage, and the status stage acknowledged */
+    /* the data stage, and the status stage acknowledged; at most DATA_STAGE_S, or the loop stops with it: on
+     * 2026-11-21 a SET_REPORT's data never came, and this read held everything else for 35 s (the car dropped the link) */
+    alarm(DATA_STAGE_S);
+    r = read(i->ep0, buf, want);
+    alarm(0);
     int e = r < 0 ? ERRNO : 0;
     if (rt == 0x21 && rq == 0x09) snprintf(note, sizeof note, "SET_REPORT type %u id %u", wv >> 8, wv & 255);
     else if (rt == 0x21 && rq == 0x0a) snprintf(note, sizeof note, "SET_IDLE");
@@ -824,6 +873,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(o, "--cmd-file")) cmd_file = v, ++a;
         else if (!strcmp(o, "--art-dir")) art_dir = v, ++a;
         else if (!strcmp(o, "--state")) state_file = v, ++a;
+        else if (!strcmp(o, "--report-ms")) report_ms = atoi(v), ++a;
         else if (!strcmp(o, "--lib-db")) lib_db = v, ++a;
         else if (!strcmp(o, "--lib-sent")) lib_sent_file = v, ++a;
         else if (!strcmp(o, "--lib-cat")) lib_cat = v, ++a;
@@ -848,6 +898,7 @@ int main(int argc, char **argv) {
     clock_gettime(CLOCK_MONOTONIC, &t0);
     signal(SIGTERM, on_signal), signal(SIGINT, on_signal), signal(SIGHUP, on_signal);
     signal(SIGPIPE, SIG_IGN), signal(SIGCHLD, SIG_IGN); /* echo children reaped by the kernel */
+    alarm_interrupts();
     char msg[512];
     snprintf(msg, sizeof msg, "start: phase %s, wall clock %ld, echo %s, sessions %d, for %ld s, gap %ld ms%s", phase,
              time(0), echo_from < 0 ? "never" : echo_from == 0 ? "always" : "from session N", sessions_max, for_s, gap_ms,
