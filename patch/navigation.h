@@ -1167,7 +1167,9 @@ enum { ROUTE_BUZZER = 1, ROUTE_MIXED = 2 };
 extern int clicker_kind; /* CLICK_KIND_*, 0 the wheel's (zero at start, as .scratch is) */
 const char *clicker_text(void);
 void clicker_step(void);
-int clicker_route(int listening);
+int clicker_route(int listening), clicker_buzzes(int listening);
+/* input.c: one buzzer click alone, as a wheel's would be, for a wheel read raw (radio_tuner.c) */
+int ringnav_piezo(void);
 /* menu_modal.c: the menu sheet (docs/oled-design.md#menus) */
 enum { MM_ACTION, MM_SETTING, MM_CHOICE, MM_SWITCH }; /* modal_row's how */
 int modal_row_w(void);

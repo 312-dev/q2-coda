@@ -315,6 +315,21 @@ static void *tone_worker(void *on) {
     tone_busy = 0;
     return 0;
 }
+/* A buzzer click alone (clicker.c clicker_buzzes, nothing mixed), on the same worker and gates as
+ * ringnav_buzzer: Radio's dial, whose wheel is read raw (radio_tuner.c fine_turn). */
+int ringnav_piezo(void) {
+    int listening = g_po_status || g_bal_status || mclGetOutputWay();
+    if (!g_keytone_flag || tone_dark || !clicker_buzzes(listening) || tone_busy) return 0;
+    unsigned long tid;
+    tone_busy = 1;
+    if (pthread_create(&tid, 0, tone_worker, (void *)1L)) {
+        tone_busy = 0;
+        return 0;
+    }
+    pthread_detach(tid);
+    tone_dark = !g_backlight_status;
+    return 1;
+}
 int ringnav_buzzer(int on) {
     int listening = g_po_status || g_bal_status || mclGetOutputWay();
     if (!g_keytone_flag || tone_dark) return 0;

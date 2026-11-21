@@ -261,8 +261,12 @@ static void click(int tenths) {
 
 /* n steps of the dial (the prototype's fineTurn), FAST ones when fast: a station within CAPTURE
  * of where a step would go, or passed by it, is landed on, and holds the next HOLD steps the same
- * way, each a click in place; sitting on one (landed by seek, the list or a tap) holds alike. */
-static void fine_turn(int n, int fast) {
+ * way, each a click in place; sitting on one (landed by seek, the list or a tap) holds alike.
+ * piezo: the steps came from the raw wheel, which posts no key and so no Key Tone click: each step
+ * that moves the dial asks the buzzer for one (input.c ringnav_piezo, under the Clicker), and one
+ * asked while the last still sounds is dropped, so a fast spin is a train at the buzzer's own pace.
+ * A tick (a key) had stock's click on its press already. */
+static void fine_turn(int n, int fast, int piezo) {
     int d = n > 0 ? 1 : -1, step = fast ? FAST : FINE;
     for (int k = 0; k < n * d; ++k) {
         if ((rt->det_f != rt->freq || rt->det_d != d) && on_station(rt->freq))
@@ -284,6 +288,7 @@ static void fine_turn(int n, int fast) {
         }
         if (hit) f = hit->freq, rt->det_f = f, rt->det_left = HOLD, rt->det_d = d;
         click(hit ? 14 : 10);
+        if (piezo && f != rt->freq) ringnav_piezo();
         rt->freq = f;
     }
     tune();
@@ -311,7 +316,7 @@ static void wheel(unsigned now) {
     rt->travel -= n * STEP_THIRDS;
     int fast = now - rt->tick_at < (unsigned)(FAST_MS * (n < 0 ? -n : n));
     rt->tick_at = now;
-    fine_turn(n, fast);
+    fine_turn(n, fast, 1);
 }
 
 /* The words' reveal (the prototype's shown): the station on the dial, once its stream has sounded
@@ -1051,7 +1056,7 @@ int tuner_key(void *top, unsigned key) {
             unsigned now = time_now_ms();
             int fast = now - rt->tick_at < FAST_MS;
             rt->tick_at = now;
-            fine_turn(wheel, fast);
+            fine_turn(wheel, fast, 0);
         } else if (key == KEY_FWD_BTN || key == KEY_BACK_BTN)
             seek(key == KEY_FWD_BTN ? 1 : -1);
         else if (key == KEY_CENTER) { /* a tap: the volume shown, or a tap while it shows: gone */
