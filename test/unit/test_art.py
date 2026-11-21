@@ -195,7 +195,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                                               'crphone_d', 'crphone_l', 'crphone_w',
                                               *(f'ctaring_{s}_{k}' for s in 'lr' for k in 'dl'),  # the buttons' focus ring's ends
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *hearts, *menufav, *rates, *stars, *marks, *menus, *speakers, *pair, *quality,
-                                              *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
+                                              *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt', 'radio_tower',
                                               'search_pop', 'search_pop_letters', *(f'search_return_{m}_{k}' for m in ('search', 'go', 'save') for k in 'wa'), 'holdback',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)),
                                               *offers, *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
@@ -235,6 +235,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           *((n, art.MODE_GLYPH_PX, 0xffffff) for n in modepages),
                           *((n, art.SW_OFFER_PX, 0xffffff) for n in offers),
                           *((n, art.USB_TOAST_PX, c) for n, c in charge.items()), ('chargebolt', art.CHARGE_BOLT_PX, 0x34c759),
+                          ('radio_tower', art.RADIO_TOWER_PX, 0xffffff),  # Home's pane while Radio plays (radio_pane.c)
                           *((n, art.ROW_ICON_PX, c) for n, c in btdev.items()), *((n, art.USB_TOAST_PX, c) for n, c in bttoast.items()),
                           *((f'cc_{n}', px, c) for n, (_, px, c) in art.CC_ICONS.items()),
                           *((f'cc_{n}_l', px, art.CC_LIGHT[n]) for n, (_, px, _) in art.CC_ICONS.items())):
@@ -452,6 +453,17 @@ def test_oleds_tidal_mark_is_four_diamonds_three_across_one_under():
     w, h, at = pixels(art.images(theme.builtins()[0])['oled_stream_tidal_d'])
     assert all(at(x, 7)[3] > 200 for x in (4, 10, 15)) and at(10, 12)[3] > 200
     assert at(4, 12)[3] == 0 and at(15, 12)[3] == 0 and at(10, 2)[3] == 0
+
+
+def test_the_radio_tower_is_a_mast_under_a_dot_between_two_pairs_of_waves():
+    """Home's pane's tower (RADIO_TOWER, the Car Remote app's ic_radio): the dot and the mast's foot inked down the
+    middle, a wave either side, the gaps between them clear."""
+    w, h, at = pixels(art.images(theme.builtins()[0])['oled_radio_tower'])
+    c = art.RADIO_TOWER_PX // 2
+    assert (w, h) == (art.RADIO_TOWER_PX, art.RADIO_TOWER_PX)
+    assert at(c, 16)[3] > 200 and at(c - 5, 29)[3] > 200 and at(c, 26)[3] > 200  # the dot, a leg, the crossbar
+    assert at(7, 17)[3] > 200 and at(31, 17)[3] > 200 and at(13, 17)[3] > 200  # the outer waves, an inner one
+    assert at(c, 3)[3] == 0 and at(c, 36)[3] == 0 and at(10, 17)[3] == 0 and at(c, 29)[3] == 0  # clear around
 
 
 def test_oleds_subsonic_mark_is_q2_codas_submarine():
