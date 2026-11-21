@@ -835,6 +835,41 @@ def test_the_car_s_audio_health(probe, tmp_path):
     assert 'in_sent 3970 in_missed 30 (0.7%), underruns 1, problems 2, p_rate 48000 rate_sets 2 rate_asked 44100' in text
 
 
+def test_the_car_s_stream_a_line_a_second(probe, tmp_path):
+    """While the car has asked for audio, a line a second from the module's counters (uac1_build.py COUNTED): that
+    second's completions by status, resends, the frames the host took, packet sizes and the longest gap (windows the
+    line restarts by writing them back), gaps over 2 ms, AS IN alternate settings, rate changes; and the cable's
+    summary: the start latency, the longest gap, the toggles and the rate changes."""
+    c = tmp_path/'params'
+    c.mkdir()
+    base = dict(in_sent=1000, in_missed=0, in_enodata=0, in_exdev=0, in_eshutdown=0, in_other=0, in_resent=0, in_bytes=0,
+                in_zero=0, in_gaps2=0, in_alt_on=1, in_alt_off=0, rate_sets=1, in_pkt_min=4294967295, in_pkt_max=0,
+                in_gap_max=0, p_rate=44100, rate_asked=44100)
+    for k, v in base.items():
+        (c/k).write_text(f'{v}\n')
+    p, car, fd, log, files = bmw_up(probe, tmp_path, '--state', str(tmp_path/'state'), '--counters', str(c))
+    try:
+        car.send(message(0xDA00))
+        car.msg()
+        time.sleep(1.3)
+        # a second as the 00:24 clip might have been: the host toggling the stream, one gap of 340 ms
+        for k, v in dict(in_sent=1998, in_missed=3, in_enodata=2, in_other=1, in_resent=3, in_bytes=176400, in_zero=2,
+                         in_gaps2=1, in_alt_on=3, in_alt_off=2, rate_sets=2, in_pkt_min=176, in_pkt_max=180,
+                         in_gap_max=332031).items():
+            (c/k).write_text(f'{v}\n')
+        time.sleep(1.1)
+    finally:
+        stop(p, fd)
+    lines = [l.split(' car ', 1)[1] for l in log.read_text().splitlines() if ' car usb ' in l]
+    want = ('usb 1000ms: sent=998 missed=3 (enodata 2 exdev 0 shutdown 0 other 1) resent=3 zero=2 frames=44100 '
+            'pkt=176/180 gapmax=339.9ms gaps2=1 alt=+2/-2 rate_sets=1')
+    assert want in lines, lines
+    assert (c/'in_gap_max').read_text().strip() == '0' and (c/'in_pkt_min').read_text().strip() == '4294967295', \
+        'the windows restarted'
+    text = log.read_text()
+    assert 'longest gap 339.9 ms, alt toggles 4, rate changes 1' in text, text[-600:]
+
+
 def test_no_sound_when_the_car_asks_and_takes_nothing(probe, tmp_path):
     counters = tmp_path/'params'
     counters.mkdir()

@@ -220,6 +220,17 @@ The cause is in `u_audio`, with the controller's part read in the stock kernel. 
 
 Unchanged from the design's staged plan, except that the library went to iDrive sooner than M7: the car's browser lists the Q2's songs and plays them ([below](#the-library-on-idrive)), and its Up Next lists the queue.
 
+<a id="the-car-s-stream-counted"></a>
+## The car's stream, counted
+
+For the stutter heard in the car on 2026-11-20 at 00:24 (about 300 ms of music, then about 340 ms of silence, over and over, while the player fed the USB card steadily, `dry=0`): not reproduced at the desk. With a Windows host on the image's module, `in_missed` stayed 0 with one request in flight and with two and no resend, at 44.1 and at 48 kHz, and the recordings had no gaps; Windows' capture is not bit-exact, so the frame counter could not be checked. The drive's own session counted `in_missed` 0 of 47,064 packets. So the module counts more, and changes nothing it sends (`uac1_build.py` `COUNTED`, `COUNTED_F`): completions by status (`in_enodata`, the controller's missed interval; `in_exdev`; `in_eshutdown`; `in_other`), resends, the bytes the host took and the packets with none, the smallest and largest packet and the longest gap between two completions (windows q2-iap restarts each second by writing them), the gaps over 2 ms, and the host's AS IN alternate settings (`in_alt_on`, `in_alt_off`, `in_alt_ms` the last one's time). q2-iap writes a line a second from them while the car has asked for audio:
+
+```text
+usb 1000ms: sent=998 missed=3 (enodata 2 exdev 0 shutdown 0 other 1) resent=3 zero=2 frames=44100 pkt=176/180 gapmax=339.9ms gaps2=1 alt=+2/-2 rate_sets=1
+```
+
+and the cable's summary adds the start latency (asked to taken), the longest gap, the alternate-setting toggles and the rate changes. A host that turns the stream off and on every 300 ms shows as `alt` counts each second; packets lost on the bus as `missed`; a host that stops collecting as a long `gapmax` with `sent` short of 1000; a stream the host takes whole while the sound still breaks points past the Q2, at the car. `test/uac1_isoc.py` checks the counters under Unicorn against a controller that gives back every third request unsent (300 `in_enodata`, the resends only with one request, the bytes, 176 and 180-byte packets, a 2 ms longest gap), and `test/iap_probe.py` `test_the_car_s_stream_a_line_a_second` the line and the summary.
+
 <a id="the-library-on-idrive"></a>
 ## The library on iDrive, playing from it, and Up Next
 

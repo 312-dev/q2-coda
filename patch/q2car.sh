@@ -138,7 +138,8 @@ keep() {
     : > $RUN/kept
     P=/sys/module/usb_f_uac1/parameters
     m=
-    for f in in_sent in_missed p_rate p_srates rate_sets rate_asked resend_missed; do
+    for f in in_sent in_missed in_enodata in_exdev in_eshutdown in_other in_resent in_bytes in_zero in_gaps2 \
+        in_alt_on in_alt_off in_alt_ms p_rate p_srates rate_sets rate_asked resend_missed; do
         [ -e $P/$f ] && m="$m $f=$(cat $P/$f)"
     done
     { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $(up) $(grep ' car summary:' "$LOG" | tail -n 1 | cut -d' ' -f3-)"

@@ -457,7 +457,7 @@ static char why[64];
 #define NOSTREAM_MS 5000     /* the car asked for audio and took no packet in this long: no sound */
 #define CLEAN_MS 10000       /* a problem is over after this long without one */
 static unsigned sent0, missed0, under0, sent_last, missed_last, under_last;
-static long audio_at = -1, flowing_at = -1, health_at, trouble_at;
+static long audio_at = -1, audio_at0 = -1, flowing_at = -1, health_at, trouble_at;
 static int counted, flowing, troubles;
 static const char *trouble = "";
 
@@ -478,6 +478,48 @@ static void counters(unsigned *sent, unsigned *missed, unsigned *under) {
         snprintf(p, sizeof p, "%s/in_missed", counters_dir), read_uint(p, missed);
     }
     read_uint(under_file, under);
+}
+
+/* The car's stream, a line a second while the car has asked for audio (docs/iphone-mode.md#the-car-s-stream-counted),
+ * from the module's counters (uac1_build.py COUNTED): what each second's completions were, by status, the frames the
+ * host took, the packet sizes and the longest gap between completions (windows this restarts by writing them), the
+ * gaps over 2 ms and the host's AS IN alternate settings. Kept for the cable's summary: the longest gap, the toggles
+ * and the rate changes. Counting only: nothing here changes what is sent. */
+enum { C_SENT, C_MISSED, C_ENODATA, C_EXDEV, C_ESHUTDOWN, C_OTHER, C_RESENT, C_BYTES, C_ZERO, C_GAPS2, C_ALT_ON, C_ALT_OFF,
+       C_RATE_SETS, C_PKT_MIN, C_PKT_MAX, C_GAP_MAX, C_N };
+static const char *const c_names[C_N] = { "in_sent",  "in_missed",  "in_enodata", "in_exdev", "in_eshutdown",
+                                          "in_other", "in_resent",  "in_bytes",   "in_zero",  "in_gaps2",
+                                          "in_alt_on", "in_alt_off", "rate_sets", "in_pkt_min", "in_pkt_max",
+                                          "in_gap_max" };
+static unsigned c_last[C_N], c_first[C_N], gap_longest; /* gap_longest in 1024 ns units */
+static int c_have;
+static void c_write(int k, unsigned v) {
+    char p[160], b[16];
+    snprintf(p, sizeof p, "%s/%s", counters_dir, c_names[k]);
+    int fd = open(p, O_WRONLY | O_TRUNC), n = snprintf(b, sizeof b, "%u\n", v);
+    if (fd >= 0) write(fd, b, n), close(fd);
+}
+static void stream_line(long ms) {
+    unsigned c[C_N], d[C_N];
+    char p[160], msg[400];
+    if (!counters_dir) return;
+    for (int k = 0; k < C_N; ++k) {
+        c[k] = 0;
+        snprintf(p, sizeof p, "%s/%s", counters_dir, c_names[k]);
+        read_uint(p, &c[k]);
+        d[k] = c[k] - c_last[k];
+    }
+    if (!c_have) memcpy(c_first, c, sizeof c), c_have = 1, d[C_SENT] = d[C_MISSED] = 0;
+    if (c[C_GAP_MAX] > gap_longest) gap_longest = c[C_GAP_MAX];
+    snprintf(msg, sizeof msg,
+             "usb %ldms: sent=%u missed=%u (enodata %u exdev %u shutdown %u other %u) resent=%u zero=%u frames=%u pkt=%u/%u"
+             " gapmax=%u.%ums gaps2=%u alt=+%u/-%u rate_sets=%u",
+             ms, d[C_SENT], d[C_MISSED], d[C_ENODATA], d[C_EXDEV], d[C_ESHUTDOWN], d[C_OTHER], d[C_RESENT], d[C_ZERO],
+             d[C_BYTES] / 4, c[C_PKT_MIN] == ~0u ? 0 : c[C_PKT_MIN], c[C_PKT_MAX], c[C_GAP_MAX] * 1024u / 1000000u,
+             c[C_GAP_MAX] * 1024u / 100000u % 10, d[C_GAPS2], d[C_ALT_ON], d[C_ALT_OFF], d[C_RATE_SETS]);
+    logline("car", msg);
+    memcpy(c_last, c, sizeof c);
+    c_write(C_PKT_MIN, ~0u), c_write(C_PKT_MAX, 0), c_write(C_GAP_MAX, 0); /* the next second's windows */
 }
 
 /* The state file, written whole at each change. */
@@ -546,6 +588,7 @@ static void health_poll(long now) {
     unsigned ds = sent - sent_last, dm = missed - missed_last, du = under - under_last;
     sent_last = sent, missed_last = missed, under_last = under;
     int changed = strcmp(state_name, car_name) != 0; /* identified since the last write */
+    if (audio_on) stream_line(HEALTH_MS);
     if (!audio_on) {
         changed |= flowing || *trouble;
         audio_at = -1, flowing = 0, trouble = "";
@@ -553,6 +596,7 @@ static void health_poll(long now) {
         return;
     }
     if (audio_at < 0) audio_at = now, changed = 1;
+    if (audio_at0 < 0) audio_at0 = now; /* the first ask, for the summary's start latency */
     if (ds && !flowing) {
         flowing = 1, changed = 1;
         if (flowing_at < 0) flowing_at = now;
@@ -593,11 +637,15 @@ static void summary(void) {
     }
     snprintf(msg, sizeof msg,
              "summary: host %s (%s, %ld ms), car \"%s\", identified %s, audio asked %s, flowing %s, in_sent %u in_missed %u"
-             " (%u.%u%%), underruns %u, problems %d, p_rate %u rate_sets %u rate_asked %u",
+             " (%u.%u%%), underruns %u, problems %d, p_rate %u rate_sets %u rate_asked %u, start %ld ms, longest gap"
+             " %u.%u ms, alt toggles %u, rate changes %u",
              verdicts[verdict], why[0] ? why : "-", verdict_ms, car_name, identified ? "yes" : "no",
              audio_at >= 0 || flowing_at >= 0 ? "yes" : "no",
              flowing_at >= 0 ? "yes" : "no", ds, dm, ds + dm ? dm * 100 / (ds + dm) : 0,
-             ds + dm ? dm * 1000 / (ds + dm) % 10 : 0, under - under0, troubles, rate[0], rate[1], rate[2]);
+             ds + dm ? dm * 1000 / (ds + dm) % 10 : 0, under - under0, troubles, rate[0], rate[1], rate[2],
+             flowing_at >= 0 && audio_at0 >= 0 ? flowing_at - audio_at0 : -1L, gap_longest * 1024u / 1000000u,
+             gap_longest * 1024u / 100000u % 10, c_last[C_ALT_ON] - c_first[C_ALT_ON] + c_last[C_ALT_OFF] - c_first[C_ALT_OFF],
+             c_last[C_RATE_SETS] - c_first[C_RATE_SETS]);
     logline("car", msg);
 }
 

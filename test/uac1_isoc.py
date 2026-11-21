@@ -26,6 +26,7 @@ import importlib.util
 from pathlib import Path
 import struct
 import sys
+from unicorn.mips_const import UC_MIPS_REG_V1
 
 ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location('uac1_bind', ROOT/'test/uac1_bind.py')
@@ -58,6 +59,8 @@ class Machine(uac1_bind.Machine):
     def __init__(self, data):
         super().__init__(data)
         self.queue = []
+        self.t = 0  # ktime_get's nanoseconds: run() moves it a millisecond a completion, the isochronous interval
+
 
     def service(self, name, a):
         if name in ('_snd_pcm_stream_lock_irqsave', '_raw_spin_lock_irqsave', 'snd_pcm_stream_unlock_irqrestore',
@@ -66,6 +69,9 @@ class Machine(uac1_bind.Machine):
         if name == 'usb_ep_queue':
             self.queue.append(a[1])
             return 0
+        if name == 'ktime_get':  # an s64 in v0 (low) and v1 (high), o32's way
+            self.uc.reg_write(UC_MIPS_REG_V1, self.t >> 32)
+            return self.t & 0xffffffff
         return super().service(name, a)
 
 
@@ -110,15 +116,24 @@ def run(data, resend, reqs, steps=900):
     for i in range(steps):
         req = m.queue.pop(0)
         sent = i % 3 != 2
+        m.t += 1000000
+        n = 0
         if sent:
             n = m.read(req + REQ_LENGTH)
             host += struct.unpack(f'<{n // 4}I', m.read(m.read(req + REQ_BUF), n))
+        m.write(req + REQ_ACTUAL, n)
         m.write(req + REQ_STATUS, 0 if sent else ENODATA)
         m.call('u_audio_iso_complete', ep, req)
         hw = m.read(prm + PRM_HW_PTR) // 4
         moved += (hw - last) % RING_FRAMES
         last = hw
-    return host, moved, m.read(sym['in_missed']), m.read(sym['in_sent'])
+    counted = {k: m.read(sym[k]) for k in COUNTED if k in sym}
+    return host, moved, m.read(sym['in_missed']), m.read(sym['in_sent']), counted
+
+
+# uac1_build.py COUNTED's counters, where the module has them
+COUNTED = ('in_bytes', 'in_zero', 'in_enodata', 'in_exdev', 'in_eshutdown', 'in_other', 'in_resent', 'in_gaps2',
+           'in_pkt_min', 'in_pkt_max', 'in_gap_max')
 
 
 # struct g_audio's in_ep, uac and params.p_srate; struct usb_gadget's ep0 and speed (STOCK); usb_composite_dev.req;
@@ -289,7 +304,7 @@ def main(argv):
     data = a.ko.read_bytes()
     wrong = []
     for resend, reqs, cured in ((0, 2, False), (1, 2, False), (0, 1, False), (1, 1, True)):
-        host, moved, missed, sent = run(data, resend, reqs)
+        host, moved, missed, sent, counted = run(data, resend, reqs)
         r = runs(host)
         got = len(host) - next(i for i, v in enumerate(host) if v) + 1  # from the counter's frame 0, after the zeroed packets
         what = f'resend_missed {resend}, {reqs} requests'
@@ -297,6 +312,16 @@ def main(argv):
               f'{sorted(set(r[2:-2])) if len(r) > 4 else r}; in_missed {missed}, in_sent {sent}')
         if (missed, sent) != (300, 600):
             wrong.append(f'{what}: in_missed {missed} and in_sent {sent}, not 300 and 600')
+        if counted:
+            # each miss -ENODATA and, resent only with one request; the bytes the host got; packets of 44 or 45
+            # frames at 44.1 kHz (176 or 180 bytes); two intervals at most between completions (2 ms, so none over
+            # 2 ms), in 1024 ns units
+            want = dict(in_bytes=4 * len(host), in_zero=0, in_enodata=300, in_exdev=0, in_eshutdown=0, in_other=0,
+                        in_resent=300 if resend and reqs == 1 else 0, in_gaps2=0, in_pkt_min=176, in_pkt_max=180,
+                        in_gap_max=2000000 >> 10)
+            print(f'{what}: counted {counted}')
+            if counted != want:
+                wrong.append(f'{what}: counted {counted}, not {want}')
         if cured:
             if len(r) != 1:
                 wrong.append(f'{what}: the host\'s frames break {len(r) - 1} times')
