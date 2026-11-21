@@ -338,12 +338,12 @@ typedef struct {
 } now_info;
 void now_get(now_info *n), now_poll(void);
 int now_owner(void), now_status(void), now_scrobbles(void), now_time(int *sec, int *total);
-void now_hold(void), now_release(void);
+void now_hold(void), now_release(void), now_drop(void), now_take_back(void);
 void *now_song(unsigned *at, unsigned *n, int *pressed);
 void bt_cover_hold(int held); /* bt_cover.c */
 
 /* radio_tuner.c: Home's Radio (docs/internals.md#radio-home) */
-int tuner_open(void *ctx, void *event), tuner_key(void *top, unsigned key);
+int tuner_key(void *top, unsigned key);
 void tuner_keydown(void *top, unsigned key); /* ringnav_keydown: Centre's hold on Radio's tuner */
 void tuner_paint(void *w, void *canvas), tuner_poll(void);
 void tuner_title(const char *in, char *out, unsigned cap);

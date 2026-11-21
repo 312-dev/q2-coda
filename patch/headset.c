@@ -102,14 +102,19 @@ int ringnav_play_pause(void) {
     if (status == 1) press_stamp(); /* Play from a stop starts a track */
     return stock_pause_trampoline();
 }
-int media_owner(void) { return video_status() ? 4 : radio_status() ? 3 : spot_status() ? 2 : 1; }
+/* Who has the playback keys: 5 Radio (radio_tuner.c, its page open or shut), 4 a video, 3 Internet
+ * Radio, 2 Spotify, 1 the Library. */
+int media_owner(void) { return tuner_state() ? 5 : video_status() ? 4 : radio_status() ? 3 : spot_status() ? 2 : 1; }
 /* What owns playback says, as mclGetPlayStatus does: 2 playing, 3 paused, else stopped or none. */
 int media_status(void) {
+    int t = tuner_state(); /* Radio's: 1 playing, 2 paused */
+    if (t) return t + 1;
     return video_status() ?: radio_status() ?: spot_status() ?: mclGetPlayStatus();
 }
 int media_playing(void) { return media_status() == 2; }
 static unsigned media_session(void) {
     int owner = media_owner();
+    if (owner == 5) return 0x7ad10; /* Radio: one session for as long as it plays */
     if (owner == 4) return video_session();
     if (owner == 3) return radio_session();
     if (owner == 2) return spot_session();
@@ -122,7 +127,9 @@ void media_set_playing(int playing) {
                                                   starts over its PCM; media_key too */
     hs.automatic = 1;
     int owner = media_owner();
-    if (owner == 4)
+    if (owner == 5)
+        tuner_set_playing(playing);
+    else if (owner == 4)
         video_set_playing(playing);
     else if (owner == 3)
         radio_set_playing(playing);
@@ -152,7 +159,9 @@ void media_key(unsigned key) {
     int f = focus(); /* a focused Spotify or radio that isn't running leaves them to the owner */
     if ((f == 1 && spot_media(key)) || (f == 2 && radio_media(key)))
         return;
-    if (f != 3 && video_status())
+    if (f != 3 && tuner_state())
+        tuner_media(key); /* Radio, its page shut or not, until the Library is chosen again */
+    else if (f != 3 && video_status())
         video_key(key);
     else if (f != 3 && radio_status())
         radio_media(key);

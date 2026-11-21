@@ -75,8 +75,9 @@ static void radio_words(now_info *n, const char *station, const char *freq, cons
     tk_snprintf(n->artist, sizeof n->artist, "%s", song[0] ? artist : freq);
 }
 
-/* Who owns playback: Radio while its page is open (its receiver lives with the page), else
- * headset.c media_owner's order, a video, Internet Radio, Spotify, else the Library. */
+/* Who owns playback: Radio while its receiver runs (from its page's opening until the Library is
+ * chosen again, its page shut or not), else headset.c media_owner's order, a video, Internet
+ * Radio, Spotify, else the Library. */
 int now_owner(void) {
     if (tuner_state()) return NOW_RADIO;
     return video_status()   ? NOW_VIDEO
@@ -113,9 +114,11 @@ void *now_song(unsigned *at, unsigned *n, int *pressed) {
 /* Radio takes the output (radio_tuner.c tuner_open): the Library's song, playing or paused, is
  * stopped with its place kept (player_save_stop; a paused q2player would keep the PCM Radio needs,
  * and stock's player_stop, which video_start calls, forgets the place), and now_time reads it
- * paused there for as long as Radio has it. Radio's page shut (now_release), the song is loaded
- * again paused at that place (player_save_start(1)) for the user's Play, never playing on its own.
- * A Library that was stopped is left as it is. */
+ * paused there for as long as Radio has it, its page shut or not. The Library chosen again ends the
+ * hold: Play on its Now Playing plays the song on from that place (now_take_back), a pick plays
+ * the pick (now_drop); a Radio page that found no stations, shut, loads the song again paused
+ * there for the user's Play (now_release), never playing on its own. A Library that was stopped is
+ * left as it is. */
 void now_hold(void) {
     int status = mclGetPlayStatus();
     if (np.held || (status != 2 && status != 3)) return;
@@ -128,6 +131,19 @@ void now_release(void) {
     if (!np.held) return;
     np.held = 0;
     player_save_start(1);
+}
+/* Radio ended by a Library pick (radio_tuner.c tuner_yield): the held song is forgotten, the pick
+ * plays in its place. */
+void now_drop(void) { np.held = 0; }
+/* Radio ended by the Library's Play (tuner_key): the held song playing on from its place, or, with
+ * none held (the Library was stopped when Radio started), stock's Play. */
+void now_take_back(void) {
+    if (!np.held) {
+        player_play_pause();
+        return;
+    }
+    np.held = 0;
+    player_save_start(0);
 }
 
 /* The Library's song's second and length as the player has them (-1 and 0 for none), and its play

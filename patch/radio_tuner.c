@@ -20,6 +20,7 @@
     "/mnt/mmc/Radio/.local/zip"        /* the ZIP the user chose; none: the network's place        \
                                         */
 #define TUNER_SOCK "/tmp/q2tuner.sock" /* video.c's */
+#define FREQ_FILE "/mnt/mmc/Radio/.local/freq" /* the station last landed on, 10 kHz as text */
 #define TUNER_STATE "/tmp/q2tuner.state"
 #define RT_MAX 64 /* FM stations a list holds */
 #define RT_URL 300
@@ -100,6 +101,7 @@ static struct rt {
     int held;                 /* that hold went off: its release is taken */
     unsigned tap_at;          /* a tap's release, and the next tap within DOUBLE_CLICK_MS ... */
     int tap_armed;            /* ... is its double press, the wheel not turned between */
+    int ending;               /* tuner_stop shutting the page: closed ends Radio too */
 } *rt __attribute__((section(".scratch")));
 static int rt_fetch_pid __attribute__((section(".scratch")));
 
@@ -182,8 +184,18 @@ static int source(void) {
     return index_of(best);
 }
 
+/* The dial's frequency kept on the card, where a page opened with no receiver starts (tuner_open),
+ * as the Library resumes where it was. */
+static void freq_save(void) {
+    char f[8];
+    int n = tk_snprintf(f, sizeof f, "%d", rt->freq);
+    void *out = fopen(FREQ_FILE, "wb");
+    if (out) fwrite(f, 1, (unsigned)n, out), fclose(out);
+}
+
 static int land(const void *unused) {
     rt->land = 0;
+    freq_save(); /* the dial at rest: where Radio starts next time */
     int s = source();
     if (s >= 0 && s != rt->feed && rt->playing) {
         char u[RT_URL + 2];
@@ -205,9 +217,14 @@ static int cool(const void *unused) { /* the dial left the loaded stream's stati
 
 static int frame(const void *unused);
 
+/* A repaint of the page, while it is open: Radio plays on with it shut (closed). */
+static void redraw(void) {
+    if (rt->sheet) widget_invalidate_force(rt->sheet, 0);
+}
 static void animate(void) {
+    if (!rt->page) return;
     if (!rt->anim) rt->anim = timer_add(frame, 0, FRAME_MS);
-    widget_invalidate_force(rt->sheet, 0);
+    redraw();
 }
 
 /* The dial moved to rt->freq (or play or pause): the needle glides there, the stream it lands on
@@ -278,7 +295,7 @@ static void fine_turn(int n, int fast) {
  * do. Given back to ticks anywhere else, and with the screen off, so a turn wakes it as a tick
  * does. */
 static void wheel(unsigned now) {
-    int raw = rt->screen == TUNER && !rt->vol && g_backlight_status &&
+    int raw = rt->page && rt->screen == TUNER && !rt->vol && g_backlight_status &&
               window_manager_get_top_window(window_manager()) == rt->page;
     if (raw != rt->raw) {
         __sync_lock_test_and_set(&wheel_travel, 0);
@@ -456,7 +473,7 @@ void tuner_poll(void) {
         rt->no_wifi) { /* "No Wi-Fi" up or down; back, a stream not sounding starts again at once */
         if (!lost) rt_send("r");
         rt->no_wifi = lost;
-        widget_invalidate_force(rt->sheet, 0);
+        redraw();
     }
     if (rt->audio && waitpid(rt->audio, &status,
                              1)) /* the receiver gone (no output to open): tune starts it again */
@@ -479,8 +496,7 @@ void tuner_poll(void) {
             rt_send(u);
             receive();
         }
-        if (tk_strcmp(t, rt->title_text) && rt->screen == TUNER)
-            widget_invalidate_force(rt->sheet, 0);
+        if (tk_strcmp(t, rt->title_text) && rt->screen == TUNER) redraw();
         tk_snprintf(rt->title_text, sizeof rt->title_text, "%s", t);
     }
     words_due(now);
@@ -632,11 +648,14 @@ void tuner_song(const char *in, char *artist, char *song, unsigned cap) {
     tk_snprintf(song, cap, "%s", s);
 }
 
-/* What Radio plays, for now_source.c: 0 while the page is shut (the receiver goes with it), else 1
- * playing or 2 paused; station the station's name (its call sign without one), freq the station's
- * or the dial's frequency as "93.1 FM", title the stream's raw StreamTitle (empty between stations
- * or before its first), each in cap bytes. */
-int tuner_state(void) { return !rt ? 0 : rt->playing && rt->audio ? 1 : 2; }
+/* What Radio plays, for now_source.c: 0 with no receiver (Radio never opened, or ended for the
+ * Library), else 1 playing or 2 paused, its page open or shut. Playing is the user's Play alone
+ * (the user's, 2026-11-20: "as long as in radio, whether on station or not... now playing"):
+ * connecting, between stations, a dropout or the receiver restarting all read playing; only Pause
+ * reads paused. station: the station's name (its call sign without one); freq the station's or
+ * the dial's frequency as "93.1 FM"; title the stream's raw StreamTitle (empty between stations or
+ * before its first); each in cap bytes. */
+int tuner_state(void) { return !rt ? 0 : rt->playing ? 1 : 2; }
 int tuner_now(char *station, char *freq, char *title, unsigned cap) {
     if (!rt) return 0;
     const rt_station *s = rt->feed >= 0 ? &rt->st[rt->feed] : 0;
@@ -683,8 +702,8 @@ static int marquee(void *canvas, int line, const char *s, int medium, int px, un
 
 /* The words' and the marquee's frame: a repaint while the last one moved. */
 static int marq_tick(const void *unused) {
-    if (!rt || rt->screen != TUNER || !rt->live) return rt ? (int)(rt->marq = 0) : 0;
-    widget_invalidate_force(rt->sheet, 0);
+    if (!rt || !rt->page || rt->screen != TUNER || !rt->live) return rt ? (int)(rt->marq = 0) : 0;
+    redraw();
     return 8; /* RET_REPEAT */
 }
 
@@ -882,7 +901,7 @@ void tuner_paint(void *w, void *canvas) {
 /* A repaint while something moves: the needle gliding (with the receiver told), the list sliding,
  * its indicator fading or its music bars playing, the spinner; then it stops. */
 static int frame(const void *unused) {
-    if (!rt) return 0;
+    if (!rt || !rt->page) return rt ? (int)(rt->anim = 0) : 0;
     int moving = 0;
     if (rt->screen == TUNER && rt->glide_at) moving = 1, needle(), receive();
     if (rt->screen == LIST) {
@@ -897,7 +916,7 @@ static int frame(const void *unused) {
     }
     moving |= rt->screen == LOADING;
     if (rt->screen == TUNER && rt->vol && level_ease(&vol_bar, g_volume)) moving = 1;
-    widget_invalidate_force(rt->sheet, 0);
+    redraw();
     if (!moving) rt->anim = 0;
     return moving ? 8 : 0; /* RET_REPEAT */
 }
@@ -995,7 +1014,15 @@ void tuner_keydown(void *top, unsigned key) {
 /* ringnav (nav/input.c): the page's keys, before stock's; 0 for those it leaves to stock (Return on
  * the tuner, which leaves the page through keyup). */
 int tuner_key(void *top, unsigned key) {
-    if (!rt || top != rt->page) return 0;
+    /* Play on the Library's own Now Playing while Radio owns it: the Library chosen again, Radio
+     * ended and the Library's song playing on from where Radio held it (now_take_back) */
+    if (rt && key == KEY_PLAY && top && top != rt->page && !play_hold_released() &&
+        !tk_strcmp(widget_get_prop_str(top, "name", ""), "playing_page")) {
+        tuner_stop();
+        now_take_back();
+        return 1;
+    }
+    if (!rt || !rt->page || top != rt->page) return 0;
     if (key == KEY_RETURN && *(volatile unsigned char *)RETURN_RELEASE_LATCH) return 0;
     int wheel = key == KEY_NEXT ? 1 : key == KEY_PREV ? -1 : 0, s = rt->screen;
     if (key == KEY_CENTER && rt->held) { /* the release of the hold that opened the list */
@@ -1148,7 +1175,8 @@ static void audio_halt(void) {
     rt->audio = 0;
 }
 
-static int closed(void *ctx, void *event) {
+/* Radio's end: its timers, the wheel's ticks back, the receiver asked to quit, the state freed. */
+static void teardown(void) {
     stop_timer(&rt->anim), stop_timer(&rt->land), stop_timer(&rt->warm), stop_timer(&rt->leave);
     stop_timer(&rt->marq), stop_timer(&rt->vol_timer), stop_timer(&rt->hold);
     if (rt->raw && wheel_raw == WHEEL_RAW) wheel_raw = WHEEL_TICKS; /* the wheel's ticks back */
@@ -1156,20 +1184,64 @@ static int closed(void *ctx, void *event) {
     if (rt->sock > 0) close(rt->sock);
     free(rt);
     rt = 0;
+}
+
+/* The page shut (Back, Home, another page over it): Radio plays on, the owner of Now Playing
+ * (now_source.c), its station and its place kept for the page's return; only a page that found no
+ * stations ends with it, the Library's song back paused where Radio found it (now_release). */
+static int closed(void *ctx, void *event) {
+    if (!rt) return 0;
+    stop_timer(&rt->anim), stop_timer(&rt->leave), stop_timer(&rt->marq);
+    stop_timer(&rt->vol_timer), stop_timer(&rt->hold);
+    rt->vol = rt->held = 0;
+    if (rt->raw && wheel_raw == WHEEL_RAW) wheel_raw = WHEEL_TICKS, rt->raw = 0;
+    rt->page = rt->sheet = rt->title = 0;
+    if (rt->n && !rt->ending) return 0;
+    teardown();
     now_release(); /* the Library's song back, paused where Radio found it */
     return 0;
 }
 
-/* Home's Radio row: the page, the receiver started (whatever else held the output stopped),
- * and the stations for the chosen ZIP or the network's place looked up. */
-int tuner_open(void *ctx, void *event) {
-    if (rt || !(rt = calloc(1, sizeof *rt))) return 0;
-    void *page = rt->page = page_open("tuner_page", closed, keyup);
-    if (!page) {
-        free(rt);
-        rt = 0;
-        return 0;
+/* Radio ends for the Library (tuner_yield, tuner_key's Play on the Library's Now Playing): its
+ * station kept for next time, the page shut if it is open. */
+void tuner_stop(void) {
+    if (!rt) return;
+    freq_save();
+    if (rt->page) {
+        rt->ending = 1;
+        window_close(rt->page); /* closed */
     }
+    if (rt) teardown();
+}
+
+/* A Library pick (playback.c ringnav_load): Radio ends, and the Library's held song goes with it,
+ * the pick playing in its place (now_drop). */
+void tuner_yield(void) {
+    if (!rt) return;
+    tuner_stop();
+    now_drop();
+}
+
+/* Play or pause from elsewhere (headset.c media_set_playing and media_key: a headset, the car, Car
+ * Remote), as Play/Pause on the page. */
+void tuner_set_playing(int playing) {
+    if (!rt || !rt->playing == !playing) return;
+    rt->playing = playing;
+    tune();
+}
+/* A media key for Radio as the owner: Play/Pause, Next and Previous seek. */
+void tuner_media(unsigned key) {
+    if (!rt) return;
+    if (key == KEY_PLAY)
+        tuner_set_playing(!rt->playing);
+    else if (key == KEY_FWD_BTN || key == KEY_BACK_BTN)
+        seek(key == KEY_FWD_BTN ? 1 : -1);
+}
+
+/* The page's widgets, on rt (a new one, or the one playing on since its page shut). */
+static int page_make(void) {
+    void *page = rt->page = page_open("tuner_page", closed, keyup);
+    if (!page) return 0;
     rt->y0 = bar_foot(page);
     rt->sheet = widget_factory_create_widget(widget_factory(), "view", page, 0, rt->y0, 375,
                                              page_room(page));
@@ -1177,7 +1249,33 @@ int tuner_open(void *ctx, void *event) {
     widget_on(rt->sheet, EVT_POINTER_DOWN, touch, 0);
     widget_on(page, EVT_POINTER_MOVE_BEFORE, touch, 0);
     widget_on(page, EVT_POINTER_UP_BEFORE, touch, 0);
+    return 1;
+}
+
+/* Home's Radio row (and Now Playing's ways in while Radio owns it): the page. On Radio playing on
+ * since its page shut, the page again on its tuner where it was, the same receiver; else the
+ * receiver started (whatever else held the output stopped), the dial on the station last landed on
+ * (FREQ_FILE), and the stations for the chosen ZIP or the network's place looked up. */
+int tuner_open(void *ctx, void *event) {
+    if (rt && rt->page) return 0;
+    if (rt) {
+        if (!page_make()) return 0;
+        screen(rt->screen == LIST || rt->screen == ZIP ? TUNER : rt->screen);
+        tune();
+        return 0;
+    }
+    if (!(rt = calloc(1, sizeof *rt))) return 0;
+    if (!page_make()) {
+        free(rt);
+        rt = 0;
+        return 0;
+    }
     rt->freq = 9310, rt->playing = 1, rt->feed = -1, rt->sock = -1;
+    char z[8] = "";
+    void *f = fopen(FREQ_FILE, "rb");
+    if (f) z[fread(z, 1, 6, f)] = 0, fclose(f);
+    int saved = atoi(z);
+    if (saved >= LO && saved <= HI) rt->freq = saved;
     headset_manual();
     spot_yield(); /* librespot, Internet Radio and the player hold the output too */
     radio_stop();
@@ -1186,8 +1284,8 @@ int tuner_open(void *ctx, void *event) {
     now_hold();   /* the Library paused where it was, not stopped and forgotten (now_source.c) */
     rt->audio = video_start("-", 2);
     rt->volume = headset_gain() + 1;
-    char z[8] = "";
-    void *f = fopen(ZIP_FILE, "rb");
+    z[0] = 0;
+    f = fopen(ZIP_FILE, "rb");
     if (f) z[fread(z, 1, 5, f)] = 0, fclose(f);
     tk_snprintf(rt->zip_text, sizeof rt->zip_text, "%s", strlen(z) == 5 ? z : "");
     find(rt->zip_text[0] ? rt->zip_text : 0);

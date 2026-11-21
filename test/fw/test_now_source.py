@@ -254,3 +254,64 @@ def test_only_the_library_is_scrobbled(fw, ui, mcl, recs):
     assert scrobbles() == 0
     car.radio_off()
     assert scrobbles() == 1
+
+
+def test_radio_left_plays_on_and_comes_back_where_it_was(fw, ui, mcl, recs):
+    """Radio's page shut on a station (Back, Home, another page): the receiver and its station stay, Radio stays
+    the owner, the Library stays held; the page opened again lands on that frequency with the same receiver (no new
+    q2video, no new search). A page opened with nothing running starts on the station last landed on (the card's
+    /mnt/mmc/Radio/.local/freq), as the Library resumes."""
+    car = Car(fw, ui, recs)
+    forks = []
+    fw.mock('fw_fork', lambda *_: forks.append(1) or 4242)
+    fw.mock('fw_waitpid', lambda *_: 0)  # the receiver runs
+    car.files['/mnt/mmc/Radio/.local/freq'] = b'10590'
+    open_ = fw.fn('tuner_open', C.c_int, C.c_void_p, C.c_void_p)
+    open_(None, None)
+    rt_var = fw.var('radio_tuner__rt', C.c_void_p)
+    rt = Rt.from_address(rt_var.value)
+    assert rt.freq == 10590, 'the last station, kept across a restart'
+    rt.screen, rt.n, rt.freq, rt.feed, rt.st[0].freq = 1, 1, 9312, 0, 9310  # the tuner, on 93.12 by 93.1
+    rt.st[0].url = b'https://xrt'
+    page = rt.page
+    ui.close(page)  # Back: stock closes the window, closed runs
+    assert rt_var.value and not Rt.from_address(rt_var.value).page
+    assert fw.fn('now_owner', C.c_int)() == 2 and fw.fn('tuner_state', C.c_int)() == 1
+    n = len(forks)
+    open_(None, None)
+    rt = Rt.from_address(rt_var.value)
+    assert rt.page and rt.screen == 1 and rt.freq == 9312 and len(forks) == n
+
+
+def test_the_status_glyph_follows_radio_off_its_page_until_the_library_is_chosen(fw, ui, mcl, recs):
+    """The status row's play glyph (bar_status) and Home's first row (hn_state) through Radio's life: the Library
+    playing; Radio playing, between stations and with its receiver gone too (playing is the user's Play: "as long as
+    in radio, whether on station or not... now playing"); Radio paused; its page left, still paused; Play from the
+    car, playing; a Library pick, the Library's own again."""
+    car = Car(fw, ui, recs)
+    hn, bar = fw.fn('home_np__hn_state', C.c_int), fw.fn('bar_status', C.c_int)
+    assert (hn(), bar()) == (0, 2), 'the Library playing'
+    car.status = 1  # Radio's page stopped the player
+    rt = car.radio()
+    libc = C.CDLL(None)
+    libc.calloc.restype = C.c_void_p
+    heap = libc.calloc(1, C.sizeof(Rt))  # tuner_open's: tuner_yield frees it
+    C.memmove(heap, C.addressof(rt), C.sizeof(Rt))
+    fw.var('radio_tuner__rt', C.c_void_p).value = heap
+    rt = Rt.from_address(heap)
+    rt.n, rt.sock = 1, -1
+    assert (hn(), bar()) == (0, 2), 'Radio playing'
+    rt.feed, rt.audio = -1, 0  # between stations, the receiver gone a moment: still playing
+    assert (hn(), bar()) == (0, 2)
+    rt.audio = 999
+    fw.mock('fw_waitpid', lambda *_: 999)
+    fw.fn('media_set_playing', None, C.c_int)(0)  # Pause
+    assert (hn(), bar()) == (1, 3), 'Radio paused'
+    fw.fn('radio_tuner__closed', C.c_int, C.c_void_p, C.c_void_p)(None, None)  # Back to Home
+    assert (hn(), bar()) == (1, 3), 'its page left, still paused'
+    fw.fn('media_set_playing', None, C.c_int)(1)  # the car's Play: Radio's
+    assert (hn(), bar()) == (0, 2) and car.status == 1
+    fw.fn('tuner_yield', None)()  # a Library pick (ringnav_load)
+    assert not fw.var('radio_tuner__rt', C.c_void_p).value
+    car.status = 2
+    assert (hn(), bar()) == (0, 2) and fw.fn('now_owner', C.c_int)() == 1, 'the Library\'s own again'

@@ -1018,6 +1018,7 @@ int ringnav_load(void *q, int at, int type) {
     ++playback_loads;
     app_fav_load(); /* tidal.c: an app song's heart isn't the new queue's */
     if (s.restoring == 2) type = M(MCL_TYPE);
+    if (!s.restoring) tuner_yield(); /* the Library chosen: Radio ends, its output the pick's */
     close_preload();
     /* After Shuffle Songs, before stock loads; ringnav_mode's playback_clear ends its shuffle. */
     if (unshuffle && !s.restoring) config_playmode(playback_unshuffle(), 1);
@@ -1266,6 +1267,10 @@ int playback_keeps(void *q, int at) {
  * stays as it is (Control Center's Now Playing block, control_center.c). */
 void playback_np_open(void) {
     static const int context[4] = { 0, 0, 0xff, 2 };
+    if (tuner_state()) { /* Radio owns Now Playing: its page */
+        tuner_open((void *)0, (void *)0);
+        return;
+    }
     navigator_switch_to_with_context("playing_page", context, 0);
 }
 /* Now Playing opened by a pick, which means play this, so a paused file goes on. Its Play waits for

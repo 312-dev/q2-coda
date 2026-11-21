@@ -591,3 +591,96 @@ def test_a_double_press_turns_the_screen_off(tu, ce, fw):
     ce.down()
     tu.key(KEY_CENTER)
     assert tu.rt.vol == 0 and off == [KEY_CENTER]
+
+
+# Radio as Now Playing (the user's, 2026-11-20: "radio should remember place when leaving", "it should be Now
+# Playing when radio is playing until library is reselected", "going back on Radio to another menu should not stop
+# it"): the page is a view of a receiver that outlives it.
+FREQ_FILE = '/mnt/mmc/Radio/.local/freq'
+NP_PAGE = 0x6160
+NOW_LIBRARY, NOW_RADIO = 1, 2  # navigation.h's NOW_* order
+
+
+class Owner:
+    """The tuner on a list, its receiver running, and the Library's restarts recorded."""
+    def __init__(self, tu, fw):
+        self.tu, self.fw = tu, fw
+        tu.rt.screen, tu.rt.freq, tu.rt.feed = TUNER, 9310, 2
+        self.started = []
+        fw.mock('player_save_start', lambda pause, *_: self.started.append(pause) or 0)
+        fw.mock('fw_waitpid', lambda *_: 999)  # the receiver goes when asked
+        libc = C.CDLL(None)
+        libc.calloc.restype = C.c_void_p
+        heap = libc.calloc(1, C.sizeof(Rt))  # on the heap, as tuner_open's: closed and tuner_stop free it
+        C.memmove(heap, C.addressof(tu.rt), C.sizeof(Rt))
+        tu.rt = Rt.from_address(heap)
+        fw.var('radio_tuner__rt', C.c_void_p).value = heap
+        self.close = fw.fn('radio_tuner__closed', C.c_int, C.c_void_p, C.c_void_p)
+        self.state = fw.fn('tuner_state', C.c_int)
+        self.rt_var = fw.var('radio_tuner__rt', C.c_void_p)
+
+    def alive(self):
+        return bool(self.rt_var.value)
+
+
+@pytest.fixture
+def ow(tu, fw):
+    return Owner(tu, fw)
+
+
+def test_back_leaves_radio_playing(tu, ow):
+    """Back (Return on the tuner, left to stock, which closes the page): the station plays on, nothing stopped."""
+    assert tu.key(KEY_RETURN) == 0
+    tu.sent.clear()
+    ow.close(None, None)
+    assert ow.alive() and ow.state() == 1
+    assert not [m for m in tu.sent if m in ('q', 'x')]  # the receiver neither told to quit nor its stream dropped
+    assert not tu.rt.page and tu.rt.freq == 9310
+
+
+def test_back_on_a_page_that_found_nothing_ends_it(tu, ow):
+    tu.rt.screen, tu.rt.n, tu.rt.feed = ERROR, 0, -1
+    ow.close(None, None)
+    assert not ow.alive()
+
+
+def test_the_last_station_is_written_where_the_dial_lands(tu, ow):
+    """Landing on a station writes it to the card (FREQ_FILE), where a page opened with no receiver starts
+    (test_now_source.py), and tuner_stop leaves it there."""
+    tu.fire('land')
+    assert tu.files.files.get(FREQ_FILE) == b'9310'
+    ow.close(None, None)
+    tu.fw.fn('tuner_stop', None)()
+    assert not ow.alive() and tu.files.files.get(FREQ_FILE) == b'9310'
+
+
+def test_radio_is_the_owner_until_the_library_is_chosen(tu, ow, fw):
+    """library -> Radio -> left -> still Radio (headset and car keys its) -> the Library's Play on its Now Playing:
+    Radio stops, its place kept, and the Library plays on from where it was held."""
+    fw.mock('mclGetPlayStatus', lambda *_: 2)
+    fw.fn('now_hold', None)()  # the Library playing when Radio opened
+    ow.close(None, None)
+    assert fw.fn('now_owner', C.c_int)() == NOW_RADIO and fw.fn('media_status', C.c_int)() == 2
+    fw.fn('media_set_playing', None, C.c_int)(0)  # a headset's pause: Radio's
+    assert tu.rt.playing == 0 and not ow.started
+    fw.fn('media_set_playing', None, C.c_int)(1)
+    assert tu.rt.playing == 1
+    fw.mock('window_manager_get_top_window', lambda *_: NP_PAGE)
+    name = C.create_string_buffer(b'playing_page')
+    fw.mock('widget_get_prop_str', lambda w, k, d, *_: C.addressof(name) if w == NP_PAGE else d)
+    tu.sent.clear()
+    assert tu.key_fn(NP_PAGE, KEY_PLAY) == 1
+    assert not ow.alive() and 'q' in tu.sent
+    assert ow.started == [0]  # the held song, playing from its place
+    assert fw.fn('now_owner', C.c_int)() == NOW_LIBRARY
+
+
+def test_a_pick_in_the_library_ends_radio_and_drops_the_hold(tu, ow, fw):
+    fw.mock('mclGetPlayStatus', lambda *_: 2)
+    fw.fn('now_hold', None)()
+    ow.close(None, None)
+    fw.fn('tuner_yield', None)()  # playback.c ringnav_load, a user's pick
+    assert not ow.alive() and not ow.started  # the pick plays, not the held song
+    sec, total = C.c_int(), C.c_int()
+    fw.mock('mclGetPlayStatus', lambda *_: 2)
+    assert fw.fn('now_time', C.c_int, C.c_void_p, C.c_void_p)(C.byref(sec), C.byref(total)) == 2  # the player's
