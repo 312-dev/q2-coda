@@ -78,8 +78,8 @@ Each rule was broken on 2026-11-17 or 18 with other workers' runs lost or killed
 When the user has an integrator assemble an `integ/*` branch (an image ahead of the trunk), its work is tested once, at each end, never at every step:
 
 - **A feature branch** for it runs `python3 tools/ci/affected.py --base <its base> --run "$B"` before it ends `READY`, where the base is the integration branch it will be merged into. It is not queued (`--mark-ready`): the integrator merges it.
-- **The integrator** merges the `READY` branches with only a build (`rebuild.py`, which compiles everything) after each merge, to name the merge that broke it. On the final merge, before the image, it runs `affected.py --all --run "$B"` and `tools/ci/smoke.py "$B"` once.
-- **A failure** in that run is classified by running that suite again, alone (`gate.py --only SUITE --build "$B"`). One that then passes is a flake: report it, with the suite and its log. One that fails again is real, and goes back to the branch whose change it is.
+- **The integrator** merges the `READY` branches with only a build (`rebuild.py`, which compiles everything) after each merge, to name the merge that broke it. On the final merge, before the image, it runs `affected.py --all --run "$B"` and `tools/ci/smoke.py "$B"` once. `--run` starts the suites side by side as memory allows (`gate.run`), so the whole run takes about as long as `test/player/run.py`, its longest suite (about 13 minutes), not the sum of them ([building: Fast test runs](building.md#fast-test-runs)).
+- **A failure** in that run is classified by the run itself: `affected.py --run` runs a failed suite once more, alone. One that then passes is `flaky` in its table, a flake: report it, with the suite and its log (the first try's is `<suite>.first.log`). One that fails again is `FAILED`, real, and goes back to the branch whose change it is.
 
 ## The brief
 
