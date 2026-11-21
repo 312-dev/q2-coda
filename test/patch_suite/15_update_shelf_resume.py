@@ -228,7 +228,8 @@ class ResumeMachine(QueueMachine):
             if mode in ('wb','ab'): self.files[path]=data
         elif name=='access': ret=0 if self.text(a) in self.files else -1
         elif name=='time': ret=self.epoch
-        elif name=='rename': self.renames+=1; self.files[self.text(b)]=self.files.pop(self.text(a))
+        elif name=='rename':  # the resume file's; bluetoothd's position file (now_source.c) is not counted
+            self.renames+=self.text(b)!='/tmp/q2-bt.play'; self.files[self.text(b)]=self.files.pop(self.text(a))
         elif name=='player_playtime_and_length':
             if self.play[1]: self.word(a,self.play[0]); self.word(b,self.play[1]); ret=1
             else: ret=-1
