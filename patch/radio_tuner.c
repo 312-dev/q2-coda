@@ -575,9 +575,9 @@ static void cased(char *s) {
     }
 }
 
-/* A StreamTitle's parts: iHeart's key="value" pairs (title="R.I.P.",artist="MOTIONLESS IN WHITE",url="...")
- * into artist, song and a spot's text= (each 128 bytes), all capitals made title case (cased); 0 when it has
- * no pairs. */
+/* A StreamTitle's parts: iHeart's key="value" pairs (title="R.I.P.",artist="MOTIONLESS IN
+ * WHITE",url="...") into artist, song and a spot's text= (each 128 bytes), all capitals made title
+ * case (cased); 0 when it has no pairs. */
 static int icy_pairs(const char *in, char *artist, char *song, char *spot) {
     int pairs = 0;
     artist[0] = song[0] = spot[0] = 0;
@@ -596,8 +596,8 @@ static int icy_pairs(const char *in, char *artist, char *song, char *spot) {
     return pairs;
 }
 
-/* A StreamTitle as the tuner shows it: "Artist - Title" as sent, or iHeart's pairs as "Artist - Title",
- * or a spot's text=; all capitals made title case (cased). Shared with test/fw. */
+/* A StreamTitle as the tuner shows it: "Artist - Title" as sent, or iHeart's pairs as "Artist -
+ * Title", or a spot's text=; all capitals made title case (cased). Shared with test/fw. */
 void tuner_title(const char *in, char *out, unsigned cap) {
     char artist[128], song[128], spot[128];
     if (!icy_pairs(in, artist, song, spot)) {
@@ -610,8 +610,8 @@ void tuner_title(const char *in, char *out, unsigned cap) {
 }
 
 /* A StreamTitle as a car's Now Playing takes it (now_source.c): the artist and the song apart, from
- * iHeart's pairs or from "Artist - Title" (no " - ": all of it the song), title case as the tuner's;
- * a spot's text is the song. Either may be empty. */
+ * iHeart's pairs or from "Artist - Title" (no " - ": all of it the song), title case as the
+ * tuner's; a spot's text is the song. Either may be empty. */
 void tuner_song(const char *in, char *artist, char *song, unsigned cap) {
     char a[128], s[128], spot[128];
     if (!icy_pairs(in, a, s, spot)) {
@@ -626,9 +626,9 @@ void tuner_song(const char *in, char *artist, char *song, unsigned cap) {
 }
 
 /* What Radio plays, for now_source.c: 0 while the page is shut (the receiver goes with it), else 1
- * playing or 2 paused, with the station's name (its call sign without one) and the dial's frequency
- * as "93.1 FM" in station, and the stream's raw StreamTitle in title (empty between stations or before
- * its first). */
+ * playing or 2 paused; station the station's name (its call sign without one), freq the station's
+ * or the dial's frequency as "93.1 FM", title the stream's raw StreamTitle (empty between stations
+ * or before its first), each in cap bytes. */
 int tuner_now(char *station, char *freq, char *title, unsigned cap) {
     if (!rt) return 0;
     const rt_station *s = rt->feed >= 0 ? &rt->st[rt->feed] : 0;

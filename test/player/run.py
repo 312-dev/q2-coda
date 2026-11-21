@@ -1161,9 +1161,9 @@ def test_car_rate_set_by_the_car(player, songs, tmp):
 
 
 CAR_LINE = re.compile(r' I player car (\d+)ms: frames=(\d+) writes=(\d+) wmax=(\d+)ms slow=(\d+) dry=(\d+)/(\d+)ms '
-                      r'back=(\d+)/(\d+)ms avail=(-?\d+) delay=(-?\d+) rmax=(\d+)ms cpu=(\d+)ms tap=(\d+)/(\d+) under=(\d+)$', re.M)
+                      r'back=(\d+)/(\d+)ms avail=(-?\d+) delay=(-?\d+) rmax=(\d+)ms cpu=(\d+)ms tap=(\d+)/(\d+) under=(\d+) pos=(-?\d+)s played=(-?\d+)$', re.M)
 CAR_FIELDS = ('ms', 'frames', 'writes', 'wmax', 'slow', 'dry', 'dry_ms', 'back', 'back_ms', 'avail', 'delay', 'rmax', 'cpu',
-              'tap', 'tap_lost', 'under')
+              'tap', 'tap_lost', 'under', 'pos', 'played')
 
 
 def car_trace(log):
@@ -1174,7 +1174,7 @@ def car_trace(log):
 def test_car_trace(player, songs, tmp):
     """The car's trace (docs/iphone-mode.md#car-trace): while way 3 plays, a line a second in the unified log whose
     frames add up to the car's PCM, and an underrun counted where it happens, once also as Car Audio's health count
-    (under=, Q2PLAYER_CAR_UNDER). a1 arrives as a card app writes it
+    (under=, Q2PLAYER_CAR_UNDER), and the position told demo beside the frames heard it comes from. a1 arrives as a card app writes it
     (player/grow.c), a quarter of it there at the start and the rest landing at 12 s, so the player waits in a read
     and the car's PCM runs dry: that second's line has the read's wait, the dry spell and the silence it put in. The
     tap holds the car's PCM, the first Q2PLAYER_CAR_TAP_S (3) seconds of it, frame for frame."""
@@ -1221,6 +1221,9 @@ def test_car_trace(player, songs, tmp):
     assert lines[-1]['tap'] == 3 * 44100 * 4 and not any(l['tap_lost'] for l in lines), lines[-1]
     # the dry spell came while the song flowed (not a pause's, a seek's or the open's): Car Audio's health count
     assert lines[-1]['under'] == 1 and (out/'under').read_text() == '1\n', (lines[-1], list(out.glob('under')))
+    # the position told demo, and the frames heard it comes from: they move together, a second a 44100 frames
+    pos = [(l['pos'], l['played']) for l in lines]
+    assert pos[-1][0] > pos[0][0] and all(abs(p - f // 44100) <= 1 for p, f in pos if f > 0), pos
     return f'{len(lines)} lines, {len(got) // 4} frames; dry once, {dry[0]["dry_ms"]} ms of silence, read {slowest} ms; tap {len(tap)} bytes'
 
 

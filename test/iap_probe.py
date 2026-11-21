@@ -700,7 +700,7 @@ def np_updates(car):
 def test_bmw_radio_is_live_with_no_cover(probe, tmp_path):
     """A radio in Now Playing (coda_rc_shim.c cr_now: source=radio, live=1, no path): its song and artist, the station
     as the album, and no duration, no position and no cover, even with a cover cached for those words; nor any
-    position after, as it plays (docs/iphone-mode.md#now-playing)."""
+    position after, as it plays (docs/internals.md#now-playing-source)."""
     p, car, fd, log, files = bmw_up(probe, tmp_path)
     jpeg = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=160x160', '-frames:v', '1',
                            '-f', 'mjpeg', '-'], check=True, capture_output=True).stdout

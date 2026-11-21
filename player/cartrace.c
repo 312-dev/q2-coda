@@ -161,6 +161,12 @@ void car_trace_read(int64_t us) {
     if (us > w.rmax_us) w.rmax_us = us;
 }
 
+/* The song's position as demo is told it, and the frames heard since the song's start or its last seek or move
+ * (engine.c play_through: until they pass 0 the position stays where it was), as the second's line ends */
+static int heard_s;
+static long long heard_frames;
+void car_trace_position(int position, int64_t played) { heard_s = position, heard_frames = (long long)played; }
+
 void car_trace_tick(struct output *o, int closing) {
     int64_t now = car_trace_now();
     if (!closing && now - window_at < LINE_MS * 1000) return;
@@ -168,14 +174,15 @@ void car_trace_tick(struct output *o, int closing) {
     long avail = 0, delay = 0;
     output_levels(o, &avail, &delay);
     int64_t cpu = clock_us(CLOCK_PROCESS_CPUTIME_ID);
-    char line[224];
+    char line[256];
     int n = snprintf(line, sizeof line,
                      "car %lldms: frames=%lld writes=%d wmax=%lldms slow=%d dry=%d/%lldms back=%d/%lldms avail=%ld "
-                     "delay=%ld rmax=%lldms cpu=%lldms tap=%lld/%lld under=%u",
+                     "delay=%ld rmax=%lldms cpu=%lldms tap=%lld/%lld under=%u pos=%ds played=%lld",
                      (long long)((now - window_at) / 1000), (long long)w.frames, w.writes, (long long)(w.wmax_us / 1000),
                      w.slow, w.dry, (long long)(w.dry_frames * 1000 / rate), w.back,
                      (long long)(w.back_frames * 1000 / rate), avail, delay, (long long)(w.rmax_us / 1000),
-                     (long long)((cpu - cpu_at) / 1000), (long long)tap_put, (long long)tap_lost, underruns);
+                     (long long)((cpu - cpu_at) / 1000), (long long)tap_put, (long long)tap_lost, underruns, heard_s,
+                     heard_frames);
     plog('I', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
     if (underruns != underruns_told) {
         const char *path = getenv("Q2PLAYER_CAR_UNDER") ? getenv("Q2PLAYER_CAR_UNDER") : CAR_UNDER;
