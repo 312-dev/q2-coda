@@ -1847,10 +1847,6 @@ error screens, "Near <city>" on the stations list and "Change Location" on the Z
   last turn or press (Now Playing's scrub timeout) the dial returns and the wheel tunes. A tap while it shows ends
   it; a double press turns the screen off. Held 550 ms (Edit Library's hold) Centre opens the stations list;
   stock's Shut Down? hold is not reached from the tuner. Frequency, name and song stay where they are.
-- **Home while Radio plays** (approved 2026-11-20, `design/radio-tuner/radio-now-playing/sheet.png` frame 5): Radio
-  is Now Playing until the Library is chosen again; Home's art pane shows the station instead of covers, black,
-  the tuner's words centred and smaller: the frequency in Inter Medium 40 with FM (13), above it the name (15
-  Medium), below the song or Paused (13 Text Secondary) and call sign and city (13 Text Tertiary).
 - **Stations list:** the house list's measures (32 px rows from y 58, Inter 20, the flat selection bar
   `sel_bar_flat`, fades from y 40 to 74 and 266 to 310 where the list goes on, the 4 px scroll indicator at
   x 366 while the wheel turns), painted by the page: the name left, the frequency right (Text Secondary, Text

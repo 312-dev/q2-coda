@@ -3882,9 +3882,8 @@ typedef struct {
 enum { SLIDE_STILL = 2 };
 enum {
     SHOW_NOW,
-    SHOW_LIB,
-    SHOW_RADIO
-}; /* what the pane shows (art_source): the playing cover, the library's, Radio's station */
+    SHOW_LIB
+}; /* what the pane shows (art_source): the playing cover, the library's */
 /* iPod Home (docs/ipod.md): the playing track's art, or the library's in turn, beside the list. */
 static struct {
     void *win, *art, *list, *sets; /* sets: the Settings list, in the list's place while open */
@@ -4498,12 +4497,7 @@ static void slide_next(void) {
 
 /* What the pane shows (docs/ipod.md#home), as an iPod classic's main menu: the playing cover on a
  * Now Playing row, playing or paused, the library's covers in turn on every other row. */
-/* Radio the owner of Now Playing, playing or paused (radio_tuner.c tuner_state): its station, drawn
- * by tuner_pane in place of the covers (approved 2026-11-20, design/radio-tuner/radio-now-playing,
- * frame 5); else the row's: the playing cover, or the library's in turn. */
-static int art_source(void) {
-    return tuner_state() ? SHOW_RADIO : home.kind == PANE_LIBRARY ? SHOW_LIB : SHOW_NOW;
-}
+static int art_source(void) { return home.kind == PANE_LIBRARY ? SHOW_LIB : SHOW_NOW; }
 
 /* The player's cover, else the Coverflow cache of the track's album (now_tag), else the theme's
  * pane or the placeholder; or under the slideshow (SHOW_LIB) the library's covers, which
@@ -4517,14 +4511,6 @@ void coverflow_home_art(void *top) {
     if (!home.art || top != home.win || !widget_get_visible(home.art)) return;
     int show = art_source(), changed = show != home.show;
     home.show = show;
-    if (show == SHOW_RADIO) { /* no covers, no pan: the station, repainted when its words change */
-        unsigned key = tuner_pane_key();
-        if (key == home.key && !changed) return;
-        home.key = key;
-        if (changed) stop_timer(&home.drift), slides_drop(), art_frame();
-        pane_invalidate();
-        return;
-    }
     if (!home.drift && drift_live()) {
         home.drift_last = time_now_ms();
         home.tick = DRIFT_TICK_MS;
@@ -4819,10 +4805,7 @@ void coverflow_home_clip(void *w, void *canvas, int begin) {
         (w != home.art && w != home.list && w != home.sets && w != home.lib && w != home.stream))
         return;
     if (!begin) {
-        if (w == home.art && home.show == SHOW_RADIO)
-            tuner_pane(canvas, pane_w(), pane_h(), pane_y());
-        else if (w == home.art && home.sl[0].tw)
-            home_paint(canvas);
+        if (w == home.art && home.sl[0].tw) home_paint(canvas);
         if (w == home.list) {
             int split = widget_get_visible(home.art);
             home_fades(canvas, w, I(canvas, CANVAS_Y), split ? pane_x() : 375, split, 0);

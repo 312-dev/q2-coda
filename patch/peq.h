@@ -673,10 +673,6 @@ int video_start(const char *file, int radio); /* videos.c */
  * (tuner_stop; tuner_yield, a pick, playback.c ringnav_load, its held song dropped too); its page
  * (tuner_open) */
 int tuner_state(void), tuner_open(void *ctx, void *event);
-/* ...its station in Home's art pane, w x h with its top at screen row top (coverflow.c), and a
- * hash of what that shows, which changes when it should be painted again */
-void tuner_pane(void *canvas, int w, int h, int top);
-unsigned tuner_pane_key(void);
 void tuner_set_playing(int playing), tuner_media(unsigned key), tuner_stop(void), tuner_yield(void);
 /* peq_ui.c's T9 edit, named EDIT_NAME: navigation.c's search_key cancels it on Return while its
  * keyboard is up. */
