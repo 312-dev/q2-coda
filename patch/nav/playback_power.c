@@ -77,6 +77,7 @@ char *scrobble_tag(char *o, char *end, const char *s) {
 }
 
 static void scrobble(void *r, int total, int heard) {
+    if (!now_scrobbles()) return; /* the Library's songs alone (now_source.c) */
     const char *artist = now_tag(r, REC_ARTIST), *album_artist = now_tag(r, REC_ALBUM_ARTIST);
     if (!album_artist || !*album_artist)
         album_artist = P(r, REC_ALBUM_ARTIST); /* CUE: none parsed */
@@ -548,6 +549,7 @@ int ringnav_sleep(void *loop) {
     radio_poll();
     tuner_poll(); /* Radio's list and receiver (radio_tuner.c) */
     addon_poll();
+    now_poll(); /* the car's Bluetooth told of a radio and of the position (now_source.c) */
     coda_rc_poll();
     song_radio_poll();
     airplay_poll();

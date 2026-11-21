@@ -42,7 +42,7 @@ static struct {
 
 static int hn_state(void) {
     if (guest_active()) return HN_GUEST;
-    return media_status() == 2 ? HN_PLAYING : HN_PAUSED;
+    return now_status() == 1 ? HN_PLAYING : HN_PAUSED; /* the owner's (now_source.c) */
 }
 /* Whether the glyph is the pause: the owner's paused, or the guest's */
 static int hn_paused(int state) {

@@ -439,6 +439,7 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
         if (played > 0) heard = 1;
         pthread_mutex_lock(&c->mu);
         if (played > 0) c->position = (int)(heard_at(s, sx, &rw, origin, offset) / f->rate);
+        if (way == 3) car_trace_position(c->position, played); /* the car's trace line names both */
         if (heard) c->state = PLAYING;
         if (metering) c->uv[0] = uv[0], c->uv[1] = uv[1]; /* the last levels stand otherwise, as stock's */
         ipc_status_note(c);

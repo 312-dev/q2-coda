@@ -663,6 +663,9 @@ int spot_np_track(void *win); /* spotify.c: win is Spotify's Now Playing with a 
 int headset_gain(void);
 int spot_status(void), radio_status(void), video_status(void);
 unsigned spot_session(void), radio_session(void), video_session(void);
+int radio_now(char *station, char *title, unsigned cap);
+int spot_now(char *title, char *artist, char *album, unsigned cap, unsigned *pos, unsigned *len);
+int now_time(int *sec, int *total); /* now_source.c: the Library's second, length and play state */
 void spot_set_playing(int playing), radio_set_playing(int playing), video_set_playing(int playing);
 int video_start(const char *file, int radio); /* videos.c */
 /* peq_ui.c's T9 edit, named EDIT_NAME: navigation.c's search_key cancels it on Return while its

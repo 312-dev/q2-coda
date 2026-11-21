@@ -212,6 +212,7 @@ void car_trace_dry(int64_t frames);                   /* the PCM ran dry: the si
 void car_trace_back(int64_t frames);                  /* written frames taken back unheard */
 void car_trace_underrun(void);                         /* dry while a song flowed: not a pause's, a seek's or the open's */
 void car_trace_read(int64_t us);                      /* a source read and how long it took */
+void car_trace_position(int position, int64_t played); /* the position told demo, the frames heard since its origin */
 void car_tap(const uint8_t *data, int64_t bytes);     /* what is written to the device, for the tap */
 void car_trace_tick(struct output *, int closing);    /* the line, once its second is up or as the output closes */
 

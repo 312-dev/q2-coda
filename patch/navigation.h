@@ -322,10 +322,29 @@ extern int spot_media(unsigned key), spot_key(void *top, unsigned key),
     spot_open(void *ctx, void *event), spot_hold(void *top);
 extern int radio_media(unsigned key), radio_open(void *ctx, void *event);
 extern int games_key(void *top, unsigned key), games_open(void *ctx, void *event);
+/* now_source.c: Now Playing for every reader (docs/internals.md#now-playing-source). source: who
+ * owns playback; state 0 stopped, 1 playing, 2 paused (AVRCP's and iAP2's order); pos_ms and len_ms
+ * -1 for none (a radio has neither); rec the Library's record (queue or pressed), 0 for another
+ * owner; station a radio's name, else its frequency. */
+enum { NOW_NONE, NOW_LIBRARY, NOW_RADIO, NOW_NETRADIO, NOW_SPOTIFY, NOW_VIDEO };
+typedef struct {
+    int source, state, pos_ms, len_ms, id, pressed;
+    unsigned qpos, qlen;
+    void *rec;
+    char title[160], artist[160], album[160], station[64], path[400];
+} now_info;
+void now_get(now_info *n), now_poll(void);
+int now_owner(void), now_status(void), now_scrobbles(void), now_time(int *sec, int *total);
+void now_hold(void), now_release(void);
+void *now_song(unsigned *at, unsigned *n, int *pressed);
+void bt_cover_hold(int held); /* bt_cover.c */
+
 /* radio_tuner.c: Home's Radio (docs/internals.md#radio-home) */
 int tuner_open(void *ctx, void *event), tuner_key(void *top, unsigned key);
 void tuner_paint(void *w, void *canvas), tuner_poll(void);
 void tuner_title(const char *in, char *out, unsigned cap);
+void tuner_song(const char *in, char *artist, char *song, unsigned cap);
+int tuner_now(char *station, char *freq, char *title, unsigned cap), tuner_state(void);
 extern int games_keydown(void *top, unsigned key);
 /* search_strip.c: Search, the strip under a list.entry.ipod theme, else stock's dialog */
 int library_search_open(void *ctx, void *event), search_strip_key(void *top, unsigned key),

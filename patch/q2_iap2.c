@@ -34,6 +34,7 @@ typedef unsigned int u32;
 /* What the Q2 is playing, for NowPlayingUpdate (the shim's /tmp/coda-rc.now, read by the caller). */
 struct iap2_np {
     int state; /* 0 stopped, 1 playing, 2 paused */
+    int live;  /* a radio's stream (the shim's live=1): no duration, position or cover */
     unsigned pos_ms, len_ms, qpos, qlen;
     int shuffle, repeat; /* repeat 0 off, 1 one, 2 all */
     unsigned id, qgen; /* the song's library id (songtable's rid, 0 for none) and the queue's generation */
@@ -1250,7 +1251,7 @@ static u32 np_hash(const struct iap2_np *n) {
 }
 
 /* The song's attributes the car asked for (group 0) and its playback state (group 1). With nothing known, the
- * title is the Q2's name, stopped. Artwork (M6) is not offered. */
+ * title is the Q2's name, stopped. A stream (live) has no duration, position or cover. */
 static void send_now_playing(const struct iap2_np *n, int media) {
     msg_start(0x5001);
     if (media) {
@@ -1259,13 +1260,13 @@ static void send_now_playing(const struct iap2_np *n, int media) {
         if (media_mask & 1u << MI_PERSISTENT_ID)
             param_u64(MI_PERSISTENT_ID, n->id ? LIB_KEY : 0x51320000u, n->id ? n->id : np_hash(n));
         if (media_mask & 1u << MI_TITLE) param_str(MI_TITLE, n->title[0] ? n->title : H->name);
-        if (media_mask & 1u << MI_DURATION) param_u32(MI_DURATION, n->len_ms);
+        if ((media_mask & 1u << MI_DURATION) && !n->live) param_u32(MI_DURATION, n->len_ms);
         if ((media_mask & 1u << MI_ALBUM) && n->album[0]) param_str(MI_ALBUM, n->album);
         if ((media_mask & 1u << MI_ARTIST) && n->artist[0]) param_str(MI_ARTIST, n->artist);
         for (unsigned a = MI_LIKE_SUPPORTED; a <= MI_BANNED; ++a)
             if (media_mask & 1u << a) param_u8(a, 0);
         if (media_mask & 1u << MI_CHAPTER_COUNT) param_u16(MI_CHAPTER_COUNT, 0);
-        if (media_mask & 1u << MI_ARTWORK) {
+        if ((media_mask & 1u << MI_ARTWORK) && !n->live) {
             u8 id = art_start(n);
             if (id) param_u8(MI_ARTWORK, id);
         }
@@ -1273,7 +1274,7 @@ static void send_now_playing(const struct iap2_np *n, int media) {
     }
     group_start(1);
     if (playback_mask & 1u << PB_STATE) param_u8(PB_STATE, n->state);
-    if (playback_mask & 1u << PB_POSITION) param_u32(PB_POSITION, n->pos_ms);
+    if ((playback_mask & 1u << PB_POSITION) && !n->live) param_u32(PB_POSITION, n->pos_ms);
     if (playback_mask & 1u << PB_QUEUE_INDEX) param_u32(PB_QUEUE_INDEX, n->qpos);
     if (playback_mask & 1u << PB_QUEUE_COUNT) param_u32(PB_QUEUE_COUNT, n->qlen);
     if (playback_mask & 1u << PB_SHUFFLE) param_u8(PB_SHUFFLE, n->shuffle ? 1 : 0);
@@ -1290,7 +1291,8 @@ static void send_now_playing(const struct iap2_np *n, int media) {
 }
 
 /* Every half second while the car takes Now Playing: everything again on a new song or state, else the position
- * while playing (PodBox: without it the car's bar sits at 0:00). */
+ * while playing (PodBox: without it the car's bar sits at 0:00), and paused when it moved (a seek); a stream's
+ * none. */
 /* ---- Up Next on iDrive: the playing queue as a list (docs/iphone-mode.md#the-library-on-idrive) ----
  * When the queue changes (the shim's qgen), once it has held still a second, an iPhone sends PB_QUEUE_LIST 1 and an
  * empty PB_QUEUE_LIST_ID, then the queue as a file transfer, [ID, 04, size, 00 03] and the songs' ids, 8 bytes each,
@@ -1330,9 +1332,10 @@ static void poll_now_playing(long now) {
     np_at = now;
     memset(&n, 0, sizeof n);
     if (!H->now_playing || !H->now_playing(&n)) n.state = 0;
-    int changed = !np_sent || np_hash(&n) != np_hash(&np_last) || n.state != np_last.state || n.len_ms != np_last.len_ms;
+    int changed = !np_sent || np_hash(&n) != np_hash(&np_last) || n.state != np_last.state ||
+                  n.len_ms != np_last.len_ms || n.live != np_last.live;
     if (changed) send_now_playing(&n, 1);
-    else if (n.state == 1) {
+    else if (!n.live && (n.state == 1 || n.pos_ms != np_last.pos_ms)) {
         msg_start(0x5001), group_start(1), param_u32(PB_POSITION, n.pos_ms), group_end(), msg_send();
     }
     if ((playback_mask & 1u << PB_QUEUE_LIST) && n.qgen != np_last.qgen) ql_seen_at = now; /* the queue moved */
