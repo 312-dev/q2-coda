@@ -5704,8 +5704,11 @@ def test_a_game_with_the_sound_holds_the_library_where_it_was_and_gives_it_back(
     assert lib.calls[0] == 'save_stop', lib.calls
     assert lib.now() == (3, 61)
     fw.mock('fw_waitpid', lambda *_: 77)
+    game_has_sound = fw.fn('addon_game_audio', C.c_int)
+    fw.mock('player_save_start', lambda paused, *_: (lib.calls.append(f'save_start {paused} game {game_has_sound()}'), 0)[1])
     fw.fn('addon_poll', None)()
-    assert fw.var('addon__gm', Game).pid == 0 and lib.calls[-1] == 'save_start 1' and lib.now() == (3, 61)
+    # given back once the game has let go of the sound: before, ringnav_start_player refuses the start
+    assert fw.var('addon__gm', Game).pid == 0 and lib.calls[-1] == 'save_start 1 game 0', lib.calls
 
 
 def test_a_game_with_the_sound_that_can_t_start_gives_the_library_back_at_once(fw):

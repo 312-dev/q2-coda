@@ -1588,12 +1588,13 @@ static void game_poll(void) {
     int status = 0;
     if (!gm.pid) return;
     if (waitpid(gm.pid, &status, 1)) { /* WNOHANG: it has ended */
+        int audio = gm.audio;
         close(gm.sock);
+        gm.pid = gm.audio = 0; /* first: no start while a game has the sound (ringnav_start_player) */
         /* the Library's song held at the start back, paused where the game found it; with none
          * held, a jack or USB change meanwhile ran stock's player_save_start(1): its start failed
          * (ringnav_start_player) but its pause stuck on nothing, so Play would do nothing */
-        if (gm.audio && !now_release() && mclGetPlayStatus() == 3) player_stop();
-        gm.pid = gm.audio = 0;
+        if (audio && !now_release() && mclGetPlayStatus() == 3) player_stop();
         wheel_raw = 0;
         widget_invalidate_force(window_manager(), 0);
         if (status == 127 << 8) toast("It couldn't start"); /* the child's execl failed */
