@@ -112,6 +112,14 @@ def scenarios(m):
         'cue': boot + [(1.0, song('set-songurl', a1)), (6.0, song('set-nexturl', a1, start=5)), (11.0, song('set-nexturl', a1, start=10)), (24.0, None)],
         # a seek, then to the end: the PCM after it is the reference from the second asked
         'seek': boot + [(1.0, song('set-songurl', a1)), (3.0, '{mcl-seek\\9}'), (16.0, None)],
+        # a song whose output fails while a newer song and a pause are already waiting, as a Bluetooth headset lost
+        # mid-song (2026-11-21 20:32: bt_reopen gave up after demo had reloaded the song paused); then a song whose
+        # output fails with nothing waiting, as any song that fails while it plays
+        'replaced-failure': boot + [(0.5, stall_sink('0000_44100_2_s16.raw')), (1.0, song('set-songurl', a1)),
+                                    (2.0, song('set-songurl', a2, start=5)), (2.0, '{mcl-pause\\null}'),
+                                    (3.0, break_sink('0000_44100_2_s16.raw')), (5.0, None)],
+        'play-failure': boot + [(0.5, stall_sink('0000_44100_2_s16.raw')), (1.0, song('set-songurl', a1)),
+                                (2.0, break_sink('0000_44100_2_s16.raw')), (4.0, None)],
         # a preload that is not audio: the song plays to its end, then the error
         'badnext': boot + [(1.0, song('set-songurl', a1, flag=1)), (2.0, '{mcl-seek\\12}'), (4.0, gapless(f'{m}/junk.flac', flag=1)), (14.0, None)],
         # a preload cancelled by a queue edit: the song ends with nothing after it, and demo starts the next itself
@@ -324,6 +332,25 @@ def put(path, data, in_place=False):
         tmp = out.with_name(out.name + '.tmp')
         tmp.write_bytes(body)
         tmp.replace(out)
+    return go
+
+
+def stall_sink(name):
+    """A step: the sink file the next PCM open makes (output.c sink_open's name), made a FIFO that this side holds open
+    and never reads, so once its 64 KB are full the player's write waits, as a write waits in bt_reopen for bluealsa's
+    PCM after a headset's loss."""
+    def go(s):
+        os.mkfifo(s.out / 'pcm' / name)
+        s.stall_fd = os.open(s.out / 'pcm' / name, os.O_RDONLY | os.O_NONBLOCK)
+    return go
+
+
+def break_sink(name):
+    """A step: the stalled sink's reader closed, so the waiting write fails (EPIPE; the player ignores SIGPIPE), as a
+    PCM that did not come back. The FIFO goes with it: the session reads every .raw left at its end."""
+    def go(s):
+        os.close(s.stall_fd)
+        os.unlink(s.out / 'pcm' / name)
     return go
 
 

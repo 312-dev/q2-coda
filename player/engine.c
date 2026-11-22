@@ -534,11 +534,15 @@ void *engine_thread(void *unused) {
             if (!cur) {
                 close_output(0);
                 pthread_mutex_lock(&c->mu);
-                int stopped = c->stop, skipped = c->next;
+                int stopped = c->stop, skipped = c->next, replaced = c->play;
                 if (stopped) c->play = c->next = 0;
                 pthread_mutex_unlock(&c->mu);
                 if (stopped || skipped) { /* given up, not failed: answered as a song cut while it played */
                     ipc_event(stopped ? "{player-stopstatus\\exit}" : "{player-nextstatus\\exit}");
+                    continue;
+                }
+                if (replaced) { /* a set-songurl came while it opened: that song is demo's now, as in FAILED below */
+                    log_failed("open failed, already replaced", &song, error);
                     continue;
                 }
                 log_failed("open failed", &song, error);
@@ -627,9 +631,14 @@ void *engine_thread(void *unused) {
             break;
         }
         case FAILED:
-            log_failed("play failed", &song, ERR_NONE); /* output_open or a write failed */
+            log_failed(waiting || stopping ? "play failed, already replaced" : "play failed", &song, ERR_NONE); /* output_open or a write failed */
             close_output(0);
             preload_cancel();
+            /* A song demo has already replaced (a set-songurl or a stop that came while this one's write was failing:
+             * a Bluetooth headset lost mid-song, whose PCM bt_reopen waits up to 5 s for, while demo reloads the song
+             * paused) is not reported: demo's error dialog would advance the queue and start the next song playing,
+             * DAC powered, under a pause (docs/player-plan.md#a-failure-already-replaced). The waiting command is taken next. */
+            if (waiting || stopping) break;
             touch("/tmp/notsupport");
             ipc_event("{player-status\\error}");
             break;

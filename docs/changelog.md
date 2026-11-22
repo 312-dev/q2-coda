@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: losing a Bluetooth headset or car mid-song no longer starts the next song a few seconds after the Q2 paused, which kept the headphone amplifier powered on with nothing listening (once for almost an hour and a half) and the battery draining. The song stays paused where it was.
   - Battery: when Standby is on, it now waits while the Q2 is plugged into a computer or a car. Once fully charged on a computer's cable, the Q2 could go into Standby and come back with its USB connection dead until the cable was unplugged and plugged in again. Standby is still off by default.
   - Playback: nothing plays without somewhere to hear it. With no headphones in, no Bluetooth headset connected, no USB DAC and no car taking the Q2's audio over USB, Play shows "Connect headphones or Bluetooth to play" and nothing starts, for music, Videos, Internet Radio and Radio alike. **Headphones Required** is always on, so its row is gone from Playback settings. A car taking the audio over USB now counts as somewhere to play.
   - Car Audio: unplugging from the car pauses the music, as an iPod does, unless headphones are in or a Bluetooth headset is connected, where it carries on. It used to play on silently through the headphone output with nothing plugged in, draining the battery.

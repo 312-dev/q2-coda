@@ -320,6 +320,28 @@ def test_bad_preload(player, songs, tmp):
     return 'played to the end, then exit, error and /tmp/notsupport, the path logged'
 
 
+def test_a_failure_already_replaced_is_not_reported(player, songs, tmp):
+    """2026-11-21 20:32: a Bluetooth headset lost mid-song, bt_reopen waited 5 s for its PCM, and meanwhile demo reloaded
+    the song paused (set-songurl, mcl-pause). The write's failure was then reported as the song's error, and demo's
+    error dialog advanced the queue and started the next song playing, the DAC powered on under a pause for hours.
+    Now a song whose output fails once a newer song or a stop is waiting is logged, not reported: no error, no
+    /tmp/notsupport, and the waiting song opens paused. A song that fails with nothing waiting reports as before."""
+    pathlib.Path('/tmp/notsupport').unlink(missing_ok=True)
+    s, pcm, names = play(player, songs, 'replaced-failure', tmp/'replaced')
+    events = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
+    assert events == [], events
+    assert not pathlib.Path('/tmp/notsupport').exists(), '/tmp/notsupport made for a song already replaced'
+    log = (tmp/'replaced/player.log').read_text()
+    assert f'q2player: play failed, already replaced (the output would not open or take audio): {songs}/a1.flac' in log
+    assert b''.join(pcm) == b'', names  # a2 taken paused: nothing written
+    s, pcm, names = play(player, songs, 'play-failure', tmp/'failure')
+    events = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
+    assert events == ['{player-status\\error}'], events
+    assert pathlib.Path('/tmp/notsupport').exists(), '/tmp/notsupport not made for a song that failed while it played'
+    pathlib.Path('/tmp/notsupport').unlink()
+    return 'replaced: no error, the waiting song paused; alone: the error and /tmp/notsupport'
+
+
 def test_status_push(player, songs, tmp):
     """docs/internals.md#player-status-push: a datagram for each change of what player-status and media-info answer,
     so demo's status poll waits on it, and none while they stay the same (paused, with nothing moving)."""
