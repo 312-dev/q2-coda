@@ -11,7 +11,8 @@
  * the player's own song playing), what comes is read and dropped at the source's own rate, so a source never blocks
  * for good and nothing grows. Between a source's write and the car: the FIFO's FEED_PIPE bytes, the ring's FEED_RING
  * frames and the car's own PCM buffer, about 0.5 s, which a video's picture leads by (q2video's clock is the q2car
- * device's, which holds nothing). Q2PLAYER_FEED moves the FIFO for the host tests. */
+ * device's, which holds nothing). The reader sleeps in poll() until a source writes: it never wakes on its own.
+ * Q2PLAYER_FEED moves the FIFO for the host tests. */
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -71,8 +72,9 @@ static void *reader(void *arg) {
     int fd = (int)(intptr_t)arg;
     uint8_t b[4096];
     for (;;) {
+        /* no timeout: the write end held here means no end of file, so the thread sleeps until a source writes */
         struct pollfd p = {fd, POLLIN, 0};
-        if (poll(&p, 1, 100) <= 0) continue;
+        if (poll(&p, 1, -1) <= 0) continue;
         pthread_mutex_lock(&mu);
         unsigned room = FEED_RING - count;
         int64_t idle = mono_ms() - pulled_at;

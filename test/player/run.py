@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Host tests of q2player (player/): `python3 test/player/run.py [-k NAME]`.
 
-Needs ffmpeg, lame, openssl (the HTTPS tests' certificates) and a C compiler, no stock ZIP and no Q2; the DST
+Needs ffmpeg, lame, openssl (the HTTPS tests' certificates), strace and a C compiler, no stock ZIP and no Q2; the DST
 SACD image needs FFmpeg's DST sample, fetched once (music.py DST_SAMPLE), and is left out without it. The player is built for this machine by tools/player.py
 (its FFmpeg on first use, some minutes) and driven through its socket by fakedemo.py, writing PCM to
 files in place of ALSA.
@@ -1857,6 +1857,27 @@ def test_car_feed_source_gone_leaves_the_song_resumable(player, songs, tmp):
     assert src in pcm[0] and 'the car\'s other source ended' in log
     assert pcm[1][:44100 * 4] == reference(songs/'a1.flac')[:44100 * 4]
     return 'the source ended, a1 after it'
+
+
+def test_car_feed_reader_sleeps_while_no_source_writes(player, songs, tmp):
+    """The feed's reader (player/feed.c) waits in poll() with no timeout while nothing writes to the FIFO: q2player
+    idle for 4 s makes one such poll and no timed-out one (it woke ten times a second, for the player's whole life).
+    Counted with strace, so a sleep it takes anywhere else is not counted."""
+    d, trace = tmp/'feedidle', tmp/'feedidle.strace'
+    d.mkdir(parents=True, exist_ok=True)
+    wrap = tmp/'feedidle.sh'
+    wrap.write_text(f'#!/bin/sh\nexec strace -f -e trace=poll,ppoll -o {trace} {car_player()}\n')
+    wrap.chmod(0o755)
+    s = fakedemo.Session(d)
+    s.music = songs
+    s.run([(4.0, None)], fakedemo.launch_host(str(wrap), str(songs), 1, {'Q2PLAYER_CAR': str(tmp/'feedidle.audio'),
+                                                                         'Q2PLAYER_FEED': str(tmp/'feedidle.fifo')}), 1)
+    t = trace.read_text()
+    fds = r'(?:\[\{fd=\d+, events=POLLIN\}\]|0x[0-9a-f]+)'  # strace may not be let read the array
+    timed_out = re.findall(rf'poll\({fds}, 1, 100\) += 0 \(Timeout\)', t)
+    waits = re.findall(rf'poll\({fds}, 1, -1', t)
+    assert not timed_out and len(waits) == 1, f'{len(timed_out)} timed-out polls, {len(waits)} waits'
+    return f'one wait, no timed-out poll in 4 s idle'
 
 
 def test_car_feed_does_not_block_a_source_the_car_does_not_take(player, songs, tmp):

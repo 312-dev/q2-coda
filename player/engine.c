@@ -25,7 +25,11 @@ static int out_way; /* the output way out was opened on */
 static int out_cut; /* out was dropped for a skip: its tail is not to be played out */
 
 enum { ENDED, NEXT, STOPPED, FAILED, MOVED /* reopen: opened for another output */ };
-enum { CAR_LOOK_MS = 250 }; /* how often a song playing looks for the car's wish (car_way) */
+/* How often a song playing looks for the car's wish (car_way): an open of /tmp/q2-iap.audio, which fails while no car
+ * asks. ponytail: 34 such opens in 10 s of a1 on the host, 0.7 ms of the 17.8 ms its syscalls took, made from the
+ * playback loop, which is awake anyway, so none is a wake-up; an inotify watch on /tmp would wake for every file
+ * written there (each app's .stream twice a second). A message from q2-iap would lift it. */
+enum { CAR_LOOK_MS = 250 };
 
 /* How a DSD file goes out on an output, as stock decides it at each file (0x4210d4-0x421a24): on Bluetooth as PCM;
  * on a Q2's own DAC (hardware type 17) as DoP whatever mcl-dsdmode says; elsewhere, a USB DAC, as mcl-dsdmode says. */
