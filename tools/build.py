@@ -640,8 +640,8 @@ BT_MTU_MAX = 679 - 4
 WATCHDOG = 'usr/bin/checkappprocess.sh'
 WATCHDOG_STUB = (b'#!/bin/sh\n# Q2 Muse: S90play reboots when demo ends (tools/build.py BOOT_HOOK); demo still starts this\n'
                  b'exit 0\n')
-# The config a reset copies to /mnt/data: Enlarged Album Art (10 s wait) starts off; Standby keeps stock's on (system.c
-# standby_default turns it on once on a Q2 set up before). So does stock's Wheel Function start off: Q2 Muse runs stock in Volume Mode whatever the key holds (WHEEL_MODE), and a Q2 reset here and returned to stock gets Menu Mode, the default stock's changelog names and a missing key gives (the shipped file says 1).
+# The config a reset copies to /mnt/data: Enlarged Album Art (10 s wait) and Standby start off (Standby until a wake is
+# shown to bring the USB link back: docs/internals.md#standby-limit). So does stock's Wheel Function: Q2 Muse runs stock in Volume Mode whatever the key holds (WHEEL_MODE), and a Q2 reset here and returned to stock gets Menu Mode, the default stock's changelog names and a missing key gives (the shipped file says 1).
 # Its TIMEZONE is UTC (DEFAULT_TIMEZONE), not stock's 22, Shanghai.
 # It also names the language, English (2): stock's config_init (0x5047f8) sets g_guideflag when SYSSET LANGUAGE is
 # missing, and the first boot and every reset opened stock's language guide, where Q2 Muse's wheel and Centre are off.
@@ -651,7 +651,7 @@ WATCHDOG_STUB = (b'#!/bin/sh\n# Q2 Muse: S90play reboots when demo ends (tools/b
 # Bluetooth Quality starts on Auto (BTCODING 2, docs/internals.md#bluetooth-page), as stock's file has it: checked,
 # since stock's demo reads a missing or other key as LDAC Best (atoi at 0x504940).
 DEFAULT_BTCODING = b'\nBTCODING=2\n'
-DEFAULT_CONFIG_OFF = (b'COVERMODE', b'WHEELMODE')
+DEFAULT_CONFIG_OFF = (b'COVERMODE', b'STANDBYMODE', b'WHEELMODE')
 DEFAULT_LANGUAGE = b'LANGUAGE=2\n'
 DEFAULT_IPOD = b'[IPOD]\nKEEPLIT=1\n'
 def default_config(config):
@@ -2119,7 +2119,6 @@ GLOBALS = ['tidal_albuminfo_thread_run', 'tidal_collection_thread_run',  # 2: a 
            'g_usbvol_mode',  # USB DAC volume: 0 fixed, else the volume (config_usbvolmode, device_set_volume)
            'g_usbdac_chargeflag',  # USB mode's charge choice, which switch_charge_enable gets there
            'g_block_withoutphone_flag',  # Headphones Required, held on (output_rule.c output_rule_config)
-           'g_standbyflag', 'g_savepower_mode',  # Standby and Auto-shutdown on (system.c standby_default)
            'g_memory_play', 'g_carmode', 'g_carmode_state',  # In-Vehicle Mode (pod_click)
            'g_bigcovermode', 'g_foldercover_flag',  # Enlarged Album Art (1 on) and Folder Album Cover (pod_click)
            'g_headset_output',  # the output config_outputchannel sets: 0, 1 the jacks, 2 Bluetooth

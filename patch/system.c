@@ -456,21 +456,6 @@ static void standby_host_poll(void) {
     pw.host_at = now;
     if (usb_host()) reset_poweroptions_timer(1, 0, 0);
 }
-
-/* Standby on, once (Q2POD STANDBYOWN marks it done, so a later Off is kept): Q2 Muse 1.7.3 to now
- * shipped it off with no reason recorded, and a Q2 that never sleeps drains about 7 % an hour dark
- * and paused (2026-11-21). Stock's default config says STANDBYMODE=1 again (tools/build.py). Not
- * when Auto-shutdown is chosen: stock lets one of the two be on. After config_init
- * (usb_charge.c ringnav_usb_config). */
-void standby_default(void) {
-    if (config_value("Q2POD", "STANDBYOWN", 2, 0)) return;
-    if (!g_standbyflag && !g_savepower_mode) {
-        g_standbyflag = 1;
-        write_int_config(1, "SYSSET", "STANDBYMODE");
-        reset_poweroptions_timer(1, 0, 0); /* its countdown from now */
-    }
-    write_int_config(1, "Q2POD", "STANDBYOWN");
-}
 /* User boot logo (docs/boot.md): the card's LOGO_SRC is kept as LOGO_DST, which the splash shows at
  * power-on, each time the card is mounted (boot, the end of USB storage). A 375x320 one is turned
  * upright by stock ffmpeg; anything but a 320x375 baseline JPEG is refused and LOGO_DST kept. No

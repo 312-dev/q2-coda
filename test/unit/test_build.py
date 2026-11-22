@@ -83,11 +83,11 @@ STOCK_CONFIG = b'[PLAYSET]\nCOVERMODE=1\n[SYSSET]\nAUTOSCAN=1\nBTCODING=2\nTIMEZ
 
 
 def test_the_default_config_names_english_so_no_language_guide_opens():
-    """A reset's config.ini: Enlarged Album Art and Wheel Function off, Standby left on as stock ships it, LANGUAGE=2 (English) first in SYSSET, whose absence is what
+    """A reset's config.ini: Enlarged Album Art, Standby and Wheel Function off, LANGUAGE=2 (English) first in SYSSET, whose absence is what
     sends config_init to stock's first-boot language guide, the zone UTC (DEFAULT_TIMEZONE) for stock's Shanghai, and
     Smart Awake on in an [IPOD] of its own, on its own line after stock's last, which has no newline."""
     out = build.default_config(STOCK_CONFIG)
-    assert out == (b'[PLAYSET]\nCOVERMODE=0\n[SYSSET]\nLANGUAGE=2\nAUTOSCAN=1\nBTCODING=2\nTIMEZONE=43\nSTANDBYMODE=1\nWHEELMODE=0\n'
+    assert out == (b'[PLAYSET]\nCOVERMODE=0\n[SYSSET]\nLANGUAGE=2\nAUTOSCAN=1\nBTCODING=2\nTIMEZONE=43\nSTANDBYMODE=0\nWHEELMODE=0\n'
                    b'NAVHIDE=0\n[IPOD]\nKEEPLIT=1\n')
     assert build.default_config(STOCK_CONFIG + b'\n').endswith(b'NAVHIDE=0\n[IPOD]\nKEEPLIT=1\n')
     for bad in (STOCK_CONFIG.replace(b'AUTOSCAN', b'LANGUAGE=1\nAUTOSCAN'), STOCK_CONFIG + b'\n[SYSSET]\n',
