@@ -884,6 +884,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(o, "--under")) under_file = v, ++a;
         else if (!strcmp(o, "--auto-ms")) auto_ms = atoi(v), ++a;
         else if (!strcmp(o, "--car-ms")) car_ms = atoi(v), ++a;
+        else if (!strcmp(o, "--quiet-ms")) link_quiet_ms = atoi(v), ++a;
+        else if (!strcmp(o, "--card-root")) card_root = v, ++a;
         else if (!strcmp(o, "--uuid")) {
             /* the serial's first 32 hex digits as a UUID */
             if (strlen(v) >= 32)

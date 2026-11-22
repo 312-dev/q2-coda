@@ -6,6 +6,7 @@ __ffs_data_do_entity, __ffs_data_got_strings), and the probe is run against a st
 mode whose other end plays FunctionFS: the probe's descriptor writes arrive there, and events and data stages are
 written back. Checked: what it answers to each request, the echo of iAP2's detect on ep1 (a FIFO), sessions and the
 exit status. Run it as python3 test/iap_probe.py (pytest, host cc)."""
+import fcntl
 import os
 import pathlib
 import select
@@ -1214,7 +1215,150 @@ def test_a_data_stage_that_never_comes_holds_nothing(probe, tmp_path):
     assert 'read -1 (errno 4' in log.read_text()
 
 
-PACE_MS = int(os.environ.get('Q2IAP_PACE_MS', '2'))
+def acked_within(car, seconds):
+    """The car's own packet sent and the seconds until the Q2 acknowledged it, or None."""
+    car.send(message(0x5003, prm(0, (100000).to_bytes(4, 'big'))))
+    mine, t0 = car.seq, time.time()
+    while time.time() - t0 < seconds:
+        try:
+            got = car.packet_any(0.2)
+        except AssertionError:
+            continue
+        if got and (got[2] - mine) % 256 < 128:
+            return time.time() - t0
+    return None
+
+
+def test_writing_the_sent_record_holds_nothing(probe, tmp_path, monkeypatch):
+    """The drive of 2026-11-21 (q2muse-1125): at "library: whole sent" (34110.909) q2-iap wrote the sent record, a line
+    a song in a write each, 9,200 of them to /mnt/data, which is mounted sync, and its loop did nothing else for 12.3 s:
+    the car's next SET_REPORT went unanswered until it gave the transfer up. The record's temporary name here is a FIFO,
+    so its writing waits until the test reads it, as a slow write would; the car's packet must still be acknowledged
+    within the BMW's first two tries (400 ms), and the record arrives whole once read."""
+    monkeypatch.setattr(BmwCar, 'msg', bmw_msg_keeping_body)
+    tmp_name = tmp_path/'q2-iap.library.iap'
+    os.mkfifo(tmp_name)
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path)
+    record, r = b'', -1
+    try:
+        items, gone, rev, reset = library(car)
+        waited = acked_within(car, 2.0)
+        r = os.open(tmp_name, os.O_RDONLY | os.O_NONBLOCK)  # the record's writer goes on
+        end = time.time() + 3
+        while time.time() < end and len(record.splitlines()) < 1 + len(items):
+            try:
+                record += os.read(r, 65536)
+            except BlockingIOError:
+                pass
+            time.sleep(0.02)
+    finally:
+        if r < 0:
+            r = os.open(tmp_name, os.O_RDONLY | os.O_NONBLOCK)
+        stop(p, fd)
+        os.close(r)
+    assert waited is not None and waited < 0.4, f"the car's packet acknowledged after {waited} s"
+    lines = record.decode().splitlines()
+    assert lines[0] == rev and len(lines) == 1 + len(items), lines
+    assert 'library: the sent record written' in log.read_text()
+
+
+def test_a_request_read_as_data_shows_the_iphone_again(probe, tmp_path):
+    """q2muse-1125 at 34123.221, the first line after the 12.3 s stall: the data stage of the car's SET_REPORT (14 bytes)
+    came back as 8 bytes, 01 0b 00 00 01 00 00 00, a request of its own (SET_INTERFACE, alternate setting 0 of interface
+    1): the car had given the transfer up and sent its next request, which the gadget never answered. Nothing came
+    from the car again, over ep0 or for ep1, for the 23 minutes to the cable out. Those bytes are not iAP2's, and the
+    link is lost: with --state, exit 22, for q2car.sh to show the iPhone again."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path, '--state', str(tmp_path/'state'))
+    try:
+        car.ffs.setup(0x21, 9, 0x020f, 2, 14, bytes.fromhex('010b000001000000'))
+        assert p.wait(3) == 22
+    finally:
+        p.kill()
+        os.close(fd)
+    text = log.read_text()
+    assert 'read 8 ' in text and 'not the report asked for' in text and 'the iPhone shown again' in text
+
+
+def test_a_link_gone_quiet_with_packets_waiting_is_lost(probe, tmp_path):
+    """q2muse-1125 from 34123: the car took no input report and sent nothing for 23 minutes. The reports already handed
+    to the writer never went, so no packet went to the wire (pacing: only while no more than 4 wait), 2,555 were
+    dropped from a full queue, and the count of tries, kept only while the wire is clear, never ran: nothing called the
+    link lost. Here the car stops taking reports (ep1's pipe made small and filled) and says nothing; with packets
+    waiting and nothing from the car for --quiet-ms, the link is lost: exit 22."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path, '--state', str(tmp_path/'state'), '--quiet-ms', '1500')
+    w = os.open(car.ffs.path/'ep1', os.O_WRONLY | os.O_NONBLOCK)
+    try:
+        fcntl.fcntl(w, 1031, 4096)  # F_SETPIPE_SZ: the smallest pipe
+        try:
+            while True:
+                os.write(w, bytes(512))
+        except BlockingIOError:
+            pass
+        t0 = time.time()
+        assert p.wait(6) == 22
+        took = time.time() - t0
+    finally:
+        p.kill()
+        os.close(w)
+        os.close(fd)
+    text = log.read_text()
+    assert 'link: lost (nothing from the car' in text and 'the iPhone shown again' in text
+    assert took > 1.0, took
+
+
+def test_a_quiet_car_with_nothing_waiting_keeps_the_link(probe, tmp_path):
+    """The other side of the quiet rule: a car that says nothing while the Q2 has nothing waiting (paused, everything
+    acknowledged) keeps the link, and the Q2's next packet after a long quiet is not lost at once."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path, '--state', str(tmp_path/'state'), '--quiet-ms', '1000')
+    try:
+        files['np'].write_text(files['np'].read_text().replace('state=1', 'state=2'))
+        end = time.time() + 2.5
+        while time.time() < end:  # the pause's update acknowledged, then nothing either way
+            try:
+                car.packet_any(0.2)
+            except AssertionError:
+                pass
+        assert p.poll() is None
+        assert acked_within(car, 1.0) is not None
+        time.sleep(0.5)
+        assert p.poll() is None
+    finally:
+        stop(p, fd)
+    assert 'link: lost' not in log.read_text()
+
+
+def test_a_server_song_s_cover_from_its_app(probe, tmp_path):
+    """The drive of 2026-11-21 (q2muse-1125): The Boys Of Summer, a server song played from the Subsonic app's stream
+    cache (/mnt/mmc/.subsonic/stream/...), showed its cover on the Q2 (its app's covers/<album id>.jpg,
+    catalogue.c catalogue_cover) and none on iDrive, "art: transfer 83, 0 bytes (0 as found)": Cover Flow had no copy
+    of its album and nothing lay beside the file. The song's library id (its server row, from 0x40000000) names its
+    row's path in the catalogue, whose album id names the app's cover."""
+    card = tmp_path/'card'
+    cover = card/'mnt/mmc/.subsonic/covers/al-77.jpg'
+    cover.parent.mkdir(parents=True)
+    jpeg = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=160x160', '-frames:v', '1', '-q:v', '2',
+                           '-f', 'mjpeg', '-'], check=True, capture_output=True).stdout
+    cover.write_bytes(jpeg)
+    rid = 0x4000139a
+    catalogue_db(tmp_path/'catalogue.db', [(rid, 'The Boys Of Summer', 'The Very Best Of', 'Don Henley', '', 'Rock', 5, 1,
+                                            '/mnt/mmc/.subsonic/cat/al-77/05.flac')])
+    (tmp_path/'run').mkdir()
+    p, car, fd, log, files = bmw_up(probe, tmp_path/'run', '--lib-cat', str(tmp_path/'catalogue.db'),
+                                    '--card-root', str(card))
+    try:
+        files['np'].write_text(f'state=1\npos=1000\nlen=288\nid={rid}\ntitle=The Boys Of Summer\nartist=Don Henley\n'
+                               'album=The Very Best Of\npath=/mnt/mmc/.subsonic/stream/11c3e037/original/5/the boys of '
+                               'summer [6wXZ8JEGfmYO7FYDnHDAUi].flac\nshuffle=0\nrepeat=0\n')
+        media, _ = np_updates(car)
+        updates, setups = np_and_files(car, lambda u: False, seconds=1.0)
+    finally:
+        stop(p, fd)
+    assert media.get(0x1a), 'a transfer named'
+    assert setups and max(setups.values()) > len(jpeg) - 64, setups
+    assert f'({len(jpeg)} as found)' in log.read_text()
+
+
+PACE_MS =int(os.environ.get('Q2IAP_PACE_MS', '2'))
 
 
 def fast_ffs(init):

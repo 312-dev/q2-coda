@@ -35,6 +35,11 @@
  * the car's 200 ms. */
 #define BACKLOG_MAX 4
 #define BULK_MAX 768
+/* The link lost when the Q2 has packets or reports waiting and the car has sent nothing for this long (iap2_tick):
+ * the BMW acknowledges within 22 ms and gives a packet up after 10 tries of 200 ms, so 10 s of quiet with something
+ * waiting is a car that has stopped. q2muse-1125: the car stopped taking input reports, pacing then held every packet
+ * back, the tries were never counted (they wait for a clear wire) and the link stayed up, silent, for 23 minutes. */
+static long link_quiet_ms = 10000;
 
 typedef unsigned char u8;
 typedef unsigned short u16;
