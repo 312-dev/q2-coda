@@ -1389,6 +1389,13 @@ static void send_library_updates(const char *car_rev, unsigned mask) {
              car_rev ? car_rev : "nothing", ls.nf, lib_nlists(), ls.held ? "nothing" : ls.diff ? "the changes" : "the whole",
              l->rev, l->n, ls.next);
     H->log(t);
+    /* every list's name, once: on 2026-11-22 iDrive showed a list like "Apple Music Radio" and the log cut the
+     * updates' names off */
+    char names[1600];
+    unsigned at = (unsigned)snprintf(names, sizeof names, "library: its lists:");
+    for (unsigned j = 0; j < lib_nlists() && at < sizeof names - 1; ++j)
+        at += (unsigned)snprintf(names + at, sizeof names - at, "%s \"%s\"", j ? "," : "", lib_str(l->lists[j].name));
+    H->log(names);
     lib_pump();
 }
 

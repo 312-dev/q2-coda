@@ -1685,6 +1685,8 @@ def test_idrive_has_the_lists_first_within_seconds_at_the_bmw_s_pace(probe, tmp_
           f'every list\'s songs in {t_lists:.1f} s; then {len(pushed)} songs of the push before the cable came out '
           f'({last_rev})')
     assert 'link: lost' not in text and '(again)' not in text
+    names = next(l for l in text.splitlines() if 'library: its lists:' in l)  # every name sent, in one line
+    assert all(f'"{n}"' in names for n, ids in playlists if ids) and '"Favorites"' in names, names
     # the next plug: the push resumes where the car's revision says, with the lists first again
     p, car, fd, log, files, db, sent = lib_car(probe, tmp_path, '--report-ms', str(PACE_MS), run='run2')
     try:
