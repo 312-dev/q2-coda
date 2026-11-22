@@ -70,6 +70,15 @@ static void usb_car_toast(const char *glyph, const char *text) {
 static void usb_car_gone(const char *why) {
     char line[96];
     car.gone_at = 0;
+    /* Radio, Internet Radio, a video or Spotify played to the car's feed (videos.c output_device), which cannot follow
+     * to another output mid-stream: paused whatever else is connected */
+    if (media_owner() != 1) {
+        if (!media_playing()) return;
+        media_set_playing(0);
+        tk_snprintf(line, sizeof line, "the car's audio gone (%s) under another source: paused", why);
+        ulog('I', "usb", line);
+        return;
+    }
     if (mclGetPlayStatus() != 2 || has_valid_output_device()) return;
     player_play_pause();
     tk_snprintf(line, sizeof line, "the car's audio gone (%s) and nowhere else to play: paused", why);

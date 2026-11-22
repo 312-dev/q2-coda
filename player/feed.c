@@ -9,7 +9,9 @@
  * waits for a reader and the read never sees an end. The ring is read from only as the car takes its frames, so the
  * source is paced by the car through the pipe; when nothing has taken a frame for FEED_IDLE_MS (the car not reading,
  * the player's own song playing), what comes is read and dropped at the source's own rate, so a source never blocks
- * for good and nothing grows. Q2PLAYER_FEED moves the FIFO for the host tests. */
+ * for good and nothing grows. Between a source's write and the car: the FIFO's FEED_PIPE bytes, the ring's FEED_RING
+ * frames and the car's own PCM buffer, about 0.5 s, which a video's picture leads by (q2video's clock is the q2car
+ * device's, which holds nothing). Q2PLAYER_FEED moves the FIFO for the host tests. */
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -23,14 +25,15 @@
 #include "q2player.h"
 
 #define FEED_FILE "/tmp/q2car.feed"
-#define FEED_RING (FEED_RATE / 5) /* frames: 200 ms */
+#define FEED_RING (FEED_RATE / 10) /* frames: 100 ms */
+#define FEED_PIPE 4096          /* the FIFO's bytes, 23 ms: what the source runs ahead by (F_SETPIPE_SZ) */
 #define FEED_IDLE_MS 300
 #define FRAME 4 /* 16-bit stereo */
 
 static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
 static uint8_t ring[FEED_RING * FRAME], part[FRAME];
 static unsigned head, count, nparts; /* frames */
-static int64_t pulled_at, heard_at, dropped_at;
+static int64_t pulled_at, heard_at;
 
 static int64_t mono_ms(void) {
     struct timespec t;
@@ -72,18 +75,21 @@ static void *reader(void *arg) {
         if (poll(&p, 1, 100) <= 0) continue;
         pthread_mutex_lock(&mu);
         unsigned room = FEED_RING - count;
-        int64_t now = mono_ms(), idle = now - pulled_at;
+        int64_t idle = mono_ms() - pulled_at;
         pthread_mutex_unlock(&mu);
         if (room >= sizeof b / FRAME) {
             ssize_t r = read(fd, b, sizeof b);
             if (r > 0) put(b, (unsigned)r);
         } else if (idle >= FEED_IDLE_MS) {
-            /* nobody takes the frames: dropped at the source's rate, so it is neither blocked nor sped up */
-            int64_t due = (now - (dropped_at > now - 1000 ? dropped_at : now - 20)) * FEED_RATE / 1000 * FRAME;
-            if (due > (int64_t)sizeof b) due = sizeof b;
-            ssize_t r = due >= FRAME ? read(fd, b, (size_t)due - (size_t)due % FRAME) : 0;
-            if (r > 0) dropped_at = now, heard_at = now;
-            else usleep(10000);
+            /* nobody takes the frames: dropped at the source's rate (each read waited out for as long as it plays),
+             * so the source is neither held nor sped up */
+            ssize_t r = read(fd, b, sizeof b);
+            if (r > 0) {
+                pthread_mutex_lock(&mu);
+                heard_at = mono_ms();
+                pthread_mutex_unlock(&mu);
+                usleep((useconds_t)((int64_t)r / FRAME * 1000000 / FEED_RATE));
+            }
         } else {
             usleep(5000); /* the ring is full and the car is taking it: wait for room */
         }
@@ -103,6 +109,7 @@ void feed_start(void) {
         close(fd);
         return;
     }
+    fcntl(fd, F_SETPIPE_SZ, FEED_PIPE); /* the source this little ahead of the ring, for a video's lips */
     pthread_t t;
     if (pthread_create(&t, NULL, reader, (void *)(intptr_t)fd)) close(fd);
     else pthread_detach(t);

@@ -1270,7 +1270,7 @@ int tuner_open(void *ctx, void *event) {
         tune();
         return 0;
     }
-    if (car_takes_audio() || !(rt = calloc(1, sizeof *rt))) return 0;
+    if (!(rt = calloc(1, sizeof *rt))) return 0;
     if (!page_make()) {
         free(rt);
         rt = 0;

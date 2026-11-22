@@ -243,3 +243,18 @@ def test_a_relink_that_never_brings_the_audio_back_pauses_in_30_s(fw):
     state(u, ms=10000, verdict='car', host=1, name='BMW 83828', audio=0)
     assert p.pauses == 1
 
+
+
+def test_another_source_played_to_the_car_pauses_when_the_car_s_audio_goes(fw):
+    """Spotify (or Radio, Internet Radio, a video) plays to the car's feed (videos.c output_device), which cannot
+    follow to another output mid-stream: at the cable out it is paused, headphones in or not, and the Library is
+    left alone."""
+    from test_radio import Sp
+    u, p = car_playing(fw, output=1)
+    sp = fw.var('spotify__sp', Sp)
+    sp.active, sp.playing = 1, 1
+    sent = []
+    fw.mock('fw_sendto', lambda fd, data, n, *_: sent.append(C.string_at(data, n)) or n)
+    u.unplug()
+    assert sent and sent[0].startswith(b's'), sent  # librespot told to pause, as spot_yield tells it
+    assert p.pauses == 0, "the Library's pause is not asked"

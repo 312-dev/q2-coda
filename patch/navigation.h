@@ -1253,7 +1253,6 @@ enum { USB_CAR_NONE, USB_CAR_STORAGE, USB_CAR_CHARGER };
 void usb_car_start(void), usb_car_stop(int wait);
 int usb_car_poll(void), usb_car_on(void);
 const char *usb_car_name(void);
-int car_takes_audio(void); /* videos.c */
 #if Q2POD_DEV
 /* adb_trust.c (docs/adb.md#authorization): adbd's question on the card, its answer back through
  * usb_ui.c; Settings > General > Developer Options and Trusted Computers */

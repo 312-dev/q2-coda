@@ -281,6 +281,8 @@ CODA_RC_LIBS = ['lib/libc-2.28.so', 'usr/lib/libsqlite3.so.0.8.6']
 # (patch/usb_ui.c) runs q2car, the iPhone gadget's script, which loads usb_f_uac1.ko (tools/uac1.py's pinned build;
 # beside the vendor modules, not among those S11module_driver_default loads) and runs q2-iap on its FunctionFS HID
 Q2CAR = 'usr/bin/q2car'
+# The car's other sources' ALSA device (assets/alsa/30-q2car.conf, player/feed.c)
+CAR_FEED_CONF = 'usr/share/alsa/alsa.conf.d/30-q2car.conf'
 Q2IAP = 'usr/bin/q2-iap'
 UAC1_KO = 'module_driver/usb_f_uac1.ko'
 # Guest Play's daemon (docs/internals.md#guest-play): demo starts it (patch/guest.c), libdbus talks to BlueZ,
@@ -3026,6 +3028,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                BIP: (HELPER_LIKE, compile_helper(out, cat, BIP_SOURCES, 'q2-bip', HELPER_LIBS[:1])),
                                IROH: (HELPER_LIKE, iroh.binary(fresh=build_iroh)),
                                Q2CAR: (HELPER_LIKE, (ROOT/'patch/q2car.sh').read_bytes()),
+                               CAR_FEED_CONF: ('usr/share/alsa/alsa.conf.d/20-bluealsa.conf',
+                                               (ROOT/'assets/alsa/30-q2car.conf').read_bytes()),
                                Q2IAP: (HELPER_LIKE, compile_helper(out, cat, 'q2_iap', 'q2-iap', CODA_RC_LIBS)),  # libc and SQLite (q2_iap_lib.c)
                                UAC1_KO: ('module_driver/soc_aic.ko', uac1.module()),
                                Q2SEND: (HELPER_LIKE, compile_helper(out, cat, Q2SEND_SOURCES, 'q2send', Q2SEND_LIBS)),

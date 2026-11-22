@@ -1801,7 +1801,7 @@ def test_car_feed_does_not_block_a_source_the_car_does_not_take(player, songs, t
     assert names == [], names
     assert len(f.runs) == 1, 'the source finished'
     took = f.runs[0][1] - f.runs[0][0]
-    assert 1.5 < took < 4.5, f'{took:.2f} s for 3 s of sound'
+    assert 2.5 < took < 3.8, f'{took:.2f} s for 3 s of sound'
     return f'3 s of sound dropped in {took:.2f} s'
 
 

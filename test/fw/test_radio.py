@@ -491,19 +491,35 @@ def test_a_station_plays_in_q2video_and_is_kept_as_last(fw):
     assert fw.fn('radio_status', C.c_int)() == 2
 
 
-def test_a_station_waits_while_the_car_takes_the_audio(fw):
-    """Car Audio's USB stream is the player's songs alone (q2-iap's car file there): a station played to demo's
-    output went to Bluetooth A2DP on the drive of 2026-11-22, its name on iDrive over silence. While the car takes the
-    audio nothing starts and the Q2 says why; the car file gone, it plays."""
+def exec_args(fw):
+    """q2video's arguments, read as the child's execl is called (its volume is a string on the parent's stack)."""
+    got = []
+
+    def execl(*a):
+        out = []
+        for x in a:
+            if not x:
+                break
+            out.append(C.string_at(x).decode())
+        got.append(out)
+        return -1
+    fw.mock('fw_execl', execl)
+    return got
+
+
+def test_a_station_plays_to_the_car_while_the_car_takes_the_audio(fw):
+    """Car Audio's USB stream is the player's (q2-iap's car file there): a station plays to ALSA's q2car, which the
+    player plays on to the car (docs/iphone-mode.md#other-sources-over-usb), at unity (the car's knob is its volume).
+    On the drive of 2026-11-22 it went to demo's output, Bluetooth A2DP, and iDrive showed its name over silence."""
     p = page(fw, {'/tmp/q2-iap.audio': b'hw:CARD=UAC1Gadget,0\n44100\n'})
     fw.mock('fw_system', lambda *_: 0)
     fw.fn('usb_car_start', None)()  # Car Audio's iPhone on the cable
-    player = play(fw, p, 3)
-    assert player.started == [] and rd(fw).pid == 0
-    assert p.toasts == ["Plays on the Q2 only, not over the car's USB"]
-    del p.card.files['/tmp/q2-iap.audio']
+    fw.mock('fw_fork', lambda *_: 0)  # the child's side
+    got = exec_args(fw)
+    p.menu('Featured')
     p.rows('station_click')[3]()
-    assert player.started == [4242]
+    assert got[0] == ['/usr/bin/q2video', '/usr/bin/q2video', '-r', 'q2car', KEXP[1], 'h100'], got
+    assert p.toasts == []
 
 
 def test_a_station_that_can_t_start_says_so(fw):
