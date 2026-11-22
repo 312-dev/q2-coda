@@ -254,7 +254,7 @@ A WMA file's `LENGTH` is its whole seconds (5 for 5.99 s), and its position star
 
 ## What it writes
 
-`/tmp/ampsco.ini` (the unit record, at start), `/tmp/notfile` and `/tmp/notsupport` (through `system("touch …")`), and nothing else: no configuration, no state. In `--dev` builds q2player also writes, while the car's USB audio plays, its trace lines to the unified log and the tap `/mnt/mmc/.q2muse/logs/car-pcm.raw` ([iphone-mode: The car's trace](iphone-mode.md#car-trace)). Q2 Muse's patches add reads of `/mnt/data/peq-active` and `/tmp/q2xfade`.
+`/tmp/ampsco.ini` (the unit record, at start), `/tmp/notfile` and `/tmp/notsupport` (through `system("touch …")`), and nothing else: no configuration, no state. While the car's USB audio plays, q2player also writes its trace lines to the unified log (a line a minute while all is well, one for each second with something wrong) and, only while `/mnt/mmc/.q2muse/logs/car-pcm.on` exists, the tap `/mnt/mmc/.q2muse/logs/car-pcm.raw` ([iphone-mode: The car's trace](iphone-mode.md#car-trace)), and `/tmp/q2-iap.under`, its underrun count. Q2 Muse's patches add reads of `/mnt/data/peq-active` and `/tmp/q2xfade`.
 
 ## What Q2 Muse patches
 

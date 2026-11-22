@@ -209,7 +209,7 @@ static int car_follow(int want, int *waited_ms) {
     return r;
 }
 
-/* The one-off line for each change of the car's rate, beside the trace's line a second (cartrace.c) */
+/* The one-off line for each change of the car's rate, beside the trace's lines (cartrace.c) */
 static void car_rate_line(const char *what, int from, int to, int waited_ms, int gap_ms) {
     char line[160];
     int n = gap_ms < 0 ? snprintf(line, sizeof line, "car rate %d->%d %s: wait=%dms", from, to, what, waited_ms)
