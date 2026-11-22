@@ -1,7 +1,8 @@
 /* Settings > Bluetooth (docs/oled-design.md#bluetooth, docs/internals.md#bluetooth-page): devices
  * before settings. Over the list stock's btmenu_rows builds (and rebuilds on every scan result and
  * link change, ringnav_btrows), the page is the switch, Name, then My Devices (the paired ones),
- * Other Devices (the found ones) and an Audio group: Quality, Headset Volume, Resume on Connect and
+ * Other Devices (the found ones a scan heard while the page is open; a stored record with no key
+ * removed through BlueZ, seen_fetch) and an Audio group: Quality, Headset Volume, Resume on Connect and
  * Link Volume. Stock's Scan now row goes: the page scans by itself while it is open (bt_ui_poll),
  * a spinner beside Other Devices while it runs, and stops a scan when a connect starts. With
  * Bluetooth off, the switch, Name and a line saying what turning it on gives.
@@ -44,6 +45,11 @@
 #define BT_ROWS_MAX 48
 #define BT_CLASS_FILE "/tmp/q2-btclass"
 #define BT_CLASS_MAX 12 /* devices whose Class one fetch asks for */
+#define BT_SEEN_FILE "/tmp/q2-btseen"
+#define BT_FOUND_MAX 16 /* found devices the page keeps track of */
+#define BT_SEEN_MAX 8   /* ... and asks BlueZ about at once (seen_fetch) */
+#define BT_SEEN_MS 2000 /* while the page scans, the ones not heard yet asked again this often */
+#define BT_STORE "/mnt/data/bluetooth" /* BlueZ's records, ADAPTER/ADDRESS/info */
 #define BT_MARK "_btmark"
 
 /* What a row's state label says, from stock's tr_text (navigation.h BT_ROW_*). */
@@ -74,6 +80,10 @@ static struct {
     int link_pending; /* its connect toast not yet shown */
     int low;          /* the battery's steps toasted this connection: 1 at 20%, 2 at 10% */
     char classes[BT_CLASS_MAX * 32 + 2];
+    char found[BT_FOUND_MAX][18]; /* the found devices stock listed at the last build */
+    int n_found, n_heard;
+    unsigned heard[BT_FOUND_MAX]; /* ... those BlueZ had an RSSI for since the page opened */
+    unsigned seen_ask, seen_hash, seen_at, seen_file; /* the last ask: its number, what, when */
 } bt __attribute__((section(".scratch")));
 
 /* ---- the devices ---- */
@@ -292,6 +302,103 @@ static int class_read(void) {
     bt.class_seen = hash;
     tk_snprintf(bt.classes, sizeof bt.classes, "%s", raw + 1);
     return 1;
+}
+
+/* ---- what the scan heard ----
+ * libbtctl's btctl_get_device_list (stock's list, getSearchResult) is every Device1 BlueZ has,
+ * paired first by its Paired: a record BlueZ loaded from its store with no key (a pairing that
+ * never finished, kept as Trusted) is listed as found wherever the radio is. On 2026-11-20 (V1N6i)
+ * an Arctis Nova Pro Wireless (20:AF:1B:18:FD:03) was in Other Devices 20 miles from it. So a found
+ * device is listed once BlueZ has had an RSSI for it while the page is open (a discovery heard it),
+ * and a stored record with no key, not paired, not connected and not heard is removed through
+ * BlueZ (Adapter1.RemoveDevice), never while a connect runs (docs/internals.md#bluetooth-page). */
+
+static unsigned mac_hash(const char *m) {
+    unsigned h = 5381;
+    for (; m && *m; ++m) h = h * 33 + (unsigned)(*m >= 'a' && *m <= 'f' ? *m - 32 : *m);
+    return h;
+}
+static int heard(const char *mac) {
+    unsigned h = mac_hash(mac);
+    for (int i = 0; i < bt.n_heard; ++i)
+        if (bt.heard[i] == h) return 1;
+    return 0;
+}
+
+static int busy(void);
+/* Asked of BlueZ in the background, for each found device not heard yet, into BT_SEEN_FILE whole:
+ * "#N" (this ask's number), then "MAC seen" for one with an RSSI, "MAC removed" for a stale record
+ * removed. Asked again when that set changes, a removal becomes allowed, or every BT_SEEN_MS while
+ * the page scans. */
+static void seen_fetch(unsigned now) {
+    char cmd[BT_SEEN_MAX * 600 + 320], link[32] = "";
+    int status = 0, n = getBtLinkSize(), k = 0;
+    int rm = I(bt_connectstatus, 0) != 1 && !busy(); /* a pairing or connect runs: nothing removed */
+    unsigned hash = 5381u + (unsigned)rm, at;
+    if (n > 0) getBtLinkItem(n - 1, &status, link); /* the link thread's target: never removed */
+    for (int i = 0; i < bt.n_found && k < BT_SEEN_MAX; ++i)
+        if (!heard(bt.found[i])) hash = hash * 33 + mac_hash(bt.found[i]), ++k;
+    if (!k || (hash == bt.seen_hash && !(bt_searchtime > 1 && now - bt.seen_at >= BT_SEEN_MS)))
+        return;
+    bt.seen_hash = hash, bt.seen_at = now;
+    at = (unsigned)tk_snprintf(cmd, sizeof cmd,
+                               "(f=" BT_SEEN_FILE "; g() { dbus-send --system --print-reply "
+                               "--dest=org.bluez $1 org.freedesktop.DBus.Properties.Get "
+                               "string:org.bluez.Device1 string:$2 2>/dev/null; }; { echo '#%u'; ",
+                               ++bt.seen_ask);
+    k = 0;
+    for (int i = 0; i < bt.n_found && k < BT_SEEN_MAX; ++i) {
+        const char *m = bt.found[i];
+        if (heard(m)) continue;
+        ++k;
+        char path[24];
+        tk_snprintf(path, sizeof path, "%s", m);
+        for (char *p = path; *p; ++p)
+            if (*p == ':') *p = '_';
+        at += (unsigned)tk_snprintf(cmd + at, sizeof cmd - at,
+                                    "d=/org/bluez/hci0/dev_%s; if g $d RSSI >/dev/null; then "
+                                    "echo '%s seen'; ",
+                                    path, m);
+        if (rm && strcmp(m, link))
+            at += (unsigned)tk_snprintf(
+                cmd + at, sizeof cmd - at,
+                "elif g $d Paired | grep -q false && g $d Connected | grep -q false && "
+                "i=$(ls " BT_STORE "/*/%s/info 2>/dev/null) && [ -n \"$i\" ] && "
+                "! grep -q 'Key\\]' $i && dbus-send --system --print-reply --dest=org.bluez "
+                "/org/bluez/hci0 org.bluez.Adapter1.RemoveDevice objpath:$d >/dev/null 2>&1; "
+                "then echo '%s removed'; ",
+                m, m);
+        at += (unsigned)tk_snprintf(cmd + at, sizeof cmd - at, "fi; ");
+    }
+    tk_snprintf(cmd + at, sizeof cmd - at, "} > $f.new; mv -f $f.new $f) >/dev/null 2>&1 &");
+    system(cmd);
+}
+
+/* BT_SEEN_FILE's answer to the last ask, once: each device seen joins the heard set, each record
+ * removed is logged. 1 when a device was heard that was not before. */
+static int seen_read(void) {
+    char raw[BT_SEEN_MAX * 32 + 32], tok[16];
+    unsigned n = state_read(BT_SEEN_FILE, raw, sizeof raw), h = 5381, t;
+    int added = 0;
+    for (unsigned i = 1; i <= n; ++i) h = h * 33 + (unsigned char)raw[i];
+    t = (unsigned)tk_snprintf(tok, sizeof tok, "\n#%u\n", bt.seen_ask);
+    if (!bt.seen_ask || h == bt.seen_file || strncmp(raw, tok, t)) return 0;
+    bt.seen_file = h;
+    for (const char *p = raw + t, *next; *p; p = next) {
+        char mac[18], s[96];
+        for (next = p; *next && *next++ != '\n';) {}
+        tk_snprintf(mac, sizeof mac, "%s", p);
+        if (!bt_mac_ok(mac)) continue;
+        if (!strncmp(p + 17, " seen\n", 6) && !heard(mac) && bt.n_heard < BT_FOUND_MAX) {
+            bt.heard[bt.n_heard++] = mac_hash(mac);
+            added = 1;
+        } else if (!strncmp(p + 17, " removed\n", 9)) {
+            const char *name = dev_at(bt_dev_find(mac), 1);
+            tk_snprintf(s, sizeof s, "stale record removed %s \"%s\"", mac, name ? name : "");
+            ulog('I', "bt", s);
+        }
+    }
+    return added;
 }
 
 /* ---- the connected device's codecs ---- */
@@ -542,6 +649,7 @@ void bt_page(void *view, int on) {
     bt.listed = listed_hash(); /* the list these rows were built from */
     if (bt.view != view) {
         bt.view = view, bt.scans = 0, bt.linking = -1;
+        bt.n_heard = 0, bt.seen_hash = 0; /* what the scan heard, from this open on */
         bt_trace_page(); /* "page opened", and its found devices logged afresh */
         widget_on(view, EVT_DESTROY, view_gone, view);
     }
@@ -552,11 +660,27 @@ void bt_page(void *view, int on) {
     if (n < 7 || n - 2 > BT_ROWS_MAX - 8) return;
     void *rows[BT_ROWS_MAX], *quality = widget_get_child(view, 2),
                              *volume = widget_get_child(view, 3), *scan = widget_get_child(view, 4);
-    unsigned k = 0, other = 0;
+    void *unheard[BT_ROWS_MAX];
+    unsigned k = 0, other = 0, u = 0;
+    bt.n_found = 0; /* the found devices listed, then BlueZ asked which a scan heard */
+    for (unsigned i = 5; i < n - 2; ++i) {
+        void *b = row_button(widget_get_child(view, i));
+        const char *m = b && !state_label(b) ? dev_at(atoi(widget_get_prop_str(b, "name", "")), 0)
+                                             : (const char *)0;
+        if (m && bt_mac_ok(m) && bt.n_found < BT_FOUND_MAX)
+            tk_snprintf(bt.found[bt.n_found++], sizeof bt.found[0], "%s", m);
+    }
+    seen_fetch(time_now_ms());
+    seen_read();
     rows[k++] = widget_get_child(view, 0);
     rows[k++] = widget_get_child(view, 1);
     for (unsigned i = 5; i < n - 2; ++i) {
         void *item = widget_get_child(view, i), *b = row_button(item);
+        if (b && !state_label(b) &&
+            !heard(dev_at(atoi(widget_get_prop_str(b, "name", "")), 0))) { /* not in range */
+            unheard[u++] = item;
+            continue;
+        }
         if (b) {
             widget_set_prop_int(item, "_bt_dev", atoi(widget_get_prop_str(b, "name", "")) + 1);
             widget_off_by_func(b, EVT_CLICK, (void *)btmenu_item_on_click, b);
@@ -587,6 +711,7 @@ void bt_page(void *view, int on) {
     for (unsigned j = k - 2; j < k; ++j) widget_resize(rows[j], I(rows[j], W_W), SET_STOCK_ROW);
     for (unsigned i = 0; i < k; ++i) widget_restack(rows[i], i);
     widget_destroy(scan);
+    for (unsigned i = 0; i < u; ++i) widget_destroy(unheard[i]);
     class_read();
     class_fetch();
 }
@@ -1005,6 +1130,8 @@ static void page_poll(unsigned now) {
     if (now - bt.poll_at < BT_POLL_MS) return;
     bt.poll_at = now;
     if (class_read()) widget_invalidate_force(win, (void *)0);
+    seen_fetch(now);
+    if (seen_read()) ringnav_btrows(win, (void *)0); /* a device heard: listed now */
     /* stock rebuilds only when its own state moves: a row it left behind is rebuilt here */
     if (labels_stale()) g_btsetting_flag = 1;
     int linking = I(bt_connectstatus, 0) == 1 || busy();

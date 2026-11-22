@@ -3,6 +3,7 @@ rows, then the Audio group (Guest Play, Quality, Headset Volume, Resume on Conne
 started by the page itself while it is open; the connected device a two-line row ("Connected · LDAC · 72%")."""
 import ctypes as C
 import os
+import re
 import subprocess
 
 import pytest
@@ -13,6 +14,7 @@ from test_nav_library_pages import Config, Ui
 EVT_CLICK = 0x10c
 CLASS_FILE = '/tmp/q2-btclass'
 BATT_FILE = '/tmp/q2-btbatt'
+SEEN_FILE = '/tmp/q2-btseen'
 HEAD = 'AA:BB:CC:DD:EE:01'
 CAR = 'AA:BB:CC:DD:EE:02'
 SPEAKER = 'AA:BB:CC:DD:EE:03'
@@ -22,12 +24,12 @@ class Page:
     """Settings > Bluetooth as stock's btmenu_rows builds it: five head rows s0-s4 (Bluetooth on) or the switch,
     then My Devices' header and the paired devices, Other Devices' header and the found ones, each device row its
     button named by its index in pdeq_btshowlist, holding stock's icon, name and state labels; then ringnav_btrows."""
-    def __init__(self, fw, devices=(), on=1, files=None, **config):
+    def __init__(self, fw, devices=(), on=1, files=None, answer=True, **config):
         self.fw, self.ui, self.devices = fw, Ui(fw), list(devices)
         self.config = Config(fw, **config)
         self.files = Files(fw, dict(files or {}))
-        self.commands, self.now, self.links = [], 1000, []
-        fw.mock('fw_system', lambda cmd, *_: self.commands.append(C.string_at(cmd).decode()) or 0)
+        self.commands, self.now, self.links, self.answer = [], 1000, [], answer
+        fw.mock('fw_system', self.system)
         fw.mock('time_now_ms', lambda *_: self.now)
         fw.mock('getBtLinkSize', lambda *_: len(self.links))
         fw.mock('getBtLinkItem', self.link_item)
@@ -43,6 +45,16 @@ class Page:
         self.ui.name[self.view] = 'scroll_view_bluetooth'
         fw.mock('stock_btrows_trampoline', self.build)
         self.rebuild()
+
+    def system(self, cmd, *_):
+        """A command run; with answer, BlueZ's answer to the page's ask of which found devices the scan heard
+        (SEEN_FILE), at once: every device listed as found was."""
+        command = C.string_at(cmd).decode()
+        self.commands.append(command)
+        if self.answer and SEEN_FILE in command:
+            seen = ''.join(f'{mac} seen\n' for mac, _, state in self.devices if state == 'found')
+            self.files.files[SEEN_FILE] = (re.search(r"echo '(#\d+)'", command)[1] + '\n' + seen).encode()
+        return 0
 
     def link_item(self, i, status, mac, *_):
         m, s = self.links[i]
@@ -1333,3 +1345,117 @@ def test_a_device_found_mid_scan_never_paints_on_another_s_row(fw):
         p.layout()
         assert all(kind == {'BMW 83828': 'car', 'Pixel Buds': 'headphones', 'JBL Flip 6': 'bt'}[t] for t, kind in rows()), rows()
     assert [t for t, _ in rows()] == ['BMW 83828', 'Pixel Buds', 'JBL Flip 6']
+
+
+ARCTIS = '20:AF:1B:18:FD:03'
+BMW_CAR = '60:E6:F0:A1:1F:09'
+ADAPTER = 'A4:E8:8D:7B:40:31'
+ARCTIS_INFO = ('[General]\nName=Arctis Nova Pro Wireless\nClass=0x240418\nSupportedTechnologies=BR/EDR;\nTrusted=true\n'
+               'Blocked=false\n\n[DeviceID]\nSource=2\nVendor=4152\nProduct=4733\nVersion=1\n')
+BMW_INFO = '[General]\nName=BMW 83828\nTrusted=true\n\n[LinkKey]\nKey=00112233445566778899AABBCCDDEEFF\nType=4\nPINLength=0\n'
+
+
+class BlueZ:
+    """BlueZ under sh for the page's ask (SEEN_FILE): a dbus-send answering Device1's Properties.Get from an object
+    set (a device's property missing is BlueZ's error, as RSSI is for a device no discovery heard) and logging
+    Adapter1.RemoveDevice, and BlueZ's store (ADAPTER/ADDRESS/info) in a directory for /mnt/data/bluetooth."""
+    def __init__(self, tmp_path, devices):
+        self.tmp = tmp_path
+        self.bin, self.objs, self.store = tmp_path / 'bin', tmp_path / 'objs', tmp_path / 'store'
+        for d in (self.bin, self.objs, self.store):
+            d.mkdir()
+        for mac, (props, info) in devices.items():
+            obj = self.objs / ('dev_' + mac.replace(':', '_'))
+            obj.mkdir()
+            for k, v in props.items():
+                (obj / k).write_text(v)
+            if info is not None:
+                (self.store / ADAPTER / mac).mkdir(parents=True)
+                (self.store / ADAPTER / mac / 'info').write_text(info)
+        (self.bin / 'dbus-send').write_text(
+            '#!/bin/sh\n'
+            f'[ "$5" = org.bluez.Adapter1.RemoveDevice ] && [ "$4" = /org/bluez/hci0 ] && echo "${{6#objpath:}}" >> {tmp_path}/removed && exit 0\n'
+            '[ "$5" = org.freedesktop.DBus.Properties.Get ] && [ "$6" = string:org.bluez.Device1 ] || exit 1\n'
+            f'v={self.objs}/${{4##*/}}/${{7#string:}}\n'
+            '[ -f "$v" ] || { echo "Error org.freedesktop.DBus.Error.InvalidArgs: No such property" >&2; exit 1; }\n'
+            'echo "method return time=1 sender=:1.2"; echo "   variant       $(cat "$v")"\n')
+        (self.bin / 'dbus-send').chmod(0o755)
+
+    def run(self, command):
+        """The command, as the page's shell runs it, in the foreground: what it wrote."""
+        out = self.tmp / 'seen'
+        command = (command.replace(SEEN_FILE, str(out)).replace('/mnt/data/bluetooth', str(self.store))
+                   .replace(') >/dev/null 2>&1 &', ') >/dev/null 2>&1'))
+        subprocess.run(['sh', '-c', command], check=True, env={**os.environ, 'PATH': f'{self.bin}:{os.environ["PATH"]}'})
+        return out.read_bytes()
+
+    def removed(self):
+        f = self.tmp / 'removed'
+        return f.read_text().split() if f.exists() else []
+
+
+def other_devices(p):
+    names = p.names()
+    return names[names.index('Other Devices') + 1:names.index('Audio')]
+
+
+def test_other_devices_lists_what_the_scan_heard_and_a_stale_record_is_removed(fw, tmp_path):
+    """2026-11-20 (V1N6i): the Arctis Nova Pro Wireless stayed in Other Devices 20 miles from it. BlueZ's store held
+    a record for it, Trusted with no [LinkKey] (a pairing that never finished), which BlueZ loads at every start;
+    libbtctl's btctl_get_device_list lists every Device1 BlueZ has, a paired flag from Paired, so it was listed as
+    found whatever the radio heard. A found device is now listed once BlueZ has an RSSI for it (a discovery heard
+    it), and a stored record no key was ever saved in is removed through BlueZ."""
+    devices = [(BMW_CAR, 'BMW 83828', 'paired'), (ARCTIS, 'Arctis Nova Pro Wireless', 'found'),
+               (SPEAKER, 'JBL Flip 6', 'found')]
+    s = Scan.__new__(Scan)
+    s.fw, s.started = fw, 0
+    s.p = p = Page(fw, devices, answer=False)
+    fw.mock('btStartSearch', s.start)
+    p.ui.windows.append(p.win)
+    bluez = BlueZ(tmp_path, {
+        BMW_CAR: ({'Paired': 'boolean true', 'Trusted': 'boolean true', 'Connected': 'boolean false'}, BMW_INFO),
+        ARCTIS: ({'Paired': 'boolean false', 'Trusted': 'boolean true', 'Connected': 'boolean false',
+                  'Class': 'uint32 2360344'}, ARCTIS_INFO),
+        SPEAKER: ({'Paired': 'boolean false', 'Connected': 'boolean false', 'RSSI': 'int16 -52'}, None)})
+    assert other_devices(p) == []  # nothing yet: BlueZ has not said what the scan heard
+    asks = [c for c in p.commands if SEEN_FILE in c]
+    assert len(asks) == 1 and BMW_CAR not in asks[0]  # only the found ones are asked about
+    p.files.files[SEEN_FILE] = bluez.run(asks[0])
+    p.poll()
+    assert other_devices(p) == ['d2']
+    assert 'd0' in p.names()
+    assert bluez.removed() == ['/org/bluez/hci0/dev_20_AF_1B_18_FD_03']
+
+
+def test_a_stale_record_is_kept_while_a_key_a_link_or_a_connect_says_it_is_real(fw, tmp_path):
+    """Nothing with a key in its record, connected, or while a connect runs is removed; each is still not listed
+    until a scan hears it."""
+    keyed, linked = 'AA:BB:CC:DD:EE:04', 'AA:BB:CC:DD:EE:05'
+    devices = [(ARCTIS, 'Arctis Nova Pro Wireless', 'found'), (keyed, 'Keyed', 'found'), (linked, 'Linked', 'found')]
+    bluez = BlueZ(tmp_path, {
+        ARCTIS: ({'Paired': 'boolean false', 'Connected': 'boolean false'}, ARCTIS_INFO),
+        keyed: ({'Paired': 'boolean false', 'Connected': 'boolean false'}, BMW_INFO.replace('BMW 83828', 'Keyed')),
+        linked: ({'Paired': 'boolean false', 'Connected': 'boolean true'}, ARCTIS_INFO.replace('Arctis', 'Linked'))})
+    fw.var('fw_ctx_bt_connectstatus', C.c_int).value = 1  # a connect running: nothing is removed
+    p = Page(fw, devices, answer=False)
+    assert bluez.run(next(c for c in p.commands if SEEN_FILE in c)).split(b'\n')[1:] == [b'']
+    assert bluez.removed() == [] and other_devices(p) == []
+    fw.var('fw_ctx_bt_connectstatus', C.c_int).value = 0
+    p.commands.clear()
+    p.rebuild()
+    p.files.files[SEEN_FILE] = bluez.run(next(c for c in p.commands if SEEN_FILE in c))
+    assert bluez.removed() == ['/org/bluez/hci0/dev_20_AF_1B_18_FD_03']
+    p.rebuild()
+    assert other_devices(p) == []
+
+
+def test_a_device_the_scan_heard_stays_listed_this_open(fw):
+    """Once heard, a found device stays on the list while the page is open: BlueZ drops its RSSI as each discovery
+    ends, and with a device connected the page does not scan again."""
+    p = Page(fw, [(CAR, 'BMW 6R81', 'paired'), (SPEAKER, 'JBL Flip 6', 'found')])
+    assert other_devices(p) == ['d1']
+    asked = len([c for c in p.commands if SEEN_FILE in c])
+    p.answer = False
+    p.files.files[SEEN_FILE] = b'#999\n'
+    p.rebuild()
+    assert other_devices(p) == ['d1'] and len([c for c in p.commands if SEEN_FILE in c]) == asked
