@@ -306,7 +306,8 @@ int car_takes_audio(void); /* videos.c */
 static void radio_play(int i) {
     headset_manual();
     int n = rd.list.n;
-    if (!n || car_takes_audio()) return;
+    /* nothing to play to (output_rule.c), else the car's USB taking the audio (videos.c): one refusal, one toast */
+    if (!n || check_forbid_play_no_headset(0) || car_takes_audio()) return;
     rd.at = (i % n + n) % n;
     radio_halt();
     spot_yield();

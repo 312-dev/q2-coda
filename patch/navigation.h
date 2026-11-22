@@ -966,6 +966,8 @@ int stock_usb_status_trampoline(void);
 
 /* usb_otg.c: check_otg_status's hook, OTG host power only with no VBUS on the port */
 int ringnav_otg_status(void), stock_otg_status_trampoline(void);
+/* usb_ui.c: a host has configured the gadget (system.c holds Standby on it) */
+int usb_host(void);
 void otg_hold(void); /* the PHY's ID pull-up on, the controller's role held at device */
 
 /* usb_record.c: the USB record on the card, a line per cable edge and OTG power change */
@@ -1251,9 +1253,12 @@ int usb_ui_key(void *top, unsigned key), usb_ui_cable(void), usb_pick_open(void 
  * answers to usb_ui.c */
 enum { USB_CAR_NONE, USB_CAR_STORAGE, USB_CAR_CHARGER };
 void usb_car_start(void), usb_car_stop(int wait);
-int usb_car_poll(void), usb_car_on(void);
+int usb_car_poll(void), usb_car_on(void), usb_car_output(void);
 const char *usb_car_name(void);
 int car_takes_audio(void); /* videos.c */
+/* output_rule.c: no playback without an output (docs/internals.md#no-playback-without-an-output) */
+void output_rule_config(void);
+int ringnav_valid_output(void), stock_valid_output_trampoline(void);
 #if Q2POD_DEV
 /* adb_trust.c (docs/adb.md#authorization): adbd's question on the card, its answer back through
  * usb_ui.c; Settings > General > Developer Options and Trusted Computers */

@@ -43,6 +43,10 @@ int usb_car_on(void) { return car.on; }
  * car the Q2 was playing to over USB (docs/iphone-mode.md#car-audio-in-the-image). */
 const char *usb_car_name(void) { return car.on && car.decided && car.name[0] ? car.name : 0; }
 
+/* 1 while the car's audio is an output (output_rule.c ringnav_valid_output): the car asks for it, or
+ * it went during a relink that may still bring it back (car.gone_at), as usb_car_gone waits for. */
+int usb_car_output(void) { return car.on && (car.audio || car.gone_at); }
+
 void usb_car_start(void) {
     car.on = 1, car.decided = car.host = car.flowing = car.troubles = car.charger_told = car.audio = 0, car.gone_at = 0;
     car.name[0] = 0;

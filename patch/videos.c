@@ -73,7 +73,8 @@ const char *output_device(char *vol) {
  * is there): q2video (Radio, Internet Radio, Videos) plays to demo's output, which the car does not hear, so on the
  * drive of 2026-11-22 Radio's station name reached the car over silence (its sound went to Bluetooth A2DP). Such a
  * start is refused while the car takes the audio (Car Audio on the cable and q2-iap's car file there), with a toast at most every CAR_SAY_MS, the Library left playing
- * on. 1 when refused. ponytail: routing them to the car needs the player to take a second source's PCM while its
+ * on. 1 when refused. Each start asks output_rule.c's no-output gate first and this one only when that let it
+ * through, so one press gets one toast. ponytail: routing them to the car needs the player to take a second source's PCM while its
  * own song is paused or stopped (docs/iphone-mode.md#other-sources-over-usb). */
 #define CAR_FILE "/tmp/q2-iap.audio" /* q2_iap.c's car_file */
 void ulog(char level, const char *src, const char *msg); /* ulog.c */
@@ -129,7 +130,9 @@ int video_start(const char *file, int radio) {
 
 /* path played from its saved place (video_click). */
 static void video_play(const char *path) {
-    if (vid.pid || car_takes_audio()) return;
+    if (vid.pid) return;
+    /* nothing to play to (output_rule.c), else the car's USB taking the audio: one refusal, one toast */
+    if (check_forbid_play_no_headset(0) || car_takes_audio()) return;
     headset_manual();
     spot_yield(); /* librespot and radio hold the PCM too, as for local music */
     radio_stop();
@@ -216,6 +219,7 @@ void video_key(unsigned key) {
     vid.paused_at = 0; /* a key restarts a pause's VIDEO_PAUSE_QUIT_MS */
     if (key == KEY_PLAY || key == KEY_FWD_BTN || key == KEY_BACK_BTN || key == KEY_RETURN)
         headset_manual();
+    if (key == KEY_PLAY && vid.paused && check_forbid_play_no_headset(0)) return; /* output_rule.c */
     int wheel = key == KEY_NEXT || key == KEY_PREV, v;
     if (key == KEY_CENTER) vid.seek = !vid.seek;
     if (key == KEY_CENTER || (wheel && vid.seek)) vid.seek_at = time_now_ms();
@@ -244,6 +248,7 @@ void video_key(unsigned key) {
 int video_status(void) { return vid.pid ? (vid.paused ? 3 : 2) : 0; }
 unsigned video_session(void) { return (unsigned)vid.pid; }
 void video_set_playing(int playing) {
+    if (playing && vid.paused && check_forbid_play_no_headset(0)) return; /* output_rule.c */
     if (vid.pid) {
         dgram_send(&vid.sock, VIDEO_SOCK, playing ? "r" : "a", 1);
         vid.paused = !playing;

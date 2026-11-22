@@ -47,7 +47,7 @@ m,rows,texts,*_=settings_page('power','scroll_view_powermanager',{'STANDBYLIMIT'
 assert texts()[0]=='Standby Limit: Off'; passed()  # out of range: Off
 # Playback: stock V1.36's thirteen rows less its last two (Volume and Album Display, whose page's rows are here, on
 # Display and on Library > Folders, and Folder skip, Library > Folders'), then ours, EQ and the Library first; stock's
-# Balance (10) stays, hidden, for the inline one. The Sleep Timer, Volume (its slider page, below) and the Library open
+# Balance (10) stays, hidden, for the inline one, and Headphones Required (8), which is always on. The Sleep Timer, Volume (its slider page, below) and the Library open
 # from their rows; Max Volume, Balance and Crossfade's and Default Volume's values are inline sliders (inline_slider.c),
 # Crossfade and Default Volume switches with their slider row under them.
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13)
@@ -56,6 +56,7 @@ assert texts()==['Crossfade','Duration','Resume Songs: 30 min','Mono Audio','Swa
 assert len(m.nodes[m.settings_view]['children'])==23 and not set(m.entries[11:])&set(m.nodes[m.settings_view]['children'])
 assert [(m.entries+rows).index(c) for c in m.nodes[m.settings_view]['children']]==[2,24,3,7,13,14,6,15,8,18,19,20,21,22,0,9,23,10,16,17,1,4,5]  # EQ, Library first
 assert m.nodes[m.entries[10]].get('visible',1)==0 and m.nodes[rows[1]].get('visible',1)==0 and m.nodes[rows[9]].get('visible',1)==0  # stock's Balance; the sliders of switches that are off
+assert m.nodes[m.entries[8]].get('visible',1)==0  # Headphones Required: always on (output_rule.c), no row
 assert [click(5),m.opened[-1]]==[[],('systemset/sleepshutdown_page',None)]
 n=len(m.opened); assert click(7)==[] and len(m.opened)==n  # Max Volume: grabbed in place, no page
 assert click(8)==[(1,'PLAYSET','BOOTVOLFLAG')] and m.nodes[rows[9]].get('visible',1)==1  # Default Volume on: its Level shows
