@@ -1083,6 +1083,7 @@ void playlist_new_open(void); /* search_strip.c: New Playlist on the strip, its 
 const char *bt_name(char *out, unsigned n);
 int bt_name_valid(const char *s);
 void bt_name_apply(void), bt_name_row(void *view);
+int bt_own_picture(const char *path); /* bt_cover.c: a song file holds its own picture */
 /* bt_ui.c: Settings > Bluetooth's order, rows and marks (docs/oled-design.md#bluetooth) */
 void bt_page(void *view, int on), bt_rows_pre(void *view), bt_rows_post(void *view);
 int bt_list(void *list), bt_mac_ok(const char *s), bt_dev_find(const char *mac);

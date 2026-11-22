@@ -117,13 +117,21 @@ def test_a_raw_line_gets_a_level_and_source_from_its_words(L, text, level, src):
 
 
 def test_a_ulog_line_passes_through_as_it_was_and_a_raw_one_is_stamped(L, tmp_path):
+    """A raw line is stamped when it is read, or, after a stamped line read into the same ring no more than a minute
+    before, with that line's time: it was written between that line and the read."""
     log = Log(L, tmp_path)
-    mine = '2026-11-17T14:00:00Z 42 W usb plug, 40 ms\n'
-    assert L.ulog_add_raw(log.log, WALL, 777, mine.encode(), len(mine)) == b'W'
     raw = 'rtk_hciattach: Failed to read local version\n'
     assert L.ulog_add_raw(log.log, WALL, 777, raw.encode(), len(raw)) == b'E'
+    mine = '2026-11-17T14:00:00Z 4200 W usb plug, 40 ms\n'
+    assert L.ulog_add_raw(log.log, WALL, 7000, mine.encode(), len(mine)) == b'W'
+    after = 'rtk_hciattach: Failed to download firmware\n'
+    assert L.ulog_add_raw(log.log, WALL, 7000, after.encode(), len(after)) == b'E'
+    late = 'rtk_hciattach: Failed again\n'
+    assert L.ulog_add_raw(log.log, WALL, 70000, late.encode(), len(late)) == b'E'  # 65.8 s on: its own read time
     assert L.ulog_add_raw(log.log, WALL, 777, b'   \n', 4) == b'\x00'  # blank: dropped
-    assert log.ram() == mine + f'{TIME} 777 E bt rtk_hciattach: Failed to read local version\n'
+    assert log.ram() == (f'{TIME} 777 E bt rtk_hciattach: Failed to read local version\n' + mine +
+                         '2026-11-17T14:00:00Z 4200 E bt rtk_hciattach: Failed to download firmware\n' +
+                         f'{TIME} 70000 E bt rtk_hciattach: Failed again\n')
 
 
 def test_a_run_of_one_line_is_that_line_once_and_a_count(L, tmp_path):

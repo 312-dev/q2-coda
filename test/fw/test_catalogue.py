@@ -1853,3 +1853,21 @@ def test_a_server_songs_row_is_the_playing_one_by_its_path(rig, fw, mcl, low):
     assert [playing(record(p)) for p in (url('s1'), url('s2'), copy, '/mnt/mmc/Music/s1.flac')] == [1, 0, 1, 0]
     status[0] = 1
     assert playing(record(url('s1'))) == 0
+
+
+def test_bluetooth_names_a_server_songs_cover_as_its_app_keeps_it(rig, fw):
+    """bt_cover.c: a streamed server song whose album Cover Flow has no copy of gets the cover the app keeps
+    (catalogue_cover), the one Now Playing shows, as the car's handle and file; the handle is that file's key."""
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, album_id='al1')])
+    rig.poll()
+    cover = '/mnt/mmc/.subsonic/covers/al1.jpg'
+    rig.files.files[cover] = b'\xff\xd8'
+    id3 = C.create_string_buffer(0x700)
+    id3[0x504], id3[0x404] = b'B', b'A'  # ID3_ARTIST, ID3_ALBUM
+    stream = b'/mnt/mmc/.subsonic/stream/9f3a/original/0/One [s1].flac'
+    fw.fn('bt_cover_note', None, C.c_char_p, C.c_char_p)(id3, stream)
+    h = (2166136261 * 16777619) & 0xffffffff  # tags_key('', cover) (coverflow.c): the empty artist, then the path
+    for b in cover.encode():
+        h = ((h ^ b) * 16777619) & 0xffffffff
+    h = (h * 16777619) & 0xffffffff
+    assert rig.files.files.get('/tmp/q2-bip.now') == b'%07d\n%s\napp\n%s\n' % (h % 10**7, cover.encode(), stream)
