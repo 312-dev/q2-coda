@@ -65,12 +65,21 @@ struct iap2_track {
 struct iap2_sent {
     unsigned rid, hash;
 };
+/* A list the car is sent as a playlist: stock's playlists (their ids, 0 to 100), Favorites and Recently Played
+ * (LIST_FAVORITES, LIST_RECENT); its name an offset into pool, its songs' rids lrids[at] to lrids[at + n - 1]. */
+struct iap2_list {
+    unsigned id, name, at, n;
+};
+#define LIST_FAVORITES 1001
+#define LIST_RECENT 1002
 struct iap2_library {
     struct iap2_track *tracks;
     unsigned n;
     char *pool, rev[40], sent_rev[40];
     struct iap2_sent *sent;
     unsigned sent_n;
+    struct iap2_list *lists; /* in the order their songs go first: Favorites, Recently Played, then stock's */
+    unsigned nlists, *lrids;
 };
 
 struct iap2_host {
@@ -842,12 +851,15 @@ static void art_setup(void) {
     file_send(art_id, 0x04, setup, sizeof setup);
 }
 
+static int list_transfer_word(const u8 *d);
+
 /* The car's answers on the file transfer session. */
 static void iap2_file(const u8 *d, unsigned n) {
     char t[96];
     if (n < 2) return;
     snprintf(t, sizeof t, "file < transfer %02x op %02x (%u bytes)", d[0], d[1], n);
     H->log(t);
+    if (list_transfer_word(d)) return;
     if (d[0] == ql_id && ql_going && d[1] == 0x01) { /* the queue list: every piece */
         unsigned room = (peer_max < BULK_MAX ? peer_max : BULK_MAX) - HEADER_LEN - 1 - 2, sent = 0;
         room -= room % 8;
@@ -1030,9 +1042,7 @@ static void send_power(u32 mask) {
     }
 }
 
-/* The library: the Q2's own, by name and ID, and an update with no items (the user's decision: the car's browser
- * starts empty, music is chosen on the Q2 and in the app). ponytail: PodBox found its Mazda reads nothing more after
- * an empty library; if iDrive stalls here, send the playing track as the one item, as PodBox does. */
+/* The library: the Q2's own, by name and ID (its songs and lists follow in send_library_updates). */
 static void send_library_info(void) {
     msg_start(0x4C01);
     group_start(0), param_str(0, H->name), param_str(1, H->library_id), param_u8(2, 0), group_end();
@@ -1042,29 +1052,45 @@ static void send_library_info(void) {
  *
  * To StartMediaLibraryUpdates (4C03: 1 the revision the car holds, 2 the item properties it wants) an iPhone's
  * answers, as PodBox sends them: 8 00, 9 01 (it can play all songs), then MediaLibraryUpdates (4C04) with the songs
- * as items (parameter 2, a group each), as many to a packet as it holds, the first opening with 6 (a reset); an update
- * on the way carries a partial revision and the progress (7) so far, under 100, so a car cut off asks again; the last
- * the revision and 100. The partial revision names where the push had reached ("q2p." for the whole library, "q2d."
- * for changes, then the revision and the songs gone so far): a car that comes back holding one of this revision's
- * resumes from there with no reset, so a 9,199-song library goes over several short plugs (the BMW's wire takes about
- * 6 KB a second: docs/iphone-mode.md#the-link-s-pace). A car
- * that holds the revision gets the revision alone; one that holds the revision this Q2 last sent it whole
+ * as items (parameter 2, a group each) and the lists as playlists (parameter 3), as many to a packet as it holds, the
+ * first opening with 6 (a reset) when the car's copy is not built on; each carries a revision and the progress (7).
+ * iDrive shows what an update with progress 100 completes (PodBox: its BMW reloads its library at each one, and reads
+ * on while 100 is held back), and the whole library takes minutes on the BMW's wire (about 6 KB a second:
+ * docs/iphone-mode.md#the-link-s-pace), so a first update goes ahead and completes within seconds: up to FIRST_MAX
+ * songs (the queue's from the playing song on, then the lists' in order) and every list's record, each list's songs
+ * then following as a file transfer (lists_pump). The whole push follows, completing a checkpoint every
+ * CHECKPOINT_MS, and the last update the revision itself, 100, and the lists' records again (their songs are all in
+ * the car by then). Until the last, the revision is a partial one naming where the push has reached ("q2p." for the
+ * whole library, "q2d." for changes, then the revision and the songs gone so far): a car that comes back holding one
+ * of this revision's resumes from there with no reset, so a 9,199-song library goes over several short plugs. A car
+ * that holds the revision gets the lists alone; one that holds the revision this Q2 last sent it whole
  * (lib->sent_rev) gets only the songs added or changed since and, as 4 each, the ids of those gone, with no reset.
  * Updates go only while nothing else waits to be sent and the window has a slot to spare, so the car's buttons and
  * Now Playing are never behind the library. Each song's id is LIB_KEY's with its rid, and Now Playing sends the same
  * id, so the car knows the song it plays; an album's, an artist's, an album artist's and a genre's ids are their
- * names' hashes under their own high word. */
+ * names' hashes under their own high word, and a list's its id (stock's playlist id, or LIST_FAVORITES and
+ * LIST_RECENT) under LIB_LIST. */
 #define LIB_KEY 0x51320001u
 #define LIB_ALBUM 0x5132000Au
 #define LIB_ARTIST 0x5132000Bu
 #define LIB_AARTIST 0x5132000Cu
 #define LIB_GENRE 0x5132000Du
 #define LIB_COMPOSER 0x5132000Eu
-enum { LIB_IDLE, LIB_ITEMS, LIB_GONE };
+#define LIB_LIST 0x5132000Fu
+#define FIRST_MAX 150            /* songs in the first update: about 7 s of the BMW's wire */
+#define FIRST_QUEUE 50           /* of them, the queue's from the playing song on */
+#define CHECKPOINT_FIRST_MS 5000 /* a push with no first update of its own completes one this soon */
+#define CHECKPOINT_MS 60000      /* and then one a minute */
+#define LISTS_MAX 128
+#define LIST_WAIT_MS 5000 /* a list's transfer the car has not started in this long is given up */
+enum { LIB_IDLE, LIB_FIRST, LIB_LISTS, LIB_ITEMS, LIB_GONE, LIB_FINAL };
 static struct {
-    int phase, diff, reset;
-    unsigned next, gone, mask, items, updates;
-    long started;
+    int phase, after, diff, reset, held; /* after: the phase once the lists' transfers end; held: the car has rev */
+    unsigned next, gone, mask, items, updates, completes;
+    unsigned nf, fi, rec, xi, x_sent; /* the first set's size and cursor; the next record; the list in transfer */
+    unsigned first[FIRST_MAX], sorted[FIRST_MAX]; /* the first set's song indexes, in sending order and sorted */
+    u8 x_id, x_state, list_ids[LISTS_MAX];         /* x_state: 0 none, 1 set up, 2 its songs going */
+    long started, complete_at, x_since;
 } ls;
 
 static const char *lib_str(unsigned off) { return H->lib->pool + off; }
@@ -1102,7 +1128,8 @@ static int lib_unchanged(const struct iap2_track *t) {
     }
     return lo < l->sent_n && l->sent[lo].rid == t->rid && l->sent[lo].hash == t->hash;
 }
-static int lib_kept(unsigned rid) { /* still in the library */
+
+static int lib_index(unsigned rid) { /* a song's index in the library, or -1 */
     const struct iap2_library *l = H->lib;
     unsigned lo = 0, hi = l->n;
     while (lo < hi) {
@@ -1110,55 +1137,156 @@ static int lib_kept(unsigned rid) { /* still in the library */
         if (l->tracks[mid].rid < rid) lo = mid + 1;
         else hi = mid;
     }
-    return lo < l->n && l->tracks[lo].rid == rid;
+    return lo < l->n && l->tracks[lo].rid == rid ? (int)lo : -1;
+}
+static int lib_kept(unsigned rid) { return lib_index(rid) >= 0; } /* still in the library */
+
+static int in_first(unsigned i) { /* sent in this connection's first update */
+    unsigned lo = 0, hi = ls.nf;
+    while (lo < hi) {
+        unsigned mid = (lo + hi) / 2;
+        if (ls.sorted[mid] < i) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo < ls.nf && ls.sorted[lo] == i;
 }
 
-/* An update while there is room: songs (or the ids of songs gone), as many as a packet holds. */
+/* Does the car hold this song as it is now: all of them, those the push cut off had reached, or (changes) those
+ * unchanged since the revision last sent whole? */
+static int car_has(unsigned i) {
+    return ls.held || i < ls.next || (ls.diff && lib_unchanged(&H->lib->tracks[i]));
+}
+
+/* A song for the first update, by rid: one the library has, the car lacks and the set has not yet. */
+static void first_add(unsigned rid) {
+    int i = rid ? lib_index(rid) : -1;
+    if (i < 0 || ls.nf >= FIRST_MAX || car_has((unsigned)i)) return;
+    for (unsigned k = 0; k < ls.nf; ++k)
+        if (ls.first[k] == (unsigned)i) return;
+    ls.first[ls.nf++] = (unsigned)i;
+}
+
+/* The first update's songs: the queue's from the playing song on, then the lists' in their order. */
+static void first_set(void) {
+    static unsigned q[QLIST_MAX];
+    const struct iap2_library *l = H->lib;
+    struct iap2_np np;
+    memset(&np, 0, sizeof np);
+    int n = H->queue ? H->queue(q, QLIST_MAX) : -1;
+    unsigned from = H->now_playing && H->now_playing(&np) && np.qpos < (unsigned)(n > 0 ? n : 0) ? np.qpos : 0;
+    for (int k = (int)from; k < n && k < (int)from + FIRST_QUEUE; ++k) first_add(q[k]);
+    for (unsigned j = 0; j < l->nlists && j < LISTS_MAX; ++j)
+        for (unsigned k = 0; k < l->lists[j].n && ls.nf < FIRST_MAX; ++k) first_add(l->lrids[l->lists[j].at + k]);
+    memcpy(ls.sorted, ls.first, ls.nf * sizeof *ls.first);
+    for (unsigned i = 1; i < ls.nf; ++i) { /* insertion sort: a few hundred */
+        unsigned x = ls.sorted[i], j = i;
+        while (j && ls.sorted[j - 1] > x) ls.sorted[j] = ls.sorted[j - 1], --j;
+        ls.sorted[j] = x;
+    }
+}
+
+/* A list's record (parameter 3: 0 its id, 1 its name, 2 its folder, none, 3 not a Genius mix, 4 not a folder, 5 the
+ * file transfer its songs' ids go in), a new transfer id each time it is sent. 0 when the packet is full. */
+static int list_record(unsigned j) {
+    const struct iap2_list *li = &H->lib->lists[j];
+    unsigned mark = m.len;
+    u8 id = next_transfer;
+    group_start(3);
+    param_u64(0, LIB_LIST, li->id);
+    param_str(1, lib_str(li->name));
+    param_u64(2, 0, 0);
+    param_u8(3, 0), param_u8(4, 0), param_u8(5, id);
+    group_end();
+    if (!m.ok || m.len + 4 + 64 + 5 > BULK_MAX - HEADER_LEN - 1 || m.len + 4 + 64 + 5 > peer_max - HEADER_LEN - 1) {
+        m.len = mark, m.ok = 1;
+        return 0;
+    }
+    ls.list_ids[j] = id, next_transfer = next_transfer == 0xFF ? 0x80 : next_transfer + 1;
+    return 1;
+}
+
+static unsigned lib_nlists(void) { return H->lib->nlists < LISTS_MAX ? H->lib->nlists : LISTS_MAX; }
+
+/* An update while there is room: songs (or the ids of songs gone) or lists' records, as many as a packet holds. One
+ * completes (progress 100, which iDrive loads, PodBox found) at the end of the first update, at the end of the push,
+ * and in between at CHECKPOINT_FIRST_MS into a push that had no first update and then every CHECKPOINT_MS. */
 static void lib_pump(void) {
     const struct iap2_library *l = H->lib;
     char t[200];
-    while (ls.phase != LIB_IDLE && link_up && !q_count && (!rto || count + 1 < window) && backlog() <= BACKLOG_MAX) {
-        int n = 0;
+    while ((ls.phase == LIB_FIRST || ls.phase == LIB_ITEMS || ls.phase == LIB_GONE || ls.phase == LIB_FINAL) && link_up &&
+           !q_count && (!rto || count + 1 < window) && backlog() <= BACKLOG_MAX) {
+        int n = 0, complete = 0, final = 0;
         msg_start(0x4C04);
         param_str(0, H->library_id);
         if (ls.reset) param(6, 0, 0), ls.reset = 0;
+        while (ls.phase == LIB_FIRST && ls.fi < ls.nf) {
+            unsigned mark = m.len;
+            lib_item(&l->tracks[ls.first[ls.fi]], ls.mask);
+            if (!m.ok || m.len + 4 + 64 + 5 > BULK_MAX - HEADER_LEN - 1 || m.len + 4 + 64 + 5 > peer_max - HEADER_LEN - 1) {
+                m.len = mark, m.ok = 1;
+                if (!n) ++ls.fi; /* a song no packet holds */
+                break;
+            }
+            ++ls.fi, ++n, ++ls.items;
+        }
+        while ((ls.phase == LIB_FIRST && ls.fi >= ls.nf) || ls.phase == LIB_FINAL) {
+            if (ls.rec >= lib_nlists()) {
+                complete = 1, final = ls.phase == LIB_FINAL;
+                break;
+            }
+            if (!list_record(ls.rec)) {
+                if (!n) ++ls.rec; /* a record no packet holds */
+                break;
+            }
+            ++ls.rec, ++n;
+        }
         while (ls.phase == LIB_ITEMS && ls.next < l->n) {
             const struct iap2_track *tr = &l->tracks[ls.next];
-            if (ls.diff && lib_unchanged(tr)) {
+            if ((ls.diff && lib_unchanged(tr)) || in_first(ls.next)) {
                 ++ls.next;
                 continue;
             }
             unsigned mark = m.len;
             lib_item(tr, ls.mask);
-            if (!m.ok || m.len + 4 + sizeof l->rev + 5 > BULK_MAX - HEADER_LEN - 1 ||
-                m.len + 4 + sizeof l->rev + 5 > peer_max - HEADER_LEN - 1) {
+            if (!m.ok || m.len + 4 + 64 + 5 > BULK_MAX - HEADER_LEN - 1 || m.len + 4 + 64 + 5 > peer_max - HEADER_LEN - 1) {
                 m.len = mark, m.ok = 1;
                 if (!n) ++ls.next; /* a song no packet holds */
                 break;
             }
             ++ls.next, ++n, ++ls.items;
         }
-        if (ls.phase == LIB_ITEMS && ls.next >= l->n) ls.phase = ls.diff ? LIB_GONE : LIB_IDLE + 99;
+        if (ls.phase == LIB_ITEMS && ls.next >= l->n) ls.phase = ls.diff ? LIB_GONE : LIB_FINAL, ls.rec = 0;
         while (ls.phase == LIB_GONE && ls.gone < l->sent_n) {
             unsigned rid = l->sent[ls.gone].rid;
             if (lib_kept(rid)) {
                 ++ls.gone;
                 continue;
             }
-            if (m.len + 12 + 4 + sizeof l->rev + 5 > BULK_MAX - HEADER_LEN - 1) break;
+            if (m.len + 12 + 4 + 64 + 5 > BULK_MAX - HEADER_LEN - 1) break;
             param_u64(4, LIB_KEY, rid);
             ++ls.gone, ++n;
         }
-        if (ls.phase == LIB_GONE && ls.gone >= l->sent_n) ls.phase = LIB_IDLE + 99;
-        int done = ls.phase == LIB_IDLE + 99;
+        if (ls.phase == LIB_GONE && ls.gone >= l->sent_n) ls.phase = LIB_FINAL, ls.rec = 0;
+        if (ls.phase == LIB_FINAL && !n && ls.rec >= lib_nlists()) complete = final = 1; /* no lists: the revision */
+        if ((ls.phase == LIB_ITEMS || ls.phase == LIB_GONE) &&
+            H->now() - ls.complete_at >= (ls.completes ? CHECKPOINT_MS : CHECKPOINT_FIRST_MS))
+            complete = 1;
         char partial[64];
         snprintf(partial, sizeof partial, "%s.%s.%u", ls.diff ? "q2d" : "q2p", l->rev, ls.next);
-        param_str(1, done ? l->rev : partial);
-        param_u8(7, done ? 100 : (u8)(l->n ? ls.next * 99u / l->n : 0));
+        param_str(1, final || ls.held ? l->rev : partial);
+        param_u8(7, complete ? 100 : (u8)(l->n ? ls.next * 99u / l->n : 0));
         msg_send();
         ++ls.updates;
-        if (done) {
-            ls.phase = LIB_IDLE;
+        if (!complete) continue;
+        ++ls.completes, ls.complete_at = H->now();
+        snprintf(t, sizeof t, "library: %s complete, %u songs and %u lists so far, %ld ms",
+                 final ? "the whole" : ls.phase == LIB_FIRST ? "the first update" : "a checkpoint", ls.items,
+                 ls.phase == LIB_FIRST || final ? lib_nlists() : 0, H->now() - ls.started);
+        H->log(t);
+        if (ls.phase == LIB_FIRST) {
+            ls.after = ls.held ? LIB_IDLE : LIB_ITEMS;
+            ls.phase = LIB_LISTS, ls.xi = 0, ls.x_state = 0;
+        } else if (final) {
             snprintf(t, sizeof t, "library: %s sent, %u songs of %u in %u updates, %ld ms", ls.diff ? "changes" : "whole",
                      ls.items, l->n, ls.updates, H->now() - ls.started);
             H->log(t);
@@ -1166,8 +1294,66 @@ static void lib_pump(void) {
             if (H->lib_saved) H->lib_saved();
             snprintf(t, sizeof t, "library: its end taken in %ld ms (the record handed to its writer)", H->now() - at);
             H->log(t);
+            ls.after = LIB_IDLE;
+            ls.phase = LIB_LISTS, ls.xi = 0, ls.x_state = 0;
         }
     }
+}
+
+/* The lists' songs, a list at a time, each as a file transfer: [ID, 04, an 8-byte size, 00 04, the list's 8-byte id,
+ * the library's id and a 0], then on the car's [ID, 01] the songs' ids, 8 bytes each in order (PodBox, from an iPhone
+ * in its car), a piece at a time while little waits to be sent, and the next once the last piece is on its way (as
+ * PodBox's), or once the car cancels it (02), or LIST_WAIT_MS after a setup it never answers. Then on to the push
+ * (ls.after). */
+static void lists_pump(long now) {
+    const struct iap2_library *l = H->lib;
+    if (ls.phase != LIB_LISTS) return;
+    if (!file_session) ls.xi = lib_nlists();
+    if (ls.x_state == 1 && now - ls.x_since > LIST_WAIT_MS) { /* never started: cancelled, and on */
+        file_send(ls.x_id, 0x02, 0, 0);
+        ls.x_state = 0, ++ls.xi;
+    }
+    if (!ls.x_state && ls.xi < lib_nlists() && !q_count) {
+        const struct iap2_list *li = &l->lists[ls.xi];
+        unsigned size = li->n * 8, k = 0;
+        u8 setup[10 + 8 + 64];
+        memset(setup, 0, 4);
+        k = 4, setup[k++] = size >> 24, setup[k++] = size >> 16, setup[k++] = size >> 8, setup[k++] = size;
+        setup[k++] = 0, setup[k++] = 4;
+        for (int b = 0; b < 4; ++b) setup[k + b] = (u8)(LIB_LIST >> (24 - 8 * b)), setup[k + 4 + b] = (u8)(li->id >> (24 - 8 * b));
+        k += 8;
+        unsigned idn = strlen(H->library_id) + 1;
+        if (idn > sizeof setup - k) idn = sizeof setup - k;
+        memcpy(setup + k, H->library_id, idn), k += idn;
+        ls.x_id = ls.list_ids[ls.xi], ls.x_state = 1, ls.x_since = now, ls.x_sent = 0;
+        file_send(ls.x_id, 0x04, setup, k);
+    }
+    while (ls.x_state == 2 && q_count < 2) {
+        const struct iap2_list *li = &l->lists[ls.xi];
+        u8 piece[BULK_MAX];
+        unsigned room = (peer_max < BULK_MAX ? peer_max : BULK_MAX) - HEADER_LEN - 1 - 2, k = 0;
+        unsigned first = ls.x_sent == 0;
+        while (ls.x_sent < li->n && k + 8 <= room) {
+            unsigned rid = l->lrids[li->at + ls.x_sent++];
+            for (int b = 0; b < 4; ++b) piece[k + b] = (u8)(LIB_KEY >> (24 - 8 * b)), piece[k + 4 + b] = (u8)(rid >> (24 - 8 * b));
+            k += 8;
+        }
+        unsigned last = ls.x_sent >= li->n;
+        file_send(ls.x_id, first && last ? 0xC0 : first ? 0x80 : last ? 0x40 : 0x00, piece, k);
+        if (last) ls.x_state = 0, ++ls.xi; /* the next at once, as PodBox's does */
+    }
+    if (ls.xi >= lib_nlists() && !ls.x_state) {
+        ls.phase = ls.after;
+        if (ls.phase == LIB_ITEMS) ls.complete_at = now; /* the next checkpoint a minute on */
+    }
+}
+
+/* The car's word on the list in transfer: 01 go, 02 cancelled. 1 when it was that list's. */
+static int list_transfer_word(const u8 *d) {
+    if (ls.phase != LIB_LISTS || !ls.x_state || d[0] != ls.x_id) return 0;
+    if (d[1] == 0x01 && ls.x_state == 1) ls.x_state = 2;
+    else if (d[1] == 0x02) ls.x_state = 0, ++ls.xi;
+    return 1;
 }
 
 static void send_library_updates(const char *car_rev, unsigned mask) {
@@ -1180,15 +1366,10 @@ static void send_library_updates(const char *car_rev, unsigned mask) {
     }
     const struct iap2_library *l = H->lib;
     memset(&ls, 0, sizeof ls);
-    ls.mask = mask, ls.started = H->now();
-    if (car_rev && !strcmp(car_rev, l->rev)) {
-        snprintf(t, sizeof t, "library: the car holds %s, %u songs: nothing to send", l->rev, l->n);
-        H->log(t);
-        msg_start(0x4C04), param_str(0, H->library_id), param_str(1, l->rev), param_u8(7, 100), msg_send();
-        return;
-    }
-    ls.diff = car_rev && l->sent_rev[0] && !strcmp(car_rev, l->sent_rev);
-    ls.reset = !ls.diff;
+    ls.mask = mask, ls.started = ls.complete_at = H->now();
+    ls.held = car_rev && !strcmp(car_rev, l->rev);
+    ls.diff = !ls.held && car_rev && l->sent_rev[0] && !strcmp(car_rev, l->sent_rev);
+    ls.reset = !ls.held && !ls.diff;
     /* a push of this revision cut off: on from where it reached, with no reset (its kind from the prefix) */
     unsigned rn = strlen(l->rev);
     if (car_rev && (!strncmp(car_rev, "q2p.", 4) || !strncmp(car_rev, "q2d.", 4)) && !strncmp(car_rev + 4, l->rev, rn) &&
@@ -1196,9 +1377,17 @@ static void send_library_updates(const char *car_rev, unsigned mask) {
         unsigned at = (unsigned)atoi(car_rev + 5 + rn);
         ls.diff = car_rev[2] == 'd', ls.reset = 0, ls.next = at < l->n ? at : l->n;
     }
-    ls.phase = LIB_ITEMS;
-    snprintf(t, sizeof t, "library: the car holds %s; sending %s of %s (%u songs) from %u", car_rev ? car_rev : "nothing",
-             ls.diff ? "the changes" : "the whole", l->rev, l->n, ls.next);
+    first_set();
+    if (ls.held && !lib_nlists()) {
+        snprintf(t, sizeof t, "library: the car holds %s, %u songs: nothing to send", l->rev, l->n);
+        H->log(t);
+        msg_start(0x4C04), param_str(0, H->library_id), param_str(1, l->rev), param_u8(7, 100), msg_send();
+        return;
+    }
+    ls.phase = ls.nf || lib_nlists() ? LIB_FIRST : LIB_ITEMS;
+    snprintf(t, sizeof t, "library: the car holds %s; %u songs and %u lists first, then %s of %s (%u songs) from %u",
+             car_rev ? car_rev : "nothing", ls.nf, lib_nlists(), ls.held ? "nothing" : ls.diff ? "the changes" : "the whole",
+             l->rev, l->n, ls.next);
     H->log(t);
     lib_pump();
 }
@@ -1218,15 +1407,25 @@ static void play_items(const u8 *p, unsigned len) {
     free(rids);
 }
 
-/* PlayMediaLibraryCollection: 0 the collection's id, 1 its type (1 an artist, 2 an album, 3 an album artist, 4 a
- * genre, 5 a composer; 0 a playlist has none here), 2 the index to start at. Its songs in the library's order of
- * an album: album artist, album, disc, track. */
+/* PlayMediaLibraryCollection: 0 the collection's id, 1 its type (0 a playlist, 1 an artist, 2 an album, 3 an album
+ * artist, 4 a genre, 5 a composer), 2 the index to start at. A playlist's songs in its order; the others' in the
+ * library's order of an album: album artist, album, disc, track. */
 static void play_collection(const u8 *p, unsigned len) {
     unsigned n, tn, sn;
     const u8 *v = find(p, len, 0, &n), *ty = find(p, len, 1, &tn), *s = find(p, len, 2, &sn);
     const struct iap2_library *l = H->lib;
     if (!v || n != 8 || !ty || !tn || !l || !l->n) return;
     unsigned id = get_be(v + 4, 4), type = ty[0], at = s && sn == 4 ? get_be(s, 4) : 0, k = 0;
+    if (type == 0) {
+        for (unsigned j = 0; j < l->nlists; ++j)
+            if (get_be(v, 4) == LIB_LIST && l->lists[j].id == id && H->play) {
+                char t[96];
+                snprintf(t, sizeof t, "library: list %u: %u songs, from %u", id, l->lists[j].n, at);
+                H->log(t);
+                H->play(l->lrids + l->lists[j].at, l->lists[j].n, at, 0);
+            }
+        return;
+    }
     unsigned *rids = play_rids(l->n);
     for (unsigned i = 0; rids && i < l->n; ++i) {
         const struct iap2_track *t = &l->tracks[i];
@@ -1383,7 +1582,7 @@ static void ql_announce(void) {
     file_send(ql_id, 0x04, setup, sizeof setup);
 }
 
-static void lib_reset(void) { ls.phase = LIB_IDLE, ql_going = 0, ql_seen_at = 0; }
+static void lib_reset(void) { ls.phase = LIB_IDLE, ls.x_state = 0, ql_going = 0, ql_seen_at = 0; }
 
 static void poll_now_playing(long now) {
     struct iap2_np n;
@@ -1448,7 +1647,7 @@ static void iap2_control_receive(const u8 *msg, unsigned len) {
         break;
     }
     case 0x4C05:
-        ls.phase = LIB_IDLE;
+        ls.phase = LIB_IDLE, ls.x_state = 0;
         break;
     case 0x4C06:
         if (H->command) H->command("resume");
@@ -1583,6 +1782,7 @@ static void iap2_tick(void) {
     }
     if (availability_due && now >= availability_due) send_carplay_availability();
     scan_tick(now);
+    lists_pump(now);
     lib_pump();
     if (identified && now_playing) poll_now_playing(now);
     pump();

@@ -1,6 +1,6 @@
 /* q2-iap's library (docs/iphone-mode.md#the-library-on-idrive): the Q2's songs as the car's media library, read from
- * stock's database (songtable, the songs coda_rc_lib.c's views read: audiobooks and podcasts left out) into RAM at
- * the car's StartMediaLibraryUpdates, and the record of what the car was last sent in full (LIB_SENT), so a car that
+ * stock's database (songtable, the songs coda_rc_lib.c's views read: audiobooks and podcasts left out) with the lists
+ * it sends as playlists (lib_lists) into RAM at the car's StartMediaLibraryUpdates, and the record of what the car was last sent in full (LIB_SENT), so a car that
  * holds that revision is sent only what changed. Included by q2_iap.c; q2_iap2.c reads the tables through its host
  * (struct iap2_library) and never this file's I/O. The database is opened read-only and closed after the read. */
 
@@ -49,7 +49,7 @@ static unsigned lib_put(char **pool, unsigned *len, unsigned *cap, const char *s
 }
 
 static void lib_free(void) {
-    free(lib_t.tracks), free(lib_t.pool), free(lib_t.sent);
+    free(lib_t.tracks), free(lib_t.pool), free(lib_t.sent), free(lib_t.lists), free(lib_t.lrids);
     memset(&lib_t, 0, sizeof lib_t);
 }
 
@@ -98,6 +98,50 @@ static void lib_read_sent(void) {
     "select " t ".id, ifnull(nullif(" t ".name,''),ifnull(" t ".filename,'')), ifnull(" t ".album,''), ifnull("       \
     t ".songer,''), ifnull(nullif(" t ".albumsonger,''),ifnull(" t ".songer,'')), ifnull(" t ".style,''), ifnull(" t  \
     ".composer,''), ifnull(" t ".track,0), ifnull(" t ".cd_num,0), "
+
+/* The lists the car gets as playlists, each song by its rid in the library: Favorites (stock's My Fav, by path, as
+ * Car Remote's favorites), Recently Played (stock's recentplay, the last played first), then stock's playlists (a
+ * header row of id 0 to 100 names one; its songs are the rows above 100 whose cd_num is that id, in row order, as
+ * coda_rc_lib.c lists them). A list none of whose songs is in the library (stock's Audiobooks) is left out. Stock's
+ * database always has the three tables; without them there are no lists. */
+static void lib_lists(sqlite3 *db, int server, char **pool, unsigned *len, unsigned *cap) {
+    sqlite3_stmt *st = 0;
+    char sql[1400];
+    snprintf(sql, sizeof sql,
+             "with s(rid, url) as (select id, fileurl from main.songtable where %s%s) "
+             "select %d, 'Favorites', s.rid, 0, f.id from main.myfav f join s on s.url = f.fileurl "
+             "union all select %d, 'Recently Played', s.rid, 1, -r.id from main.recentplay r join s on s.url = r.fileurl "
+             "union all select h.id, ifnull(h.name,''), s.rid, 2, p.id from main.playlist h join main.playlist p "
+             "on p.cd_num = h.id and p.id > 100 join s on s.url = p.fileurl where h.id <= 100 order by 4, 1, 5",
+             LIB_WHERE, server ? " union all select id, fileurl from cat.servertable" : "", LIST_FAVORITES, LIST_RECENT);
+    if (sqlite3_prepare_v2(db, sql, -1, &st, 0) != 0) {
+        char msg[200];
+        snprintf(msg, sizeof msg, "library: no lists (%s)", sqlite3_errmsg(db));
+        logline("lib", msg);
+        return;
+    }
+    unsigned cap_l = 0, cap_r = 0, nr = 0;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        unsigned id = (unsigned)sqlite3_column_int(st, 0), rid = (unsigned)sqlite3_column_int(st, 2);
+        if (nr == cap_r) {
+            unsigned *r = realloc(lib_t.lrids, (cap_r = cap_r ? cap_r * 2 : 1024) * sizeof *r);
+            if (!r) break;
+            lib_t.lrids = r;
+        }
+        if (!lib_t.nlists || lib_t.lists[lib_t.nlists - 1].id != id) {
+            if (lib_t.nlists == cap_l) {
+                struct iap2_list *l = realloc(lib_t.lists, (cap_l = cap_l ? cap_l * 2 : 16) * sizeof *l);
+                if (!l) break;
+                lib_t.lists = l;
+            }
+            const char *name = (const char *)sqlite3_column_text(st, 1);
+            struct iap2_list *l = &lib_t.lists[lib_t.nlists++];
+            l->id = id, l->name = lib_put(pool, len, cap, name ? name : ""), l->at = nr, l->n = 0;
+        }
+        lib_t.lrids[nr++] = rid, ++lib_t.lists[lib_t.nlists - 1].n;
+    }
+    sqlite3_finalize(st);
+}
 
 /* The songs into RAM, in rid order, each with the hash of what the car is sent of it; the revision their hashes'
  * hash. The card's songs (songtable) and, while a server is signed in (its catalogue on the card, as Car Remote's
@@ -154,14 +198,15 @@ static int lib_load(void) {
         if (t->rid) ++n;
     }
     sqlite3_finalize(st);
+    if (pool) lib_lists(db, server, &pool, &len, &cap);
     sqlite3_close(db);
     lib_t.pool = pool, lib_t.n = n;
     snprintf(lib_t.rev, sizeof lib_t.rev, "q2.%u.%08x", n, rev);
     lib_read_sent();
     char msg[240];
-    snprintf(msg, sizeof msg, "library: %u songs read (%s), revision %s; the car was last sent %s (%u songs)", n,
-             server ? "the card's and the server's" : "the card's", lib_t.rev, lib_t.sent_rev[0] ? lib_t.sent_rev : "nothing",
-             lib_t.sent_n);
+    snprintf(msg, sizeof msg, "library: %u songs read (%s), %u lists, revision %s; the car was last sent %s (%u songs)",
+             n, server ? "the card's and the server's" : "the card's", lib_t.nlists, lib_t.rev,
+             lib_t.sent_rev[0] ? lib_t.sent_rev : "nothing", lib_t.sent_n);
     logline("lib", msg);
     return 0;
 }
