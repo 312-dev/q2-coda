@@ -34,6 +34,8 @@ test/patch.py, which executes the payload as one program. What gets narrowed:
 - a tools/ module (not tools/ci/), or its test/unit/test_X.py, also plans `cov:tools/X.py` (`cov_target`): tools/ci/covcheck.py
   runs the test/unit files that name the module under coverage and holds it to the post tier's `fail_under`,
   as a merge batch does, so a branch that drops a module under the floor is rejected there, not POST_RED;
+- patch/addon.c, catalogue.c, stream_state.c, player/ and tools/build.py (the app's pin) also plan
+  test/subsonic_contract.py (`CONTRACT_SOURCES`): the words and files the bundled Subsonic app shares with them;
 - a payload change (patch/) also plans `smoke`, tools/ci/smoke.py on a pooled emulator, but runs it only with
   --smoke: it is optional for a worker, and a merge batch leaves it out (gate.OPTIONAL), as the queue runs it
   on the trunk's tip after landing, where a failure turns the tip red.
@@ -110,6 +112,11 @@ MYPY_CONFIG = 'pyproject.toml'
 # build). One of gate.PLANNED. A release's package step runs the same check, too late to name the branch at fault.
 STOCK_SITES = 'test/stock_sites.py'
 SITENOTES = 'docs/rebasing/sitenotes.py'
+# The firmware's side of the files-on-card contract with the Subsonic app it carries (the caps line, .catplay, .playing,
+# .ahead, .stream) and the pin of the app's build: test/subsonic_contract.py checks both sides still name the same
+# words and files. One of gate.PLANNED; player/ too, as the player is what Download Ahead's .stream follows.
+CONTRACT = 'test/subsonic_contract.py'
+CONTRACT_SOURCES = ('patch/addon.c', 'patch/catalogue.c', 'patch/stream_state.c', 'tools/build.py', 'player/*')
 SMOKE = 'smoke'  # tools/ci/smoke.py: optional here (run with --smoke), the post tier's on the trunk
 INTEGRATION = re.compile(r'^(release/|integ/|main$|master$)')  # integ/*: the integrator's (docs/orchestration.md)
 # test/unit files that check a rule over every file of a folder: (folder, suffixes or None for any, test).
@@ -260,6 +267,9 @@ def plan_for(changes, root=ROOT, patch_source=None):
         for folder, suffixes, test in SCANNERS:
             if path.startswith(folder) and (suffixes is None or suffix in suffixes):
                 p.add('unit', {test}, f'{path}: {test} checks every file of {folder}')
+        if any(fnmatch.fnmatchcase(path, g) for g in CONTRACT_SOURCES):
+            p.other.add(CONTRACT)
+            p.why.append(f'{path}: {CONTRACT} (the Subsonic app\'s files-on-card contract)')
         if path.startswith('test/patch_suite/') and suffix == '.py':  # one file of the suite: its lines, joined
             starts = suite_starts(root)
             if patch_source is None:

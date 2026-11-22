@@ -1283,3 +1283,12 @@ def test_every_unit_file_that_reads_remote_is_in_its_rule():
 def test_integration_branches_are_the_ones_the_docs_name(branch, whole):
     """docs/orchestration.md and CLAUDE.md name integration branches integ/*, the integrator's."""
     assert bool(affected.INTEGRATION.match(branch)) == whole
+
+
+@pytest.mark.parametrize('path', ['patch/addon.c', 'patch/catalogue.c', 'patch/stream_state.c', 'player/engine.c',
+                                  'tools/build.py'])
+def test_the_subsonic_contract_is_planned_for_its_sides(path):
+    """The firmware's side of the bundled app's files (.catplay, .playing, .ahead, .stream, the caps line) and its pin."""
+    plan = json.loads(affected.plan_for({path: {1}}, REPO).to_json())
+    assert 'test/subsonic_contract.py' in plan['other'] or gate.everything(plan)
+    assert 'test/subsonic_contract.py' not in json.loads(affected.plan_for({'patch/home.c': {1}}, REPO).to_json())['other']
