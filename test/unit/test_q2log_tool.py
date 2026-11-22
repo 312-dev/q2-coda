@@ -104,3 +104,15 @@ def test_with_nothing_to_read_it_says_what_it_needs(capsys):
     else:
         raise AssertionError('no files and no --adb ran on')
     assert 'files, --heat, --bt or --adb' in capsys.readouterr().err
+
+
+def test_btev_over_adb_reads_the_bluetooth_event_log_alone(monkeypatch, capsys):
+    """q2guard --dump-bt flushes what q2guard holds, then prints q2-btev.3 to .0: unified lines, shown and filtered
+    as the unified log's, with no heat or link log merged in (they would repeat nothing it lacks)."""
+    asked = []
+    btev = [l for l in LOG if ' bt ' in l or ' guard ' in l]
+    monkeypatch.setattr(q2log, 'adb', lambda command, serial=None: asked.append(command) or btev)
+    assert q2log.main(['--adb', '--btev', '--level', 'W']) == 0
+    assert asked == ['q2guard --dump-bt 2>/dev/null']
+    assert [' '.join(l.split()[3:]) for l in capsys.readouterr().out.splitlines()] == [
+        'E bt rtk_hciattach: Failed to read local version']

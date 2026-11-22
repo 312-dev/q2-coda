@@ -15,7 +15,7 @@ def L(tmp_path):
     out = tmp_path / 'q2bt_sleep.so'
     subprocess.run(['clang', '-shared', '-fPIC', '-O1', '-DQ2GUARD_HOST', '-Wall', '-Werror', '-Wno-unused-parameter',
                     '-Wno-unused-function', '-include', ROOT / 'test/unit/glibc228_snprintf.h',
-                    f'-DPEQ_ROOT="{tmp_path}"', ROOT / 'test/unit/q2bt_sleep_host.c', ROOT / 'patch/q2bt_core.c',
+                    f'-DPEQ_ROOT="{tmp_path}"', ROOT / 'test/unit/q2bt_sleep_host.c', ROOT / 'patch/q2bt_core.c', ROOT / 'patch/q2dbus.c',
                     ROOT / 'patch/q2guard_core.c', ROOT / 'patch/q2log_core.c', ROOT / 'patch/card_store.c',
                     '-o', out], check=True)
     lib = C.CDLL(str(out))

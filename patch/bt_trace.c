@@ -6,7 +6,8 @@
  * (bt_a2dp_direction), the link list's last item (its address and status), the saved device
  * (BTLINKMAC), and each connect the link thread starts, with its target and why: auto (headset.c's
  * autolink, at boot and at each Bluetooth on), usb (the same at a cable in, headset_bt_usb), tap
- * (a row or Connect, through bt_stock_click) or other (stock started it with neither). q2guard's
+ * (a row or Connect, through bt_stock_click) or other (stock started it with neither); and each
+ * auto-link decision, the device it pages or why none (bt_trace_autolink). q2guard's
  * lines beside them say what the kernel did (docs/internals.md#bluetooth-devices).
  *
  * bt_acl_up answers whether the kernel holds a connected ACL link to an address (HCIGETCONNLIST on
@@ -130,6 +131,26 @@ static void who(char *out, unsigned n, const char *mac) {
         tk_snprintf(out, n, "%s \"%s\"", mac, name);
     else
         tk_snprintf(out, n, "%s", *mac ? mac : "-");
+}
+
+/* An auto-link decision (headset.c headset_bt_autolink, at boot, at each Bluetooth on and, as usb,
+ * at a cable in): the device it pages and why, or why it pages none. connected: the link list's
+ * connected item, which stops it; else go says whether the target was paired. */
+void bt_trace_autolink(const char *why, const char *target, const char *connected, int go) {
+    char a[96], c[96], b[256];
+    const char *saved = (const char *)BTLINKMAC;
+    who(a, sizeof a, target ? target : "");
+    const char *which =
+        target && mac_eq(target, saved) ? "the saved device" : "not the saved device";
+    if (connected) {
+        who(c, sizeof c, connected);
+        tk_snprintf(b, sizeof b, "auto-connect (%s) skips %s: %s is connected", why, a, c);
+    } else if (go)
+        tk_snprintf(b, sizeof b, "auto-connect (%s) picks %s: %s, paired, nothing connected", why,
+                    a, which);
+    else
+        tk_snprintf(b, sizeof b, "auto-connect (%s) skips %s: %s, not paired", why, a, which);
+    say(connected || go ? 'I' : 'W', b);
 }
 
 void bt_trace_poll(void) {

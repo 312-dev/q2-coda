@@ -20,8 +20,10 @@
  * watchdog (bt_kmsg, bt_watch, docs/internals.md#bluetooth-controller-watchdog), and bt_sleep waits
  * on the kernel's management channel, whose device events (connects and who began them, drops,
  * failures, pairings, Forgets, discoveries and the devices each found) go to the unified log as
- * they come (docs/internals.md#bluetooth-devices). */
+ * they come (docs/internals.md#bluetooth-devices), and on the system bus's socket, whose A2DP
+ * transport signals (q2dbus.c) do too (docs/internals.md#bluetooth-event-log). */
 #include "q2bt.h"
+#include "q2dbus.h"
 #include "q2log.h"
 
 #define PCMS_FILE "/tmp/q2bt.pcms"
@@ -872,6 +874,28 @@ static void mgmt_drain(void) {
         if (level == 'W') bt.mgmt_warned = 1;
     }
 }
+/* ---- A2DP transports (docs/internals.md#bluetooth-event-log) ----
+ * BlueZ's MediaTransport1 objects as the system bus announces them (q2dbus.c): each stream made,
+ * started (AVDTP START accepted), suspended and closed, as it comes, beside the management
+ * channel's device lines. */
+static struct bt_dbus dbus;
+static void dbus_drain(void) {
+    struct dbus_tr t;
+    for (int k = 0; k < MGMT_MAX && dbus_next(&dbus, &t, now_ms()); ++k) {
+        char line[192];
+        const char *name = bt_names_get(&bt.names, t.bdaddr);
+        char level = dbus_tr_line(&t, name, line, sizeof line);
+        ulog_add(bt.ulog, time(0), now_ms(), level, "bt", line);
+    }
+}
+static int dbus_up(unsigned now) {
+    int was = dbus.tried;
+    int ok = dbus_ok(&dbus, PEQ_ROOT DBUS_SOCK, now);
+    if (!ok && !was) /* the emulator, or no bus yet: said once */
+        ulog_add(bt.ulog, time(0), now_ms(), 'I', "bt", "transports: the system bus does not open");
+    return ok;
+}
+
 int bt_dev_warned(void) {
     int w = bt.mgmt_warned;
     bt.mgmt_warned = 0;
@@ -880,6 +904,7 @@ int bt_dev_warned(void) {
 
 void bt_init(card_log *l, card_log *u) {
     bt.log = l, bt.ulog = u, bt.ctl = bt.raw = bt.mgmt = -1, bt.sink_h = bt.down_h = -1;
+    dbus_init(&dbus);
     bt_edr_reset(&bt.edr);
 }
 int bt_streaming(void) { return bt.det.on; }
@@ -900,10 +925,14 @@ void bt_sleep(unsigned ms) {
             int due = (int)(bt.at + BT_TICK_MS - now);
             step = due <= 0 ? 0 : due < left ? due : left;
         }
-        if (step > 0 && mgmt_ok(now)) { /* the wait, or until a device event: logged at once */
-            struct pollfd p = { bt.mgmt, POLLIN, 0 };
-            int got = poll(&p, 1, step); /* a signal ends it early (EINTR) */
+        struct pollfd p[2];
+        int np = 0;
+        if (step > 0 && mgmt_ok(now)) p[np++] = (struct pollfd){ bt.mgmt, POLLIN, 0 };
+        if (step > 0 && dbus_up(now)) p[np++] = (struct pollfd){ dbus.fd, POLLIN, 0 };
+        if (np) { /* the wait, or until a device or transport event: logged at once */
+            int got = poll(p, (unsigned long)np, step); /* a signal ends it early (EINTR) */
             mgmt_drain();
+            dbus_drain();
             /* woken early by an event: the rest of the wait, so the tick below keeps its time */
             if (got > 0 && (int)(now_ms() - now) < step) continue;
         } else if (step > 0) {
