@@ -72,15 +72,16 @@ const char *output_device(char *vol) {
 /* Car Audio's USB stream carries the player's own songs alone (player/output.c output_car, while q2-iap's car file
  * is there): q2video (Radio, Internet Radio, Videos) plays to demo's output, which the car does not hear, so on the
  * drive of 2026-11-22 Radio's station name reached the car over silence (its sound went to Bluetooth A2DP). Such a
- * start is refused while the car takes the audio, with a toast at most every CAR_SAY_MS, the Library left playing
+ * start is refused while the car takes the audio (Car Audio on the cable and q2-iap's car file there), with a toast at most every CAR_SAY_MS, the Library left playing
  * on. 1 when refused. ponytail: routing them to the car needs the player to take a second source's PCM while its
  * own song is paused or stopped (docs/iphone-mode.md#other-sources-over-usb). */
 #define CAR_FILE "/tmp/q2-iap.audio" /* q2_iap.c's car_file */
 void ulog(char level, const char *src, const char *msg); /* ulog.c */
+int usb_car_on(void);                                    /* usb_car.c */
 #define CAR_SAY_MS 10000
 int car_takes_audio(void) {
     static unsigned said __attribute__((section(".scratch")));
-    if (access(CAR_FILE, 0)) return 0;
+    if (!usb_car_on() || access(CAR_FILE, 0)) return 0; /* the iPhone gadget on the cable, and the car's file */
     unsigned now = time_now_ms();
     if (!said || now - said >= CAR_SAY_MS) {
         said = now | 1;

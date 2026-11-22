@@ -496,6 +496,8 @@ def test_a_station_waits_while_the_car_takes_the_audio(fw):
     output went to Bluetooth A2DP on the drive of 2026-11-22, its name on iDrive over silence. While the car takes the
     audio nothing starts and the Q2 says why; the car file gone, it plays."""
     p = page(fw, {'/tmp/q2-iap.audio': b'hw:CARD=UAC1Gadget,0\n44100\n'})
+    fw.mock('fw_system', lambda *_: 0)
+    fw.fn('usb_car_start', None)()  # Car Audio's iPhone on the cable
     player = play(fw, p, 3)
     assert player.started == [] and rd(fw).pid == 0
     assert p.toasts == ["Plays on the Q2 only, not over the car's USB"]

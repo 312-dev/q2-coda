@@ -232,6 +232,7 @@ def test_radio_waits_while_the_car_takes_the_audio(fw, ui, mcl, recs):
     to the car) and iDrive showed its station over silence. While the car takes the audio (q2-iap's car file), Radio
     does not open, the Library plays on untouched, and the Q2 says why."""
     car = Car(fw, ui, recs)
+    fw.fn('usb_car_start', None)()  # Car Audio's iPhone on the cable
     car.files['/tmp/q2-iap.audio'] = b'hw:CARD=UAC1Gadget,0\n44100\n'
     fw.mock('fw_access', lambda path, *_: 0 if C.string_at(path).decode() in car.files else -1)
     saves = []
