@@ -655,6 +655,7 @@ int ringnav(void *ctx, void *event) {
         return 0;
     }
     unsigned key = (unsigned)I(event, EVENT_KEY);
+    if (key == KEY_PREV || key == KEY_NEXT) wheel_tick_taken(); /* the bar's lean: its carry again */
     if (ple_key(key, 2)) return STOP;
     if (seek_release(key)) return STOP; /* a hold that scanned is no skip */
     /* This release's press was silenced by ringnav_keydown: a row change below clicks instead. */
@@ -962,6 +963,7 @@ int ringnav(void *ctx, void *event) {
          * Cover Flow never jumps by letter */
         static wheel_accel_t cf_wa __attribute__((section(".scratch")));
         home_step(w, dir, now, wheel_accel(&cf_wa, w, dir, now, 0));
+        tilt_poll(); /* the bar's lean as it steps: the tick's carry (playback.c wheel_part) */
         widget_invalidate_force(w, (void *)0);
         return STOP;
     }
@@ -1000,6 +1002,7 @@ int ringnav(void *ctx, void *event) {
                              (tilt.c), but above a music list's first row stands its search bar */
             if (dir < 0 && !id && search_bar_up(top, g_menu.w)) return STOP;
             tilt_end(w, dir);
+            tilt_poll(); /* held full from this paint on, never the bare carry */
             stop_scroll(&g_menu);
             widget_invalidate_force(w, (void *)0); /* a wheel wake still clears touch hiding */
             return STOP;
@@ -1020,6 +1023,7 @@ int ringnav(void *ctx, void *event) {
         if (next == 0 || next >= end) st.wheel_run = 0;
         wheel_offset(&g_menu, next);
     }
+    tilt_poll(); /* the bar's lean as it steps: the tick's carry (playback.c wheel_part) */
     widget_invalidate_force(w, (void *)0);
     return STOP;
 }

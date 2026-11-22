@@ -4,7 +4,9 @@
  * eased 1 - (1 - a)^2, it moves up to TILT_LIFT px that way, grows up to TILT_GROW thousandths,
  * casts an accent shadow under it and carries a white gleam that slides the other way. The tick
  * itself is unchanged (the wheel's travel per tick, Wheel Sensitivity's): past it the selection
- * steps a row and the next tug starts from the leftover travel. Let go short of it and the bar
+ * steps a row and the next tug starts from the leftover travel; until ringnav takes the tick, the
+ * lean stays whole (playback.c wheel_part), and the step paints with the leftover (input.c calls
+ * tilt_poll), docs/internals.md#wheel-movement. Let go short of it and the bar
  * springs back over TILT_SPRING_MS. The mock-up's tilt of 1 degree is under a pixel on a 32 px
  * row, so it is not drawn. Only the bar's own box is painted again (tilt.box): tilt_poll, from
  * each UI loop pass, invalidates it in its window while the bar moves and that window is on top,
