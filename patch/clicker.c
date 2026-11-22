@@ -86,6 +86,14 @@ int clicker_route(int listening) {
     return (buzz ? ROUTE_BUZZER : 0) | (mixed ? ROUTE_MIXED : 0);
 }
 
+/* Whether the buzzer clicks under the Clicker, nothing sent to the player: a click of Radio's dial
+ * (input.c ringnav_piezo), whose own receiver clicks in what it plays, where q2player plays
+ * nothing. Off none; Speaker while nothing listens; Headphones never; Both always. */
+int clicker_buzzes(int listening) {
+    int mode = shown();
+    return mode == SHOWN_BOTH || (mode == SHOWN_SPEAKER && !listening);
+}
+
 /* The plug-in chirp (charging.c charge_plugged; q2player's {mcl-click\charge}, player/output.c
  * chirp_at): a sound, not a click, so the buzzer, which can only click, never plays it. Mixed into
  * what q2player plays under Headphones or Both, as a click is; with nothing playing, the stock
