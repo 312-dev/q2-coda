@@ -7,7 +7,7 @@ import ctypes as C
 
 import pytest
 
-from test_q2log import WALL, L, Log  # noqa: F401  (L: the module's library fixture)
+from test_q2log import TIME, WALL, L, Log  # noqa: F401  (L: the module's library fixture)
 
 BTEV_FILE_MAX, BTEV_FILES, BTEV_RAM = 131072, 4, 32768  # q2log.h
 BUDS = '04:00:6E:D3:96:6D'
@@ -54,30 +54,33 @@ def test_the_bluetooth_lines_are_copied_as_written_and_the_rest_left_out(L, tmp_
     in order."""
     p = Pair(L, tmp_path)
     u = p.u
-    u.add('I', 'guard', 'boot build=V1JBi last=forced')
-    u.add('I', 'ui', 'page home opened')
-    u.add('I', 'bt', f'connected {BUDS} "Grayson\'s Pixel Buds" by=device')
+    u.add('I', 'guard', 'boot build=V1JBi last=forced', up=9800000)
+    u.add('I', 'ui', 'page home opened', up=9810000)
+    u.add('I', 'bt', f'connected {BUDS} "Grayson\'s Pixel Buds" by=device', up=9824000)
     raw(L, u, "2026-11-19T14:21:35Z 9824703 I bt auto-connect (auto) picks 60:E6:F0:A1:1F:09: the saved device\n")
-    raw(L, u, 'parse_bluealsa_status_msg event = 2, len = 14\n')
-    raw(L, u, "bluealsa: E: Couldn't acquire transport: GDBus.Error:org.bluez.Error.Failed: Input/output error\n")
-    raw(L, u, "q2player: plug:'bluealsa:DEV=00:00:00:00:00:00,PROFILE=a2dp' 44100 Hz 2 ch 2 bytes: Device or resource busy\n")
+    raw(L, u, 'parse_bluealsa_status_msg event = 2, len = 14\n', up=9839000)
+    raw(L, u, "bluealsa: E: Couldn't acquire transport: GDBus.Error:org.bluez.Error.Failed: Input/output error\n",
+        up=9839000)
+    raw(L, u, "q2player: plug:'bluealsa:DEV=00:00:00:00:00:00,PROFILE=a2dp' 44100 Hz 2 ch 2 bytes: Device or resource busy\n",
+        up=9839000)
     raw(L, u, '2026-11-19T14:21:50Z 9839712 E player q2player: open failed (missing): /mnt/mmc/Music/a.flac\n')
     raw(L, u, '2026-11-19T14:21:51Z 9839800 I player q2player: set-songurl /mnt/mmc/Music/b.flac\n')
-    u.add('W', 'usb', 'cable in, seen after its edge, 9 ms')
-    raw(L, u, 'wpa_supplicant: wlan0: WARNING: reason 3\n')
+    u.add('W', 'usb', 'cable in, seen after its edge, 9 ms', up=9839850)
+    raw(L, u, 'wpa_supplicant: wlan0: WARNING: reason 3\n', up=9839860)
     rec = '3,900,9839900123,-;Bluetooth: hci0: command 0x0c03 tx timeout\n'
     L.ulog_kmsg(u.log, WALL, rec.encode(), len(rec))
-    u.add('I', 'bt', f'transport {BUDS} active: AVDTP started /sep1/fd0')
-    u.add('W', 'bt', f'disconnected {BUDS} "Grayson\'s Pixel Buds" reason=1 timeout or link loss')
-    u.add('I', 'guard', 'snapshot power-off')
-    u.add('I', 'ui', 'shutdown: power-off')
+    u.add('I', 'bt', f'transport {BUDS} active: AVDTP started /sep1/fd0', up=9840000)
+    u.add('W', 'bt', f'disconnected {BUDS} "Grayson\'s Pixel Buds" reason=1 timeout or link loss', up=9850000)
+    u.add('I', 'guard', 'snapshot power-off', up=9860000)
+    u.add('I', 'ui', 'shutdown: power-off', up=9860001)
     assert p.flush() == 0
     log, ev = p.text('q2-log.0').splitlines(), p.text('q2-btev.0').splitlines()
-    left_out = ('page home opened', 'set-songurl', 'cable in', 'wpa_supplicant')
-    assert len(log) == 16 and len(ev) == 12
+    left_out = ('page home opened', 'set-songurl', 'cable in', 'wpa_supplicant', 'parse_bluealsa_status_msg')
+    assert len(log) == 16 and len(ev) == 11
     assert ev == [line for line in log if not any(w in line for w in left_out)]
     assert ev[1].endswith('connected 04:00:6E:D3:96:6D "Grayson\'s Pixel Buds" by=device')
-    assert ' E kernel Bluetooth: hci0: command 0x0c03 tx timeout' in ev[7]
+    assert ' E kernel Bluetooth: hci0: command 0x0c03 tx timeout' in ev[6]
+    assert " bt bluealsa: E: Couldn't acquire transport" in ev[3]  # bluealsa's own line is Bluetooth's
 
 
 @pytest.mark.parametrize('level, src, msg, want', [
@@ -92,6 +95,9 @@ def test_the_bluetooth_lines_are_copied_as_written_and_the_rest_left_out(L, tmp_
     ('I', 'ui', 'hci0x is not hci0', 1),
     ('I', 'ui', 'hci0x only', 0),  # hci0 only as a word of its own
     ('I', 'usb', 'gadget car: A2DP off while the car plays', 1),
+    ('I', 'player', 'parse_bluealsa_status_msg event = 10, len = 14', 0),  # the player's, not a Bluetooth event
+    ('E', 'kernel', "debugfs: File 'force_bredr_smp' in directory 'hci0' already present!", 0),  # each stack start
+    ('E', 'kernel', 'Bluetooth: Peer acked invalid packet', 1),
 ])
 def test_what_counts_as_a_bluetooth_line(L, level, src, msg, want):
     L.ulog_bt_wanted.argtypes = [C.c_char, C.c_char_p, C.c_char_p, C.c_int]
@@ -107,8 +113,8 @@ def test_a_repeated_bluetooth_line_is_counted_in_both_and_a_repeated_other_in_ne
     p.u.add('I', 'bt', 'scan ended')
     assert p.flush() == 0
     tail = [line.split(' ', 2)[2] for line in p.text('q2-btev.0').splitlines()]
-    assert tail == ["I player bluealsa: E: Couldn't release transport: UnknownObject",
-                    'I player last line repeated 4 more times', 'I bt scan ended']
+    assert tail == ["I bt bluealsa: E: Couldn't release transport: UnknownObject",
+                    'I bt last line repeated 4 more times', 'I bt scan ended']
     assert 'I ui last line repeated' not in p.text('q2-btev.0')
     assert 'E ui last line repeated 2 more times' in p.text('q2-log.0')
 
@@ -169,3 +175,87 @@ def test_with_the_card_away_the_lines_wait_and_follow_in_order(L, tmp_path):
     assert p.flush() == 0
     assert [line.split(' ', 4)[4] for line in p.text('q2-btev.0').splitlines()] == ['before', 'away 0', 'away 1',
                                                                                    'away 2']
+
+
+def bt_lines(p):
+    return [line.split(' ', 1)[1] for line in p.text('q2-btev.0').splitlines()]
+
+
+def test_lines_from_two_feeds_go_in_by_their_uptime(L, tmp_path):
+    """The drive of 2026-11-22: q2guard's own lines (the kernel's connect, BlueZ's transports) go into the ring as they
+    happen, demo's are read from its stderr file at the next 5 s tick with their own earlier stamps, and were
+    written after them. In q2-btev each goes in by its uptime; the unified log keeps the order it read them in."""
+    p = Pair(L, tmp_path)
+    u = p.u
+    u.add('I', 'bt', 'connected 60:E6:F0:A1:1F:09 "BMW 83828" by=device', up=2071325)
+    u.add('I', 'bt', 'transport 60:E6:F0:A1:1F:09 "BMW 83828" opened: A2DP stream configured /fd0', up=2072086)
+    raw(L, u, '2026-11-22T05:56:59Z 2071502 I bt auto-connect (usb) skips 60:E6:F0:A1:1F:09\n')
+    raw(L, u, '2026-11-22T05:56:59Z 2071586 I bt saved device 60:E6:F0:A1:1F:09\n')
+    u.add('I', 'bt', 'transport 60:E6:F0:A1:1F:09 "BMW 83828" active: AVDTP started /fd0', up=2072822)
+    assert p.flush() == 0
+    ups = [int(line.split(' ')[0]) for line in bt_lines(p)]
+    assert ups == [2071325, 2071502, 2071586, 2072086, 2072822]
+    assert [int(line.split(' ')[1]) for line in p.text('q2-log.0').splitlines()] == [2071325, 2072086, 2071502,
+                                                                                    2071586, 2072822]
+
+
+def test_a_raw_line_takes_the_stamp_of_the_line_before_it(L, tmp_path):
+    """A line demo's file holds without a stamp (stock's printf, hciconfig's) was stamped when q2guard read it, up to
+    a tick later than it was written: 13040 for a "====auto bt" printed between demo's 8493 and 8520 lines. It takes
+    the time and uptime of the stamped line before it in the file instead, so it stays where it was written."""
+    p = Pair(L, tmp_path)
+    u = p.u
+    raw(L, u, '2026-11-22T05:22:38Z 8493 I bt auto-connect (auto) picks 20:AF:1B:18:FD:03\n', up=13040)
+    raw(L, u, '====auto bt[20:AF:1B:18:FD:03]==\n', up=13040)
+    raw(L, u, '2026-11-22T05:22:38Z 8520 I bt stack status 0\n', up=13040)
+    assert p.flush() == 0
+    lines = p.text('q2-btev.0').splitlines()
+    assert lines[1].startswith('2026-11-22T05:22:38Z 8493 I bt ====auto bt[')
+    assert [line.split(' ')[1] for line in lines] == ['8493', '8493', '8520']
+
+
+def test_a_raw_line_with_no_stamped_line_before_it_keeps_its_read_time(L, tmp_path):
+    p = Pair(L, tmp_path)
+    raw(L, p.u, '====auto bt[20:AF:1B:18:FD:03]==\n', up=13040)
+    assert p.flush() == 0
+    assert p.text('q2-btev.0').split(' ')[1] == '13040'
+
+
+def test_the_every_boot_hciconfig_line_says_it_is_expected(L, tmp_path):
+    """openBluetooth's hciconfig hci0 reset fails this way at every boot and at no relaunch (2026-11-22, builds 1126
+    and 1127); the name is written after it (bt_name.c). An I line that says so, not an error."""
+    p = Pair(L, tmp_path)
+    raw(L, p.u, "Can't init device hci0: Function not implemented (89)\n")
+    assert p.flush() == 0
+    (line,) = bt_lines(p)
+    assert line.startswith("7000 I bt Can't init device hci0: Function not implemented (89)") and 'expected' in line
+
+
+def test_a_periodic_flush_holds_back_the_last_seconds(L, tmp_path):
+    """q2guard hands its writer only the lines older than the newest few seconds (ulog_settled), so one read late
+    from demo's file still finds the lines it belongs before; a final flush takes them all."""
+    p = Pair(L, tmp_path)
+    for up in (1000, 2000, 9000, 9500):
+        p.u.add('I', 'bt', f'line {up}', up=up)
+    L.ulog_settled.argtypes, L.ulog_settled.restype = [C.c_void_p, C.c_uint], C.c_uint
+    first_two = len(b''.join(f'{TIME} {up} I bt line {up}\n'.encode() for up in (1000, 2000)))
+    assert L.ulog_settled(p.ev, 9500 - 6000) == first_two
+    assert L.ulog_settled(p.ev, 10000) == L.log_used(p.ev)
+    assert L.ulog_settled(p.ev, 500) == 0
+
+
+def test_a_late_line_never_goes_into_the_part_being_written(L, tmp_path):
+    """While q2guard's writer has the ring's first bytes (ulog_bt_freeze), a line older than them goes in after them:
+    the watcher drops exactly those bytes when the writer is done."""
+    p = Pair(L, tmp_path)
+    p.u.add('I', 'bt', 'line 1000', up=1000)
+    p.u.add('I', 'bt', 'line 3000', up=3000)
+    frozen = len(f'{TIME} 1000 I bt line 1000\n')
+    L.ulog_bt_freeze.argtypes = [C.c_uint, C.c_uint]
+    L.ulog_bt_freeze(frozen, L.log_dropped(p.ev))
+    p.u.add('I', 'bt', 'line 500', up=500)
+    L.ulog_bt_freeze(0, 0)
+    p.u.add('I', 'bt', 'line 2000', up=2000)
+    assert p.flush() == 0
+    assert [line.split(' ', 4)[4] for line in p.text('q2-btev.0').splitlines()] == ['line 1000', 'line 500',
+                                                                                   'line 2000', 'line 3000']

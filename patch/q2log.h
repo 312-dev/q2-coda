@@ -24,10 +24,19 @@
 #define BTEV_FILE_MAX 131072 /* q2-btev.0 is moved on when a flush finds it this big */
 #define BTEV_FILES 4         /* q2-btev.0 to .3: about 512 KB in all */
 #define BTEV_FLUSH_MS 60000  /* lines held in its ring are written at least this often */
+#define BTEV_HOLD_MS 10000   /* its newest lines this young wait for the next flush, unless final: two ticks */
 /* From here on each line into from (the unified ring) that ulog_bt_wanted keeps is also put in to */
 void ulog_bt_to(card_log *from, card_log *to);
+/* Lines go into that ring by their uptime, not as read (a late one carried back past later ones).
+ * While q2guard's writer holds the ring's first bytes (dropped: the ring's drop count then), none
+ * goes in before them; 0 bytes lifts it. */
+void ulog_bt_freeze(unsigned bytes, unsigned dropped);
+/* The bytes at l's start whose lines have an uptime of before_ms or less: what a flush may write
+ * while a line read late could still belong after them. */
+unsigned ulog_settled(const card_log *l, unsigned before_ms);
 /* 1 for a Bluetooth line: source bt; a boot, snapshot or shutdown line; the player's errors; or
- * one that names bluealsa, BlueZ, Bluetooth, A2DP, AVDTP, rtk_hci, hci0 or L2CAP */
+ * one that names bluealsa, BlueZ, Bluetooth, A2DP, AVDTP, rtk_hci, hci0 or L2CAP, but the player's
+ * parse_bluealsa_status_msg and the kernel's debugfs notes */
 int ulog_bt_wanted(char level, const char *src, const char *s, int n);
 
 /* A level and source for a line that came without them (the player's, stock's helpers'), from

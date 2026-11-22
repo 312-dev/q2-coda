@@ -330,7 +330,10 @@ static struct {
     unsigned len, dropped, bt_len, bt_dropped, u_len, u_dropped, e_len, e_dropped; /* what the child was given of each */
     int done; /* the last flush ended (written, failed or given up) */
 } fl;
-static void flush_start(void) {
+/* The writer handed the logs. all: every line (a final flush); else the Bluetooth log's lines
+ * older than BTEV_HOLD_MS alone, so a line read late from demo's file still goes in before later
+ * ones (q2log_core.c insert_sorted), and those bytes frozen until the writer is reaped. */
+static void flush_start(int all) {
     if (fl.pid > 0) return;
     ulog_repeats(&ulog); /* a run of one line still being counted: its count goes too */
     if (!card_ready()) {
@@ -340,14 +343,19 @@ static void flush_start(void) {
     fl.len = heat.len, fl.dropped = heat.dropped, fl.done = 0;
     fl.bt_len = btlog.len, fl.bt_dropped = btlog.dropped;
     fl.u_len = ulog.len, fl.u_dropped = ulog.dropped;
-    fl.e_len = btev.len, fl.e_dropped = btev.dropped;
+    unsigned now = now_ms();
+    fl.e_len = all || now < BTEV_HOLD_MS ? btev.len : ulog_settled(&btev, now - BTEV_HOLD_MS);
+    fl.e_dropped = btev.dropped;
     pid_t pid = fork();
-    if (!pid)
-        in_writer = 1, _exit((heat_flush(&heat, LOGS) ? 1 : 0) | (bt_flush(&btlog, LOGS) ? 2 : 0) |
-                             (ulog_flush(&ulog, LOGS, "q2-log", ULOG_FILE_MAX, ULOG_FILES) ? 4 : 0) |
-                             (ulog_flush(&btev, LOGS, "q2-btev", BTEV_FILE_MAX, BTEV_FILES) ? 8 : 0));
+    if (!pid) {
+        in_writer = 1, btev.len = fl.e_len; /* the child's copy: what it was handed of the Bluetooth log */
+        _exit((heat_flush(&heat, LOGS) ? 1 : 0) | (bt_flush(&btlog, LOGS) ? 2 : 0) |
+              (ulog_flush(&ulog, LOGS, "q2-log", ULOG_FILE_MAX, ULOG_FILES) ? 4 : 0) |
+              (ulog_flush(&btev, LOGS, "q2-btev", BTEV_FILE_MAX, BTEV_FILES) ? 8 : 0));
+    }
     fl.pid = pid;
     if (pid < 0) fl.pid = 0, fl.done = 1;
+    else ulog_bt_freeze(fl.e_len, fl.e_dropped);
 }
 /* what the child wrote of l dropped from its ring: not if the ring moved since (twice beats lost) */
 static void written(card_log *l, unsigned len, unsigned dropped) {
@@ -360,6 +368,7 @@ static void flush_reap(void) {
     int status = 0;
     if (fl.pid <= 0 || waitpid(fl.pid, &status, WNOHANG) != fl.pid) return;
     fl.pid = 0, fl.done = 1;
+    ulog_bt_freeze(0, 0);
     int failed = status & 0x7f ? 15 : status >> 8 & 0xff; /* killed: none; else its exit's bits */
     if (!(failed & 1)) written(&heat, fl.len, fl.dropped);
     if (!(failed & 2)) written(&btlog, fl.bt_len, fl.bt_dropped);
@@ -397,7 +406,7 @@ static void answers(int *ack, int *cancel, char *b, int size) {
 #define FINAL_MS 3000
 static void flush_final(unsigned deadline) {
     while (fl.pid > 0 && (int)(deadline - now_ms()) > 0) usleep(100000), flush_reap();
-    flush_start();
+    flush_start(1);
     unsigned end = now_ms() + FINAL_MS;
     if ((int)(end - deadline) > 0) end = deadline;
     while (fl.pid > 0 && (int)(end - now_ms()) > 0) usleep(100000), flush_reap();
@@ -525,7 +534,7 @@ int main(int argc, char **argv) {
     const char *snap_why = 0; /* a heat event's snapshot, taken once this tick's heat line is made */
     s.cable = -1;
     pmic_open();
-    flush_start();
+    flush_start(0);
     for (;;) {
         /* a tick every GUARD_TICK_MS, the PMIC's window included; the Bluetooth link sampled each second
          * through both while it streams (bt_sleep) */
@@ -615,7 +624,7 @@ int main(int argc, char **argv) {
             ((btev.len || btev.dropped) && now - last_flush >= BTEV_FLUSH_MS) ||
             now - last_flush >= (unsigned)flush_every(fast, bt_streaming())) {
             if (g.off && !card_ready()) note("CARD not mounted: log in RAM only");
-            flush_start();
+            flush_start(0);
             if (warn_due) last_warn = now, warn_due = 0;
             last_flush = now;
         }
