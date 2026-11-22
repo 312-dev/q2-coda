@@ -26,7 +26,8 @@
 #define BD_VALUE_W 120 /* Battery's value, right-aligned in this much */
 #define BD_ROWS 4
 /* BTLINKMAC: stock's last connected device, [SYSSET] BTLINKMAC in config.ini, 32 bytes at a fixed
- * address (readBtLinkMac fills it, 0x4fa1f0); autoLinkBluetooth connects it at boot and Bluetooth on */
+ * address (readBtLinkMac fills it, 0x4fa1f0); autoLinkBluetooth connects it at boot and Bluetooth
+ * on */
 #define BD_LINK_MAC ((char *)0xa4c0d8)
 #define BD_LINK_MAC_N 32
 
@@ -120,7 +121,8 @@ static void fill(void) {
         void *item = bd.rows[i] == ROW_RENAME
                          ? page_row_detail_into(bd.view, i, caption, 0, bd_click)
                          : page_row_detail(bd.view, i, caption, 0, bd_click);
-        if (bd.rows[i] == ROW_FORGET) /* the row that loses something, as Settings' Reset Settings */
+        if (bd.rows[i] ==
+            ROW_FORGET) /* the row that loses something, as Settings' Reset Settings */
             text_ink(widget_get_child(item, 0), 0xff000000u | tok(TOK_NEGATIVE), INK_LABEL);
         if (bd.rows[i] == ROW_BATTERY) {
             int right = 375 - geom_val(V_RIGHT_X);
@@ -167,9 +169,21 @@ static void forget_link(const char *mac) {
  * dialog's OK (btmenu_item_on_click, 0x4c44b8 to 0x4c45b4), then the saved link. */
 static void forget(void *ctx, int row, int toggle_on) {
     (void)ctx, (void)toggle_on;
-    int dev = bt_dev_find(bd.mac);
-    if (row != 1 || dev < 0) return;
-    int r = handleBluetoothPair(dev);
+    char b[96];
+    int dev = bt_dev_find(bd.mac), r = 0;
+    /* each answer a bt line (docs/internals.md#bluetooth-connection-trace): on 2026-11-19 a Forget
+     * took two taps and nothing said why */
+    if (row != 1)
+        tk_snprintf(b, sizeof b, "forget %s: Cancel chosen", bd.mac);
+    else if (dev < 0)
+        tk_snprintf(b, sizeof b, "forget %s: not in the device list now, nothing done", bd.mac);
+    else if ((r = handleBluetoothPair(dev)) != 1 && r != 2)
+        tk_snprintf(b, sizeof b, "forget %s: stock's unpair refused it (%d), nothing done", bd.mac,
+                    r);
+    else
+        tk_snprintf(b, sizeof b, "forget %s: %s", bd.mac,
+                    r == 2 ? "disconnected and unpaired" : "unpaired");
+    ulog(row == 1 && r != 1 && r != 2 ? 'W' : 'I', "bt", b);
     if (r != 1 && r != 2) return;
     if (r == 2) { /* it was the output: back to a jack */
         int out = check_outputdevice((signed char)g_headset_output, 2);
@@ -229,7 +243,7 @@ static int bd_click(void *ctx, void *event) {
         break;
     case ROW_RENAME:
         search_strip_note("Shows on this Q2");
-        search_strip_label("Rename"); /* typed in its row, after the label (search_strip.c) */
+        search_strip_label("Rename");    /* typed in its row, after the label (search_strip.c) */
         search_strip_return(STRIP_SAVE); /* the return key's check */
         search_strip_text("Rename", bd.name, BD_NAME_MAX, renamed);
         break;
