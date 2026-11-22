@@ -1294,6 +1294,8 @@ def test_a_link_gone_quiet_with_packets_waiting_is_lost(probe, tmp_path):
                 os.write(w, bytes(512))
         except BlockingIOError:
             pass
+        attrs = b''.join(prm(a) for a in (0, 1, 4, 6, 12))
+        car.send(message(0x5000, prm(0, attrs), prm(1, prm(0) + prm(1))))  # its last word: Now Playing is owed it
         t0 = time.time()
         assert p.wait(6) == 22
         took = time.time() - t0

@@ -166,19 +166,64 @@ static int lib_load(void) {
     return 0;
 }
 
-/* The car has all of this revision: what it holds, for the next connection's changes alone. */
+/* A server song's cover as its app keeps it (catalogue.c catalogue_cover, what the Q2's own Now Playing shows): the
+ * song's server row (its rid, from 0x40000000, is servermeta's id) has the path /mnt/mmc/.<app>/cat/<album id>/...,
+ * and the cover is /mnt/mmc/.<app>/covers/<album id>.jpg, a baseline JPEG of 160 px at most (q2-subsonic's
+ * covers.go). Its path into out, 1; 0 for a card song, or a row with no such path. One row by its key, as the song
+ * changes. */
+static int lib_app_cover(unsigned rid, char *out, unsigned cap) {
+    sqlite3 *db = 0;
+    sqlite3_stmt *st = 0;
+    char sql[80];
+    int ok = 0;
+    if (rid < 0x40000000u || access(lib_cat, 0)) return 0;
+    if (sqlite3_open_v2(lib_cat, &db, SQLITE_OPEN_READONLY, 0) == 0) {
+        snprintf(sql, sizeof sql, "select fileurl from servermeta where id = %u", rid);
+        if (sqlite3_prepare_v2(db, sql, -1, &st, 0) == 0 && sqlite3_step(st) == SQLITE_ROW) {
+            const char *u = (const char *)sqlite3_column_text(st, 0), *c = u ? strstr(u, "/cat/") : 0;
+            const char *e = c ? strchr(c + 5, '/') : 0;
+            if (e && e > c + 5 && !strncmp(u, "/mnt/mmc/.", 10) && !memchr(u + 10, '/', (unsigned)(c - u - 10))) {
+                int n = snprintf(out, cap, "%s%.*s/covers/%.*s.jpg", card_root, (int)(c - u), u, (int)(e - c - 5), c + 5);
+                ok = n > 0 && (unsigned)n < cap;
+            }
+        }
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return ok;
+}
+
+/* The car has all of this revision: what it holds, for the next connection's changes alone. The record is made in
+ * RAM and written in one write by a child, so the event loop never waits on it: /mnt/data is UBIFS mounted sync,
+ * and on 2026-11-21 (q2muse-1125) the record of 9,199 songs, written a line at a time from the loop, held it 12.3 s
+ * while the car's SET_REPORT went unanswered (test/iap_probe.py test_writing_the_sent_record_holds_nothing). */
 static void lib_saved(void) {
     char tmp[200];
-    snprintf(tmp, sizeof tmp, "%s.iap", lib_sent_file);
-    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600), ok = fd >= 0;
-    char b[32];
-    if (ok) ok = write(fd, lib_t.rev, strlen(lib_t.rev)) == (int)strlen(lib_t.rev) && write(fd, "\n", 1) == 1;
-    for (unsigned i = 0; ok && i < lib_t.n; ++i) {
-        int k = snprintf(b, sizeof b, "%u %08x\n", lib_t.tracks[i].rid, lib_t.tracks[i].hash);
-        ok = write(fd, b, k) == k;
+    unsigned cap = (unsigned)strlen(lib_t.rev) + 2 + lib_t.n * 20, len;
+    char *b = malloc(cap);
+    if (!b) {
+        logline("lib", "library: the sent record could not be written (no memory)");
+        return;
     }
-    if (fd >= 0) close(fd);
-    if (!ok || rename(tmp, lib_sent_file)) unlink(tmp), logline("lib", "library: the sent record could not be written");
+    len = (unsigned)snprintf(b, cap, "%s\n", lib_t.rev);
+    for (unsigned i = 0; i < lib_t.n && len < cap; ++i)
+        len += (unsigned)snprintf(b + len, cap - len, "%u %08x\n", lib_t.tracks[i].rid, lib_t.tracks[i].hash);
+    snprintf(tmp, sizeof tmp, "%s.iap", lib_sent_file);
+    int pid = len < cap ? fork() : -1;
+    if (pid == 0) {
+        long at = mono_ms();
+        int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600), ok = fd >= 0 && write(fd, b, len) == (int)len;
+        if (fd >= 0) close(fd);
+        char msg[120];
+        if (ok && !rename(tmp, lib_sent_file))
+            snprintf(msg, sizeof msg, "library: the sent record written, %u bytes, %ld ms", len, mono_ms() - at);
+        else
+            unlink(tmp), snprintf(msg, sizeof msg, "library: the sent record could not be written");
+        logline("lib", msg);
+        _exit(0);
+    }
+    free(b);
+    if (pid < 0) logline("lib", "library: the sent record could not be written (no child)");
 }
 
 /* Songs to play, by rid: the shim's list (/tmp/coda-rc.list, a rid a line) and its play command, as coda-rc's Play

@@ -3,11 +3,12 @@
  * cover's image handle (seven digits), a newline, the cover's path and a newline, or removed when
  * the song has no cover. bluetoothd's GetElementAttributes reads the handle (tools/bt_meta.c,
  * AVRCP's attribute 8) and q2-bip the path (patch/q2bip.c), so both speak of this song. The cover
- * is the one iPhone mode sends (tools/iap_probe/q2-iap-probe.c io_artwork): Cover Flow's cached
- * copy for the song's artist and album, else cover.jpg, folder.jpg or front.jpg beside the song.
- * The handle is that file's key, so it changes when the cover does and songs of one album share it:
- * a car that has the album's cover fetches nothing at the next song. ponytail: a server song whose
- * cover only its app has shows none; album_cover.c's catalogue_cover would name it. */
+ * is Cover Flow's cached copy for the song's artist and album, else cover.jpg, folder.jpg or
+ * front.jpg beside the song, as iPhone mode looks (patch/q2_iap.c io_artwork). The handle is that
+ * file's key, so it changes when the cover does and songs of one album share it: a car that has
+ * the album's cover fetches nothing at the next song. ponytail: a server song whose cover only its
+ * app has shows none here; iPhone mode finds it by the song's catalogue row (q2_iap_lib.c
+ * lib_app_cover), and album_cover.c's catalogue_cover would name it. */
 #include "navigation.h"
 
 #define BT_COVER_FILE "/tmp/q2-bip.now" /* BT_COVER_FILE in tools/build.py */

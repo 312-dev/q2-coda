@@ -77,6 +77,8 @@ int kill(int, int);
 int rename(const char *, const char *);
 int unlink(const char *);
 char *strrchr(const char *, int);
+char *strstr(const char *, const char *);
+void *memchr(const void *, int, size_t);
 int *__errno_location(void);
 void *malloc(size_t);
 void *realloc(void *, size_t);
@@ -455,7 +457,9 @@ static unsigned fnv_part(unsigned h, const char *s) {
     return h * 16777619u;
 }
 
-/* The song's cover: Cover Flow's 160 px copy (keyed by artist and album), else a cover beside the song. */
+static int lib_app_cover(unsigned rid, char *out, unsigned cap); /* q2_iap_lib.c */
+/* The song's cover: Cover Flow's 160 px copy (keyed by artist and album), else a server song's from its app (its
+ * catalogue row's album: lib_app_cover), else a cover beside the song. */
 static unsigned io_artwork(const struct iap2_np *n, unsigned char *out, unsigned cap) {
     char p[600];
     unsigned got = 0;
@@ -463,6 +467,7 @@ static unsigned io_artwork(const struct iap2_np *n, unsigned char *out, unsigned
         snprintf(p, sizeof p, "%s/%08x.jpg", art_dir, fnv_part(fnv_part(2166136261u, n->artist), n->album));
         got = read_file(p, out, cap);
     }
+    if (!got && lib_app_cover(n->id, p, sizeof p)) got = read_file(p, out, cap);
     static const char *const names[] = { "cover.jpg", "folder.jpg", "front.jpg" };
     const char *slash = strrchr(n->path, '/');
     for (unsigned i = 0; !got && slash && i < 3; ++i) {
@@ -690,7 +695,8 @@ static void summary(void) {
 
 #include "q2_iap_lib.c"
 
-/* The link lost (the car stopped acknowledging through every retry): with --state, q2-iap ends (exit 22) and q2car.sh
+/* The link lost (the car stopped acknowledging through every retry, went quiet with packets waiting, or a request's
+ * data stage was not its report: q2_iap2.c iap2_lost): with --state, q2-iap ends (exit 22) and q2car.sh
  * shows the car the iPhone again (the gadget off the controller and back), which is how a car starts a session
  * afresh; it sent nothing more by itself after the loss on 2026-11-21 (126 s, to the cable out). */
 static void io_link_lost(void) {
@@ -787,6 +793,16 @@ static void setup(struct inst *i, const unsigned char *s) {
     if (rt == 0x21 && rq == 0x09 && r >= 2 + (int)sizeof detect && !memcmp(buf + 2, detect, sizeof detect))
         apple_seen(2, "iAP2's detect");
     if (iap2_mode && i->kind == K_HID && rt == 0x21 && rq == 0x09 && r > 0) {
+        /* A data stage shorter than asked, or not of the report named: on 2026-11-21 (q2muse-1125) a SET_REPORT of 14
+         * bytes came back after a 12.3 s stall as 8, 01 0b 00 00 01 00 00 00, the car's next request (SET_INTERFACE)
+         * read as data: the car had given the transfer up, its next request was never answered, and it sent nothing
+         * more. Not iAP2's bytes, and the control pipe out of step with the car: the link lost (the iPhone shown
+         * again, io_link_lost). */
+        if (seen && ((unsigned)r != want || buf[0] != (wv & 255))) {
+            logline(i->name, "SET_REPORT: not the report asked for (the car gave the transfer up)");
+            iap2_lost("link: lost (a request's data stage was not its report)");
+            return;
+        }
         iap2_report(buf, (unsigned)r);
         return;
     }

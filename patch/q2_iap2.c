@@ -195,6 +195,7 @@ static u8 syn_ack[48];
 static unsigned syn_ack_len, window, peer_max, max_sends, max_cacks, unacked;
 static long rto, cack, unacked_since; /* milliseconds; rto 0: never sent again */
 static long wire_busy_at; /* the last time reports were still waiting for the wire */
+static long heard_at, waiting_since; /* the car's last output report; since when something has waited (iap2_tick) */
 static int backlog(void) { return H && H->backlog ? H->backlog() : 0; }
 
 struct slot {
@@ -268,7 +269,15 @@ static void reset_link(void) {
     q_head = q_count = 0;
     last_ack = my_seq;
     cs_len = unacked = 0;
+    waiting_since = 0;
     iap2_control_reset();
+}
+
+/* The link given up on: said why, forgotten, and the host told (q2_iap.c io_link_lost: the iPhone shown again). */
+static void iap2_lost(const char *why) {
+    H->log(why);
+    reset_link();
+    if (H->link_lost) H->link_lost();
 }
 
 /* The car's SYN: its link parameters, the sessions after them. Retransmitted SYNs get the same answer. */
@@ -450,6 +459,7 @@ static int iap2_report(const u8 *r, unsigned len) {
         return 1;
     }
     if (!seen) return 0;
+    heard_at = H->now();
     if (first && !(rx_partial && !opens_packet(data, n))) rx_len = 0;
     rx_partial = 0;
     if (n > sizeof rx - rx_len) n = sizeof rx - rx_len;
@@ -1500,13 +1510,19 @@ static void iap2_tick(void) {
         long since = s->sent > wire_busy_at ? s->sent : wire_busy_at; /* when it can have reached the car */
         if (s->tries && now - since > rto) {
             if (s->tries >= max_sends) {
-                H->log("link: lost (a packet went unacknowledged through every retry)");
-                reset_link();
-                if (H->link_lost) H->link_lost();
+                iap2_lost("link: lost (a packet went unacknowledged through every retry)");
                 return;
             }
             send_slot(s);
         }
+    }
+    /* something waiting (a packet queued or unacknowledged, or reports not yet taken) and nothing from the car since
+     * it began, or since the car's last word, for link_quiet_ms (docs/iphone-mode.md#the-link-s-pace) */
+    if (!link_up || !(q_count || (rto && count) || bl)) waiting_since = 0;
+    else if (!waiting_since) waiting_since = now;
+    if (waiting_since && now - (heard_at > waiting_since ? heard_at : waiting_since) >= link_quiet_ms) {
+        iap2_lost("link: lost (nothing from the car with packets waiting)");
+        return;
     }
     if (q_count) pump(); /* the wire has room again */
     if (link_up && unacked && cack && now - unacked_since >= cack) send_ctl(CTL_ACK, 0, 0, my_seq);
