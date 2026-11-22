@@ -1822,5 +1822,73 @@ def test_up_next_of_server_songs_from_the_stream_cache(probe, tmp_path, monkeypa
         stop(p, fd)
 
 
+Q2CAR = pathlib.Path(__file__).resolve().parents[1]/'patch/q2car.sh'
+Q2CAR_CAR = '12.5 car host: car (Apple\'s C0 53), 604 ms after it addressed the Q2\n'
+Q2CAR_COMPUTER = '12.5 car host: computer (usbmux\'s C0 45), 13 ms after it addressed the Q2\n'
+
+
+# patch/q2car.sh's rotate (docs/iphone-mode.md#car-audio-in-the-image): a car's cable log kept as q2car.1.log, the older
+# ones moved up and the oldest going past CARLOG_MAX bytes or CARLOG_DAYS days; a computer's or a charger's never
+# pushes a car's out. The drive of 2026-11-22 lost three car cables' logs to the next car, a second drive and the
+# computer plugged in to read them, when the script kept three cables of any kind.
+@pytest.fixture
+def carlogs(tmp_path):
+    (tmp_path / 'run').mkdir()
+    (tmp_path / 'logs').mkdir()
+    return tmp_path
+
+
+def q2car_rotate(where):
+    env = dict(os.environ, Q2CAR_RUN=str(where / 'run'), Q2CAR_LOGDIR=str(where / 'logs'))
+    subprocess.run(['sh', str(Q2CAR), '_rotate'], env=env, check=True, timeout=30)
+
+
+def car_cable(where, text, dmesg=None):
+    """A cable's log as q2car.sh leaves it, then the next cable's start."""
+    (where / 'logs/q2car.log').write_text(text)
+    if dmesg is not None:
+        (where / 'logs/q2car.log.dmesg').write_text(dmesg)
+    q2car_rotate(where)
+
+
+def carlog_names(where):
+    return sorted(p.name for p in (where / 'logs').iterdir())
+
+
+def test_cars_kept_and_others_never_push_them_out(carlogs):
+    for i in range(4):
+        car_cable(carlogs, Q2CAR_CAR + f'car {i}\n', dmesg=f'dmesg {i}\n')
+    car_cable(carlogs, Q2CAR_COMPUTER)
+    car_cable(carlogs, '0.1 sh start: kernel 5.10.21+\n')  # a charger: no host spoke
+    assert carlog_names(carlogs) == ['q2car.1.log', 'q2car.1.log.dmesg', 'q2car.2.log', 'q2car.2.log.dmesg', 'q2car.3.log',
+                           'q2car.3.log.dmesg', 'q2car.4.log', 'q2car.4.log.dmesg', 'q2car.other.log']
+    assert (carlogs / 'logs/q2car.1.log').read_text().endswith('car 3\n')
+    assert (carlogs / 'logs/q2car.4.log').read_text().endswith('car 0\n')
+    assert (carlogs / 'logs/q2car.4.log.dmesg').read_text() == 'dmesg 0\n'
+    assert 'sh start' in (carlogs / 'logs/q2car.other.log').read_text()
+
+
+def test_the_oldest_go_past_the_size(carlogs):
+    big = Q2CAR_CAR + 'x' * (2 << 20)
+    for i in range(6):
+        car_cable(carlogs, big + f'\ncar {i}\n')
+    # each just over 2 MB: the fifth passes 10 MB, so it and the sixth go
+    assert carlog_names(carlogs) == ['q2car.1.log', 'q2car.2.log', 'q2car.3.log', 'q2car.4.log']
+    assert (carlogs / 'logs/q2car.1.log').read_text().endswith('car 5\n')
+    assert (carlogs / 'logs/q2car.4.log').read_text().endswith('car 2\n')
+
+
+def test_the_oldest_go_past_the_days_but_the_last_car_stays(carlogs):
+    car_cable(carlogs, Q2CAR_CAR + 'old\n')
+    week = time.time() - 9 * 86400
+    os.utime(carlogs / 'logs/q2car.1.log', (week, week))
+    car_cable(carlogs, Q2CAR_CAR + 'new\n')
+    assert carlog_names(carlogs) == ['q2car.1.log']
+    assert (carlogs / 'logs/q2car.1.log').read_text().endswith('new\n')
+    os.utime(carlogs / 'logs/q2car.1.log', (week, week))
+    car_cable(carlogs, Q2CAR_COMPUTER)
+    assert carlog_names(carlogs) == ['q2car.1.log', 'q2car.other.log']  # the only car's log, however old
+
+
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-q', *sys.argv[1:]]))

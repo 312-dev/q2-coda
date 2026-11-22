@@ -611,3 +611,22 @@ def test_car_audio_s_commands_are_read_every_pass_beside_the_daemon_s_pipe(fw, u
     q2.files[CMD] = b'22 scan 1\n'
     q2.tick(600)
     assert q2.files.pop(ACK) == b'22 0\n'
+
+
+def test_resume_and_pause_say_what_the_player_was_and_press_only_to_change_it(fw, ui, mcl, recs):
+    """The drive of 2026-11-22: the phone's resume, and the player paused 0.4 s later. Resume on a song playing
+    presses nothing (it is no toggle), and each says the player's status and what it did."""
+    from test_headset import said_on_stderr
+    q2 = Q2(fw, ui, recs)
+    said = said_on_stderr(fw, 'remote')
+    q2.queue()
+    q2.tick()
+    q2.files[CMD] = b'31 resume\n'
+    q2.tick()
+    assert fw.calls('player_play_pause') == [] and q2.files.pop(ACK) == b'31 0\n'
+    q2.status = 3
+    q2.files[CMD] = b'32 resume\n'
+    q2.tick()
+    assert len(fw.calls('player_play_pause')) == 1
+    assert said[-2:] == ['resume from the car or phone: the player 2, nothing pressed',
+                         'resume from the car or phone: the player 3, Play/Pause pressed'], said
