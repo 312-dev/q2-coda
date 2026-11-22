@@ -492,9 +492,11 @@ static void settle_preload(int wait) {
 /* ---- another source's sound for the car (feed.c, docs/iphone-mode.md#other-sources-over-usb) ----
  * With nothing of its own playing and the car's way the output, the player writes what q2video sent to the feed to the
  * car's PCM, at FEED_RATE, unity: the same PCM rules as a song's (a dry ring is the silence the never-stopped PCM
- * plays, output.c alsa_sw), and the same close (its silence written out first). A song, a click, another way or the
- * feed quiet for FEED_END_MS (the source ended, paused or gone) ends it. */
-enum { FEED_END_MS = 2000, FEED_TICK = 1024 };
+ * plays, output.c alsa_sw), and the same close (its silence written out first). Only FEED_LEAD_MS is written ahead of
+ * the car, as a scan's SCAN_LEAD_MS, not the PCM's half second: a video's sound then trails its picture by the FIFO,
+ * the ring and this lead, under 0.3 s. A song, a click, another way or the feed quiet for FEED_END_MS (the source
+ * ended, paused or gone) ends it. */
+enum { FEED_END_MS = 2000, FEED_TICK = 1024, FEED_LEAD_MS = 150 };
 static void feed_session(void) {
     struct ctl *c = &ctl;
     struct pcm_format f = {FEED_RATE, 2, 2, 0, DSD_PCM};
@@ -509,6 +511,11 @@ static void feed_session(void) {
         int other = c->play || c->click || car_way(c->outputway) != 3;
         pthread_mutex_unlock(&c->mu);
         if (other) break;
+        if (output_delay(out) > (int64_t)FEED_RATE * FEED_LEAD_MS / 1000) { /* far enough ahead of the car */
+            feed_pulling(); /* it is taking the frames: the source is paced, not dropped */
+            usleep(5000);
+            continue;
+        }
         int n = feed_take(buf, FEED_TICK);
         if (n > 0) {
             int w = output_write(out, buf, n);
@@ -517,6 +524,7 @@ static void feed_session(void) {
                 break;
             }
             if (w < 0) break;
+            car_trace_tick(out, 0); /* the car's trace for another source too (docs/iphone-mode.md#car-trace) */
             continue;
         }
         if (feed_heard_ms() > FEED_END_MS) break;

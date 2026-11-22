@@ -1859,6 +1859,30 @@ def test_car_feed_source_gone_leaves_the_song_resumable(player, songs, tmp):
     return 'the source ended, a1 after it'
 
 
+def test_car_feed_keeps_the_car_close_behind(player, songs, tmp):
+    """Radio's sound in the car runs at most FEED_LEAD_MS (150 ms) of PCM ahead of the car (engine.c feed_session), as a
+    scan does, not the PCM's whole half second: with the FIFO's 23 ms and the ring's 100 ms, under 0.3 s behind the
+    picture. The car trace's lines (a line a second here: a quiet window of 300 ms, looked at each second) give the
+    PCM's delay as each is made: never over the lead and one write, and the PCM never dry while the source flows."""
+    car, feed = tmp/'feedlead.audio', tmp/'feedlead.fifo'
+    car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    src, f = tone(6.0), Feeder(feed)
+    cp, s = car_player(), fakedemo.Session(tmp/'feedlead')
+    s.music = songs
+    s.run([(0.0, '{mcl-setoutputway\\1}'), (0.5, f.send(src)), (9.0, None)],
+          fakedemo.launch_host(cp, str(songs), 1, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16', 'Q2PLAYER_FEED': str(feed),
+                                                   'Q2PLAYER_CAR_QUIET_MS': '300'}), 1)
+    pcm = b''.join(p.read_bytes() for p in sorted((tmp/'feedlead/pcm').glob('*.raw')))
+    assert src in pcm, 'the source whole and in order'
+    lines = car_trace((tmp/'feedlead/player.log').read_text())
+    flowing = [l for l in lines[1:-1]]  # the first (the PCM filling) and the last (the source gone quiet) left out
+    assert len(flowing) >= 4, [(l['ms'], l['delay']) for l in lines]
+    worst = max(l['delay'] for l in flowing)
+    assert worst <= 44100 * 150 // 1000 + 1024, f'the PCM {worst} frames ({worst * 1000 // 44100} ms) ahead of the car'
+    assert not any(l['dry'] for l in flowing), [(l['delay'], l['dry']) for l in flowing]
+    return f'the PCM at most {worst * 1000 // 44100} ms ahead over {len(flowing)} windows, never dry'
+
+
 def test_car_feed_reader_sleeps_while_no_source_writes(player, songs, tmp):
     """The feed's reader (player/feed.c) waits in poll() with no timeout while nothing writes to the FIFO: q2player
     idle for 4 s makes one such poll and no timed-out one (it woke ten times a second, for the player's whole life).

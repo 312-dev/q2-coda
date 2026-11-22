@@ -10,8 +10,8 @@
  * source is paced by the car through the pipe; when nothing has taken a frame for FEED_IDLE_MS (the car not reading,
  * the player's own song playing), what comes is read and dropped at the source's own rate, so a source never blocks
  * for good and nothing grows. Between a source's write and the car: the FIFO's FEED_PIPE bytes, the ring's FEED_RING
- * frames and the car's own PCM buffer, about 0.5 s, which a video's picture leads by (q2video's clock is the q2car
- * device's, which holds nothing). The reader sleeps in poll() until a source writes: it never wakes on its own.
+ * frames and what the engine writes ahead in the car's PCM, FEED_LEAD_MS (engine.c), under 0.3 s in all, which a
+ * video's picture leads by (q2video's clock is the q2car device's, which holds nothing). The reader sleeps in poll() until a source writes: it never wakes on its own.
  * Q2PLAYER_FEED moves the FIFO for the host tests. */
 #include <errno.h>
 #include <fcntl.h>
