@@ -115,6 +115,14 @@ struct AVIOContext *grow_avio(struct grow *);
 void grow_seeking(struct grow *, int on); /* on while a seek searches: only the bytes there, no wait at their end */
 void grow_close(struct grow *);
 
+/* feed.c: other sources' sound for the car (docs/iphone-mode.md#other-sources-over-usb): a FIFO read into a ring */
+#define FEED_RATE 44100
+void feed_start(void);
+int feed_frames(void);                   /* frames waiting */
+int feed_take(uint8_t *out, int frames); /* up to frames of 16-bit stereo; how many */
+void feed_pulling(void);                 /* the car takes it, the ring dry: keep the source paced */
+int64_t feed_heard_ms(void);             /* since the last frames came, -1 never */
+
 /* output.c */
 struct output;
 struct output *output_open(const struct pcm_format *, int outputway, int hw);

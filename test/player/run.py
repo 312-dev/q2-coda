@@ -15,7 +15,7 @@ files in place of ALSA.
 - protocol: for each transcript in fixtures/ (stock's and Q2 Muse's hciplayer under qemu, captured by
   fakedemo.py), the same commands get the same events and answers from q2player.
 """
-import array, concurrent.futures, math, os, pathlib, re, struct, subprocess, sys, tempfile
+import array, concurrent.futures, math, os, pathlib, re, struct, subprocess, sys, tempfile, time
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -899,6 +899,8 @@ def test_alsa_sw_params(player, songs, tmp):
             'dry': 'r 0 forward 6378 avail_reads 1 writes 1', 'dry-usb': 'r 0 forward 45478 avail_reads 1 writes 1'}
     for k, v in want.items():
         assert lines[k] == f'{k} {v}', lines[k]
+    close = lines['car-close'].split()
+    assert int(close[2]) > 0 and close[4] == '1', f'way 3 closes on a write of silence: {lines["car-close"]}'
     bt = lines['dry-bt'].split()
     assert bt[1:7] == ['r', '0', 'forward', '-1', 'avail_reads', '0'], lines['dry-bt']
     # bluealsa's PCM gone under the stream (SelectCodec's new transport, docs/internals.md#bluetooth-link-monitor):
@@ -1687,6 +1689,120 @@ def test_crash_count(player, songs, tmp):
         assert re.search(rf'^\d{{4}}-\d\d-\d\dT\d\d:\d\d:\d\dZ \d+ E player q2player: crashed, signal 11, crash {n} in a row$',
                          (d/'player.log').read_text(), re.M), (d/'player.log').read_text()
     return 'three crashes, each counted, logged and the process ended by its signal'
+
+
+
+# ---- other sources for the car (player/feed.c, docs/iphone-mode.md#other-sources-over-usb): q2video's sound through
+# ALSA's q2car device, raw 44.1 kHz frames in a FIFO the player reads while its own song is stopped ----
+
+def tone(seconds, hz=441, rate=44100):
+    """16-bit stereo, a sine whose every frame differs from silence's but one in fifty"""
+    n = int(seconds * rate)
+    a = array.array('h', (int(12000 * math.sin(2 * math.pi * hz * i / rate)) for i in range(n) for _ in (0, 1)))
+    return a.tobytes()
+
+
+class Feeder:
+    """A source writing to the player's feed (as ALSA's file PCM does): blocking writes, so the player's reads pace it;
+    each run's start and end times (wall clock) noted."""
+    def __init__(self, path):
+        self.path, self.runs, self.pool = path, [], concurrent.futures.ThreadPoolExecutor(1)
+
+    def send(self, data):
+        def go():
+            t0 = time.monotonic()
+            with open(self.path, 'wb', buffering=0) as f:
+                for i in range(0, len(data), 4096):
+                    f.write(data[i:i + 4096])
+            self.runs.append((t0, time.monotonic()))
+        return lambda s: self.pool.submit(go)
+
+
+def feed_play(songs, tmp, name, steps, feed, car, speed=1):
+    cp = car_player()
+    s = fakedemo.Session(tmp/name)
+    s.music = songs
+    s.run(steps, fakedemo.launch_host(cp, str(songs), speed, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16',
+                                                             'Q2PLAYER_FEED': str(feed)}), speed)
+    pcm = sorted((tmp/name/'pcm').glob('*.raw'))
+    return [p.name.split('_', 1)[1] for p in pcm], [p.read_bytes() for p in pcm], (tmp/name/'player.log').read_text()
+
+
+def test_car_feed_reaches_the_car(player, songs, tmp):
+    """Radio (q2video's receiver) while the car takes the audio and nothing of the player's plays: its frames reach the
+    car's PCM at 44.1 kHz, whole and in order."""
+    car, feed = tmp/'feed1.audio', tmp/'feed1.fifo'
+    car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    src, f = tone(2.0), Feeder(feed)
+    steps = [(0.0, '{mcl-setoutputway\\1}'), (0.5, f.send(src)), (6.0, None)]
+    names, pcm, log = feed_play(songs, tmp, 'feed1', steps, feed, car)
+    assert names == ['44100_2_s16_car.raw'], (names, log[-600:])
+    assert src in pcm[0], f'{len(pcm[0]) // 4} frames, the tone whole and in order: {(first_difference(pcm[0], src) or 0) // 4}'
+    assert 'the car plays another source' in log
+    return f'{len(src) // 4} frames of the source in one car PCM of {len(pcm[0]) // 4}'
+
+
+def test_car_feed_hands_over_both_ways(player, songs, tmp):
+    """a1 on the car, stopped for Radio, Radio's frames, then a1 again: three car PCMs in turn, each closed on its
+    silence (no repeated period's buzz between), the source's frames whole in the middle one."""
+    car, feed = tmp/'feed2.audio', tmp/'feed2.fifo'
+    car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    src, f = tone(2.0, 330), Feeder(feed)
+    steps = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'),
+             (0.5, fakedemo.song('set-songurl', f'{songs}/a1.flac')), (3.0, '{mcl-stop\\null}'), (3.5, f.send(src)),
+             (8.5, fakedemo.song('set-songurl', f'{songs}/a1.flac')), (11.0, '{mcl-stop\\null}'), (12.0, None)]
+    names, pcm, log = feed_play(songs, tmp, 'feed2', steps, feed, car)
+    assert names == ['44100_2_s16_car.raw'] * 3, (names, log[-800:])
+    a1 = reference(songs/'a1.flac')
+    assert pcm[0][:44100 * 4] == a1[:44100 * 4] and pcm[2][:44100 * 4] == a1[:44100 * 4], 'a1, before and after'
+    assert src in pcm[1], 'the source between, whole'
+    return 'a1, the source, a1: three car PCMs (each closed on silence: test_alsa_sw_params car-close)'
+
+
+def test_car_feed_paused_is_silence_not_a_stall(player, songs, tmp):
+    """Radio paused (nothing written) for a second, then on: one PCM, not closed, the gap a dry spell, which a
+    device's never-stopped PCM plays as silence (output.c alsa_sw), the frames before and after it whole."""
+    car, feed = tmp/'feed3.audio', tmp/'feed3.fifo'
+    car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    a, b, f = tone(1.5, 441), tone(1.5, 551), Feeder(feed)
+    steps = [(0.0, '{mcl-setoutputway\\1}'), (0.5, f.send(a)), (3.0, f.send(b)), (7.0, None)]
+    names, pcm, log = feed_play(songs, tmp, 'feed3', steps, feed, car)
+    assert names == ['44100_2_s16_car.raw'], names
+    # the file sink writes only what it is given: the pause is the car trace's dry spell, the silence a device plays
+    assert pcm[0].index(a) == 0 and pcm[0].index(b) == len(a), (pcm[0].index(a), pcm[0].index(b))
+    dry = re.search(r'dry=1/(\d+)ms', log)
+    assert dry and 500 <= int(dry[1]) <= 2000, log[-400:]
+    return f'one PCM through the pause, {dry[1]} ms of it dry (silence on a device)'
+
+
+def test_car_feed_source_gone_leaves_the_song_resumable(player, songs, tmp):
+    """q2video dies mid-stream: the player waits FEED_END_MS on silence, closes the car's PCM on its silence, and a1
+    plays after it as ever; no hang."""
+    car, feed = tmp/'feed4.audio', tmp/'feed4.fifo'
+    car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    src, f = tone(1.0), Feeder(feed)
+    steps = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'),
+             (0.5, f.send(src)), (5.0, fakedemo.song('set-songurl', f'{songs}/a1.flac')), (8.0, '{mcl-stop\\null}'),
+             (9.0, None)]
+    names, pcm, log = feed_play(songs, tmp, 'feed4', steps, feed, car)
+    assert names == ['44100_2_s16_car.raw'] * 2, names
+    assert src in pcm[0] and 'the car\'s other source ended' in log
+    assert pcm[1][:44100 * 4] == reference(songs/'a1.flac')[:44100 * 4]
+    return 'the source ended, a1 after it'
+
+
+def test_car_feed_does_not_block_a_source_the_car_does_not_take(player, songs, tmp):
+    """The car's way not the output (Bluetooth's): the feed's frames are read and dropped at the source's own rate,
+    so a source writing 3 s of sound is done in about 3 s, never held, and nothing reaches any PCM."""
+    car, feed = tmp/'feed5.audio', tmp/'feed5.fifo'
+    src, f = tone(3.0), Feeder(feed)
+    steps = [(0.0, '{mcl-setoutputway\\1}'), (0.5, f.send(src)), (6.5, None)]
+    names, pcm, log = feed_play(songs, tmp, 'feed5', steps, feed, car)
+    assert names == [], names
+    assert len(f.runs) == 1, 'the source finished'
+    took = f.runs[0][1] - f.runs[0][0]
+    assert 1.5 < took < 4.5, f'{took:.2f} s for 3 s of sound'
+    return f'3 s of sound dropped in {took:.2f} s'
 
 
 def main():
