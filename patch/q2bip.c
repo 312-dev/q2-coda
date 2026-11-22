@@ -2,7 +2,8 @@
  * channel in Enhanced Retransmission Mode, which OBEX over L2CAP requires, serves one controller at
  * a time through q2bip_core.c, and makes the 200 x 200 JPEG a controller asks for from the cover
  * demo's payload names in BT_COVER_FILE (patch/bt_cover.c), with stock's ffmpeg, the first time a
- * handle is asked for. bluealsa2, stock's Bluetooth launcher, starts it; it ends with that script
+ * handle is asked for, each fetch a line of the unified log on its stderr (note). bluealsa2, stock's
+ * Bluetooth launcher, starts it; it ends with that script
  * (PR_SET_PDEATHSIG), which ends when Bluetooth is turned off.
  *
  * One thread, asleep in accept() or recv() unless a car is fetching: nothing polls. */
