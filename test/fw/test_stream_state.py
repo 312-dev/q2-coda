@@ -251,3 +251,26 @@ def test_repeat_all_names_whole_songs_never_one_still_to_land(fw, mcl, songs, ad
     assert D4 not in ahead and set(ahead) <= {A, B, C3}, ahead
     if not advanced:
         assert ahead == [A, B]  # the next pass from the queue's first
+
+
+
+def test_a_queue_file_past_256_kb_is_read_only_that_far(fw, mcl, songs):
+    """addon.c reads a session's playlist file to M3U_MAX (256 KB), its cut last line dropped: songs named past it
+    are never queued and Up Next never lists them (addon_pending, the same read as m3u_songs). A 9,199-song
+    Shuffle's cache paths are about 1 MB; q2-subsonic writes a window of the list, QUEUE_AHEAD (1,000) songs past
+    the one playing, so the file stays well inside it. This is the firmware's side of that contract."""
+    first = A
+    rest = [b'/mnt/mmc/.foo/stream/11c3e037/original/f%02d/a song title long as the user\'s are %04d '
+            b'[VdsIsB1X5aqa0jZXUmsd5M].flac' % (i // 100, i) for i in range(3000)]
+    s = playlist(fw, mcl, songs, first, *rest)
+    s.land(first)
+    s.play(b'7 ' + PLAYLIST + b'\n')
+    s.step()
+    s.step()
+    assert s.queued() == [first]
+    n = C.c_uint(0)
+    fw.fn('addon_pending', C.c_void_p, C.c_uint, C.POINTER(C.c_uint))(10000, C.byref(n))  # left: freeing needs stock's
+    body = s.world.files[PLAYLIST]
+    fits = body[:256 << 10].count(b'\n') - 2  # the #EXTM3U line and A's
+    assert len(body) > 256 << 10 and 2000 < fits < 3000
+    assert n.value == fits, (n.value, fits)
