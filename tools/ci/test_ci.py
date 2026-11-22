@@ -1255,3 +1255,31 @@ def test_rebuild_reuses_only_a_build_of_the_same_inputs(tmp_path, monkeypatch, c
     assert len(builds) == 1 and 'reused' in go('--', '--build-iroh').err and len(builds) == 1
     (crate/'src/main.rs').write_text('fn main() { println!("changed"); }\n')
     assert 'reused' not in go('--', '--build-iroh').err and len(builds) == 2
+
+
+def test_a_remote_change_plans_what_reads_it_not_everything():
+    """remote/ had no rule, so a one-line edit to the iroh sidecar or the coda-rc proto planned every suite,
+    test/player/run.py's ten minutes among them. What reads it: tools/iroh.py's PIN of the crate (test_iroh.py),
+    the build that refuses an unpinned crate (test/build.py), and the proto's tables (test_coda_rc*.py)."""
+    plan = json.loads(affected.plan_for({'remote/iroh-sidecar/src/main.rs': {1}}, REPO).to_json())
+    assert not gate.everything(plan) and not plan['patch'] and not plan['fw']
+    assert plan['unit'] == ['test_iroh.py'] and 'test/build.py' in plan['other']
+    plan = json.loads(affected.plan_for({'remote/coda-rc.proto': {1}}, REPO).to_json())
+    assert not gate.everything(plan) and plan['unit'] == ['test_coda_rc.py', 'test_coda_rc_lib.py']
+    # a remote/ file no rule names still runs everything
+    assert gate.everything(json.loads(affected.plan_for({'remote/other/x.go': {1}}, REPO).to_json()))
+
+
+def test_every_unit_file_that_reads_remote_is_in_its_rule():
+    """A test/unit file that names a remote/ path is planned by REMOTE's rule for it."""
+    for path in sorted((REPO/'test/unit').glob('test_*.py')):
+        for ref in sorted(set(re.findall(r"remote/[\w./-]+", path.read_text()))):
+            unit, _ = next((v for k, v in affected.REMOTE.items() if ref.startswith(k) or k.startswith(ref)), (set(), ()))
+            assert path.name in unit, f'{path.name} reads {ref}, which REMOTE does not plan it for'
+
+
+@pytest.mark.parametrize('branch, whole', [('integ/q2-1128', True), ('release/p32', True), ('main', True),
+                                           ('fix/integ-thing', False), ('integrate-x', False)])
+def test_integration_branches_are_the_ones_the_docs_name(branch, whole):
+    """docs/orchestration.md and CLAUDE.md name integration branches integ/*, the integrator's."""
+    assert bool(affected.INTEGRATION.match(branch)) == whole

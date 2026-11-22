@@ -6,7 +6,7 @@
     python3 tools/ci/affected.py --run BUILD          # and run it, the suites at once (test/patch.py in one process)
     python3 tools/ci/affected.py --all --run BUILD    # everything: what an integration branch runs
 
-A feature branch runs what its files map to; an integration branch (release/*, main) runs everything, as
+A feature branch runs what its files map to; an integration branch (release/*, integ/*, main) runs everything, as
 does any branch whose changes include a file no rule knows (`RULES`: an unknown file means all). The
 mapping is conservative: a change to the payload (patch/, a build input in tools/, assets/) runs all of
 test/patch.py, which executes the payload as one program. What gets narrowed:
@@ -25,6 +25,8 @@ test/patch.py, which executes the payload as one program. What gets narrowed:
 - a file in a tools/ folder a rule knows (`TOOL_DIRS`) runs the tests that read that folder: tools/uac1_module/
   the module's pin, build and tests, tools/iap_probe/ the probe's; a file in any other tools/ folder runs
   everything, and tools/ci/ runs the CI tools' own tests;
+- a remote/ file a rule knows (`REMOTE`) runs the tests that read it: remote/iroh-sidecar/ the sidecar's pin and
+  the build, remote/coda-rc.proto the protocol's tables; any other remote/ file runs everything;
 - a test file runs itself;
 - a .py under tools/ or test/unit/ also runs gate.py's mypy-tools suite, one under test/fw/ mypy-fw, and
   pyproject.toml (the mypy config) both: the merge queue runs them, so a plan without them passes here and is
@@ -84,6 +86,15 @@ TOOL_DIRS = {
     # devices. Nothing here goes into an image.
     'iap_probe': ({'test_iap_tools.py'}, ('test/iap_probe.py',)),
 }
+# remote/ paths a rule knows (a file or a folder's prefix; any other remote/ file runs everything): (the test/unit
+# files that read them, the test/X.py suites that do). Nothing here is in source_sha256 or compiled into the payload.
+REMOTE = {
+    # the iroh sidecar's crate: tools/iroh.py hashes it into PIN (test_iroh.py fails on a crate edit with a stale pin)
+    # and the build stops when the crate is not the pinned one, or with --build-iroh builds it (test/build.py)
+    'remote/iroh-sidecar/': ({'test_iroh.py'}, ('test/build.py',)),
+    # coda-rc's wire format: its message table against patch/coda_rc.h and the library's tags
+    'remote/coda-rc.proto': ({'test_coda_rc.py', 'test_coda_rc_lib.py'}, ()),
+}
 # test/coverflow.py compiles patch/coverflow*.c and .h on the host with stand-ins for the behaviour of home.c,
 # page_parallax.c and playlist_art.c, so a change to any of these plans it (in `other`). It is one of
 # gate.PLANNED, which a plan that runs everything also names.
@@ -100,7 +111,7 @@ MYPY_CONFIG = 'pyproject.toml'
 STOCK_SITES = 'test/stock_sites.py'
 SITENOTES = 'docs/rebasing/sitenotes.py'
 SMOKE = 'smoke'  # tools/ci/smoke.py: optional here (run with --smoke), the post tier's on the trunk
-INTEGRATION = re.compile(r'^(release/|integrate/|main$|master$)')
+INTEGRATION = re.compile(r'^(release/|integ/|main$|master$)')  # integ/*: the integrator's (docs/orchestration.md)
 # test/unit files that check a rule over every file of a folder: (folder, suffixes or None for any, test).
 # A change there runs the test whatever else the file maps to. tools/ci/test_ci.py checks that each folder a
 # test/unit file globs is here.
@@ -288,6 +299,13 @@ def plan_for(changes, root=ROOT, patch_source=None):
             elif stem in IMAGE_INPUTS and suffix == '.py':
                 p.other.add('test/build.py')
                 p.why.append(f'{path}: a file the build puts in the image (test/build.py)')
+        elif parts[0] == 'remote' and (rule := next((v for k, v in REMOTE.items() if path.startswith(k)), None)):
+            unit, scripts = rule
+            have = {u for u in unit if (root/'test/unit'/u).exists()}
+            p.add('unit', have or ALL, f'{path}: test/unit ' + (', '.join(sorted(have)) if have else 'all'))
+            p.other.update(s for s in scripts if (root/s).exists())
+            if scripts:
+                p.why.append(f'{path}: ' + ', '.join(s for s in scripts if (root/s).exists()))
         elif parts[:2] == ('tools', 'ci'):
             p.other.update({'tools/ci/test_ci.py', 'tools/ci/test_orch.py'})
             p.why.append(f'{path}: the CI tools\' own tests')
