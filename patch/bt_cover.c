@@ -3,12 +3,14 @@
  * cover's image handle (seven digits), a newline, the cover's path and a newline, or removed when
  * the song has no cover. bluetoothd's GetElementAttributes reads the handle (tools/bt_meta.c,
  * AVRCP's attribute 8) and q2-bip the path (patch/q2bip.c), so both speak of this song. The cover
- * is Cover Flow's cached copy for the song's artist and album, else cover.jpg, folder.jpg or
- * front.jpg beside the song, as iPhone mode looks (patch/q2_iap.c io_artwork). The handle is that
- * file's key, so it changes when the cover does and songs of one album share it: a car that has
- * the album's cover fetches nothing at the next song. ponytail: a server song whose cover only its
- * app has shows none here; iPhone mode finds it by the song's catalogue row (q2_iap_lib.c
- * lib_app_cover), and album_cover.c's catalogue_cover would name it. */
+ * is the first there of: Cover Flow's cached copy for the song's artist and album; for a server
+ * song, the cover its app keeps (catalogue.c catalogue_cover, what Now Playing shows); cover.jpg,
+ * folder.jpg or front.jpg beside the song, as iPhone mode looks (patch/q2_iap.c io_artwork); and
+ * a FLAC's own picture, the song file itself, which q2-bip's ffmpeg reads the attached picture of.
+ * The handle is a file's key, so it changes when the cover does and songs of one album share it
+ * (a song's own picture is keyed by its album): a car that has the album's cover fetches nothing
+ * at the next song. ponytail: an MP3's or M4A's own picture is not looked for; a sniff of ID3v2's
+ * APIC or MP4's covr would add them. */
 #include "navigation.h"
 
 #define BT_COVER_FILE "/tmp/q2-bip.now" /* BT_COVER_FILE in tools/build.py */
@@ -17,6 +19,26 @@
 extern unsigned tags_key(const char *artist, const char *album);
 extern char *art_path(char *out, unsigned key, const char *suffix);
 
+/* Whether path is a FLAC with a PICTURE block among its first BT_FLAC_BLOCKS metadata blocks: the
+ * headers alone are read, each block's length skipped, never the audio. */
+#define BT_FLAC_BLOCKS 64
+static int flac_picture(const char *path) {
+    unsigned char h[4];
+    void *f = fopen(path, "rb");
+    int found = 0;
+    if (f && fread(h, 1, 4, f) == 4 && !memcmp(h, "fLaC", 4))
+        for (unsigned i = 0; i < BT_FLAC_BLOCKS && fread(h, 1, 4, f) == 4; ++i) {
+            if ((h[0] & 127) == 6) {
+                found = 1;
+                break;
+            }
+            if (h[0] & 128 || fseek(f, (long)(h[1] << 16 | h[2] << 8 | h[3]), 1))
+                break; /* the last block, or none to seek to */
+        }
+    if (f) fclose(f);
+    return found;
+}
+
 /* id3: the playing song's tags (ID3_ARTIST, ID3_ALBUM), path its file */
 void bt_cover_note(const char *id3, const char *path) {
     static const char *const beside[] = { "cover.jpg", "folder.jpg", "front.jpg" };
@@ -24,10 +46,15 @@ void bt_cover_note(const char *id3, const char *path) {
     unsigned key = tags_key(id3 + ID3_ARTIST, id3 + ID3_ALBUM), have;
     const char *slash = strrchr(path, '/');
     have = id3[ID3_ALBUM] && !access(art_path(cover, key, ""), 0);
+    if (!have && (have = catalogue_cover(path, cover, sizeof cover))) key = tags_key("", cover);
     for (unsigned i = 0; !have && slash && i < sizeof beside / sizeof *beside; ++i) {
         tk_snprintf(cover, sizeof cover, "%.*s/%s", (int)(slash - path), path, beside[i]);
         have = !access(cover, 0);
         key = tags_key("", cover); /* no album's key: the file's own */
+    }
+    if (!have && (have = flac_picture(path))) {
+        tk_snprintf(cover, sizeof cover, "%s", path);
+        key = id3[ID3_ALBUM] ? tags_key(id3 + ID3_ARTIST, id3 + ID3_ALBUM) : tags_key("", path);
     }
     void *f = have ? fopen(BT_COVER_FILE ".tmp", "wb") : 0;
     if (!f) {

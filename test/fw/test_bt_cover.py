@@ -1,6 +1,7 @@
 """bt_cover.c (docs/internals.md#bluetooth-cover-art): the playing song's image handle and cover in /tmp/q2-bip.now,
 which bluetoothd's GetElementAttributes (tools/bt_meta.c) and q2-bip read: Cover Flow's cached copy for the song's
-artist and album, else a cover beside the song, else no file; a handle that changes exactly when the cover does."""
+artist and album, else the app's cover for a server song, else a cover beside the song, else a FLAC's own picture,
+else no file; a handle that changes exactly when the cover does."""
 import ctypes as C
 
 import pytest
@@ -96,3 +97,53 @@ def test_guest_play_sets_the_owners_cover_aside(fw):
     assert c.hold(1) is None  # the car is told of the guest's song: no cover of the owner's
     assert c.hold(0) == mine  # and the owner's again
     assert c.hold(0) == mine
+
+
+def flac(picture=True, blocks_after=0):
+    """A FLAC's start: STREAMINFO, then a PICTURE (a front cover, image/jpeg), then padding blocks; the audio after
+    the last is left out, as nothing past the metadata is read."""
+    def block(kind, body, last):
+        return bytes([kind | (128 if last else 0)]) + len(body).to_bytes(3, 'big') + body
+    pic = (3).to_bytes(4, 'big') + (10).to_bytes(4, 'big') + b'image/jpeg' + (0).to_bytes(4, 'big') + bytes(16) + \
+        (4).to_bytes(4, 'big') + b'\xff\xd8\xff\xd9'
+    out = [block(0, bytes(34), False)] + [block(1, bytes(8), False) for _ in range(blocks_after)]
+    out.append(block(6, pic, True) if picture else block(1, bytes(4), True))
+    return b'fLaC' + b''.join(out)
+
+
+STREAMED = '/mnt/mmc/.subsonic/stream/11c3e037/original/f/ribs [0S2sKobzoSngoRjq2oIqxT].flac'
+
+
+def test_a_song_with_only_its_own_picture_names_itself_by_its_albums_key(fw):
+    """The drive of 2026-11-22: a server song streamed from the app's cache (Lorde's Pure Heroine) has its cover in
+    the FLAC alone, Cover Flow keeps no copy and the app had fetched none, so the file was removed and the car went
+    on showing the last cover it was given, the first song's. The song itself is the cover (q2-bip's ffmpeg takes its
+    attached picture), its handle the album's key, so the album's songs share it."""
+    c = Cover(fw)
+    c.files.files[STREAMED] = flac(blocks_after=2)
+    want = b'%07d\n%s\n' % (key('Lorde', 'Pure Heroine') % 10**7, STREAMED.encode())
+    assert c.play(STREAMED, 'Lorde', 'Pure Heroine') == want
+    other = STREAMED.replace('ribs [0S2', 'buzzcut season [RjY')
+    c.files.files[other] = flac()
+    assert c.play(other, 'Lorde', 'Pure Heroine') == want.replace(STREAMED.encode(), other.encode())
+
+
+def test_a_song_s_own_picture_without_an_album_is_its_own_key(fw):
+    c = Cover(fw)
+    c.files.files['/mnt/mmc/x/1.flac'] = flac()
+    assert c.play('/mnt/mmc/x/1.flac') == b'%07d\n/mnt/mmc/x/1.flac\n' % (key('', '/mnt/mmc/x/1.flac') % 10**7)
+
+
+@pytest.mark.parametrize('data', [flac(picture=False), b'ID3\x03' + bytes(40), b'fLaC', b''])
+def test_a_song_with_no_picture_of_its_own_still_has_none(fw, data):
+    c = Cover(fw, [flow('A', 'B')])
+    assert c.play('/mnt/mmc/x/0.flac', 'A', 'B')  # a cover first, which the next song must not keep
+    c.files.files['/mnt/mmc/y/1.flac'] = data
+    assert c.play('/mnt/mmc/y/1.flac', 'C', 'D') is None
+
+
+def test_cover_flows_copy_comes_before_the_songs_own_picture(fw):
+    art = flow('A', 'B')
+    c = Cover(fw, [art])
+    c.files.files['/mnt/mmc/x/1.flac'] = flac()
+    assert c.play('/mnt/mmc/x/1.flac', 'A', 'B').endswith(art.encode() + b'\n')

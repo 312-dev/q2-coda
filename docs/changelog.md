@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: a car now shows the cover of the song playing for server songs and for songs whose only cover is the one inside the file. It went on showing the last cover it had been given, often the first song's.
   - Bluetooth: a car or phone that asks the Q2 for its name now gets Q2 Muse (or the name you chose) after the Q2 starts up. Until Bluetooth was restarted it answered with the radio chip's own RT_BT.
   - Car Audio: unplugging from the car pauses the music, as an iPod does, unless headphones are in or a Bluetooth headset is connected, where it carries on. It used to play on silently through the headphone output with nothing plugged in, draining the battery.
   - Car Audio: the car no longer goes silent for the rest of the drive once the library has finished sending to it. Saving the note of what the car holds held the Q2 up for 12 seconds, long enough for the car to give up on the connection; it is now saved in the background, and a connection that goes quiet, or that the car gives up on, makes the Q2 reconnect by itself.

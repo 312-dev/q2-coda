@@ -53,8 +53,8 @@ int bt_name_valid(const char *s) {
  * bluetoothd and the controller answer, as demo starts them a moment before. The second write is
  * for the controller alone: at boot openBluetooth's `hciconfig hci0 reset` fails ("Can't init
  * device hci0: Function not implemented (89)") and leaves the RTL8733BS answering a name request
- * with its ROM's RT_BT while BlueZ holds the right name, and BlueZ writes nothing for an Alias of ""
- * with none stored or for one it already has (docs/internals.md#bluetooth-name). */
+ * with its ROM's RT_BT while BlueZ holds the right name, and BlueZ writes nothing for an Alias of
+ * "" with none stored or for one it already has (docs/internals.md#bluetooth-name). */
 void bt_name_apply(void) {
     char raw[BT_NAME_MAX * 2 + 2] = "", name[BT_NAME_MAX + 1], cmd[640];
     toolsReadConfig("/mnt/data/config.ini", "Q2POD", BT_NAME_KEY, raw, "");
