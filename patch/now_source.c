@@ -112,6 +112,18 @@ void *now_song(unsigned *at, unsigned *n, int *pressed) {
     return r ? r : queue_now(at, n);
 }
 
+/* Stock's Now Playing update (playing_page_update, 0x53cf08) reads the state and the time through
+ * these, where it called mclGetPlayStatus and player_playtime_and_length (tools/build.py
+ * NP_TIME_CALLS): stopped, it writes 0 to the bar and both times. Held (now_hold) the player is
+ * stopped, so they answer the held song paused at its second, and the bar and the elapsed time show
+ * where Play will go on from. Otherwise they are stock's two calls. */
+int now_page_status(void) { return np.held ? 3 : mclGetPlayStatus(); }
+int now_page_time(int *sec, int *total) {
+    if (!np.held) return player_playtime_and_length(sec, total);
+    *sec = np.held_sec, *total = np.held_total;
+    return 0;
+}
+
 /* Radio (radio_tuner.c tuner_open), an Internet Radio station (radio.c radio_play) or a video
  * (videos.c video_play) takes the output: the Library's song, playing or paused, is stopped with
  * its place kept (player_save_stop; a paused q2player would keep the PCM they need, and stock's

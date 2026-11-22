@@ -338,6 +338,8 @@ typedef struct {
 } now_info;
 void now_get(now_info *n), now_poll(void);
 int now_owner(void), now_status(void), now_scrobbles(void), now_time(int *sec, int *total);
+/* stock's Now Playing update reads through these (tools/build.py NP_TIME_CALLS) */
+int now_page_status(void), now_page_time(int *sec, int *total);
 void *now_song(unsigned *at, unsigned *n, int *pressed);
 void bt_cover_hold(int held); /* bt_cover.c */
 
