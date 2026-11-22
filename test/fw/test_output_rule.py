@@ -9,6 +9,9 @@ from conftest import O
 from test_radio import Vid, page as radio_page, play as radio_station, rd
 from test_radio_tuner import TUNER, Tuner
 from test_usb_car import auto, state
+from test_nav_library_pages import ui  # noqa: F401
+from test_nav_hold import recs  # noqa: F401
+from test_now_source import Car
 
 KEY_PLAY = O['KEY_PLAY']
 
@@ -163,3 +166,19 @@ def test_radio_s_page_does_not_open_with_nothing_to_play_to(fw):
     assert fw.fn('tuner_open', C.c_int, C.c_void_p, C.c_void_p)(None, None) == 0
     assert asked == [0] and forks == [] and fw.var('radio_tuner__rt', C.c_void_p).value is None
     assert fw.fn('tuner_state', C.c_int)() == 0
+
+
+@pytest.mark.parametrize('forbidden', [1, 0])
+def test_one_refusal_and_one_toast_when_there_is_no_output_and_the_car_has_the_usb(fw, ui, mcl, recs, forbidden):
+    """Radio's start with Car Audio on the cable and the car's file there (videos.c car_takes_audio refuses it): with no
+    output at all, stock's gate refuses first (its own message) and the car's toast never shows; with an output, the
+    car's refusal alone, its toast once."""
+    car = Car(fw, ui, recs)
+    fw.fn('usb_car_start', None)()
+    car.files['/tmp/q2-iap.audio'] = b'hw:CARD=UAC1Gadget,0\n44100\n'
+    fw.mock('fw_access', lambda path, *_: 0 if C.string_at(path).decode() in car.files else -1)
+    asked = forbid(fw, forbidden)
+    fw.mock('fw_fork', lambda *_: 4242)
+    assert fw.fn('tuner_open', C.c_int, C.c_void_p, C.c_void_p)(None, None) == 0
+    assert asked == [0] and not fw.calls('fw_fork')
+    assert ui.toasts == ([] if forbidden else ["Plays on the Q2 only, not over the car's USB"])
