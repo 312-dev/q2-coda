@@ -14,8 +14,14 @@ files in place of ALSA.
   paused (docs/internals.md#player-status-push).
 - protocol: for each transcript in fixtures/ (stock's and Q2 Muse's hciplayer under qemu, captured by
   fakedemo.py), the same commands get the same events and answers from q2player.
+
+The tests and the fixtures run side by side, WIDTH at once, each in a folder of its own (AFTER's reader in its
+writer's), as each mostly waits on a player running in real time or faster; then SERIAL's, one at a time: the tests
+that bound real-time behaviour or read the host's /tmp, each tried again (TRIES in all) when it failed on a run the
+machine starved (Stalls). Each line gives the test's seconds, and the run ends with the side-by-side part's and the
+whole run's.
 """
-import array, concurrent.futures, math, os, pathlib, re, struct, subprocess, sys, tempfile, time
+import array, concurrent.futures, functools, math, os, pathlib, re, struct, subprocess, sys, tempfile, threading, time
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -999,6 +1005,7 @@ def test_bt_resample_96_48(player, songs, tmp): return check_bt_split(player, so
 def test_bt_resample_44_96(player, songs, tmp): return check_bt_split(player, songs, tmp, 'bt-pair', 'bt-whole', 'whole.wav', 96000, 3840000)
 
 
+@functools.cache
 def car_player():
     """The player built with Car Audio's output (Q2_CAR_USB, as every image's is: docs/iphone-mode.md#car-audio)."""
     return subprocess.run([sys.executable, ROOT/'tools/player.py', 'build', 'host', 'car'], check=True, capture_output=True,
@@ -1827,24 +1834,96 @@ def test_car_feed_does_not_block_a_source_the_car_does_not_take(player, songs, t
     return f'3 s of sound dropped in {took:.2f} s'
 
 
+# Tests that read another's output, run after it in its folder: {test: the test whose folder it reads}.
+AFTER = {'test_exact_mp3_no_step_at_the_cut': 'test_exact_mp3_gapless'}
+# Tests that run alone, after everything else, each tried again when it failed on a run the machine starved:
+# those whose assertions bound what happens in real time (a scan's 150 ms turn, a feed's 3 s of sound, the car trace's
+# lines a second, a preload's opening against the song's end, the clicks' 130 ms mute), each failed side by side
+# (2026-11-22), and the one that asserts on the host's own /tmp/notsupport, which any player whose song fails writes.
+SERIAL = ('test_scan', 'test_car_trace', 'test_car_feed_reaches_the_car', 'test_car_feed_hands_over_both_ways',
+          'test_car_feed_paused_is_silence_not_a_stall', 'test_car_feed_source_gone_leaves_the_song_resumable',
+          'test_car_feed_does_not_block_a_source_the_car_does_not_take', 'test_preload_outrun', 'test_click_idle',
+          'test_a_failure_already_replaced_is_not_reported')
+WIDTH = 12  # tests and fixtures side by side: each mostly waits on a player running in real time or faster
+STALL_S = 0.1  # a 5 ms sleep that took this much longer: the machine did not run this process (measured: 650 ms under
+               # a nice-19 job on a busy core, under 10 ms when the core is shared fairly)
+TRIES = 3
+
+
+class Stalls:
+    """The longest this process went unscheduled while it ran, from a thread sleeping 5 ms at a time."""
+    def __enter__(self):
+        self.worst, self.done = 0.0, False
+        def watch():
+            while not self.done:
+                t = time.monotonic(); time.sleep(0.005); self.worst = max(self.worst, time.monotonic() - t - 0.005)
+        self.thread = threading.Thread(target=watch, daemon=True); self.thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self.done = True; self.thread.join()
+
+
+def timed(f, *args):
+    """f(*args)'s answer or AssertionError, and its seconds: (ok, text, seconds)."""
+    t = time.monotonic()
+    try: return True, f(*args), time.monotonic() - t
+    except AssertionError as e: return False, str(e), time.monotonic() - t
+
+
+def chain(n, names, player, songs, tmp):
+    """The tests names, one after another in folder tmp/c<n> (AFTER's reader after its writer; short, as the player's
+    socket path under it must fit a sockaddr_un): [(name, ok, text, s)]."""
+    d = tmp/f'c{n}'; d.mkdir()
+    return [(n, *timed(globals()[n], player, songs, d)) for n in names]
+
+
+def alone(name, player, songs, tmp):
+    """A SERIAL test, run again (TRIES in all) when it failed on a run the machine starved: (ok, text, s)."""
+    for attempt in range(1, TRIES + 1):
+        d = tmp/f's{SERIAL.index(name)}-{attempt}'; d.mkdir()
+        with Stalls() as stalls:
+            ok, text, secs = timed(globals()[name], player, songs, d)
+        if ok or stalls.worst < STALL_S:
+            break
+        print(f'again {name}: failed while starved for {stalls.worst * 1000:.0f} ms ({text[:200]})', flush=True)
+    if not ok and stalls.worst >= STALL_S:
+        text += f' (every try starved, the last for {stalls.worst * 1000:.0f} ms)'
+    return ok, text, secs
+
+
+def report(name, ok, text, secs):
+    print(f'{"ok  " if ok else "FAIL"} {name} ({secs:.1f} s): {text}', flush=True)
+    return 0 if ok else 1
+
+
 def main():
     only = sys.argv[sys.argv.index('-k') + 1] if '-k' in sys.argv else ''
     player = subprocess.run([sys.executable, ROOT/'tools/player.py', 'build', 'host'], check=True, capture_output=True, text=True).stdout.strip()
+    car_player()  # built once here, so the tests that run it side by side never build it at the same time
     songs = music.make(CACHE/'music')
-    failed = 0
+    failed, start = 0, time.monotonic()
     with tempfile.TemporaryDirectory(prefix='q2player-') as t:
         tmp = pathlib.Path(t)
-        tests = [(n, f) for n, f in globals().items() if n.startswith('test_') and only in n]
-        for n, f in tests:
-            try: print(f'ok   {n}: {f(player, songs, tmp)}')
-            except AssertionError as e: failed += 1; print(f'FAIL {n}: {e}')
+        tests = [n for n in globals() if n.startswith('test_') and only in n]
+        chains = [[n, *(r for r, w in AFTER.items() if w == n and r in tests)] for n in tests
+                  if n not in SERIAL and (n not in AFTER or AFTER[n] not in tests)]
         fixtures = [f for f in sorted((HERE/'fixtures').glob('*.txt')) if only in 'protocol-' + f.stem and f.stem not in KNOWN]
-        with concurrent.futures.ThreadPoolExecutor(8) as pool:  # each plays in real time, so side by side
-            for f, r in [(f, pool.submit(check_protocol, player, songs, tmp, f)) for f in fixtures]:
-                try: print(f'ok   protocol {f.stem}: {r.result()}')
-                except AssertionError as e: failed += 1; print(f'FAIL protocol {f.stem}: {e}')
+        with concurrent.futures.ThreadPoolExecutor(WIDTH) as pool:
+            jobs = [pool.submit(chain, i, c, player, songs, tmp) for i, c in enumerate(chains)]
+            runs = [(f, pool.submit(timed, check_protocol, player, songs, tmp, f)) for f in fixtures]
+            for job in jobs:
+                for result in job.result():
+                    failed += report(*result)
+            for f, r in runs:
+                failed += report(f'protocol {f.stem}', *r.result())
+        print(f'side by side: {time.monotonic() - start:.1f} s', flush=True)
+        for n in tests:
+            if n in SERIAL:
+                failed += report(n, *alone(n, player, songs, tmp))
         for name, why in KNOWN.items():
             if only in 'protocol-' + name: print(f'skip protocol {name}: {why}')
+    print(f'all: {time.monotonic() - start:.1f} s', flush=True)
     sys.exit(1 if failed else 0)
 
 
