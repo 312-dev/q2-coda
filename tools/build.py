@@ -315,8 +315,9 @@ RADIO_DATA = 'usr/share/q2radio'
 RADIO_TABLES = ('stations.bin', 'zcta.bin')
 # Card apps the firmware carries (docs/internals.md#bundled-apps): id -> (version, release zip, its size, its
 # SHA-256, builtin), each the zip its release ships, read from --apps (APPS_DIR). Its .<id>/ files go
-# to BUNDLED_DIR/<id> (patch/addon.c BUNDLED) with a version file and bundled_launcher's run in place of the
-# app's, so the app keeps its data in the card's .<id>. builtin: the firmware's copy is the only one that runs
+# to BUNDLED_DIR/<id> (patch/addon.c BUNDLED) with a version file, a bundle file naming the zip and the program's
+# SHA-256 (bundle_record), and bundled_launcher's run in place of the app's, so the app keeps its data in the
+# card's .<id>. builtin: the firmware's copy is the only one that runs
 # and the App Store never lists the app (a builtin file holding 1 beside it, patch/addon.c addon_builtin), so its
 # updates are firmware updates. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
@@ -1588,12 +1589,32 @@ def bundled_app(app_id, apps_dir):
         files = {n[len(prefix):]: z.read(n) for n in z.namelist() if n.startswith(prefix) and not n.endswith('/')}
     need_files = {f'q2-{app_id}', 'run', 'q2app'}
     check(need_files <= set(files) and all('/' not in n for n in files), f'Unexpected files in {name}')
+    check('builtin' not in files and 'bundle' not in files, f'Unexpected files in {name}')
+    commit = re.search(r'-([0-9a-f]{7,40})(-dirty)?\.zip$', name)
+    check(not (commit and commit[2]), f'{name} was built from a tree with uncommitted changes')
+    # The zip's own version file, when its build.sh writes one, is "<version>+<commit>": that commit's, clean.
+    stamp = files.pop('version', b'').decode(errors='replace').strip()
+    check(not stamp or (commit is not None and stamp == f'{version}+{commit[1]}'),
+          f'{name} says it is {stamp!r}, not {version}+ its name\'s commit')
     files['run'] = bundled_launcher(app_id, files['run'].decode()).encode()
     files['version'] = version.encode() + b'\n'
-    check('builtin' not in files, f'Unexpected files in {name}')
     if builtin:
         files['builtin'] = b'1\n'
+    files['bundle'] = bundle_record(app_id, name, digest, files[f'q2-{app_id}'], stamp)
     return {n: (b, n in (f'q2-{app_id}', 'run')) for n, b in sorted(files.items())}
+
+
+def bundle_record(app_id, zip_name, zip_sha256, binary, stamp):
+    """BUNDLED_DIR/<id>/bundle: which build of the app this image carries, for `cat` on the Q2 and test/build.py.
+    One "key value" a line: the zip and its SHA-256 (BUNDLED_APPS), the program's own SHA-256 (what
+    `sha256sum /usr/lib/q2apps/<id>/q2-<id>` prints on the Q2), and the zip's version stamp, or - when it has none."""
+    return (f'zip {zip_name}\nzip_sha256 {zip_sha256}\nq2-{app_id}_sha256 {sha(binary)}\n'
+            f'build {stamp or "-"}\n').encode()
+
+
+def bundle_fields(data):
+    """A bundle file's lines as a dict (bundle_record's keys)."""
+    return dict(line.split(' ', 1) for line in data.decode().splitlines() if ' ' in line)
 
 
 def rootfs_fits(size):
@@ -2966,8 +2987,10 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
             p += path + b' F ' + b' '.join(like.groups()) + b' cat ' + shlex.quote(str(src)).encode() + b'\n'
             player_added.append([path, b'R', *like.groups()])
         app_version, zip_name, _, digest, builtin = BUNDLED_APPS[app_id]
+        record = bundle_fields(files['bundle'][0])
         bundled[app_id] = dict(version=app_version, zip=zip_name, sha256=digest, builtin=builtin,
-                               bytes=sum(len(d) for d, _ in files.values()))
+                               bytes=sum(len(d) for d, _ in files.values()),
+                               binary_sha256=record[f'q2-{app_id}_sha256'], build=record['build'])
     for path, src in ((b'release/bin/demo', out/'demo'), (b'usr/bin/hciplayer', q2player),
                       (BLUEALSA.encode(), out/'bluealsa'), (BLUETOOTHD.encode(), out/'bluetoothd'), (WATCHDOG.encode(), out/'watchdog'),
                       (S90PLAY.encode(), out/'S90play'), (S11LOGO.encode(), out/'S11logo'),

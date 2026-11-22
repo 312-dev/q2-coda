@@ -443,6 +443,21 @@ def validate_assets(directory):
     STOCK_NAMED_ICONS = ('menu_coverflow.png', 'menu_coverflowdown.png')
     def read(image, rel):
         return subprocess.check_output(['unsquashfs', '-cat', str(directory/image), rel])
+    # Each card app the image carries (BUNDLED_APPS) is its pinned zip's program, byte for byte, with a bundle file
+    # naming the zip and both hashes (build.py bundle_record), as manifest.json's bundled_apps does.
+    import zipfile
+    from build import BUNDLED_APPS, BUNDLED_DIR, APPS_DIR, bundle_fields
+    for app_id, (_, zip_name, _, digest, _) in BUNDLED_APPS.items():
+        binary = read('rootfs.squashfs', f'{BUNDLED_DIR}/{app_id}/q2-{app_id}')
+        record = bundle_fields(read('rootfs.squashfs', f'{BUNDLED_DIR}/{app_id}/bundle'))
+        entry = manifest['bundled_apps'][app_id]
+        assert record['zip'] == zip_name == entry['zip'] and record['zip_sha256'] == digest == entry['sha256'], record
+        assert record[f'q2-{app_id}_sha256'] == sha(binary) == entry['binary_sha256'], f'{app_id}: not the program its bundle names'
+        assert record['build'] == entry['build']
+        pinned = APPS_DIR/zip_name
+        assert pinned.is_file() and sha(pinned.read_bytes()) == digest, f'{pinned}: missing or not the pinned zip'
+        with zipfile.ZipFile(pinned) as z:
+            assert z.read(f'.{app_id}/q2-{app_id}') == binary, f'{app_id}: the image\'s program is not the pinned zip\'s'
     # Every stock UI asset with Chinese text is given in English (english_ui), the edited ones after their edit.
     ui = 'release/assets/default/raw/ui/'
     # Every stock UI asset the image keeps (the stock EQ pages and STOCK_PAGES go): the build writes each one full-bleed

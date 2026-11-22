@@ -1420,9 +1420,37 @@ def test_a_carried_app_is_its_pinned_zips_files_with_a_version_and_the_new_launc
     pinned(monkeypatch, tmp_path, app_zip({'.demo/q2app': 'name=Demo\n', '.demo/q2-demo': b'ELF', '.demo/run': LAUNCHER,
                                            '.demo/icon.png': b'png', 'README': 'outside its folder'}))
     files = build.bundled_app('demo', tmp_path)
-    assert sorted(files) == ['icon.png', 'q2-demo', 'q2app', 'run', 'version']
+    assert sorted(files) == ['bundle', 'icon.png', 'q2-demo', 'q2app', 'run', 'version']
     assert files['q2-demo'] == (b'ELF', True) and files['run'][1] and files['q2app'] == (b'name=Demo\n', False)
     assert files['version'] == (b'q2-v1.2\n', False) and b'/usr/lib/q2apps/demo/q2-demo' in files['run'][0]
+    digest = build.BUNDLED_APPS['demo'][3]
+    assert build.bundle_fields(files['bundle'][0]) == {'zip': 'demo.zip', 'zip_sha256': digest,
+                                                       'q2-demo_sha256': hashlib.sha256(b'ELF').hexdigest(), 'build': '-'}
+    assert not files['bundle'][1]
+
+
+def stamped(monkeypatch, tmp_path, name, stamp):
+    data = app_zip({'.demo/q2app': '', '.demo/q2-demo': b'ELF', '.demo/run': LAUNCHER, '.demo/version': stamp})
+    (tmp_path/name).write_bytes(data)
+    monkeypatch.setitem(build.BUNDLED_APPS, 'demo', ('q2-v1.0', name, len(data), hashlib.sha256(data).hexdigest(), True))
+
+
+def test_a_zips_commit_stamp_is_carried_in_its_bundle_file(monkeypatch, tmp_path):
+    stamped(monkeypatch, tmp_path, 'demo-v1.0-7ded418.zip', 'q2-v1.0+7ded418\n')
+    files = build.bundled_app('demo', tmp_path)
+    assert files['version'][0] == b'q2-v1.0\n'  # addon_version_cmp's tag, as before
+    assert build.bundle_fields(files['bundle'][0])['build'] == 'q2-v1.0+7ded418'
+
+
+@pytest.mark.parametrize('name, stamp, why', [
+    ('demo-v1.0-7ded418.zip', 'q2-v1.0+32bd2cd', "says it is 'q2-v1.0\\+32bd2cd'"),  # renamed after the build
+    ('demo-v1.0-7ded418-dirty.zip', 'q2-v1.0+7ded418-dirty', 'uncommitted changes'),
+    ('demo.zip', 'q2-v1.0+7ded418', 'not q2-v1.0\\+ its name'),  # no commit in its name to check it by
+])
+def test_a_zip_whose_stamp_is_not_a_clean_commits_is_refused(monkeypatch, tmp_path, name, stamp, why):
+    stamped(monkeypatch, tmp_path, name, stamp)
+    with pytest.raises(ValueError, match=why):
+        build.bundled_app('demo', tmp_path)
 
 
 def test_a_builtin_app_carries_its_builtin_file_and_no_zip_brings_one(monkeypatch, tmp_path):
@@ -1431,9 +1459,10 @@ def test_a_builtin_app_carries_its_builtin_file_and_no_zip_brings_one(monkeypatc
     assert build.bundled_app('demo', tmp_path)['builtin'] == (b'1\n', False)
     pinned(monkeypatch, tmp_path, app_zip(files))
     assert 'builtin' not in build.bundled_app('demo', tmp_path)
-    pinned(monkeypatch, tmp_path, app_zip({**files, '.demo/builtin': ''}))
-    with pytest.raises(ValueError, match='Unexpected files in demo.zip'):
-        build.bundled_app('demo', tmp_path)
+    for extra in ('builtin', 'bundle'):
+        pinned(monkeypatch, tmp_path, app_zip({**files, f'.demo/{extra}': ''}))
+        with pytest.raises(ValueError, match='Unexpected files in demo.zip'):
+            build.bundled_app('demo', tmp_path)
 
 
 def test_subsonic_is_the_firmwares_alone():
