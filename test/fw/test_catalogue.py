@@ -1870,4 +1870,4 @@ def test_bluetooth_names_a_server_songs_cover_as_its_app_keeps_it(rig, fw):
     for b in cover.encode():
         h = ((h ^ b) * 16777619) & 0xffffffff
     h = (h * 16777619) & 0xffffffff
-    assert rig.files.files.get('/tmp/q2-bip.now') == b'%07d\n%s\n' % (h % 10**7, cover.encode())
+    assert rig.files.files.get('/tmp/q2-bip.now') == b'%07d\n%s\napp\n%s\n' % (h % 10**7, cover.encode(), stream)

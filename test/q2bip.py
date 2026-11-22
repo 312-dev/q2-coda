@@ -9,6 +9,7 @@ import ctypes
 import errno
 import os
 import pathlib
+import re
 import shutil
 import socket
 import struct
@@ -61,16 +62,27 @@ class Daemon:
         fake.write_text(f'#!/bin/sh\necho "$@" >> {self.log}\nfor last; do :; done\n'
                         f'[ -f {self.made} ] || exit 1\ncp {self.made} "$last"\n[ ! -f {tmp}/fails ] || exit 3\n')
         fake.chmod(0o755)
-        self.sock = tmp / 'sock'
+        self.sock, self.err = tmp / 'sock', tmp / 'stderr'
         env = dict(os.environ, Q2BIP_NOW=str(self.now), Q2BIP_TMP=str(tmp / 'out.jpg'), Q2BIP_FFMPEG=str(ffmpeg or fake))
-        self.proc = subprocess.Popen([binary, self.sock], env=env)
+        with open(self.err, 'wb') as err:  # demo's stderr file on a Q2, which q2guard reads into its logs
+            self.proc = subprocess.Popen([binary, self.sock], env=env, stderr=err)
         for _ in range(100):
             if self.sock.exists():
                 break
             time.sleep(0.02)
 
-    def song(self, handle, cover):
-        self.now.write_bytes(f'{handle}\n{cover}\n'.encode())
+    def song(self, handle, cover, source=None, track=None):
+        extra = '' if source is None else f'{source}\n{track}\n'  # bt_cover.c's third and fourth lines
+        self.now.write_bytes(f'{handle}\n{cover}\n{extra}'.encode())
+
+    def lines(self):
+        """Its log lines, each the unified log's (patch/ulog_line.h): time, uptime, level, source, message."""
+        out = []
+        for line in self.err.read_text().splitlines():
+            wall, up, level, src, msg = line.split(' ', 4)
+            assert wall.endswith('Z') and up.isdigit() and level in 'EWI'
+            out.append((level, src, msg))
+        return out
 
     def connect(self):
         s = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
@@ -141,6 +153,37 @@ def test_daemon_follows_a_track_change(daemon):
     daemon.now.unlink()  # a song with no cover
     assert fetch(s, 'x-bt/img-thm', '6136261') == (0xc4, b'')
     assert fetch(s, 'x-bt/img-thm', '0000042')[1] == jpeg(4000)  # kept: what was fetched stays fetchable
+
+
+LOG = re.compile(r'cover (\d{7}) (thumbnail|image|properties) for (.*) from (\w+|\?): (\d+) bytes in (\d+) ms, (.*)')
+
+
+def test_daemon_logs_one_line_per_fetch(daemon):
+    """Each GET of a cover is one bt line: the handle, what was asked, the song and where its cover came from (as
+    bt_cover.c wrote them), the bytes sent, the time it took and how it went."""
+    daemon.made.write_bytes(jpeg(7000))
+    song = '/mnt/mmc/.subsonic/stream/a/original/f/ribs [0S2].flac'
+    daemon.song('6136261', song, 'own', song)
+    s = daemon.connect()
+    ask(s, CONNECT)
+    fetch(s, 'x-bt/img-properties', '6136261')
+    fetch(s, 'x-bt/img-thm', '6136261')
+    fetch(s, 'x-bt/img-thm', '0000042')  # not the playing song's
+    got = [(level, src, LOG.fullmatch(msg).groups()) for level, src, msg in daemon.lines()]
+    assert [(g[0], g[1]) + g[2][:5] + g[2][6:] for g in got] == [
+        ('I', 'bt', '6136261', 'properties', song, 'own', '7000', 'made'),
+        ('I', 'bt', '6136261', 'thumbnail', song, 'own', '7000', 'kept'),
+        ('W', 'bt', '0000042', 'thumbnail', song, 'own', '0', 'not the playing song\'s')]
+
+
+def test_daemon_logs_a_failed_run_and_an_old_file(daemon):
+    daemon.song('6136261', '/a/cover.jpg')  # no source lines: a file from before them
+    s = daemon.connect()
+    ask(s, CONNECT)
+    fetch(s, 'x-bt/img-thm', '6136261')  # ffmpeg fails: it makes no file
+    (level, src, msg), = daemon.lines()
+    assert (level, src) == ('W', 'bt') and LOG.fullmatch(msg).groups()[2:5] == ('?', '?', '0')
+    assert msg.endswith('ffmpeg failed')
 
 
 @pytest.mark.parametrize('made', [None, b'', b'not a jpeg', b'\xff\xd8' + bytes(70000)])
