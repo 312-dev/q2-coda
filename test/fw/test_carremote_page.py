@@ -296,116 +296,138 @@ def test_the_wheel_moves_onto_pair_a_phone_without_scrolling_the_page(fw, ui, mc
 
 
 BLE = '/tmp/coda-rc.ble'
-WIFI_STEPS = ['1', 'Open the Q2 Muse Remote app', '2', 'Pair a Q2 Muse > Wi-Fi address', '3',
-              'Pick Q2 Muse, then tap Next', '4', 'Type the code shown here']
+IROH, QR = '/tmp/coda-rc.iroh', '/tmp/coda-rc.qr'
+ENDPOINT = '8aace45aa34b357c67fae6d1433685921c74f979a8be842802efc17807939913'
+RELAY = b'relay https://use1-1.relay.n0.iroh.link./\n'
+# What Q2 Muse Remote's one Pair a Q2 Muse screen asks of the phone, beside the QR code and over the code alone
+QR_HOW = ['On your phone, open', 'Q2 Muse Remote', 'Tap Pair a Q2 Muse,', 'then scan this or', 'type the code']
+CODE_HOW = ['On your phone, open Q2 Muse Remote,', 'tap Pair a Q2 Muse and type this code']
+NEARBY = 'Bluetooth  Phones nearby can find it'
+SAME_WIFI = ['Wi-Fi  192.168.1.30', 'Phone on the same Wi-Fi']
+WAITING = 'Waiting for a phone…'
 
 
 def howto_texts(fw, ui, howto):
-    """What Pair a Phone paints, in order."""
+    """What Pair a Phone paints, in order. None of it names the app's old tabs or a Next button: its Pair a Q2 Muse
+    screen is the one flow, the Q2 Muses it finds by Bluetooth and on the Wi-Fi in one list."""
     lcd, canvas = C.create_string_buffer(0x200), C.create_string_buffer(0x200)
     C.c_void_p.from_address(C.addressof(canvas) + O['CANVAS_LCD']).value = C.addressof(lcd)
     texts = []
     fw.mock('canvas_draw_text_in_rect', lambda c, s, n, *_: texts.append(''.join(map(chr, (C.c_uint * n).from_address(s)))) or 0)
     fw.mock('canvas_measure_text', lambda c, s, n, *_: 5.0 * n)
     fw.fn('carremote_paint', None, C.c_void_p, C.c_void_p)(howto, C.addressof(canvas))
+    assert not [t for t in texts if 'Wi-Fi address' in t or '> Bluetooth' in t or 'tap Next' in t or 'Scan QR' in t]
     return texts
 
 
-def open_howto(fw, ui, recs, bluetooth=0, advertising=False, wifi=True):
+def open_howto(fw, ui, recs, bluetooth=0, advertising=False, wifi=True, random=1042917, iroh=None):
+    """Pair a Phone with Bluetooth on (bluetooth), the daemon advertising, Wi-Fi joined, /dev/urandom giving random
+    (None: no randomness) and q2-iroh's --info file (iroh); the QR codes it encodes."""
+    encoded = []
+    fw.mock('QRcode_encodeString', lambda text, *_: encoded.append(C.string_at(text).decode()) and 0)
     q2 = Car(fw, ui, recs)
     fw.var('g_bluetoothflag', C.c_ubyte).value = bluetooth
     if advertising:
         q2.files[BLE] = b'1\n'
     if not wifi:
         fw.mock('fw_ioctl', lambda *_: -1)
+    if random is not None:
+        q2.files['/dev/urandom'] = struct.pack('<I', random)
+    if iroh is not None:
+        q2.files[IROH] = iroh
     page = open_page(fw, ui)
     ui.handler(stops(ui, page)[1], O['EVT_CLICK'])()  # the empty state's Pair a Phone
     assert ui.name[ui.top()] == 'carhowto_page'
-    return q2, ui.top()
+    return q2, ui.top(), encoded
 
 
-def test_pair_a_phone_with_bluetooth_off_gives_the_wi_fi_steps_and_the_address(fw, ui, mcl, recs):
-    _, howto = open_howto(fw, ui, recs)
-    assert howto_texts(fw, ui, howto) == WIFI_STEPS + ['Q2 Muse', 'Address  192.168.1.30', 'Phone and Q2 Muse on one Wi-Fi',
-                                                       'Waiting for a phone…']
+def open_qr(fw, ui, recs, random=1042917, relay=True, **kw):
+    """Pair a Phone with q2-iroh running (its --info file), with a relay or not"""
+    return open_howto(fw, ui, recs, random=random, iroh=f'id {ENDPOINT}\n'.encode() + (RELAY if relay else b''), **kw)
 
 
-def test_wi_fi_steps_pick_the_q2_by_its_bluetooth_name(fw, ui, mcl, recs):
-    """Q2 Muse Remote's Wi-Fi tab lists the Q2 under its mDNS instance, the Bluetooth name (coda_rc_mdns.c)."""
-    def read(path, section, key, out, default, *_):
-        v = b'Car Q2' if C.string_at(key) == b'BTNAME' else C.string_at(default)
-        C.memmove(out, v + b'\0', len(v) + 1)
-    _, howto = open_howto(fw, ui, recs)
-    fw.mock('toolsReadConfig', read)
-    assert howto_texts(fw, ui, howto)[5] == 'Pick Car Q2, then tap Next'
+def test_on_wi_fi_without_q2_iroh_the_page_shows_the_code_to_type(fw, ui, mcl, recs):
+    """The daemon's PairStart takes the page's code whichever way the phone came (coda_rc_core.c pair_start,
+    docs/remote-protocol.md#pairing-by-qr-code), so the code shows with no QR code too."""
+    q2, howto, encoded = open_howto(fw, ui, recs)
+    assert q2.files[QR] == b'042917\n' and encoded == []
+    assert howto_texts(fw, ui, howto) == ['042 917'] + CODE_HOW + SAME_WIFI + [WAITING]
 
 
-def test_bluetooth_on_but_not_advertising_is_still_the_wi_fi_steps(fw, ui, mcl, recs):
-    """A real Q2's bluetoothd without GattManager1 (2026-11-17): the app's Bluetooth tab could not find it."""
-    _, howto = open_howto(fw, ui, recs, bluetooth=1)
-    assert howto_texts(fw, ui, howto)[:8] == WIFI_STEPS
+def test_bluetooth_on_but_not_advertising_says_nothing_of_bluetooth(fw, ui, mcl, recs):
+    """A real Q2's bluetoothd without GattManager1 (2026-11-17): a phone's scan could not find it."""
+    _, howto, _ = open_howto(fw, ui, recs, bluetooth=1)
+    assert NEARBY not in howto_texts(fw, ui, howto)
 
 
-def test_advertising_gives_the_bluetooth_steps_and_the_address_besides(fw, ui, mcl, recs):
-    _, howto = open_howto(fw, ui, recs, bluetooth=1, advertising=True)
-    assert howto_texts(fw, ui, howto) == [
-        '1', 'Open the Q2 Muse Remote app', '2', 'Pair a Q2 Muse > Bluetooth', '3', 'Pick Q2 Muse, then tap Next', '4',
-        'Type the code shown here', 'Q2 Muse', 'Or Wi-Fi address  192.168.1.30', 'Waiting for a phone…']
+def test_advertising_adds_the_bluetooth_line(fw, ui, mcl, recs):
+    _, howto, _ = open_howto(fw, ui, recs, bluetooth=1, advertising=True)
+    assert howto_texts(fw, ui, howto) == ['042 917'] + CODE_HOW + [NEARBY] + SAME_WIFI + [WAITING]
+
+
+def test_advertising_with_no_wi_fi_is_the_code_and_bluetooth_alone(fw, ui, mcl, recs):
+    _, howto, _ = open_howto(fw, ui, recs, bluetooth=1, advertising=True, wifi=False)
+    assert howto_texts(fw, ui, howto) == ['042 917'] + CODE_HOW + [NEARBY, WAITING]
 
 
 def test_a_stale_advertising_file_with_bluetooth_off_is_not_believed(fw, ui, mcl, recs):
-    _, howto = open_howto(fw, ui, recs, bluetooth=0, advertising=True)
-    assert howto_texts(fw, ui, howto)[:8] == WIFI_STEPS
+    _, howto, _ = open_howto(fw, ui, recs, bluetooth=0, advertising=True)
+    assert NEARBY not in howto_texts(fw, ui, howto)
 
 
-def test_with_no_link_it_says_to_join_wi_fi_first_and_waits_for_nothing(fw, ui, mcl, recs):
-    _, howto = open_howto(fw, ui, recs, wifi=False)
-    assert howto_texts(fw, ui, howto) == ['1', 'Open Settings > Wi-Fi', '2', 'Join the Wi-Fi your phone is on', '3',
-                                          'Come back here to pair', 'Q2 Muse', 'Wi-Fi  not connected']
+def test_with_no_link_it_says_to_turn_on_bluetooth_or_join_wi_fi_and_waits_for_nothing(fw, ui, mcl, recs):
+    _, howto, _ = open_howto(fw, ui, recs, wifi=False)
+    assert howto_texts(fw, ui, howto) == ['1', 'Turn on Bluetooth, or', '2', 'join a Wi-Fi network in',
+                                          'Settings > Wi-Fi', '3', 'Come back here to pair', 'Q2 Muse',
+                                          'Not reachable yet']
 
 
 def test_pair_a_phone_follows_bluetooth_coming_on(fw, ui, mcl, recs):
-    q2, howto = open_howto(fw, ui, recs, bluetooth=1)
+    q2, howto, _ = open_howto(fw, ui, recs, bluetooth=1, wifi=False)
     painted = []
     fw.mock('widget_invalidate_force', lambda w, *_: painted.append(w) or 0)
     q2.tick()
     assert howto not in painted  # nothing changed
-    q2.files[BLE] = b'1\n'  # bluetoothd took the GATT application
+    q2.files[BLE] = b'1\n'  # the daemon advertises
     q2.tick()
     assert howto in painted
-    assert howto_texts(fw, ui, howto)[3] == 'Pair a Q2 Muse > Bluetooth'
+    assert howto_texts(fw, ui, howto) == ['042 917'] + CODE_HOW + [NEARBY, WAITING]
 
 
-IROH, QR = '/tmp/coda-rc.iroh', '/tmp/coda-rc.qr'
-ENDPOINT = '8aace45aa34b357c67fae6d1433685921c74f979a8be842802efc17807939913'
-
-
-def open_qr(fw, ui, recs, random=1042917, relay=True):
-    """Pair a Phone with q2-iroh running (its --info file) and /dev/urandom giving random; the QR codes it encodes."""
-    encoded = []
-    fw.mock('QRcode_encodeString', lambda text, *_: encoded.append(C.string_at(text).decode()) and 0)
-    q2 = Car(fw, ui, recs)
-    q2.files[IROH] = f'id {ENDPOINT}\n'.encode() + (b'relay https://use1-1.relay.n0.iroh.link./\n' if relay else b'')
-    q2.files['/dev/urandom'] = struct.pack('<I', random)
-    page = open_page(fw, ui)
-    ui.handler(stops(ui, page)[1], O['EVT_CLICK'])()
-    return q2, ui.top(), encoded
-
-
-def test_with_q2_iroh_pair_a_phone_is_a_qr_code_with_the_code_under_it(fw, ui, mcl, recs):
+def test_with_q2_iroh_and_a_relay_the_qr_code_works_from_any_network(fw, ui, mcl, recs):
     """docs/remote-protocol.md#pairing-by-qr-code: the QR code carries the code, the endpoint id, the Wi-Fi address
     and the relay, in capitals (QR's alphanumeric mode); the code is in /tmp/coda-rc.qr for the daemon to take."""
     q2, howto, encoded = open_qr(fw, ui, recs)
     assert q2.files[QR] == b'042917\n'
-    assert howto_texts(fw, ui, howto) == ['042 917', 'Scan with', 'Q2 Muse Remote', 'Pair a Q2 Muse >', 'Scan QR Code',
-                                          'Works from any', 'network', 'Or type the code at', '192.168.1.30', 'Waiting…']
+    assert howto_texts(fw, ui, howto) == ['042 917'] + QR_HOW + ['Works from any', 'network', 'Wi-Fi 192.168.1.30',
+                                                                 'Waiting…']
     assert encoded[-1] == f'Q2MUSE:1:042917:{ENDPOINT.upper()}:192.168.1.30:HTTPS://USE1-1.RELAY.N0.IROH.LINK./'
 
 
-def test_before_q2_iroh_has_a_relay_the_qr_code_leaves_it_empty(fw, ui, mcl, recs):
+def test_before_q2_iroh_has_a_relay_the_qr_code_works_from_the_same_wi_fi_only(fw, ui, mcl, recs):
+    """Without a relay iroh cannot cross networks: the QR code reaches the Q2 at its Wi-Fi address alone."""
     q2, howto, encoded = open_qr(fw, ui, recs, relay=False)
-    howto_texts(fw, ui, howto)
+    texts = howto_texts(fw, ui, howto)
+    assert texts == ['042 917'] + QR_HOW + ['Phone on the same', 'Wi-Fi as this Q2 Muse', 'Wi-Fi 192.168.1.30',
+                                            'Waiting…']
     assert encoded[-1] == f'Q2MUSE:1:042917:{ENDPOINT.upper()}:192.168.1.30:'
+
+
+def test_beside_the_qr_code_bluetooth_shows_only_while_advertising(fw, ui, mcl, recs):
+    _, howto, _ = open_qr(fw, ui, recs, bluetooth=1, advertising=True)
+    assert howto_texts(fw, ui, howto) == ['042 917'] + QR_HOW + ['Works from any', 'network', 'Or nearby,',
+                                                                 'by Bluetooth', 'Wi-Fi 192.168.1.30', 'Waiting…']
+
+
+def test_pair_a_phone_follows_the_relay_coming(fw, ui, mcl, recs):
+    q2, howto, _ = open_qr(fw, ui, recs, relay=False)
+    painted = []
+    fw.mock('widget_invalidate_force', lambda w, *_: painted.append(w) or 0)
+    q2.tick()
+    assert howto not in painted
+    q2.files[IROH] = f'id {ENDPOINT}\n'.encode() + RELAY
+    q2.tick()
+    assert howto in painted and 'Works from any' in howto_texts(fw, ui, howto)
 
 
 def test_a_code_the_daemon_spent_is_replaced_and_closing_takes_it_away(fw, ui, mcl, recs):
@@ -421,34 +443,36 @@ def test_a_code_the_daemon_spent_is_replaced_and_closing_takes_it_away(fw, ui, m
     assert QR not in q2.files
 
 
+def test_a_code_spent_without_q2_iroh_is_replaced_too(fw, ui, mcl, recs):
+    q2, howto, _ = open_howto(fw, ui, recs)
+    painted = []
+    fw.mock('widget_invalidate_force', lambda w, *_: painted.append(w) or 0)
+    del q2.files[QR]
+    q2.files['/dev/urandom'] = struct.pack('<I', 7)
+    q2.tick()
+    assert howto in painted and howto_texts(fw, ui, howto)[0] == '000 007'
+
+
 def test_with_a_relay_and_no_wi_fi_address_it_is_still_a_qr_code(fw, ui, mcl, recs):
     """The emulator's case (no wlan0): reachable through the relay alone, the QR code has no address and the page
-    names none to type at."""
-    encoded = []
-    fw.mock('QRcode_encodeString', lambda text, *_: encoded.append(C.string_at(text).decode()) and 0)
-    q2 = Car(fw, ui, recs)
-    fw.mock('fw_ioctl', lambda *_: -1)
-    q2.files[IROH] = f'id {ENDPOINT}\nrelay https://use1-1.relay.n0.iroh.link./\n'.encode()
-    q2.files['/dev/urandom'] = struct.pack('<I', 1042917)
-    page = open_page(fw, ui)
-    ui.handler(stops(ui, page)[1], O['EVT_CLICK'])()
-    texts = howto_texts(fw, ui, ui.top())
-    assert texts[0] == '042 917' and 'Or type the code at' not in texts
+    names none."""
+    _, howto, encoded = open_qr(fw, ui, recs, wifi=False)
+    texts = howto_texts(fw, ui, howto)
+    assert texts == ['042 917'] + QR_HOW + ['Works from any', 'network', 'Waiting…']
     assert encoded[-1] == f'Q2MUSE:1:042917:{ENDPOINT.upper()}::HTTPS://USE1-1.RELAY.N0.IROH.LINK./'
 
 
-def test_with_neither_the_page_keeps_its_steps(fw, ui, mcl, recs):
-    q2 = Car(fw, ui, recs)
-    fw.mock('fw_ioctl', lambda *_: -1)
-    q2.files[IROH] = f'id {ENDPOINT}\n'.encode()  # not yet online
-    page = open_page(fw, ui)
-    ui.handler(stops(ui, page)[1], O['EVT_CLICK'])()
-    assert howto_texts(fw, ui, ui.top())[1] == 'Open Settings > Wi-Fi'
+def test_with_q2_iroh_but_no_way_to_reach_it_the_page_keeps_its_steps(fw, ui, mcl, recs):
+    _, howto, encoded = open_qr(fw, ui, recs, relay=False, wifi=False)  # not yet online
+    assert howto_texts(fw, ui, howto)[1] == 'Turn on Bluetooth, or' and encoded == []
 
 
 def test_without_randomness_there_is_no_code_and_nothing_to_scan(fw, ui, mcl, recs):
+    """The daemon then makes its own code when the phone asks and shows it on the pairing card."""
     q2, howto, encoded = open_qr(fw, ui, recs, random=4294967295)  # rejected every time
-    assert QR not in q2.files and howto_texts(fw, ui, howto) == [] and encoded == []
+    assert QR not in q2.files and encoded == []
+    assert howto_texts(fw, ui, howto) == ['On your phone, open Q2 Muse Remote', 'and tap Pair a Q2 Muse. The code',
+                                          'shows when your phone asks'] + SAME_WIFI + [WAITING]
 
 
 def test_renaming_a_phone_gets_the_strip_s_arrow(fw, ui, mcl, recs):

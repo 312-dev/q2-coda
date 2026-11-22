@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Remote: **Pair a Phone** is one page that always shows the pairing code, with the QR code above it when the Q2 can be reached that way. It no longer sends you to tabs Q2 Muse Remote doesn't have: open the app, tap **Pair a Q2 Muse**, then scan the QR code or tap this Q2 Muse in its list and type the code. It says "Works from any network" only when that is true; until the Q2 has its internet relay it says the phone must be on the same Wi-Fi. While the Q2 can be found over Bluetooth it says so, and with neither Bluetooth nor Wi-Fi it says to turn one on.
   - Car Audio: unplugging from the car pauses the music, as an iPod does, unless headphones are in or a Bluetooth headset is connected, where it carries on. It used to play on silently through the headphone output with nothing plugged in, draining the battery.
   - Car Audio: the car no longer goes silent for the rest of the drive once the library has finished sending to it. Saving the note of what the car holds held the Q2 up for 12 seconds, long enough for the car to give up on the connection; it is now saved in the background, and a connection that goes quiet, or that the car gives up on, makes the Q2 reconnect by itself.
   - Car Audio: songs from a signed-in server (Subsonic) now show their album cover in the car, as they do on the Q2.

@@ -6,8 +6,8 @@
  * (crc_cover_ask, which asks the app itself through its /tmp files).
  *
  * demo starts it when Settings > Car Remote is on and kills it when that goes off; nothing else starts it.
- * It also answers mDNS for Q2 Muse Remote's Wi-Fi tab (coda_rc_mdns.c) on wlan0, or the interface --mdns-if
- * names (the emulator's), and not at all with --no-mdns; the host build answers only with --mdns-if.
+ * It also answers mDNS for Q2 Muse Remote's Pair a Q2 Muse list (coda_rc_mdns.c) on wlan0, or the interface
+ * --mdns-if names (the emulator's), and not at all with --no-mdns; the host build answers only with --mdns-if.
  * It runs at nice 19. --root DIR prefixes every path (the host tests); --no-ble, --ble-sim DIR and --port N are for
  * them too. */
 #include "coda_rc_sys.h"
@@ -870,7 +870,7 @@ void crc_ble_gone(void) {
 }
 
 /* Whether a phone's Bluetooth scan can find this Q2 now: the Pair a Phone page reads it (carremote_page.c
- * cr_howto_mode) to give the Bluetooth steps only then, the Wi-Fi ones otherwise. */
+ * cr_howto_mode) to say a phone nearby can find it by Bluetooth only then. */
 void crc_ble_advertising(int on) {
     if (on) crc_write_file("/tmp/coda-rc.ble", "1\n", 2, 0644);
     else unlink_at("/tmp/coda-rc.ble");

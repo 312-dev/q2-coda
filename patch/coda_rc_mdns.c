@@ -1,6 +1,6 @@
 /* coda-rc's mDNS responder (docs/remote-protocol.md#discovery): while Car Remote is on and Wi-Fi is joined, the
  * Q2 answers multicast DNS (RFC 6762, IPv4, UDP 5353) for one DNS-SD service (RFC 6763), so Q2 Muse Remote's
- * Wi-Fi tab lists it without an address typed:
+ * Pair a Q2 Muse lists it without an address typed:
  *
  *   _q2muse._tcp.local                 PTR  <name>._q2muse._tcp.local      <name>: the Bluetooth name
  *   <name>._q2muse._tcp.local          SRV  0 0 7720 q2muse-<6 hex>.local  (config.ini BTNAME, else Q2 Muse)
