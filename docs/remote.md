@@ -98,8 +98,8 @@ Q2 Muse Remote reaches the Q2's coda-rc ([remote-protocol](remote-protocol.md)) 
 
 ### What the user does
 
-1. On the Q2: Settings > Car Remote on, then Pair a Phone. With Wi-Fi joined it shows a QR code, the pairing code under it ([remote-protocol: Pairing by QR code](remote-protocol.md#pairing-by-qr-code)).
-2. On the phone: Q2 Muse Remote > Pair a Q2 Muse > **Scan QR code**, and point it at the Q2. The phone can be on any network. It dials the Q2's Wi-Fi address and its iroh endpoint at once, keeps the first that answers, and pairs on the code it read; the Q2 shows the pairing card for a moment, then "Pixel 10 Pro paired".
+1. On the Q2: Settings > Car Remote on, then Pair a Phone. It shows the pairing code, and above it a QR code once `q2-iroh` can be reached: from any network with a relay, from the same Wi-Fi without one ([remote-protocol: Pairing by QR code](remote-protocol.md#pairing-by-qr-code)).
+2. On the phone: Q2 Muse Remote > Pair a Q2 Muse, then **Scan QR code** and point it at the Q2, or tap the Q2 Muse it lists (found by Bluetooth or on the Wi-Fi) and type the code. With a relay the phone can be on any network. Scanned, it dials the Q2's Wi-Fi address and its iroh endpoint at once, keeps the first that answers, and pairs on the code it read; the Q2 shows the pairing card for a moment, then "Pixel 10 Pro paired".
 3. From then on the app connects the same way wherever the phone is: on the Q2's Wi-Fi straight to its address, elsewhere through the relay (or a direct path once iroh finds one). A phone paired the old way (Wi-Fi address or Bluetooth) learns the endpoint at its next session on a Q2 with `q2-iroh` (`GetRemote`) and does the same.
 
 The Q2 needs Wi-Fi with internet for a phone elsewhere to reach it; Car Remote on keeps its Wi-Fi on under Smart Wi-Fi ([internals: Smart Wi-Fi](internals.md#smart-wi-fi)).

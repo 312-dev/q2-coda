@@ -1836,12 +1836,17 @@ Settings > Car Remote (approved 2026-11-16, `design/carremote-page`, `mock_carre
 - **A phone's page:** [label/value rows](#labelvalue-rows) Status ("Connected · Wi-Fi"), Paired ("Nov 12"), Last
   Connected ("Now", "Friday"), Rename (the name and a chevron: the letter strip), then Forget Phone in Negative red after
   a 12 px gap, which asks on the [confirmation card](#confirmation-card), Cancel first. It opens on Rename.
-- **Pair a Phone** (the row and the button): up to four numbered steps (20 px Raised 2 discs, 15 px lines 28 px apart
-  from y 66) for the link a phone can find it on now, Bluetooth or Wi-Fi ([internals: Car remote](internals.md#car-remote)),
-  then from y 190 "Q2 Muse" in Inter Medium 17 and, in 14 px Text Tertiary, the address for a phone that does not list it ("Address
-  192.168.1.30", "Phone and Q2 Muse on one Wi-Fi"; "Or Wi-Fi address …" under the Bluetooth steps; "Wi-Fi  not
-  connected" with neither), then "Waiting for a phone…". The Q2 Muse cannot start a pairing; the phone does. ponytail: the mock-up's QR code waits
-  for Q2 Muse Remote to scan one.
+- **Pair a Phone** (the row and the button): one page with the pairing code ([internals: Car remote](internals.md#car-remote)).
+  With a QR code, the 180 px plate at x 20, y 58, the code under it in Inter Medium 28, and beside it from x 216 (14 px
+  lines 17 px apart from y 72): "On your phone, open", "Q2 Muse Remote" in Inter Medium 16, "Tap Pair a Q2 Muse, then
+  scan this or type the code", in Text Tertiary where it works from ("Works from any network" with a relay, else "Phone
+  on the same Wi-Fi as this Q2 Muse"), "Or nearby, by Bluetooth" while it advertises, "Wi-Fi 192.168.1.30" in 13 px,
+  and "Waiting…" level with the code. Without one, the code in Inter Medium 40 centred near the top, 15 px "On your
+  phone, open Q2 Muse Remote, tap Pair a Q2 Muse and type this code", in 14 px Text Tertiary "Bluetooth  Phones nearby
+  can find it" and "Wi-Fi  192.168.1.30", "Phone on the same Wi-Fi", then "Waiting for a phone…". With neither link,
+  numbered steps (20 px Raised 2 discs, 15 px lines from y 66) "Turn on Bluetooth, or join a Wi-Fi network in Settings
+  > Wi-Fi", "Come back here to pair", then from y 190 "Q2 Muse" in Inter Medium 17 over "Not reachable yet". The Q2
+  Muse cannot start a pairing; the phone does.
 - **Pairing:** the code's Dialog over whatever shows, then the icon toast "Pixel 10 Pro paired" (Positive
   `check-circle`). ponytail: the card form with the 120 s countdown on Cancel's row is the shared pairing card's, not on
   this branch yet.
