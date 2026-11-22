@@ -157,6 +157,7 @@ int ulog_bt_wanted(char level, const char *src, const char *s, int n) {
         return 1;
     if (n >= 9 && !memcmp(s, "shutdown:", 9)) return 1; /* demo's ulog_end */
     if (!strcmp(src, "player") && level == 'E') return 1; /* a song that would not open, with its path */
+    if (!strcmp(src, "coda-rc") && n >= 4 && !memcmp(s, "ble:", 4)) return 1; /* its LE advertising and links */
     for (unsigned i = 0; i < sizeof bt_words / sizeof *bt_words; ++i)
         if (has(s, n, bt_words[i].word, bt_words[i].whole)) return 1;
     return 0;
@@ -295,8 +296,9 @@ void ulog_tail_at(struct ulog_tail *t, const char *path, int from_end) {
 }
 
 /* A card app's line: the date Go's log puts first ("2006/01/02 15:04:05 ", or "2006-01-02 ..."
- * as q2-subsonic's applog writes it) left out, the level guessed from its words, the source the
- * app's id. Its level, 0 for a blank line or a repeat. */
+ * as q2-subsonic's applog writes it, or "2006-01-02T15:04:05Z " as coda-rc's crc_log does) left
+ * out, the level guessed from its words, the source the app's id. Its level, 0 for a blank line or
+ * a repeat. */
 static char app_line(card_log *l, long wall, unsigned up_ms, const char *src, const char *s,
                      int n) {
     while (n && (s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == ' ')) --n;
@@ -305,6 +307,8 @@ static char app_line(card_log *l, long wall, unsigned up_ms, const char *src, co
     while (k < (int)sizeof date - 1 && k < n &&
            (date[k] == '0'   ? s[k] >= '0' && s[k] <= '9'
             : date[k] == '/' ? s[k] == '/' || s[k] == '-'
+            : k == 10        ? s[k] == ' ' || s[k] == 'T'
+            : k == 19        ? s[k] == ' ' || s[k] == 'Z'
                              : s[k] == date[k]))
         ++k;
     if (k == (int)sizeof date - 1) s += k, n -= k;

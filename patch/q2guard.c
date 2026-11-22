@@ -37,6 +37,7 @@
 #define SNAP "/tmp/q2guard.snap" /* a request: why, or "flush"; removed once answered (ulog.c, S90play) */
 #define DEMO_ERR "/tmp/q2-demo.err" /* demo's stderr (tools/build.py BOOT_HOOK) */
 #define DEMO_LOG "/tmp/q2-demo.log" /* --dev: demo's stdout and stderr (tools/build.py LOG_HOOK) */
+#define CRC_LOG "/tmp/coda-rc.log"  /* coda-rc's own (patch/coda_rc.c crc_log) */
 #define KMSG "/dev/kmsg"
 #define KMSG_MAX 64 /* records read in one tick; the rest wait for the next */
 #define WARN_GAP_MS 30000 /* an E or W line flushes at once; more of them, at most this often */
@@ -431,7 +432,7 @@ static void on_signal(int sig) {
     guard_woke = 1;
     if (sig == SIGTERM) termed = 1;
 }
-static struct ulog_tail err;
+static struct ulog_tail err, crc; /* demo's stderr; coda-rc's own log, whose ble: lines q2-btev keeps too */
 static struct ulog_apps apps; /* the card apps' own logs, /tmp/q2-<id>.log */
 static int kmsg = -1;
 /* What demo's stderr file, the card apps' logs and the kernel gained since the last tick: 2 when a
@@ -439,6 +440,7 @@ static int kmsg = -1;
 static int feeds(void) {
     long wall = time(0);
     int got = ulog_tail(&err, &ulog, wall, now_ms());
+    got |= ulog_tail(&crc, &ulog, wall, now_ms());
     got |= ulog_apps(&apps, &ulog, "/tmp", wall, now_ms());
     char rec[1024];
     for (int k = 0; kmsg >= 0 && k < KMSG_MAX; ++k) {
@@ -516,6 +518,8 @@ int main(int argc, char **argv) {
     ulog_add(&ulog, time(0), now_ms(), again || !strcmp(last, "clean") ? 'I' : 'W', "guard", b);
     /* a q2guard started again reads only what is new: the one before it read the rest */
     ulog_tail_at(&err, dev_build ? DEMO_LOG : DEMO_ERR, again);
+    ulog_tail_at(&crc, CRC_LOG, again);
+    crc.src = "coda-rc";
     apps.from_end = again;
     kmsg = open(KMSG, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
     if (kmsg < 0)

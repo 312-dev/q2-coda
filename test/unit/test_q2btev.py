@@ -7,7 +7,7 @@ import ctypes as C
 
 import pytest
 
-from test_q2log import TIME, WALL, L, Log  # noqa: F401  (L: the module's library fixture)
+from test_q2log import TIME, WALL, L, Log, Tail  # noqa: F401  (L: the module's library fixture)
 
 BTEV_FILE_MAX, BTEV_FILES, BTEV_RAM = 131072, 4, 32768  # q2log.h
 BUDS = '04:00:6E:D3:96:6D'
@@ -259,3 +259,21 @@ def test_a_late_line_never_goes_into_the_part_being_written(L, tmp_path):
     assert p.flush() == 0
     assert [line.split(' ', 4)[4] for line in p.text('q2-btev.0').splitlines()] == ['line 1000', 'line 500',
                                                                                    'line 2000', 'line 3000']
+
+
+def test_coda_rc_s_bluetooth_le_lines_come_in(L, tmp_path):
+    """coda-rc's own log (/tmp/coda-rc.log, its lines after a UTC stamp) is a feed of its own under source coda-rc,
+    its stamp left out as a card app's date is, so its advertising (a Bluetooth LE ADD_ADVERTISING each time) can be
+    set beside the storms the kernel logs; its ble: lines go to q2-btev too, its others only to the unified log."""
+    p = Pair(L, tmp_path)
+    f = tmp_path / 'coda-rc.log'
+    f.write_text('2026-11-22T06:07:24Z ble: Bluetooth on; advertising in 2 s\n2026-11-22T06:07:26Z ble: advertising\n'
+                 '2026-11-22T06:07:30Z tcp: phone connected\n')
+    t = Tail()
+    L.ulog_tail_at(C.byref(t), str(f).encode(), 0)
+    t.src = b'coda-rc'
+    L.ulog_tail(C.byref(t), p.u.log, WALL, 2700000)
+    assert p.flush() == 0
+    ev = [line.split(' ', 2)[2] for line in p.text('q2-btev.0').splitlines()]
+    assert ev == ['I coda-rc ble: Bluetooth on; advertising in 2 s', 'I coda-rc ble: advertising']
+    assert p.text('q2-log.0').splitlines()[-1].endswith('I coda-rc tcp: phone connected')
