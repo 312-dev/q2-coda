@@ -32,6 +32,7 @@
 typedef long ssize_t;
 typedef int pid_t;
 typedef unsigned socklen_t;
+int __xstat(int, const char *, void *); /* glibc 2.28's stat, version 3 (coda_rc_lib.c lib_key_now) */
 #define O_RDONLY 0
 #define O_WRONLY 1
 #define O_RDWR 2

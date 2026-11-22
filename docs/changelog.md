@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Audio: changing songs or the queue with a server library no longer holds the car link up for a fraction of a second each time, and Q2 Muse Remote's library pages open faster and use less of the Q2's processor.
   - Car Remote: a Bluetooth device nearby can no longer crash or take over the Car Remote service by sending it a malformed message before pairing. Devices that are not paired also can no longer keep a paired phone from connecting over Wi-Fi, or light the Q2's screen with pairing requests more than four times a minute.
   - Car Audio: Radio, Internet Radio, Videos and Spotify now play through the car's USB too, where they went to Bluetooth or nowhere while the car listened to USB.
   - Radio: starting a song's radio again after stopping it (from the car or on the Q2) works, where it said "Radio isn't available for this song".
