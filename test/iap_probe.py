@@ -1408,9 +1408,10 @@ def test_a_silence_is_seen_as_it_grows(probe, tmp_path):
 
 
 def test_the_link_s_health_comes_at_its_default_pace(probe, tmp_path):
-    """The drive of 2026-11-22 (q2muse-1126): 403 s with the link up and not one `link: health:` line. With no
-    --health-ms, a line every 5 s while the link is up, the car acknowledging as it goes."""
-    p, car, fd, log, files = bmw_up(probe, tmp_path)
+    """The drive of 2026-11-22 (q2muse-1126): 403 s with the link up and not one `link: health:` line. q2car.sh runs
+    q2-iap with --state, whose audio check kept a file-scope health_at that was the link's too (two tentative
+    definitions in one translation unit), set every second. With --state and no --health-ms, a line every 5 s."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path, '--state', str(tmp_path/'state'))
     try:
         end = time.time() + 11.5
         while time.time() < end:

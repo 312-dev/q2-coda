@@ -207,7 +207,10 @@ static unsigned syn_ack_len, window, peer_max, max_sends, max_cacks, unacked;
 static long rto, cack, unacked_since; /* milliseconds; rto 0: never sent again */
 static long wire_busy_at; /* the last time reports were still waiting for the wire */
 static long heard_at, waiting_since; /* the car's last output report; since when something has waited (iap2_tick) */
-static long acked_at, health_at; /* the car's last new acknowledgement; link_health's last line */
+/* acked_at: the car's last new acknowledgement; link_health_at: link_health's last line. Named apart from q2_iap.c's
+ * audio health_at: q2_iap.c includes this file, and two file-scope `static long health_at;` there are one variable,
+ * which the audio check set every second, so no link line came on the 2026-11-22 drive (q2-iap with --state). */
+static long acked_at, link_health_at;
 static long health_ms = 5000;    /* --health-ms; 0 none */
 static unsigned dropped;         /* packets dropped from a full queue, this link */
 static int retries_held, drop_said;
@@ -1737,7 +1740,7 @@ static void iap2_control_receive(const u8 *msg, unsigned len) {
  * against its limit. */
 static void link_health(long now, int bl) {
     char t[300];
-    health_at = now;
+    link_health_at = now;
     long quiet = waiting_since ? now - (heard_at > waiting_since ? heard_at : waiting_since) : 0;
     snprintf(t, sizeof t,
              "link: health: reports waiting %d, queued %u, unacknowledged %u, sent %ld ms ago, heard %ld ms ago, "
@@ -1763,7 +1766,7 @@ static void iap2_tick(void) {
         retries_held = 1;
     }
     if (!bl) retries_held = 0;
-    if (link_up && health_ms && now - health_at >= health_ms) link_health(now, bl);
+    if (link_up && health_ms && now - link_health_at >= health_ms) link_health(now, bl);
     if (link_up && count && rto && !bl) {
         struct slot *s = &slots[head];
         long since = s->sent > wire_busy_at ? s->sent : wire_busy_at; /* when it can have reached the car */
