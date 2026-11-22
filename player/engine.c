@@ -5,7 +5,8 @@
  *   {player-status\exit}      it played to its end
  *   {player-nextstatus\exit}  set-nexturl replaced it
  *   {player-stopstatus\exit}  mcl-stop
- *   {player-status\error}     it would not open, after /tmp/notfile or /tmp/notsupport is made for demo's dialog
+ *   {player-status\error}     it would not open or play, after /tmp/notfile or /tmp/notsupport is made for demo's
+ *                             dialog; none for a song a waiting set-songurl or mcl-stop has already replaced
  * A song preloaded by set-gapless is opened on a thread of its own while the one before plays, and starts on the frame
  * after that one's last, in the same PCM when rate, channels and width are the same. A preload that a queue edit, a
  * stop or a skip cancelled is closed by its thread when its open returns, and never played. */
