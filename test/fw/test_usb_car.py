@@ -242,3 +242,4 @@ def test_a_relink_that_never_brings_the_audio_back_pauses_in_30_s(fw):
     assert p.pauses == 0
     state(u, ms=10000, verdict='car', host=1, name='BMW 83828', audio=0)
     assert p.pauses == 1
+

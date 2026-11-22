@@ -1461,3 +1461,51 @@ def test_a_device_the_scan_heard_stays_listed_this_open(fw):
     p.files.files[SEEN_FILE] = b'#999\n'
     p.rebuild()
     assert other_devices(p) == ['d1'] and len([c for c in p.commands if SEEN_FILE in c]) == asked
+
+
+# ---- the car on the cable (headset.c headset_bt_autolink, usb_car.c usb_car_name) ----
+
+def car_on_the_cable(fw, p, name):
+    """Car Audio with a car on the cable that named itself name over iAP2 (q2-iap's state file, usb_car.c)."""
+    fw.mock('fw_access', lambda *_: -1)
+    fw.fn('usb_car_start', None)()
+    p.files.files['/tmp/q2car.state'] = f'verdict=car\nhost=1\nname={name}\naudio=1\nflowing=1\n'.encode()
+    p.now += 300
+    fw.fn('usb_car_poll', C.c_int)()
+
+
+def autolink(fw, mac):
+    fw.mock('checkPairDev', lambda *_: 1)
+    said = []
+
+    def write(fd, data, n, *_):  # ulog's line on stderr: "<time> <up> <level> <src> <msg>"
+        words = C.string_at(data, n).decode().rstrip('\n').split(' ', 4)
+        if fd == 2 and words[3] == 'bt':
+            said.append(words[4])
+        return n
+    fw.mock('fw_write', write)
+    return fw.fn('headset_bt_autolink', C.c_int, C.c_char_p)(mac.encode()), said
+
+
+def test_bluetooth_leaves_alone_the_car_car_audio_plays_to(fw):
+    """2026-11-21: a Bluetooth relaunch auto-connected A2DP to "BMW 83828" while the Q2 played to it over USB. While
+    Car Audio has that car (its iAP2 name, q2-iap's name=), auto-connect skips it, and says so."""
+    p = Page(fw, [(CAR, 'BMW 83828', 'paired'), (SPEAKER, 'JBL', 'paired')])
+    car_on_the_cable(fw, p, 'BMW 83828')
+    go, said = autolink(fw, CAR)
+    assert go == 0 and said == [f'auto-connect (auto) skips {CAR} "BMW 83828": the car on the cable, whose audio is '
+                                "Car Audio's"], said
+
+
+def test_bluetooth_still_connects_another_device_or_another_car(fw):
+    p = Page(fw, [(CAR, 'BMW 83828', 'paired'), (SPEAKER, 'JBL', 'paired')])
+    car_on_the_cable(fw, p, 'BMW 83828')
+    assert autolink(fw, SPEAKER)[0] == 1, 'a speaker is not the car'
+    p2 = Page(fw, [(CAR, 'BMW 83828', 'paired')])
+    car_on_the_cable(fw, p2, 'Audi MMI')
+    assert autolink(fw, CAR)[0] == 1, 'another car on the cable'
+
+
+def test_bluetooth_connects_the_car_when_car_audio_is_off(fw):
+    Page(fw, [(CAR, 'BMW 83828', 'paired')])
+    assert autolink(fw, CAR)[0] == 1

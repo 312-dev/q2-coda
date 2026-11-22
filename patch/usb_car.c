@@ -33,12 +33,19 @@
 static struct {
     int on, decided, host, flowing, troubles, charger_told, audio;
     unsigned at, look_at, gone_at; /* gone_at: when the car's audio went during a relink, 0 none */
+    char name[64];                 /* the car's name, as it identified itself over iAP2 (q2-iap's name=) */
 } car __attribute__((section(".scratch")));
 
 int usb_car_on(void) { return car.on; }
 
+/* The car on the cable as it named itself over iAP2, while Car Audio has it; 0 otherwise. headset.c's
+ * auto-connect leaves that car's Bluetooth alone: on 2026-11-21 a Bluetooth relaunch auto-connected A2DP to the very
+ * car the Q2 was playing to over USB (docs/iphone-mode.md#car-audio-in-the-image). */
+const char *usb_car_name(void) { return car.on && car.decided && car.name[0] ? car.name : 0; }
+
 void usb_car_start(void) {
     car.on = 1, car.decided = car.host = car.flowing = car.troubles = car.charger_told = car.audio = 0, car.gone_at = 0;
+    car.name[0] = 0;
     car.at = car.look_at = (unsigned)time_now_ms();
     system(USB_CAR_SCRIPT " start >/dev/null 2>&1");
 }
@@ -115,6 +122,7 @@ int usb_car_poll(void) {
         field(raw, "why", line, sizeof line);
         ulog('I', "usb", line[0] ? line : "a car");
     }
+    field(raw, "name", car.name, sizeof car.name);
     int flowing = (int)number(raw, "flowing"), troubles = (int)number(raw, "troubles");
     if (flowing && !car.flowing) {
         field(raw, "name", v, sizeof v);

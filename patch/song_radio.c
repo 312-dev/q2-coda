@@ -46,8 +46,9 @@ static struct {
     unsigned seek_loads; /* playback_loads at the tap: the radio's queue is a later one */
 } sr __attribute__((section(".scratch")));
 
-/* A line in the system log (q2-log) for each radio decision: the drive of 2026-11-22 showed "Radio isn't available
- * for this song" on a second start after the car's stop, and nothing on the device said what the app answered. */
+/* A line in the system log (q2-log) for each radio decision: the drive of 2026-11-22 showed "Radio
+ * isn't available for this song" on a second start after the car's stop, and nothing on the device
+ * said what the app answered. */
 static void say(const char *what, int n) {
     char line[96];
     tk_snprintf(line, sizeof line, "%s %d", what, n);
@@ -241,7 +242,9 @@ int song_radio_tap(const void *unused) {
  * plays on), or stop (stop 1). 0 when it started or stopped, 1 when it didn't, 3 when no song has
  * that id. */
 int song_radio_car(int id, int stop_it) {
-    say(stop_it ? "the car stops it, on" : sr.ask ? "the car starts one while an answer waits, id" : "the car starts one, id",
+    say(stop_it  ? "the car stops it, on"
+        : sr.ask ? "the car starts one while an answer waits, id"
+                 : "the car starts one, id",
         stop_it ? song_radio_on() : id);
     if (stop_it) {
         if (song_radio_on()) stop();
@@ -267,7 +270,8 @@ void song_radio_poll(void) {
     unsigned now = time_now_ms();
     if (sr.ask) {
         int code = addon_radio_answer(sr.ask);
-        if (code >= 0 || now - sr.ask_at >= SR_WAIT_MS) say("the app's answer (-1 none in time)", code);
+        if (code >= 0 || now - sr.ask_at >= SR_WAIT_MS)
+            say("the app's answer (-1 none in time)", code);
         if (code == 0) {
             sr.ask = 0;
             sr.seek_at = sr.sec > 0 ? stamp(now) : 0;

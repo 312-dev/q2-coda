@@ -135,14 +135,19 @@ static void who(char *out, unsigned n, const char *mac) {
 
 /* An auto-link decision (headset.c headset_bt_autolink, at boot, at each Bluetooth on and, as usb,
  * at a cable in): the device it pages and why, or why it pages none. connected: the link list's
- * connected item, which stops it; else go says whether the target was paired. */
+ * connected item, which stops it; else go says whether the target was paired, or (-1) that it is
+ * the car Car Audio has on the cable (usb_car.c usb_car_name). */
 void bt_trace_autolink(const char *why, const char *target, const char *connected, int go) {
     char a[96], c[96], b[256];
     const char *saved = (const char *)BTLINKMAC;
     who(a, sizeof a, target ? target : "");
     const char *which =
         target && mac_eq(target, saved) ? "the saved device" : "not the saved device";
-    if (connected) {
+    if (go < 0) {
+        tk_snprintf(b, sizeof b,
+                    "auto-connect (%s) skips %s: the car on the cable, whose audio is Car Audio's",
+                    why, a);
+    } else if (connected) {
         who(c, sizeof c, connected);
         tk_snprintf(b, sizeof b, "auto-connect (%s) skips %s: %s is connected", why, a, c);
     } else if (go)

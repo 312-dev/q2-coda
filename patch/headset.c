@@ -44,14 +44,21 @@ static int bt_connected(char *mac) {
 }
 void bt_trace_why(const char *why, const char *mac); /* bt_trace.c */
 void bt_trace_autolink(const char *why, const char *target, const char *connected, int go);
+const char *usb_car_name(void);                           /* usb_car.c */
+int bt_dev_find(const char *mac);                         /* bt_ui.c */
+const char *bt_dev_name(int i);
 /* Auto-link would append its target after a connected incoming link; its failure clears both. Each
  * decision is logged with its target and why (bt_trace_autolink), and a connect it goes ahead with
  * as auto, or usb from headset_bt_usb (docs/internals.md#bluetooth-connection-trace). */
 int headset_bt_autolink(char *address) {
     char item[32];
     int linked = bt_connected(item);
+    const char *why = hl.usb ? "usb" : "auto", *car = usb_car_name(), *name = bt_dev_name(bt_dev_find(address));
+    if (!linked && car && name && !tk_strcmp(car, name)) { /* the car on the cable plays the Q2 over USB already */
+        bt_trace_autolink(why, address, 0, -1);
+        return 0;
+    }
     int go = !linked && checkPairDev(address);
-    const char *why = hl.usb ? "usb" : "auto";
     bt_trace_autolink(why, address, linked ? item : 0, go);
     if (go) bt_trace_why(why, address);
     return go;
