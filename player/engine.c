@@ -485,6 +485,44 @@ static void settle_preload(int wait) {
     }
 }
 
+/* ---- another source's sound for the car (feed.c, docs/iphone-mode.md#other-sources-over-usb) ----
+ * With nothing of its own playing and the car's way the output, the player writes what q2video sent to the feed to the
+ * car's PCM, at FEED_RATE, unity: the same PCM rules as a song's (a dry ring is the silence the never-stopped PCM
+ * plays, output.c alsa_sw), and the same close (its silence written out first). A song, a click, another way or the
+ * feed quiet for FEED_END_MS (the source ended, paused or gone) ends it. */
+enum { FEED_END_MS = 2000, FEED_TICK = 1024 };
+static void feed_session(void) {
+    struct ctl *c = &ctl;
+    struct pcm_format f = {FEED_RATE, 2, 2, 0, DSD_PCM};
+    static uint8_t buf[FEED_TICK * 4];
+    output_car_song(FEED_RATE, 0);
+    if (!(out = output_open(&f, 3, last_hw))) return;
+    out_way = 3;
+    output_volume(out, UNITY);
+    fprintf(stderr, "q2player: the car plays another source\n");
+    for (;;) {
+        pthread_mutex_lock(&c->mu);
+        int other = c->play || c->click || car_way(c->outputway) != 3;
+        pthread_mutex_unlock(&c->mu);
+        if (other) break;
+        int n = feed_take(buf, FEED_TICK);
+        if (n > 0) {
+            int w = output_write(out, buf, n);
+            if (w == OUTPUT_CAR_GONE) {
+                output_car_gone();
+                break;
+            }
+            if (w < 0) break;
+            continue;
+        }
+        if (feed_heard_ms() > FEED_END_MS) break;
+        feed_pulling(); /* the car still takes it: the source is paced, not dropped */
+        usleep(10000);
+    }
+    fprintf(stderr, "q2player: the car's other source ended\n");
+    close_output(0);
+}
+
 void *engine_thread(void *unused) {
     struct ctl *c = &ctl;
     struct source *cur = NULL;
@@ -497,6 +535,14 @@ void *engine_thread(void *unused) {
             ipc_status_note(c);
             while (!c->play) {
                 c->stop = c->seek = c->preload = c->close_preload = 0; /* nothing is playing: stock answers none of these */
+                if (car_way(c->outputway) == 3 && feed_frames() > 0) { /* another source for the car */
+                    pthread_mutex_unlock(&c->mu);
+                    if (out) output_drop(out);
+                    close_output(0);
+                    feed_session();
+                    pthread_mutex_lock(&c->mu);
+                    continue;
+                }
                 if (c->click) { /* the Clicker's, with nothing open: a PCM of its own for it */
                     int kind = c->click, way = car_way(c->outputway);
                     c->click = 0;

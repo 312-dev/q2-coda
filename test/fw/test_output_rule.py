@@ -6,12 +6,9 @@ import ctypes as C
 import pytest
 
 from conftest import O
-from test_radio import Vid, page as radio_page, play as radio_station, rd
+from test_radio import Vid, exec_args, page as radio_page, play as radio_station, rd
 from test_radio_tuner import TUNER, Tuner
 from test_usb_car import auto, state
-from test_nav_library_pages import ui  # noqa: F401
-from test_nav_hold import recs  # noqa: F401
-from test_now_source import Car
 
 KEY_PLAY = O['KEY_PLAY']
 
@@ -168,17 +165,30 @@ def test_radio_s_page_does_not_open_with_nothing_to_play_to(fw):
     assert fw.fn('tuner_state', C.c_int)() == 0
 
 
-@pytest.mark.parametrize('forbidden', [1, 0])
-def test_one_refusal_and_one_toast_when_there_is_no_output_and_the_car_has_the_usb(fw, ui, mcl, recs, forbidden):
-    """Radio's start with Car Audio on the cable and the car's file there (videos.c car_takes_audio refuses it): with no
-    output at all, stock's gate refuses first (its own message) and the car's toast never shows; with an output, the
-    car's refusal alone, its toast once."""
-    car = Car(fw, ui, recs)
-    fw.fn('usb_car_start', None)()
-    car.files['/tmp/q2-iap.audio'] = b'hw:CARD=UAC1Gadget,0\n44100\n'
-    fw.mock('fw_access', lambda path, *_: 0 if C.string_at(path).decode() in car.files else -1)
-    asked = forbid(fw, forbidden)
-    fw.mock('fw_fork', lambda *_: 4242)
-    assert fw.fn('tuner_open', C.c_int, C.c_void_p, C.c_void_p)(None, None) == 0
-    assert asked == [0] and not fw.calls('fw_fork')
-    assert ui.toasts == ([] if forbidden else ["Plays on the Q2 only, not over the car's USB"])
+@pytest.mark.parametrize('car', [1, 0])
+def test_with_no_jack_or_bluetooth_a_station_plays_into_the_car_or_is_refused_once(fw, car):
+    """No jack and no Bluetooth. With the car taking the USB audio (q2-iap's car file there, the car asking for audio),
+    the car counts as an output: an Internet Radio station starts, routed into the car (q2video on q2car), with no
+    toast. With no car either, stock's gate refuses it with its one message and nothing starts."""
+    u = auto(fw)  # the car first: its stand-ins for the timers and files, then the page's over them
+    state(u, verdict='car', host=1, name='BMW 83828', audio=car, flowing=car, troubles=0)
+    p = radio_page(fw, {'/tmp/q2-iap.audio': b'hw:CARD=UAC1Gadget,0\n44100\n'} if car else None)
+    fw.mock('fw_system', lambda *_: 0)
+    fw.mock('stock_valid_output_trampoline', lambda *_: 0)  # no jack, no Bluetooth
+    refused = []
+
+    def gate(quiet, *_):  # stock's check_forbid_play_no_headset: its message (msg_noheadset) when it refuses
+        ok = fw.fn('ringnav_valid_output', C.c_int)()
+        if not ok and not quiet:
+            refused.append(1)
+        return int(not ok)
+    fw.mock('check_forbid_play_no_headset', gate)
+    fw.mock('fw_fork', lambda *_: 0)  # the child's side
+    got = exec_args(fw)
+    p.menu('Featured')
+    p.rows('station_click')[3]()
+    assert p.toasts == []
+    if car:
+        assert refused == [] and got and got[0][3:4] == ['q2car'], got
+    else:
+        assert refused == [1] and got == [], got

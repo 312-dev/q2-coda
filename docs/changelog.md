@@ -1,7 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
-  - Car Audio: Radio, Internet Radio and Videos no longer play silently while the car plays the Q2 over USB (only your library's songs go over the car's USB): the Q2 says so instead, and the music you were playing carries on.
+  - Car Audio: Radio, Internet Radio, Videos and Spotify now play through the car's USB too, where they went to Bluetooth or nowhere while the car listened to USB.
   - Radio: starting a song's radio again after stopping it (from the car or on the Q2) works, where it said "Radio isn't available for this song".
   - Car Audio: the car's Up Next shows the queue of songs from your server, and their covers come from the songs themselves when the Q2 has no other.
   - Bluetooth: losing a Bluetooth headset or car mid-song no longer starts the next song a few seconds after the Q2 paused, which kept the headphone amplifier powered on with nothing listening (once for almost an hour and a half) and the battery draining. The song stays paused where it was.

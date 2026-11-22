@@ -12,6 +12,7 @@ from test_coda_rc_shim import NOW, Q2
 from test_nav_library_pages import ui  # noqa: F401
 from test_nav_hold import recs  # noqa: F401
 from test_radio_tuner import Rt
+from test_radio import exec_args
 
 PLAY, COVER = '/tmp/q2-bt.play', '/tmp/q2-bip.now'
 # iHeart's StreamTitle as q2video writes it from the stream (the drive of 2026-11-20)
@@ -227,19 +228,20 @@ def test_radio_holds_the_library_paused_where_it_was(fw, ui, mcl, recs):
     assert (car.now()['source'], car.now()['state'], car.now()['pos']) == ('library', '2', '61000')
 
 
-def test_radio_waits_while_the_car_takes_the_audio(fw, ui, mcl, recs):
+def test_radio_plays_to_the_car_while_the_car_takes_the_audio(fw, ui, mcl, recs):
     """The drive of 2026-11-22: Radio opened while the car played the Q2 over USB; its sound went to demo's output (A2DP
-    to the car) and iDrive showed its station over silence. While the car takes the audio (q2-iap's car file), Radio
-    does not open, the Library plays on untouched, and the Q2 says why."""
+    to the car) and iDrive showed its station over silence. While the car takes the audio (q2-iap's car file), the
+    receiver plays to ALSA's q2car, the player's feed to the car (docs/iphone-mode.md#other-sources-over-usb); the
+    Library is held as for any Radio."""
     car = Car(fw, ui, recs)
     fw.fn('usb_car_start', None)()  # Car Audio's iPhone on the cable
     car.files['/tmp/q2-iap.audio'] = b'hw:CARD=UAC1Gadget,0\n44100\n'
     fw.mock('fw_access', lambda path, *_: 0 if C.string_at(path).decode() in car.files else -1)
-    saves = []
-    fw.mock('player_save_stop', lambda *_: saves.append(1) or 0)
-    fw.mock('fw_fork', lambda *_: 4242)
-    assert fw.fn('tuner_open', C.c_int, C.c_void_p, C.c_void_p)(None, None) == 0
-    assert saves == [] and not fw.calls('fw_fork') and ui.toasts == ["Plays on the Q2 only, not over the car's USB"]
+    fw.mock('fw_fork', lambda *_: 0)  # the child's side: q2video's arguments
+    got = exec_args(fw)
+    fw.fn('tuner_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+    assert got[0] == ['/usr/bin/q2video', '/usr/bin/q2video', '-t', 'q2car', 'h100'], got
+    assert ui.toasts == []
 
 
 def test_the_owner_s_state_for_home_control_center_and_the_status_row(fw, ui, mcl, recs):

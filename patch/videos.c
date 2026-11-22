@@ -62,34 +62,19 @@ static int usb_soft(void) { return g_usbvol_mode && I(USB_MIXER, 0) == -2; }
  * device demo writes to /mnt/data/asound.conf). A USB DAC is "usb", which the helper finds in
  * /proc/asound/cards (plughw, for its rate): with g_volume when its volume is soft, else "h" and
  * the volume, which the helper only shows. */
+#define CAR_FILE "/tmp/q2-iap.audio" /* q2_iap.c's car_file: the car takes the player's audio over USB */
+int usb_car_on(void);                /* usb_car.c */
 const char *output_device(char *vol) {
+    /* the car: ALSA's q2car (assets/alsa/30-q2car.conf), which the player plays on to the car at unity, the car's knob
+     * its volume (docs/iphone-mode.md#other-sources-over-usb) */
+    if (usb_car_on() && !access(CAR_FILE, 0)) {
+        memcpy(vol, "h100", 5); /* "h": q2video only shows it */
+        return "q2car";
+    }
     int way = mclGetOutputWay();
     tk_snprintf(vol, 5, way == 2 && !usb_soft() ? "h%u" : "%u",
                 way == 1 ? headset_gain() : g_volume);
     return way == 1 ? "plug:bluealsa" : way == 2 ? "usb" : 0;
-}
-
-/* Car Audio's USB stream carries the player's own songs alone (player/output.c output_car, while q2-iap's car file
- * is there): q2video (Radio, Internet Radio, Videos) plays to demo's output, which the car does not hear, so on the
- * drive of 2026-11-22 Radio's station name reached the car over silence (its sound went to Bluetooth A2DP). Such a
- * start is refused while the car takes the audio (Car Audio on the cable and q2-iap's car file there), with a toast at most every CAR_SAY_MS, the Library left playing
- * on. 1 when refused. Each start asks output_rule.c's no-output gate first and this one only when that let it
- * through, so one press gets one toast. ponytail: routing them to the car needs the player to take a second source's PCM while its
- * own song is paused or stopped (docs/iphone-mode.md#other-sources-over-usb). */
-#define CAR_FILE "/tmp/q2-iap.audio" /* q2_iap.c's car_file */
-void ulog(char level, const char *src, const char *msg); /* ulog.c */
-int usb_car_on(void);                                    /* usb_car.c */
-#define CAR_SAY_MS 10000
-int car_takes_audio(void) {
-    static unsigned said __attribute__((section(".scratch")));
-    if (!usb_car_on() || access(CAR_FILE, 0)) return 0; /* the iPhone gadget on the cable, and the car's file */
-    unsigned now = time_now_ms();
-    if (!said || now - said >= CAR_SAY_MS) {
-        said = now | 1;
-        toast("Plays on the Q2 only, not over the car's USB");
-        ulog('I', "usb", "a source other than the Library refused: the car takes the audio over USB");
-    }
-    return 1;
 }
 
 /* The headphone output readied as stock's player_start readies it before each track (headset mode,
@@ -131,8 +116,7 @@ int video_start(const char *file, int radio) {
 /* path played from its saved place (video_click). */
 static void video_play(const char *path) {
     if (vid.pid) return;
-    /* nothing to play to (output_rule.c), else the car's USB taking the audio: one refusal, one toast */
-    if (check_forbid_play_no_headset(0) || car_takes_audio()) return;
+    if (check_forbid_play_no_headset(0)) return; /* nothing to play to (output_rule.c) */
     headset_manual();
     spot_yield(); /* librespot and radio hold the PCM too, as for local music */
     radio_stop();

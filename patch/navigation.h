@@ -1258,7 +1258,6 @@ enum { USB_CAR_NONE, USB_CAR_STORAGE, USB_CAR_CHARGER };
 void usb_car_start(void), usb_car_stop(int wait);
 int usb_car_poll(void), usb_car_on(void), usb_car_output(void);
 const char *usb_car_name(void);
-int car_takes_audio(void); /* videos.c */
 /* output_rule.c: no playback without an output (docs/internals.md#no-playback-without-an-output) */
 void output_rule_config(void);
 int ringnav_valid_output(void), stock_valid_output_trampoline(void);

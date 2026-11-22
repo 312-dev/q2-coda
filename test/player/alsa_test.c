@@ -72,10 +72,13 @@ int snd_pcm_sw_params_set_stop_threshold(snd_pcm_t *p, snd_pcm_sw_params_t *s, s
 int snd_pcm_sw_params_set_silence_size(snd_pcm_t *p, snd_pcm_sw_params_t *s, snd_pcm_uframes_t v) { s->silence = v; return 0; }
 int snd_pcm_sw_params(snd_pcm_t *p, snd_pcm_sw_params_t *s) { applied = *s, sw_calls++; return 0; }
 int snd_pcm_prepare(snd_pcm_t *p) { return prepare_fails && prepare_fails-- ? -19 : 0; }
+static int last_zero; /* the last write all silence */
 snd_pcm_sframes_t snd_pcm_writei(snd_pcm_t *p, const void *b, snd_pcm_uframes_t n) {
     writes++;
     if (write_fails && write_fails--) return gone_error;
     last_written = (long)n;
+    last_zero = 1;
+    for (snd_pcm_uframes_t i = 0; i < n * 2; ++i) last_zero &= !((const int16_t *)b)[i];
     return (snd_pcm_sframes_t)n;
 }
 int snd_pcm_delay(snd_pcm_t *p, snd_pcm_sframes_t *d) { *d = 0; return 0; }
@@ -179,6 +182,21 @@ int main(void) {
         car_case("car-late3", 12, -1, -1);           /* 3009 ms in the BMW, the second drive (2026-11-20) */
         car_case("car-left", 1000, 3, -1);
         car_case("car-cut", 1000, -1, 3);
+        /* way 3's close, whatever played (a song, or another source through feed.c: engine.c feed_session): its last
+         * write is silence, so the stopped gadget's repeated packet is silence, no buzz */
+        struct pcm_format f = {0};
+        f.rate = FEED_RATE, f.channels = 2, f.bytes = 2;
+        static int16_t tone[200];
+        for (int i = 0; i < 200; ++i) tone[i] = (int16_t)(1000 + i);
+        FILE *c = fopen(car_file, "w");
+        if (c) fputs("hw:CARD=UAC1Gadget,0\n44100\n", c), fclose(c);
+        wait_busy = 0, waits = 0;
+        struct output *o = output_open(&f, 3, 17);
+        if (o) {
+            output_write(o, (const uint8_t *)tone, 100);
+            output_close(o);
+            printf("car-close last %ld zero %d\n", last_written, last_zero);
+        }
     }
     avail_now = 0;
     gone_case("bt-gone", 1, -19, 0, 3, 0);         /* SelectCodec: the new PCM is there after three looks */

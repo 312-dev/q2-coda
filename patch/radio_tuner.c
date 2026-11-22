@@ -1273,9 +1273,8 @@ int tuner_open(void *ctx, void *event) {
         tune();
         return 0;
     }
-    /* nothing to play to: the page does not open, as stock's Now Playing closes (output_rule.c); nor while the car's
-     * USB takes the audio (videos.c). The first refusal's toast alone. */
-    if (check_forbid_play_no_headset(0) || car_takes_audio()) return 0;
+    /* nothing to play to: the page does not open, as stock's Now Playing closes (output_rule.c) */
+    if (check_forbid_play_no_headset(0)) return 0;
     if (!(rt = calloc(1, sizeof *rt))) return 0;
     if (!page_make()) {
         free(rt);
