@@ -41,6 +41,9 @@ static struct {
     unsigned at, item; /* the stamp and the item NP_PLAY_FILE was written with */
     int held, held_sec,
         held_total; /* the Library held for another output (now_hold): its second and length */
+    int start_sec;  /* where the Library's song last started, in its own seconds (now_starting) */
+    unsigned
+        start_key; /* ... that song's path hash and queue place, so another's start is not it */
 } np __attribute__((section(".scratch")));
 
 static unsigned np_ms(void) {
@@ -112,6 +115,41 @@ void *now_song(unsigned *at, unsigned *n, int *pressed) {
     return r ? r : queue_now(at, n);
 }
 
+/* The playing song's path hash and queue place, 0 with none. */
+static unsigned song_key(void) {
+    unsigned at, n;
+    void *r = queue_now(&at, &n);
+    const char *path = r ? P(r, REC_PATH) : (const char *)0;
+    return path ? fnv(FNV_SEED, (const unsigned char *)path) ^ (unsigned)MCL(MCL_POS) * 0x9e3779b1u
+                : 0;
+}
+
+/* A start of the Library's player (chapters_streams_folders.c ringnav_start_player, before stock's
+ * mclStartPlayer reads and clears MCL_START_SEC): where it starts, as the song's own seconds (a CUE
+ * track's from its start). A song loaded paused there, as a boot resume, now_release or an output
+ * change loads it, reads 0 from q2player until it is heard, as from stock's player
+ * (player/engine.c play: resume_poll counts on it), and player_time answers this place until then.
+ */
+void now_starting(void) {
+    unsigned at, n;
+    void *r = queue_now(&at, &n);
+    int ss = MCL(MCL_START_SEC), cue = r ? I(r, REC_CUE_START) : 0;
+    np.start_sec = ss > cue ? ss - cue : 0;
+    np.start_key = np.start_sec ? song_key() : 0;
+}
+
+/* player_playtime_and_length, but a song loaded paused at a place (now_starting) and not yet heard
+ * reads that place, not the player's 0. */
+static int player_time(int *sec, int *total) {
+    int r = player_playtime_and_length(sec, total);
+    if (!np.start_sec) return r;
+    if (*sec > 0 || mclGetPlayStatus() != 3 || song_key() != np.start_key)
+        np.start_sec = 0; /* heard, playing, stopped or another song: the player's own second */
+    else
+        *sec = np.start_sec;
+    return r;
+}
+
 /* Stock's Now Playing update (playing_page_update, 0x53cf08) reads the state and the time through
  * these, where it called mclGetPlayStatus and player_playtime_and_length (tools/build.py
  * NP_TIME_CALLS): stopped, it writes 0 to the bar and both times. Held (now_hold) the player is
@@ -119,7 +157,7 @@ void *now_song(unsigned *at, unsigned *n, int *pressed) {
  * where Play will go on from. Otherwise they are stock's two calls. */
 int now_page_status(void) { return np.held ? 3 : mclGetPlayStatus(); }
 int now_page_time(int *sec, int *total) {
-    if (!np.held) return player_playtime_and_length(sec, total);
+    if (!np.held) return player_time(sec, total);
     *sec = np.held_sec, *total = np.held_total;
     return 0;
 }
@@ -174,7 +212,7 @@ int now_time(int *sec, int *total) {
         return 3;
     }
     *sec = -1, *total = 0;
-    player_playtime_and_length(sec, total);
+    player_time(sec, total);
     return mclGetPlayStatus();
 }
 

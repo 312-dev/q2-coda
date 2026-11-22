@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Now Playing: a song waiting paused where you left it (after a restart with Memory Playback, after a game, a video or a radio station) shows that time and its progress bar, where it showed 0:00 until you pressed Play.
   - Games: a card game with its own sound (Groovebox) now keeps the Library's song paused where it was while it plays and gives it back paused there when you leave the game, where the song was stopped and its place lost.
   - Internet Radio, Radio and Videos: while a station or a video plays, the Library's Now Playing shows the song's place, its time and progress bar where Play will carry on from, where it showed 0:00.
   - Car Audio: unplugging from the car pauses the music, as an iPod does, unless headphones are in or a Bluetooth headset is connected, where it carries on. It used to play on silently through the headphone output with nothing plugged in, draining the battery.

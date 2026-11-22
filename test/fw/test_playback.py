@@ -2026,6 +2026,37 @@ def test_a_stale_checkpoint_is_ignored(saved):
     assert saved.fw.calls('mclSetStartSeekTime')[-1][1][0] == 10
 
 
+def test_a_boot_resume_reads_its_place_paused_until_it_is_heard(saved):
+    """Memory Playback's resume loads the song paused at its second (mclSetStartSeekTime, read and cleared by stock's
+    mclStartPlayer). q2player reads 0 until the song is heard, as stock's does; Now Playing's time
+    (now_source.c now_time, and stock's page update through now_page_time) reads the place, from the song's own
+    start (a CUE track's less its start), until Play."""
+    rows = full_queue(saved)
+    saved.sec, saved.s.dirty = 33, 1
+    saved.save()
+    fw, mcl = saved.fw, saved.mcl
+    fw.mock('mclSetStartSeekTime', lambda sec, *_: setattr(mcl, 'start_sec', sec) or 0)
+    restore(saved)
+    cue = C.c_int.from_address(rows[mcl.pos] + O['REC_CUE_START']).value
+    mcl.start_sec += cue  # stock's start is the file's second: a CUE track's place is past its start
+    status, heard = [3], [0]
+    fw.mock('mclGetPlayStatus', lambda *_: status[0])
+    fw.mock('player_playtime_and_length', lambda sec, total, *_: (C.c_int.from_address(sec).__setattr__('value', heard[0]),
+                                                                  C.c_int.from_address(total).__setattr__('value', 200), 0)[2])
+    fw.fn('now_starting', None)()  # ringnav_start_player, before stock's mclStartPlayer clears it
+    mcl.start_sec = -1
+    sec, total = C.c_int(), C.c_int()
+    now_time = fw.fn('now_time', C.c_int, C.c_void_p, C.c_void_p)
+    page_time = fw.fn('now_page_time', C.c_int, C.c_void_p, C.c_void_p)
+    assert now_time(C.byref(sec), C.byref(total)) == 3 and sec.value == 33
+    page_time(C.byref(sec), C.byref(total))
+    assert sec.value == 33 and total.value == 200
+    status[0], heard[0] = 2, 34  # Play: the player's own second from here
+    assert now_time(C.byref(sec), C.byref(total)) == 2 and sec.value == 34
+    status[0], heard[0] = 3, 0  # a later load with no place of its own reads the player's 0
+    assert now_time(C.byref(sec), C.byref(total)) == 3 and sec.value == 0
+
+
 def test_memory_playback_off_seeks_nowhere(saved):
     full_queue(saved)
     saved.sec, saved.s.dirty = 10, 1
