@@ -170,6 +170,7 @@ static void log_msg(int from_q2, const u8 *m, unsigned len, unsigned max) {
 /* Input report ids and their sizes after the id (the report descriptor's counts), smallest first. PodBox sends no
  * report larger than 7 at high speed (95 bytes after the id), and the cars it runs in take that; so does this. */
 static const u16 in_report_sizes[] = { 5, 9, 13, 17, 25, 49, 95 };
+static long sent_at; /* the Q2's last input report handed over (link_health) */
 
 static void send_bytes(const u8 *p, unsigned n) {
     unsigned off = 0;
@@ -183,6 +184,7 @@ static void send_bytes(const u8 *p, unsigned n) {
         r[1] = (off ? 0x01 : 0) | (off + take < n ? 0x02 : 0); /* continues, more to follow */
         memcpy(r + 2, p + off, take);
         H->send(r, 1 + size);
+        sent_at = H->now();
         off += take;
     } while (off < n);
 }
@@ -196,6 +198,10 @@ static unsigned syn_ack_len, window, peer_max, max_sends, max_cacks, unacked;
 static long rto, cack, unacked_since; /* milliseconds; rto 0: never sent again */
 static long wire_busy_at; /* the last time reports were still waiting for the wire */
 static long heard_at, waiting_since; /* the car's last output report; since when something has waited (iap2_tick) */
+static long acked_at, health_at; /* the car's last new acknowledgement; link_health's last line */
+static long health_ms = 5000;    /* --health-ms; 0 none */
+static unsigned dropped;         /* packets dropped from a full queue, this link */
+static int retries_held, drop_said;
 static int backlog(void) { return H && H->backlog ? H->backlog() : 0; }
 
 struct slot {
@@ -270,6 +276,7 @@ static void reset_link(void) {
     last_ack = my_seq;
     cs_len = unacked = 0;
     waiting_since = 0;
+    dropped = 0, drop_said = retries_held = 0;
     iap2_control_reset();
 }
 
@@ -338,6 +345,7 @@ static void take_ack(u8 ack) {
         H->log("link: up");
         iap2_control_link_up();
     }
+    if (ack != last_ack) acked_at = H->now();
     last_ack = ack;
     if (rto) drop_acked();
     pump();
@@ -527,10 +535,17 @@ static void group_end(void) {
 
 /* A packet's payload to go: at once while the window has room, else in turn (pump). */
 static void enqueue(u8 session, const u8 *b, unsigned n) {
-    if (q_count == QUEUE || n > sizeof queue[0].b) {
-        H->log(q_count == QUEUE ? "link: the send queue is full; a packet dropped" : "link: a packet too long; dropped");
+    /* a full queue's drops said once, then counted in link_health's line (q2muse-1125 logged 2,555 of them) */
+    if (q_count == QUEUE) {
+        if (!drop_said) H->log("link: the send queue is full; packets dropped (counted in link: health)"), drop_said = 1;
+        ++dropped;
         return;
     }
+    if (n > sizeof queue[0].b) {
+        H->log("link: a packet too long; dropped");
+        return;
+    }
+    drop_said = 0;
     struct queued *q = &queue[(q_head + q_count++) % QUEUE];
     q->session = session, q->len = n;
     memcpy(q->b, b, n);
@@ -1147,7 +1162,10 @@ static void lib_pump(void) {
             snprintf(t, sizeof t, "library: %s sent, %u songs of %u in %u updates, %ld ms", ls.diff ? "changes" : "whole",
                      ls.items, l->n, ls.updates, H->now() - ls.started);
             H->log(t);
+            long at = H->now();
             if (H->lib_saved) H->lib_saved();
+            snprintf(t, sizeof t, "library: its end taken in %ld ms (the record handed to its writer)", H->now() - at);
+            H->log(t);
         }
     }
 }
@@ -1500,11 +1518,39 @@ static void iap2_control_receive(const u8 *msg, unsigned len) {
 
 /* ---- the clock ---- */
 
+/* The link's health every health_ms while it is up (docs/iphone-mode.md#the-loop-s-steps), so a silence shows as it
+ * grows: the reports the writer still holds, the packets queued and unacknowledged, how long since the Q2 sent, the
+ * car sent anything and the car acknowledged something new, the packets dropped from a full queue, and the quiet
+ * against its limit. */
+static void link_health(long now, int bl) {
+    char t[300];
+    health_at = now;
+    long quiet = waiting_since ? now - (heard_at > waiting_since ? heard_at : waiting_since) : 0;
+    snprintf(t, sizeof t,
+             "link: health: reports waiting %d, queued %u, unacknowledged %u, sent %ld ms ago, heard %ld ms ago, "
+             "acknowledged %ld ms ago, dropped %u, quiet %ld of %ld ms",
+             bl, q_count, rto ? count : 0, sent_at ? now - sent_at : -1L, heard_at ? now - heard_at : -1L,
+             acked_at ? now - acked_at : -1L, dropped, quiet, link_quiet_ms);
+    H->log(t);
+}
+
 static void iap2_tick(void) {
     long now = H->now();
     if (!seen) return;
     int bl = backlog();
     if (bl) wire_busy_at = now;
+    /* The tries are counted only while the wire is clear: one held past every try's time is said once, as the reason
+     * the count of tries cannot give the link up (q2muse-1125's 23 minutes) */
+    if (link_up && count && rto && bl && slots[head].tries && !retries_held &&
+        now - slots[head].sent > rto * (long)max_sends) {
+        char t[160];
+        snprintf(t, sizeof t, "link: retries held: packet %u unacknowledged %ld ms, %d reports still wait for the wire",
+                 slots[head].packet[5], now - slots[head].sent, bl);
+        H->log(t);
+        retries_held = 1;
+    }
+    if (!bl) retries_held = 0;
+    if (link_up && health_ms && now - health_at >= health_ms) link_health(now, bl);
     if (link_up && count && rto && !bl) {
         struct slot *s = &slots[head];
         long since = s->sent > wire_busy_at ? s->sent : wire_busy_at; /* when it can have reached the car */

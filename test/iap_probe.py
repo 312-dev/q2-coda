@@ -1329,6 +1329,90 @@ def test_a_quiet_car_with_nothing_waiting_keeps_the_link(probe, tmp_path):
     assert 'link: lost' not in log.read_text()
 
 
+# ---- the log's diagnostics (docs/iphone-mode.md#the-loop-s-steps): what the next stall or dead link says of itself ----
+
+def test_a_stall_names_its_step(probe, tmp_path):
+    """A loop pass that holds 100 ms or more is logged with the step that took most of it. Here the cover's file is a
+    FIFO nobody writes for 400 ms, so its read holds the loop as a slow card would."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path, '--stall-ms', '100')
+    key = fnv_part(fnv_part(2166136261, 'Massive Attack'), 'Mezzanine')
+    art = files['art']/f'{key:08x}.jpg'
+    os.mkfifo(art)
+    try:
+        attrs = b''.join(prm(a) for a in (0, 1, 4, 6, 12, 0x1a))
+        car.send(message(0x5000, prm(0, attrs), prm(1, prm(0) + prm(1))))
+        time.sleep(0.4)
+        w = os.open(art, os.O_WRONLY)  # the read goes on, to an empty file
+        os.close(w)
+        time.sleep(0.3)
+    finally:
+        stop(p, fd)
+    stalls = [l for l in log.read_text().splitlines() if 'loop: a pass held' in l]
+    assert any("in the cover's read" in l for l in stalls), stalls
+    held = max(int(l.split('held ')[1].split(' ms')[0]) for l in stalls)
+    assert 300 <= held < 2000, stalls
+
+
+def test_ep0_s_odd_reads_are_said(probe, tmp_path):
+    """Every ep0 read that is not a whole event, and a SET_REPORT whose data stage never came, is a line saying what
+    was read and what q2-iap did next."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path)
+    try:
+        car.ffs.setup(0x21, 9, 0x020f, 2, 14)  # no data stage
+        time.sleep(2.5)
+        os.write(car.ffs.master, b'\x01\x02\x03\x04\x05')  # five bytes where an event's twelve belong
+        time.sleep(0.3)
+    finally:
+        stop(p, fd)
+    text = log.read_text()
+    assert 'SET_REPORT: no data stage' in text and 'the loop goes on' in text
+    assert "ep0: read 5 of an event's 12 bytes" in text
+
+
+def test_a_silence_is_seen_as_it_grows(probe, tmp_path):
+    """The link's health every --health-ms (reports waiting, packets queued, the ages of the last send, word and
+    acknowledgement), the tries said to be held while the wire is busy, and at the lost link the kernel's USB lines:
+    the 1125 drive's silence, line by line."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path, '--state', str(tmp_path/'state'), '--quiet-ms', '3500',
+                                    '--health-ms', '500')
+    w = os.open(car.ffs.path/'ep1', os.O_WRONLY | os.O_NONBLOCK)
+    try:
+        fcntl.fcntl(w, 1031, 4096)  # F_SETPIPE_SZ
+        try:
+            while True:
+                os.write(w, bytes(512))
+        except BlockingIOError:
+            pass
+        attrs = b''.join(prm(a) for a in (0, 1, 4, 6, 12))
+        car.send(message(0x5000, prm(0, attrs), prm(1, prm(0) + prm(1))))
+        assert p.wait(8) == 22
+    finally:
+        p.kill()
+        os.close(w)
+        os.close(fd)
+    text = log.read_text()
+    health = [l for l in text.splitlines() if 'link: health: ' in l]
+    assert len(health) >= 4 and 'reports waiting' in health[-1] and 'quiet' in health[-1], health
+    heard = [int(l.split('heard ')[1].split(' ms')[0]) for l in health]
+    assert heard[-1] > heard[0] + 1000, heard
+    assert 'link: retries held: packet' in text
+    assert 'kernel: ' in text and 'at the lost link' in text
+
+
+def test_a_lost_link_without_state_says_it_goes_on(probe, tmp_path):
+    """Whether the lost-link path ends q2-iap is said either way: here, with no --state, it goes on."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path)
+    try:
+        car.hold = True
+        car.send(message(0xDA00))
+        time.sleep(3.5)
+        assert p.poll() is None
+    finally:
+        stop(p, fd)
+    text = log.read_text()
+    assert 'link: lost (a packet went unacknowledged' in text and 'no --state, so q2-iap goes on' in text
+
+
 def test_a_server_song_s_cover_from_its_app(probe, tmp_path):
     """The drive of 2026-11-21 (q2muse-1125): The Boys Of Summer, a server song played from the Subsonic app's stream
     cache (/mnt/mmc/.subsonic/stream/...), showed its cover on the Q2 (its app's covers/<album id>.jpg,

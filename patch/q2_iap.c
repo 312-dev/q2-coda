@@ -36,6 +36,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/klog.h>
 #define ERRNO errno
 #else
 typedef unsigned int size_t;
@@ -85,6 +86,7 @@ void *realloc(void *, size_t);
 void free(void *);
 unsigned long strtoul(const char *, char **, int);
 int access(const char *, int);
+int klogctl(int, char *, int);
 #define ERRNO (*__errno_location())
 #define O_RDONLY 0
 #define O_WRONLY 1
@@ -219,6 +221,7 @@ static void strings(struct blob *out, int kind) {
 /* ---- the log ---- */
 
 static int logfd = 2;
+static long log_slowest; /* this loop pass's slowest log write, ms */
 static struct timespec t0;
 static long mono_ms(void) {
     struct timespec t;
@@ -233,6 +236,79 @@ static void logline(const char *tag, const char *msg) {
     int n = snprintf(line, sizeof line, "%ld.%03ld %s %s\n", ms / 1000, ms % 1000, tag, msg);
     if (n > (int)sizeof line - 1) n = sizeof line - 1, line[n - 1] = '\n';
     if (n > 0) write(logfd, line, n);
+    long took = mono_ms() - ms;
+    if (took > log_slowest) log_slowest = took; /* the card's own pace, for the loop's stall line (loop_end) */
+}
+
+/* ---- the event loop's steps (docs/iphone-mode.md#the-loop-s-steps) ----
+ * Each pass of the loop is cut into named steps (loop_step: the one that starts now, the last one closed); a pass that
+ * held the loop stall_ms or more is logged with the step that took the most of it, the slowest log write in it and,
+ * past STALL_KMSG_MS, the kernel's USB lines (kernel_usb_lines), so a stall names its cause in the log. A mark costs
+ * a clock read. */
+#define STALL_KMSG_MS 1000
+static long stall_ms = 100; /* --stall-ms */
+static long pass_at, step_at, step_most;
+static const char *step_now = "start", *step_most_name = "start";
+static const char *loop_step(const char *name) {
+    long now = mono_ms();
+    const char *was = step_now;
+    if (now - step_at > step_most) step_most = now - step_at, step_most_name = step_now;
+    step_at = now, step_now = name;
+    return was;
+}
+static void kernel_usb_lines(const char *why);
+static void loop_begin(void) {
+    pass_at = step_at = mono_ms(), step_most = 0, log_slowest = 0, step_now = step_most_name = "poll's wake";
+}
+static void loop_end(void) {
+    loop_step("poll");
+    long took = step_at - pass_at;
+    if (took < stall_ms) return;
+    char msg[200];
+    snprintf(msg, sizeof msg, "loop: a pass held %ld ms, %ld of it in %s; the slowest log write %ld ms", took, step_most,
+             step_most_name, log_slowest);
+    logline("probe", msg);
+    if (took >= STALL_KMSG_MS) kernel_usb_lines("after a stall");
+}
+
+/* The kernel's last USB lines (the controller's, dwc2, FunctionFS's, the gadget's and the UAC1 module's), from its
+ * ring buffer (klogctl's read-all, which takes nothing out of it), into the log: at a long stall and at a lost link,
+ * before the DAC's chatter rolls them out (on 2026-11-21 the cable's dmesg, saved at its end, began 190 s after the
+ * stall). At most once in 10 s, and the last KMSG_LINES of them. */
+#define KMSG_LINES 24
+static void kernel_usb_lines(const char *why) {
+    static long last = -100000;
+    long now = mono_ms();
+    if (now - last < 10000) return;
+    last = now;
+    enum { CAP = 1 << 17 };
+    char *b = malloc(CAP + 1), msg[300];
+    int n = b ? klogctl(3, b, CAP) : -1; /* SYSLOG_ACTION_READ_ALL */
+    if (n < 0) {
+        snprintf(msg, sizeof msg, "kernel: its log unreadable %s (errno %d)", why, b ? ERRNO : 0);
+        logline("probe", msg);
+        free(b);
+        return;
+    }
+    b[n] = 0;
+    static const char *const keys[] = { "dwc2", "ffs_", "functionfs", "FunctionFS", "gadget", "udc", "UDC", "usb", "USB", "uac", "UAC" };
+    const char *at[KMSG_LINES];
+    unsigned found = 0;
+    for (char *line = b; *line;) {
+        char *end = strchr(line, '\n');
+        if (end) *end = 0;
+        for (unsigned k = 0; k < sizeof keys / sizeof *keys; ++k)
+            if (strstr(line, keys[k])) {
+                at[found++ % KMSG_LINES] = line;
+                break;
+            }
+        line = end ? end + 1 : line + strlen(line);
+    }
+    snprintf(msg, sizeof msg, "kernel: %u USB lines in its log %s%s", found, why, found > KMSG_LINES ? ", the last ones:" : "");
+    logline("probe", msg);
+    for (unsigned i = found > KMSG_LINES ? found - KMSG_LINES : 0; i < found; ++i)
+        snprintf(msg, sizeof msg, "kernel: %.280s", at[i % KMSG_LINES]), logline("probe", msg);
+    free(b);
 }
 static void hex(char *out, unsigned cap, const unsigned char *p, unsigned n) {
     static const char d[] = "0123456789abcdef";
@@ -700,12 +776,41 @@ static void summary(void) {
  * shows the car the iPhone again (the gadget off the controller and back), which is how a car starts a session
  * afresh; it sent nothing more by itself after the loss on 2026-11-21 (126 s, to the cable out). */
 static void io_link_lost(void) {
+    kernel_usb_lines("at the lost link");
     if (state_file && !leave) leave = 22, logline("car", "link: lost; the iPhone shown again");
+    else logline("car", leave ? "link: lost; q2-iap already ending" : "link: lost; no --state, so q2-iap goes on");
 }
 
-static const struct iap2_host io = { io_send,   mono_ms,    io_log,  io_now_playing, "Q2 Muse", uuid,     library_id,
-                                     io_audio,  io_command, io_artwork, &lib_t,      lib_load,  lib_saved, lib_play,
-                                     lib_queue, io_backlog, io_link_lost };
+/* The host's calls that read or write a file or the database, each a step of the loop's of its own (loop_step), so
+ * a stall names the one that held it. */
+#define STEPPED(ret, name, what, params, args)                                                                      \
+    static ret name##_stepped params {                                                                                \
+        const char *was = loop_step(what);                                                                            \
+        ret r = name args;                                                                                            \
+        loop_step(was);                                                                                               \
+        return r;                                                                                                     \
+    }
+#define STEPPED_VOID(name, what, params, args)                                                                       \
+    static void name##_stepped params {                                                                               \
+        const char *was = loop_step(what);                                                                            \
+        name args;                                                                                                    \
+        loop_step(was);                                                                                               \
+    }
+STEPPED(int, io_now_playing, "the Now Playing file", (struct iap2_np * n), (n))
+STEPPED(unsigned, io_artwork, "the cover's read", (const struct iap2_np *n, u8 *out, unsigned cap), (n, out, cap))
+STEPPED(int, lib_load, "the library's read", (void), ())
+STEPPED_VOID(lib_saved, "the library's record", (void), ())
+STEPPED_VOID(io_audio, "the car's audio file", (int on), (on))
+STEPPED_VOID(io_command, "the shim's command file", (const char *verb), (verb))
+STEPPED_VOID(lib_play, "the shim's play list", (const unsigned *rids, unsigned n, unsigned at, int shuffle),
+             (rids, n, at, shuffle))
+STEPPED(int, lib_queue, "the shim's queue file", (unsigned *rids, unsigned cap), (rids, cap))
+
+static const struct iap2_host io = { io_send,           mono_ms,           io_log,        io_now_playing_stepped,
+                                     "Q2 Muse",         uuid,              library_id,    io_audio_stepped,
+                                     io_command_stepped, io_artwork_stepped, &lib_t,      lib_load_stepped,
+                                     lib_saved_stepped, lib_play_stepped,  lib_queue_stepped, io_backlog,
+                                     io_link_lost };
 
 /* The input report that echoes payload (link control 0, whole): the smallest that fits, zero padded,
  * written to the HID instance's ep1 in a child so the event loop never waits on the host's poll. */
@@ -764,7 +869,9 @@ static void setup(struct inst *i, const unsigned char *s) {
         }
         if (ans) {
             if (an > wl) an = wl;
+            const char *was = loop_step("an answer on ep0");
             r = write(i->ep0, ans, an);
+            loop_step(was);
         } else {
             stalled = 1;
             r = read(i->ep0, buf, 0); /* the wrong direction: FunctionFS stalls ep0 */
@@ -778,9 +885,11 @@ static void setup(struct inst *i, const unsigned char *s) {
     unsigned want = wl < sizeof buf ? wl : sizeof buf;
     /* the data stage, and the status stage acknowledged; at most DATA_STAGE_S, or the loop stops with it: on
      * 2026-11-21 a SET_REPORT's data never came, and this read held everything else for 35 s (the car dropped the link) */
+    const char *was = loop_step("a request's data stage");
     alarm(DATA_STAGE_S);
     r = read(i->ep0, buf, want);
     alarm(0);
+    loop_step(was);
     int e = r < 0 ? ERRNO : 0;
     if (rt == 0x21 && rq == 0x09) snprintf(note, sizeof note, "SET_REPORT type %u id %u", wv >> 8, wv & 255);
     else if (rt == 0x21 && rq == 0x0a) snprintf(note, sizeof note, "SET_IDLE");
@@ -792,6 +901,9 @@ static void setup(struct inst *i, const unsigned char *s) {
     logline(i->name, msg);
     if (rt == 0x21 && rq == 0x09 && r >= 2 + (int)sizeof detect && !memcmp(buf + 2, detect, sizeof detect))
         apple_seen(2, "iAP2's detect");
+    if (iap2_mode && i->kind == K_HID && rt == 0x21 && rq == 0x09 && r <= 0)
+        logline(i->name, "SET_REPORT: no data stage (the car gave the transfer up, or the read's 2 s ran out): nothing "
+                         "taken, the loop goes on");
     if (iap2_mode && i->kind == K_HID && rt == 0x21 && rq == 0x09 && r > 0) {
         /* A data stage shorter than asked, or not of the report named: on 2026-11-21 (q2muse-1125) a SET_REPORT of 14
          * bytes came back after a 12.3 s stall as 8, 01 0b 00 00 01 00 00 00, the car's next request (SET_INTERFACE)
@@ -901,6 +1013,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(o, "--auto-ms")) auto_ms = atoi(v), ++a;
         else if (!strcmp(o, "--car-ms")) car_ms = atoi(v), ++a;
         else if (!strcmp(o, "--quiet-ms")) link_quiet_ms = atoi(v), ++a;
+        else if (!strcmp(o, "--health-ms")) health_ms = atoi(v), ++a;
+        else if (!strcmp(o, "--stall-ms")) stall_ms = atoi(v), ++a;
         else if (!strcmp(o, "--card-root")) card_root = v, ++a;
         else if (!strcmp(o, "--uuid")) {
             /* the serial's first 32 hex digits as a UUID */
@@ -954,6 +1068,7 @@ int main(int argc, char **argv) {
         struct pollfd p[MAX_INST];
         for (int k = 0; k < ninst; ++k) p[k].fd = in[k].ep0, p[k].events = POLLIN, p[k].revents = 0;
         int n = poll(p, ninst, iap2_mode ? 10 : 500);
+        loop_begin();
         if (n < 0 && ERRNO != EINTR) {
             snprintf(msg, sizeof msg, "poll failed, errno %d", ERRNO);
             logline("probe", msg), rc = 1;
@@ -962,13 +1077,26 @@ int main(int argc, char **argv) {
         for (int k = 0; n > 0 && k < ninst; ++k) {
             if (!(p[k].revents & POLLIN)) continue;
             unsigned char e[12];
+            loop_step("an ep0 event's read");
             int r = read(in[k].ep0, e, sizeof e); /* one event at a time: a SETUP must be answered first */
+            loop_step("an ep0 event");
             if (r == (int)sizeof e) event(&in[k], e);
+            else {
+                snprintf(msg, sizeof msg, "ep0: read %d of an event's 12 bytes (errno %d): not an event, dropped", r,
+                         r < 0 ? ERRNO : 0);
+                logline(in[k].name, msg);
+            }
         }
-        if (iap2_mode) rate_poll(mono_ms()), iap2_tick();
+        loop_step("the rate file");
+        if (iap2_mode) rate_poll(mono_ms());
+        loop_step("iAP2's tick");
+        if (iap2_mode) iap2_tick();
         long now = mono_ms();
+        loop_step("the host's verdict");
         host_poll(now);
+        loop_step("the audio's health");
         health_poll(now);
+        loop_end();
         if (active && disabled_at >= 0 && now - disabled_at > gap_ms) {
             active = 0, disabled_at = -1;
             snprintf(msg, sizeof msg, "session %d ended (no ENABLE within %ld ms of the DISABLE)", session, gap_ms);
