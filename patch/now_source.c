@@ -7,8 +7,8 @@
  *   (lyrics_status_bar.c bar_status);
  * - now_song and now_time: the Library's song as Now Playing shows it and its second, for the pages
  *   that only ever show the Library (np_bar.c, nav/now_playing.c, lyrics.c) and for now_get; while
- *   Radio, Internet Radio or a video has the output the Library is held paused where it was
- *   (now_hold, now_release);
+ *   Radio, Internet Radio, a video or a sound game has the output the Library is held paused where
+ *   it was (now_hold, now_release);
  * - now_scrobbles: the one rule for what is scrobbled (nav/playback_power.c scrobble);
  * - now_get: all of it, for Car Remote and the iPhone cable (coda_rc_shim.c cr_now, which writes
  *   /tmp/coda-rc.now for coda-rc and q2-iap) and for now_poll, which hands it to the car over
@@ -124,17 +124,18 @@ int now_page_time(int *sec, int *total) {
     return 0;
 }
 
-/* Radio (radio_tuner.c tuner_open), an Internet Radio station (radio.c radio_play) or a video
- * (videos.c video_play) takes the output: the Library's song, playing or paused, is stopped with
- * its place kept (player_save_stop; a paused q2player would keep the PCM they need, and stock's
- * player_stop, which video_start calls, forgets the place), and now_time reads it paused there for
- * as long as they have it, Radio's page shut or not, and through a hand-over from one to another.
- * The Library chosen again ends the hold: Play on its Now Playing plays the song on from that place
- * (now_take_back: radio_tuner.c tuner_key, radio.c radio_take_back), and any start of its player,
- * a pick among them, plays from the player's own place (now_drop: radio_tuner.c tuner_yield and
- * ringnav_start_player); a Radio page that found no stations, shut, and a video's end load the
- * song again paused there for the user's Play (now_release), never playing on its own. A Library
- * that was stopped is left as it is. */
+/* Radio (radio_tuner.c tuner_open), an Internet Radio station (radio.c radio_play), a video
+ * (videos.c video_play) or a card game with the sound (addon.c addon_game_start) takes the output:
+ * the Library's song, playing or paused, is stopped with its place kept (player_save_stop; a paused
+ * q2player would keep the PCM they need, and stock's player_stop, which video_start calls, forgets
+ * the place), and now_time reads it paused there for as long as they have it, Radio's page shut or
+ * not, and through a hand-over from one to another. The Library chosen again ends the hold: Play on
+ * its Now Playing plays the song on from that place (now_take_back: radio_tuner.c tuner_key,
+ * radio.c radio_take_back), and any start of its player, a pick among them, plays from the player's
+ * own place (now_drop: radio_tuner.c tuner_yield and ringnav_start_player); a Radio page that found
+ * no stations, shut, and a video's or a sound game's end load the song again paused there for the
+ * user's Play (now_release), never playing on its own. A Library that was stopped is left as it is.
+ */
 void now_hold(void) {
     int status = mclGetPlayStatus();
     if (np.held || (status != 2 && status != 3)) return;
@@ -143,10 +144,11 @@ void now_hold(void) {
     np.held = 1;
     player_save_stop();
 }
-void now_release(void) {
-    if (!np.held) return;
+int now_release(void) {
+    if (!np.held) return 0;
     np.held = 0;
     player_save_start(1);
+    return 1;
 }
 /* The Library's player started (a pick: radio_tuner.c tuner_yield; any start:
  * ringnav_start_player): the held song is forgotten, the player's place is the one read. */
