@@ -219,3 +219,35 @@ def test_a_whole_song_or_one_outside_a_stream_cache_has_no_reach_of_its_own(fw):
     world.mtime[STREAM] = NOW
     assert reach(fw, 400) == -1
     assert reach(fw, 400, A) == -1
+
+
+def test_a_streams_start_logs_where_its_time_went(fw, mcl, songs):
+    """docs/internals.md#ui-pass-watchdog: the first start's UI-thread steps, timed: the folder listings and tag
+    reads of m3u_songs, then play_folder (Now Playing's open)."""
+    s = playlist(fw, mcl, songs, A, B)
+    lines = []
+
+    def write(fd, data, n, *_):
+        if fd == 2:
+            lines.append(C.string_at(data, n).decode().rstrip('\n').split(' ', 4)[4])
+        return n
+    fw.mock('fw_write', write)
+    listing, navigate = s.listing, s.navigate
+
+    def slow_listing(path, *_):
+        s.world.ms += 40
+        return listing(path)
+
+    def slow_navigate(name, ctx, *_):
+        s.world.ms += 300
+        return navigate(name, ctx)
+    fw.mock('toolsLoadDirectory', slow_listing)
+    fw.mock('navigator_to_with_context', slow_navigate)
+    s.land(A)
+    s.play(b'1 ' + PLAYLIST + b'\n')
+    s.step()
+    assert s.queued() == [A]
+    assert [l for l in lines if l.startswith('stream start:')] == ['stream start: 1 songs in 40 ms (list 40, tags 0), play 300 ms']
+    s.land(B)
+    s.step()
+    assert len([l for l in lines if l.startswith('stream start:')]) == 1  # a song joining the queue is no start
