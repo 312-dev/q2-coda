@@ -540,9 +540,10 @@ static unsigned fnv_part(unsigned h, const char *s) {
 
 /* A song's own picture (an embedded cover: every streamed Subsonic song of the 2026-11-22 drive had one, and the
  * car got none after the first, whose album Cover Flow had), fitted into 160 px as a baseline JPEG by ffmpeg in a
- * child, as Cover Flow fits one (patch/coverflow.c ff_run), at art_made.<FNV-1a of the path>.jpg. One at a time and
- * once a song (made.tried), ART_MADE_MS at most; when it is there for the song still playing, Now Playing goes again
- * whole (iap2_art_again), its cover with it. The loop never waits on it (art_made_poll). */
+ * child, as Cover Flow fits one (patch/coverflow.c ff_run), at art_made.<key>.jpg: the key the album's (its artist
+ * and name, as Cover Flow keys it), or for a song with no album its path's, so the album's next songs take it at
+ * once. One at a time, once a key (made.tried), the last album's kept, ART_MADE_MS at most; once it is there, Now
+ * Playing goes again whole (iap2_art_again), its cover with it. The loop never waits on it (art_made_poll). */
 #define ART_MADE_MS 20000
 static const char *art_made = "/tmp/q2-iap.art", *art_ffmpeg = "/usr/bin/ffmpeg"; /* --art-made, --ffmpeg */
 static struct {
@@ -552,7 +553,7 @@ static struct {
     char dst[600];
 } made;
 static int lib_app_cover(unsigned rid, char *out, unsigned cap); /* q2_iap_lib.c */
-static void art_made_ask(const char *path);
+static void art_made_ask(const char *path, unsigned key);
 /* The song's cover: Cover Flow's 160 px copy (keyed by artist and album), else a server song's from its app (its
  * catalogue row's album: lib_app_cover), else a cover beside the song, else the picture in the song's own file as
  * art_made_ask fitted it into 160 px (none yet: asked, and the car sent it once it is there). */
@@ -571,14 +572,15 @@ static unsigned io_artwork(const struct iap2_np *n, unsigned char *out, unsigned
         got = read_file(p, out, cap);
     }
     if (!got && n->path[0]) {
-        snprintf(p, sizeof p, "%s.%08x.jpg", art_made, fnv_part(2166136261u, n->path));
-        if (!(got = read_file(p, out, cap))) art_made_ask(n->path);
+        /* the album's, as the Bluetooth cover keys a song's own picture (bt_cover.c), else the song's */
+        unsigned key = n->album[0] ? fnv_part(fnv_part(2166136261u, n->artist), n->album) : fnv_part(2166136261u, n->path);
+        snprintf(p, sizeof p, "%s.%08x.jpg", art_made, key);
+        if (!(got = read_file(p, out, cap))) art_made_ask(n->path, key);
     }
     return got;
 }
 
-static void art_made_ask(const char *path) {
-    unsigned key = fnv_part(2166136261u, path);
+static void art_made_ask(const char *path, unsigned key) {
     if (made.pid || key == made.tried) return;
     made.tried = made.key = key, made.at = mono_ms();
     if (made.dst[0]) unlink(made.dst); /* the last song's: one kept, in RAM (/tmp) */

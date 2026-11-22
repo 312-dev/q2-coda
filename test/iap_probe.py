@@ -1457,9 +1457,15 @@ def test_a_song_s_own_picture_is_the_car_s_cover(probe, tmp_path):
                                f'path={song}\nshuffle=0\nrepeat=0\n')
         media, _ = np_updates(car)
         updates, setups = np_and_files(car, lambda u: False, seconds=4.0)
+        # the album's next song: its cover made already (keyed by the album), in its first update, no ffmpeg
+        files['np'].write_text(f'state=1\npos=1000\nlen=208\ntitle=Ribs\nartist=Lorde\nalbum=Pure Heroine\n'
+                               f'path={tmp_path}/ribs.flac\nshuffle=0\nrepeat=0\n')
+        _, next_setups = np_and_files(car, lambda u: False, seconds=2.0)
     finally:
         stop(p, fd)
     text = log.read_text()
+    assert next_setups and min(next_setups.values()) > 1000, next_setups
+    assert text.count('asked of ffmpeg') == 1, text.count('asked of ffmpeg')
     assert media.get(0x1a) and "art: the song's own picture made" in text, text[-600:]
     sizes = sorted(setups.values())
     assert sizes[0] == 0 and sizes[-1] > 1000, setups  # empty at first, then the made cover
