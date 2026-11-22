@@ -1792,3 +1792,32 @@ def test_a_folder_s_delete_removes_that_folder_alone_whatever_its_name(fw, tmp_p
     cmd = block(fw, size=25)  # exactly the command and its NUL
     assert rm(cmd, 25, b'', b"/mnt/mmc/a'b") == 24 and C.string_at(cmd) == b"rm -rf '/mnt/mmc/a'\\''b'"
     assert rm(cmd, 24, b'', b"/mnt/mmc/a'b") == 1 and C.string_at(cmd) == b':'  # a byte short: removes nothing
+
+
+def test_a_video_holds_the_library_paused_where_it_was_and_gives_it_back(fw):
+    """A video takes the output as Radio does (now_source.c now_hold): the Library's song playing at 61 s is stopped
+    with its place kept, not forgotten by stock's player_stop, and reads paused at 61 s while the video plays; the
+    video ended, the song is loaded again paused at 61 s (now_release), as when Radio's page shuts with no station."""
+    from test_radio import Library
+    lib = Library(fw)
+    Card(fw)
+    fw.mock('fw_fork', lambda *_: 77)
+    fw.mock('fw_socket', lambda *_: 9)
+    assert fw.fn('video_click', C.c_int, C.c_char_p)(b'/m/a.mp4') == 1
+    assert lib.calls[0] == 'save_stop', lib.calls
+    assert lib.now() == (3, 61)
+    fw.mock('fw_waitpid', lambda *_: 77)
+    fw.fn('video_poll', None)()
+    assert video(fw).pid == 0 and lib.calls[-1] == 'save_start 1' and lib.now() == (3, 61)
+
+
+def test_a_video_over_a_stopped_library_leaves_it_stopped(fw):
+    from test_radio import Library
+    lib = Library(fw, status=1, sec=-1)
+    Card(fw)
+    fw.mock('fw_fork', lambda *_: 77)
+    fw.mock('fw_socket', lambda *_: 9)
+    fw.fn('video_click', C.c_int, C.c_char_p)(b'/m/a.mp4')
+    fw.mock('fw_waitpid', lambda *_: 77)
+    fw.fn('video_poll', None)()
+    assert 'save_start 1' not in lib.calls and lib.now() == (1, -1)

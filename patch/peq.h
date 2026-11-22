@@ -666,6 +666,11 @@ unsigned spot_session(void), radio_session(void), video_session(void);
 int radio_now(char *station, char *title, unsigned cap);
 int spot_now(char *title, char *artist, char *album, unsigned cap, unsigned *pos, unsigned *len);
 int now_time(int *sec, int *total); /* now_source.c: the Library's second, length and play state */
+/* now_source.c: the Library's song held paused where it was while Radio, Internet Radio or a video
+ * has the output, given back paused, played on, or forgotten for a start of its own */
+void now_hold(void), now_release(void), now_drop(void), now_take_back(void);
+int play_hold_released(void); /* navigation.c: Play/Pause's release ends a hold that fired */
+int radio_take_back(void *top, unsigned key); /* radio.c: Play on the Library's Now Playing */
 void spot_set_playing(int playing), radio_set_playing(int playing), video_set_playing(int playing);
 int video_start(const char *file, int radio); /* videos.c */
 /* radio_tuner.c: Radio's receiver, 0 none, 1 playing, 2 paused (its page shut or not); played or
