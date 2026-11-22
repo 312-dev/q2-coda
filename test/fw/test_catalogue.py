@@ -1863,7 +1863,7 @@ def test_bluetooth_names_a_server_songs_cover_as_its_app_keeps_it(rig, fw):
     cover = '/mnt/mmc/.subsonic/covers/al1.jpg'
     rig.files.files[cover] = b'\xff\xd8'
     id3 = C.create_string_buffer(0x700)
-    id3[0x504:0x505], id3[0x404:0x405] = b'B', b'A'
+    id3[0x504], id3[0x404] = b'B', b'A'  # ID3_ARTIST, ID3_ALBUM
     stream = b'/mnt/mmc/.subsonic/stream/9f3a/original/0/One [s1].flac'
     fw.fn('bt_cover_note', None, C.c_char_p, C.c_char_p)(id3, stream)
     h = (2166136261 * 16777619) & 0xffffffff  # tags_key('', cover) (coverflow.c): the empty artist, then the path
