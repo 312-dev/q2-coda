@@ -23,7 +23,8 @@
 #     tools/ci/merge_queue.py). At most Q2_HEAVY_BRANCH_SLOTS (4) branch jobs run at once and each gets a low
 #     CPU weight, so the queue's batch keeps its speed whatever the workers run.
 #   - Q2_HEAVY_MAX_S (1800) is the longest a job may run: its scope is stopped then (RuntimeMaxSec) and
-#     q2-heavy exits 143, so nothing heavy outlives its purpose. The longest suite takes under five minutes.
+#     q2-heavy exits 143, so nothing heavy outlives its purpose. The longest suites, test/player/run.py and test/unit, take
+#     about five minutes each.
 #   - While it runs, ~/.cache/q2-heavy/jobs/<pid> says whose it is (class, worktree, command, start,
 #     deadline, scope): `q2 status` lists them and `q2 stop-all` stops each by its scope.
 slots=${Q2_HEAVY_SLOTS:-10}

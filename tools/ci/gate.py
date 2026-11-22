@@ -83,15 +83,16 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 HEAVY = pathlib.Path(os.environ.get('Q2_HEAVY', pathlib.Path.home()/'.local/bin/q2-heavy'))
 FLOOR = 4.0  # GB of MemAvailable a new suite must leave
 RAMP = 30    # s: a suite this young may not have reached its peak yet, so its estimate still counts
-# A suite's peak memory (GB) and how long it takes alone (s), from the gate's runs on 2026-11-16 (PLANNED's
+# A suite's peak memory (GB) and how long it takes alone (s), from the gate's runs on 2026-11-16 (unit's and
+# test/player/run.py's from 2026-11-22; PLANNED's
 # from their own runs on 2026-11-18, each under 0.25 GB): the order they start in and what each needs free.
 MEM_GB = {'build': 2.0, 'unit': 1.0, 'unit-cov': 1.5, 'mypy-tools': 1.0, 'mypy-fw': 1.0, 'fw': 3.0, 'fw-asan': 5.0,
           'patch': 1.5, 'test/build.py': 1.0, 'test/peq.py': 1.0, 'test/playback.py': 1.0, 'test/headset_io.py': 0.5,
           'smoke': 1.0, 'leak-hunt': 1.0, 'test/coverflow.py': 0.5, 'test/player/run.py': 0.5, 'tools/ci/test_ci.py': 0.5,
           'tools/ci/test_orch.py': 0.5, 'test/stock_sites.py': 0.5, 'test/subsonic_contract.py': 0.25}
-SECONDS = {'unit-cov': 330, 'patch': 280, 'fw-asan': 150, 'unit': 120, 'smoke': 95, 'leak-hunt': 200, 'test/playback.py': 80, 'fw': 50,
+SECONDS = {'unit-cov': 330, 'patch': 280, 'fw-asan': 150, 'unit': 280, 'smoke': 95, 'leak-hunt': 200, 'test/playback.py': 80, 'fw': 50,
            'mypy-tools': 40, 'mypy-fw': 30, 'test/build.py': 20, 'test/peq.py': 20, 'test/headset_io.py': 5,
-           'test/coverflow.py': 20, 'test/player/run.py': 800, 'tools/ci/test_ci.py': 5, 'tools/ci/test_orch.py': 15, 'test/stock_sites.py': 12,
+           'test/coverflow.py': 20, 'test/player/run.py': 270, 'tools/ci/test_ci.py': 5, 'tools/ci/test_orch.py': 15, 'test/stock_sites.py': 12,
            'test/subsonic_contract.py': 2}
 # The suites a rule of affected.py plans for a change no merge-tier suite covers (patch/coverflow*.c, player/,
 # tools/ci/, a stock address in patch/ or tools/). Not in the merge tier, as test/player/run.py alone is longer than all of it: a batch's plan names
