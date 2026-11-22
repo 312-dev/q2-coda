@@ -69,6 +69,27 @@ const char *output_device(char *vol) {
     return way == 1 ? "plug:bluealsa" : way == 2 ? "usb" : 0;
 }
 
+/* Car Audio's USB stream carries the player's own songs alone (player/output.c output_car, while q2-iap's car file
+ * is there): q2video (Radio, Internet Radio, Videos) plays to demo's output, which the car does not hear, so on the
+ * drive of 2026-11-22 Radio's station name reached the car over silence (its sound went to Bluetooth A2DP). Such a
+ * start is refused while the car takes the audio, with a toast at most every CAR_SAY_MS, the Library left playing
+ * on. 1 when refused. ponytail: routing them to the car needs the player to take a second source's PCM while its
+ * own song is paused or stopped (docs/iphone-mode.md#other-sources-over-usb). */
+#define CAR_FILE "/tmp/q2-iap.audio" /* q2_iap.c's car_file */
+void ulog(char level, const char *src, const char *msg); /* ulog.c */
+#define CAR_SAY_MS 10000
+int car_takes_audio(void) {
+    static unsigned said __attribute__((section(".scratch")));
+    if (access(CAR_FILE, 0)) return 0;
+    unsigned now = time_now_ms();
+    if (!said || now - said >= CAR_SAY_MS) {
+        said = now | 1;
+        toast("Plays on the Q2 only, not over the car's USB");
+        ulog('I', "usb", "a source other than the Library refused: the car takes the audio over USB");
+    }
+    return 1;
+}
+
 /* The headphone output readied as stock's player_start readies it before each track (headset mode,
  * DAC powered, PCM mode, unmuted, the volume); Bluetooth's way left alone. Shared with spotify.c.
  */
@@ -107,7 +128,7 @@ int video_start(const char *file, int radio) {
 
 /* path played from its saved place (video_click). */
 static void video_play(const char *path) {
-    if (vid.pid) return;
+    if (vid.pid || car_takes_audio()) return;
     headset_manual();
     spot_yield(); /* librespot and radio hold the PCM too, as for local music */
     radio_stop();

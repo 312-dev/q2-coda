@@ -1,6 +1,9 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Audio: Radio, Internet Radio and Videos no longer play silently while the car plays the Q2 over USB (only your library's songs go over the car's USB): the Q2 says so instead, and the music you were playing carries on.
+  - Radio: starting a song's radio again after stopping it (from the car or on the Q2) works, where it said "Radio isn't available for this song".
+  - Car Audio: the car's Up Next shows the queue of songs from your server, and their covers come from the songs themselves when the Q2 has no other.
   - Car Audio: unplugging from the car pauses the music, as an iPod does, unless headphones are in or a Bluetooth headset is connected, where it carries on. It used to play on silently through the headphone output with nothing plugged in, draining the battery.
   - Car Audio: the car no longer goes silent for the rest of the drive once the library has finished sending to it. Saving the note of what the car holds held the Q2 up for 12 seconds, long enough for the car to give up on the connection; it is now saved in the background, and a connection that goes quiet, or that the car gives up on, makes the Q2 reconnect by itself.
   - Car Audio: songs from a signed-in server (Subsonic) now show their album cover in the car, as they do on the Q2.

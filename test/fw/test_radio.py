@@ -491,6 +491,19 @@ def test_a_station_plays_in_q2video_and_is_kept_as_last(fw):
     assert fw.fn('radio_status', C.c_int)() == 2
 
 
+def test_a_station_waits_while_the_car_takes_the_audio(fw):
+    """Car Audio's USB stream is the player's songs alone (q2-iap's car file there): a station played to demo's
+    output went to Bluetooth A2DP on the drive of 2026-11-22, its name on iDrive over silence. While the car takes the
+    audio nothing starts and the Q2 says why; the car file gone, it plays."""
+    p = page(fw, {'/tmp/q2-iap.audio': b'hw:CARD=UAC1Gadget,0\n44100\n'})
+    player = play(fw, p, 3)
+    assert player.started == [] and rd(fw).pid == 0
+    assert p.toasts == ["Plays on the Q2 only, not over the car's USB"]
+    del p.card.files['/tmp/q2-iap.audio']
+    p.rows('station_click')[3]()
+    assert player.started == [4242]
+
+
 def test_a_station_that_can_t_start_says_so(fw):
     p = page(fw)
     play(fw, p, 0, pid=0)

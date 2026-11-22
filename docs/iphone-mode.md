@@ -263,6 +263,11 @@ and the cable's summary adds the start latency (asked to taken), the longest gap
 
 While Car Audio has a car on the cable, Bluetooth's auto-connect (at a stack relaunch, at Bluetooth on) leaves that car alone, matched by the name it gives over iAP2 ([internals](internals.md#bluetooth-connection-trace)): its audio already comes over USB.
 
+<a id="other-sources-over-usb"></a>
+### Other sources over USB
+
+Car Audio's USB stream is the player's: `player/output.c` `output_car` writes the Library's songs to the UAC1 card. Radio, Internet Radio and Videos play through q2video, Spotify and AirPlay through their own players, each to demo's output (`videos.c` `output_device`: the DAC, Bluetooth or a USB DAC), which the car does not hear. On the drive of 2026-11-22 Radio's station reached iDrive's screen over silence: the player's car stream was idle and the receiver's sound went to Bluetooth A2DP (`bt transport ... active` as Radio began). Radio is not an analogue tuner: its sound is q2video's, a station's stream through a modelled FM receiver ([internals: Radio static](internals.md#radio-static)), so it is PCM like the rest. **Now** (`videos.c` `car_takes_audio`): while the car takes the audio (q2-iap's `/tmp/q2-iap.audio` there), Radio's first open, an Internet Radio station and a video are refused with a toast, "Plays on the Q2 only, not over the car's USB", at most every 10 s, and the Library plays on. ponytail: routing them into the car needs the player, the card's one owner, to take another source's PCM (a FIFO from an ALSA `file` PCM the sources would play to) while its own song is paused or stopped, at the car's rate, with the never-stopped stream's rules; Spotify and AirPlay, which a phone starts, are not refused and still play to demo's output.
+
 <a id="nowhere-to-play"></a>
 ### Nowhere to play
 

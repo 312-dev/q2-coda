@@ -227,6 +227,20 @@ def test_radio_holds_the_library_paused_where_it_was(fw, ui, mcl, recs):
     assert (car.now()['source'], car.now()['state'], car.now()['pos']) == ('library', '2', '61000')
 
 
+def test_radio_waits_while_the_car_takes_the_audio(fw, ui, mcl, recs):
+    """The drive of 2026-11-22: Radio opened while the car played the Q2 over USB; its sound went to demo's output (A2DP
+    to the car) and iDrive showed its station over silence. While the car takes the audio (q2-iap's car file), Radio
+    does not open, the Library plays on untouched, and the Q2 says why."""
+    car = Car(fw, ui, recs)
+    car.files['/tmp/q2-iap.audio'] = b'hw:CARD=UAC1Gadget,0\n44100\n'
+    fw.mock('fw_access', lambda path, *_: 0 if C.string_at(path).decode() in car.files else -1)
+    saves = []
+    fw.mock('player_save_stop', lambda *_: saves.append(1) or 0)
+    fw.mock('fw_fork', lambda *_: 4242)
+    assert fw.fn('tuner_open', C.c_int, C.c_void_p, C.c_void_p)(None, None) == 0
+    assert saves == [] and not fw.calls('fw_fork') and ui.toasts == ["Plays on the Q2 only, not over the car's USB"]
+
+
 def test_the_owner_s_state_for_home_control_center_and_the_status_row(fw, ui, mcl, recs):
     """Home's first row, Control Center and the status row's play glyph read now_status: Radio playing is
     playing (they read the Library alone, stopped by then, before), paused is paused; the Library's own as it was."""

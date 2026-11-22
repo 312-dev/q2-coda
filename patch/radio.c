@@ -302,10 +302,11 @@ void radio_stop(void) {
 
 /* rd.list's station i (round the ends): q2video started on the output in use, after librespot let
  * go, and the station kept in RADIO_LAST. */
+int car_takes_audio(void); /* videos.c */
 static void radio_play(int i) {
     headset_manual();
     int n = rd.list.n;
-    if (!n) return;
+    if (!n || car_takes_audio()) return;
     rd.at = (i % n + n) % n;
     radio_halt();
     spot_yield();
