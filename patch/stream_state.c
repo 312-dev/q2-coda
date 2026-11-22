@@ -17,8 +17,12 @@
 
 #define AHEAD_DEFAULT 2
 #define AHEAD_MAX 3
-#define START_MS 8000               /* a song arriving starts once this much of it is there */
-#define START_MIN (256u << 10)      /* and at least this many bytes */
+/* A song arriving starts once START_MS of it is there, at least START_MIN bytes: past what q2player's
+ * open reads (the headers, a cover in them, and half a second of audio: source.c GROW_ANALYZE_US),
+ * with time in hand for a download a little slower than the song. Measured in
+ * docs/internals.md#streaming-configuration. */
+#define START_MS 3000
+#define START_MIN (256u << 10)
 #define STALE_S 3                   /* a get line not rewritten this long: the app is gone */
 #define SS_MAX (8 << 10)            /* .stream read this far: a dozen lines */
 #define CLICKS_FILE "/tmp/q2clicks" /* player/main.c: there while q2player is the player */

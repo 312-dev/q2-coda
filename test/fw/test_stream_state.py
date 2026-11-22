@@ -82,12 +82,14 @@ MB = 1 << 20
 
 @pytest.mark.parametrize('state,have,total,ms,ok', [
     ('wait', 0, 20 * MB, 780000, 0),
-    ('get', 1398095, 20 * MB, 120000, 0),    # 8 s of a 2-minute 20 MB song: 174,762 bytes a second, 8 times
-    ('get', 1398096, 20 * MB, 120000, 1),
-    ('stall', 1398096, 20 * MB, 120000, 1),
-    ('get', 262143, 20 * MB, 780000, 0),     # 8 s of a 13-minute one is 215,088 bytes: at least 256 KB
+    ('get', 524285, 20 * MB, 120000, 0),     # 3 s of a 2-minute 20 MB song: 174,762 bytes a second, 3 times
+    ('get', 524286, 20 * MB, 120000, 1),
+    ('stall', 524286, 20 * MB, 120000, 1),
+    ('get', 333728, 31259447, 281000, 0),    # a Q2's streamed FLAC (2026-11-22): 111,243 bytes a second, 3 times
+    ('get', 333729, 31259447, 281000, 1),
+    ('get', 262143, 20 * MB, 780000, 0),     # 3 s of a 13-minute one is 80,658 bytes: at least 256 KB
     ('get', 262144, 20 * MB, 780000, 1),
-    ('get', 200 << 10, 3 * MB, 300000, 0),   # 8 s is 83,880 bytes: at least 256 KB
+    ('get', 200 << 10, 3 * MB, 300000, 0),   # 3 s is 31,455 bytes: at least 256 KB
     ('get', 256 << 10, 3 * MB, 300000, 1),
     ('get', 100 << 10, 100 << 10, 2000, 1),  # a short song: all of it
     ('get', MB, 2 * MB, 0, 0),               # no length: all of it
@@ -95,7 +97,7 @@ MB = 1 << 20
     ('get', 5 * MB, 0, 300000, 0),           # no total: never before it is done
     ('done', 0, 0, 0, 1), ('fail', 0, 0, 0, 1),
 ])
-def test_with_grow_an_arriving_song_starts_once_eight_seconds_are_there(fw, state, have, total, ms, ok):
+def test_with_grow_an_arriving_song_starts_once_three_seconds_are_there(fw, state, have, total, ms, ok):
     world = World(fw, now=NOW)
     grow(fw, world, True)
     world.files[STREAM] = status((state, have, total, ms, A))

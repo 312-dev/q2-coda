@@ -16,6 +16,13 @@
 #include <math.h>
 
 enum { AAC_FRAME = 1024 }; /* AAC LC's samples a packet; padding is less */
+/* The most audio avformat_find_stream_info reads of a song still arriving (docs/internals.md#streaming-configuration).
+ * Its default, 5 s, is reached whenever a stream's parameters stay unknown, and an embedded cover's always do here:
+ * this FFmpeg has no JPEG or PNG decoder to size it (tools/player.py DECODERS). A whole file's 5 s is read at once,
+ * but an arriving one's waits for them to come, so the song started only once 5 s of audio and the cover had. The
+ * audio's own parameters are known from its first frames; at 100 ms the open reads what it would at none, its
+ * parser's look ahead (about 1.3 s of a FLAC after its headers, measured with FFmpeg's flac demuxer, 2026-11-22). */
+enum { GROW_ANALYZE_US = 100000 };
 
 struct source {
     AVFormatContext *fmt;
@@ -156,6 +163,7 @@ struct source *source_open(const struct song *song, int *error, const int *cance
         if (!(s->grow = grow_open(song->url, error))) goto fail;
         s->fmt->pb = grow_avio(s->grow);
         s->fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
+        s->fmt->max_analyze_duration = GROW_ANALYZE_US;
     } else if (sacd_is_image(song->url)) {
         if (!(s->iso = sacd_open(song->url, error))) goto fail;
         s->fmt->pb = sacd_avio(s->iso);

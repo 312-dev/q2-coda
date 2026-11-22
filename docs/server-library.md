@@ -384,7 +384,7 @@ there when it starts, so a file cut by a crash or a pulled card is never taken f
 
 **Starting before the end** (firmware, `m3u_songs`, with `grow`). A line whose file exists but whose
 `.stream` line is `wait` or `get` with fewer than `START` bytes is waited for as a missing file is
-today; `START` is 8 s of the song (total x 8000 / length), at least 256 KB, or the whole file when
+today; `START` is 3 s of the song (total x 3000 / length), at least 256 KB, or the whole file when
 total or length is unknown. A `stall` line waits the same. Then it is queued as any card file.
 Gapless and the FLAC paths are unchanged: the next song is a file in the queue, whole or arriving.
 ponytail: the stock player reads a file's length from its header (FLAC STREAMINFO, an MP3's Xing
@@ -396,7 +396,9 @@ there is none ([internals](internals.md#streaming-configuration)).
 `/tmp/q2-<id>.stream` for its path. A `get` or `stall` line wraps the file in a growing read: at the
 bytes there are, it waits (polling `.stream` every 100 ms) rather than end. A seek searches only the
 bytes there are, so one inside them plays from its target at once, and one past them waits there,
-its position the target's, and plays from it as its bytes come. While it waits it writes `/tmp/q2player.wait`, the path and a newline, and removes the file
+its position the target's, and plays from it as its bytes come. Its open of such a file analyses at most
+100 ms of audio (`GROW_ANALYZE_US`): an embedded cover, which its FFmpeg cannot size, otherwise held the open
+until 5 s of audio had come ([internals](internals.md#streaming-configuration)). While it waits it writes `/tmp/q2player.wait`, the path and a newline, and removes the file
 once it plays again. `done`, `fail`, a stale file or no line: the end of the bytes is the song's end.
 
 **What the firmware shows.** A server song is loading while it is the song Now Playing shows and

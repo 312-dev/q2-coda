@@ -394,13 +394,14 @@ def with_seektable(flac, every=44100):
     return flac[:4] + si + bytes([3]) + len(table).to_bytes(3, 'big') + table + flac[42:]
 
 
-def grow(player, songs, out, head, land_at, extra=(), seektable=False, part=None):
+def grow(player, songs, out, head, land_at, extra=(), seektable=False, part=None, whole=None):
     """a1 arriving in place as a card app writes it (player/grow.c): head bytes of it on the card and its .stream saying
-    get, the rest landing at land_at (the line then done); extra are more steps (a seek); seektable, a1 with one; part, (time, bytes): more of it landing earlier. Returns the session, the PCM,
-    and the beats' reads of /tmp/q2player.wait (False when there is none)."""
+    get, the rest landing at land_at (the line then done); extra are more steps (a seek); seektable, a1 with one; part, (time, bytes): more of it landing earlier;
+    whole, other bytes in a1's place. Returns the session, the PCM, and the beats' reads of /tmp/q2player.wait (False
+    when there is none)."""
     card, status = out/'mnt/mmc/.foo', out/'tmp/q2-foo.stream'
     card.mkdir(parents=True, exist_ok=True)
-    whole, path = (songs/'a1.flac').read_bytes(), card/'grow.flac'
+    whole, path = whole or (songs/'a1.flac').read_bytes(), card/'grow.flac'
     if seektable: whole = with_seektable(whole)
     path.write_bytes(whole[:head])
     seen, have = [], [head]
@@ -444,6 +445,37 @@ def test_grow_plays_a_song_as_it_arrives(player, songs, tmp):
     assert '/mnt/mmc/.foo/grow.flac\n' in seen, f'the wait was never named: {seen}'
     waited = seen.count('/mnt/mmc/.foo/grow.flac\n')
     return f'{len(got) // 4} frames equal to the reference; the wait named in {waited} of {len(seen)} beats'
+
+
+def with_cover(flac, size):
+    """flac with a front cover of size bytes after its STREAMINFO, as a server's FLACs have one: a JPEG by its MIME
+    type and its header, its width and height 0 (unknown) in the block, as taggers often leave them. q2player's FFmpeg
+    has no JPEG decoder, so the picture's size stays unknown to avformat_find_stream_info. Returns the FLAC and where
+    its audio starts."""
+    jpeg = b'\xff\xd8\xff\xe0' + bytes(size - 6) + b'\xff\xd9'
+    mime = b'image/jpeg'
+    body = struct.pack('>II', 3, len(mime)) + mime + struct.pack('>IIIIII', 0, 0, 0, 0, 0, len(jpeg)) + jpeg
+    si = bytes([flac[4] & 0x7f]) + flac[5:42]  # STREAMINFO, no longer the last block
+    out = flac[:4] + si + bytes([0x80 | 6]) + len(body).to_bytes(3, 'big') + body + flac[42:]
+    return out, 42 + 4 + len(body)
+
+
+def test_grow_opens_a_song_with_a_cover_on_its_first_audio(player, songs, tmp):
+    """A song arriving in place with an embedded cover starts once its headers and a little of its audio are there,
+    whatever the cover's size: the open reads the audio's headers and a frame or two, not 5 s of audio to size a
+    picture its FFmpeg cannot decode (source.c GROW_ANALYZE_US). 3 s of a1's audio is there (the open's own look
+    ahead reads about 1.3 s), the rest lands at 8 s: the song is playing well before then, and plays whole."""
+    want, said = reference(songs/'a1.flac'), []
+    for size in (2048, 160 * 1024):  # a thumbnail, and the largest seen on a Q2's stream folder (2026-11-22)
+        whole, audio = with_cover((songs/'a1.flac').read_bytes(), size)
+        head = audio + (len(whole) - audio) * 3 // 20  # a1 is 20 s: 3 s of it
+        s, got, seen = grow(player, songs, tmp/f'grow-cover{size}', head, 8.0, whole=whole)
+        at = first_difference(got, want)
+        assert at is None, f'cover of {size} B: {len(got) // 4} frames, reference {len(want) // 4}; first difference at frame {(at or 0) // 4}'
+        known = [t for t, p in s.positions]
+        assert known and known[0] < 3.0, f'cover of {size} B: the song was opened only at {known[:1]} s (set at 1 s, the rest landing at 8 s)'
+        said.append(f'{size} B cover: opened by {known[0]:.1f} s')
+    return '; '.join(said) + ', the rest landing at 8 s'
 
 
 def test_grow_seek_inside(player, songs, tmp):
