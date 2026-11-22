@@ -1591,3 +1591,15 @@ def test_stock_window_opens_finds_each_call_and_the_name_it_passes_and_each_keyb
     assert calls == {jalr_page: 'page_one', bal_hex: 'kb_hex', b_call: None, jalr_nowhere: None, bal_long: None,
                      bal_or: None, bal_addiu: None, bal_after: None, jalr_later: 'page_one'}
     assert reads == {read_slot: 'kb_hex', read_addiu: 'kb_hex'}  # bal_hex's addiu builds on $4, not on the load's $5
+
+
+def test_the_font_memo_follows_only_the_code_its_function_names():
+    """memo's key (memo_source): an edit elsewhere in tools/build.py keeps the fonts' cache, as a new hook or a new
+    BUNDLED_APPS pin should; an edit of subset_font, of a helper it calls or of a constant either names does not."""
+    text = pathlib.Path(build.__file__).read_text()
+    key = build.memo_source(build.subset_font, text)
+    assert 'def play_mark' in key and 'PLAY_MARK' in key and 'TABULAR' in key and 'BUNDLED_APPS' not in key
+    assert build.memo_source(build.subset_font, text + '\n# a comment\nOTHER = 1\n') == key
+    assert build.memo_source(build.subset_font, text.replace('PLAY_MARK = 0x25b6', 'PLAY_MARK = 0x25b7')) != key
+    helper = text.index('def play_mark')
+    assert build.memo_source(build.subset_font, text[:helper] + 'def play_mark(font):\n    pass\n\ndef was_play_mark' + text[helper + 13:]) != key

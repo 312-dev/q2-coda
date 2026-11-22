@@ -1254,9 +1254,34 @@ def english_ui(rel, data):
 FONT = 'release/assets/default/raw/fonts/default.ttf'
 QUOTES = {0x2018: 0x27, 0x2019: 0x27, 0x201c: 0x22, 0x201d: 0x22}
 
+def memo_source(fn, text=None):
+    """The text fn's result follows from in this module (text: its source, by default this file's): fn's own
+    definition and, transitively, every module-level function, class and constant it names. An edit elsewhere in
+    tools/build.py leaves it as it is."""
+    import ast
+    text = pathlib.Path(__file__).read_text() if text is None else text
+    tree = ast.parse(text)
+    defs: dict[str, ast.AST] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            defs[node.name] = node
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            for t in (node.targets if isinstance(node, ast.Assign) else [node.target]):
+                for n in ast.walk(t):
+                    if isinstance(n, ast.Name): defs[n.id] = node
+    seen, todo, parts = set(), [fn.__name__], []
+    while todo:
+        name = todo.pop()
+        if name in seen or name not in defs: continue
+        seen.add(name)
+        node = defs[name]
+        parts.append(ast.get_source_segment(text, node) or '')
+        todo += [n.id for n in ast.walk(node) if isinstance(n, ast.Name)]
+    return '\0'.join(sorted(set(parts)))
+
 def memo(fn):  # pragma: no mutate block
-    """fn, its results kept on disk in $Q2_BUILD_CACHE, keyed by tools/build.py's text, fontTools' version
-    and the arguments (a path by its file's bytes): a rebuild with the same fonts skips fontTools' 15 s or so.
+    """fn, its results kept on disk in $Q2_BUILD_CACHE, keyed by the code it follows from (memo_source), fontTools'
+    version and the arguments (a path by its file's bytes): a rebuild with the same fonts skips fontTools' work.
     Off unless Q2_BUILD_CACHE names a directory (tools/ci/rebuild.py sets it), so a release's two
     reproducibility builds still compute everything."""
     import functools, os, pickle
@@ -1265,7 +1290,7 @@ def memo(fn):  # pragma: no mutate block
         where = os.environ.get('Q2_BUILD_CACHE')
         if not where: return fn(*args, **kwargs)
         from fontTools import version as fonttools
-        h = hashlib.sha256(pathlib.Path(__file__).read_bytes() + fn.__name__.encode() + fonttools.encode())
+        h = hashlib.sha256(memo_source(fn).encode() + fn.__name__.encode() + fonttools.encode())
         for a in [*args, *sorted(kwargs.items())]: h.update(a.read_bytes() if isinstance(a, pathlib.Path) else repr(a).encode())
         path = pathlib.Path(where)/f'{fn.__name__}-{h.hexdigest()}.pickle'
         try: return pickle.loads(path.read_bytes())
