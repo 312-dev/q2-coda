@@ -1945,6 +1945,8 @@ FUNCTIONS = {
  'buzzeer_switch': ('int', 'int'),  # the stock key click; it reads g_keytone_flag
  # Headphones required (g_block_withoutphone_flag) with no output: toasts (0) and returns 1, as before each stock start
  'check_forbid_play_no_headset': ('int', 'int'),
+ # 1 while something can sound: either jack (g_po_status, g_bal_status), a Bluetooth link with its codec up, a USB DAC
+ 'has_valid_output_device': ('int', 'void'),
  'on_wm_keyup_fun': ('int', 'void *, void *'),  # stock key-up: np_single replays a centre release
  'toolsGetBatterycapacity': ('int', 'void'),  # the CW2015's level, 0-100 (get_battery_capacity's reads: system.c ringnav_batt_level)
  'toolsGetBatteryVoltage': ('int', 'void'),  # its voltage, mV

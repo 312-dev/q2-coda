@@ -20,6 +20,7 @@
 
 RUN=/tmp/q2car
 STATE=/tmp/q2car.state
+RELINK=/tmp/q2car.relink # q2-iap's note of a relink under way (patch/usb_car.c holds its pause for it)
 CFS=/sys/kernel/config
 G=$CFS/usb_gadget/q2car
 FFS=/dev/usb-ffs
@@ -183,6 +184,7 @@ runner() {
         rm -f $RUN/kept # the next session's summary is kept too
         sleep 1
     done
+    rm -f $RELINK # no relink follows
     gadget_down "end"
     echo "down=1" >> $STATE
     rm -f $RUN/runner.pid
@@ -195,7 +197,7 @@ start() {
         [ $k = 1 ] && from=${LOG%.log}.1.log
         [ -f "$from" ] && mv -f "$from" "${LOG%.log}.$((k + 1)).log" && mv -f "$from.dmesg" "${LOG%.log}.$((k + 1)).log.dmesg" 2>/dev/null
     done
-    rm -f $STATE $RUN/kept
+    rm -f $STATE $RUN/kept $RELINK
     log "start: kernel $(uname -r)"
     setsid sh "$0" _runner </dev/null >/dev/null 2>>"$LOG" &
 }
@@ -210,6 +212,7 @@ stop() {
         while alive "$r" && [ $i -lt 30 ]; do usleep 100000; i=$((i + 1)); done
         alive "$r" && kill -9 "$r"
     fi
+    rm -f $RELINK
     if [ -d $G ] || [ -f $RUN/daemon.pid ]; then
         gadget_down "stop"
         echo "down=1" >> $STATE

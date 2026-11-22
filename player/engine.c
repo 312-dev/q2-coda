@@ -410,7 +410,8 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
         }
         if (way == 3 && !gone) car_trace_tick(out, 0); /* a line a second while the car plays (docs/iphone-mode.md#car-trace) */
         /* The car asks for its audio, or stops, while a song plays: the song moves to the other output where it is,
-         * as a seek moves (the PCM's unplayed frames, under half a second, are not heard), as the car changes source. */
+         * as a seek moves (the PCM's unplayed frames, under half a second, are not heard), as the car changes source.
+         * With nothing else to sound, demo then pauses it (patch/usb_car.c usb_car_gone). */
         int64_t now = now_ms();
         if (gone || now - car_look >= CAR_LOOK_MS) {
             car_look = now;
