@@ -87,6 +87,7 @@ void free(void *);
 unsigned long strtoul(const char *, char **, int);
 int access(const char *, int);
 int klogctl(int, char *, int);
+int execl(const char *, const char *, ...);
 #define ERRNO (*__errno_location())
 #define O_RDONLY 0
 #define O_WRONLY 1
@@ -537,9 +538,24 @@ static unsigned fnv_part(unsigned h, const char *s) {
     return h * 16777619u;
 }
 
+/* A song's own picture (an embedded cover: every streamed Subsonic song of the 2026-11-22 drive had one, and the
+ * car got none after the first, whose album Cover Flow had), fitted into 160 px as a baseline JPEG by ffmpeg in a
+ * child, as Cover Flow fits one (patch/coverflow.c ff_run), at art_made.<FNV-1a of the path>.jpg. One at a time and
+ * once a song (made.tried), ART_MADE_MS at most; when it is there for the song still playing, Now Playing goes again
+ * whole (iap2_art_again), its cover with it. The loop never waits on it (art_made_poll). */
+#define ART_MADE_MS 20000
+static const char *art_made = "/tmp/q2-iap.art", *art_ffmpeg = "/usr/bin/ffmpeg"; /* --art-made, --ffmpeg */
+static struct {
+    int pid;
+    unsigned key, tried;
+    long at;
+    char dst[600];
+} made;
 static int lib_app_cover(unsigned rid, char *out, unsigned cap); /* q2_iap_lib.c */
+static void art_made_ask(const char *path);
 /* The song's cover: Cover Flow's 160 px copy (keyed by artist and album), else a server song's from its app (its
- * catalogue row's album: lib_app_cover), else a cover beside the song. */
+ * catalogue row's album: lib_app_cover), else a cover beside the song, else the picture in the song's own file as
+ * art_made_ask fitted it into 160 px (none yet: asked, and the car sent it once it is there). */
 static unsigned io_artwork(const struct iap2_np *n, unsigned char *out, unsigned cap) {
     char p[600];
     unsigned got = 0;
@@ -554,7 +570,48 @@ static unsigned io_artwork(const struct iap2_np *n, unsigned char *out, unsigned
         snprintf(p, sizeof p, "%.*s/%s", (int)(slash - n->path), n->path, names[i]);
         got = read_file(p, out, cap);
     }
+    if (!got && n->path[0]) {
+        snprintf(p, sizeof p, "%s.%08x.jpg", art_made, fnv_part(2166136261u, n->path));
+        if (!(got = read_file(p, out, cap))) art_made_ask(n->path);
+    }
     return got;
+}
+
+static void art_made_ask(const char *path) {
+    unsigned key = fnv_part(2166136261u, path);
+    if (made.pid || key == made.tried) return;
+    made.tried = made.key = key, made.at = mono_ms();
+    if (made.dst[0]) unlink(made.dst); /* the last song's: one kept, in RAM (/tmp) */
+    snprintf(made.dst, sizeof made.dst, "%s.%08x.jpg", art_made, key);
+    char tmp[620];
+    snprintf(tmp, sizeof tmp, "%s.ff", made.dst);
+    int pid = fork();
+    if (pid == 0) {
+        execl(art_ffmpeg, art_ffmpeg, "-nostdin", "-v", "quiet", "-xerror", "-i", path, "-frames:v", "1", "-vf",
+              "scale=160:160:force_original_aspect_ratio=decrease", "-pix_fmt", "yuvj420p", "-q:v", "3", "-f", "mjpeg",
+              "-y", tmp, (char *)0);
+        _exit(127);
+    }
+    made.pid = pid > 0 ? pid : 0;
+    logline("iap2", pid > 0 ? "art: none found; the song's own picture asked of ffmpeg" : "art: ffmpeg not started");
+}
+static void iap2_art_again(void);
+static void art_made_poll(void) {
+    if (!made.pid) return;
+    char tmp[620], msg[160];
+    snprintf(tmp, sizeof tmp, "%s.ff", made.dst);
+    long took = mono_ms() - made.at;
+    if (!kill(made.pid, 0) && took < ART_MADE_MS) return; /* still at it (children are reaped: SIGCHLD ignored) */
+    if (took >= ART_MADE_MS) kill(made.pid, 9);
+    made.pid = 0;
+    unsigned char b[4];
+    int fd = open(tmp, O_RDONLY), ok = fd >= 0 && read(fd, b, sizeof b) == (int)sizeof b && b[0] == 0xff && b[1] == 0xd8;
+    if (fd >= 0) close(fd);
+    ok = ok && !rename(tmp, made.dst);
+    if (!ok) unlink(tmp);
+    snprintf(msg, sizeof msg, "art: the song's own picture %s in %ld ms", ok ? "made" : "not made", took);
+    logline("iap2", msg);
+    if (ok) iap2_art_again();
 }
 
 /* ---- Car Audio in the image (--state; docs/iphone-mode.md#car-audio-in-the-image) ----
@@ -1006,6 +1063,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(o, "--car-file")) car_file = v, ++a;
         else if (!strcmp(o, "--rate-file")) rate_file = v, ++a;
         else if (!strcmp(o, "--relink-file")) relink_file = v, ++a;
+        else if (!strcmp(o, "--art-made")) art_made = v, ++a;
+        else if (!strcmp(o, "--ffmpeg")) art_ffmpeg = v, ++a;
         else if (!strcmp(o, "--cmd-file")) cmd_file = v, ++a;
         else if (!strcmp(o, "--art-dir")) art_dir = v, ++a;
         else if (!strcmp(o, "--state")) state_file = v, ++a;
@@ -1100,6 +1159,8 @@ int main(int argc, char **argv) {
         loop_step("iAP2's tick");
         if (iap2_mode) iap2_tick();
         long now = mono_ms();
+        loop_step("the cover's making");
+        if (iap2_mode) art_made_poll();
         loop_step("the host's verdict");
         host_poll(now);
         loop_step("the audio's health");

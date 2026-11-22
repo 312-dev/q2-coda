@@ -56,7 +56,7 @@
 #define CR_NOTE_MS 4000   /* a toast stays in Now Playing for the car this long (NowPlaying.notice) */
 
 static struct {
-    int checked, on;
+    int checked, on, radio_said; /* radio_said: the radio flag cr_now last logged */
     unsigned at, started_at, seq, now_hash, now_n, q_hash, q_gen;
     unsigned play_timer, toast_timer;
     int want; /* a Pause (1) or Play (2) waiting for the player; 0 none */
@@ -289,7 +289,12 @@ static void cr_now(void) {
     put_int(b, sizeof b, &n, "bhave", (int)have);
     put_int(b, sizeof b, &n, "btotal", (int)btotal);
     put_int(b, sizeof b, &n, "bms", (int)bms);
-    put_int(b, sizeof b, &n, "radio", song_radio_on());
+    int radio = song_radio_on();
+    if (radio != cr.radio_said) { /* its changes in the system log, as the phone's buttons follow it */
+        cr.radio_said = radio;
+        ulog('I', "remote", radio ? "Now Playing: a radio plays" : "Now Playing: no radio");
+    }
+    put_int(b, sizeof b, &n, "radio", radio);
     static const char *const sources[] = { "", "library", "radio", "netradio", "spotify", "video" };
     put(b, sizeof b, &n, "source", sources[now.source]);
     put_int(b, sizeof b, &n, "live", live);
@@ -497,6 +502,9 @@ static void cr_command(void) {
         cr_ack(seq, 0);
     } else if (verb && __isoc99_sscanf(verb, " mode %d %d", &v, &w) == 2) {
         int ok = cr_mode(v, w);
+        char line[64]; /* the drive of 2026-11-22: repeat from the car seen not to reach the Q2 after a radio */
+        tk_snprintf(line, sizeof line, "mode %d %d from the car or phone: %s", v, w, ok ? "set" : "refused");
+        ulog('I', "remote", line);
         cr_now(); /* the new mode before the ack, as cr_settle */
         cr_ack(seq, !ok);
     } else if (verb && __isoc99_sscanf(verb, " rate %d %d", &v, &w) == 2) {

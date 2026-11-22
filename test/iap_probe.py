@@ -25,6 +25,10 @@ SETUP, ENABLE, DISABLE = 4, 2, 3
 
 @pytest.fixture(scope='module')
 def probe(tmp_path_factory):
+    """q2-iap built for this machine, or Q2IAP_EXE: another to run instead, such as a build's MIPS q2-iap behind a
+    script that runs it under qemu-mipsel-static with an emulator's rootfs (as the device runs it)."""
+    if os.environ.get('Q2IAP_EXE'):
+        return pathlib.Path(os.environ['Q2IAP_EXE'])
     exe = tmp_path_factory.mktemp('probe')/'q2-iap-probe'
     subprocess.run(['cc', '-DPROBE_HOST', '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
                     '-Wno-unused-result', str(SRC), '-o', str(exe), SQLITE], check=True)
@@ -1403,6 +1407,23 @@ def test_a_silence_is_seen_as_it_grows(probe, tmp_path):
     assert 'kernel: ' in text and 'at the lost link' in text
 
 
+def test_the_link_s_health_comes_at_its_default_pace(probe, tmp_path):
+    """The drive of 2026-11-22 (q2muse-1126): 403 s with the link up and not one `link: health:` line. With no
+    --health-ms, a line every 5 s while the link is up, the car acknowledging as it goes."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path)
+    try:
+        end = time.time() + 11.5
+        while time.time() < end:
+            try:
+                car.packet_any(0.3)
+            except AssertionError:
+                pass
+    finally:
+        stop(p, fd)
+    health = [l for l in log.read_text().splitlines() if 'link: health: ' in l]
+    assert len(health) >= 2, health
+
+
 def test_a_lost_link_without_state_says_it_goes_on(probe, tmp_path):
     """Whether the lost-link path ends q2-iap is said either way: here, with no --state, it goes on."""
     p, car, fd, log, files = bmw_up(probe, tmp_path)
@@ -1415,6 +1436,35 @@ def test_a_lost_link_without_state_says_it_goes_on(probe, tmp_path):
         stop(p, fd)
     text = log.read_text()
     assert 'link: lost (a packet went unacknowledged' in text and 'no --state, so q2-iap goes on' in text
+
+
+def test_a_song_s_own_picture_is_the_car_s_cover(probe, tmp_path):
+    """The drive of 2026-11-22 (q2muse-1126): after the first song every cover went empty ("0 as found"), though each
+    streamed song carried its own picture (demo's ffmpeg probe: "stream 1 (Video: mjpeg)") and the Q2 showed it. With
+    no other cover, ffmpeg fits the song's picture into 160 px in a child, and once it is there Now Playing goes again
+    with it, a baseline JPEG the car takes."""
+    import shutil
+    ffmpeg = shutil.which('ffmpeg')
+    cover, song = tmp_path/'pic.jpg', tmp_path/'05 Buzzcut Season [RjYzpcigs0gxaJeph5u83x].flac'
+    subprocess.run([ffmpeg, '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=600x600', '-frames:v', '1', '-q:v', '2',
+                    str(cover)], check=True)
+    subprocess.run([ffmpeg, '-v', 'error', '-f', 'lavfi', '-i', 'sine=d=1', '-i', str(cover), '-map', '0', '-map', '1',
+                    '-c:v', 'copy', '-disposition:v', 'attached_pic', str(song)], check=True)
+    (tmp_path/'run').mkdir()
+    p, car, fd, log, files = bmw_up(probe, tmp_path/'run', '--art-made', str(tmp_path/'made'), '--ffmpeg', ffmpeg)
+    try:
+        files['np'].write_text(f'state=1\npos=1000\nlen=208\ntitle=Buzzcut Season\nartist=Lorde\nalbum=Pure Heroine\n'
+                               f'path={song}\nshuffle=0\nrepeat=0\n')
+        media, _ = np_updates(car)
+        updates, setups = np_and_files(car, lambda u: False, seconds=4.0)
+    finally:
+        stop(p, fd)
+    text = log.read_text()
+    assert media.get(0x1a) and "art: the song's own picture made" in text, text[-600:]
+    sizes = sorted(setups.values())
+    assert sizes[0] == 0 and sizes[-1] > 1000, setups  # empty at first, then the made cover
+    made = [l for l in text.splitlines() if 'art: transfer' in l][-1]
+    assert int(made.split(', ')[1].split(' bytes')[0]) > 1000, made
 
 
 def test_a_server_song_s_cover_from_its_app(probe, tmp_path):

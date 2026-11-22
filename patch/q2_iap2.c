@@ -1582,6 +1582,11 @@ static void ql_announce(void) {
     file_send(ql_id, 0x04, setup, sizeof setup);
 }
 
+/* A cover made since Now Playing went (q2_iap.c art_made_poll): all of it again, a new transfer with it. */
+static void iap2_art_again(void) {
+    if (now_playing) np_sent = 0, np_at = 0;
+}
+
 static void lib_reset(void) { ls.phase = LIB_IDLE, ls.x_state = 0, ql_going = 0, ql_seen_at = 0; }
 
 static void poll_now_playing(long now) {
@@ -1604,7 +1609,9 @@ static void poll_now_playing(long now) {
 static void iap2_control_receive(const u8 *msg, unsigned len) {
     unsigned id = msg[4] << 8 | msg[5], plen = len - 6, n;
     const u8 *p = msg + 6, *v;
-    log_msg(0, msg, len, id == 0x1D01 ? 1100 : id == 0xAA01 || id == 0xAA03 ? 24 : 160);
+    /* whole: identification, and the car's Start*Updates, which list the attributes it wants (on 2026-11-22 the 160
+     * bytes cut StartMediaLibraryUpdates' list of media item attributes, the question of a library item's cover) */
+    log_msg(0, msg, len, id == 0x1D01 || id == 0x4C03 || id == 0x5000 ? 1100 : id == 0xAA01 || id == 0xAA03 ? 24 : 160);
     switch (id) {
     case 0xAA01:
         send_challenge(find(p, plen, 0, &n) ? n : 0);
