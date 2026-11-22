@@ -12,6 +12,7 @@ static struct {
     int card_quiet; /* a Standby resumed at card_at: its card toasts are dropped (ringnav_cardmount)
                      */
     unsigned card_at;
+    unsigned host_at; /* standby_host_poll's last look at the USB controller */
     char state[96];     /* the state record last written (state_poll) */
     unsigned state_due; /* time_now_ms of the first change not yet written; 0 none */
     /* the boot logo's poll: last check, card seen mounted, its sync thread, its failure to toast */
@@ -440,6 +441,36 @@ static void standby_poll(void) {
     pw.standby_off = 0;
     if (!g_usbdet_value && mclGetPlayStatus() != 2) navigator_to("poweroff_page");
 }
+
+/* A computer or a car on the cable holds Standby (docs/internals.md#standby-limit). Stock's Standby
+ * waits while the battery charges (check_to_poweroption's g_charge_state test), but at Full that
+ * reads 0 with the cable still in, and a suspend under a host's live USB link left the link dead
+ * after the wake: the gadget still "configured" on the Q2, the computer never reaching it again
+ * until the cable was handled (a Q2 on a laptop, 2026-11-22, 23 min). So while the controller says
+ * configured, Standby's countdown starts again every STANDBY_HOST_MS; a charger, which configures
+ * nothing, lets it run. */
+#define STANDBY_HOST_MS 1000
+static void standby_host_poll(void) {
+    unsigned now = (unsigned)time_now_ms();
+    if (!g_usbdet_value || now - pw.host_at < STANDBY_HOST_MS) return;
+    pw.host_at = now;
+    if (usb_host()) reset_poweroptions_timer(1, 0, 0);
+}
+
+/* Standby on, once (Q2POD STANDBYOWN marks it done, so a later Off is kept): Q2 Muse 1.7.3 to now
+ * shipped it off with no reason recorded, and a Q2 that never sleeps drains about 7 % an hour dark
+ * and paused (2026-11-21). Stock's default config says STANDBYMODE=1 again (tools/build.py). Not
+ * when Auto-shutdown is chosen: stock lets one of the two be on. After config_init
+ * (usb_charge.c ringnav_usb_config). */
+void standby_default(void) {
+    if (config_value("Q2POD", "STANDBYOWN", 2, 0)) return;
+    if (!g_standbyflag && !g_savepower_mode) {
+        g_standbyflag = 1;
+        write_int_config(1, "SYSSET", "STANDBYMODE");
+        reset_poweroptions_timer(1, 0, 0); /* its countdown from now */
+    }
+    write_int_config(1, "Q2POD", "STANDBYOWN");
+}
 /* User boot logo (docs/boot.md): the card's LOGO_SRC is kept as LOGO_DST, which the splash shows at
  * power-on, each time the card is mounted (boot, the end of USB storage). A 375x320 one is turned
  * upright by stock ffmpeg; anything but a 320x375 baseline JPEG is refused and LOGO_DST kept. No
@@ -560,6 +591,7 @@ void power_poll(void) {
     durations_poll();
     charge_poll();
     standby_poll();
+    standby_host_poll();
     logo_poll();
     ratings_copy_poll();
     wdt_poll();

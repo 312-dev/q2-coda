@@ -11,6 +11,7 @@ class Charging:
         self.gpio, self.writes = 1, []
         self.ini = {} if own is None else {'DACCHARGEOWN': str(own)}
         self.ini['SYNCLINKOWN'] = '1'  # the same hook's SyncLink mark, already there: test_synclink.py's
+        self.ini['STANDBYOWN'] = '1'  # the same hook's Standby mark, already there: test_standby.py's
         self.saved = []
         self.depth = 0
         self.charge = fw.fn('ringnav_usb_charge', C.c_int, C.c_int)

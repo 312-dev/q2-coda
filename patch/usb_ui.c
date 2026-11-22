@@ -82,7 +82,8 @@ static struct {
     char in[AUTH_KEY_MAX + 8], key[AUTH_KEY_MAX];
 } u __attribute__((section(".scratch")));
 
-static int usb_host(void) {
+/* 1 while a host has configured the gadget on the controller (system.c holds Standby on it too) */
+int usb_host(void) {
     char s[16] = { 0 };
     void *f = fopen(USB_UDC, "rb");
     if (!f) return 0;
