@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Playback: nothing plays without somewhere to hear it. With no headphones in, no Bluetooth headset connected, no USB DAC and no car taking the Q2's audio over USB, Play shows "Connect headphones or Bluetooth to play" and nothing starts, for music, Videos, Internet Radio and Radio alike. **Headphones Required** is always on, so its row is gone from Playback settings. A car taking the audio over USB now counts as somewhere to play.
   - Car Audio: unplugging from the car pauses the music, as an iPod does, unless headphones are in or a Bluetooth headset is connected, where it carries on. It used to play on silently through the headphone output with nothing plugged in, draining the battery.
   - Car Audio: the car no longer goes silent for the rest of the drive once the library has finished sending to it. Saving the note of what the car holds held the Q2 up for 12 seconds, long enough for the car to give up on the connection; it is now saved in the background, and a connection that goes quiet, or that the car gives up on, makes the Q2 reconnect by itself.
   - Car Audio: songs from a signed-in server (Subsonic) now show their album cover in the car, as they do on the Q2.

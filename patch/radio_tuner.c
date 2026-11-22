@@ -1038,6 +1038,7 @@ int tuner_key(void *top, unsigned key) {
     if (key == KEY_CENTER) stop_timer(&rt->hold);
     if (wheel) rt->tap_armed = 0; /* a turn between two taps: not a double press */
     if (key == KEY_PLAY && (s == TUNER || s == LIST)) {
+        if (!rt->playing && check_forbid_play_no_headset(0)) return 1; /* output_rule.c */
         rt->playing = !rt->playing;
         tune();
         return 1;
@@ -1232,6 +1233,7 @@ void tuner_yield(void) {
  * Remote), as Play/Pause on the page. */
 void tuner_set_playing(int playing) {
     if (!rt || !rt->playing == !playing) return;
+    if (playing && check_forbid_play_no_headset(0)) return; /* nothing to play to (output_rule.c) */
     rt->playing = playing;
     tune();
 }
@@ -1261,7 +1263,8 @@ static int page_make(void) {
 /* Home's Radio row (and Now Playing's ways in while Radio owns it): the page. On Radio playing on
  * since its page shut, the page again on its tuner where it was, the same receiver; else the
  * receiver started (whatever else held the output stopped), the dial on the station last landed on
- * (FREQ_FILE), and the stations for the chosen ZIP or the network's place looked up. */
+ * (FREQ_FILE), and the stations for the chosen ZIP or the network's place looked up. With nothing to
+ * play to, a fresh one opens nothing (check_forbid_play_no_headset's message instead). */
 int tuner_open(void *ctx, void *event) {
     if (rt && rt->page) return 0;
     if (rt) {
@@ -1270,6 +1273,8 @@ int tuner_open(void *ctx, void *event) {
         tune();
         return 0;
     }
+    /* nothing to play to: the page does not open, as stock's Now Playing closes (output_rule.c) */
+    if (check_forbid_play_no_headset(0)) return 0;
     if (!(rt = calloc(1, sizeof *rt))) return 0;
     if (!page_make()) {
         free(rt);

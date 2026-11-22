@@ -687,8 +687,8 @@ static void reorder(void *view, const unsigned char *order, unsigned n) {
 
 /* EQ and the Library first, then everyday listening, what plays next, the Sleep Timer, level,
  * channels, then specialist output controls. Stock's rows 0-10 (ringnav_audioset drops its Volume
- * and Album Display and Folder skip, and hides its Balance, 10, for the inline one), then ours as
- * built. */
+ * and Album Display and Folder skip, hides its Balance, 10, for the inline one, and Headphones
+ * Required, 8, which is always on), then ours as built. */
 static const unsigned char playset_order[] = {
     2 /* EQ */,
     22 /* Library */,
@@ -698,7 +698,7 @@ static const unsigned char playset_order[] = {
     12 /* its Duration */,
     6 /* Memory play */,
     13 /* Resume Songs */,
-    8 /* Headphones required */,
+    8 /* Headphones required, hidden */,
     16 /* Sleep Timer */,
     17 /* Volume */,
     18 /* Max Volume */,
@@ -860,6 +860,8 @@ int ringnav_audioset(void *win, void *ctx) {
     inline_slider_row(view, "playset_balance", IS_BALANCE);
     /* stock's Balance, which opens its page */
     widget_set_visible(widget_get_child(view, 10), 0, 0);
+    /* Headphones Required, held on (output_rule.c) */
+    widget_set_visible(widget_get_child(view, 8), 0, 0);
     widget_set_text_utf8(
         list_row_into(view, "playset_folderjump", library_open, (void *)LIB_LIBRARY), "Library");
     reorder(view, playset_order, sizeof playset_order);

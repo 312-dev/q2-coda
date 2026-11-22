@@ -305,7 +305,7 @@ void radio_stop(void) {
 static void radio_play(int i) {
     headset_manual();
     int n = rd.list.n;
-    if (!n) return;
+    if (!n || check_forbid_play_no_headset(0)) return; /* nothing to play to (output_rule.c) */
     rd.at = (i % n + n) % n;
     radio_halt();
     spot_yield();

@@ -1251,7 +1251,10 @@ int usb_ui_key(void *top, unsigned key), usb_ui_cable(void), usb_pick_open(void 
  * answers to usb_ui.c */
 enum { USB_CAR_NONE, USB_CAR_STORAGE, USB_CAR_CHARGER };
 void usb_car_start(void), usb_car_stop(int wait);
-int usb_car_poll(void), usb_car_on(void);
+int usb_car_poll(void), usb_car_on(void), usb_car_output(void);
+/* output_rule.c: no playback without an output (docs/internals.md#no-playback-without-an-output) */
+void output_rule_config(void);
+int ringnav_valid_output(void), stock_valid_output_trampoline(void);
 #if Q2POD_DEV
 /* adb_trust.c (docs/adb.md#authorization): adbd's question on the card, its answer back through
  * usb_ui.c; Settings > General > Developer Options and Trusted Computers */
