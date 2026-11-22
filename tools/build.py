@@ -676,6 +676,11 @@ NTP_POOL = (b'\0cn.pool.ntp.org\0time.', b'\x000.pool.ntp.org\0\0time.')
 WIFI_LPS = (b'rtwpriv wlan0 pm_set lps=0\0', b'rtwpriv wlan0 pm_set lps=2\0')
 # Now Playing's info page: its one fill (0x53bc78), a bal, becomes jal ringnav_np_info, which tidies the lines.
 NP_INFO_CALL = 0x53d308
+# Now Playing's update (0x53cf08) reads the state, jalr mclGetPlayStatus (lw $t9 at 0x53d378), and when it is not
+# stopped the time, bal player_playtime_and_length; stopped, it writes 0 to the bar and both times. They become jal
+# now_page_status and now_page_time, which answer a Library song held for Radio, a station or a video (now_hold,
+# the player stopped) paused at its second (docs/internals.md#now-playing-source).
+NP_TIME_CALLS = ((0x53d380, 0x0320f809, 'now_page_status'), (0x53d39c, 0x0411869c, 'now_page_time'))
 # Now Playing's A-B markers (0x53baa4): its three calls of their x (0x53b9d8), each a bal, become jal ringnav_ab_x,
 # which keeps them on the slider wherever the page has moved it from the build's place.
 AB_X_CALLS = (0x53bb78, 0x53bbf4, 0x53bc04)
@@ -2233,7 +2238,7 @@ PAYLOAD_ROOTS = ['compact_set_row_layout', 'kb_host_open', 'kb_open_hint', 'ipod
                  'ringnav_dark_usleep', 'ringnav_dialog_close', 'ringnav_ellipsis_text', 'ringnav_gbk_tag', 'ringnav_glyph_stamp',
                  'ringnav_hold_info', 'ringnav_hold_timer', 'ringnav_hscroll_lull', 'ringnav_id3_path',
                  'ringnav_lyric_follow', 'ringnav_lyric_rows', 'ringnav_mainscheduling', 'ringnav_play_cover_wait', 'ringnav_scan_dir',
-                 'ringnav_scan_refresh', 'ringnav_shuffle', 'ringnav_song_unknown', 'ringnav_table_drag',
+                 'now_page_status', 'now_page_time', 'ringnav_scan_refresh', 'ringnav_shuffle', 'ringnav_song_unknown', 'ringnav_table_drag',
                  'ringnav_table_load', 'ringnav_table_scroll', 'stock_row_style', 'stock_row_text', 'stock_set_row_layout']
 
 
@@ -2799,6 +2804,12 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     for load, name in ((FOLDER_NAME[1][2], 'tk_strncpy'), (CLOSE_LOAD, 'navigator_close'), (DUMMY_LOAD, 'dummy_destroy')):
         check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, GP + ((load & 0xffff) ^ 0x8000) - 0x8000))[0] == syms[name],
               f"{name}: the GOT load written for it names another slot")
+    check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, NP_TIME_CALLS[0][0] - 8))[0] == 0x8f99a9a0,
+          'Now Playing time: expected mclGetPlayStatus')
+    check(NP_TIME_CALLS[1][1] == branch(0x04110000, NP_TIME_CALLS[1][0], syms['player_playtime_and_length']),
+          'Now Playing time: expected player_playtime_and_length')
+    for address, word, fn in NP_TIME_CALLS:
+        patch_word(patched, address, word, jal(ps[fn]), "Now Playing's time holds a held song's place")
     patch_word(patched, NP_INFO_CALL, branch(0x04110000, NP_INFO_CALL, PRIVATE_FUNCTIONS['np_info']),
                jal(ps['ringnav_np_info']), "Now Playing's info lines")
     for site in AB_X_CALLS:

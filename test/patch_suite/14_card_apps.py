@@ -91,20 +91,21 @@ CONFIG['KEEPLIT']='1'; a=AppMachine(); del CONFIG['KEEPLIT']; card_app(a,'fidget
 assert a.call(address=payload_syms['addon_games'],args=(0,0,0,0),gap=0,clear=False,count=5_000_000)==1
 assert a.call(address=payload_syms['addon_game_start'],args=(0,0,0,0),gap=0,clear=False,count=5_000_000)==1
 assert not idle(a) and not idle(a) and any(c[0]=='reset_poweroptions_timer' for c in a.calls); passed()
-# A card game with the sound (q2app audio=1): the output is handed over before the fork as for a video (player_stop,
+# A card game with the sound (q2app audio=1): the output is handed over before the fork as for a video (now_hold,
 # the jack readied by dac_take) and the binary gets q2video's arguments: the device, and on Bluetooth or USB the
 # volume (h: the DAC's own); Play/Pause and the side buttons reach it; the DAC stays on and nothing ends it for
 # idling; the Shortcut opens it by id, -1 for an id no card game has.
-g=AppMachine(); card_app(g,'groovebox','name=Groovebox\ngame=1\naudio=1\n'); GB='/mnt/mmc/.groovebox/q2-groovebox'; GS2='/tmp/q2-groovebox.input.sock'
+g=AppMachine(); g.handlers.pop(syms['mclGetPlayStatus'],None); g.word(0xa50084,2); g.mock('player_save_stop','player_save_start')  # the Library playing
+card_app(g,'groovebox','name=Groovebox\ngame=1\naudio=1\n'); GB='/mnt/mmc/.groovebox/q2-groovebox'; GS2='/tmp/q2-groovebox.input.sock'
 def gn(name,*args): return g.call(address=payload_syms[name],args=(args+(0,0,0,0))[:4],gap=0,clear=False,count=5_000_000)
 def start(way):
     g.way=way; g.forked=0; g.execs=[]; g.calls=[]; gn('addon_game_start',0)  # the child
     return [c[0] for c in g.calls]
 assert gn('addon_games')==1 and gn('addon_game_audio')==0  # scanned: the game is listed, none runs
 g.word(syms['g_dacoff_time'],0xffffffff); g.byte(syms['g_headset_output'],1); g.byte(syms['g_volume'],42); names=start(0)
-take=[n for n in names if n in ('player_stop','config_outputchannel','mclSetPcmMode','mclSetMute','device_set_volume','fork')]
-assert take==['player_stop','config_outputchannel','mclSetPcmMode','mclSetMute','device_set_volume','fork'] and g.execs[-1]==(GB,GB,'plughw:0,0','',0)
-names=start(1); assert 'player_stop' in names and 'config_outputchannel' not in names and g.execs[-1]==(GB,GB,'plug:bluealsa','42',0)
+take=[n for n in names if n in ('player_save_stop','config_outputchannel','mclSetPcmMode','mclSetMute','device_set_volume','fork')]
+assert take==['player_save_stop','config_outputchannel','mclSetPcmMode','mclSetMute','device_set_volume','fork'] and g.execs[-1]==(GB,GB,'plughw:0,0','',0)
+names=start(1); assert 'player_stop' not in names and 'config_outputchannel' not in names  # the song still held and g.execs[-1]==(GB,GB,'plug:bluealsa','42',0)
 g.byte(syms['g_usbvol_mode'],0); g.word(O['USB_MIXER'],0xfffffffe); start(2); assert g.execs[-1]==(GB,GB,'usb','h42',0)
 g.way=0; g.forked=4243; assert gn('addon_game_start',0)==1 and gn('addon_game_on')==4243 and gn('addon_game_audio')==1
 g.handlers[inp+12]='stock_input'
@@ -118,7 +119,8 @@ assert gevent(O['EVT_KEY_DOWN'],O['KEY_BACK_BTN'])==[('k d 222',GS2)] and gevent
 assert gevent(O['EVT_KEY_LONG'],O['KEY_PLAY'])==[]  # eaten: no Play-hold action of stock's
 g.word(syms['g_dacoff_time'],5); g.now+=120_001; g.waited=0; assert poll(g)==0 and g.get(syms['g_dacoff_time'])==0
 g.now+=120_001; assert poll(g)==0 and any(c[0]=='reset_poweroptions_timer' for c in g.calls)
-g.waited=4243; poll(g); assert gn('addon_game_on')==0 and gn('addon_game_audio')==0
+g.waited=4243; g.calls=[]; poll(g); assert gn('addon_game_on')==0 and gn('addon_game_audio')==0
+assert [c[1] for c in g.calls if c[0]=='player_save_start']==[1]  # the held song back, paused (now_release)
 g.waited=0; assert signed(gn('addon_game_open',g.string('nothere')))==-1 and gn('addon_game_on')==0
 assert gn('addon_game_open',g.string('groovebox'))==1 and gn('addon_game_on')==4243; passed()
 # Stock's Baidu Netdisk row (a Chinese cloud drive; list_baidu's icon) is gone from Streaming, destroyed; its

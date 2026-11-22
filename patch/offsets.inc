@@ -723,6 +723,7 @@ static inline int arc_out(int r, int y) {
 #define MCL_LASTPOS 0xa50068    /* shuffle "previous" index, -1 none */
 #define MCL_PREPOS 0xa5006c
 #define MCL_PRELOAD 0xa50070    /* 1 preloaded, 0 none, -1 closed for this track */
+#define MCL_START_SEC 0xa50064  /* the next start's place, seconds of the file (mclSetStartSeekTime), -1 none; mclStartPlayer reads and clears it */
 #define MCL_TYPE 0xa50078       /* queue classType: 1 folder, 0xfxxx local */
 #define MCL_POS 0xa5007c
 #define MCL_MODE 0xa50080       /* 0 order, 1 repeat one, 2 shuffle, 3 repeat all */

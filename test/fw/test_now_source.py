@@ -330,3 +330,22 @@ def test_the_status_glyph_follows_radio_off_its_page_until_the_library_is_chosen
     assert not fw.var('radio_tuner__rt', C.c_void_p).value
     car.status = 2
     assert (hn(), bar()) == (0, 2) and fw.fn('now_owner', C.c_int)() == 1, 'the Library\'s own again'
+
+
+def test_a_song_loaded_paused_at_a_place_reads_it_until_heard_and_another_song_does_not(fw, ui, mcl, recs):
+    """now_starting notes where the Library's song starts (MCL_START_SEC); loaded paused there, the player reads 0
+    until heard, and now_time reads the place: never once it plays, nor for the next song."""
+    car = Car(fw, ui, recs)
+    car.status, car.sec = 3, 0
+    mcl.start_sec = 61
+    fw.fn('now_starting', None)()
+    mcl.start_sec = -1
+    sec, total = C.c_int(), C.c_int()
+    now_time = fw.fn('now_time', C.c_int, C.c_void_p, C.c_void_p)
+    assert now_time(C.byref(sec), C.byref(total)) == 3 and sec.value == 61
+    mcl.pos += 1  # the next song, loaded paused from its start
+    assert now_time(C.byref(sec), C.byref(total)) == 3 and sec.value == 0
+    mcl.pos -= 1
+    assert now_time(C.byref(sec), C.byref(total)) == 3 and sec.value == 0  # forgotten, not back
+    fw.fn('now_starting', None)()  # a start with no place (-1): the player's own
+    assert now_time(C.byref(sec), C.byref(total)) == 3 and sec.value == 0

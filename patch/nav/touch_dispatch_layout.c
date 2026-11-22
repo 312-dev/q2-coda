@@ -95,9 +95,48 @@ static void shuffle_page(void) {
         toast("Queue unchanged");
 }
 
+/* A touch's press and whether it went more than TAP_PX from it either way before its lift (far);
+ * lift: the last pointer event was its lift, so the click that follows is that touch's, not a
+ * key's. AWTK clicks a button lifted inside it however far it was dragged there, and a list's
+ * scroll view takes only drags up or down: a sideways drag across a row clicked it (Gain cycled,
+ * a switch flipped). drag_click drops such a click on a list's row. */
+static struct {
+    int x0, y0, far, lift;
+} tp __attribute__((section(".scratch")));
+
+static void touch_track(void *event) {
+    int type = I(event, EVENT_TYPE), x = I(event, EVENT_X), y = I(event, EVENT_Y);
+    if (type == EVT_POINTER_DOWN - 1 || type == EVT_POINTER_DOWN) {
+        tp.x0 = x, tp.y0 = y, tp.far = tp.lift = 0;
+        return;
+    }
+    int up = type == EVT_POINTER_UP_BEFORE - 1 || type == EVT_POINTER_UP_BEFORE;
+    if (up || type == EVT_POINTER_MOVE_BEFORE - 1 || type == EVT_POINTER_MOVE_BEFORE) {
+        if ((unsigned)(x - tp.x0 + TAP_PX) > 2 * TAP_PX ||
+            (unsigned)(y - tp.y0 + TAP_PX) > 2 * TAP_PX)
+            tp.far = 1;
+        if (up) tp.lift = 1;
+    } else if (type >= EVT_KEY_DOWN && type <= EVT_KEY_UP_BEFORE)
+        tp.lift = 0; /* a key's click from here on */
+}
+
+/* 1 for a click on a list's row (inside a scroll view) made by the lift of a touch that went
+ * more than TAP_PX from its press: a drag, not a tap. Buttons in no list (a dialog's, a
+ * keyboard's) keep stock's click. */
+static int drag_click(void *target) {
+    int dragged = tp.lift && tp.far;
+    tp.lift = 0; /* one click a lift */
+    for (void *w = dragged ? target : (void *)0; w; w = P(w, W_PARENT))
+        if (!tk_strcmp(widget_get_type(w), "scroll_view")) return 1;
+    return 0;
+}
+
 /* Observe actual clicks BEFORE app callbacks can navigate or destroy/rebind their widgets.
  * Do not turn pointer-down into selection: a swipe is not a tap. */
 int ringnav_dispatch(void *target, void *event) {
+    if (event) touch_track(event);
+    /* a row's click from a drag's lift: no tap, so no row (a Settings switch or choice) changes */
+    if (target && event && I(event, EVENT_TYPE) == EVT_CLICK && drag_click(target)) return STOP;
     if (np_tap_lift(target, event)) return STOP; /* a hold's lift under the art it opened */
     if (event && target != window_manager() &&
         ((I(event, EVENT_TYPE) >= EVT_KEY_DOWN && I(event, EVENT_TYPE) <= EVT_KEY_UP_BEFORE) ||

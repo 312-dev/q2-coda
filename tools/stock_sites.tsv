@@ -381,6 +381,9 @@ demo	0x53cafc	0x4	playing_page_fav_on_click	`lw $2, GOT[a page]` (3rd of 3 such)
 demo	0x53d0e8	0x4	playing_page_update	`lw $5, -0x30($2)`, the delay slot of 2nd of 2 calls to hscroll_label_set_speed, after "scrlabel_artist"; patch/offsets.inc HSCROLL_PACE
 demo	0x53d10c	0x4	playing_page_update	the only call to playing_page_lyrics_rebuild_rows, after "scrlabel_artist"; tools/build.py LYRIC_ROWS
 demo	0x53d308	0x4	playing_page_update	the only call to np_info, after "play_unfav"; tools/build.py NP_INFO_CALL
+demo	0x53d378	0x4	playing_page_update	the load of $25 for 4th of 4 calls to mclGetPlayStatus, after "img_playstate"; tools/build.py NP_TIME_CALLS
+demo	0x53d380	0x4	playing_page_update	4th of 4 calls to mclGetPlayStatus, after "img_playstate"; tools/build.py NP_TIME_CALLS
+demo	0x53d39c	0x4	playing_page_update	the only call to player_playtime_and_length, after "img_playstate"; tools/build.py NP_TIME_CALLS
 demo	0x53d6d4	0x4	playing_page_update	the load of $25 for the only call to scroll_view_scroll_to, after "play_unfav"; tools/build.py LYRIC_FOLLOW, tools/build.py build
 demo	0x53d6e4	0x4	playing_page_update	the only call to scroll_view_scroll_to, after "play_unfav"; tools/build.py LYRIC_FOLLOW
 demo	0x53dbac	0x4	playing_page_on_keyup_seek	`bne $2, $3, +14 words` (2nd of 2 such), before the only call to power_keyup_detect, after "slider_play"; tools/build.py NP_CENTRE

@@ -5645,6 +5645,8 @@ def toasts(fw):
 
 
 def test_the_groovebox_shortcut_starts_the_card_game_with_the_sound(fw):
+    from test_radio import Library
+    lib = Library(fw)
     card(fw, groovebox=b'name=Groovebox\ngame=1\naudio=1\n')
     fw.mock('fw_fork', lambda *_: 77)
     fw.mock('fw_socket', lambda *_: 9)
@@ -5652,7 +5654,7 @@ def test_the_groovebox_shortcut_starts_the_card_game_with_the_sound(fw):
     assert shortcut(fw, b'10')(None, None) == 0 and seen == []
     gm = fw.var('addon__gm', Game)
     assert (gm.pid, gm.audio, gm.sock, gm.path) == (77, 1, 9, b'/tmp/q2-groovebox.input.sock')
-    assert fw.calls('player_stop') and fw.calls('mclSetMute') and fw.calls('device_set_volume')  # the jack readied, dac_take
+    assert lib.calls == ['save_stop'] and fw.calls('mclSetMute') and fw.calls('device_set_volume')  # held; the jack readied, dac_take
 
 
 @pytest.mark.parametrize('folder, said', [({}, b'Groovebox is not on the card'),
@@ -5666,7 +5668,7 @@ def test_the_groovebox_shortcut_says_when_no_card_game_is_it(fw, folder, said):
     assert seen == [said] and not fw.calls('fw_fork')
     opened = fw.fn('addon_game_open', C.c_int, C.c_char_p)
     assert opened(b'groovebox') == -1 and not fw.calls('fw_fork')
-    assert opened(b'other') == 1 and fw.calls('fw_fork') and not fw.calls('player_stop')  # a game without the sound
+    assert opened(b'other') == 1 and fw.calls('fw_fork') and not fw.calls('player_stop') and not fw.calls('player_save_stop')  # a game without the sound
 
 
 def test_a_card_game_that_can_t_fork_says_so(fw):
@@ -5674,7 +5676,7 @@ def test_a_card_game_that_can_t_fork_says_so(fw):
     fw.mock('fw_fork', lambda *_: -1)
     seen = toasts(fw)
     assert shortcut(fw, b'10')(None, None) == 0
-    assert seen == [b"It couldn't start"] and fw.var('addon__gm', Game).pid == 0 and fw.calls('player_stop')
+    assert seen == [b"It couldn't start"] and fw.var('addon__gm', Game).pid == 0
 
 
 @pytest.mark.parametrize('status, stops', [(3, 1), (1, 0)])
@@ -5687,6 +5689,36 @@ def test_the_game_with_the_sound_ending_clears_a_pause_stuck_on_nothing(fw, stat
     fw.mock('mclGetPlayStatus', lambda *_: status)
     fw.fn('addon_poll', None)()
     assert gm.pid == 0 and gm.audio == 0 and len(fw.calls('player_stop')) == stops
+
+
+def test_a_game_with_the_sound_holds_the_library_where_it_was_and_gives_it_back(fw):
+    """A card game with the sound takes the output as a video does (now_source.c now_hold): the Library's song
+    playing at 61 s is stopped with its place kept, not forgotten by stock's player_stop, and reads paused at 61 s
+    while the game runs; the game ended, the song is loaded again paused at 61 s (now_release)."""
+    from test_radio import Library
+    lib = Library(fw)
+    card(fw, groovebox=b'name=Groovebox\ngame=1\naudio=1\n')
+    fw.mock('fw_fork', lambda *_: 77)
+    fw.mock('fw_socket', lambda *_: 9)
+    assert fw.fn('addon_game_open', C.c_int, C.c_char_p)(b'groovebox') == 1
+    assert lib.calls[0] == 'save_stop', lib.calls
+    assert lib.now() == (3, 61)
+    fw.mock('fw_waitpid', lambda *_: 77)
+    game_has_sound = fw.fn('addon_game_audio', C.c_int)
+    fw.mock('player_save_start', lambda paused, *_: (lib.calls.append(f'save_start {paused} game {game_has_sound()}'), 0)[1])
+    fw.fn('addon_poll', None)()
+    # given back once the game has let go of the sound: before, ringnav_start_player refuses the start
+    assert fw.var('addon__gm', Game).pid == 0 and lib.calls[-1] == 'save_start 1 game 0', lib.calls
+
+
+def test_a_game_with_the_sound_that_can_t_start_gives_the_library_back_at_once(fw):
+    from test_radio import Library
+    lib = Library(fw, status=3)
+    card(fw, groovebox=b'name=Groovebox\ngame=1\naudio=1\n')
+    fw.mock('fw_fork', lambda *_: -1)
+    toasts(fw)
+    assert fw.fn('addon_game_open', C.c_int, C.c_char_p)(b'groovebox') == 0
+    assert lib.calls == ['save_stop', 'save_start 1'] and lib.now() == (3, 61)
 
 
 @pytest.mark.parametrize('how', ['poll', 'timer'])
