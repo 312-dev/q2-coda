@@ -208,6 +208,43 @@ def test_nothing_but_the_handshake_before_auth(fresh):
     assert s.call(0x7e, b'ping') == b'ping'  # Ping, plain before Auth
 
 
+def test_a_ping_before_auth_is_echoed_only_when_short(fresh):
+    """An unpaired peer gets CRC_PING_PLAIN bytes echoed at most (over BLE the rest would be air time taken from
+    A2DP); the session goes on. Sealed, a Ping takes a whole payload."""
+    s = client.Session(Core(fresh), 'x')
+    s.hello()
+    assert s.call(0x7e, bytes(64)) == bytes(64)
+    with pytest.raises(client.RemoteError) as e:
+        s.call(0x7e, bytes(65))
+    assert e.value.name == 'TOO_LARGE'
+    assert s.call(0x7e, b'still') == b'still'
+    s, _, ltk = paired(fresh)
+    s.auth(ltk)
+    assert s.call(0x7e, bytes(8000)) == bytes(8000)
+
+
+def test_new_codes_are_put_up_four_a_minute_at_most(fresh):
+    """Each new code raises the pairing card and lights the screen: a peer asking under new names gets four a
+    minute, then E_BUSY until the oldest is a minute old. The same phone asking again keeps its code and is not
+    counted."""
+    s = client.Session(Core(fresh), 'x')
+    s.hello()
+    for i in range(4):
+        s.name = f'phone {i}'
+        s.pair_start()
+    before = shown(fresh)
+    s.name = 'phone 4'
+    with pytest.raises(client.RemoteError) as e:
+        s.pair_start()
+    assert e.value.name == 'BUSY' and shown(fresh) == before
+    s.name = 'phone 3'
+    assert len(s.pair_start()) == 32 and shown(fresh) == before  # the same phone again: its code, uncounted
+    var(fresh, 'now_ms', ctypes.c_uint32).value += 60001
+    s.name = 'phone 5'
+    s.pair_start()
+    assert shown(fresh) != before
+
+
 def test_wrong_code_fails_once_then_locks_after_three(fresh):
     for attempt in range(3):
         s = client.Session(Core(fresh), 'x')
@@ -377,6 +414,7 @@ def test_code_expires_and_cancel_ends_it(fresh):
 def test_full_device_refuses_a_ninth(fresh):
     for _ in range(8):
         paired(fresh)
+        var(fresh, 'now_ms', ctypes.c_uint32).value += 15001  # four new codes a minute (CRC_PAIR_SHOWS)
     s = client.Session(Core(fresh), 'x')
     s.hello()
     with pytest.raises(client.RemoteError) as e:

@@ -16,7 +16,8 @@
 
 #define MAX_TCP 4
 #define HELLO_MS 10000
-#define AUTH_MS 150000
+#define AUTH_MS 150000    /* the longest a session lives unauthenticated, a pairing's included */
+#define HANDSHAKE_MS 15000 /* the longest one stays in a state other than pairing before Auth */
 #define ACK_MS 4000
 #define TICK_MS 1000 /* the loop's longest sleep: pairing's end, forgotten phones, the handshakes' limits */
 #define LOG_MAX 65536
@@ -43,6 +44,8 @@ typedef struct {
 typedef struct {
     int fd, used;
     uint32_t opened;
+    int seen;          /* its session's state at the last look (timeouts), and since when */
+    uint32_t seen_at;
     crc_session s;
 } conn;
 static conn tcp[MAX_TCP];
@@ -166,9 +169,16 @@ void crc_random(void *buf, size_t n) {
     }
 }
 
+#ifdef CODA_HOST
+uint32_t crc_host_skew_ms; /* the tests' clock ahead of the host's, to reach a limit without waiting for it */
+#endif
+
 uint32_t crc_now_ms(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
+#ifdef CODA_HOST
+    return (uint32_t)(t.tv_sec * 1000u + t.tv_nsec / 1000000) + crc_host_skew_ms;
+#endif
     return (uint32_t)(t.tv_sec * 1000u + t.tv_nsec / 1000000);
 }
 
@@ -802,9 +812,15 @@ static void conn_close(conn *c) {
 static void tcp_accept(int lfd) {
     int fd = accept(lfd, 0, 0);
     if (fd < 0) return;
-    conn *c = 0;
+    conn *c = 0, *old = 0;
     for (int i = 0; i < MAX_TCP && !c; ++i)
         if (!tcp[i].used) c = &tcp[i];
+    /* All taken: the oldest that has said no more than Hello makes room, so peers that connect and wait
+     * cannot keep a paired phone out */
+    for (int i = 0; i < MAX_TCP && !c; ++i)
+        if ((tcp[i].s.state == S_NEW || tcp[i].s.state == S_HELLO) && (!old || tcp[i].opened - old->opened >= 0x80000000u))
+            old = &tcp[i];
+    if (!c && old) conn_close(c = old);
     if (!c) { close(fd); return; }
     struct timeval tv = {2, 0};
     int one = 1;
@@ -813,8 +829,9 @@ static void tcp_accept(int lfd) {
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
     c->fd = fd;
     c->used = 1;
-    c->opened = crc_now_ms();
+    c->opened = c->seen_at = crc_now_ms();
     crc_open(&c->s, c, TR_TCP);
+    c->seen = c->s.state;
 }
 
 static void tcp_read(conn *c) {
@@ -853,8 +870,9 @@ void crc_ble_connected(void) {
     if (ble.used) conn_close(&ble);
     ble.used = 1;
     ble.fd = -1;
-    ble.opened = crc_now_ms();
+    ble.opened = ble.seen_at = crc_now_ms();
     crc_open(&ble.s, &ble, TR_BLE);
+    ble.seen = ble.s.state;
 }
 
 void crc_ble_bytes(const uint8_t *p, size_t n) {
@@ -920,8 +938,12 @@ static int files_watch(void) {
 
 static void timeouts(conn *c) {
     if (!c->used) return;
-    uint32_t age = crc_now_ms() - c->opened;
-    if ((c->s.state == S_NEW && age > HELLO_MS) || (c->s.state != S_AUTHED && age > AUTH_MS)) {
+    uint32_t now = crc_now_ms(), age = now - c->opened;
+    if (c->s.state != c->seen) c->seen = c->s.state, c->seen_at = now;
+    /* Hello within HELLO_MS, Auth within AUTH_MS; and no state but the pairing (a person typing the code)
+     * held longer than HANDSHAKE_MS, which the phone's handshake takes well under a second of */
+    if ((c->s.state == S_NEW && age > HELLO_MS) || (c->s.state != S_AUTHED && age > AUTH_MS) ||
+        (c->s.state != S_AUTHED && c->s.state != S_PAIRING && now - c->seen_at > HANDSHAKE_MS)) {
         conn_close(c);
         if (c == &ble) ble_disconnect();
     }

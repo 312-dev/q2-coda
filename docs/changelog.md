@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Remote: a Bluetooth device nearby can no longer crash or take over the Car Remote service by sending it a malformed message before pairing. Devices that are not paired also can no longer keep a paired phone from connecting over Wi-Fi, or light the Q2's screen with pairing requests more than four times a minute.
   - Car Audio: Radio, Internet Radio, Videos and Spotify now play through the car's USB too, where they went to Bluetooth or nowhere while the car listened to USB.
   - Radio: starting a song's radio again after stopping it (from the car or on the Q2) works, where it said "Radio isn't available for this song".
   - Car Audio: the car's Up Next shows the queue of songs from your server, and their covers come from the songs themselves when the Q2 has no other.

@@ -41,7 +41,7 @@ option java_multiple_files = true;
 //   0x46 StartRadio       -> 0x21 Ack              (CAP_RADIO)
 //   0x50 GetCover         -> 0x51 Cover
 //   0x60 GetRemote        -> 0x61 RemoteInfo           (CAP_REMOTE)
-//   0x7e Ping             -> 0x7f Pong                 (any payload, echoed; plain before Auth)
+//   0x7e Ping             -> 0x7f Pong                 (any payload, echoed; plain before Auth, and then 64 bytes at most: longer gets TOO_LARGE)
 //
 // Before AuthResp only Hello, PairStart, PairFinish, Auth and Ping are answered; anything else gets
 // Error{UNAUTHORIZED}; after it, an unknown type gets Error{UNSUPPORTED} and the session goes on.
