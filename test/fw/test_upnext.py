@@ -646,6 +646,18 @@ def test_a_drag_down_on_the_sheet_closes_it(fw, up):
     assert aborts == [(PAGE, O['EVT_POINTER_ABORT'])]  # claimed: the sheet's pressed widgets let go
 
 
+@pytest.mark.parametrize('at, to', [((140, 46), (220, 185)), ((130, 46), (230, 189)), ((120, 150), (210, 280))],
+                         ids=['grab-30deg', 'grab-35deg', 'rows-35deg'])
+def test_a_thumb_s_slanted_drag_down_closes_the_sheet(fw, up, at, to):
+    """The user's, 2026-11-21, on the device: a swipe down still left Up Next up. A thumb holding the Q2 swipes down
+    on a slant, 30 to 35 degrees off the vertical; driven so on the emulator with the panel's own events, the sheet
+    claimed the drag (more down than across) and followed it, then rose back at the lift, which also asked for less
+    than half as far across as down. Once claimed, the drop alone decides, as the sheet follows only the drop."""
+    _, page = up
+    page.open()
+    assert finger(page, at, to) == 1
+
+
 @pytest.mark.parametrize('at, to, scrolled', [
     ((187, 120), (187, 160), 0),   # 40 px: short of it
     ((187, 120), (260, 180), 0),   # as much across as down

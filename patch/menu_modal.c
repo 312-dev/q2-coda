@@ -265,9 +265,9 @@ void modal_close(void *win) {
 
 /* A finger that closes a sheet (the user's, 2026-11-18, for Up Next; docs/oled-design.md#up-next):
  * a tap on the page receding above it (down and up over SH_TOP, within TAP_PX), or a drag down,
- * more down than across (the swipe up that opens Up Next, reversed), that came down on the sheet's
- * strip above its rows (the grab bar's) or on its rows while they are at their top. A drag on rows
- * scrolled down scrolls them, as anywhere.
+ * more down than across as it starts (the swipe up that opens Up Next, reversed), that came down
+ * on the sheet's strip above its rows (the grab bar's) or on its rows while they are at their top.
+ * A drag on rows scrolled down scrolls them, as anywhere.
  *
  * The drag is claimed in the window's move-before, before its children see the move, once it has
  * gone TAP_PX down and more down than across: from there the rows' scroll would take it, and
@@ -275,7 +275,9 @@ void modal_close(void *win) {
  * widgets are aborted first (as swipe_back.c and pull-to-search claim theirs) and the moves and the
  * lift are swallowed. A drag up or sideways first is left to the rows. Claimed, the sheet follows
  * the finger (mo.off, MO_DRAG), the page behind coming forward as it drops; let go SH_DRAG_PX or
- * more down and it falls away from there as Return lets it (modal_close, from the next pass,
+ * more down, however far across (a thumb holding the Q2 swipes down on a slant, 30 degrees and
+ * more off the vertical: the user's, 2026-11-21), and it falls away from there as Return lets it
+ * (modal_close, from the next pass,
  * outside the touch's dispatch), short of it it rises back. Under Reduce Motion, or with no motion
  * to run (no material yet, a picker over another sheet), it stays put and the lift decides alone.
  * Another's abort (a swipe back's) puts the sheet back. */
@@ -354,7 +356,8 @@ static int sheet_touch(void *win, void *event) {
     int tap = dx <= TAP_PX && (dy < 0 ? -dy : dy) <= TAP_PX;
     if (from == MT_SCRIM && tap && y < SH_TOP) timer_add(sheet_touch_close, win, 0);
     if (from != MT_DRAG) return 0;
-    if (dy >= SH_DRAG_PX && 2 * dx < dy)
+    /* claimed, the drop alone decides: a thumb's slant across is no reason to stay */
+    if (dy >= SH_DRAG_PX)
         timer_add(sheet_touch_close, win, 0);
     else
         drag_back();
