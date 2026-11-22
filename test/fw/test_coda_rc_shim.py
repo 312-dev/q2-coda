@@ -592,3 +592,22 @@ def test_the_daemons_wake_names_the_app_to_start(fw, ui, mcl, recs):
     assert '/tmp/coda-rc.wake' not in q2.files
     a = ap(fw)
     assert [bytes(a.a[i].id) for i in range(a.n)] == [b'foo']
+
+
+def test_car_audio_s_commands_are_read_every_pass_beside_the_daemon_s_pipe(fw, ui, mcl, recs):
+    """The drive of 2026-11-22 (q2muse-1126): with Car Remote on, its daemon's pipe live, the shim read the command
+    file only after a tell or every CR_FILES_MS (5 s), and q2-iap, which never tells, writes Car Audio's buttons
+    there: the car's held Next ("scan 1" every 500 ms) reached seek.c every 5 s, its scan ended 2 s after each
+    (SEEK_CAR_LOST_MS) and began again at the next, in bursts. While the iPhone gadget is on the cable the file is
+    read every CR_POLL_MS."""
+    tell = Tell(fw)
+    q2 = Q2(fw, ui, recs)
+    q2.tick()
+    assert tell.threads == [8]
+    fw.fn('usb_car_start', None)()  # a cable in on Automatic: q2car's iPhone (usb_car.c)
+    q2.files[CMD] = b'21 scan 1\n'
+    q2.tick(600)
+    assert q2.files.pop(ACK) == b'21 0\n'
+    q2.files[CMD] = b'22 scan 1\n'
+    q2.tick(600)
+    assert q2.files.pop(ACK) == b'22 0\n'

@@ -625,7 +625,12 @@ void coda_rc_poll(void) {
         if (!cr.started_at || (now - cr.started_at >= CR_RESTART_MS && dead)) cr_start();
         cr_now();
         cr_settle();
-        if (!told && cr.tell_live && !cr.play_timer && !cr.pair_page && now - cr.files_at < CR_FILES_MS) return;
+        /* Car Audio's q2-iap writes the car's buttons here and never tells, and the car's held Next or Previous says
+         * "scan" every 500 ms against seek.c's SEEK_CAR_LOST_MS: while its iPhone is on the cable, every CR_POLL_MS
+         * (q2muse-1126: read every 5 s, the car's scan ran in bursts) */
+        if (!told && cr.tell_live && !cr.play_timer && !cr.pair_page && !usb_car_on() &&
+            now - cr.files_at < CR_FILES_MS)
+            return;
     } else if (!coda_rc_enabled()) {
         return;
     }
