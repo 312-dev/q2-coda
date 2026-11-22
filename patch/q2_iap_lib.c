@@ -271,6 +271,53 @@ static void lib_saved(void) {
     if (pid < 0) logline("lib", "library: the sent record could not be written (no child)");
 }
 
+/* Server songs played from their app's stream cache (/mnt/mmc/.<app>/stream/.../<title> [<sid>].<suffix>,
+ * stream_path.h) by their library rid: the shim names such a song by rid 0 (no record of the library has its path),
+ * though the library the car was sent has it as its server row, servermeta's id for that app and sid. On
+ * 2026-11-22 every queue was such songs and Up Next went to the car as "no list", and Now Playing named the song by a
+ * hash. Each of n paths (0: none) whose rids[i] is 0 is looked for, the catalogue read once, its (app, sid) pairs
+ * sorted; the count found. */
+struct lib_sid {
+    char key[80]; /* "<app> <sid>" */
+    unsigned rid;
+};
+static int lib_sid_cmp(const void *a, const void *b) { return strcmp(((const struct lib_sid *)a)->key, ((const struct lib_sid *)b)->key); }
+static unsigned lib_stream_rids(const char *const *paths, unsigned *rids, unsigned n) {
+    sqlite3 *db = 0;
+    sqlite3_stmt *st = 0;
+    struct lib_sid *v = 0, want;
+    unsigned m = 0, vcap = 0, found = 0;
+    if (access(lib_cat, 0) || sqlite3_open_v2(lib_cat, &db, SQLITE_OPEN_READONLY, 0) ||
+        sqlite3_prepare_v2(db, "select app, sid, id from servermeta where sid is not null", -1, &st, 0)) {
+        if (db) sqlite3_close(db);
+        return 0;
+    }
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        if (m == vcap) {
+            struct lib_sid *w = realloc(v, (vcap = vcap ? vcap * 2 : 4096) * sizeof *w);
+            if (!w) break;
+            v = w;
+        }
+        const char *app = (const char *)sqlite3_column_text(st, 0), *sid = (const char *)sqlite3_column_text(st, 1);
+        snprintf(v[m].key, sizeof v[m].key, "%s %s", app ? app : "", sid ? sid : "");
+        v[m].rid = (unsigned)sqlite3_column_int(st, 2);
+        ++m;
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    if (v) qsort(v, m, sizeof *v, lib_sid_cmp);
+    for (unsigned i = 0; v && i < n; ++i) {
+        const char *app, *sid;
+        int appn, sidn;
+        if (rids[i] || !paths[i] || !stream_path_sid(paths[i], &app, &appn, &sid, &sidn)) continue;
+        snprintf(want.key, sizeof want.key, "%.*s %.*s", appn, app, sidn, sid);
+        const struct lib_sid *hit = bsearch(&want, v, m, sizeof *v, lib_sid_cmp);
+        if (hit && hit->rid) rids[i] = hit->rid, ++found;
+    }
+    free(v);
+    return found;
+}
+
 /* Songs to play, by rid: the shim's list (/tmp/coda-rc.list, a rid a line) and its play command, as coda-rc's Play
  * sends them (coda_rc_lib.c play). */
 static const char *list_file = "/tmp/coda-rc.list";
@@ -293,9 +340,11 @@ static void lib_play(const unsigned *rids, unsigned n, unsigned at, int shuffle)
  * cap rids into out; the count, or -1 when there is no queue file or it lists fewer songs than it has. */
 static const char *queue_file = "/tmp/coda-rc.queue";
 static int lib_queue(unsigned *out, unsigned cap) {
-    unsigned char *b = malloc(cap * 12 + 64);
-    unsigned got = b ? read_file(queue_file, b, cap * 12 + 63) : 0;
-    int n = -1;
+    unsigned room = cap * 300 + 64; /* a song outside songtable is a line with its path, title and artist */
+    unsigned char *b = malloc(room);
+    const char **paths = malloc(cap * sizeof *paths);
+    unsigned got = b && paths ? read_file(queue_file, b, room - 1) : 0;
+    int n = -1, zeros = 0;
     if (got) {
         b[got] = 0;
         unsigned total = 0;
@@ -307,11 +356,18 @@ static int lib_queue(unsigned *out, unsigned cap) {
             while (*e && *e != ' ' && *e != '\n') ++e;
         }
         for (n = 0; c && *++c && (unsigned)n < cap;) {
+            char *tab = strchr(c, '\t'), *nl = strchr(c, '\n');
+            paths[n] = 0;
+            if (tab && (!nl || tab < nl)) {
+                char *end = strchr(tab + 1, '\t');
+                if (end && (!nl || end < nl)) *end = 0, paths[n] = tab + 1, zeros += !atoi(c);
+            }
             out[n++] = (unsigned)atoi(c);
-            c = strchr(c, '\n');
+            c = nl;
         }
         if ((unsigned)n != total) n = -1;
     }
-    free(b);
+    if (n > 0 && zeros) lib_stream_rids(paths, out, (unsigned)n);
+    free(b), free(paths);
     return n;
 }

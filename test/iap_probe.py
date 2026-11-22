@@ -1776,5 +1776,50 @@ def test_up_next_and_the_playing_song_s_id(probe, tmp_path, monkeypatch):
         stop(p, fd)
 
 
+def test_up_next_of_server_songs_from_the_stream_cache(probe, tmp_path, monkeypatch):
+    """The drive of 2026-11-22 (q2muse-1126): every queue was the Subsonic app's songs played from its stream cache,
+    which the shim names by rid 0 (the device's /tmp/coda-rc.queue: `1 0 3` then three lines of 0, the stream path,
+    title and artist; /tmp/coda-rc.now id=0), so every announce was "no list" and Now Playing named the song by a
+    hash, though the library the car was sent has each as its server row. The stream path's app and sid name that row
+    (servermeta), whose rid goes in the list and in Now Playing's id."""
+    monkeypatch.setattr(BmwCar, 'msg', bmw_msg_keeping_body)
+    import sqlite3
+    song_db(tmp_path/'database.db', [SONGS[1]])
+    server = [(0x40000000 + k, t, 'Pure Heroine', 'Lorde', '', 'Pop', k + 1, 1, f'/mnt/mmc/.subsonic/cat/al-9/{k}.flac')
+              for k, t in enumerate(('Ribs', 'Buzzcut Season', 'Team'))]
+    catalogue_db(tmp_path/'catalogue.db', server)
+    c = sqlite3.connect(tmp_path/'catalogue.db')
+    for k, sid in enumerate(('0S2sKobzoSngoRjq2oIqxT', 'RjYzpcigs0gxaJeph5u83x', 'Tm4xQ2pV')):
+        c.execute('update servermeta set sid = ? where id = ?', (sid, 0x40000000 + k))
+    c.commit()
+    c.close()
+    stream = '/mnt/mmc/.subsonic/stream/11c3e037/original/{}/{} [{}].flac'
+    paths = [stream.format('f', 'ribs', '0S2sKobzoSngoRjq2oIqxT'), stream.format('5', 'buzzcut season', 'RjYzpcigs0gxaJeph5u83x'),
+             stream.format('a', 'team', 'Tm4xQ2pV')]
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path)
+    (tmp_path/'queue').write_text('1 0 3\n' + ''.join(f'0\t{pa}\t{t}\tLorde\n' for pa, t in zip(paths, ('Ribs', 'Buzzcut Season', 'Team'))))
+    files['np'].write_text(f'state=1\npos=1000\nlen=208\nid=0\ntitle=Ribs\nartist=Lorde\nalbum=Pure Heroine\npath={paths[0]}\n'
+                           'qgen=1\nqpos=0\nqlen=3\n')
+    try:
+        car.send(message(0x5000, prm(0, prm(0) + prm(1)), prm(1, prm(0) + prm(2) + prm(3) + prm(14) + prm(17))))
+        mid, ps = car.msg()
+        assert mid == 0x5001 and params(ps[0])[0] == (0x5132000140000000).to_bytes(8, 'big'), params(ps[0])[0].hex()
+        deadline, announce = time.time() + 4, None
+        while time.time() < deadline and announce is None:
+            mid, ps = car.msg()
+            if mid == 0x5001 and 1 in ps and 14 in params(ps[1]):
+                announce = params(ps[1])
+        assert announce and announce[14] == b'\x01', announce
+        while not car.files:
+            file_packet(car)
+        tid = car.files[0][0]
+        car.send(bytes([tid, 0x01]), session=2)
+        while len(car.files) < 2:
+            file_packet(car)
+        assert car.files[1][2:] == b''.join((0x5132000100000000 | (0x40000000 + k)).to_bytes(8, 'big') for k in range(3))
+    finally:
+        stop(p, fd)
+
+
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-q', *sys.argv[1:]]))
