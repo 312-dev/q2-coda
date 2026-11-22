@@ -241,11 +241,14 @@ for way,soft in ((0,0),(1,0),(2,0),(2,1)):
     assert any(c[0]=='notifyVolume' for c in b.calls); passed()
 
 # Screen off, the UI loop idles SCREEN_OFF_SLEEP_MS before stock's own pacing; screen on, stock alone.
+# Stock's sleep is the pass's last call but the UI pass watchdog's clock read (ui_watch.c ui_watch_woke).
 sleep_hook=HOOKS['main_loop_sleep_default'][0]
 for light,want in ((1,[]),(0,[O['SCREEN_OFF_SLEEP_MS']])):
     s=Machine(); s.handlers[sleep_hook+12]='stock_sleep'; s.byte(syms['g_backlight_status'],light)
     assert s.call(address=sleep_hook,args=(0x1234,0,0,0),gap=0)==0
-    assert [c[1] for c in s.calls if c[0]=='sleep_ms']==want and s.calls[-1][:2]==('stock_sleep',0x1234); passed()
+    slept=max(i for i,c in enumerate(s.calls) if c[0]=='stock_sleep')
+    assert [c[1] for c in s.calls if c[0]=='sleep_ms']==want and s.calls[slept][:2]==('stock_sleep',0x1234)
+    assert {c[0] for c in s.calls[slept+1:]}<={'time_now_ms'}, s.calls[slept+1:]; passed()
     # The next pass with the backlight on repaints the whole screen once; staying on, nothing more.
     s.byte(syms['g_backlight_status'],1)
     for wake in (not light,False):
