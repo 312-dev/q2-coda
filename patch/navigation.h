@@ -590,6 +590,8 @@ void tilt_press(int down);
 unsigned tilt_tone(unsigned c);
 /* swipe_back.c: the left edge's swipe back (docs/internals.md#swipe-back) */
 void swipe_back_down(void *event, int allowed);
+int swipe_back_holds(void); /* a touch is a swipe back's candidate or its own */
+void touch_hide(void);      /* nav/touch_dispatch_layout.c: a touch on the rows after all */
 void swipe_back_poll(void);
 void swipe_back_paint(void *w, void *canvas);
 int page_ox(void *canvas, void *w);

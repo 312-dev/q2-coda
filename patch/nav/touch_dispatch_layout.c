@@ -16,6 +16,9 @@ static void hide_outline(void) {
     st.touch_mode = 1;
     if (top) widget_invalidate_force(top, (void *)0);
 }
+/* A touch on the page after all: swipe_back.c's edge press that dragged up, down or left, or lifted
+ * where it came down. */
+void touch_hide(void) { hide_outline(); }
 
 int ringnav_touch(void *ctx, void *event) {
     /* a finger on the A-Z index: its moves are az_index.c's (az_event), the rows' bar stays */
@@ -34,7 +37,10 @@ int ringnav_touch(void *ctx, void *event) {
     }
     if (!hold)       /* swiping pages keeps the paused seek's preview */
         np_cancel(); /* before the slider sees the touch, so a drag seeks the stock way */
-    hide_outline();
+    /* A swipe back's touch (swipe_back.c) is no touch on the rows: the bar rides with the page. Its
+     * press hides it here as any does, and is given it back below once it is a candidate. */
+    int was_touch = st.touch_mode, swiping = swipe_back_holds();
+    if (!swiping) hide_outline();
     int result = stock_touch_trampoline(ctx, event);
     /* A tap is a fresh interaction: it cancels a pending screen-toggle pair and any spin. */
     drop_input();
@@ -55,6 +61,7 @@ int ringnav_touch(void *ctx, void *event) {
     if (!result)
         swipe_back_down(event, !st.rt_page && !(st.np_full && window_manager_get_top_window(
                                                                   window_manager()) == st.np_win));
+    if (!swiping && !was_touch && swipe_back_holds()) st.touch_mode = 0;
     /* Pointer-down must not recall/rebind the row that native touch is about to hit. */
     if (!result && w && load_rows(&g_menu, w)) {
         stop_scroll(&g_menu);

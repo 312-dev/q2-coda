@@ -9,7 +9,7 @@ import pytest
 
 from conftest import O, ROOT
 from test_coverflow import themed
-from test_nav_lists import STOP, Page, Pull, titles, ui  # noqa: F401  (ui: fixture)
+from test_nav_lists import STOP, Page, Pull, scratch, st, titles, ui  # noqa: F401  (scratch, st, ui: fixtures)
 
 SB = {k: int(v, 0) for k, v in re.findall(r'^#define (SB_\w+) (0x[0-9a-f]+|\d+)\b', (ROOT / 'patch' / 'swipe_back.c').read_text(), re.M)}
 EVT_MOVE, EVT_UP = O['EVT_POINTER_MOVE_BEFORE'], O['EVT_POINTER_UP_BEFORE']
@@ -201,3 +201,36 @@ def test_the_page_under_shows_left_of_the_page_drifting_in_and_lightening(fw, ui
     s.ui.now += 400
     s.poll(2 * SB['SB_GLIDE_MS'])
     assert under.gone == [C.addressof(under.bitmap)]  # the snapshot let go once the swipe ends
+
+
+def test_an_edge_swipe_keeps_the_rows_bar_and_a_touch_on_the_page_hides_it(fw, ui, st):
+    """Seen on the emulator 2026-11-21 with the panel's own events (also on the base): the selected row's accent bar
+    went as the finger came down at the edge, stayed gone while the page slid and after it sprang back. A touch hides
+    the bar (st.touch_mode, docs/internals.md#touch-mode) because it is a touch on the page's rows; an edge press
+    that becomes a swipe back is none, so the bar rides with the page. The same press dragged up or down, or let go
+    where it came down, is the page's after all, and hides it."""
+    touch = st('touch_mode')
+    s = Swipe(fw, ui)
+    touch.value = 0
+    s.pull.down(5, 150)
+    assert touch.value == 0  # a candidate: not yet a touch on the rows
+    s.drag(30, 90)
+    assert touch.value == 0 and s.x == 85  # claimed, the page follows; the bar with it
+    s.ui.now += 400
+    s.lift(90)
+    s.poll(2 * SB['SB_GLIDE_MS'])
+    assert touch.value == 0 and s.x == 0  # sprung back, the row still lit
+
+    for dx, dy in ((2, SB['SB_CLAIM_PX']), (0, 0)):  # dragged down; a tap at the edge
+        touch.value = 0
+        s.pull.down(5, 150)
+        if dy:
+            s.pull.move(dx, dy)
+        else:
+            s.pull.up(0, 0)
+        assert touch.value == 1, (dx, dy)
+        s.pull.up(dx, dy)
+
+    touch.value = 0
+    s.pull.down(SB['SB_EDGE_PX'] + 40, 150)  # mid screen: a touch on the rows at once, as before
+    assert touch.value == 1
