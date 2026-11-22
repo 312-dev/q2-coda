@@ -368,6 +368,55 @@ def test_a_phone_that_writes_without_reading_answers_is_let_go(q2):
     assert wait_for(q2.advertising)
 
 
+def authed(q2, c, name='Pixel 10'):
+    """A Session over c that has paired and authenticated: what a phone has before anything but the handshake."""
+    s = client.Session(c, name)
+    s.hello()
+    point = s.pair_start()
+    assert wait_for((q2.root / 'tmp/coda-rc.pair').exists)
+    code = (q2.root / 'tmp/coda-rc.pair').read_text().split('\n')[0]
+    s.auth(s.pair_finish(code, point)[1])
+    return s
+
+
+def static_bytes(so, lib, symbol, offset, n):
+    """n bytes of the loaded daemon's memory at a static's address plus offset: the static found by name in the
+    library's symbol table, the load address from coda_main's."""
+    syms = {}
+    for line in subprocess.run(['llvm-nm', '--defined-only', str(so)], capture_output=True, text=True,
+                               check=True).stdout.splitlines():
+        addr, _, name = line.split()
+        syms[name] = int(addr, 16)
+    base = ctypes.cast(lib.coda_main, ctypes.c_void_p).value - syms['coda_main']
+    return ctypes.string_at(base + syms[symbol] + offset, n)
+
+
+def test_a_bad_length_with_more_than_a_frame_held_closes_without_overrunning(daemon_so, q2):
+    """A length out of range at the head of more than CRC_MAX_FRAME held bytes (they pile up while an answer
+    larger than the link's send buffer waits for the phone to take it): the link is closed and nothing is copied
+    past the frame buffer feed hands the session (coda_rc_ble.c feed, its static f)."""
+    max_frame = 6 + 8192 + 16
+    c = connect(q2)
+    c.exchange(247)
+    c.notify()
+    s = authed(q2, c)
+    canary = static_bytes(daemon_so, q2.lib, 'feed.f', max_frame, 400)
+    s.send(client.T['PING'], bytes(8000))  # 8022 bytes back, more than the send buffer holds: they wait in out
+    c.s.recv(1, socket.MSG_PEEK)  # the answer has begun, so the Ping has left the held bytes
+    held = b'\xff\xff' + b'\xa5' * (max_frame + 300 - 2)
+    for i in range(0, len(held), 244):
+        c.write(H_CONTROL, held[i:i + 244], cmd=True)
+    c.s.send(struct.pack('<BH', 0x0a, H_INFO))  # a Read after them: its answer comes once all were taken in
+    got_info = False
+    with pytest.raises((ConnectionError, OSError)):
+        while True:
+            p = c.take()
+            got_info = got_info or p == b'\x0bcoda-rc 1'
+    assert got_info and len(c.stream) >= 8022
+    assert static_bytes(daemon_so, q2.lib, 'feed.f', max_frame, 400) == canary
+    assert wait_for(q2.advertising)
+
+
 def test_advertising_follows_the_phone(q2):
     k = q2.kernel
     assert wait_for(q2.advertising)

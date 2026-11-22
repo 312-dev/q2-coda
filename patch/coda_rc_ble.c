@@ -520,12 +520,13 @@ static void flush(void) {
 }
 
 /* The phone's frames to the session, one at a time, each only once everything before it has gone out. A
- * malformed length goes as it is: the session closes on it. */
+ * length out of range goes as its two bytes alone, which the session refuses (crc_feed), closing it and the
+ * link; what follows them is dropped. b.in holds up to two frames, so nothing longer than f is ever copied. */
 static void feed(void) {
     static uint8_t f[CRC_MAX_FRAME];
     while (b.cfd >= 0 && !b.dead && b.out_n == 0 && !b.rsp_n && b.in_n >= 2) {
         size_t len = b.in[0] << 8 | b.in[1], take = 2 + len;
-        if (len < 4 || take > CRC_MAX_FRAME) take = b.in_n;
+        if (len < 4 || take > CRC_MAX_FRAME) take = 2;
         if (take > b.in_n) return;
         memcpy(f, b.in, take);
         memmove(b.in, b.in + take, b.in_n - take);
