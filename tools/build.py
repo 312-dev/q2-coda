@@ -1482,7 +1482,8 @@ def source_sha256():
     h = hashlib.sha256()
     manual = [ROOT/'docs/manual'/f for f in ('build.py', 'guide.html')]
     for path in sorted([*(p for p in ROOT.glob('assets/**/*') if p.is_file()), *(p for p in ROOT.glob('patch/**/*') if p.is_file()),
-                        *ROOT.glob('tools/*.py'), *ROOT.glob('tools/*.c'),
+                        *ROOT.glob('tools/*.py'), *ROOT.glob('tools/*.c'), *ROOT.glob('tools/*.patch'),
+                        *(p for p in ROOT.glob('tools/uac1_module/**/*') if p.is_file() and '__pycache__' not in p.parts),
                         *ROOT.glob('tools/*.h'), *ROOT.glob('tools/*.S'), *ROOT.glob('player/*.[ch]'),
                         *ROOT.glob('player/Makefile'), *manual]):
         h.update(str(path.relative_to(ROOT)).encode() + b'\0')

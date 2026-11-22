@@ -8,8 +8,8 @@ What it adds to tools/build.py, which it runs:
 - one place per worktree, ~/.cache/q2-builds/<worktree>[-dev]/, holding this build and the one before it
   (a test still reading that one keeps it) and a `cur` link to the newest, not a new bN each run: two
   builds' disk, not dozens. The path printed is the build's own directory, never the link;
-- nothing at all when cur was built from the same sources (source_sha256) and options: a test of an
-  unchanged tree reuses it;
+- nothing at all when cur was built from the same sources (tools/build.py's source_sha256, and the iroh
+  crate's, tools/iroh.py's crate_sha256) and options: a test of an unchanged tree reuses it;
 - ccache in front of clang and cc (/usr/lib/ccache, base_dir $HOME, hash_dir off; the build runs in one
   fixed directory and is renamed after, as the include path is hashed). A --dev build's number is in
   stock.h, which most sources include, so ccache pays off on a release build, not a --dev one;
@@ -43,6 +43,14 @@ def source_sha256():
     sys.path.insert(0, str(ROOT/'tools'))
     import build  # noqa: E402  (tools/build.py: the hash test/patch.py checks a build against)
     return build.source_sha256()
+
+
+def crate_sha256():
+    """remote/iroh-sidecar's sources (tools/iroh.py), outside source_sha256: --build-iroh compiles them, and
+    the pinned path stops a build whose crate is not PIN's, so neither may reuse an image made from another."""
+    sys.path.insert(0, str(ROOT/'tools'))
+    import iroh  # noqa: E402
+    return iroh.crate_sha256()
 
 
 def dedupe(out):
@@ -83,13 +91,13 @@ def main():
     cur = link.resolve() if link.is_symlink() else link
     new = place/f'b{time.strftime("%Y%m%d-%H%M%S")}'
     options = [*(['--dev'] if args.dev else []), *rest]
-    source = source_sha256()
+    key = {'source_sha256': source_sha256(), 'crate_sha256': crate_sha256(), 'options': options}
     stamp = cur/'rebuild.json'
     try:
         old = json.loads(stamp.read_text())
     except (OSError, ValueError):
         old = None
-    if not args.force and old == {'source_sha256': source, 'options': options} and (cur/'update.tar').exists():
+    if not args.force and old == key and (cur/'update.tar').exists():
         print(f'unchanged since {cur} was built: reused', file=sys.stderr)
         print(cur)
         return 0
@@ -115,7 +123,7 @@ def main():
         return p.returncode
     building.rename(new)
     saved = dedupe(new)
-    (new/'rebuild.json').write_text(json.dumps({'source_sha256': source, 'options': options}))
+    (new/'rebuild.json').write_text(json.dumps(key))
     tmp = place/'cur.new'
     tmp.unlink(missing_ok=True)
     tmp.symlink_to(new.name)

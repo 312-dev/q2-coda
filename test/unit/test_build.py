@@ -786,11 +786,13 @@ def test_jpeg_size_refuses(data, message):
 def test_source_sha256_hashes_every_input_by_path(tmp_path, monkeypatch):
     monkeypatch.setattr(build, 'ROOT', tmp_path)
     files = ['assets/icons/a.png', 'assets/b.jpg', 'patch/c.c', 'tools/d.py', 'tools/e.c', 'tools/f.h', 'tools/g.S',
-             'docs/manual/build.py', 'docs/manual/guide.html', 'player/h.c', 'player/i.h', 'player/Makefile']
+             'docs/manual/build.py', 'docs/manual/guide.html', 'player/h.c', 'player/i.h', 'player/Makefile',
+             'tools/adbd.patch', 'tools/uac1_module/Kbuild', 'tools/uac1_module/patches/p.patch']
     for name in files:
         (tmp_path/name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path/name).write_text(name)
-    for name in ('tools/note.txt', 'docs/other.md', 'test/x.py', 'tools/sub/deep.py', 'player/build/host/q2player'):
+    for name in ('tools/note.txt', 'docs/other.md', 'test/x.py', 'tools/sub/deep.py', 'player/build/host/q2player',
+                 'tools/uac1_module/__pycache__/x.pyc'):
         (tmp_path/name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path/name).write_text(name)
     expected = hashlib.sha256()

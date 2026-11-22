@@ -1223,3 +1223,35 @@ def test_a_pass_is_keyed_by_the_options_the_build_was_made_with(tmp_path):
     other = tmp_path/'other'
     other.mkdir()
     assert affected.build_options(str(other)) == [f'build:{other.resolve()}']
+
+
+def test_rebuild_reuses_only_a_build_of_the_same_inputs(tmp_path, monkeypatch, capsys):
+    """rebuild.py's reuse key: the sources build.py hashes, the options, and the iroh crate, which --build-iroh
+    compiles and the pinned path checks against its PIN; a crate edit alone must not return the old image."""
+    import rebuild
+    sys.path.insert(0, str(rebuild.ROOT/'tools'))
+    import iroh
+    crate = tree(tmp_path/'crate', {'Cargo.toml': '[package]\n', 'Cargo.lock': '', 'src/main.rs': 'fn main() {}\n'})
+    monkeypatch.setattr(iroh, 'CRATE', crate)
+    monkeypatch.setattr(rebuild, 'BUILDS', tmp_path/'builds')
+    monkeypatch.setattr(rebuild, 'source_sha256', lambda: 'src')
+    builds = []
+
+    def run(cmd, **kw):
+        out = pathlib.Path(cmd[cmd.index('--out') + 1])
+        out.mkdir(parents=True)
+        (out/'update.tar').write_bytes(b'tar')
+        builds.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout='payload room: x\n')
+    monkeypatch.setattr(rebuild.subprocess, 'run', run)
+    stamps = iter(range(10))
+    monkeypatch.setattr(rebuild.time, 'strftime', lambda fmt: f'{next(stamps)}')  # one build directory a run
+
+    def go(*argv):
+        monkeypatch.setattr(sys, 'argv', ['rebuild.py', '--dev', *argv])
+        assert rebuild.main() == 0
+        return capsys.readouterr()
+    go('--', '--build-iroh')
+    assert len(builds) == 1 and 'reused' in go('--', '--build-iroh').err and len(builds) == 1
+    (crate/'src/main.rs').write_text('fn main() { println!("changed"); }\n')
+    assert 'reused' not in go('--', '--build-iroh').err and len(builds) == 2
