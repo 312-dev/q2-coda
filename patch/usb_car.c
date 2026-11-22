@@ -10,32 +10,46 @@
  *   USB_CAR_STORAGE and usb_ui.c gives the cable to Transfer Files;
  * - no host at all within USB_CAR_CHARGER_MS (a charger): USB_CAR_CHARGER, once, for the charge toast; the
  *   gadget stays, unseen by a charger, and a host that comes later is decided as any other.
- * A cable out stops it all (usb_car_stop). */
+ * A cable out stops it all (usb_car_stop).
+ *
+ * Losing the car's audio with nowhere else to play pauses, as stock pauses at a jack's eject (config_po_output,
+ * config_bal_output) and reloads paused at a Bluetooth headset's loss (checkBluetoothStatus): the player falls back
+ * to the DAC at once (player/engine.c), and with no jack in, no Bluetooth link and no USB DAC
+ * (has_valid_output_device) that plays to nothing; on 2026-11-21 it did so for 2 h 09 after the cable came out.
+ * So at a cable out, and when the car stops asking for audio while the cable stays, a song playing is paused where
+ * it is (stock's pause: Play resumes it there, and the DAC's own timer powers it down). Not while q2car.sh shows
+ * the car the iPhone again after a lost link (USB_CAR_RELINK, written by q2-iap before it ends with 22): the car's
+ * audio comes back then, and the song with it, unless it has not within USB_CAR_RELINK_MS
+ * (docs/iphone-mode.md#nowhere-to-play). */
 #include "navigation.h"
 
 #define USB_CAR_SCRIPT "/usr/bin/q2car"
 #define USB_CAR_STATE "/tmp/q2car.state" /* q2_iap.c state_write, q2car.sh's down=1 */
 #define USB_CAR_LOOK_MS 200
 #define USB_CAR_CHARGER_MS 3000 /* usb_ui.c USB_PROBE_MS: a host addresses a gadget within a second or two */
+#define USB_CAR_RELINK "/tmp/q2car.relink" /* q2_iap.c's at a lost link's exit 22, q2car.sh's until the runner ends */
+#define USB_CAR_RELINK_MS 30000            /* a relink's longest wait for the car's audio before it counts as gone */
 
 static struct {
-    int on, decided, host, flowing, troubles, charger_told;
-    unsigned at, look_at;
+    int on, decided, host, flowing, troubles, charger_told, audio;
+    unsigned at, look_at, gone_at; /* gone_at: when the car's audio went during a relink, 0 none */
 } car __attribute__((section(".scratch")));
 
 int usb_car_on(void) { return car.on; }
 
 void usb_car_start(void) {
-    car.on = 1, car.decided = car.host = car.flowing = car.troubles = car.charger_told = 0;
+    car.on = 1, car.decided = car.host = car.flowing = car.troubles = car.charger_told = car.audio = 0, car.gone_at = 0;
     car.at = car.look_at = (unsigned)time_now_ms();
     system(USB_CAR_SCRIPT " start >/dev/null 2>&1");
 }
 
 /* The gadget removed: in the background at a cable out (q2car.sh's stop waits for q2-iap, and the next start for
  * the stop), here and now (wait) when another gadget is to have the controller next. */
+static void usb_car_gone(const char *why);
 void usb_car_stop(int wait) {
     if (!car.on) return;
     car.on = 0;
+    if (car.audio) car.audio = 0, usb_car_gone("the cable out");
     system(wait ? USB_CAR_SCRIPT " stop >/dev/null 2>&1" : "( " USB_CAR_SCRIPT " stop >/dev/null 2>&1 & )");
 }
 
@@ -43,6 +57,32 @@ void usb_car_stop(int wait) {
 static void usb_car_toast(const char *glyph, const char *text) {
     awake_screen();
     toast_later(glyph, text);
+}
+
+/* The car's audio gone: a song playing paused where it is when nothing else can sound (docs at the top). */
+static void usb_car_gone(const char *why) {
+    char line[96];
+    car.gone_at = 0;
+    if (mclGetPlayStatus() != 2 || has_valid_output_device()) return;
+    player_play_pause();
+    tk_snprintf(line, sizeof line, "the car's audio gone (%s) and nowhere else to play: paused", why);
+    ulog('I', "usb", line);
+}
+
+/* The car's wish for audio as q2-iap's state file has it (audio=), followed: its end pauses (usb_car_gone), at once,
+ * or during a relink only once the relink is over without it, or USB_CAR_RELINK_MS on. */
+static void usb_car_audio(int audio, unsigned now) {
+    if (audio) {
+        car.audio = 1, car.gone_at = 0;
+        return;
+    }
+    if (car.audio) {
+        car.audio = 0;
+        if (access(USB_CAR_RELINK, 0)) usb_car_gone("the car stopped it");
+        else car.gone_at = now ? now : 1;
+    } else if (car.gone_at && (access(USB_CAR_RELINK, 0) || now - car.gone_at >= USB_CAR_RELINK_MS)) {
+        usb_car_gone("a relink without it");
+    }
 }
 
 /* The state file's news; what usb_ui.c is to do about it. */
@@ -53,6 +93,7 @@ int usb_car_poll(void) {
     car.look_at = now;
     state_read(USB_CAR_STATE, raw, sizeof raw);
     field(raw, "verdict", v, sizeof v);
+    usb_car_audio((int)number(raw, "audio"), now);
     if (number(raw, "host")) car.host = 1;
     if (!tk_strcmp(v, "computer") || !tk_strcmp(v, "silent") || !tk_strcmp(v, "failed")) {
         if (!number(raw, "down")) return USB_CAR_NONE; /* the gadget still there: nothing else can start yet */

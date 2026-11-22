@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Audio: unplugging from the car pauses the music, as an iPod does, unless headphones are in or a Bluetooth headset is connected, where it carries on. It used to play on silently through the headphone output with nothing plugged in, draining the battery.
   - Car Audio: the car no longer goes silent for the rest of the drive once the library has finished sending to it. Saving the note of what the car holds held the Q2 up for 12 seconds, long enough for the car to give up on the connection; it is now saved in the background, and a connection that goes quiet, or that the car gives up on, makes the Q2 reconnect by itself.
   - Car Audio: songs from a signed-in server (Subsonic) now show their album cover in the car, as they do on the Q2.
   - Car Audio: the car's music browser has something to show within about ten seconds of plugging in, where it waited minutes for the whole library: the queue from the playing song on, your favourites and recently played songs come first, and Favorites, Recently Played and your playlists now appear in the car as playlists you can play. The rest of the library follows and shows up in steps as it arrives.

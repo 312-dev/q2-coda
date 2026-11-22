@@ -360,6 +360,9 @@ static const char *np_file = "/tmp/coda-rc.now";
  * cache of covers (patch/coverflow.c art_path); each can be moved for the host tests. */
 static const char *car_file = "/tmp/q2-iap.audio", *car_pcm = "null", *cmd_file = "/tmp/coda-rc.cmd",
                   *art_dir = "/mnt/mmc/.coverflow", *rate_file = "/tmp/q2-iap.rate";
+/* A relink under way (patch/usb_car.c USB_CAR_RELINK): written at a lost link's exit 22, before the car's file goes,
+ * so demo holds its pause for a car whose audio comes back; removed once the car asks for audio again. */
+static const char *relink_file = "/tmp/q2car.relink";
 static char uuid[40] = "51320000-0000-4000-8000-000000000000", library_id[64];
 
 /* The input reports go out through a child that writes them to the HID instance's ep1 one at a time: a write there
@@ -494,6 +497,7 @@ static void io_audio(int on) {
     }
     int n = snprintf(b, sizeof b, "%s\n%u\n", car_pcm, iap2_rates[iap2_rate_index(audio_hz)]);
     if (write_whole(car_file, b, (unsigned)n)) logline("iap2", "audio: the car's file could not be written");
+    unlink(relink_file); /* the relink, if one was under way, is over */
 }
 
 /* The player's rate for the song about to play (player/output.c car_ask, docs/iphone-mode.md#per-song-rate), read
@@ -777,8 +781,11 @@ static void summary(void) {
  * afresh; it sent nothing more by itself after the loss on 2026-11-21 (126 s, to the cable out). */
 static void io_link_lost(void) {
     kernel_usb_lines("at the lost link");
-    if (state_file && !leave) leave = 22, logline("car", "link: lost; the iPhone shown again");
-    else logline("car", leave ? "link: lost; q2-iap already ending" : "link: lost; no --state, so q2-iap goes on");
+    if (state_file && !leave) {
+        leave = 22, logline("car", "link: lost; the iPhone shown again");
+        if (write_whole(relink_file, "22\n", 3)) logline("car", "link: the relink's note could not be written");
+    } else
+        logline("car", leave ? "link: lost; q2-iap already ending" : "link: lost; no --state, so q2-iap goes on");
 }
 
 /* The host's calls that read or write a file or the database, each a step of the loop's of its own (loop_step), so
@@ -998,6 +1005,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(o, "--car-pcm")) car_pcm = v, ++a;
         else if (!strcmp(o, "--car-file")) car_file = v, ++a;
         else if (!strcmp(o, "--rate-file")) rate_file = v, ++a;
+        else if (!strcmp(o, "--relink-file")) relink_file = v, ++a;
         else if (!strcmp(o, "--cmd-file")) cmd_file = v, ++a;
         else if (!strcmp(o, "--art-dir")) art_dir = v, ++a;
         else if (!strcmp(o, "--state")) state_file = v, ++a;

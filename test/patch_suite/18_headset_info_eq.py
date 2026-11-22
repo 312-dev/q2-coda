@@ -186,7 +186,8 @@ for owner,page,want in ((2,'spotbrowse_page',[(2,O['KEY_PLAY'])]),(1,'spotify_pa
 GATE=syms['check_forbid_play_no_headset']
 def hp_on(m,**state):
     """m with stock's gate run, not answered, and the switch on; state's bytes are an output, test mode or the switch off."""
-    del m.handlers[GATE]; m.byte(syms['g_block_withoutphone_flag'],1)
+    del m.handlers[GATE]; m.handlers.pop(syms['has_valid_output_device'],None)  # stock's own outputs check too
+    m.byte(syms['g_block_withoutphone_flag'],1)
     for name,v in state.items(): (m.word if name=='bt_showcoding' else m.byte)(syms[name],v)
     return m
 def forbids(patched,ask=0,**state):

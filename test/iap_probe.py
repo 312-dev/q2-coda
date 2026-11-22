@@ -481,13 +481,13 @@ class BmwCar(Car):
 def bmw_up(probe, tmp_path, *more):
     """A probe in --iap2 up to identification with the BMW's link parameters; (process, car, log, files)."""
     files = {'car': tmp_path/'q2-iap.audio', 'cmd': tmp_path/'coda-rc.cmd', 'np': tmp_path/'now', 'art': tmp_path/'art',
-             'rate': tmp_path/'q2-iap.rate'}
+             'rate': tmp_path/'q2-iap.rate', 'relink': tmp_path/'q2car.relink'}
     files['art'].mkdir()
     files['np'].write_text('state=1\npos=61000\nlen=245\ntitle=Teardrop\nartist=Massive Attack\nalbum=Mezzanine\n'
                            'path=/nowhere/a.flac\nshuffle=0\nrepeat=2\n')
     p, ffs, log = start(probe, tmp_path, '--iap2', '--np', str(files['np']), '--car-pcm', 'hw:CARD=UAC1Gadget,0',
                         '--car-file', str(files['car']), '--cmd-file', str(files['cmd']), '--art-dir', str(files['art']),
-                        '--rate-file', str(files['rate']), *more)
+                        '--rate-file', str(files['rate']), '--relink-file', str(files['relink']), *more)
     fd = os.open(ffs.path/'ep1', os.O_RDONLY | os.O_NONBLOCK)
     car = BmwCar(ffs, fd)
     ffs.event(ENABLE)
@@ -576,12 +576,14 @@ def test_bmw_audio_and_seek(probe, tmp_path):
     """StartUSBDeviceModeAudio writes the player's car file (its device, then 44100), StopUSBDeviceModeAudio removes
     it; the car's seek is a seek in seconds."""
     p, car, fd, log, files = bmw_up(probe, tmp_path)
+    files['relink'].write_text('22\n')  # a relink under way (q2-iap's last run ended with 22)
     try:
         car.send(message(0xDA00))
         mid, ps = car.msg()
         assert mid == 0xDA01 and ps[0] == b'\x07'
         time.sleep(0.1)
         assert files['car'].read_text() == 'hw:CARD=UAC1Gadget,0\n44100\n'
+        assert not files['relink'].exists(), "the car's audio back: the relink over"
         car.send(message(0x5003, prm(0, (125300).to_bytes(4, 'big'))))
         time.sleep(0.15)
         assert files['cmd'].read_text().split(' ', 1)[1] == 'seek 125\n'
@@ -1198,6 +1200,7 @@ def test_a_lost_link_shows_the_iphone_again(probe, tmp_path):
         os.close(fd)
     text = log.read_text()
     assert 'link: lost' in text and 'the iPhone shown again' in text and 'identified yes' in text
+    assert files['relink'].read_text() == '22\n', "the relink's note, for demo to hold its pause (usb_car.c)"
 
 
 def test_a_data_stage_that_never_comes_holds_nothing(probe, tmp_path):
