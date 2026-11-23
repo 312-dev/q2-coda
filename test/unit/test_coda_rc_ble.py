@@ -127,7 +127,10 @@ class Q2:
         self.argv = (ctypes.c_char_p * len(args))(*args)
         self.loop = threading.Thread(target=self.lib.coda_main, args=(len(args), self.argv), daemon=True)
         self.loop.start()
-        assert wait_for(lambda: (root / 'tmp/coda-rc.pid').exists())
+        # Its log's start line, written once the TCP port listens: the pid file comes before the device id's fsync and
+        # the listen, and a test that connected on the pid file alone was refused when the disk was slow (a loaded
+        # machine, 2026-11-22: test_unauthenticated_tcp_sessions_give_way_and_time_out, ECONNREFUSED)
+        assert wait_for(lambda: any('start: tcp' in line for line in self.log()))
 
     def config(self, text):
         (self.root / 'mnt/data/config.ini').write_text(text)
