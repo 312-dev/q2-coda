@@ -37,7 +37,7 @@ def no_ffmpeg(monkeypatch):
 @pytest.fixture(scope='module')
 def cases(tmp_path_factory):
     d = tmp_path_factory.mktemp('cal')
-    a, b, made = ba.make(d, codec='none', seconds=24, flac=False)
+    a, b, made = ba.make(d, codec='none', seconds=14, flac=False)
     return a, b, made
 
 
@@ -51,11 +51,11 @@ def test_calibration_tells_a_cut_a_fade_and_a_gap_apart(cases):
         assert olo <= c['overlap_s'] <= ohi and glo <= c['gap_s'] <= ghi, (case, c)
         assert c['a_gain_db'] == pytest.approx(-3.0, abs=0.3) and c['b_gain_db'] == pytest.approx(-3.0, abs=0.3)
         assert c['fit_db_median'] > 15
-    # B found where it starts: 0.37 s of lead plus A's 24 s (less for the fade, more for the gap), on a clock 60 ppm fast
+    # B found where it starts: 0.37 s of lead plus A's 14 s (less for the fade, more for the gap), on a clock 60 ppm fast
     starts = {k: v['b_enters_s'] for k, v in got.items()}
-    assert starts['cut'] == pytest.approx(24.37, abs=0.1)
-    assert starts['fade5'] == pytest.approx(19.37, abs=0.6)  # the fade-in is under PRESENT_BELOW for its first moments
-    assert starts['gap2'] == pytest.approx(26.37, abs=0.1)
+    assert starts['cut'] == pytest.approx(14.37, abs=0.1)
+    assert starts['fade5'] == pytest.approx(9.37, abs=0.6)  # the fade-in is under PRESENT_BELOW for its first moments
+    assert starts['gap2'] == pytest.approx(16.37, abs=0.1)
     # an equal-power fade is 3 dB down half way: 2.5 s before A's end; B reaches its level about then too
     assert got['fade5']['a_fade_from_before_file_end_s'] == pytest.approx(2.5, abs=0.3)
     assert got['fade5']['b_fade_in_s'] == pytest.approx(2.5, abs=0.4)
@@ -65,12 +65,12 @@ def test_calibration_tells_a_cut_a_fade_and_a_gap_apart(cases):
 def test_the_calibration_check_fails_when_the_analysis_is_wrong(cases, monkeypatch, tmp_path):
     """A presence threshold of 3 dB in place of 30 hides the fade: the check must go red, not pass anyway."""
     monkeypatch.setattr(ba.presence, '__defaults__', (3.0, ba.TRUST_DB))
-    rows = dict((r[0], r[3]) for r in ba.calibrate(tmp_path, codec='none', seconds=24, flac=False))
+    rows = dict((r[0], r[3]) for r in ba.calibrate(tmp_path, codec='none', seconds=14, flac=False))
     assert rows == {'cut': True, 'fade5': False, 'gap2': True}
 
 
 def test_calibrate_reports_each_case(tmp_path):
-    rows = ba.calibrate(tmp_path, codec='none', seconds=24, flac=False)
+    rows = ba.calibrate(tmp_path, codec='none', seconds=14, flac=False)
     assert [r[0] for r in rows] == ['cut', 'fade5', 'gap2'] and all(r[3] for r in rows)
 
 
@@ -232,12 +232,12 @@ def test_fit_change_on_one_song_alone_and_past_the_recording(cases):
 
 def test_analyse_without_songs_and_main(cases, capsys):
     _, _, made = cases
-    out = ba.analyse(made['gap2'], at=[26.0])
+    out = ba.analyse(made['gap2'], at=[15.4])
     assert out['silences'][0] == (0.0, 0.35) and out['silences'][1][1] == pytest.approx(2.0, abs=0.1)
     assert out['changes'][0]['dip']['dip_db'] > 100 and 'songs' not in out
-    assert ba.main([str(made['cut']), '--at', '24.4']) == 0
+    assert ba.main([str(made['cut']), '--at', '14.4']) == 0
     printed = json.loads(capsys.readouterr().out)
-    assert printed['changes'][0]['dip']['at_s'] == 24.4
+    assert printed['changes'][0]['dip']['at_s'] == 14.4
 
 
 def test_analyse_with_rows_and_a_song_never_heard(cases, tmp_path):
