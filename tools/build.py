@@ -770,8 +770,13 @@ STANDBY_WAKE = (0x5024b4, 0x0411ff26, 0x24020001)
 # device_standby's system("umount /mnt/mmc") (its jalr, the string's addiu in the delay slot) becomes jal
 # ringnav_card_umount, which lets go of every holder of the card, unmounts it and checks it is off before stock unloads
 # its driver; device_poweroff's system("poweroff") and device_reboot's system("reboot") become jal ringnav_card_down,
-# the same before the command (patch/card_release.c, docs/internals.md#the-card-across-standby).
+# the same before the command (patch/card_release.c, docs/internals.md#the-card-across-standby). A card that would
+# neither unmount nor go read-only stays mounted and the Standby does not sleep: its system("rmmod soc_msc") becomes jal
+# ringnav_card_rmmod (skipped then) and its system(" cd /module_driver/ && sh soc_msc.sh && sh rtl8733bs.sh") after the
+# suspend jal ringnav_card_reload (Wi-Fi's driver alone then).
 CARD_UMOUNT_CALL = (0x502438, 0x0320f809)
+CARD_RMMOD_CALL = (0x502460, 0x0320f809)
+CARD_RELOAD_CALL = (0x5024c8, 0x0320f809)
 CARD_DOWN_CALLS = ((0x502138, 0x0320f809), (0x5020d8, 0x0320f809))
 # config_init reads SYSSET NAVHIDE and WHEELMODE, V1.36's Show Navigation Bar and Wheel Function, into g_navhide_flag and
 # g_wheelmode. Q2 Muse's themes own the bar and every list's box, and its wheel is built on stock's Volume Mode (1): NAVHIDE's
@@ -2352,7 +2357,7 @@ NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'h
 PAYLOAD_ROOTS = ['compact_set_row_layout', 'kb_host_open', 'kb_open_hint', 'ipod_list_layout', 'parallax_curr', 'parallax_prev', 'parallax_update', 'ringnav_ab_move', 'ringnav_ab_x', 'ringnav_album_cover_wait', 'ringnav_album_label',
                  'ringnav_albumcovers', 'ringnav_art_header', 'ringnav_art_name', 'ringnav_artist_art_name',
                  'ringnav_artist_covers', 'ringnav_batt_level', 'ringnav_batt_status', 'ringnav_batt_voltage', 'ringnav_boot', 'ringnav_bt_connect_start', 'ringnav_class_icon',
-                 'ringnav_card_down', 'ringnav_card_umount', 'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text',
+                 'ringnav_card_down', 'ringnav_card_reload', 'ringnav_card_rmmod', 'ringnav_card_umount', 'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text',
                  'ringnav_dark_usleep', 'ringnav_dialog_close', 'ringnav_ellipsis_text', 'ringnav_gbk_tag', 'coverflow_album_pic', 'ringnav_glyph_stamp',
                  'ringnav_hold_info', 'ringnav_hold_timer', 'ringnav_hscroll_lull', 'ringnav_id3_path',
                  'ringnav_lyric_follow', 'ringnav_lyric_rows', 'ringnav_mainscheduling', 'ringnav_play_cover_wait', 'ringnav_scan_dir',
@@ -2783,6 +2788,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     patch_word(patched, *KEY_ABORTED, 'A press the window changed under stays ended until its release')
     patch_word(patched, *STANDBY_WAKE, 'Standby resume stays dark')
     patch_word(patched, *CARD_UMOUNT_CALL, jal(ps['ringnav_card_umount']), "Standby's card let go of and unmounted")
+    patch_word(patched, *CARD_RMMOD_CALL, jal(ps['ringnav_card_rmmod']), "Standby's card driver kept for a card kept")
+    patch_word(patched, *CARD_RELOAD_CALL, jal(ps['ringnav_card_reload']), "Standby's reload: Wi-Fi's alone for a card kept")
     for address, word in CARD_DOWN_CALLS:
         patch_word(patched, address, word, jal(ps['ringnav_card_down']), 'the card unmounted before power-off and restart')
     patch_word(patched, *NAV_SHOWN, "stock's navigation bar stays shown")

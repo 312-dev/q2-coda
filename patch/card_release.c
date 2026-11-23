@@ -3,25 +3,34 @@
  * then unloads the card's driver whatever that umount did, and on the owner's Q2 (2026-11-23) it
  * failed: coda-rc held the server catalogue open (its library's connection, coda_rc_lib.c), so the
  * driver went away under a live mount, the wake mounted the card again on top of it, and the first
- * mount stayed in /proc/mounts with coda-rc still reading through it. Power-off and restart go
- * through init's `umount -a -r` with every one of those holders still running.
+ * mount stayed in /proc/mounts with coda-rc still reading through it. The first Standby after a
+ * boot met demo itself holding it (its catalogue job, which imports the app's catalogue at each
+ * boot, or the ratings copy's pass, both with catalogue.db attached read-write). Power-off and
+ * restart go through init's `umount -a -r` with every one of those holders still running.
  *
  * So, at stock's umount in device_standby (ringnav_card_umount: its system("umount /mnt/mmc") call)
  * and at its system("poweroff") and system("reboot") (ringnav_card_down):
  * - everything of ours that holds the card asked to let go (card_release): CARD_HOLD written with
  * demo's pid, which q2guard (no log write to the card, the lines kept in RAM) and coda-rc (no
  * catalogue opened) read; the card apps asked to end, Get Album Lyrics, playlist art's worker and
- * the song durations' pass stopped and the server catalogue detached from stock's connection, as
- * for USB storage (addon_card_away); coda-rc's library connection closed (a SIGUSR1); then the
+ * the song durations' pass stopped, as for USB storage (addon_card_away); demo's own catalogue
+ * connections let go (catalogue.c catalogue_card_release: detached, none attached again, a running
+ * import or match stopped) and the ratings copy's pass ended (ratings.c); coda-rc's library
+ * connection closed (a SIGUSR1); then the
  * processes that still hold a file, a working folder or their program on the card (card_holders)
  * waited for, CARD_FREE_MS at most, and named in the log if any are left;
  * - `sync`, then the umount, verified in /proc/mounts and tried again with the holders named, every
  * mount of the card taken off (a stale one under it too);
  * - as a last resort, a card that will not unmount remounted read-only and synced, then detached
- * (`umount -l`), so its power-off cannot be a write cut short and the next mount is the only one;
- * the log says which. After Standby's wake, card_back (standby_usb.c, once the card is mounted
- * again or given up on) removes the hold, logs how many times the card is mounted and asks q2guard
- * to write out what it held. */
+ * (`umount -l`): with nothing writable open its power-off cuts nothing short, and the next mount is
+ * the only one. A card that will not go read-only either has a file open for writing (the kernel
+ * refuses a read-only remount then, EBUSY), and powering it off would cut that write: Standby keeps
+ * it mounted and does not sleep (card_kept: the card's driver stays, ringnav_card_rmmod; the
+ * suspend is skipped, system.c ringnav_standby; only Wi-Fi's driver is loaded again,
+ * ringnav_card_reload), and its countdown starts again; a power-off or restart can only sync and go
+ * on. The log says which. After Standby's wake, card_back (standby_usb.c, once the card is mounted
+ * again or given up on) removes the hold, lets the catalogue attach again, logs how many times the
+ * card is mounted and asks q2guard to write out what it held. */
 #include "navigation.h"
 #include "playlist_art.h"
 
@@ -34,6 +43,8 @@
 #define CARD_TRIES 3  /* umounts of one mount that failed before the last resort */
 #define CARD_LAYERS 4 /* mounts of the card taken off at most */
 #define CARD_RETRY_MS 500
+#define WIFI_RELOAD                                                                                \
+    "cd /module_driver/ && sh rtl8733bs.sh" /* device_standby's reload, Wi-Fi's half */
 #define CODA_RC_RELEASE                                                                            \
     "kill -USR1 $(cat /tmp/coda-rc.pid) 2>/dev/null" /* coda_rc.c: its library let go */
 
@@ -41,6 +52,8 @@ void ulog_request_flush(void); /* ulog.c */
 
 static struct {
     int held; /* CARD_HOLD written: card_back removes it */
+    int keep; /* Standby keeps the card mounted: no driver unload, no suspend (card_kept) */
+    int kept; /* this Standby kept it: card_back says so */
 } cr __attribute__((section(".scratch")));
 
 /* How many times the card is mounted: lines of /proc/mounts on CARD_DIR. */
@@ -133,6 +146,13 @@ static void card_release(const char *why) {
     album_lyrics_stop();
     playlist_art_stop();
     durations_shutdown(1);
+    int job = catalogue_card_release(), pass = ratings_card_release();
+    if (job || pass) /* what of demo's own was using the card */
+        card_say('I',
+                 job && pass ? "the catalogue's job stopped and the ratings copy's pass ended"
+                 : job       ? "the catalogue's job stopped"
+                             : "the ratings copy's pass ended",
+                 why, 0);
     system(CODA_RC_RELEASE);
     char held[400];
     unsigned start = (unsigned)time_now_ms();
@@ -142,9 +162,10 @@ static void card_release(const char *why) {
 }
 
 /* The card off before it loses power (the top of this file): 1 when every mount came off by umount,
- * 0 when one had to be detached. cmd is the umount to run (stock's own string at device_standby's
- * call). */
-static int card_unmount(const char *cmd, const char *why) {
+ * 0 when one had to be detached read-only, -1 when it would not go read-only: still mounted for a
+ * Standby (keep), synced and left as it is otherwise. cmd is the umount to run (stock's own string
+ * at device_standby's call). */
+static int card_unmount(const char *cmd, const char *why, int keep) {
     int mounts = card_mounts();
     if (!mounts) return 1;
     card_release(why);
@@ -173,12 +194,17 @@ static int card_unmount(const char *cmd, const char *why) {
     card_holders(held, sizeof held);
     int ro = !system("mount -o remount,ro " CARD_DIR);
     system("sync");
-    for (int k = 0; card_mounts() && k < CARD_LAYERS; ++k) system("umount -l " CARD_DIR);
-    card_say('E',
-             ro ? "would not unmount: remounted read-only, synced and detached"
-                : "would not unmount or go read-only: synced and detached read-write",
-             why, held);
-    return 0;
+    if (ro) {
+        for (int k = 0; card_mounts() && k < CARD_LAYERS; ++k) system("umount -l " CARD_DIR);
+        card_say('E', "would not unmount: remounted read-only, synced and detached", why, held);
+        return 0;
+    }
+    card_say(
+        'E',
+        keep ? "would not unmount or go read-only (a file open for writing): kept mounted, no sleep"
+             : "would not unmount or go read-only (a file open for writing): synced, left mounted",
+        why, held);
+    return -1;
 }
 
 /* After Standby's wake (standby_usb.c), once the card is mounted again or given up on: the hold
@@ -187,6 +213,13 @@ void card_back(void) {
     if (!cr.held) return;
     cr.held = 0;
     unlink(CARD_HOLD);
+    catalogue_card_back();
+    if (cr.kept) {
+        cr.kept = 0;
+        ulog('W', "ui", "card: kept mounted, the Standby skipped");
+        ulog_request_flush();
+        return;
+    }
     int n = card_mounts();
     char line[64];
     tk_snprintf(line, sizeof line,
@@ -198,13 +231,29 @@ void card_back(void) {
 /* device_standby's system("umount /mnt/mmc") (tools/build.py CARD_UMOUNT_CALL), once the player,
  * Wi-Fi and Bluetooth are stopped and before it unloads the card's driver. */
 int ringnav_card_umount(const char *cmd) {
-    card_unmount(cmd, "standby");
+    cr.keep = cr.kept = card_unmount(cmd, "standby", 1) < 0;
     return 0;
+}
+
+/* Standby keeps the card mounted this time (card_unmount): its suspend is skipped (system.c). */
+int card_kept(void) { return cr.keep; }
+
+/* device_standby's system("rmmod soc_msc") (tools/build.py CARD_RMMOD_CALL): the card's (and the
+ * Wi-Fi's SDIO) driver unloaded, unless the card is kept. */
+int ringnav_card_rmmod(const char *cmd) { return cr.keep ? 0 : system(cmd); }
+
+/* device_standby's driver reload after the suspend (tools/build.py CARD_RELOAD_CALL): stock's
+ * command, or with the card driver kept, Wi-Fi's alone (soc_msc's insmod would fail and its && end
+ * the line before it). */
+int ringnav_card_reload(const char *cmd) {
+    int keep = cr.keep;
+    cr.keep = 0;
+    return system(keep ? WIFI_RELOAD : cmd);
 }
 
 /* device_poweroff's system("poweroff") and device_reboot's system("reboot") (tools/build.py
  * CARD_DOWN_CALLS), after the queue and the unified log are saved: the card off first, then cmd. */
 int ringnav_card_down(const char *cmd) {
-    card_unmount("umount " CARD_DIR, cmd);
+    card_unmount("umount " CARD_DIR, cmd, 0);
     return system(cmd);
 }

@@ -56,7 +56,7 @@ class CatHead(C.Structure):
     _fields_ = [('app', CatApp * 4), ('napps', C.c_int), ('scanned', C.c_uint), ('polled', C.c_uint), ('online', C.c_int),
                 ('thread', C.c_ulong), ('running', C.c_int), ('done', C.c_int), ('job_app', C.c_int),
                 ('job_seq', C.c_char * 24), ('job_why', C.c_char * 96), ('job_rows', C.c_uint), ('job_ix', CatIx),
-                ('gen', C.c_uint), ('pending', C.c_int), ('ix', CatIx)]
+                ('gen', C.c_uint), ('pending', C.c_int), ('away', C.c_int), ('stop', C.c_int), ('ix', CatIx)]
 
 
 def cat_head(fw):
@@ -2090,3 +2090,72 @@ def test_a_catalogue_avail_line_naming_the_copy_a_row_has_adds_no_string(rig, fw
     rig.poll(1)
     print('index strings: after the copies', once, 'after naming them twice more', cat_head(fw).ix.len)
     assert cat_head(fw).ix.len == once
+
+
+def catalogue_fds(rig):
+    """This process's descriptors on the rig's catalogue.db (and .new): what stock's and the job's connections hold."""
+    import os
+    out = []
+    for fd in os.listdir('/proc/self/fd'):
+        try:
+            target = os.readlink(f'/proc/self/fd/{fd}')
+        except OSError:
+            continue
+        if target.startswith(str(rig.tmp / 'catalogue.db')):
+            out.append(target)
+    return out
+
+
+def test_the_card_let_go_of_closes_every_catalogue_connection_until_it_is_back(rig, fw):
+    """The first Standby after a boot on the owner's Q2 (2026-11-23) met demo itself holding catalogue.db, so its
+    umount failed. catalogue_card_release (card_release.c's) detaches stock's connection and attaches it to no other
+    (stock_db_open's, Era's and the counts' connections) until catalogue_card_back; then stock's next query attaches
+    it again. On the real SQLite files, by this process's open descriptors."""
+    rig.write(1, [song_row('s1', 'Server One', 'Band', 'Album', 2, 180, 5000)])
+    rig.poll()
+    slot = C.c_void_p.from_address(STOCK_SLOT)
+    rig.lib.sqlite3_open(str(rig.tmp/'database.db').encode(), C.byref(slot))
+    fw.fn('catalogue_attach', None, C.c_void_p)(STOCK_SLOT)
+    assert catalogue_fds(rig), "stock's connection holds the catalogue while a server is signed in"
+    release = fw.fn('catalogue_card_release', C.c_int)
+    assert release() == 0, 'no job running'
+    assert not catalogue_fds(rig)
+    attach_db = fw.fn('catalogue_attach_db', None, C.c_void_p)
+    other = C.c_void_p()
+    rig.lib.sqlite3_open(str(rig.tmp/'database.db').encode(), C.byref(other))
+    attach_db(other)  # Era's or the counts' connection, opened meanwhile
+    fw.fn('catalogue_attach', None, C.c_void_p)(STOCK_SLOT)  # stock_db_open again
+    assert not fw.fn('catalogue_rows', C.c_char_p)(), "stock's queries read the card's songs alone"
+    assert not catalogue_fds(rig), 'nothing attached while the card is let go of'
+    rig.lib.sqlite3_close(other)
+    fw.fn('catalogue_card_back', None)()
+    assert fw.fn('catalogue_rows', C.c_char_p)() == b' union all select * from servertable'
+    assert catalogue_fds(rig)
+    rig.lib.sqlite3_close(slot)
+    slot.value = 0
+
+
+def test_a_job_under_way_stops_for_the_card_and_runs_again_once_it_is_back(rig, fw):
+    """A boot's import (or a match) on its thread holds catalogue.db and writes catalogue.db.new, a file open for
+    writing that the kernel will not remount read-only under. The release stops it at its next statement: its
+    connection closed, the new file removed, the app not answered with an error; once the card is back the next poll
+    starts it again and it completes."""
+    rig.write(1, [song_row('s1', 'Server One', 'Band', 'Album', 2, 180, 5000)])
+    stopped = []
+
+    def exec_(db, sql, cb, ctx, err, *_):
+        text = C.string_at(sql)
+        if text.startswith(b'insert') and not stopped:  # mid-import: the UI thread lets the card go
+            stopped.append(fw.fn('catalogue_card_release', C.c_int)())
+        return rig.exec(db, sql, cb, ctx, err)
+    fw.mock('sqlite3_exec', exec_)
+    rig.poll()
+    assert stopped == [1], 'a job was running when the card was let go of'
+    assert DONE not in rig.files.files, 'the app not answered'
+    assert not (rig.tmp / 'catalogue.db.new').exists() and not catalogue_fds(rig)
+    assert not fw.fn('catalogue_has', C.c_int)()
+    rig.poll(3)
+    assert DONE not in rig.files.files, 'no job while the card is let go of'
+    fw.fn('catalogue_card_back', None)()
+    rig.poll()
+    assert rig.files.files[DONE] == b'1 ok 1\n' and rig.shown() == ['Server One']

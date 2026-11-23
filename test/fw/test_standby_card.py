@@ -19,6 +19,9 @@ ROOT_LINE = '/dev/root / squashfs ro,relatime 0 0\n'
 UMOUNT = 'umount /mnt/mmc'
 CATALOGUE = '/mnt/mmc/.q2pod/catalogue.db'
 DEMO_PID = 1110
+DEMO_FDS = (30, 31)  # demo's catalogue connections: the job's catalogue.db and catalogue.db.new
+WIFI_RELOAD = 'cd /module_driver/ && sh rtl8733bs.sh'
+RELOAD = ' cd /module_driver/ && sh soc_msc.sh && sh rtl8733bs.sh'
 
 
 class Q2:
@@ -58,8 +61,17 @@ class Q2:
         self.files.files[MOUNTS] = (ROOT_LINE + ''.join(self.mounts)).encode()
 
     def holders(self):
+        self.demo_lets_go()
         return [pid for pid, (_, fds, cwd) in self.procs.items()
                 if cwd.startswith('/mnt/mmc') or any(t.startswith('/mnt/mmc/') for t in fds.values())]
+
+    def demo_lets_go(self):
+        """demo's own catalogue connections (a job's, stock's shared one, the ratings pass's: fds DEMO_FDS) close
+        once catalogue.c's release has run, which test_catalogue.py's rig shows on real SQLite files."""
+        away = getattr(self.fw.lib, 'catalogue_away', None)
+        if away and self.fw.fn('catalogue_away', C.c_int)() and DEMO_PID in self.procs:
+            for fd in DEMO_FDS:
+                self.procs[DEMO_PID][1].pop(fd, None)
 
     def system(self, cmd, *_):
         cmd = C.string_at(cmd).decode()
@@ -73,7 +85,8 @@ class Q2:
                 return 1 << 8
             self.mounts.pop()
         elif cmd == 'mount -o remount,ro /mnt/mmc':
-            writers = [pid for pid in self.holders() if 'w' in self.procs[pid][0]]
+            writers = [pid for pid in self.holders() if 'w' in self.procs[pid][0] or
+                       any(t.endswith('.new') for t in self.procs[pid][1].values())]
             if not self.ro_ok or writers:
                 return 1 << 8
             self.readonly = True
@@ -145,9 +158,20 @@ class Q2:
             self.fw.fn('ringnav_card_umount', C.c_int, C.c_char_p)(UMOUNT.encode())
         else:  # stock's own system("umount /mnt/mmc")
             self.system(C.c_char_p(UMOUNT.encode()))
-        self.order.append(('driver unloaded', len(self.mounts), list(self.holders())))
+        rmmod = 'rmmod soc_msc'
+        if getattr(self.fw.lib, 'ringnav_card_rmmod', None):
+            self.fw.fn('ringnav_card_rmmod', C.c_int, C.c_char_p)(rmmod.encode())
+        else:
+            self.system(C.c_char_p(rmmod.encode()))
+        unloaded = rmmod in self.commands
+        self.order.append(('driver unloaded' if unloaded else 'driver kept', len(self.mounts), list(self.holders())))
         self.fw.fn('ringnav_standby', C.c_int)()
-        self.mounts.append(CARD_LINE)  # the driver back: mdev mounts the card again, on whatever is left
+        if getattr(self.fw.lib, 'ringnav_card_reload', None):
+            self.fw.fn('ringnav_card_reload', C.c_int, C.c_char_p)(RELOAD.encode())
+        else:
+            self.system(C.c_char_p(RELOAD.encode()))
+        if unloaded:
+            self.mounts.append(CARD_LINE)  # the driver back: mdev mounts the card again, on whatever is left
         self.sync()
         return 1
 
@@ -212,16 +236,48 @@ def test_a_holder_that_never_lets_go_is_named_and_the_card_goes_read_only_then_d
     assert 3000 <= q.now - start - 60000 - 100 < 6000
 
 
-def test_a_writer_that_never_lets_go_is_detached_read_write_and_said_so(fw):
-    """A file open for writing (here a process whose name says so): the read-only remount refused, the card detached
-    anyway so the wake's mount is the only one, and the E line says it was read-write."""
+def test_demo_s_own_catalogue_job_lets_go_before_the_umount(fw):
+    """The owner's Q2, the first Standby 31 s after a boot (2026-11-23): demo itself held catalogue.db (its boot's
+    import job, catalogue.db.new beside it, open for writing), the umount failed three times and the read-only remount
+    was refused. demo's catalogue connections let go first (catalogue.c catalogue_card_release), so the card comes off
+    at the first umount. Red on 03151a80: the last resort, "synced and detached read-write"."""
+    procs = {DEMO_PID: ('demo', {3: '/mnt/data/database.db', 30: CATALOGUE, 31: CATALOGUE + '.new'}, '/'),
+             1249: ('coda-rc', {24: CATALOGUE}, '/')}
+    q = Q2(fw, procs=procs)
+    q.standby()
+    unloaded = next(o for o in q.order if o[0].startswith('driver'))
+    assert unloaded == ('driver unloaded', 0, []), unloaded
+    assert q.commands.count(UMOUNT) == 1 and not q.logged('umount failed') and not q.logged('would not')
+    q.poll()
+    assert q.logged('card: back, mounted once')
+    assert not fw.fn('catalogue_away', C.c_int)(), 'the catalogue attaches again once the card is back'
+
+
+def test_a_writer_that_never_lets_go_keeps_the_card_mounted_and_the_q2_awake(fw):
+    """A file open for writing that never closes: the read-only remount refused (the kernel's EBUSY). Powering the
+    card off would cut the write, so this Standby keeps it mounted: no driver unload, no suspend, only Wi-Fi's driver
+    loaded again, and the E line says so."""
     procs = {DEMO_PID: ('demo', {}, '/'), 4242: ('writer', {5: '/mnt/mmc/.subsonic/log.txt'}, '/')}
     q = Q2(fw, procs=procs)
     q.standby()
     assert not q.readonly
-    assert q.logged('would not unmount or go read-only: synced and detached read-write for standby: 4242 writer')
+    assert q.logged('would not unmount or go read-only (a file open for writing): kept mounted, no sleep for standby: '
+                    '4242 writer')
+    assert 'rmmod soc_msc' not in q.commands and 'umount -l /mnt/mmc' not in q.commands
+    assert not [o for o in q.order if o[0] == 'suspend'], 'no suspend'
+    assert q.commands[-1] == WIFI_RELOAD and RELOAD not in q.commands
     q.poll()
     assert q.files.files[MOUNTS].decode().count(' /mnt/mmc ') == 1
+    assert q.logged('card: kept mounted, the Standby skipped') and HOLD not in q.files.files
+
+
+def test_a_reader_that_never_lets_go_is_detached_read_only(fw):
+    """Only a reader left (coda-rc not answering): read-only is possible, so the card is detached read-only and the
+    Standby sleeps; its driver unloads under nothing writable."""
+    q = Q2(fw, coda_rc_lets_go=False)
+    q.standby()
+    assert q.readonly and 'umount -l /mnt/mmc' in q.commands and 'rmmod soc_msc' in q.commands
+    assert [o for o in q.order if o[0] == 'suspend']
 
 
 def test_a_stale_mount_under_the_card_comes_off_too(fw):

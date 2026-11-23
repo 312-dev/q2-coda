@@ -727,9 +727,20 @@ static void rc_page(void) {
     rc_end();
 }
 
+/* card_release.c, before Standby, a power-off or a restart: a pass under way holds its connection,
+ * with the server catalogue on the card attached, from page to page; it ends, and starts again once
+ * the card is back. */
+int ratings_card_release(void) {
+    if (!rc.db) return 0;
+    rc_end();
+    rc_due = 1;
+    return 1;
+}
+
 /* Every RC_WAIT_MS: a change, the boot (stock's own My Fav rows change it unseen) or the library
- * rewritten, once the card is there and no scan is running. */
+ * rewritten, once the card is there, no scan is running and the card is not being let go of. */
 void ratings_copy_poll(void) {
+    if (catalogue_away()) return;
     if (rc.db) {
         rc_page();
         return;

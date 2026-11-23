@@ -415,6 +415,9 @@ static int rtc_alarm(unsigned at) { /* 0 clears it; one already set refuses anot
 }
 int ringnav_standby(void) {
     static const unsigned hours[] = { 0, STANDBY_LIMIT_1, STANDBY_LIMIT_2, STANDBY_LIMIT_3 };
+    /* a card that would neither unmount nor go read-only is not powered off under a write
+     * (card_release.c): no suspend this time, and the countdown starts again */
+    if (card_kept()) return 0;
     pod_settings();
     unsigned start = st.standby_limit ? rtc_now() : 0;
     unsigned alarm = start + hours[st.standby_limit] * 3600;
