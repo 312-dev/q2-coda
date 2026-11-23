@@ -172,7 +172,7 @@ int stream_player_waits(const char *path) {
     return !strcmp(raw + 1, path);
 }
 
-static void ahead_write(const char *id, const char *buf, int len) {
+static void ahead_write(const char *id, char *buf, int len) {
     char file[48], tmp[52];
     unsigned h = hash_bytes(fnv(FNV_SEED, (const unsigned char *)id), (const unsigned char *)buf,
                             (unsigned)len);
