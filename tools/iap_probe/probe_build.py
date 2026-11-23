@@ -23,7 +23,7 @@ CFLAGS = ['--target=mipsel-linux-gnu', '-march=mips32r2', '-mabi=32', '-mfp64', 
           '-fno-pic', '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-fno-unwind-tables',
           '-fno-asynchronous-unwind-tables', '-Oz', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter']
 LIBS = ['lib/libc-2.28.so', 'usr/lib/libsqlite3.so.0.8.6']  # SQLite: the library on iDrive (patch/q2_iap_lib.c)
-SOURCES = ['q2_iap', 'q2_iap2', 'iap2_names', 'iap2_hid', 'iap2_msg', 'iap2_xfer', 'iap2_library', 'q2_iap_lib']  # under patch/: tools/build.py's Q2IAP_SOURCES
+SOURCES = ['q2_iap', 'q2_iap2', 'iap2_names', 'iap2_hid', 'iap2_msg', 'iap2_xfer', 'iap2_library', 'iap2_nowplaying', 'q2_iap_lib']  # under patch/: tools/build.py's Q2IAP_SOURCES
 TONE_RATE, TONE_HZ, TONE_DB, TONE_S = 44100, 1000, -20, 2
 
 
