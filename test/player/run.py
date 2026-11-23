@@ -1004,6 +1004,15 @@ def test_alsa_sw_params(player, songs, tmp):
     gone = {'bt-gone': 'r 0 0 opens 5 writes 3 sleeps 3 last +', 'bt-gone-xrun': 'r 0 0 opens 2 writes 3 sleeps 0 last +',
             'bt-gone-44k': 'r 0 0 opens 2 writes 3 sleeps 0 last 100', 'bt-lost': 'r -1 -1 opens 51 writes 1 sleeps 49 last -1',
             'dac-gone': 'r -1 0 opens 1 writes 2 sleeps 0 last 100'}
+    # a USB DAC unplugged under a write: the output's own answer, which the engine waits on (engine.c output_back)
+    assert lines['usb-gone'].split()[1:3] == ['r', '-3'], lines['usb-gone']
+    # the dongle of 2026-11-22 (48 kHz S16 stereo alone): a 44.1 kHz song asks for 48 kHz and is resampled; 24 bits at
+    # 96 kHz come out at 48 kHz in 16; a mono song on both channels; two writes of 4410 frames are 9600 frames (4410
+    # from 96 kHz) less what the resampler holds back; left and right the same tone, within the dither, at its level
+    for k in ('usb48', 'usb48-96', 'usb48-mono'):
+        got = lines[k].split()
+        assert got[1:3] == ['asked', '48000'] and 0 <= 4410 * 2 * 48000 // (96000 if k.endswith('96') else 44100) - int(got[6]) < 64 \
+            and int(got[8]) <= 2 and abs(int(got[10]) - 8192) < 100, lines[k]
     for k, v in gone.items():
         got, want = lines[k].split()[1:], v.split()
         assert got[:-1] == want[:-1] and (int(got[-1]) > 0 if want[-1] == '+' else got[-1] == want[-1]), lines[k]
@@ -1055,6 +1064,113 @@ def test_usb_formats(player, songs, tmp):
     far = max(abs(x - max(-8388608, min(8388607, round(y * 8388608)))) for x, y in zip(got, f))
     assert far <= 1 and len(got) > 44100, f'm4a: {len(got)} samples, at most {far} steps off'
     return f'{len(names)} opens: S16_LE, S24_3LE from S32 exactly, S24_3LE from float within a step'
+
+
+# A USB DAC of the file sink's own kind (output.c sink_open): the AB13X dongle of 2026-11-22 takes 48 kHz S16_LE stereo
+# alone, and output.c resamples a USB DAC's song with libswresample at filter 32, cutoff 0.97 (its USB_FILTER).
+USB48 = {'Q2PLAYER_RATES': '48000', 'Q2PLAYER_FORMATS': 's16'}
+USB_RS = (32, 0.97)
+
+
+def s16_far(got, want):
+    """The largest difference between two runs of S16 samples, and whether they are as long."""
+    a, b = array.array('h'), array.array('h')
+    a.frombytes(got), b.frombytes(want)
+    return max((abs(x - y) for x, y in zip(a, b)), default=0), len(a) == len(b)
+
+
+def test_usb_48k_only(player, songs, tmp):
+    """The dongle that takes 48 kHz alone: a 44.1 kHz song is resampled to it, where it was refused at every song
+    ("hw:1,0 gave 48000 Hz for 44100", play failed, "Not Supported"). The pair through a preloaded change is the whole
+    file resampled, in one PCM; that is FFmpeg's resample of the file within the 16-bit dither (TPDF, a step either way),
+    with no step at the cut; what the device offers is logged once, not at each song."""
+    s, a, an = play(player, songs, 'usb48-pair', tmp/'usb48-pair', speed=4, env=USB48)
+    _, b, bn = play(player, songs, 'usb48-whole', tmp/'usb48-whole', speed=4, env=USB48)
+    errors = [l for l in s.lines if 'error}' in l]
+    name = '0000_48000_2_s16_usb.raw'
+    assert not errors and an == [name] and bn == [name], (an, bn, errors)
+    assert a[0] == b[0], f'the pair: {len(a[0]) // 4} frames, the whole {len(b[0]) // 4}, first difference at frame {(first_difference(a[0], b[0]) or 0) // 4}'
+    want = ffref(tmp, 'resample', songs/'whole.wav', 48000, 's16', *USB_RS)
+    far, same = s16_far(b[0], want)
+    assert same and far <= 2, f'{len(b[0]) // 4} frames, the reference {len(want) // 4}; at most {far} steps off'
+    def roughness(data, i):
+        x = array.array('h'); x.frombytes(data[(i - 200) * 4:(i + 200) * 4])
+        left = x[0::2]
+        return max(abs(left[j + 1] - 2 * left[j] + left[j - 1]) for j in range(1, len(left) - 1))
+    cut = 20 * 48000
+    away, here = max(roughness(a[0], cut - 48000), roughness(a[0], cut + 48000)), roughness(a[0], cut)
+    assert here <= 2 * away, (here, away)
+    offers = (tmp/'usb48-pair/player.log').read_text().count('hw:1,0 offers')
+    assert offers == 1, f'the device\'s offer logged {offers} times'
+    return f'{len(a[0]) // 4} frames at 48 kHz, the pair the whole file, within {far} steps of the reference; offer logged once'
+
+
+def test_usb_48k_rates(player, songs, tmp):
+    """Into the 48 kHz device, a 1 kHz tone at 44.1 kHz and then, preloaded, a 24-bit 96 kHz song: one PCM at 48 kHz
+    S16 across the change of rate and width, each song its own resample within the dither, the tone still 1 kHz."""
+    s, pcm, names = play(player, songs, 'usb48-rates', tmp/'usb48-rates', speed=4, env=USB48)
+    assert names == ['0000_48000_2_s16_usb.raw'], names
+    tone, hires = ffref(tmp, 'resample', songs/'tone20.wav', 48000, 's16', *USB_RS), ffref(tmp, 'resample', songs/'c96.flac', 48000, 's16', *USB_RS)
+    far, same = s16_far(pcm[0], tone + hires)
+    assert same and far <= 2, f'{len(pcm[0]) // 4} frames, the references {(len(tone) + len(hires)) // 4}; at most {far} steps off'
+    x = array.array('h'); x.frombytes(pcm[0][48000 * 4:5 * 48000 * 4])
+    left = x[0::2]
+    ups = sum(1 for i in range(1, len(left)) if left[i - 1] < 0 <= left[i])
+    assert abs(ups / 4 - 1000) <= 0.5, f'the tone at {ups / 4} Hz'
+    exits = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
+    assert exits == ['{player-status\\exit}'] * 2, exits
+    return f'{len(pcm[0]) // 4} frames in one 48 kHz PCM, at most {far} steps off; the tone at {ups / 4} Hz'
+
+
+def test_usb_48k_soft_volume(player, songs, tmp):
+    """The volume in software on that device (mcl-softvolflag 1, 50: 25/256) scales the song before the resample."""
+    s, pcm, names = play(player, songs, 'usb48-soft', tmp/'usb48-soft', speed=4, env=USB48)
+    assert names == ['0000_48000_2_s16_usb.raw'], names
+    want = ffref(tmp, 'resample', songs/'tone20.wav', 48000, 's16', *USB_RS)
+    rms = lambda b: math.sqrt(sum(v * v for v in array.array('h', b[48000 * 4:4 * 48000 * 4])) / (3 * 48000 * 2))
+    ratio = rms(pcm[0]) / rms(want)
+    assert abs(ratio - 25 / 256) < 0.002, f'level {ratio:.4f}, not 25/256'
+    return f'level {ratio:.4f} of the reference (25/256 = {25 / 256:.4f})'
+
+
+def test_usb_capable_exact(player, songs, tmp):
+    """A USB DAC that takes every rate gets each song at its own rate and width, bit for bit: no resampler."""
+    rates = '44100,48000,88200,96000,176400,192000,352800,384000'
+    s, pcm, names = play(player, songs, 'usb-capable', tmp/'usb-capable', speed=4, env={'Q2PLAYER_RATES': rates})
+    assert names == ['0000_44100_2_s16_usb.raw', '0001_96000_2_s32_usb.raw'], names
+    assert reference(songs/'a1.flac').startswith(pcm[0]) and len(pcm[0]) > 44100 * 4, 'a1 is not its reference'
+    c96 = reference(songs/'c96.flac', 's32le')
+    assert pcm[1] == c96, f'c96: {len(pcm[1]) // 8} frames, the reference {len(c96) // 8}, first difference at {first_difference(pcm[1], c96)}'
+    return f'44.1 kHz S16 and 96 kHz S32 as they are, {len(pcm[1]) // 8} frames of the second'
+
+
+def test_usb_gone(player, songs, tmp):
+    """The USB DAC unplugged mid-song, a Next while it is out, then plugged in again: no song is reported as not
+    playing (each was "Not Supported" on 2026-11-22, the queue run through); the output's going is logged once; the
+    song chosen while it was out plays from its first frame when it is back."""
+    s, pcm, names = play(player, songs, 'usb-gone', tmp/'usb-gone', speed=1, env={'Q2PLAYER_GONE': 'usb.gone'})
+    ev = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
+    assert ev == ['{player-nextstatus\\exit}', '{player-stopstatus\\exit}'], ev
+    gone = (tmp/'usb-gone/player.log').read_text().count('hw:1,0 is gone')
+    assert gone == 1, f'gone logged {gone} times'
+    assert len(names) == 2 and reference(songs/'a1.flac').startswith(pcm[0]), names
+    a2 = reference(songs/'a2.flac')
+    assert len(pcm[1]) > 44100 * 4 and a2.startswith(pcm[1]), f'a2 at its return: {len(pcm[1]) // 4} frames, first difference {first_difference(pcm[1], a2[:len(pcm[1])])}'
+    return f'events {ev}; a2 {len(pcm[1]) // 4} frames from its start once back'
+
+
+def test_usb_gone_and_back(player, songs, tmp):
+    """Out and back within a song: the song goes on from what was last heard (the half second the device held is
+    played again), in a PCM opened again, with no error."""
+    s, pcm, names = play(player, songs, 'usb-gone-back', tmp/'usb-gone-back', speed=1, env={'Q2PLAYER_GONE': 'usb.gone'})
+    ev = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
+    assert ev == ['{player-stopstatus\\exit}'], ev
+    a1 = reference(songs/'a1.flac')
+    assert len(names) == 2 and a1.startswith(pcm[0]), names
+    k = a1.find(pcm[1][:4000])
+    assert k % 4 == 0 and len(pcm[0]) - 0.6 * 44100 * 4 <= k <= len(pcm[0]), f'went on at frame {k // 4}, {len(pcm[0]) // 4} written before'
+    assert a1[k:k + len(pcm[1])] == pcm[1], 'the rest is not a1 from there'
+    return f'{len(pcm[0]) // 4} frames, then on from frame {k // 4}'
 
 
 def check_bt_split(player, songs, tmp, pair, whole, source, rate, frames):

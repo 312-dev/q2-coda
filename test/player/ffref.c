@@ -1,13 +1,14 @@
 /* References made with the player's own FFmpeg (tools/player.py's host build), by none of the player's code:
  *
  *   ffref decode FILE              the file's decode as interleaved float, FFmpeg's sample format made packed
- *   ffref resample FILE RATE FMT   a 16-bit or wider integer file to RATE as libswresample does it with MPlayer's
- *                                  lavcresample settings (filter 16, phase shift 10, cutoff 0.8), in float, written
- *                                  as FMT: s16 (lrintf of x * 32768, saturated) or f32; what the resampler holds back
- *                                  at the end is flushed
+ *   ffref resample FILE RATE FMT [FILTER CUTOFF]
+ *                                  a 16-bit or wider integer file to RATE as libswresample does it with MPlayer's
+ *                                  lavcresample settings (filter 16, phase shift 10, cutoff 0.8), or with FILTER and
+ *                                  CUTOFF (a USB DAC's: 32, 0.97), in float, written as FMT: s16 (lrintf of x * 32768,
+ *                                  saturated) or f32; what the resampler holds back at the end is flushed
  *
  * to standard output. A reference for the DSD decoders (the system's ffmpeg is another version, whose DSD decoder
- * differs in the last place) and for Bluetooth's resampler. */
+ * differs in the last place) and for Bluetooth's and a USB DAC's resampler. */
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/opt.h>
@@ -61,8 +62,8 @@ static void frame_out(const AVFrame *f, int ch) {
 int main(int argc, char **argv) {
     AVFormatContext *fmt = NULL;
     const AVCodec *codec = NULL;
-    if (argc < 3 || (strcmp(argv[1], "decode") && (strcmp(argv[1], "resample") || argc != 5))) {
-        fprintf(stderr, "usage: ffref decode FILE | ffref resample FILE RATE s16|f32\n");
+    if (argc < 3 || (strcmp(argv[1], "decode") && (strcmp(argv[1], "resample") || (argc != 5 && argc != 7)))) {
+        fprintf(stderr, "usage: ffref decode FILE | ffref resample FILE RATE s16|f32 [FILTER CUTOFF]\n");
         return 2;
     }
     if (avformat_open_input(&fmt, argv[2], NULL, NULL) < 0 || avformat_find_stream_info(fmt, NULL) < 0) return 1;
@@ -78,10 +79,10 @@ int main(int argc, char **argv) {
         AVChannelLayout l;
         av_channel_layout_default(&l, ch);
         swr_alloc_set_opts2(&swr, &l, AV_SAMPLE_FMT_FLT, rate_out, &l, AV_SAMPLE_FMT_FLT, dec->sample_rate, 0, NULL);
-        av_opt_set_int(swr, "filter_size", 16, 0);
+        av_opt_set_int(swr, "filter_size", argc == 7 ? atoi(argv[5]) : 16, 0);
         av_opt_set_int(swr, "phase_shift", 10, 0);
         av_opt_set_int(swr, "linear_interp", 0, 0);
-        av_opt_set_double(swr, "cutoff", 0.8, 0);
+        av_opt_set_double(swr, "cutoff", argc == 7 ? atof(argv[6]) : 0.8, 0);
         if (swr_init(swr) < 0) return 1;
     }
     AVPacket *pkt = av_packet_alloc();

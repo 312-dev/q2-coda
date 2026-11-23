@@ -235,6 +235,43 @@ static void click_session(int way, int kind, int paused) {
     if (!paused) close_output(0);
 }
 
+/* ---- a USB DAC unplugged (docs/player.md#usb-dacs): its card is not there to open, or went under a write. The song
+ * is not reported as one that cannot play (each was, and demo's dialog ran through the queue, on 2026-11-22): it waits,
+ * position held, while demo's own detach moves the output (check_otg_status: the way back to the DAC and the song
+ * started again, paused) or the device comes back, looked for every GONE_LOOK_MS (output_present); the output's going
+ * is logged once (output.c say_gone). A preload, a Next, a stop or a new song are taken meanwhile. -1 once an output is
+ * open again (out, out_way and *way set), else how the song ends: NEXT, STOPPED, or FAILED for a song demo has
+ * already replaced, which is not reported. */
+enum { GONE_LOOK_MS = 250 };
+static int output_back(const struct pcm_format *f, int *way, const struct song *song) {
+    struct ctl *c = &ctl;
+    for (;;) {
+        struct timespec until;
+        clock_gettime(CLOCK_REALTIME, &until);
+        until.tv_nsec += GONE_LOOK_MS * 1000000L;
+        if (until.tv_nsec >= 1000000000L) until.tv_sec++, until.tv_nsec -= 1000000000L;
+        pthread_mutex_lock(&c->mu);
+        if (!c->play && !c->stop && !c->preload && !c->close_preload) pthread_cond_timedwait(&c->wake, &c->mu, &until);
+        int want = c->preload, unwant = c->close_preload, replaced = c->play && !c->next, w = car_way(c->outputway);
+        struct song ps = c->preload_song;
+        c->preload = c->close_preload = c->click = 0; /* a click has no output to sound in */
+        if (c->play && c->next) { pthread_mutex_unlock(&c->mu); return NEXT; }
+        if (c->stop) { c->stop = 0; pthread_mutex_unlock(&c->mu); return STOPPED; }
+        pthread_mutex_unlock(&c->mu);
+        if (unwant) preload_cancel();
+        if (want) preload_start(&ps);
+        if (replaced) return FAILED;
+        if (!output_present(w)) continue;
+        dac_song(w, f->dsd);
+        dac_mute(w);
+        if ((out = output_open(f, w, song->hw))) {
+            out_way = *way = w;
+            return -1;
+        }
+        if (!output_gone()) return FAILED; /* there, and refused: as any output that will not open */
+    }
+}
+
 /* Plays s to its end or to the request that cuts it short, through its DSP chain (dsp.c). The PCM stays open on
  * return. */
 static int play_through(struct source *s, const struct song *song, struct dsp *d, int untouched, struct stretch *sx);
@@ -353,8 +390,12 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
     }
     if (!out) {
         dac_mute(way);
-        if (!(out = output_open(f, way, song->hw))) return FAILED;
-        out_way = way;
+        if ((out = output_open(f, way, song->hw))) out_way = way;
+        else if (!output_gone()) return FAILED;
+        else {
+            int r = output_back(f, &way, song); /* a USB DAC unplugged: the song waits for an output */
+            if (r >= 0) return r;
+        }
         if (song->hw) last_hw = song->hw;
     }
     out_cut = 0;
@@ -463,7 +504,20 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
             if (metering) dsp_meter(f, untouched, data, n, uv);
             int w = output_write(out, data, n);
             if (w == OUTPUT_CAR_GONE) gone = 1, output_car_gone(); /* the car's file or its card gone: off its way at once */
-            else if (w < 0) return FAILED;
+            else if (w == OUTPUT_GONE) { /* a USB DAC unplugged: on from the frame heard once an output is back */
+                int64_t at = rw.on || scan ? -1 : heard_at(s, sx, &rw, origin, offset);
+                dac_mute(way);
+                close_output(0);
+                int r = output_back(f, &way, song);
+                if (r >= 0) return r;
+                volume_at_start(way);
+                if (at >= 0 && source_seek_frame(s, at) < 0) return ENDED;
+                if (sx) stretch_reset(sx);
+                origin = offset = source_frames(s);
+                pausing = 0;
+                dac_unmute(way, 1);
+                continue;
+            } else if (w < 0) return FAILED;
         }
         if (way == 3 && !gone) car_trace_tick(out, 0); /* each second looked at while the car plays (docs/iphone-mode.md#car-trace) */
         /* The car asks for its audio, or stops, while a song plays: the song moves to the other output where it is,

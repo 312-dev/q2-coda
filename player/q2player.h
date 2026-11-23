@@ -137,8 +137,9 @@ struct output;
 struct output *output_open(const struct pcm_format *, int outputway, int hw);
 /* Whether an open output goes on with format f on outputway (a gapless change): Bluetooth takes the same channels
  * and width at any rate and resamples it; the car the same channels at any rate and width, its PCM opened again at
- * the car's next rate first (output_car_song); the others the same format. 1 when it does, and f is then what is
- * written. */
+ * the car's next rate first (output_car_song); the DAC and a USB DAC any song that would go out in the format the
+ * PCM is open at (a fixed-rate dongle: every PCM song, resampled), DSD the same format. 1 when it does, and f is then
+ * what is written. */
 int output_take(struct output *, const struct pcm_format *f, int outputway);
 /* Software volume, mcl-setvol's L << 8 | R by stock's law (output.c); 0x6464, 100 each, is unity */
 void output_volume(struct output *, int volume);
@@ -147,6 +148,12 @@ int output_write(struct output *, const uint8_t *data, int frames);
 /* output_write's answer when the car's way ended under a write: its file removed (the car stopped, the cable came out)
  * or its card gone (way 3, docs/iphone-mode.md#car-audio) */
 #define OUTPUT_CAR_GONE (-2)
+/* output_write's answer when a USB DAC (way 2) was unplugged under a write; output_gone is 1 after an output_open that
+ * failed because it is not there; output_present says whether way's device is there to open (a USB DAC's card node),
+ * for a wait for one to come back (engine.c output_back). Each is logged once until the device is opened again. */
+#define OUTPUT_GONE (-3)
+int output_gone(void);
+int output_present(int outputway);
 /* Car Audio's output, way 3 (Q2_CAR_USB: every image's player): 1 while the iPhone gadget's car wants USB audio, with its
  * ALSA device and rate when asked; output_car_gone forgets that until the car asks again. */
 int output_car(char *device, unsigned cap, unsigned *rate);

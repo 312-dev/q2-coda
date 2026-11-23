@@ -19,6 +19,8 @@ int snd_pcm_hw_params_set_access(snd_pcm_t *, snd_pcm_hw_params_t *, int);
 int snd_pcm_hw_params_test_format(snd_pcm_t *, snd_pcm_hw_params_t *, int);
 int snd_pcm_hw_params_set_format(snd_pcm_t *, snd_pcm_hw_params_t *, int);
 int snd_pcm_hw_params_set_channels(snd_pcm_t *, snd_pcm_hw_params_t *, unsigned);
+int snd_pcm_hw_params_test_channels(snd_pcm_t *, snd_pcm_hw_params_t *, unsigned);
+int snd_pcm_hw_params_test_rate(snd_pcm_t *, snd_pcm_hw_params_t *, unsigned, int);
 int snd_pcm_hw_params_set_rate_resample(snd_pcm_t *, snd_pcm_hw_params_t *, unsigned);
 int snd_pcm_hw_params_set_rate_near(snd_pcm_t *, snd_pcm_hw_params_t *, unsigned *, int *);
 int snd_pcm_hw_params_set_buffer_time_near(snd_pcm_t *, snd_pcm_hw_params_t *, unsigned *, int *);

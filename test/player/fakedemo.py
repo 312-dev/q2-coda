@@ -56,6 +56,7 @@ SETEQ = '{mcl-seteq\\' + '|'.join(['0.000000'] * 10) + '|1}'
 def scenarios(m):
     a1, a2, b1, b2, c96, m4a, ogg = (f'{m}/{n}' for n in ('a1.flac', 'a2.flac', 'b1.mp3', 'b2.mp3', 'c96.flac', 'd.m4a', 'e.ogg'))
     boot = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\0}'), (0.1, '{mcl-setvol\\60}')]
+    usb = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\2}'), (0.1, '{mcl-softvolflag\\0}')]
     return {
         # start, pause, resume, seek forward and back, stop
         'transport': boot + [(1.0, song('set-songurl', a1)), (4.0, '{mcl-pause\\null}'), (6.0, '{mcl-play\\null}'),
@@ -218,6 +219,20 @@ def scenarios(m):
         # a USB DAC with mcl-softvolflag 0: an mcl-setvol mid-song scales it (stock's quirk), and the next song starts at unity
         'usb-next': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\2}'), (0.1, '{mcl-softvolflag\\0}'),
                      (1.0, song('set-songurl', a1)), (2.0, vol(50, 50)), (3.5, song('set-nexturl', a2)), (5.0, '{mcl-stop\\null}'), (6.0, None)],
+        # a USB DAC that takes 48 kHz alone (run.py Q2PLAYER_RATES): the 44.1 kHz pair through a preloaded change and
+        # the whole file; a 1 kHz tone then a 24-bit 96 kHz song preloaded after it; the tone with the volume in software
+        **{k: usb + v for k, v in {
+            'usb48-pair': [(1.0, song('set-songurl', a1, flag=1)), (16.0, gapless(a2, flag=1)), (44.0, None)],
+            'usb48-whole': [(1.0, song('set-songurl', f'{m}/whole.wav')), (44.0, None)],
+            'usb48-rates': [(1.0, song('set-songurl', f'{m}/tone20.wav', flag=1)), (2.0, gapless(c96, flag=1)), (24.0, None)],
+            'usb48-soft': [(0.1, '{mcl-softvolflag\\1}'), (0.1, vol(50, 50)), (1.0, song('set-songurl', f'{m}/tone20.wav')), (8.0, None)],
+            # a DAC that takes every rate: each song at its own, bit for bit
+            'usb-capable': [(1.0, song('set-songurl', a1)), (3.0, song('set-nexturl', c96)), (20.0, None)],
+            # unplugged (Q2PLAYER_GONE) mid-song, Next while it is out, then back; and out and back within one song
+            'usb-gone': [(1.0, song('set-songurl', a1)), (2.5, lambda s: (s.out/'usb.gone').touch()), (4.0, song('set-nexturl', a2)),
+                         (6.0, lambda s: (s.out/'usb.gone').unlink()), (9.0, '{mcl-stop\\null}'), (10.0, None)],
+            'usb-gone-back': [(1.0, song('set-songurl', a1)), (2.5, lambda s: (s.out/'usb.gone').touch()),
+                              (4.0, lambda s: (s.out/'usb.gone').unlink()), (7.0, '{mcl-stop\\null}'), (8.0, None)]}.items()},
         # the output way changed while a song plays: the DAC, then Bluetooth, then USB, then the DAC
         'way': boot + [(1.0, song('set-songurl', a1)), (3.0, '{mcl-setoutputway\\1}'), (3.0, vol(100, 100)), (6.0, '{mcl-setoutputway\\2}'),
                        (9.0, '{mcl-setoutputway\\0}'), (12.0, '{mcl-stop\\null}'), (13.0, None)],

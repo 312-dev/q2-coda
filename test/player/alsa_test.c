@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <math.h>
 #include "alsa_min.h"
 #include "q2player.h"
 
@@ -30,10 +31,15 @@ static unsigned rate = 44100;
 static int opens, open_fails, write_fails, gone_error, prepare_fails, sleeps;
 static unsigned reopen_rate;
 static long last_written = -1;
+static int lr_far, peak; /* the last write's largest difference between left and right, and its peak (16-bit stereo) */
 /* snd_config_update_free_global: the next open reads alsa-lib's configuration afresh (fresh counts those opens),
  * so a /mnt/data/asound.conf demo rewrote since the last one names the device (docs/player.md#output). */
 static int freed, fresh;
 static char opened[128]; /* the device the last open named */
+/* A USB DAC of its own kind (run.py test_alsa_usb): the rates it takes (none listed: `rate` alone, as above), and
+ * whether it takes S16_LE and stereo alone, as a cheap USB-C dongle does (the AB13X of 2026-11-22: 48 kHz S16 stereo). */
+static unsigned dev_rates[8];
+static int dev_nrates, dev_s16, dev_stereo, set_rate_asked;
 int snd_config_update_free_global(void) { freed = 1; return 0; }
 int usleep(useconds_t us) { sleeps++; return 0; }
 void plog(char level, const char *msg, int n) { (void)level, (void)msg, (void)n; } /* main.c's, for cartrace.c */
@@ -50,11 +56,26 @@ int snd_pcm_hw_params_malloc(snd_pcm_hw_params_t **p) { *p = calloc(1, sizeof **
 void snd_pcm_hw_params_free(snd_pcm_hw_params_t *p) { free(p); }
 int snd_pcm_hw_params_any(snd_pcm_t *p, snd_pcm_hw_params_t *h) { return 0; }
 int snd_pcm_hw_params_set_access(snd_pcm_t *p, snd_pcm_hw_params_t *h, int a) { return 0; }
-int snd_pcm_hw_params_test_format(snd_pcm_t *p, snd_pcm_hw_params_t *h, int f) { return 0; }
-int snd_pcm_hw_params_set_format(snd_pcm_t *p, snd_pcm_hw_params_t *h, int f) { return 0; }
-int snd_pcm_hw_params_set_channels(snd_pcm_t *p, snd_pcm_hw_params_t *h, unsigned c) { return 0; }
+int snd_pcm_hw_params_test_format(snd_pcm_t *p, snd_pcm_hw_params_t *h, int f) { return dev_s16 && f != SND_PCM_FORMAT_S16_LE ? -22 : 0; }
+int snd_pcm_hw_params_set_format(snd_pcm_t *p, snd_pcm_hw_params_t *h, int f) { return snd_pcm_hw_params_test_format(p, h, f); }
+int snd_pcm_hw_params_test_channels(snd_pcm_t *p, snd_pcm_hw_params_t *h, unsigned c) { return dev_stereo && c != 2 ? -22 : 0; }
+int snd_pcm_hw_params_set_channels(snd_pcm_t *p, snd_pcm_hw_params_t *h, unsigned c) { return snd_pcm_hw_params_test_channels(p, h, c); }
+int snd_pcm_hw_params_test_rate(snd_pcm_t *p, snd_pcm_hw_params_t *h, unsigned v, int d) {
+    if (!dev_nrates) return v == rate ? 0 : -22;
+    for (int i = 0; i < dev_nrates; ++i)
+        if (dev_rates[i] == v) return 0;
+    return -22;
+}
 int snd_pcm_hw_params_set_rate_resample(snd_pcm_t *p, snd_pcm_hw_params_t *h, unsigned v) { return 0; }
-int snd_pcm_hw_params_set_rate_near(snd_pcm_t *p, snd_pcm_hw_params_t *h, unsigned *v, int *d) { *v = rate; return 0; }
+int snd_pcm_hw_params_set_rate_near(snd_pcm_t *p, snd_pcm_hw_params_t *h, unsigned *v, int *d) {
+    set_rate_asked = (int)*v;
+    if (!dev_nrates) { *v = rate; return 0; }
+    unsigned best = dev_rates[0];
+    for (int i = 1; i < dev_nrates; ++i)
+        if (labs((long)dev_rates[i] - (long)*v) < labs((long)best - (long)*v)) best = dev_rates[i];
+    *v = best;
+    return 0;
+}
 int snd_pcm_hw_params_set_buffer_time_near(snd_pcm_t *p, snd_pcm_hw_params_t *h, unsigned *v, int *d) { return 0; }
 int snd_pcm_hw_params_set_periods_near(snd_pcm_t *p, snd_pcm_hw_params_t *h, unsigned *v, int *d) { return 0; }
 int snd_pcm_hw_params(snd_pcm_t *p, snd_pcm_hw_params_t *h) { return 0; }
@@ -79,6 +100,12 @@ snd_pcm_sframes_t snd_pcm_writei(snd_pcm_t *p, const void *b, snd_pcm_uframes_t 
     writes++;
     if (write_fails && write_fails--) return gone_error;
     last_written = (long)n, first_written = ((const int16_t *)b)[0];
+    lr_far = peak = 0;
+    for (snd_pcm_uframes_t i = 0; i < n; ++i) {
+        int l = ((const int16_t *)b)[2 * i], r = ((const int16_t *)b)[2 * i + 1];
+        if (abs(l - r) > lr_far) lr_far = abs(l - r);
+        if (abs(l) > peak) peak = abs(l);
+    }
     last_zero = 1;
     for (snd_pcm_uframes_t i = 0; i < n * 2; ++i) last_zero &= !((const int16_t *)b)[i];
     return (snd_pcm_sframes_t)n;
@@ -181,6 +208,33 @@ static void pause_case(const char *name, int err) {
     output_close(o);
 }
 
+/* A USB DAC that takes 48 kHz S16_LE stereo alone (dev_*), and a song of rate, channels and width on way 2: the
+ * rate it asked set_rate_near for, the writes, the frames two writes of 4410 handed the device, and the last write's
+ * largest difference between its left and right and its peak: the tone (-12 dBFS, 8192) is the same in both, a mono
+ * song's too once made stereo, at its own level, so the difference is the dither's, a step or two. */
+static void usb_case(const char *name, int song_rate, int ch, int bytes) {
+    struct pcm_format f = {0};
+    f.rate = song_rate, f.channels = ch, f.bytes = bytes;
+    static int32_t tone[4410 * 2];
+    for (int i = 0; i < 4410 * ch; ++i) {
+        double x = 0.25 * sin(2 * M_PI * 1000 * (i / ch) / song_rate);
+        if (bytes == 2) ((int16_t *)tone)[i] = (int16_t)(x * 32767);
+        else tone[i] = (int32_t)(x * 2147483647.0);
+    }
+    dev_rates[0] = 48000, dev_nrates = 1, dev_s16 = dev_stereo = 1;
+    writes = 0, last_written = -1, avail_now = 0, set_rate_asked = 0;
+    struct output *o = output_open(&f, 2, 17);
+    if (!o) {
+        printf("%s open-failed\n", name);
+    } else {
+        long sum = 0;
+        for (int i = 0; i < 2; ++i) output_write(o, (const uint8_t *)tone, 4410), sum += last_written > 0 ? last_written : 0;
+        printf("%s asked %d writes %d frames %ld lr %d peak %d\n", name, set_rate_asked, writes, sum, lr_far, peak);
+        output_close(o);
+    }
+    dev_nrates = dev_s16 = dev_stereo = 0;
+}
+
 int main(void) {
     unsetenv("Q2PLAYER_PCM");
     setenv("Q2PLAYER_DEVICE", "test", 1);
@@ -233,6 +287,11 @@ int main(void) {
     gone_case("bt-gone-44k", 1, -19, 0, 0, 44100); /* the new transport at 44.1 kHz: the song unresampled */
     gone_case("bt-lost", 1, -19, 0, 1000, 0);      /* the headset gone: no PCM comes back */
     gone_case("dac-gone", 0, -19, 0, 0, 0);        /* off Bluetooth an error ends the song, as before */
+    gone_case("usb-gone", 2, -19, 0, 0, 0);        /* a USB DAC unplugged under a write */
+    rate = 44100;
+    usb_case("usb48", 44100, 2, 2);   /* a 44.1 kHz song into a 48 kHz-only dongle (2026-11-22): resampled, not refused */
+    usb_case("usb48-96", 96000, 2, 4); /* 24 bits at 96 kHz into it: 48 kHz, 16 bits */
+    usb_case("usb48-mono", 44100, 1, 2); /* a mono song into a stereo-only device */
     for (int way = 0; way < 3; ++way) { /* two opens in a row: which read the configuration afresh */
         struct pcm_format f = {0};
         f.rate = 44100, f.channels = 2, f.bytes = 2;
