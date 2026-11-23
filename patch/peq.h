@@ -419,7 +419,16 @@ void tidal_clear(void);
 #define APPS_MAX 8 /* card apps on the card at once */
 int addon_scan(void), addon_open(void *ctx, void *event), addon_hold(void *top);
 int addon_games_last(void); /* the card's games as the last addon_scan found them */
-#define GAMES_BUILTIN 4     /* games.c's Sudoku, Vortex, Solitaire and Snake */
+/* The games games.c's chooser ships, the one place to turn each on (docs/internals.md#games): 1
+ * lists it and builds it into the payload, 0 leaves it out of both, its source kept in games.c
+ * (test/fw builds every one, GAMES_ALL, so its tests keep running). Sudoku, Vortex, Solitaire
+ * and Snake wait while the games in progress are finished (the owner, 2026-11-22); Bricks is the
+ * engine's (engine.c eng_games[]), always listed. */
+#define GAME_SUDOKU 0
+#define GAME_VORTEX 0
+#define GAME_SOLITAIRE 0
+#define GAME_SNAKE 0
+#define GAMES_BUILTIN (GAME_SUDOKU + GAME_VORTEX + GAME_SOLITAIRE + GAME_SNAKE) /* chooser rows */
 const char *addon_name(int a), *addon_id(int a), *addon_icon(int a);
 int card_path(const char *path); /* on the card, no ".." segment: what an app or server may name */
 /* stream_state.c: Download Ahead and a card app's .stream

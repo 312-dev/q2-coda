@@ -2,6 +2,7 @@
 
 - **Unreleased (q2-coda)**:
   - Logs: Car Audio keeps the logs of every car cable from the last 7 days (up to 10 MB), and plugging the Q2 into a computer or a charger no longer pushes a drive's logs out. The unified log now says each button a Bluetooth car or headset sends, what the Car Remote's Play and Pause found the player doing, and why a cable showed the car no iPhone.
+  - Games: Games lists Bricks alone (then any games on your card). Sudoku, Vortex, Solitaire and Snake are left out of this build while the new games are finished; a game in progress or a best score you had stays saved for when they return.
   - Car Audio: Radio, Internet Radio, Videos and Spotify now play through the car's USB too, where they went to Bluetooth or nowhere while the car listened to USB.
   - Radio: starting a song's radio again after stopping it (from the car or on the Q2) works, where it said "Radio isn't available for this song".
   - Car Audio: the car's Up Next shows the queue of songs from your server, and their covers come from the songs themselves when the Q2 has no other.

@@ -1,6 +1,6 @@
 # The game engine
 
-A small engine inside the UI payload for games drawn at the panel's refresh: a fixed 60 Hz step, a frame's input as one record, drawing straight into the screen's buffer inside the rects a step said changed, the Clicker's sounds, and sealed saves. It is `patch/engine.c` and `patch/engine.h`; `patch/engine_demo.c` is a scene that proves it and shows a game's four calls. Games (`patch/games.c`) is its page: the chooser lists the engine's games after its own four, and the pause menu is Games' pop-up.
+A small engine inside the UI payload for games drawn at the panel's refresh: a fixed 60 Hz step, a frame's input as one record, drawing straight into the screen's buffer inside the rects a step said changed, the Clicker's sounds, and sealed saves. It is `patch/engine.c` and `patch/engine.h`; `patch/engine_demo.c` is a scene that proves it and shows a game's four calls. Games (`patch/games.c`) is its page: the chooser lists the engine's games after its own (those `GAME_*` in `patch/peq.h` ships: none in this build, so Bricks is the first row), and the pause menu is Games' pop-up.
 
 This page is the design, the measurements behind it, the API, the budgets and the libraries considered. The older games (Sudoku, Vortex, Solitaire, Snake) are in [internals: Games](internals.md#games) and do not use the engine.
 
@@ -161,7 +161,7 @@ To see it: a `--dev` build, `ENGINEDEMO=1` under `[Q2POD]` in `/mnt/data/config.
 - **Heap** is one game's at a time, freed on leaving it. The device has little to spare next to the player; 8 KB is the most any game is given.
 - **Scratch** (131,072 bytes, about 31 KB free): the engine uses 4. A game uses none: its state is the heap's.
 - **The root filesystem** (at most 75,497,472 bytes, `ROOTFS_ROOM`) is not used by the engine at all.
-- The older four games are 27 KB of the payload (`games.c.o`). Retiring the Sudoku and Solitaire there once the engine's exist would give room back; that is a change of its own.
+- The older four games are out of the payload in this build (`GAME_*` in `patch/peq.h` all 0), which gave back 15,568 bytes (`patch_bytes` 1,331,960 to 1,316,392, 2026-11-22); turning them back on costs that again.
 
 ## Games
 
