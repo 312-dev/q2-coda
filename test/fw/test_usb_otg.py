@@ -54,6 +54,8 @@ class Port:
         fw.mock('fw_fopen', self.fopen)
         fw.mock('fw_fread', self.fread)
         fw.mock('toolsGpioSetValue', self.write)
+        fw.mock('stock_gpio_value_trampoline', self.read)
+        self.gpio = fw.fn('ringnav_gpio_value', C.c_int, C.c_char_p)
 
     def fopen(self, path, *_):
         name = C.string_at(path)
@@ -81,7 +83,8 @@ class Port:
         return self.pins.get(pin, 1)  # PD19: an input with a pull-up
 
     def stock(self, *_):
-        host = int(self.id == 0)
+        """Stock's pass reads PD18 through toolsGpioGetValue, whose prologue is hooked (ringnav_gpio_value)."""
+        host = int(self.gpio(b'PD18') == 0)
         if self.otgid.value != host:
             self.pins['PC20'] = self.pins['PE22'] = host
             self.otgid.value = host
@@ -358,12 +361,64 @@ def test_the_records_first_line_follows_stocks_pin_setup_with_the_id_pins_pull(f
     assert order == ['stock'] and p.records() == [word] and p.commands == commands
 
 
+def test_an_id_high_while_its_device_enumerates_keeps_the_bus_power(fw):
+    """2026-11-23 (V1PXi, the AB13X earbuds): otg-on at 12965.752, the kernel enumerating at 12966.260 ("usb 1-1: new
+    full-speed USB device number 2"), PD18 high at 12966.731, and stock's host pass cut the bus power in that pass: the
+    device went before it was there. An ID high alone does not end the host role: the port's device going does, or
+    2 s of ID high with no device."""
+    p = Port(fw)
+    p.id = 0
+    p.run(SETTLE + PASS_MS)
+    assert p.records() == ['otg-on']
+    on = p.now  # 12965.752
+    p.id = 1  # 12966.731, before the next pass; the device not on the host port yet
+    p.run(PASS_MS)
+    assert p.pins['PC20'] == 1 and p.otgid.value == 1, ('cut mid-enumeration', p.records())
+    p.hostdev = True  # 1-1 there, the ID still high
+    p.run(30000)
+    assert p.pins == {'PC20': 1, 'PE22': 1} and p.otgid.value == 1 and p.records() == ['otg-on']
+    assert p.now - on > TRIAL, 'past the trial with its device: kept'
+    p.hostdev = False  # unplugged: the port's disconnect with the ID high
+    p.run(PASS_MS)
+    assert p.pins == {'PC20': 0, 'PE22': 0} and p.otgid.value == 0 and p.records() == ['otg-on', 'otg-off']
+
+
+def test_an_id_high_with_no_device_ends_the_host_role_after_2_s(fw):
+    p = Port(fw)
+    p.id = 0
+    p.run(SETTLE + PASS_MS)
+    p.id = 1
+    p.run(PASS_MS)
+    assert p.pins['PC20'] == 1
+    p.run(PASS_MS)
+    assert p.pins['PC20'] == 1
+    p.run(PASS_MS)  # 2 s of ID high, nothing on the host port
+    assert p.pins['PC20'] == 0 and p.otgid.value == 0 and p.records() == ['otg-on', 'otg-off']
+    assert p.commands[-1] == HOLD
+
+
+def test_an_id_high_that_comes_back_low_keeps_the_host_role_and_starts_its_2_s_again(fw):
+    p = Port(fw)
+    p.id = 0
+    p.run(SETTLE + PASS_MS)
+    for _ in range(3):  # 6 s, within the trial
+        p.id = 1
+        p.run(PASS_MS)
+        p.id = 0
+        p.run(PASS_MS)
+    p.hostdev = True
+    p.id = 1
+    p.run(PASS_MS)
+    assert p.pins['PC20'] == 1 and p.records() == ['otg-on']
+
+
 def test_the_record_has_each_change_of_bus_power(fw):
     p = Port(fw)
     p.id = 0
     p.hostdev = True
-    p.run(SETTLE + PASS_MS)
-    p.id = 1
+    p.run(SETTLE + 2 * PASS_MS)  # a host pass with its device on the host port
+    p.id = 1  # the adapter out: its device gone from the host port with it
+    p.hostdev = False
     p.run(2000)
     assert p.records() == ['otg-on', 'otg-off']
 
@@ -420,7 +475,8 @@ class Player:
         fw.var('g_block_withoutphone_flag', C.c_ubyte).value = 1
         fw.var('g_testmode_flag', C.c_ubyte).value = 0
         self.otg_status = fw.var('g_otg_status', C.c_ubyte)
-        fw.mock('has_valid_output_device', lambda *_: int(self.otg_status.value == 2))
+        self.other_output = False  # a Bluetooth headset or a jack's, beside the DAC
+        fw.mock('has_valid_output_device', lambda *_: int(self.otg_status.value == 2 or self.other_output))
         fw.mock('stock_forbid_play_trampoline', lambda quiet, *_: self.calls.append(('stock gate', quiet)) or 1)
         fw.mock('mclGetPlayStatus', lambda *_: self.status)
         fw.mock('player_save_stop', lambda *_: self.calls.append(('save_stop', self.otg_status.value)) or 0)
@@ -434,6 +490,7 @@ class Player:
             return 0
         fw.mock('stock_otg_status_trampoline', host_pass)
         self.gate, self.poll = fw.fn('ringnav_forbid_play', C.c_int, C.c_int), fw.fn('usb_otg_poll', None)
+        self.resume = fw.fn('usb_otg_forbid_resume', C.c_int)  # a Play of the song there (headset.c)
 
     def run(self, ms):
         end = self.p.now + ms
@@ -452,7 +509,7 @@ def test_a_play_while_an_accessory_attaches_says_so_and_starts_on_it(fw):
     p.id = 0
     p.hostdev = True
     pl.run(2000)
-    assert pl.gate(0) == 1 and pl.toasts == [CONNECTING] and pl.calls == []
+    assert pl.resume() == 1 and pl.toasts == [CONNECTING] and pl.calls == []
     pl.run(ACCESSORY + 2 * PASS_MS)
     assert pl.calls == [('save_stop', 2), ('save_start', 0, 2)], pl.calls
     pl.run(5000)
@@ -466,7 +523,7 @@ def test_a_play_while_an_adapter_settles_is_kept_too(fw):
     p.id = 0
     p.hostdev = True
     pl.run(2000)
-    assert pl.gate(0) == 1 and pl.toasts == [CONNECTING]
+    assert pl.resume() == 1 and pl.toasts == [CONNECTING]
     pl.run(SETTLE + 2 * PASS_MS)
     assert pl.calls == [('save_stop', 2), ('save_start', 0, 2)]
 
@@ -479,21 +536,59 @@ def test_a_play_while_the_board_s_pulse_reads_as_an_accessory_goes_with_stock_s_
     unplug(p, 3000)
     p.id = 0
     pl.run(1000)
-    assert pl.gate(0) == 1 and pl.toasts == [CONNECTING]
+    assert pl.resume() == 1 and pl.toasts == [CONNECTING]
     p.id = 1
     pl.run(2000)
     assert pl.calls == [('stock gate', 0)]
 
 
-def test_a_trial_with_nothing_enumerated_gives_the_play_up(fw):
+def test_a_power_with_no_output_3_s_on_gives_the_play_up(fw):
+    """The bus power on and nothing to play to 3 s later (OTG_PLAY_GRANT_MS): the Play goes with stock's message then,
+    not at the trial's end."""
     p = Port(fw)
     pl = Player(fw, p)
     p.id = 0
-    pl.run(SETTLE + 2 * PASS_MS)
+    pl.run(SETTLE + PASS_MS)
     assert p.otgid.value == 1
+    on = p.now
+    assert pl.resume() == 1 and pl.toasts == [CONNECTING]
+    pl.run(2 * PASS_MS)
+    assert pl.calls == []
+    pl.run(PASS_MS)
+    assert pl.calls == [('stock gate', 0)] and p.now - on == 3000 and p.pins['PC20'] == 1, 'the trial still runs'
+
+
+def test_a_play_kept_starts_on_any_output_that_comes(fw):
+    """A Bluetooth headset that connects while the DAC is awaited is somewhere to play: the Play starts then."""
+    p = Port(fw)
+    pl = Player(fw, p)
+    p.id = 0
+    pl.run(2000)
+    assert pl.resume() == 1
+    pl.other_output = True
+    pl.run(PASS_MS)
+    assert pl.calls == [('save_stop', 0), ('save_start', 0, 0)]
+
+
+def test_a_start_other_than_a_play_of_the_song_there_says_so_and_is_not_kept(fw):
+    """A radio station, a video, a skip or a row's song asked while an accessory attaches: the same message, refused,
+    and nothing started once the DAC is there (starting the paused song again would play the wrong thing)."""
+    p = Port(fw)
+    pl = Player(fw, p)
+    unplug(p, 5000)
+    p.id = 0
+    p.hostdev = True
+    pl.run(2000)
     assert pl.gate(0) == 1 and pl.toasts == [CONNECTING]
-    pl.run(TRIAL)
-    assert p.records()[-1] == 'otg-trial-off' and pl.calls == [('stock gate', 0)]
+    pl.run(ACCESSORY + SETTLE + TRIAL)
+    assert p.otgid.value == 1 and pl.otg_status.value == 2 and pl.calls == []
+
+
+def test_stock_s_play_key_is_a_play_of_the_song_there():
+    """playpause_quick_click's call returns to 0x4f2fd8 (V1.36, `beqz $2` after `bal check_forbid_play_no_headset`)."""
+    assert re.search(r'#define OTG_PLAYPAUSE_RET 0x4f2fd8\b', _SOURCE)
+    sites = (pathlib.Path(__file__).parents[2]/'tools/stock_sites.tsv').read_text()
+    assert re.search(r'^demo\t0x4f2fd8\t0x4\tplaypause_quick_click\t', sites, re.M)
 
 
 @pytest.mark.parametrize('case', ['nothing attached', 'quiet', 'dac there'])

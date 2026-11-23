@@ -103,13 +103,14 @@ void headset_manual(void) {
     }
 }
 /* player_play_pause. Headphones required with none to play to: nothing starts, as stock's own
- * Play key (playpause_quick_click, 0x4f2fc8), which toasts so; a pause always goes through.
+ * Play key (playpause_quick_click, 0x4f2fc8), which toasts so, and a Play while USB audio connects
+ * is kept for it (usb_otg.c usb_otg_forbid_resume); a pause always goes through.
  * ponytail: a card app's own player and a card app's song through player_start aren't asked
  * (docs/internals.md#no-playback-without-an-output); gate addon.c's starts if that matters. */
 int ringnav_play_pause(void) {
     headset_manual();
     int status = mclGetPlayStatus();
-    if (status != 2 && check_forbid_play_no_headset(0)) return 0;
+    if (status != 2 && usb_otg_forbid_resume()) return 0;
     if (status == 1) press_stamp(); /* Play from a stop starts a track */
     return stock_pause_trampoline();
 }

@@ -38,12 +38,21 @@
 #define OTG_ACCESSORY_MS 8000
 /* Bus power with no device enumerated on the host port goes off after this. */
 #define OTG_TRIAL_MS 8000
+/* In host role an ID high with no device on the host port this long ends it; with one, the device
+ * going does. The AB13X earbuds' ID read high 0.98 s after their power came on, while the kernel
+ * enumerated them (2026-11-23 12966.731), and stock's pass cut the power then. */
+#define OTG_ID_HIGH_MS 2000
 #define OTG_GAP_MS 5000 /* passes further apart than this (a Standby) start the wait again */
 /* The Q2's own bus power, ended, still read by stock as a cable's VBUS this long after: 1.6 s on
  * 2026-11-23, when that "cable in" started a Bluetooth connect (usb_ui.c headset_bt_usb). */
 #define OTG_OWN_VBUS_MS 3000
-/* A remembered Play's longest wait: the blank's accessory, the settle and the trial. */
-#define OTG_PLAY_MS (OTG_ACCESSORY_MS + OTG_SETTLE_MS + OTG_TRIAL_MS)
+/* A remembered Play waits this long for somewhere to play once the bus power is on (the AB13X
+ * earbuds enumerated 0.5 s after it, 2026-11-23), and at most OTG_PLAY_MS in all. */
+#define OTG_PLAY_GRANT_MS 3000
+#define OTG_PLAY_MS (OTG_ACCESSORY_MS + OTG_SETTLE_MS + OTG_PLAY_GRANT_MS)
+/* playpause_quick_click's return from check_forbid_play_no_headset (V1.36): stock's Play key, a Play
+ * of the song there (tools/stock_sites.tsv). */
+#define OTG_PLAYPAUSE_RET 0x4f2fd8
 #define OTG_CONNECTING "Connecting USB audio..." /* ringnav_forbid_play's message */
 #define OTG_HOST_DEV "/sys/bus/usb/devices/1-1/idVendor" /* a device on the Q2's host port */
 /* The X2000's CPM: USBPCR (0x1000003c) bit 29, the PHY's ID pull-up always on (D); USBRDT
@@ -59,9 +68,13 @@ static struct {
                                                 leaving the port, the bus power granted */
     int waiting, have_last, have_gone, vbus_prev, blanked, refused;
     unsigned blanked_at; /* when the blank caught the low still read */
+    unsigned id_high_at; /* host role: when PD18 first read high; id_high: it reads high now */
+    int id_high, had_dev; /* had_dev: a device seen on the host port in this grant */
+    int id_as_low;        /* stock's PD18 read gives 0 (ringnav_gpio_value) */
     unsigned own_at;     /* when the Q2's own bus power last ended; own: it has */
     int own, id_low;     /* id_low: PD18 as the last pass read it */
     int play;            /* a Play refused while an accessory is on its way (ringnav_forbid_play) */
+    int resume;          /* the gate asked for a Play of the song there (usb_otg_forbid_resume) */
     unsigned play_at;
 } otg __attribute__((section(".scratch")));
 
@@ -79,14 +92,18 @@ static void gone(unsigned now) {
 }
 
 /* Stock's pass, with a line in the USB record (usb_record.c) when it turned the bus power on or
- * off; its end is VBUS leaving the port, and the controller held at device again. */
-static int otg_stock(unsigned now) {
+ * off; its end is VBUS leaving the port, and the controller held at device again. id_as_low: stock
+ * reads PD18 low, so its pass is the host one (the DAC's discovery, its end) whatever the pin. */
+static int otg_stock(unsigned now, int id_as_low) {
     int was = g_last_otgid;
+    otg.id_as_low = id_as_low;
     int result = stock_otg_status_trampoline();
+    otg.id_as_low = 0;
     if (g_last_otgid != was) {
         usb_record(g_last_otgid == 1 ? "otg-on" : "otg-off");
         if (g_last_otgid == 1) {
             otg.host_at = now;
+            otg.id_high = 0, otg.had_dev = 0;
         } else {
             gone(now);
             otg.own = 1, otg.own_at = now;
@@ -100,6 +117,14 @@ static int otg_stock(unsigned now) {
  * dying away, no host's (usb_ui.c: no Bluetooth connect for it). */
 int usb_otg_own_vbus(void) {
     return g_last_otgid == 1 || (otg.own && (unsigned)time_now_ms() - otg.own_at < OTG_OWN_VBUS_MS);
+}
+
+/* toolsGpioGetValue (0x5d1c3c, tools/build.py HOOKS): stock's read of a pin, but PD18 reads 0 inside
+ * stock's pass while the host role is kept over an ID high (otg_stock). Only check_otg_status and
+ * this file's passes read PD18, all on the UI thread. */
+int ringnav_gpio_value(const char *name) {
+    if (otg.id_as_low && name && !strcmp(name, "PD18")) return 0;
+    return stock_gpio_value_trampoline(name);
 }
 
 static int host_device(void) {
@@ -121,11 +146,21 @@ int ringnav_otg_status(void) {
     otg.id_low = id_low;
     /* Host already: PD17 reads the Q2's own bus power now, so it tells nothing. A device on the
      * host port keeps it; none within OTG_TRIAL_MS ends it, stock's pins written as its own device
-     * pass writes them. Stock turns it off itself once PD18 reads high. ponytail: a DAC unplugged
-     * from the adapter leaves the empty adapter powered. */
+     * pass writes them. An ID high ends it (stock's pass reading the pin, which turns it off) once
+     * the port's device has gone, or after OTG_ID_HIGH_MS with none; until then stock's pass is run
+     * as the host one. ponytail: a DAC unplugged from the adapter, its ID low, leaves the empty
+     * adapter powered. */
     if (g_last_otgid == 1) {
         otg.waiting = 0;
-        if (id_low && now - otg.host_at >= OTG_TRIAL_MS && !host_device()) {
+        int dev = host_device();
+        if (dev) otg.had_dev = 1;
+        if (!id_low) {
+            if (!otg.id_high) otg.id_high = 1, otg.id_high_at = now;
+            int end = otg.had_dev ? !dev : now - otg.id_high_at >= OTG_ID_HIGH_MS;
+            return otg_stock(now, !end);
+        }
+        otg.id_high = 0;
+        if (now - otg.host_at >= OTG_TRIAL_MS && !dev) {
             toolsGpioSetValue("PC20", 0);
             toolsGpioSetValue("PE22", 0); /* the charge guard (usb_charge.c) sets its own next */
             g_last_otgid = 0;
@@ -136,7 +171,7 @@ int ringnav_otg_status(void) {
             usb_record("otg-trial-off");
             return 0;
         }
-        return otg_stock(now);
+        return otg_stock(now, 0);
     }
     if (vbus) otg.refused = 0; /* a cable's VBUS: PC20 is off, so it is not the Q2's own */
     /* An ID low read within OTG_BLANK_MS of VBUS leaving is ignored until it reads high, or until
@@ -153,47 +188,60 @@ int ringnav_otg_status(void) {
     }
     /* A high ID is stock's device pass (it also ends a DAC's output). A low one is passed on only
      * once settled, with the controller's role handed back to the pin first. */
-    if (!id_low) return otg_stock(now);
+    if (!id_low) return otg_stock(now, 0);
     if (otg.waiting && (accessory || now - otg.since >= OTG_SETTLE_MS)) {
         system(OTG_FROM_PIN);
-        int result = otg_stock(now);
+        int result = otg_stock(now, 0);
         if (g_last_otgid != 1) otg_hold();
         return result;
     }
     return 0;
 }
 
-/* An accessory on its way: its ID low and, with no USB DAC yet, waited out (the blank or the settle)
- * or its bus power's trial running. */
+/* An accessory on its way: with no USB DAC yet, its ID low and waited out (the blank or the
+ * settle), or its bus power on for less than OTG_PLAY_GRANT_MS, the ID either way. */
 static int attaching(unsigned now) {
-    if (g_otg_status == 2 || otg.refused || !otg.id_low) return 0;
-    if (g_last_otgid == 1) return now - otg.host_at < OTG_TRIAL_MS;
-    return otg.blanked || otg.waiting;
+    if (g_otg_status == 2 || otg.refused) return 0;
+    if (g_last_otgid == 1) return now - otg.host_at < OTG_PLAY_GRANT_MS;
+    return otg.id_low && (otg.blanked || otg.waiting);
 }
 
 /* check_forbid_play_no_headset (0x4f2cac, tools/build.py HOOKS): stock's gate, but for a start with
- * nothing to play to while an accessory is on its way (the top of this file). */
+ * nothing to play to while an accessory is on its way (the top of this file). Only a Play of the
+ * song there (stock's Play key, or usb_otg_forbid_resume) is kept: started again later it is the
+ * same Play, where a station, a video, a skip or a row's song would be the paused song instead. */
 int ringnav_forbid_play(int quiet) {
     unsigned now = time_now_ms();
     if (g_testmode_flag || !g_block_withoutphone_flag || !attaching(now) || has_valid_output_device())
         return stock_forbid_play_trampoline(quiet);
     if (!quiet) {
         toast(OTG_CONNECTING);
-        otg.play = 1, otg.play_at = now;
+        if (otg.resume || __builtin_return_address(0) == (void *)OTG_PLAYPAUSE_RET)
+            otg.play = 1, otg.play_at = now;
     }
     return 1;
 }
 
-/* From usb_ui_poll, every UI pass: a remembered Play started once the DAC is there, or given up. */
+/* The gate (check_forbid_play_no_headset(0), whose hook this is) for a Play of the song paused or
+ * stopped there, kept while an accessory attaches: the Play key's player_play_pause (headset.c). */
+int usb_otg_forbid_resume(void) {
+    otg.resume = 1;
+    int refused = ringnav_forbid_play(0);
+    otg.resume = 0;
+    return refused;
+}
+
+/* From usb_ui_poll, every UI pass: a remembered Play started once there is somewhere to play (the
+ * DAC, its way switched by stock's host pass, or any other output), or given up. */
 void usb_otg_poll(void) {
     if (!otg.play) return;
     unsigned now = time_now_ms();
-    if (g_otg_status == 2 && has_valid_output_device()) {
+    if (has_valid_output_device()) {
         otg.play = 0;
         if (mclGetPlayStatus() != 2) {
             player_save_stop();
             player_save_start(0);
-            ulog('I', "usb", "the Play asked while USB audio connected: started on it");
+            ulog('I', "usb", "the Play asked while USB audio connected: started");
         }
         return;
     }

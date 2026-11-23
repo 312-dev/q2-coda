@@ -40,6 +40,8 @@ HOOKS = {
     'check_usb_status': (0x4f3744, 'ringnav_usb_status', 'usb_status'),
     # OTG host power (PC20) only after the ID pin settles low with no VBUS on the port (usb_otg.c)
     'check_otg_status': (0x4f3408, 'ringnav_otg_status', 'otg_status'),
+    # PD18 read low by stock's host pass while usb_otg.c keeps the host role over an ID high
+    'toolsGpioGetValue': (0x5d1c3c, 'ringnav_gpio_value', 'gpio_value'),
     # the car's USB audio counts as an output, beside stock's jacks, Bluetooth and USB DAC (output_rule.c)
     'has_valid_output_device': (0x4f2c3c, 'ringnav_valid_output', 'valid_output'),
     # The USB record's first line once stock has set the USB pins up, with PD18's pull (usb_record.c)
