@@ -1,24 +1,63 @@
-/* With the screen off Return never reaches the UI, so a bump of Back leaves the page alone.
- * Wake: Double press. With the screen off, a lone centre press (the power key, which wakes it)
+/* Wake: Any Button (wake_key, below): with the screen off, each of the Q2's own keys lights it.
+ * Wake: Double Press, the pocket guard: Return never reaches the UI dark, so a bump of Back leaves
+ * the page alone; a lone centre press (the power key, which wakes it)
  * never reaches the UI, so a pocket bump stays dark; one within WAKE_MS after it passes, press and
- * release, so holding that second press still powers off. With Single press it passes at once.
- * Either way a passing press clears Standby's resume guard, so its release is not dropped, and
- * another centre press within WAKE_MS of it, or of the first UI loop pass with the screen lit, is
- * dropped with its release (wake_eat): turning the screen on (on_wm_keyup_fun) and that pass's
+ * release, so holding that second press still powers off; under Any Button a centre press passes at
+ * once. Either way a passing press clears Standby's resume guard, so its release is not dropped,
+ * and another centre press within WAKE_MS of it, or of the first UI loop pass with the screen lit,
+ * is dropped with its release (wake_eat): turning the screen on (on_wm_keyup_fun) and that pass's
  * paint stall the loop about that long, so a blind second press is dispatched only after. A blind
  * double press only wakes, without clicking the selected row or turning the screen off again.
  * Repeated downs share their press's fate, including a dropped press's release. A passing hold
- * keeps stock's downstream long-press power-off. Other keys pass: the media keys work dark, and
- * the wheel's ticks set nothing there (volume.c vol_wm_keyup). Returns 1 to drop the event. */
+ * keeps stock's downstream long-press power-off. Under Double Press other keys pass: the media
+ * keys work dark, and the wheel's ticks set nothing there (volume.c vol_wm_keyup). Returns 1 to
+ * drop the event. */
 static void woke(unsigned now) { /* a passing dark press: not Standby's resume key */
     *(volatile unsigned char *)BOOT_KEY_GUARD = 0;
     st.woke_at = now;
     st.dark |= 2; /* ringnav_sleep restarts woke_at once the screen is lit */
 }
+static int remote_match(void *e, int spend);
+/* Wake: Any Button (WAKEDOUBLE 0, the default) lights a dark screen at the press of any of the Q2's
+ * own keys (not a SyncLink or Car Remote key, posted by the loop, nor a headset's, which headset.c
+ * takes past the window manager), as stock's Center release lights it (awake_screen:
+ * g_backlight_status, enable_fb, its 50 ms settle, screen_action(1)), its screen-off and Standby
+ * counts started over as a press's (reset_poweroptions_timer) and its wake window and lit pacing as
+ * a Center wake's (woke). Play/Pause, Previous and Next go on and act, a hold of the skips seeking;
+ * Return's press only wakes, its long press and release dropped with it (wake_return), so a hold
+ * from dark does not open Home; a wheel turn's first tick only wakes, and the turn's ticks after it
+ * are dropped while they come within WAKE_TURN_MS of each other (wake_turn_at), so neither the
+ * volume nor a list moves on the turn that woke it. Center is left to stock's release, which lights
+ * it as it always has. A key the Buttons Lock holds is left to keylock.c, whose card lights the
+ * screen. */
+#define WAKE_TURN_MS 300
+static int wake_key(void *e, unsigned type, unsigned key, unsigned now) {
+    if (key == KEY_RETURN && st.wake_return) { /* the waking press's long press and release */
+        if (type == EVT_KEY_UP) st.wake_return = 0;
+        return 1;
+    }
+    int wheel = key == KEY_PREV || key == KEY_NEXT;
+    if (wheel && st.wake_turn_at && now - st.wake_turn_at < WAKE_TURN_MS) {
+        st.wake_turn_at = now | 1; /* the turn goes on */
+        return 1;
+    }
+    st.wake_turn_at = 0;
+    if (g_backlight_status || type != EVT_KEY_DOWN) return 0;
+    int media = key == KEY_PLAY || key == KEY_BACK_BTN || key == KEY_FWD_BTN;
+    if ((!media && !wheel && key != KEY_RETURN) || remote_match(e, 0) || keylock_holds(key))
+        return 0;
+    awake_screen();
+    reset_poweroptions_timer(1, 1, 1);
+    woke(now);
+    if (key == KEY_RETURN) st.wake_return = 1;
+    if (wheel) st.wake_turn_at = now | 1;
+    return !media;
+}
 static int wake_gate(void *e) {
     unsigned type = (unsigned)I(e, EVENT_TYPE), now = (unsigned)time_now_ms();
     if (type != EVT_KEY_DOWN && type != EVT_KEY_LONG && type != EVT_KEY_UP) return 0;
     unsigned key = (unsigned)I(e, EVENT_KEY);
+    if (!st.wake_double && wake_key(e, type, key, now)) return 1;
     if (!g_backlight_status && key == KEY_RETURN) return 1;
     if (type == EVT_KEY_LONG) return 0; /* stock generates this downstream of the input hook */
     if (key != KEY_CENTER) return 0;

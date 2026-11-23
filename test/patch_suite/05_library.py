@@ -494,16 +494,32 @@ m=SongsMachine(page='localclass_page',cls=0xf001,rows=2); m.found=[m.song('a.fla
 m.word(m.found[1]+O['REC_TITLE'],m.string('Tagged')); m.word(m.found[0]+O['REC_PATH'],m.string('/p/a.flac'))
 m.call(address=HOOKS['load_localclass_list'][0],args=(0xf001,0,0,0),gap=0)
 assert [m.text(m.get(m.row(i)+O['REC_TITLE'])) for i in (0,1)]==['a','Tagged']; passed()
-# My Fav, Frequent and Recent: a row stock copied without its title takes the library's, by path, not
-# its file name.
+# My Fav, Frequent and Recent: a row stock copied without its title takes the library's, by path and CUE
+# start, not its file name, asked of the database for those rows' paths alone (fav_titles, era_sql).
+class FavMachine(ClassMachine):
+    def __init__(self,**kw):
+        super().__init__(**kw)
+        self.db=sqlite3.connect(':memory:',isolation_level=None); self.sql=[]
+        self.db.execute('create table songtable(fileurl,time,name)')
+        self.db.executemany('insert into songtable values(?,?,?)',[('/p/05-song.flac',1,'Other Track'),('/p/05-song.flac',0,'Song')])
+    def hook(self,u,address,size,unused):
+        if address not in (syms['sqlite3_open'],syms['sqlite3_exec'],syms['sqlite3_close']): return super().hook(u,address,size,unused)
+        a,b,c,d=[u.reg_read(r) for r in REGS]; ret=0
+        if address==syms['sqlite3_open']: self.word(b,123)
+        elif address==syms['sqlite3_exec'] and self.text(b).startswith('select'):
+            self.sql.append(self.text(b))
+            for row in self.db.execute(self.text(b)).fetchall():
+                values=self.alloc(4*len(row)); names=self.alloc(4*len(row))
+                for i,v in enumerate(row): self.word(values+4*i,0 if v is None else self.string(str(v)))
+                self.nested(c,d,len(row),values,names)
+        self.returns(ret)
 for cls in (0xf00a,0xf008,0xf007):
-    m=ClassMachine(page='localclass_page',cls=0xf001,rows=2)
+    m=FavMachine(page='localclass_page',cls=0xf001,rows=2)
     m.word(m.row(0)+O['REC_NAME'],m.string('05-song.flac')); m.word(m.row(0)+O['REC_PATH'],m.string('/p/05-song.flac'))
-    m.handlers.pop(syms['getAllMusic']); m.split=[m.song('Row 0'),m.song('05-song.flac')]; m.word(m.split[1]+O['REC_TITLE'],m.string('Song'))
-    m.word(m.split[0]+O['REC_PATH'],m.string('/p/05-song.flac')); m.word(m.split[0]+O['REC_CUE_START'],1)  # a CUE image's other track
     m.call(address=HOOKS['load_localclass_list'][0],args=(cls,0,0,0),gap=0)
     t=m.get(m.row(1)+O['REC_TITLE'])  # no library title: as before
     assert m.text(m.get(m.row(0)+O['REC_TITLE']))=='Song' and m.text(t)=='Row 1', hex(cls)
+    assert m.sql==["select fileurl,time,name from songtable where fileurl in ('/p/05-song.flac','/p/Row 1')"], m.sql  # the untitled rows
 passed()
 # An empty category list says so once its page is up, instead of a black page.
 m=EmptyClassMachine(page='localclass_page',cls=0xf001,rows=0)

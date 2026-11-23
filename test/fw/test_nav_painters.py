@@ -17,7 +17,7 @@ import typing
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, c_enum, Deques, Files, claim, high_halves, libc, stock_prop_str, stock_start_with, ui_name
+from conftest import NAVIGATION_SOURCE, O, c_enum, Deques, Files, claim, high_halves, libc, stock_prop_str, stock_start_with, threads_now, ui_name
 
 STRINGS = dict(re.findall(r'^#define (\w+) "([^"]*)"', (host.ROOT/'patch/offsets.inc').read_text(), re.M))
 BT_GLYPH = STRINGS['BT_GLYPH']
@@ -1988,28 +1988,6 @@ def test_ringnav_paint_returns_stocks_and_hands_the_paint_to_the_parent(fw, st):
     assert style_ink(fw, grey) != lit
 
 
-def cf_letter(fw, st, elapsed, drawn):
-    theme(fw)
-    ui = Ui(fw)
-    w = ui.add('slide_menu', ui.window('coverflow_page'), (0, 0, 375, 294))
-    st('cf_letter_surface', C.c_void_p).value, st('cf_letter').value, st('cf_letter_at').value = w.addr, ord('M'), 1000
-    fw.mock('time_now_ms', lambda *_: 1000 + elapsed)
-    canvas = Canvas(fw)
-    fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(w.addr, canvas.addr)
-    box = O['LETTER_BOX']
-    assert [b[0] for b in canvas.boxes] == [((375 - box) // 2, (294 - box) // 2, box, box)] * drawn
-    assert [t[0] for t in canvas.texts] == ['M'] * drawn and canvas.restored()
-
-
-@pytest.mark.parametrize('elapsed', [0, O['LETTER_MS'] - 1])
-def test_cover_flows_letter_shows_for_its_time_centred(fw, st, elapsed):
-    cf_letter(fw, st, elapsed, 1)
-
-
-def test_cover_flows_letter_is_gone_after_its_time(fw, st):
-    cf_letter(fw, st, O['LETTER_MS'], 0)
-
-
 @pytest.mark.parametrize('same, kept', [(1, 1), (0, 0)])
 def test_a_paint_ends_a_pending_centre_once_the_top_window_changed(fw, st, same, kept):
     ui = Ui(fw)
@@ -2259,6 +2237,7 @@ def test_link_volume_unset_shows_and_turns_off_from_what_applies(fw):
         return 0
     fw.mock('getBtLinkItem', item)
     fw.mock('fw_system', lambda *_: 0)
+    threads_now(fw)  # the battery run (bt_battery.c) ends at once; its answer is the file
     Files(fw, {'/tmp/q2-btbatt': f'{mac} 80 48000 {0x240418} Px7\n'.encode()})  # headphones
     fw.fn('ringnav_btrows', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     link = row(ui, view, 'Link Volume')

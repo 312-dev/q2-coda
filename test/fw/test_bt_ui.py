@@ -8,7 +8,7 @@ import subprocess
 
 import pytest
 
-from conftest import Files
+from conftest import Files, threads_now
 from test_nav_library_pages import Config, Ui
 
 EVT_CLICK = 0x10c
@@ -29,7 +29,10 @@ class Page:
         self.config = Config(fw, **config)
         self.files = Files(fw, dict(files or {}))
         self.commands, self.now, self.links, self.answer = [], 1000, [], answer
+        self.on_command = None  # a command's run, as the shell would make it (Connected's codecs)
         fw.mock('fw_system', self.system)
+        self.runs = threads_now(fw)  # each shell run off the UI thread ends at once (bt_ui.c bt_shell)
+        fw.var('g_backlight_status', C.c_ubyte).value = 1
         fw.mock('time_now_ms', lambda *_: self.now)
         fw.mock('getBtLinkSize', lambda *_: len(self.links))
         fw.mock('getBtLinkItem', self.link_item)
@@ -51,6 +54,8 @@ class Page:
         (SEEN_FILE), at once: every device listed as found was."""
         command = C.string_at(cmd).decode()
         self.commands.append(command)
+        if self.on_command:
+            self.on_command(command)
         if self.answer and SEEN_FILE in command:
             seen = ''.join(f'{mac} seen\n' for mac, _, state in self.devices if state == 'found')
             ask = re.search(r"echo '(#\d+)'", command)
@@ -371,7 +376,7 @@ def test_the_page_gone_stops_its_scans(fw):
 
 
 class Links(Page):
-    """The page's machinery with stock's link list and the battery loop's file ("MAC PCT RATE CLASS")."""
+    """The page's machinery with stock's link list and the battery runs' file ("MAC PCT RATE CLASS NAME")."""
     def __init__(self, fw, devices=DEVICES, resume=b'0'):
         super().__init__(fw, devices, RESUME=resume)
         self.alias = ''
@@ -380,7 +385,8 @@ class Links(Page):
         self.links = [(mac, 3)] if mac else []
         lv = '' if level is None else level
         self.files.files[BATT_FILE] = f'{mac} {lv} 48000 {cls or ""} {self.alias}\n'.encode() if mac else b''
-        self.now += 5000  # the loop's file read again
+        self.now += 300000  # bt_battery.c BATT_POLL_MS: asked again, the file read as the run ends
+        self.poll()
         self.poll()
 
 
@@ -815,7 +821,7 @@ def test_a_quality_pick_on_a_live_link_switches_the_codec_in_place(fw, row, code
     r, switches = quality_pick(fw, row, codec)
     assert r == 0 and len(switches) == 1
     assert f'for c in {order}; do' in switches[0] and 'q2bt-codec "$p" $c' in switches[0]
-    assert switches[0].rstrip().endswith('&')
+    assert not switches[0].rstrip().endswith('&')  # run off the UI thread, waited for there (bt_shell)
 
 
 @pytest.mark.parametrize('row, codec', [(3, 13), (4, 3), (5, 2)])
@@ -957,13 +963,18 @@ class Connected(Page):
         fw.var('bt_linkstatus', C.c_ubyte).value = 1
         self.stream(codec)
         self.commands.clear()
-        self.poll()
+        self.on_command = self.codecs
+        self.poll()  # the ask, run as bt_shell's thread runs it: the answer there as it ends
         fetches = [c for c in self.commands if CODECS_FILE in c]
-        assert len(fetches) == 1 and fetches[0].rstrip().endswith('&')
-        answer = self.bluealsa.sh(fetches[0], {CODECS_FILE: tmp_path / 'codecs'})
-        assert answer is not None
-        self.files.files[CODECS_FILE] = answer.encode()
-        self.poll()
+        assert len(fetches) == 1 and not fetches[0].rstrip().endswith('&')
+        assert CODECS_FILE in self.files.files
+        self.poll()  # read
+
+    def codecs(self, command):
+        if CODECS_FILE in command:
+            answer = self.bluealsa.sh(command, {CODECS_FILE: self.tmp / 'codecs'})
+            if answer is not None:
+                self.files.files[CODECS_FILE] = answer.encode()
 
     def stream(self, codec):
         self.fw.var('fw_ctx_bt_showcoding', C.c_int).value = CODEC[codec]

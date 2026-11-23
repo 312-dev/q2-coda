@@ -102,7 +102,7 @@ void wifi_busy_show(void *win) {
 static int connected(void *b);
 /* ipod_list_layout: the connected row is one line high, its Connected a selection's caption */
 int wifi_connected_row(void *b) { return connected(b); }
-static const unsigned *const connected_caption = (const unsigned *)L"Connected";
+static const char *const connected_caption = "Connected";
 #define WIFI_LINE_PX TYPE(13) /* a second line's size: the caption's (docs/oled-design.md Type) */
 
 /* The row button b's name (its first hscroll_label) and its second line (stock's next label,

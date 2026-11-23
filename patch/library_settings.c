@@ -143,8 +143,7 @@ void library_page(void *win, void *view, int page) {
         INTO("Playlists", LIB_PLAYLISTS);
         INTO("Folders", LIB_FOLDERS);
         ROWS(POD_SCAN_DURATIONS, 1);
-        caption_row(st.pod_label[POD_SCAN_DURATIONS],
-                    (const unsigned *)L"Measures lengths after each update");
+        caption_row(st.pod_label[POD_SCAN_DURATIONS], "Measures lengths after each update");
     } else if (page == LIB_SORTING) {
         ls.songs = list_row_into(view, icons[0], picker_open, (void *)PICK_SONGS);
         widget_on(ls.songs, EVT_DESTROY, songs_gone, ls.songs);

@@ -914,13 +914,13 @@ def test_the_release_that_ends_the_hold_leaves_the_shutdown_prompt_its_centre(fw
     assert clicks.seen == [(buttons[1].at, EVT_CLICK)]
 
 
-@pytest.mark.parametrize('cable, moves', [(1, False), (0, True)])
-def test_usb_modes_scan_prompt_takes_the_wheel_once_the_cable_is_out(fw, ui, cable, moves):
+@pytest.mark.parametrize('cable', [1, 0])
+def test_usb_modes_scan_prompt_takes_the_wheel_cable_in_or_out(fw, ui, cable):
     fw.var('g_usblink_status', C.c_ubyte).value = 2
     fw.var('g_usbdet_value', C.c_ubyte).value = cable
     win, _ = dialog(ui)
     key(fw, ui, KEY_NEXT)
-    assert (win.props.get(SEL) == 1) == moves
+    assert win.props.get(SEL) == 1
 
 
 # A virtual table: a pool of row widgets rebound to the rows in view.
@@ -1191,29 +1191,8 @@ def test_the_carousels_momentum_is_the_lists_rows_never_a_letter(fw, ui):
     fast = steps[3:]
     assert steps[:3] == [1, 1, 1] and fast[0] == 1 and max(fast) == WA['WA_MAX_ROWS'] and fast[-1] == WA['WA_MAX_ROWS']
     assert all(b >= a for a, b in zip(fast, fast[1:]))  # rising while it goes on, never a letter's jump
-    assert not ui.due('cf_letter_expire')  # no letter over the covers
     key(fw, ui, KEY_NEXT, t + WA['WA_RUN_MS'] + 100)  # after a pause: one again
     assert (goal - home.goal) // home.stride == 1
-
-
-def test_coverflows_letter_shows_for_its_time_then_repaints_away(fw, ui):
-    page = Page(ui, titles(10), name='coverflow_page')
-    letter = fw.fn('coverflow_letter', None, C.c_void_p, C.c_uint, C.c_uint)
-    letter(page.view.at, ord('B'), 500)
-    (timer,) = ui.due('cf_letter_expire')
-    assert ui.timers[timer][2] == O['LETTER_MS']
-    ui.invalidated.clear()
-    ui.fire(timer)
-    assert ui.invalidated == [page.view.at]
-
-
-def test_coverflows_letter_cleared_stops_its_timer(fw, ui):
-    page = Page(ui, titles(10), name='coverflow_page')
-    letter = fw.fn('coverflow_letter', None, C.c_void_p, C.c_uint, C.c_uint)
-    letter(page.view.at, ord('B'), 500)
-    (timer,) = ui.due('cf_letter_expire')
-    letter(page.view.at, 0, 600)
-    assert not ui.due('cf_letter_expire') and timer not in ui.timers
 
 
 # Pull to search: a drag down from the top of Local Songs' list.

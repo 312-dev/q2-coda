@@ -5,7 +5,7 @@ import struct
 
 import pytest
 
-from conftest import O, Files
+from conftest import O, Files, threads_now
 from test_addon import Ap
 from test_nav_painters import Canvas, StatusRow, i32, scratch, st  # noqa: F401 (fixtures)
 
@@ -126,9 +126,10 @@ def bt_link(fw, status=None, level=None, cls=None, thread=0):
         return 0
     fw.mock('getBtLinkItem', item)
     fw.mock('fw_system', lambda *_: 0)
+    threads_now(fw)  # the battery run (bt_battery.c) ends at once; its answer is the file
     lv = '' if level is None else level
     files = Files(fw, {'/tmp/q2-btbatt': f'{HEAD} {lv} 48000 {cls or ""}\n'.encode()})
-    fw.fn('bt_headset_battery', C.c_int)()  # its loop started; the file read at the next look
+    fw.fn('bt_headset_battery', C.c_int)()  # its run started and ended; the file read at the next look
     now = [100000]
     fw.mock('time_now_ms', lambda *_: now[0])
     return files

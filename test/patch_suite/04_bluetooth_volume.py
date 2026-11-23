@@ -79,6 +79,7 @@ class QualityMachine(Machine):
         super().__init__(); self.commands=[]
         self.byte(syms['bt_linkstatus'],linked); self.word(syms['bt_showcoding'],codec)
         self.handlers[syms['system@GLIBC_2.0']]='system'
+        self.handlers[syms['pthread_create@GLIBC_2.2']]='thread:run'  # bt_shell's thread, run at once
     def hook(self,u,addr,size,_):
         if self.handlers.get(addr)!='system': return super().hook(u,addr,size,_)
         self.commands.append(self.text(u.reg_read(REGS[0]))); u.reg_write(UC_MIPS_REG_GP,0x5a5a5a5a)  # libc's own $gp

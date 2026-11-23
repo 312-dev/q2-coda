@@ -9,7 +9,7 @@ import struct
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, Files, claim, ui_name
+from conftest import NAVIGATION_SOURCE, O, Files, claim, threads_now, ui_name
 
 KEY_CENTER, KEY_PREV, KEY_NEXT, KEY_PLAY, KEY_RETURN = (O[k] for k in ('KEY_CENTER', 'KEY_PREV', 'KEY_NEXT', 'KEY_PLAY', 'KEY_RETURN'))
 KEY_BACK_BTN, KEY_FWD_BTN = O['KEY_BACK_BTN'], O['KEY_FWD_BTN']
@@ -1057,7 +1057,7 @@ PX7 = 'AA:BB:CC:DD:EE:07'
 
 
 def linked_device(fw, kind, link=None):
-    """bt_link's link with the device connected now of kind (its Class, as the battery loop's file gives it), and
+    """bt_link's link with the device connected now of kind (its Class, as the battery run's file gives it), and
     Link Volume as saved (None: never chosen)."""
     bt_link(fw)
     Config(fw, **({} if link is None else {'BTVOLLINK': link}))
@@ -1067,7 +1067,8 @@ def linked_device(fw, kind, link=None):
         C.memmove(mac, PX7.encode() + b'\0', len(PX7) + 1)
         return 0
     fw.mock('getBtLinkItem', item)
-    fw.mock('fw_system', lambda *_: 0)  # the battery loop's start
+    fw.mock('fw_system', lambda *_: 0)  # the battery run (bt_battery.c), ended at once, its answer the file below
+    threads_now(fw)
     Files(fw, {'/tmp/q2-btbatt': f'{PX7} 80 48000 {CLASSES[kind]} Px7\n'.encode()})
 
 
@@ -3933,11 +3934,24 @@ def test_the_usb_scan_prompt_takes_centre(fw, stock_bytes):
     assert ui.clicks == [(b'btn_no', EVT_CLICK)]
 
 
-def test_with_the_cable_in_the_prompt_keeps_stocks_keys(fw, stock_bytes):
+@pytest.mark.parametrize('cable', [0, 1])
+def test_the_usb_scan_prompt_opens_on_its_first_button_and_the_wheel_moves_it_cable_in_or_out(fw, stock_bytes, cable):
+    """Stop on Transfer Files' page with the computer still plugged in asks the same: Scan Card or not. Its first
+    button holds the selection as it opens, the wheel moves it (and stops at the last), Centre picks, cable in or
+    out."""
     ui, top, keys = usb_prompt(fw, stock_bytes)
-    fw.var('g_usbdet_value', C.c_ubyte).value = 1
+    fw.var('g_usbdet_value', C.c_ubyte).value = cable
+    assert fw.fn('usable', C.c_int)() == 1
     keys(DOWN, KEY_NEXT), keys(UP, KEY_NEXT, 10)
-    assert keys.stock == [(DOWN, KEY_NEXT), (UP, KEY_NEXT)]
+    assert keys.stock == [] and top.ints[SEL] == 1  # from the first button to the second, through ringnav
+    keys(DOWN, KEY_NEXT, 400), keys(UP, KEY_NEXT, 10)
+    assert top.ints[SEL] == 1  # its end
+    keys(DOWN, KEY_PREV, 400), keys(UP, KEY_PREV, 10)
+    assert top.ints[SEL] == 0
+    keys(DOWN, KEY_CENTER, 400), keys(UP, KEY_CENTER, 10)
+    keys.clock.now += O['DOUBLE_CLICK_MS']
+    ui.fire('navigation__confirm_center')
+    assert ui.clicks == [(b'btn_yes', EVT_CLICK)]
 
 
 class Np:

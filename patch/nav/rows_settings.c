@@ -471,7 +471,7 @@ int ringnav_bt_resume(void) {
     return st.resume;
 }
 /* Link Volume as it applies now: the choice saved, else on for the device connected now when its
- * Class is headphones or a headset (bt_kind's "headphones", from the battery loop's read of it,
+ * Class is headphones or a headset (bt_kind's "headphones", from the battery run's read of it,
  * bt_battery.c) and off for a speaker, a car or a device not yet known, whose own amplifier a low
  * Q2 volume would turn down with it (docs/internals.md#headset-controls-and-volume). */
 static int bt_link(void) {
@@ -499,7 +499,7 @@ int ringnav_bt_connect_start(int pause) {
 static void pod_text(int i) {
     static const char *const names[][4] = {
         { "Charge Limit: Off", "Charge Limit: " STR(CHARGE_STOP) "%" },
-        { "Wake: Single Press", "Wake: Double Press" },
+        { "Wake: Any Button", "Wake: Double Press" },
         { "Artist View: Grid", "Artist View: Cover Flow", "Artist View: List" },
         { "Years: Newest First", "Years: Oldest First" },
         { "Artists: Artist", "Artists: Album Artist" },
@@ -652,8 +652,8 @@ int ringnav_powermanager(void *win, void *ctx) {
     /* smart_wifi.c's SMART_IDLE_MS; a caption shows under the selected row (settings_pages.c) */
     if (view)
         caption_row(st.pod_label[POD_SMART_WIFI],
-                    (const unsigned *)L"Turns Wi-Fi off after 5 minutes when nothing needs it. "
-                                      L"AirPlay and Car Remote keep it on.");
+                    "Turns Wi-Fi off after 5 minutes when nothing needs it. "
+                    "AirPlay and Car Remote keep it on.");
     pod_rows(win, "scroll_view_powermanager", POD_CARMODE, 1, icons + 2);
     if (view) /* battery.c's page */
         widget_set_text_utf8(list_row_into(view, "system_powermanager", battery_history, 0),
