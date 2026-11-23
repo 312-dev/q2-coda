@@ -8,14 +8,15 @@ int usable(void) {
      * (on_wm_keylong_fun); 2 is the power-off page itself. */
     if (g_poweroff_state) return confirm;
     if (g_usblink_status != 2) return 1;
-    /* USB mode's exit asks whether to scan in a confirm dialog before it leaves the mode: once the
-     * cable is out, that prompt takes the wheel and Centre. */
-    return !g_usbdet_value && confirm;
+    /* USB mode's exit asks whether to scan the card in a confirm dialog before it leaves the mode,
+     * the cable pulled out or the mode page's Stop pressed with the computer still there: that
+     * prompt takes the wheel and Centre either way, its first button selected as it opens. */
+    return confirm;
 }
 
 static int usb_prompt(void) {
     void *top = window_manager_get_top_window(window_manager());
-    return g_usblink_status == 2 && !g_usbdet_value && usable() && top &&
+    return g_usblink_status == 2 && usable() && top &&
            !tk_strcmp(widget_get_prop_str(top, "name", ""), "confirminfo_dialog");
 }
 

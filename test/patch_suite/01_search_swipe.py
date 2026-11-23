@@ -98,9 +98,10 @@ m.call(O['KEY_NEXT'],address=HOOKS['window_manager_dispatch_input_event'][0],arg
 assert any(c[0]=='stock_input' for c in m.calls)
 m.call(address=HOOKS['window_manager_dispatch_input_event'][0],args=(m.wm,m.event,0,0),gap=1000)
 assert m.selected(d)==1
-m.byte(syms['g_usbdet_value'],1)
+m.byte(syms['g_usbdet_value'],1)  # the cable in again: still the prompt's key
+stock=sum(c[0]=='stock_input' for c in m.calls)
 m.call(address=HOOKS['window_manager_dispatch_input_event'][0],args=(m.wm,m.event,0,0),gap=0)
-assert any(c[0]=='stock_input' for c in m.calls); passed()
+assert sum(c[0]=='stock_input' for c in m.calls)==stock; passed()
 # Transition-time volume applies once, without a queued overlay; fresh input stays native.
 m=Machine(); m.top=m.node('window','playing_page'); m.animating=1
 m.byte(syms['g_volume'],20); m.byte(syms['g_maxvolume'],21)

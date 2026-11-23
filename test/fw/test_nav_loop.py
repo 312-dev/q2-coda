@@ -3887,11 +3887,24 @@ def test_the_usb_scan_prompt_takes_centre(fw, stock_bytes):
     assert ui.clicks == [(b'btn_no', EVT_CLICK)]
 
 
-def test_with_the_cable_in_the_prompt_keeps_stocks_keys(fw, stock_bytes):
+@pytest.mark.parametrize('cable', [0, 1])
+def test_the_usb_scan_prompt_opens_on_its_first_button_and_the_wheel_moves_it_cable_in_or_out(fw, stock_bytes, cable):
+    """Stop on Transfer Files' page with the computer still plugged in asks the same: Scan Card or not. Its first
+    button holds the selection as it opens, the wheel moves it (and stops at the last), Centre picks, cable in or
+    out."""
     ui, top, keys = usb_prompt(fw, stock_bytes)
-    fw.var('g_usbdet_value', C.c_ubyte).value = 1
+    fw.var('g_usbdet_value', C.c_ubyte).value = cable
+    assert fw.fn('usable', C.c_int)() == 1
     keys(DOWN, KEY_NEXT), keys(UP, KEY_NEXT, 10)
-    assert keys.stock == [(DOWN, KEY_NEXT), (UP, KEY_NEXT)]
+    assert keys.stock == [] and top.ints[SEL] == 1  # from the first button to the second, through ringnav
+    keys(DOWN, KEY_NEXT, 400), keys(UP, KEY_NEXT, 10)
+    assert top.ints[SEL] == 1  # its end
+    keys(DOWN, KEY_PREV, 400), keys(UP, KEY_PREV, 10)
+    assert top.ints[SEL] == 0
+    keys(DOWN, KEY_CENTER, 400), keys(UP, KEY_CENTER, 10)
+    keys.clock.now += O['DOUBLE_CLICK_MS']
+    ui.fire('navigation__confirm_center')
+    assert ui.clicks == [(b'btn_yes', EVT_CLICK)]
 
 
 class Np:

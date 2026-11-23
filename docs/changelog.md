@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - USB: the Scan Card prompt you get on stopping Transfer Files with the computer still plugged in now takes the wheel and Center, its first button selected, where nothing could be chosen but by touch.
   - Wake: with the screen off, every button and the wheel wake it (**Wake: Any Button**, the default). Play/Pause, Previous and Next also play or skip on that press; Center, Return and the wheel only wake it, so you press or turn again. **Wake: Double Press** keeps the old pocket-safe behaviour: only two Center presses wake the screen.
   - Library: a song from your server in My Fav, Frequent or Recent that showed its file name now shows its title.
   - Search: the letter strip is up the moment Search opens, where it waited for the whole library to load first; results show as soon as the library is in. Add Songs' Search uses the songs Add Songs already has, so it opens at once too and takes no second copy of the library.
