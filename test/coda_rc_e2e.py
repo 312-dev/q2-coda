@@ -144,8 +144,9 @@ def keep_logs(why):
     that raised (a RemoteError's UNAVAILABLE) is told apart there, a refusal from the shim's own log line, a command
     never taken from its absence."""
     pid, emu, shots = WHERE.get('pid'), WHERE.get('emu'), WHERE.get('shots')
-    if not shots:
+    if not shots or WHERE.get('kept'):  # once: --pool's main runs main, and both see the same error
         return
+    WHERE['kept'] = True
     out = shots / f'logs-{time.strftime("%H%M%S")}'
     out.mkdir(parents=True, exist_ok=True)
     (out / 'why.txt').write_text(why + '\n')
