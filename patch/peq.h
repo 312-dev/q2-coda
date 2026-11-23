@@ -154,13 +154,16 @@ void peq_process(peq_dsp *d, float *audio, unsigned frames);
 
 long long now_ns(void);
 unsigned long long now_ms(void);
-/* Crossfade (docs/internals.md#crossfade): demo writes the next track change's fade, an int in ms,
- * 0 for none; hciplayer's filter maps the file read-only and holds the outgoing track's tail for
- * it. */
-#define XFADE_FILE                                                                                 \
-    PEQ_ROOT "/tmp/q2xfade" /* the next fade's ms (XF_MS), under demo's count of stops (XF_STOPS)  \
-                             */
-#define XF_MS 0xffff
+/* Crossfade (docs/internals.md#crossfade): demo writes the next track change's fade, an int: its
+ * length in ms (XF_MS, 0 for none, the fixed fade a smart one falls back to), XF_SMART to have the
+ * player choose the overlap from both songs' loudness, and demo's count of stops above (XF_STOPS).
+ * The player maps the file read-only and holds the outgoing track's tail for it. XFADE_NEXT names
+ * the two songs of that change, a line each, the playing one's path first, so the player can open
+ * the next one ahead (made whole under .tmp and renamed; empty when the next is not known). */
+#define XFADE_FILE PEQ_ROOT "/tmp/q2xfade"
+#define XFADE_NEXT PEQ_ROOT "/tmp/q2xfade.next"
+#define XF_MS 0x7fff
+#define XF_SMART 0x8000
 #define XF_STOPS 16
 /* Mono Audio: demo writes an int, 1 to mix both channels into each; hciplayer's filter and q2video
  * map it read-only (video.c keeps its own copy of the path). */

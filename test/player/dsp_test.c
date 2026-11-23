@@ -2,6 +2,7 @@
  * made of the new player's chain, one dsp per song. Built and run by run.py (test_dsp_chain) with PEQ_ROOT a scratch
  * directory holding mnt/data and tmp. A block here is float stereo unless named; pts is the end of the block. */
 #include <assert.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include "q2player.h"
 #include "peq.h"
@@ -17,6 +18,17 @@ int __wrap_clock_gettime(clockid_t clock, struct timespec *t) {
 }
 
 static int length = 10; /* each song's media-info length */
+
+/* smart.c's side, as a check sets it: the analysis answers smart_answer with smart_given at once; begun counts asks */
+static int smart_answer = SMART_PLAIN, smart_begun, smart_cancels;
+static struct xf_plan smart_given;
+void smart_begin(const char *url, float rg) { ++smart_begun; }
+int smart_poll(struct xf_plan *p) {
+    if (smart_answer == SMART_PLAN) *p = smart_given;
+    return smart_answer;
+}
+void smart_cancel(const char *why) { ++smart_cancels; }
+void plog(char level, const char *msg, int n) { fprintf(stderr, "%.*s\n", n, msg); }
 
 static peq_preset active(double preamp, double gain) {
     peq_preset p;

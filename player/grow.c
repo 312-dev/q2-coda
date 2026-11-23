@@ -106,6 +106,15 @@ int grow_arriving(const char *url) {
     return path && arriving(status, path, NULL, NULL);
 }
 
+int grow_have(const char *url, int64_t *have, int64_t *total, int64_t *ms) {
+    char status[96];
+    struct stat st;
+    const char *path = status_of(url, status, sizeof status);
+    if (!path || !arriving(status, path, total, ms)) return 0;
+    *have = stat(url, &st) ? 0 : st.st_size;
+    return 1;
+}
+
 static void wait_mark(struct grow *g, int on) {
     if (on == g->waiting) return;
     g->waiting = on;

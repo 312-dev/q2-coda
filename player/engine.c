@@ -290,6 +290,7 @@ static int play(struct source *s, const struct song *song) {
     pthread_mutex_unlock(&c->mu);
     stream_playing(source_stream(s)); /* get_cache_buffer reports this song's cache, or 0 */
     struct dsp *d = dsp_open(source_format(s), untouched, untouched ? 1 : source_replaygain(s, rg), info.length);
+    dsp_path(d, song->url); /* Smart Crossfade opens it again, ahead of its end */
     /* SCAN_FILE is there while the song playing can be scanned at speed (patch/seek.c looks at a hold's start) */
     struct stretch *sx = untouched ? NULL : stretch_open(source_format(s));
     if (sx) touch(SCAN_FILE);
