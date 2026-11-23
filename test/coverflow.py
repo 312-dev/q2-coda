@@ -24,9 +24,9 @@ THUMB_PAGE = {'cf.radius': 0, 'cf.top': 32, 'cf.bright1': 256, 'cf.bright2': 256
 SHELF_180 = {'cf.eye': 94, 'cf.tilt': 89, 'cf.x1': 116, 'cf.xs': 34, 'cf.z1': 77, 'cf.zs': 1, 'cf.horizon': 63, 'cf.swing': 1,
              'cf.lift': 20, 'cf.eye_turn': 150, 'cf.art_persp': 13, 'cf.arch_span': 0}
 
-# coverflow.c, coverflow_thumb.c, coverflow_letters.c, coverflow_loader.c, playlist_art.c and wheel_accel.c as one unit, so the shim's
+# coverflow.c, coverflow_thumb.c, coverflow_letters.c, coverflow_loader.c, playlist_art.c, wheel_accel.c and hash.c as one unit, so the shim's
 # stubs are defined once
-CF_SOURCES = '#include "coverflow.c"\n#include "coverflow_thumb.c"\n#include "coverflow_letters.c"\n#include "coverflow_loader.c"\n#include "playlist_art.c"\n#include "coverflow_position.c"\n#include "corner_cover.c"\n#include "wheel_accel.c"\n'
+CF_SOURCES = '#include "coverflow.c"\n#include "coverflow_thumb.c"\n#include "coverflow_letters.c"\n#include "coverflow_loader.c"\n#include "playlist_art.c"\n#include "coverflow_position.c"\n#include "corner_cover.c"\n#include "wheel_accel.c"\n#include "hash.c"\n'
 SHIM_H = r"""
 extern char system_bar[];
 """ + ''.join(line + '\n' for line in font_indices()) + r"""

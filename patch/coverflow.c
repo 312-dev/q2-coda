@@ -130,12 +130,6 @@ void *coverflow_album(void *page) { return centred(page, 0); }
 /* The playlist a hold is on (navigation.c), its container record, a copy of the list's */
 void *coverflow_playlist(void *page) { return centred(page, 1); }
 
-/* FNV-1a, shared with navigation.c */
-unsigned hash_bytes(unsigned h, const unsigned char *s, unsigned n) {
-    for (unsigned i = 0; i < n; ++i) h = (h ^ s[i]) * 16777619u;
-    return h;
-}
-
 unsigned fnv(unsigned h, const unsigned char *s) {
     while (s && *s) h = hash_bytes(h, s++, 1);
     return h * 16777619u; /* a separator, so "ab"+"c" and "a"+"bc" differ */

@@ -340,7 +340,7 @@ int thumb(const char *src, const char *dst, int w, int h);
 extern volatile unsigned ff_kills; /* coverflow.c: ffmpeg runs killed or never started */
 int card_space(const char *dir);
 int card_room(const char *dir, unsigned mb, unsigned pct);
-unsigned hash_bytes(unsigned h, const unsigned char *s, unsigned n);
+unsigned hash_bytes(unsigned h, const unsigned char *s, unsigned n); /* hash.c: FNV-1a */
 unsigned fnv(unsigned h, const unsigned char *s);
 void stop_timer(unsigned *timer), rearm(unsigned *timer, int (*fn)(const void *), unsigned ms);
 int return_key(void *event, unsigned *timer,
