@@ -34,7 +34,7 @@ from build import APPS_DIR, BUNDLED_APPS  # noqa: E402
 CACHE = pathlib.Path.home()/'.cache/q2-seam'
 # q2-subsonic's commit whose cmd/q2-fakesonic the tests drive (its branch test/seam-harness, on the fork). A change
 # to the fake's control calls moves this pin with the test that uses them.
-FAKESONIC = 'c9b5093'
+FAKESONIC = '19b9104'
 REPO = pathlib.Path.home()/'repos/q2-subsonic'
 
 

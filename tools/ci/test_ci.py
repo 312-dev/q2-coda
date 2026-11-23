@@ -985,9 +985,18 @@ def test_smoke_says_a_card_with_no_songs_apart_from_no_emulator(tmp_path, monkey
     card_tree(emu_pool.copy_dir(3)/'state/mmc', {'.subsonic/log.txt': 'x'})
     monkeypatch.setattr(smoke, 'lease', lambda *a: 3)
     monkeypatch.setattr(emu_pool, 'put', lambda k: None)
-    assert smoke.main([str(build), '--logs', str(tmp_path/'logs')]) == 3
+    assert smoke.main([str(build), '--logs', str(tmp_path/'logs'), '--no-stream']) == 3
     out = capsys.readouterr().out
     assert 'the card on slot 3 has no songs' in out and 'no pool emulator' not in out and 'no emulator' not in out
+
+
+@pytest.mark.parametrize('ini, want', [
+    ('[Q2POD]\nCARREMOTE=0\nAHEAD=2\n', '[Q2POD]\nCARREMOTE=1\nAHEAD=2\n'),
+    ('[SYSSET]\nBLUETOOTH=0\n[Q2POD]\nAHEAD=2\n', '[SYSSET]\nBLUETOOTH=0\n[Q2POD]\nCARREMOTE=1\nAHEAD=2\n'),
+    ('[SYSSET]\nBLUETOOTH=0\n', '[SYSSET]\nBLUETOOTH=0\n[Q2POD]\nCARREMOTE=1\n')])
+def test_the_streaming_step_turns_car_remote_on_for_its_position(ini, want):
+    """smoke.py reads a streamed song's position from Car Remote's /tmp/coda-rc.now: CARREMOTE=1 under [Q2POD]."""
+    assert smoke.car_remote_on(ini) == want
 
 
 def test_a_payload_change_plans_the_smoke_test_and_a_merge_batch_leaves_it_out(tmp_path, monkeypatch):
