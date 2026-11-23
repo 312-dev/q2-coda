@@ -54,11 +54,15 @@ def keep(data):
 
 
 def build(log=sys.stderr):
-    """uac1_build.py's module (every check passed, or it exits), kept in the cache: (data, digest)."""
+    """uac1_build.py's module (every check passed, or it exits), kept in the cache: (data, digest, sources), sources
+    the sources_sha256 it was built from, taken before the build and checked again after it."""
+    sources = sources_sha256()
     subprocess.run([sys.executable, str(SOURCES/'uac1_build.py'), '--work', str(WORK)], check=True, stdout=log,
                    stderr=log)
+    if sources_sha256() != sources:
+        raise SystemExit('tools/uac1_module changed while usb_f_uac1.ko was built: build it again')
     data = (WORK/'module/usb_f_uac1.ko').read_bytes()
-    return data, keep(data)
+    return data, keep(data), sources
 
 
 def problem():
@@ -88,8 +92,8 @@ def main(argv):
     if argv[1:]:
         print(__doc__, file=sys.stderr)
         return 2
-    data, digest = build()
-    print(f'PIN = {(digest, len(data), sources_sha256())!r}')
+    data, digest, sources = build()
+    print(f'PIN = {(digest, len(data), sources)!r}')
     return 0
 
 

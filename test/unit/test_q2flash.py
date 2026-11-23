@@ -102,6 +102,16 @@ class Q2:
         self.mounted, self.free_kb, self.corrupt = mounted, free_kb, corrupt
         self.log, self.online, self.after_install = [], True, None
         self.push_fails, self.df, self.versions = False, None, []  # versions: answers to version first, in turn
+        self.rename_fails = False  # mv prints nothing and adb drops its status, so a failed rename is silent
+
+    def card_tag(self):
+        """The tag of the card's update.tar, as Software Update reads it, or -."""
+        data = self.files.get(q2flash.TARGET)
+        if data is None:
+            return '-'
+        with tarfile.open(fileobj=io.BytesIO(data)) as t:
+            head = t.extractfile('firmware_v20.info')
+            return head.read().decode().splitlines()[1] if head else '-'
 
     def state(self):
         return 'device' if self.online else ''
@@ -128,11 +138,11 @@ class Q2:
             op = command.split('q2update ')[-1].split()[0]
             if op == 'version':
                 return self.versions.pop(0) if self.versions else f'1 version {self.installed} -\n'
-            word = self.answers[op]
+            word, tag = self.answers[op], self.card_tag()
             if word == 'installing':
                 self.online = False
-                self.installed = self.after_install or NEW
-            return f'1 {word} {INSTALLED} {NEW}\n'
+                self.installed = self.after_install or tag
+            return f'1 {word} {INSTALLED} {tag}\n'
         if command.startswith('cat ' + q2flash.BATTERY):
             return f'{self.level}\n'
         if command.startswith('cat ' + q2flash.STATUS):
@@ -150,7 +160,8 @@ class Q2:
             return f'{hashlib.sha256(self.files[path]).hexdigest()}  {path}\n' if path in self.files else ''
         if command.startswith('mv -f '):
             src, dst = command.split()[2:4]
-            self.files[dst] = self.files.pop(src)
+            if not self.rename_fails:
+                self.files[dst] = self.files.pop(src)
             return ''
         if command.startswith('rm -f '):
             self.files.pop(command.split()[2], None)
@@ -177,7 +188,7 @@ def test_install_pushes_checks_the_copy_and_asks_the_q2s_own_update(tmp_path, on
     assert q2.files == {q2flash.TARGET: (tmp_path/'build/update.tar').read_bytes()}
     pushes = [c for c in q2.log if c[0] == 'push']
     assert pushes == [('push', str(tmp_path/'build/update.tar'), q2flash.PART)]
-    assert ops(q2) == ['version', 'install', 'version'] and q2.installed == NEW
+    assert ops(q2) == ['version', 'check', 'install', 'version'] and q2.installed == NEW
     assert 'installed: the Q2 runs V0JZi' in capsys.readouterr().out
 
 
@@ -215,6 +226,27 @@ def test_a_copy_that_differs_is_removed_and_never_installed(tmp_path):
     with pytest.raises(q2flash.Refused, match='differs'):
         q2flash.flash(build_dir(tmp_path), q2)
     assert not q2.files and ops(q2) == ['version']
+
+
+def test_a_failed_rename_never_installs_the_older_file(tmp_path, online):
+    q2 = Q2()
+    older = update_tar(tmp_path/'older.tar', version='V0JXi')
+    q2.files[q2flash.TARGET] = older.read_bytes()  # an earlier flash's update.tar, still on the card
+    q2.rename_fails = True  # the card remounted read-only between the push and the rename
+    with pytest.raises(q2flash.Refused, match='rename'):
+        q2flash.flash(build_dir(tmp_path), q2)
+    assert 'install' not in ops(q2) and q2.installed == INSTALLED
+
+
+@pytest.mark.parametrize('tags, why', [(['V0JXi'], 'reads /mnt/mmc/update.tar as V0JXi'),
+                                       ([NEW, 'V0JXi'], 'is installing V0JXi, not V0JZi')])
+def test_an_answer_naming_another_file_stops_the_install(tmp_path, monkeypatch, tags, why):
+    q2 = Q2()
+    said = iter(tags)
+    monkeypatch.setattr(q2, 'card_tag', lambda: next(said))  # the file the Q2's check and install each read
+    with pytest.raises(q2flash.Refused, match=why):
+        q2flash.flash(build_dir(tmp_path), q2)
+    assert ops(q2)[:2] == ['version', 'check'] and ('install' in ops(q2)) == (len(tags) > 1)
 
 
 def test_the_q2s_own_refusal_is_said(tmp_path):
@@ -323,7 +355,7 @@ def test_a_failed_push_leaves_nothing(tmp_path):
 
 def test_no_wait_returns_once_installing(tmp_path):
     q2 = Q2()
-    assert q2flash.flash(build_dir(tmp_path), q2, wait=False) == 0 and ops(q2) == ['version', 'install']
+    assert q2flash.flash(build_dir(tmp_path), q2, wait=False) == 0 and ops(q2) == ['version', 'check', 'install']
 
 
 def clock(monkeypatch, step=1.0):

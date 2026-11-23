@@ -18,7 +18,7 @@ never xdist's `-n auto`. The run is one q2-heavy job sized for its workers. Need
 Under ASan a process's memory grows with every test it has run (two xdist workers reached 9.4 GB and
 were killed on an idle machine, 2026-11-16), so --asan runs the files in ASAN_CHUNKS groups, each a
 pytest process of its own that ends before it is large: eight groups, three at a time, peaked at 3.7 GB
-in all (1.4 GB a process) and passed the same 9,052 tests in 2:31. Each group is a q2-heavy job.
+in all (1.4 GB a process) and passed every test (9,052 then) in 2:31. Each group is a q2-heavy job.
 """
 import argparse
 import concurrent.futures

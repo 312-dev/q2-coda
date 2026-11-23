@@ -1223,3 +1223,120 @@ def test_a_pass_is_keyed_by_the_options_the_build_was_made_with(tmp_path):
     other = tmp_path/'other'
     other.mkdir()
     assert affected.build_options(str(other)) == [f'build:{other.resolve()}']
+
+
+def test_rebuild_reuses_only_a_build_of_the_same_inputs(tmp_path, monkeypatch, capsys):
+    """rebuild.py's reuse key: the sources build.py hashes, the options, and the iroh crate, which --build-iroh
+    compiles and the pinned path checks against its PIN; a crate edit alone must not return the old image."""
+    import rebuild
+    sys.path.insert(0, str(rebuild.ROOT/'tools'))
+    import iroh
+    crate = tree(tmp_path/'crate', {'Cargo.toml': '[package]\n', 'Cargo.lock': '', 'src/main.rs': 'fn main() {}\n'})
+    monkeypatch.setattr(iroh, 'CRATE', crate)
+    monkeypatch.setattr(rebuild, 'BUILDS', tmp_path/'builds')
+    monkeypatch.setattr(rebuild, 'source_sha256', lambda: 'src')
+    builds = []
+
+    def run(cmd, **kw):
+        out = pathlib.Path(cmd[cmd.index('--out') + 1])
+        out.mkdir(parents=True)
+        (out/'update.tar').write_bytes(b'tar')
+        builds.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout='payload room: x\n')
+    monkeypatch.setattr(rebuild.subprocess, 'run', run)
+    stamps = iter(range(10))
+    monkeypatch.setattr(rebuild.time, 'strftime', lambda fmt: f'{next(stamps)}')  # one build directory a run
+
+    def go(*argv):
+        monkeypatch.setattr(sys, 'argv', ['rebuild.py', '--dev', *argv])
+        assert rebuild.main() == 0
+        return capsys.readouterr()
+    go('--', '--build-iroh')
+    assert len(builds) == 1 and 'reused' in go('--', '--build-iroh').err and len(builds) == 1
+    (crate/'src/main.rs').write_text('fn main() { println!("changed"); }\n')
+    assert 'reused' not in go('--', '--build-iroh').err and len(builds) == 2
+
+
+def test_a_remote_change_plans_what_reads_it_not_everything():
+    """remote/ had no rule, so a one-line edit to the iroh sidecar or the coda-rc proto planned every suite,
+    test/player/run.py's ten minutes among them. What reads it: tools/iroh.py's PIN of the crate (test_iroh.py),
+    the build that refuses an unpinned crate (test/build.py), and the proto's tables (test_coda_rc*.py)."""
+    plan = json.loads(affected.plan_for({'remote/iroh-sidecar/src/main.rs': {1}}, REPO).to_json())
+    assert not gate.everything(plan) and not plan['patch'] and not plan['fw']
+    assert plan['unit'] == ['test_iroh.py'] and 'test/build.py' in plan['other']
+    plan = json.loads(affected.plan_for({'remote/coda-rc.proto': {1}}, REPO).to_json())
+    assert not gate.everything(plan) and plan['unit'] == ['test_coda_rc.py', 'test_coda_rc_lib.py']
+    # a remote/ file no rule names still runs everything
+    assert gate.everything(json.loads(affected.plan_for({'remote/other/x.go': {1}}, REPO).to_json()))
+
+
+def test_every_unit_file_that_reads_remote_is_in_its_rule():
+    """A test/unit file that names a remote/ path is planned by REMOTE's rule for it."""
+    for path in sorted((REPO/'test/unit').glob('test_*.py')):
+        for ref in sorted(set(re.findall(r"remote/[\w./-]+", path.read_text()))):
+            unit, _ = next((v for k, v in affected.REMOTE.items() if ref.startswith(k) or k.startswith(ref)), (set(), ()))
+            assert path.name in unit, f'{path.name} reads {ref}, which REMOTE does not plan it for'
+
+
+@pytest.mark.parametrize('branch, whole', [('integ/q2-1128', True), ('release/p32', True), ('main', True),
+                                           ('fix/integ-thing', False), ('integrate-x', False)])
+def test_integration_branches_are_the_ones_the_docs_name(branch, whole):
+    """docs/orchestration.md and CLAUDE.md name integration branches integ/*, the integrator's."""
+    assert bool(affected.INTEGRATION.match(branch)) == whole
+
+
+@pytest.mark.parametrize('path', ['patch/addon.c', 'patch/catalogue.c', 'patch/stream_state.c', 'player/engine.c',
+                                  'tools/build.py'])
+def test_the_subsonic_contract_is_planned_for_its_sides(path):
+    """The firmware's side of the bundled app's files (.catplay, .playing, .ahead, .stream, the caps line) and its pin."""
+    plan = json.loads(affected.plan_for({path: {1}}, REPO).to_json())
+    assert 'test/subsonic_contract.py' in plan['other'] or gate.everything(plan)
+    assert 'test/subsonic_contract.py' not in json.loads(affected.plan_for({'patch/home.c': {1}}, REPO).to_json())['other']
+
+
+def test_an_integration_branch_given_a_base_runs_that_diffs_plan():
+    """An integrator's run after one merge names its base (or a --plan-json); only a bare run plans everything."""
+    assert affected.runs_everything(False, None, 'integ/q2-1129')
+    assert not affected.runs_everything(False, 'integ/q2-1128', 'integ/q2-1129')
+    assert affected.runs_everything(True, 'integ/q2-1128', 'fix/x') and not affected.runs_everything(False, None, 'fix/x')
+
+
+def test_a_retry_that_passes_after_the_tree_changed_is_not_flaky(monkeypatch, tmp_path, capsys):
+    """Three times on 2026-11-22 a suite was reported flaky when its first failure was real: the agent fixed the bug
+    while the run went on, and the retry ran on the fixed tree. Only a retry on the same tree and build is flaky; one
+    after a change fails, says so, and shows the first try's failure; every first-try failure is named at the end."""
+    monkeypatch.setattr(gate, 'HEAVY', tmp_path/'no-q2-heavy')
+    monkeypatch.setattr(gate, 'VERIFIED', tmp_path/'verified')
+    monkeypatch.setattr(gate, 'FLAKES', tmp_path/'flakes.jsonl')
+    monkeypatch.setattr(gate, 'tree_key', lambda root=None: None)
+    state = tmp_path/'state'
+    state.write_text('before the fix')
+    monkeypatch.setattr(gate, 'tree_state', lambda build=None: state.read_text(), raising=False)
+    fail = tmp_path/'fail'
+    py = tmp_path/'py'
+    py.write_text(f'''#!/bin/sh
+case "$*" in *coverflow*)
+  if [ -e {fail} ]; then
+    echo "FAILED test/coverflow.py::test_the_wall_tilts - assert 1 == 2"
+    [ "$(cat {fail})" = fixed ] && echo "after the fix" > {state}
+    rm {fail}; exit 1
+  fi;;
+esac
+exit 0
+''')
+    py.chmod(0o755)
+    plan = affected.Plan()
+    plan.other.update({'test/coverflow.py', 'test/peq.py'})
+    fail.write_text('fixed')  # the first try fails, and the tree changes before the retry
+    n = affected.run(plan, None, str(py), logs=tmp_path/'logs', poll=0.01)
+    out = capsys.readouterr().out
+    assert n == 1, out
+    assert re.search(r'test/coverflow.py +FAILED, then passed after a change', out), out
+    assert 'test_the_wall_tilts' in out.split('== test/coverflow.py')[-1] and not gate.FLAKES.exists()
+    assert re.search(r'first tries failed: test/coverflow.py \(test/coverflow.py::test_the_wall_tilts\)', out), out
+    # the same tree both times: flaky, as before, counted as passed, and still named at the end
+    fail.write_text('once')
+    n = affected.run(plan, None, str(py), logs=tmp_path/'logs2', poll=0.01)
+    out = capsys.readouterr().out
+    assert n == 0 and re.search(r'test/coverflow.py +flaky \(fail\)', out), out
+    assert 'first tries failed: test/coverflow.py (test/coverflow.py::test_the_wall_tilts)' in out

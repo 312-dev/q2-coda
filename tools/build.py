@@ -315,8 +315,9 @@ RADIO_DATA = 'usr/share/q2radio'
 RADIO_TABLES = ('stations.bin', 'zcta.bin')
 # Card apps the firmware carries (docs/internals.md#bundled-apps): id -> (version, release zip, its size, its
 # SHA-256, builtin), each the zip its release ships, read from --apps (APPS_DIR). Its .<id>/ files go
-# to BUNDLED_DIR/<id> (patch/addon.c BUNDLED) with a version file and bundled_launcher's run in place of the
-# app's, so the app keeps its data in the card's .<id>. builtin: the firmware's copy is the only one that runs
+# to BUNDLED_DIR/<id> (patch/addon.c BUNDLED) with a version file, a bundle file naming the zip and the program's
+# SHA-256 (bundle_record), and bundled_launcher's run in place of the app's, so the app keeps its data in the
+# card's .<id>. builtin: the firmware's copy is the only one that runs
 # and the App Store never lists the app (a builtin file holding 1 beside it, patch/addon.c addon_builtin), so its
 # updates are firmware updates. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
@@ -1253,9 +1254,34 @@ def english_ui(rel, data):
 FONT = 'release/assets/default/raw/fonts/default.ttf'
 QUOTES = {0x2018: 0x27, 0x2019: 0x27, 0x201c: 0x22, 0x201d: 0x22}
 
+def memo_source(fn, text=None):
+    """The text fn's result follows from in this module (text: its source, by default this file's): fn's own
+    definition and, transitively, every module-level function, class and constant it names. An edit elsewhere in
+    tools/build.py leaves it as it is."""
+    import ast
+    text = pathlib.Path(__file__).read_text() if text is None else text
+    tree = ast.parse(text)
+    defs: dict[str, ast.AST] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            defs[node.name] = node
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            for t in (node.targets if isinstance(node, ast.Assign) else [node.target]):
+                for n in ast.walk(t):
+                    if isinstance(n, ast.Name): defs[n.id] = node
+    seen, todo, parts = set(), [fn.__name__], []
+    while todo:
+        name = todo.pop()
+        if name in seen or name not in defs: continue
+        seen.add(name)
+        node = defs[name]
+        parts.append(ast.get_source_segment(text, node) or '')
+        todo += [n.id for n in ast.walk(node) if isinstance(n, ast.Name)]
+    return '\0'.join(sorted(set(parts)))
+
 def memo(fn):  # pragma: no mutate block
-    """fn, its results kept on disk in $Q2_BUILD_CACHE, keyed by tools/build.py's text, fontTools' version
-    and the arguments (a path by its file's bytes): a rebuild with the same fonts skips fontTools' 15 s or so.
+    """fn, its results kept on disk in $Q2_BUILD_CACHE, keyed by the code it follows from (memo_source), fontTools'
+    version and the arguments (a path by its file's bytes): a rebuild with the same fonts skips fontTools' work.
     Off unless Q2_BUILD_CACHE names a directory (tools/ci/rebuild.py sets it), so a release's two
     reproducibility builds still compute everything."""
     import functools, os, pickle
@@ -1264,7 +1290,7 @@ def memo(fn):  # pragma: no mutate block
         where = os.environ.get('Q2_BUILD_CACHE')
         if not where: return fn(*args, **kwargs)
         from fontTools import version as fonttools
-        h = hashlib.sha256(pathlib.Path(__file__).read_bytes() + fn.__name__.encode() + fonttools.encode())
+        h = hashlib.sha256(memo_source(fn).encode() + fn.__name__.encode() + fonttools.encode())
         for a in [*args, *sorted(kwargs.items())]: h.update(a.read_bytes() if isinstance(a, pathlib.Path) else repr(a).encode())
         path = pathlib.Path(where)/f'{fn.__name__}-{h.hexdigest()}.pickle'
         try: return pickle.loads(path.read_bytes())
@@ -1482,7 +1508,8 @@ def source_sha256():
     h = hashlib.sha256()
     manual = [ROOT/'docs/manual'/f for f in ('build.py', 'guide.html')]
     for path in sorted([*(p for p in ROOT.glob('assets/**/*') if p.is_file()), *(p for p in ROOT.glob('patch/**/*') if p.is_file()),
-                        *ROOT.glob('tools/*.py'), *ROOT.glob('tools/*.c'),
+                        *ROOT.glob('tools/*.py'), *ROOT.glob('tools/*.c'), *ROOT.glob('tools/*.patch'), ROOT/'tools/stock_map.tsv',
+                        *(p for p in ROOT.glob('tools/uac1_module/**/*') if p.is_file() and '__pycache__' not in p.parts),
                         *ROOT.glob('tools/*.h'), *ROOT.glob('tools/*.S'), *ROOT.glob('player/*.[ch]'),
                         *ROOT.glob('player/Makefile'), *manual]):
         h.update(str(path.relative_to(ROOT)).encode() + b'\0')
@@ -1546,6 +1573,26 @@ def jpeg_size(b):
             return w, h
         i += size
     raise ValueError('No JPEG size marker')
+def stock_map(path=None):
+    """tools/stock_map.tsv's names for demo's unnamed functions: {name: address}. Kept by hand from stock's code
+    (docs/rebasing.md), so it is a record of where each function is that HOOKS is not made from."""
+    out = {}
+    for line in (path or ROOT/'tools/stock_map.tsv').read_text().splitlines():
+        f = line.split('\t')
+        if len(f) > 3 and f[0] == 'demo' and f[1].startswith('0x'):
+            out[f[3]] = int(f[1], 16)
+    return out
+
+def hook_address_check(hooks, stock_syms, mapped):
+    """Each hook's address in HOOKS against a source not derived from it: stock's symbol table for a function
+    Shanling named, tools/stock_map.tsv (mapped) for one it left unnamed. The prologue check after it holds for
+    nearly any function's start, so a hook moved to another function would otherwise build."""
+    for name, (address, _, _) in hooks.items():
+        known = stock_syms.get(name, mapped.get(name))
+        check(known is not None, f'{name}: in neither the stock symbol table nor tools/stock_map.tsv')
+        check(known == address, f'{name}: HOOKS has {address:#x}, but {name} is at {known:#x}'
+              f' ({"the stock symbol table" if name in stock_syms else "tools/stock_map.tsv"})')
+
 def symbols(p, table=None):
     out = {}
     for line in (table or run('readelf', '-Ws', p)).splitlines():
@@ -1587,12 +1634,32 @@ def bundled_app(app_id, apps_dir):
         files = {n[len(prefix):]: z.read(n) for n in z.namelist() if n.startswith(prefix) and not n.endswith('/')}
     need_files = {f'q2-{app_id}', 'run', 'q2app'}
     check(need_files <= set(files) and all('/' not in n for n in files), f'Unexpected files in {name}')
+    check('builtin' not in files and 'bundle' not in files, f'Unexpected files in {name}')
+    commit = re.search(r'-([0-9a-f]{7,40})(-dirty)?\.zip$', name)
+    check(not (commit and commit[2]), f'{name} was built from a tree with uncommitted changes')
+    # The zip's own version file, when its build.sh writes one, is "<version>+<commit>": that commit's, clean.
+    stamp = files.pop('version', b'').decode(errors='replace').strip()
+    check(not stamp or (commit is not None and stamp == f'{version}+{commit[1]}'),
+          f'{name} says it is {stamp!r}, not {version}+ its name\'s commit')
     files['run'] = bundled_launcher(app_id, files['run'].decode()).encode()
     files['version'] = version.encode() + b'\n'
-    check('builtin' not in files, f'Unexpected files in {name}')
     if builtin:
         files['builtin'] = b'1\n'
+    files['bundle'] = bundle_record(app_id, name, digest, files[f'q2-{app_id}'], stamp)
     return {n: (b, n in (f'q2-{app_id}', 'run')) for n, b in sorted(files.items())}
+
+
+def bundle_record(app_id, zip_name, zip_sha256, binary, stamp):
+    """BUNDLED_DIR/<id>/bundle: which build of the app this image carries, for `cat` on the Q2 and test/build.py.
+    One "key value" a line: the zip and its SHA-256 (BUNDLED_APPS), the program's own SHA-256 (what
+    `sha256sum /usr/lib/q2apps/<id>/q2-<id>` prints on the Q2), and the zip's version stamp, or - when it has none."""
+    return (f'zip {zip_name}\nzip_sha256 {zip_sha256}\nq2-{app_id}_sha256 {sha(binary)}\n'
+            f'build {stamp or "-"}\n').encode()
+
+
+def bundle_fields(data):
+    """A bundle file's lines as a dict (bundle_record's keys)."""
+    return dict(line.split(' ', 1) for line in data.decode().splitlines() if ' ' in line)
 
 
 def rootfs_fits(size):
@@ -2591,6 +2658,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     syms = symbols(demo, symbol_table)
     for name, address in APP_URL_CALLS.items():
         check(syms.get(name) == address, f'{name}: not at {address:#x} in the stock demo')
+    hook_address_check(HOOKS, syms, stock_map())  # before PRIVATE_FUNCTIONS, which takes some from HOOKS
     syms.update(PRIVATE_FUNCTIONS)
     fonts = {f.path: face_font(f) for f in FACES.values() if f.source}
     for name in GLOBALS:
@@ -2612,7 +2680,6 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     patch_timezones(patched)
     def jump(off, name): patched[off:off+8] = struct.pack('<II', j(ps[name]), 0)
     for name, (address, replacement, _) in HOOKS.items():
-        check(syms[name] == address, f'{name}: callback address mismatch')
         off = fileoff(patched, address)
         prolog = struct.unpack_from('<III', patched, off)
         check(prolog[0] >> 16 == 0x3c1c and prolog[1] >> 16 == 0x279c and
@@ -2965,8 +3032,10 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
             p += path + b' F ' + b' '.join(like.groups()) + b' cat ' + shlex.quote(str(src)).encode() + b'\n'
             player_added.append([path, b'R', *like.groups()])
         app_version, zip_name, _, digest, builtin = BUNDLED_APPS[app_id]
+        record = bundle_fields(files['bundle'][0])
         bundled[app_id] = dict(version=app_version, zip=zip_name, sha256=digest, builtin=builtin,
-                               bytes=sum(len(d) for d, _ in files.values()))
+                               bytes=sum(len(d) for d, _ in files.values()),
+                               binary_sha256=record[f'q2-{app_id}_sha256'], build=record['build'])
     for path, src in ((b'release/bin/demo', out/'demo'), (b'usr/bin/hciplayer', q2player),
                       (BLUEALSA.encode(), out/'bluealsa'), (BLUETOOTHD.encode(), out/'bluetoothd'), (WATCHDOG.encode(), out/'watchdog'),
                       (S90PLAY.encode(), out/'S90play'), (S11LOGO.encode(), out/'S11logo'),

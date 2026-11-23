@@ -17,7 +17,7 @@ It aligns the two `.text` streams between exported symbols on words with their a
 
 Two tracked tables go with it, both carried by `apply`:
 
-- `tools/stock_map.tsv`: our names for stock's unnamed functions, with a line on what each does. A name goes in only on evidence (a string it loads, what it calls, how its caller uses it). `report` and `refs` print these names.
+- `tools/stock_map.tsv`: our names for stock's unnamed functions, with a line on what each does. The build checks each `HOOKS` entry on an unnamed function against its address here (`hook_address_check`; a named one against stock's symbol table), so a hook moved to another function stops the build. A name goes in only on evidence (a string it loads, what it calls, how its caller uses it). `report` and `refs` print these names.
 - `tools/stock_sites.tsv`: for every stock code address `patch/` and `tools/` name, the function it is in and how to find it again: the call it is, or the instruction, with the last string loaded before it and the next call after it, and what of ours uses it. `docs/rebasing/sitenotes.py` writes it, and with `--check` writes nothing and fails when the table is not current; `test/stock_sites.py` runs that check for any branch that changes `patch/`, `tools/` or the script (`affected.py` plans it), and `tools/release.py package` runs it too, so a release needs the table current ([releasing](releasing.md)). A row `apply` cannot carry keeps its old address, and `report` lists it under "Patch sites to find by hand".
 
 ## The routine

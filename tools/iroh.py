@@ -45,10 +45,14 @@ def cached(digest):
 
 
 def build(log=sys.stderr):
-    """q2/build.sh's binary, kept in the cache under its SHA-256: (data, digest)."""
+    """q2/build.sh's binary, kept in the cache under its SHA-256: (data, digest, crate), crate the crate_sha256 it was
+    built from, taken before the build and checked again after it: a crate edited while cargo ran stops here."""
+    crate = crate_sha256()
     out = pathlib.Path(os.environ.get('CARGO_TARGET_DIR') or CRATE/'target')/'q2'
     path = subprocess.run(['sh', str(CRATE/'q2/build.sh'), str(out)], check=True, stdout=subprocess.PIPE,
                           stderr=log, text=True).stdout.strip().splitlines()[-1]
+    if crate_sha256() != crate:
+        raise SystemExit('remote/iroh-sidecar changed while q2-iroh was built: build it again')
     data = pathlib.Path(path).read_bytes()
     digest = hashlib.sha256(data).hexdigest()
     (CACHE/digest).mkdir(parents=True, exist_ok=True)
@@ -57,7 +61,7 @@ def build(log=sys.stderr):
     tmp.chmod(0o755)
     os.replace(tmp, CACHE/digest/'q2-iroh')
     shutil.rmtree(out/'sysroot', ignore_errors=True)  # a copy of the stock /lib, made again by each build
-    return data, digest
+    return data, digest, crate
 
 
 def problem():
@@ -74,9 +78,9 @@ def problem():
 def binary(fresh=False):
     """The bytes to install as /usr/bin/q2-iroh: the pinned binary, or with fresh one built now."""
     if fresh:
-        data, digest = build()
-        if (digest, len(data), crate_sha256()) != PIN:
-            print(f'q2-iroh: built {digest[:12]}, not the pinned one; PIN = {(digest, len(data), crate_sha256())!r}',
+        data, digest, crate = build()
+        if (digest, len(data), crate) != PIN:
+            print(f'q2-iroh: built {digest[:12]}, not the pinned one; PIN = {(digest, len(data), crate)!r}',
                   file=sys.stderr)
         return data
     why = problem()
@@ -93,8 +97,8 @@ def main(argv):
     if argv[1:]:
         print(__doc__, file=sys.stderr)
         return 2
-    data, digest = build()
-    print(f'PIN = {(digest, len(data), crate_sha256())!r}')
+    data, digest, crate = build()
+    print(f'PIN = {(digest, len(data), crate)!r}')
     return 0
 
 

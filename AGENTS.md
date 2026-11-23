@@ -60,7 +60,7 @@ Prerequisites, all in [docs/building.md](docs/building.md#requirements): clang, 
 
 ```sh
 # Tests that need no stock ZIP and no build. Run these first.
-python3 -m pytest test/unit -q                                 # tools/ (about 40 s)
+python3 -m pytest test/unit -q                                 # tools/ (about 4.5 minutes, serial)
 mkdir -p ~/.cache/q2-pytest
 python3 -m pytest test/fw -q --basetemp ~/.cache/q2-pytest/fw  # the payload's C on this machine; needs a PIE python
 python3 test/build.py                                          # boot scripts, JPEG checks, dev tags
@@ -119,7 +119,7 @@ Don't add features to `patch/navigation.c`: give each its own file, as CONTRIBUT
 
 ## graphify
 
-This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+graphify-out/ (git-ignored) is a knowledge graph of the code (god nodes, community structure, cross-file relationships) that exists only in a checkout where someone has generated it with the graphify tool; a new worktree has none, and the tool is not installed on this machine as of 2026-11-22 (`command -v graphify` prints nothing). Without graphify-out/graph.json, skip these rules and search as usual.
 
 When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.
 
