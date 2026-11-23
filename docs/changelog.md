@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: a headset or car with an accented or non-Latin name ("Café", Japanese, an emoji) shows its name right in Quality's "doesn't support" line, where it showed garbled letters.
   - App sign-in: while an app shows a large sign-in QR code, the Q2 no longer goes to standby under it, and the app's sync progress still shows.
   - Playback: Shuffle with no headphones, Bluetooth or USB audio connected now only shows "Connect headphones or Bluetooth to play". It also switched the play mode to Shuffle and showed "Shuffled Songs" (Shuffle Albums and Folders loaded the whole library as the queue), and playing an album from Cover Flow over Now Playing closed Now Playing, though nothing played.
   - USB: the Scan Card prompt you get on stopping Transfer Files with the computer still plugged in now takes the wheel and Center, its first button selected, where nothing could be chosen but by touch.

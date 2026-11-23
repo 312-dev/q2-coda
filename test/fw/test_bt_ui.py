@@ -39,7 +39,7 @@ class Page:
         self.records = [C.create_string_buffer(0x124) for _ in self.devices]
         for record, (mac, name, _) in zip(self.records, self.devices):
             C.memmove(C.addressof(record) + 4, mac.encode() + b'\0', len(mac) + 1)
-            C.memmove(C.addressof(record) + 0x24, name.encode() + b'\0', len(name) + 1)
+            C.memmove(C.addressof(record) + 0x24, name.encode() + b'\0', len(name.encode()) + 1)  # UTF-8, as BlueZ's
         fw.var('fw_ctx_pdeq_btshowlist', C.c_uint).value = self.ui.deques.new(C.addressof(r) for r in self.records)
         fw.var('g_bluetoothflag', C.c_ubyte).value = on
         self.win = self.ui.new('window_create', 0, 0, 0, 0, 0)
@@ -1118,6 +1118,20 @@ def test_a_px7_marks_only_ldac(fw, tmp_path):
     p.picker()
     assert p.lacking() == [0, 1]
     assert p.caption(1) == "Px7 doesn't support LDAC: using aptX HD"
+
+
+@pytest.mark.parametrize('name, shown', [
+    ('Café Sönd', 'Café Sönd'),                                   # accented Latin: two bytes a letter
+    ('ソニー WH-1000XM5 ヘッドホン 黒', 'ソニー WH-1000XM5 ヘッドホン'),  # CJK, cut at 20 characters, never inside one
+    ('🎧 Buds', '🎧 Buds'),                                        # four bytes
+])
+def test_a_device_s_name_in_a_caption_is_its_characters(fw, tmp_path, name, shown):
+    """A headset's name is UTF-8 (BlueZ's), and caption_row widened it a byte a character, so "Café" drew as "CafÃ©"
+    and a Japanese name as a row of Latin-1 noise; and the cut at BT_LACK_NAME counted bytes, which could split a
+    character. The caption's code units are the name's characters, cut at 20 of them."""
+    p = Connected(fw, tmp_path, HEAD, name, PX7, 'aptX-HD')
+    p.picker()
+    assert p.caption(1) == shown + " doesn't support LDAC: using aptX HD"
 
 
 def test_a_marked_row_s_text_is_grayed_as_the_library_s(fw, tmp_path):
