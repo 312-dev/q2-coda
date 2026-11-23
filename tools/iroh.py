@@ -21,8 +21,8 @@ CRATE = ROOT/'remote/iroh-sidecar'
 CACHE = pathlib.Path(os.environ.get('Q2_THIRDPARTY_CACHE') or pathlib.Path.home()/'.cache/q2-thirdparty')/'q2-iroh'
 
 # (the stripped binary's SHA-256, its size, crate_sha256() of the crate it was built from)
-PIN = ('59dd6c843261bb8ba8cb2ff5ffdeb2e3f44015e452a07687816d90a47bf18526', 5318928,
-       'c560ab1bcc3d77b6dc645cfca52e9a69127657d3a2173cda8961517d6978d093')
+PIN = ('ca356d46aa4ccb0d7386fdc33ec4eb26fa9e82e73bafb182b951070ac65c8f54', 5325056,
+       '6b9e543db5141b6c7a378d226772e181285c6f0552ff7544400f5b02564090a2')
 
 
 def crate_sha256():

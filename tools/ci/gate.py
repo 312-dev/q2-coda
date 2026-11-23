@@ -215,6 +215,7 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/build.py': ['--build', '{build}'],
     'test/chapters.py': [],  # --stock-root and --qemu go together and are optional: its parser refuses BUILD
     'test/coda_rc_e2e.py': ['--pool', '{build}'],  # a pooled emulator, Car Remote on for the lease, on its own port
+    'test/coda_rc_iroh_e2e.py': "needs a host build of q2-iroh and n0's public relay (the network); run it by hand",
     'test/coverflow.py': [],
     'test/coverflow_position.py': [],
     'test/fmrx.py': [],  # the tuner's receiver against the prototype's figures; --mips OUT builds the Q2's bench

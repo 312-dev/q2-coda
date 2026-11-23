@@ -1479,10 +1479,21 @@ def test_dark_and_paused_the_polls_slow_before_the_dac_is_off(fw, stock_bytes):
     assert play(100) == (False, O['DARK_POLL_US'])
 
 
+def car_phone(fw, connected):
+    """Car Remote on, its daemon's online file naming a phone with an authenticated session or none, read by the
+    shim's first poll (coda_rc_shim.c coda_rc_online)."""
+    files = Files(fw).files
+    if connected:
+        files['/tmp/coda-rc.online'] = b'\x01' * 8 + b'\x01'
+    fw.fn('coda_rc_poll', None)()
+
+
 @pytest.mark.parametrize('why', ['a-b', 'car', 'airplay', 'receiver'])
 def test_dark_what_follows_the_position_keeps_stocks_pace(fw, stock_bytes, why):
     play = DarkPlay(fw, stock_bytes, car=b'1' if why == 'car' else b'0')
-    if why == 'a-b':  # check_abrepeatmode seeks back to A from the cached position
+    if why == 'car':  # a phone on Car Remote shows the position
+        car_phone(fw, connected=True)
+    elif why == 'a-b':  # check_abrepeatmode seeks back to A from the cached position
         C.c_ubyte.from_address(play.ab).value = 1
         C.c_int.from_address(play.ab + O['REPEAT_AB_STATE']).value = 2
     elif why == 'airplay':
@@ -1491,6 +1502,15 @@ def test_dark_what_follows_the_position_keeps_stocks_pace(fw, stock_bytes, why):
         fw.var('bt__recv_pageflag', C.c_ubyte).value = 2
     play(0)
     assert play(100) == (True, 200000)
+
+
+def test_car_remote_with_no_phone_lets_the_polls_slow(fw, stock_bytes):
+    """2026-11-22's sweep (item 22): with Car Remote on and no phone connected the dark loop kept stock's pace, 600
+    passes a minute playing dark for nobody. Only a connected phone follows the position."""
+    play = DarkPlay(fw, stock_bytes, car=b'1')
+    car_phone(fw, connected=False)
+    play(0)
+    assert play(100) == (False, O['DARK_POLL_US'])
 
 
 def test_a_b_repeat_with_only_a_set_lets_the_polls_slow(fw, stock_bytes):

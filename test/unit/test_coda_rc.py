@@ -615,7 +615,8 @@ def cover_answers():
 
 
 ANSWERS = {
-    0x10: ACK, 0x20: ACK, 0x22: ACK, 0x24: ACK, 0x40: ACK, 0x44: ACK,
+    0x10: ACK, 0x20: ACK, 0x22: ACK, 0x24: ACK, 0x40: ACK, 0x44: ACK, 0x46: ACK,
+    0x60: lambda m: [(0x61, None, client.encode([(1, 'ab' * 32), (2, 'https://use1-1.relay.n0.iroh.link./')]))],
     0x12: lambda m: [(0x7F, 0, b''), (0x11, None, NOW)],  # a push first: kept, then the answer
     0x30: lambda m: [(0x31, None, client.encode([(1, client.text(m, 1)), (2, 'Albums'), (3, 2), (4, 0),
                                                  (5, item('al:1', 'One', subtitle='A', art='a:1', browsable=1,
@@ -708,6 +709,14 @@ def test_client_commands(q2, capsys, tmp_path):
         run(capsys, 'nonsense')
     with pytest.raises(SystemExit):
         run(capsys, 'repeat', 'sometimes')
+
+
+def test_client_radio_and_remote(q2, capsys):
+    """StartRadio from the playing song, from a song and stopped (CAP_RADIO); GetRemote's endpoint (CAP_REMOTE)."""
+    run(capsys, 'pair')
+    for argv, fields in ((('radio',), {}), (('radio', 'song:t12'), {1: [b'song:t12']}), (('radio', 'stop'), {2: [1]})):
+        assert run(capsys, *argv) == {'ok': True} and q2[-1].requests[0] == (0x46, fields)
+    assert run(capsys, 'remote') == {'endpoint_id': 'ab' * 32, 'relay_url': 'https://use1-1.relay.n0.iroh.link./'}
 
 
 def test_client_watch_prints_pushes_until_its_time(q2, capsys, monkeypatch):

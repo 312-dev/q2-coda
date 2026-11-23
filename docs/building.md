@@ -15,6 +15,7 @@
 - ImageMagick 6 or 7 for the iPod UI's settings icons (`convert` or `magick`; tested with 6.9.12)
 - The test dependencies: `pip install -r requirements.txt`
 - For the rebuilt third-party libraries ([third-party.md](third-party.md)): network access on the first build, which fetches the Codescape MIPS toolchain (2.3 GB) and the pinned sources into `~/.cache/q2-thirdparty`, and about an hour to compile them once; bwrap and qemu-mipsel for `test/thirdparty.py`
+- Only to change `remote/iroh-sidecar` (`q2-iroh`, which a build otherwise takes pinned from the cache): Rust nightly-2026-11-18 with `rust-src` ([remote: Building it](remote.md#building-it)). On GRAYTHINKPAD it is installed in `~/.cache/q2-rust` (`rustup` and `cargo` there; `~/.cache/q2-rust/wrap/cargo` runs `cargo +nightly` on that nightly). The pinned binary is reproduced byte for byte only with that toolchain and its target folder: `RUSTUP_HOME=~/.cache/q2-rust/rustup CARGO_HOME=~/.cache/q2-rust/cargo PATH=~/.cache/q2-rust/wrap:$PATH CARGO_TARGET_DIR=~/.cache/q2-rust/target python3 tools/iroh.py` (a later nightly, or another target folder, makes a different binary of the same crate). The crate's unit tests run on the host the same way with `cargo +nightly test --offline --release --manifest-path remote/iroh-sidecar/Cargo.toml` and `CARGO_TARGET_DIR=~/.cache/q2-rust/target-host`.
 - The original stock ZIP. Its SHA-256 is:
 
 ```text
@@ -127,6 +128,7 @@ python3 test/adb.py [BUILD]                # adbd under qemu-mipsel in bwrap (de
 python3 test/coda_rc_e2e.py --emu DIR [--build BUILD] [--shots DIR]  # coda-rc end to end over TCP against a q2-emu copy with CARREMOTE=1: pair, browse (album numbers, NOT_FOUND), play an album, State pushes, Pause and Play acked once played, Next, Previous, a cover (docs/remote-protocol.md)
 python3 test/coda_rc_e2e.py --pool BUILD     # the same on a pooled emulator it leases, Car Remote turned on for the lease, on that copy's own port (the gate's way)
 python3 test/subsonic_seam.py [--app DIR | --commit SHA] [--mips QEMU]  # the bundled Subsonic app, built here, against a fake server and the firmware's own C (Seam test); needs Go, ~/repos/q2-subsonic, unshare
+python3 test/coda_rc_iroh_e2e.py [--iroh BIN]  # q2-iroh's allow-list end to end over n0's relay: a host coda-rc and q2-iroh serve, q2-iroh dial as the phone; skipped with no host q2-iroh or no relay
 python3 test/rotator.py STOCK_MODULE        # actual MIPS rotator clock ownership and failure paths
 python3 test/rotator_build.py [BUILD...]    # dev-only guard (no build needed); given builds, packed/default module isolation
 python3 test/playback.py /tmp/q2-build     # grouped traversal, snapshots and the wheel's ticks (cc)

@@ -42,12 +42,31 @@ def test_nothing_needing_the_network_turns_the_radio_off(fw, st):
     assert q2.switched == [0] and q2.off() == 1
 
 
-@pytest.mark.parametrize('minutes', [6, 60])
-def test_car_remote_on_keeps_the_radio_on(fw, st, minutes):
-    """A phone connects over Wi-Fi when the car starts, to a daemon that is on whether a session is open or not."""
-    q2 = Q2(fw, st, CARREMOTE=b'1')
-    q2.idle(minutes * 60_000)
-    assert q2.switched == [] and not q2.off() and q2.wifi.value == 1
+def car_remote_on(fw, q2, link):
+    """Car Remote turned on now (its daemon started: coda_rc_shim.c's use count starts), Wi-Fi's link as given."""
+    fw.mock('networkGetConnectStatus', lambda *_: link)
+    fw.fn('coda_rc_toggle', None)()
+
+
+def test_car_remote_with_no_wi_fi_link_lets_the_radio_go(fw, st):
+    """docs/internals.md#smart-wi-fi. The heat log of 2026-11-22: 485 idle samples on battery with Car Remote on and no
+    network joined, the radio on and scanning (the driver's thread and wpa_supplicant among the busiest) for nothing:
+    with no saved network in range the phone comes over Bluetooth. Car Remote holds no radio without a link."""
+    q2 = Q2(fw, st, CARREMOTE=b'0')
+    car_remote_on(fw, q2, link=0)
+    q2.idle(O['SMART_IDLE_MS'] + 2 * O['SMART_POLL_MS'])
+    assert q2.switched == [0] and q2.off() == 1
+
+
+def test_car_remote_holds_a_linked_radio_ten_minutes_after_its_last_use(fw, st):
+    """With a link, a phone may come over this Wi-Fi or through q2-iroh: the radio stays for 10 minutes after Car
+    Remote's last use (here its start), then goes SMART_IDLE_MS later, as for anything else."""
+    q2 = Q2(fw, st, CARREMOTE=b'0')
+    car_remote_on(fw, q2, link=1)
+    q2.idle(10 * 60_000)
+    assert q2.switched == [] and not q2.off()
+    q2.idle(O['SMART_IDLE_MS'] + 2 * O['SMART_POLL_MS'])
+    assert q2.switched == [0] and q2.off() == 1
 
 
 @pytest.mark.parametrize('page', ['radio_page', 'tuner_page'])
@@ -142,10 +161,12 @@ def test_a_new_wpa_supplicant_is_held_again(fw, st):
     assert q2.sent == [HOLD, HOLD]
 
 
-@pytest.mark.parametrize('playing, out, carremote', [(3, 1, b'0'), (2, 0, b'0'), (2, 2, b'0'), (2, 1, b'1')])
+@pytest.mark.parametrize('playing, out, carremote', [(3, 1, 0), (2, 0, 0), (2, 2, 0), (2, 1, 1)])
 def test_no_hold_unless_a_headset_plays_and_nothing_needs_the_network(fw, st, playing, out, carremote):
-    """Paused, on the jack or USB, or with Car Remote on (its phone joins over Wi-Fi when the car starts)."""
-    q2 = Scans(fw, st, CARREMOTE=carremote)
+    """Paused, on the jack or USB, or with Car Remote wanting the network (linked and used lately)."""
+    q2 = Scans(fw, st, CARREMOTE=b'0')
+    if carremote:
+        car_remote_on(fw, q2, link=1)
     q2.playing, q2.out = playing, out
     q2.idle(5_000)
     assert HOLD not in q2.sent
