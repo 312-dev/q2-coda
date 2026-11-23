@@ -29,28 +29,41 @@ static struct {
  * Fav toggled for the playing track (manage_myfav), and the heart's image with it. */
 #define FAV_CLICK ((int (*)(void *, void *))0x53c968)
 
+/* A slot's place: a key's slots are probed from its hash's (open addressing), so a lookup reads a
+ * few words, not the whole table. RATE_GONE marks a rating taken out, which a probe passes over
+ * and an insert reuses; it reads as no rating (7). The table's last two words are no slots: a
+ * file laid out this way says so (RATE_LAYOUT) and keeps its slots in use (<< 3, then 6), so it is
+ * read as it is; both read as malformed slots (6) to a firmware from before. */
+#define RATE_GONE 7u
+#define RATE_PROBE (RATE_SLOTS - 2)
+#define RATE_LAYOUT 0x48415356u /* "VSAH", its low bits 6 */
 /* The songs' table, or with album the albums'. A file shorter than the table, written when it held
  * fewer slots, is read as far as it goes, the rest of the table free. */
 static int rate_io(int album, int write) {
     const char *f = album ? ALBUM_RATINGS_FILE : RATINGS_FILE;
     const char *tmp = album ? ALBUM_RATINGS_FILE ".tmp" : RATINGS_FILE ".tmp";
     unsigned *t = album ? ra.album_rates : ra.rates;
-    if (write) return blob_io(f, tmp, t, RATE_SLOTS * sizeof *t, 1);
+    if (write) {
+        t[RATE_PROBE] = RATE_LAYOUT, t[RATE_PROBE + 1] = ra.used[album] << 3 | 6;
+        return blob_io(f, tmp, t, RATE_SLOTS * sizeof *t, 1);
+    }
     void *in = fopen(f, "rb");
     unsigned n = in ? (unsigned)fread(t, sizeof *t, RATE_SLOTS, in) : 0;
     if (in) fclose(in);
     memset(t + n, 0, (RATE_SLOTS - n) * sizeof *t);
     return (int)n; /* the words read */
 }
-/* A slot's place: a key's slots are probed from its hash's (open addressing), so a lookup reads a
- * few words, not the whole table. RATE_GONE marks a rating taken out, which a probe passes over
- * and an insert reuses; it reads as no rating (7). */
-#define RATE_GONE 7u
-static unsigned rate_home(unsigned key) { return ((key >> 3) * 2654435761u) % RATE_SLOTS; }
+static unsigned rate_home(unsigned key) { return ((key >> 3) * 2654435761u) % RATE_PROBE; }
 static unsigned *rates(int album) {
     unsigned **t = album ? &ra.album_rates : &ra.rates;
     if (*t || !(*t = calloc(RATE_SLOTS, sizeof **t))) return *t;
     unsigned n = (unsigned)rate_io(album, 0);
+    if (n == RATE_SLOTS && (*t)[RATE_PROBE] == RATE_LAYOUT) { /* laid out already */
+        ra.used[album] = (*t)[RATE_PROBE + 1] >> 3;
+        return *t;
+    }
+    if (n > RATE_PROBE) n = RATE_PROBE;
+    (*t)[RATE_PROBE] = (*t)[RATE_PROBE + 1] = 0; /* rate_io writes them */
     /* each rating at its key's place: a file from before the hashing (every slot from the first),
      * or one with gaps; marks and malformed slots dropped. No file, nothing to place. */
     unsigned *was = n ? calloc(n, sizeof *was) : (unsigned *)0;
@@ -60,8 +73,8 @@ static unsigned *rates(int album) {
     for (unsigned i = 0; i < n; i++) {
         unsigned v = was[i], k = rate_home(v);
         if (!(v & 7) || (v & 7) > 5 || ra.used[album] >= RATE_CAP) continue;
-        for (unsigned n = 0; n < RATE_SLOTS && (*t)[k] && ((*t)[k] ^ v) >= 8; n++)
-            k = (k + 1) % RATE_SLOTS;
+        for (unsigned n = 0; n < RATE_PROBE && (*t)[k] && ((*t)[k] ^ v) >= 8; n++)
+            k = (k + 1) % RATE_PROBE;
         ra.used[album] += !(*t)[k];
         (*t)[k] = v; /* a key twice in a damaged file: its later slot's, as rate_all reads it */
     }
@@ -73,7 +86,7 @@ static unsigned *rates(int album) {
 static int rate_slot(int album, unsigned key, int free) {
     unsigned *t = rates(album), k = rate_home(key);
     int empty = -1;
-    for (unsigned n = 0; t && n < RATE_SLOTS; n++, k = (k + 1) % RATE_SLOTS) {
+    for (unsigned n = 0; t && n < RATE_PROBE; n++, k = (k + 1) % RATE_PROBE) {
         if (!t[k]) /* a mark's slot reused first; a new one only below RATE_CAP */
             return !free ? -1 : empty >= 0 ? empty : ra.used[album] < RATE_CAP ? (int)k : -1;
         if (t[k] == RATE_GONE) {
@@ -329,7 +342,7 @@ static void rate_all(void *songs, unsigned char *h) {
     rated_t *keys = calloc(nfav + RATE_SLOTS + 1, sizeof *keys);
     for (unsigned i = 0; keys && i < nfav; i++)
         keys[i] = (rated_t){ rate_song_key(deque_at(favs, i)) | 7, i }; /* a copy: its row */
-    for (int i = 0; keys && t && i < RATE_SLOTS && (unsigned)kept < ra.used[0]; i++)
+    for (int i = 0; keys && t && i < RATE_PROBE && (unsigned)kept < ra.used[0]; i++)
         if (t[i]) keys[nfav + kept] = (rated_t){ t[i], nfav + kept }, kept++;
     unsigned m = nfav + (unsigned)kept;
     if (keys) qsort(keys, m, sizeof *keys, rated_order);
@@ -590,7 +603,7 @@ static void rc_write(void) {
 /* The rated of table album, valid stars or hearts only (1 to 5), for rc_take. */
 static unsigned *rc_rated(int album, unsigned *n) {
     unsigned *t = rates(album), *c = t ? calloc(RATE_SLOTS, sizeof *c) : (unsigned *)0;
-    for (unsigned i = 0, seen = 0; c && i < RATE_SLOTS && seen < ra.used[album]; seen += !!t[i++])
+    for (unsigned i = 0, seen = 0; c && i < RATE_PROBE && seen < ra.used[album]; seen += !!t[i++])
         if ((t[i] & 7) && (t[i] & 7) <= 5u) c[(*n)++] = t[i];
     return c;
 }
