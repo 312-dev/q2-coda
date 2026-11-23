@@ -419,6 +419,18 @@ def tree_state(build=None, root=ROOT):
 FAILED_TEST = re.compile(r'^(?:FAILED (\S+::\S+)|FAIL (?:protocol )?(\S+)[ :(])', re.M)
 
 
+# test/player/run.py's last line: what failed side by side and then passed alone (counted, never hidden)
+SIDE = re.compile(r'^all: .*; (\d+) failed side by side and passed alone(?:: (.*))?$', re.M)
+
+
+def side_failures(text):
+    """The tests a passing log says failed side by side and passed alone (run.py's summary), else []."""
+    m = SIDE.findall(text)
+    if not m or not int(m[-1][0]):
+        return []
+    return [t.strip() for t in m[-1][1].split(',') if t.strip()] or [f'{m[-1][0]} unnamed']
+
+
 def failed_tests(text):
     """The tests a failed try's log names: pytest's FAILED lines, and test/player/run.py's and the host suites'
     FAIL lines."""
@@ -521,6 +533,8 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
                                                 'log': str(s.log.with_suffix('.first.log'))}) + '\n')
                 if s.retried:
                     result['first_tests'] = s.first_tests
+                if s is not builder and (side := side_failures(pathlib.Path(s.log).read_text(errors='replace')[-20000:])):
+                    result['side'] = side
                 if s.rc == 0 and tree and s is not builder and not s.retried:
                     # a pass after a failure is not recorded: the next run on this tree tests it again
                     hit = cache_file(tree, s, build_args)
@@ -576,9 +590,12 @@ def table(results, wall):
 
 
 def first_tries(results):
-    """A line naming every suite whose first try failed, with the tests its log named, flaky or not: none is silent."""
+    """A line naming every suite whose first try failed, with the tests its log named, flaky or not, and one naming
+    the tests a suite failed side by side and passed alone (test/player/run.py's count): none is silent."""
     firsts = [f'{n} ({", ".join(r["first_tests"]) or "no test named"})' for n, r in results.items() if 'first_tests' in r]
-    return [f'first tries failed: {"; ".join(firsts)}'] if firsts else []
+    sides = [f'{n} ({len(r["side"])}: {", ".join(r["side"])})' for n, r in results.items() if r.get('side')]
+    return ([f'first tries failed: {"; ".join(firsts)}'] if firsts else []) + \
+        ([f'failed side by side and passed alone: {"; ".join(sides)}'] if sides else [])
 
 
 def main():
