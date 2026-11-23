@@ -237,8 +237,11 @@ so nothing jumps; a cover that cannot
 move (a 16-bit decode, a cover too long for `DRIFT_TEXELS`, none) still cuts. The timer steps every
 `SLIDE_TICK_MS` (100 ms) while a fade runs, so it steps in 15 shades, and every `DRIFT_TICK_MS`
 otherwise. The covers come from `slideshow.c`, off the UI thread (`slide_pick`): a song at a random
-rowid of the card's library (no sort of the table, `MUSIC_WHERE`'s scope kept), its album's
-embedded art, else its folder image, each read by stock's own readers under both art locks at
+rowid of the library (no sort of the table, `MUSIC_WHERE`'s scope kept), from the card's
+`songtable` or a signed-in server's `servertable` in proportion to their rows (`SLIDE_COUNT`, so a
+library that is all a server's still turns); a card song's album's embedded art, else its folder
+image, a server song's the cover its app keeps for the album (`catalogue_cover`), each read by
+stock's own readers under both art locks at
 `SLIDE_ART_PX` (352, the tallest pane zoomed 110 %) square into `/tmp/q2-slide.jpg`, else the album's
 Cover Flow thumbnail (160 px, softer); up to `SLIDE_TRIES` (8) songs a pick, the last
 `SLIDE_RECENT` (6) albums passed over but for the last two tries, so a small library still turns.
