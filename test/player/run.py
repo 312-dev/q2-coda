@@ -1780,6 +1780,39 @@ def test_stop_right_after_a_next(player, songs, tmp):
     return f'{got / 44100:.1f} s played, then stopped; {events(s)}'
 
 
+def test_a_stop_before_a_restart_is_kept(player, songs, tmp):
+    """The drive of 2026-11-23: a write to the car's PCM held the playback thread 10.8 s, and meanwhile demo restarted the
+    song after an output change, mcl-stop and then set-songurl of the same song from 46 s, with a pause. The
+    set-songurl erased the stop the thread had not yet taken: the song went on, its end started it again from 46 s,
+    and every song demo sent after was played one song late, under the next one's title. The stop is kept: it cuts
+    the song playing (stopstatus), the restart plays from 5 s to its end, and the song sent at that exit follows.
+    With the write held (a stalled sink), with the drive's pauses as well, and with the stop and the restart sent in
+    one instant to a song playing."""
+    a1, a2 = reference(songs/'a1.flac'), reference(songs/'a2.flac')
+
+    def which(b):  # what a PCM holds: the song and the frame it starts at
+        for n, ref in (('a1', a1), ('a2', a2)):
+            at = ref.find(b[:4410 * 4]) if len(b) >= 4410 * 4 else -1
+            if at >= 0 and at % 4 == 0: return f'{n} from {at // 4 / 44100:.2f} s, {len(b) // 4 / 44100:.2f} s of it'
+        return f'{len(b) // 4} frames of neither'
+    said, failed = [], []
+    for name in ('stop-restart', 'stop-restart-paused', 'stop-restart-now'):
+        s = fakedemo.Session(tmp/name)
+        s.music = songs
+        s.run(fakedemo.scenarios(str(songs))[name], fakedemo.launch_host(player, str(songs), 4), 4)
+        if getattr(s, 'drain', None): s.drain.join(5)
+        pcm = [p.read_bytes() for p in sorted((tmp/name/'pcm').glob('*.raw'))]
+        got = [which(b) for b in pcm]
+        said.append(f'{name}: {", then ".join(got)}; {events(s)}')
+        ok = (len(pcm) == 3 and pcm[0] == a1[:len(pcm[0])] and len(pcm[0]) < 4 * 44100 * 4  # a1 cut by the stop
+              and pcm[1] == a1[5 * 44100 * 4:]  # the restart, a1 from 5 s to its end
+              and pcm[2] and a2.startswith(pcm[2])  # then a2
+              and events(s)[:2] == ['{player-stopstatus\\exit}', '{player-status\\exit}'])
+        if not ok: failed.append(name)
+    assert not failed, f'{failed} wrong: ' + ' | '.join(said)
+    return '; '.join(said)
+
+
 def test_pause_then_pick(player, songs, tmp):
     """A song paused at 3 s, another picked at 5 s (set-nexturl): no frame of the paused song is written after the
     pick, only those before the pause (2 s heard and the PCM's 500 ms ahead, dropped at the cut), then the picked

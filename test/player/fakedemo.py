@@ -121,6 +121,20 @@ def scenarios(m):
                                     (3.0, break_sink('0000_44100_2_s16.raw')), (5.0, None)],
         'play-failure': boot + [(0.5, stall_sink('0000_44100_2_s16.raw')), (1.0, song('set-songurl', a1)),
                                 (2.0, break_sink('0000_44100_2_s16.raw')), (4.0, None)],
+        # the drive of 2026-11-23: a song's write held up (the car's PCM, 10.8 s), and meanwhile demo's restart after an
+        # output change (player_save_start): mcl-stop, then the same song from where it was. At that song's end demo
+        # sends the next song by set-songurl (no preload). '-paused' adds the car's pause before the stop and demo's
+        # pause sent with the restart, as on the drive; '-now' sends the stop and the restart in one instant to a
+        # song playing, its write not held
+        'stop-restart': boot + [(0.5, stall_sink('0000_44100_2_s16.raw')), (0.5, then_song(a2)), (1.0, song('set-songurl', a1)),
+                                (2.0, '{mcl-stop\\null}'), (2.5, song('set-songurl', a1, start=5)),
+                                (3.0, drain_sink('0000_44100_2_s16.raw')), (24.0, None)],
+        'stop-restart-paused': boot + [(0.5, stall_sink('0000_44100_2_s16.raw')), (0.5, then_song(a2)),
+                                       (1.0, song('set-songurl', a1)), (1.5, '{mcl-pause\\null}'), (2.0, '{mcl-stop\\null}'),
+                                       (2.5, song('set-songurl', a1, start=5)), (2.5, '{mcl-pause\\null}'),
+                                       (3.0, drain_sink('0000_44100_2_s16.raw')), (4.0, '{mcl-play\\null}'), (25.0, None)],
+        'stop-restart-now': boot + [(0.5, then_song(a2)), (1.0, song('set-songurl', a1)), (3.0, '{mcl-stop\\null}'),
+                                    (3.0, song('set-songurl', a1, start=5)), (22.0, None)],
         # a preload that is not audio: the song plays to its end, then the error
         'badnext': boot + [(1.0, song('set-songurl', a1, flag=1)), (2.0, '{mcl-seek\\12}'), (4.0, gapless(f'{m}/junk.flac', flag=1)), (14.0, None)],
         # a preload cancelled by a queue edit: the song ends with nothing after it, and demo starts the next itself
@@ -366,6 +380,30 @@ def break_sink(name):
     def go(s):
         os.close(s.stall_fd)
         os.unlink(s.out / 'pcm' / name)
+    return go
+
+
+def then_song(path):
+    """A step: the song demo sends by set-songurl at the next {player-status\\exit}, as mclNextSong(1) does with no
+    preload."""
+    def go(s): s.on_exit.append(song('set-songurl', path))
+    return go
+
+
+def drain_sink(name):
+    """A step: the stalled sink read again, so the waiting write goes on, as the car's write did when its PCM came
+    free (2026-11-23). The FIFO is unlinked and what it carries, until the player closes it, is copied to a file of
+    the same name on a thread (s.drain), which the caller joins before reading the session's .raw files."""
+    def go(s):
+        path, fd = s.out / 'pcm' / name, s.stall_fd
+        os.unlink(path)
+        def copy():
+            os.set_blocking(fd, True)
+            with open(path, 'wb') as f:
+                while (b := os.read(fd, 65536)): f.write(b)
+            os.close(fd)
+        s.drain = threading.Thread(target=copy, daemon=True)
+        s.drain.start()
     return go
 
 

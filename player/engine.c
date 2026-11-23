@@ -638,7 +638,7 @@ void *engine_thread(void *unused) {
             c->state = IDLE, c->has_info = 0;
             ipc_status_note(c);
             while (!c->play) {
-                c->stop = c->seek = c->preload = c->close_preload = 0; /* nothing is playing: stock answers none of these */
+                c->stop = c->stop_first = c->seek = c->preload = c->close_preload = 0; /* nothing is playing: stock answers none of these */
                 if (car_way(c->outputway) == 3 && feed_frames() > 0) { /* another source for the car */
                     pthread_mutex_unlock(&c->mu);
                     if (out) output_drop(out);
@@ -665,11 +665,13 @@ void *engine_thread(void *unused) {
                 }
                 pthread_cond_wait(&c->wake, &c->mu);
             }
-            /* An mcl-stop after the song's command (a set-songurl or set-nexturl clears an older one: ipc.c) came before
+            /* An mcl-stop after the song's command (a set-songurl or set-nexturl clears an older one with no song
+             * playing, and marks it stop_first with one: ipc.c) came before
              * this thread took the song: nothing plays, as stock's answers. demo sent the two that close when a press of
              * a server song stopped the queue stock's player_start played again; it sends neither now (patch/playback.c
-             * playback_start_refused), and a stop is still held so. */
-            if (c->stop) {
+             * playback_start_refused), and a stop is still held so. A stop that came before the song's command
+             * (stop_first) was the song before's, which has ended: this song is taken. */
+            if (c->stop && !c->stop_first) {
                 c->play = c->next = c->stop = c->seek = c->paused = c->play_paused = c->cut = 0;
                 pthread_mutex_unlock(&c->mu);
                 if (out) dac_mute(out_way), output_drop(out);
@@ -680,7 +682,7 @@ void *engine_thread(void *unused) {
             song = c->play_song;
             song.dsd = dsd_out(car_way(c->outputway), song.hw, c->dsdmode);
             c->paused = c->play_paused; /* a pause after the song's command holds for it (ipc.c) */
-            c->play = c->next = c->seek = c->play_paused = c->cut = 0;
+            c->play = c->next = c->stop = c->stop_first = c->seek = c->play_paused = c->cut = 0;
             c->state = OPENING;
             ipc_status_note(c);
             pthread_mutex_unlock(&c->mu);
@@ -692,7 +694,8 @@ void *engine_thread(void *unused) {
                 close_output(0);
                 pthread_mutex_lock(&c->mu);
                 int stopped = c->stop, skipped = c->next, replaced = c->play;
-                if (stopped) c->play = c->next = 0;
+                if (stopped && !c->stop_first) c->play = c->next = 0;
+                if (stopped) c->stop = c->stop_first = 0; /* a song waiting behind a stop (stop_first) is taken next */
                 pthread_mutex_unlock(&c->mu);
                 if (stopped || skipped) { /* given up, not failed: answered as a song cut while it played */
                     ipc_event(stopped ? "{player-stopstatus\\exit}" : "{player-nextstatus\\exit}");
@@ -732,7 +735,9 @@ void *engine_thread(void *unused) {
         pthread_mutex_lock(&c->mu);
         int skipped = c->next, waiting = c->play, stopping = c->stop;
         c->has_info = 0;
-        if (why == STOPPED) c->play = c->next = 0; /* a stop also forgets a song that was waiting, as stock's does */
+        /* a stop also forgets a song that was waiting, as stock's does, unless that song's command came after it */
+        if (why == STOPPED && !c->stop_first) c->play = c->next = 0;
+        if (why == STOPPED) c->stop_first = 0;
         ipc_status_note(c);
         pthread_mutex_unlock(&c->mu);
         switch (why) {

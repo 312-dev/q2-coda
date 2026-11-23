@@ -35,7 +35,7 @@ demo queues every message it receives as a (name, argument) pair (`0x5bb7f4`); a
 
 | Command | Argument | What hciplayer does (address) | Answer |
 | --- | --- | --- | --- |
-| `set-songurl` | `URL\|ss=S\|C\|P\|G\|H\|90` | Sets the play flag `0xb11e34` and clears a pending preload (`0x42d404`). With nothing loaded the song starts. While a song plays it is not cut: the new one starts when that song has ended (captured, `stock-replace.txt`), and `mcl-stop` forgets it. | none; see [Events](#events) |
+| `set-songurl` | `URL\|ss=S\|C\|P\|G\|H\|90` | Sets the play flag `0xb11e34` and clears a pending preload (`0x42d404`). With nothing loaded the song starts. While a song plays it is not cut: the new one starts when that song has ended (captured, `stock-replace.txt`), and `mcl-stop` forgets it. A stop sent just before, that q2player has not yet taken from the song playing, is that song's: demo's restart after an output change sends `mcl-stop` and then the same song from where it was (`player_save_start`), and q2player ends the song playing, answers the stop, and plays the new one next (`test_a_stop_before_a_restart_is_kept`). On a drive (2026-11-23) a write to the car's PCM held q2player 10.8 s, the stop was lost, the song played on and then again, and every song after it played one late. | none; see [Events](#events) |
 | `set-nexturl` | the same | The same, and sets the next flag `0xb11e6c` (`0x42d1c8`): the song playing is cut. | `{player-nextstatus\exit}` when the old song is closed |
 | `set-gapless` | `URL\|ss=S\|C\|P\|G\|90` | Open this on the preload thread and play it when the current song ends (`0x42cf8c`, flag `0xb11df8`). | none |
 | `mcl-closegapless` | `null` | Forget a finished preload (`0x42c2bc`). | none |
