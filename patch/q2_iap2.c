@@ -1,6 +1,6 @@
 /* iAP2 with the Q2 in an iPhone's place, over the iPhone gadget's HID interface: milestone M1 of route 1
- * (docs/iphone-mode.md#iap2). Included by q2_iap.c, which feeds it the car's output reports (SET_REPORT data)
- * and sends its input reports; nothing here touches a file or the USB itself.
+ * (docs/iphone-mode.md#iap2). q2_iap.c feeds it the car's output reports (SET_REPORT data) and sends its input
+ * reports (q2_iap2.h); nothing here touches a file or the USB itself.
  *
  * A port of PodBox's firmware/usbstack/usb_iap2.c (the transport and link layer) and the M1 part of
  * usb_iap2_control.c (the control session up to identification, and the answers an iPhone gives right after),
@@ -14,6 +14,9 @@
  * parameters, the length capped); the control session (messages 40 40, length, id, parameters of length, id, data):
  * the Q2 asks for the car's certificate, challenges it, accepts whatever answers (the Q2 verifies nothing and holds no
  * key), asks it to identify, accepts that, then sends what an iPhone sends next. */
+#include "q2_iap_sys.h"
+#include "iap2.h"
+#include "q2_iap2.h"
 
 #define IAP2_SOP1 0xFF
 #define IAP2_SOP2 0x5A
@@ -39,12 +42,10 @@
  * the BMW acknowledges within 22 ms and gives a packet up after 10 tries of 200 ms, so 10 s of quiet with something
  * waiting is a car that has stopped. q2muse-1125: the car stopped taking input reports, pacing then held every packet
  * back, the tries were never counted (they wait for a clear wire) and the link stayed up, silent, for 23 minutes. */
-static long link_quiet_ms = 10000;
-
-#include "iap2.h"
+long link_quiet_ms = 10000;
 
 static const struct iap2_host *H;
-static const u8 iap2_probe[] = { 0xFF, 0x55, 0x02, 0x00, 0xEE, 0x10 };
+const u8 iap2_probe[] = { 0xFF, 0x55, 0x02, 0x00, 0xEE, 0x10 };
 
 /* ---- logging ---- */
 
@@ -91,7 +92,7 @@ static const char *iap2_name(unsigned id) {
     return "?";
 }
 
-static void iap2_hex(char *out, unsigned cap, const u8 *p, unsigned n) {
+void iap2_hex(char *out, unsigned cap, const u8 *p, unsigned n) {
     static const char d[] = "0123456789abcdef";
     unsigned o = 0, i = 0;
     for (; i < n && o + 6 < cap; ++i) {
@@ -143,18 +144,17 @@ static void send_bytes(const u8 *p, unsigned n) {
 
 /* ---- the link layer ---- */
 
-static int seen, synced, link_up;
+int seen, link_up;
+static int synced;
 static u8 my_seq, syn_seq, peer_seq, last_ack, control_session, file_session;
 static u8 syn_ack[48];
 static unsigned syn_ack_len, window, peer_max, max_sends, max_cacks, unacked;
 static long rto, cack, unacked_since; /* milliseconds; rto 0: never sent again */
 static long wire_busy_at; /* the last time reports were still waiting for the wire */
 static long heard_at, waiting_since; /* the car's last output report; since when something has waited (iap2_tick) */
-/* acked_at: the car's last new acknowledgement; link_health_at: link_health's last line. Named apart from q2_iap.c's
- * audio health_at: q2_iap.c includes this file, and two file-scope `static long health_at;` there are one variable,
- * which the audio check set every second, so no link line came on the 2026-11-22 drive (q2-iap with --state). */
+/* acked_at: the car's last new acknowledgement; link_health_at: link_health's last line */
 static long acked_at, link_health_at;
-static long health_ms = 5000;    /* --health-ms; 0 none */
+long health_ms = 5000;    /* --health-ms; 0 none */
 static unsigned dropped;         /* packets dropped from a full queue, this link */
 static int retries_held, drop_said;
 static int backlog(void) { return H && H->backlog ? H->backlog() : 0; }
@@ -194,10 +194,11 @@ static void log_packet(int from_q2, const u8 *p, unsigned len, const char *note)
  * plays with, twice a second, and its acknowledgement, five lines each): a position update's message, packet and
  * reports, and each bare acknowledgement either way, are counted, not logged (trace_quiet, read by q2_iap.c io_send
  * too), and the counts go in the link's health line. Sent again, a packet is logged. */
-static int msg_quiet, trace_quiet;
+static int msg_quiet;
+int trace_quiet;
 static unsigned quiet_pos, quiet_in, quiet_out;
 /* An output report that is the car's bare acknowledgement whole: [id][00, a whole packet][FF 5A 00 09 40 ...] */
-static int iap2_bare_ack(const u8 *r, unsigned n) {
+int iap2_bare_ack(const u8 *r, unsigned n) {
     return n >= 2 + HEADER_LEN && r[1] == 0 && r[2] == IAP2_SOP1 && r[3] == IAP2_SOP2 && r[4] == 0 &&
            r[5] == HEADER_LEN && r[6] == CTL_ACK;
 }
@@ -254,7 +255,7 @@ static void reset_link(void) {
 }
 
 /* The link given up on: said why, forgotten, and the host told (q2_iap.c io_link_lost: the iPhone shown again). */
-static void iap2_lost(const char *why) {
+void iap2_lost(const char *why) {
     H->log(why);
     reset_link();
     if (H->link_lost) H->link_lost();
@@ -436,7 +437,7 @@ static void take_packets(int last) {
 }
 
 /* An output report from the car: [id][link control][data]. 1 if it was iAP2's. */
-static int iap2_report(const u8 *r, unsigned len) {
+int iap2_report(const u8 *r, unsigned len) {
     if (len < 2) return 0;
     const u8 *data = r + 2;
     unsigned n = len - 2;
@@ -594,13 +595,14 @@ static u32 get_be(const u8 *p, unsigned n) {
 static u16 car_receives[96];
 static unsigned car_receives_n;
 static int identified, now_playing, bt_component = -1;
-static int ever_identified; /* this cable: identified kept after the link is lost, for the summary */
+int ever_identified; /* this cable: identified kept after the link is lost, for the summary */
 static long auth_due, ident_due, availability_due, np_at; /* 0: not due */
 static unsigned car_current;
 static u32 media_mask, playback_mask, rnd;
 static struct iap2_np np_last;
-static int np_sent, audio_on;
-static char car_name[64]; /* the car's identification name, for the status file (q2_iap.c state_write) */
+static int np_sent;
+int audio_on;
+char car_name[64]; /* the car's identification name, for the status file (q2_iap.c state_write) */
 
 /* ---- the car's buttons: its StartHID report descriptor's consumer controls (PodBox parse_hid, one-bit ones) ---- */
 
@@ -1502,11 +1504,11 @@ static void play_all(void) {
  * The rate is the player's for the song about to play (iap2_audio_rate, docs/iphone-mode.md#per-song-rate), sent at
  * StartUSBDeviceModeAudio and again at each song whose rate differs: 32, 44.1 and 48 kHz (6, 7, 8), the 48 kHz family
  * above it 8, anything else 44.1 kHz's 7. */
-static const unsigned iap2_rates[9] = { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 };
-static unsigned audio_hz = 44100;
+const unsigned iap2_rates[9] = { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 };
+unsigned audio_hz = 44100;
 static int audio_sent = -1;
 
-static int iap2_rate_index(unsigned hz) {
+int iap2_rate_index(unsigned hz) {
     if (hz == 32000) return 6;
     if (hz == 48000 || (hz > 48000 && hz % 48000 == 0)) return 8;
     return 7;
@@ -1525,7 +1527,7 @@ static void send_audio_rate(void) {
 }
 
 /* The player's rate for the song about to play (q2_iap.c rate_poll): told the car while it takes USB audio. */
-static void iap2_audio_rate(unsigned hz) {
+void iap2_audio_rate(unsigned hz) {
     audio_hz = hz;
     if (audio_on && iap2_rate_index(hz) != audio_sent) send_audio_rate();
 }
@@ -1617,10 +1619,10 @@ static void iap2_art_again(void) {
  * ask or ffmpeg (iap2_art_slow), it goes with an empty one, and the cover follows (iap2_art_done). */
 #define ART_HOLD_MS 1000
 static long art_hold_at; /* since when Now Playing waits, 0 not */
-static void iap2_art_slow(void) {
+void iap2_art_slow(void) {
     if (art_hold_at) np_at = 0; /* at the next tick, with no cover yet */
 }
-static void iap2_art_done(int found) {
+void iap2_art_done(int found) {
     if (art_hold_at || found) iap2_art_again();
 }
 
@@ -1790,7 +1792,7 @@ static void link_health(long now, int bl) {
     quiet_pos = quiet_in = quiet_out = 0;
 }
 
-static void iap2_tick(void) {
+void iap2_tick(void) {
     long now = H->now();
     if (!seen) return;
     int bl = backlog();
@@ -1861,7 +1863,7 @@ static long due_min(long w, long now, long at) {
     if (d < 0) d = 0;
     return w < 0 || d < w ? d : w;
 }
-static long iap2_due(long now) {
+long iap2_due(long now) {
     long w = -1;
     if (!seen) return -1;
     if (link_up && count && rto) {
@@ -1884,7 +1886,7 @@ static long iap2_due(long now) {
 }
 
 /* A new connection: everything forgotten, the detect awaited. */
-static void iap2_connect(const struct iap2_host *h) {
+void iap2_connect(const struct iap2_host *h) {
     H = h;
     seen = 0;
     my_seq = 1, peer_seq = 0, head = 0;
@@ -1894,7 +1896,7 @@ static void iap2_connect(const struct iap2_host *h) {
 
 /* A session's end (q2_iap.c: no ENABLE or RESUME within the gap): the link forgotten with it, the car's audio file
  * removed (iap2_control_reset), so a bus that comes back without the car's detect gets nothing of the old link. */
-static void iap2_session_end(void) {
+void iap2_session_end(void) {
     if (seen) H->log("link: forgotten with its session");
     iap2_connect(H);
 }

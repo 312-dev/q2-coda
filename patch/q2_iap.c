@@ -372,7 +372,8 @@ static void alarm_interrupts(void) {
 
 /* ---- iAP2 (--iap2) ---- */
 
-#include "q2_iap2.c"
+#include "iap2.h"
+#include "q2_iap2.h"
 #include "q2_iap_lib.h"
 
 static int iap2_mode, writer_fd = -1, writer_pid, done_fd = -1, report_ms;
@@ -611,8 +612,6 @@ static struct {
     unsigned got_n, got_cap;
     int jpeg_at, made; /* made: ffmpeg made it */
 } artw = {.fd = -1, .jpeg_at = -1};
-static void iap2_art_done(int found);
-static void iap2_art_slow(void);
 
 static unsigned art_key(const struct iap2_np *n) {
     return n->album[0] ? fnv_part(fnv_part(2166136261u, n->artist), n->album) : fnv_part(2166136261u, n->path);
