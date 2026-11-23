@@ -318,3 +318,21 @@ The user's decision (2026-11-20) replaces the design's decision 4, an empty libr
 **Up Next:** Now Playing names a library song by its library id, so the car knows the song in its list. When the queue changes (the shim's `qgen`) and holds still a second, `PB_QUEUE_LIST` 1 and an empty `PB_QUEUE_LIST_ID` go, then the queue as a file transfer (`[ID, 04, size, 00 03]`, the songs' ids in play order) when the car says go; a server song played from its app's stream cache, which the shim names by rid 0, is named by its server row's rid, found by the app and sid in its path (`q2_iap_lib.c` `lib_stream_rids`), in the list and in Now Playing (on the drive of 2026-11-22 every queue was such songs and none reached the car; `test/iap_probe.py` `test_up_next_of_server_songs_from_the_stream_cache`); a queue with a song outside the library still (a card app's stream the catalogue does not name) or over 2,000 songs is `PB_QUEUE_LIST` 0 and no list, and the car shows only the place in it.
 
 **Tested:** `test/iap_probe.py` with a database made in the test: the whole library (the audiobook left out, ids, names, an album's one id), nothing to a car that holds the revision, then after a song added, one changed and one removed the two changes and the removed id alone, no reset; 4C07, an album by 4C08 in track order, 4C09 shuffled and 4C06; Up Next's announcement, transfer setup and ids, and no list for a queue with a stream in it; at the BMW's pace, the first update's songs in their order, every list's record, setup and ids, the push leaving the first update's songs out, and a resume after it (it failed with 400 songs in the first update, 20.9 s). Each failed on a change that breaks it.
+
+<a id="in-the-car-after-a-standby"></a>
+## In the car after a Standby: the owner's checklist
+
+For the next drive with Standby on ([internals: Standby and the USB link](internals.md#standby-and-the-usb-link)). Nothing here needs a computer; Send Logs afterwards takes `q2car.log`, `q2car-summary.log` and the unified log.
+
+1. **Before parking:** play something from the Q2 through the car (USB), and note the library's song count iDrive shows (or that `q2car.log` gives in `library:` lines).
+2. **Park with the cable in.** Turn the car off and leave the Q2 on the cable, nothing playing (pause it from iDrive or the Q2 first). Lock the car and walk away for at least 10 minutes, longer than the Q2's Standby time, so the Q2 goes into Standby.
+3. **Wake it:** come back and press a key on the Q2. Note the time.
+4. **Start the car.** Within a minute iDrive should show the iPhone again, by itself, with no cable handling.
+5. **Audio flows:** press Play on iDrive. The song plays through the car's speakers.
+6. **The cover is there** on iDrive for the song playing.
+7. **The library count is unchanged** from step 1 (the server's songs included).
+8. **Pause from iDrive**, wait a few seconds, then Play: listen for a jump back or forward, or a scrap of another part of the song, right after each press. There should be none.
+9. **Write down** anything that did not happen, with the time, and Send Logs.
+
+What the logs should show: `standby: Car Audio stopped for it` before the sleep, `standby: the link back, the card mounted: udc ..., role device` after it, a new `start:` in `q2car.log`, and the car's `car usb` lines with `sent` near 1000 and `zero=0` while it plays.
+

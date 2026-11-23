@@ -381,7 +381,7 @@ extern int stock_keyup_trampoline(void *, void *), stock_touch_trampoline(void *
     stock_systemset_trampoline(void *, void *), stock_audioset_trampoline(void *, void *),
     stock_btrows_trampoline(void *, void *), stock_playlist_trampoline(void *),
     stock_stream_trampoline(void *, void *), stock_start_player_trampoline(void),
-    stock_standby_trampoline(void), stock_cardmount_trampoline(void),
+    stock_standby_trampoline(void), stock_device_standby_trampoline(void), stock_cardmount_trampoline(void),
     stock_usbmode_trampoline(void *, void *, void *, void *),
     stock_hscroll_start_trampoline(void *), stock_wifi_page_trampoline(void *, void *),
     stock_stream_row_trampoline(void *, void *), stock_netservice_row_trampoline(void *, void *),
@@ -971,6 +971,8 @@ int ringnav_otg_status(void), stock_otg_status_trampoline(void);
 /* usb_ui.c: a host has configured the gadget (system.c holds Standby on it) */
 int usb_host(void);
 void otg_hold(void); /* the PHY's ID pull-up on, the controller's role held at device */
+/* standby_usb.c: Standby and the USB link (docs/internals.md#standby-and-the-usb-link) */
+void standby_usb_suspend(void), standby_usb_poll(void);
 
 /* usb_record.c: the USB record on the card, a line per cable edge and OTG power change */
 void usb_record(const char *what), usb_record_edge(int in), usb_record_wake(void), usb_record_poll(void);
@@ -1256,7 +1258,7 @@ int usb_ui_key(void *top, unsigned key), usb_ui_cable(void), usb_pick_open(void 
  * answers to usb_ui.c */
 enum { USB_CAR_NONE, USB_CAR_STORAGE, USB_CAR_CHARGER };
 void usb_car_start(void), usb_car_stop(void);
-int usb_car_poll(void), usb_car_on(void), usb_car_output(void), usb_car_busy(void);
+int usb_car_poll(void), usb_car_on(void), usb_car_output(void), usb_car_busy(void), usb_car_stop_now(void);
 const char *usb_car_name(void);
 /* output_rule.c: no playback without an output (docs/internals.md#no-playback-without-an-output) */
 void output_rule_config(void);

@@ -17,9 +17,10 @@
  * paused song keeps the PCM open in a wait that only demo's next command ends (player/engine.c); on 2026-11-22 a
  * held PCM kept the UDC write in snd_card_free until it closed, with every other read of the gadget's UDC (q2guard's
  * too) waiting behind it (docs/iphone-mode.md#the-stream-s-life). So the player is asked to release it
- * ({mcl-carrelease\null}: the PCM closed, the car file removed, the song paused at its place), later UI passes look
- * for the PCM closed (USB_CAR_PCM) for USB_CAR_RELEASE_MS at most, and q2car stop then runs in the background,
- * touching USB_CAR_STOPPED when it has returned (usb_car_busy until then).
+ * ({mcl-carrelease\null}: the PCM closed, the song paused at its place; a Play before the stop opens it again, which
+ * gadget_down's own release then covers), later UI passes look for the PCM closed (USB_CAR_PCM) for
+ * USB_CAR_RELEASE_MS at most, and q2car stop then runs in the background, touching USB_CAR_STOPPED when it has
+ * returned (usb_car_busy until then). Standby's stop is the one made here and now (usb_car_stop_now).
  *
  * Losing the car's audio with nowhere else to play pauses, as stock pauses at a jack's eject (config_po_output,
  * config_bal_output) and reloads paused at a Bluetooth headset's loss (checkBluetoothStatus): the player falls back
@@ -91,6 +92,14 @@ void usb_car_start(void) {
         system(USB_CAR_SCRIPT " start >/dev/null 2>&1");
 }
 
+/* The player asked to let go of the car's PCM: closed, the car file kept, the song paused where it was heard
+ * (docs/player.md#releasing-the-car). Never waits on the player (MSG_DONTWAIT | MSG_NOSIGNAL). */
+static void usb_car_release(void) {
+    int fd = *(volatile int *)MCL_FD;
+    static const char m[] = "{mcl-carrelease\\null}";
+    if (fd != -1) send(fd, m, sizeof m - 1, 0x4040);
+}
+
 /* The gadget removed (the docs at the top): the player asked to release the car's PCM if it holds it, and q2car stop
  * run once it has, or USB_CAR_RELEASE_MS on (usb_car_poll); at once with the PCM closed. */
 static void usb_car_gone(const char *why);
@@ -102,10 +111,24 @@ void usb_car_stop(void) {
         usb_car_stop_run(0);
         return;
     }
-    int fd = *(volatile int *)MCL_FD;
-    static const char m[] = "{mcl-carrelease\\null}";
-    if (fd != -1) send(fd, m, sizeof m - 1, 0x4040); /* never waits on the player (MSG_DONTWAIT | MSG_NOSIGNAL) */
+    usb_car_release();
     car.stopping = 1, car.stop_at = (unsigned)time_now_ms();
+}
+
+/* Standby's stop (standby_usb.c), before stock's device_standby unmounts the card: q2-iap and the runner end, and with
+ * them their logs on the card, which stock's plain umount would otherwise meet open. Here and now, as the suspend
+ * follows: the release waited for USB_CAR_RELEASE_MS at most, then q2car stop, whose own waits are bounded. Nothing
+ * plays (Standby's gate), so nothing is paused. 1 if Car Audio was on. */
+int usb_car_stop_now(void) {
+    int was = car.on;
+    if (!car.on && !car.stopping) return 0;
+    if (car.on && usb_car_pcm_held()) usb_car_release();
+    car.on = car.audio = 0, car.gone_at = 0;
+    unsigned at = (unsigned)time_now_ms();
+    while (usb_car_pcm_held() && (unsigned)time_now_ms() - at < USB_CAR_RELEASE_MS) usleep(50000);
+    car.stopping = 0;
+    system(USB_CAR_SCRIPT " stop >/dev/null 2>&1");
+    return was;
 }
 
 /* 1 from usb_car_stop until its q2car stop has returned: the controller is not yet free for another gadget. */

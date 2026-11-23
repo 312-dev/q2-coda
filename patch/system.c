@@ -424,6 +424,7 @@ int ringnav_standby(void) {
     state_poll();     /* the record a resume that never comes leaves behind */
     wdt_set(0);   /* it would count through the suspend */
     usb_record("standby"); /* the USB pins either side of it (usb_record.c) */
+    standby_usb_suspend(); /* the host told; the link back on a later pass, after the card (standby_usb.c) */
     int result = stock_standby_trampoline();
     wdt_set(1);
     usb_record_wake();
@@ -577,6 +578,7 @@ void power_poll(void) {
     charge_poll();
     standby_poll();
     standby_host_poll();
+    standby_usb_poll(); /* the USB link back after a Standby (standby_usb.c) */
     logo_poll();
     ratings_copy_poll();
     wdt_poll();
