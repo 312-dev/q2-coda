@@ -1873,6 +1873,48 @@ def test_bluetooth_names_a_server_songs_cover_as_its_app_keeps_it(rig, fw):
     assert rig.files.files.get('/tmp/q2-bip.now') == b'%07d\n%s\napp\n%s\n' % (h % 10**7, cover.encode(), stream)
 
 
+def test_an_untitled_server_song_in_my_fav_takes_its_title_from_the_server_library(rig, fw):
+    """My Fav's, Frequent's and Recent's rows are stock's copies of the songs; an untitled one takes the library's
+    title by path and CUE start (nav/library_pages.c fav_titles): a server song's from servertable, a card song's
+    from songtable, asked of the database for those rows alone, no whole-library load."""
+    rig.card_song('/mnt/mmc/Music/a.flac', 'Card Song', 'Me', 'Mine', 1, 200, 1000)
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1), song_row('s2', "It's Two", 'B', 'A', 2, 100, 1)])
+    rig.poll()
+    loads = []
+    fw.mock('getAllMusic', lambda sort, *_: loads.append(sort) or 0)
+    # Records read as the C reads them: a 64-bit P() at REC_PATH takes REC_TITLE's word as its high half, so the
+    # strings sit under 4 GB and an untitled row's title word is 0 (a NULL title, which fav_titles may free)
+    libc = C.CDLL(None)
+    libc.mmap.restype, libc.mmap.argtypes = C.c_void_p, [C.c_void_p, C.c_size_t, C.c_int, C.c_int, C.c_int, C.c_long]
+    libc.munmap.argtypes = [C.c_void_p, C.c_size_t]
+    low = 0x3e000000
+    assert libc.mmap(low, 0x10000, 3, 0x100022, -1, 0) == low  # MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE
+    at, keep = [low], []
+
+    def text(b):
+        C.memmove(at[0], b + b'\0', len(b) + 1)
+        at[0] += len(b) + 16
+        return at[0] - len(b) - 16
+
+    def row(path, title=None):
+        r = C.create_string_buffer(O['REC_SIZE'] + 8)
+        keep.append(r)
+        struct.pack_into('<I', r, O['REC_PATH'], text(path.encode()))
+        if title:
+            struct.pack_into('<I', r, O['REC_TITLE'], text(title))
+        struct.pack_into('<i', r, O['REC_TYPE'], 8)
+        return C.addressof(r)
+
+    rows = [row(url('s1')), row(url('s2')), row('/mnt/mmc/Music/a.flac'), row('/mnt/mmc/Music/gone.flac'),
+            row(url('s1'), b'Kept')]
+    try:
+        fw.fn('navigation__fav_titles', None, C.c_void_p, C.c_int)(rig.rows.new(rows), len(rows))
+        titles = [(lambda v: C.string_at(v) if v else None)(C.c_void_p.from_address(r + O['REC_TITLE']).value) for r in rows]
+        assert titles == [b'One', b"It's Two", b'Card Song', None, b'Kept'] and not loads
+    finally:
+        libc.munmap(low, 0x10000)
+
+
 def test_now_playing_fits_a_server_albums_cover_once_for_all_its_tracks(rig, fw):
     """A server song's Now Playing art is its app's cover of the album through ffmpeg (coverflow_player_cover, under
     g_playcover_mutex, where stock's thumbnailer and its parse_cover_mutex cannot go): the fit is kept, so the
