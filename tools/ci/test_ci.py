@@ -268,17 +268,23 @@ def test_scripts_are_run_the_way_their_parsers_take_them():
 
 
 def test_a_script_the_gate_cannot_run_is_skipped_with_its_reason(capsys, monkeypatch):
-    for path in ('test/coda_rc_e2e.py', 'test/server_catalogue.py', 'test/suite_source.py', 'test/module_mips.py'):
+    for path in ('test/server_catalogue.py', 'test/suite_source.py', 'test/module_mips.py'):
         assert gate.other_suite(path, 'python3') is None, path
         assert gate.SCRIPTS[path], path  # the reason
     plan = affected.Plan()
-    plan.other.add('test/coda_rc_e2e.py')
+    plan.other.add('test/server_catalogue.py')
     calls = handed(monkeypatch)
     assert affected.run(plan, '/b', 'python3') == 0
     assert calls == [] and 'skipped' in capsys.readouterr().out
-    assert gate.suites_for({'unit': [], 'fw': [], 'patch': [], 'other': ['test/coda_rc_e2e.py']}, None, 'python3',
+    assert gate.suites_for({'unit': [], 'fw': [], 'patch': [], 'other': ['test/server_catalogue.py']}, None, 'python3',
                            pathlib.Path('/nowhere')) == {}
-    assert 'test/coda_rc_e2e.py' in capsys.readouterr().out
+    assert 'test/server_catalogue.py' in capsys.readouterr().out
+
+
+def test_car_remote_end_to_end_runs_on_a_pooled_emulator_with_the_build():
+    """test/coda_rc_e2e.py leases its own emulator (--pool), so the gate runs it on the plan's build, under q2-heavy."""
+    suite = gate.other_suite('test/coda_rc_e2e.py', 'python3')
+    assert suite.argv == ['python3', 'test/coda_rc_e2e.py', '--pool', '{build}'] and suite.needs_build and suite.heavy
 
 
 def test_a_stock_script_is_run_on_the_builds_stock_files(monkeypatch, tmp_path):
@@ -979,9 +985,18 @@ def test_smoke_says_a_card_with_no_songs_apart_from_no_emulator(tmp_path, monkey
     card_tree(emu_pool.copy_dir(3)/'state/mmc', {'.subsonic/log.txt': 'x'})
     monkeypatch.setattr(smoke, 'lease', lambda *a: 3)
     monkeypatch.setattr(emu_pool, 'put', lambda k: None)
-    assert smoke.main([str(build), '--logs', str(tmp_path/'logs')]) == 3
+    assert smoke.main([str(build), '--logs', str(tmp_path/'logs'), '--no-stream']) == 3
     out = capsys.readouterr().out
     assert 'the card on slot 3 has no songs' in out and 'no pool emulator' not in out and 'no emulator' not in out
+
+
+@pytest.mark.parametrize('ini, want', [
+    ('[Q2POD]\nCARREMOTE=0\nAHEAD=2\n', '[Q2POD]\nCARREMOTE=1\nAHEAD=2\n'),
+    ('[SYSSET]\nBLUETOOTH=0\n[Q2POD]\nAHEAD=2\n', '[SYSSET]\nBLUETOOTH=0\n[Q2POD]\nCARREMOTE=1\nAHEAD=2\n'),
+    ('[SYSSET]\nBLUETOOTH=0\n', '[SYSSET]\nBLUETOOTH=0\n[Q2POD]\nCARREMOTE=1\n')])
+def test_the_streaming_step_turns_car_remote_on_for_its_position(ini, want):
+    """smoke.py reads a streamed song's position from Car Remote's /tmp/coda-rc.now: CARREMOTE=1 under [Q2POD]."""
+    assert smoke.car_remote_on(ini) == want
 
 
 def test_a_payload_change_plans_the_smoke_test_and_a_merge_batch_leaves_it_out(tmp_path, monkeypatch):
@@ -1292,6 +1307,16 @@ def test_the_subsonic_contract_is_planned_for_its_sides(path):
     plan = json.loads(affected.plan_for({path: {1}}, REPO).to_json())
     assert 'test/subsonic_contract.py' in plan['other'] or gate.everything(plan)
     assert 'test/subsonic_contract.py' not in json.loads(affected.plan_for({'patch/home.c': {1}}, REPO).to_json())['other']
+
+
+@pytest.mark.parametrize('path', ['patch/addon.c', 'patch/catalogue.c', 'patch/stream_state.c', 'patch/playback.c',
+                                  'player/engine.c', 'tools/build.py', 'test/fw/seam.py', 'test/fw/test_seam_subsonic.py'])
+def test_the_subsonic_seam_is_planned_for_its_sides(path):
+    """The real app against the firmware's C: planned for each file on the firmware's side of it, the app's pin and
+    the seam test's own harness, and for nothing else."""
+    plan = json.loads(affected.plan_for({path: {1}}, REPO).to_json())
+    assert 'test/subsonic_seam.py' in plan['other'] or gate.everything(plan)
+    assert 'test/subsonic_seam.py' not in json.loads(affected.plan_for({'patch/home.c': {1}}, REPO).to_json())['other']
 
 
 def test_an_integration_branch_given_a_base_runs_that_diffs_plan():

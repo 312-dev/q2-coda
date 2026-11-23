@@ -451,3 +451,8 @@ class Game(C.Structure):
     """addon.c's gm: the running card game."""
     _fields_ = [*((k, C.c_int) for k in 'pid sock eat audio'.split()), *((k, C.c_uint) for k in 'seen held term'.split()),
                 ('path', C.c_char * 48)]
+
+
+def pytest_configure(config):
+    config.addinivalue_line('markers', 'library(songs, album, size): the fake server\'s library for a seam test '
+                                       '(test_seam_subsonic.py)')

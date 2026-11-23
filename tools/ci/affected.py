@@ -37,6 +37,8 @@ test/patch.py, which executes the payload as one program. What gets narrowed:
   as a merge batch does, so a branch that drops a module under the floor is rejected there, not POST_RED;
 - patch/addon.c, catalogue.c, stream_state.c, player/ and tools/build.py (the app's pin) also plan
   test/subsonic_contract.py (`CONTRACT_SOURCES`): the words and files the bundled Subsonic app shares with them;
+  those, patch/playback.c and the seam test's own files (`SEAM_SOURCES`) plan test/subsonic_seam.py, the real app
+  run against them;
 - a payload change (patch/) also plans `smoke`, tools/ci/smoke.py on a pooled emulator, but runs it only with
   --smoke: it is optional for a worker, and a merge batch leaves it out (gate.OPTIONAL), as the queue runs it
   on the trunk's tip after landing, where a failure turns the tip red.
@@ -118,6 +120,11 @@ SITENOTES = 'docs/rebasing/sitenotes.py'
 # words and files. One of gate.PLANNED; player/ too, as the player is what Download Ahead's .stream follows.
 CONTRACT = 'test/subsonic_contract.py'
 CONTRACT_SOURCES = ('patch/addon.c', 'patch/catalogue.c', 'patch/stream_state.c', 'tools/build.py', 'player/*')
+# The same seam run for real: test/subsonic_seam.py runs the pinned app against a fake server with the firmware's own
+# C on the other side of each file (docs/building.md#seam-test). One of gate.PLANNED. Its sides: the contract's, the
+# play order playback.c gives .ahead, and the test's own harness (a change there runs the seam, not only test/fw).
+SEAM = 'test/subsonic_seam.py'
+SEAM_SOURCES = (*CONTRACT_SOURCES, 'patch/playback.c', 'test/fw/seam.py', 'test/fw/test_seam_subsonic.py')
 SMOKE = 'smoke'  # tools/ci/smoke.py: optional here (run with --smoke), the post tier's on the trunk
 INTEGRATION = re.compile(r'^(release/|integ/|main$|master$)')  # integ/*: the integrator's (docs/orchestration.md)
 # test/unit files that check a rule over every file of a folder: (folder, suffixes or None for any, test).
@@ -271,6 +278,9 @@ def plan_for(changes, root=ROOT, patch_source=None):
         if any(fnmatch.fnmatchcase(path, g) for g in CONTRACT_SOURCES):
             p.other.add(CONTRACT)
             p.why.append(f'{path}: {CONTRACT} (the Subsonic app\'s files-on-card contract)')
+        if any(fnmatch.fnmatchcase(path, g) for g in SEAM_SOURCES):
+            p.other.add(SEAM)
+            p.why.append(f'{path}: {SEAM} (the real Subsonic app against the firmware\'s C)')
         if path.startswith('test/patch_suite/') and suffix == '.py':  # one file of the suite: its lines, joined
             starts = suite_starts(root)
             if patch_source is None:
