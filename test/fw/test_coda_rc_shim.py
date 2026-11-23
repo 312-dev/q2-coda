@@ -386,7 +386,7 @@ def test_a_newer_command_drops_the_waiting_ones_ack(fw, ui, mcl, recs):
 
 
 def test_scan_is_car_audio_s_held_button(fw, ui, mcl, recs):
-    """scan 1, -1 and 0 (q2_iap2.c's held Next or Previous, and its release) go to seek.c's seek_car and are acked;
+    """scan 1, -1 and 0 (iap2_hid.c's held Next or Previous, and its release) go to seek.c's seek_car and are acked;
     another number is refused."""
     q2 = Q2(fw, ui, recs)
     q2.tick()

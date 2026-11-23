@@ -2,6 +2,7 @@
 import ctypes
 import gc
 import hashlib
+import importlib.util
 import io
 import pathlib
 import re
@@ -819,6 +820,29 @@ def test_compile_helper(tmp_path, monkeypatch):
     assert commands[2] == ('ld.lld', '-m', 'elf32ltsmip', '-e', '__start', '--dynamic-linker', '/lib/ld-linux-mipsn8.so.1',
                            '--image-base=0x400000', '-z', 'noexecstack', '--gc-sections', '-s', '--hash-style=sysv', '--build-id=none',
                            *objs, f'-L{tmp_path}', '-l:libc.so', '-l:libz.so', '-o', tmp_path/'helper')
+
+
+@pytest.mark.parametrize('sections', [None, False])
+def test_compile_helper_sources_with_or_without_sections(tmp_path, monkeypatch, sections):
+    """A list of sources: each compiled with -ffunction-sections and -fdata-sections, unless sections is False."""
+    commands = []
+    monkeypatch.setattr(build, 'run', lambda *args: commands.append(args) or (tmp_path/'helper').write_bytes(b'x'))
+    monkeypatch.setattr(build, 'FLAGS', ['-a'])
+    build.compile_helper(tmp_path, {}.__getitem__, ['one', 'two'], 'helper', [], sections=sections)
+    split = ['-ffunction-sections', '-fdata-sections'] if sections is None else []
+    assert commands[:3] == [('clang', '-a', '-mnan=2008', '-mabs=2008', '-mabicalls', *split, '-c',
+                             build.ROOT/'patch'/f'{s}.c', '-o', tmp_path/f'{s}.o') for s in ('one', 'two', 'start')]
+
+
+def test_q2_iap_is_built_from_one_list_of_sources():
+    """tools/build.py (the image), tools/iap_probe/probe_build.py and test/iap_probe.py (which takes probe_build's)
+    build q2-iap from the same sources, and each is a file."""
+    spec = importlib.util.spec_from_file_location('iap_probe_build', build.ROOT/'tools/iap_probe/probe_build.py')
+    assert spec and spec.loader
+    probe_build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe_build)
+    assert probe_build.SOURCES == build.Q2IAP_SOURCES
+    assert all((build.ROOT/'patch'/f'{s}.c').is_file() for s in build.Q2IAP_SOURCES)
 
 
 def test_bt_silence_commands(monkeypatch):

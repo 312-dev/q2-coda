@@ -280,7 +280,7 @@ def car(s, ms, word=1, every=500):
 
 
 def test_the_car_s_held_next_is_the_q2_s_own_scan(scan):
-    """Car Audio's held Next (q2_iap2.c, "scan 1" through the shim): the scan a held button makes, from the word on,
+    """Car Audio's held Next (iap2_hid.c, "scan 1" through the shim): the scan a held button makes, from the word on,
     at 2, 4 and 8 times on q2player with no seek; the release ("scan 0") plays on at its own speed. The first drive's
     seek every 500 ms jumped unevenly (2026-11-20)."""
     s = scan(sec=0, total=3600, q2player=True)

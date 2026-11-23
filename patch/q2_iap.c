@@ -4,7 +4,7 @@
  * and control request the host sends, answering only what an iPhone in media mode answers: the HID report
  * descriptor, Apple's C0 53 (four zero bytes), GET_REPORT with zeros; everything OUT is read and logged, every other
  * IN request stalled. With echo on, a SET_REPORT carrying iAP2's detect (FF 55 02 00 EE 10) is echoed on the HID
- * interrupt endpoint, so the host's next reports carry its link SYN. With --iap2 it speaks iAP2 instead (q2_iap2.c):
+ * interrupt endpoint, so the host's next reports carry its link SYN. With --iap2 it speaks iAP2 instead (iap2_*.c):
  * the detect answered, the link set up, the car authenticated and identified, and the answers an iPhone gives next,
  * every packet and message logged. With --state (Car Audio) it decides what the host is and watches the car's
  * audio (below, "Car Audio in the image").
@@ -25,103 +25,10 @@
  * Every ep0 stays open until the end: closing one unbinds the gadget.
  *
  * Built for the Q2 by tools/build.py's compile_helper (and tools/iap_probe/probe_build.py for the experiments)
- * against the rootfs's libc with no headers (the declarations and MIPS constants below), and for this machine with
- * -DPROBE_HOST (test/iap_probe.py). */
-#ifdef PROBE_HOST
-#include <errno.h>
-#include <fcntl.h>
-#include <poll.h>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <unistd.h>
-#include <sys/klog.h>
-#include <sys/wait.h>
-#define ERRNO errno
-#else
-typedef unsigned int size_t;
-typedef int ssize_t;
-struct timespec {
-    long tv_sec, tv_nsec;
-};
-struct pollfd {
-    int fd;
-    short events, revents;
-};
-int open(const char *, int, ...);
-int close(int);
-ssize_t read(int, void *, size_t);
-ssize_t write(int, const void *, size_t);
-int poll(struct pollfd *, unsigned long, int);
-int clock_gettime(int, struct timespec *);
-long time(long *);
-long atol(const char *);
-int snprintf(char *, size_t, const char *, ...);
-int strcmp(const char *, const char *);
-int strncmp(const char *, const char *, size_t);
-size_t strlen(const char *);
-char *strchr(const char *, int);
-void *memcpy(void *, const void *, size_t);
-void *memset(void *, int, size_t);
-int memcmp(const void *, const void *, size_t);
-int atoi(const char *);
-int fork(void);
-int nanosleep(const struct timespec *, struct timespec *);
-int siginterrupt(int, int);
-void _exit(int);
-unsigned alarm(unsigned);
-void (*signal(int, void (*)(int)))(int);
-int fsync(int);
-void *memmove(void *, const void *, size_t);
-int pipe(int *);
-int fcntl(int, int, ...);
-int kill(int, int);
-int rename(const char *, const char *);
-int unlink(const char *);
-char *strrchr(const char *, int);
-char *strstr(const char *, const char *);
-void *memchr(const void *, int, size_t);
-int *__errno_location(void);
-void *malloc(size_t);
-void *realloc(void *, size_t);
-void free(void *);
-unsigned long strtoul(const char *, char **, int);
-int access(const char *, int);
-int klogctl(int, char *, int);
-int execl(const char *, const char *, ...);
-void qsort(void *, size_t, size_t, int (*)(const void *, const void *));
-int nice(int);
-int waitpid(int, int *, int);
-#define WNOHANG 1
-#define O_CLOEXEC 0x80000 /* MIPS */
-#define F_SETFD 2
-#define FD_CLOEXEC 1
-void *bsearch(const void *, const void *, size_t, size_t, int (*)(const void *, const void *));
-#define ERRNO (*__errno_location())
-#define O_RDONLY 0
-#define O_WRONLY 1
-#define O_RDWR 2
-#define O_APPEND 0x0008 /* MIPS */
-#define O_CREAT 0x0100  /* MIPS */
-#define O_TRUNC 0x0200  /* MIPS */
-#define POLLIN 1
-#define CLOCK_MONOTONIC 1
-#define CLOCK_BOOTTIME 7
-#define F_SETFL 4
-#define O_NONBLOCK 0x0080 /* MIPS */
-#define SIGHUP 1
-#define SIGINT 2
-#define SIGPIPE 13
-#define SIGALRM 14
-#define SIGTERM 15
-#define SIGCHLD 18 /* MIPS */
-#define SIG_IGN ((void (*)(int))1)
-#define SIG_DFL ((void (*)(int))0)
-#define EINTR 4
-#define EAGAIN 11
-#endif
+ * against the rootfs's libc with no headers (the declarations and MIPS constants of q2_iap_sys.h), and for this
+ * machine with -DPROBE_HOST (test/iap_probe.py). */
+#include "q2_iap_sys.h"
+#include "q2_iap.h"
 #include "coda_rc_cmdq.h" /* the shim's command queue: needs open, write, close, O_NONBLOCK, O_CLOEXEC, ssize_t */
 
 /* <linux/usb/functionfs.h> */
@@ -236,7 +143,7 @@ static void strings(struct blob *out, int kind) {
 
 static int logfd = 2;
 static long log_slowest; /* this loop pass's slowest log write, ms */
-static long mono_ms(void) {
+long mono_ms(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return t.tv_sec * 1000L + t.tv_nsec / 1000000L;
@@ -247,7 +154,7 @@ static long mono_ms(void) {
  * milliseconds, a sleep the host tests stand in for (read every pass, sleep_poll). */
 static const char *clock_file;
 static long clock_skew;
-static long boot_ms(void) {
+long boot_ms(void) {
     struct timespec t;
     clock_gettime(CLOCK_BOOTTIME, &t);
     return t.tv_sec * 1000L + t.tv_nsec / 1000000L + clock_skew;
@@ -259,7 +166,7 @@ static long boot_ms(void) {
  * PIPE_BUF, so it is never split or mixed with a child's. A full pipe (the card stalled for seconds) costs lines, not
  * the loop: they are counted and said with the next line that goes. */
 static unsigned log_dropped;
-static void logline(const char *tag, const char *msg) {
+void logline(const char *tag, const char *msg) {
     char line[3200];
     long ms = mono_ms();
     int n = snprintf(line, sizeof line, "%ld.%03ld %s %s\n", ms / 1000, ms % 1000, tag, msg);
@@ -362,12 +269,12 @@ static long disabled_at = -1, gap_ms = 8000;
 /* Every fd the loop opens is close-on-exec (O_CLOEXEC, pipe_cloexec), so ffmpeg holds none, and a child that does
  * not exec drops the ep0s at its start (child_drop): an ep0 a child held kept FunctionFS busy, so a lost link's
  * teardown could not unmount it and the relink failed for as long as the child ran (car-bt-power.md #9). */
-static int pipe_cloexec(int *fds) {
+int pipe_cloexec(int *fds) {
     if (pipe(fds)) return -1;
     fcntl(fds[0], F_SETFD, FD_CLOEXEC), fcntl(fds[1], F_SETFD, FD_CLOEXEC);
     return 0;
 }
-static void child_drop(void) {
+void child_drop(void) {
     for (int k = 0; k < ninst; ++k)
         if (in[k].ep0 >= 0) close(in[k].ep0), in[k].ep0 = -1;
 }
@@ -465,7 +372,12 @@ static void alarm_interrupts(void) {
 
 /* ---- iAP2 (--iap2) ---- */
 
-#include "q2_iap2.c"
+#include "iap2.h"
+#include "iap2_link.h"
+#include "iap2_names.h"
+#include "iap2_nowplaying.h"
+#include "iap2_session.h"
+#include "q2_iap_lib.h"
 
 static int iap2_mode, writer_fd = -1, writer_pid, done_fd = -1, report_ms;
 static unsigned wr_queued, wr_done; /* input reports handed to the writer, and those it has written to ep1 */
@@ -542,7 +454,7 @@ static void io_send(const unsigned char *r, unsigned len) {
     memcpy(b + 1, r, len);
     int w = writer_fd < 0 ? -1 : (int)write(writer_fd, b, len + 1);
     if (w == (int)len + 1) ++wr_queued;
-    if (trace_quiet && w == (int)len + 1) return; /* a position update's or a bare acknowledgement's (q2_iap2.c) */
+    if (trace_quiet && w == (int)len + 1) return; /* a position update's or a bare acknowledgement's (iap2_link.c) */
     iap2_hex(h, sizeof h, r, len < 24 ? len : 24);
     snprintf(msg, sizeof msg, "report > %s%s", h, w == (int)len + 1 ? "" : " (dropped: the writer is behind)");
     logline("iap2", msg);
@@ -559,10 +471,7 @@ static int io_backlog(void) {
     return done_fd < 0 ? 0 : (int)(wr_queued - wr_done);
 }
 
-#include "stream_path.h"
 static int read_some(const char *path, char *b, unsigned cap);
-static unsigned lib_stream_rids(const char *const *paths, unsigned *rids, unsigned n); /* q2_iap_lib.c */
-static void sid_index_start(void);                                                     /* q2_iap_lib.c */
 /* The shim's Now Playing (patch/coda_rc_shim.c cr_now, from now_source.c: key=value lines; pos in ms, len in
  * seconds, live=1 for a radio's stream), written while Car Remote is on or the car's iPhone is on the cable. */
 static int io_now_playing(struct iap2_np *n) {
@@ -610,7 +519,7 @@ static int read_some(const char *path, char *b, unsigned cap) {
 }
 
 /* A file written whole, through a temporary name, mode 0600 (the shim takes only root's own, private files). */
-static int write_whole(const char *path, const char *b, unsigned n) {
+int write_whole(const char *path, const char *b, unsigned n) {
     char tmp[200];
     snprintf(tmp, sizeof tmp, "%s.iap", path);
     int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
@@ -636,7 +545,7 @@ static void io_audio(int on) {
 
 /* The player's rate for the song about to play (player/output.c car_ask, docs/iphone-mode.md#per-song-rate), read
  * every RATE_POLL_MS while the car takes audio, RATE_IDLE_MS while a car is on the link otherwise, and not with no
- * car (a charger), and handed to q2_iap2.c, which tells the car when it changes; none written, 44.1 kHz. */
+ * car (a charger), and handed to iap2_session.c, which tells the car when it changes; none written, 44.1 kHz. */
 #define RATE_POLL_MS 20
 #define RATE_IDLE_MS 250 /* with a car on the link and its audio not asked for */
 static long rate_at;
@@ -656,7 +565,7 @@ static void rate_poll(long now) {
 /* A button or a seek, as the Remote app's commands reach the shim (Car Remote on): down the shim's queue
  * (coda_rc_cmdq.h), each press its own line, else its single command file. Its numbers start high, so an ack
  * of one is never taken for coda-rc's own. */
-static void io_command(const char *verb) {
+void io_command(const char *verb) {
     static unsigned seq = 0x51000000u;
     char b[96];
     int n = snprintf(b, sizeof b, "%u %s\n", ++seq, verb);
@@ -664,7 +573,7 @@ static void io_command(const char *verb) {
     if (write_whole(cmd_file, b, (unsigned)n)) logline("iap2", "command: the shim's file could not be written");
 }
 
-static unsigned read_file(const char *path, unsigned char *out, unsigned cap) {
+unsigned read_file(const char *path, unsigned char *out, unsigned cap) {
     int fd = open(path, O_RDONLY | O_CLOEXEC), got = 0, r;
     if (fd < 0) return 0;
     while (got < (int)cap && (r = (int)read(fd, out + got, cap - got)) > 0) got += r;
@@ -673,7 +582,7 @@ static unsigned read_file(const char *path, unsigned char *out, unsigned cap) {
 }
 
 /* Cover Flow's key (patch/coverflow.c tags_key, coda_rc_lib.c fnv32): FNV-1a with a separator after each part */
-static unsigned fnv_part(unsigned h, const char *s) {
+unsigned fnv_part(unsigned h, const char *s) {
     while (*s) h = (h ^ (unsigned char)*s++) * 16777619u;
     return h * 16777619u;
 }
@@ -689,11 +598,11 @@ static unsigned fnv_part(unsigned h, const char *s) {
  * Bluetooth cover key it), else the song's path, so the album's next songs take the same cover with no child.
  *
  * The child writes 'w' to its pipe as it starts on an ask or ffmpeg, 'm' when ffmpeg made the cover, then 'c' and
- * the JPEG (none: no cover). Now Playing for a new song waits for the quick sources (q2_iap2.c ART_HOLD_MS, until 'w'
- * or the end); a cover found after it went is sent with Now Playing again (iap2_art_again). */
+ * the JPEG (none: no cover). Now Playing for a new song waits for the quick sources (iap2_nowplaying.c ART_HOLD_MS,
+ * until 'w' or the end); a cover found after it went is sent with Now Playing again (iap2_art_again). */
 #define ART_ASK_MS 4000   /* --art-ask-ms: the app's answer to an ask waited for this long */
 #define ART_MADE_MS 20000 /* ffmpeg's longest */
-#define ART_CAP 65536     /* q2_iap2.c ART_MAX */
+#define ART_CAP 65536     /* iap2_xfer.c ART_MAX */
 static const char *art_made = "/tmp/q2-iap.art", *art_ffmpeg = "/usr/bin/ffmpeg"; /* --art-made, --ffmpeg */
 static const char *ask_dir = "/tmp"; /* --ask-dir: the apps' ask, state and socket files (q2-<id>.*) */
 static long art_ask_ms = ART_ASK_MS;
@@ -706,11 +615,6 @@ static struct {
     unsigned got_n, got_cap;
     int jpeg_at, made; /* made: ffmpeg made it */
 } artw = {.fd = -1, .jpeg_at = -1};
-static const char *card_root;                                                         /* q2_iap_lib.c */
-static int lib_app_album(unsigned rid, char *app, unsigned appcap, char *album, unsigned albumcap); /* q2_iap_lib.c */
-static void iap2_art_done(int found);
-static void iap2_art_slow(void);
-static int lib_write_all(int fd, const void *p, unsigned n); /* q2_iap_lib.c */
 
 static unsigned art_key(const struct iap2_np *n) {
     return n->album[0] ? fnv_part(fnv_part(2166136261u, n->artist), n->album) : fnv_part(2166136261u, n->path);
@@ -903,8 +807,8 @@ static unsigned io_artwork(const struct iap2_np *n, unsigned char *out, unsigned
     return len;
 }
 
-/* The child's bytes taken in, its markers read as they come; at its end Now Playing is told (q2_iap2.c iap2_art_done).
- * Every pass of the loop. */
+/* The child's bytes taken in, its markers read as they come; at its end Now Playing is told (iap2_nowplaying.c
+ * iap2_art_done). Every pass of the loop. */
 static void art_poll(void) {
     if (artw.fd < 0) return;
     for (;;) {
@@ -1153,10 +1057,8 @@ static void summary(void) {
     logline("car", msg);
 }
 
-#include "q2_iap_lib.c"
-
 /* The link lost (the car stopped acknowledging through every retry, went quiet with packets waiting, or a request's
- * data stage was not its report: q2_iap2.c iap2_lost): with --state, q2-iap ends (exit 22) and q2car.sh
+ * data stage was not its report: iap2_link.c iap2_lost): with --state, q2-iap ends (exit 22) and q2car.sh
  * shows the car the iPhone again (the gadget off the controller and back), which is how a car starts a session
  * afresh; it sent nothing more by itself after the loss on 2026-11-21 (126 s, to the cable out). */
 static void io_link_lost(void) {
@@ -1381,7 +1283,7 @@ static void sleep_poll(void) {
     apart = d;
 }
 
-/* How long the loop's poll may sleep (iAP2), in ms: until the soonest of iAP2's deadlines (q2_iap2.c iap2_due), the
+/* How long the loop's poll may sleep (iAP2), in ms: until the soonest of iAP2's deadlines (iap2_link.c iap2_due), the
  * rate file's look, the host's verdict (the controller's state every 100 ms until the host has addressed the Q2, the
  * window after), the audio's health, the session's gap and --for's end; at most LOOP_MAX_MS, a guard. It was 10 ms
  * whatever was due: 6,000 wakeups a minute on a charger overnight (car-bt-power.md #6). With --clock-file at most

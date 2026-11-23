@@ -42,7 +42,7 @@ test/patch.py, which executes the payload as one program. What gets narrowed:
 - a source a suite outside test/fw and test/patch.py builds, runs or reads plans that suite (`SUITE_SOURCES`, patterns
   so a split's new files are covered; for a suite that compiles them, every header and .inc they include too):
   patch/coda_rc*, remote/coda-rc.proto, tools/coda_rc_client.py and tools/ci/emu_pool.py test/coda_rc_e2e.py;
-  patch/q2_iap*, patch/iap_* and patch/q2car.sh test/iap_probe.py; patch/peq*, hash.c and the other sources it builds
+  patch/q2_iap*, patch/iap_*, patch/iap2* and patch/q2car.sh test/iap_probe.py; patch/peq*, hash.c and the other sources it builds
   test/peq.py; the Cover Flow sources and theirs test/coverflow.py; patch/peq.c test/player/run.py;
 - a payload change (patch/, a build input in tools/, assets/) also plans test/playback.py and test/headset_io.py
   (`PAYLOAD_SUITES`), which run the build's payload as test/patch.py does;
@@ -146,7 +146,7 @@ SEAM_SOURCES = (*CONTRACT_SOURCES, 'patch/playback.c', 'test/fw/seam.py', 'test/
 SUITE_SOURCES = {
     'test/coda_rc_e2e.py': (('patch/coda_rc*', 'remote/coda-rc.proto', 'tools/coda_rc_client.py', 'tools/ci/emu_pool.py'),
                             True),
-    'test/iap_probe.py': (('patch/q2_iap*.[ch]', 'patch/iap_*.[ch]', 'patch/q2car.sh'), True),
+    'test/iap_probe.py': (('patch/q2_iap*.[ch]', 'patch/iap_*.[ch]', 'patch/iap2*.[ch]', 'patch/q2car.sh'), True),
     'test/peq.py': (('patch/peq*.[ch]', 'patch/hash.c', 'patch/games.c', 'patch/video.c', 'patch/radio.c', 'patch/spotify.c',
                      'patch/netupdate.c', 'patch/onlinematch.c', 'patch/tidal.c', 'patch/scrobble.c',
                      'assets/themes/oled/theme.xml'), True),
