@@ -595,6 +595,7 @@ class Library:
         self.card.files['/proc/mounts'] = MOUNTED
         self.clock = Clock(fw)
         self.myfav, self.songs, self.scanned, self.sql = [], [], True, []
+        self.server = None  # a signed-in server's servertable rows (catalogue.c), None: no catalogue attached
         fw.mock('sqlite3_open', self.open_db)
         fw.mock('sqlite3_exec', self.exec_db)
         self.keep_fn = fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)
@@ -611,11 +612,15 @@ class Library:
         self.sql.append(q)
         if q.startswith('PRAGMA'):
             return 0
-        if 'sqlite_master' in q:
+        if 'cat.' in q and self.server is None:
+            return 1  # no such database
+        if 'cat.sqlite_master' in q:
+            rows = [(b'1',)]
+        elif 'sqlite_master' in q:
             rows = [(b'1',)] if self.scanned else []
         else:
             last, limit = int(q.split('id>')[1].split()[0]), int(q.split('limit ')[1])
-            table = self.myfav if ' from myfav ' in q else self.songs
+            table = self.myfav if ' from myfav ' in q else self.server if ' from cat.servertable ' in q else self.songs
             rows = [r for r in table if int(r[0]) > last][:limit]
         call = self.ROW(row)
         for r in rows:
@@ -704,6 +709,28 @@ def test_tabs_and_newlines_in_a_name_become_spaces(fw, st):
     lib.rate_album(b'X\tY', b'Z\r', b'/mnt/mmc/a\tb\nc.flac', 3)
     assert lib.run()
     assert lib.copy() == RC_HEADER + b'song\t1\t0\t/mnt/mmc/a b c.flac\t\nalbum\t3\tX Y\tZ \t\n'
+
+
+def test_a_server_songs_stars_and_its_albums_hearts_reach_the_copy(fw, st):
+    """The owner's library is a server's alone (servertable, attached as cat), songtable empty: a server song's stars
+    are kept under its row's key, its fileurl's listen_key, and the copy names it as it does a card song."""
+    lib = Library(fw)
+    lib.server = []
+    row = b'/mnt/mmc/.subsonic/cat/al1/s1.flac'
+    lib.song(row, b'Alpha', b'Ann', table=lib.server)
+    lib.song(b'/mnt/mmc/.subsonic/cat/al2/s2.flac', b'Beta', b'Bo', table=lib.server)
+    lib.rate(row, 4)
+    lib.rate_album(b'Beta', b'Bo', b'/mnt/mmc/.subsonic/cat/al2/s2.flac', 5)
+    assert lib.run()
+    assert lib.copy() == RC_HEADER + b'song\t4\t0\t/mnt/mmc/.subsonic/cat/al1/s1.flac\t\nalbum\t5\tBeta\tBo\t\n'
+
+
+def test_no_catalogue_the_card_alone_still_written(fw, st):
+    lib = Library(fw)  # cat not attached: its queries fail, and the copy is still made
+    lib.song(b'/mnt/mmc/a.flac')
+    lib.rate(b'/mnt/mmc/a.flac', 3)
+    lib.rate(b'/mnt/mmc/gone.flac', 2)
+    assert lib.run() and lib.copy() == RC_HEADER + b'song\t3\t0\t/mnt/mmc/a.flac\t\n'
 
 
 def test_a_rating_whose_song_left_the_library_stays_out(fw, st):

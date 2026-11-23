@@ -509,8 +509,9 @@ static inline int arc_out(int r, int y) {
 #define LISTEN_MAX_S 240
 #define PLAYS_SLOTS 512
 #define PLAYS_TOP 100
-/* Ratings (docs/internals.md#ratings): RATE_SLOTS songs keep 1-5 stars, apart from My Fav. */
-#define RATE_SLOTS 4096
+/* Ratings (docs/internals.md#ratings): RATE_SLOTS songs keep 1-5 stars, apart from My Fav, and as
+ * many albums their hearts: room for a library of 9,199 songs (the owner's, a server's) and more. */
+#define RATE_SLOTS 16384
 /* A Quick Settings or Control Center button held this long, by a finger (navigation.c quick_long)
  * or Centre (control_center.c cc_keydown), opens its page: the house hold, Edit Library's and Up
  * Next's (LR_HOLD_MS, UN_HOLD_MS). */

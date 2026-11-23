@@ -28,11 +28,18 @@ static struct {
  * Fav toggled for the playing track (manage_myfav), and the heart's image with it. */
 #define FAV_CLICK ((int (*)(void *, void *))0x53c968)
 
-/* The songs' table, or with album the albums'. */
+/* The songs' table, or with album the albums'. A file shorter than the table, written when it held
+ * fewer slots, is read as far as it goes, the rest of the table free. */
 static int rate_io(int album, int write) {
     const char *f = album ? ALBUM_RATINGS_FILE : RATINGS_FILE;
     const char *tmp = album ? ALBUM_RATINGS_FILE ".tmp" : RATINGS_FILE ".tmp";
-    return blob_io(f, tmp, album ? ra.album_rates : ra.rates, RATE_SLOTS * sizeof *ra.rates, write);
+    unsigned *t = album ? ra.album_rates : ra.rates;
+    if (write) return blob_io(f, tmp, t, RATE_SLOTS * sizeof *t, 1);
+    void *in = fopen(f, "rb");
+    unsigned n = in ? (unsigned)fread(t, sizeof *t, RATE_SLOTS, in) : 0;
+    if (in) fclose(in);
+    memset(t + n, 0, (RATE_SLOTS - n) * sizeof *t);
+    return n != 0;
 }
 static unsigned *rates(int album) {
     unsigned **t = album ? &ra.album_rates : &ra.rates;
@@ -423,8 +430,11 @@ int ratings_menu(void *ctx, void *event) {
  * thread (stock's shared connection waits only 500 ms for a reader, so a worker's longer read lock
  * could still make stock's own My Fav writes fail), and writes the card once at the end, only if
  * the file would change; the longest copy so far is kept as .1, the one way back from a lost table.
+ * The rows are My Fav's, then the card's songtable, then a signed-in server's servertable (cat,
+ * catalogue.c), whose songs' stars are kept under their row's fileurl (rate_song_key).
  * ponytail: every row against every rated one still to find (rc_take); a rating whose song or
- * album has left the library has no name to write, and stays out until it is back. */
+ * album is in none of the three (deleted from the card, or a server signed out) has no name to
+ * write, and stays out until it is back. */
 #define RC_FILE "/mnt/mmc/.ratings.tsv"
 #define RC_HEADER                                                                                  \
     "#song\tstars\tliked\tpath\tcue_start\n#album\thearts\tname\talbum_artist\tfolder\n"
@@ -568,6 +578,7 @@ static void rc_start(void) {
         rc_end();
         return;
     }
+    catalogue_attach_db(rc.db); /* a signed-in server's songs, as cat, while its index is built */
     rc.len = (unsigned)tk_snprintf(rc.out, RC_LINE, RC_HEADER);
     I(unknown, REC_ID) = -1; /* the Unknown Album card, which no row is */
     if ((hearts = rc_take(rc.album, &rc.albums, album_id(unknown))))
@@ -582,6 +593,7 @@ static int rc_exists(void *ctx, int n, char **v, char **c) {
 /* A page of the pass, then its end. A failed read or write stays as it was, for the next change or
  * boot; a scan rewriting the library ends the pass, and library_gen starts another after it. */
 static void rc_page(void) {
+    static const char *const tables[] = { "myfav", "songtable", "cat.servertable" };
     char sql[128];
     if (library_scanning()) {
         rc_end();
@@ -590,18 +602,23 @@ static void rc_page(void) {
     if (time_now_ms() - st.last_input < RC_QUIET_MS) return;
     tk_snprintf(sql, sizeof sql,
                 "select id,fileurl,time,album,albumsonger from %s where id>%d order by id limit %d",
-                rc.table ? "songtable" : "myfav", rc.last, RC_PAGE);
+                tables[rc.table], rc.last, RC_PAGE);
     rc.rows = 0;
     if (sqlite3_exec(rc.db, sql, rc_row, 0, 0)) {
         rc_end();
         return;
     }
     if (rc.rows == RC_PAGE && (!rc.table || rc.songs || rc.albums)) return;
-    if (!rc.table++) {
+    /* The next table that is there, while ratings are still to find. No songtable before the first
+     * scan; no cat while no server is signed in (its query fails): My Fav's alone, still worth a
+     * copy. */
+    while (++rc.table < 3 && (rc.table == 1 || rc.songs || rc.albums)) {
         rc.last = rc.rows = 0;
-        /* no songtable before the first scan: My Fav's alone, still worth a copy */
-        if (sqlite3_exec(rc.db, "select 1 from sqlite_master where name='songtable'", rc_exists, 0,
-                         0)) {
+        if (sqlite3_exec(rc.db,
+                         rc.table == 1 ? "select 1 from sqlite_master where name='songtable'"
+                                       : "select 1 from cat.sqlite_master where name='servertable'",
+                         rc_exists, 0, 0) &&
+            rc.table == 1) {
             rc_end();
             return;
         }
