@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - App sign-in: while an app shows a large sign-in QR code, the Q2 no longer goes to standby under it, and the app's sync progress still shows.
   - Playback: Shuffle with no headphones, Bluetooth or USB audio connected now only shows "Connect headphones or Bluetooth to play". It also switched the play mode to Shuffle and showed "Shuffled Songs" (Shuffle Albums and Folders loaded the whole library as the queue), and playing an album from Cover Flow over Now Playing closed Now Playing, though nothing played.
   - USB: the Scan Card prompt you get on stopping Transfer Files with the computer still plugged in now takes the wheel and Center, its first button selected, where nothing could be chosen but by touch.
   - Wake: with the screen off, every button and the wheel wake it (**Wake: Any Button**, the default). Play/Pause, Previous and Next also play or skip on that press; Center, Return and the wheel only wake it, so you press or turn again. **Wake: Double Press** keeps the old pocket-safe behaviour: only two Center presses wake the screen.

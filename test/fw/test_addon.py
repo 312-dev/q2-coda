@@ -1777,6 +1777,26 @@ def test_an_app_asking_to_hold_keeps_standby_and_power_off_away(fw):
     assert a.hold == 0 and len(fw.calls('reset_poweroptions_timer')) == 1
 
 
+QR40 = b'f' * ((177 + 3) // 4 * 177)  # a version-40 code's rows as the QR page reads them (QR_HEX less its NUL)
+
+
+def test_keys_after_a_version_40_code_still_read(fw):
+    """An app signing in writes its code's rows as qr= (7,965 bytes of hex at version 40, which the QR page draws);
+    poll_one read the file's first 1,534 bytes only, so a hold= after it read as 0 and the Q2 could sleep under the
+    sign-in, and a sync= after it read as none. Lines that do not fit are left out, not the rest of the file."""
+    world, a = running(fw, b'addr=192.168.1.2:8080\nqrsize=177\nqr=' + QR40 + b'\nhold=1\nsync=down 5 10\n')
+    addon_poll(fw, world)
+    assert a.hold == 1 and [c[1][:3] for c in fw.calls('reset_poweroptions_timer')] == [(1, 1, 0)]
+    assert fw.fn('addon_sync', C.c_int, C.c_void_p)(None) == 2
+
+
+def test_a_state_file_past_its_bound_is_read_no_further(fw):
+    """The read is bounded: a key past STATE_SCAN bytes of lines too long to keep is not looked for."""
+    world, a = running(fw, (b'qr=' + QR40 + b'\n') * 3 + b'hold=1\n')
+    addon_poll(fw, world)
+    assert a.hold == 0
+
+
 @pytest.mark.parametrize('job, result, kept', [(JOB_INSTALL, SH_NET, 1), (JOB_INSTALL, SH_CANCELLED, 1), (JOB_INSTALL, SH_OK, 0), (JOB_REMOVE, SH_OK, 0), (JOB_REMOVE, SH_CARD, 1)])
 def test_the_app_store_forgets_a_running_app_only_once_its_job_replaced_it(fw, job, result, kept):
     # an update that fails or is cancelled leaves the app running: still tracked, its hold still honoured
@@ -6358,6 +6378,8 @@ def test_a_server_songs_radio_is_asked_of_its_app(fw):
     assert p.world.files[b'/tmp/q2-foo.radio'] == b'7 start ' + path + b'\n'
     p.world.files[b'/tmp/q2-foo.state'] = b'version=1\nradioack=7 1\n'
     assert answer(7) == 1 and answer(8) == -1
+    p.world.files[b'/tmp/q2-foo.state'] = b'qrsize=177\nqr=' + QR40 + b'\nradioack=7 1\nversion=1\n'
+    assert answer(7) == 1  # after a sign-in's long code, as an app writes its keys in name order
 
 
 def test_an_app_without_radio_is_not_asked(fw):
