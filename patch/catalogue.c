@@ -1377,6 +1377,19 @@ int catalogue_cover(const char *path, char *out, unsigned size) {
     return n > 0 && (unsigned)n < size && !access(out, 4);
 }
 
+/* The app's larger cover of path's album, covers/512/<album>.jpg (q2-subsonic saves 500 px there,
+ * beside the 160 px list-row one catalogue_cover names), when the card has it: for art drawn
+ * larger than a row, Home's slideshow (slideshow.c). 0, out unspecified, when it is not there. */
+int catalogue_cover_large(const char *path, char *out, unsigned size) {
+    if (!catalogue_cover(path, out, size)) return 0;
+    char *name = strrchr(out, '/');
+    unsigned k = (unsigned)strlen(out);
+    if (!name || k + 5 > size) return 0;
+    memmove(name + 5, name + 1, k - (unsigned)(name + 1 - out) + 1);
+    memcpy(name + 1, "512/", 4);
+    return !access(out, 4);
+}
+
 /* ---- Greyed and marked rows: stock's pooled table rows as they are bound (ringnav_table_load),
  * the payload's own lists' rows as they are made (catalogue_mark). ringnav_style_color asks
  * catalogue_greyed for each text colour. A row that can't play now is greyed with the offline
