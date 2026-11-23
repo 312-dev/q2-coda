@@ -20,7 +20,15 @@ for result in (0,-7):
     passed()
 # An incoming link while a link thread waits for the saved device (BT_STATUS) is adopted; auto-link
 # skips while a listed one is connected (BT_AUTOLINK).
-from build import BT_STATUS, BT_AUTOLINK
+from build import BT_STATUS, BT_AUTOLINK, BT_PROMPT
+# openBluetooth sets stock's prompt callback (0x4f9d20) at every Bluetooth on, after headset_bt_init: its call is
+# bt_pair_register's, which sets bt_pair.c's whatever it is handed (docs/internals.md#bluetooth-pairing-card).
+assert struct.unpack_from('<I',demo,fileoff(demo,BT_PROMPT[0]))[0]==jal(payload_syms['bt_pair_register'])
+on=Machine(); on.mock('system@GLIBC_2.0')
+on.call(address=payload_syms['bt_pair_register'],args=(0x4f9d20,0,0,0),gap=0)
+assert [c[:3] for c in on.calls if c[0]=='btctl_set_prompt_callback']==[
+    ('btctl_set_prompt_callback',payload_syms['bt_pair_prompt'],0)]
+passed()
 assert struct.unpack_from('<I',demo,fileoff(demo,BT_STATUS[0]))[0]==jal(payload_syms['headset_status_register'])
 assert struct.unpack_from('<I',demo,fileoff(demo,BT_AUTOLINK[0]))[0]==jal(payload_syms['headset_bt_autolink'])
 class BtLinkMachine(Machine):

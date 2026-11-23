@@ -77,13 +77,11 @@ void headset_bt_usb(void) {
     autoLinkBluetooth();
     hl.usb = 0;
 }
-void bt_pair_init(void); /* bt_pair.c */
-int bt_pair_prompt(int type, const char *passkey, void *unused);
+void bt_pair_register(void *stock, void *unused); /* bt_pair.c */
 /* The control thread can discover a boot reconnect before openBluetooth powers the radio. */
 int headset_bt_init(void *thread) {
     initBluetoothParam(); /* Lists must exist before callbacks; the later reset would erase links. */
-    bt_pair_init();
-    btctl_set_prompt_callback((void *)bt_pair_prompt, 0); /* in place of stock's 0x4f9d20 */
+    bt_pair_register((void *)0x4f9d20, 0); /* bt_pair.c's callback in place of stock's */
     headset_status_register();
     btctl_set_a2dp_callback((void *)btrecvA2dpFunc, (void *)0x01020304);
     return btctl_create_daemon_thread(thread);

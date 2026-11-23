@@ -1121,7 +1121,7 @@ int bt_quality_dim(void *w, unsigned *color); /* a Quality choice the device lac
 #define BT_MARK_CHECK 6 /* bt_mark's kind: a picker's check on the right column */
 void *bt_mark(void *parent, const char *name, int kind, int x, int y, int w, int h);
 /* bt_pair.c: a device pairing by numeric comparison (docs/internals.md#bluetooth-pairing-card) */
-void bt_pair_init(void), bt_pair_poll(void);
+void bt_pair_register(void *stock, void *unused), bt_pair_poll(void);
 int bt_pair_prompt(int type, const char *passkey, void *unused);
 /* guest_ui.c: Guest Play's screens (docs/oled-design.md#guest-play) */
 void guest_ui_poll(void), guest_ui_paint(void *w, void *canvas), guest_np_open(void);

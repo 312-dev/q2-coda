@@ -262,6 +262,7 @@ demo	0x4f9728	0x4	parse_albumcovertask_thd	the load of $25 for 2nd of 4 calls to
 demo	0x4f9738	0x4	parse_albumcovertask_thd	2nd of 4 calls to toolsGetAlbumCover, after "cp -f "%s" '%s'"; tools/build.py GRID_COVER
 demo	0x4f97f0	0x4	parse_albumcovertask_thd	the load of $25 for 4th of 4 calls to toolsGetAlbumCover, after "cp -f "%s" '%s'"; tools/build.py GRID_COVER
 demo	0x4f97f4	0x4	parse_albumcovertask_thd	4th of 4 calls to toolsGetAlbumCover, after "cp -f "%s" '%s'"; tools/build.py GRID_COVER
+demo	0x4fa6e8	0x4	openBluetooth	the only call to btctl_set_prompt_callback, after "/tmp/bt_startup"; tools/build.py BT_PROMPT
 demo	0x4fa700	0x4	openBluetooth	the only call to btctl_device_status_callback, after "/tmp/bt_startup"; tools/build.py BT_STATUS
 demo	0x4faa5c	0x4	switchBtPriority	`sll $4, $4, 0x2`, before the only call to btctl_set_codec_priority; tools/build.py LDAC_HQ
 demo	0x4faa60	0x4	switchBtPriority	`addiu $2, $2, 0x2e30`, before the only call to btctl_set_codec_priority; tools/build.py LDAC_HQ
