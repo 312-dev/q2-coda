@@ -75,22 +75,23 @@ static unsigned *rates(int album) {
     unsigned **t = album ? &ra.album_rates : &ra.rates;
     if (*t) return *t;
     const char *f = album ? ALBUM_RATINGS_FILE : RATINGS_FILE;
-    /* read in RATE_MIN words, then as many again while the file goes on, up to RATE_SLOTS */
+    /* read in RATE_MIN words, then twice the room while the file goes on (up to RATE_SLOTS),
+     * unless what was read ends in a layout mark: a laid-out file is that long */
     unsigned n = 0, room = RATE_MIN, rated = 0, cap = RATE_MIN;
     unsigned *in = calloc(room, sizeof *in);
     void *file = in ? fopen(f, "rb") : 0;
     while (file && (n += (unsigned)fread(in + n, sizeof *in, room - n, file)) == room &&
-           room < RATE_SLOTS) {
-        unsigned *more = realloc(in, room * 2 * sizeof *in);
+           room < RATE_SLOTS && in[room - 2] != RATE_LAYOUT) {
+        unsigned *more = calloc(room * 2, sizeof *more);
         if (!more) break;
-        in = more, room *= 2;
+        memcpy(more, in, room * sizeof *in);
+        free(in), in = more, room *= 2;
     }
     if (file) fclose(file);
     if (!in) return 0;
-    if (n >= RATE_MIN && !(n & (n - 1)) && in[n - 2] == RATE_LAYOUT) { /* laid out already */
+    if (n == room && in[n - 2] == RATE_LAYOUT) { /* laid out already */
         ra.cap[album] = n, ra.used[album] = in[n - 1] >> 3;
-        unsigned *fit = n < room ? realloc(in, n * sizeof *in) : in; /* the read's spare room back */
-        return *t = fit ? fit : in;
+        return *t = in;
     }
     for (unsigned i = 0; i < n; i++) rated += (in[i] & 7) && (in[i] & 7) <= 5;
     while (cap < RATE_SLOTS && rate_room(cap) < rated + 1) cap *= 2;
