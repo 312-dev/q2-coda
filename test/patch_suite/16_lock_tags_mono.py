@@ -447,10 +447,12 @@ assert m.confirm()==11 and [c[0] for c in m.calls].count('navigator_back')==1; p
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13)
 m.stack=[m.top]; m.nodes[m.wm]=dict(type='window_manager',name='',children=m.stack,visible=1)
 m.byte(O['MCL_GAPLESS'],0)
-assert click(0)==[(1,'Q2POD','XFADE'),(1,'PLAYSET','GAPLESS')] and m.u.mem_read(O['MCL_GAPLESS'],1)==b'\1'
+gapless=lambda: [c[1] for c in m.calls if c[0]=='mclSetGaplessMode']
+assert click(0)==[(1,'Q2POD','XFADE'),(1,'PLAYSET','GAPLESS')] and gapless()==[1]
+m.byte(O['MCL_GAPLESS'],1)  # what stock's setter stores (0x5bda90)
 assert m.nodes[m.top]['name']!='bootvol_page' and texts()[0]=='Smart Crossfade' and switch_image(m,rows[0])=='switch_on'
-assert click(0)==[(0,'Q2POD','XFADE')] and m.u.mem_read(O['MCL_GAPLESS'],1)==b'\1' and switch_image(m,rows[0])=='switch_off'
-assert click(0)==[(1,'Q2POD','XFADE')]; passed()  # Gapless already on: left alone
+assert click(0)==[(0,'Q2POD','XFADE')] and not gapless() and switch_image(m,rows[0])=='switch_off'
+assert click(0)==[(1,'Q2POD','XFADE')] and not gapless(); passed()  # Gapless already on: left alone
 # Night Shift (nightshift.c): the main Display page's last row, after Appearance,
 # Coverflow and Controls; Q2POD NIGHTSHIFT and NIGHTK, 3400K unless a hundred in 2000-5000.
 for config,text in (({},'Off'),({'NIGHTSHIFT':'1'},'3400 K'),({'NIGHTSHIFT':'1','NIGHTK':'2700'},'2700 K'),({'NIGHTSHIFT':'1','NIGHTK':'5000'},'5000 K'),
