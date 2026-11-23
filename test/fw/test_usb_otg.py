@@ -39,6 +39,7 @@ class Port:
         self.fw, self.id, self.cable = fw, id_pin, cable
         self.pins = {'PC20': 0, 'PE22': 0}
         self.decay, self.off_at = 0, None  # ms PD17 still reads VBUS once the Q2's own bus power is off
+        self.pin_count, self.seen = 0, []  # traced(): pins lines and record words, the call log emptied as it goes
         self.now = 100000
         self.backfeed = []  # times the Q2 powered the bus while a computer's VBUS was on it
         self.powered = []  # times the Q2 powered the bus at all
@@ -469,21 +470,20 @@ def test_the_trial_s_own_vbus_dying_away_does_not_clear_its_refusal(fw):
 
 def pin_lines(p):
     """The pins lines written so far: counted by traced(), which empties the stubs' call log (8192 calls) as it goes."""
-    return [None] * getattr(p, 'pin_count', 0)
+    return [None] * p.pin_count
 
 
 def traced(p, ms, step=100):
     """UI passes every step ms (usb_otg_poll), the status pass once a second; the record's other lines are dropped."""
     poll = p.fw.fn('usb_otg_poll', None)
     n = C.c_int.in_dll(p.fw.lib, 'fw_log_n')
-    p.pin_count = getattr(p, 'pin_count', 0)
     for _ in range(ms // step):
         p.now += step
         if p.now % PASS_MS == 0:
             p.guard()
         poll()
         p.pin_count += sum(C.string_at(a[2]).startswith(b'%u %u pins PD18=') for _, a in p.fw.calls('tk_snprintf'))
-        p.seen = getattr(p, 'seen', []) + p.records()
+        p.seen += p.records()
         n.value = 0
 
 
