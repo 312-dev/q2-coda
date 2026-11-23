@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Audio: after a lost connection the car gets the Q2 back as it should even while a cover is still being made, where it could stay without an iPhone until the cable was unplugged.
   - Car Audio: on a cable, a car's or a wall charger's, the Q2's car service now wakes only when there is something to do, about a tenth to a twentieth as often as before (it woke a hundred times a second all night on a charger).
   - Car Audio: a server song's cover now comes from your streaming app when the Q2 has none yet, within a few seconds, where it could take 13 seconds or not come at all, and looking for a cover never holds up the car's connection.
   - Car Audio: plugging in before the SD card is ready no longer tells the car your server's songs are gone (and sends them all again on the next drive). Waking the Q2 from Standby with the cable in starts a fresh connection with the car, where the old one could carry on with the car's audio stuck.

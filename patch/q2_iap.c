@@ -96,6 +96,8 @@ int nice(int);
 int waitpid(int, int *, int);
 #define WNOHANG 1
 #define O_CLOEXEC 0x80000 /* MIPS */
+#define F_SETFD 2
+#define FD_CLOEXEC 1
 void *bsearch(const void *, const void *, size_t, size_t, int (*)(const void *, const void *));
 #define ERRNO (*__errno_location())
 #define O_RDONLY 0
@@ -356,6 +358,19 @@ static volatile int stopping;
 static int echo_from = -1, sessions_max, session, active, carplay;
 static long disabled_at = -1, gap_ms = 8000;
 
+/* Every fd the loop opens is close-on-exec (O_CLOEXEC, pipe_cloexec), so ffmpeg holds none, and a child that does
+ * not exec drops the ep0s at its start (child_drop): an ep0 a child held kept FunctionFS busy, so a lost link's
+ * teardown could not unmount it and the relink failed for as long as the child ran (car-bt-power.md #9). */
+static int pipe_cloexec(int *fds) {
+    if (pipe(fds)) return -1;
+    fcntl(fds[0], F_SETFD, FD_CLOEXEC), fcntl(fds[1], F_SETFD, FD_CLOEXEC);
+    return 0;
+}
+static void child_drop(void) {
+    for (int k = 0; k < ninst; ++k)
+        if (in[k].ep0 >= 0) close(in[k].ep0), in[k].ep0 = -1;
+}
+
 static void on_signal(int s) { stopping = s; }
 static void on_alarm(int s) { (void)s; } /* only to end a read that waits too long (setup's data stage) */
 #define DATA_STAGE_S 2
@@ -393,8 +408,8 @@ static char uuid[40] = "51320000-0000-4000-8000-000000000000", library_id[64];
 static void writer_start(const char *dir) {
     int fds[2], dn[2];
     char path[160];
-    if (pipe(dn)) dn[0] = dn[1] = -1;
-    if (pipe(fds)) {
+    if (pipe_cloexec(dn)) dn[0] = dn[1] = -1;
+    if (pipe_cloexec(fds)) {
         logline("iap2", "pipe failed: no input reports");
         return;
     }
@@ -402,9 +417,10 @@ static void writer_start(const char *dir) {
     writer_pid = fork();
     if (writer_pid == 0) {
         signal(SIGTERM, SIG_DFL), signal(SIGINT, SIG_DFL), signal(SIGHUP, SIG_DFL); /* the probe's only set a flag */
+        child_drop();
         close(fds[1]);
         if (dn[0] >= 0) close(dn[0]);
-        int ep = open(path, O_RDWR), fails = 0;
+        int ep = open(path, O_RDWR | O_CLOEXEC), fails = 0;
         unsigned char b[2 + 128];
         for (;;) {
             if (read(fds[0], b, 1) != 1) _exit(0);
@@ -471,7 +487,7 @@ static void sid_index_start(void);                                              
  * seconds, live=1 for a radio's stream), written while Car Remote is on or the car's iPhone is on the cable. */
 static int io_now_playing(struct iap2_np *n) {
     char b[1600];
-    int fd = open(np_file, O_RDONLY), len = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
+    int fd = open(np_file, O_RDONLY | O_CLOEXEC), len = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
     if (fd >= 0) close(fd);
     if (len <= 0) return 0;
     b[len] = 0;
@@ -511,7 +527,7 @@ static int io_now_playing(struct iap2_np *n) {
 static int write_whole(const char *path, const char *b, unsigned n) {
     char tmp[200];
     snprintf(tmp, sizeof tmp, "%s.iap", path);
-    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
     if (fd < 0) return -1;
     int ok = write(fd, b, n) == (int)n;
     close(fd);
@@ -541,7 +557,7 @@ static long rate_at;
 static long rate_every(void) { return audio_on ? RATE_POLL_MS : seen ? RATE_IDLE_MS : -1; } /* -1: not read */
 static unsigned io_rate(void) { /* the host's rate: the file's now, also read when the car asks for audio */
     char b[16];
-    int fd = open(rate_file, O_RDONLY), n = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
+    int fd = open(rate_file, O_RDONLY | O_CLOEXEC), n = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
     if (fd >= 0) close(fd);
     b[n > 0 ? n : 0] = 0;
     return atoi(b) > 0 ? (unsigned)atoi(b) : 44100;
@@ -563,7 +579,7 @@ static void io_command(const char *verb) {
 }
 
 static unsigned read_file(const char *path, unsigned char *out, unsigned cap) {
-    int fd = open(path, O_RDONLY), got = 0, r;
+    int fd = open(path, O_RDONLY | O_CLOEXEC), got = 0, r;
     if (fd < 0) return 0;
     while (got < (int)cap && (r = (int)read(fd, out + got, cap - got)) > 0) got += r;
     close(fd);
@@ -767,10 +783,11 @@ static void art_start_child(const struct iap2_np *n, unsigned key) {
     artw.at = boot_ms();
     if (!artw.seq) artw.seq = (unsigned)boot_ms() | 1; /* above any seq an earlier q2-iap gave since boot */
     unsigned seq = artw.seq++;
-    if (pipe(fds)) return;
+    if (pipe_cloexec(fds)) return;
     int pid = fork();
     if (pid == 0) {
         signal(SIGINT, SIG_DFL), signal(SIGHUP, SIG_DFL);
+        child_drop();
         close(fds[0]);
         art_child(n, key, seq, fds[1]);
     }
@@ -862,7 +879,7 @@ static const char *trouble = "";
 
 static int read_uint(const char *path, unsigned *v) {
     char b[24];
-    int fd = open(path, O_RDONLY), n = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
+    int fd = open(path, O_RDONLY | O_CLOEXEC), n = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
     if (fd >= 0) close(fd);
     if (n <= 0) return 0;
     b[n] = 0;
@@ -895,7 +912,7 @@ static int c_have;
 static void c_write(int k, unsigned v) {
     char p[160], b[16];
     snprintf(p, sizeof p, "%s/%s", counters_dir, c_names[k]);
-    int fd = open(p, O_WRONLY | O_TRUNC), n = snprintf(b, sizeof b, "%u\n", v);
+    int fd = open(p, O_WRONLY | O_TRUNC | O_CLOEXEC), n = snprintf(b, sizeof b, "%u\n", v);
     if (fd >= 0) write(fd, b, n), close(fd);
 }
 static void stream_line(long ms) {
@@ -960,7 +977,7 @@ static void host_poll(long now) {
     if (host_at < 0 && udc_file && now - udc_at >= 100) {
         char s[24] = "";
         udc_at = now;
-        int fd = open(udc_file, O_RDONLY), n = fd < 0 ? -1 : (int)read(fd, s, sizeof s - 1);
+        int fd = open(udc_file, O_RDONLY | O_CLOEXEC), n = fd < 0 ? -1 : (int)read(fd, s, sizeof s - 1);
         if (fd >= 0) close(fd);
         if (n > 0 && (!strncmp(s, "addressed", 9) || !strncmp(s, "configured", 10))) {
             host_at = now;
@@ -1117,8 +1134,9 @@ static void echo_report(struct inst *i, const unsigned char *payload, unsigned n
     hex(h, sizeof h, r, len < 16 ? len : 16);
     int pid = fork();
     if (pid == 0) {
+        child_drop();
         alarm(5); /* a host that never polls: the write is interrupted, the request dequeued */
-        int fd = open(path, O_RDWR);
+        int fd = open(path, O_RDWR | O_CLOEXEC);
         int w = fd < 0 ? -1 : (int)write(fd, r, len);
         snprintf(msg, sizeof msg, "echo report %u (%u bytes: %s) written: %d%s", id + 1, len, h, w,
                  w < 0 ? " (failed or timed out)" : "");
@@ -1256,7 +1274,7 @@ static void sleep_poll(void) {
     static long apart, seen_apart;
     if (clock_file) {
         char b[24];
-        int fd = open(clock_file, O_RDONLY), n = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
+        int fd = open(clock_file, O_RDONLY | O_CLOEXEC), n = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
         if (fd >= 0) close(fd);
         if (n > 0) b[n] = 0, clock_skew = atol(b);
     }
@@ -1370,7 +1388,7 @@ int main(int argc, char **argv) {
         else return usage();
     }
     if (argc - a < 2 || argc - a - 1 > MAX_INST) return usage();
-    logfd = open(argv[a++], O_WRONLY | O_CREAT | O_APPEND, 0644);
+    logfd = open(argv[a++], O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
     if (logfd < 0) logfd = 2;
     signal(SIGTERM, on_signal), signal(SIGINT, on_signal), signal(SIGHUP, on_signal);
     signal(SIGPIPE, SIG_IGN), signal(SIGCHLD, SIG_IGN); /* echo children reaped by the kernel */
@@ -1390,7 +1408,7 @@ int main(int argc, char **argv) {
         snprintf(path, sizeof path, "%s/ep0", i->dir);
         struct blob d, s;
         descs(&d, i->kind), strings(&s, i->kind);
-        i->ep0 = open(path, O_RDWR);
+        i->ep0 = open(path, O_RDWR | O_CLOEXEC);
         int wd = i->ep0 < 0 ? -1 : (int)write(i->ep0, d.b, d.n);
         int ws = wd < 0 ? -1 : (int)write(i->ep0, s.b, s.n);
         snprintf(msg, sizeof msg, "%s: descriptors %d of %u bytes, strings %d of %u (errno %d)", path, wd, d.n, ws, s.n,
@@ -1481,7 +1499,7 @@ int main(int argc, char **argv) {
     if (writer_pid > 0) kill(writer_pid, SIGTERM);
     if (lload.pid > 0) kill(lload.pid, SIGTERM);
     if (artw.pid > 0) kill(artw.pid, SIGTERM); /* it kills and reaps its ffmpeg */
+    for (int k = 0; k < ninst; ++k) close(in[k].ep0); /* first: a relink waits on them, not on the card */
     if (logfd != 2) fsync(logfd);
-    for (int k = 0; k < ninst; ++k) close(in[k].ep0);
     return rc;
 }

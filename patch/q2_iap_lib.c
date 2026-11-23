@@ -58,7 +58,7 @@ static void lib_free(void) {
 
 /* What the car was sent in full last: its revision and each song's rid and hash. */
 static void lib_read_sent(void) {
-    int fd = open(lib_sent_file, O_RDONLY);
+    int fd = open(lib_sent_file, O_RDONLY | O_CLOEXEC);
     if (fd < 0) return;
     unsigned cap = 0, len = 0;
     char *b = 0;
@@ -206,11 +206,12 @@ static void sid_index_start(void) {
     int fds[2];
     if (sids.asked || sids.n || access(lib_cat, 0)) return;
     sids.asked = 1;
-    if (pipe(fds)) return;
+    if (pipe_cloexec(fds)) return;
     int pid = fork();
     if (pid == 0) {
         sqlite3 *db = 0;
         sqlite3_stmt *st = 0;
+        child_drop();
         close(fds[0]);
         if (!sqlite3_open_v2(lib_cat, &db, SQLITE_OPEN_READONLY, 0) &&
             !sqlite3_prepare_v2(db, "select app, sid, id from servermeta where sid is not null", -1, &st, 0)) {
@@ -521,10 +522,11 @@ static int lib_load(void) {
     int fds[2];
     lload.ready = 0;
     if (lload.fd >= 0) return 0;
-    if (pipe(fds)) return logline("lib", "library: no pipe for its child"), -1;
+    if (pipe_cloexec(fds)) return logline("lib", "library: no pipe for its child"), -1;
     int pid = fork();
     if (pid == 0) {
         signal(SIGTERM, SIG_DFL), signal(SIGINT, SIG_DFL), signal(SIGHUP, SIG_DFL);
+        child_drop();
         close(fds[0]);
         lib_child(fds[1]);
     }
@@ -592,8 +594,9 @@ static void lib_saved(void) {
     snprintf(tmp, sizeof tmp, "%s.iap", lib_sent_file);
     int pid = len < cap ? fork() : -1;
     if (pid == 0) {
+        child_drop();
         long at = mono_ms();
-        int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600), ok = fd >= 0 && write(fd, b, len) == (int)len;
+        int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600), ok = fd >= 0 && write(fd, b, len) == (int)len;
         if (fd >= 0) close(fd);
         char msg[120];
         if (ok && !rename(tmp, lib_sent_file))

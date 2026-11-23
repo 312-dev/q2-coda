@@ -2122,5 +2122,45 @@ def test_the_loop_sleeps_until_something_is_due(probe, tmp_path):
     assert charger <= 30 and idle <= 30, (charger, idle)
 
 
+
+def children_fds(pid):
+    """{child pid: the paths its fds name} for each process whose parent is pid."""
+    out = {}
+    for d in pathlib.Path('/proc').iterdir():
+        if not d.name.isdigit():
+            continue
+        try:
+            if int((d/'stat').read_text().rsplit(')', 1)[1].split()[1]) != pid:
+                continue
+            out[int(d.name)] = {os.readlink(f) for f in (d/'fd').iterdir()}
+        except (OSError, ValueError, IndexError):
+            continue
+    return out
+
+
+def test_the_children_hold_no_ep0(probe, tmp_path):
+    """car-bt-power.md #9: no fd of q2-iap was close-on-exec, and its children (the report writer, the library's read,
+    the cover's search and its ffmpeg) held every ep0 open: a lost link's teardown then found FunctionFS busy and the
+    relink failed while one ran (ffmpeg on a 2026-11-22 cover ran 13.4 s). Its children hold no ep0 now; checked on the
+    writer, which lives as long as q2-iap, and on ffmpeg (a stand-in that waits)."""
+    wait = tmp_path/'ffmpeg'
+    wait.write_text('#!/bin/sh\nsleep 3\n')
+    wait.chmod(0o755)
+    (tmp_path/'run').mkdir()
+    p, car, fd, log, files = bmw_up(probe, tmp_path/'run', '--ffmpeg', str(wait), '--art-made', str(tmp_path/'made'))
+    ep0 = os.path.realpath(tmp_path/'run'/'iap2'/'ep0')
+    try:
+        files['np'].write_text('state=1\npos=1000\nlen=200\ntitle=T\nartist=A\nalbum=B\npath=/nowhere/x.flac\n')
+        np_updates(car)
+        time.sleep(0.5)
+        kids = children_fds(p.pid)
+        grand = {k: v for c in kids for k, v in children_fds(c).items()}
+    finally:
+        stop(p, fd)
+    assert len(kids) >= 2 and grand, (kids, grand)  # the writer and the cover's child, and its ffmpeg
+    held = {k: v for k, v in {**kids, **grand}.items() if ep0 in v}
+    assert not held, held
+
+
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-q', *sys.argv[1:]]))
