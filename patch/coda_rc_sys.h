@@ -90,6 +90,7 @@ int fcntl(int, int, ...), ftruncate(int, long);
 long lseek(int, long, int);
 int socket(int, int, int), setsockopt(int, int, int, const void *, socklen_t), bind(int, const void *, socklen_t);
 int listen(int, int), accept(int, void *, socklen_t *), connect(int, const void *, socklen_t);
+int getsockname(int, void *, socklen_t *);
 int getpeername(int, void *, socklen_t *);
 ssize_t send(int, const void *, size_t, int);
 ssize_t sendto(int, const void *, size_t, int, const void *, socklen_t);

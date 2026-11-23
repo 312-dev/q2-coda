@@ -8,6 +8,7 @@ held (docs/internals.md#car-remote-covers)."""
 import ctypes
 import os
 import pathlib
+import re
 import shutil
 import socket
 import struct
@@ -51,6 +52,20 @@ def daemon_bin(tmp_path_factory):
     return ctypes.CDLL(str(out))
 
 
+def started(root):
+    """The ports a daemon under root listens on, from its start line (--port 0 and --iroh-port any: the kernel's
+    picks). A port chosen here and closed for the daemon to bind could be given to another process in between."""
+    log = root / 'tmp/coda-rc.log'
+    for _ in range(500):
+        for line in log.read_text().splitlines() if log.exists() else []:
+            m = re.search(r'start: tcp (\d+) listening, q2-iroh.s port (-?\d+)', line)
+            if m:
+                return int(m[1]), int(m[2])
+            assert 'start failed' not in line, line
+        WAIT(0.02)
+    raise AssertionError('the daemon never said it listens')
+
+
 def put(path, text):
     """Written as demo's shim writes (coda_rc_shim.c blob_io): a temporary file renamed into place."""
     tmp = path.with_name(path.name + '.tmp')
@@ -92,25 +107,14 @@ class Shim:
 def q2(daemon_bin, tmp_path_factory):
     tmp_path = tmp_path_factory.mktemp('q2')
     shim = Shim(tmp_path)
-    with socket.socket() as s:
-        s.bind(('127.0.0.1', 0))
-        port = s.getsockname()[1]
-    with socket.socket() as s:
-        s.bind(('127.0.0.1', 0))
-        shim.iroh_port = s.getsockname()[1]
     shim.tell_r, tell_w = os.pipe()  # the shim's pipe (coda_rc_shim.c cr_start); the daemon runs in this process
     os.set_blocking(shim.tell_r, False)
-    args = [b'coda-rc', b'--root', str(tmp_path).encode(), b'--no-ble', b'--port', str(port).encode(),
-            b'--tell-fd', str(tell_w).encode(), b'--iroh-port', str(shim.iroh_port).encode()]
+    args = [b'coda-rc', b'--root', str(tmp_path).encode(), b'--no-ble', b'--port', b'0',
+            b'--tell-fd', str(tell_w).encode(), b'--iroh-port', b'any']
     argv = (ctypes.c_char_p * len(args))(*args)
     loop = threading.Thread(target=daemon_bin.coda_main, args=(len(args), argv), daemon=True)
     loop.start()
-    for _ in range(200):
-        try:
-            socket.create_connection(('127.0.0.1', port), timeout=1).close()
-            break
-        except OSError:
-            time.sleep(0.02)
+    port, shim.iroh_port = started(tmp_path)
 
     def code(_prompt):
         for _ in range(200):
@@ -474,20 +478,12 @@ def lonely(daemon_bin, tmp_path_factory):
     root = tmp_path / 'root'
     (root / 'tmp').mkdir(parents=True)
     (root / 'mnt/data').mkdir(parents=True)
-    with socket.socket() as so:
-        so.bind(('127.0.0.1', 0))
-        port = so.getsockname()[1]
-    args = [b'coda-rc', b'--root', str(root).encode(), b'--no-ble', b'--port', str(port).encode(),
+    args = [b'coda-rc', b'--root', str(root).encode(), b'--no-ble', b'--port', b'0',
             b'--mdns-if', b'nowhere0', b'--iroh-port', b'0']
     argv = (ctypes.c_char_p * len(args))(*args)
     loop = threading.Thread(target=d.coda_main, args=(len(args), argv), daemon=True)
     loop.start()
-    for _ in range(200):
-        try:
-            socket.create_connection(('127.0.0.1', port), timeout=1).close()
-            break
-        except OSError:
-            WAIT(0.02)
+    port, _ = started(root)
     WAIT(0.5)
     yield root, loop, port
     d.crc_host_quit()

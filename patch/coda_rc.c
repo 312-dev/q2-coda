@@ -8,8 +8,10 @@
  * demo starts it when Settings > Car Remote is on and kills it when that goes off; nothing else starts it.
  * It also answers mDNS for Q2 Muse Remote's Pair a Q2 Muse list (coda_rc_mdns.c) on wlan0, or the interface
  * --mdns-if names (the emulator's), and not at all with --no-mdns; the host build answers only with --mdns-if.
- * It runs at nice 19. --root DIR prefixes every path (the host tests); --no-ble, --ble-sim DIR and --port N are for
- * them too. */
+ * It runs at nice 19. --root DIR prefixes every path (the host tests); --no-ble, --ble-sim DIR, --port N (0: the
+ * kernel's pick) and --iroh-port N (q2-iroh's loopback port, 7721; 0 none, any the kernel's pick) are for them too:
+ * the "start: tcp N listening, q2-iroh's port M" line names what it got. A port it cannot take ends it at once, with
+ * a "start failed" line and no pid file, so the shim starts it again (coda_rc_shim.c CR_RESTART_MS). */
 #include "coda_rc_sys.h"
 #include "coda_rc.h"
 #include "coda_rc_cmdq.h"
@@ -1003,7 +1005,17 @@ static void tcp_read(conn *c) {
     if (r <= 0 || crc_feed(&c->s, p, (size_t)r) < 0) conn_close(c);
 }
 
-/* TCP on port: on every interface, or loopback alone (q2-iroh's named port, and the host tests) */
+static int listen_errno; /* the last tcp_listen's failure */
+
+/* The port fd is bound to */
+static int bound_port(int fd) {
+    struct sockaddr_in a;
+    socklen_t n = sizeof a;
+    return getsockname(fd, (void *)&a, &n) ? -1 : htons(a.sin_port);
+}
+
+/* TCP on port (0: the kernel's pick): on every interface, or loopback alone (q2-iroh's named port, and the host
+ * tests) */
 static int tcp_listen(int at, int loopback) {
     int fd = socket(AF_INET, SOCK_STREAM, 0), one = 1;
     if (fd < 0) return -1;
@@ -1017,6 +1029,7 @@ static int tcp_listen(int at, int loopback) {
 #endif
     a.sin_addr.s_addr = loopback ? htonl(0x7f000001) : INADDR_ANY;
     if (bind(fd, (void *)&a, sizeof a) || listen(fd, 4)) {
+        listen_errno = errno;
         close(fd);
         return -1;
     }
@@ -1238,7 +1251,8 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--root") && i + 1 < argc) snprintf(root, sizeof root, "%s", argv[++i]);
         else if (!strcmp(argv[i], "--port") && i + 1 < argc) port = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "--iroh-port") && i + 1 < argc) iroh_port = atoi(argv[++i]); /* 0: none */
+        else if (!strcmp(argv[i], "--iroh-port") && i + 1 < argc) /* 0: none; any: the kernel's pick */
+            iroh_port = !strcmp(argv[i + 1], "any") ? -1 : atoi(argv[i + 1]), ++i;
         else if (!strcmp(argv[i], "--no-ble")) use_ble = 0;
         else if (!strcmp(argv[i], "--mdns-if") && i + 1 < argc) mdns_if = argv[++i];
         else if (!strcmp(argv[i], "--no-mdns")) mdns_if = 0;
@@ -1257,8 +1271,20 @@ int main(int argc, char **argv) {
     device_id();
     unlink_at("/tmp/coda-rc.pair");
     unlink_at("/tmp/coda-rc.ble"); /* a killed daemon's */
-    int lfd = tcp_listen(port, 0), ifd = iroh_port ? tcp_listen(iroh_port, 1) : -1;
-    crc_log("start: tcp %d %s", port, lfd >= 0 ? "listening" : "failed");
+    int lfd = tcp_listen(port, 0), ifd = iroh_port ? tcp_listen(iroh_port < 0 ? 0 : iroh_port, 1) : -1;
+    if (lfd < 0 || (iroh_port && ifd < 0)) {
+        /* a port taken: a daemon with no listener would only look alive to the shim, which starts it again
+         * CR_RESTART_MS later (coda_rc_shim.c) */
+        crc_log("start failed: tcp %d %s, q2-iroh's port %d %s (errno %d): not running", port,
+                lfd >= 0 ? "listening" : "refused", iroh_port, !iroh_port || ifd >= 0 ? "listening" : "refused", listen_errno);
+        if (lfd >= 0) close(lfd);
+        if (ifd >= 0) close(ifd);
+        unlink_at("/tmp/coda-rc.pid");
+        return 1;
+    }
+    port = bound_port(lfd); /* --port 0 and --iroh-port any: what the kernel gave, for mDNS and the tests */
+    if (ifd >= 0) iroh_port = bound_port(ifd);
+    crc_log("start: tcp %d listening, q2-iroh's port %d", port, iroh_port);
     if (use_ble) ble_start();
     if (mdns_if) mdns_start(mdns_if);
     for (int i = 0; i < MAX_TCP; ++i) tcp[i].fd = -1;

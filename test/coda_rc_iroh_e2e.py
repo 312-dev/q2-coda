@@ -17,6 +17,7 @@ RegisterRemote over the phone's plain TCP session; after Forget (the peers file 
 keys are refused. Each step prints one line; the exit status is the number of failures."""
 import argparse
 import pathlib
+import re
 import shutil
 import socket
 import subprocess
@@ -34,7 +35,22 @@ SOURCES = ['coda_rc.c', 'coda_rc_core.c', 'coda_rc_lib.c', 'coda_rc_mdns.c', 'mo
 SQLITE = '/usr/lib/x86_64-linux-gnu/libsqlite3.so.0'
 
 
+def daemon_ports(root):
+    """The TCP port and q2-iroh's port the daemon got (--port 0, --iroh-port any), from its start line."""
+    log = root / 'tmp/coda-rc.log'
+    for _ in range(300):
+        for line in log.read_text().splitlines() if log.exists() else []:
+            m = re.search(r'start: tcp (\d+) listening, q2-iroh.s port (\d+)', line)
+            if m:
+                return int(m[1]), int(m[2])
+            if 'start failed' in line:
+                raise RuntimeError(line)
+        time.sleep(0.1)
+    raise RuntimeError('coda-rc never said it listens')
+
+
 def free_port():
+    """A port free now, for q2-iroh dial's --listen (see Rig.dial)."""
     with socket.socket() as s:
         s.bind(('127.0.0.1', 0))
         return s.getsockname()[1]
@@ -57,15 +73,22 @@ class Rig:
         self.failures += not ok
 
     def dial(self, key):
-        """q2-iroh dial to the Q2 (a kept key, or None for a new one), a local port in front of it, and that port."""
-        port = free_port()
-        argv = [self.iroh, 'dial', self.q2id, '--listen', f'127.0.0.1:{port}'] + (['--key', str(key)] if key else [])
-        d = self.start(*argv, log=f'dial{port}')
-        for _ in range(300):
-            if 'listening' in (self.work / f'dial{port}.out').read_text() or d.poll() is not None:
-                break
-            time.sleep(0.1)
-        return d, port
+        """q2-iroh dial to the Q2 (a kept key, or None for a new one), a local port in front of it, and that port. A
+        port free when chosen may be given to another process before dial binds it: dial then exits, and another
+        port is tried."""
+        for _ in range(5):
+            port = free_port()
+            argv = [self.iroh, 'dial', self.q2id, '--listen', f'127.0.0.1:{port}'] + (['--key', str(key)] if key else [])
+            d = self.start(*argv, log=f'dial{port}')
+            for _ in range(300):
+                if 'listening' in (self.work / f'dial{port}.out').read_text():
+                    return d, port
+                if d.poll() is not None:
+                    break
+                time.sleep(0.1)
+            if d.poll() is None:
+                return d, port
+        raise RuntimeError('q2-iroh dial never listened')
 
     def session(self, port):
         return client.Session(socket.create_connection(('127.0.0.1', port), timeout=10), 'iroh e2e phone')
@@ -102,10 +125,10 @@ def main(argv=None):
     try:
         subprocess.run(['clang', '-O1', '-DCODA_HOST', '-w', '-I', str(PATCH), *(str(PATCH / f) for f in SOURCES),
                         SQLITE, '-o', str(work / 'coda-rc')], check=True)
-        port, iport = free_port(), free_port()
         root = rig.root
-        rig.start(str(work / 'coda-rc'), '--root', str(root), '--no-ble', '--no-mdns', '--port', str(port),
-                  '--iroh-port', str(iport), log='coda-rc')
+        rig.start(str(work / 'coda-rc'), '--root', str(root), '--no-ble', '--no-mdns', '--port', '0',
+                  '--iroh-port', 'any', log='coda-rc')
+        port, iport = daemon_ports(root)
         rig.start(a.iroh, 'serve', '--key', str(work / 'q2.key'), '--info', str(work / 'info'),
                   '--forward-named', f'127.0.0.1:{iport}', '--allow-file', str(root / 'tmp/coda-rc.iroh-allow'),
                   '--open-while', str(root / 'tmp/coda-rc.qr'), '--log', str(work / 'q2-iroh.log'), log='serve')

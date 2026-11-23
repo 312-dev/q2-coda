@@ -37,6 +37,7 @@ EVENT = '5645283b-18bb-419e-b338-f089cfc8dced'
 INFO = 'c7f73d6b-93b1-46b5-8892-1ba59bdb7513'
 H_NAME, H_CONTROL, H_EVENT, H_CCCD, H_INFO = 3, 8, 10, 11, 13
 ADD_ADV, REMOVE_ADV, DISCONNECT = 0x3e, 0x3f, 0x14
+LISTENING = re.compile(r'start: tcp (\d+) listening')  # the daemon's start line, with the port it got
 STAMP = re.compile(r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ ')  # a log line's UTC stamp, ulog's
 
 
@@ -118,11 +119,9 @@ class Q2:
         copy = root / 'coda-rc.so'  # a copy of its own: the daemon's statics start at zero
         shutil.copy(so, copy)
         self.lib = ctypes.CDLL(str(copy))
-        with socket.socket() as s:
-            s.bind(('127.0.0.1', 0))
-            port = s.getsockname()[1]
-        self.port = port
-        args = [b'coda-rc', b'--root', str(root).encode(), b'--port', str(port).encode(), b'--ble-sim',
+        # --port 0: the kernel's pick, read back from the daemon's start line. A port chosen here and closed for the
+        # daemon to bind could be given to another worktree's test in between (2026-11-22): nothing listened.
+        args = [b'coda-rc', b'--root', str(root).encode(), b'--port', b'0', b'--iroh-port', b'0', b'--ble-sim',
                 str(self.sim).encode()]
         self.argv = (ctypes.c_char_p * len(args))(*args)
         self.loop = threading.Thread(target=self.lib.coda_main, args=(len(args), self.argv), daemon=True)
@@ -130,7 +129,8 @@ class Q2:
         # Its log's start line, written once the TCP port listens: the pid file comes before the device id's fsync and
         # the listen, and a test that connected on the pid file alone was refused when the disk was slow (a loaded
         # machine, 2026-11-22: test_unauthenticated_tcp_sessions_give_way_and_time_out, ECONNREFUSED)
-        assert wait_for(lambda: any('start: tcp' in line for line in self.log()))
+        assert wait_for(lambda: any(LISTENING.match(line) for line in self.log()))
+        self.port = next(int(m[1]) for m in map(LISTENING.match, self.log()) if m)
 
     def config(self, text):
         (self.root / 'mnt/data/config.ini').write_text(text)
@@ -544,7 +544,8 @@ def test_no_ble_opens_nothing(daemon_so, tmp_path):
     (root / 'tmp').mkdir()
     shutil.copy(daemon_so, root / 'c.so')
     lib = ctypes.CDLL(str(root / 'c.so'))
-    args = [b'coda-rc', b'--root', str(root).encode(), b'--port', b'0', b'--no-ble', b'--ble-sim', str(sim).encode()]
+    args = [b'coda-rc', b'--root', str(root).encode(), b'--port', b'0', b'--iroh-port', b'0', b'--no-ble', b'--ble-sim',
+            str(sim).encode()]
     argv = (ctypes.c_char_p * len(args))(*args)
     t = threading.Thread(target=lib.coda_main, args=(len(args), argv), daemon=True)
     t.start()
@@ -554,6 +555,30 @@ def test_no_ble_opens_nothing(daemon_so, tmp_path):
     lib.crc_host_quit()
     t.join(5)
     shutil.rmtree(sim)
+
+
+@pytest.mark.parametrize('which', ['tcp', 'iroh'])
+def test_a_taken_port_ends_the_daemon_and_says_so(daemon_so, tmp_path, which):
+    """A port another process holds: the daemon does not run with no listener (the shim would take it for alive and
+    never start it again, docs/internals.md#car-remote), logs why and leaves no pid file; the shim starts it again
+    CR_RESTART_MS later."""
+    root = tmp_path
+    (root / 'tmp').mkdir()
+    shutil.copy(daemon_so, root / 'c.so')
+    lib = ctypes.CDLL(str(root / 'c.so'))
+    holder = socket.socket()
+    holder.bind(('127.0.0.1', 0))  # bound and not listening, as another program's
+    taken = str(holder.getsockname()[1]).encode()
+    ports = [b'--port', taken, b'--iroh-port', b'0'] if which == 'tcp' else [b'--port', b'0', b'--iroh-port', taken]
+    args = [b'coda-rc', b'--root', str(root).encode(), *ports, b'--no-ble']
+    argv = (ctypes.c_char_p * len(args))(*args)
+    try:
+        assert lib.coda_main(len(args), argv) == 1
+    finally:
+        holder.close()
+    log = (root / 'tmp/coda-rc.log').read_text()
+    assert 'start failed: tcp' in log and 'not running' in log and 'start: tcp' not in log
+    assert not (root / 'tmp/coda-rc.pid').exists()
 
 
 def test_each_log_line_starts_with_its_utc_time(daemon_so, tmp_path):
