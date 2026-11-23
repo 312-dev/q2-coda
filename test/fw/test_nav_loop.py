@@ -4131,3 +4131,25 @@ def test_touch_mode_is_a_touch_on_rows_not_on_the_keyboard_or_lock_window(fw, st
     fw.fn('ringnav_touch', C.c_int, C.c_void_p, C.c_void_p)(None, C.create_string_buffer(0x40))
     fw.var('g_lockscreen_pageflag', C.c_ubyte).value = 0
     assert st('touch_mode').value == (where == 'list')
+
+
+class Cw(C.Structure):  # card_watch.c's cw
+    _fields_ = [('state', C.c_int), ('in_', C.c_int), ('mounts', C.c_int), ('gen', C.c_uint)]
+
+
+def test_card_mounted_reads_proc_mounts_again_only_when_the_watch_saw_a_change(fw):
+    """catalogue_poll, every card write and the Storage page ask card_mounted; with card_watch.c's thread
+    watching /proc/mounts, the table is read once per generation, not per call. Without the thread, every call."""
+    files = Files(fw, {'/proc/mounts': b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n'})
+    reads = []
+    fw.mock('fw_fopen', lambda path, mode, *_: reads.append(C.string_at(path)) or files.fopen(path, mode))
+    mounted = fw.fn('card_mounted', C.c_int)
+    assert [mounted() for _ in range(50)] == [1] * 50 and len(reads) == 50  # no watch: each call
+    cw = fw.var('card_watch__cw', Cw)
+    cw.state, cw.gen = 1, 5
+    reads.clear()
+    assert [mounted() for _ in range(50)] == [1] * 50 and len(reads) == 1
+    files.files['/proc/mounts'] = b''  # handed to USB storage
+    assert mounted() == 1 and len(reads) == 1  # not seen yet
+    cw.gen = 6  # the thread's mark
+    assert mounted() == 0 and mounted() == 0 and len(reads) == 2
