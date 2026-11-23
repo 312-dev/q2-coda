@@ -1292,3 +1292,10 @@ def test_the_subsonic_contract_is_planned_for_its_sides(path):
     plan = json.loads(affected.plan_for({path: {1}}, REPO).to_json())
     assert 'test/subsonic_contract.py' in plan['other'] or gate.everything(plan)
     assert 'test/subsonic_contract.py' not in json.loads(affected.plan_for({'patch/home.c': {1}}, REPO).to_json())['other']
+
+
+def test_an_integration_branch_given_a_base_runs_that_diffs_plan():
+    """An integrator's run after one merge names its base (or a --plan-json); only a bare run plans everything."""
+    assert affected.runs_everything(False, None, 'integ/q2-1129')
+    assert not affected.runs_everything(False, 'integ/q2-1128', 'integ/q2-1129')
+    assert affected.runs_everything(True, 'integ/q2-1128', 'fix/x') and not affected.runs_everything(False, None, 'fix/x')

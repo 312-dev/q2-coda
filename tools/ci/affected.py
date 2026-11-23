@@ -6,7 +6,8 @@
     python3 tools/ci/affected.py --run BUILD          # and run it, the suites at once (test/patch.py in one process)
     python3 tools/ci/affected.py --all --run BUILD    # everything: what an integration branch runs
 
-A feature branch runs what its files map to; an integration branch (release/*, integ/*, main) runs everything, as
+A feature branch runs what its files map to; an integration branch (release/*, integ/*, main) runs everything unless
+--base or --plan-json names what to run (an integrator's run after one merge: its diff, or a computed plan), as
 does any branch whose changes include a file no rule knows (`RULES`: an unknown file means all). The
 mapping is conservative: a change to the payload (patch/, a build input in tools/, assets/) runs all of
 test/patch.py, which executes the payload as one program. What gets narrowed:
@@ -352,6 +353,12 @@ def plan_for(changes, root=ROOT, patch_source=None):
     return p
 
 
+def runs_everything(all_, base, branch):
+    """Whether a run plans everything: --all, or an integration branch given no --base (a --plan-json is read
+    before this is asked)."""
+    return bool(all_ or (base is None and INTEGRATION.match(branch)))
+
+
 def changed(base, head='HEAD', root=ROOT):
     """{path: changed line numbers in head} between base's merge base with head and head, plus the work tree."""
     merge_base = subprocess.run(['git', '-C', str(root), 'merge-base', base, head], capture_output=True, text=True,
@@ -446,8 +453,8 @@ def run(plan, build, python, smoke=False, retry=True, cache=True, logs=None, pol
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--base', default=q2ci.trunk(), help='what the branch is compared with (default: the trunk, '
-                    f'now {q2ci.trunk()})')
+    ap.add_argument('--base', help='what the branch is compared with (default: the trunk, '
+                    f'now {q2ci.trunk()}); given, it is used on an integration branch too')
     ap.add_argument('--all', action='store_true', help='everything, as an integration branch runs')
     ap.add_argument('--json', action='store_true')
     ap.add_argument('--run', metavar='BUILD', nargs='?', const='', help='run the plan; BUILD for the suites that need one')
@@ -461,11 +468,11 @@ def main():
                             text=True).stdout.strip()
     if args.plan_json:
         plan = Plan.from_json(sys.stdin.read() if args.plan_json == '-' else pathlib.Path(args.plan_json).read_text())
-    elif args.all or INTEGRATION.match(branch):
+    elif runs_everything(args.all, args.base, branch):
         plan = Plan()
         plan.everything('--all' if args.all else f'{branch} is an integration branch: everything')
     else:
-        plan = plan_for(changed(args.base))
+        plan = plan_for(changed(args.base or q2ci.trunk()))
     d = plan.as_dict()
     if args.json:
         print(json.dumps(d, indent=1))
