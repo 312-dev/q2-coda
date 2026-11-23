@@ -1074,6 +1074,25 @@ def test_smoke_compares_the_screen_in_upright_boxes():
     assert smoke.differ(blank, lit(100, 200), smoke.HOME_LIST) == 1
 
 
+def test_smoke_tells_cover_flows_art_build_from_its_covers_and_an_albums_tracks():
+    """Cover Flow's page as demo held it on a pool copy (2026-11-23): "Preparing artwork n/5" is a text list with its
+    Cancel row and no carousel yet; the covers add a view holding the slide_menu; an album's tracks hide that view
+    under the list. smoke's "Center on an album" once landed on Cancel while a cold card's art was still building,
+    saw the screen change to the covers and passed, and the next step's Center opened the tracks instead of Now
+    Playing: the failure was reported two steps late, as a play that never came."""
+    def page(*views):
+        return ('window', True, list(views))
+    text_list = ('view', True, [('hscroll_label', True, []), ('list_view', True, [('scroll_view', True, [
+        ('list_item', True, [('hscroll_label', True, [])])])])])
+
+    def carousel(shown):
+        return ('view', shown, [('slide_menu', True, [('image', True, [])] * 5), ('hscroll_label', True, [])])
+    assert smoke.coverflow_screen(page(text_list)) == 'building'
+    assert smoke.coverflow_screen(page(text_list, carousel(True))) == 'covers'
+    assert smoke.coverflow_screen(page(text_list, carousel(False))) == 'tracks'
+    assert smoke.coverflow_screen(None) is None
+
+
 def test_smoke_looks_past_the_status_bar_and_a_toast():
     assert smoke.top([('system_bar', 'system_bar'), ('window', 'home_page'), ('dialog', 'msginfo_dialog')]) == 'home_page'
     assert smoke.top([('system_bar', 'system_bar'), ('window', 'home_page'), ('dialog', 'statusbar_dialog')]) == 'statusbar_dialog'
