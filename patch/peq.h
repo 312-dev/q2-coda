@@ -389,10 +389,8 @@ int thread_lower(int idle);   /* coverflow_loader.c: a worker's nice 19 and its 
 int ringnav_statx(int dirfd, const char *path, int flags, unsigned mask, void *buf);
 void *coverflow_album_tracks(void *r);
 unsigned album_id(void *r), album_dir(const char *p, int disc);
-/* navigation.c: Cover Flow's glide and its letter */
+/* nav/home_carousel.c: Cover Flow's glide */
 int carousel_glide(void *w, int goal, unsigned ms, int easing);
-void coverflow_letter(void *w, unsigned letter, unsigned now);
-void coverflow_letter_hold(void *w, unsigned letter);
 int ringnav_big_library(void); /* Display's Fast Navigation: letters, years and half copies */
 /* A letter with this bit is the Year sort's year instead, in its low bits, 0 undated. */
 #define CF_YEAR 0x80000000u
