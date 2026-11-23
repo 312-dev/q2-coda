@@ -1263,6 +1263,8 @@ const char *usb_car_name(void);
 /* output_rule.c: no playback without an output (docs/internals.md#no-playback-without-an-output) */
 void output_rule_config(void);
 int ringnav_valid_output(void), stock_valid_output_trampoline(void);
+int ringnav_nav_to(const char *name, const int *ctx),
+    stock_nav_to_trampoline(const char *, const int *);
 #if Q2POD_DEV
 /* adb_trust.c (docs/adb.md#authorization): adbd's question on the card, its answer back through
  * usb_ui.c; Settings > General > Developer Options and Trusted Computers */

@@ -1299,8 +1299,11 @@ void playback_np_open(void) {
     navigator_switch_to_with_context("playing_page", context, 0);
 }
 /* Now Playing opened by a pick, which means play this, so a paused file goes on. Its Play waits for
- * the DAC by itself (dac_resume), so no stamp. */
+ * the DAC by itself (dac_resume), so no stamp. With nothing to play to, a paused file's pick is
+ * refused where it was made (stock's message), Now Playing not opened, as any refused start
+ * (output_rule.c ringnav_nav_to). */
 void playback_np(void) {
+    if (mclGetPlayStatus() == 3 && check_forbid_play_no_headset(0)) return;
     playback_np_open();
     if (mclGetPlayStatus() == 3) player_play_pause();
 }

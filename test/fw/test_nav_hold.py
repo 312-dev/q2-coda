@@ -3344,3 +3344,37 @@ def test_centre_after_a_drag_still_clicks_and_a_button_off_the_lists_keeps_stock
     ok = ui.child(win, 'button', 100, 250, 175, 40)  # a dialog's own button, in no list
     touch_path(ui, fw, ok, [(120, 260), (240, 262)])
     assert clicks(ui, ok) == [(ok, O['EVT_CLICK'])]
+
+
+# ---- a start from the menu with nothing to play to (output_rule.c): refused before anything changes ----
+
+def no_output(fw):
+    asked = []
+    fw.mock('check_forbid_play_no_headset', lambda quiet, *_: asked.append(quiet) or 1)
+    return asked
+
+
+def test_resume_with_nothing_to_play_to_sets_no_seek(hold, recs, ui, st, fw):
+    """Refused, the chapter's place is not left waiting (rs_go) for whatever plays that book next, and no page opens."""
+    chapters = book(recs)
+    hold.card.files[RESUME_FILE] = places_file((key_of(BOOK), 900))
+    hold.songs_page('allmusic_page', chapters, sel=0)
+    hold.hold()
+    assert hold.menu()[0] == 'Resume'
+    asked = no_output(fw)
+    hold.pick('Resume')
+    assert asked == [0] and 'playing_page' not in ui.went and ui.toasts == []
+    assert (st('rs_go').value, st('rs_go_key', C.c_uint).value) == (0, 0)
+
+
+def test_shuffle_with_nothing_to_play_to_keeps_the_play_mode(hold, recs, ui, fw):
+    """Shuffle sets stock's mode to Shuffle and says "Shuffled Songs" around its start (library_lists.c shuffle_play):
+    refused first, neither happens."""
+    albums = [recs(album=a, artist='The Beatles', kind=4, id_=i + 1) for i, a in enumerate(('Help!', 'Revolver'))]
+    hold.songs_page('localclass_page', albums, sel=1, cls=0xf003)
+    hold.hold()
+    hold.menu()
+    asked = no_output(fw)
+    hold.pick('Shuffle')
+    assert asked == [0] and 'playing_page' not in ui.went and ui.toasts == []
+    assert not fw.calls('config_playmode') and not fw.calls('mclLoadPlayList')
