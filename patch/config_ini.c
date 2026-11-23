@@ -84,7 +84,7 @@ int ringnav_ini_write(const char *path, const char *section, const char *key, co
 static const char *const settle_keys[][2] = {
     { "PLAYSET", "VOLUME" },     { "PLAYSET", "BT_VOLUME" }, { "Q2POD", "AIRVOL" },
     { "PLAYSET", "MAXVOLUME" },  { "PLAYSET", "BOOTVOLUME" }, { "PLAYSET", "BALANCE" },
-    { "SYSSET", "LIGHTNESS" },   { "Q2POD", "XFADESEC" },
+    { "SYSSET", "LIGHTNESS" },
 };
 #define SETTLE_N (sizeof settle_keys / sizeof *settle_keys)
 static struct {

@@ -613,27 +613,30 @@ def test_play_flips_the_pause_at_once(fw):
 # Crossfade's page
 
 class Xf(C.Structure):
-    _fields_ = [*((k, C.c_int) for k in 'read on seconds done'.split()), ('key', C.c_int * 8),
+    _fields_ = [*((k, C.c_int) for k in 'read on done'.split()), ('key', C.c_int * 8),
                 *((k, C.c_int) for k in 'stops counted ctx sliding unsaved setting rs_read rs_min mono_read mono swap_read swap'.split()),
                 *((k, C.c_void_p) for k in 'flag mono_flag swap_flag press_file swap_label mono_label page sw view slider dec add label'.split()),
-                ('press', C.c_uint), ('press_at', C.c_uint)]
+                ('press', C.c_uint), ('press_at', C.c_uint), ('xfade_label', C.c_void_p), ('shown', C.c_int)]
 
 
 def xf(fw):
     return fw.var('crossfade__xf', Xf)
 
 
-@pytest.mark.parametrize('ctx, want', ((0, 1), (1, 0), (2, 0), (3, 1)))
-def test_switched_crossfade_and_night_shift_have_the_switch(fw, ctx, want):
+@pytest.mark.parametrize('ctx, want', ((0, 0), (1, 0), (2, 0), (3, 1), (4, 0)))
+def test_only_night_shifts_page_has_the_switch(fw, ctx, want):
     xf(fw).ctx = ctx
     assert fw.fn('crossfade__switched', C.c_int)() == want
 
 
-@pytest.mark.parametrize('stored, seconds', (('5', 5), ('1', 1), ('15', 15), ('0', 5), ('16', 5), ('x', 5), ('', 5)))
-def test_crossfade_seconds_saved_must_be_in_range(fw, stored, seconds):
-    config(fw, {'XFADESEC': stored})
+# Smart Crossfade's one switch (crossfade.c settings): Q2POD XFADE, which the length picker before it saved too, so a
+# config with Crossfade on at any length reads On; XFADESEC is not read.
+@pytest.mark.parametrize('stored, on', (({'XFADE': '1', 'XFADESEC': '7'}, 1), ({'XFADE': '1', 'XFADESEC': '15'}, 1),
+                                        ({'XFADE': '0', 'XFADESEC': '7'}, 0), ({'XFADESEC': '7'}, 0), ({}, 0), ({'XFADE': '1'}, 1)))
+def test_smart_crossfade_reads_the_crossfade_switch_saved_before_it(fw, stored, on):
+    config(fw, stored)
     fw.fn('crossfade__settings', None)()
-    assert xf(fw).seconds == seconds
+    assert xf(fw).on == on
 
 
 @pytest.mark.parametrize('stored, want', (('0', 0), ('20', 20), ('25', 25), ('120', 120), ('19', 30), ('15', 30), ('125', 30), ('33', 30), ('', 30), ('00', 30), ('x', 30)))
@@ -653,9 +656,7 @@ def test_a_config_line_of_255_bytes_fits_every_reader(fw):
     """toolsReadConfig takes no size and copies a whole line, up to 255 bytes (its fgets): each reader's
     buffer holds one (a shorter one fails under ASan here)."""
     def line(digits): return digits + ' ' * (255 - len(digits))
-    config(fw, {'XFADESEC': line('7'), 'RESUMEMIN': line('45')})
-    fw.fn('crossfade__settings', None)()
-    assert xf(fw).seconds == 7
+    config(fw, {'RESUMEMIN': line('45')})
     assert fw.fn('resume_min', C.c_int)() == 45
     _, kelvin, _, _ = night(fw, {'NIGHTK': line('3000')})
     assert kelvin() == 3000
@@ -670,44 +671,29 @@ def page(fw, ctx, values=None):
     return x, written, fw.fn('crossfade__set_value', None, C.c_int, C.c_int)
 
 
-def test_the_crossfade_slider_runs_off_then_1_to_15(fw):
-    x, written, set_value = page(fw, 0, {'XFADE': 1, 'XFADESEC': 5})
-    set_value(0, 0)
-    assert (x.on, x.seconds) == (0, 5) and written == [('XFADE', 0), ('XFADESEC', 5)]  # Off keeps the length
-    set_value(9, 0)
-    assert (x.on, x.seconds) == (1, 9)
-    set_value(-3, 0)
-    assert x.on == 0
-    set_value(99, 0)
-    assert (x.on, x.seconds) == (1, 15)
-
-
 def test_a_value_it_already_has_saves_nothing(fw):
-    x, written, set_value = page(fw, 0, {'XFADE': 1, 'XFADESEC': 5})
-    set_value(5, 0)
-    assert written == []
-    x.on = 0
-    set_value(0, 0)
+    x, written, set_value = page(fw, 2, {'RESUMEMIN': '30'})
+    set_value(30, 0)
     assert written == []
 
 
 def test_a_drag_saves_at_its_release(fw):
-    x, written, set_value = page(fw, 0, {'XFADE': 1, 'XFADESEC': 5})
-    set_value(7, 1)
-    set_value(8, 1)
-    assert x.seconds == 8 and written == [] and x.unsaved == 1
-    set_value(8, 0)  # the release, on a value it has
-    assert written == [('XFADE', 1), ('XFADESEC', 8)] and x.unsaved == 0
+    x, written, set_value = page(fw, 2, {'RESUMEMIN': '30'})
+    set_value(40, 1)
+    set_value(45, 1)
+    assert x.rs_min == 45 and written == [] and x.unsaved == 1
+    set_value(45, 0)  # the release, on a value it has
+    assert written == [('RESUMEMIN', 45)] and x.unsaved == 0
 
 
 def test_a_drag_never_released_saves_as_the_page_closes(fw):
-    x, written, set_value = page(fw, 0, {'XFADE': 1, 'XFADESEC': 5})
+    x, written, set_value = page(fw, 2, {'RESUMEMIN': '30'})
     x.page = 0x7000
     x.sw = x.slider = x.label = 0x7100
-    set_value(7, 1)
+    set_value(40, 1)
     assert written == []
     assert fw.fn('crossfade__gone', C.c_int, C.c_void_p, C.c_void_p)(0x7000, None) == 0
-    assert written == [('XFADE', 1), ('XFADESEC', 7)] and x.page is None and x.ctx == 0
+    assert written == [('RESUMEMIN', 40)] and x.page is None and x.ctx == 0
 
 
 def test_another_page_s_close_changes_nothing(fw):
@@ -730,8 +716,7 @@ def test_the_resume_slider_on_its_value_is_nothing(fw):
     assert written == []
 
 
-@pytest.mark.parametrize('ctx, stored, want', ((0, {'XFADE': 0, 'XFADESEC': 7}, 0), (0, {'XFADE': 1, 'XFADESEC': 7}, 7),
-                                               (2, {'RESUMEMIN': '0'}, 15), (2, {'RESUMEMIN': '45'}, 45),
+@pytest.mark.parametrize('ctx, stored, want', ((2, {'RESUMEMIN': '0'}, 15), (2, {'RESUMEMIN': '45'}, 45),
                                                (3, {'NIGHTK': '5000'}, 0), (3, {'NIGHTK': '2000'}, 30), (1, {'WHEELSENSITIVITY': '120'}, 120)))
 def test_the_slider_s_value_for_each_page(fw, ctx, stored, want):
     page(fw, ctx, stored)
@@ -774,24 +759,18 @@ def test_the_switch_cycles_night_shift_off_on_auto(fw):
     assert seen == [1, 2, 0] and [v for k, v in written] == [1, 2, 0]
 
 
-def test_the_switch_turns_crossfade_on_and_off(fw):
-    x, written, _ = page(fw, 0, {'XFADE': 0, 'XFADESEC': 9})
-    fw.fn('crossfade__toggle', C.c_int, C.c_void_p, C.c_void_p)(None, None)
-    assert x.on == 1 and written == [('XFADE', 1), ('XFADESEC', 9)]
-
-
 def test_a_page_with_no_switch_ignores_it(fw):
     x, written, _ = page(fw, 2)
     fw.fn('crossfade__toggle', C.c_int, C.c_void_p, C.c_void_p)(None, None)
     assert not written
 
 
-@pytest.mark.parametrize('ctx, stored, sign, want', ((0, {'XFADE': 1, 'XFADESEC': 5}, 1, 6), (0, {'XFADE': 1, 'XFADESEC': 5}, -1, 4),
+@pytest.mark.parametrize('ctx, stored, sign, want', ((1, {'WHEELSENSITIVITY': '50'}, 1, 60), (1, {'WHEELSENSITIVITY': '50'}, -1, 40),
                                                      (2, {'RESUMEMIN': '30'}, 1, 35), (2, {'RESUMEMIN': '20'}, -1, 0)))
 def test_plus_and_minus_step_by_the_page_s_tick(fw, ctx, stored, sign, want):
     x, _, _ = page(fw, ctx, stored)
     fw.fn('crossfade__step', C.c_int, C.c_void_p, C.c_void_p)(sign, None)
-    assert (x.seconds if ctx == 0 else x.rs_min) == want
+    assert (fw.fn('wheel_pct', C.c_int)() if ctx == 1 else x.rs_min) == want
 
 
 def keyed(fw, ctx, stored):
@@ -801,12 +780,12 @@ def keyed(fw, ctx, stored):
     return x, written, fw.fn('xfade_key', C.c_int, C.c_void_p, C.c_uint)
 
 
-def test_the_wheel_sets_the_length_and_other_keys_are_left(fw):
-    x, _, key = keyed(fw, 0, {'XFADE': 1, 'XFADESEC': 5})
-    assert key(0x7000, NEXT) == 1 and x.seconds == 6
-    assert key(0x7000, PREV) == 1 and x.seconds == 5
+def test_the_wheel_steps_the_value_and_other_keys_are_left(fw):
+    x, _, key = keyed(fw, 2, {'RESUMEMIN': '30'})
+    assert key(0x7000, NEXT) == 1 and x.rs_min == 35
+    assert key(0x7000, PREV) == 1 and x.rs_min == 30
     assert key(0x7000, PLAY) == 0
-    assert key(0x7001, NEXT) == 0 and x.seconds == 5
+    assert key(0x7001, NEXT) == 0 and x.rs_min == 30
 
 
 def test_centre_on_a_page_with_no_switch_goes_to_stock(fw):

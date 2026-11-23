@@ -569,7 +569,7 @@ void list_grown_foot(void *view, void *row, int step); /* nav/row_paint.c: and s
 void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);
 /* inline_slider.c: Settings' one-value rows that change in place
  * (docs/oled-design.md#inline-sliders) */
-enum { IS_MAXVOL, IS_BALANCE, IS_BRIGHT, IS_BOOTVOL, IS_XFADE, IS_KINDS };
+enum { IS_MAXVOL, IS_BALANCE, IS_BRIGHT, IS_BOOTVOL, IS_KINDS };
 void *inline_slider_row(void *view, const char *icon, int kind);
 void inline_pair(void *view, const char *icon, int kind);
 void inline_slider_sel(void *view, void *item), inline_slider_paint(void *w, void *canvas);

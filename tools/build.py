@@ -1984,6 +1984,7 @@ FUNCTIONS = {
  'mclStop': ('int', 'void'),
  'mclGetPlayTime': ('int', 'int *, int *'),
  'mclSetStartSeekTime': ('int', 'int'),
+ 'mclSetGaplessMode': ('int', 'int'),  # stock's Gapless row's setter (0x4bcfa4), with PLAYSET GAPLESS: Smart Crossfade turns it on
  'mcl_open_preload': ('int', 'void'),
  'mclLoadPlayList': ('int', 'void *, int, int'),
  'mcl_shuffle_pick': ('int', 'int'),

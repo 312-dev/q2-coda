@@ -48,19 +48,19 @@ assert texts()[0]=='Standby Limit: Off'; passed()  # out of range: Off
 # Playback: stock V1.36's thirteen rows less its last two (Volume and Album Display, whose page's rows are here, on
 # Display and on Library > Folders, and Folder skip, Library > Folders'), then ours, EQ and the Library first; stock's
 # Balance (10) stays, hidden, for the inline one, and Headphones Required (8), which is always on. The Sleep Timer, Volume (its slider page, below) and the Library open
-# from their rows; Max Volume, Balance and Crossfade's and Default Volume's values are inline sliders (inline_slider.c),
-# Crossfade and Default Volume switches with their slider row under them.
+# from their rows; Max Volume, Balance and Default Volume's value are inline sliders (inline_slider.c), Default Volume a
+# switch with its slider row under it; Smart Crossfade is one switch (crossfade.c xfade_row).
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13)
-assert len(rows)==12 and icons==['playset_gapless','playset_gapless','playset_memplay','playset_balance','playset_balance','system_powermanager','playset_maxvol','playset_maxvol','playset_bootvol','playset_bootvol','playset_balance','playset_folderjump'],icons
-assert texts()==['Crossfade','Duration','Resume Songs: 30 min','Mono Audio','Swap L/R','Sleep Timer','Volume: 0','Max Volume','Default Volume','Level','Balance','Library'],texts()
-assert len(m.nodes[m.settings_view]['children'])==23 and not set(m.entries[11:])&set(m.nodes[m.settings_view]['children'])
-assert [(m.entries+rows).index(c) for c in m.nodes[m.settings_view]['children']]==[2,24,3,7,13,14,6,15,8,18,19,20,21,22,0,9,23,10,16,17,1,4,5]  # EQ, Library first
-assert m.nodes[m.entries[10]].get('visible',1)==0 and m.nodes[rows[1]].get('visible',1)==0 and m.nodes[rows[9]].get('visible',1)==0  # stock's Balance; the sliders of switches that are off
+assert len(rows)==11 and icons==['playset_gapless','playset_memplay','playset_balance','playset_balance','system_powermanager','playset_maxvol','playset_maxvol','playset_bootvol','playset_bootvol','playset_balance','playset_folderjump'],icons
+assert texts()==['Smart Crossfade','Resume Songs: 30 min','Mono Audio','Swap L/R','Sleep Timer','Volume: 0','Max Volume','Default Volume','Level','Balance','Library'],texts()
+assert len(m.nodes[m.settings_view]['children'])==22 and not set(m.entries[11:])&set(m.nodes[m.settings_view]['children'])
+assert [(m.entries+rows).index(c) for c in m.nodes[m.settings_view]['children']]==[2,23,3,7,13,6,14,8,17,18,19,20,21,0,9,22,10,15,16,1,4,5]  # EQ, Library first
+assert m.nodes[m.entries[10]].get('visible',1)==0 and m.nodes[rows[8]].get('visible',1)==0  # stock's Balance; the slider of a switch that is off
 assert m.nodes[m.entries[8]].get('visible',1)==0  # Headphones Required: always on (output_rule.c), no row
-assert [click(5),m.opened[-1]]==[[],('systemset/sleepshutdown_page',None)]
-n=len(m.opened); assert click(7)==[] and len(m.opened)==n  # Max Volume: grabbed in place, no page
-assert click(8)==[(1,'PLAYSET','BOOTVOLFLAG')] and m.nodes[rows[9]].get('visible',1)==1  # Default Volume on: its Level shows
-assert click(11)==[] and m.opened[-1]==('playset/playset_page',None) and m.get(payload_syms['playset_sub'])==0
+assert [click(4),m.opened[-1]]==[[],('systemset/sleepshutdown_page',None)]
+n=len(m.opened); assert click(6)==[] and len(m.opened)==n  # Max Volume: grabbed in place, no page
+assert click(7)==[(1,'PLAYSET','BOOTVOLFLAG')] and m.nodes[rows[8]].get('visible',1)==1  # Default Volume on: its Level shows
+assert click(10)==[] and m.opened[-1]==('playset/playset_page',None) and m.get(payload_syms['playset_sub'])==0
 passed()
 # Playback > Library (library_settings.c): stock's Playback page again, its rows gone, ours built; a chevron row opens
 # its page the same way (playset_sub naming it while its init runs).
@@ -289,8 +289,8 @@ class MonoMachine(QueueMachine):
         self.calls.append((name,)); self.returns(self.flag if name=='mono:mmap' else 3 if name=='mono:open' else 4 if name=='mono:write' else 0)
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13,cls=MonoMachine)
 assert not [c for c in m.calls if c[0]=='mono:open']
-assert click(3)==[(1,'Q2POD','MONO')] and texts()[3]=='Mono Audio' and m.get(m.flag)==1  # after Crossfade, its Duration and Resume Songs
-assert click(3)==[(0,'Q2POD','MONO')] and texts()[3]=='Mono Audio' and m.get(m.flag)==0 and switch_image(m,rows[3])=='switch_off'
+assert click(2)==[(1,'Q2POD','MONO')] and texts()[2]=='Mono Audio' and m.get(m.flag)==1  # after Smart Crossfade and Resume Songs
+assert click(2)==[(0,'Q2POD','MONO')] and texts()[2]=='Mono Audio' and m.get(m.flag)==0 and switch_image(m,rows[2])=='switch_off'
 assert [c[0] for c in m.calls if c[0]=='mono:open']==[]; passed()  # mapped once
 # A failed map must never publish an inode that consumers could retain forever.
 class FailedMapMachine(MonoMachine):
@@ -299,7 +299,7 @@ class FailedMapMachine(MonoMachine):
             self.calls.append(('mono:mmap',)); self.returns(0xffffffff); return
         return super().hook(u,address,size,unused)
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13,cls=FailedMapMachine)
-assert click(3)==[(1,'Q2POD','MONO')]
+assert click(2)==[(1,'Q2POD','MONO')]
 assert 'mono:mmap' in [c[0] for c in m.calls] and 'mono:rename' not in [c[0] for c in m.calls]
 passed()
 # Mono Audio with the EQ off and the player stopped (mono_sync): the filter is not attached until something
@@ -309,7 +309,7 @@ class MonoStoppedMachine(MonoMachine):
         super().__init__(); self.word(syms['g_equalizer_flag'],0); self.handlers.pop(syms['mclGetPlayStatus'],None)
         self.word(PLAY_STATUS,1); self.handlers[payload_syms['peq_attach']]='mono:peq_attach'
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13,cls=MonoStoppedMachine)
-assert click(3)==[(1,'Q2POD','MONO')] and not [c for c in m.calls if c[0]=='mono:peq_attach']
+assert click(2)==[(1,'Q2POD','MONO')] and not [c for c in m.calls if c[0]=='mono:peq_attach']
 m.word(PLAY_STATUS,2)
 m.call(address=payload_syms['mono_sync'],args=(0,0,0,0),gap=0)
 assert [c[0] for c in m.calls].count('mono:peq_attach')==1
@@ -318,19 +318,19 @@ m.call(address=payload_syms['mono_sync'],args=(0,0,0,0),gap=0)
 assert 'mono:peq_attach' not in [c[0] for c in m.calls]; passed()
 # Playback Setting restacks by use (navigation.c playset_order): stock's rows by id, then ours.
 def stacked(m,view_name): return [(m.entries+rows).index(c) for c in m.nodes[named(m,m.top,view_name)]['children'] if c in m.entries+rows]
-assert stacked(m,'scroll_view_playset')==[2,24,3,7,13,14,6,15,8,18,19,20,21,22,0,9,23,10,16,17,1,4,5]; passed()  # EQ, Library first
+assert stacked(m,'scroll_view_playset')==[2,23,3,7,13,6,14,8,17,18,19,20,21,0,9,22,10,15,16,1,4,5]; passed()  # EQ, Library first
 assert all(r in m.entries+rows for r in m.nodes[m.settings_view]['children'])  # no headings
-for i in (2,5,6,11):  # Resume Songs, Sleep Timer, Volume and Library open pages; the switches and sliders don't
+for i in (1,4,5,10):  # Resume Songs, Sleep Timer, Volume and Library open pages; the switches and sliders don't
     button=m.nodes[rows[i]]['children'][0]
     assert 'list_into' in [m.nodes[c].get('image') for c in m.nodes[button]['children']]  # a value row's _setting_value follows it
 passed()
 # Swap L/R uses its own persistent flag, immediately below Mono Audio.
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13,cls=MonoMachine)
-assert texts()[4]=='Swap L/R'
-assert click(4)==[(1,'Q2POD','SWAPLR')] and texts()[4]=='Swap L/R' and m.get(m.flag)==1
-assert click(4)==[(0,'Q2POD','SWAPLR')] and texts()[4]=='Swap L/R' and m.get(m.flag)==0
+assert texts()[3]=='Swap L/R'
+assert click(3)==[(1,'Q2POD','SWAPLR')] and texts()[3]=='Swap L/R' and m.get(m.flag)==1
+assert click(3)==[(0,'Q2POD','SWAPLR')] and texts()[3]=='Swap L/R' and m.get(m.flag)==0
 m,rows,texts,*_=settings_page('audioset','scroll_view_playset',{'SWAPLR':'1'},stock_rows=13)
-assert texts()[4]=='Swap L/R'; passed()
+assert texts()[3]=='Swap L/R'; passed()
 # Folder Root (#49): the row cycles the card's top-level folders, case aside, then the card, saving Q2POD
 # FOLDERROOT each time. Not offered: files, dot-folders, names with an edge space or over 200 bytes (a
 # config.ini line can't keep them). A saved folder gone moves on to the next name after it.
@@ -343,18 +343,17 @@ for _ in range(6):
     saved.append((m.config['FOLDERROOT'],texts()[0]))
 assert [v for v,_ in saved]==['Música ñ','Unknown','Zeta','','alpha','B'*200]
 assert [t for _,t in saved]==['Folder Root: '+(v or 'Card') for v,_ in saved]; passed()
-# Crossfade (crossfade.c xfade_state): the switch row, its Duration row shown while on holding the saved length; an
-# unreadable one is the default.
-for config,on,sec in (({'XFADE':'1','XFADESEC':'7'},1,7),({'XFADE':'1','XFADESEC':'15'},1,15),({'XFADE':'1','XFADESEC':'16'},1,5),({'XFADESEC':'7'},0,7)):
+# Smart Crossfade (crossfade.c xfade_row): one switch row, Q2POD XFADE; a config saved with the length picker before
+# it reads On whenever Crossfade was on, at any length (XFADESEC is not read).
+for config,on in (({'XFADE':'1','XFADESEC':'7'},1),({'XFADE':'1','XFADESEC':'16'},1),({'XFADE':'0','XFADESEC':'7'},0),({'XFADESEC':'7'},0),({},0)):
     m,rows,texts,*_=settings_page('audioset','scroll_view_playset',config,stock_rows=13)
-    assert texts()[:2]==['Crossfade','Duration'] and m.nodes[rows[1]].get('visible',1)==on
-    assert m.call(address=payload_syms['inline_value'],args=(4,0,0,0),gap=0)==sec,config
+    assert texts()[:2]==['Smart Crossfade','Resume Songs: 30 min'] and switch_image(m,rows[0])==('switch_on' if on else 'switch_off'),config
 passed()
 # Resume Songs (crossfade.c resume_min): the row shows Q2POD RESUMEMIN, 30 min unless 0 or a five in 20-120.
 for config,text in (({},'30 min'),({'RESUMEMIN':'0'},'Off'),({'RESUMEMIN':'120'},'120 min'),({'RESUMEMIN':'125'},'30 min'),
                     ({'RESUMEMIN':'22'},'30 min'),({'RESUMEMIN':'15'},'30 min'),({'RESUMEMIN':'x'},'30 min')):
     m,rows,texts,*_=settings_page('audioset','scroll_view_playset',config,stock_rows=13)
-    assert texts()[2]=='Resume Songs: '+text and m.nodes[m.nodes[m.nodes[rows[2]]['children'][0]]['children'][1]].get('name')=='label_resumemin',config
+    assert texts()[1]=='Resume Songs: '+text and m.nodes[m.nodes[m.nodes[rows[1]]['children'][0]]['children'][1]].get('name')=='label_resumemin',config
 passed()
 # Wheel sensitivity (playback.c wheel_pct, test/playback.py's travel): Display → Controls' last row in both
 # builds, Q2POD WHEELSENSITIVITY as 1.0.6 saved it, 50% unless a canonical ten in 10-200.
@@ -413,43 +412,45 @@ assert m.confirm()==11 and [c[0] for c in m.calls].count('navigator_back')==1; p
 # saved (a drag at its release); Centre goes back.
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13)
 m.stack=[m.top]; m.nodes[m.wm]=dict(type='window_manager',name='',children=m.stack,visible=1)
-assert click(2)==[] and m.nodes[m.top]['name']=='bootvol_page' and m.nodes[m.title]['text']=='Resume Songs'
+assert click(1)==[] and m.nodes[m.top]['name']=='bootvol_page' and m.nodes[m.title]['text']=='Resume Songs'
 assert m.nodes[m.switch]['visible']==0 and m.nodes[m.vol]['text']=='30 min'
 R='Q2POD','RESUMEMIN'
-assert turn()==[(35,*R)] and m.nodes[m.vol]['text']=='35 min' and texts()[2]=='Resume Songs: 35 min'
+assert turn()==[(35,*R)] and m.nodes[m.vol]['text']=='35 min' and texts()[1]=='Resume Songs: 35 min'
 assert press(m.dec)==[(30,*R)] and turn(O['KEY_PREV'])==[(25,*R)] and turn(O['KEY_PREV'])==[(20,*R)]
-assert turn(O['KEY_PREV'])==[(0,*R)] and m.nodes[m.vol]['text']=='Off' and texts()[2]=='Resume Songs: Off'
+assert turn(O['KEY_PREV'])==[(0,*R)] and m.nodes[m.vol]['text']=='Off' and texts()[1]=='Resume Songs: Off'
 assert turn(O['KEY_PREV'])==[] and press(m.add)==[(20,*R)]  # Off is the bottom; up from it is 20
 m.nodes[m.slider]['value']=63; assert press(m.slider,O['EVT_VALUE_CHANGED'])==[(65,*R)] and m.nodes[m.vol]['text']=='65 min'
 m.nodes[m.slider]['value']=300; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[] and m.nodes[m.vol]['text']=='120 min'
 assert press(m.slider,O['EVT_VALUE_CHANGED'])==[(120,*R)] and turn()==[]
-m.nodes[m.slider]['value']=15; assert press(m.slider,O['EVT_VALUE_CHANGED'])==[(0,*R)] and texts()[2]=='Resume Songs: Off'
+m.nodes[m.slider]['value']=15; assert press(m.slider,O['EVT_VALUE_CHANGED'])==[(0,*R)] and texts()[1]=='Resume Songs: Off'
 assert m.confirm()==11 and [c[0] for c in m.calls].count('navigator_back')==1
 # A page closed mid-drag saves the dragged value once, as it closes.
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13)
 m.stack=[m.top]; m.nodes[m.wm]=dict(type='window_manager',name='',children=m.stack,visible=1)
-assert click(2)==[]
-m.nodes[m.slider]['value']=53; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[] and texts()[2]=='Resume Songs: 55 min'
-assert press(m.top,O['EVT_DESTROY'])==[(55,*R)] and texts()[2]=='Resume Songs: 55 min'; passed()
+assert click(1)==[]
+m.nodes[m.slider]['value']=53; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[] and texts()[1]=='Resume Songs: 55 min'
+assert press(m.top,O['EVT_DESTROY'])==[(55,*R)] and texts()[1]=='Resume Songs: 55 min'; passed()
 # Playback's Volume row opens it on the volume (crossfade.c xfade_open 4): no switch, 0 to Max Volume, heard and saved
 # at once (a drag at its release), the wheel vol_next's steps (1 a slow tick); Centre goes back.
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13)
 m.mock('device_set_volume'); m.byte(syms['g_volume'],30); m.byte(syms['g_maxvolume'],60)
 m.stack=[m.top]; m.nodes[m.wm]=dict(type='window_manager',name='',children=m.stack,visible=1)
-assert click(6)==[] and m.nodes[m.top]['name']=='bootvol_page' and m.nodes[m.title]['text']=='Volume'
+assert click(5)==[] and m.nodes[m.top]['name']=='bootvol_page' and m.nodes[m.title]['text']=='Volume'
 assert m.nodes[m.switch]['visible']==0 and m.nodes[m.vol]['text']=='30'
 V='PLAYSET','VOLUME'
-assert turn()==[(31,*V)] and m.nodes[m.vol]['text']=='31' and texts()[6]=='Volume: 31' and press(m.dec)==[(30,*V)]
+assert turn()==[(31,*V)] and m.nodes[m.vol]['text']=='31' and texts()[5]=='Volume: 31' and press(m.dec)==[(30,*V)]
 m.nodes[m.slider]['value']=90; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[] and m.nodes[m.vol]['text']=='60'
-assert press(m.slider,O['EVT_VALUE_CHANGED'])==[(60,*V)] and turn()==[] and texts()[6]=='Volume: 60'
+assert press(m.slider,O['EVT_VALUE_CHANGED'])==[(60,*V)] and turn()==[] and texts()[5]=='Volume: 60'
 assert m.confirm()==11 and [c[0] for c in m.calls].count('navigator_back')==1; passed()
-# Crossfade's row is its switch in place (inline_slider.c inline_pair): no page; each press saves both keys, and
-# its Duration row shows while it is on.
+# Smart Crossfade's row is one switch (crossfade.c xfade_click): no page. On with stock's Gapless off turns Gapless on
+# as stock's own row does (PLAYSET GAPLESS and stock's mclSetGaplessMode, the byte it sets); off leaves Gapless be.
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13)
 m.stack=[m.top]; m.nodes[m.wm]=dict(type='window_manager',name='',children=m.stack,visible=1)
-X=lambda on,sec: [(on,'Q2POD','XFADE'),(sec,'Q2POD','XFADESEC')]
-assert click(0)==X(1,5) and m.nodes[m.top]['name']!='bootvol_page' and texts()[0]=='Crossfade' and m.nodes[rows[1]].get('visible',1)
-assert click(0)==X(0,5) and not m.nodes[rows[1]].get('visible',1); passed()
+m.byte(O['MCL_GAPLESS'],0)
+assert click(0)==[(1,'Q2POD','XFADE'),(1,'PLAYSET','GAPLESS')] and m.u.mem_read(O['MCL_GAPLESS'],1)==b'\1'
+assert m.nodes[m.top]['name']!='bootvol_page' and texts()[0]=='Smart Crossfade' and switch_image(m,rows[0])=='switch_on'
+assert click(0)==[(0,'Q2POD','XFADE')] and m.u.mem_read(O['MCL_GAPLESS'],1)==b'\1' and switch_image(m,rows[0])=='switch_off'
+assert click(0)==[(1,'Q2POD','XFADE')]; passed()  # Gapless already on: left alone
 # Night Shift (nightshift.c): the main Display page's last row, after Appearance,
 # Coverflow and Controls; Q2POD NIGHTSHIFT and NIGHTK, 3400K unless a hundred in 2000-5000.
 for config,text in (({},'Off'),({'NIGHTSHIFT':'1'},'3400 K'),({'NIGHTSHIFT':'1','NIGHTK':'2700'},'2700 K'),({'NIGHTSHIFT':'1','NIGHTK':'5000'},'5000 K'),

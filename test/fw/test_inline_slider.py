@@ -58,15 +58,14 @@ def titles(view):
 
 
 def test_playback_s_values_are_inline_rows_and_each_switch_holds_its_slider(fw):
-    p = Playback(fw)  # Crossfade and Default Volume off
+    p = Playback(fw)  # Default Volume off
     t = titles(p.view)
     names = [n for n, _ in t]
     at = names.index
-    assert names[at('Crossfade') + 1] == 'Duration' and names[at('Max Volume') + 1] == 'Default Volume'
-    assert names[at('Default Volume') + 1] == 'Level'
-    assert dict(t)['Duration'] is False and dict(t)['Level'] is False  # under switches that are off
+    assert names[at('Max Volume') + 1] == 'Default Volume' and names[at('Default Volume') + 1] == 'Level'
+    assert dict(t)['Level'] is False  # under a switch that is off
     assert dict(t)['Max Volume'] and dict(t)['Balance'] and dict(t)['stock_10'] is False  # stock's Balance, hidden
-    for title in ('Max Volume', 'Balance', 'Duration', 'Level'):  # no chevron: they change in place
+    for title in ('Max Volume', 'Balance', 'Level'):  # no chevron: they change in place
         assert not any(c.props.get('image') == b'list_into' for c in p.item(title).children[0].children)
 
 
@@ -123,7 +122,7 @@ def test_inline_value_text(fw):
         text(kind, v, out, 16)
         return out.value.decode()
     assert [t(1, 0), t(1, -2), t(1, 10)] == ['Center', 'L 20%', 'R 100%']
-    assert [t(0, 80), t(2, 65), t(4, 6)] == ['80', '65%', '6 s']
+    assert [t(0, 80), t(2, 65), t(3, 6)] == ['80', '65%', '6']
 
 
 def test_brightness_leads_display_and_sets_the_backlight_through_stock(fw):
@@ -153,17 +152,6 @@ def test_default_volume_s_switch_shows_its_level_and_the_level_saves(fw):
     p.key(KEY_CENTER)
     p.click('Default Volume')
     assert not p.item('Level').visible and writes(fw)[-1] == ('BOOTVOLFLAG', 0)
-
-
-def test_crossfade_s_switch_and_duration_save_its_two_keys(fw):
-    p = Playback(fw, XFADE=b'1', XFADESEC=b'5')
-    assert p.item('Duration').visible
-    p.click('Duration')
-    p.key(KEY_NEXT)
-    assert writes(fw)[-2:] == [('XFADE', 1), ('XFADESEC', 6)]
-    p.key(KEY_CENTER)
-    p.click('Crossfade')
-    assert writes(fw)[-2:] == [('XFADE', 0), ('XFADESEC', 6)] and not p.item('Duration').visible
 
 
 def test_the_row_grows_on_its_timer_with_no_selection_paint(fw):
