@@ -223,6 +223,7 @@ struct slot {
     u8 packet[MAX_PACKET];
     unsigned len, tries;
     long sent;
+    u8 quiet; /* a position update's: its first sending not logged */
 };
 static struct slot slots[SLOTS];
 static unsigned head, count;
@@ -249,13 +250,28 @@ static void log_packet(int from_q2, const u8 *p, unsigned len, const char *note)
     H->log(m);
 }
 
+/* The log's volume (car-bt-power.md #4: 870 B/s on the 2026-11-22 drive, 85 % of it the position update a song
+ * plays with, twice a second, and its acknowledgement, five lines each): a position update's message, packet and
+ * reports, and each bare acknowledgement either way, are counted, not logged (trace_quiet, read by q2_iap.c io_send
+ * too), and the counts go in the link's health line. Sent again, a packet is logged. */
+static int msg_quiet, trace_quiet;
+static unsigned quiet_pos, quiet_in, quiet_out;
+/* An output report that is the car's bare acknowledgement whole: [id][00, a whole packet][FF 5A 00 09 40 ...] */
+static int iap2_bare_ack(const u8 *r, unsigned n) {
+    return n >= 2 + HEADER_LEN && r[1] == 0 && r[2] == IAP2_SOP1 && r[3] == IAP2_SOP2 && r[4] == 0 &&
+           r[5] == HEADER_LEN && r[6] == CTL_ACK;
+}
+
 static void send_ctl(u8 control, const u8 *payload, unsigned n, u8 seq) {
     u8 p[HEADER_LEN + 48 + 1];
     unsigned len = HEADER_LEN + (n ? n + 1 : 0);
     put_header(p, len, control, seq, 0);
     if (n) memcpy(p + HEADER_LEN, payload, n), p[HEADER_LEN + n] = cksum(payload, n);
-    log_packet(1, p, len, 0);
+    trace_quiet = control == CTL_ACK && !n;
+    if (trace_quiet) ++quiet_out;
+    else log_packet(1, p, len, 0);
     send_bytes(p, len);
+    trace_quiet = 0;
     unacked = 0;
 }
 
@@ -264,8 +280,10 @@ static void send_slot(struct slot *s) {
     s->packet[8] = cksum(s->packet, 8);
     s->tries++, s->sent = H->now();
     unacked = 0;
-    log_packet(1, s->packet, s->len, s->tries > 1 ? "(again)" : 0);
+    trace_quiet = s->quiet && s->tries == 1;
+    if (!trace_quiet) log_packet(1, s->packet, s->len, s->tries > 1 ? "(again)" : 0);
     send_bytes(s->packet, s->len);
+    trace_quiet = 0;
 }
 
 /* Messages waiting for room in the car's window: with retransmission on (the BMW's SYN gives 10 retries), no more
@@ -273,7 +291,7 @@ static void send_slot(struct slot *s) {
  * window (pump). */
 #define QUEUE 96
 static struct queued {
-    u8 session;
+    u8 session, quiet;
     unsigned len;
     u8 b[MAX_PACKET - HEADER_LEN - 1];
 } queue[QUEUE];
@@ -397,7 +415,8 @@ static void take_packet(const u8 *p, unsigned len) {
         log_packet(0, p, len, "(bad payload checksum: dropped)");
         return;
     }
-    log_packet(0, p, len, 0);
+    if (control == CTL_ACK && len == HEADER_LEN) ++quiet_in; /* a bare acknowledgement: counted (link_health) */
+    else log_packet(0, p, len, 0);
     if (control & CTL_RST) {
         reset_link();
         return;
@@ -562,7 +581,7 @@ static void enqueue(u8 session, const u8 *b, unsigned n) {
     }
     drop_said = 0;
     struct queued *q = &queue[(q_head + q_count++) % QUEUE];
-    q->session = session, q->len = n;
+    q->session = session, q->len = n, q->quiet = (u8)msg_quiet;
     memcpy(q->b, b, n);
     pump();
 }
@@ -575,7 +594,7 @@ static void pump(void) {
         put_header(s->packet, s->len, CTL_ACK, ++my_seq, q->session);
         memcpy(s->packet + HEADER_LEN, q->b, q->len);
         s->packet[HEADER_LEN + q->len] = cksum(q->b, q->len);
-        s->tries = 0;
+        s->tries = 0, s->quiet = q->quiet;
         if (rto) ++count; /* kept for sending again; with no retransmission, done with once sent */
         q_head = (q_head + 1) % QUEUE, --q_count;
         send_slot(s);
@@ -591,7 +610,7 @@ static void msg_send(void) {
         return;
     }
     m.b[2] = m.len >> 8, m.b[3] = m.len;
-    log_msg(1, m.b, m.len, 96);
+    if (!msg_quiet) log_msg(1, m.b, m.len, 96);
     enqueue(control_session, m.b, m.len);
 }
 
@@ -1670,7 +1689,9 @@ static void poll_now_playing(long now) {
     art_hold_at = 0;
     if (changed) send_now_playing(&n, 1);
     else if (!n.live && (n.state == 1 || n.pos_ms != np_last.pos_ms)) {
+        msg_quiet = 1, ++quiet_pos;
         msg_start(0x5001), group_start(1), param_u32(PB_POSITION, n.pos_ms), group_end(), msg_send();
+        msg_quiet = 0;
     }
     if ((playback_mask & 1u << PB_QUEUE_LIST) && n.qgen != np_last.qgen) ql_seen_at = now; /* the queue moved */
     np_last = n, np_sent = 1;
@@ -1801,15 +1822,17 @@ static void iap2_control_receive(const u8 *msg, unsigned len) {
  * car sent anything and the car acknowledged something new, the packets dropped from a full queue, and the quiet
  * against its limit. */
 static void link_health(long now, int bl) {
-    char t[300];
+    char t[400];
     link_health_at = now;
     long quiet = waiting_since ? now - (heard_at > waiting_since ? heard_at : waiting_since) : 0;
     snprintf(t, sizeof t,
              "link: health: reports waiting %d, queued %u, unacknowledged %u, sent %ld ms ago, heard %ld ms ago, "
-             "acknowledged %ld ms ago, dropped %u, quiet %ld of %ld ms",
+             "acknowledged %ld ms ago, dropped %u, quiet %ld of %ld ms; since the last, not logged: %u position updates,"
+             " %u bare acks in, %u out",
              bl, q_count, rto ? count : 0, sent_at ? now - sent_at : -1L, heard_at ? now - heard_at : -1L,
-             acked_at ? now - acked_at : -1L, dropped, quiet, link_quiet_ms);
+             acked_at ? now - acked_at : -1L, dropped, quiet, link_quiet_ms, quiet_pos, quiet_in, quiet_out);
     H->log(t);
+    quiet_pos = quiet_in = quiet_out = 0;
 }
 
 static void iap2_tick(void) {

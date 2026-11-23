@@ -254,14 +254,25 @@ static long boot_ms(void) {
 }
 /* One line, written whole: the shell's lines go to the same file (O_APPEND). Stamped with
  * CLOCK_MONOTONIC as seconds, dmesg's clock (equal to /proc/uptime with no suspend between). */
+/* The lines go to a child over a pipe (log_start), which writes them to the card, so no card write is ever in the
+ * loop: on the 2026-11-22 drive three of the stalls, 109 to 278 ms, were a log write. A line is one write, under
+ * PIPE_BUF, so it is never split or mixed with a child's. A full pipe (the card stalled for seconds) costs lines, not
+ * the loop: they are counted and said with the next line that goes. */
+static unsigned log_dropped;
 static void logline(const char *tag, const char *msg) {
     char line[3200];
     long ms = mono_ms();
     int n = snprintf(line, sizeof line, "%ld.%03ld %s %s\n", ms / 1000, ms % 1000, tag, msg);
     if (n > (int)sizeof line - 1) n = sizeof line - 1, line[n - 1] = '\n';
-    if (n > 0) write(logfd, line, n);
+    if (log_dropped) {
+        char said[96];
+        int k = snprintf(said, sizeof said, "%ld.%03ld log %u lines dropped (the log's writer was behind)\n",
+                         ms / 1000, ms % 1000, log_dropped);
+        if (write(logfd, said, k) == k) log_dropped = 0;
+    }
+    if (n > 0 && write(logfd, line, n) != n) ++log_dropped;
     long took = mono_ms() - ms;
-    if (took > log_slowest) log_slowest = took; /* the card's own pace, for the loop's stall line (loop_end) */
+    if (took > log_slowest) log_slowest = took; /* the pipe's pace: the card's, before log_start */
 }
 
 /* ---- the event loop's steps (docs/iphone-mode.md#the-loop-s-steps) ----
@@ -371,6 +382,82 @@ static void child_drop(void) {
         if (in[k].ep0 >= 0) close(in[k].ep0), in[k].ep0 = -1;
 }
 
+/* The log's writer (logline): a child that takes the lines from a pipe and appends each read whole to the card's
+ * file. Within a cable the file is capped: past LOG_TRIM (--log-cap) it keeps no packet trace (the pkt, msg, report,
+ * SETUP and file lines), and past twice that only q2-iap's own events (the probe and car lines: stalls, sessions, the verdict, the
+ * summary) and the link's (health, losses); each mark is said once. At its end (every write end closed: q2-iap and
+ * its children gone) it syncs the file. */
+#define LOG_TRIM (6 << 20)
+static unsigned long long log_trim = LOG_TRIM; /* --log-cap; the hard mark twice it */
+static int log_pid;
+static int log_keeps(const char *l, unsigned n, unsigned long long size) {
+    if (size < log_trim) return 1;
+    const char *sp = memchr(l, ' ', n), *m = sp ? memchr(sp + 1, ' ', n - (unsigned)(sp + 1 - l)) : 0;
+    if (!m) return 1;
+    ++m; /* the line's text after its stamp and tag */
+    unsigned rest = n - (unsigned)(m - l);
+    static const char *const trace[] = { "pkt ", "msg ", "report ", "SETUP ", "file " };
+    for (unsigned k = 0; k < sizeof trace / sizeof *trace; ++k)
+        if (rest >= strlen(trace[k]) && !memcmp(m, trace[k], strlen(trace[k]))) return 0;
+    if (size < 2 * log_trim) return 1;
+    return !memcmp(sp + 1, "probe ", 6) || !memcmp(sp + 1, "car ", 4) || (rest >= 5 && !memcmp(m, "link:", 5));
+}
+static void log_child(int in, int out) {
+    static char b[65536 + 200];
+    unsigned long long size = 0;
+    int said = 0;
+    for (;;) {
+        int r = (int)read(in, b, 65536);
+        if (r < 0 && ERRNO == EINTR) continue;
+        if (r <= 0) break;
+        if (size >= log_trim && said < 1 + (size >= 2 * log_trim)) {
+            int k = snprintf(b + r, 200, "log: past %llu bytes this cable: %s\n", size,
+                             size >= 2 * log_trim ? "only q2-iap's events and the link's kept from here"
+                                                  : "no packet trace from here");
+            write(out, b + r, k), ++said;
+        }
+        unsigned o = 0;
+        for (unsigned i = 0; i < (unsigned)r;) { /* whole lines, each kept or not */
+            char *nl = memchr(b + i, '\n', (unsigned)r - i);
+            unsigned e = nl ? (unsigned)(nl - b) + 1 : (unsigned)r;
+            if (log_keeps(b + i, e - i, size)) memmove(b + o, b + i, e - i), o += e - i;
+            i = e;
+        }
+        if (o && write(out, b, o) > 0) size += o;
+    }
+    fsync(out);
+    _exit(0);
+}
+static void log_start(void) {
+    int fds[2];
+    if (logfd == 2 || pipe_cloexec(fds)) return;
+    int pid = fork();
+    if (pid == 0) {
+        signal(SIGTERM, SIG_IGN), signal(SIGINT, SIG_IGN), signal(SIGHUP, SIG_IGN); /* it ends with the pipe */
+        close(fds[1]);
+        log_child(fds[0], logfd);
+    }
+    close(fds[0]);
+    if (pid < 0) {
+        close(fds[1]);
+        return;
+    }
+    close(logfd);
+    logfd = fds[1], log_pid = pid;
+    fcntl(logfd, F_SETFL, O_NONBLOCK);
+}
+/* q2-iap's end: the pipe closed and its writer given LOG_END_MS to write the last lines and sync, so q2car.sh finds
+ * the summary when it reads the file. */
+#define LOG_END_MS 1000
+static void log_end(void) {
+    if (!log_pid) return;
+    close(logfd), logfd = 2;
+    for (long waited = 0; waited < LOG_END_MS && !kill(log_pid, 0); waited += 20) {
+        struct timespec ts = { 0, 20000000L };
+        nanosleep(&ts, 0);
+    }
+}
+
 static void on_signal(int s) { stopping = s; }
 static void on_alarm(int s) { (void)s; } /* only to end a read that waits too long (setup's data stage) */
 #define DATA_STAGE_S 2
@@ -464,6 +551,7 @@ static void io_send(const unsigned char *r, unsigned len) {
     memcpy(b + 1, r, len);
     int w = writer_fd < 0 ? -1 : (int)write(writer_fd, b, len + 1);
     if (w == (int)len + 1) ++wr_queued;
+    if (trace_quiet && w == (int)len + 1) return; /* a position update's or a bare acknowledgement's (q2_iap2.c) */
     hex(h, sizeof h, r, len < 24 ? len : 24);
     snprintf(msg, sizeof msg, "report > %s%s", h, w == (int)len + 1 ? "" : " (dropped: the writer is behind)");
     logline("iap2", msg);
@@ -1203,10 +1291,15 @@ static void setup(struct inst *i, const unsigned char *s) {
     else if (rt == 0x21 && rq == 0x0a) snprintf(note, sizeof note, "SET_IDLE");
     else if (rt == 0x40 && rq == 0x40) snprintf(note, sizeof note, "Apple charging request");
     else if (rt == 0x40 && rq == 0x51) snprintf(note, sizeof note, "Apple role switch (wired CarPlay), value %u", wv);
-    hex(h, sizeof h, buf, r > 0 ? (unsigned)r : 0);
-    snprintf(msg, sizeof msg, "SETUP %02x %02x %04x %04x %04x -> read %d (errno %d, %ld ms)%s%s%s%s", rt, rq, wv, wi, wl,
-             r, e, mono_ms() - at, note[0] ? ": " : "", note, r > 0 ? " data " : "", r > 0 ? h : "");
-    logline(i->name, msg);
+    /* the car's bare acknowledgement (one a position update, twice a second while a song plays): counted in the link's
+     * health line, not logged */
+    if (!(iap2_mode && rt == 0x21 && rq == 0x09 && r > 0 && (unsigned)r == want && mono_ms() - at < stall_ms &&
+          iap2_bare_ack(buf, (unsigned)r))) {
+        hex(h, sizeof h, buf, r > 0 ? (unsigned)r : 0);
+        snprintf(msg, sizeof msg, "SETUP %02x %02x %04x %04x %04x -> read %d (errno %d, %ld ms)%s%s%s%s", rt, rq, wv, wi,
+                 wl, r, e, mono_ms() - at, note[0] ? ": " : "", note, r > 0 ? " data " : "", r > 0 ? h : "");
+        logline(i->name, msg);
+    }
     if (rt == 0x21 && rq == 0x09 && r >= 2 + (int)sizeof detect && !memcmp(buf + 2, detect, sizeof detect))
         apple_seen(2, "iAP2's detect");
     if (iap2_mode && i->kind == K_HID && rt == 0x21 && rq == 0x09 && r <= 0)
@@ -1377,6 +1470,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(o, "--health-ms")) health_ms = atoi(v), ++a;
         else if (!strcmp(o, "--stall-ms")) stall_ms = atoi(v), ++a;
         else if (!strcmp(o, "--clock-file")) clock_file = v, ++a;
+        else if (!strcmp(o, "--log-cap")) log_trim = strtoul(v, 0, 10), ++a;
         else if (!strcmp(o, "--card-wait-ms")) card_wait_ms = atoi(v), ++a;
         else if (!strcmp(o, "--card-root")) card_root = v, ++a;
         else if (!strcmp(o, "--uuid")) {
@@ -1390,6 +1484,8 @@ int main(int argc, char **argv) {
     if (argc - a < 2 || argc - a - 1 > MAX_INST) return usage();
     logfd = open(argv[a++], O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
     if (logfd < 0) logfd = 2;
+    signal(SIGCHLD, SIG_IGN); /* children reaped by the kernel, the log's writer first among them */
+    log_start();
     signal(SIGTERM, on_signal), signal(SIGINT, on_signal), signal(SIGHUP, on_signal);
     signal(SIGPIPE, SIG_IGN), signal(SIGCHLD, SIG_IGN); /* echo children reaped by the kernel */
     alarm_interrupts();
@@ -1500,6 +1596,6 @@ int main(int argc, char **argv) {
     if (lload.pid > 0) kill(lload.pid, SIGTERM);
     if (artw.pid > 0) kill(artw.pid, SIGTERM); /* it kills and reaps its ffmpeg */
     for (int k = 0; k < ninst; ++k) close(in[k].ep0); /* first: a relink waits on them, not on the card */
-    if (logfd != 2) fsync(logfd);
+    log_end(); /* the log's writer syncs the card's file */
     return rc;
 }
