@@ -1367,6 +1367,28 @@ exit 0
     assert 'first tries failed: test/coverflow.py (test/coverflow.py::test_the_wall_tilts)' in out
 
 
+def test_tests_that_failed_side_by_side_are_named_at_the_end(tmp_path, monkeypatch, capsys):
+    """test/player/run.py runs a test that failed side by side again alone, and a pass then hid it (2026-11-23): its
+    last line counts them, and the gate's table names them, though the suite passed."""
+    monkeypatch.setattr(gate, 'HEAVY', tmp_path/'no-q2-heavy')
+    monkeypatch.setattr(gate, 'VERIFIED', tmp_path/'verified')
+    monkeypatch.setattr(gate, 'tree_key', lambda root=None: None)
+    py = tmp_path/'py'
+    py.write_text("""#!/bin/sh
+case "$*" in *peq*) echo "all: 9.0 s; 0 failed; 2 failed side by side and passed alone: test_scan, test_car_trace";;
+*) echo "all: 1.0 s; 0 failed; 0 failed side by side and passed alone";; esac
+exit 0
+""")
+    py.chmod(0o755)
+    plan = affected.Plan()
+    plan.other.update({'test/peq.py', 'test/coverflow.py'})
+    n = affected.run(plan, None, str(py), logs=tmp_path/'logs', poll=0.01)
+    out = capsys.readouterr().out
+    assert n == 0, out
+    assert 'failed side by side and passed alone: test/peq.py (2: test_scan, test_car_trace)' in out, out
+    assert 'test/coverflow.py (' not in out.split('failed side by side and passed alone: ')[-1], out
+
+
 @pytest.mark.parametrize('path', ['patch/coda_rc.c', 'patch/coda_rc_core.c', 'patch/coda_rc_shim.c', 'patch/coda_rc.h',
                                   'patch/coda_rc_new_part.c', 'remote/coda-rc.proto'])
 def test_a_car_remote_change_plans_its_end_to_end_run(path):
