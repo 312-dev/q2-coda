@@ -403,7 +403,9 @@ there is none ([internals](internals.md#streaming-configuration)).
 `/tmp/q2-<id>.stream` for its path. A `get` or `stall` line wraps the file in a growing read: at the
 bytes there are, it waits (polling `.stream` every 100 ms) rather than end. A seek searches only the
 bytes there are, so one inside them plays from its target at once, and one past them waits there,
-its position the target's, and plays from it as its bytes come. Its open of such a file analyses at most
+its position the target's, and plays from it as its bytes come. Once the song is playing, a stall waits for a
+refill before it plays on: 3 s of the song ahead, then 6 s and 12 s at the stalls after, or the song whole
+([internals](internals.md#streaming-configuration)). Its open of such a file analyses at most
 100 ms of audio (`GROW_ANALYZE_US`): an embedded cover, which its FFmpeg cannot size, otherwise held the open
 until 5 s of audio had come ([internals](internals.md#streaming-configuration)). While it waits it writes `/tmp/q2player.wait`, the path and a newline, and removes the file
 once it plays again. `done`, `fail`, a stale file or no line: the end of the bytes is the song's end.

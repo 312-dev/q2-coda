@@ -35,12 +35,9 @@
 #include <time.h>
 #include <unistd.h>
 
-#ifndef PEQ_ROOT /* player/Makefile passes it: "" on the Q2, a host test's directory ("."); test/player's tools none */
-#define PEQ_ROOT ""
-#endif
 #define TAP_FILE PEQ_ROOT "/mnt/mmc/.q2muse/logs/car-pcm.raw"
 #define TAP_ON PEQ_ROOT "/mnt/mmc/.q2muse/logs/car-pcm.on"
-#define CAR_UNDER "/tmp/q2-iap.under"
+#define CAR_UNDER PEQ_ROOT "/tmp/q2-iap.under"
 enum { TAP_S = 120, TAP_RING = 512 * 1024, TAP_POLL_MS = 100, SLOW_MS = 50, LINE_MS = 1000, QUIET_MS = 60000 };
 
 static int64_t clock_us(clockid_t id) {

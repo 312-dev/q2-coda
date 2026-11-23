@@ -5,6 +5,10 @@
 #include <pthread.h>
 #include <stdint.h>
 
+#ifndef PEQ_ROOT /* player/Makefile passes it: "" on the Q2, a host test's own directory (".") */
+#define PEQ_ROOT ""
+#endif
+
 #define URL_MAX 1564 /* stock's command buffer, 0x61c */
 
 /* set-songurl, set-nexturl and set-gapless, as demo sends them. */
@@ -117,6 +121,7 @@ int grow_arriving(const char *url); /* the app's .stream says url is still arriv
 struct grow *grow_open(const char *url, int *error);
 struct AVIOContext *grow_avio(struct grow *);
 void grow_seeking(struct grow *, int on); /* on while a seek searches: only the bytes there, no wait at their end */
+void grow_playing(struct grow *);         /* opened: a stall from here on waits for a refill (REFILL_S) */
 void grow_close(struct grow *);
 
 /* feed.c: other sources' sound for the car (docs/iphone-mode.md#other-sources-over-usb): a FIFO read into a ring */
@@ -203,7 +208,7 @@ void dsd_reset(struct dsd_pack *);
  * the frames made, at *out; below 0 with no memory */
 int dsd_pack(struct dsd_pack *, const uint8_t *data, int bytes, int planar, int lsb_first, int skip, const uint8_t **out);
 
-#define SCAN_FILE "/tmp/q2scan" /* there while the song playing can be scanned at speed (mcl-scan, patch/seek.c) */
+#define SCAN_FILE PEQ_ROOT "/tmp/q2scan" /* there while the song playing can be scanned at speed (mcl-scan, patch/seek.c) */
 /* stretch.c: scan's time-stretch, the song at 2 to 8 times its speed at its own pitch (docs/player.md#scan) */
 struct stretch;
 double stretch_top(int rate);                         /* the highest speed at a rate */

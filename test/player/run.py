@@ -324,12 +324,11 @@ def test_cue_tracks(player, songs, tmp):
 
 def test_bad_preload(player, songs, tmp):
     """A preload that is not audio: the song plays to its last frame, then exit, then the error and /tmp/notsupport."""
-    pathlib.Path('/tmp/notsupport').unlink(missing_ok=True)
     s, pcm, names = play(player, songs, 'badnext', tmp/'badnext', speed=8)
     assert b''.join(pcm).endswith(reference(songs/'a1.flac')[12 * 44100 * 4:]), 'the song did not play to its end'
     events = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
     assert events == ['{player-status\\exit}', '{player-status\\error}'], events
-    assert pathlib.Path('/tmp/notsupport').exists(), '/tmp/notsupport not made'
+    assert (tmp/'badnext/tmp/notsupport').exists(), '/tmp/notsupport not made'  # under the run's own root (PEQ_ROOT)
     # the song that would not open, with its path, an E line the Bluetooth event log copies (engine.c log_failed)
     failed = re.findall(r' E player (q2player: open failed.*)', (tmp/'badnext/player.log').read_text())
     assert failed == [f'q2player: open failed (unsupported): {songs}/junk.flac'], failed
@@ -342,19 +341,18 @@ def test_a_failure_already_replaced_is_not_reported(player, songs, tmp):
     error dialog advanced the queue and started the next song playing, the DAC powered on under a pause for hours.
     Now a song whose output fails once a newer song or a stop is waiting is logged, not reported: no error, no
     /tmp/notsupport, and the waiting song opens paused. A song that fails with nothing waiting reports as before."""
-    pathlib.Path('/tmp/notsupport').unlink(missing_ok=True)
     s, pcm, names = play(player, songs, 'replaced-failure', tmp/'replaced')
     events = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
     assert events == [], events
-    assert not pathlib.Path('/tmp/notsupport').exists(), '/tmp/notsupport made for a song already replaced'
+    # the host player's /tmp is its run's own (PEQ_ROOT "."), so another player on the machine cannot make it
+    assert not (tmp/'replaced/tmp/notsupport').exists(), '/tmp/notsupport made for a song already replaced'
     log = (tmp/'replaced/player.log').read_text()
     assert f'q2player: play failed, already replaced (the output would not open or take audio): {songs}/a1.flac' in log
     assert b''.join(pcm) == b'', names  # a2 taken paused: nothing written
     s, pcm, names = play(player, songs, 'play-failure', tmp/'failure')
     events = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
     assert events == ['{player-status\\error}'], events
-    assert pathlib.Path('/tmp/notsupport').exists(), '/tmp/notsupport not made for a song that failed while it played'
-    pathlib.Path('/tmp/notsupport').unlink()
+    assert (tmp/'failure/tmp/notsupport').exists(), '/tmp/notsupport not made for a song that failed while it played'
     return 'replaced: no error, the waiting song paused; alone: the error and /tmp/notsupport'
 
 
@@ -410,11 +408,11 @@ def with_seektable(flac, every=44100):
     return flac[:4] + si + bytes([3]) + len(table).to_bytes(3, 'big') + table + flac[42:]
 
 
-def grow(player, songs, out, head, land_at, extra=(), seektable=False, part=None, whole=None):
+def grow(player, songs, out, head, land_at, extra=(), seektable=False, part=None, whole=None, speed=4, env=None, tail=24.0):
     """a1 arriving in place as a card app writes it (player/grow.c): head bytes of it on the card and its .stream saying
     get, the rest landing at land_at (the line then done); extra are more steps (a seek); seektable, a1 with one; part, (time, bytes): more of it landing earlier;
-    whole, other bytes in a1's place. Returns the session, the PCM, and the beats' reads of /tmp/q2player.wait (False
-    when there is none)."""
+    whole, other bytes in a1's place; speed, env and tail (the run's length after land_at) as the session's. Returns the
+    session, the PCM, and the beats' reads of /tmp/q2player.wait (False when there is none)."""
     card, status = out/'mnt/mmc/.foo', out/'tmp/q2-foo.stream'
     card.mkdir(parents=True, exist_ok=True)
     whole, path = whole or (songs/'a1.flac').read_bytes(), card/'grow.flac'
@@ -431,17 +429,17 @@ def grow(player, songs, out, head, land_at, extra=(), seektable=False, part=None
 
     def land(s, n=None):
         n = n or len(whole)
-        with open(path, 'ab') as f: f.write(whole[have[0]:n])
+        with open(path, 'ab') as f: f.write(whole[path.stat().st_size:n])  # from what is there: a test may land more itself
         have[0] = n
         line('done' if n == len(whole) else 'get', n)
 
     boot = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\0}'), (0.1, '{mcl-setvol\\60}')]
     steps = sorted(boot + [(1.0, fakedemo.song('set-songurl', str(path)))] + [(t / 2, beat) for t in range(4, 2 * int(land_at) + 2)]
-                   + [(land_at, land), *extra] + ([(part[0], lambda s: land(s, part[1]))] if part else []), key=lambda st: st[0]) + [(land_at + 24.0, None)]
+                   + [(land_at, land), *extra] + ([(part[0], lambda s: land(s, part[1]))] if part else []), key=lambda st: st[0]) + [(land_at + tail, None)]
     s = fakedemo.Session(out)  # it empties out/tmp: the line after it
     s.music = songs
     line('get', head)
-    s.run(steps, fakedemo.launch_host(player, str(songs), 4), 4)
+    s.run(steps, fakedemo.launch_host(player, str(songs), speed, env), speed)
     pcm = b''.join(p.read_bytes() for p in sorted((out/'pcm').glob('*.raw')))
     assert not (out/'tmp/q2player.wait').exists(), 'q2player.wait left after the song'
     exits = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
@@ -492,6 +490,33 @@ def test_grow_opens_a_song_with_a_cover_on_its_first_audio(player, songs, tmp):
         assert known and known[0] < 3.0, f'cover of {size} B: the song was opened only at {known[:1]} s (set at 1 s, the rest landing at 8 s)'
         said.append(f'{size} B cover: opened by {known[0]:.1f} s')
     return '; '.join(said) + ', the rest landing at 8 s'
+
+
+def test_grow_slow_download_plays_in_few_long_stretches(player, songs, tmp):
+    """A song arriving at three quarters of its own rate (player/grow.c refill), played into the car's PCM in real time,
+    whose trace counts the PCM running dry (docs/iphone-mode.md#car-trace): after each stall the read waits until
+    REFILL_S of the song is there ahead (then twice that, to REFILL_MAX_S) before it plays on, or the whole song is
+    there, so the song breaks off a handful of times, not every time a packet comes; and plays whole, frame for frame."""
+    whole = (songs/'a1.flac').read_bytes()
+    per_s, out, car = len(whole) / 20, tmp/'grow-slow', tmp/'grow-slow.audio'
+    car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    head = int(per_s * 3)  # the start gate's 3 s
+    path = out/'mnt/mmc/.foo/grow.flac'
+
+    def land_to(n):  # the download's next bytes, up to n
+        with open(path, 'ab') as f: f.write(whole[path.stat().st_size:n])
+    steps = int((len(whole) - head) / (per_s * 0.75) * 10)  # tenths of a second to the last byte
+    landing = [(1.0 + k / 10, (lambda n: lambda s: land_to(n))(head + int(per_s * 0.75 * k / 10))) for k in range(1, steps)]
+    end = 1.0 + steps / 10
+    s, got, seen = grow(car_player(), songs, out, head, end, extra=landing, speed=1, tail=4.0,
+                        env={'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16', 'Q2PLAYER_CAR_QUIET_MS': '1000'})
+    want = reference(songs/'a1.flac')
+    at = first_difference(got, want)
+    assert at is None, f'{len(got) // 4} frames, reference {len(want) // 4}; first difference at frame {(at or 0) // 4}'
+    lines = car_trace((out/'player.log').read_text())
+    dry, silent = sum(l['dry'] for l in lines), sum(l['dry_ms'] for l in lines)
+    assert 1 <= dry <= 6, f'the car\'s PCM ran dry {dry} times, {silent} ms of silence in all'
+    return f'{dry} breaks ({silent} ms of silence in all) over a song arriving at three quarters of its rate, played whole'
 
 
 def test_grow_seek_inside(player, songs, tmp):

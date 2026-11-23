@@ -649,7 +649,7 @@ void *engine_thread(void *unused) {
                     continue;
                 }
                 log_failed("open failed", &song, error);
-                touch(error == ERR_MISSING ? "/tmp/notfile" : "/tmp/notsupport");
+                touch(error == ERR_MISSING ? PEQ_ROOT "/tmp/notfile" : PEQ_ROOT "/tmp/notsupport");
                 ipc_event("{player-status\\error}");
                 continue;
             }
@@ -729,7 +729,7 @@ void *engine_thread(void *unused) {
             if ((cur = source_open(&song, &error, NULL))) break;
             log_failed("open for the new output failed", &song, error);
             close_output(0);
-            touch("/tmp/notsupport");
+            touch(PEQ_ROOT "/tmp/notsupport");
             ipc_event("{player-status\\error}");
             break;
         }
@@ -742,7 +742,7 @@ void *engine_thread(void *unused) {
              * paused) is not reported: demo's error dialog would advance the queue and start the next song playing,
              * DAC powered, under a pause (docs/player-plan.md#a-failure-already-replaced). The waiting command is taken next. */
             if (waiting || stopping) break;
-            touch("/tmp/notsupport");
+            touch(PEQ_ROOT "/tmp/notsupport");
             ipc_event("{player-status\\error}");
             break;
         }
