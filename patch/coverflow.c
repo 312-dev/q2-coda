@@ -747,12 +747,15 @@ static void drop_albums(void) {
 /* A stock library query run into the caller's deque, the staging pointer on it so it leaves no
  * trace. No copies: two of a 47,000-song library's rows got demo OOM-killed, with 128 MB and no
  * swap. Stock writes the pointer only at init and reads it afresh at each use; every caller is on
- * the UI thread, or on a Cover Flow open's step thread, and a call on the UI thread while a step
- * runs gives that open up first (open_yield), as an overlap could leave the pointer on a deque its
- * owner destroyed. */
+ * the UI thread, on a Cover Flow open's step thread or on Search's load thread, and a call on the
+ * UI thread while a step runs gives that open up first (open_yield), and one while Search's load
+ * runs waits for it (search_strip.c search_yield), as an overlap could leave the pointer on a deque
+ * its owner destroyed. */
 static void open_yield(void);
+void search_yield(void); /* search_strip.c */
 int staged_into(void *into, int (*query)(void *), void *arg) {
     open_yield();
+    search_yield();
     void *dir = P(tools_pdeq_directory, 0);
     P(tools_pdeq_directory, 0) = into;
     int n = query(arg);
@@ -3606,6 +3609,7 @@ static int open_cancelled(void) { return op.cancel && op.running && pthread_self
 static void open_yield(void) {
     if (op.running && pthread_self() != op.thread) open_end(), art_found_drop();
 }
+void coverflow_yield(void) { open_yield(); }
 /* Whether an open's albums want OPEN_ART: listed and in order, their art not known. */
 static int art_due(void) { return cf.albums && deque_size(cf.albums) && !art_clean(); }
 static void *step_thread(void *k) {

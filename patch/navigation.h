@@ -1154,7 +1154,9 @@ int add_songs_key(void *top, unsigned key);
 void add_songs_paint(void *w, void *canvas);
 int add_songs_mark(void *r);
 void add_songs_toggle(void *r);
-void add_songs_search(void); /* search_strip.c: the strip over the library's songs, picking */
+void add_songs_search(void *songs); /* search_strip.c: the strip over Add Songs' songs, picking */
+void search_yield(void);    /* search_strip.c: Search's load, if it runs, ended (staged_into) */
+void coverflow_yield(void); /* coverflow.c: a Cover Flow open's step given up (open_yield) */
 int playlist_page_hold(void *top);
 int qm_song_hold(void *page, void *list, unsigned at, const char *extra, void (*pick)(void));
 int otg_count(void);

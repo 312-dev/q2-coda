@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Search: the letter strip is up the moment Search opens, where it waited for the whole library to load first; results show as soon as the library is in. Add Songs' Search uses the songs Add Songs already has, so it opens at once too and takes no second copy of the library.
   - Bluetooth: a connected headset's battery level is asked for while the screen is on, every five minutes, instead of every 30 seconds whether the screen was on or off, which saves battery with headphones connected.
   - App sign-in: the QR code page shows a code of any size an app sends. A long sign-in link stayed on "No code yet".
   - Home: the album art slideshow beside the main menu now shows your server's albums too. With a library that is all on a server, it showed nothing.
