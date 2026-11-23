@@ -25,7 +25,7 @@
 
 #include "q2player.h"
 
-#define FEED_FILE "/tmp/q2car.feed"
+#define FEED_FILE PEQ_ROOT "/tmp/q2car.feed"
 #define FEED_RING (FEED_RATE / 10) /* frames: 100 ms */
 #define FEED_PIPE 4096          /* the FIFO's bytes, 23 ms: what the source runs ahead by (F_SETPIPE_SZ) */
 #define FEED_IDLE_MS 300

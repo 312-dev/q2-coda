@@ -265,7 +265,7 @@ Unbinding the car's gadget (`patch/q2car.sh` `gadget_down`, writing `""` to the 
 
 ## What it writes
 
-`/tmp/ampsco.ini` (the unit record, at start), `/tmp/notfile` and `/tmp/notsupport` (through `system("touch …")`), and nothing else: no configuration, no state. While the car's USB audio plays, q2player also writes its trace lines to the unified log (a line a minute while all is well, one for each second with something wrong) and, only while `/mnt/mmc/.q2muse/logs/car-pcm.on` exists, the tap `/mnt/mmc/.q2muse/logs/car-pcm.raw` ([iphone-mode: The car's trace](iphone-mode.md#car-trace)), and `/tmp/q2-iap.under`, its underrun count. Q2 Muse's patches add reads of `/mnt/data/peq-active` and `/tmp/q2xfade`.
+`/tmp/ampsco.ini` (the unit record, at start), `/tmp/notfile` and `/tmp/notsupport` (through `system("touch …")`), and nothing else: no configuration, no state. While the car's USB audio plays, q2player also writes its trace lines to the unified log (a line a minute while all is well, one for each second with something wrong) and, only while `/mnt/mmc/.q2muse/logs/car-pcm.on` exists, the tap `/mnt/mmc/.q2muse/logs/car-pcm.raw` ([iphone-mode: The car's trace](iphone-mode.md#car-trace)), and `/tmp/q2-iap.under`, its underrun count. Q2 Muse's patches add reads of `/mnt/data/peq-active` and `/tmp/q2xfade`. Every such path is the device's own in the image; a host build (`test/player`, `PEQ_ROOT "."`) keeps each under its run's directory, `/tmp/notsupport`, the car's files, the feed's FIFO and the sockets' defaults included, so players run side by side on one machine never see each other's files.
 
 ## What Q2 Muse patches
 

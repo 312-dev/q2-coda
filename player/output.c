@@ -110,7 +110,7 @@ static int candidates(const struct pcm_format *f, int out[4][2]) {
  * car was told on its second (the PCM's rate only with a one-rate module: car_open_rate). While it is there, way 3 takes the place of the DAC's and Bluetooth's. Every image's
  * player has it (Q2_CAR_USB, tools/build.py); the host's default build has not, so test/player's other suites never
  * meet a car. */
-#define CAR_FILE "/tmp/q2-iap.audio"
+#define CAR_FILE PEQ_ROOT "/tmp/q2-iap.audio"
 #define CAR_RATE 44100
 #define CAR_WAIT_MS 1000 /* a close's silence waits at most this long for room (output_close) */
 #define CAR_LOOK_MS 250  /* a write waiting for the car looks at the car file this often (sink) */
@@ -154,7 +154,7 @@ void output_car_gone(void) {
  * car sets it. The PCM is only ever opened at P_RATE_FILE's rate: the car's packets are sized by it, and a PCM at
  * another would play off speed. A song at a rate the car is not at is resampled to the car's. A module with no
  * P_RATE_FILE (one rate) is left at the car file's rate, and nothing is asked. */
-#define CAR_RATE_FILE "/tmp/q2-iap.rate"
+#define CAR_RATE_FILE PEQ_ROOT "/tmp/q2-iap.rate"
 #define P_RATE_FILE "/sys/module/usb_f_uac1/parameters/p_rate"
 /* how long a rate change waits for the car to follow; how often a song playing looks at P_RATE_FILE; the silence
  * written after the last song's tail before the PCM closes, so the car hears silence up to the close */
@@ -357,7 +357,7 @@ void dac_unmute(int outputway, int wait) {
  * for a natural start demo did not mute for. It counts when younger than DAC_PRESS_MS, and each word once. */
 int dac_stamp(int pressed) {
     static int seen;
-    int at = 0, fd = open("/tmp/q2press", O_RDONLY | O_CLOEXEC);
+    int at = 0, fd = open(PEQ_ROOT "/tmp/q2press", O_RDONLY | O_CLOEXEC);
     if (fd < 0) return 0;
     if (read(fd, &at, sizeof at) != sizeof at) at = 0;
     close(fd);
