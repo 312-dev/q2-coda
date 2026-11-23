@@ -59,8 +59,16 @@ class Fx(C.Structure):
 class Ui(C.Structure):
     _fields_ = [('page', C.c_void_p), ('view', C.c_void_p), ('edit', C.c_void_p), ('timer', C.c_uint), ('go', C.c_uint),
                 ('leave', C.c_uint), *((k, C.c_int) for k in 'level next arg want az note genre favs from'.split()),
-                ('rows', C.c_int * 6), ('sel', C.c_int * 3), ('wifi', C.c_int), ('pick', List), ('list', List), ('caption', C.c_char * 64),
+                ('rows', C.c_int * 6), ('sel', C.c_int * 3), ('wifi', C.c_int), ('pick_p', C.POINTER(List)), ('list_p', C.POINTER(List)), ('caption', C.c_char * 64),
                 ('pend', C.c_byte)]
+
+    @property
+    def pick(self):  # radio.c's lists are a heap block of two from radio_open to closed
+        return self.pick_p.contents
+
+    @property
+    def list(self):
+        return self.list_p.contents
 
 
 class Np(C.Structure):

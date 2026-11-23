@@ -151,7 +151,7 @@ static struct {
     unsigned timer, go, leave;
     int level, next, arg, want, az, note, genre, favs, from, rows[6], sel[3];
     int wifi; /* the fetch waits for Smart Wi-Fi's link */
-    list_t pick, list;
+    list_t *pick, *list; /* one heap block of the two, from radio_open to closed */
     char caption[64];
     /* pend: a fetch from a list on show waits under the loading overlay
      * (docs/oled-design.md#loading), the list left as it is until the new one, or its note, is
@@ -582,7 +582,7 @@ static void show(int level) {
             else
                 page_row_into(ui.view, i, menu[ui.rows[i]], menu_click);
     } else {
-        const list_t *l = level == PICK ? &ui.pick : &ui.list;
+        const list_t *l = level == PICK ? ui.pick : ui.list;
         n = l->n;
         const char *caption = level == PICK ? ui.genre ? "Genres" : "Countries" : ui.caption;
         ui.view = !n && level == STATIONS
@@ -712,7 +712,7 @@ static int tick(const void *unused) {
     fx.running = 0;
     ui.pend = 0;
     if (fx.code == 200 && fx.n) {
-        list_t *l = ui.want == PICK ? &ui.pick : &ui.list;
+        list_t *l = ui.want == PICK ? ui.pick : ui.list;
         list_set(l, fx.body, fx.n, ui.want == PICK, !ui.genre);
         if (ui.az) list_sort(l);
         if (l->n)
@@ -733,11 +733,11 @@ static int go(const void *unused) {
     ui.go = 0;
     if (ui.pend) return 0; /* the wheel's Centre, or a row, while the overlay waits */
     if (ui.next == R_FAVS) {
-        favs_read(&ui.list, 1);
+        favs_read(ui.list, 1);
         tk_snprintf(ui.caption, sizeof ui.caption, "Favorites"); /* none: the empty state (show) */
         show(STATIONS);
     } else if (ui.next == R_FEATURED) {
-        list_set(&ui.list, STARTERS, sizeof STARTERS - 1, 0, 0);
+        list_set(ui.list, STARTERS, sizeof STARTERS - 1, 0, 0);
         tk_snprintf(ui.caption, sizeof ui.caption, "Featured");
         show(STATIONS);
     } else if (ui.next == A_SHOW) {
@@ -757,12 +757,12 @@ static int go(const void *unused) {
                        : "/csv/countries?order=stationcount&reverse=true&limit=60",
               PICK, 1);
     } else {
-        url_escape(url_of(&ui.pick, i), key, sizeof key);
+        url_escape(url_of(ui.pick, i), key, sizeof key);
         tk_snprintf(path, sizeof path,
                     ui.genre ? "/m3u/stations/bytagexact/%s" RADIO_QUERY
                              : "/m3u/stations/bycountrycodeexact/%s" RADIO_QUERY,
                     key);
-        tk_snprintf(ui.caption, sizeof ui.caption, "%s", name_of(&ui.pick, i));
+        tk_snprintf(ui.caption, sizeof ui.caption, "%s", name_of(ui.pick, i));
         fetch(path, STATIONS, 1);
     }
     return 0;
@@ -802,7 +802,7 @@ static int pick_click(void *ctx, void *event) {
 
 static int station_click(void *ctx, void *event) {
     if (ui.pend) return 0;
-    list_copy(&rd.list, &ui.list);
+    list_copy(&rd.list, ui.list);
     radio_play((int)(long)ctx);
     np_open();
     return 0;
@@ -811,7 +811,7 @@ static int station_click(void *ctx, void *event) {
 /* ringnav_keylong: Play/Pause held on a station, or on Now Playing for the one playing, adds it to
  * favourites.m3u, or takes it out when it is there. The toast's text, or 0 when top is neither. */
 const char *radio_hold(void *top) {
-    const list_t *l = &ui.list;
+    const list_t *l = ui.list;
     int i = -1;
     if (np.page && top == np.page)
         l = &rd.list, i = rd.at;
@@ -847,15 +847,17 @@ static int closed(void *ctx, void *event) {
     stop_timer(&ui.timer);
     stop_timer(&ui.go);
     stop_timer(&ui.leave);
-    list_free(&ui.pick);
-    list_free(&ui.list);
+    if (ui.pick) list_free(ui.pick), list_free(ui.list), free(ui.pick);
     memset(&ui, 0, sizeof ui);
     return 0;
 }
 
 /* Streaming's Internet Radio row (home.c ringnav_stream). */
 int radio_open(void *ctx, void *event) {
-    if (ui.page || !(ui.page = page_open("radio_page", closed, keyup))) return 0;
+    list_t *lists = ui.page ? 0 : calloc(2, sizeof *lists);
+    if (!lists) return 0;
+    if (!(ui.page = page_open("radio_page", closed, keyup))) return free(lists), 0;
+    ui.pick = lists, ui.list = lists + 1;
     static const unsigned short touches[] = { EVT_POINTER_DOWN, EVT_POINTER_MOVE_BEFORE,
                                               EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
     for (unsigned t = 0; t < sizeof touches / sizeof *touches; ++t)
