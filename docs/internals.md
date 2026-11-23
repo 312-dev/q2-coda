@@ -1950,7 +1950,7 @@ The thread uses only `open`, `read`, `write`, `fsync`, `close` and `unlink` on b
 
 ## Unified log
 
-One log for the whole Q2, on the card: `/mnt/mmc/.q2muse/logs/q2-log.0` to `.3`, beside the heat log and the [Bluetooth link log](#bluetooth-link-monitor), never on the flash (the user's, 2026-11-17). Before it, demo's stderr and the players' went to `/tmp/q2-demo.err` (release) or `/tmp/q2-demo.log` (`--dev`), in RAM and gone at every power-off, emptied whole past 512 KB, with no time or level on a line; only a crash moved a slice of them to the card, in `q2-crash.log`.
+One log for the whole Q2, on the card: `/mnt/mmc/.q2muse/logs/q2-log.0` to `.3`, beside the heat log and the [Bluetooth link log](#bluetooth-link-monitor), never on the flash (the user's, 2026-11-17). Before it, demo's stderr and the players' went to `/tmp/q2-demo.err` (release) or `/tmp/q2-demo.log` (`--dev`), in RAM and gone at every power-off, emptied whole past 512 KB, with no time or level on a line; only a crash moved a slice of them to the card, in `q2-crash.log`. A boot that finds the last session did not end cleanly copies the files to `/mnt/mmc/.q2muse/crashes/` before they roll on ([boot](boot.md)).
 
 **A line** (`patch/ulog_line.h`, `ulog_line`): `2026-11-17T14:35:02Z 5123456 W usb cable in, seen after its edge, 9 ms`, the UTC time (the Q2's clock: 1970 until Wi-Fi or a computer sets it), the uptime in ms (`CLOCK_MONOTONIC`), a level (`E` error, `W` warning, `I` the rest), a source (`ui`, `player`, `usb`, `bt`, `wifi`, `guard`, `kernel`) and the message, one line, control characters as spaces, cut at about 500 bytes.
 

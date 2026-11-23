@@ -368,6 +368,7 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             # The UI loop stalled (system.c stall_write): what its thread was doing
             [ -f /mnt/data/q2-stall ] && {{ echo "== stall"; cat /mnt/data/q2-stall; }} >> $c
             rm -f $m
+            u=1
         }}
         rm -f /mnt/data/q2-cf-trace /mnt/data/q2-stall
         # Baidu Netdisk's sign-in, which stock sends over plain HTTP: Q2 Muse has no Baidu row to use it from
@@ -376,6 +377,29 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             i=0
             while [ $i -lt 60 ] && ! grep -q ' /mnt/mmc ' /proc/mounts; do usleep 500000; i=$((i+1)); done
             grep -q ' /mnt/mmc ' /proc/mounts || exit
+            # an unclean end (u, docs/internals.md#unified-log): the unified log's files, the car's newest log and
+            # dmesg kept in a numbered folder under .q2muse/crashes before the logs roll on, named in the crash
+            # log; only with 50 MB free besides them, the newest five kept, 10 MB at most in all. Off the boot's
+            # path (this subshell runs in the background), the copies niced.
+            [ "$u" ] && {{
+                L=/mnt/mmc/.q2muse/logs; K=/mnt/mmc/.q2muse/crashes
+                n=$(( $(cat $K/.seq 2>/dev/null || echo 0) + 1 ))
+                d=$K/$(printf %05d $n)-$(date -u +%Y%m%dT%H%M%SZ)
+                f=$(df -k /mnt/mmc 2>/dev/null | awk 'NR == 2 {{ print $4 }}')
+                if [ "${{f:-0}}" -gt $(( $(du -sk $L 2>/dev/null | cut -f1) + 51200 )) ] && mkdir -p $d; then
+                    echo $n > $K/.seq
+                    for x in $L/q2-log.* $L/q2-heat.* $L/q2-bt.* $L/q2-btev.* $L/q2car.log $L/q2car.log.dmesg; do
+                        [ -f "$x" ] && nice -n 19 cp "$x" $d/
+                    done
+                    dmesg > $d/dmesg 2>/dev/null
+                    sync
+                    echo "== evidence ${{d#/mnt/mmc/}}" >> $c
+                    ls -1d $K/*/ | sort -r | tail -n +6 | while read x; do rm -rf "$x"; done
+                    while [ "$(du -sk $K | cut -f1)" -gt 10240 ] && [ "$(ls -1d $K/*/ | wc -l)" -gt 1 ]; do
+                        rm -rf "$(ls -1d $K/*/ | sort | head -n 1)"
+                    done
+                fi
+            }}
             # the card keeps the two before it: q2-crash.log.1, then .2; they move only once the copy is
             # whole (a full card or a power cut leaves them, and the log stays on /mnt/data)
             l=/mnt/mmc/q2-crash.log
