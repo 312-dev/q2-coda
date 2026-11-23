@@ -48,9 +48,12 @@ def put(path, text):
     os.replace(tmp, path)
 
 
-def play(player, songs, scenario, out, speed=1, env=None):
+def play(player, songs, scenario, out, speed=1, env=None, exits=0):
+    """exits: the run's end waits for that many {player-status\\exit} (fakedemo Session.wait_exits), for a test that
+    compares the whole of what played."""
     s = fakedemo.Session(out)
     s.music = songs
+    s.wait_exits = exits
     s.run(fakedemo.scenarios(str(songs))[scenario], fakedemo.launch_host(player, str(songs), speed, env), speed)
     return s, [p.read_bytes() for p in sorted((pathlib.Path(out)/'pcm').glob('*.raw'))], sorted(p.name for p in (pathlib.Path(out)/'pcm').glob('*.raw'))
 
@@ -68,7 +71,7 @@ def first_difference(a, b):
 
 def check_exact(player, songs, tmp, scenario, files, fmt, name):
     """The scenario plays `files` one after another to the end; the output is their reference decodes joined, in one PCM."""
-    s, pcm, names = play(player, songs, scenario, tmp/scenario, speed=8)
+    s, pcm, names = play(player, songs, scenario, tmp/scenario, speed=8, exits=len(files))
     want = b''.join(reference(songs/f, fmt) for f in files)
     got = b''.join(pcm)
     frame = (4 if fmt == 's16le' else 8)
@@ -128,7 +131,7 @@ def check_chain(player, songs, tmp, scenario, files, cut=None):
     """files played one after another: each PCM open, in order, is the reference decodes of the files it carries, in
     its own width; cut[f] frames is how many of a file's reference play (the source's length, where ffmpeg leaves
     an encoder's padding in)."""
-    s, pcm, names = play(player, songs, scenario, tmp/scenario, speed=8)
+    s, pcm, names = play(player, songs, scenario, tmp/scenario, speed=8, exits=len(files))
     opens = [(int(n.split('_')[1]), n.rsplit('_', 1)[1][:3]) for n in names]
     got = b''.join(pcm)
     want, at, frames = b'', 0, 0

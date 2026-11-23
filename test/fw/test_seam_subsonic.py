@@ -119,6 +119,10 @@ class Seam:
         found = self.fw.fn('stream_line', C.c_int, C.c_char_p, C.c_char_p, C.c_void_p)(b'subsonic', path, C.byref(out))
         return ('none wait get stall done fail'.split()[out.state], out.have, out.total, out.ms) if found else None
 
+    def startable(self, path):
+        """stream_startable's answer for path: whether m3u_songs may queue it now."""
+        return bool(self.fw.fn('stream_startable', C.c_int, C.c_char_p, C.c_char_p)(b'subsonic', path))
+
     def ahead(self):
         raw = self.fwr.tmp('q2-subsonic.ahead')
         return raw.decode().splitlines()[1:] if raw else None
@@ -221,8 +225,12 @@ def test_an_album_list_plays_and_its_next_songs_are_fetched_ahead(seam):
     f = seam.fwr
     first = f.queued()[0]
     assert seam.sid(first) == 's11'  # Album 1's first song (q2-fakesonic: s1-s10 are Album 0)
+    # Queued only once it can start, as stream_startable lets m3u_songs: done, or arriving with its start's bytes
+    # there. A song whole at its path a moment before the app's done line (renamed, the line still get with every
+    # byte) is one; a run under load read the line in that moment and failed here (2026-11-23).
     st = seam.line(first)
-    assert st is None or st[0] == 'done', f'queued before it could start: {st}'
+    assert st is None or st[0] == 'done' or st[0] in ('get', 'stall') and seam.startable(first), \
+        f'queued before it could start: {st}'
     assert f.until('.playing names it', lambda: seam.playing() == first, timeout=10)
     ahead = f.until('.ahead', lambda: seam.ahead(), timeout=10)
     assert f.tmp('q2-subsonic.ahead').startswith(b'#Q2AHEAD/1\tseq=')

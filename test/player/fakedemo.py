@@ -16,9 +16,10 @@ Transcript lines are `seconds direction text`: `>` is demo to player, `<` player
 the 200 ms poll is written only when it changes; media-info's position is written as POS and
 sampled in the last line.
 """
-import argparse, os, pathlib, re, select, shutil, socket, subprocess, sys, threading, time
+import argparse, os, pathlib, re, select, shutil, signal, socket, subprocess, sys, threading, time
 
 POLL = ('{player-status\\request}', '{media-info\\get-music-info}')
+EXIT_WAIT_S = 60  # real seconds a run waits past its last step for the exits it wants (Session.wait_exits)
 
 
 def song(cmd, path, start=0, cache=512, cache_min=20, flag=0, hw=17):
@@ -419,6 +420,25 @@ def feed(name):
     return go
 
 
+def starve(proc):
+    """Q2_TEST_STARVE=STOP_MS/EVERY_MS: the player stopped (SIGSTOP) for STOP_MS of every EVERY_MS of real time, then
+    let go (SIGCONT), as a machine busy with a build leaves it unscheduled, but every time. The returned event, once
+    set, ends it with the player let go."""
+    done = threading.Event()
+    spec = os.environ.get('Q2_TEST_STARVE')
+    if not spec: return done
+    stop_ms, every_ms = (int(x) for x in spec.split('/'))
+    def go():
+        while not done.wait((every_ms - stop_ms) / 1000):
+            try: os.kill(proc.pid, signal.SIGSTOP)
+            except ProcessLookupError: return
+            done.wait(stop_ms / 1000)
+            try: os.kill(proc.pid, signal.SIGCONT)
+            except ProcessLookupError: return
+    threading.Thread(target=go, daemon=True).start()
+    return done
+
+
 def cpu_seconds(pid):
     """User and system time so far of pid and everything under it (the sandbox's qemu is a grandchild)."""
     tick, total, kids = os.sysconf('SC_CLK_TCK'), 0.0, {}
@@ -447,6 +467,7 @@ class Session:
         self.lines, self.seen, self.t0, self.conn, self.playing, self.preload, self.speed = [], {}, None, None, False, False, 1
         self.music = None  # the music directory on this machine, for steps that act on its files
         self.on_exit = []  # set-gapless commands sent one at each {player-status\\exit}, as demo sends one per song
+        self.wait_exits = 0  # at the last step, wait for this many {player-status\\exit} first (run): 0, none
         certs = httpd.certificates(CERTS)
         root = lambda: pathlib.Path(self.music)
         self.web = [httpd.serve(root)] + [httpd.serve(root, (certs / f'{n}.pem', certs / f'{n}.key')) for n in ('good', 'wrong', 'self')]
@@ -460,6 +481,10 @@ class Session:
 
     def note(self, direction, text):
         self.lines.append(f'{self.now():8.3f} {direction} {text}')
+
+    def exits(self):
+        """The {player-status\\exit} events so far."""
+        return sum(m == '{player-status\\exit}' for _, m in self.answers)  # every one, where lines keeps changes
 
     def now(self):
         return (time.monotonic() - self.t0) * self.speed  # in the player's seconds
@@ -514,17 +539,27 @@ class Session:
         and the poll's period shrink by it."""
         self.positions, self.answers, self.speed = [], [], speed
         proc = self.proc = launch(self)  # a step may signal it (run.py test_car_release_while_paused)
+        starving = starve(proc)
         self.srv.settimeout(30)
         self.conn, _ = self.srv.accept()
         self.t0 = time.monotonic()
         for at, what in steps:
             self.pump(self.t0 + at / speed)
-            if what is None: break
+            if what is None:
+                # a test that wants the whole of what plays (run.py check_exact, check_chain) waits for the player's
+                # own end, its wait_exits'th {player-status\exit}, sent once the PCM is closed: the step's time is
+                # the player's clock, which a starved machine leaves behind (the file sink's 500 ms is 62 ms at
+                # speed 8, and the time a stall runs it dry is not caught up), so a capture ended there came up short
+                deadline = time.monotonic() + EXIT_WAIT_S
+                while self.wait_exits and self.exits() < self.wait_exits and time.monotonic() < deadline:
+                    self.pump(min(deadline, time.monotonic() + 0.1))
+                break
             if callable(what): what(self); continue
             if what.startswith(('{set-songurl', '{set-nexturl')): self.playing, self.preload = True, False
             if what.startswith('{set-gapless'): self.preload = True
             if what.startswith('{mcl-closegapless'): self.preload = False
             self.send(what)
+        starving.set()
         cpu = cpu_seconds(proc.pid)
         self.conn.close(); proc.terminate()
         for srv in self.web: srv.shutdown(); srv.server_close()
