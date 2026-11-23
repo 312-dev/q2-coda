@@ -335,8 +335,8 @@ RADIO_TABLES = ('stations.bin', 'zcta.bin')
 # updates are firmware updates. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
 BUNDLED_APPS = {
-    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-86d02b7.zip', 3686544,
-                 '50e3dfa8a350c0684823168d7053ffe4b964079be8c2e1a39e98f15e3280cd6a', True),
+    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-78f9628.zip', 3686807,
+                 'f0c2e8bebe7dafac4f4693f34ebea8fba2c21763bd88aae1cdebc91363a8fd0f', True),
 }
 APPS_DIR = pathlib.Path.home()/'.cache/q2-apps'
 S90PLAY = 'etc/init.d/S90play'
