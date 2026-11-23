@@ -771,27 +771,39 @@ def gone(pid, seconds=5):
 
 
 def test_stop_all_ends_q2_processes_and_nothing_else(tmp_path):
+    """stop-all scans every process of this user on the machine and takes those of the roots it is given (Q2_ROOTS,
+    here this test's own folder), so another agent's q2 work is never in reach: a look-alike neighbour, the same
+    script in another folder, is neither listed nor stopped. The rig it keeps is matched by Q2_KEEP against a
+    process and each of its ancestors; the test names its own marker there, as the default (emu_pool.py, dhu, Xvfb
+    and the pool's folders) also matched the shell the test was started from when that shell's command named
+    tools/ci/emu_pool.py, which kept the test's own processes and failed it (2026-11-22)."""
     work = tmp_path/'work'
     (work/'tools/ci').mkdir(parents=True)
     script = work/'tools/ci/fake_suite.sh'
     script.write_text('sleep 60 & wait\n')
     other = tmp_path/'elsewhere'
-    other.mkdir()
+    (other/'tools/ci').mkdir(parents=True)
+    neighbour_script = other/'tools/ci/fake_suite.sh'
+    neighbour_script.write_text('sleep 60 & wait\n')
+    keep = f'q2-test-rig-{os.getpid()}-{tmp_path.name}'
     ours = subprocess.Popen(['bash', str(script)], cwd=work, start_new_session=True)
-    rig = subprocess.Popen(['bash', '-c', f'exec -a q2-emu-pool2-viewer bash {script}'], cwd=work, start_new_session=True)
+    rig = subprocess.Popen(['bash', '-c', f'exec -a {keep} bash {script}'], cwd=work, start_new_session=True)
     bystander = subprocess.Popen(['sleep', '60'], cwd=other, start_new_session=True)
+    neighbour = subprocess.Popen(['bash', str(neighbour_script)], cwd=other, start_new_session=True)
     try:
         time.sleep(0.3)
-        listed = q2(tmp_path, 'stop-all')
+        listed = q2(tmp_path, 'stop-all', Q2_KEEP=keep)
         assert listed.returncode == 0 and f'proc  {ours.pid}' in listed.stdout and 'nothing was touched' in listed.stdout
+        assert str(neighbour.pid) not in listed.stdout and str(rig.pid) not in listed.stdout
         assert ours.poll() is None  # a listing stops nothing
-        done = q2(tmp_path, 'stop-all', '--yes')
+        done = q2(tmp_path, 'stop-all', '--yes', Q2_KEEP=keep)
         assert done.returncode == 0 and 'nothing q2 is left running' in done.stdout, done.stdout + done.stderr
         assert gone(ours.pid)
-        assert rig.poll() is None and bystander.poll() is None  # the user's rig and what is not q2's are left alone
+        # the rig, what is not q2's and another root's look-alike are left alone
+        assert rig.poll() is None and bystander.poll() is None and neighbour.poll() is None
         assert (tmp_path/'q/STOP').exists()
     finally:
-        for p in (ours, rig, bystander):
+        for p in (ours, rig, bystander, neighbour):
             with __import__('contextlib').suppress(ProcessLookupError):
                 os.killpg(p.pid, 9)
             p.wait()

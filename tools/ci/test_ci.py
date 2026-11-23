@@ -1408,3 +1408,60 @@ def test_an_everything_plan_runs_the_car_suites_and_the_seam(monkeypatch, tmp_pa
     assert suites['test/iap_probe.py'].argv == ['py', 'test/iap_probe.py']
     assert 'test/subsonic_seam.py' in suites and 'test/coda_rc_iroh_e2e.py' not in suites
     assert {'test/coda_rc_e2e.py', 'test/iap_probe.py', 'test/subsonic_seam.py'} <= set(gate.TIERS['release'])
+
+
+@pytest.mark.parametrize('path', ['patch/peq_ui.c', 'patch/peq.c', 'patch/peq.h', 'patch/peq_types.h', 'patch/games.c',
+                                  'patch/tidal.c', 'patch/ui_kit.h'])
+def test_a_source_test_peq_builds_plans_it(path):
+    """test/peq.py builds the EQ and its editor (and games, video, radio, Spotify, the App Store, online lyrics,
+    Tidal and scrobbling) on the host, and was planned only by an everything plan: a change to patch/peq_ui.c that its
+    host build could not link (hash_bytes) went unseen from 2f74c2c3 until a full run. A header one of them includes
+    plans it too."""
+    assert 'test/peq.py' in affected.plan_for({path: {1}}, REPO).as_dict()['other']
+
+
+@pytest.mark.parametrize('path, suite', [('patch/corner_cover.c', 'test/coverflow.py'), ('patch/wheel_accel.c', 'test/coverflow.py'),
+                                         ('tools/theme.py', 'test/coverflow.py'), ('patch/peq.c', 'test/player/run.py'),
+                                         ('patch/stream_path.h', 'test/iap_probe.py'), ('tools/coda_rc_client.py', 'test/coda_rc_e2e.py'),
+                                         ('tools/ci/emu_pool.py', 'test/coda_rc_e2e.py')])
+def test_a_source_a_suite_builds_runs_or_reads_plans_it(path, suite):
+    assert suite in affected.plan_for({path: {1}}, REPO).as_dict()['other']
+
+
+@pytest.mark.parametrize('path', ['patch/navigation.c', 'tools/ipod.py', 'assets/themes/oled/theme.xml'])
+def test_a_payload_change_plans_the_suites_that_run_the_payload(path):
+    """test/playback.py and test/headset_io.py run the build's payload under Unicorn as test/patch.py does, so what
+    plans test/patch.py plans them."""
+    other = affected.plan_for({path: {1}}, REPO).as_dict()['other']
+    assert {'test/playback.py', 'test/headset_io.py'} <= set(other)
+
+
+def code_strings(path):
+    """The string constants of path's code, its docstrings left out (a comment or docstring naming a file is not a
+    use of it)."""
+    tree = ast.parse(path.read_text())
+    docs = {id(n.value) for n in ast.walk(tree) if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)}
+    return [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs]
+
+
+def test_every_source_a_suite_names_in_its_code_plans_it():
+    """The planner audit's rule, kept: for each test/X.py of an everything plan (and test/player/'s files for
+    test/player/run.py), every patch/, player/, tools/, remote/ or assets/ file its code names (a path in a string, or
+    a #include "X" of patch/ in a C source it writes), and for a suite that compiles (a cc it runs, or C it writes)
+    every file those include, must plan that suite. Comments and docstrings name files without using them, so they
+    are not read."""
+    src = re.compile(r'(?<![\w/.-])((?:patch|player|tools|remote|assets)/[A-Za-z0-9_./-]*[A-Za-z0-9_])')
+    inc = re.compile(r'#include "([A-Za-z0-9_]+\.(?:c|h|inc))"')
+    missing = []
+    for suite in (s for s in (*gate.MERGE, *gate.PLANNED) if s.startswith('test/')):
+        files = [REPO/suite] + (sorted((REPO/'test/player').glob('*.py')) if suite == 'test/player/run.py' else [])
+        strings = [s for f in files for s in code_strings(f)]
+        named = {m for s in strings for m in src.findall(s) if (REPO/m).is_file()}
+        named |= {f'patch/{m}' for s in strings for m in inc.findall(s) if (REPO/'patch'/m).is_file()}
+        if any(s == 'cc' or '#include' in s for s in strings):
+            named |= affected.included(REPO, tuple(sorted(n for n in named if n.endswith(('.c', '.h', '.inc')))))
+        for path in sorted(named):
+            plan = affected.plan_for({path: {1}}, REPO).as_dict()
+            if not (gate.everything(plan) or suite in plan['other'] or (suite == 'test/patch.py' and plan['patch'])):
+                missing.append(f'{suite}: {path}')
+    assert not missing, missing

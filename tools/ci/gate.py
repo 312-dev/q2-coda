@@ -117,7 +117,8 @@ POST = ('fw-asan', 'unit-cov', 'smoke', 'leak-hunt')
 MERGE = tuple(n for n in SECONDS if n not in POST + PLANNED)
 FULL = MERGE + PLANNED + POST
 TIERS = {'merge': MERGE, 'post': POST, 'release': FULL}
-# in a whole tier, and in no narrower plan or only by chance: --only runs these whole when the plan lacks them
+# in a whole tier, and in a narrower plan only for the sources that need them (the mypy suites for a .py, test/peq.py
+# for the sources it builds, the payload suites for a payload change): --only runs these whole when the plan lacks them
 GATE_ONLY = ('fw-asan', 'unit-cov', 'smoke', 'leak-hunt', 'mypy-tools', 'mypy-fw', 'test/peq.py', 'test/playback.py',
              'test/headset_io.py')
 # post-tier suites an affected.py plan names for a worker to run if it likes (affected.py --run --smoke): a merge
