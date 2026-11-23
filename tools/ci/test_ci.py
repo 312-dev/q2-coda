@@ -403,8 +403,8 @@ def test_a_pool_copy_runs_car_remote_on_its_own_port_once(tmp_path):
 
 def test_a_pool_copys_q2_iroh_forwards_to_its_own_daemon(tmp_path):
     """docs/remote.md#car-remote-across-networks: demo starts q2-iroh with no --forward, which would reach TCP 7720,
-    another emulator's daemon or the user's. The wrapper run.sh writes puts this copy's port first after serve; a copy
-    fitted before q2-iroh existed gets it too."""
+    another emulator's daemon or the user's. The wrapper run.sh writes puts this copy's ports first after serve (its
+    daemon's q2-iroh port named, its TCP port for an older sidecar); a copy fitted before q2-iroh existed gets it too."""
     import subprocess
     (tmp_path/'q2emu').write_text(Q2EMU)
     (tmp_path/'run.sh').write_text(RUN.replace(emu_pool.RUN_BEFORE, emu_pool.CODA_BLOCK + emu_pool.RUN_BEFORE)
@@ -420,7 +420,45 @@ def test_a_pool_copys_q2_iroh_forwards_to_its_own_daemon(tmp_path):
                          capture_output=True, text=True, check=True).stdout
     assert out.strip() == f'--ro-bind {tmp_path}/state/q2-iroh /usr/bin/q2-iroh'
     wrapper = (tmp_path/'state/q2-iroh').read_text()
-    assert wrapper == '#!/bin/sh\nc=$1; shift\nexec /emu/q2-iroh.real "$c" --forward 127.0.0.1:7703 "$@"\n'
+    assert wrapper == ('#!/bin/sh\nc=$1; shift\nexec /emu/q2-iroh.real "$c" --forward 127.0.0.1:7703 '
+                       '--forward-named 127.0.0.1:7803 "$@"\n')
+
+
+def wrappers(tmp_path, run):
+    """The coda-rc and q2-iroh wrappers run.sh's blocks write for a copy at Car Remote port 7703."""
+    import subprocess
+    (tmp_path/'rootfs/usr/bin').mkdir(parents=True, exist_ok=True)
+    for name in ('coda-rc', 'q2-iroh'):
+        (tmp_path/'rootfs/usr/bin'/name).write_text('real')
+    (tmp_path/'state').mkdir(exist_ok=True)
+    blocks = run[run.index('CODA=()'):run.index('# Q2EMU_CORE=1')]
+    subprocess.run(['bash', '-c', f'E={tmp_path}; S={tmp_path}/state; Q2EMU_CODA_PORT=7703\n{blocks}'], check=True)
+    return (tmp_path/'state/coda-rc').read_text(), (tmp_path/'state/q2-iroh').read_text()
+
+
+def test_each_pool_copy_has_its_own_q2_iroh_port(tmp_path):
+    """The copies share this machine's network: every daemon took 127.0.0.1:7721 for q2-iroh's streams, and since a
+    taken one ends a daemon (patch/coda_rc.c main) only the first emulator's ran (coda_rc_e2e.py: "the daemon listens:
+    pid None", 2026-11-23). Each copy's daemon and q2-iroh get Q2EMU_CODA_PORT + 100; q2-iroh keeps --forward for a
+    build whose sidecar predates --forward-named."""
+    (tmp_path/'q2emu').write_text(Q2EMU)
+    (tmp_path/'run.sh').write_text(RUN)
+    emu_pool.fit(tmp_path, 3)
+    coda, iroh = wrappers(tmp_path, (tmp_path/'run.sh').read_text())
+    assert coda == '#!/bin/sh\nexec /emu/coda-rc.real --port 7703 --iroh-port 7803 "$@"\n'
+    assert iroh == ('#!/bin/sh\nc=$1; shift\nexec /emu/q2-iroh.real "$c" --forward 127.0.0.1:7703 '
+                    '--forward-named 127.0.0.1:7803 "$@"\n')
+
+
+def test_a_copy_fitted_before_its_q2_iroh_port_is_fitted_again(tmp_path):
+    (tmp_path/'q2emu').write_text(Q2EMU)
+    old = (RUN.replace(emu_pool.RUN_BEFORE, emu_pool.CODA_BLOCK_V1 + emu_pool.IROH_BLOCK_V1 + emu_pool.RUN_BEFORE)
+           .replace(emu_pool.RUN_BWRAP, '    "${CODA[@]}" "${IROH[@]}" "${BOOT[@]}"'))
+    (tmp_path/'run.sh').write_text(old)
+    emu_pool.fit(tmp_path, 3)
+    run = (tmp_path/'run.sh').read_text()
+    assert emu_pool.CODA_BLOCK in run and emu_pool.IROH_BLOCK in run and emu_pool.CODA_BLOCK_V1 not in run
+    assert '--iroh-port 7803' in wrappers(tmp_path, run)[0]
 
 
 def test_a_changed_run_script_is_refused(tmp_path):

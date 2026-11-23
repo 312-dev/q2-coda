@@ -70,8 +70,34 @@ def coda_port(k):
 
 
 # run.sh's stand-in for /usr/bin/coda-rc, which demo starts with no arguments (patch/coda_rc_shim.c): the build's
+# own daemon, copied beside the state, run with --port and --iroh-port. Put before run.sh's bwrap, whose arguments
+# gain CODA. The copies share this machine's network, so each copy's q2-iroh port is its own too, Q2EMU_CODA_PORT +
+# IROH_PORT_OFFSET: a daemon ends when its q2-iroh port is taken (patch/coda_rc.c main), and with every copy on
+# 7721 only the first emulator's daemon ran.
+CODA_BLOCK = '''# Car Remote (coda-rc) on this copy's own ports, Q2EMU_CODA_PORT and + 100 (tools/ci/emu_pool.py CODA_RC_BASE)
+CODA=()
+if [ -n "${Q2EMU_CODA_PORT:-}" ] && [ -e "$E/rootfs/usr/bin/coda-rc" ]; then
+    cp -f "$E/rootfs/usr/bin/coda-rc" "$S/coda-rc.real"
+    printf '%s\\n' '#!/bin/sh' "exec /emu/coda-rc.real --port $Q2EMU_CODA_PORT --iroh-port $((Q2EMU_CODA_PORT + 100)) \\"\\$@\\"" > "$S/coda-rc"; chmod +x "$S/coda-rc"
+    CODA=(--ro-bind "$S/coda-rc" /usr/bin/coda-rc)
+fi
+'''
+# And for q2-iroh, which demo starts beside coda-rc (docs/remote.md#car-remote-across-networks): its streams go to
+# this copy's daemon, named on its q2-iroh port (--forward-named), and for a build whose q2-iroh predates that, as
+# plain TCP to its Car Remote port (--forward), never to 7720 or 7721, where another emulator's (or the user's)
+# daemon may listen. Its first argument (serve) stays first; the ones put after it are the ones it takes, being first.
+IROH_BLOCK = '''# q2-iroh forwarding to this copy's coda-rc (tools/ci/emu_pool.py IROH_BLOCK)
+IROH=()
+if [ -n "${Q2EMU_CODA_PORT:-}" ] && [ -e "$E/rootfs/usr/bin/q2-iroh" ]; then
+    cp -f "$E/rootfs/usr/bin/q2-iroh" "$S/q2-iroh.real"
+    printf '%s\\n' '#!/bin/sh' 'c=$1; shift' "exec /emu/q2-iroh.real \\"\\$c\\" --forward 127.0.0.1:$Q2EMU_CODA_PORT --forward-named 127.0.0.1:$((Q2EMU_CODA_PORT + 100)) \\"\\$@\\"" > "$S/q2-iroh"; chmod +x "$S/q2-iroh"
+    IROH=(--ro-bind "$S/q2-iroh" /usr/bin/q2-iroh)
+fi
+'''
+# The blocks a copy fitted before each had its q2-iroh port has: fit puts the ones above in their place.
+# run.sh's stand-in for /usr/bin/coda-rc, which demo starts with no arguments (patch/coda_rc_shim.c): the build's
 # own daemon, copied beside the state, run with --port. Put before run.sh's bwrap, whose arguments gain CODA.
-CODA_BLOCK = '''# Car Remote (coda-rc) on this copy's own port, Q2EMU_CODA_PORT (tools/ci/emu_pool.py CODA_RC_BASE)
+CODA_BLOCK_V1 = '''# Car Remote (coda-rc) on this copy's own port, Q2EMU_CODA_PORT (tools/ci/emu_pool.py CODA_RC_BASE)
 CODA=()
 if [ -n "${Q2EMU_CODA_PORT:-}" ] && [ -e "$E/rootfs/usr/bin/coda-rc" ]; then
     cp -f "$E/rootfs/usr/bin/coda-rc" "$S/coda-rc.real"
@@ -82,7 +108,7 @@ fi
 # And for q2-iroh, which demo starts beside coda-rc (docs/remote.md#car-remote-across-networks): its streams go to
 # this copy's daemon, never to TCP 7720, where another emulator's (or the user's) daemon may listen. Its first
 # argument (serve) stays first; the --forward put after it is the one it takes, being the first.
-IROH_BLOCK = '''# q2-iroh forwarding to this copy's coda-rc (tools/ci/emu_pool.py IROH_BLOCK)
+IROH_BLOCK_V1 = '''# q2-iroh forwarding to this copy's coda-rc (tools/ci/emu_pool.py IROH_BLOCK)
 IROH=()
 if [ -n "${Q2EMU_CODA_PORT:-}" ] && [ -e "$E/rootfs/usr/bin/q2-iroh" ]; then
     cp -f "$E/rootfs/usr/bin/q2-iroh" "$S/q2-iroh.real"
@@ -107,6 +133,10 @@ def fit(d, k):
         assert run.count(RUN_BEFORE) == 1 and run.count(RUN_BWRAP) == 1, 'run.sh has changed: update CODA_BLOCK'
         run = run.replace(RUN_BEFORE, CODA_BLOCK + RUN_BEFORE).replace(RUN_BWRAP, '    "${CODA[@]}" "${BOOT[@]}"')
         (d/'run.sh').write_text(run)
+    for was, now in ((CODA_BLOCK_V1, CODA_BLOCK), (IROH_BLOCK_V1, IROH_BLOCK)):
+        if was in run:  # fitted before each copy had its own q2-iroh port
+            run = run.replace(was, now)
+            (d/'run.sh').write_text(run)
     if 'IROH=()' not in run:  # a copy fitted before q2-iroh too
         coda = '    "${CODA[@]}" "${BOOT[@]}"'
         assert run.count(RUN_BEFORE) == 1 and run.count(coda) == 1, 'run.sh has changed: update IROH_BLOCK'
