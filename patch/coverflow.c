@@ -3262,6 +3262,9 @@ void album_memory(void *r) {
  * started over the pressed server song's Now Playing, addon.c stream_start). Now Playing on top is
  * closed first, so there is one, and Return leaves for the page under it. */
 void play_folder(void *dq, int idx, int cls) {
+    /* ringnav_nav_to's question, asked before Now Playing on top closes or an album's name goes
+     * into the resume record (docs/internals.md#no-playback-without-an-output) */
+    if (cls != 0xff && check_forbid_play_no_headset(0)) return;
     if (cls == 0xff10) album_memory(deque_at(dq, (unsigned)idx));
     struct {
         void *dq;
