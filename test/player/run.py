@@ -16,7 +16,8 @@ files in place of ALSA.
   fakedemo.py), the same commands get the same events and answers from q2player.
 
 The tests and the fixtures run side by side, WIDTH at once, each in a folder of its own (AFTER's reader in its
-writer's), as each mostly waits on a player running in real time or faster; then SERIAL's, one at a time: the tests
+writer's), as each mostly waits on a player running in real time or faster; one that fails there runs again alone,
+and passing then is reported flaky and counted as passed. Then SERIAL's, one at a time: the tests
 that bound real-time behaviour or read the host's /tmp, each tried again (TRIES in all) when it failed on a run the
 machine starved (Stalls). Each line gives the test's seconds, and the run ends with the side-by-side part's and the
 whole run's.
@@ -1838,13 +1839,14 @@ def test_car_feed_does_not_block_a_source_the_car_does_not_take(player, songs, t
 AFTER = {'test_exact_mp3_no_step_at_the_cut': 'test_exact_mp3_gapless'}
 # Tests that run alone, after everything else, each tried again when it failed on a run the machine starved:
 # those whose assertions bound what happens in real time (a scan's 150 ms turn, a feed's 3 s of sound, the car trace's
-# lines a second, a preload's opening against the song's end, the clicks' 130 ms mute), each failed side by side
-# (2026-11-22), and the one that asserts on the host's own /tmp/notsupport, which any player whose song fails writes.
-SERIAL = ('test_scan', 'test_car_trace', 'test_car_feed_reaches_the_car', 'test_car_feed_hands_over_both_ways',
+# lines a second, a preload's opening against the song's end, the clicks' 130 ms mute, the positions sampled in a
+# window of seconds while a growing song's seek waits), each failed side by side (2026-11-22), and the one that
+# asserts on the host's own /tmp/notsupport, which any player whose song fails writes.
+SERIAL = ('test_scan', 'test_grow_seek_beyond', 'test_grow_seek_inside', 'test_car_trace', 'test_car_feed_reaches_the_car', 'test_car_feed_hands_over_both_ways',
           'test_car_feed_paused_is_silence_not_a_stall', 'test_car_feed_source_gone_leaves_the_song_resumable',
           'test_car_feed_does_not_block_a_source_the_car_does_not_take', 'test_preload_outrun', 'test_click_idle',
           'test_a_failure_already_replaced_is_not_reported')
-WIDTH = 12  # tests and fixtures side by side: each mostly waits on a player running in real time or faster
+WIDTH = 8  # tests and fixtures side by side: each mostly waits on a player running in real time or faster
 STALL_S = 0.1  # a 5 ms sleep that took this much longer: the machine did not run this process (measured: 650 ms under
                # a nice-19 job on a busy core, under 10 ms when the core is shared fairly)
 TRIES = 3
@@ -1909,15 +1911,32 @@ def main():
         chains = [[n, *(r for r, w in AFTER.items() if w == n and r in tests)] for n in tests
                   if n not in SERIAL and (n not in AFTER or AFTER[n] not in tests)]
         fixtures = [f for f in sorted((HERE/'fixtures').glob('*.txt')) if only in 'protocol-' + f.stem and f.stem not in KNOWN]
+        again = []  # what failed side by side, run again alone below
         with concurrent.futures.ThreadPoolExecutor(WIDTH) as pool:
             jobs = [pool.submit(chain, i, c, player, songs, tmp) for i, c in enumerate(chains)]
             runs = [(f, pool.submit(timed, check_protocol, player, songs, tmp, f)) for f in fixtures]
-            for job in jobs:
-                for result in job.result():
-                    failed += report(*result)
+            for c, job in zip(chains, jobs):
+                results = job.result()
+                if all(ok for _, ok, _, _ in results):
+                    for result in results: report(*result)
+                else:
+                    again.append((c, results))
             for f, r in runs:
-                failed += report(f'protocol {f.stem}', *r.result())
+                ok, text, secs = r.result()
+                if ok: report(f'protocol {f.stem}', ok, text, secs)
+                else: again.append((f, [(f'protocol {f.stem}', ok, text, secs)]))
         print(f'side by side: {time.monotonic() - start:.1f} s', flush=True)
+        # A failure side by side runs again alone, as gate.run does a suite's: passing then, it is flaky (said, and
+        # counted as passed); failing again, it fails.
+        for i, (what, first) in enumerate(again):
+            if isinstance(what, list):
+                second = chain(f'a{i}', what, player, songs, tmp)
+            else:
+                (tmp/f'a{i}').mkdir()
+                second = [(f'protocol {what.stem}', *timed(check_protocol, player, songs, tmp/f'a{i}', what))]
+            for (name, ok1, text1, _), (_, ok, text, secs) in zip(first, second):
+                if ok and not ok1: print(f'flaky {name}: failed side by side ({text1[:200]}), passed alone', flush=True)
+                failed += report(name, ok, text, secs)
         for n in tests:
             if n in SERIAL:
                 failed += report(n, *alone(n, player, songs, tmp))
