@@ -710,7 +710,7 @@ def test_crossfade(player, songs, tmp):
     """/tmp/q2xfade at 2000 ms, two 20 s FLACs, the second preloaded: the first plays exactly up to its last 2 s, which
     are mixed under the second's first 2 s at equal power, then the second plays exactly (demo's fade is 0 by then, its
     next being the queue's end); one PCM open."""
-    s, pcm, names = play(player, songs, 'xfade', tmp/'xfade', speed=8)
+    s, pcm, names = play(player, songs, 'xfade', tmp/'xfade', speed=8, exits=2)
     assert names == ['0000_44100_2_s16.raw'], names
     a, b, got = (array.array('h', x) for x in (reference(songs/'a1.flac'), reference(songs/'a2.flac'), pcm[0]))
     n, h = len(a) // 2, 2 * 44100
@@ -751,10 +751,11 @@ def synth(path, seconds, level, rate=44100, channels=2, hz=None):
 
 def smart_songs(d, rate_b=44100, channels_b=2, b_level=None):
     """A: a 440 Hz tone at half scale for 16 s, a 6 s linear fade to nothing, 2 s of silence. B: 1.5 s of silence,
-    then a 660 Hz tone at half scale from its first frame (a hard start), 18.5 s of it."""
+    then a 660 Hz tone at half scale from its first frame (a hard start), 43.5 s of it: over XF_SMART_LEAD_S long, so
+    its own change's analysis is not asked for before demo's word for it (0, the queue's end) is there."""
     d.mkdir(parents=True, exist_ok=True)
     a = synth(d/'sa.flac', 24, lambda t: 0.5 if t < 16 else max(0.0, 0.5 * (1 - (t - 16) / 6)) if t < 22 else 0.0)
-    b = synth(d/'sb.flac', 20, b_level or (lambda t: 0.0 if t < 1.5 else 0.5), rate=rate_b, channels=channels_b, hz=660)
+    b = synth(d/'sb.flac', 45, b_level or (lambda t: 0.0 if t < 1.5 else 0.5), rate=rate_b, channels=channels_b, hz=660)
     return a, b
 
 
@@ -792,18 +793,22 @@ def smart_plan(a, b, ca=2, cb=2, ra=44100, rb=44100):
     return overlap, te * wa, skip * wb, rb * fade_ms // 1000
 
 
-def smart_scenario(a, b, gapless_at=12.0, end=60.0, word=SMART, next_text=None):
+def smart_scenario(a, b, gapless_at=12.0, end=80.0, word=SMART, next_text=None):
+    """A then B, B preloaded at gapless_at, word in /tmp/q2xfade until A's exit, where demo writes B's own (0, the
+    queue's end); the run ends at both songs' exits (smart_play), end only bounding it."""
+    def at_exit(s): s.on_exit = [fakedemo.put('tmp/q2xfade', bytes(4), in_place=True)]
     boot = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\0}'), (0.1, '{mcl-setvol\\60}')]
     return boot + [(0.2, fakedemo.put('tmp/q2xfade', word.to_bytes(4, 'little'))),
                    (0.2, fakedemo.put('tmp/q2xfade.next', (next_text if next_text is not None else f'{a}\n{b}\n').encode())),
                    (0.3, fakedemo.SETEQ), (1.0, fakedemo.song('set-songurl', str(a), flag=1)),
-                   (gapless_at, fakedemo.gapless(str(b), flag=1)),
-                   (gapless_at + 9, fakedemo.put('tmp/q2xfade', bytes(4), in_place=True)), (end, None)]
+                   (gapless_at, fakedemo.gapless(str(b), flag=1)), (gapless_at, at_exit), (end, None)]
 
 
-def smart_play(player, songs, out, steps, speed=8, env=None):
+def smart_play(player, songs, out, steps, speed=8, env=None, exits=2):
+    """exits: as play's, the run's end waits for both songs' {player-status\\exit}."""
     s = fakedemo.Session(out)
     s.music = songs
+    s.wait_exits = exits
     s.run(steps, fakedemo.launch_host(player, str(songs), speed, env), speed)
     pcm = sorted((pathlib.Path(out)/'pcm').glob('*.raw'))
     return s, [p.name for p in pcm], b''.join(p.read_bytes() for p in pcm), (pathlib.Path(out)/'player.log').read_text()
@@ -849,17 +854,22 @@ def test_smart_crossfade(player, songs, tmp):
 
 def test_smart_crossfade_starved(player, songs, tmp):
     """The player and its analysis thread on one core with two busy neighbours on it (the Q2's second core taken by
-    demo, at worst): the change is still whole, the smart fade or, logged, the plain one, never a tail cut short."""
+    demo, at worst), and stopped for 300 ms of every second besides (fakedemo's Q2_TEST_STARVE): the change is still
+    whole, the smart fade or, logged, the plain one, never a tail cut short."""
     a, b = smart_songs(tmp/'smart')
     cpu = str(max(os.sched_getaffinity(0)))
     wrap = tmp/'starved.sh'
     wrap.write_text(f'#!/bin/sh\nexec taskset -c {cpu} {player}\n')
     wrap.chmod(0o755)
     busy = [subprocess.Popen(['taskset', '-c', cpu, sys.executable, '-c', 'while True: pass']) for _ in range(2)]
+    was = os.environ.get('Q2_TEST_STARVE')
+    os.environ['Q2_TEST_STARVE'] = '300/1000'
     try:
         s, names, got, log = smart_play(str(wrap), songs, tmp/'smartstarved', smart_scenario(a, b))
     finally:
         for p in busy: p.kill(), p.wait()
+        if was is None: os.environ.pop('Q2_TEST_STARVE', None)
+        else: os.environ['Q2_TEST_STARVE'] = was
     if 'smart crossfade: plain' in log:
         lines = [l for l in log.splitlines() if 'smart crossfade: plain' in l]
         assert len(lines) == 1, lines

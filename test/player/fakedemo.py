@@ -466,7 +466,9 @@ class Session:
         self.pushes = []
         self.lines, self.seen, self.t0, self.conn, self.playing, self.preload, self.speed = [], {}, None, None, False, False, 1
         self.music = None  # the music directory on this machine, for steps that act on its files
-        self.on_exit = []  # set-gapless commands sent one at each {player-status\\exit}, as demo sends one per song
+        # set-gapless commands sent one at each {player-status\\exit}, as demo sends one per song; a callable is called
+        # with the session instead (demo's own work at a change, such as /tmp/q2xfade's next word)
+        self.on_exit = []
         self.wait_exits = 0  # at the last step, wait for this many {player-status\\exit} first (run): 0, none
         certs = httpd.certificates(CERTS)
         root = lambda: pathlib.Path(self.music)
@@ -530,7 +532,10 @@ class Session:
                 self.seen[name] = shown
                 # demo stops polling at an exit unless it had sent a preload: then mclNextSong(1) sends nothing and
                 # the player goes on with the preloaded file alone
-                if m == '{player-status\\exit}' and self.on_exit: self.send(self.on_exit.pop(0)); continue
+                if m == '{player-status\\exit}' and self.on_exit:
+                    nxt = self.on_exit.pop(0)
+                    nxt(self) if callable(nxt) else self.send(nxt)
+                    continue
                 if m == '{player-status\\exit}' and self.preload: self.preload = False
                 elif m in ('{player-status\\exit}', '{player-stopstatus\\exit}', '{player-status\\error}'): self.playing = False
 
