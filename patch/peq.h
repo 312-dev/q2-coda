@@ -418,6 +418,7 @@ void tidal_clear(void);
  * once replaced or removed, forgotten on the UI thread. */
 #define APPS_MAX 8 /* card apps on the card at once */
 int addon_scan(void), addon_open(void *ctx, void *event), addon_hold(void *top);
+void child_quit(int pid, unsigned quit_ms); /* radio.c: a child asked to quit, reaped or killed */
 int addon_games_last(void); /* the card's games as the last addon_scan found them */
 /* The games games.c's chooser ships, the one place to turn each on (docs/internals.md#games): 1
  * lists it and builds it into the payload, 0 leaves it out of both, its source kept in games.c

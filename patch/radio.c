@@ -274,21 +274,27 @@ static void send_key(const char *c, unsigned n) {
     dgram_send(&rd.sock, RADIO_SOCK, c, n);
 }
 
+/* A child asked to quit (its caller's way, already) reaped, and killed if it has not gone within
+ * quit_ms: Internet Radio's q2video here, Radio's receiver (radio_tuner.c audio_halt). The UI
+ * thread waits that long at most, only for a child that does not answer. */
+void child_quit(int pid, unsigned quit_ms) {
+    int status, done;
+    unsigned start = time_now_ms();
+    while (!(done = waitpid(pid, &status, 1)) && time_now_ms() - start < quit_ms) sleep_ms(20);
+    if (!done) {
+        char kill[24]; /* this child only: librespot's sink is a q2video too (demo imports no kill) */
+        tk_snprintf(kill, sizeof kill, "kill -9 %d", pid);
+        system(kill);
+        waitpid(pid, &status, 0);
+    }
+}
+
 /* q2video quit, and killed if it does not go within RADIO_QUIT_MS. The media keys stay radio's. */
 static void radio_halt(void) {
     rd.wait = 0;
     if (!rd.pid) return;
-    int status, done;
-    unsigned start = time_now_ms();
     send_key("q", 1);
-    while (!(done = waitpid(rd.pid, &status, 1)) && time_now_ms() - start < RADIO_QUIT_MS)
-        sleep_ms(20);
-    if (!done) {
-        char kill[24]; /* this helper only: librespot's sink is a q2video too (demo imports no kill) */
-        tk_snprintf(kill, sizeof kill, "kill -9 %d", rd.pid);
-        system(kill);
-        waitpid(rd.pid, &status, 0);
-    }
+    child_quit(rd.pid, RADIO_QUIT_MS);
     rd.pid = 0;
     unlink(RADIO_STATE);
     tk_snprintf(rd.state, sizeof rd.state, "stopped");
