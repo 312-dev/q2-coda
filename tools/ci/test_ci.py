@@ -1377,11 +1377,12 @@ def test_a_car_remote_change_plans_its_end_to_end_run(path):
 
 
 @pytest.mark.parametrize('path', ['patch/q2_iap.c', 'patch/q2_iap2.c', 'patch/q2_iap_lib.c', 'patch/q2_iap2_link.c',
-                                  'patch/q2_iap_auth.h', 'patch/iap_session.c', 'patch/q2car.sh'])
+                                  'patch/q2_iap_auth.h', 'patch/iap_session.c', 'patch/q2car.sh',
+                                  'patch/iap2_link.c', 'patch/iap2_session.h', 'patch/iap2.h', 'patch/q2_iap_sys.h'])
 def test_an_iphone_gadget_change_plans_the_probe_suite(path):
     """test/iap_probe.py builds q2-iap from patch/q2_iap*.c and runs it as q2car.sh does against a stand-in
-    FunctionFS, and was planned only when its own file changed. Every q2-iap source, those a split of q2_iap2.c
-    adds under the same prefixes (q2_iap*, iap_*), and q2car.sh plan it."""
+    FunctionFS, and was planned only when its own file changed. Every q2-iap source, those under the same prefixes
+    (q2_iap*, iap_*, and iap2*, the iAP2 files tools/build.py's Q2IAP_SOURCES names), and q2car.sh plan it."""
     assert 'test/iap_probe.py' in affected.plan_for({path: {1}}, REPO).as_dict()['other']
 
 

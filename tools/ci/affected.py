@@ -39,8 +39,8 @@ test/patch.py, which executes the payload as one program. What gets narrowed:
   test/subsonic_contract.py (`CONTRACT_SOURCES`): the words and files the bundled Subsonic app shares with them;
   those, patch/playback.c and the seam test's own files (`SEAM_SOURCES`) plan test/subsonic_seam.py, the real app
   run against them;
-- patch/coda_rc* and remote/coda-rc.proto also plan test/coda_rc_e2e.py, and patch/q2_iap*, patch/iap_* and
-  patch/q2car.sh test/iap_probe.py (`CAR_SUITES`, patterns so a split's new files are covered);
+- patch/coda_rc* and remote/coda-rc.proto also plan test/coda_rc_e2e.py, and patch/q2_iap*, patch/iap_*, patch/iap2*
+  and patch/q2car.sh test/iap_probe.py (`CAR_SUITES`, patterns so a split's new files are covered);
 - a payload change (patch/) also plans `smoke`, tools/ci/smoke.py on a pooled emulator, but runs it only with
   --smoke: it is optional for a worker, and a merge batch leaves it out (gate.OPTIONAL), as the queue runs it
   on the trunk's tip after landing, where a failure turns the tip red.
@@ -131,10 +131,11 @@ SEAM_SOURCES = (*CONTRACT_SOURCES, 'patch/playback.c', 'test/fw/seam.py', 'test/
 # test/coda_rc_e2e.py drives the Car Remote daemon and demo's shim over TCP on a pooled emulator, from every
 # patch/coda_rc* file (a file a split adds under that prefix too) and the protocol's definition;
 # test/iap_probe.py builds q2-iap from its sources and runs it as q2car.sh does against a stand-in FunctionFS, from
-# patch/q2_iap*, patch/iap_* and q2car.sh. Patterns, not names, so a file split out under the same prefix is covered.
+# patch/q2_iap*, patch/iap_*, patch/iap2* (the iAP2 files) and q2car.sh. Patterns, not names, so a file split out
+# under the same prefix is covered.
 CAR_SUITES = {
     'test/coda_rc_e2e.py': ('patch/coda_rc*', 'remote/coda-rc.proto'),
-    'test/iap_probe.py': ('patch/q2_iap*.[ch]', 'patch/iap_*.[ch]', 'patch/q2car.sh'),
+    'test/iap_probe.py': ('patch/q2_iap*.[ch]', 'patch/iap_*.[ch]', 'patch/iap2*.[ch]', 'patch/q2car.sh'),
 }
 SMOKE = 'smoke'  # tools/ci/smoke.py: optional here (run with --smoke), the post tier's on the trunk
 INTEGRATION = re.compile(r'^(release/|integ/|main$|master$)')  # integ/*: the integrator's (docs/orchestration.md)
