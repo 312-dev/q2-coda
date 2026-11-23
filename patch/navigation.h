@@ -1255,8 +1255,8 @@ int usb_ui_key(void *top, unsigned key), usb_ui_cable(void), usb_pick_open(void 
 /* usb_car.c: Car Audio, the USB setting's Automatic (docs/iphone-mode.md#car-audio-in-the-image); usb_car_poll's
  * answers to usb_ui.c */
 enum { USB_CAR_NONE, USB_CAR_STORAGE, USB_CAR_CHARGER };
-void usb_car_start(void), usb_car_stop(int wait);
-int usb_car_poll(void), usb_car_on(void), usb_car_output(void);
+void usb_car_start(void), usb_car_stop(void);
+int usb_car_poll(void), usb_car_on(void), usb_car_output(void), usb_car_busy(void);
 const char *usb_car_name(void);
 /* output_rule.c: no playback without an output (docs/internals.md#no-playback-without-an-output) */
 void output_rule_config(void);

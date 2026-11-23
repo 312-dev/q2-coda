@@ -9,8 +9,13 @@ from test_nav_painters import Canvas, scratch, st  # noqa: F401 (fixtures)
 from test_usb_ui import CAR_START, UDC, Usb, picker
 
 STATE = '/tmp/q2car.state'
-CAR_STOP_BG = '( /usr/bin/q2car stop >/dev/null 2>&1 & )'
-CAR_STOP = '/usr/bin/q2car stop >/dev/null 2>&1'
+CAR_STOP_BG = '( /usr/bin/q2car stop >/dev/null 2>&1; : > /tmp/q2car.stopped ) &'
+CAR_STOP_START = ('( /usr/bin/q2car stop >/dev/null 2>&1; : > /tmp/q2car.stopped; /usr/bin/q2car start >/dev/null 2>&1 )'
+                  ' &')
+CAR_STOP = '/usr/bin/q2car stop >/dev/null 2>&1'  # the blocking form usb_ui.c's pick once ran on the UI thread
+STOPPED = '/tmp/q2car.stopped'
+PCM = '/proc/asound/UAC1Gadget/pcm0p/sub0/status'
+RELEASE = '{mcl-carrelease\\null}'
 
 
 def auto(fw, **kw):
@@ -113,12 +118,90 @@ def test_the_cable_out_stops_the_gadget_in_the_background(fw):
 
 
 def test_a_pick_with_the_iphone_shown_stops_it_first(fw):
-    """Charge Only picked while Automatic's iPhone is on the cable: q2car stopped here and now, then the pick."""
+    """Charge Only picked while Automatic's iPhone is on the cable, the car's PCM closed: q2car stopped in the
+    background, and the pick made once that stop has returned (STOPPED), remembered at once."""
     u = auto(fw)
     u.ui.click(u.row(picker(u), 'Charge Only'))
-    assert u.commands == [CAR_START, CAR_STOP] and u.saved == [('Q2POD', 'USBPICK', 1)]
+    assert u.commands == [CAR_START, CAR_STOP_BG] and u.saved == [('Q2POD', 'USBPICK', 1)]
+    u.files.files[STOPPED] = b''
+    u.poll()
+    assert u.commands == [CAR_START, CAR_STOP_BG] and u.saved == [('Q2POD', 'USBPICK', 1)], 'remembered once'
     u.unplug()
-    assert CAR_STOP_BG not in u.commands, 'stopped once'
+    assert u.commands.count(CAR_STOP_BG) == 1, 'stopped once'
+
+
+# ---- the player's release of the car's PCM before the stop (usb_car.c usb_car_stop, docs at its top) ----
+
+def holding(fw, u, status=b'state: PAUSED\n'):
+    """The paused player holding the car's PCM (its /proc status not "closed"), and demo's socket to it."""
+    C.c_int.from_address(O['MCL_FD']).value = 7
+    u.files.files[PCM] = status
+    u.sent.clear()
+
+
+def test_a_pick_never_blocks_on_the_player_holding_the_car_s_pcm(fw):
+    """2026-11-22: the gadget's unbind sat in snd_card_free while the car's PCM was held open, and this pick ran it on
+    the UI thread. Now the player is asked to release it and nothing runs until it has: the pick waits, the UI pass
+    goes on; once the PCM reads closed, the stop in the background, and the pick after it."""
+    u = auto(fw)
+    holding(fw, u)
+    u.ui.click(u.row(picker(u), 'Transfer Files'))
+    assert u.sent == [RELEASE] and u.commands == [CAR_START], 'nothing run while the player holds it'
+    assert CAR_STOP not in u.commands
+    u.now += 500
+    u.poll()
+    assert u.commands == [CAR_START] and u.link.value == 3
+    u.files.files[PCM] = b'closed\n'
+    u.now += 100
+    u.poll()
+    assert u.commands == [CAR_START, CAR_STOP_BG] and u.link.value == 3, 'the stop, and the pick still waiting'
+    u.files.files[STOPPED] = b''
+    u.poll()
+    assert u.link.value == 0 and u.mode.value == 2, "then Transfer Files: stock's storage gadget for this cable"
+    assert u.sent == [RELEASE]
+
+
+def test_a_player_that_never_lets_go_is_given_2_s(fw):
+    u = auto(fw)
+    holding(fw, u, b'state: RUNNING\n')
+    u.ui.click(u.row(picker(u), 'Charge Only'))
+    u.now += 1900
+    u.poll()
+    assert u.commands == [CAR_START]
+    u.now += 100
+    u.poll()
+    assert u.commands == [CAR_START, CAR_STOP_BG]
+
+
+def test_the_cable_out_asks_the_player_to_let_go_first(fw):
+    """A song paused into the car and the cable out: the release, then the stop once the PCM is closed."""
+    u = auto(fw)
+    holding(fw, u)
+    u.unplug()
+    assert u.sent == [RELEASE] and u.commands == [CAR_START]
+    u.files.files[PCM] = b'closed\n'
+    u.now += 50
+    u.poll()
+    assert u.commands == [CAR_START, CAR_STOP_BG]
+
+
+def test_no_car_card_needs_no_release(fw):
+    """The function not bound (no card): nothing to let go of, the stop at once and nothing sent."""
+    u = auto(fw)
+    C.c_int.from_address(O['MCL_FD']).value = 7
+    u.sent.clear()
+    u.unplug()
+    assert u.sent == [] and u.commands == [CAR_START, CAR_STOP_BG]
+
+
+def test_a_cable_back_before_the_release_stops_then_starts(fw):
+    """Out and in again while the player still holds the PCM: the old gadget's stop goes first, then the start, in
+    one background run, so the new runner never meets the old gadget."""
+    u = auto(fw)
+    holding(fw, u)
+    u.unplug()
+    u.plug(host=False)
+    assert u.commands == [CAR_START, CAR_STOP_START]
 
 
 # ---- nowhere to play once the car's audio goes (usb_car.c usb_car_gone, docs/iphone-mode.md#nowhere-to-play) ----

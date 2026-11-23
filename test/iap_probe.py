@@ -1890,5 +1890,49 @@ def test_the_oldest_go_past_the_days_but_the_last_car_stays(carlogs):
     assert carlog_names(carlogs) == ['q2car.1.log', 'q2car.other.log']  # the only car's log, however old
 
 
+
+# patch/q2car.sh's release, before gadget_down unbinds the function: the player told by SIGUSR2 to let go of the car's
+# PCM, 2 s at most. On 2026-11-22 the unbind sat 6.4 s in snd_card_free while the PCM was held open.
+def q2car_release(where, status, player=None):
+    pcm = where / 'status'
+    pcm.write_text(status)
+    shim = where / 'bin'
+    shim.mkdir(exist_ok=True)
+    (shim / 'usleep').write_text('#!/bin/sh\nsleep $(awk "BEGIN { print $1 / 1000000 }")\n')  # busybox's, not the host's
+    (shim / 'usleep').chmod(0o755)
+    env = dict(os.environ, Q2CAR_RUN=str(where / 'run'), Q2CAR_LOGDIR=str(where / 'logs'), Q2CAR_PCM=str(pcm),
+               Q2CAR_PLAYER=player or 'q2-no-such-player', PATH=f'{shim}:{os.environ["PATH"]}')
+    start = time.monotonic()
+    subprocess.run(['sh', str(Q2CAR), '_release'], env=env, check=True, timeout=30)
+    return time.monotonic() - start, (where / 'logs/q2car.log').read_text() if (where / 'logs/q2car.log').exists() else ''
+
+
+def test_a_closed_car_pcm_is_not_waited_for(carlogs):
+    took, log = q2car_release(carlogs, 'closed\n')
+    assert took < 1 and log == ''
+
+
+def test_the_player_lets_go_of_the_car_pcm_before_the_unbind(carlogs):
+    """A stand-in player that closes the PCM at SIGUSR2, as q2player does (docs/player.md)."""
+    src = carlogs / 'player.c'
+    src.write_text('#include <signal.h>\n#include <stdio.h>\n#include <unistd.h>\nstatic const char *pcm;\n'
+                   'static void let_go(int s) { FILE *f = fopen(pcm, "w"); fputs("closed\\n", f); fclose(f); _exit(0); }\n'
+                   'int main(int argc, char **argv) { pcm = argv[1]; signal(SIGUSR2, let_go); for (;;) pause(); }\n')
+    subprocess.run([os.environ.get('CC', 'cc'), '-o', str(carlogs / 'q2fakeplayer'), str(src)], check=True, timeout=60)
+    p = subprocess.Popen([str(carlogs / 'q2fakeplayer'), str(carlogs / 'status')])
+    try:
+        time.sleep(0.3)
+        took, log = q2car_release(carlogs, 'state: PAUSED\n', player='q2fakeplayer')
+    finally:
+        p.kill()
+        p.wait()
+    assert took < 1.5 and "the car's PCM released in" in log, (took, log)
+
+
+def test_a_car_pcm_never_let_go_is_given_2_s(carlogs):
+    took, log = q2car_release(carlogs, 'state: RUNNING\n')
+    assert 1.9 < took < 4 and "still open after 2 s" in log, (took, log)
+
+
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-q', *sys.argv[1:]]))
