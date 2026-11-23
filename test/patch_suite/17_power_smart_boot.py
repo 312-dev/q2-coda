@@ -342,18 +342,19 @@ for case,setup,kept in CASES:
     assert (not m.switch())==kept and (kept or m.flag()==0),case
 passed()
 # The payload's own users hold it on while they run: librespot, a station, a card app, an upload,
-# Network Update's download or an Apps job, Get Album Lyrics, a Tidal download and Car Remote on.
+# Network Update's download or an Apps job, Get Album Lyrics, a Tidal download and Car Remote while a phone may
+# use the network (coda_rc_wants_wifi: a link, and used within 10 minutes; test/fw/test_coda_rc_shim.py has the rule).
 class SmartBusy(SmartMachine):
     def __init__(self,name,busy):
         super().__init__(); self.busy=busy; self.handlers[payload_syms[name]]='b:'+name  # every address is hooked here
-        # Car Remote on: its shim's poll (test/fw/test_coda_rc_shim.py's) left out, as it would start the daemon
-        if name=='coda_rc_enabled': self.handlers[payload_syms['coda_rc_poll']]='skip'
+        # Car Remote's: its shim's poll (test/fw/test_coda_rc_shim.py's) left out, as it would start the daemon
+        if name=='coda_rc_wants_wifi': self.handlers[payload_syms['coda_rc_poll']]='skip'
     def hook(self,u,address,size,unused):
         if self.handlers.get(address)=='skip': self.returns(0); return
         if self.handlers.get(address,'').startswith('b:'): self.returns(self.busy); return
         return super().hook(u,address,size,unused)
 for name in ('spot_running','radio_status','addon_running','scrobble_busy','netupdate_busy','album_lyrics_busy','tidal_busy',
-             'coda_rc_enabled'):
+             'coda_rc_wants_wifi'):
     for busy in (0,2):  # radio_status: 2 a station playing
         m=SmartBusy(name,busy); m.pass_(1); m.pass_(SW_IDLE); assert (not m.switch())==bool(busy),(name,busy)
 passed()
