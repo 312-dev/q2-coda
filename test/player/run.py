@@ -1011,6 +1011,59 @@ def test_volume_law(player, songs, tmp):
     return f'{len(want)} levels'
 
 
+def test_car_write_slow(player, songs, tmp):
+    """The drive of 2026-11-23: one write to the car's PCM took 10.8 s (the trace's wmax=10862ms), across the car's
+    pause, a stop and a restart. output.c against alsa_test.c's libasound, in real time:
+    - a car that stopped reading with room for 50 frames left, and a stop at the first wait: the write of 100 frames
+      never asks the kernel for more than the room, whose blocking write would wait for the rest until its timeout
+      (10 s on 5.10; 1.2 s here), so the stop ends it at the next look, not after the timeout;
+    - a write that took over a second, in waits for the car or in the write itself, logs one line saying where the
+      time went: snd_pcm_wait's and snd_pcm_writei's last answers, errno, the PCM's state and avail; a quick one none."""
+    run = subprocess.run([tool(tmp, 'alsa_test', '-DHAVE_ALSA', '-DQ2_CAR_USB'), 'car-slow'], check=True, capture_output=True,
+                         text=True, env={**os.environ, 'Q2PLAYER_CAR': str(tmp/'alsa-slow.audio')})
+    got = {l.split()[0]: l for l in run.stdout.split('\n') if l}
+    said = [l[len('plog W '):] for l in run.stderr.split('\n') if l.startswith('plog W q2player: a car write took')]
+    stall = got['car-stall'].split()
+    assert stall[1:5] == ['r', '0', 'blocked', '0'] and int(stall[-1]) < 600, \
+        f'a write past the car\'s room waited in the kernel past the stop: {got["car-stall"]}'
+    assert len(said) == 2, said
+    wait, write = said
+    assert re.fullmatch(r'q2player: a car write took 1[2-5]\d\d ms: 100 frames, 1[2-5]\d\d ms waiting \(snd_pcm_wait 1\), '
+                        r'\d+ ms writing \(snd_pcm_writei 100, errno 0\), RUNNING, avail \d+', wait), wait
+    assert re.fullmatch(r'q2player: a car write took 1[01]\d\d ms: 100 frames, \d+ ms waiting \(snd_pcm_wait 1\), '
+                        r'1[01]\d\d ms writing \(snd_pcm_writei 100, errno 0\), RUNNING, avail \d+', write), write
+    return f'stall: {got["car-stall"]}; {wait}; {write}'
+
+
+def test_usb_errors(player, songs, tmp):
+    """The drive of 2026-11-23: the AB13X earbuds (48 kHz alone) on the host port, `q2player: hw:1,0 is gone` about 5 s
+    before /sys/bus/usb/devices/1-1 went, and the line could not say which call found it gone, with which error, or
+    whether the earbuds were back as another card. output.c against alsa_test.c's dongle: an underrun or a suspend on
+    the first write is prepared and written again, nothing said; -EIO fails the song with the call and errno, the device
+    not taken as gone; an open that finds no card, and -ENODEV under two writes, are each said once, naming the call,
+    the error and the sound cards there (/proc/asound/cards, Q2PLAYER_CARDS here)."""
+    cards = tmp/'cards'
+    cards.write_text(' 0 [audiocodec     ]: audiocodec - audiocodec\n                      audiocodec\n'
+                     ' 2 [AB13X          ]: USB-Audio - AB13X USB Audio\n                      Generic AB13X USB Audio at usb-1\n')
+    run = subprocess.run([tool(tmp, 'alsa_test', '-DHAVE_ALSA', '-DQ2_CAR_USB'), 'usb-errors'], check=True, capture_output=True,
+                         text=True, env={**os.environ, 'Q2PLAYER_CARDS': str(cards)})
+    got = {l.split()[0]: l.split(' ', 1)[1] for l in run.stdout.split('\n') if l}
+    said, case = {}, None
+    for l in run.stderr.split('\n'):
+        if l.startswith('case '): case = l[5:]
+        elif l.startswith('q2player: ') and case: said.setdefault(case, []).append(l)
+    want = {'usb-xrun': 'open 1 r 0 0', 'usb-suspend': 'open 1 r 0 0', 'usb-eio': 'open 1 r -1 0', 'usb-gone-open': 'open 0 r 0 0',
+            'usb-gone-write': 'open 1 r -3 -3'}
+    bad = [f'{k}: {got.get(k)}' for k, v in want.items() if not (got.get(k) or '').startswith(v)]
+    assert not bad, bad
+    gone = lambda k: [l for l in said.get(k, []) if ' is gone' in l]
+    assert not gone('usb-xrun') and not gone('usb-suspend') and not gone('usb-eio'), said
+    assert said.get('usb-eio') == ['q2player: test: snd_pcm_writei -5 (Input/output error)'], said.get('usb-eio')
+    assert gone('usb-gone-open') == ['q2player: test is gone: snd_pcm_open -2 (No such file or directory); sound cards: 0 audiocodec, 2 AB13X'], said
+    assert gone('usb-gone-write') == ['q2player: test is gone: snd_pcm_writei -19 (No such device); sound cards: 0 audiocodec, 2 AB13X'], said
+    return f"{gone('usb-gone-open')[0]}; {gone('usb-gone-write')[0]}; {said['usb-eio'][0]}"
+
+
 def test_alsa_sw_params(player, songs, tmp):
     """output.c against alsa_test.c's libasound: every way sets stock's software parameters (ao_alsa's init,
     0x438d64-0x438dc4: start at a period, stop_threshold and silence_size at the boundary), and off Bluetooth a write to

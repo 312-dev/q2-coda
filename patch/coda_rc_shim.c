@@ -463,6 +463,19 @@ static void cr_ack(unsigned seq, int code) {
     blob_io(CR_ACK, CR_ACK ".tmp", b, n, 1);
 }
 
+/* A command in the system log as it is taken: its words (verb, up to its line's end), who sent it (q2-iap's numbers
+ * start at 0x51000000, q2_iap.c io_command; coda-rc's, the phone's, are below), what owned playback said before it
+ * (status, media_status's: 2 playing, 3 paused) and, with done, what came of it. The drive of 2026-11-23 could
+ * not tell a phone's pick from a song's end. */
+static void cr_said(unsigned seq, const char *verb, int status, const char *done) {
+    char line[112];
+    int n = 0;
+    while (verb[n] && verb[n] != '\n' && n < 48) ++n;
+    tk_snprintf(line, sizeof line, "%.*s from the %s: the player %d%s%s", n, verb,
+                seq >= 0x51000000u ? "car" : "phone", status, done ? ", " : "", done ? done : "");
+    ulog('I', "remote", line);
+}
+
 typedef struct {
     int id;
     unsigned at;
@@ -518,11 +531,15 @@ static int cr_play(const void *unused) {
     char *verb = strstr(raw + 1, " ");
     if (!verb || __isoc99_sscanf(verb, " play %d %d %d", &at, &shuffle, &count) != 3) return 0;
     if (library_scanning() || addon_game_audio() || navigator_window_is_exist("usbmode_page")) {
+        cr_said(seq, verb + 1, media_status(), "busy");
         cr_ack(seq, 2); /* busy: the daemon answers UNAVAILABLE */
         return 0;
     }
     void *dq = cr_songs(at, &from);
     int size = (int)deque_size(dq);
+    char done[32];
+    tk_snprintf(done, sizeof done, "%d songs from %d", size, from);
+    cr_said(seq, verb + 1, media_status(), size ? done : "no songs");
     if (size) {
         press_natural = 0; /* the phone's pick is the user's: the same row resumes, as a tap does */
         if (shuffle)
@@ -547,9 +564,11 @@ static int cr_radio(const void *unused) {
     int stop = verb && !strncmp(verb, " radio stop", 11);
     if (!verb || (!stop && __isoc99_sscanf(verb, " radio %d", &id) != 1)) return 0;
     if (!stop && (library_scanning() || addon_game_audio() || navigator_window_is_exist("usbmode_page"))) {
+        cr_said(seq, verb + 1, media_status(), "busy");
         cr_ack(seq, 2);
         return 0;
     }
+    cr_said(seq, verb + 1, media_status(), 0);
     int code = song_radio_car(id, stop);
     cr_now();
     cr_ack(seq, code);
@@ -622,42 +641,46 @@ static void cr_run(const char *raw) {
                                          : -1;
     if (want >= 0) {
         int status = media_status(), press = (status == 2) != want;
-        char line[64]; /* the drive of 2026-11-22: a resume, and the player paused 0.4 s later */
-        tk_snprintf(line, sizeof line, "%s from the car or phone: the player %d, %s", word, status,
-                    press ? "Play/Pause pressed" : "nothing pressed");
-        ulog('I', "remote", line);
+        /* the drive of 2026-11-22: a resume, and the player paused 0.4 s later */
+        cr_said(seq, verb + 1, status, press ? "Play/Pause pressed" : "nothing pressed");
         if (press) media_key(KEY_PLAY);
         cr.want = want + 1; /* acked once the player shows it (cr_settle) */
         cr.want_seq = seq;
         cr.want_at = time_now_ms();
         cr_settle();
     } else if (!strcmp(word, "next") || !strcmp(word, "previous")) {
+        cr_said(seq, verb + 1, media_status(), 0);
         media_key(word[0] == 'n' ? KEY_FWD_BTN : KEY_BACK_BTN);
         cr_ack(seq, 0);
     } else if (verb && __isoc99_sscanf(verb, " scan %d", &v) == 1 && v >= -1 && v <= 1) {
+        cr_said(seq, verb + 1, media_status(), 0);
         seek_car(v); /* Car Audio's held Next or Previous (iap2_hid.c), and its release */
         cr_ack(seq, 0);
     } else if (verb && __isoc99_sscanf(verb, " seek %d", &v) == 1 && v >= 0) {
+        cr_said(seq, verb + 1, media_status(), 0);
         player_seek_time(v);
         cr_ack(seq, 0);
     } else if (verb && __isoc99_sscanf(verb, " mode %d %d", &v, &w) == 2) {
         int ok = cr_mode(v, w);
-        char line[64]; /* the drive of 2026-11-22: repeat from the car seen not to reach the Q2 after a radio */
-        tk_snprintf(line, sizeof line, "mode %d %d from the car or phone: %s", v, w, ok ? "set" : "refused");
-        ulog('I', "remote", line);
+        /* the drive of 2026-11-22: repeat from the car seen not to reach the Q2 after a radio */
+        cr_said(seq, verb + 1, media_status(), ok ? "set" : "refused");
         cr_now(); /* the new mode before the ack, as cr_settle */
         cr_ack(seq, !ok);
     } else if (verb && __isoc99_sscanf(verb, " rate %d %d", &v, &w) == 2) {
         unsigned at, n;
         void *r = queue_now(&at, &n);
         int ok = r && I(r, REC_ID) == w ? rate_now_set(v) : -1;
+        cr_said(seq, verb + 1, media_status(), ok < 0 ? "not the song playing" : ok ? "set" : "refused");
         cr.hearts_at = 0; /* the new stars: read them now */
         cr_now();
         cr_ack(seq, ok < 0 ? 3 : !ok);
     } else if (verb && __isoc99_sscanf(verb, " jump %d %d", &v, &w) == 2 && v >= 0) {
-        cr_ack(seq, cr_jump((unsigned)v, w));
+        int before = media_status(), code = cr_jump((unsigned)v, w);
+        cr_said(seq, verb + 1, before, code == 3 ? "not that song now" : code ? "refused" : 0);
+        cr_ack(seq, code);
     } else if (verb && __isoc99_sscanf(verb, " volume %d", &v) == 1 && v >= 0 && v <= 100) {
         /* as the AirPlay app sets it (airplay.c): up to Volume Limit, saved for the output in use */
+        cr_said(seq, verb + 1, media_status(), 0);
         if (v > g_maxvolume) v = g_maxvolume;
         int from = g_volume;
         g_volume = (unsigned char)v;
@@ -666,6 +689,7 @@ static void cr_run(const char *raw) {
         if (v != from) vol_show(from); /* on the Q2's screen too, as a headset's change (volume.c) */
         cr_ack(seq, 0);
     } else {
+        cr_said(seq, verb ? verb + 1 : "?", media_status(), "not known");
         cr_ack(seq, 1);
     }
 }

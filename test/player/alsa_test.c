@@ -8,6 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <math.h>
+#include <time.h>
 #include "alsa_min.h"
 #include "q2player.h"
 
@@ -28,7 +29,7 @@ static unsigned rate = 44100;
 /* bluealsa's PCM going away under a stream (a SelectCodec: docs/internals.md#bluetooth-link-monitor): the next
  * write_fails writes answer gone_error, the plugin's -ENODEV (or -EPIPE, with prepare then -ENODEV), the next
  * open_fails opens find no PCM, and a reopen is given reopen_rate. */
-static int opens, open_fails, write_fails, gone_error, prepare_fails, sleeps;
+static int opens, open_fails, open_err = -19, write_fails, gone_error, prepare_fails, sleeps; /* open_err: what a failed open answers */
 static unsigned reopen_rate;
 static long last_written = -1;
 static int lr_far, peak; /* the last write's largest difference between left and right, and its peak (16-bit stereo) */
@@ -42,12 +43,14 @@ static unsigned dev_rates[8];
 static int dev_nrates, dev_s16, dev_stereo, set_rate_asked;
 int snd_config_update_free_global(void) { freed = 1; return 0; }
 int usleep(useconds_t us) { sleeps++; return 0; }
-void plog(char level, const char *msg, int n) { (void)level, (void)msg, (void)n; } /* main.c's, for cartrace.c */
+/* main.c's, for cartrace.c and output.c: on stderr, which run.py's test_car_write_slow reads */
+void plog(char level, const char *msg, int n) { fprintf(stderr, "plog %c %.*s\n", level, n, msg); }
+static void nap(int ms) { struct timespec t = {ms / 1000, ms % 1000 * 1000000L}; nanosleep(&t, NULL); } /* real time */
 int snd_pcm_open(snd_pcm_t **p, const char *name, int stream, int mode) {
     fresh += freed, freed = 0;
     snprintf(opened, sizeof opened, "%s", name);
     if (opens++ && reopen_rate) rate = reopen_rate;
-    if (open_fails && open_fails--) return -19;
+    if (open_fails && open_fails--) return open_err;
     *p = &the_pcm;
     return 0;
 }
@@ -96,8 +99,20 @@ static int prepares, drops, pauses, pause_err; /* pause_err: what snd_pcm_pause 
 static long delay_now, first_written;        /* what snd_pcm_delay answers; the last write's first sample */
 int snd_pcm_prepare(snd_pcm_t *p) { prepares++; return prepare_fails && prepare_fails-- ? -19 : 0; }
 static int last_zero; /* the last write all silence */
+/* A car that stopped reading (StopUSBDeviceModeAudio, 2026-11-23) with room left in its ring for `room` frames (stall
+ * set): the kernel's blocking write of more than that writes the room and then waits for more, which never comes,
+ * until its timeout (5.10's pcm_lib.c wait_for_avail: 10 s), when it answers the frames it wrote. Here the wait is
+ * block_ms of real time, and counted in blocked. write_nap_ms: every write takes that long, a slow device. */
+static int stall, room, blocked, block_ms, write_nap_ms, wait_nap_ms;
 snd_pcm_sframes_t snd_pcm_writei(snd_pcm_t *p, const void *b, snd_pcm_uframes_t n) {
     writes++;
+    if (write_nap_ms) nap(write_nap_ms);
+    if (stall && (long)n > room) {
+        blocked++, nap(block_ms);
+        n = (snd_pcm_uframes_t)room;
+        if (!n) return -5; /* -EIO: nothing written before the timeout */
+    }
+    if (stall) room -= (int)n;
     if (write_fails && write_fails--) return gone_error;
     last_written = (long)n, first_written = ((const int16_t *)b)[0];
     lr_far = peak = 0;
@@ -111,7 +126,8 @@ snd_pcm_sframes_t snd_pcm_writei(snd_pcm_t *p, const void *b, snd_pcm_uframes_t 
     return (snd_pcm_sframes_t)n;
 }
 int snd_pcm_delay(snd_pcm_t *p, snd_pcm_sframes_t *d) { *d = delay_now; return 0; }
-snd_pcm_sframes_t snd_pcm_avail(snd_pcm_t *p) { avail_calls++; return avail_now; }
+snd_pcm_sframes_t snd_pcm_avail(snd_pcm_t *p) { avail_calls++; return stall ? room : avail_now; }
+int snd_pcm_state(snd_pcm_t *p) { return 3; } /* SND_PCM_STATE_RUNNING */
 snd_pcm_sframes_t snd_pcm_forward(snd_pcm_t *p, snd_pcm_uframes_t n) { forwarded = (long)n; return (snd_pcm_sframes_t)n; }
 snd_pcm_sframes_t snd_pcm_rewindable(snd_pcm_t *p) { return 0; }
 snd_pcm_sframes_t snd_pcm_rewind(snd_pcm_t *p, snd_pcm_uframes_t n) { return 0; }
@@ -123,9 +139,10 @@ static volatile int cut;
 static const char *car_file;
 int snd_pcm_wait(snd_pcm_t *p, int ms) {
     ++waits, waited_ms += ms;
+    if (wait_nap_ms) nap(wait_nap_ms);
     if (waits == wait_unlink) unlink(car_file);
     if (waits == wait_cut) cut = 1;
-    return waits > wait_busy;
+    return stall ? room > 0 : waits > wait_busy;
 }
 int snd_pcm_pause(snd_pcm_t *p, int on) { pauses++; return pause_err; }
 int snd_pcm_drop(snd_pcm_t *p) { drops++; return 0; }
@@ -183,6 +200,48 @@ static void car_case(const char *name, int busy, int unlink_at, int cut_at) {
     output_car_watch(0);
 }
 
+/* One write of 100 frames on way 3, timed in real time: to a car that stopped reading with room for `left` frames
+ * (stall) and a stop at the first wait; or with every wait or every write taking nap_ms (slow: 'w' or 'r'). Its
+ * result, the kernel waits the write met (blocked), the writes, the ms it took. */
+static void car_slow_case(const char *name, int left, char slow, int nap_ms, int busy) {
+    struct pcm_format f = {0};
+    f.rate = 44100, f.channels = 2, f.bytes = 2;
+    static int16_t silence[200];
+    FILE *c = fopen(car_file, "w");
+    if (c) fputs("hw:CARD=UAC1Gadget,0\n44100\n", c), fclose(c);
+    rate = 44100;
+    struct output *o = output_open(&f, 3, 17);
+    if (!o) { printf("%s open-failed\n", name); return; }
+    output_car_watch(&cut);
+    waits = writes = blocked = 0, cut = 0, avail_now = RING / 2, wait_busy = busy, wait_unlink = -1;
+    stall = left >= 0, room = left, block_ms = 1200, wait_cut = stall ? 1 : -1;
+    wait_nap_ms = slow == 'w' ? nap_ms : 0, write_nap_ms = slow == 'r' ? nap_ms : 0;
+    int64_t t = car_trace_now();
+    int r = output_write(o, (const uint8_t *)silence, 100);
+    printf("%s r %d blocked %d writes %d ms %lld\n", name, r, blocked, writes, (long long)((car_trace_now() - t) / 1000));
+    stall = wait_nap_ms = write_nap_ms = wait_busy = 0, wait_cut = -1, avail_now = 0;
+    output_close(o);
+    output_car_watch(0);
+}
+
+/* The 48 kHz-only dongle (usb_case's) on way 2 whose first `fails` writes answer err, then two writes of 100
+ * frames; or, with err 0, an open that answers open_e. The results (the open's 1 or 0, the writes'), the writes and
+ * prepares: what run.py's test_usb_errors reads beside the stderr lines output.c says. */
+static void usb_err_case(const char *name, int err, int fails, int open_e) {
+    struct pcm_format f = {0};
+    f.rate = 44100, f.channels = 2, f.bytes = 2;
+    static int16_t silence[200];
+    dev_rates[0] = 48000, dev_nrates = 1, dev_s16 = dev_stereo = 1;
+    writes = prepares = 0, avail_now = 0, open_fails = open_e ? 1 : 0, open_err = open_e;
+    fprintf(stderr, "case %s\n", name);
+    struct output *o = output_open(&f, 2, 17);
+    write_fails = fails, gone_error = err;
+    int r1 = o ? output_write(o, (const uint8_t *)silence, 100) : 0, r2 = o ? output_write(o, (const uint8_t *)silence, 100) : 0;
+    printf("%s open %d r %d %d writes %d prepares %d\n", name, o != NULL, r1, r2, writes, prepares);
+    if (o) output_close(o);
+    write_fails = 0, open_fails = 0, open_err = -19, dev_nrates = dev_s16 = dev_stereo = 0;
+}
+
 /* A pause and its resume on way 3 with the device answering err to snd_pcm_pause (the car's gadget advertises a pause
  * its trigger cannot do: -EINVAL), 60 of the 100 frames written not yet heard: the pauses asked, the drops and
  * prepares, then at the resume the frames written again and the first of them (the tone's frame 40 is 1040). */
@@ -235,9 +294,25 @@ static void usb_case(const char *name, int song_rate, int ch, int bytes) {
     dev_nrates = dev_s16 = dev_stereo = 0;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
     unsetenv("Q2PLAYER_PCM");
     setenv("Q2PLAYER_DEVICE", "test", 1);
+    car_file = getenv("Q2PLAYER_CAR");
+    if (argc > 1 && !strcmp(argv[1], "usb-errors")) { /* run.py test_usb_errors */
+        usb_err_case("usb-xrun", -32, 1, 0);      /* an underrun on the first write: prepared and written again */
+        usb_err_case("usb-suspend", -86, 1, 0);   /* -ESTRPIPE, the same */
+        usb_err_case("usb-eio", -5, 1, 0);        /* -EIO: the song's failure, not the device gone */
+        usb_err_case("usb-gone-open", 0, 0, -2);  /* the open finds no card: gone */
+        usb_err_case("usb-gone-write", -19, 2, 0); /* opened again, then -ENODEV under two writes: gone, said once */
+        return 0;
+    }
+    if (argc > 1 && !strcmp(argv[1], "car-slow") && car_file) { /* run.py test_car_write_slow, seconds of real time */
+        car_slow_case("car-stall", 50, 0, 0, 0);     /* the car stopped, room for 50 frames, a stop at the first wait */
+        car_slow_case("car-slow-wait", -1, 'w', 250, 5); /* five empty looks, then the one with room: 250 ms each */
+        car_slow_case("car-slow-write", -1, 'r', 1100, 0); /* one write of 1.1 s */
+        car_slow_case("car-quick", -1, 0, 0, 0);     /* none: no line */
+        return 0;
+    }
     for (int way = 0; way < 3; ++way) {
         struct pcm_format f = {0};
         f.rate = 44100, f.channels = 2, f.bytes = 2;
