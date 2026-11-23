@@ -29,7 +29,7 @@ static unsigned rate = 44100;
 /* bluealsa's PCM going away under a stream (a SelectCodec: docs/internals.md#bluetooth-link-monitor): the next
  * write_fails writes answer gone_error, the plugin's -ENODEV (or -EPIPE, with prepare then -ENODEV), the next
  * open_fails opens find no PCM, and a reopen is given reopen_rate. */
-static int opens, open_fails, write_fails, gone_error, prepare_fails, sleeps;
+static int opens, open_fails, open_err = -19, write_fails, gone_error, prepare_fails, sleeps; /* open_err: what a failed open answers */
 static unsigned reopen_rate;
 static long last_written = -1;
 static int lr_far, peak; /* the last write's largest difference between left and right, and its peak (16-bit stereo) */
@@ -50,7 +50,7 @@ int snd_pcm_open(snd_pcm_t **p, const char *name, int stream, int mode) {
     fresh += freed, freed = 0;
     snprintf(opened, sizeof opened, "%s", name);
     if (opens++ && reopen_rate) rate = reopen_rate;
-    if (open_fails && open_fails--) return -19;
+    if (open_fails && open_fails--) return open_err;
     *p = &the_pcm;
     return 0;
 }
@@ -224,6 +224,24 @@ static void car_slow_case(const char *name, int left, char slow, int nap_ms, int
     output_car_watch(0);
 }
 
+/* The 48 kHz-only dongle (usb_case's) on way 2 whose first `fails` writes answer err, then two writes of 100
+ * frames; or, with err 0, an open that answers open_e. The results (the open's 1 or 0, the writes'), the writes and
+ * prepares: what run.py's test_usb_errors reads beside the stderr lines output.c says. */
+static void usb_err_case(const char *name, int err, int fails, int open_e) {
+    struct pcm_format f = {0};
+    f.rate = 44100, f.channels = 2, f.bytes = 2;
+    static int16_t silence[200];
+    dev_rates[0] = 48000, dev_nrates = 1, dev_s16 = dev_stereo = 1;
+    writes = prepares = 0, avail_now = 0, open_fails = open_e ? 1 : 0, open_err = open_e;
+    fprintf(stderr, "case %s\n", name);
+    struct output *o = output_open(&f, 2, 17);
+    write_fails = fails, gone_error = err;
+    int r1 = o ? output_write(o, (const uint8_t *)silence, 100) : 0, r2 = o ? output_write(o, (const uint8_t *)silence, 100) : 0;
+    printf("%s open %d r %d %d writes %d prepares %d\n", name, o != NULL, r1, r2, writes, prepares);
+    if (o) output_close(o);
+    write_fails = 0, open_fails = 0, open_err = -19, dev_nrates = dev_s16 = dev_stereo = 0;
+}
+
 /* A pause and its resume on way 3 with the device answering err to snd_pcm_pause (the car's gadget advertises a pause
  * its trigger cannot do: -EINVAL), 60 of the 100 frames written not yet heard: the pauses asked, the drops and
  * prepares, then at the resume the frames written again and the first of them (the tone's frame 40 is 1040). */
@@ -280,6 +298,14 @@ int main(int argc, char **argv) {
     unsetenv("Q2PLAYER_PCM");
     setenv("Q2PLAYER_DEVICE", "test", 1);
     car_file = getenv("Q2PLAYER_CAR");
+    if (argc > 1 && !strcmp(argv[1], "usb-errors")) { /* run.py test_usb_errors */
+        usb_err_case("usb-xrun", -32, 1, 0);      /* an underrun on the first write: prepared and written again */
+        usb_err_case("usb-suspend", -86, 1, 0);   /* -ESTRPIPE, the same */
+        usb_err_case("usb-eio", -5, 1, 0);        /* -EIO: the song's failure, not the device gone */
+        usb_err_case("usb-gone-open", 0, 0, -2);  /* the open finds no card: gone */
+        usb_err_case("usb-gone-write", -19, 2, 0); /* opened again, then -ENODEV under two writes: gone, said once */
+        return 0;
+    }
     if (argc > 1 && !strcmp(argv[1], "car-slow") && car_file) { /* run.py test_car_write_slow, seconds of real time */
         car_slow_case("car-stall", 50, 0, 0, 0);     /* the car stopped, room for 50 frames, a stop at the first wait */
         car_slow_case("car-slow-wait", -1, 'w', 250, 5); /* five empty looks, then the one with room: 250 ms each */

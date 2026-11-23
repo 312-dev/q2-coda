@@ -217,13 +217,33 @@ static void say_device(const char *name, const struct caps *c, const struct pcm_
                 dev->channels);
 }
 
-/* A USB DAC not there to open, or gone under a write: said once until it is opened again. */
+/* The sound cards there, from /proc/asound/cards (Q2PLAYER_CARDS in a host test), as `0 audiocodec, 2 AB13X`: a USB
+ * DAC that came back as another card than 1 is not hw:1,0. */
+static void cards_text(char *out, size_t size) {
+    const char *path = getenv("Q2PLAYER_CARDS") ? getenv("Q2PLAYER_CARDS") : "/proc/asound/cards";
+    FILE *f = fopen(path, "r");
+    char line[160], id[40];
+    size_t n = 0;
+    int card;
+    out[0] = 0;
+    if (!f) { snprintf(out, size, "none (%s)", strerror(errno)); return; }
+    while (fgets(line, sizeof line, f) && n < size)
+        if (sscanf(line, " %d [%39[^] ]", &card, id) == 2) n += (size_t)snprintf(out + n, size - n, "%s%d %s", n ? ", " : "", card, id);
+    fclose(f);
+    if (!out[0]) snprintf(out, size, "none");
+}
+
+/* A USB DAC not there to open, or gone under a write: said once until it is opened again, with the call that found it
+ * so and its answer, and the sound cards there then. The drive of 2026-11-23 had `hw:1,0 is gone` about 5 s before
+ * the earbuds left the bus, and the line could not say which call, which error, or where the card was. */
 static int open_gone;
-static void say_gone(const char *name) {
+static void say_gone(const char *name, const char *call, int err) {
+    char cards[120];
     open_gone = 1;
     if (said.gone) return;
     said.gone = 1, said.offer[0] = 0, said.n = 0;
-    fprintf(stderr, "q2player: %s is gone\n", name);
+    cards_text(cards, sizeof cards);
+    fprintf(stderr, "q2player: %s is gone: %s %d (%s); sound cards: %s\n", name, call, err, strerror(-err), cards);
 }
 
 int output_gone(void) { return open_gone; }
@@ -449,7 +469,7 @@ static int alsa_open(struct output *o, int outputway, int hw) {
     if (outputway == 1) snd_config_update_free_global();
     int r = snd_pcm_open(&o->pcm, name, SND_PCM_STREAM_PLAYBACK, 0), c[4][2], n = candidates(&o->f, c), i = 0;
     if (r < 0) {
-        if (outputway == 2 && (r == -ENOENT || r == -ENODEV)) say_gone(name); /* unplugged */
+        if (outputway == 2 && (r == -ENOENT || r == -ENODEV)) say_gone(name, "snd_pcm_open", r); /* unplugged */
         else fprintf(stderr, "q2player: %s: %s\n", name, snd_strerror(r));
         return -1;
     }
@@ -601,7 +621,7 @@ static void sink_caps(struct caps *c) {
 static int sink_open(struct output *o, const char *dir, int outputway) {
     static int opens;
     const char *only = getenv("Q2PLAYER_FORMATS"), *bt = getenv("Q2PLAYER_BT_RATE"), *name = device(outputway, 0);
-    if (!output_present(outputway)) { say_gone(name); return -1; }
+    if (!output_present(outputway)) { say_gone(name, "the card's node", -ENOENT); return -1; }
     if (outputway == 2) said.gone = 0;
     if ((outputway == 0 || outputway == 2) && !o->f.dsd) {
         sink_caps(&o->caps);
@@ -984,8 +1004,11 @@ static int sink_to(struct output *o, const uint8_t *data, int frames) {
                 continue;
             }
             if (n == -ENODEV && o->way == 3) return OUTPUT_CAR_GONE; /* the gadget, and its card, went */
-            if (n == -ENODEV && o->way == 2) { say_gone(device(2, 0)); return OUTPUT_GONE; } /* unplugged */
-            if (n < 0) return -1;
+            if (n == -ENODEV && o->way == 2) { say_gone(device(2, 0), "snd_pcm_writei", (int)n); return OUTPUT_GONE; } /* unplugged */
+            if (n < 0) { /* the song's failure (engine.c FAILED); on a USB DAC with the call and its answer */
+                if (o->way == 2) fprintf(stderr, "q2player: %s: snd_pcm_writei %ld (%s)\n", device(2, 0), (long)n, strerror((int)-n));
+                return -1;
+            }
             if (n == 0) continue;
             data += n * o->f.channels * o->f.bytes, frames -= n;
         }
@@ -993,7 +1016,7 @@ static int sink_to(struct output *o, const uint8_t *data, int frames) {
     }
 #endif
     if (!o->file) return -1; /* a Bluetooth PCM that did not come back (bt_reopen) */
-    if (!output_present(o->way)) { say_gone(device(o->way, 0)); return OUTPUT_GONE; } /* a USB DAC unplugged */
+    if (!output_present(o->way)) { say_gone(device(o->way, 0), "the card's node", -ENOENT); return OUTPUT_GONE; } /* a USB DAC unplugged */
     if (fwrite(data, (size_t)o->f.channels * o->f.bytes, frames, o->file) != (size_t)frames) return -1;
     int64_t due = (int64_t)(since(&o->t0) * o->speed * o->f.rate);
     if (due > o->written) { /* it ran dry: the clock starts again here */
