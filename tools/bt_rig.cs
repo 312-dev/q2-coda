@@ -587,7 +587,7 @@ static class Program {
                     Json.Say("role", role.ToString(), "id", id, "name", d == null ? null : Audio.Name(d));
                 }
                 return 0;
-            case "set-default": {  // set-default ROLE ID: puts back a default Windows moved (docs/bt-rig.md#windows)
+            case "set-default": {  // set-default ROLE ID: puts back a default Windows moved (docs/bt-rig.md#pairing-and-what-it-does-to-windows)
                 var role = (ERole)Enum.Parse(typeof(ERole), args[1]);
                 Audio.Check(((IPolicyConfig)new PolicyConfigClient()).SetDefaultEndpoint(args[2], role), "SetDefaultEndpoint");
                 Json.Say("event", "default_set", "role", role.ToString(), "id", args[2]);
@@ -743,8 +743,8 @@ static class Program {
         var src = await FindSource(mac);
         if (src == null) { Json.Say("event", "error", "message", "no paired A2DP source with address " + mac); return 1; }
 
-        // This process's output on the endpoint named, before the stream exists: Windows renders the received
-        // stream in this process, so it plays there and not on the default output (docs/bt-rig.md#silence).
+        // This process's output on the endpoint named, before the stream exists, so that a received stream played
+        // in this process plays there and not on the default output (docs/bt-rig.md#silence: assumed, not yet seen).
         string routeId = null;
         IAudioClient hold = null;
         if (route != null) {
