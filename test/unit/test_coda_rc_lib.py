@@ -436,15 +436,16 @@ def test_a_page_reuses_the_librarys_tables(lib, tmp_path):
     assert 'Z' in titles(q.browse('albums'))
 
 
-def open_catalogues():
-    """This process's descriptors on a catalogue.db (the library under test runs in it)."""
+def open_catalogues(root):
+    """This process's descriptors on root's catalogue.db (the library under test runs in it; other modules' daemons,
+    loaded in the same process, hold their own roots')."""
     out = []
     for fd in os.listdir('/proc/self/fd'):
         try:
             target = os.readlink(f'/proc/self/fd/{fd}')
         except OSError:
             continue
-        if target.endswith('/.q2pod/catalogue.db'):
+        if target == str(root / 'mnt/mmc/.q2pod/catalogue.db'):
             out.append(target)
     return out
 
@@ -456,16 +457,16 @@ def test_the_card_is_let_go_of_while_demo_holds_it(lib, tmp_path):
     live a request reads the database alone; once it is gone the catalogue is attached again."""
     q = Q2(lib, tmp_path, server=SERVER, cat=True)
     both = titles(q.browse('tracks'))
-    assert open_catalogues(), 'the connection keeps the catalogue open between requests'
+    assert open_catalogues(tmp_path), 'the connection keeps the catalogue open between requests'
     hold = tmp_path / 'tmp/mmc_hold'
     hold.write_text(f'{os.getpid()}\n')
     lib.lib_release()
-    assert not open_catalogues()
+    assert not open_catalogues(tmp_path)
     local = titles(q.browse('tracks'))
-    assert not open_catalogues(), 'nothing on the card opened while it is held'
+    assert not open_catalogues(tmp_path), 'nothing on the card opened while it is held'
     assert set(local) == {s[2] for s in SONGS} and set(local) < set(both)
     hold.unlink()
-    assert titles(q.browse('tracks')) == both and open_catalogues()
+    assert titles(q.browse('tracks')) == both and open_catalogues(tmp_path)
 
 
 def test_a_hold_whose_process_is_gone_holds_nothing(lib, tmp_path):
