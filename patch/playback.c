@@ -1222,6 +1222,14 @@ static int restart_refused(int key, int restarts) {
     restart_key = key;
     return restart_ask = 1;
 }
+/* Advanced play's next song, as Up Next lists it first, is in the queue and not yet played this
+ * pass (a Play Next pick, or the order's next before it wraps): a playlist session's Next plays
+ * it rather than wait for the session's next song in list order (the seam test, 2026-11-22: under
+ * Shuffle, Next on the last song queued played the playlist's next download). */
+static int order_next_queued(void) {
+    unsigned x;
+    return s.active && upcoming(&x, 1) && x < s.n && !s.seen[x];
+}
 /* Manual Next/Prev (player_change_music). List Play stops at a library queue's end, as above. At
  * queue index 0 or n-1 stock wraps or loads a sibling folder itself; in Repeat All without Folder
  * Skip every branch calls mclNextSong(0)/mclPrevSong, so advanced order applies. MCL_MODE is
@@ -1234,8 +1242,9 @@ static int change_music(int next) {
     playback_pick();
     /* a playlist session's next song still to land: the Next shows it at once and plays it once it
      * can (addon.c), not stock's wrap to the queue's first song, the one playing (the device,
-     * 2026-11-17: a radio) */
-    if (next && !press_natural && addon_next_waits()) return 0;
+     * 2026-11-17: a radio). Not while advanced play's next is a queued song this pass has not
+     * played (order_next_queued): that is Up Next's first, and the Next plays it. */
+    if (next && !press_natural && !order_next_queued() && addon_next_waits()) return 0;
     if (!s.active) {
         if (!next || !list_end()) return stock_change_trampoline(next);
         ringnav_next(0); /* stops */
