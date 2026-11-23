@@ -53,7 +53,9 @@ class Page:
         self.commands.append(command)
         if self.answer and SEEN_FILE in command:
             seen = ''.join(f'{mac} seen\n' for mac, _, state in self.devices if state == 'found')
-            self.files.files[SEEN_FILE] = (re.search(r"echo '(#\d+)'", command)[1] + '\n' + seen).encode()
+            ask = re.search(r"echo '(#\d+)'", command)
+            assert ask
+            self.files.files[SEEN_FILE] = (ask[1] + '\n' + seen).encode()
         return 0
 
     def link_item(self, i, status, mac, *_):
