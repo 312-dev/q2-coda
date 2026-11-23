@@ -4,6 +4,7 @@
   - Car Audio: unplugging, or picking another USB mode, while a song is paused into the car could freeze the Q2's screen, and a cable plugged back in got no iPhone until Play was pressed; the Q2 now lets go of the car's audio first.
   - Car Audio: pausing in the car no longer lets up to a third of a second of earlier and later music play out of order after the press, and a cable pulled mid-song no longer leaves the car's audio half running on the Q2 until the next car.
   - Logs: Car Audio keeps the logs of every car cable from the last 7 days (up to 10 MB), and plugging the Q2 into a computer or a charger no longer pushes a drive's logs out. The unified log now says each button a Bluetooth car or headset sends, what the Car Remote's Play and Pause found the player doing, and why a cable showed the car no iPhone.
+  - Streaming: a song from your server starts sooner, once about 3 seconds of it have downloaded instead of 8, and a song with a cover inside the file no longer waits for 5 seconds of it first. On a download of 300 KB/s a song starts in about 2.4 seconds, where it took 4.4.
   - Car Audio: Radio, Internet Radio, Videos and Spotify now play through the car's USB too, where they went to Bluetooth or nowhere while the car listened to USB.
   - Radio: starting a song's radio again after stopping it (from the car or on the Q2) works, where it said "Radio isn't available for this song".
   - Car Audio: the car's Up Next shows the queue of songs from your server, and their covers come from the songs themselves when the Q2 has no other.
