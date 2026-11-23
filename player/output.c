@@ -75,6 +75,11 @@ struct output {
     FILE *file;
     int paused;
     int dry_ok; /* way 3: a dry PCM at the next write is a pause's, a seek's or the open's, not an underrun */
+    /* way 3, for a slow write's line (sink): this write's last snd_pcm_wait and snd_pcm_writei answers, errno after
+     * the writei, and the microseconds spent in writei */
+    int car_wait_r, car_errno;
+    long car_write_r;
+    int64_t car_write_us;
     double speed;         /* file sink: how many seconds of sound pass in one */
     int64_t written;      /* frames, file sink */
     struct timespec t0;   /* when the file sink's clock started, moved on by each pause */
@@ -950,13 +955,24 @@ static int sink_to(struct output *o, const uint8_t *data, int frames) {
              * source) and q2car.sh when the cable comes out, and that ends the car's way. A stop or a skip (the
              * engine's cut, output_car_watch) ends the wait, the frames dropped, as the stop drops them. ponytail:
              * a pause or a seek waits until the car reads; the BMW reads from about 2 s after it asks. */
+            snd_pcm_uframes_t ask = (snd_pcm_uframes_t)frames;
             if (o->way == 3) {
-                while (snd_pcm_wait(o->pcm, CAR_LOOK_MS) == 0) {
+                while ((o->car_wait_r = snd_pcm_wait(o->pcm, CAR_LOOK_MS)) == 0) {
                     if (!output_car(NULL, 0, NULL)) return OUTPUT_CAR_GONE;
                     if (car_cut && *car_cut) return 0;
                 }
+                /* No more than the ring has room for: a blocking write of more writes the room and then waits in the
+                 * kernel for the rest, which a car that stopped reading never makes, until 5.10's timeout (pcm_lib.c
+                 * wait_for_avail, 10 s), deaf to a stop or a skip (run.py test_car_write_slow). The rest goes after
+                 * the next wait, which looks at the car file and the cut. Room of 0 or an error: the write as
+                 * asked, which answers the error. */
+                snd_pcm_sframes_t room = snd_pcm_avail(o->pcm);
+                if (room > 0 && room < frames) ask = (snd_pcm_uframes_t)room;
             }
-            snd_pcm_sframes_t n = snd_pcm_writei(o->pcm, data, frames);
+            int64_t wt = o->way == 3 ? car_trace_now() : 0;
+            errno = 0; /* a slow write's line says the writei's own */
+            snd_pcm_sframes_t n = snd_pcm_writei(o->pcm, data, ask);
+            if (o->way == 3) o->car_write_r = n, o->car_errno = errno, o->car_write_us += car_trace_now() - wt;
             if (n == -EINTR || n == -EAGAIN) continue;
             if (n == -EPIPE || n == -ESTRPIPE) { /* the buffer ran dry: start again here */
                 if (o->way == 3) car_trace_dry(0);
@@ -995,13 +1011,38 @@ static int sink_to(struct output *o, const uint8_t *data, int frames) {
     return 0;
 }
 
+/* A write to the car's PCM that took CAR_SLOW_US or more, one line for it: where the time went, in snd_pcm_wait (the
+ * car not reading, CAR_LOOK_MS at a time) or in snd_pcm_writei (the kernel's own wait), their last answers, errno
+ * after the writei, and the PCM's state and room after it. The drive of 2026-11-23 had one write of 10.8 s across a
+ * pause, a stop and a restart, and its trace line could not say which. */
+enum { CAR_SLOW_US = 1000000 };
+static const char *const PCM_STATES[] = {"OPEN", "SETUP", "PREPARED", "RUNNING", "XRUN", "DRAINING", "PAUSED", "SUSPENDED", "DISCONNECTED"};
+static void car_slow(struct output *o, int frames, int64_t us) {
+    char line[200];
+    int st = -1;
+    long avail = 0;
+#ifdef HAVE_ALSA
+    if (o->pcm) st = snd_pcm_state(o->pcm), avail = (long)snd_pcm_avail(o->pcm);
+#endif
+    int n = snprintf(line, sizeof line,
+                     "q2player: a car write took %lld ms: %d frames, %lld ms waiting (snd_pcm_wait %d), %lld ms writing "
+                     "(snd_pcm_writei %ld, errno %d), %s, avail %ld",
+                     (long long)(us / 1000), frames, (long long)((us - o->car_write_us) / 1000), o->car_wait_r,
+                     (long long)(o->car_write_us / 1000), o->car_write_r, o->car_errno,
+                     st >= 0 && st < 9 ? PCM_STATES[st] : "no PCM", avail);
+    plog('W', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
+}
+
 /* Every write to the device. On way 3 it is timed and tapped for the car's trace (docs/iphone-mode.md#car-trace). */
 static int sink(struct output *o, const uint8_t *data, int frames) {
     if (o->way != 3) return sink_to(o, data, frames);
     car_tap(data, (int64_t)frames * frame_bytes(o));
     int64_t t = car_trace_now();
+    o->car_wait_r = o->car_errno = 0, o->car_write_r = 0, o->car_write_us = 0;
     int r = sink_to(o, data, frames);
-    car_trace_write(frames, car_trace_now() - t);
+    int64_t us = car_trace_now() - t;
+    car_trace_write(frames, us);
+    if (us >= CAR_SLOW_US) car_slow(o, frames, us);
     return r;
 }
 
