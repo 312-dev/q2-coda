@@ -47,8 +47,11 @@ A suite that passed on this exact tree is not run again (`cached` in the table):
 the worktree has no change git does not hold. So a release's gate after a batch on the same commit costs
 only what the batch did not run. --no-cache runs everything.
 
-A suite that fails is run once more, alone (--no-retry: not). One that then passes is `flaky` (it failed,
-then passed: the run counts as passed) and is appended to ~/.cache/q2-queue/flakes.jsonl. A result's
+A suite that fails is run once more, alone (--no-retry: not). One that then passes on the same tree and build
+(tree_state: HEAD, the work tree's changes, untracked files, the build's manifest) is `flaky` (the run counts as
+passed) and is appended to ~/.cache/q2-queue/flakes.jsonl; one that passes only after either changed is a failure,
+`failed, then passed after a change`, with the first try's log. The table ends with every suite whose first try
+failed and the tests that log names, so a flake is never silent. A result's
 `kind` says what a failure was: `crash` when the process died of a signal or its log shows one (a Unicorn
 segfault, a memory limit's kill, a deadline's), else `fail`. merge_batch.py blames no branch for a crash.
 
@@ -71,6 +74,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shlex
 import shutil
 import signal
@@ -137,6 +141,8 @@ class Suite:
         self.rc: Any = None
         self.seconds = 0.0
         self.retried: Any = None  # the kind of its first failure, once it is being run again
+        self.states: list = []  # tree_state at each try's start
+        self.first_tests: list = []  # the tests its first failed try named
 
     @staticmethod
     def fill(arg, build):
@@ -387,6 +393,31 @@ def tree_key(root=ROOT):
     return tree.stdout.strip()
 
 
+def tree_state(build=None, root=ROOT):
+    """What a suite's try ran against, dirty or not: HEAD, the work tree's changes from it, the files git does not
+    know outside its ignores, and the build's manifest.json. Two tries of one suite with different states ran
+    different code, so a pass on the second says nothing about the first's failure."""
+    def git(*a):
+        return subprocess.run(['git', '-C', str(root), *a], capture_output=True).stdout
+    h = hashlib.sha256(git('rev-parse', 'HEAD') + git('diff', 'HEAD', '--binary'))
+    for name in sorted(git('ls-files', '--others', '--exclude-standard', '-z').split(b'\0')):
+        if name and (root/name.decode()).is_file():
+            h.update(name + b'\0' + (root/name.decode()).read_bytes())
+    manifest = pathlib.Path(build)/'manifest.json' if build else None
+    if manifest and manifest.is_file():
+        h.update(manifest.read_bytes())
+    return h.hexdigest()
+
+
+FAILED_TEST = re.compile(r'^(?:FAILED (\S+::\S+)|FAIL (?:protocol )?(\S+)[ :(])', re.M)
+
+
+def failed_tests(text):
+    """The tests a failed try's log names: pytest's FAILED lines, and test/player/run.py's and the host suites'
+    FAIL lines."""
+    return list(dict.fromkeys(a or b for a, b in FAILED_TEST.findall(text)))
+
+
 def cache_file(tree, suite, build_args):
     """Where suite's pass on tree is recorded: by the tree, the suite's command and the build's options."""
     def plain(arg):  # the same command from another worktree or venv is the same command
@@ -409,7 +440,9 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
     """Build (unless build is given, or nothing needs it and not force_build) and run the suites, as memory
     allows; returns {name: {'rc', 'seconds', 'log'}} with 'build' among them when it ran. A failed result
     has 'kind' (classify). retry: a suite that fails runs once more, with nothing beside it, and a pass then
-    is the result, marked 'flaky' with the first failure's kind and appended to the file flakes. tree (the
+    is the result, marked 'flaky' with the first failure's kind and appended to the file flakes, when both tries
+    ran on the same tree_state; after a change it fails with rc 'changed' and the first try's log. A retried
+    result names the tests the first try's log failed ('first_tests'). tree (the
     hash tree_key gives): a suite recorded as passed on it is not run ('cached'), and each pass is recorded."""
     logs.mkdir(parents=True, exist_ok=True)
     done: dict = {}
@@ -429,6 +462,7 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
 
     def launch(s):
         s.log = logs/f'{s.name.replace("/", "_")}.log'
+        s.states.append(tree_state(build))  # what this try runs against, before it starts
         s.start = clock()
         cmd = s.command(build or '')
         log_file = open(s.log, 'w')
@@ -461,11 +495,15 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
                     if retry and s is not builder and s.retried is None:
                         s.retried = result['kind']
                         first = s.log.with_suffix('.first.log')
+                        s.first_tests = failed_tests(s.log.read_text(errors='replace'))
                         s.log.replace(first)
                         log(f'FAIL {s.name} ({s.seconds:.0f} s, {s.retried}): running it once more, alone; '
                             f'the first log is {first}')
                         pending.insert(0, s)
                         continue
+                elif s.retried and len(set(s.states)) > 1:
+                    # passed only after the tree or the build changed: the first failure stands
+                    result.update(rc='changed', kind=s.retried, changed=True, log=str(s.log.with_suffix('.first.log')))
                 elif s.retried:
                     result['flaky'] = s.retried
                     if flakes:
@@ -474,6 +512,8 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
                             f.write(json.dumps({'when': time.strftime('%Y-%m-%dT%H:%M:%S'), 'suite': s.name,
                                                 'first': s.retried, 'tree': tree, 'worktree': ROOT.name,
                                                 'log': str(s.log.with_suffix('.first.log'))}) + '\n')
+                if s.retried:
+                    result['first_tests'] = s.first_tests
                 if s.rc == 0 and tree and s is not builder and not s.retried:
                     # a pass after a failure is not recorded: the next run on this tree tests it again
                     hit = cache_file(tree, s, build_args)
@@ -482,9 +522,10 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
                     tmp.write_text(json.dumps({**result, 'when': time.strftime('%Y-%m-%d %H:%M'), 'tree': tree}))
                     tmp.replace(hit)
                 done[s.name] = result
-                note = f', flaky: first {s.retried}' if s.rc == 0 and s.retried else \
+                note = ', failed, then passed after a change' if result.get('changed') else \
+                    f', flaky: first {s.retried}' if s.rc == 0 and s.retried else \
                     f', {result["kind"]}' if s.rc != 0 else ''
-                log(f'{"ok  " if s.rc == 0 else "FAIL"} {s.name} ({s.seconds:.0f} s{note})')
+                log(f'{"ok  " if result["rc"] == 0 else "FAIL"} {s.name} ({s.seconds:.0f} s{note})')
             if builder and builder.rc not in (None, 0):
                 for s in [p for p in pending if p.needs_build]:
                     pending.remove(s)
@@ -518,12 +559,19 @@ def table(results, wall):
     rows = [f'{"suite":18} {"rc":>8} {"time":>7}  log']
     for name, r in results.items():
         note = ' (cached)' if r.get('cached') else f' (flaky: first {r["flaky"]})' if r.get('flaky') else \
+            ' (failed, then passed after a change)' if r.get('changed') else \
             f' ({r["kind"]})' if r.get('kind') else ''
         rows.append(f'{name:18} {str(r["rc"]):>8} {r["seconds"] // 60:4d}:{r["seconds"] % 60:02d}  {r["log"]}{note}')
     bad = [n for n, r in results.items() if r['rc'] != 0]
     rows.append(f'{"wall":18} {"":>8} {int(wall) // 60:4d}:{int(wall) % 60:02d}  '
                 + (f'FAILED: {", ".join(bad)}' if bad else 'all passed'))
-    return '\n'.join(rows)
+    return '\n'.join(rows + first_tries(results))
+
+
+def first_tries(results):
+    """A line naming every suite whose first try failed, with the tests its log named, flaky or not: none is silent."""
+    firsts = [f'{n} ({", ".join(r["first_tests"]) or "no test named"})' for n, r in results.items() if 'first_tests' in r]
+    return [f'first tries failed: {"; ".join(firsts)}'] if firsts else []
 
 
 def main():

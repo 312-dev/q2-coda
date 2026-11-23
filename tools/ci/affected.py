@@ -419,15 +419,18 @@ def suites(plan, build, python, logs, smoke=False):
 
 
 def summary(results, wall):
-    """A row a suite: ok, FAILED (and the kind), flaky (failed, then passed alone) or cached, and its seconds."""
+    """A row a suite: ok, FAILED (and the kind), FAILED, then passed after a change (the retry ran on another tree or
+    build), flaky (failed, then passed alone on the same one) or cached, and its seconds; then every first try that
+    failed, with the tests its log named."""
     rows = [f'{"suite":24} {"result":14} {"seconds":>7}']
     for name, r in results.items():
         state = ('cached' if r.get('cached') else f'flaky ({r["flaky"]})' if r.get('flaky') else 'ok') \
-            if r['rc'] == 0 else f'FAILED ({r.get("kind", r["rc"])})'
+            if r['rc'] == 0 else 'FAILED, then passed after a change' if r.get('changed') else \
+            f'FAILED ({r.get("kind", r["rc"])})'
         rows.append(f'{name:24} {state:14} {r["seconds"]:7d}' + (f'  {r["log"]}' if r['rc'] != 0 else ''))
     bad = [n for n, r in results.items() if r['rc'] != 0]
     rows.append(f'{"wall":24} {"":14} {round(wall):7d}  ' + (f'FAILED: {", ".join(bad)}' if bad else 'all passed'))
-    return '\n'.join(rows)
+    return '\n'.join(rows + gate.first_tries(results))
 
 
 def run(plan, build, python, smoke=False, retry=True, cache=True, logs=None, poll=2.0):

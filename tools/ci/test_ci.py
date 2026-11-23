@@ -1299,3 +1299,44 @@ def test_an_integration_branch_given_a_base_runs_that_diffs_plan():
     assert affected.runs_everything(False, None, 'integ/q2-1129')
     assert not affected.runs_everything(False, 'integ/q2-1128', 'integ/q2-1129')
     assert affected.runs_everything(True, 'integ/q2-1128', 'fix/x') and not affected.runs_everything(False, None, 'fix/x')
+
+
+def test_a_retry_that_passes_after_the_tree_changed_is_not_flaky(monkeypatch, tmp_path, capsys):
+    """Three times on 2026-11-22 a suite was reported flaky when its first failure was real: the agent fixed the bug
+    while the run went on, and the retry ran on the fixed tree. Only a retry on the same tree and build is flaky; one
+    after a change fails, says so, and shows the first try's failure; every first-try failure is named at the end."""
+    monkeypatch.setattr(gate, 'HEAVY', tmp_path/'no-q2-heavy')
+    monkeypatch.setattr(gate, 'VERIFIED', tmp_path/'verified')
+    monkeypatch.setattr(gate, 'FLAKES', tmp_path/'flakes.jsonl')
+    monkeypatch.setattr(gate, 'tree_key', lambda root=None: None)
+    state = tmp_path/'state'
+    state.write_text('before the fix')
+    monkeypatch.setattr(gate, 'tree_state', lambda build=None: state.read_text(), raising=False)
+    fail = tmp_path/'fail'
+    py = tmp_path/'py'
+    py.write_text(f'''#!/bin/sh
+case "$*" in *coverflow*)
+  if [ -e {fail} ]; then
+    echo "FAILED test/coverflow.py::test_the_wall_tilts - assert 1 == 2"
+    [ "$(cat {fail})" = fixed ] && echo "after the fix" > {state}
+    rm {fail}; exit 1
+  fi;;
+esac
+exit 0
+''')
+    py.chmod(0o755)
+    plan = affected.Plan()
+    plan.other.update({'test/coverflow.py', 'test/peq.py'})
+    fail.write_text('fixed')  # the first try fails, and the tree changes before the retry
+    n = affected.run(plan, None, str(py), logs=tmp_path/'logs', poll=0.01)
+    out = capsys.readouterr().out
+    assert n == 1, out
+    assert re.search(r'test/coverflow.py +FAILED, then passed after a change', out), out
+    assert 'test_the_wall_tilts' in out.split('== test/coverflow.py')[-1] and not gate.FLAKES.exists()
+    assert re.search(r'first tries failed: test/coverflow.py \(test/coverflow.py::test_the_wall_tilts\)', out), out
+    # the same tree both times: flaky, as before, counted as passed, and still named at the end
+    fail.write_text('once')
+    n = affected.run(plan, None, str(py), logs=tmp_path/'logs2', poll=0.01)
+    out = capsys.readouterr().out
+    assert n == 0 and re.search(r'test/coverflow.py +flaky \(fail\)', out), out
+    assert 'first tries failed: test/coverflow.py (test/coverflow.py::test_the_wall_tilts)' in out
