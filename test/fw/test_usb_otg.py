@@ -29,6 +29,7 @@ def define(name):
 
 
 SETTLE, BLANK, TRIAL = define('OTG_SETTLE_MS'), define('OTG_BLANK_MS'), define('OTG_TRIAL_MS')
+ACCESSORY = define('OTG_ACCESSORY_MS') if '#define OTG_ACCESSORY_MS' in _SOURCE else 20000
 
 
 class Port:
@@ -221,19 +222,33 @@ def test_bus_power_with_nothing_enumerated_goes_off_and_is_not_tried_again_until
     assert p.pins['PC20'] == 1
 
 
-def test_an_otg_adapter_put_in_soon_after_an_unplug_waits_for_its_replug(fw):
-    """ponytail: an adapter in within OTG_BLANK_MS of VBUS leaving is taken for the board's pulse until it is put in
-    again."""
+def test_an_accessory_put_in_soon_after_an_unplug_and_left_in_gets_bus_power(fw):
+    """2026-11-23 (V1PXi): the laptop's cable out at 12929.4, USB-C headphones in, PD18 low by 12934.4 and staying
+    low; Play was refused for want of an output, and the host port saw a device only at 12966.3. A low the blank
+    caught was ignored until it read high, which an accessory left in never does. Now a low that outlasts every
+    pulse logged with nothing attached (OTG_ACCESSORY_MS) is an accessory's, and stock's pass gets it at once."""
+    p = Port(fw)
+    unplug(p, 5000)
+    p.id = 0
+    p.hostdev = True
+    plugged = p.now
+    p.run(60000)
+    assert p.powered, 'never powered: the blank held it'
+    assert p.powered[0] - plugged <= ACCESSORY + PASS_MS, (p.powered[0] - plugged, p.records())
+    assert p.backfeed == [] and p.pins['PC20'] == 1, 'kept while its device is on the host port'
+
+
+def test_an_accessory_re_seated_after_an_unplug_still_gets_bus_power(fw):
+    """The re-seat (ID high, then low again) is one more low to wait out, never a refusal."""
     p = Port(fw)
     unplug(p, 3000)
     p.id = 0
     p.hostdev = True
-    p.run(60000)
-    assert p.powered == []
+    p.run(5000)
     p.id = 1
     p.run(2000)
     p.id = 0
-    p.run(SETTLE + PASS_MS)
+    p.run(ACCESSORY + 2 * PASS_MS)
     assert p.pins['PC20'] == 1
 
 
@@ -254,20 +269,17 @@ def test_an_id_low_shorter_than_the_settle_time_never_powers_the_bus(fw):
 
 
 def test_vbus_on_the_port_restarts_the_wait(fw):
-    """A charger or computer seen during the wait means the Q2 is not a host; once it is out, its removal blanks the ID
-    and the low must start again after that."""
+    """A charger or computer seen during the wait means the Q2 is not a host; once it is out, its removal blanks the ID:
+    a low still there is taken for the board's pulse until it has lasted OTG_ACCESSORY_MS, then for an accessory."""
     p = Port(fw)
     p.id = 0
     p.run(SETTLE - 1000)
     p.cable = True
     p.run(1000)
     p.cable = False
-    p.run(BLANK + SETTLE)
+    p.run(ACCESSORY - PASS_MS)
     assert p.powered == []
-    p.id = 1
-    p.run(1000)
-    p.id = 0
-    p.run(SETTLE + PASS_MS)
+    p.run(2 * PASS_MS)
     assert p.pins['PC20'] == 1
 
 

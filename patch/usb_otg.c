@@ -5,7 +5,8 @@
  * leaves the port, the Q2's own bus power included; a cable put into a computer then met the Q2's
  * 5 V, and a USB-C laptop will not source onto a live VBUS, so nothing enumerated. Here:
  * - a low ID read within OTG_BLANK_MS of VBUS leaving the port is ignored until it reads high
- *   again (B);
+ *   again (B), or until it has stayed low for OTG_ACCESSORY_MS, longer than any low logged with
+ *   nothing attached: an accessory put in soon after a cable out and left in;
  * - any other low reaches stock only once it has read low, with the cable sense PD17 showing no
  *   VBUS, on every pass for OTG_SETTLE_MS;
  * - the bus power is a trial: with no device on the host port within OTG_TRIAL_MS it goes off,
@@ -16,12 +17,17 @@
  */
 #include "navigation.h"
 
-/* The ID low and no VBUS this long before the Q2 powers the bus: the empty port's pulses were 4.3 s
- * at most (2026-11-17). */
+/* The ID low and no VBUS this long before the Q2 powers the bus, for a low the blank did not catch.
+ * The board's own lows, with nothing attached, came after VBUS left and are the blank's: 6 s alone
+ * let the 22:43 low (6.5 s) power an empty port (2026-11-17). */
 #define OTG_SETTLE_MS 6000
 /* A low ID starting this soon after VBUS left the port is the board's, not an adapter's: the
  * pulses started 2.7 to 11.8 s after it (2026-11-17, 0.25 s samples). */
 #define OTG_BLANK_MS 15000
+/* A low the blank caught and still low this long is an accessory's: the logged lows with nothing
+ * attached lasted 2.1 to 7.8 s before they read high or the bus power cut them (q2-ab-state.log,
+ * q2-pull-state.log), and the 22:43 low, with the bus power it brought on, 17.2 s. */
+#define OTG_ACCESSORY_MS 20000
 /* Bus power with no device enumerated on the host port goes off after this. */
 #define OTG_TRIAL_MS 8000
 #define OTG_GAP_MS 5000 /* passes further apart than this (a Standby) start the wait again */
@@ -38,6 +44,7 @@ static struct {
     unsigned since, last, gone_at, host_at; /* time_now_ms: the wait's start, the last pass, VBUS
                                                 leaving the port, the bus power granted */
     int waiting, have_last, have_gone, vbus_prev, blanked, refused;
+    unsigned blanked_at; /* when the blank caught the low still read */
 } otg __attribute__((section(".scratch")));
 
 /* The PHY's ID pull-up on and the controller held at device: at boot (usb_record.c
@@ -105,10 +112,13 @@ int ringnav_otg_status(void) {
         return otg_stock(now);
     }
     if (vbus) otg.refused = 0; /* a cable's VBUS: PC20 is off, so it is not the Q2's own */
-    /* An ID low read within OTG_BLANK_MS of VBUS leaving is ignored until it reads high. */
-    if (id_low && otg.have_gone && now - otg.gone_at < OTG_BLANK_MS) otg.blanked = 1;
+    /* An ID low read within OTG_BLANK_MS of VBUS leaving is ignored until it reads high, or until
+     * it has stayed low OTG_ACCESSORY_MS: an accessory's, settled already. */
+    if (id_low && otg.have_gone && now - otg.gone_at < OTG_BLANK_MS && !otg.blanked)
+        otg.blanked = 1, otg.blanked_at = now;
     if (!id_low) otg.blanked = 0;
-    if (!id_low || vbus || gap || otg.blanked || otg.refused) {
+    int accessory = otg.blanked && now - otg.blanked_at >= OTG_ACCESSORY_MS;
+    if (!id_low || vbus || gap || (otg.blanked && !accessory) || otg.refused) {
         otg.waiting = 0;
     } else if (!otg.waiting) {
         otg.waiting = 1;
@@ -117,7 +127,7 @@ int ringnav_otg_status(void) {
     /* A high ID is stock's device pass (it also ends a DAC's output). A low one is passed on only
      * once settled, with the controller's role handed back to the pin first. */
     if (!id_low) return otg_stock(now);
-    if (otg.waiting && now - otg.since >= OTG_SETTLE_MS) {
+    if (otg.waiting && (accessory || now - otg.since >= OTG_SETTLE_MS)) {
         system(OTG_FROM_PIN);
         int result = otg_stock(now);
         if (g_last_otgid != 1) otg_hold();
