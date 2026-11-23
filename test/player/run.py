@@ -808,13 +808,10 @@ def smart_play(player, songs, out, steps, speed=8, env=None):
     return s, [p.name for p in pcm], b''.join(p.read_bytes() for p in pcm), (pathlib.Path(out)/'player.log').read_text()
 
 
-def test_smart_crossfade(player, songs, tmp):
-    """A fades out into silence, B starts hard after 1.5 s of silence: the plan is the reference's (its rules written
-    again in Python over the reference decodes), and the output is A exact up to out_point, then B from its first
-    sound mixed with A's quiet end (B at full level, no fade-in: a hard start; A fading out, cos), A's trailing
-    silence never played, then B exact; no step at either end of the overlap; one PCM."""
-    a, b = smart_songs(tmp/'smart')
-    s, names, got, log = smart_play(player, songs, tmp/'smart/run', smart_scenario(a, b))
+def check_smart(a, b, names, got, log):
+    """got is a's and b's smart crossfade by smart_plan's rules: a exact up to out_point, then b from its first sound
+    mixed with a's quiet end (b at full level, no fade-in: a hard start; a fading out, cos), a's trailing silence never
+    played, then b exact; no step at either end of the overlap; one PCM. The plan and the largest step off."""
     A, B, Y = (array.array('h', x) for x in (reference(a), reference(b), got))
     overlap, trail, skip, fade = smart_plan(A, B)
     assert fade == 0 and skip == 66150 and 44100 <= overlap <= 3 * 44100, (overlap, trail, skip, fade)
@@ -835,8 +832,40 @@ def test_smart_crossfade(player, songs, tmp):
     def step(i): return max(abs(Y[2 * i + c] - Y[2 * (i - 1) + c]) for c in (0, 1))
     around = max(max(step(i) for i in range(cut - 50, cut - 1)), max(step(i) for i in range(cut + overlap + 2, cut + overlap + 50)))
     assert step(cut) <= around and step(cut + overlap) <= around, (step(cut), step(cut + overlap), around)
+    return (overlap, trail, skip, fade), worst
+
+
+def test_smart_crossfade(player, songs, tmp):
+    """A fades out into silence, B starts hard after 1.5 s of silence: the plan is the reference's (its rules written
+    again in Python over the reference decodes) and the output check_smart's."""
+    a, b = smart_songs(tmp/'smart')
+    s, names, got, log = smart_play(player, songs, tmp/'smart/run', smart_scenario(a, b))
+    (overlap, trail, skip, fade), worst = check_smart(a, b, names, got, log)
+    cpu = re.findall(r'analysis took (\d+) ms of CPU', log)
     return (f'plan {overlap / 44100:.2f} s overlap, {trail / 44100:.2f} s trail, {skip / 44100:.2f} s skipped, no fade-in, '
-            f'as the reference; A exact to out_point, the overlap within {worst:.1f} steps, B exact after')
+            f'as the reference; A exact to out_point, the overlap within {worst:.1f} steps, B exact after; analysis {cpu} ms CPU')
+
+
+def test_smart_crossfade_starved(player, songs, tmp):
+    """The player and its analysis thread on one core with two busy neighbours on it (the Q2's second core taken by
+    demo, at worst): the change is still whole, the smart fade or, logged, the plain one, never a tail cut short."""
+    a, b = smart_songs(tmp/'smart')
+    cpu = str(max(os.sched_getaffinity(0)))
+    wrap = tmp/'starved.sh'
+    wrap.write_text(f'#!/bin/sh\nexec taskset -c {cpu} {player}\n')
+    wrap.chmod(0o755)
+    busy = [subprocess.Popen(['taskset', '-c', cpu, sys.executable, '-c', 'while True: pass']) for _ in range(2)]
+    try:
+        s, names, got, log = smart_play(str(wrap), songs, tmp/'smartstarved', smart_scenario(a, b))
+    finally:
+        for p in busy: p.kill(), p.wait()
+    if 'smart crossfade: plain' in log:
+        lines = [l for l in log.splitlines() if 'smart crossfade: plain' in l]
+        assert len(lines) == 1, lines
+        worst = check_plain(*(array.array('h', x) for x in (reference(a), reference(b), got)), 5 * 44100)
+        return f'the plain fade, whole (within {worst:.1f} steps), logged: {lines[0].split("q2player: ")[-1]}'
+    (overlap, *_), worst = check_smart(a, b, names, got, log)
+    return f'the smart fade, whole: {overlap / 44100:.2f} s overlap within {worst:.1f} steps, on one core shared with two busy loops'
 
 
 def check_plain(A, B, Y, h):
@@ -2453,7 +2482,9 @@ SERIAL = ('test_scan', 'test_grow_seek_beyond', 'test_grow_seek_inside', 'test_c
           # fix/stream-start's: a song with a cover opened by 3.0 s, the feed's 150 ms lead, the feed reader's wakeups
           # counted over seconds, the car's PCM fds read from /proc right after each release
           'test_grow_opens_a_song_with_a_cover_on_its_first_audio', 'test_car_feed_keeps_the_car_close_behind',
-          'test_car_feed_reader_sleeps_while_no_source_writes', 'test_car_release_while_paused')
+          'test_car_feed_reader_sleeps_while_no_source_writes', 'test_car_release_while_paused',
+          # smart-crossfade's: the player on one core shared with busy loops
+          'test_smart_crossfade_starved')
 WIDTH = 8  # tests and fixtures side by side: each mostly waits on a player running in real time or faster
 STALL_S = 0.1  # a 5 ms sleep that took this much longer: the machine did not run this process (measured: 650 ms under
                # a nice-19 job on a busy core, under 10 ms when the core is shared fairly)

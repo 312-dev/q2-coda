@@ -112,7 +112,7 @@ static struct {
     unsigned trail;               /* its frames after the plan's tail_end, dropped as the mix begins */
     struct xf_plan plan;          /* the next song's side of it */
     unsigned skip, fade, t;       /* the mix: the next song's frames still to drop, its fade-in's, and those mixed */
-    float env, rel;               /* the limiter's gain and its recovery a frame */
+    double env, rel;              /* the limiter's gain and its recovery a frame (double: in float it stalls short of 1) */
     int release;                  /* the limiter still recovering after the mix, on the next song alone */
 } xf;
 
@@ -129,11 +129,11 @@ static void ring_copy(float *a, unsigned at, unsigned n, unsigned cap, int nch, 
 static void limit(float *y, int nch) {
     float peak = 0;
     for (int c = 0; c < nch; ++c) peak = fabsf(y[c]) > peak ? fabsf(y[c]) : peak;
-    float need = peak > XF_CEIL ? XF_CEIL / peak : 1;
+    double need = peak > XF_CEIL ? XF_CEIL / peak : 1;
+    if ((xf.env += (1 - xf.env) * xf.rel) > 0.99999) xf.env = 1;
     if (need < xf.env) xf.env = need;
-    else if ((xf.env += (1 - xf.env) * xf.rel) > 0.99999f) xf.env = 1;
     if (xf.env < 1)
-        for (int c = 0; c < nch; ++c) y[c] *= xf.env;
+        for (int c = 0; c < nch; ++c) y[c] = (float)(y[c] * xf.env);
 }
 
 static void say(const char *what) {
@@ -221,7 +221,7 @@ static unsigned crossfade(struct dsp *s, float *a, unsigned frames, int nch, int
                     int planned = s->url && !strcmp(s->url, xf.plan.next) && xf.plan.next_rate > 0;
                     double to = planned ? (double)rate / xf.plan.next_rate : 0;
                     xf.skip = (unsigned)(xf.plan.skip * to), xf.fade = (unsigned)(xf.plan.fade * to), xf.t = 0;
-                    xf.env = 1, xf.rel = 1 - expf(-1.0f / (float)(XF_RELEASE_S * rate)), xf.release = 0;
+                    xf.env = 1, xf.rel = 1 - exp(-1 / (XF_RELEASE_S * rate)), xf.release = 0;
                     if (!planned) say("the next song is not the one analysed: no skip, no fade-in");
                 }
                 xf.step = (double)xf.rate / rate, xf.pos = 0, xf.out = rate;
