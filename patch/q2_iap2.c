@@ -20,6 +20,7 @@
 #include "iap2_names.h"
 #include "iap2_hid.h"
 #include "iap2_msg.h"
+#include "iap2_xfer.h"
 
 #define IAP2_SOP1 0xFF
 #define IAP2_SOP2 0x5A
@@ -30,15 +31,6 @@
 #define SYN_FIXED 10   /* link parameters ahead of the session list */
 #define RX_PACKET 8192  /* the longest it takes, offered in the SYN+ACK (an iPhone offers 0xFFFF) */
 #define SLOTS 8
-/* The wire's pace (docs/iphone-mode.md#the-link-s-pace): the BMW takes input reports from an interrupt endpoint, 64
- * bytes every 8 ms, so a 1,024-byte packet is about 170 ms on the wire and its window of 5 most of a second, longer
- * than its 200 ms retransmission timer and its 10 tries. So a packet goes to the wire only while no more than
- * BACKLOG_MAX reports wait for it (a bare acknowledgement always goes: one report), a packet is sent again only after
- * the wire has been idle for the retransmission time, and the bulk (library updates, covers, the queue list) goes in
- * packets of at most BULK_MAX bytes, so an acknowledgement waits behind no more than about 130 ms of it, well inside
- * the car's 200 ms. */
-#define BACKLOG_MAX 4
-#define BULK_MAX 768
 /* The link lost when the Q2 has packets or reports waiting and the car has sent nothing for this long (iap2_tick):
  * the BMW acknowledges within 22 ms and gives a packet up after 10 tries of 200 ms, so 10 s of quiet with something
  * waiting is a car that has stopped. q2muse-1125: the car stopped taking input reports, pacing then held every packet
@@ -76,7 +68,8 @@ static void send_bytes(const u8 *p, unsigned n) {
 
 int seen, link_up;
 static int synced;
-static u8 my_seq, syn_seq, peer_seq, last_ack, file_session;
+static u8 my_seq, syn_seq, peer_seq, last_ack;
+u8 file_session;
 u8 control_session;
 static u8 syn_ack[48];
 static unsigned syn_ack_len, window, max_sends, max_cacks, unacked;
@@ -288,8 +281,6 @@ static void take_control(const u8 *data, unsigned n) {
     cs_len -= off;
 }
 
-static void iap2_file(const u8 *d, unsigned n);
-
 static void take_packet(const u8 *p, unsigned len) {
     u8 control = p[4], seq = p[5], session = p[7];
     const u8 *payload = p + HEADER_LEN;
@@ -449,140 +440,6 @@ static void set_audio(int on) {
     if (H->audio) H->audio(on);
 }
 
-/* ---- artwork, on the file transfer session (PodBox): the song's attribute 26 names a transfer; the Q2 sets it
- * up as [ID, 04, an 8-byte size, 00 02 (artwork)]; the car answers [ID, 01] to go; the JPEG follows as [ID, op,
- * bytes], op C0 the only piece, else 80 the first, 00 the middle ones and 40 the last; [ID, 02] cancels either way.
- * An empty one (size 0) when there is no cover: PodBox's car waits otherwise. ---- */
-
-#define ART_MAX 65536
-static u8 art[ART_MAX];
-static unsigned art_len, art_sent;
-static u8 art_id, next_transfer = 0x80;
-static int art_going;
-
-/* Up Next's list on its way (ql_announce) */
-#define QLIST_MAX 2000
-static u8 ql[QLIST_MAX * 8], ql_id;
-static unsigned ql_len, ql_going;
-static long ql_seen_at;
-
-static void file_send(u8 id, u8 op, const u8 *d, unsigned n) {
-    u8 b[MAX_PACKET];
-    if (!file_session || n + 2 > sizeof b) return;
-    b[0] = id, b[1] = op;
-    if (n) memcpy(b + 2, d, n);
-    enqueue(file_session, b, n + 2);
-}
-
-/* A file transfer's pieces: the bytes a piece holds (the car's packet or BULK_MAX, less the header, its checksum and
- * the piece's id and op; MIN_PEER_MAX keeps it above 100), each piece's op (C0 the only, 80 the first, 00 one in the
- * middle, 40 the last), a new transfer's id (80 to FF, round), and a song's 8-byte id */
-static unsigned piece_room(void) { return (peer_max < BULK_MAX ? peer_max : BULK_MAX) - HEADER_LEN - 1 - 2; }
-static u8 piece_op(int first, int last) { return first && last ? 0xC0 : first ? 0x80 : last ? 0x40 : 0x00; }
-static void file_pieces(u8 id, const u8 *d, unsigned len, unsigned *sent, unsigned room) {
-    while (*sent < len) {
-        unsigned k = len - *sent < room ? len - *sent : room;
-        file_send(id, piece_op(*sent == 0, *sent + k == len), d + *sent, k);
-        *sent += k;
-    }
-}
-static u8 transfer_take(void) {
-    u8 id = next_transfer;
-    next_transfer = id == 0xFF ? 0x80 : id + 1;
-    return id;
-}
-static void put_id8(u8 *p, u32 hi, u32 lo) {
-    for (int b = 0; b < 4; ++b) p[b] = (u8)(hi >> (24 - 8 * b)), p[4 + b] = (u8)(lo >> (24 - 8 * b));
-}
-
-/* A baseline JPEG as PodBox's car needed it: each quantisation and Huffman table in a segment of its own, the bytes
- * otherwise as they are. 0 for anything else (a progressive JPEG, a PNG, a broken file). */
-static unsigned jpeg_tables_apart(const u8 *in, unsigned n, u8 *out, unsigned cap) {
-    unsigned i = 2, o = 2, baseline = 0;
-    if (n < 4 || in[0] != 0xFF || in[1] != 0xD8 || cap < 2) return 0;
-    out[0] = 0xFF, out[1] = 0xD8;
-    while (i + 4 <= n) {
-        if (in[i] != 0xFF) return 0;
-        u8 mk = in[i + 1];
-        unsigned seg = in[i + 2] << 8 | in[i + 3];
-        if (seg < 2 || i + 2 + seg > n) return 0;
-        if (mk == 0xC0 || mk == 0xC1) baseline = 1;
-        if (mk == 0xC2) return 0;
-        if (mk == 0xDB || mk == 0xC4) {
-            unsigned at = i + 4, end = i + 2 + seg;
-            while (at < end) {
-                unsigned t = mk == 0xDB ? 1 + ((in[at] >> 4) ? 128 : 64) : 0;
-                if (mk == 0xC4) {
-                    if (at + 17 > end) return 0;
-                    t = 17;
-                    for (unsigned k = 1; k <= 16; ++k) t += in[at + k];
-                }
-                if (at + t > end || o + 4 + t > cap) return 0;
-                out[o++] = 0xFF, out[o++] = mk, out[o++] = (t + 2) >> 8, out[o++] = t + 2;
-                memcpy(out + o, in + at, t), o += t, at += t;
-            }
-        } else {
-            if (o + 2 + seg > cap) return 0;
-            memcpy(out + o, in + i, 2 + seg), o += 2 + seg;
-        }
-        i += 2 + seg;
-        if (mk == 0xDA) { /* the scan, to the end */
-            if (o + (n - i) > cap) return 0;
-            memcpy(out + o, in + i, n - i), o += n - i;
-            return baseline ? o : 0;
-        }
-    }
-    return 0;
-}
-
-/* A new song's transfer, the last cancelled if it still went; its setup goes after the message naming it. */
-static u8 art_start(const struct iap2_np *n) {
-    static u8 raw[ART_MAX];
-    char t[120];
-    if (!file_session) return 0;
-    if (art_going && art_id) file_send(art_id, 0x02, 0, 0);
-    art_id = transfer_take();
-    /* a stream has no cover, but is named one, empty: with none named the car keeps the last song's */
-    unsigned got = H->artwork && !n->live ? H->artwork(n, raw, sizeof raw) : 0;
-    art_len = got ? jpeg_tables_apart(raw, got, art, sizeof art) : 0;
-    art_sent = 0, art_going = 1;
-    snprintf(t, sizeof t, "art: transfer %02x, %u bytes (%u as found)", art_id, art_len, got);
-    H->log(t);
-    return art_id;
-}
-
-static void art_setup(void) {
-    u8 setup[10] = { 0, 0, 0, 0, art_len >> 24, art_len >> 16, art_len >> 8, art_len, 0, 2 };
-    file_send(art_id, 0x04, setup, sizeof setup);
-}
-
-static int list_transfer_word(const u8 *d);
-
-/* The car's answers on the file transfer session. */
-static void iap2_file(const u8 *d, unsigned n) {
-    char t[96];
-    if (n < 2) return;
-    snprintf(t, sizeof t, "file < transfer %02x op %02x (%u bytes)", d[0], d[1], n);
-    H->log(t);
-    if (list_transfer_word(d)) return;
-    if (d[0] == ql_id && ql_going && d[1] == 0x01) { /* the queue list: every piece */
-        unsigned sent = 0;
-        file_pieces(ql_id, ql, ql_len, &sent, piece_room() - piece_room() % 8);
-        return;
-    }
-    if (d[0] == ql_id && (d[1] == 0x02 || d[1] == 0x05)) {
-        ql_going = 0;
-        return;
-    }
-    if (d[0] != art_id || !art_going) return;
-    if (d[1] == 0x01) { /* go: every piece, as the window allows */
-        if (!art_len) file_send(art_id, 0xC0, 0, 0);
-        file_pieces(art_id, art, art_len, &art_sent, piece_room());
-    } else if (d[1] == 0x02 || d[1] == 0x05) {
-        art_going = 0;
-        H->log(d[1] == 0x05 ? "art: the car took it" : "art: the car cancelled it");
-    }
-}
 
 #define MI_PERSISTENT_ID 0x00
 #define MI_TITLE 0x01
@@ -1042,7 +899,7 @@ static void lists_pump(long now) {
 }
 
 /* The car's word on the list in transfer: 01 go, 02 cancelled. 1 when it was that list's. */
-static int list_transfer_word(const u8 *d) {
+int list_transfer_word(const u8 *d) {
     if (ls.phase != LIB_LISTS || !ls.x_state || d[0] != ls.x_id) return 0;
     if (d[1] == 0x01 && ls.x_state == 1) ls.x_state = 2;
     else if (d[1] == 0x02) ls.x_state = 0, ++ls.xi;

@@ -76,6 +76,16 @@ struct iap2_host {
 #define HEADER_LEN 9
 #define MAX_PACKET 1024 /* the longest the Q2 sends: the car's certificate, about 950 bytes, fits one */
 
+/* The wire's pace (docs/iphone-mode.md#the-link-s-pace): the BMW takes input reports from an interrupt endpoint, 64
+ * bytes every 8 ms, so a 1,024-byte packet is about 170 ms on the wire and its window of 5 most of a second, longer
+ * than its 200 ms retransmission timer and its 10 tries. So a packet goes to the wire only while no more than
+ * BACKLOG_MAX reports wait for it (a bare acknowledgement always goes: one report), a packet is sent again only after
+ * the wire has been idle for the retransmission time, and the bulk (library updates, covers, the queue list) goes in
+ * packets of at most BULK_MAX bytes, so an acknowledgement waits behind no more than about 130 ms of it, well inside
+ * the car's 200 ms. */
+#define BACKLOG_MAX 4
+#define BULK_MAX 768
+
 extern const struct iap2_host *H; /* the host of this connection (iap2_connect) */
 
 #endif
