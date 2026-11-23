@@ -498,6 +498,13 @@ void output_levels(struct output *o, long *avail, long *delay) {
     *avail = (long)((int64_t)o->f.rate * BUFFER_US / 1000000) - *delay; /* the file sink's buffer is BUFFER_US */
 }
 
+/* A paused song's frames held (hold: a click, or a pause the device refused), at the rate written: written, not heard,
+ * and not in the PCM. */
+int64_t output_held(struct output *o) {
+    int64_t n = o && o->holding ? o->held_n : 0;
+    return o && o->in.rate != o->f.rate ? n * o->in.rate / o->f.rate : n;
+}
+
 int64_t output_delay(struct output *o) {
     int64_t d = dev_delay(o);
     if (o->in.rate != o->f.rate) d = d * o->in.rate / o->f.rate;

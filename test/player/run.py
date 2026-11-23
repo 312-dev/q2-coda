@@ -1055,11 +1055,12 @@ def car_steps(songs, car, at_on=None, at_off=None, flag=0):
     return steps
 
 
-def car_play(songs, tmp, name, steps, player, car, speed=4):
+def car_play(songs, tmp, name, steps, player, car, speed=4, env=None):
     s = fakedemo.Session(tmp/name)
     s.music = songs
     # the gadget's card takes S16_LE alone (q2-iap-probe.sh: p_ssize 2)
-    s.run(steps, fakedemo.launch_host(player, str(songs), speed, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16'}), speed)
+    s.run(steps, fakedemo.launch_host(player, str(songs), speed, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16', **(env or {})}),
+          speed)
     pcm = sorted((tmp/name/'pcm').glob('*.raw'))
     return [p.name for p in pcm], [p.read_bytes() for p in pcm], (tmp/name/'player.log').read_text()
 
@@ -1095,23 +1096,47 @@ def test_car_way_follows_the_car(player, songs, tmp):
 
 def test_car_release_while_paused(player, songs, tmp):
     """docs/player.md#releasing-the-car: a1 paused on the car's way holds its PCM open, and the gadget's unbind waits for
-    that close while it holds the UDC's lock. mcl-carrelease on the socket, or SIGUSR2 from a script, closes it at once,
-    while still paused (its line comes before the Play's), removes the car's file, and at the next Play the song goes
-    on where it was on demo's way: a PCM of Bluetooth's after the car's."""
+    that close while it holds the UDC's lock. mcl-dropcar on the socket (mcl-carrelease, its other name, and SIGUSR2
+    from a script the same) wakes the paused thread and closes the PCM within 0.4 s, the song still paused; the Play
+    opens a PCM on the way the car's file says then, and the song goes on from the frame last heard, not from where
+    the decode had got to. Kept, the car's file gives a second car PCM; removed (the cable out), a Bluetooth one. The
+    car's PCM (the file sink's ..._car.raw) is open in the player while paused and closed after the release, read from
+    /proc/PID/fd: the firmware waits for the gadget's PCM to read closed before it unbinds (patch/q2car.sh). The player
+    runs without q2-heavy's preload here, which makes a process unreadable in /proc."""
     said = []
-    for how in ('command', 'signal'):
+
+    def car_fds(s):  # the player's open files that are a car PCM
+        fds = []
+        for fd in pathlib.Path(f'/proc/{s.proc.pid}/fd').iterdir():
+            try:
+                if os.readlink(fd).endswith('_car.raw'): fds.append(fd.name)
+            except OSError: pass
+        return fds
+    for how, kept in (('mcl-dropcar', True), ('mcl-carrelease', False), ('signal', False)):
         cp, car = car_player(), tmp/f'car-rel-{how}.audio'
         car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
-        ask = '{mcl-carrelease\\null}' if how == 'command' else (lambda s: os.kill(s.proc.pid, signal.SIGUSR2))
-        steps = car_steps(songs, car) + [(3.0, '{mcl-pause\\null}'), (5.0, ask), (6.0, '{mcl-play\\null}'),
+        ask = f'{{{how}\\null}}' if how != 'signal' else (lambda s: os.kill(s.proc.pid, signal.SIGUSR2))
+        held, after = [], []
+        steps = car_steps(songs, car) + [(3.0, '{mcl-pause\\null}'), (4.5, lambda s: held.append(car_fds(s))), (5.0, ask),
+                                         (5.4, lambda s: after.append(car_fds(s))), (6.0, '{mcl-play\\null}'),
                                          (8.0, '{mcl-stop\\null}'), (9.0, None)]
-        names, pcm, log = car_play(songs, tmp, f'car-rel-{how}', steps, cp, car, speed=1)
-        released, played = log.find('the car\'s PCM released'), log.rfind('q2player: mcl-play')
-        assert 0 <= released < played, f'{how}: released at {released}, the Play at {played}: {log[-800:]}'
-        assert not car.exists(), f'{how}: the car file is still there'
-        assert [n.split('_', 1)[1] for n in names] == ['44100_2_s16_car.raw', '48000_2_s16_bt.raw'], (how, names)
-        bt = pcm[1]
-        said.append(f'{how}: released while paused, then {len(bt) // 4} frames on Bluetooth')
+        if not kept: steps.insert(-3, (5.5, lambda s: car.unlink()))
+        names, pcm, log = car_play(songs, tmp, f'car-rel-{how}', steps, cp, car, speed=1, env={'LD_PRELOAD': ''})
+        assert held == [held[0]] and held[0] and after == [[]], f'{how}: car PCM fds paused {held}, 0.4 s after the release {after}'
+        up = lambda text: int(re.search(rf'^\S+ (\d+) \w player {re.escape(text)}', log, re.M)[1])
+        took = up("q2player: the car's PCM released") - up('q2player: mcl-pause')
+        assert 1950 <= took <= 2400, f'{how}: released {took} ms after the pause, the command 2000 ms after it'
+        assert up("q2player: the car's PCM released") < up('q2player: mcl-play'), f'{how}: not while paused'
+        want = ['44100_2_s16_car.raw', '44100_2_s16_car.raw' if kept else '48000_2_s16_bt.raw']
+        assert [n.split('_', 1)[1] for n in names] == want, (how, names)
+        a1 = reference(songs/'a1.flac')
+        if kept:  # the same format: where the second PCM starts in a1 is where the song went on
+            at = a1.find(pcm[1][:4410 * 4]) // 4
+            unheard = len(pcm[0]) // 4 - at
+            assert at > 0 and 2205 <= unheard <= 26460, f'{how}: went on at frame {at}, {unheard} frames before the decode had got'
+            said.append(f'{how}: released {took - 2000} ms after it, went on {unheard * 1000 // 44100} ms back, at the frame heard')
+        else:
+            said.append(f'{how}: released {took - 2000} ms after it, on Bluetooth at the Play')
     return '; '.join(said)
 
 

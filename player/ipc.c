@@ -176,7 +176,7 @@ static void command(const char *name, const char *arg) {
         if (c->state != IDLE) c->seek = 1, c->seek_to = atoi(arg), wake = 1;
     } else if (!strcmp(name, "mcl-stop")) {
         c->stop = c->cut = 1, c->preload = 0, c->close_preload = 1, wake = 1;
-    } else if (!strcmp(name, "mcl-carrelease")) {
+    } else if (!strcmp(name, "mcl-dropcar") || !strcmp(name, "mcl-carrelease")) {
         c->car_release = 1, wake = 1;
     } else if (!strcmp(name, "mcl-orderstop")) {
         /* stock closes a PCM left open after the last song; this player has none open while idle */

@@ -48,8 +48,8 @@ struct ctl {
     int eq_changed; /* an mcl-seteq since the playback thread last looked: the EQ state on disk is new */
     int click;      /* an mcl-click to sound, CLICK_*: mixed into a song playing, else on its own (engine.c click_session) */
     int cut;        /* an mcl-stop or set-nexturl since the playback thread began opening a song: that open gives up */
-    /* mcl-carrelease or SIGUSR2 (docs/player.md#releasing-the-car): the car's gadget is about to go, so its PCM is
-     * closed at once, a paused song's too, and the car's way left; cleared as the playback thread takes it */
+    /* mcl-dropcar (or mcl-carrelease, or SIGUSR2: docs/player.md#releasing-the-car): the car's gadget is about to go,
+     * so a car PCM held paused or between songs is closed at once; cleared as the playback thread takes it */
     int car_release;
     /* status */
     int state, has_info, position;
@@ -82,6 +82,7 @@ void source_info(const struct source *, struct info *);
 /* The next block: frames and where they are, 0 at the end, below 0 on a decode error that ends the file. */
 int source_read(struct source *, const uint8_t **data);
 int source_seek(struct source *, int seconds);
+int source_seek_frame(struct source *, int64_t frame); /* frame of the output's rate */
 float source_replaygain(const struct source *, int mode); /* mcl-replaygain's scale for this file, 1 for none */
 int64_t source_frames(const struct source *); /* frames handed out since the start or the last seek, plus its target */
 struct stream *source_stream(const struct source *); /* NULL for a file on the card */
@@ -152,6 +153,7 @@ void output_car_watch(const volatile int *cut); /* the engine's cut flag: a stop
 void output_car_song(int rate, int keep);
 int car_rate_for(int rate); /* 32000, 44100 or 48000 */
 int64_t output_delay(struct output *); /* frames written and not yet played, at the rate written */
+int64_t output_held(struct output *);  /* a paused song's frames taken back from the PCM and held, at the rate written */
 void output_levels(struct output *, long *avail, long *delay); /* the device's own, in its frames */
 void output_pause(struct output *, int on);
 void output_drop(struct output *);     /* forget what is buffered: a seek, a skip, a stop */
