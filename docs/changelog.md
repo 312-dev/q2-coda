@@ -2,6 +2,7 @@
 
 - **Unreleased (q2-coda)**:
   - System: after the Q2 restarts without shutting down properly, it keeps that night's logs in a dated folder under `.q2muse/crashes` on the card (the newest five), named in `q2-crash.log`, so they are still there when someone looks.
+  - Wi-Fi: the network you are joining or joined is now the first row under Networks, with a spinner, a check or a red mark on the right and "Connecting…", "Connected" or "Wrong password" under it while selected. The highlight moves up with the network you press, and a failed one stays marked until you try again or search. The "Connecting..." line no longer floats between two rows.
   - Apps: opening a card app (Subsonic and the like) no longer freezes the screen for a moment while the app starts.
   - Cover Flow: album art saved as a 16-bit PNG now shows as it is. It showed twice as wide in red and blue stripes.
   - Bluetooth: a headset or car with an accented or non-Latin name ("Café", Japanese, an emoji) shows its name right in Quality's "doesn't support" line, where it showed garbled letters.

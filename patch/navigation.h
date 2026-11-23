@@ -528,10 +528,16 @@ void slider_page_dirty(void *page); /* its switch row, after a change of the hid
 int wifi_list(void *list);
 int wifi_sig(const char *image); /* stock's signal image's level, 1-4, else 0 */
 void wifi_rows_pre(void *view);
-int wifi_connected_row(void *b); /* the row button b has stock's Connected line */
+int wifi_connected_row(void *b); /* the row button b has stock's state line */
 void wifi_rows_post(void *view);
 void wifi_mark(void *w, void *canvas, int level, int selected);
 void wifi_busy_show(void *win); /* "Searching..." on the section's line while a scan runs */
+/* the network first under Networks (wifi_flows.c's): the selection kept through a rebuild, a press
+ * followed, a failed join marked, a join ended */
+void wifi_rows_keep(void *view), wifi_rows_follow(const char *ssid), wifi_rows_end(void),
+    wifi_rows_scanned(void);
+void wifi_rows_failed(const char *ssid, int wrong);
+void *wifi_tap_button(void *view, int id); /* the row button of the list's tap target id */
 /* wifi_flows.c: Settings > Wi-Fi's flows past stock's */
 int ringnav_wifi_rows(void *win), wifi_flows_hold(void *top), wifi_flows_cancel_join(void);
 
