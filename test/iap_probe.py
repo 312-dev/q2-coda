@@ -18,7 +18,11 @@ import tty
 
 import pytest
 
-SRC = pathlib.Path(__file__).resolve().parents[1]/'patch/q2_iap.c'
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT/'tools/iap_probe'))
+import probe_build  # noqa: E402  (q2-iap's sources, as tools/build.py's Q2IAP_SOURCES)
+
+SRCS = [ROOT/'patch'/f'{s}.c' for s in probe_build.SOURCES]
 SQLITE = '/usr/lib/x86_64-linux-gnu/libsqlite3.so.0'  # the library on iDrive (q2_iap_lib.c); stock's is 3.54
 SETUP, ENABLE, DISABLE = 4, 2, 3
 
@@ -31,7 +35,7 @@ def probe(tmp_path_factory):
         return pathlib.Path(os.environ['Q2IAP_EXE'])
     exe = tmp_path_factory.mktemp('probe')/'q2-iap-probe'
     subprocess.run(['cc', '-DPROBE_HOST', '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
-                    '-Wno-unused-result', str(SRC), '-o', str(exe), SQLITE], check=True)
+                    '-Wno-unused-result', *map(str, SRCS), '-o', str(exe), SQLITE], check=True)
     return exe
 
 

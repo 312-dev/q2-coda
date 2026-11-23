@@ -290,6 +290,9 @@ Q2CAR = 'usr/bin/q2car'
 # The car's other sources' ALSA device (assets/alsa/30-q2car.conf, player/feed.c)
 CAR_FEED_CONF = 'usr/share/alsa/alsa.conf.d/30-q2car.conf'
 Q2IAP = 'usr/bin/q2-iap'
+# its sources under patch/ (tools/iap_probe/probe_build.py and test/iap_probe.py build the same list), compiled
+# without -ffunction-sections (compile_helper's sections): each function and object in them is used
+Q2IAP_SOURCES = ['q2_iap']
 UAC1_KO = 'module_driver/usb_f_uac1.ko'
 # Guest Play's daemon (docs/internals.md#guest-play): demo starts it (patch/guest.c), libdbus talks to BlueZ,
 # bluealsa and bluetoothd's shanling.bluez; and the D-Bus policy its sink daemon needs.
@@ -2357,9 +2360,12 @@ def check_layout(payload, ps):
           f'scratch state {free:,} bytes free of {SCRATCH_SIZE:,}', flush=True)
     return free
 
-def compile_helper(out, cat, src, name, rels):
+def compile_helper(out, cat, src, name, rels, sections=None):
     """Link patch/{src}.c (or each of a list of sources under patch/) and start.c as name against the stock
-    rootfs's libraries rels."""
+    rootfs's libraries rels. A list's sources are compiled with -ffunction-sections and -fdata-sections, so
+    --gc-sections drops what nothing uses, unless sections is False."""
+    if sections is None:
+        sections = not isinstance(src, str)
     libs = []
     for rel in rels:
         libs.append(out/rel.rsplit('/', 1)[-1])
@@ -2368,7 +2374,7 @@ def compile_helper(out, cat, src, name, rels):
     objs = [out/f"{s.replace('/', '_')}.o" for s in srcs]
     for s, o in zip(srcs, objs):
         run('clang', *[f for f in FLAGS if f not in ('-mno-abicalls', '-G0')], '-mnan=2008', '-mabs=2008',
-            '-mabicalls', *([] if isinstance(src, str) else ['-ffunction-sections', '-fdata-sections']), '-c',
+            '-mabicalls', *(['-ffunction-sections', '-fdata-sections'] if sections else []), '-c',
             ROOT/'patch'/f'{s}.c', '-o', o)
     run('ld.lld', '-m', 'elf32ltsmip', '-e', '__start', '--dynamic-linker', '/lib/ld-linux-mipsn8.so.1',
         '--image-base=0x400000', '-z', 'noexecstack', '--gc-sections', '-s', '--hash-style=sysv', '--build-id=none',
@@ -3121,7 +3127,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                Q2CAR: (HELPER_LIKE, (ROOT/'patch/q2car.sh').read_bytes()),
                                CAR_FEED_CONF: ('usr/share/alsa/alsa.conf.d/20-bluealsa.conf',
                                                (ROOT/'assets/alsa/30-q2car.conf').read_bytes()),
-                               Q2IAP: (HELPER_LIKE, compile_helper(out, cat, 'q2_iap', 'q2-iap', CODA_RC_LIBS)),  # libc and SQLite (q2_iap_lib.c)
+                               Q2IAP: (HELPER_LIKE, compile_helper(out, cat, Q2IAP_SOURCES, 'q2-iap', CODA_RC_LIBS,
+                                                                 sections=False)),  # libc and SQLite (q2_iap_lib.c)
                                UAC1_KO: ('module_driver/soc_aic.ko', uac1.module()),
                                Q2SEND: (HELPER_LIKE, compile_helper(out, cat, Q2SEND_SOURCES, 'q2send', Q2SEND_LIBS)),
                                RADIOFETCH: (HELPER_LIKE, compile_helper(out, cat, RADIOFETCH_SOURCES, 'q2radiofetch',
