@@ -392,12 +392,13 @@ def test_a_tapped_row_plays_its_own_track_and_the_page_closes(fw, up):
 
 
 def test_a_row_starts_nothing_while_headphones_are_required_and_absent(fw, up):
-    """As stock's queue row: its check (it toasts) comes before the start."""
+    """Its check (it toasts) comes before the start, and Up Next stays with its selection, as any list a refused start
+    is tapped on (output_rule.c)."""
     _, page = up
     page.open()
     fw.mock('check_forbid_play_no_headset', lambda *_: 1)
     page.tap(1)
-    assert not fw.calls('player_start_queue') and fw.calls('navigator_back')
+    assert not fw.calls('player_start_queue') and not fw.calls('navigator_back')
 
 
 @pytest.mark.parametrize('next_, order', [(1, ['00', '07']), (2, ['07', '00'])])

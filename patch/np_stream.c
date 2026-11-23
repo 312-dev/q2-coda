@@ -152,9 +152,10 @@ int np_stream_length(unsigned *ms) {
 static int ns_tick(const void *unused) {
     (void)unused;
     void *win = st.np_win;
-    if (!win || window_manager_get_top_window(window_manager()) != win) {
+    /* off its page, or dark (nothing to show: the files it reads are left alone) */
+    if (!win || !g_backlight_status || window_manager_get_top_window(window_manager()) != win) {
         ns.timer = 0, ns.on = 0;
-        return 0; /* RET_REMOVE; the next paint starts it again */
+        return 0; /* RET_REMOVE; the next paint, lit, starts it again */
     }
     unsigned now = (unsigned)time_now_ms();
     if (now - ns.checked >= NS_CHECK_MS) {

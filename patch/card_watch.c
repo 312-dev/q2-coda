@@ -40,7 +40,7 @@ static struct {
 /* The watches, while the card is mounted: its root, and each app folder that is there. Setting one
  * that stands again changes nothing. */
 static void cw_arm(void) {
-    if (!card_mounted()) return;
+    if (!card_mounted_now()) return; /* card_mounted's answer follows this thread's generation */
     static const char *const dirs[] = { "/mnt/mmc", "/mnt/mmc/.rockbox", "/mnt/mmc/.groovebox" };
     for (unsigned i = 0; i < sizeof dirs / sizeof *dirs; ++i)
         cw_syscall(SYS_INOTIFY_ADD_WATCH, cw.in, (long)dirs[i], CW_MASK);
@@ -75,6 +75,10 @@ static void *cw_thread(void *unused) {
     cw.state = -1;
     return 0;
 }
+
+/* The generation, 0 while the watch is not running; starts nothing, so any thread may ask
+ * (system.c card_mounted). */
+unsigned card_watch_seen(void) { return cw.state > 0 ? cw.gen : 0; }
 
 /* The generation of what the card holds, 0 while the caches must keep their clock. The first call
  * starts the watch (the UI thread, on a paint). */

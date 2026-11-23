@@ -172,10 +172,30 @@ int stream_player_waits(const char *path) {
     return !strcmp(raw + 1, path);
 }
 
+static void ahead_write(const char *id, char *buf, int len) {
+    char file[48], tmp[52];
+    unsigned h = hash_bytes(fnv(FNV_SEED, (const unsigned char *)id), (const unsigned char *)buf,
+                            (unsigned)len);
+    if (h == ss.ahead) return;
+    tk_snprintf(file, sizeof file, "/tmp/q2-%s.ahead", id);
+    tk_snprintf(tmp, sizeof tmp, "%s.tmp", file);
+    if (blob_io(file, tmp, buf, (unsigned)len, 1)) ss.ahead = h;
+}
+
+/* A list handed to app id (catalogue.c catplay_write, before its .catplay): the .ahead for its
+ * seq, which the app's .play will carry, with n and no songs, as the queue holds none of the list
+ * yet; the app takes the n after the first in the catplay's order itself. Without it the app ran
+ * the list's start on its default of two ahead until ahead_poll's first write, Download Ahead Off
+ * included (the seam test, 2026-11-22). */
+void ahead_start(const char *id, unsigned seq) {
+    char buf[64];
+    ahead_write(id, buf, tk_snprintf(buf, sizeof buf, "#Q2AHEAD/1\tseq=%u\tn=%d\n", seq, ahead_n()));
+}
+
 /* While the queue playing is app id's m3u (addon.c stream_poll): its .ahead, the songs after
  * position in play order, rewritten only when they, n or the seq change. */
 void ahead_poll(const char *id, const char *seq, void *queue) {
-    char buf[2048], file[48], tmp[52];
+    char buf[2048];
     unsigned up[AHEAD_MAX], n = (unsigned)ahead_n(), k = n ? playback_upcoming(up, n) : 0;
     int len = tk_snprintf(buf, sizeof buf, "#Q2AHEAD/1\tseq=%s\tn=%u\n", seq, n);
     for (unsigned i = 0; i < k && queue && up[i] < deque_size(queue); ++i) {
@@ -183,10 +203,5 @@ void ahead_poll(const char *id, const char *seq, void *queue) {
         if (!p || len + strlen(p) + 2 > sizeof buf) break;
         len += tk_snprintf(buf + len, sizeof buf - len, "%s\n", p);
     }
-    unsigned h = hash_bytes(fnv(FNV_SEED, (const unsigned char *)id), (const unsigned char *)buf,
-                            (unsigned)len);
-    if (h == ss.ahead) return;
-    tk_snprintf(file, sizeof file, "/tmp/q2-%s.ahead", id);
-    tk_snprintf(tmp, sizeof tmp, "%s.tmp", file);
-    if (blob_io(file, tmp, buf, (unsigned)len, 1)) ss.ahead = h;
+    ahead_write(id, buf, len);
 }

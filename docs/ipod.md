@@ -1248,7 +1248,9 @@ the protocol and the daemon: [localsend.md](localsend.md).
 
 ## Games
 
-**Home → Games** (the Library's row until 2026-11-19) opens Sudoku, Vortex, Solitaire and Snake ([internals](internals.md#games)). A game
+**Home → Games** (the Library's row until 2026-11-19) opens Bricks, then the card's games ([internals](internals.md#games)).
+Sudoku, Vortex, Solitaire and Snake are left out of this build while the games in progress are
+finished (`GAME_*` in `patch/peq.h` turns each back on); their keys, below, are as they were. A game
 takes every key but Power and a held Return, so the music keeps playing untouched.
 
 | Game      | Wheel                                    | Center                                          | Play/Pause            | Previous/Next                                                           | Return                              |

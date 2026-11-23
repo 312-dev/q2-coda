@@ -96,6 +96,11 @@ static int qm_run(const void *unused) {
     void *r = qm_record();
     int a = st.qm_action, cls = st.qm_kind == QM_COVERFLOW ? 0xf001 : (int)st.qm_cls;
     unsigned aid = r ? qm_album_id(r) : 0; /* an album's own Favourites */
+    /* A start with nothing to play to: stock's message, and nothing set first (the queue's class,
+     * a chapter's seek, Shuffle's mode), as Now Playing is refused (output_rule.c
+     * ringnav_nav_to) */
+    if (r && (a == QA_PLAY || a == QA_SHUFFLE || a == QA_RESUME) && check_forbid_play_no_headset(0))
+        return 0;
     if (r && a >= 100) {
         if (!playback_set(st.qm_choice - 1, a - 100)) toast("Queue unchanged");
         st.qm_choice = 0;
