@@ -65,9 +65,9 @@ assert m.run(3) is None
 m2=AlbumRateMachine(files={ALBUM_RATES:m.files[ALBUM_RATES]}); m2.open(); m2.word(m2.slide+O['SLIDE_INDEX'],1)
 assert m2.menu()[3]=='Unfavorite' and '/mnt/data/ringnav-ratings' not in m2.files; passed()
 # A full table and a failed write report it, the album as it was.
-full=b''.join(struct.pack('<I',(i+1)<<3|1) for i in range((O['RATE_SLOTS'] // 4 * 3))).ljust(4*O['RATE_SLOTS'],b'\0')
+full=b''.join(struct.pack('<I',(i+1)<<3|1) for i in range(((O['RATE_SLOTS'] - 2) // 4 * 3))).ljust(4*O['RATE_SLOTS'],b'\0')
 m=AlbumRateMachine(files={ALBUM_RATES:full}); m.open(); m.word(m.slide+O['SLIDE_INDEX'],1)
-m.budget=5_000_000  # the table's first use lays its RATE_CAP ratings out at their places, once
+m.budget=5_000_000  # the table's first use lays its ratings out at their places, once (a test's file: no layout mark)
 assert m.run(3)=='Ratings are full' and m.files[ALBUM_RATES]==full; passed()
 m=AlbumRateMachine(); m.open(); m.word(m.slide+O['SLIDE_INDEX'],1); m.fail_write=True
 assert m.run(3)=='Rating not saved' and m.menu()[3]=='Favorite' and ALBUM_RATES not in m.files; passed()
