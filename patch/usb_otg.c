@@ -222,9 +222,9 @@ int ringnav_otg_status(void) {
 
 /* An accessory on its way: with no USB DAC yet, its ID low and waited out (the blank or the
  * settle), or its bus power on for less than OTG_PLAY_GRANT_MS, the ID either way. */
-static int attaching(unsigned now) {
+static int attaching(void) {
     if (g_otg_status == 2 || otg.refused) return 0;
-    if (g_last_otgid == 1) return now - otg.host_at < OTG_PLAY_GRANT_MS;
+    if (g_last_otgid == 1) return (unsigned)time_now_ms() - otg.host_at < OTG_PLAY_GRANT_MS;
     return otg.id_low && (otg.blanked || otg.waiting);
 }
 
@@ -233,22 +233,22 @@ static int attaching(unsigned now) {
  * song there (stock's Play key, or usb_otg_forbid_resume) is kept: started again later it is the
  * same Play, where a station, a video, a skip or a row's song would be the paused song instead. */
 int ringnav_forbid_play(int quiet) {
-    unsigned now = time_now_ms();
-    if (g_testmode_flag || !g_block_withoutphone_flag || !attaching(now) || has_valid_output_device())
-        return stock_forbid_play_trampoline(quiet);
+    if (g_testmode_flag || !g_block_withoutphone_flag || !attaching() || has_valid_output_device())
+        return stock_forbid_play_trampoline(quiet); /* stock's calls alone: no clock read before it */
     if (!quiet) {
         toast(OTG_CONNECTING);
         if (otg.resume || __builtin_return_address(0) == (void *)OTG_PLAYPAUSE_RET)
-            otg.play = 1, otg.play_at = now;
+            otg.play = 1, otg.play_at = time_now_ms();
     }
     return 1;
 }
 
-/* The gate (check_forbid_play_no_headset(0), whose hook this is) for a Play of the song paused or
- * stopped there, kept while an accessory attaches: the Play key's player_play_pause (headset.c). */
+/* The gate, check_forbid_play_no_headset(0) and so ringnav_forbid_play above, for a Play of the song
+ * paused or stopped there, kept while an accessory attaches: the Play key's player_play_pause
+ * (headset.c). */
 int usb_otg_forbid_resume(void) {
     otg.resume = 1;
-    int refused = ringnav_forbid_play(0);
+    int refused = check_forbid_play_no_headset(0);
     otg.resume = 0;
     return refused;
 }
@@ -291,7 +291,7 @@ void usb_otg_poll(void) {
         }
         return;
     }
-    if (!attaching(now) || now - otg.play_at >= OTG_PLAY_MS) {
+    if (!attaching() || now - otg.play_at >= OTG_PLAY_MS) {
         otg.play = 0;
         stock_forbid_play_trampoline(0); /* stock's no-output message, now nothing is coming */
     }

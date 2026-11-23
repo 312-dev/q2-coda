@@ -609,6 +609,7 @@ class Player:
         fw.mock('stock_otg_status_trampoline', host_pass)
         self.gate, self.poll = fw.fn('ringnav_forbid_play', C.c_int, C.c_int), fw.fn('usb_otg_poll', None)
         self.resume = fw.fn('usb_otg_forbid_resume', C.c_int)  # a Play of the song there (headset.c)
+        fw.mock('check_forbid_play_no_headset', lambda quiet, *_: self.gate(quiet))  # its prologue is the hook's
 
     def run(self, ms):
         end = self.p.now + ms
