@@ -43,7 +43,9 @@ class Bt:
         command = C.string_at(cmd).decode()
         self.commands.append(command)
         if FILE in command:
-            mac = re.search(r'echo "(\S+) ', command)[1]
+            said = re.search(r'echo "(\S+) ', command)
+            assert said, command
+            mac = said[1]
             level, rate, cls, name = (('' if v is None else str(v)) for v in self.answer)
             if 'string:Class' not in command:
                 cls = name = ''
