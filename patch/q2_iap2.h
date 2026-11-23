@@ -3,6 +3,7 @@
 #ifndef Q2_IAP2_H
 #define Q2_IAP2_H
 #include "iap2.h"
+#include "iap2_names.h"
 
 extern const u8 iap2_probe[6]; /* iAP2's detect, FF 55 02 00 EE 10 */
 extern int seen, link_up, trace_quiet, audio_on, ever_identified;
@@ -11,7 +12,6 @@ extern char car_name[64];
 extern const unsigned iap2_rates[9];
 extern unsigned audio_hz;
 
-void iap2_hex(char *out, unsigned cap, const u8 *p, unsigned n);
 int iap2_bare_ack(const u8 *r, unsigned n);
 int iap2_report(const u8 *r, unsigned len);
 void iap2_lost(const char *why);

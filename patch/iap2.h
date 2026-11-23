@@ -1,5 +1,12 @@
 /* iAP2's types (docs/iphone-mode.md#iap2): what the Q2 is playing, its library as the car is sent it, and the host
- * q2_iap.c gives the iAP2 side, every file and the USB behind it. */
+ * q2_iap.c gives the iAP2 side, every file and the USB behind it.
+ *
+ * The iAP2 side (q2_iap2.c, iap2_*.c) is a port of PodBox's firmware/usbstack/usb_iap2.c (the transport and link
+ * layer) and the M1 part of usb_iap2_control.c (the control session up to identification, and the answers an iPhone
+ * gives right after), Copyright the PodBox and Rockbox authors, under the GNU General Public License version 2 or (at
+ * your option) any later version, here under version 3 as the rest of Q2 Muse is. PodBox takes its message IDs and
+ * packet layout from lvalen91/carplayd (public domain) and its message order and timing from iPhones in real cars;
+ * the traps it found are kept, each with its note. Apple's MFi specification was never consulted, here or there. */
 #ifndef IAP2_H
 #define IAP2_H
 
@@ -64,5 +71,7 @@ struct iap2_host {
     void (*link_lost)(void);  /* the link given up on */
     unsigned (*rate)(void);   /* the player's rate for the song about to play, read now */
 };
+
+extern const struct iap2_host *H; /* the host of this connection (iap2_connect) */
 
 #endif
