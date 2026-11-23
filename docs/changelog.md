@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Standby now lets go of the SD card properly before the Q2 sleeps and checks it is unmounted, so the card is mounted once after a wake instead of twice, nothing is left writing to it as it powers down, and power-off and restart unmount it cleanly too.
   - USB-C headphones or a USB DAC: pressing Play while they are still connecting says "Connecting USB audio..." and starts the song on them once they are ready, instead of refusing with "Connect headphones or Bluetooth to play"; and unplugging them no longer starts a Bluetooth connection to a headset as if a cable had been plugged in.
   - USB-C headphones or a USB DAC plugged in soon after unplugging a computer now get power after about 8 seconds, where they could stay unpowered (and Play said there was nowhere to play) until they were unplugged and plugged in again.
   - USB-C headphones and USB DACs with their own volume in decibels: the Q2's volume now runs evenly in decibels from very quiet (-60 dB, or the device's quietest) at 1 to full at 100, where volume 1 on USB-C earbuds was already loud.

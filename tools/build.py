@@ -2352,7 +2352,7 @@ NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'h
 PAYLOAD_ROOTS = ['compact_set_row_layout', 'kb_host_open', 'kb_open_hint', 'ipod_list_layout', 'parallax_curr', 'parallax_prev', 'parallax_update', 'ringnav_ab_move', 'ringnav_ab_x', 'ringnav_album_cover_wait', 'ringnav_album_label',
                  'ringnav_albumcovers', 'ringnav_art_header', 'ringnav_art_name', 'ringnav_artist_art_name',
                  'ringnav_artist_covers', 'ringnav_batt_level', 'ringnav_batt_status', 'ringnav_batt_voltage', 'ringnav_boot', 'ringnav_bt_connect_start', 'ringnav_class_icon',
-                 'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text',
+                 'ringnav_card_down', 'ringnav_card_umount', 'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text',
                  'ringnav_dark_usleep', 'ringnav_dialog_close', 'ringnav_ellipsis_text', 'ringnav_gbk_tag', 'coverflow_album_pic', 'ringnav_glyph_stamp',
                  'ringnav_hold_info', 'ringnav_hold_timer', 'ringnav_hscroll_lull', 'ringnav_id3_path',
                  'ringnav_lyric_follow', 'ringnav_lyric_rows', 'ringnav_mainscheduling', 'ringnav_play_cover_wait', 'ringnav_scan_dir',
