@@ -506,6 +506,19 @@ def test_online_a_list_is_handed_to_the_app_and_played_offline_if_it_does_not_an
     assert len(rig.played) == 1
 
 
+def test_a_catplay_with_a_path_longer_than_twice_its_first_room_is_whole(rig):
+    """catplay_write's buffer, 64 + 160 a song, grows until each path fits: a two-song list whose card path is
+    900 bytes (its first room 384, doubled once 768) is written whole, its length the bytes written."""
+    rig.online = True
+    app_running(rig)
+    rig.write(1, [song_row('s2', 'Streamed', 'B', 'A', 2, 100, 2)])
+    rig.poll()
+    long_path = '/mnt/mmc/Music/' + 'x' * 880 + '.flac'
+    q = queue(rig, [long_path, url('s2')])
+    assert load(rig, q, 0)[0] == 2
+    assert rig.files.files[f'/tmp/q2-{APP}.catplay'] == f'1 0\n{long_path}\n{url("s2")}\n'.encode()
+
+
 def test_shuffle_songs_hands_the_app_every_song_in_a_shuffled_order(rig, fw, mcl):
     """The drive, 2026-11-19: Library > Songs > Shuffle over a library of card and server songs played "rockman",
     "rockstar", "rockstar", "rockstar", and pressed again, "the best is yet to come", "the best of my love", "best

@@ -1783,9 +1783,13 @@ static int catplay_write(int slot, void *q, int at) {
     len = (unsigned)tk_snprintf(b, cap, "%u %d\n", ++cat.cp_seq, at);
     for (unsigned i = 0; i < n; ++i) {
         const char *p = P(deque_at(q, i), REC_PATH);
-        if (len + 1100 > cap) {
+        unsigned k = p ? (unsigned)strlen(p) : 0;
+        while (len + k + 2 > cap) { /* doubled until the path, its newline and the NUL fit */
             char *g = realloc(b, cap *= 2);
-            if (!g) break;
+            if (!g) {
+                free(b);
+                return 0;
+            }
             b = g;
         }
         len += (unsigned)tk_snprintf(b + len, cap - len, "%s\n", p ? p : "");

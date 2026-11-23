@@ -239,6 +239,24 @@ def test_an_id_goes_into_shell_commands(fw, s, ok):
     assert valid_id(fw, s) == ok
 
 
+def test_hidden_folders_that_are_no_apps_take_no_app_slot(fw):
+    """A song's path names its hidden card folder (/mnt/mmc/.tidal, the user's own), which the radio, lyrics and
+    resume lookups ask about: such a folder is no app and takes none of the APPS_MAX slots, so an app installed
+    after nine of them were asked about is still found by the next scan and listed in Streaming."""
+    world = card(fw, foo=b'name=Foo\n')
+    scan(fw)
+    missing = fw.fn('addon_radio_missing', C.c_char_p, C.c_char_p)
+    for i in range(9):
+        assert missing(b'/mnt/mmc/.h%d/song.flac' % i) is None
+    assert ap(fw).n == 1
+    world.files[b'/mnt/mmc/.late/q2app'] = b'name=Late\n'
+    world.files[b'/mnt/mmc/.late/q2-late'] = b'ELF'
+    world.dirs[b'/mnt/mmc'].append(b'.late')
+    scan(fw)
+    present = [ap(fw).a[i].id for i in range(ap(fw).n) if ap(fw).a[i].present]
+    assert present == [b'foo', b'late']
+
+
 def test_every_byte_an_id_may_hold(fw):
     allowed = set(b'abcdefghijklmnopqrstuvwxyz0123456789-')
     for c in range(1, 256):

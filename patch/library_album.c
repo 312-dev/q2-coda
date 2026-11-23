@@ -56,7 +56,8 @@ static int lb_year_row(void *unused, int n, char **v, char **c) {
  * first four digits, as ALBUM_YEAR reads them). */
 static int lb_year(void *r) {
     const char *path = P(r, REC_PATH);
-    char sql[640], genre[96], *o = sql, *end = sql + sizeof sql - 4;
+    /* end: room after it for a quote doubled at its edge and the tail, "' limit 1" and its NUL */
+    char sql[640], genre[96], *o = sql, *end = sql + sizeof sql - 11;
     int year = 0;
     if (!path) return 0;
     if (catalogue_np_info(path, genre, &year)) return year > 0 ? year : 0;
