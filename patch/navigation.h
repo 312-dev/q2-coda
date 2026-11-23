@@ -992,6 +992,9 @@ void usb_otg_poll(void);    /* usb_otg.c: a Play asked while USB audio connected
 int stock_forbid_play_trampoline(int quiet);
 /* standby_usb.c: Standby and the USB link (docs/internals.md#standby-and-the-usb-link) */
 void standby_usb_suspend(void), standby_usb_poll(void);
+/* card_release.c: the card let go of before Standby, power-off and restart (docs/internals.md#the-card-across-standby) */
+void card_back(void);
+int card_mounts(void), card_holders(char *out, unsigned cap);
 
 /* usb_record.c: the USB record on the card, a line per cable edge and OTG power change */
 void usb_record(const char *what), usb_record_edge(int in), usb_record_wake(void), usb_record_poll(void);

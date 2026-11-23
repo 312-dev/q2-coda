@@ -284,8 +284,10 @@ static int lun_busy(void) { /* the card handed to a computer (USB Transfer Files
     closedir(d);
     return busy;
 }
-static int card_ready(void) { /* mounted read-write, and not the computer's */
+#define CARD_HOLD "/tmp/mmc_hold" /* demo letting the card go (card_release.c): not written meanwhile */
+static int card_ready(void) { /* mounted read-write, not the computer's, and not being let go of */
     char b[4096];
+    if (card_hold_live(CARD_HOLD)) return 0;
     slurp("/proc/mounts", b, sizeof b);
     const char *m = strstr(b, " /mnt/mmc ");
     if (!m) return 0;

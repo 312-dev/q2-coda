@@ -1072,6 +1072,10 @@ void crc_ble_advertising(int on) {
 /* ---- the loop ---- */
 
 static void on_term(int sig) { quit = 1; }
+/* demo's card_release.c before Standby, a power-off or a restart: the library's connection, which keeps the card's
+ * catalogue open between requests, closed at the loop's next pass (lib_release). */
+static volatile int release_asked;
+static void on_release(int sig) { release_asked = 1; }
 #ifdef CODA_HOST
 void crc_host_quit(void) { quit = 1; } /* the tests' SIGTERM: the daemon runs on a thread of theirs */
 #endif
@@ -1265,6 +1269,7 @@ int main(int argc, char **argv) {
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, on_term);
     signal(SIGHUP, on_term);
+    signal(SIGUSR1, on_release);
     if (already_running()) return 0;
     char b[16];
     crc_write_file("/tmp/coda-rc.pid", b, snprintf(b, sizeof b, "%d\n", getpid()), 0644);
@@ -1327,6 +1332,11 @@ int main(int argc, char **argv) {
         if (bn) ble_handle(fds + bat, bn);
         for (int i = 0; i < MAX_TCP; ++i)
             if (at[i] >= 0 && tcp[i].used && fds[at[i]].revents) tcp_read(&tcp[i]);
+        if (release_asked) {
+            release_asked = 0;
+            lib_release();
+            crc_log("lib: the card let go of");
+        }
         np_poll();
         ack_poll();
         cover_poll();

@@ -71,6 +71,7 @@ int __xstat(int, const char *, void *); /* glibc 2.28's stat, version 3 (coda_rc
 #define SIGHUP 1
 #define SIGPIPE 13
 #define SIGTERM 15
+#define SIGUSR1 16 /* MIPS's */
 #define SIG_IGN ((void (*)(int))1)
 #define CLOCK_MONOTONIC 1
 #define PRIO_PROCESS 0

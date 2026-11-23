@@ -281,6 +281,9 @@ demo	0x4ff2b0	0x4	get_battery_capacity	the load of $25 for the only call to tool
 demo	0x4ff2b4	0x4	get_battery_capacity	the only call to toolsGetChargeStatus; tools/build.py BATTERY_READS
 demo	0x5000f0	0x4	remove_file	the only call to snprintf, after "sync"; tools/build.py FOLDER_RM_CALL, FOLDER_RM_FMT
 demo	0x5000f4	0x4	remove_file	`addiu $6, $6, 0x2ff8, forming "rm -rf "%s""`, the delay slot of the only call to snprintf, after "sync"; tools/build.py FOLDER_RM_CALL, FOLDER_RM_FMT
+demo	0x5020d8	0x4	device_reboot	the only call to system, after "reboot"; tools/build.py CARD_DOWN_CALLS
+demo	0x502138	0x4	device_poweroff	the only call to system, after "poweroff"; tools/build.py CARD_DOWN_CALLS
+demo	0x502438	0x4	device_standby	4th of 7 calls to system, after "/tmp/mmc_add"; tools/build.py CARD_UMOUNT_CALL
 demo	0x5024b4	0x4	device_standby	the only call to awake_screen, after "rmmod soc_msc"; tools/build.py STANDBY_WAKE
 demo	0x502bd0	0x4	update_firmware	`addiu $5, $5, -0x1300, forming "V1.36"`, the delay slot of 2nd of 2 calls to strcmp, after "Shanling Q2"; tools/build.py build
 demo	0x5030f8	0x4	check_otginfo	`addiu $5, $5, -0x1300, forming "V1.36"`, the delay slot of the only call to strcmp, after "http://openwin.shanling.com:9000/IOtaServer/otaserver?para0=ShanlingQ2_pro&para1=ShanlingQ2_ota"; tools/build.py build

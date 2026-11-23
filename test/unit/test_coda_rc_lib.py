@@ -2,6 +2,7 @@
 (and, Local + Server, a card app's catalogue) made here, with no socket: the library built for this machine with test/unit/coda_rc_host.c and coda_rc_lib_host.c
 as the daemon around it, its device paths under a temporary root."""
 import ctypes
+import os
 import pathlib
 import re
 import sqlite3
@@ -433,3 +434,50 @@ def test_a_page_reuses_the_librarys_tables(lib, tmp_path):
     cat.commit()
     cat.close()
     assert 'Z' in titles(q.browse('albums'))
+
+
+def open_catalogues():
+    """This process's descriptors on a catalogue.db (the library under test runs in it)."""
+    out = []
+    for fd in os.listdir('/proc/self/fd'):
+        try:
+            target = os.readlink(f'/proc/self/fd/{fd}')
+        except OSError:
+            continue
+        if target.endswith('/.q2pod/catalogue.db'):
+            out.append(target)
+    return out
+
+
+def test_the_card_is_let_go_of_while_demo_holds_it(lib, tmp_path):
+    """Standby on the owner's Q2 (2026-11-23): coda-rc's library, kept open between requests, held the server catalogue
+    on the card, so stock's umount failed and the card's driver was unloaded under a live mount. demo's card_release.c
+    writes its pid to /tmp/mmc_hold and sends a SIGUSR1: the connection is closed (lib_release), and while the hold is
+    live a request reads the database alone; once it is gone the catalogue is attached again."""
+    q = Q2(lib, tmp_path, server=SERVER, cat=True)
+    both = titles(q.browse('tracks'))
+    assert open_catalogues(), 'the connection keeps the catalogue open between requests'
+    hold = tmp_path / 'tmp/mmc_hold'
+    hold.write_text(f'{os.getpid()}\n')
+    lib.lib_release()
+    assert not open_catalogues()
+    local = titles(q.browse('tracks'))
+    assert not open_catalogues(), 'nothing on the card opened while it is held'
+    assert set(local) == {s[2] for s in SONGS} and set(local) < set(both)
+    hold.unlink()
+    assert titles(q.browse('tracks')) == both and open_catalogues()
+
+
+def test_a_hold_whose_process_is_gone_holds_nothing(lib, tmp_path):
+    """demo restarted with its hold left in /tmp: the pid names no process, the catalogue is read as before."""
+    q = Q2(lib, tmp_path, server=SERVER, cat=True)
+    child = gone_pid()
+    (tmp_path / 'tmp/mmc_hold').write_text(f'{child}\n')
+    assert lib.lib_card_held() == 0
+    assert len(titles(q.browse('tracks'))) > len(SONGS)
+
+
+def gone_pid():
+    """A pid no process has (the top of pid_max downwards), as a restarted demo's old one."""
+    top = int(pathlib.Path('/proc/sys/kernel/pid_max').read_text())
+    return next(p for p in range(top - 1, 1, -1) if not pathlib.Path(f'/proc/{p}').exists())

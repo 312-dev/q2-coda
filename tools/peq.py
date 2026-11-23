@@ -30,6 +30,7 @@ LIBC = {
     'llrint': ('long long', 'double'),
     '__isoc99_sscanf': ('int', 'const char *, const char *, ...'),  # peq.c peq_number: no strtod in demo's GOT
     'opendir': ('void *', 'const char *'), 'closedir': ('int', 'void *'),
+    'readlink': ('int', 'const char *, char *, unsigned'), 'getpid': ('int', 'void'),  # card_release.c: the card's holders
     'readdir': ('struct dirent *', 'void *'),
     'qsort': ('void', 'void *, unsigned, unsigned, int (*)(const void *, const void *)'),
     # libcstl and socket imports for the Play/Pause queue menu in navigation.c

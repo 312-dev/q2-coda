@@ -2,8 +2,10 @@
  * (docs/internals.md#car-remote). The tree, its orders and its letter buckets are the q2-auto-remote app's
  * (its tools/q2bridge.py, remote/coda-rc.proto "browse"), built here with SQL over two temporary views of
  * stock's songtable and, with a signed-in server's catalogue on the card, its servertable (docs/server-library.md). The
- * database is opened per request and closed after it, so no lock or stale schema outlives an answer, and
- * nothing is ever written to it. Play.resume's places, the song each list last played from a phone was on,
+ * database is opened read-only and kept open with its tables between requests while its files are unchanged
+ * (lib_open), and nothing is ever written to it. While demo lets the card go (CARD_HOLD, before Standby, a power-off or
+ * a restart) the catalogue on the card is not opened, and a SIGUSR1 closes the connection (lib_release), so nothing
+ * of the daemon's holds the card as it is unmounted. Play.resume's places, the song each list last played from a phone was on,
  * are the daemon's own file (PLACES). */
 #include "coda_rc_sys.h"
 #include "coda_rc.h"
@@ -11,6 +13,7 @@
 
 #define DB "/mnt/data/database.db"
 #define CAT "/mnt/mmc/.q2pod/catalogue.db"
+#define CARD_HOLD "/tmp/mmc_hold" /* demo's pid while it lets the card go (card_release.c) */
 #define DURATIONS "/mnt/data/ringnav-durations-v1"
 #define SPLIT 120         /* a list longer than this opens as letter buckets (q2bridge.py SPLIT) */
 #define CAP 500           /* and a bucket longer than this splits again; no list sends more (CAP) */
@@ -93,10 +96,22 @@ static int stream_sid(const char *path, char *app, size_t appcap, char *sid, siz
 
 /* The catalogue's row for a streaming song's file (stream_sid): its id, tags, length and album art id, as the
  * server song the Library lists; 0 when path is not a stream or the catalogue does not have it. */
+/* demo is letting the card go: the pid in CARD_HOLD alive (a file naming one gone holds nothing). */
+int lib_card_held(void) {
+    char p[256], b[16];
+    int fd = open(crc_path(p, sizeof p, CARD_HOLD), O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    int n = (int)read(fd, b, sizeof b - 1);
+    close(fd);
+    b[n > 0 ? n : 0] = 0;
+    int pid = atoi(b);
+    return pid > 1 && !kill(pid, 0);
+}
+
 int lib_stream_song(const char *path, lib_song_t *o) {
     char app[64], sid[64], p[256], like[80];
     memset(o, 0, sizeof *o);
-    if (!stream_sid(path, app, sizeof app, sid, sizeof sid)) return 0;
+    if (!stream_sid(path, app, sizeof app, sid, sizeof sid) || lib_card_held()) return 0;
     sqlite3 *c = 0;
     sqlite3_stmt *st;
     int ok = 0;
@@ -275,7 +290,7 @@ static void f_dur(sqlite3_context *c, int n, sqlite3_value **v) {
  * they are always in the Library (no setting since 2026-11-19) */
 int lib_has_server(void) {
     char p[256];
-    return access(crc_path(p, sizeof p, CAT), 0) == 0;
+    return !lib_card_held() && access(crc_path(p, sizeof p, CAT), 0) == 0;
 }
 
 /* stock's library filter (offsets.inc MUSIC_WHERE): no audiobooks, podcasts or M4B in the music library */
@@ -304,8 +319,10 @@ static lib_key_t lib_key;
 static void lib_key_now(lib_key_t *k) {
     static const char *const files[3] = {DB, CAT, DURATIONS};
     memset(k, 0, sizeof *k);
+    int held = lib_card_held(); /* the catalogue counted as absent: the tables made again without it, and after */
     for (int i = 0; i < 3; ++i) {
         char p[256];
+        if (held && i == 1) continue; /* files[1]: CAT */
 #ifdef CODA_HOST
         struct stat st;
         if (stat(crc_path(p, sizeof p, files[i]), &st)) continue;
@@ -323,6 +340,12 @@ static void lib_key_now(lib_key_t *k) {
 static void lib_drop(void) {
     if (db) sqlite3_close(db);
     db = 0;
+}
+
+/* The connection closed, the catalogue's file with it (a SIGUSR1, coda_rc.c): the next request opens it again. */
+void lib_release(void) {
+    lib_drop();
+    memset(&lib_key, 0, sizeof lib_key);
 }
 
 /* A request is done with the library. The connection stays open, with its tables, for the next (lib_open). */
