@@ -823,7 +823,7 @@ as a menu's; a lit row's foot never passes y 282.
 - **Progress:** 6 px, round ends, Track and Accent Blue. Used for playback, scans and
   downloads.
 - **Slider page** (Volume, Resume Songs, Night Shift, Wheel Sensitivity; stock's Max Volume, Default Volume, Channel
-  Balance and Brightness pages and Crossfade's keep the form where they still open): the status row names it; a feature with a switch has it as the
+  Balance and Brightness pages keep the form where they still open): the status row names it; a feature with a switch has it as the
   first row, selected; the value in Inter Medium 22 centered on y 150; a 6 px track from the text
   column to the right column with its top at y 186, Track behind and Accent Blue filled to a 14 px
   white knob (Channel Balance fills from the center; in Light Mode, where white is the canvas, the
@@ -834,7 +834,7 @@ as a menu's; a lit row's foot never passes y 282.
   named choices: [List row](#list-row)); the value is the warmth ("3400 K") in every mode, and while
   Off it, the track and the knob are Text Tertiary with no accent, as a disabled row's (the user's,
   from audit2 J7).
-- <a id="inline-sliders"></a>**Inline slider rows** (Playback's Max Volume, Balance, Crossfade's Duration and Default
+- <a id="inline-sliders"></a>**Inline slider rows** (Playback's Max Volume, Balance and Default
   Volume's Level, Display's Brightness; the user's, 2026-11-16, from `design/mockups/mock_inline_slider.py`): a setting
   with one value changes in its list, not on a slider page. At rest the row holds its title, a 4 px track from x 190 to
   62 px short of the right column (Track behind, Accent Blue filled to a 12 px white knob; on the selection bar the track
@@ -844,7 +844,7 @@ as a menu's; a lit row's foot never passes y 282.
   two columns centered 43 px down with a 16 px knob; Balance grows to 82 px for Left and Right in 13 px under its
   track, and its track has a 12 px center mark and no fill. The wheel sets the value live at the wheel's speed, each
   step set and saved as stock's page for it sets a step; Center or Return sets it down, as does the selection moving
-  off it. A setting with a switch and a value (Crossfade, Default Volume) is a switch row with its slider row under it,
+  off it. A setting with a switch and a value (Default Volume) is a switch row with its slider row under it,
   shown only while the switch is on (`patch/inline_slider.c`).
 - **Vertical slider (EQ):** 4 px Track line, Accent Blue fill from 0 dB to the value (Text Tertiary
   while the EQ is off), a 14 px white knob, ringed 2 px in Accent Blue while the wheel is on it
