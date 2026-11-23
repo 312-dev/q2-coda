@@ -276,26 +276,27 @@ def test_with_nothing_to_do_the_loop_wakes_once_a_second(q2):
 
 def test_demos_files_end_the_loops_sleep(q2):
     """Now Playing and a command's ack, renamed into /tmp by the shim, reach the phone at once (inotify), not at the
-    loop's next look. A daemon that saw the files only at its tick would take anywhere from nothing to TICK_MS, evenly:
-    each of six tries must take under half of it, which such a daemon passes once in 64 runs, while a loaded machine
-    (0.28 s for a command on 2026-11-22, against the 0.15 s this test once allowed) stays well under."""
+    loop's next look. A daemon that saw the files only at its tick would take anywhere from nothing to TICK_MS, evenly,
+    on every try: of twelve tries at least ten must take under a quarter of it, which such a daemon passes about once
+    in 15,000 runs, while a loaded machine's odd slow try (0.28 s, 0.53 s on 2026-11-22 and 23) is allowed twice."""
     s, shim = q2
-    half = define('coda_rc.c', 'TICK_MS') / 2000
+    quarter = define('coda_rc.c', 'TICK_MS') / 4000
     s.subscribe(position=False)
-    for radio in (1, 0, 1, 0, 1, 0):
+    pushes, answers = [], []
+    for k in range(12):
         WAIT(0.3)  # into the loop's sleep
         start = time.monotonic()
-        shim.now(radio=radio)
-        while s.wait_push(5).get('now_playing', {}).get('radio') != bool(radio):
+        shim.now(radio=k % 2)
+        while s.wait_push(5).get('now_playing', {}).get('radio') != bool(k % 2):
             pass
-        took = time.monotonic() - start
-        assert took < half, f'Now Playing reached the phone {took:.2f} s after the shim wrote it'
-    for _ in range(6):
+        pushes.append(time.monotonic() - start)
+    for _ in range(12):
         WAIT(0.3)
         start = time.monotonic()
         s.start_radio(stop=True)  # the shim answers within its 20 ms look
-        took = time.monotonic() - start
-        assert took < half, f'a command answered {took:.2f} s after it was sent'
+        answers.append(time.monotonic() - start)
+    for what, took in (('Now Playing reached the phone', pushes), ('a command was answered', answers)):
+        assert sum(t < quarter for t in took) >= 10, f'{what} in {", ".join(f"{t:.2f}" for t in took)} s'
 
 
 def told(shim, wait=0.5):
