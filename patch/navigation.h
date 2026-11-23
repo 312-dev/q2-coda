@@ -977,6 +977,9 @@ int ringnav_otg_status(void), stock_otg_status_trampoline(void);
 /* usb_ui.c: a host has configured the gadget (system.c holds Standby on it) */
 int usb_host(void);
 void otg_hold(void); /* the PHY's ID pull-up on, the controller's role held at device */
+int usb_otg_own_vbus(void); /* usb_otg.c: the Q2's own bus power on, or just ended */
+void usb_otg_poll(void);    /* usb_otg.c: a Play asked while USB audio connected */
+int stock_forbid_play_trampoline(int quiet);
 /* standby_usb.c: Standby and the USB link (docs/internals.md#standby-and-the-usb-link) */
 void standby_usb_suspend(void), standby_usb_poll(void);
 

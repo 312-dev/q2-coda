@@ -14,6 +14,13 @@
  * - the PHY's ID pull-up is held on and the controller's role held at device (C, D) except while
  *   the bus power is granted, so a phantom ID low moves neither.
  * PD18's own pull-up is set at boot (S12usbcharge, and platform_init: tools/build.py ID_PULL_UP).
+ *
+ * A Play refused for want of an output while an accessory is on its way (its ID low, waited out or
+ * its bus power's trial running, no USB DAC yet) says "Connecting USB audio..." instead of stock's
+ * message and is remembered: once stock's host pass has the DAC (g_otg_status 2, the player's way
+ * switched to it by the same pass), the song is started again at its place (player_save_stop, then
+ * player_save_start), so it opens the DAC's PCM, never the headphone DAC's, which a resume of the
+ * paused song would keep. If the accessory does not come, the Play goes with stock's message then.
  */
 #include "navigation.h"
 
@@ -31,6 +38,12 @@
 /* Bus power with no device enumerated on the host port goes off after this. */
 #define OTG_TRIAL_MS 8000
 #define OTG_GAP_MS 5000 /* passes further apart than this (a Standby) start the wait again */
+/* The Q2's own bus power, ended, still read by stock as a cable's VBUS this long after: 1.6 s on
+ * 2026-11-23, when that "cable in" started a Bluetooth connect (usb_ui.c headset_bt_usb). */
+#define OTG_OWN_VBUS_MS 3000
+/* A remembered Play's longest wait: the blank's accessory, the settle and the trial. */
+#define OTG_PLAY_MS (OTG_ACCESSORY_MS + OTG_SETTLE_MS + OTG_TRIAL_MS)
+#define OTG_CONNECTING "Connecting USB audio..." /* ringnav_forbid_play's message */
 #define OTG_HOST_DEV "/sys/bus/usb/devices/1-1/idVendor" /* a device on the Q2's host port */
 /* The X2000's CPM: USBPCR (0x1000003c) bit 29, the PHY's ID pull-up always on (D); USBRDT
  * (0x10000040) bits 24 and 23, the controller's ID from IDDIG_REG, set to device (C), or from the
@@ -45,6 +58,10 @@ static struct {
                                                 leaving the port, the bus power granted */
     int waiting, have_last, have_gone, vbus_prev, blanked, refused;
     unsigned blanked_at; /* when the blank caught the low still read */
+    unsigned own_at;     /* when the Q2's own bus power last ended; own: it has */
+    int own, id_low;     /* id_low: PD18 as the last pass read it */
+    int play;            /* a Play refused while an accessory is on its way (ringnav_forbid_play) */
+    unsigned play_at;
 } otg __attribute__((section(".scratch")));
 
 /* The PHY's ID pull-up on and the controller held at device: at boot (usb_record.c
@@ -71,10 +88,17 @@ static int otg_stock(unsigned now) {
             otg.host_at = now;
         } else {
             gone(now);
+            otg.own = 1, otg.own_at = now;
             otg_hold();
         }
     }
     return result;
+}
+
+/* 1 while the Q2 powers the bus, and for OTG_OWN_VBUS_MS after: a cable in read then is its own VBUS
+ * dying away, no host's (usb_ui.c: no Bluetooth connect for it). */
+int usb_otg_own_vbus(void) {
+    return g_last_otgid == 1 || (otg.own && (unsigned)time_now_ms() - otg.own_at < OTG_OWN_VBUS_MS);
 }
 
 static int host_device(void) {
@@ -93,6 +117,7 @@ int ringnav_otg_status(void) {
     if (otg.vbus_prev && !vbus) gone(now);
     otg.vbus_prev = vbus;
     int id_low = toolsGpioGetValue("PD18") == 0;
+    otg.id_low = id_low;
     /* Host already: PD17 reads the Q2's own bus power now, so it tells nothing. A device on the
      * host port keeps it; none within OTG_TRIAL_MS ends it, stock's pins written as its own device
      * pass writes them. Stock turns it off itself once PD18 reads high. ponytail: a DAC unplugged
@@ -105,6 +130,7 @@ int ringnav_otg_status(void) {
             g_last_otgid = 0;
             otg.refused = 1;
             gone(now);
+            otg.own = 1, otg.own_at = now;
             otg_hold();
             usb_record("otg-trial-off");
             return 0;
@@ -134,4 +160,44 @@ int ringnav_otg_status(void) {
         return result;
     }
     return 0;
+}
+
+/* An accessory on its way: its ID low and, with no USB DAC yet, waited out (the blank or the settle)
+ * or its bus power's trial running. */
+static int attaching(unsigned now) {
+    if (g_otg_status == 2 || otg.refused || !otg.id_low) return 0;
+    if (g_last_otgid == 1) return now - otg.host_at < OTG_TRIAL_MS;
+    return otg.blanked || otg.waiting;
+}
+
+/* check_forbid_play_no_headset (0x4f2cac, tools/build.py HOOKS): stock's gate, but for a start with
+ * nothing to play to while an accessory is on its way (the top of this file). */
+int ringnav_forbid_play(int quiet) {
+    unsigned now = time_now_ms();
+    if (g_testmode_flag || !g_block_withoutphone_flag || !attaching(now) || has_valid_output_device())
+        return stock_forbid_play_trampoline(quiet);
+    if (!quiet) {
+        toast(OTG_CONNECTING);
+        otg.play = 1, otg.play_at = now;
+    }
+    return 1;
+}
+
+/* From usb_ui_poll, every UI pass: a remembered Play started once the DAC is there, or given up. */
+void usb_otg_poll(void) {
+    if (!otg.play) return;
+    unsigned now = time_now_ms();
+    if (g_otg_status == 2 && has_valid_output_device()) {
+        otg.play = 0;
+        if (mclGetPlayStatus() != 2) {
+            player_save_stop();
+            player_save_start(0);
+            ulog('I', "usb", "the Play asked while USB audio connected: started on it");
+        }
+        return;
+    }
+    if (!attaching(now) || now - otg.play_at >= OTG_PLAY_MS) {
+        otg.play = 0;
+        stock_forbid_play_trampoline(0); /* stock's no-output message, now nothing is coming */
+    }
 }

@@ -158,6 +158,8 @@ HOOKS = {
     'toolsIntoStandby': (0x5d1110, 'ringnav_standby', 'standby'),
     # Standby's start: Car Audio stopped before stock unmounts the card (patch/standby_usb.c)
     'device_standby': (0x5021bc, 'ringnav_device_standby', 'device_standby'),
+    # Headphones Required's gate: "Connecting USB audio..." and the Play kept while an accessory attaches (usb_otg.c)
+    'check_forbid_play_no_headset': (0x4f2cac, 'ringnav_forbid_play', 'forbid_play'),
     # Standby's card driver reload: no removed and inserted toasts on the wake
     'check_cardmount_status': (0x4f39a4, 'ringnav_cardmount', 'cardmount'),
     'playset_playset_page_init': (0x4bd4d0, 'ringnav_audioset', 'audioset'),

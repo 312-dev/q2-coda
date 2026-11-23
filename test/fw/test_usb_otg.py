@@ -355,3 +355,116 @@ def test_the_lows_after_an_unplug_never_power_the_bus(fw, after, low):
     p.cable = True
     p.run(3000)
     assert p.powered == []
+
+
+# ---- a Play asked while an accessory attaches (usb_otg.c ringnav_forbid_play, usb_otg_poll) ----
+
+CONNECTING = 'Connecting USB audio...'
+
+
+class Player:
+    """Headphones Required's gate around the Port: stock's gate (its no-output toast) as a double, the play status,
+    player_save_stop and player_save_start recorded in order, and stock's host pass's g_otg_status 2 once a device is on
+    the host port (the DAC found: /tmp/usb_add, /dev/snd/pcmC1D0)."""
+
+    def __init__(self, fw, p, status=3):
+        self.fw, self.p, self.status, self.calls, self.toasts = fw, p, status, [], []
+        fw.var('g_block_withoutphone_flag', C.c_ubyte).value = 1
+        fw.var('g_testmode_flag', C.c_ubyte).value = 0
+        self.otg_status = fw.var('g_otg_status', C.c_ubyte)
+        fw.mock('has_valid_output_device', lambda *_: int(self.otg_status.value == 2))
+        fw.mock('stock_forbid_play_trampoline', lambda quiet, *_: self.calls.append(('stock gate', quiet)) or 1)
+        fw.mock('mclGetPlayStatus', lambda *_: self.status)
+        fw.mock('player_save_stop', lambda *_: self.calls.append(('save_stop', self.otg_status.value)) or 0)
+        fw.mock('player_save_start', lambda pause, *_: self.calls.append(('save_start', pause, self.otg_status.value)) or 0)
+        fw.mock('navigator_to_with_context', lambda name, info, *_: self.toasts.append(C.string_at(info + 8).decode()) or 0)
+        stock = p.stock
+
+        def host_pass(*_):
+            stock()
+            self.otg_status.value = 2 if p.otgid.value == 1 and p.hostdev else 0
+            return 0
+        fw.mock('stock_otg_status_trampoline', host_pass)
+        self.gate, self.poll = fw.fn('ringnav_forbid_play', C.c_int, C.c_int), fw.fn('usb_otg_poll', None)
+
+    def run(self, ms):
+        end = self.p.now + ms
+        while self.p.now < end:
+            self.p.run(PASS_MS)
+            self.poll()
+
+
+def test_a_play_while_an_accessory_attaches_says_so_and_starts_on_it(fw):
+    """2026-11-23: Play with the earbuds just in got "Connect headphones or Bluetooth to play". Now it says the USB
+    audio is connecting, and the song starts once the DAC is there, started again at its place (save_stop, then
+    save_start playing) after g_otg_status reads 2, never resumed into the headphone DAC before it."""
+    p = Port(fw)
+    pl = Player(fw, p)
+    unplug(p, 5000)
+    p.id = 0
+    p.hostdev = True
+    pl.run(2000)
+    assert pl.gate(0) == 1 and pl.toasts == [CONNECTING] and pl.calls == []
+    pl.run(ACCESSORY + 2 * PASS_MS)
+    assert pl.calls == [('save_stop', 2), ('save_start', 0, 2)], pl.calls
+    pl.run(5000)
+    assert len(pl.calls) == 2, 'once'
+
+
+def test_a_play_while_an_adapter_settles_is_kept_too(fw):
+    """No cable out lately: the 6 s settle, then the trial; the Play waits through both."""
+    p = Port(fw)
+    pl = Player(fw, p)
+    p.id = 0
+    p.hostdev = True
+    pl.run(2000)
+    assert pl.gate(0) == 1 and pl.toasts == [CONNECTING]
+    pl.run(SETTLE + 2 * PASS_MS)
+    assert pl.calls == [('save_stop', 2), ('save_start', 0, 2)]
+
+
+def test_a_play_while_the_board_s_pulse_reads_as_an_accessory_goes_with_stock_s_message(fw):
+    """The ID low after an unplug ends with nothing attached: the Play is given up with stock's no-output message,
+    and nothing starts."""
+    p = Port(fw)
+    pl = Player(fw, p)
+    unplug(p, 3000)
+    p.id = 0
+    pl.run(1000)
+    assert pl.gate(0) == 1 and pl.toasts == [CONNECTING]
+    p.id = 1
+    pl.run(2000)
+    assert pl.calls == [('stock gate', 0)]
+
+
+def test_a_trial_with_nothing_enumerated_gives_the_play_up(fw):
+    p = Port(fw)
+    pl = Player(fw, p)
+    p.id = 0
+    pl.run(SETTLE + 2 * PASS_MS)
+    assert p.otgid.value == 1
+    assert pl.gate(0) == 1 and pl.toasts == [CONNECTING]
+    pl.run(TRIAL)
+    assert p.records()[-1] == 'otg-trial-off' and pl.calls == [('stock gate', 0)]
+
+
+@pytest.mark.parametrize('case', ['nothing attached', 'quiet', 'dac there'])
+def test_otherwise_the_gate_is_stock_s(fw, case):
+    p = Port(fw)
+    pl = Player(fw, p)
+    if case == 'dac there':
+        p.id = 0
+        p.hostdev = True
+        pl.run(SETTLE + 2 * PASS_MS)
+        pl.calls.clear()
+    elif case == 'quiet':
+        p.id = 0
+        pl.run(2000)
+    quiet = int(case == 'quiet')
+    pl.gate(quiet)
+    if case == 'quiet':
+        assert pl.calls == [] and pl.toasts == [], 'refused, unsaid and not kept'
+        pl.run(SETTLE + TRIAL + 2 * PASS_MS)
+        assert pl.calls == []
+    else:
+        assert pl.calls == [('stock gate', 0)] and pl.toasts == []
