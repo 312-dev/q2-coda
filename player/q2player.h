@@ -48,6 +48,9 @@ struct ctl {
     int eq_changed; /* an mcl-seteq since the playback thread last looked: the EQ state on disk is new */
     int click;      /* an mcl-click to sound, CLICK_*: mixed into a song playing, else on its own (engine.c click_session) */
     int cut;        /* an mcl-stop or set-nexturl since the playback thread began opening a song: that open gives up */
+    /* mcl-carrelease or SIGUSR2 (docs/player.md#releasing-the-car): the car's gadget is about to go, so its PCM is
+     * closed at once, a paused song's too, and the car's way left; cleared as the playback thread takes it */
+    int car_release;
     /* status */
     int state, has_info, position;
     struct info info;

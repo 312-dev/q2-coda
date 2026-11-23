@@ -71,17 +71,19 @@ int snd_pcm_sw_params_set_start_threshold(snd_pcm_t *p, snd_pcm_sw_params_t *s, 
 int snd_pcm_sw_params_set_stop_threshold(snd_pcm_t *p, snd_pcm_sw_params_t *s, snd_pcm_uframes_t v) { s->stop = v; return 0; }
 int snd_pcm_sw_params_set_silence_size(snd_pcm_t *p, snd_pcm_sw_params_t *s, snd_pcm_uframes_t v) { s->silence = v; return 0; }
 int snd_pcm_sw_params(snd_pcm_t *p, snd_pcm_sw_params_t *s) { applied = *s, sw_calls++; return 0; }
-int snd_pcm_prepare(snd_pcm_t *p) { return prepare_fails && prepare_fails-- ? -19 : 0; }
+static int prepares, drops, pauses, pause_err; /* pause_err: what snd_pcm_pause answers (the car's gadget: -EINVAL) */
+static long delay_now, first_written;        /* what snd_pcm_delay answers; the last write's first sample */
+int snd_pcm_prepare(snd_pcm_t *p) { prepares++; return prepare_fails && prepare_fails-- ? -19 : 0; }
 static int last_zero; /* the last write all silence */
 snd_pcm_sframes_t snd_pcm_writei(snd_pcm_t *p, const void *b, snd_pcm_uframes_t n) {
     writes++;
     if (write_fails && write_fails--) return gone_error;
-    last_written = (long)n;
+    last_written = (long)n, first_written = ((const int16_t *)b)[0];
     last_zero = 1;
     for (snd_pcm_uframes_t i = 0; i < n * 2; ++i) last_zero &= !((const int16_t *)b)[i];
     return (snd_pcm_sframes_t)n;
 }
-int snd_pcm_delay(snd_pcm_t *p, snd_pcm_sframes_t *d) { *d = 0; return 0; }
+int snd_pcm_delay(snd_pcm_t *p, snd_pcm_sframes_t *d) { *d = delay_now; return 0; }
 snd_pcm_sframes_t snd_pcm_avail(snd_pcm_t *p) { avail_calls++; return avail_now; }
 snd_pcm_sframes_t snd_pcm_forward(snd_pcm_t *p, snd_pcm_uframes_t n) { forwarded = (long)n; return (snd_pcm_sframes_t)n; }
 snd_pcm_sframes_t snd_pcm_rewindable(snd_pcm_t *p) { return 0; }
@@ -98,8 +100,8 @@ int snd_pcm_wait(snd_pcm_t *p, int ms) {
     if (waits == wait_cut) cut = 1;
     return waits > wait_busy;
 }
-int snd_pcm_pause(snd_pcm_t *p, int on) { return 0; }
-int snd_pcm_drop(snd_pcm_t *p) { return 0; }
+int snd_pcm_pause(snd_pcm_t *p, int on) { pauses++; return pause_err; }
+int snd_pcm_drop(snd_pcm_t *p) { drops++; return 0; }
 int snd_pcm_drain(snd_pcm_t *p) { return 0; }
 const char *snd_strerror(int e) { return "error"; }
 
@@ -154,6 +156,31 @@ static void car_case(const char *name, int busy, int unlink_at, int cut_at) {
     output_car_watch(0);
 }
 
+/* A pause and its resume on way 3 with the device answering err to snd_pcm_pause (the car's gadget advertises a pause
+ * its trigger cannot do: -EINVAL), 60 of the 100 frames written not yet heard: the pauses asked, the drops and
+ * prepares, then at the resume the frames written again and the first of them (the tone's frame 40 is 1040). */
+static void pause_case(const char *name, int err) {
+    struct pcm_format f = {0};
+    f.rate = 44100, f.channels = 2, f.bytes = 2;
+    static int16_t tone[200];
+    for (int i = 0; i < 100; ++i) tone[2 * i] = tone[2 * i + 1] = (int16_t)(1000 + i);
+    FILE *c = fopen(car_file, "w");
+    if (c) fputs("hw:CARD=UAC1Gadget,0\n44100\n", c), fclose(c);
+    rate = 44100, wait_busy = 0, waits = 0, avail_now = 0;
+    struct output *o = output_open(&f, 3, 17);
+    if (!o) { printf("%s open-failed\n", name); return; }
+    output_write(o, (const uint8_t *)tone, 100);
+    pauses = drops = prepares = 0, pause_err = err, delay_now = 60;
+    output_pause(o, 1);
+    int paused_drops = drops, paused_prepares = prepares;
+    delay_now = 0, last_written = -1, first_written = 0, writes = 0;
+    output_pause(o, 0);
+    printf("%s pauses %d drops %d prepares %d resume writes %d last %ld first %ld\n", name, pauses, paused_drops,
+           paused_prepares, writes, last_written, first_written);
+    pause_err = 0, delay_now = 0;
+    output_close(o);
+}
+
 int main(void) {
     unsetenv("Q2PLAYER_PCM");
     setenv("Q2PLAYER_DEVICE", "test", 1);
@@ -182,8 +209,10 @@ int main(void) {
         car_case("car-late3", 12, -1, -1);           /* 3009 ms in the BMW, the second drive (2026-11-20) */
         car_case("car-left", 1000, 3, -1);
         car_case("car-cut", 1000, -1, 3);
+        pause_case("car-pause", 0);          /* a device that pauses: nothing more */
+        pause_case("car-pause-fails", -22);  /* the gadget's -EINVAL: held, stopped, written again at the resume */
         /* way 3's close, whatever played (a song, or another source through feed.c: engine.c feed_session): its last
-         * write is silence, so the stopped gadget's repeated packet is silence, no buzz */
+         * write is silence, so the car hears silence up to the stop */
         struct pcm_format f = {0};
         f.rate = FEED_RATE, f.channels = 2, f.bytes = 2;
         static int16_t tone[200];

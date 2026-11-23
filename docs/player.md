@@ -43,6 +43,7 @@ demo queues every message it receives as a (name, argument) pair (`0x5bb7f4`); a
 | `mcl-play` | `null` | State 1 (`0x42c6dc`), only when `flag` is not 0. | none |
 | `mcl-seek` | seconds | With `flag` not 0: mute (`0x43b004`), sleep 150 ms, then the target (float `0xb11be0`) and the seek flag `0xb11c40` (`0x42c614`). | none |
 | `mcl-stop` | `null` | The stop flag `0xb11e70` (`0x42c9d0`). It holds for a song a `set-nexturl` named just before (20 to 50 ms, captured under qemu): that song is answered as cut and does not play, and the stop is answered too; sent in the same instant as the `set-nexturl`, stock plays the song (q2player stops: `test_stop_right_after_a_next`). A Library press of a server song sent that pair until the payload refused stock's replay of the queue (`patch/playback.c` `playback_start_refused`). | `{player-stopstatus\exit}` when a song was loaded, else nothing |
+| `mcl-carrelease` | `null` | Not stock's: Q2 Muse's, before the car's gadget is unbound ([Releasing the car](#releasing-the-car)). The car's PCM closed at once, a paused song's too, and the car's file removed. SIGUSR2 to q2player does the same. | none |
 | `mcl-orderstop` | `null` | Forgets the open PCM's format (`0xafb164`-`0xafb16c` to -1) and, off Bluetooth with `flag` 0, closes a PCM left open (`0x43af54`). | none |
 | `mcl-setoutputway` | 0, 1, 2 | The output way `0xb11e54` and "changed" `0xb11e4c` (`0x42c90c`): 0 the DAC, 1 Bluetooth, 2 a USB DAC. A song playing goes on where it is; the way is taken at the next song (captured, `stock-way.txt`). | none |
 | `mcl-setvol` | `L<<8 \| R`, each 0-255 | Stored (`0xb11e04`). While a song plays, on Bluetooth or USB, it reaches the software volume at once (`0x42c820`, [Volume and gain](#output)), on USB whatever `mcl-softvolflag` says, but not for DSD sent as DoP or Native; at each song's start it is applied on Bluetooth, and on USB with `mcl-softvolflag` 1 (`0x4235a8`). | none |
@@ -251,6 +252,16 @@ What each reports and how the PCM is opened for it, captured from stock's and Q2
 | DTS from FFmpeg's own encoder | none: `{player-status\error}` | | | |
 
 A WMA file's `LENGTH` is its whole seconds (5 for 5.99 s), and its position starts about 3 s on, at the ASF preroll. An MP3 with 3 MB of junk after its frames (`tail.mp3`) reports `LENGTH` 20 from its Xing count and a `BITRATE` of 1,311,656, its whole size over that length; Q2 Muse's player plays its 20 s and stops. APE, TAK, WMA Lossless and WMA Pro were not captured: nothing on the capturing machine encodes them.
+
+<a id="pause"></a>
+## Pause
+
+`mcl-pause` pauses the PCM (`snd_pcm_pause`). A device that refuses (the car's gadget advertises a pause its trigger cannot do: `-EINVAL`, [iphone-mode](iphone-mode.md#car-audio-in-the-image)) has its frames not yet heard taken back and kept, as for a click on a paused song (`output.c` `hold`, with the delay read before the refused pause moved it), and the PCM stopped and prepared; `mcl-play` writes them again, and the song goes on from the first frame not heard. A refused resume is logged and the next write goes on. `test/player/run.py` `test_alsa_sw_params` (`car-pause-fails`): the frames written again at the resume are the 60 of 100 not yet heard, from the first of them; it failed while the refusal was ignored.
+
+<a id="releasing-the-car"></a>
+## Releasing the car
+
+Unbinding the car's gadget (`patch/q2car.sh` `gadget_down`, writing `""` to the gadget's `UDC`) frees its sound card, and that waits for the last close of the card while it holds the USB device controller's lock: a song paused on the car's way held its PCM open, its thread asleep until demo's next command, so the unbind, and every gadget change after it, waited for the next Play. Before the unbind the firmware asks the player to let go: `{mcl-carrelease\null}` on demo's socket, or `SIGUSR2` to q2player from a script (`kill -USR2 $(pidof hciplayer)`: q2player runs as `/usr/bin/hciplayer`). The playback thread wakes for it, paused or not: the car's PCM is dropped and closed, the car's file removed (as at the car's `StopUSBDeviceModeAudio`), and the line `q2player: the car's PCM released` logged. A song paused there opens a PCM on demo's way at the next Play and goes on where it was; one playing goes on there at once, as when the car goes; another source's session (Radio, Videos) ends. With no car PCM open it does nothing. `test/player/run.py` `test_car_release_while_paused` (the command and the signal): the release logged before the Play, the car's file gone, and a Bluetooth PCM after the car's; it failed without the command (no release, the song resumed on the car's PCM) and the signal ended the player.
 
 ## What it writes
 

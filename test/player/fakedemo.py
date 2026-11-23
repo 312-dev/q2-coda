@@ -460,7 +460,7 @@ class Session:
         """speed: the player's clock runs this many times faster (its file sink's Q2PLAYER_SPEED), so the steps' times
         and the poll's period shrink by it."""
         self.positions, self.answers, self.speed = [], [], speed
-        proc = launch(self)
+        proc = self.proc = launch(self)  # a step may signal it (run.py test_car_release_while_paused)
         self.srv.settimeout(30)
         self.conn, _ = self.srv.accept()
         self.t0 = time.monotonic()

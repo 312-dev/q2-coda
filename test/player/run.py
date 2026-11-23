@@ -15,7 +15,7 @@ files in place of ALSA.
 - protocol: for each transcript in fixtures/ (stock's and Q2 Muse's hciplayer under qemu, captured by
   fakedemo.py), the same commands get the same events and answers from q2player.
 """
-import array, concurrent.futures, math, os, pathlib, re, struct, subprocess, sys, tempfile, time
+import array, concurrent.futures, math, os, pathlib, re, signal, struct, subprocess, sys, tempfile, time
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -984,6 +984,12 @@ def test_alsa_sw_params(player, songs, tmp):
            'car-cut': 'r 0 waits 3 ms 750 writes 0 file 1'}
     for k, v in car.items():
         assert lines[k] == f'{k} {v}', lines[k]
+    # A pause the device cannot do (the car's gadget advertises one its trigger refuses, -EINVAL, and its read position
+    # goes back to the ring's start): the frames not yet heard are held, the PCM stopped (the gadget then sends
+    # silence) and prepared, and at the resume they are written again, from the first not heard (docs/player.md#pause).
+    assert lines['car-pause'] == 'car-pause pauses 2 drops 0 prepares 0 resume writes 0 last -1 first 0', lines['car-pause']
+    assert lines['car-pause-fails'] == 'car-pause-fails pauses 1 drops 1 prepares 1 resume writes 1 last 60 first 1040', \
+        lines['car-pause-fails']
     devices = {0: 'default', 1: "plug:'bluealsa:DEV=00:00:00:00:00:00,PROFILE=a2dp'", 2: 'hw:1,0'}
     for way, name in devices.items():
         assert lines[f'device way {way}'] == f'device way {way} {name}', lines[f'device way {way}']
@@ -1085,6 +1091,28 @@ def test_car_way_follows_the_car(player, songs, tmp):
     assert len(mid) > 44100 * 4 and mid[:len(mid) - len(mid) % 4] in a1, 'the car heard a1 itself, one stretch of it'
     assert 'output way 3 now' in log and 'output way 1 now' in log, log[-800:]
     return f'Bluetooth, {len(mid) // 4} frames to the car, Bluetooth'
+
+
+def test_car_release_while_paused(player, songs, tmp):
+    """docs/player.md#releasing-the-car: a1 paused on the car's way holds its PCM open, and the gadget's unbind waits for
+    that close while it holds the UDC's lock. mcl-carrelease on the socket, or SIGUSR2 from a script, closes it at once,
+    while still paused (its line comes before the Play's), removes the car's file, and at the next Play the song goes
+    on where it was on demo's way: a PCM of Bluetooth's after the car's."""
+    said = []
+    for how in ('command', 'signal'):
+        cp, car = car_player(), tmp/f'car-rel-{how}.audio'
+        car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+        ask = '{mcl-carrelease\\null}' if how == 'command' else (lambda s: os.kill(s.proc.pid, signal.SIGUSR2))
+        steps = car_steps(songs, car) + [(3.0, '{mcl-pause\\null}'), (5.0, ask), (6.0, '{mcl-play\\null}'),
+                                         (8.0, '{mcl-stop\\null}'), (9.0, None)]
+        names, pcm, log = car_play(songs, tmp, f'car-rel-{how}', steps, cp, car, speed=1)
+        released, played = log.find('the car\'s PCM released'), log.rfind('q2player: mcl-play')
+        assert 0 <= released < played, f'{how}: released at {released}, the Play at {played}: {log[-800:]}'
+        assert not car.exists(), f'{how}: the car file is still there'
+        assert [n.split('_', 1)[1] for n in names] == ['44100_2_s16_car.raw', '48000_2_s16_bt.raw'], (how, names)
+        bt = pcm[1]
+        said.append(f'{how}: released while paused, then {len(bt) // 4} frames on Bluetooth')
+    return '; '.join(said)
 
 
 def test_car_way_needs_the_car_build(player, songs, tmp):
@@ -1812,7 +1840,7 @@ def test_car_feed_reaches_the_car(player, songs, tmp):
 
 def test_car_feed_hands_over_both_ways(player, songs, tmp):
     """a1 on the car, stopped for Radio, Radio's frames, then a1 again: three car PCMs in turn, each closed on its
-    silence (no repeated period's buzz between), the source's frames whole in the middle one."""
+    silence (silence written before each close), the source's frames whole in the middle one."""
     car, feed = tmp/'feed2.audio', tmp/'feed2.fifo'
     car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
     src, f = tone(2.0, 330), Feeder(feed)

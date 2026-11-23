@@ -163,6 +163,22 @@ static void close_output(int drain) {
     out = NULL;
 }
 
+/* mcl-carrelease taken (docs/player.md#releasing-the-car), c->mu held: the request cleared, and 1 when the car's PCM
+ * is open, which the caller then closes (release_car) */
+static int car_release_taken(struct ctl *c) {
+    int r = c->car_release;
+    c->car_release = 0;
+    return r && out && out_way == 3;
+}
+/* The car's PCM closed at once, unplayed frames dropped, and the car's way left (its file removed, as at the car's
+ * StopUSBDeviceModeAudio): the gadget's unbind waits for the last close of its card while it holds the UDC's lock. */
+static void release_car(void) {
+    output_drop(out);
+    close_output(0);
+    output_car_gone();
+    fprintf(stderr, "q2player: the car's PCM released\n");
+}
+
 /* ---- the Clicker's click with nothing playing (docs/internals.md#key-tone): a song paused keeps its PCM, whose
  * frames not yet heard are taken back (output_hold) and written again at the resume; with none, a PCM is opened for
  * the clicks, CLICK_RATE stereo S16 on the output demo chose, with the type of the last song's device. Either way
@@ -352,9 +368,16 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
     for (;;) {
         pthread_mutex_lock(&c->mu);
         while (c->paused && !(c->play && c->next) && !c->stop && !c->seek && !c->preload && !c->close_preload && !c->click) {
-            if (!pausing) dac_mute(way), output_pause(out, 1), pausing = 1;
+            if (car_release_taken(c)) { /* paused on the car: its PCM closed now, a new one opened at the resume */
+                pthread_mutex_unlock(&c->mu);
+                release_car();
+                pthread_mutex_lock(&c->mu);
+                continue;
+            }
+            if (!pausing && out) dac_mute(way), output_pause(out, 1), pausing = 1;
             pthread_cond_wait(&c->wake, &c->mu);
         }
+        int released = car_release_taken(c); /* while the song plays: off the car's way below, as a car gone */
         /* set-nexturl cuts the song. set-songurl alone does not: stock only notes it and plays it when this song
          * has ended (captured: fixtures/stock-replace.txt). demo sends it only when it believes nothing plays. */
         if (c->play && c->next) { pthread_mutex_unlock(&c->mu); return NEXT; }
@@ -366,6 +389,17 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
         c->seek = c->preload = c->close_preload = c->eq_changed = c->click = 0;
         int paused = c->paused;
         pthread_mutex_unlock(&c->mu);
+        if (released) release_car();
+        if (!out) { /* released while paused: a PCM for the way there is now */
+            way = car_way(c->outputway);
+            if (way == 3) output_car_song(f->rate, 0);
+            if (!(out = output_open(f, way, song->hw))) return FAILED;
+            out_way = way, pausing = 0;
+            volume_at_start(way);
+            if (paused) output_pause(out, 1), pausing = 1;
+            else dac_unmute(way, 1);
+            origin = offset = source_frames(s);
+        }
 
         if (unwant) preload_cancel();
         if (want) preload_start(&ps);
@@ -508,8 +542,14 @@ static void feed_session(void) {
     fprintf(stderr, "q2player: the car plays another source\n");
     for (;;) {
         pthread_mutex_lock(&c->mu);
+        int released = c->car_release;
+        c->car_release = 0;
         int other = c->play || c->click || car_way(c->outputway) != 3;
         pthread_mutex_unlock(&c->mu);
+        if (released) { /* the gadget about to go (docs/player.md#releasing-the-car) */
+            release_car();
+            return;
+        }
         if (other) break;
         if (output_delay(out) > (int64_t)FEED_RATE * FEED_LEAD_MS / 1000) { /* far enough ahead of the car */
             feed_pulling(); /* it is taking the frames: the source is paced, not dropped */
@@ -562,6 +602,12 @@ void *engine_thread(void *unused) {
                     if (out) dac_mute(out_way), output_drop(out); /* a skip's PCM kept for a next song that never came */
                     close_output(0);
                     click_session(way, kind, 0);
+                    pthread_mutex_lock(&c->mu);
+                    continue;
+                }
+                if (car_release_taken(c)) { /* a skip's car PCM kept open: closed now */
+                    pthread_mutex_unlock(&c->mu);
+                    release_car();
                     pthread_mutex_lock(&c->mu);
                     continue;
                 }
