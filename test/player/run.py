@@ -645,7 +645,8 @@ def test_formats_open_as_stock(player, songs, tmp):
 # ---- the DSP (phase 3)
 
 def tool(tmp, name, *defines):
-    """test/player/NAME.c with player/dsp.c and patch/peq.c as the player builds them, for this machine."""
+    """test/player/NAME.c with patch/peq.c (and player/dsp.c for dsp_test) as the player builds them, for this
+    machine."""
     out = tmp/name
     if not out.exists() and name in ('volume_test', 'alsa_test'):  # output.c and the car's trace it counts into, with FFmpeg's headers
         ff = pathlib.Path(subprocess.run([sys.executable, ROOT/'tools/player.py', 'ffmpeg', 'host'], check=True, capture_output=True, text=True).stdout.strip())
@@ -653,7 +654,7 @@ def tool(tmp, name, *defines):
                         ROOT/'player/output.c', ROOT/'player/cartrace.c', '-L', ff/'lib', '-lswresample', '-lavutil', '-lm', '-lpthread', '-o', out], check=True)
     if not out.exists():
         subprocess.run(['cc', '-std=c11', '-D_GNU_SOURCE', '-DPEQ_HOST', *defines, '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
-                        '-I', ROOT/'player', '-I', ROOT/'patch', HERE/f'{name}.c', ROOT/'player/dsp.c', ROOT/'patch/peq.c',
+                        '-I', ROOT/'player', '-I', ROOT/'patch', HERE/f'{name}.c', *([ROOT/'player/dsp.c'] if name == 'dsp_test' else []), ROOT/'patch/peq.c',
                         '-Wl,--wrap=clock_gettime' if name == 'dsp_test' else '-lm', '-lm', '-o', out], check=True)
     return out
 
@@ -791,7 +792,7 @@ def smart_plan(a, b, ca=2, cb=2, ra=44100, rb=44100):
     return overlap, te * wa, skip * wb, rb * fade_ms // 1000
 
 
-def smart_scenario(a, b, gapless_at=12.0, end=50.0, word=SMART, next_text=None):
+def smart_scenario(a, b, gapless_at=12.0, end=60.0, word=SMART, next_text=None):
     boot = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\0}'), (0.1, '{mcl-setvol\\60}')]
     return boot + [(0.2, fakedemo.put('tmp/q2xfade', word.to_bytes(4, 'little'))),
                    (0.2, fakedemo.put('tmp/q2xfade.next', (next_text if next_text is not None else f'{a}\n{b}\n').encode())),
