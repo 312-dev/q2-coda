@@ -1093,6 +1093,34 @@ def test_smoke_tells_cover_flows_art_build_from_its_covers_and_an_albums_tracks(
     assert smoke.coverflow_screen(None) is None
 
 
+def test_smoke_holds_the_boot_cards_ok_until_stocks_boot_key_countdown_ends(monkeypatch):
+    """Stock drops each Centre release while g_ingore_bootkey_flag counts down after Home (about 5 s); the guardian
+    card came up inside it in 4 boots of 108 and its OK was lost. boot_keys reads the countdown from demo's memory and
+    returns once it is 0; it gives up after STEP_S and on memory it cannot read, so the press is still checked."""
+    import io
+    seen = iter([3, 2, 1, 0, 0])
+    reads = []
+
+    class Mem(io.BytesIO):
+        def seek(self, a, *_):
+            reads.append(a)
+
+        def read(self, n=-1):
+            return bytes([next(seen)])
+    monkeypatch.setattr(smoke, 'open', lambda *a, **k: Mem(), raising=False)
+    monkeypatch.setattr(smoke.time, 'sleep', lambda s: None)
+    e = smoke.Emulator.__new__(smoke.Emulator)
+    e.pid = 1
+    monkeypatch.setattr(e, 'alive', lambda: None)
+    e.boot_keys()
+    assert reads == [smoke.BOOTKEY_FLAG] * 4  # 3, 2, 1, then 0: returned
+
+    def gone(*a, **k):
+        raise OSError
+    monkeypatch.setattr(smoke, 'open', gone, raising=False)
+    e.boot_keys()  # unreadable: returns at once
+
+
 def test_smoke_looks_past_the_status_bar_and_a_toast():
     assert smoke.top([('system_bar', 'system_bar'), ('window', 'home_page'), ('dialog', 'msginfo_dialog')]) == 'home_page'
     assert smoke.top([('system_bar', 'system_bar'), ('window', 'home_page'), ('dialog', 'statusbar_dialog')]) == 'statusbar_dialog'
@@ -1127,6 +1155,7 @@ def guard_run(monkeypatch, answers, stacks):
     e.pid, e.log = 1, lambda m: None
     monkeypatch.setattr(e, 'stack', stack)
     monkeypatch.setattr(e, 'settle', lambda box=None: None)
+    monkeypatch.setattr(e, 'boot_keys', lambda: keys.append('boot_keys'))
     monkeypatch.setattr(e, 'q2emu', lambda *a: keys.append(a))
     e.guard()
     return keys
@@ -1139,7 +1168,7 @@ def test_smoke_waits_for_demo_to_name_a_card_it_has_just_shown(monkeypatch):
     03:05, 12:42), which a boot loop with a 20 ms poll hit on 8 boots of 10, and on none of 10 with this wait."""
     keys = guard_run(monkeypatch, [{}, {'card': 'nosensor'}, {'card': '-'}],
                      ['sortselect_dialog', 'sortselect_dialog', None])
-    assert keys == [('key', 'centre')]
+    assert keys == ['boot_keys', ('key', 'centre')]  # its OK after stock's boot-key countdown
     # a card demo never names is still a failure, once demo has had the time to name it
     monkeypatch.setattr(smoke, 'ANSWER_S', .2)
     try:

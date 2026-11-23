@@ -84,6 +84,10 @@ TRANSIENT = ('system_bar', 'msginfo_dialog')
 # name at +4 (widget_set_name 0x66a7cc, widget_is_normal_window 0x670eec). qemu-user maps the guest at its
 # own addresses, so /proc/PID/mem reads them as they are (the viewer reads g_backlight_status the same way).
 WM_GOT, WM_OFF, WM_CHILDREN, W_NAME, W_VT, VT_TYPE = 0xa3aae0 - 0x7f44, 0x1420, 0x5c, 0x10, 0x74, 0x4
+# Stock's g_ingore_bootkey_flag (V1.36's symbol table): a countdown stock starts at Home, about 5 to 0 a second apart,
+# while which a Centre release is taken for the power key's and dropped (patch/nav/input.c drops it too). The boot's
+# guardian card came up inside it in 4 boots of 108 (2026-11-23): its OK was dropped and the boot failed.
+BOOTKEY_FLAG = 0xa4ca59
 # A widget's flags word and its visible bit (widget_get_visible 0x67795c: lw 0x24($a0); ext 2, 1).
 W_FLAGS, W_VISIBLE = 0x24, 2
 # s for Cover Flow's first open to build its art ("Preparing artwork n/N"): every lease starts with no art
@@ -316,6 +320,7 @@ class Emulator:
             if rule == 'confirm':
                 self.log(f'boot: confirmed {GUARD_CARDS.get(card or "", "")}')
                 confirmed.add(state.get('seq'))
+                self.boot_keys()
                 self.q2emu('key', 'centre')
                 gone = time.monotonic() + STEP_S  # one press: wait for demo to say the card has closed
                 while self.guard_card() == card:
@@ -343,6 +348,20 @@ class Emulator:
             if time.monotonic() > end:
                 raise Failed(f'{why}: expected {name} on top, windows are {[n for _, n in s]}')
             time.sleep(.2)
+
+    def boot_keys(self):
+        """Wait, up to STEP_S, for stock's boot-key countdown (BOOTKEY_FLAG) to end, so a Centre reaches the UI."""
+        end = time.monotonic() + STEP_S
+        while time.monotonic() < end:
+            self.alive()
+            try:
+                with open(f'/proc/{self.pid}/mem', 'rb') as m:
+                    m.seek(BOOTKEY_FLAG)
+                    if not m.read(1)[0]:
+                        return
+            except (OSError, IndexError):
+                return  # unreadable: the press goes as before, and its effect is checked
+            time.sleep(.1)
 
     def coverflow_shows(self, screen, why, wait):
         """Wait up to wait s for Cover Flow on top to show screen (coverflow_screen), then for it to finish
