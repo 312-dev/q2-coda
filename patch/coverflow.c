@@ -353,10 +353,53 @@ static int marked_empty(const char *track) {
     return !file_size(art_path(art, tags_key(id3 + ID3_ARTIST, id3 + ID3_ALBUM), ""));
 }
 
+/* Now Playing's art for a server song is its app's cover of the album through ffmpeg, a fork of
+ * demo, under g_playcover_mutex, where stock's in-process thumbnailer cannot go: it takes
+ * parse_cover_mutex, which Coverflow holds before g_playcover_mutex. So the fit is kept: the last
+ * cover fitted, its size and the JPEG ffmpeg made of it in NP_COVER_FILE, copied to the next
+ * track's dst of the same album and size without a process. One album, so the album played
+ * through costs one ffmpeg run, not one a track. ponytail: one album kept, and a cover the app
+ * writes again under the same path shows its old fit until another album plays or a reboot; key
+ * on the cover's size and time too if an app replaces covers. */
+#define NP_COVER_FILE "/tmp/q2-npcover.jpg"
+static struct {
+    unsigned key[2]; /* the cover's path, hashed from two seeds; 0 none kept */
+    int w, h;
+} np_fit __attribute__((section(".scratch")));
+/* src's bytes into dst, through dst.np renamed over it; 1 when whole. */
+static int file_copy(const char *src, const char *dst) {
+    char tmp[1040], buf[4096];
+    tk_snprintf(tmp, sizeof tmp, "%s.np", dst);
+    void *in = fopen(src, "rb"), *out = in ? fopen(tmp, "wb") : 0;
+    unsigned long n, total = 0;
+    int ok = in && out;
+    while (ok && (n = fread(buf, 1, sizeof buf, in)) > 0)
+        ok = fwrite(buf, 1, n, out) == n, total += n;
+    if (in) fclose(in);
+    if (out) ok = !fclose(out) && ok && total;
+    if (ok && !rename(tmp, dst)) return 1;
+    unlink(tmp);
+    return 0;
+}
+static int np_cover(const char *cover, const char *dst, int w, int h) {
+    unsigned n = (unsigned)strlen(cover),
+             key[2] = { hash_bytes(FNV_SEED, (const unsigned char *)cover, n) | 1,
+                        hash_bytes(0x9e3779b9u, (const unsigned char *)cover, n) };
+    if (np_fit.key[0] == key[0] && np_fit.key[1] == key[1] && np_fit.w == w && np_fit.h == h &&
+        file_copy(NP_COVER_FILE, dst))
+        return 1;
+    np_fit.key[0] = 0;
+    if (!ff_thumb(cover, dst, w, h)) return 0;
+    if (file_copy(dst, NP_COVER_FILE))
+        np_fit.key[0] = key[0], np_fit.key[1] = key[1], np_fit.w = w, np_fit.h = h;
+    return 1;
+}
+
 /* player_parsecover_thd's folder-image call, after its embedded art failed, under
  * g_playcover_mutex: what stock refuses (a PNG over 1 MB or palette/greyscale, WebP) goes to
  * ffmpeg, so Now Playing gets the art Coverflow shows. ff_thumb takes no lock, so Coverflow's
- * parse-then-play order cannot deadlock with it. The folder images cost a process only when one
+ * parse-then-play order cannot deadlock with it; a server song's app cover goes through np_cover,
+ * one ffmpeg run an album. The folder images cost a process only when one
  * exists; the embedded probe, a process for every track without art, is skipped for an album
  * Coverflow marked empty. ponytail: the marker is one track's verdict, so another disc's or a
  * same-named album's embedded-only WebP or large PNG shows no art here; a per-track probe cache
@@ -365,7 +408,7 @@ int coverflow_player_cover(const char *track, const char *dst, int w, int h) {
     char cover[512]; /* a server song's offline copy (catalogue.c): its app's cover of the album */
     return toolsGetExternCover(track, dst, w, h) == 1 ||
            beside_art(track, dst, w, h, 0, ff_thumb) ||
-           (catalogue_cover(track, cover, sizeof cover) && ff_thumb(cover, dst, w, h)) ||
+           (catalogue_cover(track, cover, sizeof cover) && np_cover(cover, dst, w, h)) ||
            (!marked_empty(track) && ff_thumb(track, dst, w, h));
 }
 

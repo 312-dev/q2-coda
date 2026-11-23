@@ -1871,3 +1871,30 @@ def test_bluetooth_names_a_server_songs_cover_as_its_app_keeps_it(rig, fw):
         h = ((h ^ b) * 16777619) & 0xffffffff
     h = (h * 16777619) & 0xffffffff
     assert rig.files.files.get('/tmp/q2-bip.now') == b'%07d\n%s\napp\n%s\n' % (h % 10**7, cover.encode(), stream)
+
+
+def test_now_playing_fits_a_server_albums_cover_once_for_all_its_tracks(rig, fw):
+    """A server song's Now Playing art is its app's cover of the album through ffmpeg (coverflow_player_cover, under
+    g_playcover_mutex, where stock's thumbnailer and its parse_cover_mutex cannot go): the fit is kept, so the
+    album's next tracks at that size copy it, no fork; another album, or another size, runs ffmpeg again."""
+    copies = [f'/mnt/mmc/.subsonic/stream/x/s{i}.flac' for i in range(1, 5)]
+    rig.write(1, [song_row(f's{i}', f'T{i}', 'B', 'A', i, 100, i, local=copies[i - 1]) for i in (1, 2, 3)] +
+              [song_row('s4', 'T4', 'B', 'Other', 1, 100, 4, album_id='al2', local=copies[3])])
+    rig.poll()
+    rig.files.files['/mnt/mmc/.subsonic/covers/al1.jpg'] = b'\xff\xd8one'
+    rig.files.files['/mnt/mmc/.subsonic/covers/al2.jpg'] = b'\xff\xd8two'
+    fw.mock('toolsGetExternCover', lambda *_: 0)
+    forks, dst = [], '/tmp/externpic.jpg'
+    fw.mock('fw_fork', lambda *_: forks.append(1) or 4242)
+    def waitpid(pid, status, *_):  # ffmpeg's run: its picture at dst.ff, the cover it was asked for
+        C.c_int.from_address(status).value = 0
+        rig.files.files[dst + '.ff'] = b'fit %d' % len(forks)
+        return pid
+    fw.mock('fw_waitpid', waitpid)
+    player = fw.fn('coverflow_player_cover', C.c_int, C.c_char_p, C.c_char_p, C.c_int, C.c_int)
+    for c in copies[:3]:
+        assert player(c.encode(), dst.encode(), 300, 300) == 1 and rig.files.files[dst] == b'fit 1'
+    assert len(forks) == 1  # three tracks of al1: one ffmpeg run
+    assert player(copies[3].encode(), dst.encode(), 300, 300) == 1 and len(forks) == 2  # al2's own
+    assert player(copies[0].encode(), dst.encode(), 300, 300) == 1 and len(forks) == 3  # one album kept
+    assert player(copies[1].encode(), dst.encode(), 166, 166) == 1 and len(forks) == 4  # another size
