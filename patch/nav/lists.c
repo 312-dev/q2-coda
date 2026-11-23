@@ -552,9 +552,15 @@ static int reconcile(menu_t *m, int settle) {
     int id = m->kind == 3 ? slide_index(m->w) : widget_get_prop_int(m->w, SEL, -1);
     int cur = index_of(m, id);
     if (m->kind == 3) return cur;
+    /* Home shows its bar under touch, so once a drag settles its selected row stands whole where
+     * the wheel would leave it (sel_height: Home's main list's rest), never under the status row
+     * or in the fade past the rest (docs/oled-design.md#list-edges); elsewhere the bar is hidden
+     * until the wheel, which reveals the row, so a row partly in sight keeps it. */
+    int home = settle && home_menu(window_manager_get_top_window(window_manager())),
+        shown = home ? sel_height(m) : m->height;
     if (cur >= 0) {
         rect_t r = bounds(m, cur);
-        if (r.y < m->height && r.y + r.h > 0) {
+        if (home ? r.y >= 0 && r.y + r.h <= shown : r.y < m->height && r.y + r.h > 0) {
             st.reveal_surface = (void *)0; /* the glide arrived, or the user brought it back */
             return cur;
         }
