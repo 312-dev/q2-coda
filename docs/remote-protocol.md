@@ -230,7 +230,7 @@ Settings > Car Remote: the first row is the switch (Off by default), its caption
 
 ## Testing on a Q2
 
-The emulator proves the protocol, the daemon, the data and the TCP transport end to end (`test/coda_rc_e2e.py`). It has no Bluetooth, so the following can only be proven on a real Q2, with a `--dev` build and `tools/q2remote.py` for a shell and logs:
+The emulator proves the protocol, the daemon, the data and the TCP transport end to end (`test/coda_rc_e2e.py`); `test/coda_rc_iroh_e2e.py` proves the allow-list across networks on this machine, through n0's relay ([Across networks: only paired phones](#across-networks-only-paired-phones)). It has no Bluetooth, so the following can only be proven on a real Q2, with a `--dev` build and `tools/q2remote.py` for a shell and logs:
 
 1. **Daemon and adapter.** Turn Car Remote on. `q2remote.py sh 'ps; cat /tmp/coda-rc.log'`: coda-rc runs at nice 19, and its log shows `ble: advertising` (`/tmp/coda-rc.ble` exists), or once the reason it is not: `ble: Bluetooth is off; waiting for it`, `ble: off while SyncLink is on`, `ble: no LE ATT channel (N)` (errno N: something else listens on CID 4), `ble: advertising refused: status 0xNN` (a management status: `0x0c` not supported or `0x0b` rejected would mean LE is off on the adapter). `btmgmt info` (if present) or `hciconfig hci0` shows LE among the settings.
 2. **Advertising.** On the phone, nRF Connect: scan, see the Q2's Bluetooth name with service `b67cefa7-...`, connectable. Turn Car Remote off: the advertisement goes within a second.

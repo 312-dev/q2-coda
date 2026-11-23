@@ -124,6 +124,7 @@ python3 test/q2_guest.py                   # Guest Play's q2-hotspot under sh, t
 python3 test/q2bip.py                      # q2-bip (internals.md#bluetooth-cover-art) built for this machine: a controller over a UNIX packet socket, a stand-in and a real ffmpeg (200 x 200, 4:2:2), the L2CAP socket where the kernel has Bluetooth
 python3 test/adb.py [BUILD]                # adbd under qemu-mipsel in bwrap (descriptors, authorization and the prompt's socket, shell, exec, push, pull) and q2adb-gadget on a stand-in configfs (adb.md)
 python3 test/coda_rc_e2e.py --emu DIR [--build BUILD] [--shots DIR]  # coda-rc end to end over TCP against a q2-emu copy with CARREMOTE=1: pair, browse (album numbers, NOT_FOUND), play an album, State pushes, Pause and Play acked once played, Next, Previous, a cover (docs/remote-protocol.md)
+python3 test/coda_rc_iroh_e2e.py [--iroh BIN]  # q2-iroh's allow-list end to end over n0's relay: a host coda-rc and q2-iroh serve, q2-iroh dial as the phone; skipped with no host q2-iroh or no relay
 python3 test/rotator.py STOCK_MODULE        # actual MIPS rotator clock ownership and failure paths
 python3 test/rotator_build.py [BUILD...]    # dev-only guard (no build needed); given builds, packed/default module isolation
 python3 test/playback.py /tmp/q2-build     # grouped traversal, snapshots and the wheel's ticks (cc)
