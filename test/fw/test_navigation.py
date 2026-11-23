@@ -2178,6 +2178,27 @@ def test_most_played_keeps_the_top_100(fw, st, scratch):
     assert top == 100 and list(idx) == list(range(149, 49, -1))
 
 
+def test_most_played_over_a_9199_song_library_with_a_full_table_ranks_as_the_table_says(fw, st, scratch):
+    """Every one of PLAYS_SLOTS counts held and 9,199 songs, most unplayed: the ranking is the count, then the slot
+    (most recent first), each song found by its key's hash (library_lists.c plays_index), the first slot of a key
+    that two hold."""
+    keep, deques = [], Deques(fw)
+    songs = [record(keep, b'/m/%d' % i) for i in range(9199)]
+    plays = (C.c_uint * 1024).from_address(C.addressof(fw.var('st', C.c_char)) + scratch['plays'])
+    st('plays_read', C.c_uint).value = 1
+    slots = O['PLAYS_SLOTS']
+    for j in range(slots):
+        plays[2 * j], plays[2 * j + 1] = listen_key(b'/m/%d' % (j * 17)), 1 + j % 7
+    plays[2 * (slots - 1)], plays[2 * (slots - 1) + 1] = listen_key(b'/m/0'), 50  # /m/0's second slot: not its first
+    idx, score = (C.c_int * 100)(), (C.c_uint * 100)()
+    rank = fw.fn('library_lists__mp_rank', C.c_int, C.c_void_p, C.c_void_p, C.c_void_p)
+    q = deques.new(songs)
+    top = rank(q, idx, score)
+    want = sorted(((1 + j % 7) * slots + slots - j, j * 17) for j in range(slots - 1))
+    want = [i for _, i in sorted(want, key=lambda x: -x[0])][:100]
+    assert top == 100 and list(idx) == want
+
+
 # Ratings.
 @pytest.fixture
 def ratings(fw):
