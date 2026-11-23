@@ -712,8 +712,33 @@ def test_resume_and_pause_say_what_the_player_was_and_press_only_to_change_it(fw
     q2.files[CMD] = b'32 resume\n'
     q2.tick()
     assert len(fw.calls('player_play_pause')) == 1
-    assert said[-2:] == ['resume from the car or phone: the player 2, nothing pressed',
-                         'resume from the car or phone: the player 3, Play/Pause pressed'], said
+    assert said[-2:] == ['resume from the phone: the player 2, nothing pressed',
+                         'resume from the phone: the player 3, Play/Pause pressed'], said
+
+
+def test_each_command_is_logged_with_its_sender_and_the_player_before_it(fw, ui, mcl, recs):
+    """The drive of 2026-11-23: two songs cut by set-nexturl with no button of the car's, and the log could not say
+    whether the phone had picked them. Each command the shim takes is one line: its words, the phone (coda-rc's
+    numbers) or the car (q2-iap's, from 0x51000000), the player's status before it, and what came of it."""
+    from test_headset import said_on_stderr
+    q2 = Q2(fw, ui, recs)
+    said = said_on_stderr(fw, 'remote')
+    q2.queue()
+    q2.tick()
+    car = 0x51000001
+    for line in (b'40 next\n', f'{car} previous\n'.encode(), b'41 seek 75\n', f'{car + 1} scan 1\n'.encode(),
+                 b'42 jump 2 12\n', b'43 jump 2 99\n', b'44 volume 30\n', b'45 bogus\n'):
+        q2.files[CMD] = line
+        q2.tick()
+    q2.files[LIST] = b'13\n11\n'
+    q2.files[CMD] = b'46 play 1 0 2\n'
+    q2.tick()
+    ui.fire('cr_play')
+    assert said[-9:] == ['next from the phone: the player 2', 'previous from the car: the player 2',
+                         'seek 75 from the phone: the player 2', 'scan 1 from the car: the player 2',
+                         'jump 2 12 from the phone: the player 2', 'jump 2 99 from the phone: the player 2, not that song now',
+                         'volume 30 from the phone: the player 2', 'bogus from the phone: the player 2, not known',
+                         'play 1 0 2 from the phone: the player 2, 2 songs from 1'], said
 
 
 CMDQ = '/tmp/coda-rc.cmdq'

@@ -75,6 +75,11 @@ struct output {
     FILE *file;
     int paused;
     int dry_ok; /* way 3: a dry PCM at the next write is a pause's, a seek's or the open's, not an underrun */
+    /* way 3, for a slow write's line (sink): this write's last snd_pcm_wait and snd_pcm_writei answers, errno after
+     * the writei, and the microseconds spent in writei */
+    int car_wait_r, car_errno;
+    long car_write_r;
+    int64_t car_write_us;
     double speed;         /* file sink: how many seconds of sound pass in one */
     int64_t written;      /* frames, file sink */
     struct timespec t0;   /* when the file sink's clock started, moved on by each pause */
@@ -212,13 +217,33 @@ static void say_device(const char *name, const struct caps *c, const struct pcm_
                 dev->channels);
 }
 
-/* A USB DAC not there to open, or gone under a write: said once until it is opened again. */
+/* The sound cards there, from /proc/asound/cards (Q2PLAYER_CARDS in a host test), as `0 audiocodec, 2 AB13X`: a USB
+ * DAC that came back as another card than 1 is not hw:1,0. */
+static void cards_text(char *out, size_t size) {
+    const char *path = getenv("Q2PLAYER_CARDS") ? getenv("Q2PLAYER_CARDS") : "/proc/asound/cards";
+    FILE *f = fopen(path, "r");
+    char line[160], id[40];
+    size_t n = 0;
+    int card;
+    out[0] = 0;
+    if (!f) { snprintf(out, size, "none (%s)", strerror(errno)); return; }
+    while (fgets(line, sizeof line, f) && n < size)
+        if (sscanf(line, " %d [%39[^] ]", &card, id) == 2) n += (size_t)snprintf(out + n, size - n, "%s%d %s", n ? ", " : "", card, id);
+    fclose(f);
+    if (!out[0]) snprintf(out, size, "none");
+}
+
+/* A USB DAC not there to open, or gone under a write: said once until it is opened again, with the call that found it
+ * so and its answer, and the sound cards there then. The drive of 2026-11-23 had `hw:1,0 is gone` about 5 s before
+ * the earbuds left the bus, and the line could not say which call, which error, or where the card was. */
 static int open_gone;
-static void say_gone(const char *name) {
+static void say_gone(const char *name, const char *call, int err) {
+    char cards[120];
     open_gone = 1;
     if (said.gone) return;
     said.gone = 1, said.offer[0] = 0, said.n = 0;
-    fprintf(stderr, "q2player: %s is gone\n", name);
+    cards_text(cards, sizeof cards);
+    fprintf(stderr, "q2player: %s is gone: %s %d (%s); sound cards: %s\n", name, call, err, strerror(-err), cards);
 }
 
 int output_gone(void) { return open_gone; }
@@ -444,7 +469,7 @@ static int alsa_open(struct output *o, int outputway, int hw) {
     if (outputway == 1) snd_config_update_free_global();
     int r = snd_pcm_open(&o->pcm, name, SND_PCM_STREAM_PLAYBACK, 0), c[4][2], n = candidates(&o->f, c), i = 0;
     if (r < 0) {
-        if (outputway == 2 && (r == -ENOENT || r == -ENODEV)) say_gone(name); /* unplugged */
+        if (outputway == 2 && (r == -ENOENT || r == -ENODEV)) say_gone(name, "snd_pcm_open", r); /* unplugged */
         else fprintf(stderr, "q2player: %s: %s\n", name, snd_strerror(r));
         return -1;
     }
@@ -596,7 +621,7 @@ static void sink_caps(struct caps *c) {
 static int sink_open(struct output *o, const char *dir, int outputway) {
     static int opens;
     const char *only = getenv("Q2PLAYER_FORMATS"), *bt = getenv("Q2PLAYER_BT_RATE"), *name = device(outputway, 0);
-    if (!output_present(outputway)) { say_gone(name); return -1; }
+    if (!output_present(outputway)) { say_gone(name, "the card's node", -ENOENT); return -1; }
     if (outputway == 2) said.gone = 0;
     if ((outputway == 0 || outputway == 2) && !o->f.dsd) {
         sink_caps(&o->caps);
@@ -950,13 +975,24 @@ static int sink_to(struct output *o, const uint8_t *data, int frames) {
              * source) and q2car.sh when the cable comes out, and that ends the car's way. A stop or a skip (the
              * engine's cut, output_car_watch) ends the wait, the frames dropped, as the stop drops them. ponytail:
              * a pause or a seek waits until the car reads; the BMW reads from about 2 s after it asks. */
+            snd_pcm_uframes_t ask = (snd_pcm_uframes_t)frames;
             if (o->way == 3) {
-                while (snd_pcm_wait(o->pcm, CAR_LOOK_MS) == 0) {
+                while ((o->car_wait_r = snd_pcm_wait(o->pcm, CAR_LOOK_MS)) == 0) {
                     if (!output_car(NULL, 0, NULL)) return OUTPUT_CAR_GONE;
                     if (car_cut && *car_cut) return 0;
                 }
+                /* No more than the ring has room for: a blocking write of more writes the room and then waits in the
+                 * kernel for the rest, which a car that stopped reading never makes, until 5.10's timeout (pcm_lib.c
+                 * wait_for_avail, 10 s), deaf to a stop or a skip (run.py test_car_write_slow). The rest goes after
+                 * the next wait, which looks at the car file and the cut. Room of 0 or an error: the write as
+                 * asked, which answers the error. */
+                snd_pcm_sframes_t room = snd_pcm_avail(o->pcm);
+                if (room > 0 && room < frames) ask = (snd_pcm_uframes_t)room;
             }
-            snd_pcm_sframes_t n = snd_pcm_writei(o->pcm, data, frames);
+            int64_t wt = o->way == 3 ? car_trace_now() : 0;
+            errno = 0; /* a slow write's line says the writei's own */
+            snd_pcm_sframes_t n = snd_pcm_writei(o->pcm, data, ask);
+            if (o->way == 3) o->car_write_r = n, o->car_errno = errno, o->car_write_us += car_trace_now() - wt;
             if (n == -EINTR || n == -EAGAIN) continue;
             if (n == -EPIPE || n == -ESTRPIPE) { /* the buffer ran dry: start again here */
                 if (o->way == 3) car_trace_dry(0);
@@ -968,8 +1004,11 @@ static int sink_to(struct output *o, const uint8_t *data, int frames) {
                 continue;
             }
             if (n == -ENODEV && o->way == 3) return OUTPUT_CAR_GONE; /* the gadget, and its card, went */
-            if (n == -ENODEV && o->way == 2) { say_gone(device(2, 0)); return OUTPUT_GONE; } /* unplugged */
-            if (n < 0) return -1;
+            if (n == -ENODEV && o->way == 2) { say_gone(device(2, 0), "snd_pcm_writei", (int)n); return OUTPUT_GONE; } /* unplugged */
+            if (n < 0) { /* the song's failure (engine.c FAILED); on a USB DAC with the call and its answer */
+                if (o->way == 2) fprintf(stderr, "q2player: %s: snd_pcm_writei %ld (%s)\n", device(2, 0), (long)n, strerror((int)-n));
+                return -1;
+            }
             if (n == 0) continue;
             data += n * o->f.channels * o->f.bytes, frames -= n;
         }
@@ -977,7 +1016,7 @@ static int sink_to(struct output *o, const uint8_t *data, int frames) {
     }
 #endif
     if (!o->file) return -1; /* a Bluetooth PCM that did not come back (bt_reopen) */
-    if (!output_present(o->way)) { say_gone(device(o->way, 0)); return OUTPUT_GONE; } /* a USB DAC unplugged */
+    if (!output_present(o->way)) { say_gone(device(o->way, 0), "the card's node", -ENOENT); return OUTPUT_GONE; } /* a USB DAC unplugged */
     if (fwrite(data, (size_t)o->f.channels * o->f.bytes, frames, o->file) != (size_t)frames) return -1;
     int64_t due = (int64_t)(since(&o->t0) * o->speed * o->f.rate);
     if (due > o->written) { /* it ran dry: the clock starts again here */
@@ -995,13 +1034,38 @@ static int sink_to(struct output *o, const uint8_t *data, int frames) {
     return 0;
 }
 
+/* A write to the car's PCM that took CAR_SLOW_US or more, one line for it: where the time went, in snd_pcm_wait (the
+ * car not reading, CAR_LOOK_MS at a time) or in snd_pcm_writei (the kernel's own wait), their last answers, errno
+ * after the writei, and the PCM's state and room after it. The drive of 2026-11-23 had one write of 10.8 s across a
+ * pause, a stop and a restart, and its trace line could not say which. */
+enum { CAR_SLOW_US = 1000000 };
+static const char *const PCM_STATES[] = {"OPEN", "SETUP", "PREPARED", "RUNNING", "XRUN", "DRAINING", "PAUSED", "SUSPENDED", "DISCONNECTED"};
+static void car_slow(struct output *o, int frames, int64_t us) {
+    char line[200];
+    int st = -1;
+    long avail = 0;
+#ifdef HAVE_ALSA
+    if (o->pcm) st = snd_pcm_state(o->pcm), avail = (long)snd_pcm_avail(o->pcm);
+#endif
+    int n = snprintf(line, sizeof line,
+                     "q2player: a car write took %lld ms: %d frames, %lld ms waiting (snd_pcm_wait %d), %lld ms writing "
+                     "(snd_pcm_writei %ld, errno %d), %s, avail %ld",
+                     (long long)(us / 1000), frames, (long long)((us - o->car_write_us) / 1000), o->car_wait_r,
+                     (long long)(o->car_write_us / 1000), o->car_write_r, o->car_errno,
+                     st >= 0 && st < 9 ? PCM_STATES[st] : "no PCM", avail);
+    plog('W', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
+}
+
 /* Every write to the device. On way 3 it is timed and tapped for the car's trace (docs/iphone-mode.md#car-trace). */
 static int sink(struct output *o, const uint8_t *data, int frames) {
     if (o->way != 3) return sink_to(o, data, frames);
     car_tap(data, (int64_t)frames * frame_bytes(o));
     int64_t t = car_trace_now();
+    o->car_wait_r = o->car_errno = 0, o->car_write_r = 0, o->car_write_us = 0;
     int r = sink_to(o, data, frames);
-    car_trace_write(frames, car_trace_now() - t);
+    int64_t us = car_trace_now() - t;
+    car_trace_write(frames, us);
+    if (us >= CAR_SLOW_US) car_slow(o, frames, us);
     return r;
 }
 

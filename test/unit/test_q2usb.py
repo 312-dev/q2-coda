@@ -47,6 +47,21 @@ def test_a_dac_on_an_otg_adapter_is_not_flagged():
     assert kinds(log) == []
 
 
+def pins(ms, hostdev, wall=1763400000):
+    # usb_record_pins's line, usb_otg.c's trace
+    return f'{wall} {ms} pins PD18=0 PD17=0 PC20=1 PE22=1 otg=1 hostdev={hostdev} otgst=2\n'
+
+
+def test_bus_power_whose_device_the_trace_saw_is_not_empty():
+    """2026-11-23 V1SSi: the earbuds enumerated after otg-on and had left by otg-off, so both lines read hostdev=?;
+    the trace's pins lines between them saw 1-1."""
+    log = [line(1000, 'otg-on', pc20=1, pd18=0), pins(1250, 0), pins(3000, 1), pins(8000, 0),
+           line(9500, 'otg-off why=gone')]
+    rows = q2usb.parse(log)
+    assert kinds(log) == [] and rows[-1].event == 'otg-off' and rows[-1].f['why'] == 'gone'
+    assert kinds([line(1000, 'otg-on', pc20=1, pd18=0), pins(1250, 0), line(9500, 'otg-trial-off')]) == ['EMPTY']
+
+
 def test_main_exits_1_when_anything_is_flagged(tmp_path, capsys):
     f = tmp_path / 'q2-usb.log'
     f.write_text(line(1000, 'otg-on', pc20=1, pd18=0, vbus=1))
@@ -72,3 +87,8 @@ def test_the_pull_up_found_off_at_boot_or_a_wake_is_flagged():
 def test_a_trial_that_ends_with_nothing_enumerated_is_an_empty_port():
     log = [line(1000, 'otg-on', pc20=1, pd18=0), line(9000, 'otg-trial-off', pd18=0)]
     assert kinds(log) == ['EMPTY']
+
+
+def test_a_row_s_time_is_utc_or_since_start_when_the_clock_was_never_set():
+    assert q2usb.parse([line(1500, 'in', wall=1763400000)])[0].when() == '2025-11-17 17:20:00Z'
+    assert q2usb.parse([line(1500, 'in', wall=100)])[0].when() == '+1.5s'

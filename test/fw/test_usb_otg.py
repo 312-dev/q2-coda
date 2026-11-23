@@ -112,6 +112,7 @@ class Port:
 
 
 ms = lambda a, b: int(round((b - a) * 1000))
+GONE = 'otg-off why=gone'  # the record's word for the bus power's end once the host port's device has gone
 
 
 def unplug(p, then_ms=1000):
@@ -389,7 +390,7 @@ def test_an_id_high_while_its_device_enumerates_keeps_the_bus_power(fw):
     assert p.now - on > TRIAL, 'past the trial with its device: kept'
     p.hostdev = False  # unplugged: the port's disconnect with the ID high
     p.run(PASS_MS)
-    assert p.pins == {'PC20': 0, 'PE22': 0} and p.otgid.value == 0 and p.records() == ['otg-on', 'otg-off']
+    assert p.pins == {'PC20': 0, 'PE22': 0} and p.otgid.value == 0 and p.records() == ['otg-on', GONE]
 
 
 def test_an_id_high_with_no_device_ends_the_host_role_after_2_s(fw):
@@ -402,7 +403,7 @@ def test_an_id_high_with_no_device_ends_the_host_role_after_2_s(fw):
     p.run(PASS_MS)
     assert p.pins['PC20'] == 1
     p.run(PASS_MS)  # 2 s of ID high, nothing on the host port
-    assert p.pins['PC20'] == 0 and p.otgid.value == 0 and p.records() == ['otg-on', 'otg-off']
+    assert p.pins['PC20'] == 0 and p.otgid.value == 0 and p.records() == ['otg-on', 'otg-off why=id-high']
     assert p.commands[-1] == HOLD
 
 
@@ -535,7 +536,7 @@ def test_the_record_has_each_change_of_bus_power(fw):
     p.id = 1  # the adapter out: its device gone from the host port with it
     p.hostdev = False
     p.run(2000)
-    assert p.records() == ['otg-on', 'otg-off']
+    assert p.records() == ['otg-on', GONE]
 
 
 # The pull-up's lows with nothing attached (q2-pull-state.log, 21:0x), each after VBUS left: when it began, and how
@@ -866,3 +867,116 @@ def test_otherwise_the_gate_is_stock_s(fw, case):
         assert pl.calls == []
     else:
         assert pl.calls == [('stock gate', 0)] and pl.toasts == []
+
+
+# ---- 2026-11-23 V1SSi, demo ms (q2-usb.log; dmesg uptime is demo + 4.052 s): the AB13X earbuds after the laptop ----
+# The laptop's cable out at 989.412. Each seat of the earbuds came up one of two ways: PD18 high with PD17 low and
+# usb/online 0 (no source: one replug toast 2 s on), or PD18 low with PD17 high (the Q2 the source: the settle, then
+# the bus power). Lines with a time not in the record (the trace was off with the ID high) are placed between the toast
+# before and the seat after. 1-1 enumerated (dmesg) and left the host port with the bus power on: grant 1 at 1144.976
+# (PD18 1 and hostdev 0 in one trace line, PC20 1), grant 2 at dmesg 1193.270 (demo 1189.218), the otg-off after it.
+CAR1129 = [
+    (1107.55, 'seat', 'none'), (1113.0, 'out', None), (1115.6, 'seat', 'none'), (1125.0, 'out', None),
+    (1131.622, 'seat', 'host'), (1138.41, 'dev', True), (1144.976, 'out', None),
+    (1151.214, 'seat', 'none'), (1157.212, 'out', None), (1163.471, 'seat', 'none'), (1167.72, 'out', None),
+    (1173.968, 'seat', 'host'), (1181.35, 'dev', True), (1189.218, 'out', None), (1200.0, 'end', None)]
+CAR1129_ON = (1137.646, 1180.619)  # the record's otg-on lines
+
+
+def replay_car1129(p):
+    """The car1129 sequence over a Source port, from 985 s with the laptop's cable in; the bus power at each pass."""
+    p.now, p.cable = 985000, True
+    p.run(4000)
+    p.cable = False
+    t, power = 989.412, []
+    for at, what, how in CAR1129:
+        while p.now + PASS_MS <= int(at * 1000):
+            p.run(PASS_MS)
+            power.append((p.now, p.pins['PC20'], p.hostdev))
+        if what == 'seat':
+            p.id, p.fake_pd17 = (1, True) if how == 'none' else (0, False)
+        elif what == 'dev':
+            p.hostdev = True
+        elif what == 'out':
+            p.id, p.fake_pd17, p.hostdev = 1, False, False
+    return power
+
+
+def test_the_car1129_earbuds_keep_bus_power_while_on_the_host_port_and_lose_it_once_gone(fw):
+    """What ended each grant: the device gone from the host port with the ID high (S2), in the pass after; never the
+    trial (it had a device), the no-source rule (not read in host role) or an ID high alone. Four toasts, one a seat
+    that came up with no source, as on the Q2."""
+    p = toasts(fw, Source(fw))
+    power = replay_car1129(p)
+    assert p.records() == ['no-source', 'no-source', 'otg-on', GONE, 'no-source', 'no-source', 'otg-on', GONE]
+    assert p.toasts == [REPLUG] * 4
+    ons = [now for (now, on, _), (_, was, _) in zip(power[1:], power) if on and not was]
+    assert [abs(a - int(b * 1000)) <= PASS_MS for a, b in zip(ons, CAR1129_ON)] == [True, True], ons
+    assert all(on for _, on, dev in power if dev), 'a device on the host port without bus power'
+    for gone in (1144.976, 1189.218):
+        after = [on for now, on, _ in power if now > gone * 1000]
+        assert after[0] == 0, 'off in the first pass after its device left'
+
+
+def test_a_device_on_the_host_port_keeps_the_bus_power_whatever_the_id_pin_reads(fw):
+    """Grant 1's sequence with the earbuds left in: the ID high at 7.3 s with 1-1 still there, for a minute."""
+    p = Port(fw)
+    p.id = 0
+    p.run(SETTLE + PASS_MS)
+    on = p.now
+    p.run(PASS_MS)
+    p.hostdev = True
+    p.run(6000)
+    p.id = 1
+    p.run(60000)
+    assert p.pins == {'PC20': 1, 'PE22': 1} and p.records() == ['otg-on'] and p.now - on > TRIAL
+    p.id = 0
+    p.run(20000)
+    assert p.pins['PC20'] == 1 and p.records() == ['otg-on']
+
+
+def test_a_device_gone_with_the_id_still_low_past_the_trial_says_gone(fw):
+    """A DAC out of an adapter left in: the power goes as an empty trial's would, and the record says why."""
+    p = Port(fw)
+    p.id = 0
+    p.hostdev = True
+    p.run(SETTLE + TRIAL + 2 * PASS_MS)
+    p.hostdev = False
+    p.run(PASS_MS)
+    assert p.pins['PC20'] == 0 and p.records() == ['otg-on', GONE]
+
+
+def test_a_kept_grant_traces_each_change_of_the_id_and_the_device_and_nothing_else(fw):
+    """Grant 2 went silent at its trial's end (1188.243), and the ID's high and the device's leaving that followed
+    were in no line. Past the trial a line comes at the beat after each change, and none while nothing changes."""
+    p = Port(fw)
+    p.id = 0
+    p.hostdev = True
+    traced(p, SETTLE + TRIAL + 3000)
+    assert p.seen == ['otg-on']
+    base = len(pin_lines(p))
+    traced(p, 30000)
+    assert len(pin_lines(p)) == base, 'kept and steady: silent'
+    traced(p, 100)  # 100 ms past a status pass
+    p.id = 1  # the ID high, the device still there: before the status pass reads it
+    traced(p, 300)
+    assert len(pin_lines(p)) == base + 1, 'the ID\'s high at the next beat'
+    traced(p, 1000)
+    p.hostdev = False
+    traced(p, PASS_MS)  # the status pass after it ends the grant
+    assert p.seen == ['otg-on', GONE] and len(pin_lines(p)) >= base + 2
+
+
+def test_a_kept_grant_s_change_lines_are_bounded(fw):
+    p = Port(fw)
+    p.id = 0
+    p.hostdev = True
+    traced(p, SETTLE + TRIAL + 3000)
+    base = len(pin_lines(p))
+    for _ in range(1000):  # the ID flapping with the device there, for 5 minutes
+        p.id ^= 1
+        traced(p, 300)
+    n = len(pin_lines(p))
+    assert p.pins['PC20'] == 1 and n <= define('OTG_TRACE_MAX') + define('OTG_TRACE_CHANGES'), n
+    traced(p, 60000)
+    assert len(pin_lines(p)) == n, 'nothing more once both are spent'
