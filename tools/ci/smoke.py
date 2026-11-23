@@ -12,13 +12,15 @@ This drives the build as a user would, in about a minute and a half:
 
     boot                     Home on top; a guardian card (No Temperature Sensor) confirmed, any other dialog fails
     Library > Songs > Center Now Playing opens (playing_page); Return to Songs; back to Home
-    Cover Flow > Center      an album's tracks (the screen changes); Center on a track: Now Playing
+    Cover Flow > Center      its art built first (no "Preparing artwork"), then an album's tracks; Center on a
+                             track: Now Playing
     Settings                 General, Playback, Display and Battery open and close
     Control Center           pulled down from the top (statusbar_dialog), Return closes it
     Search                   the letter strip types "AU" and results show; a held Return closes it
 
 A step passes when the window it should open is on top of demo's window manager (read from demo's
-memory, `windows`) or, where the step stays in one window, when the screen changes. Any step fails at once
+memory, `windows`), by what Cover Flow's page shows (its widget tree, `coverflow_screen`) for its steps, or,
+where another step stays in one window, when the screen changes. Any step fails at once
 when demo's process is gone or replaced (a crash: demo.log's tail is kept). The whole run has a hard
 deadline (DEADLINE, 170 s, after the emulator is leased); a lease is waited for up to --wait seconds, and
 none in time is exit 3, which the merge queue does not count against the tip.
@@ -82,6 +84,11 @@ TRANSIENT = ('system_bar', 'msginfo_dialog')
 # name at +4 (widget_set_name 0x66a7cc, widget_is_normal_window 0x670eec). qemu-user maps the guest at its
 # own addresses, so /proc/PID/mem reads them as they are (the viewer reads g_backlight_status the same way).
 WM_GOT, WM_OFF, WM_CHILDREN, W_NAME, W_VT, VT_TYPE = 0xa3aae0 - 0x7f44, 0x1420, 0x5c, 0x10, 0x74, 0x4
+# A widget's flags word and its visible bit (widget_get_visible 0x67795c: lw 0x24($a0); ext 2, 1).
+W_FLAGS, W_VISIBLE = 0x24, 2
+# s for Cover Flow's first open to build its art ("Preparing artwork n/N"): every lease starts with no art
+# cached, and the fixture's 16-bit PNG covers each take an ffmpeg run under qemu (1 to 3 s for its five)
+ART_S = 60
 
 
 class Failed(Exception):
@@ -141,6 +148,53 @@ def windows(pid):
             return out
     except (OSError, struct.error):
         return None
+
+
+def window_tree(pid, name):
+    """The topmost window called name as a tree of (type, visible, children), read as windows() reads the window
+    manager (a widget's children are the same darray at WM_CHILDREN; visible is bit W_VISIBLE of the word at
+    W_FLAGS, as stock's widget_get_visible at 0x67795c reads it); None when there is none or it cannot be read."""
+    try:
+        with open(f'/proc/{pid}/mem', 'rb') as m:
+            def u32(a):
+                m.seek(a)
+                return struct.unpack('<I', m.read(4))[0]
+
+            def kids(w):
+                arr = u32(w + WM_CHILDREN)
+                n = u32(arr) if arr else 0
+                return [u32(u32(arr + 8) + 4 * i) for i in range(n)] if 0 < n < 512 else []
+
+            def text(a):
+                m.seek(a)
+                return m.read(64).split(b'\0')[0].decode(errors='replace') if a else ''
+
+            def tree(w, depth=0):
+                vt = u32(w + W_VT)
+                return (text(u32(vt + VT_TYPE)) if vt else '', bool(u32(w + W_FLAGS) >> W_VISIBLE & 1),
+                        [tree(c, depth + 1) for c in kids(w) if c] if depth < 16 else [])
+            wm = u32(u32(WM_GOT) + WM_OFF)
+            found = [w for w in (kids(wm) if wm else []) if w and text(u32(w + W_NAME)) == name]
+            return tree(found[-1]) if found else None
+    except (OSError, struct.error):
+        return None
+
+
+def coverflow_screen(tree):
+    """What Cover Flow's page shows, from its widget tree (window_tree): 'covers' (the carousel, its slide_menu
+    shown), 'tracks' (the carousel built and hidden under an album's text list) or 'building' (no carousel yet:
+    "Preparing artwork n/N" with its Cancel row, or the albums still loading). A Center on 'building' presses
+    Cancel (patch/coverflow.c art_build, cancel_row), which shows the covers: a change of screen, and not the
+    album's tracks the walk wanted. None for no page."""
+    if not tree:
+        return None
+
+    def menus(node, shown):
+        kind, visible, children = node
+        shown = shown and visible
+        return [shown] if kind == 'slide_menu' else [s for c in children for s in menus(c, shown)]
+    found = menus(tree, True)
+    return 'covers' if any(found) else 'tracks' if found else 'building'
 
 
 def top(stack):
@@ -288,6 +342,22 @@ class Emulator:
                 return
             if time.monotonic() > end:
                 raise Failed(f'{why}: expected {name} on top, windows are {[n for _, n in s]}')
+            time.sleep(.2)
+
+    def coverflow_shows(self, screen, why, wait):
+        """Wait up to wait s for Cover Flow on top to show screen (coverflow_screen), then for it to finish
+        opening."""
+        end = time.monotonic() + wait
+        while True:
+            self.alive()
+            now = coverflow_screen(window_tree(self.pid, 'coverflow_page')) if top(self.stack()) == 'coverflow_page' \
+                else None
+            if now == screen:
+                self.settle()
+                return
+            if time.monotonic() > end:
+                raise Failed(f'{why}: expected Cover Flow\'s {screen}, it shows {now or "no Cover Flow"} '
+                             f'(windows {[n for _, n in self.stack()]})')
             time.sleep(.2)
 
     def settle(self, box=None, quiet_s=.4, most_s=3.0):
@@ -513,11 +583,10 @@ def steps(e, say, stream=None):
     e.row(HOME_FROM_END['cover flow'], from_end=True)
     e.do('key', 'centre')
     e.expect('coverflow_page', 'Cover Flow')
+    e.coverflow_shows('covers', 'Cover Flow\'s art built', ART_S)
     say('Cover Flow > Center: the album\'s tracks')
-    before = e.settle()
     e.do('key', 'centre')
-    e.changes(before, 'Center on an album')
-    e.expect('coverflow_page', 'the album\'s tracks')
+    e.coverflow_shows('tracks', 'Center on an album', STEP_S)
     say('tracks > Center: Now Playing')
     e.settle()
     e.do('key', 'centre')
