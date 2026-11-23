@@ -1998,7 +1998,11 @@ AFTER = {'test_exact_mp3_no_step_at_the_cut': 'test_exact_mp3_gapless'}
 SERIAL = ('test_scan', 'test_grow_seek_beyond', 'test_grow_seek_inside', 'test_car_trace', 'test_car_feed_reaches_the_car', 'test_car_feed_hands_over_both_ways',
           'test_car_feed_paused_is_silence_not_a_stall', 'test_car_feed_source_gone_leaves_the_song_resumable',
           'test_car_feed_does_not_block_a_source_the_car_does_not_take', 'test_preload_outrun', 'test_click_idle',
-          'test_a_failure_already_replaced_is_not_reported')
+          'test_a_failure_already_replaced_is_not_reported',
+          # fix/stream-start's: a song with a cover opened by 3.0 s, the feed's 150 ms lead, the feed reader's wakeups
+          # counted over seconds, the car's PCM fds read from /proc right after each release
+          'test_grow_opens_a_song_with_a_cover_on_its_first_audio', 'test_car_feed_keeps_the_car_close_behind',
+          'test_car_feed_reader_sleeps_while_no_source_writes', 'test_car_release_while_paused')
 WIDTH = 8  # tests and fixtures side by side: each mostly waits on a player running in real time or faster
 STALL_S = 0.1  # a 5 ms sleep that took this much longer: the machine did not run this process (measured: 650 ms under
                # a nice-19 job on a busy core, under 10 ms when the core is shared fairly)
