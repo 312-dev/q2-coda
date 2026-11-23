@@ -88,6 +88,11 @@ static unsigned *rates(int album) {
     }
     for (unsigned i = 0; i < n; i++) rated += (in[i] & 7) && (in[i] & 7) <= 5;
     while (cap < RATE_SLOTS && rate_room(cap) < rated + 1) cap *= 2;
+    /* an older file kept once as it was (RATINGS_FILE ".v1"), before the first write in this
+     * layout replaces it: an older firmware, or a fault in this one, can't lose those ratings */
+    char v1[64], v1_tmp[72];
+    tk_snprintf(v1, sizeof v1, "%s.v1", f), tk_snprintf(v1_tmp, sizeof v1_tmp, "%s.tmp", v1);
+    if (rated && access(v1, 0)) blob_io(v1, v1_tmp, in, n * sizeof *in, 1);
     *t = rate_layout(album, in, n, cap);
     free(in);
     return *t;

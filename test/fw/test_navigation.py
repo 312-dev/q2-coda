@@ -2237,6 +2237,40 @@ def test_ratings_hold_a_library_of_9199_songs_and_keep_an_older_smaller_table(fw
     assert struct.unpack_from('<I', files.files['/mnt/data/ringnav-ratings'], (8192 - 2) * 4)[0] == 0x48415356
 
 
+def test_an_older_ratings_file_is_kept_once_as_v1(fw):
+    """The first use of an older Q2's ratings (16 KB, the old layout) keeps that file as it was beside the new one,
+    /mnt/data/ringnav-ratings.v1, so an older firmware or a fault in the new layout can't lose them; a later
+    start, whose file is in the new layout, and a .v1 already there are left alone."""
+    old = b''.join(struct.pack('<I', (i + 1) << 3 | 1 + i % 5) for i in range(300)) + b'\0' * (4096 - 300) * 4
+    files = Files(fw, {'/mnt/data/ringnav-ratings': old})
+    fw.mock('fw_access', lambda path, *_: 0 if C.string_at(path).decode() in files.files else -1)
+    keep = fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)
+    assert keep(0, 0xfffffff8, 3) == 1
+    assert files.files['/mnt/data/ringnav-ratings.v1'] == old and files.files['/mnt/data/ringnav-ratings'] != old
+    files.files['/mnt/data/ringnav-ratings.v1'] = b'kept'  # never written again
+    files.files['/mnt/data/ringnav-ratings'] = old  # even a file in the old layout again
+    fw.var('ratings__ra', C.c_void_p).value = 0  # a restart: no table read yet (ra.rates)
+    assert fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, 1 << 3) == 1
+    assert files.files['/mnt/data/ringnav-ratings.v1'] == b'kept'
+
+
+def test_at_the_ceiling_a_new_rating_is_refused_and_said_and_the_rest_stay(fw):
+    """12,285 ratings fill a table at its largest (RATE_SLOTS words, three quarters in use): a new song's rating
+    is refused (rate_keep 0, which rate_saved toasts as "Ratings are full": test_nav_library_pages'
+    test_a_full_ratings_table_says_so), nothing is written, every kept rating reads as it was, and a kept song's
+    rating can still change."""
+    room = (O['RATE_SLOTS'] - 2) // 4 * 3
+    data = b''.join(struct.pack('<I', (i + 1) << 3 | 1 + i % 5) for i in range(room))
+    files = Files(fw, {'/mnt/data/ringnav-ratings': data})
+    keep = fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)
+    kept = fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)
+    written = dict(files.files)
+    assert keep(0, 0xfffffff8, 4) == 0
+    assert kept(0, 0xfffffff8) == 0 and files.files == written
+    assert all(kept(0, (i + 1) << 3) == 1 + i % 5 for i in range(0, room, 97))
+    assert keep(0, 1 << 3, 5) == 1 and kept(0, 1 << 3) == 5
+
+
 def test_a_full_ratings_table_refuses(fw):
     slots = ((O['RATE_SLOTS'] - 2) // 4 * 3)
     Files(fw, {'/mnt/data/ringnav-ratings': b''.join(struct.pack('<I', (i + 1) << 3 | 1) for i in range(slots))})
