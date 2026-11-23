@@ -22,7 +22,7 @@ class AlbumRateMachine(FileMocks,CoverflowMachine):
         ret=self.file_op(u,name,a,b,c,d)
         self.returns(ret,clobber=True)
     def kept(self):
-        data=self.files.get(ALBUM_RATES,b''); return sorted(v for v in struct.unpack(f'<{len(data)//4}I',data) if v)
+        data=self.files.get(ALBUM_RATES,b''); return sorted(v for v in struct.unpack(f'<{len(data)//4}I',data) if 0<v&7<6)  # 7: one taken out
     def aid(self,r): return self.call(address=payload_syms['album_id'],args=(r,0,0,0),gap=0)&0xffffffff
     def menu(self):  # the hold's rows, then Return closes the dialog
         self.t=getattr(self,'t',7000)+1; self.press(self.t); assert self.hold()==11 and self.release()==0
@@ -65,8 +65,9 @@ assert m.run(3) is None
 m2=AlbumRateMachine(files={ALBUM_RATES:m.files[ALBUM_RATES]}); m2.open(); m2.word(m2.slide+O['SLIDE_INDEX'],1)
 assert m2.menu()[3]=='Unfavorite' and '/mnt/data/ringnav-ratings' not in m2.files; passed()
 # A full table and a failed write report it, the album as it was.
-full=b''.join(struct.pack('<I',(i+1)<<3|1) for i in range(O['RATE_SLOTS']))
+full=b''.join(struct.pack('<I',(i+1)<<3|1) for i in range((O['RATE_SLOTS'] // 4 * 3))).ljust(4*O['RATE_SLOTS'],b'\0')
 m=AlbumRateMachine(files={ALBUM_RATES:full}); m.open(); m.word(m.slide+O['SLIDE_INDEX'],1)
+m.budget=5_000_000  # the table's first use lays its RATE_CAP ratings out at their places, once
 assert m.run(3)=='Ratings are full' and m.files[ALBUM_RATES]==full; passed()
 m=AlbumRateMachine(); m.open(); m.word(m.slide+O['SLIDE_INDEX'],1); m.fail_write=True
 assert m.run(3)=='Rating not saved' and m.menu()[3]=='Favorite' and ALBUM_RATES not in m.files; passed()

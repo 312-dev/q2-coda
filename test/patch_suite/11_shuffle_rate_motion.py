@@ -523,7 +523,7 @@ FAV_CLICK=0x53c968
 class RateMachine(FileMocks,ShuffleMachine):
     def __init__(self,saved=b''):
         super().__init__()
-        self.budget=2_000_000  # a RATE_SLOTS table scan or two a call
+        self.budget=2_000_000  # a RATE_SLOTS table's walk or two a call
         self.word(O['MCL_POS'],1)  # B of ABC plays
         self.file_mocks('r:',{'/mnt/data/ringnav-ratings':saved} if saved else {}); self.fav_songs=[]
         for n in ('getAllFav','fseek@GLIBC_2.0','ftell@GLIBC_2.0','taglib_file_new','taglib_file_audioproperties','taglib_file_free'):
@@ -563,7 +563,7 @@ class RateMachine(FileMocks,ShuffleMachine):
         self.returns(ret,clobber=True)
     def kept(self):
         data=self.files.get('/mnt/data/ringnav-ratings',b'')
-        return sorted(v for v in struct.unpack(f'<{len(data)//4}I',data) if v)
+        return sorted(v for v in struct.unpack(f'<{len(data)//4}I',data) if 0<v&7<6)  # 7: one taken out
     def alone(self):  # the heart is the favourite alone: nothing added beside it (the rating page has the stars)
         return self.nodes[self.get(self.fav+O['W_PARENT'])]['children']==[self.fav]
     def tap(self):  # the heart's click

@@ -2225,7 +2225,7 @@ def test_a_malformed_slot_reads_as_no_rating(fw):
 def test_ratings_hold_a_library_of_9199_songs_and_keep_an_older_smaller_table(fw):
     """The owner's library is 9,199 songs: RATE_SLOTS holds them all. A table written when it held 4,096 (16 KB) is
     read as far as it goes, its ratings kept, and the rest free."""
-    assert O['RATE_SLOTS'] >= 9199
+    assert (O['RATE_SLOTS'] // 4 * 3) >= 9199
     old = b''.join(struct.pack('<I', (i + 1) << 3 | 1 + i % 5) for i in range(4096))
     files = Files(fw, {'/mnt/data/ringnav-ratings': old})
     keep = fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)
@@ -2236,7 +2236,7 @@ def test_ratings_hold_a_library_of_9199_songs_and_keep_an_older_smaller_table(fw
 
 
 def test_a_full_ratings_table_refuses(fw):
-    slots = O['RATE_SLOTS']
+    slots = (O['RATE_SLOTS'] // 4 * 3)
     Files(fw, {'/mnt/data/ringnav-ratings': b''.join(struct.pack('<I', (i + 1) << 3 | 1) for i in range(slots))})
     keep = fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)
     assert keep(0, 0xfffffff8, 2) == 0 and keep(0, 8, 2) == 1

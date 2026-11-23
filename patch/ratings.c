@@ -59,7 +59,7 @@ static unsigned *rates(int album) {
     memset(*t, 0, n * sizeof **t);
     for (unsigned i = 0; i < n; i++) {
         unsigned v = was[i], k = rate_home(v);
-        if (!(v & 7) || (v & 7) > 5) continue;
+        if (!(v & 7) || (v & 7) > 5 || ra.used[album] >= RATE_CAP) continue;
         for (unsigned n = 0; n < RATE_SLOTS && (*t)[k] && ((*t)[k] ^ v) >= 8; n++)
             k = (k + 1) % RATE_SLOTS;
         ra.used[album] += !(*t)[k];
@@ -74,7 +74,8 @@ static int rate_slot(int album, unsigned key, int free) {
     unsigned *t = rates(album), k = rate_home(key);
     int empty = -1;
     for (unsigned n = 0; t && n < RATE_SLOTS; n++, k = (k + 1) % RATE_SLOTS) {
-        if (!t[k]) return free ? (empty >= 0 ? empty : (int)k) : -1;
+        if (!t[k]) /* a mark's slot reused first; a new one only below RATE_CAP */
+            return !free ? -1 : empty >= 0 ? empty : ra.used[album] < RATE_CAP ? (int)k : -1;
         if (t[k] == RATE_GONE) {
             if (empty < 0) empty = (int)k;
         } else if ((t[k] ^ key) < 8)
