@@ -621,6 +621,12 @@ void usb_ui_status(void) {
          * shows the iPhone on: a car that takes it plays over USB, and a host that does not gets the
          * connect then (usb_car_storage) */
         if (g_last_otgid != 1 && usb_remembered() != USB_AUDIO && usb_remembered() != USB_AUTO) headset_bt_usb();
+        /* below, nothing is chosen for a cable that comes while stock's link status is not 0: said, as the
+         * car's first cable of 2026-11-22 showed no iPhone and nothing said why */
+        char line[64];
+        if (g_usblink_status && tk_snprintf(line, sizeof line, "cable in with stock's link status %d: no choice made",
+                                            g_usblink_status) > 0)
+            usb_log(line, -1);
     }
     u.det_known = 1;
     if (det && !u.det && g_usblink_status == 0) {

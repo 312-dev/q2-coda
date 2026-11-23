@@ -393,7 +393,25 @@ void headset_ears(unsigned report) {
 static int connect_hold(unsigned now) {
     return hs.linked && now - hs.linked_at < CONNECT_HOLD_MS && !ringnav_bt_resume();
 }
+extern void ulog(char level, const char *src, const char *msg); /* ulog.c */
+/* Each key a Bluetooth peer sends, in the unified log with its address and what played: the drive
+ * of 2026-11-22 paused twice with the car on A2DP and nothing on the Q2 said who asked. */
+static void avrcp_say(int code) {
+    const char *what = code == 163                 ? "next"
+                       : code == 165               ? "previous"
+                       : code == 164               ? "play/pause"
+                       : code == 200 || code == 207 ? "play"
+                       : code == 119 || code == 201 ? "pause"
+                       : code == 166               ? "stop"
+                                                   : "key";
+    const unsigned char *a = hs.address;
+    char line[80];
+    snprintf(line, sizeof line, "avrcp %s (%d) from %02X:%02X:%02X:%02X:%02X:%02X, the player %d", what, code,
+             a[9], a[8], a[7], a[6], a[5], a[4], media_status());
+    ulog('I', "bt", line);
+}
 void headset_command(int code) {
+    avrcp_say(code);
     unsigned now = time_now_ms();
     if (hs.last_key == code && now - hs.last_at < 150) return;
     hs.last_key = code;

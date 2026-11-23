@@ -3,6 +3,8 @@ class HeadsetMachine(Machine):
     def __init__(self,owner=1):
         super().__init__(); self.owner=owner; self.playing=True; self.session=42; self.actions=[]; self.saved=0
         self.mock('strstr@GLIBC_2.0')  # guest.c guest_key reads Guest Play's state fields
+        self.mock('snprintf@GLIBC_2.0')  # headset.c avrcp_say's line, which ulog (no-op here) takes
+        self.handlers[payload_syms['ulog']]='hs:ulog'
         self.handlers[syms['mclGetSavePlayStatus']]='hs:saved'
         for name in ('spot_status','radio_status','video_status','spot_session','radio_session','video_session',
                      'spot_set_playing','radio_set_playing','video_set_playing','spot_media','radio_media','video_key'):
@@ -16,7 +18,8 @@ class HeadsetMachine(Machine):
         if not name.startswith('hs:'): return super().hook(u,address,size,unused)
         name=name[3:]; a=u.reg_read(REGS[0]); ret=0
         owner=4 if name.startswith('video') else 3 if name.startswith('radio') else 2 if name.startswith('spot') else 1
-        if name=='saved': ret=self.saved
+        if name=='ulog': pass
+        elif name=='saved': ret=self.saved
         elif name.endswith('_status'): ret=(2 if self.playing else 3) if self.owner==owner else 0
         elif name.endswith('_session'): ret=self.session
         elif name.endswith('_set_playing'): self.playing=bool(a); self.actions.append((owner,'play' if a else 'pause'))

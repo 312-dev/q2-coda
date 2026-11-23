@@ -258,3 +258,19 @@ def test_another_source_played_to_the_car_pauses_when_the_car_s_audio_goes(fw):
     u.unplug()
     assert sent and sent[0].startswith(b's'), sent  # librespot told to pause, as spot_yield tells it
     assert p.pauses == 0, "the Library's pause is not asked"
+
+
+def test_a_cable_in_while_stock_holds_the_link_says_so(fw):
+    """The drive of 2026-11-22: the car's first cable showed no iPhone, and nothing said why. A cable that comes while
+    stock's link status is not 0 gets no choice at all (usb_ui_status); the log says the status it found."""
+    from test_headset import said_on_stderr
+    u = Usb(fw, ini={'USBPICK': 0})
+    said = said_on_stderr(fw, 'usb')
+    u.status()  # a pass with no cable first, so the plug is an edge
+    u.link.value = 2
+    u.plug(host=False)
+    assert u.commands == [] and "cable in with stock's link status 2: no choice made" in said, said
+    u.unplug()
+    said.clear()
+    u.plug(host=False)
+    assert u.commands == [CAR_START] and not any('link status' in s for s in said), said
