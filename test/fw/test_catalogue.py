@@ -506,6 +506,24 @@ def test_online_a_list_is_handed_to_the_app_and_played_offline_if_it_does_not_an
     assert len(rig.played) == 1
 
 
+@pytest.mark.parametrize('n', [0, 2])
+def test_a_catplay_tells_the_app_download_ahead_for_its_list_from_the_start(rig, fw, n):
+    """The seam test (fix/seam-tests, 2026-11-22): with Download Ahead Off the app still fetched two songs after a
+    list's first, as it had no .ahead for the list's seq until the first song was whole and queued (ahead_poll), and
+    with none it keeps its default of two in list order. The .ahead for the catplay's seq (the .play's, as the app
+    answers with it) is written with the catplay: the setting's n, and no lines, as the firmware's queue holds none
+    of the list yet (the app takes the songs after the first in the catplay's order itself)."""
+    ss = (C.c_int * 2).in_dll(fw.lib, 'stream_state__ss')
+    ss[0], ss[1] = n, 1  # Download Ahead, read
+    rig.online = True
+    app_running(rig)
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1), song_row('s2', 'Two', 'B', 'A', 2, 100, 2)])
+    rig.poll()
+    assert load(rig, queue(rig, [url('s1'), url('s2')]), 0)[0] == 2
+    assert rig.files.files[f'/tmp/q2-{APP}.catplay'].startswith(b'1 0\n')
+    assert rig.files.files.get(f'/tmp/q2-{APP}.ahead') == f'#Q2AHEAD/1\tseq=1\tn={n}\n'.encode()
+
+
 def test_a_catplay_with_a_path_longer_than_twice_its_first_room_is_whole(rig):
     """catplay_write's buffer, 64 + 160 a song, grows until each path fits: a two-song list whose card path is
     900 bytes (its first room 384, doubled once 768) is written whole, its length the bytes written."""

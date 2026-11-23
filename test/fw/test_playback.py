@@ -2991,6 +2991,27 @@ def test_view_queues_row_of_the_playing_track_opens_now_playing(fw, keeps, playe
     assert now_playing(fw) == ([b'playing_page'] if kept else []) and len(fw.calls('player_play_pause')) == kept
 
 
+@pytest.mark.parametrize('ret', [VIEW_QUEUE_RET, ALBUMINFO_PLAY_RET])
+@pytest.mark.parametrize('status', [3, 2])
+def test_a_pick_of_the_paused_file_with_nothing_to_play_to_stays_on_its_page(fw, keeps, player, stock_call, ret,
+                                                                              status):
+    """A pick of the paused song plays it on, so with no output it is refused where it was picked: no Now Playing over
+    the queue or the album page, as a refused start of another song (output_rule.c). A playing song's pick starts
+    nothing and asks nothing: Now Playing opens."""
+    keeps.status = status
+    asked = []
+    fw.mock('check_forbid_play_no_headset', lambda quiet, *_: asked.append(quiet) or 1)
+    fw.mock('stock_start_queue_trampoline', lambda *_: 9)
+    if ret == VIEW_QUEUE_RET:
+        assert stock_call(ret, 'ringnav_start_queue', C.c_int, C.c_int)(1) == 1
+    else:
+        start = stock_call(ret, 'ringnav_player_start', C.c_int, C.c_void_p, C.c_int, C.c_int, C.c_int)
+        assert start(player.handle, 1, LIBRARY, 0) == 1
+    paused = status == 3
+    assert asked == ([0] if paused else []) and not fw.calls('player_play_pause')
+    assert now_playing(fw) == ([] if paused else [b'playing_page'])
+
+
 @pytest.mark.parametrize('eq, chained', [(0, 0), (1, 1)])
 def test_hciplayers_reconnect_reapplies_the_mode_and_keeps_advanced_play(fw, player, stock_call, eq, chained):
     player.load(player.albums(3))

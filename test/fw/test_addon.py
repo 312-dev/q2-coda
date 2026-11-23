@@ -1321,6 +1321,52 @@ def test_a_card_apps_song_not_yet_played_takes_its_files_tags(fw, low, case):
         assert reads == []  # tagged already (an album), nothing there to read yet, or the user's own file
 
 
+def test_under_shuffle_next_on_the_last_song_queued_plays_the_shuffles_next(fw, mcl, songs):
+    """The seam test (fix/seam-tests, 2026-11-22): Shuffle over a playlist session, the song playing the last one
+    queued (pos + 1 == n) while songs of the pass are still unplayed. Next is the shuffle's (stock's change in
+    advanced play's mode 3, as Up Next lists it), not the wait for the playlist's next song in list order."""
+    D = b'/mnt/mmc/.foo/B/4.flac'
+    s = playlist(fw, mcl, songs, A, B, C3, D)
+    s.land(A, B, C3)
+    s.play(b'1 ' + PLAYLIST + b'\n')
+    for _ in range(4):
+        s.step()
+    assert s.queued() == [A, B, C3]
+    mcl.pos = 2
+    assert fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(0, 1)  # Shuffle Songs
+    changes = []
+    fw.mock('stock_change_trampoline', lambda nxt, *_: changes.append(nxt) or 0)
+    fw.fn('ringnav_change', C.c_int, C.c_int)(1)
+    assert changes == [1] and shown(fw)[0] is None  # no wait shown for D
+
+
+def test_under_shuffle_a_song_played_after_its_wait_counts_as_played(fw, mcl, songs):
+    """The pass played out (the song playing the one queued), so Next waits for the playlist's next song, and once it
+    lands and plays (stream_poll's player_start_queue, through ringnav_start_queue) it is played in the shuffle's
+    pass: Up Next no longer lists it (the seam test: s5 played this way and came round again in the same pass)."""
+    s = playlist(fw, mcl, songs, A, B)
+    s.land(A)
+    s.play(b'1 ' + PLAYLIST + b'\n')
+    for _ in range(3):
+        s.step()
+    assert s.queued() == [A]
+    assert fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(0, 1)  # Shuffle Songs
+    fw.mock('stock_change_trampoline', lambda *_: 0)
+    fw.fn('ringnav_change', C.c_int, C.c_int)(1)
+    assert shown(fw)[0]  # nothing else this pass: it waits for B
+    s.fire()
+    start = fw.fn('ringnav_start_queue', C.c_int, C.c_int)
+    fw.mock('stock_start_queue_trampoline', lambda at, *_: setattr(mcl, 'pos', at) or 0)
+    fw.mock('player_start_queue', lambda at, *_: start(at))
+    s.land(B)
+    for _ in range(3):
+        s.step()
+    assert s.queued() == [A, B] and mcl.pos == 1
+    up = (C.c_uint * 8)()
+    n = fw.fn('playback_upcoming', C.c_uint, C.c_void_p, C.c_uint)(up, 8)
+    assert 1 not in list(up[:n])
+
+
 def test_a_next_waiting_for_a_song_gives_way_to_another_choice(fw, mcl, songs):
     s = playlist(fw, mcl, songs, A, B)
     s.land(A)

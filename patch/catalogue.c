@@ -1866,6 +1866,7 @@ static int catplay_write(int slot, void *q, int at) {
         len += (unsigned)tk_snprintf(b + len, cap - len, "%s\n", p ? p : "");
     }
     tk_snprintf(path, sizeof path, "/tmp/q2-%s.catplay", cat.app[slot].id);
+    ahead_start(cat.app[slot].id, cat.cp_seq); /* Download Ahead for the list, before it starts */
     int ok = blob_io(path, "/tmp/q2-catplay.tmp", b, len, 1);
     free(b);
     return ok;

@@ -440,6 +440,7 @@ typedef struct {
     unsigned have, total, ms; /* bytes on the card, of the whole (0 unknown), length (0 unknown) */
 } sline_t;
 int ahead_n(void), ahead_step(void);
+void ahead_start(const char *id, unsigned seq);
 const char *ahead_caps(void);
 int stream_line(const char *id, const char *path, sline_t *l);
 int stream_startable(const char *id, const char *path);

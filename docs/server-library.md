@@ -331,8 +331,11 @@ found).
 **Download Ahead** is the firmware's setting: Streaming > Configuration, **Download Ahead**, Off, 1,
 2 or 3 songs, 2 by default (`[Q2POD] AHEAD`, `streamconf_page`).
 
-**`/tmp/q2-<id>.ahead`** (firmware to app). Written while the queue playing is that app's `.play`
-m3u: at the queue's start, and whenever the songs after the one playing change in play order (a
+**`/tmp/q2-<id>.ahead`** (firmware to app). Written first just before the `.catplay` that hands the
+app a list, for that catplay's seq (which the app's `.play` carries) with `n` and no lines, as the
+firmware's queue holds none of the list yet (`stream_state.c` `ahead_start`), so the app never runs
+a list on its default; then while the queue playing is that app's `.play` m3u: at the queue's
+start, and whenever the songs after the one playing change in play order (a
 skip, a jump in Up Next, shuffle or repeat changed, a song added or removed, the setting changed).
 Not rewritten for position or pause.
 
