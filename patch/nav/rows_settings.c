@@ -652,8 +652,8 @@ int ringnav_powermanager(void *win, void *ctx) {
     /* smart_wifi.c's SMART_IDLE_MS; a caption shows under the selected row (settings_pages.c) */
     if (view)
         caption_row(st.pod_label[POD_SMART_WIFI],
-                    (const unsigned *)L"Turns Wi-Fi off after 5 minutes when nothing needs it. "
-                                      L"AirPlay and Car Remote keep it on.");
+                    "Turns Wi-Fi off after 5 minutes when nothing needs it. "
+                    "AirPlay and Car Remote keep it on.");
     pod_rows(win, "scroll_view_powermanager", POD_CARMODE, 1, icons + 2);
     if (view) /* battery.c's page */
         widget_set_text_utf8(list_row_into(view, "system_powermanager", battery_history, 0),

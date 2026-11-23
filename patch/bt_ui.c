@@ -726,8 +726,7 @@ void bt_page(void *view, int on) {
  * one; no state of its own. quality_order puts it first, over a CODEC header and the choices. */
 #define BT_STEP_KEY "BTSTEPDOWN"
 #define BT_STEP_TITLE "Adapt to Signal"
-#define BT_STEP_CAPTION                                                                            \
-    ((const unsigned *)L"On Auto or SBC, lowers quality to keep playing when the signal is weak")
+#define BT_STEP_CAPTION "On Auto or SBC, lowers quality to keep playing when the signal is weak"
 static int step_on(void) { return config_value("Q2POD", BT_STEP_KEY, 2, 0); }
 static int step_click(void *label, void *event) {
     int on = !step_on();
@@ -889,48 +888,31 @@ static unsigned choice_kbps(int i) {
     static const unsigned short kbps[] = { 990, 660, 0, 576, 384, 0, 0, 0 };
     return i >= 0 && i < (int)(sizeof kbps / sizeof *kbps) ? kbps[i] : 0;
 }
-#define BT_AUTO_CAPTION ((const unsigned *)L"Steps with the signal, 330 to 990 kbps")
-#define BT_KBPS_W 90 /* a choice's rate, right-aligned on the right column */
+#define BT_AUTO_CAPTION "Steps with the signal, 330 to 990 kbps"
+#define BT_KBPS_W 90    /* a choice's rate, right-aligned on the right column */
 #define BT_CHECK_GAP 24 /* ... and on the checked row before the check: its 12 px and the gap */
 
 /* Auto's caption for the headset connected now. bluealsa offers aptX HD, aptX, AAC and SBC beside
  * LDAC whatever the choice, so a headset without LDAC streams one of those on Auto, at that codec's
  * own rate (a Bowers & Wilkins Px7: aptX HD, a fixed 576 kbps): the caption names it, "Best this
  * headset supports: aptX HD, 576 kbps". On LDAC, with no device connected (stock's rule: the link
- * list's last item at status 3) or no codec known, it says what Auto does.
- * caption_row measures a caption again only for another pointer, so a changed text goes to the
- * other of two buffers. */
-static struct {
-    unsigned text[2][48];
-    int at;
-} auto_cap __attribute__((section(".scratch")));
+ * list's last item at status 3) or no codec known, it says what Auto does. s holds it, 48
+ * bytes (caption_row copies it). */
 static struct {
     void *view;    /* the picker's list while it is open */
     int coding;    /* g_btcoding its rates were placed for */
     unsigned lack; /* lack_key its marks were set for */
 } quality __attribute__((section(".scratch")));
-/* s as a caption in one of the pair of n-character buffers at pair: the current one while it says
- * s, else the other, filled, so caption_row sees another pointer and measures it again. */
-static const unsigned *cap_text(unsigned *pair, int *at, unsigned n, const char *s) {
-    unsigned *cur = pair + *at * n, i = 0;
-    while (s[i] && cur[i] == (unsigned char)s[i]) ++i;
-    if (s[i] || cur[i]) {
-        cur = pair + (*at ^= 1) * n;
-        for (i = 0; s[i] && i < n - 1; ++i) cur[i] = (unsigned char)s[i];
-        cur[i] = 0;
-    }
-    return cur;
-}
-static const unsigned *auto_caption(void) {
+static const char *auto_caption(char *s) {
     const char *codec = bt_codec();
-    char item[32] = "", s[48];
+    char item[32] = "";
     int status = 0, n = getBtLinkSize();
     if (n > 0) getBtLinkItem(n - 1, &status, item);
     if (!codec || status != 3 || !tk_strcmp(codec, "LDAC")) return BT_AUTO_CAPTION;
     unsigned kbps = bt_kbps(codec, bt_headset_rate()),
-             k = (unsigned)tk_snprintf(s, sizeof s, "Best this headset supports: %s", codec);
-    if (kbps && k < sizeof s) tk_snprintf(s + k, sizeof s - k, ", %u kbps", kbps);
-    return cap_text(auto_cap.text[0], &auto_cap.at, 48, s);
+             k = (unsigned)tk_snprintf(s, 48, "Best this headset supports: %s", codec);
+    if (kbps && k < 48) tk_snprintf(s + k, 48 - k, ", %u kbps", kbps);
+    return s;
 }
 
 /* The choices whose codec the device connected now lacks (sink_lacks: LDAC Best and Standard,
@@ -939,24 +921,20 @@ static const unsigned *auto_caption(void) {
  * on it, bt_quality_dim) and still pickable, the pick kept for the next device; each says why
  * under it while selected, "BMW 6R81 doesn't support aptX HD: using AAC" (the device's name cut at
  * BT_LACK_NAME characters, the codec streaming now if known). Run after each layout and again
- * from bt_ui_poll when the device, its codecs or the codec streaming change (lack_key). */
+ * from bt_ui_poll when the device, its codecs or the codec streaming change (lack_key). s holds
+ * the caption, BT_LACK_LEN bytes (caption_row copies it). */
 #define BT_LACK_NAME 20
 #define BT_LACK_LEN 64
 #define BT_LACK_GREY 0x666666 /* catalogue.c CAT_GREY */
 #define BT_LACK_DIM 0xb3      /* ... CAT_DIM */
-static struct {
-    unsigned text[4][2][BT_LACK_LEN]; /* LDAC, aptX HD, aptX, AAC */
-    int at[4];
-} lack __attribute__((section(".scratch")));
-static const unsigned *lack_caption(int codec) {
-    int k = codec == 4 ? 0 : codec == 13 ? 1 : codec == 3 ? 2 : 3, now = I(bt_showcoding, 0);
-    char s[BT_LACK_LEN];
+static const char *lack_caption(int codec, char *s) {
+    int now = I(bt_showcoding, 0);
     unsigned n =
-        (unsigned)tk_snprintf(s, sizeof s, "%.*s doesn't support %s", BT_LACK_NAME,
+        (unsigned)tk_snprintf(s, BT_LACK_LEN, "%.*s doesn't support %s", BT_LACK_NAME,
                               *bt.link_name ? bt.link_name : "This device", codec_name(codec));
-    if (codec_name(now) && now != codec && n < sizeof s)
-        tk_snprintf(s + n, sizeof s - n, ": using %s", codec_name(now));
-    return cap_text(lack.text[k][0], &lack.at[k], BT_LACK_LEN, s);
+    if (codec_name(now) && now != codec && n < BT_LACK_LEN)
+        tk_snprintf(s + n, BT_LACK_LEN - n, ": using %s", codec_name(now));
+    return s;
 }
 static unsigned lack_key(void) {
     unsigned h = sink.bits ^ (unsigned)I(bt_showcoding, 0) << 16;
@@ -996,7 +974,8 @@ static void quality_rows(void *view) {
         int choice = atoi(widget_get_prop_str(b, "name", ""));
         title = row_title(b);
         unsigned kbps = choice_kbps(choice);
-        if (choice == BT_AUTO && title) { caption_row(title, auto_caption()); }
+        char said[48];
+        if (choice == BT_AUTO && title) caption_row(title, auto_caption(said));
         if (!kbps) continue;
         char s[16];
         void *l = small_label(b, 0, 0, BT_KBPS_W, I(b, W_H), BT_HEAD_PX);
@@ -1020,7 +999,8 @@ static void quality_lacks(void *view) {
         if (choice == BT_AUTO || choice < 0 || choice > 7) continue;
         int codec = row_codec(choice), lacks = sink_lacks(codec);
         widget_set_prop_int(item, "_bt_lack", lacks);
-        caption_row(row_title(b), lacks ? lack_caption(codec) : (const unsigned *)0);
+        char said[BT_LACK_LEN];
+        caption_row(row_title(b), lacks ? lack_caption(codec, said) : (const char *)0);
     }
     quality.lack = lack_key();
     widget_invalidate_force(view, (void *)0);

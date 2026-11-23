@@ -547,10 +547,10 @@ int kv_text_w(void *label);  /* an hscroll_label's text width in its row's face;
 void kv_row(void *key, void *val, int kw, int vw, int right); /* settings_pages.c: kv_fit's split */
 void diag_about_row(void *view); /* diagnostics.c, --dev builds' Save Diagnostics */
 int diag_row(void *item);
-void caption_row(void *label, const unsigned *text);
-const unsigned *pod_caption(int i);
-extern const unsigned *const smart_awake_caption, *const folder_skip_caption,
-                                                      *const reduce_motion_caption;
+void caption_row(void *label, const char *text);
+const char *pod_caption(int i);
+extern const char *const smart_awake_caption, *const folder_skip_caption,
+                                                  *const reduce_motion_caption;
 void caption_prune(void *view); /* drops the captions of rows a rebuild removed from view */
 void caption_sel(void *view, void *item);
 /* nav/lists.c: how much of scroll view `view` a row may stand in, its height cut at the set's list
