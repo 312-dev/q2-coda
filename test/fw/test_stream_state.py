@@ -4,6 +4,7 @@ import ctypes as C
 
 import pytest
 
+from conftest import O
 from test_addon import A, B, C3, LIBRARY, PLAYLIST, World, playlist, songs  # noqa: F401 (songs: a fixture)
 
 AHEAD = b'/tmp/q2-foo.ahead'
@@ -219,3 +220,57 @@ def test_a_whole_song_or_one_outside_a_stream_cache_has_no_reach_of_its_own(fw):
     world.mtime[STREAM] = NOW
     assert reach(fw, 400) == -1
     assert reach(fw, 400, A) == -1
+
+
+
+D4 = b'/mnt/mmc/.foo/B/4.flac'
+
+
+@pytest.mark.parametrize('advanced', [False, True], ids=['repeat all', 'shuffle and repeat all'])
+def test_repeat_all_names_whole_songs_never_one_still_to_land(fw, mcl, songs, advanced):
+    """The contract q2-subsonic's plan reads (docs/server-library.md#download-ahead-and-the-streaming-state), as it
+    is: under Repeat All, plain or with Shuffle, .ahead is always full, Repeat All's next pass naming songs already
+    queued (whole on the card) once the songs to come run out, and never D4, the list's song still to land. So the
+    app gives a whole song behind the one playing no Download Ahead slot (the drive of 2026-11-22: a radio stopped
+    at its fourth song, D4 never fetched)."""
+    s = playlist(fw, mcl, songs, A, B, C3, D4)
+    s.land(A, B, C3)
+    s.play(b'7 ' + PLAYLIST + b'\n')
+    s.step()
+    s.step()
+    assert s.queued() == [A, B, C3]
+    if advanced:
+        put = fw.fn('playback_set', C.c_int, C.c_int, C.c_int)
+        assert put(0, 1) and put(1, 5)  # Shuffle Songs, Repeat All: q2car's snapshot of 2026-11-22 (1, 5)
+    else:
+        C.c_int.from_address(O['MCL_MODE']).value = 3
+        mcl.pos = 2  # the queue's last song
+    s.step()
+    ahead = [x for x in s.world.files[AHEAD].split(b'\n')[1:] if x]
+    assert s.world.files[AHEAD].startswith(b'#Q2AHEAD/1\tseq=7\tn=2\n') and len(ahead) == 2, ahead
+    assert D4 not in ahead and set(ahead) <= {A, B, C3}, ahead
+    if not advanced:
+        assert ahead == [A, B]  # the next pass from the queue's first
+
+
+
+def test_a_queue_file_past_256_kb_is_read_only_that_far(fw, mcl, songs):
+    """addon.c reads a session's playlist file to M3U_MAX (256 KB), its cut last line dropped: songs named past it
+    are never queued and Up Next never lists them (addon_pending, the same read as m3u_songs). A 9,199-song
+    Shuffle's cache paths are about 1 MB; q2-subsonic writes a window of the list, QUEUE_AHEAD (1,000) songs past
+    the one playing, so the file stays well inside it. This is the firmware's side of that contract."""
+    first = A
+    rest = [b'/mnt/mmc/.foo/stream/11c3e037/original/f%02d/a song title long as the user\'s are %04d '
+            b'[VdsIsB1X5aqa0jZXUmsd5M].flac' % (i // 100, i) for i in range(3000)]
+    s = playlist(fw, mcl, songs, first, *rest)
+    s.land(first)
+    s.play(b'7 ' + PLAYLIST + b'\n')
+    s.step()
+    s.step()
+    assert s.queued() == [first]
+    n = C.c_uint(0)
+    fw.fn('addon_pending', C.c_void_p, C.c_uint, C.POINTER(C.c_uint))(10000, C.byref(n))  # left: freeing needs stock's
+    body = s.world.files[PLAYLIST]
+    fits = body[:256 << 10].count(b'\n') - 2  # the #EXTM3U line and A's
+    assert len(body) > 256 << 10 and 2000 < fits < 3000
+    assert n.value == fits, (n.value, fits)

@@ -486,7 +486,12 @@ static void cr_command(void) {
                : !strcmp(word, "toggle") ? !media_playing()
                                          : -1;
     if (want >= 0) {
-        if (media_playing() != want) media_key(KEY_PLAY);
+        int status = media_status(), press = (status == 2) != want;
+        char line[64]; /* the drive of 2026-11-22: a resume, and the player paused 0.4 s later */
+        tk_snprintf(line, sizeof line, "%s from the car or phone: the player %d, %s", word, status,
+                    press ? "Play/Pause pressed" : "nothing pressed");
+        ulog('I', "remote", line);
+        if (press) media_key(KEY_PLAY);
         cr.want = want + 1; /* acked once the player shows it (cr_settle) */
         cr.want_seq = seq;
         cr.want_at = time_now_ms();
