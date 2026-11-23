@@ -10,6 +10,10 @@
 
 #define CRC_CMDQ "/tmp/coda-rc.cmdq"
 #define CRC_CMDQ_LINE 64 /* a line, its '\n' and state_read's leading byte; a longer one is dropped */
+/* The shim's answer "taken, still at work" (coda_rc_shim.c cr_run): a play or a radio, whose work runs on a timer
+ * and can hold demo's loop for seconds (9 s on a loaded emulator, 2026-11-23); the daemon then waits ACK_TAKEN_MS
+ * (7 s) for the answer that follows, instead of ACK_MS (4 s) (coda_rc.c ack_poll). */
+#define CRC_ACK_TAKEN 9
 
 #ifdef O_NONBLOCK
 /* line (n bytes, ending '\n') down fifo: 0 sent; -1 not (no reader, no FIFO, too long), and the caller

@@ -28,6 +28,8 @@ SOURCES = [PATCH / 'coda_rc.c', PATCH / 'coda_rc_core.c', PATCH / 'coda_rc_lib.c
 SQLITE = '/usr/lib/x86_64-linux-gnu/libsqlite3.so.0'
 CAP_RADIO = 16384
 CAP_IROH_ALLOW = 131072
+# the shim's "taken" answer (coda_rc_cmdq.h CRC_ACK_TAKEN)
+TAKEN = int(re.findall(r'#define CRC_ACK_TAKEN (\d+)', (PATCH / 'coda_rc_cmdq.h').read_text())[0])
 CONNECT = socket.socket.connect  # conftest refuses it to a test; the daemons here listen on loopback alone
 
 
@@ -77,6 +79,8 @@ class Shim:
     """demo's side: Now Playing written, each command answered with code."""
     def __init__(self, root):
         self.root, self.seq, self.code, self.verbs = root, 0, 0, []
+        self.taken_s: float | None = 0  # play and radio: answered taken, then done this much later (None: never)
+        self.lib = None  # the daemon's library, for its clock (crc_host_skew_ms)
         self.before = ''  # answers to other commands, kept above this one's in the ack file (coda_rc_shim.c cr_ack)
         self.loop: threading.Thread | None = None  # the daemon's loop, once started
         self.tell_r = -1  # the read end of the pipe the daemon tells the shim on
@@ -99,7 +103,13 @@ class Shim:
                 seq, verb = cmd.read_text().strip().split(' ', 1)
                 cmd.unlink()
                 self.verbs.append(verb)
-                put(self.root / 'tmp/coda-rc.ack', f'{self.before}{seq} {self.code}\n')
+                ack = self.root / 'tmp/coda-rc.ack'
+                if self.taken_s != 0 and verb.startswith(('play', 'radio')):  # as cr_run: taken, its timer to come
+                    put(ack, f'{seq} {TAKEN}\n')
+                    if self.taken_s is not None:
+                        threading.Timer(self.taken_s, put, (ack, f'{seq} {self.code}\n{seq} {TAKEN}\n')).start()
+                else:
+                    put(ack, f'{self.before}{seq} {self.code}\n')
             time.sleep(0.02)
 
 
@@ -126,6 +136,7 @@ def q2(daemon_bin, tmp_path_factory):
 
     s = client.connect('127.0.0.1', port, tmp_path / 'keys', code=None, ask=code)
     shim.loop = loop
+    shim.lib = daemon_bin
     yield s, shim
     shim.stop = True
     s.sock.close()
@@ -699,3 +710,43 @@ def test_the_largest_now_playing_fits_its_state(car):
     np = client.decode(client.decode(raw)[1][0])
     assert client.text(np, 20).startswith('album:') and client.text(np, 21).startswith('artist:r')
     assert len(raw) <= 1400, len(raw)
+
+
+# ---- a command the shim took and is still at work on (patch/coda_rc_cmdq.h CRC_ACK_TAKEN) ----
+
+def test_a_command_the_shim_took_is_answered_when_it_is_done(q2):
+    """coda_rc_e2e.py on a loaded emulator, 2026-11-23: the shim took a shuffled Play at once, then its start held
+    demo's loop for 9 s, and the daemon, at ACK_MS (4 s) with no answer, told the phone UNAVAILABLE for a Play that
+    happened. The shim answers "taken" when it takes one; the daemon then waits for the answer that follows."""
+    s, shim = q2
+    shim.taken_s = 5.0
+    try:
+        start = time.monotonic()
+        s.start_radio(stop=True)
+        took = time.monotonic() - start
+    finally:
+        shim.taken_s = 0
+    assert took >= 4.5, took  # the Ack came with the shim's answer, past ACK_MS
+
+
+def test_a_taken_command_never_answered_is_unavailable_at_its_longer_limit(q2):
+    s, shim = q2
+    skew = ctypes.c_uint32.in_dll(shim.lib, 'crc_host_skew_ms')
+    shim.taken_s = None
+    got: list = []
+    t = threading.Thread(target=lambda: got.extend(_call(s.start_radio, '', True)))
+    try:
+        log = shim.root / 'tmp/coda-rc.log'
+        marks = log.read_text().count('radio stop taken') if log.exists() else 0
+        t.start()
+        for _ in range(250):  # the daemon has seen "taken" (its log), so the longer limit runs from then
+            if log.exists() and log.read_text().count('radio stop taken') > marks:
+                break
+            WAIT(0.02)
+        assert log.read_text().count('radio stop taken') > marks, log.read_text()[-600:]
+        assert t.is_alive()  # taken: past ACK_MS's first look, still waiting
+        skew.value += define('coda_rc.c', 'ACK_TAKEN_MS') + 1000
+        t.join(5)
+    finally:
+        shim.taken_s = 0
+    assert not t.is_alive() and len(got) == 1 and getattr(got[0], 'name', '') == 'UNAVAILABLE', got

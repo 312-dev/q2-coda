@@ -226,6 +226,8 @@ A server album's cover that the Q2 Muse doesn't have yet (its card app hasn't fe
 
 Everything else (`NOT_FOUND`, `BAD_REQUEST` on a field, `UNAVAILABLE`, `BUSY`, the pairing errors) leaves the session open.
 
+A command the Q2 Muse carries out (`Transport`, `SetMode`, `Rate`, `PlayQueueItem`, `Play`, `StartRadio`) is answered once it is done: within 4 s, or `UNAVAILABLE`. A `Play` or a `StartRadio` the Q2 Muse has taken but is still starting (a shuffled list of a big library can take seconds) is answered when it has started, within 7 s of being taken, else `UNAVAILABLE`: under the 8 s Q2 Muse Remote waits for any answer before it drops the session.
+
 ## Pairing on the Q2
 
 When a phone sends `PairStart`, the Q2 asks on its pairing card over whatever is on screen: a phone glyph, the title "Pair with Pixel 8?" (the phone's name, scrolling when long), "Enter this code in Q2 Muse Remote", the code large as two groups of three, and one row, Cancel, with the pairing's two minutes as a bar along its foot. Return is Cancel. It closes by itself when the phone finishes, fails or gives up, with a toast: the phone's name and "paired" ("Pixel 8 paired") or "Pairing failed".
