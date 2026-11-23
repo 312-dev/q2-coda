@@ -64,9 +64,6 @@ typedef struct {
     unsigned center_timer, center_token, center_scope, center_hash, center_hash2;
     unsigned edit_press, edit_at; /* a slider or time editor's pending Centre (edit_key) */
     int center_id, center_ctx, center_rows;
-    unsigned cf_letter, cf_letter_at, cf_letter_timer;
-    int cf_letter_held; /* the thumb's letters: shown until it lifts */
-    void *cf_letter_surface;
     unsigned last_home;
     int home_dir;
     void *home_surface;   /* non-null also marks a step accepted at time zero */

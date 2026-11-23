@@ -1191,29 +1191,8 @@ def test_the_carousels_momentum_is_the_lists_rows_never_a_letter(fw, ui):
     fast = steps[3:]
     assert steps[:3] == [1, 1, 1] and fast[0] == 1 and max(fast) == WA['WA_MAX_ROWS'] and fast[-1] == WA['WA_MAX_ROWS']
     assert all(b >= a for a, b in zip(fast, fast[1:]))  # rising while it goes on, never a letter's jump
-    assert not ui.due('cf_letter_expire')  # no letter over the covers
     key(fw, ui, KEY_NEXT, t + WA['WA_RUN_MS'] + 100)  # after a pause: one again
     assert (goal - home.goal) // home.stride == 1
-
-
-def test_coverflows_letter_shows_for_its_time_then_repaints_away(fw, ui):
-    page = Page(ui, titles(10), name='coverflow_page')
-    letter = fw.fn('coverflow_letter', None, C.c_void_p, C.c_uint, C.c_uint)
-    letter(page.view.at, ord('B'), 500)
-    (timer,) = ui.due('cf_letter_expire')
-    assert ui.timers[timer][2] == O['LETTER_MS']
-    ui.invalidated.clear()
-    ui.fire(timer)
-    assert ui.invalidated == [page.view.at]
-
-
-def test_coverflows_letter_cleared_stops_its_timer(fw, ui):
-    page = Page(ui, titles(10), name='coverflow_page')
-    letter = fw.fn('coverflow_letter', None, C.c_void_p, C.c_uint, C.c_uint)
-    letter(page.view.at, ord('B'), 500)
-    (timer,) = ui.due('cf_letter_expire')
-    letter(page.view.at, 0, 600)
-    assert not ui.due('cf_letter_expire') and timer not in ui.timers
 
 
 # Pull to search: a drag down from the top of Local Songs' list.
