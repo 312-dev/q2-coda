@@ -8,6 +8,7 @@
 #include "iap2.h"
 #include "q2_iap2.h"
 #include "iap2_xfer.h"
+#include "iap2_library.h"
 
 #define ART_MAX 65536
 static u8 art[ART_MAX];

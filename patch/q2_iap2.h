@@ -11,12 +11,13 @@ extern long link_quiet_ms, health_ms;
 extern char car_name[64];
 extern const unsigned iap2_rates[9];
 extern u8 control_session, file_session;
-extern unsigned peer_max;
+extern unsigned peer_max, window, head, count, q_count;
+extern long rto;
 extern int msg_quiet;
 extern unsigned audio_hz;
 
+int backlog(void);
 void enqueue(u8 session, const u8 *b, unsigned n);
-int list_transfer_word(const u8 *d);
 int iap2_bare_ack(const u8 *r, unsigned n);
 int iap2_report(const u8 *r, unsigned len);
 void iap2_lost(const char *why);
