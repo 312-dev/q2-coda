@@ -266,18 +266,48 @@ def test_seek_exact(player, songs, tmp):
 
 
 def heard_seconds(pcm, rate=44100):
-    """pos.flac's seconds heard in s16 stereo PCM, one a 20 ms window (None where silent), each with its tone's error
-    in Hz: the frequency from the window's first and last rising zero crossings, interpolated."""
+    """pos.flac's seconds heard in s16 stereo PCM, one a 20 ms window, each with its tone's error in Hz: the frequency
+    from the window's first and last rising zero crossings, interpolated. None where silent, and where the gaps between
+    crossings differ by more than a tenth of their median: a splice (a seek, a scan's turn) meets two tones' phases
+    there, and the short gap at the join reads as a higher tone, a second or two on (test_heard_seconds_at_a_splice).
+    A splice's neighbours still say where each side is, so a second skipped there still shows."""
     left = array.array('h', pcm)[::2]
     w, out = rate // 50, []
     for at in range(0, len(left) - w, w):
         x = left[at:at + w]
         ups = [i + x[i] / (x[i] - x[i + 1]) for i in range(w - 1) if x[i] < 0 <= x[i + 1]]
         if max(x) < 4000 or len(ups) < 3: out.append((None, 0)); continue
+        gaps = sorted(b - a for a, b in zip(ups, ups[1:]))
+        if gaps[-1] - gaps[0] > 0.1 * gaps[len(gaps) // 2]: out.append((None, 0)); continue
         f = (len(ups) - 1) * rate / (ups[-1] - ups[0])
         n = round((f - music.POS_BASE) / music.POS_STEP)
         out.append((n, f - (music.POS_BASE + music.POS_STEP * n)))
     return out
+
+
+def test_heard_seconds_at_a_splice(player, songs, tmp):
+    """heard_seconds across a splice of pos.flac's second 22 into its second 23 (a turn of the scan, a seek), at 20
+    places in a window and 16 phases each: no window reads a second that is neither. A window across a phase jump has
+    one short gap between zero crossings, which made the tone read high: up to 24 here, the "jumps of [2] s" test_scan
+    failed with (integ/q2-1129, 2026-11-22: the scan went 22, 22, 24, 23, 23, its PCM 22 then 23)."""
+    rate, w = 44100, 44100 // 50
+    def tone(n, frames, phase):
+        f = music.POS_BASE + music.POS_STEP * n
+        return [int(16000 * math.sin(phase + 2 * math.pi * f * i / rate)) for i in range(frames)]
+    wrong, read = [], 0
+    for cut in range(20, w - 20, 37):
+        for k in range(16):
+            x = tone(22, w + cut, 0) + tone(23, 2 * w - cut, 2 * math.pi * k / 16)
+            for n, e in heard_seconds(array.array('h', (v for s in x for v in (s, s))).tobytes()):
+                if n is None or abs(e) > 3: continue
+                read += 1
+                if n not in (22, 23): wrong.append((cut, k, n, round(e, 1)))
+    assert not wrong, f'{len(wrong)} windows read a second neither side of the splice, e.g. {wrong[:3]}'
+    # a second skipped is still seen: 22 into 24 reads as 22s then 24s, a jump of 2 for test_scan to find
+    x = tone(22, w + 300, 0) + tone(24, 3 * w - 300, 1.0)
+    secs = [n for n, e in heard_seconds(array.array('h', (v for s in x for v in (s, s))).tobytes()) if n is not None and abs(e) <= 3]
+    assert [b - a for a, b in zip(secs, secs[1:]) if b != a] == [2], f'22 into 24 read as {secs}'
+    return f'{read} windows read, each 22 or 23; 22 into 24 still a jump of 2'
 
 
 def test_scan(player, songs, tmp):
