@@ -487,18 +487,24 @@ def up_next(seam, most=16):
 def test_under_shuffle_next_plays_up_nexts_first_song_at_the_queues_last_index_too(seam):
     seam.fwr.settings[b'AHEAD'] = b'3'
     seam.start()
+    for sid in ('s5', 's6', 's7', 's8'):  # the list's next songs held at the server: the queue stays s1 to s4
+        seam.fake.cut(sid, 0, 60000)
     seam.press(seam.album_rows(0), 0)
     f = seam.fwr
-    f.until('s1 to s4 queued', lambda: len(f.queued()) >= 4, timeout=30)
-    settle(seam)
-    seam.fw.var('playback__rng', C.c_uint).value = 0x2545f491  # the order s1, s4, s2, s3 (2026-11-22's runs)
+    f.until('s1 to s4 queued', lambda: len(f.queued()) == 4, timeout=30)
+    seam.fw.var('playback__rng', C.c_uint).value = 0x2545f491
     assert seam.fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(0, SHUFFLE_SONGS)
-    for _ in range(6):
+    for _ in range(4):  # Next in Up Next's order, until a Next has been pressed on the queue's last song
         f.until('.playing naming the song playing', lambda: seam.playing() == seam.now(), timeout=10)
+        last = seam.mcl.pos == len(f.queued()) - 1
         want, cur = up_next(seam)[0], seam.playing()
         seam.next()
-        f.until(f'Next from {seam.sid(cur)}', lambda: seam.playing() != cur and seam.playing() == seam.now(), timeout=30)
+        f.until(f'Next from {seam.sid(cur)} to Up Next\'s {want}', lambda: seam.playing() != cur and
+                seam.playing() == seam.now(), timeout=10)
         assert seam.sid(seam.playing()) == want, f'Up Next said {want}; Next played {seam.sid(seam.playing())}'
+        if last:
+            return
+    raise AssertionError(f'no Next was pressed on the queue\'s last song in four (order {up_next(seam)})')
 
 
 # Download Ahead Off (n=0: "the app fetches only the song playing", docs/server-library.md): the firmware writes
