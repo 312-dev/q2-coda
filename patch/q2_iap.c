@@ -460,6 +460,7 @@ static int io_backlog(void) {
     char b[256];
     int n;
     while (done_fd >= 0 && (n = (int)read(done_fd, b, sizeof b)) > 0) wr_done += (unsigned)n;
+    if (done_fd >= 0 && !n) close(done_fd), done_fd = -1; /* the writer gone: its hang-up would wake poll for ever */
     return done_fd < 0 ? 0 : (int)(wr_queued - wr_done);
 }
 
@@ -532,13 +533,17 @@ static void io_audio(int on) {
 }
 
 /* The player's rate for the song about to play (player/output.c car_ask, docs/iphone-mode.md#per-song-rate), read
- * every RATE_POLL_MS and handed to q2_iap2.c, which tells the car when it changes; none written, 44.1 kHz. */
+ * every RATE_POLL_MS while the car takes audio, RATE_IDLE_MS while a car is on the link otherwise, and not with no
+ * car (a charger), and handed to q2_iap2.c, which tells the car when it changes; none written, 44.1 kHz. */
 #define RATE_POLL_MS 20
+#define RATE_IDLE_MS 250 /* with a car on the link and its audio not asked for */
+static long rate_at;
+static long rate_every(void) { return audio_on ? RATE_POLL_MS : seen ? RATE_IDLE_MS : -1; } /* -1: not read */
 static void rate_poll(long now) {
-    static long at;
+    long every = rate_every();
     char b[16];
-    if (at && now - at < RATE_POLL_MS) return;
-    at = now;
+    if (every < 0 || (rate_at && now - rate_at < every)) return;
+    rate_at = now;
     int fd = open(rate_file, O_RDONLY), n = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
     if (fd >= 0) close(fd);
     b[n > 0 ? n : 0] = 0;
@@ -968,11 +973,18 @@ static void host_poll(long now) {
     }
 }
 
-/* Every HEALTH_MS while the car has asked for audio: is it flowing, and cleanly. */
+/* Every HEALTH_MS while the car has asked for audio, and until its problem is said over: is it flowing, and cleanly.
+ * Otherwise nothing is read. */
 static void health_poll(long now) {
     unsigned sent, missed, under;
     char msg[200];
-    if (!state_file || now - health_at < HEALTH_MS) return;
+    if (!state_file) return;
+    if (!audio_on && !flowing && !*trouble) { /* nothing to count: only a name newly identified to write */
+        audio_at = -1;
+        if (strcmp(state_name, car_name)) state_write();
+        return;
+    }
+    if (now - health_at < HEALTH_MS) return;
     health_at = now;
     counters(&sent, &missed, &under);
     if (!counted) counted = 1, sent0 = sent_last = sent, missed0 = missed_last = missed, under0 = under_last = under;
@@ -1258,6 +1270,29 @@ static void sleep_poll(void) {
     apart = d;
 }
 
+/* How long the loop's poll may sleep (iAP2), in ms: until the soonest of iAP2's deadlines (q2_iap2.c iap2_due), the
+ * rate file's look, the host's verdict (the controller's state every 100 ms until the host has addressed the Q2, the
+ * window after), the audio's health, the session's gap and --for's end; at most LOOP_MAX_MS, a guard. It was 10 ms
+ * whatever was due: 6,000 wakeups a minute on a charger overnight (car-bt-power.md #6). With --clock-file at most
+ * 100 ms, so a sleep the tests stand in for is seen. */
+#define LOOP_MAX_MS 1000
+static long loop_due(long end) {
+    long now = boot_ms(), w = iap2_due(now), d;
+#define DUE(at)                                                                                                       \
+    (d = (at) - now, d = d < 0 ? 0 : d, w = w < 0 || d < w ? d : w)
+    if (rate_every() >= 0) DUE(rate_at + rate_every());
+    if (state_file && !leave && host_at < 0 && udc_file) DUE(udc_at + 100);
+    if (state_file && !leave && verdict == V_WAIT && host_at >= 0) DUE(host_at + (config2 ? car_ms : auto_ms) + 1);
+    if (state_file && (audio_on || flowing || *trouble)) DUE(health_at + HEALTH_MS);
+    if (active && disabled_at >= 0) DUE(disabled_at + gap_ms + 1);
+    if (end) DUE(end);
+    if (artw.fd >= 0 || lload.fd >= 0) DUE(now + 250); /* a child's end is a hang-up poll sees; a guard all the same */
+#undef DUE
+    if (w < 0 || w > LOOP_MAX_MS) w = LOOP_MAX_MS;
+    if (clock_file && w > 100) w = 100;
+    return w;
+}
+
 static int kind_of(const char *s) {
     for (int k = 0; k < K_COUNT; ++k)
         if (!strcmp(s, kinds[k])) return k;
@@ -1372,9 +1407,14 @@ int main(int argc, char **argv) {
     started_at = boot_ms();
     state_write();
     while (!stopping && !leave) {
-        struct pollfd p[MAX_INST];
-        for (int k = 0; k < ninst; ++k) p[k].fd = in[k].ep0, p[k].events = POLLIN, p[k].revents = 0;
-        int n = poll(p, ninst, iap2_mode ? 10 : 500);
+        struct pollfd p[MAX_INST + 4];
+        int np = 0;
+        for (int k = 0; k < ninst; ++k) p[np].fd = in[k].ep0, p[np].events = POLLIN, p[np++].revents = 0;
+        /* the writer's reports gone and the children's bytes wake it too (loop_due) */
+        int more[4] = { done_fd, lload.fd, artw.fd, sids.fd };
+        for (int k = 0; iap2_mode && k < 4; ++k)
+            if (more[k] >= 0) p[np].fd = more[k], p[np].events = POLLIN, p[np++].revents = 0;
+        int n = poll(p, (unsigned long)np, iap2_mode ? loop_due(end) : 500);
         loop_begin();
         if (n < 0 && ERRNO != EINTR) {
             snprintf(msg, sizeof msg, "poll failed, errno %d", ERRNO);
@@ -1394,6 +1434,8 @@ int main(int argc, char **argv) {
                 logline(in[k].name, msg);
             }
         }
+        loop_step("the writer's reports");
+        if (iap2_mode) io_backlog(); /* its pipe drained each pass, as poll wakes for it */
         loop_step("the clocks");
         sleep_poll();
         loop_step("the rate file");
@@ -1405,6 +1447,7 @@ int main(int argc, char **argv) {
         if (iap2_mode) art_poll();
         loop_step("the library's read");
         if (iap2_mode) lib_load_poll(); /* its child's bytes, whether or not the car still waits for them */
+        if (iap2_mode) sid_index_poll(); /* the stream-path index's child's, so it never waits on a full pipe */
         loop_step("the host's verdict");
         host_poll(now);
         loop_step("the audio's health");

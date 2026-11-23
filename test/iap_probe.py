@@ -2069,5 +2069,40 @@ def test_a_catalogue_that_cannot_be_read_is_not_an_empty_one(probe, tmp_path, mo
     assert 'waited for the card' in log.read_text()
 
 
+
+def wakeups(pid, seconds):
+    """The process's voluntary context switches over seconds: each sleep in poll that ended is one."""
+    def count():
+        for line in pathlib.Path(f'/proc/{pid}/status').read_text().splitlines():
+            if line.startswith('voluntary_ctxt_switches:'):
+                return int(line.split()[1])
+    a = count()
+    time.sleep(seconds)
+    return count() - a
+
+
+def test_the_loop_sleeps_until_something_is_due(probe, tmp_path):
+    """car-bt-power.md #6: q2-iap's loop woke every 10 ms whatever it was doing, a charger overnight included (the
+    gadget stays up, unseen by it), and read the rate file 50 times a second: 6,000 wakeups a minute. It sleeps now
+    until a request, a report gone, a child's bytes or the soonest deadline. On a charger (a host that never addresses
+    the Q2) that is the controller's state every 100 ms; with a car identified, its link idle and its audio not asked
+    for, the rate file every 250 ms. Counted over 2 s here: at most 30 wakeups each (the old loop's were about 200)."""
+    p, ffs, log, state, udc = car_daemon(probe, tmp_path, '--iap2', kinds=('hid',))
+    try:
+        time.sleep(0.3)
+        charger = wakeups(p.pid, 2.0)
+    finally:
+        p.terminate()
+        p.wait(5)
+    (tmp_path/'car').mkdir()
+    p, car, fd, log, files = bmw_up(probe, tmp_path/'car')
+    try:
+        time.sleep(0.3)
+        idle = wakeups(p.pid, 2.0)
+    finally:
+        stop(p, fd)
+    assert charger <= 30 and idle <= 30, (charger, idle)
+
+
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-q', *sys.argv[1:]]))

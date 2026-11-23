@@ -1871,6 +1871,38 @@ static void iap2_tick(void) {
     pump();
 }
 
+/* The soonest anything here is due, in ms from now (0: at once), or -1 for nothing: what q2_iap.c's poll sleeps to,
+ * besides the car's requests, the writer's reports gone and the children's pipes, which wake it themselves. Each
+ * deadline is one iap2_tick tests: a packet's retry, the retries held, the cumulative ack, the quiet's limit, the
+ * health line, authentication's and identification's answers, CarPlay's availability, a held button's scan, a list's
+ * transfer the car never started, Now Playing's look and Up Next's announcement. */
+static long due_min(long w, long now, long at) {
+    long d = at - now;
+    if (d < 0) d = 0;
+    return w < 0 || d < w ? d : w;
+}
+static long iap2_due(long now) {
+    long w = -1;
+    if (!seen) return -1;
+    if (link_up && count && rto) {
+        long since = slots[head].sent > wire_busy_at ? slots[head].sent : wire_busy_at;
+        if (slots[head].tries) w = due_min(w, now, since + rto + 1);
+        if (slots[head].tries && !retries_held) w = due_min(w, now, slots[head].sent + rto * (long)max_sends + 1);
+    }
+    if (waiting_since) w = due_min(w, now, (heard_at > waiting_since ? heard_at : waiting_since) + link_quiet_ms);
+    if (link_up && health_ms) w = due_min(w, now, link_health_at + health_ms);
+    if (link_up && unacked && cack) w = due_min(w, now, unacked_since + cack);
+    if (auth_due) w = due_min(w, now, auth_due);
+    if (ident_due) w = due_min(w, now, ident_due);
+    if (availability_due) w = due_min(w, now, availability_due);
+    if (held) w = due_min(w, now, scanning ? scan_at + SCAN_KEEP_MS : held_at + HOLD_MS);
+    if (ls.phase == LIB_LISTS && ls.x_state == 1) w = due_min(w, now, ls.x_since + LIST_WAIT_MS + 1);
+    if (identified && now_playing) w = due_min(w, now, np_at + 500);
+    if (ql_seen_at) w = due_min(w, now, ql_seen_at + 1000);
+    if (q_count && link_up && (!rto || count < window)) w = 0; /* the queue has room to go */
+    return w;
+}
+
 /* A new connection: everything forgotten, the detect awaited. */
 static void iap2_connect(const struct iap2_host *h) {
     H = h;
