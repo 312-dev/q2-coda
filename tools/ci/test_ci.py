@@ -1390,3 +1390,21 @@ def test_other_files_plan_neither_car_suite(path):
     other = affected.plan_for({path: {1}}, REPO).as_dict()['other']
     other = other if other != ALL else ()
     assert 'test/coda_rc_e2e.py' not in other and 'test/iap_probe.py' not in other
+
+
+def test_an_everything_plan_runs_the_car_suites_and_the_seam(monkeypatch, tmp_path):
+    """affected.py --all and an integ/* run without a base plan everything: the image's last full run before the
+    owner drives with it ran neither route 1's probe nor Car Remote end to end, the two suites the car depends on.
+    They are PLANNED, so an everything plan and a release's gate hold them, as the Subsonic seam already was;
+    coda_rc_e2e leases its own emulator (--pool BUILD), iap_probe builds q2-iap for this machine and needs no build.
+    test/coda_rc_iroh_e2e.py stays by hand (n0's public relay)."""
+    calls = handed(monkeypatch)
+    every = affected.Plan()
+    every.everything('x')
+    assert affected.run(every, '/b', 'py', logs=tmp_path) == 0
+    suites = calls[0][0]
+    assert suites['test/coda_rc_e2e.py'].argv == ['py', 'test/coda_rc_e2e.py', '--pool', '{build}']
+    assert suites['test/coda_rc_e2e.py'].needs_build and suites['test/coda_rc_e2e.py'].heavy
+    assert suites['test/iap_probe.py'].argv == ['py', 'test/iap_probe.py']
+    assert 'test/subsonic_seam.py' in suites and 'test/coda_rc_iroh_e2e.py' not in suites
+    assert {'test/coda_rc_e2e.py', 'test/iap_probe.py', 'test/subsonic_seam.py'} <= set(gate.TIERS['release'])
