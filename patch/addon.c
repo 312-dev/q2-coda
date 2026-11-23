@@ -91,7 +91,8 @@ enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR, LAY_ALBUM };
 #define RESTART_MS 20000 /* Retry's restart starts the app by then, its old loop gone or not */
 #define QUIT_MS 20000    /* the Apps page's worker waits at most this long for an app to end */
 #define APP_ID 16        /* an id's bytes, its NUL included */
-#define QR_RAW 1536      /* an app's status file as far as it is read (poll_one, qr_refresh) */
+#define QR_RAW 1536      /* an app's status file's lines as kept (app_state) */
+#define STATE_SCAN (16 << 10) /* and as far as it is read: a version-40 qr= (7,965 bytes) and more */
 #define CARD "/mnt/mmc"
 #define BUNDLED "/usr/lib/q2apps" /* the firmware's own copies (tools/build.py BUNDLED_DIR) */
 #define TAGS CARD "/.q2/apps"      /* an App Store install's tag (netupdate.c app_file) */
@@ -135,6 +136,37 @@ static struct {
     int n, shown, order[APPS_MAX]; /* order: the slots on the card, by name */
     int games, game[APPS_MAX];     /* the card games among them, by name too */
 } ap __attribute__((section(".scratch")));
+
+/* An app's state file into raw as state_read lays it out (a newline first, NUL-terminated) and its
+ * kept bytes' count, but line by line: a line longer than the room left in raw, a sign-in's qr=
+ * (up to 7,965 bytes of hex, more than QR_RAW), is left out whole and the lines after it are
+ * read, so a hold=, sync=, reach= or an ack written after the code is not lost. Read no further
+ * than STATE_SCAN bytes of the file. The QR page reads the file whole itself (qr_refresh). */
+static unsigned app_state(const char *path, char *raw, unsigned size) {
+    void *f = fopen(path, "rb");
+    unsigned n = 1, start = 1, seen = 0, got;
+    int skip = 0;
+    char chunk[256];
+    raw[0] = '\n';
+    while (f && seen < STATE_SCAN && (got = fread(chunk, 1, sizeof chunk, f)) > 0) {
+        seen += got;
+        for (unsigned k = 0; k < got; ++k) {
+            char c = chunk[k];
+            if (skip) { /* the rest of a line too long to keep */
+                skip = c != '\n';
+            } else if (n < size - 1) {
+                raw[n++] = c;
+                if (c == '\n') start = n;
+            } else { /* no room for the line: take it back, and pass over what is left of it */
+                n = start;
+                skip = c != '\n';
+            }
+        }
+    }
+    if (f) fclose(f);
+    raw[n] = 0;
+    return n - 1;
+}
 
 /* An id goes into shell commands: lowercase letters, digits and '-' only. */
 static int valid_id(const char *s) {
@@ -375,12 +407,19 @@ static void stop_cmd(const char *pid, char *cmd, unsigned n) {
     snprintf(cmd, n, "kill $(cat %s) 2>/dev/null || rm -f %s", pid, pid);
 }
 
+/* The app's run script started in the background: system() waits only for its shell, not for the
+ * script, which exits at once when the app runs already and otherwise copies itself and the app to
+ * /tmp and forks its loop (about 210 ms on the emulator, which the UI pass waited for; 65 ms with
+ * the "&", the shell's own start under qemu). Its loop is reparented when the shell ends, so no
+ * child is left for demo to reap. */
 static void launch(app_t *a) {
     const char *busy = shelf_busy();
     if (busy && !strcmp(busy + 1, a->id)) return; /* the Apps page is replacing its files */
     a->launched = 1;
     a->launch_at = time_now_ms();
-    system(a->run); /* exits at once when the app runs already */
+    char cmd[sizeof a->run + 2];
+    tk_snprintf(cmd, sizeof cmd, "%s &", a->run);
+    system(cmd);
 }
 
 /* The server library's play hand-off (catalogue.c catalogue_load, docs/server-library.md): app id
@@ -572,7 +611,7 @@ static void resume_poll(void) {
     }
     char raw[QR_RAW], v[24], want[16], why[40];
     unsigned k = (unsigned)tk_snprintf(want, sizeof want, "%u ", rs.seq);
-    if (state_read(rs.app->state, raw, sizeof raw)) {
+    if (app_state(rs.app->state, raw, sizeof raw)) {
         field(raw, "resumeack", v, sizeof v);
         if (!strncmp(v, want, k) && v[k] >= '1' && v[k] <= '9') {
             char code[2] = { v[k], 0 };
@@ -1345,11 +1384,9 @@ static void poll_one(app_t *a) {
             a->relaunch = 0, launch(a);
         return;
     }
-    /* hold= may come anywhere, after the long qr= too. ponytail: only the first QR_RAW - 2 bytes
-     * (1,534) are read, so a hold= further on reads as 0; the QR page's largest code (177
-     * modules, QR_HEX) takes 7,965. A longer file needs a larger buffer here. */
+    /* hold= may come anywhere, after the long qr= too (app_state) */
     char raw[QR_RAW];
-    state_read(a->state, raw, sizeof raw);
+    app_state(a->state, raw, sizeof raw);
     a->hold = number(raw, "hold") == 1;
     if (a->hold) reset_poweroptions_timer(1, 1, 0); /* standby, auto power-off; not the screen's */
     sync_read(a, raw);
@@ -1364,9 +1401,8 @@ static void poll_one(app_t *a) {
 /* The status row's sync (status_row.c, docs/internals.md#card-app-sync): what each running app's
  * state file says, sync=check while it checks its server or its metadata, sync=down DONE TOTAL
  * while it downloads songs (DONE of TOTAL, in any unit), no key while idle. Read at poll_one's
- * pace from the read it makes anyway. ponytail: like hold=, read from the file's first QR_RAW - 2
- * bytes, and an app writes its keys in name order, so a sync= after a sign-in's long qr= reads as
- * none; sign-in and a sync do not run at once in q2-subsonic. */
+ * pace from the read it makes anyway (app_state, which keeps the lines after a sign-in's long
+ * qr=). */
 static unsigned long long digits(const char **c) {
     unsigned long long x = 0;
     while (**c == ' ') ++*c;
@@ -2419,19 +2455,24 @@ static const char *row_album(int i) {
         if (*e == ' ' || *e == '/') return 0; /* one word, a name, never a path */
     return c + 6;
 }
-/* Row i's album's cover: the app's catalogue cover for its album id
- * (docs/server-library.md#covers), when the file is there; 0 otherwise. */
-static int album_cover(int i, char *url, unsigned size) {
+/* Row i's album's cover's URL: the app's catalogue cover for its album id
+ * (docs/server-library.md#covers), there on the card or not; 0 for a row with no album. */
+static int album_url(int i, char *url, unsigned size) {
     const char *id = row_album(i);
     if (!id) return 0;
     tk_snprintf(url, size, "file:///mnt/mmc/.%s/covers/%s.jpg", app()->id, id);
-    return !access(url + 7, 0);
+    return 1;
 }
+/* The same, for a cover about to be drawn: 0 too when the file is not there. */
+static int album_cover(int i, char *url, unsigned size) {
+    return album_url(i, url, size) && !access(url + 7, 0);
+}
+/* Every row's cover let go by name, with no look for its file: unloading a name that was never
+ * loaded does nothing. */
 static void album_covers_drop(void) {
     char url[96];
     for (int i = 0; i < top()->n; ++i)
-        if (album_cover(i, url, sizeof url))
-            image_manager_unload_bitmap_by_name(image_manager(), url);
+        if (album_url(i, url, sizeof url)) image_manager_unload_bitmap_by_name(image_manager(), url);
 }
 /* A song row's subtitle's parts (each "" when not sent), as an app with "artist" or "album"
  * writes it, "<album or artist> · <length> · <status>": the length is the first part of digits
@@ -3564,7 +3605,7 @@ int addon_radio(void) {
     app_t *a = qa.app;
     char raw[512], seed[8];
     on = 0;
-    if (a && playback_loads == qa.loads && state_read(a->state, raw, sizeof raw)) {
+    if (a && playback_loads == qa.loads && app_state(a->state, raw, sizeof raw)) {
         field(raw, "radio", seed, sizeof seed);
         on = seed[0] && seed[0] != '\r';
     }
@@ -3682,7 +3723,7 @@ int addon_lyrics_ask(const char *path, unsigned seq) {
 int addon_lyrics_answer(unsigned seq, const char *path) {
     char raw[QR_RAW], v[24], want[16];
     lyrics_send(path);
-    if (!lq.app || lq.pending || !state_read(lq.app->state, raw, sizeof raw)) return -1;
+    if (!lq.app || lq.pending || !app_state(lq.app->state, raw, sizeof raw)) return -1;
     field(raw, "lyricsack", v, sizeof v);
     unsigned k = (unsigned)tk_snprintf(want, sizeof want, "%u ", seq);
     return strncmp(v, want, k) || v[k] < '0' || v[k] > '9' ? -1 : v[k] - '0';
@@ -3714,7 +3755,7 @@ int addon_radio_stop(unsigned seq) {
 int addon_radio_answer(unsigned seq) {
     char raw[QR_RAW], v[24], want[16];
     radio_send();
-    if (!rq.app || !state_read(rq.app->state, raw, sizeof raw)) return -1;
+    if (!rq.app || !app_state(rq.app->state, raw, sizeof raw)) return -1;
     field(raw, "radioack", v, sizeof v);
     unsigned k = (unsigned)tk_snprintf(want, sizeof want, "%u ", seq);
     return strncmp(v, want, k) || v[k] < '0' || v[k] > '9' ? -1 : v[k] - '0';

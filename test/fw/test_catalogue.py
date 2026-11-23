@@ -578,7 +578,7 @@ def test_a_catalogue_app_not_running_is_started_and_handed_the_list_once_it_list
     fw.mock('fw_system', lambda cmd, *_: started.append(C.string_at(cmd)) or 0)
     q = queue(rig, ['/mnt/mmc/Music/a.flac', url('s2'), url('s1')])
     assert load(rig, q, 1)[0] == 2
-    assert started == [f'/bin/sh /mnt/mmc/.{APP}/run'.encode()] and b'catalogue' in rig.files.files['/tmp/q2-addon.caps']
+    assert started == [f'/bin/sh /mnt/mmc/.{APP}/run &'.encode()] and b'catalogue' in rig.files.files['/tmp/q2-addon.caps']
     assert catplay not in rig.files.files and sock not in rig.files.files
     rig.poll(6)  # 6.6 s starting: no catplay yet, and nothing played meanwhile
     assert catplay not in rig.files.files and not rig.played
@@ -670,7 +670,7 @@ def test_a_server_song_pressed_while_smart_wi_fi_has_the_radio_off_waits_for_the
     assert not off.started and not rig.played
     rig.online = True
     off.tick(2)
-    assert off.started == [f'/bin/sh /mnt/mmc/.{APP}/run'.encode()]
+    assert off.started == [f'/bin/sh /mnt/mmc/.{APP}/run &'.encode()]
     rig.files.files[f'/tmp/q2-{APP}'] = b'42'
     rig.files.files[f'/tmp/q2-{APP}.browse.sock'] = b''  # it listens
     off.tick(1)
@@ -1883,7 +1883,7 @@ def test_a_signed_in_catalogue_app_starts_once_at_boot(rig, fw):
     """Its catalogue, covers and play reports catch up without its page opened; it idle-exits as before."""
     started = autostart_rig(rig, fw)
     rig.poll(1)
-    assert started == [f'/bin/sh /mnt/mmc/.{APP}/run'.encode()] and b'libsource' in rig.files.files['/tmp/q2-addon.caps']
+    assert started == [f'/bin/sh /mnt/mmc/.{APP}/run &'.encode()] and b'libsource' in rig.files.files['/tmp/q2-addon.caps']
     assert rig.files.files['/tmp/q2-addon.library'] == b'server\n'
     rig.poll(25)  # past the next scans: started once
     assert len(started) == 1

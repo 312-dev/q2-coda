@@ -340,7 +340,7 @@ int thumb(const char *src, const char *dst, int w, int h);
 extern volatile unsigned ff_kills; /* coverflow.c: ffmpeg runs killed or never started */
 int card_space(const char *dir);
 int card_room(const char *dir, unsigned mb, unsigned pct);
-unsigned hash_bytes(unsigned h, const unsigned char *s, unsigned n);
+unsigned hash_bytes(unsigned h, const unsigned char *s, unsigned n); /* hash.c: FNV-1a */
 unsigned fnv(unsigned h, const unsigned char *s);
 void stop_timer(unsigned *timer), rearm(unsigned *timer, int (*fn)(const void *), unsigned ms);
 int return_key(void *event, unsigned *timer,
@@ -389,10 +389,8 @@ int thread_lower(int idle);   /* coverflow_loader.c: a worker's nice 19 and its 
 int ringnav_statx(int dirfd, const char *path, int flags, unsigned mask, void *buf);
 void *coverflow_album_tracks(void *r);
 unsigned album_id(void *r), album_dir(const char *p, int disc);
-/* navigation.c: Cover Flow's glide and its letter */
+/* nav/home_carousel.c: Cover Flow's glide */
 int carousel_glide(void *w, int goal, unsigned ms, int easing);
-void coverflow_letter(void *w, unsigned letter, unsigned now);
-void coverflow_letter_hold(void *w, unsigned letter);
 int ringnav_big_library(void); /* Display's Fast Navigation: letters, years and half copies */
 /* A letter with this bit is the Year sort's year instead, in its low bits, 0 undated. */
 #define CF_YEAR 0x80000000u

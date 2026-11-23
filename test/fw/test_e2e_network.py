@@ -696,7 +696,7 @@ class CardApps:
     app served here listens on its page's socket half a second after it starts."""
     def __init__(self, w):
         self.w, self.started = w, {}
-        w.shell.hook(r'/bin/sh /mnt/mmc/\.([a-z0-9-]+)/run', self.run)
+        w.shell.hook(r'/bin/sh /mnt/mmc/\.([a-z0-9-]+)/run &', self.run)  # launch(): in the background
         w.shell.hook(r'kill \$\(cat (/tmp/q2-[a-z0-9-]+)\) 2>/dev/null \|\| rm -f \1', lambda m: w.card.drop(m[1]))
 
     def run(self, m):
@@ -1088,7 +1088,7 @@ def test_the_app_store_updates_an_app_stopping_it_first_and_keeping_what_it_save
     assert stop < first and '/tmp/q2-foo' not in w.card.files
     assert streaming(w) == ['Foo']
     w.fn('addon_open', C.c_int, C.c_void_p, C.c_void_p)(0, None)  # Streaming's row starts the new one
-    assert w.shell.ran.count('/bin/sh /mnt/mmc/.foo/run') == 1
+    assert w.shell.ran.count('/bin/sh /mnt/mmc/.foo/run &') == 1
 
 
 def test_the_app_store_removes_an_app_with_what_it_saved_and_without_wifi(w):
@@ -1300,7 +1300,7 @@ def test_an_installed_app_draws_its_page_and_its_sync_updates_the_library_once_t
     assert streaming(w) == ['Foo']
     w.fn('addon_open', C.c_int, C.c_void_p, C.c_void_p)(0, None)  # Foo's Streaming row
     page = w.ui.top()
-    assert w.shell.ran.count('/bin/sh /mnt/mmc/.foo/run') == 1
+    assert w.shell.ran.count('/bin/sh /mnt/mmc/.foo/run &') == 1
     w.ui.run(250)
     assert w.ui.texts(page) == ['Starting Foo…']  # no socket yet
     w.ui.run(1000)

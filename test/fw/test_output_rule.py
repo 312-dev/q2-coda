@@ -222,3 +222,80 @@ def test_now_playing_to_show_what_plays_and_other_pages_ask_nothing(fw, page, cl
     """0xff opens Now Playing on what plays or is paused, starting nothing (the status bar's button, Control Center);
     another page's context may not be a queue's at all (the playlist page's is a number), so it is never read."""
     assert nav_to(fw, 1, page, cls) == ([], [page], 0)
+
+
+# ---- the payload's starts that set something on the way to the navigator ----
+
+@pytest.fixture
+def refusing(fw, mcl):
+    """A fake AWTK whose navigator goes through ringnav_nav_to, as the device's does, with nothing to play to: the
+    UI, what the gate was asked and the stock calls a start makes."""
+    from test_nav_library_pages import Ui
+    ui = Ui(fw)
+    asked = forbid(fw, 1)
+    fw.mock('stock_nav_to_trampoline', lambda name, info, *_: ui.navigate(name, info) or 0)
+    nav_to = fw.fn('ringnav_nav_to', C.c_int, C.c_void_p, C.c_void_p)
+    fw.mock('navigator_to_with_context', lambda name, info, *_: nav_to(name, info))
+    fw.mock('mclLoadPlayList', lambda *_: 0)
+    fw.mock('window_manager_close_window_force', lambda *_: 0)
+    return ui, asked
+
+
+def songs_of(fw, ui, n=4):
+    from test_nav_library_pages import Songs
+    song = Songs()
+    fw.songs_kept = song  # the records' strings live as long as the test
+    return [song(b'/m/%c/%d.flac' % (65 + i % 2, i), album=b'%c' % (65 + i % 2)) for i in range(n)]
+
+
+def unchanged(fw, ui):
+    """What a refused start must leave: the advanced play mode, stock's play mode, the resume record, and no page."""
+    return ([fw.fn('playback_option', C.c_int, C.c_int)(k) for k in range(3)], fw.calls('config_playmode'),
+            fw.calls('mclLoadPlayList'), C.string_at(C.addressof(C.c_char.in_dll(fw.lib, 'fw_ctx_g_memory_info')), 3476),
+            ui.played, ui.toasts, [ui.name.get(w) for w in ui.windows])
+
+
+def test_a_refused_shuffle_changes_no_mode_and_shows_only_the_gate_s_message(fw, refusing):
+    """The emulator (2026-11-22, the refused-tap agent): Songs' Shuffle with no output switched to Shuffle and showed
+    "Shuffled Songs" under the toast. shuffle_play (Songs' and Home's Shuffle Songs, an album's, an artist's and a
+    playlist's Shuffle) asks the gate before its mode changes; its answer is still the list's size, so no caller
+    adds "No songs"."""
+    ui, asked = refusing
+    songs = songs_of(fw, ui)
+    assert fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(1, 4) == 1  # an advanced repeat the user chose
+    before = unchanged(fw, ui)
+    assert fw.fn('shuffle_play', C.c_int, C.c_void_p)(ui.deques.new(songs)) == 4
+    assert asked == [0] and unchanged(fw, ui) == before
+
+
+def test_a_refused_shuffle_songs_row_says_nothing_of_the_library(fw, refusing):
+    from test_nav_library_pages import Library, call
+    ui, asked = refusing
+    Library(fw, ui, songs_of(fw, ui))
+    before = unchanged(fw, ui)
+    call(fw, 'shuffle_songs')
+    assert asked == [0] and unchanged(fw, ui) == before
+
+
+@pytest.mark.parametrize('folders', [0, 1])
+def test_a_refused_shuffle_albums_or_folders_loads_no_queue(fw, refusing, folders):
+    """Shuffle Albums and Folders loaded the whole library as the queue (playback_groups' mclLoadPlayList) before
+    the navigator refused its Now Playing: asked first, before the library is read."""
+    from test_nav_library_pages import Library
+    ui, asked = refusing
+    library = Library(fw, ui, songs_of(fw, ui))
+    before = unchanged(fw, ui)
+    fw.fn('library_lists__shuffle_groups', C.c_int, C.c_void_p, C.c_void_p)(folders, None)
+    assert asked == [0] and unchanged(fw, ui) == before and library.asked == []
+
+
+def test_a_refused_play_folder_keeps_now_playing_and_the_resume_album(fw, refusing):
+    """play_folder closed a Now Playing on top, and wrote an album queue's album into the resume record, before the
+    navigator refused the new one: Cover Flow's tracks and an album's Play over Now Playing left Return without it."""
+    ui, asked = refusing
+    songs = songs_of(fw, ui)
+    np = ui.new('window_create', 0, 0, 0, 0, 0)
+    ui.name[np] = 'playing_page'
+    before = unchanged(fw, ui)
+    fw.fn('play_folder', None, C.c_void_p, C.c_int, C.c_int)(ui.deques.new(songs), 1, 0xff10)
+    assert asked == [0] and unchanged(fw, ui) == before and not fw.calls('window_manager_close_window_force')

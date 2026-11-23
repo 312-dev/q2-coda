@@ -380,6 +380,7 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             # The UI loop stalled (system.c stall_write): what its thread was doing
             [ -f /mnt/data/q2-stall ] && {{ echo "== stall"; cat /mnt/data/q2-stall; }} >> $c
             rm -f $m
+            u=1
         }}
         rm -f /mnt/data/q2-cf-trace /mnt/data/q2-stall
         # Baidu Netdisk's sign-in, which stock sends over plain HTTP: Q2 Muse has no Baidu row to use it from
@@ -388,6 +389,29 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             i=0
             while [ $i -lt 60 ] && ! grep -q ' /mnt/mmc ' /proc/mounts; do usleep 500000; i=$((i+1)); done
             grep -q ' /mnt/mmc ' /proc/mounts || exit
+            # an unclean end (u, docs/internals.md#unified-log): the unified log's files, the car's newest log and
+            # dmesg kept in a numbered folder under .q2muse/crashes before the logs roll on, named in the crash
+            # log; only with 50 MB free besides them, the newest five kept, 10 MB at most in all. Off the boot's
+            # path (this subshell runs in the background), the copies niced.
+            [ "$u" ] && {{
+                L=/mnt/mmc/.q2muse/logs; K=/mnt/mmc/.q2muse/crashes
+                n=$(( $(cat $K/.seq 2>/dev/null || echo 0) + 1 ))
+                d=$K/$(printf %05d $n)-$(date -u +%Y%m%dT%H%M%SZ)
+                f=$(df -k /mnt/mmc 2>/dev/null | awk 'NR == 2 {{ print $4 }}')
+                if [ "${{f:-0}}" -gt $(( $(du -sk $L 2>/dev/null | cut -f1) + 51200 )) ] && mkdir -p $d; then
+                    echo $n > $K/.seq
+                    for x in $L/q2-log.* $L/q2-heat.* $L/q2-bt.* $L/q2-btev.* $L/q2car.log $L/q2car.log.dmesg; do
+                        [ -f "$x" ] && nice -n 19 cp "$x" $d/
+                    done
+                    dmesg > $d/dmesg 2>/dev/null
+                    sync
+                    echo "== evidence ${{d#/mnt/mmc/}}" >> $c
+                    ls -1d $K/*/ | sort -r | tail -n +6 | while read x; do rm -rf "$x"; done
+                    while [ "$(du -sk $K | cut -f1)" -gt 10240 ] && [ "$(ls -1d $K/*/ | wc -l)" -gt 1 ]; do
+                        rm -rf "$(ls -1d $K/*/ | sort | head -n 1)"
+                    done
+                fi
+            }}
             # the card keeps the two before it: q2-crash.log.1, then .2; they move only once the copy is
             # whole (a full card or a power cut leaves them, and the log stays on /mnt/data)
             l=/mnt/mmc/q2-crash.log
@@ -870,6 +894,10 @@ LYRIC_ROWS = (0x53d10c, 0x0411f95b)
 # ringnav_lrc_open, which keeps a copy that ringnav_lyric reads again, without its blank lines and, for iPod's
 # lyrics page, with its milliseconds and word stamps.
 LYRIC_OPEN = (0x5bc30c, 0x0320f809)
+# toolsGetAlbumCover's jalr to stock's thumbnailer (cover_thumb_file, 0x5cb3e0) on the embedded picture it wrote to
+# /tmp/.tmp_picture becomes jal coverflow_album_pic, which refuses a 16-bit PNG (stock reads its pixels as twice as
+# many 8-bit ones, in stripes), so Cover Flow, Home's slideshow and the grids go on to ffmpeg for it.
+ALBUM_PIC = (0x5d7140, 0x0320f809)
 # parse_albumcovertask_thd's jalr toolsGetAlbumCover (Albums grids; Folder view's folder and track rows),
 # each with its lw $t9, become jal coverflow_grid_cover, which gives ffmpeg the Ogg pictures stock skips;
 # the Albums grid's (first, before stock's toolsGetExternCover) jal coverflow_album_cover, and the folder
@@ -1971,6 +1999,7 @@ FUNCTIONS = {
  'widget_remove_child': ('int', 'void *, void *'),
  'widget_add_child': ('int', 'void *, void *'),
  'toolsThumbSpecCover': ('int', 'const char *, const char *, int, int'),
+ 'cover_thumb_file': ('int', 'const char *, const char *, int, int'),  # PRIVATE_FUNCTIONS
  'toolsGetAlbumCover': ('int', 'const char *, const char *, int, int'),
  'toolsGetExternCover': ('int', 'const char *, const char *, int, int'),
  'window_create': ('void *', 'void *, int, int, int, int'),
@@ -2167,6 +2196,7 @@ PRIVATE_FUNCTIONS = {
     'quick_lock': HOOKS['quick_lock'][0],
     "playlist_rebuild": HOOKS['playlist_rebuild'][0],  # picker init and re-entry rebuild all rows
     "stock_search": 0x5350d4,
+    'cover_thumb_file': 0x5cb3e0,  # stock's thumbnailer of a picture file, which toolsGetAlbumCover calls (ALBUM_PIC)
     "slide_menu_item_width": 0x605ed0,
     "slide_menu_on_scroll_done": 0x6064e4,
     "mcl_preload": HOOKS['mcl_preload'][0],
@@ -2317,7 +2347,7 @@ PAYLOAD_ROOTS = ['compact_set_row_layout', 'kb_host_open', 'kb_open_hint', 'ipod
                  'ringnav_albumcovers', 'ringnav_art_header', 'ringnav_art_name', 'ringnav_artist_art_name',
                  'ringnav_artist_covers', 'ringnav_batt_level', 'ringnav_batt_status', 'ringnav_batt_voltage', 'ringnav_boot', 'ringnav_bt_connect_start', 'ringnav_class_icon',
                  'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text',
-                 'ringnav_dark_usleep', 'ringnav_dialog_close', 'ringnav_ellipsis_text', 'ringnav_gbk_tag', 'ringnav_glyph_stamp',
+                 'ringnav_dark_usleep', 'ringnav_dialog_close', 'ringnav_ellipsis_text', 'ringnav_gbk_tag', 'coverflow_album_pic', 'ringnav_glyph_stamp',
                  'ringnav_hold_info', 'ringnav_hold_timer', 'ringnav_hscroll_lull', 'ringnav_id3_path',
                  'ringnav_lyric_follow', 'ringnav_lyric_rows', 'ringnav_mainscheduling', 'ringnav_play_cover_wait', 'ringnav_scan_dir',
                  'now_page_status', 'now_page_time', 'ringnav_scan_refresh', 'ringnav_shuffle', 'ringnav_song_unknown', 'ringnav_table_drag',
@@ -2798,6 +2828,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, 0x5bc304))[0] == 0x8f99f5ac,
           'lyric file: expected fopen import')
     patch_word(patched, *LYRIC_OPEN, jal(ps['ringnav_lrc_open']), 'lyric files read as tags are')
+    patch_word(patched, *ALBUM_PIC, jal(ps['coverflow_album_pic']), 'a 16-bit embedded PNG goes to ffmpeg')
     for call, load, fn in GRID_COVER:
         check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, load))[0] == 0x8f99b76c,
               'grid cover: expected toolsGetAlbumCover import')

@@ -65,6 +65,7 @@ static void cancel(void) {
     wifi_connectstatus = 0;
     wf.ssid[0] = 0;
     wf.ask = 0;
+    wifi_rows_end(); /* nothing is first under Networks (wifi_rows.c) */
 }
 
 /* Ends the join that is trying, if one is (wifi_switch's guard: Wi-Fi on, a join going, stock's init
@@ -91,6 +92,7 @@ int ringnav_wifi_switch_row(void *button, void *event) {
         return 0;
     }
     int r = stock_wifi_switch_row_trampoline(button, event);
+    if (row == 1 && wifi_searchtime) wifi_rows_scanned(); /* a failed network's mark goes */
     if (row == 1) wifi_busy_show(window_of(button));
     return r;
 }
@@ -106,6 +108,7 @@ int ringnav_wifi_network_row(void *button, void *event) {
         ringnav_wifi_rows(win); /* as stock's click rebuilds after its actions */
         return 0;
     }
+    if (ssid) wifi_rows_follow(ssid); /* the selection goes with it to the top (wifi_rows.c) */
     return stock_wifi_network_row_trampoline(button, event);
 }
 
@@ -136,6 +139,8 @@ int ringnav_wifi_checkstatus(void) {
         if (!connecting()) wf.ssid[0] = 0;
         return r;
     }
+    /* first under Networks with its mark until the next join or scan (wifi_rows.c) */
+    wifi_rows_failed(wf.ssid, wf.shook && !wf.linked);
     int at = find(wf.ssid);
     if (!wifi_page() || at < 0 || !secured(at)) {
         wf.ssid[0] = 0;
@@ -188,6 +193,7 @@ static int ask_again(const void *unused) {
     if (!r || !networkCheckSsidPassword((const char *)P(r, 4), (const char *)prepare_linkpasswd))
         return 0;
     if (networkCheckConnectedSsid(ssid)) wifi_action_deleterecord(at);
+    wifi_rows_follow(ssid);
     wifi_action_connect(at);
     g_wifisetting_flag = 1; /* the page's timer rebuilds: the row reads Connecting */
     return 0;
@@ -198,6 +204,7 @@ static void forget_answer(void *ctx, int row, int toggle_on) {
     int at = row == 1 ? find(wf.forget) : -1;
     if (at < 0) return;
     if (connecting() && !tk_strcmp(wf.forget, (const char *)wifi_name)) cancel();
+    wifi_rows_end();              /* the joined network, or one that failed, first no more */
     wifi_action_deleterecord(at); /* stock's Forget: disconnects the joined one first */
     g_wifisetting_flag = 1;
     toast("Network Forgotten");
@@ -208,17 +215,9 @@ static void forget_answer(void *ctx, int row, int toggle_on) {
  * cannot reach. */
 int wifi_flows_hold(void *top) {
     if (tk_strcmp(name_of(top), WIFI_PAGE)) return 0;
-    void *view = widget_lookup(top, WIFI_VIEW, 1), *b = (void *)0;
-    /* the selection's id counts the list's tap targets (navigation.c load_rows): its rows' buttons,
-     * the disabled heading passed */
-    int sel = view ? widget_get_prop_int(view, SEL, -1) : -1;
-    for (unsigned i = 0, n = view ? widget_count_children(view) : 0; i < n && sel >= 0 && !b; ++i) {
-        void *item = widget_get_child(view, i),
-             *c = widget_count_children(item) ? widget_get_child(item, 0) : (void *)0;
-        if (c && widget_get_visible(item) && widget_get_prop_bool(item, "enable", 1) &&
-            !tk_strcmp(widget_get_type(c), "button") && !sel--)
-            b = c;
-    }
+    void *view = widget_lookup(top, WIFI_VIEW, 1);
+    /* the selection's id counts the list's tap targets (navigation.c load_rows) */
+    void *b = view ? wifi_tap_button(view, widget_get_prop_int(view, SEL, -1)) : (void *)0;
     int network = 0;
     for (unsigned i = 0, n = b ? widget_count_children(b) : 0; i < n; ++i)
         network |= wifi_sig(widget_get_prop_str(widget_get_child(b, i), "image", "")) > 0;
@@ -245,6 +244,7 @@ static void reset_answer(void *ctx, int row, int toggle_on) {
     networkClearSsid();
     networkGetSsidList(WIFI_CONF);
     wf.ssid[0] = wf.ask = 0;
+    wifi_rows_end();
     if (on) {
         wifi_switch(1);
         wifi_searchtime = 50; /* the switch row's own, a search as Wi-Fi comes on */
@@ -260,11 +260,14 @@ static int reset_click(void *ctx, void *event) {
     return 0;
 }
 
-/* wifimenu_rows_build (0x4d5950), every rebuild of the Wi-Fi page's list: stock's rows, then
- * Reset Network Settings at its foot, Wi-Fi on or off. */
+/* wifimenu_rows_build (0x4d5950), every rebuild of the Wi-Fi page's list: the selected network
+ * noted (wifi_rows.c wifi_rows_keep), stock's rows, then Reset Network Settings at its foot, Wi-Fi
+ * on or off. */
 int ringnav_wifi_rows(void *win) {
-    int r = stock_wifi_rows_trampoline(win);
     void *view = win ? widget_lookup(win, WIFI_VIEW, 1) : (void *)0;
+    if (view) wifi_rows_keep(view); /* the selected network, its rows about to be made again */
+    int r = stock_wifi_rows_trampoline(win);
+    view = win ? widget_lookup(win, WIFI_VIEW, 1) : (void *)0;
     if (view) /* the label across the button, as stock's Add Network: no right column to stop at */
         widget_set_text_utf8(list_row_core(view, 0, reset_click, 0, 325, 0),
                              "Reset Network Settings");

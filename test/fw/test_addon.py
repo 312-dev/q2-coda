@@ -1707,7 +1707,7 @@ def test_a_restart_waits_for_the_loop_to_go(fw):
     del world.files[b'/tmp/q2-foo']
     world.ms = 3000
     poll(C.pointer(a))
-    assert a.restart == 0 and a.launched == 1 and world.of('system') == [(b'run',)]
+    assert a.restart == 0 and a.launched == 1 and world.of('system') == [(b'run &',)]
 
 
 def test_a_restart_gives_up_on_the_old_loop(fw):
@@ -1777,6 +1777,26 @@ def test_an_app_asking_to_hold_keeps_standby_and_power_off_away(fw):
     assert a.hold == 0 and len(fw.calls('reset_poweroptions_timer')) == 1
 
 
+QR40 = b'f' * ((177 + 3) // 4 * 177)  # a version-40 code's rows as the QR page reads them (QR_HEX less its NUL)
+
+
+def test_keys_after_a_version_40_code_still_read(fw):
+    """An app signing in writes its code's rows as qr= (7,965 bytes of hex at version 40, which the QR page draws);
+    poll_one read the file's first 1,534 bytes only, so a hold= after it read as 0 and the Q2 could sleep under the
+    sign-in, and a sync= after it read as none. Lines that do not fit are left out, not the rest of the file."""
+    world, a = running(fw, b'addr=192.168.1.2:8080\nqrsize=177\nqr=' + QR40 + b'\nhold=1\nsync=down 5 10\n')
+    addon_poll(fw, world)
+    assert a.hold == 1 and [c[1][:3] for c in fw.calls('reset_poweroptions_timer')] == [(1, 1, 0)]
+    assert fw.fn('addon_sync', C.c_int, C.c_void_p)(None) == 2
+
+
+def test_a_state_file_past_its_bound_is_read_no_further(fw):
+    """The read is bounded: a key past STATE_SCAN bytes of lines too long to keep is not looked for."""
+    world, a = running(fw, (b'qr=' + QR40 + b'\n') * 3 + b'hold=1\n')
+    addon_poll(fw, world)
+    assert a.hold == 0
+
+
 @pytest.mark.parametrize('job, result, kept', [(JOB_INSTALL, SH_NET, 1), (JOB_INSTALL, SH_CANCELLED, 1), (JOB_INSTALL, SH_OK, 0), (JOB_REMOVE, SH_OK, 0), (JOB_REMOVE, SH_CARD, 1)])
 def test_the_app_store_forgets_a_running_app_only_once_its_job_replaced_it(fw, job, result, kept):
     # an update that fails or is cancelled leaves the app running: still tracked, its hold still honoured
@@ -1828,7 +1848,7 @@ def test_launch_waits_for_the_apps_page(fw):
     a = ap(fw).a[0]
     a.id, a.run = b'foo', b'run'
     fw.fn('addon__launch', None, C.POINTER(App))(C.pointer(a))
-    assert a.launched == 1 and world.of('system') == [(b'run',)] and a.launch_at == 1000
+    assert a.launched == 1 and world.of('system') == [(b'run &',)] and a.launch_at == 1000
 
 
 def test_stop_all_asks_each_running_app(fw):
@@ -2228,10 +2248,13 @@ def item(n, kind=b'action', ctx=b'', hold=b''):
 
 
 def test_a_page_opens_on_the_apps_menu_and_starts_it(fw):
+    """The app's run script started in the background ("&"): system() waits only for its shell, not the script's
+    copies and its fork (about 210 ms a launch on the emulator, 2026-11-22, the UI pass stalled for it; 65 ms with
+    "&", the shell's own start under qemu)."""
     p = Page(fw)
     assert p.request() == b'Q2SPOT/1\n1\tmenu\n' and C.string_at(p.req.path) == b'/tmp/q2-foo.browse.sock'
     assert p.ap.a[0].launched == 1 and p.top.title == b'Foo'
-    assert p.world.of('system') == [(b'/bin/sh /mnt/mmc/.foo/run',)]
+    assert p.world.of('system') == [(b'/bin/sh /mnt/mmc/.foo/run &',)]
 
 
 def test_rows_show_with_a_trailing_more_when_theres_a_cursor(fw):
@@ -6124,6 +6147,25 @@ def test_albums_asks_the_artist_again_and_lists_its_albums_newest_first(fw, nav_
     assert p.pending.op == b'album' and p.pending.args == b'\talbum:al3'
 
 
+def test_leaving_an_albums_page_lets_its_covers_go_without_looking_for_them(fw, nav_st):
+    """addon.c drop on an Albums page: each row's catalogue cover is unloaded by name, there on the card or not
+    (unloading a name never loaded does nothing), so the drop asks access() of none of them; a cover's file is
+    looked for only where one is about to be drawn (album_cover)."""
+    p = oled_page(fw, nav_st)
+    p.answer(rows=artist_rows())
+    p.click(AR_ALBUMS)
+    p.answer(rows=artist_rows())
+    assert p.top.lay == LAY_ALBUMS
+    p.world.files[b'/mnt/mmc/.foo/covers/al4.jpg'] = jpeg()  # one of the four on the card
+    names, looked = unloads(fw), []
+    fw.mock('fw_access', lambda path, *_: looked.append(C.string_at(path)) or p.world.access(path))
+    fw.fn('addon__drop', None)()
+    covers = [n for n in looked if b'/covers/' in n]
+    print('access() calls for covers in one drop of a 4-album page:', len(covers))
+    assert covers == []
+    assert sorted(names) == [b'file:///mnt/mmc/.foo/covers/%s.jpg' % i for i in (b'al1', b'al3', b'al4', b'al6')]
+
+
 def test_top_songs_opens_as_a_list_of_cover_rows(fw, nav_st):
     p = oled_page(fw, nav_st)
     p.answer(rows=artist_rows())
@@ -6339,6 +6381,8 @@ def test_a_server_songs_radio_is_asked_of_its_app(fw):
     assert p.world.files[b'/tmp/q2-foo.radio'] == b'7 start ' + path + b'\n'
     p.world.files[b'/tmp/q2-foo.state'] = b'version=1\nradioack=7 1\n'
     assert answer(7) == 1 and answer(8) == -1
+    p.world.files[b'/tmp/q2-foo.state'] = b'qrsize=177\nqr=' + QR40 + b'\nradioack=7 1\nversion=1\n'
+    assert answer(7) == 1  # after a sign-in's long code, as an app writes its keys in name order
 
 
 def test_an_app_without_radio_is_not_asked(fw):
@@ -6557,7 +6601,7 @@ def test_an_app_is_started_for_the_cars_cover_with_covers_1(fw, manifest, starte
         wake(name)
     assert p.world.of('system') == []
     wake(b'foo')
-    assert (p.world.of('system') == [(b'/bin/sh /mnt/mmc/.foo/run',)]) == started
+    assert (p.world.of('system') == [(b'/bin/sh /mnt/mmc/.foo/run &',)]) == started
 
 
 def test_a_status_reply_is_the_centred_stack_and_its_button_presses_its_action(fw, nav_st):
