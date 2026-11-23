@@ -471,7 +471,7 @@ int ringnav_bt_resume(void) {
     return st.resume;
 }
 /* Link Volume as it applies now: the choice saved, else on for the device connected now when its
- * Class is headphones or a headset (bt_kind's "headphones", from the battery loop's read of it,
+ * Class is headphones or a headset (bt_kind's "headphones", from the battery run's read of it,
  * bt_battery.c) and off for a speaker, a car or a device not yet known, whose own amplifier a low
  * Q2 volume would turn down with it (docs/internals.md#headset-controls-and-volume). */
 static int bt_link(void) {

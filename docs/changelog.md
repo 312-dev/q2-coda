@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: a connected headset's battery level is asked for while the screen is on, every five minutes, instead of every 30 seconds whether the screen was on or off, which saves battery with headphones connected.
   - App sign-in: the QR code page shows a code of any size an app sends. A long sign-in link stayed on "No code yet".
   - Home: the album art slideshow beside the main menu now shows your server's albums too. With a library that is all on a server, it showed nothing.
   - Games: Games lists Bricks alone (then any games on your card). Sudoku, Vortex, Solitaire and Snake are left out of this build while the new games are finished; a game in progress or a best score you had stays saved for when they return.

@@ -1272,6 +1272,14 @@ unsigned long long usb_event_now_ns(void);
 /* bt_battery.c: a connected headset's battery, 0 to 100, -1 for none
  * (docs/internals.md#headset-battery) */
 int bt_headset_battery(void);
+/* A shell command run off the UI thread (bt_ui.c bt_shell): one at a time per job, done counted
+ * once it has ended, so its file is read once per answer. */
+typedef struct {
+    int running;   /* a run of it has started and not ended */
+    unsigned done; /* runs ended */
+} bt_job;
+int bt_shell(bt_job *job, const char *cmd);
+unsigned bt_job_done(bt_job *job);
 unsigned bt_headset_rate(void), bt_headset_class(void);
 const char *bt_headset_name(void);
 /* loop_wake.c: the UI loop's idle as a poll() on an eventfd that loop_wake (peq.h, any thread)

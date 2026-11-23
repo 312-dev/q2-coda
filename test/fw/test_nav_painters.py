@@ -17,7 +17,7 @@ import typing
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, c_enum, Deques, Files, claim, high_halves, libc, stock_prop_str, stock_start_with, ui_name
+from conftest import NAVIGATION_SOURCE, O, c_enum, Deques, Files, claim, high_halves, libc, stock_prop_str, stock_start_with, threads_now, ui_name
 
 STRINGS = dict(re.findall(r'^#define (\w+) "([^"]*)"', (host.ROOT/'patch/offsets.inc').read_text(), re.M))
 BT_GLYPH = STRINGS['BT_GLYPH']
@@ -2237,6 +2237,7 @@ def test_link_volume_unset_shows_and_turns_off_from_what_applies(fw):
         return 0
     fw.mock('getBtLinkItem', item)
     fw.mock('fw_system', lambda *_: 0)
+    threads_now(fw)  # the battery run (bt_battery.c) ends at once; its answer is the file
     Files(fw, {'/tmp/q2-btbatt': f'{mac} 80 48000 {0x240418} Px7\n'.encode()})  # headphones
     fw.fn('ringnav_btrows', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     link = row(ui, view, 'Link Volume')

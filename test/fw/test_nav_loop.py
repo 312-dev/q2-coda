@@ -9,7 +9,7 @@ import struct
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, Files, claim, ui_name
+from conftest import NAVIGATION_SOURCE, O, Files, claim, threads_now, ui_name
 
 KEY_CENTER, KEY_PREV, KEY_NEXT, KEY_PLAY, KEY_RETURN = (O[k] for k in ('KEY_CENTER', 'KEY_PREV', 'KEY_NEXT', 'KEY_PLAY', 'KEY_RETURN'))
 KEY_BACK_BTN, KEY_FWD_BTN = O['KEY_BACK_BTN'], O['KEY_FWD_BTN']
@@ -1030,7 +1030,7 @@ PX7 = 'AA:BB:CC:DD:EE:07'
 
 
 def linked_device(fw, kind, link=None):
-    """bt_link's link with the device connected now of kind (its Class, as the battery loop's file gives it), and
+    """bt_link's link with the device connected now of kind (its Class, as the battery run's file gives it), and
     Link Volume as saved (None: never chosen)."""
     bt_link(fw)
     Config(fw, **({} if link is None else {'BTVOLLINK': link}))
@@ -1040,7 +1040,8 @@ def linked_device(fw, kind, link=None):
         C.memmove(mac, PX7.encode() + b'\0', len(PX7) + 1)
         return 0
     fw.mock('getBtLinkItem', item)
-    fw.mock('fw_system', lambda *_: 0)  # the battery loop's start
+    fw.mock('fw_system', lambda *_: 0)  # the battery run (bt_battery.c), ended at once, its answer the file below
+    threads_now(fw)
     Files(fw, {'/tmp/q2-btbatt': f'{PX7} 80 48000 {CLASSES[kind]} Px7\n'.encode()})
 
 
