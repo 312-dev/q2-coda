@@ -529,6 +529,8 @@ int addon_dir(const char *id, char *dir, unsigned n), addon_version_cmp(const ch
 /* addon.c: whether the firmware carries app id as its own alone, never the App Store's (netupdate.c) */
 int addon_builtin(const char *id);
 void addon_q2app(const char *id, char *path, unsigned n);
+/* each card app's q2app read, until each answers nonzero (addon.c) */
+int addon_q2apps(int (*each)(const char *id, const char *raw, void *ctx), void *ctx);
 /* catalogue.c: the server library (docs/internals.md#server-library), a signed-in catalogue app's
  * songs in the Library. catalogue_has: any are in it now; catalogue_path: a server row's path; catalogue_unavailable: a record that can't play now;
  * catalogue_album_unavailable: an album list's record none of whose songs can play now, and

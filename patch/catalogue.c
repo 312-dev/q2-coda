@@ -1608,31 +1608,32 @@ void catalogue_row_mark(void *w, void *canvas, void *row, int x, int y) {
 
 /* ---- Apps, their files, the poll ---- */
 
-static void cat_scan(void) {
-    char path[64], raw[512];
-    void *d = card_mounted() ? opendir("/mnt/mmc") : 0;
-    int n = 0;
+/* A card app's q2app, for cat_scan: a catalogue app in the next slot, its state kept from the scan
+ * before (was, wasn) by id. Stops once CAT_APPS are found. */
+struct cat_scanning {
     cat_app_t was[CAT_APPS];
-    memcpy(was, cat.app, sizeof was);
-    int wasn = cat.napps;
-    for (struct dirent *e; d && n < CAT_APPS && (e = readdir(d));) {
-        const char *id = e->d_name + 1;
-        if (e->d_name[0] != '.' || !*id || strlen(id) >= sizeof cat.app[0].id ||
-            !strcmp(id, "q2pod"))
-            continue;
-        addon_q2app(id, path, sizeof path);
-        if (!state_read(path, raw, sizeof raw) || number(raw, "catalogue") != 1) continue;
-        cat_app_t *a = &cat.app[n++];
-        memset(a, 0, sizeof *a);
-        for (int i = 0; i < wasn; ++i)
-            if (!strcmp(was[i].id, id)) *a = was[i];
-        tk_snprintf(a->id, sizeof a->id, "%s", id);
-        a->ratings = number(raw, "ratings");
-        field(raw, "downloads", a->dl, sizeof a->dl);
-        if (strstr(a->dl, "/") || a->dl[0] == '.') a->dl[0] = 0; /* one folder at the card's root */
-    }
-    if (d) closedir(d);
-    cat.napps = n;
+    int wasn, n;
+};
+static int cat_app_found(const char *id, const char *raw, void *ctx) {
+    struct cat_scanning *c = ctx;
+    if (strlen(id) >= sizeof cat.app[0].id || !strcmp(id, "q2pod") ||
+        number(raw, "catalogue") != 1)
+        return 0;
+    cat_app_t *a = &cat.app[c->n++];
+    memset(a, 0, sizeof *a);
+    for (int i = 0; i < c->wasn; ++i)
+        if (!strcmp(c->was[i].id, id)) *a = c->was[i];
+    tk_snprintf(a->id, sizeof a->id, "%s", id);
+    a->ratings = number(raw, "ratings");
+    field(raw, "downloads", a->dl, sizeof a->dl);
+    if (strstr(a->dl, "/") || a->dl[0] == '.') a->dl[0] = 0; /* one folder at the card's root */
+    return c->n == CAT_APPS;
+}
+static void cat_scan(void) {
+    struct cat_scanning c = { .wasn = cat.napps };
+    memcpy(c.was, cat.app, sizeof c.was);
+    if (card_mounted()) addon_q2apps(cat_app_found, &c);
+    cat.napps = c.n;
 }
 
 /* The catalogue's first line: its seq, into seq (24 bytes), or 0. */

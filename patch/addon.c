@@ -230,14 +230,30 @@ void addon_q2app(const char *id, char *path, unsigned n) {
     tk_snprintf(path, n, "%s/q2app", dir);
 }
 
+/* Each card app's folder, /mnt/mmc/.<id> with a valid id, and the q2app of the copy of it that
+ * runs (addon_q2app) read into raw (512 bytes): each(id, raw, ctx) for each one that reads, until
+ * it answers nonzero, which this answers then; 0 after the last. The one scan of the card's
+ * manifests: Streaming's (addon_scan), the server library's (catalogue.c cat_scan), Storage's
+ * (storage.c st_app) and a favourite's app (addon_fav_path). */
+int addon_q2apps(int (*each)(const char *id, const char *raw, void *ctx), void *ctx) {
+    char raw[512], path[64];
+    int stop = 0;
+    void *d = opendir(CARD);
+    for (struct dirent *e; d && !stop && (e = readdir(d));) {
+        if (e->d_name[0] != '.' || !valid_id(e->d_name + 1)) continue;
+        addon_q2app(e->d_name + 1, path, sizeof path);
+        if (state_read(path, raw, sizeof raw)) stop = each(e->d_name + 1, raw, ctx);
+    }
+    if (d) closedir(d);
+    return stop;
+}
+
 /* One app's folder at the scan: read when it is the copy of its app that runs (addon_dir). */
-static void scan_one(const char *id, const char *from) {
-    char raw[512], path[64], dir[48];
+static void scan_one(const char *id, const char *from, const char *raw) {
+    char dir[48], path[64];
     app_t *a;
     addon_dir(id, dir, sizeof dir);
-    if (strcmp(dir, from)) return;
-    tk_snprintf(path, sizeof path, "%s/q2app", dir);
-    if (!state_read(path, raw, sizeof raw) || !(a = slot(id))) return;
+    if (strcmp(dir, from) || !(a = slot(id))) return;
     tk_snprintf(a->bin, sizeof a->bin, "%s/q2-%s", dir, id);
     tk_snprintf(a->run, sizeof a->run, "/bin/sh %s/run", dir);
     field(raw, "name", a->name, sizeof a->name);
@@ -290,24 +306,27 @@ static void builtin_untag(const char *id) {
     }
 }
 
+/* A card folder's app, for addon_scan: read when the card's copy is the one that runs. */
+static int scan_card(const char *id, const char *raw, void *unused) {
+    char dir[48];
+    tk_snprintf(dir, sizeof dir, CARD "/.%s", id);
+    scan_one(id, dir, raw);
+    return 0;
+}
+
 /* Streaming's page (navigation.c): the apps on the card and those the firmware carries found again,
  * their names read; how many there are, by name for addon_name. A slot keeps its app (and its
  * running state) from scan to scan. */
 int addon_scan(void) {
-    char dir[48];
+    char dir[48], raw[512], path[64];
     for (int i = 0; i < ap.n; ++i) ap.a[i].present = 0;
-    void *d = opendir(CARD);
-    for (struct dirent *e; d && (e = readdir(d));) {
-        if (e->d_name[0] != '.' || !valid_id(e->d_name + 1)) continue;
-        tk_snprintf(dir, sizeof dir, CARD "/%s", e->d_name);
-        scan_one(e->d_name + 1, dir);
-    }
-    if (d) closedir(d);
-    d = opendir(BUNDLED);
+    addon_q2apps(scan_card, 0);
+    void *d = opendir(BUNDLED);
     for (struct dirent *e; d && (e = readdir(d));) {
         if (!valid_id(e->d_name)) continue;
         tk_snprintf(dir, sizeof dir, BUNDLED "/%s", e->d_name);
-        scan_one(e->d_name, dir);
+        tk_snprintf(path, sizeof path, "%s/q2app", dir);
+        if (state_read(path, raw, sizeof raw)) scan_one(e->d_name, dir, raw);
         if (addon_builtin(e->d_name)) builtin_untag(e->d_name);
     }
     if (d) closedir(d);
@@ -3447,25 +3466,26 @@ int addon_fav(const char *id, const char *kind, const char *key, int on) {
  * folder path is in, CARD/<favdir>/…, such as q2-jellyfin's synced Jellyfin. favdir is one folder
  * name, its line maybe ending in a Windows editor's \r. Every app's q2app is read at each change,
  * so no scan is needed first: a press is rare. 0 when that app's card didn't take it. */
+struct fav_ask {
+    const char *path;
+    int on, ok;
+};
+static int fav_app(const char *id, const char *raw, void *ctx) {
+    struct fav_ask *f = ctx;
+    char dir[64];
+    field(raw, "favdir", dir, sizeof dir);
+    unsigned k = strlen(dir);
+    if (k && dir[k - 1] == '\r') dir[--k] = 0;
+    if (!k || strstr(dir, "/") || !strcmp(dir, ".") || !strcmp(dir, "..") ||
+        strncmp(f->path + sizeof CARD, dir, k) || f->path[sizeof CARD + k] != '/')
+        return 0;
+    f->ok = addon_fav(id, "path", f->path, f->on);
+    return 1;
+}
 int addon_fav_path(const char *path, int on) {
-    char raw[512], file[64], dir[64];
-    int ok = 1;
-    void *d = path && card_path(path) ? opendir(CARD) : 0;
-    for (struct dirent *e; d && (e = readdir(d));) {
-        if (e->d_name[0] != '.' || !valid_id(e->d_name + 1)) continue;
-        addon_q2app(e->d_name + 1, file, sizeof file);
-        if (!state_read(file, raw, sizeof raw)) continue;
-        field(raw, "favdir", dir, sizeof dir);
-        unsigned k = strlen(dir);
-        if (k && dir[k - 1] == '\r') dir[--k] = 0;
-        if (k && !strstr(dir, "/") && strcmp(dir, ".") && strcmp(dir, "..") &&
-            !strncmp(path + sizeof CARD, dir, k) && path[sizeof CARD + k] == '/') {
-            ok = addon_fav(e->d_name + 1, "path", path, on);
-            break;
-        }
-    }
-    if (d) closedir(d);
-    return ok;
+    struct fav_ask f = { path, on, 1 };
+    if (path && card_path(path)) addon_q2apps(fav_app, &f);
+    return f.ok;
 }
 
 /* Go to Album (album) or Go to Artist on a song in a card app's folder, /mnt/mmc/.<id>/…
