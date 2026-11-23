@@ -407,6 +407,18 @@ static int sink_open(struct output *o, const char *dir, int outputway) {
     if (i == n) return -1;
     o->f.bytes = c[i][0], o->f.is_float = c[i][1];
     if (outputway == 1) o->f.rate = bt && atoi(bt) > 0 ? atoi(bt) : BT_ASK; /* way 3's is the car's already */
+    /* a USB DAC of its own kind: Q2PLAYER_GONE names a file that is there while it is unplugged, Q2PLAYER_RATES the
+     * only rates it takes, the nearest given as set_rate_near gives it, and refused as alsa_open refuses it */
+    const char *gone = getenv("Q2PLAYER_GONE"), *rates = getenv("Q2PLAYER_RATES");
+    if (outputway == 2 && gone && !access(gone, 0)) { fprintf(stderr, "q2player: hw:1,0: No such file or directory\n"); return -1; }
+    if (outputway == 2 && rates) {
+        int best = 0;
+        for (const char *r = rates; *r; r += strcspn(r, ",") + (r[strcspn(r, ",")] == ',')) {
+            int v = atoi(r);
+            if (!best || abs(v - o->f.rate) < abs(best - o->f.rate)) best = v;
+        }
+        if (best && best != o->f.rate) { fprintf(stderr, "q2player: hw:1,0 gave %d Hz for %d\n", best, o->f.rate); return -1; }
+    }
     char path[1024];
     snprintf(path, sizeof path, "%s/%04d_%d_%d_%s%s.raw", dir, opens++, o->f.rate, o->f.channels, sink_name(&o->f),
              outputway == 1 ? "_bt" : outputway == 2 ? "_usb" : outputway == 3 ? "_car" : "");
@@ -731,6 +743,7 @@ static int sink_to(struct output *o, const uint8_t *data, int frames) {
     }
 #endif
     if (!o->file) return -1; /* a Bluetooth PCM that did not come back (bt_reopen) */
+    if (o->way == 2 && getenv("Q2PLAYER_GONE") && !access(getenv("Q2PLAYER_GONE"), 0)) return -1; /* unplugged */
     if (fwrite(data, (size_t)o->f.channels * o->f.bytes, frames, o->file) != (size_t)frames) return -1;
     int64_t due = (int64_t)(since(&o->t0) * o->speed * o->f.rate);
     if (due > o->written) { /* it ran dry: the clock starts again here */
