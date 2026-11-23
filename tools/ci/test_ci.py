@@ -1365,3 +1365,28 @@ exit 0
     out = capsys.readouterr().out
     assert n == 0 and re.search(r'test/coverflow.py +flaky \(fail\)', out), out
     assert 'first tries failed: test/coverflow.py (test/coverflow.py::test_the_wall_tilts)' in out
+
+
+@pytest.mark.parametrize('path', ['patch/coda_rc.c', 'patch/coda_rc_core.c', 'patch/coda_rc_shim.c', 'patch/coda_rc.h',
+                                  'patch/coda_rc_new_part.c', 'remote/coda-rc.proto'])
+def test_a_car_remote_change_plans_its_end_to_end_run(path):
+    """test/coda_rc_e2e.py, the daemon and demo's shim driven over TCP on an emulator, was planned for nothing but
+    itself: the integrator ran it by hand after a coda_rc_core.c change (2026-11-22). Any patch/coda_rc* file, one
+    a later split adds among them, and the protocol's definition plan it."""
+    assert 'test/coda_rc_e2e.py' in affected.plan_for({path: {1}}, REPO).as_dict()['other']
+
+
+@pytest.mark.parametrize('path', ['patch/q2_iap.c', 'patch/q2_iap2.c', 'patch/q2_iap_lib.c', 'patch/q2_iap2_link.c',
+                                  'patch/q2_iap_auth.h', 'patch/iap_session.c', 'patch/q2car.sh'])
+def test_an_iphone_gadget_change_plans_the_probe_suite(path):
+    """test/iap_probe.py builds q2-iap from patch/q2_iap*.c and runs it as q2car.sh does against a stand-in
+    FunctionFS, and was planned only when its own file changed. Every q2-iap source, those a split of q2_iap2.c
+    adds under the same prefixes (q2_iap*, iap_*), and q2car.sh plan it."""
+    assert 'test/iap_probe.py' in affected.plan_for({path: {1}}, REPO).as_dict()['other']
+
+
+@pytest.mark.parametrize('path', ['patch/coverflow.c', 'patch/addon.c', 'remote/iroh-sidecar/src/main.rs'])
+def test_other_files_plan_neither_car_suite(path):
+    other = affected.plan_for({path: {1}}, REPO).as_dict()['other']
+    other = other if other != ALL else ()
+    assert 'test/coda_rc_e2e.py' not in other and 'test/iap_probe.py' not in other
