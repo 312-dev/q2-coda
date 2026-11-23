@@ -127,13 +127,22 @@ def test_car_audio_goes_before_stock_s_standby_and_the_link_comes_back_after_the
     assert s.commands.count(CAR_START) == 1 and s.files.files[SOFT] == b'connect'
 
 
-def test_a_q2_with_no_card_reconnects_after_3_s(fw):
+def test_a_card_not_back_within_3_s_reconnects_then(fw):
     s = Sleep(fw, car=False)
     s.standby()
     s.poll(2900)
     assert s.files.files[SOFT] == b'disconnect'
     s.poll(200)
     assert s.files.files[SOFT] == b'connect' and not [c for c in s.commands if 'q2car' in c]
+
+
+def test_a_q2_with_no_card_before_the_standby_reconnects_at_once(fw):
+    """No card mounted as the Standby began: nothing to wait for, the pull-up back in the first pass after the wake."""
+    s = Sleep(fw, car=False)
+    s.files.files[MOUNTS] = b'rootfs / rootfs rw 0 0\n'
+    s.standby()
+    s.poll()
+    assert s.files.files[SOFT] == b'connect'
 
 
 def test_a_card_mounted_read_only_is_not_the_card_back(fw):
