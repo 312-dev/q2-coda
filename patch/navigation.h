@@ -978,7 +978,8 @@ int ringnav_gpio_value(const char *name), stock_gpio_value_trampoline(const char
 /* usb_ui.c: a host has configured the gadget (system.c holds Standby on it) */
 int usb_host(void);
 void otg_hold(void); /* the PHY's ID pull-up on, the controller's role held at device */
-int usb_otg_own_vbus(void); /* usb_otg.c: the Q2's own bus power on, or just ended */
+int usb_otg_own_vbus(void); /* usb_otg.c: the Q2's own bus power on, or still dying away */
+int usb_otg_cable(int vbus); /* usb_otg.c: PD17's VBUS less the Q2's own dying away */
 void usb_otg_poll(void);    /* usb_otg.c: a Play asked while USB audio connected */
 int stock_forbid_play_trampoline(int quiet);
 /* standby_usb.c: Standby and the USB link (docs/internals.md#standby-and-the-usb-link) */

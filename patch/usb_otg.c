@@ -43,8 +43,10 @@
  * enumerated them (2026-11-23 12966.731), and stock's pass cut the power then. */
 #define OTG_ID_HIGH_MS 2000
 #define OTG_GAP_MS 5000 /* passes further apart than this (a Standby) start the wait again */
-/* The Q2's own bus power, ended, still read by stock as a cable's VBUS this long after: 1.6 s on
- * 2026-11-23, when that "cable in" started a Bluetooth connect (usb_ui.c headset_bt_usb). */
+/* The Q2's own bus power, ended, reads as VBUS on PD17 as it dies away: 1.6 s on 2026-11-23
+ * (13404.022 to 13405.770), when stock took it for a cable in and Bluetooth connected for it. It is
+ * no cable until PD17 has read no VBUS once, or for this long at most, so a computer's cable put
+ * in before PD17 read high is seen then. */
 #define OTG_OWN_VBUS_MS 3000
 /* A remembered Play waits this long for somewhere to play once the bus power is on (the AB13X
  * earbuds enumerated 0.5 s after it, 2026-11-23), and at most OTG_PLAY_MS in all. */
@@ -71,7 +73,7 @@ static struct {
     unsigned id_high_at; /* host role: when PD18 first read high; id_high: it reads high now */
     int id_high, had_dev; /* had_dev: a device seen on the host port in this grant */
     int id_as_low;        /* stock's PD18 read gives 0 (ringnav_gpio_value) */
-    unsigned own_at;     /* when the Q2's own bus power last ended; own: it has */
+    unsigned own_at;     /* when the Q2's own bus power last ended; own: PD17 not read high since */
     int own, id_low;     /* id_low: PD18 as the last pass read it */
     int play;            /* a Play refused while an accessory is on its way (ringnav_forbid_play) */
     int resume;          /* the gate asked for a Play of the song there (usb_otg_forbid_resume) */
@@ -113,10 +115,22 @@ static int otg_stock(unsigned now, int id_as_low) {
     return result;
 }
 
-/* 1 while the Q2 powers the bus, and for OTG_OWN_VBUS_MS after: a cable in read then is its own VBUS
- * dying away, no host's (usb_ui.c: no Bluetooth connect for it). */
+/* PD17's VBUS (1 for VBUS on the port) as a cable's: 0 while the Q2's own bus power, ended, dies
+ * away (OTG_OWN_VBUS_MS). Every PD17 read of this file and stock's cable read (usb_charge.c
+ * ringnav_usb_detect, so g_usbdet_value, the cable in, its gadget and its Bluetooth connect) pass
+ * through it. While the Q2 powers the bus the read is stock's own, which then counts no cable. */
+int usb_otg_cable(int vbus) {
+    if (g_last_otgid == 1) return vbus;
+    if (otg.own && (!vbus || (unsigned)time_now_ms() - otg.own_at >= OTG_OWN_VBUS_MS)) otg.own = 0;
+    return vbus && !otg.own;
+}
+
+/* 1 while the Q2 powers the bus, or its ended power has not yet read as gone (usb_ui.c: no
+ * Bluetooth connect for a cable then). */
 int usb_otg_own_vbus(void) {
-    return g_last_otgid == 1 || (otg.own && (unsigned)time_now_ms() - otg.own_at < OTG_OWN_VBUS_MS);
+    if (g_last_otgid == 1) return 1;
+    if (otg.own && (unsigned)time_now_ms() - otg.own_at >= OTG_OWN_VBUS_MS) otg.own = 0;
+    return otg.own;
 }
 
 /* toolsGpioGetValue (0x5d1c3c, tools/build.py HOOKS): stock's read of a pin, but PD18 reads 0 inside
@@ -139,7 +153,7 @@ int ringnav_otg_status(void) {
     otg.last = now;
     otg.have_last = 1;
     if (gap) otg.refused = 0;                  /* back from Standby: a fresh try */
-    int vbus = toolsGpioGetValue("PD17") == 0; /* usb_detect's read: 0 is VBUS on the port */
+    int vbus = usb_otg_cable(toolsGpioGetValue("PD17") == 0); /* usb_detect's read: 0 is VBUS */
     if (otg.vbus_prev && !vbus) gone(now);
     otg.vbus_prev = vbus;
     int id_low = toolsGpioGetValue("PD18") == 0;

@@ -38,6 +38,7 @@ class Port:
     def __init__(self, fw, id_pin=1, cable=False):
         self.fw, self.id, self.cable = fw, id_pin, cable
         self.pins = {'PC20': 0, 'PE22': 0}
+        self.decay, self.off_at = 0, None  # ms PD17 still reads VBUS once the Q2's own bus power is off
         self.now = 100000
         self.backfeed = []  # times the Q2 powered the bus while a computer's VBUS was on it
         self.powered = []  # times the Q2 powered the bus at all
@@ -62,7 +63,12 @@ class Port:
         return 9 if name == PULL_FUNC else 10 if name == HOST_DEV and self.hostdev else 0
 
     def write(self, name, value, *_):
-        self.pins[C.string_at(name).decode()] = value
+        self.set(C.string_at(name).decode(), value)
+
+    def set(self, pin, value):
+        if pin == 'PC20' and self.pins['PC20'] and not value:
+            self.off_at = self.now
+        self.pins[pin] = value
 
     def fread(self, buf, size, n, f, *_):
         data = self.func[:size * n]
@@ -79,14 +85,16 @@ class Port:
         if pin == 'PD18':
             return self.id
         if pin == 'PD17':
-            return 0 if self.cable or self.pins['PC20'] else 1
+            dying = self.off_at is not None and self.now - self.off_at < self.decay
+            return 0 if self.cable or self.pins['PC20'] or dying else 1
         return self.pins.get(pin, 1)  # PD19: an input with a pull-up
 
     def stock(self, *_):
         """Stock's pass reads PD18 through toolsGpioGetValue, whose prologue is hooked (ringnav_gpio_value)."""
         host = int(self.gpio(b'PD18') == 0)
         if self.otgid.value != host:
-            self.pins['PC20'] = self.pins['PE22'] = host
+            self.set('PC20', host)
+            self.pins['PE22'] = host
             self.otgid.value = host
         return 0
 
@@ -410,6 +418,51 @@ def test_an_id_high_that_comes_back_low_keeps_the_host_role_and_starts_its_2_s_a
     p.id = 1
     p.run(PASS_MS)
     assert p.pins['PC20'] == 1 and p.records() == ['otg-on']
+
+
+# 2026-11-23 13404.022: otg-off as the earbuds came out, and PD17 still read VBUS for 1.6 s (stock's read took it for a
+# cable at 13405.589, out again at 13405.770) as the Q2's own 5 V died away.
+OWN_DECAY_MS = 1600
+
+
+def own_power_off(p):
+    p.decay = OWN_DECAY_MS
+    p.id = 0
+    p.hostdev = True
+    p.run(SETTLE + 2 * PASS_MS)
+    assert p.pins['PC20'] == 1
+    p.id = 1
+    p.hostdev = False
+    p.run(PASS_MS)
+    assert p.pins['PC20'] == 0 and p.off_at == p.now
+
+
+def test_the_q2_s_own_vbus_dying_away_is_no_cable_and_a_cable_after_it_is(fw):
+    """usb_detect (ringnav_usb_detect, stock's cable read for g_usbdet_value, so the cable in, its gadget and the
+    Bluetooth connect): no VBUS while the bus power's own dies away, until PD17 has read none once."""
+    p = Port(fw)
+    fw.mock('stock_usb_detect_trampoline', lambda *_: int(p.read(b'PD17') == 0))
+    detect = fw.fn('ringnav_usb_detect', C.c_int)
+    own_power_off(p)
+    seen = []
+    for _ in range(20):  # 2 s, every 100 ms, as a status bar read or an edge's pass may come
+        seen.append(detect())
+        p.now += 100
+    assert seen == [0] * 20, 'its own VBUS taken for a cable'
+    p.now += 4000
+    assert detect() == 0
+    p.cable = True  # a real cable 4 s later
+    assert detect() == 1
+
+
+def test_the_trial_s_own_vbus_dying_away_does_not_clear_its_refusal(fw):
+    p = Port(fw)
+    p.decay = OWN_DECAY_MS
+    p.id = 0
+    p.run(SETTLE + TRIAL + PASS_MS)
+    assert p.records() == ['otg-on', 'otg-trial-off']
+    p.run(60000)  # the ID still low: no second trial
+    assert p.records() == ['otg-on', 'otg-trial-off'] and p.pins['PC20'] == 0
 
 
 def test_the_record_has_each_change_of_bus_power(fw):

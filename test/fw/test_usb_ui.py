@@ -775,8 +775,11 @@ def own_bus_power(fw, u, r):
     fw.mock('toolsGpioGetValue', lambda name, *_: pins.get(C.string_at(name).decode(), 1))
     fw.mock('toolsGpioSetValue', lambda *_: 0)
 
-    def stock(*_):
-        otgid.value = int(pins['PD18'] == 0)
+    gpio = fw.fn('ringnav_gpio_value', C.c_int, C.c_char_p)
+    fw.mock('stock_gpio_value_trampoline', lambda name, *_: pins.get(C.string_at(name).decode(), 1))
+
+    def stock(*_):  # its PD18 read through toolsGpioGetValue's hook
+        otgid.value = int(gpio(b'PD18') == 0)
         return 0
     fw.mock('stock_otg_status_trampoline', stock)
     u.files.files['/sys/bus/usb/devices/1-1/idVendor'] = b'3302\n'  # AB13X USB Audio, kept powered
@@ -786,6 +789,7 @@ def own_bus_power(fw, u, r):
         guard()
     assert otgid.value == 1
     pins['PD18'] = 1
+    del u.files.files['/sys/bus/usb/devices/1-1/idVendor']  # pulled: off the host port too
     r.now += 1000
     guard()
     assert otgid.value == 0
