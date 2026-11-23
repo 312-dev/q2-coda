@@ -603,6 +603,14 @@ def test_bmw_audio_and_seek(probe, tmp_path):
     assert not files['car'].exists(), 'and with the probe'
 
 
+def put_rate(path, text):
+    """The rate file written as the player writes it, whole through a rename (player/output.c car_ask): a read never
+    finds it empty half way."""
+    tmp = path.with_name(path.name + '.tmp')
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
 def test_bmw_audio_rate_follows_the_player(probe, tmp_path):
     """USBDeviceModeAudioInformation carries the rate index of the song about to play, as the player writes it to the
     rate file (docs/iphone-mode.md#per-song-rate): at StartUSBDeviceModeAudio, the car file's second line the same
@@ -610,7 +618,7 @@ def test_bmw_audio_rate_follows_the_player(probe, tmp_path):
     kHz family above it 8, 88.2 kHz and anything unreadable 7. Nothing is sent after StopUSBDeviceModeAudio."""
     p, car, fd, log, files = bmw_up(probe, tmp_path)
     try:
-        files['rate'].write_text('48000\n')
+        put_rate(files['rate'], '48000\n')
         time.sleep(0.1)
         car.send(message(0xDA00))
         mid, ps = car.msg()
@@ -620,7 +628,7 @@ def test_bmw_audio_rate_follows_the_player(probe, tmp_path):
         seen = []
         for rate, index in (('44100', 7), ('96000', 8), ('192000', 8), ('88200', 7), ('32000', 6), ('junk', 7),
                             ('176400', 7)):
-            files['rate'].write_text(rate + '\n')
+            put_rate(files['rate'], rate + '\n')
             if seen and seen[-1] == index:
                 time.sleep(0.15)
                 continue
@@ -630,7 +638,7 @@ def test_bmw_audio_rate_follows_the_player(probe, tmp_path):
             assert seen[-1] == index, (rate, seen)
         car.send(message(0xDA02))
         time.sleep(0.15)
-        files['rate'].write_text('48000\n')
+        put_rate(files['rate'], '48000\n')
         with pytest.raises(Exception):
             car.msg(timeout=0.4)
     finally:
@@ -1340,8 +1348,9 @@ def test_a_quiet_car_with_nothing_waiting_keeps_the_link(probe, tmp_path):
 # ---- the log's diagnostics (docs/iphone-mode.md#the-loop-s-steps): what the next stall or dead link says of itself ----
 
 def test_a_stall_names_its_step(probe, tmp_path):
-    """A loop pass that holds 100 ms or more is logged with the step that took most of it. Here the cover's file is a
-    FIFO nobody writes for 400 ms, so its read holds the loop as a slow card would."""
+    """A loop pass that holds 100 ms or more is logged with the step that took most of it. The cover's file is a FIFO
+    nobody writes for 400 ms first: its read is in the cover's child, so it holds nothing. Then the Now Playing file is
+    one, so its read holds the loop as a slow card would, and the stall names it."""
     p, car, fd, log, files = bmw_up(probe, tmp_path, '--stall-ms', '100')
     key = fnv_part(fnv_part(2166136261, 'Massive Attack'), 'Mezzanine')
     art = files['art']/f'{key:08x}.jpg'
@@ -1350,15 +1359,24 @@ def test_a_stall_names_its_step(probe, tmp_path):
         attrs = b''.join(prm(a) for a in (0, 1, 4, 6, 12, 0x1a))
         car.send(message(0x5000, prm(0, attrs), prm(1, prm(0) + prm(1))))
         time.sleep(0.4)
-        w = os.open(art, os.O_WRONLY)  # the read goes on, to an empty file
+        w = os.open(art, os.O_WRONLY)  # the child's read goes on, to an empty file
         os.close(w)
+        time.sleep(0.3)
+        assert not [l for l in log.read_text().splitlines() if 'loop: a pass held' in l]
+        files['np'].unlink()
+        os.mkfifo(files['np'])
+        time.sleep(0.7)  # past the next 500 ms look, which waits in its open from then
+        w = os.open(files['np'], os.O_WRONLY)
+        os.close(w)
+        files['np'].unlink()
+        files['np'].write_text('state=0\n')  # a file again, so the next look does not wait for a writer
         time.sleep(0.3)
     finally:
         stop(p, fd)
     stalls = [l for l in log.read_text().splitlines() if 'loop: a pass held' in l]
-    assert any("in the cover's read" in l for l in stalls), stalls
+    assert any("in the Now Playing file" in l for l in stalls), stalls
     held = max(int(l.split('held ')[1].split(' ms')[0]) for l in stalls)
-    assert 300 <= held < 2000, stalls
+    assert 200 <= held < 2000, stalls
 
 
 def test_ep0_s_odd_reads_are_said(probe, tmp_path):

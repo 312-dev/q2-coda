@@ -539,15 +539,18 @@ static void io_audio(int on) {
 #define RATE_IDLE_MS 250 /* with a car on the link and its audio not asked for */
 static long rate_at;
 static long rate_every(void) { return audio_on ? RATE_POLL_MS : seen ? RATE_IDLE_MS : -1; } /* -1: not read */
-static void rate_poll(long now) {
-    long every = rate_every();
+static unsigned io_rate(void) { /* the host's rate: the file's now, also read when the car asks for audio */
     char b[16];
-    if (every < 0 || (rate_at && now - rate_at < every)) return;
-    rate_at = now;
     int fd = open(rate_file, O_RDONLY), n = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
     if (fd >= 0) close(fd);
     b[n > 0 ? n : 0] = 0;
-    iap2_audio_rate(atoi(b) > 0 ? (unsigned)atoi(b) : 44100);
+    return atoi(b) > 0 ? (unsigned)atoi(b) : 44100;
+}
+static void rate_poll(long now) {
+    long every = rate_every();
+    if (every < 0 || (rate_at && now - rate_at < every)) return;
+    rate_at = now;
+    iap2_audio_rate(io_rate());
 }
 
 /* A button or a seek, as the Remote app's commands reach the shim (Car Remote on). Its numbers start high, so an ack
@@ -1097,7 +1100,7 @@ static const struct iap2_host io = { io_send,           boot_ms,           io_lo
                                      "Q2 Muse",         uuid,              library_id,    io_audio_stepped,
                                      io_command_stepped, io_artwork,    io_art_pending_stepped, &lib_t,  lib_load_stepped,
                                      lib_ready_stepped, lib_saved_stepped, lib_play_stepped,  lib_queue_stepped,
-                                     io_backlog,        io_link_lost };
+                                     io_backlog,        io_link_lost,      io_rate };
 
 /* The input report that echoes payload (link control 0, whole): the smallest that fits, zero padded,
  * written to the HID instance's ep1 in a child so the event loop never waits on the host's poll. */

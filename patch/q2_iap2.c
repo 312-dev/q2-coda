@@ -100,6 +100,7 @@ struct iap2_host {
     int (*queue)(unsigned *rids, unsigned cap); /* the playing queue's rids, or -1 */
     int (*backlog)(void);     /* input reports handed over and not yet taken by the car */
     void (*link_lost)(void);  /* the link given up on */
+    unsigned (*rate)(void);   /* the player's rate for the song about to play, read now */
 };
 
 static const struct iap2_host *H;
@@ -1740,6 +1741,7 @@ static void iap2_control_receive(const u8 *msg, unsigned len) {
         break;
     case 0xDA00:
         H->log("audio: the car asks for USB audio");
+        if (H->rate) audio_hz = H->rate(); /* read only every RATE_IDLE_MS until now (q2_iap.c rate_poll) */
         send_audio_rate();
         set_audio(1);
         break;
