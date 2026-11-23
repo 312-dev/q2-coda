@@ -401,7 +401,7 @@ class Stream:
         self.proc, self.why, self.files = None, None, {}
         sys.path.insert(0, str(TEST))
         try:
-            import subsonic_seam as seam
+            import subsonic_seam as seam  # type: ignore[import-not-found]  # test/, not on mypy's path
         except Exception as e:  # noqa: BLE001  a tree without the seam harness
             self.why = f'no test/subsonic_seam.py ({e})'
             return
@@ -424,7 +424,7 @@ class Stream:
             self.files = {n.split('/', 1)[1]: z.read(n) for n in z.namelist() if n.startswith('.subsonic/') and n[-1] != '/'}
         self.proc = subprocess.Popen([str(fake), '-listen', f'{ip}:0', '-songs', '3', '-album', '3', '-audio', str(audio),
                                       '-title', '0 Seam '], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-        line = self.proc.stdout.readline().split()
+        line = self.proc.stdout.readline().split() if self.proc.stdout else []
         self.url = line[1] if len(line) == 2 and line[0] == 'listening' else None
         if not self.url:
             self.stop()
