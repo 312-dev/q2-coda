@@ -1508,7 +1508,7 @@ def source_sha256():
     h = hashlib.sha256()
     manual = [ROOT/'docs/manual'/f for f in ('build.py', 'guide.html')]
     for path in sorted([*(p for p in ROOT.glob('assets/**/*') if p.is_file()), *(p for p in ROOT.glob('patch/**/*') if p.is_file()),
-                        *ROOT.glob('tools/*.py'), *ROOT.glob('tools/*.c'), *ROOT.glob('tools/*.patch'),
+                        *ROOT.glob('tools/*.py'), *ROOT.glob('tools/*.c'), *ROOT.glob('tools/*.patch'), ROOT/'tools/stock_map.tsv',
                         *(p for p in ROOT.glob('tools/uac1_module/**/*') if p.is_file() and '__pycache__' not in p.parts),
                         *ROOT.glob('tools/*.h'), *ROOT.glob('tools/*.S'), *ROOT.glob('player/*.[ch]'),
                         *ROOT.glob('player/Makefile'), *manual]):
@@ -1573,6 +1573,26 @@ def jpeg_size(b):
             return w, h
         i += size
     raise ValueError('No JPEG size marker')
+def stock_map(path=None):
+    """tools/stock_map.tsv's names for demo's unnamed functions: {name: address}. Kept by hand from stock's code
+    (docs/rebasing.md), so it is a record of where each function is that HOOKS is not made from."""
+    out = {}
+    for line in (path or ROOT/'tools/stock_map.tsv').read_text().splitlines():
+        f = line.split('\t')
+        if len(f) > 3 and f[0] == 'demo' and f[1].startswith('0x'):
+            out[f[3]] = int(f[1], 16)
+    return out
+
+def hook_address_check(hooks, stock_syms, mapped):
+    """Each hook's address in HOOKS against a source not derived from it: stock's symbol table for a function
+    Shanling named, tools/stock_map.tsv (mapped) for one it left unnamed. The prologue check after it holds for
+    nearly any function's start, so a hook moved to another function would otherwise build."""
+    for name, (address, _, _) in hooks.items():
+        known = stock_syms.get(name, mapped.get(name))
+        check(known is not None, f'{name}: in neither the stock symbol table nor tools/stock_map.tsv')
+        check(known == address, f'{name}: HOOKS has {address:#x}, but {name} is at {known:#x}'
+              f' ({"the stock symbol table" if name in stock_syms else "tools/stock_map.tsv"})')
+
 def symbols(p, table=None):
     out = {}
     for line in (table or run('readelf', '-Ws', p)).splitlines():
@@ -2638,6 +2658,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     syms = symbols(demo, symbol_table)
     for name, address in APP_URL_CALLS.items():
         check(syms.get(name) == address, f'{name}: not at {address:#x} in the stock demo')
+    hook_address_check(HOOKS, syms, stock_map())  # before PRIVATE_FUNCTIONS, which takes some from HOOKS
     syms.update(PRIVATE_FUNCTIONS)
     fonts = {f.path: face_font(f) for f in FACES.values() if f.source}
     for name in GLOBALS:
@@ -2659,7 +2680,6 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     patch_timezones(patched)
     def jump(off, name): patched[off:off+8] = struct.pack('<II', j(ps[name]), 0)
     for name, (address, replacement, _) in HOOKS.items():
-        check(syms[name] == address, f'{name}: callback address mismatch')
         off = fileoff(patched, address)
         prolog = struct.unpack_from('<III', patched, off)
         check(prolog[0] >> 16 == 0x3c1c and prolog[1] >> 16 == 0x279c and

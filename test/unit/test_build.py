@@ -787,7 +787,7 @@ def test_source_sha256_hashes_every_input_by_path(tmp_path, monkeypatch):
     monkeypatch.setattr(build, 'ROOT', tmp_path)
     files = ['assets/icons/a.png', 'assets/b.jpg', 'patch/c.c', 'tools/d.py', 'tools/e.c', 'tools/f.h', 'tools/g.S',
              'docs/manual/build.py', 'docs/manual/guide.html', 'player/h.c', 'player/i.h', 'player/Makefile',
-             'tools/adbd.patch', 'tools/uac1_module/Kbuild', 'tools/uac1_module/patches/p.patch']
+             'tools/adbd.patch', 'tools/uac1_module/Kbuild', 'tools/uac1_module/patches/p.patch', 'tools/stock_map.tsv']
     for name in files:
         (tmp_path/name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path/name).write_text(name)
@@ -1603,3 +1603,18 @@ def test_the_font_memo_follows_only_the_code_its_function_names():
     assert build.memo_source(build.subset_font, text.replace('PLAY_MARK = 0x25b6', 'PLAY_MARK = 0x25b7')) != key
     helper = text.index('def play_mark')
     assert build.memo_source(build.subset_font, text[:helper] + 'def play_mark(font):\n    pass\n\ndef was_play_mark' + text[helper + 13:]) != key
+
+
+def test_every_hook_is_where_a_record_not_made_from_hooks_says():
+    """HOOKS' 18 hooks on functions Shanling left unnamed were checked against PRIVATE_FUNCTIONS, itself made from
+    HOOKS: keylock_rows moved to tidal_favourite_request's start built (2026-11-22). stock_map.tsv names them."""
+    mapped = build.stock_map()
+    private = [n for n in build.HOOKS if build.PRIVATE_FUNCTIONS.get(n) == build.HOOKS[n][0]]
+    assert len(private) == 18 and all(mapped[n] == build.HOOKS[n][0] for n in private)
+    stock = {n: a for n, (a, _, _) in build.HOOKS.items() if n not in private}  # as stock's symbol table gives them
+    build.hook_address_check(build.HOOKS, stock, mapped)
+    moved = {**build.HOOKS, 'keylock_rows': (mapped['tidal_favourite_request'], 'ringnav_keylock_rows', None)}
+    with pytest.raises(ValueError, match=r'keylock_rows: HOOKS has 0x484514, but keylock_rows is at 0x4c9dd8 \(tools/stock_map.tsv\)'):
+        build.hook_address_check(moved, stock, mapped)
+    with pytest.raises(ValueError, match='in neither'):
+        build.hook_address_check({'nowhere': (1, 'x', None)}, {}, mapped)
