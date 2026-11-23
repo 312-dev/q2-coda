@@ -309,3 +309,18 @@ def test_a_shutdown_snapshot_says_why_and_what_the_q2_was_doing_and_reaches_the_
         'I guard state up=5120 t=41.5 die=41.5 adc=6900 batt_raw=27 level=87 g=ok']
     L.ulog_snapshot(log.log, WALL, 9100, b'E', b'crash demo exit 139', None, None, None)
     assert log.ram() == f'{TIME} 9100 E guard snapshot crash demo exit 139\n'
+
+
+def test_a_stamped_line_whose_uptime_runs_past_the_cut_is_kept_cut(L, tmp_path):
+    """A ulog line longer than ULOG_PART is cut there; when the cut falls inside its uptime (500 digits), the level
+    and source are past it, so the message is empty, never a negative length."""
+    log, bt = Log(L, tmp_path), Log(L, tmp_path / 'bt')
+    L.ulog_bt_to.argtypes = [C.c_void_p, C.c_void_p]
+    L.ulog_bt_to(log.log, bt.log)  # the Bluetooth ring's check reads the message too
+    try:
+        line = ('2026-11-22T10:00:00Z ' + '7' * 500 + ' I x y\n').encode()
+        assert L.ulog_add_raw(log.log, WALL, 100, line, len(line)) == b'I'
+        assert L.ulog_add_raw(log.log, WALL, 200, line, len(line)) == b'\x00'  # the same again: a repeat, counted
+        assert log.ram() == line[:PART].decode() + '\n' and bt.ram() == ''
+    finally:
+        L.ulog_bt_to(None, None)
