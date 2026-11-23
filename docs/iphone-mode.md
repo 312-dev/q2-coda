@@ -252,6 +252,18 @@ usb 1000ms: sent=998 missed=3 (enodata 2 exdev 0 shutdown 0 other 1) resent=3 ze
 
 and the cable's summary adds the start latency (asked to taken), the longest gap, the alternate-setting toggles and the rate changes. A host that turns the stream off and on every 300 ms shows as `alt` counts each second; packets lost on the bus as `missed`; a host that stops collecting as a long `gapmax` with `sent` short of 1000; a stream the host takes whole while the sound still breaks points past the Q2, at the car. `test/uac1_isoc.py` checks the counters under Unicorn against a controller that gives back every third request unsent (300 `in_enodata`, the resends only with one request, the bytes, 176 and 180-byte packets, a 2 ms longest gap), and `test/iap_probe.py` `test_the_car_s_stream_a_line_a_second` the line and the summary.
 
+<a id="the-stream-s-life"></a>
+## The stream's life
+
+Four of 5.10.21's u_audio and f_uac1 paths were wrong for the car's way, and `uac1_build.py` `LIFE` and `LIFE_F` change them (read in the module's own code under Unicorn: `test/uac1_isoc.py` `life_run`, which fails on the module pinned before them):
+
+- **Pause.** The PCM advertises pause, but its trigger zeroed the ring position before its switch and answered `PAUSE_PUSH` and `PAUSE_RELEASE` with `-EINVAL`, so the player's `snd_pcm_pause` on way 3 left the stream running from the ring's start: up to a buffer (16,384 frames, 371 ms at 44.1 kHz) of earlier and later audio out of order in the car after each pause. Now a pause and a suspend keep the position and send silence; their release and resume go on from it; only a start and a stop begin the ring again.
+- **Alternate 1 again** while the stream runs queued its four requests a second time, while they were still queued. Now it changes nothing.
+- **A disconnect** (`f_audio_disable`: a reset, the host gone, the gadget removed) stopped capture only, so the playback endpoint stayed enabled and its requests were never freed if the gadget went before the next `SET_CONFIGURATION`. Now it stops playback too, and the host's rate goes back to `p_srate`, so the next host starts there and `GET_CUR` says so.
+- **`in_eshutdown`** could never count: the completion returned on `-ESHUTDOWN` before the count. It counts there now, with `in_missed`, so a summary's `shutdown` shows a bus drop.
+
+ponytail: `in_pkt_min`, `in_pkt_max` and `in_gap_max` are reset by q2-iap each second while completions update them, so a reset that meets an update spoils that one window's figure. At full speed the endpoint's `bInterval` of 4 (8 ms) would cut 44.1 kHz to what fits `wMaxPacketSize` 200; the car and Windows run the gadget at high speed.
+
 <a id="the-link-s-pace"></a>
 ## The link's pace
 

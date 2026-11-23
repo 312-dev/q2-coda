@@ -20,6 +20,8 @@ playback interface at alt 1, a host's GET_CUR answers 44100 and the packets are 
 GET_CUR answers 48000, every packet is 192 bytes (48 frames) and p_rate, rate_sets and rate_asked say so; a SET_CUR of
 96000, which the format does not list, changes nothing but rate_asked; and alt 0 and back keeps 48 kHz. On a module
 built before q2-uac1-playback-rates.patch the packets stay 44.1 kHz's and GET_CUR answers whatever ep0's buffer held.
+Then the stream's life (docs/iphone-mode.md#the-stream-s-life, life_run): a pause keeps the ring position, alt 1 again
+queues nothing twice, a -ESHUTDOWN completion is counted, and a disable stops playback and forgets the host's rate.
 Kernel calls are modeled as test/uac1_bind.py models them. Exit 0 when all hold."""
 import argparse
 import importlib.util
@@ -49,7 +51,7 @@ GA_REQ_NUMBER = 0x6c + 6 * 4 + 6 * 4
 REQ_BUF, REQ_LENGTH, REQ_CONTEXT, REQ_STATUS = 0x0, 0x4, 0x20, 0x30
 # the kernel's: substream stream 0x30 and runtime 0x70 (STOCK); runtime status 0xb4 (its state first), period_size
 # 0x54, frame_bits 0x68, dma_area 0x244, dma_bytes 0x24c
-SUB_STREAM, SUB_RUNTIME = 0x30, 0x70
+SUB_PRIVATE, SUB_STREAM, SUB_RUNTIME = 0x8, 0x30, 0x70  # private_data: STOCK q2_off_sub_private_data
 RT_STATUS, RT_PERIOD_SIZE, RT_FRAME_BITS, RT_DMA_AREA, RT_DMA_BYTES = 0xb4, 0x54, 0x68, 0x244, 0x24c
 SNDRV_PCM_STATE_RUNNING = 3
 RING_FRAMES, PERIOD_FRAMES = 4096, 1024
@@ -210,13 +212,11 @@ def control(m, kind, wlength, data=None):
     return m.read(m.read(req + REQ_BUF), n)
 
 
-def rate_run(data):
-    """What is wrong with the rate the host sets (docs/iphone-mode.md#per-song-rate), one line each, and what was seen.
-    The module is bound with the probe's attributes and req_number 1, the playback interface set to alt 1 at high
-    speed (bInterval 4: one packet a millisecond), then as a host does: GET_CUR, SET_CUR 48000 while streaming,
-    GET_CUR, SET_CUR 96000 (not offered), the interface to alt 0 and back. Each step's packets are the next 20
-    completions' lengths."""
-    m = uac1_bind.bound(data, Bound, {**uac1_bind.PROBE, 'req_number': 1})
+def streaming(data, reqs=1):
+    """(machine, function, playback prm, substream, playback ep): the module bound with the probe's attributes and
+    reqs requests, at high speed, with u_audio's chip as g_audio_setup (modeled) would leave it and an open PCM as
+    run()'s, its substream's chip that chip, as the PCM's trigger reads it"""
+    m = uac1_bind.bound(data, Bound, {**uac1_bind.PROBE, 'req_number': reqs})
     f = m.function
     m.ep0 = m.alloc(0x40)
     m.write(m.gadget + GADGET_EP0, m.ep0)
@@ -231,10 +231,11 @@ def rate_run(data):
     m.write(f + GA_UAC, uac)
     m.write(uac, f)
     m.write(prm + PRM_UAC, uac)
-    m.write(prm + PRM_RBUF, m.alloc(200))
+    m.write(prm + PRM_RBUF, m.alloc(200 * reqs))  # max_psize a request, as g_audio_setup's kzalloc
     m.write(prm + PRM_MAX_PSIZE, 200)
-    m.write(prm + PRM_UREQ, m.alloc(8))
+    m.write(prm + PRM_UREQ, m.alloc(8 * reqs))
     sub, rt, st, ring = m.alloc(0x100), m.alloc(0x300), m.alloc(0x40), m.alloc(RING_FRAMES * 4)
+    m.write(sub + SUB_PRIVATE, uac)
     m.write(sub + SUB_RUNTIME, rt)
     m.write(rt + RT_STATUS, st)
     m.write(st, SNDRV_PCM_STATE_RUNNING)
@@ -243,6 +244,16 @@ def rate_run(data):
     m.write(rt + RT_DMA_AREA, ring)
     m.write(rt + RT_DMA_BYTES, RING_FRAMES * 4)
     ep = m.read(f + GA_IN_EP)
+    return m, f, prm, sub, ep
+
+
+def rate_run(data):
+    """What is wrong with the rate the host sets (docs/iphone-mode.md#per-song-rate), one line each, and what was seen.
+    The module is bound with the probe's attributes and req_number 1, the playback interface set to alt 1 at high
+    speed (bInterval 4: one packet a millisecond), then as a host does: GET_CUR, SET_CUR 48000 while streaming,
+    GET_CUR, SET_CUR 96000 (not offered), the interface to alt 0 and back. Each step's packets are the next 20
+    completions' lengths."""
+    m, f, prm, sub, ep = streaming(data)
 
     def packets(n=20):
         out = []
@@ -299,6 +310,91 @@ def rate_run(data):
     seen.append(f'alt 0 and back: packets {sorted(set(again))}')
     if set(again) != {192}:
         wrong.append(f'after alt 0 and back the packets are {sorted(set(again))} bytes, not 192')
+    return wrong, seen
+
+
+# the trigger's commands (include/sound/pcm.h) and the errno the controller gives a request at a disconnect
+TRIGGER_STOP, TRIGGER_START, TRIGGER_PAUSE_PUSH, TRIGGER_PAUSE_RELEASE = 0, 1, 3, 4
+ESHUTDOWN = -143  # MIPS's errno (arch/mips/include/uapi/asm/errno.h), not the generic 108
+
+
+def life_run(data):
+    """What is wrong in the playback stream's life (docs/iphone-mode.md#the-uac1-module), one line each, and what was
+    seen. The module bound as rate_run binds it, with patch/q2car.sh's four requests:
+    - pause: the PCM's trigger with PAUSE_PUSH and PAUSE_RELEASE (the player's snd_pcm_pause, player/output.c) answers
+      0 and keeps the ring position, sending nothing of the ring while paused; START and STOP start it at 0. 5.10.21
+      advertised pause, answered both with -EINVAL and zeroed the position first, so the stream ran on from the
+      ring's start;
+    - a request the controller gives back with -ESHUTDOWN (a disconnect) is counted in in_eshutdown, which 5.10.21's
+      early return made unreachable;
+    - the host setting alternate 1 again while the stream runs queues none of its four requests a second time;
+    - the function disabled (a disconnect, a reset, the gadget removed) stops the playback endpoint as it stops the
+      capture one, and the host's rate is forgotten: p_srate's again for the next host."""
+    m, f, prm, sub, ep = streaming(data, 4)
+    sym = m.symbols
+    wrong, seen = [], []
+    trigger = sym['uac_pcm_trigger'] if 'uac_pcm_trigger' in sym else None
+
+    def trig(cmd):
+        return m.call('uac_pcm_trigger', sub, cmd) if trigger else None
+
+    if trigger is None:
+        return ['the module has no uac_pcm_trigger symbol'], seen
+    m.write(prm + PRM_SS, 0)
+    status = trig(TRIGGER_START)
+    m.write(prm + PRM_HW_PTR, 4000)  # where the ring had got to
+    push = trig(TRIGGER_PAUSE_PUSH)
+    after_push = (m.read(prm + PRM_HW_PTR), m.read(prm + PRM_SS))
+    release = trig(TRIGGER_PAUSE_RELEASE)
+    after_release = (m.read(prm + PRM_HW_PTR), m.read(prm + PRM_SS))
+    seen.append(f'pause: START {status}, PAUSE_PUSH {push - (1 << 32) if push >> 31 else push} (hw_ptr, ss {after_push}), '
+                f'PAUSE_RELEASE {release - (1 << 32) if release >> 31 else release} (hw_ptr, ss {after_release})')
+    if push or after_push != (4000, 0):
+        wrong.append(f'PAUSE_PUSH answers {push:#x} and leaves hw_ptr, ss {after_push}, not 0 and (4000, 0)')
+    if release or after_release != (4000, sub):
+        wrong.append(f'PAUSE_RELEASE answers {release:#x} and leaves hw_ptr, ss {after_release}, not 0 and (4000, the PCM)')
+    trig(TRIGGER_STOP)
+    trig(TRIGGER_START)
+    if m.read(prm + PRM_HW_PTR) != 0:
+        wrong.append(f'STOP then START leaves hw_ptr {m.read(prm + PRM_HW_PTR)}, not 0')
+    m.write(prm + PRM_SS, 0)
+    # alternate 1, then 1 again while it runs
+    m.queue.clear()
+    m.call('f_audio_set_alt', f, AS_IN, 1)
+    first = len(m.queue)
+    m.call('f_audio_set_alt', f, AS_IN, 1)
+    seen.append(f'alt 1: {first} requests queued; alt 1 again: {len(m.queue) - first} more')
+    if first != 4 or len(m.queue) != 4:
+        wrong.append(f'alt 1 queued {first} requests and alt 1 again {len(m.queue) - first} more, not 4 and 0')
+    # a request given back with -ESHUTDOWN
+    r = m.queue.pop(0)
+    m.write(r + REQ_STATUS, ESHUTDOWN & 0xffffffff)
+    m.write(r + REQ_ACTUAL, 0)
+    m.call('u_audio_iso_complete', ep, r)
+    shut = m.read(sym['in_eshutdown']) if 'in_eshutdown' in sym else None
+    seen.append(f'-ESHUTDOWN: in_eshutdown {shut}, queued again {r in m.queue}')
+    if shut != 1 or r in m.queue:
+        wrong.append(f'a -ESHUTDOWN completion leaves in_eshutdown {shut} and queued again {r in m.queue}, not 1 and no')
+    # the host's rate, then the function disabled
+    control(m, SET_CUR, 3, (48000).to_bytes(3, 'little'))
+    dequeued = []
+    real = m.service
+
+    def service(name, a):
+        if name == 'usb_ep_dequeue':
+            dequeued.append(a[1])
+        return real(name, a)
+    m.service = service
+    m.call('f_audio_disable', f)
+    m.service = real
+    enabled = m.read(prm + PRM_ENABLED, 1)[0]
+    rate = m.read(f + GA_P_SRATE)
+    p_rate = m.read(sym['p_rate']) if 'p_rate' in sym else None
+    seen.append(f'disabled: playback enabled {enabled}, {len(dequeued)} requests dequeued, p_srate {rate}, p_rate {p_rate}')
+    if enabled or len(dequeued) != 4:
+        wrong.append(f'f_audio_disable leaves the playback endpoint enabled {enabled}, {len(dequeued)} requests dequeued, not 0 and 4')
+    if (rate, p_rate) != (44100, 44100):
+        wrong.append(f'after the disable p_srate {rate} and p_rate {p_rate}, not the configured 44100: the last host\'s rate kept')
     return wrong, seen
 
 
@@ -376,6 +472,9 @@ def main(argv):
     rate_wrong, seen = rate_run(data)
     print('rates: ' + '; '.join(seen))
     wrong += rate_wrong
+    life_wrong, seen = life_run(data)
+    print('stream life: ' + '; '.join(seen))
+    wrong += life_wrong
     for w in wrong:
         print('FAIL  ' + w)
     print('ok' if not wrong else f'{len(wrong)} wrong')

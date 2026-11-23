@@ -141,6 +141,48 @@ COUNTED_F = [
      'module_param(in_alt_ms, uint, 0444);\n\n'
      'static int f_audio_set_alt(struct usb_function *f, unsigned intf, unsigned alt)\n{\n'),
 ]
+# The playback stream's life, applied after COUNTED (docs/iphone-mode.md#the-stream-s-life), checked by test/uac1_isoc.py
+# life_run. 5.10.21 advertises pause, but its trigger zeroed the ring position before the switch and answered PAUSE_PUSH
+# and PAUSE_RELEASE with -EINVAL, so a pause on the car's way (the player's snd_pcm_pause) left the stream running from
+# the ring's start: now a pause and a suspend keep the position and send nothing of the ring, and only a start or a
+# stop begins it again. The host setting alternate 1 again while it streams queued the running requests a second time;
+# now it changes nothing. f_audio_disable stopped capture only, so a disconnect mid-song left the playback endpoint
+# enabled and its requests unfreed if the gadget went before the next SET_CONFIGURATION; now it stops playback too, and
+# the host's rate is forgotten, so the next host starts at p_srate as GET_CUR then says. A completion given back with
+# -ESHUTDOWN (a disconnect) returned before COUNTED's count; now in_missed and in_eshutdown count it there.
+# ponytail: in_pkt_min, in_pkt_max and in_gap_max are reset by q2-iap's write each second while the completion
+# updates them, so a write that meets an update spoils that one window's figure; a module-side window would lift it.
+# At full speed the endpoint's bInterval 4 (8 ms) makes 44.1 kHz packets larger than wMaxPacketSize 200, so audio
+# would be cut to about 6 kHz; the car and Windows run the gadget at high speed, where it is 1 ms.
+LIFE = [
+    ('\t/* Reset */\n\tprm->hw_ptr = 0;\n\n\tswitch (cmd) {\n\tcase SNDRV_PCM_TRIGGER_START:\n'
+     '\tcase SNDRV_PCM_TRIGGER_RESUME:\n\t\tprm->ss = substream;\n\t\tbreak;\n'
+     '\tcase SNDRV_PCM_TRIGGER_STOP:\n\tcase SNDRV_PCM_TRIGGER_SUSPEND:\n\t\tprm->ss = NULL;\n\t\tbreak;\n',
+     '\t/* q2: a start or a stop begins the ring again; a pause and a suspend keep the position, and their\n'
+     '\t * release and resume go on from it (uac1_build.py LIFE) */\n'
+     '\tswitch (cmd) {\n\tcase SNDRV_PCM_TRIGGER_START:\n\t\tprm->hw_ptr = 0;\n\t\tfallthrough;\n'
+     '\tcase SNDRV_PCM_TRIGGER_RESUME:\n\tcase SNDRV_PCM_TRIGGER_PAUSE_RELEASE:\n\t\tprm->ss = substream;\n\t\tbreak;\n'
+     '\tcase SNDRV_PCM_TRIGGER_STOP:\n\t\tprm->hw_ptr = 0;\n\t\tfallthrough;\n'
+     '\tcase SNDRV_PCM_TRIGGER_SUSPEND:\n\tcase SNDRV_PCM_TRIGGER_PAUSE_PUSH:\n\t\tprm->ss = NULL;\n\t\tbreak;\n'),
+    ('\tep = audio_dev->in_ep;\n\tprm = &uac->p_prm;\n',
+     '\tep = audio_dev->in_ep;\n\tprm = &uac->p_prm;\n'
+     '\t/* q2: alternate 1 again while streaming: its requests are queued already (uac1_build.py LIFE) */\n'
+     '\tif (prm->ep_enabled)\n\t\treturn 0;\n'),
+    ('\tif (req->status == -ESHUTDOWN)\n\t\treturn;\n',
+     '\tif (req->status == -ESHUTDOWN) {\n'
+     '\t\t/* q2: counted here, as this return comes before the count below (uac1_build.py LIFE) */\n'
+     '\t\tif (prm == &uac->p_prm) {\n\t\t\tin_missed++;\n\t\t\tin_eshutdown++;\n\t\t}\n'
+     '\t\treturn;\n\t}\n'),
+    ('\t\t\telse if (status == -ESHUTDOWN)\n\t\t\t\tin_eshutdown++;\n', ''),
+]
+LIFE_F = [
+    ('\tuac1->as_in_alt = 0;\n\n\tu_audio_stop_capture(&uac1->g_audio);\n}\n',
+     '\tuac1->as_in_alt = 0;\n\n\tu_audio_stop_capture(&uac1->g_audio);\n'
+     '\t/* q2: and playback, and the next host starts at p_srate (uac1_build.py LIFE) */\n'
+     '\tu_audio_stop_playback(&uac1->g_audio);\n'
+     '\tp_rate = g_audio_to_uac1_opts(&uac1->g_audio)->p_srate;\n'
+     '\tq2_u_audio_set_playback_srate(&uac1->g_audio, p_rate);\n}\n'),
+]
 # Offsets and sizes read in the stock kernel's own code (vmlinux-to-elf of the #303 kernel, docs/iphone-mode.md#the-uac1-module),
 # each with the instruction it came from: q2_layout.ko must agree with every one.
 STOCK = {
@@ -403,8 +445,8 @@ def main(argv):  # pragma: no mutate block (all of the above)
     # Q2 Muse's own changes after those (OWN_PATCHES): several playback rates and the host's SET_CUR of one
     for p in OWN_PATCHES:
         run('patch', '-p1', '-F0', '--no-backup-if-mismatch', '-d', mod, '-i', HERE/'patches'/p)
-    # The car's stream counted (COUNTED, COUNTED_F): nothing sent changes
-    for name, changes in (('u_audio.c', COUNTED), ('f_uac1.c', COUNTED_F)):
+    # The car's stream counted (COUNTED, COUNTED_F): nothing sent changes; then the stream's life (LIFE, LIFE_F)
+    for name, changes in (('u_audio.c', COUNTED), ('f_uac1.c', COUNTED_F), ('u_audio.c', LIFE), ('f_uac1.c', LIFE_F)):
         text = (mod/name).read_text()
         for old, new in changes:
             if text.count(old) != 1:
