@@ -31,7 +31,7 @@
  * stream_poll plays as it fills, or an .m3u of card paths, which it plays in order, waiting for
  * each, or its Q2URLS/1 queue of stream URLs, /tmp/q2-<id>.urls, which stock's Tidal player plays
  * (tidal.c app_urls_play), telling it in /tmp/q2-<id>.now which of them plays when the queue asks
- * (now_poll). It asks for Update Local Music and its playlists' import in
+ * (urls_now_poll). It asks for Update Local Music and its playlists' import in
  * /tmp/q2-<id>.library (addon_library.c), the result in .library.done. A list reply whose message
  * is "pages" and that has a cursor is followed by its next pages, appended to the same list
  * (page_next), up to ADDON_PAGES.
@@ -835,8 +835,10 @@ static void now_sweep(void) {
     if (d) closedir(d);
 }
 
-/* addon_poll's, every ADDON_POLL_MS: what plays, as sleep_check reads it */
-static void now_poll(void) {
+/* addon_poll's, every ADDON_POLL_MS: which URL of a card app's queue plays, written to its .now
+ * file, and what plays, as sleep_check reads it (now_source.c's now_poll is another thing: the
+ * Bluetooth record and NP_PLAY_FILE) */
+static void urls_now_poll(void) {
     unsigned ms = time_now_ms();
     if (!nw.owner || ms - nw.polled < ADDON_POLL_MS) return;
     nw.polled = ms;
@@ -1665,7 +1667,7 @@ void addon_poll(void) {
     resume_poll(); /* first: a resume let go before its app's .play is read */
     for (int i = 0; i < ap.n; ++i) poll_one(&ap.a[i]);
     sleep_check();
-    now_poll();
+    urls_now_poll();
     library_poll();
     catalogue_poll(); /* the server library's apps (catalogue.c), running or not */
 }
