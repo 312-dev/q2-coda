@@ -78,7 +78,10 @@ seventh of its brightness. At the foot the rows fade as Corners says, into black
   y 50 as [Menus](#menus) says.
 - **Taps** on the band are the status row's, as on any page ([Full-bleed](#full-bleed)): a row shown under the
   status row is not tappable there; scroll it down to tap it. Its box, its selection, the wheel and a drag are as
-  they were, so a selected row never stops under the status row.
+  they were, so a selected row never stops under the status row. On Home, whose bar shows under touch, a drag
+  that ends with the selected row under the status row, cut by it, or in the fade past the list's rest moves the
+  selection to the whole row nearest the list's middle, and the old bar goes with it: the clock always stands
+  alone on its line ([internals](internals.md#touch-mode)).
 - Built as a paint of the list's rows into the status row's band, under its glyphs (`patch/nav/row_paint.c`
   `list_reach_paint`, the fade `patch/home.c` `list_top_fade`; Home's Split fades follow the glass's corners as
   before, `home_fades`).

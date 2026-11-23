@@ -2,6 +2,7 @@
 
 - **Unreleased (q2-coda)**:
   - Car Remote: on the car's now-playing screen, the artist and the album open that artist's and that album's pages (with a Q2 Muse Remote that supports it).
+  - Home: dragging the menu with a finger no longer leaves the blue selection on a row under the clock (with a song loaded, "Paused" or "Playing" drawn through the time) or on the faded row at the bottom. When the drag ends, the selection moves to a whole row in the middle of the list.
   - Car Audio: when the car stops taking audio mid-song, a stop, a skip or a new song now takes effect at once, where the Q2 could wait up to 10 seconds first.
   - Car Remote: the Q2's log names each command it takes from the phone or the car (play, Next, Previous, seek, a queue pick, volume and the rest) with what the player was doing, so a song skipped from the phone can be told from one that ended.
   - Home: the slideshow's album covers from your server are sharp, made from the app's large covers instead of the small list-row ones scaled up.
