@@ -91,8 +91,9 @@ struct iap2_host {
     void (*audio)(int on);                         /* the car wants USB audio (1) or no longer (0) */
     void (*command)(const char *verb);             /* a button or a seek: the shim's verbs (coda_rc_shim.c cr_command) */
     unsigned (*artwork)(const struct iap2_np *np, u8 *out, unsigned cap); /* the song's cover, a JPEG, or 0 */
-    struct iap2_library *lib;   /* the library, filled by lib_load (-1: none to send) */
-    int (*lib_load)(void);
+    struct iap2_library *lib;   /* the library, filled once lib_load's read is over */
+    int (*lib_load)(void);      /* its read begun, off the loop: 0, or -1 with none to send */
+    int (*lib_ready)(void);     /* 1 lib filled, -1 none to send, 0 still reading */
     void (*lib_saved)(void);    /* the car holds lib's revision whole */
     void (*play)(const unsigned *rids, unsigned n, unsigned at, int shuffle);
     int (*queue)(unsigned *rids, unsigned cap); /* the playing queue's rids, or -1 */
@@ -1086,7 +1087,7 @@ static void send_library_info(void) {
 #define CHECKPOINT_MS 60000      /* and then one a minute */
 #define LISTS_MAX 128
 #define LIST_WAIT_MS 5000 /* a list's transfer the car has not started in this long is given up */
-enum { LIB_IDLE, LIB_FIRST, LIB_LISTS, LIB_ITEMS, LIB_GONE, LIB_FINAL };
+enum { LIB_IDLE, LIB_FIRST, LIB_LISTS, LIB_ITEMS, LIB_GONE, LIB_FINAL, LIB_READING };
 static struct {
     int phase, after, diff, reset, held; /* after: the phase once the lists' transfers end; held: the car has rev */
     unsigned next, gone, mask, items, updates, completes;
@@ -1359,14 +1360,37 @@ static int list_transfer_word(const u8 *d) {
     return 1;
 }
 
+/* What the car asked at StartMediaLibraryUpdates, kept while the library is read (LIB_READING): the revision it
+ * holds (a longer one than this is no revision this Q2 sent) and the item properties it wants. */
+static struct {
+    char rev[128];
+    int has_rev;
+    unsigned mask;
+} lib_ask;
+
+static void send_library_none(void) {
+    msg_start(0x4C04), param_str(0, H->library_id), param_str(1, "1"), param_u8(7, 100), msg_send();
+}
+
+/* The car's StartMediaLibraryUpdates: its first two answers at once, then the library read off the loop (H->lib_load,
+ * a child on the Q2) and the updates begun when it is in (library_read, from iap2_tick). */
 static void send_library_updates(const char *car_rev, unsigned mask) {
-    char t[200];
     msg_start(0x4C04), param_str(0, H->library_id), param_u8(8, 0), msg_send();
     msg_start(0x4C04), param_str(0, H->library_id), param_u8(9, 1), msg_send();
-    if (!H->lib || !H->lib_load || H->lib_load() < 0) {
-        msg_start(0x4C04), param_str(0, H->library_id), param_str(1, "1"), param_u8(7, 100), msg_send();
+    if (!H->lib || !H->lib_load || !H->lib_ready || H->lib_load() < 0) {
+        send_library_none();
         return;
     }
+    lib_ask.has_rev = car_rev != 0;
+    snprintf(lib_ask.rev, sizeof lib_ask.rev, "%s", car_rev ? car_rev : "");
+    lib_ask.mask = mask;
+    ls.phase = LIB_READING, ls.x_state = 0;
+}
+
+static void library_read(void) {
+    char t[300];
+    const char *car_rev = lib_ask.has_rev ? lib_ask.rev : 0;
+    unsigned mask = lib_ask.mask;
     const struct iap2_library *l = H->lib;
     memset(&ls, 0, sizeof ls);
     ls.mask = mask, ls.started = ls.complete_at = H->now();
@@ -1799,6 +1823,11 @@ static void iap2_tick(void) {
     }
     if (availability_due && now >= availability_due) send_carplay_availability();
     scan_tick(now);
+    if (ls.phase == LIB_READING) {
+        int r = H->lib_ready();
+        if (r < 0) ls.phase = LIB_IDLE, send_library_none();
+        else if (r > 0) library_read();
+    }
     lists_pump(now);
     lib_pump();
     if (identified && now_playing) poll_now_playing(now);

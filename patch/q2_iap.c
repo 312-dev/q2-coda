@@ -89,6 +89,7 @@ int access(const char *, int);
 int klogctl(int, char *, int);
 int execl(const char *, const char *, ...);
 void qsort(void *, size_t, size_t, int (*)(const void *, const void *));
+int nice(int);
 void *bsearch(const void *, const void *, size_t, size_t, int (*)(const void *, const void *));
 #define ERRNO (*__errno_location())
 #define O_RDONLY 0
@@ -876,7 +877,8 @@ static void io_link_lost(void) {
     }
 STEPPED(int, io_now_playing, "the Now Playing file", (struct iap2_np * n), (n))
 STEPPED(unsigned, io_artwork, "the cover's read", (const struct iap2_np *n, u8 *out, unsigned cap), (n, out, cap))
-STEPPED(int, lib_load, "the library's read", (void), ())
+STEPPED(int, lib_load, "the library's read", (void), ()) /* its child's start, and below the tables' hand-over */
+STEPPED(int, lib_ready, "the library's read", (void), ())
 STEPPED_VOID(lib_saved, "the library's record", (void), ())
 STEPPED_VOID(io_audio, "the car's audio file", (int on), (on))
 STEPPED_VOID(io_command, "the shim's command file", (const char *verb), (verb))
@@ -887,8 +889,8 @@ STEPPED(int, lib_queue, "the shim's queue file", (unsigned *rids, unsigned cap),
 static const struct iap2_host io = { io_send,           mono_ms,           io_log,        io_now_playing_stepped,
                                      "Q2 Muse",         uuid,              library_id,    io_audio_stepped,
                                      io_command_stepped, io_artwork_stepped, &lib_t,      lib_load_stepped,
-                                     lib_saved_stepped, lib_play_stepped,  lib_queue_stepped, io_backlog,
-                                     io_link_lost };
+                                     lib_ready_stepped, lib_saved_stepped, lib_play_stepped,  lib_queue_stepped,
+                                     io_backlog,        io_link_lost };
 
 /* The input report that echoes payload (link control 0, whole): the smallest that fits, zero padded,
  * written to the HID instance's ep1 in a child so the event loop never waits on the host's poll. */
@@ -1176,6 +1178,8 @@ int main(int argc, char **argv) {
         long now = mono_ms();
         loop_step("the cover's making");
         if (iap2_mode) art_made_poll();
+        loop_step("the library's read");
+        if (iap2_mode) lib_load_poll(); /* its child's bytes, whether or not the car still waits for them */
         loop_step("the host's verdict");
         host_poll(now);
         loop_step("the audio's health");
@@ -1203,6 +1207,7 @@ int main(int argc, char **argv) {
     logline("probe", msg);
     if (iap2_mode) unlink(car_file); /* the player back to demo's output */
     if (writer_pid > 0) kill(writer_pid, SIGTERM);
+    if (lload.pid > 0) kill(lload.pid, SIGTERM);
     if (logfd != 2) fsync(logfd);
     for (int k = 0; k < ninst; ++k) close(in[k].ep0);
     return rc;

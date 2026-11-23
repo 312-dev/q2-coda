@@ -1885,5 +1885,31 @@ def test_a_song_change_does_not_read_the_catalogue_in_the_loop(probe, tmp_path, 
     assert len(slow) <= 1, sorted(slow)
 
 
+
+def test_the_library_s_read_does_not_hold_the_loop(probe, tmp_path, monkeypatch):
+    """q2car.1.log of 2026-11-22 at 22028.654: "a pass held 648 ms, 557 of it in the library's read", the car's
+    StartMediaLibraryUpdates answered by reading all 9,199 of the owner's server songs and 31 lists inside the loop,
+    once a cable. This machine reads them about 100 times faster than the Q2's card, so the stall detector is set at
+    2 ms: no pass may be held mostly in the library's read, and the whole library still goes to the car."""
+    monkeypatch.setattr(BmwCar, 'msg', bmw_msg_keeping_body)
+    monkeypatch.setattr(FakeFfs, '__init__', fast_ffs(FakeFfs.__init__))  # the data stage's 50 ms would hide it
+    song_db(tmp_path/'database.db', [SONGS[1]])
+    big_catalogue(tmp_path/'catalogue.db')
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path, '--stall-ms', '2')
+    try:
+        car.send(message(0x4C03, prm(0, b'lib\0')))
+        deadline, first = time.time() + 10, None
+        while time.time() < deadline and first is None:
+            mid, ps = car.msg()
+            if mid == 0x4C04 and 2 in ps:
+                first = ps
+    finally:
+        stop(p, fd)
+    assert first is not None, 'no song sent'
+    text = log.read_text()
+    assert '9200 songs read' in text
+    assert held(log, "the library's read") == [], held(log, "the library's read")
+
+
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-q', *sys.argv[1:]]))

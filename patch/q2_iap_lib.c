@@ -1,8 +1,9 @@
 /* q2-iap's library (docs/iphone-mode.md#the-library-on-idrive): the Q2's songs as the car's media library, read from
  * stock's database (songtable, the songs coda_rc_lib.c's views read: audiobooks and podcasts left out) with the lists
- * it sends as playlists (lib_lists) into RAM at the car's StartMediaLibraryUpdates, and the record of what the car was last sent in full (LIB_SENT), so a car that
- * holds that revision is sent only what changed. Included by q2_iap.c; q2_iap2.c reads the tables through its host
- * (struct iap2_library) and never this file's I/O. The database is opened read-only and closed after the read. */
+ * it sends as playlists (lib_lists) into RAM at the car's StartMediaLibraryUpdates, and the record of what the car was
+ * last sent in full (LIB_SENT), so a car that holds that revision is sent only what changed. Included by q2_iap.c;
+ * q2_iap2.c reads the tables through its host (struct iap2_library) and never this file's I/O. The databases are read
+ * in a child (lib_load), opened read-only and closed after the read. */
 
 #define LIB_DB "/mnt/data/database.db"
 #define LIB_CAT "/mnt/mmc/.q2pod/catalogue.db" /* a signed-in server's songs (docs/server-library.md) */
@@ -48,8 +49,10 @@ static unsigned lib_put(char **pool, unsigned *len, unsigned *cap, const char *s
     return at;
 }
 
+static unsigned char *lib_blob; /* the tables lib_t points into when the child read them (lib_install): one block */
 static void lib_free(void) {
-    free(lib_t.tracks), free(lib_t.pool), free(lib_t.sent), free(lib_t.lists), free(lib_t.lrids);
+    if (lib_blob) free(lib_blob), lib_blob = 0; /* the child's tables: one block */
+    else free(lib_t.tracks), free(lib_t.pool), free(lib_t.sent), free(lib_t.lists), free(lib_t.lrids);
     memset(&lib_t, 0, sizeof lib_t);
 }
 
@@ -188,9 +191,9 @@ static int sid_add(struct lib_sid **v, unsigned *n, unsigned *cap, const char *a
     s->rid = rid;
     return 1;
 }
-/* v (n rows) sorted and made the index, in place of the one before */
-static void sid_install(struct lib_sid *v, unsigned n) {
-    if (v) qsort(v, n, sizeof *v, sid_cmp);
+/* v (n rows) sorted, unless they are, and made the index, in place of the one before */
+static void sid_install(struct lib_sid *v, unsigned n, int sorted) {
+    if (v && !sorted) qsort(v, n, sizeof *v, sid_cmp);
     free(sids.v);
     sids.v = n ? realloc(v, n * sizeof *v) : (free(v), (struct lib_sid *)0);
     if (n && !sids.v) sids.v = v;
@@ -259,7 +262,7 @@ static void sid_index_poll(void) {
     unsigned n = sids.in_n / sizeof(struct lib_sid);
     if (!sids.n && sids.in) {
         char msg[120];
-        sid_install((struct lib_sid *)sids.in, n);
+        sid_install((struct lib_sid *)sids.in, n, 0);
         snprintf(msg, sizeof msg, "library: %u server songs found by their stream path, from the catalogue", sids.n);
         logline("lib", msg);
     } else {
@@ -288,9 +291,11 @@ static unsigned lib_stream_rids(const char *const *paths, unsigned *rids, unsign
 /* The songs into RAM, in rid order, each with the hash of what the car is sent of it; the revision their hashes'
  * hash. The card's songs (songtable) and, while a server is signed in (its catalogue on the card, as Car Remote's
  * library attaches it: coda_rc_lib.c lib_open), the server's (servertable, rids from 0x40000000): on the Q2 of the
- * 2026-11-20 drive songtable was empty and every song the server's, 9,199 of them, and iDrive got none. 0, or -1 with
- * no database. */
-static int lib_load(void) {
+ * 2026-11-20 drive songtable was empty and every song the server's, 9,199 of them, and iDrive got none. The server
+ * songs' stream-path index rows into *sv (*sn of them), for lib_stream_rids. 0, or -1 with no database. Run in
+ * lib_load's child, never in the loop. */
+static unsigned lib_pool_len; /* lib_t.pool's bytes in use, for the child's hand-over */
+static int lib_read(struct lib_sid **sv_out, unsigned *sn_out) {
     sqlite3 *db = 0;
     sqlite3_stmt *st = 0;
     char *pool = 0, sql[900];
@@ -317,6 +322,7 @@ static int lib_load(void) {
     if (pool) pool[0] = 0;
     struct lib_sid *sv = 0;
     unsigned sn = 0, scap = 0;
+    *sv_out = 0, *sn_out = 0;
     while (pool && sqlite3_step(st) == SQLITE_ROW) {
         if (n == tcap) {
             struct iap2_track *t = realloc(lib_t.tracks, (tcap = tcap ? tcap * 2 : 1024) * sizeof *t);
@@ -344,10 +350,10 @@ static int lib_load(void) {
                 t->rid);
     }
     sqlite3_finalize(st);
-    sid_install(sv, sn); /* the server songs' stream paths, as this library has them (lib_stream_rids) */
+    *sv_out = sv, *sn_out = sn; /* the server songs' stream paths, as this library has them (lib_stream_rids) */
     if (pool) lib_lists(db, server, &pool, &len, &cap);
     sqlite3_close(db);
-    lib_t.pool = pool, lib_t.n = n;
+    lib_t.pool = pool, lib_t.n = n, lib_pool_len = len;
     snprintf(lib_t.rev, sizeof lib_t.rev, "q2.%u.%08x", n, rev);
     lib_read_sent();
     char msg[240];
@@ -356,6 +362,155 @@ static int lib_load(void) {
              lib_t.sent_rev[0] ? lib_t.sent_rev : "nothing", lib_t.sent_n);
     logline("lib", msg);
     return 0;
+}
+
+/* The library's read, in a child (lib_load), so the loop never waits on it: at the car's StartMediaLibraryUpdates on
+ * 2026-11-22 (q2car.1.log, 22028.654) reading the owner's 9,199 server songs and 31 lists held the loop 648 ms. The
+ * child reads them as lib_read does and hands the tables over a pipe whole: a header, then the songs, the pool of
+ * their strings, the lists, the lists' rids, the sent record and the stream-path index, each array as it lies in
+ * memory (this machine's order; the child is a fork of this program). The loop takes the bytes in as they come
+ * (lib_load_poll) and, at the end, points lib_t into them; the tables before stay in use until then. */
+struct lib_head {
+    unsigned magic, n, pool_len, nlists, nlrids, sent_n, sn;
+    char rev[40], sent_rev[40];
+};
+#define LIB_MAGIC 0x51324c42u
+static struct {
+    int fd, pid;          /* the child's pipe and pid while it reads, else -1 and 0 */
+    int ready;            /* 1 the tables installed, -1 none read; 0 not yet (lib_ready) */
+    long at;              /* when it began */
+    unsigned char *in;    /* its bytes so far */
+    unsigned in_n, in_cap;
+} lload = {.fd = -1};
+
+static int lib_write_all(int fd, const void *p, unsigned n) {
+    const unsigned char *b = p;
+    while (n) {
+        int w = (int)write(fd, b, n);
+        if (w <= 0) {
+            if (w < 0 && ERRNO == EINTR) continue;
+            return -1;
+        }
+        b += w, n -= (unsigned)w;
+    }
+    return 0;
+}
+static unsigned lib_pad(unsigned n) { return (n + 3u) & ~3u; }
+
+/* The child: the tables read and written to the pipe; nothing written when there is no database. */
+static void lib_child(int out) {
+    struct lib_sid *sv;
+    unsigned sn;
+    static const unsigned char zero[4];
+    nice(10);
+    if (lib_read(&sv, &sn) < 0) _exit(1);
+    if (sv) qsort(sv, sn, sizeof *sv, sid_cmp); /* here, not in the loop (lib_install) */
+    struct lib_head h;
+    memset(&h, 0, sizeof h);
+    h.magic = LIB_MAGIC, h.n = lib_t.n, h.pool_len = lib_pool_len, h.nlists = lib_t.nlists, h.sent_n = lib_t.sent_n;
+    h.sn = sn;
+    for (unsigned j = 0; j < lib_t.nlists; ++j) h.nlrids += lib_t.lists[j].n;
+    memcpy(h.rev, lib_t.rev, sizeof h.rev), memcpy(h.sent_rev, lib_t.sent_rev, sizeof h.sent_rev);
+    if (lib_write_all(out, &h, sizeof h) || lib_write_all(out, lib_t.tracks, h.n * sizeof *lib_t.tracks) ||
+        lib_write_all(out, lib_t.pool, h.pool_len) || lib_write_all(out, zero, lib_pad(h.pool_len) - h.pool_len) ||
+        lib_write_all(out, lib_t.lists, h.nlists * sizeof *lib_t.lists) ||
+        lib_write_all(out, lib_t.lrids, h.nlrids * sizeof *lib_t.lrids) ||
+        lib_write_all(out, lib_t.sent, h.sent_n * sizeof *lib_t.sent) || lib_write_all(out, sv, sn * sizeof *sv))
+        _exit(1);
+    _exit(0);
+}
+
+/* The child's bytes made the tables: lib_t pointed into them and the stream-path index replaced. 1, or 0 when they
+ * are not whole. */
+static unsigned long long lib_want(const struct lib_head *h) { /* the bytes the header announces, itself included */
+    return sizeof *h + (unsigned long long)h->n * sizeof(struct iap2_track) + lib_pad(h->pool_len) +
+           (unsigned long long)h->nlists * sizeof(struct iap2_list) + h->nlrids * 4ull +
+           (unsigned long long)h->sent_n * sizeof(struct iap2_sent) + h->sn * sizeof(struct lib_sid);
+}
+static int lib_install(unsigned char *b, unsigned len) {
+    struct lib_head h;
+    if (len < sizeof h) return 0;
+    memcpy(&h, b, sizeof h);
+    if (h.magic != LIB_MAGIC || lib_want(&h) != len || !h.pool_len) return 0;
+    lib_free();
+    lib_blob = b;
+    unsigned char *c = b + sizeof h;
+    lib_t.tracks = h.n ? (struct iap2_track *)c : 0, c += h.n * sizeof(struct iap2_track);
+    lib_t.pool = (char *)c, c += lib_pad(h.pool_len);
+    lib_t.lists = h.nlists ? (struct iap2_list *)c : 0, c += h.nlists * sizeof(struct iap2_list);
+    lib_t.lrids = h.nlrids ? (unsigned *)c : 0, c += h.nlrids * 4;
+    lib_t.sent = h.sent_n ? (struct iap2_sent *)c : 0, c += h.sent_n * sizeof(struct iap2_sent);
+    lib_t.n = h.n, lib_t.nlists = h.nlists, lib_t.sent_n = h.sent_n;
+    memcpy(lib_t.rev, h.rev, sizeof h.rev), memcpy(lib_t.sent_rev, h.sent_rev, sizeof h.sent_rev);
+    lib_t.rev[sizeof lib_t.rev - 1] = lib_t.sent_rev[sizeof lib_t.sent_rev - 1] = 0;
+    struct lib_sid *sv = h.sn ? malloc(h.sn * sizeof *sv) : 0;
+    if (sv) memcpy(sv, c, h.sn * sizeof *sv);
+    sid_install(sv, sv ? h.sn : 0, 1);
+    return 1;
+}
+
+/* The child's bytes taken in, as many as wait; at its end the tables installed (lib_ready then says how it went).
+ * Called every pass of the loop, so the child never waits on a full pipe. */
+static void lib_load_poll(void) {
+    for (;;) {
+        if (lload.fd < 0) return;
+        if (lload.in_n + 65536 > lload.in_cap) {
+            unsigned c = lload.in_cap ? lload.in_cap * 2 : 262144;
+            if (lload.in_n >= sizeof(struct lib_head)) { /* once, at the size the header announces */
+                unsigned long long want = lib_want((const struct lib_head *)lload.in) + 65536;
+                if (want > c && want < 64u << 20) c = (unsigned)want;
+            }
+            unsigned char *w = realloc(lload.in, c);
+            if (!w) break;
+            lload.in = w, lload.in_cap = c;
+        }
+        int r = (int)read(lload.fd, lload.in + lload.in_n, lload.in_cap - lload.in_n);
+        if (r > 0) {
+            lload.in_n += (unsigned)r;
+            continue;
+        }
+        if (r < 0 && (ERRNO == EAGAIN || ERRNO == EINTR)) return;
+        break;
+    }
+    close(lload.fd), lload.fd = -1, lload.pid = 0;
+    char msg[160];
+    int ok = lload.in && lib_install(lload.in, lload.in_n);
+    if (!ok) free(lload.in);
+    snprintf(msg, sizeof msg, "library: %s by its child in %ld ms (%u bytes)", ok ? "read" : "not read",
+             mono_ms() - lload.at, lload.in_n);
+    logline("lib", msg);
+    lload.in = 0, lload.in_n = lload.in_cap = 0;
+    lload.ready = ok ? 1 : -1;
+}
+
+/* The host's lib_load: the library's read begun in a child (one already reading goes on). 0, or -1 when no child
+ * could be started. */
+static int lib_load(void) {
+    int fds[2];
+    lload.ready = 0;
+    if (lload.fd >= 0) return 0;
+    if (pipe(fds)) return logline("lib", "library: no pipe for its child"), -1;
+    int pid = fork();
+    if (pid == 0) {
+        signal(SIGTERM, SIG_DFL), signal(SIGINT, SIG_DFL), signal(SIGHUP, SIG_DFL);
+        close(fds[0]);
+        lib_child(fds[1]);
+    }
+    close(fds[1]);
+    if (pid < 0) {
+        close(fds[0]);
+        logline("lib", "library: its child not started");
+        return -1;
+    }
+    fcntl(fds[0], F_SETFL, O_NONBLOCK);
+    lload.fd = fds[0], lload.pid = pid, lload.at = mono_ms();
+    return 0;
+}
+
+/* The host's lib_ready: 1 the tables read (in lib_t), -1 none, 0 still reading. */
+static int lib_ready(void) {
+    lib_load_poll();
+    return lload.ready;
 }
 
 /* A server song's cover as its app keeps it (catalogue.c catalogue_cover, what the Q2's own Now Playing shows): the
