@@ -31,7 +31,9 @@ SERIAL=/mnt/data/q2-iap.serial
 MODULE=/module_driver/usb_f_uac1.ko
 DAEMON=/usr/bin/q2-iap
 ADBG=/usr/bin/q2adb-gadget
-LOGDIR=${Q2CAR_LOGDIR:-/mnt/mmc/.q2muse/logs} # Q2CAR_RUN and Q2CAR_LOGDIR: test/unit/test_q2car_rotate.py
+LOGDIR=${Q2CAR_LOGDIR:-/mnt/mmc/.q2muse/logs} # Q2CAR_RUN, Q2CAR_LOGDIR, Q2CAR_PCM, Q2CAR_PLAYER: test/iap_probe.py
+PCM=${Q2CAR_PCM:-/proc/asound/UAC1Gadget/pcm0p/sub0/status} # "closed" once nothing has the car's PCM open
+PLAYER=${Q2CAR_PLAYER:-hciplayer}                           # q2player, by stock's player's name
 mkdir -p "$RUN"
 if [ -d "$LOGDIR" ] && touch "$LOGDIR/.q2car-w" 2>/dev/null; then rm -f "$LOGDIR/.q2car-w"; else LOGDIR=$RUN; fi
 LOG=$LOGDIR/q2car.log
@@ -115,10 +117,26 @@ gadget_up() {
     return 0
 }
 
+# The car's PCM let go before the function is unbound: the unbind ends in the kernel's snd_card_free, which waits for
+# the card's last open file, and a paused song keeps it open (player/engine.c), so the unbind and the gadget's lock
+# waited for the player's next command (2026-11-22: 6.4 s in snd_card_free with the PCM held open, every read of UDC
+# waiting behind it, until it closed). The
+# player's SIGUSR2 releases it (docs/player.md); 2 s at most, then the unbind goes ahead and waits as before.
+pcm_open() { [ -e "$PCM" ] && [ "$(head -c 6 "$PCM")" != closed ]; }
+release() {
+    pcm_open || return 0
+    p=$(pidof $PLAYER)
+    [ -n "$p" ] && kill -USR2 $p
+    i=0
+    while pcm_open && [ $i -lt 20 ]; do usleep 100000; i=$((i + 1)); done
+    if pcm_open; then log "the car's PCM still open after 2 s: the gadget removed anyway"; else log "the car's PCM released in ${i}00 ms"; fi
+}
+
 # The gadget gone, configfs's way, and configfs unmounted, so stock's storage and DAC scripts can start theirs. Safe
 # with nothing there.
 gadget_down() {
     mountpoint -q $CFS || mount -t configfs none $CFS
+    release
     [ -d $G ] && echo "" > $G/UDC 2>/dev/null
     p=$(cat $RUN/daemon.pid 2>/dev/null)
     if alive "$p"; then
@@ -257,6 +275,7 @@ case "$1" in
 start) start ;;
 stop) stop ;;
 _runner) runner ;;
-_rotate) rotate ;; # test/unit/test_q2car_rotate.py
+_rotate) rotate ;;   # test/iap_probe.py
+_release) release ;; # test/iap_probe.py
 *) echo "usage: $0 start | stop" >&2; exit 2 ;;
 esac

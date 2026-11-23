@@ -76,6 +76,7 @@ static struct {
     /* the USB picker, its footer, General's row's label, and a pick the confirmation card is asking about */
     void *pick, *pick_view, *pick_foot, *row;
     int pending;
+    int after_car; /* a pick + 1 waiting for Automatic's iPhone to be off the controller (usb_switch), 0 none */
     /* the ADB prompt */
     int fd;
     unsigned auth_at;
@@ -194,11 +195,11 @@ static int usb_debug_open(void);
 
 /* A choice made for the cable that is in (the chooser's, a remembered one's, the USB picker's);
  * always remembers it too. */
-static void usb_apply(int pick, int always) {
+static void usb_apply(int pick, int always) { /* always 2: remembered already (usb_switch) */
     u.choice = pick;
     usb_probe_stop();
     u.probing = 0;
-    if (always) usb_remember(pick);
+    if (always == 1) usb_remember(pick);
     if (pick == USB_FILES || pick == USB_AUDIO) {
         if (!always) usb_mode(pick == USB_AUDIO);
         g_usblink_status = 0; /* stock's next pass starts its gadget and opens usbmode_page */
@@ -231,7 +232,7 @@ static int usb_row_click(void *ctx, void *event) {
     int i = (int)(long)ctx, always = u.always && widget_get_prop_int(u.always, "_on", 0);
     if (i < 0 || i >= USB_ROWS) return 0;
     u.chosen = 1;
-    usb_apply(USB_CHARGE + i, always);
+    usb_apply(USB_CHARGE + i, always != 0);
     if (i + USB_CHARGE != USB_DEBUG) usb_page_close(&u.chooser);
     return 0;
 }
@@ -406,6 +407,15 @@ static int usb_now(void) {
     return u.debug ? USB_DEBUG : u.choice;
 }
 
+/* The pick made once what the cable had is let go (usb_switch): remember 1, or 2 when it already was. */
+static void usb_switch_to(int now, int pick, int remember) {
+    usb_apply(pick, remember);
+    if (now == USB_DEBUG && pick == USB_CHARGE)
+        system("/usr/bin/q2adb-gadget park >/dev/null 2>&1");
+    else if (pick == USB_DEBUG)
+        system("/usr/bin/q2adb-gadget unpark >/dev/null 2>&1");
+}
+
 /* The cable that is in, switched to pick and pick remembered. What it had is let go first: stock's
  * mode by closing its page, whose EVT_WINDOW_CLOSE runs stock's usbmode_exit (the gadget stopped,
  * the card mounted again, g_usblink_status 3; demo 0x542ad0); stock's gadget still waiting for a
@@ -430,12 +440,15 @@ static void usb_switch(int pick) {
                                 : "storage_config.sh stop >/dev/null 2>&1");
     }
     usb_page_close(&u.debug);
-    usb_car_stop(1); /* Automatic's iPhone off the controller before the pick's gadget */
-    usb_apply(pick, 1);
-    if (now == USB_DEBUG && pick == USB_CHARGE)
-        system("/usr/bin/q2adb-gadget park >/dev/null 2>&1");
-    else if (pick == USB_DEBUG)
-        system("/usr/bin/q2adb-gadget unpark >/dev/null 2>&1");
+    usb_car_stop(); /* Automatic's iPhone off the controller before the pick's gadget */
+    if (usb_car_busy()) {
+        /* its stop waits for the player's release and runs in the background (usb_car.c): the pick is remembered
+         * now and made by the first UI pass after it (usb_ui_poll) */
+        usb_remember(pick);
+        u.after_car = pick + 1;
+        return;
+    }
+    usb_switch_to(now, pick, 1);
 }
 
 /* Each row's check, the remembered choice's, and its note under the list. */
@@ -658,9 +671,9 @@ void usb_ui_status(void) {
         /* The probe's gadget goes with the cable, whether it still waited or its chooser was up
          * unanswered: left running, it kept configfs mounted and the ADB gadget parked, and the
          * next cable's probe could not start (docs/internals.md#usb-cable-events). */
-        u.probing = 0;
+        u.probing = 0, u.after_car = 0;
         usb_probe_stop();
-        usb_car_stop(0);
+        usb_car_stop();
         usb_page_close(&u.chooser);
         usb_page_close(&u.debug);
         if (u.mode_saved) g_usbmode = (unsigned char)(u.mode_saved - 1);
@@ -748,6 +761,11 @@ void usb_ui_poll(void) {
     }
     if (u.probing && (unsigned)time_now_ms() - u.probe_look_at >= USB_PROBE_LOOK_MS) usb_probe_look();
     int car = usb_car_poll();
+    if (u.after_car && !usb_car_busy()) {
+        int pick = u.after_car - 1;
+        u.after_car = 0;
+        if (usb_ui_cable()) usb_switch_to(USB_AUTO, pick, 2);
+    }
     if (car == USB_CAR_STORAGE && g_usbdet_value == 1) usb_car_storage();
     else if (car == USB_CAR_CHARGER) usb_charger_in();
     usb_record_poll();  /* usb_record.c: a cable edge's second line */

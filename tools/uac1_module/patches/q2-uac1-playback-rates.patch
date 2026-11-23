@@ -154,8 +154,8 @@ Applied by uac1_build.py after upstream's patches and its own u_audio.c changes.
  
 +/* q2: the host chose srate for the playback endpoint (f_uac1.c's SET_CUR). The PCM opens at it from now on;
 + * with the endpoint running, the next packet is sized for it, as u_audio_start_playback sizes the first. It runs
-+ * from ep0's completion, which can meet a playback completion on the other CPU: that one packet may then be a
-+ * frame long or short. */
++ * from ep0's completion, which dwc2 gives back from the same interrupt handler as every playback completion,
++ * so the two never run at once. */
 +void q2_u_audio_set_playback_srate(struct g_audio *audio_dev, int srate)
 +{
 +	struct snd_uac_chip *uac = audio_dev->uac;

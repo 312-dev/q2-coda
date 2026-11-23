@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Audio: unplugging, or picking another USB mode, while a song is paused into the car could freeze the Q2's screen, and a cable plugged back in got no iPhone until Play was pressed; the Q2 now lets go of the car's audio first.
+  - Car Audio: pausing in the car no longer lets up to a third of a second of earlier and later music play out of order after the press, and a cable pulled mid-song no longer leaves the car's audio half running on the Q2 until the next car.
   - Logs: Car Audio keeps the logs of every car cable from the last 7 days (up to 10 MB), and plugging the Q2 into a computer or a charger no longer pushes a drive's logs out. The unified log now says each button a Bluetooth car or headset sends, what the Car Remote's Play and Pause found the player doing, and why a cable showed the car no iPhone.
   - Games: Games lists Bricks alone (then any games on your card). Sudoku, Vortex, Solitaire and Snake are left out of this build while the new games are finished; a game in progress or a best score you had stays saved for when they return.
   - Streaming: a song from your server starts sooner, once about 3 seconds of it have downloaded instead of 8, and a song with a cover inside the file no longer waits for 5 seconds of it first. On a download of 300 KB/s a song starts in about 2.4 seconds, where it took 4.4.
