@@ -64,9 +64,6 @@ typedef struct {
     unsigned center_timer, center_token, center_scope, center_hash, center_hash2;
     unsigned edit_press, edit_at; /* a slider or time editor's pending Centre (edit_key) */
     int center_id, center_ctx, center_rows;
-    unsigned cf_letter, cf_letter_at, cf_letter_timer;
-    int cf_letter_held; /* the thumb's letters: shown until it lifts */
-    void *cf_letter_surface;
     unsigned last_home;
     int home_dir;
     void *home_surface;   /* non-null also marks a step accepted at time zero */
@@ -151,6 +148,8 @@ typedef struct {
         wake_down, /* 1: the held Centre press passes; 2: it is dropped */
         charge_held, artist_cf, year_old, resume, artist_az, hold_home, standby_limit, eq_output,
         smart_wifi, big_library, playlist_cf, scan_durations, cf_position;
+    unsigned wake_turn_at; /* wake_key: the waking wheel turn's last tick (| 1), 0 none */
+    int wake_return;       /* ... a waking Return press, its long press and release to come */
     void *pod_label[POD_COUNT];
     char art_cf_hint[64]; /* the page cf_veil hides: its anim_hint */
     unsigned wake_at; /* Wake: Double press, the screen-off centre press a second one must follow */
@@ -550,10 +549,10 @@ int kv_text_w(void *label);  /* an hscroll_label's text width in its row's face;
 void kv_row(void *key, void *val, int kw, int vw, int right); /* settings_pages.c: kv_fit's split */
 void diag_about_row(void *view); /* diagnostics.c, --dev builds' Save Diagnostics */
 int diag_row(void *item);
-void caption_row(void *label, const unsigned *text);
-const unsigned *pod_caption(int i);
-extern const unsigned *const smart_awake_caption, *const folder_skip_caption,
-                                                      *const reduce_motion_caption;
+void caption_row(void *label, const char *text);
+const char *pod_caption(int i);
+extern const char *const smart_awake_caption, *const folder_skip_caption,
+                                                  *const reduce_motion_caption;
 void caption_prune(void *view); /* drops the captions of rows a rebuild removed from view */
 void caption_sel(void *view, void *item);
 /* nav/lists.c: how much of scroll view `view` a row may stand in, its height cut at the set's list
@@ -851,6 +850,7 @@ int video_on(void);
 /* keylock.c: Buttons Lock's card (docs/internals.md#buttons-lock); its padlock is a status_row.c
  * slot */
 int keylock_gate(void *e, int remote);
+int keylock_holds(unsigned key); /* keylock.c: the Buttons Lock holds key back now */
 void keylock_paint(void *w, void *canvas);
 /* feedback.c: an overlay card's scrim over the top window and the status bar; 1 on the window */
 int overlay_scrim(void *w, void *canvas, unsigned argb, int *dy);
@@ -1167,7 +1167,9 @@ int add_songs_key(void *top, unsigned key);
 void add_songs_paint(void *w, void *canvas);
 int add_songs_mark(void *r);
 void add_songs_toggle(void *r);
-void add_songs_search(void); /* search_strip.c: the strip over the library's songs, picking */
+void add_songs_search(void *songs); /* search_strip.c: the strip over Add Songs' songs, picking */
+void search_yield(void);    /* search_strip.c: Search's load, if it runs, ended (staged_into) */
+void coverflow_yield(void); /* coverflow.c: a Cover Flow open's step given up (open_yield) */
 int playlist_page_hold(void *top);
 int qm_song_hold(void *page, void *list, unsigned at, const char *extra, void (*pick)(void));
 int otg_count(void);
@@ -1289,6 +1291,14 @@ unsigned long long usb_event_now_ns(void);
 /* bt_battery.c: a connected headset's battery, 0 to 100, -1 for none
  * (docs/internals.md#headset-battery) */
 int bt_headset_battery(void);
+/* A shell command run off the UI thread (bt_ui.c bt_shell): one at a time per job, done counted
+ * once it has ended, so its file is read once per answer. */
+typedef struct {
+    int running;   /* a run of it has started and not ended */
+    unsigned done; /* runs ended */
+} bt_job;
+int bt_shell(bt_job *job, const char *cmd);
+unsigned bt_job_done(bt_job *job);
 unsigned bt_headset_rate(void), bt_headset_class(void);
 const char *bt_headset_name(void);
 /* loop_wake.c: the UI loop's idle as a poll() on an eventfd that loop_wake (peq.h, any thread)

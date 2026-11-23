@@ -1346,8 +1346,8 @@ static void poll_one(app_t *a) {
         return;
     }
     /* hold= may come anywhere, after the long qr= too. ponytail: only the first QR_RAW - 2 bytes
-     * (1,534) are read, so a hold= further on reads as 0; the largest code the QR page draws
-     * (49 modules, QR_HEX) takes about 640. A longer file needs a larger buffer here. */
+     * (1,534) are read, so a hold= further on reads as 0; the QR page's largest code (177
+     * modules, QR_HEX) takes 7,965. A longer file needs a larger buffer here. */
     char raw[QR_RAW];
     state_read(a->state, raw, sizeof raw);
     a->hold = number(raw, "hold") == 1;
@@ -3749,7 +3749,13 @@ int addon_hold(void *w) {
  * so the app knows the page was left by its going ("signin" in ADDON_CAPS), not by guessing from
  * the pauses in its page's refreshes, which the screen turning off makes too. The wheel does
  * nothing here, as on every page that is not a playback screen (volume.c vol_wm_keyup). */
-#define QR_HEX 640
+/* The largest code the apps send: their encoder (q2-subsonic internal/qr) takes the smallest
+ * version that holds the URL, up to 40, 177 modules, its rows QR_HEX bytes of hex; the status file
+ * is read as far as QR_FILE, room for that and the page's other fields. Both are the page's, on
+ * the heap while it is open. */
+#define QR_MAX 177
+#define QR_HEX ((QR_MAX + 3) / 4 * QR_MAX + 1)
+#define QR_FILE (QR_HEX + 1024)
 #define QR_PLATE                                                                                   \
     166 /* the code's white plate: a 29-module code's 5 px modules, 2 quiet each side */
 #define QR_PLATE_Y 4  /* its top, on the page: under the status row */
@@ -3758,108 +3764,113 @@ int addon_hold(void *w) {
 #define QR_SCAN_PX TYPE(17) /* Inter Medium 17 */
 #define QR_ADDR_PX TYPE(15) /* Inter Regular 15 */
 #define QR_DONE_MS 1500     /* Signed In shows this long before the app's page */
-static struct {
+typedef struct {
     void *page, *view;
     unsigned timer, leave, done, seen; /* seen: the state file as last read, hashed */
     const char *state;
     char marker[48]; /* /tmp/q2-<id>.qrpage */
     char name[32];   /* the app's, the status row's title */
     int size, code;  /* code: the file has one to draw */
-    char *hex;       /* the code's rows, QR_HEX bytes calloc'd with the page */
     char step[8], title[64], line[96], addr[64], pin[16], note[128];
-} qp __attribute__((section(".scratch")));
+    char hex[QR_HEX];  /* the code's rows */
+    char raw[QR_FILE]; /* the status file as last read */
+} qr_page;
+static qr_page *qp __attribute__((section(".scratch"))); /* calloc'd with the page, 0 without one */
 
 static int qr_done(const void *unused) {
     (void)unused;
-    qp.done = 0;
-    if (qp.page && window_manager_get_top_window(window_manager()) == qp.page) navigator_back();
+    if (!qp) return 0;
+    qp->done = 0;
+    if (window_manager_get_top_window(window_manager()) == qp->page) navigator_back();
     return 0;
 }
 
 static void qr_refresh(void) {
-    char raw[QR_RAW];
-    int n = (int)state_read(qp.state, raw, sizeof raw);
+    char *raw = qp->raw;
+    int n = (int)state_read(qp->state, raw, QR_FILE);
     unsigned h = hash_bytes(FNV_SEED, (const unsigned char *)raw, (unsigned)n + 1);
-    if (h == qp.seen) return;
-    qp.seen = h;
-    field(raw, "addr", qp.addr, sizeof qp.addr);
-    field(raw, "pin", qp.pin, sizeof qp.pin);
-    field(raw, "note", qp.note, sizeof qp.note);
-    field(raw, "qr", qp.hex, QR_HEX);
-    field(raw, "step", qp.step, sizeof qp.step);
-    field(raw, "title", qp.title, sizeof qp.title);
-    field(raw, "line", qp.line, sizeof qp.line);
-    if (!n) qp.step[0] = 0; /* not running: say so, whatever the last step was */
-    qp.size = (int)number(raw, "qrsize");
-    int w = (qp.size + 3) / 4;
-    qp.code = qp.addr[0] && qp.size >= 21 && qp.size <= 177 && (int)strlen(qp.hex) == w * qp.size;
-    if (!qp.code) {
-        tk_snprintf(qp.title, sizeof qp.title, "%s",
-                    !n           ? "Not running"
-                    : qp.addr[0] ? "No code yet"
-                                 : "Connect the Q2 to Wi-Fi");
-        tk_snprintf(qp.line, sizeof qp.line, "%s",
-                    !n           ? "Open it again"
-                    : qp.addr[0] ? "Wait a moment"
-                                 : "Then come back here");
+    if (h == qp->seen) return;
+    qp->seen = h;
+    field(raw, "addr", qp->addr, sizeof qp->addr);
+    field(raw, "pin", qp->pin, sizeof qp->pin);
+    field(raw, "note", qp->note, sizeof qp->note);
+    field(raw, "qr", qp->hex, QR_HEX);
+    field(raw, "step", qp->step, sizeof qp->step);
+    field(raw, "title", qp->title, sizeof qp->title);
+    field(raw, "line", qp->line, sizeof qp->line);
+    if (!n) qp->step[0] = 0; /* not running: say so, whatever the last step was */
+    qp->size = (int)number(raw, "qrsize");
+    int w = (qp->size + 3) / 4;
+    qp->code = qp->addr[0] && qp->size >= 21 && qp->size <= QR_MAX &&
+               (int)strlen(qp->hex) == w * qp->size;
+    if (!qp->code) {
+        tk_snprintf(qp->title, sizeof qp->title, "%s",
+                    !n            ? "Not running"
+                    : qp->addr[0] ? "No code yet"
+                                  : "Connect the Q2 to Wi-Fi");
+        tk_snprintf(qp->line, sizeof qp->line, "%s",
+                    !n            ? "Open it again"
+                    : qp->addr[0] ? "Wait a moment"
+                                  : "Then come back here");
     }
-    if (!strcmp(qp.step, "done") && !qp.done) rearm(&qp.done, qr_done, QR_DONE_MS);
-    widget_invalidate_force(qp.view, 0);
+    if (!strcmp(qp->step, "done") && !qp->done) rearm(&qp->done, qr_done, QR_DONE_MS);
+    widget_invalidate_force(qp->view, 0);
 }
 
 static int qr_tick(const void *unused) {
     (void)unused;
-    if (g_backlight_status) qr_refresh();
+    if (g_backlight_status && qp) qr_refresh();
     return 8; /* RET_REPEAT */
 }
 
 static int qr_leave(const void *unused) {
     (void)unused;
-    qp.leave = 0;
+    qp->leave = 0;
     navigator_back();
     return 0;
 }
 
 static int qr_keyup(void *ctx, void *event) {
     (void)ctx;
-    return return_key(event, &qp.leave, qr_leave);
+    return return_key(event, &qp->leave, qr_leave);
 }
 
 static int qr_closed(void *ctx, void *event) {
     (void)ctx, (void)event;
-    stop_timer(&qp.timer);
-    stop_timer(&qp.leave);
-    stop_timer(&qp.done);
-    unlink(qp.marker);
-    free(qp.hex);
-    memset(&qp, 0, sizeof qp);
+    if (!qp) return 0;
+    stop_timer(&qp->timer);
+    stop_timer(&qp->leave);
+    stop_timer(&qp->done);
+    unlink(qp->marker);
+    free(qp);
+    qp = 0;
     return 0;
 }
 
 static void qr_open(const char *state, const char *title) {
-    if (qp.page || !(qp.hex = calloc(QR_HEX, 1))) return;
-    if (!(qp.page = page_open("qrcode_page", qr_closed, qr_keyup))) {
-        free(qp.hex), qp.hex = 0;
+    if (qp || !(qp = calloc(1, sizeof *qp))) return;
+    if (!(qp->page = page_open("qrcode_page", qr_closed, qr_keyup))) {
+        free(qp), qp = 0;
         return;
     }
-    qp.state = state;
-    tk_snprintf(qp.name, sizeof qp.name, "%s", title);
+    qp->state = state;
+    tk_snprintf(qp->name, sizeof qp->name, "%s", title);
     /* /tmp/q2-<id>.state's marker: /tmp/q2-<id>.qrpage */
     unsigned k = strlen(state);
     k = k > 6 && !strcmp(state + k - 6, ".state") ? k - 6 : k;
-    tk_snprintf(qp.marker, sizeof qp.marker, "%.*s.qrpage", (int)k, state);
-    void *f = fopen(qp.marker, "wb");
+    tk_snprintf(qp->marker, sizeof qp->marker, "%.*s.qrpage", (int)k, state);
+    void *f = fopen(qp->marker, "wb");
     if (f) fclose(f);
-    qp.view = widget_factory_create_widget(widget_factory(), "view", qp.page, 0, bar_foot(qp.page),
-                                           375, page_room(qp.page));
-    qp.seen = 0; /* nothing read yet: no read hashes to 0 but by chance, and then only once */
+    qp->view = widget_factory_create_widget(widget_factory(), "view", qp->page, 0,
+                                            bar_foot(qp->page), 375, page_room(qp->page));
+    qp->seen = 0; /* nothing read yet: no read hashes to 0 but by chance, and then only once */
     qr_refresh();
-    qp.timer = timer_add(qr_tick, 0, 500);
+    qp->timer = timer_add(qr_tick, 0, 500);
 }
 
 /* The status row's title on the QR page: the app's name (navigation.c bar_title_of); 0 elsewhere.
  */
-const char *addon_qr_title(void *win) { return qp.page && win == qp.page ? qp.name : 0; }
+const char *addon_qr_title(void *win) { return qp && win == qp->page ? qp->name : 0; }
 
 static void plate(void *canvas, int x, int y, int w, int h, unsigned color, unsigned radius) {
     int r[4] = { x, y, w, h };
@@ -3877,12 +3888,13 @@ static void qr_text(void *canvas, const char *s, int y, const char *face, unsign
     ui_ink_raw(raw);
 }
 
-/* The page as qr_refresh read it, on qp.view (its rows count from the status row's foot). */
+/* The page as qr_refresh read it, on qp->view (its rows count from the status row's foot). */
 static void qr_paint(void *w, void *canvas) {
     unsigned ink = tok(TOK_PRIMARY), ter = tok(TOK_TERTIARY);
-    if (qp.code && !qp.step[0]) {
-        int side = QR_PLATE, x0 = (375 - side) / 2, y0 = QR_PLATE_Y;
-        int n = qp.size, m = side / (n + 4), o = (side - m * n) / 2, digits = (n + 3) / 4;
+    if (qp->code && !qp->step[0]) {
+        /* a code past 162 modules: a plate of a pixel a module and its quiet zone */
+        int n = qp->size, side = n + 4 > QR_PLATE ? n + 4 : QR_PLATE, x0 = (375 - side) / 2,
+            y0 = QR_PLATE_Y, m = side / (n + 4), o = (side - m * n) / 2, digits = (n + 3) / 4;
         unsigned raw = ui_ink_raw(0);
         plate(canvas, x0, y0, side, side, 0xffffffffu, 12);
         canvas_set_fill_color(canvas, rgba(0x000000, 255));
@@ -3890,7 +3902,7 @@ static void qr_paint(void *w, void *canvas) {
             for (int x = 0; x < n;) {
                 int run = 0;
                 for (; x + run < n; ++run) {
-                    int d = hex(qp.hex[y * digits + (x + run) / 4]);
+                    int d = hex(qp->hex[y * digits + (x + run) / 4]);
                     if (d < 0 || !(d >> (3 - (x + run) % 4) & 1)) break;
                 }
                 if (run) canvas_fill_rect(canvas, x0 + o + x * m, y0 + o + y * m, run * m, m);
@@ -3898,18 +3910,18 @@ static void qr_paint(void *w, void *canvas) {
             }
         ui_ink_raw(raw);
         char a[112], spaced[16];
-        if (strlen(qp.pin) == 6) /* 548 001 */
-            memcpy(spaced, qp.pin, 3), spaced[3] = ' ', memcpy(spaced + 4, qp.pin + 3, 4);
+        if (strlen(qp->pin) == 6) /* 548 001 */
+            memcpy(spaced, qp->pin, 3), spaced[3] = ' ', memcpy(spaced + 4, qp->pin + 3, 4);
         else
-            tk_snprintf(spaced, sizeof spaced, "%s", qp.pin);
-        tk_snprintf(a, sizeof a, spaced[0] ? "or open %s  \xc2\xb7  PIN %s" : "or open %s", qp.addr,
-                    spaced);
-        qr_text(canvas, qp.note[0] ? qp.note : "Scan with your phone", QR_SCAN_Y, "inter-medium",
+            tk_snprintf(spaced, sizeof spaced, "%s", qp->pin);
+        tk_snprintf(a, sizeof a, spaced[0] ? "or open %s  \xc2\xb7  PIN %s" : "or open %s",
+                    qp->addr, spaced);
+        qr_text(canvas, qp->note[0] ? qp->note : "Scan with your phone", QR_SCAN_Y, "inter-medium",
                 QR_SCAN_PX, ink);
         qr_text(canvas, a, QR_ADDR_Y, "inter", QR_ADDR_PX, ter);
         return;
     }
-    const char *s = qp.step;
+    const char *s = qp->step;
     unsigned ring = !strcmp(s, "done")                          ? RGB_POSITIVE
                     : !strcmp(s, "fail") || !strcmp(s, "error") ? RGB_NEGATIVE
                                                                 : scheme()->tones[0] & 0xffffffu;
@@ -3917,9 +3929,9 @@ static void qr_paint(void *w, void *canvas) {
                 !strcmp(s, "fail") || !strcmp(s, "error");
     char glyph[24];
     tk_snprintf(glyph, sizeof glyph, "modepage_%s", s);
-    mode_page_paint(w, canvas, widget_get_prop_int(qp.page, "y", 0),
+    mode_page_paint(w, canvas, widget_get_prop_int(qp->page, "y", 0),
                     &(mode_page_t){ known ? ring : MODE_BARE, known ? glyph : (const char *)0, 0,
-                                    qp.title, qp.line, (const char *)0 });
+                                    qp->title, qp->line, (const char *)0 });
 }
 
 /* ringnav_paint, every widget after stock painted it: a progress row's bar, a flat rectangle filled
@@ -3944,7 +3956,7 @@ void addon_paint(void *w, void *canvas) {
         return;
     }
     if ((pg.pend || pg.hold) && w == pg.page) load_spinner_paint(w, canvas); /* over the page */
-    if (!qp.page || w != qp.view || !P(canvas, CANVAS_LCD)) return;
+    if (!qp || w != qp->view || !P(canvas, CANVAS_LCD)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     qr_paint(w, canvas);
     stock_canvas_set_fill_color(canvas, fill);

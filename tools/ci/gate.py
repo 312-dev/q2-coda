@@ -20,7 +20,8 @@ checkout's venv, ~/repos/q2-pod/.venv, has them all). The suites, by tier:
             test/headset_io.py test/headset_io.py BUILD
             mypy-tools         mypy tools test/unit
             mypy-fw            mypy test/fw
-    planned test/coverflow.py, test/player/run.py, tools/ci/test_ci.py, tools/ci/test_orch.py (PLANNED): what
+    planned test/coverflow.py, test/player/run.py, tools/ci/test_ci.py, tools/ci/test_orch.py, test/stock_sites.py,
+            test/subsonic_contract.py, test/subsonic_seam.py, test/iap_probe.py, test/coda_rc_e2e.py (PLANNED): what
                                affected.py's rules plan for a change no merge suite covers; run when a plan
                                names them (an everything plan names all), and in a release's gate
     cov:tools/X.py             tools/ci/covcheck.py: one tools/ module's coverage by the test/unit files that name it,
@@ -89,16 +90,18 @@ FLOOR = 4.0  # GB of MemAvailable a new suite must leave
 RAMP = 30    # s: a suite this young may not have reached its peak yet, so its estimate still counts
 # A suite's peak memory (GB) and how long it takes alone (s), from the gate's runs on 2026-11-16 (unit's and
 # test/player/run.py's from 2026-11-22; PLANNED's
-# from their own runs on 2026-11-18, each under 0.25 GB): the order they start in and what each needs free.
+# from their own runs on 2026-11-18, each under 0.25 GB; test/iap_probe.py's 9:02 and 77 MB and test/coda_rc_e2e.py's
+# 17 s on a pooled emulator from 2026-11-22, its 1.0 GB the emulator's, as smoke's): the order they start in and
+# what each needs free.
 MEM_GB = {'build': 2.0, 'unit': 1.0, 'unit-cov': 1.5, 'mypy-tools': 1.0, 'mypy-fw': 1.0, 'fw': 3.0, 'fw-asan': 5.0,
           'patch': 1.5, 'test/build.py': 1.0, 'test/peq.py': 1.0, 'test/playback.py': 1.0, 'test/headset_io.py': 0.5,
           'smoke': 1.0, 'leak-hunt': 1.0, 'test/coverflow.py': 0.5, 'test/player/run.py': 0.5, 'tools/ci/test_ci.py': 0.5,
           'tools/ci/test_orch.py': 0.5, 'test/stock_sites.py': 0.5, 'test/subsonic_contract.py': 0.25,
-          'test/subsonic_seam.py': 1.0}
+          'test/subsonic_seam.py': 1.0, 'test/iap_probe.py': 0.25, 'test/coda_rc_e2e.py': 1.0}
 SECONDS = {'unit-cov': 330, 'patch': 280, 'fw-asan': 150, 'unit': 280, 'smoke': 95, 'leak-hunt': 200, 'test/playback.py': 80, 'fw': 50,
            'mypy-tools': 40, 'mypy-fw': 30, 'test/build.py': 20, 'test/peq.py': 20, 'test/headset_io.py': 5,
            'test/coverflow.py': 20, 'test/player/run.py': 270, 'tools/ci/test_ci.py': 5, 'tools/ci/test_orch.py': 15, 'test/stock_sites.py': 12,
-           'test/subsonic_contract.py': 2, 'test/subsonic_seam.py': 150}
+           'test/subsonic_contract.py': 2, 'test/subsonic_seam.py': 150, 'test/iap_probe.py': 540, 'test/coda_rc_e2e.py': 20}
 # The suites a rule of affected.py plans for a change no merge-tier suite covers (patch/coverflow*.c, player/,
 # tools/ci/, a stock address in patch/ or tools/). Not in the merge tier, as test/player/run.py alone is longer than all of it: a batch's plan names
 # them when its diff needs them, and the gate runs a plan's `other` suites beside the tier. A plan that runs
@@ -109,7 +112,7 @@ SECONDS = {'unit-cov': 330, 'patch': 280, 'fw-asan': 150, 'unit': 280, 'smoke': 
 # not minutes. In a merge batch's run, so a branch that drops coverage is rejected, not landed and POST_RED.
 COV = 'cov:'
 PLANNED = ('test/coverflow.py', 'test/player/run.py', 'tools/ci/test_ci.py', 'tools/ci/test_orch.py', 'test/stock_sites.py',
-           'test/subsonic_contract.py', 'test/subsonic_seam.py')
+           'test/subsonic_contract.py', 'test/subsonic_seam.py', 'test/iap_probe.py', 'test/coda_rc_e2e.py')
 POST = ('fw-asan', 'unit-cov', 'smoke', 'leak-hunt')
 MERGE = tuple(n for n in SECONDS if n not in POST + PLANNED)
 FULL = MERGE + PLANNED + POST

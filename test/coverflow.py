@@ -322,11 +322,7 @@ int carousel_glide(void *x, int goal, unsigned ms, int easing) {
     ++glides, glide_goal = goal, glide_ms = (int)ms, glide_easing = easing;
     return 1;
 }
-/* navigation.c's big letter: the last one shown, and how many */
-static unsigned letter_shown;
-static int letters, letter_held; /* held: the thumb's, with no LETTER_MS, until a coverflow_letter */
-void coverflow_letter(void *x, unsigned letter, unsigned now) { letter_shown = letter, letter_held = 0, letters += letter != 0; }
-void coverflow_letter_hold(void *x, unsigned letter) { letter_shown = letter, letter_held = 1, ++letters; }
+void search_yield(void) {} /* search_strip.c's: no Search here to wait for */
 static void *invalidated; /* the last widget invalidated */
 int widget_invalidate_force(void *x, void *y) { wm_repaints += x == &wm_repaints; invalidated = x; return 0; }
 static void *wm_stack[4]; /* the window manager's windows, bottom first: none unless a test stacks them */
@@ -3250,7 +3246,7 @@ static void edge_drawn(void) {
    sensitivity, the letters after the dwell and back, and a long spin's landing. ---- */
 static int initial_of(int i) { char c = names[i][0]; return c >= 'a' && c <= 'z' ? c - 32 : c; }
 /* Going by letters, where the row is going: the goal's album, a letter's first; the row's place,
-   unwrapped from last; the row there, the thumb still; a letter's step. */
+   unwrapped from last; the row there, the thumb still. */
 #define TARGET() ((((*index + (int)lroundf(th[T_GOAL])) % n) + n) % n)
 #define FIRST(a) ((a) == 0 || initial_of(a) != initial_of((a) - 1))
 static float th_at(int *index, int n, float *last) { /* the row's place, unwrapped from last */
@@ -3260,12 +3256,6 @@ static float th_at(int *index, int n, float *last) { /* the row's place, unwrapp
 static void th_arrive(void) { /* the thumb still, till the row is there */
     for (int i = 0; i < 300 && th[T_POS] != th[T_GOAL]; ++i) th_pass(0, 17);
     assert(th[T_POS] == th[T_GOAL]);
-}
-static int th_step(int dir) { /* one letter on (1) or back (-1): under one's travel a pass */
-    int was = letters, r = 0;
-    for (int i = 0; i < 8 && letters == was; ++i) r |= th_pass(-10 * dir, 17);
-    assert(letters == was + 1);
-    return r;
 }
 
 /* ---- Fast Navigation off: 1.7.6's letters, as 1.7.6's own tests had them (the shipped
@@ -4372,10 +4362,8 @@ static void playlist_covers(void) {
     coverflow_paint(s, canvas);
     assert(loads == before + 2); /* 41's, as it was made */
     th_pass(0, 17);
-    int letters0 = letters;
     th_down();
     for (int t = 0; t < 2500; t += 17) th_spin(150, 17);
-    assert(letters == letters0);
     th_rest();
     /* The playlists stop at their ends (coverflow_bounded): the first push past kicks the covers out
        by a fifth of a stride, once, they spring back, and the thumb never wraps to the other end. */
@@ -5171,7 +5159,7 @@ def main():
           ' its texture window, centre click, small libraries and flat fallback passed;'
           ' Sort by artist, year, recently added, most played and random, kept across opens, passed;'
           ' Home art sources, fit, clip, cache and Split/Full layout passed;'
-          ' playlist art (own picture, 2x2, bad picture, songs changed mid-build, card full or gone) passed; playlists as covers (captions, art filling in, no letters, Centre, Return) passed;'
+          ' playlist art (own picture, 2x2, bad picture, songs changed mid-build, card full or gone) passed; playlists as covers (captions, art filling in, Centre, Return) passed;'
           ' the scoped pages\' cards, Go to Album, the Cancel row and the Unknown Album card\'s resume after a restart passed.')
 
 

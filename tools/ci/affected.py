@@ -39,6 +39,8 @@ test/patch.py, which executes the payload as one program. What gets narrowed:
   test/subsonic_contract.py (`CONTRACT_SOURCES`): the words and files the bundled Subsonic app shares with them;
   those, patch/playback.c and the seam test's own files (`SEAM_SOURCES`) plan test/subsonic_seam.py, the real app
   run against them;
+- patch/coda_rc* and remote/coda-rc.proto also plan test/coda_rc_e2e.py, and patch/q2_iap*, patch/iap_* and
+  patch/q2car.sh test/iap_probe.py (`CAR_SUITES`, patterns so a split's new files are covered);
 - a payload change (patch/) also plans `smoke`, tools/ci/smoke.py on a pooled emulator, but runs it only with
   --smoke: it is optional for a worker, and a merge batch leaves it out (gate.OPTIONAL), as the queue runs it
   on the trunk's tip after landing, where a failure turns the tip red.
@@ -125,6 +127,15 @@ CONTRACT_SOURCES = ('patch/addon.c', 'patch/catalogue.c', 'patch/stream_state.c'
 # play order playback.c gives .ahead, and the test's own harness (a change there runs the seam, not only test/fw).
 SEAM = 'test/subsonic_seam.py'
 SEAM_SOURCES = (*CONTRACT_SOURCES, 'patch/playback.c', 'test/fw/seam.py', 'test/fw/test_seam_subsonic.py')
+# The car's two suites a source change needs and nothing plans otherwise (each is not in test/fw or test/patch.py):
+# test/coda_rc_e2e.py drives the Car Remote daemon and demo's shim over TCP on a pooled emulator, from every
+# patch/coda_rc* file (a file a split adds under that prefix too) and the protocol's definition;
+# test/iap_probe.py builds q2-iap from its sources and runs it as q2car.sh does against a stand-in FunctionFS, from
+# patch/q2_iap*, patch/iap_* and q2car.sh. Patterns, not names, so a file split out under the same prefix is covered.
+CAR_SUITES = {
+    'test/coda_rc_e2e.py': ('patch/coda_rc*', 'remote/coda-rc.proto'),
+    'test/iap_probe.py': ('patch/q2_iap*.[ch]', 'patch/iap_*.[ch]', 'patch/q2car.sh'),
+}
 SMOKE = 'smoke'  # tools/ci/smoke.py: optional here (run with --smoke), the post tier's on the trunk
 INTEGRATION = re.compile(r'^(release/|integ/|main$|master$)')  # integ/*: the integrator's (docs/orchestration.md)
 # test/unit files that check a rule over every file of a folder: (folder, suffixes or None for any, test).
@@ -281,6 +292,10 @@ def plan_for(changes, root=ROOT, patch_source=None):
         if any(fnmatch.fnmatchcase(path, g) for g in SEAM_SOURCES):
             p.other.add(SEAM)
             p.why.append(f'{path}: {SEAM} (the real Subsonic app against the firmware\'s C)')
+        for suite, globs in CAR_SUITES.items():
+            if any(fnmatch.fnmatchcase(path, g) for g in globs):
+                p.other.add(suite)
+                p.why.append(f'{path}: {suite}')
         if path.startswith('test/patch_suite/') and suffix == '.py':  # one file of the suite: its lines, joined
             starts = suite_starts(root)
             if patch_source is None:

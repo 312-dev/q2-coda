@@ -581,26 +581,55 @@ void *rec_find(void *songs, const unsigned *slot, unsigned mask, void *r) {
     return 0;
 }
 /* My Fav's, Frequent's and Recent's rows are stock's copies of the songs as added or played, some
- * with an empty title though the library has the tag (a song played from Folder): an empty one
- * takes the library's, by path, so it reads as every other list's instead of falling back to its
- * file name and track number.
- * ponytail: the library is staged and indexed once per list load (O(library)) when any row is
- * untitled; keep an index across loads if that shows. */
-static void fav_titles(void *list, int n) {
-    void *songs = 0;
-    unsigned mask = 0, *slot = 0;
-    for (int i = 0; i < n; ++i) {
-        void *r = deque_at(list, (unsigned)i), *s;
+ * with an empty title though the library has the tag (a song played from Folder, or a server
+ * song's row): an empty one takes the library's, by path and CUE start, so it reads as every other
+ * list's instead of falling back to its file name and track number. The library is asked for
+ * those rows alone, the card's songtable and a signed-in server's servertable (era_sql), in one
+ * query of their paths; the first answer for a row is its title, the card's before the server's. */
+typedef struct {
+    void *list;
+    int n;
+} fav_ask;
+static int untitled(void *r) {
+    const char *t = P(r, REC_TITLE);
+    return I(r, REC_TYPE) == 8 && !(t && *t) && P(r, REC_PATH);
+}
+static int fav_title_row(void *ctx, int cols, char **v, char **names) {
+    const fav_ask *a = ctx;
+    if (cols < 3 || !v[0] || !v[2] || !*v[2]) return 0;
+    int cue = v[1] ? atoi(v[1]) : 0;
+    for (int i = 0; i < a->n; ++i) {
+        void *r = deque_at(a->list, (unsigned)i);
         char **title = (char **)((char *)r + REC_TITLE), *t;
-        if (I(r, REC_TYPE) != 8 || (*title && **title) || !P(r, REC_PATH)) continue;
-        int k;
-        if (!songs && (songs = staged(songs_unsorted, 0, &k))) slot = rec_index(songs, &mask);
-        if (!slot || !(s = rec_find(songs, slot, mask, r))) continue;
-        const char *lib = P(s, REC_TITLE);
-        if (lib && *lib && (t = strdup(lib))) free(*title), *title = t;
+        if (untitled(r) && I(r, REC_CUE_START) == cue && !strcmp(P(r, REC_PATH), v[0]) &&
+            (t = strdup(v[2])))
+            free(*title), *title = t;
     }
-    free(slot);
-    if (songs) deque_destroy(songs);
+    return 0;
+}
+static void fav_titles(void *list, int n) {
+    unsigned size = 96, at;
+    for (int i = 0; i < n; ++i) {
+        void *r = deque_at(list, (unsigned)i);
+        if (untitled(r)) size += 2 * (unsigned)strlen(P(r, REC_PATH)) + 3;
+    }
+    char *sql = size > 96 ? calloc(size, 1) : (char *)0;
+    if (!sql) return;
+    at = (unsigned)tk_snprintf(sql, size,
+                               "select fileurl,time,name from songtable where fileurl in (");
+    for (int i = 0, k = 0; i < n; ++i) {
+        void *r = deque_at(list, (unsigned)i);
+        if (!untitled(r)) continue;
+        if (k++) sql[at++] = ',';
+        sql[at++] = '\'';
+        for (const char *c = P(r, REC_PATH); *c; ++c) /* a quote doubled, as SQL writes it */
+            if ((sql[at++] = *c) == '\'') sql[at++] = '\'';
+        sql[at++] = '\'';
+    }
+    sql[at++] = ')', sql[at] = 0;
+    fav_ask ask = { list, n };
+    era_sql(sql, fav_title_row, &ask);
+    free(sql);
 }
 /* Playlists bypass songtable; filter their displayed copies, never their stored rows (Cover
  * Flow's turned playlist too). */
