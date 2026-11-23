@@ -144,6 +144,30 @@ def test_a_die_sensor_that_fails_later_brings_the_card_once(rig):
     assert [c['title'] for c in rig.cards] == ['No Temperature Sensor']
 
 
+def test_the_no_sensor_card_closes_by_itself_once_the_sensor_is_back(rig, fw):
+    """The owner's Q2 on 2026-11-23: "No Temperature Sensor" raised after a Standby (SENSOR none usable: jumps), the
+    sensor ok 15 s later, and the card still on the screen an hour on, holding the update check busy. Once q2guard
+    says the sensor is trusted again (card none, state ok) the card closes with no OK and the ack says no card is up;
+    a guardian still down keeps it. Red before: the card stayed and the ack said nosensor."""
+    lines = []
+    fw.mock('fw_write', lambda fd, data, n, *_: (lines.append(C.string_at(data, n).decode()) if fd == 2 else
+                                                 rig.write(fd, data, n)) or n)
+    rig.state(1, 'none', state='ok', t=401)
+    rig.poll()
+    rig.state(2, 'nosensor', state='nosensor')
+    rig.poll()
+    assert [c['title'] for c in rig.cards] == ['No Temperature Sensor'] and 'card nosensor\n' in rig.written[ACK]
+    for _ in range(4):  # still down: it stays
+        rig.state(2, 'nosensor', state='nosensor')
+        rig.poll()
+    assert 'card nosensor\n' in rig.written[ACK]
+    rig.state(3, 'none', state='ok', t=365)
+    rig.poll()
+    assert 'card -\n' in rig.written[ACK], rig.written[ACK]
+    assert any('No Temperature Sensor closed: the sensor is back' in line for line in lines)
+    assert len(rig.cards) == 1, 'nothing raised again'
+
+
 def test_the_load_warning_counts_down_and_its_cancel_is_answered(rig):
     rig.state(3, 'loadwarn', left=60000, state='loadwarn')
     rig.poll()

@@ -31,6 +31,9 @@ def L(tmp_path_factory):
     lib.log_ram.argtypes = lib.log_used.argtypes = lib.guard_load.argtypes = [C.c_void_p]
     lib.feed.argtypes = [C.c_void_p, C.c_uint, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int,
                          C.POINTER(C.c_int)]
+    if hasattr(lib, 'feed_slept'):
+        lib.feed_slept.argtypes = [C.c_void_p, C.c_uint, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int,
+                                   C.c_int, C.POINTER(C.c_int)]
     lib.log_new.argtypes = [C.c_char_p]
     lib.log_dropped.argtypes = [C.c_void_p]
     lib.heat_add.argtypes = [C.c_void_p, C.c_char_p]
@@ -63,9 +66,12 @@ class Guard:
         self.L, self.g, self.now, self.out = L, L.guard_new(), 0, (C.c_int * 3)()
         self.events = []
 
-    def step(self, temp=NONE, busy=-1, cancel=0, acked=0, saved=0, dt=5000, charge=0):
+    def step(self, temp=NONE, busy=-1, cancel=0, acked=0, saved=0, dt=5000, charge=0, slept=0):
         self.now += dt
-        ev = self.L.feed(self.g, self.now, temp, busy, cancel, acked, saved, charge, self.out)
+        if hasattr(self.L, 'feed_slept'):
+            ev = self.L.feed_slept(self.g, self.now, temp, busy, cancel, acked, saved, charge, slept, self.out)
+        else:  # a build before guard_in.slept: the suspend unseen
+            ev = self.L.feed(self.g, self.now, temp, busy, cancel, acked, saved, charge, self.out)
         self.events.append(ev)
         return ev
 
@@ -195,6 +201,38 @@ def test_the_same_step_with_no_charger_change_is_still_a_jump(L, seq):
     g.step(t0 - 2, charge=c0), g.step(t0 - 1, charge=c0)
     events = [g.step(t, charge=c0) for t, _ in seq]
     assert EV_SENSOR_DOWN in events and g.why() == 'jumps'
+
+
+def test_a_standby_s_cooling_is_no_jump_and_raises_no_card(L):
+    """The owner's Q2 on 2026-11-23: a Standby 20 s after a boot, the die at 40.1 C after the boot's load, 35.8 C at
+    the first reading after the 75 s suspend, then 36.0, 36.2, 36.4 (its heat log). Each was held to 40.1 and was a
+    jump, so the sensor went down ("No Temperature Sensor") 15 s after the wake and came back 15 s later. A suspend
+    between two readings (in.slept) makes the first after it the reference: no event, the sensor trusted throughout.
+    Red before guard_in.slept: EV_SENSOR_DOWN, why jumps."""
+    g = Guard(L)
+    for t in (392, 398, 401):
+        g.step(t, charge=1)
+    assert g.state() == 'ok'
+    events = [g.step(358, charge=1, slept=1)] + [g.step(t, charge=1) for t in (360, 362, 364, 364, 365, 364)]
+    assert EV_SENSOR_DOWN not in events and g.state() == 'ok', (events, g.why())
+
+
+def test_a_standby_does_not_hide_a_sensor_that_died_in_it(L):
+    """A sensor that reads nothing after the wake is down after three readings, as before: the suspend resets the
+    reference, not the error count that follows."""
+    g = Guard(L)
+    real(g)
+    events = [g.step(NONE, slept=1), g.step(NONE), g.step(NONE)]
+    assert events == [EV_NONE, EV_NONE, EV_SENSOR_DOWN] and g.why() == 'none read'
+
+
+def test_a_jump_with_no_standby_between_is_still_a_jump(L):
+    """The same 4.3 C step with no suspend between the readings is a misread, three of them the sensor down."""
+    g = Guard(L)
+    for t in (392, 398, 401):
+        g.step(t, charge=1)
+    events = [g.step(t, charge=1) for t in (358, 360, 362)]
+    assert events[-1] == EV_SENSOR_DOWN and g.why() == 'jumps'
 
 
 def test_a_charger_change_waives_the_jump_for_two_readings_and_no_further(L):

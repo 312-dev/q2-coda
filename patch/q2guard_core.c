@@ -12,12 +12,17 @@
  * constant (a placeholder, no thermistor) and is down too: before it was trusted, whatever the load;
  * after, when the CPU load swung GUARD_SWING points or more meanwhile, which moves a real die. It is
  * trusted once two readings differ, and again after it went down as soon as it reads, and varies,
- * again. 1 when this reading counts. */
+ * again. A suspend between two readings (Standby) leaves the last one no bound for the next: the
+ * die cools or warms through it (40.1 C before a 75 s Standby just after a boot, 35.8 C after, on a
+ * Q2 on 2026-11-23, which put the sensor down as jumps), so the first reading after it is the one
+ * the next are held to, as after going down, and the sensor stays trusted. 1 when this reading
+ * counts. */
 static void down(struct guard *g, int why, struct guard_out *o) {
     g->seen = g->same = 0;
     if (g->sensor != SENSOR_DOWN) g->sensor = SENSOR_DOWN, g->why = why, o->event = EV_SENSOR_DOWN;
 }
-static int sensor_read(struct guard *g, int t, int busy, int charge, struct guard_out *o) {
+static int sensor_read(struct guard *g, int t, int busy, int charge, int slept, struct guard_out *o) {
+    if (slept) g->seen = g->same = g->errors = 0;
     if (charge != g->charge) g->charge = charge, g->settle = GUARD_SETTLE;
     int jump = g->settle ? GUARD_STEP_DC : GUARD_JUMP_DC;
     if (g->settle) --g->settle;
@@ -104,7 +109,7 @@ void guard_step(struct guard *g, const struct guard_in *in, struct guard_out *o)
         if (due && !g->powered) g->powered = 1, o->power_off = 1;
         return;
     }
-    int counts = sensor_read(g, in->temp, in->busy, in->charge, o);
+    int counts = sensor_read(g, in->temp, in->busy, in->charge, in->slept, o);
     if (g->sensor == SENSOR_OK) {
         if (g->load == LOAD_COUNTING) o->event = EV_LOAD_CANCELLED;
         if (g->load != LOAD_ARMED) load_reset(g);

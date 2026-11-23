@@ -182,6 +182,15 @@ void heatguard_poll(void) {
         hg_power_off(hg.off ? hg.off : seq, left, !strncmp(v, "poweroff-load", 13));
         return;
     }
+    /* "No Temperature Sensor" up and the sensor trusted again (q2guard's SENSOR ok, card none): the card is no longer
+     * true, so it closes by itself, and an OK that never comes cannot hold the screen (or an update, which waits for
+     * a card) */
+    if (hg.card && !tk_strcmp(hg.card, "nosensor") && tk_strcmp(card, "nosensor") &&
+        !tk_strcmp(v, "ok")) {
+        if (confirm_up()) confirm_close();
+        hg.card = 0, hg_answer();
+        ulog('I', "guard", "No Temperature Sensor closed: the sensor is back");
+    }
     if (seq == hg.seq_shown) return;
     int shown = 1;
     if (!tk_strcmp(card, "warn")) {
