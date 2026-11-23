@@ -523,7 +523,7 @@ FAV_CLICK=0x53c968
 class RateMachine(FileMocks,ShuffleMachine):
     def __init__(self,saved=b''):
         super().__init__()
-        self.budget=2_000_000  # a RATE_SLOTS table scan or two a call
+        self.budget=2_000_000  # a RATE_SLOTS table's walk or two a call
         self.word(O['MCL_POS'],1)  # B of ABC plays
         self.file_mocks('r:',{'/mnt/data/ringnav-ratings':saved} if saved else {}); self.fav_songs=[]
         for n in ('getAllFav','fseek@GLIBC_2.0','ftell@GLIBC_2.0','taglib_file_new','taglib_file_audioproperties','taglib_file_free'):
@@ -563,7 +563,7 @@ class RateMachine(FileMocks,ShuffleMachine):
         self.returns(ret,clobber=True)
     def kept(self):
         data=self.files.get('/mnt/data/ringnav-ratings',b'')
-        return sorted(v for v in struct.unpack(f'<{len(data)//4}I',data) if v)
+        return sorted(v for v in struct.unpack(f'<{len(data)//4}I',data) if 0<v&7<6)  # 7: one taken out
     def alone(self):  # the heart is the favourite alone: nothing added beside it (the rating page has the stars)
         return self.nodes[self.get(self.fav+O['W_PARENT'])]['children']==[self.fav]
     def tap(self):  # the heart's click
@@ -607,7 +607,7 @@ assert [m3.get(c[2]) for c in m3.dispatched() if c[1]==more]==[O['EVT_CLICK']]; 
 # title order. Each row's stars are OLED's glyphs, painted before its detail (ratings.c rate_row: the count in the
 # row's "_stars", the detail moved RATE_ROOM, 5 x 14 px glyphs 2 px apart and a 6 px space, to the right); a liked
 # song with no stars has none, its detail where it was.
-m=RateMachine(b''.join(struct.pack('<I',(fnv(path)&~7)|h) for path,h in (('/p/A',1),('/p/B',5),('/mnt/mmc/Audiobooks/C.m4b',4),('/mnt/mmc/Podcasts/E.mp3',2))).ljust(4*O['RATE_SLOTS'],b'\0'))
+m=RateMachine(b''.join(struct.pack('<I',(fnv(path)&~7)|h) for path,h in (('/p/A',1),('/p/B',5),('/mnt/mmc/Audiobooks/C.m4b',4),('/mnt/mmc/Podcasts/E.mp3',2))))
 m.found=[m.song(n) for n in ('A','B','C','D','E')]; m.fav_songs=[m.song('D')]
 m.word(m.found[2]+O['REC_PATH'],m.string('/mnt/mmc/Audiobooks/C.m4b'))
 m.word(m.found[4]+O['REC_PATH'],m.string('/mnt/mmc/Podcasts/E.mp3'))

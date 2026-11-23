@@ -42,6 +42,8 @@ HOOKS = {
     'check_otg_status': (0x4f3408, 'ringnav_otg_status', 'otg_status'),
     # the car's USB audio counts as an output, beside stock's jacks, Bluetooth and USB DAC (output_rule.c)
     'has_valid_output_device': (0x4f2c3c, 'ringnav_valid_output', 'valid_output'),
+    # Now Playing opened to start a track with nothing to play to: refused before the page exists (output_rule.c)
+    'navigator_to_with_context': (0x4f6e74, 'ringnav_nav_to', 'nav_to'),
     # The USB record's first line once stock has set the USB pins up, with PD18's pull (usb_record.c)
     'platform_init': (0x51cd94, 'ringnav_platform_init', 'platform_init'),
     'createPlayListItem': (0x517fdc, 'ringnav_playlist_create', None),

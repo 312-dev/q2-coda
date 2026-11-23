@@ -192,3 +192,33 @@ def test_with_no_jack_or_bluetooth_a_station_plays_into_the_car_or_is_refused_on
         assert refused == [] and got and got[0][3:4] == ['q2car'], got
     else:
         assert refused == [1] and got == [], got
+
+
+# ---- Now Playing opened to start a track: asked at the navigator's door (ringnav_nav_to) ----
+
+def nav_to(fw, forbidden, page=b'playing_page', cls=0xf001):
+    """navigator_to_with_context(page, {queue, 0, cls, 2}) through the hook: (what the gate was asked, the pages
+    stock's navigator was asked to open, the result)."""
+    asked = forbid(fw, forbidden)
+    opened = []
+    fw.mock('stock_nav_to_trampoline', lambda name, *_: opened.append(C.string_at(name)) or 0)
+    ctx = (C.c_int * 4)(0x1234, 0, cls, 2)
+    ret = fw.fn('ringnav_nav_to', C.c_int, C.c_char_p, C.c_void_p)(page, ctx)
+    return asked, opened, ret
+
+
+def test_a_start_with_nothing_to_play_to_opens_no_now_playing(fw):
+    """The owner's report (2026-11-22): a song's tap with no output slid in Now Playing with stock's placeholder title
+    under the toast. Refused at the navigator, the page is never made (STOP, as playing_page_init answered)."""
+    assert nav_to(fw, 1) == ([0], [], 11)
+
+
+def test_a_start_with_an_output_opens_now_playing(fw):
+    assert nav_to(fw, 0) == ([0], [b'playing_page'], 0)
+
+
+@pytest.mark.parametrize('page, cls', [(b'playing_page', 0xff), (b'localmusic/album_page', 0xf001)])
+def test_now_playing_to_show_what_plays_and_other_pages_ask_nothing(fw, page, cls):
+    """0xff opens Now Playing on what plays or is paused, starting nothing (the status bar's button, Control Center);
+    another page's context may not be a queue's at all (the playlist page's is a number), so it is never read."""
+    assert nav_to(fw, 1, page, cls) == ([], [page], 0)

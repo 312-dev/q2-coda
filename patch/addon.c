@@ -31,7 +31,7 @@
  * stream_poll plays as it fills, or an .m3u of card paths, which it plays in order, waiting for
  * each, or its Q2URLS/1 queue of stream URLs, /tmp/q2-<id>.urls, which stock's Tidal player plays
  * (tidal.c app_urls_play), telling it in /tmp/q2-<id>.now which of them plays when the queue asks
- * (now_poll). It asks for Update Local Music and its playlists' import in
+ * (urls_now_poll). It asks for Update Local Music and its playlists' import in
  * /tmp/q2-<id>.library (addon_library.c), the result in .library.done. A list reply whose message
  * is "pages" and that has a cursor is followed by its next pages, appended to the same list
  * (page_next), up to ADDON_PAGES.
@@ -146,11 +146,19 @@ static int valid_id(const char *s) {
     return k > 0;
 }
 
-static app_t *slot(const char *id) {
+/* id's slot, or 0 when no scan has found it an app. */
+static app_t *known(const char *id) {
     for (int i = 0; i < ap.n; ++i)
         if (!strcmp(ap.a[i].id, id)) return &ap.a[i];
+    return 0;
+}
+/* id's slot, made when it has none: only for a folder whose q2app was read (scan_one), so a
+ * hidden folder a song's path names (.tidal, the user's own) takes none of the APPS_MAX. */
+static app_t *slot(const char *id) {
+    app_t *a = known(id);
+    if (a) return a;
     if (ap.n == APPS_MAX) return 0;
-    app_t *a = &ap.a[ap.n++];
+    a = &ap.a[ap.n++];
     tk_snprintf(a->id, sizeof a->id, "%s", id);
     tk_snprintf(a->bin, sizeof a->bin, CARD "/.%s/q2-%s", id, id);
     tk_snprintf(a->run, sizeof a->run, "/bin/sh " CARD "/.%s/run", id);
@@ -224,14 +232,30 @@ void addon_q2app(const char *id, char *path, unsigned n) {
     tk_snprintf(path, n, "%s/q2app", dir);
 }
 
+/* Each card app's folder, /mnt/mmc/.<id> with a valid id, and the q2app of the copy of it that
+ * runs (addon_q2app) read into raw (512 bytes): each(id, raw, ctx) for each one that reads, until
+ * it answers nonzero, which this answers then; 0 after the last. The one scan of the card's
+ * manifests: Streaming's (addon_scan), the server library's (catalogue.c cat_scan), Storage's
+ * (storage.c st_app) and a favourite's app (addon_fav_path). */
+int addon_q2apps(int (*each)(const char *id, const char *raw, void *ctx), void *ctx) {
+    char raw[512], path[64];
+    int stop = 0;
+    void *d = opendir(CARD);
+    for (struct dirent *e; d && !stop && (e = readdir(d));) {
+        if (e->d_name[0] != '.' || !valid_id(e->d_name + 1)) continue;
+        addon_q2app(e->d_name + 1, path, sizeof path);
+        if (state_read(path, raw, sizeof raw)) stop = each(e->d_name + 1, raw, ctx);
+    }
+    if (d) closedir(d);
+    return stop;
+}
+
 /* One app's folder at the scan: read when it is the copy of its app that runs (addon_dir). */
-static void scan_one(const char *id, const char *from) {
-    char raw[512], path[64], dir[48];
+static void scan_one(const char *id, const char *from, const char *raw) {
+    char dir[48], path[64];
     app_t *a;
     addon_dir(id, dir, sizeof dir);
-    if (strcmp(dir, from)) return;
-    tk_snprintf(path, sizeof path, "%s/q2app", dir);
-    if (!state_read(path, raw, sizeof raw) || !(a = slot(id))) return;
+    if (strcmp(dir, from) || !(a = slot(id))) return;
     tk_snprintf(a->bin, sizeof a->bin, "%s/q2-%s", dir, id);
     tk_snprintf(a->run, sizeof a->run, "/bin/sh %s/run", dir);
     field(raw, "name", a->name, sizeof a->name);
@@ -284,24 +308,27 @@ static void builtin_untag(const char *id) {
     }
 }
 
+/* A card folder's app, for addon_scan: read when the card's copy is the one that runs. */
+static int scan_card(const char *id, const char *raw, void *unused) {
+    char dir[48];
+    tk_snprintf(dir, sizeof dir, CARD "/.%s", id);
+    scan_one(id, dir, raw);
+    return 0;
+}
+
 /* Streaming's page (navigation.c): the apps on the card and those the firmware carries found again,
  * their names read; how many there are, by name for addon_name. A slot keeps its app (and its
  * running state) from scan to scan. */
 int addon_scan(void) {
-    char dir[48];
+    char dir[48], raw[512], path[64];
     for (int i = 0; i < ap.n; ++i) ap.a[i].present = 0;
-    void *d = opendir(CARD);
-    for (struct dirent *e; d && (e = readdir(d));) {
-        if (e->d_name[0] != '.' || !valid_id(e->d_name + 1)) continue;
-        tk_snprintf(dir, sizeof dir, CARD "/%s", e->d_name);
-        scan_one(e->d_name + 1, dir);
-    }
-    if (d) closedir(d);
-    d = opendir(BUNDLED);
+    addon_q2apps(scan_card, 0);
+    void *d = opendir(BUNDLED);
     for (struct dirent *e; d && (e = readdir(d));) {
         if (!valid_id(e->d_name)) continue;
         tk_snprintf(dir, sizeof dir, BUNDLED "/%s", e->d_name);
-        scan_one(e->d_name, dir);
+        tk_snprintf(path, sizeof path, "%s/q2app", dir);
+        if (state_read(path, raw, sizeof raw)) scan_one(e->d_name, dir, raw);
         if (addon_builtin(e->d_name)) builtin_untag(e->d_name);
     }
     if (d) closedir(d);
@@ -365,8 +392,8 @@ static void launch(app_t *a) {
  * makes its socket after that); -1: it can't start (not on the card, or the Apps page replacing
  * its files). A socket a killed app left is removed first, so it is not taken for the new one's. */
 int addon_wake(const char *id) {
-    app_t *a = valid_id(id) ? slot(id) : 0;
-    if (a && !a->present) addon_scan();
+    app_t *a = valid_id(id) ? known(id) : 0;
+    if (valid_id(id) && (!a || !a->present)) addon_scan(), a = known(id);
     if (!a || !a->present) return -1;
     if (!access(a->pid, 0)) {
         if (!a->launched) a->launched = 1, a->launch_at = time_now_ms(); /* its .play polled */
@@ -377,7 +404,7 @@ int addon_wake(const char *id) {
     return a->launched ? 1 : -1;
 }
 int addon_ready(const char *id) {
-    app_t *a = valid_id(id) ? slot(id) : 0;
+    app_t *a = valid_id(id) ? known(id) : 0;
     return a && !access(a->browse, 0);
 }
 
@@ -485,8 +512,9 @@ int addon_resume_ask(const char *const *paths, const unsigned char *in, unsigned
         unsigned k = strlen(paths[i]) + 1;
         bytes += k;
         if (i > at && !in[i]) ++missing, rows += k;
-        app_t *b = a || !card_id(paths[i], id) ? 0 : slot(id);
-        if (b && !b->present && !scanned) scanned = 1, addon_scan();
+        app_t *b = a || !card_id(paths[i], id) ? 0 : known(id);
+        if (!a && (!b || !b->present) && !scanned && card_id(paths[i], id))
+            scanned = 1, addon_scan(), b = known(id);
         if (b && b->present && b->resume) a = b;
     }
     if (!a || !missing || at >= n) return 0;
@@ -836,8 +864,10 @@ static void now_sweep(void) {
     if (d) closedir(d);
 }
 
-/* addon_poll's, every ADDON_POLL_MS: what plays, as sleep_check reads it */
-static void now_poll(void) {
+/* addon_poll's, every ADDON_POLL_MS: which URL of a card app's queue plays, written to its .now
+ * file, and what plays, as sleep_check reads it (now_source.c's now_poll is another thing: the
+ * Bluetooth record and NP_PLAY_FILE) */
+static void urls_now_poll(void) {
     unsigned ms = time_now_ms();
     if (!nw.owner || ms - nw.polled < ADDON_POLL_MS) return;
     nw.polled = ms;
@@ -1418,13 +1448,13 @@ static void offline_send(app_t *a) {
 }
 /* 1 when id takes Sync Offline (its q2app's offline=1) */
 int addon_offline_ok(const char *id) {
-    app_t *a = valid_id(id) ? slot(id) : 0;
-    if (a && !a->present) addon_scan();
+    app_t *a = valid_id(id) ? known(id) : 0;
+    if (valid_id(id) && (!a || !a->present)) addon_scan(), a = known(id);
     return a && a->present && a->offline;
 }
 /* Asks id to sync key ("<kind> <id>") offline (add) or stop; 1 when the request is on its way. */
 int addon_offline_ask(const char *id, int add, const char *key) {
-    app_t *a = valid_id(id) ? slot(id) : 0;
+    app_t *a = valid_id(id) ? known(id) : 0;
     if (!addon_offline_ok(id) || !key || !*key || addon_wake(id) < 0) return 0;
     tk_snprintf(off.id, sizeof off.id, "%s", id);
     tk_snprintf(off.line, sizeof off.line, "%s %s", add ? "add" : "remove", key);
@@ -1666,7 +1696,7 @@ void addon_poll(void) {
     resume_poll(); /* first: a resume let go before its app's .play is read */
     for (int i = 0; i < ap.n; ++i) poll_one(&ap.a[i]);
     sleep_check();
-    now_poll();
+    urls_now_poll();
     library_poll();
     catalogue_poll(); /* the server library's apps (catalogue.c), running or not */
 }
@@ -3420,8 +3450,8 @@ static app_t *goto_app(const char *path) {
     if (catalogue_path(path) || !card_id(path, id)) return 0; /* a server row is the Library's */
     addon_q2app(id, file, sizeof file);
     if (!state_read(file, raw, sizeof raw) || number(raw, "goto") != 1) return 0;
-    app_t *a = slot(id);
-    if (a && !a->name[0]) addon_scan(); /* not listed by Streaming since boot: its name read */
+    app_t *a = known(id);
+    if (!a || !a->name[0]) addon_scan(), a = known(id); /* not listed since boot: its name read */
     return a && a->present ? a : 0;
 }
 /* The hold menu's: whether Go to on path opens a page, its app's (goto=1) or, outside an app's
@@ -3467,25 +3497,26 @@ int addon_fav(const char *id, const char *kind, const char *key, int on) {
  * folder path is in, CARD/<favdir>/…, such as q2-jellyfin's synced Jellyfin. favdir is one folder
  * name, its line maybe ending in a Windows editor's \r. Every app's q2app is read at each change,
  * so no scan is needed first: a press is rare. 0 when that app's card didn't take it. */
+struct fav_ask {
+    const char *path;
+    int on, ok;
+};
+static int fav_app(const char *id, const char *raw, void *ctx) {
+    struct fav_ask *f = ctx;
+    char dir[64];
+    field(raw, "favdir", dir, sizeof dir);
+    unsigned k = strlen(dir);
+    if (k && dir[k - 1] == '\r') dir[--k] = 0;
+    if (!k || strstr(dir, "/") || !strcmp(dir, ".") || !strcmp(dir, "..") ||
+        strncmp(f->path + sizeof CARD, dir, k) || f->path[sizeof CARD + k] != '/')
+        return 0;
+    f->ok = addon_fav(id, "path", f->path, f->on);
+    return 1;
+}
 int addon_fav_path(const char *path, int on) {
-    char raw[512], file[64], dir[64];
-    int ok = 1;
-    void *d = path && card_path(path) ? opendir(CARD) : 0;
-    for (struct dirent *e; d && (e = readdir(d));) {
-        if (e->d_name[0] != '.' || !valid_id(e->d_name + 1)) continue;
-        addon_q2app(e->d_name + 1, file, sizeof file);
-        if (!state_read(file, raw, sizeof raw)) continue;
-        field(raw, "favdir", dir, sizeof dir);
-        unsigned k = strlen(dir);
-        if (k && dir[k - 1] == '\r') dir[--k] = 0;
-        if (k && !strstr(dir, "/") && strcmp(dir, ".") && strcmp(dir, "..") &&
-            !strncmp(path + sizeof CARD, dir, k) && path[sizeof CARD + k] == '/') {
-            ok = addon_fav(e->d_name + 1, "path", path, on);
-            break;
-        }
-    }
-    if (d) closedir(d);
-    return ok;
+    struct fav_ask f = { path, on, 1 };
+    if (path && card_path(path)) addon_q2apps(fav_app, &f);
+    return f.ok;
 }
 
 /* Go to Album (album) or Go to Artist on a song in a card app's folder, /mnt/mmc/.<id>/…
@@ -3562,8 +3593,9 @@ static void radio_send(void) {
 
 static app_t *radio_app(const char *path) {
     char id[APP_ID];
-    app_t *a = path && card_id(path, id) ? slot(id) : 0;
-    if (a && !a->present) addon_scan(); /* a Library server row's app, not listed since boot */
+    int app = path && card_id(path, id);
+    app_t *a = app ? known(id) : 0;
+    if (app && (!a || !a->present)) addon_scan(), a = known(id); /* a server row's, not listed yet */
     if ((!a || !a->present || !a->radio) && qa.app && playback_loads == qa.loads) a = qa.app;
     return a && a->present && a->radio ? a : 0;
 }
@@ -3585,8 +3617,9 @@ int addon_radio_start(const char *path, unsigned seq) {
  * (q2-subsonic before q2-v1.0). 0 for any other path, or an app that does. */
 const char *addon_radio_missing(const char *path) {
     char id[APP_ID];
-    app_t *a = path && card_id(path, id) ? slot(id) : 0;
-    if (a && !a->present) addon_scan();
+    int app = path && card_id(path, id);
+    app_t *a = app ? known(id) : 0;
+    if (app && (!a || !a->present)) addon_scan(), a = known(id);
     return a && a->present && !a->radio && a->name[0] ? a->name : 0;
 }
 
@@ -3618,7 +3651,7 @@ static void lyrics_send(const char *path) {
 static app_t *lyrics_app(const char *path) {
     char id[APP_ID];
     for (int pass = 0; pass < 2; ++pass) {
-        app_t *a = card_id(path, id) ? slot(id) : 0;
+        app_t *a = card_id(path, id) ? known(id) : 0;
         if (a && !a->present) a = 0; /* not read yet, or gone from the card */
         for (int i = 0; !a && i < ap.n; ++i) {
             unsigned k = strlen(ap.a[i].dl);
@@ -3661,8 +3694,8 @@ int addon_lyrics_answer(unsigned seq, const char *path) {
 void addon_cover_wake(const char *id) {
     char k[APP_ID];
     tk_snprintf(k, sizeof k, "%s", id);
-    app_t *a = valid_id(k) ? slot(k) : 0;
-    if (a && !a->present) addon_scan();
+    app_t *a = valid_id(k) ? known(k) : 0;
+    if (valid_id(k) && (!a || !a->present)) addon_scan(), a = known(k);
     if (a && a->present && a->covers) addon_wake(k);
 }
 

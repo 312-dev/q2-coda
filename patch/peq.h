@@ -418,8 +418,18 @@ void tidal_clear(void);
  * once replaced or removed, forgotten on the UI thread. */
 #define APPS_MAX 8 /* card apps on the card at once */
 int addon_scan(void), addon_open(void *ctx, void *event), addon_hold(void *top);
+void child_quit(int pid, unsigned quit_ms); /* radio.c: a child asked to quit, reaped or killed */
 int addon_games_last(void); /* the card's games as the last addon_scan found them */
-#define GAMES_BUILTIN 4     /* games.c's Sudoku, Vortex, Solitaire and Snake */
+/* The games games.c's chooser ships, the one place to turn each on (docs/internals.md#games): 1
+ * lists it and builds it into the payload, 0 leaves it out of both, its source kept in games.c
+ * (test/fw builds every one, GAMES_ALL, so its tests keep running). Sudoku, Vortex, Solitaire
+ * and Snake wait while the games in progress are finished (the owner, 2026-11-22); Bricks is the
+ * engine's (engine.c eng_games[]), always listed. */
+#define GAME_SUDOKU 0
+#define GAME_VORTEX 0
+#define GAME_SOLITAIRE 0
+#define GAME_SNAKE 0
+#define GAMES_BUILTIN (GAME_SUDOKU + GAME_VORTEX + GAME_SOLITAIRE + GAME_SNAKE) /* chooser rows */
 const char *addon_name(int a), *addon_id(int a), *addon_icon(int a);
 int card_path(const char *path); /* on the card, no ".." segment: what an app or server may name */
 /* stream_state.c: Download Ahead and a card app's .stream
@@ -430,6 +440,7 @@ typedef struct {
     unsigned have, total, ms; /* bytes on the card, of the whole (0 unknown), length (0 unknown) */
 } sline_t;
 int ahead_n(void), ahead_step(void);
+void ahead_start(const char *id, unsigned seq);
 const char *ahead_caps(void);
 int stream_line(const char *id, const char *path, sline_t *l);
 int stream_startable(const char *id, const char *path);
@@ -519,6 +530,8 @@ int addon_dir(const char *id, char *dir, unsigned n), addon_version_cmp(const ch
 /* addon.c: whether the firmware carries app id as its own alone, never the App Store's (netupdate.c) */
 int addon_builtin(const char *id);
 void addon_q2app(const char *id, char *path, unsigned n);
+/* each card app's q2app read, until each answers nonzero (addon.c) */
+int addon_q2apps(int (*each)(const char *id, const char *raw, void *ctx), void *ctx);
 /* catalogue.c: the server library (docs/internals.md#server-library), a signed-in catalogue app's
  * songs in the Library. catalogue_has: any are in it now; catalogue_path: a server row's path; catalogue_unavailable: a record that can't play now;
  * catalogue_album_unavailable: an album list's record none of whose songs can play now, and

@@ -421,7 +421,7 @@ int era_sql(const char *sql, int (*row)(void *, int, char **, char **), void *ct
     /* Keep a full-library grouping query from competing with the player's song records for RAM. */
     int bad = sqlite3_open("/mnt/data/database.db", &db) ||
               sqlite3_exec(db, "PRAGMA cache_size=64;PRAGMA temp_store=FILE", 0, 0, 0);
-    if (!bad && both) catalogue_attach_db(db);
+    if (!bad && (both || strstr(sql, " cat."))) catalogue_attach_db(db); /* the union, or cat named */
     bad = bad || sqlite3_exec(db, both ? both : expanded ? expanded : sql, row, ctx, 0);
     if (db) sqlite3_close(db);
     free(expanded), free(both);

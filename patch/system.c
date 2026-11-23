@@ -538,7 +538,8 @@ static void *logo_sync(void *unused) {
     pw.logo_busy = 0;
     return 0;
 }
-int card_mounted(void) {
+/* /proc/mounts lists the card now: its read each call. */
+int card_mounted_now(void) {
     char m[4096]; /* ponytail: the Q2's few mounts fit (remote.c's card_mounted) */
     void *f = fopen("/proc/mounts", "rb");
     if (!f) return 0;
@@ -546,6 +547,18 @@ int card_mounted(void) {
     fclose(f);
     m[n] = 0;
     return strstr(m, " /mnt/mmc ") != 0;
+}
+/* The same, read again only when card_watch.c's generation moved (a mount, an unmount, or a change
+ * in the card's root), as it is called every second and on each card write; every call reads while
+ * its thread has not started or has ended (card_watch_seen 0). The generation is taken before the
+ * read, so a change during it is read at the next call. Any thread. */
+int card_mounted(void) {
+    static unsigned seen __attribute__((section(".scratch")));
+    static int was __attribute__((section(".scratch")));
+    unsigned gen = card_watch_seen();
+    if (!gen) return card_mounted_now();
+    if (gen != seen) was = card_mounted_now(), seen = gen;
+    return was;
 }
 static void logo_poll(void) {
     unsigned now = time_now_ms();
