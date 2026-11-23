@@ -1967,16 +1967,22 @@ def test_a_busy_functionfs_mount_says_who_holds_it(carlogs):
     (shim / 'umount').write_text('#!/bin/sh\ncase "$1" in */iap2) echo "umount: $1: target is busy" >&2; exit 1 ;; esac\n')
     for f in 'mountpoint', 'umount':
         (shim / f).chmod(0o755)
-    ep0 = open(ffs / 'iap2' / 'ep0', 'w')  # this test's own process holds iap2, as q2-iap's child did
+    # a child holds iap2, as q2-iap's child did; started without q2-heavy's no-core-dump preload (tools/ci/nodump.c),
+    # whose PR_SET_DUMPABLE 0 makes a process's /proc/PID/fd unreadable even to its own user
+    clean = {k: v for k, v in os.environ.items() if k != 'LD_PRELOAD'}
+    holder = subprocess.Popen([sys.executable, '-c', 'import sys, time; f = open(sys.argv[1], "w"); print(1, flush=True); time.sleep(60)',
+                               str(ffs / 'iap2' / 'ep0')], env=clean, stdout=subprocess.PIPE, text=True)
     try:
+        assert holder.stdout and holder.stdout.readline().strip() == '1'
         env = dict(os.environ, Q2CAR_RUN=str(carlogs / 'run'), Q2CAR_LOGDIR=str(carlogs / 'logs'), Q2CAR_FFS=str(ffs),
                    PATH=f'{shim}:{os.environ["PATH"]}')
         subprocess.run(['sh', str(Q2CAR), '_unmount'], env=env, check=True, timeout=30)
     finally:
-        ep0.close()
+        holder.kill()
+        holder.wait()
     log = (carlogs / 'logs/q2car.log').read_text()
     lines = [line for line in log.splitlines() if 'could not unmount' in line]
-    assert len(lines) == 1 and f'{ffs}/iap2: busy (held by: ' in lines[0] and f' {os.getpid()} ' in f' {lines[0]}', log
+    assert len(lines) == 1 and f'{ffs}/iap2: busy (held by: ' in lines[0] and f' {holder.pid} ' in f' {lines[0]}', log
     assert 'target is busy' in log  # umount's own words kept too
 
 
