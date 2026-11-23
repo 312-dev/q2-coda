@@ -15,14 +15,14 @@ files in place of ALSA.
 - protocol: for each transcript in fixtures/ (stock's and Q2 Muse's hciplayer under qemu, captured by
   fakedemo.py), the same commands get the same events and answers from q2player.
 
-The tests and the fixtures run side by side, WIDTH at once, each in a folder of its own (AFTER's reader in its
-writer's), as each mostly waits on a player running in real time or faster; one that fails there runs again alone,
-and passing then is reported flaky and counted as passed. Then SERIAL's, one at a time: the tests
+The tests and the fixtures run side by side, WIDTH at once, each in a process and a folder of its own (AFTER's
+reader in its writer's), as each mostly waits on a player running in real time or faster; one that fails there runs
+again alone, and passing then is reported flaky and counted as passed. Then SERIAL's, one at a time: the tests
 that bound real-time behaviour or read the host's /tmp, each tried again (TRIES in all) when it failed on a run the
 machine starved (Stalls). Each line gives the test's seconds, and the run ends with the side-by-side part's and the
-whole run's.
+whole run's, the last line also counting what failed, and what failed side by side and passed alone, by name.
 """
-import array, concurrent.futures, functools, math, os, pathlib, re, signal, struct, subprocess, sys, tempfile, threading, time
+import array, concurrent.futures, functools, math, multiprocessing, os, pathlib, re, signal, struct, subprocess, sys, tempfile, threading, time
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -1027,14 +1027,19 @@ def test_car_write_slow(player, songs, tmp):
     got = {l.split()[0]: l for l in run.stdout.split('\n') if l}
     said = [l[len('plog W '):] for l in run.stderr.split('\n') if l.startswith('plog W q2player: a car write took')]
     stall = got['car-stall'].split()
-    assert stall[1:5] == ['r', '0', 'blocked', '0'] and int(stall[-1]) < 600, \
+    # blocked is what says the kernel was asked for more than the room; the ms only that it did not wait out the
+    # model's 1.2 s timeout, which a busy machine cannot stretch the quick path to
+    assert stall[1:5] == ['r', '0', 'blocked', '0'] and int(stall[-1]) < 1200, \
         f'a write past the car\'s room waited in the kernel past the stop: {got["car-stall"]}'
     assert len(said) == 2, said
+    # the naps are real time, 1.5 s of waits and 1.1 s of writing: the line says at least that, and a busy machine
+    # adds to it (1609 ms side by side, 2026-11-23), so there is no upper bound
+    form = (r'q2player: a car write took (\d+) ms: 100 frames, (\d+) ms waiting \(snd_pcm_wait 1\), (\d+) ms writing '
+            r'\(snd_pcm_writei 100, errno 0\), RUNNING, avail \d+')
     wait, write = said
-    assert re.fullmatch(r'q2player: a car write took 1[2-5]\d\d ms: 100 frames, 1[2-5]\d\d ms waiting \(snd_pcm_wait 1\), '
-                        r'\d+ ms writing \(snd_pcm_writei 100, errno 0\), RUNNING, avail \d+', wait), wait
-    assert re.fullmatch(r'q2player: a car write took 1[01]\d\d ms: 100 frames, \d+ ms waiting \(snd_pcm_wait 1\), '
-                        r'1[01]\d\d ms writing \(snd_pcm_writei 100, errno 0\), RUNNING, avail \d+', write), write
+    w, r = re.fullmatch(form, wait), re.fullmatch(form, write)
+    assert w and int(w[1]) >= 1250 and int(w[2]) >= 1250, wait
+    assert r and int(r[1]) >= 1100 and int(r[3]) >= 1100, write
     return f'stall: {got["car-stall"]}; {wait}; {write}'
 
 
@@ -2024,11 +2029,19 @@ def test_media_info_per_format(player, songs, tmp):
                 out.setdefault(fakedemo.ALL_FORMATS[i], arg.split('|'))
         return out
     want = per_file(parse((HERE/'fixtures/pod-formats-all.txt').read_text())[0])
-    play(player, songs, 'formats-all', tmp/'formats-all', speed=4)
-    got = per_file(parse((tmp/'formats-all/transcript.txt').read_text())[0])
-    # a transcript writes an answer only when it changes: a file with none of its own answered as the one before
-    for d in want, got:
-        for a, b in zip(fakedemo.ALL_FORMATS, fakedemo.ALL_FORMATS[1:]): d.setdefault(b, d.get(a))
+    # a fixture's transcript writes an answer only when it changes: a file with none of its own answered as the one before
+    for a, b in zip(fakedemo.ALL_FORMATS, fakedemo.ALL_FORMATS[1:]): want.setdefault(b, want.get(a))
+    s, _, _ = play(player, songs, 'formats-all', tmp/'formats-all', speed=4)
+    # q2player's, by the song each query was asked under, the last answer before the next song's command: not by when
+    # this side read it. Side by side, the runner's other threads hold the GIL, so the session reads and stamps late,
+    # and a song's answers landed in the next song's 2.5 s (6 of 6 runs beside seven threads of Python work)
+    got = {}
+    for asked, m in zip(s.mi_asked, s.mi_answers):
+        if '|' in m and 1 <= asked <= len(fakedemo.ALL_FORMATS):
+            got[asked] = m[12:-1].split('|')
+    got = {f: got.get(i + 1) for i, f in reversed(list(enumerate(fakedemo.ALL_FORMATS)))}  # f24.flac's first play
+    for v in got.values():
+        if v: v[3] = 'POS'
     bad = []
     for f in fakedemo.ALL_FORMATS:
         w, g = want.get(f), got.get(f)
@@ -2329,7 +2342,11 @@ def main():
                   if n not in SERIAL and (n not in AFTER or AFTER[n] not in tests)]
         fixtures = [f for f in sorted((HERE/'fixtures').glob('*.txt')) if only in 'protocol-' + f.stem and f.stem not in KNOWN]
         again = []  # what failed side by side, run again alone below
-        with concurrent.futures.ThreadPoolExecutor(WIDTH) as pool:
+        # a process each, not a thread: a test's session (fakedemo) reads, stamps and sends on its own clock, and in
+        # threads the others' Python held the GIL from it (test_media_info_per_format's answers landed in the next
+        # song's window, side by side at low load). Forked, so the player built above and the music are shared.
+        ctx = multiprocessing.get_context('fork')
+        with concurrent.futures.ProcessPoolExecutor(WIDTH, mp_context=ctx) as pool:
             jobs = [pool.submit(chain, i, c, player, songs, tmp) for i, c in enumerate(chains)]
             runs = [(f, pool.submit(timed, check_protocol, player, songs, tmp, f)) for f in fixtures]
             for c, job in zip(chains, jobs):
@@ -2345,6 +2362,7 @@ def main():
         print(f'side by side: {time.monotonic() - start:.1f} s', flush=True)
         # A failure side by side runs again alone, as gate.run does a suite's: passing then, it is flaky (said, and
         # counted as passed); failing again, it fails.
+        side = []  # what failed side by side and passed alone: counted in the summary, not hidden
         for i, (what, first) in enumerate(again):
             if isinstance(what, list):
                 second = chain(f'a{i}', what, player, songs, tmp)
@@ -2352,14 +2370,17 @@ def main():
                 (tmp/f'a{i}').mkdir()
                 second = [(f'protocol {what.stem}', *timed(check_protocol, player, songs, tmp/f'a{i}', what))]
             for (name, ok1, text1, _), (_, ok, text, secs) in zip(first, second):
-                if ok and not ok1: print(f'flaky {name}: failed side by side ({text1[:200]}), passed alone', flush=True)
+                if ok and not ok1:
+                    print(f'flaky {name}: failed side by side ({text1[:200]}), passed alone', flush=True)
+                    side.append(name)
                 failed += report(name, ok, text, secs)
         for n in tests:
             if n in SERIAL:
                 failed += report(n, *alone(n, player, songs, tmp))
         for name, why in KNOWN.items():
             if only in 'protocol-' + name: print(f'skip protocol {name}: {why}')
-    print(f'all: {time.monotonic() - start:.1f} s', flush=True)
+    print(f'all: {time.monotonic() - start:.1f} s; {failed} failed; {len(side)} failed side by side and passed alone'
+          + (f': {", ".join(side)}' if side else ''), flush=True)
     sys.exit(1 if failed else 0)
 
 

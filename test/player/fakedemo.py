@@ -491,6 +491,10 @@ class Session:
 
     def send(self, text, quiet=False):
         if not quiet: self.note('>', text)
+        # which song each media-info query was asked under: its answer is the n-th (the player answers each once, in
+        # order), so an answer is tied to the song commands sent before its query, not to when this side read it
+        if text.startswith(('{set-songurl', '{set-nexturl')): self.songs_sent += 1
+        if text == POLL[1]: self.mi_asked.append(self.songs_sent)
         try: self.conn.sendall(self.url(text).encode())
         except OSError: pass
 
@@ -524,6 +528,7 @@ class Session:
                     self.positions.append((self.now(), int(f[3])))
                     shown = '{media-info\\' + '|'.join(f[:3] + ['POS'] + f[4:]) + '}'
                 if name in ('media-info', 'player-status'): self.answers.append((self.now(), m))  # as answered, position and all
+                if name == 'media-info': self.mi_answers.append(m)
                 # an answer to the 200 ms poll is written only when it differs from the last one of its kind
                 if name in ('media-info', 'player-status') and self.seen.get(name) == shown: pass
                 else: self.note('<', shown)
@@ -538,6 +543,7 @@ class Session:
         """speed: the player's clock runs this many times faster (its file sink's Q2PLAYER_SPEED), so the steps' times
         and the poll's period shrink by it."""
         self.positions, self.answers, self.speed = [], [], speed
+        self.songs_sent, self.mi_asked, self.mi_answers = 0, [], []  # media-info's queries and answers, in order (send)
         proc = self.proc = launch(self)  # a step may signal it (run.py test_car_release_while_paused)
         starving = starve(proc)
         self.srv.settimeout(30)
