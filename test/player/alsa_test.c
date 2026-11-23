@@ -31,7 +31,7 @@ static unsigned rate = 44100;
 static int opens, open_fails, write_fails, gone_error, prepare_fails, sleeps;
 static unsigned reopen_rate;
 static long last_written = -1;
-static int16_t last_frame[2]; /* the last write's first frame, for a mono song made stereo */
+static int lr_far, peak; /* the last write's largest difference between left and right, and its peak (16-bit stereo) */
 /* snd_config_update_free_global: the next open reads alsa-lib's configuration afresh (fresh counts those opens),
  * so a /mnt/data/asound.conf demo rewrote since the last one names the device (docs/player.md#output). */
 static int freed, fresh;
@@ -100,7 +100,12 @@ snd_pcm_sframes_t snd_pcm_writei(snd_pcm_t *p, const void *b, snd_pcm_uframes_t 
     writes++;
     if (write_fails && write_fails--) return gone_error;
     last_written = (long)n, first_written = ((const int16_t *)b)[0];
-    memcpy(last_frame, b, sizeof last_frame);
+    lr_far = peak = 0;
+    for (snd_pcm_uframes_t i = 0; i < n; ++i) {
+        int l = ((const int16_t *)b)[2 * i], r = ((const int16_t *)b)[2 * i + 1];
+        if (abs(l - r) > lr_far) lr_far = abs(l - r);
+        if (abs(l) > peak) peak = abs(l);
+    }
     last_zero = 1;
     for (snd_pcm_uframes_t i = 0; i < n * 2; ++i) last_zero &= !((const int16_t *)b)[i];
     return (snd_pcm_sframes_t)n;
@@ -204,8 +209,9 @@ static void pause_case(const char *name, int err) {
 }
 
 /* A USB DAC that takes 48 kHz S16_LE stereo alone (dev_*), and a song of rate, channels and width on way 2: the
- * open's rate and channels, the rate it asked set_rate_near for, and what two writes of 4410 frames handed the device. A
- * mono song's frame comes out on both channels. */
+ * rate it asked set_rate_near for, the writes, the frames two writes of 4410 handed the device, and the last write's
+ * largest difference between its left and right and its peak: the tone (-12 dBFS, 8192) is the same in both, a mono
+ * song's too once made stereo, at its own level, so the difference is the dither's, a step or two. */
 static void usb_case(const char *name, int song_rate, int ch, int bytes) {
     struct pcm_format f = {0};
     f.rate = song_rate, f.channels = ch, f.bytes = bytes;
@@ -223,7 +229,7 @@ static void usb_case(const char *name, int song_rate, int ch, int bytes) {
     } else {
         long sum = 0;
         for (int i = 0; i < 2; ++i) output_write(o, (const uint8_t *)tone, 4410), sum += last_written > 0 ? last_written : 0;
-        printf("%s asked %d writes %d frames %ld both %d\n", name, set_rate_asked, writes, sum, last_frame[0] == last_frame[1]);
+        printf("%s asked %d writes %d frames %ld lr %d peak %d\n", name, set_rate_asked, writes, sum, lr_far, peak);
         output_close(o);
     }
     dev_nrates = dev_s16 = dev_stereo = 0;

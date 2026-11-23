@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - USB DACs: USB-C earphones and simple USB DACs that take only 48 kHz now play every song, converted to what they take, where each song said "Not Supported". A DAC that takes a song's own rate and bit depth still gets it untouched. Unplugging one mid-song no longer runs through the queue marking each song unsupported: the song waits, and goes on when the DAC is back.
   - Streaming: a song from your server starts sooner, once about 3 seconds of it have downloaded instead of 8, and a song with a cover inside the file no longer waits for 5 seconds of it first. On a download of 300 KB/s a song starts in about 2.4 seconds, where it took 4.4.
   - Car Audio: Radio, Internet Radio, Videos and Spotify now play through the car's USB too, where they went to Bluetooth or nowhere while the car listened to USB.
   - Radio: starting a song's radio again after stopping it (from the car or on the Q2) works, where it said "Radio isn't available for this song".

@@ -991,11 +991,12 @@ def test_alsa_sw_params(player, songs, tmp):
     # a USB DAC unplugged under a write: the output's own answer, which the engine waits on (engine.c output_back)
     assert lines['usb-gone'].split()[1:3] == ['r', '-3'], lines['usb-gone']
     # the dongle of 2026-11-22 (48 kHz S16 stereo alone): a 44.1 kHz song asks for 48 kHz and is resampled; 24 bits at
-    # 96 kHz come out at 48 kHz in 16; a mono song in stereo; two writes of 4410 frames are 9600 frames give or take
-    # what the resampler holds back
+    # 96 kHz come out at 48 kHz in 16; a mono song on both channels; two writes of 4410 frames are 9600 frames (4410
+    # from 96 kHz) less what the resampler holds back; left and right the same tone, within the dither, at its level
     for k in ('usb48', 'usb48-96', 'usb48-mono'):
         got = lines[k].split()
-        assert got[1:3] == ['asked', '48000'] and abs(int(got[6]) - 4410 * 2 * 48000 // int(k.endswith('96') and 96000 or 44100)) < 64 and got[8] == '1', lines[k]
+        assert got[1:3] == ['asked', '48000'] and 0 <= 4410 * 2 * 48000 // (96000 if k.endswith('96') else 44100) - int(got[6]) < 64 \
+            and int(got[8]) <= 2 and abs(int(got[10]) - 8192) < 100, lines[k]
     for k, v in gone.items():
         got, want = lines[k].split()[1:], v.split()
         assert got[:-1] == want[:-1] and (int(got[-1]) > 0 if want[-1] == '+' else got[-1] == want[-1]), lines[k]
