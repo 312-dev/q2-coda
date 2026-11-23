@@ -212,6 +212,7 @@ struct source *source_open(const struct song *song, int *error, const int *cance
         s->out.rate = s->byte_rate / dsd_unit(song->dsd), s->out.bytes = song->dsd == DSD_DOP ? 3 : 4, s->out.is_float = 0, s->out.dsd = song->dsd;
     }
     if (song->start > 0 && source_seek(s, song->start) < 0) goto fail;
+    if (s->grow) grow_playing(s->grow); /* the open's own reads go on at any byte; a stall after waits for a refill */
     *error = ERR_NONE;
     return s;
 fail:

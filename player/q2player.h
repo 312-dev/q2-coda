@@ -117,6 +117,7 @@ int grow_arriving(const char *url); /* the app's .stream says url is still arriv
 struct grow *grow_open(const char *url, int *error);
 struct AVIOContext *grow_avio(struct grow *);
 void grow_seeking(struct grow *, int on); /* on while a seek searches: only the bytes there, no wait at their end */
+void grow_playing(struct grow *);         /* opened: a stall from here on waits for a refill (REFILL_S) */
 void grow_close(struct grow *);
 
 /* feed.c: other sources' sound for the car (docs/iphone-mode.md#other-sources-over-usb): a FIFO read into a ring */
