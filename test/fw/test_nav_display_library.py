@@ -636,7 +636,7 @@ def test_playback_has_the_sleep_timer_and_leaves_the_library_s_rows(fw):
     page = Pages(fw, ui)
     page.open('playset/playset_page')
     texts = page.texts()
-    assert texts == ['stock_2', 'Library', 'stock_3', 'stock_7', 'Crossfade', 'Duration', 'stock_6',
+    assert texts == ['stock_2', 'Library', 'stock_3', 'stock_7', 'Smart Crossfade', 'stock_6',
                      'Resume Songs: 30 min', 'stock_8', 'Sleep Timer', 'Volume: 0', 'Max Volume', 'Default Volume',
                      'Level', 'stock_0', 'stock_9', 'Balance', 'stock_10', 'Mono Audio', 'Swap L/R', 'stock_1',
                      'stock_4', 'stock_5']  # EQ (stock_2), then the Library

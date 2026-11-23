@@ -680,7 +680,8 @@ def test_client_commands(q2, capsys, tmp_path):
     assert st == {'now_playing': {'track_id': 's:12', 'title': 'Song', 'artist': 'Artist', 'album': 'Album',
                                   'duration_ms': 200000, 'art': 'a:3', 'play_state': 1, 'shuffle': 1, 'repeat': 2,
                                   'volume': 40, 'hearts': 3, 'rateable': True, 'buffering': False, 'buffered_bytes': 0,
-                                  'total_bytes': 0, 'buffered_ms': 0, 'radio': False, 'notice': '', 'notice_id': 0},
+                                  'total_bytes': 0, 'buffered_ms': 0, 'radio': False, 'notice': '', 'notice_id': 0,
+                                  'album_id': '', 'artist_id': ''},
                   'position': {'position_ms': 30000, 'at_ms': 99}, 'queue': {'version': 4, 'index': 2, 'total': 9}}
     b = run(capsys, 'browse', 'albums', '--sort', 'name', '--limit', '2')
     assert b['items'][0] == {'id': 'al:1', 'title': 'One', 'subtitle': 'A', 'art': 'a:1', 'group': 'O',

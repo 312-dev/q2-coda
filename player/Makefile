@@ -7,7 +7,7 @@ TARGET ?= host
 # patch/peq.h's files' prefix: the Q2's own paths, or under the directory a host test runs the player in
 PEQ_ROOT ?= ""
 STRIP ?= strip
-SRC := main.c ipc.c engine.c feed.c source.c stream.c qq.c sacd.c grow.c output.c cartrace.c dsp.c dsd.c stretch.c ../patch/peq.c
+SRC := main.c ipc.c engine.c feed.c source.c stream.c qq.c sacd.c grow.c output.c cartrace.c dsp.c smart.c dsd.c stretch.c ../patch/peq.c
 OBJ := $(patsubst %.c,$(OUT)/%.o,$(notdir $(SRC)))
 CFLAGS := -std=c11 -D_GNU_SOURCE -O2 -g -Wall -Wextra -Wno-unused-parameter -ffunction-sections -fdata-sections -I$(FFMPEG)/include -I../patch -DPEQ_HOST -DPEQ_ROOT='$(PEQ_ROOT)'
 LIBS := -L$(FFMPEG)/lib -lavformat -lavcodec -lswresample -lavutil $(TLS) -lm -lpthread -ldl

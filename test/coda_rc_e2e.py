@@ -21,7 +21,9 @@ that song, and the queue at it; Pause, Play and Play/Pause, each played by the t
 cover as an image; then SetMode (shuffle on and off, repeat one, all and off, each in the next State), Rate (three
 hearts, Favorites, none; another song's id NOT_FOUND), PlayQueueItem (the third song; a stale id NOT_FOUND), and Resume
 (the album again after another list, from the song it was left on; Resume while it plays carries on). Each step prints
-one line; the exit status is the number of failures."""
+one line; the exit status is the number of failures. A call that raises keeps the daemon's log, demo's (its unified-log
+lines, again 15 s later as .later), the shim's answers and the card's unified log in a logs-HHMMSS folder of the run's
+(keep_logs)."""
 import argparse
 import os
 import pathlib
@@ -131,7 +133,53 @@ def pooled(build, wait_s, argv):
             (emu_pool.copy_dir(slot) / 'state/data/config.ini').write_bytes(saved[slot])
 
 
+LATE_S = 15  # keep_logs copies demo's log again this much later
+# Where the run's daemon is, once known (run): keep_logs copies the logs from there when a call raises.
+WHERE: dict = {}
+
+
+def keep_logs(why):
+    """The daemon's log, demo's (its unified-log lines: S90play keeps demo's stderr there, docs/internals.md#unified-log),
+    the shim's last answers and the card's unified log into the run's folder, while the emulator still runs: a call
+    that raised (a RemoteError's UNAVAILABLE) is told apart there, a refusal from the shim's own log line, a command
+    never taken from its absence."""
+    pid, emu, shots = WHERE.get('pid'), WHERE.get('emu'), WHERE.get('shots')
+    if not shots or WHERE.get('kept'):  # once: --pool's main runs main, and both see the same error
+        return
+    WHERE['kept'] = True
+    out = shots / f'logs-{time.strftime("%H%M%S")}'
+    out.mkdir(parents=True, exist_ok=True)
+    (out / 'why.txt').write_text(why + '\n')
+    sources = [pathlib.Path(f'/proc/{pid}/root/tmp/{n}') for n in ('coda-rc.log', 'q2-demo.log', 'q2-demo.err',
+                                                                   'coda-rc.ack', 'coda-rc.now')] if pid else []
+    if emu:
+        sources += sorted((emu / 'state/mmc/.q2muse/logs').glob('q2-log.*'))
+    for f in sources:
+        try:
+            shutil.copyfile(f, out / f.name)
+        except OSError:
+            pass
+    # demo's log again a while later: a UI pass that held the loop past the call's 4 s is logged only once it ends
+    # ("ui pass N ms"), after the copy above
+    time.sleep(LATE_S)
+    for f in sources[1:3]:
+        try:
+            shutil.copyfile(f, out / (f.name + '.later'))
+        except OSError:
+            pass
+    print(f'logs kept in {out}', flush=True)
+
+
 def main(argv=None):
+    """run, its logs kept when a call raises."""
+    try:
+        return run(argv)
+    except Exception as e:
+        keep_logs(f'{type(e).__name__}: {e}')
+        raise
+
+
+def run(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     where = ap.add_mutually_exclusive_group(required=True)
     where.add_argument('--emu', type=pathlib.Path)
@@ -154,6 +202,7 @@ def main(argv=None):
         return 1
     shots = a.shots or pathlib.Path(tempfile.mkdtemp(prefix='coda-rc-e2e-'))
     shots.mkdir(parents=True, exist_ok=True)
+    WHERE.update(pid=pid, emu=a.emu, shots=shots)
     keys = pathlib.Path(tempfile.mkdtemp(prefix='coda-rc-keys-'))
     forget_runs(a.emu)
 

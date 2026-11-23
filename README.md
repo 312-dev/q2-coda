@@ -41,7 +41,7 @@
   </tr>
   <tr valign="top">
     <td><b>Playback</b></td>
-    <td>Gapless FLAC, MP3, AAC, Opus and Ogg Vorbis, and gapless USB DAC output. Crossfade up to 15 s that follows sample-rate changes and Shuffle. Shuffle by song, album or folder. Playback speed per folder. Resume Songs, and Memory Playback that brings back the queue you left, Play Next and Add to Queue included.</td>
+    <td>Gapless FLAC, MP3, AAC, Opus and Ogg Vorbis, and gapless USB DAC output. Smart Crossfade, which overlaps each pair of songs at the right moment from their loudness, across sample rates and in Shuffle. Shuffle by song, album or folder. Playback speed per folder. Resume Songs, and Memory Playback that brings back the queue you left, Play Next and Add to Queue included.</td>
   </tr>
   <tr valign="top">
     <td><b>EQ</b></td>

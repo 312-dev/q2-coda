@@ -847,7 +847,7 @@ def test_a_play_is_kept_for_its_timer_and_the_next_command_waits_for_it(fw, ui, 
     (queue, at, cls), = ui.played
     assert [C.c_int.from_address(r).value for r in queue] == [13, 11]
     q2.tick(600)
-    assert len(fw.calls('player_next_music')) == 1 and q2.files[ACK] == b'8 0\n7 0\n'
+    assert len(fw.calls('player_next_music')) == 1 and q2.files[ACK] == b'8 0\n7 0\n7 9\n'
 
 
 def test_the_single_command_file_is_still_read_beside_the_queue(fw, ui, mcl, recs):
@@ -888,3 +888,17 @@ def test_a_scan_held_through_the_queue_keeps_going_and_its_release_ends_it(fw, u
         q.send(f'{1359998990 + i} {verb}\n'.encode())
         q2.tick(500)
     assert q2.files[ACK] == b'1359998993 0\n1359998992 0\n1359998991 0\n1359998990 0\n'
+
+
+def test_a_play_is_answered_taken_before_its_timer_runs(fw, ui, mcl, recs):
+    """A play's work runs on a timer and can hold the loop for seconds (a shuffled list's start: 9 s on a loaded
+    emulator, 2026-11-23): the shim answers "taken" (coda_rc_cmdq.h CRC_ACK_TAKEN, 9) as it takes it, so the daemon
+    waits for the answer the timer writes instead of telling the phone UNAVAILABLE at ACK_MS."""
+    q2 = Q2(fw, ui, recs)
+    q2.tick()
+    q2.files[LIST] = b'13\n11\n'
+    q2.files[CMD] = b'7 play 0 0 2\n'
+    q2.tick()
+    assert q2.files[ACK] == b'7 9\n' and not ui.played  # taken; its timer has not run
+    ui.fire('cr_play')
+    assert ui.played and q2.files[ACK] == b'7 0\n7 9\n'

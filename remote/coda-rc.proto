@@ -195,6 +195,12 @@ message NowPlaying {
   // otherwise. notice_id is new for each toast, so the same words twice are two notices.
   string notice = 18;
   uint32 notice_id = 19;
+  // The Browse nodes of the song's album ("album:..."), whose page lists the song, and of its album's artist
+  // ("artist:r..."), the Artists list's page, which lists that album: Android Auto's links from now playing. Left
+  // out when there is no such page (a station, a song not in the library, a server song while its server is not
+  // signed in, no album artist). Added within version 1 with no capability bit: a Q2 without them never sends them.
+  string album_id = 20;
+  string artist_id = 21;
 }
 
 enum PlayState {
