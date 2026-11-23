@@ -613,7 +613,11 @@ def test_grow_seek_beyond(player, songs, tmp):
         sought = next(float(l.split()[0]) for l in s.lines if l.endswith('{mcl-seek\\15}'))
         landed = next(u for at, u in s.ran if at == 5.0)
         waiting = [p for t, p in s.positions if sought + 0.6 < t < landed - 0.1]
-        assert waiting and set(waiting) == {15}, f'{kind}: the position while the player waits is not the target: {waiting}'
+        # a starved player may take the seek later than 600 ms: what it read before (1 s, 2 of 20 starved) is not a
+        # wait; from its first 15 on, every answer is 15
+        took = waiting.index(15) if 15 in waiting else len(waiting)
+        assert waiting[took:] and set(waiting[took:]) == {15} and all(p <= 2 for p in waiting[:took]), \
+            f'{kind}: the position while the player waits is not the target: {waiting}'
         after = [p for t, p in s.positions if 2.0 < t < 12.0]
         assert after and max(after) >= 16, f'{kind}: the target was not played when its bytes came: positions {after}'
         said.append(f'{kind} {len(head) // 4} frames before, at {max(after)} s before the rest landed')
@@ -641,13 +645,17 @@ def test_preload_cancelled_while_opening(player, songs, tmp):
 
 def test_preload_outrun(player, songs, tmp):
     """A preload still opening when the song ends: exit at the end, then the file plays when it has opened."""
-    s, pcm, names = play(player, songs, 'outrun', tmp/'outrun', speed=4)
+    # The file comes 2 s after a1's exit (after_exits), and the run waits for a2's: at fixed times (the file at 12 s,
+    # the end at 36 s) a starved player reached a1's end after the file had come, or a2's after the run had ended
+    # (0 of 10 with it stopped 300 ms a second, and once alone at load 12 on integ/q2-1129)
+    s, pcm, names = play(player, songs, 'outrun', tmp/'outrun', speed=4, exits=2)
     a1, a2 = reference(songs/'a1.flac'), reference(songs/'a2.flac')
     got = b''.join(pcm)
     assert got.endswith(a1[12 * 44100 * 4:] + a2), 'not a1 to its end, then the whole of a2'
     events = [(float(l.split()[0]), l.split()[-1]) for l in s.lines if 'exit}' in l]
-    assert [e for _, e in events] == ['{player-status\\exit}'] * 2 and events[0][0] < 12, events
-    return f'exit at {events[0][0]:.1f} s, before the file arrived at 12 s; then all {len(a2) // 4} frames of it'
+    fed = max(u for at, u in s.ran if at == 4.0)  # the feed, the last of the steps at 4.0, after the wait for the exit
+    assert [e for _, e in events] == ['{player-status\\exit}'] * 2 and events[0][0] < fed, (events, fed)
+    return f'exit at {events[0][0]:.1f} s, before the file arrived at {fed:.1f} s; then all {len(a2) // 4} frames of it'
 
 
 def test_exits_apart(player, songs, tmp):
@@ -680,8 +688,10 @@ def test_media_info_while_a_song_opens(player, songs, tmp):
     s = fakedemo.Session(tmp/'mi-open')
     s.music = songs
     s.run(steps, fakedemo.launch_host(player, str(songs), 1), 1)
-    cut = next(float(l.split()[0]) for l in s.lines if l.endswith('{player-nextstatus\\exit}'))
-    after = [(round(t, 2), m) for t, m in s.answers if m.startswith('{media-info') and t > cut]
+    # the answers after the cut by their order on the socket: by time, an answer read just before it could stamp later
+    # than the transcript's rounded time of it (4 of 20 runs starved)
+    cut = next(n for m, n in s.ends if m == '{player-nextstatus\\exit}')
+    after = [(t, m) for t, m in s.answers[cut:] if m.startswith('{media-info')]
     first = next(i for i, (_, m) in enumerate(after) if '|' in m)
     opening, (came, song) = after[:first], after[first]
     fed = next(u for at, u in s.ran if at == 5.0)  # when a2 was written, as this side ran it
@@ -1376,10 +1386,11 @@ def test_car_way(player, songs, tmp):
     kHz song after it resampled into the same PCM, which stays open, so the car's stream never stops."""
     cp, car = car_player(), tmp/'car-on.audio'
     car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
-    # the stop 4 s into c96, after a1's end: at a fixed time a starved player had not finished a1 (0 of 20 runs
-    # passed with it stopped 300 ms a second), its car PCM a1's exact prefix
+    # the stop once c96 is heard 3 s in, after a1's end: at a fixed time a starved player had not finished a1 (0 of
+    # 20 runs passed with it stopped 300 ms a second), its car PCM a1's exact prefix, and 4 s of the session's clock
+    # after the exit held under 2 s of c96 (1 of 20)
     steps = car_steps(songs, car, flag=1) + [(16.0, fakedemo.gapless(f'{songs}/c96.flac', flag=1)),
-                                             (16.0, fakedemo.after_exits(1, 4.0)), (16.0, '{mcl-stop\\null}'), (17.0, None)]
+                                             (16.0, fakedemo.after_exits(1, heard=3)), (16.0, '{mcl-stop\\null}'), (17.0, None)]
     names, pcm, log = car_play(songs, tmp, 'car-on', steps, cp, car, speed=8)
     assert [n.split('_', 1)[1] for n in names] == ['44100_2_s16_car.raw'], names
     a1 = reference(songs/'a1.flac')

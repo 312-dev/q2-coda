@@ -154,7 +154,7 @@ def scenarios(m):
                                (5.0, '{mcl-closegapless\\null}'), (6.0, feed('a2.flac')), (13.0, song('set-songurl', b1)), (16.0, '{mcl-stop\\null}'), (18.0, None)],
         # a preload the song outruns: its file arrives two seconds after the song's end, and plays then
         'outrun': boot + [(1.0, song('set-songurl', a1, flag=1)), (2.0, '{mcl-seek\\12}'), (4.0, gapless(f'{m}/slow.flac', flag=1)),
-                          (12.0, feed('a2.flac')), (36.0, None)],
+                          (4.0, after_exits(1, 2.0)), (4.0, feed('a2.flac')), (4.0, None)],
         # a path with a } in it, which demo writes as %0x7d
         'brace': boot + [(1.0, song('set-songurl', f'{m}/a}}1.flac')), (3.0, '{mcl-stop\\null}'), (5.0, None)],
         # every lossless and every lossy format but MP3 and FLAC at 16 bits, whole, each preloaded half a second into
@@ -214,12 +214,13 @@ def scenarios(m):
         'bt': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'), (0.1, vol(100, 100)),
                (1.0, song('set-songurl', a1)), (2.0, vol(50, 50)), (3.0, vol(20, 20)), (4.0, vol(150, 150)), (5.0, vol(80, 40)),
                (6.0, vol(100, 100)), (6.5, song('set-nexturl', c96)), (9.0, song('set-nexturl', m4a)), (11.5, '{mcl-stop\\null}'), (12.5, None)],
-        # the same volumes, each sent a second of the song after the one before (at_position), not of the session's
-        # clock: run.py test_bt_formats_and_volume measures each level over the song's frames
+        # the same volumes, each sent two seconds of the song after the one before (at_position), not of the session's
+        # clock: run.py test_bt_formats_and_volume measures each level over the song's frames (a second of the song,
+        # read from whole-second positions, was under 0.75 s once, 1 of 20 runs starved)
         'bt-levels': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'), (0.1, vol(100, 100)),
-                      (1.0, song('set-songurl', a1)), (1.0, at_position(1)), (1.0, vol(50, 50)), (1.0, at_position(2)), (1.0, vol(20, 20)),
-                      (1.0, at_position(3)), (1.0, vol(150, 150)), (1.0, at_position(4)), (1.0, vol(80, 40)), (1.0, at_position(5)),
-                      (1.0, vol(100, 100)), (1.0, at_position(5, 0.5)), (1.0, song('set-nexturl', c96)), (1.0, at_position(-1, 2.5)),
+                      (1.0, song('set-songurl', a1)), (1.0, at_position(2)), (1.0, vol(50, 50)), (1.0, at_position(4)), (1.0, vol(20, 20)),
+                      (1.0, at_position(6)), (1.0, vol(150, 150)), (1.0, at_position(8)), (1.0, vol(80, 40)), (1.0, at_position(10)),
+                      (1.0, vol(100, 100)), (1.0, at_position(10, 0.5)), (1.0, song('set-nexturl', c96)), (1.0, at_position(-1, 2.5)),
                       (1.0, song('set-nexturl', m4a)), (1.0, at_position(-1, 2.5)), (1.0, '{mcl-stop\\null}'), (1.0, at_position(-1, 1.0)),
                       (1.0, None)],
         # Bluetooth across a gapless change: the 44.1 kHz pair and the 96 kHz pair, whole, at unity
@@ -402,14 +403,21 @@ def then_song(path):
     return go
 
 
-def after_exits(n, extra=0.0):
+def after_exits(n, extra=0.0, heard=None):
     """A step: wait (pumping, at most EXIT_WAIT_S of real time) for the player's n-th {player-status\\exit}, then
-    `extra` seconds more of the player's clock. The steps after it are due at once: a step that must follow a song's
-    end, on a machine whose stalls leave the player's clock behind the session's."""
+    `extra` seconds more of the player's clock, or with heard, until a media-info answer after that exit puts the next
+    song at `heard` seconds or more. The steps after it are due at once: a step that must follow a song's end, on a
+    machine whose stalls leave the player's clock behind the session's."""
     def go(s):
         deadline = time.monotonic() + EXIT_WAIT_S
         while s.exits() < n and time.monotonic() < deadline:
             s.pump(min(deadline, time.monotonic() + 0.1))
+        if heard is not None:
+            at = [k for m, k in s.ends if m == '{player-status\\exit}'][n - 1] if s.exits() >= n else len(s.answers)
+            def there():
+                return any(m.startswith('{media-info') and '|' in m and int(m.split('|')[3]) >= heard for _, m in s.answers[at:])
+            while not there() and time.monotonic() < deadline:
+                s.pump(min(deadline, time.monotonic() + 0.05))
         s.pump(time.monotonic() + extra / s.speed)
     return go
 
@@ -509,6 +517,7 @@ class Session:
         self.on_exit = []  # set-gapless commands sent one at each {player-status\\exit}, as demo sends one per song
         self.wait_exits = 0  # at the last step, wait for this many {player-status\\exit} first (run): 0, none
         self.wait_ends, self.ended = 0, 0  # the same for every event that ends a song (ENDS), and their count so far
+        self.ends = []  # each such event and how many answers (self.answers) came before it: their order, not their time
         certs = httpd.certificates(CERTS)
         root = lambda: pathlib.Path(self.music)
         self.web = [httpd.serve(root)] + [httpd.serve(root, (certs / f'{n}.pem', certs / f'{n}.key')) for n in ('good', 'wrong', 'self')]
@@ -572,7 +581,7 @@ class Session:
                     shown = '{media-info\\' + '|'.join(f[:3] + ['POS'] + f[4:]) + '}'
                 if name in ('media-info', 'player-status'): self.answers.append((self.now(), m))  # as answered, position and all
                 if name == 'media-info': self.mi_answers.append(m)
-                if m in ENDS: self.ended += 1
+                if m in ENDS: self.ended += 1; self.ends.append((m, len(self.answers)))
                 # an answer to the 200 ms poll is written only when it differs from the last one of its kind
                 if name in ('media-info', 'player-status') and self.seen.get(name) == shown: pass
                 else: self.note('<', shown)
