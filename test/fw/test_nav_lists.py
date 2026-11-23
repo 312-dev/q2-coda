@@ -914,13 +914,13 @@ def test_the_release_that_ends_the_hold_leaves_the_shutdown_prompt_its_centre(fw
     assert clicks.seen == [(buttons[1].at, EVT_CLICK)]
 
 
-@pytest.mark.parametrize('cable, moves', [(1, False), (0, True)])
-def test_usb_modes_scan_prompt_takes_the_wheel_once_the_cable_is_out(fw, ui, cable, moves):
+@pytest.mark.parametrize('cable', [1, 0])
+def test_usb_modes_scan_prompt_takes_the_wheel_cable_in_or_out(fw, ui, cable):
     fw.var('g_usblink_status', C.c_ubyte).value = 2
     fw.var('g_usbdet_value', C.c_ubyte).value = cable
     win, _ = dialog(ui)
     key(fw, ui, KEY_NEXT)
-    assert (win.props.get(SEL) == 1) == moves
+    assert win.props.get(SEL) == 1
 
 
 # A virtual table: a pool of row widgets rebound to the rows in view.

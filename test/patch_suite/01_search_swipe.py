@@ -78,13 +78,13 @@ m.paint(d); assert m.selected(d)==0 and [b[:5] for b in m.bands]==bar_bands(inse
 assert m.call()==11 and m.selected(d)==1; m.paint(d); assert [b[:5] for b in m.bands]==bar_bands(inset,256,375-2*inset,48,radius)
 assert m.confirm()==11 and m.clicks==[rows[1]]; passed()
 
-# USB mode's exit asks whether to scan before it leaves the mode: with the cable out, the prompt
-# takes the wheel (iPod: its buttons); with the cable in, input stays stock's.
+# USB mode's exit asks whether to scan before it leaves the mode, the cable out or still in (the mode
+# page's Stop): the prompt takes the wheel (iPod: its buttons) either way.
 for cable in (0,1):
     m=Machine(); d=m.node('dialog','confirminfo_dialog',[]); m.word(d+O['W_PARENT'],m.wm); m.top=d
     m.nodes[d]['children']=[m.entry(d,220) for _ in range(2)]
     m.byte(syms['g_usblink_status'],2); m.byte(syms['g_usbdet_value'],cable)
-    assert m.call()==(11 if not cable else 0); passed()
+    assert m.call()==11; passed()
 
 # The real input entry handles USB confirmation before native USB/volume routing.
 m=Machine(); d=m.node('dialog','confirminfo_dialog',[]); m.word(d+O['W_PARENT'],m.wm); m.top=d
