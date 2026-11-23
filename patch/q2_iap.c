@@ -122,6 +122,7 @@ void *bsearch(const void *, const void *, size_t, size_t, int (*)(const void *, 
 #define EINTR 4
 #define EAGAIN 11
 #endif
+#include "coda_rc_cmdq.h" /* the shim's command queue: needs open, write, close, O_NONBLOCK, O_CLOEXEC, ssize_t */
 
 /* <linux/usb/functionfs.h> */
 #define FFS_DESC_MAGIC_V2 3
@@ -471,6 +472,7 @@ static unsigned wr_queued, wr_done; /* input reports handed to the writer, and t
 static const char *np_file = "/tmp/coda-rc.now";
 /* What the player and the shim read (player/output.c output_car, patch/coda_rc_shim.c cr_command), and Cover Flow's
  * cache of covers (patch/coverflow.c art_path); each can be moved for the host tests. */
+static const char *cmdq_file = CRC_CMDQ; /* --cmdq-file: the shim's command queue (coda_rc_cmdq.h) */
 static const char *car_file = "/tmp/q2-iap.audio", *car_pcm = "null", *cmd_file = "/tmp/coda-rc.cmd",
                   *art_dir = "/mnt/mmc/.coverflow", *rate_file = "/tmp/q2-iap.rate";
 /* A relink under way (patch/usb_car.c USB_CAR_RELINK): written at a lost link's exit 22, before the car's file goes,
@@ -651,12 +653,14 @@ static void rate_poll(long now) {
     iap2_audio_rate(io_rate());
 }
 
-/* A button or a seek, as the Remote app's commands reach the shim (Car Remote on). Its numbers start high, so an ack
+/* A button or a seek, as the Remote app's commands reach the shim (Car Remote on): down the shim's queue
+ * (coda_rc_cmdq.h), each press its own line, else its single command file. Its numbers start high, so an ack
  * of one is never taken for coda-rc's own. */
 static void io_command(const char *verb) {
     static unsigned seq = 0x51000000u;
     char b[96];
     int n = snprintf(b, sizeof b, "%u %s\n", ++seq, verb);
+    if (!crc_cmdq_send(cmdq_file, b, (unsigned)n)) return;
     if (write_whole(cmd_file, b, (unsigned)n)) logline("iap2", "command: the shim's file could not be written");
 }
 
@@ -1446,6 +1450,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(o, "--ask-dir")) ask_dir = v, ++a;
         else if (!strcmp(o, "--art-ask-ms")) art_ask_ms = atoi(v), ++a;
         else if (!strcmp(o, "--cmd-file")) cmd_file = v, ++a;
+        else if (!strcmp(o, "--cmdq-file")) cmdq_file = v, ++a;
         else if (!strcmp(o, "--art-dir")) art_dir = v, ++a;
         else if (!strcmp(o, "--state")) state_file = v, ++a;
         else if (!strcmp(o, "--report-ms")) report_ms = atoi(v), ++a;

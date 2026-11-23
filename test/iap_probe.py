@@ -485,13 +485,14 @@ class BmwCar(Car):
 def bmw_up(probe, tmp_path, *more):
     """A probe in --iap2 up to identification with the BMW's link parameters; (process, car, log, files)."""
     files = {'car': tmp_path/'q2-iap.audio', 'cmd': tmp_path/'coda-rc.cmd', 'np': tmp_path/'now', 'art': tmp_path/'art',
-             'rate': tmp_path/'q2-iap.rate', 'relink': tmp_path/'q2car.relink'}
+             'rate': tmp_path/'q2-iap.rate', 'relink': tmp_path/'q2car.relink', 'cmdq': tmp_path/'cmdq'}
     files['art'].mkdir()
     put_whole(files['np'], 'state=1\npos=61000\nlen=245\ntitle=Teardrop\nartist=Massive Attack\nalbum=Mezzanine\n'
                            'path=/nowhere/a.flac\nshuffle=0\nrepeat=2\n')
     p, ffs, log = start(probe, tmp_path, '--iap2', '--np', str(files['np']), '--car-pcm', 'hw:CARD=UAC1Gadget,0',
                         '--car-file', str(files['car']), '--cmd-file', str(files['cmd']), '--art-dir', str(files['art']),
-                        '--rate-file', str(files['rate']), '--relink-file', str(files['relink']), *more)
+                        '--rate-file', str(files['rate']), '--relink-file', str(files['relink']),
+                        '--cmdq-file', str(files['cmdq']), *more)
     fd = os.open(ffs.path/'ep1', os.O_RDONLY | os.O_NONBLOCK)
     car = BmwCar(ffs, fd)
     ffs.event(ENABLE)
@@ -2301,6 +2302,33 @@ def test_an_answer_ep0_does_not_take_is_a_lost_link(probe, tmp_path):
         os.close(fd)
     assert 'link: lost (an answer on ep0 not taken in 2 s)' in log.read_text()
 
+
+
+def test_two_presses_inside_a_poll_both_reach_the_shim(probe, tmp_path):
+    """car-bt-power.md #8: the car's buttons went to the shim through one file, renamed over at each press and read
+    every 500 ms, so two presses inside one read lost the first (two taps of Next 300 ms apart skipped one song). They
+    go down the shim's queue now (coda_rc_cmdq.h, a FIFO demo's shim makes and reads), a line each; here the FIFO is
+    the test's, and two Next presses 150 ms apart arrive as two lines."""
+    q = tmp_path/'cmdq'
+    os.mkfifo(q)
+    r = os.open(q, os.O_RDWR | os.O_NONBLOCK)
+    p, car, fd, log, files = bmw_up(probe, tmp_path)
+    got = b''
+    try:
+        car.send(bytes([0x40, 0x40, 0, 6 + len(BMW_START_HID), 0x68, 0x00]) + BMW_START_HID)
+        for b in (0x04, 0x00, 0x04, 0x00):
+            car.send(message(0x6802, prm(0, b'\x00\x01'), prm(1, bytes([b]))))
+            time.sleep(0.04)
+        time.sleep(0.3)
+        try:
+            got = os.read(r, 4096)
+        except BlockingIOError:
+            pass
+    finally:
+        stop(p, fd)
+        os.close(r)
+    lines = [l.split(' ', 1)[1] for l in got.decode().splitlines()]
+    assert lines == ['next', 'next'], (lines, files['cmd'].exists() and files['cmd'].read_text())
 
 
 if __name__ == '__main__':
