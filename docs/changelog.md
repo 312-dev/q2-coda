@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Audio: a server song's cover now comes from your streaming app when the Q2 has none yet, within a few seconds, where it could take 13 seconds or not come at all, and looking for a cover never holds up the car's connection.
   - Car Audio: plugging in before the SD card is ready no longer tells the car your server's songs are gone (and sends them all again on the next drive). Waking the Q2 from Standby with the cable in starts a fresh connection with the car, where the old one could carry on with the car's audio stuck.
   - Car Audio: changing songs or the queue with a server library, or the car asking for the library at a plug-in, no longer holds the car link up for a fraction of a second each time, and Q2 Muse Remote's library pages open faster and use less of the Q2's processor.
   - Car Remote: a Bluetooth device nearby can no longer crash or take over the Car Remote service by sending it a malformed message before pairing. Devices that are not paired also can no longer keep a paired phone from connecting over Wi-Fi, or light the Q2's screen with pairing requests more than four times a minute.

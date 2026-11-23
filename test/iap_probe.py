@@ -1505,6 +1505,59 @@ def test_a_server_song_s_cover_from_its_app(probe, tmp_path):
     assert f'({len(jpeg)} as found)' in log.read_text()
 
 
+
+def test_a_server_song_s_cover_asked_of_its_app(probe, tmp_path):
+    """The drive of 2026-11-22: a server song whose album the app had no cover of yet went to the car 13.4 s late,
+    ffmpeg's picture from the streamed file the only source. q2-iap now asks the app first, in the contract coda-rc's
+    covers use with a file and key of its own: q2-<app>.coverask-iap holds "<seq> 160 <album>", the app saves the cover
+    where it saves .coverask's and answers coverack-iap=<seq> 0 in its state file. Here the test is the app, answering
+    300 ms after the ask; the cover goes to the car and ffmpeg is never run."""
+    card, asks = tmp_path/'card', tmp_path/'asks'
+    asks.mkdir()
+    app = card/'mnt/mmc/.subsonic'
+    app.mkdir(parents=True)
+    (app/'q2app').write_text('name=Subsonic\ncatalogue=1\ncovers=1\n')
+    jpeg = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=160x160', '-frames:v', '1', '-q:v', '2',
+                           '-f', 'mjpeg', '-'], check=True, capture_output=True).stdout
+    rid = 0x4000139a
+    catalogue_db(tmp_path/'catalogue.db', [(rid, 'The Boys Of Summer', 'The Very Best Of', 'Don Henley', '', 'Rock', 5, 1,
+                                            '/mnt/mmc/.subsonic/cat/al-77/05.flac')])
+    never = tmp_path/'ffmpeg-ran'
+    fake_ffmpeg = tmp_path/'ffmpeg'
+    fake_ffmpeg.write_text(f'#!/bin/sh\ntouch {never}\nexit 1\n')
+    fake_ffmpeg.chmod(0o755)
+    (tmp_path/'run').mkdir()
+    p, car, fd, log, files = bmw_up(probe, tmp_path/'run', '--lib-cat', str(tmp_path/'catalogue.db'),
+                                    '--card-root', str(card), '--ask-dir', str(asks), '--ffmpeg', str(fake_ffmpeg),
+                                    '--art-made', str(tmp_path/'made'))
+    try:
+        files['np'].write_text(f'state=1\npos=1000\nlen=288\nid={rid}\ntitle=The Boys Of Summer\nartist=Don Henley\n'
+                               'album=The Very Best Of\npath=/mnt/mmc/.subsonic/stream/11c3e037/original/5/the boys of '
+                               'summer [6wXZ8JEGfmYO7FYDnHDAUi].flac\nshuffle=0\nrepeat=0\n')
+        attrs = b''.join(prm(a) for a in (0, 1, 4, 6, 12, 0x1a))
+        car.send(message(0x5000, prm(0, attrs), prm(1, prm(0) + prm(1))))
+        ask = asks/'q2-subsonic.coverask-iap'
+        end = time.time() + 3
+        while not ask.exists() and time.time() < end:
+            time.sleep(0.02)
+        line = ask.read_text()
+        seq, px, album = line.split()
+        assert (px, album) == ('160', 'al-77') and line.endswith('\n')
+        assert (asks/'coda-rc.wake').read_text() == 'subsonic\n', 'the app not running: named to be started'
+        time.sleep(0.3)
+        (app/'covers').mkdir()
+        (app/'covers/al-77.jpg').write_bytes(jpeg)
+        (asks/'q2-subsonic.state').write_text(f'server=up\ncoverack-iap={seq} 0\n')
+        updates, setups = np_and_files(car, lambda u: False, seconds=2.0)
+    finally:
+        stop(p, fd)
+    text = log.read_text()
+    assert setups and max(setups.values()) > len(jpeg) - 64, setups
+    assert f'art: asked subsonic for al-77 (ask {seq}): saved' in text
+    assert not ask.exists(), 'the ask goes once answered'
+    assert not never.exists(), 'ffmpeg run though the app had the cover'
+
+
 PACE_MS =int(os.environ.get('Q2IAP_PACE_MS', '2'))
 
 

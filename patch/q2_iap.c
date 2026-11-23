@@ -38,6 +38,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/klog.h>
+#include <sys/wait.h>
 #define ERRNO errno
 #else
 typedef unsigned int size_t;
@@ -92,6 +93,9 @@ int klogctl(int, char *, int);
 int execl(const char *, const char *, ...);
 void qsort(void *, size_t, size_t, int (*)(const void *, const void *));
 int nice(int);
+int waitpid(int, int *, int);
+#define WNOHANG 1
+#define O_CLOEXEC 0x80000 /* MIPS */
 void *bsearch(const void *, const void *, size_t, size_t, int (*)(const void *, const void *));
 #define ERRNO (*__errno_location())
 #define O_RDONLY 0
@@ -564,82 +568,260 @@ static unsigned fnv_part(unsigned h, const char *s) {
     return h * 16777619u;
 }
 
-/* A song's own picture (an embedded cover: every streamed Subsonic song of the 2026-11-22 drive had one, and the
- * car got none after the first, whose album Cover Flow had), fitted into 160 px as a baseline JPEG by ffmpeg in a
- * child, as Cover Flow fits one (patch/coverflow.c ff_run), at art_made.<key>.jpg: the key the album's (its artist
- * and name, as Cover Flow keys it), or for a song with no album its path's, so the album's next songs take it at
- * once. One at a time, once a key (made.tried), the last album's kept, ART_MADE_MS at most; once it is there, Now
- * Playing goes again whole (iap2_art_again), its cover with it. The loop never waits on it (art_made_poll). */
-#define ART_MADE_MS 20000
+/* ---- the car's cover (docs/iphone-mode.md#the-car-s-cover) ----
+ *
+ * Looked for in a child (art_child), one song at a time, so the loop never waits on the card, the app or ffmpeg: on
+ * the 2026-11-22 drive a cover only ffmpeg could make took 13.4 s. In this order: Cover Flow's 160 px copy (keyed by
+ * artist and album); one made for the album before (art_made.<key>.jpg); a server song's cover from its app
+ * (covers/<album id>.jpg); a cover beside the song; a server song's cover asked of its app (art_ask: the app fetches
+ * it from the server), waited for ART_ASK_MS; the picture in the song's own file, fitted into 160 px as a baseline
+ * JPEG by ffmpeg, niced, killed after ART_MADE_MS. The key is the album's (its artist and name, as Cover Flow and the
+ * Bluetooth cover key it), else the song's path, so the album's next songs take the same cover with no child.
+ *
+ * The child writes 'w' to its pipe as it starts on an ask or ffmpeg, 'm' when ffmpeg made the cover, then 'c' and
+ * the JPEG (none: no cover). Now Playing for a new song waits for the quick sources (q2_iap2.c ART_HOLD_MS, until 'w'
+ * or the end); a cover found after it went is sent with Now Playing again (iap2_art_again). */
+#define ART_ASK_MS 4000   /* --art-ask-ms: the app's answer to an ask waited for this long */
+#define ART_MADE_MS 20000 /* ffmpeg's longest */
+#define ART_CAP 65536     /* q2_iap2.c ART_MAX */
 static const char *art_made = "/tmp/q2-iap.art", *art_ffmpeg = "/usr/bin/ffmpeg"; /* --art-made, --ffmpeg */
+static const char *ask_dir = "/tmp"; /* --ask-dir: the apps' ask, state and socket files (q2-<id>.*) */
+static long art_ask_ms = ART_ASK_MS;
 static struct {
-    int pid;
-    unsigned key, tried;
+    int pid, fd;   /* the child and its pipe while it looks, else 0 and -1 */
+    int state;     /* 0 nothing, 1 looking, 2 looking slowly (an ask or ffmpeg), 3 found or not (got_n) */
+    unsigned key, seq, made_key;
     long at;
-    char dst[600];
-} made;
-static int lib_app_cover(unsigned rid, char *out, unsigned cap); /* q2_iap_lib.c */
-static void art_made_ask(const char *path, unsigned key);
-/* The song's cover: Cover Flow's 160 px copy (keyed by artist and album), else a server song's from its app (its
- * catalogue row's album: lib_app_cover), else a cover beside the song, else the picture in the song's own file as
- * art_made_ask fitted it into 160 px (none yet: asked, and the car sent it once it is there). */
-static unsigned io_artwork(const struct iap2_np *n, unsigned char *out, unsigned cap) {
-    char p[600];
-    unsigned got = 0;
-    if (n->album[0]) {
-        snprintf(p, sizeof p, "%s/%08x.jpg", art_dir, fnv_part(fnv_part(2166136261u, n->artist), n->album));
-        got = read_file(p, out, cap);
-    }
-    if (!got && lib_app_cover(n->id, p, sizeof p)) got = read_file(p, out, cap);
-    static const char *const names[] = { "cover.jpg", "folder.jpg", "front.jpg" };
-    const char *slash = strrchr(n->path, '/');
-    for (unsigned i = 0; !got && slash && i < 3; ++i) {
-        snprintf(p, sizeof p, "%.*s/%s", (int)(slash - n->path), n->path, names[i]);
-        got = read_file(p, out, cap);
-    }
-    if (!got && n->path[0]) {
-        /* the album's, as the Bluetooth cover keys a song's own picture (bt_cover.c), else the song's */
-        unsigned key = n->album[0] ? fnv_part(fnv_part(2166136261u, n->artist), n->album) : fnv_part(2166136261u, n->path);
-        snprintf(p, sizeof p, "%s.%08x.jpg", art_made, key);
-        if (!(got = read_file(p, out, cap))) art_made_ask(n->path, key);
-    }
-    return got;
+    unsigned char *got; /* what the pipe brought: the markers, then the JPEG from jpeg_at (-1: not yet) */
+    unsigned got_n, got_cap;
+    int jpeg_at, made; /* made: ffmpeg made it */
+} artw = {.fd = -1, .jpeg_at = -1};
+static const char *card_root;                                                         /* q2_iap_lib.c */
+static int lib_app_album(unsigned rid, char *app, unsigned appcap, char *album, unsigned albumcap); /* q2_iap_lib.c */
+static void iap2_art_done(int found);
+static void iap2_art_slow(void);
+static int lib_write_all(int fd, const void *p, unsigned n); /* q2_iap_lib.c */
+
+static unsigned art_key(const struct iap2_np *n) {
+    return n->album[0] ? fnv_part(fnv_part(2166136261u, n->artist), n->album) : fnv_part(2166136261u, n->path);
 }
 
-static void art_made_ask(const char *path, unsigned key) {
-    if (made.pid || key == made.tried) return;
-    made.tried = made.key = key, made.at = boot_ms();
-    if (made.dst[0]) unlink(made.dst); /* the last song's: one kept, in RAM (/tmp) */
-    snprintf(made.dst, sizeof made.dst, "%s.%08x.jpg", art_made, key);
+/* the art child's SIGTERM: its ffmpeg killed and reaped before it goes */
+static volatile int art_term;
+static void art_on_term(int s) { art_term = s; }
+static void art_nap(long ms) {
+    struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
+    nanosleep(&ts, 0);
+}
+
+/* A file written whole through a temporary name, readable by the app (mode 0644) */
+static int art_write(const char *path, const char *b, unsigned n) {
+    char tmp[220];
+    snprintf(tmp, sizeof tmp, "%s.iap", path);
+    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd < 0) return -1;
+    int ok = write(fd, b, n) == (int)n;
+    close(fd);
+    if (!ok || rename(tmp, path)) return unlink(tmp), -1;
+    return 0;
+}
+
+/* The app's q2app says covers=1: it answers asks */
+static int art_app_answers(const char *app) {
+    char p[300];
+    unsigned char b[1025];
+    snprintf(p, sizeof p, "%s/mnt/mmc/.%s/q2app", card_root ? card_root : "", app);
+    unsigned n = read_file(p, b, sizeof b - 1);
+    b[n] = 0;
+    for (char *l = (char *)b; l && *l; l = strchr(l, '\n'), l = l ? l + 1 : 0)
+        if (!strncmp(l, "covers=1", 8) && (l[8] == '\n' || l[8] == '\r' || !l[8])) return 1;
+    return 0;
+}
+
+/* The ask (the contract coda-rc's covers use, docs/internals.md#car-remote-covers, in a file and key of q2-iap's own):
+ * <ask_dir>/q2-<app>.coverask-iap written whole with a line, "<seq> <px> <album>"; the app answers in its state file,
+ * coverack-iap=<seq> <code> (0 saved), saving the cover where it saves .coverask's. The app named in coda-rc.wake when
+ * its socket is not there (demo starts it). The code, or -1 with no answer in art_ask_ms. The file goes at the end. */
+static int art_ask(const char *app, const char *album, unsigned seq) {
+    char ask[200], st[200], line[96];
+    snprintf(ask, sizeof ask, "%s/q2-%s.coverask-iap", ask_dir, app);
+    snprintf(st, sizeof st, "%s/q2-%s.state", ask_dir, app);
+    int n = snprintf(line, sizeof line, "%u 160 %s\n", seq, album);
+    if (n <= 0 || n >= (int)sizeof line || art_write(ask, line, (unsigned)n)) return -1;
+    char sock[200];
+    snprintf(sock, sizeof sock, "%s/q2-%s.browse.sock", ask_dir, app);
+    if (access(sock, 0)) {
+        char wake[200], who[24];
+        snprintf(wake, sizeof wake, "%s/coda-rc.wake", ask_dir);
+        art_write(wake, who, (unsigned)snprintf(who, sizeof who, "%s\n", app));
+    }
+    int code = -1;
+    for (long waited = 0; code < 0 && waited < art_ask_ms && !art_term; waited += 100) {
+        unsigned char b[1601];
+        unsigned got = read_file(st, b, sizeof b - 1);
+        b[got] = 0;
+        char *v = strstr((char *)b, "coverack-iap=");
+        if (v && v != (char *)b && v[-1] != '\n') v = 0;
+        char *sp = v ? strchr(v, ' ') : 0;
+        if (v && (int)((unsigned)strtoul(v + 13, 0, 10) - seq) >= 0) code = sp ? atoi(sp + 1) : 3;
+        if (code < 0) art_nap(100);
+    }
+    unlink(ask);
+    return code;
+}
+
+/* ffmpeg on the song's own picture, into made (through made.ff): 1 when it made a JPEG. Niced, killed after
+ * ART_MADE_MS or at the child's SIGTERM, and reaped either way. */
+static int art_ffmpeg_run(const char *path, const char *made) {
     char tmp[620];
-    snprintf(tmp, sizeof tmp, "%s.ff", made.dst);
+    snprintf(tmp, sizeof tmp, "%s.ff", made);
     int pid = fork();
     if (pid == 0) {
+        nice(10);
         execl(art_ffmpeg, art_ffmpeg, "-nostdin", "-v", "quiet", "-xerror", "-i", path, "-frames:v", "1", "-vf",
               "scale=160:160:force_original_aspect_ratio=decrease", "-pix_fmt", "yuvj420p", "-q:v", "3", "-f", "mjpeg",
               "-y", tmp, (char *)0);
         _exit(127);
     }
-    made.pid = pid > 0 ? pid : 0;
-    logline("iap2", pid > 0 ? "art: none found; the song's own picture asked of ffmpeg" : "art: ffmpeg not started");
-}
-static void iap2_art_again(void);
-static void art_made_poll(void) {
-    if (!made.pid) return;
-    char tmp[620], msg[160];
-    snprintf(tmp, sizeof tmp, "%s.ff", made.dst);
-    long took = boot_ms() - made.at;
-    if (!kill(made.pid, 0) && took < ART_MADE_MS) return; /* still at it (children are reaped: SIGCHLD ignored) */
-    if (took >= ART_MADE_MS) kill(made.pid, 9);
-    made.pid = 0;
+    if (pid < 0) return 0;
+    long waited = 0;
+    int st = 0, done = 0;
+    while (!(done = waitpid(pid, &st, WNOHANG) == pid) && waited < ART_MADE_MS && !art_term) art_nap(50), waited += 50;
+    if (!done) kill(pid, 9), waitpid(pid, &st, 0);
     unsigned char b[4];
-    int fd = open(tmp, O_RDONLY), ok = fd >= 0 && read(fd, b, sizeof b) == (int)sizeof b && b[0] == 0xff && b[1] == 0xd8;
+    int fd = open(tmp, O_RDONLY | O_CLOEXEC), ok = done && fd >= 0 && read(fd, b, sizeof b) == (int)sizeof b &&
+                                                    b[0] == 0xff && b[1] == 0xd8;
     if (fd >= 0) close(fd);
-    ok = ok && !rename(tmp, made.dst);
+    ok = ok && !rename(tmp, made);
     if (!ok) unlink(tmp);
-    snprintf(msg, sizeof msg, "art: the song's own picture %s in %ld ms", ok ? "made" : "not made", took);
+    char msg[120];
+    snprintf(msg, sizeof msg, "art: the song's own picture %s in %ld ms%s", ok ? "made" : "not made", waited,
+             done ? "" : " (ffmpeg killed)");
     logline("iap2", msg);
-    if (ok) iap2_art_again();
+    return ok;
+}
+
+static void art_child(const struct iap2_np *n, unsigned key, unsigned seq, int out) {
+    static unsigned char b[ART_CAP];
+    char p[600], app[24], album[48];
+    unsigned got = 0;
+    const char *from = "none";
+    signal(SIGTERM, art_on_term), signal(SIGCHLD, SIG_DFL); /* its ffmpeg is waited for */
+    if (n->album[0]) {
+        snprintf(p, sizeof p, "%s/%08x.jpg", art_dir, key);
+        if ((got = read_file(p, b, sizeof b))) from = "Cover Flow's";
+    }
+    if (!got) {
+        snprintf(p, sizeof p, "%s.%08x.jpg", art_made, key);
+        if ((got = read_file(p, b, sizeof b))) from = "made before";
+    }
+    int server = lib_app_album(n->id, app, sizeof app, album, sizeof album);
+    if (!got && server) {
+        snprintf(p, sizeof p, "%s/mnt/mmc/.%s/covers/%s.jpg", card_root ? card_root : "", app, album);
+        if ((got = read_file(p, b, sizeof b))) from = "its app's";
+    }
+    static const char *const names[] = { "cover.jpg", "folder.jpg", "front.jpg" };
+    const char *slash = strrchr(n->path, '/');
+    for (unsigned i = 0; !got && slash && i < 3; ++i) {
+        snprintf(p, sizeof p, "%.*s/%s", (int)(slash - n->path), n->path, names[i]);
+        if ((got = read_file(p, b, sizeof b))) from = "beside the song";
+    }
+    if (!got && server && art_app_answers(app)) {
+        long at = boot_ms();
+        write(out, "w", 1);
+        int code = art_ask(app, album, seq);
+        snprintf(p, sizeof p, "%s/mnt/mmc/.%s/covers/%s.jpg", card_root ? card_root : "", app, album);
+        if (!code && (got = read_file(p, b, sizeof b))) from = "asked of its app";
+        char msg[160];
+        snprintf(msg, sizeof msg, "art: asked %s for %s (ask %u): %s in %ld ms", app, album, seq,
+                 code < 0 ? "no answer" : !code ? "saved" : "none", boot_ms() - at);
+        logline("iap2", msg);
+    }
+    if (!got && n->path[0] && !art_term) {
+        write(out, "w", 1);
+        logline("iap2", "art: none found; the song's own picture asked of ffmpeg");
+        snprintf(p, sizeof p, "%s.%08x.jpg", art_made, key);
+        if (art_ffmpeg_run(n->path, p) && (got = read_file(p, b, sizeof b))) from = "the song's own", write(out, "m", 1);
+    }
+    char msg[120];
+    snprintf(msg, sizeof msg, "art: %u bytes, %s", got, from);
+    logline("iap2", msg);
+    if (write(out, "c", 1) == 1) lib_write_all(out, b, got);
+    _exit(0);
+}
+
+/* The cover's child for this song started, the last one's ended (it kills its ffmpeg) */
+static void art_start_child(const struct iap2_np *n, unsigned key) {
+    int fds[2];
+    if (artw.pid > 0) kill(artw.pid, SIGTERM);
+    if (artw.fd >= 0) close(artw.fd);
+    artw.pid = 0, artw.fd = -1, artw.got_n = 0, artw.jpeg_at = -1, artw.made = 0, artw.key = key, artw.state = 3;
+    artw.at = boot_ms();
+    if (!artw.seq) artw.seq = (unsigned)boot_ms() | 1; /* above any seq an earlier q2-iap gave since boot */
+    unsigned seq = artw.seq++;
+    if (pipe(fds)) return;
+    int pid = fork();
+    if (pid == 0) {
+        signal(SIGINT, SIG_DFL), signal(SIGHUP, SIG_DFL);
+        close(fds[0]);
+        art_child(n, key, seq, fds[1]);
+    }
+    close(fds[1]);
+    if (pid < 0) {
+        close(fds[0]);
+        return;
+    }
+    fcntl(fds[0], F_SETFL, O_NONBLOCK);
+    artw.pid = pid, artw.fd = fds[0], artw.state = 1;
+}
+
+/* The host's art_pending: 1 while the song's quick sources are still being looked at (its child started here if it
+ * is a new one), so Now Playing can wait for its cover. */
+static int io_art_pending(const struct iap2_np *n) {
+    unsigned key = art_key(n);
+    if (artw.key != key || !artw.state) art_start_child(n, key);
+    return artw.state == 1;
+}
+
+/* The host's artwork: the song's cover as the child found it, or 0 (none, or not yet) */
+static unsigned io_artwork(const struct iap2_np *n, unsigned char *out, unsigned cap) {
+    if (artw.state != 3 || artw.key != art_key(n) || artw.jpeg_at < 0) return 0;
+    unsigned len = artw.got_n - (unsigned)artw.jpeg_at;
+    if (!len || len > cap) return 0;
+    memcpy(out, artw.got + artw.jpeg_at, len);
+    return len;
+}
+
+/* The child's bytes taken in, its markers read as they come; at its end Now Playing is told (q2_iap2.c iap2_art_done).
+ * Every pass of the loop. */
+static void art_poll(void) {
+    if (artw.fd < 0) return;
+    for (;;) {
+        if (artw.got_n + 4096 > artw.got_cap) {
+            unsigned char *w = realloc(artw.got, artw.got_cap + ART_CAP + 4096);
+            if (!w) break;
+            artw.got = w, artw.got_cap += ART_CAP + 4096;
+        }
+        int r = (int)read(artw.fd, artw.got + artw.got_n, artw.got_cap - artw.got_n);
+        if (r <= 0) {
+            if (r < 0 && (ERRNO == EAGAIN || ERRNO == EINTR)) return;
+            break;
+        }
+        for (unsigned i = artw.got_n; artw.jpeg_at < 0 && i < artw.got_n + (unsigned)r; ++i) {
+            if (artw.got[i] == 'w' && artw.state == 1) artw.state = 2, iap2_art_slow();
+            else if (artw.got[i] == 'm') artw.made = 1;
+            else if (artw.got[i] == 'c') artw.jpeg_at = (int)i + 1;
+        }
+        artw.got_n += (unsigned)r;
+    }
+    close(artw.fd), artw.fd = -1, artw.pid = 0, artw.state = 3;
+    if (artw.made && artw.made_key && artw.made_key != artw.key) { /* the last album's made cover goes: one kept, in RAM */
+        char p[600];
+        snprintf(p, sizeof p, "%s.%08x.jpg", art_made, artw.made_key);
+        unlink(p);
+    }
+    if (artw.made) artw.made_key = artw.key;
+    iap2_art_done(artw.jpeg_at >= 0 && (unsigned)artw.jpeg_at < artw.got_n);
 }
 
 /* ---- Car Audio in the image (--state; docs/iphone-mode.md#car-audio-in-the-image) ----
@@ -889,7 +1071,7 @@ static void io_link_lost(void) {
         loop_step(was);                                                                                               \
     }
 STEPPED(int, io_now_playing, "the Now Playing file", (struct iap2_np * n), (n))
-STEPPED(unsigned, io_artwork, "the cover's read", (const struct iap2_np *n, u8 *out, unsigned cap), (n, out, cap))
+STEPPED(int, io_art_pending, "the cover's child", (const struct iap2_np *n), (n))
 STEPPED(int, lib_load, "the library's read", (void), ()) /* its child's start, and below the tables' hand-over */
 STEPPED(int, lib_ready, "the library's read", (void), ())
 STEPPED_VOID(lib_saved, "the library's record", (void), ())
@@ -901,7 +1083,7 @@ STEPPED(int, lib_queue, "the shim's queue file", (unsigned *rids, unsigned cap),
 
 static const struct iap2_host io = { io_send,           boot_ms,           io_log,        io_now_playing_stepped,
                                      "Q2 Muse",         uuid,              library_id,    io_audio_stepped,
-                                     io_command_stepped, io_artwork_stepped, &lib_t,      lib_load_stepped,
+                                     io_command_stepped, io_artwork,    io_art_pending_stepped, &lib_t,  lib_load_stepped,
                                      lib_ready_stepped, lib_saved_stepped, lib_play_stepped,  lib_queue_stepped,
                                      io_backlog,        io_link_lost };
 
@@ -1119,6 +1301,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(o, "--relink-file")) relink_file = v, ++a;
         else if (!strcmp(o, "--art-made")) art_made = v, ++a;
         else if (!strcmp(o, "--ffmpeg")) art_ffmpeg = v, ++a;
+        else if (!strcmp(o, "--ask-dir")) ask_dir = v, ++a;
+        else if (!strcmp(o, "--art-ask-ms")) art_ask_ms = atoi(v), ++a;
         else if (!strcmp(o, "--cmd-file")) cmd_file = v, ++a;
         else if (!strcmp(o, "--art-dir")) art_dir = v, ++a;
         else if (!strcmp(o, "--state")) state_file = v, ++a;
@@ -1218,7 +1402,7 @@ int main(int argc, char **argv) {
         if (iap2_mode) iap2_tick();
         long now = boot_ms();
         loop_step("the cover's making");
-        if (iap2_mode) art_made_poll();
+        if (iap2_mode) art_poll();
         loop_step("the library's read");
         if (iap2_mode) lib_load_poll(); /* its child's bytes, whether or not the car still waits for them */
         loop_step("the host's verdict");
@@ -1250,6 +1434,7 @@ int main(int argc, char **argv) {
     if (iap2_mode) unlink(car_file); /* the player back to demo's output */
     if (writer_pid > 0) kill(writer_pid, SIGTERM);
     if (lload.pid > 0) kill(lload.pid, SIGTERM);
+    if (artw.pid > 0) kill(artw.pid, SIGTERM); /* it kills and reaps its ffmpeg */
     if (logfd != 2) fsync(logfd);
     for (int k = 0; k < ninst; ++k) close(in[k].ep0);
     return rc;

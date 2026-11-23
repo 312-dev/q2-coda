@@ -91,6 +91,7 @@ struct iap2_host {
     void (*audio)(int on);                         /* the car wants USB audio (1) or no longer (0) */
     void (*command)(const char *verb);             /* a button or a seek: the shim's verbs (coda_rc_shim.c cr_command) */
     unsigned (*artwork)(const struct iap2_np *np, u8 *out, unsigned cap); /* the song's cover, a JPEG, or 0 */
+    int (*art_pending)(const struct iap2_np *np); /* 1 while its cover is still looked for, quickly (q2_iap.c) */
     struct iap2_library *lib;   /* the library, filled once lib_load's read is over */
     int (*lib_load)(void);      /* its read begun, off the loop: 0, or -1 with none to send */
     int (*lib_ready)(void);     /* 1 lib filled, 2 the server's catalogue unreadable, -1 none to send, 0 reading */
@@ -1631,9 +1632,21 @@ static void ql_announce(void) {
     file_send(ql_id, 0x04, setup, sizeof setup);
 }
 
-/* A cover made since Now Playing went (q2_iap.c art_made_poll): all of it again, a new transfer with it. */
+/* A cover found since Now Playing went (q2_iap.c art_poll): all of it again, a new transfer with it. */
 static void iap2_art_again(void) {
     if (now_playing) np_sent = 0, np_at = 0;
+}
+
+/* A new song's Now Playing waits for its cover's quick sources (Cover Flow's, the app's, one beside it: q2_iap.c
+ * art_child), ART_HOLD_MS at most, so its first update names the cover; past that, or once the child goes on to an
+ * ask or ffmpeg (iap2_art_slow), it goes with an empty one, and the cover follows (iap2_art_done). */
+#define ART_HOLD_MS 1000
+static long art_hold_at; /* since when Now Playing waits, 0 not */
+static void iap2_art_slow(void) {
+    if (art_hold_at) np_at = 0; /* at the next tick, with no cover yet */
+}
+static void iap2_art_done(int found) {
+    if (art_hold_at || found) iap2_art_again();
 }
 
 static void lib_reset(void) { ls.phase = LIB_IDLE, ls.x_state = 0, ql_going = 0, ql_seen_at = 0; }
@@ -1646,6 +1659,14 @@ static void poll_now_playing(long now) {
     if (!H->now_playing || !H->now_playing(&n)) n.state = 0;
     int changed = !np_sent || np_hash(&n) != np_hash(&np_last) || n.state != np_last.state ||
                   n.len_ms != np_last.len_ms || n.live != np_last.live;
+    if (changed && (media_mask & 1u << MI_ARTWORK) && !n.live && H->art_pending && H->art_pending(&n)) {
+        if (!art_hold_at) art_hold_at = now | 1;
+        if (now - art_hold_at < ART_HOLD_MS) {
+            np_at = now - 450; /* looked at again in 50 ms */
+            return;
+        }
+    }
+    art_hold_at = 0;
     if (changed) send_now_playing(&n, 1);
     else if (!n.live && (n.state == 1 || n.pos_ms != np_last.pos_ms)) {
         msg_start(0x5001), group_start(1), param_u32(PB_POSITION, n.pos_ms), group_end(), msg_send();

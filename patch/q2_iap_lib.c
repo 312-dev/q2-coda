@@ -546,12 +546,11 @@ static int lib_ready(void) {
     return lload.ready;
 }
 
-/* A server song's cover as its app keeps it (catalogue.c catalogue_cover, what the Q2's own Now Playing shows): the
- * song's server row (its rid, from 0x40000000, is servermeta's id) has the path /mnt/mmc/.<app>/cat/<album id>/...,
- * and the cover is /mnt/mmc/.<app>/covers/<album id>.jpg, a baseline JPEG of 160 px at most (q2-subsonic's
- * covers.go). Its path into out, 1; 0 for a card song, or a row with no such path. One row by its key, as the song
- * changes. */
-static int lib_app_cover(unsigned rid, char *out, unsigned cap) {
+/* A server song's album as its app keeps it (catalogue.c catalogue_cover, what the Q2's own Now Playing shows): the
+ * song's server row (its rid, from 0x40000000, is servermeta's id) has the path /mnt/mmc/.<app>/cat/<album id>/...;
+ * the app's id (the folder's name without its dot) into app and the album's id into album, 1; 0 for a card song, or a
+ * row with no such path. One row by its key. Read in the cover's child (q2_iap.c art_child), never in the loop. */
+static int lib_app_album(unsigned rid, char *app, unsigned appcap, char *album, unsigned albumcap) {
     sqlite3 *db = 0;
     sqlite3_stmt *st = 0;
     char sql[80];
@@ -562,9 +561,11 @@ static int lib_app_cover(unsigned rid, char *out, unsigned cap) {
         if (sqlite3_prepare_v2(db, sql, -1, &st, 0) == 0 && sqlite3_step(st) == SQLITE_ROW) {
             const char *u = (const char *)sqlite3_column_text(st, 0), *c = u ? strstr(u, "/cat/") : 0;
             const char *e = c ? strchr(c + 5, '/') : 0;
-            if (e && e > c + 5 && !strncmp(u, "/mnt/mmc/.", 10) && !memchr(u + 10, '/', (unsigned)(c - u - 10))) {
-                int n = snprintf(out, cap, "%s%.*s/covers/%.*s.jpg", card_root, (int)(c - u), u, (int)(e - c - 5), c + 5);
-                ok = n > 0 && (unsigned)n < cap;
+            if (e && e > c + 5 && !strncmp(u, "/mnt/mmc/.", 10) && c > u + 10 && !memchr(u + 10, '/', (unsigned)(c - u - 10)) &&
+                (unsigned)(c - u - 10) < appcap && (unsigned)(e - c - 5) < albumcap && !memchr(c + 5, ' ', (unsigned)(e - c - 5))) {
+                snprintf(app, appcap, "%.*s", (int)(c - u - 10), u + 10);
+                snprintf(album, albumcap, "%.*s", (int)(e - c - 5), c + 5);
+                ok = 1;
             }
         }
         sqlite3_finalize(st);
