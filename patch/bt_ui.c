@@ -1341,6 +1341,7 @@ void bt_ui_poll(void) {
     if (quality.view && quality.coding != g_btcoding) quality_rates(quality.view);
     if (bt.view) page_poll(now);
     guest_ui_poll();
+    bt_pair_poll(); /* a device pairing: its card (bt_pair.c) */
     bt_detail_poll();
     if (now - bt.link_poll_at >= BT_POLL_MS) {
         bt.link_poll_at = now;

@@ -958,20 +958,27 @@ as its callers move onto it.
 
 ### Pairing
 
-A phone pairing with the Q2 asks in one form, whoever asks: Car Remote's app or a Guest Play guest
-(`patch/pair_prompt.c` `pair_prompt`, the confirmation card's consequential kind; the user's ruling, 2026-11-16).
+A phone pairing with the Q2 asks in one form, whoever asks: Car Remote's app, a Guest Play guest or any device
+pairing over Bluetooth by numeric comparison (`patch/pair_prompt.c` `pair_prompt`, the confirmation card's
+consequential kind; the user's ruling, 2026-11-16; the Bluetooth device's card `patch/bt_pair.c`,
+[internals](internals.md#bluetooth-pairing-card)).
 
 - The phone glyph (Phosphor `device-mobile`, 28 px, the accent) over the title "Pair with Pixel 10 Pro?", the phone
   as it names itself, scrolling when long; never cut short in the status row. A card the glyph would take past the
   glass's foot (y 44 to 302: a guest's, with two body lines and three answers) goes without it and shows whole.
 - What to do with the code, in the body: Car Remote's "Enter this code in Q2 Muse Remote"; a guest's "Wants to play
-  music. Check it's on Alex's phone."
+  music. Check it's on Alex's phone."; a Bluetooth device's "Make sure both codes match". A Bluetooth device whose
+  name BlueZ does not have yet is "Pair with this device?" over "Unknown device" and its address, and the card
+  changes to the name in place when it comes; one the request does not identify is "Unknown device" alone.
 - The code large, Inter Medium 30, as two groups of three ("242 610").
-- The answers: Car Remote's Cancel alone; a guest's Allow Once, Always Allow, Decline. It opens on the first.
-- The pairing's time as the card's timeout: Car Remote's 2 minutes, a guest's 30 s, a bar along its foot.
+- The answers: Car Remote's Cancel alone; a guest's Allow Once, Always Allow, Decline; a Bluetooth device's Cancel,
+  Pair (the consequential kind's order: a device paired by mistake keeps its access). It opens on the first.
+- The pairing's time as the card's timeout: Car Remote's 2 minutes, a guest's 30 s, a Bluetooth device's 60 s (BlueZ's
+  own wait for an answer), a bar along its foot. A Bluetooth device's card also closes the moment the device gives
+  up, cancels or goes; it never answers Pair by itself.
 - Its end, Car Remote's: the icon toast "Pixel 10 Pro paired" (Positive's check-circle) or "Pairing failed" (`carremote_page.c` `carremote_paired`).
-- ponytail: the digits are Inter's own, proportional; tabular digits need Inter's `tnum`, which the text drawing does
-  not apply.
+- The digits are tabular: the build maps Inter's 0 to 9 to its `.tf` figures (`tools/build.py` `subset_font`), so
+  every code takes the same width.
 
 ### Focus ring
 
