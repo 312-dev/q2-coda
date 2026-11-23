@@ -74,6 +74,9 @@ python3 tools/build.py 'Q2 Firmware V1.36.zip' --out /tmp/q2-build       # relea
 python3 test/patch.py /tmp/q2-dev        # the UI payload (about 4.5 minutes, one core)
 python3 test/playback.py /tmp/q2-dev     # queue traversal and the wheel's ticks
 
+# The bundled Subsonic app, run for real against a fake server and the firmware's C (no build; Go and ~/repos/q2-subsonic)
+python3 test/subsonic_seam.py            # the pinned app; --app DIR for a checkout, --commit SHA (docs/building.md#seam-test)
+
 ./tools/format.sh                        # clang-format and prettier, before a pull request; --check changes nothing
 ```
 

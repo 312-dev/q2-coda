@@ -268,17 +268,23 @@ def test_scripts_are_run_the_way_their_parsers_take_them():
 
 
 def test_a_script_the_gate_cannot_run_is_skipped_with_its_reason(capsys, monkeypatch):
-    for path in ('test/coda_rc_e2e.py', 'test/server_catalogue.py', 'test/suite_source.py', 'test/module_mips.py'):
+    for path in ('test/server_catalogue.py', 'test/suite_source.py', 'test/module_mips.py'):
         assert gate.other_suite(path, 'python3') is None, path
         assert gate.SCRIPTS[path], path  # the reason
     plan = affected.Plan()
-    plan.other.add('test/coda_rc_e2e.py')
+    plan.other.add('test/server_catalogue.py')
     calls = handed(monkeypatch)
     assert affected.run(plan, '/b', 'python3') == 0
     assert calls == [] and 'skipped' in capsys.readouterr().out
-    assert gate.suites_for({'unit': [], 'fw': [], 'patch': [], 'other': ['test/coda_rc_e2e.py']}, None, 'python3',
+    assert gate.suites_for({'unit': [], 'fw': [], 'patch': [], 'other': ['test/server_catalogue.py']}, None, 'python3',
                            pathlib.Path('/nowhere')) == {}
-    assert 'test/coda_rc_e2e.py' in capsys.readouterr().out
+    assert 'test/server_catalogue.py' in capsys.readouterr().out
+
+
+def test_car_remote_end_to_end_runs_on_a_pooled_emulator_with_the_build():
+    """test/coda_rc_e2e.py leases its own emulator (--pool), so the gate runs it on the plan's build, under q2-heavy."""
+    suite = gate.other_suite('test/coda_rc_e2e.py', 'python3')
+    assert suite.argv == ['python3', 'test/coda_rc_e2e.py', '--pool', '{build}'] and suite.needs_build and suite.heavy
 
 
 def test_a_stock_script_is_run_on_the_builds_stock_files(monkeypatch, tmp_path):

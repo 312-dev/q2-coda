@@ -214,7 +214,7 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/bluetoothd.py': ['{build}'],
     'test/build.py': ['--build', '{build}'],
     'test/chapters.py': [],  # --stock-root and --qemu go together and are optional: its parser refuses BUILD
-    'test/coda_rc_e2e.py': 'needs a q2-emu copy to boot (--emu DIR, a card with CARREMOTE=1) and a port; run it by hand',
+    'test/coda_rc_e2e.py': ['--pool', '{build}'],  # a pooled emulator, Car Remote on for the lease, on its own port
     'test/coverflow.py': [],
     'test/coverflow_position.py': [],
     'test/fmrx.py': [],  # the tuner's receiver against the prototype's figures; --mips OUT builds the Q2's bench
