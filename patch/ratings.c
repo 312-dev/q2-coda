@@ -13,6 +13,8 @@ static struct {
     unsigned rate_gen; /* catalogue_fav_gen when rate_row_heart last read My Fav */
     unsigned rate_tick;
     void *rt_menu;
+    unsigned used[2]; /* each table's slots not free (ratings and RATE_GONE marks): a walk stops there */
+    unsigned cap[2];  /* each table's words: RATE_MIN, doubled as it fills, up to RATE_SLOTS */
 } ra __attribute__((section(".scratch")));
 
 /* Ratings (docs/internals.md#ratings): 0 to 5 stars a song, kept here by listen_key, its low three
@@ -28,25 +30,105 @@ static struct {
  * Fav toggled for the playing track (manage_myfav), and the heart's image with it. */
 #define FAV_CLICK ((int (*)(void *, void *))0x53c968)
 
-/* The songs' table, or with album the albums'. */
-static int rate_io(int album, int write) {
-    const char *f = album ? ALBUM_RATINGS_FILE : RATINGS_FILE;
-    const char *tmp = album ? ALBUM_RATINGS_FILE ".tmp" : RATINGS_FILE ".tmp";
-    return blob_io(f, tmp, album ? ra.album_rates : ra.rates, RATE_SLOTS * sizeof *ra.rates, write);
+/* A slot's place: a key's slots are probed from its hash's (open addressing), so a lookup reads a
+ * few words, not the whole table. RATE_GONE marks a rating taken out, which a probe passes over
+ * and an insert reuses; it reads as no rating (7). A table is RATE_MIN words to start (16 KB, a
+ * firmware before this one's size) and doubles, up to RATE_SLOTS, whenever its slots in use would
+ * pass three quarters of it, so probes stay short and a small library pays for a small table. Its
+ * last two words are no slots: a file laid out this way says so (RATE_LAYOUT) and keeps its slots
+ * in use (<< 3, then 6), so it is read as it is; both read as malformed slots (6) to a firmware
+ * from before. */
+#define RATE_GONE 7u
+#define RATE_MIN 4096
+#define RATE_LAYOUT 0x48415356u /* "VSAH", its low bits 6 */
+static unsigned probe(int album) { return ra.cap[album] - 2; } /* the slots */
+static unsigned rate_room(unsigned cap) { return (cap - 2) / 4 * 3; } /* slots in use at most */
+static unsigned rate_home(unsigned key, unsigned m) { return ((key >> 3) * 2654435761u) % m; }
+/* v at its key's place in t (m slots), over a slot of the same key; *used counts a new one. */
+static void rate_place(unsigned *t, unsigned m, unsigned v, unsigned *used) {
+    unsigned k = rate_home(v, m);
+    for (unsigned n = 0; n < m && t[k] && (t[k] ^ v) >= 8; n++) k = (k + 1) % m;
+    *used += !t[k];
+    t[k] = v; /* a key twice in a damaged file: its later slot's, as rate_all reads it */
 }
-static unsigned *rates(int album) {
-    unsigned **t = album ? &ra.album_rates : &ra.rates;
-    if (!*t && (*t = calloc(RATE_SLOTS, sizeof **t))) rate_io(album, 0);
-    return *t;
+/* t's ratings (n words, marks and malformed slots passed over) in a new table of cap words, the
+ * album's from now on; 0 with no memory. */
+static unsigned *rate_layout(int album, const unsigned *t, unsigned n, unsigned cap) {
+    unsigned *u = calloc(cap, sizeof *u), used = 0;
+    for (unsigned i = 0; u && i < n && used < rate_room(cap); i++)
+        if ((t[i] & 7) && (t[i] & 7) <= 5) rate_place(u, cap - 2, t[i], &used);
+    if (u) ra.cap[album] = cap, ra.used[album] = used;
+    return u;
 }
 
-/* key's slot; with free, the first free one when it has none; -1 when neither. */
+/* The songs' table, or with album the albums', written whole (its cap words). */
+static int rate_io(int album) {
+    const char *f = album ? ALBUM_RATINGS_FILE : RATINGS_FILE;
+    const char *tmp = album ? ALBUM_RATINGS_FILE ".tmp" : RATINGS_FILE ".tmp";
+    unsigned *t = album ? ra.album_rates : ra.rates, m = probe(album);
+    t[m] = RATE_LAYOUT, t[m + 1] = ra.used[album] << 3 | 6;
+    return blob_io(f, tmp, t, ra.cap[album] * sizeof *t, 1);
+}
+/* The table, read at its first use: a file this firmware wrote as it is, an older one (its
+ * ratings from the first slot, 16 KB) laid out in a table large enough for what it holds. */
+static unsigned *rates(int album) {
+    unsigned **t = album ? &ra.album_rates : &ra.rates;
+    if (*t) return *t;
+    const char *f = album ? ALBUM_RATINGS_FILE : RATINGS_FILE;
+    /* read in RATE_MIN words, then twice the room while the file goes on (up to RATE_SLOTS),
+     * unless what was read ends in a layout mark: a laid-out file is that long */
+    unsigned n = 0, room = RATE_MIN, rated = 0, cap = RATE_MIN;
+    unsigned *in = calloc(room, sizeof *in);
+    void *file = in ? fopen(f, "rb") : 0;
+    while (file && (n += (unsigned)fread(in + n, sizeof *in, room - n, file)) == room &&
+           room < RATE_SLOTS && in[room - 2] != RATE_LAYOUT) {
+        unsigned *more = calloc(room * 2, sizeof *more);
+        if (!more) break;
+        memcpy(more, in, room * sizeof *in);
+        free(in), in = more, room *= 2;
+    }
+    if (file) fclose(file);
+    if (!in) return 0;
+    if (n == room && in[n - 2] == RATE_LAYOUT) { /* laid out already */
+        ra.cap[album] = n, ra.used[album] = in[n - 1] >> 3;
+        return *t = in;
+    }
+    for (unsigned i = 0; i < n; i++) rated += (in[i] & 7) && (in[i] & 7) <= 5;
+    while (cap < RATE_SLOTS && rate_room(cap) < rated + 1) cap *= 2;
+    /* an older file kept once as it was (RATINGS_FILE ".v1"), before the first write in this
+     * layout replaces it: an older firmware, or a fault in this one, can't lose those ratings */
+    char v1[64], v1_tmp[72];
+    tk_snprintf(v1, sizeof v1, "%s.v1", f), tk_snprintf(v1_tmp, sizeof v1_tmp, "%s.tmp", v1);
+    if (rated && access(v1, 0)) blob_io(v1, v1_tmp, in, n * sizeof *in, 1);
+    *t = rate_layout(album, in, n, cap);
+    free(in);
+    return *t;
+}
+/* The table twice its size, its ratings laid out again; 0 when it is RATE_SLOTS or no memory. */
+static int rate_grow(int album) {
+    unsigned **t = album ? &ra.album_rates : &ra.rates, *u;
+    if (ra.cap[album] >= RATE_SLOTS || !(u = rate_layout(album, *t, probe(album), ra.cap[album] * 2)))
+        return 0;
+    free(*t), *t = u;
+    return 1;
+}
+
+/* key's slot; with free, the first free one on its probe when it has none (the table grown first
+ * when a new slot would fill it past its room); -1 when neither. */
 static int rate_slot(int album, unsigned key, int free) {
-    unsigned *t = rates(album);
+    unsigned *t = rates(album), m = t ? probe(album) : 0, k = rate_home(key, m | !m);
     int empty = -1;
-    for (int i = 0; t && i < RATE_SLOTS; i++) {
-        if (t[i] && (t[i] ^ key) < 8) return i;
-        if (!t[i] && empty < 0) empty = i;
+    for (unsigned n = 0; t && n < m; n++, k = (k + 1) % m) {
+        if (!t[k]) { /* a mark's slot reused first; a new one only within the table's room */
+            if (!free) return -1;
+            if (empty >= 0) return empty;
+            if (ra.used[album] < rate_room(ra.cap[album])) return (int)k;
+            return rate_grow(album) ? rate_slot(album, key, free) : -1;
+        }
+        if (t[k] == RATE_GONE) {
+            if (empty < 0) empty = (int)k;
+        } else if ((t[k] ^ key) < 8)
+            return (int)k;
     }
     return free ? empty : -1;
 }
@@ -58,19 +140,40 @@ int rate_kept(int album, unsigned key) {
     return n <= 5 ? n : 0;
 }
 
+/* rate_hold's: the songs' table changed while held, written by rate_release. */
+static int rate_held __attribute__((section(".scratch")));
+
 /* Keeps n for key, 1 to 5, or none for 0. 1 when saved, 0 when the table is full, -1 when the file
- * was not written (the slot then as it was). */
+ * was not written (the slot then as it was). Between rate_hold and rate_release a song's is kept
+ * in the table only, and saved once by rate_release. */
 int rate_keep(int album, unsigned key, int n) {
     int some = n > 0 && n <= 5, i = rate_slot(album, key, some);
     if (i < 0) return !some;
     unsigned *t = rates(album), old = t[i];
-    t[i] = some ? (key & ~7u) | (unsigned)n : 0;
-    if (rate_io(album, 1)) {
+    t[i] = some ? (key & ~7u) | (unsigned)n : RATE_GONE;
+    ra.used[album] += !old;
+    if (!album && rate_held) {
+        rate_held = 2;
+        return 1;
+    }
+    if (rate_io(album)) {
         ratings_copy_due();
         return 1;
     }
     t[i] = old;
     return -1;
+}
+
+/* A run of songs' rate_keep (catalogue.c's ratings_in: a server's lines) written once, at
+ * rate_release: 1 when it was, or nothing changed. */
+void rate_hold(void) { rate_held = 1; }
+int rate_release(void) {
+    int changed = rate_held == 2;
+    rate_held = 0;
+    if (!changed) return 1;
+    if (!rate_io(0)) return 0;
+    ratings_copy_due();
+    return 1;
 }
 
 /* Report only failures from rate_keep. */
@@ -292,10 +395,10 @@ static void rate_all(void *songs, unsigned char *h) {
     int nf, kept = 0;
     void *favs = staged(fav_songs, 0, &nf);
     unsigned nfav = deque_size(favs), n = deque_size(songs), *t = rates(0);
-    rated_t *keys = calloc(nfav + RATE_SLOTS + 1, sizeof *keys);
+    rated_t *keys = calloc(nfav + ra.used[0] + 1, sizeof *keys);
     for (unsigned i = 0; keys && i < nfav; i++)
         keys[i] = (rated_t){ rate_song_key(deque_at(favs, i)) | 7, i }; /* a copy: its row */
-    for (int i = 0; keys && t && i < RATE_SLOTS; i++)
+    for (int i = 0; keys && t && i < (int)probe(0) && (unsigned)kept < ra.used[0]; i++)
         if (t[i]) keys[nfav + kept] = (rated_t){ t[i], nfav + kept }, kept++;
     unsigned m = nfav + (unsigned)kept;
     if (keys) qsort(keys, m, sizeof *keys, rated_order);
@@ -423,8 +526,11 @@ int ratings_menu(void *ctx, void *event) {
  * thread (stock's shared connection waits only 500 ms for a reader, so a worker's longer read lock
  * could still make stock's own My Fav writes fail), and writes the card once at the end, only if
  * the file would change; the longest copy so far is kept as .1, the one way back from a lost table.
+ * The rows are My Fav's, then the card's songtable, then a signed-in server's servertable (cat,
+ * catalogue.c), whose songs' stars are kept under their row's fileurl (rate_song_key).
  * ponytail: every row against every rated one still to find (rc_take); a rating whose song or
- * album has left the library has no name to write, and stays out until it is back. */
+ * album is in none of the three (deleted from the card, or a server signed out) has no name to
+ * write, and stays out until it is back. */
 #define RC_FILE "/mnt/mmc/.ratings.tsv"
 #define RC_HEADER                                                                                  \
     "#song\tstars\tliked\tpath\tcue_start\n#album\thearts\tname\talbum_artist\tfolder\n"
@@ -552,8 +658,8 @@ static void rc_write(void) {
 
 /* The rated of table album, valid stars or hearts only (1 to 5), for rc_take. */
 static unsigned *rc_rated(int album, unsigned *n) {
-    unsigned *t = rates(album), *c = t ? calloc(RATE_SLOTS, sizeof *c) : (unsigned *)0;
-    for (unsigned i = 0; c && i < RATE_SLOTS; i++)
+    unsigned *t = rates(album), *c = t ? calloc(ra.used[album] + 1, sizeof *c) : (unsigned *)0;
+    for (unsigned i = 0, seen = 0; c && i < probe(album) && seen < ra.used[album]; seen += !!t[i++])
         if ((t[i] & 7) && (t[i] & 7) <= 5u) c[(*n)++] = t[i];
     return c;
 }
@@ -568,6 +674,7 @@ static void rc_start(void) {
         rc_end();
         return;
     }
+    catalogue_attach_db(rc.db); /* a signed-in server's songs, as cat, while its index is built */
     rc.len = (unsigned)tk_snprintf(rc.out, RC_LINE, RC_HEADER);
     I(unknown, REC_ID) = -1; /* the Unknown Album card, which no row is */
     if ((hearts = rc_take(rc.album, &rc.albums, album_id(unknown))))
@@ -582,6 +689,7 @@ static int rc_exists(void *ctx, int n, char **v, char **c) {
 /* A page of the pass, then its end. A failed read or write stays as it was, for the next change or
  * boot; a scan rewriting the library ends the pass, and library_gen starts another after it. */
 static void rc_page(void) {
+    static const char *const tables[] = { "myfav", "songtable", "cat.servertable" };
     char sql[128];
     if (library_scanning()) {
         rc_end();
@@ -590,18 +698,23 @@ static void rc_page(void) {
     if (time_now_ms() - st.last_input < RC_QUIET_MS) return;
     tk_snprintf(sql, sizeof sql,
                 "select id,fileurl,time,album,albumsonger from %s where id>%d order by id limit %d",
-                rc.table ? "songtable" : "myfav", rc.last, RC_PAGE);
+                tables[rc.table], rc.last, RC_PAGE);
     rc.rows = 0;
     if (sqlite3_exec(rc.db, sql, rc_row, 0, 0)) {
         rc_end();
         return;
     }
     if (rc.rows == RC_PAGE && (!rc.table || rc.songs || rc.albums)) return;
-    if (!rc.table++) {
+    /* The next table that is there, while ratings are still to find. No songtable before the first
+     * scan; no cat while no server is signed in (its query fails): My Fav's alone, still worth a
+     * copy. */
+    while (++rc.table < 3 && (rc.table == 1 || rc.songs || rc.albums)) {
         rc.last = rc.rows = 0;
-        /* no songtable before the first scan: My Fav's alone, still worth a copy */
-        if (sqlite3_exec(rc.db, "select 1 from sqlite_master where name='songtable'", rc_exists, 0,
-                         0)) {
+        if (sqlite3_exec(rc.db,
+                         rc.table == 1 ? "select 1 from sqlite_master where name='songtable'"
+                                       : "select 1 from cat.sqlite_master where name='servertable'",
+                         rc_exists, 0, 0) &&
+            rc.table == 1) {
             rc_end();
             return;
         }

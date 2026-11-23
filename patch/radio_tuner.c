@@ -1169,16 +1169,7 @@ static int keyup(void *ctx, void *event) { return return_key(event, &rt->leave, 
 static void audio_halt(void) {
     if (!rt->audio) return;
     rt_send("q");
-    int status, done;
-    unsigned start = time_now_ms();
-    while (!(done = waitpid(rt->audio, &status, 1)) && time_now_ms() - start < QUIT_MS)
-        sleep_ms(20);
-    if (!done) {
-        char kill[24]; /* demo imports no kill */
-        tk_snprintf(kill, sizeof kill, "kill -9 %d", rt->audio);
-        system(kill);
-        waitpid(rt->audio, &status, 0);
-    }
+    child_quit(rt->audio, QUIT_MS); /* radio.c */
     rt->audio = 0;
 }
 

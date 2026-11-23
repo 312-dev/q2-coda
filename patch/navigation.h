@@ -1031,6 +1031,8 @@ void list_reach_paint(void *bar, void *win, void *canvas); /* row_paint.c: the s
 void list_reach_due(void); /* row_paint.c: before a frame, the band again if its list moved */
 void *coverflow_home_view(void);
 int rate_keep(int album, unsigned key, int n);
+void rate_hold(void);  /* rate_keep's songs held in the table, until */
+int rate_release(void); /* written once */
 int rate_kept(int album, unsigned key);
 unsigned rate_song_key(void *r); /* a server song's offline copy: its row's */
 int rate_fav(void *r);           /* My Fav, a server song's offline copy by its row */
@@ -1296,7 +1298,8 @@ int bt_vol_event_take(void), bt_vol_event_live(void), bt_vol_event_connect(void)
     bt_vol_event_wait(void);
 /* card_watch.c: what the card holds, as a generation that moves on each change; 0 without the watch
  * (docs/internals.md#card-watch) */
-unsigned card_watch_gen(void);
+unsigned card_watch_gen(void), card_watch_seen(void);
+int card_mounted_now(void); /* system.c: /proc/mounts read now; card_mounted follows the watch */
 /* player_push.c: q2player's status push, waited on by the player polls (docs/internals.md#player-status-push) */
 int player_push_wait(unsigned us), player_push_live(void);
 unsigned player_push_seq(void);

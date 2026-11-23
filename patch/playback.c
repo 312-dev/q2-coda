@@ -5,6 +5,7 @@
 #include "offsets.inc"
 #include "peq.h"
 #include "card_store.h"
+#include "stream_path.h"
 #include "stock.h"
 #define M(a) (*(volatile int *)(a))
 /* On the card (card_store.c, docs/internals.md#where-q2-muse-writes): a queue's songs are there too.
@@ -1915,28 +1916,44 @@ int ringnav_memory(void *out) {
         p += len;
     }
     if (ok && p != buf + h.size) ok = 0;
-    void *rows = 0, *q = 0, *all = 0;
+    void *q = 0, *all = 0;
     if (ok) {
         q = _create_deque("stSongInfo");
         deque_init(q);
-        int count;
-        all = staged(library, 0, &count);
-        unsigned n = 0;
-        resume_row *lookup = calloc(deque_size(all), sizeof *lookup);
-        if (!lookup && deque_size(all)) ok = 0;
-        for (unsigned i = 0; ok && i < deque_size(all); ++i) {
+        unsigned char *songs = buf + header_size + (h.n * 3 + h.hn + h.npend) * 4;
+        /* Each saved song's identity (where it is in buf), and whether any could be a Library row:
+         * a stream cache download (stream_path.h) never is, so a streamed queue loads no library. */
+        unsigned *at = calloc(h.n, sizeof *at), *miss = calloc(h.n, sizeof *miss), nmiss = 0;
+        void **got = calloc(h.n, sizeof *got), **lists = calloc(h.n, sizeof *lists);
+        unsigned nlists = 0, n = 0;
+        int library_too = 0;
+        if (!at || !miss || !got || !lists) ok = 0;
+        p = songs;
+        for (unsigned i = 0; ok && i < h.n; ++i) {
+            const char *app, *sid;
+            int appn, sidn;
+            at[i] = (unsigned)(p - buf);
+            if (!stream_path_sid((const char *)p + 12, &app, &appn, &sid, &sidn)) library_too = 1;
+            unsigned len;
+            memcpy(&len, p, 4); /* unaligned after an odd path */
+            p += 12 + len;
+        }
+        resume_row *lookup = 0;
+        if (ok && library_too) {
+            int count;
+            all = staged(library, 0, &count);
+            lookup = calloc(deque_size(all), sizeof *lookup);
+            if (!lookup && deque_size(all)) ok = 0;
+        }
+        for (unsigned i = 0; ok && all && i < deque_size(all); ++i) {
             void *r = deque_at(all, i);
             if (I(r, REC_TYPE) == 8 && P(r, REC_PATH)) lookup[n++] = (resume_row){ r, i };
         }
         if (n) qsort(lookup, n, sizeof *lookup, resume_before);
-        char folder[1024] = "";
-        p = buf + header_size + (h.n * 3 + h.hn + h.npend) * 4;
         for (unsigned i = 0; ok && i < h.n; ++i) {
             unsigned id[3];
-            memcpy(id, p, 12);
-            p += 12;
-            const char *path = (const char *)p;
-            p += id[0];
+            memcpy(id, buf + at[i], 12);
+            const char *path = (const char *)buf + at[i] + 12;
             map[i] = ~0u;
             if (access(path, 0)) continue;
             unsigned lo = 0, hi = n;
@@ -1947,37 +1964,47 @@ int ringnav_memory(void *out) {
                 else
                     hi = mid;
             }
-            if (lo < n && !resume_cmp(lookup[lo].record, path, id[1], id[2])) {
-                map[i] = deque_size(q);
-                _deque_push_back(q, lookup[lo].record);
-            }
-            if (map[i] != ~0u) continue;
+            if (lo < n && !resume_cmp(lookup[lo].record, path, id[1], id[2]))
+                got[i] = lookup[lo].record;
+            else if (strrchr(path, '/'))
+                miss[nmiss++] = i;
+        }
+        /* The rest from their folders' listings, each folder listed once however the queue
+         * interleaves them (a stream cache's hex buckets), each listing kept until the queue is
+         * built from it. */
+        for (unsigned k = 0; ok && k < nmiss; ++k) {
+            if (miss[k] == ~0u) continue;
             char parent[1024];
-            memcpy(parent, path, id[0]);
-            char *slash = strrchr(parent, '/');
-            if (!slash) continue;
-            *slash = 0;
-            if (strcmp(folder, parent) || !rows) {
-                if (rows) deque_destroy(rows);
-                int count;
-                rows = staged(directory, parent, &count);
-                memcpy(folder, parent, strlen(parent) + 1);
-            }
-            for (unsigned j = 0; j < deque_size(rows); ++j) {
-                void *r = deque_at(rows, j);
-                if (I(r, REC_TYPE) == 8 && !strcmp(P(r, REC_PATH), path) &&
-                    (unsigned)I(r, REC_CUE_START) == id[1] &&
-                    (unsigned)I(r, REC_CUE_END) == id[2]) {
-                    map[i] = deque_size(q);
-                    card_record_tags(r); /* a card app's download: its tags, not its file's name */
-                    _deque_push_back(q, r);
-                    break;
+            const char *path = (const char *)buf + at[miss[k]] + 12;
+            unsigned len = (unsigned)(strrchr(path, '/') - path);
+            memcpy(parent, path, len), parent[len] = 0;
+            int count;
+            void *rows = lists[nlists++] = staged(directory, parent, &count);
+            for (unsigned m = k; m < nmiss; ++m) {
+                unsigned i = miss[m], id[3];
+                const char *other = i == ~0u ? 0 : (const char *)buf + at[i] + 12;
+                if (!other || strncmp(other, parent, len) || other[len] != '/' ||
+                    strrchr(other + len + 1, '/'))
+                    continue;
+                memcpy(id, buf + at[i], 12);
+                miss[m] = ~0u;
+                for (unsigned j = 0; j < deque_size(rows); ++j) {
+                    void *r = deque_at(rows, j);
+                    if (I(r, REC_TYPE) == 8 && !strcmp(P(r, REC_PATH), other) &&
+                        (unsigned)I(r, REC_CUE_START) == id[1] &&
+                        (unsigned)I(r, REC_CUE_END) == id[2]) {
+                        card_record_tags(r); /* a card app's download: its tags, not its name */
+                        got[i] = r;
+                        break;
+                    }
                 }
             }
         }
-        if (rows) deque_destroy(rows);
-        free(lookup);
-        deque_destroy(all);
+        for (unsigned i = 0; ok && i < h.n; ++i)
+            if (got[i]) map[i] = deque_size(q), _deque_push_back(q, got[i]);
+        for (unsigned k = 0; k < nlists; ++k) deque_destroy(lists[k]);
+        free(lookup), free(at), free(miss), free(got), free(lists);
+        if (all) deque_destroy(all);
         ok = deque_size(q) != 0;
     }
     int result = -1;

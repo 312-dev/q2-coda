@@ -251,7 +251,9 @@ static struct {
     void *label;    /* the label whose ends are copied, or &mf for text_fade's */
     int x[2], y, h; /* each end's first column (-1 none) and the rows, in the buffer */
     int n;          /* the columns each end fades over, MARQUEE_FADE_PX at most */
-    unsigned px[2][MARQUEE_FADE_ROWS][MARQUEE_FADE_PX];
+    /* the ends' pixels (6 KB): on the heap from the first fade on, kept, as it is used by every
+     * paint of a scrolling label */
+    unsigned (*px)[MARQUEE_FADE_ROWS][MARQUEE_FADE_PX];
 } mf __attribute__((section(".scratch")));
 
 /* The canvas's 32-bit buffer and its pitch in pixels, else 0. */
@@ -285,7 +287,7 @@ int text_fade_under_n(void *canvas, int x0, int x1, int y, int h, int ends, int 
     int pitch, fw, fh, clip[4];
     mf.label = (void *)0;
     unsigned *fb = canvas && ends ? fade_fb(canvas, &pitch, &fw, &fh) : (unsigned *)0;
-    if (!fb) return 0;
+    if (!fb || (!mf.px && !(mf.px = calloc(2, sizeof *mf.px)))) return 0; /* unfaded: clipped */
     canvas_get_clip_rect(canvas, clip);
     int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y);
     if (h > MARQUEE_FADE_ROWS) h = MARQUEE_FADE_ROWS;
