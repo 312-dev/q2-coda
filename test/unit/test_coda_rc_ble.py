@@ -385,7 +385,9 @@ def static_bytes(so, lib, symbol, offset, n):
                                check=True).stdout.splitlines():
         addr, _, name = line.split()
         syms[name] = int(addr, 16)
-    base = ctypes.cast(lib.coda_main, ctypes.c_void_p).value - syms['coda_main']
+    main = ctypes.cast(lib.coda_main, ctypes.c_void_p).value
+    assert main is not None
+    base = main - syms['coda_main']
     return ctypes.string_at(base + syms[symbol] + offset, n)
 
 
