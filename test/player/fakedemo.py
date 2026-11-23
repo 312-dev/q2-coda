@@ -19,6 +19,7 @@ sampled in the last line.
 import argparse, os, pathlib, re, select, shutil, signal, socket, subprocess, sys, threading, time
 
 POLL = ('{player-status\\request}', '{media-info\\get-music-info}')
+ENDS = ('{player-status\\exit}', '{player-status\\error}', '{player-nextstatus\\exit}', '{player-stopstatus\\exit}')
 EXIT_WAIT_S = 60  # real seconds a run waits past its last step for the exits it wants (Session.wait_exits)
 
 
@@ -126,16 +127,18 @@ def scenarios(m):
         # output change (player_save_start): mcl-stop, then the same song from where it was. At that song's end demo
         # sends the next song by set-songurl (no preload). '-paused' adds the car's pause before the stop and demo's
         # pause sent with the restart, as on the drive; '-now' sends the stop and the restart in one instant to a
-        # song playing, its write not held
+        # song playing, its write not held. Each ends 2 s into the next song, after the restart's exit (after_exits): at a
+        # fixed time a starved player had not reached it
         'stop-restart': boot + [(0.5, stall_sink('0000_44100_2_s16.raw')), (0.5, then_song(a2)), (1.0, song('set-songurl', a1)),
                                 (2.0, '{mcl-stop\\null}'), (2.5, song('set-songurl', a1, start=5)),
-                                (3.0, drain_sink('0000_44100_2_s16.raw')), (24.0, None)],
+                                (3.0, drain_sink('0000_44100_2_s16.raw')), (3.0, after_exits(1, 2.0)), (3.0, None)],
         'stop-restart-paused': boot + [(0.5, stall_sink('0000_44100_2_s16.raw')), (0.5, then_song(a2)),
                                        (1.0, song('set-songurl', a1)), (1.5, '{mcl-pause\\null}'), (2.0, '{mcl-stop\\null}'),
                                        (2.5, song('set-songurl', a1, start=5)), (2.5, '{mcl-pause\\null}'),
-                                       (3.0, drain_sink('0000_44100_2_s16.raw')), (4.0, '{mcl-play\\null}'), (25.0, None)],
+                                       (3.0, drain_sink('0000_44100_2_s16.raw')), (4.0, '{mcl-play\\null}'), (4.0, after_exits(1, 2.0)),
+                                       (4.0, None)],
         'stop-restart-now': boot + [(0.5, then_song(a2)), (1.0, song('set-songurl', a1)), (3.0, '{mcl-stop\\null}'),
-                                    (3.0, song('set-songurl', a1, start=5)), (22.0, None)],
+                                    (3.0, song('set-songurl', a1, start=5)), (3.0, after_exits(1, 2.0)), (3.0, None)],
         # a preload that is not audio: the song plays to its end, then the error
         'badnext': boot + [(1.0, song('set-songurl', a1, flag=1)), (2.0, '{mcl-seek\\12}'), (4.0, gapless(f'{m}/junk.flac', flag=1)), (14.0, None)],
         # a preload cancelled by a queue edit: the song ends with nothing after it, and demo starts the next itself
@@ -211,6 +214,14 @@ def scenarios(m):
         'bt': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'), (0.1, vol(100, 100)),
                (1.0, song('set-songurl', a1)), (2.0, vol(50, 50)), (3.0, vol(20, 20)), (4.0, vol(150, 150)), (5.0, vol(80, 40)),
                (6.0, vol(100, 100)), (6.5, song('set-nexturl', c96)), (9.0, song('set-nexturl', m4a)), (11.5, '{mcl-stop\\null}'), (12.5, None)],
+        # the same volumes, each sent a second of the song after the one before (at_position), not of the session's
+        # clock: run.py test_bt_formats_and_volume measures each level over the song's frames
+        'bt-levels': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'), (0.1, vol(100, 100)),
+                      (1.0, song('set-songurl', a1)), (1.0, at_position(1)), (1.0, vol(50, 50)), (1.0, at_position(2)), (1.0, vol(20, 20)),
+                      (1.0, at_position(3)), (1.0, vol(150, 150)), (1.0, at_position(4)), (1.0, vol(80, 40)), (1.0, at_position(5)),
+                      (1.0, vol(100, 100)), (1.0, at_position(5, 0.5)), (1.0, song('set-nexturl', c96)), (1.0, at_position(-1, 2.5)),
+                      (1.0, song('set-nexturl', m4a)), (1.0, at_position(-1, 2.5)), (1.0, '{mcl-stop\\null}'), (1.0, at_position(-1, 1.0)),
+                      (1.0, None)],
         # Bluetooth across a gapless change: the 44.1 kHz pair and the 96 kHz pair, whole, at unity
         'bt-pair': [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'), (0.1, vol(100, 100)),
                     (1.0, song('set-songurl', a1, flag=1)), (16.0, gapless(a2, flag=1)), (44.0, None)],
@@ -391,6 +402,30 @@ def then_song(path):
     return go
 
 
+def after_exits(n, extra=0.0):
+    """A step: wait (pumping, at most EXIT_WAIT_S of real time) for the player's n-th {player-status\\exit}, then
+    `extra` seconds more of the player's clock. The steps after it are due at once: a step that must follow a song's
+    end, on a machine whose stalls leave the player's clock behind the session's."""
+    def go(s):
+        deadline = time.monotonic() + EXIT_WAIT_S
+        while s.exits() < n and time.monotonic() < deadline:
+            s.pump(min(deadline, time.monotonic() + 0.1))
+        s.pump(time.monotonic() + extra / s.speed)
+    return go
+
+
+def at_position(p, extra=0.0):
+    """A step: wait (pumping, at most EXIT_WAIT_S of real time) until media-info's position reads p seconds or more,
+    then `extra` seconds more of the player's clock (p below 0: those seconds alone): a step tied to where the song is
+    heard, not to the session's clock, which a starved player falls behind."""
+    def go(s):
+        deadline = time.monotonic() + EXIT_WAIT_S
+        while not (s.positions and s.positions[-1][1] >= p) and time.monotonic() < deadline:
+            s.pump(min(deadline, time.monotonic() + 0.05))
+        s.pump(time.monotonic() + extra / s.speed)
+    return go
+
+
 def drain_sink(name):
     """A step: the stalled sink read again, so the waiting write goes on, as the car's write did when its PCM came
     free (2026-11-23). The FIFO is unlinked and what it carries, until the player closes it, is copied to a file of
@@ -409,12 +444,12 @@ def drain_sink(name):
 
 
 def feed(name):
-    """A step: write the music directory's `name` into its FIFO slow.flac, on a thread, since the write waits for the
-    player to open the FIFO."""
+    """A step: write the music directory's `name` into the session's own FIFO for slow.flac (Session.slow), on a
+    thread, since the write waits for the player to open the FIFO."""
     def go(s):
         def write():
             try:
-                with open(pathlib.Path(s.music)/'slow.flac', 'wb') as f: f.write((pathlib.Path(s.music)/name).read_bytes())
+                with open(s.slow, 'wb') as f: f.write((pathlib.Path(s.music)/name).read_bytes())
             except BrokenPipeError: pass  # the player gave up reading: a cancelled preload
         threading.Thread(target=write, daemon=True).start()
     return go
@@ -458,6 +493,11 @@ class Session:
     def __init__(self, out):
         self.out = pathlib.Path(out); self.out.mkdir(parents=True, exist_ok=True)
         self.tmp = self.out / 'tmp'; shutil.rmtree(self.tmp, ignore_errors=True); self.tmp.mkdir()
+        # the music directory's slow.flac, as a scenario names it, is this session's own FIFO (url): one shared by tests
+        # side by side would give one test's bytes to another's player
+        self.slow = self.out / 'slow.flac'
+        if self.slow.exists() or self.slow.is_symlink(): self.slow.unlink()
+        os.mkfifo(self.slow)
         self.srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.srv.bind(str(self.tmp / 'sock_play')); self.srv.listen(1)
         # q2player's status push (docs/internals.md#player-status-push), bound as demo binds it: each datagram's time
@@ -468,13 +508,15 @@ class Session:
         self.music = None  # the music directory on this machine, for steps that act on its files
         self.on_exit = []  # set-gapless commands sent one at each {player-status\\exit}, as demo sends one per song
         self.wait_exits = 0  # at the last step, wait for this many {player-status\\exit} first (run): 0, none
+        self.wait_ends, self.ended = 0, 0  # the same for every event that ends a song (ENDS), and their count so far
         certs = httpd.certificates(CERTS)
         root = lambda: pathlib.Path(self.music)
         self.web = [httpd.serve(root)] + [httpd.serve(root, (certs / f'{n}.pem', certs / f'{n}.key')) for n in ('good', 'wrong', 'self')]
         self.ca = certs / 'ca.pem'
 
     def url(self, text):
-        """text with each of WEB_NAMES made its server's address."""
+        """text with each of WEB_NAMES made its server's address, and the music directory's slow.flac this session's."""
+        if self.music: text = text.replace(f'{self.music}/slow.flac', str(self.slow))
         for name, srv in zip(WEB_NAMES, self.web):
             text = text.replace(name, f'{name.split(":")[0]}://{"127.0.0.1" if srv is self.web[0] else "localhost"}:{srv.port}')
         return text
@@ -500,9 +542,10 @@ class Session:
 
     def pump(self, until):
         """Read replies until the given monotonic time, polling as demo does while a song plays."""
-        next_poll = time.monotonic()
+        next_poll = last = time.monotonic()
         while True:
             now = time.monotonic()
+            self.worst, last = max(self.worst, now - last), now
             if now >= until: return
             if self.playing and now >= next_poll:
                 for p in POLL: self.send(p, quiet=True)
@@ -529,6 +572,7 @@ class Session:
                     shown = '{media-info\\' + '|'.join(f[:3] + ['POS'] + f[4:]) + '}'
                 if name in ('media-info', 'player-status'): self.answers.append((self.now(), m))  # as answered, position and all
                 if name == 'media-info': self.mi_answers.append(m)
+                if m in ENDS: self.ended += 1
                 # an answer to the 200 ms poll is written only when it differs from the last one of its kind
                 if name in ('media-info', 'player-status') and self.seen.get(name) == shown: pass
                 else: self.note('<', shown)
@@ -544,6 +588,8 @@ class Session:
         and the poll's period shrink by it."""
         self.positions, self.answers, self.speed = [], [], speed
         self.songs_sent, self.mi_asked, self.mi_answers = 0, [], []  # media-info's queries and answers, in order (send)
+        self.ran = []  # (its time in the steps, the time it ran) of each callable step: late when this side was held up
+        self.worst = 0.0  # the longest this side's read loop went between passes, real seconds (pump)
         proc = self.proc = launch(self)  # a step may signal it (run.py test_car_release_while_paused)
         starving = starve(proc)
         self.srv.settimeout(30)
@@ -557,10 +603,10 @@ class Session:
                 # the player's clock, which a starved machine leaves behind (the file sink's 500 ms is 62 ms at
                 # speed 8, and the time a stall runs it dry is not caught up), so a capture ended there came up short
                 deadline = time.monotonic() + EXIT_WAIT_S
-                while self.wait_exits and self.exits() < self.wait_exits and time.monotonic() < deadline:
+                while (self.exits() < self.wait_exits or self.ended < self.wait_ends) and time.monotonic() < deadline:
                     self.pump(min(deadline, time.monotonic() + 0.1))
                 break
-            if callable(what): what(self); continue
+            if callable(what): what(self); self.ran.append((at, self.now())); continue  # when it ran, for a test to read
             if what.startswith(('{set-songurl', '{set-nexturl')): self.playing, self.preload = True, False
             if what.startswith('{set-gapless'): self.preload = True
             if what.startswith('{mcl-closegapless'): self.preload = False
