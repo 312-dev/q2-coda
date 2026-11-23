@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Remote: the Q2's log names each command it takes from the phone or the car (play, Next, Previous, seek, a queue pick, volume and the rest) with what the player was doing, so a song skipped from the phone can be told from one that ended.
   - Car Audio: after the car paused and its Bluetooth dropped, the song could play again from where it was paused once it ended, and every song after it then played one late, under the next song's title and length. The Q2 now stops the song and starts it again once, as it meant to.
   - USB-C headphones or a USB DAC: pressing Play while they are still connecting says "Connecting USB audio..." and starts the song on them once they are ready, instead of refusing with "Connect headphones or Bluetooth to play"; and unplugging them no longer starts a Bluetooth connection to a headset as if a cable had been plugged in.
   - USB-C headphones or a USB DAC plugged in soon after unplugging a computer now get power after about 8 seconds, where they could stay unpowered (and Play said there was nowhere to play) until they were unplugged and plugged in again.
