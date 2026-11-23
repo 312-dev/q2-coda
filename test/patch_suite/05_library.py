@@ -519,7 +519,7 @@ for cls in (0xf00a,0xf008,0xf007):
     m.call(address=HOOKS['load_localclass_list'][0],args=(cls,0,0,0),gap=0)
     t=m.get(m.row(1)+O['REC_TITLE'])  # no library title: as before
     assert m.text(m.get(m.row(0)+O['REC_TITLE']))=='Song' and m.text(t)=='Row 1', hex(cls)
-    assert m.sql==["select fileurl,time,name from songtable where fileurl in ('/p/05-song.flac')"], m.sql
+    assert m.sql==["select fileurl,time,name from songtable where fileurl in ('/p/05-song.flac','/p/Row 1')"], m.sql  # the untitled rows
 passed()
 # An empty category list says so once its page is up, instead of a black page.
 m=EmptyClassMachine(page='localclass_page',cls=0xf001,rows=0)
