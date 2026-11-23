@@ -12,7 +12,7 @@ for result in (0,-7):
     assert bt_init.call(address=payload_syms['headset_bt_init'],args=(thread,0,0,0),gap=0)==result
     assert bt_init.calls[0][0]=='initBluetoothParam'
     assert [c[:3] for c in bt_init.calls[1:] if c[0].startswith('btctl')]==[
-        ('btctl_set_prompt_callback',0x4f9d20,0),
+        ('btctl_set_prompt_callback',payload_syms['bt_pair_prompt'],0),  # bt_pair.c's, in place of stock's 0x4f9d20
         ('btctl_device_status_callback',payload_syms['headset_bt_status'],0),
         ('btctl_set_a2dp_callback',syms['btrecvA2dpFunc'],0x01020304),
         ('btctl_create_daemon_thread',thread,0)]

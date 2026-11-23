@@ -466,7 +466,7 @@ void feedback_switch_bar(void *w, void *canvas);
 void feedback_scan_bar(void *w, void *canvas);
 void feedback_shuffled(const char *what, int songs);
 int confirm_surface(void *w); /* w holds the card's answers */
-/* pair_prompt.c: one pairing presentation, Car Remote's and Guest Play's
+/* pair_prompt.c: one pairing presentation, Car Remote's, Guest Play's and a Bluetooth device's
  * (docs/oled-design.md#pairing) */
 void *pair_prompt(const char *phone, const char *code, const char *body, const char *const *rows,
                   int n_rows, int back, int timeout_ms, int timeout_row,
@@ -1116,6 +1116,9 @@ int bt_list(void *list), bt_mac_ok(const char *s), bt_dev_find(const char *mac);
 int bt_quality_dim(void *w, unsigned *color); /* a Quality choice the device lacks: its text */
 #define BT_MARK_CHECK 6 /* bt_mark's kind: a picker's check on the right column */
 void *bt_mark(void *parent, const char *name, int kind, int x, int y, int w, int h);
+/* bt_pair.c: a device pairing by numeric comparison (docs/internals.md#bluetooth-pairing-card) */
+void bt_pair_init(void), bt_pair_poll(void);
+int bt_pair_prompt(int type, const char *passkey, void *unused);
 /* guest_ui.c: Guest Play's screens (docs/oled-design.md#guest-play) */
 void guest_ui_poll(void), guest_ui_paint(void *w, void *canvas), guest_np_open(void);
 int guest_ui_state(void), guest_ui_on(void), guest_settings_open(void *ctx, void *event),
