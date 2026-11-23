@@ -19,6 +19,7 @@
 #include "q2_iap2.h"
 #include "iap2_names.h"
 #include "iap2_hid.h"
+#include "iap2_msg.h"
 
 #define IAP2_SOP1 0xFF
 #define IAP2_SOP2 0x5A
@@ -26,9 +27,7 @@
 #define CTL_ACK 0x40
 #define CTL_EAK 0x20
 #define CTL_RST 0x10
-#define HEADER_LEN 9
 #define SYN_FIXED 10   /* link parameters ahead of the session list */
-#define MAX_PACKET 1024 /* the longest the Q2 sends: the car's certificate, about 950 bytes, fits one */
 #define RX_PACKET 8192  /* the longest it takes, offered in the SYN+ACK (an iPhone offers 0xFFFF) */
 #define SLOTS 8
 /* The wire's pace (docs/iphone-mode.md#the-link-s-pace): the BMW takes input reports from an interrupt endpoint, 64
@@ -77,9 +76,11 @@ static void send_bytes(const u8 *p, unsigned n) {
 
 int seen, link_up;
 static int synced;
-static u8 my_seq, syn_seq, peer_seq, last_ack, control_session, file_session;
+static u8 my_seq, syn_seq, peer_seq, last_ack, file_session;
+u8 control_session;
 static u8 syn_ack[48];
-static unsigned syn_ack_len, window, peer_max, max_sends, max_cacks, unacked;
+static unsigned syn_ack_len, window, max_sends, max_cacks, unacked;
+unsigned peer_max;
 static long rto, cack, unacked_since; /* milliseconds; rto 0: never sent again */
 static long wire_busy_at; /* the last time reports were still waiting for the wire */
 static long heard_at, waiting_since; /* the car's last output report; since when something has waited (iap2_tick) */
@@ -125,7 +126,7 @@ static void log_packet(int from_q2, const u8 *p, unsigned len, const char *note)
  * plays with, twice a second, and its acknowledgement, five lines each): a position update's message, packet and
  * reports, and each bare acknowledgement either way, are counted, not logged (trace_quiet, read by q2_iap.c io_send
  * too), and the counts go in the link's health line. Sent again, a packet is logged. */
-static int msg_quiet;
+int msg_quiet;
 int trace_quiet;
 static unsigned quiet_pos, quiet_in, quiet_out;
 /* An output report that is the car's bare acknowledgement whole: [id][00, a whole packet][FF 5A 00 09 40 ...] */
@@ -393,64 +394,8 @@ int iap2_report(const u8 *r, unsigned len) {
     return 1;
 }
 
-/* ---- the control session: building and reading messages ---- */
-
-static struct {
-    u8 b[MAX_PACKET];
-    unsigned len, group;
-    u16 id;
-    int ok;
-} m;
-
-static void msg_start(u16 id) {
-    m.b[0] = 0x40, m.b[1] = 0x40, m.b[4] = id >> 8, m.b[5] = id;
-    m.len = 6, m.id = id, m.ok = 1;
-}
-
-static void param(u16 id, const void *data, unsigned n) {
-    if (m.len + 4 + n > peer_max - HEADER_LEN - 1 || m.len + 4 + n > sizeof m.b) {
-        m.ok = 0;
-        return;
-    }
-    m.b[m.len] = (4 + n) >> 8, m.b[m.len + 1] = 4 + n, m.b[m.len + 2] = id >> 8, m.b[m.len + 3] = id;
-    if (n) memcpy(m.b + m.len + 4, data, n);
-    m.len += 4 + n;
-}
-static void param_u8(u16 id, u8 v) { param(id, &v, 1); }
-static void param_u16(u16 id, u16 v) {
-    u8 b[2] = { v >> 8, v };
-    param(id, b, 2);
-}
-static void param_u32(u16 id, u32 v) {
-    u8 b[4] = { v >> 24, v >> 16, v >> 8, v };
-    param(id, b, 4);
-}
-static void param_u64(u16 id, u32 hi, u32 lo) {
-    u8 b[8] = { hi >> 24, hi >> 16, hi >> 8, hi, lo >> 24, lo >> 16, lo >> 8, lo };
-    param(id, b, 8);
-}
-/* NUL-terminated, cut at 200 bytes on a character boundary. */
-static void param_str(u16 id, const char *s) {
-    unsigned n = strlen(s);
-    char t[201];
-    if (n > 200) {
-        n = 200;
-        while (n && ((u8)s[n] & 0xC0) == 0x80) --n;
-    }
-    memcpy(t, s, n), t[n] = 0;
-    param(id, t, n + 1);
-}
-static void group_start(u16 id) {
-    m.group = m.len;
-    param(id, 0, 0);
-}
-static void group_end(void) {
-    unsigned n = m.len - m.group;
-    m.b[m.group] = n >> 8, m.b[m.group + 1] = n;
-}
-
 /* A packet's payload to go: at once while the window has room, else in turn (pump). */
-static void enqueue(u8 session, const u8 *b, unsigned n) {
+void enqueue(u8 session, const u8 *b, unsigned n) {
     /* a full queue's drops said once, then counted in link_health's line (q2muse-1125 logged 2,555 of them) */
     if (q_count == QUEUE) {
         if (!drop_said) H->log("link: the send queue is full; packets dropped (counted in link: health)"), drop_said = 1;
@@ -481,44 +426,6 @@ static void pump(void) {
         q_head = (q_head + 1) % QUEUE, --q_count;
         send_slot(s);
     }
-}
-
-/* One message to a packet: PodBox's car reads only the first message of a packet. */
-static void msg_send(void) {
-    if (!m.ok || !link_up) {
-        char t[120];
-        snprintf(t, sizeof t, "msg > %04x %s not sent (%s)", m.id, iap2_name(m.id), m.ok ? "no link" : "too long");
-        H->log(t);
-        return;
-    }
-    m.b[2] = m.len >> 8, m.b[3] = m.len;
-    if (!msg_quiet) log_msg(1, m.b, m.len, 96);
-    enqueue(control_session, m.b, m.len);
-}
-
-static void send_empty(u16 id) {
-    msg_start(id);
-    msg_send();
-}
-
-static const u8 *find(const u8 *data, unsigned len, u16 id, unsigned *n) {
-    unsigned off = 0;
-    while (off + 4 <= len) {
-        unsigned plen = data[off] << 8 | data[off + 1];
-        if (plen < 4 || off + plen > len) break;
-        if ((data[off + 2] << 8 | data[off + 3]) == id) {
-            *n = plen - 4;
-            return data + off + 4;
-        }
-        off += plen;
-    }
-    return 0;
-}
-
-static u32 get_be(const u8 *p, unsigned n) {
-    u32 v = 0;
-    while (n--) v = v << 8 | *p++;
-    return v;
 }
 
 /* ---- the control session: the conversation ---- */

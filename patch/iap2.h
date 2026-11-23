@@ -72,6 +72,10 @@ struct iap2_host {
     unsigned (*rate)(void);   /* the player's rate for the song about to play, read now */
 };
 
+/* The link's packets: FF 5A, a 9-byte header, a checksummed payload */
+#define HEADER_LEN 9
+#define MAX_PACKET 1024 /* the longest the Q2 sends: the car's certificate, about 950 bytes, fits one */
+
 extern const struct iap2_host *H; /* the host of this connection (iap2_connect) */
 
 #endif
