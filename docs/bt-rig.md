@@ -29,7 +29,7 @@ python3 tools/bt_rig.py ends 3 --before 50        # three natural ends: seek nea
 python3 tools/bt_rig.py log --from 2026-11-23T22:40:00Z --to 2026-11-23T22:45:00Z
 python3 tools/bt_rig.py analyse take.wav --ref A.flac --ref B.flac
 python3 tools/bt_rig.py calibrate /tmp/cal --codec sbc
-python3 tools/bt_rig.py pair | unpair             # the laptop and the Q2, both sides
+python3 tools/bt_rig.py pair [--answer tap] [--refuse-after S] | unpair   # the laptop and the Q2, both sides
 python3 tools/bt_rig.py record --seconds 120 --out take.wav   # take.json and take.q2.log beside it (needs a sink: see below)
 ```
 
@@ -37,7 +37,7 @@ python3 tools/bt_rig.py record --seconds 120 --out take.wav   # take.json and ta
 
 ## Pairing, and what it does to Windows
 
-`pair` has Windows start it (`btrig pair`: WinRT custom pairing, which takes the numeric comparison in the program, with no Windows dialog). On V1UQi the Q2 asks with stock's own dialog, "Bluetooth Code:NNNNNN" with Cancel lit and OK under it, not the firmware's pairing card. Once the laptop is the one device linked to the Q2, the rig turns the wheel one row and taps OK, written as input events ([remote: Input](remote.md#input)), with a screenshot before each; Centre on that dialog did nothing.
+`pair` has Windows start it (`btrig pair`: WinRT custom pairing, which takes the numeric comparison in the program, with no Windows dialog) and the Q2 asks on its screen, Cancel lit. Once the laptop is the one device linked to the Q2, the rig turns the wheel one row and presses, written as input events ([remote: Input](remote.md#input)), with a screenshot and a copy of `/dev/fb0` before each: Centre for the firmware's pairing card ([internals](internals.md#bluetooth-pairing-card)), the default, or `--answer tap` for stock's "Bluetooth Code:NNNNNN" dialog that V1UQi showed instead (Cancel, then OK under it; Centre did nothing there). `--refuse-after S` presses nothing: Windows holds the confirmation S seconds and refuses it, the laptop cancelling, and the screen is captured every 0.3 s until 3 s after. The result names the screenshots and carries the unified log's pairing and Bluetooth lines of the run. `unpair` forgets the pairing on both sides (the Q2's side through BlueZ's `Adapter1.RemoveDevice` for the laptop's address alone).
 
 A Q2 offers A2DP Sink as well as Source (its Bluetooth receiver), so a computer it pairs with sees a pair of speakers: as soon as the link is up, Windows makes "Speakers (Q2 Muse)" its default output for every role and sends the computer's sound to the Q2, which opens its receiver page. `pair` therefore runs `btrig guard` throughout (each role's default goes back to what it was, within 20 ms) and afterwards turns off the Q2's Audio Sink service on Windows (`btrig service MAC 0000110b-... off`; no administrator rights needed). On the Q2, stock's link thread also takes the paired computer as the saved device: `BTLINKMAC` in `config.ini` becomes the laptop's address.
 

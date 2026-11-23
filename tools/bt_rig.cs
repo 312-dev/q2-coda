@@ -8,7 +8,9 @@
 //   btrig defaults                      the default output of each role
 //   btrig set-default ROLE ID           a role's default output set (to put back one Windows moved)
 //   btrig guard NAME SECONDS            while it runs, a default output named NAME goes back to the role's previous
-//   btrig pair MAC | unpair MAC         pair with a device, the confirmation accepted here (no Windows dialog); forget it
+//   btrig pair MAC [--refuse-after S]   pair with a device, the confirmation accepted here (no Windows dialog), or
+//                                       held S seconds and refused (the laptop cancelling)
+//   btrig unpair MAC                    forget it
 //   btrig service MAC UUID on|off       one of a paired device's Bluetooth services on Windows
 //   btrig link MAC                      the device's connection status
 //   btrig create ID                     AudioPlaybackConnection.TryCreateFromId alone (does Windows take this source)
@@ -572,7 +574,7 @@ static class Program {
             switch (args[0]) {
                 case "info": return Info().GetAwaiter().GetResult();
                 case "sessions": return ListSessions();
-                case "pair": return Pair(args[1]).GetAwaiter().GetResult();
+                case "pair": return Pair(args[1], Arg(args, "--refuse-after", null)).GetAwaiter().GetResult();
                 case "receive": return Receive(args).GetAwaiter().GetResult();
                 case "selftest": return SelfTest(args);
             case "create": {  // TryCreateFromId alone, nothing started: does the API take this id
@@ -699,7 +701,8 @@ static class Program {
         return 0;
     }
 
-    static async Task<int> Pair(string mac) {
+    // refuseAfter: hold the confirmation that many seconds, then refuse it (the laptop cancelling the pairing).
+    static async Task<int> Pair(string mac, string refuseAfter) {
         var dev = await BluetoothDevice.FromBluetoothAddressAsync(ParseMac(mac));
         if (dev == null) { Json.Say("event", "error", "message", "no such device"); return 1; }
         var di = dev.DeviceInformation;
@@ -707,7 +710,14 @@ static class Program {
         if (di.Pairing.IsPaired) return 0;
         var custom = di.Pairing.Custom;
         custom.PairingRequested += (s, a) => {
-            Json.Say("event", "pairing_requested", "kind", a.PairingKind.ToString(), "pin", a.Pin);
+            Json.Say("event", "pairing_requested", "kind", a.PairingKind.ToString(), "pin", a.Pin, "utc", DateTime.UtcNow.ToString("o"));
+            if (refuseAfter != null) {  // not accepted: Windows answers no once the deferral completes
+                var d = a.GetDeferral();
+                Thread.Sleep((int)(double.Parse(refuseAfter, System.Globalization.CultureInfo.InvariantCulture) * 1000));
+                Json.Say("event", "refused", "utc", DateTime.UtcNow.ToString("o"));
+                d.Complete();
+                return;
+            }
             if (a.PairingKind == DevicePairingKinds.ProvidePin) a.Accept("0000"); else a.Accept();
         };
         var r = await custom.PairAsync(DevicePairingKinds.ConfirmOnly | DevicePairingKinds.ConfirmPinMatch |

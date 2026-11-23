@@ -134,6 +134,8 @@ class Q2:
             out = LOG
         elif cmd.startswith('cat /tmp/coda-rc.pair'):
             out = '123456\nbt-rig\n'
+        elif cmd == 'cat /dev/fb0':
+            return subprocess.CompletedProcess(args, 0, b'\1' * (qr.W * qr.H * 4 * 2), b'')
         elif 'q2remote --shot' in cmd:
             import gzip
             return subprocess.CompletedProcess(args, 0, gzip.compress(b'Q2FB\0frame'), b'')
@@ -441,13 +443,41 @@ def test_pair_answers_only_the_laptop_and_turns_off_the_speakers_role(rig, capsy
                                   {'event': 'pairing_requested', 'kind': 'ConfirmPinMatch', 'pin': '1'}, {'event': 'paired'}])
     rig.q2.paired = 'true'
     assert br.pair(rig.tmp / 'shots') == 0
-    taps = [s for s in rig.q2.scripts if 'event2' in s]
-    assert len(taps) == 1  # the second request is not answered again
-    assert (rig.tmp / 'shots' / '1-dialog.png').exists() and (rig.tmp / 'shots' / '2-second-row-lit.png').exists()
+    presses = [s for s in rig.q2.scripts if 'event1' in s]
+    assert len(presses) == 1 and presses[0] == qr.event_writer('/dev/input/event1', qr.key_events(116), 80000)
+    assert not [s for s in rig.q2.scripts if 'event2' in s]  # Centre, no tap
+    for name in ('1-card.png', '1-card-fb0.png', '2-second-row-lit.png', '2-second-row-lit-fb0.png', '3-after.png'):
+        assert (rig.tmp / 'shots' / name).exists(), name
+    assert (rig.tmp / 'shots' / '1-card-fb0.png').read_bytes()[:8] == b'PNGQ2FB\0'
+    assert len((rig.tmp / 'shots' / '1-card-fb0.png').read_bytes()) == 3 + 21 + qr.W * qr.H * 4  # one page
     assert any(c[1:] == ['service', br.Q2_MAC, br.A2DP_SINK, 'off'] for c in rig.runs if c[0].endswith('btrig.exe'))
     result = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert result['q2_paired'] is True and result['defaults_put_back'][0]['was'] == 'Speakers (Q2 Muse)'
     assert not (rig.win / 'guard.stop').exists()
+
+
+def test_pair_on_stock_s_dialog_taps_ok(rig):
+    rig.btrig['info'] = [{'adapter': LAPTOP}]
+    rig.btrig['service'] = [{'event': 'service', 'win32': 0}]
+    rig.plans['guard'] = guard_proc
+    rig.plans['pair'] = FakeProc([{'event': 'pairing_requested', 'kind': 'ConfirmPinMatch'}, {'event': 'paired'}])
+    rig.q2.paired = 'true'
+    assert br.pair(rig.tmp / 'shots', answer='tap') == 0
+    assert len([s for s in rig.q2.scripts if 'event2' in s]) == 1 and not [s for s in rig.q2.scripts if 'event1' in s]
+
+
+def test_pair_refused_by_the_laptop_is_watched_not_answered(rig, capsys):
+    rig.btrig['info'] = [{'adapter': LAPTOP}]
+    rig.plans['guard'] = lambda: guard_proc(False)
+    rig.plans['pair'] = FakeProc([{'event': 'pairing_requested', 'kind': 'ConfirmPinMatch'}, {'event': 'refused'},
+                                  {'event': 'paired', 'status': 'Failed'}], rc=1)
+    assert br.pair(rig.tmp / 'shots', refuse_after=1) == 1
+    assert rig.popens[-1][-2:] == ['--refuse-after', '1']
+    assert not [s for s in rig.q2.scripts if 'printf' in s]
+    frames = sorted(p.name for p in (rig.tmp / 'shots').iterdir())
+    assert frames[0].endswith('-fb0.png') and frames[1].endswith('-shot.png') and len(frames) >= 2
+    result = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert result['q2_paired'] is False and result['log'] == []
 
 
 def test_pair_does_not_answer_with_another_device_linked(rig, capsys):
@@ -505,7 +535,7 @@ def test_record_failure_keeps_what_it_knows(rig, tmp_path):
 def test_main_dispatch(rig, monkeypatch, capsys, tmp_path):
     seen: list = []
     monkeypatch.setattr(br, 'build', lambda: 'built')
-    monkeypatch.setattr(br, 'pair', lambda: seen.append('pair') or 0)
+    monkeypatch.setattr(br, 'pair', lambda sh, an, ref: seen.append(('pair', sh, an, ref)) or 0)
     monkeypatch.setattr(br, 'unpair', lambda: seen.append('unpair') or 0)
     monkeypatch.setattr(br, 'ends', lambda n, b: seen.append(('ends', n, b)))
     monkeypatch.setattr(br, 'play', lambda a, args: seen.append(('play', a, args)) or 0)
@@ -517,12 +547,13 @@ def test_main_dispatch(rig, monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(bt_rig_analyse, 'calibrate', lambda d, c: [('cut', 0.0, 0.0, True)])
     assert br.main(['build']) == 0 and 'built' in capsys.readouterr().out
     assert br.main(['status']) == 0 and '"adapter"' in capsys.readouterr().out
-    assert br.main(['pair']) == 0 and br.main(['unpair']) == 0
+    assert br.main(['pair']) == 0 and br.main(['pair', '--answer', 'tap', '--refuse-after', '2']) == 0
+    assert br.main(['unpair']) == 0
     assert br.main(['record', '--seconds', '5', '--out', 'x.wav', '--endpoint']) == 0
     assert br.main(['record', '--seconds', '5', '--out', 'x.wav']) == 0
     assert br.main(['ends', '3', '--before', '40']) == 0
     assert br.main(['play', 'seek', '10']) == 0
-    assert seen == ['pair', 'unpair', ('record', 5.0, 'x.wav', ['--endpoint']), ('record', 5.0, 'x.wav', []),
+    assert seen == [('pair', None, 'centre', None), ('pair', None, 'tap', 2.0), 'unpair', ('record', 5.0, 'x.wav', ['--endpoint']), ('record', 5.0, 'x.wav', []),
                     ('ends', 3, 40.0), ('play', 'seek', ['10'])]
     capsys.readouterr()
     assert br.main(['log', '--from', '2026-11-23T22:42:05Z', '--to', '2026-11-23T22:42:30Z']) == 0

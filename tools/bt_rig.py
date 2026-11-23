@@ -324,21 +324,35 @@ def guard_stop(g):
     return [json.loads(l) for l in out.splitlines() if l.startswith("{")]
 
 
-OK_TAP = (187, 280)  # the lower of the two rows on the Bluetooth Code dialog's 375 x 320 screen (V1UQi)
+OK_TAP = (187, 280)  # stock's Bluetooth Code dialog (V1UQi): its lower row, OK, on the 375 x 320 screen
 
 
-def pair(shots=None):
+def q2_fb0(out):
+    """/dev/fb0's first page as a PNG: the framebuffer as the panel scans it, read whole over adb."""
+    import struct
+    import q2remote as qr
+    raw = adb("exec-out", "cat /dev/fb0", timeout=30)
+    page = qr.W * qr.H * 4
+    pathlib.Path(out).write_bytes(qr.framebuffer_png(b"Q2FB\0" + struct.pack("<IIII", qr.W, qr.H, qr.W * 4, page) + raw[:page]))
+
+
+def pair(shots=None, answer="centre", refuse_after=None):
     """Pair this laptop with the Q2. Windows starts it (btrig pair: WinRT custom pairing, accepted there, no Windows
-    dialog); the Q2 asks with a numeric comparison dialog, Cancel lit. Once the laptop is the one device linked to
-    the Q2, the wheel lights the second row and a tap presses it, both written as input events (docs/remote.md#input),
-    with a screenshot before each. Afterwards Windows' use of the Q2 as speakers (its Audio Sink service) is turned
-    off, and btrig guard keeps the default output where it was throughout."""
+    dialog) and the Q2 asks for the numeric comparison on its screen, Cancel lit. Once the laptop is the one device
+    linked to the Q2, the wheel lights the second row and Centre (the firmware's pairing card) or a tap on OK_TAP
+    (stock's dialog) answers it, written as input events (docs/remote.md#input), with a screenshot and a copy of
+    /dev/fb0 before each. With refuse_after, nothing is pressed: Windows refuses after that many seconds and the
+    screen is captured every 0.3 s from the request until 3 s after the refusal. Afterwards Windows' use of the Q2
+    as speakers (its Audio Sink service) is turned off, and btrig guard keeps the default output where it was
+    throughout. The unified log's `pair` and Bluetooth lines of the run are returned with the result."""
     laptop = next((e["adapter"] for e in btrig("info") if "adapter" in e), None)
     shots = pathlib.Path(shots or pathlib.Path(WIN_DIR) / "pair")
     shots.mkdir(parents=True, exist_ok=True)
+    t_start, off = time.time(), q2_clock_offset()
     g = guard_start()
     try:
-        p = subprocess.Popen([str(btrig_exe()), "pair", Q2_MAC], stdout=subprocess.PIPE, text=True, cwd=WIN_DIR)
+        extra = ["--refuse-after", str(refuse_after)] if refuse_after is not None else []
+        p = subprocess.Popen([str(btrig_exe()), "pair", Q2_MAC, *extra], stdout=subprocess.PIPE, text=True, cwd=WIN_DIR)
         assert p.stdout is not None
         answered = False
         for line in p.stdout:
@@ -352,21 +366,38 @@ def pair(shots=None):
             if linked != {laptop}:
                 print(json.dumps({"event": "not_answered", "why": f"devices linked to the Q2: {sorted(linked)}"}), flush=True)
                 continue
-            time.sleep(1.5)  # the dialog opens on demo's next pass
-            q2_shot(shots / "1-dialog.png")
+            answered = True
+            if refuse_after is not None:
+                t0 = time.time()
+                while time.time() - t0 < refuse_after + 3:
+                    ms = int((time.time() - t0) * 1000)
+                    q2_shot(shots / f"t{ms:05d}-shot.png")
+                    q2_fb0(shots / f"t{ms:05d}-fb0.png")
+                    time.sleep(0.3)
+                continue
+            time.sleep(1.5)  # the card opens on demo's next pass
+            q2_shot(shots / "1-card.png")
+            q2_fb0(shots / "1-card-fb0.png")
             q2_input("wheel", 1)
             time.sleep(0.5)
             q2_shot(shots / "2-second-row-lit.png")
-            q2_input("tap", *OK_TAP)
-            answered = True
+            q2_fb0(shots / "2-second-row-lit-fb0.png")
+            if answer == "tap":
+                q2_input("tap", *OK_TAP)
+            else:
+                q2_input("key", "centre")
+            time.sleep(1.5)
+            q2_shot(shots / "3-after.png")
         rc = p.wait()
         if rc == 0:
             btrig("service", Q2_MAC, A2DP_SINK, "off")
     finally:
         restored = [e for e in guard_stop(g) if e.get("event") == "default_restored"]
     paired = q2_bluez().get(laptop, {}).get("paired")
-    print(json.dumps({"event": "result", "windows_exit": rc, "q2_paired": paired, "screens": str(shots),
-                      "defaults_put_back": restored}), flush=True)
+    lines = [l for l in q2_log(t_start - 2, time.time() + 2, off) if " pair" in l or " bt " in l]
+    result = {"event": "result", "windows_exit": rc, "q2_paired": paired, "screens": str(shots),
+              "defaults_put_back": restored, "log": lines}
+    print(json.dumps(result), flush=True)
     return 0 if rc == 0 and paired else 1
 
 
@@ -481,7 +512,11 @@ def main(argv):
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("build")
     sub.add_parser("status")
-    sub.add_parser("pair")
+    pr = sub.add_parser("pair")
+    pr.add_argument("--answer", choices=["centre", "tap"], default="centre",
+                    help="centre: the firmware's pairing card; tap: stock's Bluetooth Code dialog")
+    pr.add_argument("--refuse-after", type=float, help="press nothing; Windows refuses after S seconds")
+    pr.add_argument("--shots", help="where the screenshots go")
     sub.add_parser("unpair")
     r = sub.add_parser("record")
     r.add_argument("--seconds", type=float, required=True)
@@ -512,7 +547,7 @@ def main(argv):
     elif a.cmd == "status":
         print(json.dumps({"laptop": btrig("info"), "q2": q2_settings(), "q2_link": q2_codec()}, indent=1))
     elif a.cmd == "pair":
-        return pair()
+        return pair(a.shots, a.answer, a.refuse_after)
     elif a.cmd == "unpair":
         return unpair()
     elif a.cmd == "record":
