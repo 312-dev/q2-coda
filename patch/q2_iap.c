@@ -28,6 +28,7 @@
  * against the rootfs's libc with no headers (the declarations and MIPS constants of q2_iap_sys.h), and for this
  * machine with -DPROBE_HOST (test/iap_probe.py). */
 #include "q2_iap_sys.h"
+#include "q2_iap.h"
 #include "coda_rc_cmdq.h" /* the shim's command queue: needs open, write, close, O_NONBLOCK, O_CLOEXEC, ssize_t */
 
 /* <linux/usb/functionfs.h> */
@@ -142,7 +143,7 @@ static void strings(struct blob *out, int kind) {
 
 static int logfd = 2;
 static long log_slowest; /* this loop pass's slowest log write, ms */
-static long mono_ms(void) {
+long mono_ms(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return t.tv_sec * 1000L + t.tv_nsec / 1000000L;
@@ -153,7 +154,7 @@ static long mono_ms(void) {
  * milliseconds, a sleep the host tests stand in for (read every pass, sleep_poll). */
 static const char *clock_file;
 static long clock_skew;
-static long boot_ms(void) {
+long boot_ms(void) {
     struct timespec t;
     clock_gettime(CLOCK_BOOTTIME, &t);
     return t.tv_sec * 1000L + t.tv_nsec / 1000000L + clock_skew;
@@ -165,7 +166,7 @@ static long boot_ms(void) {
  * PIPE_BUF, so it is never split or mixed with a child's. A full pipe (the card stalled for seconds) costs lines, not
  * the loop: they are counted and said with the next line that goes. */
 static unsigned log_dropped;
-static void logline(const char *tag, const char *msg) {
+void logline(const char *tag, const char *msg) {
     char line[3200];
     long ms = mono_ms();
     int n = snprintf(line, sizeof line, "%ld.%03ld %s %s\n", ms / 1000, ms % 1000, tag, msg);
@@ -268,12 +269,12 @@ static long disabled_at = -1, gap_ms = 8000;
 /* Every fd the loop opens is close-on-exec (O_CLOEXEC, pipe_cloexec), so ffmpeg holds none, and a child that does
  * not exec drops the ep0s at its start (child_drop): an ep0 a child held kept FunctionFS busy, so a lost link's
  * teardown could not unmount it and the relink failed for as long as the child ran (car-bt-power.md #9). */
-static int pipe_cloexec(int *fds) {
+int pipe_cloexec(int *fds) {
     if (pipe(fds)) return -1;
     fcntl(fds[0], F_SETFD, FD_CLOEXEC), fcntl(fds[1], F_SETFD, FD_CLOEXEC);
     return 0;
 }
-static void child_drop(void) {
+void child_drop(void) {
     for (int k = 0; k < ninst; ++k)
         if (in[k].ep0 >= 0) close(in[k].ep0), in[k].ep0 = -1;
 }
@@ -372,6 +373,7 @@ static void alarm_interrupts(void) {
 /* ---- iAP2 (--iap2) ---- */
 
 #include "q2_iap2.c"
+#include "q2_iap_lib.h"
 
 static int iap2_mode, writer_fd = -1, writer_pid, done_fd = -1, report_ms;
 static unsigned wr_queued, wr_done; /* input reports handed to the writer, and those it has written to ep1 */
@@ -465,10 +467,7 @@ static int io_backlog(void) {
     return done_fd < 0 ? 0 : (int)(wr_queued - wr_done);
 }
 
-#include "stream_path.h"
 static int read_some(const char *path, char *b, unsigned cap);
-static unsigned lib_stream_rids(const char *const *paths, unsigned *rids, unsigned n); /* q2_iap_lib.c */
-static void sid_index_start(void);                                                     /* q2_iap_lib.c */
 /* The shim's Now Playing (patch/coda_rc_shim.c cr_now, from now_source.c: key=value lines; pos in ms, len in
  * seconds, live=1 for a radio's stream), written while Car Remote is on or the car's iPhone is on the cable. */
 static int io_now_playing(struct iap2_np *n) {
@@ -516,7 +515,7 @@ static int read_some(const char *path, char *b, unsigned cap) {
 }
 
 /* A file written whole, through a temporary name, mode 0600 (the shim takes only root's own, private files). */
-static int write_whole(const char *path, const char *b, unsigned n) {
+int write_whole(const char *path, const char *b, unsigned n) {
     char tmp[200];
     snprintf(tmp, sizeof tmp, "%s.iap", path);
     int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
@@ -562,7 +561,7 @@ static void rate_poll(long now) {
 /* A button or a seek, as the Remote app's commands reach the shim (Car Remote on): down the shim's queue
  * (coda_rc_cmdq.h), each press its own line, else its single command file. Its numbers start high, so an ack
  * of one is never taken for coda-rc's own. */
-static void io_command(const char *verb) {
+void io_command(const char *verb) {
     static unsigned seq = 0x51000000u;
     char b[96];
     int n = snprintf(b, sizeof b, "%u %s\n", ++seq, verb);
@@ -570,7 +569,7 @@ static void io_command(const char *verb) {
     if (write_whole(cmd_file, b, (unsigned)n)) logline("iap2", "command: the shim's file could not be written");
 }
 
-static unsigned read_file(const char *path, unsigned char *out, unsigned cap) {
+unsigned read_file(const char *path, unsigned char *out, unsigned cap) {
     int fd = open(path, O_RDONLY | O_CLOEXEC), got = 0, r;
     if (fd < 0) return 0;
     while (got < (int)cap && (r = (int)read(fd, out + got, cap - got)) > 0) got += r;
@@ -579,7 +578,7 @@ static unsigned read_file(const char *path, unsigned char *out, unsigned cap) {
 }
 
 /* Cover Flow's key (patch/coverflow.c tags_key, coda_rc_lib.c fnv32): FNV-1a with a separator after each part */
-static unsigned fnv_part(unsigned h, const char *s) {
+unsigned fnv_part(unsigned h, const char *s) {
     while (*s) h = (h ^ (unsigned char)*s++) * 16777619u;
     return h * 16777619u;
 }
@@ -612,11 +611,8 @@ static struct {
     unsigned got_n, got_cap;
     int jpeg_at, made; /* made: ffmpeg made it */
 } artw = {.fd = -1, .jpeg_at = -1};
-static const char *card_root;                                                         /* q2_iap_lib.c */
-static int lib_app_album(unsigned rid, char *app, unsigned appcap, char *album, unsigned albumcap); /* q2_iap_lib.c */
 static void iap2_art_done(int found);
 static void iap2_art_slow(void);
-static int lib_write_all(int fd, const void *p, unsigned n); /* q2_iap_lib.c */
 
 static unsigned art_key(const struct iap2_np *n) {
     return n->album[0] ? fnv_part(fnv_part(2166136261u, n->artist), n->album) : fnv_part(2166136261u, n->path);
@@ -1058,8 +1054,6 @@ static void summary(void) {
              c_last[C_RATE_SETS] - c_first[C_RATE_SETS]);
     logline("car", msg);
 }
-
-#include "q2_iap_lib.c"
 
 /* The link lost (the car stopped acknowledging through every retry, went quiet with packets waiting, or a request's
  * data stage was not its report: q2_iap2.c iap2_lost): with --state, q2-iap ends (exit 22) and q2car.sh

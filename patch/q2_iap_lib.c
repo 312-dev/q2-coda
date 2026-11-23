@@ -1,9 +1,14 @@
 /* q2-iap's library (docs/iphone-mode.md#the-library-on-idrive): the Q2's songs as the car's media library, read from
  * stock's database (songtable, the songs coda_rc_lib.c's views read: audiobooks and podcasts left out) with the lists
  * it sends as playlists (lib_lists) into RAM at the car's StartMediaLibraryUpdates, and the record of what the car was
- * last sent in full (LIB_SENT), so a car that holds that revision is sent only what changed. Included by q2_iap.c;
- * q2_iap2.c reads the tables through its host (struct iap2_library) and never this file's I/O. The databases are read
- * in a child (lib_load), opened read-only and closed after the read. */
+ * last sent in full (LIB_SENT), so a car that holds that revision is sent only what changed. q2_iap.c hands the
+ * tables to the iAP2 side as its host's (struct iap2_library), which never does this file's I/O. The databases are
+ * read in a child (lib_load), opened read-only and closed after the read. */
+#include "q2_iap_sys.h"
+#include "iap2.h"
+#include "q2_iap.h"
+#include "q2_iap_lib.h"
+#include "stream_path.h"
 
 #define LIB_DB "/mnt/data/database.db"
 #define LIB_CAT "/mnt/mmc/.q2pod/catalogue.db" /* a signed-in server's songs (docs/server-library.md) */
@@ -26,9 +31,9 @@ int sqlite3_exec(sqlite3 *, const char *, int (*)(void *, int, char **, char **)
 #define SQLITE_OPEN_READONLY 1
 #define SQLITE_ROW 100
 
-static const char *lib_db = LIB_DB, *lib_cat = LIB_CAT, *lib_sent_file = LIB_SENT;
-static const char *card_root = ""; /* put before a catalogue row's /mnt/mmc path (--card-root, for the host tests) */
-static struct iap2_library lib_t; /* the tables q2_iap2.c reads */
+const char *lib_db = LIB_DB, *lib_cat = LIB_CAT, *lib_sent_file = LIB_SENT;
+const char *card_root = ""; /* put before a catalogue row's /mnt/mmc path (--card-root, for the host tests) */
+struct iap2_library lib_t; /* the tables q2_iap2.c reads */
 
 
 static unsigned lib_put(char **pool, unsigned *len, unsigned *cap, const char *s) {
@@ -154,15 +159,7 @@ static void lib_lists(sqlite3 *db, int server, char **pool, unsigned *len, unsig
 struct lib_sid {
     unsigned hi, lo, rid;
 };
-static struct {
-    struct lib_sid *v; /* the index, sorted; n of them */
-    void *block;       /* the allocation v lies in, when it is the index's own (sid_install) */
-    unsigned n, cap;
-    int fd;               /* the child's pipe while it reads the catalogue, else -1 */
-    int asked;            /* a child was started this run: not again */
-    unsigned char *in;    /* its bytes so far: a count, then that many rows */
-    unsigned in_n, want;  /* want: the bytes it sends, once its count is in, else 0 */
-} sids = {.fd = -1};
+struct lib_sids sids = {.fd = -1};
 #define HANDOVER_MAX 65536 /* bytes of a child's tables taken in a loop pass at most: never O(library) at once */
 
 static void sid_key(const char *app, int appn, const char *sid, int sidn, unsigned *hi, unsigned *lo) {
@@ -201,7 +198,7 @@ static void sid_install(struct lib_sid *v, unsigned n, void *block) {
 /* The child that reads the catalogue's (app, sid, id) rows for the index and sorts them: on the pipe their count,
  * then each as 12 bytes (sid_key's halves and the rid, in this machine's order), the loop taking them in as they
  * come (sid_index_poll). */
-static void sid_index_start(void) {
+void sid_index_start(void) {
     int fds[2];
     if (sids.asked || sids.n || access(lib_cat, 0)) return;
     sids.asked = 1;
@@ -236,7 +233,7 @@ static void sid_index_start(void) {
 
 /* The child's rows taken in, HANDOVER_MAX bytes a pass at most, into room for exactly the count it sent first; once
  * all are in, they are the index, unless lib_load's has come meanwhile. */
-static void sid_index_poll(void) {
+void sid_index_poll(void) {
     unsigned took = 0;
     int r = 1;
     while (sids.fd >= 0 && took < HANDOVER_MAX) {
@@ -275,7 +272,7 @@ static void sid_index_poll(void) {
 }
 
 /* Each of n paths (0: none) whose rids[i] is 0 looked for in the index; the count found. */
-static unsigned lib_stream_rids(const char *const *paths, unsigned *rids, unsigned n) {
+unsigned lib_stream_rids(const char *const *paths, unsigned *rids, unsigned n) {
     unsigned found = 0;
     sid_index_poll();
     sid_index_start();
@@ -300,7 +297,7 @@ static unsigned lib_stream_rids(const char *const *paths, unsigned *rids, unsign
  * card not mounted yet (a wake, a card lent to a computer), which is not a server library gone (an app signed out
  * leaves its catalogue, without its rows). Run in lib_load's child, never in the loop. */
 static unsigned lib_pool_len; /* lib_t.pool's bytes in use, for the child's hand-over */
-static long card_wait_ms = 10000; /* --card-wait-ms: how long the child waits for a catalogue it cannot read */
+long card_wait_ms = 10000; /* --card-wait-ms: how long the child waits for a catalogue it cannot read */
 static int lib_read(struct lib_sid **sv_out, unsigned *sn_out) {
     sqlite3 *db = 0;
     sqlite3_stmt *st = 0;
@@ -390,15 +387,9 @@ struct lib_head {
     char rev[40], sent_rev[40];
 };
 #define LIB_MAGIC 0x51324c42u
-static struct {
-    int fd, pid;          /* the child's pipe and pid while it reads, else -1 and 0 */
-    int ready;            /* 1 the tables installed, 2 the catalogue unreadable, -1 none read; 0 not yet */
-    long at;              /* when it began */
-    unsigned char *in;    /* its bytes so far */
-    unsigned in_n, in_cap;
-} lload = {.fd = -1};
+struct lib_lload lload = {.fd = -1};
 
-static int lib_write_all(int fd, const void *p, unsigned n) {
+int lib_write_all(int fd, const void *p, unsigned n) {
     const unsigned char *b = p;
     while (n) {
         int w = (int)write(fd, b, n);
@@ -483,7 +474,7 @@ static int lib_install(unsigned char *b, unsigned len) {
 
 /* The child's bytes taken in, as many as wait; at its end the tables installed (lib_ready then says how it went).
  * Called every pass of the loop, so the child never waits on a full pipe. */
-static void lib_load_poll(void) {
+void lib_load_poll(void) {
     unsigned took = 0;
     int r = 1, whole = 0;
     while (lload.fd >= 0 && took < HANDOVER_MAX) {
@@ -522,7 +513,7 @@ static void lib_load_poll(void) {
 
 /* The host's lib_load: the library's read begun in a child (one already reading goes on). 0, or -1 when no child
  * could be started. */
-static int lib_load(void) {
+int lib_load(void) {
     int fds[2];
     lload.ready = 0;
     if (lload.fd >= 0) return 0;
@@ -547,7 +538,7 @@ static int lib_load(void) {
 
 /* The host's lib_ready: 1 the tables read (in lib_t), 2 the catalogue unreadable (lib_t as it was), -1 none, 0 still
  * reading. */
-static int lib_ready(void) {
+int lib_ready(void) {
     lib_load_poll();
     return lload.ready;
 }
@@ -556,7 +547,7 @@ static int lib_ready(void) {
  * song's server row (its rid, from 0x40000000, is servermeta's id) has the path /mnt/mmc/.<app>/cat/<album id>/...;
  * the app's id (the folder's name without its dot) into app and the album's id into album, 1; 0 for a card song, or a
  * row with no such path. One row by its key. Read in the cover's child (q2_iap.c art_child), never in the loop. */
-static int lib_app_album(unsigned rid, char *app, unsigned appcap, char *album, unsigned albumcap) {
+int lib_app_album(unsigned rid, char *app, unsigned appcap, char *album, unsigned albumcap) {
     sqlite3 *db = 0;
     sqlite3_stmt *st = 0;
     char sql[80];
@@ -584,7 +575,7 @@ static int lib_app_album(unsigned rid, char *app, unsigned appcap, char *album, 
  * RAM and written in one write by a child, so the event loop never waits on it: /mnt/data is UBIFS mounted sync,
  * and on 2026-11-21 (q2muse-1125) the record of 9,199 songs, written a line at a time from the loop, held it 12.3 s
  * while the car's SET_REPORT went unanswered (test/iap_probe.py test_writing_the_sent_record_holds_nothing). */
-static void lib_saved(void) {
+void lib_saved(void) {
     char tmp[200];
     unsigned cap = (unsigned)strlen(lib_t.rev) + 2 + lib_t.n * 20, len;
     char *b = malloc(cap);
@@ -616,8 +607,8 @@ static void lib_saved(void) {
 
 /* Songs to play, by rid: the shim's list (/tmp/coda-rc.list, a rid a line) and its play command, as coda-rc's Play
  * sends them (coda_rc_lib.c play). */
-static const char *list_file = "/tmp/coda-rc.list";
-static void lib_play(const unsigned *rids, unsigned n, unsigned at, int shuffle) {
+const char *list_file = "/tmp/coda-rc.list";
+void lib_play(const unsigned *rids, unsigned n, unsigned at, int shuffle) {
     char cmd[48];
     char *b = n ? malloc(n * 12 + 1) : 0;
     unsigned len = 0;
@@ -634,8 +625,8 @@ static void lib_play(const unsigned *rids, unsigned n, unsigned at, int shuffle)
 
 /* The shim's queue (/tmp/coda-rc.queue: "gen pos total" then a rid a line, 0 for a song outside the library): up to
  * cap rids into out; the count, or -1 when there is no queue file or it lists fewer songs than it has. */
-static const char *queue_file = "/tmp/coda-rc.queue";
-static int lib_queue(unsigned *out, unsigned cap) {
+const char *queue_file = "/tmp/coda-rc.queue";
+int lib_queue(unsigned *out, unsigned cap) {
     unsigned room = cap * 300 + 64; /* a song outside songtable is a line with its path, title and artist */
     unsigned char *b = malloc(room);
     const char **paths = malloc(cap * sizeof *paths);
