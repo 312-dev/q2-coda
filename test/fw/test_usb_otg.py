@@ -149,24 +149,52 @@ def test_the_logged_replugs_back_feed_under_stocks_own_pass(fw):
     assert p.backfeed and p.pins['PC20'] == 1
 
 
-# 22:43 (q2-ab-state.log, build 8fd0ddcd with PD18's pull-up, the PHY's ID pull-up and the controller held at device,
-# 0.25 s samples, nothing attached): VBUS left at 431.82, PD18 read low at 443.93 (12.1 s on) and the 6 s settle powered
-# the bus at 450.47; PD18 read high at 461.11, PC20 went off, and 7 s after that VBUS left PD18 read low again (468.54)
-# and the bus came on again at 476.33: a loop into an empty port, and a laptop plugged in then sent no VBUS.
-AB_OUT, AB_LOW, AB_HIGH = 431.82, 443.93, 461.11
+# With PD18's pull-up on (q2-pull-state.log, PU18=1 on every line, 0.54 s samples, nothing attached): a cable out at
+# 1095.34, PD18 low at 1102.36 (7.02 s on, the latest start logged) and stock's bus power on 3.21 s into it; that power's
+# end (1106.65) was VBUS leaving again, and PD18 went low once more at 1112.02 for 2.15 s; a laptop's cable at 1120.62.
+PU_OUT, PU_LOW, PU_CUT, PU_OWN_OFF, PU_LOW2, PU_HIGH2, PU_LAPTOP = 1095.34, 1102.36, 1105.57, 1106.65, 1112.02, 1114.17, 1120.62
 
 
 def test_the_board_s_id_pulse_after_vbus_leaves_never_powers_the_bus_nor_loops(fw):
+    p = Port(fw)
+    unplug(p, ms(PU_OUT, PU_LOW))
+    p.id = 0
+    p.run(ms(PU_LOW, PU_OWN_OFF))  # as long as it lasted with stock's power on it: longer than uncut
+    p.id = 1
+    p.run(ms(PU_OWN_OFF, PU_LOW2))
+    p.id = 0
+    p.run(ms(PU_LOW2, PU_HIGH2))
+    p.id = 1
+    p.run(ms(PU_HIGH2, PU_LAPTOP))
+    assert p.powered == []
+    p.cable = True  # the laptop: VBUS from it, the Q2 a device
+    p.run(5000)
+    assert p.powered == [] and p.otgid.value == 0
+
+
+# 22:43 (q2-ab-state.log, build 8fd0ddcd, which predates PD18's pull-up (ID_PULL_UP): the pin floated; the PHY's ID
+# pull-up and the controller held at device, 0.25 s samples, nothing attached): VBUS left at 431.82, PD18 read low at
+# 443.93 (12.1 s on) and the 6 s settle powered the bus at 450.47; PD18 read high at 461.11, and 7 s after the power's
+# end PD18 read low again (468.54). What a floating pin did, not what the board does with the pull-up on.
+AB_OUT, AB_LOW, AB_HIGH = 431.82, 443.93, 461.11
+
+
+def test_the_floating_pin_s_long_low_gets_one_trial_and_no_loop(fw):
+    """The floating 22:43 low began after the blank and lasted 17 s: it passes the settle, the trial finds nothing on
+    the host port and ends it, and the low that followed is refused; the laptop is then a device's host, never fed."""
     p = Port(fw)
     unplug(p, ms(AB_OUT, AB_LOW))
     p.id = 0
     p.run(ms(AB_LOW, AB_HIGH))
     p.id = 1
     p.run(ms(AB_HIGH, 468.54))
-    assert p.powered == []
-    p.cable = True  # the laptop: VBUS from it, the Q2 a device
+    p.id = 0
+    p.run(10000)
+    assert p.records() == ['otg-on', 'otg-trial-off'] and p.pins['PC20'] == 0
+    p.id = 1
+    p.cable = True
     p.run(5000)
-    assert p.powered == [] and p.otgid.value == 0
+    assert p.backfeed == [] and p.otgid.value == 0
 
 
 def test_the_logged_pulse_under_the_settle_alone_powers_the_bus(fw):
@@ -235,6 +263,8 @@ def test_an_accessory_put_in_soon_after_an_unplug_and_left_in_gets_bus_power(fw)
     p.run(60000)
     assert p.powered, 'never powered: the blank held it'
     assert p.powered[0] - plugged <= ACCESSORY + PASS_MS, (p.powered[0] - plugged, p.records())
+    assert p.powered[0] - plugged <= 9000, 'past the pull-up\'s lows (2.15 s uncut) by a margin, no more'
+
     assert p.backfeed == [] and p.pins['PC20'] == 1, 'kept while its device is on the host port'
 
 
@@ -338,13 +368,15 @@ def test_the_record_has_each_change_of_bus_power(fw):
     assert p.records() == ['otg-on', 'otg-off']
 
 
-# The pull-up's pulses with nothing attached (q2-pull-state.log, 21:0x) and the floating lows before it
-# (q2-otg-state-fixbuild.log, 20:35), each after an unplug: all start within the blank.
+# The pull-up's lows with nothing attached (q2-pull-state.log, 21:0x), each after VBUS left: when it began, and how
+# long it lasted, uncut (2.15 s) or until the VBUS of stock's bus power, or its end, came (the rest).
+PULLED = [(ms(840.05, 842.20), ms(842.20, 847.56)), (ms(1095.34, 1102.36), ms(1102.36, 1106.65)),
+          (ms(1106.65, 1112.02), ms(1112.02, 1114.17)), (ms(1122.76, 1128.14), ms(1128.14, 1130.29))]
+# The floating lows before the pull-up (q2-otg-state-fixbuild.log, 20:35): the first lasted 8.56 s.
 FLOATING = [(ms(166.94, 168.00), ms(168.00, 176.56)), (ms(188.26, 190.93), ms(190.93, 196.30))]
-PULLED = [(ms(1095.34, 1102.36), ms(1102.36, 1106.65))]
 
 
-@pytest.mark.parametrize('after,low', FLOATING + PULLED)
+@pytest.mark.parametrize('after,low', PULLED + FLOATING[1:])
 def test_the_lows_after_an_unplug_never_power_the_bus(fw, after, low):
     p = Port(fw)
     unplug(p, after)
@@ -355,6 +387,22 @@ def test_the_lows_after_an_unplug_never_power_the_bus(fw, after, low):
     p.cable = True
     p.run(3000)
     assert p.powered == []
+
+
+def test_a_floating_low_longer_than_the_accessory_wait_is_one_trial_never_a_back_feed(fw):
+    """The floating pin's 8.56 s low outlasts OTG_ACCESSORY_MS: what a floating pin would do now, not the board with its
+    pull-up. The bus power it gets ends when the ID reads high, and a computer's cable after it is not fed."""
+    after, low = FLOATING[0]
+    p = Port(fw)
+    unplug(p, after)
+    p.id = 0
+    p.run(low)
+    p.id = 1
+    p.run(4000)
+    assert p.pins['PC20'] == 0 and p.otgid.value == 0
+    p.cable = True
+    p.run(3000)
+    assert p.backfeed == []
 
 
 # ---- a Play asked while an accessory attaches (usb_otg.c ringnav_forbid_play, usb_otg_poll) ----

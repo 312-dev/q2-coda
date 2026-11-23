@@ -2,7 +2,7 @@
 
 - **Unreleased (q2-coda)**:
   - USB-C headphones or a USB DAC: pressing Play while they are still connecting says "Connecting USB audio..." and starts the song on them once they are ready, instead of refusing with "Connect headphones or Bluetooth to play"; and unplugging them no longer starts a Bluetooth connection to a headset as if a cable had been plugged in.
-  - USB-C headphones or a USB DAC plugged in soon after unplugging a computer now get power after about 20 seconds, where they could stay unpowered (and Play said there was nowhere to play) until they were unplugged and plugged in again.
+  - USB-C headphones or a USB DAC plugged in soon after unplugging a computer now get power after about 8 seconds, where they could stay unpowered (and Play said there was nowhere to play) until they were unplugged and plugged in again.
   - Car Audio: unplugging, or picking another USB mode, while a song is paused into the car could freeze the Q2's screen, and a cable plugged back in got no iPhone until Play was pressed; the Q2 now lets go of the car's audio first.
   - Car Audio: pausing in the car no longer lets up to a third of a second of earlier and later music play out of order after the press, and a cable pulled mid-song no longer leaves the car's audio half running on the Q2 until the next car.
   - Logs: Car Audio keeps the logs of every car cable from the last 7 days (up to 40 MB, and always the last two drives), and plugging the Q2 into a computer or a charger no longer pushes a drive's logs out. The unified log now says each button a Bluetooth car or headset sends, what the Car Remote's Play and Pause found the player doing, and why a cable showed the car no iPhone.

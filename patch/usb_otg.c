@@ -1,9 +1,10 @@
 /* The Q2's OTG host power, only for a device on an OTG adapter (docs/internals.md#otg-host-power).
  * Stock's check_otg_status, from the one-second status pass, reads the ID pin PD18 and on a low
  * read turns the bus power on (PC20 high) and the charger off (PE22 high) at once. The board drives
- * PD18 low by itself, with nothing attached, in one pulse of 2 to 4 s some 3 to 12 s after VBUS
- * leaves the port, the Q2's own bus power included; a cable put into a computer then met the Q2's
- * 5 V, and a USB-C laptop will not source onto a live VBUS, so nothing enumerated. Here:
+ * PD18 low by itself, with nothing attached and its pull-up on, in one pulse of about 2 s some 2 to
+ * 7 s after VBUS leaves the port, the Q2's own bus power included; a cable put into a computer then
+ * met the Q2's 5 V, and a USB-C laptop will not source onto a live VBUS, so nothing enumerated.
+ * Here:
  * - a low ID read within OTG_BLANK_MS of VBUS leaving the port is ignored until it reads high
  *   again (B), or until it has stayed low for OTG_ACCESSORY_MS, longer than any low logged with
  *   nothing attached: an accessory put in soon after a cable out and left in;
@@ -25,16 +26,16 @@
 #include "navigation.h"
 
 /* The ID low and no VBUS this long before the Q2 powers the bus, for a low the blank did not catch.
- * The board's own lows, with nothing attached, came after VBUS left and are the blank's: 6 s alone
- * let the 22:43 low (6.5 s) power an empty port (2026-11-17). */
+ * The board's own lows, with nothing attached, came after VBUS left and are the blank's. */
 #define OTG_SETTLE_MS 6000
-/* A low ID starting this soon after VBUS left the port is the board's, not an adapter's: the
- * pulses started 2.7 to 11.8 s after it (2026-11-17, 0.25 s samples). */
-#define OTG_BLANK_MS 15000
-/* A low the blank caught and still low this long is an accessory's: the logged lows with nothing
- * attached lasted 2.1 to 7.8 s before they read high or the bus power cut them (q2-ab-state.log,
- * q2-pull-state.log), and the 22:43 low, with the bus power it brought on, 17.2 s. */
-#define OTG_ACCESSORY_MS 20000
+/* A low ID starting this soon after VBUS left the port is the board's, not an adapter's: with
+ * PD18's pull-up on, the lows started 2.15 to 7.02 s after it (q2-pull-state.log, 2026-11-17,
+ * 0.54 s samples, 4 lows). */
+#define OTG_BLANK_MS 10000
+/* A low the blank caught and still low this long is an accessory's: with the pull-up on, the lows
+ * with nothing attached lasted 2.15 s where nothing cut them, and 3.21 and 4.28 s before stock's
+ * bus power cut them (q2-pull-state.log). */
+#define OTG_ACCESSORY_MS 8000
 /* Bus power with no device enumerated on the host port goes off after this. */
 #define OTG_TRIAL_MS 8000
 #define OTG_GAP_MS 5000 /* passes further apart than this (a Standby) start the wait again */
