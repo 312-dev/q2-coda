@@ -1185,8 +1185,10 @@ static int split_row(void *a, int n, char **v, char **c) {
 static int rank_query(void *sql) {
     return toolsQueryDbTable("/mnt/data/database.db", sql, split_row, 0);
 }
-/* staged, reading a signed-in server's songs too (catalogue.c): Cover Flow's albums, their ranks
- * and the rated albums, as the Library's Albums list reads them. */
+/* staged, reading a signed-in server's songs too (staged_music sets library_music, so
+ * navigation.c library_query reads songtable's union with servertable, which catalogue.c
+ * catalogue_rows supplies): Cover Flow's albums, their ranks and the rated albums, as the Library's
+ * Albums list reads them. */
 extern void *staged_music(int (*query)(void *), void *arg, int *count);
 static void *cf_staged(int (*query)(void *), void *arg, int *count) {
     return catalogue_has() ? staged_music(query, arg, count) : staged(query, arg, count);
@@ -2515,7 +2517,9 @@ static void fx_ring(int c, int n, const unsigned **ring) {
 
 #if Q2POD_DEV
 /* --dev builds only (docs/internals.md#coverflow-step): each frame of a run in RAM, a store a
- * frame. They go to /tmp/q2-cf-gaps.log at the first paint after the run, if /tmp/q2-cf-gaps.on
+ * frame. gaps' 1,032 bytes of scratch are a --dev build's alone, so its scratch_free_bytes reads
+ * that much under a release build's (docs/architecture.md#the-payload). They go to
+ * /tmp/q2-cf-gaps.log at the first paint after the run, if /tmp/q2-cf-gaps.on
  * exists. */
 #define GAP_FRAMES 128
 #define GAP_MAX_BYTES 262144
