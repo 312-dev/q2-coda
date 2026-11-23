@@ -72,6 +72,14 @@ unsigned now_ms(void) {
     clock_gettime(CLOCK_MONOTONIC, &t);
     return (unsigned)t.tv_sec * 1000u + (unsigned)(t.tv_nsec / 1000000);
 }
+/* The time the Q2 has spent suspended since boot, in ms: CLOCK_BOOTTIME counts it, CLOCK_MONOTONIC does not.
+ * A step it grew by more than SLEPT_MS since the last is a Standby's (guard_in.slept). */
+#define SLEPT_MS 2000
+static unsigned suspended_ms(void) {
+    struct timespec b, m;
+    if (clock_gettime(CLOCK_BOOTTIME, &b) || clock_gettime(CLOCK_MONOTONIC, &m)) return 0;
+    return (unsigned)((b.tv_sec - m.tv_sec) * 1000L + (b.tv_nsec - m.tv_nsec) / 1000000L);
+}
 
 /* ---- the PMIC's bus: i2c-dev, one SMBus byte transaction at a time (linux/i2c-dev.h) ---- */
 #define I2C_SLAVE_FORCE 0x0706
@@ -538,6 +546,7 @@ int main(int argc, char **argv) {
     busy_since(&cpu_line, &cores);
     struct heat_sample s = { 0 };
     const char *snap_why = 0; /* a heat event's snapshot, taken once this tick's heat line is made */
+    unsigned asleep_seen = suspended_ms(); /* the time suspended at the last step (in.slept) */
     s.cable = -1;
     pmic_open();
     flush_start(0);
@@ -578,7 +587,10 @@ int main(int argc, char **argv) {
         /* the Bluetooth controller watched (not while powering off): a probe waits up to BT_PROBE_MS,
          * only while it is suspect */
         int bt_req = g.off ? 0 : bt_watch(now_ms(), ack_text);
-        struct guard_in in = { now, temp, busy, 0, 0, 0, charge_state() };
+        struct guard_in in = { now, temp, busy, 0, 0, 0, charge_state(), 0 };
+        unsigned asleep = suspended_ms();
+        in.slept = asleep - asleep_seen > SLEPT_MS;
+        asleep_seen = asleep;
         in.cancel = !strcmp(card, "loadwarn") && cancel == seq && cancel != cancel_seen;
         if (in.cancel) cancel_seen = cancel;
         in.acked = g.off && ack >= (int)off_seq;

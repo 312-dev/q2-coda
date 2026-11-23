@@ -75,6 +75,7 @@ void (*signal(int, void (*)(int)))(int);
 #define EPIPE 32
 #define WNOHANG 1
 #define CLOCK_MONOTONIC 1
+#define CLOCK_BOOTTIME 7 /* CLOCK_MONOTONIC and the time suspended */
 #define RB_POWER_OFF 0x4321fedc
 #define LOCK_EX 2
 #define LOCK_NB 4
@@ -164,6 +165,8 @@ struct guard_in {
     int acked;  /* demo answered the power-off */
     int saved;  /* the log flush after the power-off began has finished (written or given up) */
     int charge; /* the charger's state, GUARD_CHARGE_*: a change steps the die's reading (q2guard_core.c) */
+    int slept;  /* the Q2 was suspended since the last step (Standby): the die's last reading is too old to
+                 * hold this one to (q2guard_core.c sensor_read) */
 };
 
 enum { EV_NONE, EV_SENSOR_DOWN, EV_SENSOR_OK, EV_WARN, EV_LOAD_WARN, EV_LOAD_CANCELLED, EV_OFF };
