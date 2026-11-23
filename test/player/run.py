@@ -251,15 +251,19 @@ def test_a_pause_right_after_a_song_holds_for_it(player, songs, tmp):
     logged = re.findall(r' I player (q2player: .*)', (tmp/'start-paused/player.log').read_text())
     assert logged == [f'q2player: set-songurl {songs}/a1.flac from 5 s', 'q2player: mcl-pause', 'q2player: mcl-play'], logged
     got, want = b''.join(pcm), reference(songs/'a1.flac')[5 * 44100 * 4:]
-    frames = len(got) // 4  # mcl-play at 3.0 and the end at 5.0: about 2 s, where a lost pause gives about 4
-    assert want.startswith(got) and 0 < frames < int(2.6 * 44100), f'{frames} frames written'
+    # from mcl-play to the run's end as this side ran them (2 s idle) and the PCM's half second ahead, where a lost
+    # pause gives 2 s more: a fixed 2.6 s missed a session that ended late side by side (115712 frames)
+    played = next(float(l.split()[0]) for l in s.lines if l.endswith('{mcl-play\\null}'))
+    frames, most = len(got) // 4, int((s.end_at - played + 0.6) * 44100)
+    assert want.startswith(got) and 0 < frames < most, f'{frames} frames written, at most {most}'
     return f'{frames} frames, all after the play'
 
 
 def test_seek_exact(player, songs, tmp):
     """A seek to 9 s: what follows it is the reference from frame 9 x 44100, to the end; what came before is the
     reference's start."""
-    s, pcm, names = play(player, songs, 'seek', tmp/'seek', speed=8)
+    # to its end: the run waits for its exit (a fixed end cut the tail short side by side, 340380 frames)
+    s, pcm, names = play(player, songs, 'seek', tmp/'seek', speed=8, exits=1)
     got, ref = b''.join(pcm), reference(songs/'a1.flac')
     tail = ref[9 * 44100 * 4:]
     assert got.endswith(tail), f'the PCM does not end with the reference from 9 s ({len(got) // 4} frames)'
@@ -334,13 +338,14 @@ def test_scan(player, songs, tmp):
     # 10 s and on at 1 until the turn backward, plus the half second the file sink keeps of what the turn drops, and a
     # second for where a window falls. A player stopped 300 ms a second reached 17 s (1 of 20), as a busy Q2 would: 15
     # s is past what playing on would reach (14 s). Back at twice is twice its hold at most, less on a busy machine,
-    # where it went back 1 s in a hold of 1.25 s: it must go back, and no further than that.
+    # where it went back 1 s in a hold of 1.25 s: it must go back, and no further than that and the turn's 2 s, the
+    # hold read from the transcript's milliseconds (10 ms: 22 s back to 16 s in a hold read as 1.996 s).
     sent = {l.split()[-1]: float(l.split()[0]) for l in reversed(s.lines) if l.split()[1] == '>' and 'mcl-scan' in l}
     sent0 = [float(l.split()[0]) for l in s.lines if l.endswith('{mcl-scan\\0}')]
     fwd, hold = sent0[0] - sent['{mcl-scan\\400}'], sent0[1] - sent['{mcl-scan\\-200}']
     most = 10 + (sent['{mcl-scan\\400}'] - 1.0) + 4 * fwd + (sent['{mcl-scan\\-200}'] - sent0[0]) + 1.5
     reached = secs[top]
-    assert 15 <= reached <= most and reached - 2 * hold - 2 <= back < reached, \
+    assert 15 <= reached <= most and reached - 2 * hold - 2.01 <= back < reached, \
         f'reached {reached} s (at most {most:.1f}), then back to {back} s (a hold of {hold:.2f} s backward)'
     steps = [b - a for a, b in zip(secs, secs[1:])]
     jumps = [d for d in steps if abs(d) > 1]
@@ -691,7 +696,7 @@ def test_media_info_while_a_song_opens(player, songs, tmp):
     s.run(steps, fakedemo.launch_host(player, str(songs), 1), 1)
     # the answers after the cut by their order on the socket: by time, an answer read just before it could stamp later
     # than the transcript's rounded time of it (4 of 20 runs starved)
-    cut = next(n for m, n in s.ends if m == '{player-nextstatus\\exit}')
+    cut = next(n for m, n, _ in s.ends if m == '{player-nextstatus\\exit}')
     after = [(t, m) for t, m in s.answers[cut:] if m.startswith('{media-info')]
     first = next(i for i, (_, m) in enumerate(after) if '|' in m)
     opening, (came, song) = after[:first], after[first]
@@ -1242,8 +1247,9 @@ def test_usb_48k_only(player, songs, tmp):
     ("hw:1,0 gave 48000 Hz for 44100", play failed, "Not Supported"). The pair through a preloaded change is the whole
     file resampled, in one PCM; that is FFmpeg's resample of the file within the 16-bit dither (TPDF, a step either way),
     with no step at the cut; what the device offers is logged once, not at each song."""
-    s, a, an = play(player, songs, 'usb48-pair', tmp/'usb48-pair', speed=4, env=USB48)
-    _, b, bn = play(player, songs, 'usb48-whole', tmp/'usb48-whole', speed=4, env=USB48)
+    # each whole: the run waits for the player's exits (a fixed end cut the whole short side by side)
+    s, a, an = play(player, songs, 'usb48-pair', tmp/'usb48-pair', speed=4, env=USB48, exits=2)
+    _, b, bn = play(player, songs, 'usb48-whole', tmp/'usb48-whole', speed=4, env=USB48, exits=1)
     errors = [l for l in s.lines if 'error}' in l]
     name = '0000_48000_2_s16_usb.raw'
     assert not errors and an == [name] and bn == [name], (an, bn, errors)
@@ -1336,8 +1342,9 @@ def check_bt_split(player, songs, tmp, pair, whole, source, rate, frames):
     one PCM at the transport's rate, and that is FFmpeg 7.1.5's libswresample with lavcresample's settings, its tail
     flushed. docs/internals.md#bluetooth-resampler"""
     env = {'Q2PLAYER_BT_RATE': str(rate)}
-    _, a, an = play(player, songs, pair, tmp/f'{pair}-{rate}', speed=4, env=env)
-    _, b, bn = play(player, songs, whole, tmp/f'{whole}-{rate}', speed=4, env=env)
+    # each whole: the run waits for the player's exits (a fixed end cut the pair short side by side)
+    _, a, an = play(player, songs, pair, tmp/f'{pair}-{rate}', speed=4, env=env, exits=2)
+    _, b, bn = play(player, songs, whole, tmp/f'{whole}-{rate}', speed=4, env=env, exits=1)
     name = f'0000_{rate}_2_s16_bt.raw'
     assert an == [name] and bn == [name], (an, bn)
     want = ffref(tmp, 'resample', songs/source, rate, 's16')
@@ -1404,7 +1411,11 @@ def test_car_way_follows_the_car(player, songs, tmp):
     """The car asks for its audio while a1 plays over Bluetooth, then stops: a1 moves to the car's PCM where it is, then
     back to Bluetooth's, three PCMs in turn, the car's a stretch of a1 itself, unbroken."""
     cp, car = car_player(), tmp/'car-switch.audio'
-    steps = car_steps(songs, car, at_on=3.0, at_off=6.0) + [(8.0, '{mcl-stop\\null}'), (9.0, None)]
+    # each move waited for in the player's log, then 2 s of the song where it went: at fixed times a starved player
+    # had not moved back to Bluetooth by the stop (two PCMs, side by side)
+    steps = sorted(car_steps(songs, car, at_on=3.0) + [(3.0, fakedemo.logged('output way 3 now', 2.0)), (3.0, lambda s: car.unlink()),
+                                                       (3.0, fakedemo.logged('output way 1 now', 2.0)), (3.0, '{mcl-stop\\null}'),
+                                                       (3.0, None)], key=lambda st: st[0])
     names, pcm, log = car_play(songs, tmp, 'car-switch', steps, cp, car)
     assert [n.split('_', 1)[1] for n in names] == ['48000_2_s16_bt.raw', '44100_2_s16_car.raw', '48000_2_s16_bt.raw'], names
     a1, mid = reference(songs/'a1.flac'), pcm[1]
@@ -2100,6 +2111,46 @@ MEDIA_INFO_DEVIATIONS = {
 }
 
 
+def media_info_by_song(s):
+    """q2player's media-info figures for each song the session sent (1 for the first), POS for the position: the last
+    answer to a query asked under that song's command, and after the song before it was cut (its nextstatus or exit,
+    by order on the socket). Not by when this side read it: side by side, the runner's other threads held the GIL,
+    the session read and stamped late, and a song's answers landed in the next song's 2.5 s (6 of 6 runs beside seven
+    threads of Python work). Not before the cut: until the playback thread cuts the song playing, the player answers
+    for the song still playing (stock's cut comes 60 to 80 ms after the command, docs/player.md#captured-sequences),
+    and a burst of queries taken all at once after the command (the player held through the song's 2.5 s,
+    test_media_info_held) was all answered so."""
+    cuts = [n for m, _, n in s.ends if m in ('{player-nextstatus\\exit}', '{player-status\\exit}')]
+    got = {}
+    for k, (asked, m) in enumerate(zip(s.mi_asked, s.mi_answers)):
+        if '|' in m and (asked == 1 or (len(cuts) >= asked - 1 and k >= cuts[asked - 2])):
+            got[asked] = m[12:-1].split('|')
+            got[asked][3] = 'POS'
+    return got
+
+
+def test_media_info_held(player, songs, tmp):
+    """The player held (SIGSTOP) from just before w16.wav's set-nexturl until 50 ms before w24.wav's is due, as a
+    machine that does not run it for that long (integ/q2-1129, load 1 to 2: w16.wav reported as the OGG before it):
+    the queries of w16's 2.5 s are all taken at once with the command and answered for e.ogg, which plays until the
+    playback thread cuts it. The next command waits for w16's own figures (fakedemo.figures), and each song's
+    figures are its own."""
+    m = songs
+    hold = lambda s: os.kill(s.proc.pid, signal.SIGSTOP)
+    go = lambda s: os.kill(s.proc.pid, signal.SIGCONT)
+    boot = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\0}'), (0.1, '{mcl-setvol\\60}')]
+    steps = boot + [(1.0, fakedemo.song('set-songurl', f'{m}/e.ogg')), (3.45, hold), (3.5, fakedemo.song('set-nexturl', f'{m}/w16.wav')),
+                    (5.95, go), (6.0, fakedemo.figures()), (6.0, fakedemo.song('set-nexturl', f'{m}/w24.wav')), (6.0, fakedemo.figures()),
+                    (8.5, '{mcl-stop\\null}'), (9.0, None)]
+    s = fakedemo.Session(tmp/'mi-held')
+    s.music = songs
+    s.run(steps, fakedemo.launch_host(player, str(songs), 1), 1)
+    got = media_info_by_song(s)
+    kinds = {k: (v[4], v[5]) for k, v in got.items()}
+    assert kinds == {1: ('OGG', '32'), 2: ('WAV', '16'), 3: ('WAV', '24')}, got
+    return ', '.join(f'{c} {b}' for c, b in kinds.values())
+
+
 def test_media_info_per_format(player, songs, tmp):
     """formats-all: for each file, the media-info Q2 Muse's hciplayer gave (fixtures/pod-formats-all.txt): RATE, LENGTH,
     CODEC and BITS the same and BITRATE within 2%, but for MEDIA_INFO_DEVIATIONS."""
@@ -2114,16 +2165,8 @@ def test_media_info_per_format(player, songs, tmp):
     # a fixture's transcript writes an answer only when it changes: a file with none of its own answered as the one before
     for a, b in zip(fakedemo.ALL_FORMATS, fakedemo.ALL_FORMATS[1:]): want.setdefault(b, want.get(a))
     s, _, _ = play(player, songs, 'formats-all', tmp/'formats-all', speed=4)
-    # q2player's, by the song each query was asked under, the last answer before the next song's command: not by when
-    # this side read it. Side by side, the runner's other threads hold the GIL, so the session reads and stamps late,
-    # and a song's answers landed in the next song's 2.5 s (6 of 6 runs beside seven threads of Python work)
-    got = {}
-    for asked, m in zip(s.mi_asked, s.mi_answers):
-        if '|' in m and 1 <= asked <= len(fakedemo.ALL_FORMATS):
-            got[asked] = m[12:-1].split('|')
+    got = media_info_by_song(s)
     got = {f: got.get(i + 1) for i, f in reversed(list(enumerate(fakedemo.ALL_FORMATS)))}  # f24.flac's first play
-    for v in got.values():
-        if v: v[3] = 'POS'
     bad = []
     for f in fakedemo.ALL_FORMATS:
         w, g = want.get(f), got.get(f)

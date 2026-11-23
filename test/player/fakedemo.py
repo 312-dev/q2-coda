@@ -103,8 +103,12 @@ def scenarios(m):
         # a whole 24-bit 96 kHz song
         'hires': boot + [(1.0, song('set-songurl', c96)), (19.0, None)],
         # every format demo lists, one after another by set-nexturl: CODEC, BITS, LENGTH, BITRATE and the PCM opened
-        'formats-all': boot + [(1.0 + 2.5 * i, song('set-songurl' if i == 0 else 'set-nexturl', f'{m}/{f}')) for i, f in enumerate(ALL_FORMATS)]
-                       + [(1.0 + 2.5 * len(ALL_FORMATS), '{mcl-stop\\null}'), (3.0 + 2.5 * len(ALL_FORMATS), None)],
+        # each next song sent once the one before has said its figures (figures): on the host only, where run.py's
+        # test_media_info_per_format reads them; stock's captures (fixtures/*-formats-all.txt) sent at the times alone
+        'formats-all': boot + [x for i, f in enumerate(ALL_FORMATS) for x in
+                               ([(1.0 + 2.5 * i, figures())] if i else []) + [(1.0 + 2.5 * i, song('set-songurl' if i == 0 else 'set-nexturl', f'{m}/{f}'))]]
+                       + [(1.0 + 2.5 * len(ALL_FORMATS), figures()), (1.0 + 2.5 * len(ALL_FORMATS), '{mcl-stop\\null}'),
+                          (3.0 + 2.5 * len(ALL_FORMATS), None)],
         # a held Next heard at 4 times (patch/seek.c's mcl-scan), let go, then a held Previous heard backward at twice
         'scan': boot + [(1.0, song('set-songurl', f'{m}/pos.flac', start=10)), (3.0, '{mcl-scan\\400}'), (5.0, '{mcl-scan\\0}'),
                         (7.0, '{mcl-scan\\-200}'), (9.0, '{mcl-scan\\0}'), (11.0, '{mcl-stop\\null}'), (12.0, None)],
@@ -413,7 +417,7 @@ def after_exits(n, extra=0.0, heard=None):
         while s.exits() < n and time.monotonic() < deadline:
             s.pump(min(deadline, time.monotonic() + 0.1))
         if heard is not None:
-            at = [k for m, k in s.ends if m == '{player-status\\exit}'][n - 1] if s.exits() >= n else len(s.answers)
+            at = [k for m, k, _ in s.ends if m == '{player-status\\exit}'][n - 1] if s.exits() >= n else len(s.answers)
             def there():
                 return any(m.startswith('{media-info') and '|' in m and int(m.split('|')[3]) >= heard for _, m in s.answers[at:])
             while not there() and time.monotonic() < deadline:
@@ -431,6 +435,34 @@ def at_position(p, extra=0.0):
         while not (s.positions and s.positions[-1][1] >= p) and time.monotonic() < deadline:
             s.pump(min(deadline, time.monotonic() + 0.05))
         s.pump(time.monotonic() + extra / s.speed)
+    return go
+
+
+def logged(text, extra=0.0):
+    """A step: wait (pumping, at most EXIT_WAIT_S of real time) until the player's log (player.log) has text, then
+    `extra` seconds more of the player's clock: a step after something the player does on its own time."""
+    def go(s):
+        deadline, log = time.monotonic() + EXIT_WAIT_S, s.out / 'player.log'
+        while time.monotonic() < deadline and text not in (log.read_text(errors='replace') if log.exists() else ''):
+            s.pump(min(deadline, time.monotonic() + 0.05))
+        s.pump(time.monotonic() + extra / s.speed)
+    return go
+
+
+def figures():
+    """A step: wait (pumping, at most EXIT_WAIT_S of real time) for media-info's figures of the song last sent: an
+    answer to a query asked under its command, after the song before it was cut (Session.ends, by order on the
+    socket), so the next command never comes before this song has said what it is."""
+    def go(s):
+        deadline = time.monotonic() + EXIT_WAIT_S
+        def there():
+            n = s.songs_sent
+            cuts = [k for m, _, k in s.ends if m in ('{player-nextstatus\\exit}', '{player-status\\exit}')]
+            if n > 1 and len(cuts) < n - 1: return False
+            start = cuts[n - 2] if n > 1 else 0
+            return any(a == n and '|' in m for a, m in list(zip(s.mi_asked, s.mi_answers))[start:])
+        while not there() and time.monotonic() < deadline:
+            s.pump(min(deadline, time.monotonic() + 0.05))
     return go
 
 
@@ -517,7 +549,7 @@ class Session:
         self.on_exit = []  # set-gapless commands sent one at each {player-status\\exit}, as demo sends one per song
         self.wait_exits = 0  # at the last step, wait for this many {player-status\\exit} first (run): 0, none
         self.wait_ends, self.ended = 0, 0  # the same for every event that ends a song (ENDS), and their count so far
-        self.ends = []  # each such event and how many answers (self.answers) came before it: their order, not their time
+        self.ends = []  # each such event, and how many answers (self.answers) and media-info answers came before it: order, not time
         certs = httpd.certificates(CERTS)
         root = lambda: pathlib.Path(self.music)
         self.web = [httpd.serve(root)] + [httpd.serve(root, (certs / f'{n}.pem', certs / f'{n}.key')) for n in ('good', 'wrong', 'self')]
@@ -581,7 +613,7 @@ class Session:
                     shown = '{media-info\\' + '|'.join(f[:3] + ['POS'] + f[4:]) + '}'
                 if name in ('media-info', 'player-status'): self.answers.append((self.now(), m))  # as answered, position and all
                 if name == 'media-info': self.mi_answers.append(m)
-                if m in ENDS: self.ended += 1; self.ends.append((m, len(self.answers)))
+                if m in ENDS: self.ended += 1; self.ends.append((m, len(self.answers), len(self.mi_answers)))
                 # an answer to the 200 ms poll is written only when it differs from the last one of its kind
                 if name in ('media-info', 'player-status') and self.seen.get(name) == shown: pass
                 else: self.note('<', shown)
@@ -620,6 +652,7 @@ class Session:
             if what.startswith('{set-gapless'): self.preload = True
             if what.startswith('{mcl-closegapless'): self.preload = False
             self.send(what)
+        self.end_at = self.now()  # when the player is stopped: the run's last moment, as this side counts
         starving.set()
         cpu = cpu_seconds(proc.pid)
         self.conn.close(); proc.terminate()
