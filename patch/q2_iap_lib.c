@@ -156,12 +156,14 @@ struct lib_sid {
 };
 static struct {
     struct lib_sid *v; /* the index, sorted; n of them */
+    void *block;       /* the allocation v lies in, when it is the index's own (sid_install) */
     unsigned n, cap;
     int fd;               /* the child's pipe while it reads the catalogue, else -1 */
     int asked;            /* a child was started this run: not again */
-    unsigned char *in;    /* its records so far */
-    unsigned in_n, in_cap;
+    unsigned char *in;    /* its bytes so far: a count, then that many rows */
+    unsigned in_n, want;  /* want: the bytes it sends, once its count is in, else 0 */
 } sids = {.fd = -1};
+#define HANDOVER_MAX 65536 /* bytes of a child's tables taken in a loop pass at most: never O(library) at once */
 
 static void sid_key(const char *app, int appn, const char *sid, int sidn, unsigned *hi, unsigned *lo) {
     unsigned long long h = 14695981039346656037ull;
@@ -188,16 +190,17 @@ static int sid_add(struct lib_sid **v, unsigned *n, unsigned *cap, const char *a
     return 1;
 }
 /* v (n rows) sorted, unless they are, and made the index, in place of the one before */
-static void sid_install(struct lib_sid *v, unsigned n, int sorted) {
-    if (v && !sorted) qsort(v, n, sizeof *v, sid_cmp);
-    free(sids.v);
-    sids.v = n ? realloc(v, n * sizeof *v) : (free(v), (struct lib_sid *)0);
-    if (n && !sids.v) sids.v = v;
-    sids.n = sids.v ? n : 0;
+/* v (n rows, sorted) made the index, in place of the one before. block: the allocation v lies in, freed with the
+ * next index (0: v lies in the library's block, lib_install, and goes with it). O(1): the sort and the copies are
+ * the children's. */
+static void sid_install(struct lib_sid *v, unsigned n, void *block) {
+    free(sids.block);
+    sids.block = block, sids.v = n ? v : 0, sids.n = n;
 }
 
-/* The child that reads the catalogue's (app, sid, id) rows for the index: each as 12 bytes on the pipe, unsorted
- * (sid_key's halves and the rid, in this machine's order), the loop reading them as they come (sid_index_poll). */
+/* The child that reads the catalogue's (app, sid, id) rows for the index and sorts them: on the pipe their count,
+ * then each as 12 bytes (sid_key's halves and the rid, in this machine's order), the loop taking them in as they
+ * come (sid_index_poll). */
 static void sid_index_start(void) {
     int fds[2];
     if (sids.asked || sids.n || access(lib_cat, 0)) return;
@@ -209,23 +212,17 @@ static void sid_index_start(void) {
         sqlite3_stmt *st = 0;
         child_drop();
         close(fds[0]);
+        struct lib_sid *v = 0;
+        unsigned n = 0, cap = 0;
+        nice(10);
         if (!sqlite3_open_v2(lib_cat, &db, SQLITE_OPEN_READONLY, 0) &&
-            !sqlite3_prepare_v2(db, "select app, sid, id from servermeta where sid is not null", -1, &st, 0)) {
-            struct lib_sid b[256];
-            unsigned k = 0;
-            while (sqlite3_step(st) == SQLITE_ROW) {
-                const char *app = (const char *)sqlite3_column_text(st, 0), *sid = (const char *)sqlite3_column_text(st, 1);
-                unsigned rid = (unsigned)sqlite3_column_int(st, 2);
-                if (!app || !sid || !rid) continue;
-                sid_key(app, (int)strlen(app), sid, (int)strlen(sid), &b[k].hi, &b[k].lo);
-                b[k].rid = rid;
-                if (++k == 256) {
-                    if (write(fds[1], b, sizeof b) != (int)sizeof b) _exit(1);
-                    k = 0;
-                }
-            }
-            if (k && write(fds[1], b, k * sizeof *b) != (int)(k * sizeof *b)) _exit(1);
-        }
+            !sqlite3_prepare_v2(db, "select app, sid, id from servermeta where sid is not null", -1, &st, 0))
+            while (sqlite3_step(st) == SQLITE_ROW)
+                if (!sid_add(&v, &n, &cap, (const char *)sqlite3_column_text(st, 0),
+                             (const char *)sqlite3_column_text(st, 1), (unsigned)sqlite3_column_int(st, 2)))
+                    _exit(1);
+        if (v) qsort(v, n, sizeof *v, sid_cmp); /* here, so the loop only takes them in */
+        if (lib_write_all(fds[1], &n, sizeof n) || lib_write_all(fds[1], v, n * sizeof *v)) _exit(1);
         _exit(0);
     }
     close(fds[1]);
@@ -237,35 +234,44 @@ static void sid_index_start(void) {
     sids.fd = fds[0];
 }
 
-/* The child's records taken in, as many as wait; at its end (end of file) the index made of them, unless lib_load
- * has made one meanwhile. */
+/* The child's rows taken in, HANDOVER_MAX bytes a pass at most, into room for exactly the count it sent first; once
+ * all are in, they are the index, unless lib_load's has come meanwhile. */
 static void sid_index_poll(void) {
-    for (;;) {
-        if (sids.fd < 0) return;
-        if (sids.in_n + 4096 > sids.in_cap) {
-            unsigned char *w = realloc(sids.in, sids.in_cap = sids.in_cap ? sids.in_cap * 2 : 65536);
+    unsigned took = 0;
+    int r = 1;
+    while (sids.fd >= 0 && took < HANDOVER_MAX) {
+        unsigned need = sids.want ? sids.want : sizeof(unsigned);
+        if (sids.in_n == need) break; /* all in */
+        if (!sids.in || sids.in_n == sizeof(unsigned)) { /* room for the count, then for exactly what it says */
+            unsigned char *w = realloc(sids.in, need);
             if (!w) break;
             sids.in = w;
         }
-        int r = (int)read(sids.fd, sids.in + sids.in_n, sids.in_cap - sids.in_n);
-        if (r > 0) {
-            sids.in_n += (unsigned)r;
-            continue;
+        r = (int)read(sids.fd, sids.in + sids.in_n, need - sids.in_n < HANDOVER_MAX - took ? need - sids.in_n : HANDOVER_MAX - took);
+        if (r <= 0) break;
+        sids.in_n += (unsigned)r, took += (unsigned)r;
+        if (!sids.want && sids.in_n == sizeof(unsigned)) {
+            unsigned n;
+            memcpy(&n, sids.in, sizeof n);
+            sids.want = n < (64u << 20) / sizeof(struct lib_sid) ? sizeof n + n * sizeof(struct lib_sid) : 0;
+            if (!sids.want) break;
+            if (sids.want == sizeof n) break; /* none */
         }
-        if (r < 0 && (ERRNO == EAGAIN || ERRNO == EINTR)) return;
-        break;
     }
+    if (sids.fd < 0) return;
+    int whole = sids.want && sids.in_n == sids.want;
+    if (!whole && (took >= HANDOVER_MAX || (r < 0 && (ERRNO == EAGAIN || ERRNO == EINTR)))) return; /* more to come */
     close(sids.fd), sids.fd = -1;
-    unsigned n = sids.in_n / sizeof(struct lib_sid);
-    if (!sids.n && sids.in) {
+    unsigned n = whole ? (sids.want - (unsigned)sizeof(unsigned)) / sizeof(struct lib_sid) : 0;
+    if (whole && n && !sids.n) {
         char msg[120];
-        sid_install((struct lib_sid *)sids.in, n, 0);
+        sid_install((struct lib_sid *)(sids.in + sizeof(unsigned)), n, sids.in);
         snprintf(msg, sizeof msg, "library: %u server songs found by their stream path, from the catalogue", sids.n);
         logline("lib", msg);
     } else {
         free(sids.in);
     }
-    sids.in = 0, sids.in_n = sids.in_cap = 0;
+    sids.in = 0, sids.in_n = sids.want = 0;
 }
 
 /* Each of n paths (0: none) whose rids[i] is 0 looked for in the index; the count found. */
@@ -471,35 +477,37 @@ static int lib_install(unsigned char *b, unsigned len) {
     lib_t.n = h.n, lib_t.nlists = h.nlists, lib_t.sent_n = h.sent_n;
     memcpy(lib_t.rev, h.rev, sizeof h.rev), memcpy(lib_t.sent_rev, h.sent_rev, sizeof h.sent_rev);
     lib_t.rev[sizeof lib_t.rev - 1] = lib_t.sent_rev[sizeof lib_t.sent_rev - 1] = 0;
-    struct lib_sid *sv = h.sn ? malloc(h.sn * sizeof *sv) : 0;
-    if (sv) memcpy(sv, c, h.sn * sizeof *sv);
-    sid_install(sv, sv ? h.sn : 0, 1);
+    sid_install((struct lib_sid *)c, h.sn, 0); /* the rows where they lie, in the block */
     return 1;
 }
 
 /* The child's bytes taken in, as many as wait; at its end the tables installed (lib_ready then says how it went).
  * Called every pass of the loop, so the child never waits on a full pipe. */
 static void lib_load_poll(void) {
-    for (;;) {
-        if (lload.fd < 0) return;
-        if (lload.in_n + 65536 > lload.in_cap) {
-            unsigned c = lload.in_cap ? lload.in_cap * 2 : 262144;
-            if (lload.in_n >= sizeof(struct lib_head)) { /* once, at the size the header announces */
-                unsigned long long want = lib_want((const struct lib_head *)lload.in) + 65536;
-                if (want > c && want < 64u << 20) c = (unsigned)want;
-            }
-            unsigned char *w = realloc(lload.in, c);
+    unsigned took = 0;
+    int r = 1, whole = 0;
+    while (lload.fd >= 0 && took < HANDOVER_MAX) {
+        unsigned need = sizeof(struct lib_head);
+        if (lload.in_n >= need) { /* the header in: room for exactly what it announces, once */
+            unsigned long long want = lib_want((const struct lib_head *)lload.in);
+            if (want >= 64u << 20) break;
+            need = (unsigned)want;
+        }
+        if (lload.in_n == need && lload.in_n >= sizeof(struct lib_head)) {
+            whole = 1;
+            break;
+        }
+        if (lload.in_cap < need) {
+            unsigned char *w = realloc(lload.in, need);
             if (!w) break;
-            lload.in = w, lload.in_cap = c;
+            lload.in = w, lload.in_cap = need;
         }
-        int r = (int)read(lload.fd, lload.in + lload.in_n, lload.in_cap - lload.in_n);
-        if (r > 0) {
-            lload.in_n += (unsigned)r;
-            continue;
-        }
-        if (r < 0 && (ERRNO == EAGAIN || ERRNO == EINTR)) return;
-        break;
+        r = (int)read(lload.fd, lload.in + lload.in_n, need - lload.in_n < HANDOVER_MAX - took ? need - lload.in_n : HANDOVER_MAX - took);
+        if (r <= 0) break;
+        lload.in_n += (unsigned)r, took += (unsigned)r;
     }
+    if (lload.fd < 0) return;
+    if (!whole && (took >= HANDOVER_MAX || (r < 0 && (ERRNO == EAGAIN || ERRNO == EINTR)))) return; /* more to come */
     close(lload.fd), lload.fd = -1, lload.pid = 0;
     char msg[160];
     int ok = lload.in ? lib_install(lload.in, lload.in_n) : 0;
