@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Menus and Up Next: the blurred background behind them shades smoothly, where its darker gradients showed as wide bands.
   - Car Audio: Radio, Internet Radio, Videos and Spotify now play through the car's USB too, where they went to Bluetooth or nowhere while the car listened to USB.
   - Radio: starting a song's radio again after stopping it (from the car or on the Q2) works, where it said "Radio isn't available for this song".
   - Car Audio: the car's Up Next shows the queue of songs from your server, and their covers come from the songs themselves when the Q2 has no other.
