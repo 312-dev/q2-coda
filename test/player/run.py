@@ -618,7 +618,8 @@ def test_grow_seek_beyond(player, songs, tmp):
         took = waiting.index(15) if 15 in waiting else len(waiting)
         assert waiting[took:] and set(waiting[took:]) == {15} and all(p <= 2 for p in waiting[:took]), \
             f'{kind}: the position while the player waits is not the target: {waiting}'
-        after = [p for t, p in s.positions if 2.0 < t < 12.0]
+        rest = max(u for at, u in s.ran if at == 12.0)  # the rest landing, as this side ran it
+        after = [p for t, p in s.positions if 2.0 < t < rest]  # a fixed 12 s missed a starved player's 16 s (1 of 20)
         assert after and max(after) >= 16, f'{kind}: the target was not played when its bytes came: positions {after}'
         said.append(f'{kind} {len(head) // 4} frames before, at {max(after)} s before the rest landed')
     return 'a wait, then the reference from 15 s to the end; ' + '; '.join(said)
