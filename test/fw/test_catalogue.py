@@ -739,6 +739,40 @@ def test_likes_and_stars_from_the_server_are_applied_apart(rig, fw):
     assert rate(0, ka) == 4 and rate(0, kb) == 3 and rate(0, ks) == 5
 
 
+def test_a_thousand_ratings_from_the_server_are_one_database_write_and_one_table_write(rig, fw):
+    """A first sync of a server's stars and hearts: 1,000 lines in one ratings.in, beside a ratings.out of 1,000 of
+    the Q2's own. They are applied with one connection and one transaction for My Fav, the ratings table written
+    once, and ratings.out read and indexed once, on the UI thread's pass that takes them; the pass's time is
+    printed (test/fw at -O0, for comparing builds, not the Q2's)."""
+    import time
+    sids = [f's{i:04}' for i in range(1000)]
+    rig.write(1, [song_row(sid, f'T {sid}', 'B', 'A', i + 1, 100, i + 1) for i, sid in enumerate(sids)])
+    rig.poll()
+    keys = [listen_key(url(sid)) for sid in sids]
+    lines = ''.join(f'{k:08x}\t{sid}\t' + (f'stars={i % 5 + 1}' if i % 2 else f'like={i % 4 // 2}') + '\t1700000000\n'
+                    for i, (k, sid) in enumerate(zip(keys, sids)))
+    rig.files.files[f'/mnt/mmc/.{APP}/ratings.out'] = ''.join(f'{0x10000 + i:08x}\t\tstars=3\t1700000100\n'
+                                                               for i in range(1000)).encode()
+    rig.files.files[f'/mnt/mmc/.{APP}/ratings.in'] = lines.encode()
+    rig.files.files['/mnt/data/ringnav-ratings'] = b''
+    opens, renames = [], []  # counted here: the call log keeps only the latest calls
+    fw.mock('sqlite3_open', lambda name, db, *_: opens.append(C.string_at(name)) or rig.open(name, db))
+    fw.mock('fw_rename', lambda old, new, *_: renames.append(C.string_at(new)) or rig.rename(old, new))
+    t = time.perf_counter()
+    rig.poll(1)
+    took = time.perf_counter() - t
+    print(f'ratings_in of 1,000 lines: {took * 1000:.0f} ms, {len(opens)} database opens, '
+          f'{renames.count(b"/mnt/data/ringnav-ratings")} ratings table writes')
+    assert f'/mnt/mmc/.{APP}/ratings.in' not in rig.files.files
+    db = sqlite3.connect(rig.tmp/'database.db')
+    liked = {r[0] for r in db.execute('select fileurl from myfav')}
+    assert liked == {url(sid) for i, sid in enumerate(sids) if not i % 2 and i % 4 // 2}
+    rate = fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)
+    assert all(rate(0, k) == i % 5 + 1 for i, k in enumerate(keys) if i % 2)
+    assert len(opens) <= 2  # the songtable lookup's and My Fav's
+    assert renames.count(b'/mnt/data/ringnav-ratings') == 1
+
+
 def test_a_scan_that_ends_while_a_job_runs_is_matched_after_it(rig, fw):
     """A USB copy's scan moves library_gen while the import reads the card's songs: the swap must not
     count it as matched, so the next poll matches again and finds the new file."""
@@ -1884,3 +1918,88 @@ def test_bluetooth_names_a_server_songs_cover_as_its_app_keeps_it(rig, fw):
         h = ((h ^ b) * 16777619) & 0xffffffff
     h = (h * 16777619) & 0xffffffff
     assert rig.files.files.get('/tmp/q2-bip.now') == b'%07d\n%s\napp\n%s\n' % (h % 10**7, cover.encode(), stream)
+
+
+def test_dark_and_idle_the_catalogue_poll_reads_the_app_s_files_every_ten_seconds(rig, fw):
+    """The owner's case, a server signed in and indexed: with the screen dark, nothing playing and no catplay
+    waiting, catalogue_poll looked at the app's state, catalogue.avail, catalogue.tsv (twice) and ratings.in every
+    second. It now does once each CAT_DARK_MS; lit, or playing, still each second. Counted over a dark minute."""
+    rig.write(1, [song_row('s1', 'A', 'B', 'C', 1, 100, 1)])
+    rig.poll()
+    opened, looked = [], []
+    files = rig.files
+    fw.mock('fw_fopen', lambda path, mode, *_: opened.append(C.string_at(path)) or files.fopen(path, mode))
+    fw.mock('fw_access', lambda path, mode, *_: looked.append(C.string_at(path)) or rig.access(path, mode))
+    poll = fw.fn('catalogue_poll', None)
+
+    def minute():
+        opened.clear(), looked.clear()
+        for _ in range(60):
+            rig.now += 1000
+            poll()
+        return len(opened) + len(looked)
+    fw.var('g_backlight_status', C.c_ubyte).value = 0
+    dark = minute()
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    lit = minute()
+    print(f'catalogue_poll, a minute: dark and idle {dark} opens and accesses, lit {lit}')
+    assert dark <= lit // 8
+    fw.var('g_backlight_status', C.c_ubyte).value = 0
+    fw.mock('mclGetPlayStatus', lambda *_: 2)  # playing: each second, as lit
+    assert minute() >= lit // 2
+
+
+def test_serverall_is_looked_up_by_fileurl_through_an_index(rig, fw):
+    """Up Next's rows (catalogue_copy_tags), Now Playing's info (catalogue_np_info) and fav_set read serverall by
+    fileurl: an index makes each a search, where the plan was a scan of every row. A catalogue made before the
+    index gets it from the next job, which a boot's first poll starts."""
+    rig.write(1, [song_row(f's{i}', f'T{i}', 'B', 'A', i + 1, 100, i + 1) for i in range(20)])
+    rig.poll()
+    plan = lambda: ' '.join(r[3] for r in rig.query(
+        f"explain query plan select name,album,songer,albumsonger from cat.serverall where fileurl='{url('s3')}'"))
+    print('serverall by fileurl:', plan())
+    assert 'USING INDEX' in plan() and 'SCAN' not in plan()
+    db = sqlite3.connect(rig.tmp/'catalogue.db')
+    db.execute('drop index serverall_url')
+    db.commit()
+    db.close()
+    assert 'SCAN' in plan()  # a file from before the index
+    rig.write(2, [song_row(f's{i}', f'T{i}', 'B', 'A', i + 1, 100, i + 1) for i in range(21)])
+    rig.poll()
+    assert 'USING INDEX' in plan()
+
+
+def test_an_offline_copy_is_found_by_its_path_s_hash(rig, fw):
+    """cat_copy_of walked every index entry with a strcmp per offline copy; it is now a binary search on the copy
+    path's hash, its time per lookup printed (9,199 rows, 2,000 of them with an offline copy)."""
+    import time
+    n = 9199
+    rig.write(1, [song_row(f's{i:05}', f'T{i}', 'B', 'A', i + 1, 100, i + 1,
+                           local=f'/mnt/mmc/.subsonic/stream/acct/q/{i % 16:x}/T{i} [s{i:05}].flac' if i < 2000 else '')
+                  for i in range(n)])
+    rig.poll()
+    seconds = fw.fn('catalogue_copy_seconds', C.c_int, C.c_char_p)
+    paths = [f'/mnt/mmc/.subsonic/stream/acct/q/{i % 16:x}/T{i} [s{i:05}].flac'.encode() for i in range(0, 2000, 7)]
+    t = time.perf_counter()
+    got = [seconds(p) for p in paths]
+    took = (time.perf_counter() - t) / len(paths)
+    print(f'cat_copy_of: {took * 1e6:.1f} us a lookup')
+    assert got == [100] * len(paths)
+    assert seconds(b'/mnt/mmc/.subsonic/stream/acct/q/0/none.flac') == -1
+
+
+def test_a_catalogue_avail_line_naming_the_copy_a_row_has_adds_no_string(rig, fw):
+    """catalogue.avail is appended to as the app syncs, and a song synced again is named again: a line naming the
+    copy its row already has adds nothing to the index's strings, which grew by every such line until the next
+    import."""
+    rig.write(1, [song_row(f's{i}', f'T{i}', 'B', 'A', i + 1, 100, i + 1) for i in range(200)])
+    rig.poll()
+    avail = f'/mnt/mmc/.{APP}/catalogue.avail'
+    lines = ''.join(f's{i}\t/mnt/mmc/.subsonic/stream/a/q/0/T{i} [s{i}].flac\n' for i in range(200)).encode()
+    rig.files.files[avail] = lines
+    rig.poll(1)
+    once = cat_head(fw).ix.len
+    rig.files.files[avail] = lines * 3  # synced again, twice
+    rig.poll(1)
+    print('index strings: after the copies', once, 'after naming them twice more', cat_head(fw).ix.len)
+    assert cat_head(fw).ix.len == once

@@ -1,7 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
-  - Ratings: stars you give songs from your server now reach the card's `.ratings.tsv` copy, and the Q2 keeps stars for up to 12,285 songs (it stopped at 4,096 with "Ratings are full"). Ratings kept before are kept.
+  - Ratings: stars you give songs from your server now reach the card's `.ratings.tsv` copy, and the Q2 keeps stars for up to 12,285 songs (it stopped at 4,096 with "Ratings are full"). Ratings kept before are kept, and the Q2's old ratings file is saved once beside the new one (`/mnt/data/ringnav-ratings.v1`).
+  - Battery: with a server signed in, the Q2 now looks at the streaming app's files every 10 seconds instead of every second while the screen is off and nothing plays, and Now Playing's download spinner stops checking while the screen is off. Your server's stars and hearts arriving all at once are applied in one go, about a hundred times faster on a first sync.
   - Home: the album art slideshow beside the main menu now shows your server's albums too. With a library that is all on a server, it showed nothing.
   - Games: Games lists Bricks alone (then any games on your card). Sudoku, Vortex, Solitaire and Snake are left out of this build while the new games are finished; a game in progress or a best score you had stays saved for when they return.
   - Car Audio: Radio, Internet Radio, Videos and Spotify now play through the car's USB too, where they went to Bluetooth or nowhere while the car listened to USB.

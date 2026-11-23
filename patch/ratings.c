@@ -133,20 +133,40 @@ int rate_kept(int album, unsigned key) {
     return n <= 5 ? n : 0;
 }
 
+/* rate_hold's: the songs' table changed while held, written by rate_release. */
+static int rate_held __attribute__((section(".scratch")));
+
 /* Keeps n for key, 1 to 5, or none for 0. 1 when saved, 0 when the table is full, -1 when the file
- * was not written (the slot then as it was). */
+ * was not written (the slot then as it was). Between rate_hold and rate_release a song's is kept
+ * in the table only, and saved once by rate_release. */
 int rate_keep(int album, unsigned key, int n) {
     int some = n > 0 && n <= 5, i = rate_slot(album, key, some);
     if (i < 0) return !some;
     unsigned *t = rates(album), old = t[i];
     t[i] = some ? (key & ~7u) | (unsigned)n : RATE_GONE;
     ra.used[album] += !old;
+    if (!album && rate_held) {
+        rate_held = 2;
+        return 1;
+    }
     if (rate_io(album)) {
         ratings_copy_due();
         return 1;
     }
     t[i] = old;
     return -1;
+}
+
+/* A run of songs' rate_keep (catalogue.c's ratings_in: a server's lines) written once, at
+ * rate_release: 1 when it was, or nothing changed. */
+void rate_hold(void) { rate_held = 1; }
+int rate_release(void) {
+    int changed = rate_held == 2;
+    rate_held = 0;
+    if (!changed) return 1;
+    if (!rate_io(0)) return 0;
+    ratings_copy_due();
+    return 1;
 }
 
 /* Report only failures from rate_keep. */
