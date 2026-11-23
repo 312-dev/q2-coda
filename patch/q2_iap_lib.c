@@ -1,8 +1,9 @@
 /* q2-iap's library (docs/iphone-mode.md#the-library-on-idrive): the Q2's songs as the car's media library, read from
  * stock's database (songtable, the songs coda_rc_lib.c's views read: audiobooks and podcasts left out) with the lists
- * it sends as playlists (lib_lists) into RAM at the car's StartMediaLibraryUpdates, and the record of what the car was last sent in full (LIB_SENT), so a car that
- * holds that revision is sent only what changed. Included by q2_iap.c; q2_iap2.c reads the tables through its host
- * (struct iap2_library) and never this file's I/O. The database is opened read-only and closed after the read. */
+ * it sends as playlists (lib_lists) into RAM at the car's StartMediaLibraryUpdates, and the record of what the car was
+ * last sent in full (LIB_SENT), so a car that holds that revision is sent only what changed. Included by q2_iap.c;
+ * q2_iap2.c reads the tables through its host (struct iap2_library) and never this file's I/O. The databases are read
+ * in a child (lib_load), opened read-only and closed after the read. */
 
 #define LIB_DB "/mnt/data/database.db"
 #define LIB_CAT "/mnt/mmc/.q2pod/catalogue.db" /* a signed-in server's songs (docs/server-library.md) */
@@ -29,10 +30,6 @@ static const char *lib_db = LIB_DB, *lib_cat = LIB_CAT, *lib_sent_file = LIB_SEN
 static const char *card_root = ""; /* put before a catalogue row's /mnt/mmc path (--card-root, for the host tests) */
 static struct iap2_library lib_t; /* the tables q2_iap2.c reads */
 
-static unsigned lib_fnv(unsigned h, const char *s) {
-    while (*s) h = (h ^ (unsigned char)*s++) * 16777619u;
-    return h * 16777619u; /* a separator, so "ab"+"c" is not "a"+"bc" */
-}
 
 static unsigned lib_put(char **pool, unsigned *len, unsigned *cap, const char *s) {
     unsigned n = strlen(s) + 1, at = *len;
@@ -48,14 +45,16 @@ static unsigned lib_put(char **pool, unsigned *len, unsigned *cap, const char *s
     return at;
 }
 
+static unsigned char *lib_blob; /* the tables lib_t points into when the child read them (lib_install): one block */
 static void lib_free(void) {
-    free(lib_t.tracks), free(lib_t.pool), free(lib_t.sent), free(lib_t.lists), free(lib_t.lrids);
+    if (lib_blob) free(lib_blob), lib_blob = 0; /* the child's tables: one block */
+    else free(lib_t.tracks), free(lib_t.pool), free(lib_t.sent), free(lib_t.lists), free(lib_t.lrids);
     memset(&lib_t, 0, sizeof lib_t);
 }
 
 /* What the car was sent in full last: its revision and each song's rid and hash. */
 static void lib_read_sent(void) {
-    int fd = open(lib_sent_file, O_RDONLY);
+    int fd = open(lib_sent_file, O_RDONLY | O_CLOEXEC);
     if (fd < 0) return;
     unsigned cap = 0, len = 0;
     char *b = 0;
@@ -188,9 +187,9 @@ static int sid_add(struct lib_sid **v, unsigned *n, unsigned *cap, const char *a
     s->rid = rid;
     return 1;
 }
-/* v (n rows) sorted and made the index, in place of the one before */
-static void sid_install(struct lib_sid *v, unsigned n) {
-    if (v) qsort(v, n, sizeof *v, sid_cmp);
+/* v (n rows) sorted, unless they are, and made the index, in place of the one before */
+static void sid_install(struct lib_sid *v, unsigned n, int sorted) {
+    if (v && !sorted) qsort(v, n, sizeof *v, sid_cmp);
     free(sids.v);
     sids.v = n ? realloc(v, n * sizeof *v) : (free(v), (struct lib_sid *)0);
     if (n && !sids.v) sids.v = v;
@@ -203,11 +202,12 @@ static void sid_index_start(void) {
     int fds[2];
     if (sids.asked || sids.n || access(lib_cat, 0)) return;
     sids.asked = 1;
-    if (pipe(fds)) return;
+    if (pipe_cloexec(fds)) return;
     int pid = fork();
     if (pid == 0) {
         sqlite3 *db = 0;
         sqlite3_stmt *st = 0;
+        child_drop();
         close(fds[0]);
         if (!sqlite3_open_v2(lib_cat, &db, SQLITE_OPEN_READONLY, 0) &&
             !sqlite3_prepare_v2(db, "select app, sid, id from servermeta where sid is not null", -1, &st, 0)) {
@@ -259,7 +259,7 @@ static void sid_index_poll(void) {
     unsigned n = sids.in_n / sizeof(struct lib_sid);
     if (!sids.n && sids.in) {
         char msg[120];
-        sid_install((struct lib_sid *)sids.in, n);
+        sid_install((struct lib_sid *)sids.in, n, 0);
         snprintf(msg, sizeof msg, "library: %u server songs found by their stream path, from the catalogue", sids.n);
         logline("lib", msg);
     } else {
@@ -288,9 +288,14 @@ static unsigned lib_stream_rids(const char *const *paths, unsigned *rids, unsign
 /* The songs into RAM, in rid order, each with the hash of what the car is sent of it; the revision their hashes'
  * hash. The card's songs (songtable) and, while a server is signed in (its catalogue on the card, as Car Remote's
  * library attaches it: coda_rc_lib.c lib_open), the server's (servertable, rids from 0x40000000): on the Q2 of the
- * 2026-11-20 drive songtable was empty and every song the server's, 9,199 of them, and iDrive got none. 0, or -1 with
- * no database. */
-static int lib_load(void) {
+ * 2026-11-20 drive songtable was empty and every song the server's, 9,199 of them, and iDrive got none. The server
+ * songs' stream-path index rows into *sv (*sn of them), for lib_stream_rids. 0; -1 with no database; -2 when the
+ * catalogue cannot be read (absent, or not attached) while the record of what the car holds has server songs: the
+ * card not mounted yet (a wake, a card lent to a computer), which is not a server library gone (an app signed out
+ * leaves its catalogue, without its rows). Run in lib_load's child, never in the loop. */
+static unsigned lib_pool_len; /* lib_t.pool's bytes in use, for the child's hand-over */
+static long card_wait_ms = 10000; /* --card-wait-ms: how long the child waits for a catalogue it cannot read */
+static int lib_read(struct lib_sid **sv_out, unsigned *sn_out) {
     sqlite3 *db = 0;
     sqlite3_stmt *st = 0;
     char *pool = 0, sql[900];
@@ -300,6 +305,15 @@ static int lib_load(void) {
     if (sqlite3_open_v2(lib_db, &db, SQLITE_OPEN_READONLY, 0) == 0 && !access(lib_cat, 0) && !strchr(lib_cat, '\'')) {
         snprintf(sql, sizeof sql, "attach '%s' as cat", lib_cat);
         server = sqlite3_exec(db, sql, 0, 0, 0) == 0;
+    }
+    if (!server) { /* no catalogue: none signed in ever, or the card not there yet (the record says which) */
+        lib_read_sent();
+        int had = lib_t.sent_n && lib_t.sent[lib_t.sent_n - 1].rid >= 0x40000000u; /* the record is in rid order */
+        lib_free();
+        if (had) {
+            if (db) sqlite3_close(db);
+            return -2;
+        }
     }
     snprintf(sql, sizeof sql, "%s%s%s", LIB_COLS("songtable") "0, null, null from main.songtable where " LIB_WHERE,
              server ? " union all " LIB_COLS("s") "ifnull(m.seconds,0), m.app, m.sid from cat.servertable s left join"
@@ -317,6 +331,7 @@ static int lib_load(void) {
     if (pool) pool[0] = 0;
     struct lib_sid *sv = 0;
     unsigned sn = 0, scap = 0;
+    *sv_out = 0, *sn_out = 0;
     while (pool && sqlite3_step(st) == SQLITE_ROW) {
         if (n == tcap) {
             struct iap2_track *t = realloc(lib_t.tracks, (tcap = tcap ? tcap * 2 : 1024) * sizeof *t);
@@ -333,21 +348,21 @@ static int lib_load(void) {
         t->artist = lib_put(&pool, &len, &cap, f[2]), t->aartist = lib_put(&pool, &len, &cap, f[3]);
         t->genre = lib_put(&pool, &len, &cap, f[4]), t->composer = lib_put(&pool, &len, &cap, f[5]);
         unsigned h = 2166136261u;
-        for (int k = 0; k < 6; ++k) h = lib_fnv(h, f[k]);
+        for (int k = 0; k < 6; ++k) h = fnv_part(h, f[k]);
         t->hash = (h ^ t->track * 131u ^ t->disc * 65537u ^ t->ms) * 16777619u;
-        t->album_id = lib_fnv(lib_fnv(2166136261u, f[3]), f[1]); /* an album is its album artist's */
-        t->artist_id = lib_fnv(2166136261u, f[2]), t->aartist_id = lib_fnv(2166136261u, f[3]);
-        t->genre_id = lib_fnv(2166136261u, f[4]), t->composer_id = lib_fnv(2166136261u, f[5]);
+        t->album_id = fnv_part(fnv_part(2166136261u, f[3]), f[1]); /* an album is its album artist's */
+        t->artist_id = fnv_part(2166136261u, f[2]), t->aartist_id = fnv_part(2166136261u, f[3]);
+        t->genre_id = fnv_part(2166136261u, f[4]), t->composer_id = fnv_part(2166136261u, f[5]);
         rev = (rev ^ t->rid) * 16777619u, rev = (rev ^ t->hash) * 16777619u;
         if (t->rid) ++n;
         sid_add(&sv, &sn, &scap, (const char *)sqlite3_column_text(st, 10), (const char *)sqlite3_column_text(st, 11),
                 t->rid);
     }
     sqlite3_finalize(st);
-    sid_install(sv, sn); /* the server songs' stream paths, as this library has them (lib_stream_rids) */
+    *sv_out = sv, *sn_out = sn; /* the server songs' stream paths, as this library has them (lib_stream_rids) */
     if (pool) lib_lists(db, server, &pool, &len, &cap);
     sqlite3_close(db);
-    lib_t.pool = pool, lib_t.n = n;
+    lib_t.pool = pool, lib_t.n = n, lib_pool_len = len;
     snprintf(lib_t.rev, sizeof lib_t.rev, "q2.%u.%08x", n, rev);
     lib_read_sent();
     char msg[240];
@@ -358,12 +373,182 @@ static int lib_load(void) {
     return 0;
 }
 
-/* A server song's cover as its app keeps it (catalogue.c catalogue_cover, what the Q2's own Now Playing shows): the
- * song's server row (its rid, from 0x40000000, is servermeta's id) has the path /mnt/mmc/.<app>/cat/<album id>/...,
- * and the cover is /mnt/mmc/.<app>/covers/<album id>.jpg, a baseline JPEG of 160 px at most (q2-subsonic's
- * covers.go). Its path into out, 1; 0 for a card song, or a row with no such path. One row by its key, as the song
- * changes. */
-static int lib_app_cover(unsigned rid, char *out, unsigned cap) {
+/* The library's read, in a child (lib_load), so the loop never waits on it: at the car's StartMediaLibraryUpdates on
+ * 2026-11-22 (q2car.1.log, 22028.654) reading the owner's 9,199 server songs and 31 lists held the loop 648 ms. The
+ * child reads them as lib_read does and hands the tables over a pipe whole: a header, then the songs, the pool of
+ * their strings, the lists, the lists' rids, the sent record and the stream-path index, each array as it lies in
+ * memory (this machine's order; the child is a fork of this program). The loop takes the bytes in as they come
+ * (lib_load_poll) and, at the end, points lib_t into them; the tables before stay in use until then. */
+struct lib_head {
+    unsigned magic, n, pool_len, nlists, nlrids, sent_n, sn, unreadable; /* unreadable: lib_read's -2, no tables */
+    char rev[40], sent_rev[40];
+};
+#define LIB_MAGIC 0x51324c42u
+static struct {
+    int fd, pid;          /* the child's pipe and pid while it reads, else -1 and 0 */
+    int ready;            /* 1 the tables installed, 2 the catalogue unreadable, -1 none read; 0 not yet */
+    long at;              /* when it began */
+    unsigned char *in;    /* its bytes so far */
+    unsigned in_n, in_cap;
+} lload = {.fd = -1};
+
+static int lib_write_all(int fd, const void *p, unsigned n) {
+    const unsigned char *b = p;
+    while (n) {
+        int w = (int)write(fd, b, n);
+        if (w <= 0) {
+            if (w < 0 && ERRNO == EINTR) continue;
+            return -1;
+        }
+        b += w, n -= (unsigned)w;
+    }
+    return 0;
+}
+static unsigned lib_pad(unsigned n) { return (n + 3u) & ~3u; }
+
+/* The child: the tables read and written to the pipe; nothing written when there is no database. */
+static void lib_child(int out) {
+    struct lib_sid *sv;
+    unsigned sn;
+    static const unsigned char zero[4];
+    nice(10);
+    long until = boot_ms() + card_wait_ms, from = boot_ms();
+    int r;
+    while ((r = lib_read(&sv, &sn)) == -2 && boot_ms() < until) {
+        struct timespec ts = { 0, 250000000L };
+        nanosleep(&ts, 0);
+    }
+    char msg[120];
+    if (boot_ms() - from >= 250) {
+        snprintf(msg, sizeof msg, "library: waited for the card %ld ms, %s", boot_ms() - from,
+                 r == -2 ? "and the catalogue cannot be read" : "and read the catalogue");
+        logline("lib", msg);
+    }
+    if (r == -2) {
+        struct lib_head h;
+        memset(&h, 0, sizeof h);
+        h.magic = LIB_MAGIC, h.unreadable = 1;
+        _exit(lib_write_all(out, &h, sizeof h) ? 1 : 0);
+    }
+    if (r < 0) _exit(1);
+    if (sv) qsort(sv, sn, sizeof *sv, sid_cmp); /* here, not in the loop (lib_install) */
+    struct lib_head h;
+    memset(&h, 0, sizeof h);
+    h.magic = LIB_MAGIC, h.n = lib_t.n, h.pool_len = lib_pool_len, h.nlists = lib_t.nlists, h.sent_n = lib_t.sent_n;
+    h.sn = sn;
+    for (unsigned j = 0; j < lib_t.nlists; ++j) h.nlrids += lib_t.lists[j].n;
+    memcpy(h.rev, lib_t.rev, sizeof h.rev), memcpy(h.sent_rev, lib_t.sent_rev, sizeof h.sent_rev);
+    if (lib_write_all(out, &h, sizeof h) || lib_write_all(out, lib_t.tracks, h.n * sizeof *lib_t.tracks) ||
+        lib_write_all(out, lib_t.pool, h.pool_len) || lib_write_all(out, zero, lib_pad(h.pool_len) - h.pool_len) ||
+        lib_write_all(out, lib_t.lists, h.nlists * sizeof *lib_t.lists) ||
+        lib_write_all(out, lib_t.lrids, h.nlrids * sizeof *lib_t.lrids) ||
+        lib_write_all(out, lib_t.sent, h.sent_n * sizeof *lib_t.sent) || lib_write_all(out, sv, sn * sizeof *sv))
+        _exit(1);
+    _exit(0);
+}
+
+/* The child's bytes made the tables: lib_t pointed into them and the stream-path index replaced. 1, or 0 when they
+ * are not whole. */
+static unsigned long long lib_want(const struct lib_head *h) { /* the bytes the header announces, itself included */
+    return sizeof *h + (unsigned long long)h->n * sizeof(struct iap2_track) + lib_pad(h->pool_len) +
+           (unsigned long long)h->nlists * sizeof(struct iap2_list) + h->nlrids * 4ull +
+           (unsigned long long)h->sent_n * sizeof(struct iap2_sent) + h->sn * sizeof(struct lib_sid);
+}
+static int lib_install(unsigned char *b, unsigned len) {
+    struct lib_head h;
+    if (len < sizeof h) return 0;
+    memcpy(&h, b, sizeof h);
+    if (h.magic == LIB_MAGIC && h.unreadable && len == sizeof h) return 2; /* the tables before stay */
+    if (h.magic != LIB_MAGIC || lib_want(&h) != len || !h.pool_len) return 0;
+    lib_free();
+    lib_blob = b;
+    unsigned char *c = b + sizeof h;
+    lib_t.tracks = h.n ? (struct iap2_track *)c : 0, c += h.n * sizeof(struct iap2_track);
+    lib_t.pool = (char *)c, c += lib_pad(h.pool_len);
+    lib_t.lists = h.nlists ? (struct iap2_list *)c : 0, c += h.nlists * sizeof(struct iap2_list);
+    lib_t.lrids = h.nlrids ? (unsigned *)c : 0, c += h.nlrids * 4;
+    lib_t.sent = h.sent_n ? (struct iap2_sent *)c : 0, c += h.sent_n * sizeof(struct iap2_sent);
+    lib_t.n = h.n, lib_t.nlists = h.nlists, lib_t.sent_n = h.sent_n;
+    memcpy(lib_t.rev, h.rev, sizeof h.rev), memcpy(lib_t.sent_rev, h.sent_rev, sizeof h.sent_rev);
+    lib_t.rev[sizeof lib_t.rev - 1] = lib_t.sent_rev[sizeof lib_t.sent_rev - 1] = 0;
+    struct lib_sid *sv = h.sn ? malloc(h.sn * sizeof *sv) : 0;
+    if (sv) memcpy(sv, c, h.sn * sizeof *sv);
+    sid_install(sv, sv ? h.sn : 0, 1);
+    return 1;
+}
+
+/* The child's bytes taken in, as many as wait; at its end the tables installed (lib_ready then says how it went).
+ * Called every pass of the loop, so the child never waits on a full pipe. */
+static void lib_load_poll(void) {
+    for (;;) {
+        if (lload.fd < 0) return;
+        if (lload.in_n + 65536 > lload.in_cap) {
+            unsigned c = lload.in_cap ? lload.in_cap * 2 : 262144;
+            if (lload.in_n >= sizeof(struct lib_head)) { /* once, at the size the header announces */
+                unsigned long long want = lib_want((const struct lib_head *)lload.in) + 65536;
+                if (want > c && want < 64u << 20) c = (unsigned)want;
+            }
+            unsigned char *w = realloc(lload.in, c);
+            if (!w) break;
+            lload.in = w, lload.in_cap = c;
+        }
+        int r = (int)read(lload.fd, lload.in + lload.in_n, lload.in_cap - lload.in_n);
+        if (r > 0) {
+            lload.in_n += (unsigned)r;
+            continue;
+        }
+        if (r < 0 && (ERRNO == EAGAIN || ERRNO == EINTR)) return;
+        break;
+    }
+    close(lload.fd), lload.fd = -1, lload.pid = 0;
+    char msg[160];
+    int ok = lload.in ? lib_install(lload.in, lload.in_n) : 0;
+    if (ok != 1) free(lload.in);
+    snprintf(msg, sizeof msg, "library: %s by its child in %ld ms (%u bytes)",
+             ok == 1 ? "read" : ok == 2 ? "not read, the catalogue unreadable," : "not read", mono_ms() - lload.at,
+             lload.in_n);
+    logline("lib", msg);
+    lload.in = 0, lload.in_n = lload.in_cap = 0;
+    lload.ready = ok ? ok : -1;
+}
+
+/* The host's lib_load: the library's read begun in a child (one already reading goes on). 0, or -1 when no child
+ * could be started. */
+static int lib_load(void) {
+    int fds[2];
+    lload.ready = 0;
+    if (lload.fd >= 0) return 0;
+    if (pipe_cloexec(fds)) return logline("lib", "library: no pipe for its child"), -1;
+    int pid = fork();
+    if (pid == 0) {
+        signal(SIGTERM, SIG_DFL), signal(SIGINT, SIG_DFL), signal(SIGHUP, SIG_DFL);
+        child_drop();
+        close(fds[0]);
+        lib_child(fds[1]);
+    }
+    close(fds[1]);
+    if (pid < 0) {
+        close(fds[0]);
+        logline("lib", "library: its child not started");
+        return -1;
+    }
+    fcntl(fds[0], F_SETFL, O_NONBLOCK);
+    lload.fd = fds[0], lload.pid = pid, lload.at = mono_ms();
+    return 0;
+}
+
+/* The host's lib_ready: 1 the tables read (in lib_t), 2 the catalogue unreadable (lib_t as it was), -1 none, 0 still
+ * reading. */
+static int lib_ready(void) {
+    lib_load_poll();
+    return lload.ready;
+}
+
+/* A server song's album as its app keeps it (catalogue.c catalogue_cover, what the Q2's own Now Playing shows): the
+ * song's server row (its rid, from 0x40000000, is servermeta's id) has the path /mnt/mmc/.<app>/cat/<album id>/...;
+ * the app's id (the folder's name without its dot) into app and the album's id into album, 1; 0 for a card song, or a
+ * row with no such path. One row by its key. Read in the cover's child (q2_iap.c art_child), never in the loop. */
+static int lib_app_album(unsigned rid, char *app, unsigned appcap, char *album, unsigned albumcap) {
     sqlite3 *db = 0;
     sqlite3_stmt *st = 0;
     char sql[80];
@@ -374,9 +559,11 @@ static int lib_app_cover(unsigned rid, char *out, unsigned cap) {
         if (sqlite3_prepare_v2(db, sql, -1, &st, 0) == 0 && sqlite3_step(st) == SQLITE_ROW) {
             const char *u = (const char *)sqlite3_column_text(st, 0), *c = u ? strstr(u, "/cat/") : 0;
             const char *e = c ? strchr(c + 5, '/') : 0;
-            if (e && e > c + 5 && !strncmp(u, "/mnt/mmc/.", 10) && !memchr(u + 10, '/', (unsigned)(c - u - 10))) {
-                int n = snprintf(out, cap, "%s%.*s/covers/%.*s.jpg", card_root, (int)(c - u), u, (int)(e - c - 5), c + 5);
-                ok = n > 0 && (unsigned)n < cap;
+            if (e && e > c + 5 && !strncmp(u, "/mnt/mmc/.", 10) && c > u + 10 && !memchr(u + 10, '/', (unsigned)(c - u - 10)) &&
+                (unsigned)(c - u - 10) < appcap && (unsigned)(e - c - 5) < albumcap && !memchr(c + 5, ' ', (unsigned)(e - c - 5))) {
+                snprintf(app, appcap, "%.*s", (int)(c - u - 10), u + 10);
+                snprintf(album, albumcap, "%.*s", (int)(e - c - 5), c + 5);
+                ok = 1;
             }
         }
         sqlite3_finalize(st);
@@ -403,8 +590,9 @@ static void lib_saved(void) {
     snprintf(tmp, sizeof tmp, "%s.iap", lib_sent_file);
     int pid = len < cap ? fork() : -1;
     if (pid == 0) {
+        child_drop();
         long at = mono_ms();
-        int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600), ok = fd >= 0 && write(fd, b, len) == (int)len;
+        int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600), ok = fd >= 0 && write(fd, b, len) == (int)len;
         if (fd >= 0) close(fd);
         char msg[120];
         if (ok && !rename(tmp, lib_sent_file))

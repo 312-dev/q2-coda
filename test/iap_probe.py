@@ -485,13 +485,14 @@ class BmwCar(Car):
 def bmw_up(probe, tmp_path, *more):
     """A probe in --iap2 up to identification with the BMW's link parameters; (process, car, log, files)."""
     files = {'car': tmp_path/'q2-iap.audio', 'cmd': tmp_path/'coda-rc.cmd', 'np': tmp_path/'now', 'art': tmp_path/'art',
-             'rate': tmp_path/'q2-iap.rate', 'relink': tmp_path/'q2car.relink'}
+             'rate': tmp_path/'q2-iap.rate', 'relink': tmp_path/'q2car.relink', 'cmdq': tmp_path/'cmdq'}
     files['art'].mkdir()
-    files['np'].write_text('state=1\npos=61000\nlen=245\ntitle=Teardrop\nartist=Massive Attack\nalbum=Mezzanine\n'
+    put_whole(files['np'], 'state=1\npos=61000\nlen=245\ntitle=Teardrop\nartist=Massive Attack\nalbum=Mezzanine\n'
                            'path=/nowhere/a.flac\nshuffle=0\nrepeat=2\n')
     p, ffs, log = start(probe, tmp_path, '--iap2', '--np', str(files['np']), '--car-pcm', 'hw:CARD=UAC1Gadget,0',
                         '--car-file', str(files['car']), '--cmd-file', str(files['cmd']), '--art-dir', str(files['art']),
-                        '--rate-file', str(files['rate']), '--relink-file', str(files['relink']), *more)
+                        '--rate-file', str(files['rate']), '--relink-file', str(files['relink']),
+                        '--cmdq-file', str(files['cmdq']), *more)
     fd = os.open(ffs.path/'ep1', os.O_RDONLY | os.O_NONBLOCK)
     car = BmwCar(ffs, fd)
     ffs.event(ENABLE)
@@ -603,6 +604,15 @@ def test_bmw_audio_and_seek(probe, tmp_path):
     assert not files['car'].exists(), 'and with the probe'
 
 
+def put_whole(path, text):
+    """A file q2-iap reads written as its writers write theirs, whole through a rename (the player's rate file,
+    player/output.c car_ask; the shim's Now Playing and queue, coda_rc_shim.c blob_io): a read never finds it empty or
+    half written."""
+    tmp = path.with_name(path.name + '.tmp')
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
 def test_bmw_audio_rate_follows_the_player(probe, tmp_path):
     """USBDeviceModeAudioInformation carries the rate index of the song about to play, as the player writes it to the
     rate file (docs/iphone-mode.md#per-song-rate): at StartUSBDeviceModeAudio, the car file's second line the same
@@ -610,7 +620,7 @@ def test_bmw_audio_rate_follows_the_player(probe, tmp_path):
     kHz family above it 8, 88.2 kHz and anything unreadable 7. Nothing is sent after StopUSBDeviceModeAudio."""
     p, car, fd, log, files = bmw_up(probe, tmp_path)
     try:
-        files['rate'].write_text('48000\n')
+        put_whole(files['rate'], '48000\n')
         time.sleep(0.1)
         car.send(message(0xDA00))
         mid, ps = car.msg()
@@ -620,7 +630,7 @@ def test_bmw_audio_rate_follows_the_player(probe, tmp_path):
         seen = []
         for rate, index in (('44100', 7), ('96000', 8), ('192000', 8), ('88200', 7), ('32000', 6), ('junk', 7),
                             ('176400', 7)):
-            files['rate'].write_text(rate + '\n')
+            put_whole(files['rate'], rate + '\n')
             if seen and seen[-1] == index:
                 time.sleep(0.15)
                 continue
@@ -630,7 +640,7 @@ def test_bmw_audio_rate_follows_the_player(probe, tmp_path):
             assert seen[-1] == index, (rate, seen)
         car.send(message(0xDA02))
         time.sleep(0.15)
-        files['rate'].write_text('48000\n')
+        put_whole(files['rate'], '48000\n')
         with pytest.raises(Exception):
             car.msg(timeout=0.4)
     finally:
@@ -744,7 +754,7 @@ def test_bmw_radio_is_live_and_clears_the_cover(probe, tmp_path):
         updates, setups = np_and_files(car, lambda u: False, 0.8)
         song = updates[0][0]
         assert song[1] == b'Teardrop\0' and setups[song[0x1a][0]] > 0, 'the Library song\'s cover first'
-        files['np'].write_text('state=1\npos=0\nlen=0\nsource=radio\nlive=1\nstation=93XRT\ntitle=Toxicity\n'
+        put_whole(files['np'], 'state=1\npos=0\nlen=0\nsource=radio\nlive=1\nstation=93XRT\ntitle=Toxicity\n'
                                'artist=System of a Down\nalbum=93XRT 93.1 FM\npath=\n')
         updates, more = np_and_files(car, lambda u: False, 1.5)
         setups.update(more)
@@ -765,11 +775,11 @@ def test_bmw_a_seek_while_paused_is_sent(probe, tmp_path):
     """Paused, the position is sent when it moves (a seek from the Q2 or the phone), not only while playing: the car
     shows where the song will go on from."""
     p, car, fd, log, files = bmw_up(probe, tmp_path)
-    files['np'].write_text(files['np'].read_text().replace('state=1', 'state=2'))
+    put_whole(files['np'], files['np'].read_text().replace('state=1', 'state=2'))
     try:
         media, play = np_updates(car)
         assert play[0] == b'\x02' and int.from_bytes(play[1], 'big') == 61000
-        files['np'].write_text(files['np'].read_text().replace('pos=61000', 'pos=120000'))
+        put_whole(files['np'], files['np'].read_text().replace('pos=61000', 'pos=120000'))
         end, seen = time.time() + 1.5, []
         while time.time() < end and not seen:
             try:
@@ -863,7 +873,7 @@ def test_a_host_that_asks_nothing_apple_s_is_let_go(probe, tmp_path):
     try:
         time.sleep(0.6)
         assert p.poll() is None and verdict(state)['host'] == '0', 'no host yet: a charger, nothing decided'
-        udc.write_text('addressed\n')
+        put_whole(udc, 'addressed\n')
         t = time.time()
         assert p.wait(5) == 21
         assert 0.3 < time.time() - t < 2.0
@@ -893,10 +903,10 @@ def test_the_car_s_audio_health(probe, tmp_path):
     session's summary with the counts since the start."""
     counters = tmp_path/'params'
     counters.mkdir()
-    (counters/'in_sent').write_text('1000\n')
-    (counters/'in_missed').write_text('7\n')
+    put_whole(counters/'in_sent', '1000\n')
+    put_whole(counters/'in_missed', '7\n')
     for k, v in (('p_rate', 48000), ('rate_sets', 2), ('rate_asked', 44100)):
-        (counters/k).write_text(f'{v}\n')
+        put_whole(counters/k, f'{v}\n')
     p, car, fd, log, files = bmw_up(probe, tmp_path, '--state', str(tmp_path/'state'), '--counters', str(counters),
                                     '--under', str(tmp_path/'under'))
     state = tmp_path/'state'
@@ -906,21 +916,21 @@ def test_the_car_s_audio_health(probe, tmp_path):
         car.send(message(0xDA00))
         car.msg()
         time.sleep(1.2)
-        (counters/'in_sent').write_text('2000\n')
+        put_whole(counters/'in_sent', '2000\n')
         time.sleep(1.2)
         v = verdict(state)
         assert (v['audio'], v['flowing'], v['trouble'], v['troubles']) == ('1', '1', '', '0')
-        (counters/'in_sent').write_text('2990\n')
-        (counters/'in_missed').write_text('17\n')       # 10 of 1000
+        put_whole(counters/'in_sent', '2990\n')
+        put_whole(counters/'in_missed', '17\n')       # 10 of 1000
         time.sleep(1.2)
         assert verdict(state)['troubles'] == '0', '1% is not over 1%'
-        (counters/'in_sent').write_text('3970\n')
-        (counters/'in_missed').write_text('37\n')       # 20 of 1000
+        put_whole(counters/'in_sent', '3970\n')
+        put_whole(counters/'in_missed', '37\n')       # 20 of 1000
         time.sleep(1.2)
         v = verdict(state)
         assert (v['trouble'], v['troubles']) == ('dropouts', '1')
-        (counters/'in_sent').write_text('4970\n')
-        (tmp_path/'under').write_text('1\n')
+        put_whole(counters/'in_sent', '4970\n')
+        put_whole(tmp_path/'under', '1\n')
         time.sleep(1.2)
         v = verdict(state)
         assert (v['trouble'], v['troubles']) == ('underruns', '2')
@@ -942,7 +952,7 @@ def test_the_car_s_stream_a_line_a_second(probe, tmp_path):
                 in_zero=0, in_gaps2=0, in_alt_on=1, in_alt_off=0, rate_sets=1, in_pkt_min=4294967295, in_pkt_max=0,
                 in_gap_max=0, p_rate=44100, rate_asked=44100)
     for k, v in base.items():
-        (c/k).write_text(f'{v}\n')
+        put_whole(c/k, f'{v}\n')
     p, car, fd, log, files = bmw_up(probe, tmp_path, '--state', str(tmp_path/'state'), '--counters', str(c))
     try:
         car.send(message(0xDA00))
@@ -952,7 +962,7 @@ def test_the_car_s_stream_a_line_a_second(probe, tmp_path):
         for k, v in dict(in_sent=1998, in_missed=3, in_enodata=2, in_other=1, in_resent=3, in_bytes=176400, in_zero=2,
                          in_gaps2=1, in_alt_on=3, in_alt_off=2, rate_sets=2, in_pkt_min=176, in_pkt_max=180,
                          in_gap_max=332031).items():
-            (c/k).write_text(f'{v}\n')
+            put_whole(c/k, f'{v}\n')
         time.sleep(1.1)
     finally:
         stop(p, fd)
@@ -969,8 +979,8 @@ def test_the_car_s_stream_a_line_a_second(probe, tmp_path):
 def test_no_sound_when_the_car_asks_and_takes_nothing(probe, tmp_path):
     counters = tmp_path/'params'
     counters.mkdir()
-    (counters/'in_sent').write_text('5\n')
-    (counters/'in_missed').write_text('0\n')
+    put_whole(counters/'in_sent', '5\n')
+    put_whole(counters/'in_missed', '0\n')
     p, car, fd, log, files = bmw_up(probe, tmp_path, '--state', str(tmp_path/'state'), '--counters', str(counters))
     try:
         car.send(message(0xDA00))
@@ -1321,7 +1331,7 @@ def test_a_quiet_car_with_nothing_waiting_keeps_the_link(probe, tmp_path):
     acknowledged) keeps the link, and the Q2's next packet after a long quiet is not lost at once."""
     p, car, fd, log, files = bmw_up(probe, tmp_path, '--state', str(tmp_path/'state'), '--quiet-ms', '1000')
     try:
-        files['np'].write_text(files['np'].read_text().replace('state=1', 'state=2'))
+        put_whole(files['np'], files['np'].read_text().replace('state=1', 'state=2'))
         end = time.time() + 2.5
         while time.time() < end:  # the pause's update acknowledged, then nothing either way
             try:
@@ -1340,8 +1350,9 @@ def test_a_quiet_car_with_nothing_waiting_keeps_the_link(probe, tmp_path):
 # ---- the log's diagnostics (docs/iphone-mode.md#the-loop-s-steps): what the next stall or dead link says of itself ----
 
 def test_a_stall_names_its_step(probe, tmp_path):
-    """A loop pass that holds 100 ms or more is logged with the step that took most of it. Here the cover's file is a
-    FIFO nobody writes for 400 ms, so its read holds the loop as a slow card would."""
+    """A loop pass that holds 100 ms or more is logged with the step that took most of it. The cover's file is a FIFO
+    nobody writes for 400 ms first: its read is in the cover's child, so it holds nothing. Then the Now Playing file is
+    one, so its read holds the loop as a slow card would, and the stall names it."""
     p, car, fd, log, files = bmw_up(probe, tmp_path, '--stall-ms', '100')
     key = fnv_part(fnv_part(2166136261, 'Massive Attack'), 'Mezzanine')
     art = files['art']/f'{key:08x}.jpg'
@@ -1350,15 +1361,24 @@ def test_a_stall_names_its_step(probe, tmp_path):
         attrs = b''.join(prm(a) for a in (0, 1, 4, 6, 12, 0x1a))
         car.send(message(0x5000, prm(0, attrs), prm(1, prm(0) + prm(1))))
         time.sleep(0.4)
-        w = os.open(art, os.O_WRONLY)  # the read goes on, to an empty file
+        w = os.open(art, os.O_WRONLY)  # the child's read goes on, to an empty file
         os.close(w)
+        time.sleep(0.3)
+        assert not [l for l in log.read_text().splitlines() if 'loop: a pass held' in l]
+        files['np'].unlink()
+        os.mkfifo(files['np'])
+        time.sleep(0.7)  # past the next 500 ms look, which waits in its open from then
+        w = os.open(files['np'], os.O_WRONLY)
+        os.close(w)
+        files['np'].unlink()
+        put_whole(files['np'], 'state=0\n')  # a file again, so the next look does not wait for a writer
         time.sleep(0.3)
     finally:
         stop(p, fd)
     stalls = [l for l in log.read_text().splitlines() if 'loop: a pass held' in l]
-    assert any("in the cover's read" in l for l in stalls), stalls
+    assert any("in the Now Playing file" in l for l in stalls), stalls
     held = max(int(l.split('held ')[1].split(' ms')[0]) for l in stalls)
-    assert 300 <= held < 2000, stalls
+    assert 200 <= held < 2000, stalls
 
 
 def test_ep0_s_odd_reads_are_said(probe, tmp_path):
@@ -1454,12 +1474,12 @@ def test_a_song_s_own_picture_is_the_car_s_cover(probe, tmp_path):
     (tmp_path/'run').mkdir()
     p, car, fd, log, files = bmw_up(probe, tmp_path/'run', '--art-made', str(tmp_path/'made'), '--ffmpeg', ffmpeg)
     try:
-        files['np'].write_text(f'state=1\npos=1000\nlen=208\ntitle=Buzzcut Season\nartist=Lorde\nalbum=Pure Heroine\n'
+        put_whole(files['np'], f'state=1\npos=1000\nlen=208\ntitle=Buzzcut Season\nartist=Lorde\nalbum=Pure Heroine\n'
                                f'path={song}\nshuffle=0\nrepeat=0\n')
         media, _ = np_updates(car)
         updates, setups = np_and_files(car, lambda u: False, seconds=4.0)
         # the album's next song: its cover made already (keyed by the album), in its first update, no ffmpeg
-        files['np'].write_text(f'state=1\npos=1000\nlen=208\ntitle=Ribs\nartist=Lorde\nalbum=Pure Heroine\n'
+        put_whole(files['np'], f'state=1\npos=1000\nlen=208\ntitle=Ribs\nartist=Lorde\nalbum=Pure Heroine\n'
                                f'path={tmp_path}/ribs.flac\nshuffle=0\nrepeat=0\n')
         _, next_setups = np_and_files(car, lambda u: False, seconds=2.0)
     finally:
@@ -1493,7 +1513,7 @@ def test_a_server_song_s_cover_from_its_app(probe, tmp_path):
     p, car, fd, log, files = bmw_up(probe, tmp_path/'run', '--lib-cat', str(tmp_path/'catalogue.db'),
                                     '--card-root', str(card))
     try:
-        files['np'].write_text(f'state=1\npos=1000\nlen=288\nid={rid}\ntitle=The Boys Of Summer\nartist=Don Henley\n'
+        put_whole(files['np'], f'state=1\npos=1000\nlen=288\nid={rid}\ntitle=The Boys Of Summer\nartist=Don Henley\n'
                                'album=The Very Best Of\npath=/mnt/mmc/.subsonic/stream/11c3e037/original/5/the boys of '
                                'summer [6wXZ8JEGfmYO7FYDnHDAUi].flac\nshuffle=0\nrepeat=0\n')
         media, _ = np_updates(car)
@@ -1503,6 +1523,59 @@ def test_a_server_song_s_cover_from_its_app(probe, tmp_path):
     assert media.get(0x1a), 'a transfer named'
     assert setups and max(setups.values()) > len(jpeg) - 64, setups
     assert f'({len(jpeg)} as found)' in log.read_text()
+
+
+
+def test_a_server_song_s_cover_asked_of_its_app(probe, tmp_path):
+    """The drive of 2026-11-22: a server song whose album the app had no cover of yet went to the car 13.4 s late,
+    ffmpeg's picture from the streamed file the only source. q2-iap now asks the app first, in the contract coda-rc's
+    covers use with a file and key of its own: q2-<app>.coverask-iap holds "<seq> 160 <album>", the app saves the cover
+    where it saves .coverask's and answers coverack-iap=<seq> 0 in its state file. Here the test is the app, answering
+    300 ms after the ask; the cover goes to the car and ffmpeg is never run."""
+    card, asks = tmp_path/'card', tmp_path/'asks'
+    asks.mkdir()
+    app = card/'mnt/mmc/.subsonic'
+    app.mkdir(parents=True)
+    (app/'q2app').write_text('name=Subsonic\ncatalogue=1\ncovers=1\n')
+    jpeg = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=160x160', '-frames:v', '1', '-q:v', '2',
+                           '-f', 'mjpeg', '-'], check=True, capture_output=True).stdout
+    rid = 0x4000139a
+    catalogue_db(tmp_path/'catalogue.db', [(rid, 'The Boys Of Summer', 'The Very Best Of', 'Don Henley', '', 'Rock', 5, 1,
+                                            '/mnt/mmc/.subsonic/cat/al-77/05.flac')])
+    never = tmp_path/'ffmpeg-ran'
+    fake_ffmpeg = tmp_path/'ffmpeg'
+    fake_ffmpeg.write_text(f'#!/bin/sh\ntouch {never}\nexit 1\n')
+    fake_ffmpeg.chmod(0o755)
+    (tmp_path/'run').mkdir()
+    p, car, fd, log, files = bmw_up(probe, tmp_path/'run', '--lib-cat', str(tmp_path/'catalogue.db'),
+                                    '--card-root', str(card), '--ask-dir', str(asks), '--ffmpeg', str(fake_ffmpeg),
+                                    '--art-made', str(tmp_path/'made'))
+    try:
+        put_whole(files['np'], f'state=1\npos=1000\nlen=288\nid={rid}\ntitle=The Boys Of Summer\nartist=Don Henley\n'
+                               'album=The Very Best Of\npath=/mnt/mmc/.subsonic/stream/11c3e037/original/5/the boys of '
+                               'summer [6wXZ8JEGfmYO7FYDnHDAUi].flac\nshuffle=0\nrepeat=0\n')
+        attrs = b''.join(prm(a) for a in (0, 1, 4, 6, 12, 0x1a))
+        car.send(message(0x5000, prm(0, attrs), prm(1, prm(0) + prm(1))))
+        ask = asks/'q2-subsonic.coverask-iap'
+        end = time.time() + 3
+        while not ask.exists() and time.time() < end:
+            time.sleep(0.02)
+        line = ask.read_text()
+        seq, px, album = line.split()
+        assert (px, album) == ('160', 'al-77') and line.endswith('\n')
+        assert (asks/'coda-rc.wake').read_text() == 'subsonic\n', 'the app not running: named to be started'
+        time.sleep(0.3)
+        (app/'covers').mkdir()
+        (app/'covers/al-77.jpg').write_bytes(jpeg)
+        put_whole(asks/'q2-subsonic.state', f'server=up\ncoverack-iap={seq} 0\n')
+        updates, setups = np_and_files(car, lambda u: False, seconds=2.0)
+    finally:
+        stop(p, fd)
+    text = log.read_text()
+    assert setups and max(setups.values()) > len(jpeg) - 64, setups
+    assert f'art: asked subsonic for al-77 (ask {seq}): saved' in text
+    assert not ask.exists(), 'the ask goes once answered'
+    assert not never.exists(), 'ffmpeg run though the app had the cover'
 
 
 PACE_MS =int(os.environ.get('Q2IAP_PACE_MS', '2'))
@@ -1608,9 +1681,9 @@ def test_idrive_has_the_lists_first_within_seconds_at_the_bmw_s_pace(probe, tmp_
                  for k, size in enumerate(PLAYLIST_SIZES)]
     stock_lists(tmp_path/'database.db', favs, recent, playlists)
     queue = rnd.sample(range(1, n_songs + 1), 300)
-    (tmp_path/'queue').write_text('7 10 300\n' + ''.join(f'{r}\n' for r in queue))
+    put_whole(tmp_path/'queue', '7 10 300\n' + ''.join(f'{r}\n' for r in queue))
     p, car, fd, log, files, db, sent = lib_car(probe, tmp_path, '--report-ms', '16')
-    files['np'].write_text(files['np'].read_text() + f'id={queue[10]}\nqgen=7\nqpos=10\nqlen=300\n')
+    put_whole(files['np'], files['np'].read_text() + f'id={queue[10]}\nqgen=7\nqpos=10\nqlen=300\n')
     jpeg = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=180x180', '-frames:v', '1',
                            '-q:v', '2', '-f', 'mjpeg', '-'], check=True, capture_output=True).stdout
     (files['art']/f'{fnv_part(fnv_part(2166136261, "Massive Attack"), "Mezzanine"):08x}.jpg').write_bytes(jpeg)
@@ -1745,8 +1818,8 @@ def test_up_next_and_the_playing_song_s_id(probe, tmp_path, monkeypatch):
     outside the library is PB_QUEUE_LIST 0 and no list."""
     monkeypatch.setattr(BmwCar, 'msg', bmw_msg_keeping_body)
     p, car, fd, log, files, db, sent = lib_car(probe, tmp_path)
-    (tmp_path/'queue').write_text('4 1 3\n5\n3\n9\n')
-    files['np'].write_text(files['np'].read_text() + 'id=3\nqgen=4\nqpos=1\nqlen=3\n')
+    put_whole(tmp_path/'queue', '4 1 3\n5\n3\n9\n')
+    put_whole(files['np'], files['np'].read_text() + 'id=3\nqgen=4\nqpos=1\nqlen=3\n')
     try:
         car.send(message(0x5000, prm(0, prm(0) + prm(1)), prm(1, prm(0) + prm(2) + prm(3) + prm(14) + prm(17))))
         mid, ps = car.msg()
@@ -1765,8 +1838,8 @@ def test_up_next_and_the_playing_song_s_id(probe, tmp_path, monkeypatch):
         while len(car.files) < 2:
             file_packet(car)
         assert car.files[1][1] == 0xC0 and car.files[1][2:] == b''.join((0x5132000100000000 | r).to_bytes(8, 'big') for r in (5, 3, 9))
-        (tmp_path/'queue').write_text('5 0 2\n5\n0\t/mnt/mmc/.app/x.flac\tX\tY\n')
-        files['np'].write_text(files['np'].read_text().replace('qgen=4', 'qgen=5'))
+        put_whole(tmp_path/'queue', '5 0 2\n5\n0\t/mnt/mmc/.app/x.flac\tX\tY\n')
+        put_whole(files['np'], files['np'].read_text().replace('qgen=4', 'qgen=5'))
         deadline, announce = time.time() + 4, None
         while time.time() < deadline and announce is None:
             mid, ps = car.msg()
@@ -1798,8 +1871,8 @@ def test_up_next_of_server_songs_from_the_stream_cache(probe, tmp_path, monkeypa
     paths = [stream.format('f', 'ribs', '0S2sKobzoSngoRjq2oIqxT'), stream.format('5', 'buzzcut season', 'RjYzpcigs0gxaJeph5u83x'),
              stream.format('a', 'team', 'Tm4xQ2pV')]
     p, car, fd, log, files, db, sent = lib_car(probe, tmp_path)
-    (tmp_path/'queue').write_text('1 0 3\n' + ''.join(f'0\t{pa}\t{t}\tLorde\n' for pa, t in zip(paths, ('Ribs', 'Buzzcut Season', 'Team'))))
-    files['np'].write_text(f'state=1\npos=1000\nlen=208\nid=0\ntitle=Ribs\nartist=Lorde\nalbum=Pure Heroine\npath={paths[0]}\n'
+    put_whole(tmp_path/'queue', '1 0 3\n' + ''.join(f'0\t{pa}\t{t}\tLorde\n' for pa, t in zip(paths, ('Ribs', 'Buzzcut Season', 'Team'))))
+    put_whole(files['np'], f'state=1\npos=1000\nlen=208\nid=0\ntitle=Ribs\nartist=Lorde\nalbum=Pure Heroine\npath={paths[0]}\n'
                            'qgen=1\nqpos=0\nqlen=3\n')
     try:
         car.send(message(0x5000, prm(0, prm(0) + prm(1)), prm(1, prm(0) + prm(2) + prm(3) + prm(14) + prm(17))))
@@ -1867,9 +1940,9 @@ def test_a_song_change_does_not_read_the_catalogue_in_the_loop(probe, tmp_path, 
         car.send(message(0x5000, prm(0, prm(0) + prm(1)), prm(1, prm(0) + prm(2) + prm(3) + prm(14) + prm(17))))
         time.sleep(1.5)  # the index's making, at the cable's start, before any song needs it
         for i, k in enumerate(range(100, 9100, 900)):
-            (tmp_path/'queue').write_text(f'{i + 1} 0 2\n0\t{stream_of(k)}\tSong {k}\tA\n'
+            put_whole(tmp_path/'queue', f'{i + 1} 0 2\n0\t{stream_of(k)}\tSong {k}\tA\n'
                                           f'0\t{stream_of(k + 1)}\tSong {k + 1}\tA\n')
-            files['np'].write_text(f'state=1\npos=1000\nlen=200\nid=0\ntitle=Song {k}\nartist=A\nalbum=B\n'
+            put_whole(files['np'], f'state=1\npos=1000\nlen=200\nid=0\ntitle=Song {k}\nartist=A\nalbum=B\n'
                                    f'path={stream_of(k)}\nqgen={i + 1}\nqpos=0\nqlen=2\n')
             deadline, seen = time.time() + 3, None
             while time.time() < deadline and seen != 0x40000000 + k:
@@ -1994,6 +2067,378 @@ def test_the_player_lets_go_of_the_car_pcm_before_the_unbind(carlogs):
 def test_a_car_pcm_never_let_go_is_given_2_s(carlogs):
     took, log = q2car_release(carlogs, 'state: RUNNING\n')
     assert 1.9 < took < 4 and "still open after 2 s" in log, (took, log)
+
+
+def test_the_library_s_read_does_not_hold_the_loop(probe, tmp_path, monkeypatch):
+    """q2car.1.log of 2026-11-22 at 22028.654: "a pass held 648 ms, 557 of it in the library's read", the car's
+    StartMediaLibraryUpdates answered by reading all 9,199 of the owner's server songs and 31 lists inside the loop,
+    once a cable. This machine reads them about 100 times faster than the Q2's card, so the stall detector is set at
+    2 ms: no pass may be held mostly in the library's read, and the whole library still goes to the car."""
+    monkeypatch.setattr(BmwCar, 'msg', bmw_msg_keeping_body)
+    monkeypatch.setattr(FakeFfs, '__init__', fast_ffs(FakeFfs.__init__))  # the data stage's 50 ms would hide it
+    song_db(tmp_path/'database.db', [SONGS[1]])
+    big_catalogue(tmp_path/'catalogue.db')
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path, '--stall-ms', '2')
+    try:
+        car.send(message(0x4C03, prm(0, b'lib\0')))
+        deadline, first = time.time() + 10, None
+        while time.time() < deadline and first is None:
+            mid, ps = car.msg()
+            if mid == 0x4C04 and 2 in ps:
+                first = ps
+    finally:
+        stop(p, fd)
+    assert first is not None, 'no song sent'
+    text = log.read_text()
+    assert '9200 songs read' in text
+    assert held(log, "the library's read") == [], held(log, "the library's read")
+
+
+
+def test_a_session_s_end_takes_the_car_s_audio_and_the_link(probe, tmp_path):
+    """uac1-power-app.md #19: a DISABLE or SUSPEND past the gap ended q2-iap's session (its summary written) but left
+    the car's file, so the player kept writing to a way 3 nobody read, and the link, so a bus RESUME went on with
+    active 0. The session's end now removes the car's file and forgets the link; the next ENABLE is session 2."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path, '--gap-ms', '300')
+    try:
+        car.send(message(0xDA00))
+        assert car.msg()[0] == 0xDA01
+        time.sleep(0.1)
+        assert files['car'].exists()
+        car.ffs.event(DISABLE)
+        time.sleep(0.8)
+        assert not files['car'].exists(), "the car's file outlived its session"
+        car.ffs.event(ENABLE)
+        time.sleep(0.2)
+    finally:
+        stop(p, fd)
+    text = log.read_text()
+    assert 'session 1 ended' in text and 'session 2 begins' in text
+    assert 'iap2 link: forgotten with its session' in text
+
+
+def test_a_sleep_ends_the_session_and_the_link(probe, tmp_path):
+    """uac1-power-app.md #6: the session gap and the link's timers ran on CLOCK_MONOTONIC, which stops while the Q2 is
+    suspended, so hours asleep after a DISABLE read as no time and the old session went on at the wake. They run on
+    CLOCK_BOOTTIME now. --clock-file stands in for a sleep: the milliseconds it holds are added to the boot clock and
+    not to the monotonic one. A sleep past the gap after a DISABLE ends the session; a sleep with the link up is a
+    lost link."""
+    clock = tmp_path/'clock'
+    put_whole(clock, '0\n')
+    p, car, fd, log, files = bmw_up(probe, tmp_path, '--clock-file', str(clock))
+    try:
+        car.send(message(0xDA00))
+        assert car.msg()[0] == 0xDA01
+        time.sleep(0.1)
+        car.ffs.event(DISABLE)
+        time.sleep(0.2)
+        put_whole(clock, '20000\n')  # 20 s asleep, past the 8 s gap
+        time.sleep(0.4)
+        assert 'session 1 ended' in log.read_text()
+        assert not files['car'].exists()
+    finally:
+        stop(p, fd)
+    (tmp_path/'awake').mkdir()
+    p, car, fd, log, files = bmw_up(probe, tmp_path/'awake', '--clock-file', str(clock))
+    try:
+        time.sleep(0.2)
+        put_whole(clock, '60000\n')  # 40 s more, the link up and no DISABLE
+        time.sleep(0.4)
+    finally:
+        stop(p, fd)
+    text = log.read_text()
+    assert 'link: lost (the Q2 slept 40' in text, [l for l in text.splitlines() if 'link' in l][-5:]
+    assert 'session 1 ended' not in text
+
+
+def test_a_catalogue_that_cannot_be_read_is_not_an_empty_one(probe, tmp_path, monkeypatch):
+    """uac1-power-app.md #4: a car asking for the library with the card not mounted yet (a wake, a card lent to a
+    computer) was told every server song was gone, and the record then said it held the smaller library, so the next
+    drive pushed them all again. With the sent record holding server songs and the catalogue absent, the read waits
+    for the card a bounded time (--card-wait-ms); a catalogue there by then is read as usual, and one still absent
+    leaves the car with the library it holds: its revision back, complete, nothing gone, the record unchanged."""
+    monkeypatch.setattr(BmwCar, 'msg', bmw_msg_keeping_body)
+    cat = tmp_path/'catalogue.db'
+    song_db(tmp_path/'database.db', [SONGS[1]])
+    server = [(0x40000000 + k, t, 'Vide Noir', 'Lord Huron', '', 'Rock', k + 1, 1,
+               f'/mnt/mmc/.subsonic/cat/a/{k}.flac') for k, t in enumerate(('Lost in Time and Space', 'Never Ever'))]
+    catalogue_db(cat, server)
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path)
+    try:
+        items, gone, rev, reset = library(car)
+        assert len(items) == 3
+        time.sleep(0.2)
+    finally:
+        stop(p, fd)
+    record = sent.read_text()
+    cat.rename(tmp_path/'away.db')  # the card not mounted
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path, '--card-wait-ms', '600', run='run2')
+    try:
+        items, gone, rev2, reset = library(car, rev)
+        time.sleep(0.2)
+    finally:
+        stop(p, fd)
+    assert (items, gone, rev2, reset) == ([], [], rev, False)
+    assert sent.read_text() == record
+    assert 'the catalogue cannot be read' in log.read_text()
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path, '--card-wait-ms', '5000', run='run3')
+    try:
+        car.send(message(0x4C03, prm(0, b'lib\0'), prm(1, rev.encode() + b'\0')))
+        time.sleep(0.5)
+        (tmp_path/'away.db').rename(cat)  # mounted half a second into the read
+        items, gone, rev3, reset = [], [], None, False
+        while rev3 is None:
+            mid, _ = car.msg(8)
+            ps = plist(car.last)
+            gone += [int.from_bytes(d, 'big') for i, d in ps if i == 4]
+            if dict(ps).get(7) == b'\x64':
+                rev3 = dict(ps).get(1, b'').rstrip(b'\0').decode()
+    finally:
+        stop(p, fd)
+    assert (gone, rev3) == ([], rev)
+    assert 'waited for the card' in log.read_text()
+
+
+
+def wakeups(pid, seconds):
+    """The process's voluntary context switches over seconds: each sleep in poll that ended is one."""
+    def count():
+        for line in pathlib.Path(f'/proc/{pid}/status').read_text().splitlines():
+            if line.startswith('voluntary_ctxt_switches:'):
+                return int(line.split()[1])
+    a = count()
+    time.sleep(seconds)
+    return count() - a
+
+
+def test_the_loop_sleeps_until_something_is_due(probe, tmp_path):
+    """car-bt-power.md #6: q2-iap's loop woke every 10 ms whatever it was doing, a charger overnight included (the
+    gadget stays up, unseen by it), and read the rate file 50 times a second: 6,000 wakeups a minute. It sleeps now
+    until a request, a report gone, a child's bytes or the soonest deadline. On a charger (a host that never addresses
+    the Q2) that is the controller's state every 100 ms; with a car identified, its link idle and its audio not asked
+    for, the rate file every 250 ms. Counted over 2 s here: at most 30 wakeups each (the old loop's were about 200)."""
+    p, ffs, log, state, udc = car_daemon(probe, tmp_path, '--iap2', kinds=('hid',))
+    try:
+        time.sleep(0.3)
+        charger = wakeups(p.pid, 2.0)
+    finally:
+        p.terminate()
+        p.wait(5)
+    (tmp_path/'car').mkdir()
+    p, car, fd, log, files = bmw_up(probe, tmp_path/'car')
+    try:
+        time.sleep(0.3)
+        idle = wakeups(p.pid, 2.0)
+    finally:
+        stop(p, fd)
+    assert charger <= 30 and idle <= 30, (charger, idle)
+
+
+
+def test_the_children_hold_no_ep0(probe, tmp_path):
+    """car-bt-power.md #9: no fd of q2-iap was close-on-exec, and its children (the report writer, the library's read,
+    the cover's search and its ffmpeg) held every ep0 open: a lost link's teardown then found FunctionFS busy and the
+    relink failed while one ran (ffmpeg on a 2026-11-22 cover ran 13.4 s). Here ffmpeg is a stand-in that waits 3 s;
+    q2-iap is killed while it runs, and ep0's other end must see the last holder gone at once (a pty's master reads EIO
+    once no fd of its slave is open), not when the stand-in ends."""
+    wait = tmp_path/'ffmpeg'
+    wait.write_text('#!/bin/sh\nsleep 3\n')
+    wait.chmod(0o755)
+    (tmp_path/'run').mkdir()
+    p, car, fd, log, files = bmw_up(probe, tmp_path/'run', '--ffmpeg', str(wait), '--art-made', str(tmp_path/'made'))
+    try:
+        put_whole(files['np'], 'state=1\npos=1000\nlen=200\ntitle=T\nartist=A\nalbum=B\npath=/nowhere/x.flac\n')
+        np_updates(car)
+        time.sleep(0.5)
+        assert 'asked of ffmpeg' in log.read_text()
+    finally:
+        os.close(car.ffs.slave)  # the test's own hold on ep0
+        p.kill()
+        p.wait(5)
+        os.close(fd)
+    killed = time.time()
+    gone, end = None, killed + 2.5
+    while gone is None and time.time() < end:
+        try:
+            r, _, _ = select.select([car.ffs.master], [], [], 0.05)
+            if r:
+                os.read(car.ffs.master, 65536)
+        except OSError:
+            gone = time.time()
+    assert gone is not None and gone - killed < 1.0, f'ep0 held {gone and gone - killed} s by a child of q2-iap after it was killed'
+
+
+
+def test_a_slow_log_holds_nothing(probe, tmp_path, monkeypatch):
+    """q2car.1.log of 2026-11-22: three stalls of 109 to 278 ms were a write to the card's log from the loop. The log
+    is a FIFO here whose reader stops while the car sends 40 seeks, a page's pipe, as a card that stalls; the car's packet must
+    still be acknowledged within the BMW's first two tries (400 ms), and every line arrives once the reader goes on."""
+    import threading
+    log = tmp_path/'probe.log'
+    os.mkfifo(log)
+    got, pause = [], threading.Event()
+
+    def reader():
+        r = os.open(log, os.O_RDONLY)
+        fcntl.fcntl(r, 1031, 4096)  # F_SETPIPE_SZ: a pipe of one page
+        while True:
+            while pause.is_set():
+                time.sleep(0.05)
+            b = os.read(r, 4096)
+            if not b:
+                break
+            got.append(b)
+        os.close(r)
+    t = threading.Thread(target=reader, daemon=True)
+    t.start()
+    p, car, fd, _, files = bmw_up(probe, tmp_path)
+    try:
+        pause.set()
+        time.sleep(0.05)
+        for k in range(40):  # 40 seeks: 40 lines or more each way, past the page
+            car.send(message(0x5003, prm(0, (1000 * k).to_bytes(4, 'big'))))
+        waited = acked_within(car, 1.0)
+    finally:
+        pause.clear()
+        stop(p, fd)
+        t.join(5)
+    text = b''.join(got).decode(errors='replace')
+    assert waited is not None and waited < 0.4, f"the car's packet acknowledged after {waited} s"
+    assert text.count('seek ') >= 40 and 'end: signalled' in text
+
+
+def test_position_updates_are_counted_not_logged(probe, tmp_path):
+    """car-bt-power.md #4: q2car.log ran at 870 B/s, 85 % of it the position update a playing song sends twice a second
+    and its acknowledgement, five lines each. They are counted in the link's health line now, and the rest stays: the
+    first Now Playing's message by name, and every packet that is not a bare acknowledgement."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path, '--health-ms', '1000')
+    try:
+        np_updates(car)
+        start = len(log.read_bytes())
+        np_and_files(car, lambda u: False, seconds=3.2)
+        text = log.read_text()
+    finally:
+        stop(p, fd)
+    health = [l for l in text.splitlines() if 'link: health' in l and 'position updates' in l]
+    assert health and sum(int(l.split('not logged: ')[1].split(' position')[0]) for l in health) >= 5, health
+    assert 'msg > 5001 NowPlayingUpdate' in text
+    tail = text.encode()[start:]
+    assert len(tail) / 3.2 < 400, f'{len(tail) / 3.2:.0f} B/s while a song plays'
+
+
+
+def test_the_log_is_capped_within_a_cable(probe, tmp_path):
+    """car-bt-power.md #4: nothing limited q2car.log within a cable (3.1 MB an hour; a ten hour drive about 31 MB, in
+    RAM when the card is away). Past the cap (6 MB, --log-cap here 20,000 bytes) the packet trace stops and q2-iap's
+    own events and the link's go on; past twice the cap only those of q2-iap and the link."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path, '--log-cap', '20000')
+    try:
+        for k in range(150):
+            car.send(message(0x5003, prm(0, (1000 * k).to_bytes(4, 'big'))))
+        time.sleep(0.3)
+    finally:
+        stop(p, fd)
+    text = log.read_text()
+    after = text.split('no packet trace from here', 1)
+    assert len(after) == 2, len(text)
+    assert ' pkt ' not in after[1].split('only q2-iap')[0] and 'seek ' in after[1].split('only q2-iap')[0]
+    assert 'end: signalled' in text, 'q2-iap\'s own last line kept'
+
+
+
+def answered(ffs, timeout=1.0):
+    """A GET_REPORT on ep0 answered (its 8 zero bytes) within timeout: the loop is alive."""
+    ffs.buf = b''
+    while ffs.read(1, 0.05):
+        pass
+    ffs.setup(0xa1, 1, 0x0101, 2, 8)
+    return ffs.read(8, timeout) == bytes(8)
+
+
+def test_a_tiny_max_packet_is_not_taken(probe, tmp_path):
+    """car-bt-power.md #13: a SYN offering a maximum packet of 12 to 19 bytes left a file transfer's piece room 0, so
+    the car's go for a cover spun the loop for good (at 11 the room wrapped). No car offers that; such a SYN is not
+    taken now, and the loop goes on."""
+    np = tmp_path/'now'
+    np.write_text('state=1\npos=1000\nlen=200\ntitle=T\nartist=A\nalbum=B\npath=/nowhere/x.flac\n')
+    p, ffs, log = start(probe, tmp_path, '--iap2', '--art-dir', str(tmp_path), '--np', str(np), '--ask-dir',
+                        str(tmp_path), '--art-made', str(tmp_path/'made'))
+    fd = os.open(ffs.path/'ep1', os.O_RDONLY | os.O_NONBLOCK)
+    car = BmwCar(ffs, fd)
+    jpeg = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=160x160', '-frames:v', '1',
+                           '-f', 'mjpeg', '-'], check=True, capture_output=True).stdout
+    try:
+        ffs.event(ENABLE)
+        car.write(bytes([0xff, 0x55, 0x02, 0x00, 0xee, 0x10]))
+        car.report()
+        car.write(packet(0x80, car.seq, 0, 0, BMW_SYN[:2] + (12).to_bytes(2, 'big') + BMW_SYN[4:]))
+        try:
+            _, syn_seq, _, _, _ = car.packet(1.0)
+            car.write(packet(0x40, car.seq, syn_seq, 0))
+        except AssertionError:
+            pass
+        (tmp_path/f"{fnv_part(fnv_part(2166136261, 'A'), 'B'):08x}.jpg").write_bytes(jpeg)
+        takes = b''.join(i.to_bytes(2, 'big') for i in (0x5001, 0x4E09))
+        car.send(message(0x1D01, prm(0, b'BMW 83828\0'), prm(7, takes)))  # identified, its answers too long to go
+        time.sleep(0.5)
+        car.send(message(0x5000, prm(0, prm(0x1a)), prm(1, prm(0))))
+        time.sleep(1.5)
+        car.send(bytes([0x80, 0x01]), session=2)
+        time.sleep(0.3)
+        alive = answered(ffs)
+    finally:
+        p.kill()
+        p.wait(5)
+        os.close(fd)
+    assert alive, 'the loop stopped'
+    assert 'max packet 12 bytes, under' in log.read_text()
+
+
+def test_an_answer_ep0_does_not_take_is_a_lost_link(probe, tmp_path):
+    """car-bt-power.md #12: the answer to an IN control request was written to ep0 with no time limit, where the OUT
+    data stage's read has 2 s since a 35 s hold. Here ep0's other end stops reading, so the answers' writes wait;
+    each now has DATA_STAGE_S, and one not taken loses the link (the control pipe is out of step with the car), as a
+    data stage that is not its report does."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path)
+    try:
+        for _ in range(200):  # GET_REPORTs of 1 KB each, never read: past the pty's buffer
+            car.ffs.setup(0xa1, 1, 0x0101, 2, 1024)
+        deadline = time.time() + 8
+        while time.time() < deadline and 'not taken in' not in log.read_text():
+            time.sleep(0.1)
+    finally:
+        p.kill()
+        p.wait(5)
+        os.close(fd)
+    assert 'link: lost (an answer on ep0 not taken in 2 s)' in log.read_text()
+
+
+
+def test_two_presses_inside_a_poll_both_reach_the_shim(probe, tmp_path):
+    """car-bt-power.md #8: the car's buttons went to the shim through one file, renamed over at each press and read
+    every 500 ms, so two presses inside one read lost the first (two taps of Next 300 ms apart skipped one song). They
+    go down the shim's queue now (coda_rc_cmdq.h, a FIFO demo's shim makes and reads), a line each; here the FIFO is
+    the test's, and two Next presses 150 ms apart arrive as two lines."""
+    q = tmp_path/'cmdq'
+    os.mkfifo(q)
+    r = os.open(q, os.O_RDWR | os.O_NONBLOCK)
+    p, car, fd, log, files = bmw_up(probe, tmp_path)
+    got = b''
+    try:
+        car.send(bytes([0x40, 0x40, 0, 6 + len(BMW_START_HID), 0x68, 0x00]) + BMW_START_HID)
+        for b in (0x04, 0x00, 0x04, 0x00):
+            car.send(message(0x6802, prm(0, b'\x00\x01'), prm(1, bytes([b]))))
+            time.sleep(0.04)
+        time.sleep(0.3)
+        try:
+            got = os.read(r, 4096)
+        except BlockingIOError:
+            pass
+    finally:
+        stop(p, fd)
+        os.close(r)
+    lines = [l.split(' ', 1)[1] for l in got.decode().splitlines()]
+    assert lines == ['next', 'next'], (lines, files['cmd'].exists() and files['cmd'].read_text())
 
 
 if __name__ == '__main__':

@@ -91,13 +91,16 @@ struct iap2_host {
     void (*audio)(int on);                         /* the car wants USB audio (1) or no longer (0) */
     void (*command)(const char *verb);             /* a button or a seek: the shim's verbs (coda_rc_shim.c cr_command) */
     unsigned (*artwork)(const struct iap2_np *np, u8 *out, unsigned cap); /* the song's cover, a JPEG, or 0 */
-    struct iap2_library *lib;   /* the library, filled by lib_load (-1: none to send) */
-    int (*lib_load)(void);
+    int (*art_pending)(const struct iap2_np *np); /* 1 while its cover is still looked for, quickly (q2_iap.c) */
+    struct iap2_library *lib;   /* the library, filled once lib_load's read is over */
+    int (*lib_load)(void);      /* its read begun, off the loop: 0, or -1 with none to send */
+    int (*lib_ready)(void);     /* 1 lib filled, 2 the server's catalogue unreadable, -1 none to send, 0 reading */
     void (*lib_saved)(void);    /* the car holds lib's revision whole */
     void (*play)(const unsigned *rids, unsigned n, unsigned at, int shuffle);
     int (*queue)(unsigned *rids, unsigned cap); /* the playing queue's rids, or -1 */
     int (*backlog)(void);     /* input reports handed over and not yet taken by the car */
     void (*link_lost)(void);  /* the link given up on */
+    unsigned (*rate)(void);   /* the player's rate for the song about to play, read now */
 };
 
 static const struct iap2_host *H;
@@ -220,6 +223,7 @@ struct slot {
     u8 packet[MAX_PACKET];
     unsigned len, tries;
     long sent;
+    u8 quiet; /* a position update's: its first sending not logged */
 };
 static struct slot slots[SLOTS];
 static unsigned head, count;
@@ -246,13 +250,28 @@ static void log_packet(int from_q2, const u8 *p, unsigned len, const char *note)
     H->log(m);
 }
 
+/* The log's volume (car-bt-power.md #4: 870 B/s on the 2026-11-22 drive, 85 % of it the position update a song
+ * plays with, twice a second, and its acknowledgement, five lines each): a position update's message, packet and
+ * reports, and each bare acknowledgement either way, are counted, not logged (trace_quiet, read by q2_iap.c io_send
+ * too), and the counts go in the link's health line. Sent again, a packet is logged. */
+static int msg_quiet, trace_quiet;
+static unsigned quiet_pos, quiet_in, quiet_out;
+/* An output report that is the car's bare acknowledgement whole: [id][00, a whole packet][FF 5A 00 09 40 ...] */
+static int iap2_bare_ack(const u8 *r, unsigned n) {
+    return n >= 2 + HEADER_LEN && r[1] == 0 && r[2] == IAP2_SOP1 && r[3] == IAP2_SOP2 && r[4] == 0 &&
+           r[5] == HEADER_LEN && r[6] == CTL_ACK;
+}
+
 static void send_ctl(u8 control, const u8 *payload, unsigned n, u8 seq) {
     u8 p[HEADER_LEN + 48 + 1];
     unsigned len = HEADER_LEN + (n ? n + 1 : 0);
     put_header(p, len, control, seq, 0);
     if (n) memcpy(p + HEADER_LEN, payload, n), p[HEADER_LEN + n] = cksum(payload, n);
-    log_packet(1, p, len, 0);
+    trace_quiet = control == CTL_ACK && !n;
+    if (trace_quiet) ++quiet_out;
+    else log_packet(1, p, len, 0);
     send_bytes(p, len);
+    trace_quiet = 0;
     unacked = 0;
 }
 
@@ -261,8 +280,10 @@ static void send_slot(struct slot *s) {
     s->packet[8] = cksum(s->packet, 8);
     s->tries++, s->sent = H->now();
     unacked = 0;
-    log_packet(1, s->packet, s->len, s->tries > 1 ? "(again)" : 0);
+    trace_quiet = s->quiet && s->tries == 1;
+    if (!trace_quiet) log_packet(1, s->packet, s->len, s->tries > 1 ? "(again)" : 0);
     send_bytes(s->packet, s->len);
+    trace_quiet = 0;
 }
 
 /* Messages waiting for room in the car's window: with retransmission on (the BMW's SYN gives 10 retries), no more
@@ -270,7 +291,7 @@ static void send_slot(struct slot *s) {
  * window (pump). */
 #define QUEUE 96
 static struct queued {
-    u8 session;
+    u8 session, quiet;
     unsigned len;
     u8 b[MAX_PACKET - HEADER_LEN - 1];
 } queue[QUEUE];
@@ -300,21 +321,31 @@ static void iap2_lost(const char *why) {
 }
 
 /* The car's SYN: its link parameters, the sessions after them. Retransmitted SYNs get the same answer. */
+/* The least maximum packet a SYN may offer: under it a file transfer's piece has no room (12 to 19 bytes spun the
+ * loop for good at the car's go, car-bt-power.md #13) and most messages do not fit. No car offers so little (the
+ * BMW 0xFFFF, PodBox's cars 1,024 or more). */
+#define MIN_PEER_MAX 128
 static void take_syn(u8 seq, const u8 *payload, unsigned n) {
     char h[200], m[300];
+    if (n < SYN_FIXED || n > sizeof syn_ack || payload[0] != 1) {
+        iap2_hex(h, sizeof h, payload, n);
+        iap2_log("link: SYN not taken (not version 1, or its length):", h);
+        return;
+    }
     iap2_hex(h, sizeof h, payload, n);
     snprintf(m, sizeof m, "link parameters: version %u, window %u, max packet %u, retransmit %u ms, cack %u ms, "
              "retries %u, cacks %u:", payload[0], payload[1], payload[2] << 8 | payload[3], payload[4] << 8 | payload[5],
              payload[6] << 8 | payload[7], payload[8], payload[9]);
     iap2_log(m, h);
-    if (n < SYN_FIXED || n > sizeof syn_ack || payload[0] != 1) {
-        H->log("link: SYN not taken (not version 1, or its length)");
+    unsigned want = payload[2] << 8 | payload[3];
+    if (want < MIN_PEER_MAX) {
+        snprintf(m, sizeof m, "link: SYN not taken (max packet %u bytes, under %u)", want, MIN_PEER_MAX);
+        H->log(m);
         return;
     }
     memcpy(syn_ack, payload, n);
     syn_ack_len = n;
-    unsigned want = payload[2] << 8 | payload[3];
-    peer_max = want < HEADER_LEN + 2 ? HEADER_LEN + 2 : want > MAX_PACKET ? MAX_PACKET : want;
+    peer_max = want > MAX_PACKET ? MAX_PACKET : want;
     if (want > RX_PACKET) syn_ack[2] = RX_PACKET >> 8, syn_ack[3] = RX_PACKET & 255;
     /* The Q2 holds nothing it receives, so takes any number of packets unacknowledged; an iPhone offers 0x7F to an
      * accessory that retransmits and echoes the window to one that does not. */
@@ -394,7 +425,8 @@ static void take_packet(const u8 *p, unsigned len) {
         log_packet(0, p, len, "(bad payload checksum: dropped)");
         return;
     }
-    log_packet(0, p, len, 0);
+    if (control == CTL_ACK && len == HEADER_LEN) ++quiet_in; /* a bare acknowledgement: counted (link_health) */
+    else log_packet(0, p, len, 0);
     if (control & CTL_RST) {
         reset_link();
         return;
@@ -559,7 +591,7 @@ static void enqueue(u8 session, const u8 *b, unsigned n) {
     }
     drop_said = 0;
     struct queued *q = &queue[(q_head + q_count++) % QUEUE];
-    q->session = session, q->len = n;
+    q->session = session, q->len = n, q->quiet = (u8)msg_quiet;
     memcpy(q->b, b, n);
     pump();
 }
@@ -572,7 +604,7 @@ static void pump(void) {
         put_header(s->packet, s->len, CTL_ACK, ++my_seq, q->session);
         memcpy(s->packet + HEADER_LEN, q->b, q->len);
         s->packet[HEADER_LEN + q->len] = cksum(q->b, q->len);
-        s->tries = 0;
+        s->tries = 0, s->quiet = q->quiet;
         if (rto) ++count; /* kept for sending again; with no retransmission, done with once sent */
         q_head = (q_head + 1) % QUEUE, --q_count;
         send_slot(s);
@@ -588,7 +620,7 @@ static void msg_send(void) {
         return;
     }
     m.b[2] = m.len >> 8, m.b[3] = m.len;
-    log_msg(1, m.b, m.len, 96);
+    if (!msg_quiet) log_msg(1, m.b, m.len, 96);
     enqueue(control_session, m.b, m.len);
 }
 
@@ -793,6 +825,27 @@ static void file_send(u8 id, u8 op, const u8 *d, unsigned n) {
     enqueue(file_session, b, n + 2);
 }
 
+/* A file transfer's pieces: the bytes a piece holds (the car's packet or BULK_MAX, less the header, its checksum and
+ * the piece's id and op; MIN_PEER_MAX keeps it above 100), each piece's op (C0 the only, 80 the first, 00 one in the
+ * middle, 40 the last), a new transfer's id (80 to FF, round), and a song's 8-byte id */
+static unsigned piece_room(void) { return (peer_max < BULK_MAX ? peer_max : BULK_MAX) - HEADER_LEN - 1 - 2; }
+static u8 piece_op(int first, int last) { return first && last ? 0xC0 : first ? 0x80 : last ? 0x40 : 0x00; }
+static void file_pieces(u8 id, const u8 *d, unsigned len, unsigned *sent, unsigned room) {
+    while (*sent < len) {
+        unsigned k = len - *sent < room ? len - *sent : room;
+        file_send(id, piece_op(*sent == 0, *sent + k == len), d + *sent, k);
+        *sent += k;
+    }
+}
+static u8 transfer_take(void) {
+    u8 id = next_transfer;
+    next_transfer = id == 0xFF ? 0x80 : id + 1;
+    return id;
+}
+static void put_id8(u8 *p, u32 hi, u32 lo) {
+    for (int b = 0; b < 4; ++b) p[b] = (u8)(hi >> (24 - 8 * b)), p[4 + b] = (u8)(lo >> (24 - 8 * b));
+}
+
 /* A baseline JPEG as PodBox's car needed it: each quantisation and Huffman table in a segment of its own, the bytes
  * otherwise as they are. 0 for anything else (a progressive JPEG, a PNG, a broken file). */
 static unsigned jpeg_tables_apart(const u8 *in, unsigned n, u8 *out, unsigned cap) {
@@ -839,7 +892,7 @@ static u8 art_start(const struct iap2_np *n) {
     char t[120];
     if (!file_session) return 0;
     if (art_going && art_id) file_send(art_id, 0x02, 0, 0);
-    art_id = next_transfer, next_transfer = next_transfer == 0xFF ? 0x80 : next_transfer + 1;
+    art_id = transfer_take();
     /* a stream has no cover, but is named one, empty: with none named the car keeps the last song's */
     unsigned got = H->artwork && !n->live ? H->artwork(n, raw, sizeof raw) : 0;
     art_len = got ? jpeg_tables_apart(raw, got, art, sizeof art) : 0;
@@ -864,14 +917,8 @@ static void iap2_file(const u8 *d, unsigned n) {
     H->log(t);
     if (list_transfer_word(d)) return;
     if (d[0] == ql_id && ql_going && d[1] == 0x01) { /* the queue list: every piece */
-        unsigned room = (peer_max < BULK_MAX ? peer_max : BULK_MAX) - HEADER_LEN - 1 - 2, sent = 0;
-        room -= room % 8;
-        while (sent < ql_len) {
-            unsigned k = ql_len - sent < room ? ql_len - sent : room;
-            u8 op = sent == 0 && sent + k == ql_len ? 0xC0 : sent == 0 ? 0x80 : sent + k == ql_len ? 0x40 : 0x00;
-            file_send(ql_id, op, ql + sent, k);
-            sent += k;
-        }
+        unsigned sent = 0;
+        file_pieces(ql_id, ql, ql_len, &sent, piece_room() - piece_room() % 8);
         return;
     }
     if (d[0] == ql_id && (d[1] == 0x02 || d[1] == 0x05)) {
@@ -880,14 +927,8 @@ static void iap2_file(const u8 *d, unsigned n) {
     }
     if (d[0] != art_id || !art_going) return;
     if (d[1] == 0x01) { /* go: every piece, as the window allows */
-        unsigned room = (peer_max < BULK_MAX ? peer_max : BULK_MAX) - HEADER_LEN - 1 - 2;
         if (!art_len) file_send(art_id, 0xC0, 0, 0);
-        while (art_sent < art_len) {
-            unsigned k = art_len - art_sent < room ? art_len - art_sent : room;
-            u8 op = art_sent == 0 && art_sent + k == art_len ? 0xC0 : art_sent == 0 ? 0x80 : art_sent + k == art_len ? 0x40 : 0x00;
-            file_send(art_id, op, art + art_sent, k);
-            art_sent += k;
-        }
+        file_pieces(art_id, art, art_len, &art_sent, piece_room());
     } else if (d[1] == 0x02 || d[1] == 0x05) {
         art_going = 0;
         H->log(d[1] == 0x05 ? "art: the car took it" : "art: the car cancelled it");
@@ -1086,7 +1127,7 @@ static void send_library_info(void) {
 #define CHECKPOINT_MS 60000      /* and then one a minute */
 #define LISTS_MAX 128
 #define LIST_WAIT_MS 5000 /* a list's transfer the car has not started in this long is given up */
-enum { LIB_IDLE, LIB_FIRST, LIB_LISTS, LIB_ITEMS, LIB_GONE, LIB_FINAL };
+enum { LIB_IDLE, LIB_FIRST, LIB_LISTS, LIB_ITEMS, LIB_GONE, LIB_FINAL, LIB_READING };
 static struct {
     int phase, after, diff, reset, held; /* after: the phase once the lists' transfers end; held: the car has rev */
     unsigned next, gone, mask, items, updates, completes;
@@ -1097,6 +1138,25 @@ static struct {
 } ls;
 
 static const char *lib_str(unsigned off) { return H->lib->pool + off; }
+
+/* The update being built has no room for one more item (an item's group with its id, and the 5 bytes the update ends
+ * with), in a packet of BULK_MAX or the car's maximum */
+static int msg_full(void) {
+    return !m.ok || m.len + 4 + 64 + 5 > BULK_MAX - HEADER_LEN - 1 || m.len + 4 + 64 + 5 > peer_max - HEADER_LEN - 1;
+}
+
+/* The first of n records (stride bytes apart, each starting with an unsigned key, sorted by it) whose key is not
+ * below key: its index, n when there is none */
+static unsigned lower_key(const void *base, unsigned n, unsigned stride, unsigned key) {
+    unsigned lo = 0, hi = n;
+    while (lo < hi) {
+        unsigned mid = (lo + hi) / 2, k;
+        memcpy(&k, (const u8 *)base + (size_t)mid * stride, sizeof k);
+        if (k < key) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
 
 static void lib_named(unsigned mask, unsigned id_param, u32 hi, u32 id, const char *name) {
     if (!*name) return;
@@ -1123,34 +1183,19 @@ static void lib_item(const struct iap2_track *t, unsigned mask) {
 /* Is the car's copy of this song the one it was last sent (diff), so it needs nothing? */
 static int lib_unchanged(const struct iap2_track *t) {
     const struct iap2_library *l = H->lib;
-    unsigned lo = 0, hi = l->sent_n;
-    while (lo < hi) {
-        unsigned mid = (lo + hi) / 2;
-        if (l->sent[mid].rid < t->rid) lo = mid + 1;
-        else hi = mid;
-    }
+    unsigned lo = lower_key(l->sent, l->sent_n, sizeof *l->sent, t->rid);
     return lo < l->sent_n && l->sent[lo].rid == t->rid && l->sent[lo].hash == t->hash;
 }
 
 static int lib_index(unsigned rid) { /* a song's index in the library, or -1 */
     const struct iap2_library *l = H->lib;
-    unsigned lo = 0, hi = l->n;
-    while (lo < hi) {
-        unsigned mid = (lo + hi) / 2;
-        if (l->tracks[mid].rid < rid) lo = mid + 1;
-        else hi = mid;
-    }
+    unsigned lo = lower_key(l->tracks, l->n, sizeof *l->tracks, rid);
     return lo < l->n && l->tracks[lo].rid == rid ? (int)lo : -1;
 }
 static int lib_kept(unsigned rid) { return lib_index(rid) >= 0; } /* still in the library */
 
 static int in_first(unsigned i) { /* sent in this connection's first update */
-    unsigned lo = 0, hi = ls.nf;
-    while (lo < hi) {
-        unsigned mid = (lo + hi) / 2;
-        if (ls.sorted[mid] < i) lo = mid + 1;
-        else hi = mid;
-    }
+    unsigned lo = lower_key(ls.sorted, ls.nf, sizeof *ls.sorted, i);
     return lo < ls.nf && ls.sorted[lo] == i;
 }
 
@@ -1200,11 +1245,11 @@ static int list_record(unsigned j) {
     param_u64(2, 0, 0);
     param_u8(3, 0), param_u8(4, 0), param_u8(5, id);
     group_end();
-    if (!m.ok || m.len + 4 + 64 + 5 > BULK_MAX - HEADER_LEN - 1 || m.len + 4 + 64 + 5 > peer_max - HEADER_LEN - 1) {
+    if (msg_full()) {
         m.len = mark, m.ok = 1;
         return 0;
     }
-    ls.list_ids[j] = id, next_transfer = next_transfer == 0xFF ? 0x80 : next_transfer + 1;
+    ls.list_ids[j] = transfer_take(); /* id, taken now that the record fits */
     return 1;
 }
 
@@ -1225,7 +1270,7 @@ static void lib_pump(void) {
         while (ls.phase == LIB_FIRST && ls.fi < ls.nf) {
             unsigned mark = m.len;
             lib_item(&l->tracks[ls.first[ls.fi]], ls.mask);
-            if (!m.ok || m.len + 4 + 64 + 5 > BULK_MAX - HEADER_LEN - 1 || m.len + 4 + 64 + 5 > peer_max - HEADER_LEN - 1) {
+            if (msg_full()) {
                 m.len = mark, m.ok = 1;
                 if (!n) ++ls.fi; /* a song no packet holds */
                 break;
@@ -1251,7 +1296,7 @@ static void lib_pump(void) {
             }
             unsigned mark = m.len;
             lib_item(tr, ls.mask);
-            if (!m.ok || m.len + 4 + 64 + 5 > BULK_MAX - HEADER_LEN - 1 || m.len + 4 + 64 + 5 > peer_max - HEADER_LEN - 1) {
+            if (msg_full()) {
                 m.len = mark, m.ok = 1;
                 if (!n) ++ls.next; /* a song no packet holds */
                 break;
@@ -1323,7 +1368,7 @@ static void lists_pump(long now) {
         memset(setup, 0, 4);
         k = 4, setup[k++] = size >> 24, setup[k++] = size >> 16, setup[k++] = size >> 8, setup[k++] = size;
         setup[k++] = 0, setup[k++] = 4;
-        for (int b = 0; b < 4; ++b) setup[k + b] = (u8)(LIB_LIST >> (24 - 8 * b)), setup[k + 4 + b] = (u8)(li->id >> (24 - 8 * b));
+        put_id8(setup + k, LIB_LIST, li->id);
         k += 8;
         unsigned idn = strlen(H->library_id) + 1;
         if (idn > sizeof setup - k) idn = sizeof setup - k;
@@ -1334,15 +1379,11 @@ static void lists_pump(long now) {
     while (ls.x_state == 2 && q_count < 2) {
         const struct iap2_list *li = &l->lists[ls.xi];
         u8 piece[BULK_MAX];
-        unsigned room = (peer_max < BULK_MAX ? peer_max : BULK_MAX) - HEADER_LEN - 1 - 2, k = 0;
+        unsigned room = piece_room(), k = 0;
         unsigned first = ls.x_sent == 0;
-        while (ls.x_sent < li->n && k + 8 <= room) {
-            unsigned rid = l->lrids[li->at + ls.x_sent++];
-            for (int b = 0; b < 4; ++b) piece[k + b] = (u8)(LIB_KEY >> (24 - 8 * b)), piece[k + 4 + b] = (u8)(rid >> (24 - 8 * b));
-            k += 8;
-        }
+        while (ls.x_sent < li->n && k + 8 <= room) put_id8(piece + k, LIB_KEY, l->lrids[li->at + ls.x_sent++]), k += 8;
         unsigned last = ls.x_sent >= li->n;
-        file_send(ls.x_id, first && last ? 0xC0 : first ? 0x80 : last ? 0x40 : 0x00, piece, k);
+        file_send(ls.x_id, piece_op(first, last), piece, k);
         if (last) ls.x_state = 0, ++ls.xi; /* the next at once, as PodBox's does */
     }
     if (ls.xi >= lib_nlists() && !ls.x_state) {
@@ -1359,14 +1400,52 @@ static int list_transfer_word(const u8 *d) {
     return 1;
 }
 
+/* What the car asked at StartMediaLibraryUpdates, kept while the library is read (LIB_READING): the revision it
+ * holds (a longer one than this is no revision this Q2 sent) and the item properties it wants. */
+static struct {
+    char rev[128];
+    int has_rev;
+    unsigned mask;
+} lib_ask;
+
+static void send_library_none(void) {
+    msg_start(0x4C04), param_str(0, H->library_id), param_str(1, "1"), param_u8(7, 100), msg_send();
+}
+
+/* The car's StartMediaLibraryUpdates: its first two answers at once, then the library read off the loop (H->lib_load,
+ * a child on the Q2) and the updates begun when it is in (library_read, from iap2_tick). */
 static void send_library_updates(const char *car_rev, unsigned mask) {
-    char t[200];
     msg_start(0x4C04), param_str(0, H->library_id), param_u8(8, 0), msg_send();
     msg_start(0x4C04), param_str(0, H->library_id), param_u8(9, 1), msg_send();
-    if (!H->lib || !H->lib_load || H->lib_load() < 0) {
-        msg_start(0x4C04), param_str(0, H->library_id), param_str(1, "1"), param_u8(7, 100), msg_send();
+    if (!H->lib || !H->lib_load || !H->lib_ready || H->lib_load() < 0) {
+        send_library_none();
         return;
     }
+    lib_ask.has_rev = car_rev != 0;
+    snprintf(lib_ask.rev, sizeof lib_ask.rev, "%s", car_rev ? car_rev : "");
+    lib_ask.mask = mask;
+    ls.phase = LIB_READING, ls.x_state = 0;
+}
+
+/* The server's catalogue unreadable while the car was last sent server songs (q2_iap_lib.c lib_read's -2, the card
+ * not mounted yet): not read as every server song gone (uac1-power-app.md #4). The car keeps what it holds: its own
+ * revision back, complete, and nothing recorded as sent. */
+static void library_unreadable(void) {
+    char t[220];
+    snprintf(t, sizeof t, "library: the catalogue cannot be read (the card not mounted?): the car keeps %s",
+             lib_ask.has_rev ? lib_ask.rev : "nothing");
+    H->log(t);
+    if (!lib_ask.has_rev) {
+        send_library_none();
+        return;
+    }
+    msg_start(0x4C04), param_str(0, H->library_id), param_str(1, lib_ask.rev), param_u8(7, 100), msg_send();
+}
+
+static void library_read(void) {
+    char t[300];
+    const char *car_rev = lib_ask.has_rev ? lib_ask.rev : 0;
+    unsigned mask = lib_ask.mask;
     const struct iap2_library *l = H->lib;
     memset(&ls, 0, sizeof ls);
     ls.mask = mask, ls.started = ls.complete_at = H->now();
@@ -1580,21 +1659,29 @@ static void ql_announce(void) {
     H->log(t);
     if (!whole) return;
     if (ql_going && ql_id) file_send(ql_id, 0x02, 0, 0);
-    ql_id = next_transfer, next_transfer = next_transfer == 0xFF ? 0x80 : next_transfer + 1;
+    ql_id = transfer_take();
     ql_len = 0;
-    for (int i = 0; i < n; ++i) {
-        u8 *k = ql + ql_len;
-        for (int b = 0; b < 4; ++b) k[b] = (u8)(LIB_KEY >> (24 - 8 * b)), k[4 + b] = (u8)(rids[i] >> (24 - 8 * b));
-        ql_len += 8;
-    }
+    for (int i = 0; i < n; ++i) put_id8(ql + ql_len, LIB_KEY, rids[i]), ql_len += 8;
     ql_going = 1;
     u8 setup[10] = { 0, 0, 0, 0, ql_len >> 24, ql_len >> 16, ql_len >> 8, ql_len, 0, 3 };
     file_send(ql_id, 0x04, setup, sizeof setup);
 }
 
-/* A cover made since Now Playing went (q2_iap.c art_made_poll): all of it again, a new transfer with it. */
+/* A cover found since Now Playing went (q2_iap.c art_poll): all of it again, a new transfer with it. */
 static void iap2_art_again(void) {
     if (now_playing) np_sent = 0, np_at = 0;
+}
+
+/* A new song's Now Playing waits for its cover's quick sources (Cover Flow's, the app's, one beside it: q2_iap.c
+ * art_child), ART_HOLD_MS at most, so its first update names the cover; past that, or once the child goes on to an
+ * ask or ffmpeg (iap2_art_slow), it goes with an empty one, and the cover follows (iap2_art_done). */
+#define ART_HOLD_MS 1000
+static long art_hold_at; /* since when Now Playing waits, 0 not */
+static void iap2_art_slow(void) {
+    if (art_hold_at) np_at = 0; /* at the next tick, with no cover yet */
+}
+static void iap2_art_done(int found) {
+    if (art_hold_at || found) iap2_art_again();
 }
 
 static void lib_reset(void) { ls.phase = LIB_IDLE, ls.x_state = 0, ql_going = 0, ql_seen_at = 0; }
@@ -1607,9 +1694,19 @@ static void poll_now_playing(long now) {
     if (!H->now_playing || !H->now_playing(&n)) n.state = 0;
     int changed = !np_sent || np_hash(&n) != np_hash(&np_last) || n.state != np_last.state ||
                   n.len_ms != np_last.len_ms || n.live != np_last.live;
+    if (changed && (media_mask & 1u << MI_ARTWORK) && !n.live && H->art_pending && H->art_pending(&n)) {
+        if (!art_hold_at) art_hold_at = now | 1;
+        if (now - art_hold_at < ART_HOLD_MS) {
+            np_at = now - 450; /* looked at again in 50 ms */
+            return;
+        }
+    }
+    art_hold_at = 0;
     if (changed) send_now_playing(&n, 1);
     else if (!n.live && (n.state == 1 || n.pos_ms != np_last.pos_ms)) {
+        msg_quiet = 1, ++quiet_pos;
         msg_start(0x5001), group_start(1), param_u32(PB_POSITION, n.pos_ms), group_end(), msg_send();
+        msg_quiet = 0;
     }
     if ((playback_mask & 1u << PB_QUEUE_LIST) && n.qgen != np_last.qgen) ql_seen_at = now; /* the queue moved */
     np_last = n, np_sent = 1;
@@ -1680,6 +1777,7 @@ static void iap2_control_receive(const u8 *msg, unsigned len) {
         break;
     case 0xDA00:
         H->log("audio: the car asks for USB audio");
+        if (H->rate) audio_hz = H->rate(); /* read only every RATE_IDLE_MS until now (q2_iap.c rate_poll) */
         send_audio_rate();
         set_audio(1);
         break;
@@ -1739,15 +1837,17 @@ static void iap2_control_receive(const u8 *msg, unsigned len) {
  * car sent anything and the car acknowledged something new, the packets dropped from a full queue, and the quiet
  * against its limit. */
 static void link_health(long now, int bl) {
-    char t[300];
+    char t[400];
     link_health_at = now;
     long quiet = waiting_since ? now - (heard_at > waiting_since ? heard_at : waiting_since) : 0;
     snprintf(t, sizeof t,
              "link: health: reports waiting %d, queued %u, unacknowledged %u, sent %ld ms ago, heard %ld ms ago, "
-             "acknowledged %ld ms ago, dropped %u, quiet %ld of %ld ms",
+             "acknowledged %ld ms ago, dropped %u, quiet %ld of %ld ms; since the last, not logged: %u position updates,"
+             " %u bare acks in, %u out",
              bl, q_count, rto ? count : 0, sent_at ? now - sent_at : -1L, heard_at ? now - heard_at : -1L,
-             acked_at ? now - acked_at : -1L, dropped, quiet, link_quiet_ms);
+             acked_at ? now - acked_at : -1L, dropped, quiet, link_quiet_ms, quiet_pos, quiet_in, quiet_out);
     H->log(t);
+    quiet_pos = quiet_in = quiet_out = 0;
 }
 
 static void iap2_tick(void) {
@@ -1799,10 +1899,48 @@ static void iap2_tick(void) {
     }
     if (availability_due && now >= availability_due) send_carplay_availability();
     scan_tick(now);
+    if (ls.phase == LIB_READING) {
+        int r = H->lib_ready();
+        if (r < 0) ls.phase = LIB_IDLE, send_library_none();
+        else if (r == 2) ls.phase = LIB_IDLE, library_unreadable();
+        else if (r > 0) library_read();
+    }
     lists_pump(now);
     lib_pump();
     if (identified && now_playing) poll_now_playing(now);
     pump();
+}
+
+/* The soonest anything here is due, in ms from now (0: at once), or -1 for nothing: what q2_iap.c's poll sleeps to,
+ * besides the car's requests, the writer's reports gone and the children's pipes, which wake it themselves. Each
+ * deadline is one iap2_tick tests: a packet's retry, the retries held, the cumulative ack, the quiet's limit, the
+ * health line, authentication's and identification's answers, CarPlay's availability, a held button's scan, a list's
+ * transfer the car never started, Now Playing's look and Up Next's announcement. */
+static long due_min(long w, long now, long at) {
+    long d = at - now;
+    if (d < 0) d = 0;
+    return w < 0 || d < w ? d : w;
+}
+static long iap2_due(long now) {
+    long w = -1;
+    if (!seen) return -1;
+    if (link_up && count && rto) {
+        long since = slots[head].sent > wire_busy_at ? slots[head].sent : wire_busy_at;
+        if (slots[head].tries) w = due_min(w, now, since + rto + 1);
+        if (slots[head].tries && !retries_held) w = due_min(w, now, slots[head].sent + rto * (long)max_sends + 1);
+    }
+    if (waiting_since) w = due_min(w, now, (heard_at > waiting_since ? heard_at : waiting_since) + link_quiet_ms);
+    if (link_up && health_ms) w = due_min(w, now, link_health_at + health_ms);
+    if (link_up && unacked && cack) w = due_min(w, now, unacked_since + cack);
+    if (auth_due) w = due_min(w, now, auth_due);
+    if (ident_due) w = due_min(w, now, ident_due);
+    if (availability_due) w = due_min(w, now, availability_due);
+    if (held) w = due_min(w, now, scanning ? scan_at + SCAN_KEEP_MS : held_at + HOLD_MS);
+    if (ls.phase == LIB_LISTS && ls.x_state == 1) w = due_min(w, now, ls.x_since + LIST_WAIT_MS + 1);
+    if (identified && now_playing) w = due_min(w, now, np_at + 500);
+    if (ql_seen_at) w = due_min(w, now, ql_seen_at + 1000);
+    if (q_count && link_up && (!rto || count < window)) w = 0; /* the queue has room to go */
+    return w;
 }
 
 /* A new connection: everything forgotten, the detect awaited. */
@@ -1812,4 +1950,11 @@ static void iap2_connect(const struct iap2_host *h) {
     my_seq = 1, peer_seq = 0, head = 0;
     rx_len = 0, rx_partial = 0;
     reset_link();
+}
+
+/* A session's end (q2_iap.c: no ENABLE or RESUME within the gap): the link forgotten with it, the car's audio file
+ * removed (iap2_control_reset), so a bus that comes back without the car's detect gets nothing of the old link. */
+static void iap2_session_end(void) {
+    if (seen) H->log("link: forgotten with its session");
+    iap2_connect(H);
 }
