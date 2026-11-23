@@ -74,6 +74,7 @@ assert m.run(3)=='Rating not saved' and m.menu()[3]=='Favorite' and ALBUM_RATES 
 # A malformed slot (6 or 7) reads as none; a truncated file reads empty.
 for data in (struct.pack('<I',(a1&~7)|7).ljust(4*O['RATE_SLOTS'],b'\0'),b'\x05\0'):
     m=AlbumRateMachine(files={ALBUM_RATES:data}); m.open(); m.word(m.slide+O['SLIDE_INDEX'],1)
+    m.budget=1_000_000  # a full-size file with no layout mark (none this firmware writes) is laid out again, once
     assert m.menu()[3]=='Favorite'; passed()
 # An album is album_cmp's: its name and album artist, else its folder (disc folders as one), ASCII case aside but
 # the folder's; the song artist never counts, so a compilation is one album. The Unknown card is one album.
@@ -216,7 +217,7 @@ class RatingsCopyMachine(FileMocks,EraMachine):
     def key(self,f,*a,**k): return self.call(address=payload_syms[f],args=(self.rec(*a,**k),0,0,0),gap=0)&0xffffffff
     def rate(self,songs=(),albums=()):  # (key, stars or hearts) each, as the tables keep them
         for path,rows in (('/mnt/data/ringnav-ratings',songs),('/mnt/data/ringnav-album-ratings',albums)):
-            self.files[path]=b''.join(struct.pack('<I',(k&~7)|h) for k,h in rows).ljust(4*O['RATE_SLOTS'],b'\0')
+            self.files[path]=b''.join(struct.pack('<I',(k&~7)|h) for k,h in rows)
     def poll(self,ms=5000):  # that long on, then pages until the pass ends
         self.now+=ms; f=payload_syms['ratings_copy_poll']; self.call(address=f,args=(0,0,0,0),gap=0)
         while self.get(payload_syms['rc']): self.now+=1000; self.call(address=f,args=(0,0,0,0),gap=0)
@@ -343,7 +344,7 @@ def ratings_albums(m):
     return menu_page
 m=AlbumRateMachine(); ids=[m.aid(r) for r in m.albums]
 assert ratings_albums(m)==m.top and m.toasts[-1][3]=='No rated albums yet'; passed()
-data=b''.join(struct.pack('<I',(ids[i]&~7)|h) for i,h in ((0,2),(2,5))).ljust(4*O['RATE_SLOTS'],b'\0')
+data=b''.join(struct.pack('<I',(ids[i]&~7)|h) for i,h in ((0,2),(2,5)))
 m=AlbumRateMachine(files={ALBUM_RATES:data}); menu_page=ratings_albums(m)
 m.page=m.top; m.slide=m.find('slide_menu'); assert m.page!=menu_page and m.nodes[m.page]['name']=='coverflow_page'
 def shown(m,i): m.word(m.slide+O['SLIDE_INDEX'],i); f,ctx=m.handler(m.slide,O['EVT_VALUE_CHANGED']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); return m.texts()[0]

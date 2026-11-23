@@ -607,7 +607,7 @@ assert [m3.get(c[2]) for c in m3.dispatched() if c[1]==more]==[O['EVT_CLICK']]; 
 # title order. Each row's stars are OLED's glyphs, painted before its detail (ratings.c rate_row: the count in the
 # row's "_stars", the detail moved RATE_ROOM, 5 x 14 px glyphs 2 px apart and a 6 px space, to the right); a liked
 # song with no stars has none, its detail where it was.
-m=RateMachine(b''.join(struct.pack('<I',(fnv(path)&~7)|h) for path,h in (('/p/A',1),('/p/B',5),('/mnt/mmc/Audiobooks/C.m4b',4),('/mnt/mmc/Podcasts/E.mp3',2))).ljust(4*O['RATE_SLOTS'],b'\0'))
+m=RateMachine(b''.join(struct.pack('<I',(fnv(path)&~7)|h) for path,h in (('/p/A',1),('/p/B',5),('/mnt/mmc/Audiobooks/C.m4b',4),('/mnt/mmc/Podcasts/E.mp3',2))))
 m.found=[m.song(n) for n in ('A','B','C','D','E')]; m.fav_songs=[m.song('D')]
 m.word(m.found[2]+O['REC_PATH'],m.string('/mnt/mmc/Audiobooks/C.m4b'))
 m.word(m.found[4]+O['REC_PATH'],m.string('/mnt/mmc/Podcasts/E.mp3'))

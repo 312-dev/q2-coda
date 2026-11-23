@@ -339,7 +339,7 @@ static void rate_all(void *songs, unsigned char *h) {
     int nf, kept = 0;
     void *favs = staged(fav_songs, 0, &nf);
     unsigned nfav = deque_size(favs), n = deque_size(songs), *t = rates(0);
-    rated_t *keys = calloc(nfav + RATE_SLOTS + 1, sizeof *keys);
+    rated_t *keys = calloc(nfav + ra.used[0] + 1, sizeof *keys);
     for (unsigned i = 0; keys && i < nfav; i++)
         keys[i] = (rated_t){ rate_song_key(deque_at(favs, i)) | 7, i }; /* a copy: its row */
     for (int i = 0; keys && t && i < RATE_PROBE && (unsigned)kept < ra.used[0]; i++)
@@ -602,7 +602,7 @@ static void rc_write(void) {
 
 /* The rated of table album, valid stars or hearts only (1 to 5), for rc_take. */
 static unsigned *rc_rated(int album, unsigned *n) {
-    unsigned *t = rates(album), *c = t ? calloc(RATE_SLOTS, sizeof *c) : (unsigned *)0;
+    unsigned *t = rates(album), *c = t ? calloc(ra.used[album] + 1, sizeof *c) : (unsigned *)0;
     for (unsigned i = 0, seen = 0; c && i < RATE_PROBE && seen < ra.used[album]; seen += !!t[i++])
         if ((t[i] & 7) && (t[i] & 7) <= 5u) c[(*n)++] = t[i];
     return c;
