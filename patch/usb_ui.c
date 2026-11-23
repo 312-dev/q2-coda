@@ -630,10 +630,11 @@ void usb_ui_status(void) {
     if (det && !u.det && u.det_known) {
         charge_plugged(); /* charging.c: a dark Q2 lights for it */
         /* A car's USB coming on with the car (docs/internals.md#bluetooth-on-usb-power); not the
-         * Q2's own OTG bus power, nor a cable whose remembered choice is USB Audio, nor one Automatic
+         * Q2's own OTG bus power or the 3 s after it ends, its VBUS dying away (usb_otg.c
+         * usb_otg_own_vbus), nor a cable whose remembered choice is USB Audio, nor one Automatic
          * shows the iPhone on: a car that takes it plays over USB, and a host that does not gets the
          * connect then (usb_car_storage) */
-        if (g_last_otgid != 1 && usb_remembered() != USB_AUDIO && usb_remembered() != USB_AUTO) headset_bt_usb();
+        if (!usb_otg_own_vbus() && usb_remembered() != USB_AUDIO && usb_remembered() != USB_AUTO) headset_bt_usb();
         /* below, nothing is chosen for a cable that comes while stock's link status is not 0: said, as the
          * car's first cable of 2026-11-22 showed no iPhone and nothing said why */
         char line[64];
@@ -695,7 +696,7 @@ static void usb_car_storage(void) {
     usb_log("Automatic: not a car, Transfer Files", (int)((unsigned)time_now_ms() - u.plug_at));
     u.chosen = 1;
     usb_apply(USB_FILES, 0);
-    if (g_last_otgid != 1) headset_bt_usb();
+    if (!usb_otg_own_vbus()) headset_bt_usb();
 }
 
 /* ---- the ADB prompt (--dev builds) ---- */
@@ -769,6 +770,7 @@ void usb_ui_poll(void) {
     if (car == USB_CAR_STORAGE && g_usbdet_value == 1) usb_car_storage();
     else if (car == USB_CAR_CHARGER) usb_charger_in();
     usb_record_poll();  /* usb_record.c: a cable edge's second line */
+    usb_otg_poll();     /* usb_otg.c: a Play asked while USB audio connected */
     charging_poll();    /* charging.c's plug-in screen and weak charger */
     toast_later_poll(); /* a toast USB or charging left */
     auth_poll();

@@ -1985,17 +1985,17 @@ def carlogs(tmp_path):
     return tmp_path
 
 
-def q2car_rotate(where):
-    env = dict(os.environ, Q2CAR_RUN=str(where / 'run'), Q2CAR_LOGDIR=str(where / 'logs'))
+def q2car_rotate(where, **extra):
+    env = dict(os.environ, Q2CAR_RUN=str(where / 'run'), Q2CAR_LOGDIR=str(where / 'logs'), **extra)
     subprocess.run(['sh', str(Q2CAR), '_rotate'], env=env, check=True, timeout=30)
 
 
-def car_cable(where, text, dmesg=None):
+def car_cable(where, text, dmesg=None, **extra):
     """A cable's log as q2car.sh leaves it, then the next cable's start."""
     (where / 'logs/q2car.log').write_text(text)
     if dmesg is not None:
         (where / 'logs/q2car.log.dmesg').write_text(dmesg)
-    q2car_rotate(where)
+    q2car_rotate(where, **extra)
 
 
 def carlog_names(where):
@@ -2016,13 +2016,34 @@ def test_cars_kept_and_others_never_push_them_out(carlogs):
 
 
 def test_the_oldest_go_past_the_size(carlogs):
-    big = Q2CAR_CAR + 'x' * (2 << 20)
+    big = Q2CAR_CAR + 'x' * (9 << 20)
     for i in range(6):
         car_cable(carlogs, big + f'\ncar {i}\n')
-    # each just over 2 MB: the fifth passes 10 MB, so it and the sixth go
+    # each just over 9 MB: the fifth passes 40 MB, so it and the sixth go
     assert carlog_names(carlogs) == ['q2car.1.log', 'q2car.2.log', 'q2car.3.log', 'q2car.4.log']
     assert (carlogs / 'logs/q2car.1.log').read_text().endswith('car 5\n')
     assert (carlogs / 'logs/q2car.4.log').read_text().endswith('car 2\n')
+
+
+def test_a_long_drive_s_log_survives_the_next_car(carlogs):
+    """q2-iap lets one cable's log reach 12 MB (--log-cap): two such drives, then a third cable, and the drive before
+    it is still there (with a 10 MB budget it went at once, and the evidence of the drive before with it)."""
+    big = Q2CAR_CAR + 'x' * (12 << 20)
+    car_cable(carlogs, big + '\ndrive 1\n')
+    car_cable(carlogs, big + '\ndrive 2\n')
+    car_cable(carlogs, Q2CAR_CAR + 'drive 3\n')
+    assert carlog_names(carlogs) == ['q2car.1.log', 'q2car.2.log', 'q2car.3.log']
+    assert (carlogs / 'logs/q2car.2.log').read_text().endswith('drive 2\n')
+    assert (carlogs / 'logs/q2car.3.log').read_text().endswith('drive 1\n')
+
+
+def test_the_newest_two_cars_stay_whatever_their_size(carlogs):
+    """Past the budget, the older ones go but never the last two."""
+    small = {'Q2CAR_CARLOG_MAX': str(1 << 20)}
+    for i in range(3):
+        car_cable(carlogs, Q2CAR_CAR + 'x' * (2 << 20) + f'\ncar {i}\n', **small)
+    assert carlog_names(carlogs) == ['q2car.1.log', 'q2car.2.log']
+    assert (carlogs / 'logs/q2car.2.log').read_text().endswith('car 1\n')
 
 
 def test_the_oldest_go_past_the_days_but_the_last_car_stays(carlogs):
@@ -2456,6 +2477,36 @@ def test_two_presses_inside_a_poll_both_reach_the_shim(probe, tmp_path):
         os.close(r)
     lines = [l.split(' ', 1)[1] for l in got.decode().splitlines()]
     assert lines == ['next', 'next'], (lines, files['cmd'].exists() and files['cmd'].read_text())
+
+
+# patch/q2car.sh's ffs_unmount, in gadget_down: a FunctionFS mount that will not go says so, with the pids holding a
+# file under it, where it failed silently and the relink then found the gadget still there.
+def test_a_busy_functionfs_mount_says_who_holds_it(carlogs):
+    ffs, shim = carlogs / 'ffs', carlogs / 'bin'
+    shim.mkdir()
+    for n in 1, 2, 3, 4:
+        (ffs / f'iap{n}').mkdir(parents=True)
+    (shim / 'mountpoint').write_text('#!/bin/sh\nexit 0\n')  # all four mounted
+    (shim / 'umount').write_text('#!/bin/sh\ncase "$1" in */iap2) echo "umount: $1: target is busy" >&2; exit 1 ;; esac\n')
+    for f in 'mountpoint', 'umount':
+        (shim / f).chmod(0o755)
+    # a child holds iap2, as q2-iap's child did; started without q2-heavy's no-core-dump preload (tools/ci/nodump.c),
+    # whose PR_SET_DUMPABLE 0 makes a process's /proc/PID/fd unreadable even to its own user
+    clean = {k: v for k, v in os.environ.items() if k != 'LD_PRELOAD'}
+    holder = subprocess.Popen([sys.executable, '-c', 'import sys, time; f = open(sys.argv[1], "w"); print(1, flush=True); time.sleep(60)',
+                               str(ffs / 'iap2' / 'ep0')], env=clean, stdout=subprocess.PIPE, text=True)
+    try:
+        assert holder.stdout and holder.stdout.readline().strip() == '1'
+        env = dict(os.environ, Q2CAR_RUN=str(carlogs / 'run'), Q2CAR_LOGDIR=str(carlogs / 'logs'), Q2CAR_FFS=str(ffs),
+                   PATH=f'{shim}:{os.environ["PATH"]}')
+        subprocess.run(['sh', str(Q2CAR), '_unmount'], env=env, check=True, timeout=30)
+    finally:
+        holder.kill()
+        holder.wait()
+    log = (carlogs / 'logs/q2car.log').read_text()
+    lines = [line for line in log.splitlines() if 'could not unmount' in line]
+    assert len(lines) == 1 and f'{ffs}/iap2: busy (held by: ' in lines[0] and f' {holder.pid} ' in f' {lines[0]}', log
+    assert 'target is busy' in log  # umount's own words kept too
 
 
 if __name__ == '__main__':

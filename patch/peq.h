@@ -669,6 +669,7 @@ void spot_send_play(int playing);
 void q2eq_poll(void); /* peq_ui.c, --dev builds only: a q2eq request (q2eq.h) */
 void q2update_poll(void); /* sw_update.c, --dev builds only: a q2update request (docs/adb.md#installing-an-update-over-adb) */
 int media_owner(void), media_status(void), media_playing(void), media_focused(void);
+int usb_otg_forbid_resume(void); /* usb_otg.c: the gate for a Play of the song there, kept while USB audio connects */
 void media_set_playing(int playing), media_key(unsigned key);
 void video_key(unsigned key);
 int radio_media(unsigned key), spot_media(unsigned key);
