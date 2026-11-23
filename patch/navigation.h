@@ -987,6 +987,7 @@ void standby_usb_suspend(void), standby_usb_poll(void);
 
 /* usb_record.c: the USB record on the card, a line per cable edge and OTG power change */
 void usb_record(const char *what), usb_record_edge(int in), usb_record_wake(void), usb_record_poll(void);
+void usb_record_pins(int hostdev); /* the pins alone, usb_otg.c's trace */
 int ringnav_platform_init(void), stock_platform_init_trampoline(void);
 
 /* autozone.c: Automatic Time Zone, the zone from the network's location */

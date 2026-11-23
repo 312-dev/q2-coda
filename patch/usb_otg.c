@@ -56,6 +56,12 @@
  * of the song there (tools/stock_sites.tsv). */
 #define OTG_PLAYPAUSE_RET 0x4f2fd8
 #define OTG_CONNECTING "Connecting USB audio..." /* ringnav_forbid_play's message */
+/* The pin trace (usb_otg_poll): a line this often while PD18 reads low out of host role, the bus
+ * power is in its trial or kept over an ID high, or VBUS left the port less than OTG_TRACE_AFTER_MS
+ * ago; at most OTG_TRACE_MAX lines (a minute of it) until none of that holds. */
+#define OTG_TRACE_MS 250
+#define OTG_TRACE_AFTER_MS 30000
+#define OTG_TRACE_MAX 240
 #define OTG_HOST_DEV "/sys/bus/usb/devices/1-1/idVendor" /* a device on the Q2's host port */
 /* The X2000's CPM: USBPCR (0x1000003c) bit 29, the PHY's ID pull-up always on (D); USBRDT
  * (0x10000040) bits 24 and 23, the controller's ID from IDDIG_REG, set to device (C), or from the
@@ -78,6 +84,8 @@ static struct {
     int play;            /* a Play refused while an accessory is on its way (ringnav_forbid_play) */
     int resume;          /* the gate asked for a Play of the song there (usb_otg_forbid_resume) */
     unsigned play_at;
+    unsigned trace_at; /* the trace's last line; traced: its lines this episode */
+    int traced;
 } otg __attribute__((section(".scratch")));
 
 /* The PHY's ID pull-up on and the controller held at device: at boot (usb_record.c
@@ -245,11 +253,31 @@ int usb_otg_forbid_resume(void) {
     return refused;
 }
 
-/* From usb_ui_poll, every UI pass: a remembered Play started once there is somewhere to play (the
- * DAC, its way switched by stock's host pass, or any other output), or given up. */
+/* The pin trace, from each UI pass (the top of OTG_TRACE_MS): what the board's ID and VBUS do around
+ * an unplug, an accessory and the bus power, in the USB record; nothing while they rest. */
+static void trace(unsigned now) {
+    int host = g_last_otgid == 1;
+    int moving = (!host && otg.id_low) || (host && (now - otg.host_at < OTG_TRIAL_MS || otg.id_high)) ||
+                 (otg.have_gone && now - otg.gone_at < OTG_TRACE_AFTER_MS);
+    if (!moving) {
+        otg.traced = 0;
+        return;
+    }
+    if (otg.traced >= OTG_TRACE_MAX || (otg.traced && now - otg.trace_at < OTG_TRACE_MS)) return;
+    /* on a 250 ms beat, not 250 ms after the pass that wrote; passes further apart (the screen off)
+     * write one line each, with no catching up */
+    otg.trace_at = otg.traced && now - otg.trace_at < 2 * OTG_TRACE_MS ? otg.trace_at + OTG_TRACE_MS : now;
+    ++otg.traced;
+    usb_record_pins(host_device());
+}
+
+/* From usb_ui_poll, every UI pass: the pin trace, and a remembered Play started once there is
+ * somewhere to play (the DAC, its way switched by stock's host pass, or any other output), or given
+ * up. */
 void usb_otg_poll(void) {
-    if (!otg.play) return;
     unsigned now = time_now_ms();
+    trace(now);
+    if (!otg.play) return;
     if (has_valid_output_device()) {
         otg.play = 0;
         if (mclGetPlayStatus() != 2) {

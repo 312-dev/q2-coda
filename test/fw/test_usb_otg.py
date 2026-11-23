@@ -465,6 +465,68 @@ def test_the_trial_s_own_vbus_dying_away_does_not_clear_its_refusal(fw):
     assert p.records() == ['otg-on', 'otg-trial-off'] and p.pins['PC20'] == 0
 
 
+# ---- the pin trace (S0): usb_otg_poll's pins lines in the USB record ----
+
+def pin_lines(p):
+    """The pins lines written so far: counted by traced(), which empties the stubs' call log (8192 calls) as it goes."""
+    return [None] * getattr(p, 'pin_count', 0)
+
+
+def traced(p, ms, step=100):
+    """UI passes every step ms (usb_otg_poll), the status pass once a second; the record's other lines are dropped."""
+    poll = p.fw.fn('usb_otg_poll', None)
+    n = C.c_int.in_dll(p.fw.lib, 'fw_log_n')
+    p.pin_count = getattr(p, 'pin_count', 0)
+    for _ in range(ms // step):
+        p.now += step
+        if p.now % PASS_MS == 0:
+            p.guard()
+        poll()
+        p.pin_count += sum(C.string_at(a[2]).startswith(b'%u %u pins PD18=') for _, a in p.fw.calls('tk_snprintf'))
+        p.seen = getattr(p, 'seen', []) + p.records()
+        n.value = 0
+
+
+def test_the_pin_trace_is_silent_when_idle(fw):
+    p = Port(fw)
+    traced(p, 60000)
+    assert pin_lines(p) == []
+    p.cable = True  # a cable in, and in for a minute: no ID low, nothing left
+    traced(p, 60000)
+    assert pin_lines(p) == []
+
+
+def test_the_pin_trace_follows_vbus_leaving_for_30_s_four_times_a_second(fw):
+    p = Port(fw)
+    p.cable = True
+    traced(p, 3000)
+    p.cable = False
+    traced(p, 40000)
+    n = len(pin_lines(p))
+    assert 115 <= n <= 121, n
+    traced(p, 20000)
+    assert len(pin_lines(p)) == n, 'nothing once 30 s have passed'
+
+
+def test_the_pin_trace_covers_an_id_low_and_the_trial_and_is_bounded(fw):
+    p = Port(fw)
+    p.id = 0  # an empty adapter: the settle, the trial, then refused with the ID low for good
+    traced(p, SETTLE + TRIAL + 2 * PASS_MS)
+    assert p.seen == ['otg-on', 'otg-trial-off']
+    during = len(pin_lines(p))
+    assert during >= (SETTLE + TRIAL) // 250 - 2, during
+    traced(p, 10 * 60000)
+    assert len(pin_lines(p)) <= 240, 'one episode is 240 lines (60 s) at most'
+    p.id = 1
+    traced(p, 40000)  # the episode over, and VBUS left long ago: silent
+    m = len(pin_lines(p))
+    traced(p, 10000)
+    assert len(pin_lines(p)) == m
+    p.id = 0  # a new episode traces again
+    traced(p, 2000)
+    assert len(pin_lines(p)) > m
+
+
 def test_the_record_has_each_change_of_bus_power(fw):
     p = Port(fw)
     p.id = 0
