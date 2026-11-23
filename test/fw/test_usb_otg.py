@@ -629,6 +629,70 @@ def test_the_replug_toast_comes_once_an_episode_and_again_after_the_id_was_high(
     assert p.toasts == [REPLUG, REPLUG]
 
 
+# ---- an accessory read as a cable: PD17 low with no source (usb_otg.c usb_otg_cable) ----
+
+ONLINE = b'/sys/class/power_supply/usb/online'
+
+
+class Source(Port):
+    """The Port with the PMIC's USB supply: online while a computer's or charger's VBUS is in, and not for PD17 read low
+    by an accessory (2026-11-23 18191.59: the AB13X earbuds, PD18 high, PD17 0, online 0) or by the Q2's own power."""
+    def __init__(self, fw, **kw):
+        super().__init__(fw, **kw)
+        self.fake_pd17 = False  # an accessory holding PD17 low with no VBUS
+        self.online_file = True
+        fw.mock('stock_usb_detect_trampoline', lambda *_: int(self.read(b'PD17') == 0))
+        self.detect = fw.fn('ringnav_usb_detect', C.c_int)
+        self.files = {9: b'input pull_up\n'}
+
+    def fopen(self, path, *_):
+        name = C.string_at(path)
+        if name == ONLINE and self.online_file:
+            self.func = b'1\n' if self.cable else b'0\n'
+            return 9
+        return super().fopen(path)
+
+    def read(self, name, *_):
+        if C.string_at(name) == b'PD17' and self.fake_pd17:
+            return 0
+        return super().read(name)
+
+
+def test_an_accessory_holding_pd17_low_with_no_source_is_no_cable_and_asks_for_a_replug(fw):
+    """2026-11-23 18191.59 to 18230.12: the earbuds in, PD17 0 with PC20 off, usb/online 0, PD18 high for 38.5 s:
+    stock's read took it for a cable (charging shown, the gadget started). Now it is no cable at any read, and after
+    OTG_NO_SOURCE_MS the USB record says no-source and one toast asks for a replug (a re-seat brought the ID low)."""
+    p = toasts(fw, Source(fw))
+    p.run(3000)
+    p.fake_pd17 = True
+    seen = []
+    for _ in range(385):  # 38.5 s of reads every 100 ms, the status pass once a second
+        p.now += 100
+        seen.append(p.detect())
+        if p.now % PASS_MS == 0:
+            p.guard()
+    assert seen == [0] * 385, 'read as a cable'
+    assert p.records() == ['no-source'] and p.toasts == [REPLUG] and p.powered == []
+    p.fake_pd17 = False
+    p.run(3000)
+    p.cable = True  # the laptop: online at once
+    assert p.detect() == 1 and p.toasts == [REPLUG]
+
+
+def test_a_computer_s_cable_is_a_cable_at_its_first_read(fw):
+    p = toasts(fw, Source(fw))
+    p.run(3000)
+    p.cable = True
+    assert p.detect() == 1 and p.records() == [] and p.toasts == []
+
+
+def test_with_no_pmic_file_pd17_is_read_as_before(fw):
+    p = toasts(fw, Source(fw))
+    p.online_file = False
+    p.fake_pd17 = True
+    assert p.detect() == 1
+
+
 # ---- a Play asked while an accessory attaches (usb_otg.c ringnav_forbid_play, usb_otg_poll) ----
 
 CONNECTING = 'Connecting USB audio...'

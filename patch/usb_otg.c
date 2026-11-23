@@ -60,7 +60,13 @@
  * likely a computer whose roles resolved the wrong way (the Q2 the source, it the sink), which stays so
  * while its cable is in (2026-11-23 17777.35 to 17833.67, pd18-owner2.log); a replug re-resolves it. */
 #define OTG_WRONG_MS 3000
-#define OTG_REPLUG "Unplug the cable and plug it in again" 
+#define OTG_REPLUG "Unplug the cable and plug it in again"
+/* The PMIC's USB supply: 1 for a computer's or a charger's VBUS, already in the pass of the cable's
+ * edge, on some 250 lines of the USB record; 0 for the Q2's own power dying away and for the AB13X
+ * earbuds that held PD17 low with no VBUS anywhere (2026-11-23 18191.59 and 18231.97, and demo
+ * 510574 on an earlier boot). PD17 low with it 0 is no cable; this long so is the no-source state. */
+#define OTG_ONLINE "/sys/class/power_supply/usb/online"
+#define OTG_NO_SOURCE_MS 2000
 /* The pin trace (usb_otg_poll): a line this often while PD18 reads low out of host role, the bus
  * power is in its trial or kept over an ID high, or VBUS left the port less than OTG_TRACE_AFTER_MS
  * ago; at most OTG_TRACE_MAX lines (a minute of it) until none of that holds. */
@@ -93,6 +99,8 @@ static struct {
     int traced;
     unsigned trial_end_at; /* the last trial's end; wrong: 1 since, with the ID low; 2 its toast shown */
     int wrong;
+    unsigned nosrc_at; /* PD17 low with no source since; nosrc: 1 so, 2 said */
+    int nosrc;
 } otg __attribute__((section(".scratch")));
 
 /* The PHY's ID pull-up on and the controller held at device: at boot (usb_record.c
@@ -137,7 +145,30 @@ static int otg_stock(unsigned now, int id_as_low) {
 int usb_otg_cable(int vbus) {
     if (g_last_otgid == 1) return vbus;
     if (otg.own && (!vbus || (unsigned)time_now_ms() - otg.own_at >= OTG_OWN_VBUS_MS)) otg.own = 0;
-    return vbus && !otg.own;
+    if (!vbus || otg.own) {
+        otg.nosrc = 0;
+        return 0;
+    }
+    /* PD17 low with the PMIC seeing no source (OTG_ONLINE): an accessory, not a cable; past
+     * OTG_NO_SOURCE_MS, said once. The bus power is not tried for it: with PD18 high the grant would
+     * leave the controller a device (OTG_FROM_PIN), and a re-seat brought the ID low. With no PMIC
+     * file PD17 is read as it is. */
+    char on[4] = { 0 };
+    void *f = fopen(OTG_ONLINE, "rb");
+    int got = f ? (int)fread(on, 1, sizeof on - 1, f) : 0;
+    if (f) fclose(f);
+    if (got <= 0 || on[0] != '0') {
+        otg.nosrc = 0;
+        return 1;
+    }
+    unsigned now = time_now_ms();
+    if (!otg.nosrc) otg.nosrc = 1, otg.nosrc_at = now;
+    if (otg.nosrc == 1 && now - otg.nosrc_at >= OTG_NO_SOURCE_MS) {
+        otg.nosrc = 2;
+        usb_record("no-source");
+        toast(OTG_REPLUG);
+    }
+    return 0;
 }
 
 /* 1 while the Q2 powers the bus, or its ended power has not yet read as gone (usb_ui.c: no
