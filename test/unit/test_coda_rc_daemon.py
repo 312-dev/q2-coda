@@ -233,34 +233,58 @@ def sleeps(tid):
     return int(status.split('voluntary_ctxt_switches:')[1].split()[0])
 
 
+def define(path, name):
+    """A number the daemon's source #defines: the tests take the daemon's own pace, not a copy of it."""
+    m = re.search(rf'#define {name} (\d+)', (PATCH / path).read_text())
+    assert m, name
+    return int(m[1])
+
+
+def paced(loop, work, period_ms, timers):
+    """work() run while the daemon's loop thread is counted: (its wakeups, the most a loop may have that wakes only for
+    its `timers` looks, each every period_ms on a phase of its own, and the seconds work took). The bound follows the
+    time measured on the monotonic clock, not the time work meant to take: on a loaded machine (18 suites starting
+    beside this one, 2026-11-22) 10 s of writes took over 12, and a fixed count failed a daemon that did nothing
+    wrong. Each timer looks at most once per whole period and once more for the parts at either end."""
+    before, start = sleeps(loop.native_id), time.monotonic()
+    work()
+    elapsed = time.monotonic() - start
+    return sleeps(loop.native_id) - before, timers * (int(elapsed * 1000 // period_ms) + 2), elapsed
+
+
 def test_with_nothing_to_do_the_loop_wakes_once_a_second(q2):
-    """No phone following the position, nothing from demo: its poll sleeps until the second's tick (TICK_MS)."""
+    """No phone following the position, nothing from demo: its poll sleeps until the second's tick (TICK_MS), the one
+    timer this daemon has (no mDNS here); a 250 ms poll woke 12 times in 3 s."""
     s, shim = q2
     s.subscribe(position=False)
     WAIT(1.2)
     assert shim.loop and shim.loop.native_id
-    before = sleeps(shim.loop.native_id)
-    WAIT(3)
-    assert sleeps(shim.loop.native_id) - before <= 5  # about 3; a 250 ms poll woke 12 times
+    woke, most, elapsed = paced(shim.loop, lambda: WAIT(3), define('coda_rc.c', 'TICK_MS'), 1)
+    assert woke <= most, f'{woke} wakeups in {elapsed:.1f} s; a loop that wakes only for its tick has {most} at most'
 
 
 def test_demos_files_end_the_loops_sleep(q2):
     """Now Playing and a command's ack, renamed into /tmp by the shim, reach the phone at once (inotify), not at the
-    loop's next look."""
+    loop's next look. A daemon that saw the files only at its tick would take anywhere from nothing to TICK_MS, evenly:
+    each of six tries must take under half of it, which such a daemon passes once in 64 runs, while a loaded machine
+    (0.28 s for a command on 2026-11-22, against the 0.15 s this test once allowed) stays well under."""
     s, shim = q2
+    half = define('coda_rc.c', 'TICK_MS') / 2000
     s.subscribe(position=False)
-    for radio in (1, 0, 1, 0):
+    for radio in (1, 0, 1, 0, 1, 0):
         WAIT(0.3)  # into the loop's sleep
         start = time.monotonic()
         shim.now(radio=radio)
         while s.wait_push(5).get('now_playing', {}).get('radio') != bool(radio):
             pass
-        assert time.monotonic() - start < 0.1
-    for _ in range(3):
+        took = time.monotonic() - start
+        assert took < half, f'Now Playing reached the phone {took:.2f} s after the shim wrote it'
+    for _ in range(6):
         WAIT(0.3)
         start = time.monotonic()
         s.start_radio(stop=True)  # the shim answers within its 20 ms look
-        assert time.monotonic() - start < 0.15
+        took = time.monotonic() - start
+        assert took < half, f'a command answered {took:.2f} s after it was sent'
 
 
 def told(shim, wait=0.5):
@@ -493,13 +517,25 @@ def lonely(daemon_bin, tmp_path_factory):
 def test_with_no_phone_the_loop_sleeps_through_demos_files(lonely):
     """2026-11-22's sweep: with Car Remote on and no phone, coda-rc woke every second and at every file renamed into
     /tmp, the shim's Now Playing twice a second while a song plays: 159 wakeups a minute measured on this machine.
-    With no phone connected and no pairing, it wakes every TICK_IDLE_MS (5 s) for its own looks."""
+    With no phone connected and no pairing, it wakes every TICK_IDLE_MS (5 s) for its own looks.
+    Its timers then are the tick and the mDNS address look (on an interface with no address here), each every
+    TICK_IDLE_MS on a phase of its own. Now Playing is renamed in every 0.2 s for 10 s by the monotonic clock: a
+    daemon that wakes for each file wakes at least once a write, and the writes are kept to more than twice the
+    bound, so such a daemon fails it however slow the machine is."""
     root, loop, port = lonely
-    before = sleeps(loop.native_id)
-    for k in range(20):  # 10 s of a song playing, as the shim writes it
-        put(root / 'tmp/coda-rc.now', NOW.format(seq=k, radio=0))
-        WAIT(0.5)
-    assert sleeps(loop.native_id) - before <= 4  # two or three; it was 30 or more
+    writes = []
+
+    def song_playing():
+        start = time.monotonic()
+        while time.monotonic() - start < 10:
+            put(root / 'tmp/coda-rc.now', NOW.format(seq=len(writes), radio=0))
+            writes.append(1)
+            WAIT(0.2)
+    tick = define('coda_rc.c', 'TICK_IDLE_MS')
+    assert tick == define('coda_rc_mdns.c', 'MDNS_CHECK_IDLE_MS')  # the two looks share the period the bound uses
+    woke, most, elapsed = paced(loop, song_playing, tick, 2)
+    assert len(writes) > 2 * most, f'{len(writes)} writes in {elapsed:.1f} s: too few to tell a wake per write apart'
+    assert woke <= most, f'{woke} wakeups for {len(writes)} writes in {elapsed:.1f} s; its two looks give {most} at most'
 
 
 def test_a_phone_connecting_ends_the_quiet_at_once(lonely):
