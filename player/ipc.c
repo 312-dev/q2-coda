@@ -155,7 +155,13 @@ static void command(const char *name, const char *arg) {
         reply("{mcl-pcmstate\\0}");
     } else if (!strcmp(name, "set-songurl") || !strcmp(name, "set-nexturl")) {
         parse_song(arg, &c->play_song, 1);
-        c->play = 1, c->stop = 0, c->play_paused = 0; /* a stop before this song is not this song's (engine.c engine_thread) */
+        /* A stop before this song is not this song's (engine.c engine_thread). One the playback thread has not yet
+         * taken from a song open or opening is that song's: it is kept, to end it, and this song waits for it to be
+         * taken. demo's restart after an output change sends the two (player_save_start): the drive of 2026-11-23
+         * held the thread 10.8 s in a write to the car's PCM, the stop was lost, the song played on and its end
+         * started it again, and each song after played one late. */
+        c->stop_first = c->stop && c->state != IDLE;
+        c->play = 1, c->stop = c->stop_first, c->play_paused = 0;
         c->preload = c->close_preload = 0;
         if (name[4] == 'n') c->next = 1, c->cut = 1;
         wake = 1;
@@ -175,7 +181,7 @@ static void command(const char *name, const char *arg) {
     } else if (!strcmp(name, "mcl-seek")) {
         if (c->state != IDLE) c->seek = 1, c->seek_to = atoi(arg), wake = 1;
     } else if (!strcmp(name, "mcl-stop")) {
-        c->stop = c->cut = 1, c->preload = 0, c->close_preload = 1, wake = 1;
+        c->stop = c->cut = 1, c->stop_first = 0, c->preload = 0, c->close_preload = 1, wake = 1;
     } else if (!strcmp(name, "mcl-dropcar") || !strcmp(name, "mcl-carrelease")) {
         c->car_release = 1, wake = 1;
     } else if (!strcmp(name, "mcl-orderstop")) {
