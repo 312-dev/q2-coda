@@ -508,8 +508,14 @@ class Fake:
         self.call('POST', '/delay', op=op, ms=ms)
 
 
+def die_with_parent():
+    """In the child before exec: SIGKILL when the test's process ends, however it ends."""
+    C.CDLL(None).prctl(1, signal.SIGKILL)  # PR_SET_PDEATHSIG
+
+
 # The namespace: a user and mount namespace of its own, where root's card/ is /mnt/mmc and its tmp/ is /tmp, and
-# a network namespace whose loopback carries ADDR, so the fake server's fixed port is no other agent's.
+# a network namespace whose loopback carries ADDR, so the fake server's fixed port is no other agent's, and a PID
+# namespace that ends with the test (App.start).
 NAMESPACE = r'''set -e
 ip link set lo up
 ip addr add {addr}/32 dev lo
@@ -545,8 +551,14 @@ class App:
     def start(self):
         assert self.proc is None
         (self.root/'ctl.sock').unlink(missing_ok=True)
-        self.proc = subprocess.Popen(['unshare', '--user', '--map-root-user', '--mount', '--net', 'sh', '-c', self.script],
-                                     start_new_session=True, stdout=subprocess.DEVNULL, stderr=open(self.root/'ns.err', 'wb'))
+        # a PID namespace too, whose processes all go when its first one does (--kill-child), and that one goes
+        # when unshare does, which dies with this process (PR_SET_PDEATHSIG): a test that crashes leaves nothing
+        self.proc = subprocess.Popen(['unshare', '--user', '--map-root-user', '--mount', '--net', '--pid', '--fork',
+                                      '--kill-child', '--mount-proc', 'sh', '-c', self.script],
+                                     start_new_session=True, stdout=subprocess.DEVNULL, stderr=open(self.root/'ns.err', 'wb'),
+                                     preexec_fn=die_with_parent,
+                                     # q2-heavy's host preload leaves a process unable to write its uid map
+                                     env={k: v for k, v in os.environ.items() if k != 'LD_PRELOAD'})
 
     def stop(self):
         """Ends the namespace: SIGTERM to its group (the app removes its socket and state as on the Q2), then

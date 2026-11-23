@@ -105,6 +105,7 @@ def car_remote_on(ini):
 def pooled(build, wait_s, argv):
     """main on a pooled emulator leased for build with Car Remote on (the module docstring's --pool)."""
     saved = {}
+    os.environ.pop('LD_PRELOAD', None)  # q2-heavy's host preload: bwrap could not write the emulator's uid map
 
     def prepare(k):
         ini = emu_pool.copy_dir(k) / 'state/data/config.ini'
@@ -259,7 +260,7 @@ def main(argv=None):
     p = until(s, lambda p: p.get('now_playing', {}).get('track_id') == q['items'][2]['id'])
     check('PlayQueueItem: the third song', p is not None, q['items'][2]['title'])
     try:
-        s.jump(1, q['items'][3]['id'])
+        s.jump(1, q['items'][0]['id'])  # the first song's id at the second's place: stale (the pool's album has 3)
         got = 'Ack'
     except client.RemoteError as e:
         got = e.name
