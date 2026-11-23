@@ -1707,7 +1707,7 @@ def test_a_restart_waits_for_the_loop_to_go(fw):
     del world.files[b'/tmp/q2-foo']
     world.ms = 3000
     poll(C.pointer(a))
-    assert a.restart == 0 and a.launched == 1 and world.of('system') == [(b'run',)]
+    assert a.restart == 0 and a.launched == 1 and world.of('system') == [(b'run &',)]
 
 
 def test_a_restart_gives_up_on_the_old_loop(fw):
@@ -1848,7 +1848,7 @@ def test_launch_waits_for_the_apps_page(fw):
     a = ap(fw).a[0]
     a.id, a.run = b'foo', b'run'
     fw.fn('addon__launch', None, C.POINTER(App))(C.pointer(a))
-    assert a.launched == 1 and world.of('system') == [(b'run',)] and a.launch_at == 1000
+    assert a.launched == 1 and world.of('system') == [(b'run &',)] and a.launch_at == 1000
 
 
 def test_stop_all_asks_each_running_app(fw):
@@ -2248,10 +2248,13 @@ def item(n, kind=b'action', ctx=b'', hold=b''):
 
 
 def test_a_page_opens_on_the_apps_menu_and_starts_it(fw):
+    """The app's run script started in the background ("&"): system() waits only for its shell, not the script's
+    copies and its fork (about 210 ms a launch on the emulator, 2026-11-22, the UI pass stalled for it; 65 ms with
+    "&", the shell's own start under qemu)."""
     p = Page(fw)
     assert p.request() == b'Q2SPOT/1\n1\tmenu\n' and C.string_at(p.req.path) == b'/tmp/q2-foo.browse.sock'
     assert p.ap.a[0].launched == 1 and p.top.title == b'Foo'
-    assert p.world.of('system') == [(b'/bin/sh /mnt/mmc/.foo/run',)]
+    assert p.world.of('system') == [(b'/bin/sh /mnt/mmc/.foo/run &',)]
 
 
 def test_rows_show_with_a_trailing_more_when_theres_a_cursor(fw):
@@ -6598,7 +6601,7 @@ def test_an_app_is_started_for_the_cars_cover_with_covers_1(fw, manifest, starte
         wake(name)
     assert p.world.of('system') == []
     wake(b'foo')
-    assert (p.world.of('system') == [(b'/bin/sh /mnt/mmc/.foo/run',)]) == started
+    assert (p.world.of('system') == [(b'/bin/sh /mnt/mmc/.foo/run &',)]) == started
 
 
 def test_a_status_reply_is_the_centred_stack_and_its_button_presses_its_action(fw, nav_st):

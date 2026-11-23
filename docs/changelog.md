@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Apps: opening a card app (Subsonic and the like) no longer freezes the screen for a moment while the app starts.
   - Cover Flow: album art saved as a 16-bit PNG now shows as it is. It showed twice as wide in red and blue stripes.
   - Bluetooth: a headset or car with an accented or non-Latin name ("Café", Japanese, an emoji) shows its name right in Quality's "doesn't support" line, where it showed garbled letters.
   - App sign-in: while an app shows a large sign-in QR code, the Q2 no longer goes to standby under it, and the app's sync progress still shows.

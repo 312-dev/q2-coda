@@ -405,12 +405,19 @@ static void stop_cmd(const char *pid, char *cmd, unsigned n) {
     snprintf(cmd, n, "kill $(cat %s) 2>/dev/null || rm -f %s", pid, pid);
 }
 
+/* The app's run script started in the background: system() waits only for its shell, not for the
+ * script, which exits at once when the app runs already and otherwise copies itself and the app to
+ * /tmp and forks its loop (about 210 ms on the emulator, which the UI pass waited for; 65 ms with
+ * the "&", the shell's own start under qemu). Its loop is reparented when the shell ends, so no
+ * child is left for demo to reap. */
 static void launch(app_t *a) {
     const char *busy = shelf_busy();
     if (busy && !strcmp(busy + 1, a->id)) return; /* the Apps page is replacing its files */
     a->launched = 1;
     a->launch_at = time_now_ms();
-    system(a->run); /* exits at once when the app runs already */
+    char cmd[sizeof a->run + 2];
+    tk_snprintf(cmd, sizeof cmd, "%s &", a->run);
+    system(cmd);
 }
 
 /* The server library's play hand-off (catalogue.c catalogue_load, docs/server-library.md): app id
