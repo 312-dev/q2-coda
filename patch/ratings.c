@@ -13,6 +13,7 @@ static struct {
     unsigned rate_gen; /* catalogue_fav_gen when rate_row_heart last read My Fav */
     unsigned rate_tick;
     void *rt_menu;
+    unsigned used[2]; /* each table's slots not free (ratings and RATE_GONE marks): a walk stops there */
 } ra __attribute__((section(".scratch")));
 
 /* Ratings (docs/internals.md#ratings): 0 to 5 stars a song, kept here by listen_key, its low three
@@ -61,6 +62,7 @@ static unsigned *rates(int album) {
         if (!(v & 7) || (v & 7) > 5) continue;
         for (unsigned n = 0; n < RATE_SLOTS && (*t)[k] && ((*t)[k] ^ v) >= 8; n++)
             k = (k + 1) % RATE_SLOTS;
+        ra.used[album] += !(*t)[k];
         (*t)[k] = v; /* a key twice in a damaged file: its later slot's, as rate_all reads it */
     }
     free(was);
@@ -95,6 +97,7 @@ int rate_keep(int album, unsigned key, int n) {
     if (i < 0) return !some;
     unsigned *t = rates(album), old = t[i];
     t[i] = some ? (key & ~7u) | (unsigned)n : RATE_GONE;
+    ra.used[album] += !old;
     if (rate_io(album, 1)) {
         ratings_copy_due();
         return 1;
@@ -325,7 +328,7 @@ static void rate_all(void *songs, unsigned char *h) {
     rated_t *keys = calloc(nfav + RATE_SLOTS + 1, sizeof *keys);
     for (unsigned i = 0; keys && i < nfav; i++)
         keys[i] = (rated_t){ rate_song_key(deque_at(favs, i)) | 7, i }; /* a copy: its row */
-    for (int i = 0; keys && t && i < RATE_SLOTS; i++)
+    for (int i = 0; keys && t && i < RATE_SLOTS && (unsigned)kept < ra.used[0]; i++)
         if (t[i]) keys[nfav + kept] = (rated_t){ t[i], nfav + kept }, kept++;
     unsigned m = nfav + (unsigned)kept;
     if (keys) qsort(keys, m, sizeof *keys, rated_order);
@@ -586,7 +589,7 @@ static void rc_write(void) {
 /* The rated of table album, valid stars or hearts only (1 to 5), for rc_take. */
 static unsigned *rc_rated(int album, unsigned *n) {
     unsigned *t = rates(album), *c = t ? calloc(RATE_SLOTS, sizeof *c) : (unsigned *)0;
-    for (unsigned i = 0; c && i < RATE_SLOTS; i++)
+    for (unsigned i = 0, seen = 0; c && i < RATE_SLOTS && seen < ra.used[album]; seen += !!t[i++])
         if ((t[i] & 7) && (t[i] & 7) <= 5u) c[(*n)++] = t[i];
     return c;
 }
