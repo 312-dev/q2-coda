@@ -46,6 +46,14 @@ static struct {
     unsigned seek_loads; /* playback_loads at the tap: the radio's queue is a later one */
 } sr __attribute__((section(".scratch")));
 
+/* A line in the system log (q2-log) for each radio decision: the drive of 2026-11-22 showed "Radio
+ * isn't available for this song" on a second start after the car's stop, and nothing on the device
+ * said what the app answered. */
+static void say(const char *what, int n) {
+    char line[96];
+    tk_snprintf(line, sizeof line, "%s %d", what, n);
+    ulog('I', "radio", line);
+}
 /* A time stamp, never 0 (0 is none) */
 static unsigned stamp(unsigned ms) { return ms ? ms : 1; }
 
@@ -175,13 +183,16 @@ static int start(void *r, int sec) {
     if (!path || !*path || sr.ask) return 0;
     unsigned seq = time_now_ms() | 1;
     if (addon_radio_start(path, seq)) {
+        say("asked the app, seq", (int)seq);
         sr.ask = seq, sr.ask_at = time_now_ms();
         tk_snprintf(sr.path, sizeof sr.path, "%s", path);
         sr.id = key(r), sr.sec = sec;
         sr.seek_loads = playback_loads, sr.seek_at = 0;
         return 1;
     }
-    return local_start(r, sec, addon_radio_missing(path));
+    int ok = local_start(r, sec, addon_radio_missing(path));
+    say("a local radio, started", ok);
+    return ok;
 }
 
 /* addon.c's, as a playlist session's first entry, first, comes: whether that session is the app's
@@ -199,6 +210,7 @@ int song_radio_keeps(const char *first) {
 }
 
 static void stop(void) {
+    say("stopped; it was local", sr.local);
     if (sr.local) {
         local_end();
         return;
@@ -230,6 +242,10 @@ int song_radio_tap(const void *unused) {
  * plays on), or stop (stop 1). 0 when it started or stopped, 1 when it didn't, 3 when no song has
  * that id. */
 int song_radio_car(int id, int stop_it) {
+    say(stop_it  ? "the car stops it, on"
+        : sr.ask ? "the car starts one while an answer waits, id"
+                 : "the car starts one, id",
+        stop_it ? song_radio_on() : id);
     if (stop_it) {
         if (song_radio_on()) stop();
         return 0;
@@ -254,6 +270,8 @@ void song_radio_poll(void) {
     unsigned now = time_now_ms();
     if (sr.ask) {
         int code = addon_radio_answer(sr.ask);
+        if (code >= 0 || now - sr.ask_at >= SR_WAIT_MS)
+            say("the app's answer (-1 none in time)", code);
         if (code == 0) {
             sr.ask = 0;
             sr.seek_at = sr.sec > 0 ? stamp(now) : 0;

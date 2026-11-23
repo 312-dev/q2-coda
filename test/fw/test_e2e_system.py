@@ -664,7 +664,7 @@ def test_a_lit_screen_idles_only_once_input_has_been_still_for_a_while(q2):
 
 def test_wake_double_press_chosen_on_controls_wakes_only_on_a_second_press_after_a_restart(q2):
     controls(q2)
-    assert q2.screen.row('Wake') == 'Wake: Single Press'
+    assert q2.screen.row('Wake') == 'Wake: Any Button'
     q2.screen.click('Wake')
     assert q2.screen.row('Wake') == 'Wake: Double Press' and q2.flash.get('Q2POD', 'WAKEDOUBLE') == '1'
     q2.power_on()

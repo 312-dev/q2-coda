@@ -24,9 +24,9 @@ THUMB_PAGE = {'cf.radius': 0, 'cf.top': 32, 'cf.bright1': 256, 'cf.bright2': 256
 SHELF_180 = {'cf.eye': 94, 'cf.tilt': 89, 'cf.x1': 116, 'cf.xs': 34, 'cf.z1': 77, 'cf.zs': 1, 'cf.horizon': 63, 'cf.swing': 1,
              'cf.lift': 20, 'cf.eye_turn': 150, 'cf.art_persp': 13, 'cf.arch_span': 0}
 
-# coverflow.c, coverflow_thumb.c, coverflow_letters.c, coverflow_loader.c, playlist_art.c and wheel_accel.c as one unit, so the shim's
+# coverflow.c, coverflow_thumb.c, coverflow_letters.c, coverflow_loader.c, playlist_art.c, wheel_accel.c and hash.c as one unit, so the shim's
 # stubs are defined once
-CF_SOURCES = '#include "coverflow.c"\n#include "coverflow_thumb.c"\n#include "coverflow_letters.c"\n#include "coverflow_loader.c"\n#include "playlist_art.c"\n#include "coverflow_position.c"\n#include "corner_cover.c"\n#include "wheel_accel.c"\n'
+CF_SOURCES = '#include "coverflow.c"\n#include "coverflow_thumb.c"\n#include "coverflow_letters.c"\n#include "coverflow_loader.c"\n#include "playlist_art.c"\n#include "coverflow_position.c"\n#include "corner_cover.c"\n#include "wheel_accel.c"\n#include "hash.c"\n'
 SHIM_H = r"""
 extern char system_bar[];
 """ + ''.join(line + '\n' for line in font_indices()) + r"""
@@ -82,7 +82,7 @@ widget_set_text_utf8 widget_get_text_utf8 widget_add_timer widget_restack widget
 widget_get_prop_str widget_on widget_destroy_children widget_invalidate_force
 widget_count_children widget_get_child widget_lookup widget_move_resize widget_resize widget_get_canvas widget_get_visible
 canvas_get_clip_rect canvas_set_clip_rect widget_set_sensitive widget_get_type tk_strcmp widget_animator_destroy
-timer_add timer_remove navigator_back_to_home navigator_back navigator_window_is_exist window_manager_close_window_force navigator_to_with_context bitmap_create_ex bitmap_destroy bitmap_unlock_buffer
+timer_add timer_remove navigator_back_to_home navigator_back navigator_window_is_exist window_manager_close_window_force navigator_to_with_context check_forbid_play_no_headset bitmap_create_ex bitmap_destroy bitmap_unlock_buffer
 bitmap_lock_buffer_for_read bitmap_lock_buffer_for_write bitmap_get_line_length
 canvas_draw_image slide_menu_set_spacer window_manager window_manager_get_top_window window_manager_is_animating time_now_ms
 widget_to_local widget_animator_pause window_manager_get_pointer_pressed image_manager image_manager_unload_bitmap_by_name image_manager_unload_all
@@ -322,11 +322,7 @@ int carousel_glide(void *x, int goal, unsigned ms, int easing) {
     ++glides, glide_goal = goal, glide_ms = (int)ms, glide_easing = easing;
     return 1;
 }
-/* navigation.c's big letter: the last one shown, and how many */
-static unsigned letter_shown;
-static int letters, letter_held; /* held: the thumb's, with no LETTER_MS, until a coverflow_letter */
-void coverflow_letter(void *x, unsigned letter, unsigned now) { letter_shown = letter, letter_held = 0, letters += letter != 0; }
-void coverflow_letter_hold(void *x, unsigned letter) { letter_shown = letter, letter_held = 1, ++letters; }
+void search_yield(void) {} /* search_strip.c's: no Search here to wait for */
 static void *invalidated; /* the last widget invalidated */
 int widget_invalidate_force(void *x, void *y) { wm_repaints += x == &wm_repaints; invalidated = x; return 0; }
 static void *wm_stack[4]; /* the window manager's windows, bottom first: none unless a test stacks them */
@@ -503,6 +499,7 @@ int navigator_back(void) { return ++backs, 0; }
 static int usb_page; /* USB Storage's page open */
 int navigator_window_is_exist(const char *name) { return usb_page && !strcmp(name, "usbmode_page"); }
 int window_manager_close_window_force(void *m, void *x) { force_closed = x; return ++force_closes, 0; }
+int check_forbid_play_no_headset(int quiet) { return 0; } /* an output there: the tests play */
 /* play_folder's: the page, its context and the queue as it stood */
 static char nav_to[32];
 static struct { void *dq; int idx, cls, mode; } nav_ctx;
@@ -3250,7 +3247,7 @@ static void edge_drawn(void) {
    sensitivity, the letters after the dwell and back, and a long spin's landing. ---- */
 static int initial_of(int i) { char c = names[i][0]; return c >= 'a' && c <= 'z' ? c - 32 : c; }
 /* Going by letters, where the row is going: the goal's album, a letter's first; the row's place,
-   unwrapped from last; the row there, the thumb still; a letter's step. */
+   unwrapped from last; the row there, the thumb still. */
 #define TARGET() ((((*index + (int)lroundf(th[T_GOAL])) % n) + n) % n)
 #define FIRST(a) ((a) == 0 || initial_of(a) != initial_of((a) - 1))
 static float th_at(int *index, int n, float *last) { /* the row's place, unwrapped from last */
@@ -3260,12 +3257,6 @@ static float th_at(int *index, int n, float *last) { /* the row's place, unwrapp
 static void th_arrive(void) { /* the thumb still, till the row is there */
     for (int i = 0; i < 300 && th[T_POS] != th[T_GOAL]; ++i) th_pass(0, 17);
     assert(th[T_POS] == th[T_GOAL]);
-}
-static int th_step(int dir) { /* one letter on (1) or back (-1): under one's travel a pass */
-    int was = letters, r = 0;
-    for (int i = 0; i < 8 && letters == was; ++i) r |= th_pass(-10 * dir, 17);
-    assert(letters == was + 1);
-    return r;
 }
 
 /* ---- Fast Navigation off: 1.7.6's letters, as 1.7.6's own tests had them (the shipped
@@ -4372,10 +4363,8 @@ static void playlist_covers(void) {
     coverflow_paint(s, canvas);
     assert(loads == before + 2); /* 41's, as it was made */
     th_pass(0, 17);
-    int letters0 = letters;
     th_down();
     for (int t = 0; t < 2500; t += 17) th_spin(150, 17);
-    assert(letters == letters0);
     th_rest();
     /* The playlists stop at their ends (coverflow_bounded): the first push past kicks the covers out
        by a fifth of a stride, once, they spring back, and the thumb never wraps to the other end. */
@@ -5171,7 +5160,7 @@ def main():
           ' its texture window, centre click, small libraries and flat fallback passed;'
           ' Sort by artist, year, recently added, most played and random, kept across opens, passed;'
           ' Home art sources, fit, clip, cache and Split/Full layout passed;'
-          ' playlist art (own picture, 2x2, bad picture, songs changed mid-build, card full or gone) passed; playlists as covers (captions, art filling in, no letters, Centre, Return) passed;'
+          ' playlist art (own picture, 2x2, bad picture, songs changed mid-build, card full or gone) passed; playlists as covers (captions, art filling in, Centre, Return) passed;'
           ' the scoped pages\' cards, Go to Album, the Cancel row and the Unknown Album card\'s resume after a restart passed.')
 
 

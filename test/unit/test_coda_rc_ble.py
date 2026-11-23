@@ -37,6 +37,7 @@ EVENT = '5645283b-18bb-419e-b338-f089cfc8dced'
 INFO = 'c7f73d6b-93b1-46b5-8892-1ba59bdb7513'
 H_NAME, H_CONTROL, H_EVENT, H_CCCD, H_INFO = 3, 8, 10, 11, 13
 ADD_ADV, REMOVE_ADV, DISCONNECT = 0x3e, 0x3f, 0x14
+LISTENING = re.compile(r'start: tcp (\d+) listening')  # the daemon's start line, with the port it got
 STAMP = re.compile(r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ ')  # a log line's UTC stamp, ulog's
 
 
@@ -118,15 +119,18 @@ class Q2:
         copy = root / 'coda-rc.so'  # a copy of its own: the daemon's statics start at zero
         shutil.copy(so, copy)
         self.lib = ctypes.CDLL(str(copy))
-        with socket.socket() as s:
-            s.bind(('127.0.0.1', 0))
-            port = s.getsockname()[1]
-        args = [b'coda-rc', b'--root', str(root).encode(), b'--port', str(port).encode(), b'--ble-sim',
+        # --port 0: the kernel's pick, read back from the daemon's start line. A port chosen here and closed for the
+        # daemon to bind could be given to another worktree's test in between (2026-11-22): nothing listened.
+        args = [b'coda-rc', b'--root', str(root).encode(), b'--port', b'0', b'--iroh-port', b'0', b'--ble-sim',
                 str(self.sim).encode()]
         self.argv = (ctypes.c_char_p * len(args))(*args)
         self.loop = threading.Thread(target=self.lib.coda_main, args=(len(args), self.argv), daemon=True)
         self.loop.start()
-        assert wait_for(lambda: (root / 'tmp/coda-rc.pid').exists())
+        # Its log's start line, written once the TCP port listens: the pid file comes before the device id's fsync and
+        # the listen, and a test that connected on the pid file alone was refused when the disk was slow (a loaded
+        # machine, 2026-11-22: test_unauthenticated_tcp_sessions_give_way_and_time_out, ECONNREFUSED)
+        assert wait_for(lambda: any(LISTENING.match(line) for line in self.log()))
+        self.port = next(int(m[1]) for m in map(LISTENING.match, self.log()) if m)
 
     def config(self, text):
         (self.root / 'mnt/data/config.ini').write_text(text)
@@ -237,6 +241,17 @@ def err(p):
     return p[1], struct.unpack('<H', p[2:4])[0], p[4]
 
 
+def authed(q2, c, name='Pixel 10'):
+    """A Session over c that has paired and authenticated: what a phone has before anything but the handshake."""
+    s = client.Session(c, name)
+    s.hello()
+    point = s.pair_start()
+    assert wait_for((q2.root / 'tmp/coda-rc.pair').exists)
+    code = (q2.root / 'tmp/coda-rc.pair').read_text().split('\n')[0]
+    s.auth(s.pair_finish(code, point)[1])
+    return s
+
+
 def test_discovery_finds_gap_and_the_coda_rc_service(q2):
     c = connect(q2)
     groups = []
@@ -292,12 +307,11 @@ def test_mtu_exchange_sizes_the_notifications(q2):
     c = connect(q2)
     assert c.exchange(247) == 247
     c.notify()
-    s = client.Session(c)
+    s = authed(q2, c)
     payload = bytes(range(256)) * 20
-    s.hello()
     notes = c.notes
     assert s.call(client.T['PING'], payload, client.T['PONG']) == payload
-    assert c.notes - notes == -(-(len(payload) + 6) // 244)  # every notification full but the last
+    assert c.notes - notes == -(-(len(payload) + 6 + 16) // 244)  # every notification full but the last
 
 
 def test_write_and_notify_round_trip_at_the_least_mtu(q2):
@@ -342,12 +356,11 @@ def test_a_whole_session_pairs_and_authenticates_over_ble(q2):
 
 
 def test_pipelined_requests_are_answered_in_order_one_at_a_time(q2):
-    """Four 3 KB Pings in one go at MTU 23: each answer whole and in order (the daemon takes the next once the one
-    before has left, coda_rc_ble.c feed)."""
+    """Four 3 KB Pings in one go at MTU 23, sealed (before Auth a Ping is echoed only up to CRC_PING_PLAIN): each
+    answer whole and in order (the daemon takes the next once the one before has left, coda_rc_ble.c feed)."""
     c = connect(q2)
     c.notify()
-    s = client.Session(c)
-    s.hello()
+    s = authed(q2, c)
     payloads = [bytes([i]) * 3000 for i in range(4)]
     reqs = [s.send(client.T['PING'], p) for p in payloads]
     for req, p in zip(reqs, payloads):
@@ -359,13 +372,96 @@ def test_a_phone_that_writes_without_reading_answers_is_let_go(q2):
     """More than IN_CAP (two whole frames) waiting to be framed: the link is dropped rather than the bytes."""
     c = connect(q2)
     c.notify()
-    s = client.Session(c)
-    s.hello()
+    s = authed(q2, c)
     with pytest.raises((ConnectionError, OSError)):
         for _ in range(4):
             s.send(client.T['PING'], bytes(8000))
         c.read(H_INFO)
     assert wait_for(q2.advertising)
+
+
+def static_bytes(so, lib, symbol, offset, n):
+    """n bytes of the loaded daemon's memory at a static's address plus offset: the static found by name in the
+    library's symbol table, the load address from coda_main's."""
+    syms = {}
+    for line in subprocess.run(['llvm-nm', '--defined-only', str(so)], capture_output=True, text=True,
+                               check=True).stdout.splitlines():
+        addr, _, name = line.split()
+        syms[name] = int(addr, 16)
+    main = ctypes.cast(lib.coda_main, ctypes.c_void_p).value
+    assert main is not None
+    base = main - syms['coda_main']
+    return ctypes.string_at(base + syms[symbol] + offset, n)
+
+
+def test_a_bad_length_with_more_than_a_frame_held_closes_without_overrunning(daemon_so, q2):
+    """A length out of range at the head of more than CRC_MAX_FRAME held bytes (they pile up while an answer
+    larger than the link's send buffer waits for the phone to take it): the link is closed and nothing is copied
+    past the frame buffer feed hands the session (coda_rc_ble.c feed, its static f)."""
+    max_frame = 6 + 8192 + 16
+    c = connect(q2)
+    c.exchange(247)
+    c.notify()
+    s = authed(q2, c)
+    canary = static_bytes(daemon_so, q2.lib, 'feed.f', max_frame, 400)
+    s.send(client.T['PING'], bytes(8000))  # 8022 bytes back, more than the send buffer holds: they wait in out
+    c.s.recv(1, socket.MSG_PEEK)  # the answer has begun, so the Ping has left the held bytes
+    held = b'\xff\xff' + b'\xa5' * (max_frame + 300 - 2)
+    for i in range(0, len(held), 244):
+        c.write(H_CONTROL, held[i:i + 244], cmd=True)
+    c.s.send(struct.pack('<BH', 0x0a, H_INFO))  # a Read after them: its answer comes once all were taken in
+    got_info = False
+    with pytest.raises((ConnectionError, OSError)):
+        while True:
+            p = c.take()
+            got_info = got_info or p == b'\x0bcoda-rc 1'
+    assert got_info and len(c.stream) >= 8022
+    assert static_bytes(daemon_so, q2.lib, 'feed.f', max_frame, 400) == canary
+    assert wait_for(q2.advertising)
+
+
+def tcp(q2):
+    s = socket.socket()
+    CONNECT(s, ('127.0.0.1', q2.port))
+    s.settimeout(5)
+    return s
+
+
+def closed(sock):
+    """True once the daemon has closed sock (its read gives end of file)."""
+    sock.settimeout(0.05)
+    def gone():
+        try:
+            return sock.recv(1) == b''
+        except (TimeoutError, BlockingIOError):
+            return False
+        except OSError:
+            return True
+    return wait_for(gone, 5)
+
+
+def test_unauthenticated_tcp_sessions_give_way_and_time_out(q2):
+    """Four peers that say Hello and wait hold every TCP slot: a fifth connection still gets a session, the oldest
+    making room, and a session that stays short of Auth outside a pairing is closed after HANDSHAKE_MS (15 s). The
+    one pairing (a person typing the code) keeps AUTH_MS."""
+    skew = ctypes.c_uint32.in_dll(q2.lib, 'crc_host_skew_ms')
+    socks = []
+    for i in range(4):
+        sk = tcp(q2)
+        client.Session(sk, f'idle {i}').hello()
+        socks.append(sk)
+    pairing = tcp(q2)
+    p = client.Session(pairing, 'Pixel 10')
+    p.hello()  # a session of its own: the oldest idle one made room for it
+    assert closed(socks[0])
+    p.pair_start()
+    WAIT(1.2)  # a state is timed from the loop's once-a-second look that first sees it (timeouts)
+    skew.value += 15001
+    assert all(closed(sk) for sk in socks[1:])
+    skew.value += 100000  # 115 s in: the pairing's session is still up
+    assert p.call(client.T['PING'], b'up', client.T['PONG']) == b'up'
+    skew.value += 40000
+    assert closed(pairing)
 
 
 def test_advertising_follows_the_phone(q2):
@@ -448,7 +544,8 @@ def test_no_ble_opens_nothing(daemon_so, tmp_path):
     (root / 'tmp').mkdir()
     shutil.copy(daemon_so, root / 'c.so')
     lib = ctypes.CDLL(str(root / 'c.so'))
-    args = [b'coda-rc', b'--root', str(root).encode(), b'--port', b'0', b'--no-ble', b'--ble-sim', str(sim).encode()]
+    args = [b'coda-rc', b'--root', str(root).encode(), b'--port', b'0', b'--iroh-port', b'0', b'--no-ble', b'--ble-sim',
+            str(sim).encode()]
     argv = (ctypes.c_char_p * len(args))(*args)
     t = threading.Thread(target=lib.coda_main, args=(len(args), argv), daemon=True)
     t.start()
@@ -458,6 +555,30 @@ def test_no_ble_opens_nothing(daemon_so, tmp_path):
     lib.crc_host_quit()
     t.join(5)
     shutil.rmtree(sim)
+
+
+@pytest.mark.parametrize('which', ['tcp', 'iroh'])
+def test_a_taken_port_ends_the_daemon_and_says_so(daemon_so, tmp_path, which):
+    """A port another process holds: the daemon does not run with no listener (the shim would take it for alive and
+    never start it again, docs/internals.md#car-remote), logs why and leaves no pid file; the shim starts it again
+    CR_RESTART_MS later."""
+    root = tmp_path
+    (root / 'tmp').mkdir()
+    shutil.copy(daemon_so, root / 'c.so')
+    lib = ctypes.CDLL(str(root / 'c.so'))
+    holder = socket.socket()
+    holder.bind(('127.0.0.1', 0))  # bound and not listening, as another program's
+    taken = str(holder.getsockname()[1]).encode()
+    ports = [b'--port', taken, b'--iroh-port', b'0'] if which == 'tcp' else [b'--port', b'0', b'--iroh-port', taken]
+    args = [b'coda-rc', b'--root', str(root).encode(), *ports, b'--no-ble']
+    argv = (ctypes.c_char_p * len(args))(*args)
+    try:
+        assert lib.coda_main(len(args), argv) == 1
+    finally:
+        holder.close()
+    log = (root / 'tmp/coda-rc.log').read_text()
+    assert 'start failed: tcp' in log and 'not running' in log and 'start: tcp' not in log
+    assert not (root / 'tmp/coda-rc.pid').exists()
 
 
 def test_each_log_line_starts_with_its_utc_time(daemon_so, tmp_path):

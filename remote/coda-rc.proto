@@ -41,7 +41,8 @@ option java_multiple_files = true;
 //   0x46 StartRadio       -> 0x21 Ack              (CAP_RADIO)
 //   0x50 GetCover         -> 0x51 Cover
 //   0x60 GetRemote        -> 0x61 RemoteInfo           (CAP_REMOTE)
-//   0x7e Ping             -> 0x7f Pong                 (any payload, echoed; plain before Auth)
+//   0x62 RegisterRemote   -> 0x21 Ack                  (CAP_IROH_ALLOW)
+//   0x7e Ping             -> 0x7f Pong                 (any payload, echoed; plain before Auth, and then 64 bytes at most: longer gets TOO_LARGE)
 //
 // Before AuthResp only Hello, PairStart, PairFinish, Auth and Ping are answered; anything else gets
 // Error{UNAUTHORIZED}; after it, an unknown type gets Error{UNSUPPORTED} and the session goes on.
@@ -89,6 +90,7 @@ enum Capability {
   CAP_RADIO = 16384;     // StartRadio, and NowPlaying.radio
   CAP_NOTICE = 32768;    // NowPlaying.notice and notice_id: the Q2 Muse's toasts
   CAP_REMOTE = 65536;    // GetRemote: how to reach this Q2 Muse from another network
+  CAP_IROH_ALLOW = 131072;  // RegisterRemote: across networks only paired phones' iroh keys are let in
 }
 
 // type 0x03. Asks the Q2 to show a 6-digit code. Refused with BUSY while another phone pairs,
@@ -193,6 +195,12 @@ message NowPlaying {
   // otherwise. notice_id is new for each toast, so the same words twice are two notices.
   string notice = 18;
   uint32 notice_id = 19;
+  // The Browse nodes of the song's album ("album:..."), whose page lists the song, and of its album's artist
+  // ("artist:r..."), the Artists list's page, which lists that album: Android Auto's links from now playing. Left
+  // out when there is no such page (a station, a song not in the library, a server song while its server is not
+  // signed in, no album artist). Added within version 1 with no capability bit: a Q2 without them never sends them.
+  string album_id = 20;
+  string artist_id = 21;
 }
 
 enum PlayState {
@@ -439,11 +447,21 @@ message Cover {
 // type 0x60, CAP_REMOTE. How a paired phone reaches this Q2 Muse from another network: its q2-iroh sidecar,
 // an iroh endpoint that carries each QUIC stream to this port's frame stream
 // (docs/remote.md#car-remote-across-networks). Sealed, like every request after Auth, so only a paired phone
-// learns it. UNAVAILABLE while the sidecar is not running (Car Remote just turned on, or no q2-iroh).
+// learns it. UNAVAILABLE while the sidecar is not running (Car Remote just turned on, no Wi-Fi link, or no q2-iroh).
 message GetRemote {}
 
 // type 0x61
 message RemoteInfo {
   string endpoint_id = 1;  // the iroh endpoint id: 64 lowercase hex digits, the sidecar's public key
   string relay_url = 2;    // its home relay ("https://use1-1.relay.n0.iroh.link./"); absent before it has one
+}
+
+// type 0x62, CAP_IROH_ALLOW. The phone's own iroh key, so the Q2's q2-iroh lets it in from another network: with
+// CAP_IROH_ALLOW only the keys of paired phones are (docs/remote-protocol.md#across-networks-only-paired-phones).
+// Sent on every authenticated session, on any transport, right after AuthResp; kept with this phone's pairing,
+// in place of any key it registered before, and gone when the phone is forgotten. The key is the phone's iroh
+// secret key's public half, made once per install and kept in the app's private storage. BAD_REQUEST unless
+// endpoint_id is 32 bytes.
+message RegisterRemote {
+  bytes endpoint_id = 1;  // 32 bytes, raw (not hex): the phone's iroh endpoint id
 }

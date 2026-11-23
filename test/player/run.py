@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Host tests of q2player (player/): `python3 test/player/run.py [-k NAME]`.
 
-Needs ffmpeg, lame, openssl (the HTTPS tests' certificates) and a C compiler, no stock ZIP and no Q2; the DST
+Needs ffmpeg, lame, openssl (the HTTPS tests' certificates), strace and a C compiler, no stock ZIP and no Q2; the DST
 SACD image needs FFmpeg's DST sample, fetched once (music.py DST_SAMPLE), and is left out without it. The player is built for this machine by tools/player.py
 (its FFmpeg on first use, some minutes) and driven through its socket by fakedemo.py, writing PCM to
 files in place of ALSA.
@@ -14,8 +14,15 @@ files in place of ALSA.
   paused (docs/internals.md#player-status-push).
 - protocol: for each transcript in fixtures/ (stock's and Q2 Muse's hciplayer under qemu, captured by
   fakedemo.py), the same commands get the same events and answers from q2player.
+
+The tests and the fixtures run side by side, WIDTH at once, each in a process and a folder of its own (AFTER's
+reader in its writer's), as each mostly waits on a player running in real time or faster; one that fails there runs
+again alone, and passing then is reported flaky and counted as passed. Then SERIAL's, one at a time: the tests
+that bound real-time behaviour or read the host's /tmp, each tried again (TRIES in all) when it failed on a run the
+machine starved (Stalls). Each line gives the test's seconds, and the run ends with the side-by-side part's and the
+whole run's, the last line also counting what failed, and what failed side by side and passed alone, by name.
 """
-import array, concurrent.futures, math, os, pathlib, re, struct, subprocess, sys, tempfile
+import array, concurrent.futures, functools, math, multiprocessing, os, pathlib, re, signal, struct, subprocess, sys, tempfile, threading, time
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -32,9 +39,21 @@ def reference(path, fmt='s16le'):
     return subprocess.run(['ffmpeg', '-v', 'error', '-cpuflags', '0', *decoder, '-i', str(path), '-f', fmt, '-'], check=True, capture_output=True).stdout
 
 
-def play(player, songs, scenario, out, speed=1, env=None):
+def put(path, text):
+    """text as path's whole content, through a temporary name, as a card app and demo write the files the player
+    reads while it runs: written in place, a read in the truncate window finds it empty (a growing song's .stream
+    read so ends the song at the bytes it has)."""
+    tmp = pathlib.Path(f'{path}.tmp')
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
+def play(player, songs, scenario, out, speed=1, env=None, exits=0, ends=0):
+    """exits: the run's end waits for that many {player-status\\exit} (fakedemo Session.wait_exits), for a test that
+    compares the whole of what played; ends, for that many events that end a song of any kind (wait_ends)."""
     s = fakedemo.Session(out)
     s.music = songs
+    s.wait_exits, s.wait_ends = exits, ends
     s.run(fakedemo.scenarios(str(songs))[scenario], fakedemo.launch_host(player, str(songs), speed, env), speed)
     return s, [p.read_bytes() for p in sorted((pathlib.Path(out)/'pcm').glob('*.raw'))], sorted(p.name for p in (pathlib.Path(out)/'pcm').glob('*.raw'))
 
@@ -52,7 +71,7 @@ def first_difference(a, b):
 
 def check_exact(player, songs, tmp, scenario, files, fmt, name):
     """The scenario plays `files` one after another to the end; the output is their reference decodes joined, in one PCM."""
-    s, pcm, names = play(player, songs, scenario, tmp/scenario, speed=8)
+    s, pcm, names = play(player, songs, scenario, tmp/scenario, speed=8, exits=len(files))
     want = b''.join(reference(songs/f, fmt) for f in files)
     got = b''.join(pcm)
     frame = (4 if fmt == 's16le' else 8)
@@ -112,7 +131,7 @@ def check_chain(player, songs, tmp, scenario, files, cut=None):
     """files played one after another: each PCM open, in order, is the reference decodes of the files it carries, in
     its own width; cut[f] frames is how many of a file's reference play (the source's length, where ffmpeg leaves
     an encoder's padding in)."""
-    s, pcm, names = play(player, songs, scenario, tmp/scenario, speed=8)
+    s, pcm, names = play(player, songs, scenario, tmp/scenario, speed=8, exits=len(files))
     opens = [(int(n.split('_')[1]), n.rsplit('_', 1)[1][:3]) for n in names]
     got = b''.join(pcm)
     want, at, frames = b'', 0, 0
@@ -232,15 +251,19 @@ def test_a_pause_right_after_a_song_holds_for_it(player, songs, tmp):
     logged = re.findall(r' I player (q2player: .*)', (tmp/'start-paused/player.log').read_text())
     assert logged == [f'q2player: set-songurl {songs}/a1.flac from 5 s', 'q2player: mcl-pause', 'q2player: mcl-play'], logged
     got, want = b''.join(pcm), reference(songs/'a1.flac')[5 * 44100 * 4:]
-    frames = len(got) // 4  # mcl-play at 3.0 and the end at 5.0: about 2 s, where a lost pause gives about 4
-    assert want.startswith(got) and 0 < frames < int(2.6 * 44100), f'{frames} frames written'
+    # from mcl-play to the run's end as this side ran them (2 s idle) and the PCM's half second ahead, where a lost
+    # pause gives 2 s more: a fixed 2.6 s missed a session that ended late side by side (115712 frames)
+    played = next(float(l.split()[0]) for l in s.lines if l.endswith('{mcl-play\\null}'))
+    frames, most = len(got) // 4, int((s.end_at - played + 0.6) * 44100)
+    assert want.startswith(got) and 0 < frames < most, f'{frames} frames written, at most {most}'
     return f'{frames} frames, all after the play'
 
 
 def test_seek_exact(player, songs, tmp):
     """A seek to 9 s: what follows it is the reference from frame 9 x 44100, to the end; what came before is the
     reference's start."""
-    s, pcm, names = play(player, songs, 'seek', tmp/'seek', speed=8)
+    # to its end: the run waits for its exit (a fixed end cut the tail short side by side, 340380 frames)
+    s, pcm, names = play(player, songs, 'seek', tmp/'seek', speed=8, exits=1)
     got, ref = b''.join(pcm), reference(songs/'a1.flac')
     tail = ref[9 * 44100 * 4:]
     assert got.endswith(tail), f'the PCM does not end with the reference from 9 s ({len(got) // 4} frames)'
@@ -250,18 +273,48 @@ def test_seek_exact(player, songs, tmp):
 
 
 def heard_seconds(pcm, rate=44100):
-    """pos.flac's seconds heard in s16 stereo PCM, one a 20 ms window (None where silent), each with its tone's error
-    in Hz: the frequency from the window's first and last rising zero crossings, interpolated."""
+    """pos.flac's seconds heard in s16 stereo PCM, one a 20 ms window, each with its tone's error in Hz: the frequency
+    from the window's first and last rising zero crossings, interpolated. None where silent, and where the gaps between
+    crossings differ by more than a tenth of their median: a splice (a seek, a scan's turn) meets two tones' phases
+    there, and the short gap at the join reads as a higher tone, a second or two on (test_heard_seconds_at_a_splice).
+    A splice's neighbours still say where each side is, so a second skipped there still shows."""
     left = array.array('h', pcm)[::2]
     w, out = rate // 50, []
     for at in range(0, len(left) - w, w):
         x = left[at:at + w]
         ups = [i + x[i] / (x[i] - x[i + 1]) for i in range(w - 1) if x[i] < 0 <= x[i + 1]]
         if max(x) < 4000 or len(ups) < 3: out.append((None, 0)); continue
+        gaps = sorted(b - a for a, b in zip(ups, ups[1:]))
+        if gaps[-1] - gaps[0] > 0.1 * gaps[len(gaps) // 2]: out.append((None, 0)); continue
         f = (len(ups) - 1) * rate / (ups[-1] - ups[0])
         n = round((f - music.POS_BASE) / music.POS_STEP)
         out.append((n, f - (music.POS_BASE + music.POS_STEP * n)))
     return out
+
+
+def test_heard_seconds_at_a_splice(player, songs, tmp):
+    """heard_seconds across a splice of pos.flac's second 22 into its second 23 (a turn of the scan, a seek), at 20
+    places in a window and 16 phases each: no window reads a second that is neither. A window across a phase jump has
+    one short gap between zero crossings, which made the tone read high: up to 24 here, the "jumps of [2] s" test_scan
+    failed with (integ/q2-1129, 2026-11-22: the scan went 22, 22, 24, 23, 23, its PCM 22 then 23)."""
+    rate, w = 44100, 44100 // 50
+    def tone(n, frames, phase):
+        f = music.POS_BASE + music.POS_STEP * n
+        return [int(16000 * math.sin(phase + 2 * math.pi * f * i / rate)) for i in range(frames)]
+    wrong, read = [], 0
+    for cut in range(20, w - 20, 37):
+        for k in range(16):
+            x = tone(22, w + cut, 0) + tone(23, 2 * w - cut, 2 * math.pi * k / 16)
+            for n, e in heard_seconds(array.array('h', (v for s in x for v in (s, s))).tobytes()):
+                if n is None or abs(e) > 3: continue
+                read += 1
+                if n not in (22, 23): wrong.append((cut, k, n, round(e, 1)))
+    assert not wrong, f'{len(wrong)} windows read a second neither side of the splice, e.g. {wrong[:3]}'
+    # a second skipped is still seen: 22 into 24 reads as 22s then 24s, a jump of 2 for test_scan to find
+    x = tone(22, w + 300, 0) + tone(24, 3 * w - 300, 1.0)
+    secs = [n for n, e in heard_seconds(array.array('h', (v for s in x for v in (s, s))).tobytes()) if n is not None and abs(e) <= 3]
+    assert [b - a for a, b in zip(secs, secs[1:]) if b != a] == [2], f'22 into 24 read as {secs}'
+    return f'{read} windows read, each 22 or 23; 22 into 24 still a jump of 2'
 
 
 def test_scan(player, songs, tmp):
@@ -270,13 +323,30 @@ def test_scan(player, songs, tmp):
     back about 4, and nothing is skipped: from window to window the second moves by one at most, at the releases too."""
     s, pcm, names = play(player, songs, 'scan', tmp/'scan', speed=2)  # a turn's 150 ms wait is real time: more would eat the run back
     heard = [(n, e) for n, e in heard_seconds(b''.join(pcm)) if n is not None]
-    off = [e for _, e in heard if abs(e) > 3]
-    assert len(off) <= len(heard) // 50, f'{len(off)} of {len(heard)} windows off their tone, by up to {max(map(abs, off))} Hz'
+    # A window where the second changes holds two tones and reads between them, by up to half a step (10 Hz): where
+    # the changes fall on the windows depends on where the scan and the turns landed, which a busy machine moves (6
+    # such windows idle, 9 with the player stopped 300 ms a second, 11 side by side at load 10). Off its tone within
+    # a run of one second is the pitch wrong.
+    off = [e for i, (n, e) in enumerate(heard) if abs(e) > 3 and 0 < i < len(heard) - 1 and heard[i - 1][0] == n == heard[i + 1][0]]
+    assert len(off) <= len(heard) // 100, f'{len(off)} of {len(heard)} windows off their tone within a second, by up to {max(map(abs, off))} Hz'
     secs = [n for n, e in heard if abs(e) <= 3]  # a window across a seek's splice reads between two tones
-    top = secs.index(max(secs))
+    turn = next((i for i in range(1, len(secs)) if secs[i] < secs[i - 1]), len(secs))  # the first step back
+    top = secs.index(max(secs[:turn]))
     back = min(secs[top:])
-    # the file sink keeps what the turn backward drops from the PCM, up to half a second played as it is: 22 s
-    assert 19 <= max(secs) <= 22 and 15 <= back <= max(secs) - 4, f'reached {max(secs)} s, then back to {back} s'
+    # The scan covers song in the time the player runs, between the commands as this side sent them (a busy machine
+    # sends late: the backward hold went out a second late and lasted 1.25 s, 1 of 50 runs): forward at 4 times from
+    # 10 s and on at 1 until the turn backward, plus the half second the file sink keeps of what the turn drops, and a
+    # second for where a window falls. A player stopped 300 ms a second reached 17 s (1 of 20), as a busy Q2 would: 15
+    # s is past what playing on would reach (14 s). Back at twice is twice its hold at most, less on a busy machine,
+    # where it went back 1 s in a hold of 1.25 s: it must go back, and no further than that and the turn's 2 s, the
+    # hold read from the transcript's milliseconds (10 ms: 22 s back to 16 s in a hold read as 1.996 s).
+    sent = {l.split()[-1]: float(l.split()[0]) for l in reversed(s.lines) if l.split()[1] == '>' and 'mcl-scan' in l}
+    sent0 = [float(l.split()[0]) for l in s.lines if l.endswith('{mcl-scan\\0}')]
+    fwd, hold = sent0[0] - sent['{mcl-scan\\400}'], sent0[1] - sent['{mcl-scan\\-200}']
+    most = 10 + (sent['{mcl-scan\\400}'] - 1.0) + 4 * fwd + (sent['{mcl-scan\\-200}'] - sent0[0]) + 1.5
+    reached = secs[top]
+    assert 15 <= reached <= most and reached - 2 * hold - 2.01 <= back < reached, \
+        f'reached {reached} s (at most {most:.1f}), then back to {back} s (a hold of {hold:.2f} s backward)'
     steps = [b - a for a, b in zip(secs, secs[1:])]
     jumps = [d for d in steps if abs(d) > 1]
     assert jumps in ([], [-2]), f'jumps of {jumps} s'  # -2: the dropped half second, never heard on a Q2
@@ -308,13 +378,36 @@ def test_cue_tracks(player, songs, tmp):
 
 def test_bad_preload(player, songs, tmp):
     """A preload that is not audio: the song plays to its last frame, then exit, then the error and /tmp/notsupport."""
-    pathlib.Path('/tmp/notsupport').unlink(missing_ok=True)
     s, pcm, names = play(player, songs, 'badnext', tmp/'badnext', speed=8)
     assert b''.join(pcm).endswith(reference(songs/'a1.flac')[12 * 44100 * 4:]), 'the song did not play to its end'
     events = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
     assert events == ['{player-status\\exit}', '{player-status\\error}'], events
-    assert pathlib.Path('/tmp/notsupport').exists(), '/tmp/notsupport not made'
-    return 'played to the end, then exit, error and /tmp/notsupport'
+    assert (tmp/'badnext/tmp/notsupport').exists(), '/tmp/notsupport not made'  # under the run's own root (PEQ_ROOT)
+    # the song that would not open, with its path, an E line the Bluetooth event log copies (engine.c log_failed)
+    failed = re.findall(r' E player (q2player: open failed.*)', (tmp/'badnext/player.log').read_text())
+    assert failed == [f'q2player: open failed (unsupported): {songs}/junk.flac'], failed
+    return 'played to the end, then exit, error and /tmp/notsupport, the path logged'
+
+
+def test_a_failure_already_replaced_is_not_reported(player, songs, tmp):
+    """2026-11-21 20:32: a Bluetooth headset lost mid-song, bt_reopen waited 5 s for its PCM, and meanwhile demo reloaded
+    the song paused (set-songurl, mcl-pause). The write's failure was then reported as the song's error, and demo's
+    error dialog advanced the queue and started the next song playing, the DAC powered on under a pause for hours.
+    Now a song whose output fails once a newer song or a stop is waiting is logged, not reported: no error, no
+    /tmp/notsupport, and the waiting song opens paused. A song that fails with nothing waiting reports as before."""
+    s, pcm, names = play(player, songs, 'replaced-failure', tmp/'replaced')
+    events = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
+    assert events == [], events
+    # the host player's /tmp is its run's own (PEQ_ROOT "."), so another player on the machine cannot make it
+    assert not (tmp/'replaced/tmp/notsupport').exists(), '/tmp/notsupport made for a song already replaced'
+    log = (tmp/'replaced/player.log').read_text()
+    assert f'q2player: play failed, already replaced (the output would not open or take audio): {songs}/a1.flac' in log
+    assert b''.join(pcm) == b'', names  # a2 taken paused: nothing written
+    s, pcm, names = play(player, songs, 'play-failure', tmp/'failure')
+    events = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
+    assert events == ['{player-status\\error}'], events
+    assert (tmp/'failure/tmp/notsupport').exists(), '/tmp/notsupport not made for a song that failed while it played'
+    return 'replaced: no error, the waiting song paused; alone: the error and /tmp/notsupport'
 
 
 def test_status_push(player, songs, tmp):
@@ -369,19 +462,20 @@ def with_seektable(flac, every=44100):
     return flac[:4] + si + bytes([3]) + len(table).to_bytes(3, 'big') + table + flac[42:]
 
 
-def grow(player, songs, out, head, land_at, extra=(), seektable=False, part=None):
+def grow(player, songs, out, head, land_at, extra=(), seektable=False, part=None, whole=None, speed=4, env=None, tail=24.0):
     """a1 arriving in place as a card app writes it (player/grow.c): head bytes of it on the card and its .stream saying
-    get, the rest landing at land_at (the line then done); extra are more steps (a seek); seektable, a1 with one; part, (time, bytes): more of it landing earlier. Returns the session, the PCM,
-    and the beats' reads of /tmp/q2player.wait (False when there is none)."""
+    get, the rest landing at land_at (the line then done); extra are more steps (a seek); seektable, a1 with one; part, (time, bytes): more of it landing earlier;
+    whole, other bytes in a1's place; speed, env and tail (the run's length after land_at) as the session's. Returns the
+    session, the PCM, and the beats' reads of /tmp/q2player.wait (False when there is none)."""
     card, status = out/'mnt/mmc/.foo', out/'tmp/q2-foo.stream'
     card.mkdir(parents=True, exist_ok=True)
-    whole, path = (songs/'a1.flac').read_bytes(), card/'grow.flac'
+    whole, path = whole or (songs/'a1.flac').read_bytes(), card/'grow.flac'
     if seektable: whole = with_seektable(whole)
     path.write_bytes(whole[:head])
     seen, have = [], [head]
 
     def line(state, n):
-        status.write_text(f'#Q2STREAM/1\tseq=1\n{state}\t{n}\t{len(whole)}\t20000\t/mnt/mmc/.foo/grow.flac\n')
+        put(status, f'#Q2STREAM/1\tseq=1\n{state}\t{n}\t{len(whole)}\t20000\t/mnt/mmc/.foo/grow.flac\n')
 
     def beat(s):  # the app rewrites its line twice a second while the song arrives
         if have[0] < len(whole): line('get', have[0])
@@ -389,17 +483,18 @@ def grow(player, songs, out, head, land_at, extra=(), seektable=False, part=None
 
     def land(s, n=None):
         n = n or len(whole)
-        with open(path, 'ab') as f: f.write(whole[have[0]:n])
+        with open(path, 'ab') as f: f.write(whole[path.stat().st_size:n])  # from what is there: a test may land more itself
         have[0] = n
         line('done' if n == len(whole) else 'get', n)
 
     boot = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\0}'), (0.1, '{mcl-setvol\\60}')]
     steps = sorted(boot + [(1.0, fakedemo.song('set-songurl', str(path)))] + [(t / 2, beat) for t in range(4, 2 * int(land_at) + 2)]
-                   + [(land_at, land), *extra] + ([(part[0], lambda s: land(s, part[1]))] if part else []), key=lambda st: st[0]) + [(land_at + 24.0, None)]
+                   + [(land_at, land), *extra] + ([(part[0], lambda s: land(s, part[1]))] if part else []), key=lambda st: st[0]) + [(land_at + tail, None)]
     s = fakedemo.Session(out)  # it empties out/tmp: the line after it
     s.music = songs
+    s.wait_exits = 1  # each plays the song to its end: the run waits for it (a starved player's was after land_at + tail)
     line('get', head)
-    s.run(steps, fakedemo.launch_host(player, str(songs), 4), 4)
+    s.run(steps, fakedemo.launch_host(player, str(songs), speed, env), speed)
     pcm = b''.join(p.read_bytes() for p in sorted((out/'pcm').glob('*.raw')))
     assert not (out/'tmp/q2player.wait').exists(), 'q2player.wait left after the song'
     exits = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
@@ -421,6 +516,64 @@ def test_grow_plays_a_song_as_it_arrives(player, songs, tmp):
     return f'{len(got) // 4} frames equal to the reference; the wait named in {waited} of {len(seen)} beats'
 
 
+def with_cover(flac, size):
+    """flac with a front cover of size bytes after its STREAMINFO, as a server's FLACs have one: a JPEG by its MIME
+    type and its header, its width and height 0 (unknown) in the block, as taggers often leave them. q2player's FFmpeg
+    has no JPEG decoder, so the picture's size stays unknown to avformat_find_stream_info. Returns the FLAC and where
+    its audio starts."""
+    jpeg = b'\xff\xd8\xff\xe0' + bytes(size - 6) + b'\xff\xd9'
+    mime = b'image/jpeg'
+    body = struct.pack('>II', 3, len(mime)) + mime + struct.pack('>IIIIII', 0, 0, 0, 0, 0, len(jpeg)) + jpeg
+    si = bytes([flac[4] & 0x7f]) + flac[5:42]  # STREAMINFO, no longer the last block
+    out = flac[:4] + si + bytes([0x80 | 6]) + len(body).to_bytes(3, 'big') + body + flac[42:]
+    return out, 42 + 4 + len(body)
+
+
+def test_grow_opens_a_song_with_a_cover_on_its_first_audio(player, songs, tmp):
+    """A song arriving in place with an embedded cover starts once its headers and a little of its audio are there,
+    whatever the cover's size: the open reads the audio's headers and a frame or two, not 5 s of audio to size a
+    picture its FFmpeg cannot decode (source.c GROW_ANALYZE_US). 3 s of a1's audio is there (the open's own look
+    ahead reads about 1.3 s), the rest lands at 8 s: the song is playing well before then, and plays whole."""
+    want, said = reference(songs/'a1.flac'), []
+    for size in (2048, 160 * 1024):  # a thumbnail, and the largest seen on a Q2's stream folder (2026-11-22)
+        whole, audio = with_cover((songs/'a1.flac').read_bytes(), size)
+        head = audio + (len(whole) - audio) * 3 // 20  # a1 is 20 s: 3 s of it
+        s, got, seen = grow(player, songs, tmp/f'grow-cover{size}', head, 8.0, whole=whole)
+        at = first_difference(got, want)
+        assert at is None, f'cover of {size} B: {len(got) // 4} frames, reference {len(want) // 4}; first difference at frame {(at or 0) // 4}'
+        known = [t for t, p in s.positions]
+        assert known and known[0] < 3.0, f'cover of {size} B: the song was opened only at {known[:1]} s (set at 1 s, the rest landing at 8 s)'
+        said.append(f'{size} B cover: opened by {known[0]:.1f} s')
+    return '; '.join(said) + ', the rest landing at 8 s'
+
+
+def test_grow_slow_download_plays_in_few_long_stretches(player, songs, tmp):
+    """A song arriving at three quarters of its own rate (player/grow.c refill), played into the car's PCM in real time,
+    whose trace counts the PCM running dry (docs/iphone-mode.md#car-trace): after each stall the read waits until
+    REFILL_S of the song is there ahead (then twice that, to REFILL_MAX_S) before it plays on, or the whole song is
+    there, so the song breaks off a handful of times, not every time a packet comes; and plays whole, frame for frame."""
+    whole = (songs/'a1.flac').read_bytes()
+    per_s, out, car = len(whole) / 20, tmp/'grow-slow', tmp/'grow-slow.audio'
+    car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    head = int(per_s * 3)  # the start gate's 3 s
+    path = out/'mnt/mmc/.foo/grow.flac'
+
+    def land_to(n):  # the download's next bytes, up to n
+        with open(path, 'ab') as f: f.write(whole[path.stat().st_size:n])
+    steps = int((len(whole) - head) / (per_s * 0.75) * 10)  # tenths of a second to the last byte
+    landing = [(1.0 + k / 10, (lambda n: lambda s: land_to(n))(head + int(per_s * 0.75 * k / 10))) for k in range(1, steps)]
+    end = 1.0 + steps / 10
+    s, got, seen = grow(car_player(), songs, out, head, end, extra=landing, speed=1, tail=4.0,
+                        env={'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16', 'Q2PLAYER_CAR_QUIET_MS': '1000'})
+    want = reference(songs/'a1.flac')
+    at = first_difference(got, want)
+    assert at is None, f'{len(got) // 4} frames, reference {len(want) // 4}; first difference at frame {(at or 0) // 4}'
+    lines = car_trace((out/'player.log').read_text())
+    dry, silent = sum(l['dry'] for l in lines), sum(l['dry_ms'] for l in lines)
+    assert 1 <= dry <= 6, f'the car\'s PCM ran dry {dry} times, {silent} ms of silence in all'
+    return f'{dry} breaks ({silent} ms of silence in all) over a song arriving at three quarters of its rate, played whole'
+
+
 def test_grow_seek_inside(player, songs, tmp):
     """A seek inside the part of a growing FLAC on the card, with no SEEKTABLE (FFmpeg then searches the file for the
     target) and with one (server songs have it): the song plays from the target at once, without waiting for the rest,
@@ -435,8 +588,11 @@ def test_grow_seek_inside(player, songs, tmp):
         head = got[:len(got) - len(tail)]
         assert ref.startswith(head), f'{kind}: {len(head) // 4} frames before the seek are not the reference start'
         # what plays from 9 s before the rest lands (6 s after the seek: 4 s of it at the least)
-        after = [p for t, p in s.positions if 2.0 < t < 8.0]
-        assert after and max(after) >= 12, f'{kind}: the seek waited for the rest of the song: positions {after}'
+        # from the seek to the landing as this side ran it (late on a busy machine): past the target, played without
+        # the rest (12 s at the least idle; 10 s with the player stopped 300 ms a second, which a fixed 8 s missed)
+        landed = max(u for at, u in s.ran if at == 8.0)
+        after = [p for t, p in s.positions if 2.0 < t < landed]
+        assert after and max(after) > 9, f'{kind}: the seek waited for the rest of the song: positions {after}'
         assert '/mnt/mmc/.foo/grow.flac\n' not in seen, f'{kind}: the player waited although the target was on the card'
         said.append(f'{kind} at {max(after)} s before the rest landed')
     return 'from 9 s at once, ' + '; '.join(said)
@@ -457,9 +613,18 @@ def test_grow_seek_beyond(player, songs, tmp):
         head = got[:len(got) - len(tail)]
         assert ref.startswith(head), f'{kind}: {len(head) // 4} frames before the seek are not the reference start'
         assert '/mnt/mmc/.foo/grow.flac\n' in seen, f'{kind}: the wait was never named: {seen}'
-        waiting = [p for t, p in s.positions if 2.6 < t < 4.9]  # the target's bytes not there: the bar shows it
-        assert waiting and set(waiting) == {15}, f'{kind}: the position while the player waits is not the target: {waiting}'
-        after = [p for t, p in s.positions if 2.0 < t < 12.0]
+        # the target's bytes not there: the bar shows it, from the seek as sent (and the 600 ms it takes) to the landing
+        # as it ran, each late when this side was held up (empty in a fixed 2.6 s to 4.9 s, 1 of 20 runs starved)
+        sought = next(float(l.split()[0]) for l in s.lines if l.endswith('{mcl-seek\\15}'))
+        landed = next(u for at, u in s.ran if at == 5.0)
+        waiting = [p for t, p in s.positions if sought + 0.6 < t < landed - 0.1]
+        # a starved player may take the seek later than 600 ms: what it read before (1 s, 2 of 20 starved) is not a
+        # wait; from its first 15 on, every answer is 15
+        took = waiting.index(15) if 15 in waiting else len(waiting)
+        assert waiting[took:] and set(waiting[took:]) == {15} and all(p <= 2 for p in waiting[:took]), \
+            f'{kind}: the position while the player waits is not the target: {waiting}'
+        rest = max(u for at, u in s.ran if at == 12.0)  # the rest landing, as this side ran it
+        after = [p for t, p in s.positions if 2.0 < t < rest]  # a fixed 12 s missed a starved player's 16 s (1 of 20)
         assert after and max(after) >= 16, f'{kind}: the target was not played when its bytes came: positions {after}'
         said.append(f'{kind} {len(head) // 4} frames before, at {max(after)} s before the rest landed')
     return 'a wait, then the reference from 15 s to the end; ' + '; '.join(said)
@@ -486,21 +651,59 @@ def test_preload_cancelled_while_opening(player, songs, tmp):
 
 def test_preload_outrun(player, songs, tmp):
     """A preload still opening when the song ends: exit at the end, then the file plays when it has opened."""
-    s, pcm, names = play(player, songs, 'outrun', tmp/'outrun', speed=4)
+    # The file comes 2 s after a1's exit (after_exits), and the run waits for a2's: at fixed times (the file at 12 s,
+    # the end at 36 s) a starved player reached a1's end after the file had come, or a2's after the run had ended
+    # (0 of 10 with it stopped 300 ms a second, and once alone at load 12 on integ/q2-1129)
+    s, pcm, names = play(player, songs, 'outrun', tmp/'outrun', speed=4, exits=2)
     a1, a2 = reference(songs/'a1.flac'), reference(songs/'a2.flac')
     got = b''.join(pcm)
     assert got.endswith(a1[12 * 44100 * 4:] + a2), 'not a1 to its end, then the whole of a2'
     events = [(float(l.split()[0]), l.split()[-1]) for l in s.lines if 'exit}' in l]
-    assert [e for _, e in events] == ['{player-status\\exit}'] * 2 and events[0][0] < 12, events
-    return f'exit at {events[0][0]:.1f} s, before the file arrived at 12 s; then all {len(a2) // 4} frames of it'
+    fed = max(u for at, u in s.ran if at == 4.0)  # the feed, the last of the steps at 4.0, after the wait for the exit
+    assert [e for _, e in events] == ['{player-status\\exit}'] * 2 and events[0][0] < fed, (events, fed)
+    return f'exit at {events[0][0]:.1f} s, before the file arrived at {fed:.1f} s; then all {len(a2) // 4} frames of it'
 
 
 def test_exits_apart(player, songs, tmp):
     """A preloaded file with no audio ends as it starts: its exit comes at least 300 ms after the one before."""
     s, pcm, names = play(player, songs, 'emptynext', tmp/'emptynext')
     t = [float(l.split()[0]) for l in s.lines if l.endswith('{player-status\\exit}')]
-    assert len(t) == 2 and t[1] - t[0] >= 0.3, t
+    # read as this side took them: to the millisecond (300 ms apart reads 0.299, 7.992 and 8.292, 3 of 20 runs), and
+    # closer by as long as this side went without reading (s.worst), when the first waited in the socket
+    assert len(t) == 2 and t[1] - t[0] >= 0.3 - s.worst - 0.002, (t, s.worst)
     return f'exits {t[1] - t[0]:.3f} s apart'
+
+
+def test_media_info_while_a_song_opens(player, songs, tmp):
+    """media-info asked while the next song opens (set-nexturl to a FIFO nothing writes yet, then a2 written to it):
+    every answer between the cut ({player-nextstatus\\exit}) and the new song's figures is no-playing-status, never the
+    song before's figures (docs/player.md: stock answers no-playing-status until media-info has the song). A song's
+    figures under the next song's name would show on Now Playing as its format."""
+    fifo = tmp/'mi-open.flac'
+    os.mkfifo(fifo)
+    def feed(s):
+        def write():
+            try:
+                with open(fifo, 'wb') as f: f.write((songs/'a2.flac').read_bytes())
+            except BrokenPipeError: pass  # the stop at 7 s, before the reader took it all
+        threading.Thread(target=write, daemon=True).start()
+    boot = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\0}'), (0.1, '{mcl-setvol\\60}')]
+    steps = boot + [(1.0, fakedemo.song('set-songurl', f'{songs}/b1.mp3')), (3.0, fakedemo.song('set-nexturl', str(fifo))),
+                    (3.5, '{media-info\\get-music-info}'), (4.0, '{media-info\\get-music-info}'), (5.0, feed), (7.0, '{mcl-stop\\null}'),
+                    (8.0, None)]
+    s = fakedemo.Session(tmp/'mi-open')
+    s.music = songs
+    s.run(steps, fakedemo.launch_host(player, str(songs), 1), 1)
+    # the answers after the cut by their order on the socket: by time, an answer read just before it could stamp later
+    # than the transcript's rounded time of it (4 of 20 runs starved)
+    cut = next(n for m, n, _ in s.ends if m == '{player-nextstatus\\exit}')
+    after = [(t, m) for t, m in s.answers[cut:] if m.startswith('{media-info')]
+    first = next(i for i, (_, m) in enumerate(after) if '|' in m)
+    opening, (came, song) = after[:first], after[first]
+    fed = next(u for at, u in s.ran if at == 5.0)  # when a2 was written, as this side ran it
+    assert opening and all(m == '{media-info\\no-playing-status}' for _, m in opening), opening
+    assert came >= fed and '|FLAC|' in song, (fed, came, song)  # no figures until a2 came, then a2's
+    return f'{len(opening)} answers of no-playing-status over {opening[-1][0] - opening[0][0]:.1f} s of the open, then {song}'
 
 
 def test_formats_open_as_stock(player, songs, tmp):
@@ -514,7 +717,8 @@ def test_formats_open_as_stock(player, songs, tmp):
 # ---- the DSP (phase 3)
 
 def tool(tmp, name, *defines):
-    """test/player/NAME.c with player/dsp.c and patch/peq.c as the player builds them, for this machine."""
+    """test/player/NAME.c with patch/peq.c (and player/dsp.c for dsp_test) as the player builds them, for this
+    machine."""
     out = tmp/name
     if not out.exists() and name in ('volume_test', 'alsa_test'):  # output.c and the car's trace it counts into, with FFmpeg's headers
         ff = pathlib.Path(subprocess.run([sys.executable, ROOT/'tools/player.py', 'ffmpeg', 'host'], check=True, capture_output=True, text=True).stdout.strip())
@@ -522,7 +726,7 @@ def tool(tmp, name, *defines):
                         ROOT/'player/output.c', ROOT/'player/cartrace.c', '-L', ff/'lib', '-lswresample', '-lavutil', '-lm', '-lpthread', '-o', out], check=True)
     if not out.exists():
         subprocess.run(['cc', '-std=c11', '-D_GNU_SOURCE', '-DPEQ_HOST', *defines, '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
-                        '-I', ROOT/'player', '-I', ROOT/'patch', HERE/f'{name}.c', ROOT/'player/dsp.c', ROOT/'patch/peq.c',
+                        '-I', ROOT/'player', '-I', ROOT/'patch', HERE/f'{name}.c', *([ROOT/'player/dsp.c'] if name == 'dsp_test' else []), ROOT/'patch/peq.c',
                         '-Wl,--wrap=clock_gettime' if name == 'dsp_test' else '-lm', '-lm', '-o', out], check=True)
     return out
 
@@ -578,7 +782,7 @@ def test_crossfade(player, songs, tmp):
     """/tmp/q2xfade at 2000 ms, two 20 s FLACs, the second preloaded: the first plays exactly up to its last 2 s, which
     are mixed under the second's first 2 s at equal power, then the second plays exactly (demo's fade is 0 by then, its
     next being the queue's end); one PCM open."""
-    s, pcm, names = play(player, songs, 'xfade', tmp/'xfade', speed=8)
+    s, pcm, names = play(player, songs, 'xfade', tmp/'xfade', speed=8, exits=2)
     assert names == ['0000_44100_2_s16.raw'], names
     a, b, got = (array.array('h', x) for x in (reference(songs/'a1.flac'), reference(songs/'a2.flac'), pcm[0]))
     n, h = len(a) // 2, 2 * 44100
@@ -595,6 +799,236 @@ def test_crossfade(player, songs, tmp):
     exits = [l.split()[-1] for l in s.lines if 'exit}' in l]
     assert exits == ['{player-status\\exit}'] * 2, exits
     return f'{len(got) // 2} frames: {n - h} exact, {h} mixed within {worst:.2f} of equal power, {len(b) // 2 - h} exact'
+
+
+# ---- Smart Crossfade (player/smart.c, dsp.c smart_want; docs/internals.md#smart-crossfade)
+SMART = 5000 | 0x8000  # peq.h: the plain fade's 5 s, XF_SMART
+
+
+def synth(path, seconds, level, rate=44100, channels=2, hz=None):
+    """A FLAC whose frame i is level(i / rate) times a sine of hz (a whole number of cycles a 50 ms window), every
+    channel the same: the analysis's windows then measure the level exactly."""
+    hz = hz or 440
+    raw = array.array('h')
+    for i in range(int(seconds * rate)):
+        v = int(round(32767 * level(i / rate) * math.sin(2 * math.pi * hz * i / rate)))
+        raw.extend([v] * channels)
+    pcm = path.with_suffix('.raw')
+    pcm.write_bytes(raw.tobytes())
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 's16le', '-ar', str(rate), '-ac', str(channels), '-i', pcm,
+                    '-c:a', 'flac', path], check=True)
+    pcm.unlink()
+    return path
+
+
+def smart_songs(d, rate_b=44100, channels_b=2, b_level=None):
+    """A: a 440 Hz tone at half scale for 16 s, a 6 s linear fade to nothing, 2 s of silence. B: 1.5 s of silence,
+    then a 660 Hz tone at half scale from its first frame (a hard start), 43.5 s of it: over XF_SMART_LEAD_S long, so
+    its own change's analysis is not asked for before demo's word for it (0, the queue's end) is there."""
+    d.mkdir(parents=True, exist_ok=True)
+    a = synth(d/'sa.flac', 24, lambda t: 0.5 if t < 16 else max(0.0, 0.5 * (1 - (t - 16) / 6)) if t < 22 else 0.0)
+    b = synth(d/'sb.flac', 45, b_level or (lambda t: 0.0 if t < 1.5 else 0.5), rate=rate_b, channels=channels_b, hz=660)
+    return a, b
+
+
+def windows(x, channels, w, from_end):
+    """The analysis's windows of interleaved samples x (16-bit), in dB of full scale: from the end, newest first, or
+    from the start."""
+    n = len(x) // channels
+    out = []
+    for k in range(n // w):
+        lo = n - (k + 1) * w if from_end else k * w
+        s = sum((v / 32768) ** 2 for v in x[lo * channels:(lo + w) * channels])
+        out.append(10 * math.log10(s / (w * channels)) if s > 0 else -200.0)
+    return out
+
+
+def smart_plan(a, b, ca=2, cb=2, ra=44100, rb=44100):
+    """smart.c's rules, written again here from docs/internals.md#smart-crossfade: (overlap, trail, skip, fade) in
+    frames."""
+    wa, wb = ra // 20, rb // 20
+    tail = windows(a, ca, wa, True)[:400]
+    head = windows(b[:cb * 15 * rb], cb, wb, False)[:300]
+    body = sorted(tail)[(len(tail) - 1) // 2]
+    loud = max(-60, body - 45)
+    te = next(k for k, v in enumerate(tail) if v > loud)
+    run = te
+    while run < len(tail) and tail[run] < body - 12: run += 1
+    quiet_ms = (run - te) * 50
+    overlap = (run - te) * wa if 1000 <= quiet_ms <= 15000 and run < len(tail) else ra * 5
+    skip = 0
+    while skip < len(head) and skip * 50 < 5000 and head[skip] < -60: skip += 1
+    bb = sorted(head)[(len(head) - 1) // 2]
+    start = max(head[skip:skip + 4])
+    gap = bb - 6 - start
+    fade_ms = 300 + int(700 * min(1, gap / 14)) if gap > 0 else 0
+    return overlap, te * wa, skip * wb, rb * fade_ms // 1000
+
+
+def smart_scenario(a, b, gapless_at=12.0, end=80.0, word=SMART, next_text=None):
+    """A then B, B preloaded at gapless_at, word in /tmp/q2xfade until A's exit, where demo writes B's own (0, the
+    queue's end); the run ends at both songs' exits (smart_play), end only bounding it."""
+    def at_exit(s): s.on_exit = [fakedemo.put('tmp/q2xfade', bytes(4), in_place=True)]
+    boot = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\0}'), (0.1, '{mcl-setvol\\60}')]
+    return boot + [(0.2, fakedemo.put('tmp/q2xfade', word.to_bytes(4, 'little'))),
+                   (0.2, fakedemo.put('tmp/q2xfade.next', (next_text if next_text is not None else f'{a}\n{b}\n').encode())),
+                   (0.3, fakedemo.SETEQ), (1.0, fakedemo.song('set-songurl', str(a), flag=1)),
+                   (gapless_at, fakedemo.gapless(str(b), flag=1)), (gapless_at, at_exit), (end, None)]
+
+
+def smart_play(player, songs, out, steps, speed=8, env=None, exits=2):
+    """exits: as play's, the run's end waits for both songs' {player-status\\exit}."""
+    s = fakedemo.Session(out)
+    s.music = songs
+    s.wait_exits = exits
+    s.run(steps, fakedemo.launch_host(player, str(songs), speed, env), speed)
+    pcm = sorted((pathlib.Path(out)/'pcm').glob('*.raw'))
+    return s, [p.name for p in pcm], b''.join(p.read_bytes() for p in pcm), (pathlib.Path(out)/'player.log').read_text()
+
+
+def check_smart(a, b, names, got, log):
+    """got is a's and b's smart crossfade by smart_plan's rules: a exact up to out_point, then b from its first sound
+    mixed with a's quiet end (b at full level, no fade-in: a hard start; a fading out, cos), a's trailing silence never
+    played, then b exact; no step at either end of the overlap; one PCM. The plan and the largest step off."""
+    A, B, Y = (array.array('h', x) for x in (reference(a), reference(b), got))
+    overlap, trail, skip, fade = smart_plan(A, B)
+    assert fade == 0 and skip == 66150 and 44100 <= overlap <= 3 * 44100, (overlap, trail, skip, fade)
+    na, nb, ny = len(A) // 2, len(B) // 2, len(Y) // 2
+    cut = na - trail - overlap  # out_point
+    assert names == ['0000_44100_2_s16.raw'], names
+    assert 'smart crossfade: body' in log, log[-2000:]
+    assert ny == cut + nb - skip, f'{ny} frames, expected {cut + nb - skip} (plan {overlap, trail, skip, fade}): {log[-1500:]}'
+    assert Y[:2 * cut] == A[:2 * cut], f'A before out_point, first difference at frame {first_difference(Y[:2 * cut].tobytes(), A[:2 * cut].tobytes()) // 4}'
+    worst = 0
+    for k in range(overlap):
+        go = math.cos((k + 0.5) / overlap * math.pi / 2)
+        for c in (0, 1):
+            want = B[2 * (skip + k) + c] + A[2 * (cut + k) + c] * go
+            worst = max(worst, abs(Y[2 * (cut + k) + c] - want))
+    assert worst <= 2, f'the overlap is {worst} steps from B + A cos'
+    assert Y[2 * (cut + overlap):] == B[2 * (skip + overlap):], 'B after the overlap'
+    def step(i): return max(abs(Y[2 * i + c] - Y[2 * (i - 1) + c]) for c in (0, 1))
+    around = max(max(step(i) for i in range(cut - 50, cut - 1)), max(step(i) for i in range(cut + overlap + 2, cut + overlap + 50)))
+    assert step(cut) <= around and step(cut + overlap) <= around, (step(cut), step(cut + overlap), around)
+    return (overlap, trail, skip, fade), worst
+
+
+def test_smart_crossfade(player, songs, tmp):
+    """A fades out into silence, B starts hard after 1.5 s of silence: the plan is the reference's (its rules written
+    again in Python over the reference decodes) and the output check_smart's."""
+    a, b = smart_songs(tmp/'smart')
+    s, names, got, log = smart_play(player, songs, tmp/'smart/run', smart_scenario(a, b))
+    (overlap, trail, skip, fade), worst = check_smart(a, b, names, got, log)
+    cpu = re.findall(r'analysis took (\d+) ms of CPU', log)
+    return (f'plan {overlap / 44100:.2f} s overlap, {trail / 44100:.2f} s trail, {skip / 44100:.2f} s skipped, no fade-in, '
+            f'as the reference; A exact to out_point, the overlap within {worst:.1f} steps, B exact after; analysis {cpu} ms CPU')
+
+
+def test_smart_crossfade_starved(player, songs, tmp):
+    """The player and its analysis thread on one core with two busy neighbours on it (the Q2's second core taken by
+    demo, at worst), and stopped for 300 ms of every second besides (fakedemo's Q2_TEST_STARVE): the change is still
+    whole, the smart fade or, logged, the plain one, never a tail cut short."""
+    a, b = smart_songs(tmp/'smart')
+    cpu = str(max(os.sched_getaffinity(0)))
+    wrap = tmp/'starved.sh'
+    wrap.write_text(f'#!/bin/sh\nexec taskset -c {cpu} {player}\n')
+    wrap.chmod(0o755)
+    busy = [subprocess.Popen(['taskset', '-c', cpu, sys.executable, '-c', 'while True: pass']) for _ in range(2)]
+    was = os.environ.get('Q2_TEST_STARVE')
+    os.environ['Q2_TEST_STARVE'] = '300/1000'
+    try:
+        s, names, got, log = smart_play(str(wrap), songs, tmp/'smartstarved', smart_scenario(a, b))
+    finally:
+        for p in busy: p.kill(), p.wait()
+        if was is None: os.environ.pop('Q2_TEST_STARVE', None)
+        else: os.environ['Q2_TEST_STARVE'] = was
+    if 'smart crossfade: plain' in log:
+        lines = [l for l in log.splitlines() if 'smart crossfade: plain' in l]
+        assert len(lines) == 1, lines
+        worst = check_plain(*(array.array('h', x) for x in (reference(a), reference(b), got)), 5 * 44100)
+        return f'the plain fade, whole (within {worst:.1f} steps), logged: {lines[0].split("q2player: ")[-1]}'
+    (overlap, *_), worst = check_smart(a, b, names, got, log)
+    return f'the smart fade, whole: {overlap / 44100:.2f} s overlap within {worst:.1f} steps, on one core shared with two busy loops'
+
+
+def check_plain(A, B, Y, h):
+    """Y is the plain fade of h frames: A exact to its last h, those under B's first h at equal power, B exact after;
+    the largest step from equal power."""
+    na = len(A) // 2
+    assert len(Y) == len(A) + len(B) - 2 * h, f'{len(Y) // 2} frames, expected {(len(A) + len(B)) // 2 - h}'
+    assert Y[:2 * (na - h)] == A[:2 * (na - h)], 'A before its tail'
+    worst = 0
+    for k in range(h):
+        p = (k + 0.5) / h * math.pi / 2
+        for c in (0, 1):
+            worst = max(worst, abs(Y[2 * (na - h + k) + c] - (B[2 * k + c] * math.sin(p) + A[2 * (na - h + k) + c] * math.cos(p))))
+    assert worst <= 2, f'the mix is {worst} from equal power'
+    assert Y[2 * na:] == B[2 * h:], 'B after the mix'
+    return worst
+
+
+def smart_falls_back(player, songs, tmp, name, why, steps=None, env=None, b=None):
+    """The scenario's change is the plain 5 s fade, with the log line saying why."""
+    a, b0 = smart_songs(tmp/'smart')
+    b = b or b0
+    s, names, got, log = smart_play(player, songs, tmp/name, steps or smart_scenario(a, b), env=env)
+    lines = [l for l in log.splitlines() if 'smart crossfade: plain' in l]
+    assert len(lines) == 1 and why in lines[0], f'{lines}: {log[-1500:]}'
+    worst = check_plain(*(array.array('h', x) for x in (reference(a), reference(b), got)), 5 * 44100)
+    return f'the plain 5 s fade (within {worst:.1f} steps), logged once: {lines[0].split("q2player: ")[-1]}'
+
+
+def test_smart_crossfade_next_missing(player, songs, tmp):
+    """XFADE_NEXT names a file that is not on the card: the plain fade."""
+    a, b = smart_songs(tmp/'smart')
+    return smart_falls_back(player, songs, tmp, 'smartmiss', 'the next song is not on the card',
+                            smart_scenario(a, b, next_text=f'{a}\n{tmp}/smart/gone.flac\n'))
+
+
+def test_smart_crossfade_next_unknown(player, songs, tmp):
+    """XFADE_NEXT names the next song of another change (demo's next has moved on): the plain fade."""
+    a, b = smart_songs(tmp/'smart')
+    return smart_falls_back(player, songs, tmp, 'smartother', 'follows another',
+                            smart_scenario(a, b, next_text=f'{tmp}/smart/other.flac\n{b}\n'))
+
+
+def test_smart_crossfade_too_slow(player, songs, tmp):
+    """An analysis not done by the plain fade's hold (Q2PLAYER_SMART_DELAY_MS): the plain fade, and the late answer
+    is thrown away."""
+    return smart_falls_back(player, songs, tmp, 'smartslow', 'the analysis took too long', env={'Q2PLAYER_SMART_DELAY_MS': '30000'})
+
+
+def test_smart_crossfade_next_arriving(player, songs, tmp):
+    """The next song still arriving on the card (player/grow.c), a tenth of it there when the analysis looks: the
+    plain fade; the rest lands before the change."""
+    a, b0 = smart_songs(tmp/'smart')
+    out = tmp/'smartgrow'
+    card = out/'mnt/mmc/.foo'
+    card.mkdir(parents=True, exist_ok=True)
+    whole = b0.read_bytes()
+    b = card/'sb.flac'
+    def line(state, n):
+        put(out/'tmp/q2-foo.stream', f'#Q2STREAM/1\tseq=1\n{state}\t{n}\t{len(whole)}\t20000\t/mnt/mmc/.foo/sb.flac\n')
+    def start(s):
+        b.write_bytes(whole[:len(whole) // 10])
+        line('get', len(whole) // 10)
+    def land(s):
+        b.write_bytes(whole)
+        line('done', len(whole))
+    steps = smart_scenario(a, b)
+    steps = sorted(steps[:5] + [(0.25, start)] + [(t / 2, lambda s: line('get', len(whole) // 10)) for t in range(1, 16)]
+                   + [(8.0, land)] + steps[5:], key=lambda st: st[0])
+    return smart_falls_back(player, songs, tmp, 'smartgrow', 'the next song is still downloading', steps, b=b)
+
+
+def test_smart_crossfade_off_is_gapless(player, songs, tmp):
+    """No fade asked (demo's word 0: an album in order, Repeat One, the queue's end, a DSD next) with XFADE_NEXT
+    there: A then B, bit for bit, no analysis."""
+    a, b = smart_songs(tmp/'smart')
+    s, names, got, log = smart_play(player, songs, tmp/'smartoff', smart_scenario(a, b, word=0))
+    assert got == reference(a) + reference(b), 'not the two songs joined'
+    assert 'smart crossfade' not in log, log[-800:]
+    return 'A and B joined bit for bit, nothing analysed'
 
 
 # mcl-replaygain's scale for each file of music.REPLAYGAIN and b1.mp3, by mode: hciplayer's rule (player/source.c
@@ -883,6 +1317,64 @@ def test_volume_law(player, songs, tmp):
     return f'{len(want)} levels'
 
 
+def test_car_write_slow(player, songs, tmp):
+    """The drive of 2026-11-23: one write to the car's PCM took 10.8 s (the trace's wmax=10862ms), across the car's
+    pause, a stop and a restart. output.c against alsa_test.c's libasound, in real time:
+    - a car that stopped reading with room for 50 frames left, and a stop at the first wait: the write of 100 frames
+      never asks the kernel for more than the room, whose blocking write would wait for the rest until its timeout
+      (10 s on 5.10; 1.2 s here), so the stop ends it at the next look, not after the timeout;
+    - a write that took over a second, in waits for the car or in the write itself, logs one line saying where the
+      time went: snd_pcm_wait's and snd_pcm_writei's last answers, errno, the PCM's state and avail; a quick one none."""
+    run = subprocess.run([tool(tmp, 'alsa_test', '-DHAVE_ALSA', '-DQ2_CAR_USB'), 'car-slow'], check=True, capture_output=True,
+                         text=True, env={**os.environ, 'Q2PLAYER_CAR': str(tmp/'alsa-slow.audio')})
+    got = {l.split()[0]: l for l in run.stdout.split('\n') if l}
+    said = [l[len('plog W '):] for l in run.stderr.split('\n') if l.startswith('plog W q2player: a car write took')]
+    stall = got['car-stall'].split()
+    # blocked is what says the kernel was asked for more than the room; the ms only that it did not wait out the
+    # model's 1.2 s timeout, which a busy machine cannot stretch the quick path to
+    assert stall[1:5] == ['r', '0', 'blocked', '0'] and int(stall[-1]) < 1200, \
+        f'a write past the car\'s room waited in the kernel past the stop: {got["car-stall"]}'
+    assert len(said) == 2, said
+    # the naps are real time, 1.5 s of waits and 1.1 s of writing: the line says at least that, and a busy machine
+    # adds to it (1609 ms side by side, 2026-11-23), so there is no upper bound
+    form = (r'q2player: a car write took (\d+) ms: 100 frames, (\d+) ms waiting \(snd_pcm_wait 1\), (\d+) ms writing '
+            r'\(snd_pcm_writei 100, errno 0\), RUNNING, avail \d+')
+    wait, write = said
+    w, r = re.fullmatch(form, wait), re.fullmatch(form, write)
+    assert w and int(w[1]) >= 1250 and int(w[2]) >= 1250, wait
+    assert r and int(r[1]) >= 1100 and int(r[3]) >= 1100, write
+    return f'stall: {got["car-stall"]}; {wait}; {write}'
+
+
+def test_usb_errors(player, songs, tmp):
+    """The drive of 2026-11-23: the AB13X earbuds (48 kHz alone) on the host port, `q2player: hw:1,0 is gone` about 5 s
+    before /sys/bus/usb/devices/1-1 went, and the line could not say which call found it gone, with which error, or
+    whether the earbuds were back as another card. output.c against alsa_test.c's dongle: an underrun or a suspend on
+    the first write is prepared and written again, nothing said; -EIO fails the song with the call and errno, the device
+    not taken as gone; an open that finds no card, and -ENODEV under two writes, are each said once, naming the call,
+    the error and the sound cards there (/proc/asound/cards, Q2PLAYER_CARDS here)."""
+    cards = tmp/'cards'
+    cards.write_text(' 0 [audiocodec     ]: audiocodec - audiocodec\n                      audiocodec\n'
+                     ' 2 [AB13X          ]: USB-Audio - AB13X USB Audio\n                      Generic AB13X USB Audio at usb-1\n')
+    run = subprocess.run([tool(tmp, 'alsa_test', '-DHAVE_ALSA', '-DQ2_CAR_USB'), 'usb-errors'], check=True, capture_output=True,
+                         text=True, env={**os.environ, 'Q2PLAYER_CARDS': str(cards)})
+    got = {l.split()[0]: l.split(' ', 1)[1] for l in run.stdout.split('\n') if l}
+    said, case = {}, None
+    for l in run.stderr.split('\n'):
+        if l.startswith('case '): case = l[5:]
+        elif l.startswith('q2player: ') and case: said.setdefault(case, []).append(l)
+    want = {'usb-xrun': 'open 1 r 0 0', 'usb-suspend': 'open 1 r 0 0', 'usb-eio': 'open 1 r -1 0', 'usb-gone-open': 'open 0 r 0 0',
+            'usb-gone-write': 'open 1 r -3 -3'}
+    bad = [f'{k}: {got.get(k)}' for k, v in want.items() if not (got.get(k) or '').startswith(v)]
+    assert not bad, bad
+    gone = lambda k: [l for l in said.get(k, []) if ' is gone' in l]
+    assert not gone('usb-xrun') and not gone('usb-suspend') and not gone('usb-eio'), said
+    assert said.get('usb-eio') == ['q2player: test: snd_pcm_writei -5 (Input/output error)'], said.get('usb-eio')
+    assert gone('usb-gone-open') == ['q2player: test is gone: snd_pcm_open -2 (No such file or directory); sound cards: 0 audiocodec, 2 AB13X'], said
+    assert gone('usb-gone-write') == ['q2player: test is gone: snd_pcm_writei -19 (No such device); sound cards: 0 audiocodec, 2 AB13X'], said
+    return f"{gone('usb-gone-open')[0]}; {gone('usb-gone-write')[0]}; {said['usb-eio'][0]}"
+
+
 def test_alsa_sw_params(player, songs, tmp):
     """output.c against alsa_test.c's libasound: every way sets stock's software parameters (ao_alsa's init,
     0x438d64-0x438dc4: start at a period, stop_threshold and silence_size at the boundary), and off Bluetooth a write to
@@ -896,6 +1388,8 @@ def test_alsa_sw_params(player, songs, tmp):
             'dry': 'r 0 forward 6378 avail_reads 1 writes 1', 'dry-usb': 'r 0 forward 45478 avail_reads 1 writes 1'}
     for k, v in want.items():
         assert lines[k] == f'{k} {v}', lines[k]
+    close = lines['car-close'].split()
+    assert int(close[2]) > 0 and close[4] == '1', f'way 3 closes on a write of silence: {lines["car-close"]}'
     bt = lines['dry-bt'].split()
     assert bt[1:7] == ['r', '0', 'forward', '-1', 'avail_reads', '0'], lines['dry-bt']
     # bluealsa's PCM gone under the stream (SelectCodec's new transport, docs/internals.md#bluetooth-link-monitor):
@@ -904,6 +1398,15 @@ def test_alsa_sw_params(player, songs, tmp):
     gone = {'bt-gone': 'r 0 0 opens 5 writes 3 sleeps 3 last +', 'bt-gone-xrun': 'r 0 0 opens 2 writes 3 sleeps 0 last +',
             'bt-gone-44k': 'r 0 0 opens 2 writes 3 sleeps 0 last 100', 'bt-lost': 'r -1 -1 opens 51 writes 1 sleeps 49 last -1',
             'dac-gone': 'r -1 0 opens 1 writes 2 sleeps 0 last 100'}
+    # a USB DAC unplugged under a write: the output's own answer, which the engine waits on (engine.c output_back)
+    assert lines['usb-gone'].split()[1:3] == ['r', '-3'], lines['usb-gone']
+    # the dongle of 2026-11-22 (48 kHz S16 stereo alone): a 44.1 kHz song asks for 48 kHz and is resampled; 24 bits at
+    # 96 kHz come out at 48 kHz in 16; a mono song on both channels; two writes of 4410 frames are 9600 frames (4410
+    # from 96 kHz) less what the resampler holds back; left and right the same tone, within the dither, at its level
+    for k in ('usb48', 'usb48-96', 'usb48-mono'):
+        got = lines[k].split()
+        assert got[1:3] == ['asked', '48000'] and 0 <= 4410 * 2 * 48000 // (96000 if k.endswith('96') else 44100) - int(got[6]) < 64 \
+            and int(got[8]) <= 2 and abs(int(got[10]) - 8192) < 100, lines[k]
     for k, v in gone.items():
         got, want = lines[k].split()[1:], v.split()
         assert got[:-1] == want[:-1] and (int(got[-1]) > 0 if want[-1] == '+' else got[-1] == want[-1]), lines[k]
@@ -925,6 +1428,12 @@ def test_alsa_sw_params(player, songs, tmp):
            'car-cut': 'r 0 waits 3 ms 750 writes 0 file 1'}
     for k, v in car.items():
         assert lines[k] == f'{k} {v}', lines[k]
+    # A pause the device cannot do (the car's gadget advertises one its trigger refuses, -EINVAL, and its read position
+    # goes back to the ring's start): the frames not yet heard are held, the PCM stopped (the gadget then sends
+    # silence) and prepared, and at the resume they are written again, from the first not heard (docs/player.md#pause).
+    assert lines['car-pause'] == 'car-pause pauses 2 drops 0 prepares 0 resume writes 0 last -1 first 0', lines['car-pause']
+    assert lines['car-pause-fails'] == 'car-pause-fails pauses 1 drops 1 prepares 1 resume writes 1 last 60 first 1040', \
+        lines['car-pause-fails']
     devices = {0: 'default', 1: "plug:'bluealsa:DEV=00:00:00:00:00:00,PROFILE=a2dp'", 2: 'hw:1,0'}
     for way, name in devices.items():
         assert lines[f'device way {way}'] == f'device way {way} {name}', lines[f'device way {way}']
@@ -951,13 +1460,122 @@ def test_usb_formats(player, songs, tmp):
     return f'{len(names)} opens: S16_LE, S24_3LE from S32 exactly, S24_3LE from float within a step'
 
 
+# A USB DAC of the file sink's own kind (output.c sink_open): the AB13X dongle of 2026-11-22 takes 48 kHz S16_LE stereo
+# alone, and output.c resamples a USB DAC's song with libswresample at filter 32, cutoff 0.97 (its USB_FILTER).
+USB48 = {'Q2PLAYER_RATES': '48000', 'Q2PLAYER_FORMATS': 's16'}
+USB_RS = (32, 0.97)
+
+
+def s16_far(got, want):
+    """The largest difference between two runs of S16 samples, and whether they are as long."""
+    a, b = array.array('h'), array.array('h')
+    a.frombytes(got), b.frombytes(want)
+    return max((abs(x - y) for x, y in zip(a, b)), default=0), len(a) == len(b)
+
+
+def test_usb_48k_only(player, songs, tmp):
+    """The dongle that takes 48 kHz alone: a 44.1 kHz song is resampled to it, where it was refused at every song
+    ("hw:1,0 gave 48000 Hz for 44100", play failed, "Not Supported"). The pair through a preloaded change is the whole
+    file resampled, in one PCM; that is FFmpeg's resample of the file within the 16-bit dither (TPDF, a step either way),
+    with no step at the cut; what the device offers is logged once, not at each song."""
+    # each whole: the run waits for the player's exits (a fixed end cut the whole short side by side)
+    s, a, an = play(player, songs, 'usb48-pair', tmp/'usb48-pair', speed=4, env=USB48, exits=2)
+    _, b, bn = play(player, songs, 'usb48-whole', tmp/'usb48-whole', speed=4, env=USB48, exits=1)
+    errors = [l for l in s.lines if 'error}' in l]
+    name = '0000_48000_2_s16_usb.raw'
+    assert not errors and an == [name] and bn == [name], (an, bn, errors)
+    assert a[0] == b[0], f'the pair: {len(a[0]) // 4} frames, the whole {len(b[0]) // 4}, first difference at frame {(first_difference(a[0], b[0]) or 0) // 4}'
+    want = ffref(tmp, 'resample', songs/'whole.wav', 48000, 's16', *USB_RS)
+    far, same = s16_far(b[0], want)
+    assert same and far <= 2, f'{len(b[0]) // 4} frames, the reference {len(want) // 4}; at most {far} steps off'
+    def roughness(data, i):
+        x = array.array('h'); x.frombytes(data[(i - 200) * 4:(i + 200) * 4])
+        left = x[0::2]
+        return max(abs(left[j + 1] - 2 * left[j] + left[j - 1]) for j in range(1, len(left) - 1))
+    cut = 20 * 48000
+    away, here = max(roughness(a[0], cut - 48000), roughness(a[0], cut + 48000)), roughness(a[0], cut)
+    assert here <= 2 * away, (here, away)
+    offers = (tmp/'usb48-pair/player.log').read_text().count('hw:1,0 offers')
+    assert offers == 1, f'the device\'s offer logged {offers} times'
+    return f'{len(a[0]) // 4} frames at 48 kHz, the pair the whole file, within {far} steps of the reference; offer logged once'
+
+
+def test_usb_48k_rates(player, songs, tmp):
+    """Into the 48 kHz device, a 1 kHz tone at 44.1 kHz and then, preloaded, a 24-bit 96 kHz song: one PCM at 48 kHz
+    S16 across the change of rate and width, each song its own resample within the dither, the tone still 1 kHz."""
+    s, pcm, names = play(player, songs, 'usb48-rates', tmp/'usb48-rates', speed=4, env=USB48)
+    assert names == ['0000_48000_2_s16_usb.raw'], names
+    tone, hires = ffref(tmp, 'resample', songs/'tone20.wav', 48000, 's16', *USB_RS), ffref(tmp, 'resample', songs/'c96.flac', 48000, 's16', *USB_RS)
+    far, same = s16_far(pcm[0], tone + hires)
+    assert same and far <= 2, f'{len(pcm[0]) // 4} frames, the references {(len(tone) + len(hires)) // 4}; at most {far} steps off'
+    x = array.array('h'); x.frombytes(pcm[0][48000 * 4:5 * 48000 * 4])
+    left = x[0::2]
+    ups = sum(1 for i in range(1, len(left)) if left[i - 1] < 0 <= left[i])
+    assert abs(ups / 4 - 1000) <= 0.5, f'the tone at {ups / 4} Hz'
+    exits = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
+    assert exits == ['{player-status\\exit}'] * 2, exits
+    return f'{len(pcm[0]) // 4} frames in one 48 kHz PCM, at most {far} steps off; the tone at {ups / 4} Hz'
+
+
+def test_usb_48k_soft_volume(player, songs, tmp):
+    """The volume in software on that device (mcl-softvolflag 1, 50: 25/256) scales the song before the resample."""
+    s, pcm, names = play(player, songs, 'usb48-soft', tmp/'usb48-soft', speed=4, env=USB48)
+    assert names == ['0000_48000_2_s16_usb.raw'], names
+    want = ffref(tmp, 'resample', songs/'tone20.wav', 48000, 's16', *USB_RS)
+    rms = lambda b: math.sqrt(sum(v * v for v in array.array('h', b[48000 * 4:4 * 48000 * 4])) / (3 * 48000 * 2))
+    ratio = rms(pcm[0]) / rms(want)
+    assert abs(ratio - 25 / 256) < 0.002, f'level {ratio:.4f}, not 25/256'
+    return f'level {ratio:.4f} of the reference (25/256 = {25 / 256:.4f})'
+
+
+def test_usb_capable_exact(player, songs, tmp):
+    """A USB DAC that takes every rate gets each song at its own rate and width, bit for bit: no resampler."""
+    rates = '44100,48000,88200,96000,176400,192000,352800,384000'
+    s, pcm, names = play(player, songs, 'usb-capable', tmp/'usb-capable', speed=4, env={'Q2PLAYER_RATES': rates})
+    assert names == ['0000_44100_2_s16_usb.raw', '0001_96000_2_s32_usb.raw'], names
+    assert reference(songs/'a1.flac').startswith(pcm[0]) and len(pcm[0]) > 44100 * 4, 'a1 is not its reference'
+    c96 = reference(songs/'c96.flac', 's32le')
+    assert pcm[1] == c96, f'c96: {len(pcm[1]) // 8} frames, the reference {len(c96) // 8}, first difference at {first_difference(pcm[1], c96)}'
+    return f'44.1 kHz S16 and 96 kHz S32 as they are, {len(pcm[1]) // 8} frames of the second'
+
+
+def test_usb_gone(player, songs, tmp):
+    """The USB DAC unplugged mid-song, a Next while it is out, then plugged in again: no song is reported as not
+    playing (each was "Not Supported" on 2026-11-22, the queue run through); the output's going is logged once; the
+    song chosen while it was out plays from its first frame when it is back."""
+    s, pcm, names = play(player, songs, 'usb-gone', tmp/'usb-gone', speed=1, env={'Q2PLAYER_GONE': 'usb.gone'})
+    ev = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
+    assert ev == ['{player-nextstatus\\exit}', '{player-stopstatus\\exit}'], ev
+    gone = (tmp/'usb-gone/player.log').read_text().count('hw:1,0 is gone')
+    assert gone == 1, f'gone logged {gone} times'
+    assert len(names) == 2 and reference(songs/'a1.flac').startswith(pcm[0]), names
+    a2 = reference(songs/'a2.flac')
+    assert len(pcm[1]) > 44100 * 4 and a2.startswith(pcm[1]), f'a2 at its return: {len(pcm[1]) // 4} frames, first difference {first_difference(pcm[1], a2[:len(pcm[1])])}'
+    return f'events {ev}; a2 {len(pcm[1]) // 4} frames from its start once back'
+
+
+def test_usb_gone_and_back(player, songs, tmp):
+    """Out and back within a song: the song goes on from what was last heard (the half second the device held is
+    played again), in a PCM opened again, with no error."""
+    s, pcm, names = play(player, songs, 'usb-gone-back', tmp/'usb-gone-back', speed=1, env={'Q2PLAYER_GONE': 'usb.gone'})
+    ev = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
+    assert ev == ['{player-stopstatus\\exit}'], ev
+    a1 = reference(songs/'a1.flac')
+    assert len(names) == 2 and a1.startswith(pcm[0]), names
+    k = a1.find(pcm[1][:4000])
+    assert k % 4 == 0 and len(pcm[0]) - 0.6 * 44100 * 4 <= k <= len(pcm[0]), f'went on at frame {k // 4}, {len(pcm[0]) // 4} written before'
+    assert a1[k:k + len(pcm[1])] == pcm[1], 'the rest is not a1 from there'
+    return f'{len(pcm[0]) // 4} frames, then on from frame {k // 4}'
+
+
 def check_bt_split(player, songs, tmp, pair, whole, source, rate, frames):
     """Bluetooth: a tone cut in two and played through a preloaded change comes out as the whole file resampled, in
     one PCM at the transport's rate, and that is FFmpeg 7.1.5's libswresample with lavcresample's settings, its tail
     flushed. docs/internals.md#bluetooth-resampler"""
     env = {'Q2PLAYER_BT_RATE': str(rate)}
-    _, a, an = play(player, songs, pair, tmp/f'{pair}-{rate}', speed=4, env=env)
-    _, b, bn = play(player, songs, whole, tmp/f'{whole}-{rate}', speed=4, env=env)
+    # each whole: the run waits for the player's exits (a fixed end cut the pair short side by side)
+    _, a, an = play(player, songs, pair, tmp/f'{pair}-{rate}', speed=4, env=env, exits=2)
+    _, b, bn = play(player, songs, whole, tmp/f'{whole}-{rate}', speed=4, env=env, exits=1)
     name = f'0000_{rate}_2_s16_bt.raw'
     assert an == [name] and bn == [name], (an, bn)
     want = ffref(tmp, 'resample', songs/source, rate, 's16')
@@ -972,6 +1590,7 @@ def test_bt_resample_96_48(player, songs, tmp): return check_bt_split(player, so
 def test_bt_resample_44_96(player, songs, tmp): return check_bt_split(player, songs, tmp, 'bt-pair', 'bt-whole', 'whole.wav', 96000, 3840000)
 
 
+@functools.cache
 def car_player():
     """The player built with Car Audio's output (Q2_CAR_USB, as every image's is: docs/iphone-mode.md#car-audio)."""
     return subprocess.run([sys.executable, ROOT/'tools/player.py', 'build', 'host', 'car'], check=True, capture_output=True,
@@ -981,7 +1600,7 @@ def car_player():
 def car_steps(songs, car, at_on=None, at_off=None, flag=0):
     """Bluetooth at half volume (the car plays at unity whatever it is), a1 then c96; the car's file written at at_on
     and removed at at_off (None: there from the start, and to the end)."""
-    on = lambda s: car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    on = lambda s: put(car, 'hw:CARD=UAC1Gadget,0\n44100\n')
     off = lambda s: car.unlink()
     steps = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'),
              (0.1, fakedemo.vol(50, 50)), (1.0, fakedemo.song('set-songurl', f'{songs}/a1.flac', flag=flag))]
@@ -990,11 +1609,12 @@ def car_steps(songs, car, at_on=None, at_off=None, flag=0):
     return steps
 
 
-def car_play(songs, tmp, name, steps, player, car, speed=4):
+def car_play(songs, tmp, name, steps, player, car, speed=4, env=None):
     s = fakedemo.Session(tmp/name)
     s.music = songs
     # the gadget's card takes S16_LE alone (q2-iap-probe.sh: p_ssize 2)
-    s.run(steps, fakedemo.launch_host(player, str(songs), speed, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16'}), speed)
+    s.run(steps, fakedemo.launch_host(player, str(songs), speed, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16', **(env or {})}),
+          speed)
     pcm = sorted((tmp/name/'pcm').glob('*.raw'))
     return [p.name for p in pcm], [p.read_bytes() for p in pcm], (tmp/name/'player.log').read_text()
 
@@ -1005,8 +1625,11 @@ def test_car_way(player, songs, tmp):
     kHz song after it resampled into the same PCM, which stays open, so the car's stream never stops."""
     cp, car = car_player(), tmp/'car-on.audio'
     car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
-    steps = car_steps(songs, car, flag=1) + [(16.0, fakedemo.gapless(f'{songs}/c96.flac', flag=1)), (24.0, '{mcl-stop\\null}'),
-                                             (25.0, None)]
+    # the stop once c96 is heard 3 s in, after a1's end: at a fixed time a starved player had not finished a1 (0 of
+    # 20 runs passed with it stopped 300 ms a second), its car PCM a1's exact prefix, and 4 s of the session's clock
+    # after the exit held under 2 s of c96 (1 of 20)
+    steps = car_steps(songs, car, flag=1) + [(16.0, fakedemo.gapless(f'{songs}/c96.flac', flag=1)),
+                                             (16.0, fakedemo.after_exits(1, heard=3)), (16.0, '{mcl-stop\\null}'), (17.0, None)]
     names, pcm, log = car_play(songs, tmp, 'car-on', steps, cp, car, speed=8)
     assert [n.split('_', 1)[1] for n in names] == ['44100_2_s16_car.raw'], names
     a1 = reference(songs/'a1.flac')
@@ -1019,13 +1642,63 @@ def test_car_way_follows_the_car(player, songs, tmp):
     """The car asks for its audio while a1 plays over Bluetooth, then stops: a1 moves to the car's PCM where it is, then
     back to Bluetooth's, three PCMs in turn, the car's a stretch of a1 itself, unbroken."""
     cp, car = car_player(), tmp/'car-switch.audio'
-    steps = car_steps(songs, car, at_on=3.0, at_off=6.0) + [(8.0, '{mcl-stop\\null}'), (9.0, None)]
+    # each move waited for in the player's log, then 2 s of the song where it went: at fixed times a starved player
+    # had not moved back to Bluetooth by the stop (two PCMs, side by side)
+    steps = sorted(car_steps(songs, car, at_on=3.0) + [(3.0, fakedemo.logged('output way 3 now', 2.0)), (3.0, lambda s: car.unlink()),
+                                                       (3.0, fakedemo.logged('output way 1 now', 2.0)), (3.0, '{mcl-stop\\null}'),
+                                                       (3.0, None)], key=lambda st: st[0])
     names, pcm, log = car_play(songs, tmp, 'car-switch', steps, cp, car)
     assert [n.split('_', 1)[1] for n in names] == ['48000_2_s16_bt.raw', '44100_2_s16_car.raw', '48000_2_s16_bt.raw'], names
     a1, mid = reference(songs/'a1.flac'), pcm[1]
     assert len(mid) > 44100 * 4 and mid[:len(mid) - len(mid) % 4] in a1, 'the car heard a1 itself, one stretch of it'
     assert 'output way 3 now' in log and 'output way 1 now' in log, log[-800:]
     return f'Bluetooth, {len(mid) // 4} frames to the car, Bluetooth'
+
+
+def test_car_release_while_paused(player, songs, tmp):
+    """docs/player.md#releasing-the-car: a1 paused on the car's way holds its PCM open, and the gadget's unbind waits for
+    that close while it holds the UDC's lock. mcl-dropcar on the socket (mcl-carrelease, its other name, and SIGUSR2
+    from a script the same) wakes the paused thread and closes the PCM within 0.4 s, the song still paused; the Play
+    opens a PCM on the way the car's file says then, and the song goes on from the frame last heard, not from where
+    the decode had got to. Kept, the car's file gives a second car PCM; removed (the cable out), a Bluetooth one. The
+    car's PCM (the file sink's ..._car.raw) is open in the player while paused and closed after the release, read from
+    /proc/PID/fd: the firmware waits for the gadget's PCM to read closed before it unbinds (patch/q2car.sh). The player
+    runs without q2-heavy's preload here, which makes a process unreadable in /proc."""
+    said = []
+
+    def car_fds(s):  # the player's open files that are a car PCM
+        fds = []
+        for fd in pathlib.Path(f'/proc/{s.proc.pid}/fd').iterdir():
+            try:
+                if os.readlink(fd).endswith('_car.raw'): fds.append(fd.name)
+            except OSError: pass
+        return fds
+    for how, kept in (('mcl-dropcar', True), ('mcl-carrelease', False), ('signal', False)):
+        cp, car = car_player(), tmp/f'car-rel-{how}.audio'
+        car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+        ask = f'{{{how}\\null}}' if how != 'signal' else (lambda s: os.kill(s.proc.pid, signal.SIGUSR2))
+        held, after = [], []
+        steps = car_steps(songs, car) + [(3.0, '{mcl-pause\\null}'), (4.5, lambda s: held.append(car_fds(s))), (5.0, ask),
+                                         (5.4, lambda s: after.append(car_fds(s))), (6.0, '{mcl-play\\null}'),
+                                         (8.0, '{mcl-stop\\null}'), (9.0, None)]
+        if not kept: steps.insert(-3, (5.5, lambda s: car.unlink()))
+        names, pcm, log = car_play(songs, tmp, f'car-rel-{how}', steps, cp, car, speed=1, env={'LD_PRELOAD': ''})
+        assert held == [held[0]] and held[0] and after == [[]], f'{how}: car PCM fds paused {held}, 0.4 s after the release {after}'
+        up = lambda text: int(re.search(rf'^\S+ (\d+) \w player {re.escape(text)}', log, re.M)[1])
+        took = up("q2player: the car's PCM released") - up('q2player: mcl-pause')
+        assert 1950 <= took <= 2400, f'{how}: released {took} ms after the pause, the command 2000 ms after it'
+        assert up("q2player: the car's PCM released") < up('q2player: mcl-play'), f'{how}: not while paused'
+        want = ['44100_2_s16_car.raw', '44100_2_s16_car.raw' if kept else '48000_2_s16_bt.raw']
+        assert [n.split('_', 1)[1] for n in names] == want, (how, names)
+        a1 = reference(songs/'a1.flac')
+        if kept:  # the same format: where the second PCM starts in a1 is where the song went on
+            at = a1.find(pcm[1][:4410 * 4]) // 4
+            unheard = len(pcm[0]) // 4 - at
+            assert at > 0 and 2205 <= unheard <= 26460, f'{how}: went on at frame {at}, {unheard} frames before the decode had got'
+            said.append(f'{how}: released {took - 2000} ms after it, went on {unheard * 1000 // 44100} ms back, at the frame heard')
+        else:
+            said.append(f'{how}: released {took - 2000} ms after it, on Bluetooth at the Play')
+    return '; '.join(said)
 
 
 def test_car_way_needs_the_car_build(player, songs, tmp):
@@ -1069,14 +1742,14 @@ class Car:
         import threading
         d.mkdir(parents=True, exist_ok=True)
         self.asked, self.p_rate, self.follow, self.delay = d/'q2-iap.rate', d/'p_rate', follow, delay_ms / 1000
-        self.p_rate.write_text(f'{start}\n')
+        put(self.p_rate, f'{start}\n')
         self.asked.unlink(missing_ok=True)
         self.seen, self.stop = [], threading.Event()
         threading.Thread(target=self.run, daemon=True).start()
 
     def env(self): return {'Q2PLAYER_CAR_RATE': str(self.asked), 'Q2PLAYER_P_RATE': str(self.p_rate)}
 
-    def set(self, rate): self.p_rate.write_text(f'{rate}\n')
+    def set(self, rate): put(self.p_rate, f'{rate}\n')
 
     def run(self):
         import time
@@ -1182,20 +1855,23 @@ def car_trace(log):
 
 
 def test_car_trace(player, songs, tmp):
-    """The car's trace (docs/iphone-mode.md#car-trace): while way 3 plays, a line a second in the unified log whose
-    frames add up to the car's PCM, and an underrun counted where it happens, once also as Car Audio's health count
-    (under=, Q2PLAYER_CAR_UNDER), and the position told demo beside the frames heard it comes from. a1 arrives as a card app writes it
-    (player/grow.c), a quarter of it there at the start and the rest landing at 12 s, so the player waits in a read
-    and the car's PCM runs dry: that second's line has the read's wait, the dry spell and the silence it put in. The
-    tap holds the car's PCM, the first Q2PLAYER_CAR_TAP_S (3) seconds of it, frame for frame."""
+    """The car's trace (docs/iphone-mode.md#car-trace): while way 3 plays, the quiet seconds are one line each
+    Q2PLAYER_CAR_QUIET_MS (1.2 s here, a minute on a Q2) and a second with something wrong in it a line of its own, the
+    lines' windows one after another so their frames add up to the car's PCM; an underrun counted where it happens,
+    once also as Car Audio's health count (under=, Q2PLAYER_CAR_UNDER, written aside and renamed), and the position
+    told demo beside the frames heard it comes from. a1 arrives as a card app writes it (player/grow.c), a quarter of
+    it there at the start and the rest landing at 12 s, so the player waits in a read and the car's PCM runs dry:
+    that second's line has the read's wait, the dry spell and the silence it put in. With car-pcm.on the tap holds
+    the car's PCM, the first Q2PLAYER_CAR_TAP_S (3) seconds of it, frame for frame."""
     cp, car, out = car_player(), tmp/'car-trace.audio', tmp/'car-trace'
     car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
     card, status, logs = out/'mnt/mmc/.foo', out/'tmp/q2-foo.stream', out/'mnt/mmc/.q2muse/logs'
     card.mkdir(parents=True, exist_ok=True), logs.mkdir(parents=True, exist_ok=True)
+    (logs/'car-pcm.on').write_text('')  # the tap is for an investigation, on only with this file
     whole, path = (songs/'a1.flac').read_bytes(), card/'grow.flac'
     head = len(whole) // 4
     path.write_bytes(whole[:head])
-    line = lambda state, n: status.write_text(f'#Q2STREAM/1\tseq=1\n{state}\t{n}\t{len(whole)}\t20000\t/mnt/mmc/.foo/grow.flac\n')
+    line = lambda state, n: put(status, f'#Q2STREAM/1\tseq=1\n{state}\t{n}\t{len(whole)}\t20000\t/mnt/mmc/.foo/grow.flac\n')
     beat = lambda s: line('get', head)  # the app's line, rewritten twice a second while the song arrives
 
     def land(s):
@@ -1206,19 +1882,33 @@ def test_car_trace(player, songs, tmp):
                    key=lambda st: st[0]) + [(30.0, None)]
     s = fakedemo.Session(out)
     s.music = songs
+    # the run ends at a1's exit, its car PCM closed and the closing trace line written: at a fixed 30 s a starved
+    # player was still in a1, and the frames traced fell short of those written (0 of 20 with it stopped 300 ms a second)
+    s.wait_exits = 1
     line('get', head)
     s.run(steps, fakedemo.launch_host(cp, str(songs), 4, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16',
-                                                          'Q2PLAYER_CAR_TAP_S': '3', 'Q2PLAYER_CAR_UNDER': str(out/'under')}), 4)
+                                                          'Q2PLAYER_CAR_TAP_S': '3', 'Q2PLAYER_CAR_UNDER': str(out/'under'),
+                                                          'Q2PLAYER_CAR_QUIET_MS': '1200'}), 4)
     pcm = sorted((out/'pcm').glob('*.raw'))
     assert [p.name.split('_', 1)[1] for p in pcm] == ['44100_2_s16_car.raw'], pcm
     got, log = pcm[0].read_bytes(), (out/'player.log').read_text()
     lines = car_trace(log)
-    assert len(lines) >= 4, f'{len(lines)} trace lines: {log[-1500:]}'
-    # a second's line waits for the write or read in hand: the window with the read that waited is that much longer
-    assert all(l['ms'] >= 900 and l['ms'] - l['rmax'] <= 1500 for l in lines[:-1]), [(l['ms'], l['rmax']) for l in lines]
+    assert len(lines) >= 3, f'{len(lines)} trace lines: {log[-1500:]}'
     assert sum(l['frames'] for l in lines) == len(got) // 4, f'{sum(l["frames"] for l in lines)} frames traced, {len(got) // 4} written'
     assert all(0 <= l['delay'] <= 22050 and l['avail'] == 22050 - l['delay'] for l in lines), lines
     dry = [l for l in lines if l['dry']]
+    # the wrong second is a line of its own: a second, and the read in hand it waited for; every other line but the
+    # one just before it (the quiet seconds up to it) and the closing one is QUIET_MS of quiet seconds
+    at = lines.index(dry[0]) if dry else -1
+    assert dry and dry[0]['ms'] >= 900 and dry[0]['ms'] - dry[0]['rmax'] <= 1500, [(l['ms'], l['rmax'], l['dry']) for l in lines]
+    # A write over 50 ms (cartrace.c SLOW_MS) is a second of its own too, and so is the quiet stretch just before it:
+    # on this machine that is its load, not the player (the file sink's write sleeps to keep pace, and a sleep that
+    # overruns is a slow write; 10 of 10 runs with the player stopped 40 ms a second), and nothing is lost by it. A
+    # dry second other than the stall's is an underrun, heard on a Q2, and still fails.
+    quiet = [l for i, l in enumerate(lines[:-1]) if i not in (at, at - 1)]
+    assert quiet and all(not l['dry'] and (l['ms'] >= 1200 or l['slow'] or lines[i + 1]['slow'])
+                         for i, l in enumerate(lines[:-1]) if l in quiet), [(l['ms'], l['dry'], l['slow']) for l in lines]
+    assert not (out/'under.tmp').exists(), 'the underrun count left aside, not renamed'
     # the read waits from the head's end to 12 s; at four times real speed the silence is four times that wait, less
     # the PCM's half second that played on into it
     assert len(dry) == 1 and dry[0]['dry'] == 1 and abs(dry[0]['dry_ms'] - (4 * dry[0]['rmax'] - 500)) < 1000 \
@@ -1234,14 +1924,17 @@ def test_car_trace(player, songs, tmp):
     # the position told demo, and the frames heard it comes from: they move together, a second a 44100 frames
     pos = [(l['pos'], l['played']) for l in lines]
     assert pos[-1][0] > pos[0][0] and all(abs(p - f // 44100) <= 1 for p, f in pos if f > 0), pos
-    return f'{len(lines)} lines, {len(got) // 4} frames; dry once, {dry[0]["dry_ms"]} ms of silence, read {slowest} ms; tap {len(tap)} bytes'
+    return (f'{len(lines)} lines (ms, dry: {[(l["ms"], l["dry"]) for l in lines]}), {len(got) // 4} frames; dry once, '
+            f'{dry[0]["dry_ms"]} ms of silence, read {slowest} ms; tap {len(tap)} bytes')
 
 
 def test_bt_formats_and_volume(player, songs, tmp):
-    """Bluetooth (the 'bt' scenario, as stock's capture of it): each song in its own format at the transport's 48 kHz,
+    """Bluetooth (the 'bt' scenario's commands, as stock's capture of it): each song in its own format at the transport's 48 kHz,
     and the volume's levels in turn, measured against the song: 1, 25/256, 10/256, 484/256 (clipped), 163/256 left
     with the right silent. Stock's right channel there is about 8.4 times (its dB of a negative level)."""
-    s, pcm, names = play(player, songs, 'bt', tmp/'bt')
+    # bt-levels: the volumes sent a second of the song apart; 'bt' sends them a second of real time apart, which a
+    # starved player had written less than a second of song in (0 of 20 with it stopped 300 ms a second)
+    s, pcm, names = play(player, songs, 'bt-levels', tmp/'bt')
     assert [n.split('_', 1)[1] for n in names] == ['48000_2_s16_bt.raw', '48000_2_s32_bt.raw', '48000_2_f32_bt.raw'], names
     got, ref = array.array('h', pcm[0]), array.array('h', reference(songs/'a1.flac'))
     def rms(x): return math.sqrt(sum(v * v for v in x) / max(1, len(x)))
@@ -1401,7 +2094,10 @@ def test_http_missing(player, songs, tmp):
     """A 404: error, as stock's (which makes /tmp/notfile, captured)."""
     s, pcm, names = play(player, songs, 'http-missing', tmp/'http-missing')
     assert events(s) == ['{player-status\\error}'] and not pcm, (events(s), names)
-    return 'error'
+    failed = re.findall(r' E player (q2player: open failed.*)', (tmp/'http-missing/player.log').read_text())
+    assert len(failed) == 1 and failed[0].startswith('q2player: open failed (missing): http') and \
+        failed[0].endswith('nothing.flac'), failed
+    return 'error, ' + failed[0]
 
 
 def test_https_checks(player, songs, tmp):
@@ -1467,6 +2163,39 @@ def test_stop_right_after_a_next(player, songs, tmp):
     return f'{got / 44100:.1f} s played, then stopped; {events(s)}'
 
 
+def test_a_stop_before_a_restart_is_kept(player, songs, tmp):
+    """The drive of 2026-11-23: a write to the car's PCM held the playback thread 10.8 s, and meanwhile demo restarted the
+    song after an output change, mcl-stop and then set-songurl of the same song from 46 s, with a pause. The
+    set-songurl erased the stop the thread had not yet taken: the song went on, its end started it again from 46 s,
+    and every song demo sent after was played one song late, under the next one's title. The stop is kept: it cuts
+    the song playing (stopstatus), the restart plays from 5 s to its end, and the song sent at that exit follows.
+    With the write held (a stalled sink), with the drive's pauses as well, and with the stop and the restart sent in
+    one instant to a song playing."""
+    a1, a2 = reference(songs/'a1.flac'), reference(songs/'a2.flac')
+
+    def which(b):  # what a PCM holds: the song and the frame it starts at
+        for n, ref in (('a1', a1), ('a2', a2)):
+            at = ref.find(b[:4410 * 4]) if len(b) >= 4410 * 4 else -1
+            if at >= 0 and at % 4 == 0: return f'{n} from {at // 4 / 44100:.2f} s, {len(b) // 4 / 44100:.2f} s of it'
+        return f'{len(b) // 4} frames of neither'
+    said, failed = [], []
+    for name in ('stop-restart', 'stop-restart-paused', 'stop-restart-now'):
+        s = fakedemo.Session(tmp/name)
+        s.music = songs
+        s.run(fakedemo.scenarios(str(songs))[name], fakedemo.launch_host(player, str(songs), 4), 4)
+        if getattr(s, 'drain', None): s.drain.join(5)
+        pcm = [p.read_bytes() for p in sorted((tmp/name/'pcm').glob('*.raw'))]
+        got = [which(b) for b in pcm]
+        said.append(f'{name}: {", then ".join(got)}; {events(s)}')
+        ok = (len(pcm) == 3 and pcm[0] == a1[:len(pcm[0])] and len(pcm[0]) < 4 * 44100 * 4  # a1 cut by the stop
+              and pcm[1] == a1[5 * 44100 * 4:]  # the restart, a1 from 5 s to its end
+              and pcm[2] and a2.startswith(pcm[2])  # then a2
+              and events(s)[:2] == ['{player-stopstatus\\exit}', '{player-status\\exit}'])
+        if not ok: failed.append(name)
+    assert not failed, f'{failed} wrong: ' + ' | '.join(said)
+    return '; '.join(said)
+
+
 def test_pause_then_pick(player, songs, tmp):
     """A song paused at 3 s, another picked at 5 s (set-nexturl): no frame of the paused song is written after the
     pick, only those before the pause (2 s heard and the PCM's 500 ms ahead, dropped at the cut), then the picked
@@ -1494,10 +2223,12 @@ def test_qq(player, songs, tmp):
     exactly; a seek to 12 s lands exactly. No key file, a key the library refuses and a song id with a character stock
     refuses read the file as it is, which is not audio: error, as stock's, after its log line."""
     env = qq_env(tmp)
-    s, pcm, names = play(player, songs, 'qq', tmp/'qq', env=env)
+    # each played to its end: the run waits for its exit (qq-seek's fixed end, 12 s, was its end less the PCM's half
+    # second and the open, at real speed, and a busy machine cut it short)
+    s, pcm, names = play(player, songs, 'qq', tmp/'qq', env=env, exits=1)
     got, ref = b''.join(pcm), reference(songs/'a1.flac')
     assert got == ref, f'{len(got) // 4} frames, reference {len(ref) // 4}, first difference {first_difference(got, ref)}'
-    s, pcm, names = play(player, songs, 'qq-seek', tmp/'qq-seek', env=env)
+    s, pcm, names = play(player, songs, 'qq-seek', tmp/'qq-seek', env=env, exits=1)
     got = b''.join(pcm)
     assert got.endswith(ref[12 * 44100 * 4:]) and ref.startswith(got[:len(got) - len(ref[12 * 44100 * 4:])]), \
         f'qq-seek: {len(got) // 4} frames are not the reference with a seek to 12 s'
@@ -1611,6 +2342,46 @@ MEDIA_INFO_DEVIATIONS = {
 }
 
 
+def media_info_by_song(s):
+    """q2player's media-info figures for each song the session sent (1 for the first), POS for the position: the last
+    answer to a query asked under that song's command, and after the song before it was cut (its nextstatus or exit,
+    by order on the socket). Not by when this side read it: side by side, the runner's other threads held the GIL,
+    the session read and stamped late, and a song's answers landed in the next song's 2.5 s (6 of 6 runs beside seven
+    threads of Python work). Not before the cut: until the playback thread cuts the song playing, the player answers
+    for the song still playing (stock's cut comes 60 to 80 ms after the command, docs/player.md#captured-sequences),
+    and a burst of queries taken all at once after the command (the player held through the song's 2.5 s,
+    test_media_info_held) was all answered so."""
+    cuts = [n for m, _, n in s.ends if m in ('{player-nextstatus\\exit}', '{player-status\\exit}')]
+    got = {}
+    for k, (asked, m) in enumerate(zip(s.mi_asked, s.mi_answers)):
+        if '|' in m and (asked == 1 or (len(cuts) >= asked - 1 and k >= cuts[asked - 2])):
+            got[asked] = m[12:-1].split('|')
+            got[asked][3] = 'POS'
+    return got
+
+
+def test_media_info_held(player, songs, tmp):
+    """The player held (SIGSTOP) from just before w16.wav's set-nexturl until 50 ms before w24.wav's is due, as a
+    machine that does not run it for that long (integ/q2-1129, load 1 to 2: w16.wav reported as the OGG before it):
+    the queries of w16's 2.5 s are all taken at once with the command and answered for e.ogg, which plays until the
+    playback thread cuts it. The next command waits for w16's own figures (fakedemo.figures), and each song's
+    figures are its own."""
+    m = songs
+    hold = lambda s: os.kill(s.proc.pid, signal.SIGSTOP)
+    go = lambda s: os.kill(s.proc.pid, signal.SIGCONT)
+    boot = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\0}'), (0.1, '{mcl-setvol\\60}')]
+    steps = boot + [(1.0, fakedemo.song('set-songurl', f'{m}/e.ogg')), (3.45, hold), (3.5, fakedemo.song('set-nexturl', f'{m}/w16.wav')),
+                    (5.95, go), (6.0, fakedemo.figures()), (6.0, fakedemo.song('set-nexturl', f'{m}/w24.wav')), (6.0, fakedemo.figures()),
+                    (8.5, '{mcl-stop\\null}'), (9.0, None)]
+    s = fakedemo.Session(tmp/'mi-held')
+    s.music = songs
+    s.run(steps, fakedemo.launch_host(player, str(songs), 1), 1)
+    got = media_info_by_song(s)
+    kinds = {k: (v[4], v[5]) for k, v in got.items()}
+    assert kinds == {1: ('OGG', '32'), 2: ('WAV', '16'), 3: ('WAV', '24')}, got
+    return ', '.join(f'{c} {b}' for c, b in kinds.values())
+
+
 def test_media_info_per_format(player, songs, tmp):
     """formats-all: for each file, the media-info Q2 Muse's hciplayer gave (fixtures/pod-formats-all.txt): RATE, LENGTH,
     CODEC and BITS the same and BITRATE within 2%, but for MEDIA_INFO_DEVIATIONS."""
@@ -1622,11 +2393,11 @@ def test_media_info_per_format(player, songs, tmp):
                 out.setdefault(fakedemo.ALL_FORMATS[i], arg.split('|'))
         return out
     want = per_file(parse((HERE/'fixtures/pod-formats-all.txt').read_text())[0])
-    play(player, songs, 'formats-all', tmp/'formats-all', speed=4)
-    got = per_file(parse((tmp/'formats-all/transcript.txt').read_text())[0])
-    # a transcript writes an answer only when it changes: a file with none of its own answered as the one before
-    for d in want, got:
-        for a, b in zip(fakedemo.ALL_FORMATS, fakedemo.ALL_FORMATS[1:]): d.setdefault(b, d.get(a))
+    # a fixture's transcript writes an answer only when it changes: a file with none of its own answered as the one before
+    for a, b in zip(fakedemo.ALL_FORMATS, fakedemo.ALL_FORMATS[1:]): want.setdefault(b, want.get(a))
+    s, _, _ = play(player, songs, 'formats-all', tmp/'formats-all', speed=4)
+    got = media_info_by_song(s)
+    got = {f: got.get(i + 1) for i, f in reversed(list(enumerate(fakedemo.ALL_FORMATS)))}  # f24.flac's first play
     bad = []
     for f in fakedemo.ALL_FORMATS:
         w, g = want.get(f), got.get(f)
@@ -1640,8 +2411,14 @@ def check_protocol(player, songs, tmp, fixture):
     name = fixture.stem
     scenario = name.split('-', 1)[1]
     want, want_pos = parse(fixture.read_text())
-    s, _, _ = play(player, songs, scenario, tmp/f'p-{name}')
-    got, got_pos = parse((tmp/f'p-{name}/transcript.txt').read_text())
+    # the run waits for as many song ends as the fixture has: a fixed end cut a starved player's last event off
+    # (pod-badnext's error, side by side)
+    ends = sum(d == '<' and '{%s\\%s}' % (n, a) in fakedemo.ENDS for _, d, n, a in want)
+    s, _, _ = play(player, songs, scenario, tmp/f'p-{name}', ends=ends)
+    got, _ = parse((tmp/f'p-{name}/transcript.txt').read_text())
+    # q2player's every position answer, not the transcript's one a second: a session the machine held up polls late, and
+    # the one sample left near a song change (pod-gapless-*, 10.2 s) could be the next song's 0 alone
+    got_pos = s.positions
     norm = lambda sk: [x.replace(str(songs), '/mnt/mmc') for x in sk]
     a, b = norm(skeleton(got, scenario != 'controls')), norm(skeleton(want, scenario != 'controls'))
     assert a == b, f'{name}: events differ\n  q2player: {a}\n  fixture:  {b}'
@@ -1683,24 +2460,291 @@ def test_crash_count(player, songs, tmp):
     return 'three crashes, each counted, logged and the process ended by its signal'
 
 
+
+# ---- other sources for the car (player/feed.c, docs/iphone-mode.md#other-sources-over-usb): q2video's sound through
+# ALSA's q2car device, raw 44.1 kHz frames in a FIFO the player reads while its own song is stopped ----
+
+def tone(seconds, hz=441, rate=44100):
+    """16-bit stereo, a sine whose every frame differs from silence's but one in fifty"""
+    n = int(seconds * rate)
+    a = array.array('h', (int(12000 * math.sin(2 * math.pi * hz * i / rate)) for i in range(n) for _ in (0, 1)))
+    return a.tobytes()
+
+
+class Feeder:
+    """A source writing to the player's feed (as ALSA's file PCM does): blocking writes, so the player's reads pace it;
+    each run's start and end times (wall clock) noted."""
+    def __init__(self, path):
+        self.path, self.runs, self.pool = path, [], concurrent.futures.ThreadPoolExecutor(1)
+
+    def send(self, data):
+        def go():
+            t0 = time.monotonic()
+            with open(self.path, 'wb', buffering=0) as f:
+                for i in range(0, len(data), 4096):
+                    f.write(data[i:i + 4096])
+            self.runs.append((t0, time.monotonic()))
+        return lambda s: self.pool.submit(go)
+
+
+def feed_play(songs, tmp, name, steps, feed, car, speed=1, logs=None):
+    cp = car_player()
+    s = fakedemo.Session(tmp/name)
+    s.music = songs
+    if logs: logs.mkdir(parents=True, exist_ok=True)  # after the session's start, which empties its folder's tmp only
+    s.run(steps, fakedemo.launch_host(cp, str(songs), speed, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16',
+                                                             'Q2PLAYER_FEED': str(feed)}), speed)
+    pcm = sorted((tmp/name/'pcm').glob('*.raw'))
+    return [p.name.split('_', 1)[1] for p in pcm], [p.read_bytes() for p in pcm], (tmp/name/'player.log').read_text()
+
+
+def test_car_feed_reaches_the_car(player, songs, tmp):
+    """Radio (q2video's receiver) while the car takes the audio and nothing of the player's plays: its frames reach the
+    car's PCM at 44.1 kHz, whole and in order. The card's log folder is there without car-pcm.on: no tap is written
+    (docs/iphone-mode.md#car-trace)."""
+    car, feed = tmp/'feed1.audio', tmp/'feed1.fifo'
+    car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    logs = tmp/'feed1/mnt/mmc/.q2muse/logs'
+    src, f = tone(2.0), Feeder(feed)
+    steps = [(0.0, '{mcl-setoutputway\\1}'), (0.5, f.send(src)), (6.0, None)]
+    names, pcm, log = feed_play(songs, tmp, 'feed1', steps, feed, car, logs=logs)
+    assert logs.is_dir() and not list(logs.glob('car-pcm*')), list(logs.iterdir())
+    assert names == ['44100_2_s16_car.raw'], (names, log[-600:])
+    assert src in pcm[0], f'{len(pcm[0]) // 4} frames, the tone whole and in order: {(first_difference(pcm[0], src) or 0) // 4}'
+    assert 'the car plays another source' in log
+    return f'{len(src) // 4} frames of the source in one car PCM of {len(pcm[0]) // 4}'
+
+
+def test_car_feed_hands_over_both_ways(player, songs, tmp):
+    """a1 on the car, stopped for Radio, Radio's frames, then a1 again: three car PCMs in turn, each closed on its
+    silence (silence written before each close), the source's frames whole in the middle one."""
+    car, feed = tmp/'feed2.audio', tmp/'feed2.fifo'
+    car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    src, f = tone(2.0, 330), Feeder(feed)
+    steps = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'),
+             (0.5, fakedemo.song('set-songurl', f'{songs}/a1.flac')), (3.0, '{mcl-stop\\null}'), (3.5, f.send(src)),
+             (8.5, fakedemo.song('set-songurl', f'{songs}/a1.flac')), (11.0, '{mcl-stop\\null}'), (12.0, None)]
+    names, pcm, log = feed_play(songs, tmp, 'feed2', steps, feed, car)
+    assert names == ['44100_2_s16_car.raw'] * 3, (names, log[-800:])
+    a1 = reference(songs/'a1.flac')
+    assert pcm[0][:44100 * 4] == a1[:44100 * 4] and pcm[2][:44100 * 4] == a1[:44100 * 4], 'a1, before and after'
+    assert src in pcm[1], 'the source between, whole'
+    return 'a1, the source, a1: three car PCMs (each closed on silence: test_alsa_sw_params car-close)'
+
+
+def test_car_feed_paused_is_silence_not_a_stall(player, songs, tmp):
+    """Radio paused (nothing written) for a second, then on: one PCM, not closed, the gap a dry spell, which a
+    device's never-stopped PCM plays as silence (output.c alsa_sw), the frames before and after it whole."""
+    car, feed = tmp/'feed3.audio', tmp/'feed3.fifo'
+    car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    a, b, f = tone(1.5, 441), tone(1.5, 551), Feeder(feed)
+    steps = [(0.0, '{mcl-setoutputway\\1}'), (0.5, f.send(a)), (3.0, f.send(b)), (7.0, None)]
+    names, pcm, log = feed_play(songs, tmp, 'feed3', steps, feed, car)
+    assert names == ['44100_2_s16_car.raw'], names
+    # the file sink writes only what it is given: the pause is the car trace's dry spell, the silence a device plays
+    assert pcm[0].index(a) == 0 and pcm[0].index(b) == len(a), (pcm[0].index(a), pcm[0].index(b))
+    dry = re.search(r'dry=1/(\d+)ms', log)
+    assert dry and 500 <= int(dry[1]) <= 2000, log[-400:]
+    return f'one PCM through the pause, {dry[1]} ms of it dry (silence on a device)'
+
+
+def test_car_feed_source_gone_leaves_the_song_resumable(player, songs, tmp):
+    """q2video dies mid-stream: the player waits FEED_END_MS on silence, closes the car's PCM on its silence, and a1
+    plays after it as ever; no hang."""
+    car, feed = tmp/'feed4.audio', tmp/'feed4.fifo'
+    car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    src, f = tone(1.0), Feeder(feed)
+    steps = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'),
+             (0.5, f.send(src)), (5.0, fakedemo.song('set-songurl', f'{songs}/a1.flac')), (8.0, '{mcl-stop\\null}'),
+             (9.0, None)]
+    names, pcm, log = feed_play(songs, tmp, 'feed4', steps, feed, car)
+    assert names == ['44100_2_s16_car.raw'] * 2, names
+    assert src in pcm[0] and 'the car\'s other source ended' in log
+    assert pcm[1][:44100 * 4] == reference(songs/'a1.flac')[:44100 * 4]
+    return 'the source ended, a1 after it'
+
+
+def test_car_feed_keeps_the_car_close_behind(player, songs, tmp):
+    """Radio's sound in the car runs at most FEED_LEAD_MS (150 ms) of PCM ahead of the car (engine.c feed_session), as a
+    scan does, not the PCM's whole half second: with the FIFO's 23 ms and the ring's 100 ms, under 0.3 s behind the
+    picture. The car trace's lines (a line a second here: a quiet window of 300 ms, looked at each second) give the
+    PCM's delay as each is made: never over the lead and one write, and the PCM never dry while the source flows."""
+    car, feed = tmp/'feedlead.audio', tmp/'feedlead.fifo'
+    car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    src, f = tone(6.0), Feeder(feed)
+    cp, s = car_player(), fakedemo.Session(tmp/'feedlead')
+    s.music = songs
+    s.run([(0.0, '{mcl-setoutputway\\1}'), (0.5, f.send(src)), (9.0, None)],
+          fakedemo.launch_host(cp, str(songs), 1, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16', 'Q2PLAYER_FEED': str(feed),
+                                                   'Q2PLAYER_CAR_QUIET_MS': '300'}), 1)
+    pcm = b''.join(p.read_bytes() for p in sorted((tmp/'feedlead/pcm').glob('*.raw')))
+    assert src in pcm, 'the source whole and in order'
+    lines = car_trace((tmp/'feedlead/player.log').read_text())
+    flowing = [l for l in lines[1:-1]]  # the first (the PCM filling) and the last (the source gone quiet) left out
+    assert len(flowing) >= 4, [(l['ms'], l['delay']) for l in lines]
+    worst = max(l['delay'] for l in flowing)
+    assert worst <= 44100 * 150 // 1000 + 1024, f'the PCM {worst} frames ({worst * 1000 // 44100} ms) ahead of the car'
+    assert not any(l['dry'] for l in flowing), [(l['delay'], l['dry']) for l in flowing]
+    return f'the PCM at most {worst * 1000 // 44100} ms ahead over {len(flowing)} windows, never dry'
+
+
+def test_car_feed_reader_sleeps_while_no_source_writes(player, songs, tmp):
+    """The feed's reader (player/feed.c) waits in poll() with no timeout while nothing writes to the FIFO: q2player
+    idle for 4 s makes one such poll and no timed-out one (it woke ten times a second, for the player's whole life).
+    Counted with strace, so a sleep it takes anywhere else is not counted."""
+    d, trace = tmp/'feedidle', tmp/'feedidle.strace'
+    d.mkdir(parents=True, exist_ok=True)
+    wrap = tmp/'feedidle.sh'
+    wrap.write_text(f'#!/bin/sh\nexec strace -f -e trace=poll,ppoll -o {trace} {car_player()}\n')
+    wrap.chmod(0o755)
+    s = fakedemo.Session(d)
+    s.music = songs
+    s.run([(4.0, None)], fakedemo.launch_host(str(wrap), str(songs), 1, {'Q2PLAYER_CAR': str(tmp/'feedidle.audio'),
+                                                                         'Q2PLAYER_FEED': str(tmp/'feedidle.fifo')}), 1)
+    t = trace.read_text()
+    fds = r'(?:\[\{fd=\d+, events=POLLIN\}\]|0x[0-9a-f]+)'  # strace may not be let read the array
+    timed_out = re.findall(rf'poll\({fds}, 1, 100\) += 0 \(Timeout\)', t)
+    waits = re.findall(rf'poll\({fds}, 1, -1', t)
+    assert not timed_out and len(waits) == 1, f'{len(timed_out)} timed-out polls, {len(waits)} waits'
+    return f'one wait, no timed-out poll in 4 s idle'
+
+
+def test_car_feed_does_not_block_a_source_the_car_does_not_take(player, songs, tmp):
+    """The car's way not the output (Bluetooth's): the feed's frames are read and dropped at the source's own rate,
+    so a source writing 3 s of sound is done in about 3 s, never held, and nothing reaches any PCM."""
+    car, feed = tmp/'feed5.audio', tmp/'feed5.fifo'
+    src, f = tone(3.0), Feeder(feed)
+    steps = [(0.0, '{mcl-setoutputway\\1}'), (0.5, f.send(src)), (6.5, None)]
+    names, pcm, log = feed_play(songs, tmp, 'feed5', steps, feed, car)
+    assert names == [], names
+    assert len(f.runs) == 1, 'the source finished'
+    took = f.runs[0][1] - f.runs[0][0]
+    assert 2.5 < took < 3.8, f'{took:.2f} s for 3 s of sound'
+    return f'3 s of sound dropped in {took:.2f} s'
+
+
+# Tests that read another's output, run after it in its folder: {test: the test whose folder it reads}.
+AFTER = {'test_exact_mp3_no_step_at_the_cut': 'test_exact_mp3_gapless'}
+# Tests that run alone, after everything else, each tried again when it failed on a run the machine starved:
+# those whose assertions bound what happens in real time (a scan's 150 ms turn, a feed's 3 s of sound, the car trace's
+# lines a second, a preload's opening against the song's end, the clicks' 130 ms mute, the positions sampled in a
+# window of seconds while a growing song's seek waits), each failed side by side (2026-11-22), and the one that
+# asserts on the host's own /tmp/notsupport, which any player whose song fails writes.
+SERIAL = ('test_scan', 'test_grow_seek_beyond', 'test_grow_seek_inside', 'test_car_trace', 'test_car_feed_reaches_the_car', 'test_car_feed_hands_over_both_ways',
+          'test_car_feed_paused_is_silence_not_a_stall', 'test_car_feed_source_gone_leaves_the_song_resumable',
+          'test_car_feed_does_not_block_a_source_the_car_does_not_take', 'test_preload_outrun', 'test_click_idle',
+          'test_a_failure_already_replaced_is_not_reported',
+          # fix/stream-start's: a song with a cover opened by 3.0 s, the feed's 150 ms lead, the feed reader's wakeups
+          # counted over seconds, the car's PCM fds read from /proc right after each release
+          'test_grow_opens_a_song_with_a_cover_on_its_first_audio', 'test_car_feed_keeps_the_car_close_behind',
+          'test_car_feed_reader_sleeps_while_no_source_writes', 'test_car_release_while_paused',
+          # smart-crossfade's: the player on one core shared with busy loops
+          'test_smart_crossfade_starved')
+WIDTH = 8  # tests and fixtures side by side: each mostly waits on a player running in real time or faster
+STALL_S = 0.1  # a 5 ms sleep that took this much longer: the machine did not run this process (measured: 650 ms under
+               # a nice-19 job on a busy core, under 10 ms when the core is shared fairly)
+TRIES = 3
+
+
+class Stalls:
+    """The longest this process went unscheduled while it ran, from a thread sleeping 5 ms at a time."""
+    def __enter__(self):
+        self.worst, self.done = 0.0, False
+        def watch():
+            while not self.done:
+                t = time.monotonic(); time.sleep(0.005); self.worst = max(self.worst, time.monotonic() - t - 0.005)
+        self.thread = threading.Thread(target=watch, daemon=True); self.thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self.done = True; self.thread.join()
+
+
+def timed(f, *args):
+    """f(*args)'s answer or AssertionError, and its seconds: (ok, text, seconds)."""
+    t = time.monotonic()
+    try: return True, f(*args), time.monotonic() - t
+    except AssertionError as e: return False, str(e), time.monotonic() - t
+
+
+def chain(n, names, player, songs, tmp):
+    """The tests names, one after another in folder tmp/c<n> (AFTER's reader after its writer; short, as the player's
+    socket path under it must fit a sockaddr_un): [(name, ok, text, s)]."""
+    d = tmp/f'c{n}'; d.mkdir()
+    return [(n, *timed(globals()[n], player, songs, d)) for n in names]
+
+
+def alone(name, player, songs, tmp):
+    """A SERIAL test, run again (TRIES in all) when it failed on a run the machine starved: (ok, text, s)."""
+    for attempt in range(1, TRIES + 1):
+        d = tmp/f's{SERIAL.index(name)}-{attempt}'; d.mkdir()
+        with Stalls() as stalls:
+            ok, text, secs = timed(globals()[name], player, songs, d)
+        if ok or stalls.worst < STALL_S:
+            break
+        print(f'again {name}: failed while starved for {stalls.worst * 1000:.0f} ms ({text[:200]})', flush=True)
+    if not ok and stalls.worst >= STALL_S:
+        text += f' (every try starved, the last for {stalls.worst * 1000:.0f} ms)'
+    return ok, text, secs
+
+
+def report(name, ok, text, secs):
+    print(f'{"ok  " if ok else "FAIL"} {name} ({secs:.1f} s): {text}', flush=True)
+    return 0 if ok else 1
+
+
 def main():
     only = sys.argv[sys.argv.index('-k') + 1] if '-k' in sys.argv else ''
     player = subprocess.run([sys.executable, ROOT/'tools/player.py', 'build', 'host'], check=True, capture_output=True, text=True).stdout.strip()
+    car_player()  # built once here, so the tests that run it side by side never build it at the same time
     songs = music.make(CACHE/'music')
-    failed = 0
+    failed, start = 0, time.monotonic()
     with tempfile.TemporaryDirectory(prefix='q2player-') as t:
         tmp = pathlib.Path(t)
-        tests = [(n, f) for n, f in globals().items() if n.startswith('test_') and only in n]
-        for n, f in tests:
-            try: print(f'ok   {n}: {f(player, songs, tmp)}')
-            except AssertionError as e: failed += 1; print(f'FAIL {n}: {e}')
+        tests = [n for n in globals() if n.startswith('test_') and only in n]
+        chains = [[n, *(r for r, w in AFTER.items() if w == n and r in tests)] for n in tests
+                  if n not in SERIAL and (n not in AFTER or AFTER[n] not in tests)]
         fixtures = [f for f in sorted((HERE/'fixtures').glob('*.txt')) if only in 'protocol-' + f.stem and f.stem not in KNOWN]
-        with concurrent.futures.ThreadPoolExecutor(8) as pool:  # each plays in real time, so side by side
-            for f, r in [(f, pool.submit(check_protocol, player, songs, tmp, f)) for f in fixtures]:
-                try: print(f'ok   protocol {f.stem}: {r.result()}')
-                except AssertionError as e: failed += 1; print(f'FAIL protocol {f.stem}: {e}')
+        again = []  # what failed side by side, run again alone below
+        # a process each, not a thread: a test's session (fakedemo) reads, stamps and sends on its own clock, and in
+        # threads the others' Python held the GIL from it (test_media_info_per_format's answers landed in the next
+        # song's window, side by side at low load). Forked, so the player built above and the music are shared.
+        ctx = multiprocessing.get_context('fork')
+        with concurrent.futures.ProcessPoolExecutor(WIDTH, mp_context=ctx) as pool:
+            jobs = [pool.submit(chain, i, c, player, songs, tmp) for i, c in enumerate(chains)]
+            runs = [(f, pool.submit(timed, check_protocol, player, songs, tmp, f)) for f in fixtures]
+            for c, job in zip(chains, jobs):
+                results = job.result()
+                if all(ok for _, ok, _, _ in results):
+                    for result in results: report(*result)
+                else:
+                    again.append((c, results))
+            for f, r in runs:
+                ok, text, secs = r.result()
+                if ok: report(f'protocol {f.stem}', ok, text, secs)
+                else: again.append((f, [(f'protocol {f.stem}', ok, text, secs)]))
+        print(f'side by side: {time.monotonic() - start:.1f} s', flush=True)
+        # A failure side by side runs again alone, as gate.run does a suite's: passing then, it is flaky (said, and
+        # counted as passed); failing again, it fails.
+        side = []  # what failed side by side and passed alone: counted in the summary, not hidden
+        for i, (what, first) in enumerate(again):
+            if isinstance(what, list):
+                second = chain(f'a{i}', what, player, songs, tmp)
+            else:
+                (tmp/f'a{i}').mkdir()
+                second = [(f'protocol {what.stem}', *timed(check_protocol, player, songs, tmp/f'a{i}', what))]
+            for (name, ok1, text1, _), (_, ok, text, secs) in zip(first, second):
+                if ok and not ok1:
+                    print(f'flaky {name}: failed side by side ({text1[:200]}), passed alone', flush=True)
+                    side.append(name)
+                failed += report(name, ok, text, secs)
+        for n in tests:
+            if n in SERIAL:
+                failed += report(n, *alone(n, player, songs, tmp))
         for name, why in KNOWN.items():
             if only in 'protocol-' + name: print(f'skip protocol {name}: {why}')
+    print(f'all: {time.monotonic() - start:.1f} s; {failed} failed; {len(side)} failed side by side and passed alone'
+          + (f': {", ".join(side)}' if side else ''), flush=True)
     sys.exit(1 if failed else 0)
 
 

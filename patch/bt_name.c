@@ -4,10 +4,11 @@
  * which the build also writes as Name in /etc/bluetooth/main.conf (tools/build.py BT_NAME). Each
  * time demo turns Bluetooth on (openBluetooth, through headset.c's headset_status_register) and
  * after a rename, bt_name_apply sets BlueZ's adapter Alias over D-Bus to the chosen name, or to ""
- * with none, which BlueZ takes as "use main.conf's Name": so config.ini is the one record, and Q2
- * Q2 Muse's first-boot defaults (a config.ini without BTNAME) give the Q2 its default name back
- * even where BlueZ kept an old alias in /mnt/data/bluetooth. The change is live: a phone scanning
- * sees the new name at once, and one already paired shows it the next time it reads the Q2's name.
+ * with none, which BlueZ takes as "use main.conf's Name", then writes the same name into the
+ * controller itself: so config.ini is the one record, and Q2 Muse's first-boot defaults (a
+ * config.ini without BTNAME) give the Q2 its default name back even where BlueZ kept an old alias
+ * in /mnt/data/bluetooth. The change is live: a phone scanning sees the new name at once, and one
+ * already paired shows it the next time it reads the Q2's name.
  *
  * Settings > Bluetooth's Name row shows the name and opens the letter strip (search_strip_text),
  * the name typed in the row itself after its label and who sees it said under the row:
@@ -47,18 +48,24 @@ int bt_name_valid(const char *s) {
     return 1;
 }
 
-/* BlueZ's Alias to the saved name, or "" (main.conf's Name) with none, in the background: tried
- * until bluetoothd answers, as demo starts it a moment before. */
+/* BlueZ's Alias to the saved name, or "" (main.conf's Name) with none, and then the controller's
+ * own local name to the name itself (hciconfig's Write Local Name), in the background: tried until
+ * bluetoothd and the controller answer, as demo starts them a moment before. The second write is
+ * for the controller alone: at boot openBluetooth's `hciconfig hci0 reset` fails ("Can't init
+ * device hci0: Function not implemented (89)") and leaves the RTL8733BS answering a name request
+ * with its ROM's RT_BT while BlueZ holds the right name, and BlueZ writes nothing for an Alias of
+ * "" with none stored or for one it already has (docs/internals.md#bluetooth-name). */
 void bt_name_apply(void) {
-    char raw[BT_NAME_MAX * 2 + 2] = "", cmd[512];
+    char raw[BT_NAME_MAX * 2 + 2] = "", name[BT_NAME_MAX + 1], cmd[640];
     toolsReadConfig("/mnt/data/config.ini", "Q2POD", BT_NAME_KEY, raw, "");
     if (!bt_name_valid(raw)) raw[0] = 0;
+    tk_snprintf(name, sizeof name, "%s", *raw ? raw : BT_NAME_DEFAULT);
     tk_snprintf(cmd, sizeof cmd,
                 "(i=0; while [ $i -lt %d ]; do dbus-send --system --print-reply --dest=org.bluez "
                 "/org/bluez/hci0 org.freedesktop.DBus.Properties.Set string:org.bluez.Adapter1 "
-                "string:Alias 'variant:string:%s' >/dev/null 2>&1 && break; usleep %d; i=$((i+1)); "
-                "done) >/dev/null 2>&1 &",
-                BT_NAME_TRIES, raw, BT_NAME_WAIT_US);
+                "string:Alias 'variant:string:%s' >/dev/null 2>&1 && hciconfig hci0 name '%s' "
+                ">/dev/null 2>&1 && break; usleep %d; i=$((i+1)); done) >/dev/null 2>&1 &",
+                BT_NAME_TRIES, raw, name, BT_NAME_WAIT_US);
     system(cmd);
 }
 

@@ -34,6 +34,7 @@
 #define CAT_ID_BASE 0x40000000 /* server rows' ids: above any songtable id stock gives */
 #define CAT_APP_SPAN 0x01000000
 #define CAT_POLL_MS 1000
+#define CAT_DARK_MS 10000 /* the poll's pace while dark, nothing playing and no catplay waiting */
 #define CAT_SCAN_MS 10000 /* the card's apps looked for again this often */
 #define CAT_LINE 8192     /* a catalogue line read this far; a longer one is skipped */
 #define CAT_BATCH 64      /* rows per insert statement */
@@ -77,6 +78,15 @@ typedef struct {
     unsigned apps;            /* a bit per app slot with rows in it (cat_ent.app) */
 } cat_ix;
 
+struct cat_copy {
+    unsigned long long key; /* the copy's path, fnv64 */
+    unsigned at;            /* its entry in cat.ix */
+};
+struct cat_copies {
+    unsigned n, gen; /* gen: the local_gen it was made for */
+    struct cat_copy c[];
+};
+
 typedef struct {
     char id[16];
     int ratings;   /* q2app ratings=: 1 the server's hearts in, 2 also stars and likes out */
@@ -108,6 +118,10 @@ static struct {
      * local_gen has moved since (an import, catalogue.avail) */
     cat_set local[G_KINDS];
     unsigned local_gen, local_built;
+    /* the entries with an offline copy by the copy's path hash (cat_copy_of), made on the UI
+     * thread each time local_gen moves (copies_build); stock's cover thread reads it too, so a new
+     * one is published whole and the one before freed only at the next build */
+    struct cat_copies *copies, *copies_old;
     void **stock_slot; /* stock's handle's global (stock_db_open's a1) */
     void *attached;    /* the stock handle cat is attached to */
     void *grey[CAT_GREY_ROWS];
@@ -721,7 +735,10 @@ static const char *const SCHEMA =
     "create table if not exists nw.serveritem(app,pid,sid,path);"
     "create table if not exists nw.serverlists(app,pid,list integer,twin integer);"
     "create index if not exists nw.servertable_album on servertable(album collate nocase);"
-    "create index if not exists nw.servermeta_url on servermeta(fileurl);";
+    "create index if not exists nw.servermeta_url on servermeta(fileurl);"
+    /* the UI's lookups by a row's path: Up Next's tags, Now Playing's info, My Fav's insert */
+    "create index if not exists nw.serverall_url on serverall(fileurl);"
+    "create index if not exists nw.servertable_url on servertable(fileurl);";
 
 /* The job's copy of the old file's tables into nw, less app's rows when it is imported again
  * (serverlists kept: which stock playlist is the app's stays known across imports). */
@@ -1156,9 +1173,51 @@ static int cat_app_of(const char *path);
  * Center or the car for one). Every UI lookup from a playing path to its server row comes here:
  * its cover (catalogue_cover: the player's cover thread, Up Next, the modal header), its play key
  * and hearts (cat_row_of) and its genre and year (catalogue_np_info). */
+static int copy_cmp(const void *a, const void *b) {
+    unsigned long long x = ((const struct cat_copy *)a)->key, y = ((const struct cat_copy *)b)->key;
+    return x < y ? -1 : x > y;
+}
+/* The offline copies' index for the index as it is now. UI thread. */
+static void copies_build(void) {
+    unsigned n = 0;
+    for (unsigned i = 0; i < cat.ix.n; ++i) n += cat.ix.e[i].local != 0;
+    struct cat_copies *c = calloc(1, sizeof *c + n * sizeof *c->c);
+    if (c) {
+        for (unsigned i = 0; i < cat.ix.n; ++i)
+            if (cat.ix.e[i].local)
+                c->c[c->n++] = (struct cat_copy){ fnv64(ix_str(&cat.ix, cat.ix.e[i].local)), i };
+        if (c->n) qsort(c->c, c->n, sizeof *c->c, copy_cmp);
+        c->gen = cat.local_gen;
+    }
+    free(cat.copies_old);
+    cat.copies_old = cat.copies;
+    __atomic_store_n(&cat.copies, c, __ATOMIC_RELEASE);
+}
+/* The entry whose offline copy is path; 0 for none, or with no index for the copies as they are,
+ * -1 (walk the entries). */
+static const cat_ent *copy_find(const char *path, int *walk) {
+    const struct cat_copies *c = __atomic_load_n(&cat.copies, __ATOMIC_ACQUIRE);
+    *walk = !c || c->gen != cat.local_gen;
+    if (*walk) return 0;
+    unsigned long long key = fnv64(path);
+    unsigned lo = 0, hi = c->n;
+    while (lo < hi)
+        if (c->c[(lo + hi) / 2].key < key)
+            lo = (lo + hi) / 2 + 1;
+        else
+            hi = (lo + hi) / 2;
+    for (; lo < c->n && c->c[lo].key == key; ++lo) {
+        const cat_ent *e = c->c[lo].at < cat.ix.n ? &cat.ix.e[c->c[lo].at] : 0;
+        if (e && e->local && !strcmp(ix_str(&cat.ix, e->local), path)) return e;
+    }
+    return 0;
+}
 static const cat_ent *cat_copy_of(const char *path) {
     if (!path || !tk_str_start_with(path, "/mnt/mmc/.")) return 0;
-    for (unsigned i = 0; i < cat.ix.n; ++i)
+    int walk;
+    const cat_ent *found = copy_find(path, &walk);
+    if (found) return found;
+    for (unsigned i = 0; walk && i < cat.ix.n; ++i)
         if (cat.ix.e[i].local && !strcmp(ix_str(&cat.ix, cat.ix.e[i].local), path))
             return &cat.ix.e[i];
     const char *app, *sid;
@@ -1316,6 +1375,19 @@ int catalogue_cover(const char *path, char *out, unsigned size) {
     int n = tk_snprintf(out, size, "%.*s/covers/%.*s.jpg", (int)(cat_at - row), row,
                         (int)(end - album), album);
     return n > 0 && (unsigned)n < size && !access(out, 4);
+}
+
+/* The app's larger cover of path's album, covers/512/<album>.jpg (q2-subsonic saves 500 px there,
+ * beside the 160 px list-row one catalogue_cover names), when the card has it: for art drawn
+ * larger than a row, Home's slideshow (slideshow.c). 0, out unspecified, when it is not there. */
+int catalogue_cover_large(const char *path, char *out, unsigned size) {
+    if (!catalogue_cover(path, out, size)) return 0;
+    char *name = strrchr(out, '/');
+    unsigned k = (unsigned)strlen(out);
+    if (!name || k + 5 > size) return 0;
+    memmove(name + 5, name + 1, k - (unsigned)(name + 1 - out) + 1);
+    memcpy(name + 1, "512/", 4);
+    return !access(out, 4);
 }
 
 /* ---- Greyed and marked rows: stock's pooled table rows as they are bound (ringnav_table_load),
@@ -1549,31 +1621,32 @@ void catalogue_row_mark(void *w, void *canvas, void *row, int x, int y) {
 
 /* ---- Apps, their files, the poll ---- */
 
-static void cat_scan(void) {
-    char path[64], raw[512];
-    void *d = card_mounted() ? opendir("/mnt/mmc") : 0;
-    int n = 0;
+/* A card app's q2app, for cat_scan: a catalogue app in the next slot, its state kept from the scan
+ * before (was, wasn) by id. Stops once CAT_APPS are found. */
+struct cat_scanning {
     cat_app_t was[CAT_APPS];
-    memcpy(was, cat.app, sizeof was);
-    int wasn = cat.napps;
-    for (struct dirent *e; d && n < CAT_APPS && (e = readdir(d));) {
-        const char *id = e->d_name + 1;
-        if (e->d_name[0] != '.' || !*id || strlen(id) >= sizeof cat.app[0].id ||
-            !strcmp(id, "q2pod"))
-            continue;
-        addon_q2app(id, path, sizeof path);
-        if (!state_read(path, raw, sizeof raw) || number(raw, "catalogue") != 1) continue;
-        cat_app_t *a = &cat.app[n++];
-        memset(a, 0, sizeof *a);
-        for (int i = 0; i < wasn; ++i)
-            if (!strcmp(was[i].id, id)) *a = was[i];
-        tk_snprintf(a->id, sizeof a->id, "%s", id);
-        a->ratings = number(raw, "ratings");
-        field(raw, "downloads", a->dl, sizeof a->dl);
-        if (strstr(a->dl, "/") || a->dl[0] == '.') a->dl[0] = 0; /* one folder at the card's root */
-    }
-    if (d) closedir(d);
-    cat.napps = n;
+    int wasn, n;
+};
+static int cat_app_found(const char *id, const char *raw, void *ctx) {
+    struct cat_scanning *c = ctx;
+    if (strlen(id) >= sizeof cat.app[0].id || !strcmp(id, "q2pod") ||
+        number(raw, "catalogue") != 1)
+        return 0;
+    cat_app_t *a = &cat.app[c->n++];
+    memset(a, 0, sizeof *a);
+    for (int i = 0; i < c->wasn; ++i)
+        if (!strcmp(c->was[i].id, id)) *a = c->was[i];
+    tk_snprintf(a->id, sizeof a->id, "%s", id);
+    a->ratings = number(raw, "ratings");
+    field(raw, "downloads", a->dl, sizeof a->dl);
+    if (strstr(a->dl, "/") || a->dl[0] == '.') a->dl[0] = 0; /* one folder at the card's root */
+    return c->n == CAT_APPS;
+}
+static void cat_scan(void) {
+    struct cat_scanning c = { .wasn = cat.napps };
+    memcpy(c.was, cat.app, sizeof c.was);
+    if (card_mounted()) addon_q2apps(cat_app_found, &c);
+    cat.napps = c.n;
 }
 
 /* The catalogue's first line: its seq, into seq (24 bytes), or 0. */
@@ -1660,7 +1733,10 @@ static void cat_avail(int slot) {
             int n = tsv_split(line + gone, f2, 2);
             cat_ent *e = ix_sid(&cat.ix, slot, f2[0]);
             if (!e || e->dup) continue;
-            e->local = gone || n < 2 || !card_path(f2[1]) ? 0 : ix_put(&cat.ix, f2[1]);
+            int copy = !gone && n >= 2 && card_path(f2[1]);
+            /* the copy the row has already (a song synced again): no new string */
+            if (copy && e->local && !strcmp(ix_str(&cat.ix, e->local), f2[1])) continue;
+            e->local = copy ? ix_put(&cat.ix, f2[1]) : 0;
             ++cat.local_gen;
         }
     /* a cut last line waits for its newline */
@@ -1689,10 +1765,16 @@ static void cat_autostart(void) {
 
 static void ratings_in(int slot);
 static void catplay_poll(void);
+static void copies_build(void);
 void catalogue_poll(void) {
     unsigned now = time_now_ms();
     if (cat.running && __atomic_load_n(&cat.done, __ATOMIC_ACQUIRE)) cat_swap();
-    if (now - cat.polled < CAT_POLL_MS) return;
+    if (!cat.copies || cat.copies->gen != cat.local_gen) copies_build(); /* a new index */
+    /* dark with nothing to play and no catplay waiting on its app, nothing here is looked at by
+     * anyone: the app's files every CAT_DARK_MS, not each second */
+    int idle = !g_backlight_status && !cat.cp_at && !cat.cp_wake && !cat.cp_link &&
+               mclGetPlayStatus() != 2;
+    if (now - cat.polled < (idle ? CAT_DARK_MS : CAT_POLL_MS)) return;
     /* nothing indexed and the screen off: no app's files looked at, so a Q2 with no server signed
      * in leaves the card alone while it is dark */
     if (!cat.ix.n && !cat.running && !g_backlight_status) return;
@@ -1703,6 +1785,7 @@ void catalogue_poll(void) {
         if (!cat_started && card_mounted()) cat_autostart(); /* the first scan with the card */
     }
     int up = 0;
+    char seqs[CAT_APPS][24]; /* each app's catalogue.tsv seq, read once a poll; "" for none */
     for (int i = 0; i < cat.napps; ++i) {
         char path[48], raw[256], v[8];
         tk_snprintf(path, sizeof path, "/tmp/q2-%s.state", cat.app[i].id);
@@ -1713,19 +1796,20 @@ void catalogue_poll(void) {
         cat_avail(i);
         /* a server row's line finds its path in the index: not while a job builds a new one, nor
          * before the app's catalogue is imported (a boot's first poll starts that job) */
-        char seq[24];
-        if (!cat.running && !(cat_seq(cat.app[i].id, seq) && strcmp(seq, cat.app[i].seq)))
-            ratings_in(i);
+        seqs[i][0] = 0;
+        if (cat.running) continue;
+        if (!cat_seq(cat.app[i].id, seqs[i])) seqs[i][0] = 0;
+        if (!*seqs[i] || !strcmp(seqs[i], cat.app[i].seq)) ratings_in(i);
     }
+    if (!cat.copies || cat.copies->gen != cat.local_gen) copies_build(); /* catalogue.avail's */
     /* Smart Wi-Fi's radio off or coming back counts: a press brings the link (catalogue_load) */
     cat.online = up && (networkGetConnectStatus() > 0 || smart_wifi_back());
     catplay_poll();
     if (cat.running || library_scanning() || !card_mounted()) return;
     for (int i = 0; i < cat.napps; ++i) {
-        char seq[24];
-        int has = cat_signed_in(i) && cat_seq(cat.app[i].id, seq);
-        if (has && strcmp(seq, cat.app[i].seq)) {
-            cat_start(i, seq);
+        int has = *seqs[i] && cat_signed_in(i);
+        if (has && strcmp(seqs[i], cat.app[i].seq)) {
+            cat_start(i, seqs[i]);
             return;
         }
         if (!has && cat.ix.apps >> i & 1) { /* signed out, or its file gone: its rows leave */
@@ -1783,14 +1867,19 @@ static int catplay_write(int slot, void *q, int at) {
     len = (unsigned)tk_snprintf(b, cap, "%u %d\n", ++cat.cp_seq, at);
     for (unsigned i = 0; i < n; ++i) {
         const char *p = P(deque_at(q, i), REC_PATH);
-        if (len + 1100 > cap) {
+        unsigned k = p ? (unsigned)strlen(p) : 0;
+        while (len + k + 2 > cap) { /* doubled until the path, its newline and the NUL fit */
             char *g = realloc(b, cap *= 2);
-            if (!g) break;
+            if (!g) {
+                free(b);
+                return 0;
+            }
             b = g;
         }
         len += (unsigned)tk_snprintf(b + len, cap - len, "%s\n", p ? p : "");
     }
     tk_snprintf(path, sizeof path, "/tmp/q2-%s.catplay", cat.app[slot].id);
+    ahead_start(cat.app[slot].id, cat.cp_seq); /* Download Ahead for the list, before it starts */
     int ok = blob_io(path, "/tmp/q2-catplay.tmp", b, len, 1);
     free(b);
     return ok;
@@ -2219,22 +2308,44 @@ static char rated_kind(const char *v) {
            : *v >= '0' && *v <= '9'   ? 'h'
                                       : 0;
 }
-/* The newest time ratings.out holds for key (its first column) changing kind, 0 for none; a line
- * of one number changed both. */
-static unsigned out_time(const char *out, const char *key, char kind) {
-    unsigned t = 0, k = strlen(key);
-    for (const char *l = out; l && *l;) {
-        const char *e = strstr(l, "\n"), *tab = l, *v = 0;
-        for (int c = 0; c < 3 && tab; ++c) {
-            tab = strstr(tab, "\t") ? strstr(tab, "\t") + 1 : 0;
-            if (c == 1) v = tab;
-        }
-        char was = v ? rated_kind(v) : 0;
-        if (tab && !strncmp(l, key, k) && l[k] == '\t' && (was == kind || was == 'h') &&
-            (unsigned)atoi(tab) > t)
-            t = (unsigned)atoi(tab);
-        l = e ? e + 1 : 0;
+static unsigned hex32(const char *s);
+/* ratings.out's lines, each its key, kind ('l', 's' or 'h') and time, sorted by key: read and
+ * indexed once a ratings.in, so each line looks its key up rather than reading the file again. */
+typedef struct {
+    unsigned key, t;
+    char kind;
+} out_t;
+static int out_cmp(const void *a, const void *b) {
+    unsigned x = ((const out_t *)a)->key, y = ((const out_t *)b)->key;
+    return x < y ? -1 : x > y;
+}
+static out_t *out_index(char *out, unsigned *n) {
+    unsigned lines = 0;
+    *n = 0;
+    for (const char *l = out; l && *l; l = strstr(l, "\n") ? strstr(l, "\n") + 1 : 0) ++lines;
+    out_t *o = lines ? calloc(lines, sizeof *o) : 0;
+    for (char *l = out, *e; o && l && *l; l = e) {
+        if ((e = strstr(l, "\n"))) *e++ = 0;
+        char *f[4];
+        unsigned key;
+        if (tsv_split(l, f, 4) < 4 || !(key = hex32(f[0]))) continue;
+        o[*n].key = key, o[*n].kind = rated_kind(f[2]), o[*n].t = (unsigned)atoi(f[3]);
+        ++*n;
     }
+    if (*n) qsort(o, *n, sizeof *o, out_cmp);
+    return o;
+}
+/* The newest time the index holds for key changing kind, 0 for none; a line of one number changed
+ * both. */
+static unsigned out_time(const out_t *o, unsigned n, unsigned key, char kind) {
+    unsigned lo = 0, hi = n, t = 0;
+    while (lo < hi)
+        if (o[(lo + hi) / 2].key < key)
+            lo = (lo + hi) / 2 + 1;
+        else
+            hi = (lo + hi) / 2;
+    for (; lo < n && o[lo].key == key; ++lo)
+        if ((o[lo].kind == kind || o[lo].kind == 'h') && o[lo].t > t) t = o[lo].t;
     return t;
 }
 static unsigned hex32(const char *s) {
@@ -2276,12 +2387,13 @@ static int key_row(void *ctx, int n, char **v, char **c) {
         if (!k->l[lo].path) k->l[lo].path = strdup(v[0]);
     return 0;
 }
-extern int rate_keep(int album, unsigned key, int n);
+extern int rate_keep(int album, unsigned key, int n), rate_release(void);
+extern void rate_hold(void);
 extern int stock_db_open(const char *path, void **db); /* playlists.c */
 /* My Fav: the song's row in or out, as stock keeps it, and copy's own row (a server row's Stream
- * Cache copy, which stock's heart puts in by its path, or 0) out either way. */
-static void fav_set(const char *path, int on, const char *copy) {
-    void *db = 0;
+ * Cache copy, which stock's heart puts in by its path, or 0) out either way; on db, or a
+ * connection of its own for 0. */
+static void fav_set_on(void *db, const char *path, int on, const char *copy) {
     char sql[1700], *o = sql, *end = sql + sizeof sql - CAT_SLACK;
     PUT(o, end, "delete from myfav where fileurl=");
     o = sq(o, end, path);
@@ -2295,11 +2407,13 @@ static void fav_set(const char *path, int on, const char *copy) {
             catalogue_path(path) ? "servertable" : "songtable");
         o = sq(o, end, path), PUT(o, end, " limit 1");
     }
-    if (o >= end || stock_db_open("/mnt/data/database.db", &db)) return;
+    int own = !db;
+    if (o >= end || (own && stock_db_open("/mnt/data/database.db", &db))) return;
     *o = 0;
     sqlite3_exec(db, sql, 0, 0, 0);
-    sqlite3_close(db);
+    if (own) sqlite3_close(db);
 }
+static void fav_set(const char *path, int on, const char *copy) { fav_set_on(0, path, on, copy); }
 /* My Fav's contents may have changed: catalogue_row_fav reads the table again. */
 void catalogue_fav_changed(void) { ++cat.fav_gen; }
 /* Moves with each catalogue_fav_changed: Now Playing reads a copy's own My Fav again (ratings.c
@@ -2344,8 +2458,9 @@ void catalogue_row_unfav(void *r) {
  * heart given to the copy here follows the server's). An app with ratings=1 writes one number:
  * five is its star, the like, with the stars left as they are; under five is that many stars and
  * no like. A line is passed over when the Q2's own change of the same kind to that song, still in
- * ratings.out, is newer. The file is renamed before it is read, so lines the app writes meanwhile
- * go to a new ratings.in, not lost. */
+ * ratings.out, is newer (ratings.out indexed once, out_index). The file is renamed before it is
+ * read, so lines the app writes meanwhile go to a new ratings.in, not lost. The whole file is one
+ * pass: the stars written once, My Fav in one transaction. */
 static void ratings_in(int slot) {
     char in[64], taking[72], outp[64];
     if (!cat.app[slot].ratings) return;
@@ -2353,9 +2468,10 @@ static void ratings_in(int slot) {
     tk_snprintf(taking, sizeof taking, "%s.taking", in);
     tk_snprintf(outp, sizeof outp, "/mnt/mmc/.%s/ratings.out", cat.app[slot].id);
     if (access(taking, 0) && (access(in, 0) || rename(in, taking))) return;
-    unsigned size = 0, osize = 0, lines = 0;
+    unsigned size = 0, osize = 0, lines = 0, nout = 0;
     char *raw = read_all(taking, 1 << 20, &size);
     char *out = raw ? read_all(outp, 1 << 20, &osize) : 0;
+    out_t *ox = out ? out_index(out, &nout) : 0;
     for (char *l = raw; l && *l; l = strstr(l, "\n") ? strstr(l, "\n") + 1 : 0) ++lines;
     in_set k = { lines ? calloc(lines, sizeof *k.l) : 0, 0 };
     for (char *l = raw, *e; k.l && l && *l; l = e) {
@@ -2369,8 +2485,8 @@ static void ratings_in(int slot) {
         int stars = kind == 's' || (kind == 'h' && v < 5) ? v : -1;
         int like = kind == 'l' ? v : kind == 'h' ? v == 5 : -1;
         unsigned at = (unsigned)atoi(f[3]);
-        if (out && stars >= 0 && out_time(out, f[0], 's') > at) stars = -1;
-        if (out && like >= 0 && out_time(out, f[0], 'l') > at) like = -1;
+        if (stars >= 0 && out_time(ox, nout, key, 's') > at) stars = -1;
+        if (like >= 0 && out_time(ox, nout, key, 'l') > at) like = -1;
         if (stars < 0 && like < 0) continue;
         in_t *t = &k.l[k.n++];
         t->key = key, t->stars = stars, t->like = like;
@@ -2387,13 +2503,23 @@ static void ratings_in(int slot) {
         sqlite3_exec(db, "select fileurl,time from songtable", key_row, &k, 0);
         sqlite3_close(db);
     }
+    /* the whole file at once: the stars in the table, written once (rate_release); My Fav's rows
+     * on one connection in one transaction, so one journal and one sync */
+    int likes = 0;
+    for (unsigned i = 0; i < k.n; ++i) likes += k.l[i].like >= 0 && k.l[i].path;
+    db = 0;
+    if (likes && !stock_db_open("/mnt/data/database.db", &db))
+        sqlite3_exec(db, "begin", 0, 0, 0);
+    rate_hold();
     for (unsigned i = 0; i < k.n; ++i) {
         if (k.l[i].stars >= 0) rate_keep(0, k.l[i].key, k.l[i].stars);
-        if (k.l[i].like >= 0 && k.l[i].path)
-            fav_set(k.l[i].path, k.l[i].like, k.l[i].copy), catalogue_fav_changed();
+        if (k.l[i].like >= 0 && k.l[i].path && db) fav_set_on(db, k.l[i].path, k.l[i].like, k.l[i].copy);
         free(k.l[i].path), free(k.l[i].copy);
     }
-    free(k.l), free(raw), free(out);
+    rate_release();
+    if (db) sqlite3_exec(db, "commit", 0, 0, 0), sqlite3_close(db);
+    if (likes) catalogue_fav_changed();
+    free(k.l), free(raw), free(out), free(ox);
     unlink(taking);
     ratings_copy_due();
 }

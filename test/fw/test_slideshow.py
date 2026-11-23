@@ -1,7 +1,7 @@
 """slideshow.c: Split's slideshow picks, a random library song's album art off the UI thread (docs/ipod.md#home)."""
 import ctypes as C
 
-from conftest import FNV_PRIME, FNV_SEED, O, Files, fnv1a
+from conftest import FNV_PRIME, FNV_SEED, O, Files, fnv1a, stock_start_with
 
 SLIDE = '/tmp/q2-slide.jpg'
 ROW = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_int, C.c_void_p, C.c_void_p)
@@ -14,11 +14,15 @@ class Pick(C.Structure):
 
 
 class Library:
-    """era_sql's connection: each query answers the next of songs, (path, artist, album) or None for no row; the cover
-    readers write a picture for the paths in embedded or folder; the files on the card and in /tmp as a dict."""
-    def __init__(self, fw, songs, embedded=(), folder=()):
-        self.fw, self.songs, self.sql = fw, list(songs), []
+    """era_sql's connection: each song query answers the next of songs, (path, artist, album) or None for no row; the
+    count query the card's and the server's highest rowid (server None: no catalogue attached, so a query naming cat.
+    fails); the cover readers write a picture for the paths in embedded or folder; the files on the card and in /tmp as
+    a dict."""
+    def __init__(self, fw, songs, embedded=(), folder=(), card=100, server=None, seed=12345):
+        self.fw, self.songs, self.sql, self.counts = fw, list(songs), [], []
+        self.rows, self.seed = (card, server), seed
         self.card = Files(fw)
+        fw.mock('fw_access', lambda path, *_: 0 if C.string_at(path).decode() in self.card.files else -1)
         self.now = [5000]
         fw.mock('time_now_ms', lambda *_: self.now[0])
         fw.mock('sqlite3_open', lambda path, db, *_: setattr(C.c_void_p.from_address(db), 'value', 0x5d) or 0)
@@ -28,9 +32,18 @@ class Library:
         self.sizes = []
 
     def exec(self, db, sql, cb, ctx, *_):
-        if not C.string_at(sql).startswith(b'select'):
+        q = C.string_at(sql).decode()
+        if not q.startswith('select'):
             return 0  # era_sql's PRAGMAs
-        self.sql.append(C.string_at(sql).decode())
+        if 'cat.' in q and self.rows[1] is None:
+            return 1  # no such database
+        if not q.startswith('select fileurl'):
+            self.counts.append(q)
+            v = [b'%d' % self.rows[0], b'%d' % self.seed] + ([b'%d' % self.rows[1]] if 'cat.' in q else [])
+            row = (C.c_char_p * len(v))(*v)  # held until the callback returns
+            ROW(cb)(ctx, len(v), C.addressof(row), 0)
+            return 0
+        self.sql.append(q)
         song = self.songs.pop(0) if self.songs else None
         if song and cb:
             v = (C.c_char_p * 3)(*[None if x is None else x.encode() for x in song])
@@ -147,3 +160,60 @@ def test_a_refused_thread_waits_too(fw):
     lib.take()
     lib.take()
     assert len(fw.calls('fw_pthread_create')) == 1 and lib.state().failed & 1
+
+
+def test_a_server_only_library_shows_its_apps_album_covers(fw):
+    """The owner's library is all a server's (servertable), the card's songtable empty: the picks are the server's
+    rows, each shown with the cover its app keeps for the album (catalogue_cover), made the slide's size."""
+    fw.mock('tk_str_start_with', stock_start_with)
+    row = '/mnt/mmc/.subsonic/cat/al1/s1.flac'
+    lib = Library(fw, [(row, 'Ann', 'Alpha')], card=0, server=9199)
+    lib.card.files['/mnt/mmc/.subsonic/covers/al1.jpg'] = b'jpeg'
+    made = []
+    fw.mock('toolsThumbSpecCover', lambda src, dst, w, h, *_: made.append((C.string_at(src).decode(), (w, h)))
+            or lib.card.files.__setitem__(C.string_at(dst).decode(), b'jpeg') or 1)
+    sp = lib.pick()
+    assert (sp.state, sp.kind) == (ANSWERED, 1) and SLIDE in lib.card.files
+    assert made == [('/mnt/mmc/.subsonic/covers/al1.jpg', (O['SLIDE_ART_PX'],) * 2)]
+    assert len(lib.sql) == 1 and 'cat.servertable' in lib.sql[0] and 'main.songtable' not in lib.sql[0]
+    assert lib.sizes == []  # no file to read embedded art from
+
+
+import pytest
+
+
+@pytest.mark.parametrize('large', [True, False])
+def test_a_server_album_s_slide_is_made_from_its_512_px_cover_when_the_card_has_it(fw, large):
+    """The owner's report (2026-11-23, "why are slideshow library album covers so low res"): the slide was made from
+    the app's list-row cover, 160 px, scaled up to SLIDE_ART_PX (352) and blocky. The app keeps a larger one beside
+    it, covers/512/<album>.jpg (500 px on the owner's card, 2,048 of 2,048 albums): the slide is made from that,
+    and from the small one only when it is missing."""
+    fw.mock('tk_str_start_with', stock_start_with)
+    row = '/mnt/mmc/.subsonic/cat/al1/s1.flac'
+    lib = Library(fw, [(row, 'Ann', 'Alpha')], card=0, server=9199)
+    lib.card.files['/mnt/mmc/.subsonic/covers/al1.jpg'] = b'jpeg'
+    if large:
+        lib.card.files['/mnt/mmc/.subsonic/covers/512/al1.jpg'] = b'jpeg'
+    made = []
+    fw.mock('toolsThumbSpecCover', lambda src, dst, w, h, *_: made.append(C.string_at(src).decode())
+            or lib.card.files.__setitem__(C.string_at(dst).decode(), b'jpeg') or 1)
+    assert lib.pick().kind == 1
+    assert made == ['/mnt/mmc/.subsonic/covers/512/al1.jpg' if large else '/mnt/mmc/.subsonic/covers/al1.jpg']
+
+
+def test_a_library_on_both_draws_from_each_by_its_size(fw):
+    """Songs on the card and on a server: each try takes the card's table or the server's, in proportion to their
+    rows, so neither hides the other."""
+    picks = {'main': 0, 'cat': 0}
+    for seed in range(40):
+        lib = Library(fw, [None] * O['SLIDE_TRIES'], card=100, server=300, seed=seed * 7919)
+        lib.pick()
+        for q in lib.sql:
+            picks['cat' if 'cat.servertable' in q else 'main'] += 1
+    total = picks['main'] + picks['cat']
+    assert 0.6 < picks['cat'] / total < 0.9, picks
+
+
+def test_without_a_catalogue_the_card_alone(fw):
+    lib = Library(fw, [('/mnt/mmc/A/1.flac', 'Ann', 'Alpha')], embedded={'/mnt/mmc/A/1.flac'})
+    assert lib.pick().kind == 1 and 'main.songtable' in lib.sql[0] and len(lib.counts) == 1  # cat's refused: the card's

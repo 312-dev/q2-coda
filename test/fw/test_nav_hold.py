@@ -3279,3 +3279,102 @@ def test_the_song_search_box_gives_the_strip_its_magnifier(editor, ui):
     editor.pick('Search')
     edit = ui.lookup(editor.ple.page, 'search_edit', 1)
     assert ui.nodes[edit].props.get('_strip_return') == STRIP_SEARCH
+
+
+# A sideways drag across a Settings row is no tap on it (the device's trial, 2026-11-22: a 110 px drag across Gain
+# changed it High to Low, one across Default Volume switched it on). AWTK clicks a button lifted inside it, and a
+# list's scroll view takes only drags up or down, so ringnav_dispatch drops a row's click whose touch went more
+# than TAP_PX from its press either way; a tap's few pixels of jitter still click, as does Centre after a drag.
+DOWN, MOVE, UP = O['EVT_POINTER_DOWN'] - 1, O['EVT_POINTER_MOVE_BEFORE'] - 1, O['EVT_POINTER_UP_BEFORE'] - 1
+
+
+def touch_path(ui, fw, target, path):
+    """One touch along path (x, y points: press, moves, lift) through ringnav_dispatch as the window manager sends
+    it to target, then the click AWTK makes on a lift inside it: the click's answer."""
+    dispatch = fw.fn('ringnav_dispatch', C.c_int, C.c_void_p, C.c_void_p)
+    event = C.create_string_buffer(0x40)
+    for i, (x, y) in enumerate(path):
+        kind = DOWN if i == 0 else UP if i == len(path) - 1 else MOVE
+        ui.pointer_event(C.addressof(event), kind, target, x, y)
+        dispatch(target, C.addressof(event))
+    ui.pointer_event(C.addressof(event), O['EVT_CLICK'], target, *path[-1])
+    return dispatch(target, C.addressof(event))
+
+
+def settings_row(ui):
+    win = ui.window('playset_page')
+    view = ui.child(ui.child(win, 'list_view', 0, 40, 375, 280), 'scroll_view', 0, 0, 375, 280)
+    return win, ui.child(view, 'list_item', 0, 64, 375, 32)
+
+
+def clicks(ui, w):
+    return [d for d in ui.dispatched if d == (w, O['EVT_CLICK'])]
+
+
+@pytest.mark.parametrize('path', [
+    [(100, 75)] + [(100 + 11 * i, 75 + (i % 2)) for i in range(1, 11)],  # 110 px right, as hwtouch.py drew it
+    [(330, 172), (260, 172), (200, 171)],                                  # 130 px left
+    [(150, 70), (150, 82)],                                                # 12 px down, the scroll's to take
+])
+def test_a_drag_across_a_row_is_no_tap_on_it(ui, fw, path):
+    _, row = settings_row(ui)
+    assert touch_path(ui, fw, row, path) == STOP and clicks(ui, row) == []
+
+
+@pytest.mark.parametrize('path', [[(100, 75), (100, 75)], [(100, 75), (103, 76), (98, 73), (102, 77)],
+                                  [(100, 75), (110, 85)]])
+def test_a_tap_with_a_finger_s_jitter_still_clicks_its_row(ui, fw, path):
+    _, row = settings_row(ui)
+    touch_path(ui, fw, row, path)
+    assert clicks(ui, row) == [(row, O['EVT_CLICK'])]
+
+
+def test_centre_after_a_drag_still_clicks_and_a_button_off_the_lists_keeps_stock_s_click(ui, fw):
+    win, row = settings_row(ui)
+    assert touch_path(ui, fw, row, [(100, 75), (210, 75)]) == STOP
+    dispatch = fw.fn('ringnav_dispatch', C.c_int, C.c_void_p, C.c_void_p)
+    key = C.create_string_buffer(0x40)
+    C.c_int.from_address(C.addressof(key) + O['EVENT_TYPE']).value = O['EVT_KEY_DOWN']
+    C.c_int.from_address(C.addressof(key) + O['EVENT_KEY']).value = O['KEY_CENTER']
+    dispatch(row, C.addressof(key))
+    click = C.create_string_buffer(0x40)
+    C.c_int.from_address(C.addressof(click) + O['EVENT_TYPE']).value = O['EVT_CLICK']
+    dispatch(row, C.addressof(click))
+    assert clicks(ui, row) == [(row, O['EVT_CLICK'])]
+    ok = ui.child(win, 'button', 100, 250, 175, 40)  # a dialog's own button, in no list
+    touch_path(ui, fw, ok, [(120, 260), (240, 262)])
+    assert clicks(ui, ok) == [(ok, O['EVT_CLICK'])]
+
+
+# ---- a start from the menu with nothing to play to (output_rule.c): refused before anything changes ----
+
+def no_output(fw):
+    asked = []
+    fw.mock('check_forbid_play_no_headset', lambda quiet, *_: asked.append(quiet) or 1)
+    return asked
+
+
+def test_resume_with_nothing_to_play_to_sets_no_seek(hold, recs, ui, st, fw):
+    """Refused, the chapter's place is not left waiting (rs_go) for whatever plays that book next, and no page opens."""
+    chapters = book(recs)
+    hold.card.files[RESUME_FILE] = places_file((key_of(BOOK), 900))
+    hold.songs_page('allmusic_page', chapters, sel=0)
+    hold.hold()
+    assert hold.menu()[0] == 'Resume'
+    asked = no_output(fw)
+    hold.pick('Resume')
+    assert asked == [0] and 'playing_page' not in ui.went and ui.toasts == []
+    assert (st('rs_go').value, st('rs_go_key', C.c_uint).value) == (0, 0)
+
+
+def test_shuffle_with_nothing_to_play_to_keeps_the_play_mode(hold, recs, ui, fw):
+    """Shuffle sets stock's mode to Shuffle and says "Shuffled Songs" around its start (library_lists.c shuffle_play):
+    refused first, neither happens."""
+    albums = [recs(album=a, artist='The Beatles', kind=4, id_=i + 1) for i, a in enumerate(('Help!', 'Revolver'))]
+    hold.songs_page('localclass_page', albums, sel=1, cls=0xf003)
+    hold.hold()
+    hold.menu()
+    asked = no_output(fw)
+    hold.pick('Shuffle')
+    assert asked == [0] and 'playing_page' not in ui.went and ui.toasts == []
+    assert not fw.calls('config_playmode') and not fw.calls('mclLoadPlayList')

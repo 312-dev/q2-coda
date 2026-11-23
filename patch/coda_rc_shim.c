@@ -8,10 +8,13 @@
  *   owner as source=, a Radio or Internet Radio station live=1 with station=; a pressed server song from the
  *   press on, as Now Playing shows it; the last toast for CR_NOTE_MS), and the queue's song ids to /tmp/coda-rc.queue (a stream download's
  *   path, title and artist beside its id 0);
- * - takes its commands from /tmp/coda-rc.cmd: play a list of song ids from one of them, or shuffled (ids in
+ * - takes its commands from the queue coda_rc_cmdq.h describes (the FIFO /tmp/coda-rc.cmdq, read by a thread of
+ *   its own, which wakes the UI loop for each), or from the single file /tmp/coda-rc.cmd that a sender with no
+ *   queue writes: play a list of song ids from one of them, or shuffled (ids in
  *   /tmp/coda-rc.list), Play, Pause, Play/Pause, Next, Previous, seek, scan (Car Audio's held Next or Previous: seek.c seek_car), set the volume, set shuffle and
  *   repeat, rate the playing song, play a song of the queue, start or stop a radio (song_radio.c); and
- *   answers each in /tmp/coda-rc.ack, a Pause or Play once the player shows it;
+ *   answers each in /tmp/coda-rc.ack (the last CR_ACKS answers, newest first), a Pause or Play once the player
+ *   shows it;
  * - starts a card app the daemon named in /tmp/coda-rc.wake, for a cover the car asked for (addon_cover_wake);
  * - shows the pairing code while /tmp/coda-rc.pair exists, and writes /tmp/coda-rc.pair-cancel when the
  *   user closes it.
@@ -22,24 +25,36 @@
  * pass after, else every CR_FILES_MS; without the pipe (a daemon this demo did not start, the pipe refused or
  * closed) they are read every CR_POLL_MS (docs/internals.md#car-remote-tell).
  * While Car Audio's iPhone is on the cable (usb_car.c) Now Playing is written and the commands taken with the switch
- * off too, every CR_POLL_MS, for q2-iap, which reads and writes the same files; the daemon is not started for it.
+ * off too, for q2-iap, which reads Now Playing and sends the car's buttons the same way: queued ones at once, the
+ * single file every CR_POLL_MS; the daemon is not started for it.
  * Everything the protocol needs is in the daemon; here only a few words of state. */
 #include "navigation.h"
+#include "coda_rc_cmdq.h"
 
 #define CR_POLL_MS 500
 #define CR_FILES_MS 5000 /* with the daemon's pipe: the command files read at least this often */
-#define CR_RESTART_MS 30000 /* a daemon that died is started again at most this often */
+#define CR_RESTART_MS 30000 /* a daemon or q2-iroh that died is started again at most this often */
+#define CR_NET_IDLE_MS 600000 /* Car Remote holds Smart Wi-Fi's radio this long after its last use (coda_rc_wants_wifi) */
+#define CR_IROH_DOWN_MS 60000 /* q2-iroh runs on this long after Wi-Fi's link went, for a link that comes back */
 #define CR_SETTLE_MS 3000   /* a Pause or Play the player has not shown by then is refused (under coda_rc.c ACK_MS) */
 #define CR_DAEMON "/usr/bin/coda-rc"
 #define CR_PID "/tmp/coda-rc.pid"
 /* q2-iroh (remote/iroh-sidecar): its key beside coda-rc's, the relays to use instead of n0's public ones one URL a
- * line (none: n0's), and the endpoint id and home relay it keeps in CR_IROH_INFO for the daemon and Pair a Phone */
+ * line (none: n0's), the endpoint id and home relay it keeps in CR_IROH_INFO for the daemon and Pair a Phone, and
+ * its log, which it keeps to 64 KB (--log); each stream goes to coda-rc's q2-iroh port named by its phone's key, and
+ * only the keys coda-rc lists (paired phones') come in, anyone else only while Pair a Phone shows its code
+ * (docs/remote-protocol.md#across-networks-only-paired-phones) */
 #define CR_IROH "/usr/bin/q2-iroh"
 #define CR_IROH_PID "/tmp/q2-iroh.pid"
 #define CR_IROH_INFO "/tmp/coda-rc.iroh"
 #define CR_IROH_ARGS                                                                                                   \
     " serve --key /mnt/data/coda-rc/iroh.key --relay-file /mnt/data/coda-rc/relay --info " CR_IROH_INFO               \
-    " --pid " CR_IROH_PID " --nice 19"
+    " --pid " CR_IROH_PID " --nice 19 --log /tmp/q2-iroh.log --forward-named 127.0.0.1:7721"                       \
+    " --allow-file /tmp/coda-rc.iroh-allow --open-while /tmp/coda-rc.qr"
+#define CR_CMDQ CRC_CMDQ /* coda_rc_cmdq.h: the FIFO the daemon and q2-iap send commands down */
+#define CR_QN 4          /* lines held between the reader thread and the UI pass; the FIFO holds the rest */
+#define CR_LINE CRC_CMDQ_LINE
+#define CR_ACKS 4 /* answers kept in CR_ACK, so two acked between the daemon's reads both reach it */
 #define CR_NOW "/tmp/coda-rc.now"
 #define CR_QUEUE "/tmp/coda-rc.queue"
 #define CR_CMD "/tmp/coda-rc.cmd"
@@ -56,7 +71,7 @@
 #define CR_NOTE_MS 4000   /* a toast stays in Now Playing for the car this long (NowPlaying.notice) */
 
 static struct {
-    int checked, on;
+    int checked, on, radio_said; /* radio_said: the radio flag cr_now last logged */
     unsigned at, started_at, seq, now_hash, now_n, q_hash, q_gen;
     unsigned play_timer, toast_timer;
     int want; /* a Pause (1) or Play (2) waiting for the player; 0 none */
@@ -72,6 +87,19 @@ static struct {
     volatile int tell_live;   /* the tell thread waits on the daemon's pipe */
     volatile unsigned told;   /* bytes the daemon sent, counted by that thread */
     unsigned told_seen, files_at;
+    /* The command queue (cr_cmdq_read): lines the reader thread took from CR_CMDQ, q_head written by it alone,
+     * q_tail by the UI thread alone; each line as state_read leaves one, '\n' first. q_live: the thread reads;
+     * q_tried: the last time making the FIFO failed. play_line: the play or radio command its timer runs. */
+    char q[CR_QN][CR_LINE];
+    unsigned q_head, q_tail, q_tried;
+    int q_live;
+    char play_line[CR_LINE];
+    unsigned acks[CR_ACKS][2]; /* the last commands answered, newest first: seq, code (cr_ack) */
+    /* online: a phone has an authenticated session (CR_ONLINE not empty, read on the files' pass); net_at: Car
+     * Remote's last use (on, a session, a pairing); link_at: Wi-Fi's link last seen up; iroh_at: q2-iroh's last
+     * start, 0 while it is stopped for want of a link */
+    int online;
+    unsigned net_at, link_at, iroh_at;
 } cr __attribute__((section(".scratch")));
 
 int coda_rc_enabled(void) {
@@ -101,11 +129,48 @@ static int cr_alive(const char *pid_file) {
 static int cr_running(void) { return cr_alive(CR_PID); }
 
 /* q2-iroh, unless it runs or the image has none; its id file is the new one's, never a dead one's */
-static void cr_iroh_start(void) {
+static void cr_iroh_start(unsigned now) {
+    cr.iroh_at = now | !now;
     if (cr_alive(CR_IROH_PID) || access(CR_IROH, 0)) return;
     unlink(CR_IROH_INFO);
-    system("( " CR_IROH CR_IROH_ARGS " >/tmp/q2-iroh.log 2>&1 & )");
+    system("( " CR_IROH CR_IROH_ARGS " >/dev/null 2>&1 & )");
 }
+
+/* q2-iroh stopped, Wi-Fi's link gone for CR_IROH_DOWN_MS: with no network it reaches no one, and its relay's
+ * retries were the idle Q2's largest CPU user (2026-11-22, docs/internals.md#car-remote-iroh). Pair a Phone's QR
+ * code goes with its id file. */
+static void cr_iroh_stop(void) {
+    cr.iroh_at = 0;
+    system("kill $(cat " CR_IROH_PID " 2>/dev/null) 2>/dev/null");
+    unlink(CR_IROH_PID);
+    unlink(CR_IROH_INFO);
+}
+
+/* q2-iroh while Wi-Fi has a link, or had one within CR_IROH_DOWN_MS; started again CR_RESTART_MS after a start if
+ * it died. Every CR_POLL_MS while Car Remote is on. */
+static void cr_iroh_poll(unsigned now) {
+    if (networkGetConnectStatus() > 0) cr.link_at = now | !now;
+    if (!cr.link_at || now - cr.link_at >= CR_IROH_DOWN_MS) {
+        if (cr.iroh_at) cr_iroh_stop();
+        cr.link_at = 0;
+    } else if (!cr.iroh_at || now - cr.iroh_at >= CR_RESTART_MS) {
+        cr_iroh_start(now);
+    }
+}
+
+/* Smart Wi-Fi's question (smart_wifi.c smart_needed): does Car Remote need the radio on? While the Q2 has a Wi-Fi
+ * link and Car Remote was used within CR_NET_IDLE_MS (turned on or started at boot, a phone connected by any way,
+ * a pairing card up; net_at, kept by coda_rc_poll), so a phone reaches it on that network or through q2-iroh. Not
+ * with no link (no saved network in range: the radio would scan for one for nothing, and the phone in the car comes
+ * over Bluetooth, which needs no Wi-Fi), nor once nothing has used it for CR_NET_IDLE_MS. Pair a Phone wakes the
+ * radio as a network page (smart_wifi.c net_page_open). */
+int coda_rc_wants_wifi(void) {
+    return coda_rc_enabled() && cr.net_at && time_now_ms() - cr.net_at < CR_NET_IDLE_MS &&
+           networkGetConnectStatus() > 0;
+}
+
+/* A phone has an authenticated session (playback_power.c dark_slow_ok: it shows the position). */
+int coda_rc_online(void) { return coda_rc_enabled() && cr.online; }
 
 /* The o32 syscall nr(a, b, c): its result, or -1 when the kernel reports an error ($a3). */
 #ifndef PEQ_HOST
@@ -133,12 +198,78 @@ static void *cr_tell(void *arg) {
     return 0;
 }
 
+#define SYS_MKNOD 4014
+#define CR_FIFO_MODE 010600 /* S_IFIFO, 0600 */
+
+/* The command queue's thread (coda_rc_cmdq.h): each whole line read from the FIFO goes into cr.q, and the UI
+ * loop is woken to run it. With cr.q full it waits for the UI pass to take one, and the FIFO holds what comes
+ * meanwhile. The FIFO is open for writing too (O_RDWR), so a sender closing it is no end of file and the read
+ * waits; it ends only if the read fails. */
+static void *cr_cmdq_read(void *arg) {
+    int fd = (int)(long)arg;
+    char b[2 * CR_LINE];
+    unsigned n = 0;
+    for (int r; (r = (int)read(fd, b + n, sizeof b - n)) > 0;) {
+        n += (unsigned)r;
+        unsigned start = 0;
+        for (unsigned i = 0; i < n; ++i) {
+            if (b[i] != '\n') continue;
+            unsigned len = i - start;
+            if (len && len + 2 < CR_LINE) {
+                while (cr.q_head - __atomic_load_n(&cr.q_tail, __ATOMIC_ACQUIRE) >= CR_QN) usleep(10000);
+                char *slot = cr.q[cr.q_head % CR_QN];
+                slot[0] = '\n';
+                memcpy(slot + 1, b + start, len);
+                slot[len + 1] = 0;
+                __atomic_store_n(&cr.q_head, cr.q_head + 1, __ATOMIC_RELEASE);
+                loop_wake();
+            }
+            start = i + 1;
+        }
+        if (start) memmove(b, b + start, n - start), n -= start;
+        else if (n == sizeof b) n = 0; /* a line too long for any command: dropped */
+    }
+    cr.q_live = 0;
+    close(fd);
+    return 0;
+}
+
+/* The FIFO made and its thread started, once (again CR_RESTART_MS after a failure): a file of that name another
+ * demo left goes first. Without it senders write CR_CMD, read as before. */
+static void cr_cmdq_start(void) {
+    unsigned now = time_now_ms();
+    if (cr.q_live || (cr.q_tried && now - cr.q_tried < CR_RESTART_MS)) return;
+    cr.q_tried = now | !now;
+    unlink(CR_CMDQ);
+    int fd = cr_syscall(SYS_MKNOD, (long)CR_CMDQ, CR_FIFO_MODE, 0) ? -1 : open(CR_CMDQ, 2 | CR_CLOEXEC); /* O_RDWR */
+    unsigned long t;
+    if (fd < 0) return;
+    cr.q_live = 1;
+    if (pthread_create(&t, 0, cr_cmdq_read, (void *)(long)fd) || !t) {
+        cr.q_live = 0;
+        close(fd);
+        unlink(CR_CMDQ);
+        return;
+    }
+    pthread_detach(t);
+}
+
+/* The next queued line into raw (CR_LINE bytes), as state_read leaves one: 1, or 0 with none. */
+static int cr_cmdq_take(char *raw) {
+    unsigned tail = cr.q_tail;
+    if (__atomic_load_n(&cr.q_head, __ATOMIC_ACQUIRE) == tail) return 0;
+    memcpy(raw, cr.q[tail % CR_QN], CR_LINE);
+    __atomic_store_n(&cr.q_tail, tail + 1, __ATOMIC_RELEASE);
+    return 1;
+}
+
+static int cr_cmdq_waiting(void) { return __atomic_load_n(&cr.q_head, __ATOMIC_ACQUIRE) != cr.q_tail; }
+
 /* The daemon, handed the write end of a pipe whose read end cr_tell waits on. The write end is inheritable only
  * for the system() that starts it; the read end never is. ponytail: another thread's fork in that moment would
  * hold the write end too, and the read end then ends only with that child: tells still come, from the daemon. */
 static void cr_start(void) {
     cr.started_at = time_now_ms() | 1;
-    cr_iroh_start();
     if (cr_running()) return;
     int fds[2] = { 0, 0 };
     unsigned long t;
@@ -162,6 +293,8 @@ static void cr_start(void) {
 
 static void cr_stop(void) {
     system("kill $(cat " CR_PID " " CR_IROH_PID " 2>/dev/null) 2>/dev/null");
+    cr.iroh_at = cr.link_at = 0;
+    cr.online = 0;
     unlink(CR_IROH_PID);
     unlink(CR_IROH_INFO);
     unlink(CR_NOW);
@@ -289,7 +422,12 @@ static void cr_now(void) {
     put_int(b, sizeof b, &n, "bhave", (int)have);
     put_int(b, sizeof b, &n, "btotal", (int)btotal);
     put_int(b, sizeof b, &n, "bms", (int)bms);
-    put_int(b, sizeof b, &n, "radio", song_radio_on());
+    int radio = song_radio_on();
+    if (radio != cr.radio_said) { /* its changes in the system log, as the phone's buttons follow it */
+        cr.radio_said = radio;
+        ulog('I', "remote", radio ? "Now Playing: a radio plays" : "Now Playing: no radio");
+    }
+    put_int(b, sizeof b, &n, "radio", radio);
     static const char *const sources[] = { "", "library", "radio", "netradio", "spotify", "video" };
     put(b, sizeof b, &n, "source", sources[now.source]);
     put_int(b, sizeof b, &n, "live", live);
@@ -313,10 +451,29 @@ static void cr_now(void) {
 
 /* ---- commands in ---- */
 
+/* A command answered: CR_ACK holds this answer and the CR_ACKS - 1 before it, a "seq code" line each, newest
+ * first, so commands queued close together are each answered though the daemon reads the file once. */
 static void cr_ack(unsigned seq, int code) {
-    char b[24];
-    int n = snprintf(b, sizeof b, "%u %d\n", seq, code);
-    blob_io(CR_ACK, CR_ACK ".tmp", b, (unsigned)n, 1);
+    char b[CR_ACKS * 24];
+    unsigned n = 0;
+    memmove(cr.acks[1], cr.acks[0], sizeof cr.acks - sizeof cr.acks[0]);
+    cr.acks[0][0] = seq, cr.acks[0][1] = (unsigned)code;
+    for (unsigned i = 0; i < CR_ACKS && (i == 0 || cr.acks[i][0]); ++i)
+        n += (unsigned)snprintf(b + n, sizeof b - n, "%u %d\n", cr.acks[i][0], (int)cr.acks[i][1]);
+    blob_io(CR_ACK, CR_ACK ".tmp", b, n, 1);
+}
+
+/* A command in the system log as it is taken: its words (verb, up to its line's end), who sent it (q2-iap's numbers
+ * start at 0x51000000, q2_iap.c io_command; coda-rc's, the phone's, are below), what owned playback said before it
+ * (status, media_status's: 2 playing, 3 paused) and, with done, what came of it. The drive of 2026-11-23 could
+ * not tell a phone's pick from a song's end. */
+static void cr_said(unsigned seq, const char *verb, int status, const char *done) {
+    char line[112];
+    int n = 0;
+    while (verb[n] && verb[n] != '\n' && n < 48) ++n;
+    tk_snprintf(line, sizeof line, "%.*s from the %s: the player %d%s%s", n, verb,
+                seq >= 0x51000000u ? "car" : "phone", status, done ? ", " : "", done ? done : "");
+    ulog('I', "remote", line);
 }
 
 typedef struct {
@@ -367,20 +524,22 @@ static void *cr_songs(int want, int *at) {
 
 /* Play's work, from a timer: play_folder opens Now Playing, a window, which a poll may not do. */
 static int cr_play(const void *unused) {
-    char raw[64];
+    char *raw = cr.play_line;
     cr.play_timer = 0;
-    if (!state_read(CR_CMD, raw, sizeof raw)) return 0;
     unsigned seq = (unsigned)atoi(raw + 1);
     int at = 0, shuffle = 0, count = 0, from = 0;
     char *verb = strstr(raw + 1, " ");
     if (!verb || __isoc99_sscanf(verb, " play %d %d %d", &at, &shuffle, &count) != 3) return 0;
-    unlink(CR_CMD);
     if (library_scanning() || addon_game_audio() || navigator_window_is_exist("usbmode_page")) {
+        cr_said(seq, verb + 1, media_status(), "busy");
         cr_ack(seq, 2); /* busy: the daemon answers UNAVAILABLE */
         return 0;
     }
     void *dq = cr_songs(at, &from);
     int size = (int)deque_size(dq);
+    char done[32];
+    tk_snprintf(done, sizeof done, "%d songs from %d", size, from);
+    cr_said(seq, verb + 1, media_status(), size ? done : "no songs");
     if (size) {
         press_natural = 0; /* the phone's pick is the user's: the same row resumes, as a tap does */
         if (shuffle)
@@ -397,19 +556,19 @@ static int cr_play(const void *unused) {
 /* StartRadio's work, from a timer as Play's (a radio's queue opens Now Playing): "radio <id>", a radio of
  * the song with that record id, 0 the playing one, or "radio stop" (song_radio.c song_radio_car). */
 static int cr_radio(const void *unused) {
-    char raw[64];
+    char *raw = cr.play_line;
     int id = 0;
     cr.play_timer = 0;
-    if (!state_read(CR_CMD, raw, sizeof raw)) return 0;
     unsigned seq = (unsigned)atoi(raw + 1);
     char *verb = strstr(raw + 1, " ");
     int stop = verb && !strncmp(verb, " radio stop", 11);
     if (!verb || (!stop && __isoc99_sscanf(verb, " radio %d", &id) != 1)) return 0;
-    unlink(CR_CMD);
     if (!stop && (library_scanning() || addon_game_audio() || navigator_window_is_exist("usbmode_page"))) {
+        cr_said(seq, verb + 1, media_status(), "busy");
         cr_ack(seq, 2);
         return 0;
     }
+    cr_said(seq, verb + 1, media_status(), 0);
     int code = song_radio_car(id, stop);
     cr_now();
     cr_ack(seq, code);
@@ -459,18 +618,21 @@ static int cr_jump(unsigned at, int id) {
     return 0;
 }
 
-static void cr_command(void) {
-    char raw[64];
-    if (cr.play_timer || !state_read(CR_CMD, raw, sizeof raw)) return;
+/* One command, raw as state_read leaves a line ('\n' first). A play or a radio is kept for its timer, which runs it
+ * on the next pass; cr_command takes no other until then. */
+static void cr_run(const char *raw) {
     unsigned seq = (unsigned)atoi(raw + 1);
-    char *verb = strstr(raw + 1, " ");
+    const char *verb = strstr(raw + 1, " ");
     int v = 0, w = 0;
     cr.want = 0; /* a newer command: the daemon has answered the one waiting, and its ack would be stale */
     if (verb && (!strncmp(verb, " play ", 6) || !strncmp(verb, " radio ", 7))) {
+        memcpy(cr.play_line, raw, CR_LINE);
         cr.play_timer = timer_add(verb[1] == 'p' ? cr_play : cr_radio, 0, 0);
+        /* taken: its work can hold the loop for seconds (a shuffled list's start, 9 s on a loaded emulator), and the
+         * daemon then waits longer for the answer the timer writes (coda_rc_cmdq.h CRC_ACK_TAKEN) */
+        if (cr.play_timer) cr_ack(seq, CRC_ACK_TAKEN);
         return;
     }
-    unlink(CR_CMD);
     char word[12] = "";
     if (verb) __isoc99_sscanf(verb, " %11s", word);
     /* Play/Pause, Next and Previous as a headset's buttons (headset.c media_key): to whatever plays,
@@ -481,35 +643,47 @@ static void cr_command(void) {
                : !strcmp(word, "toggle") ? !media_playing()
                                          : -1;
     if (want >= 0) {
-        if (media_playing() != want) media_key(KEY_PLAY);
+        int status = media_status(), press = (status == 2) != want;
+        /* the drive of 2026-11-22: a resume, and the player paused 0.4 s later */
+        cr_said(seq, verb + 1, status, press ? "Play/Pause pressed" : "nothing pressed");
+        if (press) media_key(KEY_PLAY);
         cr.want = want + 1; /* acked once the player shows it (cr_settle) */
         cr.want_seq = seq;
         cr.want_at = time_now_ms();
         cr_settle();
     } else if (!strcmp(word, "next") || !strcmp(word, "previous")) {
+        cr_said(seq, verb + 1, media_status(), 0);
         media_key(word[0] == 'n' ? KEY_FWD_BTN : KEY_BACK_BTN);
         cr_ack(seq, 0);
     } else if (verb && __isoc99_sscanf(verb, " scan %d", &v) == 1 && v >= -1 && v <= 1) {
-        seek_car(v); /* Car Audio's held Next or Previous (q2_iap2.c), and its release */
+        cr_said(seq, verb + 1, media_status(), 0);
+        seek_car(v); /* Car Audio's held Next or Previous (iap2_hid.c), and its release */
         cr_ack(seq, 0);
     } else if (verb && __isoc99_sscanf(verb, " seek %d", &v) == 1 && v >= 0) {
+        cr_said(seq, verb + 1, media_status(), 0);
         player_seek_time(v);
         cr_ack(seq, 0);
     } else if (verb && __isoc99_sscanf(verb, " mode %d %d", &v, &w) == 2) {
         int ok = cr_mode(v, w);
+        /* the drive of 2026-11-22: repeat from the car seen not to reach the Q2 after a radio */
+        cr_said(seq, verb + 1, media_status(), ok ? "set" : "refused");
         cr_now(); /* the new mode before the ack, as cr_settle */
         cr_ack(seq, !ok);
     } else if (verb && __isoc99_sscanf(verb, " rate %d %d", &v, &w) == 2) {
         unsigned at, n;
         void *r = queue_now(&at, &n);
         int ok = r && I(r, REC_ID) == w ? rate_now_set(v) : -1;
+        cr_said(seq, verb + 1, media_status(), ok < 0 ? "not the song playing" : ok ? "set" : "refused");
         cr.hearts_at = 0; /* the new stars: read them now */
         cr_now();
         cr_ack(seq, ok < 0 ? 3 : !ok);
     } else if (verb && __isoc99_sscanf(verb, " jump %d %d", &v, &w) == 2 && v >= 0) {
-        cr_ack(seq, cr_jump((unsigned)v, w));
+        int before = media_status(), code = cr_jump((unsigned)v, w);
+        cr_said(seq, verb + 1, before, code == 3 ? "not that song now" : code ? "refused" : 0);
+        cr_ack(seq, code);
     } else if (verb && __isoc99_sscanf(verb, " volume %d", &v) == 1 && v >= 0 && v <= 100) {
         /* as the AirPlay app sets it (airplay.c): up to Volume Limit, saved for the output in use */
+        cr_said(seq, verb + 1, media_status(), 0);
         if (v > g_maxvolume) v = g_maxvolume;
         int from = g_volume;
         g_volume = (unsigned char)v;
@@ -518,8 +692,22 @@ static void cr_command(void) {
         if (v != from) vol_show(from); /* on the Q2's screen too, as a headset's change (volume.c) */
         cr_ack(seq, 0);
     } else {
+        cr_said(seq, verb ? verb + 1 : "?", media_status(), "not known");
         cr_ack(seq, 1);
     }
+}
+
+/* The commands waiting, in order: the single file's (CR_CMD, from a sender that found no queue: a q2-iap or daemon
+ * from before coda_rc_cmdq.h, or one whose FIFO open failed), then the queue's; none while a play's or radio's
+ * timer has yet to run. */
+static void cr_command(void) {
+    char raw[CR_LINE];
+    if (cr.play_timer) return;
+    if (state_read(CR_CMD, raw, sizeof raw)) {
+        unlink(CR_CMD);
+        cr_run(raw);
+    }
+    while (!cr.play_timer && cr_cmdq_take(raw)) cr_run(raw);
 }
 
 /* ---- the pairing code ---- */
@@ -607,26 +795,41 @@ static void cr_wake(void) {
 
 /* Every UI pass (ringnav_sleep): the daemon, Now Playing and the pages every CR_POLL_MS; the daemon's files then
  * too, unless its pipe is live, when they are read on the pass after a tell, every CR_POLL_MS while a play waits
- * for its timer or the pairing card is up (their next step is a poll's, not a tell's), else every CR_FILES_MS. */
+ * for its timer or the pairing card is up (their next step is a poll's, not a tell's), else every CR_FILES_MS. A
+ * queued command (cr_cmdq_read) runs on the pass its line woke, whatever the pace. */
 void coda_rc_poll(void) {
     unsigned now = time_now_ms();
-    int told = cr.told != cr.told_seen;
-    if (!told && cr.at && now - cr.at < CR_POLL_MS) return;
+    int told = cr.told != cr.told_seen, queued = cr_cmdq_waiting();
+    if (!told && !queued && cr.at && now - cr.at < CR_POLL_MS) return;
+    if (!coda_rc_enabled() && !usb_car_on()) {
+        char drop[CR_LINE];
+        while (cr_cmdq_take(drop)) {} /* a command with neither to take it: dropped, as the file's was */
+        if (cr.at && now - cr.at < CR_POLL_MS) return;
+    }
     if (!cr.at || now - cr.at >= CR_POLL_MS) {
         cr.at = now | !now;
         carremote_poll(); /* Settings > Car Remote's pages while open */
         if (!coda_rc_enabled()) {
-            /* Car Audio's q2-iap reads Now Playing and writes the car's buttons in the same files, with Car Remote
-             * on or off (docs/iphone-mode.md#car-audio-in-the-image); no daemon is started for it */
-            if (usb_car_on()) cr_now(), cr_settle(), cr_command();
+            /* Car Audio's q2-iap reads Now Playing and sends the car's buttons the same way, with Car Remote on or
+             * off (docs/iphone-mode.md#car-audio-in-the-image); no daemon is started for it */
+            if (usb_car_on()) cr_cmdq_start(), cr_now(), cr_settle(), cr_command();
             return;
         }
-        int dead = !cr_running() || (!cr_alive(CR_IROH_PID) && !access(CR_IROH, 0)); /* the daemon, or the sidecar */
-        if (!cr.started_at || (now - cr.started_at >= CR_RESTART_MS && dead)) cr_start();
+        cr_cmdq_start();
+        if (!cr.started_at) cr.net_at = now | !now; /* the first start: Car Remote's use begins (coda_rc_wants_wifi) */
+        if (!cr.started_at || (now - cr.started_at >= CR_RESTART_MS && !cr_running())) cr_start();
+        cr_iroh_poll(now);
+        if (cr.online || cr.pair_page) cr.net_at = now | !now;
         cr_now();
         cr_settle();
-        if (!told && cr.tell_live && !cr.play_timer && !cr.pair_page && now - cr.files_at < CR_FILES_MS) return;
+        /* A q2-iap from before the queue writes the car's buttons in CR_CMD and never tells, and the car's held Next
+         * or Previous says "scan" every 500 ms against seek.c's SEEK_CAR_LOST_MS: while its iPhone is on the cable,
+         * every CR_POLL_MS (q2muse-1126: read every 5 s, the car's scan ran in bursts) */
+        if (!told && !queued && cr.tell_live && !cr.play_timer && !cr.pair_page && !usb_car_on() &&
+            now - cr.files_at < CR_FILES_MS)
+            return;
     } else if (!coda_rc_enabled()) {
+        if (queued) cr_command(); /* Car Audio's button, on the pass its line woke */
         return;
     }
     cr.told_seen = cr.told;
@@ -634,6 +837,8 @@ void coda_rc_poll(void) {
     cr_command();
     cr_wake();
     cr_pairing();
+    char raw[8];
+    cr.online = state_read(CR_ONLINE, raw, sizeof raw) > 0;
 }
 
 /* Car Remote on or off, its daemon started or stopped: the page's switch, and Control Center's
@@ -641,8 +846,11 @@ void coda_rc_poll(void) {
 void coda_rc_toggle(void) {
     cr.on = !coda_rc_enabled();
     write_int_config(cr.on, "Q2POD", "CARREMOTE");
-    if (cr.on)
+    if (cr.on) {
+        unsigned now = time_now_ms();
+        cr.net_at = now | !now; /* turned on: Car Remote's use begins (coda_rc_wants_wifi) */
         cr_start();
-    else
+    } else {
         cr_stop();
+    }
 }

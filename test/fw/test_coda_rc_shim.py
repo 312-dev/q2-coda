@@ -26,6 +26,8 @@ class Q2:
                            album='Album') for i in range(songs)]
         fw.mock('getAllMusic', lambda *_: ui.deques[self.directory()].extend(self.songs) or len(self.songs))
         self.status, self.sec, self.total = 2, 30, 200
+        self.link = 1  # Wi-Fi's link (stock's networkGetConnectStatus): up
+        fw.mock('networkGetConnectStatus', lambda *_: self.link)
         fw.mock('mclGetPlayStatus', lambda *_: self.status)
         fw.mock('player_playtime_and_length', self.times)
         self.poll = fw.fn('coda_rc_poll', None)
@@ -49,6 +51,11 @@ class Q2:
     def now(self):
         return dict(line.split('=', 1) for line in self.files[NOW].decode().splitlines())
 
+    def ack(self, keep=False):
+        """The newest answer in the ack file (cr_ack keeps the last few, newest first), the file taken unless keep."""
+        raw = self.files[ACK] if keep else self.files.pop(ACK)
+        return raw.split(b'\n')[0] + b'\n'
+
 
 def test_off_starts_nothing_and_writes_nothing(fw, ui, mcl, recs):
     q2 = Q2(fw, ui, recs, on=0)
@@ -69,7 +76,7 @@ def test_car_audio_gets_now_playing_and_buttons_with_car_remote_off(fw, ui, mcl,
     assert q2.now()['title'] == 'Song 1' and q2.system == []
     q2.files[CMD] = b'1359998977 next\n'
     q2.tick()
-    assert len(fw.calls('player_next_music')) == 1 and q2.files.pop(ACK) == b'1359998977 0\n'
+    assert len(fw.calls('player_next_music')) == 1 and q2.ack() == b'1359998977 0\n'
     fw.fn('usb_car_stop', None, C.c_int)(1)
     q2.files.pop(NOW)
     q2.files[CMD] = b'1359998978 next\n'
@@ -109,22 +116,51 @@ def test_a_dead_daemon_is_started_again_after_30_s(fw, ui, mcl, recs):
 
 
 IROH_START = ('( /usr/bin/q2-iroh serve --key /mnt/data/coda-rc/iroh.key --relay-file /mnt/data/coda-rc/relay '
-              '--info /tmp/coda-rc.iroh --pid /tmp/q2-iroh.pid --nice 19 >/tmp/q2-iroh.log 2>&1 & )')
+              '--info /tmp/coda-rc.iroh --pid /tmp/q2-iroh.pid --nice 19 --log /tmp/q2-iroh.log '
+              '--forward-named 127.0.0.1:7721 --allow-file /tmp/coda-rc.iroh-allow --open-while /tmp/coda-rc.qr '
+              '>/dev/null 2>&1 & )')
+IROH_STOP = 'kill $(cat /tmp/q2-iroh.pid 2>/dev/null) 2>/dev/null'
 
 
 def test_q2_iroh_runs_while_car_remote_is_on(fw, ui, mcl, recs):
-    """docs/remote.md#car-remote-across-networks: the sidecar starts with the daemon, a stale id file gone first, and
-    stops with it; nothing of it is left once Car Remote is off."""
+    """docs/remote.md#car-remote-across-networks: the sidecar starts with the daemon while Wi-Fi has a link, a stale
+    id file gone first, and stops with it; nothing of it is left once Car Remote is off."""
     q2 = Q2(fw, ui, recs)
     q2.files['/usr/bin/q2-iroh'] = b''
     q2.files['/tmp/coda-rc.iroh'] = b'id dead\n'  # a killed sidecar's
     q2.tick()
-    assert q2.system == [IROH_START, '( /usr/bin/coda-rc >/dev/null 2>&1 & )']
+    assert q2.system == ['( /usr/bin/coda-rc >/dev/null 2>&1 & )', IROH_START]
     assert '/tmp/coda-rc.iroh' not in q2.files
     q2.files['/tmp/coda-rc.iroh'] = b'id 8aac\n'
     fw.fn('coda_rc_toggle', None)()
     assert q2.system[-1] == 'kill $(cat /tmp/coda-rc.pid /tmp/q2-iroh.pid 2>/dev/null) 2>/dev/null'
     assert '/tmp/coda-rc.iroh' not in q2.files
+
+
+def test_q2_iroh_waits_for_a_wi_fi_link_and_stops_a_minute_after_it_goes(fw, ui, mcl, recs):
+    """docs/internals.md#car-remote-iroh. The heat log of 2026-11-22: on battery with Wi-Fi down, q2-iroh was the idle
+    Q2's largest CPU user, an endpoint that could reach nobody. It runs only while Wi-Fi has a link, and rides out a
+    drop of up to a minute; the daemon (Bluetooth, and TCP once a link comes) runs throughout."""
+    q2 = Q2(fw, ui, recs)
+    q2.files['/usr/bin/q2-iroh'] = b''
+    q2.link = 0
+    q2.tick()
+    assert q2.system == ['( /usr/bin/coda-rc >/dev/null 2>&1 & )']
+    q2.tick(60_000)
+    assert len(q2.system) == 2 and IROH_START not in q2.system  # the daemon again (no pid in this fake), no sidecar
+    q2.link = 1
+    q2.tick()
+    assert q2.system[-1] == IROH_START
+    q2.files.update({'/tmp/q2-iroh.pid': b'4343\n', '/proc/4343': b'', '/tmp/coda-rc.iroh': b'id 8aac\n',
+                     '/tmp/coda-rc.pid': b'4242\n', '/proc/4242': b''})
+    q2.link = 0
+    q2.tick(30_000)
+    assert q2.system[-1] == IROH_START  # a drop under a minute: still running, nothing done
+    q2.tick(31_000)
+    assert q2.system[-1] == IROH_STOP and '/tmp/coda-rc.iroh' not in q2.files and '/tmp/q2-iroh.pid' not in q2.files
+    q2.link = 1
+    q2.tick()
+    assert q2.system[-1] == IROH_START  # the link back: at once
 
 
 def test_a_dead_q2_iroh_is_started_again_beside_a_live_daemon(fw, ui, mcl, recs):
@@ -147,6 +183,51 @@ def test_an_image_without_q2_iroh_starts_the_daemon_alone(fw, ui, mcl, recs):
     assert q2.system == ['( /usr/bin/coda-rc >/dev/null 2>&1 & )']
 
 
+ONLINE = '/tmp/coda-rc.online'
+
+
+def test_car_remote_wants_wi_fi_while_linked_and_used_in_the_last_ten_minutes(fw, ui, mcl, recs):
+    """docs/internals.md#smart-wi-fi. Smart Wi-Fi asks coda_rc_wants_wifi: with a link, for 10 minutes after Car
+    Remote started and after a phone was last connected (any way), and while a pairing card is up; never with no link
+    (no saved network in range), whatever Car Remote does: its phone in the car comes over Bluetooth."""
+    q2 = Q2(fw, ui, recs)
+    wants = fw.fn('coda_rc_wants_wifi', C.c_int)
+    q2.tick()
+    assert wants()
+    q2.link = 0
+    assert not wants()
+    q2.link = 1
+    q2.tick(9 * 60_000)
+    assert wants()
+    q2.tick(61_000)
+    assert not wants()  # ten minutes with nobody
+    q2.files[ONLINE] = b'\x01' * 8 + b'\x01'  # a phone over Bluetooth
+    q2.tick(5_000)  # the files' pass reads it
+    q2.tick(600)
+    assert wants()
+    del q2.files[ONLINE]
+    q2.tick(5_000)
+    q2.tick(9 * 60_000)
+    assert wants()
+    q2.tick(61_000)
+    assert not wants()
+
+
+def test_online_is_an_authenticated_phone(fw, ui, mcl, recs):
+    """playback_power.c's dark pace follows a connected phone, not the switch: 600 passes a minute playing dark with
+    Car Remote on and nobody connected (2026-11-22's sweep, item 22)."""
+    q2 = Q2(fw, ui, recs)
+    online = fw.fn('coda_rc_online', C.c_int)
+    q2.tick()
+    assert not online()
+    q2.files[ONLINE] = b'\x02' * 8 + b'\x00'
+    q2.tick(5_000)
+    assert online()
+    del q2.files[ONLINE]
+    q2.tick(5_000)
+    assert not online()
+
+
 def test_play_queues_the_listed_ids_from_one(fw, ui, mcl, recs):
     q2 = Q2(fw, ui, recs)
     q2.tick()
@@ -156,7 +237,7 @@ def test_play_queues_the_listed_ids_from_one(fw, ui, mcl, recs):
     ui.fire('cr_play')  # from a timer: play_folder opens a window
     (queue, at, cls), = ui.played
     assert [C.c_int.from_address(r).value for r in queue] == [13, 11, 10] and at == 1 and cls == 0xf001
-    assert q2.files[ACK] == b'7 0\n' and CMD not in q2.files
+    assert q2.ack(keep=True) == b'7 0\n' and CMD not in q2.files
 
 
 def test_play_while_usb_storage_is_busy(fw, ui, mcl, recs):
@@ -166,7 +247,7 @@ def test_play_while_usb_storage_is_busy(fw, ui, mcl, recs):
     q2.files[CMD] = b'3 play 0 0 1\n'
     q2.tick()
     ui.fire('cr_play')
-    assert not ui.played and q2.files[ACK] == b'3 2\n'
+    assert not ui.played and q2.ack(keep=True) == b'3 2\n'
 
 
 def test_seek_and_volume(fw, ui, mcl, recs):
@@ -174,14 +255,14 @@ def test_seek_and_volume(fw, ui, mcl, recs):
     fw.var('g_maxvolume', C.c_ubyte).value = 60
     q2.files[CMD] = b'4 seek 75\n'
     q2.tick()
-    assert [a[0] for _, a in fw.calls('player_seek_time')] == [75] and q2.files[ACK] == b'4 0\n'
+    assert [a[0] for _, a in fw.calls('player_seek_time')] == [75] and q2.ack(keep=True) == b'4 0\n'
     q2.files[CMD] = b'5 volume 90\n'
     q2.tick()
     assert fw.var('g_volume', C.c_ubyte).value == 60  # up to Volume Limit
-    assert [a[:2] for _, a in fw.calls('device_set_volume')] == [(60, 1)] and q2.files[ACK] == b'5 0\n'
+    assert [a[:2] for _, a in fw.calls('device_set_volume')] == [(60, 1)] and q2.ack(keep=True) == b'5 0\n'
     q2.files[CMD] = b'6 volume 101\n'
     q2.tick()
-    assert q2.files[ACK] == b'6 1\n'
+    assert q2.ack(keep=True) == b'6 1\n'
 
 
 def card_route(fw, ui):
@@ -266,15 +347,15 @@ def test_pause_and_play_go_to_the_player_and_ack_once_it_shows_them(fw, ui, mcl,
     assert len(fw.calls('player_play_pause')) == 1 and ACK not in q2.files  # the player has not paused yet
     q2.status = 3
     q2.tick()
-    assert q2.files.pop(ACK) == b'8 0\n'
+    assert q2.ack() == b'8 0\n'
     q2.files[CMD] = b'9 pause\n'  # already paused: nothing pressed, answered at once
     q2.tick()
-    assert len(fw.calls('player_play_pause')) == 1 and q2.files.pop(ACK) == b'9 0\n'
+    assert len(fw.calls('player_play_pause')) == 1 and q2.ack() == b'9 0\n'
     q2.files[CMD] = b'10 toggle\n'
     q2.tick()
     q2.status = 2
     q2.tick()
-    assert len(fw.calls('player_play_pause')) == 2 and q2.files.pop(ACK) == b'10 0\n'
+    assert len(fw.calls('player_play_pause')) == 2 and q2.ack() == b'10 0\n'
 
 
 def test_a_play_the_player_never_shows_is_refused(fw, ui, mcl, recs):
@@ -286,7 +367,7 @@ def test_a_play_the_player_never_shows_is_refused(fw, ui, mcl, recs):
     q2.tick(2000)
     assert ACK not in q2.files
     q2.tick(1100)
-    assert q2.files.pop(ACK) == b'11 1\n'
+    assert q2.ack() == b'11 1\n'
     q2.tick(5000)
     assert ACK not in q2.files
 
@@ -298,21 +379,21 @@ def test_a_newer_command_drops_the_waiting_ones_ack(fw, ui, mcl, recs):
     q2.tick()
     q2.files[CMD] = b'13 seek 5\n'
     q2.tick()
-    assert q2.files.pop(ACK) == b'13 0\n'
+    assert q2.ack() == b'13 0\n'
     q2.status = 3
     q2.tick(4000)
     assert ACK not in q2.files
 
 
 def test_scan_is_car_audio_s_held_button(fw, ui, mcl, recs):
-    """scan 1, -1 and 0 (q2_iap2.c's held Next or Previous, and its release) go to seek.c's seek_car and are acked;
+    """scan 1, -1 and 0 (iap2_hid.c's held Next or Previous, and its release) go to seek.c's seek_car and are acked;
     another number is refused."""
     q2 = Q2(fw, ui, recs)
     q2.tick()
     for seq, verb, ack in ((21, 'scan 1', 0), (22, 'scan 0', 0), (23, 'scan -1', 0), (24, 'scan 2', 1)):
         q2.files[CMD] = f'{seq} {verb}\n'.encode()
         q2.tick()
-        assert q2.files.pop(ACK) == f'{seq} {ack}\n'.encode(), verb
+        assert q2.ack() == f'{seq} {ack}\n'.encode(), verb
 
 
 def test_next_and_previous_go_to_the_player(fw, ui, mcl, recs):
@@ -320,10 +401,10 @@ def test_next_and_previous_go_to_the_player(fw, ui, mcl, recs):
     q2.tick()
     q2.files[CMD] = b'14 next\n'
     q2.tick()
-    assert len(fw.calls('player_next_music')) == 1 and q2.files.pop(ACK) == b'14 0\n'
+    assert len(fw.calls('player_next_music')) == 1 and q2.ack() == b'14 0\n'
     q2.files[CMD] = b'15 previous\n'
     q2.tick()
-    assert len(fw.calls('player_prev_music')) == 1 and q2.files.pop(ACK) == b'15 0\n'
+    assert len(fw.calls('player_prev_music')) == 1 and q2.ack() == b'15 0\n'
 
 
 class Tell:
@@ -334,7 +415,8 @@ class Tell:
     def __init__(self, fw):
         self.fw, self.threads, self.bytes = fw, [], 0
         def syscall(nr, a, *_):
-            assert nr == 4328  # pipe2
+            if nr != 4328:  # pipe2's; the command queue's mknod is refused, so it is not made
+                return -1
             C.c_int.from_address(a).value, C.c_int.from_address(a + 4).value = self.R, self.W
             return 0
         fw.mock('cr_syscall', syscall)
@@ -364,14 +446,14 @@ def test_the_daemons_tell_reads_its_files_on_the_next_pass_else_every_5_s(fw, ui
     q2.tick()
     assert ACK not in q2.files  # no tell: Now Playing's pass leaves the files
     q2.tick(4500)
-    assert q2.files.pop(ACK) == b'14 0\n'  # CR_FILES_MS after the last look
+    assert q2.ack() == b'14 0\n'  # CR_FILES_MS after the last look
     q2.files[CMD] = b'15 previous\n'
     tell.tell()
     q2.tick(50)
-    assert q2.files.pop(ACK) == b'15 0\n' and len(fw.calls('player_prev_music')) == 1  # the pass after the tell
+    assert q2.ack() == b'15 0\n' and len(fw.calls('player_prev_music')) == 1  # the pass after the tell
     q2.files[CMD] = b'16 next\n'
     q2.tick(600)
-    assert q2.files.pop(ACK) == b'16 0\n'  # the daemon's end closed: every CR_POLL_MS again
+    assert q2.ack() == b'16 0\n'  # the daemon's end closed: every CR_POLL_MS again
 
 
 def test_without_the_pipe_the_files_are_read_every_poll(fw, ui, mcl, recs):
@@ -380,7 +462,7 @@ def test_without_the_pipe_the_files_are_read_every_poll(fw, ui, mcl, recs):
     assert q2.system == ['( /usr/bin/coda-rc >/dev/null 2>&1 & )']
     q2.files[CMD] = b'14 next\n'
     q2.tick()
-    assert q2.files.pop(ACK) == b'14 0\n'
+    assert q2.ack() == b'14 0\n'
 
 
 def test_mode_sets_shuffle_and_repeat_as_the_hold_menu(fw, ui, mcl, recs):
@@ -393,20 +475,20 @@ def test_mode_sets_shuffle_and_repeat_as_the_hold_menu(fw, ui, mcl, recs):
     fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(1, 5)  # Repeat All from the hold menu: extended play runs
     q2.files[CMD] = b'20 mode 1 2\n'
     q2.tick()
-    assert q2.files.pop(ACK) == b'20 0\n'
+    assert q2.ack() == b'20 0\n'
     assert (option(0), option(1)) == (1, 5)  # All Songs, Repeat All
     assert q2.now()['shuffle'] == '1' and q2.now()['repeat'] == '2'  # written before the ack
     q2.files[CMD] = b'21 mode -1 1\n'
     q2.tick()
-    assert q2.files.pop(ACK) == b'21 0\n' and (option(0), option(1)) == (1, 3)  # shuffle kept, Repeat Song
+    assert q2.ack() == b'21 0\n' and (option(0), option(1)) == (1, 3)  # shuffle kept, Repeat Song
     q2.files[CMD] = b'22 mode 0 0\n'
     q2.tick()
-    assert q2.files.pop(ACK) == b'22 0\n' and (option(0), option(1)) == (0, 2)  # Off, Play All
+    assert q2.ack() == b'22 0\n' and (option(0), option(1)) == (0, 2)  # Off, Play All
     fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(0, 3)  # Albums, from the hold menu
     fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(1, 4)  # Repeat Album
     q2.files[CMD] = b'23 mode 1 2\n'
     q2.tick()
-    assert q2.files.pop(ACK) == b'23 0\n' and (option(0), option(1)) == (3, 4)  # both kept: already on
+    assert q2.ack() == b'23 0\n' and (option(0), option(1)) == (3, 4)  # both kept: already on
 
 
 def test_rate_hearts_the_playing_song_and_now_playing_shows_them(fw, ui, mcl, recs):
@@ -417,15 +499,15 @@ def test_rate_hearts_the_playing_song_and_now_playing_shows_them(fw, ui, mcl, re
     assert q2.now()['hearts'] == '0'
     q2.files[CMD] = b'30 rate 3 12\n'
     q2.tick()
-    assert q2.files.pop(ACK) == b'30 0\n' and q2.now()['hearts'] == '3'
+    assert q2.ack() == b'30 0\n' and q2.now()['hearts'] == '3'
     assert not fw.calls('batch_add_file')
     q2.files[CMD] = b'31 rate 5 12\n'  # five stars, kept as the others: no like (My Fav is the heart's alone)
     q2.tick()
-    assert q2.files.pop(ACK) == b'31 0\n' and q2.now()['hearts'] == '5'
+    assert q2.ack() == b'31 0\n' and q2.now()['hearts'] == '5'
     assert not fw.calls('batch_add_file') and not fw.calls('deleteMusicFromFav')
     q2.files[CMD] = b'32 rate 4 11\n'  # not the playing song: NOT_FOUND, nothing kept
     q2.tick()
-    assert q2.files.pop(ACK) == b'32 3\n'
+    assert q2.ack() == b'32 3\n'
 
 
 def test_a_stream_has_no_hearts(fw, ui, mcl, recs):
@@ -442,17 +524,17 @@ def test_jump_plays_a_queue_entry_if_it_is_still_that_song(fw, ui, mcl, recs):
     q2.tick()
     q2.files[CMD] = b'40 jump 3 13\n'
     q2.tick()
-    assert q2.files.pop(ACK) == b'40 0\n' and [a[0] for _, a in fw.calls('player_start_queue')] == [3]
+    assert q2.ack() == b'40 0\n' and [a[0] for _, a in fw.calls('player_start_queue')] == [3]
     q2.files[CMD] = b'41 jump 2 13\n'  # the queue moved under the phone
     q2.tick()
-    assert q2.files.pop(ACK) == b'41 3\n' and len(fw.calls('player_start_queue')) == 1
+    assert q2.ack() == b'41 3\n' and len(fw.calls('player_start_queue')) == 1
     q2.files[CMD] = b'42 jump 9 13\n'
     q2.tick()
-    assert q2.files.pop(ACK) == b'42 3\n'
+    assert q2.ack() == b'42 3\n'
     fw.mock('check_forbid_play_no_headset', lambda *_: 1)  # Headphones required
     q2.files[CMD] = b'43 jump 1 11\n'
     q2.tick()
-    assert q2.files.pop(ACK) == b'43 1\n' and len(fw.calls('player_start_queue')) == 1
+    assert q2.ack() == b'43 1\n' and len(fw.calls('player_start_queue')) == 1
 
 
 def test_modes_follow_now_playings_buttons_both_ways(fw, ui, mcl, recs):
@@ -476,11 +558,11 @@ def test_modes_follow_now_playings_buttons_both_ways(fw, ui, mcl, recs):
     assert (q2.now()['shuffle'], q2.now()['repeat']) == ('0', '1') and mcl.mode == 1
     q2.files[CMD] = b'30 mode 1 0\n'  # the car: shuffle on, repeat Off
     q2.tick()
-    assert q2.files.pop(ACK) == b'30 0\n' and mcl.mode == 2  # stock's Shuffle: Now Playing's shuffle lit
+    assert q2.ack() == b'30 0\n' and mcl.mode == 2  # stock's Shuffle: Now Playing's shuffle lit
     assert (q2.now()['shuffle'], q2.now()['repeat']) == ('1', '0')
     q2.files[CMD] = b'31 mode -1 2\n'  # repeat All, shuffle kept
     q2.tick()
-    assert q2.files.pop(ACK) == b'31 0\n' and (q2.now()['shuffle'], q2.now()['repeat']) == ('1', '2')
+    assert q2.ack() == b'31 0\n' and (q2.now()['shuffle'], q2.now()['repeat']) == ('1', '2')
     assert fw.fn('playback_option', C.c_int, C.c_int)(0) == 0  # the hold menu's shuffle not started
 
 
@@ -497,7 +579,7 @@ def test_a_card_apps_streaming_song_can_be_rated(fw, ui, mcl, recs):
     assert q2.now()['id'] == '0' and q2.now()['hearts'] == '0'
     q2.files[CMD] = b'40 rate 3 0\n'
     q2.tick()
-    assert q2.files.pop(ACK) == b'40 0\n' and q2.now()['hearts'] == '3'
+    assert q2.ack() == b'40 0\n' and q2.now()['hearts'] == '3'
 
 
 def test_a_streaming_song_the_player_waits_for_is_buffering(fw, ui, mcl, recs):
@@ -583,12 +665,240 @@ def test_no_toast_is_kept_while_car_remote_is_off(fw, ui, mcl, recs):
 def test_the_daemons_wake_names_the_app_to_start(fw, ui, mcl, recs):
     """The daemon asked a card app that doesn't run for a car's cover (coda_rc.c crc_cover_ask): /tmp/coda-rc.wake
     names it, and the shim hands that to addon_cover_wake (test_addon.py's test_an_app_is_started_for_the_cars_cover)
-    and removes the file, so it is taken once."""
+    and removes the file, so it is taken once. foo is on no card here: addon_cover_wake looks for it (a scan of the
+    card) and, finding no app, keeps no slot for it."""
     from test_addon import ap
     q2 = Q2(fw, ui, recs)
     q2.tick()
     q2.files['/tmp/coda-rc.wake'] = b'foo\n'
+    scans = len([c for c in fw.calls('fw_opendir') if C.string_at(c[1][0]) == b'/mnt/mmc'])
     q2.tick()
     assert '/tmp/coda-rc.wake' not in q2.files
-    a = ap(fw)
-    assert [bytes(a.a[i].id) for i in range(a.n)] == [b'foo']
+    assert len([c for c in fw.calls('fw_opendir') if C.string_at(c[1][0]) == b'/mnt/mmc']) == scans + 1
+    assert ap(fw).n == 0
+
+
+def test_car_audio_s_commands_are_read_every_pass_beside_the_daemon_s_pipe(fw, ui, mcl, recs):
+    """The drive of 2026-11-22 (q2muse-1126): with Car Remote on, its daemon's pipe live, the shim read the command
+    file only after a tell or every CR_FILES_MS (5 s), and q2-iap, which never tells, writes Car Audio's buttons
+    there: the car's held Next ("scan 1" every 500 ms) reached seek.c every 5 s, its scan ended 2 s after each
+    (SEEK_CAR_LOST_MS) and began again at the next, in bursts. While the iPhone gadget is on the cable the file is
+    read every CR_POLL_MS."""
+    tell = Tell(fw)
+    q2 = Q2(fw, ui, recs)
+    q2.tick()
+    assert tell.threads == [8]
+    fw.fn('usb_car_start', None)()  # a cable in on Automatic: q2car's iPhone (usb_car.c)
+    q2.files[CMD] = b'21 scan 1\n'
+    q2.tick(600)
+    assert q2.ack() == b'21 0\n'
+    q2.files[CMD] = b'22 scan 1\n'
+    q2.tick(600)
+    assert q2.ack() == b'22 0\n'
+
+
+def test_resume_and_pause_say_what_the_player_was_and_press_only_to_change_it(fw, ui, mcl, recs):
+    """The drive of 2026-11-22: the phone's resume, and the player paused 0.4 s later. Resume on a song playing
+    presses nothing (it is no toggle), and each says the player's status and what it did."""
+    from test_headset import said_on_stderr
+    q2 = Q2(fw, ui, recs)
+    said = said_on_stderr(fw, 'remote')
+    q2.queue()
+    q2.tick()
+    q2.files[CMD] = b'31 resume\n'
+    q2.tick()
+    assert fw.calls('player_play_pause') == [] and q2.ack() == b'31 0\n'
+    q2.status = 3
+    q2.files[CMD] = b'32 resume\n'
+    q2.tick()
+    assert len(fw.calls('player_play_pause')) == 1
+    assert said[-2:] == ['resume from the phone: the player 2, nothing pressed',
+                         'resume from the phone: the player 3, Play/Pause pressed'], said
+
+
+def test_each_command_is_logged_with_its_sender_and_the_player_before_it(fw, ui, mcl, recs):
+    """The drive of 2026-11-23: two songs cut by set-nexturl with no button of the car's, and the log could not say
+    whether the phone had picked them. Each command the shim takes is one line: its words, the phone (coda-rc's
+    numbers) or the car (q2-iap's, from 0x51000000), the player's status before it, and what came of it."""
+    from test_headset import said_on_stderr
+    q2 = Q2(fw, ui, recs)
+    said = said_on_stderr(fw, 'remote')
+    q2.queue()
+    q2.tick()
+    car = 0x51000001
+    for line in (b'40 next\n', f'{car} previous\n'.encode(), b'41 seek 75\n', f'{car + 1} scan 1\n'.encode(),
+                 b'42 jump 2 12\n', b'43 jump 2 99\n', b'44 volume 30\n', b'45 bogus\n'):
+        q2.files[CMD] = line
+        q2.tick()
+    q2.files[LIST] = b'13\n11\n'
+    q2.files[CMD] = b'46 play 1 0 2\n'
+    q2.tick()
+    ui.fire('cr_play')
+    assert said[-9:] == ['next from the phone: the player 2', 'previous from the car: the player 2',
+                         'seek 75 from the phone: the player 2', 'scan 1 from the car: the player 2',
+                         'jump 2 12 from the phone: the player 2', 'jump 2 99 from the phone: the player 2, not that song now',
+                         'volume 30 from the phone: the player 2', 'bogus from the phone: the player 2, not known',
+                         'play 1 0 2 from the phone: the player 2, 2 songs from 1'], said
+
+
+CMDQ = '/tmp/coda-rc.cmdq'
+
+
+class CmdQ:
+    """The command queue (patch/coda_rc_cmdq.h): mknod makes the FIFO, open gives it fd 11, pthread_create keeps the
+    reader thread to run by hand. send() is a sender's crc_cmdq_send: down the FIFO while the shim has it open, else
+    the single command file, replaced whole as q2-iap's write_whole and the daemon's crc_write_file replace it."""
+    FD = 11
+
+    def __init__(self, fw, q2):
+        self.fw, self.q2, self.opened, self.pending, self.thread = fw, q2, False, b'', None
+        def syscall(nr, path, mode, *_):
+            if nr != 4014:  # mknod; pipe2 refused: no daemon's pipe here
+                return -1
+            assert C.string_at(path).decode() == CMDQ and mode == 0o10600
+            q2.files[CMDQ] = b''
+            return 0
+        def open_(path, flags, *_):
+            if C.string_at(path).decode() != CMDQ or CMDQ not in q2.files:
+                return -1
+            assert flags & 3 == 2  # O_RDWR: no end of file when a sender closes
+            self.opened = True
+            return self.FD
+        def read(fd, buf, n, *_):
+            if fd != self.FD or not self.pending:
+                return -1
+            chunk, self.pending = self.pending[:n], self.pending[n:]
+            C.memmove(buf, chunk, len(chunk))
+            return len(chunk)
+        fw.mock('cr_syscall', syscall)
+        fw.mock('fw_open', open_)
+        fw.mock('fw_read', read)
+        fw.mock('fw_pthread_create', lambda t, attr, fn, arg, *_: setattr(self, 'thread', arg) or
+                C.c_ulong.from_address(t).__setattr__('value', 7) or 0)
+        try:
+            self.reader = fw.fn('coda_rc_shim__cr_cmdq_read', C.c_void_p, C.c_void_p)
+        except AttributeError:  # a shim with no queue: every command goes to the file, as a sender's would
+            self.reader = None
+
+    def send(self, *lines):
+        """Each line as its sender sends it; through the FIFO they are read when the thread runs (send's end)."""
+        for line in lines:
+            if self.opened:
+                self.pending += line
+            else:
+                self.q2.files[CMD] = line
+        if self.opened and self.pending:
+            self.reader(self.thread)  # reads what is there; the next read fails and the thread ends
+
+
+def test_two_car_presses_inside_one_poll_both_reach_the_player(fw, ui, mcl, recs):
+    """docs/internals.md#car-remote-commands. The car's Next tapped twice 300 ms apart: q2-iap sends two commands
+    before the shim's next 500 ms poll, and both must reach the player. Through the single command file the second
+    replaced the first unread and one song was skipped, not two."""
+    q2 = Q2(fw, ui, recs, on=0)
+    q2.queue()
+    q = CmdQ(fw, q2)
+    fw.fn('usb_car_start', None)()
+    q2.tick()
+    q.send(b'1359998977 next\n', b'1359998978 next\n')
+    q2.tick(100)
+    q2.tick(500)
+    assert len(fw.calls('player_next_music')) == 2
+
+
+def test_a_queued_command_runs_on_the_pass_it_woke(fw, ui, mcl, recs):
+    """A command is run on the pass after it arrives, not at the next CR_POLL_MS: 0 to 500 ms of every steering-wheel
+    press's delay through the file."""
+    q2 = Q2(fw, ui, recs)
+    q2.queue()
+    q = CmdQ(fw, q2)
+    q2.tick()
+    q.send(b'31 previous\n')
+    q2.tick(20)
+    assert len(fw.calls('player_prev_music')) == 1 and q2.ack() == b'31 0\n'
+
+
+def test_the_phones_and_the_cars_commands_are_each_run_and_answered(fw, ui, mcl, recs):
+    """The daemon's (a phone's) and q2-iap's (the car's) commands no longer overwrite each other, and each answer is
+    still in the ack file when the next one comes, newest first, so the daemon finds its own."""
+    q2 = Q2(fw, ui, recs)
+    q2.queue()
+    q = CmdQ(fw, q2)
+    q2.tick()
+    q.send(b'41 next\n', b'1359998979 seek 20\n', b'42 previous\n')
+    q2.tick(20)
+    assert len(fw.calls('player_next_music')) == 1 and len(fw.calls('player_prev_music')) == 1
+    assert [a[0] for _, a in fw.calls('player_seek_time')] == [20]
+    assert q2.files[ACK] == b'42 0\n1359998979 0\n41 0\n'
+
+
+def test_a_play_is_kept_for_its_timer_and_the_next_command_waits_for_it(fw, ui, mcl, recs):
+    """A play is run by a timer (play_folder opens a window). A command after it, queued or in the file, waits until
+    the timer has run, and cannot replace the play: through the file the timer read the file again, found the next
+    command there and the play was dropped with no answer."""
+    q2 = Q2(fw, ui, recs)
+    q2.tick()
+    q2.files[LIST] = b'13\n11\n'
+    q2.files[CMD] = b'7 play 0 0 2\n'
+    q2.tick()
+    q2.files[CMD] = b'8 next\n'  # before the timer runs
+    q2.tick(20)
+    ui.fire('cr_play')
+    (queue, at, cls), = ui.played
+    assert [C.c_int.from_address(r).value for r in queue] == [13, 11]
+    q2.tick(600)
+    assert len(fw.calls('player_next_music')) == 1 and q2.files[ACK] == b'8 0\n7 0\n7 9\n'
+
+
+def test_the_single_command_file_is_still_read_beside_the_queue(fw, ui, mcl, recs):
+    """A q2-iap from before the queue (or a sender whose FIFO open failed) writes the file: still read every
+    CR_POLL_MS, and before the queue's lines."""
+    q2 = Q2(fw, ui, recs, on=0)
+    q2.queue()
+    q = CmdQ(fw, q2)
+    fw.fn('usb_car_start', None)()
+    q2.tick()
+    assert q.opened
+    q2.files[CMD] = b'1359998980 next\n'
+    q2.tick(600)
+    assert len(fw.calls('player_next_music')) == 1 and q2.ack() == b'1359998980 0\n'
+
+
+def test_queued_commands_are_dropped_with_neither_car_remote_nor_car_audio(fw, ui, mcl, recs):
+    q2 = Q2(fw, ui, recs, on=0)
+    q = CmdQ(fw, q2)
+    fw.fn('usb_car_start', None)()
+    q2.tick()
+    fw.fn('usb_car_stop', None, C.c_int)(1)
+    q.send(b'1359998981 next\n')
+    q2.tick(20)
+    q2.tick(600)
+    assert not fw.calls('player_next_music') and ACK not in q2.files
+
+
+def test_a_scan_held_through_the_queue_keeps_going_and_its_release_ends_it(fw, ui, mcl, recs):
+    """Car Audio's held Next: "scan 1" every 500 ms while it is down, "scan 0" at the release, each to seek.c's
+    seek_car as through the file, in order, each answered."""
+    q2 = Q2(fw, ui, recs, on=0)
+    q2.queue()
+    q = CmdQ(fw, q2)
+    fw.fn('usb_car_start', None)()
+    q2.tick()
+    for i, verb in enumerate(['scan 1', 'scan 1', 'scan 1', 'scan 0']):
+        q.send(f'{1359998990 + i} {verb}\n'.encode())
+        q2.tick(500)
+    assert q2.files[ACK] == b'1359998993 0\n1359998992 0\n1359998991 0\n1359998990 0\n'
+
+
+def test_a_play_is_answered_taken_before_its_timer_runs(fw, ui, mcl, recs):
+    """A play's work runs on a timer and can hold the loop for seconds (a shuffled list's start: 9 s on a loaded
+    emulator, 2026-11-23): the shim answers "taken" (coda_rc_cmdq.h CRC_ACK_TAKEN, 9) as it takes it, so the daemon
+    waits for the answer the timer writes instead of telling the phone UNAVAILABLE at ACK_MS."""
+    q2 = Q2(fw, ui, recs)
+    q2.tick()
+    q2.files[LIST] = b'13\n11\n'
+    q2.files[CMD] = b'7 play 0 0 2\n'
+    q2.tick()
+    assert q2.files[ACK] == b'7 9\n' and not ui.played  # taken; its timer has not run
+    ui.fire('cr_play')
+    assert ui.played and q2.files[ACK] == b'7 0\n7 9\n'

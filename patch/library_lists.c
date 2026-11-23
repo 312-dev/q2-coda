@@ -39,9 +39,13 @@ static void *shuffled_for_app(void *all, int at) {
     return out;
 }
 
-/* Collection Shuffle is Shuffle Songs over the collection. */
+/* Collection Shuffle is Shuffle Songs over the collection: the list's size, 0 for an empty one.
+ * With nothing to play to (docs/internals.md#no-playback-without-an-output) stock's gate refuses
+ * with its message before the play mode, Up Next's order or the confirmation changes; the size is
+ * still returned, so a caller's "No songs" is not added to it. */
 int shuffle_play(void *all) {
     int size = (int)deque_size(all);
+    if (size && check_forbid_play_no_headset(0)) return size;
     if (size) {
         int at = (int)rand_below((unsigned)size);
         if (playback_keeps(all, at)) { /* not a pick of it: another song, or alone, Now Playing */
@@ -72,8 +76,11 @@ int shuffle_songs(void *ctx, void *event) {
     return 0;
 }
 
+/* Shuffle Albums (ctx 0) or Folders (1): the whole library loaded as the queue and grouped, so the
+ * gate asks first, before the library is read or the queue loaded. */
 static int shuffle_groups(void *ctx, void *event) {
     int n;
+    if (check_forbid_play_no_headset(0)) return 0;
     void *all = staged(songs_unsorted, (void *)1, &n);
     if (!playback_groups(all, (int)(long)ctx))
         toast(deque_size(all) ? "Too many songs to shuffle" : "Update Local Music first");
@@ -123,21 +130,53 @@ static int mp_play(void *ctx, void *event) {
     return 0;
 }
 
+/* The play table's keys found by hash, for a pass over a library: PLAYS_INDEX slots (twice
+ * PLAYS_SLOTS, so at most half full), each 0 or a slot j + 1, open addressing from the key's low
+ * bits, filled in table order, so a key's first slot is met first. calloc'd; 0 without memory, and
+ * plays_slot then looks through the table. */
+#define PLAYS_INDEX (2 * PLAYS_SLOTS)
+static unsigned short *plays_index(void) {
+    unsigned short *ix = calloc(PLAYS_INDEX, sizeof *ix);
+    for (int j = 0; ix && j < PLAYS_SLOTS; j++) {
+        unsigned h = st.plays[j].key;
+        if (!h) continue; /* an empty slot: listen_key is never 0 */
+        while (ix[h & (PLAYS_INDEX - 1)]) ++h;
+        ix[h & (PLAYS_INDEX - 1)] = (unsigned short)(j + 1);
+    }
+    return ix;
+}
+/* key's first slot in the play table, -1 when it has none. */
+static int plays_slot(const unsigned short *ix, unsigned key) {
+    if (!key) return -1; /* no song's: listen_key is never 0 */
+    if (!ix) {
+        for (int j = 0; j < PLAYS_SLOTS; j++)
+            if (st.plays[j].key == key) return j;
+        return -1;
+    }
+    for (unsigned h = key; ix[h & (PLAYS_INDEX - 1)]; ++h) {
+        int j = ix[h & (PLAYS_INDEX - 1)] - 1;
+        if (st.plays[j].key == key) return j;
+    }
+    return -1;
+}
+
 /* The PLAYS_TOP most played of songs, their indices in idx, most played first and, among equal
  * counts, most recently counted first (the table keeps that order); returns how many. */
 static int mp_rank(void *songs, int *idx, unsigned *score) {
     int top = 0, size = (int)deque_size(songs);
     plays_load();
+    unsigned short *ix = plays_index();
     for (int i = 0; i < size; i++) {
         unsigned key = listen_key(deque_at(songs, i)), c = 0;
-        for (int j = 0; j < PLAYS_SLOTS && !c; j++)
-            if (st.plays[j].key == key) c = st.plays[j].n * PLAYS_SLOTS + PLAYS_SLOTS - j;
+        int j = plays_slot(ix, key);
+        if (j >= 0) c = st.plays[j].n * PLAYS_SLOTS + PLAYS_SLOTS - j;
         if (!c || (top == PLAYS_TOP && score[top - 1] >= c)) continue;
         int at = top < PLAYS_TOP ? top++ : PLAYS_TOP - 1;
         for (; at > 0 && score[at - 1] < c; at--) score[at] = score[at - 1], idx[at] = idx[at - 1];
         score[at] = c;
         idx[at] = i;
     }
+    free(ix);
     return top;
 }
 
@@ -154,19 +193,21 @@ void *plays_ranked(void *songs) {
 }
 
 /* Coverflow's Most Played order: every counted song's listens added to sum[album_of(song)], the
- * album's index in Coverflow's list (-1 none). One pass over the library. */
+ * album's index in Coverflow's list (-1 none). One pass over the library, a hash look a song
+ * (plays_index). */
 void album_plays(int (*album_of)(void *), unsigned *sum) {
     int n;
     void *songs = staged(songs_unsorted, (void *)1, &n);
     plays_load();
+    unsigned short *ix = plays_index();
     for (unsigned i = 0; i < deque_size(songs); i++) {
         void *r = deque_at(songs, i);
-        unsigned key = listen_key(r), c = 0;
-        for (int j = 0; j < PLAYS_SLOTS && !c; j++)
-            if (st.plays[j].key == key) c = st.plays[j].n;
+        int j = plays_slot(ix, listen_key(r));
+        unsigned c = j >= 0 ? st.plays[j].n : 0;
         int a = c ? album_of(r) : -1;
         if (a >= 0) sum[a] += c;
     }
+    free(ix);
     deque_destroy(songs);
 }
 
@@ -421,7 +462,7 @@ int era_sql(const char *sql, int (*row)(void *, int, char **, char **), void *ct
     /* Keep a full-library grouping query from competing with the player's song records for RAM. */
     int bad = sqlite3_open("/mnt/data/database.db", &db) ||
               sqlite3_exec(db, "PRAGMA cache_size=64;PRAGMA temp_store=FILE", 0, 0, 0);
-    if (!bad && both) catalogue_attach_db(db);
+    if (!bad && (both || strstr(sql, " cat."))) catalogue_attach_db(db); /* the union, or cat named */
     bad = bad || sqlite3_exec(db, both ? both : expanded ? expanded : sql, row, ctx, 0);
     if (db) sqlite3_close(db);
     free(expanded), free(both);

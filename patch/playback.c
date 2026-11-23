@@ -5,6 +5,7 @@
 #include "offsets.inc"
 #include "peq.h"
 #include "card_store.h"
+#include "stream_path.h"
 #include "stock.h"
 #define M(a) (*(volatile int *)(a))
 /* On the card (card_store.c, docs/internals.md#where-q2-muse-writes): a queue's songs are there too.
@@ -137,16 +138,18 @@ void wheel_set_pct(int n) {
     if (n != wheel_pct()) wheel_apply(n);
 }
 
-static void wheel_post(char *info, int key) {
+/* 1 when the key went into the UI loop's queue, 0 when its headroom was gone and the tick dropped */
+static int wheel_post(char *info, int key) {
     /* Read unlocked: off by one at worst, and the headroom covers it. */
     unsigned short *q = *(unsigned short **)(*(char **)(info + WHEEL_INFO_LOOP) + LOOP_QUEUE);
     int used = q[2] ? q[3] : (q[1] - q[0] + q[3]) % q[3];
-    if (q[3] - used < WHEEL_QUEUE_FREE + 2) return;
+    if (q[3] - used < WHEEL_QUEUE_FREE + 2) return 0;
     for (int type = 0x110; type <= 0x114; type += 4) { /* key down, then up */
         *(int *)(info + WHEEL_INFO_KEY) = key;
         *(int *)(info + WHEEL_INFO_EVENT) = type;
         ((void (*)(void *))WHEEL_POST)(info);
     }
+    return 1;
 }
 /* The wheel's thread and the threads reading it share these, a word each. wheel_frame_at: its last
  * frame with pressure. wh_tick_at, wh_since: its last tick wanted, and how many since Return armed
@@ -155,6 +158,11 @@ volatile unsigned wheel_frame_at __attribute__((section(".scratch")));
 static volatile unsigned wh_tick_at __attribute__((section(".scratch"))),
     wh_since __attribute__((section(".scratch"))), wh_armed_at __attribute__((section(".scratch")));
 static volatile int wh_armed __attribute__((section(".scratch")));
+/* Ticks posted that ringnav has not yet taken (wheel_tick_taken), and the way the last went, + toward
+ * Next: wheel_part holds a whole tick for them, as their travel has left wh_acc before the row
+ * steps. The wheel's thread adds, the UI thread takes away. */
+static volatile int wh_pending __attribute__((section(".scratch"))),
+    wh_pending_dir __attribute__((section(".scratch")));
 volatile int wheel_mute __attribute__((section(".scratch")));
 #if Q2POD_DEV
 /* ponytail: temporary, --dev builds only, comes out once the runaway report is explained. The last
@@ -351,6 +359,7 @@ void wheel_sample(int *s, int ret, char *info) {
         wh_acc = 0;
         wh_raw = 0;
         wh_speed = wh_moved = wh_dir = 0; /* a new touch starts from rest */
+        wh_pending = 0;
         wh_moved_at = at;
         wheel_held = 1;
         return;
@@ -388,17 +397,33 @@ void wheel_sample(int *s, int ret, char *info) {
         wh_since++;
         wl_note_tick(now, before);
         wheel_speed = wh_speed >> 8;
-        if (!wheel_mute) wheel_post(info, dir > 0 ? KEY_PREV : KEY_NEXT); /* x rising is back, as stock */
+        if (!wheel_mute && wheel_post(info, dir > 0 ? KEY_PREV : KEY_NEXT)) { /* x rising is back, as stock */
+            wh_pending_dir = -dir;
+            __sync_fetch_and_add(&wh_pending, 1);
+        }
     }
     s[0] = wh_anchor;
 }
 
 /* The wheel's way to its next tick, in 256ths of a tick: positive toward Next (clockwise), 0 with no
- * finger on it or while it posts no ticks (wheel_raw). Read on the UI thread: two words the
- * encoder thread writes whole, so at worst a sample stale (tilt.c). */
+ * finger on it or while it posts no ticks (wheel_raw). Read on the UI thread: words the encoder
+ * thread writes whole, so at worst a sample stale (tilt.c). A tick posted and not yet taken by
+ * ringnav is a whole one its way (256): its travel has left wh_acc, but its row has not stepped,
+ * and the carry alone would show the bar at rest for a frame on the row it is leaving, or against a
+ * list's end before tilt_end holds it (the About page's jump, docs/internals.md#wheel-movement). A
+ * tick no one takes in WHEEL_TAKE_MS (a key the UI dropped) is let go. */
 int wheel_part(void) {
     int acc = wh_acc, units = wh_units;
-    return wheel_held && !wheel_raw && units > 0 ? -acc * 256 / units : 0;
+    if (!wheel_held || wheel_raw || units <= 0) return 0;
+    if (wh_pending > 0 && (unsigned)time_now_ms() - wh_tick_at < WHEEL_TAKE_MS)
+        return wh_pending_dir * 256;
+    return -acc * 256 / units;
+}
+
+/* ringnav, on a wheel key's release: one posted tick reached the UI. A held turn's replayed ticks
+ * (input.c hold_wheel) were never posted, and find none left to take. */
+void wheel_tick_taken(void) {
+    if (wh_pending > 0) __sync_fetch_and_sub(&wh_pending, 1);
 }
 
 /* $t9 still holds ts_read, which stock loaded for its jalr; $s1 is the thread's info, which stock
@@ -1197,6 +1222,14 @@ static int restart_refused(int key, int restarts) {
     restart_key = key;
     return restart_ask = 1;
 }
+/* Advanced play's next song, as Up Next lists it first, is in the queue and not yet played this
+ * pass (a Play Next pick, or the order's next before it wraps): a playlist session's Next plays
+ * it rather than wait for the session's next song in list order (the seam test, 2026-11-22: under
+ * Shuffle, Next on the last song queued played the playlist's next download). */
+static int order_next_queued(void) {
+    unsigned x;
+    return s.active && upcoming(&x, 1) && x < s.n && !s.seen[x];
+}
 /* Manual Next/Prev (player_change_music). List Play stops at a library queue's end, as above. At
  * queue index 0 or n-1 stock wraps or loads a sibling folder itself; in Repeat All without Folder
  * Skip every branch calls mclNextSong(0)/mclPrevSong, so advanced order applies. MCL_MODE is
@@ -1209,8 +1242,9 @@ static int change_music(int next) {
     playback_pick();
     /* a playlist session's next song still to land: the Next shows it at once and plays it once it
      * can (addon.c), not stock's wrap to the queue's first song, the one playing (the device,
-     * 2026-11-17: a radio) */
-    if (next && !press_natural && addon_next_waits()) return 0;
+     * 2026-11-17: a radio). Not while advanced play's next is a queued song this pass has not
+     * played (order_next_queued): that is Up Next's first, and the Next plays it. */
+    if (next && !press_natural && !order_next_queued() && addon_next_waits()) return 0;
     if (!s.active) {
         if (!next || !list_end()) return stock_change_trampoline(next);
         ringnav_next(0); /* stops */
@@ -1274,8 +1308,11 @@ void playback_np_open(void) {
     navigator_switch_to_with_context("playing_page", context, 0);
 }
 /* Now Playing opened by a pick, which means play this, so a paused file goes on. Its Play waits for
- * the DAC by itself (dac_resume), so no stamp. */
+ * the DAC by itself (dac_resume), so no stamp. With nothing to play to, a paused file's pick is
+ * refused where it was made (stock's message), Now Playing not opened, as any refused start
+ * (output_rule.c ringnav_nav_to). */
 void playback_np(void) {
+    if (mclGetPlayStatus() == 3 && check_forbid_play_no_headset(0)) return;
     playback_np_open();
     if (mclGetPlayStatus() == 3) player_play_pause();
 }
@@ -1891,28 +1928,44 @@ int ringnav_memory(void *out) {
         p += len;
     }
     if (ok && p != buf + h.size) ok = 0;
-    void *rows = 0, *q = 0, *all = 0;
+    void *q = 0, *all = 0;
     if (ok) {
         q = _create_deque("stSongInfo");
         deque_init(q);
-        int count;
-        all = staged(library, 0, &count);
-        unsigned n = 0;
-        resume_row *lookup = calloc(deque_size(all), sizeof *lookup);
-        if (!lookup && deque_size(all)) ok = 0;
-        for (unsigned i = 0; ok && i < deque_size(all); ++i) {
+        unsigned char *songs = buf + header_size + (h.n * 3 + h.hn + h.npend) * 4;
+        /* Each saved song's identity (where it is in buf), and whether any could be a Library row:
+         * a stream cache download (stream_path.h) never is, so a streamed queue loads no library. */
+        unsigned *at = calloc(h.n, sizeof *at), *miss = calloc(h.n, sizeof *miss), nmiss = 0;
+        void **got = calloc(h.n, sizeof *got), **lists = calloc(h.n, sizeof *lists);
+        unsigned nlists = 0, n = 0;
+        int library_too = 0;
+        if (!at || !miss || !got || !lists) ok = 0;
+        p = songs;
+        for (unsigned i = 0; ok && i < h.n; ++i) {
+            const char *app, *sid;
+            int appn, sidn;
+            at[i] = (unsigned)(p - buf);
+            if (!stream_path_sid((const char *)p + 12, &app, &appn, &sid, &sidn)) library_too = 1;
+            unsigned len;
+            memcpy(&len, p, 4); /* unaligned after an odd path */
+            p += 12 + len;
+        }
+        resume_row *lookup = 0;
+        if (ok && library_too) {
+            int count;
+            all = staged(library, 0, &count);
+            lookup = calloc(deque_size(all), sizeof *lookup);
+            if (!lookup && deque_size(all)) ok = 0;
+        }
+        for (unsigned i = 0; ok && all && i < deque_size(all); ++i) {
             void *r = deque_at(all, i);
             if (I(r, REC_TYPE) == 8 && P(r, REC_PATH)) lookup[n++] = (resume_row){ r, i };
         }
         if (n) qsort(lookup, n, sizeof *lookup, resume_before);
-        char folder[1024] = "";
-        p = buf + header_size + (h.n * 3 + h.hn + h.npend) * 4;
         for (unsigned i = 0; ok && i < h.n; ++i) {
             unsigned id[3];
-            memcpy(id, p, 12);
-            p += 12;
-            const char *path = (const char *)p;
-            p += id[0];
+            memcpy(id, buf + at[i], 12);
+            const char *path = (const char *)buf + at[i] + 12;
             map[i] = ~0u;
             if (access(path, 0)) continue;
             unsigned lo = 0, hi = n;
@@ -1923,37 +1976,47 @@ int ringnav_memory(void *out) {
                 else
                     hi = mid;
             }
-            if (lo < n && !resume_cmp(lookup[lo].record, path, id[1], id[2])) {
-                map[i] = deque_size(q);
-                _deque_push_back(q, lookup[lo].record);
-            }
-            if (map[i] != ~0u) continue;
+            if (lo < n && !resume_cmp(lookup[lo].record, path, id[1], id[2]))
+                got[i] = lookup[lo].record;
+            else if (strrchr(path, '/'))
+                miss[nmiss++] = i;
+        }
+        /* The rest from their folders' listings, each folder listed once however the queue
+         * interleaves them (a stream cache's hex buckets), each listing kept until the queue is
+         * built from it. */
+        for (unsigned k = 0; ok && k < nmiss; ++k) {
+            if (miss[k] == ~0u) continue;
             char parent[1024];
-            memcpy(parent, path, id[0]);
-            char *slash = strrchr(parent, '/');
-            if (!slash) continue;
-            *slash = 0;
-            if (strcmp(folder, parent) || !rows) {
-                if (rows) deque_destroy(rows);
-                int count;
-                rows = staged(directory, parent, &count);
-                memcpy(folder, parent, strlen(parent) + 1);
-            }
-            for (unsigned j = 0; j < deque_size(rows); ++j) {
-                void *r = deque_at(rows, j);
-                if (I(r, REC_TYPE) == 8 && !strcmp(P(r, REC_PATH), path) &&
-                    (unsigned)I(r, REC_CUE_START) == id[1] &&
-                    (unsigned)I(r, REC_CUE_END) == id[2]) {
-                    map[i] = deque_size(q);
-                    card_record_tags(r); /* a card app's download: its tags, not its file's name */
-                    _deque_push_back(q, r);
-                    break;
+            const char *path = (const char *)buf + at[miss[k]] + 12;
+            unsigned len = (unsigned)(strrchr(path, '/') - path);
+            memcpy(parent, path, len), parent[len] = 0;
+            int count;
+            void *rows = lists[nlists++] = staged(directory, parent, &count);
+            for (unsigned m = k; m < nmiss; ++m) {
+                unsigned i = miss[m], id[3];
+                const char *other = i == ~0u ? 0 : (const char *)buf + at[i] + 12;
+                if (!other || strncmp(other, parent, len) || other[len] != '/' ||
+                    strrchr(other + len + 1, '/'))
+                    continue;
+                memcpy(id, buf + at[i], 12);
+                miss[m] = ~0u;
+                for (unsigned j = 0; j < deque_size(rows); ++j) {
+                    void *r = deque_at(rows, j);
+                    if (I(r, REC_TYPE) == 8 && !strcmp(P(r, REC_PATH), other) &&
+                        (unsigned)I(r, REC_CUE_START) == id[1] &&
+                        (unsigned)I(r, REC_CUE_END) == id[2]) {
+                        card_record_tags(r); /* a card app's download: its tags, not its name */
+                        got[i] = r;
+                        break;
+                    }
                 }
             }
         }
-        if (rows) deque_destroy(rows);
-        free(lookup);
-        deque_destroy(all);
+        for (unsigned i = 0; ok && i < h.n; ++i)
+            if (got[i]) map[i] = deque_size(q), _deque_push_back(q, got[i]);
+        for (unsigned k = 0; k < nlists; ++k) deque_destroy(lists[k]);
+        free(lookup), free(at), free(miss), free(got), free(lists);
+        if (all) deque_destroy(all);
         ok = deque_size(q) != 0;
     }
     int result = -1;

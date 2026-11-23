@@ -281,6 +281,30 @@ def boot_check():
         assert out.endswith(line + '== stall\n' + record) and '== cover flow' not in out and not stall.exists()
         stall.write_text('stale\n'); out, cp = logged(0, False)
         assert out is False and not stall.exists()  # no forced restart: dropped, not reported
+        # an unclean end found at boot keeps its evidence on the card (docs/internals.md#unified-log): the unified log's
+        # files, the car's newest log and dmesg in a numbered folder under .q2muse/crashes, named in q2-crash.log; a
+        # clean boot keeps nothing; the newest five are kept, a sixth drops the oldest; a card short of room keeps none
+        ulogs, kept = r/'mnt/mmc/.q2muse/logs', r/'mnt/mmc/.q2muse/crashes'
+        ulogs.mkdir(parents=True, exist_ok=True)
+        evidence = ['q2-log.0', 'q2-log.1', 'q2-heat.0', 'q2-bt.0', 'q2-btev.0', 'q2car.log', 'q2car.log.dmesg']
+        for f in (*evidence, 'q2car.1.log', 'other.txt'):
+            (ulogs/f).write_text(f + ' lines\n')
+        exe('bin/dmesg', 'echo kernel ring')
+        def folders(): return sorted(p.name for p in kept.iterdir() if p.is_dir()) if kept.exists() else []
+        for f in (crash, copy): f.unlink(missing_ok=True)
+        logged(0, True); assert folders() == []  # a clean end
+        state.write_text(line); out, cp = logged(0, True)
+        (one,) = folders()
+        assert sorted(p.name for p in (kept/one).iterdir()) == sorted([*evidence, 'dmesg'])
+        assert (kept/one/'q2-log.0').read_text() == 'q2-log.0 lines\n' and (kept/one/'dmesg').read_text() == 'kernel ring\n'
+        assert cp.endswith(f'== evidence .q2muse/crashes/{one}\n') and not state.exists()
+        for _ in range(5):
+            state.write_text(line); logged(0, True)
+        assert len(folders()) == 5 and one not in folders() and folders() == sorted(folders())
+        exe('bin/df', 'echo "Filesystem 1K-blocks Used Available Use% Mounted on"; echo "card 100 90 10 90% /mnt/mmc"')
+        before = folders(); state.write_text(line); out, cp = logged(0, True)
+        assert folders() == before and '== evidence' not in cp  # no room: nothing copied, nothing named
+        (r/'bin/df').unlink(); (r/'bin/dmesg').unlink(); mounts.write_text('')
         for f in (crash, copy): f.unlink(missing_ok=True)
         crash.write_text('== demo exit 137\n'); state.write_text(line); boot(True, False, status=0)
         assert crash.read_text().startswith('== demo exit 137\n== last state\n') and line in crash.read_text() and not state.exists()
@@ -443,6 +467,21 @@ def validate_assets(directory):
     STOCK_NAMED_ICONS = ('menu_coverflow.png', 'menu_coverflowdown.png')
     def read(image, rel):
         return subprocess.check_output(['unsquashfs', '-cat', str(directory/image), rel])
+    # Each card app the image carries (BUNDLED_APPS) is its pinned zip's program, byte for byte, with a bundle file
+    # naming the zip and both hashes (build.py bundle_record), as manifest.json's bundled_apps does.
+    import zipfile
+    from build import BUNDLED_APPS, BUNDLED_DIR, APPS_DIR, bundle_fields
+    for app_id, (_, zip_name, _, digest, _) in BUNDLED_APPS.items():
+        binary = read('rootfs.squashfs', f'{BUNDLED_DIR}/{app_id}/q2-{app_id}')
+        record = bundle_fields(read('rootfs.squashfs', f'{BUNDLED_DIR}/{app_id}/bundle'))
+        entry = manifest['bundled_apps'][app_id]
+        assert record['zip'] == zip_name == entry['zip'] and record['zip_sha256'] == digest == entry['sha256'], record
+        assert record[f'q2-{app_id}_sha256'] == sha(binary) == entry['binary_sha256'], f'{app_id}: not the program its bundle names'
+        assert record['build'] == entry['build']
+        pinned = APPS_DIR/zip_name
+        assert pinned.is_file() and sha(pinned.read_bytes()) == digest, f'{pinned}: missing or not the pinned zip'
+        with zipfile.ZipFile(pinned) as z:
+            assert z.read(f'.{app_id}/q2-{app_id}') == binary, f'{app_id}: the image\'s program is not the pinned zip\'s'
     # Every stock UI asset with Chinese text is given in English (english_ui), the edited ones after their edit.
     ui = 'release/assets/default/raw/ui/'
     # Every stock UI asset the image keeps (the stock EQ pages and STOCK_PAGES go): the build writes each one full-bleed

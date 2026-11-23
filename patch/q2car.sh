@@ -14,26 +14,35 @@
 #
 # q2-iap writes what it decided to $STATE (key=value lines, read by demo); this script adds down=1 once the gadget is
 # gone, which is when demo may start another gadget. The log is /mnt/mmc/.q2muse/logs/q2car.log (Send Logs takes
-# it), the two before it kept as q2car.1.log and q2car.2.log; the kernel's last lines go to q2car.log.dmesg at the end.
+# it); the kernel's last lines go to q2car.log.dmesg at the end. At the next cable a car's log is kept as
+# q2car.1.log, the older ones moving to .2, .3 and on, the oldest going once they pass CARLOG_MAX bytes together
+# (the newest CARLOG_KEEP whatever their size) or CARLOG_DAYS days (rotate); a computer's or a charger's is kept only until the next, as q2car.other.log, so a
+# computer plugged in to read the logs never pushes a drive's out.
 # Each cable's summary line and the module's counters at its end are added to q2car-summary.log (SUMMARY), which
 # is never rotated, only cut to its newer half past SUMMARY_MAX bytes, so a drive's cables are all in one file.
 
-RUN=/tmp/q2car
+RUN=${Q2CAR_RUN:-/tmp/q2car}
 STATE=/tmp/q2car.state
+RELINK=/tmp/q2car.relink # q2-iap's note of a relink under way (patch/usb_car.c holds its pause for it)
 CFS=/sys/kernel/config
 G=$CFS/usb_gadget/q2car
-FFS=/dev/usb-ffs
+FFS=${Q2CAR_FFS:-/dev/usb-ffs}
 SERIAL=/mnt/data/q2-iap.serial
 MODULE=/module_driver/usb_f_uac1.ko
 DAEMON=/usr/bin/q2-iap
 ADBG=/usr/bin/q2adb-gadget
-LOGDIR=/mnt/mmc/.q2muse/logs
+LOGDIR=${Q2CAR_LOGDIR:-/mnt/mmc/.q2muse/logs} # Q2CAR_RUN, _LOGDIR, _PCM, _PLAYER, _FFS: test/iap_probe.py
+PCM=${Q2CAR_PCM:-/proc/asound/UAC1Gadget/pcm0p/sub0/status} # "closed" once nothing has the car's PCM open
+PLAYER=${Q2CAR_PLAYER:-hciplayer}                           # q2player, by stock's player's name
 mkdir -p "$RUN"
 if [ -d "$LOGDIR" ] && touch "$LOGDIR/.q2car-w" 2>/dev/null; then rm -f "$LOGDIR/.q2car-w"; else LOGDIR=$RUN; fi
 LOG=$LOGDIR/q2car.log
 SUMMARY=$LOGDIR/q2car-summary.log
 SUMMARY_MAX=262144
 RELINKS=3
+CARLOG_MAX=${Q2CAR_CARLOG_MAX:-41943040} # the cars' logs together, bytes: three of q2-iap's longest (its --log-cap, 12 MB) and more
+CARLOG_KEEP=2       # the newest cars' logs kept whatever their size: the last drive's beside this one's
+CARLOG_DAYS=7
 
 up() { cut -d' ' -f1 /proc/uptime; }
 log() { echo "$(up) sh $*" >> "$LOG"; }
@@ -109,10 +118,42 @@ gadget_up() {
     return 0
 }
 
+# The car's PCM let go before the function is unbound: the unbind ends in the kernel's snd_card_free, which waits for
+# the card's last open file, and a paused song keeps it open (player/engine.c), so the unbind and the gadget's lock
+# waited for the player's next command (2026-11-22: 6.4 s in snd_card_free with the PCM held open, every read of UDC
+# waiting behind it, until it closed). The
+# player's SIGUSR2 releases it (docs/player.md); 2 s at most, then the unbind goes ahead and waits as before.
+pcm_open() { [ -e "$PCM" ] && [ "$(head -c 6 "$PCM")" != closed ]; }
+release() {
+    pcm_open || return 0
+    p=$(pidof $PLAYER)
+    [ -n "$p" ] && kill -USR2 $p
+    i=0
+    while pcm_open && [ $i -lt 20 ]; do usleep 100000; i=$((i + 1)); done
+    if pcm_open; then log "the car's PCM still open after 2 s: the gadget removed anyway"; else log "the car's PCM released in ${i}00 ms"; fi
+}
+
+# The processes with a file open under $1, by pid.
+holders() {
+    for p in /proc/[0-9]*; do
+        ls -l $p/fd 2>/dev/null | grep -q " $1/" && printf '%s ' "${p#/proc/}"
+    done
+}
+
+# The four FunctionFS mounts gone; one that will not go says so, with who holds it (a relink cannot start over it).
+ffs_unmount() {
+    for n in 1 2 3 4; do
+        mountpoint -q $FFS/iap$n || continue
+        umount $FFS/iap$n 2>>"$LOG" && continue
+        log "could not unmount $FFS/iap$n: busy (held by: $(holders $FFS/iap$n))"
+    done
+}
+
 # The gadget gone, configfs's way, and configfs unmounted, so stock's storage and DAC scripts can start theirs. Safe
 # with nothing there.
 gadget_down() {
     mountpoint -q $CFS || mount -t configfs none $CFS
+    release
     [ -d $G ] && echo "" > $G/UDC 2>/dev/null
     p=$(cat $RUN/daemon.pid 2>/dev/null)
     if alive "$p"; then
@@ -122,7 +163,7 @@ gadget_down() {
         alive "$p" && kill -9 "$p"
     fi
     rm -f $RUN/daemon.pid /tmp/q2-iap.audio
-    for n in 1 2 3 4; do mountpoint -q $FFS/iap$n && umount $FFS/iap$n; done
+    ffs_unmount
     if [ -d $G ]; then
         rm -f $G/configs/c.*/ffs.c* $G/configs/c.*/uac1.car
         rmdir $G/configs/c.*/strings/0x409 $G/configs/c.* 2>/dev/null
@@ -180,22 +221,53 @@ runner() {
         relinks=$((relinks + 1))
         log "the link was lost: the iPhone shown again ($relinks of $RELINKS)"
         gadget_down "relink"
+        [ -d $G ] && log "the relink cannot start: $G is still there (FunctionFS busy)"
         rm -f $RUN/kept # the next session's summary is kept too
         sleep 1
     done
+    rm -f $RELINK # no relink follows
     gadget_down "end"
     echo "down=1" >> $STATE
     rm -f $RUN/runner.pid
 }
 
-start() {
-    # the last three cables' logs: q2car.log, q2car.1.log, q2car.2.log (and their .dmesg)
-    for k in 1 0; do
-        from=$LOG
-        [ $k = 1 ] && from=${LOG%.log}.1.log
-        [ -f "$from" ] && mv -f "$from" "${LOG%.log}.$((k + 1)).log" && mv -f "$from.dmesg" "${LOG%.log}.$((k + 1)).log.dmesg" 2>/dev/null
+# The cable before's log made room for this one's: a car's (q2-iap's "car host: car" verdict) shifted to
+# q2car.1.log, the others up one, then the oldest dropped past CARLOG_MAX bytes (never the newest CARLOG_KEEP) or
+# CARLOG_DAYS days (never q2car.1.log); any other host's, or a cable no host spoke on, to q2car.other.log in place
+# of the one before.
+rotate() {
+    b=${LOG%.log}
+    [ -f "$LOG" ] || return 0
+    if ! grep -q '^[0-9.]* car host: car ' "$LOG"; then
+        mv -f "$LOG" "$b.other.log"
+        rm -f "$b.other.log.dmesg"
+        [ -f "$LOG.dmesg" ] && mv -f "$LOG.dmesg" "$b.other.log.dmesg"
+        return 0
+    fi
+    n=1
+    while [ -f "$b.$n.log" ]; do n=$((n + 1)); done
+    while [ $n -gt 1 ]; do
+        mv -f "$b.$((n - 1)).log" "$b.$n.log"
+        [ -f "$b.$((n - 1)).log.dmesg" ] && mv -f "$b.$((n - 1)).log.dmesg" "$b.$n.log.dmesg"
+        n=$((n - 1))
     done
-    rm -f $STATE $RUN/kept
+    mv -f "$LOG" "$b.1.log"
+    [ -f "$LOG.dmesg" ] && mv -f "$LOG.dmesg" "$b.1.log.dmesg"
+    total=0 k=1
+    while [ -f "$b.$k.log" ]; do
+        total=$((total + $(cat "$b.$k.log" "$b.$k.log.dmesg" 2>/dev/null | wc -c)))
+        if { [ $k -gt $CARLOG_KEEP ] && [ $total -gt $CARLOG_MAX ]; } ||
+            { [ $k -gt 1 ] && [ -n "$(find "$b.$k.log" -mtime +$CARLOG_DAYS)" ]; }; then
+            while [ -f "$b.$k.log" ]; do rm -f "$b.$k.log" "$b.$k.log.dmesg"; k=$((k + 1)); done
+            break
+        fi
+        k=$((k + 1))
+    done
+}
+
+start() {
+    rotate
+    rm -f $STATE $RUN/kept $RELINK
     log "start: kernel $(uname -r)"
     setsid sh "$0" _runner </dev/null >/dev/null 2>>"$LOG" &
 }
@@ -210,6 +282,7 @@ stop() {
         while alive "$r" && [ $i -lt 30 ]; do usleep 100000; i=$((i + 1)); done
         alive "$r" && kill -9 "$r"
     fi
+    rm -f $RELINK
     if [ -d $G ] || [ -f $RUN/daemon.pid ]; then
         gadget_down "stop"
         echo "down=1" >> $STATE
@@ -222,5 +295,8 @@ case "$1" in
 start) start ;;
 stop) stop ;;
 _runner) runner ;;
+_rotate) rotate ;;   # test/iap_probe.py
+_release) release ;; # test/iap_probe.py
+_unmount) ffs_unmount ;; # test/iap_probe.py
 *) echo "usage: $0 start | stop" >&2; exit 2 ;;
 esac

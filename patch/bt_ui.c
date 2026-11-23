@@ -260,6 +260,48 @@ int bt_mac_ok(const char *s) {
     return !s[17];
 }
 
+/* demo has no D-Bus client of its own, so BlueZ and bluealsa are asked through dbus-send in a
+ * shell. The shell is started on a thread of its own, never the UI thread: system() forks demo,
+ * whose copy of a large address space is the UI's time otherwise. The thread waits for the shell,
+ * then marks its job done, so the answer's file is read once, after it is whole; a job still
+ * running is not started again. 0 when it could not start (no memory, no thread): the caller asks
+ * again later. */
+struct bt_run {
+    bt_job *job;
+    char cmd[];
+};
+static void *bt_run_worker(void *arg) {
+    struct bt_run *r = arg;
+    system(r->cmd);
+    if (r->job) {
+        __atomic_add_fetch(&r->job->done, 1, __ATOMIC_RELEASE);
+        __atomic_store_n(&r->job->running, 0, __ATOMIC_RELEASE);
+    }
+    free(r);
+    return 0;
+}
+int bt_shell(bt_job *job, const char *cmd) {
+    if (job && __atomic_load_n(&job->running, __ATOMIC_ACQUIRE)) return 0;
+    unsigned n = (unsigned)strlen(cmd);
+    struct bt_run *r = calloc(1, sizeof *r + n + 1);
+    if (!r) return 0;
+    r->job = job;
+    memcpy(r->cmd, cmd, n + 1);
+    if (job) __atomic_store_n(&job->running, 1, __ATOMIC_RELEASE);
+    unsigned long t = 0;
+    if (pthread_create(&t, 0, bt_run_worker, r) || !t) {
+        if (job) __atomic_store_n(&job->running, 0, __ATOMIC_RELEASE);
+        free(r);
+        return 0;
+    }
+    pthread_detach(t);
+    return 1;
+}
+unsigned bt_job_done(bt_job *job) { return __atomic_load_n(&job->done, __ATOMIC_ACQUIRE); }
+/* the page's asks (class_fetch, seen_fetch) and the connected device's codecs' (sink_fetch) */
+static bt_job class_job __attribute__((section(".scratch"))),
+    seen_job __attribute__((section(".scratch"))), sink_job __attribute__((section(".scratch")));
+
 /* BlueZ's Class for each listed device, in the background, written whole to BT_CLASS_FILE as
  * "MAC CLASS" lines: started when the list holds a device the file has not answered for. */
 static void class_fetch(void) {
@@ -272,7 +314,6 @@ static void class_fetch(void) {
             ++k;
         }
     if (!k || hash == bt.class_hash) return; /* nothing new, or asked already */
-    bt.class_hash = hash;
     at = (unsigned)tk_snprintf(cmd, sizeof cmd, "(f=" BT_CLASS_FILE "; { cat $f 2>/dev/null; ");
     k = 0;
     for (int i = 0; (m = dev_at(i, 0)) && k < BT_CLASS_MAX && at < sizeof cmd - 260; ++i) {
@@ -289,8 +330,8 @@ static void class_fetch(void) {
             path, m);
         ++k;
     }
-    tk_snprintf(cmd + at, sizeof cmd - at, "} > $f.new; mv -f $f.new $f) >/dev/null 2>&1 &");
-    system(cmd);
+    tk_snprintf(cmd + at, sizeof cmd - at, "} > $f.new; mv -f $f.new $f) >/dev/null 2>&1");
+    if (bt_shell(&class_job, cmd)) bt.class_hash = hash;
 }
 
 /* BT_CLASS_FILE into bt.classes when it changed; 1 then. */
@@ -340,12 +381,12 @@ static void seen_fetch(unsigned now) {
         if (!heard(bt.found[i])) hash = hash * 33 + mac_hash(bt.found[i]), ++k;
     if (!k || (hash == bt.seen_hash && !(bt_searchtime > 1 && now - bt.seen_at >= BT_SEEN_MS)))
         return;
-    bt.seen_hash = hash, bt.seen_at = now;
+    if (__atomic_load_n(&seen_job.running, __ATOMIC_ACQUIRE)) return; /* the last ask runs yet */
     at = (unsigned)tk_snprintf(cmd, sizeof cmd,
                                "(f=" BT_SEEN_FILE "; g() { dbus-send --system --print-reply "
                                "--dest=org.bluez $1 org.freedesktop.DBus.Properties.Get "
                                "string:org.bluez.Device1 string:$2 2>/dev/null; }; { echo '#%u'; ",
-                               ++bt.seen_ask);
+                               bt.seen_ask + 1);
     k = 0;
     for (int i = 0; i < bt.n_found && k < BT_SEEN_MAX; ++i) {
         const char *m = bt.found[i];
@@ -370,8 +411,8 @@ static void seen_fetch(unsigned now) {
                 m, m);
         at += (unsigned)tk_snprintf(cmd + at, sizeof cmd - at, "fi; ");
     }
-    tk_snprintf(cmd + at, sizeof cmd - at, "} > $f.new; mv -f $f.new $f) >/dev/null 2>&1 &");
-    system(cmd);
+    tk_snprintf(cmd + at, sizeof cmd - at, "} > $f.new; mv -f $f.new $f) >/dev/null 2>&1");
+    if (bt_shell(&seen_job, cmd)) bt.seen_hash = hash, bt.seen_at = now, ++bt.seen_ask;
 }
 
 /* BT_SEEN_FILE's answer to the last ask, once: each device seen joins the heard set, each record
@@ -408,8 +449,9 @@ static int seen_read(void) {
  * device's A2DP source PCM names each codec of the sink endpoints BlueZ found on it (bluez-alsa
  * 4.0.0 bluealsa_pcm_get_codecs). Asked in the background once the link streams (a codec in
  * bt_showcoding: the PCM is there), written to BT_CODECS_FILE as the MAC's line then one name a
- * line (with the inner keys, which sink_read passes), and asked again every BT_CODECS_RETRY_MS
- * while unanswered, BT_CODECS_TRIES times; the file is read only while an ask is fresh. */
+ * line (with the inner keys, which sink_read passes), and asked again once an ask has ended
+ * unanswered, at most every BT_CODECS_RETRY_MS and BT_CODECS_TRIES times; the file is read once per
+ * ask, as it ends. */
 #define BT_CODECS_FILE "/tmp/q2bt.codecs"
 #define BT_CODECS_RETRY_MS 3000
 #define BT_CODECS_TRIES 10
@@ -418,13 +460,14 @@ static struct {
     unsigned bits; /* stock's codec numbers it takes, as 1 << n; 0 not known */
     unsigned asked_at;
     int tries;
+    unsigned seen; /* sink_job's runs ended as last read */
 } sink __attribute__((section(".scratch")));
 
 /* Whether the device connected now is known to lack stock's codec n. SBC every sink has (A2DP
  * makes it mandatory), so the ordered walk always ends there. */
 static int sink_lacks(int n) { return sink.bits && n > 1 && !(sink.bits & 1u << n); }
 
-static void sink_fetch(const char *mac) {
+static int sink_fetch(const char *mac) {
     char cmd[640], dev[24];
     tk_snprintf(dev, sizeof dev, "%s", mac);
     for (char *p = dev; *p; ++p)
@@ -437,9 +480,9 @@ static void sink_fetch(const char *mac) {
         "|\\1|p' | head -n 1); [ -n \"$p\" ] && { echo %s; dbus-send --system --print-reply "
         "--dest=org.bluealsa \"$p\" org.bluealsa.PCM1.GetCodecs 2>/dev/null | sed -n "
         "'s/^ *string \"\\([A-Za-z0-9-]*\\)\"$/\\1/p'; } >" BT_CODECS_FILE
-        ".new && mv -f " BT_CODECS_FILE ".new " BT_CODECS_FILE ") >/dev/null 2>&1 &",
+        ".new && mv -f " BT_CODECS_FILE ".new " BT_CODECS_FILE ") >/dev/null 2>&1",
         dev, mac);
-    system(cmd);
+    return bt_shell(&sink_job, cmd);
 }
 
 /* BT_CODECS_FILE's answer for sink.mac into sink.bits: the five codecs Quality offers, by name
@@ -467,12 +510,12 @@ static void sink_poll(const char *mac, unsigned now) {
         sink.bits = 0, sink.tries = 0;
     }
     if (!sink.mac[0] || sink.bits) return;
-    if (sink.tries && now - sink.asked_at < 2 * BT_CODECS_RETRY_MS) sink_read();
+    unsigned done = bt_job_done(&sink_job);
+    if (done != sink.seen) sink.seen = done, sink_read(); /* an ask ended: its answer */
     if (sink.bits || sink.tries >= BT_CODECS_TRIES || I(bt_showcoding, 0) <= 0 ||
         (sink.tries && now - sink.asked_at < BT_CODECS_RETRY_MS))
         return;
-    sink.asked_at = now, ++sink.tries;
-    sink_fetch(sink.mac);
+    if (sink_fetch(sink.mac)) sink.asked_at = now, ++sink.tries;
 }
 
 /* ---- the page's rows ---- */
@@ -726,8 +769,7 @@ void bt_page(void *view, int on) {
  * one; no state of its own. quality_order puts it first, over a CODEC header and the choices. */
 #define BT_STEP_KEY "BTSTEPDOWN"
 #define BT_STEP_TITLE "Adapt to Signal"
-#define BT_STEP_CAPTION                                                                            \
-    ((const unsigned *)L"On Auto or SBC, lowers quality to keep playing when the signal is weak")
+#define BT_STEP_CAPTION "On Auto or SBC, lowers quality to keep playing when the signal is weak"
 static int step_on(void) { return config_value("Q2POD", BT_STEP_KEY, 2, 0); }
 static int step_click(void *label, void *event) {
     int on = !step_on();
@@ -889,74 +931,56 @@ static unsigned choice_kbps(int i) {
     static const unsigned short kbps[] = { 990, 660, 0, 576, 384, 0, 0, 0 };
     return i >= 0 && i < (int)(sizeof kbps / sizeof *kbps) ? kbps[i] : 0;
 }
-#define BT_AUTO_CAPTION ((const unsigned *)L"Steps with the signal, 330 to 990 kbps")
-#define BT_KBPS_W 90 /* a choice's rate, right-aligned on the right column */
+#define BT_AUTO_CAPTION "Steps with the signal, 330 to 990 kbps"
+#define BT_KBPS_W 90    /* a choice's rate, right-aligned on the right column */
 #define BT_CHECK_GAP 24 /* ... and on the checked row before the check: its 12 px and the gap */
 
 /* Auto's caption for the headset connected now. bluealsa offers aptX HD, aptX, AAC and SBC beside
  * LDAC whatever the choice, so a headset without LDAC streams one of those on Auto, at that codec's
  * own rate (a Bowers & Wilkins Px7: aptX HD, a fixed 576 kbps): the caption names it, "Best this
  * headset supports: aptX HD, 576 kbps". On LDAC, with no device connected (stock's rule: the link
- * list's last item at status 3) or no codec known, it says what Auto does.
- * caption_row measures a caption again only for another pointer, so a changed text goes to the
- * other of two buffers. */
-static struct {
-    unsigned text[2][48];
-    int at;
-} auto_cap __attribute__((section(".scratch")));
+ * list's last item at status 3) or no codec known, it says what Auto does. s holds it, 48
+ * bytes (caption_row copies it). */
 static struct {
     void *view;    /* the picker's list while it is open */
     int coding;    /* g_btcoding its rates were placed for */
     unsigned lack; /* lack_key its marks were set for */
 } quality __attribute__((section(".scratch")));
-/* s as a caption in one of the pair of n-character buffers at pair: the current one while it says
- * s, else the other, filled, so caption_row sees another pointer and measures it again. */
-static const unsigned *cap_text(unsigned *pair, int *at, unsigned n, const char *s) {
-    unsigned *cur = pair + *at * n, i = 0;
-    while (s[i] && cur[i] == (unsigned char)s[i]) ++i;
-    if (s[i] || cur[i]) {
-        cur = pair + (*at ^= 1) * n;
-        for (i = 0; s[i] && i < n - 1; ++i) cur[i] = (unsigned char)s[i];
-        cur[i] = 0;
-    }
-    return cur;
-}
-static const unsigned *auto_caption(void) {
+static const char *auto_caption(char *s) {
     const char *codec = bt_codec();
-    char item[32] = "", s[48];
+    char item[32] = "";
     int status = 0, n = getBtLinkSize();
     if (n > 0) getBtLinkItem(n - 1, &status, item);
     if (!codec || status != 3 || !tk_strcmp(codec, "LDAC")) return BT_AUTO_CAPTION;
     unsigned kbps = bt_kbps(codec, bt_headset_rate()),
-             k = (unsigned)tk_snprintf(s, sizeof s, "Best this headset supports: %s", codec);
-    if (kbps && k < sizeof s) tk_snprintf(s + k, sizeof s - k, ", %u kbps", kbps);
-    return cap_text(auto_cap.text[0], &auto_cap.at, 48, s);
+             k = (unsigned)tk_snprintf(s, 48, "Best this headset supports: %s", codec);
+    if (kbps && k < 48) tk_snprintf(s + k, 48 - k, ", %u kbps", kbps);
+    return s;
 }
 
 /* The choices whose codec the device connected now lacks (sink_lacks: LDAC Best and Standard,
  * aptX HD, aptX, AAC; Auto and SBC never) are marked as the Library's grayed rows are
  * (docs/server-library.md#grayed-rows: #666666 off the selection, the selection's own ink at 70%
  * on it, bt_quality_dim) and still pickable, the pick kept for the next device; each says why
- * under it while selected, "BMW 6R81 doesn't support aptX HD: using AAC" (the device's name cut at
- * BT_LACK_NAME characters, the codec streaming now if known). Run after each layout and again
- * from bt_ui_poll when the device, its codecs or the codec streaming change (lack_key). */
+ * under it while selected, "BMW 6R81 doesn't support aptX HD: using AAC" (the device's name, UTF-8,
+ * cut at BT_LACK_NAME characters, the codec streaming now if known). Run after each layout and again
+ * from bt_ui_poll when the device, its codecs or the codec streaming change (lack_key). s holds
+ * the caption, BT_LACK_LEN bytes (caption_row copies it). */
 #define BT_LACK_NAME 20
-#define BT_LACK_LEN 64
+#define BT_LACK_LEN 128 /* 20 characters of up to 4 bytes, " doesn't support aptX HD: using aptX HD" */
 #define BT_LACK_GREY 0x666666 /* catalogue.c CAT_GREY */
 #define BT_LACK_DIM 0xb3      /* ... CAT_DIM */
-static struct {
-    unsigned text[4][2][BT_LACK_LEN]; /* LDAC, aptX HD, aptX, AAC */
-    int at[4];
-} lack __attribute__((section(".scratch")));
-static const unsigned *lack_caption(int codec) {
-    int k = codec == 4 ? 0 : codec == 13 ? 1 : codec == 3 ? 2 : 3, now = I(bt_showcoding, 0);
-    char s[BT_LACK_LEN];
-    unsigned n =
-        (unsigned)tk_snprintf(s, sizeof s, "%.*s doesn't support %s", BT_LACK_NAME,
-                              *bt.link_name ? bt.link_name : "This device", codec_name(codec));
-    if (codec_name(now) && now != codec && n < sizeof s)
-        tk_snprintf(s + n, sizeof s - n, ": using %s", codec_name(now));
-    return cap_text(lack.text[k][0], &lack.at[k], BT_LACK_LEN, s);
+static const char *lack_caption(int codec, char *s) {
+    int now = I(bt_showcoding, 0);
+    const char *name = *bt.link_name ? bt.link_name : "This device";
+    unsigned len = (unsigned)strlen(name), cut = 0;
+    for (int c = 0; c < BT_LACK_NAME && cut < len; ++c) /* characters, not bytes: UTF-8 */
+        utf8_char((const unsigned char *)name, len, &cut);
+    unsigned n = (unsigned)tk_snprintf(s, BT_LACK_LEN, "%.*s doesn't support %s", (int)cut, name,
+                                       codec_name(codec));
+    if (codec_name(now) && now != codec && n < BT_LACK_LEN)
+        tk_snprintf(s + n, BT_LACK_LEN - n, ": using %s", codec_name(now));
+    return s;
 }
 static unsigned lack_key(void) {
     unsigned h = sink.bits ^ (unsigned)I(bt_showcoding, 0) << 16;
@@ -996,7 +1020,8 @@ static void quality_rows(void *view) {
         int choice = atoi(widget_get_prop_str(b, "name", ""));
         title = row_title(b);
         unsigned kbps = choice_kbps(choice);
-        if (choice == BT_AUTO && title) { caption_row(title, auto_caption()); }
+        char said[48];
+        if (choice == BT_AUTO && title) caption_row(title, auto_caption(said));
         if (!kbps) continue;
         char s[16];
         void *l = small_label(b, 0, 0, BT_KBPS_W, I(b, W_H), BT_HEAD_PX);
@@ -1020,7 +1045,8 @@ static void quality_lacks(void *view) {
         if (choice == BT_AUTO || choice < 0 || choice > 7) continue;
         int codec = row_codec(choice), lacks = sink_lacks(codec);
         widget_set_prop_int(item, "_bt_lack", lacks);
-        caption_row(row_title(b), lacks ? lack_caption(codec) : (const unsigned *)0);
+        char said[BT_LACK_LEN];
+        caption_row(row_title(b), lacks ? lack_caption(codec, said) : (const char *)0);
     }
     quality.lack = lack_key();
     widget_invalidate_force(view, (void *)0);
@@ -1185,7 +1211,7 @@ static void link_toast(const char *mac, const char *what, int off) {
 
 /* Every BT_POLL_MS: a device connecting or dropping toasts it ("WH-1000XM5 connected", a car
  * "BMW 6R81 connected · resuming" with Resume on Connect on); its connect toast waits up to
- * BT_CLASS_WAIT_MS for its Class (bt_battery.c's loop) so a car says so. A headset's battery
+ * BT_CLASS_WAIT_MS for its Class (bt_battery.c's first run) so a car says so. A headset's battery
  * toasts once as it reaches 20% and once at 10% each connection. A drop the user asked for (stock
  * toasts its own Disconnected) is not toasted again. The connected device's codecs are learned
  * here too (sink_poll). */
@@ -1278,9 +1304,13 @@ int bt_quality_linked(int row) {
                 "org.bluealsa.Manager1.GetPCMs 2>/dev/null | sed -n "
                 "'s|.*object path \"\\(/org/bluealsa/[A-Za-z0-9_/]*/a2dpsrc/[A-Za-z0-9_/]*\\)\".*"
                 "|\\1|p' | head -n 1); [ -n \"$p\" ] && for c in %s; do q2bt-codec \"$p\" $c && "
-                "echo $c && break; done) >" BT_PICK_FILE " 2>&1 &",
+                "echo $c && break; done) >" BT_PICK_FILE " 2>&1",
                 list);
-    system(cmd);
+    if (!bt_shell((bt_job *)0, cmd)) { /* each pick its own, as the link monitor's step-down */
+        tk_snprintf(cmd, sizeof cmd, "Quality: %s not asked for: no thread to ask on", list);
+        ulog('W', "bt", cmd);
+        return 0;
+    }
     tk_snprintf(cmd, sizeof cmd, "Quality: %s asked for on the live link", list);
     ulog('I', "bt", cmd);
     return 0;
@@ -1311,6 +1341,7 @@ void bt_ui_poll(void) {
     if (quality.view && quality.coding != g_btcoding) quality_rates(quality.view);
     if (bt.view) page_poll(now);
     guest_ui_poll();
+    bt_pair_poll(); /* a device pairing: its card (bt_pair.c) */
     bt_detail_poll();
     if (now - bt.link_poll_at >= BT_POLL_MS) {
         bt.link_poll_at = now;

@@ -117,13 +117,21 @@ def test_a_raw_line_gets_a_level_and_source_from_its_words(L, text, level, src):
 
 
 def test_a_ulog_line_passes_through_as_it_was_and_a_raw_one_is_stamped(L, tmp_path):
+    """A raw line is stamped when it is read, or, after a stamped line read into the same ring no more than a minute
+    before, with that line's time: it was written between that line and the read."""
     log = Log(L, tmp_path)
-    mine = '2026-11-17T14:00:00Z 42 W usb plug, 40 ms\n'
-    assert L.ulog_add_raw(log.log, WALL, 777, mine.encode(), len(mine)) == b'W'
     raw = 'rtk_hciattach: Failed to read local version\n'
     assert L.ulog_add_raw(log.log, WALL, 777, raw.encode(), len(raw)) == b'E'
+    mine = '2026-11-17T14:00:00Z 4200 W usb plug, 40 ms\n'
+    assert L.ulog_add_raw(log.log, WALL, 7000, mine.encode(), len(mine)) == b'W'
+    after = 'rtk_hciattach: Failed to download firmware\n'
+    assert L.ulog_add_raw(log.log, WALL, 7000, after.encode(), len(after)) == b'E'
+    late = 'rtk_hciattach: Failed again\n'
+    assert L.ulog_add_raw(log.log, WALL, 70000, late.encode(), len(late)) == b'E'  # 65.8 s on: its own read time
     assert L.ulog_add_raw(log.log, WALL, 777, b'   \n', 4) == b'\x00'  # blank: dropped
-    assert log.ram() == mine + f'{TIME} 777 E bt rtk_hciattach: Failed to read local version\n'
+    assert log.ram() == (f'{TIME} 777 E bt rtk_hciattach: Failed to read local version\n' + mine +
+                         '2026-11-17T14:00:00Z 4200 E bt rtk_hciattach: Failed to download firmware\n' +
+                         f'{TIME} 70000 E bt rtk_hciattach: Failed again\n')
 
 
 def test_a_run_of_one_line_is_that_line_once_and_a_count(L, tmp_path):
@@ -301,3 +309,18 @@ def test_a_shutdown_snapshot_says_why_and_what_the_q2_was_doing_and_reaches_the_
         'I guard state up=5120 t=41.5 die=41.5 adc=6900 batt_raw=27 level=87 g=ok']
     L.ulog_snapshot(log.log, WALL, 9100, b'E', b'crash demo exit 139', None, None, None)
     assert log.ram() == f'{TIME} 9100 E guard snapshot crash demo exit 139\n'
+
+
+def test_a_stamped_line_whose_uptime_runs_past_the_cut_is_kept_cut(L, tmp_path):
+    """A ulog line longer than ULOG_PART is cut there; when the cut falls inside its uptime (500 digits), the level
+    and source are past it, so the message is empty, never a negative length."""
+    log, bt = Log(L, tmp_path), Log(L, tmp_path / 'bt')
+    L.ulog_bt_to.argtypes = [C.c_void_p, C.c_void_p]
+    L.ulog_bt_to(log.log, bt.log)  # the Bluetooth ring's check reads the message too
+    try:
+        line = ('2026-11-22T10:00:00Z ' + '7' * 500 + ' I x y\n').encode()
+        assert L.ulog_add_raw(log.log, WALL, 100, line, len(line)) == b'I'
+        assert L.ulog_add_raw(log.log, WALL, 200, line, len(line)) == b'\x00'  # the same again: a repeat, counted
+        assert log.ram() == line[:PART].decode() + '\n' and bt.ram() == ''
+    finally:
+        L.ulog_bt_to(None, None)

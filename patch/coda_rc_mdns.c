@@ -1,6 +1,6 @@
 /* coda-rc's mDNS responder (docs/remote-protocol.md#discovery): while Car Remote is on and Wi-Fi is joined, the
  * Q2 answers multicast DNS (RFC 6762, IPv4, UDP 5353) for one DNS-SD service (RFC 6763), so Q2 Muse Remote's
- * Wi-Fi tab lists it without an address typed:
+ * Pair a Q2 Muse lists it without an address typed:
  *
  *   _q2muse._tcp.local                 PTR  <name>._q2muse._tcp.local      <name>: the Bluetooth name
  *   <name>._q2muse._tcp.local          SRV  0 0 7720 q2muse-<6 hex>.local  (config.ini BTNAME, else Q2 Muse)
@@ -27,6 +27,7 @@
 #define MDNS_PORT 5353
 #define MDNS_GROUP 0xe00000fbu /* 224.0.0.251 */
 #define MDNS_CHECK_MS 1000     /* the address looked at this often */
+#define MDNS_CHECK_IDLE_MS 5000 /* and this often while no phone is connected (mdns_pace) */
 #define MDNS_NAME_MS 5000      /* the Bluetooth name this often */
 #define MDNS_SPACING_MS 1000   /* between the two announcements, and the least between two sends of a record */
 #define MDNS_RETRY_MS 30000    /* a socket refused on an address is tried again this much later (or on a new one) */
@@ -353,15 +354,20 @@ static int md_up(const uint8_t ip[4]) {
 void mdns_start(const char *ifname) {
     snprintf(md.ifname, sizeof md.ifname, "%s", ifname);
     md.on = 1;
-    md.checked = crc_now_ms() - MDNS_CHECK_MS;
+    md.checked = crc_now_ms() - MDNS_CHECK_IDLE_MS; /* the first look at once, at either pace */
     md.named = crc_now_ms() - MDNS_NAME_MS;
 }
 
 int mdns_fd(void) { return md.fd; }
 
+/* The address looked at every MDNS_CHECK_IDLE_MS while the daemon is quiet (no phone connected: coda_rc.c quiet),
+ * else every MDNS_CHECK_MS: a new address is announced up to 5 s late then, and queries are answered at once. */
+static uint32_t check_ms = MDNS_CHECK_MS;
+void mdns_pace(int quiet) { check_ms = quiet ? MDNS_CHECK_IDLE_MS : MDNS_CHECK_MS; }
+
 void mdns_poll(uint32_t now) {
     if (!md.on) return;
-    if (now - md.checked >= MDNS_CHECK_MS) {
+    if (now - md.checked >= check_ms) {
         md.checked = now;
         int renamed = 0;
         if (now - md.named >= MDNS_NAME_MS) {
@@ -386,8 +392,8 @@ void mdns_poll(uint32_t now) {
 
 uint32_t mdns_due(uint32_t now) {
     if (!md.on) return 0xffffffffu;
-    uint32_t due = md.checked + MDNS_CHECK_MS - now;
-    if (due > MDNS_CHECK_MS) due = 0; /* already due */
+    uint32_t due = md.checked + check_ms - now;
+    if (due > check_ms) due = 0; /* already due */
     if (md.fd >= 0 && md.announces) {
         uint32_t a = md.next_announce - now;
         if (a >= 0x80000000u) a = 0;

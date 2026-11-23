@@ -8,14 +8,15 @@ int usable(void) {
      * (on_wm_keylong_fun); 2 is the power-off page itself. */
     if (g_poweroff_state) return confirm;
     if (g_usblink_status != 2) return 1;
-    /* USB mode's exit asks whether to scan in a confirm dialog before it leaves the mode: once the
-     * cable is out, that prompt takes the wheel and Centre. */
-    return !g_usbdet_value && confirm;
+    /* USB mode's exit asks whether to scan the card in a confirm dialog before it leaves the mode,
+     * the cable pulled out or the mode page's Stop pressed with the computer still there: that
+     * prompt takes the wheel and Centre either way, its first button selected as it opens. */
+    return confirm;
 }
 
 static int usb_prompt(void) {
     void *top = window_manager_get_top_window(window_manager());
-    return g_usblink_status == 2 && !g_usbdet_value && usable() && top &&
+    return g_usblink_status == 2 && usable() && top &&
            !tk_strcmp(widget_get_prop_str(top, "name", ""), "confirminfo_dialog");
 }
 
@@ -551,9 +552,15 @@ static int reconcile(menu_t *m, int settle) {
     int id = m->kind == 3 ? slide_index(m->w) : widget_get_prop_int(m->w, SEL, -1);
     int cur = index_of(m, id);
     if (m->kind == 3) return cur;
+    /* Home shows its bar under touch, so once a drag settles its selected row stands whole where
+     * the wheel would leave it (sel_height: Home's main list's rest), never under the status row
+     * or in the fade past the rest (docs/oled-design.md#list-edges); elsewhere the bar is hidden
+     * until the wheel, which reveals the row, so a row partly in sight keeps it. */
+    int home = settle && home_menu(window_manager_get_top_window(window_manager())),
+        shown = home ? sel_height(m) : m->height;
     if (cur >= 0) {
         rect_t r = bounds(m, cur);
-        if (r.y < m->height && r.y + r.h > 0) {
+        if (home ? r.y >= 0 && r.y + r.h <= shown : r.y < m->height && r.y + r.h > 0) {
             st.reveal_surface = (void *)0; /* the glide arrived, or the user brought it back */
             return cur;
         }

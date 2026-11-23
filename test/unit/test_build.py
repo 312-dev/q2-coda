@@ -2,6 +2,7 @@
 import ctypes
 import gc
 import hashlib
+import importlib.util
 import io
 import pathlib
 import re
@@ -83,7 +84,7 @@ STOCK_CONFIG = b'[PLAYSET]\nCOVERMODE=1\n[SYSSET]\nAUTOSCAN=1\nBTCODING=2\nTIMEZ
 
 
 def test_the_default_config_names_english_so_no_language_guide_opens():
-    """A reset's config.ini: the three settings off, LANGUAGE=2 (English) first in SYSSET, whose absence is what
+    """A reset's config.ini: Enlarged Album Art, Standby and Wheel Function off, LANGUAGE=2 (English) first in SYSSET, whose absence is what
     sends config_init to stock's first-boot language guide, the zone UTC (DEFAULT_TIMEZONE) for stock's Shanghai, and
     Smart Awake on in an [IPOD] of its own, on its own line after stock's last, which has no newline."""
     out = build.default_config(STOCK_CONFIG)
@@ -786,11 +787,13 @@ def test_jpeg_size_refuses(data, message):
 def test_source_sha256_hashes_every_input_by_path(tmp_path, monkeypatch):
     monkeypatch.setattr(build, 'ROOT', tmp_path)
     files = ['assets/icons/a.png', 'assets/b.jpg', 'patch/c.c', 'tools/d.py', 'tools/e.c', 'tools/f.h', 'tools/g.S',
-             'docs/manual/build.py', 'docs/manual/guide.html', 'player/h.c', 'player/i.h', 'player/Makefile']
+             'docs/manual/build.py', 'docs/manual/guide.html', 'player/h.c', 'player/i.h', 'player/Makefile',
+             'tools/adbd.patch', 'tools/uac1_module/Kbuild', 'tools/uac1_module/patches/p.patch', 'tools/stock_map.tsv']
     for name in files:
         (tmp_path/name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path/name).write_text(name)
-    for name in ('tools/note.txt', 'docs/other.md', 'test/x.py', 'tools/sub/deep.py', 'player/build/host/q2player'):
+    for name in ('tools/note.txt', 'docs/other.md', 'test/x.py', 'tools/sub/deep.py', 'player/build/host/q2player',
+                 'tools/uac1_module/__pycache__/x.pyc'):
         (tmp_path/name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path/name).write_text(name)
     expected = hashlib.sha256()
@@ -817,6 +820,29 @@ def test_compile_helper(tmp_path, monkeypatch):
     assert commands[2] == ('ld.lld', '-m', 'elf32ltsmip', '-e', '__start', '--dynamic-linker', '/lib/ld-linux-mipsn8.so.1',
                            '--image-base=0x400000', '-z', 'noexecstack', '--gc-sections', '-s', '--hash-style=sysv', '--build-id=none',
                            *objs, f'-L{tmp_path}', '-l:libc.so', '-l:libz.so', '-o', tmp_path/'helper')
+
+
+@pytest.mark.parametrize('sections', [None, False])
+def test_compile_helper_sources_with_or_without_sections(tmp_path, monkeypatch, sections):
+    """A list of sources: each compiled with -ffunction-sections and -fdata-sections, unless sections is False."""
+    commands = []
+    monkeypatch.setattr(build, 'run', lambda *args: commands.append(args) or (tmp_path/'helper').write_bytes(b'x'))
+    monkeypatch.setattr(build, 'FLAGS', ['-a'])
+    build.compile_helper(tmp_path, {}.__getitem__, ['one', 'two'], 'helper', [], sections=sections)
+    split = ['-ffunction-sections', '-fdata-sections'] if sections is None else []
+    assert commands[:3] == [('clang', '-a', '-mnan=2008', '-mabs=2008', '-mabicalls', *split, '-c',
+                             build.ROOT/'patch'/f'{s}.c', '-o', tmp_path/f'{s}.o') for s in ('one', 'two', 'start')]
+
+
+def test_q2_iap_is_built_from_one_list_of_sources():
+    """tools/build.py (the image), tools/iap_probe/probe_build.py and test/iap_probe.py (which takes probe_build's)
+    build q2-iap from the same sources, and each is a file."""
+    spec = importlib.util.spec_from_file_location('iap_probe_build', build.ROOT/'tools/iap_probe/probe_build.py')
+    assert spec and spec.loader
+    probe_build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe_build)
+    assert probe_build.SOURCES == build.Q2IAP_SOURCES
+    assert all((build.ROOT/'patch'/f'{s}.c').is_file() for s in build.Q2IAP_SOURCES)
 
 
 def test_bt_silence_commands(monkeypatch):
@@ -1418,9 +1444,37 @@ def test_a_carried_app_is_its_pinned_zips_files_with_a_version_and_the_new_launc
     pinned(monkeypatch, tmp_path, app_zip({'.demo/q2app': 'name=Demo\n', '.demo/q2-demo': b'ELF', '.demo/run': LAUNCHER,
                                            '.demo/icon.png': b'png', 'README': 'outside its folder'}))
     files = build.bundled_app('demo', tmp_path)
-    assert sorted(files) == ['icon.png', 'q2-demo', 'q2app', 'run', 'version']
+    assert sorted(files) == ['bundle', 'icon.png', 'q2-demo', 'q2app', 'run', 'version']
     assert files['q2-demo'] == (b'ELF', True) and files['run'][1] and files['q2app'] == (b'name=Demo\n', False)
     assert files['version'] == (b'q2-v1.2\n', False) and b'/usr/lib/q2apps/demo/q2-demo' in files['run'][0]
+    digest = build.BUNDLED_APPS['demo'][3]
+    assert build.bundle_fields(files['bundle'][0]) == {'zip': 'demo.zip', 'zip_sha256': digest,
+                                                       'q2-demo_sha256': hashlib.sha256(b'ELF').hexdigest(), 'build': '-'}
+    assert not files['bundle'][1]
+
+
+def stamped(monkeypatch, tmp_path, name, stamp):
+    data = app_zip({'.demo/q2app': '', '.demo/q2-demo': b'ELF', '.demo/run': LAUNCHER, '.demo/version': stamp})
+    (tmp_path/name).write_bytes(data)
+    monkeypatch.setitem(build.BUNDLED_APPS, 'demo', ('q2-v1.0', name, len(data), hashlib.sha256(data).hexdigest(), True))
+
+
+def test_a_zips_commit_stamp_is_carried_in_its_bundle_file(monkeypatch, tmp_path):
+    stamped(monkeypatch, tmp_path, 'demo-v1.0-7ded418.zip', 'q2-v1.0+7ded418\n')
+    files = build.bundled_app('demo', tmp_path)
+    assert files['version'][0] == b'q2-v1.0\n'  # addon_version_cmp's tag, as before
+    assert build.bundle_fields(files['bundle'][0])['build'] == 'q2-v1.0+7ded418'
+
+
+@pytest.mark.parametrize('name, stamp, why', [
+    ('demo-v1.0-7ded418.zip', 'q2-v1.0+32bd2cd', "says it is 'q2-v1.0\\+32bd2cd'"),  # renamed after the build
+    ('demo-v1.0-7ded418-dirty.zip', 'q2-v1.0+7ded418-dirty', 'uncommitted changes'),
+    ('demo.zip', 'q2-v1.0+7ded418', 'not q2-v1.0\\+ its name'),  # no commit in its name to check it by
+])
+def test_a_zip_whose_stamp_is_not_a_clean_commits_is_refused(monkeypatch, tmp_path, name, stamp, why):
+    stamped(monkeypatch, tmp_path, name, stamp)
+    with pytest.raises(ValueError, match=why):
+        build.bundled_app('demo', tmp_path)
 
 
 def test_a_builtin_app_carries_its_builtin_file_and_no_zip_brings_one(monkeypatch, tmp_path):
@@ -1429,9 +1483,10 @@ def test_a_builtin_app_carries_its_builtin_file_and_no_zip_brings_one(monkeypatc
     assert build.bundled_app('demo', tmp_path)['builtin'] == (b'1\n', False)
     pinned(monkeypatch, tmp_path, app_zip(files))
     assert 'builtin' not in build.bundled_app('demo', tmp_path)
-    pinned(monkeypatch, tmp_path, app_zip({**files, '.demo/builtin': ''}))
-    with pytest.raises(ValueError, match='Unexpected files in demo.zip'):
-        build.bundled_app('demo', tmp_path)
+    for extra in ('builtin', 'bundle'):
+        pinned(monkeypatch, tmp_path, app_zip({**files, f'.demo/{extra}': ''}))
+        with pytest.raises(ValueError, match='Unexpected files in demo.zip'):
+            build.bundled_app('demo', tmp_path)
 
 
 def test_subsonic_is_the_firmwares_alone():
@@ -1560,3 +1615,30 @@ def test_stock_window_opens_finds_each_call_and_the_name_it_passes_and_each_keyb
     assert calls == {jalr_page: 'page_one', bal_hex: 'kb_hex', b_call: None, jalr_nowhere: None, bal_long: None,
                      bal_or: None, bal_addiu: None, bal_after: None, jalr_later: 'page_one'}
     assert reads == {read_slot: 'kb_hex', read_addiu: 'kb_hex'}  # bal_hex's addiu builds on $4, not on the load's $5
+
+
+def test_the_font_memo_follows_only_the_code_its_function_names():
+    """memo's key (memo_source): an edit elsewhere in tools/build.py keeps the fonts' cache, as a new hook or a new
+    BUNDLED_APPS pin should; an edit of subset_font, of a helper it calls or of a constant either names does not."""
+    text = pathlib.Path(build.__file__).read_text()
+    key = build.memo_source(build.subset_font, text)
+    assert 'def play_mark' in key and 'PLAY_MARK' in key and 'TABULAR' in key and 'BUNDLED_APPS' not in key
+    assert build.memo_source(build.subset_font, text + '\n# a comment\nOTHER = 1\n') == key
+    assert build.memo_source(build.subset_font, text.replace('PLAY_MARK = 0x25b6', 'PLAY_MARK = 0x25b7')) != key
+    helper = text.index('def play_mark')
+    assert build.memo_source(build.subset_font, text[:helper] + 'def play_mark(font):\n    pass\n\ndef was_play_mark' + text[helper + 13:]) != key
+
+
+def test_every_hook_is_where_a_record_not_made_from_hooks_says():
+    """HOOKS' 18 hooks on functions Shanling left unnamed were checked against PRIVATE_FUNCTIONS, itself made from
+    HOOKS: keylock_rows moved to tidal_favourite_request's start built (2026-11-22). stock_map.tsv names them."""
+    mapped = build.stock_map()
+    private = [n for n in build.HOOKS if build.PRIVATE_FUNCTIONS.get(n) == build.HOOKS[n][0]]
+    assert len(private) == 18 and all(mapped[n] == build.HOOKS[n][0] for n in private)
+    stock = {n: a for n, (a, _, _) in build.HOOKS.items() if n not in private}  # as stock's symbol table gives them
+    build.hook_address_check(build.HOOKS, stock, mapped)
+    moved = {**build.HOOKS, 'keylock_rows': (mapped['tidal_favourite_request'], 'ringnav_keylock_rows', None)}
+    with pytest.raises(ValueError, match=r'keylock_rows: HOOKS has 0x484514, but keylock_rows is at 0x4c9dd8 \(tools/stock_map.tsv\)'):
+        build.hook_address_check(moved, stock, mapped)
+    with pytest.raises(ValueError, match='in neither'):
+        build.hook_address_check({'nowhere': (1, 'x', None)}, {}, mapped)

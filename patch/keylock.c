@@ -102,6 +102,11 @@ static void card_on(void) {
     rearm(&kl.timer, card_end, KEYLOCK_CARD_MS);
 }
 
+/* Whether a press of key now is the lock's: held back, its card shown dark (keylock_gate). */
+int keylock_holds(unsigned key) {
+    return key_bit(key) && locked(key) && !video_on() && !addon_game_on();
+}
+
 /* ringnav_input, after the wake gate: 1 drops the event. remote: SyncLink's play control
  * (ringnav_post_key), which the lock never holds. */
 int keylock_gate(void *e, int remote) {

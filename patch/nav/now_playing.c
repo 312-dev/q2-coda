@@ -600,8 +600,9 @@ static void np_only(void *win) {
 }
 
 /* playing_page_init: stock builds the page and starts its 250 ms timer, then the iPod labels bind.
- * Headphones required with none to play to: stock toasts, closes the window it was given and
- * returns STOP before it builds anything (0x53e4b4), so nothing binds and the page under stays. */
+ * Headphones required with none to play to: output_rule.c ringnav_nav_to refuses the start before
+ * the navigator makes the page. Should one get here all the same, stock toasts, closes the window
+ * it was given and returns STOP before it builds anything (0x53e4b4), so nothing binds. */
 int ringnav_playing(void *win, void *ctx) {
     if (st.np_full)
         np_full(0); /* another Now Playing: the last one's lyrics back in their column */

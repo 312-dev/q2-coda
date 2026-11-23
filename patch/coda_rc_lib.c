@@ -292,16 +292,57 @@ static sqlite3 *db;
 static int cat_on; /* the catalogue is attached (a server signed in) */
 static char sql[6144];
 
-static void lib_close(void) {
+/* What the open connection's tables were made from: the database, the catalogue and the durations file, each
+ * by inode, size and change time (0 for one that is not there). A request whose files are the same uses the
+ * connection as it is; any change makes it again. */
+typedef struct {
+    unsigned long long ino[3];
+    long long size[3], mtime[3];
+} lib_key_t;
+static lib_key_t lib_key;
+
+static void lib_key_now(lib_key_t *k) {
+    static const char *const files[3] = {DB, CAT, DURATIONS};
+    memset(k, 0, sizeof *k);
+    for (int i = 0; i < 3; ++i) {
+        char p[256];
+#ifdef CODA_HOST
+        struct stat st;
+        if (stat(crc_path(p, sizeof p, files[i]), &st)) continue;
+        k->ino[i] = st.st_ino, k->size[i] = st.st_size;
+        k->mtime[i] = (long long)st.st_mtim.tv_sec * 1000000000 + st.st_mtim.tv_nsec;
+#else
+        int st[40]; /* glibc's MIPS o32 struct stat as words: st_ino 4, st_size 12, st_mtim 16 and 17 */
+        if (__xstat(3, crc_path(p, sizeof p, files[i]), st)) continue;
+        k->ino[i] = (unsigned)st[4], k->size[i] = (unsigned)st[12];
+        k->mtime[i] = (long long)st[16] * 1000000000 + st[17];
+#endif
+    }
+}
+
+static void lib_drop(void) {
     if (db) sqlite3_close(db);
     db = 0;
 }
 
+/* A request is done with the library. The connection stays open, with its tables, for the next (lib_open). */
+static void lib_close(void) {}
+
+/* The library ready for a request: the database open with the catalogue attached while a server is signed in,
+ * and the temp tables every list reads, songs with their sort keys (s2) and albums, made once for the files as
+ * they are (lib_key). Made per request as views, a Browse page at 9,199 songs costs 35 ms on a laptop
+ * (test_coda_rc_lib.py test_a_page_reuses_the_librarys_tables), and coda-rc took 37 % of the Q2's core while a
+ * phone browsed on the drive of 2026-11-22. The tables hold about 2 MB at 9,199 songs (the log's "tables made"). */
 static int lib_open(void) {
     char p[256];
+    lib_key_t k;
+    lib_key_now(&k);
+    if (db && !memcmp(&k, &lib_key, sizeof k)) return 0;
+    lib_drop();
+    lib_key = k;
     if (sqlite3_open_v2(crc_path(p, sizeof p, DB), &db, SQLITE_OPEN_READONLY, 0) != SQLITE_OK) {
         crc_log("lib: %s", db ? sqlite3_errmsg(db) : "no database");
-        lib_close();
+        lib_drop();
         return -1;
     }
     sqlite3_busy_timeout(db, 500);
@@ -326,16 +367,23 @@ static int lib_open(void) {
              server ? " union all " SONG_COLS("s", "c", "ifnull(m.seconds,0)", "1")
                       " from cat.servertable s left join cat.servermeta m on m.fileurl = s.fileurl"
                     : "",
-             ";create temp view s2 as select *, akey(url) ak, norm(title) nt, norm(artist) nar, norm(album) nal, "
+             ";create temp table s2 as select *, akey(url) ak, norm(title) nt, norm(artist) nar, norm(album) nal, "
              "norm(aartist) naa, norm(genre) ng, case when srv then printf('%05d%05d',disc,track)||norm(title) "
              "else filename end ord, case when srv then track else lead(filename) end num from songs;"
-             "create temp view albums as select ak, max(album) title, max(aartist) artist, max(year) year, "
-             "max(added) added, norm(max(album)) nt, norm(max(aartist)) naa from s2 group by ak;");
+             "create temp table albums as select ak, max(album) title, max(aartist) artist, max(year) year, "
+             "max(added) added, norm(max(album)) nt, norm(max(aartist)) naa from s2 group by ak;"
+             "create index temp.s2_ak on s2(ak);create index temp.albums_ak on albums(ak);");
     if (sqlite3_exec(db, sql, 0, 0, 0) != SQLITE_OK) {
-        crc_log("lib: views: %s", sqlite3_errmsg(db));
-        lib_close();
+        crc_log("lib: tables: %s", sqlite3_errmsg(db));
+        lib_drop();
         return -1;
     }
+    sqlite3_stmt *st = 0;
+    if (sqlite3_prepare_v2(db, "select (select count(*) from s2), (select page_count from pragma_page_count('temp')) *"
+                               " (select page_size from pragma_page_size('temp')) / 1024", -1, &st, 0) == SQLITE_OK &&
+        sqlite3_step(st) == SQLITE_ROW)
+        crc_log("lib: tables made, %d songs, %d KB", sqlite3_column_int(st, 0), sqlite3_column_int(st, 1));
+    sqlite3_finalize(st);
     return 0;
 }
 
@@ -775,6 +823,28 @@ fail:
     sqlite3_finalize(st);
     lib_close();
     return crc_error(s, req_id, E_INTERNAL, "query");
+}
+
+/* ---- the playing song's pages (NowPlaying.album_id and artist_id) ---- */
+
+/* The Browse nodes of track_id's ("song:t12", "song:c1073741830") album and album artist, as Browse serves them:
+ * album: and the album's key, the page that lists the song; artist:r and the album artist's hash, the Artists
+ * list's page, which lists the album. Empty where there is no such page: a song not in the library (a stream
+ * with no catalogue row, a station), a server song while its catalogue is not attached, no album artist. */
+void lib_song_nodes(const char *track_id, char *album, size_t acap, char *artist, size_t rcap) {
+    *album = *artist = 0;
+    if (strncmp(track_id, "song:", 5) || !track_id[5] || lib_open()) return;
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(db, "select 'album:'||ak, case when naa != '' then 'artist:r'||hkey(naa) else '' end "
+                               "from s2 where sid = ?1 limit 1", -1, &st, 0) != SQLITE_OK)
+        return;
+    sqlite3_bind_text(st, 1, track_id + 5, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        snprintf(album, acap, "%s", (const char *)sqlite3_column_text(st, 0));
+        snprintf(artist, rcap, "%s", (const char *)sqlite3_column_text(st, 1));
+    }
+    sqlite3_finalize(st);
+    lib_close();
 }
 
 /* ---- search ---- */

@@ -83,8 +83,8 @@ def cargo(tmp_path, monkeypatch):
 
 
 def test_a_build_is_kept_in_the_cache_under_its_sha(cargo):
-    data, digest = iroh.build()
-    assert data == cargo.data and digest == hashlib.sha256(data).hexdigest()
+    data, digest, crate = iroh.build()
+    assert data == cargo.data and digest == hashlib.sha256(data).hexdigest() and crate == iroh.crate_sha256()
     assert (iroh.CACHE/digest/'q2-iroh').read_bytes() == data and (iroh.CACHE/digest/'q2-iroh').stat().st_mode & 0o111
     assert cargo.calls == [['sh', str(iroh.CRATE/'q2/build.sh'), str(cargo.built.parent)]]
     assert not (cargo.built.parent/'sysroot').exists()
@@ -119,3 +119,22 @@ def test_main_check_passes_on_the_pinned_binary_and_fails_without_it(pinned, cap
 def test_main_refuses_other_arguments(capsys):
     assert iroh.main(['iroh.py', '--frobnicate']) == 2
     assert 'python3 tools/iroh.py' in capsys.readouterr().err
+
+
+def test_a_crate_edited_during_the_build_pins_nothing(cargo, tmp_path, monkeypatch, capsys):
+    """The crate was hashed after the build, so an edit while cargo ran paired the old source's binary with the new
+    source's hash (2026-11-22, seen only by the binary's size). Hashed before and again after, a change stops it."""
+    crate = tmp_path/'crate'
+    for name, text in {'Cargo.toml': 'a', 'Cargo.lock': 'b', 'src/main.rs': 'fn main() {}', 'q2/build.sh': 'x'}.items():
+        (crate/name).parent.mkdir(parents=True, exist_ok=True)
+        (crate/name).write_text(text)
+    monkeypatch.setattr(iroh, 'CRATE', crate)
+    run = iroh.subprocess.run
+
+    def edited_meanwhile(cmd, **kw):
+        (crate/'src/main.rs').write_text('fn main() { println!("new"); }')  # saved while cargo builds the old one
+        return run(cmd, **kw)
+    monkeypatch.setattr(iroh.subprocess, 'run', edited_meanwhile)
+    with pytest.raises(SystemExit, match='remote/iroh-sidecar changed while q2-iroh was built'):
+        iroh.main(['iroh.py'])
+    assert 'PIN = ' not in capsys.readouterr().out

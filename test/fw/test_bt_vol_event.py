@@ -4,10 +4,12 @@ a fallback. The bus is a test's: bytes in and out of fw_socket's stubs, and, whe
 dbus-python, a real daemon the C logs in to, subscribes on and hears from."""
 import ctypes as C
 import os
+import pathlib
 import shutil
 import socket
 import struct
 import subprocess
+import tempfile
 import time
 
 import pytest
@@ -282,8 +284,12 @@ def real_bus() -> bool:
 
 
 @pytest.mark.skipif(not real_bus(), reason='needs dbus-daemon and dbus-python')
-def test_a_real_bus_takes_the_login_and_the_match_and_delivers_the_signal(fw, tmp_path):
-    path = tmp_path/'bus'
+def test_a_real_bus_takes_the_login_and_the_match_and_delivers_the_signal(fw):
+    # The bus's socket in a short folder of its own: dbus-daemon refuses a unix:path= longer than 99 bytes
+    # (_DBUS_MAX_SUN_PATH_LENGTH), and tmp_path under a worktree with a long name (fw.py's basetemp is named after
+    # it, then popen-gwN and the test's own folder) passes that, so the daemon never listened.
+    folder = tempfile.mkdtemp(prefix='q2bus')
+    path = pathlib.Path(folder)/'bus'
     daemon = subprocess.Popen(['dbus-daemon', '--session', '--nofork', '--nopidfile', f'--address=unix:path={path}'],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
@@ -320,3 +326,4 @@ def test_a_real_bus_takes_the_login_and_the_match_and_delivers_the_signal(fw, tm
     finally:
         daemon.terminate()
         daemon.wait()
+        shutil.rmtree(folder, ignore_errors=True)

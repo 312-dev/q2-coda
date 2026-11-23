@@ -51,8 +51,8 @@ def pending(fw):
 
 class Resume(Stream):
     """A Subsonic stream of SONGS, the first two on the card, saved by Memory Playback (Location) and restored after
-    a restart. manifest: the app's q2app."""
-    def __init__(self, fw, mcl, songs, manifest=b'name=Subsonic\nresume=1\n'):
+    a restart. manifest: the app's q2app; paths the session's songs, the first landed of them on the card."""
+    def __init__(self, fw, mcl, songs, manifest=b'name=Subsonic\nresume=1\n', paths=SONGS, landed=2):
         super().__init__(fw, mcl, songs, subsonic=manifest)
         self.world.files[b'/proc/mounts'] = MOUNTS
         self.status, self.logged = PAUSED, []
@@ -63,13 +63,13 @@ class Resume(Stream):
         fw.mock('fw_write', lambda fd, data, n, *_: self.logged.append(C.string_at(data, n).decode()) or n)
         fw.var('g_memory_play', C.c_ubyte).value = 2  # Location: the place in the song too
         m3u = STREAM + b'/queue-1.m3u'
-        self.world.files[m3u] = b''.join(p + b'\n' for p in SONGS)
-        self.land(*SONGS[:2])
+        self.world.files[m3u] = b''.join(p + b'\n' for p in paths)
+        self.land(*paths[:landed])
         self.play(b'1 ' + m3u + b'\n', app=b'subsonic')
         self.step()
         self.step()
         mcl.type = LIBRARY
-        assert self.queued() == SONGS[:2] and pending(fw) == SONGS[2:]
+        assert self.queued() == paths[:landed] and pending(fw) == paths[landed:]
         fw.fn('playback_save', None)()
 
     def restart(self):
@@ -119,6 +119,19 @@ def test_a_restore_of_ten_server_songs_with_two_on_the_card_keeps_ten_rows(fw, m
     assert s.queued() == SONGS[:2]  # the two on the card, the first current
     assert pending(fw) == SONGS[2:]  # and the eight to come, in Up Next's pending rows: ten in all
     assert fw.calls('mclSetStartSeekTime')[-1][1][0] == 42
+
+
+def test_a_restore_of_stream_cache_songs_lists_each_folder_once_and_not_the_library(fw, mcl, songs, free_rec):
+    """A streamed queue's downloads sit in the stream cache's hex buckets (stream_path.h), in no Library table: the
+    whole library is not loaded to look for them, and each bucket is listed once however the queue interleaves
+    them, the queue's order kept."""
+    paths = [STREAM + b'/acct/original/%x/song %d [s%d].flac' % (i % 4, i, i) for i in range(12)]
+    s = Resume(fw, mcl, songs, paths=paths, landed=12)
+    listed = len(fw.calls('toolsLoadDirectory'))
+    assert s.restart() == 0
+    assert s.queued() == paths
+    assert len(fw.calls('getAllMusic')) == 0
+    assert len(fw.calls('toolsLoadDirectory')) - listed == 4
 
 
 def test_the_app_is_asked_to_resume_paused_once_its_socket_is_there(fw, mcl, songs, free_rec):

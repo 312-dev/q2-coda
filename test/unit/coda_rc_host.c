@@ -53,6 +53,8 @@ int crc_code_shown(char c[7]) {
     return 1;
 }
 void crc_code_spent(void) { qr_code[0] = 0, ++spent; }
+int iroh_proved; /* sessions through q2-iroh that proved their phone (crc_iroh_proved) */
+void crc_iroh_proved(crc_session *s) { ++iroh_proved, s->iroh_ok = 1; }
 int crc_pair_cancelled(void) { int c = cancelled; cancelled = 0; return c; }
 uint32_t crc_caps(void) { return CAP_BROWSE; }
 

@@ -61,6 +61,7 @@ int ringnav_usb_config(void) {
     pthread_mutex_unlock(usb_charge.mutex);
     int result = stock_usb_config_trampoline();
     dac_default();
+    output_rule_config(); /* Headphones Required held on (output_rule.c) */
     synclink_default(); /* before platform_init starts Bluetooth, Wi-Fi and SyncLink (synclink.c) */
     int cable = stock_usb_detect_trampoline();
     pthread_mutex_lock(usb_charge.mutex);
@@ -72,7 +73,7 @@ int ringnav_usb_config(void) {
 }
 
 int ringnav_usb_detect(void) {
-    int result = stock_usb_detect_trampoline();
+    int result = usb_otg_cable(stock_usb_detect_trampoline()); /* not the Q2's own dying VBUS */
     pthread_mutex_lock(usb_charge.mutex);
     usb_charge.cable = result;
     charge_apply(0);

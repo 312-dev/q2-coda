@@ -622,12 +622,14 @@ static struct {
 } wk __attribute__((section(".scratch")));
 enum { W_OK, W_NOSOCK, W_FAIL };
 
+#define SPOT_SELECTED 6500 /* Storage Management's picks, comma-separated ids */
 /* The page, while open. act: what the request in flight is for (A_*). */
 static struct {
     void *page, *view, *edit;
     unsigned timer, go, leave, poll_at, until; /* until: no socket before it is librespot starting */
     int depth, act, next, arg, playing, rows[11], caps_checked, downloads, can_download;
-    char selected[6500], remove_kind[16], remove_note[128];
+    char *selected; /* SPOT_SELECTED bytes: Storage's picks, on the heap with lv */
+    char remove_kind[16], remove_note[128];
     char term[64];
     level_t *lv; /* SPOT_DEPTH of them, calloc'd, and one more: the list push() waits on (pend) */
     /* pend: a list's first reply awaited under the loading overlay (docs/oled-design.md#loading),
@@ -1170,7 +1172,7 @@ static int go(const void *unused) {
         else toast("Select at least one item");
     } else if (l->kind == L_SELECT && i < l->n) {
         l->sel = i;
-        if (csv_toggle(br.selected, sizeof br.selected, cell(l, i, 1)) < 0) toast("Selection full. Remove these first");
+        if (csv_toggle(br.selected, SPOT_SELECTED, cell(l, i, 1)) < 0) toast("Selection full. Remove these first");
         show();
     } else if (!strcmp(l->op, "collection") && i == l->n + more(l)) {
         push(L_JOB, "", l->args, "", "Download Controls");
@@ -1283,7 +1285,7 @@ static int br_closed(void *ctx, void *event) {
     stop_timer(&br.go);
     stop_timer(&br.leave);
     while (br.depth) drop(&br.lv[--br.depth]);
-    free(br.lv);
+    free(br.lv), free(br.selected);
     memset(&br, 0, sizeof br);
     return 0;
 }
@@ -1313,7 +1315,8 @@ int spot_open(void *ctx, void *event) {
     spot_launch();
     void *from = page_in_use();
     if (br.lv || !(br.lv = calloc(SPOT_DEPTH + 1, sizeof *br.lv))) return 0;
-    if (!from && !br_make()) return free(br.lv), br.lv = 0, 0;
+    if (!(br.selected = calloc(1, SPOT_SELECTED)) || (!from && !br_make()))
+        return free(br.lv), free(br.selected), br.lv = 0, br.selected = 0, 0;
     if (!br.page) br.hold = 1 + S_LOAD, load_over(from, spot_gone); /* the page once it answers */
     br.depth = 1;
     br.until = sp.launch_at + SPOT_OLD_MS;

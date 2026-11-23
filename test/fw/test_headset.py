@@ -1696,3 +1696,30 @@ def test_eq_poll_with_eq_per_output_off_looks_at_nothing(fw):
     player.now += 1000
     fw.fn('headset_eq_poll', None)()
     assert fw.calls('mclGetOutputWay') == []
+
+
+def said_on_stderr(fw, src):
+    """The unified log's lines from src (ulog.c's "<time> <up> <level> <src> <msg>" on stderr)."""
+    said = []
+
+    def write(fd, data, n, *_):
+        words = C.string_at(data, n).decode().rstrip('\n').split(' ', 4)
+        if fd == 2 and len(words) == 5 and words[3] == src:
+            said.append(words[4])
+        return n
+    fw.mock('fw_write', write)
+    return said
+
+
+def test_each_avrcp_key_is_logged_with_its_peer_and_the_player(fw):
+    """The drive of 2026-11-22: the car on A2DP, two pauses, and nothing said who asked."""
+    player = Player(fw)
+    said = said_on_stderr(fw, 'bt')
+    h = hs(fw)
+    for i, b in enumerate((0x09, 0x1f, 0xa1, 0xf0, 0xe6, 0x60)):  # 60:E6:F0:A1:1F:09, as headset_start keeps it
+        h.address[4 + i] = b
+    fw.fn('headset_command', None, C.c_int)(PAUSE)
+    player.now += 2000
+    fw.fn('headset_command', None, C.c_int)(NEXT)
+    assert said == ['avrcp pause (119) from 60:E6:F0:A1:1F:09, the player 2',
+                    'avrcp next (163) from 60:E6:F0:A1:1F:09, the player 3'], said

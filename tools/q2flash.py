@@ -9,10 +9,12 @@
 It refuses, before anything is copied, a file that is not one of ours (an update.tar as tools/build.py writes it, whose
 build directory's manifest.json names its SHA-256, or a release's whose update.tar.sig the release key signed), a Q2
 whose battery is under 30% and not charging, a Q2 that already runs that build, and a card without room. It pushes the
-file to the card as update.tar.part, compares its SHA-256 on the Q2 with the local one, and only then renames it over
-/mnt/mmc/update.tar. The install is the Q2's own: q2update (a --dev build's, patch/q2update.sh) asks demo to run
-Software Update's SD card path, which checks the file again, shows Restarting to Install and runs stock's updater. On a
-build without q2update it stops after the push and says to press Software Update. It never runs the flasher itself.
+file to the card as update.tar.part, compares its SHA-256 on the Q2 with the local one, renames it over
+/mnt/mmc/update.tar and compares that file's SHA-256 again (adb drops the rename's exit status). The install is the
+Q2's own: q2update (a --dev build's, patch/q2update.sh) asks demo to run Software Update's SD card path, first as a
+check, whose answer must name this build's tag, then as the install, which checks the file again, shows Restarting to
+Install and runs stock's updater. On a build without q2update it stops after the push and says to press Software
+Update. It never runs the flasher itself.
 
 Exit status: 0 installed (or, with --dry-run, would install), 1 refused or failed, 3 pushed but the install needs a
 press on the Q2 (no q2update there).
@@ -191,21 +193,33 @@ def flash(update, adb, dry_run=False, minimum=MIN_BATTERY, wait=True):
         adb.sh(f'rm -f {PART}')
         raise Refused(f'the copy on the Q2 differs (sha256 {remote or "unreadable"}, expected {found["sha256"]}): removed')
     adb.sh(f'mv -f {PART} {TARGET} && sync')
-    say(f'{TARGET} on the Q2, sha256 {remote} checked')
+    # the rename prints nothing either way: read back the file the install will take, not the .part just checked
+    final = (adb.sh(f'sha256sum {TARGET}', timeout=300).split() or [''])[0]
+    if final != found['sha256']:
+        adb.sh(f'rm -f {PART}')
+        raise Refused(f'the rename to {TARGET} failed: it holds sha256 {final or "(no file)"}, not this build\'s; '
+                      'nothing installed')
+    say(f'{TARGET} on the Q2, sha256 {final} checked')
     if words is None:
         say('this Q2\'s build has no q2update: press Settings > General > Software Update on it to install')
         return 3
-    op = 'check' if dry_run else 'install'
-    say(f'q2update {op}: the Q2 checks the file on screen')
-    answer = q2update(adb, op)
-    word = answer[1] if answer and len(answer) > 1 else 'none'
+    say('q2update check: the Q2 checks the file on screen')
+    answer = q2update(adb, 'check')
+    if not answer or len(answer) < 4 or answer[1] != 'ok':
+        raise Refused(f'the Q2\'s own check refused it: {" ".join(answer or [])}')
+    if answer[3] != found['tag']:
+        raise Refused(f'the Q2 reads {TARGET} as {answer[3]}, not {found["tag"]}: nothing installed')
     if dry_run:
-        if word != 'ok':
-            raise Refused(f'the Q2\'s own check refused it: {" ".join(answer or [])}')
         say(f'dry run passed: {found["tag"]} would install over {installed}; nothing installed')
         return 0
+    say('q2update install: the Q2 checks it once more and installs')
+    answer = q2update(adb, 'install')
+    word = answer[1] if answer and len(answer) > 1 else 'none'
     if word != 'installing':
         raise Refused(f'the Q2 did not start the install: {" ".join(answer or [])}')
+    if len(answer) < 4 or answer[3] != found['tag']:
+        raise Refused(f'the Q2 is installing {answer[3] if len(answer) > 3 else "(an unnamed file)"}, '
+                      f'not {found["tag"]}: look at its screen')
     say('installing: Restarting to Install on the Q2; it restarts and the recovery flashes (about 2 min)')
     if not wait:
         return 0

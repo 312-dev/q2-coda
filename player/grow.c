@@ -5,7 +5,10 @@
  *   <wait|get|stall|done|fail>	<bytes on the card>	<total, 0 unknown>	<length ms>	<card path>
  * rewritten every 500 ms while a song arrives. A file whose line says get or stall is read through here: at the end
  * of the bytes there are, the read waits for more (WAIT_FILE names the song meanwhile, for Now Playing's spinner)
- * instead of ending the song, and so does a read after a seek past them. It ends at the file's end once the line
+ * instead of ending the song, and so does a read after a seek past them. Once the song has opened (grow_playing), a
+ * read that found the end waits for a refill before it goes on: REFILL_S of the song ahead of it, doubled at each
+ * stall after to REFILL_MAX_S, or the line no longer arriving (the song whole, or given up), so a download slower
+ * than the song plays in a few long stretches; the open's own reads go on at any byte. It ends at the file's end once the line
  * says done or fail, the line is gone, the file has not been rewritten for STALE_S (the app is gone), or a stop or
  * a skip (ctl.cut) gives the song up.
  * A seek (grow_seeking, around source_seek's av_seek_frame) searches only the bytes there are: the file's size is
@@ -30,14 +33,21 @@
 #define CARD "/mnt/mmc/."
 #define WAIT_FILE PEQ_ROOT "/tmp/q2player.wait"
 enum { IO_BUF = 32768, POLL_US = 100000, STALE_S = 3, STATUS_LINE = 8192 };
+/* After a stall of a song playing, the read waits until REFILL_S of it is there ahead of where it is, doubled at each
+ * stall after, to REFILL_MAX_S: a download slower than the song then plays in a few long stretches, not in bursts of
+ * a packet. At the song's average rate (total over length), REFILL_BYTES when either is unknown. */
+enum { REFILL_S = 3, REFILL_MAX_S = 12, REFILL_BYTES = 512 * 1024 };
 
 struct grow {
     FILE *f;
     AVIOContext *io;
     char status[96]; /* the app's .stream */
     char path[URL_MAX]; /* the card path its lines name: the url from "/mnt/mmc/." on */
-    int64_t pos, total;
+    int64_t pos, total, ms;
     int waiting, seeking;
+    int playing;        /* the open is done (grow_playing): a stall from here on waits for a refill */
+    int64_t refill;     /* bytes to be there ahead of pos before a stalled read goes on; 0 while not refilling */
+    int refill_s;       /* the next stall's refill, seconds */
 };
 
 /* The .stream file for url, into out, and the card path in url; NULL when url is not under an app's folder. */
@@ -48,8 +58,8 @@ static const char *status_of(const char *url, char *out, size_t n) {
     return card;
 }
 
-/* Whether path's line in status says it is still arriving (get or stall, the file fresh), and its total. */
-static int arriving(const char *status, const char *path, int64_t *total) {
+/* Whether path's line in status says it is still arriving (get or stall, the file fresh), its total and length. */
+static int arriving(const char *status, const char *path, int64_t *total, int64_t *ms) {
     struct stat st;
     if (stat(status, &st) || st.st_mtime < time(NULL) - STALE_S) return 0;
     FILE *f = fopen(status, "rb");
@@ -82,6 +92,7 @@ static int arriving(const char *status, const char *path, int64_t *total) {
         if (strcmp(want, path)) continue;
         yes = !strcmp(f5[0], "get") || !strcmp(f5[0], "stall");
         if (total) *total = strtoll(f5[2], NULL, 10);
+        if (ms) *ms = strtoll(f5[3], NULL, 10);
         break;
     }
     free(line);
@@ -92,7 +103,16 @@ static int arriving(const char *status, const char *path, int64_t *total) {
 int grow_arriving(const char *url) {
     char status[96];
     const char *path = status_of(url, status, sizeof status);
-    return path && arriving(status, path, NULL);
+    return path && arriving(status, path, NULL, NULL);
+}
+
+int grow_have(const char *url, int64_t *have, int64_t *total, int64_t *ms) {
+    char status[96];
+    struct stat st;
+    const char *path = status_of(url, status, sizeof status);
+    if (!path || !arriving(status, path, total, ms)) return 0;
+    *have = stat(url, &st) ? 0 : st.st_size;
+    return 1;
 }
 
 static void wait_mark(struct grow *g, int on) {
@@ -110,9 +130,30 @@ static void wait_mark(struct grow *g, int on) {
     if (fclose(f) == 0) rename(tmp, WAIT_FILE);
 }
 
+/* The bytes of a refill: refill_s seconds of the song at its average rate. */
+static int64_t refill_bytes(const struct grow *g) {
+    if (g->total <= 0 || g->ms <= 0) return REFILL_BYTES;
+    return g->total * 1000 / g->ms * g->refill_s;
+}
+
 static int grow_read(void *opaque, uint8_t *to, int n) {
     struct grow *g = opaque;
     for (;;) {
+        if (g->refill) { /* refilling after a stall: on once enough is there, or the song is whole or given up */
+            struct stat st;
+            int64_t have = fstat(fileno(g->f), &st) ? 0 : st.st_size;
+            int on = arriving(g->status, g->path, &g->total, &g->ms);
+            if (on && have - g->pos < g->refill && !g->seeking) {
+                if (__atomic_load_n(&ctl.cut, __ATOMIC_RELAXED)) {
+                    wait_mark(g, 0);
+                    return AVERROR_EXIT;
+                }
+                wait_mark(g, 1);
+                usleep(POLL_US);
+                continue;
+            }
+            g->refill = 0;
+        }
         if (fseeko(g->f, g->pos, SEEK_SET)) return AVERROR(EIO);
         size_t got = fread(to, 1, n, g->f);
         if (got) {
@@ -121,9 +162,14 @@ static int grow_read(void *opaque, uint8_t *to, int n) {
             return (int)got;
         }
         clearerr(g->f);
-        if (g->seeking || !arriving(g->status, g->path, &g->total)) {
+        if (g->seeking || !arriving(g->status, g->path, &g->total, &g->ms)) {
             wait_mark(g, 0);
             return AVERROR_EOF;
+        }
+        if (g->playing) { /* a stall: wait for a refill, longer at each stall after */
+            g->refill = refill_bytes(g);
+            g->refill_s = g->refill_s * 2 < REFILL_MAX_S ? g->refill_s * 2 : REFILL_MAX_S;
+            continue;
         }
         if (__atomic_load_n(&ctl.cut, __ATOMIC_RELAXED)) { /* a stop or a skip: the engine takes it */
             wait_mark(g, 0);
@@ -159,7 +205,8 @@ struct grow *grow_open(const char *url, int *error) {
     const char *path = g ? status_of(url, g->status, sizeof g->status) : NULL;
     if (!path || !(g->f = fopen(url, "rb"))) goto fail;
     snprintf(g->path, sizeof g->path, "%s", path);
-    arriving(g->status, g->path, &g->total);
+    arriving(g->status, g->path, &g->total, &g->ms);
+    g->refill_s = REFILL_S;
     *error = ERR_OTHER;
     if (!(buf = av_malloc(IO_BUF)) || !(g->io = avio_alloc_context(buf, IO_BUF, 0, g, grow_read, NULL, grow_seek))) {
         av_free(buf);
@@ -175,6 +222,8 @@ fail:
 struct AVIOContext *grow_avio(struct grow *g) { return g->io; }
 
 void grow_seeking(struct grow *g, int on) { g->seeking = on; }
+
+void grow_playing(struct grow *g) { g->playing = 1; }
 
 void grow_close(struct grow *g) {
     if (!g) return;

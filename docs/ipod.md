@@ -237,8 +237,13 @@ so nothing jumps; a cover that cannot
 move (a 16-bit decode, a cover too long for `DRIFT_TEXELS`, none) still cuts. The timer steps every
 `SLIDE_TICK_MS` (100 ms) while a fade runs, so it steps in 15 shades, and every `DRIFT_TICK_MS`
 otherwise. The covers come from `slideshow.c`, off the UI thread (`slide_pick`): a song at a random
-rowid of the card's library (no sort of the table, `MUSIC_WHERE`'s scope kept), its album's
-embedded art, else its folder image, each read by stock's own readers under both art locks at
+rowid of the library (no sort of the table, `MUSIC_WHERE`'s scope kept), from the card's
+`songtable` or a signed-in server's `servertable` in proportion to their rows (`SLIDE_COUNT`, so a
+library that is all a server's still turns); a card song's album's embedded art, else its folder
+image, a server song's the cover its app keeps for the album, its 512 px one
+(`catalogue_cover_large`, `covers/512/<album>.jpg`, 500 px from q2-subsonic) when the card has it,
+else the 160 px row one (`catalogue_cover`), scaled up and blocky, each read by
+stock's own readers under both art locks at
 `SLIDE_ART_PX` (352, the tallest pane zoomed 110 %) square into `/tmp/q2-slide.jpg`, else the album's
 Cover Flow thumbnail (160 px, softer); up to `SLIDE_TRIES` (8) songs a pick, the last
 `SLIDE_RECENT` (6) albums passed over but for the last two tries, so a small library still turns.
@@ -334,7 +339,7 @@ The navbar is hidden, as on the local pages, on the settings pages
 inits destroy the navbar's children and create an unnamed title `hscroll_label`,
 back, Home and Now Playing buttons; none has a control the keys lack, except the on/off switches
 of the sleep timer (`img_switch`) and Startup volume (`img_bootswitch`, which `playset_bootvol_page_init` puts in
-the navbar; Crossfade reuses the page), whose fields hide while off:
+the navbar; Night Shift reuses the page), whose fields hide while off:
 those two pages (`TOOLBAR_SWITCHES`) keep it. There the switch takes the toolbar's right-hand
 slot and the title runs up to it (225 pixels); the Home and Now Playing buttons are 0 wide, as the
 keys do what they did (`immediates` in `ipod.json`). `patch_asset` hides those toolbars
@@ -376,9 +381,9 @@ set with `home_lib` its rows over the Settings list, which Return gives back. Ge
 (`ringnav_systemset`): About, Software Update (`sw_update.c`: online and the card at once), Storage (with **Update Library**, from the
 Library's page since 2026-11-19, [internals](internals.md#storage)), USB (the remembered USB choice as its value; its picker is `usb_ui.c` `usb_pick_open`, [internals](internals.md#usb-pages)), Date & Time, App Store, Network (DLNA, AirPlay and Wi-Fi File
 Transfer), then Restart and Shut Down after a 12 px gap and Reset Settings last, directly under Shut Down, in Negative red as a destructive row (`power_rows`); Battery is stock's Power
-page under its new name. No list has headings. EQ and **Library** come first, then Play Mode, Gapless, Crossfade, Memory Playback, Resume Songs, Headphones Required and the Sleep Timer (stock's timer page); the volume rows (Volume, Max Volume, Default Volume) and specialist output controls come next. Volume opens the slider page on the volume itself ([Wheel volume](internals.md#wheel-volume)); Max Volume, Balance, Crossfade's length and Default Volume's level are inline sliders set in the list, Crossfade and Default Volume switches with their slider under them while on, and Display's Brightness is one too ([oled-design](oled-design.md#inline-sliders)). Added binary settings
+page under its new name. No list has headings. EQ and **Library** come first, then Play Mode, Gapless, Smart Crossfade, Memory Playback, Resume Songs and the Sleep Timer (stock's timer page; stock's Headphones Required is hidden, as it is always on: [internals](internals.md#no-playback-without-an-output)); the volume rows (Volume, Max Volume, Default Volume) and specialist output controls come next. Volume opens the slider page on the volume itself ([Wheel volume](internals.md#wheel-volume)); Max Volume, Balance and Default Volume's level are inline sliders set in the list, Default Volume a switch with its slider under it while on, Smart Crossfade one switch, and Display's Brightness is one too ([oled-design](oled-design.md#inline-sliders)). Added binary settings
 use Shanling's `switch_on` / `switch_off` images with the whole row as the tap target. Settings
-that cycle between named choices retain their value labels. Volume, Crossfade, Resume Songs, Wheel
+that cycle between named choices retain their value labels. Volume, Resume Songs, Wheel
 Sensitivity and App Store show a chevron, as do the added Library browsing rows.
 
 Playback's **Library** (`patch/library_settings.c`) holds what the Library contains and how it is ordered and shown.
@@ -471,7 +476,7 @@ Spotify row's Now Playing page uses Now Playing's layout (`NP_*`), rounded art i
 (`ringnav_image_add`) works on the decoded bitmap, so it applies at either size.
 
 Brightness, Balance, Maximum Volume and Default Volume use eight-pixel rounded, theme-aware bars
-with their original touch areas, where they still open (Settings sets them in its list instead). Crossfade, Wheel Sensitivity, Resume Songs, Night Shift and Playback's Volume reuse Default Volume's
+with their original touch areas, where they still open (Settings sets them in its list instead). Wheel Sensitivity, Resume Songs, Night Shift and Playback's Volume reuse Default Volume's
 page and inherit its styling. All keep their ranges and wheel/touch controls, but lose their endpoint icons (`slider_plain`, tools/ipod.py):
 the images stay, named, with no image and no size, since stock looks them up. The quick
 settings slider and custom volume overlay retain their layouts. Under OLED (`settings.values.switch`) the four
@@ -977,7 +982,7 @@ drops the stock rows, takes the sub-page's title and builds only its own rows:
   again). The Library's own settings (Artist View, Playlist View, Scan Song Durations) are on
   [Settings > Playback > Library](#settings).
 - Controls: Wheel Sensitivity, which opens its slider page; "Hold Return: Recent"
-  (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); "Clicker: Both", Key Tone's row, cycling Speaker, Headphones, Both and Off (`IPOD CLICKER`, Off being Key Tone off; [Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; and "Wake: Single Press".
+  (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); "Clicker: Both", Key Tone's row, cycling Speaker, Headphones, Both and Off (`IPOD CLICKER`, Off being Key Tone off; [Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; and "Wake: Any Button" (or "Wake: Double Press").
 
 All are among the [settings icons](#settings-icons) the build pre-sizes. A value row has its value
 in the label (260 pixels wide, to where the chevron ends) and no chevron, since Center or a tap
@@ -1055,7 +1060,7 @@ painted it white, which drew the box at rest.
   the bottom corners, and the strip below it stays black (`list_end`, `fit_rows`). Chevrons and values share one column 28 px
   from the right edge on every row. Settings, the Library, Home (Full and Split) and stock's own list pages all
   take it; Albums and stock's search results are two lines at 52 px, four to a page, the covers with 4 px corners. A row that
-  opens a page and shows a value (Crossfade, Resume Songs) has the value just left of its chevron. The status row
+  opens a page and shows a value (Resume Songs, Volume) has the value just left of its chevron. The status row
   names the Library and Songs by those words, where stock calls both "Local Songs".
 - **Color.** Black (white in Light Mode), white text, second lines in Text Tertiary (`#858585`), a settings row's
   value in Text Secondary (`#ABABAB`, `#5C5C5C` on paper), and one blue, `#2160D8`, for the selection bar, the
@@ -1245,7 +1250,9 @@ the protocol and the daemon: [localsend.md](localsend.md).
 
 ## Games
 
-**Home → Games** (the Library's row until 2026-11-19) opens Sudoku, Vortex, Solitaire and Snake ([internals](internals.md#games)). A game
+**Home → Games** (the Library's row until 2026-11-19) opens Bricks, then the card's games ([internals](internals.md#games)).
+Sudoku, Vortex, Solitaire and Snake are left out of this build while the games in progress are
+finished (`GAME_*` in `patch/peq.h` turns each back on); their keys, below, are as they were. A game
 takes every key but Power and a held Return, so the music keeps playing untouched.
 
 | Game      | Wheel                                    | Center                                          | Play/Pause            | Previous/Next                                                           | Return                              |

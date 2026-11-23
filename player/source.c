@@ -16,6 +16,13 @@
 #include <math.h>
 
 enum { AAC_FRAME = 1024 }; /* AAC LC's samples a packet; padding is less */
+/* The most audio avformat_find_stream_info reads of a song still arriving (docs/internals.md#streaming-configuration).
+ * Its default, 5 s, is reached whenever a stream's parameters stay unknown, and an embedded cover's always do here:
+ * this FFmpeg has no JPEG or PNG decoder to size it (tools/player.py DECODERS). A whole file's 5 s is read at once,
+ * but an arriving one's waits for them to come, so the song started only once 5 s of audio and the cover had. The
+ * audio's own parameters are known from its first frames; at 100 ms the open reads what it would at none, its
+ * parser's look ahead (about 1.3 s of a FLAC after its headers, measured with FFmpeg's flac demuxer, 2026-11-22). */
+enum { GROW_ANALYZE_US = 100000 };
 
 struct source {
     AVFormatContext *fmt;
@@ -156,6 +163,7 @@ struct source *source_open(const struct song *song, int *error, const int *cance
         if (!(s->grow = grow_open(song->url, error))) goto fail;
         s->fmt->pb = grow_avio(s->grow);
         s->fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
+        s->fmt->max_analyze_duration = GROW_ANALYZE_US;
     } else if (sacd_is_image(song->url)) {
         if (!(s->iso = sacd_open(song->url, error))) goto fail;
         s->fmt->pb = sacd_avio(s->iso);
@@ -204,6 +212,7 @@ struct source *source_open(const struct song *song, int *error, const int *cance
         s->out.rate = s->byte_rate / dsd_unit(song->dsd), s->out.bytes = song->dsd == DSD_DOP ? 3 : 4, s->out.is_float = 0, s->out.dsd = song->dsd;
     }
     if (song->start > 0 && source_seek(s, song->start) < 0) goto fail;
+    if (s->grow) grow_playing(s->grow); /* the open's own reads go on at any byte; a stall after waits for a refill */
     *error = ERR_NONE;
     return s;
 fail:
@@ -386,9 +395,11 @@ int source_read(struct source *s, const uint8_t **data) {
     }
 }
 
-int source_seek(struct source *s, int seconds) {
+int source_seek(struct source *s, int seconds) { return source_seek_frame(s, (int64_t)seconds * s->out.rate); }
+
+/* To frame target of the output's rate: the decode resumes at the packet before it and drops up to it. */
+int source_seek_frame(struct source *s, int64_t target) {
     AVStream *st = s->fmt->streams[s->stream];
-    int64_t target = (int64_t)seconds * s->out.rate;
     int64_t ts = av_rescale_q(target, (AVRational){1, s->out.rate}, st->time_base);
     if (st->start_time != AV_NOPTS_VALUE) ts += st->start_time;
     /* a song still arriving: the search sees only the bytes there are, and a target past them is read up to (grow.c) */
@@ -403,6 +414,6 @@ int source_seek(struct source *s, int seconds) {
     s->frames = 0;
     s->base = target;
     s->drop_until = st->start_time != AV_NOPTS_VALUE ? target + av_rescale_q(st->start_time, st->time_base, (AVRational){1, s->out.rate}) : target;
-    if (s->raw) s->drop_until = (int64_t)seconds * s->byte_rate, dsd_reset(&s->pack); /* in a channel's bytes */
+    if (s->raw) s->drop_until = target * s->byte_rate / s->out.rate, dsd_reset(&s->pack); /* in a channel's bytes */
     return 0;
 }

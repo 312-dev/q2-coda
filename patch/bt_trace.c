@@ -6,8 +6,11 @@
  * (bt_a2dp_direction), the link list's last item (its address and status), the saved device
  * (BTLINKMAC), and each connect the link thread starts, with its target and why: auto (headset.c's
  * autolink, at boot and at each Bluetooth on), usb (the same at a cable in, headset_bt_usb), tap
- * (a row or Connect, through bt_stock_click) or other (stock started it with neither). q2guard's
- * lines beside them say what the kernel did (docs/internals.md#bluetooth-devices).
+ * (a row or Connect, through bt_stock_click) or other (stock started it with neither), each
+ * followed by one line of how it ended (connected, failed, no link, or abandoned when Bluetooth
+ * goes off or the stack restarts under it: pend_end); and each auto-link decision, the device it
+ * pages or why none (bt_trace_autolink). q2guard's lines beside them say what the kernel did
+ * (docs/internals.md#bluetooth-devices).
  *
  * bt_acl_up answers whether the kernel holds a connected ACL link to an address (HCIGETCONNLIST on
  * an unbound HCI socket), which the Bluetooth page goes by where stock's state stays behind the
@@ -35,6 +38,8 @@ static struct {
     char held[24]; /* the address whose link the kernel holds while stock's item says otherwise */
     unsigned shown[BT_SHOWN]; /* the found devices the page has shown since it opened (hashes) */
     int n_shown;
+    char pend[24]; /* the connect started and not yet ended: its target, since pend_at */
+    unsigned pend_at;
 } tr __attribute__((section(".scratch")));
 
 static int mac_eq(const char *a, const char *b) { /* a MAC either case */
@@ -132,6 +137,67 @@ static void who(char *out, unsigned n, const char *mac) {
         tk_snprintf(out, n, "%s", *mac ? mac : "-");
 }
 
+/* An auto-link decision (headset.c headset_bt_autolink, at boot, at each Bluetooth on and, as usb,
+ * at a cable in): the device it pages and why, or why it pages none. connected: the link list's
+ * connected item, which stops it; else go says whether the target was paired, or (-1) that it is
+ * the car Car Audio has on the cable (usb_car.c usb_car_name). */
+void bt_trace_autolink(const char *why, const char *target, const char *connected, int go) {
+    char a[96], c[96], b[256];
+    const char *saved = (const char *)BTLINKMAC;
+    who(a, sizeof a, target ? target : "");
+    const char *which =
+        target && mac_eq(target, saved) ? "the saved device" : "not the saved device";
+    if (go < 0) {
+        tk_snprintf(b, sizeof b,
+                    "auto-connect (%s) skips %s: the car on the cable, whose audio is Car Audio's",
+                    why, a);
+    } else if (connected) {
+        who(c, sizeof c, connected);
+        tk_snprintf(b, sizeof b, "auto-connect (%s) skips %s: %s is connected", why, a, c);
+    } else if (go)
+        tk_snprintf(b, sizeof b, "auto-connect (%s) picks %s: %s, paired, nothing connected", why,
+                    a, which);
+    else
+        tk_snprintf(b, sizeof b, "auto-connect (%s) skips %s: %s, not paired", why, a, which);
+    say(connected || go ? 'I' : 'W', b);
+}
+
+/* The link list's status for mac, -1 when no item is it */
+static int item_status(const char *mac) {
+    char m[32];
+    int status = 0;
+    for (int i = getBtLinkSize(); i-- > 0;) {
+        m[0] = 0, getBtLinkItem(i, &status, m);
+        if (mac_eq(m, mac)) return status;
+    }
+    return -1;
+}
+
+/* The connect started to tr.pend, ended now when it has: connected or failed by its item's status,
+ * no link when the link thread stopped without one, abandoned when Bluetooth went off or the stack
+ * is starting again (bt_initstatus not 0: a relaunch). One line, said once. */
+static void pend_end(int on, int init, int conn, unsigned now) {
+    char a[96], b[192];
+    if (!tr.pend[0]) return;
+    int st = on ? item_status(tr.pend) : -1;
+    who(a, sizeof a, tr.pend);
+    if (!on)
+        tk_snprintf(b, sizeof b, "connect to %s abandoned: Bluetooth switched off", a);
+    else if (init)
+        tk_snprintf(b, sizeof b, "connect to %s abandoned: the stack restarted", a);
+    else if (st == 3 || st == 4)
+        tk_snprintf(b, sizeof b, "connect to %s ended: %s after %u ms", a,
+                    st == 3 ? "connected" : "failed", now - tr.pend_at);
+    else if (conn != 1)
+        tk_snprintf(b, sizeof b, "connect to %s ended: no link, %s%s", a,
+                    st < 0 ? "its item is gone" : "the link list says ",
+                    st < 0 ? "" : item_word(st));
+    else
+        return;
+    say(st == 3 ? 'I' : 'W', b);
+    tr.pend[0] = 0;
+}
+
 void bt_trace_poll(void) {
     unsigned now = time_now_ms();
     if (tr.seen && now - tr.at < BT_TRACE_MS) return;
@@ -170,15 +236,25 @@ void bt_trace_poll(void) {
     if (first || conn != tr.conn) {
         tk_snprintf(b, sizeof b, "link thread %s (%d)", conn_word(conn), conn);
         say('I', b);
-        if (!first && conn == 1) { /* a connect starts: to the last item, and why */
+        pend_end(on, init, conn, now); /* the one before, ended by this change */
+        if (!first && conn == 1) {     /* a connect starts: to the last item, and why */
             int fresh = tr.why[0] && now - tr.why_at < BT_WHY_MS &&
                         (!tr.why_mac[0] || mac_eq(tr.why_mac, last));
+            if (tr.pend[0]) { /* the one before, still open: this one takes its place */
+                char p[96];
+                who(p, sizeof p, tr.pend);
+                tk_snprintf(b, sizeof b, "connect to %s ended: another connect started", p);
+                say('W', b);
+            }
             who(a, sizeof a, last);
             tk_snprintf(b, sizeof b, "connect starts to %s why=%s", a, fresh ? tr.why : "other");
             say('I', b);
+            tk_snprintf(tr.pend, sizeof tr.pend, "%s", last);
+            tr.pend_at = now;
         }
         if (conn == 1) tr.why[0] = 0;
-    }
+    } else
+        pend_end(on, init, conn, now);
     /* stock's last item not connected while the kernel holds its link: the page's row would say
      * Connecting (docs/internals.md#bluetooth-page) */
     int held = on && n > 0 && status != 3 && last[0] && bt_acl_up(last);

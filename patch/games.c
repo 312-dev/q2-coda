@@ -1,7 +1,9 @@
-/* Games (docs/internals.md#games), iPod: the Library's Games, Sudoku, Vortex, Solitaire and Snake.
- * The logic comes first, host-tested (test/peq.py games_check); the page below draws both on a bare
- * sheet (games_paint) and takes a game's keys in ringnav() before stock does (games_key). The state
- * is on the heap only while the page is open; the scratch holds its pointer. */
+/* Games (docs/internals.md#games), iPod: Home's Games chooser, the engine's games and the card's,
+ * and its own Sudoku, Vortex, Solitaire and Snake, each built in only while peq.h's GAME_* ships it
+ * (none does now). The logic comes first, host-tested (test/peq.py games_check); the page below
+ * draws both on a bare sheet (games_paint) and takes a game's keys in ringnav() before stock does
+ * (games_key). The state is on the heap only while the page is open; the scratch holds its
+ * pointer. */
 #include "engine.h"
 #ifdef PEQ_HOST
 #include "offsets.inc"
@@ -10,17 +12,13 @@
 #include "navigation.h" /* the theme, its scheme and the final-colour rows */
 #endif
 
-#ifdef PEQ_HOST /* playback.c's and coverflow.c's on the device */
+#ifdef PEQ_HOST /* playback.c's on the device */
 unsigned games_seed = 1;
 unsigned rand_below(unsigned n) {
     games_seed ^= games_seed << 13;
     games_seed ^= games_seed >> 17;
     games_seed ^= games_seed << 5;
     return games_seed % n;
-}
-unsigned hash_bytes(unsigned h, const unsigned char *s, unsigned n) {
-    for (unsigned i = 0; i < n; ++i) h = (h ^ s[i]) * 16777619u;
-    return h;
 }
 #endif
 
@@ -526,6 +524,34 @@ int snake_step(struct snake *s) {
 #define SN_Y 36
 /* ENGINE + k: engine.c's game k, on the same sheet */
 enum { CHOOSER, SUDOKU, VORTEX, SOLITAIRE, SNAKE, ENGINE };
+/* A game of games.c's own is built in only while it ships (peq.h's GAME_*), so the payload drops
+ * a game left out: each use of one below is behind HAS. test/fw's build has them all. */
+#ifdef GAMES_ALL
+#define HAS(game) 1
+#else
+#define HAS(game) GAME_##game
+#endif
+/* The chooser's own rows, in order: each shipped game's screen. */
+static const struct {
+    int screen, on;
+    const char *name;
+} own[] = { { SUDOKU, GAME_SUDOKU, "Sudoku" },
+            { VORTEX, GAME_VORTEX, "Vortex" },
+            { SOLITAIRE, GAME_SOLITAIRE, "Solitaire" },
+            { SNAKE, GAME_SNAKE, "Snake" } };
+/* The screen a chooser row opens: a shipped own game's, then the engine's; and back, the row of
+ * a screen (its own game's, or the engine's). */
+static int row_screen(int row) {
+    for (int k = 0, n = 0; k < (int)(sizeof own / sizeof *own); ++k)
+        if (own[k].on && n++ == row) return own[k].screen;
+    return ENGINE + row - GAMES_BUILTIN;
+}
+static int screen_row(int screen) {
+    if (screen >= ENGINE) return GAMES_BUILTIN + screen - ENGINE;
+    for (int k = 0, n = 0; k < (int)(sizeof own / sizeof *own); n += own[k++].on)
+        if (own[k].screen == screen) return n;
+    return 0;
+}
 /* Vortex, Snake: playing, paused by Play/Pause or the screen, Return's menu */
 enum { RUN, HELD, MENU };
 struct best {
@@ -547,7 +573,7 @@ static struct game {
     struct snake sn;
     int rows; /* the chooser's: its own games, then the card's */
     void *title; /* the caption the bar reads, where the theme's bar holds it */
-    int engines; /* the engine's games, the chooser's rows after its own four */
+    int engines; /* the engine's games, the chooser's rows after its own (GAMES_BUILTIN) */
 } *g __attribute__((section(".scratch")));
 
 static int sud_started(const struct sudoku *s) {
@@ -560,9 +586,9 @@ static int sud_started(const struct sudoku *s) {
 static void flush(int loud) {
     int ok = 1;
     stop_timer(&g->save);
-    if (g->dirty & 1)
+    if (HAS(SUDOKU) && g->dirty & 1)
         games_seal(&g->sud, sizeof g->sud, SUD_MAGIC), ok &= BLOB_IO(GAMES_SUDOKU, g->sud, 1);
-    if (g->dirty & 2)
+    if (HAS(SOLITAIRE) && g->dirty & 2)
         games_seal(&g->sol, sizeof g->sol, SOL_MAGIC), ok &= BLOB_IO(GAMES_SOLITAIRE, g->sol, 1);
     g->dirty = 0;
     if (!ok && loud) toast("Couldn't save");
@@ -590,6 +616,7 @@ static void hold(int paused) {
 
 /* A record score saved; an unfinished game never is. */
 static void game_over(void) {
+    if (!HAS(VORTEX) && !HAS(SNAKE)) return;
     int snake = g->screen == SNAKE, score = snake ? g->sn.score : g->vx.score;
     struct best *b = snake ? &g->sn_best : &g->best;
     if (!(g->record = score > (int)b->score)) return;
@@ -620,7 +647,7 @@ static int frame(const void *unused) {
         return 0;
     }
     unsigned now = (unsigned)time_now_ms();
-    if (g->screen == SNAKE) {
+    if (HAS(SNAKE) && g->screen == SNAKE) {
         unsigned elapsed = now - g->at;
         g->at = now;
         if (!snake_frame(elapsed)) return 8; /* RET_REPEAT */
@@ -629,6 +656,7 @@ static int frame(const void *unused) {
         game_over();
         return 0;
     }
+    if (!HAS(VORTEX)) return 0;
     int travel = __sync_lock_test_and_set(&wheel_travel, 0), n = 0;
     struct vortex was = g->vx;
     g->acc += (now - g->at) * 60;
@@ -669,7 +697,7 @@ static void run(void) {
     g->acc = 0;
     g->carry = 0;
     __sync_lock_test_and_set(&wheel_travel, 0);
-    wheel_raw = g->screen == VORTEX;
+    wheel_raw = HAS(VORTEX) && g->screen == VORTEX;
     if (!g->frame) g->frame = timer_add(frame, 0, FRAME_MS);
 }
 
@@ -700,10 +728,10 @@ static int show(const void *unused) {
                       g->screen >= ENGINE ? eng_game(g->screen - ENGINE)->name : game_names[g->screen]); /* the bar names the game */
     if (g->screen == CHOOSER) {
         flush(1);
-        ringnav_select(g->view, from - 1, g->rows);
-    } else if (g->screen == VORTEX)
+        ringnav_select(g->view, screen_row(from), g->rows);
+    } else if (HAS(VORTEX) && g->screen == VORTEX)
         vortex_new(&g->vx), run();
-    else if (g->screen == SNAKE)
+    else if (HAS(SNAKE) && g->screen == SNAKE)
         snake_new(&g->sn), run();
     widget_invalidate_force(g->page, 0);
     return 0;
@@ -715,7 +743,7 @@ static void to(int screen) {
 }
 
 static int pick_game(void *ctx, void *event) {
-    if (g->screen == CHOOSER) to((int)(long)ctx + 1);
+    if (g->screen == CHOOSER) to(row_screen((int)(long)ctx));
     return 0;
 }
 static int pick_card_game(void *ctx, void *event) { /* the card's, over the whole screen */
@@ -770,9 +798,9 @@ static int arcade_key(unsigned key, int over) {
         else if (key == KEY_CENTER || key == KEY_RETURN || key == KEY_PLAY)
             run();
     } else if (over) {
-        if (key == KEY_CENTER && g->screen == SNAKE)
+        if (HAS(SNAKE) && key == KEY_CENTER && g->screen == SNAKE)
             snake_new(&g->sn), run();
-        else if (key == KEY_CENTER)
+        else if (HAS(VORTEX) && key == KEY_CENTER)
             vortex_new(&g->vx), run();
         else if (key == KEY_RETURN)
             to(CHOOSER);
@@ -874,13 +902,13 @@ int games_key(void *top, unsigned key) {
         return 1;
     }
     struct game was = *g;
-    if (g->screen == SUDOKU)
+    if (HAS(SUDOKU) && g->screen == SUDOKU)
         sudoku_key(key);
-    else if (g->screen == SOLITAIRE)
+    else if (HAS(SOLITAIRE) && g->screen == SOLITAIRE)
         solitaire_key(key);
-    else if (g->screen == SNAKE)
+    else if (HAS(SNAKE) && g->screen == SNAKE)
         snake_key(key);
-    else
+    else if (HAS(VORTEX))
         vortex_key(key);
     /* a moved cursor is kept on leaving; a key the game ignored paints nothing */
     g->dirty |= (g->sud.cur != was.sud.cur) | (g->sol.cur != was.sol.cur) << 1;
@@ -1203,13 +1231,13 @@ void games_paint(void *w, void *canvas) {
     unsigned raw = ui_ink_raw(0);
     if (g->screen >= ENGINE)
         ui_ink_raw(1), eng_paint(canvas), ui_ink_raw(0), paused_popup(canvas, 0); /* its colours are final */
-    else if (g->screen == SUDOKU)
+    else if (HAS(SUDOKU) && g->screen == SUDOKU)
         sudoku_paint(canvas, tone);
-    else if (g->screen == SOLITAIRE)
+    else if (HAS(SOLITAIRE) && g->screen == SOLITAIRE)
         solitaire_paint(canvas, tone);
-    else if (g->screen == SNAKE)
+    else if (HAS(SNAKE) && g->screen == SNAKE)
         snake_paint(canvas, tone);
-    else
+    else if (HAS(VORTEX))
         vortex_paint(canvas, tone);
     ui_ink_raw(raw);
     stock_canvas_set_fill_color(canvas, fill);
@@ -1225,8 +1253,8 @@ static int closed(void *ctx, void *event) {
     return 0;
 }
 
-/* The Library's Games row: the chooser, the Sudoku in progress and Vortex's and Snake's best scores
- * read. */
+/* Home's Games row: the chooser, and for the own games that ship the Sudoku in progress, Vortex's
+ * and Snake's best scores and the Solitaire deal read. */
 int games_open(void *ctx, void *event) {
     if (g || !(g = calloc(1, sizeof *g))) return 0;
     void *page = g->page = page_open("games_page", closed, keyup);
@@ -1247,10 +1275,8 @@ int games_open(void *ctx, void *event) {
     g->rows = GAMES_BUILTIN + g->engines + cards;
     g->view = page_list(page, g->list, 0, "Games", g->rows, 48);
     g->title = theme()->page_title_h ? (void *)0 : widget_lookup(g->list, PAGE_TITLE, 1);
-    page_row_into(g->view, 0, "Sudoku", pick_game);
-    page_row_into(g->view, 1, "Vortex", pick_game);
-    page_row_into(g->view, 2, "Solitaire", pick_game);
-    page_row_into(g->view, 3, "Snake", pick_game);
+    for (int k = 0, n = 0; k < (int)(sizeof own / sizeof *own); ++k)
+        if (own[k].on) page_row_into(g->view, n++, own[k].name, pick_game);
     for (int k = 0; k < g->engines; ++k)
         page_row_into(g->view, GAMES_BUILTIN + k, eng_game(k)->name, pick_game);
     for (int k = 0; k < cards; ++k)
@@ -1259,14 +1285,17 @@ int games_open(void *ctx, void *event) {
     widget_on(g->sheet, EVT_POINTER_DOWN, eng_touch, 0); /* a finger on an engine game */
     widget_on(page, EVT_POINTER_MOVE_BEFORE, eng_touch, 0);
     widget_on(page, EVT_POINTER_UP_BEFORE, eng_touch, 0);
-    if (!BLOB_IO(GAMES_SUDOKU, g->sud, 0) || !games_ok(&g->sud, sizeof g->sud, SUD_MAGIC) ||
-        g->sud.cur > 80)
+    /* a game left out reads no save: its file stays on /mnt/data as it was, for its return */
+    if (HAS(SUDOKU) && (!BLOB_IO(GAMES_SUDOKU, g->sud, 0) ||
+                        !games_ok(&g->sud, sizeof g->sud, SUD_MAGIC) || g->sud.cur > 80))
         sud_new(&g->sud);
-    if (!BLOB_IO(GAMES_VORTEX, g->best, 0) || !games_ok(&g->best, sizeof g->best, BEST_MAGIC))
+    if (HAS(VORTEX) &&
+        (!BLOB_IO(GAMES_VORTEX, g->best, 0) || !games_ok(&g->best, sizeof g->best, BEST_MAGIC)))
         g->best.score = 0;
-    if (!BLOB_IO(GAMES_SNAKE, g->sn_best, 0) ||
-        !games_ok(&g->sn_best, sizeof g->sn_best, SNAKE_MAGIC))
+    if (HAS(SNAKE) && (!BLOB_IO(GAMES_SNAKE, g->sn_best, 0) ||
+                       !games_ok(&g->sn_best, sizeof g->sn_best, SNAKE_MAGIC)))
         g->sn_best.score = 0;
+    if (!HAS(SOLITAIRE)) return 0;
     int bad = !BLOB_IO(GAMES_SOLITAIRE, g->sol, 0) ||
               !games_ok(&g->sol, sizeof g->sol, SOL_MAGIC) || g->sol.cur >= PILES;
     for (int p = 0; p < PILES; ++p) {

@@ -12,13 +12,15 @@ This drives the build as a user would, in about a minute and a half:
 
     boot                     Home on top; a guardian card (No Temperature Sensor) confirmed, any other dialog fails
     Library > Songs > Center Now Playing opens (playing_page); Return to Songs; back to Home
-    Cover Flow > Center      an album's tracks (the screen changes); Center on a track: Now Playing
+    Cover Flow > Center      its art built first (no "Preparing artwork"), then an album's tracks; Center on a
+                             track: Now Playing
     Settings                 General, Playback, Display and Battery open and close
     Control Center           pulled down from the top (statusbar_dialog), Return closes it
     Search                   the letter strip types "AU" and results show; a held Return closes it
 
 A step passes when the window it should open is on top of demo's window manager (read from demo's
-memory, `windows`) or, where the step stays in one window, when the screen changes. Any step fails at once
+memory, `windows`), by what Cover Flow's page shows (its widget tree, `coverflow_screen`) for its steps, or,
+where another step stays in one window, when the screen changes. Any step fails at once
 when demo's process is gone or replaced (a crash: demo.log's tail is kept). The whole run has a hard
 deadline (DEADLINE, 170 s, after the emulator is leased); a lease is waited for up to --wait seconds, and
 none in time is exit 3, which the merge queue does not count against the tip.
@@ -39,9 +41,12 @@ import struct
 import subprocess
 import sys
 import time
+import zipfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import emu_pool  # noqa: E402
+
+TEST = pathlib.Path(__file__).resolve().parents[2]/'test'
 
 DEADLINE = 170       # s from the lease to the verdict
 BOOT_S = 60          # s for Home to come up after `q2emu start`
@@ -60,6 +65,7 @@ GUARD_CARDS = {'nosensor': 'No Temperature Sensor', 'norun': "Overheat protectio
 # hg_answer), a few ms apart in a boot loop on 2026-11-18. A GUARD_DIALOG no answer names yet is looked at again
 # for up to ANSWER_S before it fails, or a look that falls in that gap fails a good boot.
 ANSWER_S = 1.0
+STREAM_S = 60        # s for the app's songs to reach the Library, and then for its song to play
 AVOID = (2,)         # the user's own slot (docs/orchestration.md: never touched)
 W, H = 320, 375      # the framebuffer's page (portrait), BGRA
 CHANGED_PX = 1500    # pixels that must differ for "the screen changed"
@@ -78,6 +84,15 @@ TRANSIENT = ('system_bar', 'msginfo_dialog')
 # name at +4 (widget_set_name 0x66a7cc, widget_is_normal_window 0x670eec). qemu-user maps the guest at its
 # own addresses, so /proc/PID/mem reads them as they are (the viewer reads g_backlight_status the same way).
 WM_GOT, WM_OFF, WM_CHILDREN, W_NAME, W_VT, VT_TYPE = 0xa3aae0 - 0x7f44, 0x1420, 0x5c, 0x10, 0x74, 0x4
+# Stock's g_ingore_bootkey_flag (V1.36's symbol table): a countdown stock starts at Home, about 5 to 0 a second apart,
+# while which a Centre release is taken for the power key's and dropped (patch/nav/input.c drops it too). The boot's
+# guardian card came up inside it in 4 boots of 108 (2026-11-23): its OK was dropped and the boot failed.
+BOOTKEY_FLAG = 0xa4ca59
+# A widget's flags word and its visible bit (widget_get_visible 0x67795c: lw 0x24($a0); ext 2, 1).
+W_FLAGS, W_VISIBLE = 0x24, 2
+# s for Cover Flow's first open to build its art ("Preparing artwork n/N"): every lease starts with no art
+# cached; the fixture's five albums take about 0.5 s, and took 1 to 3 s while its 16-bit PNG covers went to ffmpeg
+ART_S = 60
 
 
 class Failed(Exception):
@@ -137,6 +152,53 @@ def windows(pid):
             return out
     except (OSError, struct.error):
         return None
+
+
+def window_tree(pid, name):
+    """The topmost window called name as a tree of (type, visible, children), read as windows() reads the window
+    manager (a widget's children are the same darray at WM_CHILDREN; visible is bit W_VISIBLE of the word at
+    W_FLAGS, as stock's widget_get_visible at 0x67795c reads it); None when there is none or it cannot be read."""
+    try:
+        with open(f'/proc/{pid}/mem', 'rb') as m:
+            def u32(a):
+                m.seek(a)
+                return struct.unpack('<I', m.read(4))[0]
+
+            def kids(w):
+                arr = u32(w + WM_CHILDREN)
+                n = u32(arr) if arr else 0
+                return [u32(u32(arr + 8) + 4 * i) for i in range(n)] if 0 < n < 512 else []
+
+            def text(a):
+                m.seek(a)
+                return m.read(64).split(b'\0')[0].decode(errors='replace') if a else ''
+
+            def tree(w, depth=0):
+                vt = u32(w + W_VT)
+                return (text(u32(vt + VT_TYPE)) if vt else '', bool(u32(w + W_FLAGS) >> W_VISIBLE & 1),
+                        [tree(c, depth + 1) for c in kids(w) if c] if depth < 16 else [])
+            wm = u32(u32(WM_GOT) + WM_OFF)
+            found = [w for w in (kids(wm) if wm else []) if w and text(u32(w + W_NAME)) == name]
+            return tree(found[-1]) if found else None
+    except (OSError, struct.error):
+        return None
+
+
+def coverflow_screen(tree):
+    """What Cover Flow's page shows, from its widget tree (window_tree): 'covers' (the carousel, its slide_menu
+    shown), 'tracks' (the carousel built and hidden under an album's text list) or 'building' (no carousel yet:
+    "Preparing artwork n/N" with its Cancel row, or the albums still loading). A Center on 'building' presses
+    Cancel (patch/coverflow.c art_build, cancel_row), which shows the covers: a change of screen, and not the
+    album's tracks the walk wanted. None for no page."""
+    if not tree:
+        return None
+
+    def menus(node, shown):
+        kind, visible, children = node
+        shown = shown and visible
+        return [shown] if kind == 'slide_menu' else [s for c in children for s in menus(c, shown)]
+    found = menus(tree, True)
+    return 'covers' if any(found) else 'tracks' if found else 'building'
 
 
 def top(stack):
@@ -258,6 +320,7 @@ class Emulator:
             if rule == 'confirm':
                 self.log(f'boot: confirmed {GUARD_CARDS.get(card or "", "")}')
                 confirmed.add(state.get('seq'))
+                self.boot_keys()
                 self.q2emu('key', 'centre')
                 gone = time.monotonic() + STEP_S  # one press: wait for demo to say the card has closed
                 while self.guard_card() == card:
@@ -284,6 +347,36 @@ class Emulator:
                 return
             if time.monotonic() > end:
                 raise Failed(f'{why}: expected {name} on top, windows are {[n for _, n in s]}')
+            time.sleep(.2)
+
+    def boot_keys(self):
+        """Wait, up to STEP_S, for stock's boot-key countdown (BOOTKEY_FLAG) to end, so a Centre reaches the UI."""
+        end = time.monotonic() + STEP_S
+        while time.monotonic() < end:
+            self.alive()
+            try:
+                with open(f'/proc/{self.pid}/mem', 'rb') as m:
+                    m.seek(BOOTKEY_FLAG)
+                    if not m.read(1)[0]:
+                        return
+            except (OSError, IndexError):
+                return  # unreadable: the press goes as before, and its effect is checked
+            time.sleep(.1)
+
+    def coverflow_shows(self, screen, why, wait):
+        """Wait up to wait s for Cover Flow on top to show screen (coverflow_screen), then for it to finish
+        opening."""
+        end = time.monotonic() + wait
+        while True:
+            self.alive()
+            now = coverflow_screen(window_tree(self.pid, 'coverflow_page')) if top(self.stack()) == 'coverflow_page' \
+                else None
+            if now == screen:
+                self.settle()
+                return
+            if time.monotonic() > end:
+                raise Failed(f'{why}: expected Cover Flow\'s {screen}, it shows {now or "no Cover Flow"} '
+                             f'(windows {[n for _, n in self.stack()]})')
             time.sleep(.2)
 
     def settle(self, box=None, quiet_s=.4, most_s=3.0):
@@ -366,10 +459,126 @@ SETTINGS = (('General', 2, 'sysset_page'), ('Playback', 3, 'playset_page'), ('Di
             ('Battery', 8, 'powermanager_page'))
 
 
-def steps(e, say):
+def private_ipv4():
+    """This machine's first RFC 1918 address, the only kind the app takes http:// to; None without one."""
+    out = subprocess.run(['ip', '-4', '-o', 'addr', 'show', 'scope', 'global'], capture_output=True, text=True).stdout
+    for addr in re.findall(r'inet (\d+\.\d+\.\d+\.\d+)/', out):
+        a, b = map(int, addr.split('.')[:2])
+        if a == 10 or (a == 172 and 16 <= b <= 31) or (a == 192 and b == 168):
+            return addr
+    return None
+
+
+def car_remote_on(ini):
+    """config.ini's text with Car Remote on (CARREMOTE=1 under [Q2POD]): its daemon's shim writes what Now Playing
+    plays, its position included, to /tmp/coda-rc.now, which the streaming step reads."""
+    text, n = re.subn(r'(?m)^CARREMOTE=.*$', 'CARREMOTE=1', ini)
+    if n:
+        return text
+    text, n = re.subn(r'(?m)^\[Q2POD\]\s*$', '[Q2POD]\nCARREMOTE=1', ini, count=1)
+    return text if n else ini.rstrip('\n') + '\n[Q2POD]\nCARREMOTE=1\n'
+
+
+class Stream:
+    """The streaming step's server and app: q2-fakesonic (test/subsonic_seam.py's pin, built from ~/repos/q2-subsonic)
+    on this machine's private address at a port the kernel picks, which the emulator reaches as it shares this
+    machine's network, and the pinned app's card files (BUNDLED_APPS' zip, its MIPS program) on the copy's card,
+    signed in to it with a test account (the fake takes only that one; no real credential). Its three songs are
+    titled "0 Seam s1"... so they sort first in Library > Songs, and each is the card fixture's first FLAC (-audio),
+    which the emulator's player decodes. why says what is missing when it cannot run."""
+    def __init__(self, log):
+        self.proc, self.why, self.files = None, None, {}
+        sys.path.insert(0, str(TEST))
+        try:
+            import subsonic_seam as seam  # type: ignore[import-not-found]  # test/, not on mypy's path
+        except Exception as e:  # noqa: BLE001  a tree without the seam harness
+            self.why = f'no test/subsonic_seam.py ({e})'
+            return
+        zip_path, commit = seam.pinned_zip()
+        ip = private_ipv4()
+        if zip_path is None or not (seam.REPO/'.git').exists() or not ip:
+            self.why = commit if zip_path is None else f'no q2-subsonic repository at {seam.REPO}' if ip else \
+                'this machine has no RFC 1918 address for the app to reach over http'
+            return
+        try:
+            fake, _ = seam.at_commit(seam.REPO, seam.FAKESONIC, './cmd/q2-fakesonic', 'q2-fakesonic')
+        except (OSError, subprocess.CalledProcessError) as e:
+            self.why = f'q2-fakesonic did not build: {e}'
+            return
+        audio = next(iter(sorted(emu_pool.fixture_dir().rglob('*.flac'))), None)
+        if audio is None:
+            self.why = f'no FLAC on the pool\'s card fixture ({emu_pool.fixture_dir()}) for the fake server to serve'
+            return
+        with zipfile.ZipFile(zip_path) as z:
+            self.files = {n.split('/', 1)[1]: z.read(n) for n in z.namelist() if n.startswith('.subsonic/') and n[-1] != '/'}
+        self.proc = subprocess.Popen([str(fake), '-listen', f'{ip}:0', '-songs', '3', '-album', '3', '-audio', str(audio),
+                                      '-title', '0 Seam '], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        line = self.proc.stdout.readline().split() if self.proc.stdout else []
+        self.url = line[1] if len(line) == 2 and line[0] == 'listening' else None
+        if not self.url:
+            self.stop()
+            self.why = 'q2-fakesonic did not start'
+            return
+        log(f'streaming: q2-fakesonic at {self.url}, {zip_path.name} on the card')
+
+    def card(self, copy):
+        """The app on the copy's card (its lease reset the card just before), signed in to the fake."""
+        d = copy/'state/mmc/.subsonic'
+        d.mkdir(parents=True, exist_ok=True)
+        for name, data in self.files.items():
+            (d/name).write_bytes(data)
+            (d/name).chmod(0o755 if name in ('q2-subsonic', 'run') else 0o644)
+        (d/'credentials').write_text(f'{{"Server": "{self.url}", "User": "seam", "Password": "seam"}}')
+
+    def stop(self):
+        if self.proc:
+            self.proc.kill()
+            self.proc.wait(timeout=5)
+            self.proc = None
+
+
+def guest_file(e, name):
+    """A file in demo's /tmp (a tmpfs of its sandbox), through /proc; None when it is not there."""
+    try:
+        return pathlib.Path(f'/proc/{e.pid}/root/tmp/{name}').read_text(errors='replace')
+    except OSError:
+        return None
+
+
+def now_playing(e):
+    """/tmp/coda-rc.now's keys (patch/coda_rc_shim.c): state, pos, path, buf..."""
+    return dict(l.split('=', 1) for l in (guest_file(e, 'coda-rc.now') or '').splitlines() if '=' in l)
+
+
+def until_true(e, what, ok, wait):
+    end = time.monotonic() + wait
+    while not (got := ok()):
+        e.alive()
+        if time.monotonic() > end:
+            raise Failed(f'{what}: not within {wait} s')
+        time.sleep(.5)
+    return got
+
+
+def streamed(e):
+    """The song Now Playing opened is the app's, streamed, and its position moves on."""
+    first = until_true(e, 'a streamed song playing (coda-rc.now: path under /mnt/mmc/.subsonic/, state 1, not loading)',
+                       lambda: (n := now_playing(e)).get('path', '').startswith('/mnt/mmc/.subsonic/') and
+                       n.get('state') == '1' and n.get('buf') == '0' and n, STREAM_S)
+    pos = int(first.get('pos', '0'))
+    later = until_true(e, f'the position moving on from {pos}', lambda: int(now_playing(e).get('pos', '0')) > pos and
+                       now_playing(e), 15)
+    e.log(f'  {first["path"]}: position {pos} then {later.get("pos")}')
+
+
+def steps(e, say, stream=None):
     """The walk; each step says what it did before it is checked."""
     say('boot: Home')
     e.boot()
+    if stream:
+        say('the app\'s songs in the Library')
+        until_true(e, 'the app\'s catalogue imported (/tmp/q2-subsonic.catalogue.done ok)',
+                   lambda: ' ok ' in (guest_file(e, 'q2-subsonic.catalogue.done') or ''), STREAM_S)
 
     say('Home > Library')
     e.row(HOME_FROM_END['library'], from_end=True)
@@ -379,9 +588,11 @@ def steps(e, say):
     e.row(0)
     e.do('key', 'centre')
     e.expect('allmusic_page', 'Songs')
-    say('Songs > Center: Now Playing')
+    say('Songs > Center: Now Playing' + (', a streamed song playing on' if stream else ''))
     e.do('key', 'centre')
     e.expect('playing_page', 'Center on a song')
+    if stream:
+        streamed(e)
     say('Now Playing > Return: Songs')
     e.do('key', 'return')
     e.expect('allmusic_page', 'Return from Now Playing')
@@ -391,11 +602,10 @@ def steps(e, say):
     e.row(HOME_FROM_END['cover flow'], from_end=True)
     e.do('key', 'centre')
     e.expect('coverflow_page', 'Cover Flow')
+    e.coverflow_shows('covers', 'Cover Flow\'s art built', ART_S)
     say('Cover Flow > Center: the album\'s tracks')
-    before = e.settle()
     e.do('key', 'centre')
-    e.changes(before, 'Center on an album')
-    e.expect('coverflow_page', 'the album\'s tracks')
+    e.coverflow_shows('tracks', 'Center on an album', STEP_S)
     say('tracks > Center: Now Playing')
     e.settle()
     e.do('key', 'centre')
@@ -474,6 +684,7 @@ def main(argv=None):
     ap.add_argument('--logs', type=pathlib.Path, help='default: ~/.cache/q2-smoke/<time>/')
     ap.add_argument('--shots', type=pathlib.Path, help='a screenshot here as each step starts')
     ap.add_argument('--wait', type=float, default=600, help='seconds to wait for a free emulator (600)')
+    ap.add_argument('--no-stream', action='store_true', help='leave out the streamed song (Library > Songs plays a card one)')
     args = ap.parse_args(argv)
     if not (args.build/'rootfs.squashfs').exists():
         ap.error(f'{args.build} is not a build (no rootfs.squashfs)')
@@ -488,6 +699,10 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))  # the finally below still gives the slot back
 
     saved, log_at = {}, {}
+    stream = None if args.no_stream else Stream(log)
+    if stream and stream.why:
+        log(f'smoke: streaming skipped: {stream.why}')
+        stream = None
 
     def prepare(k):
         demo_log = emu_pool.copy_dir(k)/'state/log/demo.log'
@@ -495,7 +710,10 @@ def main(argv=None):
         ini = emu_pool.copy_dir(k)/'state/data/config.ini'
         if ini.exists():
             saved[k] = ini.read_bytes()
-            ini.write_text(bluetooth_off(saved[k].decode('utf-8', 'replace')))
+            text = bluetooth_off(saved[k].decode('utf-8', 'replace'))
+            ini.write_text(car_remote_on(text) if stream else text)
+        if stream:
+            stream.card(emu_pool.copy_dir(k))
 
     slot, e, step = None, None, ['lease']
 
@@ -524,8 +742,8 @@ def main(argv=None):
         def overdue(*_):
             raise Deadline()
         signal.signal(signal.SIGALRM, overdue)
-        signal.alarm(DEADLINE)
-        steps(e, say)
+        signal.alarm(DEADLINE + (2 * STREAM_S if stream else 0))
+        steps(e, say, stream)
         signal.alarm(0)
         log(f'smoke: passed in {time.monotonic() - t0:.0f} s')
         return 0
@@ -546,6 +764,8 @@ def main(argv=None):
             log(f'  demo.log tail: {logs/"demo.log"}' + (f'; {crash[-1].strip()}' if crash else ''))
         return 1
     finally:
+        if stream:
+            stream.stop()
         if slot is not None:
             emu_pool.put(slot)
             if slot in saved:

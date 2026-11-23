@@ -44,13 +44,19 @@ def update_tar(path, info=None, members=None, payload=None):
                 t.addfile(entry, io.BytesIO(contents[name]))
 
 
+def carried():
+    """manifest.json's bundled_apps for the pinned apps, as tools/build.py writes it."""
+    return {app_id: dict(version=v, zip=z, sha256=d, builtin=b, bytes=1, binary_sha256='b' * 64, build='-')
+            for app_id, (v, z, _, d, b) in release.BUNDLED_APPS.items()}
+
+
 def built(directory, manifest=None, **tar):
     directory.mkdir(exist_ok=True)
     (directory/'rootfs.squashfs').write_bytes(ROOTFS)
     update_tar(directory/'update.tar', **tar)
     fields = dict(version=release.TAG, update_repo=release.REPO, signing_key=TRACKED, input_zip_sha256=release.ZIP_SHA,
                   stock_demo_sha256=release.DEMO_SHA, rootfs_sha256=sha(ROOTFS), kernel_sha256=sha(KERNEL),
-                  update_sha256=sha((directory/'update.tar').read_bytes()), **(manifest or {}))
+                  update_sha256=sha((directory/'update.tar').read_bytes()), bundled_apps=carried(), **(manifest or {}))
     (directory/'manifest.json').write_text(json.dumps(fields))
     return directory
 
@@ -100,6 +106,9 @@ def test_validate_names_the_suites_that_fail(tmp_path, scripts):
     ('rootfs_sha256', 'x', 'rootfs.squashfs: hash mismatch$'),
     ('update_sha256', 'x', 'update.tar: hash mismatch$'),
     ('kernel_sha256', 'x', '^Update payload mismatch$'),
+    ('bundled_apps', {}, '^The build carries \\[\\], not the pinned'),
+    ('bundled_apps', {i: {**a, 'sha256': '0' * 64} for i, a in carried().items()}, 'is not the pinned'),
+    ('bundled_apps', {i: {**a, 'binary_sha256': ''} for i, a in carried().items()}, 'is not the pinned'),
 ])
 def test_validate_refuses_a_manifest(tmp_path, scripts, field, value, message):
     d = built(tmp_path/'b', {})
@@ -174,6 +183,7 @@ class Packaging:
             self.builds.append((stock, directory, logo))
             directory.mkdir()
             (directory/'update.tar').write_bytes(repeat if directory.name.endswith('-repeat') else b'tar')
+            (directory/'manifest.json').write_text(json.dumps({'bundled_apps': carried()}))
         def script(args, check=False):
             if args[1] == '-I':  # sitenotes.py --check
                 self.sites.append(args)
@@ -200,11 +210,13 @@ def test_package(repo, monkeypatch, tmp_path, capsys):
     assert (out/release.ASSET).read_bytes() == b'tar'
     assert p.scripts == [([release.sys.executable, str(repo/'docs/manual/build.py'), str(out/release.GUIDE)], True)]
     assert (out/'SHA256SUMS').read_text() == f'{sha(b"tar")}  update.tar\n'
-    notes = f'**{release.VERSION}**\n- One.\n\nSHA-256:\n- update.tar ({release.TAG}): `{sha(b"tar")}`\n'
+    apps = ''.join(f'- {z} (carried as usr/lib/q2apps/{i}): `{d}`\n' for i, (_, z, _, d, _) in sorted(release.BUNDLED_APPS.items()))
+    notes = f'**{release.VERSION}**\n- One.\n\nSHA-256:\n- update.tar ({release.TAG}): `{sha(b"tar")}`\n' + apps
     assert (out/'release-notes.md').read_text() == notes
     record = json.loads((out/'release.json').read_text())
+    pinned = {i: {k: a[k] for k in ('zip', 'sha256', 'binary_sha256', 'build')} for i, a in carried().items()}
     assert record == dict(tag=release.VERSION, revision='rev', source_sha256='source', assets={'update.tar': sha(b'tar')},
-                          guide_sha256=sha(b'%PDF'), notes_sha256=sha(notes.encode()))
+                          bundled_apps=pinned, guide_sha256=sha(b'%PDF'), notes_sha256=sha(notes.encode()))
     assert (out/'release.json').read_text().endswith('}\n') and '\n  "tag"' in (out/'release.json').read_text()
     assert capsys.readouterr().out == f'Validated and reproducible: {out}\n'
 

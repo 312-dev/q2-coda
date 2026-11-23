@@ -9,9 +9,9 @@
  * stock's page for it sets it on each step, so nothing waits for the page: Max Volume g_maxvolume,
  * the volume pulled down with it (stock's 0x4bb360); Balance config_balance (the DAC's ioctl and
  * PLAYSET BALANCE); Brightness config_lightness (the backlight and SYSSET LIGHTNESS); Default
- * Volume's level g_bootvolume (stock's 0x4b73b8); Crossfade's length crossfade.c xfade_set. A
- * setting with a switch and a value (Default Volume, Crossfade) is a switch row with its slider row
- * under it, shown only while the switch is on (inline_pair). The rows are drawn from their
+ * Volume's level g_bootvolume (stock's 0x4b73b8). A setting with a switch and a value (Default
+ * Volume) is a switch row with its slider row under it, shown only while the switch is on
+ * (inline_pair). The rows are drawn from their
  * list_item's paint (inline_slider_paint, row_paint.c ringnav_paint), grown on a timer (is_step),
  * set down when the list's selection paints off a grabbed row (inline_slider_sel, row_paint.c
  * paint_selection), and take the keys while grabbed (inline_slider_key, nav/input.c ringnav). One
@@ -48,10 +48,7 @@ static const is_kind_t kinds[IS_KINDS] = {
     [IS_BALANCE] = { "Balance", -10, 10, 1, "Left", "Right" },
     [IS_BRIGHT] = { "Brightness", 0, 100, 0, 0, 0 },
     [IS_BOOTVOL] = { "Level", 0, 100, 0, 0, 0 },
-    [IS_XFADE] = { "Duration", 1, 15, 0, 0, 0 },
 };
-/* a pair's switch row's title, by its slider's kind */
-static const char *pair_title(int k) { return k == IS_BOOTVOL ? "Default Volume" : "Crossfade"; }
 
 static struct {
     void *view, *item[IS_ROWS], *sw[IS_ROWS]; /* each row's list_item; a pair's switch label */
@@ -89,10 +86,7 @@ int inline_value(int k) {
     if (k == IS_MAXVOL) return g_maxvolume;
     if (k == IS_BALANCE) return mclGetBalance();
     if (k == IS_BRIGHT) return g_lightness;
-    if (k == IS_BOOTVOL) return g_bootvolume;
-    int seconds;
-    xfade_state(&seconds);
-    return seconds;
+    return g_bootvolume;
 }
 
 /* k's value to v (within its range: wheel_level's), set and saved as stock's page for it does a
@@ -110,11 +104,10 @@ static void set_value(int k, int v) {
         config_balance(v);
     else if (k == IS_BRIGHT)
         config_lightness(v);
-    else if (k == IS_BOOTVOL) {
+    else {
         g_bootvolume = (unsigned char)v;
         write_int_config(v, "PLAYSET", "BOOTVOLUME");
-    } else
-        xfade_set(1, v);
+    }
 }
 
 void inline_value_text(int k, int v, char *out, unsigned n) {
@@ -123,8 +116,6 @@ void inline_value_text(int k, int v, char *out, unsigned n) {
           : tk_snprintf(out, n, "Center");
     else if (k == IS_BRIGHT)
         tk_snprintf(out, n, "%d%%", v);
-    else if (k == IS_XFADE)
-        tk_snprintf(out, n, "%d s", v);
     else
         tk_snprintf(out, n, "%d", v);
 }
@@ -214,27 +205,18 @@ void *inline_slider_row(void *view, const char *icon, int k) {
     return i < 0 ? list_row(view, icon, 0, 0) : slider_row(view, icon, k, i);
 }
 
-static int pair_on(int k) {
-    int seconds;
-    return k == IS_BOOTVOL ? g_bootvol_flag != 0 : xfade_state(&seconds);
-}
 /* The pair's switch as its setting is, and its slider row shown only while it is on. */
 static void pair_sync(int i) {
-    int on = pair_on(is.kind[i]);
-    list_toggle(is.sw[i], pair_title(is.kind[i]), on);
+    int on = g_bootvol_flag != 0;
+    list_toggle(is.sw[i], "Default Volume", on);
     widget_set_visible(is.item[i], on, 0);
 }
 static int pair_click(void *ctx, void *event) {
     (void)event;
-    int i = (int)(long)ctx, seconds;
+    int i = (int)(long)ctx;
     if (i < 0 || i >= IS_ROWS || !is.sw[i]) return 0;
-    if (is.kind[i] == IS_BOOTVOL) {
-        g_bootvol_flag = !g_bootvol_flag; /* as stock's switch (0x4b7334) */
-        write_int_config(g_bootvol_flag, "PLAYSET", "BOOTVOLFLAG");
-    } else {
-        int on = xfade_state(&seconds);
-        xfade_set(!on, seconds);
-    }
+    g_bootvol_flag = !g_bootvol_flag; /* as stock's switch (0x4b7334) */
+    write_int_config(g_bootvol_flag, "PLAYSET", "BOOTVOLFLAG");
     if (is.item[i] == is.open) is.open = (void *)0;
     int id = widget_get_prop_int(is.view, SEL, -1);
     pair_sync(i);

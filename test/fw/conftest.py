@@ -362,6 +362,20 @@ class Rows(Deques):
         return len(self.copies)
 
 
+def threads_now(fw):
+    """pthread_create runs the thread's function to its end at once, on the caller's thread, and says it started
+    (a thread id of 1): what a shell run off the UI thread (bt_ui.c bt_shell) leaves behind is there at the call's
+    return. The runs, (function, argument), are listed."""
+    runs = []
+    def create(t, attr, fn, arg, *_):
+        runs.append((fn, arg))
+        C.c_ulong.from_address(t).value = 1
+        C.CFUNCTYPE(C.c_void_p, C.c_void_p)(fn)(arg)
+        return 0
+    fw.mock('fw_pthread_create', create)
+    return runs
+
+
 class Files:
     """The card's and flash's files as a dict: fopen and all, so blob_io and the snapshot's reader run whole; "a" appends.
     card: /proc/mounts lists the card, as card_mounted reads it, which card_store.c's files need."""
@@ -451,3 +465,8 @@ class Game(C.Structure):
     """addon.c's gm: the running card game."""
     _fields_ = [*((k, C.c_int) for k in 'pid sock eat audio'.split()), *((k, C.c_uint) for k in 'seen held term'.split()),
                 ('path', C.c_char * 48)]
+
+
+def pytest_configure(config):
+    config.addinivalue_line('markers', 'library(songs, album, size): the fake server\'s library for a seam test '
+                                       '(test_seam_subsonic.py)')

@@ -604,7 +604,8 @@ static struct {
     int manual;                                           /* the check is Check for Updates' */
     unsigned need;                                        /* SH_SPACE's MB */
     unsigned long long checked;                           /* now_ms of the last whole check */
-    shelf_app next[SH_MAX]; /* the check's list (n apps), the page's once the check ends */
+    shelf_app *next; /* SH_MAX: the check's list (n apps), the page's once the check ends; on the
+                      * heap from the first check, kept */
     void *page, *row[SH_MAX + 1];
 } sh __attribute__((section(".scratch")));
 
@@ -669,6 +670,10 @@ static int check(void) {
     int why = SH_NET;
     char *list = fresh_list(&why);
     unsigned serial = list ? shelf_serial(list) : 0;
+    if (!sh.next && !(sh.next = calloc(SH_MAX, sizeof *sh.next))) { /* kept from the first check */
+        free(list);
+        return 0;
+    }
     int n = list ? shelf_sources(list, sh.next, SH_MAX) : 0, fresh = n > 0;
     free(list);
     if (!n) memcpy(sh.next, apps, sizeof apps), n = shelf_n; /* a bad list never replaces one */
@@ -903,7 +908,7 @@ static int sh_wait(const void *unused) {
     if (r == SH_OK && (job == JOB_REMOVE || job == JOB_INSTALL))
         addon_forget(apps[i].dir), card_bins_changed(); /* Home's Shortcut: Rockbox, Groovebox */
     if (job == JOB_CHECK) /* the rows built again: the list may have changed */
-        memcpy(apps, sh.next, sizeof apps), shelf_n = sh.n, sh.rows = -1;
+        if (sh.next) memcpy(apps, sh.next, sizeof apps), shelf_n = sh.n, sh.rows = -1;
     if (job == JOB_ERASE || (job != JOB_CHECK && is(i, "spotify")))
         spot_stop(); /* spotify.c forgets the old one */
     sh_rows();

@@ -16,6 +16,9 @@ static void hide_outline(void) {
     st.touch_mode = 1;
     if (top) widget_invalidate_force(top, (void *)0);
 }
+/* A touch on the page after all: swipe_back.c's edge press that dragged up, down or left, or lifted
+ * where it came down. */
+void touch_hide(void) { hide_outline(); }
 
 int ringnav_touch(void *ctx, void *event) {
     /* a finger on the A-Z index: its moves are az_index.c's (az_event), the rows' bar stays */
@@ -34,7 +37,10 @@ int ringnav_touch(void *ctx, void *event) {
     }
     if (!hold)       /* swiping pages keeps the paused seek's preview */
         np_cancel(); /* before the slider sees the touch, so a drag seeks the stock way */
-    hide_outline();
+    /* A swipe back's touch (swipe_back.c) is no touch on the rows: the bar rides with the page. Its
+     * press hides it here as any does, and is given it back below once it is a candidate. */
+    int was_touch = st.touch_mode, swiping = swipe_back_holds();
+    if (!swiping) hide_outline();
     int result = stock_touch_trampoline(ctx, event);
     /* A tap is a fresh interaction: it cancels a pending screen-toggle pair and any spin. */
     drop_input();
@@ -55,6 +61,7 @@ int ringnav_touch(void *ctx, void *event) {
     if (!result)
         swipe_back_down(event, !st.rt_page && !(st.np_full && window_manager_get_top_window(
                                                                   window_manager()) == st.np_win));
+    if (!swiping && !was_touch && swipe_back_holds()) st.touch_mode = 0;
     /* Pointer-down must not recall/rebind the row that native touch is about to hit. */
     if (!result && w && load_rows(&g_menu, w)) {
         stop_scroll(&g_menu);
@@ -88,9 +95,48 @@ static void shuffle_page(void) {
         toast("Queue unchanged");
 }
 
+/* A touch's press and whether it went more than TAP_PX from it either way before its lift (far);
+ * lift: the last pointer event was its lift, so the click that follows is that touch's, not a
+ * key's. AWTK clicks a button lifted inside it however far it was dragged there, and a list's
+ * scroll view takes only drags up or down: a sideways drag across a row clicked it (Gain cycled,
+ * a switch flipped). drag_click drops such a click on a list's row. */
+static struct {
+    int x0, y0, far, lift;
+} tp __attribute__((section(".scratch")));
+
+static void touch_track(void *event) {
+    int type = I(event, EVENT_TYPE), x = I(event, EVENT_X), y = I(event, EVENT_Y);
+    if (type == EVT_POINTER_DOWN - 1 || type == EVT_POINTER_DOWN) {
+        tp.x0 = x, tp.y0 = y, tp.far = tp.lift = 0;
+        return;
+    }
+    int up = type == EVT_POINTER_UP_BEFORE - 1 || type == EVT_POINTER_UP_BEFORE;
+    if (up || type == EVT_POINTER_MOVE_BEFORE - 1 || type == EVT_POINTER_MOVE_BEFORE) {
+        if ((unsigned)(x - tp.x0 + TAP_PX) > 2 * TAP_PX ||
+            (unsigned)(y - tp.y0 + TAP_PX) > 2 * TAP_PX)
+            tp.far = 1;
+        if (up) tp.lift = 1;
+    } else if (type >= EVT_KEY_DOWN && type <= EVT_KEY_UP_BEFORE)
+        tp.lift = 0; /* a key's click from here on */
+}
+
+/* 1 for a click on a list's row (inside a scroll view) made by the lift of a touch that went
+ * more than TAP_PX from its press: a drag, not a tap. Buttons in no list (a dialog's, a
+ * keyboard's) keep stock's click. */
+static int drag_click(void *target) {
+    int dragged = tp.lift && tp.far;
+    tp.lift = 0; /* one click a lift */
+    for (void *w = dragged ? target : (void *)0; w; w = P(w, W_PARENT))
+        if (!tk_strcmp(widget_get_type(w), "scroll_view")) return 1;
+    return 0;
+}
+
 /* Observe actual clicks BEFORE app callbacks can navigate or destroy/rebind their widgets.
  * Do not turn pointer-down into selection: a swipe is not a tap. */
 int ringnav_dispatch(void *target, void *event) {
+    if (event) touch_track(event);
+    /* a row's click from a drag's lift: no tap, so no row (a Settings switch or choice) changes */
+    if (target && event && I(event, EVENT_TYPE) == EVT_CLICK && drag_click(target)) return STOP;
     if (np_tap_lift(target, event)) return STOP; /* a hold's lift under the art it opened */
     if (event && target != window_manager() &&
         ((I(event, EVENT_TYPE) >= EVT_KEY_DOWN && I(event, EVENT_TYPE) <= EVT_KEY_UP_BEFORE) ||

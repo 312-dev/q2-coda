@@ -71,7 +71,7 @@ def pinned(text, tag=b'1.0', asset=b'app.zip', size=5, sha=PIN_SHA):
 
 class Sh(C.Structure):
     _fields_ = [('thread', C.c_ulong), *((n, C.c_int) for n in ('running', 'cancel', 'percent', 'stage', 'result', 'job', 'app', 'armed', 'rows', 'n')),
-                ('map', C.c_int * (SH_MAX + 1)), ('manual', C.c_int), ('need', C.c_uint), ('checked', C.c_ulonglong), ('next', App * SH_MAX),
+                ('map', C.c_int * (SH_MAX + 1)), ('manual', C.c_int), ('need', C.c_uint), ('checked', C.c_ulonglong), ('next', C.POINTER(App)),
                 ('page', C.c_void_p), ('row', C.c_void_p * (SH_MAX + 1))]
 
 
@@ -1218,7 +1218,7 @@ class Page:
 
     def checked(self, *latest, manual=0, result=SH_OK):
         """A check that found these latest tags, one an app, ended: sh_wait's toasts."""
-        self.sh.next = self.table
+        self.sh.next = C.cast(self.table, C.POINTER(App))
         for i, tag in enumerate(latest):
             self.sh.next[i].latest = tag
         self.sh.n, self.sh.job, self.sh.manual, self.sh.result = self.fw.var('shelf_n', C.c_int).value, JOB_CHECK, manual, result

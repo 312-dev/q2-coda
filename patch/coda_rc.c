@@ -6,25 +6,33 @@
  * (crc_cover_ask, which asks the app itself through its /tmp files).
  *
  * demo starts it when Settings > Car Remote is on and kills it when that goes off; nothing else starts it.
- * It also answers mDNS for Q2 Muse Remote's Wi-Fi tab (coda_rc_mdns.c) on wlan0, or the interface --mdns-if
- * names (the emulator's), and not at all with --no-mdns; the host build answers only with --mdns-if.
- * It runs at nice 19. --root DIR prefixes every path (the host tests); --no-ble, --ble-sim DIR and --port N are for
- * them too. */
+ * It also answers mDNS for Q2 Muse Remote's Pair a Q2 Muse list (coda_rc_mdns.c) on wlan0, or the interface
+ * --mdns-if names (the emulator's), and not at all with --no-mdns; the host build answers only with --mdns-if.
+ * It runs at nice 19. --root DIR prefixes every path (the host tests); --no-ble, --ble-sim DIR, --port N (0: the
+ * kernel's pick) and --iroh-port N (q2-iroh's loopback port, 7721; 0 none, any the kernel's pick) are for them too:
+ * the "start: tcp N listening, q2-iroh's port M" line names what it got. A port it cannot take ends it at once, with
+ * a "start failed" line and no pid file, so the shim starts it again (coda_rc_shim.c CR_RESTART_MS). */
 #include "coda_rc_sys.h"
 #include "coda_rc.h"
+#include "coda_rc_cmdq.h"
 #include "monocypher/monocypher.h"
 
 #define MAX_TCP 4
 #define HELLO_MS 10000
-#define AUTH_MS 150000
-#define ACK_MS 4000
+#define AUTH_MS 150000    /* the longest a session lives unauthenticated, a pairing's included */
+#define HANDSHAKE_MS 15000 /* the longest one stays in a state other than pairing before Auth */
+#define ACK_MS 4000        /* the shim's answer to a command, at most this late */
+/* Once it answered "taken" (CRC_ACK_TAKEN): its final answer, at most this late. Under Q2 Muse Remote's own 8 s for
+ * any answer (CodaSession.TIMEOUT_MS), past which it drops the whole session. */
+#define ACK_TAKEN_MS 7000
 #define TICK_MS 1000 /* the loop's longest sleep: pairing's end, forgotten phones, the handshakes' limits */
+#define TICK_IDLE_MS 5000 /* with no phone connected and no pairing (idle): Bluetooth's state and the Wi-Fi address */
 #define LOG_MAX 65536
 
 enum { TR_TCP, TR_BLE };
 
 static char root[160];
-static int port = CRC_TCP_PORT, use_ble = 1, quit, rnd = -1;
+static int port = CRC_TCP_PORT, iroh_port = CRC_TCP_PORT + 1, use_ble = 1, quit, rnd = -1;
 #ifdef CODA_HOST
 static const char *mdns_if; /* the tests' daemon is never on the network unless asked */
 #else
@@ -42,7 +50,11 @@ typedef struct {
 
 typedef struct {
     int fd, used;
+    int named;         /* q2-iroh's (the loopback port iroh_port): its first 32 bytes name the phone's iroh key */
+    unsigned pre_n;    /* of those 32, how many have come */
     uint32_t opened;
+    int seen;          /* its session's state at the last look (timeouts), and since when */
+    uint32_t seen_at;
     crc_session s;
 } conn;
 static conn tcp[MAX_TCP];
@@ -74,7 +86,7 @@ static int read_file(const char *path, void *buf, size_t cap) {
 static int tell_fd = -1;
 static void tell_shim(const char *path) {
     static const char *const read_by_shim[] = { "/tmp/coda-rc.cmd", "/tmp/coda-rc.pair", "/tmp/coda-rc.pair-end",
-                                                "/tmp/coda-rc.wake" };
+                                                "/tmp/coda-rc.wake", "/tmp/coda-rc.online" };
     if (tell_fd < 0) return;
     for (unsigned i = 0; i < sizeof read_by_shim / sizeof *read_by_shim; ++i)
         if (!strcmp(path, read_by_shim[i])) {
@@ -166,9 +178,16 @@ void crc_random(void *buf, size_t n) {
     }
 }
 
+#ifdef CODA_HOST
+uint32_t crc_host_skew_ms; /* the tests' clock ahead of the host's, to reach a limit without waiting for it */
+#endif
+
 uint32_t crc_now_ms(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
+#ifdef CODA_HOST
+    return (uint32_t)(t.tv_sec * 1000u + t.tv_nsec / 1000000) + crc_host_skew_ms;
+#endif
     return (uint32_t)(t.tv_sec * 1000u + t.tv_nsec / 1000000);
 }
 
@@ -211,6 +230,138 @@ int crc_peers_save(const crc_peer *peers, int n) {
     int e = crc_write_file(PEERS, b, n * PEER_REC, 0600);
     crypto_wipe(b, sizeof b);
     return e;
+}
+
+/* ---- q2-iroh's allow-list (docs/remote-protocol.md#across-networks-only-paired-phones) ----
+ * IROH_PEERS holds each paired phone's iroh key, `peer_id[8] | key[32]`, registered by RegisterRemote over any
+ * authenticated session or by an authenticated or paired session through q2-iroh itself. IROH_ALLOW is what q2-iroh
+ * reads at each handshake and stream: the keys of phones still paired, 64 hex digits a line. Both are rewritten
+ * at the start, on a registration and whenever the peers file changes (a pairing, a Forget: inotify on its
+ * folder), so a forgotten phone's key is gone from the list at once. */
+#define IROH_PEERS "/mnt/data/coda-rc/iroh-peers"
+#define IROH_REC (CRC_PEER_ID + 32)
+#define IROH_ALLOW "/tmp/coda-rc.iroh-allow"
+
+/* IROH_PEERS's records of phones still paired into out (cap records): how many; *gone when some were dropped */
+static int iroh_load(uint8_t *out, int cap, int *gone) {
+    crc_peer peers[CRC_MAX_PEERS];
+    uint8_t b[CRC_MAX_PEERS * IROH_REC];
+    int np = crc_peers_load(peers, CRC_MAX_PEERS), n = read_file(IROH_PEERS, b, sizeof b), m = 0;
+    n = n > 0 ? n / IROH_REC : 0;
+    *gone = 0;
+    for (int i = 0; i < n; ++i) {
+        int paired = 0;
+        for (int k = 0; k < np; ++k) paired |= !memcmp(peers[k].id, b + i * IROH_REC, CRC_PEER_ID);
+        if (paired && m < cap) memcpy(out + m++ * IROH_REC, b + i * IROH_REC, IROH_REC);
+        else *gone = 1;
+    }
+    crypto_wipe(peers, sizeof peers);
+    return m;
+}
+
+/* IROH_PEERS (when changed) and IROH_ALLOW from recs (n records) */
+static void iroh_write(const uint8_t *recs, int n, int changed) {
+    char t[CRC_MAX_PEERS * 65 + 1], p[256];
+    int len = 0;
+    if (changed) {
+        mkdir(crc_path(p, sizeof p, "/mnt/data/coda-rc"), 0700);
+        crc_write_file(IROH_PEERS, recs, (size_t)n * IROH_REC, 0600);
+    }
+    for (int i = 0; i < n; ++i) {
+        for (int k = 0; k < 32; ++k) len += snprintf(t + len, sizeof t - len, "%02x", recs[i * IROH_REC + CRC_PEER_ID + k]);
+        t[len++] = '\n';
+    }
+    char old[sizeof t];
+    int o = read_file(IROH_ALLOW, old, sizeof old);
+    if (o != len || memcmp(old, t, (size_t)len)) crc_write_file(IROH_ALLOW, t, (size_t)len, 0644);
+}
+
+/* The allow-list made again from the peers file: at the start and when the peers' folder changes. */
+static void iroh_allow(void) {
+    uint8_t recs[CRC_MAX_PEERS * IROH_REC];
+    int gone, n = iroh_load(recs, CRC_MAX_PEERS, &gone);
+    iroh_write(recs, n, gone);
+}
+
+/* key is the iroh key of the phone peer (paired): kept, in place of any it had and taken from any other phone */
+static void iroh_register(const uint8_t peer[CRC_PEER_ID], const uint8_t key[32]) {
+    uint8_t recs[(CRC_MAX_PEERS + 1) * IROH_REC];
+    int gone, n = iroh_load(recs, CRC_MAX_PEERS, &gone), m = 0;
+    for (int i = 0; i < n; ++i) {
+        const uint8_t *r = recs + i * IROH_REC;
+        if (memcmp(r, peer, CRC_PEER_ID) && memcmp(r + CRC_PEER_ID, key, 32)) memmove(recs + m++ * IROH_REC, r, IROH_REC);
+    }
+    crc_peer peers[CRC_MAX_PEERS];
+    int np = crc_peers_load(peers, CRC_MAX_PEERS), paired = 0;
+    for (int k = 0; k < np; ++k) paired |= !memcmp(peers[k].id, peer, CRC_PEER_ID);
+    crypto_wipe(peers, sizeof peers);
+    if (paired) {
+        memcpy(recs + m * IROH_REC, peer, CRC_PEER_ID);
+        memcpy(recs + m++ * IROH_REC + CRC_PEER_ID, key, 32);
+    }
+    iroh_write(recs, m, 1);
+}
+
+/* key registered to a phone still paired */
+static int iroh_known(const uint8_t key[32]) {
+    uint8_t recs[CRC_MAX_PEERS * IROH_REC];
+    int gone, n = iroh_load(recs, CRC_MAX_PEERS, &gone), known = 0;
+    for (int i = 0; i < n; ++i) known |= !memcmp(recs + i * IROH_REC + CRC_PEER_ID, key, 32);
+    return known;
+}
+
+void crc_iroh_proved(crc_session *s) {
+    if (!s->iroh_ok) crc_log("iroh: a phone's key registered by its %s", s->state == S_AUTHED ? "Auth" : "pairing");
+    iroh_register(s->peer, s->iroh);
+    s->iroh_ok = 1;
+}
+
+/* Keys that came through q2-iroh during Pair a Phone and left without pairing or Auth: refused at their next
+ * connection for IROH_BACKOFF_MS, doubling each time up to IROH_BACKOFF_MAX_MS (the pre-auth limits of
+ * docs/remote-protocol.md#transports hold each session; this holds a peer that keeps opening them). */
+#define IROH_BACKOFFS 8
+#define IROH_BACKOFF_MS 10000
+#define IROH_BACKOFF_MAX_MS 300000
+static struct {
+    uint8_t key[32];
+    uint32_t until, ms;
+} backoff[IROH_BACKOFFS];
+
+static int iroh_held(const uint8_t key[32], uint32_t now) {
+    for (int i = 0; i < IROH_BACKOFFS; ++i)
+        if (backoff[i].ms && !memcmp(backoff[i].key, key, 32)) return now - backoff[i].until >= 0x80000000u;
+    return 0;
+}
+
+static void iroh_hold(const uint8_t key[32], uint32_t now) {
+    int at = -1, empty = -1, first = 0; /* first: of the others, the hold that ends soonest, taken when all are used */
+    for (int i = 0; i < IROH_BACKOFFS && at < 0; ++i) {
+        if (backoff[i].ms && !memcmp(backoff[i].key, key, 32)) at = i;
+        else if (!backoff[i].ms && empty < 0) empty = i;
+        else if (backoff[i].until - backoff[first].until >= 0x80000000u) first = i;
+    }
+    if (at < 0) {
+        at = empty >= 0 ? empty : first;
+        memcpy(backoff[at].key, key, 32);
+        backoff[at].ms = 0;
+    }
+    uint32_t ms = backoff[at].ms * 2;
+    backoff[at].ms = !ms ? IROH_BACKOFF_MS : ms > IROH_BACKOFF_MAX_MS ? IROH_BACKOFF_MAX_MS : ms;
+    backoff[at].until = now + backoff[at].ms;
+}
+
+/* RegisterRemote{endpoint_id = 1: the phone's iroh key, 32 bytes}, CAP_IROH_ALLOW */
+static int register_remote(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
+    pbr r = {p, p + n};
+    pbf f;
+    int k;
+    const uint8_t *key = 0;
+    while ((k = pb_next(&r, &f)) > 0)
+        if (f.field == 1 && f.wire == 2 && f.n == 32) key = f.s;
+    if (k < 0 || !key) return crc_error(s, req_id, E_BAD_REQUEST, "RegisterRemote: endpoint_id is 32 bytes");
+    iroh_register(s->peer, key);
+    crc_log("iroh: a phone registered its key");
+    return crc_send(s, T_ACK, req_id, 0, 0);
 }
 
 /* The pairing dialog is the shim's (coda_rc_shim.c): it shows /tmp/coda-rc.pair while it exists, writes
@@ -317,7 +468,7 @@ int crc_shim_alive(void) {
 uint32_t crc_caps(void) {
     return CAP_BROWSE | CAP_SEARCH | CAP_QUEUE | CAP_COVERS | CAP_FAVORITES | CAP_RECENT |
            (crc_shim_alive() ? CAP_PLAY | CAP_SEEK | CAP_MODES | CAP_QUEUE_JUMP | CAP_RATE | CAP_RESUME | CAP_BUFFERING | CAP_RADIO | CAP_NOTICE : 0) |
-           (lib_has_server() ? CAP_SERVER : 0) | CAP_REMOTE;
+           (lib_has_server() ? CAP_SERVER : 0) | CAP_REMOTE | CAP_IROH_ALLOW;
 }
 
 static uint32_t position_now(void) {
@@ -341,8 +492,20 @@ static const lib_song_t *np_stream(void) {
     return found ? &song : 0;
 }
 
+/* NowPlaying.album_id and artist_id for track id (lib_song_nodes), looked up once a song, not at each send: a
+ * State goes out at every change and once a second while a phone follows the position. */
+static void np_nodes(const char *id, const char **album, const char **artist) {
+    static char of[24] = "\1", a[64], r[64];
+    if (strcmp(of, id)) {
+        snprintf(of, sizeof of, "%s", id);
+        lib_song_nodes(id, a, sizeof a, r, sizeof r);
+    }
+    *album = a, *artist = r;
+}
+
 static void put_now_playing(pbw *w) {
     char id[24] = "", art[48] = "";
+    const char *album_id, *artist_id;
     size_t m = pb_begin(w, 1);
     const lib_song_t *ls = np_stream();
     int rid = ls ? ls->id : np.id;
@@ -370,6 +533,9 @@ static void put_now_playing(pbw *w) {
     pb_varint(w, 17, np.radio != 0); /* CAP_RADIO */
     pb_str(w, 18, np.note);          /* CAP_NOTICE: the toast shown, while it is */
     pb_varint(w, 19, (uint32_t)np.noten);
+    np_nodes(id, &album_id, &artist_id);
+    pb_str(w, 20, album_id); /* the Browse pages of its album and album artist: left out when none */
+    pb_str(w, 21, artist_id);
     pb_end(w, m);
 }
 
@@ -436,9 +602,15 @@ static void np_poll(void) {
 static struct {
     crc_session *s;
     unsigned req_id, seq;
-    uint32_t at;
+    uint32_t at;   /* sent, or taken since */
+    int taken;     /* the shim answered CRC_ACK_TAKEN: at work, its answer to come */
     char verb[24];
 } pend;
+
+/* when the pending command's answer is due */
+static uint32_t pend_due(void) { return pend.at + (pend.taken ? ACK_TAKEN_MS : ACK_MS); }
+/* Numbered from the clock's, so a restarted daemon's never meet the last one's still in the shim's answers (it keeps
+ * a few, coda_rc_shim.c cr_ack), and under q2-iap's, which start at 0x51000000. */
 static unsigned cmd_seq;
 
 /* the shim's answer: 0 done, 3 the song named is not there (NOT_FOUND), anything else not done */
@@ -458,36 +630,51 @@ static void pend_answer(int code) {
     pend.s = 0;
 }
 
-/* the shim's command, answered once it acks or after ACK_MS */
+/* the shim's command, answered once it acks or after ACK_MS (ACK_TAKEN_MS once it said it took it): down its queue
+ * (coda_rc_cmdq.h), else in its file */
 int crc_shim_command(crc_session *s, unsigned req_id, const char *verb) {
-    char b[96];
+    char b[96], q[256];
     if (!crc_shim_alive()) return crc_error(s, req_id, E_UNAVAILABLE, "demo is not answering");
     pend_answer(1);  /* one in flight: a newer command supersedes it */
+    if (!cmd_seq) cmd_seq = (crc_now_s() & 0xffffff) << 4;
     unsigned seq = ++cmd_seq ? cmd_seq : ++cmd_seq;
     int n = snprintf(b, sizeof b, "%u %s\n", seq, verb);
-    if (crc_write_file("/tmp/coda-rc.cmd", b, n, 0600)) return crc_error(s, req_id, E_INTERNAL, "cmd");
+    if (crc_cmdq_send(crc_path(q, sizeof q, CRC_CMDQ), b, (unsigned)n) &&
+        crc_write_file("/tmp/coda-rc.cmd", b, n, 0600))
+        return crc_error(s, req_id, E_INTERNAL, "cmd");
     pend.s = s;
     pend.req_id = req_id;
     pend.seq = seq;
     pend.at = crc_now_ms();
+    pend.taken = 0;
     snprintf(pend.verb, sizeof pend.verb, "%s", verb);
     return 0;
 }
 
+/* the shim's answers, a "seq code" line each, its last few (coda_rc_shim.c cr_ack): the pending command's, if there */
 static void ack_poll(void) {
     if (!pend.s) return;
-    char b[32];
+    char b[128];
     int n = read_file("/tmp/coda-rc.ack", b, sizeof b - 1);
-    if (n > 0) {
-        b[n] = 0;
-        char *sp = strchr(b, ' ');
-        if ((unsigned)strtoul(b, 0, 10) == pend.seq) {
-            unlink_at("/tmp/coda-rc.ack");
-            pend_answer(sp ? atoi(sp + 1) : 1);
-            return;
+    if (n > 0) b[n] = 0;
+    for (char *l = b; n > 0 && l < b + n; ++l) {
+        char *sp = strchr(l, ' ');
+        if ((unsigned)strtoul(l, 0, 10) == pend.seq) {
+            int code = sp ? atoi(sp + 1) : 1;
+            if (code != CRC_ACK_TAKEN) {
+                pend_answer(code);
+                return;
+            }
+            if (!pend.taken) { /* the newest answer: taken, the final one still to come */
+                pend.taken = 1;
+                pend.at = crc_now_ms();
+                crc_log("demo: %s taken", pend.verb);
+            }
+            break;
         }
+        if (!(l = strchr(l, '\n'))) break;
     }
-    if (crc_now_ms() - pend.at > ACK_MS) pend_answer(1);
+    if ((int32_t)(crc_now_ms() - pend_due()) > 0) pend_answer(1);
 }
 
 /* ---- covers the card lacks, asked of their card app (docs/internals.md#car-remote-covers) ---- */
@@ -781,6 +968,7 @@ int crc_app(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t 
     case T_RATE: np_read(); return rate(s, req_id, p, n);
     case T_PLAY_QUEUE_ITEM: np_read(); return queue_item(s, req_id, p, n);
     case T_GET_REMOTE: return get_remote(s, req_id);
+    case T_REGISTER_REMOTE: return register_remote(s, req_id, p, n);
     case T_BROWSE: case T_SEARCH: case T_GET_QUEUE: case T_GET_COVER: case T_PLAY: case T_START_RADIO:
         np_read();
         return lib_request(s, type, req_id, p, n, np.qgen, np.qpos);
@@ -791,6 +979,8 @@ int crc_app(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t 
 /* ---- sessions on TCP ---- */
 
 static void conn_close(conn *c) {
+    /* a key that came during Pair a Phone and went without pairing or Auth: held off a while */
+    if (c->named && c->pre_n == 32 && !c->s.iroh_ok && c->s.state != S_AUTHED) iroh_hold(c->s.iroh, crc_now_ms());
     if (pend.s == &c->s) pend.s = 0;
     cover_drop(&c->s);
     crc_close(&c->s);
@@ -799,12 +989,18 @@ static void conn_close(conn *c) {
     c->used = 0;
 }
 
-static void tcp_accept(int lfd) {
+static void tcp_accept(int lfd, int named) {
     int fd = accept(lfd, 0, 0);
     if (fd < 0) return;
-    conn *c = 0;
+    conn *c = 0, *old = 0;
     for (int i = 0; i < MAX_TCP && !c; ++i)
         if (!tcp[i].used) c = &tcp[i];
+    /* All taken: the oldest that has said no more than Hello makes room, so peers that connect and wait
+     * cannot keep a paired phone out */
+    for (int i = 0; i < MAX_TCP && !c; ++i)
+        if ((tcp[i].s.state == S_NEW || tcp[i].s.state == S_HELLO) && (!old || tcp[i].opened - old->opened >= 0x80000000u))
+            old = &tcp[i];
+    if (!c && old) conn_close(c = old);
     if (!c) { close(fd); return; }
     struct timeval tv = {2, 0};
     int one = 1;
@@ -813,31 +1009,60 @@ static void tcp_accept(int lfd) {
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
     c->fd = fd;
     c->used = 1;
-    c->opened = crc_now_ms();
+    c->named = named;
+    c->pre_n = 0;
+    c->opened = c->seen_at = crc_now_ms();
     crc_open(&c->s, c, TR_TCP);
+    c->s.iroh_via = named;
+    c->seen = c->s.state;
 }
 
 static void tcp_read(conn *c) {
-    uint8_t b[2048];
+    uint8_t b[2048], *p = b;
     ssize_t r = read(c->fd, b, sizeof b);
     if (r < 0 && (errno == EAGAIN || errno == EINTR)) return;
-    if (r <= 0 || crc_feed(&c->s, b, r) < 0) conn_close(c);
+    if (r > 0 && c->named && c->pre_n < 32) { /* q2-iroh's name for the phone, before its frames */
+        size_t k = (size_t)r < 32 - c->pre_n ? (size_t)r : 32 - c->pre_n;
+        memcpy(c->s.iroh + c->pre_n, b, k);
+        c->pre_n += (unsigned)k, p += k, r -= (ssize_t)k;
+        if (c->pre_n == 32) {
+            c->s.iroh_ok = iroh_known(c->s.iroh);
+            if (!c->s.iroh_ok && iroh_held(c->s.iroh, crc_now_ms())) {
+                c->pre_n = 0; /* refused, not held longer */
+                conn_close(c);
+                return;
+            }
+        }
+        if (!r) return;
+    }
+    if (r <= 0 || crc_feed(&c->s, p, (size_t)r) < 0) conn_close(c);
 }
 
-static int tcp_listen(void) {
+static int listen_errno; /* the last tcp_listen's failure */
+
+/* The port fd is bound to */
+static int bound_port(int fd) {
+    struct sockaddr_in a;
+    socklen_t n = sizeof a;
+    return getsockname(fd, (void *)&a, &n) ? -1 : htons(a.sin_port);
+}
+
+/* TCP on port (0: the kernel's pick): on every interface, or loopback alone (q2-iroh's named port, and the host
+ * tests) */
+static int tcp_listen(int at, int loopback) {
     int fd = socket(AF_INET, SOCK_STREAM, 0), one = 1;
     if (fd < 0) return -1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
     struct sockaddr_in a;
     memset(&a, 0, sizeof a);
     a.sin_family = AF_INET;
-    a.sin_port = htons(port);
+    a.sin_port = htons(at);
 #ifdef CODA_HOST
-    a.sin_addr.s_addr = htonl(0x7f000001);  /* the tests' daemon is never on the network */
-#else
-    a.sin_addr.s_addr = INADDR_ANY;
+    loopback = 1; /* the tests' daemon is never on the network */
 #endif
+    a.sin_addr.s_addr = loopback ? htonl(0x7f000001) : INADDR_ANY;
     if (bind(fd, (void *)&a, sizeof a) || listen(fd, 4)) {
+        listen_errno = errno;
         close(fd);
         return -1;
     }
@@ -853,8 +1078,9 @@ void crc_ble_connected(void) {
     if (ble.used) conn_close(&ble);
     ble.used = 1;
     ble.fd = -1;
-    ble.opened = crc_now_ms();
+    ble.opened = ble.seen_at = crc_now_ms();
     crc_open(&ble.s, &ble, TR_BLE);
+    ble.seen = ble.s.state;
 }
 
 void crc_ble_bytes(const uint8_t *p, size_t n) {
@@ -870,7 +1096,7 @@ void crc_ble_gone(void) {
 }
 
 /* Whether a phone's Bluetooth scan can find this Q2 now: the Pair a Phone page reads it (carremote_page.c
- * cr_howto_mode) to give the Bluetooth steps only then, the Wi-Fi ones otherwise. */
+ * cr_howto_mode) to say a phone nearby can find it by Bluetooth only then. */
 void crc_ble_advertising(int on) {
     if (on) crc_write_file("/tmp/coda-rc.ble", "1\n", 2, 0644);
     else unlink_at("/tmp/coda-rc.ble");
@@ -899,14 +1125,26 @@ static int position_wanted(void) {
  * files (renamed into /tmp by its shim: inotify's IN_MOVED_TO) end it sooner. Due: the second's tick, mDNS's next
  * look or announcement, a playing song's position for a phone that follows it, Now Playing's bytes held back,
  * a command's ACK_MS. */
-static int wait_ms(uint32_t now, uint32_t last_tick) {
-    uint32_t w = until(last_tick + TICK_MS, now), d;
+static int wait_ms(uint32_t now, uint32_t last_tick, int quiet) {
+    uint32_t w = until(last_tick + (quiet ? TICK_IDLE_MS : TICK_MS), now), d;
     if ((d = mdns_due(now)) < w) w = d;
     if (np.state == 1 && position_wanted() && (d = until(pos_pushed + 1000, now)) < w) w = d;
     if (np.bhave != np_sent.bhave && (d = until(buf_pushed + 500, now)) < w) w = d;
-    if (pend.s && (d = until(pend.at + ACK_MS + 1, now)) < w) w = d;
+    if (pend.s && (d = until(pend_due() + 1, now)) < w) w = d;
     if ((d = cover_due(now)) < w) w = d;
+    if (use_ble && (d = ble_due(now)) < w) w = d;
     return (int)w;
+}
+
+/* No phone connected and no pairing: nothing a file in /tmp or a second's tick could change goes anywhere. The loop
+ * then wakes every TICK_IDLE_MS, for a socket (a phone connecting, an mDNS query) or a signal, and leaves the /tmp
+ * watch unread: the shim's Now Playing, renamed in twice a second while a song plays, and q2guard's state every
+ * 5 s woke it about 130 times a minute for nobody (2026-11-22). A connection ends it at once. */
+static int quiet(void) {
+    if (ble.used || crc_pair_busy()) return 0;
+    for (int i = 0; i < MAX_TCP; ++i)
+        if (tcp[i].used) return 0;
+    return 1;
 }
 
 /* demo's shim renames each file into /tmp: a watch on it ends the loop's sleep. Without one (no inotify) the loop
@@ -918,10 +1156,24 @@ static int files_watch(void) {
     return fd;
 }
 
+/* The paired phones' folder: a pairing, a Forget or a rename rewrites the peers file, and the allow-list follows it
+ * (iroh_allow). Its own files (seen, iroh-peers) wake it too, rarely; the list is rewritten only when it changed. */
+static int peers_watch(void) {
+    char p[256];
+    mkdir(crc_path(p, sizeof p, "/mnt/data/coda-rc"), 0700);
+    int fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+    if (fd >= 0 && inotify_add_watch(fd, p, IN_MOVED_TO | IN_CLOSE_WRITE | IN_DELETE) < 0) close(fd), fd = -1;
+    return fd;
+}
+
 static void timeouts(conn *c) {
     if (!c->used) return;
-    uint32_t age = crc_now_ms() - c->opened;
-    if ((c->s.state == S_NEW && age > HELLO_MS) || (c->s.state != S_AUTHED && age > AUTH_MS)) {
+    uint32_t now = crc_now_ms(), age = now - c->opened;
+    if (c->s.state != c->seen) c->seen = c->s.state, c->seen_at = now;
+    /* Hello within HELLO_MS, Auth within AUTH_MS; and no state but the pairing (a person typing the code)
+     * held longer than HANDSHAKE_MS, which the phone's handshake takes well under a second of */
+    if ((c->s.state == S_NEW && age > HELLO_MS) || (c->s.state != S_AUTHED && age > AUTH_MS) ||
+        (c->s.state != S_AUTHED && c->s.state != S_PAIRING && now - c->seen_at > HANDSHAKE_MS)) {
         conn_close(c);
         if (c == &ble) ble_disconnect();
     }
@@ -1032,6 +1284,8 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--root") && i + 1 < argc) snprintf(root, sizeof root, "%s", argv[++i]);
         else if (!strcmp(argv[i], "--port") && i + 1 < argc) port = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--iroh-port") && i + 1 < argc) /* 0: none; any: the kernel's pick */
+            iroh_port = !strcmp(argv[i + 1], "any") ? -1 : atoi(argv[i + 1]), ++i;
         else if (!strcmp(argv[i], "--no-ble")) use_ble = 0;
         else if (!strcmp(argv[i], "--mdns-if") && i + 1 < argc) mdns_if = argv[++i];
         else if (!strcmp(argv[i], "--no-mdns")) mdns_if = 0;
@@ -1050,19 +1304,36 @@ int main(int argc, char **argv) {
     device_id();
     unlink_at("/tmp/coda-rc.pair");
     unlink_at("/tmp/coda-rc.ble"); /* a killed daemon's */
-    int lfd = tcp_listen();
-    crc_log("start: tcp %d %s", port, lfd >= 0 ? "listening" : "failed");
+    int lfd = tcp_listen(port, 0), ifd = iroh_port ? tcp_listen(iroh_port < 0 ? 0 : iroh_port, 1) : -1;
+    if (lfd < 0 || (iroh_port && ifd < 0)) {
+        /* a port taken: a daemon with no listener would only look alive to the shim, which starts it again
+         * CR_RESTART_MS later (coda_rc_shim.c) */
+        crc_log("start failed: tcp %d %s, q2-iroh's port %d %s (errno %d): not running", port,
+                lfd >= 0 ? "listening" : "refused", iroh_port, !iroh_port || ifd >= 0 ? "listening" : "refused", listen_errno);
+        if (lfd >= 0) close(lfd);
+        if (ifd >= 0) close(ifd);
+        unlink_at("/tmp/coda-rc.pid");
+        return 1;
+    }
+    port = bound_port(lfd); /* --port 0 and --iroh-port any: what the kernel gave, for mDNS and the tests */
+    if (ifd >= 0) iroh_port = bound_port(ifd);
+    crc_log("start: tcp %d listening, q2-iroh's port %d", port, iroh_port);
     if (use_ble) ble_start();
     if (mdns_if) mdns_start(mdns_if);
     for (int i = 0; i < MAX_TCP; ++i) tcp[i].fd = -1;
-    int wfd = files_watch();
+    int wfd = files_watch(), pfd = peers_watch();
+    iroh_allow();
     uint32_t last_tick = crc_now_ms() - TICK_MS;
     while (!quit) {
-        struct pollfd fds[MAX_TCP + 3 + BLE_FDS];
+        struct pollfd fds[MAX_TCP + 5 + BLE_FDS];
         int nf = 0, mfd = mdns_fd();
         if (lfd >= 0) fds[nf++] = (struct pollfd){lfd, POLLIN, 0};
+        if (ifd >= 0) fds[nf++] = (struct pollfd){ifd, POLLIN, 0};
+        if (pfd >= 0) fds[nf++] = (struct pollfd){pfd, POLLIN, 0};
         if (mfd >= 0) fds[nf++] = (struct pollfd){mfd, POLLIN, 0};
-        if (wfd >= 0) fds[nf++] = (struct pollfd){wfd, POLLIN, 0};
+        int still = quiet(), wat = still ? -1 : nf;
+        mdns_pace(still);
+        if (wfd >= 0 && !still) fds[nf++] = (struct pollfd){wfd, POLLIN, 0};
         int bat = nf, bn = use_ble ? ble_fds(fds + nf) : 0;
         nf += bn;
         int at[MAX_TCP];
@@ -1070,15 +1341,22 @@ int main(int argc, char **argv) {
             at[i] = -1;
             if (tcp[i].used) { at[i] = nf; fds[nf++] = (struct pollfd){tcp[i].fd, POLLIN, 0}; }
         }
-        int r = poll(fds, nf, wait_ms(crc_now_ms(), last_tick));
+        int r = poll(fds, nf, wait_ms(crc_now_ms(), last_tick, still));
         if (r < 0 && errno != EINTR) break;
         int k = 0;
-        if (lfd >= 0 && fds[k++].revents & POLLIN) tcp_accept(lfd);
+        if (lfd >= 0 && fds[k++].revents & POLLIN) tcp_accept(lfd, 0);
+        if (ifd >= 0 && fds[k++].revents & POLLIN) tcp_accept(ifd, 1);
+        if (pfd >= 0 && fds[k++].revents & POLLIN) { /* a pairing, a Forget or a rename: the allow-list again */
+            char ev[512];
+            while (read(pfd, ev, sizeof ev) > 0) {}
+            iroh_allow();
+        }
         if (mfd >= 0 && fds[k++].revents & POLLIN) mdns_handle();
-        if (wfd >= 0 && fds[k++].revents & POLLIN) { /* which file does not matter: each is read below */
+        if (wfd >= 0 && (still || fds[wat].revents & POLLIN)) { /* which file does not matter: each is read below */
             char ev[512];
             while (read(wfd, ev, sizeof ev) > 0) {}
         }
+        k += wfd >= 0 && !still;
         if (bn) ble_handle(fds + bat, bn);
         for (int i = 0; i < MAX_TCP; ++i)
             if (at[i] >= 0 && tcp[i].used && fds[at[i]].revents) tcp_read(&tcp[i]);
@@ -1088,13 +1366,15 @@ int main(int argc, char **argv) {
         online_poll();
         uint32_t now = crc_now_ms();
         mdns_poll(now);
-        if (now - last_tick >= TICK_MS) {
+        if (now - last_tick >= (still ? TICK_IDLE_MS : TICK_MS)) {
             last_tick = now;
             crc_tick();
-            peers_poll();
+            if (!still) peers_poll(); /* a forgotten phone's sessions closed: with none, nothing to read it for */
             for (int i = 0; i < MAX_TCP; ++i) timeouts(&tcp[i]);
             timeouts(&ble);
             if (use_ble) ble_tick(now);
+        } else if (use_ble && !ble_due(now)) {
+            ble_tick(now); /* the advertisement due between two ticks: a phone gone */
         }
     }
     crc_log("stop");
@@ -1104,6 +1384,8 @@ int main(int argc, char **argv) {
     if (use_ble) ble_stop();
     mdns_stop();
     if (wfd >= 0) close(wfd);
+    if (pfd >= 0) close(pfd);
+    if (ifd >= 0) close(ifd);
     unlink_at("/tmp/coda-rc.pair");
     unlink_at("/tmp/coda-rc.online");
     unlink_at("/tmp/coda-rc.pid");

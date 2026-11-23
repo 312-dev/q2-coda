@@ -89,10 +89,13 @@ class CardMachine(DepthMachine):
             u.reg_write(UC_MIPS_REG_V0,0);u.reg_write(UC_MIPS_REG_SP,0x7000f000);u.reg_write(UC_MIPS_REG_PC,0x1000000);return
         self.returns(ret,clobber=True)
 
-# Games (patch/games.c, iPod): the Library's Games row, always there, opens a chooser of Sudoku,
-# Vortex, Solitaire and Snake. A game's keys never reach stock's filter or the media keys; Return goes game -> chooser ->
-# Library. Vortex's frame timer and raw wheel run only while it plays: Play/Pause, the screen going
-# off and leaving each stop them, and closing frees the state.
+# Games (patch/games.c, iPod): Home's Games row, always there, opens a chooser of the games the build ships: Bricks
+# alone (the owner, 2026-11-22), games.c's Sudoku, Vortex, Solitaire and Snake left out of the payload by peq.h's
+# GAME_* until the games in progress are finished. Their checks below run again once peq.h turns them all back on.
+# A game's keys never reach stock's filter or the media keys; Return goes game -> chooser -> Library; closing frees
+# the state.
+OWN_GAMES=re.findall(r'^#define GAME_(\w+) (\d)',(ROOT/'patch/peq.h').read_text(),re.M)
+OWN=[n.capitalize() for n,on in OWN_GAMES if on=='1']; SHIPPED=['Games',*OWN,'Bricks']
 CONFIG['SHORTCUT']='6'; m=CardMachine({},{}); del CONFIG['SHORTCUT']
 G_SCREEN,G_PICKING,G_PAUSED,G_CELL,G_CUR,G_VX=36,44,56,76,157,164
 # labels(w): the texts of the hscroll_labels under w, in node order
@@ -110,15 +113,16 @@ assert m.call(address=payload_syms['home_shortcut_open'],args=(0,m.event,0,0),ga
 m.page=m.top; assert m.nodes[m.page]['name']=='games_page'
 m.close()
 sheet,chooser=games_open(); G=m.get(payload_syms['g'])
-assert labels(chooser)==['Games','Sudoku','Vortex','Solitaire','Snake','Bricks'] and not m.nodes[sheet]['visible']
+assert labels(chooser)==SHIPPED and not m.nodes[sheet]['visible']
 rows=m.nodes[m.find('scroll_view',chooser)]['children']
 # The wheel stops at both ends of the real chooser, however long the pause.
 w=m.find('scroll_view',chooser); m.paint(w,gap=0)
+LAST=len(SHIPPED)-2  # the chooser's last row
 for _ in range(6):
-    if m.selected(w)!=4: assert m.call(gap=1000)==11; m.paint(w,gap=0)
-assert m.selected(w)==4
-for gap in (100,300,1000): assert m.call(gap=gap)==11 and m.selected(w)==4; m.paint(w,gap=0)
-for _ in range(4): assert m.call(PREV,gap=1000)==11; m.paint(w,gap=0)
+    if m.selected(w)!=LAST: assert m.call(gap=1000)==11; m.paint(w,gap=0)
+assert m.selected(w)==LAST
+for gap in (100,300,1000): assert m.call(gap=gap)==11 and m.selected(w)==LAST; m.paint(w,gap=0)
+for _ in range(LAST): assert m.call(PREV,gap=1000)==11; m.paint(w,gap=0)
 assert m.selected(w)==0
 for gap in (100,300,1000): assert m.call(PREV,gap=gap)==11 and m.selected(w)==0; m.paint(w,gap=0)
 passed()
@@ -130,110 +134,113 @@ for a in (tramp,payload_syms['media_key']): m.u.hook_add(UC_HOOK_CODE,lambda u,a
 def key(k): r=m.call(k,count=2_000_000); assert r==11 and not stock,(k,stock); return r
 byte=lambda o: m.u.mem_read(G+o,1)[0]; word=lambda o: signed(m.get(G+o))
 frames=lambda: [t for t in m.timers.values() if t[1]==payload_syms['frame']]
-pick(0); assert m.nodes[sheet]['visible'] and not m.nodes[chooser]['visible'] and word(G_SCREEN)==1; paint()
-key(O['KEY_NEXT']); assert byte(G_CUR)==1
-key(O['KEY_PREV']); key(O['KEY_PREV']); assert byte(G_CUR)==80
-key(O['KEY_FWD_BTN']); assert byte(G_CUR)==8
-key(O['KEY_BACK_BTN']); assert byte(G_CUR)==80; passed()
-# Centre on a blank cell picks its digit with the wheel, Centre writes it and saves; Return cancels; a
-# clue takes no digit. Play/Pause then asks before a new game.
-cells=lambda: bytes(m.u.mem_read(G+G_CELL,81))
-blank=cells().index(0); clue=next(i for i,c in enumerate(cells()) if c&16)
-m.byte(G+G_CUR,clue); key(O['KEY_CENTER']); assert not word(G_PICKING)
-m.byte(G+G_CUR,blank); key(O['KEY_CENTER']); assert word(G_PICKING)
-for _ in range(3): key(O['KEY_NEXT'])
-paint(); key(O['KEY_CENTER']); assert cells()[blank]==3 and not word(G_PICKING)
-m.advance(2000); saved=bytes(m.files['/mnt/data/ringnav-sudoku']); assert len(saved)==92 and saved[4:85]==cells()
-key(O['KEY_CENTER']); key(O['KEY_NEXT']); key(O['KEY_RETURN']); assert cells()[blank]==3 and not word(G_PICKING) and word(G_SCREEN)==1
-before=cells(); key(O['KEY_PLAY']); assert cells()==before and word(52); paint()
-key(O['KEY_RETURN']); assert cells()==before and not word(52)
-key(O['KEY_RETURN']); m.advance(0); assert word(G_SCREEN)==0 and m.nodes[chooser]['visible'] and not m.nodes[sheet]['visible']
-assert m.key()==11; passed()
-# Vortex: the frame timer and the raw wheel while it plays; the wheel's travel turns the paddle.
-m.page=m.top; pick(1); assert word(G_SCREEN)==2 and len(frames())==1 and m.get(payload_syms['wheel_raw'])==1
-m.word(payload_syms['wheel_travel'],-50&0xffffffff); m.advance(34); assert word(G_VX+16)==0 and m.get(payload_syms['wheel_travel'])==0
-made=lambda *a: [c[0] for c in m.calls if c[0] in a]
-assert made('reset_poweroptions_timer') and made('widget_invalidate_force')
-# Idle, waiting to launch: no repaint and the screen's timeout runs; the ball in play repaints, still
-# leaving the screen to time out; a key the game ignores paints nothing.
-m.advance(500); assert not made('reset_poweroptions_timer','widget_invalidate_force')
-key(O['KEY_CENTER']); m.advance(500); assert word(G_VX)==1 and made('widget_invalidate_force') and not made('reset_poweroptions_timer'); paint()
-key(O['KEY_FWD_BTN']); assert not made('widget_invalidate_force')
-key(O['KEY_PLAY']); assert word(G_PAUSED)==1 and not frames() and m.get(payload_syms['wheel_raw'])==0
-x=word(G_VX+20),word(G_VX+24); m.advance(500); assert (word(G_VX+20),word(G_VX+24))==x; paint()
-key(O['KEY_PLAY']); assert word(G_PAUSED)==0 and len(frames())==1 and m.get(payload_syms['wheel_raw'])==1
-m.byte(syms['g_backlight_status'],0); m.advance(40); m.byte(syms['g_backlight_status'],1)
-assert word(G_PAUSED)==1 and not frames() and m.get(payload_syms['wheel_raw'])==0
-key(O['KEY_RETURN']); assert word(G_PAUSED)==2; key(O['KEY_NEXT']); paint(); key(O['KEY_CENTER']); m.advance(0)
-assert word(G_SCREEN)==0 and not frames() and m.get(payload_syms['wheel_raw'])==0
-assert m.key()==11; passed()  # Return in the chooser after Vortex goes back to the Library
-# Solitaire (piles 0 stock, 1 waste, 2-5 foundations, 6-12 columns; a card suit*13+rank, 64 up): Centre on
-# the stock draws and saves; the wheel walks the piles, Previous/Next jump between the rows; Centre picks a
-# run up and drops it where it fits, turning the card under it; Centre twice sends a card home; Return
-# drops the held run, then leaves.
-G_SOL=220; sol=lambda: bytes(m.u.mem_read(G+G_SOL,336)); n=lambda p: byte(G_SOL+316+p); cur=lambda: byte(G_SOL+329)
-def put(p,cards): m.u.mem_write(G+G_SOL+4+24*p,bytes(cards)); m.byte(G+G_SOL+316+p,len(cards))
-m.page=m.top; pick(2); assert word(G_SCREEN)==3 and cur()==0 and [n(p) for p in range(13)]==[24,0,0,0,0,0,1,2,3,4,5,6,7]; paint()
-key(O['KEY_CENTER']); m.advance(2000); assert (n(0),n(1))==(23,1) and bytes(m.files['/mnt/data/ringnav-solitaire'])==sol()
-key(O['KEY_NEXT']); assert cur()==1; key(O['KEY_FWD_BTN']); assert cur()==7; key(O['KEY_BACK_BTN']); assert cur()==1
-key(O['KEY_PREV']); key(O['KEY_PREV']); assert cur()==12; key(O['KEY_BACK_BTN']); assert cur()==5; passed()
-put(6,[64|13+11]); put(7,[3,64|10]); m.byte(G+G_SOL+329,7)  # Q of hearts; a face-down 4 under the J of spades
-key(O['KEY_CENTER']); assert word(G_PICKING) and word(48)==7; paint()
-put(1,[]); key(O['KEY_FWD_BTN']); key(O['KEY_CENTER']); assert word(G_PICKING) and word(48)==7  # not onto the waste, empty: still held
-key(O['KEY_FWD_BTN']); key(O['KEY_PREV']); key(O['KEY_CENTER']); assert not word(G_PICKING); m.advance(2000)
-assert (n(6),n(7),byte(G_SOL+4+24*6+1),byte(G_SOL+4+24*7))==(2,1,64|10,64|3) and bytes(m.files['/mnt/data/ringnav-solitaire'])==sol()
-put(1,[64|26]); m.byte(G+G_SOL+329,1); key(O['KEY_CENTER']); key(O['KEY_CENTER'])  # the Ace of diamonds, home
-assert not word(G_PICKING) and n(1)==0 and n(2)==1 and byte(G_SOL+4+48)==64|26
-m.byte(G+G_SOL+329,6); key(O['KEY_CENTER']); key(O['KEY_CENTER']); assert not word(G_PICKING) and n(6)==2  # nothing home: put back
-key(O['KEY_CENTER']); key(O['KEY_RETURN']); assert not word(G_PICKING) and word(G_SCREEN)==3
-before_sol=sol(); key(O['KEY_PLAY']); assert word(52); paint(); key(O['KEY_RETURN']); assert not word(52) and sol()==before_sol
-key(O['KEY_RETURN']); m.advance(0); assert word(G_SCREEN)==0 and m.nodes[chooser]['visible']; passed()
-# Snake (the body a ring of cells y*20+x, head last; dir 0 up 1 right 2 down 3 left): its frame timer steps it
-# with side keys only; wheel ticks are consumed without changing the game. One turn waits for the next step. Play/Pause
-# pauses, Return's menu quits; a wall ends it, a record saves Best and says so, Centre plays again.
-G_SN=G_SOL+336+52+12; sn=lambda o: m.get(G+G_SN+o)&0xffff; body=lambda: [sn(2*((sn(800)+i)%400)) for i in range(sn(802))]
-def skey(k): r=m.call(k,gap=0,count=2_000_000); assert r==11 and not stock,(k,stock)  # no time between keys
-sdir=lambda: byte(G_SN+806); sstate=lambda: byte(G_SN+808)
-m.page=m.top; pick(3); assert word(G_SCREEN)==4 and len(frames())==1 and m.get(payload_syms['wheel_raw'])==0
-assert body()==[207,208,209] and sdir()==1 and sstate()==1; paint()
-snake_before=bytes(m.u.mem_read(G+G_SN,820))
-skey(O['KEY_NEXT']); skey(O['KEY_PREV']); assert bytes(m.u.mem_read(G+G_SN,820))==snake_before
-skey(O['KEY_FWD_BTN']); skey(O['KEY_FWD_BTN']); assert sdir()==2
-m.advance(170); assert body()[-1]==229 and sdir()==3 and made('widget_invalidate_force')  # the second turn, waiting
-skey(O['KEY_BACK_BTN']); assert sdir()==3  # waits for the next step
-skey(O['KEY_PLAY']); assert word(G_PAUSED)==1 and not frames(); was=body(); m.advance(500); assert body()==was; paint()
-skey(O['KEY_NEXT']); assert sdir()==3  # no turning while paused
-skey(O['KEY_PLAY']); assert word(G_PAUSED)==0 and len(frames())==1
-m.word(G+G_SN+812,5); m.advance(170*12); assert sstate()==2 and not frames() and body()[-1]==388  # left, then down to the wall
-best=bytes(m.files['/mnt/data/ringnav-snake']); assert len(best)==12 and best[:8]==b'SNK1'+struct.pack('<I',5)
-paint(); skey(O['KEY_CENTER']); assert sstate()==1 and body()==[207,208,209] and len(frames())==1
-skey(O['KEY_BACK_BTN']); assert sdir()==0  # side Previous turns left, without the wheel
-m.advance(170); assert body()[-1]==189
-skey(O['KEY_FWD_BTN']); assert sdir()==1  # side Next turns right
-skey(O['KEY_PLAY']); skey(O['KEY_BACK_BTN']); skey(O['KEY_FWD_BTN']); assert sdir()==1
-skey(O['KEY_PLAY'])
-skey(O['KEY_RETURN']); assert word(G_PAUSED)==2 and word(60)==0
-skey(O['KEY_NEXT']); assert word(60)==1  # the wheel picks in the menu
-skey(O['KEY_PREV']); assert word(60)==0
-skey(O['KEY_BACK_BTN']); assert word(60)==1
-skey(O['KEY_FWD_BTN']); assert word(60)==0
-skey(O['KEY_FWD_BTN']); paint(); skey(O['KEY_CENTER']); m.advance(0)
-assert word(G_SCREEN)==0 and not frames(); passed()
-# Closing frees the state, also mid-game; opening again starts clean and resumes the Sudoku.
-m.close(); assert m.get(payload_syms['g'])==0 and not frames()
-sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
-pick(0); assert cells()==before
-key(O['KEY_RETURN']); m.advance(0); pick(2); assert sol()[:-4]==before_sol[:-4]  # and the cursor, kept on leaving
-# Moves save once, SAVE_MS after the first unsaved one, not per move; leaving with nothing new writes nothing.
-saves=[]; m.u.hook_add(UC_HOOK_CODE,lambda u,a,n,_: saves.append(a),begin=syms['rename@GLIBC_2.0'],end=syms['rename@GLIBC_2.0'])
-m.byte(G+G_SOL+329,0)
-for _ in range(10): m.call(O['KEY_CENTER'],gap=100,count=2_000_000)
-assert not saves; m.advance(2000); assert len(saves)==1 and bytes(m.files['/mnt/data/ringnav-solitaire'])==sol()
-key(O['KEY_RETURN']); m.advance(0); pick(0); key(O['KEY_RETURN']); m.advance(0); assert len(saves)==1; pick(2)
-key(O['KEY_RETURN']); m.advance(0); pick(1); assert len(frames())==1
-m.close(); assert m.get(payload_syms['g'])==0 and not frames() and m.get(payload_syms['wheel_raw'])==0; passed()
+if len(OWN)==4:  # Sudoku, Vortex, Solitaire and Snake, each built in only while it ships
+    pick(0); assert m.nodes[sheet]['visible'] and not m.nodes[chooser]['visible'] and word(G_SCREEN)==1; paint()
+    key(O['KEY_NEXT']); assert byte(G_CUR)==1
+    key(O['KEY_PREV']); key(O['KEY_PREV']); assert byte(G_CUR)==80
+    key(O['KEY_FWD_BTN']); assert byte(G_CUR)==8
+    key(O['KEY_BACK_BTN']); assert byte(G_CUR)==80; passed()
+    # Centre on a blank cell picks its digit with the wheel, Centre writes it and saves; Return cancels; a
+    # clue takes no digit. Play/Pause then asks before a new game.
+    cells=lambda: bytes(m.u.mem_read(G+G_CELL,81))
+    blank=cells().index(0); clue=next(i for i,c in enumerate(cells()) if c&16)
+    m.byte(G+G_CUR,clue); key(O['KEY_CENTER']); assert not word(G_PICKING)
+    m.byte(G+G_CUR,blank); key(O['KEY_CENTER']); assert word(G_PICKING)
+    for _ in range(3): key(O['KEY_NEXT'])
+    paint(); key(O['KEY_CENTER']); assert cells()[blank]==3 and not word(G_PICKING)
+    m.advance(2000); saved=bytes(m.files['/mnt/data/ringnav-sudoku']); assert len(saved)==92 and saved[4:85]==cells()
+    key(O['KEY_CENTER']); key(O['KEY_NEXT']); key(O['KEY_RETURN']); assert cells()[blank]==3 and not word(G_PICKING) and word(G_SCREEN)==1
+    before=cells(); key(O['KEY_PLAY']); assert cells()==before and word(52); paint()
+    key(O['KEY_RETURN']); assert cells()==before and not word(52)
+    key(O['KEY_RETURN']); m.advance(0); assert word(G_SCREEN)==0 and m.nodes[chooser]['visible'] and not m.nodes[sheet]['visible']
+    assert m.key()==11; passed()
+    # Vortex: the frame timer and the raw wheel while it plays; the wheel's travel turns the paddle.
+    m.page=m.top; pick(1); assert word(G_SCREEN)==2 and len(frames())==1 and m.get(payload_syms['wheel_raw'])==1
+    m.word(payload_syms['wheel_travel'],-50&0xffffffff); m.advance(34); assert word(G_VX+16)==0 and m.get(payload_syms['wheel_travel'])==0
+    made=lambda *a: [c[0] for c in m.calls if c[0] in a]
+    assert made('reset_poweroptions_timer') and made('widget_invalidate_force')
+    # Idle, waiting to launch: no repaint and the screen's timeout runs; the ball in play repaints, still
+    # leaving the screen to time out; a key the game ignores paints nothing.
+    m.advance(500); assert not made('reset_poweroptions_timer','widget_invalidate_force')
+    key(O['KEY_CENTER']); m.advance(500); assert word(G_VX)==1 and made('widget_invalidate_force') and not made('reset_poweroptions_timer'); paint()
+    key(O['KEY_FWD_BTN']); assert not made('widget_invalidate_force')
+    key(O['KEY_PLAY']); assert word(G_PAUSED)==1 and not frames() and m.get(payload_syms['wheel_raw'])==0
+    x=word(G_VX+20),word(G_VX+24); m.advance(500); assert (word(G_VX+20),word(G_VX+24))==x; paint()
+    key(O['KEY_PLAY']); assert word(G_PAUSED)==0 and len(frames())==1 and m.get(payload_syms['wheel_raw'])==1
+    m.byte(syms['g_backlight_status'],0); m.advance(40); m.byte(syms['g_backlight_status'],1)
+    assert word(G_PAUSED)==1 and not frames() and m.get(payload_syms['wheel_raw'])==0
+    key(O['KEY_RETURN']); assert word(G_PAUSED)==2; key(O['KEY_NEXT']); paint(); key(O['KEY_CENTER']); m.advance(0)
+    assert word(G_SCREEN)==0 and not frames() and m.get(payload_syms['wheel_raw'])==0
+    assert m.key()==11; passed()  # Return in the chooser after Vortex goes back to the Library
+    # Solitaire (piles 0 stock, 1 waste, 2-5 foundations, 6-12 columns; a card suit*13+rank, 64 up): Centre on
+    # the stock draws and saves; the wheel walks the piles, Previous/Next jump between the rows; Centre picks a
+    # run up and drops it where it fits, turning the card under it; Centre twice sends a card home; Return
+    # drops the held run, then leaves.
+    G_SOL=220; sol=lambda: bytes(m.u.mem_read(G+G_SOL,336)); n=lambda p: byte(G_SOL+316+p); cur=lambda: byte(G_SOL+329)
+    def put(p,cards): m.u.mem_write(G+G_SOL+4+24*p,bytes(cards)); m.byte(G+G_SOL+316+p,len(cards))
+    m.page=m.top; pick(2); assert word(G_SCREEN)==3 and cur()==0 and [n(p) for p in range(13)]==[24,0,0,0,0,0,1,2,3,4,5,6,7]; paint()
+    key(O['KEY_CENTER']); m.advance(2000); assert (n(0),n(1))==(23,1) and bytes(m.files['/mnt/data/ringnav-solitaire'])==sol()
+    key(O['KEY_NEXT']); assert cur()==1; key(O['KEY_FWD_BTN']); assert cur()==7; key(O['KEY_BACK_BTN']); assert cur()==1
+    key(O['KEY_PREV']); key(O['KEY_PREV']); assert cur()==12; key(O['KEY_BACK_BTN']); assert cur()==5; passed()
+    put(6,[64|13+11]); put(7,[3,64|10]); m.byte(G+G_SOL+329,7)  # Q of hearts; a face-down 4 under the J of spades
+    key(O['KEY_CENTER']); assert word(G_PICKING) and word(48)==7; paint()
+    put(1,[]); key(O['KEY_FWD_BTN']); key(O['KEY_CENTER']); assert word(G_PICKING) and word(48)==7  # not onto the waste, empty: still held
+    key(O['KEY_FWD_BTN']); key(O['KEY_PREV']); key(O['KEY_CENTER']); assert not word(G_PICKING); m.advance(2000)
+    assert (n(6),n(7),byte(G_SOL+4+24*6+1),byte(G_SOL+4+24*7))==(2,1,64|10,64|3) and bytes(m.files['/mnt/data/ringnav-solitaire'])==sol()
+    put(1,[64|26]); m.byte(G+G_SOL+329,1); key(O['KEY_CENTER']); key(O['KEY_CENTER'])  # the Ace of diamonds, home
+    assert not word(G_PICKING) and n(1)==0 and n(2)==1 and byte(G_SOL+4+48)==64|26
+    m.byte(G+G_SOL+329,6); key(O['KEY_CENTER']); key(O['KEY_CENTER']); assert not word(G_PICKING) and n(6)==2  # nothing home: put back
+    key(O['KEY_CENTER']); key(O['KEY_RETURN']); assert not word(G_PICKING) and word(G_SCREEN)==3
+    before_sol=sol(); key(O['KEY_PLAY']); assert word(52); paint(); key(O['KEY_RETURN']); assert not word(52) and sol()==before_sol
+    key(O['KEY_RETURN']); m.advance(0); assert word(G_SCREEN)==0 and m.nodes[chooser]['visible']; passed()
+    # Snake (the body a ring of cells y*20+x, head last; dir 0 up 1 right 2 down 3 left): its frame timer steps it
+    # with side keys only; wheel ticks are consumed without changing the game. One turn waits for the next step. Play/Pause
+    # pauses, Return's menu quits; a wall ends it, a record saves Best and says so, Centre plays again.
+    G_SN=G_SOL+336+52+12; sn=lambda o: m.get(G+G_SN+o)&0xffff; body=lambda: [sn(2*((sn(800)+i)%400)) for i in range(sn(802))]
+    def skey(k): r=m.call(k,gap=0,count=2_000_000); assert r==11 and not stock,(k,stock)  # no time between keys
+    sdir=lambda: byte(G_SN+806); sstate=lambda: byte(G_SN+808)
+    m.page=m.top; pick(3); assert word(G_SCREEN)==4 and len(frames())==1 and m.get(payload_syms['wheel_raw'])==0
+    assert body()==[207,208,209] and sdir()==1 and sstate()==1; paint()
+    snake_before=bytes(m.u.mem_read(G+G_SN,820))
+    skey(O['KEY_NEXT']); skey(O['KEY_PREV']); assert bytes(m.u.mem_read(G+G_SN,820))==snake_before
+    skey(O['KEY_FWD_BTN']); skey(O['KEY_FWD_BTN']); assert sdir()==2
+    m.advance(170); assert body()[-1]==229 and sdir()==3 and made('widget_invalidate_force')  # the second turn, waiting
+    skey(O['KEY_BACK_BTN']); assert sdir()==3  # waits for the next step
+    skey(O['KEY_PLAY']); assert word(G_PAUSED)==1 and not frames(); was=body(); m.advance(500); assert body()==was; paint()
+    skey(O['KEY_NEXT']); assert sdir()==3  # no turning while paused
+    skey(O['KEY_PLAY']); assert word(G_PAUSED)==0 and len(frames())==1
+    m.word(G+G_SN+812,5); m.advance(170*12); assert sstate()==2 and not frames() and body()[-1]==388  # left, then down to the wall
+    best=bytes(m.files['/mnt/data/ringnav-snake']); assert len(best)==12 and best[:8]==b'SNK1'+struct.pack('<I',5)
+    paint(); skey(O['KEY_CENTER']); assert sstate()==1 and body()==[207,208,209] and len(frames())==1
+    skey(O['KEY_BACK_BTN']); assert sdir()==0  # side Previous turns left, without the wheel
+    m.advance(170); assert body()[-1]==189
+    skey(O['KEY_FWD_BTN']); assert sdir()==1  # side Next turns right
+    skey(O['KEY_PLAY']); skey(O['KEY_BACK_BTN']); skey(O['KEY_FWD_BTN']); assert sdir()==1
+    skey(O['KEY_PLAY'])
+    skey(O['KEY_RETURN']); assert word(G_PAUSED)==2 and word(60)==0
+    skey(O['KEY_NEXT']); assert word(60)==1  # the wheel picks in the menu
+    skey(O['KEY_PREV']); assert word(60)==0
+    skey(O['KEY_BACK_BTN']); assert word(60)==1
+    skey(O['KEY_FWD_BTN']); assert word(60)==0
+    skey(O['KEY_FWD_BTN']); paint(); skey(O['KEY_CENTER']); m.advance(0)
+    assert word(G_SCREEN)==0 and not frames(); passed()
+    # Closing frees the state, also mid-game; opening again starts clean and resumes the Sudoku.
+    m.close(); assert m.get(payload_syms['g'])==0 and not frames()
+    sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
+    pick(0); assert cells()==before
+    key(O['KEY_RETURN']); m.advance(0); pick(2); assert sol()[:-4]==before_sol[:-4]  # and the cursor, kept on leaving
+    # Moves save once, SAVE_MS after the first unsaved one, not per move; leaving with nothing new writes nothing.
+    saves=[]; m.u.hook_add(UC_HOOK_CODE,lambda u,a,n,_: saves.append(a),begin=syms['rename@GLIBC_2.0'],end=syms['rename@GLIBC_2.0'])
+    m.byte(G+G_SOL+329,0)
+    for _ in range(10): m.call(O['KEY_CENTER'],gap=100,count=2_000_000)
+    assert not saves; m.advance(2000); assert len(saves)==1 and bytes(m.files['/mnt/data/ringnav-solitaire'])==sol()
+    key(O['KEY_RETURN']); m.advance(0); pick(0); key(O['KEY_RETURN']); m.advance(0); assert len(saves)==1; pick(2)
+    key(O['KEY_RETURN']); m.advance(0); pick(1); assert len(frames())==1
+    m.close(); assert m.get(payload_syms['g'])==0 and not frames() and m.get(payload_syms['wheel_raw'])==0; passed()
+else:
+    m.close(); assert m.get(payload_syms['g'])==0 and not frames(); passed()
 
-# The game engine (patch/engine.c, docs/games-engine.md): its demo scene, which a --dev build lists after Games' own four
+# The game engine (patch/engine.c, docs/games-engine.md): its demo scene, which a --dev build lists after Games' own (none shipped now)
 # and the engine's games
 # with [Q2POD] ENGINEDEMO=1. A frame is one step and the rects it changed; the demo draws into the screen's own buffer,
 # only inside the rect being painted. What a frame costs is counted in the payload's instructions and bounded, a little
@@ -241,13 +248,13 @@ m.close(); assert m.get(payload_syms['g'])==0 and not frames() and m.get(payload
 # 2,000,000 (docs/games-engine.md#budgets).
 CONFIG['ENGINEDEMO']='1'; m=CardMachine({},{}); del CONFIG['ENGINEDEMO']
 sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
-if not manifest.get('dev'): assert labels(chooser)==['Games','Sudoku','Vortex','Solitaire','Snake','Bricks']; m.close()
+if not manifest.get('dev'): assert labels(chooser)==SHIPPED; m.close()
 else:
-    assert labels(chooser)==['Games','Sudoku','Vortex','Solitaire','Snake','Bricks','Engine Demo']
+    assert labels(chooser)==[*SHIPPED,'Engine Demo']
     eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
     O_ENG_RECT,O_ENG_STEPS=80,208  # struct eng's rect and steps (patch/engine.c), on MIPS
     ENG_STEP_BOUND,ENG_FRAME_BOUND,ENG_WHOLE_BOUND=600,70_000,780_000  # measured: 499, 61,511 and 703,036
-    pick(5); EN=m.get(payload_syms['en']); assert word(G_SCREEN)==6 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1
+    pick(len(SHIPPED)-1); EN=m.get(payload_syms['en']); assert word(G_SCREEN)==6 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1
     FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
     for o,v in (('LCD_W',375),('LCD_H',320),('LCD_LINE_LENGTH',1500),('LCD_FORMAT',O['LCD_BGRA8888']),('LCD_OFFLINE_FB',FB)): m.word(m.lcd+O[o],v)
     n=[0]; counter=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)
@@ -298,7 +305,10 @@ O_ENG_RECT,O_ENG_STATE=80,216  # struct eng's rect and the game's state after it
 BR_X,BR_Y,BR_SPD,BR_ANG,BR_PAD,BR_TOP,BR_MODE,BR_T,BR_LEVEL,BR_LEFT,BR_SCORE,BR_CELL=0,4,8,12,16,24,32,36,40,52,68,76  # struct bricks
 ENG_RECTS=int(re.search(r'^#define ENG_RECTS (\d+)',(ROOT/'patch/engine.h').read_text(),re.M)[1])  # a frame's rects at most (engine.c eng_dirty)
 BR_STEP_BOUND,BR_FRAME_BOUND,BR_KEY_BOUND,BR_FADE_BOUND,BR_WHOLE_BOUND=2_500,250_000,200_000,270_000,1_450_000  # measured on OLED's 262 px sheet: 2,157, 216,412 (a frame's play can break a brick, move the paddle and score at once), 174,268, 233,143 and 1,177,926
-pick(4); EN=m.get(payload_syms['en']); BR=EN+O_ENG_STATE
+# Bricks seeds its layouts from the shared RNG (playback.c rand_below), which whatever ran before draws from: set
+# to what it held here when the bounds were measured (Games' own four ran first then), so the layouts are those.
+m.word(payload_syms['rng'],0x9c3d619b)
+pick(len(OWN)); EN=m.get(payload_syms['en']); BR=EN+O_ENG_STATE
 assert word(G_SCREEN)==5 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1 and m.get(BR+BR_MODE)==0
 FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
 for o,v in (('LCD_W',375),('LCD_H',320),('LCD_LINE_LENGTH',1500),('LCD_FORMAT',O['LCD_BGRA8888']),('LCD_OFFLINE_FB',FB)): m.word(m.lcd+O[o],v)

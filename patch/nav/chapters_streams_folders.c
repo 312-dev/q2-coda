@@ -333,7 +333,8 @@ int ringnav_usbmode(void *a, void *b, void *c, void *d) {
 }
 
 /* mclStartPlayer, every local track's start: a playing librespot or radio station lets the DAC's
- * PCM go first. A track too long for RAM fails as stock's own checks do, with -1; so, silently,
+ * PCM go first, a hold on the Library's place (now_source.c now_hold) ends, and where the song
+ * starts is noted for Now Playing until it is heard (now_source.c now_starting). A track too long for RAM fails as stock's own checks do, with -1; so, silently,
  * does any start while a card game has the sound (addon.c): a jack or USB DAC change and a
  * Bluetooth drop come here through player_save_start, and the game keeps its PCM; and so does
  * player_start's replay of the queue it had after a press that loaded nothing (a server row,
@@ -345,6 +346,8 @@ int ringnav_start_player(void) {
     headset_manual();
     spot_yield();
     radio_stop();
+    now_drop();     /* the player's own place from now on, not a hold's (now_source.c) */
+    now_starting(); /* where it starts, read until it is heard (now_source.c) */
     playback_track_speed();
     return stock_start_player_trampoline();
 }

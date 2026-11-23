@@ -19,7 +19,6 @@ APPS_MAX = 8
 REPLY_MAX = 64 << 10
 ADDON_ROWS, ADDON_PAGES, ADDON_DEPTH = 50, 10, 6
 M3U_MAX = 256 << 10
-QR_HEX = 640
 LIB_MAX = 32 << 10
 LIB_DIR = '/mnt/mmc/_explaylist_data/'
 SCOPE_MAX = 131072
@@ -87,11 +86,22 @@ class Pg(C.Structure):
                 ('hold', C.c_byte)]
 
 
+QR_MAX = 177
+QR_HEX = (QR_MAX + 3) // 4 * QR_MAX + 1
+
+
 class Qp(C.Structure):
+    """addon.c's qr_page, the QR page's state, on the heap while the page is open (qp)."""
     _fields_ = [('page', C.c_void_p), ('view', C.c_void_p), *((n, C.c_uint) for n in ('timer', 'leave', 'done', 'seen')),
                 ('state', C.c_void_p), ('marker', C.c_char * 48), ('name', C.c_char * 32), ('size', C.c_int), ('code', C.c_int),
-                ('hex', C.c_void_p), ('step', C.c_char * 8), ('title', C.c_char * 64), ('line', C.c_char * 96),
-                ('addr', C.c_char * 64), ('pin', C.c_char * 16), ('note', C.c_char * 128)]
+                ('step', C.c_char * 8), ('title', C.c_char * 64), ('line', C.c_char * 96),
+                ('addr', C.c_char * 64), ('pin', C.c_char * 16), ('note', C.c_char * 128), ('hex', C.c_char * QR_HEX)]
+
+
+def qp_of(fw):
+    """The QR page's state, None while no page is open."""
+    at = fw.var('addon__qp', C.c_void_p).value
+    return Qp.from_address(at) if at else None
 
 
 class Taken(C.Structure):
@@ -237,6 +247,24 @@ def valid_id(fw, s):
 ])
 def test_an_id_goes_into_shell_commands(fw, s, ok):
     assert valid_id(fw, s) == ok
+
+
+def test_hidden_folders_that_are_no_apps_take_no_app_slot(fw):
+    """A song's path names its hidden card folder (/mnt/mmc/.tidal, the user's own), which the radio, lyrics and
+    resume lookups ask about: such a folder is no app and takes none of the APPS_MAX slots, so an app installed
+    after nine of them were asked about is still found by the next scan and listed in Streaming."""
+    world = card(fw, foo=b'name=Foo\n')
+    scan(fw)
+    missing = fw.fn('addon_radio_missing', C.c_char_p, C.c_char_p)
+    for i in range(9):
+        assert missing(b'/mnt/mmc/.h%d/song.flac' % i) is None
+    assert ap(fw).n == 1
+    world.files[b'/mnt/mmc/.late/q2app'] = b'name=Late\n'
+    world.files[b'/mnt/mmc/.late/q2-late'] = b'ELF'
+    world.dirs[b'/mnt/mmc'].append(b'.late')
+    scan(fw)
+    present = [ap(fw).a[i].id for i in range(ap(fw).n) if ap(fw).a[i].present]
+    assert present == [b'foo', b'late']
 
 
 def test_every_byte_an_id_may_hold(fw):
@@ -1303,6 +1331,52 @@ def test_a_card_apps_song_not_yet_played_takes_its_files_tags(fw, low, case):
         assert reads == []  # tagged already (an album), nothing there to read yet, or the user's own file
 
 
+def test_under_shuffle_next_on_the_last_song_queued_plays_the_shuffles_next(fw, mcl, songs):
+    """The seam test (fix/seam-tests, 2026-11-22): Shuffle over a playlist session, the song playing the last one
+    queued (pos + 1 == n) while songs of the pass are still unplayed. Next is the shuffle's (stock's change in
+    advanced play's mode 3, as Up Next lists it), not the wait for the playlist's next song in list order."""
+    D = b'/mnt/mmc/.foo/B/4.flac'
+    s = playlist(fw, mcl, songs, A, B, C3, D)
+    s.land(A, B, C3)
+    s.play(b'1 ' + PLAYLIST + b'\n')
+    for _ in range(4):
+        s.step()
+    assert s.queued() == [A, B, C3]
+    mcl.pos = 2
+    assert fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(0, 1)  # Shuffle Songs
+    changes = []
+    fw.mock('stock_change_trampoline', lambda nxt, *_: changes.append(nxt) or 0)
+    fw.fn('ringnav_change', C.c_int, C.c_int)(1)
+    assert changes == [1] and shown(fw)[0] is None  # no wait shown for D
+
+
+def test_under_shuffle_a_song_played_after_its_wait_counts_as_played(fw, mcl, songs):
+    """The pass played out (the song playing the one queued), so Next waits for the playlist's next song, and once it
+    lands and plays (stream_poll's player_start_queue, through ringnav_start_queue) it is played in the shuffle's
+    pass: Up Next no longer lists it (the seam test: s5 played this way and came round again in the same pass)."""
+    s = playlist(fw, mcl, songs, A, B)
+    s.land(A)
+    s.play(b'1 ' + PLAYLIST + b'\n')
+    for _ in range(3):
+        s.step()
+    assert s.queued() == [A]
+    assert fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(0, 1)  # Shuffle Songs
+    fw.mock('stock_change_trampoline', lambda *_: 0)
+    fw.fn('ringnav_change', C.c_int, C.c_int)(1)
+    assert shown(fw)[0]  # nothing else this pass: it waits for B
+    s.fire()
+    start = fw.fn('ringnav_start_queue', C.c_int, C.c_int)
+    fw.mock('stock_start_queue_trampoline', lambda at, *_: setattr(mcl, 'pos', at) or 0)
+    fw.mock('player_start_queue', lambda at, *_: start(at))
+    s.land(B)
+    for _ in range(3):
+        s.step()
+    assert s.queued() == [A, B] and mcl.pos == 1
+    up = (C.c_uint * 8)()
+    n = fw.fn('playback_upcoming', C.c_uint, C.c_void_p, C.c_uint)(up, 8)
+    assert 1 not in list(up[:n])
+
+
 def test_a_next_waiting_for_a_song_gives_way_to_another_choice(fw, mcl, songs):
     s = playlist(fw, mcl, songs, A, B)
     s.land(A)
@@ -1633,7 +1707,7 @@ def test_a_restart_waits_for_the_loop_to_go(fw):
     del world.files[b'/tmp/q2-foo']
     world.ms = 3000
     poll(C.pointer(a))
-    assert a.restart == 0 and a.launched == 1 and world.of('system') == [(b'run',)]
+    assert a.restart == 0 and a.launched == 1 and world.of('system') == [(b'run &',)]
 
 
 def test_a_restart_gives_up_on_the_old_loop(fw):
@@ -1703,6 +1777,26 @@ def test_an_app_asking_to_hold_keeps_standby_and_power_off_away(fw):
     assert a.hold == 0 and len(fw.calls('reset_poweroptions_timer')) == 1
 
 
+QR40 = b'f' * ((177 + 3) // 4 * 177)  # a version-40 code's rows as the QR page reads them (QR_HEX less its NUL)
+
+
+def test_keys_after_a_version_40_code_still_read(fw):
+    """An app signing in writes its code's rows as qr= (7,965 bytes of hex at version 40, which the QR page draws);
+    poll_one read the file's first 1,534 bytes only, so a hold= after it read as 0 and the Q2 could sleep under the
+    sign-in, and a sync= after it read as none. Lines that do not fit are left out, not the rest of the file."""
+    world, a = running(fw, b'addr=192.168.1.2:8080\nqrsize=177\nqr=' + QR40 + b'\nhold=1\nsync=down 5 10\n')
+    addon_poll(fw, world)
+    assert a.hold == 1 and [c[1][:3] for c in fw.calls('reset_poweroptions_timer')] == [(1, 1, 0)]
+    assert fw.fn('addon_sync', C.c_int, C.c_void_p)(None) == 2
+
+
+def test_a_state_file_past_its_bound_is_read_no_further(fw):
+    """The read is bounded: a key past STATE_SCAN bytes of lines too long to keep is not looked for."""
+    world, a = running(fw, (b'qr=' + QR40 + b'\n') * 3 + b'hold=1\n')
+    addon_poll(fw, world)
+    assert a.hold == 0
+
+
 @pytest.mark.parametrize('job, result, kept', [(JOB_INSTALL, SH_NET, 1), (JOB_INSTALL, SH_CANCELLED, 1), (JOB_INSTALL, SH_OK, 0), (JOB_REMOVE, SH_OK, 0), (JOB_REMOVE, SH_CARD, 1)])
 def test_the_app_store_forgets_a_running_app_only_once_its_job_replaced_it(fw, job, result, kept):
     # an update that fails or is cancelled leaves the app running: still tracked, its hold still honoured
@@ -1754,7 +1848,7 @@ def test_launch_waits_for_the_apps_page(fw):
     a = ap(fw).a[0]
     a.id, a.run = b'foo', b'run'
     fw.fn('addon__launch', None, C.POINTER(App))(C.pointer(a))
-    assert a.launched == 1 and world.of('system') == [(b'run',)] and a.launch_at == 1000
+    assert a.launched == 1 and world.of('system') == [(b'run &',)] and a.launch_at == 1000
 
 
 def test_stop_all_asks_each_running_app(fw):
@@ -2154,10 +2248,13 @@ def item(n, kind=b'action', ctx=b'', hold=b''):
 
 
 def test_a_page_opens_on_the_apps_menu_and_starts_it(fw):
+    """The app's run script started in the background ("&"): system() waits only for its shell, not the script's
+    copies and its fork (about 210 ms a launch on the emulator, 2026-11-22, the UI pass stalled for it; 65 ms with
+    "&", the shell's own start under qemu)."""
     p = Page(fw)
     assert p.request() == b'Q2SPOT/1\n1\tmenu\n' and C.string_at(p.req.path) == b'/tmp/q2-foo.browse.sock'
     assert p.ap.a[0].launched == 1 and p.top.title == b'Foo'
-    assert p.world.of('system') == [(b'/bin/sh /mnt/mmc/.foo/run',)]
+    assert p.world.of('system') == [(b'/bin/sh /mnt/mmc/.foo/run &',)]
 
 
 def test_rows_show_with_a_trailing_more_when_theres_a_cursor(fw):
@@ -3214,24 +3311,23 @@ def test_an_action_whose_refresh_makes_its_row_remote_opens_the_code(fw):
     remote = row_of(b'', b'Sign In', b'', kind=b'remote')
     p = live(fw, [row_of(b'x', b'Other', b'', kind=b'action'), row_of(b'signin', b'Sign In', b'', kind=b'action')])
     p.world.files[b'/tmp/q2-foo.state'] = qr_state()
-    qp = fw.var('addon__qp', Qp)
     p.sel = 1
     p.click(1)
     p.answer()
     code = block(fw, size=4096)
     fw.mock('window_create', lambda *_: code)
     p.answer(msg=b'refresh', rows=[row_of(b'x', b'Other', b'', kind=b'action'), remote])
+    qp = qp_of(fw)
     assert qp.page == code and C.string_at(qp.state) == b'/tmp/q2-foo.state' and p.pg.qrnext == 0  # once only
 
 
 def test_an_action_whose_refresh_leaves_another_row_under_the_cursor_opens_nothing(fw):
     p = live(fw, [row_of(b'signin', b'Sign In', b'', kind=b'action'), row_of(b'x', b'Other', b'', kind=b'action')])
-    qp = fw.var('addon__qp', Qp)
     p.sel = 1
     p.click(1)
     p.answer()
     p.answer(msg=b'refresh', rows=[row_of(b'', b'Sign In', b'', kind=b'remote'), row_of(b'x', b'Other', b'', kind=b'action')])
-    assert not qp.page and p.pg.qrnext == 0
+    assert not qp_of(fw) and p.pg.qrnext == 0
 
 
 def test_a_press_while_a_live_level_is_asked_again_takes_its_place(fw):
@@ -4217,8 +4313,8 @@ def test_a_remote_row_opens_the_apps_code_over_its_page(fw):
     code = block(fw, size=4096)
     fw.mock('window_create', lambda *_: code)
     p.click(0)
-    qp = fw.var('addon__qp', Qp)
-    assert qp.page == code and C.string_at(qp.state) == b'/tmp/q2-foo.state' and C.string_at(qp.hex) == HEX21
+    qp = qp_of(fw)
+    assert qp.page == code and C.string_at(qp.state) == b'/tmp/q2-foo.state' and qp.hex == HEX21
     assert p.pg.page == p.page and p.pg.depth == 1 and p.backs == 0
 
 
@@ -4519,9 +4615,8 @@ def test_a_row_past_the_list_opens_nothing(fw):
 def test_a_qr_app_shows_its_code_at_the_first_answer(fw):
     p = Page(fw, b'name=Foo\nqr=1\n')
     del p.world.files[b'/tmp/q2-foo']  # not running yet, so it starts
-    qp = fw.var('addon__qp', Qp)
     p.answer(rows=[item(1)])
-    assert qp.page and p.pg.code == 0
+    assert qp_of(fw).page and p.pg.code == 0
 
 
 class Qr:
@@ -4537,8 +4632,11 @@ class Qr:
         page = page_block(fw)
         fw.mock('window_create', lambda *_: page)
         fw.mock('widget_factory_create_widget', widget)
-        self.qp = fw.var('addon__qp', Qp)
         fw.fn('addon__qr_open', None, C.c_char_p, C.c_char_p)(b'/tmp/q2-a.state', b'Title')
+
+    @property
+    def qp(self):
+        return qp_of(self.fw)
 
     def again(self, raw):
         self.world.files[b'/tmp/q2-a.state'] = raw
@@ -4569,7 +4667,7 @@ def qr_state(size=21, code=HEX21, addr=b'192.168.1.2:8080', pin=b'548001', note=
 
 def test_a_code_shows_with_its_address_and_spaced_pin(fw):
     q = Qr(fw, qr_state())
-    assert q.code and C.string_at(q.qp.hex) == HEX21 and q.qp.size == 21
+    assert q.code and q.qp.hex == HEX21 and q.qp.size == 21
     assert q.said() == ['Hi', 'or open 192.168.1.2:8080  \u00b7  PIN 548 001']  # the app's note, then where
     q.again(qr_state(note=b''))
     assert q.said()[0] == 'Scan with your phone'
@@ -4596,9 +4694,24 @@ def test_no_code_says_why(fw, raw, say):
     assert not q.code and say in q.said()
 
 
-def test_a_code_longer_than_its_buffer_is_cut_and_never_shown(fw):
-    q = Qr(fw, qr_state(size=61, code=b'f' * (16 * 61)))
-    assert not q.code and len(C.string_at(q.qp.hex)) < QR_HEX
+@pytest.mark.parametrize('size', (53, 101, 177))
+def test_a_code_of_any_version_the_app_sends_shows(fw, size):
+    """q2-subsonic's encoder (internal/qr) takes the smallest version that holds the URL, up to 40 (177 modules):
+    a long sign-in URL's version 9 (53) or more is drawn, every module inside the plate, not "No code yet"."""
+    digits = (size + 3) // 4
+    q = Qr(fw, qr_state(size=size, code=b'f' * (digits * size)))
+    assert q.code and q.qp.size == size
+    plates, fills = q.paint()
+    rects = [f[:4] for f in fills]
+    px, py, pw, ph = plates[0][:4]
+    assert len(rects) == size  # one run a row: every module dark
+    assert all(px <= x and x + w <= px + pw and py <= y and y + h <= py + ph for x, y, w, h in rects)
+    assert all(w == rects[0][2] and w >= size and w % size == 0 for x, y, w, h in rects)  # whole pixels a module
+
+
+def test_a_code_longer_than_the_largest_version_is_never_shown(fw):
+    q = Qr(fw, qr_state(size=181, code=b'f' * (46 * 181)))
+    assert not q.code and 'No code yet' in q.said()
 
 
 @pytest.mark.parametrize('state', [
@@ -4623,7 +4736,7 @@ def test_the_same_file_again_draws_nothing_new(fw):
 def test_closing_the_code_frees_it(fw):
     q = Qr(fw, qr_state())
     fw.fn('addon__qr_closed', C.c_int, C.c_void_p, C.c_void_p)(None, None)
-    assert not q.qp.page and not q.qp.hex
+    assert not q.qp  # the page's state, the code's rows with it
 
 
 def test_the_page_keeps_its_marker_while_open(fw):
@@ -4756,8 +4869,7 @@ def test_a_code_page_that_cant_open_keeps_nothing(fw):
     World(fw)
     fw.mock('window_create', lambda *_: 0)
     fw.fn('addon__qr_open', None, C.c_char_p, C.c_char_p)(b'/tmp/q2-a.state', b'Title')
-    qp = fw.var('addon__qp', Qp)
-    assert not qp.page and not qp.hex and not qp.timer
+    assert not qp_of(fw)
 
 
 def drawn(fw, paint, rounds=True):
@@ -5645,6 +5757,8 @@ def toasts(fw):
 
 
 def test_the_groovebox_shortcut_starts_the_card_game_with_the_sound(fw):
+    from test_radio import Library
+    lib = Library(fw)
     card(fw, groovebox=b'name=Groovebox\ngame=1\naudio=1\n')
     fw.mock('fw_fork', lambda *_: 77)
     fw.mock('fw_socket', lambda *_: 9)
@@ -5652,7 +5766,7 @@ def test_the_groovebox_shortcut_starts_the_card_game_with_the_sound(fw):
     assert shortcut(fw, b'10')(None, None) == 0 and seen == []
     gm = fw.var('addon__gm', Game)
     assert (gm.pid, gm.audio, gm.sock, gm.path) == (77, 1, 9, b'/tmp/q2-groovebox.input.sock')
-    assert fw.calls('player_stop') and fw.calls('mclSetMute') and fw.calls('device_set_volume')  # the jack readied, dac_take
+    assert lib.calls == ['save_stop'] and fw.calls('mclSetMute') and fw.calls('device_set_volume')  # held; the jack readied, dac_take
 
 
 @pytest.mark.parametrize('folder, said', [({}, b'Groovebox is not on the card'),
@@ -5666,7 +5780,7 @@ def test_the_groovebox_shortcut_says_when_no_card_game_is_it(fw, folder, said):
     assert seen == [said] and not fw.calls('fw_fork')
     opened = fw.fn('addon_game_open', C.c_int, C.c_char_p)
     assert opened(b'groovebox') == -1 and not fw.calls('fw_fork')
-    assert opened(b'other') == 1 and fw.calls('fw_fork') and not fw.calls('player_stop')  # a game without the sound
+    assert opened(b'other') == 1 and fw.calls('fw_fork') and not fw.calls('player_stop') and not fw.calls('player_save_stop')  # a game without the sound
 
 
 def test_a_card_game_that_can_t_fork_says_so(fw):
@@ -5674,7 +5788,7 @@ def test_a_card_game_that_can_t_fork_says_so(fw):
     fw.mock('fw_fork', lambda *_: -1)
     seen = toasts(fw)
     assert shortcut(fw, b'10')(None, None) == 0
-    assert seen == [b"It couldn't start"] and fw.var('addon__gm', Game).pid == 0 and fw.calls('player_stop')
+    assert seen == [b"It couldn't start"] and fw.var('addon__gm', Game).pid == 0
 
 
 @pytest.mark.parametrize('status, stops', [(3, 1), (1, 0)])
@@ -5687,6 +5801,36 @@ def test_the_game_with_the_sound_ending_clears_a_pause_stuck_on_nothing(fw, stat
     fw.mock('mclGetPlayStatus', lambda *_: status)
     fw.fn('addon_poll', None)()
     assert gm.pid == 0 and gm.audio == 0 and len(fw.calls('player_stop')) == stops
+
+
+def test_a_game_with_the_sound_holds_the_library_where_it_was_and_gives_it_back(fw):
+    """A card game with the sound takes the output as a video does (now_source.c now_hold): the Library's song
+    playing at 61 s is stopped with its place kept, not forgotten by stock's player_stop, and reads paused at 61 s
+    while the game runs; the game ended, the song is loaded again paused at 61 s (now_release)."""
+    from test_radio import Library
+    lib = Library(fw)
+    card(fw, groovebox=b'name=Groovebox\ngame=1\naudio=1\n')
+    fw.mock('fw_fork', lambda *_: 77)
+    fw.mock('fw_socket', lambda *_: 9)
+    assert fw.fn('addon_game_open', C.c_int, C.c_char_p)(b'groovebox') == 1
+    assert lib.calls[0] == 'save_stop', lib.calls
+    assert lib.now() == (3, 61)
+    fw.mock('fw_waitpid', lambda *_: 77)
+    game_has_sound = fw.fn('addon_game_audio', C.c_int)
+    fw.mock('player_save_start', lambda paused, *_: (lib.calls.append(f'save_start {paused} game {game_has_sound()}'), 0)[1])
+    fw.fn('addon_poll', None)()
+    # given back once the game has let go of the sound: before, ringnav_start_player refuses the start
+    assert fw.var('addon__gm', Game).pid == 0 and lib.calls[-1] == 'save_start 1 game 0', lib.calls
+
+
+def test_a_game_with_the_sound_that_can_t_start_gives_the_library_back_at_once(fw):
+    from test_radio import Library
+    lib = Library(fw, status=3)
+    card(fw, groovebox=b'name=Groovebox\ngame=1\naudio=1\n')
+    fw.mock('fw_fork', lambda *_: -1)
+    toasts(fw)
+    assert fw.fn('addon_game_open', C.c_int, C.c_char_p)(b'groovebox') == 0
+    assert lib.calls == ['save_stop', 'save_start 1'] and lib.now() == (3, 61)
 
 
 @pytest.mark.parametrize('how', ['poll', 'timer'])
@@ -6003,6 +6147,25 @@ def test_albums_asks_the_artist_again_and_lists_its_albums_newest_first(fw, nav_
     assert p.pending.op == b'album' and p.pending.args == b'\talbum:al3'
 
 
+def test_leaving_an_albums_page_lets_its_covers_go_without_looking_for_them(fw, nav_st):
+    """addon.c drop on an Albums page: each row's catalogue cover is unloaded by name, there on the card or not
+    (unloading a name never loaded does nothing), so the drop asks access() of none of them; a cover's file is
+    looked for only where one is about to be drawn (album_cover)."""
+    p = oled_page(fw, nav_st)
+    p.answer(rows=artist_rows())
+    p.click(AR_ALBUMS)
+    p.answer(rows=artist_rows())
+    assert p.top.lay == LAY_ALBUMS
+    p.world.files[b'/mnt/mmc/.foo/covers/al4.jpg'] = jpeg()  # one of the four on the card
+    names, looked = unloads(fw), []
+    fw.mock('fw_access', lambda path, *_: looked.append(C.string_at(path)) or p.world.access(path))
+    fw.fn('addon__drop', None)()
+    covers = [n for n in looked if b'/covers/' in n]
+    print('access() calls for covers in one drop of a 4-album page:', len(covers))
+    assert covers == []
+    assert sorted(names) == [b'file:///mnt/mmc/.foo/covers/%s.jpg' % i for i in (b'al1', b'al3', b'al4', b'al6')]
+
+
 def test_top_songs_opens_as_a_list_of_cover_rows(fw, nav_st):
     p = oled_page(fw, nav_st)
     p.answer(rows=artist_rows())
@@ -6218,6 +6381,8 @@ def test_a_server_songs_radio_is_asked_of_its_app(fw):
     assert p.world.files[b'/tmp/q2-foo.radio'] == b'7 start ' + path + b'\n'
     p.world.files[b'/tmp/q2-foo.state'] = b'version=1\nradioack=7 1\n'
     assert answer(7) == 1 and answer(8) == -1
+    p.world.files[b'/tmp/q2-foo.state'] = b'qrsize=177\nqr=' + QR40 + b'\nradioack=7 1\nversion=1\n'
+    assert answer(7) == 1  # after a sign-in's long code, as an app writes its keys in name order
 
 
 def test_an_app_without_radio_is_not_asked(fw):
@@ -6436,7 +6601,7 @@ def test_an_app_is_started_for_the_cars_cover_with_covers_1(fw, manifest, starte
         wake(name)
     assert p.world.of('system') == []
     wake(b'foo')
-    assert (p.world.of('system') == [(b'/bin/sh /mnt/mmc/.foo/run',)]) == started
+    assert (p.world.of('system') == [(b'/bin/sh /mnt/mmc/.foo/run &',)]) == started
 
 
 def test_a_status_reply_is_the_centred_stack_and_its_button_presses_its_action(fw, nav_st):

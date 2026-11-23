@@ -21,19 +21,21 @@ static int has(const char *s, int n, const char *w, int whole) {
     return 0;
 }
 
-/* Who a line names, in this order: the player first, as "hciplayer" holds "hci". */
+/* Who a line names, in this order: the player first, as "hciplayer" holds "hci", but bluealsa
+ * before alsa, so its own lines are Bluetooth's. */
 static const struct {
     const char *word, *src;
     int whole;
 } names[] = {
+    { "parse_bluealsa_status_msg", "player", 0 }, /* the player's: bluealsa's events as it reads them */
     { "q2player", "player", 0 },
     { "mplayer", "player", 0 },
     { "playback", "player", 0 },
     { "audio codec", "player", 0 },
     { "hciplayer", "player", 0 },
+    { "bluealsa", "bt", 0 }, /* bluealsa's own lines ("bluealsa: E: ..."), before alsa's */
     { "alsa", "player", 0 },
     { "decoder", "player", 0 },
-    { "bluealsa", "bt", 0 },
     { "rtk_hci", "bt", 0 },
     { "bluetooth", "bt", 0 },
     { "hci", "bt", 1 },
@@ -79,6 +81,7 @@ static struct {
     long wall;
     unsigned up_ms;
     char level, src[12];
+    int copied; /* the run's line went to the Bluetooth ring too: its count follows it */
 } rep;
 
 static unsigned fnv(const char *s, int n, unsigned h) {
@@ -86,18 +89,104 @@ static unsigned fnv(const char *s, int n, unsigned h) {
     return h;
 }
 
-static void stamp(card_log *l, long wall, unsigned up_ms, char level, const char *src,
-                  const char *s, int n) {
+/* ---- the Bluetooth event log's copy (docs/internals.md#bluetooth-event-log) ----
+ * Each line that goes into the unified log's ring and is about Bluetooth goes into q2guard's q2-btev
+ * ring too, as it was written, so the Bluetooth lines outlast the unified log's churn. */
+static card_log *bt_from, *bt_to;
+void ulog_bt_to(card_log *from, card_log *to) { bt_from = from, bt_to = to; }
+
+/* The ring's first bytes q2guard's writer holds (flush_start), while its drop count is still the
+ * one they were handed with: no line goes in before them. */
+static unsigned bt_frozen, bt_frozen_dropped;
+void ulog_bt_freeze(unsigned bytes, unsigned dropped) { bt_frozen = bytes, bt_frozen_dropped = dropped; }
+
+/* A ulog line's uptime, its second field */
+static unsigned line_up(const char *s, unsigned n) {
+    unsigned i = 0, up = 0;
+    while (i < n && s[i] != ' ') ++i;
+    for (++i; i < n && s[i] >= '0' && s[i] <= '9'; ++i) up = up * 10 + (unsigned)(s[i] - '0');
+    return up;
+}
+
+#define BT_SORT_LINES 64 /* how far back a late line is carried: about a tick's worth and more */
+/* line (len bytes, whole) appended to l, then carried back before the lines with a later uptime
+ * (at most BT_SORT_LINES, never into the frozen bytes), so the ring is in uptime order. */
+static void insert_sorted(card_log *l, const char *line, int len) {
+    if (!card_log_append(l, line, (unsigned)len) || !l->ring || l->len < (unsigned)len) return;
+    unsigned up = line_up(line, (unsigned)len), at = l->len - (unsigned)len;
+    unsigned floor = bt_frozen && l->dropped == bt_frozen_dropped ? bt_frozen : 0;
+    for (int k = 0; k < BT_SORT_LINES && at > floor; ++k) {
+        unsigned q = at - 1; /* the newline ending the line before */
+        while (q > floor && l->ring[q - 1] != '\n') --q;
+        if (line_up(l->ring + q, at - q) <= up) break;
+        at = q;
+    }
+    unsigned end = l->len - (unsigned)len;
+    if (at == end) return;
+    memmove(l->ring + at + len, l->ring + at, end - at);
+    memcpy(l->ring + at, line, (unsigned)len);
+}
+
+unsigned ulog_settled(const card_log *l, unsigned before_ms) {
+    unsigned at = 0;
+    while (at < l->len) {
+        unsigned e = at;
+        while (e < l->len && l->ring[e] != '\n') ++e;
+        if (e == l->len || line_up(l->ring + at, e - at) > before_ms) break;
+        at = e + 1;
+    }
+    return at;
+}
+
+/* Words that make any source's line a Bluetooth one: bluealsa's own lines (an AVDTP start the
+ * headset refused is its "Couldn't acquire transport"), the kernel's "Bluetooth: hci0: ..." */
+static const struct {
+    const char *word;
+    int whole;
+} bt_words[] = { { "bluealsa", 0 }, { "bluez", 0 },   { "bluetooth", 0 }, { "a2dp", 0 }, { "avdtp", 0 },
+                 { "rtk_hci", 0 },  { "hci0", 1 },    { "l2cap", 0 } };
+
+int ulog_bt_wanted(char level, const char *src, const char *s, int n) {
+    if (!strcmp(src, "bt")) return 1;
+    /* named but not Bluetooth's: the player's reading of bluealsa's events, and the kernel's note
+     * at each stack start that hci0's debugfs files are there already */
+    if (has(s, n, "parse_bluealsa_status_msg", 0) || (!strcmp(src, "kernel") && has(s, n, "debugfs:", 0)))
+        return 0;
+    /* where a run of the Q2 begins and ends, so a reboot between two lines shows */
+    if (!strcmp(src, "guard") && ((n >= 5 && !memcmp(s, "boot ", 5)) || (n >= 9 && !memcmp(s, "snapshot ", 9))))
+        return 1;
+    if (n >= 9 && !memcmp(s, "shutdown:", 9)) return 1; /* demo's ulog_end */
+    if (!strcmp(src, "player") && level == 'E') return 1; /* a song that would not open, with its path */
+    if (!strcmp(src, "coda-rc") && n >= 4 && !memcmp(s, "ble:", 4)) return 1; /* its LE advertising and links */
+    for (unsigned i = 0; i < sizeof bt_words / sizeof *bt_words; ++i)
+        if (has(s, n, bt_words[i].word, bt_words[i].whole)) return 1;
+    return 0;
+}
+
+/* line (len bytes, its newline included) into the Bluetooth ring as well when l is the unified ring
+ * and copy says so: 1 yes, 0 no, -1 by ulog_bt_wanted. 1 when it went. */
+static int bt_copy(card_log *l, const char *line, int len, int copy, char level, const char *src,
+                   const char *s, int n) {
+    if (!bt_to || l != bt_from) return 0;
+    if (copy < 0) copy = ulog_bt_wanted(level, src, s, n);
+    if (copy) insert_sorted(bt_to, line, len);
+    return copy;
+}
+
+/* 1 when the line was copied to the Bluetooth ring too (bt_copy's copy) */
+static int stamp(card_log *l, long wall, unsigned up_ms, char level, const char *src,
+                 const char *s, int n, int copy) {
     char line[ULOG_PART + 64];
     int len = ulog_line(line, sizeof line, wall, up_ms, level, src, s, n);
     card_log_append(l, line, (unsigned)len);
+    return bt_copy(l, line, len, copy, level, src, s, n);
 }
 
 void ulog_repeats(card_log *l) {
     if (rep.l != l || !rep.n) return;
     char b[64];
     int n = snprintf(b, sizeof b, "last line repeated %u more times", rep.n);
-    stamp(l, rep.wall, rep.up_ms, rep.level, rep.src, b, n);
+    stamp(l, rep.wall, rep.up_ms, rep.level, rep.src, b, n, rep.copied); /* where the line went */
     rep.n = 0; /* the run goes on being counted from here */
 }
 
@@ -121,7 +210,7 @@ static int repeated(card_log *l, long wall, unsigned up_ms, char level, const ch
 static int add_line(card_log *l, long wall, unsigned up_ms, char level, const char *src,
                     const char *s, int n) {
     if (repeated(l, wall, up_ms, level, src, s, n)) return 0;
-    stamp(l, wall, up_ms, level, src, s, n);
+    rep.copied = stamp(l, wall, up_ms, level, src, s, n, -1);
     return 1;
 }
 
@@ -129,6 +218,31 @@ void ulog_add(card_log *l, long wall, unsigned up_ms, char level, const char *sr
               const char *msg) {
     add_line(l, wall, up_ms, level, src, msg, (int)strlen(msg));
 }
+
+/* The last stamped line read into each ring (ulog_add_raw), whose time an unstamped line after it
+ * takes: it was written between that line and the read. */
+static struct {
+    card_log *l;
+    long wall;
+    unsigned up;
+} last;
+#define RAW_LAG_MS 60000 /* a stamped line older than this is no guide to the next unstamped one */
+
+/* A ulog line's time, "YYYY-MM-DDTHH:MM:SSZ", as seconds since 1970 (days from the civil date,
+ * Howard Hinnant's, as ulog_time writes it) */
+static long line_wall(const char *s) {
+    long v[6] = { 0 };
+    static const int at[6] = { 0, 5, 8, 11, 14, 17 }, len[6] = { 4, 2, 2, 2, 2, 2 };
+    for (int f = 0; f < 6; ++f)
+        for (int i = 0; i < len[f]; ++i) v[f] = v[f] * 10 + (s[at[f] + i] - '0');
+    long y = v[0] - (v[1] <= 2), era = (y >= 0 ? y : y - 399) / 400, yoe = y - era * 400;
+    long doy = (153 * (v[1] > 2 ? v[1] - 3 : v[1] + 9) + 2) / 5 + v[2] - 1;
+    long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return (era * 146097 + doe - 719468) * 86400 + v[3] * 3600 + v[4] * 60 + v[5];
+}
+
+/* Unstamped lines known to come at every boot, said for what they are (docs/internals.md#bluetooth-name) */
+static const char hci_boot[] = "Can't init device hci0: Function not implemented (89)";
 
 char ulog_add_raw(card_log *l, long wall, unsigned up_ms, const char *s, int n) {
     while (n && (s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == ' ')) --n;
@@ -146,17 +260,26 @@ char ulog_add_raw(card_log *l, long wall, unsigned up_ms, const char *s, int n) 
         /* a repeat of demo's: its uptime is in the line, its wall time the run's */
         unsigned up = 0;
         for (int d = 21; d < i; ++d) up = up * 10 + (unsigned)(s[d] - '0');
+        last.l = l, last.wall = line_wall(s), last.up = up;
         if (repeated(l, wall, up, level, src, s + m, n - m)) return 0;
         char line[ULOG_PART + 2];
         memcpy(line, s, n);
         line[n] = '\n';
         card_log_append(l, line, (unsigned)n + 1);
+        rep.copied = bt_copy(l, line, n + 1, -1, level, src, s + m, n - m);
         return level;
     }
+    if (last.l == l && last.up <= up_ms && up_ms - last.up <= RAW_LAG_MS) wall = last.wall, up_ms = last.up;
     const char *src;
     char level = ulog_guess(s + start, n - start, &src);
+    char note[ULOG_PART];
+    if (n - start == (int)sizeof hci_boot - 1 && !memcmp(s + start, hci_boot, sizeof hci_boot - 1)) {
+        int k = snprintf(note, sizeof note, "%s: openBluetooth's hciconfig hci0 reset, expected at a boot's "
+                         "Bluetooth on; the name is written after it", hci_boot);
+        level = 'I', src = "bt", s = note, start = 0, n = k;
+    }
     if (repeated(l, wall, up_ms, level, src, s + start, n - start)) return 0;
-    stamp(l, wall, up_ms, level, src, s + start, n - start);
+    rep.copied = stamp(l, wall, up_ms, level, src, s + start, n - start, -1);
     return level;
 }
 
@@ -173,8 +296,9 @@ void ulog_tail_at(struct ulog_tail *t, const char *path, int from_end) {
 }
 
 /* A card app's line: the date Go's log puts first ("2006/01/02 15:04:05 ", or "2006-01-02 ..."
- * as q2-subsonic's applog writes it) left out, the level guessed from its words, the source the
- * app's id. Its level, 0 for a blank line or a repeat. */
+ * as q2-subsonic's applog writes it, or "2006-01-02T15:04:05Z " as coda-rc's crc_log does) left
+ * out, the level guessed from its words, the source the app's id. Its level, 0 for a blank line or
+ * a repeat. */
 static char app_line(card_log *l, long wall, unsigned up_ms, const char *src, const char *s,
                      int n) {
     while (n && (s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == ' ')) --n;
@@ -183,6 +307,8 @@ static char app_line(card_log *l, long wall, unsigned up_ms, const char *src, co
     while (k < (int)sizeof date - 1 && k < n &&
            (date[k] == '0'   ? s[k] >= '0' && s[k] <= '9'
             : date[k] == '/' ? s[k] == '/' || s[k] == '-'
+            : k == 10        ? s[k] == ' ' || s[k] == 'T'
+            : k == 19        ? s[k] == ' ' || s[k] == 'Z'
                              : s[k] == date[k]))
         ++k;
     if (k == (int)sizeof date - 1) s += k, n -= k;

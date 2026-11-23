@@ -5,6 +5,10 @@
 #include <pthread.h>
 #include <stdint.h>
 
+#ifndef PEQ_ROOT /* player/Makefile passes it: "" on the Q2, a host test's own directory (".") */
+#define PEQ_ROOT ""
+#endif
+
 #define URL_MAX 1564 /* stock's command buffer, 0x61c */
 
 /* set-songurl, set-nexturl and set-gapless, as demo sends them. */
@@ -40,6 +44,9 @@ struct ctl {
     int seek_to;
     int paused;
     int play_paused; /* a pause asked after play_song's command, before this thread took it: it opens paused */
+    /* the stop waiting came before play_song's command, with a song open or opening (ipc.c set-songurl): it ends that
+     * song and leaves play_song to be taken next, where a stop after the command forgets it too */
+    int stop_first;
     /* settings demo pushes; speed and mqa are stored and read by nothing (stock reads speed, docs/player.md) */
     int outputway, volume, softvol, dsdmode, replaygain, speed, explay, mqa, eq_on;
     int scan; /* mcl-scan: a held Previous or Next heard at speed, in hundredths, below 0 backwards; 0 none */
@@ -48,6 +55,9 @@ struct ctl {
     int eq_changed; /* an mcl-seteq since the playback thread last looked: the EQ state on disk is new */
     int click;      /* an mcl-click to sound, CLICK_*: mixed into a song playing, else on its own (engine.c click_session) */
     int cut;        /* an mcl-stop or set-nexturl since the playback thread began opening a song: that open gives up */
+    /* mcl-dropcar (or mcl-carrelease, or SIGUSR2: docs/player.md#releasing-the-car): the car's gadget is about to go,
+     * so a car PCM held paused or between songs is closed at once; cleared as the playback thread takes it */
+    int car_release;
     /* status */
     int state, has_info, position;
     struct info info;
@@ -79,6 +89,7 @@ void source_info(const struct source *, struct info *);
 /* The next block: frames and where they are, 0 at the end, below 0 on a decode error that ends the file. */
 int source_read(struct source *, const uint8_t **data);
 int source_seek(struct source *, int seconds);
+int source_seek_frame(struct source *, int64_t frame); /* frame of the output's rate */
 float source_replaygain(const struct source *, int mode); /* mcl-replaygain's scale for this file, 1 for none */
 int64_t source_frames(const struct source *); /* frames handed out since the start or the last seek, plus its target */
 struct stream *source_stream(const struct source *); /* NULL for a file on the card */
@@ -110,18 +121,30 @@ void sacd_close(struct sacd *);
 /* grow.c: a card app's song still arriving in place, read with a wait at the end of its bytes */
 struct grow;
 int grow_arriving(const char *url); /* the app's .stream says url is still arriving */
+/* the same, with the bytes on the card and the app's total (0 unknown) and length in ms (0 unknown) */
+int grow_have(const char *url, int64_t *have, int64_t *total, int64_t *ms);
 struct grow *grow_open(const char *url, int *error);
 struct AVIOContext *grow_avio(struct grow *);
 void grow_seeking(struct grow *, int on); /* on while a seek searches: only the bytes there, no wait at their end */
+void grow_playing(struct grow *);         /* opened: a stall from here on waits for a refill (REFILL_S) */
 void grow_close(struct grow *);
+
+/* feed.c: other sources' sound for the car (docs/iphone-mode.md#other-sources-over-usb): a FIFO read into a ring */
+#define FEED_RATE 44100
+void feed_start(void);
+int feed_frames(void);                   /* frames waiting */
+int feed_take(uint8_t *out, int frames); /* up to frames of 16-bit stereo; how many */
+void feed_pulling(void);                 /* the car takes it, the ring dry: keep the source paced */
+int64_t feed_heard_ms(void);             /* since the last frames came, -1 never */
 
 /* output.c */
 struct output;
 struct output *output_open(const struct pcm_format *, int outputway, int hw);
 /* Whether an open output goes on with format f on outputway (a gapless change): Bluetooth takes the same channels
  * and width at any rate and resamples it; the car the same channels at any rate and width, its PCM opened again at
- * the car's next rate first (output_car_song); the others the same format. 1 when it does, and f is then what is
- * written. */
+ * the car's next rate first (output_car_song); the DAC and a USB DAC any song that would go out in the format the
+ * PCM is open at (a fixed-rate dongle: every PCM song, resampled), DSD the same format. 1 when it does, and f is then
+ * what is written. */
 int output_take(struct output *, const struct pcm_format *f, int outputway);
 /* Software volume, mcl-setvol's L << 8 | R by stock's law (output.c); 0x6464, 100 each, is unity */
 void output_volume(struct output *, int volume);
@@ -130,6 +153,12 @@ int output_write(struct output *, const uint8_t *data, int frames);
 /* output_write's answer when the car's way ended under a write: its file removed (the car stopped, the cable came out)
  * or its card gone (way 3, docs/iphone-mode.md#car-audio) */
 #define OUTPUT_CAR_GONE (-2)
+/* output_write's answer when a USB DAC (way 2) was unplugged under a write; output_gone is 1 after an output_open that
+ * failed because it is not there; output_present says whether way's device is there to open (a USB DAC's card node),
+ * for a wait for one to come back (engine.c output_back). Each is logged once until the device is opened again. */
+#define OUTPUT_GONE (-3)
+int output_gone(void);
+int output_present(int outputway);
 /* Car Audio's output, way 3 (Q2_CAR_USB: every image's player): 1 while the iPhone gadget's car wants USB audio, with its
  * ALSA device and rate when asked; output_car_gone forgets that until the car asks again. */
 int output_car(char *device, unsigned cap, unsigned *rate);
@@ -141,6 +170,7 @@ void output_car_watch(const volatile int *cut); /* the engine's cut flag: a stop
 void output_car_song(int rate, int keep);
 int car_rate_for(int rate); /* 32000, 44100 or 48000 */
 int64_t output_delay(struct output *); /* frames written and not yet played, at the rate written */
+int64_t output_held(struct output *);  /* a paused song's frames taken back from the PCM and held, at the rate written */
 void output_levels(struct output *, long *avail, long *delay); /* the device's own, in its frames */
 void output_pause(struct output *, int on);
 void output_drop(struct output *);     /* forget what is buffered: a seek, a skip, a stop */
@@ -172,7 +202,25 @@ int dsp_run(struct dsp *, const uint8_t *data, int frames, double pts, const uin
 void dsp_eq_changed(struct dsp *);
 void dsp_close(struct dsp *, int ended); /* ended: the song played to its end, nobody cut it */
 int dsp_tail_held(void); /* crossfade holds a song's tail for the next one to mix in */
+void dsp_path(struct dsp *, const char *url); /* the song's file, for Smart Crossfade's analysis and plan */
 void dsp_meter(const struct pcm_format *, int untouched, const uint8_t *data, int frames, int uv[2]);
+
+/* smart.c: Smart Crossfade's analysis (docs/internals.md#smart-crossfade), on a thread of its own. smart_begin starts
+ * it for the song at url (rg its ReplayGain scale) and the next song XFADE_NEXT names; smart_poll answers SMART_RUN
+ * until it is done, then SMART_PLAN with the plan or SMART_PLAIN (the plain fade, the reason logged); smart_cancel
+ * forgets it, with why logged unless NULL. */
+enum { SMART_NONE, SMART_RUN, SMART_PLAN, SMART_PLAIN };
+struct xf_plan {
+    int64_t overlap; /* the song's frames mixed under the next, out_point to tail_end */
+    int64_t trail;   /* its frames after tail_end, dropped */
+    int64_t skip;    /* the next song's frames dropped at its start, at next_rate */
+    int64_t fade;    /* its fade-in's frames, 0 for none */
+    int next_rate;
+    char next[URL_MAX]; /* the song the skip and the fade-in are for */
+};
+void smart_begin(const char *url, float rg);
+int smart_poll(struct xf_plan *plan);
+void smart_cancel(const char *why);
 
 /* dsd.c: DSD packets made into DoP or Native frames */
 enum { DSD_CHANNELS = 8 };
@@ -190,7 +238,7 @@ void dsd_reset(struct dsd_pack *);
  * the frames made, at *out; below 0 with no memory */
 int dsd_pack(struct dsd_pack *, const uint8_t *data, int bytes, int planar, int lsb_first, int skip, const uint8_t **out);
 
-#define SCAN_FILE "/tmp/q2scan" /* there while the song playing can be scanned at speed (mcl-scan, patch/seek.c) */
+#define SCAN_FILE PEQ_ROOT "/tmp/q2scan" /* there while the song playing can be scanned at speed (mcl-scan, patch/seek.c) */
 /* stretch.c: scan's time-stretch, the song at 2 to 8 times its speed at its own pitch (docs/player.md#scan) */
 struct stretch;
 double stretch_top(int rate);                         /* the highest speed at a rate */

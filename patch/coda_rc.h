@@ -25,7 +25,7 @@ enum {
     T_BROWSE = 0x30, T_BROWSE_RESP, T_SEARCH, T_SEARCH_RESP,
     T_PLAY = 0x40, T_GET_QUEUE = 0x42, T_QUEUE_RESP, T_PLAY_QUEUE_ITEM, T_START_RADIO = 0x46,
     T_GET_COVER = 0x50, T_COVER,
-    T_GET_REMOTE = 0x60, T_REMOTE_INFO,
+    T_GET_REMOTE = 0x60, T_REMOTE_INFO, T_REGISTER_REMOTE,
     T_PING = 0x7e, T_PONG,
 };
 
@@ -53,6 +53,7 @@ enum {
 #define CAP_RADIO 16384u    /* StartRadio, NowPlaying.radio */
 #define CAP_NOTICE 32768u   /* NowPlaying.notice: the Q2 Muse's toast, for the car to show a moment */
 #define CAP_REMOTE 65536u   /* GetRemote: q2-iroh's endpoint id and relay, to reach the Q2 Muse from another network */
+#define CAP_IROH_ALLOW 131072u /* RegisterRemote: q2-iroh admits only paired phones' iroh keys */
 
 /* ---- the protobuf subset: varints (wire type 0) and length-delimited fields (wire type 2) ---- */
 typedef struct { uint8_t *p; size_t n, cap; int over; } pbw;
@@ -93,6 +94,11 @@ typedef struct crc_session {
     uint8_t rx[CRC_MAX_FRAME];
     size_t rx_n;
     void *io;  /* the platform's connection */
+    /* Through q2-iroh (iroh_via): iroh is the phone's endpoint key, as the sidecar named it, and iroh_ok says it is
+     * a paired phone's (registered); a session with neither gets nothing before Auth but outside Pair a Phone's
+     * code (docs/remote-protocol.md#across-networks-only-paired-phones). */
+    uint8_t iroh[32];
+    int iroh_via, iroh_ok;
 } crc_session;
 
 /* ---- what the platform provides (coda_rc.c; the host test's fakes) ---- */
@@ -109,6 +115,7 @@ void crc_pair_hide(int outcome);                               /* 1 paired, 0 fa
 int crc_pair_cancelled(void);                                  /* the user dismissed the dialog */
 int crc_code_shown(char code[7]); /* 1 with the code Pair a Phone's QR code carries, 0 with none */
 void crc_code_spent(void);        /* a pairing on that code ended: it is never taken again */
+void crc_iroh_proved(crc_session *s); /* a session through q2-iroh proved its phone: its key is that phone's */
 /* an authenticated request: answer with crc_send/crc_error; anything but 0 closes the session */
 int crc_app(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t n);
 extern uint8_t crc_device_id[8];
@@ -121,6 +128,7 @@ int crc_send(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t
 int crc_error(crc_session *s, unsigned req_id, int code, const char *message);
 void crc_close(crc_session *s);
 void crc_tick(void);  /* about once a second: expires a pairing code that was not used */
+int crc_pair_busy(void); /* a pairing code is out (crc_tick still has to expire it) */
 uint32_t crc_caps(void);
 /* ---- the daemon's own parts (coda_rc.c, coda_rc_lib.c, coda_rc_ble.c) ---- */
 const char *crc_path(char *buf, size_t cap, const char *path); /* path under --root */
@@ -136,6 +144,8 @@ int lib_request(crc_session *s, int type, unsigned req_id, const uint8_t *p, siz
 void lib_played(int ok, int qgen);
 void lib_now(int qgen, int id);
 void lib_art_of(const char *path, char *art, size_t cap); /* a song path's album art id */
+/* the Browse nodes of a playing song's album and album artist (NowPlaying.album_id, artist_id), "" for none */
+void lib_song_nodes(const char *track_id, char *album, size_t acap, char *artist, size_t rcap);
 /* GetCover's answer (coda_rc_lib.c); hold: a server album with no cover on the card may be asked of its app first */
 int lib_cover(crc_session *s, unsigned req_id, const char *art, unsigned offset, unsigned limit, unsigned max_px,
               int hold);
@@ -154,13 +164,15 @@ int lib_song_rid(const char *id); /* "song:t12" -> 12; 0 when not a song id */
 int lib_has_server(void);
 int lib_queue_rid(unsigned at, int rid); /* PlayQueueItem: 0 for a queued stream download of server song rid */
 /* BLE (coda_rc_ble.c, its own GATT server): ble_fds puts its sockets (at most BLE_FDS) into the loop's poll, and
- * ble_handle takes them back with their revents; ble_tick once a second */
+ * ble_handle takes them back with their revents; ble_tick once a second, and when ble_due says the advertisement
+ * is due (a phone gone: advertised again at once, at either of the loop's paces) */
 #define BLE_FDS 3
 struct pollfd;
 void ble_start(void);
 int ble_fds(struct pollfd *p);
 void ble_handle(const struct pollfd *p, int n);
 void ble_tick(uint32_t now_ms);
+uint32_t ble_due(uint32_t now_ms); /* ms until the advertisement is due again (0: now), ~0 when none waits */
 int ble_write(const uint8_t *p, size_t n);
 void ble_disconnect(void);
 void ble_stop(void);
@@ -191,6 +203,7 @@ int mdns_query(const mdns_self *me, const uint8_t *p, size_t n);
 size_t mdns_reply(const mdns_self *me, unsigned answers, uint32_t ttl, uint8_t *out, size_t cap);
 void mdns_start(const char *ifname); /* answer on ifname's address whenever it has one */
 int mdns_fd(void);                   /* the socket to poll for POLLIN, -1 with none */
+void mdns_pace(int quiet);           /* the address looked at every 5 s while no phone is connected, else 1 s */
 void mdns_poll(uint32_t now_ms);     /* every pass: the address and name followed, announcements sent */
 uint32_t mdns_due(uint32_t now_ms);  /* ms until mdns_poll has something to do; 0xffffffff never */
 void mdns_handle(void);              /* a packet waiting on mdns_fd */
@@ -199,5 +212,8 @@ void mdns_stop(void);                /* goodbye, and closed */
 #define CRC_PAIR_TIMEOUT_MS 120000
 #define CRC_PAIR_FAILS 3              /* wrong codes before pairing locks */
 #define CRC_PAIR_LOCK_MS 300000
+#define CRC_PAIR_SHOWS 4              /* new codes put up, at most, in any CRC_PAIR_SHOW_WINDOW_MS */
+#define CRC_PAIR_SHOW_WINDOW_MS 60000
+#define CRC_PING_PLAIN 64             /* the longest Ping echoed before Auth; sealed ones take CRC_MAX_PAYLOAD */
 
 #endif

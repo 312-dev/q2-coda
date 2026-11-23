@@ -64,9 +64,6 @@ typedef struct {
     unsigned center_timer, center_token, center_scope, center_hash, center_hash2;
     unsigned edit_press, edit_at; /* a slider or time editor's pending Centre (edit_key) */
     int center_id, center_ctx, center_rows;
-    unsigned cf_letter, cf_letter_at, cf_letter_timer;
-    int cf_letter_held; /* the thumb's letters: shown until it lifts */
-    void *cf_letter_surface;
     unsigned last_home;
     int home_dir;
     void *home_surface;   /* non-null also marks a step accepted at time zero */
@@ -151,6 +148,8 @@ typedef struct {
         wake_down, /* 1: the held Centre press passes; 2: it is dropped */
         charge_held, artist_cf, year_old, resume, artist_az, hold_home, standby_limit, eq_output,
         smart_wifi, big_library, playlist_cf, scan_durations, cf_position;
+    unsigned wake_turn_at; /* wake_key: the waking wheel turn's last tick (| 1), 0 none */
+    int wake_return;       /* ... a waking Return press, its long press and release to come */
     void *pod_label[POD_COUNT];
     char art_cf_hint[64]; /* the page cf_veil hides: its anim_hint */
     unsigned wake_at; /* Wake: Double press, the screen-off centre press a second one must follow */
@@ -338,7 +337,8 @@ typedef struct {
 } now_info;
 void now_get(now_info *n), now_poll(void);
 int now_owner(void), now_status(void), now_scrobbles(void), now_time(int *sec, int *total);
-void now_hold(void), now_release(void), now_drop(void), now_take_back(void);
+/* stock's Now Playing update reads through these (tools/build.py NP_TIME_CALLS) */
+int now_page_status(void), now_page_time(int *sec, int *total);
 void *now_song(unsigned *at, unsigned *n, int *pressed);
 void bt_cover_hold(int held); /* bt_cover.c */
 
@@ -380,7 +380,7 @@ extern int stock_keyup_trampoline(void *, void *), stock_touch_trampoline(void *
     stock_systemset_trampoline(void *, void *), stock_audioset_trampoline(void *, void *),
     stock_btrows_trampoline(void *, void *), stock_playlist_trampoline(void *),
     stock_stream_trampoline(void *, void *), stock_start_player_trampoline(void),
-    stock_standby_trampoline(void), stock_cardmount_trampoline(void),
+    stock_standby_trampoline(void), stock_device_standby_trampoline(void), stock_cardmount_trampoline(void),
     stock_usbmode_trampoline(void *, void *, void *, void *),
     stock_hscroll_start_trampoline(void *), stock_wifi_page_trampoline(void *, void *),
     stock_stream_row_trampoline(void *, void *), stock_netservice_row_trampoline(void *, void *),
@@ -466,7 +466,7 @@ void feedback_switch_bar(void *w, void *canvas);
 void feedback_scan_bar(void *w, void *canvas);
 void feedback_shuffled(const char *what, int songs);
 int confirm_surface(void *w); /* w holds the card's answers */
-/* pair_prompt.c: one pairing presentation, Car Remote's and Guest Play's
+/* pair_prompt.c: one pairing presentation, Car Remote's, Guest Play's and a Bluetooth device's
  * (docs/oled-design.md#pairing) */
 void *pair_prompt(const char *phone, const char *code, const char *body, const char *const *rows,
                   int n_rows, int back, int timeout_ms, int timeout_row,
@@ -528,10 +528,16 @@ void slider_page_dirty(void *page); /* its switch row, after a change of the hid
 int wifi_list(void *list);
 int wifi_sig(const char *image); /* stock's signal image's level, 1-4, else 0 */
 void wifi_rows_pre(void *view);
-int wifi_connected_row(void *b); /* the row button b has stock's Connected line */
+int wifi_connected_row(void *b); /* the row button b has stock's state line */
 void wifi_rows_post(void *view);
 void wifi_mark(void *w, void *canvas, int level, int selected);
 void wifi_busy_show(void *win); /* "Searching..." on the section's line while a scan runs */
+/* the network first under Networks (wifi_flows.c's): the selection kept through a rebuild, a press
+ * followed, a failed join marked, a join ended */
+void wifi_rows_keep(void *view), wifi_rows_follow(const char *ssid), wifi_rows_end(void),
+    wifi_rows_scanned(void);
+void wifi_rows_failed(const char *ssid, int wrong);
+void *wifi_tap_button(void *view, int id); /* the row button of the list's tap target id */
 /* wifi_flows.c: Settings > Wi-Fi's flows past stock's */
 int ringnav_wifi_rows(void *win), wifi_flows_hold(void *top), wifi_flows_cancel_join(void);
 
@@ -549,10 +555,10 @@ int kv_text_w(void *label);  /* an hscroll_label's text width in its row's face;
 void kv_row(void *key, void *val, int kw, int vw, int right); /* settings_pages.c: kv_fit's split */
 void diag_about_row(void *view); /* diagnostics.c, --dev builds' Save Diagnostics */
 int diag_row(void *item);
-void caption_row(void *label, const unsigned *text);
-const unsigned *pod_caption(int i);
-extern const unsigned *const smart_awake_caption, *const folder_skip_caption,
-                                                      *const reduce_motion_caption;
+void caption_row(void *label, const char *text);
+const char *pod_caption(int i);
+extern const char *const smart_awake_caption, *const folder_skip_caption,
+                                                  *const reduce_motion_caption;
 void caption_prune(void *view); /* drops the captions of rows a rebuild removed from view */
 void caption_sel(void *view, void *item);
 /* nav/lists.c: how much of scroll view `view` a row may stand in, its height cut at the set's list
@@ -563,7 +569,7 @@ void list_grown_foot(void *view, void *row, int step); /* nav/row_paint.c: and s
 void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);
 /* inline_slider.c: Settings' one-value rows that change in place
  * (docs/oled-design.md#inline-sliders) */
-enum { IS_MAXVOL, IS_BALANCE, IS_BRIGHT, IS_BOOTVOL, IS_XFADE, IS_KINDS };
+enum { IS_MAXVOL, IS_BALANCE, IS_BRIGHT, IS_BOOTVOL, IS_KINDS };
 void *inline_slider_row(void *view, const char *icon, int kind);
 void inline_pair(void *view, const char *icon, int kind);
 void inline_slider_sel(void *view, void *item), inline_slider_paint(void *w, void *canvas);
@@ -590,6 +596,8 @@ void tilt_press(int down);
 unsigned tilt_tone(unsigned c);
 /* swipe_back.c: the left edge's swipe back (docs/internals.md#swipe-back) */
 void swipe_back_down(void *event, int allowed);
+int swipe_back_holds(void); /* a touch is a swipe back's candidate or its own */
+void touch_hide(void);      /* nav/touch_dispatch_layout.c: a touch on the rows after all */
 void swipe_back_poll(void);
 void swipe_back_paint(void *w, void *canvas);
 int page_ox(void *canvas, void *w);
@@ -848,6 +856,7 @@ int video_on(void);
 /* keylock.c: Buttons Lock's card (docs/internals.md#buttons-lock); its padlock is a status_row.c
  * slot */
 int keylock_gate(void *e, int remote);
+int keylock_holds(unsigned key); /* keylock.c: the Buttons Lock holds key back now */
 void keylock_paint(void *w, void *canvas);
 /* feedback.c: an overlay card's scrim over the top window and the status bar; 1 on the window */
 int overlay_scrim(void *w, void *canvas, unsigned argb, int *dy);
@@ -951,6 +960,12 @@ void heatguard_poll(void);  /* heatguard.c: q2guard's cards, from power_poll */
 void ulog(char level, const char *src, const char *msg);
 void ulog_end(const char *why);
 void ulog_flush(void); /* q2guard's logs on the card now, as they are (LocalSend's Send Logs) */
+/* ui_watch.c: the UI pass watchdog (docs/internals.md#ui-pass-watchdog), from ringnav_sleep; a
+ * step a long pass may be in, named by its caller (a string constant) */
+void ui_watch_enter(void);
+void ui_watch_polled(void);
+void ui_watch_woke(void);
+void ui_watch_step(const char *step);
 void cover_wake_poll(void); /* cover_wake.c: the album cover thread woken, every UI loop pass */
 
 /* power_rows.c */
@@ -965,10 +980,22 @@ int stock_usb_status_trampoline(void);
 
 /* usb_otg.c: check_otg_status's hook, OTG host power only with no VBUS on the port */
 int ringnav_otg_status(void), stock_otg_status_trampoline(void);
+int ringnav_gpio_value(const char *name), stock_gpio_value_trampoline(const char *name);
+/* usb_volume.c: mclUsbAudioSetVol's hook, a USB DAC's volume in decibels */
+int ringnav_usb_setvol(int v, int right, const char *card), stock_usb_setvol_trampoline(int v, int right, const char *card);
+/* usb_ui.c: a host has configured the gadget (system.c holds Standby on it) */
+int usb_host(void);
 void otg_hold(void); /* the PHY's ID pull-up on, the controller's role held at device */
+int usb_otg_own_vbus(void); /* usb_otg.c: the Q2's own bus power on, or still dying away */
+int usb_otg_cable(int vbus); /* usb_otg.c: PD17's VBUS less the Q2's own dying away */
+void usb_otg_poll(void);    /* usb_otg.c: a Play asked while USB audio connected */
+int stock_forbid_play_trampoline(int quiet);
+/* standby_usb.c: Standby and the USB link (docs/internals.md#standby-and-the-usb-link) */
+void standby_usb_suspend(void), standby_usb_poll(void);
 
 /* usb_record.c: the USB record on the card, a line per cable edge and OTG power change */
 void usb_record(const char *what), usb_record_edge(int in), usb_record_wake(void), usb_record_poll(void);
+void usb_record_pins(int hostdev); /* the pins alone, usb_otg.c's trace */
 int ringnav_platform_init(void), stock_platform_init_trampoline(void);
 
 /* autozone.c: Automatic Time Zone, the zone from the network's location */
@@ -1018,6 +1045,8 @@ void list_reach_paint(void *bar, void *win, void *canvas); /* row_paint.c: the s
 void list_reach_due(void); /* row_paint.c: before a frame, the band again if its list moved */
 void *coverflow_home_view(void);
 int rate_keep(int album, unsigned key, int n);
+void rate_hold(void);  /* rate_keep's songs held in the table, until */
+int rate_release(void); /* written once */
 int rate_kept(int album, unsigned key);
 unsigned rate_song_key(void *r); /* a server song's offline copy: its row's */
 int rate_fav(void *r);           /* My Fav, a server song's offline copy by its row */
@@ -1080,12 +1109,16 @@ void playlist_new_open(void); /* search_strip.c: New Playlist on the strip, its 
 const char *bt_name(char *out, unsigned n);
 int bt_name_valid(const char *s);
 void bt_name_apply(void), bt_name_row(void *view);
+int bt_own_picture(const char *path); /* bt_cover.c: a song file holds its own picture */
 /* bt_ui.c: Settings > Bluetooth's order, rows and marks (docs/oled-design.md#bluetooth) */
 void bt_page(void *view, int on), bt_rows_pre(void *view), bt_rows_post(void *view);
 int bt_list(void *list), bt_mac_ok(const char *s), bt_dev_find(const char *mac);
 int bt_quality_dim(void *w, unsigned *color); /* a Quality choice the device lacks: its text */
 #define BT_MARK_CHECK 6 /* bt_mark's kind: a picker's check on the right column */
 void *bt_mark(void *parent, const char *name, int kind, int x, int y, int w, int h);
+/* bt_pair.c: a device pairing by numeric comparison (docs/internals.md#bluetooth-pairing-card) */
+void bt_pair_init(void), bt_pair_poll(void);
+int bt_pair_prompt(int type, const char *passkey, void *unused);
 /* guest_ui.c: Guest Play's screens (docs/oled-design.md#guest-play) */
 void guest_ui_poll(void), guest_ui_paint(void *w, void *canvas), guest_np_open(void);
 int guest_ui_state(void), guest_ui_on(void), guest_settings_open(void *ctx, void *event),
@@ -1151,7 +1184,9 @@ int add_songs_key(void *top, unsigned key);
 void add_songs_paint(void *w, void *canvas);
 int add_songs_mark(void *r);
 void add_songs_toggle(void *r);
-void add_songs_search(void); /* search_strip.c: the strip over the library's songs, picking */
+void add_songs_search(void *songs); /* search_strip.c: the strip over Add Songs' songs, picking */
+void search_yield(void);    /* search_strip.c: Search's load, if it runs, ended (staged_into) */
+void coverflow_yield(void); /* coverflow.c: a Cover Flow open's step given up (open_yield) */
 int playlist_page_hold(void *top);
 int qm_song_hold(void *page, void *list, unsigned at, const char *extra, void (*pick)(void));
 int otg_count(void);
@@ -1167,7 +1202,9 @@ enum { ROUTE_BUZZER = 1, ROUTE_MIXED = 2 };
 extern int clicker_kind; /* CLICK_KIND_*, 0 the wheel's (zero at start, as .scratch is) */
 const char *clicker_text(void);
 void clicker_step(void);
-int clicker_route(int listening);
+int clicker_route(int listening), clicker_buzzes(int listening);
+/* input.c: one buzzer click alone, as a wheel's would be, for a wheel read raw (radio_tuner.c) */
+int ringnav_piezo(void);
 /* menu_modal.c: the menu sheet (docs/oled-design.md#menus) */
 enum { MM_ACTION, MM_SETTING, MM_CHOICE, MM_SWITCH }; /* modal_row's how */
 int modal_row_w(void);
@@ -1226,6 +1263,8 @@ extern unsigned long ui_thread; /* playback.c: the UI thread, from its first pas
 /* coda_rc_shim.c: Car Remote (docs/internals.md#car-remote) */
 void coda_rc_poll(void), coda_rc_toggle(void);
 int coda_rc_enabled(void);
+int coda_rc_wants_wifi(void); /* Smart Wi-Fi: Car Remote needs the radio (coda_rc_shim.c) */
+int coda_rc_online(void);     /* a phone has an authenticated Car Remote session */
 void coda_rc_note(const char *text); /* a toast, for the car (NowPlaying.notice) */
 /* carremote_page.c: Settings > Car Remote, its phone page and Pair a Phone */
 int carremote_open(void *ctx, void *event);
@@ -1247,8 +1286,14 @@ int usb_ui_key(void *top, unsigned key), usb_ui_cable(void), usb_pick_open(void 
 /* usb_car.c: Car Audio, the USB setting's Automatic (docs/iphone-mode.md#car-audio-in-the-image); usb_car_poll's
  * answers to usb_ui.c */
 enum { USB_CAR_NONE, USB_CAR_STORAGE, USB_CAR_CHARGER };
-void usb_car_start(void), usb_car_stop(int wait);
-int usb_car_poll(void), usb_car_on(void);
+void usb_car_start(void), usb_car_stop(void);
+int usb_car_poll(void), usb_car_on(void), usb_car_output(void), usb_car_busy(void), usb_car_stop_now(void);
+const char *usb_car_name(void);
+/* output_rule.c: no playback without an output (docs/internals.md#no-playback-without-an-output) */
+void output_rule_config(void);
+int ringnav_valid_output(void), stock_valid_output_trampoline(void);
+int ringnav_nav_to(const char *name, const int *ctx),
+    stock_nav_to_trampoline(const char *, const int *);
 #if Q2POD_DEV
 /* adb_trust.c (docs/adb.md#authorization): adbd's question on the card, its answer back through
  * usb_ui.c; Settings > General > Developer Options and Trusted Computers */
@@ -1263,6 +1308,14 @@ unsigned long long usb_event_now_ns(void);
 /* bt_battery.c: a connected headset's battery, 0 to 100, -1 for none
  * (docs/internals.md#headset-battery) */
 int bt_headset_battery(void);
+/* A shell command run off the UI thread (bt_ui.c bt_shell): one at a time per job, done counted
+ * once it has ended, so its file is read once per answer. */
+typedef struct {
+    int running;   /* a run of it has started and not ended */
+    unsigned done; /* runs ended */
+} bt_job;
+int bt_shell(bt_job *job, const char *cmd);
+unsigned bt_job_done(bt_job *job);
 unsigned bt_headset_rate(void), bt_headset_class(void);
 const char *bt_headset_name(void);
 /* loop_wake.c: the UI loop's idle as a poll() on an eventfd that loop_wake (peq.h, any thread)
@@ -1276,7 +1329,8 @@ int bt_vol_event_take(void), bt_vol_event_live(void), bt_vol_event_connect(void)
     bt_vol_event_wait(void);
 /* card_watch.c: what the card holds, as a generation that moves on each change; 0 without the watch
  * (docs/internals.md#card-watch) */
-unsigned card_watch_gen(void);
+unsigned card_watch_gen(void), card_watch_seen(void);
+int card_mounted_now(void); /* system.c: /proc/mounts read now; card_mounted follows the watch */
 /* player_push.c: q2player's status push, waited on by the player polls (docs/internals.md#player-status-push) */
 int player_push_wait(unsigned us), player_push_live(void);
 unsigned player_push_seq(void);
@@ -1329,7 +1383,6 @@ int home_folders(void);
 void home_keep(int d, int k);
 void *coverflow_home_edit_view(void *top);
 void coverflow_home_layout(void);
-int play_hold_released(void); /* navigation.c: Play/Pause's release ends a hold that fired */
 /* library_settings.c: Playback > Library and its pages (docs/ipod.md#settings) */
 enum { LIB_LIBRARY = 1, LIB_SORTING, LIB_PLAYLISTS, LIB_FOLDERS };
 void library_page(void *win, void *view, int page);

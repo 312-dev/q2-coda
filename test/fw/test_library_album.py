@@ -127,3 +127,20 @@ def test_an_album_page_over_another_hands_the_design_back(fw, st, records):
     fw.mock('navigator_to_with_context', lambda *_: 0)
     assert key(first.addr, rows.addr, 0) == 1  # Play pressed: the first page's songs, from the first
     assert [C.string_at(a[0]) for _, a in fw.calls('navigator_to_with_context')] == [b'playing_page']
+
+
+@pytest.mark.parametrize('extra', range(-2, 12))
+def test_lb_year_s_query_never_passes_its_buffer(fw, extra):
+    """lb_year's songtable query in sql[640]: a card path of 577 to 581 bytes left its end at 631 to 635 and the
+    tail ("' limit 1" and its NUL, 10 bytes) passed the buffer by up to 5. A path too long for the query is not
+    asked; one that fits is asked whole."""
+    prefix = len("select substr(year,1,4) from songtable where fileurl='")
+    path = b'/mnt/mmc/' + b'a' * (640 - 10 - prefix - 9 + extra)
+    asked = []
+    fw.mock('toolsQueryDbTable', lambda db, sql, cb, ctx, *_: asked.append(C.string_at(sql)) or 0)
+    rec = C.create_string_buffer(0x60)
+    keep = C.create_string_buffer(path)
+    C.c_void_p.from_address(C.addressof(rec) + O['REC_PATH']).value = C.addressof(keep)
+    fw.fn('library_album__lb_year', C.c_int, C.c_void_p)(rec)
+    assert all(len(q) < 640 for q in asked), [len(q) for q in asked]
+    assert not asked or asked[0] == b"select substr(year,1,4) from songtable where fileurl='" + path + b"' limit 1"

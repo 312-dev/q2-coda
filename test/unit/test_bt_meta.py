@@ -213,10 +213,14 @@ def test_no_cover_attribute_for_a_controller_that_does_not_say_so(code, features
 
 
 @pytest.mark.parametrize('cover', [None, b'', b'613626', b'61362x1\n', b'-136261\n'])
-def test_a_song_with_no_cover_has_no_cover_attribute(code, cover):
-    assert attrs(run(code, request(), SONG, CT_16_COVER, cover)[1]) == (0, ALL)
-    ctype, pdu, _ = run(code, request(8), SONG, CT_16_COVER, cover)  # asked for alone: answered, with none
-    assert ctype == 0x0c and attrs(pdu)[1] == []
+def test_a_song_with_no_cover_has_an_empty_cover_attribute(code, cover):
+    """A song with no cover answers 8 with no value (AVRCP 1.6.2 table 6.27: a length of 0, the value absent), so a
+    controller that fetches covers is told this song has none instead of being left with the last song's: left
+    out, the BMW kept showing the first song's cover for every later one (docs/internals.md#bluetooth-cover-art)."""
+    assert attrs(run(code, request(), SONG, CT_16_COVER, cover)[1]) == (0, ALL + [(8, 106, '')])
+    ctype, pdu, _ = run(code, request(8), SONG, CT_16_COVER, cover)  # asked for alone
+    assert ctype == 0x0c and attrs(pdu)[1] == [(8, 106, '')]
+    assert pdu[7:7 + 9] == bytes.fromhex('01 00000008 006a 0000')  # one attribute, its length 0 and no value
 
 
 def test_the_handle_follows_the_file(code):

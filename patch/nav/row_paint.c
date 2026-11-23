@@ -431,24 +431,6 @@ static void paint_letter(void *w, void *canvas) {
     canvas_set_clip_rect(canvas, &old);
 }
 
-/* Cover Flow's big letter centred over w, or the Year sort's year (CF_YEAR): its four digits in a
- * box as tall as the letter's and as wide as they need with the letter's padding, an en dash in
- * the letter's square when undated. */
-static void cf_label(void *w, void *canvas) {
-    unsigned c = st.cf_letter, y = c & ~CF_YEAR, s[4] = { c & CF_YEAR ? 0x2013 : c }, n = 1;
-    int bw = LETTER_BOX;
-    if (c & CF_YEAR && y) {
-        for (int k = 3; k >= 0; --k, y /= 10) s[k] = '0' + y % 10;
-        n = 4;
-        int px = LETTER_PX;
-        canvas_set_font(canvas, theme_face(s, (int)n, &px), (unsigned)px);
-        int need = (int)canvas_measure_text(canvas, s, n) + LETTER_BOX - px;
-        bw = need > bw ? need : bw;
-    }
-    rect_t box = { (I(w, W_W) - bw) / 2, (I(w, W_H) - LETTER_BOX) / 2, bw, LETTER_BOX };
-    draw_letter(canvas, s, n, &box);
-}
-
 /* Playing art is rounded after scaling, so opposite corners share the same pixel grid.
  * NP_ART_RADIUS at 166px (or the theme's playing.art.radius, in px at any size), painted over it in
  * the page's black: each corner row outside the arc, then its edge pixel at the alpha of its
@@ -653,6 +635,11 @@ unsigned wide_len(const unsigned *s) {
     return n;
 }
 
+static int reach_painting; /* list_reach_paint is painting a list's rows under the status row */
+/* Home's selection moved in a paint: the next frame repaints Home's page and the status row's band
+ * (paint_selection, list_reach_due). */
+static int sel_repaint __attribute__((section(".scratch")));
+
 /* Load and settle the painted surface's selection, then draw it behind the rows: the accent's bar,
  * a grid tile's card, a dot on Home's tiles; nothing behind a picture tile. */
 static void paint_selection(void *w, void *canvas) {
@@ -682,7 +669,17 @@ static void paint_selection(void *w, void *canvas) {
         if (st.center_timer && !pending_matches(top, &g_menu)) cancel_center();
         if (g_menu.kind == 3) return; /* Home shows its selected card. */
         if (eq_tabs_hold(w)) return;  /* the wheel is on EQ's tabs, above the list: no row */
-        i = reconcile(&g_menu, !moving(&g_menu) && !pointer_down());
+        int was = widget_get_prop_int(w, SEL, -1);
+        /* the band's paint (list_reach_paint) moves the view up under the status row: it draws
+         * the selection there is, as a row in sight by the moved view need not be one in the
+         * list's */
+        i = reach_painting ? index_of(&g_menu, was)
+                           : reconcile(&g_menu, !moving(&g_menu) && !pointer_down());
+        /* Home's bar shows under touch, so a selection a drag's end moved off a row has a bar
+         * drawn there still, perhaps on a row under the status row: this paint's clip may hold
+         * neither (Split's art pans beside the list), and one asked for now goes with this frame.
+         * The next frame repaints the page and the band (list_reach_due). */
+        if (home_menu(top) && widget_get_prop_int(w, SEL, -1) != was) sel_repaint = 1;
     }
     /* Touch hides the selection until the wheel or a button, except on Home (iPod's list) and a
      * pop-up's buttons, which open on their first (Cancel). */
@@ -913,8 +910,6 @@ static void paint_scrollbar(void *canvas, void *bar, int table) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
-static int reach_painting; /* list_reach_paint is painting a list's rows under the status row */
-
 /* A virtual table (Songs' and the other Library tables) draws the row its scroll cuts at its top
  * whole, above its box: under Songs' Shuffle row, and twice under the status row with the band's
  * (list_reach_paint). Its paint keeps to its box (from ringnav_paint_bg to ringnav_paint). */
@@ -946,13 +941,6 @@ int ringnav_paint(void *w, void *canvas) {
     search_strip_overlay(w, canvas);
     search_bar_paint(w, canvas); /* a music list's lit search bar */
     confirm_bar_dim(w, canvas);
-    if (w == st.cf_letter_surface && st.cf_letter &&
-        (st.cf_letter_held || (unsigned)time_now_ms() - st.cf_letter_at < LETTER_MS) &&
-        P(canvas, CANVAS_LCD)) {
-        unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
-        cf_label(w, canvas);
-        stock_canvas_set_fill_color(canvas, fill);
-    }
     edit_paint(w, canvas);
     spot_paint(w, canvas);
     if (theme()->sb_w && !reach_painting) {
@@ -1219,10 +1207,17 @@ void list_reach_paint(void *bar, void *win, void *canvas) {
 }
 
 /* Before a frame (input.c ringnav_wm_paint): the status row's band again when the page's list
- * under it has moved or changed since the band last showed it, or no longer shows rows there. */
+ * under it has moved or changed since the band last showed it, or no longer shows rows there; and
+ * the page in front and the band whole once a paint moved Home's selection (paint_selection). */
 void list_reach_due(void) {
     void *bar = *(void *const *)system_bar;
     int x, y, off;
+    if (sel_repaint) {
+        void *page = reach_page();
+        sel_repaint = 0;
+        if (page) widget_invalidate_force(page, (void *)0);
+        if (bar) widget_invalidate_force(bar, (void *)0);
+    }
     if (!bar || !reach_still()) return;
     void *v = reach_find(reach_page(), &x, &y, &off);
     if (v == reach.view && (!v || (off == reach.off && reach_rows(v) == reach.rows))) return;

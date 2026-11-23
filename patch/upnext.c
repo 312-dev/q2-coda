@@ -237,7 +237,8 @@ static void un_fill(int sel) {
 static int un_place(int stop) { return stop - (un.npn ? 1 : 0); }
 
 /* A song's row pressed (Centre or a tap): it plays, as stock's View Queue row, and the sheet
- * closes; a tap on a queued row's arrow bumps it instead. */
+ * closes (with nothing to play to it stays, its start refused); a tap on a queued row's arrow
+ * bumps it instead. */
 static int un_bump(int k);
 static int un_click(void *ctx, void *event) {
     int k = un_place((int)(long)ctx);
@@ -247,15 +248,17 @@ static int un_click(void *ctx, void *event) {
         return un_bump(k), 0;
     void *q = P(mcl_pdeqplaylist, 0);
     unsigned at = un.idx[k];
-    if (at & UN_PEND_ROW) { /* a song still to download: Now Playing moves to it, as a Next */
+    int pend = (at & UN_PEND_ROW) != 0, keeps = !pend && q && playback_keeps(q, (int)at);
+    /* A start with nothing to play to (the playing song's own row starts nothing; a paused one's
+     * plays it on): stock's message, and Up Next stays with its selection (output_rule.c) */
+    if ((!keeps || mclGetPlayStatus() == 3) && check_forbid_play_no_headset(0)) return 0;
+    if (pend) { /* a song still to download: Now Playing moves to it, as a Next */
         void *r = un_record(at);
-        if (r && !check_forbid_play_no_headset(0)) addon_pending_play(P(r, REC_PATH));
+        if (r) addon_pending_play(P(r, REC_PATH));
         navigator_back();
         return 0;
     }
-    int keeps = q && playback_keeps(q, (int)at);
-    if (!keeps && q && at < deque_size(q) && !check_forbid_play_no_headset(0))
-        playback_pick(), player_start_queue((int)at);
+    if (!keeps && q && at < deque_size(q)) playback_pick(), player_start_queue((int)at);
     navigator_back();
     if (keeps) playback_np();
     return 0;

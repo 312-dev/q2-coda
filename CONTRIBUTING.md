@@ -10,7 +10,7 @@ Open an issue with:
 - what you did, what you expected and what happened
 - the output in use (wired, Bluetooth with the codec, or USB), for sound problems
 - `q2-crash.log` from the card's root, if there is one, and `q2-crash.log.1` and `.2` beside it (the two before it)
-- the card's `.q2muse/logs` folder (`q2-log.0` to `.3` are the Q2's log, with times; `q2-heat` and `q2-bt` beside them), copied after the problem and before many more hours of use
+- the card's `.q2muse/logs` folder (`q2-log.0` to `.3` are the Q2's log, with times; `q2-heat`, `q2-bt` and the Bluetooth event log `q2-btev` beside them), copied after the problem and before many more hours of use
 
 Ideas go in a feature request issue or on Discord. Security problems go through [SECURITY.md](SECURITY.md), not an issue.
 

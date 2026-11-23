@@ -16,6 +16,7 @@ POD = c_enum('POD_CHARGE')  # pod_rows' rows, by name
 PAPER, INK = O['LIGHT_PAPER'], O['LIGHT_INK']
 REC_NAME, REC_PATH, REC_CUE_START = O['REC_NAME'], O['REC_PATH'], O['REC_CUE_START']
 KEY_PLAY, KEY_RETURN, KEY_CENTER = O['KEY_PLAY'], O['KEY_RETURN'], O['KEY_CENTER']
+KEY_BACK_BTN, KEY_FWD_BTN, KEY_PREV, KEY_NEXT = O['KEY_BACK_BTN'], O['KEY_FWD_BTN'], O['KEY_PREV'], O['KEY_NEXT']
 CP1252 = {0x80: 0x20ac, 0x82: 0x201a, 0x83: 0x192, 0x84: 0x201e, 0x85: 0x2026, 0x86: 0x2020, 0x87: 0x2021, 0x88: 0x2c6,
           0x89: 0x2030, 0x8a: 0x160, 0x8b: 0x2039, 0x8c: 0x152, 0x8e: 0x17d, 0x91: 0x2018, 0x92: 0x2019, 0x93: 0x201c,
           0x94: 0x201d, 0x95: 0x2022, 0x96: 0x2013, 0x97: 0x2014, 0x98: 0x2dc, 0x99: 0x2122, 0x9a: 0x161, 0x9b: 0x203a,
@@ -2178,6 +2179,27 @@ def test_most_played_keeps_the_top_100(fw, st, scratch):
     assert top == 100 and list(idx) == list(range(149, 49, -1))
 
 
+def test_most_played_over_a_9199_song_library_with_a_full_table_ranks_as_the_table_says(fw, st, scratch):
+    """Every one of PLAYS_SLOTS counts held and 9,199 songs, most unplayed: the ranking is the count, then the slot
+    (most recent first), each song found by its key's hash (library_lists.c plays_index), the first slot of a key
+    that two hold."""
+    keep, deques = [], Deques(fw)
+    songs = [record(keep, b'/m/%d' % i) for i in range(9199)]
+    plays = (C.c_uint * 1024).from_address(C.addressof(fw.var('st', C.c_char)) + scratch['plays'])
+    st('plays_read', C.c_uint).value = 1
+    slots = O['PLAYS_SLOTS']
+    for j in range(slots):
+        plays[2 * j], plays[2 * j + 1] = listen_key(b'/m/%d' % (j * 17)), 1 + j % 7
+    plays[2 * (slots - 1)], plays[2 * (slots - 1) + 1] = listen_key(b'/m/0'), 50  # /m/0's second slot: not its first
+    idx, score = (C.c_int * 100)(), (C.c_uint * 100)()
+    rank = fw.fn('library_lists__mp_rank', C.c_int, C.c_void_p, C.c_void_p, C.c_void_p)
+    q = deques.new(songs)
+    top = rank(q, idx, score)
+    want = sorted(((1 + j % 7) * slots + slots - j, j * 17) for j in range(slots - 1))
+    want = [i for _, i in sorted(want, key=lambda x: -x[0])][:100]
+    assert top == 100 and list(idx) == want
+
+
 # Ratings.
 @pytest.fixture
 def ratings(fw):
@@ -2222,8 +2244,57 @@ def test_a_malformed_slot_reads_as_no_rating(fw):
     assert fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, 0x100) == 0
 
 
+def test_ratings_hold_a_library_of_9199_songs_and_keep_an_older_smaller_table(fw):
+    """The owner's library is 9,199 songs: a table grows to hold them all. A Q2's file from before, 4,096 ratings
+    from its first slot (16 KB), is read whole and laid out in a table that has room for them (8,192 words), its
+    ratings kept, and written back that size with its layout mark."""
+    assert ((O['RATE_SLOTS'] - 2) // 4 * 3) >= 9199
+    old = b''.join(struct.pack('<I', (i + 1) << 3 | 1 + i % 5) for i in range(4096))
+    files = Files(fw, {'/mnt/data/ringnav-ratings': old})
+    keep = fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)
+    kept = fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)
+    assert [kept(0, (i + 1) << 3) for i in (0, 1, 4095)] == [1, 2, 1]
+    assert keep(0, 0xfffffff8, 3) == 1 and kept(0, 0xfffffff8) == 3 and kept(0, 4096 << 3) == 1
+    assert len(files.files['/mnt/data/ringnav-ratings']) == 8192 * 4
+    assert struct.unpack_from('<I', files.files['/mnt/data/ringnav-ratings'], (8192 - 2) * 4)[0] == 0x48415356
+
+
+def test_an_older_ratings_file_is_kept_once_as_v1(fw):
+    """The first use of an older Q2's ratings (16 KB, the old layout) keeps that file as it was beside the new one,
+    /mnt/data/ringnav-ratings.v1, so an older firmware or a fault in the new layout can't lose them; a later
+    start, whose file is in the new layout, and a .v1 already there are left alone."""
+    old = b''.join(struct.pack('<I', (i + 1) << 3 | 1 + i % 5) for i in range(300)) + b'\0' * (4096 - 300) * 4
+    files = Files(fw, {'/mnt/data/ringnav-ratings': old})
+    fw.mock('fw_access', lambda path, *_: 0 if C.string_at(path).decode() in files.files else -1)
+    keep = fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)
+    assert keep(0, 0xfffffff8, 3) == 1
+    assert files.files['/mnt/data/ringnav-ratings.v1'] == old and files.files['/mnt/data/ringnav-ratings'] != old
+    files.files['/mnt/data/ringnav-ratings.v1'] = b'kept'  # never written again
+    files.files['/mnt/data/ringnav-ratings'] = old  # even a file in the old layout again
+    fw.var('ratings__ra', C.c_void_p).value = 0  # a restart: no table read yet (ra.rates)
+    assert fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, 1 << 3) == 1
+    assert files.files['/mnt/data/ringnav-ratings.v1'] == b'kept'
+
+
+def test_at_the_ceiling_a_new_rating_is_refused_and_said_and_the_rest_stay(fw):
+    """12,285 ratings fill a table at its largest (RATE_SLOTS words, three quarters in use): a new song's rating
+    is refused (rate_keep 0, which rate_saved toasts as "Ratings are full": test_nav_library_pages'
+    test_a_full_ratings_table_says_so), nothing is written, every kept rating reads as it was, and a kept song's
+    rating can still change."""
+    room = (O['RATE_SLOTS'] - 2) // 4 * 3
+    data = b''.join(struct.pack('<I', (i + 1) << 3 | 1 + i % 5) for i in range(room))
+    files = Files(fw, {'/mnt/data/ringnav-ratings': data})
+    keep = fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)
+    kept = fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)
+    written = dict(files.files)
+    assert keep(0, 0xfffffff8, 4) == 0
+    assert kept(0, 0xfffffff8) == 0 and files.files == written
+    assert all(kept(0, (i + 1) << 3) == 1 + i % 5 for i in range(0, room, 97))
+    assert keep(0, 1 << 3, 5) == 1 and kept(0, 1 << 3) == 5
+
+
 def test_a_full_ratings_table_refuses(fw):
-    slots = O['RATE_SLOTS']
+    slots = ((O['RATE_SLOTS'] - 2) // 4 * 3)
     Files(fw, {'/mnt/data/ringnav-ratings': b''.join(struct.pack('<I', (i + 1) << 3 | 1) for i in range(slots))})
     keep = fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)
     assert keep(0, 0xfffffff8, 2) == 0 and keep(0, 8, 2) == 1
@@ -3026,6 +3097,81 @@ def input_event(kind, key, at):
     e = event(kind, key)
     struct.pack_into('<I', e, O['EVENT_TIME'], at)
     return e
+
+
+# Wake (Wake setting Single, the default): a device key lights a dark screen; Play/Pause, Previous and Next act too,
+# Return and a wheel turn only wake. Double: only a second Center press wakes, Return is dropped, the rest act blind.
+@pytest.fixture
+def dark(fw, st, guard):
+    """The screen off; awake_screen and the screen's timer counted, awake_screen lighting it as stock's does."""
+    lit = fw.var('g_backlight_status', C.c_ubyte)
+    lit.value = 0
+    woke = []
+    fw.mock('awake_screen', lambda *_: woke.append(1) or lit.__setattr__('value', 1) or 1)
+    return woke
+
+
+@pytest.mark.parametrize('key', [KEY_PLAY, KEY_BACK_BTN, KEY_FWD_BTN])
+def test_a_media_button_dark_lights_the_screen_and_acts(fw, st, dark, key):
+    gate = Gate(fw, 'wake_gate')
+    assert gate(DOWN, key) == 0 and dark == [1]  # passes on to stock: it plays, or skips
+    assert gate(LONG, key, 300) == 0 and gate(UP, key, 300) == 0 and dark == [1]  # a hold: seeks, lit
+    assert (1, 1, 1) in [c[1][:3] for c in fw.calls('reset_poweroptions_timer')]  # the screen's timer from now
+    assert st('dark').value & 2  # ringnav_sleep's lit pacing starts over, as a Center wake's
+
+
+def test_return_dark_only_wakes_and_its_hold_and_release_stay_out(fw, st, dark):
+    gate = Gate(fw, 'wake_gate')
+    assert gate(DOWN, KEY_RETURN) == 1 and dark == [1]
+    assert gate(LONG, KEY_RETURN, 600) == 1 and gate(UP, KEY_RETURN, 100) == 1  # lit by now: still the waking press's
+    assert gate(DOWN, KEY_RETURN, 500) == 0 and gate(UP, KEY_RETURN, 50) == 0  # the next press is Return's
+
+
+def test_a_wheel_turn_dark_only_wakes_its_ticks_eaten_till_it_stops(fw, st, dark):
+    gate = Gate(fw, 'wake_gate')
+    assert gate(DOWN, KEY_NEXT) == 1 and dark == [1] and gate(UP, KEY_NEXT, 5) == 1
+    for _ in range(10):  # the same turn, a tick every 60 ms, lit now
+        assert gate(DOWN, KEY_NEXT, 55) == 1 and gate(UP, KEY_NEXT, 5) == 1
+    assert gate(DOWN, KEY_PREV, 55) == 1  # turned back in the same go
+    assert gate(UP, KEY_PREV, 5) == 1
+    assert gate(DOWN, KEY_NEXT, 600) == 0 and gate(UP, KEY_NEXT, 5) == 0  # a new turn: the list's or the volume's
+    assert dark == [1]
+
+
+def test_center_dark_passes_for_stock_to_light_as_before(fw, st, dark):
+    gate = Gate(fw, 'wake_gate')
+    assert gate(DOWN, KEY_CENTER) == 0 and gate(UP, KEY_CENTER, 50) == 0
+    assert dark == []  # stock's on_wm_keyup_fun lights it at the release, as it always has
+
+
+def test_a_remote_key_dark_acts_without_lighting(fw, st, dark, post):
+    post(KEY_PLAY)  # SyncLink's play, posted: a phone's or a car's, not the Q2's own button
+    send = fw.fn('ringnav_input', C.c_int, C.c_void_p, C.c_void_p)
+    send(None, input_event(DOWN, KEY_PLAY, 1001))
+    assert dark == []
+
+
+@pytest.mark.parametrize('key', [KEY_PLAY, KEY_BACK_BTN, KEY_FWD_BTN, KEY_RETURN, KEY_NEXT])
+def test_a_locked_button_dark_is_left_to_the_buttons_lock(fw, st, dark, key):
+    fw.var('g_keylock_flag', C.c_ubyte).value = 1
+    gate = Gate(fw, 'wake_gate')
+    gate(DOWN, key)
+    assert dark == []  # keylock.c lights it with its card, the key held back
+
+
+@pytest.mark.parametrize('key, out', [(KEY_PLAY, 0), (KEY_BACK_BTN, 0), (KEY_FWD_BTN, 0), (KEY_NEXT, 0), (KEY_RETURN, 1)])
+def test_double_press_wake_leaves_every_other_key_as_it_was(fw, st, dark, key, out):
+    st('wake_double').value = 1
+    gate = Gate(fw, 'wake_gate')
+    assert gate(DOWN, key) == out and gate(UP, key, 50) == out and dark == []
+
+
+def test_lit_nothing_wakes(fw, st, dark):
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    gate = Gate(fw, 'wake_gate')
+    for key in (KEY_PLAY, KEY_RETURN, KEY_NEXT):
+        assert gate(DOWN, key) == 0 and gate(UP, key, 50) == 0
+    assert dark == []
 
 
 def test_a_remote_key_passes_the_buttons_lock(fw, post, guard):

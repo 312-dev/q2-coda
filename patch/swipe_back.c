@@ -18,10 +18,12 @@
  * claimed once it has moved SB_CLAIM_PX right and more right than up or down: the page's own
  * pressed widgets are aborted (EVT_POINTER_ABORT, as pull-to-search and the A-Z index claim
  * theirs), so a row, a slider or Now Playing's slide_view lets go, and from there the moves and the
- * lift are swallowed. A drag up or down first, or left, is left to the page: a list scrolls as it
- * would, from the edge too. A drag that starts anywhere else is never this one's, so the screens
- * with sideways drags of their own (Now Playing's pages, Cover Flow, the letter strip, sliders)
- * keep them; at the edge the swipe wins.
+ * lift are swallowed. Meanwhile the touch is no touch on the rows: the selected row's bar stays lit
+ * and rides with the page (swipe_back_holds, docs/internals.md#touch-mode). A drag up or down
+ * first, or left, is left to the page, which then hides the bar as any touch does (touch_hide): a
+ * list scrolls as it would, from the edge too. A drag that starts anywhere else is never this
+ * one's, so the screens with sideways drags of their own (Now Playing's pages, Cover Flow, the
+ * letter strip, sliders) keep them; at the edge the swipe wins.
  *
  * Completing, the layer slides on to the right edge over SB_GLIDE_MS from where the finger let
  * go, eased cubic_out (sb_ease), then Return goes in as a
@@ -246,6 +248,7 @@ static int sb_event(void *page, void *event) {
     if (!sb.claimed) {
         if (up || dx <= -SB_CLAIM_PX || (ady >= SB_CLAIM_PX && ady >= dx)) {
             reset();
+            touch_hide(); /* the page's touch after all: its rows' bar hides, as for any touch */
             return 0;
         }
         if (dx < SB_CLAIM_PX || dx <= ady) return 0;
@@ -282,6 +285,10 @@ static int sb_event(void *page, void *event) {
     glide(sb_done(sb.off, w, v) ? w : 0);
     return STOP;
 }
+
+/* A press is a candidate or claimed, and not let go: navigation.c's touch hook leaves the rows' bar
+ * lit meanwhile (docs/internals.md#touch-mode). */
+int swipe_back_holds(void) { return sb.page && !sb.at; }
 
 /* navigation.c's touch hook, on a press stock and the A-Z index left alone: one near the left edge
  * of a page Return leaves, under the status row, becomes a candidate. A press on the row is the

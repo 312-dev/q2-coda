@@ -420,7 +420,7 @@ def tick(p, n=1, ms=16):
 def test_the_demo_is_listed_only_where_a_dev_build_asks(fw):
     e, p = api(fw), Page(fw)
     fw.mock('toolsReadConfig', lambda path, sec, key, out, d, *_: C.memmove(out, b'1\0', 2) and 0)
-    assert e['eng_count']() == 1 and p.s.engines == 1 and p.s.rows == 5  # test/fw builds as a release does: Bricks alone
+    assert e['eng_count']() == 1 and p.s.engines == 1 and p.s.rows == 1  # test/fw builds as a release does: Bricks alone
 
 
 @pytest.mark.parametrize('asked,count', [(b'1', 2), (b'0', 1)])

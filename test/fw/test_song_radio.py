@@ -94,18 +94,18 @@ def test_the_car_starts_and_stops_a_radio(fw, ui, mcl, recs):
     q2.tick()
     ui.fire('cr_radio')  # from a timer, as Play's
     (queue, _, _), = ui.played
-    assert q2.ids(queue)[0] == 20 and q2.files[ACK] == b'5 0\n'
+    assert q2.ids(queue)[0] == 20 and q2.files[ACK] == b'5 0\n5 9\n'  # done, and taken before it (CRC_ACK_TAKEN)
     assert q2.now()['radio'] == '1'
     q2.files[CMD] = b'6 radio stop\n'
     q2.tick()
     ui.fire('cr_radio')
-    assert q2.files[ACK] == b'6 0\n' and q2.on() == 0
+    assert q2.files[ACK] == b'6 0\n6 9\n5 0\n5 9\n' and q2.on() == 0  # the last answers, newest first
     q2.tick()
     assert q2.now()['radio'] == '0'
     q2.files[CMD] = b'7 radio 99\n'  # no such song
     q2.tick()
     ui.fire('cr_radio')
-    assert q2.files[ACK] == b'7 3\n'
+    assert q2.files[ACK].startswith(b'7 3\n')  # newest first
 
 
 def test_a_radio_adds_songs_as_they_run_out_and_none_twice(fw, ui, mcl, recs):

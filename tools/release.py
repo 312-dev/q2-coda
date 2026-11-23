@@ -15,7 +15,7 @@ import tempfile
 import shelf
 import signing
 from signing import PUBLIC_KEY, public_key
-from build import ROOT, REPO, VERSION, BETA, TAG, ZIP_SHA, DEMO_SHA, build, check, need, run, sha, source_sha256, version_ok
+from build import ROOT, REPO, VERSION, BETA, TAG, ZIP_SHA, DEMO_SHA, BUNDLED_APPS, BUNDLED_DIR, build, check, need, run, sha, source_sha256, version_ok
 
 # Network Update (patch/netupdate.c) fetches releases/download/<tag>/<ASSET> and <SIGNATURE>, so the
 # names can't carry the version.
@@ -38,9 +38,26 @@ def notes():
     return '\n'.join([title, *('- '+s for s in re.split(r'(?<=[.!?]) +(?=[A-Z*"]|iPod)', text.strip()))])
 
 
-def release_body(text, assets):
-    """The version heading and its bullets (notes()) plus the SHA-256 block used by previous releases."""
-    return '\n'.join([text, '', 'SHA-256:', f'- {ASSET} ({TAG}): `{assets[ASSET]}`']) + '\n'
+def release_body(text, assets, apps=None):
+    """The version heading and its bullets (notes()) plus the SHA-256 block used by previous releases, with a line for
+    each card app the image carries (bundled_apps()): its zip, named for the commit it was built from."""
+    carried = [f'- {app["zip"]} (carried as {BUNDLED_DIR}/{app_id}): `{app["sha256"]}`'
+               for app_id, app in sorted((apps or {}).items())]
+    return '\n'.join([text, '', 'SHA-256:', f'- {ASSET} ({TAG}): `{assets[ASSET]}`', *carried]) + '\n'
+
+
+def bundled_apps(manifest):
+    """A build's card apps (manifest.json bundled_apps) as release.json records them, each checked against its pin in
+    BUNDLED_APPS: the zip and its SHA-256, the program's SHA-256 in the image and the zip's version stamp."""
+    apps = manifest.get('bundled_apps') or {}
+    check(set(apps) == set(BUNDLED_APPS), f'The build carries {sorted(apps)}, not the pinned {sorted(BUNDLED_APPS)}')
+    out = {}
+    for app_id, (_, zip_name, _, digest, _) in BUNDLED_APPS.items():
+        app = apps[app_id]
+        check(app.get('zip') == zip_name and app.get('sha256') == digest and app.get('binary_sha256'),
+              f'The build\'s {app_id} is not the pinned {zip_name}')
+        out[app_id] = {k: app[k] for k in ('zip', 'sha256', 'binary_sha256', 'build')}
+    return out
 
 
 def validate(directory):
@@ -50,6 +67,7 @@ def validate(directory):
     check(m.get('signing_key') == public_key(PUBLIC_KEY.read_bytes()).hex(),
           f'Built with another release key than {PUBLIC_KEY.relative_to(ROOT)}')
     check(m['input_zip_sha256'] == ZIP_SHA and m['stock_demo_sha256'] == DEMO_SHA, 'Wrong stock identity')
+    bundled_apps(m)  # test/build.py --build (below) checks the image holds each one's program
     # test/patch.py (below) checks the sources and the demo, stock-demo and patch.bin hashes.
     for name, key in [('rootfs.squashfs', 'rootfs_sha256'), ('update.tar', 'update_sha256')]:
         check(sha((directory/name).read_bytes()) == m[key], f'{directory/name}: hash mismatch')
@@ -104,8 +122,9 @@ def package(stock, out):
     check(source == source_sha256() and revision == run('git', '-C', ROOT, 'rev-parse', 'HEAD').strip(),
           'Source changed during release build')
     (out/'SHA256SUMS').write_text(''.join(f'{digest}  {name}\n' for name, digest in checksums.items()))
-    (out/'release-notes.md').write_text(release_body(text, checksums))
-    record = dict(tag=VERSION, revision=revision, source_sha256=source, assets=checksums,
+    apps = bundled_apps(json.loads((out/'build/manifest.json').read_text()))
+    (out/'release-notes.md').write_text(release_body(text, checksums, apps))
+    record = dict(tag=VERSION, revision=revision, source_sha256=source, assets=checksums, bundled_apps=apps,
                   guide_sha256=sha((out/GUIDE).read_bytes()), notes_sha256=sha((out/'release-notes.md').read_bytes()))
     (out/'release.json').write_text(json.dumps(record, indent=2)+'\n')
     print(f'Validated and reproducible: {out}')

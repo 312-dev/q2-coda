@@ -110,7 +110,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     glyph (regular) in Accent Blue and white for the selection, Folder view's folder (regular) in Text Secondary (each
     half's) and white for the selection, a disabled row's caret in Text Tertiary (each half's), the pickers' check
     (bold) in Accent Blue and white for the selection, the Wi-Fi page's signal and lock (regular) in Text Primary
-    (each half's), the shuffle confirmation's glyph (bold) in Accent Blue, Now Playing's heart and More (regular) in
+    (each half's) and its failed join's warning-circle in Negative (each half's) and white, the shuffle confirmation's glyph (bold) in Accent Blue, Now Playing's heart and More (regular) in
     Text Primary (each half's), the heart 34 px and its full one (fill) in Text Primary too, More pressed in Text Secondary, and the
     Ratings rows' filled and outlined stars (14 px, and white on the bar), Now Playing's rating page's stars (filled and outlined, 44 px and the
     wheel's 52 px target) in Text Primary (each half's), and Streaming's service marks in the folder's inks, all from the vendored
@@ -135,6 +135,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
     modes = [f'mode_{n}_{k}' for n in ('shuffle', 'repeat') for k in ('d', 'l', 'on')] + ['mode_repeat1_on']
     wifi = [f'{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'lock', 'trash') for k in ('d', 'l')]
+    warn = {f'wifi_warn_{k}': c for k, c in art.inks('negative', 'd', 'l', 'w').items()}  # a failed join's mark (wifi_rows.c)
     # Now Playing's heart (test_now_playings_heart): on in Favorite pink-red, both halves; off in Text Secondary
     hearts = {'np_fav_d': 0xff375f, 'np_fav_l': 0xff375f, 'np_unfav_d': 0xababab, 'np_unfav_l': 0x5c5c5c}
     glyphs = {'np_more_d': 0xffffff, 'np_more_l': 0,
@@ -194,7 +195,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
                                               'crphone_d', 'crphone_l', 'crphone_w',
                                               *(f'ctaring_{s}_{k}' for s in 'lr' for k in 'dl'),  # the buttons' focus ring's ends
-                                              'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *hearts, *menufav, *rates, *stars, *marks, *menus, *speakers, *pair, *quality,
+                                              'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *warn, *glyphs, *hearts, *menufav, *rates, *stars, *marks, *menus, *speakers, *pair, *quality,
                                               *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt', 'radio_tower',
                                               'search_pop', 'search_pop_letters', *(f'search_return_{m}_{k}' for m in ('search', 'go', 'save') for k in 'wa'), 'holdback',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)),
@@ -214,6 +215,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           ('check_a', art.CHECK_PX, blue), ('check_w', art.CHECK_PX, 0xffffff),
                           ('holdback', art.HOLD_BACK_PX, 0xffffff),  # search_strip.c's Return-held card
                           *((n, art.ROW_ICON_PX, 0 if n.endswith('_l') else 0xffffff) for n in wifi),
+                          *((n, art.ROW_ICON_PX, c) for n, c in warn.items()),
                           *((n, 22, {'d': 0xababab, 'l': 0x5c5c5c, 'on': blue}[n.rsplit('_', 1)[1]]) for n in modes),
                           *((n, art.ROW_ICON_PX, rgb) for n, rgb in glyphs.items()),
                           *((n, art.NP_HEART_PX, rgb) for n, rgb in hearts.items()),

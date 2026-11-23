@@ -1,5 +1,6 @@
 """Original raster art the theme files state in numbers, drawn at build time: small vector shapes, antialiased
 over sub-rows, written as 8-bit RGBA PNGs. No Apple assets or reference pixels; every shape is drawn here."""
+import bisect
 import functools
 import math
 import re
@@ -116,17 +117,25 @@ def stroke(polys, width):
     return out
 
 
+def _edges(poly):
+    """poly's edges that are not level, each (low y, high y, ax, ay, bx, by): a scanline at y crosses one when
+    low <= y < high, which is (ay <= y) != (by <= y)."""
+    return [(min(ay, by), max(ay, by), ax, ay, bx, by) for (ax, ay), (bx, by) in zip(poly, poly[1:] + poly[:1]) if ay != by]
+
+
 def coverage(polys, box):
-    """Each pixel's covered fraction of box (x, y, w, h), the polygons' union, each polygon even-odd."""
+    """Each pixel's covered fraction of box (x, y, w, h), the polygons' union, each polygon even-odd. Each polygon's
+    edges are listed once, and a scanline tests only those of the polygons whose span it is in."""
     x0, y0, w, h = box
     cov = [0.0] * (w * h)
+    each = [(min(e[0] for e in es), max(e[1] for e in es), es) for es in map(_edges, polys) if es]
     for sub in range(h * SUB):
         y = y0 + (sub + 0.5) / SUB
         spans = []
-        for poly in polys:
-            xs = sorted(ax + (y - ay) * (bx - ax) / (by - ay)
-                        for (ax, ay), (bx, by) in zip(poly, poly[1:] + poly[:1]) if (ay <= y) != (by <= y))
-            spans += zip(xs[::2], xs[1::2])
+        for low, high, es in each:
+            if low <= y < high:
+                xs = sorted(ax + (y - ay) * (bx - ax) / (by - ay) for lo, hi, ax, ay, bx, by in es if lo <= y < hi)
+                spans += zip(xs[::2], xs[1::2])
         spans.sort()
         row, end = sub // SUB * w, None
         for a, b in spans:
@@ -144,13 +153,16 @@ def coverage(polys, box):
 
 def coverage_nonzero(polys, box):
     """As coverage, but the polygons filled together by the nonzero rule, as an SVG path's default: a ring's inner
-    contour, wound the other way, is a hole."""
+    contour, wound the other way, is a hole. The edges are sorted by their low y once, and a scanline tests only
+    those that start at or above it."""
     x0, y0, w, h = box
     cov = [0.0] * (w * h)
+    es = sorted(e for poly in polys for e in _edges(poly))
+    lows = [e[0] for e in es]
     for sub in range(h * SUB):
         y = y0 + (sub + 0.5) / SUB
         cross = sorted((ax + (y - ay) * (bx - ax) / (by - ay), 1 if by > ay else -1)
-                       for poly in polys for (ax, ay), (bx, by) in zip(poly, poly[1:] + poly[:1]) if (ay <= y) != (by <= y))
+                       for lo, hi, ax, ay, bx, by in es[:bisect.bisect_right(lows, y)] if y < hi)
         row, wind = sub // SUB * w, 0
         for (xa, d), (xb, _) in zip(cross, cross[1:]):
             wind += d
@@ -789,6 +801,9 @@ def images(t):
         for name, glyph in (('wifi_3', 'wifi-high'), ('wifi_2', 'wifi-medium'), ('wifi_1', 'wifi-low'), ('lock', 'lock-simple'),
                             ('trash', 'trash')):
             out |= {f'{prefix}_{name}_{k}': phosphor(glyph, ROW_ICON_PX, c, ROW_INK) for k, c in STATE_INKS.items()}
+        # ... and a failed join's mark before them: warning-circle in Negative per half, white on the selection
+        out |= {f'{prefix}_wifi_warn_{k}': phosphor('warning-circle', ROW_ICON_PX, c, ROW_INK)
+                for k, c in inks('negative', 'd', 'l', 'w').items()}
     # the menu sheet's symbols (menu_modal.c)
     out |= {f'{prefix}_menu_{n}_{k}': phosphor(n, MENU_ICON_PX, c) for n in MENU_ICONS for k, c in FOLDER_INKS.items()}
     out[f'{prefix}_menu_check_a'] = phosphor('check', MENU_ICON_PX, on)

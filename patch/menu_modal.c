@@ -265,9 +265,9 @@ void modal_close(void *win) {
 
 /* A finger that closes a sheet (the user's, 2026-11-18, for Up Next; docs/oled-design.md#up-next):
  * a tap on the page receding above it (down and up over SH_TOP, within TAP_PX), or a drag down,
- * more down than across (the swipe up that opens Up Next, reversed), that came down on the sheet's
- * strip above its rows (the grab bar's) or on its rows while they are at their top. A drag on rows
- * scrolled down scrolls them, as anywhere.
+ * more down than across as it starts (the swipe up that opens Up Next, reversed), that came down
+ * on the sheet's strip above its rows (the grab bar's) or on its rows while they are at their top.
+ * A drag on rows scrolled down scrolls them, as anywhere.
  *
  * The drag is claimed in the window's move-before, before its children see the move, once it has
  * gone TAP_PX down and more down than across: from there the rows' scroll would take it, and
@@ -275,7 +275,9 @@ void modal_close(void *win) {
  * widgets are aborted first (as swipe_back.c and pull-to-search claim theirs) and the moves and the
  * lift are swallowed. A drag up or sideways first is left to the rows. Claimed, the sheet follows
  * the finger (mo.off, MO_DRAG), the page behind coming forward as it drops; let go SH_DRAG_PX or
- * more down and it falls away from there as Return lets it (modal_close, from the next pass,
+ * more down, however far across (a thumb holding the Q2 swipes down on a slant, 30 degrees and
+ * more off the vertical: the user's, 2026-11-21), and it falls away from there as Return lets it
+ * (modal_close, from the next pass,
  * outside the touch's dispatch), short of it it rises back. Under Reduce Motion, or with no motion
  * to run (no material yet, a picker over another sheet), it stays put and the lift decides alone.
  * Another's abort (a swipe back's) puts the sheet back. */
@@ -354,7 +356,8 @@ static int sheet_touch(void *win, void *event) {
     int tap = dx <= TAP_PX && (dy < 0 ? -dy : dy) <= TAP_PX;
     if (from == MT_SCRIM && tap && y < SH_TOP) timer_add(sheet_touch_close, win, 0);
     if (from != MT_DRAG) return 0;
-    if (dy >= SH_DRAG_PX && 2 * dx < dy)
+    /* claimed, the drop alone decides: a thumb's slant across is no reason to stay */
+    if (dy >= SH_DRAG_PX)
         timer_add(sheet_touch_close, win, 0);
     else
         drag_back();
@@ -554,14 +557,14 @@ static unsigned bilerp(const unsigned *fb, int sx, int sy) {
     return out;
 }
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
-/* One plane's box blur, three passes, along n values stride apart */
+/* One plane's box blur, three passes, along n values stride apart, each pass's mean rounded */
 static void box(int *v, int n, int stride, int *tmp) {
     for (int pass = 0; pass < 3; ++pass) {
         int sum = 0;
         for (int i = 0; i < n; ++i) tmp[i] = v[i * stride];
         for (int k = -SH_BLUR; k <= SH_BLUR; ++k) sum += tmp[clampi(k, 0, n - 1)];
         for (int i = 0; i < n; ++i) {
-            v[i * stride] = sum / (2 * SH_BLUR + 1);
+            v[i * stride] = (sum + SH_BLUR) / (2 * SH_BLUR + 1);
             sum += tmp[clampi(i + SH_BLUR + 1, 0, n - 1)] - tmp[clampi(i - SH_BLUR, 0, n - 1)];
         }
     }
@@ -572,11 +575,19 @@ static unsigned isqrt(unsigned v) {
     return s;
 }
 
+/* A 4 x 4 ordered dither (Bayer), in 16ths of a level: the material's last step, from 16ths to
+ * whole levels, rounds each pixel up by its place's threshold, so a 4 x 4 tile averages them. */
+static const unsigned char sh_dither[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
+
 /* The material from the page under the sheet, whole in fb (its first whole paint): the page
  * receding and dimmed for the strip above the sheet, then that page blurred on a quarter-size grid,
  * scaled back, its colour raised, darkened and tinted (Light Mode: under white at 75%), for the
- * sheet. ponytail: made once, so a page that changes under an open sheet (Now Playing's time)
- * shows as it was; making it again on each whole paint would follow. */
+ * sheet. The grid holds each cell's sum (16 times its mean) and every step keeps those 16ths,
+ * rounding, down to the one write in whole levels, which is dithered (sh_dither): darkened to 28%,
+ * a smooth page spans as few as 8 levels across the sheet, and whole levels alone drew it as bands
+ * often over 100 px wide (docs/internals.md#inset-modal). ponytail: made once, so a page that
+ * changes under an open sheet (Now Playing's time) shows as it was; making it again on each whole
+ * paint would follow. */
 static void sheet_build(const unsigned *fb) {
     unsigned n = (SH_STRIP + SH_H - SH_TOP) * SH_W;
     int *q = calloc(3 * SH_QW * SH_QH + SH_QW + SH_QH, sizeof *q), light = ipod_light();
@@ -602,7 +613,7 @@ static void sheet_build(const unsigned *fb) {
                                        (src_at(4 * qy + j, SH_H) + 128) >> 8);
                     sum[0] += c >> 16 & 255, sum[1] += c >> 8 & 255, sum[2] += c & 255;
                 }
-            for (int p = 0; p < 3; ++p) pl[p][qy * SH_QW + qx] = sum[p] / 16;
+            for (int p = 0; p < 3; ++p) pl[p][qy * SH_QW + qx] = sum[p]; /* 16 x the mean */
         }
     for (int p = 0; p < 3; ++p) {
         for (int qy = 0; qy < SH_QH; ++qy) box(pl[p] + qy * SH_QW, SH_QW, 1, tmp);
@@ -621,15 +632,16 @@ static void sheet_build(const unsigned *fb) {
                 const int *v = pl[p];
                 int t = v[y0 * SH_QW + x0] * (256 - fx) + v[y0 * SH_QW + x1] * fx,
                     u = v[y1 * SH_QW + x0] * (256 - fx) + v[y1 * SH_QW + x1] * fx;
-                c[p] = (t * (256 - fy) + u * fy) >> 16;
+                c[p] = (t * (256 - fy) + u * fy + (1 << 15)) >> 16;
             }
-            int luma = (77 * c[0] + 150 * c[1] + 29 * c[2]) >> 8;
+            int luma = (77 * c[0] + 150 * c[1] + 29 * c[2] + 128) >> 8,
+                dither = sh_dither[(y & 3) * 4 + (x & 3)];
             unsigned out = 0xff000000u;
             for (int p = 0; p < 3; ++p) {
-                int v = clampi(luma + ((c[p] - luma) * SH_SAT >> 8), 0, 255);
-                v = light ? (v * (256 - SH_TINT_L) + 255 * SH_TINT_L) >> 8
-                          : ((v * SH_KEEP >> 8) * (256 - SH_TINT) + 255 * SH_TINT) >> 8;
-                out |= (unsigned)v << (16 - 8 * p);
+                int v = clampi(luma + ((c[p] - luma) * SH_SAT >> 8), 0, 255 * 16);
+                v = light ? (v * (256 - SH_TINT_L) + 255 * 16 * SH_TINT_L) >> 8
+                          : (v * SH_KEEP * (256 - SH_TINT) + 255 * 16 * SH_TINT * 256) >> 16;
+                out |= (unsigned)clampi((v + dither) >> 4, 0, 255) << (16 - 8 * p);
             }
             mat[(y - SH_TOP) * SH_W + x] = out;
         }

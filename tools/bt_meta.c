@@ -12,9 +12,11 @@
  *
  * Attribute 8, AVRCP 1.6's cover art, is the playing song's image handle, which demo's payload keeps
  * in BT_COVER_FILE's first seven bytes while the song has a cover (patch/bt_cover.c) and q2-bip
- * serves (docs/internals.md#bluetooth-cover-art). It exists only for a controller whose own SDP
- * record says it fetches covers (COVER_CT): for any other the file is never opened and 8 is no
- * attribute, asked for or not.
+ * serves (docs/internals.md#bluetooth-cover-art); a song with no cover answers it with no value
+ * (length 0, as AVRCP 1.6.2's table 6.27 allows), so the controller is told the song has none
+ * instead of keeping the last song's. It exists only for a controller whose own SDP record says it
+ * fetches covers (COVER_CT): for any other the file is never opened and 8 is no attribute, asked
+ * for or not.
  *
  * GetPlayStatus (PDU 0x30) is upstream's in stock too, and with no player it answers every song as length
  * 0xFFFFFFFF at position 0, so a car never learnt where the song was and ran its own clock.
@@ -168,7 +170,7 @@ u8 bt_meta_impl(void *session, u8 *pdu, u8 transaction, char *gp) {
     (void)transaction;
     unsigned len = (unsigned)pdu[5] << 8 | pdu[6], nattr, i, pos = 1, count = 0;
     u32 asked[ATTR_COVER];
-    /* the controller's record: one that fetches covers has an eighth attribute, when the song has one */
+    /* the controller's record: one that fetches covers has an eighth attribute, empty for a song with no cover */
     const char *target = *(const char *volatile *)((char *)session + SESSION_TARGET);
     unsigned last = ATTR_LAST;
     if (target && (*(const int *)(target + TARGET_FEATURES) & COVER_CT)) last = ATTR_COVER;
@@ -196,7 +198,7 @@ u8 bt_meta_impl(void *session, u8 *pdu, u8 transaction, char *gp) {
         char num[12];
         unsigned tl = 0, w;
         const char *t = m ? attr_text(m, asked[i], num, &tl) : 0;
-        if (m && asked[i] == ATTR_COVER && cover) t = handle, tl = HANDLE_DIGITS;
+        if (m && asked[i] == ATTR_COVER) t = cover ? handle : &none, tl = cover ? HANDLE_DIGITS : 0;
         if (!m && !nattr && asked[i] == 1) t = &space, tl = 1; /* no track: a title, as Shanling's browsing gives */
         if (!t && !(nattr && !m)) continue; /* an attribute with no value is left out */
         if (!t) t = &none, tl = 0;            /* asked for with no track: its empty value */

@@ -105,7 +105,7 @@ void about_rows(void *view) {
 #define CAP_STEP_MS 16
 static struct {
     void *view, *item[CAP_MAX];
-    const unsigned *text[CAP_MAX];
+    unsigned *text[CAP_MAX];               /* each caption widened, on the heap (cap_wide) */
     unsigned char cut[CAP_MAX][CAP_LINES]; /* each line's end in text; 0: not yet measured */
     unsigned char lines[CAP_MAX];
     void *open, *closing; /* the row growing (or grown) and the one shrinking back */
@@ -117,26 +117,47 @@ static int cap_find(void *item) {
         if (item && cap.item[i] == item) return i;
     return -1;
 }
+/* Entry i emptied: its row and its caption go. */
+static void cap_clear(int i) {
+    if (cap.open == cap.item[i]) cap.open = (void *)0;
+    if (cap.closing == cap.item[i]) cap.closing = (void *)0;
+    free(cap.text[i]);
+    cap.item[i] = (void *)0, cap.text[i] = (unsigned *)0, cap.lines[i] = 0;
+    memset(cap.cut[i], 0, CAP_LINES);
+}
 static int cap_gone(void *view, void *event) {
     if (view != cap.view) return 0;
     stop_timer(&cap.timer);
+    for (int i = 0; i < CAP_MAX; ++i) free(cap.text[i]);
     memset(&cap, 0, sizeof cap);
     return 0;
 }
-/* The row a list_row label stands in (its button's list_item) gets text as its caption; no text,
- * none, a caption it had dropped. A row already in the table keeps its one entry, so a caller may run on every layout: a
- * second entry for the row, never measured, would set its height in cap_step after the first. */
-void caption_row(void *label, const unsigned *text) {
+/* s, UTF-8 (a Bluetooth device's name in its caption is BlueZ's), as the canvas draws it: a code
+ * unit a character (lyrics.c utf8_char: a byte that starts no valid sequence is its own Latin-1
+ * character), on the heap; 0 with no memory. */
+static unsigned *cap_wide(const char *s) {
+    unsigned n = (unsigned)strlen(s), *w = calloc(n + 1, sizeof *w), k = 0;
+    for (unsigned i = 0; w && i < n;) w[k++] = utf8_char((const unsigned char *)s, n, &i);
+    return w;
+}
+/* Whether the widened w says s. */
+static int cap_says(const unsigned *w, const char *s) {
+    unsigned n = (unsigned)strlen(s), i = 0;
+    while (i < n && *w && *w == utf8_char((const unsigned char *)s, n, &i)) ++w;
+    return i >= n && !*w;
+}
+/* The row a list_row label stands in (its button's list_item) gets text as its caption, copied;
+ * no text, none, a caption it had dropped. A row already in the table keeps its one entry, so a
+ * caller may run on every layout: a second entry for the row, never measured, would set its height
+ * in cap_step after the first. */
+void caption_row(void *label, const char *text) {
     void *item = label ? P(P(label, W_PARENT), W_PARENT) : (void *)0,
          *view = item ? P(item, W_PARENT) : (void *)0;
     if (!view) return;
     if (!text) { /* its entry, if any, goes; the row is one row high at the next step */
         int i = view == cap.view ? cap_find(item) : -1;
         if (i < 0) return;
-        if (cap.open == item) cap.open = (void *)0;
-        if (cap.closing == item) cap.closing = (void *)0;
-        cap.item[i] = (void *)0, cap.text[i] = (const unsigned *)0, cap.lines[i] = 0;
-        memset(cap.cut[i], 0, CAP_LINES);
+        cap_clear(i);
         I(item, W_H) = CAP_TOP;
         return;
     }
@@ -147,13 +168,15 @@ void caption_row(void *label, const unsigned *text) {
     }
     int had = cap_find(item);
     if (had >= 0) {
-        if (cap.text[had] != text) /* another caption: measured again at its next paint */
-            cap.text[had] = text, cap.lines[had] = 0, memset(cap.cut[had], 0, CAP_LINES);
+        unsigned *w;
+        if (cap_says(cap.text[had], text) || !(w = cap_wide(text))) return;
+        free(cap.text[had]); /* another caption: measured again at its next paint */
+        cap.text[had] = w, cap.lines[had] = 0, memset(cap.cut[had], 0, CAP_LINES);
         return;
     }
     for (int i = 0; i < CAP_MAX; ++i)
         if (!cap.item[i]) {
-            cap.item[i] = item, cap.text[i] = text;
+            if ((cap.text[i] = cap_wide(text))) cap.item[i] = item;
             return;
         }
 }
@@ -167,25 +190,21 @@ void caption_prune(void *view) {
         for (unsigned k = 0, n = widget_count_children(view); item && k < n && !here; ++k)
             here = widget_get_child(view, k) == item;
         if (!item || here) continue;
-        if (cap.open == item) cap.open = (void *)0;
-        if (cap.closing == item) cap.closing = (void *)0;
-        cap.item[i] = (void *)0, cap.text[i] = (const unsigned *)0, cap.lines[i] = 0;
-        memset(cap.cut[i], 0, CAP_LINES);
+        cap_clear(i);
     }
 }
 #define STR_(x) #x
 #define STR(x) STR_(x)
-#define W(s) ((const unsigned *)L##s)
 /* Reset Settings (stock's reset_page; approved as 30 v2 on 2026-11-16): its three rows act at
  * once behind a confirmation card (feedback.c asks[]), so none has a chevron; under the selected
  * one a caption says what it takes, as stock's handlers do (feedback.c's asks[] note). Each row's
  * button is named by its index; its list_into image goes, insensitive too, as stock's hit test
  * skips only the insensitive. Runs on every layout; a row is captioned once. */
 void reset_rows(void *view) {
-    static const unsigned *const caps[] = {
-        W("Keeps your music, playlists and ratings"),
-        W("Erases playlists and Favorites, then rescans"),
-        W("Erases all settings and playlists; music stays"),
+    static const char *const caps[] = {
+        "Keeps your music, playlists and ratings",
+        "Erases playlists and Favorites, then rescans",
+        "Erases all settings and playlists; music stays",
     };
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
         void *item = widget_get_child(view, i),
@@ -218,29 +237,28 @@ int reset_list(void *list) {
  * On-The-Go's rows (playlists.c pl_dress, navigation.c qm_open); Automatic Time Zone's
  * lookup (autozone.c), which sends the network's address to the service only while on. Volume Guard
  * has none. */
-const unsigned *pod_caption(int i) {
-    static const unsigned *const text[POD_COUNT] = {
-        [POD_CARMODE] = W("Plays at power-on, shuts down when unplugged"),
-        [POD_STANDBY] = W("Shuts down a Q2 left in Standby this long"),
+const char *pod_caption(int i) {
+    static const char *const text[POD_COUNT] = {
+        [POD_CARMODE] = "Plays at power-on, shuts down when unplugged",
+        [POD_STANDBY] = "Shuts down a Q2 left in Standby this long",
         [POD_CHARGE] =
-            W("Stops charging at " STR(CHARGE_STOP) "%, starts again at " STR(CHARGE_RESUME) "%"),
-        [POD_WAKE] = W("Center presses it takes to wake the screen"),
-        [POD_HOLD_HOME] = W("What holding Return opens: Now Playing or Home"),
-        [POD_BIG_LIB] = W("Year sort spins by year too; letters stay till you lift"),
-        [POD_SCAN_DURATIONS] = W("Measures song lengths after each library update"),
-        [POD_CF_POSITION] = W("Shows your place in the covers while you browse"),
-        [POD_COVERMODE] = W("Shows the art full screen after 10s on Now Playing"),
-        [POD_OTG] = W("Shows On-The-Go in Playlists and hold menus"),
-        [POD_AUTOZONE] = W("Sets the zone from your network's location"),
+            "Stops charging at " STR(CHARGE_STOP) "%, starts again at " STR(CHARGE_RESUME) "%",
+        [POD_WAKE] = "Any Button: every button wakes it. Double Press: Center twice",
+        [POD_HOLD_HOME] = "What holding Return opens: Now Playing or Home",
+        [POD_BIG_LIB] = "Year sort spins by year too; letters stay till you lift",
+        [POD_SCAN_DURATIONS] = "Measures song lengths after each library update",
+        [POD_CF_POSITION] = "Shows your place in the covers while you browse",
+        [POD_COVERMODE] = "Shows the art full screen after 10s on Now Playing",
+        [POD_OTG] = "Shows On-The-Go in Playlists and hold menus",
+        [POD_AUTOZONE] = "Sets the zone from your network's location",
     };
-    return i >= 0 && i < POD_COUNT ? text[i] : (const unsigned *)0;
+    return i >= 0 && i < POD_COUNT ? text[i] : (const char *)0;
 }
 /* Smart Awake's (navigation.c keep_lit_poll), stock's Folder skip's (playback.c ringnav_next's
  * rollover) and Reduce Motion's (ui_kit.c motion_reduced): rows that are not pod_rows'. */
-const unsigned *const smart_awake_caption =
-    W("Keeps the screen on for lyrics and art while playing");
-const unsigned *const folder_skip_caption = W("Plays on into the next folder when one ends");
-const unsigned *const reduce_motion_caption = W("Fades in place of slides, zooms and bounces");
+const char *const smart_awake_caption = "Keeps the screen on for lyrics and art while playing";
+const char *const folder_skip_caption = "Plays on into the next folder when one ends";
+const char *const reduce_motion_caption = "Fades in place of slides, zooms and bounces";
 
 /* Captioned row i's grown height, its caption measured. */
 static int cap_full(int i) { return CAP_TOP + cap.lines[i] * CAP_LINE + CAP_FOOT; }

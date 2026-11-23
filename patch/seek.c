@@ -330,7 +330,7 @@ int seek_release(unsigned key) {
     return 1;
 }
 
-/* The car's Next or Previous held (patch/q2_iap2.c, through Car Remote's shim: coda_rc_shim.c "scan"): dir 1 or -1
+/* The car's Next or Previous held (patch/iap2_hid.c, through Car Remote's shim: coda_rc_shim.c "scan"): dir 1 or -1
  * scans as a button held past SEEK_HOLD_MS does, from now, the player's own scan (mcl-scan) heard at speed where it
  * can; the car's word again within SEEK_CAR_LOST_MS keeps it going (its button stays down); dir 0 is the release,
  * and the song plays on from where the scan reached. The car held its buttons in the first drive (2026-11-20) through

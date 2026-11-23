@@ -233,7 +233,7 @@ static void as_act(void) {
     if (l->kind == AS_CHOOSE)
         as_push(AS_PLAYED + l->sel, 0);
     else if (l->sel < l->lead && l->kind == AS_SONGS)
-        add_songs_search();
+        add_songs_search(l->list); /* the strip over this list, held while it is open */
     else if (l->sel < l->lead)
         as_add_all(l);
     else if ((r = as_album(l, l->sel)))

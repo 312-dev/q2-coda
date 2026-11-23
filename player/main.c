@@ -11,7 +11,7 @@
 #include <fcntl.h>
 
 /* There while q2player is the player: the payload's Clicker (patch/clicker.c) sends it clicks to mix in. */
-#define CLICKS_FILE "/tmp/q2clicks"
+#define CLICKS_FILE PEQ_ROOT "/tmp/q2clicks"
 /* Crashes in a row: CRASHES_FILE holds how many times q2player has crashed within HEALTHY_S of its start this boot, and
  * each crash's line in the unified log (plog) says which signal and how many in a row. demo starts the player again. */
 #define CRASHES_FILE PEQ_ROOT "/tmp/q2player.crashes"
@@ -61,6 +61,19 @@ static void crashed(int sig) {
     raise(sig);
 }
 
+/* SIGUSR2 is mcl-carrelease for a script (patch/q2car.sh before it unbinds the gadget): blocked in every thread and
+ * taken here, where setting the request and waking the playback thread is safe */
+static void *release_thread(void *arg) {
+    sigset_t *set = arg;
+    for (int sig; !sigwait(set, &sig);) {
+        pthread_mutex_lock(&ctl.mu);
+        ctl.car_release = 1;
+        pthread_cond_broadcast(&ctl.wake);
+        pthread_mutex_unlock(&ctl.mu);
+    }
+    return NULL;
+}
+
 int main(int argc, char **argv) {
     const char *path = getenv("Q2PLAYER_SOCK");
     pthread_t engine;
@@ -75,12 +88,19 @@ int main(int argc, char **argv) {
     close(open(CLICKS_FILE, O_WRONLY | O_CREAT | O_CLOEXEC, 0644));
     signal(SIGPIPE, SIG_IGN);
     /* demo listens before it starts the player, but a player restarted by hand may be early */
-    for (int i = 0; ipc_connect(path ? path : "/tmp/sock_play") < 0; i++) {
+    for (int i = 0; ipc_connect(path ? path : PEQ_ROOT "/tmp/sock_play") < 0; i++) {
         if (i == 50) return 1;
         usleep(100000);
     }
     const char *push = getenv("Q2PLAYER_PUSH");
-    ipc_push_open(push ? push : "/tmp/q2player.push");
+    ipc_push_open(push ? push : PEQ_ROOT "/tmp/q2player.push");
+    static sigset_t release;
+    sigemptyset(&release);
+    sigaddset(&release, SIGUSR2);
+    pthread_sigmask(SIG_BLOCK, &release, NULL); /* before any thread: each inherits it */
+    pthread_t releaser;
+    if (!pthread_create(&releaser, NULL, release_thread, &release)) pthread_detach(releaser);
+    feed_start(); /* the car's other sources (feed.c) */
     if (pthread_create(&engine, NULL, engine_thread, NULL)) return 1;
     ipc_thread(NULL);
     return 0;

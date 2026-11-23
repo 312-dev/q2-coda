@@ -10,11 +10,12 @@ from types import SimpleNamespace
 import pytest
 
 from conftest import O
+import host  # noqa: E402
 
 SEED = 2166136261
 SUD, BEST, SOL, SNK = 0x31445553, 0x31585456, 0x314c4f53, 0x314b4e53
 CENTER, PREV, NEXT, PLAY, RETURN, BACK_BTN, FWD_BTN = 218, 172, 173, 171, 170, 222, 223
-CHOOSER, SUDOKU, VORTEX, SOLITAIRE, SNAKE = range(5)
+CHOOSER, SUDOKU, VORTEX, SOLITAIRE, SNAKE, ENGINE = range(6)
 AIM, RUNNING, OVER = range(3)
 RUN, HELD, MENU = range(3)
 UP = 64
@@ -1847,7 +1848,7 @@ def test_leaving_a_game_saves_and_returns_to_its_row(fw):
     fw.mock('widget_set_prop_int', lambda w, k, v, *_: props.update({C.string_at(k): v}))
     p.go(CHOOSER)
     assert s.screen == CHOOSER and SOLITAIRE_FILE in p.card.files
-    assert props[b'_ringnav_index'] == SOLITAIRE - 1 and props[b'_ringnav_count'] == 5  # its four and Bricks
+    assert props.get(b'_ringnav_index', 0) == 0  # Solitaire unlisted: the chooser's top row, its only one
 
 
 def test_a_screen_left_with_keyup_in_the_chooser_goes_back(fw):
@@ -1897,28 +1898,50 @@ def card_apps(fw, apps):
     return {f'/mnt/mmc/.{k}/q2app': v for k, v in apps.items()}
 
 
+SHIPPED = ['Bricks']  # the build's games (peq.h GAME_*, engine.c eng_games[]): the owner's, 2026-11-22
+
+
+def test_the_build_ships_bricks_alone(fw):
+    """The owner, 2026-11-22: Games lists Bricks alone in this build, its own Sudoku, Vortex, Solitaire and Snake
+    left out while the games in progress are finished. A card with no games: the chooser is the build's list."""
+    texts = []
+    fw.mock('widget_set_text_utf8', lambda w, s, *_: texts.append(C.string_at(s).decode()))
+    p = Page(fw, card_apps(fw, {}))
+    assert texts[texts.index('Games') + 1:] == SHIPPED and len(handlers(fw, EVT_CLICK)) == len(SHIPPED)
+    assert p.s.rows == len(SHIPPED)
+    peq = (host.ROOT/'patch/peq.h').read_text()
+    assert re.findall(r'^#define GAME_(\w+) (\d)', peq, re.M) == [(n, '0') for n in ('SUDOKU', 'VORTEX', 'SOLITAIRE', 'SNAKE')]
+
+
+def test_saves_of_the_games_left_out_are_neither_read_nor_touched(fw):
+    """A Q2 that played Sudoku or Solitaire before this build: Games opens on its list, the saves' files stay as
+    they were (for the games' return); Bricks opens."""
+    files = {SUDOKU_FILE: b'\x01' * 8, SOLITAIRE_FILE: b'\x02' * 8}
+    p = Page(fw, dict(files))
+    assert p.s.screen == CHOOSER and {k: p.card.files[k] for k in files} == files
+    rows = handlers(fw, EVT_CLICK)
+    press(rows[0])  # Bricks, from the next loop pass
+    assert p.s.target == ENGINE
+
+
 def test_the_chooser_lists_its_games_then_the_card_s_by_name_and_each_row_opens_its_own(fw):
     files = card_apps(fw, {'zork': b'name=Zork\ngame=1\n', 'tunes': b'name=Tunes\n', 'blocks': b'name=Blocks\ngame=1\n'})
     texts = []
     fw.mock('widget_set_text_utf8', lambda w, s, *_: texts.append(C.string_at(s).decode()))
     p = Page(fw, files)
-    assert texts[-7:] == ['Sudoku', 'Vortex', 'Solitaire', 'Snake', 'Bricks', 'Blocks', 'Zork']  # Tunes isn't a game
+    assert texts[-3:] == [*SHIPPED, 'Blocks', 'Zork']  # Tunes isn't a game
     rows = handlers(fw, EVT_CLICK)
-    assert len(rows) == 7  # its own four, the engine's Bricks, the card's two
+    assert len(rows) == 3  # the engine's Bricks, the card's two
     fw.mock('fw_fork', lambda *_: 4242)
     toasts, tried = heard(fw), []
     fw.mock('fw_access', lambda path, *_: tried.append(C.string_at(path)) or len(tried) == 1)  # Blocks' isn't there
-    press(rows[5])  # Blocks, the card's first by name
+    press(rows[1])  # Blocks, the card's first by name
     assert tried == [b'/mnt/mmc/.blocks/q2-blocks'] and not fw.fn('addon_game_on', C.c_int)() and len(toasts) == 1
-    press(rows[6])  # Zork, its second, over the whole screen
+    press(rows[2])  # Zork, its second, over the whole screen
     assert fw.fn('addon_game_on', C.c_int)() == 4242 and tried[-1] == b'/mnt/mmc/.zork/q2-zork'
     assert p.s.screen == CHOOSER and not p.timers
-    for row, game in zip(rows, (SUDOKU, VORTEX, SOLITAIRE, SNAKE, SNAKE + 1)):  # SNAKE + 1: the engine's first
-        press(row)  # from the next loop pass
-        assert p.s.screen == CHOOSER and p.s.target == game and p.timers[-1][1] == 0
-    press(rows[1])
-    run(p.timers[-1][0])
-    assert p.s.screen == VORTEX and p.g.games_live()
+    press(rows[0])  # Bricks, the engine's first, from the next loop pass
+    assert p.s.screen == CHOOSER and p.s.target == ENGINE and p.timers[-1][1] == 0
 
 
 def test_a_game_on_screen_takes_no_tap_for_the_chooser_hidden_under_it(fw):
@@ -1938,7 +1961,7 @@ def test_a_game_on_screen_takes_no_tap_for_the_chooser_hidden_under_it(fw):
     assert not fw.fn('addon_game_on', C.c_int)()
     p.go(CHOOSER)
     assert sensitive == {chooser: 1}
-    press(rows[5])  # Zork, after the engine's Bricks
+    press(rows[1])  # Zork, after the engine's Bricks
     assert fw.fn('addon_game_on', C.c_int)() == 4242
 
 

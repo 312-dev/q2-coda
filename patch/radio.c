@@ -151,7 +151,7 @@ static struct {
     unsigned timer, go, leave;
     int level, next, arg, want, az, note, genre, favs, from, rows[6], sel[3];
     int wifi; /* the fetch waits for Smart Wi-Fi's link */
-    list_t pick, list;
+    list_t *pick, *list; /* one heap block of the two, from radio_open to closed */
     char caption[64];
     /* pend: a fetch from a list on show waits under the loading overlay
      * (docs/oled-design.md#loading), the list left as it is until the new one, or its note, is
@@ -274,21 +274,27 @@ static void send_key(const char *c, unsigned n) {
     dgram_send(&rd.sock, RADIO_SOCK, c, n);
 }
 
+/* A child asked to quit (its caller's way, already) reaped, and killed if it has not gone within
+ * quit_ms: Internet Radio's q2video here, Radio's receiver (radio_tuner.c audio_halt). The UI
+ * thread waits that long at most, only for a child that does not answer. */
+void child_quit(int pid, unsigned quit_ms) {
+    int status, done;
+    unsigned start = time_now_ms();
+    while (!(done = waitpid(pid, &status, 1)) && time_now_ms() - start < quit_ms) sleep_ms(20);
+    if (!done) {
+        char kill[24]; /* this child only: librespot's sink is a q2video too (demo imports no kill) */
+        tk_snprintf(kill, sizeof kill, "kill -9 %d", pid);
+        system(kill);
+        waitpid(pid, &status, 0);
+    }
+}
+
 /* q2video quit, and killed if it does not go within RADIO_QUIT_MS. The media keys stay radio's. */
 static void radio_halt(void) {
     rd.wait = 0;
     if (!rd.pid) return;
-    int status, done;
-    unsigned start = time_now_ms();
     send_key("q", 1);
-    while (!(done = waitpid(rd.pid, &status, 1)) && time_now_ms() - start < RADIO_QUIT_MS)
-        sleep_ms(20);
-    if (!done) {
-        char kill[24]; /* this helper only: librespot's sink is a q2video too (demo imports no kill) */
-        tk_snprintf(kill, sizeof kill, "kill -9 %d", rd.pid);
-        system(kill);
-        waitpid(rd.pid, &status, 0);
-    }
+    child_quit(rd.pid, RADIO_QUIT_MS);
     rd.pid = 0;
     unlink(RADIO_STATE);
     tk_snprintf(rd.state, sizeof rd.state, "stopped");
@@ -305,10 +311,11 @@ void radio_stop(void) {
 static void radio_play(int i) {
     headset_manual();
     int n = rd.list.n;
-    if (!n) return;
+    if (!n || check_forbid_play_no_headset(0)) return; /* nothing to play to (output_rule.c) */
     rd.at = (i % n + n) % n;
     radio_halt();
     spot_yield();
+    now_hold(); /* the Library paused where it was, not stopped and forgotten (now_source.c) */
     /* Smart Wi-Fi bringing the radio back: radio_poll starts the station once the link is up, and
      * the local track stops now, as video_start would stop it */
     if ((rd.wait = smart_wifi_wait())) player_stop();
@@ -370,6 +377,19 @@ int radio_media(unsigned key) {
         radio_halt();
     else
         radio_play(rd.at + (key == KEY_FWD_BTN) - (key == KEY_BACK_BTN));
+    return 1;
+}
+
+/* ringnav (nav/input.c): Play on the Library's own Now Playing while a station is the last thing
+ * played: the station ends and the Library's song plays on from where the station found it
+ * (now_take_back), as from Radio (radio_tuner.c tuner_key); 0 for any other key or page, where
+ * Play is the station's (radio_media). */
+int radio_take_back(void *top, unsigned key) {
+    if (!rd.active || key != KEY_PLAY || !top || play_hold_released() ||
+        tk_strcmp(widget_get_prop_str(top, "name", ""), "playing_page"))
+        return 0;
+    radio_stop();
+    now_take_back();
     return 1;
 }
 
@@ -562,7 +582,7 @@ static void show(int level) {
             else
                 page_row_into(ui.view, i, menu[ui.rows[i]], menu_click);
     } else {
-        const list_t *l = level == PICK ? &ui.pick : &ui.list;
+        const list_t *l = level == PICK ? ui.pick : ui.list;
         n = l->n;
         const char *caption = level == PICK ? ui.genre ? "Genres" : "Countries" : ui.caption;
         ui.view = !n && level == STATIONS
@@ -692,7 +712,7 @@ static int tick(const void *unused) {
     fx.running = 0;
     ui.pend = 0;
     if (fx.code == 200 && fx.n) {
-        list_t *l = ui.want == PICK ? &ui.pick : &ui.list;
+        list_t *l = ui.want == PICK ? ui.pick : ui.list;
         list_set(l, fx.body, fx.n, ui.want == PICK, !ui.genre);
         if (ui.az) list_sort(l);
         if (l->n)
@@ -713,11 +733,11 @@ static int go(const void *unused) {
     ui.go = 0;
     if (ui.pend) return 0; /* the wheel's Centre, or a row, while the overlay waits */
     if (ui.next == R_FAVS) {
-        favs_read(&ui.list, 1);
+        favs_read(ui.list, 1);
         tk_snprintf(ui.caption, sizeof ui.caption, "Favorites"); /* none: the empty state (show) */
         show(STATIONS);
     } else if (ui.next == R_FEATURED) {
-        list_set(&ui.list, STARTERS, sizeof STARTERS - 1, 0, 0);
+        list_set(ui.list, STARTERS, sizeof STARTERS - 1, 0, 0);
         tk_snprintf(ui.caption, sizeof ui.caption, "Featured");
         show(STATIONS);
     } else if (ui.next == A_SHOW) {
@@ -737,12 +757,12 @@ static int go(const void *unused) {
                        : "/csv/countries?order=stationcount&reverse=true&limit=60",
               PICK, 1);
     } else {
-        url_escape(url_of(&ui.pick, i), key, sizeof key);
+        url_escape(url_of(ui.pick, i), key, sizeof key);
         tk_snprintf(path, sizeof path,
                     ui.genre ? "/m3u/stations/bytagexact/%s" RADIO_QUERY
                              : "/m3u/stations/bycountrycodeexact/%s" RADIO_QUERY,
                     key);
-        tk_snprintf(ui.caption, sizeof ui.caption, "%s", name_of(&ui.pick, i));
+        tk_snprintf(ui.caption, sizeof ui.caption, "%s", name_of(ui.pick, i));
         fetch(path, STATIONS, 1);
     }
     return 0;
@@ -782,7 +802,7 @@ static int pick_click(void *ctx, void *event) {
 
 static int station_click(void *ctx, void *event) {
     if (ui.pend) return 0;
-    list_copy(&rd.list, &ui.list);
+    list_copy(&rd.list, ui.list);
     radio_play((int)(long)ctx);
     np_open();
     return 0;
@@ -791,7 +811,7 @@ static int station_click(void *ctx, void *event) {
 /* ringnav_keylong: Play/Pause held on a station, or on Now Playing for the one playing, adds it to
  * favourites.m3u, or takes it out when it is there. The toast's text, or 0 when top is neither. */
 const char *radio_hold(void *top) {
-    const list_t *l = &ui.list;
+    const list_t *l = ui.list;
     int i = -1;
     if (np.page && top == np.page)
         l = &rd.list, i = rd.at;
@@ -827,15 +847,17 @@ static int closed(void *ctx, void *event) {
     stop_timer(&ui.timer);
     stop_timer(&ui.go);
     stop_timer(&ui.leave);
-    list_free(&ui.pick);
-    list_free(&ui.list);
+    if (ui.pick) list_free(ui.pick), list_free(ui.list), free(ui.pick);
     memset(&ui, 0, sizeof ui);
     return 0;
 }
 
 /* Streaming's Internet Radio row (home.c ringnav_stream). */
 int radio_open(void *ctx, void *event) {
-    if (ui.page || !(ui.page = page_open("radio_page", closed, keyup))) return 0;
+    list_t *lists = ui.page ? 0 : calloc(2, sizeof *lists);
+    if (!lists) return 0;
+    if (!(ui.page = page_open("radio_page", closed, keyup))) return free(lists), 0;
+    ui.pick = lists, ui.list = lists + 1;
     static const unsigned short touches[] = { EVT_POINTER_DOWN, EVT_POINTER_MOVE_BEFORE,
                                               EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
     for (unsigned t = 0; t < sizeof touches / sizeof *touches; ++t)

@@ -278,6 +278,54 @@ def test_results_list_the_songs_then_the_artists_then_the_albums(fw, ui, song):
                           'artist: Somebody', 'album: Love Songs']
 
 
+def test_search_is_up_before_its_songs_load_and_lists_them_once_loaded(fw, ui, song):
+    """Search's songs, the whole library, load on a thread of their own (search_strip.c ss_load_worker): the strip is
+    up with no load on the UI thread, the text typed meanwhile lists nothing, and once the load ends its results are
+    those the load in place gives."""
+    threads = []
+    def create(t, attr, fn, arg, *_):
+        threads.append((fn, arg))
+        C.c_ulong.from_address(t).value = 1
+        return 0
+    fw.mock('fw_pthread_create', create)
+    s = Strip(fw, ui, library(song))
+    assert ui.name[ui.top()] == 'searchstrip_page' and len(threads) == 1 and not s.ss.songs
+    s.type('lo')
+    assert s.titles() == []
+    C.CFUNCTYPE(C.c_void_p, C.c_void_p)(threads[0][0])(threads[0][1])  # the thread runs the load
+    ui.fire('search_strip__ss_load_due')
+    assert s.ss.songs and s.titles() == ['Lovely Day', 'Love Will Tear Us Apart', 'Glove', 'album: Love Songs']
+
+
+def test_search_closed_while_it_loads_waits_for_the_load_and_drops_it(fw, ui, song):
+    threads, joined = [], []
+    def create(t, attr, fn, arg, *_):
+        threads.append((fn, arg))
+        C.c_ulong.from_address(t).value = 7
+        return 0
+    fw.mock('fw_pthread_create', create)
+    fw.mock('fw_pthread_join', lambda t, *_: joined.append(t) or C.CFUNCTYPE(C.c_void_p, C.c_void_p)(threads[0][0])(threads[0][1]) and 0)
+    fw.var('ui_thread', C.c_ulong).value = 99  # the load's thread is not the UI thread: its own staging waits for no one
+    s = Strip(fw, ui, library(song))
+    ui.close(ui.top())
+    assert joined == [7] and not s.ss.page
+
+
+def test_add_songs_search_filters_add_songs_own_list_and_leaves_it(fw, ui, song):
+    """Add Songs' Search row searches the Songs list Add Songs holds (add_songs.c AS_SONGS, the whole library): no
+    second load of the library while the first is held, and the list is still Add Songs' when the strip closes."""
+    s = attached(fw, ui)
+    Config(fw)
+    lib = Library(fw, ui, library(song))
+    songs = ui.deques.new(library(song))
+    fw.fn('add_songs_search', None, C.c_void_p)(songs)
+    assert ui.name[ui.top()] == 'searchstrip_page' and s.ss.pick == 1 and not lib.asked
+    s.type('lo')
+    assert s.titles() == ['Lovely Day', 'Love Will Tear Us Apart', 'Glove']  # Add Songs: title or artist alone
+    ui.close(ui.top())
+    assert songs in ui.deques.lists and len(ui.deques[songs]) == 4 and not lib.asked
+
+
 def test_previous_and_next_move_the_cursor_and_typing_acts_at_it(fw, ui, song):
     s = Strip(fw, ui, library(song))
     s.type('joy')
@@ -877,7 +925,7 @@ def test_add_songs_search_lists_songs_by_title_or_artist_and_centre_adds_in_plac
     fw.mock('batch_add_file', lambda cls, kind, one, sel, dest, *_: added.append(dest) or there.append(songs[1]) or 0)
     s = Strip.__new__(Strip)
     s.attach(fw, ui)
-    fw.fn('add_songs_search', None)()
+    fw.fn('add_songs_search', None, C.c_void_p)(ui.deques.new(songs))  # Add Songs' own Songs list
     assert s.ss.pick == 1
     s.type('songs')
     assert s.titles() == []  # Glove's album, Love Songs, isn't asked
@@ -937,7 +985,7 @@ def test_the_wheel_up_from_add_songs_results_lands_on_the_query_line_too(fw, ui,
     Library(fw, ui, songs)
     s = Strip.__new__(Strip)
     s.attach(fw, ui)
-    fw.fn('add_songs_search', None)()
+    fw.fn('add_songs_search', None, C.c_void_p)(ui.deques.new(songs))  # Add Songs' own Songs list
     s.type('joy')
     s.key(KEY_PLAY)
     assert s.ss.focus == ON_LIST
@@ -1735,7 +1783,7 @@ def test_search_s_return_key_is_a_magnifier_white_at_rest_the_accent_s_on_the_wh
 def test_add_songs_search_s_return_key_is_a_magnifier(fw, ui, song):
     Config(fw)
     Library(fw, ui, library(song))
-    fw.fn('add_songs_search', None)()
+    fw.fn('add_songs_search', None, C.c_void_p)(ui.deques.new(library(song)))
     assert mark(fw, attached(fw, ui)) == 'search_w'
 
 

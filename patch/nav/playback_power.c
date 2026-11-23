@@ -465,7 +465,8 @@ int ringnav_dark_usleep(unsigned us) {
  * slow down unless something else follows it: the track's last DARK_END_LEAD_S and the moments
  * after its end (player_quick: the Gapless preload, a change without Gapless, the sleep timer's
  * end, Download Ahead's next song), A-B Repeat's loop (check_abrepeatmode reads the cached
- * position), Car Remote or Car Audio while dark (the phone or the car shows it, and the dark second is blind; and
+ * position), a phone on Car Remote or Car Audio while dark (the phone or the car shows it, and the dark second is
+ * blind: with Car Remote on but no phone connected nobody reads it, coda_rc_online; and
  * the car's commands, a held button's scan among them, are read a pass apart: usb_car.c), or another
  * player (AirPlay, Bluetooth receive, a video), which keeps stock's pace. Play and pause need
  * neither: mclSetPause and mclSetResume set the status word themselves. ponytail: dark, the cached
@@ -478,7 +479,7 @@ static int nothing_follows(void) {
            (signed char)bt__recv_pageflag != 2 &&
            !(*(volatile unsigned char *)REPEAT_INFO && I(REPEAT_INFO, REPEAT_AB_STATE) == 2);
 }
-static int dark_slow_ok(int quiet) { return quiet || (nothing_follows() && !coda_rc_enabled() && !usb_car_on()); }
+static int dark_slow_ok(int quiet) { return quiet || (nothing_follows() && !coda_rc_online() && !usb_car_on()); }
 /* on_wm_idle_status ran player_mainscheduling every UI pass, and its mclAutoChange asks hciplayer
  * for its status and waits for the answer on the UI thread: 40 to 125 round trips a second, each
  * waking both players. It runs every MAINSCHEDULING_MS instead, DARK_POLL_US while dark_slow:
@@ -535,6 +536,7 @@ static int playing_stream(void) {
 }
 
 int ringnav_sleep(void *loop) {
+    ui_watch_enter();  /* the UI pass watchdog (ui_watch.c): this pass's work so far */
     cover_wake_poll(); /* stock's album cover thread, woken for a request (cover_wake.c) */
     splash_poll();
     usb_ui_poll(); /* USB and charging toasts, adbd's questions (usb_ui.c) */
@@ -568,6 +570,7 @@ int ringnav_sleep(void *loop) {
         np_about_page()) /* the details over it (np_about.c) */
         *(volatile signed char *)BC_IDLE = BC_IDLE_FULL;
     if (st.bc[0] && np_track() != st.bc_track) bc_show();
+    ui_watch_polled(); /* the pass's work ends here: the waits below are not counted */
     if (!g_backlight_status) {
         st.dark |= 1;
         int quiet = I(g_dacoff_time, 0) < 0 && !media_playing() && !video_on() &&
@@ -592,5 +595,7 @@ int ringnav_sleep(void *loop) {
                !window_manager_is_animating(window_manager()) && !np_animating())
         loop_wait(np_glide_wait(np_marq_wait(loop_span(IDLE_SLEEP_MS, LOOP_LIT_MAX_MS, 1))));
     tone_dark = 0; /* after the polls: a click of theirs is this pass's too */
-    return stock_sleep_trampoline(loop);
+    int r = stock_sleep_trampoline(loop);
+    ui_watch_woke();
+    return r;
 }

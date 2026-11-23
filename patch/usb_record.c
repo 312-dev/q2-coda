@@ -85,6 +85,20 @@ static void record(const char *what, const char *pull) {
 
 void usb_record(const char *what) { record(what, 0); }
 
+/* A short line of the pins alone, for usb_otg.c's trace while the ID or VBUS is moving
+ * (usb_otg_poll): on the card only, not in the unified log, 4 a second at most. otgst is stock's
+ * g_otg_status (2: its host pass has the USB DAC). */
+void usb_record_pins(int hostdev) {
+    char line[112];
+    int n = tk_snprintf(line, sizeof line, "%u %u pins PD18=%d PD17=%d PC20=%d PE22=%d otg=%d hostdev=%d otgst=%d\n",
+                        (unsigned)wall_time(), (unsigned)time_now_ms(), toolsGpioGetValue("PD18"),
+                        toolsGpioGetValue("PD17"), toolsGpioGetValue("PC20"), toolsGpioGetValue("PE22"),
+                        g_last_otgid, hostdev, g_otg_status);
+    if (n <= 0 || n >= (int)sizeof line) return;
+    rotate();
+    card_log_append(card_log_at(&rec.log, USB_RECORD_FILE, USB_RECORD_RAM), line, (unsigned)n);
+}
+
 /* PD18's pull as soc_gpio reports it, in a line; one that is not the pull-up is set again, and the
  * line's word says it was off. */
 static void pull_check(const char *what, const char *off) {

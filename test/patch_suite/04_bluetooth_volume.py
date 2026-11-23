@@ -12,7 +12,7 @@ for result in (0,-7):
     assert bt_init.call(address=payload_syms['headset_bt_init'],args=(thread,0,0,0),gap=0)==result
     assert bt_init.calls[0][0]=='initBluetoothParam'
     assert [c[:3] for c in bt_init.calls[1:] if c[0].startswith('btctl')]==[
-        ('btctl_set_prompt_callback',0x4f9d20,0),
+        ('btctl_set_prompt_callback',payload_syms['bt_pair_prompt'],0),  # bt_pair.c's, in place of stock's 0x4f9d20
         ('btctl_device_status_callback',payload_syms['headset_bt_status'],0),
         ('btctl_set_a2dp_callback',syms['btrecvA2dpFunc'],0x01020304),
         ('btctl_create_daemon_thread',thread,0)]
@@ -79,6 +79,7 @@ class QualityMachine(Machine):
         super().__init__(); self.commands=[]
         self.byte(syms['bt_linkstatus'],linked); self.word(syms['bt_showcoding'],codec)
         self.handlers[syms['system@GLIBC_2.0']]='system'
+        self.handlers[syms['pthread_create@GLIBC_2.2']]='thread:run'  # bt_shell's thread, run at once
     def hook(self,u,addr,size,_):
         if self.handlers.get(addr)!='system': return super().hook(u,addr,size,_)
         self.commands.append(self.text(u.reg_read(REGS[0]))); u.reg_write(UC_MIPS_REG_GP,0x5a5a5a5a)  # libc's own $gp
@@ -241,11 +242,14 @@ for way,soft in ((0,0),(1,0),(2,0),(2,1)):
     assert any(c[0]=='notifyVolume' for c in b.calls); passed()
 
 # Screen off, the UI loop idles SCREEN_OFF_SLEEP_MS before stock's own pacing; screen on, stock alone.
+# Stock's sleep is the pass's last call but the UI pass watchdog's clock read (ui_watch.c ui_watch_woke).
 sleep_hook=HOOKS['main_loop_sleep_default'][0]
 for light,want in ((1,[]),(0,[O['SCREEN_OFF_SLEEP_MS']])):
     s=Machine(); s.handlers[sleep_hook+12]='stock_sleep'; s.byte(syms['g_backlight_status'],light)
     assert s.call(address=sleep_hook,args=(0x1234,0,0,0),gap=0)==0
-    assert [c[1] for c in s.calls if c[0]=='sleep_ms']==want and s.calls[-1][:2]==('stock_sleep',0x1234); passed()
+    slept=max(i for i,c in enumerate(s.calls) if c[0]=='stock_sleep')
+    assert [c[1] for c in s.calls if c[0]=='sleep_ms']==want and s.calls[slept][:2]==('stock_sleep',0x1234)
+    assert {c[0] for c in s.calls[slept+1:]}<={'time_now_ms'}, s.calls[slept+1:]; passed()
     # The next pass with the backlight on repaints the whole screen once; staying on, nothing more.
     s.byte(syms['g_backlight_status'],1)
     for wake in (not light,False):

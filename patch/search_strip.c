@@ -288,6 +288,7 @@ static struct {
     unsigned char taps, drag;
     unsigned char
         fpress; /* a finger went down on the query while the strip had no wheel (ss_grab) */
+    unsigned char shared; /* songs are Add Songs' list (add_songs_search), not the page's */
 } ss __attribute__((section(".scratch")));
 
 /* A list page's own search (search_bar.c, docs/oled-design.md#search-bar): the page's rows, its
@@ -1858,6 +1859,7 @@ static int ss_holds(void *root, void *w) {
 }
 
 static void ss_band_back(void);
+static void ss_load_end(void);
 static int ss_closed(void *ctx, void *event) {
     stop_timer(&ss.pop_timer);
     stop_timer(&ss.hold_timer);
@@ -1872,7 +1874,8 @@ static int ss_closed(void *ctx, void *event) {
         memset(&sc, 0, sizeof sc);
     }
     if (ss.under) bitmap_destroy(ss.under);
-    if (ss.songs) deque_destroy(ss.songs);
+    ss_load_end();
+    if (ss.songs && !ss.shared) deque_destroy(ss.songs);
     free(ss.match);
     free(ss.kind);
     memset(&ss, 0, sizeof ss);
@@ -2005,15 +2008,72 @@ static void ss_scope_go(void *r) {
     window_close(page);
 }
 
-int library_search_open(void *ctx, void *event) {
-    if (!theme()->entry_ipod) return stock_search(ctx, event);
-    if (ss.page || !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup))) return 0;
+/* Search's songs, the whole library (staged_music of all_songs, the server's songs too, in stock's
+ * title order), are loaded on a thread of their own as the page opens, so the strip is up and
+ * takes letters at once; the results come with the load (ss_load_due), the text typed by then
+ * filtered as it ends. A payload load on the UI thread meanwhile waits for it (search_yield, from
+ * coverflow.c staged_into), and the page closing waits for it too, so nothing else meets its use
+ * of stock's staging pointer and library_music. With no thread the load runs in place. */
+static struct {
+    unsigned long thread;
+    volatile int running, done;
+    void *songs; /* the load's, until ss_load_due takes it */
+    unsigned timer;
+} sl __attribute__((section(".scratch")));
+static void *ss_load_worker(void *unused) {
     int n;
-    ss.songs = staged_music(all_songs, (void *)LIBRARY_MUSIC, &n);
-    n = ss.songs ? (int)deque_size(ss.songs) : 0;
+    sl.songs = staged_music(all_songs, (void *)LIBRARY_MUSIC, &n);
+    __atomic_store_n(&sl.done, 1, __ATOMIC_RELEASE);
+    return 0;
+}
+/* The songs loaded: the results' room, and the text's results. */
+static void ss_take(void *songs) {
+    int n = songs ? (int)deque_size(songs) : 0;
+    ss.songs = songs;
     ss.match = n ? calloc((unsigned)n + 2 * SS_GROUP, sizeof *ss.match) : (void *)0;
     ss.kind = ss.match ? calloc((unsigned)n + 2 * SS_GROUP, 1) : (void *)0;
     if (!ss.kind) free(ss.match), ss.match = (void *)0;
+}
+static void ss_load_join(void) {
+    if (!sl.running) return;
+    pthread_join(sl.thread, 0);
+    sl.running = 0;
+}
+static int ss_load_due(const void *unused) {
+    if (!__atomic_load_n(&sl.done, __ATOMIC_ACQUIRE)) return 8; /* RET_REPEAT */
+    sl.timer = 0;
+    ss_load_join();
+    ss_take(sl.songs); /* the page is open: its close stops this timer */
+    sl.songs = 0, sl.done = 0;
+    if (!ss_named()) ss_filter();
+    if (ss.sheet) widget_invalidate_force(ss.sheet, (void *)0);
+    return 0;
+}
+/* The page closing: a load still running waited for, its songs dropped. */
+static void ss_load_end(void) {
+    stop_timer(&sl.timer);
+    ss_load_join();
+    if (sl.songs) deque_destroy(sl.songs);
+    memset(&sl, 0, sizeof sl);
+}
+/* staged_into on the UI thread: Search's load, if one runs, ends first. */
+void search_yield(void) {
+    if (sl.running && pthread_self() == ui_thread) ss_load_join();
+}
+
+int library_search_open(void *ctx, void *event) {
+    if (!theme()->entry_ipod) return stock_search(ctx, event);
+    if (ss.page || !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup))) return 0;
+    coverflow_yield(); /* a Cover Flow open's step gives way first: one load at a time */
+    unsigned long t = 0;
+    sl.done = 0, sl.songs = 0;
+    sl.running = !pthread_create(&t, 0, ss_load_worker, 0) && t;
+    if (sl.running)
+        sl.thread = t, sl.timer = timer_add(ss_load_due, (void *)0, 16);
+    else {
+        int n;
+        ss_take(staged_music(all_songs, (void *)LIBRARY_MUSIC, &n));
+    }
     ss.set = SS_SET_UPPER, ss.stop = 1; /* on A (the user's mock-up) */
     ss.ret = STRIP_SEARCH;
     ss.label = "Search your music";
@@ -2045,14 +2105,22 @@ void playlist_new_open(void) {
     ss_place(window_under(window_manager(), ss.page), SS_FORM_ROW, 0);
 }
 
-/* Add Songs' Search row (add_songs.c): the strip over the library's songs alone, each found by its
- * title or artist, with its mark; Centre on a result adds it or takes it out, and the results
- * stay. */
-void add_songs_search(void) {
-    library_search_open(0, 0);
-    ss.pick = ss.page != 0;
+/* Add Songs' Search row (add_songs.c): the strip over songs, Add Songs' own Songs list (the
+ * library's songs, as Search loads them), which stays Add Songs' to free; each found by its title
+ * or artist, with its mark; Centre on a result adds it or takes it out, and the results stay. */
+void add_songs_search(void *songs) {
+    if (!theme()->entry_ipod || ss.page ||
+        !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup)))
+        return;
+    ss_take(songs);
+    ss.shared = 1;
+    ss.set = SS_SET_UPPER, ss.stop = 1;
+    ss.ret = STRIP_SEARCH;
+    ss.pick = 1;
     ss.tab = SS_TAB_SONGS;
     ss.label = "Search songs";
+    ss_sheet("Search");
+    ss_place(0, SS_FORM_QUERY, 0);
 }
 
 /* What a text box's edit takes, SS_SECRET_*. Stock's Wi-Fi password boxes say so by neither

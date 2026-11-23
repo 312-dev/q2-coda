@@ -59,8 +59,16 @@ class Fx(C.Structure):
 class Ui(C.Structure):
     _fields_ = [('page', C.c_void_p), ('view', C.c_void_p), ('edit', C.c_void_p), ('timer', C.c_uint), ('go', C.c_uint),
                 ('leave', C.c_uint), *((k, C.c_int) for k in 'level next arg want az note genre favs from'.split()),
-                ('rows', C.c_int * 6), ('sel', C.c_int * 3), ('wifi', C.c_int), ('pick', List), ('list', List), ('caption', C.c_char * 64),
+                ('rows', C.c_int * 6), ('sel', C.c_int * 3), ('wifi', C.c_int), ('pick_p', C.POINTER(List)), ('list_p', C.POINTER(List)), ('caption', C.c_char * 64),
                 ('pend', C.c_byte)]
+
+    @property
+    def pick(self):  # radio.c's lists are a heap block of two from radio_open to closed
+        return self.pick_p.contents
+
+    @property
+    def list(self):
+        return self.list_p.contents
 
 
 class Np(C.Structure):
@@ -489,6 +497,37 @@ def test_a_station_plays_in_q2video_and_is_kept_as_last(fw):
     assert p.card.files[LAST] == m3u(('KEXP', 'https://kexp-mp3-128.streamguys1.com/kexp128.mp3'))
     assert [n for n, _ in state.list.stations()] == FEATURED  # the list it was in, for the side buttons
     assert fw.fn('radio_status', C.c_int)() == 2
+
+
+def exec_args(fw):
+    """q2video's arguments, read as the child's execl is called (its volume is a string on the parent's stack)."""
+    got = []
+
+    def execl(*a):
+        out = []
+        for x in a:
+            if not x:
+                break
+            out.append(C.string_at(x).decode())
+        got.append(out)
+        return -1
+    fw.mock('fw_execl', execl)
+    return got
+
+
+def test_a_station_plays_to_the_car_while_the_car_takes_the_audio(fw):
+    """Car Audio's USB stream is the player's (q2-iap's car file there): a station plays to ALSA's q2car, which the
+    player plays on to the car (docs/iphone-mode.md#other-sources-over-usb), at unity (the car's knob is its volume).
+    On the drive of 2026-11-22 it went to demo's output, Bluetooth A2DP, and iDrive showed its name over silence."""
+    p = page(fw, {'/tmp/q2-iap.audio': b'hw:CARD=UAC1Gadget,0\n44100\n'})
+    fw.mock('fw_system', lambda *_: 0)
+    fw.fn('usb_car_start', None)()  # Car Audio's iPhone on the cable
+    fw.mock('fw_fork', lambda *_: 0)  # the child's side
+    got = exec_args(fw)
+    p.menu('Featured')
+    p.rows('station_click')[3]()
+    assert got[0] == ['/usr/bin/q2video', '/usr/bin/q2video', '-r', 'q2car', KEXP[1], 'h100'], got
+    assert p.toasts == []
 
 
 def test_a_station_that_can_t_start_says_so(fw):
@@ -2145,3 +2184,90 @@ def test_a_row_pressed_while_waiting_for_wi_fi_does_nothing(fw):
     p.rows('menu_click')[menu.index('By Genre')]()
     assert not p.live('go') or p.run('go') == 0
     assert fx(fw).url == url and ui(fw).pend == 1
+
+
+class Library:
+    """The Library's player as now_source.c reads it (mclGetPlayStatus 1 stopped, 2 playing, 3 paused, and its
+    second of 200): stock's player_stop forgets the place, player_save_stop keeps it for player_save_start, which
+    loads the song there paused (1) or playing (0). calls: each in order."""
+    def __init__(self, fw, status=2, sec=61):
+        self.fw, self.status, self.sec, self.calls = fw, status, sec, []
+        fw.mock('mclGetPlayStatus', lambda *_: self.status)
+        fw.mock('player_playtime_and_length', self.times)
+        fw.mock('player_stop', lambda *_: self.call('stop', 1, -1))
+        fw.mock('player_save_stop', lambda *_: self.call('save_stop', 1, -1))
+        fw.mock('player_save_start', lambda paused, *_: self.call(f'save_start {paused}', 3 if paused else 2, 61))
+        fw.mock('player_play_pause', lambda *_: self.call('play_pause', 2, max(self.sec, 0)))
+
+    def times(self, sec, total, *_):
+        C.c_int.from_address(sec).value, C.c_int.from_address(total).value = self.sec, 200 if self.sec >= 0 else 0
+        return 0
+
+    def call(self, name, status, sec):
+        if self.status != 1 or name not in ('stop', 'save_stop'):  # stopping a stopped player changes nothing
+            self.status, self.sec = status, sec
+        self.calls.append(name)
+        return 0
+
+    def now(self):
+        """now_time: (the play state, the second) every reader of the Library is given"""
+        sec, total = C.c_int(), C.c_int()
+        return fw_now_time(self.fw)(C.byref(sec), C.byref(total)), sec.value
+
+
+def fw_now_time(fw):
+    return fw.fn('now_time', C.c_int, C.POINTER(C.c_int), C.POINTER(C.c_int))
+
+
+def test_a_station_holds_the_library_paused_where_it_was(fw):
+    """Internet Radio takes the output as Radio does (now_source.c now_hold): the Library's song playing at 61 s is
+    stopped with its place kept, not forgotten, and reads paused at 61 s for as long as the station has the output;
+    the next station keeps that same hold."""
+    lib = Library(fw)
+    p = page(fw)
+    play(fw, p, 2)
+    assert lib.calls[0] == 'save_stop', lib.calls
+    assert lib.now() == (3, 61)
+    assert media(fw, KEY_FWD_BTN) == 1 and rd(fw).at == 3  # the next station: the Library still held there
+    assert lib.calls.count('save_stop') == 1 and lib.now() == (3, 61)
+
+
+def playing_page(fw, p):
+    """the Library's own Now Playing on top, by its window's name: its pointer"""
+    top = p.w.new(0, 'window_create')
+    p.w.names[top] = 'playing_page'
+    names = {}
+    def name(w, key, default, *_):
+        if C.string_at(key) != b'name' or w not in p.w.names:
+            return default
+        return C.addressof(names.setdefault(w, C.create_string_buffer(p.w.names[w].encode())))
+    fw.mock('widget_get_prop_str', name)
+    return top
+
+
+def test_play_on_the_library_s_now_playing_takes_it_back_from_the_station(fw):
+    """Play on the Library's own Now Playing while a station has the output: the station ends and the Library's song
+    plays on from 61 s (now_take_back), as from Radio (radio_tuner.c tuner_key); Play anywhere else is the station's."""
+    lib = Library(fw)
+    p = page(fw)
+    player = play(fw, p, 2)
+    key = fw.fn('radio_take_back', C.c_int, C.c_void_p, C.c_uint)
+    assert key(ui(fw).page, KEY_PLAY) == 0  # on Internet Radio's own page: radio_media's
+    top = playing_page(fw, p)
+    assert key(top, KEY_FWD_BTN) == 0
+    assert key(top, KEY_PLAY) == 1
+    assert rd(fw).active == 0 and player.keys() == [b'q']
+    assert lib.calls[-1] == 'save_start 0' and lib.now() == (2, 61)
+    assert key(top, KEY_PLAY) == 0  # the Library's own from now on
+
+
+def test_a_library_start_ends_the_hold(fw):
+    """Any start of the Library's player (ringnav_start_player: a pick, Play, a jack change) ends the hold, so the
+    readers follow the player again rather than the second it was held at."""
+    lib = Library(fw)
+    p = page(fw)
+    play(fw, p, 2)
+    fw.mock('stock_start_player_trampoline', lambda *_: lib.call('start', 2, 5))
+    assert fw.fn('ringnav_start_player', C.c_int)() == 0 and lib.calls[-1] == 'start'
+    assert lib.now() == (2, 5)
+    assert rd(fw).active == 0  # and the station gave the output back, as before

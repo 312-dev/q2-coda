@@ -12,6 +12,7 @@ static struct {
     int card_quiet; /* a Standby resumed at card_at: its card toasts are dropped (ringnav_cardmount)
                      */
     unsigned card_at;
+    unsigned host_at; /* standby_host_poll's last look at the USB controller */
     char state[96];     /* the state record last written (state_poll) */
     unsigned state_due; /* time_now_ms of the first change not yet written; 0 none */
     /* the boot logo's poll: last check, card seen mounted, its sync thread, its failure to toast */
@@ -423,6 +424,7 @@ int ringnav_standby(void) {
     state_poll();     /* the record a resume that never comes leaves behind */
     wdt_set(0);   /* it would count through the suspend */
     usb_record("standby"); /* the USB pins either side of it (usb_record.c) */
+    standby_usb_suspend(); /* the host told; the link back on a later pass, after the card (standby_usb.c) */
     int result = stock_standby_trampoline();
     wdt_set(1);
     usb_record_wake();
@@ -439,6 +441,21 @@ static void standby_poll(void) {
     if (!pw.standby_off) return;
     pw.standby_off = 0;
     if (!g_usbdet_value && mclGetPlayStatus() != 2) navigator_to("poweroff_page");
+}
+
+/* A computer or a car on the cable holds Standby (docs/internals.md#standby-limit). Stock's Standby
+ * waits while the battery charges (check_to_poweroption's g_charge_state test), but at Full that
+ * reads 0 with the cable still in, and a suspend under a host's live USB link left the link dead
+ * after the wake: the gadget still "configured" on the Q2, the computer never reaching it again
+ * until the cable was handled (a Q2 on a laptop, 2026-11-22, 23 min). So while the controller says
+ * configured, Standby's countdown starts again every STANDBY_HOST_MS; a charger, which configures
+ * nothing, lets it run. */
+#define STANDBY_HOST_MS 1000
+static void standby_host_poll(void) {
+    unsigned now = (unsigned)time_now_ms();
+    if (!g_usbdet_value || now - pw.host_at < STANDBY_HOST_MS) return;
+    pw.host_at = now;
+    if (usb_host()) reset_poweroptions_timer(1, 0, 0);
 }
 /* User boot logo (docs/boot.md): the card's LOGO_SRC is kept as LOGO_DST, which the splash shows at
  * power-on, each time the card is mounted (boot, the end of USB storage). A 375x320 one is turned
@@ -522,7 +539,8 @@ static void *logo_sync(void *unused) {
     pw.logo_busy = 0;
     return 0;
 }
-int card_mounted(void) {
+/* /proc/mounts lists the card now: its read each call. */
+int card_mounted_now(void) {
     char m[4096]; /* ponytail: the Q2's few mounts fit (remote.c's card_mounted) */
     void *f = fopen("/proc/mounts", "rb");
     if (!f) return 0;
@@ -530,6 +548,18 @@ int card_mounted(void) {
     fclose(f);
     m[n] = 0;
     return strstr(m, " /mnt/mmc ") != 0;
+}
+/* The same, read again only when card_watch.c's generation moved (a mount, an unmount, or a change
+ * in the card's root), as it is called every second and on each card write; every call reads while
+ * its thread has not started or has ended (card_watch_seen 0). The generation is taken before the
+ * read, so a change during it is read at the next call. Any thread. */
+int card_mounted(void) {
+    static unsigned seen __attribute__((section(".scratch")));
+    static int was __attribute__((section(".scratch")));
+    unsigned gen = card_watch_seen();
+    if (!gen) return card_mounted_now();
+    if (gen != seen) was = card_mounted_now(), seen = gen;
+    return was;
 }
 static void logo_poll(void) {
     unsigned now = time_now_ms();
@@ -560,6 +590,8 @@ void power_poll(void) {
     durations_poll();
     charge_poll();
     standby_poll();
+    standby_host_poll();
+    standby_usb_poll(); /* the USB link back after a Standby (standby_usb.c) */
     logo_poll();
     ratings_copy_poll();
     wdt_poll();

@@ -86,19 +86,15 @@ static const char *limit_name(unsigned mb) {
     return 0;
 }
 
+static int st_found(const char *id, const char *raw, void *unused) {
+    if (strlen(id) >= sizeof so.id || number(raw, "storage") != 1) return 0;
+    tk_snprintf(so.id, sizeof so.id, "%s", id);
+    return 1;
+}
 /* The first app on the card whose q2app says storage=1, into so.id. */
 static void st_app(void) {
-    char path[64], raw[512];
-    void *d = card_mounted() ? opendir("/mnt/mmc") : 0;
     so.id[0] = 0;
-    for (struct dirent *e; d && !so.id[0] && (e = readdir(d));) {
-        const char *id = e->d_name + 1;
-        if (e->d_name[0] != '.' || !*id || strlen(id) >= sizeof so.id) continue;
-        addon_q2app(id, path, sizeof path);
-        if (state_read(path, raw, sizeof raw) && number(raw, "storage") == 1)
-            tk_snprintf(so.id, sizeof so.id, "%s", id);
-    }
-    if (d) closedir(d);
+    if (card_mounted()) addon_q2apps(st_found, 0);
 }
 
 /* The card's size and free space (statfs, MIPS o32: f_bsize word 1, f_blocks 3, f_bavail 7), and

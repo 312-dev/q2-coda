@@ -1,7 +1,6 @@
-/* Crossfade (docs/internals.md#crossfade): Playback's row, its page and the fade hciplayer's
- * filter applies (peq_player.c). The page is stock's Boot volume page re-dressed: its slider runs
- * Off (0) and XF_MIN..XF_MAX seconds, so it needs no switch; the switch and Centre still turn it on
- * and off. Display's Wheel sensitivity row opens the same page (xf.ctx 1): 10-200% in tens, no
+/* Smart Crossfade (docs/internals.md#crossfade): Playback's switch row and when the next change
+ * fades, which q2player's chain does (player/dsp.c, smart.c). The slider page here is stock's Boot
+ * volume page re-dressed. Display's Wheel sensitivity row opens it (xf.ctx 1): 10-200% in tens, no
  * switch, the wheel a ten a tick and Centre back, as on Brightness (navigation.c edit_key). Audio
  * settings' Resume Songs row opens it too (xf.ctx 2): Off and RS_MIN..RS_MAX minutes in fives, the
  * same way, the length a music track needs to keep its place (navigation.c resume_poll). Display's
@@ -16,9 +15,8 @@
 #include "playback.h"
 #include "stock.h"
 
-#define XF_MIN 1
-#define XF_MAX 15
-#define XF_DEFAULT 5
+#define XF_FALLBACK_MS 5000 /* the plain fade a smart one falls back to (docs/internals.md#smart-crossfade) */
+#define GAPLESS_SWITCH "img_gapless7" /* stock's Gapless row's switch: row 7, its click's "img_gapless%d" */
 /* each setting row's label, found again by name (refresh) */
 #define WHEEL_ROW "label_wheel"  /* Display's Wheel sensitivity row */
 #define RS_ROW "label_resumemin" /* Playback's Resume Songs row */
@@ -29,8 +27,8 @@
 #define RS_DEFAULT 30
 
 static struct {
-    int read, on, seconds, done, key[8], stops, counted;
-    int ctx; /* the page's: 0 Crossfade, 1 Wheel sensitivity, 2 Resume Songs, 3 Night Shift, 4 Volume */
+    int read, on, done, key[8], stops, counted;
+    int ctx; /* the page's: 1 Wheel sensitivity, 2 Resume Songs, 3 Night Shift, 4 Volume; 0 none */
     int sliding, unsaved, setting; /* a finger on the slider; a value it moved; refresh's own set */
     int rs_read, rs_min;
     int mono_read, mono, swap_read, swap;
@@ -39,17 +37,57 @@ static struct {
     void *mono_label; /* the Mono Audio row's, while Playback is open */
     void *page, *sw, *view, *slider, *dec, *add, *label;
     unsigned press, press_at;
+    void *xfade_label; /* Smart Crossfade's row's, while Playback is open */
+    int shown;         /* the Gapless byte its caption was made for, plus 1; 0 none */
 } xf __attribute__((section(".scratch")));
 
-/* Q2POD XFADE (0, 1) and XFADESEC (XF_MIN..XF_MAX) in config.ini, read once. */
+/* Q2POD XFADE in config.ini, read once: Smart Crossfade on (1) or off. A config saved with the
+ * length picker that came before it reads On whenever Crossfade was on, at any length; its
+ * XFADESEC is left in the file and not read. */
 static void settings(void) {
     if (xf.read) return;
-    char v[256] = "";
     xf.on = config_value("Q2POD", "XFADE", 2, 0);
-    toolsReadConfig("/mnt/data/config.ini", "Q2POD", "XFADESEC", v, "0");
-    int n = atoi(v);
-    xf.seconds = n >= XF_MIN && n <= XF_MAX ? n : XF_DEFAULT;
     xf.read = 1;
+}
+
+/* Smart Crossfade's row: its switch, and a caption that says when stock's Gapless, which every
+ * fade needs (xfade_poll), is off. */
+static void xfade_text(void) {
+    int gapless = *(volatile unsigned char *)MCL_GAPLESS;
+    xf.shown = gapless + 1;
+    if (!xf.xfade_label) return;
+    list_toggle(xf.xfade_label, "Smart Crossfade", xf.on);
+    caption_row(xf.xfade_label, xf.on && !gapless
+                                    ? "Needs Gapless on: nothing fades while Gapless is off"
+                                    : "Overlaps songs from different albums, timed to how each "
+                                      "ends and begins");
+}
+static int xfade_gone(void *label, void *event) {
+    if (label == xf.xfade_label) xf.xfade_label = 0;
+    return 0;
+}
+/* Playback's row (navigation.c ringnav_audioset makes it): the label, kept while it lives. */
+void xfade_row(void *label) {
+    settings();
+    xf.xfade_label = label;
+    widget_on(label, EVT_DESTROY, xfade_gone, label);
+    xfade_text();
+}
+/* The row's click: Smart Crossfade on or off, saved. On also turns stock's Gapless on, as stock's
+ * own row does (0x4bcfa4: PLAYSET GAPLESS, mclSetGaplessMode, its switch's image), so one switch
+ * is all a fade needs. */
+int xfade_click(void *ctx, void *event) {
+    settings();
+    xf.on = !xf.on;
+    write_int_config(xf.on, "Q2POD", "XFADE");
+    if (xf.on && !*(volatile unsigned char *)MCL_GAPLESS) {
+        write_int_config(1, "PLAYSET", "GAPLESS");
+        mclSetGaplessMode(1);
+        void *sw = xf.xfade_label ? widget_lookup(window_of(xf.xfade_label), GAPLESS_SWITCH, 1) : 0;
+        if (sw) image_base_set_image(sw, "switch_on");
+    }
+    xfade_text();
+    return 0;
 }
 
 
@@ -233,17 +271,17 @@ int swap_click(void *ctx, void *event) {
 }
 
 /* The slider's value: the sensitivity; Resume's minutes, RS_MIN - 5 for Off; Night Shift's steps
- * below NS_COOL, on or off; the volume; or 0 for Off, else the length. */
+ * below NS_COOL, on or off; the volume. */
 static int value(void) {
     if (xf.ctx == 4) return g_volume;
     if (xf.ctx == 3) return (NS_COOL - night_kelvin()) / NS_STEP;
     if (xf.ctx == 2) return resume_min() ? resume_min() : RS_MIN - 5;
-    return xf.ctx ? wheel_pct() : xf.on ? xf.seconds : 0;
+    return wheel_pct();
 }
 static const int steps[] = { 1, 10, 5, 1, 1 }; /* a tick or +/-, by xf.ctx */
 
-/* Whether the page has its switch: Crossfade's and Night Shift's. */
-static int switched(void) { return xf.ctx == 0 || xf.ctx == 3; }
+/* Whether the page has its switch: Night Shift's. */
+static int switched(void) { return xf.ctx == 3; }
 
 /* The page and the row from xf, and the choice saved: during a drag, at its release (slid). */
 static void refresh(int save) {
@@ -253,10 +291,6 @@ static void refresh(int save) {
     if (save && xf.ctx == 2) write_int_config(xf.rs_min, "Q2POD", "RESUMEMIN");
     if (save && xf.ctx == 3) night_save();
     if (save && xf.ctx == 4) write_int_config(g_volume, "PLAYSET", "VOLUME");
-    if (save && !xf.ctx) {
-        write_int_config(xf.on, "Q2POD", "XFADE");
-        write_int_config(xf.seconds, "Q2POD", "XFADESEC");
-    }
     void *row = widget_lookup(window_manager(), WHEEL_ROW, 1);
     if (row) wheel_text(row);
     if ((row = widget_lookup(window_manager(), RS_ROW, 1))) rs_text(row);
@@ -270,12 +304,9 @@ static void refresh(int save) {
         tk_snprintf(t, sizeof t, "%d%%", wheel_pct());
     else if (xf.ctx == 2)
         tk_snprintf(t, sizeof t, xf.rs_min ? "%d min" : "Off", xf.rs_min);
-    else if (xf.ctx == 3) {
+    else {
         tk_snprintf(t, sizeof t, "%d K", night_kelvin()); /* Off, On or Auto: the row's value */
         image_base_set_image(xf.sw, night_on() ? "switch_on" : "switch_off");
-    } else {
-        tk_snprintf(t, sizeof t, xf.on ? "%ds" : "Off", xf.seconds);
-        image_base_set_image(xf.sw, xf.on ? "switch_on" : "switch_off");
     }
     widget_set_text_utf8(xf.label, t);
     if (switched()) slider_page_dirty(xf.page);
@@ -311,17 +342,9 @@ static void take(int n) {
         refresh(1);
         return;
     }
-    if (xf.ctx) {
-        int was = wheel_pct();
-        wheel_set_pct(n); /* rounds and clamps */
-        refresh(wheel_pct() != was); /* and snaps the slider to the ten */
-        return;
-    }
-    n = n < 0 ? 0 : n > XF_MAX ? XF_MAX : n;
-    if (n == value()) return;
-    xf.on = n > 0;
-    if (n) xf.seconds = n < XF_MIN ? XF_MIN : n;
-    refresh(1);
+    int was = wheel_pct();
+    wheel_set_pct(n);            /* rounds and clamps */
+    refresh(wheel_pct() != was); /* and snaps the slider to the ten */
 }
 
 /* n, held: a finger dragging the slider, whose values save at its release. Anything else (the
@@ -336,12 +359,7 @@ static void set_value(int n, int held) {
 static int toggle(void *ctx, void *event) {
     if (!switched()) return 0;
     xf.sliding = 0;
-    if (xf.ctx == 3) {
-        night_set((night_on() + 1) % 3, night_kelvin()); /* Off, On, Auto */
-        refresh(1);
-        return 0;
-    }
-    xf.on = !xf.on;
+    night_set((night_on() + 1) % 3, night_kelvin()); /* Off, On, Auto */
     refresh(1);
     return 0;
 }
@@ -361,21 +379,6 @@ static int gone(void *ctx, void *event) {
     stop_timer(&xf.press); /* a single press still waiting for its double: it was this page's */
     xf.page = 0, xf.ctx = 0;
     return 0;
-}
-
-/* Playback's Crossfade switch and Duration rows (inline_slider.c inline_pair): its state, and both
- * set and saved, as the page's switch and slider set them. */
-int xfade_state(int *seconds) {
-    settings();
-    *seconds = xf.seconds;
-    return xf.on;
-}
-void xfade_set(int on, int seconds) {
-    settings();
-    xf.on = on != 0;
-    xf.seconds = seconds < XF_MIN ? XF_MIN : seconds > XF_MAX ? XF_MAX : seconds;
-    write_int_config(xf.on, "Q2POD", "XFADE");
-    write_int_config(xf.seconds, "Q2POD", "XFADESEC");
 }
 
 int xfade_page(void *top) { return xf.page && top == xf.page; }
@@ -401,12 +404,9 @@ void xfade_ends(char *lo, char *hi, unsigned n) {
     } else if (xf.ctx == 2) {
         tk_snprintf(lo, n, "Off");
         tk_snprintf(hi, n, "%d min", RS_MAX);
-    } else if (xf.ctx == 1) {
+    } else {
         tk_snprintf(lo, n, "%d%%", WHEEL_PCT_MIN);
         tk_snprintf(hi, n, "%d%%", 200);
-    } else {
-        tk_snprintf(lo, n, "Off");
-        tk_snprintf(hi, n, "%ds", XF_MAX);
     }
 }
 
@@ -414,7 +414,6 @@ void xfade_ends(char *lo, char *hi, unsigned n) {
  * sensitivity's row, 2 for Resume Songs', 3 for Night Shift's, 4 for Volume's. */
 int xfade_open(void *ctx, void *event) {
     int mode = (int)(long)ctx, wheel = mode == 1;
-    settings();
     if (xf.page) return 0;
     void *wm = window_manager(), *below = window_manager_get_top_window(wm);
     navigator_to("playset/bootvol_page");
@@ -446,8 +445,7 @@ int xfade_open(void *ctx, void *event) {
     widget_set_text_utf8(title, mode == 4   ? "Volume"
                                 : mode == 3 ? "Night Shift"
                                 : mode == 2 ? "Resume Songs"
-                                : wheel     ? "Wheel Sensitivity"
-                                            : "Crossfade");
+                                            : "Wheel Sensitivity");
     /* Stock shows and enables it only while Boot volume's switch is on: disabled, touch misses the
      * slider and +/- (#140). */
     widget_set_visible(xf.view, 1, 0);
@@ -458,8 +456,7 @@ int xfade_open(void *ctx, void *event) {
     slider_set_max(xf.slider, mode == 4   ? vol_limit()
                               : mode == 3 ? (NS_COOL - NS_WARM) / NS_STEP
                               : mode == 2 ? RS_MAX
-                              : wheel     ? 200
-                                          : XF_MAX);
+                                          : 200);
     slider_set_step(xf.slider, steps[mode]);
     xf.page = page;
     refresh(0);
@@ -473,8 +470,8 @@ static int single(const void *info) {
     return 0;
 }
 
-/* ringnav(), the page on top: Centre toggles, a double press turns the screen off as on every
- * page, and the wheel sets the length, down to Off. Wheel sensitivity: the wheel a ten a tick
+/* ringnav(), the page on top: Centre toggles Night Shift, a double press turns the screen off as
+ * on every page, and the wheel steps the value. Wheel sensitivity: the wheel a ten a tick
  * (not through +/-, which stock may have disabled), Centre to edit_key, which goes back; Volume
  * the same, its tick vol_next's. */
 int xfade_key(void *top, unsigned key) {
@@ -492,9 +489,11 @@ int xfade_key(void *top, unsigned key) {
 }
 
 /* playback_poll, each UI pass: the next change's fade into XFADE_FILE, made whole under another
- * name first. A fade only when Crossfade and stock's Gapless are on and
- * the next track is another album's (album_cmp), so albums stay gapless; stock Shuffle's next
- * always counts as another album's, and is -2 when not drawn ahead (playback.c shuffle_peek). Its
+ * name first. A fade only when Smart Crossfade and stock's Gapless are on and the next track is
+ * another album's (album_cmp), so albums stay gapless; stock Shuffle's next always counts as
+ * another album's, and is -2 when not drawn ahead (playback.c shuffle_peek). The word is
+ * XF_FALLBACK_MS with XF_SMART: the player plans the overlap and falls back to that plain fade,
+ * from the two paths in XFADE_NEXT, written each time the change's songs do. Stock Shuffle's
  * change is a cold start (stock preloads nothing in Shuffle), which the filter's tail waits out
  * (XF_COLD_NS). Each stop moves the count beside the fade, so no tail outlives a stop: status 1 and
  * no file error. An error's status is no stop: stock's dialog timer takes the file away and shows
@@ -508,7 +507,22 @@ static int fades_into(void *r) {
     /* over 2 GB, o32's stat fails: that's a file */
     return !p || p[0] != '/' || (!access(p, 0) && (__xstat(3, p, st) || st[12]));
 }
+/* XFADE_NEXT: the playing song's path and the next one's, a line each, made whole and renamed; an
+ * empty second line when the next is not known yet (a Shuffle draw to come). */
+static void next_publish(const char *cur, const char *next) {
+    int fd = open(XFADE_NEXT ".tmp", 0x302, 0644); /* O_RDWR | O_CREAT | O_TRUNC (MIPS) */
+    if (fd < 0) return;
+    unsigned a = cur ? strlen(cur) : 0, b = next ? strlen(next) : 0;
+    int ok = write(fd, cur, a) == (int)a && write(fd, "\n", 1) == 1 && write(fd, next, b) == (int)b &&
+             write(fd, "\n", 1) == 1;
+    close(fd);
+    if (ok) rename(XFADE_NEXT ".tmp", XFADE_NEXT);
+}
 void xfade_poll(int next, int shuffled) {
+    if (xf.xfade_label && xf.shown != *(volatile unsigned char *)MCL_GAPLESS + 1) {
+        xfade_text(); /* stock's Gapless switched on the same page */
+        widget_invalidate_force(window_of(xf.xfade_label), 0);
+    }
     void *q = P(mcl_pdeqplaylist, 0);
     unsigned pos = (unsigned)I(MCL_POS, 0), n = q ? deque_size(q) : 0;
     if (!xf.flag && (next == -1 || pos >= n)) return; /* nothing playing on: no config read yet */
@@ -521,7 +535,7 @@ void xfade_poll(int next, int shuffled) {
              !navigator_window_is_exist("msginfo_dialog"))
         xf.counted = 1, ++xf.stops;
     /* the rows' paths too: Play Next moves rows' bytes, so a row's address can hold another song */
-    int key[8] = { xf.on ? xf.seconds : 0, *(volatile unsigned char *)MCL_GAPLESS,
+    int key[8] = { xf.on, *(volatile unsigned char *)MCL_GAPLESS,
                    in ? (int)deque_at(q, pos) : 0, in ? (int)deque_at(q, (unsigned)next) : 0,
                    shuffled && next != -1 && pos < n, xf.stops,
                    in ? (int)P(deque_at(q, pos), REC_PATH) : 0,
@@ -531,10 +545,13 @@ void xfade_poll(int next, int shuffled) {
     int ms = key[0] && key[1] &&
                      (key[4] || (key[2] != key[3] && album_cmp((void *)key[2], (void *)key[3]))) &&
                      (!key[3] || fades_into((void *)key[3]))
-                 ? key[0] * 1000
+                 ? XF_FALLBACK_MS | XF_SMART
                  : 0;
     xf.done = 0; /* until the player is told: a file that cannot be made yet is tried next pass */
     if (!xf.flag && ms && !(xf.flag = shared_int(XFADE_FILE ".tmp", XFADE_FILE))) return;
+    if (ms) /* the paths from the records: the key keeps only their low 32 bits */
+        next_publish(in ? P(deque_at(q, pos), REC_PATH) : 0,
+                     in ? P(deque_at(q, (unsigned)next), REC_PATH) : 0);
     if (xf.flag) *xf.flag = ms | (xf.stops & 0x7fff) << XF_STOPS;
     xf.done = 1;
 }

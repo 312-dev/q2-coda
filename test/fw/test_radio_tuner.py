@@ -684,3 +684,69 @@ def test_a_pick_in_the_library_ends_radio_and_drops_the_hold(tu, ow, fw):
     sec, total = C.c_int(), C.c_int()
     fw.mock('mclGetPlayStatus', lambda *_: 2)
     assert fw.fn('now_time', C.c_int, C.c_void_p, C.c_void_p)(C.byref(sec), C.byref(total)) == 2  # the player's
+
+
+# The dial on the piezo (the user's, 2026-11-21: "spinning the wheel is audible with the piezo like turning a
+# crunchy dial"). The tuner reads the touch wheel raw, so no key event, and so none of stock's Key Tone clicks
+# (buzzeer_switch on a key's press), reaches the buzzer: the dial asks for one itself, a click per step it moves.
+def piezo(fw, tu, mode='run', clicker=0):
+    from test_nav_loop import Buzzer
+    b = Buzzer(fw, mode)
+    fw.mock('window_manager_get_top_window', lambda *_: PAGE)
+    tu.rt.screen = TUNER
+    return b
+
+
+def turn(fw, tu, units, ms=300):
+    fw.var('wheel_travel', C.c_int).value = units
+    tu.poll(ms)
+
+
+def test_each_step_the_dial_moves_clicks_the_piezo(tu, fw):
+    b = piezo(fw, tu)
+    tu.rt.freq = 9990
+    tu.poll()
+    turn(fw, tu, -20)  # three steps, slowly: three clicks, one a step
+    assert tu.rt.freq == 9996 and b.clicks() == [1, 1, 1]
+
+
+def test_a_detent_s_held_steps_do_not_click_but_landing_does(tu, fw):
+    b = piezo(fw, tu)
+    tu.rt.freq = 9300
+    tu.poll()
+    turn(fw, tu, -20)  # 93.02, 93.04, then 93.1 caught
+    assert tu.rt.freq == 9310 and len(b.clicks()) == 3
+    turn(fw, tu, -20)  # the three steps the detent holds: the dial does not move, nothing clicks
+    assert tu.rt.freq == 9310 and len(b.clicks()) == 3
+
+
+def test_a_fast_spin_clicks_as_fast_as_the_buzzer_frees(tu, fw):
+    """Steps that come while the last click's worker still runs (tone_busy) are dropped, not queued: the buzzer's
+    own length is the spacing, so a spin is a crisp train of clicks, never a smear."""
+    b = piezo(fw, tu, 'hold')
+    tu.rt.freq = 9990
+    tu.poll()
+    turn(fw, tu, -60, 60)  # nine steps in one pass
+    assert len(fw.calls('fw_pthread_create')) == 1
+
+
+def test_clicker_off_is_silent(tu, fw):
+    b = piezo(fw, tu)
+    fw.var('g_keytone_flag', C.c_ubyte).value = 0  # Clicker: Off
+    tu.rt.freq = 9990
+    tu.poll()
+    turn(fw, tu, -20)
+    assert b.clicks() == [] and tu.rt.freq == 9996
+
+
+def test_clicker_headphones_leaves_the_buzzer_quiet_and_sends_the_player_nothing(tu, fw, library):
+    """Headphones never sounds the buzzer; and nothing goes to q2player, which plays nothing under Radio (the
+    receiver's own click, k, is the dial's in what Radio plays)."""
+    b = piezo(fw, tu)
+    fw.fn('clicker_text', C.c_char_p)()  # its config read once, which would set the field back
+    st = host.offsets(library.parent/'navigation.o', 'scratch_t')
+    C.c_int.from_address(C.addressof(fw.var('st', C.c_char)) + st['clicker']).value = 2  # CLICKER_HEADPHONES
+    tu.rt.freq = 9990
+    tu.poll()
+    turn(fw, tu, -20)
+    assert b.clicks() == [] and not fw.calls('fw_send') and tu.rt.freq == 9996

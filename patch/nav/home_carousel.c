@@ -90,15 +90,6 @@ static int home_done(void *w, void *event) {
     return 7; /* RET_REMOVE: same one-shot lifetime as stock completion */
 }
 
-static void *surface(void *target, void **other);
-
-static int cf_letter_expire(const void *info) {
-    st.cf_letter_timer = st.cf_letter = 0;
-    void *w = surface(0, 0);
-    if (w && w == st.cf_letter_surface) widget_invalidate_force(w, 0);
-    return 0;
-}
-
 extern float coverflow_follow(float k);
 extern int coverflow_follow_aim(int d, int tau, int elapsed);
 /* w's one animator, the wheel's and Coverflow's touch's, from the live offset to goal in ms with
@@ -141,26 +132,6 @@ int carousel_glide(void *w, int goal, unsigned ms, int easing) {
     P(a, ANIM_EASING) = easing == EASE_FOLLOW ? (void *)coverflow_follow : easing_get(easing);
     widget_animator_start(a);
     return 1;
-}
-
-/* Cover Flow's big letter over w for LETTER_MS, or none. ponytail: nothing calls it with a letter
- * now (docs/internals.md#coverflow-thumb, No letters); it goes with the letters' cleanup. */
-void coverflow_letter(void *w, unsigned letter, unsigned now) {
-    st.cf_letter = letter;
-    st.cf_letter_at = now;
-    st.cf_letter_surface = w;
-    st.cf_letter_held = 0;
-    if (letter)
-        rearm(&st.cf_letter_timer, cf_letter_expire, LETTER_MS);
-    else
-        stop_timer(&st.cf_letter_timer);
-}
-
-/* The thumb's letter over w with no LETTER_MS: its letters last until it lifts, which clears it
- * (coverflow_letter(w, 0, now)). */
-void coverflow_letter_hold(void *w, unsigned letter) {
-    coverflow_letter(w, 0, 0);
-    st.cf_letter = letter, st.cf_letter_held = 1;
 }
 
 /* A tick's step of n albums (wheel_accel's rows: Cover Flow never jumps by letter), the covers

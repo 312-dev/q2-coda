@@ -1521,6 +1521,40 @@ def test_the_dark_wheel_ticks_as_lit(fw):
     assert wheel.ticks() == ['prev']
 
 
+@in_fork
+def test_wheel_part_holds_a_full_tick_until_the_ui_takes_it(fw):
+    """The tick's travel leaves the wheel's thread at once, but the row steps only when ringnav takes the posted key:
+    until then wheel_part holds a whole tick that way, so the bar's lean (tilt.c) never drops to rest for a frame on the
+    row it is leaving, or against a list's end, before the step (docs/internals.md#wheel-movement)."""
+    wheel, part = Wheel(fw), fw.fn('wheel_part', C.c_int)
+    wheel.touch(100), wheel.touch(127)
+    assert part() == -27 * 256 // 28 + 1  # x rising is Previous: all but a unit of a tick that way
+    wheel.touch(129)
+    assert wheel.ticks() == ['prev']
+    assert part() == -256  # posted, not yet taken
+    taken = fw.fn('wheel_tick_taken', None)
+    taken()
+    assert part() == -(256 // 28)  # taken: the unit carried past it
+    taken()  # a replayed tick (a held turn's) takes nothing more
+    wheel.touch(101)
+    assert wheel.ticks() == ['prev', 'next'] and part() == 256  # x falling 28: Next, posted
+    wheel.now += O['WHEEL_TAKE_MS']
+    assert part() == 0  # a tick nobody took for that long is let go: the carry again
+
+
+@in_fork
+@pytest.mark.parametrize('case', ['queue full', 'stopped'])
+def test_wheel_part_holds_nothing_for_a_tick_not_posted(fw, case):
+    wheel, part = Wheel(fw), fw.fn('wheel_part', C.c_int)
+    wheel.touch(100)
+    if case == 'queue full':
+        wheel.q[:] = [0, 55, 0, 64]
+    else:
+        fw.var('wheel_mute', C.c_int).value = 1  # Return's stop (ringnav_queue_event)
+    wheel.touch(128)
+    assert wheel.ticks() == [] and part() == 0
+
+
 @pytest.fixture
 def wheel(fw):
     """The wheel outside a fork: the stand-in's bytes at WHEEL_POST go back after the test."""
@@ -1990,6 +2024,37 @@ def test_a_stale_checkpoint_is_ignored(saved):
     saved.disk.files[CHECKPOINT] = bytes(check)
     restore(saved)
     assert saved.fw.calls('mclSetStartSeekTime')[-1][1][0] == 10
+
+
+def test_a_boot_resume_reads_its_place_paused_until_it_is_heard(saved):
+    """Memory Playback's resume loads the song paused at its second (mclSetStartSeekTime, read and cleared by stock's
+    mclStartPlayer). q2player reads 0 until the song is heard, as stock's does; Now Playing's time
+    (now_source.c now_time, and stock's page update through now_page_time) reads the place, from the song's own
+    start (a CUE track's less its start), until Play."""
+    rows = full_queue(saved)
+    saved.sec, saved.s.dirty = 33, 1
+    saved.save()
+    fw, mcl = saved.fw, saved.mcl
+    fw.mock('mclSetStartSeekTime', lambda sec, *_: setattr(mcl, 'start_sec', sec) or 0)
+    restore(saved)
+    cue = C.c_int.from_address(rows[mcl.pos] + O['REC_CUE_START']).value
+    mcl.start_sec += cue  # stock's start is the file's second: a CUE track's place is past its start
+    status, heard = [3], [0]
+    fw.mock('mclGetPlayStatus', lambda *_: status[0])
+    fw.mock('player_playtime_and_length', lambda sec, total, *_: (C.c_int.from_address(sec).__setattr__('value', heard[0]),
+                                                                  C.c_int.from_address(total).__setattr__('value', 200), 0)[2])
+    fw.fn('now_starting', None)()  # ringnav_start_player, before stock's mclStartPlayer clears it
+    mcl.start_sec = -1
+    sec, total = C.c_int(), C.c_int()
+    now_time = fw.fn('now_time', C.c_int, C.c_void_p, C.c_void_p)
+    page_time = fw.fn('now_page_time', C.c_int, C.c_void_p, C.c_void_p)
+    assert now_time(C.byref(sec), C.byref(total)) == 3 and sec.value == 33
+    page_time(C.byref(sec), C.byref(total))
+    assert sec.value == 33 and total.value == 200
+    status[0], heard[0] = 2, 34  # Play: the player's own second from here
+    assert now_time(C.byref(sec), C.byref(total)) == 2 and sec.value == 34
+    status[0], heard[0] = 3, 0  # a later load with no place of its own reads the player's 0
+    assert now_time(C.byref(sec), C.byref(total)) == 3 and sec.value == 0
 
 
 def test_memory_playback_off_seeks_nowhere(saved):
@@ -2924,6 +2989,27 @@ def test_view_queues_row_of_the_playing_track_opens_now_playing(fw, keeps, playe
     assert start(at) == (1 if kept else 9)
     assert [a[0] for _, a in fw.calls('stock_start_queue_trampoline')] == ([] if kept else [at])
     assert now_playing(fw) == ([b'playing_page'] if kept else []) and len(fw.calls('player_play_pause')) == kept
+
+
+@pytest.mark.parametrize('ret', [VIEW_QUEUE_RET, ALBUMINFO_PLAY_RET])
+@pytest.mark.parametrize('status', [3, 2])
+def test_a_pick_of_the_paused_file_with_nothing_to_play_to_stays_on_its_page(fw, keeps, player, stock_call, ret,
+                                                                              status):
+    """A pick of the paused song plays it on, so with no output it is refused where it was picked: no Now Playing over
+    the queue or the album page, as a refused start of another song (output_rule.c). A playing song's pick starts
+    nothing and asks nothing: Now Playing opens."""
+    keeps.status = status
+    asked = []
+    fw.mock('check_forbid_play_no_headset', lambda quiet, *_: asked.append(quiet) or 1)
+    fw.mock('stock_start_queue_trampoline', lambda *_: 9)
+    if ret == VIEW_QUEUE_RET:
+        assert stock_call(ret, 'ringnav_start_queue', C.c_int, C.c_int)(1) == 1
+    else:
+        start = stock_call(ret, 'ringnav_player_start', C.c_int, C.c_void_p, C.c_int, C.c_int, C.c_int)
+        assert start(player.handle, 1, LIBRARY, 0) == 1
+    paused = status == 3
+    assert asked == ([0] if paused else []) and not fw.calls('player_play_pause')
+    assert now_playing(fw) == ([] if paused else [b'playing_page'])
 
 
 @pytest.mark.parametrize('eq, chained', [(0, 0), (1, 1)])

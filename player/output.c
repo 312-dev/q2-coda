@@ -1,14 +1,18 @@
 /* Where PCM goes. On the Q2 that is ALSA, opened as stock opens it (docs/player.md#output): the device by output
- * way and hardware type, the file's own rate and width with ALSA's resampling off, a 500 ms buffer in 16 periods,
- * and stock's software parameters (alsa_sw: a dry PCM plays on through silence, and sink moves past what it missed).
- * Bluetooth is asked for 48 kHz, as stock asks it, and plays at the rate bluealsa gives (its transport's), the song
- * resampled to it here, and opened again when bluealsa closes it under a stream (a codec switch: bt_reopen); a
- * device that refuses the song's width is given another (stock's fallback, and S24_3LE);
- * Bluetooth's and, when demo says so, a USB DAC's volume is done here in software, by stock's law. With
- * Q2PLAYER_PCM set to a directory it is a file a test reads back: one per open, NNNN_RATE_CH_FORMAT[_WAY].raw (s16,
- * s24, s32, f32, dop or dsd; _bt or _usb off the DAC), written as fast as it would play, or Q2PLAYER_SPEED times as
- * fast (a test's clock runs that much faster too). There Q2PLAYER_BT_RATE stands for the transport's rate (48000
- * unset) and Q2PLAYER_FORMATS, a list such as "s16,s24", for the only formats a device takes. */
+ * way and hardware type, ALSA's resampling off, a 500 ms buffer in 16 periods, and stock's software parameters
+ * (alsa_sw: a dry PCM plays on through silence, and sink moves past what it missed). The DAC and a USB DAC are asked
+ * what they take (choose, docs/player.md#usb-dacs): the song's own rate, width and channels when the device takes
+ * them, bit for bit, else the nearest it takes, the song resampled and converted here; a USB DAC unplugged is said
+ * once (say_gone) and waited for by the engine. Bluetooth is asked for 48 kHz, as stock asks it, and plays at the
+ * rate bluealsa gives (its transport's), the song resampled to it here, and opened again when bluealsa closes it
+ * under a stream (a codec switch: bt_reopen); a device that refuses the song's width is given another (stock's
+ * fallback, and S24_3LE); Bluetooth's and, when demo says so, a USB DAC's volume is done here in software, by
+ * stock's law. With Q2PLAYER_PCM set to a directory it is a file a test reads back: one per open,
+ * NNNN_RATE_CH_FORMAT[_WAY].raw (s16, s24, s32, f32, dop or dsd; _bt or _usb off the DAC), written as fast as it
+ * would play, or Q2PLAYER_SPEED times as fast (a test's clock runs that much faster too). There Q2PLAYER_BT_RATE
+ * stands for the transport's rate (48000 unset), Q2PLAYER_FORMATS, a list such as "s16,s24", for the only formats a
+ * device takes, Q2PLAYER_RATES and Q2PLAYER_CHANNELS for the only rates and channels the DAC or a USB DAC takes, and
+ * Q2PLAYER_GONE for a file that is there while a USB DAC is unplugged (sink_open). */
 #include "q2player.h"
 #include <errno.h>
 #include <math.h>
@@ -29,10 +33,23 @@
 enum { BUFFER_US = 500000, PERIODS = 16 };
 enum { BT_ASK = 48000 }; /* what stock asks bluealsa for, whatever the file (reinit_audio_chain, 0x42ecc0) */
 
+/* What a device takes, asked on the DAC's and a USB DAC's ways (choose): bit i of rates is RATES[i] (at the open's
+ * format and channels), own the song's rate when the device takes it and it is none of RATES; fmts is CAP_* bits,
+ * chans bit c for c channels; any_rate a device that takes whatever rate it is asked (the file sink without
+ * Q2PLAYER_RATES). */
+struct caps {
+    unsigned rates;
+    int own, fmts, chans, any_rate;
+};
+
 struct output {
     struct pcm_format in; /* what is written: the song's */
     struct pcm_format f;  /* what the device takes */
     int way;
+    int neg;              /* ways 0 and 2: f was chosen from what the device takes (caps), the song converted to it */
+    struct caps caps;
+    int dither;           /* TPDF dither where the song is made 16-bit (from_float) */
+    unsigned noise;       /* its LCG */
 #ifdef HAVE_ALSA
     snd_pcm_t *pcm;
     snd_pcm_uframes_t ring, period; /* the buffer and a period, in frames, as hw_params set them */
@@ -58,6 +75,11 @@ struct output {
     FILE *file;
     int paused;
     int dry_ok; /* way 3: a dry PCM at the next write is a pause's, a seek's or the open's, not an underrun */
+    /* way 3, for a slow write's line (sink): this write's last snd_pcm_wait and snd_pcm_writei answers, errno after
+     * the writei, and the microseconds spent in writei */
+    int car_wait_r, car_errno;
+    long car_write_r;
+    int64_t car_write_us;
     double speed;         /* file sink: how many seconds of sound pass in one */
     int64_t written;      /* frames, file sink */
     struct timespec t0;   /* when the file sink's clock started, moved on by each pause */
@@ -103,6 +125,129 @@ static int candidates(const struct pcm_format *f, int out[4][2]) {
     return n;
 }
 
+/* ---- what the DAC and a USB DAC take, and what a song is made for them (docs/player.md#usb-dacs) ----
+ *
+ * The device is asked what it takes; the song goes out as it is when the device takes its rate, width and channels
+ * (bit for bit), and otherwise converted, the PCM opened at the nearest the device takes: its width as candidates()
+ * orders them, its channels (else stereo, else the fewest), and its rate by pick_rate. A cheap USB-C dongle takes
+ * 48 kHz S16_LE stereo and nothing else (the AB13X of 2026-11-22), and was refused before. */
+static const int RATES[] = {8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000, 352800, 384000, 705600, 768000};
+enum { NRATES = sizeof RATES / sizeof RATES[0], MAX_CH = 8 };
+enum { CAP_S16 = 1, CAP_S24 = 2, CAP_S32 = 4, CAP_F32 = 8 };
+static int cap_fmt(int bytes, int is_float) { return is_float ? CAP_F32 : bytes == 2 ? CAP_S16 : bytes == 3 ? CAP_S24 : CAP_S32; }
+static const char *fmt_name(int bytes, int is_float) {
+    return is_float ? "FLOAT_LE" : bytes == 2 ? "S16_LE" : bytes == 3 ? "S24_3LE" : "S32_LE";
+}
+
+/* The rate for a song at want: its own when the device takes it; else the lowest whole multiple of it the device
+ * takes (88.2 kHz for 44.1); else the lowest rate above it (48 kHz for 44.1); else the highest whole divisor of it (48
+ * kHz for 192); else the highest the device takes. Each keeps all of the song's bandwidth the device can carry. */
+static int pick_rate(int want, const struct caps *c) {
+    if (c->any_rate || want == c->own) return want;
+    for (int i = 0; i < NRATES; ++i)
+        if (RATES[i] == want && c->rates >> i & 1) return want;
+    for (int i = 0; i < NRATES; ++i)
+        if (c->rates >> i & 1 && RATES[i] > want && RATES[i] % want == 0) return RATES[i];
+    for (int i = 0; i < NRATES; ++i)
+        if (c->rates >> i & 1 && RATES[i] > want) return RATES[i];
+    for (int i = NRATES - 1; i >= 0; --i)
+        if (c->rates >> i & 1 && want % RATES[i] == 0) return RATES[i];
+    for (int i = NRATES - 1; i >= 0; --i)
+        if (c->rates >> i & 1) return RATES[i];
+    return want; /* it named none: its own answer to the song's rate (set_rate_near) is taken */
+}
+
+static int pick_channels(int want, int chans) {
+    if (want > MAX_CH || chans >> want & 1) return want;
+    if (chans >> 2 & 1) return 2;
+    for (int c = 1; c <= MAX_CH; ++c)
+        if (chans >> c & 1) return c;
+    return 0;
+}
+
+/* What f goes out as on a device that takes c: bytes 0 when the device takes none of f's widths. */
+static struct pcm_format choose(const struct caps *c, const struct pcm_format *f) {
+    struct pcm_format d = *f;
+    int w[4][2], n = candidates(f, w), i = 0;
+    while (i < n && !(c->fmts & cap_fmt(w[i][0], w[i][1]))) ++i;
+    d.bytes = i < n ? w[i][0] : 0, d.is_float = i < n ? w[i][1] : 0;
+    d.channels = pick_channels(f->channels, c->chans);
+    d.rate = pick_rate(f->rate, c);
+    return d;
+}
+
+/* What the device offers, for the log: "48000 Hz; S16_LE; 2 ch" */
+static void offer_text(const struct caps *c, char *b, int cap) {
+    int n = 0;
+    for (int i = 0; i < NRATES && n < cap; ++i)
+        if (c->rates >> i & 1) n += snprintf(b + n, (size_t)(cap - n), "%s%d", n ? "," : "", RATES[i]);
+    if (c->own && n < cap) n += snprintf(b + n, (size_t)(cap - n), "%s%d", n ? "," : "", c->own);
+    if (c->any_rate && n < cap) n += snprintf(b + n, (size_t)(cap - n), "any");
+    static const int fmts[4][2] = {{2, 0}, {3, 0}, {4, 0}, {4, 1}};
+    for (int i = 0, first = 1; i < 4 && n < cap; ++i)
+        if (c->fmts & cap_fmt(fmts[i][0], fmts[i][1]))
+            n += snprintf(b + n, (size_t)(cap - n), "%s%s", first ? " Hz; " : ",", fmt_name(fmts[i][0], fmts[i][1])), first = 0;
+    for (int ch = 1, first = 1; ch <= MAX_CH && n < cap; ++ch)
+        if (c->chans >> ch & 1) n += snprintf(b + n, (size_t)(cap - n), "%s%d", first ? "; " : ",", ch), first = 0;
+    if (n < cap) snprintf(b + n, (size_t)(cap - n), " ch");
+}
+
+/* The log's word on a device, once each while it stays attached (a device that goes away, or another that offers
+ * otherwise, starts again): what it offers, beside each kind of song made another format for it, or refused. */
+static struct {
+    char offer[200];
+    int seen[8][2]; /* {song rate, channels << 16 | width}, the conversions logged */
+    int n, gone;    /* gone: logged as gone (output_gone), until an open finds it again */
+} said;
+
+static void say_device(const char *name, const struct caps *c, const struct pcm_format *song, const struct pcm_format *dev) {
+    char offer[200];
+    offer_text(c, offer, sizeof offer);
+    if (strcmp(offer, said.offer)) snprintf(said.offer, sizeof said.offer, "%s", offer), said.n = 0;
+    int key = song->channels << 16 | song->bytes << 1 | song->is_float;
+    for (int i = 0; i < said.n; ++i)
+        if (said.seen[i][0] == song->rate && said.seen[i][1] == key) return;
+    if (said.n < 8) said.seen[said.n][0] = song->rate, said.seen[said.n++][1] = key;
+    if (!dev->bytes || !dev->channels)
+        fprintf(stderr, "q2player: %s offers %s; refused %d Hz %s %d ch\n", name, offer, song->rate,
+                fmt_name(song->bytes, song->is_float), song->channels);
+    else
+        fprintf(stderr, "q2player: %s offers %s; %d Hz %s %d ch played as %d Hz %s %d ch\n", name, offer, song->rate,
+                fmt_name(song->bytes, song->is_float), song->channels, dev->rate, fmt_name(dev->bytes, dev->is_float),
+                dev->channels);
+}
+
+/* The sound cards there, from /proc/asound/cards (Q2PLAYER_CARDS in a host test), as `0 audiocodec, 2 AB13X`: a USB
+ * DAC that came back as another card than 1 is not hw:1,0. */
+static void cards_text(char *out, size_t size) {
+    const char *path = getenv("Q2PLAYER_CARDS") ? getenv("Q2PLAYER_CARDS") : "/proc/asound/cards";
+    FILE *f = fopen(path, "r");
+    char line[160], id[40];
+    size_t n = 0;
+    int card;
+    out[0] = 0;
+    if (!f) { snprintf(out, size, "none (%s)", strerror(errno)); return; }
+    while (fgets(line, sizeof line, f) && n < size)
+        if (sscanf(line, " %d [%39[^] ]", &card, id) == 2) n += (size_t)snprintf(out + n, size - n, "%s%d %s", n ? ", " : "", card, id);
+    fclose(f);
+    if (!out[0]) snprintf(out, size, "none");
+}
+
+/* A USB DAC not there to open, or gone under a write: said once until it is opened again, with the call that found it
+ * so and its answer, and the sound cards there then. The drive of 2026-11-23 had `hw:1,0 is gone` about 5 s before
+ * the earbuds left the bus, and the line could not say which call, which error, or where the card was. */
+static int open_gone;
+static void say_gone(const char *name, const char *call, int err) {
+    char cards[120];
+    open_gone = 1;
+    if (said.gone) return;
+    said.gone = 1, said.offer[0] = 0, said.n = 0;
+    cards_text(cards, sizeof cards);
+    fprintf(stderr, "q2player: %s is gone: %s %d (%s); sound cards: %s\n", name, call, err, strerror(-err), cards);
+}
+
+int output_gone(void) { return open_gone; }
+
 /* ---- route 1's car output, way 3 (docs/iphone-mode.md#car-audio) ---- */
 
 /* The iPhone gadget's probe writes CAR_FILE when the car asks for USB audio (StartUSBDeviceModeAudio) and removes it
@@ -110,7 +255,7 @@ static int candidates(const struct pcm_format *f, int out[4][2]) {
  * car was told on its second (the PCM's rate only with a one-rate module: car_open_rate). While it is there, way 3 takes the place of the DAC's and Bluetooth's. Every image's
  * player has it (Q2_CAR_USB, tools/build.py); the host's default build has not, so test/player's other suites never
  * meet a car. */
-#define CAR_FILE "/tmp/q2-iap.audio"
+#define CAR_FILE PEQ_ROOT "/tmp/q2-iap.audio"
 #define CAR_RATE 44100
 #define CAR_WAIT_MS 1000 /* a close's silence waits at most this long for room (output_close) */
 #define CAR_LOOK_MS 250  /* a write waiting for the car looks at the car file this often (sink) */
@@ -154,10 +299,10 @@ void output_car_gone(void) {
  * car sets it. The PCM is only ever opened at P_RATE_FILE's rate: the car's packets are sized by it, and a PCM at
  * another would play off speed. A song at a rate the car is not at is resampled to the car's. A module with no
  * P_RATE_FILE (one rate) is left at the car file's rate, and nothing is asked. */
-#define CAR_RATE_FILE "/tmp/q2-iap.rate"
+#define CAR_RATE_FILE PEQ_ROOT "/tmp/q2-iap.rate"
 #define P_RATE_FILE "/sys/module/usb_f_uac1/parameters/p_rate"
 /* how long a rate change waits for the car to follow; how often a song playing looks at P_RATE_FILE; the silence
- * written after the last song's tail before the PCM closes, so the closed PCM's repeated packet is silence */
+ * written after the last song's tail before the PCM closes, so the car hears silence up to the close */
 enum { CAR_FOLLOW_MS = 500, CAR_CHECK_MS = 50, CAR_PAD_MS = 60, CAR_DRAIN_MS = 600 };
 
 /* The car's rate for a song at rate: 32, 44.1 and 48 kHz as they are; above 48 kHz the family's, 48 kHz for 96 and
@@ -209,7 +354,7 @@ static int car_follow(int want, int *waited_ms) {
     return r;
 }
 
-/* The one-off line for each change of the car's rate, beside the trace's line a second (cartrace.c) */
+/* The one-off line for each change of the car's rate, beside the trace's lines (cartrace.c) */
 static void car_rate_line(const char *what, int from, int to, int waited_ms, int gap_ms) {
     char line[160];
     int n = gap_ms < 0 ? snprintf(line, sizeof line, "car rate %d->%d %s: wait=%dms", from, to, what, waited_ms)
@@ -223,7 +368,6 @@ static int car_song_rate, car_song_keep;
 
 void output_car_song(int rate, int keep) { car_song_rate = rate, car_song_keep = keep; }
 
-#ifdef HAVE_ALSA
 /* The headset connected last, whatever /mnt/data/asound.conf names (docs/player.md#output, "Which headset"):
  * bluealsa's plugin takes 00:00:00:00:00:00 as the PCM with the highest Sequence, the device that connected most
  * recently, so the car's PCM is found from bluealsa's SetConfiguration on, before demo rewrites the file or when it
@@ -245,6 +389,17 @@ static const char *device(int outputway, int hw) {
     return "default";
 }
 
+/* Whether way's device is there to open: a USB DAC's card node (hw:1,0 is /dev/snd/pcmC1D0p), so a wait for one
+ * that went (engine.c output_back) does not open it, and alsa-lib log its absence, at each look; the file sink's
+ * while Q2PLAYER_GONE's file is not there. Every other way is taken as there. */
+int output_present(int outputway) {
+    const char *gone = getenv("Q2PLAYER_GONE");
+    if (outputway != 2) return 1;
+    if (getenv("Q2PLAYER_PCM")) return !gone || access(gone, 0);
+    return getenv("Q2PLAYER_DEVICE") || !access("/dev/snd/pcmC1D0p", 0);
+}
+
+#ifdef HAVE_ALSA
 static int alsa_format(const struct pcm_format *f) {
     if (f->dsd == DSD_DOP) return SND_PCM_FORMAT_S24_3LE;
     if (f->dsd == DSD_NATIVE) return SND_PCM_FORMAT_DSD_U32_BE;
@@ -271,10 +426,41 @@ static int alsa_sw(struct output *o) {
     return r;
 }
 
+/* Ways 0 and 2: what the device takes, asked of its hardware parameters (struct caps), and the song's format chosen
+ * from it (choose); p is left with the format and channels set and the rate to be. */
+static int alsa_negotiate(struct output *o, snd_pcm_hw_params_t *p, const char *name) {
+    static const int fmts[4][2] = {{2, 0}, {3, 0}, {4, 0}, {4, 1}};
+    struct caps *c = &o->caps;
+    struct pcm_format t = o->f, d;
+    memset(c, 0, sizeof *c);
+    for (int i = 0; i < 4; ++i) {
+        t.bytes = fmts[i][0], t.is_float = fmts[i][1];
+        if (snd_pcm_hw_params_test_format(o->pcm, p, alsa_format(&t)) >= 0) c->fmts |= cap_fmt(t.bytes, t.is_float);
+    }
+    for (int ch = 1; ch <= MAX_CH; ++ch)
+        if (snd_pcm_hw_params_test_channels(o->pcm, p, (unsigned)ch) >= 0) c->chans |= 1 << ch;
+    c->any_rate = 1; /* the rates are asked once the format and channels are set */
+    d = choose(c, &o->in);
+    int r;
+    if (!d.bytes || !d.channels || (r = snd_pcm_hw_params_set_format(o->pcm, p, alsa_format(&d))) < 0 ||
+        (r = snd_pcm_hw_params_set_channels(o->pcm, p, (unsigned)d.channels)) < 0 ||
+        (r = snd_pcm_hw_params_set_rate_resample(o->pcm, p, 0)) < 0) {
+        say_device(name, c, &o->in, &d);
+        return -EINVAL;
+    }
+    c->any_rate = 0;
+    for (int i = 0; i < NRATES; ++i)
+        if (snd_pcm_hw_params_test_rate(o->pcm, p, (unsigned)RATES[i], 0) >= 0) c->rates |= 1u << i;
+    if (snd_pcm_hw_params_test_rate(o->pcm, p, (unsigned)o->in.rate, 0) >= 0) c->own = o->in.rate;
+    for (int i = 0; i < NRATES; ++i)
+        if (RATES[i] == c->own) c->own = 0; /* one of RATES: its bit says it */
+    o->f = choose(c, &o->in);
+    o->neg = 1;
+    return 0;
+}
+
 static int alsa_open(struct output *o, int outputway, int hw) {
     snd_pcm_hw_params_t *p = NULL;
-    /* way 3's o->f.rate is the car's (car_open_rate, car_reopen) */
-    unsigned want = outputway == 1 ? BT_ASK : (unsigned)o->f.rate, rate = want, buffer = BUFFER_US, periods = PERIODS;
     const char *name = device(outputway, hw);
     /* alsa-lib reads its configuration again only when alsa.conf itself changes, not /mnt/data/asound.conf, which
      * its hook loads and demo rewrites at each link (SaveBlueAlsa), so the rest of bluealsa's defaults there would
@@ -282,22 +468,38 @@ static int alsa_open(struct output *o, int outputway, int hw) {
      * 0x438ffc); so does every Bluetooth open here, the old PCM already closed. */
     if (outputway == 1) snd_config_update_free_global();
     int r = snd_pcm_open(&o->pcm, name, SND_PCM_STREAM_PLAYBACK, 0), c[4][2], n = candidates(&o->f, c), i = 0;
-    if (r < 0) { fprintf(stderr, "q2player: %s: %s\n", name, snd_strerror(r)); return -1; }
+    if (r < 0) {
+        if (outputway == 2 && (r == -ENOENT || r == -ENODEV)) say_gone(name, "snd_pcm_open", r); /* unplugged */
+        else fprintf(stderr, "q2player: %s: %s\n", name, snd_strerror(r));
+        return -1;
+    }
+    if (outputway == 2) said.gone = 0;
+    /* the DAC and a USB DAC are asked what they take and the song converted to it; DSD's bits go as they are, and
+     * Bluetooth and the car are opened at the rate they play at (way 3's o->f.rate is the car's: car_open_rate) */
+    int neg = (outputway == 0 || outputway == 2) && !o->f.dsd;
+    unsigned want = outputway == 1 ? BT_ASK : (unsigned)o->f.rate, rate, buffer = BUFFER_US, periods = PERIODS;
     if ((r = snd_pcm_hw_params_malloc(&p)) < 0 || (r = snd_pcm_hw_params_any(o->pcm, p)) < 0 ||
         (r = snd_pcm_hw_params_set_access(o->pcm, p, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0)
         goto done;
-    for (; i < n; ++i) {
-        struct pcm_format t = o->f;
-        t.bytes = c[i][0], t.is_float = c[i][1];
-        if (snd_pcm_hw_params_test_format(o->pcm, p, alsa_format(&t)) >= 0) break;
-        fprintf(stderr, "q2player: %s takes no format %d\n", name, alsa_format(&t));
+    if (neg) {
+        if ((r = alsa_negotiate(o, p, name)) < 0) goto done;
+        want = (unsigned)o->f.rate;
+    } else {
+        for (; i < n; ++i) {
+            struct pcm_format t = o->f;
+            t.bytes = c[i][0], t.is_float = c[i][1];
+            if (snd_pcm_hw_params_test_format(o->pcm, p, alsa_format(&t)) >= 0) break;
+            fprintf(stderr, "q2player: %s takes no format %d\n", name, alsa_format(&t));
+        }
+        if (i == n) { r = -EINVAL; goto done; }
+        o->f.bytes = c[i][0], o->f.is_float = c[i][1];
+        if ((r = snd_pcm_hw_params_set_format(o->pcm, p, alsa_format(&o->f))) < 0 ||
+            (r = snd_pcm_hw_params_set_channels(o->pcm, p, o->f.channels)) < 0 ||
+            (r = snd_pcm_hw_params_set_rate_resample(o->pcm, p, 0)) < 0)
+            goto done;
     }
-    if (i == n) { r = -EINVAL; goto done; }
-    o->f.bytes = c[i][0], o->f.is_float = c[i][1];
-    if ((r = snd_pcm_hw_params_set_format(o->pcm, p, alsa_format(&o->f))) < 0 ||
-        (r = snd_pcm_hw_params_set_channels(o->pcm, p, o->f.channels)) < 0 ||
-        (r = snd_pcm_hw_params_set_rate_resample(o->pcm, p, 0)) < 0 ||
-        (r = snd_pcm_hw_params_set_rate_near(o->pcm, p, &rate, NULL)) < 0 ||
+    rate = want;
+    if ((r = snd_pcm_hw_params_set_rate_near(o->pcm, p, &rate, NULL)) < 0 ||
         (r = snd_pcm_hw_params_set_buffer_time_near(o->pcm, p, &buffer, NULL)) < 0 ||
         (r = snd_pcm_hw_params_set_periods_near(o->pcm, p, &periods, NULL)) < 0 ||
         (r = snd_pcm_hw_params(o->pcm, p)) < 0 || (r = alsa_sw(o)) < 0 || (r = snd_pcm_prepare(o->pcm)) < 0)
@@ -305,13 +507,15 @@ static int alsa_open(struct output *o, int outputway, int hw) {
 done:
     if (r < 0) fprintf(stderr, "q2player: %s %d Hz %d ch %d bytes: %s\n", name, o->f.rate, o->f.channels, o->f.bytes, snd_strerror(r));
     if (p) snd_pcm_hw_params_free(p);
-    /* a device that plays another rate would play the song off speed; Bluetooth's is resampled to */
-    if (r >= 0 && outputway != 1 && rate != want) {
+    /* DSD's frames at another rate would play as noise, and the car's PCM is only ever at the car's rate; Bluetooth
+     * and a negotiated device are resampled to the rate they give */
+    if (r >= 0 && outputway != 1 && !neg && rate != want) {
         fprintf(stderr, "q2player: %s gave %u Hz for %u\n", name, rate, want);
         r = -1;
     }
     if (r < 0) { snd_pcm_close(o->pcm); o->pcm = NULL; return -1; }
     o->f.rate = (int)rate;
+    if (neg && !same_format(&o->f, &o->in)) say_device(name, &o->caps, &o->in, &o->f);
     return 0;
 }
 #endif
@@ -357,7 +561,7 @@ void dac_unmute(int outputway, int wait) {
  * for a natural start demo did not mute for. It counts when younger than DAC_PRESS_MS, and each word once. */
 int dac_stamp(int pressed) {
     static int seen;
-    int at = 0, fd = open("/tmp/q2press", O_RDONLY | O_CLOEXEC);
+    int at = 0, fd = open(PEQ_ROOT "/tmp/q2press", O_RDONLY | O_CLOEXEC);
     if (fd < 0) return 0;
     if (read(fd, &at, sizeof at) != sizeof at) at = 0;
     close(fd);
@@ -390,23 +594,52 @@ static void remember(struct output *o, const uint8_t *data, int frames) {
 }
 
 /* The file sink as a device: Q2PLAYER_FORMATS, when set, is all it takes, and on Bluetooth it plays at
- * Q2PLAYER_BT_RATE, as bluealsa at its transport's. */
+ * Q2PLAYER_BT_RATE, as bluealsa at its transport's. On ways 0 and 2 it is asked as a device is (choose):
+ * Q2PLAYER_RATES and Q2PLAYER_CHANNELS, lists such as "48000" and "2", are all it takes of those, and a USB DAC is
+ * unplugged while Q2PLAYER_GONE's file is there (output_present). */
 static const char *sink_name(const struct pcm_format *f) {
     return f->dsd == DSD_DOP ? "dop" : f->dsd ? "dsd" : f->is_float ? "f32" : f->bytes == 2 ? "s16" : f->bytes == 3 ? "s24" : "s32";
 }
 
+static void sink_caps(struct caps *c) {
+    const char *only = getenv("Q2PLAYER_FORMATS"), *rates = getenv("Q2PLAYER_RATES"), *chans = getenv("Q2PLAYER_CHANNELS");
+    static const char *names[4] = {"s16", "s24", "s32", "f32"};
+    memset(c, 0, sizeof *c);
+    for (int i = 0; i < 4; ++i)
+        if (!only || strstr(only, names[i])) c->fmts |= 1 << i;
+    c->any_rate = !rates;
+    for (const char *r = rates; r && *r; r += strcspn(r, ",") + (r[strcspn(r, ",")] == ','))
+        for (int i = 0; i < NRATES; ++i)
+            if (RATES[i] == atoi(r)) c->rates |= 1u << i;
+    for (int ch = 1; ch <= MAX_CH; ++ch) {
+        char b[4];
+        snprintf(b, sizeof b, "%d", ch);
+        if (!chans || strstr(chans, b)) c->chans |= 1 << ch;
+    }
+}
+
 static int sink_open(struct output *o, const char *dir, int outputway) {
     static int opens;
-    const char *only = getenv("Q2PLAYER_FORMATS"), *bt = getenv("Q2PLAYER_BT_RATE");
-    int c[4][2], n = candidates(&o->f, c), i = 0;
-    for (; only && i < n; ++i) {
-        struct pcm_format t = o->f;
-        t.bytes = c[i][0], t.is_float = c[i][1];
-        if (strstr(only, sink_name(&t))) break;
+    const char *only = getenv("Q2PLAYER_FORMATS"), *bt = getenv("Q2PLAYER_BT_RATE"), *name = device(outputway, 0);
+    if (!output_present(outputway)) { say_gone(name, "the card's node", -ENOENT); return -1; }
+    if (outputway == 2) said.gone = 0;
+    if ((outputway == 0 || outputway == 2) && !o->f.dsd) {
+        sink_caps(&o->caps);
+        o->f = choose(&o->caps, &o->in);
+        o->neg = 1;
+        if (!o->f.bytes || !o->f.channels) { say_device(name, &o->caps, &o->in, &o->f); return -1; }
+        if (!same_format(&o->f, &o->in)) say_device(name, &o->caps, &o->in, &o->f);
+    } else {
+        int c[4][2], n = candidates(&o->f, c), i = 0;
+        for (; only && i < n; ++i) {
+            struct pcm_format t = o->f;
+            t.bytes = c[i][0], t.is_float = c[i][1];
+            if (strstr(only, sink_name(&t))) break;
+        }
+        if (i == n) return -1;
+        o->f.bytes = c[i][0], o->f.is_float = c[i][1];
+        if (outputway == 1) o->f.rate = bt && atoi(bt) > 0 ? atoi(bt) : BT_ASK; /* way 3's is the car's already */
     }
-    if (i == n) return -1;
-    o->f.bytes = c[i][0], o->f.is_float = c[i][1];
-    if (outputway == 1) o->f.rate = bt && atoi(bt) > 0 ? atoi(bt) : BT_ASK; /* way 3's is the car's already */
     char path[1024];
     snprintf(path, sizeof path, "%s/%04d_%d_%d_%s%s.raw", dir, opens++, o->f.rate, o->f.channels, sink_name(&o->f),
              outputway == 1 ? "_bt" : outputway == 2 ? "_usb" : outputway == 3 ? "_car" : "");
@@ -415,19 +648,29 @@ static int sink_open(struct output *o, const char *dir, int outputway) {
     return 0;
 }
 
-/* Bluetooth's resampler from the song's rate to the device's, with stock's settings: MPlayer's lavcresample, which
- * stock appends for a file at another rate (af_lavcresample: filter length 16, phase shift 10, not linear, cutoff
- * max(1 - 6.5 / (16 + 8), 0.8)), here on float. docs/internals.md#bluetooth-resampler */
+/* The resampler from the song's rate to the device's, on float, which also makes its channels the device's. On
+ * Bluetooth and the car with stock's settings: MPlayer's lavcresample, which stock appends for a file at another rate
+ * (af_lavcresample: filter length 16, phase shift 10, not linear, cutoff max(1 - 6.5 / (16 + 8), 0.8));
+ * docs/internals.md#bluetooth-resampler. For the DAC and a USB DAC with libswresample's own defaults, USB_FILTER taps
+ * and a cutoff of USB_CUTOFF, flat to 21.4 kHz at 44.1 (docs/player.md#usb-dacs: about 0.13% of this machine's core
+ * for 44.1 to 48 kHz, FFmpeg's C alone). A mono song goes to both channels of a stereo device at its own level, as
+ * the DAC's plug duplicates it; more channels than the device has are mixed down by libswresample. */
+#define USB_FILTER 32
+#define USB_CUTOFF 0.97
 static int resampler(struct output *o) {
     swr_free(&o->swr);
-    if (o->in.rate == o->f.rate) return 0;
-    AVChannelLayout l;
-    av_channel_layout_default(&l, o->f.channels);
-    if (swr_alloc_set_opts2(&o->swr, &l, AV_SAMPLE_FMT_FLT, o->f.rate, &l, AV_SAMPLE_FMT_FLT, o->in.rate, 0, NULL) < 0) return -1;
-    av_opt_set_int(o->swr, "filter_size", 16, 0);
+    if (o->in.rate == o->f.rate && o->in.channels == o->f.channels) return 0;
+    int hq = o->way == 0 || o->way == 2;
+    AVChannelLayout li, lo;
+    av_channel_layout_default(&li, o->in.channels);
+    av_channel_layout_default(&lo, o->f.channels);
+    if (swr_alloc_set_opts2(&o->swr, &lo, AV_SAMPLE_FMT_FLT, o->f.rate, &li, AV_SAMPLE_FMT_FLT, o->in.rate, 0, NULL) < 0) return -1;
+    av_opt_set_int(o->swr, "filter_size", hq ? USB_FILTER : 16, 0);
     av_opt_set_int(o->swr, "phase_shift", 10, 0);
     av_opt_set_int(o->swr, "linear_interp", 0, 0);
-    av_opt_set_double(o->swr, "cutoff", 0.8, 0);
+    av_opt_set_double(o->swr, "cutoff", hq ? USB_CUTOFF : 0.8, 0);
+    static const double mono[2] = {1, 1};
+    if (o->in.channels == 1 && o->f.channels == 2) swr_set_matrix(o->swr, mono, 1);
     if (swr_init(o->swr) < 0) { swr_free(&o->swr); return -1; }
     return 0;
 }
@@ -453,10 +696,12 @@ struct output *output_open(const struct pcm_format *f, int outputway, int hw) {
     if (!o) return NULL;
     o->dry_ok = 1;
     o->in = o->f = *f, o->way = outputway;
+    o->dither = outputway == 0 || outputway == 2, o->noise = 1;
     o->gain[0] = o->gain[1] = 1;
     o->speed = getenv("Q2PLAYER_SPEED") ? atof(getenv("Q2PLAYER_SPEED")) : 1;
     if (o->speed <= 0) o->speed = 1;
     int r = -1;
+    open_gone = 0;
     if (outputway == 3) o->f.rate = car_open_rate();
     if (dir) r = sink_open(o, dir, outputway);
 #ifdef HAVE_ALSA
@@ -498,6 +743,13 @@ void output_levels(struct output *o, long *avail, long *delay) {
     *avail = (long)((int64_t)o->f.rate * BUFFER_US / 1000000) - *delay; /* the file sink's buffer is BUFFER_US */
 }
 
+/* A paused song's frames held (hold: a click, or a pause the device refused), at the rate written: written, not heard,
+ * and not in the PCM. */
+int64_t output_held(struct output *o) {
+    int64_t n = o && o->holding ? o->held_n : 0;
+    return o && o->in.rate != o->f.rate ? n * o->in.rate / o->f.rate : n;
+}
+
 int64_t output_delay(struct output *o) {
     int64_t d = dev_delay(o);
     if (o->in.rate != o->f.rate) d = d * o->in.rate / o->f.rate;
@@ -530,6 +782,26 @@ static int car_switch(struct output *o, int want);
 
 int output_take(struct output *o, const struct pcm_format *f, int outputway) {
     if (!o || outputway != o->way) return 0;
+    /* The DAC and a USB DAC: the PCM stays open when the song goes out as the one before did (choose): the same
+     * format at another rate into a device that takes one rate, its resampler made again, so a fixed-rate dongle
+     * plays a preloaded change of rate without a break; a song the device takes as it is opens it at that. */
+    if (o->neg && !f->dsd && !o->in.dsd) {
+        struct pcm_format d = choose(&o->caps, f);
+        if (d.rate != o->f.rate || d.channels != o->f.channels || d.bytes != o->f.bytes || d.is_float != o->f.is_float) return 0;
+        if (f->rate != o->in.rate || f->channels != o->in.channels) {
+            if (o->swr) { /* the old rate's resampler: what it holds back is played, then a fresh one */
+                int n = swr_get_out_samples(o->swr, 0);
+                if (n > 0 && !grow((void **)&o->rbuf, &o->rcap, n * o->f.channels, sizeof(float))) {
+                    n = swr_convert(o->swr, (uint8_t **)&o->rbuf, n, NULL, 0);
+                    if (n > 0) output_write(o, NULL, n);
+                }
+            }
+            o->in = *f;
+            if (resampler(o) < 0) return 0;
+        }
+        o->in = *f;
+        return 1;
+    }
     /* Bluetooth and the car play at their own rate: a song at another goes through the resampler, and the PCM, and
      * with it the car's stream, stays open across it; on way 3 a song for another of the car's rates moves the car
      * there first (car_switch) */
@@ -576,7 +848,8 @@ static int to_float(struct output *o, const uint8_t *data, int frames) {
 }
 
 /* frames of float at x into o->dbuf in the device's format: rounded to nearest and saturated, as dsp.c's from_float
- * (hciplayer's converters) */
+ * (hciplayer's converters), with a TPDF dither where a wider or resampled song is made 16-bit for the DAC or a USB
+ * DAC (Bluetooth and the car round, as stock's lavcresample and af_format did) */
 static int from_float(struct output *o, const float *x, int frames) {
     int n = frames * o->f.channels;
     if (grow((void **)&o->dbuf, &o->dcap, n, 4)) return -1;
@@ -584,6 +857,10 @@ static int from_float(struct output *o, const float *x, int frames) {
     else if (o->f.bytes == 2)
         for (int i = 0; i < n; ++i) {
             float v = x[i] * 32768.0f;
+            if (o->dither && v != (float)(int)v) { /* not a 16-bit sample already: TPDF dither of a step, as dsp.c's */
+                o->noise = o->noise * 1664525u + 1013904223u;
+                v += (float)((int)(o->noise >> 16 & 255) - (int)(o->noise >> 24)) * (1.0f / 256);
+            }
             ((int16_t *)o->dbuf)[i] = v >= 32767.0f ? 32767 : v <= -32768.0f ? -32768 : (int16_t)lrintf(v);
         }
     else
@@ -698,13 +975,24 @@ static int sink_to(struct output *o, const uint8_t *data, int frames) {
              * source) and q2car.sh when the cable comes out, and that ends the car's way. A stop or a skip (the
              * engine's cut, output_car_watch) ends the wait, the frames dropped, as the stop drops them. ponytail:
              * a pause or a seek waits until the car reads; the BMW reads from about 2 s after it asks. */
+            snd_pcm_uframes_t ask = (snd_pcm_uframes_t)frames;
             if (o->way == 3) {
-                while (snd_pcm_wait(o->pcm, CAR_LOOK_MS) == 0) {
+                while ((o->car_wait_r = snd_pcm_wait(o->pcm, CAR_LOOK_MS)) == 0) {
                     if (!output_car(NULL, 0, NULL)) return OUTPUT_CAR_GONE;
                     if (car_cut && *car_cut) return 0;
                 }
+                /* No more than the ring has room for: a blocking write of more writes the room and then waits in the
+                 * kernel for the rest, which a car that stopped reading never makes, until 5.10's timeout (pcm_lib.c
+                 * wait_for_avail, 10 s), deaf to a stop or a skip (run.py test_car_write_slow). The rest goes after
+                 * the next wait, which looks at the car file and the cut. Room of 0 or an error: the write as
+                 * asked, which answers the error. */
+                snd_pcm_sframes_t room = snd_pcm_avail(o->pcm);
+                if (room > 0 && room < frames) ask = (snd_pcm_uframes_t)room;
             }
-            snd_pcm_sframes_t n = snd_pcm_writei(o->pcm, data, frames);
+            int64_t wt = o->way == 3 ? car_trace_now() : 0;
+            errno = 0; /* a slow write's line says the writei's own */
+            snd_pcm_sframes_t n = snd_pcm_writei(o->pcm, data, ask);
+            if (o->way == 3) o->car_write_r = n, o->car_errno = errno, o->car_write_us += car_trace_now() - wt;
             if (n == -EINTR || n == -EAGAIN) continue;
             if (n == -EPIPE || n == -ESTRPIPE) { /* the buffer ran dry: start again here */
                 if (o->way == 3) car_trace_dry(0);
@@ -716,7 +1004,11 @@ static int sink_to(struct output *o, const uint8_t *data, int frames) {
                 continue;
             }
             if (n == -ENODEV && o->way == 3) return OUTPUT_CAR_GONE; /* the gadget, and its card, went */
-            if (n < 0) return -1;
+            if (n == -ENODEV && o->way == 2) { say_gone(device(2, 0), "snd_pcm_writei", (int)n); return OUTPUT_GONE; } /* unplugged */
+            if (n < 0) { /* the song's failure (engine.c FAILED); on a USB DAC with the call and its answer */
+                if (o->way == 2) fprintf(stderr, "q2player: %s: snd_pcm_writei %ld (%s)\n", device(2, 0), (long)n, strerror((int)-n));
+                return -1;
+            }
             if (n == 0) continue;
             data += n * o->f.channels * o->f.bytes, frames -= n;
         }
@@ -724,6 +1016,7 @@ static int sink_to(struct output *o, const uint8_t *data, int frames) {
     }
 #endif
     if (!o->file) return -1; /* a Bluetooth PCM that did not come back (bt_reopen) */
+    if (!output_present(o->way)) { say_gone(device(o->way, 0), "the card's node", -ENOENT); return OUTPUT_GONE; } /* a USB DAC unplugged */
     if (fwrite(data, (size_t)o->f.channels * o->f.bytes, frames, o->file) != (size_t)frames) return -1;
     int64_t due = (int64_t)(since(&o->t0) * o->speed * o->f.rate);
     if (due > o->written) { /* it ran dry: the clock starts again here */
@@ -741,13 +1034,38 @@ static int sink_to(struct output *o, const uint8_t *data, int frames) {
     return 0;
 }
 
+/* A write to the car's PCM that took CAR_SLOW_US or more, one line for it: where the time went, in snd_pcm_wait (the
+ * car not reading, CAR_LOOK_MS at a time) or in snd_pcm_writei (the kernel's own wait), their last answers, errno
+ * after the writei, and the PCM's state and room after it. The drive of 2026-11-23 had one write of 10.8 s across a
+ * pause, a stop and a restart, and its trace line could not say which. */
+enum { CAR_SLOW_US = 1000000 };
+static const char *const PCM_STATES[] = {"OPEN", "SETUP", "PREPARED", "RUNNING", "XRUN", "DRAINING", "PAUSED", "SUSPENDED", "DISCONNECTED"};
+static void car_slow(struct output *o, int frames, int64_t us) {
+    char line[200];
+    int st = -1;
+    long avail = 0;
+#ifdef HAVE_ALSA
+    if (o->pcm) st = snd_pcm_state(o->pcm), avail = (long)snd_pcm_avail(o->pcm);
+#endif
+    int n = snprintf(line, sizeof line,
+                     "q2player: a car write took %lld ms: %d frames, %lld ms waiting (snd_pcm_wait %d), %lld ms writing "
+                     "(snd_pcm_writei %ld, errno %d), %s, avail %ld",
+                     (long long)(us / 1000), frames, (long long)((us - o->car_write_us) / 1000), o->car_wait_r,
+                     (long long)(o->car_write_us / 1000), o->car_write_r, o->car_errno,
+                     st >= 0 && st < 9 ? PCM_STATES[st] : "no PCM", avail);
+    plog('W', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
+}
+
 /* Every write to the device. On way 3 it is timed and tapped for the car's trace (docs/iphone-mode.md#car-trace). */
 static int sink(struct output *o, const uint8_t *data, int frames) {
     if (o->way != 3) return sink_to(o, data, frames);
     car_tap(data, (int64_t)frames * frame_bytes(o));
     int64_t t = car_trace_now();
+    o->car_wait_r = o->car_errno = 0, o->car_write_r = 0, o->car_write_us = 0;
     int r = sink_to(o, data, frames);
-    car_trace_write(frames, car_trace_now() - t);
+    int64_t us = car_trace_now() - t;
+    car_trace_write(frames, us);
+    if (us >= CAR_SLOW_US) car_slow(o, frames, us);
     return r;
 }
 
@@ -916,8 +1234,8 @@ static int car_reopen(struct output *o, int rate) {
     return 0;
 }
 
-/* The last song's tail played out, then CAR_PAD_MS of silence, so the car hears silence while the rate changes and
- * a closed PCM's repeated packet (output_drop) is silence too; the wait bounded, as output_close's */
+/* The last song's tail played out, then CAR_PAD_MS of silence, so the car hears silence while the rate changes up
+ * to the close; the wait bounded, as output_close's */
 static void car_quiet(struct output *o) {
     int pad = o->f.rate * CAR_PAD_MS / 1000;
     void *z = calloc((size_t)pad, (size_t)frame_bytes(o));
@@ -1027,11 +1345,11 @@ int output_click(struct output *o, int kind) {
 #define IDLE_AHEAD_MS 80 /* more than a period (31 ms asked; the DAC's driver caps one at 4096 bytes, 19 ms at
                           * 44.1 kHz 16-bit, docs/player.md), so the PCM starts, and room for engine.c's 30 ms ticks */
 
-/* The frames written and not yet heard, the newest n of the history, into o->held; the PCM emptied, running. */
-void output_hold(struct output *o) {
+/* The frames written and not yet heard, the newest n of the history (d of them were unheard), into o->held; the PCM
+ * emptied, running. */
+static void hold(struct output *o, int64_t d) {
     if (!o || o->holding) return;
     int fb = frame_bytes(o);
-    int64_t d = dev_delay(o);
     int n = d < o->hist_n ? (int)d : o->hist_n;
     if (n > 0 && (o->held = malloc((size_t)n * fb))) { /* no memory: the resume goes on from after them, a jump */
         int from = (o->hist_at - n + o->hist_cap) % o->hist_cap, m = n < o->hist_cap - from ? n : o->hist_cap - from;
@@ -1050,6 +1368,9 @@ void output_hold(struct output *o) {
     rewind_by(o, (int)d); /* the file sink: those frames are written again at the resume */
     clock_gettime(CLOCK_MONOTONIC, &o->t0);
     o->written = 0;
+}
+void output_hold(struct output *o) {
+    if (o) hold(o, dev_delay(o));
 }
 
 void output_idle_fill(struct output *o) {
@@ -1102,8 +1423,21 @@ void output_pause(struct output *o, int on) {
     o->paused = on;
 #ifdef HAVE_ALSA
     if (o->pcm) {
-        /* A device that cannot pause keeps playing what it holds, then waits for more. */
-        snd_pcm_pause(o->pcm, on);
+        /* A device that cannot pause (docs/player.md#pause): the car's gadget advertises a pause its trigger refuses
+         * (u_audio.c uac_pcm_trigger has no pause case: -EINVAL, its read position put back to the ring's start, so
+         * the car heard the ring again, out of order). Its frames not yet heard are held, as for a click (hold, with
+         * the delay read before the refused pause moved it), and the PCM stopped, which the gadget then sends as
+         * silence, as an iPhone's stream runs on silent through a pause; the resume writes them again (above). */
+        int64_t d = on ? dev_delay(o) : 0;
+        int r = snd_pcm_pause(o->pcm, on);
+        if (r < 0 && on) {
+            fprintf(stderr, "q2player: the device cannot pause (%s): %lld frames held, the PCM stopped\n", snd_strerror(r),
+                    (long long)d);
+            hold(o, d);
+            o->paused = 1;
+        } else if (r < 0) { /* a resume refused: the PCM was never paused, and the next write goes on as ever */
+            fprintf(stderr, "q2player: the device refused the resume (%s)\n", snd_strerror(r));
+        }
         return;
     }
 #endif
@@ -1124,8 +1458,9 @@ void output_drop(struct output *o) {
     resampler(o);                          /* and what the resampler held back of it */
 #ifdef HAVE_ALSA
     if (o->pcm && o->way == 3) {
-        /* The gadget's PCM stopped sends its last packet again and again, a buzz in the car (u_audio's completion
-         * requeues it unchanged): taken back instead, it runs on, and ALSA's silence fills the room (alsa_sw) */
+        /* Taken back rather than dropped, the stream runs on and ALSA's silence fills the room (alsa_sw), as an
+         * iPhone's runs on: no stop and start for the car. A stop is silent too: the gadget's STOP zeroes its packet
+         * buffers, which its completion then sends again and again (u_audio.c uac_pcm_trigger, read 2026-11-22) */
         snd_pcm_sframes_t can = snd_pcm_rewindable(o->pcm);
         if (can > 0 && snd_pcm_rewind(o->pcm, (snd_pcm_uframes_t)can) > 0) car_trace_back(can);
         o->paused = 0;
@@ -1160,7 +1495,7 @@ void output_close(struct output *o) {
     if (!o) return;
 #ifdef HAVE_ALSA
     if (o->pcm && o->way == 3) {
-        /* the last packets silence before the stop (output_drop: a stopped gadget PCM repeats its last packet) */
+        /* the last packets silence, played out before the close (the gadget's STOP then zeroes its packets) */
         snd_pcm_sframes_t can = snd_pcm_rewindable(o->pcm);
         if (can > 0 && snd_pcm_rewind(o->pcm, (snd_pcm_uframes_t)can) > 0) car_trace_back(can);
         size_t bytes = (size_t)o->period * 2 * o->f.channels * o->f.bytes;

@@ -468,7 +468,7 @@ def test_draw_shows_the_score_line_the_ready_hint_and_the_end(fw):
 
 def test_bricks_is_games_first_engine_row_and_pauses_under_its_menu(fw):
     p = Page(fw)
-    assert p.s.engines == 1 and p.s.rows == 5
+    assert p.s.engines == 1 and p.s.rows == 1  # the chooser's one row: Games' own are not shipped
     p.go(ENGINE)
     assert p.s.screen == ENGINE and api(fw)['eng_live']()
     canvas = Canvas(fw)

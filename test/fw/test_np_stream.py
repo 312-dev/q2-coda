@@ -26,6 +26,7 @@ class Np:
     def __init__(self, fw, mcl, songs, scratch, stream=None, waits=True):
         self.fw = fw
         theme(fw)
+        fw.var('g_backlight_status', C.c_ubyte).value = 1  # lit: ns_tick ends while dark
         self.world = World(fw, now=1000)
         if stream is not None:
             self.world.files[STREAM] = stream
@@ -222,3 +223,27 @@ def test_a_song_that_plays_on_is_not_stuck_whatever_the_server(fw, mcl, songs, s
     np.paint()
     np.tick()
     assert fw.fn('np_stream_error', C.c_int)() == 0
+
+
+def test_dark_now_playing_s_stream_tick_stops_until_it_is_lit(fw, mcl, songs, scratch):
+    """ns_tick, the one page timer with no backlight test: with Now Playing on top and the screen dark it read
+    q2player.wait and the song's .stream every 500 ms. Dark, it ends (the next paint, lit, starts it again);
+    the files it read in a dark minute are counted."""
+    np = Np(fw, mcl, songs, scratch, stream=status(b'loading', 100))
+    np.paint()
+    assert np.timers
+    opened = []
+    files = np.world
+    fw.mock('fw_fopen', lambda path, mode, *_: opened.append(C.string_at(path)) or files.fopen(path, mode))
+    fw.var('g_backlight_status', C.c_ubyte).value = 0
+    for _ in range(120):
+        if not np.timers:
+            break
+        fn, _ = np.timers.pop()
+        np.world.ms += 500
+        C.CFUNCTYPE(C.c_int, C.c_void_p)(fn)(None)
+    print(f'ns_tick, a dark minute: {len(opened)} file opens')
+    assert len(opened) <= 2 and not np.timers
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    np.paint()
+    assert np.timers  # lit again: the next paint starts it

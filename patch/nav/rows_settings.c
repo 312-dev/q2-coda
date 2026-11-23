@@ -471,7 +471,7 @@ int ringnav_bt_resume(void) {
     return st.resume;
 }
 /* Link Volume as it applies now: the choice saved, else on for the device connected now when its
- * Class is headphones or a headset (bt_kind's "headphones", from the battery loop's read of it,
+ * Class is headphones or a headset (bt_kind's "headphones", from the battery run's read of it,
  * bt_battery.c) and off for a speaker, a car or a device not yet known, whose own amplifier a low
  * Q2 volume would turn down with it (docs/internals.md#headset-controls-and-volume). */
 static int bt_link(void) {
@@ -499,7 +499,7 @@ int ringnav_bt_connect_start(int pause) {
 static void pod_text(int i) {
     static const char *const names[][4] = {
         { "Charge Limit: Off", "Charge Limit: " STR(CHARGE_STOP) "%" },
-        { "Wake: Single Press", "Wake: Double Press" },
+        { "Wake: Any Button", "Wake: Double Press" },
         { "Artist View: Grid", "Artist View: Cover Flow", "Artist View: List" },
         { "Years: Newest First", "Years: Oldest First" },
         { "Artists: Artist", "Artists: Album Artist" },
@@ -652,8 +652,8 @@ int ringnav_powermanager(void *win, void *ctx) {
     /* smart_wifi.c's SMART_IDLE_MS; a caption shows under the selected row (settings_pages.c) */
     if (view)
         caption_row(st.pod_label[POD_SMART_WIFI],
-                    (const unsigned *)L"Turns Wi-Fi off after 5 minutes when nothing needs it. "
-                                      L"AirPlay and Car Remote keep it on.");
+                    "Turns Wi-Fi off after 5 minutes when nothing needs it. "
+                    "AirPlay and Car Remote keep it on.");
     pod_rows(win, "scroll_view_powermanager", POD_CARMODE, 1, icons + 2);
     if (view) /* battery.c's page */
         widget_set_text_utf8(list_row_into(view, "system_powermanager", battery_history, 0),
@@ -687,29 +687,28 @@ static void reorder(void *view, const unsigned char *order, unsigned n) {
 
 /* EQ and the Library first, then everyday listening, what plays next, the Sleep Timer, level,
  * channels, then specialist output controls. Stock's rows 0-10 (ringnav_audioset drops its Volume
- * and Album Display and Folder skip, and hides its Balance, 10, for the inline one), then ours as
- * built. */
+ * and Album Display and Folder skip, hides its Balance, 10, for the inline one, and Headphones
+ * Required, 8, which is always on), then ours as built. */
 static const unsigned char playset_order[] = {
     2 /* EQ */,
-    22 /* Library */,
+    21 /* Library */,
     3 /* Play Mode */,
     7 /* Gapless */,
-    11 /* Crossfade */,
-    12 /* its Duration */,
+    11 /* Smart Crossfade */,
     6 /* Memory play */,
-    13 /* Resume Songs */,
-    8 /* Headphones required */,
-    16 /* Sleep Timer */,
-    17 /* Volume */,
-    18 /* Max Volume */,
-    19 /* Default Volume */,
-    20 /* its Level */,
+    12 /* Resume Songs */,
+    8 /* Headphones required, hidden */,
+    15 /* Sleep Timer */,
+    16 /* Volume */,
+    17 /* Max Volume */,
+    18 /* Default Volume */,
+    19 /* its Level */,
     0 /* Gain */,
     9 /* ReplayGain */,
-    21 /* Balance */,
+    20 /* Balance */,
     10 /* stock's Balance, hidden */,
-    14 /* Mono Audio */,
-    15 /* Swap L/R */,
+    13 /* Mono Audio */,
+    14 /* Swap L/R */,
     1 /* Filters */,
     4 /* DSD Output */,
     5 /* USB Audio */,
@@ -845,8 +844,7 @@ int ringnav_audioset(void *win, void *ctx) {
         library_page(win, view, sub);
         return result;
     }
-    /* Crossfade and its Duration (inline_slider.c) */
-    inline_pair(view, "playset_gapless", IS_XFADE);
+    xfade_row(list_row(view, "playset_gapless", xfade_click, 0)); /* Smart Crossfade, crossfade.c */
     resume_row(list_row_into(view, "playset_memplay", xfade_open, (void *)2)); /* crossfade.c */
     mono_row(list_row(view, "playset_balance", mono_click, 0));
     swap_row(list_row(view, "playset_balance", swap_click, 0));
@@ -860,6 +858,8 @@ int ringnav_audioset(void *win, void *ctx) {
     inline_slider_row(view, "playset_balance", IS_BALANCE);
     /* stock's Balance, which opens its page */
     widget_set_visible(widget_get_child(view, 10), 0, 0);
+    /* Headphones Required, held on (output_rule.c) */
+    widget_set_visible(widget_get_child(view, 8), 0, 0);
     widget_set_text_utf8(
         list_row_into(view, "playset_folderjump", library_open, (void *)LIB_LIBRARY), "Library");
     reorder(view, playset_order, sizeof playset_order);

@@ -116,7 +116,56 @@ def test_each_connect_the_link_thread_starts_says_its_target_and_why(fw, why, ma
     r.links = [(CAR, 4)]
     r.set(conn=2)
     r.poll()
-    assert r.said() == [('I', f'link list 1, last {CAR} status=4 failed'), ('I', 'link thread ended (2)')]
+    assert r.said() == [('I', f'link list 1, last {CAR} status=4 failed'), ('I', 'link thread ended (2)'),
+                        ('W', f'connect to {CAR} ended: failed after 500 ms')]
+
+
+def started(fw, r, mac=CAR):
+    """A connect to mac the link thread has started, its lines read."""
+    r.poll()
+    r.links = [(mac, 1)]
+    r.set(conn=1, init=0)
+    r.poll()
+    r.said()
+
+
+@pytest.mark.parametrize('change, want', [
+    (dict(links=[(CAR, 3)]), ('I', f'connect to {CAR} ended: connected after 1000 ms')),
+    (dict(links=[(CAR, 4)], conn=0), ('W', f'connect to {CAR} ended: failed after 1000 ms')),
+    (dict(links=[(CAR, 5)], conn=0), ('W', f'connect to {CAR} ended: no link, the link list says connecting')),
+    (dict(links=[], conn=0), ('W', f'connect to {CAR} ended: no link, its item is gone')),
+    (dict(on=0), ('W', f'connect to {CAR} abandoned: Bluetooth switched off')),
+    (dict(init=1), ('W', f'connect to {CAR} abandoned: the stack restarted')),
+])
+def test_every_connect_that_starts_has_an_outcome_line(fw, change, want):
+    """Each connect starts line is followed by one of how it ended: connected, failed (the kernel's reason is in
+    q2guard's own connect failed line beside it), no link when the thread stops without one, or abandoned when
+    Bluetooth goes off or the stack restarts under it (a BT RESET relaunch, 2026-11-22 06:07:17Z)."""
+    r = Rig(fw)
+    started(fw, r)
+    r.poll()  # half a second more: still connecting, nothing to say
+    assert r.said() == []
+    if 'links' in change:
+        r.links = change.pop('links')
+    r.set(**change)
+    r.poll()
+    got = r.said()
+    assert want in got and sum(m.startswith(f'connect to {CAR} ') for _, m in got) == 1
+    r.poll()
+    r.poll()
+    assert not any(m.startswith('connect to') for _, m in r.said())  # said once
+
+
+def test_a_connect_to_another_device_ends_the_one_before(fw):
+    r = Rig(fw)
+    started(fw, r)
+    r.links = [(CAR, 4), (BUDS, 1)]
+    r.set(conn=2)
+    r.poll()
+    assert ('W', f'connect to {CAR} ended: failed after 500 ms') in r.said()
+    r.set(conn=1)
+    r.poll()
+    assert ('I', f'connect starts to {BUDS} why=other') in r.said()
 
 
 def test_a_reason_three_seconds_old_is_no_longer_the_reason(fw):
@@ -164,3 +213,21 @@ def test_the_page_opening_and_each_found_device_it_shows(fw):
     page()
     shown(BUDS.encode())
     assert r.said() == [('I', 'page opened'), ('I', f'page shows found {BUDS}')]
+
+
+@pytest.mark.parametrize('links, paired, target, want', [
+    ([], 1, CAR, ('I', f'auto-connect (auto) picks {CAR}: the saved device, paired, nothing connected')),
+    ([], 0, CAR, ('W', f'auto-connect (auto) skips {CAR}: the saved device, not paired')),
+    ([(BUDS, 3)], 1, CAR, ('I', f'auto-connect (auto) skips {CAR}: {BUDS} is connected')),
+    ([], 1, BUDS, ('I', f'auto-connect (auto) picks {BUDS}: not the saved device, paired, nothing connected')),
+])
+def test_each_auto_connect_says_which_device_it_pages_and_why(fw, links, paired, target, want):
+    """The boot of 2026-11-19 paged the car (====auto bt[60:E6:F0:A1:1F:09]==) and never the Buds, and a skip said
+    nothing: each decision of headset_bt_autolink is a bt line, its target, whether it is the saved device
+    (BTLINKMAC), and what stopped it."""
+    r = Rig(fw)
+    r.links = links
+    fw.mock('checkPairDev', lambda *_: paired)
+    go = fw.fn('headset_bt_autolink', C.c_int, C.c_char_p)(target.encode())
+    assert go == (want[1].split()[2] == 'picks')
+    assert r.said() == [want]

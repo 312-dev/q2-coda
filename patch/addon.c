@@ -31,7 +31,7 @@
  * stream_poll plays as it fills, or an .m3u of card paths, which it plays in order, waiting for
  * each, or its Q2URLS/1 queue of stream URLs, /tmp/q2-<id>.urls, which stock's Tidal player plays
  * (tidal.c app_urls_play), telling it in /tmp/q2-<id>.now which of them plays when the queue asks
- * (now_poll). It asks for Update Local Music and its playlists' import in
+ * (urls_now_poll). It asks for Update Local Music and its playlists' import in
  * /tmp/q2-<id>.library (addon_library.c), the result in .library.done. A list reply whose message
  * is "pages" and that has a cursor is followed by its next pages, appended to the same list
  * (page_next), up to ADDON_PAGES.
@@ -66,6 +66,8 @@
 #include "playback.h"
 #include "stock.h"
 
+extern void ui_watch_step(const char *step); /* ui_watch.c: the step a long UI pass is in */
+
 #define ADDON_POLL_MS 500
 /* A level's drawing (artist_view): the rows as the app sent them, or an artist's page and the
  * pages its rows open, or an album's page (album_view) */
@@ -89,7 +91,8 @@ enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR, LAY_ALBUM };
 #define RESTART_MS 20000 /* Retry's restart starts the app by then, its old loop gone or not */
 #define QUIT_MS 20000    /* the Apps page's worker waits at most this long for an app to end */
 #define APP_ID 16        /* an id's bytes, its NUL included */
-#define QR_RAW 1536      /* an app's status file as far as it is read (poll_one, qr_refresh) */
+#define QR_RAW 1536      /* an app's status file's lines as kept (app_state) */
+#define STATE_SCAN (16 << 10) /* and as far as it is read: a version-40 qr= (7,965 bytes) and more */
 #define CARD "/mnt/mmc"
 #define BUNDLED "/usr/lib/q2apps" /* the firmware's own copies (tools/build.py BUNDLED_DIR) */
 #define TAGS CARD "/.q2/apps"      /* an App Store install's tag (netupdate.c app_file) */
@@ -134,6 +137,37 @@ static struct {
     int games, game[APPS_MAX];     /* the card games among them, by name too */
 } ap __attribute__((section(".scratch")));
 
+/* An app's state file into raw as state_read lays it out (a newline first, NUL-terminated) and its
+ * kept bytes' count, but line by line: a line longer than the room left in raw, a sign-in's qr=
+ * (up to 7,965 bytes of hex, more than QR_RAW), is left out whole and the lines after it are
+ * read, so a hold=, sync=, reach= or an ack written after the code is not lost. Read no further
+ * than STATE_SCAN bytes of the file. The QR page reads the file whole itself (qr_refresh). */
+static unsigned app_state(const char *path, char *raw, unsigned size) {
+    void *f = fopen(path, "rb");
+    unsigned n = 1, start = 1, seen = 0, got;
+    int skip = 0;
+    char chunk[256];
+    raw[0] = '\n';
+    while (f && seen < STATE_SCAN && (got = fread(chunk, 1, sizeof chunk, f)) > 0) {
+        seen += got;
+        for (unsigned k = 0; k < got; ++k) {
+            char c = chunk[k];
+            if (skip) { /* the rest of a line too long to keep */
+                skip = c != '\n';
+            } else if (n < size - 1) {
+                raw[n++] = c;
+                if (c == '\n') start = n;
+            } else { /* no room for the line: take it back, and pass over what is left of it */
+                n = start;
+                skip = c != '\n';
+            }
+        }
+    }
+    if (f) fclose(f);
+    raw[n] = 0;
+    return n - 1;
+}
+
 /* An id goes into shell commands: lowercase letters, digits and '-' only. */
 static int valid_id(const char *s) {
     unsigned k = 0;
@@ -144,11 +178,19 @@ static int valid_id(const char *s) {
     return k > 0;
 }
 
-static app_t *slot(const char *id) {
+/* id's slot, or 0 when no scan has found it an app. */
+static app_t *known(const char *id) {
     for (int i = 0; i < ap.n; ++i)
         if (!strcmp(ap.a[i].id, id)) return &ap.a[i];
+    return 0;
+}
+/* id's slot, made when it has none: only for a folder whose q2app was read (scan_one), so a
+ * hidden folder a song's path names (.tidal, the user's own) takes none of the APPS_MAX. */
+static app_t *slot(const char *id) {
+    app_t *a = known(id);
+    if (a) return a;
     if (ap.n == APPS_MAX) return 0;
-    app_t *a = &ap.a[ap.n++];
+    a = &ap.a[ap.n++];
     tk_snprintf(a->id, sizeof a->id, "%s", id);
     tk_snprintf(a->bin, sizeof a->bin, CARD "/.%s/q2-%s", id, id);
     tk_snprintf(a->run, sizeof a->run, "/bin/sh " CARD "/.%s/run", id);
@@ -222,14 +264,30 @@ void addon_q2app(const char *id, char *path, unsigned n) {
     tk_snprintf(path, n, "%s/q2app", dir);
 }
 
+/* Each card app's folder, /mnt/mmc/.<id> with a valid id, and the q2app of the copy of it that
+ * runs (addon_q2app) read into raw (512 bytes): each(id, raw, ctx) for each one that reads, until
+ * it answers nonzero, which this answers then; 0 after the last. The one scan of the card's
+ * manifests: Streaming's (addon_scan), the server library's (catalogue.c cat_scan), Storage's
+ * (storage.c st_app) and a favourite's app (addon_fav_path). */
+int addon_q2apps(int (*each)(const char *id, const char *raw, void *ctx), void *ctx) {
+    char raw[512], path[64];
+    int stop = 0;
+    void *d = opendir(CARD);
+    for (struct dirent *e; d && !stop && (e = readdir(d));) {
+        if (e->d_name[0] != '.' || !valid_id(e->d_name + 1)) continue;
+        addon_q2app(e->d_name + 1, path, sizeof path);
+        if (state_read(path, raw, sizeof raw)) stop = each(e->d_name + 1, raw, ctx);
+    }
+    if (d) closedir(d);
+    return stop;
+}
+
 /* One app's folder at the scan: read when it is the copy of its app that runs (addon_dir). */
-static void scan_one(const char *id, const char *from) {
-    char raw[512], path[64], dir[48];
+static void scan_one(const char *id, const char *from, const char *raw) {
+    char dir[48], path[64];
     app_t *a;
     addon_dir(id, dir, sizeof dir);
-    if (strcmp(dir, from)) return;
-    tk_snprintf(path, sizeof path, "%s/q2app", dir);
-    if (!state_read(path, raw, sizeof raw) || !(a = slot(id))) return;
+    if (strcmp(dir, from) || !(a = slot(id))) return;
     tk_snprintf(a->bin, sizeof a->bin, "%s/q2-%s", dir, id);
     tk_snprintf(a->run, sizeof a->run, "/bin/sh %s/run", dir);
     field(raw, "name", a->name, sizeof a->name);
@@ -282,24 +340,27 @@ static void builtin_untag(const char *id) {
     }
 }
 
+/* A card folder's app, for addon_scan: read when the card's copy is the one that runs. */
+static int scan_card(const char *id, const char *raw, void *unused) {
+    char dir[48];
+    tk_snprintf(dir, sizeof dir, CARD "/.%s", id);
+    scan_one(id, dir, raw);
+    return 0;
+}
+
 /* Streaming's page (navigation.c): the apps on the card and those the firmware carries found again,
  * their names read; how many there are, by name for addon_name. A slot keeps its app (and its
  * running state) from scan to scan. */
 int addon_scan(void) {
-    char dir[48];
+    char dir[48], raw[512], path[64];
     for (int i = 0; i < ap.n; ++i) ap.a[i].present = 0;
-    void *d = opendir(CARD);
-    for (struct dirent *e; d && (e = readdir(d));) {
-        if (e->d_name[0] != '.' || !valid_id(e->d_name + 1)) continue;
-        tk_snprintf(dir, sizeof dir, CARD "/%s", e->d_name);
-        scan_one(e->d_name + 1, dir);
-    }
-    if (d) closedir(d);
-    d = opendir(BUNDLED);
+    addon_q2apps(scan_card, 0);
+    void *d = opendir(BUNDLED);
     for (struct dirent *e; d && (e = readdir(d));) {
         if (!valid_id(e->d_name)) continue;
         tk_snprintf(dir, sizeof dir, BUNDLED "/%s", e->d_name);
-        scan_one(e->d_name, dir);
+        tk_snprintf(path, sizeof path, "%s/q2app", dir);
+        if (state_read(path, raw, sizeof raw)) scan_one(e->d_name, dir, raw);
         if (addon_builtin(e->d_name)) builtin_untag(e->d_name);
     }
     if (d) closedir(d);
@@ -346,12 +407,19 @@ static void stop_cmd(const char *pid, char *cmd, unsigned n) {
     snprintf(cmd, n, "kill $(cat %s) 2>/dev/null || rm -f %s", pid, pid);
 }
 
+/* The app's run script started in the background: system() waits only for its shell, not for the
+ * script, which exits at once when the app runs already and otherwise copies itself and the app to
+ * /tmp and forks its loop (about 210 ms on the emulator, which the UI pass waited for; 65 ms with
+ * the "&", the shell's own start under qemu). Its loop is reparented when the shell ends, so no
+ * child is left for demo to reap. */
 static void launch(app_t *a) {
     const char *busy = shelf_busy();
     if (busy && !strcmp(busy + 1, a->id)) return; /* the Apps page is replacing its files */
     a->launched = 1;
     a->launch_at = time_now_ms();
-    system(a->run); /* exits at once when the app runs already */
+    char cmd[sizeof a->run + 2];
+    tk_snprintf(cmd, sizeof cmd, "%s &", a->run);
+    system(cmd);
 }
 
 /* The server library's play hand-off (catalogue.c catalogue_load, docs/server-library.md): app id
@@ -363,8 +431,8 @@ static void launch(app_t *a) {
  * makes its socket after that); -1: it can't start (not on the card, or the Apps page replacing
  * its files). A socket a killed app left is removed first, so it is not taken for the new one's. */
 int addon_wake(const char *id) {
-    app_t *a = valid_id(id) ? slot(id) : 0;
-    if (a && !a->present) addon_scan();
+    app_t *a = valid_id(id) ? known(id) : 0;
+    if (valid_id(id) && (!a || !a->present)) addon_scan(), a = known(id);
     if (!a || !a->present) return -1;
     if (!access(a->pid, 0)) {
         if (!a->launched) a->launched = 1, a->launch_at = time_now_ms(); /* its .play polled */
@@ -375,7 +443,7 @@ int addon_wake(const char *id) {
     return a->launched ? 1 : -1;
 }
 int addon_ready(const char *id) {
-    app_t *a = valid_id(id) ? slot(id) : 0;
+    app_t *a = valid_id(id) ? known(id) : 0;
     return a && !access(a->browse, 0);
 }
 
@@ -483,8 +551,9 @@ int addon_resume_ask(const char *const *paths, const unsigned char *in, unsigned
         unsigned k = strlen(paths[i]) + 1;
         bytes += k;
         if (i > at && !in[i]) ++missing, rows += k;
-        app_t *b = a || !card_id(paths[i], id) ? 0 : slot(id);
-        if (b && !b->present && !scanned) scanned = 1, addon_scan();
+        app_t *b = a || !card_id(paths[i], id) ? 0 : known(id);
+        if (!a && (!b || !b->present) && !scanned && card_id(paths[i], id))
+            scanned = 1, addon_scan(), b = known(id);
         if (b && b->present && b->resume) a = b;
     }
     if (!a || !missing || at >= n) return 0;
@@ -542,7 +611,7 @@ static void resume_poll(void) {
     }
     char raw[QR_RAW], v[24], want[16], why[40];
     unsigned k = (unsigned)tk_snprintf(want, sizeof want, "%u ", rs.seq);
-    if (state_read(rs.app->state, raw, sizeof raw)) {
+    if (app_state(rs.app->state, raw, sizeof raw)) {
         field(raw, "resumeack", v, sizeof v);
         if (!strncmp(v, want, k) && v[k] >= '1' && v[k] <= '9') {
             char code[2] = { v[k], 0 };
@@ -618,6 +687,12 @@ int card_path(const char *path) { return tk_str_start_with(path, CARD "/") && !d
  * from sm.next on (the one waited for, say). A file longer than M3U_MAX is read that far, its cut
  * last line dropped, so it is never waited for.
  * ponytail: the file is read whole each time it changes or a waited song lands; fine to M3U_MAX. */
+/* A stream's first start, timed (stream_start's log line): the ms its m3u_songs spent listing
+ * folders and reading tags, counted by m3u_songs whenever it runs and zeroed by stream_start. */
+static struct {
+    unsigned list, tags;
+} sst __attribute__((section(".scratch")));
+
 static void *m3u_songs(void) {
     void *out = _create_deque("stSongInfo"), *songs = 0;
     /* state_read's leading newline and nul, and a byte past M3U_MAX that says the file goes on */
@@ -655,15 +730,23 @@ static void *m3u_songs(void) {
             }
             if (songs) deque_destroy(songs);
             tk_snprintf(dir, sizeof dir, "%s", line);
+            ui_watch_step("stream list");
+            unsigned t = (unsigned)time_now_ms();
             songs = app_album_songs(dir);
+            sst.list += (unsigned)time_now_ms() - t;
         }
         *slash = '/';
         int found = 0;
         for (unsigned i = 0, n = deque_size(songs); !found && i < n; ++i) {
             void *r = deque_at(songs, i);
             const char *p = P(r, REC_PATH);
-            if ((found = p && !strcmp(p, line)))
-                card_record_tags(r), _deque_push_back(out, r); /* named by its tags (tags.c) */
+            if ((found = p && !strcmp(p, line))) {
+                ui_watch_step("stream tags");
+                unsigned t = (unsigned)time_now_ms();
+                card_record_tags(r); /* named by its tags (tags.c) */
+                sst.tags += (unsigned)time_now_ms() - t;
+                _deque_push_back(out, r);
+            }
         }
         if (!found && !fresh) { /* landed since the listing an earlier entry took: listed again */
             sm.more = 1;
@@ -707,8 +790,11 @@ static int stream_start(const void *unused) {
         sm.seen = 0;
         return 0;
     }
+    unsigned t0 = (unsigned)time_now_ms(), play_ms = 0;
+    sst.list = sst.tags = 0;
+    ui_watch_step("stream songs");
     void *songs = sm.m3u ? m3u_songs() : app_album_songs(sm.dir);
-    unsigned n = deque_size(songs);
+    unsigned n = deque_size(songs), songs_ms = (unsigned)time_now_ms() - t0;
     if (sm.resume && !sm.keep) { /* a resume's queue not from the song restored: never played */
         sm.state = S_DONE;
         resume_end("its queue starts at another song");
@@ -729,13 +815,23 @@ static int stream_start(const void *unused) {
             tk_snprintf(sm.last, sizeof sm.last, "%s",
                         (const char *)P(deque_at(songs, n - 1), REC_NAME));
         sm.state = S_PLAY;
-        press_natural = 1;             /* the app's .play, from its poll: nobody here pressed */
+        press_natural = 1; /* the app's .play, from its poll: nobody here pressed */
+        ui_watch_step("stream play");
+        unsigned t = (unsigned)time_now_ms();
         play_folder(songs, 0, 0xf001); /* playing_page copies the queue at once */
+        play_ms = (unsigned)time_now_ms() - t;
         press_natural = 0;
         sm.loads = playback_loads;     /* its load, which play_folder has done (playback_groups) */
         qa.app = sm.app, qa.loads = playback_loads;
     }
     deque_destroy(songs);
+    if (sm.state == S_PLAY) { /* where a stream's start spent its time on the UI thread */
+        char msg[96];
+        tk_snprintf(msg, sizeof msg,
+                    "stream start: %u songs in %u ms (list %u, tags %u), play %u ms", n, songs_ms,
+                    sst.list, sst.tags, play_ms);
+        ulog('I', "ui", msg);
+    }
     return 0;
 }
 
@@ -807,8 +903,10 @@ static void now_sweep(void) {
     if (d) closedir(d);
 }
 
-/* addon_poll's, every ADDON_POLL_MS: what plays, as sleep_check reads it */
-static void now_poll(void) {
+/* addon_poll's, every ADDON_POLL_MS: which URL of a card app's queue plays, written to its .now
+ * file, and what plays, as sleep_check reads it (now_source.c's now_poll is another thing: the
+ * Bluetooth record and NP_PLAY_FILE) */
+static void urls_now_poll(void) {
     unsigned ms = time_now_ms();
     if (!nw.owner || ms - nw.polled < ADDON_POLL_MS) return;
     nw.polled = ms;
@@ -1286,11 +1384,9 @@ static void poll_one(app_t *a) {
             a->relaunch = 0, launch(a);
         return;
     }
-    /* hold= may come anywhere, after the long qr= too. ponytail: only the first QR_RAW - 2 bytes
-     * (1,534) are read, so a hold= further on reads as 0; the largest code the QR page draws
-     * (49 modules, QR_HEX) takes about 640. A longer file needs a larger buffer here. */
+    /* hold= may come anywhere, after the long qr= too (app_state) */
     char raw[QR_RAW];
-    state_read(a->state, raw, sizeof raw);
+    app_state(a->state, raw, sizeof raw);
     a->hold = number(raw, "hold") == 1;
     if (a->hold) reset_poweroptions_timer(1, 1, 0); /* standby, auto power-off; not the screen's */
     sync_read(a, raw);
@@ -1305,9 +1401,8 @@ static void poll_one(app_t *a) {
 /* The status row's sync (status_row.c, docs/internals.md#card-app-sync): what each running app's
  * state file says, sync=check while it checks its server or its metadata, sync=down DONE TOTAL
  * while it downloads songs (DONE of TOTAL, in any unit), no key while idle. Read at poll_one's
- * pace from the read it makes anyway. ponytail: like hold=, read from the file's first QR_RAW - 2
- * bytes, and an app writes its keys in name order, so a sync= after a sign-in's long qr= reads as
- * none; sign-in and a sync do not run at once in q2-subsonic. */
+ * pace from the read it makes anyway (app_state, which keeps the lines after a sign-in's long
+ * qr=). */
 static unsigned long long digits(const char **c) {
     unsigned long long x = 0;
     while (**c == ' ') ++*c;
@@ -1389,13 +1484,13 @@ static void offline_send(app_t *a) {
 }
 /* 1 when id takes Sync Offline (its q2app's offline=1) */
 int addon_offline_ok(const char *id) {
-    app_t *a = valid_id(id) ? slot(id) : 0;
-    if (a && !a->present) addon_scan();
+    app_t *a = valid_id(id) ? known(id) : 0;
+    if (valid_id(id) && (!a || !a->present)) addon_scan(), a = known(id);
     return a && a->present && a->offline;
 }
 /* Asks id to sync key ("<kind> <id>") offline (add) or stop; 1 when the request is on its way. */
 int addon_offline_ask(const char *id, int add, const char *key) {
-    app_t *a = valid_id(id) ? slot(id) : 0;
+    app_t *a = valid_id(id) ? known(id) : 0;
     if (!addon_offline_ok(id) || !key || !*key || addon_wake(id) < 0) return 0;
     tk_snprintf(off.id, sizeof off.id, "%s", id);
     tk_snprintf(off.line, sizeof off.line, "%s %s", add ? "add" : "remove", key);
@@ -1442,12 +1537,13 @@ int addon_offline(void) {
  *   "w N"                             the wheel's raw travel since the last (wheel_raw: 200 a turn,
  *                                     rising anticlockwise), sent once a UI loop pass
  * Play/Pause and the side buttons stay the music's, as stock has them under the Games page, unless
- * the game's q2app says audio=1: the sound is then the game's (player_stop and dac_take before it
- * starts, as video_start; the output device and, on Bluetooth or USB, the volume as its arguments,
+ * the game's q2app says audio=1: the sound is then the game's (now_hold and dac_take before it
+ * starts, as video_play; the output device and, on Bluetooth or USB, the volume as its arguments,
  * as q2video gets them, and opened as q2video opens them, video.c sound_open; g_dacoff_time held
  * while it runs), those keys reach it as "k d|u 171", 222 and 223, a headset's buttons do nothing
  * (headset.c media_key, media_set_playing), and the idle quit below is left to the game, which
- * alone knows whether it is playing. Music stays stopped when it ends, as after a video. The game
+ * alone knows whether it is playing. The Library's song is held paused where it was while it runs and
+ * loaded again paused there when it ends (now_release), as after a video. The game
  * ends itself (from its Return menu); Return held GAME_HOLD_MS ends it (TERM, and its release is
  * dropped so stock's Games stays), as does GAME_IDLE_MS without input unless Smart Awake is on;
  * one still there GAME_KILL_MS after a TERM is KILLed. demo repaints when it has gone. Stock makes
@@ -1515,7 +1611,7 @@ int addon_game_start(int k) {
         headset_manual();
         spot_yield();
         radio_stop();
-        player_stop();
+        now_hold(); /* the Library paused where it was, not stopped and forgotten (now_source.c) */
         dev = output_device(vol);
         if (!dev) dac_take();
     }
@@ -1533,7 +1629,10 @@ int addon_game_start(int k) {
             execl(a->bin, a->bin, (char *)0);
         child_exit(127);
     }
-    if (pid < 0) return toast("It couldn't start"), 0;
+    if (pid < 0) {
+        if (a->audio) now_release(); /* no game: the Library's song back at once */
+        return toast("It couldn't start"), 0;
+    }
     gm.pid = pid;
     gm.audio = a->audio;
     gm.sock = socket(1, 1, 0); /* AF_UNIX, SOCK_DGRAM (MIPS numbering) */
@@ -1584,11 +1683,13 @@ static void game_poll(void) {
     int status = 0;
     if (!gm.pid) return;
     if (waitpid(gm.pid, &status, 1)) { /* WNOHANG: it has ended */
+        int audio = gm.audio;
         close(gm.sock);
-        /* a jack or USB change meanwhile ran stock's player_save_start(1): its start failed
+        gm.pid = gm.audio = 0; /* first: no start while a game has the sound (ringnav_start_player) */
+        /* the Library's song held at the start back, paused where the game found it; with none
+         * held, a jack or USB change meanwhile ran stock's player_save_start(1): its start failed
          * (ringnav_start_player) but its pause stuck on nothing, so Play would do nothing */
-        if (gm.audio && mclGetPlayStatus() == 3) player_stop();
-        gm.pid = gm.audio = 0;
+        if (audio && !now_release() && mclGetPlayStatus() == 3) player_stop();
         wheel_raw = 0;
         widget_invalidate_force(window_manager(), 0);
         if (status == 127 << 8) toast("It couldn't start"); /* the child's execl failed */
@@ -1631,7 +1732,7 @@ void addon_poll(void) {
     resume_poll(); /* first: a resume let go before its app's .play is read */
     for (int i = 0; i < ap.n; ++i) poll_one(&ap.a[i]);
     sleep_check();
-    now_poll();
+    urls_now_poll();
     library_poll();
     catalogue_poll(); /* the server library's apps (catalogue.c), running or not */
 }
@@ -2354,19 +2455,24 @@ static const char *row_album(int i) {
         if (*e == ' ' || *e == '/') return 0; /* one word, a name, never a path */
     return c + 6;
 }
-/* Row i's album's cover: the app's catalogue cover for its album id
- * (docs/server-library.md#covers), when the file is there; 0 otherwise. */
-static int album_cover(int i, char *url, unsigned size) {
+/* Row i's album's cover's URL: the app's catalogue cover for its album id
+ * (docs/server-library.md#covers), there on the card or not; 0 for a row with no album. */
+static int album_url(int i, char *url, unsigned size) {
     const char *id = row_album(i);
     if (!id) return 0;
     tk_snprintf(url, size, "file:///mnt/mmc/.%s/covers/%s.jpg", app()->id, id);
-    return !access(url + 7, 0);
+    return 1;
 }
+/* The same, for a cover about to be drawn: 0 too when the file is not there. */
+static int album_cover(int i, char *url, unsigned size) {
+    return album_url(i, url, size) && !access(url + 7, 0);
+}
+/* Every row's cover let go by name, with no look for its file: unloading a name that was never
+ * loaded does nothing. */
 static void album_covers_drop(void) {
     char url[96];
     for (int i = 0; i < top()->n; ++i)
-        if (album_cover(i, url, sizeof url))
-            image_manager_unload_bitmap_by_name(image_manager(), url);
+        if (album_url(i, url, sizeof url)) image_manager_unload_bitmap_by_name(image_manager(), url);
 }
 /* A song row's subtitle's parts (each "" when not sent), as an app with "artist" or "album"
  * writes it, "<album or artist> · <length> · <status>": the length is the first part of digits
@@ -3385,8 +3491,8 @@ static app_t *goto_app(const char *path) {
     if (catalogue_path(path) || !card_id(path, id)) return 0; /* a server row is the Library's */
     addon_q2app(id, file, sizeof file);
     if (!state_read(file, raw, sizeof raw) || number(raw, "goto") != 1) return 0;
-    app_t *a = slot(id);
-    if (a && !a->name[0]) addon_scan(); /* not listed by Streaming since boot: its name read */
+    app_t *a = known(id);
+    if (!a || !a->name[0]) addon_scan(), a = known(id); /* not listed since boot: its name read */
     return a && a->present ? a : 0;
 }
 /* The hold menu's: whether Go to on path opens a page, its app's (goto=1) or, outside an app's
@@ -3432,25 +3538,26 @@ int addon_fav(const char *id, const char *kind, const char *key, int on) {
  * folder path is in, CARD/<favdir>/…, such as q2-jellyfin's synced Jellyfin. favdir is one folder
  * name, its line maybe ending in a Windows editor's \r. Every app's q2app is read at each change,
  * so no scan is needed first: a press is rare. 0 when that app's card didn't take it. */
+struct fav_ask {
+    const char *path;
+    int on, ok;
+};
+static int fav_app(const char *id, const char *raw, void *ctx) {
+    struct fav_ask *f = ctx;
+    char dir[64];
+    field(raw, "favdir", dir, sizeof dir);
+    unsigned k = strlen(dir);
+    if (k && dir[k - 1] == '\r') dir[--k] = 0;
+    if (!k || strstr(dir, "/") || !strcmp(dir, ".") || !strcmp(dir, "..") ||
+        strncmp(f->path + sizeof CARD, dir, k) || f->path[sizeof CARD + k] != '/')
+        return 0;
+    f->ok = addon_fav(id, "path", f->path, f->on);
+    return 1;
+}
 int addon_fav_path(const char *path, int on) {
-    char raw[512], file[64], dir[64];
-    int ok = 1;
-    void *d = path && card_path(path) ? opendir(CARD) : 0;
-    for (struct dirent *e; d && (e = readdir(d));) {
-        if (e->d_name[0] != '.' || !valid_id(e->d_name + 1)) continue;
-        addon_q2app(e->d_name + 1, file, sizeof file);
-        if (!state_read(file, raw, sizeof raw)) continue;
-        field(raw, "favdir", dir, sizeof dir);
-        unsigned k = strlen(dir);
-        if (k && dir[k - 1] == '\r') dir[--k] = 0;
-        if (k && !strstr(dir, "/") && strcmp(dir, ".") && strcmp(dir, "..") &&
-            !strncmp(path + sizeof CARD, dir, k) && path[sizeof CARD + k] == '/') {
-            ok = addon_fav(e->d_name + 1, "path", path, on);
-            break;
-        }
-    }
-    if (d) closedir(d);
-    return ok;
+    struct fav_ask f = { path, on, 1 };
+    if (path && card_path(path)) addon_q2apps(fav_app, &f);
+    return f.ok;
 }
 
 /* Go to Album (album) or Go to Artist on a song in a card app's folder, /mnt/mmc/.<id>/…
@@ -3498,7 +3605,7 @@ int addon_radio(void) {
     app_t *a = qa.app;
     char raw[512], seed[8];
     on = 0;
-    if (a && playback_loads == qa.loads && state_read(a->state, raw, sizeof raw)) {
+    if (a && playback_loads == qa.loads && app_state(a->state, raw, sizeof raw)) {
         field(raw, "radio", seed, sizeof seed);
         on = seed[0] && seed[0] != '\r';
     }
@@ -3527,8 +3634,9 @@ static void radio_send(void) {
 
 static app_t *radio_app(const char *path) {
     char id[APP_ID];
-    app_t *a = path && card_id(path, id) ? slot(id) : 0;
-    if (a && !a->present) addon_scan(); /* a Library server row's app, not listed since boot */
+    int app = path && card_id(path, id);
+    app_t *a = app ? known(id) : 0;
+    if (app && (!a || !a->present)) addon_scan(), a = known(id); /* a server row's, not listed yet */
     if ((!a || !a->present || !a->radio) && qa.app && playback_loads == qa.loads) a = qa.app;
     return a && a->present && a->radio ? a : 0;
 }
@@ -3550,8 +3658,9 @@ int addon_radio_start(const char *path, unsigned seq) {
  * (q2-subsonic before q2-v1.0). 0 for any other path, or an app that does. */
 const char *addon_radio_missing(const char *path) {
     char id[APP_ID];
-    app_t *a = path && card_id(path, id) ? slot(id) : 0;
-    if (a && !a->present) addon_scan();
+    int app = path && card_id(path, id);
+    app_t *a = app ? known(id) : 0;
+    if (app && (!a || !a->present)) addon_scan(), a = known(id);
     return a && a->present && !a->radio && a->name[0] ? a->name : 0;
 }
 
@@ -3583,7 +3692,7 @@ static void lyrics_send(const char *path) {
 static app_t *lyrics_app(const char *path) {
     char id[APP_ID];
     for (int pass = 0; pass < 2; ++pass) {
-        app_t *a = card_id(path, id) ? slot(id) : 0;
+        app_t *a = card_id(path, id) ? known(id) : 0;
         if (a && !a->present) a = 0; /* not read yet, or gone from the card */
         for (int i = 0; !a && i < ap.n; ++i) {
             unsigned k = strlen(ap.a[i].dl);
@@ -3614,7 +3723,7 @@ int addon_lyrics_ask(const char *path, unsigned seq) {
 int addon_lyrics_answer(unsigned seq, const char *path) {
     char raw[QR_RAW], v[24], want[16];
     lyrics_send(path);
-    if (!lq.app || lq.pending || !state_read(lq.app->state, raw, sizeof raw)) return -1;
+    if (!lq.app || lq.pending || !app_state(lq.app->state, raw, sizeof raw)) return -1;
     field(raw, "lyricsack", v, sizeof v);
     unsigned k = (unsigned)tk_snprintf(want, sizeof want, "%u ", seq);
     return strncmp(v, want, k) || v[k] < '0' || v[k] > '9' ? -1 : v[k] - '0';
@@ -3626,8 +3735,8 @@ int addon_lyrics_answer(unsigned seq, const char *path) {
 void addon_cover_wake(const char *id) {
     char k[APP_ID];
     tk_snprintf(k, sizeof k, "%s", id);
-    app_t *a = valid_id(k) ? slot(k) : 0;
-    if (a && !a->present) addon_scan();
+    app_t *a = valid_id(k) ? known(k) : 0;
+    if (valid_id(k) && (!a || !a->present)) addon_scan(), a = known(k);
     if (a && a->present && a->covers) addon_wake(k);
 }
 
@@ -3646,7 +3755,7 @@ int addon_radio_stop(unsigned seq) {
 int addon_radio_answer(unsigned seq) {
     char raw[QR_RAW], v[24], want[16];
     radio_send();
-    if (!rq.app || !state_read(rq.app->state, raw, sizeof raw)) return -1;
+    if (!rq.app || !app_state(rq.app->state, raw, sizeof raw)) return -1;
     field(raw, "radioack", v, sizeof v);
     unsigned k = (unsigned)tk_snprintf(want, sizeof want, "%u ", seq);
     return strncmp(v, want, k) || v[k] < '0' || v[k] > '9' ? -1 : v[k] - '0';
@@ -3681,7 +3790,13 @@ int addon_hold(void *w) {
  * so the app knows the page was left by its going ("signin" in ADDON_CAPS), not by guessing from
  * the pauses in its page's refreshes, which the screen turning off makes too. The wheel does
  * nothing here, as on every page that is not a playback screen (volume.c vol_wm_keyup). */
-#define QR_HEX 640
+/* The largest code the apps send: their encoder (q2-subsonic internal/qr) takes the smallest
+ * version that holds the URL, up to 40, 177 modules, its rows QR_HEX bytes of hex; the status file
+ * is read as far as QR_FILE, room for that and the page's other fields. Both are the page's, on
+ * the heap while it is open. */
+#define QR_MAX 177
+#define QR_HEX ((QR_MAX + 3) / 4 * QR_MAX + 1)
+#define QR_FILE (QR_HEX + 1024)
 #define QR_PLATE                                                                                   \
     166 /* the code's white plate: a 29-module code's 5 px modules, 2 quiet each side */
 #define QR_PLATE_Y 4  /* its top, on the page: under the status row */
@@ -3690,108 +3805,113 @@ int addon_hold(void *w) {
 #define QR_SCAN_PX TYPE(17) /* Inter Medium 17 */
 #define QR_ADDR_PX TYPE(15) /* Inter Regular 15 */
 #define QR_DONE_MS 1500     /* Signed In shows this long before the app's page */
-static struct {
+typedef struct {
     void *page, *view;
     unsigned timer, leave, done, seen; /* seen: the state file as last read, hashed */
     const char *state;
     char marker[48]; /* /tmp/q2-<id>.qrpage */
     char name[32];   /* the app's, the status row's title */
     int size, code;  /* code: the file has one to draw */
-    char *hex;       /* the code's rows, QR_HEX bytes calloc'd with the page */
     char step[8], title[64], line[96], addr[64], pin[16], note[128];
-} qp __attribute__((section(".scratch")));
+    char hex[QR_HEX];  /* the code's rows */
+    char raw[QR_FILE]; /* the status file as last read */
+} qr_page;
+static qr_page *qp __attribute__((section(".scratch"))); /* calloc'd with the page, 0 without one */
 
 static int qr_done(const void *unused) {
     (void)unused;
-    qp.done = 0;
-    if (qp.page && window_manager_get_top_window(window_manager()) == qp.page) navigator_back();
+    if (!qp) return 0;
+    qp->done = 0;
+    if (window_manager_get_top_window(window_manager()) == qp->page) navigator_back();
     return 0;
 }
 
 static void qr_refresh(void) {
-    char raw[QR_RAW];
-    int n = (int)state_read(qp.state, raw, sizeof raw);
+    char *raw = qp->raw;
+    int n = (int)state_read(qp->state, raw, QR_FILE);
     unsigned h = hash_bytes(FNV_SEED, (const unsigned char *)raw, (unsigned)n + 1);
-    if (h == qp.seen) return;
-    qp.seen = h;
-    field(raw, "addr", qp.addr, sizeof qp.addr);
-    field(raw, "pin", qp.pin, sizeof qp.pin);
-    field(raw, "note", qp.note, sizeof qp.note);
-    field(raw, "qr", qp.hex, QR_HEX);
-    field(raw, "step", qp.step, sizeof qp.step);
-    field(raw, "title", qp.title, sizeof qp.title);
-    field(raw, "line", qp.line, sizeof qp.line);
-    if (!n) qp.step[0] = 0; /* not running: say so, whatever the last step was */
-    qp.size = (int)number(raw, "qrsize");
-    int w = (qp.size + 3) / 4;
-    qp.code = qp.addr[0] && qp.size >= 21 && qp.size <= 177 && (int)strlen(qp.hex) == w * qp.size;
-    if (!qp.code) {
-        tk_snprintf(qp.title, sizeof qp.title, "%s",
-                    !n           ? "Not running"
-                    : qp.addr[0] ? "No code yet"
-                                 : "Connect the Q2 to Wi-Fi");
-        tk_snprintf(qp.line, sizeof qp.line, "%s",
-                    !n           ? "Open it again"
-                    : qp.addr[0] ? "Wait a moment"
-                                 : "Then come back here");
+    if (h == qp->seen) return;
+    qp->seen = h;
+    field(raw, "addr", qp->addr, sizeof qp->addr);
+    field(raw, "pin", qp->pin, sizeof qp->pin);
+    field(raw, "note", qp->note, sizeof qp->note);
+    field(raw, "qr", qp->hex, QR_HEX);
+    field(raw, "step", qp->step, sizeof qp->step);
+    field(raw, "title", qp->title, sizeof qp->title);
+    field(raw, "line", qp->line, sizeof qp->line);
+    if (!n) qp->step[0] = 0; /* not running: say so, whatever the last step was */
+    qp->size = (int)number(raw, "qrsize");
+    int w = (qp->size + 3) / 4;
+    qp->code = qp->addr[0] && qp->size >= 21 && qp->size <= QR_MAX &&
+               (int)strlen(qp->hex) == w * qp->size;
+    if (!qp->code) {
+        tk_snprintf(qp->title, sizeof qp->title, "%s",
+                    !n            ? "Not running"
+                    : qp->addr[0] ? "No code yet"
+                                  : "Connect the Q2 to Wi-Fi");
+        tk_snprintf(qp->line, sizeof qp->line, "%s",
+                    !n            ? "Open it again"
+                    : qp->addr[0] ? "Wait a moment"
+                                  : "Then come back here");
     }
-    if (!strcmp(qp.step, "done") && !qp.done) rearm(&qp.done, qr_done, QR_DONE_MS);
-    widget_invalidate_force(qp.view, 0);
+    if (!strcmp(qp->step, "done") && !qp->done) rearm(&qp->done, qr_done, QR_DONE_MS);
+    widget_invalidate_force(qp->view, 0);
 }
 
 static int qr_tick(const void *unused) {
     (void)unused;
-    if (g_backlight_status) qr_refresh();
+    if (g_backlight_status && qp) qr_refresh();
     return 8; /* RET_REPEAT */
 }
 
 static int qr_leave(const void *unused) {
     (void)unused;
-    qp.leave = 0;
+    qp->leave = 0;
     navigator_back();
     return 0;
 }
 
 static int qr_keyup(void *ctx, void *event) {
     (void)ctx;
-    return return_key(event, &qp.leave, qr_leave);
+    return return_key(event, &qp->leave, qr_leave);
 }
 
 static int qr_closed(void *ctx, void *event) {
     (void)ctx, (void)event;
-    stop_timer(&qp.timer);
-    stop_timer(&qp.leave);
-    stop_timer(&qp.done);
-    unlink(qp.marker);
-    free(qp.hex);
-    memset(&qp, 0, sizeof qp);
+    if (!qp) return 0;
+    stop_timer(&qp->timer);
+    stop_timer(&qp->leave);
+    stop_timer(&qp->done);
+    unlink(qp->marker);
+    free(qp);
+    qp = 0;
     return 0;
 }
 
 static void qr_open(const char *state, const char *title) {
-    if (qp.page || !(qp.hex = calloc(QR_HEX, 1))) return;
-    if (!(qp.page = page_open("qrcode_page", qr_closed, qr_keyup))) {
-        free(qp.hex), qp.hex = 0;
+    if (qp || !(qp = calloc(1, sizeof *qp))) return;
+    if (!(qp->page = page_open("qrcode_page", qr_closed, qr_keyup))) {
+        free(qp), qp = 0;
         return;
     }
-    qp.state = state;
-    tk_snprintf(qp.name, sizeof qp.name, "%s", title);
+    qp->state = state;
+    tk_snprintf(qp->name, sizeof qp->name, "%s", title);
     /* /tmp/q2-<id>.state's marker: /tmp/q2-<id>.qrpage */
     unsigned k = strlen(state);
     k = k > 6 && !strcmp(state + k - 6, ".state") ? k - 6 : k;
-    tk_snprintf(qp.marker, sizeof qp.marker, "%.*s.qrpage", (int)k, state);
-    void *f = fopen(qp.marker, "wb");
+    tk_snprintf(qp->marker, sizeof qp->marker, "%.*s.qrpage", (int)k, state);
+    void *f = fopen(qp->marker, "wb");
     if (f) fclose(f);
-    qp.view = widget_factory_create_widget(widget_factory(), "view", qp.page, 0, bar_foot(qp.page),
-                                           375, page_room(qp.page));
-    qp.seen = 0; /* nothing read yet: no read hashes to 0 but by chance, and then only once */
+    qp->view = widget_factory_create_widget(widget_factory(), "view", qp->page, 0,
+                                            bar_foot(qp->page), 375, page_room(qp->page));
+    qp->seen = 0; /* nothing read yet: no read hashes to 0 but by chance, and then only once */
     qr_refresh();
-    qp.timer = timer_add(qr_tick, 0, 500);
+    qp->timer = timer_add(qr_tick, 0, 500);
 }
 
 /* The status row's title on the QR page: the app's name (navigation.c bar_title_of); 0 elsewhere.
  */
-const char *addon_qr_title(void *win) { return qp.page && win == qp.page ? qp.name : 0; }
+const char *addon_qr_title(void *win) { return qp && win == qp->page ? qp->name : 0; }
 
 static void plate(void *canvas, int x, int y, int w, int h, unsigned color, unsigned radius) {
     int r[4] = { x, y, w, h };
@@ -3809,12 +3929,13 @@ static void qr_text(void *canvas, const char *s, int y, const char *face, unsign
     ui_ink_raw(raw);
 }
 
-/* The page as qr_refresh read it, on qp.view (its rows count from the status row's foot). */
+/* The page as qr_refresh read it, on qp->view (its rows count from the status row's foot). */
 static void qr_paint(void *w, void *canvas) {
     unsigned ink = tok(TOK_PRIMARY), ter = tok(TOK_TERTIARY);
-    if (qp.code && !qp.step[0]) {
-        int side = QR_PLATE, x0 = (375 - side) / 2, y0 = QR_PLATE_Y;
-        int n = qp.size, m = side / (n + 4), o = (side - m * n) / 2, digits = (n + 3) / 4;
+    if (qp->code && !qp->step[0]) {
+        /* a code past 162 modules: a plate of a pixel a module and its quiet zone */
+        int n = qp->size, side = n + 4 > QR_PLATE ? n + 4 : QR_PLATE, x0 = (375 - side) / 2,
+            y0 = QR_PLATE_Y, m = side / (n + 4), o = (side - m * n) / 2, digits = (n + 3) / 4;
         unsigned raw = ui_ink_raw(0);
         plate(canvas, x0, y0, side, side, 0xffffffffu, 12);
         canvas_set_fill_color(canvas, rgba(0x000000, 255));
@@ -3822,7 +3943,7 @@ static void qr_paint(void *w, void *canvas) {
             for (int x = 0; x < n;) {
                 int run = 0;
                 for (; x + run < n; ++run) {
-                    int d = hex(qp.hex[y * digits + (x + run) / 4]);
+                    int d = hex(qp->hex[y * digits + (x + run) / 4]);
                     if (d < 0 || !(d >> (3 - (x + run) % 4) & 1)) break;
                 }
                 if (run) canvas_fill_rect(canvas, x0 + o + x * m, y0 + o + y * m, run * m, m);
@@ -3830,18 +3951,18 @@ static void qr_paint(void *w, void *canvas) {
             }
         ui_ink_raw(raw);
         char a[112], spaced[16];
-        if (strlen(qp.pin) == 6) /* 548 001 */
-            memcpy(spaced, qp.pin, 3), spaced[3] = ' ', memcpy(spaced + 4, qp.pin + 3, 4);
+        if (strlen(qp->pin) == 6) /* 548 001 */
+            memcpy(spaced, qp->pin, 3), spaced[3] = ' ', memcpy(spaced + 4, qp->pin + 3, 4);
         else
-            tk_snprintf(spaced, sizeof spaced, "%s", qp.pin);
-        tk_snprintf(a, sizeof a, spaced[0] ? "or open %s  \xc2\xb7  PIN %s" : "or open %s", qp.addr,
-                    spaced);
-        qr_text(canvas, qp.note[0] ? qp.note : "Scan with your phone", QR_SCAN_Y, "inter-medium",
+            tk_snprintf(spaced, sizeof spaced, "%s", qp->pin);
+        tk_snprintf(a, sizeof a, spaced[0] ? "or open %s  \xc2\xb7  PIN %s" : "or open %s",
+                    qp->addr, spaced);
+        qr_text(canvas, qp->note[0] ? qp->note : "Scan with your phone", QR_SCAN_Y, "inter-medium",
                 QR_SCAN_PX, ink);
         qr_text(canvas, a, QR_ADDR_Y, "inter", QR_ADDR_PX, ter);
         return;
     }
-    const char *s = qp.step;
+    const char *s = qp->step;
     unsigned ring = !strcmp(s, "done")                          ? RGB_POSITIVE
                     : !strcmp(s, "fail") || !strcmp(s, "error") ? RGB_NEGATIVE
                                                                 : scheme()->tones[0] & 0xffffffu;
@@ -3849,9 +3970,9 @@ static void qr_paint(void *w, void *canvas) {
                 !strcmp(s, "fail") || !strcmp(s, "error");
     char glyph[24];
     tk_snprintf(glyph, sizeof glyph, "modepage_%s", s);
-    mode_page_paint(w, canvas, widget_get_prop_int(qp.page, "y", 0),
+    mode_page_paint(w, canvas, widget_get_prop_int(qp->page, "y", 0),
                     &(mode_page_t){ known ? ring : MODE_BARE, known ? glyph : (const char *)0, 0,
-                                    qp.title, qp.line, (const char *)0 });
+                                    qp->title, qp->line, (const char *)0 });
 }
 
 /* ringnav_paint, every widget after stock painted it: a progress row's bar, a flat rectangle filled
@@ -3876,7 +3997,7 @@ void addon_paint(void *w, void *canvas) {
         return;
     }
     if ((pg.pend || pg.hold) && w == pg.page) load_spinner_paint(w, canvas); /* over the page */
-    if (!qp.page || w != qp.view || !P(canvas, CANVAS_LCD)) return;
+    if (!qp || w != qp->view || !P(canvas, CANVAS_LCD)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     qr_paint(w, canvas);
     stock_canvas_set_fill_color(canvas, fill);

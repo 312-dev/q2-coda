@@ -236,3 +236,38 @@ def test_rename_s_return_key_is_a_check(fw):
     d.click_row('d0')
     d.ui.click(d.page, 2)
     assert fw.var('search_strip__ss', Ss).ret == STRIP_SAVE
+
+
+def bt_lines(fw):
+    """demo's stderr as (level, message) for its bt lines, as test_bt_trace.py reads it"""
+    out = []
+    fw.mock('fw_write', lambda fd, data, n, *_: (fd == 2 and out.append(
+        tuple(C.string_at(data, n).decode().rstrip('\n').split(' ', 4)[i] for i in (2, 3, 4)))) or n)
+    return out
+
+
+@pytest.mark.parametrize('pair, said', [(1, ('I', f'forget {CAR}: unpaired')),
+                                        (2, ('I', f'forget {CAR}: disconnected and unpaired')),
+                                        (0, ('W', f'forget {CAR}: stock\'s unpair refused it (0), nothing done'))])
+def test_each_forget_says_how_it_went(fw, pair, said):
+    """On 2026-11-19 a Forget took two taps and the log could not say why: each answer of the card is a bt line
+    now, with what stock's unpair returned, and the card's Cancel too."""
+    d = Detail(fw)
+    Answers(fw, d, pair=pair)
+    d.click_row('d1')
+    lines = bt_lines(fw)
+    forget = fw.fn('bt_detail__forget', None, C.c_void_p, C.c_int, C.c_int)
+    forget(None, 0, 0)
+    forget(None, 1, 0)
+    assert [(lv, msg) for lv, src, msg in lines if src == 'bt'] == [('I', f'forget {CAR}: Cancel chosen'),
+                                                                    (said[0], said[1])]
+
+
+def test_a_forget_for_a_device_gone_from_the_list_says_so(fw):
+    d = Detail(fw)
+    Answers(fw, d)
+    d.click_row('d1')
+    lines = bt_lines(fw)
+    fw.var('fw_ctx_pdeq_btshowlist', C.c_uint).value = d.ui.deques.new([])  # stock read its list again since
+    fw.fn('bt_detail__forget', None, C.c_void_p, C.c_int, C.c_int)(None, 1, 0)
+    assert ('W', f'forget {CAR}: not in the device list now, nothing done') in [(lv, m) for lv, s, m in lines]

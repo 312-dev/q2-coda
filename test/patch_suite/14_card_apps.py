@@ -91,20 +91,21 @@ CONFIG['KEEPLIT']='1'; a=AppMachine(); del CONFIG['KEEPLIT']; card_app(a,'fidget
 assert a.call(address=payload_syms['addon_games'],args=(0,0,0,0),gap=0,clear=False,count=5_000_000)==1
 assert a.call(address=payload_syms['addon_game_start'],args=(0,0,0,0),gap=0,clear=False,count=5_000_000)==1
 assert not idle(a) and not idle(a) and any(c[0]=='reset_poweroptions_timer' for c in a.calls); passed()
-# A card game with the sound (q2app audio=1): the output is handed over before the fork as for a video (player_stop,
+# A card game with the sound (q2app audio=1): the output is handed over before the fork as for a video (now_hold,
 # the jack readied by dac_take) and the binary gets q2video's arguments: the device, and on Bluetooth or USB the
 # volume (h: the DAC's own); Play/Pause and the side buttons reach it; the DAC stays on and nothing ends it for
 # idling; the Shortcut opens it by id, -1 for an id no card game has.
-g=AppMachine(); card_app(g,'groovebox','name=Groovebox\ngame=1\naudio=1\n'); GB='/mnt/mmc/.groovebox/q2-groovebox'; GS2='/tmp/q2-groovebox.input.sock'
+g=AppMachine(); g.handlers.pop(syms['mclGetPlayStatus'],None); g.word(0xa50084,2); g.mock('player_save_stop','player_save_start')  # the Library playing
+card_app(g,'groovebox','name=Groovebox\ngame=1\naudio=1\n'); GB='/mnt/mmc/.groovebox/q2-groovebox'; GS2='/tmp/q2-groovebox.input.sock'
 def gn(name,*args): return g.call(address=payload_syms[name],args=(args+(0,0,0,0))[:4],gap=0,clear=False,count=5_000_000)
 def start(way):
     g.way=way; g.forked=0; g.execs=[]; g.calls=[]; gn('addon_game_start',0)  # the child
     return [c[0] for c in g.calls]
 assert gn('addon_games')==1 and gn('addon_game_audio')==0  # scanned: the game is listed, none runs
 g.word(syms['g_dacoff_time'],0xffffffff); g.byte(syms['g_headset_output'],1); g.byte(syms['g_volume'],42); names=start(0)
-take=[n for n in names if n in ('player_stop','config_outputchannel','mclSetPcmMode','mclSetMute','device_set_volume','fork')]
-assert take==['player_stop','config_outputchannel','mclSetPcmMode','mclSetMute','device_set_volume','fork'] and g.execs[-1]==(GB,GB,'plughw:0,0','',0)
-names=start(1); assert 'player_stop' in names and 'config_outputchannel' not in names and g.execs[-1]==(GB,GB,'plug:bluealsa','42',0)
+take=[n for n in names if n in ('player_save_stop','config_outputchannel','mclSetPcmMode','mclSetMute','device_set_volume','fork')]
+assert take==['player_save_stop','config_outputchannel','mclSetPcmMode','mclSetMute','device_set_volume','fork'] and g.execs[-1]==(GB,GB,'plughw:0,0','',0)
+names=start(1); assert 'player_stop' not in names and 'config_outputchannel' not in names  # the song still held and g.execs[-1]==(GB,GB,'plug:bluealsa','42',0)
 g.byte(syms['g_usbvol_mode'],0); g.word(O['USB_MIXER'],0xfffffffe); start(2); assert g.execs[-1]==(GB,GB,'usb','h42',0)
 g.way=0; g.forked=4243; assert gn('addon_game_start',0)==1 and gn('addon_game_on')==4243 and gn('addon_game_audio')==1
 g.handlers[inp+12]='stock_input'
@@ -118,7 +119,8 @@ assert gevent(O['EVT_KEY_DOWN'],O['KEY_BACK_BTN'])==[('k d 222',GS2)] and gevent
 assert gevent(O['EVT_KEY_LONG'],O['KEY_PLAY'])==[]  # eaten: no Play-hold action of stock's
 g.word(syms['g_dacoff_time'],5); g.now+=120_001; g.waited=0; assert poll(g)==0 and g.get(syms['g_dacoff_time'])==0
 g.now+=120_001; assert poll(g)==0 and any(c[0]=='reset_poweroptions_timer' for c in g.calls)
-g.waited=4243; poll(g); assert gn('addon_game_on')==0 and gn('addon_game_audio')==0
+g.waited=4243; g.calls=[]; poll(g); assert gn('addon_game_on')==0 and gn('addon_game_audio')==0
+assert [c[1] for c in g.calls if c[0]=='player_save_start']==[1]  # the held song back, paused (now_release)
 g.waited=0; assert signed(gn('addon_game_open',g.string('nothere')))==-1 and gn('addon_game_on')==0
 assert gn('addon_game_open',g.string('groovebox'))==1 and gn('addon_game_on')==4243; passed()
 # Stock's Baidu Netdisk row (a Chinese cloud drive; list_baidu's icon) is gone from Streaming, destroyed; its
@@ -225,7 +227,7 @@ m=SlskMachine(); m.gone(); m.open()
 assert m.labels()==["Soulseek isn't on the card",'Install it again in System settings → App Store'] and not m.systems and not m.threads
 m.row(0); assert not m.threads; m.poll(); assert not m.systems; m.close(); passed()
 # With it: started, the menu asked; no socket yet is the add-on starting, asked again; its rows.
-m=SlskMachine(); m.open(); assert m.systems==['/bin/sh /mnt/mmc/.soulseek/run'] and m.labels()==['Loading…']
+m=SlskMachine(); m.open(); assert m.systems==['/bin/sh /mnt/mmc/.soulseek/run &'] and m.labels()==['Loading…']
 m.worker(); assert m.labels()==['Starting Soulseek…']; m.advance(500)
 m.answer('ok','refresh','',SMENU); assert m.requests[-1]==('menu',) and m.labels()==SLABELS; passed()
 # A live level is asked again every 2 s while on top; the same rows aren't rebuilt, and changed texts in the
@@ -498,7 +500,7 @@ m.call(address=HOOKS['usbmode_page_init'][0],args=(0x55,0x66,0,0),gap=0,count=5_
 names=[c[0] for c in m.calls]
 assert m.systems==['kill $(cat /tmp/q2-soulseek) 2>/dev/null || rm -f /tmp/q2-soulseek'] and names.index('stock_usbmode')>names.index('sleep_ms') and SPID not in m.files,(m.systems,names[-12:])
 m.open_pages={'usbmode_page'}; m.poll(); assert m.systems==['kill $(cat /tmp/q2-soulseek) 2>/dev/null || rm -f /tmp/q2-soulseek']
-m.open_pages=set(); m.poll(); assert m.systems[-1]=='/bin/sh /mnt/mmc/.soulseek/run'; passed()
+m.open_pages=set(); m.poll(); assert m.systems[-1]=='/bin/sh /mnt/mmc/.soulseek/run &'; passed()
 # Stop Streaming Services stops it too.
 m.systems=[]; run(m,'addon_stop'); assert m.systems==['kill $(cat /tmp/q2-soulseek) 2>/dev/null || rm -f /tmp/q2-soulseek']; passed()
 # Requests no longer answered while the app may still run (its socket gone, or the app frozen): the
@@ -518,7 +520,7 @@ m.close(); m.files.pop(SPID); m.poll(); m.poll(); assert m.systems==[SKILL]; pas
 m=slsk_gone(); m.systems=[]; m.row(0); m.worker()
 assert m.systems==[SKILL] and m.labels()==["Soulseek isn't running",'Retry','Stop Soulseek'],(m.systems,m.labels())
 m.poll(); assert m.systems==[SKILL]  # the old loop still there
-m.files.pop(SPID); m.poll(); assert m.systems==[SKILL,'/bin/sh /mnt/mmc/.soulseek/run'],m.systems
+m.files.pop(SPID); m.poll(); assert m.systems==[SKILL,'/bin/sh /mnt/mmc/.soulseek/run &'],m.systems
 m.advance(500); m.answer('ok','refresh','',SMENU); assert m.labels()==SLABELS,m.labels(); passed()
 # A level loading for 3 s (a frozen app holding the request, which gives up at 15 s) keeps the menu under the
 # loading overlay, with no Stop row of its own: Return cancels it, and the menu's Stop Soulseek ends the app.
@@ -528,7 +530,7 @@ m.close(); passed()
 # An app that isn't running (it stopped by itself) has nothing to stop: Retry alone, which starts it.
 m=SlskMachine(); m.open(); m.answer('ok','refresh','',SMENU); m.serve=None; m.advance(10000); m.poll(); m.worker()
 assert m.labels()==["Soulseek isn't running",'Retry'],m.labels()
-m.systems=[]; m.row(0); assert m.systems==['/bin/sh /mnt/mmc/.soulseek/run'],m.systems; m.close(); passed()
+m.systems=[]; m.row(0); assert m.systems==['/bin/sh /mnt/mmc/.soulseek/run &'],m.systems; m.close(); passed()
 
 # File Browser: q2-filebrowser from the card's .filebrowser folder, the same page on its own socket.
 # Its manifest's qr=1: turned on by its row, its QR code page opens once it answers, the menu behind
@@ -543,7 +545,7 @@ FLABELS=['File Browser','Open on Your Phone','http://192.168.1.23:8000 · PIN 54
          'The phone can upload, rename, move and delete','Turn Off File Browser','It also turns off after 15 minutes unused']
 m=FileBrowserMachine(); m.gone(); m.open()
 assert m.labels()==["File Browser isn't on the card",'Install it again in System settings → App Store'] and not m.systems; m.close(); passed()
-m=FileBrowserMachine(); m.open(); assert m.systems==['/bin/sh /mnt/mmc/.filebrowser/run'] and m.labels()==['Loading…']
+m=FileBrowserMachine(); m.open(); assert m.systems==['/bin/sh /mnt/mmc/.filebrowser/run &'] and m.labels()==['Loading…']
 m.worker(); assert m.labels()==['Starting File Browser…']; m.advance(500)
 m.files[FSTATE]=bytearray(f"addr=192.168.1.23:8000\nhold=0\nnote=Manage the card's files there\npin=548001\nqr={hexed}\nqrsize=21\nversion=q2f-v1.0\n".encode())
 m.answer('ok','refresh','',FMENU); assert m.requests[-1]==('menu',) and m.labels()==FLABELS
@@ -575,7 +577,7 @@ class QobuzMachine(AppMachine): app,manifest='qobuz','name=Qobuz\nsearch=Search 
 QSONG='/mnt/mmc/.qobuz/cache/album-a1/01 First [t1].flac'
 m=QobuzMachine(); m.top=m.node('window','playing_page'); m.mock('navigator_back')
 assert run(m,'addon_goto',m.string(QSONG),m.string('Record'),1)==1; m.page=m.top
-assert m.nodes[m.page]['name']=='addon_page' and m.systems==['/bin/sh /mnt/mmc/.qobuz/run'] and m.labels()==['Loading…']
+assert m.nodes[m.page]['name']=='addon_page' and m.systems==['/bin/sh /mnt/mmc/.qobuz/run &'] and m.labels()==['Loading…']
 m.answer('ok','','40',[('list','artist','The Band','Artist','5',''),('action','play','First','3:20','album-a1:t1','dl:album-a1:t1')])
 assert m.requests[-1]==('goto','album',QSONG) and m.labels()==['Record','The Band','Artist','First','3:20','More…'],m.labels()
 m.pick(2); m.answer(*OK,[]); assert m.requests[-1]==('goto','album',QSONG,'40'),m.requests[-1]
@@ -666,7 +668,7 @@ m=DeezerMachine(); m.gone(); m.open()
 assert m.labels()==["Deezer isn't on the card",'Install it again in System settings → App Store'] and not m.systems; m.close(); passed()
 # Started, the menu asked; signed out, its sign-in row opens the code over its status file (and only
 # then: Deezer's row doesn't open it by itself).
-m=DeezerMachine(); m.open(); assert m.systems==['/bin/sh /mnt/mmc/.deezer/run'] and m.labels()==['Loading…']
+m=DeezerMachine(); m.open(); assert m.systems==['/bin/sh /mnt/mmc/.deezer/run &'] and m.labels()==['Loading…']
 m.worker(); assert m.labels()==['Starting Deezer…']; m.advance(500)
 DZOUT=[('remote','','Sign In from Your Phone','Press to show the code','',''),('action','stop','Stop Deezer','Downloads carry on next time','','')]
 m.files[DZSTATE]=bytearray(f"addr=192.168.1.23:8090\nhold=0\nnote=Paste your Deezer ARL there\npin=135790\nqr={hexed}\nqrsize=21\n".encode())

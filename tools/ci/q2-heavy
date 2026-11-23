@@ -6,7 +6,8 @@
 #
 # A job starts only when all of these hold, else it waits and says why once a minute:
 #   - MemAvailable is at least Q2_HEAVY_RESERVE_GB (5 GB);
-#   - memory pressure (/proc/pressure/memory, some avg10) is under 10% and io pressure (full avg10) under 20%;
+#   - memory pressure (/proc/pressure/memory, some avg10) is under 10%, io pressure (full avg10) under 20% and cpu
+#     pressure (some avg10) under 30%;
 #   - the Windows drive (/mnt/c, where WSL's disk and crash dumps live) has 25 GB free;
 #   - on battery (AC1 offline), fewer jobs run: one under 30% charge, none under 15%; plugging the
 #     charger back in restores every slot at the next admission (Q2_HEAVY_AC and Q2_HEAVY_BATTERY
@@ -20,10 +21,12 @@
 #
 # Every job has a class, a deadline and a record:
 #   - Q2_HEAVY_CLASS is `branch` (the default: a worker's own run) or `queue` (the merge queue's, set by
-#     tools/ci/merge_queue.py). At most Q2_HEAVY_BRANCH_SLOTS (4) branch jobs run at once and each gets a low
+#     tools/ci/merge_queue.py). At most Q2_HEAVY_BRANCH_SLOTS (6 on the charger with 8 GB available, else 4;
+#     branch_limit) branch jobs run at once and each gets a low
 #     CPU weight, so the queue's batch keeps its speed whatever the workers run.
 #   - Q2_HEAVY_MAX_S (1800) is the longest a job may run: its scope is stopped then (RuntimeMaxSec) and
-#     q2-heavy exits 143, so nothing heavy outlives its purpose. The longest suite takes under five minutes.
+#     q2-heavy exits 143, so nothing heavy outlives its purpose. The longest suites, test/player/run.py and test/unit, take
+#     about five minutes each.
 #   - While it runs, ~/.cache/q2-heavy/jobs/<pid> says whose it is (class, worktree, command, start,
 #     deadline, scope): `q2 status` lists them and `q2 stop-all` stops each by its scope.
 slots=${Q2_HEAVY_SLOTS:-10}
@@ -33,7 +36,7 @@ reserve=${Q2_HEAVY_RESERVE_GB:-5}
 ramp=${Q2_HEAVY_RAMP:-5}
 class=${Q2_HEAVY_CLASS:-branch}
 max_s=${Q2_HEAVY_MAX_S:-1800}
-branch_slots=${Q2_HEAVY_BRANCH_SLOTS:-4}
+branch_slots_set=${Q2_HEAVY_BRANCH_SLOTS:-}
 disk_start=${Q2_HEAVY_DISK_START_GB:-25}
 disk_stop=${Q2_HEAVY_DISK_STOP_GB:-10}
 ac=${Q2_HEAVY_AC:-/sys/class/power_supply/AC1/online}
@@ -88,17 +91,30 @@ branch_jobs() {  # branch-class jobs running now, by their records (one whose q2
     echo $n
 }
 
+# How many branch jobs may run: Q2_HEAVY_BRANCH_SLOTS, else 6 on the charger with 8 GB available and 4 otherwise.
+# Measured 2026-11-22: branch jobs' cgroup peaks were 0.5 to 1.1 GB (test/player/run.py), 0.1 GB (iap_probe), only fw
+# near its 3 GB cap, while four slots left 79 to 81 job-minutes of a full run waiting for one. Eight were too many: load
+# 16 to 20, CPU pressure avg10 37%, suites 2 to 2.5 times their quiet time and wall-clock tests red. The memory
+# reserve and the CPU pressure check below still hold a start back.
+branch_limit() {
+    if [ -n "$branch_slots_set" ]; then echo "$branch_slots_set"; return; fi
+    if [ "$(cat "$ac" 2>/dev/null)" = 1 ] && [ "$(avail_gb)" -ge 8 ]; then echo 6; else echo 4; fi
+}
+
 # Why a job may not start now: empty when it may.
 why_not() {
-    local d m pm pio
+    local d m pm pio pc branch_slots
+    branch_slots=$(branch_limit)
     if [ "$class" = branch ] && [ "$(branch_jobs)" -ge "$branch_slots" ]; then
         echo "$branch_slots branch jobs are running already (the rest of the machine is the queue's)"; return
     fi
-    d=$(disk_gb); m=$(avail_gb); pm=$(psi memory some); pio=$(psi io full)
+    d=$(disk_gb); m=$(avail_gb); pm=$(psi memory some); pio=$(psi io full); pc=$(psi cpu some)
     if [ -n "$d" ] && [ "$d" -lt "$disk_start" ]; then echo "only ${d} GB free on /mnt/c (needs $disk_start)"; return; fi
     if [ "$m" -lt "$reserve" ]; then echo "${m} GB available (needs $reserve)"; return; fi
     if [ "${pm:-0}" -ge 10 ]; then echo "memory pressure ${pm}%"; return; fi
     if [ "${pio:-0}" -ge 20 ]; then echo "io pressure ${pio}%"; return; fi
+    # rustc and clang builds outside the slots take whole cores: a start then only slows every wall-clock test
+    if [ "${pc:-0}" -ge 30 ]; then echo "cpu pressure ${pc}%"; return; fi
     allowed=$(power_slots)
     if [ "$allowed" -lt "$slots" ] && [ "$(busy)" -ge "$allowed" ]; then
         echo "on battery at $(cat "$battery")%: $allowed heavy job(s) at a time (none under 15%, one under 30%)"; return

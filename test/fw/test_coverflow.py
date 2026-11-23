@@ -1635,8 +1635,12 @@ def test_initial_any_bytes_stay_in_bounds(fw):
 
 def test_the_misc_table_is_sorted_and_is_numbers_punctuation_and_separators():
     source = (ROOT/'patch/coverflow.c').read_text()
-    body = source[source.index('initial_misc[][2] = {'):source.index('/* Initial of the active')]
-    table = [(int(a, 16), int(b, 16)) for a, b in re.findall(r'\{ (0x[0-9a-f]+), (0x[0-9a-f]+) \}', body)]
+    def ranges(name, plane):
+        body = source[source.index(f'{name}[][2] = {{'):]
+        body = body[:body.index('};')]
+        return [(int(a, 16) + plane, int(b, 16) + plane) for a, b in re.findall(r'\{ (0x[0-9a-f]+), (0x[0-9a-f]+) \}', body)]
+    table = ranges('initial_misc', 0) + ranges('initial_misc1', 0x10000)  # the BMP's, then plane 1's
+    assert all(b < 0x10000 for a, b in ranges('initial_misc', 0)) and all(b < 0x10000 for a, b in ranges('initial_misc1', 0))
     assert all(a <= b for a, b in table) and all(x[1] < y[0] for x, y in zip(table, table[1:]))
     listed = {c for a, b in table for c in range(a, b + 1)}
     for c in listed:
@@ -1644,6 +1648,14 @@ def test_the_misc_table_is_sorted_and_is_numbers_punctuation_and_separators():
     if tuple(map(int, unicodedata.unidata_version.split('.'))) <= (16, 0, 0):  # the table's version
         missing = [c for c in range(0xa0, 0x20000) if unicodedata.category(chr(c))[0] in 'NPZ' and c not in listed]
         assert not missing, [hex(c) for c in missing[:20]]
+
+
+@pytest.mark.parametrize('text, want', (('\u00bfQu\u00e9', ord('#')), ('\U0001d7ce', ord('#')), ('\U00010140', ord('#')),
+                                        ('\U0001f600', 0x1f600), ('\u00c9t\u00e9', 0xc9), ('\U00020000', 0x20000)))
+def test_initial_of_a_number_or_mark_in_either_plane_is_hash(fw, text, want):
+    """initial_misc holds the BMP's ranges and initial_misc1 plane 1's, each as 16 bits: a digit or mark of
+    either is '#', anything else its own code point."""
+    assert Albums(fw, [text.encode()]).g.initial(0) == want
 
 
 FIVE = ['Abba', 'Air', 'Beck', 'Blur', 'Cream']

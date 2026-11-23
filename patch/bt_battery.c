@@ -12,29 +12,33 @@
  * BT_EXPERIMENTAL). The sample rate is bluealsa's: its A2DP source PCM's Sampling, from
  * org.bluealsa.Manager1's GetPCMs.
  *
- * demo has no D-Bus client of its own, so a shell loop asks: started once per connection (the
- * first call that finds a connected headset in stock's link list and no loop for it), it reads the
- * device's Class and Alias once, then Percentage and the rate every BATT_POLL_S seconds while the
- * device stays Connected, writing "MAC PCT RATE CLASS NAME" (each empty for none; NAME, BlueZ's
- * Alias, to the line's end) whole to BATT_FILE, and empties the file when it ends. A call reads
- * that file at most every BATT_READ_MS and takes it only for the headset connected now; a loop that
- * ended while stock still lists the headset as connected (BlueZ answered once with the link going)
- * is started again, at most every BATT_RESTART_MS. */
+ * demo has no D-Bus client of its own, so a shell asks, off the UI thread (bt_ui.c bt_shell), one
+ * answer a run: "MAC PCT RATE CLASS NAME" (each empty for none; NAME, BlueZ's Alias, to the line's
+ * end) written whole to BATT_FILE, read once as the run ends. The first run of a connection (the
+ * first call that finds a connected headset in stock's link list) asks for all four; a later one,
+ * the level and the rate alone, the Class and the name kept. A headset's level moves by a percent
+ * in minutes and shows only on a lit screen (the status row, the Bluetooth page, the low toasts),
+ * so a later run starts only with the screen lit: BATT_POLL_MS after the last, BATT_RETRY_MS while
+ * the level is not known yet (BlueZ has it some seconds after the link, as the headset sends it),
+ * at most BATT_TRIES times, and at once when the codec streaming changes, which moves the rate.
+ * Dark, nothing runs. */
 #include "navigation.h"
 
 #define BATT_FILE "/tmp/q2-btbatt"
-#define BATT_POLL_S 30
-#define BATT_READ_MS 5000
-#define BATT_RESTART_MS                                                                            \
-    60000 /* a loop that ended with the headset still listed starts again after this */
+#define BATT_POLL_MS 300000 /* the level asked again this long after the last answer, lit */
+#define BATT_RETRY_MS 30000 /* ... or this long while none came yet, */
+#define BATT_TRIES 10       /* ... this many times a connection */
 
 static struct {
-    char mac[24];        /* the headset the loop was started for */
-    unsigned read_at;    /* BATT_FILE last read (time_now_ms), 0 never */
-    unsigned started_at; /* the loop started (time_now_ms) */
-    int level;           /* ... what it said for mac, -1 none */
-    unsigned rate, cls;  /* ... the stream's Hz and the Class, 0 none */
-    char name[64];       /* ... and BlueZ's Alias for it, "" none */
+    char mac[24];       /* the headset the runs are for */
+    int asked;          /* a run started for it */
+    unsigned asked_at;  /* ... the last one (time_now_ms) */
+    int tries, coding;  /* unanswered runs for the level; bt_showcoding at the last run */
+    unsigned seen;      /* bb.job's runs ended as last read */
+    int level;          /* what it said for mac, -1 none */
+    unsigned rate, cls; /* ... the stream's Hz and the Class, 0 none */
+    char name[64];      /* ... and BlueZ's Alias for it, "" none */
+    bt_job job;
 } bb __attribute__((section(".scratch")));
 
 /* The connected (status 3) device in stock's link list into mac[24]; 0 for none. */
@@ -51,30 +55,29 @@ static int batt_connected(char *mac) {
     return 0;
 }
 
-/* The loop for mac, in the background. */
-static void batt_start(const char *mac) {
-    char dev[24], cmd[1536];
+/* A run for mac: with whole, the Class and the Alias too. 1 when it started. */
+static int batt_fetch(const char *mac, int whole) {
+    char dev[24], cmd[1280];
     tk_snprintf(dev, sizeof dev, "dev_%s", mac);
     for (char *p = dev; *p; ++p)
         if (*p == ':') *p = '_';
     tk_snprintf(
         cmd, sizeof cmd,
         "(g='dbus-send --system --print-reply --dest=org.bluez /org/bluez/hci0/%s "
-        "org.freedesktop.DBus.Properties.Get'; f=" BATT_FILE "; "
-        "c=$($g string:org.bluez.Device1 string:Class 2>/dev/null | sed -n 's/.*uint32 //p'); "
-        "a=$($g string:org.bluez.Device1 string:Alias 2>/dev/null | "
-        "sed -n 's/.*string \"\\(.*\\)\"$/\\1/p'); "
-        "while $g string:org.bluez.Device1 string:Connected 2>/dev/null | grep -q 'boolean true'; "
-        "do "
+        "org.freedesktop.DBus.Properties.Get'; f=" BATT_FILE "; %s"
         "p=$($g string:org.bluez.Battery1 string:Percentage 2>/dev/null | sed -n 's/.*byte //p'); "
         "r=$(dbus-send --system --print-reply --dest=org.bluealsa /org/bluealsa "
         "org.bluealsa.Manager1.GetPCMs 2>/dev/null | sed -n '/object path "
         "\"\\/org\\/bluealsa\\/hci0\\/%s\\/a2dpsrc/,/object path \"\\/org\\/bluealsa/"
         "{/\"Sampling\"/{n;s/.*uint32 //p;}}' | head -n 1); "
-        "echo \"%s $p $r $c $a\" > $f.new && mv -f $f.new $f; sleep %d; done; : > $f) "
-        ">/dev/null 2>&1 &",
-        dev, dev, mac, BATT_POLL_S);
-    system(cmd);
+        "echo \"%s $p $r $c $a\" > $f.new && mv -f $f.new $f) >/dev/null 2>&1",
+        dev,
+        whole ? "c=$($g string:org.bluez.Device1 string:Class 2>/dev/null | sed -n 's/.*uint32 "
+                "//p'); a=$($g string:org.bluez.Device1 string:Alias 2>/dev/null | sed -n "
+                "'s/.*string \"\\(.*\\)\"$/\\1/p'); "
+              : "",
+        dev, mac);
+    return bt_shell(&bb.job, cmd);
 }
 
 /* A field of digits at *p, past it and its space; 0 for an empty one, max+1 past max. */
@@ -85,38 +88,49 @@ static unsigned batt_field(const char **p, unsigned max) {
     return v;
 }
 
-int bt_headset_battery(void) {
-    char mac[24], raw[96];
-    unsigned now = (unsigned)time_now_ms();
-    if (!g_bluetoothflag || !batt_connected(mac) || !bt_mac_ok(mac)) {
-        bb.mac[0] = 0; /* gone: its next connection starts a loop of its own */
-        return -1;
-    }
-    if (strcmp(mac, bb.mac)) { /* a new connection: its own loop, nothing known yet */
-        tk_snprintf(bb.mac, sizeof bb.mac, "%s", mac);
-        bb.level = -1, bb.rate = bb.cls = 0, bb.read_at = 0, bb.started_at = now;
-        batt_start(mac);
-    }
-    if (bb.read_at && now - bb.read_at < BATT_READ_MS) return bb.level;
-    bb.read_at = now ? now : 1;
-    bb.level = -1, bb.rate = bb.cls = 0, bb.name[0] = 0;
-    if (!state_read(BATT_FILE, raw, sizeof raw)) {
-        if (now - bb.started_at >= BATT_RESTART_MS) bb.started_at = now, batt_start(mac);
-        return -1;
-    }
-    unsigned n = strlen(mac);
-    if (strncmp(raw + 1, mac, n) || raw[1 + n] != ' ') return -1; /* another device's, or none */
+/* BATT_FILE's answer for bb.mac: the level (none: -1), the rate when it has one, and the Class and
+ * name when it has them (a later run's has neither: those read before are kept). */
+static void batt_read(void) {
+    char raw[96];
+    unsigned n = strlen(bb.mac);
+    state_read(BATT_FILE, raw, sizeof raw);
+    if (strncmp(raw + 1, bb.mac, n) || raw[1 + n] != ' ') return; /* another device's, or none */
     const char *p = raw + 2 + n;
     int none = *p < '0' || *p > '9';
-    unsigned level = batt_field(&p, 100);
+    unsigned level = batt_field(&p, 100), rate = batt_field(&p, 384000),
+             cls = batt_field(&p, 0xffffff), n_name = 0;
     bb.level = none || level > 100 ? -1 : (int)level;
-    bb.rate = batt_field(&p, 384000);
-    bb.cls = batt_field(&p, 0xffffff);
-    unsigned n_name = 0;
+    bb.rate = rate > 384000 ? 0 : rate;
+    if (cls && cls <= 0xffffff) bb.cls = cls;
     while (p[n_name] && p[n_name] != '\n' && n_name < sizeof bb.name - 1) ++n_name;
-    tk_snprintf(bb.name, sizeof bb.name, "%.*s", (int)n_name, p);
-    if (bb.rate > 384000) bb.rate = 0;
-    if (bb.cls > 0xffffff) bb.cls = 0;
+    if (n_name) tk_snprintf(bb.name, sizeof bb.name, "%.*s", (int)n_name, p);
+}
+
+int bt_headset_battery(void) {
+    char mac[24];
+    unsigned now = (unsigned)time_now_ms();
+    if (!g_bluetoothflag || !batt_connected(mac) || !bt_mac_ok(mac)) {
+        bb.mac[0] = 0; /* gone: its next connection is asked again */
+        return -1;
+    }
+    if (strcmp(mac, bb.mac)) { /* a new connection: nothing known yet */
+        tk_snprintf(bb.mac, sizeof bb.mac, "%s", mac);
+        bb.level = -1, bb.rate = bb.cls = 0, bb.name[0] = 0, bb.asked = bb.tries = 0;
+    }
+    int coding = I(bt_showcoding, 0),
+        due = bb.level < 0 && bb.tries < BATT_TRIES ? BATT_RETRY_MS : BATT_POLL_MS;
+    if (!bb.asked ||
+        (g_backlight_status && (now - bb.asked_at >= (unsigned)due || coding != bb.coding)))
+        if (batt_fetch(mac, !bb.asked)) {
+            bb.asked = 1, bb.asked_at = now, bb.coding = coding;
+            if (bb.level < 0) ++bb.tries;
+        }
+    unsigned done = bt_job_done(&bb.job);
+    if (done != bb.seen) { /* a run ended: its answer */
+        bb.seen = done;
+        batt_read();
+        if (bb.level >= 0) bb.tries = 0;
+    }
     return bb.level;
 }
 /* The connected device's stream rate (Hz) and Class, as bt_headset_battery reads them; 0 unknown.

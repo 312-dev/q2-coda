@@ -412,3 +412,24 @@ def test_a_server_album_with_no_cover_is_asked_of_its_app(lib, tmp_path):
     t, m = q2.ask(T['GET_COVER'], [(1, 'sthird'), (2, 0), (3, 4096), (4, 350)])
     assert t == T['COVER'] and last() == ''  # there now: nothing asked
     hold.value = 0
+
+
+def test_a_page_reuses_the_librarys_tables(lib, tmp_path):
+    """The library's lists read songs with their sort keys (s2) and albums: made per request, a Browse page at 9,199
+    songs (the owner's) took 35 ms here, and coda-rc 37 % of the Q2's core while a phone browsed. They are made once
+    for the files as they are, so a later page is a few ms; a changed catalogue is seen at the next request."""
+    import time as clock
+    server = [(f'Song {k}', f'Artist {k // 120}', f'Album {k // 12}', k) for k in range(9199)]
+    q = Q2(lib, tmp_path, server=server, cat=True)
+    assert q.browse('albums')['total']  # the tables made
+    took = []
+    for _ in range(5):
+        t0 = clock.perf_counter()
+        q.browse('albums')
+        took.append(clock.perf_counter() - t0)
+    assert min(took) < 0.01, took
+    cat = sqlite3.connect(tmp_path / 'mnt/mmc/.q2pod/catalogue.db')
+    cat.execute("update servertable set album = 'Zebra' where album = 'Album 0'")
+    cat.commit()
+    cat.close()
+    assert 'Z' in titles(q.browse('albums'))

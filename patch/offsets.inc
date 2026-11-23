@@ -509,8 +509,10 @@ static inline int arc_out(int r, int y) {
 #define LISTEN_MAX_S 240
 #define PLAYS_SLOTS 512
 #define PLAYS_TOP 100
-/* Ratings (docs/internals.md#ratings): RATE_SLOTS songs keep 1-5 stars, apart from My Fav. */
-#define RATE_SLOTS 4096
+/* Ratings (docs/internals.md#ratings): songs keep 1-5 stars, apart from My Fav, and albums their
+ * hearts, each in a hashed table of 4,096 words that doubles as it fills, up to RATE_SLOTS words:
+ * 12,285 ratings of each, room for a library of 9,199 songs (the owner's, a server's) and more. */
+#define RATE_SLOTS 16384
 /* A Quick Settings or Control Center button held this long, by a finger (navigation.c quick_long)
  * or Centre (control_center.c cc_keydown), opens its page: the house hold, Edit Library's and Up
  * Next's (LR_HOLD_MS, UN_HOLD_MS). */
@@ -603,6 +605,9 @@ static inline int arc_out(int r, int y) {
 #define WHEEL_ARM_MS 2000
 #define WHEEL_ESCAPE_TICK_MS 300
 #define WHEEL_STOP_TICKS 3
+/* A wheel tick posted and not taken by ringnav in this long no longer holds the bar's lean full
+ * (playback.c wheel_part): the UI takes one within a frame or two. */
+#define WHEEL_TAKE_MS 250
 #define BOOT_KEY_GUARD 0xa4bbf9 /* no symbol: set after a Standby resume, on_wm_keyup_fun drops the next centre release */
 #define NP_KEY_HELD 0xa4e880 /* Now Playing's long press of 222/223 sets it (0x53b4d0), its release clears it */
 #define NP_KEY_MODE 0xa4e881 /* 1 once a key-down stepped the slider with NP_KEY_HELD set (0x53e000) */
@@ -720,6 +725,7 @@ static inline int arc_out(int r, int y) {
 #define MCL_LASTPOS 0xa50068    /* shuffle "previous" index, -1 none */
 #define MCL_PREPOS 0xa5006c
 #define MCL_PRELOAD 0xa50070    /* 1 preloaded, 0 none, -1 closed for this track */
+#define MCL_START_SEC 0xa50064  /* the next start's place, seconds of the file (mclSetStartSeekTime), -1 none; mclStartPlayer reads and clears it */
 #define MCL_TYPE 0xa50078       /* queue classType: 1 folder, 0xfxxx local */
 #define MCL_POS 0xa5007c
 #define MCL_MODE 0xa50080       /* 0 order, 1 repeat one, 2 shuffle, 3 repeat all */

@@ -154,13 +154,16 @@ void peq_process(peq_dsp *d, float *audio, unsigned frames);
 
 long long now_ns(void);
 unsigned long long now_ms(void);
-/* Crossfade (docs/internals.md#crossfade): demo writes the next track change's fade, an int in ms,
- * 0 for none; hciplayer's filter maps the file read-only and holds the outgoing track's tail for
- * it. */
-#define XFADE_FILE                                                                                 \
-    PEQ_ROOT "/tmp/q2xfade" /* the next fade's ms (XF_MS), under demo's count of stops (XF_STOPS)  \
-                             */
-#define XF_MS 0xffff
+/* Crossfade (docs/internals.md#crossfade): demo writes the next track change's fade, an int: its
+ * length in ms (XF_MS, 0 for none, the fixed fade a smart one falls back to), XF_SMART to have the
+ * player choose the overlap from both songs' loudness, and demo's count of stops above (XF_STOPS).
+ * The player maps the file read-only and holds the outgoing track's tail for it. XFADE_NEXT names
+ * the two songs of that change, a line each, the playing one's path first, so the player can open
+ * the next one ahead (made whole under .tmp and renamed; empty when the next is not known). */
+#define XFADE_FILE PEQ_ROOT "/tmp/q2xfade"
+#define XFADE_NEXT PEQ_ROOT "/tmp/q2xfade.next"
+#define XF_MS 0x7fff
+#define XF_SMART 0x8000
 #define XF_STOPS 16
 /* Mono Audio: demo writes an int, 1 to mix both channels into each; hciplayer's filter and q2video
  * map it read-only (video.c keeps its own copy of the path). */
@@ -325,8 +328,7 @@ int geom_val(int v) __attribute__((pure));
 int modal_actions(const char *const *names, const char *const *icons, int n, void (*pick)(int i));
 int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i));
 void list_toggle(void *label, const char *title, int on); /* navigation.c: a row's switch */
-int xfade_state(int *seconds);       /* crossfade.c: Crossfade 1 on; *seconds its length */
-void xfade_set(int on, int seconds); /* ... both set and saved */
+void caption_row(void *label, const char *text); /* settings_pages.c: a row's caption */
 /* navigation.c: a set_text row's value */
 void list_value(void *label, const char *title, const char *value);
 char *csv_find(char *list, const char *item); /* navigation.c: comma lists */
@@ -340,7 +342,7 @@ int thumb(const char *src, const char *dst, int w, int h);
 extern volatile unsigned ff_kills; /* coverflow.c: ffmpeg runs killed or never started */
 int card_space(const char *dir);
 int card_room(const char *dir, unsigned mb, unsigned pct);
-unsigned hash_bytes(unsigned h, const unsigned char *s, unsigned n);
+unsigned hash_bytes(unsigned h, const unsigned char *s, unsigned n); /* hash.c: FNV-1a */
 unsigned fnv(unsigned h, const unsigned char *s);
 void stop_timer(unsigned *timer), rearm(unsigned *timer, int (*fn)(const void *), unsigned ms);
 int return_key(void *event, unsigned *timer,
@@ -389,10 +391,8 @@ int thread_lower(int idle);   /* coverflow_loader.c: a worker's nice 19 and its 
 int ringnav_statx(int dirfd, const char *path, int flags, unsigned mask, void *buf);
 void *coverflow_album_tracks(void *r);
 unsigned album_id(void *r), album_dir(const char *p, int disc);
-/* navigation.c: Cover Flow's glide and its letter */
+/* nav/home_carousel.c: Cover Flow's glide */
 int carousel_glide(void *w, int goal, unsigned ms, int easing);
-void coverflow_letter(void *w, unsigned letter, unsigned now);
-void coverflow_letter_hold(void *w, unsigned letter);
 int ringnav_big_library(void); /* Display's Fast Navigation: letters, years and half copies */
 /* A letter with this bit is the Year sort's year instead, in its low bits, 0 undated. */
 #define CF_YEAR 0x80000000u
@@ -418,8 +418,18 @@ void tidal_clear(void);
  * once replaced or removed, forgotten on the UI thread. */
 #define APPS_MAX 8 /* card apps on the card at once */
 int addon_scan(void), addon_open(void *ctx, void *event), addon_hold(void *top);
+void child_quit(int pid, unsigned quit_ms); /* radio.c: a child asked to quit, reaped or killed */
 int addon_games_last(void); /* the card's games as the last addon_scan found them */
-#define GAMES_BUILTIN 4     /* games.c's Sudoku, Vortex, Solitaire and Snake */
+/* The games games.c's chooser ships, the one place to turn each on (docs/internals.md#games): 1
+ * lists it and builds it into the payload, 0 leaves it out of both, its source kept in games.c
+ * (test/fw builds every one, GAMES_ALL, so its tests keep running). Sudoku, Vortex, Solitaire
+ * and Snake wait while the games in progress are finished (the owner, 2026-11-22); Bricks is the
+ * engine's (engine.c eng_games[]), always listed. */
+#define GAME_SUDOKU 0
+#define GAME_VORTEX 0
+#define GAME_SOLITAIRE 0
+#define GAME_SNAKE 0
+#define GAMES_BUILTIN (GAME_SUDOKU + GAME_VORTEX + GAME_SOLITAIRE + GAME_SNAKE) /* chooser rows */
 const char *addon_name(int a), *addon_id(int a), *addon_icon(int a);
 int card_path(const char *path); /* on the card, no ".." segment: what an app or server may name */
 /* stream_state.c: Download Ahead and a card app's .stream
@@ -430,6 +440,7 @@ typedef struct {
     unsigned have, total, ms; /* bytes on the card, of the whole (0 unknown), length (0 unknown) */
 } sline_t;
 int ahead_n(void), ahead_step(void);
+void ahead_start(const char *id, unsigned seq);
 const char *ahead_caps(void);
 int stream_line(const char *id, const char *path, sline_t *l);
 int stream_startable(const char *id, const char *path);
@@ -519,6 +530,8 @@ int addon_dir(const char *id, char *dir, unsigned n), addon_version_cmp(const ch
 /* addon.c: whether the firmware carries app id as its own alone, never the App Store's (netupdate.c) */
 int addon_builtin(const char *id);
 void addon_q2app(const char *id, char *path, unsigned n);
+/* each card app's q2app read, until each answers nonzero (addon.c) */
+int addon_q2apps(int (*each)(const char *id, const char *raw, void *ctx), void *ctx);
 /* catalogue.c: the server library (docs/internals.md#server-library), a signed-in catalogue app's
  * songs in the Library. catalogue_has: any are in it now; catalogue_path: a server row's path; catalogue_unavailable: a record that can't play now;
  * catalogue_album_unavailable: an album list's record none of whose songs can play now, and
@@ -567,6 +580,7 @@ void catalogue_row_mark(void *w, void *canvas, void *row, int x, int y);
 void catalogue_fit(void *entry, void *surface, int limit);
 int catalogue_np_info(const char *path, char *genre, int *year);
 int catalogue_cover(const char *path, char *out, unsigned size);
+int catalogue_cover_large(const char *path, char *out, unsigned size);
 /* catalogue.c: a Stream Cache copy's record takes its server row's title, artist and album (1) */
 int catalogue_copy_tags(void *r);
 /* catalogue.c: whether two paths play one song (song_radio.c) */
@@ -656,6 +670,7 @@ void spot_send_play(int playing);
 void q2eq_poll(void); /* peq_ui.c, --dev builds only: a q2eq request (q2eq.h) */
 void q2update_poll(void); /* sw_update.c, --dev builds only: a q2update request (docs/adb.md#installing-an-update-over-adb) */
 int media_owner(void), media_status(void), media_playing(void), media_focused(void);
+int usb_otg_forbid_resume(void); /* usb_otg.c: the gate for a Play of the song there, kept while USB audio connects */
 void media_set_playing(int playing), media_key(unsigned key);
 void video_key(unsigned key);
 int radio_media(unsigned key), spot_media(unsigned key);
@@ -666,6 +681,12 @@ unsigned spot_session(void), radio_session(void), video_session(void);
 int radio_now(char *station, char *title, unsigned cap);
 int spot_now(char *title, char *artist, char *album, unsigned cap, unsigned *pos, unsigned *len);
 int now_time(int *sec, int *total); /* now_source.c: the Library's second, length and play state */
+/* now_source.c: the Library's song held paused where it was while Radio, Internet Radio, a video or a
+ * sound game has the output, given back paused, played on, or forgotten for a start of its own */
+void now_hold(void), now_drop(void), now_take_back(void), now_starting(void);
+int now_release(void); /* 1 when a held song was given back */
+int play_hold_released(void); /* navigation.c: Play/Pause's release ends a hold that fired */
+int radio_take_back(void *top, unsigned key); /* radio.c: Play on the Library's Now Playing */
 void spot_set_playing(int playing), radio_set_playing(int playing), video_set_playing(int playing);
 int video_start(const char *file, int radio); /* videos.c */
 /* radio_tuner.c: Radio's receiver, 0 none, 1 playing, 2 paused (its page shut or not); played or

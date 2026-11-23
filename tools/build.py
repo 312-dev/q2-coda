@@ -40,6 +40,14 @@ HOOKS = {
     'check_usb_status': (0x4f3744, 'ringnav_usb_status', 'usb_status'),
     # OTG host power (PC20) only after the ID pin settles low with no VBUS on the port (usb_otg.c)
     'check_otg_status': (0x4f3408, 'ringnav_otg_status', 'otg_status'),
+    # PD18 read low by stock's host pass while usb_otg.c keeps the host role over an ID high
+    'toolsGpioGetValue': (0x5d1c3c, 'ringnav_gpio_value', 'gpio_value'),
+    # a USB DAC's volume spread in decibels when its control reports a dB range (usb_volume.c)
+    'mclUsbAudioSetVol': (0x5bec64, 'ringnav_usb_setvol', 'usb_setvol'),
+    # the car's USB audio counts as an output, beside stock's jacks, Bluetooth and USB DAC (output_rule.c)
+    'has_valid_output_device': (0x4f2c3c, 'ringnav_valid_output', 'valid_output'),
+    # Now Playing opened to start a track with nothing to play to: refused before the page exists (output_rule.c)
+    'navigator_to_with_context': (0x4f6e74, 'ringnav_nav_to', 'nav_to'),
     # The USB record's first line once stock has set the USB pins up, with PD18's pull (usb_record.c)
     'platform_init': (0x51cd94, 'ringnav_platform_init', 'platform_init'),
     'createPlayListItem': (0x517fdc, 'ringnav_playlist_create', None),
@@ -154,6 +162,10 @@ HOOKS = {
     'systemset_powermanager_page_init': (0x4cded4, 'ringnav_powermanager', 'power'),
     # Standby limit: the suspend to RAM between the RTC wake alarm's set and clear
     'toolsIntoStandby': (0x5d1110, 'ringnav_standby', 'standby'),
+    # Standby's start: Car Audio stopped before stock unmounts the card (patch/standby_usb.c)
+    'device_standby': (0x5021bc, 'ringnav_device_standby', 'device_standby'),
+    # Headphones Required's gate: "Connecting USB audio..." and the Play kept while an accessory attaches (usb_otg.c)
+    'check_forbid_play_no_headset': (0x4f2cac, 'ringnav_forbid_play', 'forbid_play'),
     # Standby's card driver reload: no removed and inserted toasts on the wake
     'check_cardmount_status': (0x4f39a4, 'ringnav_cardmount', 'cardmount'),
     'playset_playset_page_init': (0x4bd4d0, 'ringnav_audioset', 'audioset'),
@@ -281,7 +293,12 @@ CODA_RC_LIBS = ['lib/libc-2.28.so', 'usr/lib/libsqlite3.so.0.8.6']
 # (patch/usb_ui.c) runs q2car, the iPhone gadget's script, which loads usb_f_uac1.ko (tools/uac1.py's pinned build;
 # beside the vendor modules, not among those S11module_driver_default loads) and runs q2-iap on its FunctionFS HID
 Q2CAR = 'usr/bin/q2car'
+# The car's other sources' ALSA device (assets/alsa/30-q2car.conf, player/feed.c)
+CAR_FEED_CONF = 'usr/share/alsa/alsa.conf.d/30-q2car.conf'
 Q2IAP = 'usr/bin/q2-iap'
+# its sources under patch/ (tools/iap_probe/probe_build.py and test/iap_probe.py build the same list), compiled
+# without -ffunction-sections (compile_helper's sections): each function and object in them is used
+Q2IAP_SOURCES = ['q2_iap', 'iap2_link', 'iap2_names', 'iap2_hid', 'iap2_msg', 'iap2_xfer', 'iap2_library', 'iap2_nowplaying', 'iap2_session', 'q2_iap_lib']
 UAC1_KO = 'module_driver/usb_f_uac1.ko'
 # Guest Play's daemon (docs/internals.md#guest-play): demo starts it (patch/guest.c), libdbus talks to BlueZ,
 # bluealsa and bluetoothd's shanling.bluez; and the D-Bus policy its sink daemon needs.
@@ -311,14 +328,15 @@ RADIO_DATA = 'usr/share/q2radio'
 RADIO_TABLES = ('stations.bin', 'zcta.bin')
 # Card apps the firmware carries (docs/internals.md#bundled-apps): id -> (version, release zip, its size, its
 # SHA-256, builtin), each the zip its release ships, read from --apps (APPS_DIR). Its .<id>/ files go
-# to BUNDLED_DIR/<id> (patch/addon.c BUNDLED) with a version file and bundled_launcher's run in place of the
-# app's, so the app keeps its data in the card's .<id>. builtin: the firmware's copy is the only one that runs
+# to BUNDLED_DIR/<id> (patch/addon.c BUNDLED) with a version file, a bundle file naming the zip and the program's
+# SHA-256 (bundle_record), and bundled_launcher's run in place of the app's, so the app keeps its data in the
+# card's .<id>. builtin: the firmware's copy is the only one that runs
 # and the App Store never lists the app (a builtin file holding 1 beside it, patch/addon.c addon_builtin), so its
 # updates are firmware updates. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
 BUNDLED_APPS = {
-    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-b349ee4.zip', 3662276,
-                 '768681d4ac96ad50434229f84403249ebd52a2bb6c8b0e6d33609e3691ab1be0', True),
+    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-78f9628.zip', 3686807,
+                 'f0c2e8bebe7dafac4f4693f34ebea8fba2c21763bd88aae1cdebc91363a8fd0f', True),
 }
 APPS_DIR = pathlib.Path.home()/'.cache/q2-apps'
 S90PLAY = 'etc/init.d/S90play'
@@ -362,6 +380,7 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             # The UI loop stalled (system.c stall_write): what its thread was doing
             [ -f /mnt/data/q2-stall ] && {{ echo "== stall"; cat /mnt/data/q2-stall; }} >> $c
             rm -f $m
+            u=1
         }}
         rm -f /mnt/data/q2-cf-trace /mnt/data/q2-stall
         # Baidu Netdisk's sign-in, which stock sends over plain HTTP: Q2 Muse has no Baidu row to use it from
@@ -370,6 +389,29 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             i=0
             while [ $i -lt 60 ] && ! grep -q ' /mnt/mmc ' /proc/mounts; do usleep 500000; i=$((i+1)); done
             grep -q ' /mnt/mmc ' /proc/mounts || exit
+            # an unclean end (u, docs/internals.md#unified-log): the unified log's files, the car's newest log and
+            # dmesg kept in a numbered folder under .q2muse/crashes before the logs roll on, named in the crash
+            # log; only with 50 MB free besides them, the newest five kept, 10 MB at most in all. Off the boot's
+            # path (this subshell runs in the background), the copies niced.
+            [ "$u" ] && {{
+                L=/mnt/mmc/.q2muse/logs; K=/mnt/mmc/.q2muse/crashes
+                n=$(( $(cat $K/.seq 2>/dev/null || echo 0) + 1 ))
+                d=$K/$(printf %05d $n)-$(date -u +%Y%m%dT%H%M%SZ)
+                f=$(df -k /mnt/mmc 2>/dev/null | awk 'NR == 2 {{ print $4 }}')
+                if [ "${{f:-0}}" -gt $(( $(du -sk $L 2>/dev/null | cut -f1) + 51200 )) ] && mkdir -p $d; then
+                    echo $n > $K/.seq
+                    for x in $L/q2-log.* $L/q2-heat.* $L/q2-bt.* $L/q2-btev.* $L/q2car.log $L/q2car.log.dmesg; do
+                        [ -f "$x" ] && nice -n 19 cp "$x" $d/
+                    done
+                    dmesg > $d/dmesg 2>/dev/null
+                    sync
+                    echo "== evidence ${{d#/mnt/mmc/}}" >> $c
+                    ls -1d $K/*/ | sort -r | tail -n +6 | while read x; do rm -rf "$x"; done
+                    while [ "$(du -sk $K | cut -f1)" -gt 10240 ] && [ "$(ls -1d $K/*/ | wc -l)" -gt 1 ]; do
+                        rm -rf "$(ls -1d $K/*/ | sort | head -n 1)"
+                    done
+                fi
+            }}
             # the card keeps the two before it: q2-crash.log.1, then .2; they move only once the copy is
             # whole (a full card or a power cut leaves them, and the log stays on /mnt/data)
             l=/mnt/mmc/q2-crash.log
@@ -638,7 +680,8 @@ BT_MTU_MAX = 679 - 4
 WATCHDOG = 'usr/bin/checkappprocess.sh'
 WATCHDOG_STUB = (b'#!/bin/sh\n# Q2 Muse: S90play reboots when demo ends (tools/build.py BOOT_HOOK); demo still starts this\n'
                  b'exit 0\n')
-# The config a reset copies to /mnt/data: Enlarged Album Art (10 s wait) and Standby start off. So does stock's Wheel Function: Q2 Muse runs stock in Volume Mode whatever the key holds (WHEEL_MODE), and a Q2 reset here and returned to stock gets Menu Mode, the default stock's changelog names and a missing key gives (the shipped file says 1).
+# The config a reset copies to /mnt/data: Enlarged Album Art (10 s wait) and Standby start off (Standby until a wake is
+# shown to bring the USB link back: docs/internals.md#standby-limit). So does stock's Wheel Function: Q2 Muse runs stock in Volume Mode whatever the key holds (WHEEL_MODE), and a Q2 reset here and returned to stock gets Menu Mode, the default stock's changelog names and a missing key gives (the shipped file says 1).
 # Its TIMEZONE is UTC (DEFAULT_TIMEZONE), not stock's 22, Shanghai.
 # It also names the language, English (2): stock's config_init (0x5047f8) sets g_guideflag when SYSSET LANGUAGE is
 # missing, and the first boot and every reset opened stock's language guide, where Q2 Muse's wheel and Centre are off.
@@ -673,6 +716,11 @@ NTP_POOL = (b'\0cn.pool.ntp.org\0time.', b'\x000.pool.ntp.org\0\0time.')
 WIFI_LPS = (b'rtwpriv wlan0 pm_set lps=0\0', b'rtwpriv wlan0 pm_set lps=2\0')
 # Now Playing's info page: its one fill (0x53bc78), a bal, becomes jal ringnav_np_info, which tidies the lines.
 NP_INFO_CALL = 0x53d308
+# Now Playing's update (0x53cf08) reads the state, jalr mclGetPlayStatus (lw $t9 at 0x53d378), and when it is not
+# stopped the time, bal player_playtime_and_length; stopped, it writes 0 to the bar and both times. They become jal
+# now_page_status and now_page_time, which answer a Library song held for Radio, a station or a video (now_hold,
+# the player stopped) paused at its second (docs/internals.md#now-playing-source).
+NP_TIME_CALLS = ((0x53d380, 0x0320f809, 'now_page_status'), (0x53d39c, 0x0411869c, 'now_page_time'))
 # Now Playing's A-B markers (0x53baa4): its three calls of their x (0x53b9d8), each a bal, become jal ringnav_ab_x,
 # which keeps them on the slider wherever the page has moved it from the build's place.
 AB_X_CALLS = (0x53bb78, 0x53bbf4, 0x53bc04)
@@ -846,6 +894,11 @@ LYRIC_ROWS = (0x53d10c, 0x0411f95b)
 # ringnav_lrc_open, which keeps a copy that ringnav_lyric reads again, without its blank lines and, for iPod's
 # lyrics page, with its milliseconds and word stamps.
 LYRIC_OPEN = (0x5bc30c, 0x0320f809)
+# png_load_file's png_read_png(png, info, transforms, NULL) asks for PNG_TRANSFORM_EXPAND alone (addiu $a2, $zero, 0x10),
+# so a 16-bit PNG's six-byte pixels were read as two three-byte ones: the cover twice as wide, in vertical stripes.
+# PNG_TRANSFORM_STRIP_16 (1) beside it has libpng 1.2.59 give 8 bits a channel, the row stride the reader assumes;
+# every cover stock decodes (Cover Flow, Home's art, the grids, a folder image) goes through it.
+PNG_STRIP16 = (0x5c92fc, 0x24060010)
 # parse_albumcovertask_thd's jalr toolsGetAlbumCover (Albums grids; Folder view's folder and track rows),
 # each with its lw $t9, become jal coverflow_grid_cover, which gives ffmpeg the Ogg pictures stock skips;
 # the Albums grid's (first, before stock's toolsGetExternCover) jal coverflow_album_cover, and the folder
@@ -1148,6 +1201,9 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('playset_filter', 'Digital filters', 'Digital Filters'),
     ('playset_memplay', 'Memory playback', 'Memory Playback'),
     ('playset_noplay', 'Headphones required for playback', 'Headphones Required'),
+    # the refusal of a start with no output (check_forbid_play_no_headset), as one line (output_rule.c)
+    ('msg_noheadset', 'Playback is disabled without headphones.Please insert headphones.',
+     'Connect headphones or Bluetooth to play'),
     ('replaygain_track', 'Audio', 'Song'),
     ('small_playset', 'Playback Setting', 'Playback'), ('small_sysset', 'System Setting', 'General'),
     ('system_wifiset', 'Wireless Setting', 'Wireless'), ('system_display', 'Display setting', 'Display'),
@@ -1240,9 +1296,34 @@ def english_ui(rel, data):
 FONT = 'release/assets/default/raw/fonts/default.ttf'
 QUOTES = {0x2018: 0x27, 0x2019: 0x27, 0x201c: 0x22, 0x201d: 0x22}
 
+def memo_source(fn, text=None):
+    """The text fn's result follows from in this module (text: its source, by default this file's): fn's own
+    definition and, transitively, every module-level function, class and constant it names. An edit elsewhere in
+    tools/build.py leaves it as it is."""
+    import ast
+    text = pathlib.Path(__file__).read_text() if text is None else text
+    tree = ast.parse(text)
+    defs: dict[str, ast.AST] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            defs[node.name] = node
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            for t in (node.targets if isinstance(node, ast.Assign) else [node.target]):
+                for n in ast.walk(t):
+                    if isinstance(n, ast.Name): defs[n.id] = node
+    seen, todo, parts = set(), [fn.__name__], []
+    while todo:
+        name = todo.pop()
+        if name in seen or name not in defs: continue
+        seen.add(name)
+        node = defs[name]
+        parts.append(ast.get_source_segment(text, node) or '')
+        todo += [n.id for n in ast.walk(node) if isinstance(n, ast.Name)]
+    return '\0'.join(sorted(set(parts)))
+
 def memo(fn):  # pragma: no mutate block
-    """fn, its results kept on disk in $Q2_BUILD_CACHE, keyed by tools/build.py's text, fontTools' version
-    and the arguments (a path by its file's bytes): a rebuild with the same fonts skips fontTools' 15 s or so.
+    """fn, its results kept on disk in $Q2_BUILD_CACHE, keyed by the code it follows from (memo_source), fontTools'
+    version and the arguments (a path by its file's bytes): a rebuild with the same fonts skips fontTools' work.
     Off unless Q2_BUILD_CACHE names a directory (tools/ci/rebuild.py sets it), so a release's two
     reproducibility builds still compute everything."""
     import functools, os, pickle
@@ -1251,7 +1332,7 @@ def memo(fn):  # pragma: no mutate block
         where = os.environ.get('Q2_BUILD_CACHE')
         if not where: return fn(*args, **kwargs)
         from fontTools import version as fonttools
-        h = hashlib.sha256(pathlib.Path(__file__).read_bytes() + fn.__name__.encode() + fonttools.encode())
+        h = hashlib.sha256(memo_source(fn).encode() + fn.__name__.encode() + fonttools.encode())
         for a in [*args, *sorted(kwargs.items())]: h.update(a.read_bytes() if isinstance(a, pathlib.Path) else repr(a).encode())
         path = pathlib.Path(where)/f'{fn.__name__}-{h.hexdigest()}.pickle'
         try: return pickle.loads(path.read_bytes())
@@ -1469,7 +1550,8 @@ def source_sha256():
     h = hashlib.sha256()
     manual = [ROOT/'docs/manual'/f for f in ('build.py', 'guide.html')]
     for path in sorted([*(p for p in ROOT.glob('assets/**/*') if p.is_file()), *(p for p in ROOT.glob('patch/**/*') if p.is_file()),
-                        *ROOT.glob('tools/*.py'), *ROOT.glob('tools/*.c'),
+                        *ROOT.glob('tools/*.py'), *ROOT.glob('tools/*.c'), *ROOT.glob('tools/*.patch'), ROOT/'tools/stock_map.tsv',
+                        *(p for p in ROOT.glob('tools/uac1_module/**/*') if p.is_file() and '__pycache__' not in p.parts),
                         *ROOT.glob('tools/*.h'), *ROOT.glob('tools/*.S'), *ROOT.glob('player/*.[ch]'),
                         *ROOT.glob('player/Makefile'), *manual]):
         h.update(str(path.relative_to(ROOT)).encode() + b'\0')
@@ -1533,6 +1615,26 @@ def jpeg_size(b):
             return w, h
         i += size
     raise ValueError('No JPEG size marker')
+def stock_map(path=None):
+    """tools/stock_map.tsv's names for demo's unnamed functions: {name: address}. Kept by hand from stock's code
+    (docs/rebasing.md), so it is a record of where each function is that HOOKS is not made from."""
+    out = {}
+    for line in (path or ROOT/'tools/stock_map.tsv').read_text().splitlines():
+        f = line.split('\t')
+        if len(f) > 3 and f[0] == 'demo' and f[1].startswith('0x'):
+            out[f[3]] = int(f[1], 16)
+    return out
+
+def hook_address_check(hooks, stock_syms, mapped):
+    """Each hook's address in HOOKS against a source not derived from it: stock's symbol table for a function
+    Shanling named, tools/stock_map.tsv (mapped) for one it left unnamed. The prologue check after it holds for
+    nearly any function's start, so a hook moved to another function would otherwise build."""
+    for name, (address, _, _) in hooks.items():
+        known = stock_syms.get(name, mapped.get(name))
+        check(known is not None, f'{name}: in neither the stock symbol table nor tools/stock_map.tsv')
+        check(known == address, f'{name}: HOOKS has {address:#x}, but {name} is at {known:#x}'
+              f' ({"the stock symbol table" if name in stock_syms else "tools/stock_map.tsv"})')
+
 def symbols(p, table=None):
     out = {}
     for line in (table or run('readelf', '-Ws', p)).splitlines():
@@ -1574,12 +1676,32 @@ def bundled_app(app_id, apps_dir):
         files = {n[len(prefix):]: z.read(n) for n in z.namelist() if n.startswith(prefix) and not n.endswith('/')}
     need_files = {f'q2-{app_id}', 'run', 'q2app'}
     check(need_files <= set(files) and all('/' not in n for n in files), f'Unexpected files in {name}')
+    check('builtin' not in files and 'bundle' not in files, f'Unexpected files in {name}')
+    commit = re.search(r'-([0-9a-f]{7,40})(-dirty)?\.zip$', name)
+    check(not (commit and commit[2]), f'{name} was built from a tree with uncommitted changes')
+    # The zip's own version file, when its build.sh writes one, is "<version>+<commit>": that commit's, clean.
+    stamp = files.pop('version', b'').decode(errors='replace').strip()
+    check(not stamp or (commit is not None and stamp == f'{version}+{commit[1]}'),
+          f'{name} says it is {stamp!r}, not {version}+ its name\'s commit')
     files['run'] = bundled_launcher(app_id, files['run'].decode()).encode()
     files['version'] = version.encode() + b'\n'
-    check('builtin' not in files, f'Unexpected files in {name}')
     if builtin:
         files['builtin'] = b'1\n'
+    files['bundle'] = bundle_record(app_id, name, digest, files[f'q2-{app_id}'], stamp)
     return {n: (b, n in (f'q2-{app_id}', 'run')) for n, b in sorted(files.items())}
+
+
+def bundle_record(app_id, zip_name, zip_sha256, binary, stamp):
+    """BUNDLED_DIR/<id>/bundle: which build of the app this image carries, for `cat` on the Q2 and test/build.py.
+    One "key value" a line: the zip and its SHA-256 (BUNDLED_APPS), the program's own SHA-256 (what
+    `sha256sum /usr/lib/q2apps/<id>/q2-<id>` prints on the Q2), and the zip's version stamp, or - when it has none."""
+    return (f'zip {zip_name}\nzip_sha256 {zip_sha256}\nq2-{app_id}_sha256 {sha(binary)}\n'
+            f'build {stamp or "-"}\n').encode()
+
+
+def bundle_fields(data):
+    """A bundle file's lines as a dict (bundle_record's keys)."""
+    return dict(line.split(' ', 1) for line in data.decode().splitlines() if ' ' in line)
 
 
 def rootfs_fits(size):
@@ -1862,6 +1984,7 @@ FUNCTIONS = {
  'mclStop': ('int', 'void'),
  'mclGetPlayTime': ('int', 'int *, int *'),
  'mclSetStartSeekTime': ('int', 'int'),
+ 'mclSetGaplessMode': ('int', 'int'),  # stock's Gapless row's setter (0x4bcfa4), with PLAYSET GAPLESS: Smart Crossfade turns it on
  'mcl_open_preload': ('int', 'void'),
  'mclLoadPlayList': ('int', 'void *, int, int'),
  'mcl_shuffle_pick': ('int', 'int'),
@@ -1945,6 +2068,8 @@ FUNCTIONS = {
  'buzzeer_switch': ('int', 'int'),  # the stock key click; it reads g_keytone_flag
  # Headphones required (g_block_withoutphone_flag) with no output: toasts (0) and returns 1, as before each stock start
  'check_forbid_play_no_headset': ('int', 'int'),
+ # 1 while something can sound: either jack (g_po_status, g_bal_status), a Bluetooth link with its codec up, a USB DAC
+ 'has_valid_output_device': ('int', 'void'),
  'on_wm_keyup_fun': ('int', 'void *, void *'),  # stock key-up: np_single replays a centre release
  'toolsGetBatterycapacity': ('int', 'void'),  # the CW2015's level, 0-100 (get_battery_capacity's reads: system.c ringnav_batt_level)
  'toolsGetBatteryVoltage': ('int', 'void'),  # its voltage, mV
@@ -1984,6 +2109,7 @@ FUNCTIONS = {
  'btctl_create_daemon_thread': ('int', 'void *'),
  'initBluetoothParam': ('void', 'void'),
  'btctl_set_prompt_callback': ('void', 'void *, void *'),
+ 'btctl_reply': ('int', 'int, const char *'),  # libbtctl: its agent's pending request answered (bt_pair.c)
  'btctl_device_status_callback': ('void', 'void *, void *'),
  'btctl_set_a2dp_callback': ('void', 'void *, void *'),
  'btrecvA2dpFunc': ('int', 'int, void *, void *'),
@@ -2110,6 +2236,7 @@ GLOBALS = ['tidal_albuminfo_thread_run', 'tidal_collection_thread_run',  # 2: a 
            'g_po_status', 'g_bal_status',  # 3.5 mm and 4.4 mm jacks: 1 plugged (check_headset_status)
            'g_usbvol_mode',  # USB DAC volume: 0 fixed, else the volume (config_usbvolmode, device_set_volume)
            'g_usbdac_chargeflag',  # USB mode's charge choice, which switch_charge_enable gets there
+           'g_block_withoutphone_flag',  # Headphones Required, held on (output_rule.c output_rule_config)
            'g_memory_play', 'g_carmode', 'g_carmode_state',  # In-Vehicle Mode (pod_click)
            'g_bigcovermode', 'g_foldercover_flag',  # Enlarged Album Art (1 on) and Folder Album Cover (pod_click)
            'g_headset_output',  # the output config_outputchannel sets: 0, 1 the jacks, 2 Bluetooth
@@ -2212,7 +2339,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_record.c', 'usb_ui.c', 'usb_car.c', 'adb_trust.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'localsend_ui.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'search_bar.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'album_cover.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_ui.c', 'bt_trace.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'vol_pill.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'np_rate.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c', 'autozone.c', 'player_push.c', 'card_watch.c', 'offline.c', 'radio_tuner.c', 'radio_pane.c', 'bt_cover.c', 'now_source.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_volume.c', 'output_rule.c', 'usb_record.c', 'usb_ui.c', 'usb_car.c', 'standby_usb.c', 'adb_trust.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'localsend_ui.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'search_bar.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'album_cover.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_pair.c', 'bt_ui.c', 'bt_trace.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'vol_pill.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'np_rate.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c', 'autozone.c', 'player_push.c', 'card_watch.c', 'offline.c', 'radio_tuner.c', 'radio_pane.c', 'bt_cover.c', 'now_source.c', 'ui_watch.c']
 
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
@@ -2224,7 +2351,7 @@ PAYLOAD_ROOTS = ['compact_set_row_layout', 'kb_host_open', 'kb_open_hint', 'ipod
                  'ringnav_dark_usleep', 'ringnav_dialog_close', 'ringnav_ellipsis_text', 'ringnav_gbk_tag', 'ringnav_glyph_stamp',
                  'ringnav_hold_info', 'ringnav_hold_timer', 'ringnav_hscroll_lull', 'ringnav_id3_path',
                  'ringnav_lyric_follow', 'ringnav_lyric_rows', 'ringnav_mainscheduling', 'ringnav_play_cover_wait', 'ringnav_scan_dir',
-                 'ringnav_scan_refresh', 'ringnav_shuffle', 'ringnav_song_unknown', 'ringnav_table_drag',
+                 'now_page_status', 'now_page_time', 'ringnav_scan_refresh', 'ringnav_shuffle', 'ringnav_song_unknown', 'ringnav_table_drag',
                  'ringnav_table_load', 'ringnav_table_scroll', 'stock_row_style', 'stock_row_text', 'stock_set_row_layout']
 
 
@@ -2270,9 +2397,12 @@ def check_layout(payload, ps):
           f'scratch state {free:,} bytes free of {SCRATCH_SIZE:,}', flush=True)
     return free
 
-def compile_helper(out, cat, src, name, rels):
+def compile_helper(out, cat, src, name, rels, sections=None):
     """Link patch/{src}.c (or each of a list of sources under patch/) and start.c as name against the stock
-    rootfs's libraries rels."""
+    rootfs's libraries rels. A list's sources are compiled with -ffunction-sections and -fdata-sections, so
+    --gc-sections drops what nothing uses, unless sections is False."""
+    if sections is None:
+        sections = not isinstance(src, str)
     libs = []
     for rel in rels:
         libs.append(out/rel.rsplit('/', 1)[-1])
@@ -2281,7 +2411,7 @@ def compile_helper(out, cat, src, name, rels):
     objs = [out/f"{s.replace('/', '_')}.o" for s in srcs]
     for s, o in zip(srcs, objs):
         run('clang', *[f for f in FLAGS if f not in ('-mno-abicalls', '-G0')], '-mnan=2008', '-mabs=2008',
-            '-mabicalls', *([] if isinstance(src, str) else ['-ffunction-sections', '-fdata-sections']), '-c',
+            '-mabicalls', *(['-ffunction-sections', '-fdata-sections'] if sections else []), '-c',
             ROOT/'patch'/f'{s}.c', '-o', o)
     run('ld.lld', '-m', 'elf32ltsmip', '-e', '__start', '--dynamic-linker', '/lib/ld-linux-mipsn8.so.1',
         '--image-base=0x400000', '-z', 'noexecstack', '--gc-sections', '-s', '--hash-style=sysv', '--build-id=none',
@@ -2575,6 +2705,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     syms = symbols(demo, symbol_table)
     for name, address in APP_URL_CALLS.items():
         check(syms.get(name) == address, f'{name}: not at {address:#x} in the stock demo')
+    hook_address_check(HOOKS, syms, stock_map())  # before PRIVATE_FUNCTIONS, which takes some from HOOKS
     syms.update(PRIVATE_FUNCTIONS)
     fonts = {f.path: face_font(f) for f in FACES.values() if f.source}
     for name in GLOBALS:
@@ -2596,7 +2727,6 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     patch_timezones(patched)
     def jump(off, name): patched[off:off+8] = struct.pack('<II', j(ps[name]), 0)
     for name, (address, replacement, _) in HOOKS.items():
-        check(syms[name] == address, f'{name}: callback address mismatch')
         off = fileoff(patched, address)
         prolog = struct.unpack_from('<III', patched, off)
         check(prolog[0] >> 16 == 0x3c1c and prolog[1] >> 16 == 0x279c and
@@ -2699,6 +2829,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, 0x5bc304))[0] == 0x8f99f5ac,
           'lyric file: expected fopen import')
     patch_word(patched, *LYRIC_OPEN, jal(ps['ringnav_lrc_open']), 'lyric files read as tags are')
+    patch_word(patched, *PNG_STRIP16, 0x24060011, 'a 16-bit PNG decoded to 8 bits a channel')
     for call, load, fn in GRID_COVER:
         check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, load))[0] == 0x8f99b76c,
               'grid cover: expected toolsGetAlbumCover import')
@@ -2790,6 +2921,12 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     for load, name in ((FOLDER_NAME[1][2], 'tk_strncpy'), (CLOSE_LOAD, 'navigator_close'), (DUMMY_LOAD, 'dummy_destroy')):
         check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, GP + ((load & 0xffff) ^ 0x8000) - 0x8000))[0] == syms[name],
               f"{name}: the GOT load written for it names another slot")
+    check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, NP_TIME_CALLS[0][0] - 8))[0] == 0x8f99a9a0,
+          'Now Playing time: expected mclGetPlayStatus')
+    check(NP_TIME_CALLS[1][1] == branch(0x04110000, NP_TIME_CALLS[1][0], syms['player_playtime_and_length']),
+          'Now Playing time: expected player_playtime_and_length')
+    for address, word, fn in NP_TIME_CALLS:
+        patch_word(patched, address, word, jal(ps[fn]), "Now Playing's time holds a held song's place")
     patch_word(patched, NP_INFO_CALL, branch(0x04110000, NP_INFO_CALL, PRIVATE_FUNCTIONS['np_info']),
                jal(ps['ringnav_np_info']), "Now Playing's info lines")
     for site in AB_X_CALLS:
@@ -2943,8 +3080,10 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
             p += path + b' F ' + b' '.join(like.groups()) + b' cat ' + shlex.quote(str(src)).encode() + b'\n'
             player_added.append([path, b'R', *like.groups()])
         app_version, zip_name, _, digest, builtin = BUNDLED_APPS[app_id]
+        record = bundle_fields(files['bundle'][0])
         bundled[app_id] = dict(version=app_version, zip=zip_name, sha256=digest, builtin=builtin,
-                               bytes=sum(len(d) for d, _ in files.values()))
+                               bytes=sum(len(d) for d, _ in files.values()),
+                               binary_sha256=record[f'q2-{app_id}_sha256'], build=record['build'])
     for path, src in ((b'release/bin/demo', out/'demo'), (b'usr/bin/hciplayer', q2player),
                       (BLUEALSA.encode(), out/'bluealsa'), (BLUETOOTHD.encode(), out/'bluetoothd'), (WATCHDOG.encode(), out/'watchdog'),
                       (S90PLAY.encode(), out/'S90play'), (S11LOGO.encode(), out/'S11logo'),
@@ -3016,7 +3155,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                STOCK_CA: ('etc/hosts', mozilla_ca()),
                                BOOT: (HELPER_LIKE, compile_helper(out, cat, 'boot', 'q2boot', HELPER_LIBS[:1])),
                                SPLASH: (HELPER_LIKE, compile_helper(out, cat, 'splash', 'q2splash', HELPER_LIBS[:1])),
-                               GUARD: (HELPER_LIKE, compile_helper(out, cat, ['q2guard', 'q2guard_core', 'q2guard_pmic', 'q2guard_card', 'q2bt', 'q2bt_core', 'q2log_core'], 'q2guard', HELPER_LIBS[:1])),
+                               GUARD: (HELPER_LIKE, compile_helper(out, cat, ['q2guard', 'q2guard_core', 'q2guard_pmic', 'q2guard_card', 'q2bt', 'q2bt_core', 'q2log_core', 'q2dbus'], 'q2guard', HELPER_LIBS[:1])),
                                **({path: (xx+'list_tidal.png', data) for path, data in anim.items()} if anim else {}),
                                CODA_RC: (HELPER_LIKE, compile_helper(out, cat, CODA_RC_SOURCES, 'coda-rc', CODA_RC_LIBS)),
                                BT_CODEC: (HELPER_LIKE, compile_helper(out, cat, 'q2bt_codec', 'q2bt-codec', BT_CODEC_LIBS)),
@@ -3024,7 +3163,10 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                BIP: (HELPER_LIKE, compile_helper(out, cat, BIP_SOURCES, 'q2-bip', HELPER_LIBS[:1])),
                                IROH: (HELPER_LIKE, iroh.binary(fresh=build_iroh)),
                                Q2CAR: (HELPER_LIKE, (ROOT/'patch/q2car.sh').read_bytes()),
-                               Q2IAP: (HELPER_LIKE, compile_helper(out, cat, 'q2_iap', 'q2-iap', CODA_RC_LIBS)),  # libc and SQLite (q2_iap_lib.c)
+                               CAR_FEED_CONF: ('usr/share/alsa/alsa.conf.d/20-bluealsa.conf',
+                                               (ROOT/'assets/alsa/30-q2car.conf').read_bytes()),
+                               Q2IAP: (HELPER_LIKE, compile_helper(out, cat, Q2IAP_SOURCES, 'q2-iap', CODA_RC_LIBS,
+                                                                 sections=False)),  # libc and SQLite (q2_iap_lib.c)
                                UAC1_KO: ('module_driver/soc_aic.ko', uac1.module()),
                                Q2SEND: (HELPER_LIKE, compile_helper(out, cat, Q2SEND_SOURCES, 'q2send', Q2SEND_LIBS)),
                                RADIOFETCH: (HELPER_LIKE, compile_helper(out, cat, RADIOFETCH_SOURCES, 'q2radiofetch',

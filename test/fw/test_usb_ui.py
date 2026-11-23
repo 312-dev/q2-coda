@@ -765,3 +765,44 @@ def test_a_cable_in_starts_no_connect(fw, case):
         fw.var('g_last_otgid', C.c_byte).value = 1
     u.plug(host=False)
     assert starts == []
+
+
+def own_bus_power(fw, u, r):
+    """The Q2 a host for an accessory, through usb_otg.c's real ringnav_otg_status over stock's pass (PD18 low: bus
+    power on, as test_usb_otg.py's model has it), then the accessory pulled (PD18 high: off)."""
+    otgid = fw.var('g_last_otgid', C.c_byte)
+    pins = {'PD18': 0, 'PD17': 1}
+    fw.mock('toolsGpioGetValue', lambda name, *_: pins.get(C.string_at(name).decode(), 1))
+    fw.mock('toolsGpioSetValue', lambda *_: 0)
+
+    gpio = fw.fn('ringnav_gpio_value', C.c_int, C.c_char_p)
+    fw.mock('stock_gpio_value_trampoline', lambda name, *_: pins.get(C.string_at(name).decode(), 1))
+
+    def stock(*_):  # its PD18 read through toolsGpioGetValue's hook
+        otgid.value = int(gpio(b'PD18') == 0)
+        return 0
+    fw.mock('stock_otg_status_trampoline', stock)
+    u.files.files['/sys/bus/usb/devices/1-1/idVendor'] = b'3302\n'  # AB13X USB Audio, kept powered
+    guard = fw.fn('ringnav_otg_status', C.c_int)
+    for _ in range(8):
+        r.now += 1000
+        guard()
+    assert otgid.value == 1
+    pins['PD18'] = 1
+    del u.files.files['/sys/bus/usb/devices/1-1/idVendor']  # pulled: off the host port too
+    r.now += 1000
+    guard()
+    assert otgid.value == 0
+
+
+@pytest.mark.parametrize('after_ms, connects', [(1500, False), (4000, True)])
+def test_the_q2_s_own_bus_power_ending_is_no_cable_for_bluetooth(fw, after_ms, connects):
+    """2026-11-23: earbuds on the Q2's own bus power pulled at 13404.0, and 1.6 s later stock's read took the dying VBUS
+    for a cable (13405.6 "cable in", out again 0.2 s on) and Bluetooth connected for it (why=usb). A real cable after
+    OTG_OWN_VBUS_MS still connects."""
+    from test_bt_trace import CAR
+    u, r, starts = usb_power(fw)
+    own_bus_power(fw, u, r)
+    r.now += after_ms
+    u.plug(host=False)
+    assert starts == ([CAR] if connects else [])

@@ -19,6 +19,8 @@ int snd_pcm_hw_params_set_access(snd_pcm_t *, snd_pcm_hw_params_t *, int);
 int snd_pcm_hw_params_test_format(snd_pcm_t *, snd_pcm_hw_params_t *, int);
 int snd_pcm_hw_params_set_format(snd_pcm_t *, snd_pcm_hw_params_t *, int);
 int snd_pcm_hw_params_set_channels(snd_pcm_t *, snd_pcm_hw_params_t *, unsigned);
+int snd_pcm_hw_params_test_channels(snd_pcm_t *, snd_pcm_hw_params_t *, unsigned);
+int snd_pcm_hw_params_test_rate(snd_pcm_t *, snd_pcm_hw_params_t *, unsigned, int);
 int snd_pcm_hw_params_set_rate_resample(snd_pcm_t *, snd_pcm_hw_params_t *, unsigned);
 int snd_pcm_hw_params_set_rate_near(snd_pcm_t *, snd_pcm_hw_params_t *, unsigned *, int *);
 int snd_pcm_hw_params_set_buffer_time_near(snd_pcm_t *, snd_pcm_hw_params_t *, unsigned *, int *);
@@ -40,6 +42,7 @@ snd_pcm_sframes_t snd_pcm_avail(snd_pcm_t *);
 snd_pcm_sframes_t snd_pcm_forward(snd_pcm_t *, snd_pcm_uframes_t);
 snd_pcm_sframes_t snd_pcm_rewindable(snd_pcm_t *);
 int snd_pcm_wait(snd_pcm_t *, int);
+int snd_pcm_state(snd_pcm_t *); /* snd_pcm_state_t: 0 OPEN, 1 SETUP, 2 PREPARED, 3 RUNNING, 4 XRUN, ... 8 DISCONNECTED */
 snd_pcm_sframes_t snd_pcm_rewind(snd_pcm_t *, snd_pcm_uframes_t);
 int snd_pcm_pause(snd_pcm_t *, int);
 int snd_pcm_drop(snd_pcm_t *);

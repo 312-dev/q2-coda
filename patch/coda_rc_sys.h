@@ -32,6 +32,7 @@
 typedef long ssize_t;
 typedef int pid_t;
 typedef unsigned socklen_t;
+int __xstat(int, const char *, void *); /* glibc 2.28's stat, version 3 (coda_rc_lib.c lib_key_now) */
 #define O_RDONLY 0
 #define O_WRONLY 1
 #define O_RDWR 2
@@ -89,6 +90,7 @@ int fcntl(int, int, ...), ftruncate(int, long);
 long lseek(int, long, int);
 int socket(int, int, int), setsockopt(int, int, int, const void *, socklen_t), bind(int, const void *, socklen_t);
 int listen(int, int), accept(int, void *, socklen_t *), connect(int, const void *, socklen_t);
+int getsockname(int, void *, socklen_t *);
 int getpeername(int, void *, socklen_t *);
 ssize_t send(int, const void *, size_t, int);
 ssize_t sendto(int, const void *, size_t, int, const void *, socklen_t);
@@ -96,6 +98,8 @@ ssize_t recvfrom(int, void *, size_t, int, void *, socklen_t *);
 int ioctl(int, unsigned long, ...);
 int poll(struct pollfd *, unsigned long, int);
 #define IN_MOVED_TO 0x80
+#define IN_CLOSE_WRITE 0x8
+#define IN_DELETE 0x200
 #define IN_NONBLOCK O_NONBLOCK
 #define IN_CLOEXEC O_CLOEXEC
 int inotify_init1(int), inotify_add_watch(int, const char *, uint32_t);

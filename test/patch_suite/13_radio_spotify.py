@@ -824,3 +824,22 @@ def card_app(m,app,manifest):
     """App `app` on the card: its folder in the card's listing, its manifest and its binary."""
     m.tree.setdefault('/mnt/mmc',[]).append(('.'+app,4))
     m.files[f'/mnt/mmc/.{app}/q2app']=bytearray(manifest.encode()); m.files[f'/mnt/mmc/.{app}/q2-{app}']=bytearray()
+
+# The Library's Now Playing while Radio, a station or a video holds its song (now_source.c now_hold): stock's own
+# update (playing_page_update, 0x53cf08) reads the state and time through now_page_status and now_page_time
+# (NP_TIME_CALLS), so the song paused at 0:07 shows 0:07 and its bar there, not a stopped player's 0:00; the hold
+# ended, the player's own state and time are read again.
+def np_update(playtime, status):
+    m=Machine(); m.handlers.pop(syms['mclGetPlayStatus'],None); m.mock('player_save_stop','player_save_start')
+    m.np_slider=m.node('slider','slider_play',max=225,value=100)
+    m.np_el=m.node('label','label_playtime'); m.top=m.node('window','playing_page',[m.np_slider,m.np_el,m.node('label','label_ipod_remain')])
+    m.word(m.top+O['W_PARENT'],m.wm); m.playtime=playtime; m.word(PLAY_STATUS_WORD,status); return m
+def np_tick(m): m.calls.clear(); m.call(address=0x53cf08,args=(m.top,0,0,0),gap=0); return m.nodes[m.np_slider]['value'],m.nodes[m.np_el].get('text')
+from build import NP_TIME_CALLS
+PLAY_STATUS_WORD=0xa50084  # mclGetPlayStatus's word: 1 stopped, 2 playing, 3 paused
+for address,_,fn in NP_TIME_CALLS: assert struct.unpack_from('<I',demo,fileoff(demo,address))[0]==jal(payload_syms[fn]),fn
+m=np_update(7,3); m.call(address=payload_syms['now_hold'],args=(0,0,0,0),gap=0)
+m.word(PLAY_STATUS_WORD,1); m.playtime=0  # player_save_stop stopped it
+assert np_tick(m)==(7,'0:07') and 'player_playtime_and_length' not in [c[0] for c in m.calls]; passed()
+m.call(address=payload_syms['now_drop'],args=(0,0,0,0),gap=0); assert np_tick(m)==(0,'0:00'); passed()  # stopped, as stock shows it
+m.word(PLAY_STATUS_WORD,2); m.playtime=12; assert np_tick(m)==(12,'0:12'); passed()  # playing: the player's

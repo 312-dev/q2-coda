@@ -1045,7 +1045,7 @@ def test_nothing_selected_asks_for_a_selection(fw):
 def test_a_full_selection_asks_for_these_to_go_first(fw):
     b = storage(fw, REMOVE_TRACKS)
     b.answer(rows=[track(1, b'')])
-    full = b'x' * (Br.selected.size - 10)
+    full = b'x' * (Br.SELECTED - 10)
     b.br.selected = full
     b.click(0)
     assert len(b.toasts) == 1 and b.br.selected == full

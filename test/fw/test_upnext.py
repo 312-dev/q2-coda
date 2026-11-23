@@ -392,12 +392,13 @@ def test_a_tapped_row_plays_its_own_track_and_the_page_closes(fw, up):
 
 
 def test_a_row_starts_nothing_while_headphones_are_required_and_absent(fw, up):
-    """As stock's queue row: its check (it toasts) comes before the start."""
+    """Its check (it toasts) comes before the start, and Up Next stays with its selection, as any list a refused start
+    is tapped on (output_rule.c)."""
     _, page = up
     page.open()
     fw.mock('check_forbid_play_no_headset', lambda *_: 1)
     page.tap(1)
-    assert not fw.calls('player_start_queue') and fw.calls('navigator_back')
+    assert not fw.calls('player_start_queue') and not fw.calls('navigator_back')
 
 
 @pytest.mark.parametrize('next_, order', [(1, ['00', '07']), (2, ['07', '00'])])
@@ -644,6 +645,18 @@ def test_a_drag_down_on_the_sheet_closes_it(fw, up):
     aborts: list = []
     assert finger(page, (187, 46), (190, 94), aborts=aborts) == 1  # the grab bar, 48 px down
     assert aborts == [(PAGE, O['EVT_POINTER_ABORT'])]  # claimed: the sheet's pressed widgets let go
+
+
+@pytest.mark.parametrize('at, to', [((140, 46), (220, 185)), ((130, 46), (230, 189)), ((120, 150), (210, 280))],
+                         ids=['grab-30deg', 'grab-35deg', 'rows-35deg'])
+def test_a_thumb_s_slanted_drag_down_closes_the_sheet(fw, up, at, to):
+    """The user's, 2026-11-21, on the device: a swipe down still left Up Next up. A thumb holding the Q2 swipes down
+    on a slant, 30 to 35 degrees off the vertical; driven so on the emulator with the panel's own events, the sheet
+    claimed the drag (more down than across) and followed it, then rose back at the lift, which also asked for less
+    than half as far across as down. Once claimed, the drop alone decides, as the sheet follows only the drop."""
+    _, page = up
+    page.open()
+    assert finger(page, at, to) == 1
 
 
 @pytest.mark.parametrize('at, to, scrolled', [

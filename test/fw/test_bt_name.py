@@ -185,6 +185,27 @@ def test_the_command_hands_dbus_send_the_alias_as_typed(fw, tmp_path, saved, ali
                     f'variant:string:{alias}']
 
 
+@pytest.mark.parametrize('saved, written', [(b'Car #1 $HOME', 'Car #1 $HOME'), (b'', 'Q2 Muse'), (b"x'y", 'Q2 Muse')])
+def test_the_controller_is_given_the_name_itself(fw, tmp_path, saved, written):
+    """The Alias set, the controller's own local name is written too (hciconfig hci0 name): on 2026-11-22 after a
+    boot BlueZ's Name and Alias read Q2 Muse while the RTL8733BS answered a name request with its ROM's RT_BT, the
+    name the car showed, and an Alias of "" or one BlueZ already holds changes nothing in BlueZ."""
+    Config(fw, BTNAME=saved)
+    s = System(fw)
+    fw.fn('bt_name_apply', None)()
+    bin_ = tmp_path / 'bin'
+    bin_.mkdir()
+    log = tmp_path / 'hci'
+    (bin_ / 'dbus-send').write_text('#!/bin/sh\n')
+    (bin_ / 'hciconfig').write_text(f'#!/bin/sh\nfor a; do printf "%s\\n" "$a"; done >> {log}\n')
+    (bin_ / 'usleep').write_text('#!/bin/sh\n')
+    for f in bin_.iterdir():
+        f.chmod(0o755)
+    command = s.commands[0].replace(') >/dev/null 2>&1 &', ') >/dev/null 2>&1')  # run it to its end
+    subprocess.run(['sh', '-c', command], check=True, env={**os.environ, 'PATH': f'{bin_}:{os.environ["PATH"]}'})
+    assert pathlib.Path(log).read_text().splitlines() == ['hci0', 'name', written]
+
+
 def test_the_name_s_return_key_is_a_check(fw, ui):
     """Bluetooth's Name saves a name: the strip's return key shows the check (search_strip.c ss_ret_kind)."""
     from test_search_strip import mark

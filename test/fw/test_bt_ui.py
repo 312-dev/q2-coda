@@ -8,7 +8,7 @@ import subprocess
 
 import pytest
 
-from conftest import Files
+from conftest import Files, threads_now
 from test_nav_library_pages import Config, Ui
 
 EVT_CLICK = 0x10c
@@ -29,14 +29,17 @@ class Page:
         self.config = Config(fw, **config)
         self.files = Files(fw, dict(files or {}))
         self.commands, self.now, self.links, self.answer = [], 1000, [], answer
+        self.on_command = None  # a command's run, as the shell would make it (Connected's codecs)
         fw.mock('fw_system', self.system)
+        self.runs = threads_now(fw)  # each shell run off the UI thread ends at once (bt_ui.c bt_shell)
+        fw.var('g_backlight_status', C.c_ubyte).value = 1
         fw.mock('time_now_ms', lambda *_: self.now)
         fw.mock('getBtLinkSize', lambda *_: len(self.links))
         fw.mock('getBtLinkItem', self.link_item)
         self.records = [C.create_string_buffer(0x124) for _ in self.devices]
         for record, (mac, name, _) in zip(self.records, self.devices):
             C.memmove(C.addressof(record) + 4, mac.encode() + b'\0', len(mac) + 1)
-            C.memmove(C.addressof(record) + 0x24, name.encode() + b'\0', len(name) + 1)
+            C.memmove(C.addressof(record) + 0x24, name.encode() + b'\0', len(name.encode()) + 1)  # UTF-8, as BlueZ's
         fw.var('fw_ctx_pdeq_btshowlist', C.c_uint).value = self.ui.deques.new(C.addressof(r) for r in self.records)
         fw.var('g_bluetoothflag', C.c_ubyte).value = on
         self.win = self.ui.new('window_create', 0, 0, 0, 0, 0)
@@ -51,10 +54,12 @@ class Page:
         (SEEN_FILE), at once: every device listed as found was."""
         command = C.string_at(cmd).decode()
         self.commands.append(command)
+        if self.on_command:
+            self.on_command(command)
         if self.answer and SEEN_FILE in command:
             seen = ''.join(f'{mac} seen\n' for mac, _, state in self.devices if state == 'found')
             ask = re.search(r"echo '(#\d+)'", command)
-            assert ask
+            assert ask, command
             self.files.files[SEEN_FILE] = (ask[1] + '\n' + seen).encode()
         return 0
 
@@ -371,7 +376,7 @@ def test_the_page_gone_stops_its_scans(fw):
 
 
 class Links(Page):
-    """The page's machinery with stock's link list and the battery loop's file ("MAC PCT RATE CLASS")."""
+    """The page's machinery with stock's link list and the battery runs' file ("MAC PCT RATE CLASS NAME")."""
     def __init__(self, fw, devices=DEVICES, resume=b'0'):
         super().__init__(fw, devices, RESUME=resume)
         self.alias = ''
@@ -380,7 +385,8 @@ class Links(Page):
         self.links = [(mac, 3)] if mac else []
         lv = '' if level is None else level
         self.files.files[BATT_FILE] = f'{mac} {lv} 48000 {cls or ""} {self.alias}\n'.encode() if mac else b''
-        self.now += 5000  # the loop's file read again
+        self.now += 300000  # bt_battery.c BATT_POLL_MS: asked again, the file read as the run ends
+        self.poll()
         self.poll()
 
 
@@ -815,7 +821,7 @@ def test_a_quality_pick_on_a_live_link_switches_the_codec_in_place(fw, row, code
     r, switches = quality_pick(fw, row, codec)
     assert r == 0 and len(switches) == 1
     assert f'for c in {order}; do' in switches[0] and 'q2bt-codec "$p" $c' in switches[0]
-    assert switches[0].rstrip().endswith('&')
+    assert not switches[0].rstrip().endswith('&')  # run off the UI thread, waited for there (bt_shell)
 
 
 @pytest.mark.parametrize('row, codec', [(3, 13), (4, 3), (5, 2)])
@@ -957,13 +963,18 @@ class Connected(Page):
         fw.var('bt_linkstatus', C.c_ubyte).value = 1
         self.stream(codec)
         self.commands.clear()
-        self.poll()
+        self.on_command = self.codecs
+        self.poll()  # the ask, run as bt_shell's thread runs it: the answer there as it ends
         fetches = [c for c in self.commands if CODECS_FILE in c]
-        assert len(fetches) == 1 and fetches[0].rstrip().endswith('&')
-        answer = self.bluealsa.sh(fetches[0], {CODECS_FILE: tmp_path / 'codecs'})
-        assert answer is not None
-        self.files.files[CODECS_FILE] = answer.encode()
-        self.poll()
+        assert len(fetches) == 1 and not fetches[0].rstrip().endswith('&')
+        assert CODECS_FILE in self.files.files
+        self.poll()  # read
+
+    def codecs(self, command):
+        if CODECS_FILE in command:
+            answer = self.bluealsa.sh(command, {CODECS_FILE: self.tmp / 'codecs'})
+            if answer is not None:
+                self.files.files[CODECS_FILE] = answer.encode()
 
     def stream(self, codec):
         self.fw.var('fw_ctx_bt_showcoding', C.c_int).value = CODEC[codec]
@@ -1107,6 +1118,20 @@ def test_a_px7_marks_only_ldac(fw, tmp_path):
     p.picker()
     assert p.lacking() == [0, 1]
     assert p.caption(1) == "Px7 doesn't support LDAC: using aptX HD"
+
+
+@pytest.mark.parametrize('name, shown', [
+    ('Café Sönd', 'Café Sönd'),                                   # accented Latin: two bytes a letter
+    ('ソニー WH-1000XM5 ヘッドホン 黒', 'ソニー WH-1000XM5 ヘッドホン'),  # CJK, cut at 20 characters, never inside one
+    ('🎧 Buds', '🎧 Buds'),                                        # four bytes
+])
+def test_a_device_s_name_in_a_caption_is_its_characters(fw, tmp_path, name, shown):
+    """A headset's name is UTF-8 (BlueZ's), and caption_row widened it a byte a character, so "Café" drew as "CafÃ©"
+    and a Japanese name as a row of Latin-1 noise; and the cut at BT_LACK_NAME counted bytes, which could split a
+    character. The caption's code units are the name's characters, cut at 20 of them."""
+    p = Connected(fw, tmp_path, HEAD, name, PX7, 'aptX-HD')
+    p.picker()
+    assert p.caption(1) == shown + " doesn't support LDAC: using aptX HD"
 
 
 def test_a_marked_row_s_text_is_grayed_as_the_library_s(fw, tmp_path):
@@ -1461,3 +1486,51 @@ def test_a_device_the_scan_heard_stays_listed_this_open(fw):
     p.files.files[SEEN_FILE] = b'#999\n'
     p.rebuild()
     assert other_devices(p) == ['d1'] and len([c for c in p.commands if SEEN_FILE in c]) == asked
+
+
+# ---- the car on the cable (headset.c headset_bt_autolink, usb_car.c usb_car_name) ----
+
+def car_on_the_cable(fw, p, name):
+    """Car Audio with a car on the cable that named itself name over iAP2 (q2-iap's state file, usb_car.c)."""
+    fw.mock('fw_access', lambda *_: -1)
+    fw.fn('usb_car_start', None)()
+    p.files.files['/tmp/q2car.state'] = f'verdict=car\nhost=1\nname={name}\naudio=1\nflowing=1\n'.encode()
+    p.now += 300
+    fw.fn('usb_car_poll', C.c_int)()
+
+
+def autolink(fw, mac):
+    fw.mock('checkPairDev', lambda *_: 1)
+    said = []
+
+    def write(fd, data, n, *_):  # ulog's line on stderr: "<time> <up> <level> <src> <msg>"
+        words = C.string_at(data, n).decode().rstrip('\n').split(' ', 4)
+        if fd == 2 and words[3] == 'bt':
+            said.append(words[4])
+        return n
+    fw.mock('fw_write', write)
+    return fw.fn('headset_bt_autolink', C.c_int, C.c_char_p)(mac.encode()), said
+
+
+def test_bluetooth_leaves_alone_the_car_car_audio_plays_to(fw):
+    """2026-11-21: a Bluetooth relaunch auto-connected A2DP to "BMW 83828" while the Q2 played to it over USB. While
+    Car Audio has that car (its iAP2 name, q2-iap's name=), auto-connect skips it, and says so."""
+    p = Page(fw, [(CAR, 'BMW 83828', 'paired'), (SPEAKER, 'JBL', 'paired')])
+    car_on_the_cable(fw, p, 'BMW 83828')
+    go, said = autolink(fw, CAR)
+    assert go == 0 and said == [f'auto-connect (auto) skips {CAR} "BMW 83828": the car on the cable, whose audio is '
+                                "Car Audio's"], said
+
+
+def test_bluetooth_still_connects_another_device_or_another_car(fw):
+    p = Page(fw, [(CAR, 'BMW 83828', 'paired'), (SPEAKER, 'JBL', 'paired')])
+    car_on_the_cable(fw, p, 'BMW 83828')
+    assert autolink(fw, SPEAKER)[0] == 1, 'a speaker is not the car'
+    p2 = Page(fw, [(CAR, 'BMW 83828', 'paired')])
+    car_on_the_cable(fw, p2, 'Audi MMI')
+    assert autolink(fw, CAR)[0] == 1, 'another car on the cable'
+
+
+def test_bluetooth_connects_the_car_when_car_audio_is_off(fw):
+    Page(fw, [(CAR, 'BMW 83828', 'paired')])
+    assert autolink(fw, CAR)[0] == 1

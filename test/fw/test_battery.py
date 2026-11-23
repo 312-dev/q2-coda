@@ -49,7 +49,7 @@ class Q2:
         """The record on the card: [(time, level)]."""
         data = self.files.files[RECORD]
         magic, n = struct.unpack_from('<II', data)
-        assert magic == MAGIC and len(data) == 8 + 8 * ROWS
+        assert magic == MAGIC and len(data) == 8 + 8 * n  # its head and its rows, no more
         return [struct.unpack_from('<II', data, 8 + 8 * k) for k in range(n)]
 
     def reboot(self):
@@ -121,6 +121,25 @@ def test_a_full_discharge_stays_inside_its_bound(q2):
     assert [p for _, p in q2.rows()] == list(range(100, 0, -1))
     q2.poll(0, minutes=6)  # not a level: demo powers off first
     assert len(q2.rows()) == ROWS
+
+
+def test_a_full_discharge_writes_each_record_as_far_as_its_rows(fw, q2):
+    """Each row is one write of the record's head and rows: 41,200 bytes over a full discharge's 100 rows, where the
+    whole 808-byte record each time was 80,800."""
+    written = 0
+    for level in range(100, 0, -1):
+        q2.poll(level, minutes=6)
+        written += len(q2.files.files[RECORD])
+    assert len([a for _, a in fw.calls('fw_rename') if C.string_at(a[1]) == RECORD.encode()]) == ROWS
+    assert written == 41200
+
+
+def test_a_record_written_whole_by_an_earlier_release_reads(fw):
+    rows = [(NOON, 60), (NOON + 600, 59)]
+    whole = struct.pack('<II', MAGIC, 2) + b''.join(struct.pack('<II', *r) for r in rows) + bytes(8 * (ROWS - 2))
+    q2 = Q2(fw, {RECORD: whole})
+    q2.poll(58, minutes=20)
+    assert q2.rows() == rows + [(NOON + 1200, 58)]
 
 
 def test_the_history_survives_a_power_off(q2):

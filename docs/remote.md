@@ -98,18 +98,19 @@ Q2 Muse Remote reaches the Q2's coda-rc ([remote-protocol](remote-protocol.md)) 
 
 ### What the user does
 
-1. On the Q2: Settings > Car Remote on, then Pair a Phone. With Wi-Fi joined it shows a QR code, the pairing code under it ([remote-protocol: Pairing by QR code](remote-protocol.md#pairing-by-qr-code)).
-2. On the phone: Q2 Muse Remote > Pair a Q2 Muse > **Scan QR code**, and point it at the Q2. The phone can be on any network. It dials the Q2's Wi-Fi address and its iroh endpoint at once, keeps the first that answers, and pairs on the code it read; the Q2 shows the pairing card for a moment, then "Pixel 10 Pro paired".
-3. From then on the app connects the same way wherever the phone is: on the Q2's Wi-Fi straight to its address, elsewhere through the relay (or a direct path once iroh finds one). A phone paired the old way (Wi-Fi address or Bluetooth) learns the endpoint at its next session on a Q2 with `q2-iroh` (`GetRemote`) and does the same.
+1. On the Q2: Settings > Car Remote on, then Pair a Phone. It shows the pairing code, and above it a QR code once `q2-iroh` can be reached: from any network with a relay, from the same Wi-Fi without one ([remote-protocol: Pairing by QR code](remote-protocol.md#pairing-by-qr-code)).
+2. On the phone: Q2 Muse Remote > Pair a Q2 Muse, then **Scan QR code** and point it at the Q2, or tap the Q2 Muse it lists (found by Bluetooth or on the Wi-Fi) and type the code. With a relay the phone can be on any network. Scanned, it dials the Q2's Wi-Fi address and its iroh endpoint at once, keeps the first that answers, and pairs on the code it read; the Q2 shows the pairing card for a moment, then "Pixel 10 Pro paired".
+3. From then on the app connects the same way wherever the phone is: on the Q2's Wi-Fi straight to its address, elsewhere through the relay (or a direct path once iroh finds one). A phone paired the old way (Wi-Fi address or Bluetooth) learns the endpoint at its next session on a Q2 with `q2-iroh` (`GetRemote`), registers its own iroh key there (`RegisterRemote`), and does the same.
 
-The Q2 needs Wi-Fi with internet for a phone elsewhere to reach it; Car Remote on keeps its Wi-Fi on under Smart Wi-Fi ([internals: Smart Wi-Fi](internals.md#smart-wi-fi)).
+The Q2 needs Wi-Fi with internet for a phone elsewhere to reach it. Under Smart Wi-Fi, Car Remote keeps a joined Wi-Fi on for 10 minutes after its last use (a phone connected by any way, a pairing, Car Remote turned on); after that Smart Wi-Fi turns the radio off as for anything else, and a phone elsewhere cannot reach the Q2 until something brings Wi-Fi back ([internals: Smart Wi-Fi](internals.md#smart-wi-fi)).
 
 ### On the Q2
 
-demo's Car Remote shim (`patch/coda_rc_shim.c`) starts `q2-iroh` with the daemon and stops it with it, so nothing listens while Car Remote is off ([internals: Across networks](internals.md#car-remote-iroh)). Its key is `/mnt/data/coda-rc/iroh.key` (0600, made on first start, never on the card), so the Q2's endpoint id survives restarts and updates; `/tmp/coda-rc.iroh` holds the id and the home relay for the daemon and the Pair a Phone page; `/tmp/q2-iroh.log` its log. The relay is n0's public one (`*.relay.n0.iroh.link`) unless `/mnt/data/coda-rc/relay` names others, one URL a line (an own `iroh-relay` on the Hetzner box, later): write the file and turn Car Remote off and on.
+demo's Car Remote shim (`patch/coda_rc_shim.c`) runs `q2-iroh` beside the daemon while Wi-Fi has a link, stops it a minute after the link goes, and stops it with the daemon, so nothing listens while Car Remote is off and no endpoint retries its relay with no network ([internals: Across networks](internals.md#car-remote-iroh)). It lets in only the iroh keys of paired phones, which the daemon lists in `/tmp/coda-rc.iroh-allow`, and anyone else only while Pair a Phone shows its code ([remote-protocol: Across networks: only paired phones](remote-protocol.md#across-networks-only-paired-phones)); each stream goes to the daemon's loopback port 7721, the phone's key first. Its key is `/mnt/data/coda-rc/iroh.key` (0600, made on first start, never on the card), so the Q2's endpoint id survives restarts and updates; `/tmp/coda-rc.iroh` holds the id and the home relay for the daemon and the Pair a Phone page; `/tmp/q2-iroh.log` its log, kept to 64 KB. The relay is n0's public one (`*.relay.n0.iroh.link`) unless `/mnt/data/coda-rc/relay` names others, one URL a line (an own `iroh-relay` on the Hetzner box, later): write the file and turn Car Remote off and on.
 
 ```sh
-q2-iroh serve [--key FILE] [--forward 127.0.0.1:7720] [--allow ID]... [--relay URL]... [--relay-file FILE] [--info FILE] [--pid FILE] [--nice N]
+q2-iroh serve [--key FILE] [--forward 127.0.0.1:7720 | --forward-named 127.0.0.1:7721] [--allow ID]... [--allow-file FILE]
+              [--open-while FILE]... [--relay URL]... [--relay-file FILE] [--info FILE] [--pid FILE] [--nice N] [--log FILE]
 q2-iroh dial ID [--listen 127.0.0.1:7720] [--relay URL] [--addr IP:PORT]... [--relay-only]   # a laptop's local port to the Q2's coda-rc
 q2-iroh bench ID [--count N] [--size BYTES] [--relay URL] [--relay-only]                     # times echoed messages down one stream
 ```
@@ -135,7 +136,7 @@ On 2026-11-18 under `qemu-mipsel` on this laptop, against the stock rootfs's lib
 
 | | |
 |---|---|
-| Binary, stripped | 5.38 MB (pinned build, 5,383,796 bytes); 2.6 MB of the compressed rootfs |
+| Binary, stripped | 5.33 MB (pinned build, 5,325,056 bytes); 2.6 MB of the compressed rootfs |
 | Resident, idle and registered with the relay | 8.2 MB, steady over a minute |
 | Resident, after 4,000 echoed messages on both paths | 8.6 MB |
 | CPU idle (relay keep-alives) | about 0.6% of one host core under qemu |

@@ -3,6 +3,8 @@ class HeadsetMachine(Machine):
     def __init__(self,owner=1):
         super().__init__(); self.owner=owner; self.playing=True; self.session=42; self.actions=[]; self.saved=0
         self.mock('strstr@GLIBC_2.0')  # guest.c guest_key reads Guest Play's state fields
+        self.mock('snprintf@GLIBC_2.0')  # headset.c avrcp_say's line, which ulog (no-op here) takes
+        self.handlers[payload_syms['ulog']]='hs:ulog'
         self.handlers[syms['mclGetSavePlayStatus']]='hs:saved'
         for name in ('spot_status','radio_status','video_status','spot_session','radio_session','video_session',
                      'spot_set_playing','radio_set_playing','video_set_playing','spot_media','radio_media','video_key'):
@@ -16,7 +18,8 @@ class HeadsetMachine(Machine):
         if not name.startswith('hs:'): return super().hook(u,address,size,unused)
         name=name[3:]; a=u.reg_read(REGS[0]); ret=0
         owner=4 if name.startswith('video') else 3 if name.startswith('radio') else 2 if name.startswith('spot') else 1
-        if name=='saved': ret=self.saved
+        if name=='ulog': pass
+        elif name=='saved': ret=self.saved
         elif name.endswith('_status'): ret=(2 if self.playing else 3) if self.owner==owner else 0
         elif name.endswith('_session'): ret=self.session
         elif name.endswith('_set_playing'): self.playing=bool(a); self.actions.append((owner,'play' if a else 'pause'))
@@ -186,7 +189,8 @@ for owner,page,want in ((2,'spotbrowse_page',[(2,O['KEY_PLAY'])]),(1,'spotify_pa
 GATE=syms['check_forbid_play_no_headset']
 def hp_on(m,**state):
     """m with stock's gate run, not answered, and the switch on; state's bytes are an output, test mode or the switch off."""
-    del m.handlers[GATE]; m.byte(syms['g_block_withoutphone_flag'],1)
+    del m.handlers[GATE]; m.handlers.pop(syms['has_valid_output_device'],None)  # stock's own outputs check too
+    m.byte(syms['g_block_withoutphone_flag'],1)
     for name,v in state.items(): (m.word if name=='bt_showcoding' else m.byte)(syms[name],v)
     return m
 def forbids(patched,ask=0,**state):
@@ -223,6 +227,20 @@ def np_opens(start=1,**state):
     return ret,[x[0] for x in m.calls if x[0] in ('player_start','window_close')],any(x[0]=='widget_lookup' for x in m.calls),len(m.toasts)
 assert np_opens()==(11,['window_close'],False,1) and np_opens(0xff)==(0,[],True,0)
 assert np_opens(g_po_status=1)==np_opens(g_block_withoutphone_flag=0)==(0,['player_start'],True,0); passed()
+# The same question asked before the page exists (output_rule.c ringnav_nav_to): navigator_to_with_context, the way a list
+# row's tap or Centre, a song in Search or Cover Flow and play_folder open Now Playing to start a track. Refused, only
+# stock's message opens; the page with its placeholder title and artist (Shanling's slogan) never does (the owner's
+# report, 2026-11-22: that page slid in under the toast and out again). Now Playing to show what plays (0xff), another
+# page, and a start with an output reach stock's navigator as before. NAV_OPEN is the navigator's opening of a page.
+NAV,NAV_OPEN=syms['navigator_to_with_context'],0x4f52f0
+def nav_opens(page='playing_page',start=1,**state):
+    m=hp_on(QueueMachine(queue=3,pos=1),**state); del m.handlers[NAV]; m.handlers[NAV_OPEN]='nav_open'; ctx=m.alloc(16)
+    for i,v in enumerate((m.get(syms['mcl_pdeqplaylist']),0,start,2)): m.word(ctx+4*i,v)
+    m.call(address=NAV,args=(m.string(page),ctx,0,0),gap=0)
+    return [m.text(c[1]) for c in m.calls if c[0]=='nav_open'],[c[0] for c in m.calls if c[0]=='player_start']
+assert nav_opens()==(['dialog/msginfo_dialog'],[])
+assert nav_opens(start=0xff)==nav_opens(g_po_status=1)==nav_opens(g_block_withoutphone_flag=0)==(['playing_page'],[])
+assert nav_opens('localmusic/playlist_page')==(['localmusic/playlist_page'],[]); passed()
 # Resume on connect (docs/internals.md#resume-on-connect), local music and Spotify. Off (default): a
 # headset's PLAY within CONNECT_HOLD_MS (5 s) of the link starts nothing, a later one plays. On: it plays.
 for owner in (1,2):

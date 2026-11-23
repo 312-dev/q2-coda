@@ -506,6 +506,37 @@ def test_online_a_list_is_handed_to_the_app_and_played_offline_if_it_does_not_an
     assert len(rig.played) == 1
 
 
+@pytest.mark.parametrize('n', [0, 2])
+def test_a_catplay_tells_the_app_download_ahead_for_its_list_from_the_start(rig, fw, n):
+    """The seam test (fix/seam-tests, 2026-11-22): with Download Ahead Off the app still fetched two songs after a
+    list's first, as it had no .ahead for the list's seq until the first song was whole and queued (ahead_poll), and
+    with none it keeps its default of two in list order. The .ahead for the catplay's seq (the .play's, as the app
+    answers with it) is written with the catplay: the setting's n, and no lines, as the firmware's queue holds none
+    of the list yet (the app takes the songs after the first in the catplay's order itself)."""
+    ss = (C.c_int * 2).in_dll(fw.lib, 'stream_state__ss')
+    ss[0], ss[1] = n, 1  # Download Ahead, read
+    rig.online = True
+    app_running(rig)
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1), song_row('s2', 'Two', 'B', 'A', 2, 100, 2)])
+    rig.poll()
+    assert load(rig, queue(rig, [url('s1'), url('s2')]), 0)[0] == 2
+    assert rig.files.files[f'/tmp/q2-{APP}.catplay'].startswith(b'1 0\n')
+    assert rig.files.files.get(f'/tmp/q2-{APP}.ahead') == f'#Q2AHEAD/1\tseq=1\tn={n}\n'.encode()
+
+
+def test_a_catplay_with_a_path_longer_than_twice_its_first_room_is_whole(rig):
+    """catplay_write's buffer, 64 + 160 a song, grows until each path fits: a two-song list whose card path is
+    900 bytes (its first room 384, doubled once 768) is written whole, its length the bytes written."""
+    rig.online = True
+    app_running(rig)
+    rig.write(1, [song_row('s2', 'Streamed', 'B', 'A', 2, 100, 2)])
+    rig.poll()
+    long_path = '/mnt/mmc/Music/' + 'x' * 880 + '.flac'
+    q = queue(rig, [long_path, url('s2')])
+    assert load(rig, q, 0)[0] == 2
+    assert rig.files.files[f'/tmp/q2-{APP}.catplay'] == f'1 0\n{long_path}\n{url("s2")}\n'.encode()
+
+
 def test_shuffle_songs_hands_the_app_every_song_in_a_shuffled_order(rig, fw, mcl):
     """The drive, 2026-11-19: Library > Songs > Shuffle over a library of card and server songs played "rockman",
     "rockstar", "rockstar", "rockstar", and pressed again, "the best is yet to come", "the best of my love", "best
@@ -547,7 +578,7 @@ def test_a_catalogue_app_not_running_is_started_and_handed_the_list_once_it_list
     fw.mock('fw_system', lambda cmd, *_: started.append(C.string_at(cmd)) or 0)
     q = queue(rig, ['/mnt/mmc/Music/a.flac', url('s2'), url('s1')])
     assert load(rig, q, 1)[0] == 2
-    assert started == [f'/bin/sh /mnt/mmc/.{APP}/run'.encode()] and b'catalogue' in rig.files.files['/tmp/q2-addon.caps']
+    assert started == [f'/bin/sh /mnt/mmc/.{APP}/run &'.encode()] and b'catalogue' in rig.files.files['/tmp/q2-addon.caps']
     assert catplay not in rig.files.files and sock not in rig.files.files
     rig.poll(6)  # 6.6 s starting: no catplay yet, and nothing played meanwhile
     assert catplay not in rig.files.files and not rig.played
@@ -639,7 +670,7 @@ def test_a_server_song_pressed_while_smart_wi_fi_has_the_radio_off_waits_for_the
     assert not off.started and not rig.played
     rig.online = True
     off.tick(2)
-    assert off.started == [f'/bin/sh /mnt/mmc/.{APP}/run'.encode()]
+    assert off.started == [f'/bin/sh /mnt/mmc/.{APP}/run &'.encode()]
     rig.files.files[f'/tmp/q2-{APP}'] = b'42'
     rig.files.files[f'/tmp/q2-{APP}.browse.sock'] = b''  # it listens
     off.tick(1)
@@ -724,6 +755,40 @@ def test_likes_and_stars_from_the_server_are_applied_apart(rig, fw):
     assert db.execute('select fileurl from myfav').fetchall() == [('/mnt/mmc/Music/a.flac',)]  # five stars: no like
     rate = fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)
     assert rate(0, ka) == 4 and rate(0, kb) == 3 and rate(0, ks) == 5
+
+
+def test_a_thousand_ratings_from_the_server_are_one_database_write_and_one_table_write(rig, fw):
+    """A first sync of a server's stars and hearts: 1,000 lines in one ratings.in, beside a ratings.out of 1,000 of
+    the Q2's own. They are applied with one connection and one transaction for My Fav, the ratings table written
+    once, and ratings.out read and indexed once, on the UI thread's pass that takes them; the pass's time is
+    printed (test/fw at -O0, for comparing builds, not the Q2's)."""
+    import time
+    sids = [f's{i:04}' for i in range(1000)]
+    rig.write(1, [song_row(sid, f'T {sid}', 'B', 'A', i + 1, 100, i + 1) for i, sid in enumerate(sids)])
+    rig.poll()
+    keys = [listen_key(url(sid)) for sid in sids]
+    lines = ''.join(f'{k:08x}\t{sid}\t' + (f'stars={i % 5 + 1}' if i % 2 else f'like={i % 4 // 2}') + '\t1700000000\n'
+                    for i, (k, sid) in enumerate(zip(keys, sids)))
+    rig.files.files[f'/mnt/mmc/.{APP}/ratings.out'] = ''.join(f'{0x10000 + i:08x}\t\tstars=3\t1700000100\n'
+                                                               for i in range(1000)).encode()
+    rig.files.files[f'/mnt/mmc/.{APP}/ratings.in'] = lines.encode()
+    rig.files.files['/mnt/data/ringnav-ratings'] = b''
+    opens, renames = [], []  # counted here: the call log keeps only the latest calls
+    fw.mock('sqlite3_open', lambda name, db, *_: opens.append(C.string_at(name)) or rig.open(name, db))
+    fw.mock('fw_rename', lambda old, new, *_: renames.append(C.string_at(new)) or rig.rename(old, new))
+    t = time.perf_counter()
+    rig.poll(1)
+    took = time.perf_counter() - t
+    print(f'ratings_in of 1,000 lines: {took * 1000:.0f} ms, {len(opens)} database opens, '
+          f'{renames.count(b"/mnt/data/ringnav-ratings")} ratings table writes')
+    assert f'/mnt/mmc/.{APP}/ratings.in' not in rig.files.files
+    db = sqlite3.connect(rig.tmp/'database.db')
+    liked = {r[0] for r in db.execute('select fileurl from myfav')}
+    assert liked == {url(sid) for i, sid in enumerate(sids) if not i % 2 and i % 4 // 2}
+    rate = fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)
+    assert all(rate(0, k) == i % 5 + 1 for i, k in enumerate(keys) if i % 2)
+    assert len(opens) <= 2  # the songtable lookup's and My Fav's
+    assert renames.count(b'/mnt/data/ringnav-ratings') == 1
 
 
 def test_a_scan_that_ends_while_a_job_runs_is_matched_after_it(rig, fw):
@@ -1818,7 +1883,7 @@ def test_a_signed_in_catalogue_app_starts_once_at_boot(rig, fw):
     """Its catalogue, covers and play reports catch up without its page opened; it idle-exits as before."""
     started = autostart_rig(rig, fw)
     rig.poll(1)
-    assert started == [f'/bin/sh /mnt/mmc/.{APP}/run'.encode()] and b'libsource' in rig.files.files['/tmp/q2-addon.caps']
+    assert started == [f'/bin/sh /mnt/mmc/.{APP}/run &'.encode()] and b'libsource' in rig.files.files['/tmp/q2-addon.caps']
     assert rig.files.files['/tmp/q2-addon.library'] == b'server\n'
     rig.poll(25)  # past the next scans: started once
     assert len(started) == 1
@@ -1853,3 +1918,175 @@ def test_a_server_songs_row_is_the_playing_one_by_its_path(rig, fw, mcl, low):
     assert [playing(record(p)) for p in (url('s1'), url('s2'), copy, '/mnt/mmc/Music/s1.flac')] == [1, 0, 1, 0]
     status[0] = 1
     assert playing(record(url('s1'))) == 0
+
+
+def test_bluetooth_names_a_server_songs_cover_as_its_app_keeps_it(rig, fw):
+    """bt_cover.c: a streamed server song whose album Cover Flow has no copy of gets the cover the app keeps
+    (catalogue_cover), the one Now Playing shows, as the car's handle and file; the handle is that file's key."""
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, album_id='al1')])
+    rig.poll()
+    cover = '/mnt/mmc/.subsonic/covers/al1.jpg'
+    rig.files.files[cover] = b'\xff\xd8'
+    id3 = C.create_string_buffer(0x700)
+    id3[0x504], id3[0x404] = b'B', b'A'  # ID3_ARTIST, ID3_ALBUM
+    stream = b'/mnt/mmc/.subsonic/stream/9f3a/original/0/One [s1].flac'
+    fw.fn('bt_cover_note', None, C.c_char_p, C.c_char_p)(id3, stream)
+    h = (2166136261 * 16777619) & 0xffffffff  # tags_key('', cover) (coverflow.c): the empty artist, then the path
+    for b in cover.encode():
+        h = ((h ^ b) * 16777619) & 0xffffffff
+    h = (h * 16777619) & 0xffffffff
+    assert rig.files.files.get('/tmp/q2-bip.now') == b'%07d\n%s\napp\n%s\n' % (h % 10**7, cover.encode(), stream)
+
+
+def test_an_untitled_server_song_in_my_fav_takes_its_title_from_the_server_library(rig, fw):
+    """My Fav's, Frequent's and Recent's rows are stock's copies of the songs; an untitled one takes the library's
+    title by path and CUE start (nav/library_pages.c fav_titles): a server song's from servertable, a card song's
+    from songtable, asked of the database for those rows alone, no whole-library load."""
+    rig.card_song('/mnt/mmc/Music/a.flac', 'Card Song', 'Me', 'Mine', 1, 200, 1000)
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1), song_row('s2', "It's Two", 'B', 'A', 2, 100, 1)])
+    rig.poll()
+    loads = []
+    fw.mock('getAllMusic', lambda sort, *_: loads.append(sort) or 0)
+    # Records read as the C reads them: a 64-bit P() at REC_PATH takes REC_TITLE's word as its high half, so the
+    # strings sit under 4 GB and an untitled row's title word is 0 (a NULL title, which fav_titles may free)
+    libc = C.CDLL(None)
+    libc.mmap.restype, libc.mmap.argtypes = C.c_void_p, [C.c_void_p, C.c_size_t, C.c_int, C.c_int, C.c_int, C.c_long]
+    libc.munmap.argtypes = [C.c_void_p, C.c_size_t]
+    low = 0x3e000000
+    assert libc.mmap(low, 0x10000, 3, 0x100022, -1, 0) == low  # MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE
+    at, keep = [low], []
+
+    def text(b):
+        C.memmove(at[0], b + b'\0', len(b) + 1)
+        at[0] += len(b) + 16
+        return at[0] - len(b) - 16
+
+    def row(path, title=None):
+        r = C.create_string_buffer(O['REC_SIZE'] + 8)
+        keep.append(r)
+        struct.pack_into('<I', r, O['REC_PATH'], text(path.encode()))
+        if title:
+            struct.pack_into('<I', r, O['REC_TITLE'], text(title))
+        struct.pack_into('<i', r, O['REC_TYPE'], 8)
+        return C.addressof(r)
+
+    rows = [row(url('s1')), row(url('s2')), row('/mnt/mmc/Music/a.flac'), row('/mnt/mmc/Music/gone.flac'),
+            row(url('s1'), b'Kept')]
+    try:
+        fw.fn('navigation__fav_titles', None, C.c_void_p, C.c_int)(rig.rows.new(rows), len(rows))
+        titles = [(lambda v: C.string_at(v) if v else None)(C.c_void_p.from_address(r + O['REC_TITLE']).value) for r in rows]
+        assert titles == [b'One', b"It's Two", b'Card Song', None, b'Kept'] and not loads
+    finally:
+        libc.munmap(low, 0x10000)
+
+
+def test_now_playing_fits_a_server_albums_cover_once_for_all_its_tracks(rig, fw):
+    """A server song's Now Playing art is its app's cover of the album through ffmpeg (coverflow_player_cover, under
+    g_playcover_mutex, where stock's thumbnailer and its parse_cover_mutex cannot go): the fit is kept, so the
+    album's next tracks at that size copy it, no fork; another album, or another size, runs ffmpeg again."""
+    copies = [f'/mnt/mmc/.subsonic/stream/x/s{i}.flac' for i in range(1, 5)]
+    rig.write(1, [song_row(f's{i}', f'T{i}', 'B', 'A', i, 100, i, local=copies[i - 1]) for i in (1, 2, 3)] +
+              [song_row('s4', 'T4', 'B', 'Other', 1, 100, 4, album_id='al2', local=copies[3])])
+    rig.poll()
+    rig.files.files['/mnt/mmc/.subsonic/covers/al1.jpg'] = b'\xff\xd8one'
+    rig.files.files['/mnt/mmc/.subsonic/covers/al2.jpg'] = b'\xff\xd8two'
+    fw.mock('toolsGetExternCover', lambda *_: 0)
+    forks, dst = [], '/tmp/externpic.jpg'
+    fw.mock('fw_fork', lambda *_: forks.append(1) or 4242)
+    def waitpid(pid, status, *_):  # ffmpeg's run: its picture at dst.ff, the cover it was asked for
+        C.c_int.from_address(status).value = 0
+        rig.files.files[dst + '.ff'] = b'fit %d' % len(forks)
+        return pid
+    fw.mock('fw_waitpid', waitpid)
+    player = fw.fn('coverflow_player_cover', C.c_int, C.c_char_p, C.c_char_p, C.c_int, C.c_int)
+    for c in copies[:3]:
+        assert player(c.encode(), dst.encode(), 300, 300) == 1 and rig.files.files[dst] == b'fit 1'
+    assert len(forks) == 1  # three tracks of al1: one ffmpeg run
+    assert player(copies[3].encode(), dst.encode(), 300, 300) == 1 and len(forks) == 2  # al2's own
+    assert player(copies[0].encode(), dst.encode(), 300, 300) == 1 and len(forks) == 3  # one album kept
+    assert player(copies[1].encode(), dst.encode(), 166, 166) == 1 and len(forks) == 4  # another size
+
+
+def test_dark_and_idle_the_catalogue_poll_reads_the_app_s_files_every_ten_seconds(rig, fw):
+    """The owner's case, a server signed in and indexed: with the screen dark, nothing playing and no catplay
+    waiting, catalogue_poll looked at the app's state, catalogue.avail, catalogue.tsv (twice) and ratings.in every
+    second. It now does once each CAT_DARK_MS; lit, or playing, still each second. Counted over a dark minute."""
+    rig.write(1, [song_row('s1', 'A', 'B', 'C', 1, 100, 1)])
+    rig.poll()
+    opened, looked = [], []
+    files = rig.files
+    fw.mock('fw_fopen', lambda path, mode, *_: opened.append(C.string_at(path)) or files.fopen(path, mode))
+    fw.mock('fw_access', lambda path, mode, *_: looked.append(C.string_at(path)) or rig.access(path, mode))
+    poll = fw.fn('catalogue_poll', None)
+
+    def minute():
+        opened.clear(), looked.clear()
+        for _ in range(60):
+            rig.now += 1000
+            poll()
+        return len(opened) + len(looked)
+    fw.var('g_backlight_status', C.c_ubyte).value = 0
+    dark = minute()
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    lit = minute()
+    print(f'catalogue_poll, a minute: dark and idle {dark} opens and accesses, lit {lit}')
+    assert dark <= lit // 8
+    fw.var('g_backlight_status', C.c_ubyte).value = 0
+    fw.mock('mclGetPlayStatus', lambda *_: 2)  # playing: each second, as lit
+    assert minute() >= lit // 2
+
+
+def test_serverall_is_looked_up_by_fileurl_through_an_index(rig, fw):
+    """Up Next's rows (catalogue_copy_tags), Now Playing's info (catalogue_np_info) and fav_set read serverall by
+    fileurl: an index makes each a search, where the plan was a scan of every row. A catalogue made before the
+    index gets it from the next job, which a boot's first poll starts."""
+    rig.write(1, [song_row(f's{i}', f'T{i}', 'B', 'A', i + 1, 100, i + 1) for i in range(20)])
+    rig.poll()
+    plan = lambda: ' '.join(r[3] for r in rig.query(
+        f"explain query plan select name,album,songer,albumsonger from cat.serverall where fileurl='{url('s3')}'"))
+    print('serverall by fileurl:', plan())
+    assert 'USING INDEX' in plan() and 'SCAN' not in plan()
+    db = sqlite3.connect(rig.tmp/'catalogue.db')
+    db.execute('drop index serverall_url')
+    db.commit()
+    db.close()
+    assert 'SCAN' in plan()  # a file from before the index
+    rig.write(2, [song_row(f's{i}', f'T{i}', 'B', 'A', i + 1, 100, i + 1) for i in range(21)])
+    rig.poll()
+    assert 'USING INDEX' in plan()
+
+
+def test_an_offline_copy_is_found_by_its_path_s_hash(rig, fw):
+    """cat_copy_of walked every index entry with a strcmp per offline copy; it is now a binary search on the copy
+    path's hash, its time per lookup printed (9,199 rows, 2,000 of them with an offline copy)."""
+    import time
+    n = 9199
+    rig.write(1, [song_row(f's{i:05}', f'T{i}', 'B', 'A', i + 1, 100, i + 1,
+                           local=f'/mnt/mmc/.subsonic/stream/acct/q/{i % 16:x}/T{i} [s{i:05}].flac' if i < 2000 else '')
+                  for i in range(n)])
+    rig.poll()
+    seconds = fw.fn('catalogue_copy_seconds', C.c_int, C.c_char_p)
+    paths = [f'/mnt/mmc/.subsonic/stream/acct/q/{i % 16:x}/T{i} [s{i:05}].flac'.encode() for i in range(0, 2000, 7)]
+    t = time.perf_counter()
+    got = [seconds(p) for p in paths]
+    took = (time.perf_counter() - t) / len(paths)
+    print(f'cat_copy_of: {took * 1e6:.1f} us a lookup')
+    assert got == [100] * len(paths)
+    assert seconds(b'/mnt/mmc/.subsonic/stream/acct/q/0/none.flac') == -1
+
+
+def test_a_catalogue_avail_line_naming_the_copy_a_row_has_adds_no_string(rig, fw):
+    """catalogue.avail is appended to as the app syncs, and a song synced again is named again: a line naming the
+    copy its row already has adds nothing to the index's strings, which grew by every such line until the next
+    import."""
+    rig.write(1, [song_row(f's{i}', f'T{i}', 'B', 'A', i + 1, 100, i + 1) for i in range(200)])
+    rig.poll()
+    avail = f'/mnt/mmc/.{APP}/catalogue.avail'
+    lines = ''.join(f's{i}\t/mnt/mmc/.subsonic/stream/a/q/0/T{i} [s{i}].flac\n' for i in range(200)).encode()
+    rig.files.files[avail] = lines
+    rig.poll(1)
+    once = cat_head(fw).ix.len
+    rig.files.files[avail] = lines * 3  # synced again, twice
+    rig.poll(1)
+    print('index strings: after the copies', once, 'after naming them twice more', cat_head(fw).ix.len)
+    assert cat_head(fw).ix.len == once

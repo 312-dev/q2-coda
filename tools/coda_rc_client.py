@@ -41,7 +41,7 @@ T = dict(HELLO=0x01, HELLO_RESP=0x02, PAIR_START=0x03, PAIR_CHALLENGE=0x04, PAIR
          AUTH=0x07, AUTH_RESP=0x08, ERROR=0x0F, SUBSCRIBE=0x10, STATE=0x11, GET_STATE=0x12, TRANSPORT=0x20, ACK=0x21,
          SET_MODE=0x22, RATE=0x24, BROWSE=0x30, BROWSE_RESP=0x31, SEARCH=0x32, SEARCH_RESP=0x33, PLAY=0x40,
          GET_QUEUE=0x42, QUEUE_RESP=0x43, PLAY_QUEUE_ITEM=0x44, START_RADIO=0x46, GET_COVER=0x50, COVER=0x51, GET_REMOTE=0x60,
-         REMOTE_INFO=0x61, PING=0x7E, PONG=0x7F)
+         REMOTE_INFO=0x61, REGISTER_REMOTE=0x62, PING=0x7E, PONG=0x7F)
 ERRORS = {1: "UNSUPPORTED", 2: "UNAUTHORIZED", 3: "BAD_REQUEST", 4: "NOT_FOUND", 5: "BUSY", 6: "PAIRING_FAILED",
           7: "PAIRING_LOCKED", 8: "TOO_LARGE", 9: "INTERNAL", 10: "VERSION", 11: "UNAVAILABLE", 12: "PAIRING_CANCELLED",
           13: "PAIRING_FULL"}
@@ -143,7 +143,8 @@ def state(raw):
                               "hearts": one(n, 11, 0), "rateable": bool(one(n, 12, 0)),
                               "buffering": bool(one(n, 13, 0)), "buffered_bytes": one(n, 14, 0),
                               "total_bytes": one(n, 15, 0), "buffered_ms": one(n, 16, 0),
-                              "radio": bool(one(n, 17, 0)), "notice": text(n, 18), "notice_id": one(n, 19, 0)}
+                              "radio": bool(one(n, 17, 0)), "notice": text(n, 18), "notice_id": one(n, 19, 0),
+                              "album_id": text(n, 20), "artist_id": text(n, 21)}
     if 2 in m:
         p = decode(m[2][0])
         out["position"] = {"position_ms": one(p, 1, 0), "at_ms": one(p, 2, 0)}

@@ -636,7 +636,7 @@ def test_playback_has_the_sleep_timer_and_leaves_the_library_s_rows(fw):
     page = Pages(fw, ui)
     page.open('playset/playset_page')
     texts = page.texts()
-    assert texts == ['stock_2', 'Library', 'stock_3', 'stock_7', 'Crossfade', 'Duration', 'stock_6',
+    assert texts == ['stock_2', 'Library', 'stock_3', 'stock_7', 'Smart Crossfade', 'stock_6',
                      'Resume Songs: 30 min', 'stock_8', 'Sleep Timer', 'Volume: 0', 'Max Volume', 'Default Volume',
                      'Level', 'stock_0', 'stock_9', 'Balance', 'stock_10', 'Mono Audio', 'Swap L/R', 'stock_1',
                      'stock_4', 'stock_5']  # EQ (stock_2), then the Library
@@ -749,7 +749,7 @@ def test_controls_rows_carry_their_captions(fw):
     fw.fn('navigation__set_open', C.c_int, C.c_void_p, C.c_void_p)(4, None)
     assert 'Volume Guard' not in titles(page.view())  # retired: the wheel's volume is playback screens' alone
     assert captions(fw, page.view()) == {'Hold Return': 'What holding Return opens: Now Playing or Home',
-                                         'Wake': 'Center presses it takes to wake the screen'}
+                                         'Wake': 'Any Button: every button wakes it. Double Press: Center twice'}
 
 
 # Power's Boot to row: /mnt/data/boot-target, which the boot script reads with $(cat ...).
@@ -2618,6 +2618,23 @@ class Library:
         """Stock's query name: rows into the staging deque, their count back."""
         self.fw.mock(name, lambda *_: self.staging().extend(rows) or len(rows))
 
+    def database(self, rows):
+        """The library's database as era_sql opens it: a select answers rows, (fileurl, time, name) each, through the
+        row callback; the queries asked are kept."""
+        self.asked = []
+        row_cb = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_int, C.c_void_p, C.c_void_p)
+        def exec_(db, sql, cb, ctx, *_):
+            q = C.string_at(sql).decode()
+            if not q.startswith('select') or not cb:
+                return 0
+            self.asked.append(q)
+            for row in rows:
+                values = (C.c_char_p * 3)(*[None if v is None else str(v).encode() for v in row])
+                row_cb(cb)(ctx, 3, C.addressof(values), None)
+            return 0
+        self.fw.mock('sqlite3_open', lambda path, db, *_: setattr(C.c_void_p.from_address(db), 'value', 0x5d) or 0)
+        self.fw.mock('sqlite3_exec', exec_)
+
     def tasks(self, *names):
         """Cover tasks as albumcoverinfo_init leaves them: both art flags set, the name a heap copy at +4."""
         strdup = self.fw.fn('strdup', C.c_void_p, C.c_char_p)
@@ -2977,30 +2994,20 @@ def test_stored_lists_hide_discovery_and_take_the_librarys_titles(fw, records, c
               records.song(path=b'/mnt/mmc/Music/b.cue', cue=60),  # played from Folder: no title
               records.song(title=b'Hidden', path=b'/mnt/mmc/Discovery/c.flac'),
               records.song(path=b'/mnt/mmc/Music/d.flac')]
-    library = [records.song(title=b'Track 1', path=b'/mnt/mmc/Music/b.cue', cue=0),
-               records.song(title=b'Track 2', path=b'/mnt/mmc/Music/b.cue', cue=60),
-               records.song(title=b'Dee', path=b'/mnt/mmc/Music/d.flac')]
-    lib.query('getAllMusic', library)
+    lib.database([('/mnt/mmc/Music/b.cue', 0, 'Track 1'), ('/mnt/mmc/Music/b.cue', 60, 'Track 2'),
+                  ('/mnt/mmc/Music/d.flac', 0, 'Dee')])
     load = Localclass(fw, lib, played)
     assert load(cls) == 3 and load.shown() == [b'Kept', b'Track 2', b'Dee']
-    assert [a[0] for _, a in fw.calls('getAllMusic')] == [3]  # the library once, unsorted
+    assert not fw.calls('getAllMusic')  # the untitled rows' paths asked of the database, not the library loaded
+    assert lib.asked == ["select fileurl,time,name from songtable where fileurl in "
+                         "('/mnt/mmc/Music/b.cue','/mnt/mmc/Music/d.flac')"]
 
 
-def test_a_cue_track_takes_its_own_title_where_its_siblings_slot_comes_first(fw, records):
+def test_a_cue_track_takes_its_own_title_not_its_siblings(fw, records):
     lib = Library(fw)
     path = b'/mnt/mmc/Music/b.cue'
-    first, second = records.song(title=b'Track 1', path=path), records.song(title=b'Track 2', path=path)
-    # setup: a CUE start for the second whose key (the C's own listen_key) lands in the first's slot, the index of
-    # two songs having 4 (at most half full)
-    listen_key = fw.fn('listen_key', C.c_uint, C.c_void_p)
-    start, taken = C.c_int.from_address(second + O['REC_CUE_START']), listen_key(first)
-    for cue in range(1, 4096):
-        start.value = cue
-        if listen_key(second) & 3 == taken & 3 and listen_key(second) != taken:
-            break
-    assert listen_key(second) & 3 == taken & 3 and listen_key(second) != taken, 'no CUE start shares the first slot'
-    lib.query('getAllMusic', [first, second])
-    load = Localclass(fw, lib, [records.song(path=path, cue=start.value)])
+    lib.database([(path.decode(), 0, 'Track 1'), (path.decode(), 60, 'Track 2')])
+    load = Localclass(fw, lib, [records.song(path=path, cue=60)])
     assert load(0xf007) == 1 and load.shown() == [b'Track 2']
 
 
@@ -3010,7 +3017,8 @@ def test_a_stored_list_with_nothing_to_look_up_never_reads_the_library(fw, recor
     # every song titled, but for a folder row, or a song with no path to find it by
     other = records.song(name=b'b.flac', kind=4 if row == 'folder' else 8)
     load = Localclass(fw, lib, [records.song(title=b'A', path=b'/mnt/mmc/a.flac'), other])
-    assert load(0xf00a) == 2 and not fw.calls('getAllMusic')
+    lib.database([])
+    assert load(0xf00a) == 2 and not fw.calls('getAllMusic') and not lib.asked
 
 
 def test_an_untagged_song_with_no_path_reads_its_name_as_stored(fw, records):

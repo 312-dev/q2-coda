@@ -716,9 +716,14 @@ def test_q2_wait_will_not_wait_without_a_limit():
 
 # --- q2: the registry, the stop ---
 
+# What q2 reads of the machine that a test pins, so its outcome is the same run from a session's shell or detached
+# (setsid, the merge queue's service): no process name counts as a Claude session, and the rig is the test's marker.
+PINNED = {'Q2_SESSION_NAMES': 'q2-test-no-session', 'Q2_KEEP': f'q2-test-rig-{os.getpid()}'}
+
+
 def q2(tmp_path, *args, **env):
     e = {**os.environ, 'Q2_QUEUE_DIR': str(tmp_path/'q'), 'Q2_HEAVY_LOCKDIR': str(tmp_path/'heavy'),
-         'Q2_ROOTS': str(tmp_path/'work'), **env}
+         'Q2_ROOTS': str(tmp_path/'work'), **PINNED, **env}
     return subprocess.run([sys.executable, str(CI/'q2'), *args], capture_output=True, text=True, env=e)
 
 
@@ -771,27 +776,41 @@ def gone(pid, seconds=5):
 
 
 def test_stop_all_ends_q2_processes_and_nothing_else(tmp_path):
+    """stop-all scans every process of this user on the machine and takes those of the roots it is given (Q2_ROOTS,
+    here this test's own folder), so another agent's q2 work is never in reach: a look-alike neighbour, the same
+    script in another folder, is not among what it would stop, nor stopped. What it reads of the test's ancestors is
+    pinned (PINNED): the rig it keeps is matched by Q2_KEEP against a process and each of its ancestors, and the
+    default (emu_pool.py, dhu, Xvfb and the pool's folders) also matched the shell the test was started from when that
+    shell's command named tools/ci/emu_pool.py, keeping the test's own processes; and a process with a Claude session
+    among its ancestors is not listed as left alone, so the rig was listed run detached and not run from a session's
+    shell (2026-11-22). The assertions are on the lines of what it would stop (`proc`), not on any mention."""
     work = tmp_path/'work'
     (work/'tools/ci').mkdir(parents=True)
     script = work/'tools/ci/fake_suite.sh'
     script.write_text('sleep 60 & wait\n')
     other = tmp_path/'elsewhere'
-    other.mkdir()
+    (other/'tools/ci').mkdir(parents=True)
+    neighbour_script = other/'tools/ci/fake_suite.sh'
+    neighbour_script.write_text('sleep 60 & wait\n')
+    keep = f'q2-test-rig-{os.getpid()}-{tmp_path.name}'
     ours = subprocess.Popen(['bash', str(script)], cwd=work, start_new_session=True)
-    rig = subprocess.Popen(['bash', '-c', f'exec -a q2-emu-pool2-viewer bash {script}'], cwd=work, start_new_session=True)
+    rig = subprocess.Popen(['bash', '-c', f'exec -a {keep} bash {script}'], cwd=work, start_new_session=True)
     bystander = subprocess.Popen(['sleep', '60'], cwd=other, start_new_session=True)
+    neighbour = subprocess.Popen(['bash', str(neighbour_script)], cwd=other, start_new_session=True)
     try:
         time.sleep(0.3)
-        listed = q2(tmp_path, 'stop-all')
+        listed = q2(tmp_path, 'stop-all', Q2_KEEP=keep)
         assert listed.returncode == 0 and f'proc  {ours.pid}' in listed.stdout and 'nothing was touched' in listed.stdout
+        assert f'proc  {neighbour.pid}' not in listed.stdout and f'proc  {rig.pid}' not in listed.stdout
         assert ours.poll() is None  # a listing stops nothing
-        done = q2(tmp_path, 'stop-all', '--yes')
+        done = q2(tmp_path, 'stop-all', '--yes', Q2_KEEP=keep)
         assert done.returncode == 0 and 'nothing q2 is left running' in done.stdout, done.stdout + done.stderr
         assert gone(ours.pid)
-        assert rig.poll() is None and bystander.poll() is None  # the user's rig and what is not q2's are left alone
+        # the rig, what is not q2's and another root's look-alike are left alone
+        assert rig.poll() is None and bystander.poll() is None and neighbour.poll() is None
         assert (tmp_path/'q/STOP').exists()
     finally:
-        for p in (ours, rig, bystander):
+        for p in (ours, rig, bystander, neighbour):
             with __import__('contextlib').suppress(ProcessLookupError):
                 os.killpg(p.pid, 9)
             p.wait()
@@ -826,5 +845,5 @@ def test_q2_heavy_records_its_job_and_stops_it_at_the_deadline(tmp_path):
     assert 'class=queue' in record.read_text()
     done = subprocess.run([sys.executable, str(CI/'q2'), 'stop-all', '--yes'], capture_output=True, text=True,
                           env={**os.environ, 'Q2_QUEUE_DIR': str(tmp_path/'q'), 'Q2_HEAVY_LOCKDIR': str(tmp_path),
-                               'Q2_ROOTS': str(tmp_path/'none')})
+                               'Q2_ROOTS': str(tmp_path/'none'), **PINNED})
     assert job.wait(15) != 0 and 'nothing q2 is left running' in done.stdout, done.stdout

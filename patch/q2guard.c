@@ -13,10 +13,14 @@
  * the state file's bt= (docs/internals.md#bluetooth-controller-watchdog). bt_sleep also listens to the
  * kernel's Bluetooth management channel and logs each device's connect, drop, failure, pairing and
  * Forget, and each discovery with the devices it found, to the unified log
- * (docs/internals.md#bluetooth-devices).
+ * (docs/internals.md#bluetooth-devices), and to the system bus for each A2DP transport BlueZ sets
+ * up, starts, suspends and closes (q2dbus.c).
  * It also writes the unified log, q2-log, beside them (q2log.h, docs/internals.md#unified-log): each
  * tick it reads what demo's stderr file and the kernel's /dev/kmsg gained, and adds its own notes;
  * demo (ulog.c ulog_end) and S90play ask for a snapshot through /tmp/q2guard.snap and a SIGUSR1.
+ * Every Bluetooth line of it is copied into the Bluetooth event log, q2-btev, kept longer
+ * (docs/internals.md#bluetooth-event-log): flushed with the others, and at least every
+ * BTEV_FLUSH_MS while it holds a line.
  * It writes nothing to /mnt/data. No MIPS sysroot: glibc 2.28's declarations, as boot.c. */
 #include "q2bt.h"
 #include "q2log.h"
@@ -33,6 +37,7 @@
 #define SNAP "/tmp/q2guard.snap" /* a request: why, or "flush"; removed once answered (ulog.c, S90play) */
 #define DEMO_ERR "/tmp/q2-demo.err" /* demo's stderr (tools/build.py BOOT_HOOK) */
 #define DEMO_LOG "/tmp/q2-demo.log" /* --dev: demo's stdout and stderr (tools/build.py LOG_HOOK) */
+#define CRC_LOG "/tmp/coda-rc.log"  /* coda-rc's own (patch/coda_rc.c crc_log) */
 #define KMSG "/dev/kmsg"
 #define KMSG_MAX 64 /* records read in one tick; the rest wait for the next */
 #define WARN_GAP_MS 30000 /* an E or W line flushes at once; more of them, at most this often */
@@ -318,15 +323,18 @@ static void sample(struct heat_sample *s, int busy, int temp, int raw, int die, 
  * The watching process keeps every line in card_store.c's ring: card_mounted is false there, so
  * card_log_append only holds. The child is forked when card_ready and says the card is up, so its
  * card_log_flush appends the rings to the files; the watcher then drops what the child was given. */
-static card_log heat, btlog, ulog; /* q2-heat, q2bt.c's q2-bt and the unified q2-log */
+static card_log heat, btlog, ulog, btev; /* q2-heat, q2bt.c's q2-bt, the unified q2-log, q2-btev */
 static int in_writer;        /* true in the child */
 int card_mounted(void) { return in_writer; }
 static struct {
     pid_t pid;
-    unsigned len, dropped, bt_len, bt_dropped, u_len, u_dropped; /* what the child was given of each */
+    unsigned len, dropped, bt_len, bt_dropped, u_len, u_dropped, e_len, e_dropped; /* what the child was given of each */
     int done; /* the last flush ended (written, failed or given up) */
 } fl;
-static void flush_start(void) {
+/* The writer handed the logs. all: every line (a final flush); else the Bluetooth log's lines
+ * older than BTEV_HOLD_MS alone, so a line read late from demo's file still goes in before later
+ * ones (q2log_core.c insert_sorted), and those bytes frozen until the writer is reaped. */
+static void flush_start(int all) {
     if (fl.pid > 0) return;
     ulog_repeats(&ulog); /* a run of one line still being counted: its count goes too */
     if (!card_ready()) {
@@ -336,12 +344,19 @@ static void flush_start(void) {
     fl.len = heat.len, fl.dropped = heat.dropped, fl.done = 0;
     fl.bt_len = btlog.len, fl.bt_dropped = btlog.dropped;
     fl.u_len = ulog.len, fl.u_dropped = ulog.dropped;
+    unsigned now = now_ms();
+    fl.e_len = all || now < BTEV_HOLD_MS ? btev.len : ulog_settled(&btev, now - BTEV_HOLD_MS);
+    fl.e_dropped = btev.dropped;
     pid_t pid = fork();
-    if (!pid)
-        in_writer = 1, _exit((heat_flush(&heat, LOGS) ? 1 : 0) | (bt_flush(&btlog, LOGS) ? 2 : 0) |
-                             (ulog_flush(&ulog, LOGS, "q2-log", ULOG_FILE_MAX, ULOG_FILES) ? 4 : 0));
+    if (!pid) {
+        in_writer = 1, btev.len = fl.e_len; /* the child's copy: what it was handed of the Bluetooth log */
+        _exit((heat_flush(&heat, LOGS) ? 1 : 0) | (bt_flush(&btlog, LOGS) ? 2 : 0) |
+              (ulog_flush(&ulog, LOGS, "q2-log", ULOG_FILE_MAX, ULOG_FILES) ? 4 : 0) |
+              (ulog_flush(&btev, LOGS, "q2-btev", BTEV_FILE_MAX, BTEV_FILES) ? 8 : 0));
+    }
     fl.pid = pid;
     if (pid < 0) fl.pid = 0, fl.done = 1;
+    else ulog_bt_freeze(fl.e_len, fl.e_dropped);
 }
 /* what the child wrote of l dropped from its ring: not if the ring moved since (twice beats lost) */
 static void written(card_log *l, unsigned len, unsigned dropped) {
@@ -354,10 +369,12 @@ static void flush_reap(void) {
     int status = 0;
     if (fl.pid <= 0 || waitpid(fl.pid, &status, WNOHANG) != fl.pid) return;
     fl.pid = 0, fl.done = 1;
-    int failed = status & 0x7f ? 7 : status >> 8 & 0xff; /* killed: none; else its exit's bits */
+    ulog_bt_freeze(0, 0);
+    int failed = status & 0x7f ? 15 : status >> 8 & 0xff; /* killed: none; else its exit's bits */
     if (!(failed & 1)) written(&heat, fl.len, fl.dropped);
     if (!(failed & 2)) written(&btlog, fl.bt_len, fl.bt_dropped);
     if (!(failed & 4)) written(&ulog, fl.u_len, fl.u_dropped);
+    if (!(failed & 8)) written(&btev, fl.e_len, fl.e_dropped);
 }
 
 /* ---- demo ---- */
@@ -390,7 +407,7 @@ static void answers(int *ack, int *cancel, char *b, int size) {
 #define FINAL_MS 3000
 static void flush_final(unsigned deadline) {
     while (fl.pid > 0 && (int)(deadline - now_ms()) > 0) usleep(100000), flush_reap();
-    flush_start();
+    flush_start(1);
     unsigned end = now_ms() + FINAL_MS;
     if ((int)(end - deadline) > 0) end = deadline;
     while (fl.pid > 0 && (int)(end - now_ms()) > 0) usleep(100000), flush_reap();
@@ -415,7 +432,7 @@ static void on_signal(int sig) {
     guard_woke = 1;
     if (sig == SIGTERM) termed = 1;
 }
-static struct ulog_tail err;
+static struct ulog_tail err, crc; /* demo's stderr; coda-rc's own log, whose ble: lines q2-btev keeps too */
 static struct ulog_apps apps; /* the card apps' own logs, /tmp/q2-<id>.log */
 static int kmsg = -1;
 /* What demo's stderr file, the card apps' logs and the kernel gained since the last tick: 2 when a
@@ -423,6 +440,7 @@ static int kmsg = -1;
 static int feeds(void) {
     long wall = time(0);
     int got = ulog_tail(&err, &ulog, wall, now_ms());
+    got |= ulog_tail(&crc, &ulog, wall, now_ms());
     got |= ulog_apps(&apps, &ulog, "/tmp", wall, now_ms());
     char rec[1024];
     for (int k = 0; kmsg >= 0 && k < KMSG_MAX; ++k) {
@@ -456,8 +474,9 @@ static void request(void) {
 }
 
 /* q2guard --dump (docs/adb.md): the running q2guard asked to write out what it holds (a "flush"
- * request, answered within FINAL_MS twice over), then q2-log.3 to .0 on stdout, oldest first. */
-static int dump(void) {
+ * request, answered within FINAL_MS twice over), then name.3 to .0 on stdout, oldest first: q2-log,
+ * or q2-btev for --dump-bt. */
+static int dump(const char *name, int files) {
     char b[4096];
     int fd = open(SNAP, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
     if (fd >= 0) write(fd, "flush\n", 6), close(fd);
@@ -465,8 +484,8 @@ static int dump(void) {
     if (pid > 1 && !kill(pid, SIGUSR1))
         for (int waited = 0; waited < 2 * FINAL_MS && slurp(SNAP, b, 8) >= 0; waited += 100) usleep(100000);
     unlink(SNAP);
-    for (int k = ULOG_FILES - 1; k >= 0; --k) {
-        snprintf(b, sizeof b, LOGS "/q2-log.%d", k);
+    for (int k = files - 1; k >= 0; --k) {
+        snprintf(b, sizeof b, LOGS "/%s.%d", name, k);
         if ((fd = open(b, O_RDONLY | O_CLOEXEC)) < 0) continue;
         for (int n; (n = (int)read(fd, b, sizeof b)) > 0;) write(1, b, n);
         close(fd);
@@ -476,7 +495,8 @@ static int dump(void) {
 
 int main(int argc, char **argv) {
     static struct guard g;
-    if (argc > 1 && !strcmp(argv[1], "--dump")) return dump();
+    if (argc > 1 && !strcmp(argv[1], "--dump")) return dump("q2-log", ULOG_FILES);
+    if (argc > 1 && !strcmp(argv[1], "--dump-bt")) return dump("q2-btev", BTEV_FILES);
     struct cpu cpu5 = { 0, 0 }, cpu_line = { 0, 0 };
     int lock = open(LOCK, O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
     if (lock >= 0 && flock(lock, LOCK_EX | LOCK_NB)) return 1; /* another is watching */
@@ -485,6 +505,7 @@ int main(int argc, char **argv) {
     signal(SIGUSR1, on_signal), signal(SIGTERM, on_signal);
     card_log_at(&heat, LOGS "/q2-heat.0", HEAT_RAM);
     card_log_at(&ulog, LOGS "/q2-log.0", ULOG_RAM);
+    ulog_bt_to(&ulog, card_log_at(&btev, LOGS "/q2-btev.0", BTEV_RAM));
     bt_init(card_log_at(&btlog, LOGS "/q2-bt.0", BT_RAM), &ulog);
     dev_build = argc > 1 && !strcmp(argv[1], "--dev");
     argv += dev_build, argc -= dev_build;
@@ -497,6 +518,8 @@ int main(int argc, char **argv) {
     ulog_add(&ulog, time(0), now_ms(), again || !strcmp(last, "clean") ? 'I' : 'W', "guard", b);
     /* a q2guard started again reads only what is new: the one before it read the rest */
     ulog_tail_at(&err, dev_build ? DEMO_LOG : DEMO_ERR, again);
+    ulog_tail_at(&crc, CRC_LOG, again);
+    crc.src = "coda-rc";
     apps.from_end = again;
     kmsg = open(KMSG, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
     if (kmsg < 0)
@@ -515,7 +538,7 @@ int main(int argc, char **argv) {
     const char *snap_why = 0; /* a heat event's snapshot, taken once this tick's heat line is made */
     s.cable = -1;
     pmic_open();
-    flush_start();
+    flush_start(0);
     for (;;) {
         /* a tick every GUARD_TICK_MS, the PMIC's window included; the Bluetooth link sampled each second
          * through both while it streams (bt_sleep) */
@@ -602,9 +625,10 @@ int main(int argc, char **argv) {
         if (o.kill_player) note("NOANSWER demo: player stopped"), kill_players();
         if (o.flush || (line_due && o.event != EV_NONE) || bt_flush_due() ||
             (warn_due && now - last_warn >= WARN_GAP_MS) ||
+            ((btev.len || btev.dropped) && now - last_flush >= BTEV_FLUSH_MS) ||
             now - last_flush >= (unsigned)flush_every(fast, bt_streaming())) {
             if (g.off && !card_ready()) note("CARD not mounted: log in RAM only");
-            flush_start();
+            flush_start(0);
             if (warn_due) last_warn = now, warn_due = 0;
             last_flush = now;
         }

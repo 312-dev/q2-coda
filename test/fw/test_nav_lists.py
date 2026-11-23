@@ -16,6 +16,7 @@ from conftest import NAVIGATION_SOURCE, O, Deques, Files, block, claim, in_fork,
 from test_coverflow import COVERS, TRACKS, Home, Rec, cf, deque_of  # coverflow.c's home struct, its page and an album
 from test_nav_display_library import Ple  # playlists.c's editor state
 from test_navigation import Config
+from test_tilt import Tilt  # tilt.c's state
 from test_corners import art as art_py  # tools/art.py: corner_cover, the corners' coverage
 
 W_PARENT, W_EMITTER = O['W_PARENT'], O['W_EMITTER']
@@ -288,6 +289,31 @@ def test_a_fresh_list_takes_its_first_whole_row_then_the_tick_moves_on(fw, ui):
     assert page.selected == 5 and page.offset == ROW_H * 4  # OLED's whole rows: row 4 lands on the top
 
 
+@pytest.mark.parametrize('row', [5, 39])  # mid-list, and the last row: the tick meets the end
+def test_ringnav_takes_the_wheels_posted_tick_as_the_row_steps(fw, ui, row):
+    """playback.c wheel_part holds a whole tick for one posted and not yet taken, so the bar leans full until the
+    step (tilt.c); the tick's release through ringnav takes it, and the lean the step paints with is the carry again
+    (0 here), or full against the list's end (tilt_end): never the bare carry for a frame on either row."""
+    page = Page(ui, titles(40))
+    paint(fw, page)
+    for _ in range(row):
+        key(fw, ui, KEY_NEXT, ui.now + SLOW)
+    pending, held = fw.var('playback__wh_pending', C.c_int), fw.var('wheel_held', C.c_int)
+    held.value, pending.value = 1, 1
+    fw.var('playback__wh_pending_dir', C.c_int).value = 1
+    fw.var('playback__wh_units', C.c_int).value = 448
+    fw.var('playback__wh_tick_at', C.c_uint).value = ui.now
+    part, tilt = fw.fn('wheel_part', C.c_int), fw.var('tilt__tilt', Tilt)
+    tilt.w, tilt.win = page.view.at, ui.top.at  # the bar tilt_bar last painted: this list's, in the top window
+    fw.fn('tilt_poll', None)()  # the UI loop's pass before the key
+    assert part() == 256 and tilt.p == 256
+    key(fw, ui, KEY_NEXT, ui.now + 1)
+    assert pending.value == 0 and part() == 0
+    assert page.selected == min(row + 1, 39)
+    assert tilt.p == (256 if row == 39 else 0)  # what the step's paint shows, before the next pass
+    held.value = 0
+
+
 def test_ticks_scroll_only_as_far_as_the_row_needs(fw, ui):
     page = Page(ui, titles(40))
     paint(fw, page)
@@ -498,6 +524,131 @@ def test_home_s_list_rests_on_seven_rows_and_scrolls_the_rest(fw, ui, st, hidden
     assert [o for _, o in seen] == [0] * 6 + [ROW_H, 2 * ROW_H][:len(seen) - 6]
     assert seen[-1] == (8 - len(hidden), end)
     assert all(0 <= ROW_H * s - o and ROW_H * (s + 1) - o <= 7 * ROW_H for s, o in seen)  # inside the rest
+
+
+HOME_ROW, SPLIT_TOP, FULL_TOP = 32, 40, 58  # OLED's row pitch; Split's list top (coverflow.c HOME_SPLIT_TOP), Full's
+CLOCK = (62, 17, 188, 28)  # the status row's clock in Split (x0, y0, x1, y1): its text 62 px in, its figures on rows 17 to 27
+
+
+def split_home(ui, fw, rows, top=SPLIT_TOP, width=188):
+    """Home as a Q2 shows it: the window the whole screen, the main list from top down to the screen's foot, rows
+    HOME_ROW high (Paused or Playing first while a song is loaded: eight; seven without), and the status row."""
+    theme(fw)
+    win = ui.widget('window', ui.wm, (0, 0, 375, 320), name='home_page')
+    lst = ui.widget('list_view', win, (0, top, width, 320 - top))
+    view = ui.widget('scroll_view', lst, (0, 0, width, 320 - top))
+    view.byte(O['VIEW_VERTICAL'], 1)
+    view.int(O['VIEW_CONTENT_H'], HOME_ROW * rows)
+    for i in range(rows):
+        row = ui.widget('list_item', view, (0, HOME_ROW * i, width, HOME_ROW), click=True)
+        ui.widget('label', row, (28, 0, 150, HOME_ROW), text=f'Row {i}')
+    bar = ui.widget('system_bar', ui.wm, (0, 0, 375, FULL_TOP), name='system_bar')
+    fw.var('fw_ctx_system_bar', C.c_void_p).value = bar.at
+    ui.top = win
+    fw.var('coverflow__home', Home).list = lst.at
+    return win, view, bar
+
+
+def selected_rect(view, top):
+    """The selected row's box on the screen (x0, y0, x1, y1)."""
+    y = top + HOME_ROW * view.props[SEL] - view.int(SCROLL_Y)
+    return 0, y, view.box[2], y + HOME_ROW
+
+
+def meets(a, b):
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+@pytest.mark.parametrize('rows', [7, 8])
+@pytest.mark.parametrize('top', [SPLIT_TOP, FULL_TOP])
+def test_homes_selected_row_never_meets_the_clock_as_the_wheel_walks_it(fw, ui, st, rows, top):
+    """Down every row of Home's main list and back, seven rows or eight (a song loaded): the selected row always
+    stands whole below the status row's clock (docs/oled-design.md, Home (Split) and Home (Full))."""
+    _, view, _ = split_home(ui, fw, rows, top)
+    fw.fn('navigation__paint_selection', None, C.c_void_p, C.c_void_p)(view.at, C.create_string_buffer(0x100))
+    seen = [(view.props[SEL], selected_rect(view, top))]
+    for code in [KEY_NEXT] * (rows - 1) + [KEY_PREV] * (rows - 1):
+        key(fw, ui, code, ui.now + SLOW)
+        seen.append((view.props[SEL], selected_rect(view, top)))
+    assert [s for s, _ in seen] == list(range(rows)) + list(range(rows - 2, -1, -1))
+    assert not [s for s, r in seen if meets(r, CLOCK) or r[1] < top], seen
+
+
+@pytest.mark.parametrize('rows', [7, 8, 12])
+def test_a_list_pages_selected_row_never_meets_the_clock(fw, ui, rows):
+    """A page's list (Library, Settings) from the status row's foot: down every row and back by the wheel, and after
+    a drag that scrolls its first rows under the status row, the selected row stands whole below the clock, which is
+    centred on such a page."""
+    page = Page(ui, titles(rows), height=320 - BAR)
+    clock = (160, 17, 215, 28)
+    paint(fw, page)
+    seen = []
+    for code in [KEY_NEXT] * (rows - 1) + [KEY_PREV] * (rows - 1):
+        key(fw, ui, code, ui.now + SLOW)
+        seen.append((page.selected, BAR + page.screen_y(page.selected)))
+    page.scroll(ROW_H * 3)  # a drag's end: rows 0 to 2 under the status row
+    paint(fw, page)
+    seen.append((page.selected, BAR + page.screen_y(page.selected)))
+    assert not [(s, y) for s, y in seen if y < BAR or meets((0, y, 375, y + ROW_H), clock)], seen
+
+
+@pytest.mark.parametrize('rows', [7, 8])
+def test_a_drag_that_moves_homes_selection_repaints_it_and_the_band(fw, ui, st, rows):
+    """A drag that leaves Home's selected row under the status row: the list's next settled paint moves the
+    selection to a row in sight (reconcile), and the frame after it repaints Home's page and the status row's band,
+    so no bar stays drawn on the row under the clock. Home shows its bar while touch is the modality, and the paint
+    that moves it may be one clipped to the art beside the list (Split's pan), which repaints neither."""
+    win, view, bar = split_home(ui, fw, rows)
+    paint_sel = fw.fn('navigation__paint_selection', None, C.c_void_p, C.c_void_p)
+    due = fw.fn('list_reach_due', None)
+    paint_sel(view.at, C.create_string_buffer(0x100))
+    assert view.props[SEL] == 0
+    end = HOME_ROW * (rows - 7)
+    view.int(SCROLL_Y, end)  # the drag's end, the finger up: as far as the list scrolls (none with seven rows)
+    due()  # the frame the drag ended on
+    ui.invalidated.clear()
+    paint_sel(view.at, C.create_string_buffer(0x100))  # the next paint, the art's
+    assert not meets(selected_rect(view, SPLIT_TOP), CLOCK)
+    moved = view.props[SEL] != 0
+    assert moved == (rows == 8)
+    due()  # before the next frame
+    assert (win.at in ui.invalidated and bar.at in ui.invalidated) == moved, ui.invalidated
+
+
+@pytest.mark.parametrize('sel, off', [(0, 15), (0, 8), (7, 0), (7, 20), (6, 1)])
+def test_a_drag_that_stops_between_rows_leaves_homes_selection_whole_in_its_rest(fw, ui, st, sel, off):
+    """A short drag stops Home's eight-row list between rows: the selected row, its bar shown under touch, moves
+    to a row standing whole in the seven rows the list rests on (y 40 to 264 in Split) rather than staying cut
+    under the status row's clock or out in the fade past the rest, where the wheel never leaves it."""
+    _, view, _ = split_home(ui, fw, 8)
+    paint_sel = fw.fn('navigation__paint_selection', None, C.c_void_p, C.c_void_p)
+    paint_sel(view.at, C.create_string_buffer(0x100))
+    for _ in range(sel):
+        key(fw, ui, KEY_NEXT, ui.now + SLOW)
+    assert view.props[SEL] == sel
+    view.int(SCROLL_Y, off)  # the drag's end, the finger up
+    paint_sel(view.at, C.create_string_buffer(0x100))
+    r = selected_rect(view, SPLIT_TOP)
+    assert SPLIT_TOP <= r[1] and r[3] <= SPLIT_TOP + 7 * HOME_ROW, (view.props[SEL], r)
+    assert not meets(r, CLOCK)
+
+
+@pytest.mark.parametrize('sel', [7, 6, 1])
+def test_the_bands_paint_of_homes_rows_keeps_the_selection(fw, ui, st, sel):
+    """The status row's band paints Home's scrolled rows with the view moved up under it (list_reach_paint): that
+    paint draws the selected row the wheel left, whole in the rest, and never picks another by the moved view."""
+    win, view, bar = split_home(ui, fw, 8)
+    paint_sel = fw.fn('navigation__paint_selection', None, C.c_void_p, C.c_void_p)
+    paint_sel(view.at, C.create_string_buffer(0x100))
+    for _ in range(7):
+        key(fw, ui, KEY_NEXT, ui.now + SLOW)
+    for _ in range(7 - sel):
+        key(fw, ui, KEY_PREV, ui.now + SLOW)
+    assert view.props[SEL] == sel and view.int(SCROLL_Y) == HOME_ROW
+    # stock's widget_paint of the view runs its background paint (ringnav_paint_bg), which paints the selection
+    fw.mock('widget_paint', lambda w, canvas, *_: paint_sel(w, canvas) or 0)
+    fw.fn('list_reach_paint', None, C.c_void_p, C.c_void_p, C.c_void_p)(bar.at, win.at, Canvas(fw).at)
+    assert view.props[SEL] == sel and view.int(SCROLL_Y) == HOME_ROW
 
 
 @pytest.mark.parametrize('cls', [O['CLASS_ALBUMS'], 0xff10])
@@ -888,13 +1039,13 @@ def test_the_release_that_ends_the_hold_leaves_the_shutdown_prompt_its_centre(fw
     assert clicks.seen == [(buttons[1].at, EVT_CLICK)]
 
 
-@pytest.mark.parametrize('cable, moves', [(1, False), (0, True)])
-def test_usb_modes_scan_prompt_takes_the_wheel_once_the_cable_is_out(fw, ui, cable, moves):
+@pytest.mark.parametrize('cable', [1, 0])
+def test_usb_modes_scan_prompt_takes_the_wheel_cable_in_or_out(fw, ui, cable):
     fw.var('g_usblink_status', C.c_ubyte).value = 2
     fw.var('g_usbdet_value', C.c_ubyte).value = cable
     win, _ = dialog(ui)
     key(fw, ui, KEY_NEXT)
-    assert (win.props.get(SEL) == 1) == moves
+    assert win.props.get(SEL) == 1
 
 
 # A virtual table: a pool of row widgets rebound to the rows in view.
@@ -1165,29 +1316,8 @@ def test_the_carousels_momentum_is_the_lists_rows_never_a_letter(fw, ui):
     fast = steps[3:]
     assert steps[:3] == [1, 1, 1] and fast[0] == 1 and max(fast) == WA['WA_MAX_ROWS'] and fast[-1] == WA['WA_MAX_ROWS']
     assert all(b >= a for a, b in zip(fast, fast[1:]))  # rising while it goes on, never a letter's jump
-    assert not ui.due('cf_letter_expire')  # no letter over the covers
     key(fw, ui, KEY_NEXT, t + WA['WA_RUN_MS'] + 100)  # after a pause: one again
     assert (goal - home.goal) // home.stride == 1
-
-
-def test_coverflows_letter_shows_for_its_time_then_repaints_away(fw, ui):
-    page = Page(ui, titles(10), name='coverflow_page')
-    letter = fw.fn('coverflow_letter', None, C.c_void_p, C.c_uint, C.c_uint)
-    letter(page.view.at, ord('B'), 500)
-    (timer,) = ui.due('cf_letter_expire')
-    assert ui.timers[timer][2] == O['LETTER_MS']
-    ui.invalidated.clear()
-    ui.fire(timer)
-    assert ui.invalidated == [page.view.at]
-
-
-def test_coverflows_letter_cleared_stops_its_timer(fw, ui):
-    page = Page(ui, titles(10), name='coverflow_page')
-    letter = fw.fn('coverflow_letter', None, C.c_void_p, C.c_uint, C.c_uint)
-    letter(page.view.at, ord('B'), 500)
-    (timer,) = ui.due('cf_letter_expire')
-    letter(page.view.at, 0, 600)
-    assert not ui.due('cf_letter_expire') and timer not in ui.timers
 
 
 # Pull to search: a drag down from the top of Local Songs' list.

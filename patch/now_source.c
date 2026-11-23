@@ -7,7 +7,8 @@
  *   (lyrics_status_bar.c bar_status);
  * - now_song and now_time: the Library's song as Now Playing shows it and its second, for the pages
  *   that only ever show the Library (np_bar.c, nav/now_playing.c, lyrics.c) and for now_get; while
- *   Radio has the output the Library is held paused where it was (now_hold, now_release);
+ *   Radio, Internet Radio, a video or a sound game has the output the Library is held paused where
+ *   it was (now_hold, now_release);
  * - now_scrobbles: the one rule for what is scrobbled (nav/playback_power.c scrobble);
  * - now_get: all of it, for Car Remote and the iPhone cable (coda_rc_shim.c cr_now, which writes
  *   /tmp/coda-rc.now for coda-rc and q2-iap) and for now_poll, which hands it to the car over
@@ -39,7 +40,10 @@ static struct {
     int pos, len, state, locked;
     unsigned at, item; /* the stamp and the item NP_PLAY_FILE was written with */
     int held, held_sec,
-        held_total; /* the Library held for Radio (now_hold): its second and length */
+        held_total; /* the Library held for another output (now_hold): its second and length */
+    int start_sec;  /* where the Library's song last started, in its own seconds (now_starting) */
+    unsigned
+        start_key; /* ... that song's path hash and queue place, so another's start is not it */
 } np __attribute__((section(".scratch")));
 
 static unsigned np_ms(void) {
@@ -111,14 +115,65 @@ void *now_song(unsigned *at, unsigned *n, int *pressed) {
     return r ? r : queue_now(at, n);
 }
 
-/* Radio takes the output (radio_tuner.c tuner_open): the Library's song, playing or paused, is
- * stopped with its place kept (player_save_stop; a paused q2player would keep the PCM Radio needs,
- * and stock's player_stop, which video_start calls, forgets the place), and now_time reads it
- * paused there for as long as Radio has it, its page shut or not. The Library chosen again ends the
- * hold: Play on its Now Playing plays the song on from that place (now_take_back), a pick plays
- * the pick (now_drop); a Radio page that found no stations, shut, loads the song again paused
- * there for the user's Play (now_release), never playing on its own. A Library that was stopped is
- * left as it is. */
+/* The playing song's path hash and queue place, 0 with none. */
+static unsigned song_key(void) {
+    unsigned at, n;
+    void *r = queue_now(&at, &n);
+    const char *path = r ? P(r, REC_PATH) : (const char *)0;
+    return path ? fnv(FNV_SEED, (const unsigned char *)path) ^ (unsigned)MCL(MCL_POS) * 0x9e3779b1u
+                : 0;
+}
+
+/* A start of the Library's player (chapters_streams_folders.c ringnav_start_player, before stock's
+ * mclStartPlayer reads and clears MCL_START_SEC): where it starts, as the song's own seconds (a CUE
+ * track's from its start). A song loaded paused there, as a boot resume, now_release or an output
+ * change loads it, reads 0 from q2player until it is heard, as from stock's player
+ * (player/engine.c play: resume_poll counts on it), and player_time answers this place until then.
+ */
+void now_starting(void) {
+    unsigned at, n;
+    void *r = queue_now(&at, &n);
+    int ss = MCL(MCL_START_SEC), cue = r ? I(r, REC_CUE_START) : 0;
+    np.start_sec = ss > cue ? ss - cue : 0;
+    np.start_key = np.start_sec ? song_key() : 0;
+}
+
+/* player_playtime_and_length, but a song loaded paused at a place (now_starting) and not yet heard
+ * reads that place, not the player's 0. */
+static int player_time(int *sec, int *total) {
+    int r = player_playtime_and_length(sec, total);
+    if (!np.start_sec) return r;
+    if (*sec > 0 || mclGetPlayStatus() != 3 || song_key() != np.start_key)
+        np.start_sec = 0; /* heard, playing, stopped or another song: the player's own second */
+    else
+        *sec = np.start_sec;
+    return r;
+}
+
+/* Stock's Now Playing update (playing_page_update, 0x53cf08) reads the state and the time through
+ * these, where it called mclGetPlayStatus and player_playtime_and_length (tools/build.py
+ * NP_TIME_CALLS): stopped, it writes 0 to the bar and both times. Held (now_hold) the player is
+ * stopped, so they answer the held song paused at its second, and the bar and the elapsed time show
+ * where Play will go on from. Otherwise they are stock's two calls. */
+int now_page_status(void) { return np.held ? 3 : mclGetPlayStatus(); }
+int now_page_time(int *sec, int *total) {
+    if (!np.held) return player_time(sec, total);
+    *sec = np.held_sec, *total = np.held_total;
+    return 0;
+}
+
+/* Radio (radio_tuner.c tuner_open), an Internet Radio station (radio.c radio_play), a video
+ * (videos.c video_play) or a card game with the sound (addon.c addon_game_start) takes the output:
+ * the Library's song, playing or paused, is stopped with its place kept (player_save_stop; a paused
+ * q2player would keep the PCM they need, and stock's player_stop, which video_start calls, forgets
+ * the place), and now_time reads it paused there for as long as they have it, Radio's page shut or
+ * not, and through a hand-over from one to another. The Library chosen again ends the hold: Play on
+ * its Now Playing plays the song on from that place (now_take_back: radio_tuner.c tuner_key,
+ * radio.c radio_take_back), and any start of its player, a pick among them, plays from the player's
+ * own place (now_drop: radio_tuner.c tuner_yield and ringnav_start_player); a Radio page that found
+ * no stations, shut, and a video's or a sound game's end load the song again paused there for the
+ * user's Play (now_release), never playing on its own. A Library that was stopped is left as it is.
+ */
 void now_hold(void) {
     int status = mclGetPlayStatus();
     if (np.held || (status != 2 && status != 3)) return;
@@ -127,16 +182,18 @@ void now_hold(void) {
     np.held = 1;
     player_save_stop();
 }
-void now_release(void) {
-    if (!np.held) return;
+int now_release(void) {
+    if (!np.held) return 0;
     np.held = 0;
     player_save_start(1);
+    return 1;
 }
-/* Radio ended by a Library pick (radio_tuner.c tuner_yield): the held song is forgotten, the pick
- * plays in its place. */
+/* The Library's player started (a pick: radio_tuner.c tuner_yield; any start:
+ * ringnav_start_player): the held song is forgotten, the player's place is the one read. */
 void now_drop(void) { np.held = 0; }
-/* Radio ended by the Library's Play (tuner_key): the held song playing on from its place, or, with
- * none held (the Library was stopped when Radio started), stock's Play. */
+/* Radio or a station ended by the Library's Play (tuner_key, radio_take_back): the held song
+ * playing on from its place, or, with none held (the Library was stopped when it started), stock's
+ * Play. */
 void now_take_back(void) {
     if (!np.held) {
         player_play_pause();
@@ -147,7 +204,7 @@ void now_take_back(void) {
 }
 
 /* The Library's song's second and length as the player has them (-1 and 0 for none), and its play
- * state, mclGetPlayStatus's: 1 stopped, 2 playing, 3 paused; held for Radio, paused where it was.
+ * state, mclGetPlayStatus's: 1 stopped, 2 playing, 3 paused; held (now_hold), paused where it was.
  */
 int now_time(int *sec, int *total) {
     if (np.held) {
@@ -155,7 +212,7 @@ int now_time(int *sec, int *total) {
         return 3;
     }
     *sec = -1, *total = 0;
-    player_playtime_and_length(sec, total);
+    player_time(sec, total);
     return mclGetPlayStatus();
 }
 

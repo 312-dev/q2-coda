@@ -331,8 +331,11 @@ found).
 **Download Ahead** is the firmware's setting: Streaming > Configuration, **Download Ahead**, Off, 1,
 2 or 3 songs, 2 by default (`[Q2POD] AHEAD`, `streamconf_page`).
 
-**`/tmp/q2-<id>.ahead`** (firmware to app). Written while the queue playing is that app's `.play`
-m3u: at the queue's start, and whenever the songs after the one playing change in play order (a
+**`/tmp/q2-<id>.ahead`** (firmware to app). Written first just before the `.catplay` that hands the
+app a list, for that catplay's seq (which the app's `.play` carries) with `n` and no lines, as the
+firmware's queue holds none of the list yet (`stream_state.c` `ahead_start`), so the app never runs
+a list on its default; then while the queue playing is that app's `.play` m3u: at the queue's
+start, and whenever the songs after the one playing change in play order (a
 skip, a jump in Up Next, shuffle or repeat changed, a song added or removed, the setting changed).
 Not rewritten for position or pause.
 
@@ -345,20 +348,27 @@ One line a song: the songs the firmware's queue holds after the one playing, in 
 (shuffle, repeat and Play Next applied, `playback_upcoming`), at most `n`, and only that app's own
 lines. Its queue holds the m3u's lines up to the first one not there yet (or under `START`, below),
 so it may name fewer than `n`: the rest are the m3u's songs after the one playing that are not
-whole yet, in list order, the ones it queues next, which the app takes itself. `n=0` is Off: the
+whole yet, in list order, the ones it queues next, which the app takes itself. Under Repeat All it
+is always full: once the songs queued have all played it names Repeat All's next pass, songs already
+whole, and the app gives a whole song behind the one playing no place of `n`, so the list's next
+songs are still fetched (the drive of 2026-11-22: a radio under Shuffle and Repeat All stopped at its
+fourth song, the fifth never fetched; `test/fw/test_stream_state.py`
+`test_repeat_all_names_whole_songs_never_one_still_to_land`). `n=0` is Off: the
 app fetches only the song playing. The song playing is not listed: it is `.playing`, as today. A
 seq that is not the app's latest `.play` is ignored. With no `.ahead` (older firmware) the app keeps
 two ahead in list order.
 
-**What the app does with it.** Its plan is the song playing, then the `.ahead` lines in order:
-one download at a time, each started once the one before it is whole. A song whose file is already
+**What the app does with it.** Its plan is the song playing, then the `.ahead` lines in order,
+then the list's songs not yet whole: `n` of them after the one playing, a whole song from before it
+taking none; one download at a time, each started once the one before it is whole. A song whose file is already
 whole (synced, or in the Stream Cache) is skipped over. When `.ahead` or `.playing` changes, a
 download whose song is no longer in the plan is cancelled and its partial file deleted, and the
 plan starts again from its first song not yet whole. Fetching needs the server reachable over the
 Q2's Wi-Fi (its only link); Download Ahead never wakes Smart Wi-Fi's radio, which stays up while the
 app runs (`addon_running`) as today. Space comes from the Stream Cache under its limit as now
 (`trim`: played longest ago first), and the planned songs are protected (`protect`): never the song
-playing or the next `n`.
+playing or the next `n`. With the Stream Cache off, the songs more than two behind the one playing
+are deleted, but not one the plan names to come.
 
 **`/tmp/q2-<id>.stream`** (app to firmware and player). Written while a stream runs: at once on
 each change of a song's state, and every 500 ms while a line is `get` (2 a second at most); not at
@@ -384,7 +394,7 @@ there when it starts, so a file cut by a crash or a pulled card is never taken f
 
 **Starting before the end** (firmware, `m3u_songs`, with `grow`). A line whose file exists but whose
 `.stream` line is `wait` or `get` with fewer than `START` bytes is waited for as a missing file is
-today; `START` is 8 s of the song (total x 8000 / length), at least 256 KB, or the whole file when
+today; `START` is 3 s of the song (total x 3000 / length), at least 256 KB, or the whole file when
 total or length is unknown. A `stall` line waits the same. Then it is queued as any card file.
 Gapless and the FLAC paths are unchanged: the next song is a file in the queue, whole or arriving.
 ponytail: the stock player reads a file's length from its header (FLAC STREAMINFO, an MP3's Xing
@@ -396,7 +406,11 @@ there is none ([internals](internals.md#streaming-configuration)).
 `/tmp/q2-<id>.stream` for its path. A `get` or `stall` line wraps the file in a growing read: at the
 bytes there are, it waits (polling `.stream` every 100 ms) rather than end. A seek searches only the
 bytes there are, so one inside them plays from its target at once, and one past them waits there,
-its position the target's, and plays from it as its bytes come. While it waits it writes `/tmp/q2player.wait`, the path and a newline, and removes the file
+its position the target's, and plays from it as its bytes come. Once the song is playing, a stall waits for a
+refill before it plays on: 3 s of the song ahead, then 6 s and 12 s at the stalls after, or the song whole
+([internals](internals.md#streaming-configuration)). Its open of such a file analyses at most
+100 ms of audio (`GROW_ANALYZE_US`): an embedded cover, which its FFmpeg cannot size, otherwise held the open
+until 5 s of audio had come ([internals](internals.md#streaming-configuration)). While it waits it writes `/tmp/q2player.wait`, the path and a newline, and removes the file
 once it plays again. `done`, `fail`, a stale file or no line: the end of the bytes is the song's end.
 
 **What the firmware shows.** A server song is loading while it is the song Now Playing shows and

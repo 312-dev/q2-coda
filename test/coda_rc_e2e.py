@@ -3,10 +3,15 @@
 demo's shim from a build, driven over TCP by tools/coda_rc_client.py as a phone would.
 
 usage: coda_rc_e2e.py --emu DIR [--build BUILD] [--port 7720] [--shots OUT_DIR]
+       coda_rc_e2e.py --pool BUILD [--wait S] [--shots OUT_DIR]
 
 DIR is a q2-emu copy (its q2emu script, state/ and rootfs/) whose state/data/config.ini has CARREMOTE=1 under
-[Q2POD]; with --build it boots that build first (q2emu start BUILD), else it uses the one already running. The
-emulator shares this machine's network, so the daemon is on 127.0.0.1. The pairing code is read where the Q2
+[Q2POD]; with --build it boots that build first (q2emu start BUILD), else it uses the one already running. With
+--pool it leases a pooled emulator instead (tools/ci/emu_pool.py, never slot 2, as the gate runs it), writes
+CARREMOTE=1 into the copy's config.ini after the lease's reset of the settings and before the boot (the lease's
+prepare), boots BUILD there, and talks to the daemon on that copy's own port (emu_pool.coda_port, 7700 plus the
+slot); the lease is returned and the file put back whatever happens. Exit 3: no pooled emulator came free in --wait
+seconds. The emulator shares this machine's network, so the daemon is on 127.0.0.1. The pairing code is read where the Q2
 shows it from, the daemon's /tmp/coda-rc.pair, through /proc/PID/root of the process listening on the port.
 
 Checks, in order: pairing (a fresh key, the Dialog's screenshot) and a second session on the kept key; browse
@@ -16,8 +21,11 @@ that song, and the queue at it; Pause, Play and Play/Pause, each played by the t
 cover as an image; then SetMode (shuffle on and off, repeat one, all and off, each in the next State), Rate (three
 hearts, Favorites, none; another song's id NOT_FOUND), PlayQueueItem (the third song; a stale id NOT_FOUND), and Resume
 (the album again after another list, from the song it was left on; Resume while it plays carries on). Each step prints
-one line; the exit status is the number of failures."""
+one line; the exit status is the number of failures. A call that raises keeps the daemon's log, demo's (its unified-log
+lines, again 15 s later as .later), the shim's answers and the card's unified log in a logs-HHMMSS folder of the run's
+(keep_logs)."""
 import argparse
+import os
 import pathlib
 import re
 import shutil
@@ -27,7 +35,9 @@ import tempfile
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'tools'))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'tools/ci'))
 import coda_rc_client as client  # noqa: E402
+import emu_pool  # noqa: E402
 
 FAILS = []
 NAME = b'coda_rc_e2e'
@@ -85,13 +95,103 @@ def forget_runs(emu):
         time.sleep(1.5)
 
 
+def car_remote_on(ini):
+    """config.ini's text with Car Remote on: CARREMOTE=1 under [Q2POD]."""
+    text, n = re.subn(r'(?m)^CARREMOTE=.*$', 'CARREMOTE=1', ini)
+    if n:
+        return text
+    text, n = re.subn(r'(?m)^\[Q2POD\]\s*$', '[Q2POD]\nCARREMOTE=1', ini, count=1)
+    return text if n else ini.rstrip('\n') + '\n[Q2POD]\nCARREMOTE=1\n'
+
+
+def pooled(build, wait_s, argv):
+    """main on a pooled emulator leased for build with Car Remote on (the module docstring's --pool)."""
+    saved = {}
+    os.environ.pop('LD_PRELOAD', None)  # q2-heavy's host preload: bwrap could not write the emulator's uid map
+
+    def prepare(k):
+        ini = emu_pool.copy_dir(k) / 'state/data/config.ini'
+        saved[k] = ini.read_bytes() if ini.exists() else None
+        ini.write_text(car_remote_on(saved[k].decode('utf-8', 'replace') if saved[k] else ''))
+
+    end, slot = time.monotonic() + wait_s, None
+    while slot is None:
+        try:
+            slot = emu_pool.get(build, f'coda-rc-e2e-{os.getpid()}', 0.5, False, avoid=(2,), prepare=prepare)
+        except SystemExit as e:
+            if 'leased' not in str(e) or time.monotonic() > end:
+                print(f'coda_rc_e2e: could not run: {e}' if 'leased' not in str(e) else
+                      f'coda_rc_e2e: could not run: no pooled emulator came free in {wait_s:.0f} s')
+                return 3
+            time.sleep(10)
+    try:
+        print(f'slot {slot}: {emu_pool.copy_dir(slot)}, Car Remote on port {emu_pool.coda_port(slot)}', flush=True)
+        return main([*argv, '--emu', str(emu_pool.copy_dir(slot)), '--port', str(emu_pool.coda_port(slot))])
+    finally:
+        emu_pool.put(slot)
+        if saved.get(slot) is not None:
+            (emu_pool.copy_dir(slot) / 'state/data/config.ini').write_bytes(saved[slot])
+
+
+LATE_S = 15  # keep_logs copies demo's log again this much later
+# Where the run's daemon is, once known (run): keep_logs copies the logs from there when a call raises.
+WHERE: dict = {}
+
+
+def keep_logs(why):
+    """The daemon's log, demo's (its unified-log lines: S90play keeps demo's stderr there, docs/internals.md#unified-log),
+    the shim's last answers and the card's unified log into the run's folder, while the emulator still runs: a call
+    that raised (a RemoteError's UNAVAILABLE) is told apart there, a refusal from the shim's own log line, a command
+    never taken from its absence."""
+    pid, emu, shots = WHERE.get('pid'), WHERE.get('emu'), WHERE.get('shots')
+    if not shots or WHERE.get('kept'):  # once: --pool's main runs main, and both see the same error
+        return
+    WHERE['kept'] = True
+    out = shots / f'logs-{time.strftime("%H%M%S")}'
+    out.mkdir(parents=True, exist_ok=True)
+    (out / 'why.txt').write_text(why + '\n')
+    sources = [pathlib.Path(f'/proc/{pid}/root/tmp/{n}') for n in ('coda-rc.log', 'q2-demo.log', 'q2-demo.err',
+                                                                   'coda-rc.ack', 'coda-rc.now')] if pid else []
+    if emu:
+        sources += sorted((emu / 'state/mmc/.q2muse/logs').glob('q2-log.*'))
+    for f in sources:
+        try:
+            shutil.copyfile(f, out / f.name)
+        except OSError:
+            pass
+    # demo's log again a while later: a UI pass that held the loop past the call's 4 s is logged only once it ends
+    # ("ui pass N ms"), after the copy above
+    time.sleep(LATE_S)
+    for f in sources[1:3]:
+        try:
+            shutil.copyfile(f, out / (f.name + '.later'))
+        except OSError:
+            pass
+    print(f'logs kept in {out}', flush=True)
+
+
 def main(argv=None):
+    """run, its logs kept when a call raises."""
+    try:
+        return run(argv)
+    except Exception as e:
+        keep_logs(f'{type(e).__name__}: {e}')
+        raise
+
+
+def run(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('--emu', required=True, type=pathlib.Path)
+    where = ap.add_mutually_exclusive_group(required=True)
+    where.add_argument('--emu', type=pathlib.Path)
+    where.add_argument('--pool', metavar='BUILD', help='lease a pooled emulator and boot BUILD on it')
     ap.add_argument('--build')
     ap.add_argument('--port', type=int, default=client.PORT)
+    ap.add_argument('--wait', type=float, default=600, help='--pool: seconds to wait for a free emulator (600)')
     ap.add_argument('--shots', type=pathlib.Path)
     a = ap.parse_args(argv)
+    if a.pool:
+        rest = ['--shots', str(a.shots)] if a.shots else []
+        return pooled(a.pool, a.wait, rest)
     q2emu = a.emu / 'q2emu'
     if not re.search(r'^CARREMOTE=1$', (a.emu / 'state/data/config.ini').read_text(errors='replace'), re.M):
         sys.exit(f'{a.emu}/state/data/config.ini: set CARREMOTE=1 under [Q2POD] first')
@@ -102,6 +202,7 @@ def main(argv=None):
         return 1
     shots = a.shots or pathlib.Path(tempfile.mkdtemp(prefix='coda-rc-e2e-'))
     shots.mkdir(parents=True, exist_ok=True)
+    WHERE.update(pid=pid, emu=a.emu, shots=shots)
     keys = pathlib.Path(tempfile.mkdtemp(prefix='coda-rc-keys-'))
     forget_runs(a.emu)
 
@@ -208,7 +309,7 @@ def main(argv=None):
     p = until(s, lambda p: p.get('now_playing', {}).get('track_id') == q['items'][2]['id'])
     check('PlayQueueItem: the third song', p is not None, q['items'][2]['title'])
     try:
-        s.jump(1, q['items'][3]['id'])
+        s.jump(1, q['items'][0]['id'])  # the first song's id at the second's place: stale (the pool's album has 3)
         got = 'Ack'
     except client.RemoteError as e:
         got = e.name

@@ -208,6 +208,43 @@ def test_nothing_but_the_handshake_before_auth(fresh):
     assert s.call(0x7e, b'ping') == b'ping'  # Ping, plain before Auth
 
 
+def test_a_ping_before_auth_is_echoed_only_when_short(fresh):
+    """An unpaired peer gets CRC_PING_PLAIN bytes echoed at most (over BLE the rest would be air time taken from
+    A2DP); the session goes on. Sealed, a Ping takes a whole payload."""
+    s = client.Session(Core(fresh), 'x')
+    s.hello()
+    assert s.call(0x7e, bytes(64)) == bytes(64)
+    with pytest.raises(client.RemoteError) as e:
+        s.call(0x7e, bytes(65))
+    assert e.value.name == 'TOO_LARGE'
+    assert s.call(0x7e, b'still') == b'still'
+    s, _, ltk = paired(fresh)
+    s.auth(ltk)
+    assert s.call(0x7e, bytes(8000)) == bytes(8000)
+
+
+def test_new_codes_are_put_up_four_a_minute_at_most(fresh):
+    """Each new code raises the pairing card and lights the screen: a peer asking under new names gets four a
+    minute, then E_BUSY until the oldest is a minute old. The same phone asking again keeps its code and is not
+    counted."""
+    s = client.Session(Core(fresh), 'x')
+    s.hello()
+    for i in range(4):
+        s.name = f'phone {i}'
+        s.pair_start()
+    before = shown(fresh)
+    s.name = 'phone 4'
+    with pytest.raises(client.RemoteError) as e:
+        s.pair_start()
+    assert e.value.name == 'BUSY' and shown(fresh) == before
+    s.name = 'phone 3'
+    assert len(s.pair_start()) == 32 and shown(fresh) == before  # the same phone again: its code, uncounted
+    var(fresh, 'now_ms', ctypes.c_uint32).value += 60001
+    s.name = 'phone 5'
+    s.pair_start()
+    assert shown(fresh) != before
+
+
 def test_wrong_code_fails_once_then_locks_after_three(fresh):
     for attempt in range(3):
         s = client.Session(Core(fresh), 'x')
@@ -377,6 +414,7 @@ def test_code_expires_and_cancel_ends_it(fresh):
 def test_full_device_refuses_a_ninth(fresh):
     for _ in range(8):
         paired(fresh)
+        var(fresh, 'now_ms', ctypes.c_uint32).value += 15001  # four new codes a minute (CRC_PAIR_SHOWS)
     s = client.Session(Core(fresh), 'x')
     s.hello()
     with pytest.raises(client.RemoteError) as e:
@@ -577,7 +615,8 @@ def cover_answers():
 
 
 ANSWERS = {
-    0x10: ACK, 0x20: ACK, 0x22: ACK, 0x24: ACK, 0x40: ACK, 0x44: ACK,
+    0x10: ACK, 0x20: ACK, 0x22: ACK, 0x24: ACK, 0x40: ACK, 0x44: ACK, 0x46: ACK,
+    0x60: lambda m: [(0x61, None, client.encode([(1, 'ab' * 32), (2, 'https://use1-1.relay.n0.iroh.link./')]))],
     0x12: lambda m: [(0x7F, 0, b''), (0x11, None, NOW)],  # a push first: kept, then the answer
     0x30: lambda m: [(0x31, None, client.encode([(1, client.text(m, 1)), (2, 'Albums'), (3, 2), (4, 0),
                                                  (5, item('al:1', 'One', subtitle='A', art='a:1', browsable=1,
@@ -641,7 +680,8 @@ def test_client_commands(q2, capsys, tmp_path):
     assert st == {'now_playing': {'track_id': 's:12', 'title': 'Song', 'artist': 'Artist', 'album': 'Album',
                                   'duration_ms': 200000, 'art': 'a:3', 'play_state': 1, 'shuffle': 1, 'repeat': 2,
                                   'volume': 40, 'hearts': 3, 'rateable': True, 'buffering': False, 'buffered_bytes': 0,
-                                  'total_bytes': 0, 'buffered_ms': 0, 'radio': False, 'notice': '', 'notice_id': 0},
+                                  'total_bytes': 0, 'buffered_ms': 0, 'radio': False, 'notice': '', 'notice_id': 0,
+                                  'album_id': '', 'artist_id': ''},
                   'position': {'position_ms': 30000, 'at_ms': 99}, 'queue': {'version': 4, 'index': 2, 'total': 9}}
     b = run(capsys, 'browse', 'albums', '--sort', 'name', '--limit', '2')
     assert b['items'][0] == {'id': 'al:1', 'title': 'One', 'subtitle': 'A', 'art': 'a:1', 'group': 'O',
@@ -670,6 +710,14 @@ def test_client_commands(q2, capsys, tmp_path):
         run(capsys, 'nonsense')
     with pytest.raises(SystemExit):
         run(capsys, 'repeat', 'sometimes')
+
+
+def test_client_radio_and_remote(q2, capsys):
+    """StartRadio from the playing song, from a song and stopped (CAP_RADIO); GetRemote's endpoint (CAP_REMOTE)."""
+    run(capsys, 'pair')
+    for argv, fields in ((('radio',), {}), (('radio', 'song:t12'), {1: [b'song:t12']}), (('radio', 'stop'), {2: [1]})):
+        assert run(capsys, *argv) == {'ok': True} and q2[-1].requests[0] == (0x46, fields)
+    assert run(capsys, 'remote') == {'endpoint_id': 'ab' * 32, 'relay_url': 'https://use1-1.relay.n0.iroh.link./'}
 
 
 def test_client_watch_prints_pushes_until_its_time(q2, capsys, monkeypatch):

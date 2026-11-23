@@ -34,7 +34,8 @@ SOURCES = [ROOT/'patch'/name for name in [*tools_build.NAVIGATION, *tools_peq.UI
 FLAGS = ['-O0', '-g', '-fno-builtin', '-ffreestanding', '-fPIC', '-fkeep-static-functions', '-fno-omit-frame-pointer',
          '-Werror=implicit-function-declaration', '-Werror=int-conversion', '-Wno-int-to-pointer-cast',
          '-Wno-pointer-to-int-cast', '-Wno-builtin-declaration-mismatch', '-Wno-incompatible-pointer-types',
-         '-Wno-format', '-Wno-attributes', '-D__asm__(...)=']
+         '-Wno-format', '-Wno-attributes', '-D__asm__(...)=',
+         '-DGAMES_ALL']  # games.c: every game's code, the ones peq.h leaves out of the payload too
 STUB_ARGS = 6
 # Stock's context data as host arrays; a 4-byte cell holds a pointer (P(x, 0) reads one), 8 bytes here.
 CONTEXT = {name: max(size, 8) for name, size in tools_build.CONTEXT_DATA.items()}

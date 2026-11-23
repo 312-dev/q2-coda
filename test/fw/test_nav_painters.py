@@ -17,7 +17,7 @@ import typing
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, c_enum, Deques, Files, claim, high_halves, libc, stock_prop_str, stock_start_with, ui_name
+from conftest import NAVIGATION_SOURCE, O, c_enum, Deques, Files, claim, high_halves, libc, stock_prop_str, stock_start_with, threads_now, ui_name
 
 STRINGS = dict(re.findall(r'^#define (\w+) "([^"]*)"', (host.ROOT/'patch/offsets.inc').read_text(), re.M))
 BT_GLYPH = STRINGS['BT_GLYPH']
@@ -1988,28 +1988,6 @@ def test_ringnav_paint_returns_stocks_and_hands_the_paint_to_the_parent(fw, st):
     assert style_ink(fw, grey) != lit
 
 
-def cf_letter(fw, st, elapsed, drawn):
-    theme(fw)
-    ui = Ui(fw)
-    w = ui.add('slide_menu', ui.window('coverflow_page'), (0, 0, 375, 294))
-    st('cf_letter_surface', C.c_void_p).value, st('cf_letter').value, st('cf_letter_at').value = w.addr, ord('M'), 1000
-    fw.mock('time_now_ms', lambda *_: 1000 + elapsed)
-    canvas = Canvas(fw)
-    fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(w.addr, canvas.addr)
-    box = O['LETTER_BOX']
-    assert [b[0] for b in canvas.boxes] == [((375 - box) // 2, (294 - box) // 2, box, box)] * drawn
-    assert [t[0] for t in canvas.texts] == ['M'] * drawn and canvas.restored()
-
-
-@pytest.mark.parametrize('elapsed', [0, O['LETTER_MS'] - 1])
-def test_cover_flows_letter_shows_for_its_time_centred(fw, st, elapsed):
-    cf_letter(fw, st, elapsed, 1)
-
-
-def test_cover_flows_letter_is_gone_after_its_time(fw, st):
-    cf_letter(fw, st, O['LETTER_MS'], 0)
-
-
 @pytest.mark.parametrize('same, kept', [(1, 1), (0, 0)])
 def test_a_paint_ends_a_pending_centre_once_the_top_window_changed(fw, st, same, kept):
     ui = Ui(fw)
@@ -2259,6 +2237,7 @@ def test_link_volume_unset_shows_and_turns_off_from_what_applies(fw):
         return 0
     fw.mock('getBtLinkItem', item)
     fw.mock('fw_system', lambda *_: 0)
+    threads_now(fw)  # the battery run (bt_battery.c) ends at once; its answer is the file
     Files(fw, {'/tmp/q2-btbatt': f'{mac} 80 48000 {0x240418} Px7\n'.encode()})  # headphones
     fw.fn('ringnav_btrows', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     link = row(ui, view, 'Link Volume')
@@ -2288,9 +2267,9 @@ def test_playback_orders_its_rows_eq_and_the_library_first(fw):
     fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     rows = view.children
     # stock's Volume and Album Display is not offered; Folder skip is Library > Folders'; stock's Balance (s10) stays,
-    # hidden, after the inline Balance (inline_slider.c); Crossfade's Duration and Default Volume's Level under them
+    # hidden, after the inline Balance (inline_slider.c); Smart Crossfade's one switch; Default Volume's Level under it
     seq = [r.name or ui.text(label_of(r)).split(':')[0] for r in rows]
-    assert seq == ['s2', 'Library', 's3', 's7', 'Crossfade', 'Duration', 's6', 'Resume Songs', 's8', 'Sleep Timer',
+    assert seq == ['s2', 'Library', 's3', 's7', 'Smart Crossfade', 's6', 'Resume Songs', 's8', 'Sleep Timer',
                    'Volume', 'Max Volume', 'Default Volume', 'Level', 's0', 's9', 'Balance', 's10', 'Mono Audio',
                    'Swap L/R', 's1', 's4', 's5']
     assert 'list_into' in [c.props.get('image') for c in rows[1].walk()] and not rows[seq.index('s10')].visible
@@ -2369,7 +2348,7 @@ def test_the_library_is_stocks_page_again_with_its_pages(fw, st):
     again = ui.add('scroll_view', ui.window('playset_page'), (0, 26, 375, 294), 'scroll_view_playset')
     playset(fw, ui, again)
     audioset(ui.top.addr, None)
-    assert len(again.children) == 23  # the next open is the main page again
+    assert len(again.children) == 22  # the next open is the main page again
 
 
 def caption_texts(fw, view):
@@ -2403,13 +2382,14 @@ def test_reset_settings_rows_lose_their_chevrons_and_say_what_they_take(fw):
 
 
 def test_playback_s_and_library_s_rows_carry_their_captions(fw):
-    """Playback's own rows carry none; Playback > Library's switches do (library_settings.c), and Library > Folders'
-    stock Folder skip has its own (ringnav_audioset)."""
+    """Playback's own rows carry one, Smart Crossfade's (crossfade.c xfade_text); Playback > Library's switches do
+    (library_settings.c), and Library > Folders' stock Folder skip has its own (ringnav_audioset)."""
     ui, win, view, settings, _ = settings_page(fw, 'playset_page', 'scroll_view_playset')
     playset(fw, ui, view)
     audioset = fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)
     audioset(win.addr, None)
-    assert caption_texts(fw, view) == {}
+    assert {ui.text(label_of(r)): t for r, t in caption_texts(fw, view).items()} == {
+        'Smart Crossfade': 'Overlaps songs from different albums, timed to how each ends and begins'}
 
     def sub_page(n):  # Library's page n (LIB_*): stock's page again, built afresh
         page = ui.window('playset_page')
@@ -3561,9 +3541,9 @@ class Clock:
         return fw.fn('menu_modal__sheet_tick', C.c_int, C.c_void_p)(None)
 
 
-def sheet(fw, st, rows=10, risen=True, reduce=False):
+def sheet(fw, st, rows=10, risen=True, reduce=False, page=None):
     """A sortselect dialog framed as the sheet on OLED's set, with a header, and the screen's buffer behind a canvas:
-    the page white above y 160 and blue below. Its first whole paint (the material, the rise from the page) is made at
+    the page white above y 160 and blue below, or page (375 x 320 0xAARRGGBB pixels). Its first whole paint (the material, the rise from the page) is made at
     the clock's 10 s; risen, the rise is run to its end and the buffer the page again. Returns (ui, win, view, canvas,
     buf); the clock is fw.sheet_clock. reduce: under Reduce Motion (IPOD REDUCEMOTION)."""
     st('settings_read').value = 1
@@ -3579,7 +3559,7 @@ def sheet(fw, st, rows=10, risen=True, reduce=False):
     fw.fn('modal_head', None, C.c_char_p, C.c_char_p, C.c_void_p)(b'Time', b'Pink Floyd', None)
     fw.fn('modal_frame', None, C.c_void_p, C.c_void_p)(win.addr, lv.addr)
     canvas = Canvas(fw)
-    buf = (C.c_uint * (375 * 320))(*([0xffffffff] * (375 * 160) + [0xff0000ff] * (375 * 160)))
+    buf = (C.c_uint * (375 * 320))(*(page or [0xffffffff] * (375 * 160) + [0xff0000ff] * (375 * 160)))
     for off, v in ((O['LCD_W'], 375), (O['LCD_H'], 320), (O['LCD_LINE_LENGTH'], 4 * 375),
                    (O['LCD_FORMAT'], O['LCD_BGRA8888'])):
         C.c_int.from_buffer(canvas.lcd, off).value = v
@@ -3633,11 +3613,60 @@ def test_a_menu_sheet_recedes_the_page_and_frosts_it(fw, st):
 
 def test_a_menu_sheets_material_has_no_grain(fw, st):
     """The user's "No grain on frosted" (2026-11-20): over a page that is one colour across, a row of the sheet's
-    material is that one colour too, with no hashed +-3 levels in it."""
+    material has no hashed +-3 levels in it, only the dither's fixed 4 px pattern of two neighbouring levels."""
     ui, win, view, canvas, buf = sheet(fw, st)
     fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
     for y in (230, 250):
-        assert len({rgb(buf, x, y) for x in range(100, 276)}) == 1, y
+        row = [rgb(buf, x, y) for x in range(100, 276)]
+        assert row[4:] == row[:-4], y  # the same every 4 px
+        for p in range(3):
+            assert max(c[p] for c in row) - min(c[p] for c in row) <= 1, (y, p)
+
+
+def sheet_material(fw, st, page):
+    """The sheet's material over page (375 x 320 (r, g, b)), as rows of (r, g, b)."""
+    ui, win, view, canvas, buf = sheet(fw, st, page=[0xff000000 | r << 16 | g << 8 | b for r, g, b in page])
+    fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
+    return [[rgb(buf, x, y) for x in range(375)] for y in range(320)]
+
+
+def tile_means(m, y0, x0, x1, p):
+    """Channel p's mean over each 4 x 4 tile of m from row y0, along x0 to x1: what the eye sees of a dither."""
+    return [sum(m[y][x][p] for y in range(y0, y0 + 4) for x in range(tx, tx + 4)) / 16 for tx in range(x0, x1, 4)]
+
+
+def test_a_menu_sheets_material_over_one_colour_keeps_its_level(fw, st):
+    """Over a page of one colour, the material is that colour blurred (still itself), raised 1.6 times from its luma,
+    28% kept under 6% white, worked out exactly: each 4 x 4 tile of it averages that to within an eighth of a level
+    (the dither's 16ths and their rounding). Its steps kept whole levels, truncated, and drew it about 1.5 levels
+    darker."""
+    colour = (40, 90, 210)
+    m = sheet_material(fw, st, [colour] * (375 * 320))
+    luma = (77 * colour[0] + 150 * colour[1] + 29 * colour[2]) / 256
+    for p in range(3):
+        v = min(255.0, max(0.0, luma + (colour[p] - luma) * 410 / 256))
+        want = v * 72 / 256 * 241 / 256 + 255 * 15 / 256
+        for y0 in (160, 200, 236):  # clear of the page's black edges, which the blur reaches 60 px in from
+            for got in tile_means(m, y0, 100, 276, p):
+                assert abs(got - want) <= 1 / 8, (p, y0, got, want)
+
+
+def test_a_menu_sheets_material_over_a_gradient_has_no_bands(fw, st):
+    """A smooth page (red to blue across) darkened to 28% spans few levels, 18 of green across the screen: in whole
+    levels alone it drew bands up to 52 px wide. Dithered, the 4 x 4 tiles' means step along it a 16th at a time:
+    no 3 tiles running (12 px) average the same, and none is more than a level from the next."""
+    a, b = (220, 70, 40), (40, 90, 210)
+    row = [tuple(round(a[p] + (b[p] - a[p]) * x / 374) for p in range(3)) for x in range(375)]
+    m = sheet_material(fw, st, row * 320)
+    for p in range(3):
+        for y0 in (160, 200, 236):
+            means = tile_means(m, y0, 80, 296, p)
+            longest = run = 1
+            for u, v in zip(means, means[1:]):
+                run = run + 1 if u == v else 1
+                longest = max(longest, run)
+                assert abs(u - v) <= 1, (p, y0)
+            assert longest <= 2, (p, y0, longest)
 
 
 def test_a_menu_sheet_waits_for_a_whole_paint_to_make_its_material(fw, st):

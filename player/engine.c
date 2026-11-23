@@ -5,7 +5,8 @@
  *   {player-status\exit}      it played to its end
  *   {player-nextstatus\exit}  set-nexturl replaced it
  *   {player-stopstatus\exit}  mcl-stop
- *   {player-status\error}     it would not open, after /tmp/notfile or /tmp/notsupport is made for demo's dialog
+ *   {player-status\error}     it would not open or play, after /tmp/notfile or /tmp/notsupport is made for demo's
+ *                             dialog; none for a song a waiting set-songurl or mcl-stop has already replaced
  * A song preloaded by set-gapless is opened on a thread of its own while the one before plays, and starts on the frame
  * after that one's last, in the same PCM when rate, channels and width are the same. A preload that a queue edit, a
  * stop or a skip cancelled is closed by its thread when its open returns, and never played. */
@@ -24,7 +25,11 @@ static int out_way; /* the output way out was opened on */
 static int out_cut; /* out was dropped for a skip: its tail is not to be played out */
 
 enum { ENDED, NEXT, STOPPED, FAILED, MOVED /* reopen: opened for another output */ };
-enum { CAR_LOOK_MS = 250 }; /* how often a song playing looks for the car's wish (car_way) */
+/* How often a song playing looks for the car's wish (car_way): an open of /tmp/q2-iap.audio, which fails while no car
+ * asks. ponytail: 34 such opens in 10 s of a1 on the host, 0.7 ms of the 17.8 ms its syscalls took, made from the
+ * playback loop, which is awake anyway, so none is a wake-up; an inotify watch on /tmp would wake for every file
+ * written there (each app's .stream twice a second). A message from q2-iap would lift it. */
+enum { CAR_LOOK_MS = 250 };
 
 /* How a DSD file goes out on an output, as stock decides it at each file (0x4210d4-0x421a24): on Bluetooth as PCM;
  * on a Q2's own DAC (hardware type 17) as DoP whatever mcl-dsdmode says; elsewhere, a USB DAC, as mcl-dsdmode says. */
@@ -49,6 +54,21 @@ static void volume_at_start(int way) {
     ctl.volume_changed = 0;
     pthread_mutex_unlock(&ctl.mu);
     output_volume(out, on ? v : UNITY);
+}
+
+/* A song that would not open or play, with its path, in the unified log and so the Bluetooth event log
+ * (docs/internals.md#bluetooth-event-log): demo shows a dialog or moves on, and the drive of 2026-11-19 left some
+ * songs silent with no word of which. A URL's query is left out, as it carries the app's token. */
+static void log_failed(const char *what, const struct song *s, int error) {
+    char line[256];
+    const char *u = s->url;
+    const char *why = error == ERR_MISSING       ? "missing"
+                      : error == ERR_UNSUPPORTED ? "unsupported"
+                      : error == ERR_NONE        ? "the output would not open or take audio"
+                                                 : "other";
+    int n = snprintf(line, sizeof line, "q2player: %s (%s): %.*s", what, why,
+                     (int)strcspn(u, strncmp(u, "http", 4) ? "|" : "|?"), u);
+    plog('E', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
 }
 
 static void touch(const char *path) {
@@ -143,6 +163,22 @@ static void close_output(int drain) {
     out = NULL;
 }
 
+/* mcl-dropcar taken (docs/player.md#releasing-the-car), c->mu held: the request cleared, and 1 when the car's PCM is
+ * open, which the caller then closes (release_car) */
+static int car_release_taken(struct ctl *c) {
+    int r = c->car_release;
+    c->car_release = 0;
+    return r && out && out_way == 3;
+}
+/* The car's PCM closed at once, its unplayed frames dropped: the gadget's unbind waits for the last close of its card
+ * while it holds the UDC's lock. The car's file is left to its owners: the next write opens on the way it says. */
+static void release_car(void) {
+    output_drop(out);
+    close_output(0);
+    static const char line[] = "q2player: the car's PCM released"; /* stamped: the firmware times the unbind by it */
+    plog('I', line, sizeof line - 1);
+}
+
 /* ---- the Clicker's click with nothing playing (docs/internals.md#key-tone): a song paused keeps its PCM, whose
  * frames not yet heard are taken back (output_hold) and written again at the resume; with none, a PCM is opened for
  * the clicks, CLICK_RATE stereo S16 on the output demo chose, with the type of the last song's device. Either way
@@ -199,6 +235,43 @@ static void click_session(int way, int kind, int paused) {
     if (!paused) close_output(0);
 }
 
+/* ---- a USB DAC unplugged (docs/player.md#usb-dacs): its card is not there to open, or went under a write. The song
+ * is not reported as one that cannot play (each was, and demo's dialog ran through the queue, on 2026-11-22): it waits,
+ * position held, while demo's own detach moves the output (check_otg_status: the way back to the DAC and the song
+ * started again, paused) or the device comes back, looked for every GONE_LOOK_MS (output_present); the output's going
+ * is logged once (output.c say_gone). A preload, a Next, a stop or a new song are taken meanwhile. -1 once an output is
+ * open again (out, out_way and *way set), else how the song ends: NEXT, STOPPED, or FAILED for a song demo has
+ * already replaced, which is not reported. */
+enum { GONE_LOOK_MS = 250 };
+static int output_back(const struct pcm_format *f, int *way, const struct song *song) {
+    struct ctl *c = &ctl;
+    for (;;) {
+        struct timespec until;
+        clock_gettime(CLOCK_REALTIME, &until);
+        until.tv_nsec += GONE_LOOK_MS * 1000000L;
+        if (until.tv_nsec >= 1000000000L) until.tv_sec++, until.tv_nsec -= 1000000000L;
+        pthread_mutex_lock(&c->mu);
+        if (!c->play && !c->stop && !c->preload && !c->close_preload) pthread_cond_timedwait(&c->wake, &c->mu, &until);
+        int want = c->preload, unwant = c->close_preload, replaced = c->play && !c->next, w = car_way(c->outputway);
+        struct song ps = c->preload_song;
+        c->preload = c->close_preload = c->click = 0; /* a click has no output to sound in */
+        if (c->play && c->next) { pthread_mutex_unlock(&c->mu); return NEXT; }
+        if (c->stop) { c->stop = 0; pthread_mutex_unlock(&c->mu); return STOPPED; }
+        pthread_mutex_unlock(&c->mu);
+        if (unwant) preload_cancel();
+        if (want) preload_start(&ps);
+        if (replaced) return FAILED;
+        if (!output_present(w)) continue;
+        dac_song(w, f->dsd);
+        dac_mute(w);
+        if ((out = output_open(f, w, song->hw))) {
+            out_way = *way = w;
+            return -1;
+        }
+        if (!output_gone()) return FAILED; /* there, and refused: as any output that will not open */
+    }
+}
+
 /* Plays s to its end or to the request that cuts it short, through its DSP chain (dsp.c). The PCM stays open on
  * return. */
 static int play_through(struct source *s, const struct song *song, struct dsp *d, int untouched, struct stretch *sx);
@@ -217,6 +290,7 @@ static int play(struct source *s, const struct song *song) {
     pthread_mutex_unlock(&c->mu);
     stream_playing(source_stream(s)); /* get_cache_buffer reports this song's cache, or 0 */
     struct dsp *d = dsp_open(source_format(s), untouched, untouched ? 1 : source_replaygain(s, rg), info.length);
+    dsp_path(d, song->url); /* Smart Crossfade opens it again, ahead of its end */
     /* SCAN_FILE is there while the song playing can be scanned at speed (patch/seek.c looks at a hold's start) */
     struct stretch *sx = untouched ? NULL : stretch_open(source_format(s));
     if (sx) touch(SCAN_FILE);
@@ -317,8 +391,12 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
     }
     if (!out) {
         dac_mute(way);
-        if (!(out = output_open(f, way, song->hw))) return FAILED;
-        out_way = way;
+        if ((out = output_open(f, way, song->hw))) out_way = way;
+        else if (!output_gone()) return FAILED;
+        else {
+            int r = output_back(f, &way, song); /* a USB DAC unplugged: the song waits for an output */
+            if (r >= 0) return r;
+        }
         if (song->hw) last_hw = song->hw;
     }
     out_cut = 0;
@@ -327,14 +405,23 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
     int64_t origin = source_frames(s); /* frames of this song written to the PCM count from here */
     int64_t offset = origin;           /* and this is where in the song that was */
     int heard = 0, pausing = 0;
+    int64_t resume_at = -1; /* a car PCM released while paused (mcl-dropcar): the frame the song goes on from */
     int64_t car_look = now_ms();       /* when the car's wish (car_way) was last looked at */
 
     for (;;) {
         pthread_mutex_lock(&c->mu);
         while (c->paused && !(c->play && c->next) && !c->stop && !c->seek && !c->preload && !c->close_preload && !c->click) {
-            if (!pausing) dac_mute(way), output_pause(out, 1), pausing = 1;
+            if (car_release_taken(c)) { /* paused on the car: its PCM closed now, a new one opened at the resume */
+                if (!rw.on && !scan) resume_at = heard_at(s, sx, &rw, origin, offset) - output_held(out);
+                pthread_mutex_unlock(&c->mu);
+                release_car();
+                pthread_mutex_lock(&c->mu);
+                continue;
+            }
+            if (!pausing && out) dac_mute(way), output_pause(out, 1), pausing = 1;
             pthread_cond_wait(&c->wake, &c->mu);
         }
+        c->car_release = 0; /* while the song plays its writes go on: the unbind's -ENODEV ends the car's way (sink) */
         /* set-nexturl cuts the song. set-songurl alone does not: stock only notes it and plays it when this song
          * has ended (captured: fixtures/stock-replace.txt). demo sends it only when it believes nothing plays. */
         if (c->play && c->next) { pthread_mutex_unlock(&c->mu); return NEXT; }
@@ -346,6 +433,18 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
         c->seek = c->preload = c->close_preload = c->eq_changed = c->click = 0;
         int paused = c->paused;
         pthread_mutex_unlock(&c->mu);
+        if (!out) { /* released while paused: a PCM for the way the car's file says now, the song where it was heard */
+            way = car_way(c->outputway);
+            if (way == 3) output_car_song(f->rate, 0);
+            if (!(out = output_open(f, way, song->hw))) return FAILED;
+            out_way = way, pausing = 0;
+            volume_at_start(way);
+            if (resume_at >= 0 && source_seek_frame(s, resume_at) < 0) return ENDED;
+            resume_at = -1;
+            if (paused) output_pause(out, 1), pausing = 1;
+            else dac_unmute(way, 1);
+            origin = offset = source_frames(s);
+        }
 
         if (unwant) preload_cancel();
         if (want) preload_start(&ps);
@@ -406,11 +505,25 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
             if (metering) dsp_meter(f, untouched, data, n, uv);
             int w = output_write(out, data, n);
             if (w == OUTPUT_CAR_GONE) gone = 1, output_car_gone(); /* the car's file or its card gone: off its way at once */
-            else if (w < 0) return FAILED;
+            else if (w == OUTPUT_GONE) { /* a USB DAC unplugged: on from the frame heard once an output is back */
+                int64_t at = rw.on || scan ? -1 : heard_at(s, sx, &rw, origin, offset);
+                dac_mute(way);
+                close_output(0);
+                int r = output_back(f, &way, song);
+                if (r >= 0) return r;
+                volume_at_start(way);
+                if (at >= 0 && source_seek_frame(s, at) < 0) return ENDED;
+                if (sx) stretch_reset(sx);
+                origin = offset = source_frames(s);
+                pausing = 0;
+                dac_unmute(way, 1);
+                continue;
+            } else if (w < 0) return FAILED;
         }
-        if (way == 3 && !gone) car_trace_tick(out, 0); /* a line a second while the car plays (docs/iphone-mode.md#car-trace) */
+        if (way == 3 && !gone) car_trace_tick(out, 0); /* each second looked at while the car plays (docs/iphone-mode.md#car-trace) */
         /* The car asks for its audio, or stops, while a song plays: the song moves to the other output where it is,
-         * as a seek moves (the PCM's unplayed frames, under half a second, are not heard), as the car changes source. */
+         * as a seek moves (the PCM's unplayed frames, under half a second, are not heard), as the car changes source.
+         * With nothing else to sound, demo then pauses it (patch/usb_car.c usb_car_gone). */
         int64_t now = now_ms();
         if (gone || now - car_look >= CAR_LOOK_MS) {
             car_look = now;
@@ -468,6 +581,53 @@ static void settle_preload(int wait) {
     }
 }
 
+/* ---- another source's sound for the car (feed.c, docs/iphone-mode.md#other-sources-over-usb) ----
+ * With nothing of its own playing and the car's way the output, the player writes what q2video sent to the feed to the
+ * car's PCM, at FEED_RATE, unity: the same PCM rules as a song's (a dry ring is the silence the never-stopped PCM
+ * plays, output.c alsa_sw), and the same close (its silence written out first). Only FEED_LEAD_MS is written ahead of
+ * the car, as a scan's SCAN_LEAD_MS, not the PCM's half second: a video's sound then trails its picture by the FIFO,
+ * the ring and this lead, under 0.3 s. A song, a click, another way or the feed quiet for FEED_END_MS (the source
+ * ended, paused or gone) ends it. */
+enum { FEED_END_MS = 2000, FEED_TICK = 1024, FEED_LEAD_MS = 150 };
+static void feed_session(void) {
+    struct ctl *c = &ctl;
+    struct pcm_format f = {FEED_RATE, 2, 2, 0, DSD_PCM};
+    static uint8_t buf[FEED_TICK * 4];
+    output_car_song(FEED_RATE, 0);
+    if (!(out = output_open(&f, 3, last_hw))) return;
+    out_way = 3;
+    output_volume(out, UNITY);
+    fprintf(stderr, "q2player: the car plays another source\n");
+    for (;;) {
+        pthread_mutex_lock(&c->mu);
+        c->car_release = 0; /* its writes go on: the unbind's -ENODEV ends the session (sink) */
+        int other = c->play || c->click || car_way(c->outputway) != 3;
+        pthread_mutex_unlock(&c->mu);
+        if (other) break;
+        if (output_delay(out) > (int64_t)FEED_RATE * FEED_LEAD_MS / 1000) { /* far enough ahead of the car */
+            feed_pulling(); /* it is taking the frames: the source is paced, not dropped */
+            usleep(5000);
+            continue;
+        }
+        int n = feed_take(buf, FEED_TICK);
+        if (n > 0) {
+            int w = output_write(out, buf, n);
+            if (w == OUTPUT_CAR_GONE) {
+                output_car_gone();
+                break;
+            }
+            if (w < 0) break;
+            car_trace_tick(out, 0); /* the car's trace for another source too (docs/iphone-mode.md#car-trace) */
+            continue;
+        }
+        if (feed_heard_ms() > FEED_END_MS) break;
+        feed_pulling(); /* the car still takes it: the source is paced, not dropped */
+        usleep(10000);
+    }
+    fprintf(stderr, "q2player: the car's other source ended\n");
+    close_output(0);
+}
+
 void *engine_thread(void *unused) {
     struct ctl *c = &ctl;
     struct source *cur = NULL;
@@ -479,7 +639,15 @@ void *engine_thread(void *unused) {
             c->state = IDLE, c->has_info = 0;
             ipc_status_note(c);
             while (!c->play) {
-                c->stop = c->seek = c->preload = c->close_preload = 0; /* nothing is playing: stock answers none of these */
+                c->stop = c->stop_first = c->seek = c->preload = c->close_preload = 0; /* nothing is playing: stock answers none of these */
+                if (car_way(c->outputway) == 3 && feed_frames() > 0) { /* another source for the car */
+                    pthread_mutex_unlock(&c->mu);
+                    if (out) output_drop(out);
+                    close_output(0);
+                    feed_session();
+                    pthread_mutex_lock(&c->mu);
+                    continue;
+                }
                 if (c->click) { /* the Clicker's, with nothing open: a PCM of its own for it */
                     int kind = c->click, way = car_way(c->outputway);
                     c->click = 0;
@@ -490,13 +658,21 @@ void *engine_thread(void *unused) {
                     pthread_mutex_lock(&c->mu);
                     continue;
                 }
+                if (car_release_taken(c)) { /* a skip's car PCM kept open: closed now */
+                    pthread_mutex_unlock(&c->mu);
+                    release_car();
+                    pthread_mutex_lock(&c->mu);
+                    continue;
+                }
                 pthread_cond_wait(&c->wake, &c->mu);
             }
-            /* An mcl-stop after the song's command (a set-songurl or set-nexturl clears an older one: ipc.c) came before
+            /* An mcl-stop after the song's command (a set-songurl or set-nexturl clears an older one with no song
+             * playing, and marks it stop_first with one: ipc.c) came before
              * this thread took the song: nothing plays, as stock's answers. demo sent the two that close when a press of
              * a server song stopped the queue stock's player_start played again; it sends neither now (patch/playback.c
-             * playback_start_refused), and a stop is still held so. */
-            if (c->stop) {
+             * playback_start_refused), and a stop is still held so. A stop that came before the song's command
+             * (stop_first) was the song before's, which has ended: this song is taken. */
+            if (c->stop && !c->stop_first) {
                 c->play = c->next = c->stop = c->seek = c->paused = c->play_paused = c->cut = 0;
                 pthread_mutex_unlock(&c->mu);
                 if (out) dac_mute(out_way), output_drop(out);
@@ -507,7 +683,7 @@ void *engine_thread(void *unused) {
             song = c->play_song;
             song.dsd = dsd_out(car_way(c->outputway), song.hw, c->dsdmode);
             c->paused = c->play_paused; /* a pause after the song's command holds for it (ipc.c) */
-            c->play = c->next = c->seek = c->play_paused = c->cut = 0;
+            c->play = c->next = c->stop = c->stop_first = c->seek = c->play_paused = c->cut = 0;
             c->state = OPENING;
             ipc_status_note(c);
             pthread_mutex_unlock(&c->mu);
@@ -518,14 +694,20 @@ void *engine_thread(void *unused) {
             if (!cur) {
                 close_output(0);
                 pthread_mutex_lock(&c->mu);
-                int stopped = c->stop, skipped = c->next;
-                if (stopped) c->play = c->next = 0;
+                int stopped = c->stop, skipped = c->next, replaced = c->play;
+                if (stopped && !c->stop_first) c->play = c->next = 0;
+                if (stopped) c->stop = c->stop_first = 0; /* a song waiting behind a stop (stop_first) is taken next */
                 pthread_mutex_unlock(&c->mu);
                 if (stopped || skipped) { /* given up, not failed: answered as a song cut while it played */
                     ipc_event(stopped ? "{player-stopstatus\\exit}" : "{player-nextstatus\\exit}");
                     continue;
                 }
-                touch(error == ERR_MISSING ? "/tmp/notfile" : "/tmp/notsupport");
+                if (replaced) { /* a set-songurl came while it opened: that song is demo's now, as in FAILED below */
+                    log_failed("open failed, already replaced", &song, error);
+                    continue;
+                }
+                log_failed("open failed", &song, error);
+                touch(error == ERR_MISSING ? PEQ_ROOT "/tmp/notfile" : PEQ_ROOT "/tmp/notsupport");
                 ipc_event("{player-status\\error}");
                 continue;
             }
@@ -554,7 +736,9 @@ void *engine_thread(void *unused) {
         pthread_mutex_lock(&c->mu);
         int skipped = c->next, waiting = c->play, stopping = c->stop;
         c->has_info = 0;
-        if (why == STOPPED) c->play = c->next = 0; /* a stop also forgets a song that was waiting, as stock's does */
+        /* a stop also forgets a song that was waiting, as stock's does, unless that song's command came after it */
+        if (why == STOPPED && !c->stop_first) c->play = c->next = 0;
+        if (why == STOPPED) c->stop_first = 0;
         ipc_status_note(c);
         pthread_mutex_unlock(&c->mu);
         switch (why) {
@@ -603,15 +787,22 @@ void *engine_thread(void *unused) {
             song.dsd = dsd_out(car_way(c->outputway), song.hw, c->dsdmode);
             pthread_mutex_unlock(&c->mu);
             if ((cur = source_open(&song, &error, NULL))) break;
+            log_failed("open for the new output failed", &song, error);
             close_output(0);
-            touch("/tmp/notsupport");
+            touch(PEQ_ROOT "/tmp/notsupport");
             ipc_event("{player-status\\error}");
             break;
         }
         case FAILED:
+            log_failed(waiting || stopping ? "play failed, already replaced" : "play failed", &song, ERR_NONE); /* output_open or a write failed */
             close_output(0);
             preload_cancel();
-            touch("/tmp/notsupport");
+            /* A song demo has already replaced (a set-songurl or a stop that came while this one's write was failing:
+             * a Bluetooth headset lost mid-song, whose PCM bt_reopen waits up to 5 s for, while demo reloads the song
+             * paused) is not reported: demo's error dialog would advance the queue and start the next song playing,
+             * DAC powered, under a pause (docs/player-plan.md#a-failure-already-replaced). The waiting command is taken next. */
+            if (waiting || stopping) break;
+            touch(PEQ_ROOT "/tmp/notsupport");
             ipc_event("{player-status\\error}");
             break;
         }

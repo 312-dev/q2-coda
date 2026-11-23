@@ -43,13 +43,24 @@ static int bt_connected(char *mac) {
     return status == 3;
 }
 void bt_trace_why(const char *why, const char *mac); /* bt_trace.c */
-/* Auto-link would append its target after a connected incoming link; its failure clears both. A
- * connect it goes ahead with is logged as auto, or usb from headset_bt_usb
- * (docs/internals.md#bluetooth-connection-trace). */
+void bt_trace_autolink(const char *why, const char *target, const char *connected, int go);
+const char *usb_car_name(void);                           /* usb_car.c */
+int bt_dev_find(const char *mac);                         /* bt_ui.c */
+const char *bt_dev_name(int i);
+/* Auto-link would append its target after a connected incoming link; its failure clears both. Each
+ * decision is logged with its target and why (bt_trace_autolink), and a connect it goes ahead with
+ * as auto, or usb from headset_bt_usb (docs/internals.md#bluetooth-connection-trace). */
 int headset_bt_autolink(char *address) {
     char item[32];
-    int go = !bt_connected(item) && checkPairDev(address);
-    if (go) bt_trace_why(hl.usb ? "usb" : "auto", address);
+    int linked = bt_connected(item);
+    const char *why = hl.usb ? "usb" : "auto", *car = usb_car_name(), *name = bt_dev_name(bt_dev_find(address));
+    if (!linked && car && name && !tk_strcmp(car, name)) { /* the car on the cable plays the Q2 over USB already */
+        bt_trace_autolink(why, address, 0, -1);
+        return 0;
+    }
+    int go = !linked && checkPairDev(address);
+    bt_trace_autolink(why, address, linked ? item : 0, go);
+    if (go) bt_trace_why(why, address);
     return go;
 }
 /* A cable in (usb_ui.c usb_ui_status): stock's auto-link once more, as at Bluetooth on, since a car
@@ -66,10 +77,13 @@ void headset_bt_usb(void) {
     autoLinkBluetooth();
     hl.usb = 0;
 }
+void bt_pair_init(void); /* bt_pair.c */
+int bt_pair_prompt(int type, const char *passkey, void *unused);
 /* The control thread can discover a boot reconnect before openBluetooth powers the radio. */
 int headset_bt_init(void *thread) {
     initBluetoothParam(); /* Lists must exist before callbacks; the later reset would erase links. */
-    btctl_set_prompt_callback((void *)0x4f9d20, 0);
+    bt_pair_init();
+    btctl_set_prompt_callback((void *)bt_pair_prompt, 0); /* in place of stock's 0x4f9d20 */
     headset_status_register();
     btctl_set_a2dp_callback((void *)btrecvA2dpFunc, (void *)0x01020304);
     return btctl_create_daemon_thread(thread);
@@ -92,13 +106,14 @@ void headset_manual(void) {
     }
 }
 /* player_play_pause. Headphones required with none to play to: nothing starts, as stock's own
- * Play key (playpause_quick_click, 0x4f2fc8), which toasts so; a pause always goes through.
+ * Play key (playpause_quick_click, 0x4f2fc8), which toasts so, and a Play while USB audio connects
+ * is kept for it (usb_otg.c usb_otg_forbid_resume); a pause always goes through.
  * ponytail: a card app's own player and a card app's song through player_start aren't asked
- * (docs/internals.md, Headphones Required); gate addon.c's starts if that matters. */
+ * (docs/internals.md#no-playback-without-an-output); gate addon.c's starts if that matters. */
 int ringnav_play_pause(void) {
     headset_manual();
     int status = mclGetPlayStatus();
-    if (status != 2 && check_forbid_play_no_headset(0)) return 0;
+    if (status != 2 && usb_otg_forbid_resume()) return 0;
     if (status == 1) press_stamp(); /* Play from a stop starts a track */
     return stock_pause_trampoline();
 }
@@ -382,7 +397,25 @@ void headset_ears(unsigned report) {
 static int connect_hold(unsigned now) {
     return hs.linked && now - hs.linked_at < CONNECT_HOLD_MS && !ringnav_bt_resume();
 }
+extern void ulog(char level, const char *src, const char *msg); /* ulog.c */
+/* Each key a Bluetooth peer sends, in the unified log with its address and what played: the drive
+ * of 2026-11-22 paused twice with the car on A2DP and nothing on the Q2 said who asked. */
+static void avrcp_say(int code) {
+    const char *what = code == 163                 ? "next"
+                       : code == 165               ? "previous"
+                       : code == 164               ? "play/pause"
+                       : code == 200 || code == 207 ? "play"
+                       : code == 119 || code == 201 ? "pause"
+                       : code == 166               ? "stop"
+                                                   : "key";
+    const unsigned char *a = hs.address;
+    char line[80];
+    snprintf(line, sizeof line, "avrcp %s (%d) from %02X:%02X:%02X:%02X:%02X:%02X, the player %d", what, code,
+             a[9], a[8], a[7], a[6], a[5], a[4], media_status());
+    ulog('I', "bt", line);
+}
 void headset_command(int code) {
+    avrcp_say(code);
     unsigned now = time_now_ms();
     if (hs.last_key == code && now - hs.last_at < 150) return;
     hs.last_key = code;
