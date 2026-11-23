@@ -466,3 +466,50 @@ def test_radio_starts_stops_and_starts_again_and_a_slow_one_never_replaces_a_lat
         f.step()
         time.sleep(0.1)
     assert seam.sid(seam.now() or b'') == 's31' and not seam.state().get('radio'), (seam.now(), seam.state())
+
+
+# Bugs this seam found, each a failing test marked xfail(strict): it turns into an unexpected pass, and fails the
+# run, the moment the owner's fix lands, so the mark is taken off with the fix.
+
+def up_next(seam, most=16):
+    out = (C.c_uint * most)()
+    k = seam.fw.fn('playback_upcoming', C.c_uint, C.c_void_p, C.c_uint)(out, most)
+    q = seam.fwr.queued()
+    return [seam.sid(q[i]) for i in out[:k]]
+
+
+# Under Shuffle Songs, Next on the song at the queue's last index (s4 of s1-s4, Up Next s2 then s3) is taken by
+# addon_next_waits (addon.c), which waits for and plays the list's next song not yet queued (s5): Up Next said s2,
+# Next played s5, and s5 then stays unplayed in the shuffle's order, so it plays again in the same pass.
+@pytest.mark.xfail(strict=True, reason='BUG (firmware, addon.c addon_next_waits): under Shuffle, Next on the last '
+                   'queued song plays the list\'s next, not Up Next\'s first')
+@pytest.mark.library(songs=24, album=12)
+def test_under_shuffle_next_plays_up_nexts_first_song_at_the_queues_last_index_too(seam):
+    seam.fwr.settings[b'AHEAD'] = b'3'
+    seam.start()
+    seam.press(seam.album_rows(0), 0)
+    f = seam.fwr
+    f.until('s1 to s4 queued', lambda: len(f.queued()) >= 4, timeout=30)
+    settle(seam)
+    seam.fw.var('playback__rng', C.c_uint).value = 0x2545f491  # the order s1, s4, s2, s3 (2026-11-22's runs)
+    assert seam.fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(0, SHUFFLE_SONGS)
+    for _ in range(6):
+        f.until('.playing naming the song playing', lambda: seam.playing() == seam.now(), timeout=10)
+        want, cur = up_next(seam)[0], seam.playing()
+        seam.next()
+        f.until(f'Next from {seam.sid(cur)}', lambda: seam.playing() != cur and seam.playing() == seam.now(), timeout=30)
+        assert seam.sid(seam.playing()) == want, f'Up Next said {want}; Next played {seam.sid(seam.playing())}'
+
+
+# Download Ahead Off (n=0: "the app fetches only the song playing", docs/server-library.md): the firmware writes
+# its first .ahead only once the list's first song is whole and queued; until then the app, seeing no .ahead for
+# the list, keeps its default of two ahead, so every list started with Download Ahead Off still fetches two songs.
+@pytest.mark.xfail(strict=True, reason='BUG (contract, firmware and app): Download Ahead Off still fetches the two '
+                   'songs after a list\'s first, before the firmware\'s first .ahead')
+def test_download_ahead_off_fetches_only_the_song_playing(seam):
+    seam.fwr.settings[b'AHEAD'] = b'0'
+    started_album(seam)
+    f = seam.fwr
+    f.until('.ahead says Off', lambda: (f.tmp('q2-subsonic.ahead') or b'').split(b'\n')[0].endswith(b'n=0'), timeout=10)
+    settle(seam)
+    assert [s for s in ('s12', 's13') if seam.fetched(s)] == [], 'fetched ahead with Download Ahead Off'
