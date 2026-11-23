@@ -39,6 +39,15 @@ def reference(path, fmt='s16le'):
     return subprocess.run(['ffmpeg', '-v', 'error', '-cpuflags', '0', *decoder, '-i', str(path), '-f', fmt, '-'], check=True, capture_output=True).stdout
 
 
+def put(path, text):
+    """text as path's whole content, through a temporary name, as a card app and demo write the files the player
+    reads while it runs: written in place, a read in the truncate window finds it empty (a growing song's .stream
+    read so ends the song at the bytes it has)."""
+    tmp = pathlib.Path(f'{path}.tmp')
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
 def play(player, songs, scenario, out, speed=1, env=None):
     s = fakedemo.Session(out)
     s.music = songs
@@ -413,7 +422,7 @@ def grow(player, songs, out, head, land_at, extra=(), seektable=False, part=None
     seen, have = [], [head]
 
     def line(state, n):
-        status.write_text(f'#Q2STREAM/1\tseq=1\n{state}\t{n}\t{len(whole)}\t20000\t/mnt/mmc/.foo/grow.flac\n')
+        put(status, f'#Q2STREAM/1\tseq=1\n{state}\t{n}\t{len(whole)}\t20000\t/mnt/mmc/.foo/grow.flac\n')
 
     def beat(s):  # the app rewrites its line twice a second while the song arrives
         if have[0] < len(whole): line('get', have[0])
@@ -1016,7 +1025,7 @@ def car_player():
 def car_steps(songs, car, at_on=None, at_off=None, flag=0):
     """Bluetooth at half volume (the car plays at unity whatever it is), a1 then c96; the car's file written at at_on
     and removed at at_off (None: there from the start, and to the end)."""
-    on = lambda s: car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    on = lambda s: put(car, 'hw:CARD=UAC1Gadget,0\n44100\n')
     off = lambda s: car.unlink()
     steps = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'),
              (0.1, fakedemo.vol(50, 50)), (1.0, fakedemo.song('set-songurl', f'{songs}/a1.flac', flag=flag))]
@@ -1104,14 +1113,14 @@ class Car:
         import threading
         d.mkdir(parents=True, exist_ok=True)
         self.asked, self.p_rate, self.follow, self.delay = d/'q2-iap.rate', d/'p_rate', follow, delay_ms / 1000
-        self.p_rate.write_text(f'{start}\n')
+        put(self.p_rate, f'{start}\n')
         self.asked.unlink(missing_ok=True)
         self.seen, self.stop = [], threading.Event()
         threading.Thread(target=self.run, daemon=True).start()
 
     def env(self): return {'Q2PLAYER_CAR_RATE': str(self.asked), 'Q2PLAYER_P_RATE': str(self.p_rate)}
 
-    def set(self, rate): self.p_rate.write_text(f'{rate}\n')
+    def set(self, rate): put(self.p_rate, f'{rate}\n')
 
     def run(self):
         import time
@@ -1230,7 +1239,7 @@ def test_car_trace(player, songs, tmp):
     whole, path = (songs/'a1.flac').read_bytes(), card/'grow.flac'
     head = len(whole) // 4
     path.write_bytes(whole[:head])
-    line = lambda state, n: status.write_text(f'#Q2STREAM/1\tseq=1\n{state}\t{n}\t{len(whole)}\t20000\t/mnt/mmc/.foo/grow.flac\n')
+    line = lambda state, n: put(status, f'#Q2STREAM/1\tseq=1\n{state}\t{n}\t{len(whole)}\t20000\t/mnt/mmc/.foo/grow.flac\n')
     beat = lambda s: line('get', head)  # the app's line, rewritten twice a second while the song arrives
 
     def land(s):
