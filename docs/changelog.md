@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - App sign-in: the QR code page shows a code of any size an app sends. A long sign-in link stayed on "No code yet".
   - Home: the album art slideshow beside the main menu now shows your server's albums too. With a library that is all on a server, it showed nothing.
   - Games: Games lists Bricks alone (then any games on your card). Sudoku, Vortex, Solitaire and Snake are left out of this build while the new games are finished; a game in progress or a best score you had stays saved for when they return.
   - Car Audio: Radio, Internet Radio, Videos and Spotify now play through the car's USB too, where they went to Bluetooth or nowhere while the car listened to USB.

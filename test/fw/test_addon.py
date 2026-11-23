@@ -19,7 +19,6 @@ APPS_MAX = 8
 REPLY_MAX = 64 << 10
 ADDON_ROWS, ADDON_PAGES, ADDON_DEPTH = 50, 10, 6
 M3U_MAX = 256 << 10
-QR_HEX = 640
 LIB_MAX = 32 << 10
 LIB_DIR = '/mnt/mmc/_explaylist_data/'
 SCOPE_MAX = 131072
@@ -87,11 +86,22 @@ class Pg(C.Structure):
                 ('hold', C.c_byte)]
 
 
+QR_MAX = 177
+QR_HEX = (QR_MAX + 3) // 4 * QR_MAX + 1
+
+
 class Qp(C.Structure):
+    """addon.c's qr_page, the QR page's state, on the heap while the page is open (qp)."""
     _fields_ = [('page', C.c_void_p), ('view', C.c_void_p), *((n, C.c_uint) for n in ('timer', 'leave', 'done', 'seen')),
                 ('state', C.c_void_p), ('marker', C.c_char * 48), ('name', C.c_char * 32), ('size', C.c_int), ('code', C.c_int),
-                ('hex', C.c_void_p), ('step', C.c_char * 8), ('title', C.c_char * 64), ('line', C.c_char * 96),
-                ('addr', C.c_char * 64), ('pin', C.c_char * 16), ('note', C.c_char * 128)]
+                ('step', C.c_char * 8), ('title', C.c_char * 64), ('line', C.c_char * 96),
+                ('addr', C.c_char * 64), ('pin', C.c_char * 16), ('note', C.c_char * 128), ('hex', C.c_char * QR_HEX)]
+
+
+def qp_of(fw):
+    """The QR page's state, None while no page is open."""
+    at = fw.var('addon__qp', C.c_void_p).value
+    return Qp.from_address(at) if at else None
 
 
 class Taken(C.Structure):
@@ -3214,24 +3224,23 @@ def test_an_action_whose_refresh_makes_its_row_remote_opens_the_code(fw):
     remote = row_of(b'', b'Sign In', b'', kind=b'remote')
     p = live(fw, [row_of(b'x', b'Other', b'', kind=b'action'), row_of(b'signin', b'Sign In', b'', kind=b'action')])
     p.world.files[b'/tmp/q2-foo.state'] = qr_state()
-    qp = fw.var('addon__qp', Qp)
     p.sel = 1
     p.click(1)
     p.answer()
     code = block(fw, size=4096)
     fw.mock('window_create', lambda *_: code)
     p.answer(msg=b'refresh', rows=[row_of(b'x', b'Other', b'', kind=b'action'), remote])
+    qp = qp_of(fw)
     assert qp.page == code and C.string_at(qp.state) == b'/tmp/q2-foo.state' and p.pg.qrnext == 0  # once only
 
 
 def test_an_action_whose_refresh_leaves_another_row_under_the_cursor_opens_nothing(fw):
     p = live(fw, [row_of(b'signin', b'Sign In', b'', kind=b'action'), row_of(b'x', b'Other', b'', kind=b'action')])
-    qp = fw.var('addon__qp', Qp)
     p.sel = 1
     p.click(1)
     p.answer()
     p.answer(msg=b'refresh', rows=[row_of(b'', b'Sign In', b'', kind=b'remote'), row_of(b'x', b'Other', b'', kind=b'action')])
-    assert not qp.page and p.pg.qrnext == 0
+    assert not qp_of(fw) and p.pg.qrnext == 0
 
 
 def test_a_press_while_a_live_level_is_asked_again_takes_its_place(fw):
@@ -4217,8 +4226,8 @@ def test_a_remote_row_opens_the_apps_code_over_its_page(fw):
     code = block(fw, size=4096)
     fw.mock('window_create', lambda *_: code)
     p.click(0)
-    qp = fw.var('addon__qp', Qp)
-    assert qp.page == code and C.string_at(qp.state) == b'/tmp/q2-foo.state' and C.string_at(qp.hex) == HEX21
+    qp = qp_of(fw)
+    assert qp.page == code and C.string_at(qp.state) == b'/tmp/q2-foo.state' and qp.hex == HEX21
     assert p.pg.page == p.page and p.pg.depth == 1 and p.backs == 0
 
 
@@ -4519,9 +4528,8 @@ def test_a_row_past_the_list_opens_nothing(fw):
 def test_a_qr_app_shows_its_code_at_the_first_answer(fw):
     p = Page(fw, b'name=Foo\nqr=1\n')
     del p.world.files[b'/tmp/q2-foo']  # not running yet, so it starts
-    qp = fw.var('addon__qp', Qp)
     p.answer(rows=[item(1)])
-    assert qp.page and p.pg.code == 0
+    assert qp_of(fw).page and p.pg.code == 0
 
 
 class Qr:
@@ -4537,8 +4545,11 @@ class Qr:
         page = page_block(fw)
         fw.mock('window_create', lambda *_: page)
         fw.mock('widget_factory_create_widget', widget)
-        self.qp = fw.var('addon__qp', Qp)
         fw.fn('addon__qr_open', None, C.c_char_p, C.c_char_p)(b'/tmp/q2-a.state', b'Title')
+
+    @property
+    def qp(self):
+        return qp_of(self.fw)
 
     def again(self, raw):
         self.world.files[b'/tmp/q2-a.state'] = raw
@@ -4569,7 +4580,7 @@ def qr_state(size=21, code=HEX21, addr=b'192.168.1.2:8080', pin=b'548001', note=
 
 def test_a_code_shows_with_its_address_and_spaced_pin(fw):
     q = Qr(fw, qr_state())
-    assert q.code and C.string_at(q.qp.hex) == HEX21 and q.qp.size == 21
+    assert q.code and q.qp.hex == HEX21 and q.qp.size == 21
     assert q.said() == ['Hi', 'or open 192.168.1.2:8080  \u00b7  PIN 548 001']  # the app's note, then where
     q.again(qr_state(note=b''))
     assert q.said()[0] == 'Scan with your phone'
@@ -4596,9 +4607,24 @@ def test_no_code_says_why(fw, raw, say):
     assert not q.code and say in q.said()
 
 
-def test_a_code_longer_than_its_buffer_is_cut_and_never_shown(fw):
-    q = Qr(fw, qr_state(size=61, code=b'f' * (16 * 61)))
-    assert not q.code and len(C.string_at(q.qp.hex)) < QR_HEX
+@pytest.mark.parametrize('size', (53, 101, 177))
+def test_a_code_of_any_version_the_app_sends_shows(fw, size):
+    """q2-subsonic's encoder (internal/qr) takes the smallest version that holds the URL, up to 40 (177 modules):
+    a long sign-in URL's version 9 (53) or more is drawn, every module inside the plate, not "No code yet"."""
+    digits = (size + 3) // 4
+    q = Qr(fw, qr_state(size=size, code=b'f' * (digits * size)))
+    assert q.code and q.qp.size == size
+    plates, fills = q.paint()
+    rects = [f[:4] for f in fills]
+    px, py, pw, ph = plates[0][:4]
+    assert len(rects) == size  # one run a row: every module dark
+    assert all(px <= x and x + w <= px + pw and py <= y and y + h <= py + ph for x, y, w, h in rects)
+    assert all(w == rects[0][2] and w >= size and w % size == 0 for x, y, w, h in rects)  # whole pixels a module
+
+
+def test_a_code_longer_than_the_largest_version_is_never_shown(fw):
+    q = Qr(fw, qr_state(size=181, code=b'f' * (46 * 181)))
+    assert not q.code and 'No code yet' in q.said()
 
 
 @pytest.mark.parametrize('state', [
@@ -4623,7 +4649,7 @@ def test_the_same_file_again_draws_nothing_new(fw):
 def test_closing_the_code_frees_it(fw):
     q = Qr(fw, qr_state())
     fw.fn('addon__qr_closed', C.c_int, C.c_void_p, C.c_void_p)(None, None)
-    assert not q.qp.page and not q.qp.hex
+    assert not q.qp  # the page's state, the code's rows with it
 
 
 def test_the_page_keeps_its_marker_while_open(fw):
@@ -4756,8 +4782,7 @@ def test_a_code_page_that_cant_open_keeps_nothing(fw):
     World(fw)
     fw.mock('window_create', lambda *_: 0)
     fw.fn('addon__qr_open', None, C.c_char_p, C.c_char_p)(b'/tmp/q2-a.state', b'Title')
-    qp = fw.var('addon__qp', Qp)
-    assert not qp.page and not qp.hex and not qp.timer
+    assert not qp_of(fw)
 
 
 def drawn(fw, paint, rounds=True):
