@@ -16,7 +16,7 @@
 # gone, which is when demo may start another gadget. The log is /mnt/mmc/.q2muse/logs/q2car.log (Send Logs takes
 # it); the kernel's last lines go to q2car.log.dmesg at the end. At the next cable a car's log is kept as
 # q2car.1.log, the older ones moving to .2, .3 and on, the oldest going once they pass CARLOG_MAX bytes together
-# or CARLOG_DAYS days (rotate); a computer's or a charger's is kept only until the next, as q2car.other.log, so a
+# (the newest CARLOG_KEEP whatever their size) or CARLOG_DAYS days (rotate); a computer's or a charger's is kept only until the next, as q2car.other.log, so a
 # computer plugged in to read the logs never pushes a drive's out.
 # Each cable's summary line and the module's counters at its end are added to q2car-summary.log (SUMMARY), which
 # is never rotated, only cut to its newer half past SUMMARY_MAX bytes, so a drive's cables are all in one file.
@@ -26,12 +26,12 @@ STATE=/tmp/q2car.state
 RELINK=/tmp/q2car.relink # q2-iap's note of a relink under way (patch/usb_car.c holds its pause for it)
 CFS=/sys/kernel/config
 G=$CFS/usb_gadget/q2car
-FFS=/dev/usb-ffs
+FFS=${Q2CAR_FFS:-/dev/usb-ffs}
 SERIAL=/mnt/data/q2-iap.serial
 MODULE=/module_driver/usb_f_uac1.ko
 DAEMON=/usr/bin/q2-iap
 ADBG=/usr/bin/q2adb-gadget
-LOGDIR=${Q2CAR_LOGDIR:-/mnt/mmc/.q2muse/logs} # Q2CAR_RUN, Q2CAR_LOGDIR, Q2CAR_PCM, Q2CAR_PLAYER: test/iap_probe.py
+LOGDIR=${Q2CAR_LOGDIR:-/mnt/mmc/.q2muse/logs} # Q2CAR_RUN, _LOGDIR, _PCM, _PLAYER, _FFS: test/iap_probe.py
 PCM=${Q2CAR_PCM:-/proc/asound/UAC1Gadget/pcm0p/sub0/status} # "closed" once nothing has the car's PCM open
 PLAYER=${Q2CAR_PLAYER:-hciplayer}                           # q2player, by stock's player's name
 mkdir -p "$RUN"
@@ -40,7 +40,8 @@ LOG=$LOGDIR/q2car.log
 SUMMARY=$LOGDIR/q2car-summary.log
 SUMMARY_MAX=262144
 RELINKS=3
-CARLOG_MAX=10485760 # the cars' logs together, bytes
+CARLOG_MAX=${Q2CAR_CARLOG_MAX:-41943040} # the cars' logs together, bytes: three of q2-iap's longest (its --log-cap, 12 MB) and more
+CARLOG_KEEP=2       # the newest cars' logs kept whatever their size: the last drive's beside this one's
 CARLOG_DAYS=7
 
 up() { cut -d' ' -f1 /proc/uptime; }
@@ -132,6 +133,22 @@ release() {
     if pcm_open; then log "the car's PCM still open after 2 s: the gadget removed anyway"; else log "the car's PCM released in ${i}00 ms"; fi
 }
 
+# The processes with a file open under $1, by pid.
+holders() {
+    for p in /proc/[0-9]*; do
+        ls -l $p/fd 2>/dev/null | grep -q " $1/" && printf '%s ' "${p#/proc/}"
+    done
+}
+
+# The four FunctionFS mounts gone; one that will not go says so, with who holds it (a relink cannot start over it).
+ffs_unmount() {
+    for n in 1 2 3 4; do
+        mountpoint -q $FFS/iap$n || continue
+        umount $FFS/iap$n 2>>"$LOG" && continue
+        log "could not unmount $FFS/iap$n: busy (held by: $(holders $FFS/iap$n))"
+    done
+}
+
 # The gadget gone, configfs's way, and configfs unmounted, so stock's storage and DAC scripts can start theirs. Safe
 # with nothing there.
 gadget_down() {
@@ -146,7 +163,7 @@ gadget_down() {
         alive "$p" && kill -9 "$p"
     fi
     rm -f $RUN/daemon.pid /tmp/q2-iap.audio
-    for n in 1 2 3 4; do mountpoint -q $FFS/iap$n && umount $FFS/iap$n; done
+    ffs_unmount
     if [ -d $G ]; then
         rm -f $G/configs/c.*/ffs.c* $G/configs/c.*/uac1.car
         rmdir $G/configs/c.*/strings/0x409 $G/configs/c.* 2>/dev/null
@@ -204,6 +221,7 @@ runner() {
         relinks=$((relinks + 1))
         log "the link was lost: the iPhone shown again ($relinks of $RELINKS)"
         gadget_down "relink"
+        [ -d $G ] && log "the relink cannot start: $G is still there (FunctionFS busy)"
         rm -f $RUN/kept # the next session's summary is kept too
         sleep 1
     done
@@ -214,8 +232,9 @@ runner() {
 }
 
 # The cable before's log made room for this one's: a car's (q2-iap's "car host: car" verdict) shifted to
-# q2car.1.log, the others up one, then the oldest dropped past CARLOG_MAX bytes or CARLOG_DAYS days (q2car.1.log is
-# always kept); any other host's, or a cable no host spoke on, to q2car.other.log in place of the one before.
+# q2car.1.log, the others up one, then the oldest dropped past CARLOG_MAX bytes (never the newest CARLOG_KEEP) or
+# CARLOG_DAYS days (never q2car.1.log); any other host's, or a cable no host spoke on, to q2car.other.log in place
+# of the one before.
 rotate() {
     b=${LOG%.log}
     [ -f "$LOG" ] || return 0
@@ -237,7 +256,8 @@ rotate() {
     total=0 k=1
     while [ -f "$b.$k.log" ]; do
         total=$((total + $(cat "$b.$k.log" "$b.$k.log.dmesg" 2>/dev/null | wc -c)))
-        if [ $k -gt 1 ] && { [ $total -gt $CARLOG_MAX ] || [ -n "$(find "$b.$k.log" -mtime +$CARLOG_DAYS)" ]; }; then
+        if { [ $k -gt $CARLOG_KEEP ] && [ $total -gt $CARLOG_MAX ]; } ||
+            { [ $k -gt 1 ] && [ -n "$(find "$b.$k.log" -mtime +$CARLOG_DAYS)" ]; }; then
             while [ -f "$b.$k.log" ]; do rm -f "$b.$k.log" "$b.$k.log.dmesg"; k=$((k + 1)); done
             break
         fi
@@ -277,5 +297,6 @@ stop) stop ;;
 _runner) runner ;;
 _rotate) rotate ;;   # test/iap_probe.py
 _release) release ;; # test/iap_probe.py
+_unmount) ffs_unmount ;; # test/iap_probe.py
 *) echo "usage: $0 start | stop" >&2; exit 2 ;;
 esac

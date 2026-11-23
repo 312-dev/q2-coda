@@ -9,7 +9,8 @@
  *   q2-iap and q2car.sh's runner end, and their logs on the card close before stock's umount;
  * - just before the suspend (system.c ringnav_standby), the gadget's pull-up let go (soft_connect "disconnect");
  * - after the wake, once device_standby has returned, on a later UI pass (standby_usb_poll): the pull-up back
- *   ("connect") once the card is mounted read-write, or SB_CARD_WAIT_MS on for a Q2 with no card; the controller's
+ *   ("connect") once the card is mounted read-write, or SB_CARD_WAIT_MS on for a card not back, or at once for a Q2
+ *   that had no card mounted as the Standby began; the controller's
  *   state and role then logged, a role left at host (seen after a wake on 2026-11-17) held at device again
  *   (usb_otg.c otg_hold) and the pull-up given once more; then Car Audio started again if it was on and the cable is
  *   still in. SB_LOOK_MS later the state is logged once more, so the log shows whether the host came back. */
@@ -24,6 +25,7 @@
 
 static struct {
     int car;     /* Car Audio stopped for this Standby (ringnav_device_standby) */
+    int had_card; /* the card mounted read-write as the Standby began */
     int let_go;  /* the pull-up let go for the suspend (standby_usb_suspend) */
     int waking;  /* 1 the reconnect waits for the card, 2 the state's second look waits */
     unsigned at; /* when device_standby returned, then when the pull-up came back */
@@ -74,6 +76,7 @@ static int sb_say(const char *why) {
 /* device_standby (0x5021bc, tools/build.py HOOKS): Car Audio down before stock's card unmount, then stock's Standby,
  * which returns at the wake. */
 int ringnav_device_standby(void) {
+    sb.had_card = sb_card_rw(); /* before stock unmounts it */
     sb.car = usb_car_stop_now();
     if (sb.car) ulog('I', "usb", "standby: Car Audio stopped for it");
     int result = stock_device_standby_trampoline();
@@ -98,9 +101,11 @@ void standby_usb_poll(void) {
         return;
     }
     int card = sb_card_rw();
-    if (!card && now - sb.at < SB_CARD_WAIT_MS) return;
+    if (!card && sb.had_card && now - sb.at < SB_CARD_WAIT_MS) return;
     sb_write(SB_SOFT, "connect");
-    if (sb_say(card ? "the link back, the card mounted" : "the link back, no card after 3 s")) {
+    if (sb_say(card            ? "the link back, the card mounted"
+               : sb.had_card ? "the link back, no card after 3 s"
+                             : "the link back, no card before the Standby")) {
         otg_hold();
         sb_write(SB_SOFT, "connect");
         sb_say("held at device");

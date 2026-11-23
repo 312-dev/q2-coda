@@ -974,14 +974,22 @@ int stock_usb_status_trampoline(void);
 
 /* usb_otg.c: check_otg_status's hook, OTG host power only with no VBUS on the port */
 int ringnav_otg_status(void), stock_otg_status_trampoline(void);
+int ringnav_gpio_value(const char *name), stock_gpio_value_trampoline(const char *name);
+/* usb_volume.c: mclUsbAudioSetVol's hook, a USB DAC's volume in decibels */
+int ringnav_usb_setvol(int v, int right, const char *card), stock_usb_setvol_trampoline(int v, int right, const char *card);
 /* usb_ui.c: a host has configured the gadget (system.c holds Standby on it) */
 int usb_host(void);
 void otg_hold(void); /* the PHY's ID pull-up on, the controller's role held at device */
+int usb_otg_own_vbus(void); /* usb_otg.c: the Q2's own bus power on, or still dying away */
+int usb_otg_cable(int vbus); /* usb_otg.c: PD17's VBUS less the Q2's own dying away */
+void usb_otg_poll(void);    /* usb_otg.c: a Play asked while USB audio connected */
+int stock_forbid_play_trampoline(int quiet);
 /* standby_usb.c: Standby and the USB link (docs/internals.md#standby-and-the-usb-link) */
 void standby_usb_suspend(void), standby_usb_poll(void);
 
 /* usb_record.c: the USB record on the card, a line per cable edge and OTG power change */
 void usb_record(const char *what), usb_record_edge(int in), usb_record_wake(void), usb_record_poll(void);
+void usb_record_pins(int hostdev); /* the pins alone, usb_otg.c's trace */
 int ringnav_platform_init(void), stock_platform_init_trampoline(void);
 
 /* autozone.c: Automatic Time Zone, the zone from the network's location */
