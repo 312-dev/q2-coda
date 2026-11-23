@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Streaming: with Download Ahead Off, the Q2 no longer downloads the two songs after the first one of every list you start from your server.
   - Shuffle: on a list streaming from your server, Next plays the song Up Next shows first, where it sometimes jumped to the list's next download instead, which then came round again in the same shuffle.
   - Playback: tapping a song with no headphones, Bluetooth or USB audio connected now only shows "Connect headphones or Bluetooth to play" and leaves you on the list. It briefly opened a Now Playing screen with Shanling's placeholder title. The same goes for Up Next's rows, which now stay open, and for a paused song's row in View Queue or an album's Play.
   - Ratings: stars you give songs from your server now reach the card's `.ratings.tsv` copy, and the Q2 keeps stars for up to 12,285 songs (it stopped at 4,096 with "Ratings are full"). Ratings kept before are kept, and the Q2's old ratings file is saved once beside the new one (`/mnt/data/ringnav-ratings.v1`).
