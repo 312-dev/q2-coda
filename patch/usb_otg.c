@@ -69,10 +69,22 @@
 #define OTG_NO_SOURCE_MS 2000
 /* The pin trace (usb_otg_poll): a line this often while PD18 reads low out of host role, the bus
  * power is in its trial or kept over an ID high, or VBUS left the port less than OTG_TRACE_AFTER_MS
- * ago; at most OTG_TRACE_MAX lines (a minute of it) until none of that holds. */
+ * ago; at most OTG_TRACE_MAX lines (a minute of it) until none of that holds and the bus power is
+ * off. */
 #define OTG_TRACE_MS 250
 #define OTG_TRACE_AFTER_MS 30000
 #define OTG_TRACE_MAX 240
+/* Past its trial a grant is traced on the same beat, a line only when PD18 or the host port's
+ * device changes, OTG_TRACE_CHANGES lines a grant at most: so the device's leaving and the ID's
+ * high are timed against each other and against the kernel's "USB disconnect". */
+#define OTG_TRACE_CHANGES 40
+/* The record's word for the bus power's end, and why: the host port's device gone (the ID high, or
+ * low past the trial); OTG_ID_HIGH_MS of ID high with nothing enumerated; stock's pass otherwise
+ * (its PD18 read high between this file's read and its own). A trial with nothing enumerated is
+ * otg-trial-off. */
+#define OTG_OFF_GONE "otg-off why=gone"
+#define OTG_OFF_ID_HIGH "otg-off why=id-high"
+#define OTG_OFF_STOCK "otg-off why=stock"
 #define OTG_HOST_DEV "/sys/bus/usb/devices/1-1/idVendor" /* a device on the Q2's host port */
 /* The X2000's CPM: USBPCR (0x1000003c) bit 29, the PHY's ID pull-up always on (D); USBRDT
  * (0x10000040) bits 24 and 23, the controller's ID from IDDIG_REG, set to device (C), or from the
@@ -95,8 +107,10 @@ static struct {
     int play;            /* a Play refused while an accessory is on its way (ringnav_forbid_play) */
     int resume;          /* the gate asked for a Play of the song there (usb_otg_forbid_resume) */
     unsigned play_at;
-    unsigned trace_at; /* the trace's last line; traced: its lines this episode */
-    int traced;
+    unsigned trace_at; /* the trace's last beat; traced: its lines this episode */
+    int traced, sampled; /* sampled: a beat taken this episode */
+    int trace_id, trace_dev; /* PD18 and the host port's device at the last beat */
+    int changes;             /* lines for a change in this grant past its trial (OTG_TRACE_CHANGES) */
     unsigned trial_end_at; /* the last trial's end; wrong: 1 since, with the ID low; 2 its toast shown */
     int wrong;
     unsigned nosrc_at; /* PD17 low with no source since; nosrc: 1 so, 2 said */
@@ -117,18 +131,19 @@ static void gone(unsigned now) {
 }
 
 /* Stock's pass, with a line in the USB record (usb_record.c) when it turned the bus power on or
- * off; its end is VBUS leaving the port, and the controller held at device again. id_as_low: stock
- * reads PD18 low, so its pass is the host one (the DAC's discovery, its end) whatever the pin. */
-static int otg_stock(unsigned now, int id_as_low) {
+ * off, the off's line naming why (off: OTG_OFF_*); its end is VBUS leaving the port, and the
+ * controller held at device again. id_as_low: stock reads PD18 low, so its pass is the host one
+ * (the DAC's discovery, its end) whatever the pin. */
+static int otg_stock(unsigned now, int id_as_low, const char *off) {
     int was = g_last_otgid;
     otg.id_as_low = id_as_low;
     int result = stock_otg_status_trampoline();
     otg.id_as_low = 0;
     if (g_last_otgid != was) {
-        usb_record(g_last_otgid == 1 ? "otg-on" : "otg-off");
+        usb_record(g_last_otgid == 1 ? "otg-on" : off);
         if (g_last_otgid == 1) {
             otg.host_at = now;
-            otg.id_high = 0, otg.had_dev = 0;
+            otg.id_high = 0, otg.had_dev = 0, otg.changes = 0;
         } else {
             gone(now);
             otg.own = 1, otg.own_at = now;
@@ -208,8 +223,8 @@ int ringnav_otg_status(void) {
      * host port keeps it; none within OTG_TRIAL_MS ends it, stock's pins written as its own device
      * pass writes them. An ID high ends it (stock's pass reading the pin, which turns it off) once
      * the port's device has gone, or after OTG_ID_HIGH_MS with none; until then stock's pass is run
-     * as the host one. ponytail: a DAC unplugged from the adapter, its ID low, leaves the empty
-     * adapter powered. */
+     * as the host one. A device gone with the ID still low ends it past the trial as an empty
+     * trial's end does, recorded as gone. */
     if (g_last_otgid == 1) {
         otg.waiting = 0;
         int dev = host_device();
@@ -217,7 +232,7 @@ int ringnav_otg_status(void) {
         if (!id_low) {
             if (!otg.id_high) otg.id_high = 1, otg.id_high_at = now;
             int end = otg.had_dev ? !dev : now - otg.id_high_at >= OTG_ID_HIGH_MS;
-            return otg_stock(now, !end);
+            return otg_stock(now, !end, !end ? OTG_OFF_STOCK : otg.had_dev ? OTG_OFF_GONE : OTG_OFF_ID_HIGH);
         }
         otg.id_high = 0;
         if (now - otg.host_at >= OTG_TRIAL_MS && !dev) {
@@ -229,10 +244,10 @@ int ringnav_otg_status(void) {
             gone(now);
             otg.own = 1, otg.own_at = now;
             otg_hold();
-            usb_record("otg-trial-off");
+            usb_record(otg.had_dev ? OTG_OFF_GONE : "otg-trial-off");
             return 0;
         }
-        return otg_stock(now, 0);
+        return otg_stock(now, 0, OTG_OFF_STOCK);
     }
     if (vbus) otg.refused = 0; /* a cable's VBUS: PC20 is off, so it is not the Q2's own */
     /* The roles the wrong way round (OTG_WRONG_MS): said once, until the ID goes high or VBUS comes. */
@@ -256,10 +271,10 @@ int ringnav_otg_status(void) {
     }
     /* A high ID is stock's device pass (it also ends a DAC's output). A low one is passed on only
      * once settled, with the controller's role handed back to the pin first. */
-    if (!id_low) return otg_stock(now, 0);
+    if (!id_low) return otg_stock(now, 0, OTG_OFF_STOCK);
     if (otg.waiting && (accessory || now - otg.since >= OTG_SETTLE_MS)) {
         system(OTG_FROM_PIN);
-        int result = otg_stock(now, 0);
+        int result = otg_stock(now, 0, OTG_OFF_STOCK);
         if (g_last_otgid != 1) otg_hold();
         return result;
     }
@@ -300,21 +315,33 @@ int usb_otg_forbid_resume(void) {
 }
 
 /* The pin trace, from each UI pass (the top of OTG_TRACE_MS): what the board's ID and VBUS do around
- * an unplug, an accessory and the bus power, in the USB record; nothing while they rest. */
+ * an unplug, an accessory and the bus power, in the USB record; nothing while they rest. A grant
+ * past its trial (kept: its device on the host port) writes a line only when PD18 or the device
+ * changes (OTG_TRACE_CHANGES). */
 static void trace(unsigned now) {
     int host = g_last_otgid == 1;
     int moving = (!host && otg.id_low) || (host && (now - otg.host_at < OTG_TRIAL_MS || otg.id_high)) ||
                  (otg.have_gone && now - otg.gone_at < OTG_TRACE_AFTER_MS);
-    if (!moving) {
-        otg.traced = 0;
+    if (!moving && !host) {
+        otg.traced = 0, otg.sampled = 0;
         return;
     }
-    if (otg.traced >= OTG_TRACE_MAX || (otg.traced && now - otg.trace_at < OTG_TRACE_MS)) return;
+    if (moving && otg.traced >= OTG_TRACE_MAX) return;
+    if (!moving && otg.changes >= OTG_TRACE_CHANGES) return;
+    if (otg.sampled && now - otg.trace_at < OTG_TRACE_MS) return;
     /* on a 250 ms beat, not 250 ms after the pass that wrote; passes further apart (the screen off)
      * write one line each, with no catching up */
-    otg.trace_at = otg.traced && now - otg.trace_at < 2 * OTG_TRACE_MS ? otg.trace_at + OTG_TRACE_MS : now;
-    ++otg.traced;
-    usb_record_pins(host_device());
+    otg.trace_at = otg.sampled && now - otg.trace_at < 2 * OTG_TRACE_MS ? otg.trace_at + OTG_TRACE_MS : now;
+    int dev = host_device(), id = toolsGpioGetValue("PD18");
+    int changed = !otg.sampled || dev != otg.trace_dev || id != otg.trace_id;
+    otg.sampled = 1, otg.trace_dev = dev, otg.trace_id = id;
+    if (moving)
+        ++otg.traced;
+    else if (changed)
+        ++otg.changes;
+    else
+        return;
+    usb_record_pins(dev);
 }
 
 /* From usb_ui_poll, every UI pass: the pin trace, and a remembered Play started once there is

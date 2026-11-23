@@ -47,6 +47,21 @@ def test_a_dac_on_an_otg_adapter_is_not_flagged():
     assert kinds(log) == []
 
 
+def pins(ms, hostdev, wall=1763400000):
+    # usb_record_pins's line, usb_otg.c's trace
+    return f'{wall} {ms} pins PD18=0 PD17=0 PC20=1 PE22=1 otg=1 hostdev={hostdev} otgst=2\n'
+
+
+def test_bus_power_whose_device_the_trace_saw_is_not_empty():
+    """2026-11-23 V1SSi: the earbuds enumerated after otg-on and had left by otg-off, so both lines read hostdev=?;
+    the trace's pins lines between them saw 1-1."""
+    log = [line(1000, 'otg-on', pc20=1, pd18=0), pins(1250, 0), pins(3000, 1), pins(8000, 0),
+           line(9500, 'otg-off why=gone')]
+    rows = q2usb.parse(log)
+    assert kinds(log) == [] and rows[-1].event == 'otg-off' and rows[-1].f['why'] == 'gone'
+    assert kinds([line(1000, 'otg-on', pc20=1, pd18=0), pins(1250, 0), line(9500, 'otg-trial-off')]) == ['EMPTY']
+
+
 def test_main_exits_1_when_anything_is_flagged(tmp_path, capsys):
     f = tmp_path / 'q2-usb.log'
     f.write_text(line(1000, 'otg-on', pc20=1, pd18=0, vbus=1))
