@@ -56,6 +56,11 @@
  * of the song there (tools/stock_sites.tsv). */
 #define OTG_PLAYPAUSE_RET 0x4f2fd8
 #define OTG_CONNECTING "Connecting USB audio..." /* ringnav_forbid_play's message */
+/* A trial ended with nothing on the host port and the ID still low this long after, no VBUS: most
+ * likely a computer whose roles resolved the wrong way (the Q2 the source, it the sink), which stays so
+ * while its cable is in (2026-11-23 17777.35 to 17833.67, pd18-owner2.log); a replug re-resolves it. */
+#define OTG_WRONG_MS 3000
+#define OTG_REPLUG "Unplug the cable and plug it in again" 
 /* The pin trace (usb_otg_poll): a line this often while PD18 reads low out of host role, the bus
  * power is in its trial or kept over an ID high, or VBUS left the port less than OTG_TRACE_AFTER_MS
  * ago; at most OTG_TRACE_MAX lines (a minute of it) until none of that holds. */
@@ -86,6 +91,8 @@ static struct {
     unsigned play_at;
     unsigned trace_at; /* the trace's last line; traced: its lines this episode */
     int traced;
+    unsigned trial_end_at; /* the last trial's end; wrong: 1 since, with the ID low; 2 its toast shown */
+    int wrong;
 } otg __attribute__((section(".scratch")));
 
 /* The PHY's ID pull-up on and the controller held at device: at boot (usb_record.c
@@ -187,6 +194,7 @@ int ringnav_otg_status(void) {
             toolsGpioSetValue("PE22", 0); /* the charge guard (usb_charge.c) sets its own next */
             g_last_otgid = 0;
             otg.refused = 1;
+            otg.wrong = 1, otg.trial_end_at = now;
             gone(now);
             otg.own = 1, otg.own_at = now;
             otg_hold();
@@ -196,6 +204,13 @@ int ringnav_otg_status(void) {
         return otg_stock(now, 0);
     }
     if (vbus) otg.refused = 0; /* a cable's VBUS: PC20 is off, so it is not the Q2's own */
+    /* The roles the wrong way round (OTG_WRONG_MS): said once, until the ID goes high or VBUS comes. */
+    if (!id_low || vbus) otg.wrong = 0;
+    if (otg.wrong == 1 && now - otg.trial_end_at >= OTG_WRONG_MS) {
+        otg.wrong = 2;
+        usb_record("wrong-role");
+        toast(OTG_REPLUG);
+    }
     /* An ID low read within OTG_BLANK_MS of VBUS leaving is ignored until it reads high, or until
      * it has stayed low OTG_ACCESSORY_MS: an accessory's, settled already. */
     if (id_low && otg.have_gone && now - otg.gone_at < OTG_BLANK_MS && !otg.blanked)

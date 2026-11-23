@@ -202,7 +202,7 @@ def test_the_floating_pin_s_long_low_gets_one_trial_and_no_loop(fw):
     p.run(ms(AB_HIGH, 468.54))
     p.id = 0
     p.run(10000)
-    assert p.records() == ['otg-on', 'otg-trial-off'] and p.pins['PC20'] == 0
+    assert p.records() == ['otg-on', 'otg-trial-off', 'wrong-role'] and p.pins['PC20'] == 0  # its toast too
     p.id = 1
     p.cable = True
     p.run(5000)
@@ -462,8 +462,8 @@ def test_the_trial_s_own_vbus_dying_away_does_not_clear_its_refusal(fw):
     p.id = 0
     p.run(SETTLE + TRIAL + PASS_MS)
     assert p.records() == ['otg-on', 'otg-trial-off']
-    p.run(60000)  # the ID still low: no second trial
-    assert p.records() == ['otg-on', 'otg-trial-off'] and p.pins['PC20'] == 0
+    p.run(60000)  # the ID still low: no second trial, the replug toast once
+    assert p.records() == ['otg-on', 'otg-trial-off', 'wrong-role'] and p.pins['PC20'] == 0
 
 
 # ---- the pin trace (S0): usb_otg_poll's pins lines in the USB record ----
@@ -573,6 +573,60 @@ def test_a_floating_low_longer_than_the_accessory_wait_is_one_trial_never_a_back
     p.cable = True
     p.run(3000)
     assert p.backfeed == []
+
+
+# ---- a computer whose roles resolved the wrong way (usb_otg.c OTG_WRONG_MS) ----
+
+REPLUG = 'Unplug the cable and plug it in again'
+
+
+def toasts(fw, p):
+    p.toasts = []
+    fw.mock('navigator_to_with_context', lambda name, info, *_: p.toasts.append(C.string_at(info + 8).decode()) or 0)
+    return p
+
+
+def test_a_computer_whose_roles_resolved_the_wrong_way_gets_one_replug_toast(fw):
+    """2026-11-23, the owner's round 3 (pd18-owner2.log, uptime): the laptop's cable out at 17745.42, back in at 17777.35,
+    and the ID went low with no VBUS from the laptop (the Q2 resolved as the source); the settle's bus power at
+    17784.78, its trial ended at 17793.82 with nothing on the host port, and the ID stayed low until the cable came
+    out at 17833.67; the replug at 17841.91 configured in 0.5 s. One toast, 3 s past the trial's end; nothing else."""
+    p = toasts(fw, Port(fw))
+    unplug(p, ms(17745.42, 17777.35))
+    p.id = 0
+    p.run(ms(17777.35, 17833.67))
+    assert p.records() == ['otg-on', 'otg-trial-off', 'wrong-role'] and p.toasts == [REPLUG]
+    p.id = 1
+    p.run(ms(17833.67, 17841.91))
+    p.cable = True
+    p.run(5000)
+    assert p.toasts == [REPLUG] and p.backfeed == [] and p.powered and len(p.records()) == 3
+
+
+@pytest.mark.parametrize('out,back', [(17668.64, 17693.12), (17702.68, 17736.67)])
+def test_a_plain_unplug_and_replug_shows_nothing(fw, out, back):
+    """Rounds 1 and 2: the port empty 24.5 s and 34 s, PD18 high throughout, the laptop configured at once."""
+    p = toasts(fw, Port(fw))
+    unplug(p, ms(out, back))
+    p.cable = True
+    p.run(10000)
+    assert p.toasts == [] and p.records() == []
+
+
+def test_the_replug_toast_comes_once_an_episode_and_again_after_the_id_was_high(fw):
+    p = toasts(fw, Port(fw))
+    p.id = 0
+    p.run(SETTLE + TRIAL + 5000)
+    p.run(60000)
+    assert p.toasts == [REPLUG]
+    p.id = 1
+    p.run(3000)
+    p.id = 0  # the cable replugged and wrong again: a new episode, a new trial after the refusal is cleared
+    p.cable = True
+    p.run(1000)
+    p.cable = False
+    p.run(BLANK + SETTLE + TRIAL + 5000)
+    assert p.toasts == [REPLUG, REPLUG]
 
 
 # ---- a Play asked while an accessory attaches (usb_otg.c ringnav_forbid_play, usb_otg_poll) ----
