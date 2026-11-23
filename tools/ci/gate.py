@@ -93,11 +93,12 @@ RAMP = 30    # s: a suite this young may not have reached its peak yet, so its e
 MEM_GB = {'build': 2.0, 'unit': 1.0, 'unit-cov': 1.5, 'mypy-tools': 1.0, 'mypy-fw': 1.0, 'fw': 3.0, 'fw-asan': 5.0,
           'patch': 1.5, 'test/build.py': 1.0, 'test/peq.py': 1.0, 'test/playback.py': 1.0, 'test/headset_io.py': 0.5,
           'smoke': 1.0, 'leak-hunt': 1.0, 'test/coverflow.py': 0.5, 'test/player/run.py': 0.5, 'tools/ci/test_ci.py': 0.5,
-          'tools/ci/test_orch.py': 0.5, 'test/stock_sites.py': 0.5, 'test/subsonic_contract.py': 0.25}
+          'tools/ci/test_orch.py': 0.5, 'test/stock_sites.py': 0.5, 'test/subsonic_contract.py': 0.25,
+          'test/subsonic_seam.py': 1.0}
 SECONDS = {'unit-cov': 330, 'patch': 280, 'fw-asan': 150, 'unit': 280, 'smoke': 95, 'leak-hunt': 200, 'test/playback.py': 80, 'fw': 50,
            'mypy-tools': 40, 'mypy-fw': 30, 'test/build.py': 20, 'test/peq.py': 20, 'test/headset_io.py': 5,
            'test/coverflow.py': 20, 'test/player/run.py': 270, 'tools/ci/test_ci.py': 5, 'tools/ci/test_orch.py': 15, 'test/stock_sites.py': 12,
-           'test/subsonic_contract.py': 2}
+           'test/subsonic_contract.py': 2, 'test/subsonic_seam.py': 150}
 # The suites a rule of affected.py plans for a change no merge-tier suite covers (patch/coverflow*.c, player/,
 # tools/ci/, a stock address in patch/ or tools/). Not in the merge tier, as test/player/run.py alone is longer than all of it: a batch's plan names
 # them when its diff needs them, and the gate runs a plan's `other` suites beside the tier. A plan that runs
@@ -108,7 +109,7 @@ SECONDS = {'unit-cov': 330, 'patch': 280, 'fw-asan': 150, 'unit': 280, 'smoke': 
 # not minutes. In a merge batch's run, so a branch that drops coverage is rejected, not landed and POST_RED.
 COV = 'cov:'
 PLANNED = ('test/coverflow.py', 'test/player/run.py', 'tools/ci/test_ci.py', 'tools/ci/test_orch.py', 'test/stock_sites.py',
-           'test/subsonic_contract.py')
+           'test/subsonic_contract.py', 'test/subsonic_seam.py')
 POST = ('fw-asan', 'unit-cov', 'smoke', 'leak-hunt')
 MERGE = tuple(n for n in SECONDS if n not in POST + PLANNED)
 FULL = MERGE + PLANNED + POST
@@ -246,6 +247,7 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/rotator_build.py': [],  # given builds it asserts those were built with the module options, which a --dev build was not
     'test/server_catalogue.py': 'a generator of a catalogue file for a card (CARD_ROOT), not a test',
     'test/stock_sites.py': [],  # finds the stock zip itself (Q2_STOCK_ZIP)
+    'test/subsonic_seam.py': [],  # builds the pinned app and q2-fakesonic from ~/repos/q2-subsonic; skipped without
     'test/subsonic_contract.py': [],  # the pinned zip (~/.cache/q2-apps) and ~/repos/q2-subsonic; skipped without
     'test/suite_source.py': "test/patch.py's loader (and a line-number lookup by hand), not a test",
     'test/tuner.py': [],  # Radio's receiver on a dropout, its restarts and the dial's click (tuner_core.c with fmrx.c), host cc

@@ -1294,6 +1294,16 @@ def test_the_subsonic_contract_is_planned_for_its_sides(path):
     assert 'test/subsonic_contract.py' not in json.loads(affected.plan_for({'patch/home.c': {1}}, REPO).to_json())['other']
 
 
+@pytest.mark.parametrize('path', ['patch/addon.c', 'patch/catalogue.c', 'patch/stream_state.c', 'patch/playback.c',
+                                  'player/engine.c', 'tools/build.py', 'test/fw/seam.py', 'test/fw/test_seam_subsonic.py'])
+def test_the_subsonic_seam_is_planned_for_its_sides(path):
+    """The real app against the firmware's C: planned for each file on the firmware's side of it, the app's pin and
+    the seam test's own harness, and for nothing else."""
+    plan = json.loads(affected.plan_for({path: {1}}, REPO).to_json())
+    assert 'test/subsonic_seam.py' in plan['other'] or gate.everything(plan)
+    assert 'test/subsonic_seam.py' not in json.loads(affected.plan_for({'patch/home.c': {1}}, REPO).to_json())['other']
+
+
 def test_an_integration_branch_given_a_base_runs_that_diffs_plan():
     """An integrator's run after one merge names its base (or a --plan-json); only a bare run plans everything."""
     assert affected.runs_everything(False, None, 'integ/q2-1129')
