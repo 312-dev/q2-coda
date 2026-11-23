@@ -5,7 +5,8 @@
  * a flush now (/tmp/q2guard.snap, then a SIGUSR1 to the pid in /tmp/q2guard.lock, through the
  * shell's kill: demo imports no kill of its own) and waits for the answer, the request's removal,
  * at most ULOG_END_MS, so the lines are on the card before the power-off, Restart or update takes
- * the Q2 down. ulog_flush asks for the flush alone, before LocalSend sends the logs. */
+ * the Q2 down. ulog_flush asks for the flush alone, before LocalSend sends the logs; ulog_request_flush asks for it
+ * and does not wait (card_release.c, once the card is back after Standby). */
 #include "navigation.h"
 #include "ulog_line.h"
 
@@ -60,3 +61,6 @@ void ulog_end(const char *why) {
 /* LocalSend's Send Logs: the logs on the card as they are now, before they are sent; the UI waits for it at most
  * ULOG_FLUSH_MS (q2guard answers on its next tick). */
 void ulog_flush(void) { ulog_ask("flush", ULOG_FLUSH_MS); }
+
+/* The flush asked for, not waited for: q2guard answers on its own (card_release.c card_back). */
+void ulog_request_flush(void) { ulog_ask("flush", 0); }

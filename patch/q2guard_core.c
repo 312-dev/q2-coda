@@ -309,6 +309,17 @@ int log_flush(card_log *l, const char *dir, const char *name, long max, int file
 
 int flush_every(int fast, int streaming) { return fast || streaming ? FLUSH_FAST_MS : FLUSH_MS; }
 
+int card_hold_live(const char *path) {
+    char b[16];
+    int fd = open(path, O_RDONLY | O_CLOEXEC), n = 0;
+    if (fd < 0) return 0;
+    n = (int)read(fd, b, sizeof b - 1);
+    close(fd);
+    b[n > 0 ? n : 0] = 0;
+    int pid = atoi(b);
+    return pid > 1 && !kill(pid, 0);
+}
+
 int heat_flush(card_log *l, const char *dir) {
     return log_flush(l, dir, "q2-heat", HEAT_FILE_MAX, HEAT_FILES);
 }

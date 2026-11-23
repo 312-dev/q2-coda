@@ -113,6 +113,11 @@ static struct {
     cat_ix job_ix; /* the index it built */
     unsigned gen;  /* library_gen the last job matched against */
     int pending;   /* a match is due once no scan runs */
+    /* away: the card is let go of (card_release.c, before Standby, a power-off or a restart): no
+     * connection attaches the file and no job starts; stop: the running job is asked to end, its
+     * work thrown away and done again once the card is back */
+    int away;
+    volatile int stop;
     cat_ix ix;
     /* the server rows' names with an offline copy, by group (group_unavailable); built again when
      * local_gen has moved since (an import, catalogue.avail) */
@@ -431,8 +436,12 @@ static char *sq(char *o, char *end, const char *s) {
 }
 #define JEND (jb.sql + CAT_SQL - CAT_SLACK)
 static int job_exec(const char *sql) {
+    if (cat.stop) return jb.bad = 1;
     return sqlite3_exec(jb.db, sql, 0, 0, 0) ? (jb.bad = 1) : 0;
 }
+/* The job's connection's progress handler: nonzero (the card is being let go of) ends the statement
+ * running, so a long match or copy lets the card go within a few ms. */
+static int job_stopped(void *unused) { return cat.stop; }
 /* jb.sql as built up to o, run when it fit. */
 static int job_run(char *o) {
     if (o >= JEND) return jb.bad = 1;
@@ -1036,6 +1045,7 @@ static void *cat_worker(void *unused) {
         sqlite3_exec(jb.db, "PRAGMA nw.journal_mode=OFF;PRAGMA nw.synchronous=OFF", 0, 0, 0))
         tk_snprintf(why, sizeof why, "Couldn't open the database");
     else {
+        sqlite3_progress_handler(jb.db, 1000, job_stopped, 0);
         if (!access(CAT_DB, 0)) sqlite3_exec(jb.db, "attach '" CAT_DB "' as cat", 0, 0, 0);
         job_exec("begin");
         job_exec(SCHEMA);
@@ -1052,6 +1062,7 @@ static void *cat_worker(void *unused) {
         if (!why[0]) ix_build();
     }
     if (jb.db) sqlite3_close(jb.db);
+    jb.db = 0; /* catalogue_card_release: no job holds the card */
     free(jb.sql);
     if (why[0]) unlink(CAT_NEW);
     tk_snprintf(cat.job_why, sizeof cat.job_why, "%s", why);
@@ -1069,7 +1080,7 @@ void catalogue_attach(void **slot) {
     /* stock's own global: in demo's image, below the payload (0xb00000, tools/build.py BASE) */
     if ((unsigned long)slot >= 0x400000 && (unsigned long)slot < 0xb00000) cat.stock_slot = slot;
     if (slot == cat.stock_slot) cat.attached = 0;
-    if (!cat.ix.n || access(CAT_DB, 0) || !*slot) return;
+    if (cat.away || !cat.ix.n || access(CAT_DB, 0) || !*slot) return;
     if (!sqlite3_exec(*slot, "attach '" CAT_DB "' as cat", 0, 0, 0) && slot == cat.stock_slot)
         cat.attached = *slot;
 }
@@ -1081,7 +1092,7 @@ static void cat_detach(void) {
 /* Whether stock's Library queries may read servertable now: an index built and the file attached
  * to its live handle. Run on stock's scan thread too. */
 static int cat_live(void) {
-    if (!cat.ix.n || !cat.stock_slot) return 0;
+    if (cat.away || !cat.ix.n || !cat.stock_slot) return 0;
     void *db = *cat.stock_slot;
     if (db && cat.attached != db && !access(CAT_DB, 0) &&
         !sqlite3_exec(db, "attach '" CAT_DB "' as cat", 0, 0, 0))
@@ -1090,7 +1101,7 @@ static int cat_live(void) {
 }
 
 /* Era's and the counts' worker threads ask too: an index built and the file there. */
-static int cat_ready(void) { return cat.ix.n && !access(CAT_DB, 0); }
+static int cat_ready(void) { return !cat.away && cat.ix.n && !access(CAT_DB, 0); }
 /* library_query's: the server's rows beside songtable's, while stock's connection has them. */
 const char *catalogue_rows(void) {
     return cat_live() ? " union all select * from servertable" : "";
@@ -1680,6 +1691,12 @@ static void cat_swap(void) {
     pthread_join(cat.thread, 0);
     cat.running = 0;
     int slot = cat.job_app;
+    if (cat.stop) { /* stopped for the card: its file gone, the app not answered, the job due again */
+        cat.stop = 0;
+        ix_free(&cat.job_ix);
+        if (slot < 0) cat.gen = library_gen - 1;
+        return;
+    }
     if (!cat.job_why[0]) {
         cat_detach();
         if (!rename(CAT_NEW, CAT_DB)) {
@@ -1805,7 +1822,7 @@ void catalogue_poll(void) {
     /* Smart Wi-Fi's radio off or coming back counts: a press brings the link (catalogue_load) */
     cat.online = up && (networkGetConnectStatus() > 0 || smart_wifi_back());
     catplay_poll();
-    if (cat.running || library_scanning() || !card_mounted()) return;
+    if (cat.running || cat.away || library_scanning() || !card_mounted()) return;
     for (int i = 0; i < cat.napps; ++i) {
         int has = *seqs[i] && cat_signed_in(i);
         if (has && strcmp(seqs[i], cat.app[i].seq)) {
@@ -1843,6 +1860,24 @@ int catalogue_signed(char *id, char *name, unsigned size) {
 
 /* The card going away (USB storage, addon_card_away): nothing of ours keeps it open. */
 void catalogue_card_away(void) { cat_detach(); }
+
+/* card_release.c, before Standby, a power-off or a restart: the file detached from stock's
+ * connection and attached to no other until catalogue_card_back (cat_ready, cat_live,
+ * catalogue_attach), no job started, and a running one asked to end (job_exec, job_stopped; its
+ * thread closes its connection as it returns, which card_release waits for with the card's other
+ * holders). Era's and the counts' connections open and close per query and attach nothing meanwhile.
+ * 1 when a job was running. */
+int catalogue_card_release(void) {
+    cat.away = 1;
+    cat_detach();
+    int job = cat.running || jb.db; /* started, or (the tests' thread runs at once) its connection open */
+    if (job) cat.stop = 1;
+    return job;
+}
+/* card_release.c card_back: the card is back; stock's connection attaches it at its next query
+ * (cat_live) and a stopped job starts again at the next poll. */
+void catalogue_card_back(void) { cat.away = 0; }
+int catalogue_away(void) { return cat.away; }
 
 /* ---- Playing: a list with server rows ---- */
 

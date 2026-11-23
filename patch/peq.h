@@ -553,6 +553,8 @@ char *catalogue_union(const char *sql), *catalogue_search(const char *sql);
 const char *catalogue_rows(void); /* library_query's union, "" without one */
 void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_poll(void);
 void catalogue_card_away(void);
+int catalogue_card_release(void), catalogue_away(void); /* card_release.c's: the card let go of, */
+void catalogue_card_back(void);                          /* and back */
 void catalogue_rated(void *r, int stars), catalogue_liked(void *r, int on);
 int catalogue_signed(char *id, char *name, unsigned size); /* a catalogue app signed in */
 /* catalogue.c: a Library item's server identity for Sync Offline (offline.c), by OFF_* kind */

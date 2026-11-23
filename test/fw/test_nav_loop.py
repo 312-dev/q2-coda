@@ -4187,3 +4187,29 @@ def test_card_mounted_reads_proc_mounts_again_only_when_the_watch_saw_a_change(f
     assert mounted() == 1 and len(reads) == 1  # not seen yet
     cw.gen = 6  # the thread's mark
     assert mounted() == 0 and mounted() == 0 and len(reads) == 2
+
+
+def test_a_pass_under_way_ends_for_the_card_and_runs_again_once_it_is_back(fw, st):
+    """Standby, a power-off or a restart lets the card go (card_release.c): a ratings copy pass holds its connection,
+    with the server catalogue on the card attached, from page to page, so it ends at once (ratings_card_release), no
+    pass starts while the card is let go of (catalogue_away), and the copy is made once it is back."""
+    lib = Library(fw)
+    for k in range(200):  # more than three pages: the pass stays open between polls
+        lib.song(b'/mnt/mmc/A/%d.flac' % k, b'Album', b'Artist')
+    lib.rate(b'/mnt/mmc/A/150.flac', 3)
+    for _ in range(50):
+        lib.clock.now += 1000
+        lib.poll()
+        if lib.rc().db:
+            break
+    assert lib.rc().db, 'a pass under way'
+    assert fw.fn('catalogue_card_release', C.c_int)() == 0
+    assert fw.fn('ratings_card_release', C.c_int)() == 1 and not lib.rc().db
+    assert fw.fn('ratings_card_release', C.c_int)() == 0, 'none left'
+    for _ in range(10):
+        lib.clock.now += 1000
+        lib.poll()
+        assert not lib.rc().db, 'no pass while the card is let go of'
+    assert lib.copy() is None
+    fw.fn('catalogue_card_back', None)()
+    assert lib.run() and b'song\t3\t0\t/mnt/mmc/A/150.flac\t\n' in lib.copy()

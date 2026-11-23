@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <signal.h>
 #else
 /* No MIPS sysroot (as boot.c): glibc 2.28's declarations, with MIPS o32 open flags. */
 typedef unsigned size_t;
@@ -248,6 +249,10 @@ void heat_add(card_log *l, const char *line); /* one line, with its newline */
 /* Rotate dir/q2-heat.0 on if it is full, then append the ring to it in order (card_log_flush, which
  * also notes lines dropped for room). 0 when nothing is left held, -1 when the card refused. */
 int heat_flush(card_log *l, const char *dir);
+/* 1 while path names a live process (demo's pid in /tmp/mmc_hold while it lets the card go before Standby, a
+ * power-off or a restart, card_release.c): nothing is written to the card meanwhile, the lines kept in RAM. A file
+ * naming a process gone (demo restarted) holds nothing. */
+int card_hold_live(const char *path);
 /* The same for any log: dir/name.0, moved on once it has reached max bytes, .1 to .2 and so on up to
  * name.(files-1), the oldest dropped */
 int log_flush(card_log *l, const char *dir, const char *name, long max, int files);

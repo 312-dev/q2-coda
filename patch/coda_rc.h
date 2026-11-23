@@ -162,6 +162,8 @@ typedef struct {
 int lib_stream_song(const char *path, lib_song_t *o);
 int lib_song_rid(const char *id); /* "song:t12" -> 12; 0 when not a song id */
 int lib_has_server(void);
+int lib_card_held(void); /* demo lets the card go (card_release.c): nothing on it opened */
+void lib_release(void);  /* the library's connection closed, the card's catalogue with it */
 int lib_queue_rid(unsigned at, int rid); /* PlayQueueItem: 0 for a queued stream download of server song rid */
 /* BLE (coda_rc_ble.c, its own GATT server): ble_fds puts its sockets (at most BLE_FDS) into the loop's poll, and
  * ble_handle takes them back with their revents; ble_tick once a second, and when ble_due says the advertisement

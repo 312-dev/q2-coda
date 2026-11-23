@@ -474,6 +474,43 @@ def test_card_away_then_back_flushes_in_order(L, tmp_path):
     assert (d / 'q2-heat.0').read_text() == 'before\naway 0\naway 1\naway 2\n'
 
 
+def test_the_card_hold_is_live_only_while_its_process_is(L, tmp_path):
+    """/tmp/mmc_hold (card_release.c): demo's pid while it lets the card go. A live pid holds; a pid gone (demo
+    restarted), an empty file or none holds nothing, so a hold demo never removed cannot stop the log for good."""
+    hold = tmp_path / 'mmc_hold'
+    L.card_hold_live.argtypes = [C.c_char_p]
+    assert L.card_hold_live(str(hold).encode()) == 0
+    hold.write_text(f'{os.getpid()}\n')
+    assert L.card_hold_live(str(hold).encode()) == 1
+    child = gone_pid()
+    hold.write_text(f'{child}\n')
+    assert L.card_hold_live(str(hold).encode()) == 0
+    hold.write_text('')
+    assert L.card_hold_live(str(hold).encode()) == 0
+
+
+def test_lines_logged_while_the_card_is_held_follow_in_order_once_it_is_back(L, tmp_path):
+    """Standby's window: the hold up (q2guard.c card_ready false, so no writer is started and the watcher's ring only
+    holds), the card unmounted, the suspend, the wake. The lines of that window, the wake's among them, are written
+    after the card is back, in order, after what the card had, none lost."""
+    d = tmp_path / 'logs'
+    hold = tmp_path / 'mmc_hold'
+    L.card_hold_live.argtypes = [C.c_char_p]
+    log = new_log(L, d)
+    L.heat_add(log, b'before\n')
+    assert flush(L, log, d) == 0
+    hold.write_text(f'{os.getpid()}\n')
+    window = ['card: unmounted (1 mount) for standby', 'standby', 'wake', 'card: back, mounted once']
+    for line in window:
+        L.heat_add(log, f'{line}\n'.encode())
+        if not L.card_hold_live(str(hold).encode()):  # q2guard.c flush_start's card_ready
+            assert flush(L, log, d) == 0
+    assert (d / 'q2-heat.0').read_text() == 'before\n', 'nothing written while held'
+    hold.unlink()  # card_back
+    assert not L.card_hold_live(str(hold).encode()) and flush(L, log, d) == 0
+    assert (d / 'q2-heat.0').read_text().splitlines() == ['before', *window]
+
+
 def flush_away(L, log, d):
     L.card(0)
     return L.heat_flush(log, str(d).encode())
@@ -684,3 +721,9 @@ def test_the_first_window_measures_when_the_first_conversion_lands(L):
     assert sample(L, bus, p) == (381, RAW)
     assert p.measured == 1 and p.first_ms == 200 and len(polls) == 20  # the window stays 1000 ms
     assert bus.writes()[-1] == (0x34, 0x51)
+
+
+def gone_pid():
+    """A pid no process has (the top of pid_max downwards), as a restarted demo's old one."""
+    top = int(pathlib.Path('/proc/sys/kernel/pid_max').read_text())
+    return next(p for p in range(top - 1, 1, -1) if not pathlib.Path(f'/proc/{p}').exists())
