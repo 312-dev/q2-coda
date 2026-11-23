@@ -41,19 +41,42 @@ static int rate_io(int album, int write) {
     memset(t + n, 0, (RATE_SLOTS - n) * sizeof *t);
     return n != 0;
 }
+/* A slot's place: a key's slots are probed from its hash's (open addressing), so a lookup reads a
+ * few words, not the whole table. RATE_GONE marks a rating taken out, which a probe passes over
+ * and an insert reuses; it reads as no rating (7). */
+#define RATE_GONE 7u
+static unsigned rate_home(unsigned key) { return ((key >> 3) * 2654435761u) % RATE_SLOTS; }
 static unsigned *rates(int album) {
     unsigned **t = album ? &ra.album_rates : &ra.rates;
-    if (!*t && (*t = calloc(RATE_SLOTS, sizeof **t))) rate_io(album, 0);
+    if (*t || !(*t = calloc(RATE_SLOTS, sizeof **t))) return *t;
+    rate_io(album, 0);
+    /* each rating at its key's place: a file from before the hashing (every slot from the first),
+     * or one with gaps; marks and malformed slots dropped */
+    unsigned *was = calloc(RATE_SLOTS, sizeof *was);
+    if (!was) return *t;
+    memcpy(was, *t, RATE_SLOTS * sizeof *was);
+    memset(*t, 0, RATE_SLOTS * sizeof **t);
+    for (unsigned i = 0; i < RATE_SLOTS; i++) {
+        unsigned v = was[i], k = rate_home(v);
+        if (!(v & 7) || (v & 7) > 5) continue;
+        for (unsigned n = 0; n < RATE_SLOTS && (*t)[k] && ((*t)[k] ^ v) >= 8; n++)
+            k = (k + 1) % RATE_SLOTS;
+        (*t)[k] = v; /* a key twice in a damaged file: its later slot's, as rate_all reads it */
+    }
+    free(was);
     return *t;
 }
 
-/* key's slot; with free, the first free one when it has none; -1 when neither. */
+/* key's slot; with free, the first free one on its probe when it has none; -1 when neither. */
 static int rate_slot(int album, unsigned key, int free) {
-    unsigned *t = rates(album);
+    unsigned *t = rates(album), k = rate_home(key);
     int empty = -1;
-    for (int i = 0; t && i < RATE_SLOTS; i++) {
-        if (t[i] && (t[i] ^ key) < 8) return i;
-        if (!t[i] && empty < 0) empty = i;
+    for (unsigned n = 0; t && n < RATE_SLOTS; n++, k = (k + 1) % RATE_SLOTS) {
+        if (!t[k]) return free ? (empty >= 0 ? empty : (int)k) : -1;
+        if (t[k] == RATE_GONE) {
+            if (empty < 0) empty = (int)k;
+        } else if ((t[k] ^ key) < 8)
+            return (int)k;
     }
     return free ? empty : -1;
 }
@@ -71,7 +94,7 @@ int rate_keep(int album, unsigned key, int n) {
     int some = n > 0 && n <= 5, i = rate_slot(album, key, some);
     if (i < 0) return !some;
     unsigned *t = rates(album), old = t[i];
-    t[i] = some ? (key & ~7u) | (unsigned)n : 0;
+    t[i] = some ? (key & ~7u) | (unsigned)n : RATE_GONE;
     if (rate_io(album, 1)) {
         ratings_copy_due();
         return 1;

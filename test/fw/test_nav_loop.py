@@ -595,7 +595,7 @@ class Library:
         self.card.files['/proc/mounts'] = MOUNTED
         self.clock = Clock(fw)
         self.myfav, self.songs, self.scanned, self.sql = [], [], True, []
-        self.server = None  # a signed-in server's servertable rows (catalogue.c), None: no catalogue attached
+        self.server: list | None = None  # a signed-in server's servertable rows (catalogue.c), None: no catalogue attached
         fw.mock('sqlite3_open', self.open_db)
         fw.mock('sqlite3_exec', self.exec_db)
         self.keep_fn = fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)
@@ -620,7 +620,7 @@ class Library:
             rows = [(b'1',)] if self.scanned else []
         else:
             last, limit = int(q.split('id>')[1].split()[0]), int(q.split('limit ')[1])
-            table = self.myfav if ' from myfav ' in q else self.server if ' from cat.servertable ' in q else self.songs
+            table = self.myfav if ' from myfav ' in q else (self.server or []) if ' from cat.servertable ' in q else self.songs
             rows = [r for r in table if int(r[0]) > last][:limit]
         call = self.ROW(row)
         for r in rows:
