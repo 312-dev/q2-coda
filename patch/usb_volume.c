@@ -75,9 +75,9 @@ static int uv_control(int numid, int *min, int *max, int *lo, int *hi) {
     struct uv_tlv t;
     memset(&t, 0, sizeof t);
     t.numid = (unsigned)numid, t.length = sizeof t.tlv;
-    int ok = !ioctl(fd, UV_ELEM_INFO, &info) && info.type == 2 /* INTEGER */ && info.max > info.min &&
-             !ioctl(fd, UV_TLV_READ, &t) && uv_db(t.tlv, (int)(t.length / 4), info.max - info.min, lo, hi) &&
-             *hi > *lo;
+    int ok = !ioctl(fd, UV_ELEM_INFO, &info) && info.type == 2 /* INTEGER */ &&
+             info.max > info.min && !ioctl(fd, UV_TLV_READ, &t) &&
+             uv_db(t.tlv, (int)(t.length / 4), info.max - info.min, lo, hi) && *hi > *lo;
     close(fd);
     *min = info.min, *max = info.max;
     return ok;
@@ -87,7 +87,8 @@ static int uv_control(int numid, int *min, int *max, int *lo, int *hi) {
  * (single-precision s / 100, the rest in double), clamped as it is. */
 static int uv_stock(int s, int min, int max) {
     float range = (float)(max - min);
-    int x = s ? (int)((double)range * 0.4 + (double)((float)s / 100.0f) * ((double)range * 0.6)) : 0;
+    int x =
+        s ? (int)((double)range * 0.4 + (double)((float)s / 100.0f) * ((double)range * 0.6)) : 0;
     return x > max ? max : x < min ? min : x;
 }
 
