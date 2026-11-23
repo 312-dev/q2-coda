@@ -335,8 +335,8 @@ RADIO_TABLES = ('stations.bin', 'zcta.bin')
 # updates are firmware updates. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
 BUNDLED_APPS = {
-    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-86d02b7.zip', 3686544,
-                 '50e3dfa8a350c0684823168d7053ffe4b964079be8c2e1a39e98f15e3280cd6a', True),
+    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-78f9628.zip', 3686807,
+                 'f0c2e8bebe7dafac4f4693f34ebea8fba2c21763bd88aae1cdebc91363a8fd0f', True),
 }
 APPS_DIR = pathlib.Path.home()/'.cache/q2-apps'
 S90PLAY = 'etc/init.d/S90play'
@@ -905,10 +905,11 @@ LYRIC_ROWS = (0x53d10c, 0x0411f95b)
 # ringnav_lrc_open, which keeps a copy that ringnav_lyric reads again, without its blank lines and, for iPod's
 # lyrics page, with its milliseconds and word stamps.
 LYRIC_OPEN = (0x5bc30c, 0x0320f809)
-# toolsGetAlbumCover's jalr to stock's thumbnailer (cover_thumb_file, 0x5cb3e0) on the embedded picture it wrote to
-# /tmp/.tmp_picture becomes jal coverflow_album_pic, which refuses a 16-bit PNG (stock reads its pixels as twice as
-# many 8-bit ones, in stripes), so Cover Flow, Home's slideshow and the grids go on to ffmpeg for it.
-ALBUM_PIC = (0x5d7140, 0x0320f809)
+# png_load_file's png_read_png(png, info, transforms, NULL) asks for PNG_TRANSFORM_EXPAND alone (addiu $a2, $zero, 0x10),
+# so a 16-bit PNG's six-byte pixels were read as two three-byte ones: the cover twice as wide, in vertical stripes.
+# PNG_TRANSFORM_STRIP_16 (1) beside it has libpng 1.2.59 give 8 bits a channel, the row stride the reader assumes;
+# every cover stock decodes (Cover Flow, Home's art, the grids, a folder image) goes through it.
+PNG_STRIP16 = (0x5c92fc, 0x24060010)
 # parse_albumcovertask_thd's jalr toolsGetAlbumCover (Albums grids; Folder view's folder and track rows),
 # each with its lw $t9, become jal coverflow_grid_cover, which gives ffmpeg the Ogg pictures stock skips;
 # the Albums grid's (first, before stock's toolsGetExternCover) jal coverflow_album_cover, and the folder
@@ -2010,7 +2011,6 @@ FUNCTIONS = {
  'widget_remove_child': ('int', 'void *, void *'),
  'widget_add_child': ('int', 'void *, void *'),
  'toolsThumbSpecCover': ('int', 'const char *, const char *, int, int'),
- 'cover_thumb_file': ('int', 'const char *, const char *, int, int'),  # PRIVATE_FUNCTIONS
  'toolsGetAlbumCover': ('int', 'const char *, const char *, int, int'),
  'toolsGetExternCover': ('int', 'const char *, const char *, int, int'),
  'window_create': ('void *', 'void *, int, int, int, int'),
@@ -2207,7 +2207,6 @@ PRIVATE_FUNCTIONS = {
     'quick_lock': HOOKS['quick_lock'][0],
     "playlist_rebuild": HOOKS['playlist_rebuild'][0],  # picker init and re-entry rebuild all rows
     "stock_search": 0x5350d4,
-    'cover_thumb_file': 0x5cb3e0,  # stock's thumbnailer of a picture file, which toolsGetAlbumCover calls (ALBUM_PIC)
     "slide_menu_item_width": 0x605ed0,
     "slide_menu_on_scroll_done": 0x6064e4,
     "mcl_preload": HOOKS['mcl_preload'][0],
@@ -2358,7 +2357,7 @@ PAYLOAD_ROOTS = ['compact_set_row_layout', 'kb_host_open', 'kb_open_hint', 'ipod
                  'ringnav_albumcovers', 'ringnav_art_header', 'ringnav_art_name', 'ringnav_artist_art_name',
                  'ringnav_artist_covers', 'ringnav_batt_level', 'ringnav_batt_status', 'ringnav_batt_voltage', 'ringnav_boot', 'ringnav_bt_connect_start', 'ringnav_class_icon',
                  'ringnav_card_down', 'ringnav_card_reload', 'ringnav_card_rmmod', 'ringnav_card_umount', 'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text',
-                 'ringnav_dark_usleep', 'ringnav_dialog_close', 'ringnav_ellipsis_text', 'ringnav_gbk_tag', 'coverflow_album_pic', 'ringnav_glyph_stamp',
+                 'ringnav_dark_usleep', 'ringnav_dialog_close', 'ringnav_ellipsis_text', 'ringnav_gbk_tag', 'ringnav_glyph_stamp',
                  'ringnav_hold_info', 'ringnav_hold_timer', 'ringnav_hscroll_lull', 'ringnav_id3_path',
                  'ringnav_lyric_follow', 'ringnav_lyric_rows', 'ringnav_mainscheduling', 'ringnav_play_cover_wait', 'ringnav_scan_dir',
                  'now_page_status', 'now_page_time', 'ringnav_scan_refresh', 'ringnav_shuffle', 'ringnav_song_unknown', 'ringnav_table_drag',
@@ -2844,7 +2843,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, 0x5bc304))[0] == 0x8f99f5ac,
           'lyric file: expected fopen import')
     patch_word(patched, *LYRIC_OPEN, jal(ps['ringnav_lrc_open']), 'lyric files read as tags are')
-    patch_word(patched, *ALBUM_PIC, jal(ps['coverflow_album_pic']), 'a 16-bit embedded PNG goes to ffmpeg')
+    patch_word(patched, *PNG_STRIP16, 0x24060011, 'a 16-bit PNG decoded to 8 bits a channel')
     for call, load, fn in GRID_COVER:
         check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, load))[0] == 0x8f99b76c,
               'grid cover: expected toolsGetAlbumCover import')

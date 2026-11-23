@@ -72,7 +72,7 @@ const unsigned *widget_get_text(void *);
 int canvas_set_font(void *, const char *, unsigned);
 float canvas_measure_text(void *, const unsigned *, unsigned);
 """ + ''.join(f'{r} {n}({a});\n' for n in """
-canvas_fill_rect getAllAlbum getMusicByAlbum toolsQueryDbTable toolsUpdateDbTable toolsGetUserStop album_row toolsThumbSpecCover toolsGetAlbumCover toolsGetExternCover cover_thumb_file _create_deque deque_init_copy deque_clear
+canvas_fill_rect getAllAlbum getMusicByAlbum toolsQueryDbTable toolsUpdateDbTable toolsGetUserStop album_row toolsThumbSpecCover toolsGetAlbumCover toolsGetExternCover _create_deque deque_init_copy deque_clear
 deque_init _deque_push_back deque_pop_back
 deque_assign deque_destroy deque_size deque_at window_create widget_factory
 widget_factory_create_widget image_create hscroll_label_create set_hscroll_label_attribute hscroll_label_set_only_focus hscroll_label_set_ellipses hscroll_label_stop
@@ -855,7 +855,6 @@ int toolsThumbSpecCover(const char *src, const char *dst, int ww, int h) {
     if (strstr(src, ".webp") || strstr(src, "Bad")) return 0; /* stock decodes only JPEG and PNG */
     return write_art(dst, strrchr(src, '/') + 1);
 }
-int cover_thumb_file(const char *src, const char *dst, int ww, int h) { return 0; } /* stock's, inside toolsGetAlbumCover */
 static int album_asks; /* each toolsGetAlbumCover, found or not */
 int toolsGetAlbumCover(const char *src, const char *dst, int ww, int h) {
     assert(ww == 160 && h == 160 && held[0] && held[1] && tmp_dst(dst));

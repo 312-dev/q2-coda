@@ -426,7 +426,6 @@ demo	0x5c84c0	0x10c	tools_fix_kana_combining_marks	Merges UTF-8 combining voiced
 demo	0x5c8d30	0x8c	tools_db_open	Opens stock's shared database connection on first use, and again once an error has closed it: sqlite3_open of its caller's path into the handle at 0xa50114, then (since V1.36) PRAGMA auto_vacuum=INCREMENTAL on it; every toolsInitDatabase, toolsQueryDbTable and other tools*Db* call runs it first.
 demo	0x5c91bc	0x3ac	png_load_file	Reads a PNG file with libpng into row pixels; rejects images over 1024 px and unsupported color types.
 demo	0x5ca690	0x81c	library_file_name_cmp	File-name comparator (record +0x8) that toolsQueryDbTableAndSort's mode 1 hands algo_sort_if when the flag at 0xa5011d is set.
-demo	0x5cb3e0	0x34	cover_thumb_file	A picture file's thumbnail at a size: with a source and a destination, tail-calls the thumbnailer toolsGetAlbumCover's embedded art goes through; else 0.
 demo	0x5cc870	0x918	library_name_cmp_pinyin	Name comparator for sorted library lists that converts names to pinyin; used when the flag at 0xa3bf4d is clear.
 demo	0x5cd188	0x884	library_name_cmp	Name comparator for sorted library lists used when the flag at 0xa3bf4d is set; trims both names before comparing.
 demo	0x5cda0c	0x228	library_path_cmp	Path comparator (record +0xc) that toolsQueryDbTableAndSort's mode 2 hands algo_sort_if.
