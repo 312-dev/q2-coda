@@ -154,13 +154,16 @@ void peq_process(peq_dsp *d, float *audio, unsigned frames);
 
 long long now_ns(void);
 unsigned long long now_ms(void);
-/* Crossfade (docs/internals.md#crossfade): demo writes the next track change's fade, an int in ms,
- * 0 for none; hciplayer's filter maps the file read-only and holds the outgoing track's tail for
- * it. */
-#define XFADE_FILE                                                                                 \
-    PEQ_ROOT "/tmp/q2xfade" /* the next fade's ms (XF_MS), under demo's count of stops (XF_STOPS)  \
-                             */
-#define XF_MS 0xffff
+/* Crossfade (docs/internals.md#crossfade): demo writes the next track change's fade, an int: its
+ * length in ms (XF_MS, 0 for none, the fixed fade a smart one falls back to), XF_SMART to have the
+ * player choose the overlap from both songs' loudness, and demo's count of stops above (XF_STOPS).
+ * The player maps the file read-only and holds the outgoing track's tail for it. XFADE_NEXT names
+ * the two songs of that change, a line each, the playing one's path first, so the player can open
+ * the next one ahead (made whole under .tmp and renamed; empty when the next is not known). */
+#define XFADE_FILE PEQ_ROOT "/tmp/q2xfade"
+#define XFADE_NEXT PEQ_ROOT "/tmp/q2xfade.next"
+#define XF_MS 0x7fff
+#define XF_SMART 0x8000
 #define XF_STOPS 16
 /* Mono Audio: demo writes an int, 1 to mix both channels into each; hciplayer's filter and q2video
  * map it read-only (video.c keeps its own copy of the path). */
@@ -325,8 +328,7 @@ int geom_val(int v) __attribute__((pure));
 int modal_actions(const char *const *names, const char *const *icons, int n, void (*pick)(int i));
 int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i));
 void list_toggle(void *label, const char *title, int on); /* navigation.c: a row's switch */
-int xfade_state(int *seconds);       /* crossfade.c: Crossfade 1 on; *seconds its length */
-void xfade_set(int on, int seconds); /* ... both set and saved */
+void caption_row(void *label, const char *text); /* settings_pages.c: a row's caption */
 /* navigation.c: a set_text row's value */
 void list_value(void *label, const char *title, const char *value);
 char *csv_find(char *list, const char *item); /* navigation.c: comma lists */
@@ -340,7 +342,7 @@ int thumb(const char *src, const char *dst, int w, int h);
 extern volatile unsigned ff_kills; /* coverflow.c: ffmpeg runs killed or never started */
 int card_space(const char *dir);
 int card_room(const char *dir, unsigned mb, unsigned pct);
-unsigned hash_bytes(unsigned h, const unsigned char *s, unsigned n);
+unsigned hash_bytes(unsigned h, const unsigned char *s, unsigned n); /* hash.c: FNV-1a */
 unsigned fnv(unsigned h, const unsigned char *s);
 void stop_timer(unsigned *timer), rearm(unsigned *timer, int (*fn)(const void *), unsigned ms);
 int return_key(void *event, unsigned *timer,
@@ -389,10 +391,8 @@ int thread_lower(int idle);   /* coverflow_loader.c: a worker's nice 19 and its 
 int ringnav_statx(int dirfd, const char *path, int flags, unsigned mask, void *buf);
 void *coverflow_album_tracks(void *r);
 unsigned album_id(void *r), album_dir(const char *p, int disc);
-/* navigation.c: Cover Flow's glide and its letter */
+/* nav/home_carousel.c: Cover Flow's glide */
 int carousel_glide(void *w, int goal, unsigned ms, int easing);
-void coverflow_letter(void *w, unsigned letter, unsigned now);
-void coverflow_letter_hold(void *w, unsigned letter);
 int ringnav_big_library(void); /* Display's Fast Navigation: letters, years and half copies */
 /* A letter with this bit is the Year sort's year instead, in its low bits, 0 undated. */
 #define CF_YEAR 0x80000000u
@@ -580,6 +580,7 @@ void catalogue_row_mark(void *w, void *canvas, void *row, int x, int y);
 void catalogue_fit(void *entry, void *surface, int limit);
 int catalogue_np_info(const char *path, char *genre, int *year);
 int catalogue_cover(const char *path, char *out, unsigned size);
+int catalogue_cover_large(const char *path, char *out, unsigned size);
 /* catalogue.c: a Stream Cache copy's record takes its server row's title, artist and album (1) */
 int catalogue_copy_tags(void *r);
 /* catalogue.c: whether two paths play one song (song_radio.c) */

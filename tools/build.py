@@ -335,8 +335,8 @@ RADIO_TABLES = ('stations.bin', 'zcta.bin')
 # updates are firmware updates. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
 BUNDLED_APPS = {
-    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-132e232.zip', 3686137,
-                 'f2e9bc26da3f198e863dab7075ffa9c57a3e51b2b8a5098f0edfc30d4303ef42', True),
+    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-78f9628.zip', 3686807,
+                 'f0c2e8bebe7dafac4f4693f34ebea8fba2c21763bd88aae1cdebc91363a8fd0f', True),
 }
 APPS_DIR = pathlib.Path.home()/'.cache/q2-apps'
 S90PLAY = 'etc/init.d/S90play'
@@ -380,6 +380,7 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             # The UI loop stalled (system.c stall_write): what its thread was doing
             [ -f /mnt/data/q2-stall ] && {{ echo "== stall"; cat /mnt/data/q2-stall; }} >> $c
             rm -f $m
+            u=1
         }}
         rm -f /mnt/data/q2-cf-trace /mnt/data/q2-stall
         # Baidu Netdisk's sign-in, which stock sends over plain HTTP: Q2 Muse has no Baidu row to use it from
@@ -388,6 +389,29 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             i=0
             while [ $i -lt 60 ] && ! grep -q ' /mnt/mmc ' /proc/mounts; do usleep 500000; i=$((i+1)); done
             grep -q ' /mnt/mmc ' /proc/mounts || exit
+            # an unclean end (u, docs/internals.md#unified-log): the unified log's files, the car's newest log and
+            # dmesg kept in a numbered folder under .q2muse/crashes before the logs roll on, named in the crash
+            # log; only with 50 MB free besides them, the newest five kept, 10 MB at most in all. Off the boot's
+            # path (this subshell runs in the background), the copies niced.
+            [ "$u" ] && {{
+                L=/mnt/mmc/.q2muse/logs; K=/mnt/mmc/.q2muse/crashes
+                n=$(( $(cat $K/.seq 2>/dev/null || echo 0) + 1 ))
+                d=$K/$(printf %05d $n)-$(date -u +%Y%m%dT%H%M%SZ)
+                f=$(df -k /mnt/mmc 2>/dev/null | awk 'NR == 2 {{ print $4 }}')
+                if [ "${{f:-0}}" -gt $(( $(du -sk $L 2>/dev/null | cut -f1) + 51200 )) ] && mkdir -p $d; then
+                    echo $n > $K/.seq
+                    for x in $L/q2-log.* $L/q2-heat.* $L/q2-bt.* $L/q2-btev.* $L/q2car.log $L/q2car.log.dmesg; do
+                        [ -f "$x" ] && nice -n 19 cp "$x" $d/
+                    done
+                    dmesg > $d/dmesg 2>/dev/null
+                    sync
+                    echo "== evidence ${{d#/mnt/mmc/}}" >> $c
+                    ls -1d $K/*/ | sort -r | tail -n +6 | while read x; do rm -rf "$x"; done
+                    while [ "$(du -sk $K | cut -f1)" -gt 10240 ] && [ "$(ls -1d $K/*/ | wc -l)" -gt 1 ]; do
+                        rm -rf "$(ls -1d $K/*/ | sort | head -n 1)"
+                    done
+                fi
+            }}
             # the card keeps the two before it: q2-crash.log.1, then .2; they move only once the copy is
             # whole (a full card or a power cut leaves them, and the log stays on /mnt/data)
             l=/mnt/mmc/q2-crash.log
@@ -870,6 +894,11 @@ LYRIC_ROWS = (0x53d10c, 0x0411f95b)
 # ringnav_lrc_open, which keeps a copy that ringnav_lyric reads again, without its blank lines and, for iPod's
 # lyrics page, with its milliseconds and word stamps.
 LYRIC_OPEN = (0x5bc30c, 0x0320f809)
+# png_load_file's png_read_png(png, info, transforms, NULL) asks for PNG_TRANSFORM_EXPAND alone (addiu $a2, $zero, 0x10),
+# so a 16-bit PNG's six-byte pixels were read as two three-byte ones: the cover twice as wide, in vertical stripes.
+# PNG_TRANSFORM_STRIP_16 (1) beside it has libpng 1.2.59 give 8 bits a channel, the row stride the reader assumes;
+# every cover stock decodes (Cover Flow, Home's art, the grids, a folder image) goes through it.
+PNG_STRIP16 = (0x5c92fc, 0x24060010)
 # parse_albumcovertask_thd's jalr toolsGetAlbumCover (Albums grids; Folder view's folder and track rows),
 # each with its lw $t9, become jal coverflow_grid_cover, which gives ffmpeg the Ogg pictures stock skips;
 # the Albums grid's (first, before stock's toolsGetExternCover) jal coverflow_album_cover, and the folder
@@ -1955,6 +1984,7 @@ FUNCTIONS = {
  'mclStop': ('int', 'void'),
  'mclGetPlayTime': ('int', 'int *, int *'),
  'mclSetStartSeekTime': ('int', 'int'),
+ 'mclSetGaplessMode': ('int', 'int'),  # stock's Gapless row's setter (0x4bcfa4), with PLAYSET GAPLESS: Smart Crossfade turns it on
  'mcl_open_preload': ('int', 'void'),
  'mclLoadPlayList': ('int', 'void *, int, int'),
  'mcl_shuffle_pick': ('int', 'int'),
@@ -2079,6 +2109,7 @@ FUNCTIONS = {
  'btctl_create_daemon_thread': ('int', 'void *'),
  'initBluetoothParam': ('void', 'void'),
  'btctl_set_prompt_callback': ('void', 'void *, void *'),
+ 'btctl_reply': ('int', 'int, const char *'),  # libbtctl: its agent's pending request answered (bt_pair.c)
  'btctl_device_status_callback': ('void', 'void *, void *'),
  'btctl_set_a2dp_callback': ('void', 'void *, void *'),
  'btrecvA2dpFunc': ('int', 'int, void *, void *'),
@@ -2308,7 +2339,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_volume.c', 'output_rule.c', 'usb_record.c', 'usb_ui.c', 'usb_car.c', 'standby_usb.c', 'adb_trust.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'localsend_ui.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'search_bar.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'album_cover.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_ui.c', 'bt_trace.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'vol_pill.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'np_rate.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c', 'autozone.c', 'player_push.c', 'card_watch.c', 'offline.c', 'radio_tuner.c', 'radio_pane.c', 'bt_cover.c', 'now_source.c', 'ui_watch.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_volume.c', 'output_rule.c', 'usb_record.c', 'usb_ui.c', 'usb_car.c', 'standby_usb.c', 'adb_trust.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'localsend_ui.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'search_bar.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'album_cover.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_pair.c', 'bt_ui.c', 'bt_trace.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'vol_pill.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'np_rate.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c', 'autozone.c', 'player_push.c', 'card_watch.c', 'offline.c', 'radio_tuner.c', 'radio_pane.c', 'bt_cover.c', 'now_source.c', 'ui_watch.c']
 
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
@@ -2798,6 +2829,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, 0x5bc304))[0] == 0x8f99f5ac,
           'lyric file: expected fopen import')
     patch_word(patched, *LYRIC_OPEN, jal(ps['ringnav_lrc_open']), 'lyric files read as tags are')
+    patch_word(patched, *PNG_STRIP16, 0x24060011, 'a 16-bit PNG decoded to 8 bits a channel')
     for call, load, fn in GRID_COVER:
         check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, load))[0] == 0x8f99b76c,
               'grid cover: expected toolsGetAlbumCover import')

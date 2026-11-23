@@ -78,7 +78,10 @@ seventh of its brightness. At the foot the rows fade as Corners says, into black
   y 50 as [Menus](#menus) says.
 - **Taps** on the band are the status row's, as on any page ([Full-bleed](#full-bleed)): a row shown under the
   status row is not tappable there; scroll it down to tap it. Its box, its selection, the wheel and a drag are as
-  they were, so a selected row never stops under the status row.
+  they were, so a selected row never stops under the status row. On Home, whose bar shows under touch, a drag
+  that ends with the selected row under the status row, cut by it, or in the fade past the list's rest moves the
+  selection to the whole row nearest the list's middle, and the old bar goes with it: the clock always stands
+  alone on its line ([internals](internals.md#touch-mode)).
 - Built as a paint of the list's rows into the status row's band, under its glyphs (`patch/nav/row_paint.c`
   `list_reach_paint`, the fade `patch/home.c` `list_top_fade`; Home's Split fades follow the glass's corners as
   before, `home_fades`).
@@ -823,7 +826,7 @@ as a menu's; a lit row's foot never passes y 282.
 - **Progress:** 6 px, round ends, Track and Accent Blue. Used for playback, scans and
   downloads.
 - **Slider page** (Volume, Resume Songs, Night Shift, Wheel Sensitivity; stock's Max Volume, Default Volume, Channel
-  Balance and Brightness pages and Crossfade's keep the form where they still open): the status row names it; a feature with a switch has it as the
+  Balance and Brightness pages keep the form where they still open): the status row names it; a feature with a switch has it as the
   first row, selected; the value in Inter Medium 22 centered on y 150; a 6 px track from the text
   column to the right column with its top at y 186, Track behind and Accent Blue filled to a 14 px
   white knob (Channel Balance fills from the center; in Light Mode, where white is the canvas, the
@@ -834,7 +837,7 @@ as a menu's; a lit row's foot never passes y 282.
   named choices: [List row](#list-row)); the value is the warmth ("3400 K") in every mode, and while
   Off it, the track and the knob are Text Tertiary with no accent, as a disabled row's (the user's,
   from audit2 J7).
-- <a id="inline-sliders"></a>**Inline slider rows** (Playback's Max Volume, Balance, Crossfade's Duration and Default
+- <a id="inline-sliders"></a>**Inline slider rows** (Playback's Max Volume, Balance and Default
   Volume's Level, Display's Brightness; the user's, 2026-11-16, from `design/mockups/mock_inline_slider.py`): a setting
   with one value changes in its list, not on a slider page. At rest the row holds its title, a 4 px track from x 190 to
   62 px short of the right column (Track behind, Accent Blue filled to a 12 px white knob; on the selection bar the track
@@ -844,7 +847,7 @@ as a menu's; a lit row's foot never passes y 282.
   two columns centered 43 px down with a 16 px knob; Balance grows to 82 px for Left and Right in 13 px under its
   track, and its track has a 12 px center mark and no fill. The wheel sets the value live at the wheel's speed, each
   step set and saved as stock's page for it sets a step; Center or Return sets it down, as does the selection moving
-  off it. A setting with a switch and a value (Crossfade, Default Volume) is a switch row with its slider row under it,
+  off it. A setting with a switch and a value (Default Volume) is a switch row with its slider row under it,
   shown only while the switch is on (`patch/inline_slider.c`).
 - **Vertical slider (EQ):** 4 px Track line, Accent Blue fill from 0 dB to the value (Text Tertiary
   while the EQ is off), a 14 px white knob, ringed 2 px in Accent Blue while the wheel is on it
@@ -955,20 +958,27 @@ as its callers move onto it.
 
 ### Pairing
 
-A phone pairing with the Q2 asks in one form, whoever asks: Car Remote's app or a Guest Play guest
-(`patch/pair_prompt.c` `pair_prompt`, the confirmation card's consequential kind; the user's ruling, 2026-11-16).
+A phone pairing with the Q2 asks in one form, whoever asks: Car Remote's app, a Guest Play guest or any device
+pairing over Bluetooth by numeric comparison (`patch/pair_prompt.c` `pair_prompt`, the confirmation card's
+consequential kind; the user's ruling, 2026-11-16; the Bluetooth device's card `patch/bt_pair.c`,
+[internals](internals.md#bluetooth-pairing-card)).
 
 - The phone glyph (Phosphor `device-mobile`, 28 px, the accent) over the title "Pair with Pixel 10 Pro?", the phone
   as it names itself, scrolling when long; never cut short in the status row. A card the glyph would take past the
   glass's foot (y 44 to 302: a guest's, with two body lines and three answers) goes without it and shows whole.
 - What to do with the code, in the body: Car Remote's "Enter this code in Q2 Muse Remote"; a guest's "Wants to play
-  music. Check it's on Alex's phone."
+  music. Check it's on Alex's phone."; a Bluetooth device's "Make sure both codes match". A Bluetooth device whose
+  name BlueZ does not have yet is "Pair with this device?" over "Unknown device" and its address, and the card
+  changes to the name in place when it comes; one the request does not identify is "Unknown device" alone.
 - The code large, Inter Medium 30, as two groups of three ("242 610").
-- The answers: Car Remote's Cancel alone; a guest's Allow Once, Always Allow, Decline. It opens on the first.
-- The pairing's time as the card's timeout: Car Remote's 2 minutes, a guest's 30 s, a bar along its foot.
+- The answers: Car Remote's Cancel alone; a guest's Allow Once, Always Allow, Decline; a Bluetooth device's Cancel,
+  Pair (the consequential kind's order: a device paired by mistake keeps its access). It opens on the first.
+- The pairing's time as the card's timeout: Car Remote's 2 minutes, a guest's 30 s, a Bluetooth device's 60 s (BlueZ's
+  own wait for an answer), a bar along its foot. A Bluetooth device's card also closes the moment the device gives
+  up, cancels or goes; it never answers Pair by itself.
 - Its end, Car Remote's: the icon toast "Pixel 10 Pro paired" (Positive's check-circle) or "Pairing failed" (`carremote_page.c` `carremote_paired`).
-- ponytail: the digits are Inter's own, proportional; tabular digits need Inter's `tnum`, which the text drawing does
-  not apply.
+- The digits are tabular: the build maps Inter's 0 to 9 to its `.tf` figures (`tools/build.py` `subset_font`), so
+  every code takes the same width.
 
 ### Focus ring
 
@@ -2028,7 +2038,7 @@ pattern.
 | Storage > Downloads                 | Key/value rows              | Limit (its picker the menu sheet's), then each item: Phosphor `arrow-circle-down` (18 px, Accent Blue) for one the user picked or `arrows-clockwise` (Text Secondary) for one the app keeps itself, white on the selection, centered on x 33, its name at x 52, size and chevron; a footer (the mock's second line, "Auto items refill on the next Sync.", waits for the app to keep items on its own) |
 | Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
 | Equalizer (Simple)                  | Vertical slider             | Its [tabs](#tabs), then rows: the switch, Presets, Reset                                                   |
-| Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, "Searching..." on its line; glyphs at right, the connected network one line with its check and "Connected" as a [caption](#list-row) under its bar while selected, a connecting one with "Connecting" in 13 px Text Tertiary under its name; Reset Network Settings last |
+| Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, the one header, "Searching..." on its line; glyphs at right; the network joining, joined or whose join failed is the first row under it, one line like the rest (in scan order), with the list's spinner, the Accent check (and its trash) or the Negative `warning-circle` before its lock and signal, and "Connecting…", "Connected", "Wrong password" or "Couldn't connect" as a [caption](#list-row) under its bar while selected; a press moves the network there with the selection; a failed one stays first until the next join or scan (variant E, the owner's, 2026-11-23); Reset Network Settings last |
 | Bluetooth                           | [Bluetooth](#bluetooth)     | Devices first under My Devices and Other Devices, the connected one two lines ("Connected · LDAC · 72%" after the Positive dot); then Audio |
 | A Bluetooth device                  | [Bluetooth](#bluetooth)     | The path and its codec line, then Battery, Disconnect, Rename and Forget This Device                      |
 | Bluetooth Stopped                   | [USB](#usb)'s mode page     | The warning on an orange circle, the restart's countdown and Not Now (`bt_stopped.c`)                      |

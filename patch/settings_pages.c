@@ -132,17 +132,19 @@ static int cap_gone(void *view, void *event) {
     memset(&cap, 0, sizeof cap);
     return 0;
 }
-/* s as the canvas draws it, a code unit per byte (the captions are ASCII), on the heap; 0 with no
- * memory. */
+/* s, UTF-8 (a Bluetooth device's name in its caption is BlueZ's), as the canvas draws it: a code
+ * unit a character (lyrics.c utf8_char: a byte that starts no valid sequence is its own Latin-1
+ * character), on the heap; 0 with no memory. */
 static unsigned *cap_wide(const char *s) {
-    unsigned n = (unsigned)strlen(s), *w = calloc(n + 1, sizeof *w);
-    for (unsigned i = 0; w && i <= n; ++i) w[i] = (unsigned char)s[i];
+    unsigned n = (unsigned)strlen(s), *w = calloc(n + 1, sizeof *w), k = 0;
+    for (unsigned i = 0; w && i < n;) w[k++] = utf8_char((const unsigned char *)s, n, &i);
     return w;
 }
 /* Whether the widened w says s. */
 static int cap_says(const unsigned *w, const char *s) {
-    while (*s && *w == (unsigned char)*s) ++w, ++s;
-    return !*s && !*w;
+    unsigned n = (unsigned)strlen(s), i = 0;
+    while (i < n && *w && *w == utf8_char((const unsigned char *)s, n, &i)) ++w;
+    return i >= n && !*w;
 }
 /* The row a list_row label stands in (its button's list_item) gets text as its caption, copied;
  * no text, none, a caption it had dropped. A row already in the table keeps its one entry, so a

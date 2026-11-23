@@ -21,7 +21,10 @@
 #define HELLO_MS 10000
 #define AUTH_MS 150000    /* the longest a session lives unauthenticated, a pairing's included */
 #define HANDSHAKE_MS 15000 /* the longest one stays in a state other than pairing before Auth */
-#define ACK_MS 4000
+#define ACK_MS 4000        /* the shim's answer to a command, at most this late */
+/* Once it answered "taken" (CRC_ACK_TAKEN): its final answer, at most this late. Under Q2 Muse Remote's own 8 s for
+ * any answer (CodaSession.TIMEOUT_MS), past which it drops the whole session. */
+#define ACK_TAKEN_MS 7000
 #define TICK_MS 1000 /* the loop's longest sleep: pairing's end, forgotten phones, the handshakes' limits */
 #define TICK_IDLE_MS 5000 /* with no phone connected and no pairing (idle): Bluetooth's state and the Wi-Fi address */
 #define LOG_MAX 65536
@@ -489,8 +492,20 @@ static const lib_song_t *np_stream(void) {
     return found ? &song : 0;
 }
 
+/* NowPlaying.album_id and artist_id for track id (lib_song_nodes), looked up once a song, not at each send: a
+ * State goes out at every change and once a second while a phone follows the position. */
+static void np_nodes(const char *id, const char **album, const char **artist) {
+    static char of[24] = "\1", a[64], r[64];
+    if (strcmp(of, id)) {
+        snprintf(of, sizeof of, "%s", id);
+        lib_song_nodes(id, a, sizeof a, r, sizeof r);
+    }
+    *album = a, *artist = r;
+}
+
 static void put_now_playing(pbw *w) {
     char id[24] = "", art[48] = "";
+    const char *album_id, *artist_id;
     size_t m = pb_begin(w, 1);
     const lib_song_t *ls = np_stream();
     int rid = ls ? ls->id : np.id;
@@ -518,6 +533,9 @@ static void put_now_playing(pbw *w) {
     pb_varint(w, 17, np.radio != 0); /* CAP_RADIO */
     pb_str(w, 18, np.note);          /* CAP_NOTICE: the toast shown, while it is */
     pb_varint(w, 19, (uint32_t)np.noten);
+    np_nodes(id, &album_id, &artist_id);
+    pb_str(w, 20, album_id); /* the Browse pages of its album and album artist: left out when none */
+    pb_str(w, 21, artist_id);
     pb_end(w, m);
 }
 
@@ -584,9 +602,13 @@ static void np_poll(void) {
 static struct {
     crc_session *s;
     unsigned req_id, seq;
-    uint32_t at;
+    uint32_t at;   /* sent, or taken since */
+    int taken;     /* the shim answered CRC_ACK_TAKEN: at work, its answer to come */
     char verb[24];
 } pend;
+
+/* when the pending command's answer is due */
+static uint32_t pend_due(void) { return pend.at + (pend.taken ? ACK_TAKEN_MS : ACK_MS); }
 /* Numbered from the clock's, so a restarted daemon's never meet the last one's still in the shim's answers (it keeps
  * a few, coda_rc_shim.c cr_ack), and under q2-iap's, which start at 0x51000000. */
 static unsigned cmd_seq;
@@ -608,7 +630,8 @@ static void pend_answer(int code) {
     pend.s = 0;
 }
 
-/* the shim's command, answered once it acks or after ACK_MS: down its queue (coda_rc_cmdq.h), else in its file */
+/* the shim's command, answered once it acks or after ACK_MS (ACK_TAKEN_MS once it said it took it): down its queue
+ * (coda_rc_cmdq.h), else in its file */
 int crc_shim_command(crc_session *s, unsigned req_id, const char *verb) {
     char b[96], q[256];
     if (!crc_shim_alive()) return crc_error(s, req_id, E_UNAVAILABLE, "demo is not answering");
@@ -623,6 +646,7 @@ int crc_shim_command(crc_session *s, unsigned req_id, const char *verb) {
     pend.req_id = req_id;
     pend.seq = seq;
     pend.at = crc_now_ms();
+    pend.taken = 0;
     snprintf(pend.verb, sizeof pend.verb, "%s", verb);
     return 0;
 }
@@ -636,12 +660,21 @@ static void ack_poll(void) {
     for (char *l = b; n > 0 && l < b + n; ++l) {
         char *sp = strchr(l, ' ');
         if ((unsigned)strtoul(l, 0, 10) == pend.seq) {
-            pend_answer(sp ? atoi(sp + 1) : 1);
-            return;
+            int code = sp ? atoi(sp + 1) : 1;
+            if (code != CRC_ACK_TAKEN) {
+                pend_answer(code);
+                return;
+            }
+            if (!pend.taken) { /* the newest answer: taken, the final one still to come */
+                pend.taken = 1;
+                pend.at = crc_now_ms();
+                crc_log("demo: %s taken", pend.verb);
+            }
+            break;
         }
         if (!(l = strchr(l, '\n'))) break;
     }
-    if (crc_now_ms() - pend.at > ACK_MS) pend_answer(1);
+    if ((int32_t)(crc_now_ms() - pend_due()) > 0) pend_answer(1);
 }
 
 /* ---- covers the card lacks, asked of their card app (docs/internals.md#car-remote-covers) ---- */
@@ -1097,7 +1130,7 @@ static int wait_ms(uint32_t now, uint32_t last_tick, int quiet) {
     if ((d = mdns_due(now)) < w) w = d;
     if (np.state == 1 && position_wanted() && (d = until(pos_pushed + 1000, now)) < w) w = d;
     if (np.bhave != np_sent.bhave && (d = until(buf_pushed + 500, now)) < w) w = d;
-    if (pend.s && (d = until(pend.at + ACK_MS + 1, now)) < w) w = d;
+    if (pend.s && (d = until(pend_due() + 1, now)) < w) w = d;
     if ((d = cover_due(now)) < w) w = d;
     if (use_ble && (d = ble_due(now)) < w) w = d;
     return (int)w;

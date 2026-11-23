@@ -466,7 +466,7 @@ void feedback_switch_bar(void *w, void *canvas);
 void feedback_scan_bar(void *w, void *canvas);
 void feedback_shuffled(const char *what, int songs);
 int confirm_surface(void *w); /* w holds the card's answers */
-/* pair_prompt.c: one pairing presentation, Car Remote's and Guest Play's
+/* pair_prompt.c: one pairing presentation, Car Remote's, Guest Play's and a Bluetooth device's
  * (docs/oled-design.md#pairing) */
 void *pair_prompt(const char *phone, const char *code, const char *body, const char *const *rows,
                   int n_rows, int back, int timeout_ms, int timeout_row,
@@ -528,10 +528,16 @@ void slider_page_dirty(void *page); /* its switch row, after a change of the hid
 int wifi_list(void *list);
 int wifi_sig(const char *image); /* stock's signal image's level, 1-4, else 0 */
 void wifi_rows_pre(void *view);
-int wifi_connected_row(void *b); /* the row button b has stock's Connected line */
+int wifi_connected_row(void *b); /* the row button b has stock's state line */
 void wifi_rows_post(void *view);
 void wifi_mark(void *w, void *canvas, int level, int selected);
 void wifi_busy_show(void *win); /* "Searching..." on the section's line while a scan runs */
+/* the network first under Networks (wifi_flows.c's): the selection kept through a rebuild, a press
+ * followed, a failed join marked, a join ended */
+void wifi_rows_keep(void *view), wifi_rows_follow(const char *ssid), wifi_rows_end(void),
+    wifi_rows_scanned(void);
+void wifi_rows_failed(const char *ssid, int wrong);
+void *wifi_tap_button(void *view, int id); /* the row button of the list's tap target id */
 /* wifi_flows.c: Settings > Wi-Fi's flows past stock's */
 int ringnav_wifi_rows(void *win), wifi_flows_hold(void *top), wifi_flows_cancel_join(void);
 
@@ -563,7 +569,7 @@ void list_grown_foot(void *view, void *row, int step); /* nav/row_paint.c: and s
 void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);
 /* inline_slider.c: Settings' one-value rows that change in place
  * (docs/oled-design.md#inline-sliders) */
-enum { IS_MAXVOL, IS_BALANCE, IS_BRIGHT, IS_BOOTVOL, IS_XFADE, IS_KINDS };
+enum { IS_MAXVOL, IS_BALANCE, IS_BRIGHT, IS_BOOTVOL, IS_KINDS };
 void *inline_slider_row(void *view, const char *icon, int kind);
 void inline_pair(void *view, const char *icon, int kind);
 void inline_slider_sel(void *view, void *item), inline_slider_paint(void *w, void *canvas);
@@ -1110,6 +1116,9 @@ int bt_list(void *list), bt_mac_ok(const char *s), bt_dev_find(const char *mac);
 int bt_quality_dim(void *w, unsigned *color); /* a Quality choice the device lacks: its text */
 #define BT_MARK_CHECK 6 /* bt_mark's kind: a picker's check on the right column */
 void *bt_mark(void *parent, const char *name, int kind, int x, int y, int w, int h);
+/* bt_pair.c: a device pairing by numeric comparison (docs/internals.md#bluetooth-pairing-card) */
+void bt_pair_init(void), bt_pair_poll(void);
+int bt_pair_prompt(int type, const char *passkey, void *unused);
 /* guest_ui.c: Guest Play's screens (docs/oled-design.md#guest-play) */
 void guest_ui_poll(void), guest_ui_paint(void *w, void *canvas), guest_np_open(void);
 int guest_ui_state(void), guest_ui_on(void), guest_settings_open(void *ctx, void *event),

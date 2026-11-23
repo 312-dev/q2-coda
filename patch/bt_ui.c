@@ -962,19 +962,22 @@ static const char *auto_caption(char *s) {
  * aptX HD, aptX, AAC; Auto and SBC never) are marked as the Library's grayed rows are
  * (docs/server-library.md#grayed-rows: #666666 off the selection, the selection's own ink at 70%
  * on it, bt_quality_dim) and still pickable, the pick kept for the next device; each says why
- * under it while selected, "BMW 6R81 doesn't support aptX HD: using AAC" (the device's name cut at
- * BT_LACK_NAME characters, the codec streaming now if known). Run after each layout and again
+ * under it while selected, "BMW 6R81 doesn't support aptX HD: using AAC" (the device's name, UTF-8,
+ * cut at BT_LACK_NAME characters, the codec streaming now if known). Run after each layout and again
  * from bt_ui_poll when the device, its codecs or the codec streaming change (lack_key). s holds
  * the caption, BT_LACK_LEN bytes (caption_row copies it). */
 #define BT_LACK_NAME 20
-#define BT_LACK_LEN 64
+#define BT_LACK_LEN 128 /* 20 characters of up to 4 bytes, " doesn't support aptX HD: using aptX HD" */
 #define BT_LACK_GREY 0x666666 /* catalogue.c CAT_GREY */
 #define BT_LACK_DIM 0xb3      /* ... CAT_DIM */
 static const char *lack_caption(int codec, char *s) {
     int now = I(bt_showcoding, 0);
-    unsigned n =
-        (unsigned)tk_snprintf(s, BT_LACK_LEN, "%.*s doesn't support %s", BT_LACK_NAME,
-                              *bt.link_name ? bt.link_name : "This device", codec_name(codec));
+    const char *name = *bt.link_name ? bt.link_name : "This device";
+    unsigned len = (unsigned)strlen(name), cut = 0;
+    for (int c = 0; c < BT_LACK_NAME && cut < len; ++c) /* characters, not bytes: UTF-8 */
+        utf8_char((const unsigned char *)name, len, &cut);
+    unsigned n = (unsigned)tk_snprintf(s, BT_LACK_LEN, "%.*s doesn't support %s", (int)cut, name,
+                                       codec_name(codec));
     if (codec_name(now) && now != codec && n < BT_LACK_LEN)
         tk_snprintf(s + n, BT_LACK_LEN - n, ": using %s", codec_name(now));
     return s;
@@ -1338,6 +1341,7 @@ void bt_ui_poll(void) {
     if (quality.view && quality.coding != g_btcoding) quality_rates(quality.view);
     if (bt.view) page_poll(now);
     guest_ui_poll();
+    bt_pair_poll(); /* a device pairing: its card (bt_pair.c) */
     bt_detail_poll();
     if (now - bt.link_poll_at >= BT_POLL_MS) {
         bt.link_poll_at = now;

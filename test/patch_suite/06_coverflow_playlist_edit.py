@@ -770,3 +770,9 @@ assert not m.bands and [(t['text'],t['rect'],t['font'][1]) for t in m.letters]==
 m.nodes[sv2]['value']=1; paint(dlg2)  # a sliver is still a round dot
 assert m.rounded[2]['rect']==(*bar[:2],BH,BH),m.rounded; passed()
 R=O['LETTER_RADIUS']; assert math.hypot(80-(X+R),Y+H-R-240)+R<=80  # its rounded corner clears the glass's
+
+# Stock's PNG reader (png_load_file) calls png_read_png with PNG_TRANSFORM_EXPAND (0x10) and, from PNG_STRIP16,
+# PNG_TRANSFORM_STRIP_16 (1) beside it: a 16-bit cover is decoded at 8 bits a channel, the stride the reader's rows
+# assume, rather than as twice as many three-byte pixels in stripes (tools/build.py PNG_STRIP16).
+from build import PNG_STRIP16
+assert struct.unpack_from('<I',demo,fileoff(demo,PNG_STRIP16[0]))[0]==0x24060011; passed()

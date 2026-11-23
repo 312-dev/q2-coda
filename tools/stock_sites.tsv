@@ -415,6 +415,7 @@ demo	0x5c207c	0x4	networkStop	`addiu $2, $zero, 0x2`, before the only call to pt
 demo	0x5c6be0	0x4	platformTypeRegister	`addiu $4, $zero, 0x58`, after "stPlayCommandInfo"; patch/offsets.inc REC_SIZE
 demo	0x5c8d60	0x4	tools_db_open	the load of $25 for the only call to sqlite3_open; tools/build.py STOCK_DB_OPEN, tools/build.py build
 demo	0x5c8d64	0x4	tools_db_open	the only call to sqlite3_open; tools/build.py STOCK_DB_OPEN
+demo	0x5c92fc	0x4	png_load_file	`addiu $6, $zero, 0x10`, before the only call to png_read_png, after "1.2.37"; tools/build.py PNG_STRIP16
 demo	0x5cc968	0x4	library_name_cmp_pinyin	1st of 2 calls to toolsTrimLeft; tools/build.py SORT_TRIMS
 demo	0x5cc9d4	0x4	library_name_cmp_pinyin	2nd of 2 calls to toolsTrimLeft; tools/build.py SORT_TRIMS
 demo	0x5cd280	0x4	library_name_cmp	1st of 2 calls to toolsTrimLeft; tools/build.py SORT_TRIMS

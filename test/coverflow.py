@@ -24,9 +24,9 @@ THUMB_PAGE = {'cf.radius': 0, 'cf.top': 32, 'cf.bright1': 256, 'cf.bright2': 256
 SHELF_180 = {'cf.eye': 94, 'cf.tilt': 89, 'cf.x1': 116, 'cf.xs': 34, 'cf.z1': 77, 'cf.zs': 1, 'cf.horizon': 63, 'cf.swing': 1,
              'cf.lift': 20, 'cf.eye_turn': 150, 'cf.art_persp': 13, 'cf.arch_span': 0}
 
-# coverflow.c, coverflow_thumb.c, coverflow_letters.c, coverflow_loader.c, playlist_art.c and wheel_accel.c as one unit, so the shim's
+# coverflow.c, coverflow_thumb.c, coverflow_letters.c, coverflow_loader.c, playlist_art.c, wheel_accel.c and hash.c as one unit, so the shim's
 # stubs are defined once
-CF_SOURCES = '#include "coverflow.c"\n#include "coverflow_thumb.c"\n#include "coverflow_letters.c"\n#include "coverflow_loader.c"\n#include "playlist_art.c"\n#include "coverflow_position.c"\n#include "corner_cover.c"\n#include "wheel_accel.c"\n'
+CF_SOURCES = '#include "coverflow.c"\n#include "coverflow_thumb.c"\n#include "coverflow_letters.c"\n#include "coverflow_loader.c"\n#include "playlist_art.c"\n#include "coverflow_position.c"\n#include "corner_cover.c"\n#include "wheel_accel.c"\n#include "hash.c"\n'
 SHIM_H = r"""
 extern char system_bar[];
 """ + ''.join(line + '\n' for line in font_indices()) + r"""
@@ -82,7 +82,7 @@ widget_set_text_utf8 widget_get_text_utf8 widget_add_timer widget_restack widget
 widget_get_prop_str widget_on widget_destroy_children widget_invalidate_force
 widget_count_children widget_get_child widget_lookup widget_move_resize widget_resize widget_get_canvas widget_get_visible
 canvas_get_clip_rect canvas_set_clip_rect widget_set_sensitive widget_get_type tk_strcmp widget_animator_destroy
-timer_add timer_remove navigator_back_to_home navigator_back navigator_window_is_exist window_manager_close_window_force navigator_to_with_context bitmap_create_ex bitmap_destroy bitmap_unlock_buffer
+timer_add timer_remove navigator_back_to_home navigator_back navigator_window_is_exist window_manager_close_window_force navigator_to_with_context check_forbid_play_no_headset bitmap_create_ex bitmap_destroy bitmap_unlock_buffer
 bitmap_lock_buffer_for_read bitmap_lock_buffer_for_write bitmap_get_line_length
 canvas_draw_image slide_menu_set_spacer window_manager window_manager_get_top_window window_manager_is_animating time_now_ms
 widget_to_local widget_animator_pause window_manager_get_pointer_pressed image_manager image_manager_unload_bitmap_by_name image_manager_unload_all
@@ -499,6 +499,7 @@ int navigator_back(void) { return ++backs, 0; }
 static int usb_page; /* USB Storage's page open */
 int navigator_window_is_exist(const char *name) { return usb_page && !strcmp(name, "usbmode_page"); }
 int window_manager_close_window_force(void *m, void *x) { force_closed = x; return ++force_closes, 0; }
+int check_forbid_play_no_headset(int quiet) { return 0; } /* an output there: the tests play */
 /* play_folder's: the page, its context and the queue as it stood */
 static char nav_to[32];
 static struct { void *dq; int idx, cls, mode; } nav_ctx;

@@ -179,6 +179,28 @@ def test_a_server_only_library_shows_its_apps_album_covers(fw):
     assert lib.sizes == []  # no file to read embedded art from
 
 
+import pytest
+
+
+@pytest.mark.parametrize('large', [True, False])
+def test_a_server_album_s_slide_is_made_from_its_512_px_cover_when_the_card_has_it(fw, large):
+    """The owner's report (2026-11-23, "why are slideshow library album covers so low res"): the slide was made from
+    the app's list-row cover, 160 px, scaled up to SLIDE_ART_PX (352) and blocky. The app keeps a larger one beside
+    it, covers/512/<album>.jpg (500 px on the owner's card, 2,048 of 2,048 albums): the slide is made from that,
+    and from the small one only when it is missing."""
+    fw.mock('tk_str_start_with', stock_start_with)
+    row = '/mnt/mmc/.subsonic/cat/al1/s1.flac'
+    lib = Library(fw, [(row, 'Ann', 'Alpha')], card=0, server=9199)
+    lib.card.files['/mnt/mmc/.subsonic/covers/al1.jpg'] = b'jpeg'
+    if large:
+        lib.card.files['/mnt/mmc/.subsonic/covers/512/al1.jpg'] = b'jpeg'
+    made = []
+    fw.mock('toolsThumbSpecCover', lambda src, dst, w, h, *_: made.append(C.string_at(src).decode())
+            or lib.card.files.__setitem__(C.string_at(dst).decode(), b'jpeg') or 1)
+    assert lib.pick().kind == 1
+    assert made == ['/mnt/mmc/.subsonic/covers/512/al1.jpg' if large else '/mnt/mmc/.subsonic/covers/al1.jpg']
+
+
 def test_a_library_on_both_draws_from_each_by_its_size(fw):
     """Songs on the card and on a server: each try takes the card's table or the server's, in proportion to their
     rows, so neither hides the other."""

@@ -397,6 +397,21 @@ def headroom_check(lib, ui):
     auto = ui.check_headroom(C.byref(p))  # Auto's: the loudest standard rate's
     assert -12.37 < auto < -12.34, auto  # strongest response is at 32 kHz, not the old 48 kHz estimate
     assert bytes(p) == before and ui.check_headroom(C.byref(p)) == auto
+    # Auto's cut is kept by a hash of the bands (headroom's two FNV-1a, hash.c's hash_bytes): a band changed, even by
+    # its smallest step, is a different preset and gets its own cut, and the first preset's comes back for it after,
+    # each the loudest standard rate's peq_auto, as worked out afresh
+    def fresh(q):
+        q2 = Preset.from_buffer_copy(q); q2.automatic = 1
+        return min(0, *(lib.peq_auto(C.byref(q2), r) for r in (8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100,
+                                                               48000, 64000, 88200, 96000, 176400, 192000, 352800, 384000)))
+    for change in (('gain', 0.1), ('frequency', 1), ('q', 0.01)):
+        q = Preset.from_buffer_copy(p)
+        setattr(q.bands[3], change[0], getattr(q.bands[3], change[0]) + change[1])
+        got = ui.check_headroom(C.byref(q))
+        assert got != auto and abs(got - fresh(q)) < 1e-9, (change, got, auto)
+        assert ui.check_headroom(C.byref(p)) == auto
+    q = Preset.from_buffer_copy(p); q.preamp, q.balance = 3, 5  # neither is a band: the same cut
+    assert ui.check_headroom(C.byref(q)) == auto
     p.preamp = auto
     for rate in (8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100,
                  48000, 64000, 88200, 96000, 176400, 192000, 352800, 384000):
@@ -816,7 +831,7 @@ def editor_check(lib, tmp):
                                        'void check_calloc_fails(int on) { calloc_fails = on; }\n'
                                        'double check_headroom(const peq_preset *p) { return headroom(p); }\n'
                                        'int check_view(void) { return (int)(long)ui.view; }\nint check_graph(void) { return (int)(long)ui.graph; }\n')
-    ui = compile_host(tmp, 'peq_ui.so', tmp/'peq_ui_checks.c', ROOT/'patch/peq.c', tmp/'shim.c',
+    ui = compile_host(tmp, 'peq_ui.so', tmp/'peq_ui_checks.c', ROOT/'patch/peq.c', ROOT/'patch/hash.c', tmp/'shim.c',
                       '-I', ROOT/'patch', '-include', tmp/'shim.h')
     headroom_check(lib, ui)
     ui.shim_title.restype = C.c_char_p
@@ -1167,7 +1182,7 @@ def output_check(tmp):
                                 'double check_gain(void) { return e3.gain[0]; }\n'
                                 'void check_draft(double b) { ui.dirty = 1; ui.draft.balance = b; }\n'
                                 'double check_balance(void) { return ui.draft.balance; }\n')
-    ui = compile_host(tmp, 'outputs.so', tmp/'checks.c', ROOT/'patch/peq.c', tmp/'shim.c',
+    ui = compile_host(tmp, 'outputs.so', tmp/'checks.c', ROOT/'patch/peq.c', ROOT/'patch/hash.c', tmp/'shim.c',
                       '-I', ROOT/'patch', '-include', tmp/'shim.h')
     ui.eq_output.argtypes = [C.c_char_p]
     ui.eq_load.argtypes = ui.eq_save.argtypes = [C.POINTER(State)]
@@ -1701,7 +1716,7 @@ def games_check(tmp):
     conflicts and completion; saves' magic and checksum; Vortex's paddle, bricks, lives, levels,
     speed cap, no tunnelling and determinism; Snake's turns, growth, collisions and food."""
     import random
-    lib = compile_host(tmp, 'games.so', ROOT/'patch/games.c')
+    lib = compile_host(tmp, 'games.so', ROOT/'patch/games.c', ROOT/'patch/hash.c')
     class Sudoku(C.Structure):
         _fields_ = [('magic', C.c_uint), ('cell', C.c_ubyte * 81), ('cur', C.c_ubyte), ('pad', C.c_ubyte * 2), ('sum', C.c_uint)]
     class Vortex(C.Structure):

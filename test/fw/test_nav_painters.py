@@ -2267,9 +2267,9 @@ def test_playback_orders_its_rows_eq_and_the_library_first(fw):
     fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     rows = view.children
     # stock's Volume and Album Display is not offered; Folder skip is Library > Folders'; stock's Balance (s10) stays,
-    # hidden, after the inline Balance (inline_slider.c); Crossfade's Duration and Default Volume's Level under them
+    # hidden, after the inline Balance (inline_slider.c); Smart Crossfade's one switch; Default Volume's Level under it
     seq = [r.name or ui.text(label_of(r)).split(':')[0] for r in rows]
-    assert seq == ['s2', 'Library', 's3', 's7', 'Crossfade', 'Duration', 's6', 'Resume Songs', 's8', 'Sleep Timer',
+    assert seq == ['s2', 'Library', 's3', 's7', 'Smart Crossfade', 's6', 'Resume Songs', 's8', 'Sleep Timer',
                    'Volume', 'Max Volume', 'Default Volume', 'Level', 's0', 's9', 'Balance', 's10', 'Mono Audio',
                    'Swap L/R', 's1', 's4', 's5']
     assert 'list_into' in [c.props.get('image') for c in rows[1].walk()] and not rows[seq.index('s10')].visible
@@ -2348,7 +2348,7 @@ def test_the_library_is_stocks_page_again_with_its_pages(fw, st):
     again = ui.add('scroll_view', ui.window('playset_page'), (0, 26, 375, 294), 'scroll_view_playset')
     playset(fw, ui, again)
     audioset(ui.top.addr, None)
-    assert len(again.children) == 23  # the next open is the main page again
+    assert len(again.children) == 22  # the next open is the main page again
 
 
 def caption_texts(fw, view):
@@ -2382,13 +2382,14 @@ def test_reset_settings_rows_lose_their_chevrons_and_say_what_they_take(fw):
 
 
 def test_playback_s_and_library_s_rows_carry_their_captions(fw):
-    """Playback's own rows carry none; Playback > Library's switches do (library_settings.c), and Library > Folders'
-    stock Folder skip has its own (ringnav_audioset)."""
+    """Playback's own rows carry one, Smart Crossfade's (crossfade.c xfade_text); Playback > Library's switches do
+    (library_settings.c), and Library > Folders' stock Folder skip has its own (ringnav_audioset)."""
     ui, win, view, settings, _ = settings_page(fw, 'playset_page', 'scroll_view_playset')
     playset(fw, ui, view)
     audioset = fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)
     audioset(win.addr, None)
-    assert caption_texts(fw, view) == {}
+    assert {ui.text(label_of(r)): t for r, t in caption_texts(fw, view).items()} == {
+        'Smart Crossfade': 'Overlaps songs from different albums, timed to how each ends and begins'}
 
     def sub_page(n):  # Library's page n (LIB_*): stock's page again, built afresh
         page = ui.window('playset_page')

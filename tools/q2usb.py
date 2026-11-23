@@ -7,8 +7,8 @@ nothing enumerated on it, a plug that never enumerated, a link a wake from Stand
     adb shell cat /mnt/mmc/.q2pod/q2-usb.1.log /mnt/mmc/.q2pod/q2-usb.log | python3 tools/q2usb.py -
 
 A line is `WALL MS EVENT PD18=.. PD17=.. PD19=.. PC20=.. PE22=.. otg=.. id=.. mode=.. conn=.. vbus=.. udc=.. hostdev=..`:
-WALL is time()'s seconds, MS demo's millisecond clock, EVENT boot, in, out, in+5s, out+5s, otg-on, otg-off, otg-trial-off, standby,
-wake or wake+5s; boot and wake+5s end with `pull=` (cmd_gpio get_func PD18), and read boot-pull-off or wake+5s-pull-off
+WALL is time()'s seconds, MS demo's millisecond clock, EVENT boot, in, out, in+5s, out+5s, otg-on, otg-off (followed by why=),
+otg-trial-off, standby, wake or wake+5s; boot and wake+5s end with `pull=` (cmd_gpio get_func PD18), and read boot-pull-off or wake+5s-pull-off
 when the ID pin's pull-up was found off (and was set again).
 Other lines (the card store's `== N lines lost` note) are skipped. Exit 1 when anything is flagged."""
 import argparse
@@ -51,6 +51,7 @@ def flags(rows):
     """[(row, text)] for each thing worth a look, in order."""
     out = []
     on = None  # the otg-on row while the Q2 powers the bus
+    enumerated = False  # a pins line since it with a device on the host port
     standby = None  # the last standby row
     for i, r in enumerate(rows):
         if r.event.endswith('-pull-off'):
@@ -59,14 +60,16 @@ def flags(rows):
             out.append((r, f'BACKFEED bus power on with a computer seen ({r.event}: vbus={r.f.get("vbus")} '
                            f'udc={r.f.get("udc")})'))
         if r.event == 'otg-on':
-            on = r
+            on, enumerated = r, False
+        elif r.event == 'pins' and on is not None and r.f.get('hostdev') == '1':
+            enumerated = True  # the trace saw a device on the host port while the bus was powered
         elif r.event in ('otg-off', 'otg-trial-off') and on is not None:
             held = (r.ms - on.ms) / 1000
             later = [x for x in rows[i + 1:] if 0 <= x.ms - r.ms <= COMPUTER_MS]
             if any(x.computer() or x.event == 'in' for x in later):
                 out.append((on, f'BACKFEED bus power on {held:.1f}s, then a computer within {COMPUTER_MS // 1000}s '
                                 f'of it going off'))
-            elif on.f.get('hostdev', '?') == '?' and r.f.get('hostdev', '?') == '?':
+            elif not enumerated and on.f.get('hostdev', '?') == '?' and r.f.get('hostdev', '?') == '?':
                 out.append((on, f'EMPTY bus power on {held:.1f}s with nothing enumerated on the host port'))
             on = None
         elif r.event == 'in+5s' and r.f.get('udc') not in ENUMERATED:

@@ -281,6 +281,30 @@ def boot_check():
         assert out.endswith(line + '== stall\n' + record) and '== cover flow' not in out and not stall.exists()
         stall.write_text('stale\n'); out, cp = logged(0, False)
         assert out is False and not stall.exists()  # no forced restart: dropped, not reported
+        # an unclean end found at boot keeps its evidence on the card (docs/internals.md#unified-log): the unified log's
+        # files, the car's newest log and dmesg in a numbered folder under .q2muse/crashes, named in q2-crash.log; a
+        # clean boot keeps nothing; the newest five are kept, a sixth drops the oldest; a card short of room keeps none
+        ulogs, kept = r/'mnt/mmc/.q2muse/logs', r/'mnt/mmc/.q2muse/crashes'
+        ulogs.mkdir(parents=True, exist_ok=True)
+        evidence = ['q2-log.0', 'q2-log.1', 'q2-heat.0', 'q2-bt.0', 'q2-btev.0', 'q2car.log', 'q2car.log.dmesg']
+        for f in (*evidence, 'q2car.1.log', 'other.txt'):
+            (ulogs/f).write_text(f + ' lines\n')
+        exe('bin/dmesg', 'echo kernel ring')
+        def folders(): return sorted(p.name for p in kept.iterdir() if p.is_dir()) if kept.exists() else []
+        for f in (crash, copy): f.unlink(missing_ok=True)
+        logged(0, True); assert folders() == []  # a clean end
+        state.write_text(line); out, cp = logged(0, True)
+        (one,) = folders()
+        assert sorted(p.name for p in (kept/one).iterdir()) == sorted([*evidence, 'dmesg'])
+        assert (kept/one/'q2-log.0').read_text() == 'q2-log.0 lines\n' and (kept/one/'dmesg').read_text() == 'kernel ring\n'
+        assert cp.endswith(f'== evidence .q2muse/crashes/{one}\n') and not state.exists()
+        for _ in range(5):
+            state.write_text(line); logged(0, True)
+        assert len(folders()) == 5 and one not in folders() and folders() == sorted(folders())
+        exe('bin/df', 'echo "Filesystem 1K-blocks Used Available Use% Mounted on"; echo "card 100 90 10 90% /mnt/mmc"')
+        before = folders(); state.write_text(line); out, cp = logged(0, True)
+        assert folders() == before and '== evidence' not in cp  # no room: nothing copied, nothing named
+        (r/'bin/df').unlink(); (r/'bin/dmesg').unlink(); mounts.write_text('')
         for f in (crash, copy): f.unlink(missing_ok=True)
         crash.write_text('== demo exit 137\n'); state.write_text(line); boot(True, False, status=0)
         assert crash.read_text().startswith('== demo exit 137\n== last state\n') and line in crash.read_text() and not state.exists()

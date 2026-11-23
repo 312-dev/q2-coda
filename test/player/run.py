@@ -717,7 +717,8 @@ def test_formats_open_as_stock(player, songs, tmp):
 # ---- the DSP (phase 3)
 
 def tool(tmp, name, *defines):
-    """test/player/NAME.c with player/dsp.c and patch/peq.c as the player builds them, for this machine."""
+    """test/player/NAME.c with patch/peq.c (and player/dsp.c for dsp_test) as the player builds them, for this
+    machine."""
     out = tmp/name
     if not out.exists() and name in ('volume_test', 'alsa_test'):  # output.c and the car's trace it counts into, with FFmpeg's headers
         ff = pathlib.Path(subprocess.run([sys.executable, ROOT/'tools/player.py', 'ffmpeg', 'host'], check=True, capture_output=True, text=True).stdout.strip())
@@ -725,7 +726,7 @@ def tool(tmp, name, *defines):
                         ROOT/'player/output.c', ROOT/'player/cartrace.c', '-L', ff/'lib', '-lswresample', '-lavutil', '-lm', '-lpthread', '-o', out], check=True)
     if not out.exists():
         subprocess.run(['cc', '-std=c11', '-D_GNU_SOURCE', '-DPEQ_HOST', *defines, '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
-                        '-I', ROOT/'player', '-I', ROOT/'patch', HERE/f'{name}.c', ROOT/'player/dsp.c', ROOT/'patch/peq.c',
+                        '-I', ROOT/'player', '-I', ROOT/'patch', HERE/f'{name}.c', *([ROOT/'player/dsp.c'] if name == 'dsp_test' else []), ROOT/'patch/peq.c',
                         '-Wl,--wrap=clock_gettime' if name == 'dsp_test' else '-lm', '-lm', '-o', out], check=True)
     return out
 
@@ -781,7 +782,7 @@ def test_crossfade(player, songs, tmp):
     """/tmp/q2xfade at 2000 ms, two 20 s FLACs, the second preloaded: the first plays exactly up to its last 2 s, which
     are mixed under the second's first 2 s at equal power, then the second plays exactly (demo's fade is 0 by then, its
     next being the queue's end); one PCM open."""
-    s, pcm, names = play(player, songs, 'xfade', tmp/'xfade', speed=8)
+    s, pcm, names = play(player, songs, 'xfade', tmp/'xfade', speed=8, exits=2)
     assert names == ['0000_44100_2_s16.raw'], names
     a, b, got = (array.array('h', x) for x in (reference(songs/'a1.flac'), reference(songs/'a2.flac'), pcm[0]))
     n, h = len(a) // 2, 2 * 44100
@@ -798,6 +799,236 @@ def test_crossfade(player, songs, tmp):
     exits = [l.split()[-1] for l in s.lines if 'exit}' in l]
     assert exits == ['{player-status\\exit}'] * 2, exits
     return f'{len(got) // 2} frames: {n - h} exact, {h} mixed within {worst:.2f} of equal power, {len(b) // 2 - h} exact'
+
+
+# ---- Smart Crossfade (player/smart.c, dsp.c smart_want; docs/internals.md#smart-crossfade)
+SMART = 5000 | 0x8000  # peq.h: the plain fade's 5 s, XF_SMART
+
+
+def synth(path, seconds, level, rate=44100, channels=2, hz=None):
+    """A FLAC whose frame i is level(i / rate) times a sine of hz (a whole number of cycles a 50 ms window), every
+    channel the same: the analysis's windows then measure the level exactly."""
+    hz = hz or 440
+    raw = array.array('h')
+    for i in range(int(seconds * rate)):
+        v = int(round(32767 * level(i / rate) * math.sin(2 * math.pi * hz * i / rate)))
+        raw.extend([v] * channels)
+    pcm = path.with_suffix('.raw')
+    pcm.write_bytes(raw.tobytes())
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 's16le', '-ar', str(rate), '-ac', str(channels), '-i', pcm,
+                    '-c:a', 'flac', path], check=True)
+    pcm.unlink()
+    return path
+
+
+def smart_songs(d, rate_b=44100, channels_b=2, b_level=None):
+    """A: a 440 Hz tone at half scale for 16 s, a 6 s linear fade to nothing, 2 s of silence. B: 1.5 s of silence,
+    then a 660 Hz tone at half scale from its first frame (a hard start), 43.5 s of it: over XF_SMART_LEAD_S long, so
+    its own change's analysis is not asked for before demo's word for it (0, the queue's end) is there."""
+    d.mkdir(parents=True, exist_ok=True)
+    a = synth(d/'sa.flac', 24, lambda t: 0.5 if t < 16 else max(0.0, 0.5 * (1 - (t - 16) / 6)) if t < 22 else 0.0)
+    b = synth(d/'sb.flac', 45, b_level or (lambda t: 0.0 if t < 1.5 else 0.5), rate=rate_b, channels=channels_b, hz=660)
+    return a, b
+
+
+def windows(x, channels, w, from_end):
+    """The analysis's windows of interleaved samples x (16-bit), in dB of full scale: from the end, newest first, or
+    from the start."""
+    n = len(x) // channels
+    out = []
+    for k in range(n // w):
+        lo = n - (k + 1) * w if from_end else k * w
+        s = sum((v / 32768) ** 2 for v in x[lo * channels:(lo + w) * channels])
+        out.append(10 * math.log10(s / (w * channels)) if s > 0 else -200.0)
+    return out
+
+
+def smart_plan(a, b, ca=2, cb=2, ra=44100, rb=44100):
+    """smart.c's rules, written again here from docs/internals.md#smart-crossfade: (overlap, trail, skip, fade) in
+    frames."""
+    wa, wb = ra // 20, rb // 20
+    tail = windows(a, ca, wa, True)[:400]
+    head = windows(b[:cb * 15 * rb], cb, wb, False)[:300]
+    body = sorted(tail)[(len(tail) - 1) // 2]
+    loud = max(-60, body - 45)
+    te = next(k for k, v in enumerate(tail) if v > loud)
+    run = te
+    while run < len(tail) and tail[run] < body - 12: run += 1
+    quiet_ms = (run - te) * 50
+    overlap = (run - te) * wa if 1000 <= quiet_ms <= 15000 and run < len(tail) else ra * 5
+    skip = 0
+    while skip < len(head) and skip * 50 < 5000 and head[skip] < -60: skip += 1
+    bb = sorted(head)[(len(head) - 1) // 2]
+    start = max(head[skip:skip + 4])
+    gap = bb - 6 - start
+    fade_ms = 300 + int(700 * min(1, gap / 14)) if gap > 0 else 0
+    return overlap, te * wa, skip * wb, rb * fade_ms // 1000
+
+
+def smart_scenario(a, b, gapless_at=12.0, end=80.0, word=SMART, next_text=None):
+    """A then B, B preloaded at gapless_at, word in /tmp/q2xfade until A's exit, where demo writes B's own (0, the
+    queue's end); the run ends at both songs' exits (smart_play), end only bounding it."""
+    def at_exit(s): s.on_exit = [fakedemo.put('tmp/q2xfade', bytes(4), in_place=True)]
+    boot = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\0}'), (0.1, '{mcl-setvol\\60}')]
+    return boot + [(0.2, fakedemo.put('tmp/q2xfade', word.to_bytes(4, 'little'))),
+                   (0.2, fakedemo.put('tmp/q2xfade.next', (next_text if next_text is not None else f'{a}\n{b}\n').encode())),
+                   (0.3, fakedemo.SETEQ), (1.0, fakedemo.song('set-songurl', str(a), flag=1)),
+                   (gapless_at, fakedemo.gapless(str(b), flag=1)), (gapless_at, at_exit), (end, None)]
+
+
+def smart_play(player, songs, out, steps, speed=8, env=None, exits=2):
+    """exits: as play's, the run's end waits for both songs' {player-status\\exit}."""
+    s = fakedemo.Session(out)
+    s.music = songs
+    s.wait_exits = exits
+    s.run(steps, fakedemo.launch_host(player, str(songs), speed, env), speed)
+    pcm = sorted((pathlib.Path(out)/'pcm').glob('*.raw'))
+    return s, [p.name for p in pcm], b''.join(p.read_bytes() for p in pcm), (pathlib.Path(out)/'player.log').read_text()
+
+
+def check_smart(a, b, names, got, log):
+    """got is a's and b's smart crossfade by smart_plan's rules: a exact up to out_point, then b from its first sound
+    mixed with a's quiet end (b at full level, no fade-in: a hard start; a fading out, cos), a's trailing silence never
+    played, then b exact; no step at either end of the overlap; one PCM. The plan and the largest step off."""
+    A, B, Y = (array.array('h', x) for x in (reference(a), reference(b), got))
+    overlap, trail, skip, fade = smart_plan(A, B)
+    assert fade == 0 and skip == 66150 and 44100 <= overlap <= 3 * 44100, (overlap, trail, skip, fade)
+    na, nb, ny = len(A) // 2, len(B) // 2, len(Y) // 2
+    cut = na - trail - overlap  # out_point
+    assert names == ['0000_44100_2_s16.raw'], names
+    assert 'smart crossfade: body' in log, log[-2000:]
+    assert ny == cut + nb - skip, f'{ny} frames, expected {cut + nb - skip} (plan {overlap, trail, skip, fade}): {log[-1500:]}'
+    assert Y[:2 * cut] == A[:2 * cut], f'A before out_point, first difference at frame {first_difference(Y[:2 * cut].tobytes(), A[:2 * cut].tobytes()) // 4}'
+    worst = 0
+    for k in range(overlap):
+        go = math.cos((k + 0.5) / overlap * math.pi / 2)
+        for c in (0, 1):
+            want = B[2 * (skip + k) + c] + A[2 * (cut + k) + c] * go
+            worst = max(worst, abs(Y[2 * (cut + k) + c] - want))
+    assert worst <= 2, f'the overlap is {worst} steps from B + A cos'
+    assert Y[2 * (cut + overlap):] == B[2 * (skip + overlap):], 'B after the overlap'
+    def step(i): return max(abs(Y[2 * i + c] - Y[2 * (i - 1) + c]) for c in (0, 1))
+    around = max(max(step(i) for i in range(cut - 50, cut - 1)), max(step(i) for i in range(cut + overlap + 2, cut + overlap + 50)))
+    assert step(cut) <= around and step(cut + overlap) <= around, (step(cut), step(cut + overlap), around)
+    return (overlap, trail, skip, fade), worst
+
+
+def test_smart_crossfade(player, songs, tmp):
+    """A fades out into silence, B starts hard after 1.5 s of silence: the plan is the reference's (its rules written
+    again in Python over the reference decodes) and the output check_smart's."""
+    a, b = smart_songs(tmp/'smart')
+    s, names, got, log = smart_play(player, songs, tmp/'smart/run', smart_scenario(a, b))
+    (overlap, trail, skip, fade), worst = check_smart(a, b, names, got, log)
+    cpu = re.findall(r'analysis took (\d+) ms of CPU', log)
+    return (f'plan {overlap / 44100:.2f} s overlap, {trail / 44100:.2f} s trail, {skip / 44100:.2f} s skipped, no fade-in, '
+            f'as the reference; A exact to out_point, the overlap within {worst:.1f} steps, B exact after; analysis {cpu} ms CPU')
+
+
+def test_smart_crossfade_starved(player, songs, tmp):
+    """The player and its analysis thread on one core with two busy neighbours on it (the Q2's second core taken by
+    demo, at worst), and stopped for 300 ms of every second besides (fakedemo's Q2_TEST_STARVE): the change is still
+    whole, the smart fade or, logged, the plain one, never a tail cut short."""
+    a, b = smart_songs(tmp/'smart')
+    cpu = str(max(os.sched_getaffinity(0)))
+    wrap = tmp/'starved.sh'
+    wrap.write_text(f'#!/bin/sh\nexec taskset -c {cpu} {player}\n')
+    wrap.chmod(0o755)
+    busy = [subprocess.Popen(['taskset', '-c', cpu, sys.executable, '-c', 'while True: pass']) for _ in range(2)]
+    was = os.environ.get('Q2_TEST_STARVE')
+    os.environ['Q2_TEST_STARVE'] = '300/1000'
+    try:
+        s, names, got, log = smart_play(str(wrap), songs, tmp/'smartstarved', smart_scenario(a, b))
+    finally:
+        for p in busy: p.kill(), p.wait()
+        if was is None: os.environ.pop('Q2_TEST_STARVE', None)
+        else: os.environ['Q2_TEST_STARVE'] = was
+    if 'smart crossfade: plain' in log:
+        lines = [l for l in log.splitlines() if 'smart crossfade: plain' in l]
+        assert len(lines) == 1, lines
+        worst = check_plain(*(array.array('h', x) for x in (reference(a), reference(b), got)), 5 * 44100)
+        return f'the plain fade, whole (within {worst:.1f} steps), logged: {lines[0].split("q2player: ")[-1]}'
+    (overlap, *_), worst = check_smart(a, b, names, got, log)
+    return f'the smart fade, whole: {overlap / 44100:.2f} s overlap within {worst:.1f} steps, on one core shared with two busy loops'
+
+
+def check_plain(A, B, Y, h):
+    """Y is the plain fade of h frames: A exact to its last h, those under B's first h at equal power, B exact after;
+    the largest step from equal power."""
+    na = len(A) // 2
+    assert len(Y) == len(A) + len(B) - 2 * h, f'{len(Y) // 2} frames, expected {(len(A) + len(B)) // 2 - h}'
+    assert Y[:2 * (na - h)] == A[:2 * (na - h)], 'A before its tail'
+    worst = 0
+    for k in range(h):
+        p = (k + 0.5) / h * math.pi / 2
+        for c in (0, 1):
+            worst = max(worst, abs(Y[2 * (na - h + k) + c] - (B[2 * k + c] * math.sin(p) + A[2 * (na - h + k) + c] * math.cos(p))))
+    assert worst <= 2, f'the mix is {worst} from equal power'
+    assert Y[2 * na:] == B[2 * h:], 'B after the mix'
+    return worst
+
+
+def smart_falls_back(player, songs, tmp, name, why, steps=None, env=None, b=None):
+    """The scenario's change is the plain 5 s fade, with the log line saying why."""
+    a, b0 = smart_songs(tmp/'smart')
+    b = b or b0
+    s, names, got, log = smart_play(player, songs, tmp/name, steps or smart_scenario(a, b), env=env)
+    lines = [l for l in log.splitlines() if 'smart crossfade: plain' in l]
+    assert len(lines) == 1 and why in lines[0], f'{lines}: {log[-1500:]}'
+    worst = check_plain(*(array.array('h', x) for x in (reference(a), reference(b), got)), 5 * 44100)
+    return f'the plain 5 s fade (within {worst:.1f} steps), logged once: {lines[0].split("q2player: ")[-1]}'
+
+
+def test_smart_crossfade_next_missing(player, songs, tmp):
+    """XFADE_NEXT names a file that is not on the card: the plain fade."""
+    a, b = smart_songs(tmp/'smart')
+    return smart_falls_back(player, songs, tmp, 'smartmiss', 'the next song is not on the card',
+                            smart_scenario(a, b, next_text=f'{a}\n{tmp}/smart/gone.flac\n'))
+
+
+def test_smart_crossfade_next_unknown(player, songs, tmp):
+    """XFADE_NEXT names the next song of another change (demo's next has moved on): the plain fade."""
+    a, b = smart_songs(tmp/'smart')
+    return smart_falls_back(player, songs, tmp, 'smartother', 'follows another',
+                            smart_scenario(a, b, next_text=f'{tmp}/smart/other.flac\n{b}\n'))
+
+
+def test_smart_crossfade_too_slow(player, songs, tmp):
+    """An analysis not done by the plain fade's hold (Q2PLAYER_SMART_DELAY_MS): the plain fade, and the late answer
+    is thrown away."""
+    return smart_falls_back(player, songs, tmp, 'smartslow', 'the analysis took too long', env={'Q2PLAYER_SMART_DELAY_MS': '30000'})
+
+
+def test_smart_crossfade_next_arriving(player, songs, tmp):
+    """The next song still arriving on the card (player/grow.c), a tenth of it there when the analysis looks: the
+    plain fade; the rest lands before the change."""
+    a, b0 = smart_songs(tmp/'smart')
+    out = tmp/'smartgrow'
+    card = out/'mnt/mmc/.foo'
+    card.mkdir(parents=True, exist_ok=True)
+    whole = b0.read_bytes()
+    b = card/'sb.flac'
+    def line(state, n):
+        put(out/'tmp/q2-foo.stream', f'#Q2STREAM/1\tseq=1\n{state}\t{n}\t{len(whole)}\t20000\t/mnt/mmc/.foo/sb.flac\n')
+    def start(s):
+        b.write_bytes(whole[:len(whole) // 10])
+        line('get', len(whole) // 10)
+    def land(s):
+        b.write_bytes(whole)
+        line('done', len(whole))
+    steps = smart_scenario(a, b)
+    steps = sorted(steps[:5] + [(0.25, start)] + [(t / 2, lambda s: line('get', len(whole) // 10)) for t in range(1, 16)]
+                   + [(8.0, land)] + steps[5:], key=lambda st: st[0])
+    return smart_falls_back(player, songs, tmp, 'smartgrow', 'the next song is still downloading', steps, b=b)
+
+
+def test_smart_crossfade_off_is_gapless(player, songs, tmp):
+    """No fade asked (demo's word 0: an album in order, Repeat One, the queue's end, a DSD next) with XFADE_NEXT
+    there: A then B, bit for bit, no analysis."""
+    a, b = smart_songs(tmp/'smart')
+    s, names, got, log = smart_play(player, songs, tmp/'smartoff', smart_scenario(a, b, word=0))
+    assert got == reference(a) + reference(b), 'not the two songs joined'
+    assert 'smart crossfade' not in log, log[-800:]
+    return 'A and B joined bit for bit, nothing analysed'
 
 
 # mcl-replaygain's scale for each file of music.REPLAYGAIN and b1.mp3, by mode: hciplayer's rule (player/source.c
@@ -2406,7 +2637,9 @@ SERIAL = ('test_scan', 'test_grow_seek_beyond', 'test_grow_seek_inside', 'test_c
           # fix/stream-start's: a song with a cover opened by 3.0 s, the feed's 150 ms lead, the feed reader's wakeups
           # counted over seconds, the car's PCM fds read from /proc right after each release
           'test_grow_opens_a_song_with_a_cover_on_its_first_audio', 'test_car_feed_keeps_the_car_close_behind',
-          'test_car_feed_reader_sleeps_while_no_source_writes', 'test_car_release_while_paused')
+          'test_car_feed_reader_sleeps_while_no_source_writes', 'test_car_release_while_paused',
+          # smart-crossfade's: the player on one core shared with busy loops
+          'test_smart_crossfade_starved')
 WIDTH = 8  # tests and fixtures side by side: each mostly waits on a player running in real time or faster
 STALL_S = 0.1  # a 5 ms sleep that took this much longer: the machine did not run this process (measured: 650 ms under
                # a nice-19 job on a busy core, under 10 ms when the core is shared fairly)

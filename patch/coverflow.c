@@ -130,12 +130,6 @@ void *coverflow_album(void *page) { return centred(page, 0); }
 /* The playlist a hold is on (navigation.c), its container record, a copy of the list's */
 void *coverflow_playlist(void *page) { return centred(page, 1); }
 
-/* FNV-1a, shared with navigation.c */
-unsigned hash_bytes(unsigned h, const unsigned char *s, unsigned n) {
-    for (unsigned i = 0; i < n; ++i) h = (h ^ s[i]) * 16777619u;
-    return h;
-}
-
 unsigned fnv(unsigned h, const unsigned char *s) {
     while (s && *s) h = hash_bytes(h, s++, 1);
     return h * 16777619u; /* a separator, so "ab"+"c" and "a"+"bc" differ */
@@ -3262,6 +3256,9 @@ void album_memory(void *r) {
  * started over the pressed server song's Now Playing, addon.c stream_start). Now Playing on top is
  * closed first, so there is one, and Return leaves for the page under it. */
 void play_folder(void *dq, int idx, int cls) {
+    /* ringnav_nav_to's question, asked before Now Playing on top closes or an album's name goes
+     * into the resume record (docs/internals.md#no-playback-without-an-output) */
+    if (cls != 0xff && check_forbid_play_no_headset(0)) return;
     if (cls == 0xff10) album_memory(deque_at(dq, (unsigned)idx));
     struct {
         void *dq;

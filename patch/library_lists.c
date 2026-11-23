@@ -39,9 +39,13 @@ static void *shuffled_for_app(void *all, int at) {
     return out;
 }
 
-/* Collection Shuffle is Shuffle Songs over the collection. */
+/* Collection Shuffle is Shuffle Songs over the collection: the list's size, 0 for an empty one.
+ * With nothing to play to (docs/internals.md#no-playback-without-an-output) stock's gate refuses
+ * with its message before the play mode, Up Next's order or the confirmation changes; the size is
+ * still returned, so a caller's "No songs" is not added to it. */
 int shuffle_play(void *all) {
     int size = (int)deque_size(all);
+    if (size && check_forbid_play_no_headset(0)) return size;
     if (size) {
         int at = (int)rand_below((unsigned)size);
         if (playback_keeps(all, at)) { /* not a pick of it: another song, or alone, Now Playing */
@@ -72,8 +76,11 @@ int shuffle_songs(void *ctx, void *event) {
     return 0;
 }
 
+/* Shuffle Albums (ctx 0) or Folders (1): the whole library loaded as the queue and grouped, so the
+ * gate asks first, before the library is read or the queue loaded. */
 static int shuffle_groups(void *ctx, void *event) {
     int n;
+    if (check_forbid_play_no_headset(0)) return 0;
     void *all = staged(songs_unsorted, (void *)1, &n);
     if (!playback_groups(all, (int)(long)ctx))
         toast(deque_size(all) ? "Too many songs to shuffle" : "Update Local Music first");

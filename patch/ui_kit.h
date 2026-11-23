@@ -160,6 +160,7 @@ typedef struct {
 int confirm(const confirm_t *c); /* 1: shown; 0: another card is up, or no dialog */
 void *confirm_dialog(void);      /* the card's dialog while one is up, else 0 */
 void confirm_close(void);        /* closes the card without an answer */
+void confirm_words(const char *name, const char *body); /* the card's %s and body anew */
 int confirm_up(void);            /* a card is up */
 /* Motion (docs/oled-design.md#motion): every animation's duration, curve and timer go through
  * here, so one switch, Reduce Motion (Settings > Display, IPOD REDUCEMOTION), turns them down.

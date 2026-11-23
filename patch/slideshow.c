@@ -4,7 +4,8 @@
  * here for the next cover. A pick is a random song of the library (a rowid at random, so no sort
  * of the whole table), from the card's songtable or a signed-in server's servertable (catalogue.c)
  * in proportion to their rows; a card song's album's embedded art, else its folder image, a server
- * song's the cover its app keeps for the album (catalogue_cover), each at SLIDE_ART_PX square
+ * song's the cover its app keeps for the album (catalogue_cover_large, its 512 px one, else
+ * catalogue_cover's 160 px one), each at SLIDE_ART_PX square
  * through stock's own readers under both art locks, written to SLIDE_FILE; else the album's
  * Coverflow thumbnail, softer at that size; else another song, up to SLIDE_TRIES. Albums shown
  * lately (SLIDE_RECENT) are passed over but for the last tries, so a small library still turns.
@@ -77,9 +78,11 @@ static int song_art(const song_t *s, unsigned *key) {
     char art[512];
     pthread_mutex_lock((void *)parse_cover_mutex);
     pthread_mutex_lock((void *)g_playcover_mutex);
-    /* a server row has no file: its app's cover of the album, as Cover Flow's grid_cover reads it */
+    /* a server row has no file: its app's cover of the album, the 512 px one when the card has it
+     * (the 160 px row cover, scaled up to SLIDE_ART_PX, was blocky: the owner's report, 2026-11-23) */
     int ok = catalogue_path(s->path)
-                 ? catalogue_cover(s->path, art, sizeof art) &&
+                 ? (catalogue_cover_large(s->path, art, sizeof art) ||
+                    catalogue_cover(s->path, art, sizeof art)) &&
                        toolsThumbSpecCover(art, SLIDE_TMP, SLIDE_ART_PX, SLIDE_ART_PX) == 1
                  : toolsGetAlbumCover(s->path, SLIDE_TMP, SLIDE_ART_PX, SLIDE_ART_PX) == 1 ||
                        toolsGetExternCover(s->path, SLIDE_TMP, SLIDE_ART_PX, SLIDE_ART_PX) == 1;

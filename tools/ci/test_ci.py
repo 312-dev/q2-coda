@@ -403,8 +403,8 @@ def test_a_pool_copy_runs_car_remote_on_its_own_port_once(tmp_path):
 
 def test_a_pool_copys_q2_iroh_forwards_to_its_own_daemon(tmp_path):
     """docs/remote.md#car-remote-across-networks: demo starts q2-iroh with no --forward, which would reach TCP 7720,
-    another emulator's daemon or the user's. The wrapper run.sh writes puts this copy's port first after serve; a copy
-    fitted before q2-iroh existed gets it too."""
+    another emulator's daemon or the user's. The wrapper run.sh writes puts this copy's ports first after serve (its
+    daemon's q2-iroh port named, its TCP port for an older sidecar); a copy fitted before q2-iroh existed gets it too."""
     import subprocess
     (tmp_path/'q2emu').write_text(Q2EMU)
     (tmp_path/'run.sh').write_text(RUN.replace(emu_pool.RUN_BEFORE, emu_pool.CODA_BLOCK + emu_pool.RUN_BEFORE)
@@ -420,7 +420,45 @@ def test_a_pool_copys_q2_iroh_forwards_to_its_own_daemon(tmp_path):
                          capture_output=True, text=True, check=True).stdout
     assert out.strip() == f'--ro-bind {tmp_path}/state/q2-iroh /usr/bin/q2-iroh'
     wrapper = (tmp_path/'state/q2-iroh').read_text()
-    assert wrapper == '#!/bin/sh\nc=$1; shift\nexec /emu/q2-iroh.real "$c" --forward 127.0.0.1:7703 "$@"\n'
+    assert wrapper == ('#!/bin/sh\nc=$1; shift\nexec /emu/q2-iroh.real "$c" --forward 127.0.0.1:7703 '
+                       '--forward-named 127.0.0.1:7803 "$@"\n')
+
+
+def wrappers(tmp_path, run):
+    """The coda-rc and q2-iroh wrappers run.sh's blocks write for a copy at Car Remote port 7703."""
+    import subprocess
+    (tmp_path/'rootfs/usr/bin').mkdir(parents=True, exist_ok=True)
+    for name in ('coda-rc', 'q2-iroh'):
+        (tmp_path/'rootfs/usr/bin'/name).write_text('real')
+    (tmp_path/'state').mkdir(exist_ok=True)
+    blocks = run[run.index('CODA=()'):run.index('# Q2EMU_CORE=1')]
+    subprocess.run(['bash', '-c', f'E={tmp_path}; S={tmp_path}/state; Q2EMU_CODA_PORT=7703\n{blocks}'], check=True)
+    return (tmp_path/'state/coda-rc').read_text(), (tmp_path/'state/q2-iroh').read_text()
+
+
+def test_each_pool_copy_has_its_own_q2_iroh_port(tmp_path):
+    """The copies share this machine's network: every daemon took 127.0.0.1:7721 for q2-iroh's streams, and since a
+    taken one ends a daemon (patch/coda_rc.c main) only the first emulator's ran (coda_rc_e2e.py: "the daemon listens:
+    pid None", 2026-11-23). Each copy's daemon and q2-iroh get Q2EMU_CODA_PORT + 100; q2-iroh keeps --forward for a
+    build whose sidecar predates --forward-named."""
+    (tmp_path/'q2emu').write_text(Q2EMU)
+    (tmp_path/'run.sh').write_text(RUN)
+    emu_pool.fit(tmp_path, 3)
+    coda, iroh = wrappers(tmp_path, (tmp_path/'run.sh').read_text())
+    assert coda == '#!/bin/sh\nexec /emu/coda-rc.real --port 7703 --iroh-port 7803 "$@"\n'
+    assert iroh == ('#!/bin/sh\nc=$1; shift\nexec /emu/q2-iroh.real "$c" --forward 127.0.0.1:7703 '
+                    '--forward-named 127.0.0.1:7803 "$@"\n')
+
+
+def test_a_copy_fitted_before_its_q2_iroh_port_is_fitted_again(tmp_path):
+    (tmp_path/'q2emu').write_text(Q2EMU)
+    old = (RUN.replace(emu_pool.RUN_BEFORE, emu_pool.CODA_BLOCK_V1 + emu_pool.IROH_BLOCK_V1 + emu_pool.RUN_BEFORE)
+           .replace(emu_pool.RUN_BWRAP, '    "${CODA[@]}" "${IROH[@]}" "${BOOT[@]}"'))
+    (tmp_path/'run.sh').write_text(old)
+    emu_pool.fit(tmp_path, 3)
+    run = (tmp_path/'run.sh').read_text()
+    assert emu_pool.CODA_BLOCK in run and emu_pool.IROH_BLOCK in run and emu_pool.CODA_BLOCK_V1 not in run
+    assert '--iroh-port 7803' in wrappers(tmp_path, run)[0]
 
 
 def test_a_changed_run_script_is_refused(tmp_path):
@@ -1074,6 +1112,53 @@ def test_smoke_compares_the_screen_in_upright_boxes():
     assert smoke.differ(blank, lit(100, 200), smoke.HOME_LIST) == 1
 
 
+def test_smoke_tells_cover_flows_art_build_from_its_covers_and_an_albums_tracks():
+    """Cover Flow's page as demo held it on a pool copy (2026-11-23): "Preparing artwork n/5" is a text list with its
+    Cancel row and no carousel yet; the covers add a view holding the slide_menu; an album's tracks hide that view
+    under the list. smoke's "Center on an album" once landed on Cancel while a cold card's art was still building,
+    saw the screen change to the covers and passed, and the next step's Center opened the tracks instead of Now
+    Playing: the failure was reported two steps late, as a play that never came."""
+    def page(*views):
+        return ('window', True, list(views))
+    text_list = ('view', True, [('hscroll_label', True, []), ('list_view', True, [('scroll_view', True, [
+        ('list_item', True, [('hscroll_label', True, [])])])])])
+
+    def carousel(shown):
+        return ('view', shown, [('slide_menu', True, [('image', True, [])] * 5), ('hscroll_label', True, [])])
+    assert smoke.coverflow_screen(page(text_list)) == 'building'
+    assert smoke.coverflow_screen(page(text_list, carousel(True))) == 'covers'
+    assert smoke.coverflow_screen(page(text_list, carousel(False))) == 'tracks'
+    assert smoke.coverflow_screen(None) is None
+
+
+def test_smoke_holds_the_boot_cards_ok_until_stocks_boot_key_countdown_ends(monkeypatch):
+    """Stock drops each Centre release while g_ingore_bootkey_flag counts down after Home (about 5 s); the guardian
+    card came up inside it in 4 boots of 108 and its OK was lost. boot_keys reads the countdown from demo's memory and
+    returns once it is 0; it gives up after STEP_S and on memory it cannot read, so the press is still checked."""
+    import io
+    seen = iter([3, 2, 1, 0, 0])
+    reads = []
+
+    class Mem(io.BytesIO):
+        def seek(self, a, *_):
+            reads.append(a)
+
+        def read(self, n=-1):
+            return bytes([next(seen)])
+    monkeypatch.setattr(smoke, 'open', lambda *a, **k: Mem(), raising=False)
+    monkeypatch.setattr(smoke.time, 'sleep', lambda s: None)
+    e = smoke.Emulator.__new__(smoke.Emulator)
+    e.pid = 1
+    monkeypatch.setattr(e, 'alive', lambda: None)
+    e.boot_keys()
+    assert reads == [smoke.BOOTKEY_FLAG] * 4  # 3, 2, 1, then 0: returned
+
+    def gone(*a, **k):
+        raise OSError
+    monkeypatch.setattr(smoke, 'open', gone, raising=False)
+    e.boot_keys()  # unreadable: returns at once
+
+
 def test_smoke_looks_past_the_status_bar_and_a_toast():
     assert smoke.top([('system_bar', 'system_bar'), ('window', 'home_page'), ('dialog', 'msginfo_dialog')]) == 'home_page'
     assert smoke.top([('system_bar', 'system_bar'), ('window', 'home_page'), ('dialog', 'statusbar_dialog')]) == 'statusbar_dialog'
@@ -1108,6 +1193,7 @@ def guard_run(monkeypatch, answers, stacks):
     e.pid, e.log = 1, lambda m: None
     monkeypatch.setattr(e, 'stack', stack)
     monkeypatch.setattr(e, 'settle', lambda box=None: None)
+    monkeypatch.setattr(e, 'boot_keys', lambda: keys.append('boot_keys'))
     monkeypatch.setattr(e, 'q2emu', lambda *a: keys.append(a))
     e.guard()
     return keys
@@ -1120,7 +1206,7 @@ def test_smoke_waits_for_demo_to_name_a_card_it_has_just_shown(monkeypatch):
     03:05, 12:42), which a boot loop with a 20 ms poll hit on 8 boots of 10, and on none of 10 with this wait."""
     keys = guard_run(monkeypatch, [{}, {'card': 'nosensor'}, {'card': '-'}],
                      ['sortselect_dialog', 'sortselect_dialog', None])
-    assert keys == [('key', 'centre')]
+    assert keys == ['boot_keys', ('key', 'centre')]  # its OK after stock's boot-key countdown
     # a card demo never names is still a failure, once demo has had the time to name it
     monkeypatch.setattr(smoke, 'ANSWER_S', .2)
     try:

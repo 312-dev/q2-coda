@@ -12,17 +12,13 @@
 #include "navigation.h" /* the theme, its scheme and the final-colour rows */
 #endif
 
-#ifdef PEQ_HOST /* playback.c's and coverflow.c's on the device */
+#ifdef PEQ_HOST /* playback.c's on the device */
 unsigned games_seed = 1;
 unsigned rand_below(unsigned n) {
     games_seed ^= games_seed << 13;
     games_seed ^= games_seed >> 17;
     games_seed ^= games_seed << 5;
     return games_seed % n;
-}
-unsigned hash_bytes(unsigned h, const unsigned char *s, unsigned n) {
-    for (unsigned i = 0; i < n; ++i) h = (h ^ s[i]) * 16777619u;
-    return h;
 }
 #endif
 

@@ -810,6 +810,7 @@ static struct {
     unsigned timer, answer_timer, until, marq_timer, marq_at;
     int title_w; /* the title's width, measured at its first paint; 0 until then */
     ovm_t mo;    /* the card's enter and exit (CARD_IN_MS, CARD_OUT_MS) */
+    const char *glyph; /* the caller's glyph, which card_layout may leave out */
 } cf __attribute__((section(".scratch")));
 
 int confirm_up(void) { return cf.dialog != (void *)0; }
@@ -989,6 +990,7 @@ int confirm(const confirm_t *c) {
     }
     memset(&cf, 0, sizeof cf);
     cf.c = *c;
+    cf.glyph = c->glyph;
     cf.toggle_on = c->toggle_on;
     tk_snprintf(cf.title, sizeof cf.title, c->title ? c->title : "", c->name ? c->name : "");
     if (c->across) { /* the name in the body, where its %s is, and in Text Primary there */
@@ -1064,6 +1066,26 @@ int confirm(const confirm_t *c) {
         cf.timer = timer_add(card_tick, (void *)0, CARD_TIMER_MS);
     }
     return 1;
+}
+
+/* The card up (one confirm() showed) with name as its title's %s and body as its body: a name
+ * known only after the card opened (bt_pair.c). The card is laid out again round them, its
+ * answers moved with it; the selection, the switch and the timeout stay. */
+void confirm_words(const char *name, const char *body) {
+    void *d = cf.dialog, *list = d ? widget_lookup(d, "list_view", 1) : (void *)0;
+    if (!d || cf.stock || cf.c.across) return;
+    tk_snprintf(cf.title, sizeof cf.title, cf.c.title ? cf.c.title : "", name ? name : "");
+    cf.title_w = 0; /* measured again at the next paint; the marquee starts over */
+    if (cf.marq_timer) timer_remove(cf.marq_timer), cf.marq_timer = 0;
+    cf.lines = 0;
+    cf.c.glyph = cf.glyph;
+    card_body(d, body);
+    card_layout();
+    if (list) {
+        int out = theme()->sel_inset - CARD_BAR_IN;
+        widget_move_resize(list, CARD_X - out, cf.rows_y - I(d, W_Y), I(list, W_W), I(list, W_H));
+    }
+    widget_invalidate_force(d, (void *)0);
 }
 
 /* The body's lines from s, '\n' between its paragraphs, each wrapped at spaces to the text

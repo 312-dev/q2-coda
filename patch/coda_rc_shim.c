@@ -628,6 +628,9 @@ static void cr_run(const char *raw) {
     if (verb && (!strncmp(verb, " play ", 6) || !strncmp(verb, " radio ", 7))) {
         memcpy(cr.play_line, raw, CR_LINE);
         cr.play_timer = timer_add(verb[1] == 'p' ? cr_play : cr_radio, 0, 0);
+        /* taken: its work can hold the loop for seconds (a shuffled list's start, 9 s on a loaded emulator), and the
+         * daemon then waits longer for the answer the timer writes (coda_rc_cmdq.h CRC_ACK_TAKEN) */
+        if (cr.play_timer) cr_ack(seq, CRC_ACK_TAKEN);
         return;
     }
     char word[12] = "";

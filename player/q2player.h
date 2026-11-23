@@ -121,6 +121,8 @@ void sacd_close(struct sacd *);
 /* grow.c: a card app's song still arriving in place, read with a wait at the end of its bytes */
 struct grow;
 int grow_arriving(const char *url); /* the app's .stream says url is still arriving */
+/* the same, with the bytes on the card and the app's total (0 unknown) and length in ms (0 unknown) */
+int grow_have(const char *url, int64_t *have, int64_t *total, int64_t *ms);
 struct grow *grow_open(const char *url, int *error);
 struct AVIOContext *grow_avio(struct grow *);
 void grow_seeking(struct grow *, int on); /* on while a seek searches: only the bytes there, no wait at their end */
@@ -200,7 +202,25 @@ int dsp_run(struct dsp *, const uint8_t *data, int frames, double pts, const uin
 void dsp_eq_changed(struct dsp *);
 void dsp_close(struct dsp *, int ended); /* ended: the song played to its end, nobody cut it */
 int dsp_tail_held(void); /* crossfade holds a song's tail for the next one to mix in */
+void dsp_path(struct dsp *, const char *url); /* the song's file, for Smart Crossfade's analysis and plan */
 void dsp_meter(const struct pcm_format *, int untouched, const uint8_t *data, int frames, int uv[2]);
+
+/* smart.c: Smart Crossfade's analysis (docs/internals.md#smart-crossfade), on a thread of its own. smart_begin starts
+ * it for the song at url (rg its ReplayGain scale) and the next song XFADE_NEXT names; smart_poll answers SMART_RUN
+ * until it is done, then SMART_PLAN with the plan or SMART_PLAIN (the plain fade, the reason logged); smart_cancel
+ * forgets it, with why logged unless NULL. */
+enum { SMART_NONE, SMART_RUN, SMART_PLAN, SMART_PLAIN };
+struct xf_plan {
+    int64_t overlap; /* the song's frames mixed under the next, out_point to tail_end */
+    int64_t trail;   /* its frames after tail_end, dropped */
+    int64_t skip;    /* the next song's frames dropped at its start, at next_rate */
+    int64_t fade;    /* its fade-in's frames, 0 for none */
+    int next_rate;
+    char next[URL_MAX]; /* the song the skip and the fade-in are for */
+};
+void smart_begin(const char *url, float rg);
+int smart_poll(struct xf_plan *plan);
+void smart_cancel(const char *why);
 
 /* dsd.c: DSD packets made into DoP or Native frames */
 enum { DSD_CHANNELS = 8 };

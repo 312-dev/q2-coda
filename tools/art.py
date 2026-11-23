@@ -801,6 +801,9 @@ def images(t):
         for name, glyph in (('wifi_3', 'wifi-high'), ('wifi_2', 'wifi-medium'), ('wifi_1', 'wifi-low'), ('lock', 'lock-simple'),
                             ('trash', 'trash')):
             out |= {f'{prefix}_{name}_{k}': phosphor(glyph, ROW_ICON_PX, c, ROW_INK) for k, c in STATE_INKS.items()}
+        # ... and a failed join's mark before them: warning-circle in Negative per half, white on the selection
+        out |= {f'{prefix}_wifi_warn_{k}': phosphor('warning-circle', ROW_ICON_PX, c, ROW_INK)
+                for k, c in inks('negative', 'd', 'l', 'w').items()}
     # the menu sheet's symbols (menu_modal.c)
     out |= {f'{prefix}_menu_{n}_{k}': phosphor(n, MENU_ICON_PX, c) for n in MENU_ICONS for k, c in FOLDER_INKS.items()}
     out[f'{prefix}_menu_check_a'] = phosphor('check', MENU_ICON_PX, on)

@@ -227,7 +227,7 @@ m=SlskMachine(); m.gone(); m.open()
 assert m.labels()==["Soulseek isn't on the card",'Install it again in System settings → App Store'] and not m.systems and not m.threads
 m.row(0); assert not m.threads; m.poll(); assert not m.systems; m.close(); passed()
 # With it: started, the menu asked; no socket yet is the add-on starting, asked again; its rows.
-m=SlskMachine(); m.open(); assert m.systems==['/bin/sh /mnt/mmc/.soulseek/run'] and m.labels()==['Loading…']
+m=SlskMachine(); m.open(); assert m.systems==['/bin/sh /mnt/mmc/.soulseek/run &'] and m.labels()==['Loading…']
 m.worker(); assert m.labels()==['Starting Soulseek…']; m.advance(500)
 m.answer('ok','refresh','',SMENU); assert m.requests[-1]==('menu',) and m.labels()==SLABELS; passed()
 # A live level is asked again every 2 s while on top; the same rows aren't rebuilt, and changed texts in the
@@ -500,7 +500,7 @@ m.call(address=HOOKS['usbmode_page_init'][0],args=(0x55,0x66,0,0),gap=0,count=5_
 names=[c[0] for c in m.calls]
 assert m.systems==['kill $(cat /tmp/q2-soulseek) 2>/dev/null || rm -f /tmp/q2-soulseek'] and names.index('stock_usbmode')>names.index('sleep_ms') and SPID not in m.files,(m.systems,names[-12:])
 m.open_pages={'usbmode_page'}; m.poll(); assert m.systems==['kill $(cat /tmp/q2-soulseek) 2>/dev/null || rm -f /tmp/q2-soulseek']
-m.open_pages=set(); m.poll(); assert m.systems[-1]=='/bin/sh /mnt/mmc/.soulseek/run'; passed()
+m.open_pages=set(); m.poll(); assert m.systems[-1]=='/bin/sh /mnt/mmc/.soulseek/run &'; passed()
 # Stop Streaming Services stops it too.
 m.systems=[]; run(m,'addon_stop'); assert m.systems==['kill $(cat /tmp/q2-soulseek) 2>/dev/null || rm -f /tmp/q2-soulseek']; passed()
 # Requests no longer answered while the app may still run (its socket gone, or the app frozen): the
@@ -520,7 +520,7 @@ m.close(); m.files.pop(SPID); m.poll(); m.poll(); assert m.systems==[SKILL]; pas
 m=slsk_gone(); m.systems=[]; m.row(0); m.worker()
 assert m.systems==[SKILL] and m.labels()==["Soulseek isn't running",'Retry','Stop Soulseek'],(m.systems,m.labels())
 m.poll(); assert m.systems==[SKILL]  # the old loop still there
-m.files.pop(SPID); m.poll(); assert m.systems==[SKILL,'/bin/sh /mnt/mmc/.soulseek/run'],m.systems
+m.files.pop(SPID); m.poll(); assert m.systems==[SKILL,'/bin/sh /mnt/mmc/.soulseek/run &'],m.systems
 m.advance(500); m.answer('ok','refresh','',SMENU); assert m.labels()==SLABELS,m.labels(); passed()
 # A level loading for 3 s (a frozen app holding the request, which gives up at 15 s) keeps the menu under the
 # loading overlay, with no Stop row of its own: Return cancels it, and the menu's Stop Soulseek ends the app.
@@ -530,7 +530,7 @@ m.close(); passed()
 # An app that isn't running (it stopped by itself) has nothing to stop: Retry alone, which starts it.
 m=SlskMachine(); m.open(); m.answer('ok','refresh','',SMENU); m.serve=None; m.advance(10000); m.poll(); m.worker()
 assert m.labels()==["Soulseek isn't running",'Retry'],m.labels()
-m.systems=[]; m.row(0); assert m.systems==['/bin/sh /mnt/mmc/.soulseek/run'],m.systems; m.close(); passed()
+m.systems=[]; m.row(0); assert m.systems==['/bin/sh /mnt/mmc/.soulseek/run &'],m.systems; m.close(); passed()
 
 # File Browser: q2-filebrowser from the card's .filebrowser folder, the same page on its own socket.
 # Its manifest's qr=1: turned on by its row, its QR code page opens once it answers, the menu behind
@@ -545,7 +545,7 @@ FLABELS=['File Browser','Open on Your Phone','http://192.168.1.23:8000 · PIN 54
          'The phone can upload, rename, move and delete','Turn Off File Browser','It also turns off after 15 minutes unused']
 m=FileBrowserMachine(); m.gone(); m.open()
 assert m.labels()==["File Browser isn't on the card",'Install it again in System settings → App Store'] and not m.systems; m.close(); passed()
-m=FileBrowserMachine(); m.open(); assert m.systems==['/bin/sh /mnt/mmc/.filebrowser/run'] and m.labels()==['Loading…']
+m=FileBrowserMachine(); m.open(); assert m.systems==['/bin/sh /mnt/mmc/.filebrowser/run &'] and m.labels()==['Loading…']
 m.worker(); assert m.labels()==['Starting File Browser…']; m.advance(500)
 m.files[FSTATE]=bytearray(f"addr=192.168.1.23:8000\nhold=0\nnote=Manage the card's files there\npin=548001\nqr={hexed}\nqrsize=21\nversion=q2f-v1.0\n".encode())
 m.answer('ok','refresh','',FMENU); assert m.requests[-1]==('menu',) and m.labels()==FLABELS
@@ -577,7 +577,7 @@ class QobuzMachine(AppMachine): app,manifest='qobuz','name=Qobuz\nsearch=Search 
 QSONG='/mnt/mmc/.qobuz/cache/album-a1/01 First [t1].flac'
 m=QobuzMachine(); m.top=m.node('window','playing_page'); m.mock('navigator_back')
 assert run(m,'addon_goto',m.string(QSONG),m.string('Record'),1)==1; m.page=m.top
-assert m.nodes[m.page]['name']=='addon_page' and m.systems==['/bin/sh /mnt/mmc/.qobuz/run'] and m.labels()==['Loading…']
+assert m.nodes[m.page]['name']=='addon_page' and m.systems==['/bin/sh /mnt/mmc/.qobuz/run &'] and m.labels()==['Loading…']
 m.answer('ok','','40',[('list','artist','The Band','Artist','5',''),('action','play','First','3:20','album-a1:t1','dl:album-a1:t1')])
 assert m.requests[-1]==('goto','album',QSONG) and m.labels()==['Record','The Band','Artist','First','3:20','More…'],m.labels()
 m.pick(2); m.answer(*OK,[]); assert m.requests[-1]==('goto','album',QSONG,'40'),m.requests[-1]
@@ -668,7 +668,7 @@ m=DeezerMachine(); m.gone(); m.open()
 assert m.labels()==["Deezer isn't on the card",'Install it again in System settings → App Store'] and not m.systems; m.close(); passed()
 # Started, the menu asked; signed out, its sign-in row opens the code over its status file (and only
 # then: Deezer's row doesn't open it by itself).
-m=DeezerMachine(); m.open(); assert m.systems==['/bin/sh /mnt/mmc/.deezer/run'] and m.labels()==['Loading…']
+m=DeezerMachine(); m.open(); assert m.systems==['/bin/sh /mnt/mmc/.deezer/run &'] and m.labels()==['Loading…']
 m.worker(); assert m.labels()==['Starting Deezer…']; m.advance(500)
 DZOUT=[('remote','','Sign In from Your Phone','Press to show the code','',''),('action','stop','Stop Deezer','Downloads carry on next time','','')]
 m.files[DZSTATE]=bytearray(f"addr=192.168.1.23:8090\nhold=0\nnote=Paste your Deezer ARL there\npin=135790\nqr={hexed}\nqrsize=21\n".encode())
