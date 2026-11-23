@@ -2235,5 +2235,73 @@ def test_the_log_is_capped_within_a_cable(probe, tmp_path):
 
 
 
+def answered(ffs, timeout=1.0):
+    """A GET_REPORT on ep0 answered (its 8 zero bytes) within timeout: the loop is alive."""
+    ffs.buf = b''
+    while ffs.read(1, 0.05):
+        pass
+    ffs.setup(0xa1, 1, 0x0101, 2, 8)
+    return ffs.read(8, timeout) == bytes(8)
+
+
+def test_a_tiny_max_packet_is_not_taken(probe, tmp_path):
+    """car-bt-power.md #13: a SYN offering a maximum packet of 12 to 19 bytes left a file transfer's piece room 0, so
+    the car's go for a cover spun the loop for good (at 11 the room wrapped). No car offers that; such a SYN is not
+    taken now, and the loop goes on."""
+    np = tmp_path/'now'
+    np.write_text('state=1\npos=1000\nlen=200\ntitle=T\nartist=A\nalbum=B\npath=/nowhere/x.flac\n')
+    p, ffs, log = start(probe, tmp_path, '--iap2', '--art-dir', str(tmp_path), '--np', str(np), '--ask-dir',
+                        str(tmp_path), '--art-made', str(tmp_path/'made'))
+    fd = os.open(ffs.path/'ep1', os.O_RDONLY | os.O_NONBLOCK)
+    car = BmwCar(ffs, fd)
+    jpeg = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=160x160', '-frames:v', '1',
+                           '-f', 'mjpeg', '-'], check=True, capture_output=True).stdout
+    try:
+        ffs.event(ENABLE)
+        car.write(bytes([0xff, 0x55, 0x02, 0x00, 0xee, 0x10]))
+        car.report()
+        car.write(packet(0x80, car.seq, 0, 0, BMW_SYN[:2] + (12).to_bytes(2, 'big') + BMW_SYN[4:]))
+        try:
+            _, syn_seq, _, _, _ = car.packet(1.0)
+            car.write(packet(0x40, car.seq, syn_seq, 0))
+        except AssertionError:
+            pass
+        (tmp_path/f"{fnv_part(fnv_part(2166136261, 'A'), 'B'):08x}.jpg").write_bytes(jpeg)
+        takes = b''.join(i.to_bytes(2, 'big') for i in (0x5001, 0x4E09))
+        car.send(message(0x1D01, prm(0, b'BMW 83828\0'), prm(7, takes)))  # identified, its answers too long to go
+        time.sleep(0.5)
+        car.send(message(0x5000, prm(0, prm(0x1a)), prm(1, prm(0))))
+        time.sleep(1.5)
+        car.send(bytes([0x80, 0x01]), session=2)
+        time.sleep(0.3)
+        alive = answered(ffs)
+    finally:
+        p.kill()
+        p.wait(5)
+        os.close(fd)
+    assert alive, 'the loop stopped'
+    assert 'max packet 12 bytes, under' in log.read_text()
+
+
+def test_an_answer_ep0_does_not_take_is_a_lost_link(probe, tmp_path):
+    """car-bt-power.md #12: the answer to an IN control request was written to ep0 with no time limit, where the OUT
+    data stage's read has 2 s since a 35 s hold. Here ep0's other end stops reading, so the answers' writes wait;
+    each now has DATA_STAGE_S, and one not taken loses the link (the control pipe is out of step with the car), as a
+    data stage that is not its report does."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path)
+    try:
+        for _ in range(200):  # GET_REPORTs of 1 KB each, never read: past the pty's buffer
+            car.ffs.setup(0xa1, 1, 0x0101, 2, 1024)
+        deadline = time.time() + 8
+        while time.time() < deadline and 'not taken in' not in log.read_text():
+            time.sleep(0.1)
+    finally:
+        p.kill()
+        p.wait(5)
+        os.close(fd)
+    assert 'link: lost (an answer on ep0 not taken in 2 s)' in log.read_text()
+
+
+
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-q', *sys.argv[1:]]))

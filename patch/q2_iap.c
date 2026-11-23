@@ -1244,7 +1244,7 @@ static void setup(struct inst *i, const unsigned char *s) {
     unsigned char buf[4096], reply[1024];
     const unsigned char *ans = 0;
     unsigned an = 0;
-    int r = 0, stalled = 0;
+    int r = 0, stalled = 0, timed_out = 0;
     char note[96] = "";
     char msg[3000], h[2600];
     long at = mono_ms();
@@ -1265,8 +1265,12 @@ static void setup(struct inst *i, const unsigned char *s) {
         }
         if (ans) {
             if (an > wl) an = wl;
+            /* at most DATA_STAGE_S, as the OUT data stage: a host that never takes it would hold the loop */
             const char *was = loop_step("an answer on ep0");
+            alarm(DATA_STAGE_S);
             r = write(i->ep0, ans, an);
+            timed_out = r < 0 && ERRNO == EINTR;
+            alarm(0);
             loop_step(was);
         } else {
             stalled = 1;
@@ -1276,6 +1280,8 @@ static void setup(struct inst *i, const unsigned char *s) {
                  wl, stalled ? "stalled" : "answered ", stalled ? "" : (snprintf(h, 16, "%u bytes", an), h), r,
                  r < 0 ? ERRNO : 0, mono_ms() - at, note[0] ? ": " : "", note);
         logline(i->name, msg);
+        if (timed_out && iap2_mode && seen) /* the control pipe out of step with the car */
+            iap2_lost("link: lost (an answer on ep0 not taken in 2 s)");
         return;
     }
     unsigned want = wl < sizeof buf ? wl : sizeof buf;

@@ -321,21 +321,31 @@ static void iap2_lost(const char *why) {
 }
 
 /* The car's SYN: its link parameters, the sessions after them. Retransmitted SYNs get the same answer. */
+/* The least maximum packet a SYN may offer: under it a file transfer's piece has no room (12 to 19 bytes spun the
+ * loop for good at the car's go, car-bt-power.md #13) and most messages do not fit. No car offers so little (the
+ * BMW 0xFFFF, PodBox's cars 1,024 or more). */
+#define MIN_PEER_MAX 128
 static void take_syn(u8 seq, const u8 *payload, unsigned n) {
     char h[200], m[300];
+    if (n < SYN_FIXED || n > sizeof syn_ack || payload[0] != 1) {
+        iap2_hex(h, sizeof h, payload, n);
+        iap2_log("link: SYN not taken (not version 1, or its length):", h);
+        return;
+    }
     iap2_hex(h, sizeof h, payload, n);
     snprintf(m, sizeof m, "link parameters: version %u, window %u, max packet %u, retransmit %u ms, cack %u ms, "
              "retries %u, cacks %u:", payload[0], payload[1], payload[2] << 8 | payload[3], payload[4] << 8 | payload[5],
              payload[6] << 8 | payload[7], payload[8], payload[9]);
     iap2_log(m, h);
-    if (n < SYN_FIXED || n > sizeof syn_ack || payload[0] != 1) {
-        H->log("link: SYN not taken (not version 1, or its length)");
+    unsigned want = payload[2] << 8 | payload[3];
+    if (want < MIN_PEER_MAX) {
+        snprintf(m, sizeof m, "link: SYN not taken (max packet %u bytes, under %u)", want, MIN_PEER_MAX);
+        H->log(m);
         return;
     }
     memcpy(syn_ack, payload, n);
     syn_ack_len = n;
-    unsigned want = payload[2] << 8 | payload[3];
-    peer_max = want < HEADER_LEN + 2 ? HEADER_LEN + 2 : want > MAX_PACKET ? MAX_PACKET : want;
+    peer_max = want > MAX_PACKET ? MAX_PACKET : want;
     if (want > RX_PACKET) syn_ack[2] = RX_PACKET >> 8, syn_ack[3] = RX_PACKET & 255;
     /* The Q2 holds nothing it receives, so takes any number of packets unacknowledged; an iPhone offers 0x7F to an
      * accessory that retransmits and echoes the window to one that does not. */
