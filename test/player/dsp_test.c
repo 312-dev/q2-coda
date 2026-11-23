@@ -2,6 +2,7 @@
  * made of the new player's chain, one dsp per song. Built and run by run.py (test_dsp_chain) with PEQ_ROOT a scratch
  * directory holding mnt/data and tmp. A block here is float stereo unless named; pts is the end of the block. */
 #include <assert.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include "q2player.h"
 #include "peq.h"
@@ -17,6 +18,17 @@ int __wrap_clock_gettime(clockid_t clock, struct timespec *t) {
 }
 
 static int length = 10; /* each song's media-info length */
+
+/* smart.c's side, as a check sets it: the analysis answers smart_answer with smart_given at once; begun counts asks */
+static int smart_answer = SMART_PLAIN, smart_begun, smart_cancels;
+static struct xf_plan smart_given;
+void smart_begin(const char *url, float rg) { ++smart_begun; }
+int smart_poll(struct xf_plan *p) {
+    if (smart_answer == SMART_PLAN) *p = smart_given;
+    return smart_answer;
+}
+void smart_cancel(const char *why) { ++smart_cancels; }
+void plog(char level, const char *msg, int n) { fprintf(stderr, "%.*s\n", n, msg); }
 
 static peq_preset active(double preamp, double gain) {
     peq_preset p;
@@ -306,6 +318,115 @@ static void midmix_check(void) {
     xfade_view(0);
 }
 
+/* ---- Smart Crossfade's hold and mix (dsp.c smart_want and the mix), with smart.c's plan given (smart_given) */
+typedef float (*wave)(unsigned i, int c);
+static float *song_a, *song_b; /* each song's frames out */
+static unsigned out_a, out_b;
+/* A (ra Hz, na channels, fa) to its end at length, then bframes of B (rb, nb, fb) through the mix; word: demo's,
+ * stopped: its stop count moved after A's end. */
+static void smart_pair(int ra, int na, wave fa, int rb, int nb, wave fb, unsigned bframes, int word, int stopped) {
+    static float buf[8 * 1024];
+    free(song_a), free(song_b);
+    song_a = calloc((size_t)length * ra * na, sizeof(float)), song_b = calloc((size_t)bframes * nb, sizeof(float));
+    out_a = out_b = 0;
+    xfade_view(word);
+    struct pcm_format f = {ra, na, 4, 1, DSD_PCM};
+    struct dsp *a = dsp_open(&f, 0, 1, length);
+    dsp_path(a, "a");
+    for (unsigned n = 0, e = (unsigned)(length * ra); n < e;) {
+        unsigned m = e - n < 1024 ? e - n : 1024;
+        for (unsigned i = 0; i < m; ++i)
+            for (int c = 0; c < na; ++c) buf[i * na + c] = fa(n + i, c);
+        n += m;
+        unsigned k = run(a, buf, m, na, (double)n / ra);
+        memcpy(song_a + (size_t)out_a * na, buf, (size_t)k * na * 4), out_a += k;
+    }
+    dsp_close(a, 1);
+    if (stopped) xfade_view(word + (1 << XF_STOPS));
+    struct pcm_format g = {rb, nb, 4, 1, DSD_PCM};
+    struct dsp *b = dsp_open(&g, 0, 1, length);
+    dsp_path(b, "b");
+    for (unsigned n = 0; n < bframes;) {
+        unsigned m = bframes - n < 1024 ? bframes - n : 1024;
+        for (unsigned i = 0; i < m; ++i)
+            for (int c = 0; c < nb; ++c) buf[i * nb + c] = fb(n + i, c);
+        n += m;
+        unsigned k = run(b, buf, m, nb, (double)n / rb);
+        memcpy(song_b + (size_t)out_b * nb, buf, (size_t)k * nb * 4), out_b += k;
+    }
+    dsp_close(b, 1);
+    xfade_view(0);
+}
+static struct xf_plan plan_of(int64_t overlap, int64_t trail, int64_t skip, int64_t fade, int rate) {
+    struct xf_plan p = {overlap, trail, skip, fade, rate, "b"};
+    return p;
+}
+static float tone(unsigned i, int c) { return 0.99f * sinf(6.2831853f * 1000 * (i % 48) / 48000); }
+static float ramp(unsigned i, int c) { return i * 1e-6f; }
+static float zero(unsigned i, int c) { return 0; }
+static float ramp_level(unsigned i, int c) { return c ? 0.5f : i * 1e-6f; }
+
+static void smart_check(void) {
+    unlink(PEQ_ACTIVE);
+    length = 10;
+    smart_answer = SMART_PLAN;
+    int smart = 5000 | XF_SMART;
+    /* The same full-scale tone in phase on both sides: an equal-power mix sums to 1.41 times it, a smart one stays
+     * under XF_CEIL throughout and after, then the next song is its own again. */
+    smart_given = plan_of(24000, 0, 0, 0, 48000);
+    smart_pair(48000, 2, tone, 48000, 2, tone, 3 * 48000, smart, 0);
+    float peak = 0;
+    for (unsigned i = 0; i < out_b * 2; ++i) peak = fabsf(song_b[i]) > peak ? fabsf(song_b[i]) : peak;
+    assert(peak <= 0.99f + 1e-6f && peak > 0.9f && out_b == 3 * 48000);
+    /* recovered within 12 of XF_RELEASE_S after the overlap: the song bit for bit */
+    for (unsigned i = 24000 + 12 * 2400; i < out_b; ++i) assert(song_b[2 * i] == tone(i, 0));
+    smart_pair(48000, 2, tone, 48000, 2, tone, 2 * 48000, 500, 0); /* the plain fade of the same */
+    peak = 0;
+    for (unsigned i = 0; i < out_b * 2; ++i) peak = fabsf(song_b[i]) > peak ? fabsf(song_b[i]) : peak;
+    assert(peak > 1.3f);
+
+    /* 44.1 kHz stereo into 48 kHz mono: A's frames all come out, alone up to out_point, then under the next song
+     * through the overlap, read at 44.1/48 a frame; its trail never. */
+    smart_given = plan_of(22050, 4410, 0, 0, 48000);
+    smart_pair(44100, 2, ramp, 48000, 1, zero, 48000, smart, 0);
+    unsigned cut = 441000 - 4410 - 22050;
+    assert(out_a == cut);
+    for (unsigned i = 0; i < out_a; ++i) assert(song_a[2 * i] == ramp(i, 0));
+    double step = 44100.0 / 48000;
+    for (unsigned t = 0; t < 24000; ++t) {
+        float go = cosf((t + 0.5f) / 24000 * 1.5707963f);
+        assert(fabsf(song_b[t] - go * (float)((cut + t * step) * 1e-6)) < 2e-6f);
+    }
+    assert((unsigned)(cut + 23999 * step) == 441000 - 4410 - 1); /* the overlap's last frame read */
+    for (unsigned t = 24000; t < out_b; ++t) assert(song_b[t] == 0);
+
+    /* The next song: its leading frames dropped, then in over its fade-in, or at full level from its first frame (a
+     * hard start). */
+    smart_given = plan_of(24000, 0, 4800, 9600, 48000);
+    smart_pair(48000, 2, zero, 48000, 2, ramp_level, 48000, smart, 0);
+    assert(out_b == 48000 - 4800);
+    for (unsigned t = 0; t < out_b; ++t) {
+        float gi = t < 9600 ? sinf((t + 0.5f) / 9600 * 1.5707963f) : 1;
+        assert(fabsf(song_b[2 * t] - ramp_level(4800 + t, 0) * gi) < 1e-6f && fabsf(song_b[2 * t + 1] - 0.5f * gi) < 1e-6f);
+    }
+    smart_given = plan_of(24000, 0, 4800, 0, 48000);
+    smart_pair(48000, 2, zero, 48000, 2, ramp_level, 48000, smart, 0);
+    for (unsigned t = 0; t < out_b; ++t) assert(song_b[2 * t] == ramp_level(4800 + t, 0) && song_b[2 * t + 1] == 0.5f);
+
+    /* A stop after the hold: the next song plays whole, nothing mixed, nothing dropped. */
+    smart_given = plan_of(24000, 0, 4800, 9600, 48000);
+    smart_pair(48000, 2, tone, 48000, 2, ramp_level, 48000, smart, 1);
+    assert(out_b == 48000);
+    for (unsigned t = 0; t < out_b; ++t) assert(song_b[2 * t] == ramp_level(t, 0) && song_b[2 * t + 1] == 0.5f);
+
+    /* No plan (smart.c's SMART_PLAIN): the plain 5 s fade. */
+    smart_answer = SMART_PLAIN;
+    smart_pair(48000, 2, ramp, 48000, 2, zero, 6 * 48000, smart, 0);
+    assert(out_a == 10 * 48000 - 5 * 48000);
+    smart_answer = SMART_PLAIN;
+    free(song_a), free(song_b), song_a = song_b = 0;
+}
+
 /* Mono Audio and Swap L/R: demo's files, looked for once a second of audio; set, each stereo frame is its channels'
  * mean, or the two swapped; cleared, the block plays exactly. */
 static void mono_check(void) {
@@ -575,11 +696,12 @@ int main(void) {
     rates_check();
     crossfade_check();
     midmix_check();
+    smart_check();
     mono_check();
     cast_check();
     carry_check();
     meter_check();
     puts("dsp: bypass and the round trip, ReplayGain's clip, DSD, the EQ at 8-384 kHz and 1-8 channels, "
-         "the reread, 3EQ and its held preamp, crossfade, mid-mix, mono and swap, AirPlay's tap, carried filter memory, the meter");
+         "the reread, 3EQ and its held preamp, crossfade, mid-mix, smart crossfade, mono and swap, AirPlay's tap, carried filter memory, the meter");
     return 0;
 }

@@ -1073,12 +1073,13 @@ def test_shuffle_songs_plays_each_song_once_a_pass_and_the_next_list_picked_play
     assert [title_of(q, p) for p in q.opened[14:]] == ['Rise', 'Fall'] and q.status == STOPPED
 
 
-# Crossfade's fade for the next change, which hciplayer's filter reads from /tmp/q2xfade.
+# Smart Crossfade's word for the next change, which q2player's chain reads from /tmp/q2xfade.
 ECHO = BETA + 'Second/03 Echo.dsf'
 
 
 def fade(q):
-    """The fade the next change gets, in ms, and the stops counted: none until one is first asked for."""
+    """The fade the next change gets (its ms and XF_SMART, peq.h), and the stops counted: none until one is first
+    asked for."""
     cell = q.disk.shared.get(XFADE_FILE)
     return (0, 0) if cell is None else (cell.value & 0xffff, cell.value >> 16)
 
@@ -1087,7 +1088,7 @@ def test_crossfade_fades_into_another_album_only_and_never_into_dsd(q2):
     files, tags = music_card()
     tags[ECHO] = dict(title='Echo', album='Second', artist='Beta', album_artist='Beta', track=3, seconds=SONG)
     files[ECHO] = b'\0' * 64
-    q = q2(files, tags, config={'XFADE': '1', 'XFADESEC': '6'})
+    q = q2(files, tags, config={'XFADE': '1'})
     gapless = C.c_ubyte.from_address(O['MCL_GAPLESS'])
     gapless.value = 1
     q.update()
@@ -1101,7 +1102,7 @@ def test_crossfade_fades_into_another_album_only_and_never_into_dsd(q2):
     q.hold('Other', QA['ADD'])  # Play Last while Dusk plays: after it; First too, but Beta's
     q.hold('Echo', QA['ADD'])  # ... and after Other
     q.ui_pass()
-    assert title_of(q, q.opened[-1]) == 'Dusk' and fade(q) == (6000, 0)  # into another album of the same name
+    assert title_of(q, q.opened[-1]) == 'Dusk' and fade(q) == (5000 | 0x8000, 0)  # into another album of the same name: smart, over the plain 5 s
     gapless.value = 0
     q.ui_pass()
     assert fade(q) == (0, 0)  # stock's Gapless off: no fade either
@@ -1120,7 +1121,7 @@ def test_under_stock_shuffle_crossfade_asks_about_the_very_track_that_plays_next
     files, tags = music_card()
     tags[ECHO] = dict(title='Echo', album='Second', artist='Beta', album_artist='Beta', track=3, seconds=SONG)
     files[ECHO] = b'\0' * 64
-    q = q2(files, tags, config={'XFADE': '1', 'XFADESEC': '6'})
+    q = q2(files, tags, config={'XFADE': '1'})
     C.c_ubyte.from_address(O['MCL_GAPLESS']).value = 1
     q.update()
     q.call('mclSetPlayMode', SHUFFLE)  # Play Mode: stock's Shuffle, which draws each next at the change

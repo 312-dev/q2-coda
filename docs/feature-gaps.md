@@ -221,7 +221,7 @@ iPod-lineage features Q2 Muse or stock already has, with where. Stock means Shan
 | Volume Limit                                 | stock's Maximum Volume                                                                     | [ipod.md](ipod.md#settings-icons)                                                 |
 | Backlight timer, brightness                  | stock's Backlight settings, Smart Awake, Night Shift                                       | `patch/nightshift.c`                                                              |
 | Main Menu customisation                      | Home's Split, Full or Carousel and its Shortcut row (part of the iPod's setting)           | `patch/theme_engine.c:319` (`home_shortcut_open`), [ipod.md](ipod.md#home)        |
-| Gapless and crossfade                        | gapless FLAC, MP3, AAC, Opus, Vorbis; crossfade to 15 s                                    | `patch/mp3_gapless.c`, `patch/lavf_gapless.c`, `patch/crossfade.c`                |
+| Gapless and crossfade                        | gapless FLAC, MP3, AAC, Opus, Vorbis; Smart Crossfade, up to 15 s                                   | `patch/mp3_gapless.c`, `patch/lavf_gapless.c`, `patch/crossfade.c`                |
 | Remote and headset controls                  | headset buttons, AirPods stem controls and ear detection                                   | `patch/headset.c`                                                                 |
 | A-B repeat                                   | stock's A-B Repeat on Now Playing's More                                                   | [ipod.md](ipod.md#now-playing)                                                    |
 

@@ -2,6 +2,7 @@
 
 - **Unreleased (q2-coda)**:
   - Car Remote: on the car's now-playing screen, the artist and the album open that artist's and that album's pages (with a Q2 Muse Remote that supports it).
+  - Playback: **Crossfade** is now **Smart Crossfade**, one switch. Songs from different albums overlap at the right moment for each pair: a song that fades out plays under the next one's start for as long as its fade lasts, silence at the end of a song or the start of the next is skipped, a song that starts loud comes in at full level, and the overlap never clips. When the Q2 can't look at both songs in time (the next one still downloading, for one) it fades over 5 seconds as before. Switching it on switches Gapless on too, and the row says "Needs Gapless on" if Gapless is later switched off. If Crossfade was on, Smart Crossfade is on; the old length setting is no longer used.
   - Car Audio: when the car stops taking audio mid-song, a stop, a skip or a new song now takes effect at once, where the Q2 could wait up to 10 seconds first.
   - Car Remote: the Q2's log names each command it takes from the phone or the car (play, Next, Previous, seek, a queue pick, volume and the rest) with what the player was doing, so a song skipped from the phone can be told from one that ended.
   - Home: the slideshow's album covers from your server are sharp, made from the app's large covers instead of the small list-row ones scaled up.

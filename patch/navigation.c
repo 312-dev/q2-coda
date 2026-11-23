@@ -229,6 +229,8 @@ extern void radio_poll(void);
 extern void wheel_row(void *label), resume_row(void *label),
     mono_row(void *label), swap_row(void *label), night_row(void *label), volume_row(void *label);
 extern int mono_click(void *ctx, void *event), swap_click(void *ctx, void *event);
+extern void xfade_row(void *label);
+extern int xfade_click(void *ctx, void *event);
 extern int xfade_open(void *ctx, void *event), xfade_key(void *top, unsigned key), resume_min(void);
 extern int eq_key(void *top, unsigned key), eq_tabs_hold(void *view); /* peq_ui.c */
 extern const char *radio_hold(void *top);

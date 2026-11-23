@@ -691,25 +691,24 @@ static void reorder(void *view, const unsigned char *order, unsigned n) {
  * Required, 8, which is always on), then ours as built. */
 static const unsigned char playset_order[] = {
     2 /* EQ */,
-    22 /* Library */,
+    21 /* Library */,
     3 /* Play Mode */,
     7 /* Gapless */,
-    11 /* Crossfade */,
-    12 /* its Duration */,
+    11 /* Smart Crossfade */,
     6 /* Memory play */,
-    13 /* Resume Songs */,
+    12 /* Resume Songs */,
     8 /* Headphones required, hidden */,
-    16 /* Sleep Timer */,
-    17 /* Volume */,
-    18 /* Max Volume */,
-    19 /* Default Volume */,
-    20 /* its Level */,
+    15 /* Sleep Timer */,
+    16 /* Volume */,
+    17 /* Max Volume */,
+    18 /* Default Volume */,
+    19 /* its Level */,
     0 /* Gain */,
     9 /* ReplayGain */,
-    21 /* Balance */,
+    20 /* Balance */,
     10 /* stock's Balance, hidden */,
-    14 /* Mono Audio */,
-    15 /* Swap L/R */,
+    13 /* Mono Audio */,
+    14 /* Swap L/R */,
     1 /* Filters */,
     4 /* DSD Output */,
     5 /* USB Audio */,
@@ -845,8 +844,7 @@ int ringnav_audioset(void *win, void *ctx) {
         library_page(win, view, sub);
         return result;
     }
-    /* Crossfade and its Duration (inline_slider.c) */
-    inline_pair(view, "playset_gapless", IS_XFADE);
+    xfade_row(list_row(view, "playset_gapless", xfade_click, 0)); /* Smart Crossfade, crossfade.c */
     resume_row(list_row_into(view, "playset_memplay", xfade_open, (void *)2)); /* crossfade.c */
     mono_row(list_row(view, "playset_balance", mono_click, 0));
     swap_row(list_row(view, "playset_balance", swap_click, 0));
