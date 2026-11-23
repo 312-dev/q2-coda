@@ -841,6 +841,9 @@ BT_CONNECT_START = (0x4fdcbc, 0x0320f809)
 # platform_init's control thread start: install callbacks before it discovers boot connections.
 BT_INIT = (0x51d248, 0x0320f809)
 BT_PARAMS = (0x4fe1e4, 0x0411f5ef)  # config_bt_init's reset moves before the control thread too
+# openBluetooth's jalr btctl_set_prompt_callback(0x4f9d20), at every Bluetooth on and after headset_bt_init, becomes
+# jal bt_pair_register, so libbtctl keeps bt_pair.c's callback rather than stock's (docs/internals.md#bluetooth-pairing-card).
+BT_PROMPT = (0x4fa6e8, 0x0320f809)
 # openBluetooth's jalr btctl_device_status_callback(0x4fc180) registers headset_bt_status instead, and
 # autoLinkBluetooth's bal checkPairDev also skips while the link list holds a connected link.
 BT_STATUS = (0x4fa700, 0x0320f809)
@@ -2387,7 +2390,7 @@ def compile_payload(out):  # pragma: no mutate block
         *[f'--undefined={name}' for _, name, _ in HOOKS.values()], f'--undefined={GRADIENT_LEAF[2]}', '--undefined=ringnav_lrc_open',
         f'--undefined={WM_PAINT_LEAF[2]}', f'--undefined={QUEUE_LEAF[2]}', '--undefined=ringnav_audio_extension', '--undefined=start_mute', '--undefined=start_sleep', '--undefined=ringnav_genre_copy', '--undefined=ringnav_lyric_save', '--undefined=ringnav_lyric_drop', '--undefined=ringnav_cover_copy','--undefined=ringnav_folder_rm','--undefined=ringnav_bootmode', '--undefined=ringnav_ts_read',
         '--undefined=ringnav_baidu_poll', '--undefined=ringnav_stock_tls', '--undefined=ringnav_tidal_poll', '--undefined=catalogue_access', '--undefined=addon_m3u_dir', f'--undefined={COVERINFO_CALL[2]}',
-        '--undefined=coverflow_player_cover', '--undefined=coverflow_grid_cover', '--undefined=coverflow_album_cover', '--undefined=coverflow_folder_cover', '--undefined=headset_bt_init',
+        '--undefined=coverflow_player_cover', '--undefined=coverflow_grid_cover', '--undefined=coverflow_album_cover', '--undefined=coverflow_folder_cover', '--undefined=headset_bt_init', '--undefined=bt_pair_register',
         '--undefined=headset_status_register', '--undefined=bt_quality_site', '--undefined=headset_bt_autolink', '--undefined=bt_stopped_toast',
         *[f'--undefined={name}' for name in PAYLOAD_ROOTS],
         '--undefined=scrobble_auto_ms',  # inlined where the payload calls it; test/patch.py calls its own copy
@@ -2859,6 +2862,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(struct.unpack_from('<III', raw_demo, fileoff(raw_demo, BT_STATUS[0] - 4)) ==
           (0x8f99fc1c, 0x0320f809, 0x2484c180), 'Bluetooth status: expected btctl_device_status_callback(0x4fc180)')
     patch_word(patched, *BT_STATUS, jal(ps['headset_status_register']), 'Bluetooth: incoming link during a connect')
+    check(struct.unpack_from('<III', raw_demo, fileoff(raw_demo, BT_PROMPT[0] - 4)) ==
+          (0x8f99f458, 0x0320f809, 0x24849d20), 'Bluetooth prompt: expected btctl_set_prompt_callback(0x4f9d20)')
+    patch_word(patched, *BT_PROMPT, jal(ps['bt_pair_register']), 'Bluetooth: the pairing card\'s prompt callback')
     patch_word(patched, *BT_AUTOLINK, jal(ps['headset_bt_autolink']), 'Bluetooth: auto-link keeps an incoming link')
     check(struct.unpack_from('<III', raw_demo, fileoff(raw_demo, BT_QUALITY[1][0] + 4)) ==
           (0x1040007c, 0x8f93b05c, 0x8e620000), 'Quality click: expected beqz to the tail for no link, then bt_showcoding')

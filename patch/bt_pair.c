@@ -4,7 +4,9 @@
  *
  * BlueZ asks the pairing agent libbtctl registers for demo. Of its Agent1 calls, only
  * RequestConfirmation reaches here as a question: libbtctl hands each call to demo's prompt
- * callback as (type, passkey text), and this is that callback in place of stock's (0x4f9d20).
+ * callback as (type, passkey text), and this is that callback in place of stock's (0x4f9d20): stock
+ * sets its own at platform_init and again in openBluetooth at every Bluetooth on, and both calls
+ * come here (bt_pair_register: headset.c headset_bt_init, tools/build.py BT_PROMPT).
  * Type 5 is RequestConfirmation, its passkey "%06u"; libbtctl keeps the call as its pending
  * request (BTCTL_PENDING) until an answer (btctl_reply), and answers every other type itself when
  * the callback returns 0, as stock's did: RequestPinCode "0000", RequestPasskey refused,
@@ -13,8 +15,8 @@
  *
  * BlueZ (5.66) ends a request it gave up on with Agent1.Cancel: the peer cancelled or failed the
  * pairing, its link dropped, or the agent did not answer in REQUEST_TIMEOUT (60 s, src/agent.c).
- * libbtctl's Cancel drops its pending request and tells demo nothing, so stock's dialog stayed up
- * until someone answered it (once for six and a half hours, refusing a software update meanwhile).
+ * libbtctl's Cancel drops its pending request and tells demo nothing, so a dialog that waits on the
+ * callback alone stays up until someone answers it, refusing a software update meanwhile.
  * Here the UI loop watches libbtctl's pending request (bt_pair_poll) and closes the card when it
  * is no longer the one shown; and after BTP_TIMEOUT_MS the card refuses by itself, should no
  * Cancel come. Nothing closes the card with a yes.
@@ -25,7 +27,9 @@
  * device's Name over D-Bus (a shell, bt_ui.c bt_shell) until it has one. The card waits for the
  * first answer (BTP_NAME_MS at most); with no name yet it asks "Pair with this device?" over
  * "Unknown device" and the address, and changes to the name in place when BlueZ has it. A path
- * that does not check out is no device: "Unknown device" alone. */
+ * that does not check out is no device: "Unknown device" alone.
+ *
+ * Every decision is a unified-log line of source bt, "pair: ..." (BTP_LOG). */
 #include "navigation.h"
 
 #define BTP_CONFIRM 5        /* libbtctl's prompt type for Agent1.RequestConfirmation */
@@ -140,20 +144,39 @@ static unsigned long btctl_base(void) {
 /* libbtctl's pending request now. */
 static void *pending(void) { return *(void *volatile *)(bp.base + BTCTL_PENDING); }
 
-/* headset.c headset_bt_init, before libbtctl's thread starts: libbtctl found. */
-void bt_pair_init(void) { bp.base = btctl_base(); }
+#define BTP_LOG(level, ...)                                                                        \
+    do {                                                                                           \
+        char line_[200];                                                                           \
+        tk_snprintf(line_, sizeof line_, "pair: " __VA_ARGS__);                                    \
+        ulog(level, "bt", line_);                                                                  \
+    } while (0)
+
+/* libbtctl's prompt callback set to bt_pair_prompt, in place of stock's (stock, its userdata
+ * unused): at platform_init (headset.c headset_bt_init) and at each Bluetooth on (openBluetooth's
+ * call, tools/build.py BT_PROMPT). libbtctl is found the first time. */
+void bt_pair_register(void *stock, void *unused) {
+    (void)stock, (void)unused;
+    if (!bp.base) bp.base = btctl_base();
+    btctl_set_prompt_callback((void *)bt_pair_prompt, 0);
+    BTP_LOG('I', "callback set, libbtctl %s (%x)",
+            bp.base ? "checked" : "not found or not the one known", (unsigned)bp.base);
+}
 
 /* libbtctl's prompt callback (its thread). 1 holds a RequestConfirmation for the card; 0 leaves
  * any other type to libbtctl's own answer. */
 int bt_pair_prompt(int type, const char *passkey, void *unused) {
     (void)unused;
-    if (type != BTP_CONFIRM || !passkey) return 0;
+    if (type != BTP_CONFIRM || !passkey) {
+        BTP_LOG('I', "request type %d left to libbtctl", type);
+        return 0;
+    }
     unsigned key = 0;
     for (const char *p = passkey; *p >= '0' && *p <= '9'; ++p)
         key = key * 10 + (unsigned)(*p - '0');
     bp.msg = bp.base ? pending() : (void *)0;
     tk_snprintf(bp.code, sizeof bp.code, "%s", passkey);
     if (!bp.msg || !bt_pair_msg_path(bp.msg, key, bp.path, sizeof bp.path)) bp.path[0] = 0;
+    BTP_LOG('I', "request %s, device %s", bp.code, bp.path[0] ? bp.path : "not identified");
     __atomic_add_fetch(&bp.seq, 1, __ATOMIC_RELEASE);
     return 1;
 }
@@ -163,7 +186,11 @@ static int asked(void) { return bp.live && (!bp.base || pending() == bp.want); }
 
 /* The request answered: yes pairs, anything else refuses. Once, and only while it is asked. */
 static void reply(int yes) {
-    if (asked()) btctl_reply(BTP_CONFIRM, yes ? "yes" : "no");
+    if (asked()) {
+        btctl_reply(BTP_CONFIRM, yes ? "yes" : "no");
+        BTP_LOG('I', "answered %s", yes ? "pair" : "refused");
+    } else
+        BTP_LOG('I', "answer %s dropped: the request had ended", yes ? "pair" : "refused");
     bp.live = 0;
 }
 
@@ -199,6 +226,8 @@ static void card_open(unsigned now) {
     const char *name = card_words();
     bp.dialog = pair_prompt(name, bp.code, bp.body, rows, 2, BTP_CANCEL, left, BTP_CANCEL, answered,
                             (void *)(long)bp.taken);
+    if (bp.dialog)
+        BTP_LOG('I', "card up: %s, %d s left", bp.named ? bp.name : "unknown device", left / 1000);
 }
 
 /* A new request: the last one's card goes (BlueZ asks one at a time, so it has ended). */
@@ -230,6 +259,7 @@ static void name_follow(unsigned now) {
             while (name[k] && name[k] != '\n' && k < sizeof bp.name - 1) ++k;
             tk_snprintf(bp.name, sizeof bp.name, "%.*s", (int)k, name);
             bp.named = 1;
+            BTP_LOG('I', "name \"%s\" for %s", bp.name, bp.mac);
             if (bp.dialog && confirm_dialog() == bp.dialog) confirm_words(card_words(), bp.body);
             return;
         }
@@ -251,11 +281,13 @@ void bt_pair_poll(void) {
     if (seq != bp.taken) take(seq, now);
     if (!bp.live) return;
     if (bp.base && pending() != bp.want) { /* BlueZ's Cancel: the peer gave up, or the link went */
+        BTP_LOG('I', "request ended by BlueZ (Cancel): card %s", bp.dialog ? "closed" : "not up");
         bp.live = 0;
         card_drop();
         return;
     }
     if (now - bp.at >= BTP_TIMEOUT_MS) { /* no Cancel came: refused */
+        BTP_LOG('W', "no Cancel in %d s: refusing", BTP_TIMEOUT_MS / 1000);
         reply(0);
         card_drop();
         return;
