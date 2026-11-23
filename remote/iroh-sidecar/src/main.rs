@@ -5,16 +5,24 @@
 //! coda-rc (127.0.0.1:7720), so coda-rc itself is unchanged. demo's Car Remote shim starts it with
 //! the daemon and stops it with it (patch/coda_rc_shim.c). `--info` keeps the endpoint's id and
 //! home relay in a file, which the daemon (GetRemote) and Pair a Phone's QR code read.
+//! `--allow-file` is the allow-list (docs/remote-protocol.md#across-networks-only-paired-phones): the iroh keys of
+//! the paired phones, which coda-rc keeps, read at each handshake and each new stream, so a phone forgotten on the Q2
+//! is refused from its next stream on; a peer not in it is let in only while one of the `--open-while` files exists
+//! (Pair a Phone's code). With `--forward-named` each stream's first 32 bytes to coda-rc are the peer's key, so
+//! coda-rc knows which phone came through iroh. `--log` keeps the log to LOG_MAX bytes.
 //! On the phone's side (here, a laptop), `dial` listens on a local TCP port and carries each
 //! connection to the Q2 as one stream, found by its endpoint id (and `--relay`, `--addr` when
 //! known): iroh tries the relay and the direct addresses at once and keeps the first path that
 //! works, moving to a direct, hole-punched path when one opens.
 //! `bench` sends small messages down one stream and times their echoes.
 //!
-//!   q2-iroh serve [--key FILE] [--forward ADDR] [--allow ID]... [--relay URL]... [--relay-file FILE]
-//!                 [--info FILE] [--pid FILE] [--nice N]
-//!   q2-iroh dial ID [--listen ADDR] [--relay URL] [--addr IP:PORT]... [--relay-only]
-//!   q2-iroh bench ID [--count N] [--size BYTES] [--relay URL] [--relay-only]
+//!   q2-iroh serve [--key FILE] [--forward ADDR | --forward-named ADDR] [--allow ID]... [--allow-file FILE]
+//!                 [--open-while FILE]... [--relay URL]... [--relay-file FILE] [--info FILE] [--pid FILE]
+//!                 [--nice N] [--log FILE]
+//!   q2-iroh dial ID [--listen ADDR] [--relay URL] [--addr IP:PORT]... [--relay-only] [--key FILE]
+//!   q2-iroh bench ID [--count N] [--size BYTES] [--relay URL] [--relay-only] [--key FILE]
+//! `--key` on the dialling side keeps its own id, as the phone app keeps its key, so a laptop can stand in for a
+//! paired phone that registered it.
 
 use std::{net::SocketAddr, os::unix::fs::DirBuilderExt, str::FromStr, time::Instant};
 
@@ -30,6 +38,64 @@ use tokio::{
 
 /// The ALPN both sides must name; a peer speaking anything else is refused in the handshake.
 const ALPN: &[u8] = b"q2muse/coda-rc/0";
+
+/// The `--log` file is emptied when a line would take it past this, as coda-rc keeps /tmp/coda-rc.log: it is in RAM.
+const LOG_MAX: u64 = 64 * 1024;
+
+static LOG: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// A line to `--log`'s file (opened, appended to and closed, emptied first past LOG_MAX), else to stderr.
+fn log(line: &str) {
+    match LOG.get() {
+        Some(path) => {
+            use std::io::Write;
+            let full = std::fs::metadata(path).map(|m| m.len() + line.len() as u64 + 1 > LOG_MAX).unwrap_or(false);
+            let f = std::fs::OpenOptions::new().create(true).append(!full).write(true).truncate(full).open(path);
+            if let Ok(mut f) = f {
+                let _ = writeln!(f, "{line}");
+            }
+        }
+        None => eprintln!("{line}"),
+    }
+}
+
+/// 64 hex digits as the 32 bytes of a key.
+fn hex32(s: &str) -> Option<[u8; 32]> {
+    let s = s.trim();
+    if s.len() != 64 || !s.is_ascii() {
+        return None;
+    }
+    let mut k = [0u8; 32];
+    for (i, b) in k.iter_mut().enumerate() {
+        *b = u8::from_str_radix(&s[2 * i..2 * i + 2], 16).ok()?;
+    }
+    Some(k)
+}
+
+/// The allow file's text lists key: a line of 64 hex digits each.
+fn listed(text: &str, key: &[u8; 32]) -> bool {
+    text.lines().filter_map(hex32).any(|k| &k == key)
+}
+
+/// Who may come in: `--allow` ids, and with `--allow-file` the file's keys, read at each look, or anyone while an
+/// `--open-while` file exists. Neither option: anyone, as before there was a list.
+#[derive(Clone)]
+struct Gate {
+    allow: Vec<EndpointId>,
+    file: Option<String>,
+    open_while: Vec<String>,
+}
+
+impl Gate {
+    fn admits(&self, peer: &EndpointId) -> bool {
+        if self.allow.is_empty() && self.file.is_none() {
+            return true;
+        }
+        self.allow.contains(peer)
+            || self.file.as_ref().is_some_and(|f| listed(&std::fs::read_to_string(f).unwrap_or_default(), peer.as_bytes()))
+            || self.open_while.iter().any(|f| std::path::Path::new(f).exists())
+    }
+}
 
 /// One thread: no tokio worker pool on a 128 MB device.
 #[tokio::main(flavor = "current_thread")]
@@ -78,11 +144,17 @@ fn load_key(path: &str) -> Result<SecretKey> {
 }
 
 async fn serve(args: &[String]) -> Result<()> {
-    let forward: SocketAddr = opt(args, "--forward").unwrap_or("127.0.0.1:7720").parse()?;
-    let allow = opts(args, "--allow")
-        .into_iter()
-        .map(EndpointId::from_str)
-        .collect::<Result<Vec<_>, _>>()?;
+    if let Some(path) = opt(args, "--log") {
+        let _ = LOG.set(path.to_owned());
+    }
+    let named = opt(args, "--forward-named");
+    let forward: SocketAddr = named.or(opt(args, "--forward")).unwrap_or("127.0.0.1:7720").parse()?;
+    let named = named.is_some();
+    let gate = Gate {
+        allow: opts(args, "--allow").into_iter().map(EndpointId::from_str).collect::<Result<Vec<_>, _>>()?,
+        file: opt(args, "--allow-file").map(str::to_owned),
+        open_while: opts(args, "--open-while").into_iter().map(str::to_owned).collect(),
+    };
     if let Some(n) = opt(args, "--nice") {
         extern "C" {
             fn setpriority(which: i32, who: u32, prio: i32) -> i32;
@@ -104,7 +176,7 @@ async fn serve(args: &[String]) -> Result<()> {
         tokio::spawn(async move {
             loop {
                 if let Err(e) = write_atomic(&path, info(&w.get()).as_bytes()) {
-                    eprintln!("{path}: {e:#}");
+                    log(&format!("{path}: {e:#}"));
                 }
                 if w.updated().await.is_err() {
                     break;
@@ -116,23 +188,33 @@ async fn serve(args: &[String]) -> Result<()> {
     let relay = ep.addr().relay_urls().next().map(|u| u.to_string()).unwrap_or_default();
     println!("online relay={relay}");
     while let Some(incoming) = ep.accept().await {
-        let allow = allow.clone();
+        let gate = gate.clone();
         tokio::spawn(async move {
             let conn = match async { anyhow::Ok(incoming.accept()?.await?) }.await {
                 Ok(c) => c,
-                Err(e) => return eprintln!("handshake failed: {e:#}"),
+                Err(e) => return log(&format!("handshake failed: {e:#}")),
             };
             let peer = conn.remote_id();
-            if !allow.is_empty() && !allow.contains(&peer) {
-                eprintln!("refused {peer}");
+            if !gate.admits(&peer) {
+                log(&format!("refused {peer}"));
                 return conn.close(1u32.into(), b"not allowed");
             }
-            eprintln!("peer {peer}");
+            log(&format!("peer {peer}"));
             while let Ok((send, recv)) = conn.accept_bi().await {
+                if !gate.admits(&peer) {
+                    // forgotten on the Q2 since the handshake: this stream and the connection end
+                    log(&format!("refused {peer}: no longer allowed"));
+                    return conn.close(1u32.into(), b"not allowed");
+                }
                 tokio::spawn(async move {
                     match TcpStream::connect(forward).await {
-                        Ok(tcp) => pipe(tcp, send, recv).await,
-                        Err(e) => eprintln!("connect {forward}: {e}"),
+                        Ok(mut tcp) => {
+                            if named && tcp.write_all(peer.as_bytes()).await.is_err() {
+                                return;
+                            }
+                            pipe(tcp, send, recv).await
+                        }
+                        Err(e) => log(&format!("connect {forward}: {e}")),
                     }
                 });
             }
@@ -185,7 +267,7 @@ async fn pipe(tcp: TcpStream, mut send: iroh::endpoint::SendStream, mut recv: ir
         n
     };
     let (a, b) = tokio::join!(up, down);
-    eprintln!("stream closed: {:?} up, {:?} down", a.ok(), b.ok());
+    log(&format!("stream closed: {:?} up, {:?} down", a.ok(), b.ok()));
 }
 
 /// Dials the Q2 by its id, through `--relay` and at each `--addr` as well when given: iroh sends on
@@ -193,6 +275,9 @@ async fn pipe(tcp: TcpStream, mut send: iroh::endpoint::SendStream, mut recv: ir
 async fn connect(args: &[String]) -> Result<(Endpoint, Connection)> {
     let id = EndpointId::from_str(args.first().context("missing endpoint id")?)?;
     let mut b = relays(Endpoint::builder(presets::N0), args)?;
+    if let Some(path) = opt(args, "--key") {
+        b = b.secret_key(load_key(path)?);
+    }
     if args.iter().any(|a| a == "--relay-only") {
         b = b.clear_ip_transports();
     }
@@ -265,4 +350,74 @@ async fn bench(args: &[String]) -> Result<()> {
     conn.close(0u32.into(), b"done");
     ep.close().await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const A: &str = "8aac0bd4c41f2a6e84b5e0d6a3a9b6d8f5c1e2a3b4c5d6e7f8091a2b3c4d5e6f";
+
+    #[test]
+    fn the_allow_file_lists_keys_in_hex() {
+        let a = hex32(A).unwrap();
+        assert!(listed(&format!("{A}\n"), &a));
+        assert!(listed(&format!("{}\n{A}\n", "00".repeat(32)), &a));
+        assert!(!listed("", &a));
+        assert!(!listed(&format!("{}\n", &A[..62]), &a)); // short
+        assert!(!listed(&format!("{}zz\n", &A[..62]), &a)); // not hex
+        assert!(hex32(&format!(" {A} ")).is_some());
+    }
+
+    fn key(b: u8) -> EndpointId {
+        SecretKey::from_bytes(&[b; 32]).public()
+    }
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("q2-iroh-test-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_file(&d);
+        d
+    }
+
+    #[test]
+    fn the_gate_admits_the_listed_and_anyone_while_pairing() {
+        let (file, pairing) = (tmp("allow"), tmp("qr"));
+        let gate = Gate {
+            allow: vec![],
+            file: Some(file.to_string_lossy().into()),
+            open_while: vec![pairing.to_string_lossy().into()],
+        };
+        let (a, b) = (key(1), key(2));
+        assert!(!gate.admits(&a)); // no file yet: nobody
+        let hex: String = a.as_bytes().iter().map(|x| format!("{x:02x}")).collect();
+        std::fs::write(&file, format!("{hex}\n")).unwrap();
+        assert!(gate.admits(&a) && !gate.admits(&b));
+        std::fs::write(&pairing, "123456\n").unwrap();
+        assert!(gate.admits(&b)); // Pair a Phone shows its code
+        std::fs::remove_file(&pairing).unwrap();
+        std::fs::write(&file, "").unwrap(); // forgotten
+        assert!(!gate.admits(&a));
+        std::fs::remove_file(&file).unwrap();
+    }
+
+    #[test]
+    fn with_no_list_the_gate_is_open() {
+        let gate = Gate { allow: vec![], file: None, open_while: vec![] };
+        assert!(gate.admits(&key(3)));
+        let gate = Gate { allow: vec![key(4)], file: None, open_while: vec![] };
+        assert!(gate.admits(&key(4)) && !gate.admits(&key(3)));
+    }
+
+    #[test]
+    fn the_log_is_emptied_past_its_limit() {
+        let path = tmp("log");
+        let _ = LOG.set(path.to_string_lossy().into());
+        let line = "x".repeat(1000);
+        for _ in 0..200 {
+            log(&line);
+        }
+        let n = std::fs::metadata(&path).unwrap().len();
+        assert!(n <= LOG_MAX && n > 0, "{n}");
+        std::fs::remove_file(&path).unwrap();
+    }
 }

@@ -305,6 +305,7 @@ static int pair_finish(crc_session *s, unsigned req_id, const uint8_t *p, size_t
     crypto_wipe(prk, 64);
     s->state = S_PAIRED;
     pair_end(1);
+    if (s->iroh_via) crc_iroh_proved(s); /* paired over iroh: the phone's key goes with its new record */
     uint8_t b[60];
     pbw w = {b, 0, sizeof b, 0};
     pb_bytes(&w, 1, id, sizeof id);
@@ -312,6 +313,8 @@ static int pair_finish(crc_session *s, unsigned req_id, const uint8_t *p, size_t
     crypto_wipe(m, 64);
     return crc_send(s, T_PAIR_RESULT, req_id, b, w.n);
 }
+
+int crc_pair_busy(void) { return pair.code[0] != 0; }
 
 void crc_tick(void) {
     if (!pair.code[0]) return;
@@ -394,6 +397,7 @@ static int auth(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
     s->rx_ctr = s->tx_ctr = 0;
     int e = crc_send(s, T_AUTH_RESP, req_id, b, w.n);  /* the last plain frame */
     s->state = S_AUTHED;
+    if (s->iroh_via) crc_iroh_proved(s);
     return e;
 }
 
@@ -420,6 +424,14 @@ static int frame(crc_session *s, const uint8_t *fr, size_t len) {
         return crc_app(s, type, req_id, plain, n);
     }
     if (flags) return -1;
+    /* Through q2-iroh from a key no paired phone registered: only while Pair a Phone shows its code (q2-iroh admits
+     * such a peer only then too), and then only the handshake and the pairing; at any other time it is closed. */
+    if (s->iroh_via && !s->iroh_ok) {
+        char code[7];
+        int open = crc_code_shown(code);
+        crypto_wipe(code, sizeof code);
+        if (!open || type == T_PING) return crc_error(s, req_id, E_UNAUTHORIZED, "not a paired phone's iroh key"), -1;
+    }
     switch (type) {
     case T_HELLO: return s->state == S_NEW ? hello(s, req_id, p, n) : -1;
     case T_PAIR_START: return s->state == S_HELLO || s->state == S_PAIRING ? pair_start(s, req_id, p, n) : -1;

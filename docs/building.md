@@ -15,6 +15,7 @@
 - ImageMagick 6 or 7 for the iPod UI's settings icons (`convert` or `magick`; tested with 6.9.12)
 - The test dependencies: `pip install -r requirements.txt`
 - For the rebuilt third-party libraries ([third-party.md](third-party.md)): network access on the first build, which fetches the Codescape MIPS toolchain (2.3 GB) and the pinned sources into `~/.cache/q2-thirdparty`, and about an hour to compile them once; bwrap and qemu-mipsel for `test/thirdparty.py`
+- Only to change `remote/iroh-sidecar` (`q2-iroh`, which a build otherwise takes pinned from the cache): Rust nightly-2026-11-18 with `rust-src` ([remote: Building it](remote.md#building-it)). On GRAYTHINKPAD it is installed in `~/.cache/q2-rust` (`rustup` and `cargo` there; `~/.cache/q2-rust/wrap/cargo` runs `cargo +nightly` on that nightly). The pinned binary is reproduced byte for byte only with that toolchain and its target folder: `RUSTUP_HOME=~/.cache/q2-rust/rustup CARGO_HOME=~/.cache/q2-rust/cargo PATH=~/.cache/q2-rust/wrap:$PATH CARGO_TARGET_DIR=~/.cache/q2-rust/target python3 tools/iroh.py` (a later nightly, or another target folder, makes a different binary of the same crate). The crate's unit tests run on the host the same way with `cargo +nightly test --offline --release --manifest-path remote/iroh-sidecar/Cargo.toml` and `CARGO_TARGET_DIR=~/.cache/q2-rust/target-host`.
 - The original stock ZIP. Its SHA-256 is:
 
 ```text

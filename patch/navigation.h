@@ -1234,6 +1234,8 @@ extern unsigned long ui_thread; /* playback.c: the UI thread, from its first pas
 /* coda_rc_shim.c: Car Remote (docs/internals.md#car-remote) */
 void coda_rc_poll(void), coda_rc_toggle(void);
 int coda_rc_enabled(void);
+int coda_rc_wants_wifi(void); /* Smart Wi-Fi: Car Remote needs the radio (coda_rc_shim.c) */
+int coda_rc_online(void);     /* a phone has an authenticated Car Remote session */
 void coda_rc_note(const char *text); /* a toast, for the car (NowPlaying.notice) */
 /* carremote_page.c: Settings > Car Remote, its phone page and Pair a Phone */
 int carremote_open(void *ctx, void *event);

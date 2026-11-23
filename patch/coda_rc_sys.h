@@ -97,6 +97,8 @@ ssize_t recvfrom(int, void *, size_t, int, void *, socklen_t *);
 int ioctl(int, unsigned long, ...);
 int poll(struct pollfd *, unsigned long, int);
 #define IN_MOVED_TO 0x80
+#define IN_CLOSE_WRITE 0x8
+#define IN_DELETE 0x200
 #define IN_NONBLOCK O_NONBLOCK
 #define IN_CLOEXEC O_CLOEXEC
 int inotify_init1(int), inotify_add_watch(int, const char *, uint32_t);

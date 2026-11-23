@@ -634,6 +634,12 @@ void ble_tick(uint32_t now) {
     if (b.mfd >= 0 && b.lfd >= 0 && b.cfd < 0 && b.adv == ADV_OFF && !b.absent && (int32_t)(now - b.add_at) >= 0) adv_add();
 }
 
+uint32_t ble_due(uint32_t now) {
+    if (b.synclink || b.mfd < 0 || b.lfd < 0 || b.cfd >= 0 || b.adv != ADV_OFF || b.absent) return 0xffffffffu;
+    uint32_t d = b.add_at - now;
+    return d >= 0x80000000u ? 0 : d;
+}
+
 /* the frame bytes out, once the phone has asked for notifications */
 int ble_write(const uint8_t *p, size_t n) {
     if (b.cfd < 0 || b.dead || !b.cccd) return -1;

@@ -1,6 +1,9 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Remote: the car's steering-wheel buttons and the phone's commands are no longer lost when two come close together (two taps of Next skip two songs), and they act straight away instead of up to half a second later.
+  - Battery: with Car Remote on, the Q2 no longer keeps Wi-Fi on and searching when no saved network is in range, or for more than 10 minutes after Car Remote was last used; the across-networks link runs only while Wi-Fi is connected; and the Q2 does less in the background while no phone is connected. Bluetooth pairing and control are unchanged.
+  - Car Remote: from another network, only phones paired with this Q2 can reach it, and a phone you forget can no longer reach it at all. Q2 Muse Remote registers itself the next time it connects by Bluetooth or Wi-Fi; an older Q2 Muse Remote keeps Bluetooth and Wi-Fi but not the across-networks link.
   - Car Audio: changing songs or the queue with a server library no longer holds the car link up for a fraction of a second each time, and Q2 Muse Remote's library pages open faster and use less of the Q2's processor.
   - Car Remote: a Bluetooth device nearby can no longer crash or take over the Car Remote service by sending it a malformed message before pairing. Devices that are not paired also can no longer keep a paired phone from connecting over Wi-Fi, or light the Q2's screen with pairing requests more than four times a minute.
   - Logs: Car Audio keeps the logs of every car cable from the last 7 days (up to 10 MB), and plugging the Q2 into a computer or a charger no longer pushes a drive's logs out. The unified log now says each button a Bluetooth car or headset sends, what the Car Remote's Play and Pause found the player doing, and why a cable showed the car no iPhone.

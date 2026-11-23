@@ -67,7 +67,8 @@ int ringnav_wifi_page(void *win, void *ctx) {
 }
 
 /* A page that uses the network, open anywhere in the window stack: Streaming and its services'
- * pages (Spotify's, Internet Radio's, a card app's and its QR code, Tidal's but Tidal Downloads),
+ * pages (Spotify's, Internet Radio's, a card app's and its QR code, Tidal's but Tidal Downloads), Car
+ * Remote's Pair a Phone (carremote_page.c: its QR code and Wi-Fi address),
  * System settings' Apps, AirPlay's, Network service, the Wi-Fi page, LocalSend's page
  * (localsend_ui.c), the Wi-Fi page's dialogs, the online lyrics and cover search, and Home's Radio
  * (radio_tuner.c), whose stations stream while it is open. */
@@ -77,7 +78,7 @@ static int net_page_open(void) {
         "radionp_page",    "addon_page",       "qrcode_page",       "apps_page",
         "airplay_page",    "netservice_page",  "wifi_page",         "localsend_",
         "editwifi_dialog", "kbwifiadd_dialog", "kbwifipass_dialog", "onlinematching_page",
-        "tidal_",          "tuner_page"
+        "tidal_",          "tuner_page",       "carhowto_page"
     };
     void *wm = window_manager();
     for (unsigned i = 0, n = widget_count_children(wm); i < n; ++i) {
@@ -89,8 +90,9 @@ static int net_page_open(void) {
     return 0;
 }
 
-/* Something needs the network: a USB cable in; AirPlay or DLNA on (Network service); Car Remote on
- * (coda_rc_shim.c: its phone connects over Wi-Fi when the car starts, so the radio is up before);
+/* Something needs the network: a USB cable in; AirPlay or DLNA on (Network service); Car Remote while a
+ * phone may come over this Wi-Fi or through q2-iroh: a link up and Car Remote used within its last 10 minutes
+ * (coda_rc_shim.c coda_rc_wants_wifi; with no network joined its phone comes over Bluetooth);
  * SyncLink over Wi-Fi or a SyncLink session, LocalSend's daemon (a transfer runs on past its page); a stock stream queue (Tidal's: the
  * types on_wm_timer_networkstatus stops once offline, whatever it is doing, as Play must fetch its
  * URL at once), Spotify's librespot running or waiting to start (it never retries a Connect login
@@ -99,7 +101,7 @@ static int net_page_open(void) {
  * an action held for the link (smart_hold); a time sync pending on a link; or a page above. */
 static int smart_needed(void) {
     unsigned type = (unsigned)mclGetPlayType();
-    return g_usbdet_value || g_airplayflag || g_dlnaflag || coda_rc_enabled() ||
+    return g_usbdet_value || g_airplayflag || g_dlnaflag || coda_rc_wants_wifi() ||
            g_synclinkflag == 2 || g_syncLink_status || localsend_running() ||
            airplayGetFlag() == 2 || type - 2 < 2 || type - 0xf1 < 2 || spot_running() ||
            radio_status() == 2 || addon_running() || scrobble_busy() || netupdate_busy() ||

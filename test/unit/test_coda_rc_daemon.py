@@ -8,7 +8,9 @@ held (docs/internals.md#car-remote-covers)."""
 import ctypes
 import os
 import pathlib
+import shutil
 import socket
+import struct
 import subprocess
 import threading
 import time
@@ -24,6 +26,16 @@ SOURCES = [PATCH / 'coda_rc.c', PATCH / 'coda_rc_core.c', PATCH / 'coda_rc_lib.c
            PATCH / 'monocypher/monocypher-ed25519.c', PATCH / 'coda_rc_ble.c']
 SQLITE = '/usr/lib/x86_64-linux-gnu/libsqlite3.so.0'
 CAP_RADIO = 16384
+CAP_IROH_ALLOW = 131072
+CONNECT = socket.socket.connect  # conftest refuses it to a test; the daemons here listen on loopback alone
+
+
+def LOOPBACK(addr, timeout):
+    """A connection to one of this module's daemons, past conftest's guard."""
+    so = socket.socket()
+    so.settimeout(timeout)
+    CONNECT(so, addr)
+    return so
 WAIT = time.sleep  # conftest makes time.sleep return at once during a test; the loop's pace needs real time
 NOW = 'seq={seq}\nstate=1\npos=1000\nlen=200\nid=12\nshuffle=0\nrepeat=0\nvolume=40\nhearts=0\nqpos=0\nqlen=3\nqgen=1\n' \
       'radio={radio}\npath=/mnt/mmc/a/2.flac\ntitle=Song\nartist=Ann\nalbum=First\n'
@@ -50,8 +62,10 @@ class Shim:
     """demo's side: Now Playing written, each command answered with code."""
     def __init__(self, root):
         self.root, self.seq, self.code, self.verbs = root, 0, 0, []
+        self.before = ''  # answers to other commands, kept above this one's in the ack file (coda_rc_shim.c cr_ack)
         self.loop: threading.Thread | None = None  # the daemon's loop, once started
         self.tell_r = -1  # the read end of the pipe the daemon tells the shim on
+        self.iroh_port = 0  # the daemon's port for q2-iroh's streams, each named by its phone's key
         (root / 'tmp').mkdir()
         (root / 'mnt/data').mkdir(parents=True)
         self.now(radio=0)
@@ -70,7 +84,7 @@ class Shim:
                 seq, verb = cmd.read_text().strip().split(' ', 1)
                 cmd.unlink()
                 self.verbs.append(verb)
-                put(self.root / 'tmp/coda-rc.ack', f'{seq} {self.code}\n')
+                put(self.root / 'tmp/coda-rc.ack', f'{self.before}{seq} {self.code}\n')
             time.sleep(0.02)
 
 
@@ -81,10 +95,13 @@ def q2(daemon_bin, tmp_path_factory):
     with socket.socket() as s:
         s.bind(('127.0.0.1', 0))
         port = s.getsockname()[1]
+    with socket.socket() as s:
+        s.bind(('127.0.0.1', 0))
+        shim.iroh_port = s.getsockname()[1]
     shim.tell_r, tell_w = os.pipe()  # the shim's pipe (coda_rc_shim.c cr_start); the daemon runs in this process
     os.set_blocking(shim.tell_r, False)
     args = [b'coda-rc', b'--root', str(tmp_path).encode(), b'--no-ble', b'--port', str(port).encode(),
-            b'--tell-fd', str(tell_w).encode()]
+            b'--tell-fd', str(tell_w).encode(), b'--iroh-port', str(shim.iroh_port).encode()]
     argv = (ctypes.c_char_p * len(args))(*args)
     loop = threading.Thread(target=daemon_bin.coda_main, args=(len(args), argv), daemon=True)
     loop.start()
@@ -377,3 +394,219 @@ def test_an_app_without_covers_1_is_not_asked(car):
         s.cover('ssixth', 350)
     assert time.monotonic() - start < 1 and len(app.lines) == asked
     q2app.write_text('name=Subsonic\nlyrics=1\ncovers=1\n')
+
+
+# ---- the shim's command queue (patch/coda_rc_cmdq.h, docs/internals.md#car-remote-commands) ----
+
+def test_a_command_goes_down_the_shims_queue_while_it_reads_one(q2):
+    """With the shim's FIFO there and read, a phone's command is a line down it, not the single file that q2-iap's
+    and the daemon's commands overwrote each other in."""
+    s, shim = q2
+    fifo = shim.root / 'tmp/coda-rc.cmdq'
+    os.mkfifo(fifo, 0o600)
+    fd = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)  # the shim's reader (cr_cmdq_start)
+    errors = []
+    t = threading.Thread(target=lambda: errors.extend(_call(s.transport, 'next')))
+    try:
+        t.start()
+        line = b''
+        for _ in range(200):
+            try:
+                line += os.read(fd, 64)
+            except BlockingIOError:
+                pass
+            if line.endswith(b'\n'):
+                break
+            WAIT(0.01)
+        seq, verb = line.decode().split(' ', 1)
+        assert verb == 'next\n' and not (shim.root / 'tmp/coda-rc.cmd').exists()
+        put(shim.root / 'tmp/coda-rc.ack', f'{seq} 0\n')
+        t.join(5)
+        assert errors == []
+    finally:
+        os.close(fd)
+        fifo.unlink()
+
+
+def _call(fn, *args):
+    try:
+        fn(*args)
+        return []
+    except Exception as e:  # the thread's failure, for the test to see
+        return [e]
+
+
+def test_a_command_with_no_reader_on_the_queue_goes_to_the_file(q2):
+    """A FIFO with nobody reading it (demo gone, or one from before the queue left it): the open is refused, and the
+    command goes to the single file as before."""
+    s, shim = q2
+    fifo = shim.root / 'tmp/coda-rc.cmdq'
+    os.mkfifo(fifo, 0o600)
+    try:
+        shim.verbs.clear()
+        s.transport('previous')
+        assert shim.verbs == ['previous']
+    finally:
+        fifo.unlink()
+
+
+def test_the_daemon_finds_its_answer_among_the_shims_last(q2):
+    """The shim keeps its last few answers in the ack file, newest first: a car's command answered after the phone's
+    is above it, and the phone's is still found (the single answer it replaced timed out as UNAVAILABLE, 4 s on)."""
+    s, shim = q2
+    shim.before = '1359998999 0\n'
+    try:
+        start = time.monotonic()
+        s.transport('next')
+        assert time.monotonic() - start < 1
+    finally:
+        shim.before = ''
+
+
+@pytest.fixture(scope='module')
+def lonely(daemon_bin, tmp_path_factory):
+    """A second daemon, in a copy of the library (its statics its own), that no phone has connected to. Made for the
+    module, before conftest's guard refuses sockets to a test: a test reaches it with LOOPBACK, its loopback port."""
+    tmp_path = tmp_path_factory.mktemp('lonely')
+    lib = tmp_path / 'coda-rc-lonely.so'
+    shutil.copy(daemon_bin._name, lib)
+    d = ctypes.CDLL(str(lib))
+    root = tmp_path / 'root'
+    (root / 'tmp').mkdir(parents=True)
+    (root / 'mnt/data').mkdir(parents=True)
+    with socket.socket() as so:
+        so.bind(('127.0.0.1', 0))
+        port = so.getsockname()[1]
+    args = [b'coda-rc', b'--root', str(root).encode(), b'--no-ble', b'--port', str(port).encode(),
+            b'--mdns-if', b'nowhere0', b'--iroh-port', b'0']
+    argv = (ctypes.c_char_p * len(args))(*args)
+    loop = threading.Thread(target=d.coda_main, args=(len(args), argv), daemon=True)
+    loop.start()
+    for _ in range(200):
+        try:
+            socket.create_connection(('127.0.0.1', port), timeout=1).close()
+            break
+        except OSError:
+            WAIT(0.02)
+    WAIT(0.5)
+    yield root, loop, port
+    d.crc_host_quit()
+    loop.join(10)
+
+
+def test_with_no_phone_the_loop_sleeps_through_demos_files(lonely):
+    """2026-11-22's sweep: with Car Remote on and no phone, coda-rc woke every second and at every file renamed into
+    /tmp, the shim's Now Playing twice a second while a song plays: 159 wakeups a minute measured on this machine.
+    With no phone connected and no pairing, it wakes every TICK_IDLE_MS (5 s) for its own looks."""
+    root, loop, port = lonely
+    before = sleeps(loop.native_id)
+    for k in range(20):  # 10 s of a song playing, as the shim writes it
+        put(root / 'tmp/coda-rc.now', NOW.format(seq=k, radio=0))
+        WAIT(0.5)
+    assert sleeps(loop.native_id) - before <= 4  # two or three; it was 30 or more
+
+
+def test_a_phone_connecting_ends_the_quiet_at_once(lonely):
+    """Quiet is only while nobody is there: a connection is answered at once, and the session then has the second's
+    tick and the /tmp watch back."""
+    root, loop, port = lonely
+    WAIT(1)
+    start = time.monotonic()
+    with LOOPBACK(('127.0.0.1', port), timeout=2) as so:
+        p = client.encode([(1, 1), (2, 'probe'), (3, bytes(16))])
+        so.sendall(struct.pack('>HBBH', len(p) + 4, client.T['HELLO'], 0, 1) + p)  # as the client's --hello prints
+        so.settimeout(2)
+        assert so.recv(4096)  # HelloResp
+    assert time.monotonic() - start < 0.5
+
+
+# ---- q2-iroh's allow-list (docs/remote-protocol.md#across-networks-only-paired-phones) ----
+
+def through_iroh(shim, key, name='iroh phone'):
+    """A stream as q2-iroh carries it to the daemon: its port for q2-iroh, the phone's key first."""
+    so = LOOPBACK(('127.0.0.1', shim.iroh_port), timeout=5)
+    so.sendall(key)
+    return client.Session(so, name)
+
+
+def allowed(shim):
+    f = shim.root / 'tmp/coda-rc.iroh-allow'
+    WAIT(0.3)
+    return f.read_text().split() if f.exists() else []
+
+
+def test_an_unknown_iroh_key_gets_nothing_outside_pair_a_phone(q2):
+    """Defence beside q2-iroh's own list: a stream from a key no paired phone registered is refused at its first
+    frame, Hello included, while Pair a Phone shows no code."""
+    s, shim = q2
+    t = through_iroh(shim, b'\x11' * 32)
+    with pytest.raises((client.RemoteError, ConnectionError, OSError, ValueError)):
+        t.hello()
+    t.sock.close()
+
+
+def test_pairing_through_iroh_registers_the_phones_key_and_forget_removes_it(q2):
+    """While Pair a Phone shows its code a new phone pairs through q2-iroh; its key then is a paired phone's, listed
+    for q2-iroh, and it comes back with no code shown. Forget on the Q2 (the peers file rewritten without it) takes it
+    off the list at once."""
+    s, shim = q2
+    key = bytes(range(32))
+    qr = shim.root / 'tmp/coda-rc.qr'
+    put(qr, '246810\n')
+    t = through_iroh(shim, key)
+    info = t.hello()
+    point = t.pair_start()
+    peer_id, ltk = t.pair_finish('246810', point)
+    t.auth(ltk)
+    t.sock.close()
+    assert key.hex() in allowed(shim)
+    qr.unlink(missing_ok=True)
+    t = through_iroh(shim, key)
+    assert t.hello(peer_id)['paired']
+    t.auth(ltk)
+    t.sock.close()
+    peers = (shim.root / 'mnt/data/coda-rc/peers').read_bytes()
+    kept = b''.join(peers[i:i + 76] for i in range(0, len(peers), 76) if peers[i:i + 8] != peer_id)
+    tmp = shim.root / 'mnt/data/coda-rc/peers.tmp'  # the page's Forget: the file replaced by a rename
+    tmp.write_bytes(kept)
+    tmp.rename(shim.root / 'mnt/data/coda-rc/peers')
+    assert key.hex() not in allowed(shim)
+    t = through_iroh(shim, key)
+    with pytest.raises((client.RemoteError, ConnectionError, OSError, ValueError)):
+        t.hello(peer_id)
+    t.sock.close()
+    assert info['caps'] & CAP_IROH_ALLOW
+
+
+def test_a_paired_phone_registers_its_key_over_any_session(q2):
+    """RegisterRemote over the phone's ordinary TCP session (or Bluetooth): from then on q2-iroh lets that key in."""
+    s, shim = q2
+    key = b'\x5a' * 32
+    s.call(client.T['REGISTER_REMOTE'], client.encode([(1, key)]), client.T['ACK'])
+    assert key.hex() in allowed(shim)
+    t = through_iroh(shim, key)
+    assert t.hello(None)['caps'] & CAP_IROH_ALLOW  # past the gate: a registered key
+    t.sock.close()
+    with pytest.raises(client.RemoteError) as e:
+        s.call(client.T['REGISTER_REMOTE'], client.encode([(1, key[:31])]), client.T['ACK'])
+    assert e.value.code == 3  # BAD_REQUEST
+
+
+def test_a_key_that_left_pair_a_phone_without_pairing_is_held_off(q2):
+    """During Pair a Phone an unknown key may come in; one that leaves without pairing or Auth is refused at its next
+    connections for a while (10 s, doubling), so it cannot keep opening sessions while the page is up."""
+    s, shim = q2
+    key = b'\x77' * 32
+    qr = shim.root / 'tmp/coda-rc.qr'
+    put(qr, '135790\n')
+    try:
+        t = through_iroh(shim, key)
+        t.hello()
+        t.sock.close()
+        WAIT(0.3)
+        t = through_iroh(shim, key)
+        with pytest.raises((client.RemoteError, ConnectionError, OSError, ValueError)):
+            t.hello()
+        t.sock.close()
+    finally:
+        qr.unlink(missing_ok=True)
