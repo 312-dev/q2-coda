@@ -2390,19 +2390,24 @@ static const char *row_album(int i) {
         if (*e == ' ' || *e == '/') return 0; /* one word, a name, never a path */
     return c + 6;
 }
-/* Row i's album's cover: the app's catalogue cover for its album id
- * (docs/server-library.md#covers), when the file is there; 0 otherwise. */
-static int album_cover(int i, char *url, unsigned size) {
+/* Row i's album's cover's URL: the app's catalogue cover for its album id
+ * (docs/server-library.md#covers), there on the card or not; 0 for a row with no album. */
+static int album_url(int i, char *url, unsigned size) {
     const char *id = row_album(i);
     if (!id) return 0;
     tk_snprintf(url, size, "file:///mnt/mmc/.%s/covers/%s.jpg", app()->id, id);
-    return !access(url + 7, 0);
+    return 1;
 }
+/* The same, for a cover about to be drawn: 0 too when the file is not there. */
+static int album_cover(int i, char *url, unsigned size) {
+    return album_url(i, url, size) && !access(url + 7, 0);
+}
+/* Every row's cover let go by name, with no look for its file: unloading a name that was never
+ * loaded does nothing. */
 static void album_covers_drop(void) {
     char url[96];
     for (int i = 0; i < top()->n; ++i)
-        if (album_cover(i, url, sizeof url))
-            image_manager_unload_bitmap_by_name(image_manager(), url);
+        if (album_url(i, url, sizeof url)) image_manager_unload_bitmap_by_name(image_manager(), url);
 }
 /* A song row's subtitle's parts (each "" when not sent), as an app with "artist" or "album"
  * writes it, "<album or artist> · <length> · <status>": the length is the first part of digits

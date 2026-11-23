@@ -6124,6 +6124,25 @@ def test_albums_asks_the_artist_again_and_lists_its_albums_newest_first(fw, nav_
     assert p.pending.op == b'album' and p.pending.args == b'\talbum:al3'
 
 
+def test_leaving_an_albums_page_lets_its_covers_go_without_looking_for_them(fw, nav_st):
+    """addon.c drop on an Albums page: each row's catalogue cover is unloaded by name, there on the card or not
+    (unloading a name never loaded does nothing), so the drop asks access() of none of them; a cover's file is
+    looked for only where one is about to be drawn (album_cover)."""
+    p = oled_page(fw, nav_st)
+    p.answer(rows=artist_rows())
+    p.click(AR_ALBUMS)
+    p.answer(rows=artist_rows())
+    assert p.top.lay == LAY_ALBUMS
+    p.world.files[b'/mnt/mmc/.foo/covers/al4.jpg'] = jpeg()  # one of the four on the card
+    names, looked = unloads(fw), []
+    fw.mock('fw_access', lambda path, *_: looked.append(C.string_at(path)) or p.world.access(path))
+    fw.fn('addon__drop', None)()
+    covers = [n for n in looked if b'/covers/' in n]
+    print('access() calls for covers in one drop of a 4-album page:', len(covers))
+    assert covers == []
+    assert sorted(names) == [b'file:///mnt/mmc/.foo/covers/%s.jpg' % i for i in (b'al1', b'al3', b'al4', b'al6')]
+
+
 def test_top_songs_opens_as_a_list_of_cover_rows(fw, nav_st):
     p = oled_page(fw, nav_st)
     p.answer(rows=artist_rows())
