@@ -39,8 +39,17 @@ class Br(C.Structure):
                 *((n, C.c_uint) for n in ('timer', 'go', 'leave', 'poll_at', 'until')),
                 *((n, C.c_int) for n in ('depth', 'act', 'next', 'arg', 'playing')),
                 ('rows', C.c_int * 11), ('caps_checked', C.c_int), ('downloads', C.c_int), ('can_download', C.c_int),
-                ('selected', C.c_char * 6500), ('remove_kind', C.c_char * 16), ('remove_note', C.c_char * 128), ('term', C.c_char * 64),
+                ('selected_p', C.c_void_p), ('remove_kind', C.c_char * 16), ('remove_note', C.c_char * 128), ('term', C.c_char * 64),
                 ('lv', C.POINTER(Level)), ('pend', C.c_byte), ('hold', C.c_byte)]
+    SELECTED = 6500  # spotify.c SPOT_SELECTED: Storage's picks, on the heap while the page is open
+
+    @property
+    def selected(self):
+        return C.string_at(self.selected_p) if self.selected_p else b''
+
+    @selected.setter
+    def selected(self, value):
+        C.memmove(self.selected_p, value + b'\0', len(value) + 1)
 
 
 class Wk(C.Structure):
