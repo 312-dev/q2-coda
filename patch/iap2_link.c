@@ -1,22 +1,15 @@
 /* iAP2 with the Q2 in an iPhone's place, over the iPhone gadget's HID interface: milestone M1 of route 1
  * (docs/iphone-mode.md#iap2). q2_iap.c feeds it the car's output reports (SET_REPORT data) and sends its input
- * reports (q2_iap2.h); nothing here touches a file or the USB itself.
- *
- * A port of PodBox's firmware/usbstack/usb_iap2.c (the transport and link layer) and the M1 part of
- * usb_iap2_control.c (the control session up to identification, and the answers an iPhone gives right after),
- * Copyright the PodBox and Rockbox authors, under the GNU General Public License version 2 or (at your option) any
- * later version, here under version 3 as the rest of Q2 Muse is. PodBox takes its message IDs and packet layout from
- * lvalen91/carplayd (public domain) and its message order and timing from iPhones in real cars; the traps it found
- * are kept, each with its note. Apple's MFi specification was never consulted, here or there.
+ * reports (iap2_link.h); nothing in the iAP2 files touches a file or the USB itself.
  *
  * In order: the HID transport (reports of [id][link control][data]: 00 whole, 02 first, 03 middle, 01 last); the link
  * layer (packets FF 5A, a 9-byte header, a checksummed payload; the car's SYN answered SYN+ACK with its own
- * parameters, the length capped); the control session (messages 40 40, length, id, parameters of length, id, data):
- * the Q2 asks for the car's certificate, challenges it, accepts whatever answers (the Q2 verifies nothing and holds no
- * key), asks it to identify, accepts that, then sends what an iPhone sends next. */
+ * parameters, the length capped) and its send queue; and the clock, iAP2's tick each pass of q2_iap.c's loop and its
+ * next deadline, and a connection's start and end. The control session over it is iap2_session.c's. Part of the
+ * PodBox port (iap2.h). */
 #include "q2_iap_sys.h"
 #include "iap2.h"
-#include "q2_iap2.h"
+#include "iap2_link.h"
 #include "iap2_names.h"
 #include "iap2_hid.h"
 #include "iap2_msg.h"
@@ -170,7 +163,6 @@ static struct queued {
 static unsigned q_head;
 unsigned q_count;
 static void pump(void);
-
 
 static void reset_link(void) {
     synced = link_up = 0;

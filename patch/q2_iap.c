@@ -4,7 +4,7 @@
  * and control request the host sends, answering only what an iPhone in media mode answers: the HID report
  * descriptor, Apple's C0 53 (four zero bytes), GET_REPORT with zeros; everything OUT is read and logged, every other
  * IN request stalled. With echo on, a SET_REPORT carrying iAP2's detect (FF 55 02 00 EE 10) is echoed on the HID
- * interrupt endpoint, so the host's next reports carry its link SYN. With --iap2 it speaks iAP2 instead (q2_iap2.c):
+ * interrupt endpoint, so the host's next reports carry its link SYN. With --iap2 it speaks iAP2 instead (iap2_*.c):
  * the detect answered, the link set up, the car authenticated and identified, and the answers an iPhone gives next,
  * every packet and message logged. With --state (Car Audio) it decides what the host is and watches the car's
  * audio (below, "Car Audio in the image").
@@ -373,7 +373,10 @@ static void alarm_interrupts(void) {
 /* ---- iAP2 (--iap2) ---- */
 
 #include "iap2.h"
-#include "q2_iap2.h"
+#include "iap2_link.h"
+#include "iap2_names.h"
+#include "iap2_nowplaying.h"
+#include "iap2_session.h"
 #include "q2_iap_lib.h"
 
 static int iap2_mode, writer_fd = -1, writer_pid, done_fd = -1, report_ms;
@@ -451,7 +454,7 @@ static void io_send(const unsigned char *r, unsigned len) {
     memcpy(b + 1, r, len);
     int w = writer_fd < 0 ? -1 : (int)write(writer_fd, b, len + 1);
     if (w == (int)len + 1) ++wr_queued;
-    if (trace_quiet && w == (int)len + 1) return; /* a position update's or a bare acknowledgement's (q2_iap2.c) */
+    if (trace_quiet && w == (int)len + 1) return; /* a position update's or a bare acknowledgement's (iap2_link.c) */
     iap2_hex(h, sizeof h, r, len < 24 ? len : 24);
     snprintf(msg, sizeof msg, "report > %s%s", h, w == (int)len + 1 ? "" : " (dropped: the writer is behind)");
     logline("iap2", msg);
@@ -542,7 +545,7 @@ static void io_audio(int on) {
 
 /* The player's rate for the song about to play (player/output.c car_ask, docs/iphone-mode.md#per-song-rate), read
  * every RATE_POLL_MS while the car takes audio, RATE_IDLE_MS while a car is on the link otherwise, and not with no
- * car (a charger), and handed to q2_iap2.c, which tells the car when it changes; none written, 44.1 kHz. */
+ * car (a charger), and handed to iap2_session.c, which tells the car when it changes; none written, 44.1 kHz. */
 #define RATE_POLL_MS 20
 #define RATE_IDLE_MS 250 /* with a car on the link and its audio not asked for */
 static long rate_at;
@@ -595,11 +598,11 @@ unsigned fnv_part(unsigned h, const char *s) {
  * Bluetooth cover key it), else the song's path, so the album's next songs take the same cover with no child.
  *
  * The child writes 'w' to its pipe as it starts on an ask or ffmpeg, 'm' when ffmpeg made the cover, then 'c' and
- * the JPEG (none: no cover). Now Playing for a new song waits for the quick sources (q2_iap2.c ART_HOLD_MS, until 'w'
- * or the end); a cover found after it went is sent with Now Playing again (iap2_art_again). */
+ * the JPEG (none: no cover). Now Playing for a new song waits for the quick sources (iap2_nowplaying.c ART_HOLD_MS,
+ * until 'w' or the end); a cover found after it went is sent with Now Playing again (iap2_art_again). */
 #define ART_ASK_MS 4000   /* --art-ask-ms: the app's answer to an ask waited for this long */
 #define ART_MADE_MS 20000 /* ffmpeg's longest */
-#define ART_CAP 65536     /* q2_iap2.c ART_MAX */
+#define ART_CAP 65536     /* iap2_xfer.c ART_MAX */
 static const char *art_made = "/tmp/q2-iap.art", *art_ffmpeg = "/usr/bin/ffmpeg"; /* --art-made, --ffmpeg */
 static const char *ask_dir = "/tmp"; /* --ask-dir: the apps' ask, state and socket files (q2-<id>.*) */
 static long art_ask_ms = ART_ASK_MS;
@@ -804,8 +807,8 @@ static unsigned io_artwork(const struct iap2_np *n, unsigned char *out, unsigned
     return len;
 }
 
-/* The child's bytes taken in, its markers read as they come; at its end Now Playing is told (q2_iap2.c iap2_art_done).
- * Every pass of the loop. */
+/* The child's bytes taken in, its markers read as they come; at its end Now Playing is told (iap2_nowplaying.c
+ * iap2_art_done). Every pass of the loop. */
 static void art_poll(void) {
     if (artw.fd < 0) return;
     for (;;) {
@@ -1055,7 +1058,7 @@ static void summary(void) {
 }
 
 /* The link lost (the car stopped acknowledging through every retry, went quiet with packets waiting, or a request's
- * data stage was not its report: q2_iap2.c iap2_lost): with --state, q2-iap ends (exit 22) and q2car.sh
+ * data stage was not its report: iap2_link.c iap2_lost): with --state, q2-iap ends (exit 22) and q2car.sh
  * shows the car the iPhone again (the gadget off the controller and back), which is how a car starts a session
  * afresh; it sent nothing more by itself after the loss on 2026-11-21 (126 s, to the cable out). */
 static void io_link_lost(void) {
@@ -1280,7 +1283,7 @@ static void sleep_poll(void) {
     apart = d;
 }
 
-/* How long the loop's poll may sleep (iAP2), in ms: until the soonest of iAP2's deadlines (q2_iap2.c iap2_due), the
+/* How long the loop's poll may sleep (iAP2), in ms: until the soonest of iAP2's deadlines (iap2_link.c iap2_due), the
  * rate file's look, the host's verdict (the controller's state every 100 ms until the host has addressed the Q2, the
  * window after), the audio's health, the session's gap and --for's end; at most LOOP_MAX_MS, a guard. It was 10 ms
  * whatever was due: 6,000 wakeups a minute on a charger overnight (car-bt-power.md #6). With --clock-file at most

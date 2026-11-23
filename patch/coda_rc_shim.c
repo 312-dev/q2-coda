@@ -635,7 +635,7 @@ static void cr_run(const char *raw) {
         media_key(word[0] == 'n' ? KEY_FWD_BTN : KEY_BACK_BTN);
         cr_ack(seq, 0);
     } else if (verb && __isoc99_sscanf(verb, " scan %d", &v) == 1 && v >= -1 && v <= 1) {
-        seek_car(v); /* Car Audio's held Next or Previous (q2_iap2.c), and its release */
+        seek_car(v); /* Car Audio's held Next or Previous (iap2_hid.c), and its release */
         cr_ack(seq, 0);
     } else if (verb && __isoc99_sscanf(verb, " seek %d", &v) == 1 && v >= 0) {
         player_seek_time(v);

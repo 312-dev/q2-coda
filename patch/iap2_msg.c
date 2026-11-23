@@ -3,7 +3,7 @@
  * found by id. Part of the PodBox port (iap2.h). */
 #include "q2_iap_sys.h"
 #include "iap2.h"
-#include "q2_iap2.h"
+#include "iap2_link.h"
 #include "iap2_names.h"
 #include "iap2_msg.h"
 

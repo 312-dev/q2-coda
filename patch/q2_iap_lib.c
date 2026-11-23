@@ -33,7 +33,7 @@ int sqlite3_exec(sqlite3 *, const char *, int (*)(void *, int, char **, char **)
 
 const char *lib_db = LIB_DB, *lib_cat = LIB_CAT, *lib_sent_file = LIB_SENT;
 const char *card_root = ""; /* put before a catalogue row's /mnt/mmc path (--card-root, for the host tests) */
-struct iap2_library lib_t; /* the tables q2_iap2.c reads */
+struct iap2_library lib_t; /* the tables the iAP2 side reads (its host's lib) */
 
 
 static unsigned lib_put(char **pool, unsigned *len, unsigned *cap, const char *s) {
