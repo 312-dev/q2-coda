@@ -61,6 +61,19 @@ static void crashed(int sig) {
     raise(sig);
 }
 
+/* SIGUSR2 is mcl-carrelease for a script (patch/q2car.sh before it unbinds the gadget): blocked in every thread and
+ * taken here, where setting the request and waking the playback thread is safe */
+static void *release_thread(void *arg) {
+    sigset_t *set = arg;
+    for (int sig; !sigwait(set, &sig);) {
+        pthread_mutex_lock(&ctl.mu);
+        ctl.car_release = 1;
+        pthread_cond_broadcast(&ctl.wake);
+        pthread_mutex_unlock(&ctl.mu);
+    }
+    return NULL;
+}
+
 int main(int argc, char **argv) {
     const char *path = getenv("Q2PLAYER_SOCK");
     pthread_t engine;
@@ -81,6 +94,12 @@ int main(int argc, char **argv) {
     }
     const char *push = getenv("Q2PLAYER_PUSH");
     ipc_push_open(push ? push : "/tmp/q2player.push");
+    static sigset_t release;
+    sigemptyset(&release);
+    sigaddset(&release, SIGUSR2);
+    pthread_sigmask(SIG_BLOCK, &release, NULL); /* before any thread: each inherits it */
+    pthread_t releaser;
+    if (!pthread_create(&releaser, NULL, release_thread, &release)) pthread_detach(releaser);
     feed_start(); /* the car's other sources (feed.c) */
     if (pthread_create(&engine, NULL, engine_thread, NULL)) return 1;
     ipc_thread(NULL);

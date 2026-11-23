@@ -157,7 +157,7 @@ void output_car_gone(void) {
 #define CAR_RATE_FILE "/tmp/q2-iap.rate"
 #define P_RATE_FILE "/sys/module/usb_f_uac1/parameters/p_rate"
 /* how long a rate change waits for the car to follow; how often a song playing looks at P_RATE_FILE; the silence
- * written after the last song's tail before the PCM closes, so the closed PCM's repeated packet is silence */
+ * written after the last song's tail before the PCM closes, so the car hears silence up to the close */
 enum { CAR_FOLLOW_MS = 500, CAR_CHECK_MS = 50, CAR_PAD_MS = 60, CAR_DRAIN_MS = 600 };
 
 /* The car's rate for a song at rate: 32, 44.1 and 48 kHz as they are; above 48 kHz the family's, 48 kHz for 96 and
@@ -209,7 +209,7 @@ static int car_follow(int want, int *waited_ms) {
     return r;
 }
 
-/* The one-off line for each change of the car's rate, beside the trace's line a second (cartrace.c) */
+/* The one-off line for each change of the car's rate, beside the trace's lines (cartrace.c) */
 static void car_rate_line(const char *what, int from, int to, int waited_ms, int gap_ms) {
     char line[160];
     int n = gap_ms < 0 ? snprintf(line, sizeof line, "car rate %d->%d %s: wait=%dms", from, to, what, waited_ms)
@@ -496,6 +496,13 @@ void output_levels(struct output *o, long *avail, long *delay) {
 #endif
     *delay = (long)dev_delay(o);
     *avail = (long)((int64_t)o->f.rate * BUFFER_US / 1000000) - *delay; /* the file sink's buffer is BUFFER_US */
+}
+
+/* A paused song's frames held (hold: a click, or a pause the device refused), at the rate written: written, not heard,
+ * and not in the PCM. */
+int64_t output_held(struct output *o) {
+    int64_t n = o && o->holding ? o->held_n : 0;
+    return o && o->in.rate != o->f.rate ? n * o->in.rate / o->f.rate : n;
 }
 
 int64_t output_delay(struct output *o) {
@@ -916,8 +923,8 @@ static int car_reopen(struct output *o, int rate) {
     return 0;
 }
 
-/* The last song's tail played out, then CAR_PAD_MS of silence, so the car hears silence while the rate changes and
- * a closed PCM's repeated packet (output_drop) is silence too; the wait bounded, as output_close's */
+/* The last song's tail played out, then CAR_PAD_MS of silence, so the car hears silence while the rate changes up
+ * to the close; the wait bounded, as output_close's */
 static void car_quiet(struct output *o) {
     int pad = o->f.rate * CAR_PAD_MS / 1000;
     void *z = calloc((size_t)pad, (size_t)frame_bytes(o));
@@ -1027,11 +1034,11 @@ int output_click(struct output *o, int kind) {
 #define IDLE_AHEAD_MS 80 /* more than a period (31 ms asked; the DAC's driver caps one at 4096 bytes, 19 ms at
                           * 44.1 kHz 16-bit, docs/player.md), so the PCM starts, and room for engine.c's 30 ms ticks */
 
-/* The frames written and not yet heard, the newest n of the history, into o->held; the PCM emptied, running. */
-void output_hold(struct output *o) {
+/* The frames written and not yet heard, the newest n of the history (d of them were unheard), into o->held; the PCM
+ * emptied, running. */
+static void hold(struct output *o, int64_t d) {
     if (!o || o->holding) return;
     int fb = frame_bytes(o);
-    int64_t d = dev_delay(o);
     int n = d < o->hist_n ? (int)d : o->hist_n;
     if (n > 0 && (o->held = malloc((size_t)n * fb))) { /* no memory: the resume goes on from after them, a jump */
         int from = (o->hist_at - n + o->hist_cap) % o->hist_cap, m = n < o->hist_cap - from ? n : o->hist_cap - from;
@@ -1050,6 +1057,9 @@ void output_hold(struct output *o) {
     rewind_by(o, (int)d); /* the file sink: those frames are written again at the resume */
     clock_gettime(CLOCK_MONOTONIC, &o->t0);
     o->written = 0;
+}
+void output_hold(struct output *o) {
+    if (o) hold(o, dev_delay(o));
 }
 
 void output_idle_fill(struct output *o) {
@@ -1102,8 +1112,21 @@ void output_pause(struct output *o, int on) {
     o->paused = on;
 #ifdef HAVE_ALSA
     if (o->pcm) {
-        /* A device that cannot pause keeps playing what it holds, then waits for more. */
-        snd_pcm_pause(o->pcm, on);
+        /* A device that cannot pause (docs/player.md#pause): the car's gadget advertises a pause its trigger refuses
+         * (u_audio.c uac_pcm_trigger has no pause case: -EINVAL, its read position put back to the ring's start, so
+         * the car heard the ring again, out of order). Its frames not yet heard are held, as for a click (hold, with
+         * the delay read before the refused pause moved it), and the PCM stopped, which the gadget then sends as
+         * silence, as an iPhone's stream runs on silent through a pause; the resume writes them again (above). */
+        int64_t d = on ? dev_delay(o) : 0;
+        int r = snd_pcm_pause(o->pcm, on);
+        if (r < 0 && on) {
+            fprintf(stderr, "q2player: the device cannot pause (%s): %lld frames held, the PCM stopped\n", snd_strerror(r),
+                    (long long)d);
+            hold(o, d);
+            o->paused = 1;
+        } else if (r < 0) { /* a resume refused: the PCM was never paused, and the next write goes on as ever */
+            fprintf(stderr, "q2player: the device refused the resume (%s)\n", snd_strerror(r));
+        }
         return;
     }
 #endif
@@ -1124,8 +1147,9 @@ void output_drop(struct output *o) {
     resampler(o);                          /* and what the resampler held back of it */
 #ifdef HAVE_ALSA
     if (o->pcm && o->way == 3) {
-        /* The gadget's PCM stopped sends its last packet again and again, a buzz in the car (u_audio's completion
-         * requeues it unchanged): taken back instead, it runs on, and ALSA's silence fills the room (alsa_sw) */
+        /* Taken back rather than dropped, the stream runs on and ALSA's silence fills the room (alsa_sw), as an
+         * iPhone's runs on: no stop and start for the car. A stop is silent too: the gadget's STOP zeroes its packet
+         * buffers, which its completion then sends again and again (u_audio.c uac_pcm_trigger, read 2026-11-22) */
         snd_pcm_sframes_t can = snd_pcm_rewindable(o->pcm);
         if (can > 0 && snd_pcm_rewind(o->pcm, (snd_pcm_uframes_t)can) > 0) car_trace_back(can);
         o->paused = 0;
@@ -1160,7 +1184,7 @@ void output_close(struct output *o) {
     if (!o) return;
 #ifdef HAVE_ALSA
     if (o->pcm && o->way == 3) {
-        /* the last packets silence before the stop (output_drop: a stopped gadget PCM repeats its last packet) */
+        /* the last packets silence, played out before the close (the gadget's STOP then zeroes its packets) */
         snd_pcm_sframes_t can = snd_pcm_rewindable(o->pcm);
         if (can > 0 && snd_pcm_rewind(o->pcm, (snd_pcm_uframes_t)can) > 0) car_trace_back(can);
         size_t bytes = (size_t)o->period * 2 * o->f.channels * o->f.bytes;

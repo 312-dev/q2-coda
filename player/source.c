@@ -394,9 +394,11 @@ int source_read(struct source *s, const uint8_t **data) {
     }
 }
 
-int source_seek(struct source *s, int seconds) {
+int source_seek(struct source *s, int seconds) { return source_seek_frame(s, (int64_t)seconds * s->out.rate); }
+
+/* To frame target of the output's rate: the decode resumes at the packet before it and drops up to it. */
+int source_seek_frame(struct source *s, int64_t target) {
     AVStream *st = s->fmt->streams[s->stream];
-    int64_t target = (int64_t)seconds * s->out.rate;
     int64_t ts = av_rescale_q(target, (AVRational){1, s->out.rate}, st->time_base);
     if (st->start_time != AV_NOPTS_VALUE) ts += st->start_time;
     /* a song still arriving: the search sees only the bytes there are, and a target past them is read up to (grow.c) */
@@ -411,6 +413,6 @@ int source_seek(struct source *s, int seconds) {
     s->frames = 0;
     s->base = target;
     s->drop_until = st->start_time != AV_NOPTS_VALUE ? target + av_rescale_q(st->start_time, st->time_base, (AVRational){1, s->out.rate}) : target;
-    if (s->raw) s->drop_until = (int64_t)seconds * s->byte_rate, dsd_reset(&s->pack); /* in a channel's bytes */
+    if (s->raw) s->drop_until = target * s->byte_rate / s->out.rate, dsd_reset(&s->pack); /* in a channel's bytes */
     return 0;
 }
