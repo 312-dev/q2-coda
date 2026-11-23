@@ -143,7 +143,8 @@ def state(raw):
                               "hearts": one(n, 11, 0), "rateable": bool(one(n, 12, 0)),
                               "buffering": bool(one(n, 13, 0)), "buffered_bytes": one(n, 14, 0),
                               "total_bytes": one(n, 15, 0), "buffered_ms": one(n, 16, 0),
-                              "radio": bool(one(n, 17, 0)), "notice": text(n, 18), "notice_id": one(n, 19, 0)}
+                              "radio": bool(one(n, 17, 0)), "notice": text(n, 18), "notice_id": one(n, 19, 0),
+                              "album_id": text(n, 20), "artist_id": text(n, 21)}
     if 2 in m:
         p = decode(m[2][0])
         out["position"] = {"position_ms": one(p, 1, 0), "at_ms": one(p, 2, 0)}

@@ -233,34 +233,58 @@ def sleeps(tid):
     return int(status.split('voluntary_ctxt_switches:')[1].split()[0])
 
 
+def define(path, name):
+    """A number the daemon's source #defines: the tests take the daemon's own pace, not a copy of it."""
+    m = re.search(rf'#define {name} (\d+)', (PATCH / path).read_text())
+    assert m, name
+    return int(m[1])
+
+
+def paced(loop, work, period_ms, timers):
+    """work() run while the daemon's loop thread is counted: (its wakeups, the most a loop may have that wakes only for
+    its `timers` looks, each every period_ms on a phase of its own, and the seconds work took). The bound follows the
+    time measured on the monotonic clock, not the time work meant to take: on a loaded machine (18 suites starting
+    beside this one, 2026-11-22) 10 s of writes took over 12, and a fixed count failed a daemon that did nothing
+    wrong. Each timer looks at most once per whole period and once more for the parts at either end."""
+    before, start = sleeps(loop.native_id), time.monotonic()
+    work()
+    elapsed = time.monotonic() - start
+    return sleeps(loop.native_id) - before, timers * (int(elapsed * 1000 // period_ms) + 2), elapsed
+
+
 def test_with_nothing_to_do_the_loop_wakes_once_a_second(q2):
-    """No phone following the position, nothing from demo: its poll sleeps until the second's tick (TICK_MS)."""
+    """No phone following the position, nothing from demo: its poll sleeps until the second's tick (TICK_MS), the one
+    timer this daemon has (no mDNS here); a 250 ms poll woke 12 times in 3 s."""
     s, shim = q2
     s.subscribe(position=False)
     WAIT(1.2)
     assert shim.loop and shim.loop.native_id
-    before = sleeps(shim.loop.native_id)
-    WAIT(3)
-    assert sleeps(shim.loop.native_id) - before <= 5  # about 3; a 250 ms poll woke 12 times
+    woke, most, elapsed = paced(shim.loop, lambda: WAIT(3), define('coda_rc.c', 'TICK_MS'), 1)
+    assert woke <= most, f'{woke} wakeups in {elapsed:.1f} s; a loop that wakes only for its tick has {most} at most'
 
 
 def test_demos_files_end_the_loops_sleep(q2):
     """Now Playing and a command's ack, renamed into /tmp by the shim, reach the phone at once (inotify), not at the
-    loop's next look."""
+    loop's next look. A daemon that saw the files only at its tick would take anywhere from nothing to TICK_MS, evenly:
+    each of six tries must take under half of it, which such a daemon passes once in 64 runs, while a loaded machine
+    (0.28 s for a command on 2026-11-22, against the 0.15 s this test once allowed) stays well under."""
     s, shim = q2
+    half = define('coda_rc.c', 'TICK_MS') / 2000
     s.subscribe(position=False)
-    for radio in (1, 0, 1, 0):
+    for radio in (1, 0, 1, 0, 1, 0):
         WAIT(0.3)  # into the loop's sleep
         start = time.monotonic()
         shim.now(radio=radio)
         while s.wait_push(5).get('now_playing', {}).get('radio') != bool(radio):
             pass
-        assert time.monotonic() - start < 0.1
-    for _ in range(3):
+        took = time.monotonic() - start
+        assert took < half, f'Now Playing reached the phone {took:.2f} s after the shim wrote it'
+    for _ in range(6):
         WAIT(0.3)
         start = time.monotonic()
         s.start_radio(stop=True)  # the shim answers within its 20 ms look
-        assert time.monotonic() - start < 0.15
+        took = time.monotonic() - start
+        assert took < half, f'a command answered {took:.2f} s after it was sent'
 
 
 def told(shim, wait=0.5):
@@ -493,13 +517,25 @@ def lonely(daemon_bin, tmp_path_factory):
 def test_with_no_phone_the_loop_sleeps_through_demos_files(lonely):
     """2026-11-22's sweep: with Car Remote on and no phone, coda-rc woke every second and at every file renamed into
     /tmp, the shim's Now Playing twice a second while a song plays: 159 wakeups a minute measured on this machine.
-    With no phone connected and no pairing, it wakes every TICK_IDLE_MS (5 s) for its own looks."""
+    With no phone connected and no pairing, it wakes every TICK_IDLE_MS (5 s) for its own looks.
+    Its timers then are the tick and the mDNS address look (on an interface with no address here), each every
+    TICK_IDLE_MS on a phase of its own. Now Playing is renamed in every 0.2 s for 10 s by the monotonic clock: a
+    daemon that wakes for each file wakes at least once a write, and the writes are kept to more than twice the
+    bound, so such a daemon fails it however slow the machine is."""
     root, loop, port = lonely
-    before = sleeps(loop.native_id)
-    for k in range(20):  # 10 s of a song playing, as the shim writes it
-        put(root / 'tmp/coda-rc.now', NOW.format(seq=k, radio=0))
-        WAIT(0.5)
-    assert sleeps(loop.native_id) - before <= 4  # two or three; it was 30 or more
+    writes = []
+
+    def song_playing():
+        start = time.monotonic()
+        while time.monotonic() - start < 10:
+            put(root / 'tmp/coda-rc.now', NOW.format(seq=len(writes), radio=0))
+            writes.append(1)
+            WAIT(0.2)
+    tick = define('coda_rc.c', 'TICK_IDLE_MS')
+    assert tick == define('coda_rc_mdns.c', 'MDNS_CHECK_IDLE_MS')  # the two looks share the period the bound uses
+    woke, most, elapsed = paced(loop, song_playing, tick, 2)
+    assert len(writes) > 2 * most, f'{len(writes)} writes in {elapsed:.1f} s: too few to tell a wake per write apart'
+    assert woke <= most, f'{woke} wakeups for {len(writes)} writes in {elapsed:.1f} s; its two looks give {most} at most'
 
 
 def test_a_phone_connecting_ends_the_quiet_at_once(lonely):
@@ -606,3 +642,60 @@ def test_a_key_that_left_pair_a_phone_without_pairing_is_held_off(q2):
         t.sock.close()
     finally:
         qr.unlink(missing_ok=True)
+
+
+# ---- the playing song's pages: NowPlaying.album_id and artist_id (docs/remote-protocol.md#links-from-now-playing) ----
+
+def now_is(shim, **tags):
+    """Now Playing as the shim writes it, these lines in place of NOW's."""
+    lines = dict(line.split('=', 1) for line in NOW.format(seq=shim.seq + 1, radio=0).splitlines())
+    lines.update({k: str(v) for k, v in tags.items()})
+    shim.seq += 1
+    put(shim.root / 'tmp/coda-rc.now', ''.join(f'{k}={v}\n' for k, v in lines.items()))
+    WAIT(0.3)
+
+
+def pages(s, np):
+    """The playing song's album page's songs and its artist page's rows, browsed as the phone does."""
+    album = s.browse(np['album_id'])
+    artist = s.browse(np['artist_id'])
+    return [i['id'] for i in album['items']], [i['id'] for i in artist['items']]
+
+
+def test_a_card_songs_album_and_artist_are_its_pages(car):
+    """Android Auto's links from now playing: album_id is the page that lists the playing song, artist_id the album
+    artist's page in the Artists list, which lists that album."""
+    s, shim, app = car
+    now_is(shim, id=2, path='/mnt/mmc/a/2.flac', title='Bravo', artist='Ann', album='First')
+    np = s.get_state()['now_playing']
+    assert np['track_id'] == 'song:t2' and np['album_id'].startswith('album:') and np['artist_id'].startswith('artist:r')
+    songs, rows = pages(s, np)
+    assert 'song:t2' in songs and np['album_id'] in rows
+
+
+def test_a_server_songs_album_and_artist_are_its_pages(car):
+    s, shim, app = car
+    now_is(shim, id=0x40000001, path='/mnt/mmc/.subsonic/cat/third/s1.flac', title='Echo', artist='Eve', album='Third')
+    np = s.get_state()['now_playing']
+    assert np['track_id'] == 'song:c1073741825' and np['album_id'] and np['artist_id']
+    songs, rows = pages(s, np)
+    assert 'song:c1073741825' in songs and np['album_id'] in rows
+
+
+def test_a_station_has_no_album_or_artist_page(car):
+    s, shim, app = car
+    now_is(shim, id=0, path='', source='netradio', live=1, station='Radio One', title='News', artist='', album='')
+    np = s.get_state()['now_playing']
+    assert np['track_id'] == '' and np['album_id'] == '' and np['artist_id'] == ''
+
+
+def test_the_largest_now_playing_fits_its_state(car):
+    """The longest tags the shim writes (now_source.c: 159 bytes each, the toast 95) with both pages: the State that
+    carries them stays inside send_state's 1,400 bytes, under every transport's frame (CRC_MAX_PAYLOAD) and BLE's."""
+    s, shim, app = car
+    now_is(shim, id=2, path='/mnt/mmc/a/2.flac', title='é' * 79 + 'x', artist='A' * 159, album='B' * 159,
+           note='C' * 95, noten=7)
+    raw = s.call(client.T['GET_STATE'], b'', client.T['STATE'])
+    np = client.decode(client.decode(raw)[1][0])
+    assert client.text(np, 20).startswith('album:') and client.text(np, 21).startswith('artist:r')
+    assert len(raw) <= 1400, len(raw)
