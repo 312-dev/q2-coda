@@ -2016,9 +2016,9 @@ def test_a_clean_end_mid_build_stops_the_worker_before_the_next_album_s_note(fw,
     assert set(card.files) == {'/m/a.mp3', '/m/b.mp3'} | ({art(0xa)} if during == 'cover' else set())
 
 
-def png(w, h, depth=8, colour=6):
+def png(w, h):
     """A PNG's signature and IHDR: all of the file thumb reads."""
-    return b'\x89PNG\r\n\x1a\n' + struct.pack('>I4sIIBBBBB', 13, b'IHDR', w, h, depth, colour, 0, 0, 0) + bytes(4)
+    return b'\x89PNG\r\n\x1a\n' + struct.pack('>I4sIIBBBBB', 13, b'IHDR', w, h, 8, 6, 0, 0, 0) + bytes(4)
 
 
 def segment(marker, body):
@@ -2058,32 +2058,6 @@ def test_thumb_sends_a_picture_stock_would_decode_whole_to_ffmpeg(fw, head, big)
     builder(fw, card, thumb=True, ff=0)
     assert g.thumb(b'/p/a', b'/d', 160, 160) == 1 and card.files['/d'] == (b'jpg' if big else b'art')
     assert len(fw.calls('toolsThumbSpecCover')) == 1 - big and len(fw.calls('fw_fork')) == big
-
-
-@pytest.mark.parametrize('head, ff', ((png(600, 600, 16, 2), 1), (png(600, 600, 16, 6), 1), (png(600, 600, 8, 2), 0),
-                                      (png(600, 600, 16, 2)[:24], 0)))
-def test_thumb_sends_a_16_bit_png_to_ffmpeg(fw, head, ff):
-    """Stock's PNG reader (png_load_file, 0x5c91bc) asks libpng for no 16-to-8 bit strip, so a 16-bit PNG's six-byte
-    pixels are read as two three-byte ones: the cover comes out twice as wide, its colours in vertical stripes (the
-    emulator, 2026-11-22: the pool card's Garden Signal, an RGB48 PNG, in red and blue stripes in Cover Flow). Such a
-    PNG goes to ffmpeg, which converts it; an 8-bit one and a header too short to say stay with stock."""
-    g = api(fw)
-    card = Card(fw, {'/p/a': head, '/d.ff': b'jpg'})
-    builder(fw, card, thumb=True, ff=0)
-    assert g.thumb(b'/p/a', b'/d', 160, 160) == 1 and card.files['/d'] == (b'jpg' if ff else b'art')
-    assert len(fw.calls('toolsThumbSpecCover')) == 1 - ff and len(fw.calls('fw_fork')) == ff
-
-
-@pytest.mark.parametrize('head, stock', ((png(600, 600, 16, 2), 0), (png(600, 600, 8, 2), 1), (b'\xff\xd8' + bytes(64), 1)))
-def test_an_embedded_16_bit_png_is_left_to_ffmpeg(fw, head, stock):
-    """toolsGetAlbumCover writes a song's embedded picture to /tmp/.tmp_picture and hands it to stock's thumbnailer
-    (cover_thumb_file, 0x5cb3e0); that call is coverflow_album_pic's (ALBUM_PIC in tools/build.py), which refuses a
-    16-bit PNG, so album_art goes on to ffmpeg on the song (ff_thumb), and passes anything else to stock."""
-    Card(fw, {'/tmp/.tmp_picture': head})
-    fw.mock('cover_thumb_file', lambda *_: 1)
-    pic = fw.fn('coverflow_album_pic', C.c_int, C.c_char_p, C.c_char_p, C.c_int, C.c_int)
-    assert pic(b'/tmp/.tmp_picture', b'/d', 160, 160) == stock
-    assert len(fw.calls('cover_thumb_file')) == stock
 
 
 def ogg_rig(fw, cover=0, status=1 << 8, ogg=b'/m/a.ogg'):

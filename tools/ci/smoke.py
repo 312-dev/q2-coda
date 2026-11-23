@@ -87,7 +87,7 @@ WM_GOT, WM_OFF, WM_CHILDREN, W_NAME, W_VT, VT_TYPE = 0xa3aae0 - 0x7f44, 0x1420, 
 # A widget's flags word and its visible bit (widget_get_visible 0x67795c: lw 0x24($a0); ext 2, 1).
 W_FLAGS, W_VISIBLE = 0x24, 2
 # s for Cover Flow's first open to build its art ("Preparing artwork n/N"): every lease starts with no art
-# cached, and the fixture's 16-bit PNG covers each take an ffmpeg run under qemu (1 to 3 s for its five)
+# cached; the fixture's five albums take about 0.5 s, and took 1 to 3 s while its 16-bit PNG covers went to ffmpeg
 ART_S = 60
 
 

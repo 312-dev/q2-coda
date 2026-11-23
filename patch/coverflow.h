@@ -163,7 +163,6 @@ extern cf_thumb_t th;
 unsigned album_key(void *r);
 unsigned tags_key(const char *artist, const char *album);
 unsigned album_ident(const char *album, const char *album_artist, const char *path);
-int coverflow_album_pic(const char *pic, const char *dst, int w, int h);
 int album_art(const char *track, const char *dst, int shared);
 void art_note(const char *note, unsigned key, const char *track);
 void art_strike(const char *note);

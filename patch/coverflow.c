@@ -268,23 +268,12 @@ static int big_picture(const char *path) {
            ((kind == PICTURE_PNG || kind == 0xc2) && (w > 1024 || h > 1024));
 }
 
-/* Whether path is a 16-bit PNG (its IHDR's bit depth). Stock's PNG reader (png_load_file,
- * 0x5c91bc) asks libpng for no strip to 8 bits and reads such a picture's six-byte pixels as two
- * three-byte ones: the cover comes out twice as wide, in vertical stripes. ffmpeg converts it. */
-static int png16(const char *path) {
-    unsigned char b[25];
-    void *f = fopen(path, "rb");
-    int got = f && fread(b, 1, sizeof b, f) == sizeof b;
-    if (f) fclose(f);
-    return got && b[0] == 0x89 && b[1] == 'P' && !memcmp(b + 12, "IHDR", 4) && b[24] == 16;
-}
-
 /* stock's thumbnailer, under the lock every stock caller holds, else ffmpeg. Shared (peq.h).
  * A picture stock would decode whole in demo goes to ffmpeg alone, whose child the kernel kills
- * first, and so does a 16-bit PNG, which stock reads wrong (png16). */
+ * first. */
 int thumb(const char *src, const char *dst, int w, int h) {
     int ok = 0;
-    if (!big_picture(src) && !png16(src)) {
+    if (!big_picture(src)) {
         pthread_mutex_lock((void *)parse_cover_mutex);
         ok = toolsThumbSpecCover(src, dst, w, h) == 1;
         pthread_mutex_unlock((void *)parse_cover_mutex);
@@ -515,13 +504,6 @@ int coverflow_folder_cover(const char *track, const char *dst, int w, int h) {
 /* A track's album art at dst, ART_SIZE: embedded art, then beside_art, then ffmpeg's read of the
  * embedded art, last as it costs a process for every album without art; shared with
  * playlist_art.c. */
-/* toolsGetAlbumCover's call of stock's thumbnailer on a song's embedded picture, which it has
- * written to /tmp/.tmp_picture (ALBUM_PIC in tools/build.py): a 16-bit PNG is refused (png16), so
- * toolsGetAlbumCover fails and album_art goes on to ffmpeg on the song; anything else is stock's. */
-int coverflow_album_pic(const char *pic, const char *dst, int w, int h) {
-    return png16(pic) ? 0 : cover_thumb_file(pic, dst, w, h);
-}
-
 int album_art(const char *track, const char *dst, int shared) {
     /* toolsGetAlbumCover goes through the shared /tmp/.tmp_picture, which stock guards with
      * either lock (parse_albumcovertask_thd, player_parsecover_thd); hold both. Stock never
