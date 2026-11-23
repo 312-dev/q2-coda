@@ -82,12 +82,14 @@ MB = 1 << 20
 
 @pytest.mark.parametrize('state,have,total,ms,ok', [
     ('wait', 0, 20 * MB, 780000, 0),
-    ('get', 1398095, 20 * MB, 120000, 0),    # 8 s of a 2-minute 20 MB song: 174,762 bytes a second, 8 times
-    ('get', 1398096, 20 * MB, 120000, 1),
-    ('stall', 1398096, 20 * MB, 120000, 1),
-    ('get', 262143, 20 * MB, 780000, 0),     # 8 s of a 13-minute one is 215,088 bytes: at least 256 KB
+    ('get', 524285, 20 * MB, 120000, 0),     # 3 s of a 2-minute 20 MB song: 174,762 bytes a second, 3 times
+    ('get', 524286, 20 * MB, 120000, 1),
+    ('stall', 524286, 20 * MB, 120000, 1),
+    ('get', 333728, 31259447, 281000, 0),    # a Q2's streamed FLAC (2026-11-22): 111,243 bytes a second, 3 times
+    ('get', 333729, 31259447, 281000, 1),
+    ('get', 262143, 20 * MB, 780000, 0),     # 3 s of a 13-minute one is 80,658 bytes: at least 256 KB
     ('get', 262144, 20 * MB, 780000, 1),
-    ('get', 200 << 10, 3 * MB, 300000, 0),   # 8 s is 83,880 bytes: at least 256 KB
+    ('get', 200 << 10, 3 * MB, 300000, 0),   # 3 s is 31,455 bytes: at least 256 KB
     ('get', 256 << 10, 3 * MB, 300000, 1),
     ('get', 100 << 10, 100 << 10, 2000, 1),  # a short song: all of it
     ('get', MB, 2 * MB, 0, 0),               # no length: all of it
@@ -95,7 +97,7 @@ MB = 1 << 20
     ('get', 5 * MB, 0, 300000, 0),           # no total: never before it is done
     ('done', 0, 0, 0, 1), ('fail', 0, 0, 0, 1),
 ])
-def test_with_grow_an_arriving_song_starts_once_eight_seconds_are_there(fw, state, have, total, ms, ok):
+def test_with_grow_an_arriving_song_starts_once_three_seconds_are_there(fw, state, have, total, ms, ok):
     world = World(fw, now=NOW)
     grow(fw, world, True)
     world.files[STREAM] = status((state, have, total, ms, A))
@@ -219,3 +221,35 @@ def test_a_whole_song_or_one_outside_a_stream_cache_has_no_reach_of_its_own(fw):
     world.mtime[STREAM] = NOW
     assert reach(fw, 400) == -1
     assert reach(fw, 400, A) == -1
+
+
+def test_a_streams_start_logs_where_its_time_went(fw, mcl, songs):
+    """docs/internals.md#ui-pass-watchdog: the first start's UI-thread steps, timed: the folder listings and tag
+    reads of m3u_songs, then play_folder (Now Playing's open)."""
+    s = playlist(fw, mcl, songs, A, B)
+    lines = []
+
+    def write(fd, data, n, *_):
+        if fd == 2:
+            lines.append(C.string_at(data, n).decode().rstrip('\n').split(' ', 4)[4])
+        return n
+    fw.mock('fw_write', write)
+    listing, navigate = s.listing, s.navigate
+
+    def slow_listing(path, *_):
+        s.world.ms += 40
+        return listing(path)
+
+    def slow_navigate(name, ctx, *_):
+        s.world.ms += 300
+        return navigate(name, ctx)
+    fw.mock('toolsLoadDirectory', slow_listing)
+    fw.mock('navigator_to_with_context', slow_navigate)
+    s.land(A)
+    s.play(b'1 ' + PLAYLIST + b'\n')
+    s.step()
+    assert s.queued() == [A]
+    assert [l for l in lines if l.startswith('stream start:')] == ['stream start: 1 songs in 40 ms (list 40, tags 0), play 300 ms']
+    s.land(B)
+    s.step()
+    assert len([l for l in lines if l.startswith('stream start:')]) == 1  # a song joining the queue is no start

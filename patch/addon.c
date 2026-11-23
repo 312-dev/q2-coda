@@ -66,6 +66,8 @@
 #include "playback.h"
 #include "stock.h"
 
+extern void ui_watch_step(const char *step); /* ui_watch.c: the step a long UI pass is in */
+
 #define ADDON_POLL_MS 500
 /* A level's drawing (artist_view): the rows as the app sent them, or an artist's page and the
  * pages its rows open, or an album's page (album_view) */
@@ -618,6 +620,12 @@ int card_path(const char *path) { return tk_str_start_with(path, CARD "/") && !d
  * from sm.next on (the one waited for, say). A file longer than M3U_MAX is read that far, its cut
  * last line dropped, so it is never waited for.
  * ponytail: the file is read whole each time it changes or a waited song lands; fine to M3U_MAX. */
+/* A stream's first start, timed (stream_start's log line): the ms its m3u_songs spent listing
+ * folders and reading tags, counted by m3u_songs whenever it runs and zeroed by stream_start. */
+static struct {
+    unsigned list, tags;
+} sst __attribute__((section(".scratch")));
+
 static void *m3u_songs(void) {
     void *out = _create_deque("stSongInfo"), *songs = 0;
     /* state_read's leading newline and nul, and a byte past M3U_MAX that says the file goes on */
@@ -655,15 +663,23 @@ static void *m3u_songs(void) {
             }
             if (songs) deque_destroy(songs);
             tk_snprintf(dir, sizeof dir, "%s", line);
+            ui_watch_step("stream list");
+            unsigned t = (unsigned)time_now_ms();
             songs = app_album_songs(dir);
+            sst.list += (unsigned)time_now_ms() - t;
         }
         *slash = '/';
         int found = 0;
         for (unsigned i = 0, n = deque_size(songs); !found && i < n; ++i) {
             void *r = deque_at(songs, i);
             const char *p = P(r, REC_PATH);
-            if ((found = p && !strcmp(p, line)))
-                card_record_tags(r), _deque_push_back(out, r); /* named by its tags (tags.c) */
+            if ((found = p && !strcmp(p, line))) {
+                ui_watch_step("stream tags");
+                unsigned t = (unsigned)time_now_ms();
+                card_record_tags(r); /* named by its tags (tags.c) */
+                sst.tags += (unsigned)time_now_ms() - t;
+                _deque_push_back(out, r);
+            }
         }
         if (!found && !fresh) { /* landed since the listing an earlier entry took: listed again */
             sm.more = 1;
@@ -707,8 +723,11 @@ static int stream_start(const void *unused) {
         sm.seen = 0;
         return 0;
     }
+    unsigned t0 = (unsigned)time_now_ms(), play_ms = 0;
+    sst.list = sst.tags = 0;
+    ui_watch_step("stream songs");
     void *songs = sm.m3u ? m3u_songs() : app_album_songs(sm.dir);
-    unsigned n = deque_size(songs);
+    unsigned n = deque_size(songs), songs_ms = (unsigned)time_now_ms() - t0;
     if (sm.resume && !sm.keep) { /* a resume's queue not from the song restored: never played */
         sm.state = S_DONE;
         resume_end("its queue starts at another song");
@@ -729,13 +748,23 @@ static int stream_start(const void *unused) {
             tk_snprintf(sm.last, sizeof sm.last, "%s",
                         (const char *)P(deque_at(songs, n - 1), REC_NAME));
         sm.state = S_PLAY;
-        press_natural = 1;             /* the app's .play, from its poll: nobody here pressed */
+        press_natural = 1; /* the app's .play, from its poll: nobody here pressed */
+        ui_watch_step("stream play");
+        unsigned t = (unsigned)time_now_ms();
         play_folder(songs, 0, 0xf001); /* playing_page copies the queue at once */
+        play_ms = (unsigned)time_now_ms() - t;
         press_natural = 0;
         sm.loads = playback_loads;     /* its load, which play_folder has done (playback_groups) */
         qa.app = sm.app, qa.loads = playback_loads;
     }
     deque_destroy(songs);
+    if (sm.state == S_PLAY) { /* where a stream's start spent its time on the UI thread */
+        char msg[96];
+        tk_snprintf(msg, sizeof msg,
+                    "stream start: %u songs in %u ms (list %u, tags %u), play %u ms", n, songs_ms,
+                    sst.list, sst.tags, play_ms);
+        ulog('I', "ui", msg);
+    }
     return 0;
 }
 

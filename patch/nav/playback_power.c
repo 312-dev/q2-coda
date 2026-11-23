@@ -535,6 +535,7 @@ static int playing_stream(void) {
 }
 
 int ringnav_sleep(void *loop) {
+    ui_watch_enter();  /* the UI pass watchdog (ui_watch.c): this pass's work so far */
     cover_wake_poll(); /* stock's album cover thread, woken for a request (cover_wake.c) */
     splash_poll();
     usb_ui_poll(); /* USB and charging toasts, adbd's questions (usb_ui.c) */
@@ -568,6 +569,7 @@ int ringnav_sleep(void *loop) {
         np_about_page()) /* the details over it (np_about.c) */
         *(volatile signed char *)BC_IDLE = BC_IDLE_FULL;
     if (st.bc[0] && np_track() != st.bc_track) bc_show();
+    ui_watch_polled(); /* the pass's work ends here: the waits below are not counted */
     if (!g_backlight_status) {
         st.dark |= 1;
         int quiet = I(g_dacoff_time, 0) < 0 && !media_playing() && !video_on() &&
@@ -592,5 +594,7 @@ int ringnav_sleep(void *loop) {
                !window_manager_is_animating(window_manager()) && !np_animating())
         loop_wait(np_glide_wait(np_marq_wait(loop_span(IDLE_SLEEP_MS, LOOP_LIT_MAX_MS, 1))));
     tone_dark = 0; /* after the polls: a click of theirs is this pass's too */
-    return stock_sleep_trampoline(loop);
+    int r = stock_sleep_trampoline(loop);
+    ui_watch_woke();
+    return r;
 }

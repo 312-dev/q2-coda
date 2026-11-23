@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Host tests of q2player (player/): `python3 test/player/run.py [-k NAME]`.
 
-Needs ffmpeg, lame, openssl (the HTTPS tests' certificates) and a C compiler, no stock ZIP and no Q2; the DST
+Needs ffmpeg, lame, openssl (the HTTPS tests' certificates), strace and a C compiler, no stock ZIP and no Q2; the DST
 SACD image needs FFmpeg's DST sample, fetched once (music.py DST_SAMPLE), and is left out without it. The player is built for this machine by tools/player.py
 (its FFmpeg on first use, some minutes) and driven through its socket by fakedemo.py, writing PCM to
 files in place of ALSA.
@@ -22,7 +22,7 @@ that bound real-time behaviour or read the host's /tmp, each tried again (TRIES 
 machine starved (Stalls). Each line gives the test's seconds, and the run ends with the side-by-side part's and the
 whole run's.
 """
-import array, concurrent.futures, functools, math, os, pathlib, re, struct, subprocess, sys, tempfile, threading, time
+import array, concurrent.futures, functools, math, os, pathlib, re, signal, struct, subprocess, sys, tempfile, threading, time
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -410,13 +410,14 @@ def with_seektable(flac, every=44100):
     return flac[:4] + si + bytes([3]) + len(table).to_bytes(3, 'big') + table + flac[42:]
 
 
-def grow(player, songs, out, head, land_at, extra=(), seektable=False, part=None):
+def grow(player, songs, out, head, land_at, extra=(), seektable=False, part=None, whole=None):
     """a1 arriving in place as a card app writes it (player/grow.c): head bytes of it on the card and its .stream saying
-    get, the rest landing at land_at (the line then done); extra are more steps (a seek); seektable, a1 with one; part, (time, bytes): more of it landing earlier. Returns the session, the PCM,
-    and the beats' reads of /tmp/q2player.wait (False when there is none)."""
+    get, the rest landing at land_at (the line then done); extra are more steps (a seek); seektable, a1 with one; part, (time, bytes): more of it landing earlier;
+    whole, other bytes in a1's place. Returns the session, the PCM, and the beats' reads of /tmp/q2player.wait (False
+    when there is none)."""
     card, status = out/'mnt/mmc/.foo', out/'tmp/q2-foo.stream'
     card.mkdir(parents=True, exist_ok=True)
-    whole, path = (songs/'a1.flac').read_bytes(), card/'grow.flac'
+    whole, path = whole or (songs/'a1.flac').read_bytes(), card/'grow.flac'
     if seektable: whole = with_seektable(whole)
     path.write_bytes(whole[:head])
     seen, have = [], [head]
@@ -460,6 +461,37 @@ def test_grow_plays_a_song_as_it_arrives(player, songs, tmp):
     assert '/mnt/mmc/.foo/grow.flac\n' in seen, f'the wait was never named: {seen}'
     waited = seen.count('/mnt/mmc/.foo/grow.flac\n')
     return f'{len(got) // 4} frames equal to the reference; the wait named in {waited} of {len(seen)} beats'
+
+
+def with_cover(flac, size):
+    """flac with a front cover of size bytes after its STREAMINFO, as a server's FLACs have one: a JPEG by its MIME
+    type and its header, its width and height 0 (unknown) in the block, as taggers often leave them. q2player's FFmpeg
+    has no JPEG decoder, so the picture's size stays unknown to avformat_find_stream_info. Returns the FLAC and where
+    its audio starts."""
+    jpeg = b'\xff\xd8\xff\xe0' + bytes(size - 6) + b'\xff\xd9'
+    mime = b'image/jpeg'
+    body = struct.pack('>II', 3, len(mime)) + mime + struct.pack('>IIIIII', 0, 0, 0, 0, 0, len(jpeg)) + jpeg
+    si = bytes([flac[4] & 0x7f]) + flac[5:42]  # STREAMINFO, no longer the last block
+    out = flac[:4] + si + bytes([0x80 | 6]) + len(body).to_bytes(3, 'big') + body + flac[42:]
+    return out, 42 + 4 + len(body)
+
+
+def test_grow_opens_a_song_with_a_cover_on_its_first_audio(player, songs, tmp):
+    """A song arriving in place with an embedded cover starts once its headers and a little of its audio are there,
+    whatever the cover's size: the open reads the audio's headers and a frame or two, not 5 s of audio to size a
+    picture its FFmpeg cannot decode (source.c GROW_ANALYZE_US). 3 s of a1's audio is there (the open's own look
+    ahead reads about 1.3 s), the rest lands at 8 s: the song is playing well before then, and plays whole."""
+    want, said = reference(songs/'a1.flac'), []
+    for size in (2048, 160 * 1024):  # a thumbnail, and the largest seen on a Q2's stream folder (2026-11-22)
+        whole, audio = with_cover((songs/'a1.flac').read_bytes(), size)
+        head = audio + (len(whole) - audio) * 3 // 20  # a1 is 20 s: 3 s of it
+        s, got, seen = grow(player, songs, tmp/f'grow-cover{size}', head, 8.0, whole=whole)
+        at = first_difference(got, want)
+        assert at is None, f'cover of {size} B: {len(got) // 4} frames, reference {len(want) // 4}; first difference at frame {(at or 0) // 4}'
+        known = [t for t, p in s.positions]
+        assert known and known[0] < 3.0, f'cover of {size} B: the song was opened only at {known[:1]} s (set at 1 s, the rest landing at 8 s)'
+        said.append(f'{size} B cover: opened by {known[0]:.1f} s')
+    return '; '.join(said) + ', the rest landing at 8 s'
 
 
 def test_grow_seek_inside(player, songs, tmp):
@@ -968,6 +1000,12 @@ def test_alsa_sw_params(player, songs, tmp):
            'car-cut': 'r 0 waits 3 ms 750 writes 0 file 1'}
     for k, v in car.items():
         assert lines[k] == f'{k} {v}', lines[k]
+    # A pause the device cannot do (the car's gadget advertises one its trigger refuses, -EINVAL, and its read position
+    # goes back to the ring's start): the frames not yet heard are held, the PCM stopped (the gadget then sends
+    # silence) and prepared, and at the resume they are written again, from the first not heard (docs/player.md#pause).
+    assert lines['car-pause'] == 'car-pause pauses 2 drops 0 prepares 0 resume writes 0 last -1 first 0', lines['car-pause']
+    assert lines['car-pause-fails'] == 'car-pause-fails pauses 1 drops 1 prepares 1 resume writes 1 last 60 first 1040', \
+        lines['car-pause-fails']
     devices = {0: 'default', 1: "plug:'bluealsa:DEV=00:00:00:00:00:00,PROFILE=a2dp'", 2: 'hw:1,0'}
     for way, name in devices.items():
         assert lines[f'device way {way}'] == f'device way {way} {name}', lines[f'device way {way}']
@@ -1034,11 +1072,12 @@ def car_steps(songs, car, at_on=None, at_off=None, flag=0):
     return steps
 
 
-def car_play(songs, tmp, name, steps, player, car, speed=4):
+def car_play(songs, tmp, name, steps, player, car, speed=4, env=None):
     s = fakedemo.Session(tmp/name)
     s.music = songs
     # the gadget's card takes S16_LE alone (q2-iap-probe.sh: p_ssize 2)
-    s.run(steps, fakedemo.launch_host(player, str(songs), speed, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16'}), speed)
+    s.run(steps, fakedemo.launch_host(player, str(songs), speed, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16', **(env or {})}),
+          speed)
     pcm = sorted((tmp/name/'pcm').glob('*.raw'))
     return [p.name for p in pcm], [p.read_bytes() for p in pcm], (tmp/name/'player.log').read_text()
 
@@ -1070,6 +1109,52 @@ def test_car_way_follows_the_car(player, songs, tmp):
     assert len(mid) > 44100 * 4 and mid[:len(mid) - len(mid) % 4] in a1, 'the car heard a1 itself, one stretch of it'
     assert 'output way 3 now' in log and 'output way 1 now' in log, log[-800:]
     return f'Bluetooth, {len(mid) // 4} frames to the car, Bluetooth'
+
+
+def test_car_release_while_paused(player, songs, tmp):
+    """docs/player.md#releasing-the-car: a1 paused on the car's way holds its PCM open, and the gadget's unbind waits for
+    that close while it holds the UDC's lock. mcl-dropcar on the socket (mcl-carrelease, its other name, and SIGUSR2
+    from a script the same) wakes the paused thread and closes the PCM within 0.4 s, the song still paused; the Play
+    opens a PCM on the way the car's file says then, and the song goes on from the frame last heard, not from where
+    the decode had got to. Kept, the car's file gives a second car PCM; removed (the cable out), a Bluetooth one. The
+    car's PCM (the file sink's ..._car.raw) is open in the player while paused and closed after the release, read from
+    /proc/PID/fd: the firmware waits for the gadget's PCM to read closed before it unbinds (patch/q2car.sh). The player
+    runs without q2-heavy's preload here, which makes a process unreadable in /proc."""
+    said = []
+
+    def car_fds(s):  # the player's open files that are a car PCM
+        fds = []
+        for fd in pathlib.Path(f'/proc/{s.proc.pid}/fd').iterdir():
+            try:
+                if os.readlink(fd).endswith('_car.raw'): fds.append(fd.name)
+            except OSError: pass
+        return fds
+    for how, kept in (('mcl-dropcar', True), ('mcl-carrelease', False), ('signal', False)):
+        cp, car = car_player(), tmp/f'car-rel-{how}.audio'
+        car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+        ask = f'{{{how}\\null}}' if how != 'signal' else (lambda s: os.kill(s.proc.pid, signal.SIGUSR2))
+        held, after = [], []
+        steps = car_steps(songs, car) + [(3.0, '{mcl-pause\\null}'), (4.5, lambda s: held.append(car_fds(s))), (5.0, ask),
+                                         (5.4, lambda s: after.append(car_fds(s))), (6.0, '{mcl-play\\null}'),
+                                         (8.0, '{mcl-stop\\null}'), (9.0, None)]
+        if not kept: steps.insert(-3, (5.5, lambda s: car.unlink()))
+        names, pcm, log = car_play(songs, tmp, f'car-rel-{how}', steps, cp, car, speed=1, env={'LD_PRELOAD': ''})
+        assert held == [held[0]] and held[0] and after == [[]], f'{how}: car PCM fds paused {held}, 0.4 s after the release {after}'
+        up = lambda text: int(re.search(rf'^\S+ (\d+) \w player {re.escape(text)}', log, re.M)[1])
+        took = up("q2player: the car's PCM released") - up('q2player: mcl-pause')
+        assert 1950 <= took <= 2400, f'{how}: released {took} ms after the pause, the command 2000 ms after it'
+        assert up("q2player: the car's PCM released") < up('q2player: mcl-play'), f'{how}: not while paused'
+        want = ['44100_2_s16_car.raw', '44100_2_s16_car.raw' if kept else '48000_2_s16_bt.raw']
+        assert [n.split('_', 1)[1] for n in names] == want, (how, names)
+        a1 = reference(songs/'a1.flac')
+        if kept:  # the same format: where the second PCM starts in a1 is where the song went on
+            at = a1.find(pcm[1][:4410 * 4]) // 4
+            unheard = len(pcm[0]) // 4 - at
+            assert at > 0 and 2205 <= unheard <= 26460, f'{how}: went on at frame {at}, {unheard} frames before the decode had got'
+            said.append(f'{how}: released {took - 2000} ms after it, went on {unheard * 1000 // 44100} ms back, at the frame heard')
+        else:
+            said.append(f'{how}: released {took - 2000} ms after it, on Bluetooth at the Play')
+    return '; '.join(said)
 
 
 def test_car_way_needs_the_car_build(player, songs, tmp):
@@ -1226,16 +1311,19 @@ def car_trace(log):
 
 
 def test_car_trace(player, songs, tmp):
-    """The car's trace (docs/iphone-mode.md#car-trace): while way 3 plays, a line a second in the unified log whose
-    frames add up to the car's PCM, and an underrun counted where it happens, once also as Car Audio's health count
-    (under=, Q2PLAYER_CAR_UNDER), and the position told demo beside the frames heard it comes from. a1 arrives as a card app writes it
-    (player/grow.c), a quarter of it there at the start and the rest landing at 12 s, so the player waits in a read
-    and the car's PCM runs dry: that second's line has the read's wait, the dry spell and the silence it put in. The
-    tap holds the car's PCM, the first Q2PLAYER_CAR_TAP_S (3) seconds of it, frame for frame."""
+    """The car's trace (docs/iphone-mode.md#car-trace): while way 3 plays, the quiet seconds are one line each
+    Q2PLAYER_CAR_QUIET_MS (1.2 s here, a minute on a Q2) and a second with something wrong in it a line of its own, the
+    lines' windows one after another so their frames add up to the car's PCM; an underrun counted where it happens,
+    once also as Car Audio's health count (under=, Q2PLAYER_CAR_UNDER, written aside and renamed), and the position
+    told demo beside the frames heard it comes from. a1 arrives as a card app writes it (player/grow.c), a quarter of
+    it there at the start and the rest landing at 12 s, so the player waits in a read and the car's PCM runs dry:
+    that second's line has the read's wait, the dry spell and the silence it put in. With car-pcm.on the tap holds
+    the car's PCM, the first Q2PLAYER_CAR_TAP_S (3) seconds of it, frame for frame."""
     cp, car, out = car_player(), tmp/'car-trace.audio', tmp/'car-trace'
     car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
     card, status, logs = out/'mnt/mmc/.foo', out/'tmp/q2-foo.stream', out/'mnt/mmc/.q2muse/logs'
     card.mkdir(parents=True, exist_ok=True), logs.mkdir(parents=True, exist_ok=True)
+    (logs/'car-pcm.on').write_text('')  # the tap is for an investigation, on only with this file
     whole, path = (songs/'a1.flac').read_bytes(), card/'grow.flac'
     head = len(whole) // 4
     path.write_bytes(whole[:head])
@@ -1252,17 +1340,23 @@ def test_car_trace(player, songs, tmp):
     s.music = songs
     line('get', head)
     s.run(steps, fakedemo.launch_host(cp, str(songs), 4, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16',
-                                                          'Q2PLAYER_CAR_TAP_S': '3', 'Q2PLAYER_CAR_UNDER': str(out/'under')}), 4)
+                                                          'Q2PLAYER_CAR_TAP_S': '3', 'Q2PLAYER_CAR_UNDER': str(out/'under'),
+                                                          'Q2PLAYER_CAR_QUIET_MS': '1200'}), 4)
     pcm = sorted((out/'pcm').glob('*.raw'))
     assert [p.name.split('_', 1)[1] for p in pcm] == ['44100_2_s16_car.raw'], pcm
     got, log = pcm[0].read_bytes(), (out/'player.log').read_text()
     lines = car_trace(log)
-    assert len(lines) >= 4, f'{len(lines)} trace lines: {log[-1500:]}'
-    # a second's line waits for the write or read in hand: the window with the read that waited is that much longer
-    assert all(l['ms'] >= 900 and l['ms'] - l['rmax'] <= 1500 for l in lines[:-1]), [(l['ms'], l['rmax']) for l in lines]
+    assert len(lines) >= 3, f'{len(lines)} trace lines: {log[-1500:]}'
     assert sum(l['frames'] for l in lines) == len(got) // 4, f'{sum(l["frames"] for l in lines)} frames traced, {len(got) // 4} written'
     assert all(0 <= l['delay'] <= 22050 and l['avail'] == 22050 - l['delay'] for l in lines), lines
     dry = [l for l in lines if l['dry']]
+    # the wrong second is a line of its own: a second, and the read in hand it waited for; every other line but the
+    # one just before it (the quiet seconds up to it) and the closing one is QUIET_MS of quiet seconds
+    at = lines.index(dry[0]) if dry else -1
+    assert dry and dry[0]['ms'] >= 900 and dry[0]['ms'] - dry[0]['rmax'] <= 1500, [(l['ms'], l['rmax'], l['dry']) for l in lines]
+    quiet = [l for i, l in enumerate(lines[:-1]) if i not in (at, at - 1)]
+    assert quiet and all(l['ms'] >= 1200 and not l['dry'] and not l['slow'] for l in quiet), [(l['ms'], l['dry'], l['slow']) for l in lines]
+    assert not (out/'under.tmp').exists(), 'the underrun count left aside, not renamed'
     # the read waits from the head's end to 12 s; at four times real speed the silence is four times that wait, less
     # the PCM's half second that played on into it
     assert len(dry) == 1 and dry[0]['dry'] == 1 and abs(dry[0]['dry_ms'] - (4 * dry[0]['rmax'] - 500)) < 1000 \
@@ -1278,7 +1372,8 @@ def test_car_trace(player, songs, tmp):
     # the position told demo, and the frames heard it comes from: they move together, a second a 44100 frames
     pos = [(l['pos'], l['played']) for l in lines]
     assert pos[-1][0] > pos[0][0] and all(abs(p - f // 44100) <= 1 for p, f in pos if f > 0), pos
-    return f'{len(lines)} lines, {len(got) // 4} frames; dry once, {dry[0]["dry_ms"]} ms of silence, read {slowest} ms; tap {len(tap)} bytes'
+    return (f'{len(lines)} lines (ms, dry: {[(l["ms"], l["dry"]) for l in lines]}), {len(got) // 4} frames; dry once, '
+            f'{dry[0]["dry_ms"]} ms of silence, read {slowest} ms; tap {len(tap)} bytes')
 
 
 def test_bt_formats_and_volume(player, songs, tmp):
@@ -1757,10 +1852,11 @@ class Feeder:
         return lambda s: self.pool.submit(go)
 
 
-def feed_play(songs, tmp, name, steps, feed, car, speed=1):
+def feed_play(songs, tmp, name, steps, feed, car, speed=1, logs=None):
     cp = car_player()
     s = fakedemo.Session(tmp/name)
     s.music = songs
+    if logs: logs.mkdir(parents=True, exist_ok=True)  # after the session's start, which empties its folder's tmp only
     s.run(steps, fakedemo.launch_host(cp, str(songs), speed, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16',
                                                              'Q2PLAYER_FEED': str(feed)}), speed)
     pcm = sorted((tmp/name/'pcm').glob('*.raw'))
@@ -1769,12 +1865,15 @@ def feed_play(songs, tmp, name, steps, feed, car, speed=1):
 
 def test_car_feed_reaches_the_car(player, songs, tmp):
     """Radio (q2video's receiver) while the car takes the audio and nothing of the player's plays: its frames reach the
-    car's PCM at 44.1 kHz, whole and in order."""
+    car's PCM at 44.1 kHz, whole and in order. The card's log folder is there without car-pcm.on: no tap is written
+    (docs/iphone-mode.md#car-trace)."""
     car, feed = tmp/'feed1.audio', tmp/'feed1.fifo'
     car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    logs = tmp/'feed1/mnt/mmc/.q2muse/logs'
     src, f = tone(2.0), Feeder(feed)
     steps = [(0.0, '{mcl-setoutputway\\1}'), (0.5, f.send(src)), (6.0, None)]
-    names, pcm, log = feed_play(songs, tmp, 'feed1', steps, feed, car)
+    names, pcm, log = feed_play(songs, tmp, 'feed1', steps, feed, car, logs=logs)
+    assert logs.is_dir() and not list(logs.glob('car-pcm*')), list(logs.iterdir())
     assert names == ['44100_2_s16_car.raw'], (names, log[-600:])
     assert src in pcm[0], f'{len(pcm[0]) // 4} frames, the tone whole and in order: {(first_difference(pcm[0], src) or 0) // 4}'
     assert 'the car plays another source' in log
@@ -1783,7 +1882,7 @@ def test_car_feed_reaches_the_car(player, songs, tmp):
 
 def test_car_feed_hands_over_both_ways(player, songs, tmp):
     """a1 on the car, stopped for Radio, Radio's frames, then a1 again: three car PCMs in turn, each closed on its
-    silence (no repeated period's buzz between), the source's frames whole in the middle one."""
+    silence (silence written before each close), the source's frames whole in the middle one."""
     car, feed = tmp/'feed2.audio', tmp/'feed2.fifo'
     car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
     src, f = tone(2.0, 330), Feeder(feed)
@@ -1828,6 +1927,51 @@ def test_car_feed_source_gone_leaves_the_song_resumable(player, songs, tmp):
     assert src in pcm[0] and 'the car\'s other source ended' in log
     assert pcm[1][:44100 * 4] == reference(songs/'a1.flac')[:44100 * 4]
     return 'the source ended, a1 after it'
+
+
+def test_car_feed_keeps_the_car_close_behind(player, songs, tmp):
+    """Radio's sound in the car runs at most FEED_LEAD_MS (150 ms) of PCM ahead of the car (engine.c feed_session), as a
+    scan does, not the PCM's whole half second: with the FIFO's 23 ms and the ring's 100 ms, under 0.3 s behind the
+    picture. The car trace's lines (a line a second here: a quiet window of 300 ms, looked at each second) give the
+    PCM's delay as each is made: never over the lead and one write, and the PCM never dry while the source flows."""
+    car, feed = tmp/'feedlead.audio', tmp/'feedlead.fifo'
+    car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    src, f = tone(6.0), Feeder(feed)
+    cp, s = car_player(), fakedemo.Session(tmp/'feedlead')
+    s.music = songs
+    s.run([(0.0, '{mcl-setoutputway\\1}'), (0.5, f.send(src)), (9.0, None)],
+          fakedemo.launch_host(cp, str(songs), 1, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16', 'Q2PLAYER_FEED': str(feed),
+                                                   'Q2PLAYER_CAR_QUIET_MS': '300'}), 1)
+    pcm = b''.join(p.read_bytes() for p in sorted((tmp/'feedlead/pcm').glob('*.raw')))
+    assert src in pcm, 'the source whole and in order'
+    lines = car_trace((tmp/'feedlead/player.log').read_text())
+    flowing = [l for l in lines[1:-1]]  # the first (the PCM filling) and the last (the source gone quiet) left out
+    assert len(flowing) >= 4, [(l['ms'], l['delay']) for l in lines]
+    worst = max(l['delay'] for l in flowing)
+    assert worst <= 44100 * 150 // 1000 + 1024, f'the PCM {worst} frames ({worst * 1000 // 44100} ms) ahead of the car'
+    assert not any(l['dry'] for l in flowing), [(l['delay'], l['dry']) for l in flowing]
+    return f'the PCM at most {worst * 1000 // 44100} ms ahead over {len(flowing)} windows, never dry'
+
+
+def test_car_feed_reader_sleeps_while_no_source_writes(player, songs, tmp):
+    """The feed's reader (player/feed.c) waits in poll() with no timeout while nothing writes to the FIFO: q2player
+    idle for 4 s makes one such poll and no timed-out one (it woke ten times a second, for the player's whole life).
+    Counted with strace, so a sleep it takes anywhere else is not counted."""
+    d, trace = tmp/'feedidle', tmp/'feedidle.strace'
+    d.mkdir(parents=True, exist_ok=True)
+    wrap = tmp/'feedidle.sh'
+    wrap.write_text(f'#!/bin/sh\nexec strace -f -e trace=poll,ppoll -o {trace} {car_player()}\n')
+    wrap.chmod(0o755)
+    s = fakedemo.Session(d)
+    s.music = songs
+    s.run([(4.0, None)], fakedemo.launch_host(str(wrap), str(songs), 1, {'Q2PLAYER_CAR': str(tmp/'feedidle.audio'),
+                                                                         'Q2PLAYER_FEED': str(tmp/'feedidle.fifo')}), 1)
+    t = trace.read_text()
+    fds = r'(?:\[\{fd=\d+, events=POLLIN\}\]|0x[0-9a-f]+)'  # strace may not be let read the array
+    timed_out = re.findall(rf'poll\({fds}, 1, 100\) += 0 \(Timeout\)', t)
+    waits = re.findall(rf'poll\({fds}, 1, -1', t)
+    assert not timed_out and len(waits) == 1, f'{len(timed_out)} timed-out polls, {len(waits)} waits'
+    return f'one wait, no timed-out poll in 4 s idle'
 
 
 def test_car_feed_does_not_block_a_source_the_car_does_not_take(player, songs, tmp):
