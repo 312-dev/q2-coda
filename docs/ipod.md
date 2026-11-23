@@ -240,7 +240,9 @@ otherwise. The covers come from `slideshow.c`, off the UI thread (`slide_pick`):
 rowid of the library (no sort of the table, `MUSIC_WHERE`'s scope kept), from the card's
 `songtable` or a signed-in server's `servertable` in proportion to their rows (`SLIDE_COUNT`, so a
 library that is all a server's still turns); a card song's album's embedded art, else its folder
-image, a server song's the cover its app keeps for the album (`catalogue_cover`), each read by
+image, a server song's the cover its app keeps for the album, its 512 px one
+(`catalogue_cover_large`, `covers/512/<album>.jpg`, 500 px from q2-subsonic) when the card has it,
+else the 160 px row one (`catalogue_cover`), scaled up and blocky, each read by
 stock's own readers under both art locks at
 `SLIDE_ART_PX` (352, the tallest pane zoomed 110 %) square into `/tmp/q2-slide.jpg`, else the album's
 Cover Flow thumbnail (160 px, softer); up to `SLIDE_TRIES` (8) songs a pick, the last
