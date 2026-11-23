@@ -489,8 +489,20 @@ static const lib_song_t *np_stream(void) {
     return found ? &song : 0;
 }
 
+/* NowPlaying.album_id and artist_id for track id (lib_song_nodes), looked up once a song, not at each send: a
+ * State goes out at every change and once a second while a phone follows the position. */
+static void np_nodes(const char *id, const char **album, const char **artist) {
+    static char of[24] = "\1", a[64], r[64];
+    if (strcmp(of, id)) {
+        snprintf(of, sizeof of, "%s", id);
+        lib_song_nodes(id, a, sizeof a, r, sizeof r);
+    }
+    *album = a, *artist = r;
+}
+
 static void put_now_playing(pbw *w) {
     char id[24] = "", art[48] = "";
+    const char *album_id, *artist_id;
     size_t m = pb_begin(w, 1);
     const lib_song_t *ls = np_stream();
     int rid = ls ? ls->id : np.id;
@@ -518,6 +530,9 @@ static void put_now_playing(pbw *w) {
     pb_varint(w, 17, np.radio != 0); /* CAP_RADIO */
     pb_str(w, 18, np.note);          /* CAP_NOTICE: the toast shown, while it is */
     pb_varint(w, 19, (uint32_t)np.noten);
+    np_nodes(id, &album_id, &artist_id);
+    pb_str(w, 20, album_id); /* the Browse pages of its album and album artist: left out when none */
+    pb_str(w, 21, artist_id);
     pb_end(w, m);
 }
 

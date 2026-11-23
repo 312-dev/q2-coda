@@ -825,6 +825,28 @@ fail:
     return crc_error(s, req_id, E_INTERNAL, "query");
 }
 
+/* ---- the playing song's pages (NowPlaying.album_id and artist_id) ---- */
+
+/* The Browse nodes of track_id's ("song:t12", "song:c1073741830") album and album artist, as Browse serves them:
+ * album: and the album's key, the page that lists the song; artist:r and the album artist's hash, the Artists
+ * list's page, which lists the album. Empty where there is no such page: a song not in the library (a stream
+ * with no catalogue row, a station), a server song while its catalogue is not attached, no album artist. */
+void lib_song_nodes(const char *track_id, char *album, size_t acap, char *artist, size_t rcap) {
+    *album = *artist = 0;
+    if (strncmp(track_id, "song:", 5) || !track_id[5] || lib_open()) return;
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(db, "select 'album:'||ak, case when naa != '' then 'artist:r'||hkey(naa) else '' end "
+                               "from s2 where sid = ?1 limit 1", -1, &st, 0) != SQLITE_OK)
+        return;
+    sqlite3_bind_text(st, 1, track_id + 5, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        snprintf(album, acap, "%s", (const char *)sqlite3_column_text(st, 0));
+        snprintf(artist, rcap, "%s", (const char *)sqlite3_column_text(st, 1));
+    }
+    sqlite3_finalize(st);
+    lib_close();
+}
+
 /* ---- search ---- */
 
 static int search(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {

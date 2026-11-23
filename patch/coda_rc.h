@@ -144,6 +144,8 @@ int lib_request(crc_session *s, int type, unsigned req_id, const uint8_t *p, siz
 void lib_played(int ok, int qgen);
 void lib_now(int qgen, int id);
 void lib_art_of(const char *path, char *art, size_t cap); /* a song path's album art id */
+/* the Browse nodes of a playing song's album and album artist (NowPlaying.album_id, artist_id), "" for none */
+void lib_song_nodes(const char *track_id, char *album, size_t acap, char *artist, size_t rcap);
 /* GetCover's answer (coda_rc_lib.c); hold: a server album with no cover on the card may be asked of its app first */
 int lib_cover(crc_session *s, unsigned req_id, const char *art, unsigned offset, unsigned limit, unsigned max_px,
               int hold);

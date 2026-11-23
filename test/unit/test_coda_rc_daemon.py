@@ -606,3 +606,60 @@ def test_a_key_that_left_pair_a_phone_without_pairing_is_held_off(q2):
         t.sock.close()
     finally:
         qr.unlink(missing_ok=True)
+
+
+# ---- the playing song's pages: NowPlaying.album_id and artist_id (docs/remote-protocol.md#links-from-now-playing) ----
+
+def now_is(shim, **tags):
+    """Now Playing as the shim writes it, these lines in place of NOW's."""
+    lines = dict(line.split('=', 1) for line in NOW.format(seq=shim.seq + 1, radio=0).splitlines())
+    lines.update({k: str(v) for k, v in tags.items()})
+    shim.seq += 1
+    put(shim.root / 'tmp/coda-rc.now', ''.join(f'{k}={v}\n' for k, v in lines.items()))
+    WAIT(0.3)
+
+
+def pages(s, np):
+    """The playing song's album page's songs and its artist page's rows, browsed as the phone does."""
+    album = s.browse(np['album_id'])
+    artist = s.browse(np['artist_id'])
+    return [i['id'] for i in album['items']], [i['id'] for i in artist['items']]
+
+
+def test_a_card_songs_album_and_artist_are_its_pages(car):
+    """Android Auto's links from now playing: album_id is the page that lists the playing song, artist_id the album
+    artist's page in the Artists list, which lists that album."""
+    s, shim, app = car
+    now_is(shim, id=2, path='/mnt/mmc/a/2.flac', title='Bravo', artist='Ann', album='First')
+    np = s.get_state()['now_playing']
+    assert np['track_id'] == 'song:t2' and np['album_id'].startswith('album:') and np['artist_id'].startswith('artist:r')
+    songs, rows = pages(s, np)
+    assert 'song:t2' in songs and np['album_id'] in rows
+
+
+def test_a_server_songs_album_and_artist_are_its_pages(car):
+    s, shim, app = car
+    now_is(shim, id=0x40000001, path='/mnt/mmc/.subsonic/cat/third/s1.flac', title='Echo', artist='Eve', album='Third')
+    np = s.get_state()['now_playing']
+    assert np['track_id'] == 'song:c1073741825' and np['album_id'] and np['artist_id']
+    songs, rows = pages(s, np)
+    assert 'song:c1073741825' in songs and np['album_id'] in rows
+
+
+def test_a_station_has_no_album_or_artist_page(car):
+    s, shim, app = car
+    now_is(shim, id=0, path='', source='netradio', live=1, station='Radio One', title='News', artist='', album='')
+    np = s.get_state()['now_playing']
+    assert np['track_id'] == '' and np['album_id'] == '' and np['artist_id'] == ''
+
+
+def test_the_largest_now_playing_fits_its_state(car):
+    """The longest tags the shim writes (now_source.c: 159 bytes each, the toast 95) with both pages: the State that
+    carries them stays inside send_state's 1,400 bytes, under every transport's frame (CRC_MAX_PAYLOAD) and BLE's."""
+    s, shim, app = car
+    now_is(shim, id=2, path='/mnt/mmc/a/2.flac', title='é' * 79 + 'x', artist='A' * 159, album='B' * 159,
+           note='C' * 95, noten=7)
+    raw = s.call(client.T['GET_STATE'], b'', client.T['STATE'])
+    np = client.decode(client.decode(raw)[1][0])
+    assert client.text(np, 20).startswith('album:') and client.text(np, 21).startswith('artist:r')
+    assert len(raw) <= 1400, len(raw)
