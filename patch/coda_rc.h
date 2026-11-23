@@ -199,5 +199,8 @@ void mdns_stop(void);                /* goodbye, and closed */
 #define CRC_PAIR_TIMEOUT_MS 120000
 #define CRC_PAIR_FAILS 3              /* wrong codes before pairing locks */
 #define CRC_PAIR_LOCK_MS 300000
+#define CRC_PAIR_SHOWS 4              /* new codes put up, at most, in any CRC_PAIR_SHOW_WINDOW_MS */
+#define CRC_PAIR_SHOW_WINDOW_MS 60000
+#define CRC_PING_PLAIN 64             /* the longest Ping echoed before Auth; sealed ones take CRC_MAX_PAYLOAD */
 
 #endif

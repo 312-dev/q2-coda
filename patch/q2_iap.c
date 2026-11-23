@@ -110,6 +110,7 @@ void *bsearch(const void *, const void *, size_t, size_t, int (*)(const void *, 
 #define SIG_IGN ((void (*)(int))1)
 #define SIG_DFL ((void (*)(int))0)
 #define EINTR 4
+#define EAGAIN 11
 #endif
 
 /* <linux/usb/functionfs.h> */
@@ -446,6 +447,7 @@ static int io_backlog(void) {
 
 #include "stream_path.h"
 static unsigned lib_stream_rids(const char *const *paths, unsigned *rids, unsigned n); /* q2_iap_lib.c */
+static void sid_index_start(void);                                                     /* q2_iap_lib.c */
 /* The shim's Now Playing (patch/coda_rc_shim.c cr_now, from now_source.c: key=value lines; pos in ms, len in
  * seconds, live=1 for a radio's stream), written while Car Remote is on or the car's iPhone is on the cable. */
 static int io_now_playing(struct iap2_np *n) {
@@ -477,18 +479,11 @@ static int io_now_playing(struct iap2_np *n) {
         }
         line = end ? end + 1 : 0;
     }
-    /* a server song from its app's stream cache, rid 0 here: its library rid, as the car was sent it (lib_stream_rids),
-     * looked for once a song */
-    static char last[400];
-    static unsigned last_rid;
+    /* a server song from its app's stream cache, rid 0 here: its library rid, as the car was sent it (lib_stream_rids,
+     * an index in RAM) */
     if (!n->id && n->path[0]) {
-        if (strcmp(last, n->path)) {
-            const char *p = n->path;
-            last_rid = 0;
-            lib_stream_rids(&p, &last_rid, 1);
-            snprintf(last, sizeof last, "%s", n->path);
-        }
-        n->id = last_rid;
+        const char *p = n->path;
+        lib_stream_rids(&p, &n->id, 1);
     }
     return 1;
 }
@@ -1145,6 +1140,7 @@ int main(int argc, char **argv) {
     snprintf(library_id, sizeof library_id, "%s-MPN-26.6.2", uuid);
     for (int k = 0; iap2_mode && k < ninst; ++k)
         if (in[k].kind == K_HID) writer_start(in[k].dir);
+    if (iap2_mode) sid_index_start(); /* the server songs' index, made while the car identifies (q2_iap_lib.c) */
     if (iap2_mode) iap2_connect(&io);
     long end = for_s > 0 ? mono_ms() + for_s * 1000L : 0;
     int rc = 0;

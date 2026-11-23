@@ -143,6 +143,148 @@ static void lib_lists(sqlite3 *db, int server, char **pool, unsigned *len, unsig
     sqlite3_finalize(st);
 }
 
+/* Server songs played from their app's stream cache (/mnt/mmc/.<app>/stream/.../<title> [<sid>].<suffix>,
+ * stream_path.h) by their library rid: the shim names such a song by rid 0 (no record of the library has its path),
+ * though the library the car was sent has it as its server row, servermeta's id for that app and sid. On
+ * 2026-11-22 every queue was such songs and Up Next went to the car as "no list", and Now Playing named the song by a
+ * hash. The rows are found in an index in RAM, sorted by the 64-bit FNV-1a of "<app> <sid>", 12 bytes a song (110 KB
+ * for the owner's 9,199): a lookup reads nothing. A read of servermeta at each change holds the loop 102 to 664 ms
+ * (that drive's q2car.1.log: 16 of its 21 stalls). lib_load fills it from
+ * the rows it reads anyway, so it is the library the car was sent; before that, a child started with the cable
+ * reads it from the catalogue (sid_index_start) and hands it over a pipe, and until it has a song is not found. */
+struct lib_sid {
+    unsigned hi, lo, rid;
+};
+static struct {
+    struct lib_sid *v; /* the index, sorted; n of them */
+    unsigned n, cap;
+    int fd;               /* the child's pipe while it reads the catalogue, else -1 */
+    int asked;            /* a child was started this run: not again */
+    unsigned char *in;    /* its records so far */
+    unsigned in_n, in_cap;
+} sids = {.fd = -1};
+
+static void sid_key(const char *app, int appn, const char *sid, int sidn, unsigned *hi, unsigned *lo) {
+    unsigned long long h = 14695981039346656037ull;
+    for (int i = 0; i < appn; ++i) h = (h ^ (unsigned char)app[i]) * 1099511628211ull;
+    h = (h ^ ' ') * 1099511628211ull;
+    for (int i = 0; i < sidn; ++i) h = (h ^ (unsigned char)sid[i]) * 1099511628211ull;
+    *hi = (unsigned)(h >> 32), *lo = (unsigned)h;
+}
+static int sid_cmp(const void *a, const void *b) {
+    const struct lib_sid *x = a, *y = b;
+    return x->hi != y->hi ? (x->hi < y->hi ? -1 : 1) : x->lo != y->lo ? (x->lo < y->lo ? -1 : 1) : 0;
+}
+/* one row into v (n of cap, grown); 0 when there was no room */
+static int sid_add(struct lib_sid **v, unsigned *n, unsigned *cap, const char *app, const char *sid, unsigned rid) {
+    if (!app || !sid || !rid) return 1;
+    if (*n == *cap) {
+        struct lib_sid *w = realloc(*v, (*cap = *cap ? *cap * 2 : 4096) * sizeof *w);
+        if (!w) return 0;
+        *v = w;
+    }
+    struct lib_sid *s = &(*v)[(*n)++];
+    sid_key(app, (int)strlen(app), sid, (int)strlen(sid), &s->hi, &s->lo);
+    s->rid = rid;
+    return 1;
+}
+/* v (n rows) sorted and made the index, in place of the one before */
+static void sid_install(struct lib_sid *v, unsigned n) {
+    if (v) qsort(v, n, sizeof *v, sid_cmp);
+    free(sids.v);
+    sids.v = n ? realloc(v, n * sizeof *v) : (free(v), (struct lib_sid *)0);
+    if (n && !sids.v) sids.v = v;
+    sids.n = sids.v ? n : 0;
+}
+
+/* The child that reads the catalogue's (app, sid, id) rows for the index: each as 12 bytes on the pipe, unsorted
+ * (sid_key's halves and the rid, in this machine's order), the loop reading them as they come (sid_index_poll). */
+static void sid_index_start(void) {
+    int fds[2];
+    if (sids.asked || sids.n || access(lib_cat, 0)) return;
+    sids.asked = 1;
+    if (pipe(fds)) return;
+    int pid = fork();
+    if (pid == 0) {
+        sqlite3 *db = 0;
+        sqlite3_stmt *st = 0;
+        close(fds[0]);
+        if (!sqlite3_open_v2(lib_cat, &db, SQLITE_OPEN_READONLY, 0) &&
+            !sqlite3_prepare_v2(db, "select app, sid, id from servermeta where sid is not null", -1, &st, 0)) {
+            struct lib_sid b[256];
+            unsigned k = 0;
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                const char *app = (const char *)sqlite3_column_text(st, 0), *sid = (const char *)sqlite3_column_text(st, 1);
+                unsigned rid = (unsigned)sqlite3_column_int(st, 2);
+                if (!app || !sid || !rid) continue;
+                sid_key(app, (int)strlen(app), sid, (int)strlen(sid), &b[k].hi, &b[k].lo);
+                b[k].rid = rid;
+                if (++k == 256) {
+                    if (write(fds[1], b, sizeof b) != (int)sizeof b) _exit(1);
+                    k = 0;
+                }
+            }
+            if (k && write(fds[1], b, k * sizeof *b) != (int)(k * sizeof *b)) _exit(1);
+        }
+        _exit(0);
+    }
+    close(fds[1]);
+    if (pid < 0) {
+        close(fds[0]);
+        return;
+    }
+    fcntl(fds[0], F_SETFL, O_NONBLOCK);
+    sids.fd = fds[0];
+}
+
+/* The child's records taken in, as many as wait; at its end (end of file) the index made of them, unless lib_load
+ * has made one meanwhile. */
+static void sid_index_poll(void) {
+    for (;;) {
+        if (sids.fd < 0) return;
+        if (sids.in_n + 4096 > sids.in_cap) {
+            unsigned char *w = realloc(sids.in, sids.in_cap = sids.in_cap ? sids.in_cap * 2 : 65536);
+            if (!w) break;
+            sids.in = w;
+        }
+        int r = (int)read(sids.fd, sids.in + sids.in_n, sids.in_cap - sids.in_n);
+        if (r > 0) {
+            sids.in_n += (unsigned)r;
+            continue;
+        }
+        if (r < 0 && (ERRNO == EAGAIN || ERRNO == EINTR)) return;
+        break;
+    }
+    close(sids.fd), sids.fd = -1;
+    unsigned n = sids.in_n / sizeof(struct lib_sid);
+    if (!sids.n && sids.in) {
+        char msg[120];
+        sid_install((struct lib_sid *)sids.in, n);
+        snprintf(msg, sizeof msg, "library: %u server songs found by their stream path, from the catalogue", sids.n);
+        logline("lib", msg);
+    } else {
+        free(sids.in);
+    }
+    sids.in = 0, sids.in_n = sids.in_cap = 0;
+}
+
+/* Each of n paths (0: none) whose rids[i] is 0 looked for in the index; the count found. */
+static unsigned lib_stream_rids(const char *const *paths, unsigned *rids, unsigned n) {
+    unsigned found = 0;
+    sid_index_poll();
+    sid_index_start();
+    for (unsigned i = 0; sids.n && i < n; ++i) {
+        const char *app, *sid;
+        int appn, sidn;
+        struct lib_sid want;
+        if (rids[i] || !paths[i] || !stream_path_sid(paths[i], &app, &appn, &sid, &sidn)) continue;
+        sid_key(app, appn, sid, sidn, &want.hi, &want.lo);
+        const struct lib_sid *hit = bsearch(&want, sids.v, sids.n, sizeof *sids.v, sid_cmp);
+        if (hit) rids[i] = hit->rid, ++found;
+    }
+    return found;
+}
+
 /* The songs into RAM, in rid order, each with the hash of what the car is sent of it; the revision their hashes'
  * hash. The card's songs (songtable) and, while a server is signed in (its catalogue on the card, as Car Remote's
  * library attaches it: coda_rc_lib.c lib_open), the server's (servertable, rids from 0x40000000): on the Q2 of the
@@ -159,9 +301,9 @@ static int lib_load(void) {
         snprintf(sql, sizeof sql, "attach '%s' as cat", lib_cat);
         server = sqlite3_exec(db, sql, 0, 0, 0) == 0;
     }
-    snprintf(sql, sizeof sql, "%s%s%s", LIB_COLS("songtable") "0 from main.songtable where " LIB_WHERE,
-             server ? " union all " LIB_COLS("s") "ifnull(m.seconds,0) from cat.servertable s left join cat.servermeta m"
-                      " on m.fileurl = s.fileurl"
+    snprintf(sql, sizeof sql, "%s%s%s", LIB_COLS("songtable") "0, null, null from main.songtable where " LIB_WHERE,
+             server ? " union all " LIB_COLS("s") "ifnull(m.seconds,0), m.app, m.sid from cat.servertable s left join"
+                      " cat.servermeta m on m.fileurl = s.fileurl"
                     : "",
              " order by 1");
     if (!db || sqlite3_prepare_v2(db, sql, -1, &st, 0) != 0) {
@@ -173,6 +315,8 @@ static int lib_load(void) {
     }
     pool = malloc(cap = 65536);
     if (pool) pool[0] = 0;
+    struct lib_sid *sv = 0;
+    unsigned sn = 0, scap = 0;
     while (pool && sqlite3_step(st) == SQLITE_ROW) {
         if (n == tcap) {
             struct iap2_track *t = realloc(lib_t.tracks, (tcap = tcap ? tcap * 2 : 1024) * sizeof *t);
@@ -196,8 +340,11 @@ static int lib_load(void) {
         t->genre_id = lib_fnv(2166136261u, f[4]), t->composer_id = lib_fnv(2166136261u, f[5]);
         rev = (rev ^ t->rid) * 16777619u, rev = (rev ^ t->hash) * 16777619u;
         if (t->rid) ++n;
+        sid_add(&sv, &sn, &scap, (const char *)sqlite3_column_text(st, 10), (const char *)sqlite3_column_text(st, 11),
+                t->rid);
     }
     sqlite3_finalize(st);
+    sid_install(sv, sn); /* the server songs' stream paths, as this library has them (lib_stream_rids) */
     if (pool) lib_lists(db, server, &pool, &len, &cap);
     sqlite3_close(db);
     lib_t.pool = pool, lib_t.n = n;
@@ -269,53 +416,6 @@ static void lib_saved(void) {
     }
     free(b);
     if (pid < 0) logline("lib", "library: the sent record could not be written (no child)");
-}
-
-/* Server songs played from their app's stream cache (/mnt/mmc/.<app>/stream/.../<title> [<sid>].<suffix>,
- * stream_path.h) by their library rid: the shim names such a song by rid 0 (no record of the library has its path),
- * though the library the car was sent has it as its server row, servermeta's id for that app and sid. On
- * 2026-11-22 every queue was such songs and Up Next went to the car as "no list", and Now Playing named the song by a
- * hash. Each of n paths (0: none) whose rids[i] is 0 is looked for, the catalogue read once, its (app, sid) pairs
- * sorted; the count found. */
-struct lib_sid {
-    char key[80]; /* "<app> <sid>" */
-    unsigned rid;
-};
-static int lib_sid_cmp(const void *a, const void *b) { return strcmp(((const struct lib_sid *)a)->key, ((const struct lib_sid *)b)->key); }
-static unsigned lib_stream_rids(const char *const *paths, unsigned *rids, unsigned n) {
-    sqlite3 *db = 0;
-    sqlite3_stmt *st = 0;
-    struct lib_sid *v = 0, want;
-    unsigned m = 0, vcap = 0, found = 0;
-    if (access(lib_cat, 0) || sqlite3_open_v2(lib_cat, &db, SQLITE_OPEN_READONLY, 0) ||
-        sqlite3_prepare_v2(db, "select app, sid, id from servermeta where sid is not null", -1, &st, 0)) {
-        if (db) sqlite3_close(db);
-        return 0;
-    }
-    while (sqlite3_step(st) == SQLITE_ROW) {
-        if (m == vcap) {
-            struct lib_sid *w = realloc(v, (vcap = vcap ? vcap * 2 : 4096) * sizeof *w);
-            if (!w) break;
-            v = w;
-        }
-        const char *app = (const char *)sqlite3_column_text(st, 0), *sid = (const char *)sqlite3_column_text(st, 1);
-        snprintf(v[m].key, sizeof v[m].key, "%s %s", app ? app : "", sid ? sid : "");
-        v[m].rid = (unsigned)sqlite3_column_int(st, 2);
-        ++m;
-    }
-    sqlite3_finalize(st);
-    sqlite3_close(db);
-    if (v) qsort(v, m, sizeof *v, lib_sid_cmp);
-    for (unsigned i = 0; v && i < n; ++i) {
-        const char *app, *sid;
-        int appn, sidn;
-        if (rids[i] || !paths[i] || !stream_path_sid(paths[i], &app, &appn, &sid, &sidn)) continue;
-        snprintf(want.key, sizeof want.key, "%.*s %.*s", appn, app, sidn, sid);
-        const struct lib_sid *hit = bsearch(&want, v, m, sizeof *v, lib_sid_cmp);
-        if (hit && hit->rid) rids[i] = hit->rid, ++found;
-    }
-    free(v);
-    return found;
 }
 
 /* Songs to play, by rid: the shim's list (/tmp/coda-rc.list, a rid a line) and its play command, as coda-rc's Play

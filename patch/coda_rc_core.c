@@ -166,6 +166,8 @@ static struct {
     uint32_t since, locked_until;
     int fails;
     int shown;           /* the code is Pair a Phone's, from its QR code (crc_code_shown) */
+    uint32_t shows[CRC_PAIR_SHOWS]; /* when the last CRC_PAIR_SHOWS codes went up, oldest at shows_n's slot */
+    unsigned shows_n;
 } pair;
 
 /* The owner's part in the pairing wiped, the code kept */
@@ -225,9 +227,16 @@ static int pair_start(crc_session *s, unsigned req_id, const uint8_t *p, size_t 
     if (locked()) return crc_error(s, req_id, E_PAIRING_LOCKED, "too many wrong codes; try again later");
     if (pair.owner && pair.owner != s) return crc_error(s, req_id, E_BUSY, "another phone is pairing");
     const char *name = s->client_name[0] ? s->client_name : "Phone";
+    int fresh = !pair.code[0] || strcmp(pair.name, name) ||
+                crc_now_ms() - pair.since > CRC_PAIR_TIMEOUT_MS; /* else the same phone again: the same code */
+    /* Each new code puts the pairing card up and lights the screen; a peer that asks over and over, under
+     * new names, gets CRC_PAIR_SHOWS of them a CRC_PAIR_SHOW_WINDOW_MS */
+    if (fresh && pair.shows_n >= CRC_PAIR_SHOWS &&
+        crc_now_ms() - pair.shows[pair.shows_n % CRC_PAIR_SHOWS] < CRC_PAIR_SHOW_WINDOW_MS)
+        return crc_error(s, req_id, E_BUSY, "pairing asked too often; try again in a minute");
     pair_leave();
-    if (!pair.code[0] || strcmp(pair.name, name) ||
-        crc_now_ms() - pair.since > CRC_PAIR_TIMEOUT_MS) {  /* else the same phone again: the same code */
+    if (fresh) {
+        pair.shows[pair.shows_n++ % CRC_PAIR_SHOWS] = crc_now_ms();
         pair_end(-1);
         pair.since = crc_now_ms();
         /* Pair a Phone's QR code carries a code, shown under it, for a phone that scans it
@@ -416,7 +425,9 @@ static int frame(crc_session *s, const uint8_t *fr, size_t len) {
     case T_PAIR_START: return s->state == S_HELLO || s->state == S_PAIRING ? pair_start(s, req_id, p, n) : -1;
     case T_PAIR_FINISH: return s->state == S_PAIRING ? pair_finish(s, req_id, p, n) : -1;
     case T_AUTH: return auth(s, req_id, p, n);
-    case T_PING: return crc_send(s, T_PONG, req_id, p, n);
+    case T_PING: /* before Auth only a short echo: a peer that is not paired takes little air time */
+        if (n > CRC_PING_PLAIN) return crc_error(s, req_id, E_TOO_LARGE, "Ping before Auth"), 0;
+        return crc_send(s, T_PONG, req_id, p, n);
     }
     crc_error(s, req_id, s->state == S_NEW ? E_BAD_REQUEST : E_UNAUTHORIZED, "authenticate first");
     return 0;

@@ -1822,6 +1822,68 @@ def test_up_next_of_server_songs_from_the_stream_cache(probe, tmp_path, monkeypa
         stop(p, fd)
 
 
+def big_catalogue(path, n=9199):
+    """The owner's server library's size (q2car.1.log of 2026-11-22: 9,199 songs), each with its own sid: the stream
+    path of song k is stream_of(k)."""
+    import sqlite3
+    path.unlink(missing_ok=True)
+    db = sqlite3.connect(path)
+    db.execute(SERVERTABLE)
+    db.execute(SERVERMETA)
+    for k in range(n):
+        rid, url = 0x40000000 + k, f'/mnt/mmc/.subsonic/cat/al-{k // 12}/{k}.flac'
+        db.execute('insert into servertable values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                   (rid, f'{k}.flac', url, f'Album {k // 12}', f'Artist {k // 120}', '', 'Pop', f'Song {k}', '', 2001,
+                    k % 12 + 1, 1, 0, 0, 0, 0, 16, 44100))
+        db.execute('insert into servermeta (id, fileurl, app, sid, seconds) values (?,?,?,?,?)',
+                   (rid, url, 'subsonic', f'sid{k:06d}x', 200))
+    db.commit()
+    db.close()
+
+
+def stream_of(k):
+    return f'/mnt/mmc/.subsonic/stream/11c3e037/original/{k % 16:x}/song {k} [sid{k:06d}x].flac'
+
+
+def held(log, step):
+    """The ms of each pass the stall detector logged as held mostly in step."""
+    return [int(l.split('held ')[1].split(' ms')[0]) for l in log.read_text().splitlines()
+            if 'loop: a pass held' in l and f'in {step};' in l]
+
+
+def test_a_song_change_does_not_read_the_catalogue_in_the_loop(probe, tmp_path, monkeypatch):
+    """q2car.1.log of 2026-11-22: 16 of the drive's 21 stalls, 102 to 664 ms, were a server song's change of Now Playing
+    or of the queue, each reading all of servermeta (9,199 rows) from the card inside the loop to find one song's rid.
+    The loop must find a stream-cache song's rid without that read. This machine reads the 9,199 rows in 2 to 5 ms
+    (the Q2, from the card, 100 times that), so the stall detector is set at 2 ms: over ten song and queue changes
+    at most one pass (a scheduler's hiccup) may be held that long in either step, and each song is still named by
+    its rid."""
+    monkeypatch.setattr(BmwCar, 'msg', bmw_msg_keeping_body)
+    song_db(tmp_path/'database.db', [SONGS[1]])
+    big_catalogue(tmp_path/'catalogue.db')
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path, '--stall-ms', '2')
+    got = []
+    try:
+        car.send(message(0x5000, prm(0, prm(0) + prm(1)), prm(1, prm(0) + prm(2) + prm(3) + prm(14) + prm(17))))
+        time.sleep(1.5)  # the index's making, at the cable's start, before any song needs it
+        for i, k in enumerate(range(100, 9100, 900)):
+            (tmp_path/'queue').write_text(f'{i + 1} 0 2\n0\t{stream_of(k)}\tSong {k}\tA\n'
+                                          f'0\t{stream_of(k + 1)}\tSong {k + 1}\tA\n')
+            files['np'].write_text(f'state=1\npos=1000\nlen=200\nid=0\ntitle=Song {k}\nartist=A\nalbum=B\n'
+                                   f'path={stream_of(k)}\nqgen={i + 1}\nqpos=0\nqlen=2\n')
+            deadline, seen = time.time() + 3, None
+            while time.time() < deadline and seen != 0x40000000 + k:
+                mid, ps = car.msg()
+                if mid == 0x5001 and 0 in ps and 0 in params(ps[0]):
+                    seen = int.from_bytes(params(ps[0])[0], 'big') & 0xffffffff
+            got.append(seen)
+    finally:
+        stop(p, fd)
+    assert got == [0x40000000 + k for k in range(100, 9100, 900)], [hex(g) for g in got]
+    slow = held(log, 'the Now Playing file') + held(log, "the shim's queue file")
+    assert len(slow) <= 1, sorted(slow)
+
+
 Q2CAR = pathlib.Path(__file__).resolve().parents[1]/'patch/q2car.sh'
 Q2CAR_CAR = '12.5 car host: car (Apple\'s C0 53), 604 ms after it addressed the Q2\n'
 Q2CAR_COMPUTER = '12.5 car host: computer (usbmux\'s C0 45), 13 ms after it addressed the Q2\n'
