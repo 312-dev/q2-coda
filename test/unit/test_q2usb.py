@@ -87,3 +87,8 @@ def test_the_pull_up_found_off_at_boot_or_a_wake_is_flagged():
 def test_a_trial_that_ends_with_nothing_enumerated_is_an_empty_port():
     log = [line(1000, 'otg-on', pc20=1, pd18=0), line(9000, 'otg-trial-off', pd18=0)]
     assert kinds(log) == ['EMPTY']
+
+
+def test_a_row_s_time_is_utc_or_since_start_when_the_clock_was_never_set():
+    assert q2usb.parse([line(1500, 'in', wall=1763400000)])[0].when() == '2025-11-17 17:20:00Z'
+    assert q2usb.parse([line(1500, 'in', wall=100)])[0].when() == '+1.5s'
