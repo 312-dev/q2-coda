@@ -559,7 +559,7 @@ for v,want in ((1,limits[0]),(2,limits[1]),(3,limits[2]),(0,'Standby Limit: Off'
 passed()
 # Controls: the wheel's and the buttons' rows (Buttons Lock stock's by key, for its translation).
 m,rows,texts,icons,click=settings_page('display','scroll_view_display',stock_rows=3,sub=3)
-assert texts()==['Wheel Sensitivity: 50%','Hold Return: Recent','Clicker: Off','system_keylock','Wake: Single Press']
+assert texts()==['Wheel Sensitivity: 50%','Hold Return: Recent','Clicker: Off','system_keylock','Wake: Any Button']
 assert icons==['system_display','playset_folderjump','system_keytone','system_keylock','system_keylock']; passed()
 # Fast Navigation (Display, Cover Flow's page, after Sort, before Position Bar and Refresh Cover Flow): off by default;
 # the row saves BIGLIBRARY, and Cover Flow reads it at once (ringnav_big_library: letters, years and half copies); a

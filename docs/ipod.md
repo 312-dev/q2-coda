@@ -980,7 +980,7 @@ drops the stock rows, takes the sub-page's title and builds only its own rows:
   again). The Library's own settings (Artist View, Playlist View, Scan Song Durations) are on
   [Settings > Playback > Library](#settings).
 - Controls: Wheel Sensitivity, which opens its slider page; "Hold Return: Recent"
-  (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); "Clicker: Both", Key Tone's row, cycling Speaker, Headphones, Both and Off (`IPOD CLICKER`, Off being Key Tone off; [Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; and "Wake: Single Press".
+  (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); "Clicker: Both", Key Tone's row, cycling Speaker, Headphones, Both and Off (`IPOD CLICKER`, Off being Key Tone off; [Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; and "Wake: Any Button" (or "Wake: Double Press").
 
 All are among the [settings icons](#settings-icons) the build pre-sizes. A value row has its value
 in the label (260 pixels wide, to where the chevron ends) and no chevron, since Center or a tap

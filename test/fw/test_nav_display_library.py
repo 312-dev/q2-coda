@@ -749,7 +749,7 @@ def test_controls_rows_carry_their_captions(fw):
     fw.fn('navigation__set_open', C.c_int, C.c_void_p, C.c_void_p)(4, None)
     assert 'Volume Guard' not in titles(page.view())  # retired: the wheel's volume is playback screens' alone
     assert captions(fw, page.view()) == {'Hold Return': 'What holding Return opens: Now Playing or Home',
-                                         'Wake': 'Center presses it takes to wake the screen'}
+                                         'Wake': 'Any Button: every button wakes it. Double Press: Center twice'}
 
 
 # Power's Boot to row: /mnt/data/boot-target, which the boot script reads with $(cat ...).

@@ -499,7 +499,7 @@ int ringnav_bt_connect_start(int pause) {
 static void pod_text(int i) {
     static const char *const names[][4] = {
         { "Charge Limit: Off", "Charge Limit: " STR(CHARGE_STOP) "%" },
-        { "Wake: Single Press", "Wake: Double Press" },
+        { "Wake: Any Button", "Wake: Double Press" },
         { "Artist View: Grid", "Artist View: Cover Flow", "Artist View: List" },
         { "Years: Newest First", "Years: Oldest First" },
         { "Artists: Artist", "Artists: Album Artist" },

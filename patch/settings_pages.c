@@ -241,7 +241,7 @@ const char *pod_caption(int i) {
         [POD_STANDBY] = "Shuts down a Q2 left in Standby this long",
         [POD_CHARGE] =
             "Stops charging at " STR(CHARGE_STOP) "%, starts again at " STR(CHARGE_RESUME) "%",
-        [POD_WAKE] = "Center presses it takes to wake the screen",
+        [POD_WAKE] = "Any Button: every button wakes it. Double Press: Center twice",
         [POD_HOLD_HOME] = "What holding Return opens: Now Playing or Home",
         [POD_BIG_LIB] = "Year sort spins by year too; letters stay till you lift",
         [POD_SCAN_DURATIONS] = "Measures song lengths after each library update",
