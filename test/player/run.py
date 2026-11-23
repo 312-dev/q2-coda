@@ -280,6 +280,27 @@ def heard_seconds(pcm, rate=44100):
     return out
 
 
+def test_heard_seconds_at_a_splice(player, songs, tmp):
+    """heard_seconds across a splice of pos.flac's second 22 into its second 23 (a turn of the scan, a seek), at 20
+    places in a window and 16 phases each: no window reads a second that is neither. A window across a phase jump has
+    one short gap between zero crossings, which made the tone read high: up to 24 here, the "jumps of [2] s" test_scan
+    failed with (integ/q2-1129, 2026-11-22: the scan went 22, 22, 24, 23, 23, its PCM 22 then 23)."""
+    rate, w = 44100, 44100 // 50
+    def tone(n, frames, phase):
+        f = music.POS_BASE + music.POS_STEP * n
+        return [int(16000 * math.sin(phase + 2 * math.pi * f * i / rate)) for i in range(frames)]
+    wrong, read = [], 0
+    for cut in range(20, w - 20, 37):
+        for k in range(16):
+            x = tone(22, w + cut, 0) + tone(23, 2 * w - cut, 2 * math.pi * k / 16)
+            for n, e in heard_seconds(array.array('h', (v for s in x for v in (s, s))).tobytes()):
+                if n is None or abs(e) > 3: continue
+                read += 1
+                if n not in (22, 23): wrong.append((cut, k, n, round(e, 1)))
+    assert not wrong, f'{len(wrong)} windows read a second neither side of the splice, e.g. {wrong[:3]}'
+    return f'{read} windows read, each 22 or 23'
+
+
 def test_scan(player, songs, tmp):
     """mcl-scan (player/stretch.c): from 10 s, 2 s as it is, 2 s heard at 4 times, 2 s as it is, 2 s backward at twice,
     then as it is. Every window is on its second's tone (the pitch kept), the scan reaches 20 s (8 s in 2) and runs
