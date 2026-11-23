@@ -599,7 +599,10 @@ class Player:
         fw.mock('navigator_to_with_context', lambda name, info, *_: self.toasts.append(C.string_at(info + 8).decode()) or 0)
         stock = p.stock
 
+        self.passes = 0
+
         def host_pass(*_):
+            self.passes += 1
             stock()
             self.otg_status.value = 2 if p.otgid.value == 1 and p.hostdev else 0
             return 0
@@ -704,6 +707,24 @@ def test_stock_s_play_key_is_a_play_of_the_song_there():
     assert re.search(r'#define OTG_PLAYPAUSE_RET 0x4f2fd8\b', _SOURCE)
     sites = (pathlib.Path(__file__).parents[2]/'tools/stock_sites.tsv').read_text()
     assert re.search(r'^demo\t0x4f2fd8\t0x4\tplaypause_quick_click\t', sites, re.M)
+
+
+def test_while_the_power_awaits_its_dac_the_host_pass_runs_every_ui_pass(fw):
+    """Stock's host pass finds the DAC (/tmp/usb_add, /dev/snd/pcmC1D0p, g_otg_status) once a second; with the bus
+    power on and no DAC yet it runs every UI pass too, so the DAC is found in the pass after its PCM appears. Once it
+    is found, the pass is stock's once a second again."""
+    p = Port(fw)
+    pl = Player(fw, p)
+    p.id = 0
+    traced(p, SETTLE + PASS_MS)
+    assert p.otgid.value == 1
+    traced(p, 300)
+    p.hostdev = True  # its PCM there 300 ms into the grant
+    traced(p, 100)
+    assert pl.otg_status.value == 2, 'found in the next UI pass, not the next second'
+    pl.passes = 0
+    traced(p, 3000)
+    assert pl.passes == 3, 'found: once a second'
 
 
 @pytest.mark.parametrize('case', ['nothing attached', 'quiet', 'dac there'])

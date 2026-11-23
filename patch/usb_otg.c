@@ -277,6 +277,10 @@ static void trace(unsigned now) {
 void usb_otg_poll(void) {
     unsigned now = time_now_ms();
     trace(now);
+    /* The bus power on with no USB DAC or drive yet, within its trial: stock's host pass (the DAC's
+     * discovery) every UI pass, not only on_wm_idle_status's once a second, so a Play kept for it
+     * starts as soon as its PCM is there. */
+    if (g_last_otgid == 1 && g_otg_status == 0 && now - otg.host_at < OTG_TRIAL_MS) ringnav_otg_status();
     if (!otg.play) return;
     if (has_valid_output_device()) {
         otg.play = 0;
