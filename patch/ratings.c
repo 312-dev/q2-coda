@@ -39,7 +39,7 @@ static int rate_io(int album, int write) {
     unsigned n = in ? (unsigned)fread(t, sizeof *t, RATE_SLOTS, in) : 0;
     if (in) fclose(in);
     memset(t + n, 0, (RATE_SLOTS - n) * sizeof *t);
-    return n != 0;
+    return (int)n; /* the words read */
 }
 /* A slot's place: a key's slots are probed from its hash's (open addressing), so a lookup reads a
  * few words, not the whole table. RATE_GONE marks a rating taken out, which a probe passes over
@@ -49,14 +49,14 @@ static unsigned rate_home(unsigned key) { return ((key >> 3) * 2654435761u) % RA
 static unsigned *rates(int album) {
     unsigned **t = album ? &ra.album_rates : &ra.rates;
     if (*t || !(*t = calloc(RATE_SLOTS, sizeof **t))) return *t;
-    rate_io(album, 0);
+    unsigned n = (unsigned)rate_io(album, 0);
     /* each rating at its key's place: a file from before the hashing (every slot from the first),
-     * or one with gaps; marks and malformed slots dropped */
-    unsigned *was = calloc(RATE_SLOTS, sizeof *was);
+     * or one with gaps; marks and malformed slots dropped. No file, nothing to place. */
+    unsigned *was = n ? calloc(n, sizeof *was) : (unsigned *)0;
     if (!was) return *t;
-    memcpy(was, *t, RATE_SLOTS * sizeof *was);
-    memset(*t, 0, RATE_SLOTS * sizeof **t);
-    for (unsigned i = 0; i < RATE_SLOTS; i++) {
+    memcpy(was, *t, n * sizeof *was);
+    memset(*t, 0, n * sizeof **t);
+    for (unsigned i = 0; i < n; i++) {
         unsigned v = was[i], k = rate_home(v);
         if (!(v & 7) || (v & 7) > 5) continue;
         for (unsigned n = 0; n < RATE_SLOTS && (*t)[k] && ((*t)[k] ^ v) >= 8; n++)
