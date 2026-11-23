@@ -12,12 +12,13 @@
  *   q2-iap [--echo] [--echo-from N] [--iap2] [--np FILE] [--uuid HEX] [--car-pcm DEV] [--car-file F]
  *          [--cmd-file F] [--rate-file F] [--art-dir D] [--sessions N] [--for S] [--gap-ms MS] [--carplay]
  *          [--phase NAME] [--state F] [--udc F] [--counters DIR] [--under F] [--auto-ms MS] [--car-ms MS]
- *          [--lib-db F] [--lib-cat F] [--lib-sent F] [--list-file F] [--queue-file F]
+ *          [--lib-db F] [--lib-cat F] [--lib-sent F] [--list-file F] [--queue-file F] [--card-wait-ms MS]
+ *          [--clock-file F]
  *          LOG DIR:KIND...
  *   q2-iap --descs KIND     the descriptor and strings blobs for KIND on stdout (tests)
  *
  * KIND is ptp (configuration 1), hid (2), ptpmux (3) or ptpmuxeth (4). A session is the time from an
- * ENABLE to a DISABLE or SUSPEND not followed by another ENABLE or RESUME within --gap-ms (a cable out, not a
+ * ENABLE to a DISABLE or SUSPEND not followed by another ENABLE or RESUME within --gap-ms on the boot clock (a cable out, not a
  * reset: in the car a cable out was a SUSPEND, the controller left suspended with no VBUS); with
  * --sessions N it exits 10 after the Nth ends, and with --for S, 0 after S seconds. Exit 1 is a
  * set-up failure (an ep0 that would not take its descriptors); 20 and 21 are --state's computer and silent host.
@@ -55,6 +56,7 @@ ssize_t write(int, const void *, size_t);
 int poll(struct pollfd *, unsigned long, int);
 int clock_gettime(int, struct timespec *);
 long time(long *);
+long atol(const char *);
 int snprintf(char *, size_t, const char *, ...);
 int strcmp(const char *, const char *);
 int strncmp(const char *, const char *, size_t);
@@ -100,6 +102,7 @@ void *bsearch(const void *, const void *, size_t, size_t, int (*)(const void *, 
 #define O_TRUNC 0x0200  /* MIPS */
 #define POLLIN 1
 #define CLOCK_MONOTONIC 1
+#define CLOCK_BOOTTIME 7
 #define F_SETFL 4
 #define O_NONBLOCK 0x0080 /* MIPS */
 #define SIGHUP 1
@@ -227,11 +230,21 @@ static void strings(struct blob *out, int kind) {
 
 static int logfd = 2;
 static long log_slowest; /* this loop pass's slowest log write, ms */
-static struct timespec t0;
 static long mono_ms(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return t.tv_sec * 1000L + t.tv_nsec / 1000000L;
+}
+/* The clock of every timer and deadline (the session's gap, the link's, the host's windows): CLOCK_BOOTTIME, which
+ * goes on while the Q2 is suspended, where CLOCK_MONOTONIC stops, so hours asleep are hours (uac1-power-app.md #6).
+ * The log's stamps and the loop's step timer stay on the monotonic clock, dmesg's. clock_skew: --clock-file's
+ * milliseconds, a sleep the host tests stand in for (read every pass, sleep_poll). */
+static const char *clock_file;
+static long clock_skew;
+static long boot_ms(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_BOOTTIME, &t);
+    return t.tv_sec * 1000L + t.tv_nsec / 1000000L + clock_skew;
 }
 /* One line, written whole: the shell's lines go to the same file (O_APPEND). Stamped with
  * CLOCK_MONOTONIC as seconds, dmesg's clock (equal to /proc/uptime with no suspend between). */
@@ -595,7 +608,7 @@ static unsigned io_artwork(const struct iap2_np *n, unsigned char *out, unsigned
 
 static void art_made_ask(const char *path, unsigned key) {
     if (made.pid || key == made.tried) return;
-    made.tried = made.key = key, made.at = mono_ms();
+    made.tried = made.key = key, made.at = boot_ms();
     if (made.dst[0]) unlink(made.dst); /* the last song's: one kept, in RAM (/tmp) */
     snprintf(made.dst, sizeof made.dst, "%s.%08x.jpg", art_made, key);
     char tmp[620];
@@ -615,7 +628,7 @@ static void art_made_poll(void) {
     if (!made.pid) return;
     char tmp[620], msg[160];
     snprintf(tmp, sizeof tmp, "%s.ff", made.dst);
-    long took = mono_ms() - made.at;
+    long took = boot_ms() - made.at;
     if (!kill(made.pid, 0) && took < ART_MADE_MS) return; /* still at it (children are reaped: SIGCHLD ignored) */
     if (took >= ART_MADE_MS) kill(made.pid, 9);
     made.pid = 0;
@@ -732,7 +745,7 @@ static void state_write(void) {
 
 static void decide(int v, const char *what) {
     char msg[160];
-    long now = mono_ms();
+    long now = boot_ms();
     verdict = v, verdict_ms = now - (host_at >= 0 ? host_at : started_at);
     snprintf(why, sizeof why, "%s", what);
     snprintf(msg, sizeof msg, "host: %s (%s), %ld ms after it %s", verdicts[v], what, verdict_ms,
@@ -886,7 +899,7 @@ STEPPED_VOID(lib_play, "the shim's play list", (const unsigned *rids, unsigned n
              (rids, n, at, shuffle))
 STEPPED(int, lib_queue, "the shim's queue file", (unsigned *rids, unsigned cap), (rids, cap))
 
-static const struct iap2_host io = { io_send,           mono_ms,           io_log,        io_now_playing_stepped,
+static const struct iap2_host io = { io_send,           boot_ms,           io_log,        io_now_playing_stepped,
                                      "Q2 Muse",         uuid,              library_id,    io_audio_stepped,
                                      io_command_stepped, io_artwork_stepped, &lib_t,      lib_load_stepped,
                                      lib_ready_stepped, lib_saved_stepped, lib_play_stepped,  lib_queue_stepped,
@@ -1008,7 +1021,7 @@ static void event(struct inst *i, const unsigned char *e) {
     int type = e[8];
     char msg[160];
     if (state_file && host_at < 0 && (type == EV_SETUP || type == EV_ENABLE)) { /* a request: the host is there */
-        host_at = mono_ms();
+        host_at = boot_ms();
         state_write();
     }
     if (type == EV_SETUP) {
@@ -1032,10 +1045,35 @@ static void event(struct inst *i, const unsigned char *e) {
             logline("probe", msg);
         }
     } else if ((type == EV_DISABLE || type == EV_SUSPEND) && active) {
-        if (disabled_at < 0) disabled_at = mono_ms();
+        if (disabled_at < 0) disabled_at = boot_ms();
     } else if (type == EV_RESUME) {
         disabled_at = -1;
     }
+}
+
+/* A sleep: the boot clock gone further than the monotonic one since the last pass (the Q2 was suspended that long,
+ * SLEEP_MS or more). Said in the log, and a link that was up is lost: the car on the other end has long given it up,
+ * and a car that re-enumerates at the wake starts a session afresh (uac1-power-app.md #6). */
+#define SLEEP_MS 1000
+static void sleep_poll(void) {
+    static long apart, seen_apart;
+    if (clock_file) {
+        char b[24];
+        int fd = open(clock_file, O_RDONLY), n = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
+        if (fd >= 0) close(fd);
+        if (n > 0) b[n] = 0, clock_skew = atol(b);
+    }
+    long d = boot_ms() - mono_ms();
+    if (!seen_apart) seen_apart = 1, apart = d;
+    if (d - apart < SLEEP_MS) return;
+    char msg[96];
+    snprintf(msg, sizeof msg, "suspend: the Q2 slept %ld ms", d - apart);
+    logline("probe", msg);
+    if (iap2_mode && link_up) {
+        snprintf(msg, sizeof msg, "link: lost (the Q2 slept %ld s)", (d - apart) / 1000);
+        iap2_lost(msg);
+    }
+    apart = d;
 }
 
 static int kind_of(const char *s) {
@@ -1098,6 +1136,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(o, "--quiet-ms")) link_quiet_ms = atoi(v), ++a;
         else if (!strcmp(o, "--health-ms")) health_ms = atoi(v), ++a;
         else if (!strcmp(o, "--stall-ms")) stall_ms = atoi(v), ++a;
+        else if (!strcmp(o, "--clock-file")) clock_file = v, ++a;
+        else if (!strcmp(o, "--card-wait-ms")) card_wait_ms = atoi(v), ++a;
         else if (!strcmp(o, "--card-root")) card_root = v, ++a;
         else if (!strcmp(o, "--uuid")) {
             /* the serial's first 32 hex digits as a UUID */
@@ -1110,7 +1150,6 @@ int main(int argc, char **argv) {
     if (argc - a < 2 || argc - a - 1 > MAX_INST) return usage();
     logfd = open(argv[a++], O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (logfd < 0) logfd = 2;
-    clock_gettime(CLOCK_MONOTONIC, &t0);
     signal(SIGTERM, on_signal), signal(SIGINT, on_signal), signal(SIGHUP, on_signal);
     signal(SIGPIPE, SIG_IGN), signal(SIGCHLD, SIG_IGN); /* echo children reaped by the kernel */
     alarm_interrupts();
@@ -1144,9 +1183,9 @@ int main(int argc, char **argv) {
         if (in[k].kind == K_HID) writer_start(in[k].dir);
     if (iap2_mode) sid_index_start(); /* the server songs' index, made while the car identifies (q2_iap_lib.c) */
     if (iap2_mode) iap2_connect(&io);
-    long end = for_s > 0 ? mono_ms() + for_s * 1000L : 0;
+    long end = for_s > 0 ? boot_ms() + for_s * 1000L : 0;
     int rc = 0;
-    started_at = mono_ms();
+    started_at = boot_ms();
     state_write();
     while (!stopping && !leave) {
         struct pollfd p[MAX_INST];
@@ -1171,11 +1210,13 @@ int main(int argc, char **argv) {
                 logline(in[k].name, msg);
             }
         }
+        loop_step("the clocks");
+        sleep_poll();
         loop_step("the rate file");
-        if (iap2_mode) rate_poll(mono_ms());
+        if (iap2_mode) rate_poll(boot_ms());
         loop_step("iAP2's tick");
         if (iap2_mode) iap2_tick();
-        long now = mono_ms();
+        long now = boot_ms();
         loop_step("the cover's making");
         if (iap2_mode) art_made_poll();
         loop_step("the library's read");
@@ -1190,6 +1231,7 @@ int main(int argc, char **argv) {
             snprintf(msg, sizeof msg, "session %d ended (no ENABLE within %ld ms of the DISABLE)", session, gap_ms);
             logline("probe", msg);
             summary();
+            if (iap2_mode) iap2_session_end(); /* the car's file and the link with it (uac1-power-app.md #19) */
             if (sessions_max && session >= sessions_max) {
                 rc = 10;
                 break;

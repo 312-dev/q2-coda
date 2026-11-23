@@ -292,9 +292,12 @@ static unsigned lib_stream_rids(const char *const *paths, unsigned *rids, unsign
  * hash. The card's songs (songtable) and, while a server is signed in (its catalogue on the card, as Car Remote's
  * library attaches it: coda_rc_lib.c lib_open), the server's (servertable, rids from 0x40000000): on the Q2 of the
  * 2026-11-20 drive songtable was empty and every song the server's, 9,199 of them, and iDrive got none. The server
- * songs' stream-path index rows into *sv (*sn of them), for lib_stream_rids. 0, or -1 with no database. Run in
- * lib_load's child, never in the loop. */
+ * songs' stream-path index rows into *sv (*sn of them), for lib_stream_rids. 0; -1 with no database; -2 when the
+ * catalogue cannot be read (absent, or not attached) while the record of what the car holds has server songs: the
+ * card not mounted yet (a wake, a card lent to a computer), which is not a server library gone (an app signed out
+ * leaves its catalogue, without its rows). Run in lib_load's child, never in the loop. */
 static unsigned lib_pool_len; /* lib_t.pool's bytes in use, for the child's hand-over */
+static long card_wait_ms = 10000; /* --card-wait-ms: how long the child waits for a catalogue it cannot read */
 static int lib_read(struct lib_sid **sv_out, unsigned *sn_out) {
     sqlite3 *db = 0;
     sqlite3_stmt *st = 0;
@@ -305,6 +308,15 @@ static int lib_read(struct lib_sid **sv_out, unsigned *sn_out) {
     if (sqlite3_open_v2(lib_db, &db, SQLITE_OPEN_READONLY, 0) == 0 && !access(lib_cat, 0) && !strchr(lib_cat, '\'')) {
         snprintf(sql, sizeof sql, "attach '%s' as cat", lib_cat);
         server = sqlite3_exec(db, sql, 0, 0, 0) == 0;
+    }
+    if (!server) { /* no catalogue: none signed in ever, or the card not there yet (the record says which) */
+        lib_read_sent();
+        int had = lib_t.sent_n && lib_t.sent[lib_t.sent_n - 1].rid >= 0x40000000u; /* the record is in rid order */
+        lib_free();
+        if (had) {
+            if (db) sqlite3_close(db);
+            return -2;
+        }
     }
     snprintf(sql, sizeof sql, "%s%s%s", LIB_COLS("songtable") "0, null, null from main.songtable where " LIB_WHERE,
              server ? " union all " LIB_COLS("s") "ifnull(m.seconds,0), m.app, m.sid from cat.servertable s left join"
@@ -371,13 +383,13 @@ static int lib_read(struct lib_sid **sv_out, unsigned *sn_out) {
  * memory (this machine's order; the child is a fork of this program). The loop takes the bytes in as they come
  * (lib_load_poll) and, at the end, points lib_t into them; the tables before stay in use until then. */
 struct lib_head {
-    unsigned magic, n, pool_len, nlists, nlrids, sent_n, sn;
+    unsigned magic, n, pool_len, nlists, nlrids, sent_n, sn, unreadable; /* unreadable: lib_read's -2, no tables */
     char rev[40], sent_rev[40];
 };
 #define LIB_MAGIC 0x51324c42u
 static struct {
     int fd, pid;          /* the child's pipe and pid while it reads, else -1 and 0 */
-    int ready;            /* 1 the tables installed, -1 none read; 0 not yet (lib_ready) */
+    int ready;            /* 1 the tables installed, 2 the catalogue unreadable, -1 none read; 0 not yet */
     long at;              /* when it began */
     unsigned char *in;    /* its bytes so far */
     unsigned in_n, in_cap;
@@ -403,7 +415,25 @@ static void lib_child(int out) {
     unsigned sn;
     static const unsigned char zero[4];
     nice(10);
-    if (lib_read(&sv, &sn) < 0) _exit(1);
+    long until = boot_ms() + card_wait_ms, from = boot_ms();
+    int r;
+    while ((r = lib_read(&sv, &sn)) == -2 && boot_ms() < until) {
+        struct timespec ts = { 0, 250000000L };
+        nanosleep(&ts, 0);
+    }
+    char msg[120];
+    if (boot_ms() - from >= 250) {
+        snprintf(msg, sizeof msg, "library: waited for the card %ld ms, %s", boot_ms() - from,
+                 r == -2 ? "and the catalogue cannot be read" : "and read the catalogue");
+        logline("lib", msg);
+    }
+    if (r == -2) {
+        struct lib_head h;
+        memset(&h, 0, sizeof h);
+        h.magic = LIB_MAGIC, h.unreadable = 1;
+        _exit(lib_write_all(out, &h, sizeof h) ? 1 : 0);
+    }
+    if (r < 0) _exit(1);
     if (sv) qsort(sv, sn, sizeof *sv, sid_cmp); /* here, not in the loop (lib_install) */
     struct lib_head h;
     memset(&h, 0, sizeof h);
@@ -431,6 +461,7 @@ static int lib_install(unsigned char *b, unsigned len) {
     struct lib_head h;
     if (len < sizeof h) return 0;
     memcpy(&h, b, sizeof h);
+    if (h.magic == LIB_MAGIC && h.unreadable && len == sizeof h) return 2; /* the tables before stay */
     if (h.magic != LIB_MAGIC || lib_want(&h) != len || !h.pool_len) return 0;
     lib_free();
     lib_blob = b;
@@ -474,13 +505,14 @@ static void lib_load_poll(void) {
     }
     close(lload.fd), lload.fd = -1, lload.pid = 0;
     char msg[160];
-    int ok = lload.in && lib_install(lload.in, lload.in_n);
-    if (!ok) free(lload.in);
-    snprintf(msg, sizeof msg, "library: %s by its child in %ld ms (%u bytes)", ok ? "read" : "not read",
-             mono_ms() - lload.at, lload.in_n);
+    int ok = lload.in ? lib_install(lload.in, lload.in_n) : 0;
+    if (ok != 1) free(lload.in);
+    snprintf(msg, sizeof msg, "library: %s by its child in %ld ms (%u bytes)",
+             ok == 1 ? "read" : ok == 2 ? "not read, the catalogue unreadable," : "not read", mono_ms() - lload.at,
+             lload.in_n);
     logline("lib", msg);
     lload.in = 0, lload.in_n = lload.in_cap = 0;
-    lload.ready = ok ? 1 : -1;
+    lload.ready = ok ? ok : -1;
 }
 
 /* The host's lib_load: the library's read begun in a child (one already reading goes on). 0, or -1 when no child
@@ -507,7 +539,8 @@ static int lib_load(void) {
     return 0;
 }
 
-/* The host's lib_ready: 1 the tables read (in lib_t), -1 none, 0 still reading. */
+/* The host's lib_ready: 1 the tables read (in lib_t), 2 the catalogue unreadable (lib_t as it was), -1 none, 0 still
+ * reading. */
 static int lib_ready(void) {
     lib_load_poll();
     return lload.ready;

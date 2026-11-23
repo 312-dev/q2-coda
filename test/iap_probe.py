@@ -1911,5 +1911,110 @@ def test_the_library_s_read_does_not_hold_the_loop(probe, tmp_path, monkeypatch)
     assert held(log, "the library's read") == [], held(log, "the library's read")
 
 
+
+def test_a_session_s_end_takes_the_car_s_audio_and_the_link(probe, tmp_path):
+    """uac1-power-app.md #19: a DISABLE or SUSPEND past the gap ended q2-iap's session (its summary written) but left
+    the car's file, so the player kept writing to a way 3 nobody read, and the link, so a bus RESUME went on with
+    active 0. The session's end now removes the car's file and forgets the link; the next ENABLE is session 2."""
+    p, car, fd, log, files = bmw_up(probe, tmp_path, '--gap-ms', '300')
+    try:
+        car.send(message(0xDA00))
+        assert car.msg()[0] == 0xDA01
+        time.sleep(0.1)
+        assert files['car'].exists()
+        car.ffs.event(DISABLE)
+        time.sleep(0.8)
+        assert not files['car'].exists(), "the car's file outlived its session"
+        car.ffs.event(ENABLE)
+        time.sleep(0.2)
+    finally:
+        stop(p, fd)
+    text = log.read_text()
+    assert 'session 1 ended' in text and 'session 2 begins' in text
+    assert 'iap2 link: forgotten with its session' in text
+
+
+def test_a_sleep_ends_the_session_and_the_link(probe, tmp_path):
+    """uac1-power-app.md #6: the session gap and the link's timers ran on CLOCK_MONOTONIC, which stops while the Q2 is
+    suspended, so hours asleep after a DISABLE read as no time and the old session went on at the wake. They run on
+    CLOCK_BOOTTIME now. --clock-file stands in for a sleep: the milliseconds it holds are added to the boot clock and
+    not to the monotonic one. A sleep past the gap after a DISABLE ends the session; a sleep with the link up is a
+    lost link."""
+    clock = tmp_path/'clock'
+    clock.write_text('0\n')
+    p, car, fd, log, files = bmw_up(probe, tmp_path, '--clock-file', str(clock))
+    try:
+        car.send(message(0xDA00))
+        assert car.msg()[0] == 0xDA01
+        time.sleep(0.1)
+        car.ffs.event(DISABLE)
+        time.sleep(0.2)
+        clock.write_text('20000\n')  # 20 s asleep, past the 8 s gap
+        time.sleep(0.4)
+        assert 'session 1 ended' in log.read_text()
+        assert not files['car'].exists()
+    finally:
+        stop(p, fd)
+    (tmp_path/'awake').mkdir()
+    p, car, fd, log, files = bmw_up(probe, tmp_path/'awake', '--clock-file', str(clock))
+    try:
+        time.sleep(0.2)
+        clock.write_text('60000\n')  # 40 s more, the link up and no DISABLE
+        time.sleep(0.4)
+    finally:
+        stop(p, fd)
+    text = log.read_text()
+    assert 'link: lost (the Q2 slept 40' in text, [l for l in text.splitlines() if 'link' in l][-5:]
+    assert 'session 1 ended' not in text
+
+
+def test_a_catalogue_that_cannot_be_read_is_not_an_empty_one(probe, tmp_path, monkeypatch):
+    """uac1-power-app.md #4: a car asking for the library with the card not mounted yet (a wake, a card lent to a
+    computer) was told every server song was gone, and the record then said it held the smaller library, so the next
+    drive pushed them all again. With the sent record holding server songs and the catalogue absent, the read waits
+    for the card a bounded time (--card-wait-ms); a catalogue there by then is read as usual, and one still absent
+    leaves the car with the library it holds: its revision back, complete, nothing gone, the record unchanged."""
+    monkeypatch.setattr(BmwCar, 'msg', bmw_msg_keeping_body)
+    cat = tmp_path/'catalogue.db'
+    song_db(tmp_path/'database.db', [SONGS[1]])
+    server = [(0x40000000 + k, t, 'Vide Noir', 'Lord Huron', '', 'Rock', k + 1, 1,
+               f'/mnt/mmc/.subsonic/cat/a/{k}.flac') for k, t in enumerate(('Lost in Time and Space', 'Never Ever'))]
+    catalogue_db(cat, server)
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path)
+    try:
+        items, gone, rev, reset = library(car)
+        assert len(items) == 3
+        time.sleep(0.2)
+    finally:
+        stop(p, fd)
+    record = sent.read_text()
+    cat.rename(tmp_path/'away.db')  # the card not mounted
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path, '--card-wait-ms', '600', run='run2')
+    try:
+        items, gone, rev2, reset = library(car, rev)
+        time.sleep(0.2)
+    finally:
+        stop(p, fd)
+    assert (items, gone, rev2, reset) == ([], [], rev, False)
+    assert sent.read_text() == record
+    assert 'the catalogue cannot be read' in log.read_text()
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path, '--card-wait-ms', '5000', run='run3')
+    try:
+        car.send(message(0x4C03, prm(0, b'lib\0'), prm(1, rev.encode() + b'\0')))
+        time.sleep(0.5)
+        (tmp_path/'away.db').rename(cat)  # mounted half a second into the read
+        items, gone, rev3, reset = [], [], None, False
+        while rev3 is None:
+            mid, _ = car.msg(8)
+            ps = plist(car.last)
+            gone += [int.from_bytes(d, 'big') for i, d in ps if i == 4]
+            if dict(ps).get(7) == b'\x64':
+                rev3 = dict(ps).get(1, b'').rstrip(b'\0').decode()
+    finally:
+        stop(p, fd)
+    assert (gone, rev3) == ([], rev)
+    assert 'waited for the card' in log.read_text()
+
+
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-q', *sys.argv[1:]]))

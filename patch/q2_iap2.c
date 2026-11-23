@@ -93,7 +93,7 @@ struct iap2_host {
     unsigned (*artwork)(const struct iap2_np *np, u8 *out, unsigned cap); /* the song's cover, a JPEG, or 0 */
     struct iap2_library *lib;   /* the library, filled once lib_load's read is over */
     int (*lib_load)(void);      /* its read begun, off the loop: 0, or -1 with none to send */
-    int (*lib_ready)(void);     /* 1 lib filled, -1 none to send, 0 still reading */
+    int (*lib_ready)(void);     /* 1 lib filled, 2 the server's catalogue unreadable, -1 none to send, 0 reading */
     void (*lib_saved)(void);    /* the car holds lib's revision whole */
     void (*play)(const unsigned *rids, unsigned n, unsigned at, int shuffle);
     int (*queue)(unsigned *rids, unsigned cap); /* the playing queue's rids, or -1 */
@@ -1387,6 +1387,21 @@ static void send_library_updates(const char *car_rev, unsigned mask) {
     ls.phase = LIB_READING, ls.x_state = 0;
 }
 
+/* The server's catalogue unreadable while the car was last sent server songs (q2_iap_lib.c lib_read's -2, the card
+ * not mounted yet): not read as every server song gone (uac1-power-app.md #4). The car keeps what it holds: its own
+ * revision back, complete, and nothing recorded as sent. */
+static void library_unreadable(void) {
+    char t[220];
+    snprintf(t, sizeof t, "library: the catalogue cannot be read (the card not mounted?): the car keeps %s",
+             lib_ask.has_rev ? lib_ask.rev : "nothing");
+    H->log(t);
+    if (!lib_ask.has_rev) {
+        send_library_none();
+        return;
+    }
+    msg_start(0x4C04), param_str(0, H->library_id), param_str(1, lib_ask.rev), param_u8(7, 100), msg_send();
+}
+
 static void library_read(void) {
     char t[300];
     const char *car_rev = lib_ask.has_rev ? lib_ask.rev : 0;
@@ -1826,6 +1841,7 @@ static void iap2_tick(void) {
     if (ls.phase == LIB_READING) {
         int r = H->lib_ready();
         if (r < 0) ls.phase = LIB_IDLE, send_library_none();
+        else if (r == 2) ls.phase = LIB_IDLE, library_unreadable();
         else if (r > 0) library_read();
     }
     lists_pump(now);
@@ -1841,4 +1857,11 @@ static void iap2_connect(const struct iap2_host *h) {
     my_seq = 1, peer_seq = 0, head = 0;
     rx_len = 0, rx_partial = 0;
     reset_link();
+}
+
+/* A session's end (q2_iap.c: no ENABLE or RESUME within the gap): the link forgotten with it, the car's audio file
+ * removed (iap2_control_reset), so a bus that comes back without the car's detect gets nothing of the old link. */
+static void iap2_session_end(void) {
+    if (seen) H->log("link: forgotten with its session");
+    iap2_connect(H);
 }
