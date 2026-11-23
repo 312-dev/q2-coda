@@ -825,6 +825,27 @@ static void file_send(u8 id, u8 op, const u8 *d, unsigned n) {
     enqueue(file_session, b, n + 2);
 }
 
+/* A file transfer's pieces: the bytes a piece holds (the car's packet or BULK_MAX, less the header, its checksum and
+ * the piece's id and op; MIN_PEER_MAX keeps it above 100), each piece's op (C0 the only, 80 the first, 00 one in the
+ * middle, 40 the last), a new transfer's id (80 to FF, round), and a song's 8-byte id */
+static unsigned piece_room(void) { return (peer_max < BULK_MAX ? peer_max : BULK_MAX) - HEADER_LEN - 1 - 2; }
+static u8 piece_op(int first, int last) { return first && last ? 0xC0 : first ? 0x80 : last ? 0x40 : 0x00; }
+static void file_pieces(u8 id, const u8 *d, unsigned len, unsigned *sent, unsigned room) {
+    while (*sent < len) {
+        unsigned k = len - *sent < room ? len - *sent : room;
+        file_send(id, piece_op(*sent == 0, *sent + k == len), d + *sent, k);
+        *sent += k;
+    }
+}
+static u8 transfer_take(void) {
+    u8 id = next_transfer;
+    next_transfer = id == 0xFF ? 0x80 : id + 1;
+    return id;
+}
+static void put_id8(u8 *p, u32 hi, u32 lo) {
+    for (int b = 0; b < 4; ++b) p[b] = (u8)(hi >> (24 - 8 * b)), p[4 + b] = (u8)(lo >> (24 - 8 * b));
+}
+
 /* A baseline JPEG as PodBox's car needed it: each quantisation and Huffman table in a segment of its own, the bytes
  * otherwise as they are. 0 for anything else (a progressive JPEG, a PNG, a broken file). */
 static unsigned jpeg_tables_apart(const u8 *in, unsigned n, u8 *out, unsigned cap) {
@@ -871,7 +892,7 @@ static u8 art_start(const struct iap2_np *n) {
     char t[120];
     if (!file_session) return 0;
     if (art_going && art_id) file_send(art_id, 0x02, 0, 0);
-    art_id = next_transfer, next_transfer = next_transfer == 0xFF ? 0x80 : next_transfer + 1;
+    art_id = transfer_take();
     /* a stream has no cover, but is named one, empty: with none named the car keeps the last song's */
     unsigned got = H->artwork && !n->live ? H->artwork(n, raw, sizeof raw) : 0;
     art_len = got ? jpeg_tables_apart(raw, got, art, sizeof art) : 0;
@@ -896,14 +917,8 @@ static void iap2_file(const u8 *d, unsigned n) {
     H->log(t);
     if (list_transfer_word(d)) return;
     if (d[0] == ql_id && ql_going && d[1] == 0x01) { /* the queue list: every piece */
-        unsigned room = (peer_max < BULK_MAX ? peer_max : BULK_MAX) - HEADER_LEN - 1 - 2, sent = 0;
-        room -= room % 8;
-        while (sent < ql_len) {
-            unsigned k = ql_len - sent < room ? ql_len - sent : room;
-            u8 op = sent == 0 && sent + k == ql_len ? 0xC0 : sent == 0 ? 0x80 : sent + k == ql_len ? 0x40 : 0x00;
-            file_send(ql_id, op, ql + sent, k);
-            sent += k;
-        }
+        unsigned sent = 0;
+        file_pieces(ql_id, ql, ql_len, &sent, piece_room() - piece_room() % 8);
         return;
     }
     if (d[0] == ql_id && (d[1] == 0x02 || d[1] == 0x05)) {
@@ -912,14 +927,8 @@ static void iap2_file(const u8 *d, unsigned n) {
     }
     if (d[0] != art_id || !art_going) return;
     if (d[1] == 0x01) { /* go: every piece, as the window allows */
-        unsigned room = (peer_max < BULK_MAX ? peer_max : BULK_MAX) - HEADER_LEN - 1 - 2;
         if (!art_len) file_send(art_id, 0xC0, 0, 0);
-        while (art_sent < art_len) {
-            unsigned k = art_len - art_sent < room ? art_len - art_sent : room;
-            u8 op = art_sent == 0 && art_sent + k == art_len ? 0xC0 : art_sent == 0 ? 0x80 : art_sent + k == art_len ? 0x40 : 0x00;
-            file_send(art_id, op, art + art_sent, k);
-            art_sent += k;
-        }
+        file_pieces(art_id, art, art_len, &art_sent, piece_room());
     } else if (d[1] == 0x02 || d[1] == 0x05) {
         art_going = 0;
         H->log(d[1] == 0x05 ? "art: the car took it" : "art: the car cancelled it");
@@ -1130,6 +1139,25 @@ static struct {
 
 static const char *lib_str(unsigned off) { return H->lib->pool + off; }
 
+/* The update being built has no room for one more item (an item's group with its id, and the 5 bytes the update ends
+ * with), in a packet of BULK_MAX or the car's maximum */
+static int msg_full(void) {
+    return !m.ok || m.len + 4 + 64 + 5 > BULK_MAX - HEADER_LEN - 1 || m.len + 4 + 64 + 5 > peer_max - HEADER_LEN - 1;
+}
+
+/* The first of n records (stride bytes apart, each starting with an unsigned key, sorted by it) whose key is not
+ * below key: its index, n when there is none */
+static unsigned lower_key(const void *base, unsigned n, unsigned stride, unsigned key) {
+    unsigned lo = 0, hi = n;
+    while (lo < hi) {
+        unsigned mid = (lo + hi) / 2, k;
+        memcpy(&k, (const u8 *)base + (size_t)mid * stride, sizeof k);
+        if (k < key) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
+
 static void lib_named(unsigned mask, unsigned id_param, u32 hi, u32 id, const char *name) {
     if (!*name) return;
     if (mask & 1u << id_param) param_u64(id_param, hi, id);
@@ -1155,34 +1183,19 @@ static void lib_item(const struct iap2_track *t, unsigned mask) {
 /* Is the car's copy of this song the one it was last sent (diff), so it needs nothing? */
 static int lib_unchanged(const struct iap2_track *t) {
     const struct iap2_library *l = H->lib;
-    unsigned lo = 0, hi = l->sent_n;
-    while (lo < hi) {
-        unsigned mid = (lo + hi) / 2;
-        if (l->sent[mid].rid < t->rid) lo = mid + 1;
-        else hi = mid;
-    }
+    unsigned lo = lower_key(l->sent, l->sent_n, sizeof *l->sent, t->rid);
     return lo < l->sent_n && l->sent[lo].rid == t->rid && l->sent[lo].hash == t->hash;
 }
 
 static int lib_index(unsigned rid) { /* a song's index in the library, or -1 */
     const struct iap2_library *l = H->lib;
-    unsigned lo = 0, hi = l->n;
-    while (lo < hi) {
-        unsigned mid = (lo + hi) / 2;
-        if (l->tracks[mid].rid < rid) lo = mid + 1;
-        else hi = mid;
-    }
+    unsigned lo = lower_key(l->tracks, l->n, sizeof *l->tracks, rid);
     return lo < l->n && l->tracks[lo].rid == rid ? (int)lo : -1;
 }
 static int lib_kept(unsigned rid) { return lib_index(rid) >= 0; } /* still in the library */
 
 static int in_first(unsigned i) { /* sent in this connection's first update */
-    unsigned lo = 0, hi = ls.nf;
-    while (lo < hi) {
-        unsigned mid = (lo + hi) / 2;
-        if (ls.sorted[mid] < i) lo = mid + 1;
-        else hi = mid;
-    }
+    unsigned lo = lower_key(ls.sorted, ls.nf, sizeof *ls.sorted, i);
     return lo < ls.nf && ls.sorted[lo] == i;
 }
 
@@ -1232,11 +1245,11 @@ static int list_record(unsigned j) {
     param_u64(2, 0, 0);
     param_u8(3, 0), param_u8(4, 0), param_u8(5, id);
     group_end();
-    if (!m.ok || m.len + 4 + 64 + 5 > BULK_MAX - HEADER_LEN - 1 || m.len + 4 + 64 + 5 > peer_max - HEADER_LEN - 1) {
+    if (msg_full()) {
         m.len = mark, m.ok = 1;
         return 0;
     }
-    ls.list_ids[j] = id, next_transfer = next_transfer == 0xFF ? 0x80 : next_transfer + 1;
+    ls.list_ids[j] = transfer_take(); /* id, taken now that the record fits */
     return 1;
 }
 
@@ -1257,7 +1270,7 @@ static void lib_pump(void) {
         while (ls.phase == LIB_FIRST && ls.fi < ls.nf) {
             unsigned mark = m.len;
             lib_item(&l->tracks[ls.first[ls.fi]], ls.mask);
-            if (!m.ok || m.len + 4 + 64 + 5 > BULK_MAX - HEADER_LEN - 1 || m.len + 4 + 64 + 5 > peer_max - HEADER_LEN - 1) {
+            if (msg_full()) {
                 m.len = mark, m.ok = 1;
                 if (!n) ++ls.fi; /* a song no packet holds */
                 break;
@@ -1283,7 +1296,7 @@ static void lib_pump(void) {
             }
             unsigned mark = m.len;
             lib_item(tr, ls.mask);
-            if (!m.ok || m.len + 4 + 64 + 5 > BULK_MAX - HEADER_LEN - 1 || m.len + 4 + 64 + 5 > peer_max - HEADER_LEN - 1) {
+            if (msg_full()) {
                 m.len = mark, m.ok = 1;
                 if (!n) ++ls.next; /* a song no packet holds */
                 break;
@@ -1355,7 +1368,7 @@ static void lists_pump(long now) {
         memset(setup, 0, 4);
         k = 4, setup[k++] = size >> 24, setup[k++] = size >> 16, setup[k++] = size >> 8, setup[k++] = size;
         setup[k++] = 0, setup[k++] = 4;
-        for (int b = 0; b < 4; ++b) setup[k + b] = (u8)(LIB_LIST >> (24 - 8 * b)), setup[k + 4 + b] = (u8)(li->id >> (24 - 8 * b));
+        put_id8(setup + k, LIB_LIST, li->id);
         k += 8;
         unsigned idn = strlen(H->library_id) + 1;
         if (idn > sizeof setup - k) idn = sizeof setup - k;
@@ -1366,15 +1379,11 @@ static void lists_pump(long now) {
     while (ls.x_state == 2 && q_count < 2) {
         const struct iap2_list *li = &l->lists[ls.xi];
         u8 piece[BULK_MAX];
-        unsigned room = (peer_max < BULK_MAX ? peer_max : BULK_MAX) - HEADER_LEN - 1 - 2, k = 0;
+        unsigned room = piece_room(), k = 0;
         unsigned first = ls.x_sent == 0;
-        while (ls.x_sent < li->n && k + 8 <= room) {
-            unsigned rid = l->lrids[li->at + ls.x_sent++];
-            for (int b = 0; b < 4; ++b) piece[k + b] = (u8)(LIB_KEY >> (24 - 8 * b)), piece[k + 4 + b] = (u8)(rid >> (24 - 8 * b));
-            k += 8;
-        }
+        while (ls.x_sent < li->n && k + 8 <= room) put_id8(piece + k, LIB_KEY, l->lrids[li->at + ls.x_sent++]), k += 8;
         unsigned last = ls.x_sent >= li->n;
-        file_send(ls.x_id, first && last ? 0xC0 : first ? 0x80 : last ? 0x40 : 0x00, piece, k);
+        file_send(ls.x_id, piece_op(first, last), piece, k);
         if (last) ls.x_state = 0, ++ls.xi; /* the next at once, as PodBox's does */
     }
     if (ls.xi >= lib_nlists() && !ls.x_state) {
@@ -1650,13 +1659,9 @@ static void ql_announce(void) {
     H->log(t);
     if (!whole) return;
     if (ql_going && ql_id) file_send(ql_id, 0x02, 0, 0);
-    ql_id = next_transfer, next_transfer = next_transfer == 0xFF ? 0x80 : next_transfer + 1;
+    ql_id = transfer_take();
     ql_len = 0;
-    for (int i = 0; i < n; ++i) {
-        u8 *k = ql + ql_len;
-        for (int b = 0; b < 4; ++b) k[b] = (u8)(LIB_KEY >> (24 - 8 * b)), k[4 + b] = (u8)(rids[i] >> (24 - 8 * b));
-        ql_len += 8;
-    }
+    for (int i = 0; i < n; ++i) put_id8(ql + ql_len, LIB_KEY, rids[i]), ql_len += 8;
     ql_going = 1;
     u8 setup[10] = { 0, 0, 0, 0, ql_len >> 24, ql_len >> 16, ql_len >> 8, ql_len, 0, 3 };
     file_send(ql_id, 0x04, setup, sizeof setup);

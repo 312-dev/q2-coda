@@ -30,10 +30,6 @@ static const char *lib_db = LIB_DB, *lib_cat = LIB_CAT, *lib_sent_file = LIB_SEN
 static const char *card_root = ""; /* put before a catalogue row's /mnt/mmc path (--card-root, for the host tests) */
 static struct iap2_library lib_t; /* the tables q2_iap2.c reads */
 
-static unsigned lib_fnv(unsigned h, const char *s) {
-    while (*s) h = (h ^ (unsigned char)*s++) * 16777619u;
-    return h * 16777619u; /* a separator, so "ab"+"c" is not "a"+"bc" */
-}
 
 static unsigned lib_put(char **pool, unsigned *len, unsigned *cap, const char *s) {
     unsigned n = strlen(s) + 1, at = *len;
@@ -352,11 +348,11 @@ static int lib_read(struct lib_sid **sv_out, unsigned *sn_out) {
         t->artist = lib_put(&pool, &len, &cap, f[2]), t->aartist = lib_put(&pool, &len, &cap, f[3]);
         t->genre = lib_put(&pool, &len, &cap, f[4]), t->composer = lib_put(&pool, &len, &cap, f[5]);
         unsigned h = 2166136261u;
-        for (int k = 0; k < 6; ++k) h = lib_fnv(h, f[k]);
+        for (int k = 0; k < 6; ++k) h = fnv_part(h, f[k]);
         t->hash = (h ^ t->track * 131u ^ t->disc * 65537u ^ t->ms) * 16777619u;
-        t->album_id = lib_fnv(lib_fnv(2166136261u, f[3]), f[1]); /* an album is its album artist's */
-        t->artist_id = lib_fnv(2166136261u, f[2]), t->aartist_id = lib_fnv(2166136261u, f[3]);
-        t->genre_id = lib_fnv(2166136261u, f[4]), t->composer_id = lib_fnv(2166136261u, f[5]);
+        t->album_id = fnv_part(fnv_part(2166136261u, f[3]), f[1]); /* an album is its album artist's */
+        t->artist_id = fnv_part(2166136261u, f[2]), t->aartist_id = fnv_part(2166136261u, f[3]);
+        t->genre_id = fnv_part(2166136261u, f[4]), t->composer_id = fnv_part(2166136261u, f[5]);
         rev = (rev ^ t->rid) * 16777619u, rev = (rev ^ t->hash) * 16777619u;
         if (t->rid) ++n;
         sid_add(&sv, &sn, &scap, (const char *)sqlite3_column_text(st, 10), (const char *)sqlite3_column_text(st, 11),

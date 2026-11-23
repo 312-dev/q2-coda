@@ -158,7 +158,6 @@ _Static_assert(sizeof hid_report == 208, "the report descriptor is 208 bytes");
 static const unsigned char hid_class[] = { 0x09, 0x21, 0x11, 0x01, 0x00, 0x01, 0x22, sizeof hid_report, 0x00 };
 /* Input report sizes after the id, ids 1 to 12 (the descriptor's Report Counts). */
 static const unsigned short in_sizes[] = { 5, 9, 13, 17, 25, 49, 95, 193, 257, 385, 513, 767 };
-static const unsigned char detect[] = { 0xff, 0x55, 0x02, 0x00, 0xee, 0x10 };
 
 enum { K_PTP, K_HID, K_PTPMUX, K_PTPMUXETH, K_COUNT };
 static const char *const kinds[] = { "ptp", "hid", "ptpmux", "ptpmuxeth" };
@@ -344,16 +343,6 @@ static void kernel_usb_lines(const char *why) {
     for (unsigned i = found > KMSG_LINES ? found - KMSG_LINES : 0; i < found; ++i)
         snprintf(msg, sizeof msg, "kernel: %.280s", at[i % KMSG_LINES]), logline("probe", msg);
     free(b);
-}
-static void hex(char *out, unsigned cap, const unsigned char *p, unsigned n) {
-    static const char d[] = "0123456789abcdef";
-    unsigned o = 0;
-    for (unsigned i = 0; i < n && o + 4 < cap; ++i) {
-        out[o++] = d[p[i] >> 4], out[o++] = d[p[i] & 15];
-        if (i + 1 < n) out[o++] = ' ';
-    }
-    if (o + 4 >= cap && cap > 4) out[o++] = '.', out[o++] = '.';
-    out[o] = 0;
 }
 
 /* ---- the instances ---- */
@@ -552,7 +541,7 @@ static void io_send(const unsigned char *r, unsigned len) {
     int w = writer_fd < 0 ? -1 : (int)write(writer_fd, b, len + 1);
     if (w == (int)len + 1) ++wr_queued;
     if (trace_quiet && w == (int)len + 1) return; /* a position update's or a bare acknowledgement's (q2_iap2.c) */
-    hex(h, sizeof h, r, len < 24 ? len : 24);
+    iap2_hex(h, sizeof h, r, len < 24 ? len : 24);
     snprintf(msg, sizeof msg, "report > %s%s", h, w == (int)len + 1 ? "" : " (dropped: the writer is behind)");
     logline("iap2", msg);
 }
@@ -569,16 +558,14 @@ static int io_backlog(void) {
 }
 
 #include "stream_path.h"
+static int read_some(const char *path, char *b, unsigned cap);
 static unsigned lib_stream_rids(const char *const *paths, unsigned *rids, unsigned n); /* q2_iap_lib.c */
 static void sid_index_start(void);                                                     /* q2_iap_lib.c */
 /* The shim's Now Playing (patch/coda_rc_shim.c cr_now, from now_source.c: key=value lines; pos in ms, len in
  * seconds, live=1 for a radio's stream), written while Car Remote is on or the car's iPhone is on the cable. */
 static int io_now_playing(struct iap2_np *n) {
     char b[1600];
-    int fd = open(np_file, O_RDONLY | O_CLOEXEC), len = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
-    if (fd >= 0) close(fd);
-    if (len <= 0) return 0;
-    b[len] = 0;
+    if (read_some(np_file, b, sizeof b) <= 0) return 0;
     for (char *line = b; line && *line;) {
         char *end = strchr(line, '\n'), *eq = strchr(line, '=');
         if (end) *end = 0;
@@ -609,6 +596,15 @@ static int io_now_playing(struct iap2_np *n) {
         lib_stream_rids(&p, &n->id, 1);
     }
     return 1;
+}
+
+/* Up to cap - 1 bytes of a small file, a 0 after them: their count, or -1 with no file (the tmpfs files read every
+ * pass or second: Now Playing, the rate, the controller's state, the clock, a counter) */
+static int read_some(const char *path, char *b, unsigned cap) {
+    int fd = open(path, O_RDONLY | O_CLOEXEC), n = fd < 0 ? -1 : (int)read(fd, b, cap - 1);
+    if (fd >= 0) close(fd);
+    b[n > 0 ? n : 0] = 0;
+    return n;
 }
 
 /* A file written whole, through a temporary name, mode 0600 (the shim takes only root's own, private files). */
@@ -645,9 +641,7 @@ static long rate_at;
 static long rate_every(void) { return audio_on ? RATE_POLL_MS : seen ? RATE_IDLE_MS : -1; } /* -1: not read */
 static unsigned io_rate(void) { /* the host's rate: the file's now, also read when the car asks for audio */
     char b[16];
-    int fd = open(rate_file, O_RDONLY | O_CLOEXEC), n = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
-    if (fd >= 0) close(fd);
-    b[n > 0 ? n : 0] = 0;
+    read_some(rate_file, b, sizeof b);
     return atoi(b) > 0 ? (unsigned)atoi(b) : 44100;
 }
 static void rate_poll(long now) {
@@ -967,10 +961,7 @@ static const char *trouble = "";
 
 static int read_uint(const char *path, unsigned *v) {
     char b[24];
-    int fd = open(path, O_RDONLY | O_CLOEXEC), n = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
-    if (fd >= 0) close(fd);
-    if (n <= 0) return 0;
-    b[n] = 0;
+    if (read_some(path, b, sizeof b) <= 0) return 0;
     *v = (unsigned)atoi(b);
     return 1;
 }
@@ -1065,9 +1056,7 @@ static void host_poll(long now) {
     if (host_at < 0 && udc_file && now - udc_at >= 100) {
         char s[24] = "";
         udc_at = now;
-        int fd = open(udc_file, O_RDONLY | O_CLOEXEC), n = fd < 0 ? -1 : (int)read(fd, s, sizeof s - 1);
-        if (fd >= 0) close(fd);
-        if (n > 0 && (!strncmp(s, "addressed", 9) || !strncmp(s, "configured", 10))) {
+        if (read_some(udc_file, s, sizeof s) > 0 && (!strncmp(s, "addressed", 9) || !strncmp(s, "configured", 10))) {
             host_at = now;
             logline("car", "host: it addressed the Q2");
             state_write();
@@ -1219,7 +1208,7 @@ static void echo_report(struct inst *i, const unsigned char *payload, unsigned n
     unsigned len = 1 + in_sizes[id];
     char path[160], h[64], msg[256];
     snprintf(path, sizeof path, "%s/ep1", i->dir);
-    hex(h, sizeof h, r, len < 16 ? len : 16);
+    iap2_hex(h, sizeof h, r, len < 16 ? len : 16);
     int pid = fork();
     if (pid == 0) {
         child_drop();
@@ -1301,12 +1290,12 @@ static void setup(struct inst *i, const unsigned char *s) {
      * health line, not logged */
     if (!(iap2_mode && rt == 0x21 && rq == 0x09 && r > 0 && (unsigned)r == want && mono_ms() - at < stall_ms &&
           iap2_bare_ack(buf, (unsigned)r))) {
-        hex(h, sizeof h, buf, r > 0 ? (unsigned)r : 0);
+        iap2_hex(h, sizeof h, buf, r > 0 ? (unsigned)r : 0);
         snprintf(msg, sizeof msg, "SETUP %02x %02x %04x %04x %04x -> read %d (errno %d, %ld ms)%s%s%s%s", rt, rq, wv, wi,
                  wl, r, e, mono_ms() - at, note[0] ? ": " : "", note, r > 0 ? " data " : "", r > 0 ? h : "");
         logline(i->name, msg);
     }
-    if (rt == 0x21 && rq == 0x09 && r >= 2 + (int)sizeof detect && !memcmp(buf + 2, detect, sizeof detect))
+    if (rt == 0x21 && rq == 0x09 && r >= 2 + (int)sizeof iap2_probe && !memcmp(buf + 2, iap2_probe, sizeof iap2_probe))
         apple_seen(2, "iAP2's detect");
     if (iap2_mode && i->kind == K_HID && rt == 0x21 && rq == 0x09 && r <= 0)
         logline(i->name, "SET_REPORT: no data stage (the car gave the transfer up, or the read's 2 s ran out): nothing "
@@ -1325,8 +1314,8 @@ static void setup(struct inst *i, const unsigned char *s) {
         iap2_report(buf, (unsigned)r);
         return;
     }
-    if (rt == 0x21 && rq == 0x09 && r >= 2 + (int)sizeof detect && !memcmp(buf + 2, detect, sizeof detect)) {
-        if (echo_on()) echo_report(i, detect, sizeof detect);
+    if (rt == 0x21 && rq == 0x09 && r >= 2 + (int)sizeof iap2_probe && !memcmp(buf + 2, iap2_probe, sizeof iap2_probe)) {
+        if (echo_on()) echo_report(i, iap2_probe, sizeof iap2_probe);
         else logline(i->name, "detect seen: not echoed (echo off in this session)");
     }
 }
@@ -1373,9 +1362,7 @@ static void sleep_poll(void) {
     static long apart, seen_apart;
     if (clock_file) {
         char b[24];
-        int fd = open(clock_file, O_RDONLY | O_CLOEXEC), n = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
-        if (fd >= 0) close(fd);
-        if (n > 0) b[n] = 0, clock_skew = atol(b);
+        if (read_some(clock_file, b, sizeof b) > 0) clock_skew = atol(b);
     }
     long d = boot_ms() - mono_ms();
     if (!seen_apart) seen_apart = 1, apart = d;
