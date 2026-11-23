@@ -5,28 +5,22 @@
 #include "iap2.h"
 #include "iap2_names.h"
 #include "iap2_nowplaying.h"
+#include "iap2_session.h"
 
 extern const u8 iap2_probe[6]; /* iAP2's detect, FF 55 02 00 EE 10 */
-extern int seen, link_up, trace_quiet, audio_on, ever_identified;
+extern int seen, link_up, trace_quiet;
 extern long link_quiet_ms, health_ms;
-extern char car_name[64];
-extern const unsigned iap2_rates[9];
 extern u8 control_session, file_session;
 extern unsigned peer_max, window, head, count, q_count;
 extern long rto;
-extern int msg_quiet, now_playing, np_sent;
-extern long np_at;
-extern u32 media_mask, playback_mask;
+extern int msg_quiet;
 extern unsigned quiet_pos;
-extern unsigned audio_hz;
 
 int backlog(void);
 void enqueue(u8 session, const u8 *b, unsigned n);
 int iap2_bare_ack(const u8 *r, unsigned n);
 int iap2_report(const u8 *r, unsigned len);
 void iap2_lost(const char *why);
-int iap2_rate_index(unsigned hz);
-void iap2_audio_rate(unsigned hz);
 void iap2_tick(void);
 long iap2_due(long now);
 void iap2_connect(const struct iap2_host *h);

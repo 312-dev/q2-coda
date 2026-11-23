@@ -292,7 +292,7 @@ CAR_FEED_CONF = 'usr/share/alsa/alsa.conf.d/30-q2car.conf'
 Q2IAP = 'usr/bin/q2-iap'
 # its sources under patch/ (tools/iap_probe/probe_build.py and test/iap_probe.py build the same list), compiled
 # without -ffunction-sections (compile_helper's sections): each function and object in them is used
-Q2IAP_SOURCES = ['q2_iap', 'q2_iap2', 'iap2_names', 'iap2_hid', 'iap2_msg', 'iap2_xfer', 'iap2_library', 'iap2_nowplaying', 'q2_iap_lib']
+Q2IAP_SOURCES = ['q2_iap', 'q2_iap2', 'iap2_names', 'iap2_hid', 'iap2_msg', 'iap2_xfer', 'iap2_library', 'iap2_nowplaying', 'iap2_session', 'q2_iap_lib']
 UAC1_KO = 'module_driver/usb_f_uac1.ko'
 # Guest Play's daemon (docs/internals.md#guest-play): demo starts it (patch/guest.c), libdbus talks to BlueZ,
 # bluealsa and bluetoothd's shanling.bluez; and the D-Bus policy its sink daemon needs.
