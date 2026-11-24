@@ -1208,9 +1208,9 @@ with tempfile.TemporaryDirectory() as directory:
         assert m.sqls if not back else not m.sqls,m.sqls
         assert m.db.execute('select count(*) from songtable').fetchone()[0]==(1000 if back else 0); m.db.close()  # kept, or made again
 passed()
-# Albums without art start the thread behind a progress screen; destroy joins it and drops the poll.
+# Albums without art start the thread behind the covers, which show at once; destroy joins it and drops its poll.
 m=CoverflowMachine(cached=False); page=m.open()
-assert len(m.threads)==1 and m.timers and any((t or '').startswith('Preparing artwork') for t in m.texts()) and 'Cancel' in m.texts()
+assert len(m.threads)==1 and m.timers and m.find('slide_menu') and not any((t or '').startswith('Preparing') for t in m.texts()) and 'Cancel' not in m.texts()
 f,ctx=m.handler(page,O['EVT_DESTROY']); m.freed=0; assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0
 assert m.joins==[77] and not m.timers and m.freed==4; passed()  # three job paths and the job array
 # Tracks list and play in album order (disc, track, then path, then CUE start), named without
