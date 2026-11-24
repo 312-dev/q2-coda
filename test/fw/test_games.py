@@ -55,7 +55,8 @@ class Game(C.Structure):
                 *((k, C.c_int) for k in 'h screen target picking pick confirm paused choice carry dirty'.split()),
                 ('sud', Sudoku), ('vx', Vortex), ('best', Best), ('sol', Sol), ('save', C.c_uint), ('pop_at', C.c_uint),
                 ('pop_ring', C.c_int), ('pop_seg', C.c_int), ('trail', (C.c_int * 2) * 4), ('record', C.c_int),
-                ('sn_best', Best), ('sn', Snake), ('rows', C.c_int), ('title', C.c_void_p), ('engines', C.c_int)]
+                ('sn_best', Best), ('sn', Snake), ('rows', C.c_int), ('title', C.c_void_p), ('engines', C.c_int),
+                ('full', C.c_int), ('box', C.c_int * 4), ('bar_hidden', C.c_int)]
 
 
 def test_structs_are_the_saves_sizes():
@@ -1898,7 +1899,7 @@ def card_apps(fw, apps):
     return {f'/mnt/mmc/.{k}/q2app': v for k, v in apps.items()}
 
 
-SHIPPED = ['Bricks', 'Cabin Solitaire']  # the build's games (peq.h GAME_*, engine.c eng_games[])
+SHIPPED = ['Bricks', 'Cabin Solitaire', 'Evening Puzzle']  # the build's games (peq.h GAME_*, engine.c eng_games[])
 
 
 def test_the_build_ships_the_engines_games_alone(fw):

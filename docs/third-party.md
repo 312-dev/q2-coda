@@ -139,8 +139,12 @@ license (`docs/ipod.md`).
 | Component                                    | License | Files                                                          | Used for                                                                                                       |
 | -------------------------------------------- | ------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | Phosphor Icons, `@phosphor-icons/core` 2.1.1 | MIT     | `assets/icons/phosphor/*.svg`, `assets/icons/phosphor/LICENSE` | Theme: OLED's glyphs, drawn into bitmaps at build time by `tools/art.py` ([oled-design](oled-design.md#icons)) |
-| Libre Baskerville 2.005 (bold and regular)   | OFL-1.1 | `assets/games/solitaire.bin`, `assets/games/LibreBaskerville-OFL.txt` | Cabin Solitaire: the cards' indexes and the figures and words of its slip and boards, as glyph masks of only the sizes and letters it draws ([games-engine](games-engine.md#cabin-solitaire)) |
-| Playfair Display 1.203 (weight 800)          | OFL-1.1 | `assets/games/solitaire.bin`, `assets/games/PlayfairDisplay-OFL.txt`  | Cabin Solitaire: its boards' two titles, as glyph masks. Its Reserved Font Name is not used: no font is shipped, only the masks |
+| Libre Baskerville (2.005, bold and regular, in Cabin Solitaire) | OFL-1.1 | `assets/games/solitaire.bin`, `patch/game_sudoku_art.inc`, `assets/games/LibreBaskerville-OFL.txt` | Cabin Solitaire: the cards' indexes and the figures and words of its slip and boards ([games-engine](games-engine.md#cabin-solitaire)); the Evening Puzzle: its printed clues, tallies and level names. Glyph masks of only the sizes and letters each draws |
+| Playfair Display (1.203, weight 800, in Cabin Solitaire) | OFL-1.1 | `assets/games/solitaire.bin`, `patch/game_sudoku_art.inc`, `assets/games/PlayfairDisplay-OFL.txt` | Cabin Solitaire's two board titles and the Evening Puzzle's masthead, title and SOLVED stamp, as glyph masks. Its Reserved Font Name is not used: no font is shipped, only the masks |
+| Patrick Hand                                 | OFL-1.1 | `patch/game_sudoku_art.inc`                                     | The Evening Puzzle's handwritten digits and notes |
+| Special Elite                                | Apache-2.0 | `patch/game_sudoku_art.inc`                                  | The Evening Puzzle's small typewritten capitals |
+
+The Evening Puzzle's masks are packed by `tools/game_art.py` from the font files (`FONTS` names each and its SHA-256), which stay out of the repository ([games-engine](games-engine.md#evening-puzzle)); Cabin Solitaire's are in its art file, written by the design's `src/export.py`.
 
 ## What the scan still finds
 

@@ -47,12 +47,18 @@ def _fp64_fix():
     L-format conversions are rewritten to their W equivalents when an image is loaded. Every
     value the traversed canvas code converts fits 32 bits, so the results are identical. An mthc1
     just before one (the 64-bit integer's high word, as hscroll_label_step's 0x5fb3f8) is dropped:
-    the W form doesn't read it, and under FR=0 it would overwrite the odd register beside it."""
+    the W form doesn't read it, and under FR=0 it would overwrite the odd register beside it.
+    The payload's constants (.rodata on, in patch.elf) are read past: a packed mask's bytes can look like one."""
+    elf=(B/'patch.elf').read_bytes(); shoff,=struct.unpack_from('<I',elf,0x20); size,count,names=struct.unpack_from('<3H',elf,0x2e)
+    table=[struct.unpack_from('<10I',elf,shoff+size*k) for k in range(count)]
+    name=lambda h: elf[table[names][4]+h[0]:].split(b'\0',1)[0]
+    rodata=next(h[3] for h in table if name(h)==b'.rodata')
     data=(B/'demo').read_bytes(); fixes=[]
     for _,(t,o,v,_,f,m,flags,_) in segments(data):
         if t!=1 or not flags&1: continue
         words=struct.unpack_from(f'<{f//4}I',data,o)
         for i,w in enumerate(words):
+            if rodata<=v+4*i<SCRATCH: continue
             if w>>26&0x3f==0x11 and w>>21&0x1f==0x15:
                 fixes.append((v+4*i,(w&~(0x1f<<21))|(0x14<<21)))
             elif w>>26&0x3f==0x11 and w>>21&0x1f==0x07 and any(x>>26&0x3f==0x11 and x>>21&0x1f==0x15 for x in words[i+1:i+4]):
