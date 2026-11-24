@@ -1182,7 +1182,7 @@ static void stream_poll(app_t *a) {
     if (sm.state == S_WAIT && sm.urls) { /* played whole at once, by stock's Tidal player */
         if (playback_loads != sm.loads || playback_picks != sm.picks)
             sm.state = S_DONE; /* the user played a queue, or another song, before it started */
-        else if (!sm.timer && !scan && !addon_game_audio()) /* not under a card game's sound */
+        else if (!sm.timer && !scan && !addon_game_audio()) /* not under a game's sound */
             sm.timer = timer_add(urls_start, 0, 0);
         return;
     }

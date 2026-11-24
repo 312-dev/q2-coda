@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Games: **Caller Ten**, a radio call-in quiz on your own music. A table radio plays a clip of a song from your library, you dial your answer on a rotary phone, and a notepad shows the four choices; ten callers a contest, in three kinds (Titles, Artists and Deep cuts, the songs you rarely play). Whatever was playing before comes back as it was, playing or paused at its place, when you leave the game.
   - Bluetooth: each paired device has its own **Volume Limit** on its page, No Limit until you set one. While that device is connected the volume stops at its limit, from the wheel, Control Center, Settings, the Car Remote or the device's own buttons, and Max Volume still applies on top. Wired and USB headphones and your other Bluetooth devices keep their own levels.
   - Lyrics: after you scroll synced lyrics away, they go back to the line being sung and follow the song again once you leave them alone for 5 seconds. Tapping a synced line plays the song from that line; tap the line being sung to show the lyrics full screen as before.
   - Streamed songs: a song from your server starts as soon as its first 3 seconds have downloaded, up to half a second sooner than before, where the Subsonic app waited for its next progress report.

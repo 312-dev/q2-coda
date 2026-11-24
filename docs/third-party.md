@@ -139,6 +139,7 @@ license (`docs/ipod.md`).
 | Component                                    | License | Files                                                          | Used for                                                                                                       |
 | -------------------------------------------- | ------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | Phosphor Icons, `@phosphor-icons/core` 2.1.1 | MIT     | `assets/icons/phosphor/*.svg`, `assets/icons/phosphor/LICENSE` | Theme: OLED's glyphs, drawn into bitmaps at build time by `tools/art.py` ([oled-design](oled-design.md#icons)) |
+| Bungee 2.000 and Righteous 1.000 (fonts)    | OFL-1.1 | `assets/games/callerten.bin` (glyph masks), `assets/games/callerten-fonts.txt` | Caller Ten: the figures, the radio's line and the pad's headings, drawn into masks by the design's `export.py` ([games-engine](games-engine.md#caller-ten)) |
 
 ## What the scan still finds
 

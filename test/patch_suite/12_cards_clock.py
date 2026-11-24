@@ -417,13 +417,28 @@ for f,v in (('screen',4),('phase',1),('heard',1),('at',0),('lamps',10),('dim',-1
             ('round',2),('right',2),('song',2),('pick',-1),('replay',0),('slot',3),('needle4',702),('mode',0),('lift',0)):
     cw(f,v)
 for i in range(4): m.word(S+CT['row']+4*i,i)
+import collections as _co; _prof=_co.Counter(); _ph=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: _prof.__setitem__(a,_prof[a]+size//4),begin=BASE,end=SCRATCH-1); m.u.ctl_flush_tb()
 whole=max(whole,epaint((0,0,375,320)))
+m.u.hook_del(_ph); _syms=sorted((v,k) for k,v in payload_syms.items()); import bisect as _bi
+_by=_co.Counter()
+for _a,_c in _prof.items(): _i=_bi.bisect_right([v for v,_ in _syms],_a)-1; _by[_syms[_i][1]]+=_c
+print('PROFILE whole', sum(_prof.values()), _by.most_common(15))
+import subprocess as _sp
+_nm=[l.split() for l in _sp.run(['llvm-nm','-n',str(B/'patch.elf')],capture_output=True,text=True).stdout.splitlines() if len(l.split())==3]
+_nm=[(int(a,16),n) for a,t,n in _nm if t in 'tT']; _addr=[a for a,_ in _nm]; _by2=_co.Counter()
+for _a,_c in _prof.items(): _i=_bi.bisect_right(_addr,_a)-1; _by2[_nm[_i][1]]+=_c
+print('PROFILE2 whole', _by2.most_common(20))
 assert pixel(175,30)==0xffd62c42 and pixel(200,161)!=pixel(200,191)  # the needle on 90.1, the first row chosen
 # A second of the clock, the dial turned every ten frames: lamps going out, rings, the dial's turn and spring.
+_prof.clear(); _ph=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: _prof.__setitem__(a,_prof[a]+size//4),begin=BASE,end=SCRATCH-1); m.u.ctl_flush_tb()
+_fr=[]
 for k in range(60):
     if k%10==0: eticks(1 if k%20==0 else -1)
     rects,cost=eframe(17 if k%3==0 else 16); assert len(rects)<=ENG_RECTS,rects
-    worst=max(worst,eplay(rects,cost)); step_worst=max(step_worst,cost)
+    _w=eplay(rects,cost); _fr.append((_w,rects)); worst=max(worst,_w); step_worst=max(step_worst,cost)
+m.u.hook_del(_ph); _by2=_co.Counter()
+for _a,_c in _prof.items(): _i=_bi.bisect_right(_addr,_a)-1; _by2[_nm[_i][1]]+=_c
+print('PROFILE2 play', _by2.most_common(12), sorted(_fr,key=lambda f:-f[0])[:3])
 assert cr('at')==60 and cr('lamps')==9
 # The call: the handset lifts in six frames, the clip plays on 20, then the reveal: rows, hub, glass, score.
 ekey(O['KEY_CENTER'],1); ekey(O['KEY_CENTER'])

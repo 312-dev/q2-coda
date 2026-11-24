@@ -328,7 +328,7 @@ RADIO_DATA = 'usr/share/q2radio'
 RADIO_TABLES = ('stations.bin', 'zcta.bin')
 # The engine games' art (docs/games-engine.md#caller-ten), read once when a game opens: assets/games/<name>
 GAMES_DATA = 'usr/share/q2games'
-GAMES_ART = ('callerten.bin',)
+GAMES_ART = ('callerten.bin', 'callerten-fonts.txt')  # the art and its fonts' licences
 # Card apps the firmware carries (docs/internals.md#bundled-apps): id -> (version, release zip, its size, its
 # SHA-256, builtin), each the zip its release ships, read from --apps (APPS_DIR). Its .<id>/ files go
 # to BUNDLED_DIR/<id> (patch/addon.c BUNDLED) with a version file, a bundle file naming the zip and the program's

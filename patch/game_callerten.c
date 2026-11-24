@@ -376,28 +376,37 @@ static void blit(struct eng_surface *s, const unsigned char *art, int id, int dx
     for (int j = r0; j < r1; ++j) {
         const unsigned char *p = data + ((const unsigned *)data)[j - y];
         unsigned *out = row_at(s, j);
-        /* the columns written: [c0, a1) and [b0, c1), the second empty without a hole in this row */
-        int a1 = c1, b0 = c1;
-        if (hole && j >= hole[1] && j < hole[3] && hole[0] < c1 && hole[2] > c0)
-            a1 = hole[0] > c0 ? hole[0] : c0, b0 = hole[2] < c1 ? hole[2] : c1;
+        /* the hole's columns in this row, h0 <= q < h1: none when h1 <= h0 */
+        int h0 = c1, h1 = c1;
+        if (hole && j >= hole[1] && j < hole[3]) h0 = hole[0], h1 = hole[2];
         for (int i = x; i < c1;) {
             unsigned n = *p++;
-            int k = n < 128 ? (int)n + 1 : (int)n - 126, end = i + k;
-            for (int seg = 0; seg < 2; ++seg) {
-                int lo = seg ? (i > b0 ? i : b0) : (i > c0 ? i : c0);
-                int hi = seg ? (end < c1 ? end : c1) : (end < a1 ? end : a1);
-                if (lo >= hi) continue;
-                if (n < 128 && a >= 256)
-                    for (const unsigned char *q = p + (lo - i); lo < hi; ++lo) out[lo] = pal[*q++];
-                else if (n < 128)
-                    for (const unsigned char *q = p + (lo - i); lo < hi; ++lo) out[lo] = mixc(out[lo], pal[*q++], a);
-                else if (a >= 256)
-                    for (unsigned c = pal[*p]; lo < hi; ++lo) out[lo] = c;
-                else
-                    for (unsigned c = pal[*p]; lo < hi; ++lo) out[lo] = mixc(out[lo], c, a);
+            int k = n < 128 ? (int)n + 1 : (int)n - 126, lo = i > c0 ? i : c0, hi = i + k < c1 ? i + k : c1;
+            if (lo < hi) {
+                /* a run across the hole is written in two parts, round it */
+                int m0 = hi > h0 && lo < h1 ? (h0 > lo ? h0 : lo) : hi, m1 = m0 < hi ? (h1 < hi ? h1 : hi) : hi;
+                if (n < 128) {
+                    const unsigned char *q = p - i;
+                    if (a >= 256) {
+                        for (int c = lo; c < m0; ++c) out[c] = pal[q[c]];
+                        for (int c = m1; c < hi; ++c) out[c] = pal[q[c]];
+                    } else {
+                        for (int c = lo; c < m0; ++c) out[c] = mixc(out[c], pal[q[c]], a);
+                        for (int c = m1; c < hi; ++c) out[c] = mixc(out[c], pal[q[c]], a);
+                    }
+                } else {
+                    unsigned v = pal[*p];
+                    if (a >= 256) {
+                        for (unsigned *o = out + lo, *end = out + m0; o < end; ++o) *o = v;
+                        for (unsigned *o = out + m1, *end = out + hi; o < end; ++o) *o = v;
+                    } else {
+                        for (int c = lo; c < m0; ++c) out[c] = mixc(out[c], v, a);
+                        for (int c = m1; c < hi; ++c) out[c] = mixc(out[c], v, a);
+                    }
+                }
             }
             p += n < 128 ? k : 1;
-            i = end;
+            i += k;
         }
     }
 }
