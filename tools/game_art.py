@@ -1,4 +1,4 @@
-"""Sudoku's masks (patch/game_sudoku_art.inc, docs/games-engine.md#sudoku): the digits, the words and the stamp of
+"""Sudoku's masks (patch/game_sudoku_art.inc, docs/games-engine.md#evening-puzzle): the digits, the words and the stamp of
 its newspaper page, drawn from four fonts at the sizes the design gives, each packed for game_sudoku.c to unpack.
 
 The fonts are not in the repository (they are needed only to draw the masks again): Patrick Hand, Libre Baskerville

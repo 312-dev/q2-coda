@@ -31,8 +31,9 @@ SUDOKU = ENGINE + 1  # games.c's screen of the engine's second game
 
 
 _ART = (ROOT/'patch/game_sudoku_art.inc').read_text()
-A_COUNT = int(re.search(r'A_COUNT = (\d+)', _ART)[1])
-A_SPAN_BYTES = int(re.search(r'#define A_SPAN_BYTES (\d+)', _ART)[1])
+_COUNT, _SPANS = re.search(r'A_COUNT = (\d+)', _ART), re.search(r'#define A_SPAN_BYTES (\d+)', _ART)
+assert _COUNT and _SPANS
+A_COUNT, A_SPAN_BYTES = int(_COUNT[1]), int(_SPANS[1])
 
 
 class Solver(C.Structure):

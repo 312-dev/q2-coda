@@ -1,4 +1,4 @@
-/* Sudoku (docs/games-engine.md#sudoku), "The Evening Puzzle": a 9 x 9 grid made on the device for
+/* Sudoku (docs/games-engine.md#evening-puzzle), "The Evening Puzzle": a 9 x 9 grid made on the device for
  * one of three levels, on a newspaper's puzzle page over the whole screen, entered with the wheel
  * through a dial of digits on a sticky note. The generator fills a grid by randomized backtracking,
  * then empties it in symmetric pairs while the level's test still finds one solution, a slice of
