@@ -45,7 +45,7 @@ class Ct(C.Structure):
                 *((n, C.c_int) for n in 'nmissed top clip_sec clip_on clip_held heard ask replay needle4 needle_from '
                                         'needle_t turn_t lift lift_dir ring ring_from lamps dim dim_t cut end_t swell'.split()),
                 *((n, C.c_int * 4) for n in 'fit_px fit_n full_w maxw scroll'.split()), ('scroll_t', C.c_int),
-                ('sfx', C.c_ubyte * 8), ('sfx_n', C.c_int), ('sfx_wait', C.c_int),
+                ('sfx', C.c_ubyte * 8), ('sfx_n', C.c_int), ('sfx_wait', C.c_int), ('marks', C.c_uint),
                 ('magic', C.c_uint), ('best', C.c_uint * 3), ('played', C.c_uint), ('sum', C.c_uint)]
 
 
@@ -135,7 +135,9 @@ class Rig:
         """One pass of the game's watch (ct_watch): removed when it says so, as AWTK removes a timer."""
         for t, (fn, ctx, every) in self.watches().items():
             assert every == 100
-            if C.CFUNCTYPE(C.c_int, C.c_void_p)(fn)(ctx) != 8:
+            info = C.create_string_buffer(0x40)  # AWTK calls a timer with its timer_info_t, the ctx inside
+            C.c_void_p.from_buffer(info, O['TIMER_CTX']).value = ctx
+            if C.CFUNCTYPE(C.c_int, C.c_void_p)(fn)(C.addressof(info)) != 8:
                 self.timers.pop(t, None)
 
     def take(self, name, *_):
@@ -465,6 +467,22 @@ def test_play_replays_the_clip_once_a_round(fw, tmp_path):
     assert len(r.sent) == sent + (r.g.at % 6 == 0)  # nothing more but the player's asks
 
 
+def test_after_a_replay_the_next_callers_rings_start_from_their_first_frame(fw, tmp_path):
+    r = Rig(fw, tmp_path, songs=music(14))
+    r.start()
+    r.hear()
+    r.step(n=100)
+    r.step(pressed=E_PLAY)
+    r.step(n=30)
+    r.step(pressed=E_CENTRE)
+    r.step(n=80)
+    assert r.g.round == 1 and r.g.replay == 0
+    r.hear()
+    for k in range(40):  # the rings' frame is a picture's offset: never before the first
+        assert r.g.ring == (r.g.at // 10) % 3
+        r.step()
+
+
 def test_a_finger_on_a_row_places_the_call(fw, tmp_path):
     r = Rig(fw, tmp_path, songs=music(14))
     r.start()
@@ -712,8 +730,8 @@ def test_long_titles_shrink_then_are_cut_and_a_chosen_one_scrolls_within_its_lin
     r.hear()
     r.paint(canvas)
     drawn = {o.text: o for o in canvas.ops if o.kind == 'text'}
-    cut = next(t for t in drawn if t.endswith('...'))
-    assert LONG.startswith(cut[:-3]) and drawn[cut].px == 14 and drawn[cut].rect[2] - 2 <= 152
+    cut = next(t for t in drawn if t.endswith('...') and LONG.startswith(t[:-3]))
+    assert drawn[cut].px == 14 and drawn[cut].rect[2] - 2 <= 152
     assert texts_inside(canvas, 187, 188 + 152 + 1)  # every title within its line on the pad
     r.step(ticks=(1 if i == 0 else 0) + 1 - r.g.sel)  # another row, then this one: its scroll starts there
     r.step(ticks=i + 1 - r.g.sel)

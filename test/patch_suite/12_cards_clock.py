@@ -95,7 +95,7 @@ class CardMachine(DepthMachine):
 # A game's keys never reach stock's filter or the media keys; Return goes game -> chooser -> Library; closing frees
 # the state.
 OWN_GAMES=re.findall(r'^#define GAME_(\w+) (\d)',(ROOT/'patch/peq.h').read_text(),re.M)
-OWN=[n.capitalize() for n,on in OWN_GAMES if on=='1']; SHIPPED=['Games',*OWN,'Bricks']
+OWN=[n.capitalize() for n,on in OWN_GAMES if on=='1']; SHIPPED=['Games',*OWN,'Bricks','Caller Ten']
 m=CardMachine({},{})
 G_SCREEN,G_PICKING,G_PAUSED,G_CELL,G_CUR,G_VX=36,44,56,76,157,164
 # labels(w): the texts of the hscroll_labels under w, in node order
@@ -250,7 +250,7 @@ else:
     eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
     O_ENG_RECT,O_ENG_STEPS=80,208  # struct eng's rect and steps (patch/engine.c), on MIPS
     ENG_STEP_BOUND,ENG_FRAME_BOUND,ENG_WHOLE_BOUND=600,70_000,780_000  # measured: 499, 61,511 and 703,036
-    pick(len(SHIPPED)-1); EN=m.get(payload_syms['en']); assert word(G_SCREEN)==6 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1
+    pick(len(SHIPPED)-1); EN=m.get(payload_syms['en']); assert word(G_SCREEN)==5+len(SHIPPED)-1-len(OWN) and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1
     FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
     for o,v in (('LCD_W',375),('LCD_H',320),('LCD_LINE_LENGTH',1500),('LCD_FORMAT',O['LCD_BGRA8888']),('LCD_OFFLINE_FB',FB)): m.word(m.lcd+O[o],v)
     n=[0]; counter=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)
@@ -352,6 +352,102 @@ m.u.hook_del(counter)
 key(O['KEY_RETURN']); assert word(G_PAUSED)==2 and not eframes() and m.get(payload_syms['wheel_raw'])==0
 key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0)
 assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0 and not eframes()
+m.close(); assert m.get(payload_syms['g'])==0
+passed()
+
+# Caller Ten (patch/game_callerten.c, docs/games-engine.md#caller-ten), full screen: its art read from the root
+# filesystem at its open, then its dearest frames, each made on purpose on a round set up in its state (the songs a
+# worker would pick, as rows in memory; no player answers here): the whole sheet, a second of the clock with the dial
+# turning, the call (the handset's lift) and the reveal, and the summary's sheet coming up. Bounded in the payload's
+# instructions a little over what they measured, under the brief's 600,000 a frame.
+CT_ART=(ROOT/'assets/games/callerten.bin').read_bytes()
+m=CardMachine({},{'/usr/share/q2games/callerten.bin':bytearray(CT_ART)})
+m.word(O['MCL_FD'],-1)  # no player socket: the game's messages to it go nowhere
+sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
+eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
+O_ENG_RECT,O_ENG_STATE=80,216  # struct eng (patch/engine.c), on MIPS
+CT_FIELDS=('k h screen phase mode sel t at reduced round rounds wrongs rights streak score shown pts best_new slot row:4 '
+           'right pick song missed:10 nmissed top clip_sec clip_on clip_held heard ask replay needle4 needle_from needle_t '
+           'turn_t lift lift_dir ring ring_from lamps dim dim_t cut end_t swell fit_px:4 fit_n:4 full_w:4 maxw:4 scroll:4 '
+           'scroll_t').split()  # struct ct, a word each on MIPS
+CT={}; at=0
+for f in CT_FIELDS:
+    name,_,n=f.partition(':'); CT[name]=at; at+=4*int(n or 1)
+CT_STEP_BOUND,CT_FRAME_BOUND,CT_CALL_BOUND,CT_REVEAL_BOUND,CT_SUMMARY_BOUND,CT_WHOLE_BOUND=6_000,300_000,330_000,520_000,600_000,1_200_000
+pick(len(OWN)+1); EN=m.get(payload_syms['en']); S=EN+O_ENG_STATE
+cw=lambda f,v: m.word(S+CT[f],v); cr=lambda f: signed(m.get(S+CT[f]))
+K=m.get(S); ART=m.get(K)
+assert word(G_SCREEN)==6 and EN and cr('screen')==1 and cr('h')==320 and ART and m.u.mem_read(ART,len(CT_ART))==CT_ART
+FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
+for o,v in (('LCD_W',375),('LCD_H',320),('LCD_LINE_LENGTH',1500),('LCD_FORMAT',O['LCD_BGRA8888']),('LCD_OFFLINE_FB',FB)): m.word(m.lcd+O[o],v)
+n=[0]; counter=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)
+pixel=lambda x,y: m.get(FB+4*(y*375+x))
+def eframe(ms=16):  # the frame timer's pass: the rects it invalidated, its instructions
+    m.now+=ms; m.calls=[]; n[0]=0; m.call(address=payload_syms['eng_frame'],args=(0,0,0,0),gap=0,clear=False)
+    made=[c for c in m.calls if c[0]=='widget_invalidate_force']; assert all(c[1]==sheet for c in made)
+    box=lambda k: [signed(m.get(EN+O_ENG_RECT+16*k+4*j)) for j in range(4)]
+    return [(x0,y0,x1-x0,y1-y0) for x0,y0,x1,y1 in map(box,range(len(made)))],n[0]
+def epaint(rect): m.clip=rect; n[0]=0; paint(); return n[0]
+def eplay(rects,cost): return cost+sum(epaint(x) for x in rects)
+def ekey(k,down=0): m.call(address=payload_syms['eng_key'],args=(k,down,0,0),gap=0)  # games.c's, for the running game
+def eticks(t): ekey(O['KEY_NEXT'] if t>0 else O['KEY_PREV'])
+def art_pixel(x,y):  # the stored room's pixel (its first picture), as the game blits it
+    tab,pal=struct.unpack_from('<I',CT_ART,16)[0],struct.unpack_from('<I',CT_ART,8)[0]
+    off=struct.unpack_from('<I',CT_ART,tab)[0]; p=off+struct.unpack_from('<I',CT_ART,off+4*y)[0]; i=0
+    while True:
+        c=CT_ART[p]; k=c+1 if c<128 else c-126
+        if x<i+k: return struct.unpack_from('<I',CT_ART,pal+4*CT_ART[p+1+(x-i if c<128 else 0)])[0]
+        p+=1+(k if c<128 else 1); i+=k
+whole=epaint((0,0,375,320)); assert pixel(5,5)==0xff000000 and pixel(340,140)==art_pixel(340,140)  # the glass's corner, the band
+# Tune in: the needle slides to the next station over 8 frames.
+worst=step_worst=0
+eticks(1)
+for k in range(9):
+    rects,cost=eframe(); worst=max(worst,eplay(rects,cost)); step_worst=max(step_worst,cost)
+assert cr('sel')==1 and cr('needle4')==702+237
+# A round, as the worker's rows and a heard clip leave it: eight songs, the third the answer.
+PK=m.big_alloc(23376); m.u.mem_write(PK,bytes(23376))
+for i,(t,a) in enumerate((('Harbor Lights','The Lamplighters'),('Paper Lanterns','June Abbott'),('Slow Train Home','Northern Line'),
+                          ('Midnight Orchard','Marlowe & Finch'),('Copper Kettle','June Abbott'),('Low Tide','Northern Line'),
+                          ('Sparrow Hill','The Lamplighters'),('Old Mill Road','Marlowe & Finch'))):
+    song=PK+2076+228*i; m.word(song+12,200); m.u.mem_write(song+20,t.encode()); m.u.mem_write(song+148,a.encode())
+for o,v in ((0,1),(4,1),(16,8),(20,8)): m.word(PK+o,v)  # refs, done, n, answers
+m.word(K+4,PK)
+for f,v in (('screen',4),('phase',1),('heard',1),('at',0),('lamps',10),('dim',-1),('turn_t',-1),('sel',1),('rounds',10),
+            ('round',2),('right',2),('song',2),('pick',-1),('replay',0),('slot',3),('needle4',702),('mode',0),('lift',0)):
+    cw(f,v)
+for i in range(4): m.word(S+CT['row']+4*i,i)
+whole=max(whole,epaint((0,0,375,320)))
+assert pixel(175,30)==0xffd62c42 and pixel(200,161)!=pixel(200,191)  # the needle on 90.1, the first row chosen
+# A second of the clock, the dial turned every ten frames: lamps going out, rings, the dial's turn and spring.
+for k in range(60):
+    if k%10==0: eticks(1 if k%20==0 else -1)
+    rects,cost=eframe(17 if k%3==0 else 16); assert len(rects)<=ENG_RECTS,rects
+    worst=max(worst,eplay(rects,cost)); step_worst=max(step_worst,cost)
+assert cr('at')==60 and cr('lamps')==9
+# The call: the handset lifts in six frames, the clip plays on 20, then the reveal: rows, hub, glass, score.
+ekey(O['KEY_CENTER'],1); ekey(O['KEY_CENTER'])
+call=0
+for k in range(21):
+    rects,cost=eframe(); call=max(call,eplay(rects,cost))
+assert cr('phase')==3,cr('phase')
+reveal=0
+for k in range(9):
+    rects,cost=eframe(); reveal=max(reveal,eplay(rects,cost))
+# The contest's end: the last caller's reveal runs out, the sheet comes up over 14 frames, the score counts.
+cw('round',9); cw('t',59)
+rects,cost=eframe(); whole=max(whole,eplay(rects,cost))  # the end: everything changes, the whole sheet
+summary=0
+for k in range(40):
+    rects,cost=eframe(); summary=max(summary,eplay(rects,cost))
+assert cr('screen')==5 and cr('cut')==108 and '/mnt/data/game-callerten' in m.files
+whole=max(whole,epaint((0,0,375,320)))
+assert whole<CT_WHOLE_BOUND and worst<CT_FRAME_BOUND and step_worst<CT_STEP_BOUND and call<CT_CALL_BOUND and reveal<CT_REVEAL_BOUND and summary<CT_SUMMARY_BOUND,(whole,worst,step_worst,call,reveal,summary)
+print(f'Caller Ten on MIPS: {step_worst} instructions for a frame\'s step at most, {worst} with its changed rects painted (the needle, the clock, the dial), {call} for the call\'s dearest frame, {reveal} for the reveal\'s, {summary} for the summary\'s, {whole} to paint the whole sheet (payload only; stock\'s text and flush mocked)')
+m.u.hook_del(counter)
+key(O['KEY_RETURN']); assert word(G_PAUSED)==2 and not eframes()
+key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0)
+assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0
 m.close(); assert m.get(payload_syms['g'])==0
 passed()
 
