@@ -275,11 +275,12 @@ static int display_open(void *ctx, void *event) {
 }
 
 static void setting_row(void *view, int i) {
-    static const char *const icons[] = { "system_display",      "playset_covermode",
-                                         "system_powermanager", "playset_covermode",
-                                         "system_display",      "system_display",
-                                         "system_keytone",      "system_display",
-                                         "system_display" };
+    static const char *const icons[SETTING_OWN] = {
+        [SETTING_ACCENT] = "system_display",       [SETTING_HOME] = "playset_covermode",
+        [SETTING_BATTERY] = "system_powermanager", [SETTING_LIGHT] = "system_display",
+        [SETTING_KEEPLIT] = "system_display",      [SETTING_CLICKER] = "system_keytone",
+        [SETTING_REDUCEMOTION] = "system_display"
+    };
     const char *icon = i < SETTING_OWN ? icons[i] : "system_display";
     st.setting_label[i] = list_row(view, icon, setting_click, (void *)(long)i);
     setting_text(i);
