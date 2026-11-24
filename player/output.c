@@ -470,8 +470,8 @@ static int alsa_open(struct output *o, int outputway, int hw) {
     int r = snd_pcm_open(&o->pcm, name, SND_PCM_STREAM_PLAYBACK, 0), c[4][2], n = candidates(&o->f, c), i = 0;
     if (r < 0) {
         if (outputway == 2 && (r == -ENOENT || r == -ENODEV)) say_gone(name, "snd_pcm_open", r); /* unplugged */
-        else fprintf(stderr, "q2player: %s: %s\n", name, snd_strerror(r));
-        return -1;
+        else if (r != -EBUSY) fprintf(stderr, "q2player: %s: %s\n", name, snd_strerror(r));
+        return r == -EBUSY ? -EBUSY : -1;
     }
     if (outputway == 2) said.gone = 0;
     /* the DAC and a USB DAC are asked what they take and the song converted to it; DSD's bits go as they are, and
@@ -505,7 +505,8 @@ static int alsa_open(struct output *o, int outputway, int hw) {
         (r = snd_pcm_hw_params(o->pcm, p)) < 0 || (r = alsa_sw(o)) < 0 || (r = snd_pcm_prepare(o->pcm)) < 0)
         ;
 done:
-    if (r < 0) fprintf(stderr, "q2player: %s %d Hz %d ch %d bytes: %s\n", name, o->f.rate, o->f.channels, o->f.bytes, snd_strerror(r));
+    if (r < 0 && r != -EBUSY) /* busy: alsa_open_bt says it once, after its wait */
+        fprintf(stderr, "q2player: %s %d Hz %d ch %d bytes: %s\n", name, o->f.rate, o->f.channels, o->f.bytes, snd_strerror(r));
     if (p) snd_pcm_hw_params_free(p);
     /* DSD's frames at another rate would play as noise, and the car's PCM is only ever at the car's rate; Bluetooth
      * and a negotiated device are resampled to the rate they give */
@@ -513,10 +514,30 @@ done:
         fprintf(stderr, "q2player: %s gave %u Hz for %u\n", name, rate, want);
         r = -1;
     }
-    if (r < 0) { snd_pcm_close(o->pcm); o->pcm = NULL; return -1; }
+    if (r < 0) { snd_pcm_close(o->pcm); o->pcm = NULL; return r == -EBUSY ? -EBUSY : -1; }
     o->f.rate = (int)rate;
     if (neg && !same_format(&o->f, &o->in)) say_device(name, &o->caps, &o->in, &o->f);
     return 0;
+}
+
+/* bluealsa's PCM takes one client, claimed at hw_params, and is busy (-EBUSY) while another holds it or until
+ * bluealsa has seen the last one's close, which comes a moment after snd_pcm_close: a click session's PCM closed and
+ * another opened at once met it on a Q2. On Bluetooth the open is tried again BT_BUSY_STEP_MS apart for up to
+ * BT_BUSY_MS (docs/internals.md#bluetooth-pause), the play loop held meanwhile, and the wait is said once: opened
+ * after it, or still busy, as another client (an AirPlay receiver, q2video's sources) holds the PCM. */
+enum { BT_BUSY_MS = 1500, BT_BUSY_STEP_MS = 50 };
+static int alsa_open_bt(struct output *o, int outputway, int hw) {
+    struct pcm_format f = o->f;
+    int r, waited = 0;
+    while ((r = alsa_open(o, outputway, hw)) == -EBUSY && outputway == 1 && waited < BT_BUSY_MS)
+        usleep(BT_BUSY_STEP_MS * 1000), waited += BT_BUSY_STEP_MS, o->f = f;
+    if (r == -EBUSY && outputway == 1)
+        fprintf(stderr, "q2player: bluealsa's PCM still busy after %d ms: another client holds it\n", waited);
+    else if (r == -EBUSY)
+        fprintf(stderr, "q2player: %s: %s\n", device(outputway, hw), snd_strerror(r));
+    else if (waited && r == 0)
+        fprintf(stderr, "q2player: bluealsa's PCM was busy; it opened after %d ms\n", waited);
+    return r < 0 ? -1 : 0;
 }
 #endif
 
@@ -705,7 +726,7 @@ struct output *output_open(const struct pcm_format *f, int outputway, int hw) {
     if (outputway == 3) o->f.rate = car_open_rate();
     if (dir) r = sink_open(o, dir, outputway);
 #ifdef HAVE_ALSA
-    else r = alsa_open(o, outputway, hw);
+    else r = alsa_open_bt(o, outputway, hw);
 #else
     else (void)hw, fprintf(stderr, "q2player: built without ALSA; set Q2PLAYER_PCM\n");
 #endif

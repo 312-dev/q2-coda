@@ -2478,6 +2478,25 @@ def test_click_idle(player, songs, tmp):
     return f'paused: 2 clicks, {held:.2f} s held, the song on from frame {at}; stopped: 2 clicks in a 48 kHz PCM'
 
 
+def test_bt_open_waits_out_a_busy_pcm(player, songs, tmp):
+    """docs/internals.md#bluetooth-pause: bluealsa's plugin claims its one client's place at hw_params and answers
+    -EBUSY while another client has it, or while bluealsa has not yet seen the last one's close: a click session's
+    PCM closed and another opened in the same moment met it on a Q2 (a click session's line and the busy line in the
+    same millisecond, and the transport let go 5 s later, so nothing else held it). The open waits it out a bounded
+    time, BT_BUSY_MS, and says how long, so a song or a click after a session's close is not lost to that moment; a
+    PCM held for good is given up after it, with the wait in the log. output.c against alsa_test.c's libasound."""
+    got = subprocess.run([tool(tmp, 'alsa_test', '-DHAVE_ALSA', '-DQ2_CAR_USB'), 'busy'], check=True, capture_output=True,
+                         text=True)
+    lines = {l.split()[0]: l.split() for l in got.stdout.split('\n') if l}
+    # tries of hw_params, and the 50 ms waits between them (alsa_test.c counts usleep, no time passing)
+    assert lines['busy0'][1:] == ['opened', 'tries', '1', 'sleeps', '0'], lines
+    assert lines['busy6'][1:] == ['opened', 'tries', '7', 'sleeps', '6'], f'busy for 6 tries: {lines["busy6"]}'
+    assert lines['busy1000'][1:] == ['failed', 'tries', '31', 'sleeps', '30'], f'held for good: {lines["busy1000"]}'
+    assert "q2player: bluealsa's PCM was busy; it opened after 300 ms" in got.stderr, got.stderr[-800:]
+    assert "q2player: bluealsa's PCM still busy after 1500 ms: another client holds it" in got.stderr, got.stderr[-800:]
+    return 'free: at once; busy 6 tries: opened after 300 ms; held: given up after 1500 ms, said once'
+
+
 def test_click_idle_alsa(player, songs, tmp):
     """A click with nothing playing, through output.c against alsa_test.c's counting ring: a song paused or none, on
     Bluetooth and on the headphone DAC, and a song paused on Bluetooth whose PCM is opened again for the click after
