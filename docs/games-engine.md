@@ -86,7 +86,7 @@ The shim's sleep is 16 ms plus the frame's work, so about 58 flips a second is t
 ```c
 struct eng_game {
     const char *name;
-    unsigned size, flags;                                 /* state bytes, zeroed; ENG_RAW, ENG_STILL */
+    unsigned size, flags;                                 /* state bytes, zeroed; ENG_RAW, ENG_STILL, ENG_FULL */
     void (*init)(void *state, int h);                     /* h: the sheet's height */
     int (*step)(void *state, const struct eng_input *in); /* 1/60 s; 1 while something moves */
     void (*draw)(const void *state, struct eng_surface *s);
@@ -124,6 +124,10 @@ Return never reaches a game. A game that sets neither flag gets ticks and runs i
 
 A buffer that is not stock's 375 x 320 BGRA8888 `lcd_mem` (a window animation's snapshot of another layout) is left as stock drew it.
 
+### Full screen
+
+A game with `ENG_FULL` has the whole 375 x 320 screen: while it is open Games hides the status row (the window manager paints that over every window, so it cannot be painted under), moves its page over the row's place, makes the sheet 375 x 320 and gives `init` an `h` of 320, so `eng_inset` covers the glass's top corners too. At a pause (the screen off, another window on top, Return's menu) the status row shows again, with its clock and battery, and it hides when the game runs on; leaving the game or closing Games puts the page back under it (`full_screen`, `bar_shown` in `patch/games.c`). The Evening Puzzle is the first game with the flag; any other may set it.
+
 ### Sound
 
 `eng_sfx(ENG_SFX_TICK | ENG_SFX_TAP | ENG_SFX_ALERT)` plays one of the Clicker's three sounds by the Clicker's route (`clicker_route`): q2player's under Headphones or Both (mixed into the song while one plays, in silence of its own otherwise), the buzzer's by the Clicker's rule, nothing with the Clicker off. The music is never paused, ducked or reopened.
@@ -154,11 +158,11 @@ To see it: a `--dev` build, `ENGINEDEMO=1` under `[Q2POD]` in `/mnt/data/config.
 | Turret shooter             | 9 KB          | 4 KB          | 600,000                       | 2,000,000   |
 | Music quiz                 | 8 KB          | 8 KB          | 600,000                       | 2,000,000   |
 | Klondike solitaire         | 12 KB         | 2 KB          | 600,000                       | 2,000,000   |
-| Sudoku                     | 8 KB          | 2 KB          | 600,000                       | 2,000,000   |
-| **All five**               | **46 KB**     | one at a time |                               |             |
+| Evening Puzzle (Sudoku)    | 28 KB         | 24 KB         | 600,000                       | 2,000,000   |
+| **All five**               | **66 KB**     | one at a time |                               |             |
 
 - **A frame's hard limit is 2,000,000 instructions** of the payload's own (about 4 ms by the estimate above) for the step and every rect's paint together; 600,000 is what a game is held to, so stock's own painting of the same rects, the flush's turn of them onto the framebuffer and the loop's polls keep the rest of the 16.67 ms.
-- **Heap** is one game's at a time, freed on leaving it. The device has little to spare next to the player; 8 KB is the most any game is given.
+- **Heap** is one game's at a time, freed on leaving it. The device has little to spare next to the player; 8 KB is the most a game is given for its state, and a game with stored art up to 256 KB for that art: the Evening Puzzle's masks, unpacked at its start, are 21 KB of its 24.
 - **Scratch** (131,072 bytes, about 31 KB free): the engine uses 4. A game uses none: its state is the heap's.
 - **The root filesystem** (at most 75,497,472 bytes, `ROOTFS_ROOM`) is not used by the engine at all.
 - The older four games are out of the payload in this build (`GAME_*` in `patch/peq.h` all 0), which gave back 15,568 bytes (`patch_bytes` 1,331,960 to 1,316,392, 2026-11-22); turning them back on costs that again.
@@ -196,6 +200,49 @@ Every one is an original game in its genre. None reproduces an Apple iPod game's
 | The whole sheet with a full lattice                        | 1,177,926                    | 1,450,000                |
 
 In the emulator, 10 s of play (`design/games/bricks/bricks-play.mp4`, a finger following the ball, `bricks/autopilot.py`): 58.2 flips a second, median gap 17.03 ms, longest 24.1 ms, none over 25 ms, with the host's load average near 8. Ready and the end paint nothing while nothing moves, so a capture that waits there shows a long gap between flips that is the game at rest, not a slow frame. The payload grows by 7,344 bytes over the engine's build (989,736 against 982,392), of the brief's 9 KB; the state is 208 bytes of the brief's 2 KB; no `.scratch`.
+
+### Evening Puzzle
+
+`patch/game_sudoku.c` (`eng_sudoku`, `ENG_STILL`, `ENG_FULL`), Games' second engine row: Sudoku drawn as "The Evening Puzzle", the puzzle page of an evening paper over the whole screen ([Full screen](#full-screen)), from the design in the emulator project's `design/games/sudoku/` (`SPEC.md`, `STYLE.md`, the element sheet, layout B). Standard 9 x 9 Sudoku, every puzzle made on the Q2 with exactly one solution, at one of three levels:
+
+| Level  | Emptied while                                                          | Stops at | Its last test                         |
+| ------ | ---------------------------------------------------------------------- | -------- | ------------------------------------- |
+| Gentle | naked singles (a cell with one digit left) alone still solve it        | 36 clues | none                                  |
+| Steady | singles, naked and hidden (a digit with one place in a unit), solve it | 30 clues | naked singles alone must not solve it |
+| Sharp  | a solver that counts solutions, stopping at 2, finds exactly 1         | 24 clues | singles alone must not solve it       |
+
+**The generator** fills an empty grid by randomized backtracking (`sv_search` with a seed: the cell with fewest digits left next, its digits in a random order), shuffles the 41 symmetric pairs of cells (`i` and `80 - i`, the centre alone), and empties them in turn, putting a pair back when the level's test fails, until the level's clue count is reached or no pair is left. A puzzle that singles solve is unique (each placement is forced), so Gentle and Steady need no count; Sharp runs singles first, which leave the solutions as they were, and counts to two (`sv_search`, lowest digit first) from where they stopped. A puzzle that fails its level's last test is thrown away for a fresh grid (`S_TRIES`, `S_LATE`): after 9 grids, or once the puzzle has taken 135 slices of work, the last is kept whatever it is (unique, but perhaps solvable by singles). All of it is one resumable state machine (`gen_run`) with the search's stack a fixed array in the state: a step does `S_WORK` (7,200) units of work, each about 15 and at most about 20 payload instructions on MIPS, so no frame is late, and a sliced run makes the same puzzle as an unsliced one from the same seed. Meanwhile the running head's rule in the left margin fills from the foot (the pairs tried, of 41) under a card that says the puzzle is being set.
+
+**Entry.** The wheel moves the cursor through the cells in reading order (`fast`, so a quick turn crosses the grid); Previous and Next jump a box, keeping the place in the box. Centre on a cell that is not a clue opens the dial: a sticky note 122 px square in the 4 x 4 block of cells that shares neither the cursor's row nor its column (centred at x 106 or 269, y 78 or 242), the nine digits round a pen ring, 1 at the top. Digits the cell's row, column and box clues already hold are struck and skipped by the wheel (`ticks`, one digit a detent); the dial opens on the cell's entry, else the last digit placed, else the first it can take. Centre writes the picked digit in pen and puts the dial away; Previous or Next puts it away with nothing written; Play/Pause switches the dial between pen and pencil (the hub's digit turns graphite over NOTE), and in pencil Centre notes or un-notes the digit with the dial left open. The pencil stays until Play/Pause on the dial again. A digit written leaves the notes of its row, column and box. With the dial away, Play/Pause clears the cell's entry, then its notes. A finger on a cell moves the cursor there and opens its dial; on a dial digit it writes or notes it; off the note it puts the dial away. Return is the engine's pause menu; Quit and the game again show the levels, where Play/Pause continues the unfinished puzzle and Centre makes a new one.
+
+**The dial offers the clues' digits only, not the entries':** an entry is the player's, and may be wrong, so two entries may clash; that is what the red is for. A clash with a clue cannot be placed from the dial.
+
+**The page.** The grid fills the height: 33 px cells from x 39, y 12, 2 px box rules and 1 px cell rules, the left margin the paper's running head set sideways with its rule, the right margin a tally of the digits (struck once the board holds nine of one), the time in pen, the level in type and the slips in red. Clues are printed (Libre Baskerville Bold), entries handwritten in blue pen (Patrick Hand) half a pixel off centre, notes small graphite digits in their ninth of the cell; the cursor is a yellow highlighter in a blue pen box, its row, column and box take a pale wash and every other cell holding its digit a blue one. A digit placed that clashes is the slip: written red and circled, what it clashes with (a clue, or the entry placed before it) underlined twice in red, and counted (`slips`, kept in the save). A unit filled with nine different digits (never checked against the solution) takes a green highlighter wave, a cell each `S_WAVE` (3) steps. Finishing stamps the page SOLVED in red and shows the time, the best or "new best!" and the level on a sticky note. A pause lays a desk blotter over the grid, so it is not free thinking time. The levels page is the paper's puzzle column: the title, a card a level with a thumbnail of its clue pattern, its clue count and its best, the chosen one in highlighter and pen, and the unfinished puzzle on a strip under them.
+
+**The art.** The digits and words are masks drawn from the four fonts the design names (Patrick Hand, Libre Baskerville and Playfair Display under the OFL, Special Elite under Apache-2.0; [third-party](third-party.md#artwork)) at only the sizes and glyphs the page uses, by `tools/game_art.py` into `patch/game_sudoku_art.inc`: 8,544 bytes, packed in nibbles of 4-bit alpha with runs. At the game's start `unpack` reads them once into the state as rows of inked spans (21,459 bytes), so a paint walks ink alone, and `stamp` blends an edge pixel from the fourteen blends of the ground it last met. The paper's grain is a few flecks a row from a hash of the row, so a part repaints as it was; rings and strokes are smoothed by distance (`ring`, `line`); round corners come from a small table (`corner`). All of these are the game's own, next to the engine's `eng_fill` and `eng_disc`.
+
+**What a step paints.** Each cell's look is a key (`look`: its washes, its digit and the digit's kind, an underline, its notes), kept from the last paint; a step recomputes the 81 and marks each row's changed span (2 px wider for the cursor's box), the margin when its second, tally or slips change, and the dial's hub and two digits when it turns. **The wash follows the cursor a stage a frame:** the old twins off (with the cursor's box), then the old peers, then the new peers on, then their twins (`wash`, `wcur`), and none while the dial's note is open or on the frame that puts it away (`busy`); a digit placed brings its twins a frame after the note goes. So no frame repaints two washes or a wash with the note: a cursor's move repainting every row measured 1,232,944 instructions as one frame and is four under 421,000. Nothing blinks; a frame is painted only after input or while something moves.
+
+**The clock** counts the time between steps of play by stock's millisecond clock, as an `ENG_STILL` game takes no steps at rest; one rest counts five minutes at most (`S_REST_MS`), and a pause, the levels and the setting do not count. ponytail: the engine tells a game nothing of a rest the screen spent dark, so a rest that long is cut to five minutes rather than to when the screen went off; an engine count of lit rest time given to the next step would make it exact. The margin's time is repainted at a step, so between moves it shows the time as of the last one.
+
+**Sound:** a tap for a digit placed, the alert for a slip, a tick for a note, three taps six steps apart for a finished puzzle. ponytail: the design's ten sounds (a pen's tap, a pencil's tick, rising notes for a finished unit, the stamp) need q2player's `SOUNDS` table ([Sound](#sound)); until then these are the Clicker's three.
+
+**Save:** `/mnt/data/game-sudoku`, `SDK1`, 436 bytes: the clues, the solution, the entries, the notes (9 bits a cell), the cursor, the level, the slips, the elapsed steps, whether it is finished, and each level's best. Written at a pause when anything changed since the last write, and when a puzzle is finished. On load it is checked whole before use: the solution a full grid, each clue the solution's digit, no entry on a clue, entries 0 to 9, notes 9 bits, the cursor on the grid, times under 99 hours; anything else reads as no save. The older built-in Sudoku's `/mnt/data/ringnav-sudoku` (`games.c`, left out of this build) is another file, not read or touched.
+
+**Against the design.** Built on layout B as drawn, with notes as digits, the peer wash and the pause's blotter (the design's own choices where `BRIEFS.md` differed). Simplified: the levels' unfinished strip names the level, not a puzzle number (puzzles are made, not numbered), and has no paper clip; the setting card is in type alone and the clues do not print while the puzzle is set; the dial's note appears and goes, and a digit lands, without the design's scaling, peel and ink flecks; a finished unit's wave is a cell every three frames with no pen tick in the margin; the stamp has no page shake; the Reduce Motion, Mark Mistakes, Peer Wash and Large Notes switches of the start screen are not built; the pause is the engine's menu over the blotter.
+
+**Frames.** Measured on build `--dev`, on the 320 px full-screen sheet (`test/patch.py`, payload instructions on MIPS):
+
+| What                                                                                 | Instructions | Bound     |
+| ------------------------------------------------------------------------------------ | ------------ | --------- |
+| A generator slice, the dearest of three Sharp puzzles and a Gentle one               | 142,516      | 150,000   |
+| That frame with its progress rule painted                                            | 197,660      | 220,000   |
+| The dearest frame of a scripted second of entry, painted                             | 474,093      | 530,000   |
+| The dearest made on purpose: the dial's note opening (a cursor's move 420,995 at most) | 556,420      | 600,000   |
+| The whole sheet (the stamp; the levels 760,896, the blotter 915,954)                 | 1,679,984    | 1,850,000 |
+| Frames to make a Sharp puzzle, the most of three (38, 79, 24)                        | 79           | 180       |
+
+So the slowest of those Sharp puzzles takes 1.3 s at 60 frames a second, within the brief's 3 s; the host test makes 200 a level and bounds every one at 180 frames. The payload grows by 28,624 bytes over the build without it (1,388,360 against 1,359,736; 8,544 of them the masks), within the 28 KB it was given; the state is 23,888 bytes on the heap (21,459 the unpacked masks); no `.scratch`.
 
 ## Libraries
 

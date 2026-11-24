@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Games: **Evening Puzzle**, a new game in Home → Games: a sudoku made on the Q2 each time, with exactly one solution, at Gentle, Steady or Sharp, on the puzzle page of an evening paper over the whole screen. The wheel walks the cells; Center opens a dial of the digits the cell can still take, on a sticky note, and writes the one you pick in pen; Play/Pause on the dial switches to pencil for notes. A digit that clashes is written in red and circled, and what it clashes with is underlined. A pause covers the grid. Your puzzle in progress and each level's best time are kept.
   - Bluetooth: each paired device has its own **Volume Limit** on its page, No Limit until you set one. While that device is connected the volume stops at its limit, from the wheel, Control Center, Settings, the Car Remote or the device's own buttons, and Max Volume still applies on top. Wired and USB headphones and your other Bluetooth devices keep their own levels.
   - Lyrics: after you scroll synced lyrics away, they go back to the line being sung and follow the song again once you leave them alone for 5 seconds. Tapping a synced line plays the song from that line; tap the line being sung to show the lyrics full screen as before.
   - Streamed songs: a song from your server starts as soon as its first 3 seconds have downloaded, up to half a second sooner than before, where the Subsonic app waited for its next progress report.

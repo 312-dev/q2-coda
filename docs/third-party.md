@@ -139,6 +139,8 @@ license (`docs/ipod.md`).
 | Component                                    | License | Files                                                          | Used for                                                                                                       |
 | -------------------------------------------- | ------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | Phosphor Icons, `@phosphor-icons/core` 2.1.1 | MIT     | `assets/icons/phosphor/*.svg`, `assets/icons/phosphor/LICENSE` | Theme: OLED's glyphs, drawn into bitmaps at build time by `tools/art.py` ([oled-design](oled-design.md#icons)) |
+| Patrick Hand, Libre Baskerville, Playfair Display | SIL OFL 1.1 | none: `patch/game_sudoku_art.inc` holds masks drawn from them | The Evening Puzzle's digits and words, packed masks of only the glyphs and sizes it draws, made by `tools/game_art.py` from the font files (`FONTS` names each and its SHA-256), which stay out of the repository ([games-engine](games-engine.md#evening-puzzle)) |
+| Special Elite                                | Apache-2.0 | as above                                                    | The Evening Puzzle's small typewritten capitals, the same way |
 
 ## What the scan still finds
 
