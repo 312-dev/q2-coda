@@ -16,7 +16,7 @@ import struct
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, FNV_PRIME, O, Deques, fnv1a, high_halves, libc
+from conftest import NAVIGATION_SOURCE, FNV_PRIME, O, Deques, fnv1a, high_halves, libc, ui_name
 
 libc.munmap.argtypes = [C.c_void_p, C.c_size_t]
 FIXED = 0x100022  # MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE
@@ -1002,9 +1002,20 @@ def test_play_next_and_play_last_join_the_album_playing(q2):
 
 
 # Library → Shuffle, and Up Next: View Queue while a shuffle is on.
-def shuffle_albums(q):
+def shuffle_row(q, caption):
+    """Library → Shuffle, then its row of that caption, its loading wait (list_marks.c load_wait_sync) run to its end:
+    a step a pass, the library's read and then the play, the wait's own timer alone."""
     q.fw.fn('shuffle_menu', C.c_int, C.c_void_p, C.c_void_p)(None, None)
-    q.tap('Shuffle Albums')
+    q.tap(caption)
+    tick = C.cast(getattr(q.fw.lib, ui_name(q.fw.lib, 'lo_tick')), C.c_void_p).value
+    for _ in range(4):
+        for t, (fn, ctx) in [(t, v) for t, v in q.timers.items() if v[0] == tick]:
+            if C.CFUNCTYPE(C.c_int, C.c_void_p)(fn)(ctx) != 8:
+                q.timers.pop(t, None)
+
+
+def shuffle_albums(q):
+    shuffle_row(q, 'Shuffle Albums')
 
 
 def up_next(q):
@@ -1059,8 +1070,7 @@ def test_shuffle_songs_plays_each_song_once_a_pass_and_the_next_list_picked_play
     files, tags = music_card()
     q = q2(files, tags)
     q.update()
-    q.fw.fn('shuffle_menu', C.c_int, C.c_void_p, C.c_void_p)(None, None)
-    q.tap('Shuffle Songs')
+    shuffle_row(q, 'Shuffle Songs')
     assert q.mcl.mode == SHUFFLE  # saved as stock's Shuffle
     rows = [title for title, in up_next(q)]
     assert len(rows) == 6 + 7  # the rest of this pass, then the whole of the next (Repeat All)
@@ -1217,8 +1227,7 @@ def test_a_shuffle_restarted_with_memory_playback_plays_on_in_the_order_it_had(q
     q = q2(files, tags)
     q.fw.var('g_memory_play', C.c_ubyte).value = TRACK
     q.update()
-    q.fw.fn('shuffle_menu', C.c_int, C.c_void_p, C.c_void_p)(None, None)
-    q.tap('Shuffle Songs')
+    shuffle_row(q, 'Shuffle Songs')
     rows = [title for title, in up_next(q)]
     first = title_of(q, q.opened[-1])
     q.play_for(2 * SONG + 5)  # the third song of the pass, 5 s in
