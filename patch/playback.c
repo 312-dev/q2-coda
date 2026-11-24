@@ -818,8 +818,10 @@ static int follow_queue(void) {
     free(map);
     return 0;
 }
-/* Whether the extended play (the hold menu's shuffles and repeats) runs: playback_option's values play only then */
-int playback_active(void) { return s.active; }
+/* Whether the extended play (the hold menu's shuffles and repeats) runs: playback_option's values play only then.
+ * Stock Shuffle played as Shuffle Songs (shuffle_own, playback_shuffle) is not: Now Playing's shuffle and repeat
+ * say what plays there, and a change of them is stock's mode, which a new order follows. */
+int playback_active(void) { return s.active && !(s.shuffle == 1 && s.repeat == 5 && M(MCL_MODE) == 2); }
 int playback_option(int kind) {
     return kind == 0 ? (s.active ? s.shuffle : 0) : kind == 1 ? (s.active ? s.repeat : 2) : s.folder;
 }

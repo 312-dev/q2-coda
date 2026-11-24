@@ -73,6 +73,7 @@
 static struct {
     int checked, on, radio_said; /* radio_said: the radio flag cr_now last logged */
     unsigned at, started_at, seq, now_hash, now_n, q_hash, q_gen;
+    unsigned *q_rows, q_listed, q_place; /* a shuffle's listing (cr_queue): its queue indices, the playing one's place */
     unsigned play_timer, toast_timer;
     int want; /* a Pause (1) or Play (2) waiting for the player; 0 none */
     unsigned want_seq, want_at;
@@ -299,6 +300,8 @@ static void cr_stop(void) {
     unlink(CR_IROH_INFO);
     unlink(CR_NOW);
     unlink(CR_QUEUE);
+    free(cr.q_rows);
+    cr.q_rows = 0, cr.q_hash = 0;
     unlink(CR_CMD);
     unlink(CR_PAIR);
     unlink(CR_ONLINE);
@@ -332,25 +335,40 @@ static unsigned q_len(const char *v) { return v ? (unsigned)strlen(v) : 0; }
 /* The playing queue, when it changes: "gen pos total" then a line a song, its library id; a song with no
  * library record (id 0: a card app's stream download, as its playlist sessions and radios queue them) also
  * its path, title and artist after tabs, as its record has them (tags.c card_record_tags: its server row's),
- * so the daemon names it rather than calling it gone from the library. */
+ * so the daemon names it rather than calling it gone from the library. Under a shuffle the lines are the play
+ * order Up Next shows (upnext.c): the songs played (playback_played, at most half the lines), the one playing,
+ * then what plays after it (playback_upcoming), and pos is the playing one's line (q_place, which Now Playing's
+ * qpos says too); a Next moves only that place, as those three run on into each other. Otherwise the queue's own
+ * order, pos its index. */
 static void cr_queue(void *q, unsigned pos) {
     unsigned n = q ? deque_size(q) : 0, h = hash_bytes(FNV_SEED, (const unsigned char *)&q, sizeof q);
+    unsigned *rows = n && pos < n && playback_option(0) ? calloc(CR_QUEUE_MAX, sizeof *rows) : 0, listed;
+    if (rows) {
+        unsigned k = playback_played(rows, CR_QUEUE_MAX / 2);
+        rows[k] = pos;
+        listed = k + 1 + playback_upcoming(rows + k + 1, CR_QUEUE_MAX - k - 1);
+        cr.q_place = k;
+        h = hash_bytes(h, (const unsigned char *)rows, listed * sizeof *rows);
+    } else
+        listed = n < CR_QUEUE_MAX ? n : CR_QUEUE_MAX, cr.q_place = pos;
     h = hash_bytes(h, (const unsigned char *)&n, sizeof n);
     h = hash_bytes(h, (const unsigned char *)&playback_loads, sizeof playback_loads);
-    if (h == cr.q_hash) return;
-    unsigned listed = n < CR_QUEUE_MAX ? n : CR_QUEUE_MAX, len = 0, cap = 40 + listed * 12;
+    if (h == cr.q_hash) return free(rows);
+    unsigned len = 0, cap = 40 + listed * 12;
     for (unsigned i = 0; i < listed; ++i) {
-        void *r = deque_at(q, i);
+        void *r = deque_at(q, rows ? rows[i] : i);
         if (I(r, REC_ID) <= 0) cap += 3 + q_len(P(r, REC_PATH)) + q_len(P(r, REC_TITLE)) + q_len(P(r, REC_NAME)) +
                                       q_len(P(r, REC_ARTIST));
     }
     char *b = calloc(1, cap);
-    if (!b) return;
+    if (!b) return free(rows);
     cr.q_hash = h;
     ++cr.q_gen;
-    len = (unsigned)snprintf(b, cap, "%u %u %u\n", cr.q_gen, pos, n);
+    free(cr.q_rows);
+    cr.q_rows = rows, cr.q_listed = listed;
+    len = (unsigned)snprintf(b, cap, "%u %u %u\n", cr.q_gen, cr.q_place, rows ? listed : n);
     for (unsigned i = 0; i < listed; ++i) {
-        void *r = deque_at(q, i);
+        void *r = deque_at(q, rows ? rows[i] : i);
         int id = I(r, REC_ID);
         len += (unsigned)snprintf(b + len, cap - len, "%d", id);
         if (id <= 0 && P(r, REC_PATH)) {
@@ -414,8 +432,10 @@ static void cr_now(void) {
     put_int(b, sizeof b, &n, "repeat", rep);
     put_int(b, sizeof b, &n, "volume", g_volume);
     put_int(b, sizeof b, &n, "hearts", now.pressed || other ? -1 : cr_hearts((unsigned)now.id));
-    put_int(b, sizeof b, &n, "qpos", (int)now.qpos);
-    put_int(b, sizeof b, &n, "qlen", (int)now.qlen);
+    /* a shuffle's: the playing song's line in the listing and its lines (cr_queue), as the car lists them */
+    int listing = cr.q_rows && !now.pressed && !other;
+    put_int(b, sizeof b, &n, "qpos", listing ? (int)cr.q_place : (int)now.qpos);
+    put_int(b, sizeof b, &n, "qlen", listing ? (int)cr.q_listed : (int)now.qlen);
     put_int(b, sizeof b, &n, "qgen", (int)cr.q_gen);
     unsigned have = 0, btotal = 0, bms = 0; /* a server song loading (np_stream.c), NowPlaying.buffering */
     put_int(b, sizeof b, &n, "buf", other ? 0 : np_stream_loading(&have, &btotal, &bms));
@@ -607,6 +627,7 @@ static int cr_mode(int shuffle, int repeat) {
  * forbids it (1). */
 static int cr_jump(unsigned at, int id) {
     void *q = P(mcl_pdeqplaylist, 0);
+    if (cr.q_rows) at = at < cr.q_listed ? cr.q_rows[at] : ~0u; /* a line of a shuffle's listing (cr_queue) */
     if (!q || at >= deque_size(q) || I(deque_at(q, at), REC_ID) != id) return 3;
     if (at == (unsigned)I(MCL_POS, 0) && playback_keeps(q, (int)at)) {
         if (!media_playing()) media_key(KEY_PLAY);

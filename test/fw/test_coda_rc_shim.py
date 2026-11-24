@@ -902,3 +902,43 @@ def test_a_play_is_answered_taken_before_its_timer_runs(fw, ui, mcl, recs):
     assert q2.files[ACK] == b'7 9\n' and not ui.played  # taken; its timer has not run
     ui.fire('cr_play')
     assert ui.played and q2.files[ACK] == b'7 0\n7 9\n'
+
+
+def test_under_shuffle_the_car_lists_the_play_order_with_what_played_above(fw, ui, mcl, recs):
+    """Stock Shuffle, played as an order (playback.c shuffle_own): the queue file lists what Up Next shows, the songs
+    played, the one playing (pos, Now Playing's qpos) and then what plays after it, this pass and the next. A Next
+    moves only the place; a jump to a line plays that line's song."""
+    q2 = Q2(fw, ui, recs)
+    q2.queue(at=1)
+    mcl.type, mcl.mode = 0xf001, 2
+    fw.fn('playback_poll', None)()
+    q2.tick()
+    out = (C.c_uint * 16)()
+    coming = list(out[:fw.fn('playback_upcoming', C.c_uint, C.POINTER(C.c_uint), C.c_uint)(out, 16)])
+    lines = q2.files[QUEUE].decode().split('\n')
+    assert lines[0] == '1 0 %d' % (1 + len(coming)) and len(coming) == 3 + 4
+    assert lines[1:-1] == [str(10 + i) for i in [1] + coming]
+    assert (q2.now()['qpos'], q2.now()['qlen'], q2.now()['shuffle']) == ('0', '8', '1')
+    assert fw.fn('ringnav_next', C.c_int, C.c_int)(1) >= 0 and mcl.pos == coming[0]
+    q2.tick()
+    assert q2.now()['qpos'] == '1' and q2.files[QUEUE].decode().split('\n')[0] == '1 0 8'  # the list kept, its place on
+    q2.files[CMD] = b'50 jump 3 %d\n' % (10 + coming[2])
+    q2.tick()
+    assert q2.ack() == b'50 0\n' and [a[0] for _, a in fw.calls('player_start_queue')] == [coming[2]]
+
+
+def test_the_cars_shuffle_off_is_now_playings_and_plays_the_queue_on(fw, ui, mcl, recs):
+    """Stock Shuffle played as an order is Now Playing's mode, not the hold menu's (playback.c playback_active): the
+    car's Shuffle off turns Now Playing's off, and the queue plays on in its own order from the song."""
+    fw.mock('stock_mode_trampoline', lambda m, *_: setattr(mcl, 'mode', m) or 0)
+    fw.mock('config_playmode', lambda m, notify, *_: fw.fn('ringnav_mode', C.c_int, C.c_int)(m))
+    q2 = Q2(fw, ui, recs)
+    q2.queue(at=1)
+    mcl.type, mcl.mode = 0xf001, 2
+    fw.fn('playback_poll', None)()
+    q2.tick()
+    assert fw.fn('playback_active', C.c_int)() == 0 and q2.now()['shuffle'] == '1'
+    q2.files[CMD] = b'60 mode 0 -1\n'
+    q2.tick()
+    assert q2.ack() == b'60 0\n' and mcl.mode in (0, 3) and q2.now()['shuffle'] == '0'
+    assert q2.files[QUEUE].decode().split('\n')[:2] == ['2 1 4', '10']  # the queue's own order again
