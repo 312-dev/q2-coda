@@ -47,7 +47,8 @@ class Sudoku(C.Structure):
                 ('at', C.c_uint), ('owed', C.c_uint), *((k, C.c_int) for k in 'wash wcur wave wt'.split()),
                 ('key', C.c_uint * 81), ('side', C.c_ulonglong), ('sv', Solver), ('rng', C.c_uint),
                 *((k, C.c_int) for k in 'glevel gphase gpair gclues gtries gdeep'.split()), ('gwork', C.c_uint), ('order', C.c_ubyte * 41),
-                ('puz', C.c_ubyte * 81), ('gsol', C.c_ubyte * 81), ('cells', (C.c_ubyte * 9) * 27), ('of', (C.c_ubyte * 3) * 81)]
+                ('puz', C.c_ubyte * 81), ('gsol', C.c_ubyte * 81), ('cells', (C.c_ubyte * 9) * 27), ('of', (C.c_ubyte * 3) * 81),
+                ('slip', C.c_int)]
 
 
 # An independent solver and grader, in Python.
@@ -600,7 +601,7 @@ def test_play_with_the_dial_shut_clears_the_entry_then_the_notes_and_held_opens_
     assert s.v.clue[s.v.cur] == clue  # a clue stays
 
 
-def test_conflicts_by_row_column_and_box_show_the_entries_red_circled_and_the_clue_underlined(fw):
+def test_conflicts_show_the_slip_red_circled_and_what_it_clashes_with_underlined(fw):
     g = Game(fw)
     gaps = {0, 1, 2, 9, 10, 11, 18, 19, 20, 27, 36, 45, 54, 60}
     g.puzzle(half(SOLVED, gaps), SOLVED, cur=80)
@@ -634,7 +635,10 @@ def test_conflicts_by_row_column_and_box_show_the_entries_red_circled_and_the_cl
     assert legal(g, 1) == [2] and s.pick == 2  # 2 is cell 1's alone by its clues, and cell 0 holds one
     g.press(E_CENTRE)
     assert g.sounds == [ALERT] and s.v.ent[1] == 2 and s.v.slips == 1  # placing a clash beeps, a slip counted
+    assert s.slip == 2 and red_cells() == {1} and s.key[0] >> 10 & 1  # the slip red, the entry it clashes with underlined
     px = draw(g)
+    ux, uy = box(0)
+    assert reddish(px[(uy + 28) * 375 + ux + 16]) and s.key[0] >> 4 & 3 == K_ENTRY  # in pen, its underline red
     assert art.written(px, art.say('1 slip', 'A_HAND', 356, 256, 1), RED)
     s.v.slips = 12
     assert art.written(draw(g), art.say('12 slips', 'A_HAND', 356, 256, 1), RED)

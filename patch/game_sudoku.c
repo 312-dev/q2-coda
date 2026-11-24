@@ -5,8 +5,7 @@
  * work a step so no frame is late. */
 #include "engine.h"
 #include "game_sudoku_art.inc"
-
-unsigned time_now_ms(void); /* stock's millisecond clock: the puzzle's time between inputs */
+#include "peq_platform.h" /* time_now_ms, stock's clock: the puzzle's time between inputs */
 
 #define S_MAGIC 0x314b4453 /* "SDK1" */
 #define S_WORK                                                                                     \
@@ -87,6 +86,7 @@ struct sudoku {
     unsigned char order[41], puz[81], gsol[81];
     unsigned char cells[27][9],
         of[81][3]; /* the units (rows, columns, boxes): their cells; a cell's */
+    int slip;      /* the cell, and one, of the last digit placed that clashed; 0 none */
 };
 
 static int bit(int d) { return d ? 1 << (d - 1) : 0; }
@@ -301,8 +301,8 @@ static int peer(const struct sudoku *s, int i, int j) { /* i itself too */
 enum { B_PEER = 1, B_TWIN = 2, B_CUR = 4, B_WAVE = 8 };
 enum { K_CLUE = 1, K_ENTRY, K_CLASH };
 /* How cell i looks: its washes (B_*) in bits 0-3, its digit's kind (K_*) in 4-5, the digit in 6-9,
- * in 10 a clue an entry clashes with, its notes in 11-19 when it has no digit. The peers and twins
- * are of wcur while the wash shows, a step behind the cursor (step). */
+ * in 10 a digit a slip clashes with (underlined), its notes in 11-19 when it has no digit. The
+ * peers and twins are of wcur while the wash shows, a step behind the cursor (step). */
 static unsigned look(const struct sudoku *s, int i) {
     int d = digit(s, i), w = s->wcur, bg = 0;
     if (s->mode == PLAY) {
@@ -312,9 +312,18 @@ static unsigned look(const struct sudoku *s, int i) {
     }
     for (int k = 0; s->wave && k < 9; ++k)
         if (s->cells[s->wave - 1][k] == i && s->wt >= k * S_WAVE) bg |= B_WAVE;
-    int kind = !d ? 0 : s->v.clue[i] ? K_CLUE : clash(s, i) ? K_CLASH : K_ENTRY;
-    return (unsigned)(bg | kind << 4 | d << 6 | (kind == K_CLUE && clash(s, i)) << 10 |
-                      (d ? 0 : s->v.note[i] << 11));
+    /* A clash: the entry red and circled, and what it clashes with underlined; of two entries, the
+     * one placed last is the slip, so the other is underlined, unless a clue clashes with it too.
+     */
+    int kind = !d ? 0 : s->v.clue[i] ? K_CLUE : K_ENTRY, under = 0, at = s->slip - 1;
+    if (d && clash(s, i)) {
+        if (kind == K_CLUE || (at >= 0 && at != i && digit(s, at) == d && peer(s, i, at) &&
+                               !((unsigned)bit(d) & seen(s, i, 1))))
+            under = 1;
+        else
+            kind = K_CLASH;
+    }
+    return (unsigned)(bg | kind << 4 | d << 6 | under << 10 | (d ? 0 : s->v.note[i] << 11));
 }
 
 /* Each cell's look again; with mark, a row's changed cells marked as one rect, and the cursor's
@@ -414,7 +423,9 @@ static void place(struct sudoku *s, int d) {
         finished(s);
         return;
     }
+    s->slip = 0;
     if (clash(s, i)) {
+        s->slip = i + 1;
         s->v.slips += s->v.slips < 255;
         sound(s, ENG_SFX_ALERT, 1);
         return;
@@ -811,7 +822,7 @@ static void cell(const struct sudoku *s, struct eng_surface *sf, int i) {
         mid(sf, A_PEN + d, x2 + i * 7 % 3 - 1, y2 + i * 5 % 3 - 1,
             kind == K_CLASH ? sty.red : sty.pen);
     if (kind == K_CLASH) ring(sf, x2 * 8, y2 * 8, 222, 19, sty.red, 256);
-    if (k >> 10 & 1) /* the clue a clash is with: underlined twice */
+    if (k >> 10 & 1) /* the digit a slip clashes with: underlined twice */
         line(sf, x * 16 + 120, y * 16 + 464, x * 16 + 408, y * 16 + 448, 26, sty.red),
             line(sf, x * 16 + 136, y * 16 + 498, x * 16 + 392, y * 16 + 486, 16, sty.red);
     for (int n = 0; n < 9; ++n) /* the notes, each digit in its ninth */
