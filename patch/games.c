@@ -574,6 +574,7 @@ static struct game {
     int rows; /* the chooser's: its own games, then the card's */
     void *title; /* the caption the bar reads, where the theme's bar holds it */
     int engines; /* the engine's games, the chooser's rows after its own (GAMES_BUILTIN) */
+    int full, box[4]; /* an ENG_FULL game's page over the whole screen; the page's own place */
 } *g __attribute__((section(".scratch")));
 
 static int sud_started(const struct sudoku *s) {
@@ -606,8 +607,17 @@ static void changed(int game) {
     if (!g->save) g->save = timer_add(save_due, (void *)0, SAVE_MS);
 }
 
-/* The frame timer off and the wheel back to ticks. */
+/* The status row shown or hidden: the window manager paints it over the windows, so a full-screen
+ * game hides it, but for a pause, when its clock and battery show. */
+static void bar_shown(int on) {
+    void *bar = *(void *const *)system_bar;
+    if (bar) widget_set_visible(bar, on, 0), widget_invalidate_force(bar, 0);
+}
+
+/* The frame timer off and the wheel back to ticks; a full-screen game's pause shows the status
+ * row. */
 static void hold(int paused) {
+    if (g->full && paused != g->paused) bar_shown(paused != RUN);
     g->paused = paused;
     wheel_raw = 0;
     stop_timer(&g->frame);
@@ -690,6 +700,7 @@ int games_live(void) { return g && (g->frame || eng_live()); }
 static void run(void) {
     g->paused = RUN;
     if (g->screen >= ENGINE) { /* its own timer and wheel (engine.c) */
+        if (g->full) bar_shown(0);
         eng_run();
         return;
     }
@@ -709,6 +720,19 @@ static void engine_held(void) {
 }
 static void engine_left(void) { to(CHOOSER); }
 
+/* An ENG_FULL game (docs/games-engine.md#full-screen): the status row hidden, the page moved over
+ * its place and the sheet the whole 375 x 320; else the page's own place again, under the bar. */
+static void full_screen(int on) {
+    if (on == g->full) return;
+    bar_shown(!on);
+    if (on)
+        for (int k = 0; k < 4; ++k) g->box[k] = I(g->page, W_X + 4 * k);
+    g->full = on;
+    widget_move_resize(g->page, on ? 0 : g->box[0], on ? 0 : g->box[1], on ? 375 : g->box[2],
+                       on ? 320 : g->box[3]);
+    widget_move_resize(g->sheet, 0, on ? 0 : bar_foot(g->page), 375, on ? 320 : g->h);
+}
+
 static const char *const game_names[] = { "Games", "Sudoku", "Vortex", "Solitaire", "Snake" };
 /* The chooser or the game target, from the next loop pass. */
 static int show(const void *unused) {
@@ -716,9 +740,11 @@ static int show(const void *unused) {
     int from = g->screen;
     hold(RUN);
     if (from >= ENGINE) eng_close();
-    if (g->target >= ENGINE && /* no memory for its state: the list stays */
-        !eng_open(eng_game(g->target - ENGINE), g->page, g->sheet, g->h, engine_held, engine_left))
-        g->target = CHOOSER;
+    const struct eng_game *game = g->target >= ENGINE ? eng_game(g->target - ENGINE) : 0;
+    full_screen(game && game->flags & ENG_FULL);
+    if (game && /* no memory for its state: the list stays */
+        !eng_open(game, g->page, g->sheet, g->full ? 320 : g->h, engine_held, engine_left))
+        g->target = CHOOSER, full_screen(0);
     g->screen = g->target;
     g->picking = g->confirm = 0;
     widget_set_visible(g->list, g->screen == CHOOSER, 0);
@@ -1245,6 +1271,7 @@ void games_paint(void *w, void *canvas) {
 
 static int closed(void *ctx, void *event) {
     hold(RUN);
+    if (g->full) bar_shown(1); /* the page goes; the status row stays */
     stop_timer(&g->timer);
     flush(0);
     eng_close();
