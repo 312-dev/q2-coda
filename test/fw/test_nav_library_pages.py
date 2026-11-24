@@ -2960,6 +2960,126 @@ def test_a_library_query_on_the_ui_thread_gives_a_running_cover_flow_step_up_fir
                                 for fn, _c, _m in ui.timers.values())
 
 
+class CfOpen:
+    """Home's Cover Flow pressed (coverflow_open) over albums A and B: each step's thread runs when the test says
+    (steps), the clock is the test's, and the unified log's cf lines are kept (lines)."""
+    def __init__(self, fw, ui, song):
+        self.fw, self.ui, self.clock, self.thread, self.lines = fw, ui, [1000], [], []
+        Files(fw)
+        fw.mock('time_now_ms', lambda *_: self.clock[0])
+        fw.var('g_backlight_status', C.c_ubyte).value = 1
+        home = ui.new('window_create', 0, 0, 0, 0, 0)
+        ui.name[home] = 'home_page'
+        rows = [song(b'/m/a/1.flac', album=b'A', id_=1), song(b'/m/b/1.flac', album=b'B', id_=2)]
+        put = lambda *_: ui.deques[fw.var('fw_ctx_tools_pdeq_directory', C.c_uint).value].extend(rows) or 2  # noqa: E731
+        fw.mock('getAllAlbum', put)
+        fw.mock('toolsQueryDbTable', put)
+        fw.mock('fw_pthread_create', self.create)
+        fw.mock('fw_usleep', lambda us, *_: self.clock.__setitem__(0, self.clock[0] + us // 1000) or 0)
+        fw.mock('widget_load_image', lambda *_: 1)
+        fw.mock('fw_write', self.write)
+        fw.fn('coverflow__coverflow_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+
+    def create(self, out, attr, run, arg, *_):
+        C.c_ulong.from_address(out).value = 99
+        self.thread.append([run, arg])
+        return 0
+
+    def write(self, fd, data, n, *_):
+        line = C.string_at(data, n).decode().rstrip('\n').split(' ', 4)
+        if fd == 2 and line[3] == 'cf':
+            self.lines.append(line[2] + ' ' + line[4])
+        return n
+
+    def steps(self, n=10, until=None):
+        """Each running step ends and a pass of the main loop collects it, n times; a step until (its k) is left
+        running, as is the art build's worker."""
+        worker = C.cast(self.fw.lib.coverflow__worker, C.c_void_p).value
+        for _ in range(n):
+            for t in self.thread:
+                if t[0] and t[0] != worker and t[1] != until:
+                    run, t[0] = t[0], None
+                    C.CFUNCTYPE(C.c_void_p, C.c_void_p)(run)(t[1])
+            for t, (fn, ctx, _ms) in list(self.ui.timers.items()):
+                if fn == C.cast(self.fw.lib.coverflow__open_step, C.c_void_p).value:
+                    del self.ui.timers[t]
+                    TICK(fn)(ctx)
+
+    def watch(self):
+        """The watch's timer fired, as the main loop would at its time: its next delay, or None for none."""
+        timers = [(t, ms) for t, (fn, _c, ms) in self.ui.timers.items()
+                  if fn == C.cast(self.fw.lib.coverflow__cw_tick, C.c_void_p).value]
+        if not timers:
+            return None
+        (t, ms), = timers
+        fn, ctx, _ = self.ui.timers.pop(t)
+        self.clock[0] += ms
+        TICK(fn)(ctx)
+        later = [ms for t, (fn, _c, ms) in self.ui.timers.items()
+                 if fn == C.cast(self.fw.lib.coverflow__cw_tick, C.c_void_p).value]
+        return later[0] if later else None
+
+
+# Cover Flow's open in the unified log (docs/internals.md#cover-flow-log): "Cover Flow never loaded" (the owner,
+# 2026-11-24) left no line to say why. An open says what it opens, its covers when they show and how long after.
+def test_a_cover_flow_open_logs_its_albums_and_when_its_covers_show(fw, ui, song):
+    cf = CfOpen(fw, ui, song)
+    assert cf.lines == ['I cover flow open: the albums to query']
+    cf.clock[0] += 1200
+    cf.steps()
+    assert ui.name[ui.top()] == 'coverflow_page'
+    assert cf.lines[-1].startswith('I cover flow shown: ') and ', 2 albums, ' in cf.lines[-1]
+    assert cf.watch() is None  # nothing left to watch
+
+
+# Not shown 5 s after the open: a W line naming the phase it waits in, then one a minute while it still waits
+def test_a_cover_flow_open_still_waiting_says_where_after_5_s_then_each_minute(fw, ui, song):
+    cf = CfOpen(fw, ui, song)
+    assert cf.watch() == 60000
+    assert cf.lines[-1].startswith('W cover flow not shown ') and cf.lines[-1].endswith(
+        "after its open: the albums' query (step 1 of 3)")
+    assert cf.watch() == 60000 and ' 65 s after' in cf.lines[-1]
+    assert len(cf.lines) == 3  # a line each, never one a frame
+
+
+# the cover lookup (OPEN_ART, its own thread) says how far it is, and how many albums have no cover file to make art from
+def test_a_cover_flow_open_in_its_cover_lookup_says_how_far(fw, ui, song):
+    cf = CfOpen(fw, ui, song)
+    cf.steps(until=4)
+    assert cf.watch() == 60000
+    assert cf.lines[-1].endswith('after its open: the cover lookup, 0 of 2 albums looked at, 0 without a cover file')
+
+
+# the page up on Preparing artwork (a build of its art, on a thread) and closed before any cover shows
+def test_a_cover_flow_page_closed_while_its_art_builds_says_so(fw, ui, song):
+    def statfs(path, buf, *_):  # the card has room for the art
+        words = C.cast(buf, C.POINTER(C.c_uint))
+        words[1], words[7] = 4096, 1 << 20
+        return 0
+    fw.mock('fw_statfs', statfs)
+    fw.mock('fw_access', lambda p, *_: -1 if b'/.coverflow/' in C.string_at(p) else 0)  # no album's art made yet
+    cf = CfOpen(fw, ui, song)
+    cf.steps()
+    page = ui.top()
+    assert ui.name[page] == 'coverflow_page' and not any(line.startswith('I cover flow shown') for line in cf.lines)
+    assert cf.watch() == 60000 and cf.lines[-1].endswith('after its open: the thumbnail build, 0 of 2 done')
+    ui.close(page)
+    assert cf.lines[-1].startswith('I cover flow closed ') and cf.lines[-1].endswith(
+        'not shown: the thumbnail build, 0 of 2 done')
+    assert cf.watch() is None
+
+
+# Return while it waits: the open given up, and the line says where it was
+def test_a_cover_flow_open_given_up_says_where_it_was(fw, ui, song):
+    cf = CfOpen(fw, ui, song)
+    key = (C.c_uint * 16)()
+    key[O['EVENT_TYPE'] // 4], key[O['EVENT_KEY'] // 4] = O['EVT_KEY_UP'], O['KEY_RETURN']
+    assert fw.fn('coverflow_wait_input', C.c_int, C.c_void_p)(key) == 1
+    assert cf.lines[-1].startswith('I cover flow open given up after ') and \
+        cf.lines[-1].endswith("in the albums' query (step 1 of 3)")
+    assert cf.watch() is None
+
+
 def test_albums_none_of_them_rated_says_so(fw, ui, song):
     rated_albums(fw, ui, song)
     assert ui.toasts == ['No rated albums yet'] and not ui.windows

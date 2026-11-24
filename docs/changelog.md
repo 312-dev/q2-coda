@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Logs: opening Cover Flow from Home leaves a line when it opens, one when its covers show and how long that took, and, if nothing shows within 5 seconds, a line a minute saying what it is still waiting for (the album list, the cover lookup, or building thumbnails and how far along).
   - Library > Years: opening a large decade shows its first albums at once and adds the rest over the next second, where the screen froze for about two seconds on a decade of 2,600 albums; Play All on a decade starts in about a quarter of the time. The log names Years' and every Library list's loading, so a slow one shows which.
   - Car Remote: on the car's now-playing screen, the artist and the album open that artist's and that album's pages (with a Q2 Muse Remote that supports it).
   - Playback: **Crossfade** is now **Smart Crossfade**, one switch. Songs from different albums overlap at the right moment for each pair: a song that fades out plays under the next one's start for as long as its fade lasts, silence at the end of a song or the start of the next is skipped, a song that starts loud comes in at full level, and the overlap never clips. When the Q2 can't look at both songs in time (the next one still downloading, for one) it fades over 5 seconds as before. Switching it on switches Gapless on too, and the row says "Needs Gapless on" if Gapless is later switched off. If Crossfade was on, Smart Crossfade is on; the old length setting is no longer used.

@@ -662,13 +662,15 @@ static int art_clean(void) {
     return aw.clean && aw.clean == cf.stock && aw.clean_gen == library_gen &&
            aw.clean_n == deque_size(cf.stock);
 }
-/* Whether album r has no art cached that a build could make: load_albums' job test. */
-static int art_missing(void *r, char *path, unsigned size) {
+/* Album r's art: 0 cached, 1 not cached and a build could make it (load_albums' job test), 2 not
+ * cached and nothing to make it from: a server album whose app has no cover file, drawn as the
+ * placeholder, no job. */
+static int art_state(void *r, char *path, unsigned size) {
     const char *p = P(r, REC_PATH);
-    /* a server album's art is its app's cover: none fetched yet, the placeholder, no job */
-    return p && access(art_path(path, album_key(r), ""), 0) &&
-           (!catalogue_path(p) || catalogue_cover(p, path, size));
+    if (!p || !access(art_path(path, album_key(r), ""), 0)) return 0;
+    return !catalogue_path(p) || catalogue_cover(p, path, size) ? 1 : 2;
 }
+static int art_missing(void *r, char *path, unsigned size) { return art_state(r, path, size) == 1; }
 /* The thread: files and the albums' records only, read-only; every change to the list joins it
  * first (verify_join). */
 static void *verify(void *albums) {
@@ -720,6 +722,7 @@ static struct {
     unsigned gen, count;
     job_t *jobs; /* 0: none made (or no memory) */
     int total;
+    volatile unsigned looked, bare; /* albums looked at so far; of them, art_state's 2 (the log) */
 } aj __attribute__((section(".scratch")));
 static void art_found_drop(void) {
     for (int i = 0; i < aj.total; ++i) free(aj.jobs[i].track);
@@ -729,18 +732,24 @@ static void art_found_drop(void) {
 /* cf.albums' jobs into aj, as load_albums' own pass makes them. Files and the albums' records only.
  */
 static int open_cancelled(void);
+static void cw_refused(const char *what);
 static void art_find(void) {
     char path[512];
     unsigned count = deque_size(cf.albums);
     art_found_drop();
     art_strike(BUILDING); /* first: the album it strikes takes its marker, and no job */
-    if (!(aj.jobs = calloc(count, sizeof(job_t)))) return;
+    if (!(aj.jobs = calloc(count, sizeof(job_t)))) {
+        cw_refused("the art look's jobs");
+        return;
+    }
     aj.albums = cf.albums, aj.gen = library_gen, aj.count = count;
     unsigned char *shared = folders_shared(cf.albums, count);
     for (unsigned i = 0; i < count && !open_cancelled(); ++i) { /* a given-up open's look stops */
         void *r = deque_at(cf.albums, i);
         job_t *j = &aj.jobs[aj.total];
-        if (art_missing(r, path, sizeof path) && (j->track = strdup(P(r, REC_PATH)))) {
+        int state = art_state(r, path, sizeof path);
+        aj.bare += state == 2, aj.looked = i + 1;
+        if (state == 1 && (j->track = strdup(P(r, REC_PATH)))) {
             j->key = album_key(r);
             j->shared = shared ? shared[i] : 1; /* no memory: no cover.jpg that may be another's */
             ++aj.total;
@@ -2918,6 +2927,7 @@ static int retitle(const void *unused) {
  * 6,000 albums 25 ms and their layout as much again. The flat fallback is the stock images, 160 px,
  * as before, one child per album. ponytail: the flat fallback (no memory for the frame) still makes
  * a child per album; a pool there would rebind the images round the visual centre mid-glide. */
+static void cw_shown(const char *what);
 static void covers(void) {
     cf.screen = COVERS;
     widget_set_visible(cf.body, 0, 0);
@@ -2925,6 +2935,7 @@ static void covers(void) {
         coverflow_position_reset();
         void *f = widget_factory();
         int depth = fx_open();
+        if (!depth) cw_refused("the covers' frame, drawn flat");
         fx_fresh = depth;
         cf.covers =
             widget_factory_create_widget(f, "view", cf.page, 0, bar_foot(cf.page), 375, client_h());
@@ -2959,6 +2970,7 @@ static void covers(void) {
     widget_set_visible(cf.covers, 1, 0);
     widget_set_sensitive(cf.covers, 1);
     widget_invalidate_force(cf.page, 0);
+    cw_shown("covers");
 }
 
 static int playlists_again(const void *unused);
@@ -3155,6 +3167,7 @@ static void load_albums(unsigned t0) {
     }
     if (n > 0 && !cf.albums) sort_albums(t0); /* an open has sorted already (open_step) */
     if (n <= 0) {
+        cw_shown("no albums");
         drop_albums();      /* only a real list is kept */
         cf.screen = COVERS; /* Return goes Home */
         if (cf.scoped || !cf_empty(cf.page, cf.body)) /* the house's empty page (cf_empty.c) */
@@ -3200,7 +3213,7 @@ static void load_albums(unsigned t0) {
     art_found_drop();
     int playing = 0;
     art_strike(BUILDING);
-    cf.jobs = calloc(count, sizeof(job_t));
+    if (!(cf.jobs = calloc(count, sizeof(job_t)))) cw_refused("the art build's jobs");
     unsigned char *shared = folders_shared(cf.albums, count);
     for (unsigned i = 0; i < count; ++i) {
         if (i && !(i % 1000)) cf_trace(t0, "jobs ", i, count);
@@ -3547,8 +3560,10 @@ static void playlist_ready(int cd_num) {
     widget_invalidate_force(cf.page, 0);
 }
 
+static void cw_closed(void);
 static int closed(void *ctx, void *event) {
     if (ctx != cf.page) return 0; /* a page scoped_open closed already */
+    cw_closed();
     coverflow_position_reset();
     stop_timer(&cf.title_timer);
     stop_timer(&pl_again);
@@ -3627,7 +3642,9 @@ static void open_stop(void) {
     pthread_join(op.thread, 0);
     op.running = 0;
 }
+static void cw_given_up(void);
 static void open_end(void) {
+    if (op.step != OPEN_DONE) cw_given_up(); /* before its step's state goes */
     open_stop();
     if (op.timer) timer_remove(op.timer);
     query_drop();
@@ -3728,8 +3745,98 @@ int coverflow_wait_input(void *e) {
     if (keyed || type == EVT_POINTER_DOWN) open_end(), art_found_drop();
     return 0;
 }
+/* Cover Flow's open in the unified log (docs/internals.md#cover-flow-log): an I line as Home's
+ * Cover Flow opens, one when its covers (or its no-albums page) first show, with the time since,
+ * and, while nothing shows, a W line CW_FIRST_MS after the open and every CW_AGAIN_MS after that
+ * naming the phase it waits in; an I line too if the open is given up or the page closed first. A
+ * few lines an open, never one a frame or an album. The trace file (cf_trace) reaches the card only
+ * after a forced restart; these go with every flush of the log. */
+#define CW_FIRST_MS 5000
+#define CW_AGAIN_MS 60000
+void ulog(char level, const char *src, const char *msg);
+static struct {
+    unsigned at, timer;  /* the open's time (0: no open watched), the watch's timer */
+    const char *refused; /* the memory last refused this open, or 0 */
+} cw __attribute__((section(".scratch")));
+#define cw_say(level, ...)                                                                         \
+    do {                                                                                           \
+        char line_[160];                                                                           \
+        snprintf(line_, sizeof line_, __VA_ARGS__);                                                \
+        ulog(level, "cf", line_);                                                                  \
+    } while (0)
+static void cw_refused(const char *what) { cw.refused = what; }
+/* Where the open waits now, into buf. */
+static const char *cw_phase(char *buf, unsigned size) {
+    int n;
+    if (op.waiting && op.step <= 2)
+        n = snprintf(buf, size, "the albums' query (step %d of 3)", op.step + 1);
+    else if (op.waiting && op.step == OPEN_SORT)
+        n = snprintf(buf, size, "the Sort's order");
+    else if (op.waiting && op.step == OPEN_ART)
+        n = snprintf(buf, size,
+                     "the cover lookup, %u of %u albums looked at, %u without a cover file",
+                     aj.looked, cf.albums ? deque_size(cf.albums) : 0, aj.bare);
+    else if (op.waiting)
+        n = snprintf(buf, size, "the open's last step");
+    else if (!cf.page)
+        n = snprintf(buf, size, "no page");
+    else if (cf.screen == PREPARING)
+        n = snprintf(buf, size, "the thumbnail build, %d of %d done", cf.done, cf.total);
+    else
+        n = snprintf(buf, size, "its page, the covers not shown");
+    if (cw.refused && n > 0 && (unsigned)n < size)
+        snprintf(buf + n, size - (unsigned)n, "; no memory for %s", cw.refused);
+    return buf;
+}
+static unsigned cw_ms(void) { return (unsigned)time_now_ms() - cw.at; }
+static void cw_end(void) {
+    stop_timer(&cw.timer);
+    cw.at = 0;
+}
+static int cw_tick(const void *unused) {
+    cw.timer = 0;
+    if (!cw.at) return 0;
+    char phase[128];
+    cw_say('W', "cover flow not shown %u s after its open: %s", cw_ms() / 1000,
+           cw_phase(phase, sizeof phase));
+    cw.timer = timer_add(cw_tick, 0, CW_AGAIN_MS);
+    return 0;
+}
+static void cw_open(void) {
+    cw_end();
+    cw.at = (unsigned)time_now_ms() | 1, cw.refused = 0;
+    if (cf.stock)
+        cw_say('I', "cover flow open: %u albums kept, %s", deque_size(cf.stock),
+               art_clean() ? "their art known" : "their art to look for");
+    else
+        cw_say('I', "cover flow open: the albums to query");
+    cw.timer = timer_add(cw_tick, 0, CW_FIRST_MS);
+}
+static void cw_shown(const char *what) {
+    if (!cw.at) return;
+    cw_say('I', "cover flow shown: %s, %u albums, %u ms after its open%s%s", what,
+           cf.albums ? deque_size(cf.albums) : 0, cw_ms(), cw.refused ? "; no memory for " : "",
+           cw.refused ? cw.refused : "");
+    cw_end();
+}
+static void cw_given_up(void) {
+    if (!cw.at || cf.page) return;
+    char phase[128];
+    cw_say('I', "cover flow open given up after %u ms, in %s", cw_ms(),
+           cw_phase(phase, sizeof phase));
+    cw_end();
+}
+static void cw_closed(void) {
+    if (!cw.at) return;
+    char phase[128];
+    cw_say('I', "cover flow closed %u ms after its open, not shown: %s", cw_ms(),
+           cw_phase(phase, sizeof phase));
+    cw_end();
+}
+
 static int coverflow_open(void *ctx, void *event) {
     if (cf.page || op.waiting) return 0;
+    cw_open();
     if (cf.albums_gen != library_gen) drop_albums();
     sort_check();
     if ((cf.stock && !sort_due() && !art_due()) || library_scanning()) { /* nothing to wait for */
