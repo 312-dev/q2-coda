@@ -729,18 +729,6 @@ assert m.u.mem_read(syms['g_folder_layer'],1)[0]==4
 m.folder('/mnt/mmc/Audiobooks'); m.byte(syms['g_folder_layer'],3)
 m.call(address=HOOKS['folder_back'][0],args=(0,0,0,0),gap=0)
 assert m.u.mem_read(syms['g_folder_layer'],1)[0]==1; passed()
-# Shortcut: Podcasts (8) and Audiobooks (9) open the card's folder as Local Music's rows do; without it a toast says so.
-CONFIG['SHORTCUT']='8'; m=ShuffleMachine(); del CONFIG['SHORTCUT']; m.card=[('Podcasts',4)]
-m.handlers[int(manifest['patch_symbols']['stock_folder_trampoline'],16)]='stock_folder'
-assert m.text(m.call(address=payload_syms['ipod_home_shortcut'],args=(0,0,0,0),gap=0))=='Podcasts'
-m.calls=[]; assert m.call(address=payload_syms['home_shortcut_open'],args=(0,m.event,0,0),gap=0)==0
-assert [m.text(c[1]) for c in m.calls if c[0]=='navigator_to']==['folder_page']
-win=m.node('window','folder_page'); assert m.call(address=HOOKS['folder_page_init'][0],args=(win,0,0,0),gap=0)==0
-assert m.text(syms['g_folder_path'])=='/mnt/mmc/Podcasts' and m.u.mem_read(syms['g_folder_layer'],1)[0]==3
-CONFIG['SHORTCUT']='9'; m=ShuffleMachine(); del CONFIG['SHORTCUT']; m.card=[('Podcasts',4)]
-assert m.text(m.call(address=payload_syms['ipod_home_shortcut'],args=(0,0,0,0),gap=0))=='Audiobooks'
-m.calls=[]; assert m.call(address=payload_syms['home_shortcut_open'],args=(0,m.event,0,0),gap=0)==0
-assert not [c for c in m.calls if c[0]=='navigator_to'] and m.toasts[-1][3]=='No Audiobooks folder on the card'; passed()
 
 # Folder visits bypass the storage selector only when OTG was absent and the card present on entry
 # (stock's check_tfstatus: /tmp/mmc_add).

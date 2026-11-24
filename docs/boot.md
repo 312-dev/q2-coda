@@ -46,7 +46,7 @@ Nothing is saved for the way back. `wifi_switch` writes `WIFI` to `/mnt/data/con
 
 ### Rockbox from Home
 
-iPod's Home has a **Rockbox** row between Folder and Streaming, shown only while the Rockbox binary is a regular file ([ipod.md](ipod.md#home)). Activation checks the file again in case the card was removed after the row appeared. This handover always launches Rockbox regardless of the saved boot choice. It is the way to Rockbox with Bluetooth: shut Rockbox down (Q2 Muse starts), connect the headphones in Q2 Muse, then pick **Rockbox** on Home, and Rockbox plays through them.
+ponytail: nothing opens this hand-over now. Home's list has had no Rockbox row since the menu review (2026-11-15), and its last way in, the Shortcut card of Home's Carousel, went with Carousel (2026-11-24); `rockbox_open` is kept, tested in `test/fw`, and dropped by the payload's link until a row calls it again, and `S90play` still honours its flag. Without it the way to Rockbox is the boot choice. The hand-over always launched Rockbox regardless of the saved boot choice, and was the way to Rockbox with Bluetooth: Rockbox plays through headphones Q2 Muse connected.
 
 demo cannot start Rockbox itself, as Rockbox takes the screen, the keys and ALSA, so it hands over to `S90play` (`rockbox_open`, `patch/navigation.c`):
 

@@ -87,7 +87,8 @@ def test_ipod_home():
                                             'btn_set_car', 'btn_set_display', 'btn_set_controls', 'btn_set_power']
     assert [r[3][0][2]['text'] for r in sets] == ['Wi-Fi', 'Bluetooth', 'General', 'Playback', 'Streaming', 'Car Remote',
                                                   'Display', 'Controls', 'Battery']  # Streaming after Playback
-    assert root[3][3][3] == home()[3][0][3]  # stock's cards as stock made them, the carousel only hidden
+    stock = home()[3][0][3]
+    assert root[3][3][3] == stock[:2] + stock[3:]  # stock's cards, Album Wall's gone, the carousel only hidden
     for n in root[3][3:]:
         assert n[2]['visible'] == 'false' and n[2]['sensitive'] == 'false'
 
@@ -96,6 +97,13 @@ def test_ipod_home_wants_the_carousel():
     root = home()
     root[3].pop()
     with pytest.raises(ValueError, match='^Unexpected home carousel$'):
+        ipod.ipod_home(root, OLED_SET)
+
+
+def test_ipod_home_wants_the_cards():
+    root = home()
+    root[3][0][3].pop()
+    with pytest.raises(ValueError, match='^Unexpected home cards$'):
         ipod.ipod_home(root, OLED_SET)
 
 

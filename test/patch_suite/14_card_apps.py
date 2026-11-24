@@ -120,9 +120,8 @@ assert gevent(O['EVT_KEY_LONG'],O['KEY_PLAY'])==[]  # eaten: no Play-hold action
 g.word(syms['g_dacoff_time'],5); g.now+=120_001; g.waited=0; assert poll(g)==0 and g.get(syms['g_dacoff_time'])==0
 g.now+=120_001; assert poll(g)==0 and any(c[0]=='reset_poweroptions_timer' for c in g.calls)
 g.waited=4243; g.calls=[]; poll(g); assert gn('addon_game_on')==0 and gn('addon_game_audio')==0
-assert [c[1] for c in g.calls if c[0]=='player_save_start']==[1]  # the held song back, paused (now_release)
-g.waited=0; assert signed(gn('addon_game_open',g.string('nothere')))==-1 and gn('addon_game_on')==0
-assert gn('addon_game_open',g.string('groovebox'))==1 and gn('addon_game_on')==4243; passed()
+assert [c[1] for c in g.calls if c[0]=='player_save_start']==[1]; passed()  # the held song back, paused (now_release)
+# (addon_game_open, a card game by id, has no caller since Home's Shortcut went: the link drops it; test/fw tests it.)
 # Stock's Baidu Netdisk row (a Chinese cloud drive; list_baidu's icon) is gone from Streaming, destroyed; its
 # TIDAL row stays first.
 m=AppMachine(); view=m.node('scroll_view','scroll_view_streamsset')

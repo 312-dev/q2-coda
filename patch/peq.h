@@ -831,8 +831,6 @@ int groovebox_available(void); /* theme_engine.c: the Groovebox card app's binar
 /* theme_engine.c: the two as last looked at, for every paint; card_bins_changed: look again now */
 int rockbox_seen(void), groovebox_seen(void);
 void card_bins_changed(void);
-#define SHORTCUT_GROOVEBOX 10  /* IPOD SHORTCUT's Groovebox, after the ten stock-era values */
-#define SHORTCUT_NONE 11       /* IPOD SHORTCUT's None: Home has no Shortcut row */
 int page_keyup(void *ctx, void *event); /* navigation.c: Return leaves a payload page */
 int ringnav_localclass(int cls);        /* navigation.c: load_localclass_list's hook */
 int shelf_open(void *ctx, void *event); /* netupdate.c: System settings' Apps page */

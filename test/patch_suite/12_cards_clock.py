@@ -96,7 +96,7 @@ class CardMachine(DepthMachine):
 # the state.
 OWN_GAMES=re.findall(r'^#define GAME_(\w+) (\d)',(ROOT/'patch/peq.h').read_text(),re.M)
 OWN=[n.capitalize() for n,on in OWN_GAMES if on=='1']; SHIPPED=['Games',*OWN,'Bricks']
-CONFIG['SHORTCUT']='6'; m=CardMachine({},{}); del CONFIG['SHORTCUT']
+m=CardMachine({},{})
 G_SCREEN,G_PICKING,G_PAUSED,G_CELL,G_CUR,G_VX=36,44,56,76,157,164
 # labels(w): the texts of the hscroll_labels under w, in node order
 def labels(w): return [m.nodes[x].get('text') for x in m.nodes if m.nodes[x]['type']=='hscroll_label' and m.get(x+O['W_PARENT']) in m.nodes and x in m.nodes[m.get(x+O['W_PARENT'])]['children'] and under(x,w)]
@@ -108,10 +108,6 @@ def games_open():  # Home's Games row (2026-11-19; the Library's until then): ga
     assert m.call(address=payload_syms['games_open'],args=(0,0,0,0),gap=0,count=5_000_000)==0
     m.page=m.top; assert m.nodes[m.page]['name']=='games_page' and m.nodes[m.page]['style:normal:bg_color']==-0x1000000
     return m.nodes[m.page]['children']
-assert m.text(m.call(address=payload_syms['ipod_home_shortcut'],args=(0,0,0,0),gap=0))=='Games'
-assert m.call(address=payload_syms['home_shortcut_open'],args=(0,m.event,0,0),gap=0,count=5_000_000)==0
-m.page=m.top; assert m.nodes[m.page]['name']=='games_page'
-m.close()
 sheet,chooser=games_open(); G=m.get(payload_syms['g'])
 assert labels(chooser)==SHIPPED and not m.nodes[sheet]['visible']
 rows=m.nodes[m.find('scroll_view',chooser)]['children']

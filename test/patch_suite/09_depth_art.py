@@ -1056,18 +1056,6 @@ f,ctx=m.handler(m.nodes[cf_refresh]['children'][0],O['EVT_CLICK']); m.mock('open
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.toasts[-1][3]=='Cover Flow rebuilds artwork next time'
 assert [m.text(c[1]) for c in m.calls if c[0]=='opendir@GLIBC_2.0']==['/mnt/mmc/.coverflow','/mnt/mmc/.sldp']
 assert did(m,'image_manager_unload_all') and m.nodes[refresh_label]['text']=='Refresh Cover Flow'; passed()
-# Shortcut: no key is Rockbox on a card with it, else Favorites.
-for card,first in ((True,'Rockbox'),(False,'Favorites')):
-    CONFIG.clear(); d=Machine(); d.rockbox_mode=0o100755 if card else 0
-    assert d.text(d.call(address=payload_syms['ipod_home_shortcut'],args=(0,0,0,0),gap=0))==first
-d.rockbox_mode=0o100755; d.now+=O['CARD_RECHECK_MS']  # a card mounted after the first read: the default follows it, once looked at again
-assert d.text(d.call(address=payload_syms['ipod_home_shortcut'],args=(0,0,0,0),gap=0))=='Rockbox'
-passed()
-# Shortcut: Playlists (7) opens the Library's Playlists list, as stock's Home does (context 0: not Add to Playlist).
-CONFIG.clear(); CONFIG['SHORTCUT']='7'; d=Machine(); del CONFIG['SHORTCUT']
-assert d.text(d.call(address=payload_syms['ipod_home_shortcut'],args=(0,0,0,0),gap=0))=='Playlists'
-d.calls=[]; d.call(address=payload_syms['home_shortcut_open'],args=(0,d.event,0,0),gap=0)
-assert [(d.text(c[1]),c[2]) for c in d.calls if c[0]=='navigator_to_with_context']==[('localmusic/playlist_page',0)]; passed()
 assert texts()==['Accent: Blue','Home: Split','Battery: Icon']; passed()
 def click(i):
     m.calls=[]; f,ctx=m.handler(buttons[i],O['EVT_CLICK'])

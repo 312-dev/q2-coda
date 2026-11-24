@@ -5741,43 +5741,30 @@ def test_hostile_rules_files(fw):
         hidden(fw, b'/mnt/mmc/A/x')
 
 
-def shortcut(fw, value):
-    """IPOD SHORTCUT in config.ini, every other key its default; Home's shortcut row's click."""
-    def read(path, section, key, out, default, *_):
-        v = value if C.string_at(key) == b'SHORTCUT' else C.string_at(default)
-        C.memmove(out, v + b'\0', len(v) + 1)
-    fw.mock('toolsReadConfig', read)
-    return fw.fn('home_shortcut_open', C.c_int, C.c_void_p, C.c_void_p)
-
-
 def toasts(fw):
     out = []
     fw.mock('navigator_to_with_context', lambda page, info, *_: out.append(C.string_at(info + 8)))  # toast's dialog
     return out
 
 
-def test_the_groovebox_shortcut_starts_the_card_game_with_the_sound(fw):
+def test_groovebox_by_id_starts_the_card_game_with_the_sound(fw):
     from test_radio import Library
     lib = Library(fw)
     card(fw, groovebox=b'name=Groovebox\ngame=1\naudio=1\n')
     fw.mock('fw_fork', lambda *_: 77)
     fw.mock('fw_socket', lambda *_: 9)
     seen = toasts(fw)
-    assert shortcut(fw, b'10')(None, None) == 0 and seen == []
+    assert fw.fn('addon_game_open', C.c_int, C.c_char_p)(b'groovebox') == 1 and seen == []
     gm = fw.var('addon__gm', Game)
     assert (gm.pid, gm.audio, gm.sock, gm.path) == (77, 1, 9, b'/tmp/q2-groovebox.input.sock')
     assert lib.calls == ['save_stop'] and fw.calls('mclSetMute') and fw.calls('device_set_volume')  # held; the jack readied, dac_take
 
 
-@pytest.mark.parametrize('folder, said', [({}, b'Groovebox is not on the card'),
-                                          ({'groovebox': b'name=Groovebox\n'}, b"Groovebox can't start from the card")])
-def test_the_groovebox_shortcut_says_when_no_card_game_is_it(fw, folder, said):
-    """No .groovebox, or one whose q2app isn't a game's: the binary is there, the row shows, the tap says so."""
+@pytest.mark.parametrize('folder', [{}, {'groovebox': b'name=Groovebox\n'}])
+def test_a_card_game_by_id_is_found_only_when_its_q2app_is_a_game_s(fw, folder):
+    """No .groovebox, or one whose q2app isn't a game's: no card game has the id."""
     card(fw, other=b'name=Other\ngame=1\n', **folder)
     fw.mock('fw_fork', lambda *_: 77)
-    seen = toasts(fw)
-    assert shortcut(fw, b'10')(None, None) == 0
-    assert seen == [said] and not fw.calls('fw_fork')
     opened = fw.fn('addon_game_open', C.c_int, C.c_char_p)
     assert opened(b'groovebox') == -1 and not fw.calls('fw_fork')
     assert opened(b'other') == 1 and fw.calls('fw_fork') and not fw.calls('player_stop') and not fw.calls('player_save_stop')  # a game without the sound
@@ -5787,7 +5774,7 @@ def test_a_card_game_that_can_t_fork_says_so(fw):
     card(fw, groovebox=b'name=Groovebox\ngame=1\naudio=1\n')
     fw.mock('fw_fork', lambda *_: -1)
     seen = toasts(fw)
-    assert shortcut(fw, b'10')(None, None) == 0
+    assert fw.fn('addon_game_open', C.c_int, C.c_char_p)(b'groovebox') == 0
     assert seen == [b"It couldn't start"] and fw.var('addon__gm', Game).pid == 0
 
 

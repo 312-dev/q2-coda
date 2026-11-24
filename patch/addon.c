@@ -1587,9 +1587,12 @@ int addon_is_game(const char *id) {
     return 0;
 }
 
-/* Home's Shortcut (theme_engine.c home_shortcut_open): the card game with this id started as its
- * Games row would start it (1 running, 0 not, with addon_game_start's toast); -1 when no card game
- * has the id (no q2app with game=1 in its folder, or no slot left). */
+/* The card game with this id started as its Games row would start it (1 running, 0 not, with
+ * addon_game_start's toast); -1 when no card game has the id (no q2app with game=1 in its folder,
+ * or no slot left).
+ * ponytail: its caller was Home's Shortcut (Groovebox), Carousel's card, removed with it, so the
+ * payload's link drops it; test/fw starts games with the sound through it. A row that starts a
+ * card game by id would bring it back. */
 int addon_game_open(const char *id) {
     int n = addon_games();
     for (int k = 0; k < n; ++k)

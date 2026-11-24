@@ -125,7 +125,7 @@ user's order and shows or hides each, Settings always shown. **Search** opens th
 letter strip under `list.entry.ipod`, OLED's, stock's search without it): every song, artist and album, the one
 search across everything; each list page searches its own rows from its search bar. Shuffle Songs and the
 Shortcut row are not on the list: the Library's Shuffle page keeps Shuffle Songs, and the Shortcut
-(`IPOD/SHORTCUT` 0-11, read as a decimal by `config_value`, with no Appearance row to change it) was Carousel's card, and nothing shows or opens it since Carousel went (`home_shortcut_open`, `ipod_home_shortcut` and what they open are kept and tested, a ponytail in `theme_engine.c`). Settings opens its own list in the menu's place, as an iPod's submenu: Wi-Fi, Bluetooth, General, Playback, Streaming, Car Remote, Display, Controls and Battery ([Settings](#settings)); Return restores the menu's previous selection, and a short Return on the main menu selects
+(`IPOD/SHORTCUT` 0-11, read as a decimal by `config_value`, with no Appearance row to change it) was Carousel's card and went with it; the key is still read and means nothing. Settings opens its own list in the menu's place, as an iPod's submenu: Wi-Fi, Bluetooth, General, Playback, Streaming, Car Remote, Display, Controls and Battery ([Settings](#settings)); Return restores the menu's previous selection, and a short Return on the main menu selects
 its first row, Now Playing while it shows; a short Return with Now Playing selected opens it without
 changing playback. Return there goes back to Home. Both lists end at their ends, as every list does: the wheel stops there and the selection leans against the end ([internals.md](internals.md#list-ends)).
 Folder opens directly at the SD root when a card is in and no OTG drive is connected; Back at that root returns
@@ -176,7 +176,7 @@ drops what a paint invalidates when the frame ends, so a 0 ms timer then repaint
 otherwise the new art and its fit would reach only the regions repainted later. `g_playcover_finishflag` remains
 stock-owned. Now Playing and Spotify's page keep their black background behind the art.
 
-Stock's home carousel (its `slide_menu` of cards and the two arrows) stays in Home's window as stock made it, hidden and taking no taps, as `home_page_init`'s visitor binds the arrows and cards by name (`tools/ipod.py` `ipod_home`); nothing shows or steps it.
+Stock's home carousel (its `slide_menu` of cards, less V1.36's Album Wall card, and the two arrows) stays in Home's window, hidden and taking no taps, as `home_page_init`'s visitor binds the arrows and cards by name (`tools/ipod.py` `ipod_home`); nothing shows or steps it.
 
 The player writes every track's cover to the same `/tmp` file, so before Split loads it `coverflow_home_art` drops AWTK's cached bitmap of that name, as the full-screen art does; otherwise the image manager hands back the last track's cover.
 

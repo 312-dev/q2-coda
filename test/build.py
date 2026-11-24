@@ -1013,12 +1013,14 @@ def validate_assets(directory):
                                                               'Settings']
             # Seven rows, all in the box at rest (HOME_REST): the payload would scroll any more (home.c home_overflow).
             assert lg == [0, HOME_TOP, HOME_LIST_W, 7*GEOM.home_row] and HOME_TOP + 7*GEOM.home_row <= 320 - GEOM.bar - HOME_TOP
-            # Stock's carousel and arrows after the lists as stock made them, hidden and taking no taps
-            # (tools/ipod.py ipod_home: left for home_page_init's visitor, never shown)
+            # Stock's carousel and arrows after the lists, hidden and taking no taps (tools/ipod.py ipod_home: left
+            # for home_page_init's visitor, never shown), its cards stock's but the Album Wall's
             stock_root = decode(original)
             assert [n[2]['name'] for n in carousel] == ['slide_menu', 'img_left', 'img_right']
             for n, old in zip(carousel, stock_root[3]):
-                assert n[:2] == old[:2] and n[2] == {**old[2], 'visible': 'false', 'sensitive': 'false'} and n[3] == old[3]
+                assert n[:2] == old[:2] and n[2] == {**old[2], 'visible': 'false', 'sensitive': 'false'}
+            cards = stock_root[3][0][3]
+            assert carousel[0][3] == cards[:2] + cards[3:] and carousel[1:] == [[*n[:2], n[2] | {'visible': 'false', 'sensitive': 'false'}, n[3]] for n in stock_root[3][1:3]]
             dot = inc('HOME_DOT_X'), inc('HOME_DOT')
             assert HOME_TEXT_X == sum(dot) + inc('HOME_DOT_GAP')
             # The dot and the labels clear the bottom row's corner.
