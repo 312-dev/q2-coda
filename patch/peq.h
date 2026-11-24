@@ -660,7 +660,7 @@ void *label(void *parent, int x, int y, int w, int h, const char *style, int px,
 void spot_yield(void), spot_stop(void), radio_stop(void);
 void headset_volume_reset(void);
 int vol_next(unsigned key); /* volume.c: the volume a wheel tick moves to, at the wheel's speed */
-/* bt_vol_limit.c: a Bluetooth device's Volume Limit
+/* bt_vol_limit.c: a Bluetooth device's Volume Limit and Volume Curve
  * (docs/internals.md#headset-controls-and-volume); vol_cap is the volume's top now, Max Volume and
  * over Bluetooth the device's limit */
 int vol_cap(void), btlim_get(const char *mac), btlim_departing(int v), btlim_entering(int v);
@@ -669,6 +669,14 @@ void btlim_poll(void), btlim_saved(void), btlim_set(const char *mac, int v);
 void btlim_forget(const char *mac), btlim_text(int v, char *s, unsigned n);
 void btlim_edit(const char *mac), btlim_edit_take(int v), btlim_edit_save(void);
 void btlim_edit_row(void *label);
+/* ... and its Volume Curve, Link Volume's mapping onto the headset's 0 to 127 (playback_power.c
+ * bt_vol_avrcp); vol_gentle is the Bluetooth output's device's, 1 for Gentle */
+enum { BTLIM_EVEN, BTLIM_GENTLE_CURVE };
+#define BTLIM_CURVE_ROW "label_btcurve" /* the device page's Volume Curve value (bt_detail.c) */
+int btlim_curve(const char *mac), vol_gentle(void), btlim_edit_curve(void);
+void btlim_curve_set(const char *mac, int c), btlim_edit_curve_take(int c);
+const char *btlim_curve_name(int c);
+void bt_curve_open(void); /* library_settings.c: the Volume Curve picker for btlim_edit's device */
 int wheel_level(int value, int lo, int hi, int full, int dir); /* levels.c: a wheel tick's level */
 void headset_poll(void), headset_eq_poll(void), headset_manual(void);
 /* loop_wake.c: any thread ends the UI loop's idle (docs/internals.md#the-ui-loops-wait); the touch

@@ -1010,7 +1010,7 @@ http://stream.radioparadise.com/mp3-128</pre>
   <h2 id="bt">Bluetooth headphones</h2>
   <ul>
     <li><b>The page:</b> <b>Settings → Bluetooth</b> lists your devices first, <b>My Devices</b> then <b>Other Devices</b> (it looks for new ones by itself while open; a spinner turns beside Other Devices), then the settings under <b>Audio</b>. The connected device reads <b>Connected · LDAC · 72%</b> (its codec and, if it reports one, its battery).</li>
-    <li><b>Connecting:</b> Center on a paired device connects it. Center on the connected one, or hold Play/Pause on any paired one, opens its page: how the sound gets there and at what quality, its battery, <b>Disconnect</b> (or <b>Connect</b>), <b>Volume Limit</b>, <b>Rename</b> (the name shown on this Q2) and <b>Forget This Device</b>, which asks first; you'll need to pair it again to use it.</li>
+    <li><b>Connecting:</b> Center on a paired device connects it. Center on the connected one, or hold Play/Pause on any paired one, opens its page: how the sound gets there and at what quality, its battery, <b>Disconnect</b> (or <b>Connect</b>), <b>Volume Limit</b>, <b>Volume Curve</b>, <b>Rename</b> (the name shown on this Q2) and <b>Forget This Device</b>, which asks first; you'll need to pair it again to use it.</li>
     <li><b>Status bar:</b> a dim Bluetooth glyph while a device connects, a white one once connected, headphones with a small battery (red under 20%) when the headset reports its level, or a car. A toast says when a device connects or disconnects, and when headphones run low (at 20% and 10%).</li>
     <li><b>Quality:</b> one list: <b>Adapt to Signal</b> at the top, then the codecs, <b>Auto</b> first. Auto is the default and plays the best codec your headset supports. Each choice shows its bit rate. LDAC Best is 990 kbps (909 for 44.1 kHz music), LDAC Standard 660 (606), and on LDAC headsets Auto adapts to the connection, including intermediate 492 and 396 kbps rates at 48/96 kHz. Auto uses discrete rates, not 1 kbps increments. Try Auto when HQ breaks up. Rockbox uses the last choice made here.</li>
     <li><b>Where things play:</b> Spotify, Internet Radio and video sound play on the headphone jack, Bluetooth or a USB DAC.</li>
@@ -1047,6 +1047,16 @@ http://stream.radioparadise.com/mp3-128</pre>
   <div class="sub">
   <h3>Volume Limit</h3>
   <p>Each paired device has its own <b>Volume Limit</b>, on its page (Center on the connected device, or hold Play/Pause on any paired one). It opens a slider from 0 to <b>No Limit</b>, the default. While that device is connected, the Q2's volume goes no higher than its limit, whether it is turned up with the wheel, Control Center, Settings &gt; Playback &gt; Volume, the Car Remote or the device's own volume buttons. Lowering the limit below the volume while the device is connected turns the volume down at once. <b>Max Volume</b> still applies to everything, so over Bluetooth the lower of the two wins. Wired headphones, USB audio and other Bluetooth devices are not affected, and the level you had before a limit turned it down comes back for them. Forgetting a device forgets its limit too.</p>
+  <h3>Volume Curve</h3>
+  <p>With <b>Link Volume</b> on, each paired device's <b>Volume Curve</b>, on its page under <b>Volume Limit</b>, sets how the Q2's volume turns into the device's own. Changing it takes effect at once on the device you're connected to, and Forget This Device forgets it too.</p>
+  <table>
+    <thead><tr><th>Option</th><th>What the Q2’s volume does</th></tr></thead>
+    <tbody>
+      <tr><td>Even (default)</td><td>Each step of the Q2's volume moves the device's volume by the same amount, as a phone's does. Right for most headphones, which make the steps sound even themselves.</td></tr>
+      <tr><td>Gentle</td><td>Small steps near the bottom and bigger ones near the top, so each step of the Q2's volume sounds like the same change and half volume is much quieter than on Even. For headphones that are already loud at half volume on Even (the Bowers &amp; Wilkins Px7 is one).</td></tr>
+    </tbody>
+  </table>
+  <p>The device's <b>Volume Limit</b> and <b>Max Volume</b> work the same on either curve: they stop the Q2's volume number, whichever curve turns it into the device's.</p>
   <h3>Link Volume</h3>
   <p>This switch sits under <b>Resume on Connect</b>, last under <b>Audio</b>, while Bluetooth is on. Until you set it, it follows the device: on for headphones and headsets, off for speakers, car stereos and anything else. Once you set it, your choice applies to every device.</p>
   <table>
