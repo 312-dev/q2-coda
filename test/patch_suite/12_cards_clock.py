@@ -89,13 +89,13 @@ class CardMachine(DepthMachine):
             u.reg_write(UC_MIPS_REG_V0,0);u.reg_write(UC_MIPS_REG_SP,0x7000f000);u.reg_write(UC_MIPS_REG_PC,0x1000000);return
         self.returns(ret,clobber=True)
 
-# Games (patch/games.c, iPod): Home's Games row, always there, opens a chooser of the games the build ships: Bricks
-# alone (the owner, 2026-11-22), games.c's Sudoku, Vortex, Solitaire and Snake left out of the payload by peq.h's
+# Games (patch/games.c, iPod): Home's Games row, always there, opens a chooser of the games the build ships: the
+# engine's (Bricks, Cabin Solitaire), games.c's Sudoku, Vortex, Solitaire and Snake left out of the payload by peq.h's
 # GAME_* until the games in progress are finished. Their checks below run again once peq.h turns them all back on.
 # A game's keys never reach stock's filter or the media keys; Return goes game -> chooser -> Library; closing frees
 # the state.
 OWN_GAMES=re.findall(r'^#define GAME_(\w+) (\d)',(ROOT/'patch/peq.h').read_text(),re.M)
-OWN=[n.capitalize() for n,on in OWN_GAMES if on=='1']; SHIPPED=['Games',*OWN,'Bricks']
+OWN=[n.capitalize() for n,on in OWN_GAMES if on=='1']; SHIPPED=['Games',*OWN,'Bricks','Cabin Solitaire']
 m=CardMachine({},{})
 G_SCREEN,G_PICKING,G_PAUSED,G_CELL,G_CUR,G_VX=36,44,56,76,157,164
 # labels(w): the texts of the hscroll_labels under w, in node order
@@ -250,7 +250,7 @@ else:
     eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
     O_ENG_RECT,O_ENG_STEPS=80,208  # struct eng's rect and steps (patch/engine.c), on MIPS
     ENG_STEP_BOUND,ENG_FRAME_BOUND,ENG_WHOLE_BOUND=600,70_000,780_000  # measured: 499, 61,511 and 703,036
-    pick(len(SHIPPED)-1); EN=m.get(payload_syms['en']); assert word(G_SCREEN)==6 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1
+    pick(len(SHIPPED)-1); EN=m.get(payload_syms['en']); assert word(G_SCREEN)==5+len(SHIPPED)-1 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1
     FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
     for o,v in (('LCD_W',375),('LCD_H',320),('LCD_LINE_LENGTH',1500),('LCD_FORMAT',O['LCD_BGRA8888']),('LCD_OFFLINE_FB',FB)): m.word(m.lcd+O[o],v)
     n=[0]; counter=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)
@@ -353,6 +353,104 @@ key(O['KEY_RETURN']); assert word(G_PAUSED)==2 and not eframes() and m.get(paylo
 key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0)
 assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0 and not eframes()
 m.close(); assert m.get(payload_syms['g'])==0
+passed()
+
+# Cabin Solitaire (patch/game_solitaire.c, docs/games-engine.md#cabin-solitaire), the engine's second game: it opens
+# over the whole screen (ENG_FULL), its art read from the root filesystem, a saved table offered on its start board.
+# Then the frames it can make, each made on purpose: the whole sheet (the start board, then a table), the deal, a
+# scripted second of play (the cursor, a card picked up and hovered, dropped, undone, a draw), the dearest move there
+# is (a king-to-ace run of 13 at the tightest fan, lifted to an empty column), the auto-finish and the win board's
+# drop. Bounded in the payload's instructions a little over what they measured, under the brief's 600,000 a frame.
+SOL_ART,SOL_SAVE='/usr/share/q2games/solitaire.bin','/mnt/data/game-solitaire'
+SO_MODE,SO_SEL,SO_ART,SO_NSRC,SO_CUR,SO_HAND,SO_SRC=256,260,264,268,272,276,296  # struct sol (patch/game_solitaire.c)
+SO_FAN_U,SO_NFL,SO_T=544,1604,1648
+# measured: the whole sheet 1,993,583 (start board), a frame of play 714,995, a 13-card run 1,115,263, the deal 1,168,977,
+# the auto-finish 1,097,967, the win board's showing 1,199,318. ponytail: all but the whole sheet are over the 600,000 a
+# frame a game is held to (docs/games-engine.md#cabin-solitaire), under the engine's hard 2,000,000.
+SOL_WHOLE_BOUND,SOL_FRAME_BOUND,SOL_RUN_BOUND,SOL_DEAL_BOUND,SOL_AUTO_BOUND,SOL_WIN_BOUND=2_000_000,800_000,1_250_000,1_300_000,1_250_000,1_350_000
+def sol_table(piles,waste=(),found=(0,0,0,0),draw3=0,stock=True):
+    """A sealed save of a table, the game in progress: piles as (face-down count, face-up cards), cards as
+    suit*13+rank (hearts, spades, diamonds, clubs; ace 0); what is left over is the stock (or face down in the
+    last column, stock=False)."""
+    rec=bytearray(244); used=set(waste)|{k*13+r for k in range(4) for r in range(found[k])}|{c for _,up in piles for c in up}
+    spare=[c for c in range(52) if c not in used]
+    for k,(down,up) in enumerate(piles):
+        col=[spare.pop() for _ in range(down)]+[c|0x40 for c in up]
+        rec[4+20*k:4+20*k+len(col)]=bytes(col); rec[144+k]=len(col)
+    if not stock: assert not spare,spare
+    rec[151:151+len(spare)]=bytes(spare); rec[203]=len(spare)
+    rec[175:175+len(waste)]=bytes(waste); rec[204]=len(waste); rec[199:203]=bytes(found); rec[205]=draw3; rec[206]=1
+    struct.pack_into('<IIIII',rec,212,1,23,754000,0,1); struct.pack_into('<I',rec,0,0x31534343)
+    h=2166136261
+    for c in rec[:240]: h=((h^c)*16777619)&0xffffffff
+    struct.pack_into('<I',rec,240,h); return rec
+H,S,D,CL=0,13,26,39  # a suit's first card
+DEFAULT=sol_table([(0,[S+12]),(1,[D+6]),(2,[H+11,CL+10]),(3,[D+9,CL+8,H+7]),(4,[S+4]),(3,[H+5,CL+4,D+3]),(6,[S+8])],
+                  [CL+3,D+10,S+6],(3,1,3,2))
+m=CardMachine({},{SOL_ART:bytearray((ROOT/'assets/games/solitaire.bin').read_bytes()),SOL_SAVE:bytearray(DEFAULT)})
+sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
+assert labels(chooser)==SHIPPED
+FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
+for o,v in (('LCD_W',375),('LCD_H',320),('LCD_LINE_LENGTH',1500),('LCD_FORMAT',O['LCD_BGRA8888']),('LCD_OFFLINE_FB',FB)): m.word(m.lcd+O[o],v)
+n=[0]; counter=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)
+pixel=lambda x,y: m.get(FB+4*(y*375+x))
+def sopen():  # Games' row for Cabin Solitaire: its state on the heap
+    pick(len(OWN)+1); en=m.get(payload_syms['en']); assert word(G_SCREEN)==6 and en; return en,en+O_ENG_STATE
+def squit():  # Return, then Quit: the game paused (saved) and closed
+    key(O['KEY_RETURN']); key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0); assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0
+def sframe(ms=16):  # the frame timer's pass: the rects it invalidated, its instructions (the step and the marks)
+    m.now+=ms; m.calls=[]; n[0]=0; m.call(address=payload_syms['eng_frame'],args=(0,0,0,0),gap=0,clear=False)
+    made=[c for c in m.calls if c[0]=='widget_invalidate_force']; assert all(c[1]==sheet for c in made)
+    box=lambda k: [signed(m.get(EN+O_ENG_RECT+16*k+4*j)) for j in range(4)]
+    return [(x0,y0,x1-x0,y1-y0) for x0,y0,x1,y1 in map(box,range(len(made)))],n[0]
+SLOG=[]  # each frame splay made: its number, rects and cost
+SWITCH=[0]  # the dearest frame that changed the game's screen (the start board, the deal, the win): the whole sheet's bound
+def splay(frames,keys={}):  # frames of play, keys[k] pressed before frame k: the dearest frame, painted
+    worst=0
+    for k in range(frames):
+        if k in keys: key(keys[k])
+        mode=m.get(SO+SO_MODE); rects,cost=sframe(17 if k%3==0 else 16); assert len(rects)<=ENG_RECTS,rects
+        total=cost+sum(epaint(x) for x in rects); SLOG.append((k,rects,total))
+        if m.get(SO+SO_MODE)!=mode: SWITCH[0]=max(SWITCH[0],total)
+        else: worst=max(worst,total)
+    return worst
+EN,SO=sopen()
+assert m.get(sheet+O['W_Y'])==signed(-m.get(m.page+O['W_Y'])) and m.get(sheet+O['W_H'])==320  # the whole screen
+assert m.get(SO+SO_ART)==1 and m.get(SO+SO_MODE)==0 and m.u.mem_read(SO+SO_MODE,1)[0]==0  # the start board, the art read
+whole_start=epaint((0,0,375,320)); assert pixel(187,50)!=pixel(187,200)  # the board's title on wood, over the felt
+key(O['KEY_NEXT']); key(O['KEY_NEXT']); sframe(); key(O['KEY_CENTER']); sframe()  # Resume, the start board's third row
+assert m.get(SO+SO_MODE)==2 and m.get(SO+SO_NSRC)>0
+whole_table=epaint((0,0,375,320)); assert pixel(19+21,88+20)&0xffffff!=0x1b5c3e  # a card in the first column
+# A second of play: the cursor round, a card picked up, hovered to its other place, dropped, undone, a draw.
+play=splay(60,{0:O['KEY_NEXT'],3:O['KEY_PREV'],6:O['KEY_CENTER'],10:O['KEY_NEXT'],20:O['KEY_CENTER'],32:O['KEY_BACK_BTN'],46:O['KEY_PLAY']})
+assert m.get(SO+SO_HAND)==0
+squit()
+# The dearest move: a king to an ace over six face-down cards (the fan at its tightest, 11 px) lifted to an empty column.
+m.files[SOL_SAVE]=bytearray(sol_table([(0,[]),(1,[S+1]),(1,[D+1]),(1,[S+2]),(1,[D+2]),(0,[S+3]),
+                                       (6,[(CL if i%2==0 else H)+12-i for i in range(13)])],stock=True))
+EN,SO=sopen(); key(O['KEY_NEXT']); key(O['KEY_NEXT']); sframe(); key(O['KEY_CENTER']); sframe()
+srcs=[tuple(m.u.mem_read(SO+SO_SRC+2*k,2)) for k in range(m.get(SO+SO_NSRC))]; assert (12,13) in srcs,srcs
+assert m.get(SO+SO_FAN_U+4*6)==11
+m.word(SO+SO_CUR,srcs.index((12,13)))
+run=splay(30,{0:O['KEY_CENTER'],12:O['KEY_CENTER']})
+assert [m.u.mem_read(SO+4+20*k,1)[0] for k in (0,)]==[(CL+12)|0x40] and m.get(SO+SO_HAND)==0  # the king on the empty column
+squit()
+# The deal, from the start board with no game to resume.
+del m.files[SOL_SAVE]; EN,SO=sopen(); epaint((0,0,375,320))
+dealt=splay(80,{0:O['KEY_PLAY']}); assert m.get(SO+SO_MODE)==2
+squit()
+# The auto-finish, every card face up; then the win board's drop.
+m.files[SOL_SAVE]=bytearray(sol_table([(0,[S+12,H+11,S+10]),(0,[H+12,CL+11]),(0,[]),(0,[D+12,S+11,D+10,S+9,S+8]),
+                                       (0,[CL+12,D+11,CL+10,H+9,CL+8,CL+7]),(0,[]),(0,[H+10,CL+9,D+9])],
+                                      found=(9,8,9,7),stock=False))
+EN,SO=sopen(); key(O['KEY_NEXT']); key(O['KEY_NEXT']); sframe(); key(O['KEY_CENTER']); sframe()
+auto=splay(4*19+12,{0:O['KEY_PLAY']}); assert m.get(SO+SO_MODE)==4
+won=splay(60); assert m.get(SO+SO_T)>24+10
+whole_won=epaint((0,0,375,320))
+squit(); m.close(); assert m.get(payload_syms['g'])==0
+m.u.hook_del(counter)
+print(f'Cabin Solitaire on MIPS: the whole sheet {whole_start} (start board), {whole_table} (a table), {whole_won} (won), a screen change {SWITCH[0]}; the dearest frame of a second of play {play}, of a 13-card run lifted and dropped {run}, of the deal {dealt}, of the auto-finish {auto}, of the win board\'s showing {won} (payload only; stock\'s text and flush mocked)')
+assert max(whole_start,whole_table,whole_won,SWITCH[0])<SOL_WHOLE_BOUND and play<SOL_FRAME_BOUND and run<SOL_RUN_BOUND and dealt<SOL_DEAL_BOUND and auto<SOL_AUTO_BOUND and won<SOL_WIN_BOUND
 passed()
 
 # Videos (patch/videos.c, docs/internals.md#videos): the card's Videos folder (case aside) is browsed
