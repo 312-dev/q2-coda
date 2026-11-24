@@ -178,12 +178,15 @@ static void command(const char *name, const char *arg) {
     } else if (!strcmp(name, "mcl-play")) {
         if (c->play) c->play_paused = 0;
         if (c->state != IDLE) c->paused = 0, wake = 1;
+        c->bt_release = 0;
     } else if (!strcmp(name, "mcl-seek")) {
         if (c->state != IDLE) c->seek = 1, c->seek_to = atoi(arg), wake = 1;
     } else if (!strcmp(name, "mcl-stop")) {
         c->stop = c->cut = 1, c->stop_first = 0, c->preload = 0, c->close_preload = 1, wake = 1;
     } else if (!strcmp(name, "mcl-dropcar") || !strcmp(name, "mcl-carrelease")) {
         c->car_release = 1, wake = 1;
+    } else if (!strcmp(name, "mcl-btrelease")) {
+        if (c->state != IDLE && c->paused) c->bt_release = 1, wake = 1;
     } else if (!strcmp(name, "mcl-orderstop")) {
         /* stock closes a PCM left open after the last song; this player has none open while idle */
     } else if (!strcmp(name, "mcl-setvol")) {

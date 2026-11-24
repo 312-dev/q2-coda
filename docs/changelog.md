@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: when your headphones pause the Q2 (their own control, or AirPods moving to your phone), the Q2 lets their audio stream stop at once, so Play on the Q2 starts it again and is heard, where it could stay silent until you reconnected.
   - Logs: when Wi-Fi does not join a saved network, the log says so 30 seconds after Wi-Fi starts and each minute after: whether it is still scanning, how many networks it saw, how often it rescans and why. Joining and getting an address are logged with the seconds they took.
   - Subsonic: a restart that resumes a song from your server starts the app once, where two copies of it could start and both run until the next restart, each checking the server and writing the same files.
   - Bluetooth: music paused for more than a couple of minutes plays again when you press Play, where AirPods could stay silent, still connected, until you disconnected and reconnected them. After 20 seconds paused the Q2 lets the headset's audio stream stop, as a phone does, and starts it again at Play or a click.
