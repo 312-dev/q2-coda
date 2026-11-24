@@ -716,8 +716,12 @@ static int show(const void *unused) {
     int from = g->screen;
     hold(RUN);
     if (from >= ENGINE) eng_close();
+    int full = g->target >= ENGINE && eng_game(g->target - ENGINE)->flags & ENG_FULL;
+    /* an ENG_FULL game's sheet is the whole screen, over the status row; the others' starts under it */
+    widget_move_resize(g->sheet, 0, full ? -I(g->page, W_Y) : bar_foot(g->page), 375, full ? 320 : g->h);
     if (g->target >= ENGINE && /* no memory for its state: the list stays */
-        !eng_open(eng_game(g->target - ENGINE), g->page, g->sheet, g->h, engine_held, engine_left))
+        !eng_open(eng_game(g->target - ENGINE), g->page, g->sheet, full ? 320 : g->h, engine_held,
+                  engine_left))
         g->target = CHOOSER;
     g->screen = g->target;
     g->picking = g->confirm = 0;
@@ -991,9 +995,10 @@ static void hud(void *canvas, const char *name, unsigned v, int x, int y, int ri
  * b), in a dark box, the chosen one on the accent's bar. */
 static void popup(void *canvas, const char *title, const char *a, const char *b, int choice) {
     int top = POP_ROW + 6, h = b ? top + 2 * POP_ROW + 8 : POP_ROW + 44;
-    int x = (375 - POP_W) / 2, y = (g->h - h) / 2;
+    int sh = g->screen >= ENGINE && eng_game(g->screen - ENGINE)->flags & ENG_FULL ? 320 : g->h;
+    int x = (375 - POP_W) / 2, y = (sh - h) / 2; /* mid-sheet, an ENG_FULL game's whole screen too */
     stock_canvas_set_fill_color(canvas, 0x80000000u); /* black at half, final */
-    canvas_fill_rect(canvas, 0, 0, 375, g->h);
+    canvas_fill_rect(canvas, 0, 0, 375, sh);
     round_box(canvas, x, y, POP_W, h, 0x1c1c1c, 12);
     frame_rect(canvas, x, y, POP_W, h, 0x3a3a3a, 12);
     text_at(canvas, title, 187, y + 4, POP_ROW, 20, rgba(0xffffff, 255), MID);
