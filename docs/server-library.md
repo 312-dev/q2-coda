@@ -308,10 +308,12 @@ firmware does not wait on them.
 **Covers** (`covers/`, above): the app fetches them with `getCoverArt` (`id` the album id,
 `size=160`), two at a time, while no sync runs and the stream has no song still to fetch (a list playing what it already fetched, or from the Stream Cache, does not stop it) or the Q2 charges, and the server answers, for at most
 30 s a minute, through the network slot syncs and streams take first; a stopped round goes on at
-the next. The folder holds at most 256 MB, each file counted as whole clusters of the card (about
-8,000 albums with 32 KB clusters, 2,000 with 128 KB), and no cover is written while the card has
-under 1 GB free. Albums are taken in the Library's order (by name), so the top of Albums fills
-first. An album the server has none for (error 70, a 404, or a picture over 160 px) is noted in
+the next. The folder has room for every album's cover at its largest (64 KB at 160 px, 256 KB at
+512), each file counted as whole clusters of the card, at least 256 MB and at most the card's size
+over 32; a round whose bound leaves albums out says how many in the app's log, with the budget and
+the cluster size (a fixed 256 MB held 2,048 covers on a card with 128 KB clusters). No cover is
+written while the card has under 1 GB free. Playlists' covers come first, then albums in the
+Library's order (by name), so the top of Albums fills first. An album the server has none for (error 70, a 404, or a picture over 160 px) is noted in
 `covers/.none` and not asked again; Show in Library off and Sign Out delete the folder. Measured
 on the developer's Navidrome: a 160 px baseline JPEG of 3 to 6 KB, 50 to 350 ms each.
 
@@ -371,8 +373,10 @@ playing or the next `n`. With the Stream Cache off, the songs more than two behi
 are deleted, but not one the plan names to come.
 
 **`/tmp/q2-<id>.stream`** (app to firmware and player). Written while a stream runs: at once on
-each change of a song's state, and every 500 ms while a line is `get` (2 a second at most); not at
-all while nothing moves. A file left with a `get` line and no write for 3 s is stale (the app died
+each change of a song's state, every 500 ms while a line is `get` (2 a second at most), and at once
+when a song's bytes reach the firmware's start (`START` below: the app's `startGate` is the same
+3 s, so the song is queued as its start arrives, not up to 500 ms later); not at all while nothing
+moves. A file left with a `get` line and no write for 3 s is stale (the app died
 or stopped): its `get` lines read as `fail`.
 
 ```text

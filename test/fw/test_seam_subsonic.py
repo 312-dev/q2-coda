@@ -522,3 +522,41 @@ def test_download_ahead_off_fetches_only_the_song_playing(seam):
     f.until('.ahead says Off', lambda: (f.tmp('q2-subsonic.ahead') or b'').split(b'\n')[0].endswith(b'n=0'), timeout=10)
     settle(seam)
     assert [s for s in ('s12', 's13') if seam.fetched(s)] == [], 'fetched ahead with Download Ahead Off'
+
+
+# (j) A pressed song from a slow server, with q2player the player (grow): Now Playing's amount (np_stream_loading,
+# what np_stream.c paints as "1.2 of 4.2 MB") counts up while the song downloads and has not started, never held at
+# what came first (asked after the owner's V1UYi report, "the buffering progress is still hanging at like < 1MB
+# until the song starts playing", which this chain passes). The stand-in player never parses a song, so the press
+# shows for CATPLAY_SHOW_MS.
+@pytest.mark.library(songs=20, album=10, size=4 << 20)
+def test_a_pressed_songs_amount_counts_up_while_a_slow_server_sends_it(seam):
+    f = seam.fwr
+    (f.root/'tmp/q2clicks').write_bytes(b'')  # q2player is the player: the caps say grow, songs arrive in place
+    seam.start()
+    assert b'grow' in f.tmp('q2-addon.caps')
+    seam.fake.rate('s11', 256 << 10)  # 4 MB in 16 s; its 180 s start at 256 KB, after about a second
+    seam.press(seam.album_rows(1), 0)
+    loading = seam.fw.fn('np_stream_loading', C.c_int, C.POINTER(C.c_uint), C.POINTER(C.c_uint), C.POINTER(C.c_uint))
+    have, total, ms = C.c_uint(), C.c_uint(), C.c_uint()
+    seen, lines = [], []  # (seconds since the first byte shown, have) as Now Playing reads it, and the app's line
+    t0 = None
+    end = time.monotonic() + 20
+    while time.monotonic() < end:
+        f.step()
+        on = loading(C.byref(have), C.byref(total), C.byref(ms))
+        row = next((l for p, l in seam.stream_lines().items() if seam.sid(p) == 's11'), None)
+        if on and have.value and t0 is None:
+            t0 = time.monotonic()
+        if t0 is not None:
+            t = time.monotonic() - t0
+            seen.append((round(t, 1), have.value if on else None))
+            lines.append((round(t, 1), row))
+            if t > 6:
+                break
+        time.sleep(0.1)
+    assert t0 is not None, f'the amount never showed: {seam.stream_lines()}\n{seam.why()}'
+    shown = [h for _, h in seen if h is not None]
+    assert f.queued(), 'never queued: the start gate did not open'
+    # 6 s at 256 KB/s is about 1.5 MB: the amount must have gone well past the 256 KB the song starts at
+    assert shown and max(shown) >= 1 << 20, f'amount held at {max(shown or [0])} bytes\nshown {seen}\nlines {lines}'

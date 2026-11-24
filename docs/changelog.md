@@ -1,6 +1,9 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Streamed songs: a song from your server starts as soon as its first 3 seconds have downloaded, up to half a second sooner than before, where the Subsonic app waited for its next progress report.
+  - Server library: every album gets its cover on a card formatted with large clusters (covers stopped at 2,048 albums on a 128 KB-cluster card, the rest showing the placeholder for good), and playlist pictures are fetched before the albums' covers, so they show soon after connecting.
+  - Server library: when the Q2 joins a Wi-Fi network and the first check of your server fails, the app tries again after 15 seconds (then 30 s, 1 and 2 minutes) and at once on a new Wi-Fi address, where the library could stay disconnected for up to 10 minutes until Sync Now.
   - Car Remote: on the car's now-playing screen, the artist and the album open that artist's and that album's pages (with a Q2 Muse Remote that supports it).
   - Playback: **Crossfade** is now **Smart Crossfade**, one switch. Songs from different albums overlap at the right moment for each pair: a song that fades out plays under the next one's start for as long as its fade lasts, silence at the end of a song or the start of the next is skipped, a song that starts loud comes in at full level, and the overlap never clips. When the Q2 can't look at both songs in time (the next one still downloading, for one) it fades over 5 seconds as before. Switching it on switches Gapless on too, and the row says "Needs Gapless on" if Gapless is later switched off. If Crossfade was on, Smart Crossfade is on; the old length setting is no longer used.
   - Home: dragging the menu with a finger no longer leaves the blue selection on a row under the clock (with a song loaded, "Paused" or "Playing" drawn through the time) or on the faded row at the bottom. When the drag ends, the selection moves to a whole row in the middle of the list.
