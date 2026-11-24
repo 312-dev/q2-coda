@@ -668,7 +668,7 @@ def text_parts(pk):
     word('T_NEWBEST', 'NEW BEST', 9)
     word('T_TITLE', 'EMBER GARDEN', 19)
     word('T_LOST', 'GARDEN LOST', 19)
-    word('T_KEEP', 'Keep the embers off the beds', 13)
+    word('T_KEEP', 'Keep the embers off the beds', 10)  # the design's 13 px runs past the card's 150
     for name, s in (('T_BEST', 'BEST'), ('T_BESTWAVE', 'BEST WAVE'), ('T_SCORE', 'SCORE'), ('T_WAVE', 'WAVE')):
         word(name, s, 11)
     word('T_START', 'CENTER: START', 10.5)

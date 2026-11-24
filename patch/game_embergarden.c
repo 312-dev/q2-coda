@@ -1,0 +1,1100 @@
+/* Ember Garden (docs/games-engine.md#ember-garden): a far volcano's ash cloud rains embers on a
+ * kitchen garden; a brass sprinkler on the lawn puts them out with spurts of water. Embers fall on
+ * slow sine paths in three sizes; a cinder hit cracks into two small embers; an ember that reaches
+ * the ground sets the nearest growing bed on its side alight, and the fourth bed lost on one side
+ * ends the game. Waves grow denser and faster, the light turns from dawn to night across them, and
+ * every tenth wave is a lull of slow cinders worth double.
+ *
+ * The scene is the art file's (tools/embergarden_art.py), read once when the game opens: a byte a
+ * pixel into a palette a band of rows, four colours an entry (dawn, day, dusk, night), so a time
+ * of day is a palette and the light's turn is two palettes mixed, painted a strip of rows a frame.
+ * Each step marks the boxes that changed and joins them into at most ENG_RECTS; each is painted as
+ * the scene restored and what lies over it drawn again. */
+#include "engine.h"
+#include "game_embergarden_art.h"
+#include "peq.h"
+
+#define G_ART "/usr/share/q2games/embergarden/art.bin"
+#define G_MAGIC 0x31474d45 /* "EMG1" */
+#define G_EMBERS 24        /* alive at once */
+#define G_SHOTS 3          /* spurts in flight */
+#define G_PUFFS 4          /* steam puffs */
+#define G_BOXES 64         /* a step's changed boxes before they are joined */
+#define G_PX 187           /* the sprinkler's pivot, (187.5, 270) */
+#define G_PY 270
+#define G_GROUND 258      /* an ember reaching this row has landed */
+#define G_BED_Y 252       /* a bed's top */
+#define G_AIM_LO (-17000) /* the aim, hundredths of a degree, -90 straight up */
+#define G_AIM_HI (-1000)
+#define G_WHEEL 120     /* hundredths of a degree a wheel position */
+#define G_KEY 200       /* a step while Previous or Next is held */
+#define G_REPEAT 12     /* steps between spurts while Center is held */
+#define G_SPEED FX(6)   /* a spurt's lead drop, a step */
+#define G_HIT 72        /* its radius, 1/16 px (4.5) */
+#define G_SWAY 18       /* an ember's sway, px each way, and its period in steps */
+#define G_PERIOD 180
+#define G_BURN 90       /* steps a bed burns before it is charred */
+#define G_CATCH 8       /* steps from a landing to the bed alight */
+#define G_HOLD 45       /* the wave banner's steps whole, then G_FADE fading */
+#define G_FADE 15
+#define G_STOP 3        /* hit-stop on a cinder's split */
+#define G_STRIP 8       /* rows a step while the light turns */
+#define G_TURN 32       /* passes of the strips from one light to the next */
+#define G_DROP 14       /* steps the result card takes to drop in */
+#define G_FLASH 120     /* steps between two strikes of lightning at least */
+#define H_BANDS (320 / EG_BAND)
+
+enum { START, PLAY, LOST };
+enum { GROWING, CAUGHT, BURNING, CHARRED };
+enum { DAWN, DAY, DUSK, NIGHT };
+
+struct ember {
+    fx bx, y, vx, vy; /* its path's middle, its height, a split's kick and its fall a step */
+    int phase, amp, size, alive;
+};
+struct shot {
+    fx x, y, ux, uy; /* the lead drop and its heading */
+    int run, alive;  /* px travelled */
+};
+struct puff {
+    int x, y, t, size, pts, alive;
+};
+
+struct eg {
+    unsigned art[EG_ART_BYTES / 4]; /* the art file, whole */
+    unsigned pal[H_BANDS][EG_COLOURS]; /* the palette now, 0xffRRGGBB */
+    unsigned char grow[8][EG_CH_H * EG_CH_W]; /* each bed's box of the scene as it opened */
+    int ok;                                   /* the art was read */
+    struct ember em[G_EMBERS];
+    struct shot sh[G_SHOTS];
+    struct puff pf[G_PUFFS];
+    int mode, aim, recoil, spray, repeat, stop, h;
+    int bed[8], bed_t[8], land_x, land_t, last[2], blink;
+    int wave, lull, left, spawn, gap, banner, cleared;
+    int light, from, k, strip, dim;         /* the time of day, the one before it, the turn's pass, its strip */
+    int bolt, bolt_x, bolt_seed, bolt_wait; /* lightning: its step, place and shape */
+    int card;                               /* the result card's place */
+    int seq, runs, wait;                    /* a run of one sound */
+    unsigned score, seed;
+    int boxes, box[G_BOXES][4];
+    struct {
+        unsigned magic, best, wave, sum;
+    } save;
+    unsigned saved;
+};
+
+
+/* ---- the art file ---- */
+
+struct part { /* a row of the file's table (tools/embergarden_art.py Pack) */
+    unsigned at;
+    unsigned short w, h;
+    short ax, ay; /* the anchor: a sprite's centre, a glyph's pen at its middle row */
+    unsigned char kind, pad;
+    unsigned short adv; /* a glyph's advance */
+};
+static const struct part *part(const struct eg *g, int id) {
+    return (const struct part *)((const char *)g->art + 16) + id;
+}
+static const void *data(const struct eg *g, int id) {
+    return (const char *)g->art + part(g, id)->at;
+}
+static unsigned char *scene_idx(struct eg *g) {
+    return (unsigned char *)g->art + part(g, EG_SCENE)->at;
+}
+
+/* The art file, read whole into the state; anything amiss and the game draws a plain scene. */
+static int load(struct eg *g) {
+    void *f = fopen(G_ART, "rb");
+    if (!f) return 0;
+    unsigned n = fread(g->art, 1, EG_ART_BYTES, f);
+    fclose(f);
+    if (n != EG_ART_BYTES || g->art[0] != EG_ART_MAGIC || g->art[1] != EG_ART_BYTES ||
+        g->art[2] != EG_PARTS || g->art[3] != EG_BAND)
+        return 0;
+    for (int k = 0; k < EG_PARTS; ++k) {
+        const struct part *p = part(g, k);
+        unsigned bytes = p->kind == 1   ? 4u * p->w * p->h
+                         : p->kind == 2 ? (p->w + 1u) / 2 * p->h
+                         : k == EG_SCENE ? ENG_W * 320u
+                         : k == EG_PALETTE ? 12u * H_BANDS * EG_COLOURS
+                                           : 8u * EG_CH_W * EG_CH_H;
+        if (p->at < 16 + 16u * EG_PARTS || p->at > EG_ART_BYTES || bytes > EG_ART_BYTES - p->at)
+            return 0;
+    }
+    return part(g, EG_SCENE)->w == ENG_W && part(g, EG_SCENE)->h == 320;
+}
+
+/* ---- colours ---- */
+
+static const unsigned char AMB[4][3] = { /* the light on lit things, 256 at one: sky.py TOD amb */
+                                         { 251, 220, 225 },
+                                         { 255, 255, 255 },
+                                         { 246, 179, 159 },
+                                         { 102, 120, 184 } };
+static const unsigned HAZE[4] = { 0xffd8c0, 0xe4f4f8, 0xffa878, 0x3a2e66 };
+#define WATER 0x38e8ff
+#define WATER_KEY 0x0a2e78
+#define EMBER 0xff7a1a
+#define TINT 0x0a0618 /* the result card's dim: 55 percent of the way from it */
+
+static unsigned mixc(unsigned a, unsigned b, int k, int n) {
+    unsigned out = 0;
+    for (int sh = 0; sh < 24; sh += 8) {
+        int x = (int)(a >> sh & 255), y = (int)(b >> sh & 255);
+        out |= (unsigned)(x + (y - x) * k / n) << sh;
+    }
+    return out;
+}
+static unsigned dimmed(unsigned c) { return mixc(TINT, c, 141, 256); }
+
+/* rgb as the time of day lights it (sky.py L): each channel times the ambient, the turn's mix. */
+static unsigned lit(const struct eg *g, unsigned rgb) {
+    unsigned out = 0;
+    for (int c = 0; c < 3; ++c) {
+        int a = AMB[g->from][c] + (AMB[g->light][c] - AMB[g->from][c]) * g->k / G_TURN;
+        out |= (unsigned)((int)(rgb >> (16 - 8 * c) & 255) * a >> 8) << (16 - 8 * c);
+    }
+    return g->dim ? dimmed(out) : out;
+}
+
+/* The palette now: each entry the turn's mix of its two times of day, dimmed under the card. */
+static void palette(struct eg *g) {
+    if (!g->ok) return;
+    const unsigned char *src = data(g, EG_PALETTE), *a = src + g->from * 3 * H_BANDS * EG_COLOURS,
+                        *b = src + g->light * 3 * H_BANDS * EG_COLOURS;
+    for (int n = 0; n < H_BANDS * EG_COLOURS; ++n, a += 3, b += 3) {
+        unsigned c = 0;
+        for (int ch = 0; ch < 3; ++ch) c = c << 8 | (unsigned)(a[ch] + (b[ch] - a[ch]) * g->k / G_TURN);
+        g->pal[0][n] = 0xff000000 | (g->dim ? dimmed(c) : c);
+    }
+}
+
+/* ---- drawing ---- */
+
+static inline unsigned *at(const struct eng_surface *s, int x, int y) {
+    return s->px + (y + s->oy) * s->stride + x + s->ox;
+}
+static inline unsigned blend(unsigned dst, unsigned rgb, unsigned a) { /* a of 256 */
+    unsigned rb = ((rgb & 0xff00ff) * a + (dst & 0xff00ff) * (256 - a)) >> 8 & 0xff00ff;
+    unsigned gg = ((rgb & 0xff00) * a + (dst & 0xff00) * (256 - a)) >> 8 & 0xff00;
+    return 0xff000000 | rb | gg;
+}
+/* The part of x, y, w, h being painted, as x0 y0 x1 y1 in c; 0 when none of it is. */
+static int clip(const struct eng_surface *s, int x, int y, int w, int h, int *c) {
+    c[0] = x < s->x0 ? s->x0 : x, c[1] = y < s->y0 ? s->y0 : y;
+    c[2] = x + w > s->x1 ? s->x1 : x + w, c[3] = y + h > s->y1 ? s->y1 : y + h;
+    return c[2] > c[0] && c[3] > c[1];
+}
+
+static unsigned isqrt(unsigned n) {
+    unsigned r = 0, bit = 1u << 30;
+    while (bit > n) bit >>= 2;
+    for (; bit; bit >>= 2)
+        if (n >= r + bit)
+            n -= r + bit, r = (r >> 1) + bit;
+        else
+            r >>= 1;
+    return r;
+}
+
+/* A disc, its centre and radius in 1/16 px, its edge smoothed over a pixel, alpha of 256. */
+static void disc(struct eng_surface *s, int x16, int y16, int r16, unsigned rgb, int alpha) {
+    int x = (x16 - r16 - 8) >> 4, y = (y16 - r16 - 8) >> 4, d = ((r16 + 8) >> 3) + 2, c[4];
+    if (r16 <= 0 || alpha <= 0 || !clip(s, x, y, d, d, c)) return;
+    int in = r16 - 8, out = r16 + 8;
+    for (int j = c[1]; j < c[3]; ++j) {
+        int dy = j * 16 + 8 - y16;
+        unsigned *p = at(s, c[0], j);
+        for (int i = c[0]; i < c[2]; ++i, ++p) {
+            int dx = i * 16 + 8 - x16;
+            unsigned d2 = (unsigned)(dx * dx + dy * dy), a;
+            if (d2 >= (unsigned)(out * out)) continue;
+            a = in > 0 && d2 <= (unsigned)(in * in) ? 256 : (unsigned)(out - (int)isqrt(d2)) * 16;
+            a = a * (unsigned)alpha >> 8;
+            *p = a >= 256 ? 0xff000000 | rgb : blend(*p, rgb, a);
+        }
+    }
+}
+
+/* A straight stroke with square ends (Pillow's line), from x, y (1/16 px) along the unit ux, uy
+ * (16.16) for len, wide w (both 1/16 px); its edges smoothed, alpha of 256. */
+static void bar(struct eng_surface *s, int x16, int y16, fx ux, fx uy, int len, int w, unsigned rgb,
+                int alpha) {
+    int ex = x16 + (int)((long long)ux * len >> 16), ey = y16 + (int)((long long)uy * len >> 16);
+    int lo_x = (x16 < ex ? x16 : ex) - w, hi_x = (x16 > ex ? x16 : ex) + w;
+    int lo_y = (y16 < ey ? y16 : ey) - w, hi_y = (y16 > ey ? y16 : ey) + w, c[4];
+    if (!clip(s, lo_x >> 4, lo_y >> 4, (hi_x >> 4) - (lo_x >> 4) + 2, (hi_y >> 4) - (lo_y >> 4) + 2,
+              c))
+        return;
+    int half = w / 2;
+    for (int j = c[1]; j < c[3]; ++j) {
+        int dy = j * 16 + 8 - y16;
+        unsigned *p = at(s, c[0], j);
+        for (int i = c[0]; i < c[2]; ++i, ++p) {
+            int dx = i * 16 + 8 - x16;
+            int t = (int)(((long long)dx * ux + (long long)dy * uy) >> 16);
+            int d = (int)(((long long)dy * ux - (long long)dx * uy) >> 16);
+            int cw = half - (d < 0 ? -d : d) + 8, ct = t + 8, ce = len - t + 8;
+            if (cw <= 0 || ct <= 0 || ce <= 0) continue;
+            cw = cw > 16 ? 16 : cw, ct = ct > 16 ? 16 : ct, ce = ce > 16 ? 16 : ce;
+            unsigned a = (unsigned)(cw * ct * ce) * (unsigned)alpha >> 12;
+            *p = a >= 256 ? 0xff000000 | rgb : blend(*p, rgb, a);
+        }
+    }
+}
+
+/* A premultiplied sprite with its anchor at x, y; lean shifts each row above the anchor that many
+ * 256ths of a pixel a row, the way a tail trails a moving ember. */
+static void sprite(const struct eg *g, struct eng_surface *s, int id, int x, int y, int lean) {
+    const struct part *pt = part(g, id);
+    const unsigned *src = data(g, id);
+    int top = y - pt->ay, j0 = s->y0 - top, j1 = s->y1 - top;
+    j0 = j0 < 0 ? 0 : j0, j1 = j1 > pt->h ? pt->h : j1;
+    for (int j = j0; j < j1; ++j) {
+        int left = x - pt->ax + (j < pt->ay ? lean * (pt->ay - j) / 256 : 0);
+        int i0 = s->x0 - left, i1 = s->x1 - left;
+        i0 = i0 < 0 ? 0 : i0, i1 = i1 > pt->w ? pt->w : i1;
+        const unsigned *q = src + j * pt->w + i0;
+        unsigned *p = at(s, left + i0, top + j);
+        for (int i = i0; i < i1; ++i, ++p) {
+            unsigned v = *q++, a = v >> 24;
+            if (!a) continue;
+            if (a == 255) {
+                *p = v;
+                continue;
+            }
+            unsigned d = *p, k = 256 - a;
+            *p = 0xff000000 | ((v & 0xffffff) + (((d & 0xff00ff) * k >> 8) & 0xff00ff) +
+                               (((d & 0xff00) * k >> 8) & 0xff00));
+        }
+    }
+}
+
+/* A mask of 4 bits a pixel in rgb, its pen at x on its middle row y, alpha of 256. */
+static void glyph(const struct eg *g, struct eng_surface *s, int id, int x, int y, unsigned rgb,
+                  int alpha) {
+    const struct part *pt = part(g, id);
+    const unsigned char *src = data(g, id);
+    int left = x - pt->ax, top = y - pt->ay, stride = (pt->w + 1) / 2, c[4];
+    if (alpha <= 0 || !clip(s, left, top, pt->w, pt->h, c)) return;
+    for (int j = c[1]; j < c[3]; ++j) {
+        const unsigned char *q = src + (j - top) * stride;
+        unsigned *p = at(s, c[0], j);
+        for (int i = c[0]; i < c[2]; ++i, ++p) {
+            int u = i - left;
+            unsigned a = (unsigned)(q[u >> 1] >> (u & 1 ? 0 : 4) & 15) * 17;
+            a = a * (unsigned)alpha >> 8;
+            if (a) *p = a >= 255 ? 0xff000000 | rgb : blend(*p, rgb, a + (a >> 7));
+        }
+    }
+}
+
+/* A word's mask: from x (0), its ink centred on x (1) or ending at x (2); line: an outlined word,
+ * its outline (the next part) drawn first in that colour. */
+static void word(const struct eg *g, struct eng_surface *s, int id, int x, int y, int align,
+                 unsigned rgb, int line, unsigned line_rgb, int alpha) {
+    const struct part *pt = part(g, id);
+    if (align) x = x - (align == 1 ? pt->w / 2 : pt->w) + pt->ax;
+    if (line) glyph(g, s, id + 1, x, y, line_rgb, alpha);
+    glyph(g, s, id, x, y, rgb, alpha);
+}
+
+/* v in a set of digit glyphs (first: its 0; step: 2 for an outlined set), with commas where the
+ * set has one, aligned as word does by the advances. */
+static void numeral(const struct eg *g, struct eng_surface *s, int first, int step, int comma,
+                   unsigned v, int x, int y, int align, unsigned rgb, unsigned line_rgb, int alpha) {
+    int ids[16], n = 0, w = 0;
+    do {
+        if (comma && n % 4 == 3) ids[n++] = first + 10 * step;
+        ids[n++] = first + (int)(v % 10) * step;
+    } while ((v /= 10) && n < 14);
+    for (int k = 0; k < n; ++k) w += part(g, ids[k])->adv;
+    x -= align == 1 ? w / 2 : align == 2 ? w : 0;
+    while (n--) {
+        if (step == 2) glyph(g, s, ids[n] + 1, x, y, line_rgb, alpha);
+        glyph(g, s, ids[n], x, y, rgb, alpha);
+        x += part(g, ids[n])->adv;
+    }
+}
+
+/* The scene restored under the rect being painted: a palette entry a byte. */
+static void scene(const struct eg *g, struct eng_surface *s) {
+    if (!g->ok) {
+        for (int y = s->y0; y < s->y1; ++y)
+            eng_fill(s, s->x0, y, s->x1 - s->x0, 1,
+                     y < 198 ? mixc(0x2f86d8, 0xd6f0f8, y, 198) : lit(g, 0x4e9a46));
+        return;
+    }
+    const unsigned char *idx = data(g, EG_SCENE);
+    for (int y = s->y0; y < s->y1; ++y) {
+        const unsigned *pal = g->pal[y / EG_BAND];
+        const unsigned char *q = idx + y * ENG_W + s->x0, *end = q + (s->x1 - s->x0);
+        unsigned *p = at(s, s->x0, y);
+        while (q < end) *p++ = pal[*q++];
+    }
+}
+
+/* ---- the things in the scene ---- */
+
+static const int BED_X[8] = { 44, 79, 114, 149, 226, 261, 296, 331 };
+static const int CH_X[8] = EG_CH_X;
+static const int R16[3] = { 48, 74, 112 }; /* an ember's radius by size, 1/16 px: 3, 4.6, 7 */
+static const short CARD_Y[G_DROP + 1] = { -150, -79, -20, 28, 66, 95, 116, 131,
+                                          140,  145, 146, 145, 143, 141, 140 }; /* back-out */
+
+static int angle(int aim) { return (aim + 36000) * 1024 / 36000 & 1023; } /* 1024 a turn */
+
+static int ember_x(const struct ember *e) {
+    return FX_INT(e->bx + e->amp * eng_sin(e->phase * 1024 / G_PERIOD));
+}
+/* How far its tail leans, 256ths of a pixel a row above it: the way it moves across (sky.py ember's
+ * sway, 0.6 at the sine's steepest), over its radius. */
+static int ember_lean(const struct ember *e) {
+    int sway = (e->amp * eng_cos(e->phase * 1024 / G_PERIOD) / G_SWAY * 154 >> 16) + (e->vx * 96 >> 16);
+    return -sway * 83 * 16 / (100 * R16[e->size]);
+}
+static int shots(const struct eg *g) {
+    int n = 0;
+    for (int k = 0; k < G_SHOTS; ++k) n += g->sh[k].alive;
+    return n;
+}
+
+/* The bolt of lightning seed draws: eight points down the ash column and a branch of four. */
+static void bolt_shape(int seed, int x0, int *pts, int *br) {
+    unsigned s = (unsigned)seed | 1;
+    int x = x0 * 16, y = 46 * 16;
+    for (int k = 0; k < 8; ++k) {
+        pts[2 * k] = x, pts[2 * k + 1] = y;
+        s ^= s << 13, s ^= s >> 17, s ^= s << 5;
+        x += (int)(s % 272) - 112, y += 112 + (int)(s >> 8) % 80;
+    }
+    br[0] = pts[6], br[1] = pts[7];
+    for (int k = 1; k < 4; ++k) {
+        s ^= s << 13, s ^= s >> 17, s ^= s << 5;
+        br[2 * k] = pts[6] - 96 - (k - 1) * 80 + (int)(s % 64) - 32, br[2 * k + 1] = pts[7] + 80 + (k - 1) * 96;
+    }
+}
+static void bolt_line(struct eng_surface *s, const int *p, int n, int w, unsigned rgb, int alpha) {
+    for (int k = 0; k + 1 < n; ++k) {
+        int dx = p[2 * k + 2] - p[2 * k], dy = p[2 * k + 3] - p[2 * k + 1];
+        int len = (int)isqrt((unsigned)(dx * dx + dy * dy));
+        if (!len) continue;
+        bar(s, p[2 * k], p[2 * k + 1], dx * 65536 / len, dy * 65536 / len, len, w, rgb, alpha);
+        if (k) disc(s, p[2 * k], p[2 * k + 1], w / 2, rgb, alpha);
+    }
+}
+
+static void draw_bolt(const struct eg *g, struct eng_surface *s) {
+    int pts[16], br[8], f = g->bolt - 1, flash = f < 2 ? 256 : f < 4 ? 141 : 51;
+    bolt_shape(g->bolt_seed, g->bolt_x, pts, br);
+    glyph(g, s, EG_BOLTGLOW, pts[6] >> 4, pts[7] >> 4, 0xc8b8ff, flash);
+    if (f >= 4) return; /* the afterglow alone */
+    bolt_line(s, pts, 8, 54, 0xb8a0ff, 120 * flash >> 8);
+    bolt_line(s, br, 4, 38, 0xb8a0ff, 120 * flash >> 8);
+    bolt_line(s, pts, 8, 21, 0xffffff, flash + 51 > 256 ? 256 : flash + 51);
+    bolt_line(s, br, 4, 14, 0xf0e8ff, flash);
+}
+
+/* The sprinkler's head, turned to the aim and kicked back after a spurt, and its collar's drops:
+ * sky.py sprinkler, the tripod and riser being the scene's. */
+static void draw_sprinkler(const struct eg *g, struct eng_surface *s) {
+    int a = angle(g->aim), rc = g->recoil;
+    fx ux = eng_cos(a), uy = eng_sin(a);
+    int kick = 56 * rc * rc * rc / 512, bx = 3000 - (int)((long long)ux * kick >> 16),
+        by = 4320 - (int)((long long)uy * kick >> 16);
+#define ALONG(d, n) (b##d + (int)((long long)u##d * (n) >> 16))
+    unsigned edge = lit(g, 0x7a5414);
+    bar(s, ALONG(x, -80), ALONG(y, -80), ux, uy, 400, 144, edge, 256);
+    bar(s, ALONG(x, -80), ALONG(y, -80), ux, uy, 400, 102, lit(g, 0xd9a632), 256);
+    bar(s, ALONG(x, 32) - (int)((long long)uy * 26 >> 16), ALONG(y, 32) + (int)((long long)ux * 26 >> 16),
+        ux, uy, 240, 21, lit(g, 0xffe08a), 256);
+    bar(s, ALONG(x, 272), ALONG(y, 272), ux, uy, 80, 166, edge, 256);
+    bar(s, ALONG(x, 282), ALONG(y, 282), ux, uy, 61, 125, lit(g, 0xf2c452), 256);
+    /* the impact arm: a sprung flap that flips out on a spurt */
+    int sw = 128 + rc * 230 / 8; /* 0.5 to 1.4, of 256 */
+    fx wx = ux - (uy * sw >> 8), wy = uy + (ux * sw >> 8); /* along the aim, then out */
+    int mag = (int)isqrt((unsigned)((wx >> 4) * (wx >> 4) + (wy >> 4) * (wy >> 4)));
+    int ax = ALONG(x, 144), ay = ALONG(y, 144);
+    if (mag) {
+        bar(s, ax, ay, wx * 4096 / mag, wy * 4096 / mag, 144 * mag / 4096, 35, lit(g, 0x8a8e96), 256);
+        disc(s, ax + (int)((long long)wx * 144 >> 16), ay + (int)((long long)wy * 144 >> 16), 42,
+             lit(g, 0xc9ced8), 256);
+    }
+#undef ALONG
+    disc(s, bx, by, 122, edge, 256);
+    disc(s, bx, by, 98, lit(g, 0xe0b040), 256);
+    disc(s, bx - 29, by - 29, 34, lit(g, 0xffefa8), 256);
+    disc(s, bx, by, 26, edge, 256);
+    if (g->mode != LOST)
+        for (int k = 0, left = G_SHOTS - shots(g); k < 3; ++k)
+            disc(s, 2920 + 80 * k, 4520, 27, k < left ? WATER : lit(g, 0x2a3a4a), 256);
+}
+
+/* The aim: a dotted arc of the sweep and a dotted sight line along it. */
+static void draw_aim(const struct eg *g, struct eng_surface *s) {
+    if (s->y0 > G_PY || s->y1 < G_PY - 80) return;
+    for (int k = 0; k < 17; ++k) {
+        int a = (190 + 10 * k) * 1024 / 360;
+        disc(s, 3000 + (eng_cos(a) * 31 >> 12), 4320 + (eng_sin(a) * 31 >> 12), 13, 0xffffff, 110);
+    }
+    int a = angle(g->aim);
+    for (int k = 0; k < 5; ++k)
+        disc(s, 3000 + (eng_cos(a) * (40 + 9 * k) >> 12), 4320 + (eng_sin(a) * (40 + 9 * k) >> 12),
+             18 - 2 * k, 0xffffff, 190 - 30 * k);
+}
+
+/* A spurt: its lead drop and a trail that sags behind it (sky.py burst), each drop on a navy
+ * keyline; the trail only as far as the spurt has come. */
+static const short TRAIL[4][2] = { { 120, 48 }, { 224, 40 }, { 320, 32 }, { 408, 24 } }; /* 1/16 px */
+static void draw_shot(struct eng_surface *s, const struct shot *h) {
+    int x = h->x >> 12, y = h->y >> 12, ux = h->ux >> 12, uy = h->uy >> 12, n = 0, tx[4], ty[4];
+    for (; n < 4 && TRAIL[n][0] <= h->run * 16; ++n) {
+        int d = TRAIL[n][0];
+        tx[n] = x - ux * d / 16, ty[n] = y - uy * d / 16 + 11 * d * d / 16000;
+    }
+    for (int k = n; k--;) disc(s, tx[k], ty[k], TRAIL[k][1] + 16, WATER_KEY, 256);
+    disc(s, x, y, 86, WATER_KEY, 256);
+    for (int k = n; k--;) disc(s, tx[k], ty[k], TRAIL[k][1], WATER, 256);
+    disc(s, x, y, 70, WATER, 256);
+    disc(s, x - ux * 54 / 16, y - uy * 54 / 16 + 3, 54, WATER, 256);
+    disc(s, x + ux * 13 / 16 - 13, y + uy * 13 / 16 - 14, 35, 0xffffff, 256);
+    if (n) disc(s, tx[0] - 8, ty[0] - 10, 18, 0xffffff, 256);
+}
+
+/* A hit's steam (sky.py steam): a white flash two steps, then a puff that rises and thins over
+ * four frames, water flecks and the dead cinder for the first two, and the points rising. */
+static const short PUFF[6][3] = { { 0, 0, 100 },     { -90, -50, 78 },   { 85, -70, 82 },
+                                        { -20, -140, 68 }, { 100, -180, 50 },  { -120, -200, 46 } };
+static const unsigned char PUFF_K[4][3] = { /* spread, size (of 100), alpha (of 256) by frame */
+                                            { 98, 118, 206 },
+                                            { 115, 120, 155 },
+                                            { 133, 108, 98 },
+                                            { 150, 95, 20 } };
+static const short FLECK[7][2] = { { 921, 389 }, { 267, 964 },   { -589, 808 }, { -999, 42 },
+                                   { -654, -757 }, { 187, -982 }, { 886, -465 } };
+static void draw_puff(const struct eg *g, struct eng_surface *s, const struct puff *p) {
+    int f = p->t < 3 ? 0 : 1 + (p->t - 3) * 4 / 18, r0 = (5 + p->size * 2 + (p->size == 2)) * 16;
+    int x = p->x * 16, y = p->y * 16;
+    if (!f) {
+        disc(s, x, y, r0 + 48, 0xffffff, 256);
+        disc(s, x, y, r0, 0xfff2b0, 256);
+    } else {
+        const unsigned char *k = PUFF_K[f - 1];
+        unsigned col = mixc(0xffffff, mixc(HAZE[g->from], HAZE[g->light], g->k, G_TURN), 64, 256);
+        for (int i = 0; i < 6; ++i)
+            disc(s, x + PUFF[i][0] * r0 * k[0] / 10000, y + PUFF[i][1] * r0 * k[0] / 10000 - f * 36,
+                 PUFF[i][2] * r0 * k[1] / 10000, col, k[2]);
+    }
+    if (f < 3) {
+        if (f) disc(s, x, y + 16 + f * 32, r0 * 36 / 100, 0x5a3a30, 256);
+        for (int i = 0; i < 7; ++i) {
+            int d = r0 + 64 + f * 80;
+            disc(s, x + FLECK[i][0] * d / 1000, y + FLECK[i][1] * d * 8 / 10000 + f * f * 13,
+                 22 - 4 * f, WATER, 256);
+        }
+    }
+    if (f && g->ok) {
+        int px = p->x - r0 / 16 - 9, py = p->y + r0 / 16 + 3 - f * 5 / 2;
+        int w = part(g, EG_POP_PLUS)->adv + part(g, EG_POP_0 + 2 * (p->pts % 10))->adv;
+        glyph(g, s, EG_POP_PLUS_LINE, px - w / 2, py, 0x3a1e10, f < 4 ? 256 : 140);
+        glyph(g, s, EG_POP_PLUS, px - w / 2, py, 0xffe27a, f < 4 ? 256 : 140);
+        numeral(g, s, EG_POP_0, 2, 0, (unsigned)p->pts, px - w / 2 + part(g, EG_POP_PLUS)->adv, py,
+               0, 0xffe27a, 0x3a1e10, f < 4 ? 256 : 140);
+    }
+}
+
+/* An ember reaching the ground (sky.py landing): eight sparks and a flash, four frames. */
+static void draw_sparks(struct eng_surface *s, int x, int f) {
+    for (int k = 0; k < 8; ++k) {
+        int a = 512 + k * 512 / 7, d = 48 + f * 72;
+        disc(s, x * 16 + (eng_cos(a) * d >> 16), G_GROUND * 16 + (eng_sin(a) * d * 8 / 10 >> 16) + f * f * 8,
+             24 - 4 * f, k % 2 ? 0xffe27a : EMBER, 256);
+    }
+    if (f < 2) disc(s, x * 16, G_GROUND * 16, 96 - 32 * f, 0xfff2b0, 256);
+}
+
+/* The spray at the nozzle as a spurt leaves, three frames. */
+static void draw_spray(const struct eg *g, struct eng_surface *s) {
+    int f = 3 - g->spray, a = angle(g->aim);
+    int x = 3000 + (eng_cos(a) * 24 >> 12), y = 4320 + (eng_sin(a) * 24 >> 12);
+    for (int i = 0; i < 7; ++i) {
+        int b = a + (i - 3) * 26, r = (6 + f * 5 + (i % 2) * 3);
+        disc(s, x + (eng_cos(b) * r >> 12), y + (eng_sin(b) * r >> 12), 30 - 6 * f,
+             i % 2 ? 0xffffff : WATER, 256);
+    }
+}
+
+/* A rounded box with alpha, its corners smoothed. */
+static void round_a(struct eng_surface *s, int x, int y, int w, int h, int r, unsigned rgb, int alpha) {
+    int c[4];
+    if (!clip(s, x, y, w, h, c)) return;
+    for (int j = c[1]; j < c[3]; ++j) {
+        int v = j - y, cy = v < r ? r : v >= h - r ? h - r : -1;
+        unsigned *p = at(s, c[0], j);
+        for (int i = c[0]; i < c[2]; ++i, ++p) {
+            int u = i - x, cx = u < r ? r : u >= w - r ? w - r : -1, a = 256;
+            if (cy >= 0 && cx >= 0) {
+                int dx = u * 16 + 8 - cx * 16, dy = v * 16 + 8 - cy * 16, rr = r * 16 + 8;
+                unsigned d2 = (unsigned)(dx * dx + dy * dy);
+                a = d2 >= (unsigned)(rr * rr) ? 0 : d2 <= (unsigned)((rr - 16) * (rr - 16)) ? 256 : (rr - (int)isqrt(d2)) * 16;
+            }
+            if (a) *p = blend(*p, rgb, (unsigned)(a * alpha >> 8));
+        }
+    }
+}
+
+/* The seed packet (render.py packet): the title card at the start, the result card at the end. */
+static void draw_card(const struct eg *g, struct eng_surface *s) {
+    int over = g->mode == LOST, x = 112, y = (over ? CARD_Y[g->card] : 128) - 75, cx = G_PX + 1;
+    if (s->y1 <= y || s->y0 >= y + 156) return;
+    round_a(s, x + 3, y + 5, 150, 150, 6, 0, 110);
+    eng_round(s, x, y, 150, 150, 6, 0xfff6dc);
+    eng_round(s, x, y, 150, 40, 6, 0xe0503a);
+    eng_fill(s, x, y + 30, 150, 10, 0xe0503a);
+    for (int k = 0; k < 15; ++k) eng_fill(s, x + 5 + k * 96 / 10, y + 3, 4, 1, 0xb83a2a);
+    if (!g->ok) {
+        eng_text(s, over ? "Garden lost" : "Ember Garden", cx, y + 10, 24, 18, 0xfff6dc, 1);
+        eng_text(s, "Center", cx, y + 120, 22, 15, 0x3a2414, 1);
+        return;
+    }
+    word(g, s, over ? EG_T_LOST : EG_T_TITLE, cx, y + 22, 1, 0xfff6dc, 0, 0, 256);
+    int yy = y + 58;
+    if (over) {
+        word(g, s, EG_T_SCORE, x + 16, yy, 0, 0x8a6a4a, 0, 0, 256);
+        numeral(g, s, EG_CARD_0, 1, 1, g->score, x + 134, yy, 2, 0x3a2414, 0, 256);
+        word(g, s, EG_T_BEST, x + 16, yy + 24, 0, 0x8a6a4a, 0, 0, 256);
+        numeral(g, s, EG_SMALL_0, 1, 1, g->save.best, x + 134, yy + 24, 2, 0x3a2414, 0, 256);
+        word(g, s, EG_T_WAVE, x + 16, yy + 43, 0, 0x8a6a4a, 0, 0, 256);
+        numeral(g, s, EG_SMALL_0, 1, 0, (unsigned)g->wave, x + 134, yy + 43, 2, 0x3a2414, 0, 256);
+        if (g->score && g->score == g->save.best) {
+            eng_round(s, x + 97, y + 46, 61, 16, 8, 0xffd23f);
+            word(g, s, EG_T_NEWBEST, cx + 49, y + 54, 1, 0x3a2414, 0, 0, 256);
+        }
+    } else {
+        word(g, s, EG_T_KEEP, cx, yy, 1, 0x3a2414, 0, 0, 256);
+        word(g, s, EG_T_BEST, x + 16, yy + 19, 0, 0x8a6a4a, 0, 0, 256);
+        numeral(g, s, EG_CARD_0, 1, 1, g->save.best, x + 134, yy + 19, 2, 0x3a2414, 0, 256);
+        word(g, s, EG_T_BESTWAVE, x + 16, yy + 43, 0, 0x8a6a4a, 0, 0, 256);
+        numeral(g, s, EG_SMALL_0, 1, 0, g->save.wave, x + 134, yy + 43, 2, 0x3a2414, 0, 256);
+    }
+    eng_round(s, cx - 58, y + 123, 116, 18, 9, 0x3e8a3a);
+    word(g, s, over ? EG_T_REPLANT : EG_T_START, cx, y + 132, 1, 0xffffff, 0, 0, 256);
+}
+
+static const unsigned char LIGHT_OF[10] = { DAWN, DAWN, DAY, DAY, DAY, DUSK, DUSK, NIGHT, NIGHT, NIGHT };
+static int banner_alpha(const struct eg *g) {
+    return g->banner <= G_HOLD ? 256 : 256 * (G_HOLD + G_FADE - g->banner) / G_FADE;
+}
+
+static void draw(const void *state, struct eng_surface *s) {
+    const struct eg *g = state;
+    scene(g, s);
+    if (g->bolt) draw_bolt(g, s);
+    for (int k = 0; k < 8; ++k) {
+        int x = BED_X[k];
+        if (!g->ok && s->y1 > G_BED_Y && s->y0 < G_BED_Y + 20)
+            eng_round(s, x - 15, G_BED_Y, 31, 20, 2, g->bed[k] == CHARRED ? 0x2e1c14 : lit(g, 0xa06a3a));
+        if (g->bed[k] == BURNING && g->ok) {
+            glyph(g, s, EG_FIREGLOW, x, G_GROUND + 1, EMBER, 256);
+            sprite(g, s, EG_FIRE0 + g->bed_t[k] / 6 % 3, x, G_GROUND + 1, 0);
+        }
+        if (g->bed[k] == GROWING && k == g->last[k / 4] && g->blink < 60) {
+            unsigned y = 0xffe27a;
+            eng_fill(s, x - 18, G_BED_Y - 14, 36, 2, y), eng_fill(s, x - 18, G_BED_Y + 21, 36, 2, y);
+            eng_fill(s, x - 18, G_BED_Y - 12, 2, 33, y), eng_fill(s, x + 16, G_BED_Y - 12, 2, 33, y);
+            if (g->ok) word(g, s, EG_T_LAST, x, G_BED_Y - 20, 1, y, 1, 0x120c26, 256);
+        }
+    }
+    if (g->mode == PLAY) draw_aim(g, s);
+    draw_sprinkler(g, s);
+    if (g->mode != LOST && s->y1 > 282 && s->y0 < 300) {
+        if (g->ok) {
+            numeral(g, s, EG_SIGN_0, 1, 1, g->score, 84, 291, 1, lit(g, 0x3a2414), 0, 256);
+            numeral(g, s, EG_SIGN_0, 1, 0, (unsigned)(g->wave ? g->wave : 1), 316, 291, 2, lit(g, 0x3a2414), 0,
+                   256);
+        } else {
+            char t[12];
+            int n = 0;
+            for (unsigned v = g->score; n == 0 || v; v /= 10) t[n++] = (char)('0' + v % 10);
+            for (int i = 0; i < n / 2; ++i) {
+                char c = t[i];
+                t[i] = t[n - 1 - i], t[n - 1 - i] = c;
+            }
+            t[n] = 0;
+            eng_text(s, t, 84, 282, 18, 15, 0x3a2414, 1);
+        }
+    }
+    for (int k = 0; k < G_SHOTS; ++k)
+        if (g->sh[k].alive) draw_shot(s, &g->sh[k]);
+    for (int k = 0; k < G_EMBERS; ++k) {
+        const struct ember *e = &g->em[k];
+        if (!e->alive) continue;
+        if (g->ok)
+            sprite(g, s, EG_EMBER0 + e->size, ember_x(e), FX_INT(e->y), ember_lean(e));
+        else
+            disc(s, ember_x(e) * 16 + 8, (e->y >> 12) + 8, R16[e->size], EMBER, 256);
+    }
+    for (int k = 0; k < G_PUFFS; ++k)
+        if (g->pf[k].alive) draw_puff(g, s, &g->pf[k]);
+    if (g->land_t > 0) draw_sparks(s, g->land_x, 4 - g->land_t);
+    if (g->spray) draw_spray(g, s);
+    if (g->banner && g->ok) {
+        int a = banner_alpha(g), w = part(g, EG_T_WAVE_BIG)->w + 8, n = 0;
+        for (unsigned v = (unsigned)g->wave; v; v /= 10) n += part(g, EG_BIG_0 + 2 * (int)(v % 10))->adv;
+        int x = G_PX - (w + n) / 2;
+        word(g, s, EG_T_WAVE_BIG, x, 96, 0, 0xfff6dc, 1, 0x2a1838, a);
+        numeral(g, s, EG_BIG_0, 2, 0, (unsigned)g->wave, x + w, 96, 0, 0xfff6dc, 0x2a1838, a);
+        int light = LIGHT_OF[(g->wave - 1) % 10];
+        if (g->wave == 1 || light != LIGHT_OF[(g->wave + 8) % 10])
+            word(g, s, EG_T_DAWN + 2 * light, G_PX, 120, 1, 0xffe27a, 1, 0x2a1838, a);
+    }
+    if (g->lull && g->mode == PLAY && g->ok) word(g, s, EG_T_LULL, G_PX, 22, 1, 0xffe27a, 1, 0x120c26, 256);
+    if (g->mode != PLAY) draw_card(g, s);
+}
+
+/* ---- a step ---- */
+
+/* This part of the sheet changed: kept until the step's end, when the boxes are joined. */
+static void mark(struct eg *g, int x, int y, int w, int h) {
+    int x1 = x + w, y1 = y + h;
+    x = x < 0 ? 0 : x, y = y < 0 ? 0 : y;
+    x1 = x1 > ENG_W ? ENG_W : x1, y1 = y1 > g->h ? g->h : y1;
+    if (x1 <= x || y1 <= y) return;
+    int full = g->boxes == G_BOXES, *b = g->box[full ? G_BOXES - 1 : g->boxes++];
+    if (full) {
+        b[0] = x < b[0] ? x : b[0], b[1] = y < b[1] ? y : b[1];
+        b[2] = x1 > b[2] ? x1 : b[2], b[3] = y1 > b[3] ? y1 : b[3];
+    } else
+        b[0] = x, b[1] = y, b[2] = x1, b[3] = y1;
+}
+static int area(const int *b) { return (b[2] - b[0]) * (b[3] - b[1]); }
+
+/* The step's boxes to the engine, at most ENG_RECTS: sorted by their tops, then the neighbours
+ * whose joined box costs least are joined, any that overlap first, until few enough are left. */
+static void flush(struct eg *g) {
+    int n = g->boxes, (*b)[4] = g->box;
+    for (int i = 1; i < n; ++i)
+        for (int j = i; j > 0 && b[j][1] < b[j - 1][1]; --j)
+            for (int k = 0; k < 4; ++k) {
+                int t = b[j][k];
+                b[j][k] = b[j - 1][k], b[j - 1][k] = t;
+            }
+    while (n > 1) {
+        int best = -1, cost = 0x7fffffff;
+        for (int i = 0; i + 1 < n; ++i) {
+            int u[4] = { b[i][0] < b[i + 1][0] ? b[i][0] : b[i + 1][0], b[i][1],
+                         b[i][2] > b[i + 1][2] ? b[i][2] : b[i + 1][2],
+                         b[i][3] > b[i + 1][3] ? b[i][3] : b[i + 1][3] };
+            int c = area(u) - area(b[i]) - area(b[i + 1]);
+            if (c < cost) cost = c, best = i;
+        }
+        if (n <= ENG_RECTS && cost > 0) break;
+        int *a = b[best], *z = b[best + 1];
+        a[0] = z[0] < a[0] ? z[0] : a[0], a[2] = z[2] > a[2] ? z[2] : a[2];
+        a[3] = z[3] > a[3] ? z[3] : a[3];
+        for (int i = best + 1; i + 1 < n; ++i)
+            for (int k = 0; k < 4; ++k) b[i][k] = b[i + 1][k];
+        --n;
+    }
+    for (int i = 0; i < n; ++i) eng_dirty(b[i][0], b[i][1], b[i][2] - b[i][0], b[i][3] - b[i][1]);
+    g->boxes = 0;
+}
+
+static unsigned rng(struct eg *g) {
+    unsigned x = g->seed;
+    x ^= x << 13, x ^= x >> 17, x ^= x << 5;
+    return g->seed = x;
+}
+
+/* A run of n of one sound, six steps apart: the first now. */
+static void sound(struct eg *g, int kind, int n) {
+    eng_sfx(kind);
+    g->seq = kind, g->runs = n - 1, g->wait = 6;
+}
+
+static void ember_box(struct eg *g, const struct ember *e) {
+    int x = ember_x(e), y = FX_INT(e->y);
+    if (!g->ok) {
+        mark(g, x - 9, y - 9, 19, 19);
+        return;
+    }
+    const struct part *p = part(g, EG_EMBER0 + e->size);
+    mark(g, x - p->ax - 5, y - p->ay, p->w + 10, p->h);
+}
+/* The old box and the new of something that moved, as one when they overlap. */
+static void moved(struct eg *g, int n0, int n1) {
+    if (n1 - n0 != 2) return;
+    int *a = g->box[n0], *b = g->box[n0 + 1];
+    if (a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]) {
+        a[0] = b[0] < a[0] ? b[0] : a[0], a[1] = b[1] < a[1] ? b[1] : a[1];
+        a[2] = b[2] > a[2] ? b[2] : a[2], a[3] = b[3] > a[3] ? b[3] : a[3];
+        --g->boxes;
+    }
+}
+static void shot_box(struct eg *g, const struct shot *h) {
+    int x = FX_INT(h->x), y = FX_INT(h->y), tx = FX_INT(h->x - h->ux * 26), ty = FX_INT(h->y - h->uy * 26);
+    mark(g, (x < tx ? x : tx) - 7, (y < ty ? y : ty) - 7, (x < tx ? tx - x : x - tx) + 15,
+         (y < ty ? ty - y : y - ty) + 16);
+}
+static void sight_box(struct eg *g) {
+    int a = angle(g->aim), x0 = G_PX + (eng_cos(a) * 38 >> 16), y0 = G_PY + (eng_sin(a) * 38 >> 16),
+        x1 = G_PX + (eng_cos(a) * 79 >> 16), y1 = G_PY + (eng_sin(a) * 79 >> 16);
+    mark(g, (x0 < x1 ? x0 : x1) - 3, (y0 < y1 ? y0 : y1) - 3, (x0 < x1 ? x1 - x0 : x0 - x1) + 7,
+         (y0 < y1 ? y1 - y0 : y0 - y1) + 7);
+}
+/* The lightning's box: its bolt, its branch and the glow round its middle. */
+static void bolt_box(struct eg *g) {
+    int pts[16], br[8], x0 = 9999, y0 = 9999, x1 = -9999, y1 = -9999;
+    bolt_shape(g->bolt_seed, g->bolt_x, pts, br);
+    for (int k = 0; k < 12; ++k) {
+        int x = (k < 8 ? pts[2 * k] : br[2 * (k - 8)]) >> 4, y = (k < 8 ? pts[2 * k + 1] : br[2 * (k - 8) + 1]) >> 4;
+        x0 = x < x0 ? x : x0, x1 = x > x1 ? x : x1, y0 = y < y0 ? y : y0, y1 = y > y1 ? y : y1;
+    }
+    x0 = (pts[6] >> 4) - 36 < x0 ? (pts[6] >> 4) - 36 : x0, x1 = (pts[6] >> 4) + 36 > x1 ? (pts[6] >> 4) + 36 : x1;
+    y0 = (pts[7] >> 4) - 36 < y0 ? (pts[7] >> 4) - 36 : y0, y1 = (pts[7] >> 4) + 36 > y1 ? (pts[7] >> 4) + 36 : y1;
+    mark(g, x0 - 4, y0 - 4, x1 - x0 + 9, y1 - y0 + 9);
+}
+static void hud_box(struct eg *g) { mark(g, 52, 282, 64, 18); }
+static void bed_box(struct eg *g, int k) { mark(g, BED_X[k] - 25, 226, 50, 50); }
+static void card_box(struct eg *g, int y) { mark(g, 108, y - 78, 162, 164); }
+
+/* The time of day for this wave: a turn begins from the one now, a pass of strips at a time. */
+static void turn(struct eg *g, int light) {
+    if (light == g->light) return;
+    g->from = g->light, g->light = light, g->k = 0, g->strip = 0;
+}
+
+static void next_wave(struct eg *g) {
+    ++g->wave;
+    int lull = g->wave % 10 == 0;
+    if (lull != g->lull) mark(g, 130, 10, 115, 24);
+    g->lull = lull;
+    g->left = lull ? 5 : 6 + 2 * g->wave > 40 ? 40 : 6 + 2 * g->wave;
+    g->gap = lull ? 60 : 70 - 4 * g->wave < 18 ? 18 : 70 - 4 * g->wave;
+    g->spawn = G_HOLD;
+    g->banner = 1;
+    mark(g, 40, 76, 295, 58);
+    hud_box(g), mark(g, 286, 282, 32, 18);
+    turn(g, LIGHT_OF[(g->wave - 1) % 10]);
+    sound(g, ENG_SFX_TICK, 2);
+}
+
+static void spawn(struct eg *g) {
+    for (int k = 0; k < G_EMBERS; ++k) {
+        struct ember *e = &g->em[k];
+        if (e->alive) continue;
+        int pc = 10 + 3 * g->wave > 35 ? 35 : 10 + 3 * g->wave, pm = 25 + 3 * g->wave > 40 ? 40 : 25 + 3 * g->wave;
+        int r = (int)(rng(g) % 100);
+        e->size = g->lull ? 2 : r < pc ? 2 : r < pc + pm ? 1 : 0;
+        e->amp = G_SWAY, e->phase = (int)(rng(g) % G_PERIOD), e->vx = 0;
+        e->bx = FX(30 + G_SWAY + (int)(rng(g) % (315 - 2 * G_SWAY)));
+        e->y = FX(40);
+        e->vy = g->lull ? FX(0.5) : FX(0.5) + (g->wave - 1) * (FX(6) / 100);
+        e->vy = e->vy > FX(2.2) ? FX(2.2) : e->vy;
+        e->alive = 1;
+        ember_box(g, e);
+        --g->left;
+        return;
+    }
+}
+
+static void lose(struct eg *g);
+
+/* An ember on the ground: the nearest growing bed on its side catches; the side's third lost
+ * lights its last bed's frame, its fourth ends the game. */
+static void land(struct eg *g, int x) {
+    int side = x < G_PX ? 0 : 1, best = -1, lost = 0;
+    for (int k = side * 4; k < side * 4 + 4; ++k) {
+        if (g->bed[k] != GROWING) {
+            ++lost;
+            continue;
+        }
+        int d = x - BED_X[k] < 0 ? BED_X[k] - x : x - BED_X[k];
+        if (best < 0 || d < (x - BED_X[best] < 0 ? BED_X[best] - x : x - BED_X[best])) best = k;
+    }
+    if (g->land_t) mark(g, g->land_x - 24, G_GROUND - 20, 48, 30);
+    g->land_x = x, g->land_t = 5;
+    mark(g, x - 24, G_GROUND - 20, 48, 30);
+    sound(g, ENG_SFX_ALERT, 1);
+    if (best < 0) return;
+    g->bed[best] = CAUGHT, g->bed_t[best] = G_CATCH, ++lost;
+    if (g->last[side] >= 0) bed_box(g, g->last[side]);
+    g->last[side] = -1;
+    if (lost == 3)
+        for (int k = side * 4; k < side * 4 + 4; ++k)
+            if (g->bed[k] == GROWING) g->last[side] = k, g->blink = 0, bed_box(g, k);
+    if (lost == 4) lose(g);
+}
+
+/* A spurt's lead drop on an ember: steam and points; a cinder cracks into two small embers that
+ * fly apart, and the embers and spurts stop for a moment. */
+static void hit(struct eg *g, struct ember *e) {
+    int pts = (e->size + 1) * (g->lull ? 2 : 1);
+    g->score += (unsigned)pts;
+    hud_box(g);
+    for (int k = 0; k < G_PUFFS; ++k)
+        if (!g->pf[k].alive || k == G_PUFFS - 1) {
+            struct puff *p = &g->pf[k];
+            if (p->alive) mark(g, p->x - 40, p->y - 48, 80, 90);
+            *p = (struct puff){ ember_x(e), FX_INT(e->y), 0, e->size, pts, 1 };
+            break;
+        }
+    if (e->size < 2) {
+        e->alive = 0;
+        sound(g, ENG_SFX_TAP, 1);
+        return;
+    }
+    fx x = FX(ember_x(e));
+    e->size = 0, e->amp = 0, e->bx = x, e->vx = -FX(1.6);
+    for (int k = 0; k < G_EMBERS; ++k)
+        if (!g->em[k].alive) {
+            g->em[k] = *e;
+            g->em[k].vx = FX(1.6);
+            break;
+        }
+    if (!g->stop) g->stop = G_STOP;
+    sound(g, ENG_SFX_TAP, 2);
+}
+
+static int fire(struct eg *g) {
+    for (int k = 0; k < G_SHOTS; ++k) {
+        struct shot *h = &g->sh[k];
+        if (h->alive) continue;
+        int a = angle(g->aim);
+        h->ux = eng_cos(a), h->uy = eng_sin(a);
+        h->x = FX(G_PX) + FX(1) / 2 + h->ux * 22, h->y = FX(G_PY) + h->uy * 22;
+        h->run = 0, h->alive = 1;
+        g->recoil = 9, g->spray = 4; /* painted from the next frame: 8 and 3 */
+        sound(g, ENG_SFX_TICK, 1);
+        return 1;
+    }
+    return 0;
+}
+
+static void save_best(struct eg *g) {
+    if (g->save.best + g->save.wave != g->saved &&
+        eng_save("embergarden", &g->save, sizeof g->save, G_MAGIC))
+        g->saved = g->save.best + g->save.wave;
+}
+
+/* The fourth bed on a side lost: the scene dims, the result card drops in. */
+static void lose(struct eg *g) {
+    g->mode = LOST, g->card = 0, g->boxes = 0;
+    for (int k = 0; k < G_EMBERS; ++k) g->em[k].alive = 0;
+    for (int k = 0; k < G_SHOTS; ++k) g->sh[k].alive = 0;
+    for (int k = 0; k < G_PUFFS; ++k) g->pf[k].alive = 0;
+    g->banner = g->bolt = g->land_t = g->spray = g->recoil = 0;
+    g->k = G_TURN, g->strip = 0, g->dim = 1;
+    palette(g);
+    if (g->score > g->save.best) g->save.best = g->score;
+    if ((unsigned)g->wave > g->save.wave) g->save.wave = (unsigned)g->wave;
+    save_best(g); /* the game's end, not a frame of play */
+    sound(g, ENG_SFX_ALERT, 3);
+    eng_dirty_all();
+}
+
+/* A new game at dawn, every bed growing: the title card (START) or play at once. */
+static void new_game(struct eg *g, int mode) {
+    unsigned char *idx = scene_idx(g);
+    for (int k = 0; k < 8; ++k) {
+        if (g->ok && g->bed[k] == CHARRED)
+            for (int j = 0; j < EG_CH_H; ++j)
+                memcpy(idx + (EG_CH_Y + j) * ENG_W + CH_X[k], g->grow[k] + j * EG_CH_W, EG_CH_W);
+        g->bed[k] = GROWING;
+    }
+    for (int k = 0; k < G_EMBERS; ++k) g->em[k].alive = 0;
+    for (int k = 0; k < G_SHOTS; ++k) g->sh[k].alive = 0;
+    for (int k = 0; k < G_PUFFS; ++k) g->pf[k].alive = 0;
+    g->last[0] = g->last[1] = -1;
+    g->score = 0, g->wave = 0, g->lull = 0, g->left = 0, g->banner = 0, g->bolt = 0;
+    g->bolt_wait = G_FLASH, g->land_t = g->spray = g->recoil = g->stop = 0;
+    g->aim = -9000, g->mode = mode, g->card = 0, g->dim = 0;
+    g->light = g->from = DAWN, g->k = G_TURN, g->strip = 0;
+    g->seed = rand_below(~0u) | 1;
+    palette(g);
+    if (mode == PLAY) next_wave(g);
+    g->boxes = 0;
+    eng_dirty_all();
+}
+
+static void init(void *state, int h) {
+    struct eg *g = state;
+    g->h = h;
+    g->ok = load(g);
+    if (g->ok) {
+        const unsigned char *idx = scene_idx(g);
+        for (int k = 0; k < 8; ++k)
+            for (int j = 0; j < EG_CH_H; ++j)
+                memcpy(g->grow[k] + j * EG_CH_W, idx + (EG_CH_Y + j) * ENG_W + CH_X[k], EG_CH_W);
+    }
+    if (!eng_load("embergarden", &g->save, sizeof g->save, G_MAGIC) || g->save.best > 99999999 ||
+        g->save.wave > 9999)
+        g->save.best = g->save.wave = 0; /* a save that no game made */
+    g->saved = g->save.best + g->save.wave;
+    new_game(g, START);
+}
+
+/* The aim from the wheel, the side buttons and a finger. */
+static void aim(struct eg *g, const struct eng_input *in) {
+    int a = g->aim + in->wheel * G_WHEEL;
+    if (in->held & ENG_PREV) a -= G_KEY;
+    if (in->held & ENG_NEXT) a += G_KEY;
+    if (in->held & ENG_TOUCH && in->ty < G_PY - 4)
+        a = eng_atan2((in->ty - G_PY) * 16, in->tx * 16 + 8 - G_PX * 16) * 36000 / 1024 - 36000;
+    g->aim = a < G_AIM_LO ? G_AIM_LO : a > G_AIM_HI ? G_AIM_HI : a;
+}
+
+static void play(struct eg *g, const struct eng_input *in) {
+    if (in->pressed & (ENG_CENTRE | ENG_TOUCH)) {
+        fire(g);
+        g->repeat = G_REPEAT;
+    } else if (in->held & ENG_CENTRE && !--g->repeat) {
+        fire(g);
+        g->repeat = G_REPEAT;
+    }
+    int frozen = g->stop > 0;
+    if (frozen) --g->stop;
+    for (int k = 0; k < G_SHOTS && !frozen; ++k) {
+        struct shot *h = &g->sh[k];
+        if (!h->alive) continue;
+        int n0 = g->boxes;
+        shot_box(g, h);
+        h->x += h->ux * 6, h->y += h->uy * 6, h->run += 6;
+        if (h->y < FX(-30) || h->x < FX(-30) || h->x > FX(ENG_W + 30)) {
+            h->alive = 0;
+            continue;
+        }
+        for (int j = 0; j < G_EMBERS && h->alive; ++j) {
+            struct ember *e = &g->em[j];
+            if (!e->alive) continue;
+            int dx = ember_x(e) * 16 + 8 - (h->x >> 12), dy = (e->y >> 12) - (h->y >> 12),
+                rr = G_HIT + R16[e->size];
+            if (dx * dx + dy * dy < rr * rr) {
+                ember_box(g, e);
+                h->alive = 0;
+                hit(g, e);
+            }
+        }
+        if (h->alive) shot_box(g, h);
+        moved(g, n0, g->boxes);
+    }
+    for (int k = 0; k < G_EMBERS && !frozen; ++k) {
+        struct ember *e = &g->em[k];
+        if (!e->alive) continue;
+        int n0 = g->boxes;
+        ember_box(g, e);
+        if (e->amp) e->phase = (e->phase + 1) % G_PERIOD;
+        e->bx += e->vx, e->vx = e->vx * 15 / 16;
+        int r = R16[e->size] / 16 + 1;
+        if (FX_INT(e->bx) - e->amp < 24 + r) e->bx = FX(24 + r + e->amp);
+        if (FX_INT(e->bx) + e->amp > 351 - r) e->bx = FX(351 - r - e->amp);
+        e->y += e->vy;
+        if (FX_INT(e->y) >= G_GROUND) {
+            e->alive = 0;
+            g->boxes = n0 + 1; /* its old box: it is gone */
+            land(g, ember_x(e));
+            if (g->mode != PLAY) return;
+            continue;
+        }
+        ember_box(g, e);
+        moved(g, n0, g->boxes);
+    }
+    if (!frozen && g->left && !--g->spawn) {
+        spawn(g);
+        g->spawn = g->gap;
+    }
+    int alive = 0;
+    for (int k = 0; k < G_EMBERS; ++k) alive += g->em[k].alive;
+    if (!g->left && !alive && !g->banner) next_wave(g);
+    /* lightning in the ash column, after dusk and in a lull, never over many embers */
+    if (g->bolt_wait) --g->bolt_wait;
+    if (!g->bolt && !g->bolt_wait && (g->light >= DUSK || g->lull) && alive <= 16 && rng(g) % 64 == 0) {
+        g->bolt = 1, g->bolt_seed = (int)rng(g), g->bolt_x = 164 + (int)(rng(g) % 16);
+        g->bolt_wait = G_FLASH + (int)(rng(g) % 120);
+    }
+}
+
+static int step(void *state, const struct eng_input *in) {
+    struct eg *g = state;
+    int aim0 = g->aim, recoil = g->recoil, spray = g->spray, left = shots(g);
+    if (g->runs && !--g->wait) eng_sfx(g->seq), g->wait = 6, --g->runs;
+    if (g->bolt && ++g->bolt > 7) bolt_box(g), g->bolt = 0; /* its frames: bolt, dimmer, afterglow */
+    if (g->mode == START) {
+        if (in->pressed & (ENG_CENTRE | ENG_TOUCH)) new_game(g, PLAY);
+    } else if (g->mode == PLAY) {
+        aim(g, in);
+        play(g, in);
+    } else {
+        if (g->card < G_DROP) {
+            card_box(g, CARD_Y[g->card]);
+            ++g->card;
+            card_box(g, CARD_Y[g->card]);
+            moved(g, g->boxes - 2, g->boxes);
+        } else if (in->pressed & (ENG_CENTRE | ENG_TOUCH))
+            new_game(g, PLAY);
+    }
+    if (g->mode == PLAY) {
+        if (g->recoil) --g->recoil;
+        if (g->spray) --g->spray;
+        if (g->aim != aim0) sight_box(g);
+        if (g->aim != aim0 || g->recoil || recoil || g->spray || spray || shots(g) != left) {
+            mark(g, 153, 236, 69, 51);
+            if (g->aim != aim0) {
+                int a = g->aim;
+                g->aim = aim0, sight_box(g), g->aim = a;
+            }
+        }
+        if (g->banner) {
+            if (g->banner >= G_HOLD) mark(g, 40, 76, 295, 58);
+            if (++g->banner > G_HOLD + G_FADE) g->banner = 0;
+        }
+        if (g->bolt) bolt_box(g);
+        for (int k = 0; k < G_PUFFS; ++k) {
+            struct puff *p = &g->pf[k];
+            if (!p->alive) continue;
+            mark(g, p->x - 40, p->y - 48, 80, 90);
+            if (++p->t > 20) p->alive = 0;
+        }
+        if (g->land_t) mark(g, g->land_x - 24, G_GROUND - 20, 48, 30), --g->land_t;
+        for (int k = 0; k < 8; ++k) {
+            if (g->bed[k] == CAUGHT && !--g->bed_t[k]) g->bed[k] = BURNING, g->bed_t[k] = G_BURN, bed_box(g, k);
+            else if (g->bed[k] == BURNING) {
+                if (g->bed_t[k] % 6 == 0) bed_box(g, k);
+                if (!--g->bed_t[k]) {
+                    g->bed[k] = CHARRED;
+                    if (g->ok) {
+                        unsigned char *idx = scene_idx(g);
+                        const unsigned char *ch = (const unsigned char *)data(g, EG_CHARRED) + k * EG_CH_W * EG_CH_H;
+                        for (int j = 0; j < EG_CH_H; ++j)
+                            memcpy(idx + (EG_CH_Y + j) * ENG_W + CH_X[k], ch + j * EG_CH_W, EG_CH_W);
+                    }
+                    bed_box(g, k);
+                }
+            }
+        }
+        if (g->last[0] >= 0 || g->last[1] >= 0) {
+            g->blink = (g->blink + 1) % 90;
+            if (g->blink == 0 || g->blink == 60)
+                for (int s = 0; s < 2; ++s)
+                    if (g->last[s] >= 0) bed_box(g, g->last[s]);
+        }
+    }
+    /* the light's turn: a strip of rows a step, the palette a pass further at each pass's start */
+    if (g->mode == PLAY && (g->k < G_TURN || g->strip)) {
+        if (!g->strip) ++g->k, palette(g);
+        mark(g, 0, g->strip * G_STRIP, ENG_W, G_STRIP);
+        g->strip = (g->strip + 1) % (320 / G_STRIP);
+    }
+    flush(g);
+    return 1;
+}
+
+/* A best is written at the game's end; one that could not be then is tried again here. */
+static void pause(void *state) {
+    struct eg *g = state;
+    if (g->mode == LOST) save_best(g);
+}
+
+const struct eng_game eng_embergarden = { "Ember Garden", sizeof(struct eg), ENG_RAW | ENG_FULL,
+                                          init, step, draw, pause };
