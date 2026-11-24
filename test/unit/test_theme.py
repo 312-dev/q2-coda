@@ -1172,7 +1172,7 @@ def test_a_token_without_a_light_half_takes_its_flip():
 
 # Files with a palette of their own, not the theme's: the games' engine and boards, the EQ editor, and offsets.inc's
 # stock-facing values (test/patch.py reads them)
-OWN_PALETTE = {'games.c', 'game_bricks.c', 'engine.c', 'engine_demo.c', 'peq_ui.c', 'offsets.inc', 'tokens.h'}
+OWN_PALETTE = {'games.c', 'game_popstall.c', 'engine.c', 'engine_demo.c', 'peq_ui.c', 'offsets.inc', 'tokens.h'}
 
 
 def test_patch_names_tokens_and_type_sizes_rather_than_restating_them():
