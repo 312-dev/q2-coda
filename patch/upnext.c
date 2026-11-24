@@ -306,10 +306,22 @@ int un_hold(void *top) {
     return 1;
 }
 
+/* The menu's Remove from Queue (qm_run, once it has checked the record is still the row's): the
+ * song leaves the queue (playback_queue_remove) and the rows are taken again, the selection on the
+ * row that took its place. */
+static void un_remove(void) {
+    if (!playback_queue_remove(st.qm_idx)) {
+        toast("Queue unchanged");
+        return;
+    }
+    if (un.page) un_fill(widget_get_prop_int(un.view, SEL, -1));
+}
+
 /* Centre or a finger held on a song's row (hold_menu.c qm_centre_hold, qm_touch_hold): the song's
  * hold menu over the queue, as a playlist page's song gets it (qm_song_hold), at the row's queue
- * index. Centre (centre) leaves a Playing Next row to its lift (un_keydown); a pending row (a card
- * app's song not yet queued) and the header have none. 1 when the menu is on its way. */
+ * index, with Remove from Queue last. Centre (centre) leaves a Playing Next row to its lift
+ * (un_keydown); a pending row (a card app's song not yet queued) and the header have none. 1 when
+ * the menu is on its way. */
 int un_menu_hold(void *top, int centre) {
     if (!top || top != un.page || un.lifted) return 0;
     int k = un_place(widget_get_prop_int(un.view, SEL, -1));
@@ -318,7 +330,7 @@ int un_menu_hold(void *top, int centre) {
     unsigned at = un.idx[k];
     if ((at & UN_PEND_ROW) || at >= deque_size(q)) return 0;
     stop_timer(&un.hold);
-    return qm_song_hold(un.page, q, at, (const char *)0, (void (*)(void))0);
+    return qm_song_hold(un.page, q, at, "Remove from Queue", un_remove);
 }
 
 /* The lifted row moved to place to of Playing Next: the view's children reordered (the row's

@@ -1618,6 +1618,39 @@ int playback_next_clear(void) {
     playback_save();
     return w < size;
 }
+/* Up Next's Remove from Queue (upnext.c un_remove): the queue's row at leaves it, never the one
+ * playing, which plays on untouched. The rows after it close up in order (swap_rows: no row is
+ * copied) and the last is popped (the deque frees its strings); stock's indices follow
+ * (stock_remap), Playing Next's too (outside advanced play by the map, under it follow_queue's, by
+ * the rows' identities), and stock's preload of the next row closes when that row left, the wrap's
+ * when the first did. Crossfade's key holds the next row's path, which then names the song after,
+ * so it is told again (crossfade.c xfade_poll). 1 when the row went. */
+int playback_queue_remove(unsigned at) {
+    void *q = queue();
+    plain_follow();
+    unsigned size = q ? deque_size(q) : 0, pos = (unsigned)M(MCL_POS);
+    unsigned *map = at < size && pos < size && at != pos ? calloc(size + 1, sizeof *map) : 0;
+    if (!map) return 0;
+    for (unsigned i = 0; i < size; ++i) map[i] = i == at ? ~0u : i > at ? i - 1 : i;
+    for (unsigned i = at; i + 1 < size; ++i) swap_rows(q, i, i + 1);
+    if (!s.active) { /* the plain run after the playing row: one shorter, if it held the row */
+        unsigned k = 0;
+        for (unsigned i = 0; i < s.npend; ++i)
+            if (s.pend[i] < size && map[s.pend[i]] != ~0u) s.pend[k++] = map[s.pend[i]];
+        s.npend = k;
+    }
+    if (at == pos + 1 || (at == 0 && pos + 1 == size)) stock_unpreload();
+    M(MCL_POS) = (int)map[pos];
+    stock_remap(map, size);
+    deque_pop_back(q);
+    free(map);
+    follow_queue();
+    s.plain_size = size - 1;
+    s.next_valid = 0;
+    s.dirty = 1;
+    playback_save();
+    return 1;
+}
 /* A radio of the song playing (song_radio.c, addon.c; docs/internals.md#radio): every row but the
  * playing one leaves the queue, which then holds that song alone at place 0, and add's rows join
  * after it. Nothing loads, so the player plays on untouched, at its place, with no new song sent:

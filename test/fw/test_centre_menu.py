@@ -260,6 +260,27 @@ def test_centre_held_on_a_song_in_up_next_opens_its_menu(fw, plain, st, recs):
     del keys
 
 
+class Held(C.Structure):
+    """hold_menu.c's qm_held: a payload page's song list held (qm_song_hold), its last row's words and what it runs."""
+    _fields_ = [('page', C.c_void_p), ('list', C.c_void_p), ('extra', C.c_char_p), ('pick', C.c_void_p)]
+
+
+def test_up_next_s_menu_ends_with_remove_from_queue_which_takes_that_song_out(fw, plain, st, recs):
+    queue, page = plain
+    page.open()
+    library_records(queue, recs)
+    rows = [C.string_at(r, O['REC_SIZE']) for r in queue.deques[queue.handle]]
+    page.select(2)  # queue index 5
+    keys = keyrec(fw)
+    assert fw.fn('qm_centre_hold', C.c_int, C.c_void_p)(PAGE) == 1
+    held = fw.var('navigation__qm_held', Held)
+    assert held.extra == b'Remove from Queue' and st('qm_idx').value == 5
+    C.CFUNCTYPE(None)(held.pick)()  # the row picked, once qm_run has checked the record (upnext.c un_remove)
+    left = [C.string_at(r, O['REC_SIZE']) for r in queue.deques[queue.handle]]
+    assert left == rows[:5] + rows[6:] and queue.mcl.pos == 2 and not page.toasts
+    del keys
+
+
 def test_centre_held_on_playing_next_keeps_its_lift_and_a_finger_does_not(fw, plain, st, recs):
     """Centre held on a Playing Next song is its lift (un_keydown, UN_HOLD_MS); un_menu_hold gives the menu there
     only to a hold that is not Centre's (a finger's, qm_touch_hold)."""

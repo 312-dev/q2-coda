@@ -813,7 +813,8 @@ as a menu's; a lit row's foot never passes y 282.
   back where it was.
 - **A song's menu**: Center held half a second on a song of the rest of the queue, or a finger held
   on any queued song, opens the song's hold menu over the sheet (Play Next, Play Last, Add to
-  Playlist, Favorite, the Go to rows), as on every song list
+  Playlist, Favorite, the Go to rows), as on every song list, with **Remove from Queue** last, in
+  red: the song leaves the queue and the list closes up
   ([internals](internals.md#centre-hold-menu)).
 - Nothing toasts. Center on a song plays it and closes Up Next at once; Return lets the sheet fall
   away. The list follows the queue as songs end, the header with it.

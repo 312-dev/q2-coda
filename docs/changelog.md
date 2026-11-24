@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Search: holding Center, Play/Pause or a finger on a song in the results opens its options, as on any song list.
+  - Up Next: a song's options (hold Center or a finger on it) end with **Remove from Queue**, which takes it out of the queue; the song playing plays on, and the shorter queue is what comes back after a restart.
   - The wheel does nothing while the screen is off, whatever Wake and Buttons Lock are set to: turning it no longer wakes the screen, clicks or changes anything, and it does nothing while the Buttons Locked card shows. A headset's own volume buttons and the Car Remote still change the volume with the screen off.
   - Song lists: hold Center on a song (an album's tracks, Songs, a playlist, an artist's songs, Folders, Cover Flow's tracks, Most Played, the Ratings lists or Up Next) for half a second, or hold a finger on it, and its menu opens: Play Next, Play Last, Add to Playlist, Favorite, Go to Album, Go to Artist and the rest, the same menu a Play/Pause hold opens. Letting go does not play the song, and the press does not go on to the Shut Down prompt; holding Center on anything that is not a song still shuts down as before.
   - Car Remote: on the car's now-playing screen, the artist and the album open that artist's and that album's pages (with a Q2 Muse Remote that supports it).

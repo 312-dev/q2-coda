@@ -829,6 +829,17 @@ def test_a_fade_names_its_two_songs_for_the_player(fade):
     assert fade.fade() == SMART and fade.shared.text[NEXT_FILE] == '/m/B/1.flac\n/m/D/9.flac\n'
 
 
+def test_removing_the_next_song_from_the_queue_names_the_one_after_it(fade, fw):
+    """Up Next's Remove from Queue (playback.c playback_queue_remove) closes the queue up by moving rows' bytes, so
+    the next row's address stays and its path changes: the key holds the path, and the new next song is named."""
+    fw.mock('fw_deque_pop_back', lambda q, *_: fade.deques[q].pop() and 0)
+    fade.load('A', 'B', 'C', 'D')
+    assert fade.fade(1) == SMART and fade.shared.text[NEXT_FILE] == '/m/B/1.flac\n/m/C/2.flac\n'
+    assert fw.fn('playback_queue_remove', C.c_int, C.c_uint)(2) == 1
+    assert fade.mcl.pos == 1 and len(fade.deques[fade.queue]) == 3
+    assert fade.fade() == SMART and fade.shared.text[NEXT_FILE] == '/m/B/1.flac\n/m/D/3.flac\n'
+
+
 def test_no_fade_names_no_songs(fade):
     fade.load('A', 'A')
     assert fade.fade(0) == 0 and NEXT_FILE not in fade.shared.text  # an album in order stays gapless
