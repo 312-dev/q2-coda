@@ -95,7 +95,7 @@ class CardMachine(DepthMachine):
 # A game's keys never reach stock's filter or the media keys; Return goes game -> chooser -> Library; closing frees
 # the state.
 OWN_GAMES=re.findall(r'^#define GAME_(\w+) (\d)',(ROOT/'patch/peq.h').read_text(),re.M)
-OWN=[n.capitalize() for n,on in OWN_GAMES if on=='1']; SHIPPED=['Games',*OWN,'Bricks']
+OWN=[n.capitalize() for n,on in OWN_GAMES if on=='1']; SHIPPED=['Games',*OWN,'Bricks','Evening Puzzle']
 m=CardMachine({},{})
 G_SCREEN,G_PICKING,G_PAUSED,G_CELL,G_CUR,G_VX=36,44,56,76,157,164
 # labels(w): the texts of the hscroll_labels under w, in node order
@@ -250,7 +250,7 @@ else:
     eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
     O_ENG_RECT,O_ENG_STEPS=80,208  # struct eng's rect and steps (patch/engine.c), on MIPS
     ENG_STEP_BOUND,ENG_FRAME_BOUND,ENG_WHOLE_BOUND=600,70_000,780_000  # measured: 499, 61,511 and 703,036
-    pick(len(SHIPPED)-1); EN=m.get(payload_syms['en']); assert word(G_SCREEN)==6 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1
+    pick(len(SHIPPED)-1); EN=m.get(payload_syms['en']); assert word(G_SCREEN)==7 and EN  # after Bricks and the Evening Puzzle and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1
     FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
     for o,v in (('LCD_W',375),('LCD_H',320),('LCD_LINE_LENGTH',1500),('LCD_FORMAT',O['LCD_BGRA8888']),('LCD_OFFLINE_FB',FB)): m.word(m.lcd+O[o],v)
     n=[0]; counter=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)
@@ -350,6 +350,115 @@ print(f'Bricks on MIPS: {step_worst} instructions for a frame\'s step at most, {
 m.u.hook_del(counter)
 # Return pauses under Games' menu; Quit frees it.
 key(O['KEY_RETURN']); assert word(G_PAUSED)==2 and not eframes() and m.get(payload_syms['wheel_raw'])==0
+key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0)
+assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0 and not eframes()
+m.close(); assert m.get(payload_syms['g'])==0
+passed()
+
+# The Evening Puzzle (patch/game_sudoku.c, docs/games-engine.md#evening-puzzle), the engine's second game, full screen
+# (ENG_FULL): a Sharp puzzle made on the device, a slice of the generator a frame with its progress rule painted, then
+# a scripted second of entry, the whole sheet, and the dearest frames of entry made on purpose: the cursor stepping
+# between two digits every row holds (its old wash off one frame, the new one on the next), the dial's note opening,
+# turning and peeling off as a digit is placed, a finished row's wave, the stamp, and a pause's blotter on and off.
+# Bounded in the payload's instructions a little over what they measured: a slice under the brief's 150,000, every
+# frame under 600,000 and a Sharp puzzle within 180 frames (3 s) (docs/games-engine.md#budgets).
+m=CardMachine({},{})
+sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
+eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
+O_ENG_H=40  # struct eng's h (patch/engine.c), on MIPS
+SD_CLUE,SD_SOL,SD_ENT,SD_CUR,SD_MODE,SD_SEL,SD_DIAL,SD_PENCIL,SD_PICK,SD_HELD,SD_WASH,SD_WAVE=4,85,166,249,436,440,444,448,452,476,504,512  # struct sudoku (and its save)
+SD_SLICE_BOUND,SD_FRAME_BOUND,SD_PLAY_BOUND,SD_WORST_BOUND,SD_WHOLE_BOUND,SD_FRAMES_BOUND=150_000,220_000,530_000,600_000,1_850_000,180  # measured: 142,516, 197,660, 474,093, 556,420 (the dial's note opening) and 1,679,984; 79 frames at most
+pick(len(OWN)+1); EN=m.get(payload_syms['en']); SD=EN+O_ENG_STATE
+assert word(G_SCREEN)==6 and EN and m.get(payload_syms['wheel_raw'])==0 and m.get(SD+SD_MODE)==0  # the levels, ticks
+assert m.get(EN+O_ENG_H)==320  # the whole screen
+FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
+for o,v in (('LCD_W',375),('LCD_H',320),('LCD_LINE_LENGTH',1500),('LCD_FORMAT',O['LCD_BGRA8888']),('LCD_OFFLINE_FB',FB)): m.word(m.lcd+O[o],v)
+
+n=[0]; counter=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)
+def sframe(ms=16):  # the frame timer's pass, if it runs: the rects it invalidated, its instructions
+    m.now+=ms; m.calls=[]; n[0]=0; r=m.call(address=payload_syms['eng_frame'],args=(0,0,0,0),gap=0,clear=False); assert r in (0,8),r
+    made=[c for c in m.calls if c[0]=='widget_invalidate_force']; assert all(c[1]==sheet for c in made)
+    box=lambda k: [signed(m.get(EN+O_ENG_RECT+16*k+4*j)) for j in range(4)]
+    return [(x0,y0,x1-x0,y1-y0) for x0,y0,x1,y1 in map(box,range(len(made)))],n[0]
+def spress(k): m.calls=[]; assert m.call(k,gap=0,count=2_000_000)==11 and not stock,(k,stock)
+def sink():  # the open dial in ink, whatever the scripted second left it in
+    if m.get(SD+SD_PENCIL): spress(O['KEY_PLAY']); sframe()
+
+whole=epaint((0,0,375,320)); levels=whole; m.advance(20)
+assert not eframes()  # the levels at rest: the frame timer ended after its first pass
+# Three Sharp puzzles and a Gentle one, each a slice a frame until it is on the board.
+slice_worst=frame_worst=0; frames_each=[]
+for level in (2,2,2,0):
+    m.word(SD+SD_MODE,0); m.word(SD+SD_SEL,level); spress(O['KEY_CENTER'])
+    k=0
+    while True:
+        rects,cost=sframe(); k+=1; assert k<=SD_FRAMES_BOUND,k
+        if m.get(SD+SD_MODE)==2: break
+        assert m.get(SD+SD_MODE)==1 and len(rects)==1 and (rects[0]==(29,68,6,184) or k==1),rects  # the progress rule alone, after the first
+        slice_worst=max(slice_worst,cost)
+        if k==1: whole=max(whole,eplay(rects,cost))  # the levels' change to the setting: the whole sheet
+        else: frame_worst=max(frame_worst,eplay(rects,cost))
+    frames_each.append(k)
+    clue=bytes(m.u.mem_read(SD+SD_CLUE,81)); sol=bytes(m.u.mem_read(SD+SD_SOL,81))
+    assert all(c in (0,d) for c,d in zip(clue,sol)) and all(bool(clue[i])==bool(clue[80-i]) for i in range(81)) and sorted(sol[:9])==list(range(1,10))
+    whole=max(whole,eplay(rects,cost))  # onto the board: the whole sheet
+# A second of entry: the wheel walks the cursor, Centre opens the dial, the wheel turns it, Play takes the pencil,
+# Centre notes and places, Next jumps a box; a frame a press and the one after (the wash's), each painted.
+play_worst=0; script=[O['KEY_NEXT'],O['KEY_NEXT'],O['KEY_PREV'],O['KEY_FWD_BTN'],O['KEY_NEXT'],O['KEY_CENTER'],O['KEY_NEXT'],O['KEY_PLAY'],O['KEY_CENTER'],O['KEY_PLAY'],O['KEY_NEXT'],O['KEY_CENTER'],O['KEY_BACK_BTN'],O['KEY_NEXT']]
+for k in range(60):
+    spress(script[k%len(script)]); rects,cost=sframe(); play_worst=max(play_worst,eplay(rects,cost))
+    if k%2: rects,cost=sframe(); play_worst=max(play_worst,eplay(rects,cost))
+assert m.get(SD+SD_MODE)==2
+# The dearest frames of entry: a board every row of which holds both the cursor's digit and the next cell's, the cursor
+# stepping from one to the other: its old wash and twins off this frame, the new ones on the next; then the dial
+# opening over it, turning, and peeling off as the last digit is placed: the stamp.
+ent=bytes(0 if clue[i] else sol[i] for i in range(81)); hole=next(i for i in range(81) if not clue[i])
+m.u.mem_write(SD+SD_ENT,ent[:hole]+b'\0'+ent[hole+1:]); cur=next(i for i in range(80) if i!=hole and i+1!=hole and i%9!=8); m.byte(SD+SD_CUR,cur)
+def settle():  # the frames the wash takes to follow the cursor, a stage each: their costs
+    out=[]
+    for _ in range(6):
+        rects,cost=sframe(); assert len(rects)<=ENG_RECTS,rects; out.append(eplay(rects,cost))
+    return out
+spress(O['KEY_PREV']); settle(); spress(O['KEY_NEXT']); move=settle()
+assert m.get(SD+SD_CUR)&0xff==cur and m.get(SD+SD_WASH)==2,move  # four stages (a wave the script began may run on)
+off,on=max(move[:2]),max(move[2:4])  # the old twins and peers off, the new peers and twins on
+worst=max(off,on)
+m.byte(SD+SD_CUR,hole); spress(O['KEY_PREV']); settle(); spress(O['KEY_NEXT']); settle(); spress(O['KEY_CENTER']); rects,cost=sframe()
+assert m.get(SD+SD_DIAL); dial=eplay(rects,cost); worst=max(worst,dial)
+turn=0
+for _ in range(9):
+    if m.get(SD+SD_PICK)==sol[hole]: break
+    spress(O['KEY_NEXT']); rects,cost=sframe(); turn=max(turn,eplay(rects,cost))
+worst=max(worst,turn)
+# A row finished: the last empty cell of a row but the hole's, its wave a cell each three frames, every frame of it.
+row=next(r for r in range(9) if r!=hole//9 and any(not clue[r*9+c] for c in range(9)))
+last=max(i for i in range(row*9,row*9+9) if not clue[i])
+m.u.mem_write(SD+SD_ENT+last,b'\0'); spress(O['KEY_FWD_BTN']); sframe()  # the dial shut, nothing placed
+m.byte(SD+SD_CUR,last); spress(O['KEY_PREV']); settle(); spress(O['KEY_NEXT']); settle(); spress(O['KEY_CENTER']); sframe(); sink()
+for _ in range(9):
+    if m.get(SD+SD_PICK)==sol[last]: break
+    spress(O['KEY_NEXT']); sframe()
+spress(O['KEY_CENTER']); rects,cost=sframe(); placed=eplay(rects,cost); wave=0; placed=max(placed,eplay(*sframe()))  # and its twins
+assert m.get(SD+SD_WAVE)==row+1,(m.get(SD+SD_WAVE),row)
+while m.get(SD+SD_WAVE):
+    rects,cost=sframe(); wave=max(wave,eplay(rects,cost))
+worst=max(worst,placed,wave)
+# A pause: the blotter over the grid, the whole sheet; Return's Continue lifts it, the whole sheet again.
+key(O['KEY_RETURN']); assert word(G_PAUSED)==2 and m.get(SD+SD_HELD); blot=epaint((0,0,375,320))
+key(O['KEY_RETURN']); assert word(G_PAUSED)==0; rects,cost=sframe(); assert rects==[(0,0,375,320)] and not m.get(SD+SD_HELD); lift=eplay(rects,cost)
+whole=max(whole,blot,lift)
+# The last digit: the stamp and the result's note, the whole sheet.
+m.byte(SD+SD_CUR,hole); spress(O['KEY_PREV']); settle(); spress(O['KEY_NEXT']); settle(); spress(O['KEY_CENTER']); sframe(); sink()
+for _ in range(9):
+    if m.get(SD+SD_PICK)==sol[hole]: break
+    spress(O['KEY_NEXT']); sframe()
+spress(O['KEY_CENTER']); rects,cost=sframe(); stamp=eplay(rects,cost); whole=max(whole,stamp)
+assert m.get(SD+SD_MODE)==3 and '/mnt/data/game-sudoku' in m.files and len(m.files['/mnt/data/game-sudoku'])==436
+assert '/mnt/data/ringnav-sudoku' not in m.files  # games.c's own Sudoku's save is another file, never written here
+print(f'Evening Puzzle on MIPS: {slice_worst} instructions for a generator slice at most, {frame_worst} with its progress rule painted, {frames_each} frames to make three Sharp puzzles and a Gentle one, {play_worst} for the dearest frame of a second of entry, {worst} for the dearest made on purpose (the cursor\'s move {off} then {on}, the dial {dial} opening and {turn} turning, a digit placed {placed}, the wave {wave}), {whole} to paint the whole sheet (the levels {levels}, the blotter {blot}, lifted {lift}, the stamp {stamp}) (payload only; stock\'s flush mocked)')
+assert slice_worst<SD_SLICE_BOUND and frame_worst<SD_FRAME_BOUND and play_worst<SD_PLAY_BOUND and worst<SD_WORST_BOUND and whole<SD_WHOLE_BOUND,(slice_worst,frame_worst,play_worst,worst,whole)
+m.u.hook_del(counter)
+key(O['KEY_RETURN']); assert word(G_PAUSED)==2 and not eframes()
 key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0)
 assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0 and not eframes()
 m.close(); assert m.get(payload_syms['g'])==0
