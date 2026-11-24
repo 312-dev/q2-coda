@@ -1772,6 +1772,58 @@ def test_car_way_needs_the_car_build(player, songs, tmp):
     return 'Bluetooth, as without a car'
 
 
+def test_bt_pause_releases_the_pcm(player, songs, tmp):
+    """docs/internals.md#bluetooth-pause: a song paused on Bluetooth keeps bluealsa's PCM for BT_PAUSE_MS (3 s here,
+    Q2PLAYER_BT_PAUSE_MS), then closes it, so bluealsa's keep-alive lets the A2DP stream stop. A PCM held paused keeps
+    the stream started with nothing in it for the whole pause, and AirPods held so for minutes (pauses of 2.5 and 6.4
+    minutes in a device log, no AVDTP suspend in either) play nothing at the Play until a reconnect. A pause shorter than that keeps the PCM; after it, a click opens a PCM for itself (the click in it) that is closed
+    again BT_PAUSE_MS after the click's hold, and the Play opens one more, the song on from the frame heard. The
+    Bluetooth PCM (the file sink's ..._bt.raw) is read from /proc/PID/fd, the player run without q2-heavy's preload."""
+    def bt_fds(s):
+        fds = []
+        for fd in pathlib.Path(f'/proc/{s.proc.pid}/fd').iterdir():
+            try:
+                if os.readlink(fd).endswith('_bt.raw'): fds.append(fd.name)
+            except OSError: pass
+        return fds
+    seen = {}
+    look = lambda name: (lambda s: seen.setdefault(name, bt_fds(s)))
+    steps = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'),
+             (0.1, fakedemo.vol(100, 100)), (1.0, fakedemo.song('set-songurl', f'{songs}/whole48.wav')),
+             (2.0, '{mcl-pause\\null}'), (2.5, look('short pause')), (3.0, '{mcl-play\\null}'), (4.0, '{mcl-pause\\null}'),
+             (6.5, look('2.5 s paused')), (7.6, look('3.6 s paused')), (8.0, '{mcl-click\\wheel}'), (8.6, look('click')),
+             (14.6, look('after the click')), (15.0, '{mcl-play\\null}'), (15.6, look('playing again')),
+             (17.0, '{mcl-stop\\null}'), (18.0, None)]
+    s = fakedemo.Session(tmp/'bt-pause')
+    s.music = songs
+    s.run(steps, fakedemo.launch_host(player, str(songs), 1, {'LD_PRELOAD': '', 'Q2PLAYER_BT_PAUSE_MS': '3000'}), 1)
+    open_ = {k: len(v) for k, v in seen.items()}
+    assert open_ == {'short pause': 1, '2.5 s paused': 1, '3.6 s paused': 0, 'click': 1, 'after the click': 0,
+                     'playing again': 1}, f'Bluetooth PCMs open: {open_}'
+    names = sorted(p.name for p in (tmp/'bt-pause'/'pcm').glob('*.raw'))
+    pcm = [(tmp/'bt-pause'/'pcm'/n).read_bytes() for n in names]
+    assert [n.split('_', 1)[1] for n in names] == ['48000_2_s16_bt.raw'] * 3, names
+    ref = reference(songs/'whole48.wav')
+    assert pcm[0] == ref[:len(pcm[0])], 'the song up to the long pause, the short one in it, is not the song'
+    click = array.array('h', pcm[1])
+    firsts = wheel_clicks(click, 48000)
+    assert len(firsts) == 1 and firsts[0] < 480, f'click at {firsts} in the PCM opened for it'
+    at = ref.find(pcm[2][:4800 * 4]) // 4
+    unheard = len(pcm[0]) // 4 - at
+    assert at > 0 and 2400 <= unheard <= 28800, f'went on at frame {at}, {unheard} frames before the frame written last'
+    assert pcm[2] == ref[4 * at:4 * at + len(pcm[2])], 'the song does not go on from the frame heard'
+    log = (tmp/'bt-pause'/'player.log').read_text()
+    stamp = lambda text: [int(m) for m in re.findall(rf'^\S+ (\d+) \w player {re.escape(text)}', log, re.M)]
+    closed, opened = stamp('q2player: paused on Bluetooth for 3000 ms, its PCM closed'), stamp("q2player: Bluetooth's PCM opened again")
+    pauses = stamp('q2player: mcl-pause')
+    assert len(closed) == 2 and len(opened) == 2 and len(pauses) == 2, (closed, opened, pauses)
+    assert 2950 <= closed[0] - pauses[1] <= 3400, f'closed {closed[0] - pauses[1]} ms after the pause'
+    assert re.search(r"Bluetooth's PCM opened again for a click, \d+ ms after its close; the song held at frame \d+", log) \
+        and re.search(r"Bluetooth's PCM opened again for the play, \d+ ms after its close; the song on from frame \d+", log), log[-1500:]
+    return (f'kept through a 1 s pause, closed {closed[0] - pauses[1]} ms into a long one; a click in a PCM of its own, '
+            f'closed again; the Play went on {unheard * 1000 // 48000} ms back, at the frame heard')
+
+
 def tones(d, *rates, secs=5):
     """A 1 kHz sine at each rate (t44100.flac and so on), so that a stretch of any PCM says the speed it plays at."""
     d.mkdir(parents=True, exist_ok=True)
@@ -2056,17 +2108,19 @@ def test_click_idle(player, songs, tmp):
 
 def test_click_idle_alsa(player, songs, tmp):
     """A click with nothing playing, through output.c against alsa_test.c's counting ring: a song paused or none, on
-    Bluetooth and on the headphone DAC, IDLE_AHEAD_MS of silence (3840 frames at 48 kHz) goes into the ring with the
+    Bluetooth and on the headphone DAC, and a song paused on Bluetooth whose PCM is opened again for the click after
+    BT_PAUSE_MS closed it (bt-reopened), IDLE_AHEAD_MS of silence (3840 frames at 48 kHz) goes into the ring with the
     click in it. bluealsa's plugin counts the headset's own delay in snd_pcm_delay (280 ms on the Pixel Buds,
     13440 frames) whether the PCM has started or not: a fill measured by that wrote nothing on Bluetooth, the PCM never
     started, and no click was heard paused or stopped, only into a song playing (2026-11-24)."""
     got = subprocess.run([tool(tmp, 'alsa_test', '-DHAVE_ALSA', '-DQ2_CAR_USB'), 'idle'], check=True, capture_output=True,
                          text=True).stdout.split('\n')
     lines = {l.split()[0]: l.split() for l in got if l}
-    for k in ('bt-stopped', 'bt-paused', 'dac-stopped', 'dac-paused'):
+    for k in ('bt-stopped', 'bt-paused', 'bt-reopened', 'dac-stopped', 'dac-paused'):
         got = lines[k]
         assert abs(int(got[2]) - 3840) <= 64 and int(got[4]) > 0, f'{" ".join(got)}: want about 3840 frames queued and the click in them'
-    return 'paused and stopped, on Bluetooth (280 ms of link delay) and the DAC: 80 ms of silence queued, the click in it'
+    return ('paused, stopped and paused with the PCM opened again, on Bluetooth (280 ms of link delay), and the DAC: '
+            '80 ms of silence queued, the click in it')
 
 
 def test_click_volume(player, songs, tmp):
