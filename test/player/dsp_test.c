@@ -823,8 +823,9 @@ static void filed_check(void) {
         unsigned n = filed_pair(0, cases[i].word, cases[i].rg, cases[i].rb, cases[i].nb, bframes, cases[i].what, ring);
         assert(!tail_opens && !tail_reads);
         unsigned m = filed_pair(1, cases[i].word, cases[i].rg, cases[i].rb, cases[i].nb, bframes, cases[i].what, file);
-        /* read from the file: the hold's frames and the mix's, every block of the hold noted, the open closed */
-        assert(tail_opens == 1 && tail_closes == 1 && tail_notes > 6 * FILED_RATE && tail_reads > 12 * FILED_RATE);
+        /* read from the file: the frames before the hold that were compared, the hold's and the mix's (9 s and more
+         * of the song's last 11); every block of the hold noted (8 s and more); the open closed */
+        assert(tail_opens == 1 && tail_closes == 1 && tail_notes > 6 * FILED_RATE && tail_reads > 9 * FILED_RATE);
         assert(n == m && n > (FILED_S - 6) * FILED_RATE);
         for (size_t k = 0; k < (size_t)n * 2; ++k)
             if (memcmp(&ring[k], &file[k], 4)) {
