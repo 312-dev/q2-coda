@@ -944,14 +944,13 @@ def test_rockbox_gets_charging_back(fw, st, held, enabled):
 
 def curve(v):
     """The headset level (0-127) for Q2 volume v (0-100), as docs/internals.md#headset-controls-and-volume gives it:
-    a 40 dB curve, 127 x 10^(-40 (100 - v) / 100 / 20), never below 127 v / 400 (a level every three steps where
-    the curve's levels crowd), at least 1 above 0."""
-    return 0 if v == 0 else max(1, round(127 * 10 ** (-40 * (100 - v) / 2000)), round(127 * v / 400))
+    the same share of its range, 127 v / 100 rounded, at least 1 above 0."""
+    return 0 if v <= 0 else 127 if v >= 100 else max(1, (127 * v + 50) // 100)
 
 
 def reads_as(level):
-    """The Q2 volume (0-100) a headset level (0-127) shows as: the one whose curve level is nearest, the lowest of
-    those that share it."""
+    """The Q2 volume (0-100) a headset level (0-127) shows as: the one whose level is nearest, the lower of
+    two as near."""
     return min(range(101), key=lambda v: (abs(curve(v) - level), v))
 
 
@@ -1012,16 +1011,16 @@ def test_the_headset_takes_the_volume_and_the_q2_keeps_only_the_balance(fw, left
     assert headset.level == curve(max(left, right)) and headset.gains == [gains]
 
 
-def test_the_volume_curve_keeps_its_ends_and_rises_evenly_in_db(fw):
+def test_the_headsets_level_is_the_volumes_share_of_its_range(fw):
     avrcp = fw.fn('navigation__bt_vol_avrcp', C.c_uint, C.c_int)
     table = [avrcp(v) for v in range(101)]
     assert table == [curve(v) for v in range(101)]
-    assert (table[0], table[1], table[100]) == (0, 1, 127) and table == sorted(table)
+    assert (table[0], table[1], table[100]) == (0, 1, 127)
     assert (avrcp(-5), avrcp(150)) == (0, 127)
-    # the top half no longer sits in the headset's last 6 dB: half volume is a sixth of its level, 80 two fifths
-    assert (table[50], table[80]) == (16, 51)
-    # no Q2 step is more than two from a change
-    assert max(sum(1 for w in table if w == level) for level in set(table)) <= 4
+    # an even spread: half volume is half the headset's range, 90 nine tenths of it
+    assert (table[50], table[90]) == (64, 114)
+    # every Q2 step moves the headset, by one level or two
+    assert all(1 <= b - a <= 2 for a, b in zip(table, table[1:]))
 
 
 def test_every_headset_level_reads_as_its_nearest_volume_and_back(fw):
@@ -1032,7 +1031,7 @@ def test_every_headset_level_reads_as_its_nearest_volume_and_back(fw):
         assert curve(q2(curve(v))) == curve(v)  # a level the Q2 wrote reads back as a volume that writes it again
 
 
-def test_every_volume_reaches_the_headset_on_the_curve(fw):
+def test_every_volume_reaches_the_headset_as_its_level(fw):
     bt_link(fw)
     headset = Headset(fw)
     for v in range(101):

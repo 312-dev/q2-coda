@@ -155,7 +155,7 @@ def test_the_mute_is_the_muted_speaker_and_an_empty_track(fw, pill):
 
 def test_with_link_volume_it_shows_the_headsets_level_on_the_q2s_scale(fw, pill):
     """Link Volume on a headset that took its absolute volume: its own keys take it to 80 of AVRCP's 127, which the
-    pill shows as the Q2's 0 to 100 reads it everywhere else (bt_vol_q2: 90), never as 80."""
+    pill shows as the Q2's 0 to 100 reads it everywhere else (bt_vol_q2: 63), never as 80."""
     from test_nav_loop import VolPoll, reads_as
     vol = VolPoll(fw, volume=50)
     vol.headset.level = 80

@@ -182,9 +182,9 @@ class BtVolumeMachine(Machine):
     def poll(self,gap=400):
         self.call(address=HOOKS['main_loop_sleep_default'][0],args=(self.wm,0,0,0),gap=gap)
 
-# The headset's level is the volume's on bt_vol_curve (docs/internals.md#headset-controls-and-volume): 20 is 6, 30 is 10,
-# 40 is 13, 50 is 16, 60 is 20.
-for left,right,want in ((0,0,0),(0,20,6),(20,0,6),(1,1,1),(20,20,6),(40,30,13),(50,50,16),(100,100,127),
+# The headset's level is the volume's share of 127 (bt_vol_avrcp, docs/internals.md#headset-controls-and-volume): 20 is
+# 25, 30 is 38, 40 is 51, 50 is 64, 60 is 76.
+for left,right,want in ((0,0,0),(0,20,25),(20,0,25),(1,1,1),(20,20,25),(40,30,51),(50,50,64),(100,100,127),
                         (-5,-1,0),(101,200,127)):
     gain=(max(0,left)*100//max(left,right),max(0,right)*100//max(left,right)) if want else (left,right)  # AVRCP 0 isn't silent on every headset: keep stock's mute
     b=BtVolumeMachine(); assert b.volume(left,right)==[gain] and b.writes()==[want]
@@ -202,7 +202,7 @@ for cur in (-1,128,255):
     b=BtVolumeMachine(); b.absolute=cur
     assert b.volume(20,30)==[(20,30)] and not b.writes(); passed()
 b=BtVolumeMachine(); b.write_result=-1; b.absolute=40  # not 30's level already: a write it refuses
-assert b.volume(20,30)==[(20,30)] and b.writes()==[10]; passed()
+assert b.volume(20,30)==[(20,30)] and b.writes()==[38]; passed()
 for name,value in (('g_bluetoothflag',0),('bt_linkstatus',0),('bt__recv_pageflag',1),('bt_showcoding',0)):
     b=BtVolumeMachine()
     (b.word if name=='bt_showcoding' else b.byte)(syms[name],value)
@@ -213,15 +213,15 @@ for way in (0,2):
 b=BtVolumeMachine(); b.absolute=-1; b.poll()
 assert not b.writes()
 b.absolute=10; b.poll(O['BT_VOLUME_SLOW_MS']-1); assert not b.writes()  # no absolute volume yet: the slow pace
-b.poll(1); assert b.writes()==[6]
-b.absolute=5; b.poll(); assert not b.writes()  # a level of the headset's own reads as its nearest volume, 15
+b.poll(1); assert b.writes()==[25]
+b.absolute=5; b.poll(); assert not b.writes()  # a level of the headset's own reads as its nearest volume, 4
 b.byte(syms['bt_linkstatus'],0); b.poll(); assert not b.writes()
 b.byte(syms['bt_linkstatus'],1); b.word(syms['bt_showcoding'],0); b.poll(); assert not b.writes()
 b.word(syms['bt_showcoding'],1); b.poll(); assert not b.writes(); passed()
 b=BtVolumeMachine(); b.write_result=-1; b.poll()
-assert b.writes()==[6] and [c[1:3] for c in b.calls if c[0]=='stock_btvol']==[(20,20)]
+assert b.writes()==[25] and [c[1:3] for c in b.calls if c[0]=='stock_btvol']==[(20,20)]
 b.write_result=0; b.poll(); assert not b.writes()  # a refusal retries at the slow pace
-b.poll(O['BT_VOLUME_SLOW_MS']-400); assert b.writes()==[6]; passed()
+b.poll(O['BT_VOLUME_SLOW_MS']-400); assert b.writes()==[25]; passed()
 # Dark, the read-back slows down.
 b=BtVolumeMachine(); b.poll(); b.calls=[]; b.byte(syms['g_backlight_status'],0); b.absolute=50
 b.poll(); assert not any(c[0]=='btctl_transport_get_volume' for c in b.calls)
@@ -229,7 +229,7 @@ b.poll(O['BT_VOLUME_SLOW_MS']-400); assert any(c[0]=='btctl_transport_get_volume
 # Dark with a volume limit, the headset's own keys are still held to it, every BT_VOLUME_LIMIT_MS.
 b=BtVolumeMachine(); b.byte(syms['g_maxvolume'],60); b.poll(); b.byte(syms['g_backlight_status'],0); b.absolute=127
 b.poll(); assert not b.writes()
-b.poll(O['BT_VOLUME_LIMIT_MS']-400); assert b.writes()==[20] and b.u.mem_read(syms['g_volume'],1)[0]==60; passed()
+b.poll(O['BT_VOLUME_LIMIT_MS']-400); assert b.writes()==[76] and b.u.mem_read(syms['g_volume'],1)[0]==60; passed()
 # A headset that can't report absolute volume is asked again at the slow pace, lit too, not every 400 ms.
 b=BtVolumeMachine(); b.absolute=-1; asks=[]
 for _ in range(2*O['BT_VOLUME_SLOW_MS']//400): b.poll(); asks.append(sum(c[0]=='stock_btvol' for c in b.calls))
@@ -246,7 +246,7 @@ for way,soft in ((0,0),(1,0),(2,0),(2,1)):
     assert gains==([(100,100)] if way==1 else [(20,20)] if way==0 else [])
     assert local==([(20,20)] if way in (0,1) else [])
     assert usb==([(20,20)] if soft else [(100,100)]) if way==2 else not usb
-    assert b.writes()==([6] if way==1 else [])
+    assert b.writes()==([25] if way==1 else [])
     assert any(c[0]=='notifyVolume' for c in b.calls); passed()
 
 # Screen off, the UI loop idles SCREEN_OFF_SLEEP_MS before stock's own pacing; screen on, stock alone.

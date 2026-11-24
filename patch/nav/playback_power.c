@@ -226,28 +226,20 @@ static void resume_poll(void) {
     }
 }
 
-/* The headset's absolute volume (AVRCP, 0 to 127) for the Q2's volume v (0 to 100): 0 silent, 100
- * the headset's top, and between a 40 dB curve, 127 x 10^(-40 dB x (100 - v) / 100 / 20), so each
- * Q2 step is the same 0.4 dB louder wherever it is. A straight 127 v / 100 put the top half in the
- * headset's last 6 dB, where a headset that takes the value as a gain is loudest. Under v 58 the
- * curve's levels come closer together than AVRCP's steps, so there the value rises no slower than
- * one level every three steps (127 v / 400) and no Q2 step is more than two steps from a change.
- * At least 1 above 0, so only 0 mutes. docs/internals.md#headset-controls-and-volume. */
-static const unsigned char bt_vol_curve[101] = {
-    0,  1,  1,  1,  2,  2,  2,  2,  3,  3,  3,  3,   4,   4,   4,   5,   5,  5,  6,  6,  6,
-    7,  7,  7,  8,  8,  8,  9,  9,  9,  10, 10, 10,  10,  11,  11,  11,  12, 12, 12, 13, 13,
-    13, 14, 14, 14, 15, 15, 15, 16, 16, 16, 17, 17,  17,  17,  18,  18,  18, 19, 20, 21, 22,
-    23, 24, 25, 27, 28, 29, 30, 32, 33, 35, 37, 38,  40,  42,  44,  46,  48, 51, 53, 55, 58,
-    61, 64, 67, 70, 73, 77, 80, 84, 88, 92, 96, 101, 106, 111, 116, 121, 127
-};
-static unsigned bt_vol_avrcp(int v) { return bt_vol_curve[v < 0 ? 0 : v > 100 ? 100 : v]; }
-/* The Q2 volume a headset's level reads as: the one whose curve value is nearest, the lowest of
- * those that share it, so a level the Q2 wrote reads back as a volume that writes it again. */
+/* The headset's absolute volume (AVRCP, 0 to 127) for the Q2's volume v (0 to 100): the same share
+ * of the headset's range, 127 v / 100 rounded, as a phone sends its own volume, so a headset that
+ * shapes the value into loudness itself (Pixel Buds do) is as even on the Q2 as on a phone. At
+ * least 1 above 0, so only 0 mutes. docs/internals.md#headset-controls-and-volume. */
+static unsigned bt_vol_avrcp(int v) {
+    return v <= 0 ? 0 : v >= 100 ? 127 : v == 1 ? 1 : (127u * (unsigned)v + 50) / 100;
+}
+/* The Q2 volume a headset's level reads as: the one whose level is nearest, the lower of two as
+ * near, so a level the Q2 wrote reads back as the volume that wrote it. */
 static int bt_vol_q2(unsigned level) {
     int best = 0;
     unsigned off = 255;
     for (int v = 0; v <= 100; ++v) {
-        unsigned d = bt_vol_curve[v] > level ? bt_vol_curve[v] - level : level - bt_vol_curve[v];
+        unsigned l = bt_vol_avrcp(v), d = l > level ? l - level : level - l;
         if (d < off) best = v, off = d;
     }
     return best;
