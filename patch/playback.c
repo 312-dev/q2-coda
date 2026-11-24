@@ -902,6 +902,9 @@ static void shuffle_own(void) {
         return;
     own_tried = playback_shuffle(playback_unshuffle()) ? 0 : sig;
 }
+/* Stock Shuffle's order taken now, not at the next UI pass (shuffle_wait.c's synchronous
+ * shuffle_order_start). */
+void playback_shuffle_now(void) { shuffle_own(); }
 /* View Queue: 1 if a shuffle's play order is up, which Up Next lists rather than stock's queue
  * order. Stock Shuffle is taken as Shuffle Songs here too, should the UI pass not have taken it yet
  * (shuffle_own). Advanced play without a shuffle plays in queue order, as stock's list shows it. */

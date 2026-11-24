@@ -1030,6 +1030,14 @@ void mp_counted(void *r, unsigned key, unsigned evicted);
 int most_played(void *ctx, void *event);
 int shuffle_menu(void *ctx, void *event), shuffle_songs(void *ctx, void *event);
 int shuffle_play(void *all);
+/* shuffle_wait.c: the Shuffle order's build as a job the loading wait holds (start: 1 while it
+ * runs; poll each frame: 1 once in place; cancel: nothing of it kept), and Shuffle's waits: Now
+ * Playing's Shuffle turned on (its repeat as np_mode_set's rep), the Shuffle page's rows. */
+int shuffle_order_start(void), shuffle_order_poll(void);
+void shuffle_order_cancel(void);
+void shuffle_wait_np(int rep);
+void shuffle_wait_pick(int (*pick)(void *, void *), void *ctx);
+void playback_shuffle_now(void); /* playback.c: stock Shuffle's order taken now (shuffle_own) */
 int tidal_downloads(void *ctx, void *event);
 
 /* ratings.c */

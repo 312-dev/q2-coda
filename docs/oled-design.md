@@ -1073,7 +1073,7 @@ the hint, with no Add to Sync over nothing and no selectable info row, audit2 F1
 Settings, and a payload list's other messages (Internet Radio's "Loading…", Battery History's "Unplug to start").
 
 - Busy: no stock spinner (Playlists' while it adds a song); the toast that follows says it is done. A page still
-  being fetched is the [loading overlay](#loading). A library list whose open sorts thousands of records (the first open after a library change) shows the payload's own spinner while it sorts, in every theme: a 64 px `#1C1C1E` square with 12 px corners at the screen's center, eight dots turning clockwise (internals, [Name order](internals.md#name-order)).
+  being fetched is the [loading overlay](#loading). A library list whose open sorts thousands of records (the first open after a library change) shows the [loading overlay](#loading) while it sorts, captioned "Sorting songs…", "Sorting albums…" or "Sorting artists…"; it has no Return, as the sort runs inside stock's load (internals, [Name order](internals.md#name-order), [Loading wait](internals.md#loading-wait)).
 
 ### Sync
 
@@ -1107,6 +1107,12 @@ Flow's open holds Home).
 
 - **Form:** the [busy spinner](#empty-and-offline)'s, a 64 px `#1C1C1E` square with 12 px corners and eight 7 px dots
   15 px out (11 on the diagonals), the lit one a step clockwise every 100 ms and each before it dimmer, in every theme.
+  An action that names what it loads has its caption under the square: Inter 15 px in Text Secondary (`#ABABAB`) on a
+  `#1C1C1E` plate 28 px tall with 12 px corners, its top 8 px under the square, 14 px of plate either side of the
+  words and 240 px at most, a longer caption ending in an ellipsis; sentence case, the verb and what it acts on, an
+  ellipsis after: "Shuffling songs…", "Shuffling albums…", "Sorting songs…".
+- **When:** only once the action has run 300 ms (`LOAD_SHOW_MS`); one done sooner shows nothing, so a quick press
+  never flashes it. Input is held from the press on, shown or not.
 - **Place:** centered on the whole screen, status row included: x 155 to 219, y 128 to 192. A window under the status
   row places it by its screen y, so it is never centered on the room under the bar.
 - **The page beneath** stays in sight, undimmed, with its status row and its selection: the overlay asks nothing, and
@@ -1117,7 +1123,10 @@ Flow's open holds Home).
   own menu keeps its Stop row.
 - **Once it is there** the new page opens as any page does, sliding in; one that failed opens on its error page (Retry,
   Stop), after the app's 15 s at most.
-- **Where:** a card app's (a music server's) list rows: an artist, an album, a playlist, a folder of the server's
+- **Where:** Now Playing's Shuffle turned on, and the Library's Shuffle page (Shuffle Songs, Shuffle Albums, Shuffle
+  Folders), while the play order is built; where the work is one call the Q2 cannot step out of (the Shuffle page's
+  read of the whole library; the order's build while it is one call, `shuffle_wait.c`) the overlay shows and turns, but Return waits for
+  it. A card app's (a music server's) list rows: an artist, an album, a playlist, a folder of the server's
   browse, the search results, Albums and the other rows of an artist's page, a sort, More…, and a list's Next page and
   Previous page rows, the new window taking the old one's place once it is there. A row pressed while a list's next
   page is on its way lets that page go, the list's Loading… row More… again, so a cancel leaves the rest a press away.

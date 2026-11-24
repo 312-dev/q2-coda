@@ -92,12 +92,16 @@ static int shuffle_groups(void *ctx, void *event) {
 
 /* The Library's Shuffle row opens these three actions on one page. A pick starts playback and
  * leaves the page open, as Most Played's rows do. Album and folder shuffles queue and group the
- * whole library, hence the note. */
-static int sp_pick(void *ctx, void *event) {
+ * whole library, hence the note, and each runs under the loading wait (shuffle_wait.c). */
+static int sp_run(void *ctx, void *event) {
     if ((long)ctx)
         shuffle_groups((void *)((long)ctx - 1), 0);
     else
         shuffle_songs(0, 0);
+    return 0;
+}
+static int sp_pick(void *ctx, void *event) {
+    shuffle_wait_pick(sp_run, ctx);
     return 0;
 }
 

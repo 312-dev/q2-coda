@@ -7,7 +7,10 @@ import math
 import re
 import sqlite3
 import struct
+import threading
+import time
 from collections import Counter
+from typing import Callable
 
 import pytest
 
@@ -1850,49 +1853,81 @@ def test_a_damaged_or_foreign_order_file_is_never_used(fw, library, damage):
     assert s.load() == SORTED and s.listed() == s.order()
 
 
-def test_a_full_sort_runs_on_its_own_thread_under_the_spinner(fw):
-    """The sort on a thread of its own; from SPIN_AFTER_MS the UI thread draws on the shown framebuffer page, and
-    puts back what it covered once the sort is done."""
-    s = Sorts(fw, NO_MIN)
-    page = 320 * 375 * 4
-    fb = (C.c_ubyte * (2 * page))(*bytes(range(256)) * (2 * page // 256))
-    before = bytes(fb)
-    seen, ticks, thread = {}, [], {}
+LOAD_SHOW_MS = int(re.findall(r'#define LOAD_SHOW_MS (\d+)', (host.ROOT/'patch/ui_kit.h').read_text())[0])
+LOAD_TICK_MS = int(re.findall(r'#define LOAD_TICK_MS (\d+)', (host.ROOT/'patch/list_marks.c').read_text())[0])
 
-    def ioctl(fd, request, out, *_):
+
+class Shown:
+    """The shown framebuffer page (320 x 375, 32 bpp, the second of two pages shown), an off-screen canvas of
+    LOAD_AREA for load_sync_begin's plate (its fills are stock's stubs: it holds what the framebuffer showed), and the
+    threads pthread_create starts: the overlay's painter (fb_painter, by its address) on a real thread with a clock
+    of its own, a tick a LOAD_TICK_MS sleep; any other held in others for the test to run."""
+    def __init__(self, fw):
+        self.fw, self.page = fw, 320 * 375 * 4
+        self.fb = (C.c_ubyte * (2 * self.page))(*bytes(range(256)) * (2 * self.page // 256))
+        self.before, self.others, self.ui_ticks = bytes(self.fb), [], []
+        self.painter: threading.Thread | None = None
+        self.on_ui_tick: Callable[[int], object] = lambda n: None  # the test's work at the UI thread's nth sleep
+        self.first_drawn = None  # the painter's tick it first changed the page at
+        self.ticks = 0
+        self.off = (C.c_uint * (240 * 100))()
+        canvas, lcd = block(fw, size=4096), block(fw, size=4096)
+        C.c_void_p.from_address(canvas + O['CANVAS_LCD']).value = lcd
+        C.c_void_p.from_address(lcd + O['LCD_OFFLINE_FB']).value = C.addressof(self.off)
+        C.c_int.from_address(lcd + O['LCD_LINE_LENGTH']).value = 240 * 4
+        fw.mock('canvas_offline_create', lambda *_: canvas)
+        fw.mock('fw_open', lambda *_: 5)
+        fw.mock('fw_ioctl', self.ioctl)
+        fw.mock('fw_mmap', lambda *_: C.addressof(self.fb))
+        fw.mock('fw_usleep', self.usleep)
+        fw.mock('fw_pthread_create', self.create)
+        fw.mock('fw_pthread_join', self.join)
+        self.painter_fn = C.cast(getattr(fw.lib, ui_name(fw.lib, 'fb_painter')), C.c_void_p).value
+
+    def ioctl(self, fd, request, out, *_):
         if request == 0x4600:  # var: 320 x 375, 32 bpp, the second page shown
             C.memmove(out, struct.pack('<7I', 320, 375, 320, 750, 0, 375, 32), 28)
         else:  # fix: smem_len at word 5, line_length at word 11
             fix = [0] * 17
-            fix[5], fix[11] = 2 * page, 1280
+            fix[5], fix[11] = 2 * self.page, 1280
             C.memmove(out, struct.pack('<17I', *fix), 68)
         return 0
 
-    def usleep(us, *_):
-        ticks.append(us)
-        if len(ticks) == 20:  # 400 ms in: the spinner up, the sort not done yet
-            seen['during'] = bytes(fb)
-            C.CFUNCTYPE(C.c_void_p, C.c_void_p)(thread['run'])(None)
+    def usleep(self, us, *_):
+        if threading.current_thread() is self.painter:
+            self.ticks += 1
+            if self.first_drawn is None and bytes(self.fb) != self.before:
+                self.first_drawn = self.ticks
+            time.sleep(.0005)
+        else:
+            self.ui_ticks.append(us)
+            self.on_ui_tick(len(self.ui_ticks))
         return 0
 
-    def create(out, attr, run, arg, *_):
-        C.c_ulong.from_address(out).value, thread['run'] = 99, run
+    def create(self, out, attr, run, arg, *_):
+        C.c_ulong.from_address(out).value = 90 + len(self.others)
+        body = C.CFUNCTYPE(C.c_void_p, C.c_void_p)(run)
+        if run == self.painter_fn:
+            self.painter = threading.Thread(target=body, args=(None,))
+            self.painter.start()
+        else:
+            self.others.append(body)
         return 0
-    fw.mock('fw_open', lambda *_: 5)
-    fw.mock('fw_ioctl', ioctl)
-    fw.mock('fw_mmap', lambda *_: C.addressof(fb))
-    fw.mock('fw_usleep', usleep)
-    fw.mock('fw_pthread_create', create)
-    assert s.load() == SORTED and s.listed() == s.order()
-    assert set(ticks) == {20000} and len(ticks) == 20
-    changed = [i for i in range(2 * page) if seen['during'][i] != before[i]]
-    rows = {i // 1280 for i in changed}
-    assert min(rows) >= 375 + 187 - 32 and max(rows) < 375 + 187 + 32  # on the shown page, at its centre
-    assert {i % 1280 // 4 for i in changed} <= set(range(128, 192))
-    assert bytes(fb) == before and fw.calls('fw_munmap') and fw.calls('fw_pthread_join')
+
+    def join(self, *_):
+        if self.painter:
+            self.painter.join(5)
+        return 0
+
+    def drawn(self):
+        """Wait (real time, 5 s at most) for the painter to have drawn; the page as it was then."""
+        end = time.monotonic() + 5
+        while self.first_drawn is None and time.monotonic() < end:
+            time.sleep(.001)
+        return bytes(self.fb)
 
 
-def upright_box(changed, page, shown=1):
+def upright_box(changed, shown=1):
     """The bounding box (x0, y0, x1, y1), half open, of changed framebuffer bytes as the screen shows them: upright
     375 x 320, the portrait page turned counterclockwise (tools/q2remote.py framebuffer_png: x the page's row, y 319
     less its column)."""
@@ -1901,48 +1936,53 @@ def upright_box(changed, page, shown=1):
     return min(xs), min(ys), max(xs) + 1, max(ys) + 1
 
 
-def test_the_sort_spinner_is_centred_on_the_whole_screen(fw):
-    """The spinner's centre is the screen's, 375 x 320 with the status row, within a pixel either way: not the
-    centre of the room under the status row."""
-    s = Sorts(fw, NO_MIN)
-    page = 320 * 375 * 4
-    fb = (C.c_ubyte * (2 * page))(*bytes(range(256)) * (2 * page // 256))
-    before, seen, ticks, thread = bytes(fb), {}, [], {}
+def sort_under_overlay(fw):
+    """A full sort on its own thread under the loading overlay: the sort run at the UI thread's tenth sleep, once the
+    painter has drawn. (the sort, the framebuffer, the page as the painter drew it)."""
+    s, f, seen = Sorts(fw, NO_MIN), Shown(fw), {}
 
-    def ioctl(fd, request, out, *_):
-        if request == 0x4600:
-            C.memmove(out, struct.pack('<7I', 320, 375, 320, 750, 0, 375, 32), 28)
-        else:
-            fix = [0] * 17
-            fix[5], fix[11] = 2 * page, 1280
-            C.memmove(out, struct.pack('<17I', *fix), 68)
-        return 0
+    def tick(n):
+        if n == 10:
+            seen['during'] = f.drawn()
+            f.others[0](None)  # the sort's thread: its work, then done
+    f.on_ui_tick = tick
+    assert s.load() == SORTED and s.listed() == s.order()
+    return s, f, seen['during']
 
-    def usleep(us, *_):
-        ticks.append(us)
-        if len(ticks) == 20:
-            seen['during'] = bytes(fb)
-            C.CFUNCTYPE(C.c_void_p, C.c_void_p)(thread['run'])(None)
-        return 0
 
-    def create(out, attr, run, arg, *_):
-        C.c_ulong.from_address(out).value, thread['run'] = 99, run
-        return 0
-    fw.mock('fw_open', lambda *_: 5)
-    fw.mock('fw_ioctl', ioctl)
-    fw.mock('fw_mmap', lambda *_: C.addressof(fb))
-    fw.mock('fw_usleep', usleep)
-    fw.mock('fw_pthread_create', create)
-    s.load()
-    x0, y0, x1, y1 = upright_box([i for i in range(2 * page) if seen['during'][i] != before[i]], page)
-    assert (x1 - x0, y1 - y0) == (64, 64)
+def test_a_full_sort_runs_on_its_own_thread_under_the_overlay(fw):
+    """The sort on a thread of its own; the overlay drawn on the shown framebuffer page by a painter thread from
+    LOAD_SHOW_MS of its own clock, and what it covered put back once the sort is done."""
+    s, f, during = sort_under_overlay(fw)
+    assert set(f.ui_ticks) == {LOAD_TICK_MS * 1000} and len(f.ui_ticks) == 10
+    # drawn after the sleep that reached LOAD_SHOW_MS, seen at the next: nothing sooner, so no flash
+    assert f.first_drawn == LOAD_SHOW_MS // LOAD_TICK_MS + 1
+    changed = [i for i in range(2 * f.page) if during[i] != f.before[i]]
+    assert changed and {i // 1280 for i in changed} <= set(range(375, 750))  # on the shown page
+    assert bytes(f.fb) == f.before and fw.calls('fw_munmap') and f.painter and not f.painter.is_alive()
+
+
+def test_the_sort_overlay_is_centred_on_the_whole_screen(fw):
+    """The spinner's dots (the plate's fills are stock's, stubbed here) centre on the screen's centre, 375 x 320 with
+    the status row, within a pixel either way: not the centre of the room under the status row."""
+    s, f, during = sort_under_overlay(fw)
+    x0, y0, x1, y1 = upright_box([i for i in range(2 * f.page) if during[i] != f.before[i]])
+    assert x1 - x0 <= 64 and y1 - y0 <= 64
     assert abs((x0 + x1) / 2 - 375 / 2) <= 1 and abs((y0 + y1) / 2 - 320 / 2) <= 1
 
 
+def test_a_sort_done_before_the_delay_shows_nothing(fw):
+    s, f = Sorts(fw, NO_MIN), Shown(fw)
+    f.on_ui_tick = lambda n: n == 1 and f.others[0](None)
+    assert s.load() == SORTED
+    assert f.first_drawn is None and bytes(f.fb) == f.before and f.painter and not f.painter.is_alive()
+
+
 def test_the_overlays_spinner_is_centred_on_the_whole_screen(fw):
-    """Painted over a page the payload builds (page_open's, full-bleed: the whole screen), the box's centre is the
-    screen's (187.5, 160) within a pixel, not the rows' under the status row."""
-    boxes = []
+    """Painted over a page the payload builds (page_open's, full-bleed: the whole screen), once its wait has lasted
+    LOAD_SHOW_MS, the box's centre is the screen's (187.5, 160) within a pixel, not the rows' under the status row."""
+    boxes, now = [], [5000]
+    fw.mock('time_now_ms', lambda *_: now[0])
     fw.mock('canvas_fill_rounded_rect', lambda canvas, r, *_: boxes.append(tuple((C.c_int * 4).from_address(r))) or 0)
     page = page_block(fw)
     fw.mock('window_create', lambda *_: page)
@@ -1950,7 +1990,11 @@ def test_the_overlays_spinner_is_centred_on_the_whole_screen(fw):
     win = fw.fn('page_open', C.c_void_p, C.c_char_p, C.c_void_p, C.c_void_p)(b'radio_page', None, None)
     canvas, lcd = block(fw, size=4096), block(fw, size=4096)
     C.c_void_p.from_address(canvas + O['CANVAS_LCD']).value = lcd
-    fw.fn('load_spinner_paint', None, C.c_void_p, C.c_void_p)(win, canvas)
+    paint = fw.fn('load_spinner_paint', None, C.c_void_p, C.c_void_p)
+    for _ in range(LOAD_SHOW_MS // 100 + 1):  # a frame each 100 ms, as the spinner's timer asks
+        boxes.clear()
+        paint(win, canvas)
+        now[0] += 100
     x, y, w, h = boxes[0]
     wy = C.c_int.from_address(win + O['W_Y']).value
     assert wy == 0  # the window from the screen's top

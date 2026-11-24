@@ -2337,7 +2337,8 @@ def test_centre_while_loading_sends_nothing_again(fw):
 # The first open (docs/oled-design.md#loading): the page opens once the app's first answer is there, the overlay over
 # the window it was opened from meanwhile (list_marks.c load_over), fed input by ringnav_input (load_over_input).
 class Lo(C.Structure):
-    _fields_ = [('win', C.c_void_p), ('cancel', C.c_void_p)]
+    _fields_ = [('win', C.c_void_p), ('cancel', C.c_void_p), ('step', C.c_void_p), ('caption', C.c_char_p),
+                ('timer', C.c_uint)]
 
 
 def first_open(fw):

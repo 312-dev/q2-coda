@@ -862,7 +862,8 @@ def test_a_refreshing_level_keeps_its_rows_when_the_refresh_fails(fw):
 
 # The first open (docs/oled-design.md#loading): the browser opens once Spotify answers, the overlay over Streaming.
 class Lo(C.Structure):
-    _fields_ = [('win', C.c_void_p), ('cancel', C.c_void_p)]
+    _fields_ = [('win', C.c_void_p), ('cancel', C.c_void_p), ('step', C.c_void_p), ('caption', C.c_char_p),
+                ('timer', C.c_uint)]
 
 
 def gate(fw, type, a, b=0):
