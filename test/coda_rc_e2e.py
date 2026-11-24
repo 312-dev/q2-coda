@@ -291,6 +291,10 @@ def run(argv=None):
         np = playing(s)  # the shim wrote Now Playing before its ack
         ok = (shuffle is None or np['shuffle'] == shuffle) and (repeat is None or np['repeat'] == repeat)
         check(f'SetMode shuffle {shuffle} repeat {repeat}', ok, f"shuffle {np['shuffle']}, repeat {np['repeat']}")
+        # A UI pass or two before the next command, which takes a stock Shuffle as its play order (playback.c
+        # shuffle_own) and lists it to the car: the Resume below must still find the album's queue its own. Without the
+        # wait that pass came between the commands only under load, and the Resume failed then alone (2026-11-24).
+        time.sleep(1.5)
     np = playing(s)
     check('the playing song can be rated', np.get('rateable') is True, np['track_id'])
     for hearts in (3, 5, 0):

@@ -41,7 +41,7 @@ static const char *mdns_if = "wlan0";
 uint8_t crc_device_id[8];
 
 typedef struct {
-    int seq, state, pos_ms, len_s, id, shuffle, repeat, volume, qpos, qlen, qgen, radio;
+    int seq, state, pos_ms, len_s, id, shuffle, repeat, volume, qpos, qlen, qgen, qlist, radio;
     int hearts; /* 0-5, -1 when the song can't be rated */
     int buf, bhave, btotal, bms; /* a server song loading: its bytes and length (np_stream.c) */
     int noten;                   /* the Q2 Muse's toasts so far; note the last, while shown */
@@ -434,7 +434,7 @@ static void np_parse(const char *b, np_t *o) {
 #define STR(name, f) else if (k == sizeof name - 1 && !memcmp(line, name, k)) dst = o->f, cap = sizeof o->f;
             if (0) {}
             NUM("state", state) NUM("pos", pos_ms) NUM("len", len_s) NUM("id", id) NUM("shuffle", shuffle)
-            NUM("repeat", repeat) NUM("volume", volume) NUM("qpos", qpos) NUM("qlen", qlen) NUM("qgen", qgen)
+            NUM("repeat", repeat) NUM("volume", volume) NUM("qpos", qpos) NUM("qlen", qlen) NUM("qgen", qgen) NUM("qlist", qlist)
             NUM("seq", seq) NUM("hearts", hearts) NUM("buf", buf) NUM("bhave", bhave) NUM("btotal", btotal)
             NUM("bms", bms) NUM("radio", radio) NUM("noten", noten) STR("note", note) STR("path", path) STR("title", title) STR("artist", artist) STR("album", album)
             if (dst) {
@@ -592,7 +592,7 @@ static void np_poll(void) {
     np_sent.bhave = bhave;
     if (parts & 1) buf_pushed = crc_now_ms();
     if (!parts) return;
-    lib_now(np.qgen, np.id);
+    lib_now(np.qlist, np.id);
     if (parts & 2) pos_pushed = crc_now_ms();
     each_session(push, parts);
 }
@@ -619,8 +619,8 @@ static void pend_answer(int code) {
     crc_log("demo: %s %s", pend.verb, !code ? "done" : "not done");
     if (!strncmp(pend.verb, "play ", 5)) {
         np_read(); /* the shim wrote the new queue's Now Playing before its ack */
-        lib_played(!code, np.qgen);
-        lib_now(np.qgen, np.id); /* its first song now: another list may start before the next push */
+        lib_played(!code, np.qlist);
+        lib_now(np.qlist, np.id); /* its first song now: another list may start before the next push */
     }
     if (pend.s->state == S_AUTHED) {
         if (!code) crc_send(pend.s, T_ACK, pend.req_id, 0, 0);
@@ -971,7 +971,8 @@ int crc_app(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t 
     case T_REGISTER_REMOTE: return register_remote(s, req_id, p, n);
     case T_BROWSE: case T_SEARCH: case T_GET_QUEUE: case T_GET_COVER: case T_PLAY: case T_START_RADIO:
         np_read();
-        return lib_request(s, type, req_id, p, n, np.qgen, np.qpos);
+        /* Play's resume asks whether the queue is still the list's (qlist); GetQueue, the listing's version (qgen) */
+        return lib_request(s, type, req_id, p, n, type == T_PLAY ? np.qlist : np.qgen, np.qpos);
     }
     return crc_error(s, req_id, E_UNSUPPORTED, "unknown type");
 }

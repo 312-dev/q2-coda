@@ -968,3 +968,29 @@ def test_the_cars_shuffle_off_is_now_playings_and_plays_the_queue_on(fw, ui, mcl
     q2.tick()
     assert q2.ack() == b'60 0\n' and mcl.mode in (0, 3) and q2.now()['shuffle'] == '0'
     assert q2.files[QUEUE].decode().split('\n')[:2] == ['2 1 4', '10']  # the queue's own order again
+
+
+def test_a_shuffle_turned_on_and_off_moves_the_listing_not_the_queue(fw, ui, mcl, recs):
+    """The queue file's version (qgen) moves with its lines, which a shuffle's play order changes; Play's resume asks
+    whether the queue is still the list it started, so Now Playing's qlist moves only with the queue itself. With one
+    counter, Shuffle on and off from the car made the album's queue another list: Resume started it again from an
+    older song (test/coda_rc_e2e.py's, 2026-11-24)."""
+    fw.mock('stock_mode_trampoline', lambda m, *_: setattr(mcl, 'mode', m) or 0)
+    fw.mock('config_playmode', lambda m, notify, *_: fw.fn('ringnav_mode', C.c_int, C.c_int)(m))
+    q2 = Q2(fw, ui, recs)
+    q2.queue(at=1)
+    mcl.type = 0xf001
+    q2.tick()
+    gen, qlist = q2.now()['qgen'], q2.now()['qlist']
+    q2.files[CMD] = b'70 mode 1 -1\n'
+    q2.tick()
+    fw.fn('playback_poll', None)()  # the UI pass that takes the shuffle
+    q2.tick()
+    assert q2.now()['qgen'] != gen and q2.now()['qlist'] == qlist
+    q2.files[CMD] = b'71 mode 0 -1\n'
+    q2.tick()
+    q2.tick()
+    assert q2.now()['qlist'] == qlist  # the same queue, in its own order again
+    q2.queue(at=0)  # another queue
+    q2.tick()
+    assert q2.now()['qlist'] != qlist

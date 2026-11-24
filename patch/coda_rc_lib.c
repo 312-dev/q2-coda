@@ -924,7 +924,8 @@ fail:
 /* ---- Play.resume: where each list played from a phone was left ---- */
 
 /* The list the last Play started ("node#sort", empty after a shuffle or a single song) and its queue's
- * version once the shim took it; the song noted last; the key a Play in flight will start. */
+ * version once the shim took it (Now Playing's qlist: the queue itself, not its listing, which a shuffle turned
+ * on or off changes); the song noted last; the key a Play in flight will start. */
 static struct {
     char key[440], pending[440];
     int gen, id;

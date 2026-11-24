@@ -137,10 +137,11 @@ void crc_log(const char *fmt, ...);
 int crc_shim_alive(void);
 int crc_shim_command(crc_session *s, unsigned req_id, const char *verb);
 /* Browse, Search, GetQueue, GetCover and Play (coda_rc_lib.c); qgen and qpos: Now Playing's queue version and
- * place, newer than the queue file's */
+ * place, newer than the queue file's; for Play, qgen is the queue's own version (qlist), which a shuffle's
+ * listing does not move */
 int lib_request(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t n, int qgen, int qpos);
 /* Play.resume's memory (coda_rc_lib.c): a list's Play was taken (ok) or not, its queue now qgen; Now Playing
- * now plays song id in queue qgen */
+ * now plays song id in queue qgen. qgen here is Now Playing's qlist, the queue's own version. */
 void lib_played(int ok, int qgen);
 void lib_now(int qgen, int id);
 void lib_art_of(const char *path, char *art, size_t cap); /* a song path's album art id */

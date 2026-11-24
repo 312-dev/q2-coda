@@ -73,6 +73,7 @@
 static struct {
     int checked, on, radio_said; /* radio_said: the radio flag cr_now last logged */
     unsigned at, started_at, seq, now_hash, now_n, q_hash, q_gen;
+    unsigned q_list_hash, q_list; /* the queue's own version (cr_queue): its deque, size and loads */
     unsigned *q_rows, q_listed, q_place; /* a shuffle's listing (cr_queue): its queue indices, the playing one's place */
     unsigned play_timer, toast_timer;
     int want; /* a Pause (1) or Play (2) waiting for the player; 0 none */
@@ -339,9 +340,14 @@ static unsigned q_len(const char *v) { return v ? (unsigned)strlen(v) : 0; }
  * order Up Next shows (upnext.c): the songs played (playback_played, at most half the lines), the one playing,
  * then what plays after it (playback_upcoming), and pos is the playing one's line (q_place, which Now Playing's
  * qpos says too); a Next moves only that place, as those three run on into each other. Otherwise the queue's own
- * order, pos its index. */
+ * order, pos its index. The file's gen moves with the lines; Now Playing's qlist (q_list) only with the queue
+ * itself, so a shuffle turned on or off, which changes the lines, is still the same queue for Play's resume
+ * (coda_rc_lib.c lib_played, lib_now). */
 static void cr_queue(void *q, unsigned pos) {
     unsigned n = q ? deque_size(q) : 0, h = hash_bytes(FNV_SEED, (const unsigned char *)&q, sizeof q);
+    h = hash_bytes(h, (const unsigned char *)&n, sizeof n);
+    h = hash_bytes(h, (const unsigned char *)&playback_loads, sizeof playback_loads);
+    if (h != cr.q_list_hash) cr.q_list_hash = h, ++cr.q_list;
     unsigned *rows = n && pos < n && playback_option(0) ? calloc(CR_QUEUE_MAX, sizeof *rows) : 0, listed;
     if (rows) {
         unsigned k = playback_played(rows, CR_QUEUE_MAX / 2);
@@ -351,8 +357,6 @@ static void cr_queue(void *q, unsigned pos) {
         h = hash_bytes(h, (const unsigned char *)rows, listed * sizeof *rows);
     } else
         listed = n < CR_QUEUE_MAX ? n : CR_QUEUE_MAX, cr.q_place = pos;
-    h = hash_bytes(h, (const unsigned char *)&n, sizeof n);
-    h = hash_bytes(h, (const unsigned char *)&playback_loads, sizeof playback_loads);
     if (h == cr.q_hash) return free(rows);
     unsigned len = 0, cap = 40 + listed * 12;
     for (unsigned i = 0; i < listed; ++i) {
@@ -437,6 +441,7 @@ static void cr_now(void) {
     put_int(b, sizeof b, &n, "qpos", listing ? (int)cr.q_place : (int)now.qpos);
     put_int(b, sizeof b, &n, "qlen", listing ? (int)cr.q_listed : (int)now.qlen);
     put_int(b, sizeof b, &n, "qgen", (int)cr.q_gen);
+    put_int(b, sizeof b, &n, "qlist", (int)cr.q_list); /* the queue itself, for Play's resume (cr_queue) */
     unsigned have = 0, btotal = 0, bms = 0; /* a server song loading (np_stream.c), NowPlaying.buffering */
     put_int(b, sizeof b, &n, "buf", other ? 0 : np_stream_loading(&have, &btotal, &bms));
     put_int(b, sizeof b, &n, "bhave", (int)have);
