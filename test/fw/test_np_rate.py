@@ -97,8 +97,8 @@ def test_the_page_after_the_lyrics_rests_full_screen_and_a_swipe_off_it_puts_the
 def test_full_screen_lyrics_stay_full_onto_the_rating_page_and_end_on_the_art(fw, ui, mcl, st):
     """A tap made the lyrics full screen: the rating page keeps it, and the art page ends it, as for the lyrics."""
     rate = Rate(fw, ui, mcl, st, page=1)
-    tap(ui, rate.lyric, DOWN, 100, 100)
-    tap(ui, rate.lyric, UP, 100, 100)
+    tap(ui, rate.lyric, DOWN, 100, 50)  # the blank slot over the first line: a line's tap would seek there
+    tap(ui, rate.lyric, UP, 100, 50)
     assert st.np_full == 2
     ui.ints[rate.slide, b'value'] = RATE_PAGE
     rate.poll()

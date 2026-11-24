@@ -43,10 +43,12 @@ static void lyric_still(void *lrc) {
     P(lrc, VIEW_ANIMATOR) = (void *)0;
 }
 
-/* Another song: its lyrics at the top, nothing held or gliding, and stock's animator, which would
- * carry them on to where the last song's follow sent them, stopped. */
+/* Another song: its lyrics at the top, nothing held, gliding or waiting for a tap's seek, and
+ * stock's animator, which would carry them on to where the last song's follow sent them, stopped.
+ */
 static void lyric_top(void *lrc) {
     st.lyric_held = st.lyric_spun = st.lyric_glide = st.lyric_to = st.lyric_push = 0;
+    st.lyric_seek = 0;
     lyric_still(lrc);
     scroll_view_set_offset(lrc, I(lrc, SCROLL_X), 0);
 }
@@ -61,7 +63,8 @@ static void lyric_glide(void *lrc, int to) {
 
 /* The Now Playing timer's follow (LYRIC_FOLLOW in tools/build.py): stock scrolls to the row three
  * lines above the current one, which past the end clamps to it. iPod: lyrics the wheel or a finger
- * moved stay (lyric_held) until Now Playing goes or another song starts, and a finger on the
+ * moved stay (lyric_held) until Now Playing goes, another song starts or, timed, they rest
+ * LYRIC_RESUME_MS (lyric_poll), and a finger on the
  * screen keeps them too; on the page, the follow glides. The lyrics page follows its own playing
  * line (lyric_follow). */
 int ringnav_lyric_follow(void *lrc, int x, int y, int ms) {

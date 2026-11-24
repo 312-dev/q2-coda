@@ -627,6 +627,23 @@ static int ly_line_at(int ms) {
     return cur;
 }
 
+/* Whether lrc's page has a timed line: synced lyrics, which the follow takes back after a hold
+ * (lyric_poll) */
+int lyrics_timed(void *lrc) {
+    if (!lyrics_on(lrc)) return 0;
+    for (unsigned i = 0; i < ly.tab->n; ++i)
+        if (ly.tab->line[i].ms != LRC_FAR) return 1;
+    return 0;
+}
+
+/* Row i's line's start, ms, for a tap that seeks there (np_lyric_touch); -1 for an untimed line,
+ * the playing line or one starting with it, or no row of lrc's page. */
+int lyrics_row_ms(void *lrc, int i) {
+    if (!lyrics_on(lrc) || i < 0 || (unsigned)i >= ly.rows) return -1;
+    int ms = ly.tab->line[i].ms;
+    return ms == LRC_FAR || (ly.cur >= 0 && ms == ly.tab->line[ly.cur].ms) ? -1 : ms;
+}
+
 /* Character c's distance along line l's rows, laid end to end. */
 static int ly_along(const ly_line *l, unsigned c) {
     const unsigned short *adv = ly.tab->adv + l->text;

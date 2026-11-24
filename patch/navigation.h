@@ -250,7 +250,8 @@ typedef struct {
                    */
     /* The lyrics (lyric_poll), of the song lyric_song, their rows built for lyric_rows_song:
      * lyric_raw while their page holds the wheel's raw travel; lyric_held once the wheel or a drag
-     * moved them; lyric_spun once the wheel moved them since it was let go (2: only nudged them,
+     * moved them, lyric_held_at the last wheel or touch on them since (the hold's LYRIC_RESUME_MS
+     * runs from it); lyric_spun once the wheel moved them since it was let go (2: only nudged them,
      * still following); lyric_touch while a
      * finger is on Now Playing, 1 if it came down on the lyrics, lyric_drag_y the offset then; the
      * glide's target lyric_to (1/16 px), its last step lyric_at, and lyric_glide while it moves;
@@ -258,7 +259,9 @@ typedef struct {
     int lyric_raw, lyric_held, lyric_spun, lyric_touch, lyric_drag_y, lyric_glide, lyric_to;
     int lyric_push, lyric_home; /* travel short of LYRIC_PUSH_DETENTS, and where it nudged from */
     unsigned lyric_push_at;
-    unsigned lyric_at, lyric_follow_at, lyric_song, lyric_rows_song;
+    unsigned lyric_at, lyric_follow_at, lyric_song, lyric_rows_song, lyric_held_at;
+    int lyric_seek; /* a tap's seek to a line (np_lyric_line): its start + 1, ms; 0 none */
+    unsigned lyric_seek_at; /* when it was sent, or last seen paused (lyric_seek_ms) */
     /* The Display settings, read from config.ini on first use, and the display page's value labels.
      */
     int settings_read, accent, home, battery, home_rockbox, home_groovebox, shortcut, light,

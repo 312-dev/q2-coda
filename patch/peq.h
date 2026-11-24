@@ -625,7 +625,8 @@ typedef struct {
  * into the page's (whether it is on, as lyrics_on asks), and lyrics_fit lays them out again at
  * lrc's new width; lyrics_now is the playing position in ms,
  * lyrics_sec its whole second (off the page), lyrics_line the playing line there (-1 before the
- * first), repainting it while page shows; lyrics_paint draws a row's line, lyrics_fade OLED's
+ * first), repainting it while page shows; lyrics_timed whether any line has a time, lyrics_row_ms
+ * the time a tap on a row seeks to (-1: none); lyrics_paint draws a row's line, lyrics_fade OLED's
  * faded edges over the view. */
 void lyrics_publish(const lrc_line *l, unsigned n, const lrc_mark *m);
 void lyrics_ask_poll(int front); /* a server song's lyrics asked of its app (addon_lyrics_ask) */
@@ -633,7 +634,8 @@ int ringnav_lyric(void);
 int lyrics_rows(void *lrc), lyrics_fit(void *lrc), lyrics_on(void *lrc), lyrics_now(void),
     lyrics_row_h(void),
     lyrics_row_h(void),
-    lyrics_sec(void), lyrics_line(void *lrc, int ms, int page);
+    lyrics_sec(void), lyrics_line(void *lrc, int ms, int page), lyrics_timed(void *lrc),
+    lyrics_row_ms(void *lrc, int i);
 void lyrics_paint(void *row, void *canvas), lyrics_fade(void *lrc, void *canvas), lyrics_gone(void);
 /* np_rate.c: rows y to y + n of w's from Now Playing's glow at alpha a; 0 when there is none */
 int np_glow_rows(void *w, void *canvas, int y, int n, unsigned a);
