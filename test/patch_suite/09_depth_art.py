@@ -1015,7 +1015,7 @@ def preset_writes(config):  # theme_preset's saves for config, from OLED's optio
     for o in OLED['opts']:
         key=o.get('key') or OPT_KEY[o['setting']]
         n,d=(theme_keys(theme_builtins())[key][:2] if o.get('key') or key=='OLED_ACCENT' else
-             {'LIGHT':(3,0),'HOME':(3,0),'SHORTCUT':(12,12),'BATTERY':(4,0)}[key])
+             {'LIGHT':(3,0),'HOME':(2,0),'SHORTCUT':(12,12),'BATTERY':(4,0)}[key])  # HOME: Split, Full; a saved 2 reads Split
         s=config.get(key,''); v=int(s) if s.isdigit() and int(s)<n else d
         if o['values'] and o['def']>=0 and not o['values']>>v&1: v=o['def']
         if o['preset']>=0 and v!=o['keep'] and v!=o['preset']: out.append((o['preset'],'IPOD',key))

@@ -202,7 +202,8 @@ def home_carousel():
     CONFIG.update(HOME='2',SHORTCUT='5'); m=ShuffleMachine(); del CONFIG['HOME'],CONFIG['SHORTCUT']; view,imgs=home_list(m)
     assert m.call(address=home_hook[0],args=(m.top,0,0,0),gap=0)==0
     for name,on in (('slide_menu',0),('img_left',0),('img_right',0),('list_view_home',1),('list_view_homeset',0)):
-        n=m.nodes[named(m,m.top,name)]; assert n['visible']==n['sensitive']==on,name
+        n=m.nodes[named(m,m.top,name)]; taps=n.get('sensitive',int(n['asset'].get('sensitive')!='false'))  # the asset's, untouched
+        assert n['visible']==taps==on,name
     assert m.nodes[named(m,m.top,'img_homeart')]['visible']
     slide=named(m,m.top,'slide_menu')
     def under(w): return [w]+[d for c in m.nodes[w].get('children',[]) for d in under(c)]
