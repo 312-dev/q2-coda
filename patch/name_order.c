@@ -8,7 +8,9 @@
  * id in that order under a hash of the records as they came, in RAM and on the card. The next load
  * whose records come the same (the query's text and sort, the comparator flag, the count and the
  * hash, after a reboot too) moves them into the kept order instead (rec_permute). A full sort runs
- * on a thread of its own while the UI thread draws a spinner on the screen (spin_sort). */
+ * on a thread of its own while the UI thread draws a spinner on the screen (spin_sort). After a
+ * library or catalogue change the Library's Songs, Albums and Artists are loaded again and sorted
+ * ahead in the UI's quiet (name_order_poll), so their next open finds the order kept. */
 #include "navigation.h"
 
 #define NO_SLOTS 4
@@ -17,15 +19,17 @@
 #define NO_MAGIC 0x314f4e51u /* "QNO1" */
 #define SPIN_AFTER_MS 250    /* a sort still running this long shows the spinner */
 #define SPIN_TICK_MS 20
-#define SPIN_STEP_MS 80 /* a dot a step, 8 a turn */
-#define SPIN_BOX 64     /* px, a #1c1c1e square with 12 px corners at the screen's centre */
+#define SPIN_STEP_MS 80   /* a dot a step, 8 a turn */
+#define SPIN_BOX 64       /* px, a #1c1c1e square with 12 px corners at the screen's centre */
+#define WARM_IDLE_MS 3000 /* with the screen lit, no list is loaded ahead this soon after input */
 
 /* A slot's head, also its file's: the firmware (Q2POD_VERSION's hash: ringnav_sort_key is in the
- * comparators), the query key, the count, the records' hash and the kept ids' own hash. */
+ * comparators), the query key, the count, the records' hash, the kept ids' own hash and the Library
+ * list the order is (name_order_list's cls, 0 for any other load). */
 typedef struct {
     unsigned magic, version, key, n;
     unsigned long long sum;
-    unsigned idsum, pad;
+    unsigned idsum, cls;
 } no_head;
 typedef struct {
     no_head h; /* h.n 0: empty */
@@ -101,8 +105,9 @@ static no_head *card_file(int i) {
     if (!ok) free(b), b = 0, k->h.n = 0;
     return b;
 }
-static no_slot *find(unsigned key, unsigned n, unsigned long long sum) {
-    for (int i = 0; i < NO_SLOTS && !no.read; ++i) { /* each slot's head as the last boot left it */
+/* Each slot's head as the last boot left it, read once a boot. */
+static void read_heads(void) {
+    for (int i = 0; i < NO_SLOTS && !no.read; ++i) {
         char s[32];
         no_head *h = &no.s[i].h;
         void *f = fopen(path(s, i), "rb");
@@ -112,6 +117,9 @@ static no_slot *find(unsigned key, unsigned n, unsigned long long sum) {
         if (f) fclose(f);
     }
     no.read = 1;
+}
+static no_slot *find(unsigned key, unsigned n, unsigned long long sum) {
+    read_heads();
     for (int i = 0; i < NO_SLOTS; ++i) {
         no_slot *k = &no.s[i];
         if (k->h.n == n && k->h.key == key && k->h.sum == sum &&
@@ -149,13 +157,16 @@ static int apply(no_slot *k, void *list) {
     return 1;
 }
 
-/* After a full sort: list's order kept under key in that key's slot, else the least recently
- * used, and written to its file (blob_io: a temporary file, synced, renamed over). */
-static void keep(unsigned key, unsigned long long sum, void *list) {
+/* After a full sort: list's order kept under key in that key's slot, else in the slot of the same
+ * Library list (cls, NO_SONGS and on; its records have changed), else the least recently used, and
+ * written to its file (blob_io: a temporary file, synced, renamed over). */
+static void keep(unsigned key, unsigned long long sum, void *list, unsigned cls) {
     unsigned n = deque_size(list);
     no_slot *k = 0;
     for (int i = 0; i < NO_SLOTS; ++i)
         if (no.s[i].h.key == key && no.s[i].h.n) k = &no.s[i];
+    for (int i = 0; i < NO_SLOTS && !k && cls; ++i)
+        if (no.s[i].h.cls == cls && no.s[i].h.n) k = &no.s[i];
     if (!k)
         for (int i = 0; i < NO_SLOTS; ++i)
             if (!k || no.s[i].used < k->used) k = &no.s[i];
@@ -165,7 +176,7 @@ static void keep(unsigned key, unsigned long long sum, void *list) {
         return;
     }
     for (unsigned i = 0; i < n; ++i) IDS(f)[i] = I(deque_at(list, i), REC_ID);
-    no_head h = { NO_MAGIC, version(), key, n, sum, 0, 0 };
+    no_head h = { NO_MAGIC, version(), key, n, sum, 0, cls };
     f->n = n;
     h.idsum = id_hash(f);
     *f = k->h = h;
@@ -230,6 +241,19 @@ static void spin_paint(int f) {
             sp.at[y * sp.stride + x] = out;
         }
 }
+/* The UI thread waits for *done, the spinner shown from SPIN_AFTER_MS, and puts back what it
+ * covered. */
+static void spin_wait(volatile int *done) {
+    for (int ms = 0, shown = 0; !*done; ms += SPIN_TICK_MS) {
+        usleep(SPIN_TICK_MS * 1000);
+        if (ms >= SPIN_AFTER_MS && (shown || (shown = spin_open()))) spin_paint(ms / SPIN_STEP_MS);
+    }
+    if (sp.map) {
+        for (int y = 0; y < SPIN_BOX; ++y)
+            memcpy(sp.at + y * sp.stride, sp.under + y * SPIN_BOX, SPIN_BOX * 4);
+        munmap(sp.map, sp.len), free(sp.under), sp.map = 0;
+    }
+}
 static void *sorter(void *arg) {
     cstl_sort(no.list, no.cmp);
     no.done = 1;
@@ -244,16 +268,47 @@ static void spin_sort(void *list, void *cmp) {
         cstl_sort(list, cmp);
         return;
     }
-    for (int ms = 0, shown = 0; !no.done; ms += SPIN_TICK_MS) {
-        usleep(SPIN_TICK_MS * 1000);
-        if (ms >= SPIN_AFTER_MS && (shown || (shown = spin_open()))) spin_paint(ms / SPIN_STEP_MS);
-    }
+    spin_wait(&no.done);
     pthread_join(t, 0);
-    if (sp.map) {
-        for (int y = 0; y < SPIN_BOX; ++y)
-            memcpy(sp.at + y * sp.stride, sp.under + y * SPIN_BOX, SPIN_BOX * 4);
-        munmap(sp.map, sp.len), free(sp.under), sp.map = 0;
-    }
+}
+
+/* Sorted ahead (docs/internals.md#name-order): once the library or the server catalogue has
+ * changed (library_gen moved: a scan's end, a catalogue's import), each Library list that has a
+ * kept order (its slot's cls) is loaded again as its open loads it (library_warm, on the UI thread,
+ * with the screen dark or WARM_IDLE_MS after the last input), and when its records are not the
+ * kept ones they are sorted on a thread of their own with stock's call and comparator while the UI
+ * runs on, and kept as an open's sort keeps them. The open after it finds its order kept. An open
+ * that meets that sort still running waits for it, under the spinner, rather than sorting again. */
+static struct {
+    unsigned gen, due;  /* library_gen as last looked at; a bit (1 << cls) per list to load again */
+    unsigned cls;       /* the list a load is for: an open's (name_order_list), or the warm's */
+    int warming;        /* name_order is called from library_warm: a sort is noted, not run */
+    int noted, running; /* the warm's records to sort (key, sum, n, sort); its sort on a thread */
+    unsigned key, n, at, wcls;
+    int sort;
+    unsigned long long sum;
+    void *list, *cmp;
+    unsigned long thread;
+    volatile int done;
+} nw __attribute__((section(".scratch")));
+
+void name_order_list(unsigned cls) { nw.cls = cls; }
+
+static void *warm_sorter(void *arg) {
+    cstl_sort(nw.list, nw.cmp);
+    nw.done = 1;
+    return arg;
+}
+/* The warm's sort is done: its order kept, its records dropped. */
+static void warm_end(void) {
+    pthread_join(nw.thread, 0);
+    keep(nw.key, nw.sum, nw.list, nw.wcls);
+    char msg[80];
+    tk_snprintf(msg, sizeof msg, "list %u sorted ahead: %u rows in %u ms", nw.wcls, nw.n,
+                (unsigned)time_now_ms() - nw.at);
+    ulog('I', "ui", msg);
+    deque_destroy(nw.list);
+    nw.list = 0, nw.running = 0;
 }
 
 /* list, sql's records unsorted as library_query loaded them, in the order stock's sort gives
@@ -262,13 +317,63 @@ void name_order(const char *sql, int sort, void *list) {
     unsigned n = deque_size(list);
     void *cmp = comparator(sort);
     if (n < NO_MIN) {
-        if (n > 1) cstl_sort(list, cmp);
+        if (n > 1 && !nw.warming) cstl_sort(list, cmp);
         return;
     }
     unsigned key = query_key(sql, sort);
     unsigned long long sum = list_hash(list, sort);
+    if (nw.warming) { /* sorted once library_warm returns, if not kept (name_order_poll) */
+        if (!find(key, n, sum)) nw.noted = 1, nw.key = key, nw.sum = sum, nw.n = n, nw.sort = sort;
+        return;
+    }
     no_slot *k = find(key, n, sum);
+    if (!k && nw.running) { /* the warm's sort may be this load's: waited for, then looked again */
+        spin_wait(&nw.done);
+        warm_end();
+        k = find(key, n, sum);
+    }
     if (k && apply(k, list)) return;
     spin_sort(list, cmp);
-    keep(key, sum, list);
+    keep(key, sum, list, nw.cls);
+}
+
+/* Every UI loop pass (ringnav_sleep): the warm's sort collected when done, and the lists due after
+ * a library_gen change loaded again, one a pass. */
+void name_order_poll(void) {
+    if (nw.running) {
+        if (nw.done) warm_end();
+        return;
+    }
+    if (nw.gen != library_gen) {
+        nw.gen = library_gen, nw.due = 0;
+        read_heads();
+        for (int i = 0; i < NO_SLOTS; ++i)
+            if (no.s[i].h.n && no.s[i].h.cls && no.s[i].h.cls < 32) nw.due |= 1u << no.s[i].h.cls;
+    }
+    if (!nw.due || library_scanning() || coverflow_opening() ||
+        (g_backlight_status && (unsigned)time_now_ms() - st.last_input < WARM_IDLE_MS))
+        return;
+    unsigned cls = 0;
+    while (!(nw.due >> cls & 1)) ++cls;
+    nw.due &= ~(1u << cls);
+    void *list = _create_deque("stSongInfo");
+    deque_init(list);
+    ui_watch_step("library warm");
+    nw.warming = 1, nw.noted = 0;
+    library_warm(cls, list);
+    nw.warming = 0;
+    /* stock adds rows after its sort (an Unknown row): the records as they were hashed, else none
+     */
+    for (unsigned m = deque_size(list); nw.noted && m > nw.n; --m) deque_pop_back(list);
+    unsigned long t = 0;
+    if (nw.noted && deque_size(list) == nw.n && list_hash(list, nw.sort) == nw.sum) {
+        nw.list = list, nw.cmp = comparator(nw.sort), nw.wcls = cls, nw.done = 0;
+        nw.at = (unsigned)time_now_ms();
+        if (!pthread_create(&t, 0, warm_sorter, 0) && t) {
+            nw.thread = t, nw.running = 1;
+            return;
+        }
+        nw.list = 0;
+    }
+    deque_destroy(list);
 }

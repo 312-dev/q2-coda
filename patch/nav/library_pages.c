@@ -660,6 +660,24 @@ static int songs_load(void) {
     return (int)deque_size(list);
 }
 
+static int albums_query(void *unused) { return getAllAlbum(); }
+static int artists_query(void *unused) {
+    return I(g_artist_type, 0) ? GetAllAlbumArtist() : getAllArtist();
+}
+/* name_order.c's load ahead: list cls's query into into, as ringnav_localclass's open runs it
+ * (the server's songs beside the card's, the artist tag the artist page uses). */
+void library_warm(unsigned cls, void *into) {
+    int saved = library_music;
+    library_music = 1;
+    I(g_artist_type, 0) = I(artist_type, 0) == 1;
+    staged_into(into,
+                cls == NO_SONGS    ? songs_sorted
+                : cls == NO_ALBUMS ? albums_query
+                                   : artists_query,
+                0);
+    library_music = saved;
+}
+
 /* The step a late UI pass names while a Library list loads (ui_watch.c). */
 static const char *class_step(int cls) {
     switch (cls) {
@@ -682,7 +700,12 @@ int ringnav_localclass(int cls) {
     I(g_artist_type, 0) = I(artist_type, 0) == 1;
     int saved = library_music;
     library_music = 1;
+    name_order_list(cls == 0xf001         ? NO_SONGS
+                    : cls == CLASS_ALBUMS ? NO_ALBUMS
+                    : cls == 0xf004       ? NO_ARTISTS
+                                          : 0);
     int n = cls == 0xf001 ? songs_load() : stock_localclass_trampoline(cls);
+    name_order_list(0);
     void *list = P(p_deque_showlist, 0), *dir = P(tools_pdeq_directory, 0), *a = album_opened();
     if (n > 0 && cls == 0xff20) n = music_records(list, 0);
     /* These stored lists bypass songtable too. Keep Discovery out of their displayed copies,

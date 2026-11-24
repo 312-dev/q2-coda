@@ -3742,6 +3742,7 @@ static void open_yield(void) {
     if (op.running && pthread_self() != op.thread) open_end(), art_found_drop();
 }
 void coverflow_yield(void) { open_yield(); }
+int coverflow_opening(void) { return op.running; }
 /* Whether an open's albums want OPEN_ART: listed and in order, their art not known. */
 static int art_due(void) { return cf.albums && deque_size(cf.albums) && !art_clean(); }
 static void *step_thread(void *k) {
