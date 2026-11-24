@@ -1898,12 +1898,13 @@ def card_apps(fw, apps):
     return {f'/mnt/mmc/.{k}/q2app': v for k, v in apps.items()}
 
 
-SHIPPED = ['Bricks']  # the build's games (peq.h GAME_*, engine.c eng_games[]): the owner's, 2026-11-22
+SHIPPED = ['Bricks', 'Cabin Solitaire']  # the build's games (peq.h GAME_*, engine.c eng_games[])
 
 
-def test_the_build_ships_bricks_alone(fw):
-    """The owner, 2026-11-22: Games lists Bricks alone in this build, its own Sudoku, Vortex, Solitaire and Snake
-    left out while the games in progress are finished. A card with no games: the chooser is the build's list."""
+def test_the_build_ships_the_engines_games_alone(fw):
+    """Games lists the engine's games alone in this build, its own Sudoku, Vortex, Solitaire and Snake left out
+    (the owner, 2026-11-22) while the redesigned games replace them. A card with no games: the chooser is the
+    build's list."""
     texts = []
     fw.mock('widget_set_text_utf8', lambda w, s, *_: texts.append(C.string_at(s).decode()))
     p = Page(fw, card_apps(fw, {}))

@@ -574,6 +574,7 @@ static struct game {
     int rows; /* the chooser's: its own games, then the card's */
     void *title; /* the caption the bar reads, where the theme's bar holds it */
     int engines; /* the engine's games, the chooser's rows after its own (GAMES_BUILTIN) */
+    int bar_hidden; /* an ENG_FULL game runs over the system bar, hidden meanwhile */
 } *g __attribute__((section(".scratch")));
 
 static int sud_started(const struct sudoku *s) {
@@ -606,12 +607,26 @@ static void changed(int game) {
     if (!g->save) g->save = timer_add(save_due, (void *)0, SAVE_MS);
 }
 
+/* An ENG_FULL game plays over the status row: the system bar (its own window, over every page) is
+ * hidden while the game runs, and shown again while it is paused (the clock and battery then) or
+ * gone. */
+static void bar_over(int hide) {
+    void *bar = *(void *const *)system_bar;
+    if (!bar || hide == g->bar_hidden) return;
+    g->bar_hidden = hide;
+    widget_set_visible(bar, !hide, 0);
+}
+static int full_screen(void) {
+    return g->screen >= ENGINE && eng_game(g->screen - ENGINE)->flags & ENG_FULL;
+}
+
 /* The frame timer off and the wheel back to ticks. */
 static void hold(int paused) {
     g->paused = paused;
     wheel_raw = 0;
     stop_timer(&g->frame);
     eng_hold();
+    bar_over(0);
 }
 
 /* A record score saved; an unfinished game never is. */
@@ -691,6 +706,7 @@ static void run(void) {
     g->paused = RUN;
     if (g->screen >= ENGINE) { /* its own timer and wheel (engine.c) */
         eng_run();
+        bar_over(full_screen());
         return;
     }
     g->at = (unsigned)time_now_ms();
@@ -725,6 +741,7 @@ static int show(const void *unused) {
         g->target = CHOOSER;
     g->screen = g->target;
     g->picking = g->confirm = 0;
+    bar_over(full_screen());
     widget_set_visible(g->list, g->screen == CHOOSER, 0);
     widget_set_sensitive(g->list, g->screen == CHOOSER); /* hidden, its rows still took a game's taps */
     widget_set_visible(g->sheet, g->screen != CHOOSER, 0);

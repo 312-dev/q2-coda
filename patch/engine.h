@@ -54,7 +54,7 @@ struct eng_surface {
 };
 
 enum {
-    ENG_RAW = 1,  /* the wheel as travel (wheel), no ticks */
+    ENG_RAW = 1,   /* the wheel as travel (wheel), no ticks */
     ENG_STILL = 2, /* turn-based: the frame timer runs only after input and while step returns 1 */
     ENG_FULL = 4   /* the whole screen, 375 x 320, over the status row: Games opens the sheet so */
 };
@@ -111,6 +111,6 @@ int games_text(void *canvas, const char *s, int x, int y, int h, unsigned px, un
 
 extern const struct eng_game eng_bricks;    /* game_bricks.c */
 extern const struct eng_game eng_solitaire; /* game_solitaire.c */
-extern const struct eng_game eng_demo;   /* engine_demo.c */
+extern const struct eng_game eng_demo;      /* engine_demo.c */
 
 #endif

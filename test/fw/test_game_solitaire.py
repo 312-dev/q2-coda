@@ -943,19 +943,25 @@ def test_nothing_but_the_felt_and_the_rails_wood_falls_under_the_glass(fw, name)
 
 
 def test_cabin_solitaire_is_games_second_engine_row_and_opens_over_the_whole_screen(fw):
+    """Its sheet is the whole screen and the system bar (a window over every page) is hidden while it runs, shown
+    again while it is paused (its clock and battery then) and for any other game."""
+    BAR = 0x7700
+    fw.var('fw_ctx_system_bar', C.c_void_p).value = BAR
     p = Page(fw, {ART_FILE: ART})
-    moved = []
+    moved, bar = [], []
     fw.mock('widget_move_resize', lambda w, x, y, ww, hh, *_: moved.append((w, x, y, ww, hh)) and 0)
+    fw.mock('widget_set_visible', lambda w, v, *_: bar.append(v) if w == BAR else None)
     assert p.s.engines >= 2 and fw.var('eng_solitaire', GameDef).name == b'Cabin Solitaire'
     p.go(ENGINE + 1)
     assert p.s.screen == ENGINE + 1 and api(fw)['eng_live']()
     assert moved[-1] == (p.s.sheet, 0, 0, 375, 320)  # the page is the window, from the screen's top
     en = Eng.from_address(fw.var('engine__en', C.c_void_p).value)
-    assert en.h == 320
+    assert en.h == 320 and bar == [0]
     p.key(RETURN)
-    assert p.s.paused == 2 and not api(fw)['eng_live']()
+    assert p.s.paused == 2 and not api(fw)['eng_live']() and bar == [0, 1]
     p.key(RETURN)  # Continue
+    assert bar == [0, 1, 0]
     p.go(ENGINE)  # Bricks: under the status row again
-    assert moved[-1][3:] == (375, p.s.h) and moved[-1][2] > 0
+    assert moved[-1][3:] == (375, p.s.h) and moved[-1][2] > 0 and bar == [0, 1, 0, 1]
     p.close()
     assert not fw.var('engine__en', C.c_void_p).value

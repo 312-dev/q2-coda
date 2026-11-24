@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Games: **Cabin Solitaire**, a new game in Games, after Bricks: Klondike on a cabin's card table, over the whole screen, with a deck of its own (a fox, an owl and a bear for the court). The wheel stops only on cards that can move, and a card you pick up hovers over the best place for it, the other places it can go outlined in gold. Draw one or three, winnable deals or random ones, undo up to 64 moves, Next to send a card home, and Play/Pause finishes the game once every card is face up. Your game, wins, best time and fewest moves are kept. The music keeps playing.
   - Bluetooth: each paired device has its own **Volume Limit** on its page, No Limit until you set one. While that device is connected the volume stops at its limit, from the wheel, Control Center, Settings, the Car Remote or the device's own buttons, and Max Volume still applies on top. Wired and USB headphones and your other Bluetooth devices keep their own levels.
   - Lyrics: after you scroll synced lyrics away, they go back to the line being sung and follow the song again once you leave them alone for 5 seconds. Tapping a synced line plays the song from that line; tap the line being sung to show the lyrics full screen as before.
   - Streamed songs: a song from your server starts as soon as its first 3 seconds have downloaded, up to half a second sooner than before, where the Subsonic app waited for its next progress report.

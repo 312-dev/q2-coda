@@ -86,7 +86,7 @@ The shim's sleep is 16 ms plus the frame's work, so about 58 flips a second is t
 ```c
 struct eng_game {
     const char *name;
-    unsigned size, flags;                                 /* state bytes, zeroed; ENG_RAW, ENG_STILL */
+    unsigned size, flags;                                 /* state bytes, zeroed; ENG_RAW, ENG_STILL, ENG_FULL */
     void (*init)(void *state, int h);                     /* h: the sheet's height */
     int (*step)(void *state, const struct eng_input *in); /* 1/60 s; 1 while something moves */
     void (*draw)(const void *state, struct eng_surface *s);
@@ -112,7 +112,7 @@ Return never reaches a game. A game that sets neither flag gets ticks and runs i
 
 ### Drawing
 
-`draw` gets a `struct eng_surface`: the screen's pixels, the sheet's origin, and the rows and columns of this paint. It paints its whole scene, background first; every call clips, so the cost is the changed part's. Coordinates are the sheet's, colors `0xRRGGBB` as they reach the screen (Light Mode does not flip them; Night Shift still warms them, as it reads every pixel written).
+`draw` gets a `struct eng_surface`: the screen's pixels, the sheet's origin, and the rows and columns of this paint. The sheet starts under the status row, `h` rows of it (262 to 290 by theme); a game flagged `ENG_FULL` gets the whole screen instead, 375 x 320 over the status row (`show` in `games.c` moves the sheet to the screen's top for it, and back for any other), so its `h` is 320 and its row y is the screen's. It paints its whole scene, background first; every call clips, so the cost is the changed part's. Coordinates are the sheet's, colors `0xRRGGBB` as they reach the screen (Light Mode does not flip them; Night Shift still warms them, as it reads every pixel written).
 
 | Call           | Draws                                                                                          |
 | -------------- | ---------------------------------------------------------------------------------------------- |
@@ -153,14 +153,14 @@ To see it: a `--dev` build, `ENGINEDEMO=1` under `[Q2POD]` in `/mnt/data/config.
 | Brick breaker (Bricks)     | 9 KB          | 2 KB          | 600,000                       | 2,000,000   |
 | Turret shooter             | 9 KB          | 4 KB          | 600,000                       | 2,000,000   |
 | Music quiz                 | 8 KB          | 8 KB          | 600,000                       | 2,000,000   |
-| Klondike solitaire         | 12 KB         | 2 KB          | 600,000                       | 2,000,000   |
+| Klondike solitaire (Cabin Solitaire) | 28 KB (26.5 used) | 46 KB, its art read in | 600,000      | 2,000,000   |
 | Sudoku                     | 8 KB          | 2 KB          | 600,000                       | 2,000,000   |
-| **All five**               | **46 KB**     | one at a time |                               |             |
+| **All five**               | **62 KB**     | one at a time |                               |             |
 
 - **A frame's hard limit is 2,000,000 instructions** of the payload's own (about 4 ms by the estimate above) for the step and every rect's paint together; 600,000 is what a game is held to, so stock's own painting of the same rects, the flush's turn of them onto the framebuffer and the loop's polls keep the rest of the 16.67 ms.
-- **Heap** is one game's at a time, freed on leaving it. The device has little to spare next to the player; 8 KB is the most any game is given.
+- **Heap** is one game's at a time, freed on leaving it. The device has little to spare next to the player; 8 KB is the most a game's own state is given, and a game whose art is a file in the root filesystem reads it into its state once, at most 256 KB in all (Cabin Solitaire's is 46,812 bytes, 37,180 of them its art).
 - **Scratch** (131,072 bytes, about 31 KB free): the engine uses 4. A game uses none: its state is the heap's.
-- **The root filesystem** (at most 75,497,472 bytes, `ROOTFS_ROOM`) is not used by the engine at all.
+- **The root filesystem** (at most 75,497,472 bytes, `ROOTFS_ROOM`) is not used by the engine itself. A game's art that would not fit its payload bytes is a file there, `usr/share/q2games/<name>.bin` from `assets/games/` (`GAMES_DATA` in `tools/build.py`), read once when the game opens, never in a step or a paint: Cabin Solitaire's is 37,180 bytes.
 - The older four games are out of the payload in this build (`GAME_*` in `patch/peq.h` all 0), which gave back 15,568 bytes (`patch_bytes` 1,331,960 to 1,316,392, 2026-11-22); turning them back on costs that again.
 
 ## Games
@@ -197,6 +197,34 @@ Every one is an original game in its genre. None reproduces an Apple iPod game's
 
 In the emulator, 10 s of play (`design/games/bricks/bricks-play.mp4`, a finger following the ball, `bricks/autopilot.py`): 58.2 flips a second, median gap 17.03 ms, longest 24.1 ms, none over 25 ms, with the host's load average near 8. Ready and the end paint nothing while nothing moves, so a capture that waits there shows a long gap between flips that is the game at rest, not a slow frame. The payload grows by 7,344 bytes over the engine's build (989,736 against 982,392), of the brief's 9 KB; the state is 208 bytes of the brief's 2 KB; no `.scratch`.
 
+### Cabin Solitaire
+
+`patch/game_solitaire.c` (`eng_solitaire`, `ENG_STILL | ENG_FULL`), Games' second engine row: Klondike on a cabin's card table, the redesign in the emulator project's `design/games/solitaire/` (its `SPEC.md`, `STYLE.md` and element sheet). Seven columns, four foundations by suit from the ace (hearts, spades, diamonds, clubs, left to right), a stock and a waste; columns build down in alternate colours and only a king takes an empty one; draw one or three, unlimited passes (the waste turned back over in order). A card is `suit * 13 + rank` with `UP` when face up in a column; the state is the piles and the record together (`struct record`), so a save is the game.
+
+**The cursor and the hand.** `sources` lists every place with somewhere to go, in the wheel's order: the waste, the foundations, then each column's face-up runs from the deepest to its top card; the wheel walks only those, so an illegal move cannot be chosen and there is no error state. Center picks the place up: the card (or run) lifts and hovers over the best destination (`dests`: home first, then the longest column it builds on, then an empty column; a king alone in its column has nowhere new), the others outlined in gold where it would land, the hovered one brighter. The wheel moves the hover, Center drops, Previous puts it back. With nothing to move and nothing in the stock or the waste that could, the slip says "No moves. Prev: undo".
+
+**Controls.** Wheel: the next place, or the next destination with a card in hand. Center: pick up, drop (with no place to pick, it draws). Play/Pause: draw, or the waste back to the stock; once every card is face up and the stock and waste are empty, the auto-finish sends everything home one card every 4 frames (Center or Play again sends the rest at once). Previous: undo, from a 64-move ring (`apply` and `unapply` leave the state byte for byte as it was), or put the hand back. Next: the cursor's card (or the hand) home, if it can go. A finger: the stock draws, a card that can move is picked up, a legal place takes the hand and anywhere else puts it back.
+
+**Screens.** The start board (Deal: Winnable or Random; Draw: One card or Three cards; Resume, with a game in progress; wins, best time and fewest moves under it) is where the game opens; the wheel moves the gold marker, Center changes the row or resumes, Play deals. The deal flies a card from the stock every 2 frames, each a 6-frame glide on a 10 px arc, the last of each column turning as it lands. A move glides 8 frames (ease-out cubic); a card turned narrows and widens over 6; a card home flashes gold for 6 frames with 8 sparks flying out; an undo glides back with "Undo: N moves" on the slip. The win lights the four kings in turn, 6 frames apart, and drops the board ("Well played": time, best, moves, wins) in 14 frames, 5 px past its place and back; a new best's tag grows to 1.15 and settles in 10. The pause is the engine's (Games' pop-up), not the design's own board.
+
+**The table.** Felt from a 64 x 64 fibre tile and a 94 x 80 map of 4 px shade cells (wear, the darker edge, two stains), each pixel a lookup into a colour table per shade level: the design's felt with its shade stepped per cell rather than smoothed. Cards are a body (the 1 px warm edge and the face, their corners from two 5 x 5 tables) with a 2 px drop shadow and the contact shade over the top edge, both drawn only where the card does not cover them; their pieces (indexes, pips, the court, the back) are masks and small palette images. Every rounded box (shadows, gold edges, outlines, the rail, the boards) is one routine, `rbox`, from constant tables of layers (`layers`). A column fans 7 px a face-down card and 17 a face-up one, closing to 5 then 3 and to 11 at the least only when it must (`fan`, SPEC.md's rule), so the longest pile there can be (six face down under a king to an ace, column 7) ends at y 296, above the rail; each card is drawn only down to where the next covers it. The design's queen and jack hung under the baseline, cut at an 11 px fan, so the index art has a queen whose tail and a jack whose hook sit above the next card's edge. The last column is at x 309 (the design's 310), so no shadow or gold edge reaches under the glass's corner.
+
+**Art.** One file, `assets/games/solitaire.bin` (installed as `/usr/share/q2games/solitaire.bin`, 37,180 bytes, sealed as a save is), read whole once in `init` into the state: 181 entries of 4-bit masks and 16-colour palette images, the felt's tile, map and colour table, and per text style a table of glyphs and advances. It is written by the design's `src/export.py`, which renders each piece with the mockups' own code (`cards.py`), and its layout is `patch/game_solitaire_art.h`. Type is Libre Baskerville (indexes, labels, figures) and Playfair Display (titles), as glyph masks of the sizes and letters drawn ([third-party](third-party.md#artwork)). Without the file (or with a torn one) the game still plays, plainly: a flat felt, Inter for the words, the ranks in Inter.
+
+**Winnable deals.** A deal is a seed: an xorshift of it shuffles the deck (Fisher and Yates), the columns are dealt row by row. Winnable deals take a seed from `sol_seeds` (`patch/game_solitaire_seeds.h`, 256 of them, 512 bytes), each one the test tree's solver won in draw three and in draw one (`test/fw/solitaire_solver.c`, a depth-first search with a visited set bounded at 200,000 states, written out by `test/fw/solitaire_solver.py --write`); random deals take any seed. `test_game_solitaire.py` wins a sample of the table again and plays each win through the game's own moves.
+
+**Time.** The engine has no clock for a game and the frame timer stops at rest, so the game reads the UI's millisecond clock (`time_now_ms`) at each step of play and adds the time since the last, ten minutes at most; a pause starts it over, so time away is not counted. The slip shows it as of the last step that painted: it does not tick while nothing moves.
+
+**Sound** is the Clicker's three: a tick for the cursor, a hover and a draw (three for a recycle), a tap for a pick-up and a drop (two when a card turns), the alert once when nothing can move, ticks for the kings, two taps for a new best. The SPEC's table of 23 sounds of its own (a rising scale for cards home) needs the q2player change of [Sound](#sound).
+
+**Save:** `/mnt/data/game-solitaire`, `CCS1`: the game in progress, the start board's choices and the record (wins, games played, best time, fewest moves), written on the step after every tenth move once nothing glides, at the game's end, and at a pause when changed. A save is read only if every card is in it once, face-down cards lie under face-up ones in each column and the lengths and record are sane. Games' older Solitaire keeps its own file, `/mnt/data/ringnav-solitaire`, unread while it is not built.
+
+**Frames.** Measured on build `--dev`, the whole screen (`ENG_FULL`):
+
+TABLE
+
+In the emulator: EMU. The payload grows by GROWTH bytes over the trunk's build (of the 28 KB a redesigned game may add); the state is 46,812 bytes on the heap, nearly all of it the art; no `.scratch`.
+
 ## Libraries
 
 Looked at for vendoring. The project is GPL-3.0, so MIT, BSD, zlib, public domain and GPL-2.0-or-later code could all be taken; none is, because each need is smaller than the library that meets it.
@@ -208,7 +236,7 @@ Looked at for vendoring. The project is GPL-3.0, so MIT, BSD, zlib, public domai
 | Collision tests only          | [cute_c2](https://github.com/RandyGaul/cute_headers)                | zlib or public domain | one header, floating point                                      | No. A disc against a disc and a disc against a box are a few integer lines each, exact and testable in fixed point                                                                                                       |
 | Sudoku solving and generating | [kudoku](https://github.com/attractivechaos/plb/tree/master/sudoku) | MIT                   | 190 lines of C, integers only, one `calloc` of its matrix       | No, but the nearest to a yes. It solves by exact cover; the game needs a solver that counts to two solutions and can stop and resume between frames, which is a different loop. A bitmask backtracker is under 100 lines |
 | Sudoku generating             | [QQWing](https://qqwing.com)                                        | GPL-2.0-or-later      | C++                                                             | No. The payload is C with no C++ runtime                                                                                                                                                                                 |
-| Klondike solvability          | [Klondike-Solver](https://github.com/ShootMe/Klondike-Solver)       | MIT                   | C++; searches up to 5,000,000 states by default                 | Not in the firmware: that search does not fit a Q2's memory. Solvability is checked offline by a small solver in the test tree, and the firmware carries a table of seeds it solved (512 bytes)                          |
+| Klondike solvability          | [Klondike-Solver](https://github.com/ShootMe/Klondike-Solver)       | MIT                   | C++; searches up to 5,000,000 states by default                 | Not in the firmware: that search does not fit a Q2's memory. Solvability is checked offline by a small solver in the test tree (`test/fw/solitaire_solver.c`), and the firmware carries a table of seeds it solved (512 bytes, [Cabin Solitaire](#cabin-solitaire))                          |
 | Sprite and shape blitting     | [olive.c](https://github.com/tsoding/olive.c)                       | MIT                   | one header                                                      | No. `eng_fill`, `eng_disc` and `eng_round` are short, clip to the rect being painted, and write the screen's own pixel format                                                                                            |
 | Random numbers                | [PCG](https://www.pcg-random.org)                                   | Apache-2.0 or MIT     | a few lines                                                     | No. `rand_below` (xorshift, `patch/playback.c`) is already there and is enough for deals and levels                                                                                                                      |
 | Whole games to port           | [Rockbox](https://www.rockbox.org)'s plugins                        | GPL-2.0-or-later      | each tied to Rockbox's plugin API and LCD model                 | No. Compatible, but a port brings the API with it, and these games are designed for this screen and wheel                                                                                                                |
