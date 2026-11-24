@@ -1092,10 +1092,6 @@ static void felt(const struct sol *b, struct eng_surface *s, int x, int y, int w
                  const short (*cover)[4], int ncover) {
     int c[4];
     if (!clip(s, x, y, w, h, c)) return;
-    if (!b->art) {
-        eng_fill(s, c[0], c[1], c[2] - c[0], c[3] - c[1], FELT);
-        return;
-    }
     for (int j = c[1]; j < c[3]; ++j) {
         int i = c[0];
         for (int k = 0; k < ncover; ++k) {
@@ -1232,7 +1228,6 @@ static const unsigned char look_at[5][2] = { { 0, 2 }, { 0, 0 }, { 2, 2 }, { 4, 
 /* An entry's bits: a mask's coverage drawn in rgb, or a palette image's colours, its index 0 left.
  */
 static void art(const struct sol *b, struct eng_surface *s, int e, int x, int y, unsigned rgb) {
-    if (!b->art) return;
     const unsigned char *ent = bytes_at(b, 4 + 8 * e);
     unsigned off = ent[0] | ent[1] << 8 | ent[2] << 16 | (unsigned)ent[3] << 24;
     int w = ent[4], h = ent[5], c[4], pal = off >> 31;
@@ -1260,7 +1255,6 @@ static void art(const struct sol *b, struct eng_surface *s, int e, int x, int y,
     }
 }
 
-static const unsigned char style_px[ART_STYLE_COUNT] = { 15, 15, 16, 18, 14, 14, 22, 23 };
 
 static int text_w(const struct sol *b, int style, const char *t) { /* in 1/4 px */
     const unsigned char *adv = bytes_at(b, ART_STYLES + style * 192 + 96);
@@ -1274,11 +1268,6 @@ static int text_w(const struct sol *b, int style, const char *t) { /* in 1/4 px 
  */
 static void say(const struct sol *b, struct eng_surface *s, int style, const char *t, int x, int y,
                 unsigned rgb, int align) {
-    if (!b->art) {
-        eng_text(s, t, x, y - style_px[style] / 2 - 3, style_px[style] + 6, style_px[style], rgb,
-                 align);
-        return;
-    }
     const unsigned char *map = bytes_at(b, ART_STYLES + style * 192), *adv = map + 96;
     int pen = x * 4 - (align == 1 ? text_w(b, style, t) / 2 : align == 2 ? text_w(b, style, t) : 0);
     for (; *t; ++t) {
@@ -1363,25 +1352,17 @@ static unsigned ink(int c) { return red(c) ? RED : BLACK; }
 static void face(const struct sol *b, struct eng_surface *s, int x, int y, int c) {
     if (!(c & UP)) {
         int c4[4];
-        if (b->art && clip(s, x + 1, y + 1, CW - 2, CH - 2, c4))
+        if (clip(s, x + 1, y + 1, CW - 2, CH - 2, c4))
             for (int j = c4[1]; j < c4[3]; ++j) {
                 const unsigned *q = b->back[j - y - 1] + c4[0] - x - 1;
                 unsigned *p = px(s, c4[0], j);
                 for (int i = c4[0]; i < c4[2]; ++i, ++q, ++p)
                     if (*q) *p = *q;
             }
-        else if (!b->art)
-            eng_round(s, x + 3, y + 3, CW - 6, CH - 6, 3, 0xa8232b);
         return;
     }
     int r = rank_of(c), k = suit_of(c);
     unsigned col = ink(c);
-    if (!b->art) {
-        static const char *const names[13] = { "A", "2", "3",  "4", "5", "6", "7",
-                                               "8", "9", "10", "J", "Q", "K" };
-        eng_text(s, names[r], x + 3, y, 14, 12, col, 0);
-        return;
-    }
     art(b, s, A_RANK_A + r, x, y, col);
     art(b, s, A_SUIT_h + k, x, y, col);
     if (r >= 10)
@@ -1451,12 +1432,7 @@ static void card(const struct sol *b, struct eng_surface *s0, int x, int y, int 
         return;
     if (look == C_LIFT) x -= 3, y -= 6;
     if (look == C_CURSOR) y -= 1;
-    if (b->art)
-        deco(b, s, look, x, y);
-    else {
-        layers(s, look_layers + look_at[look][0], look_at[look][1], x, y, CW, CH);
-        if (look != C_LIFT) layers(s, look_layers + 8, 1, x, y, CW, CH);
-    }
+    deco(b, s, look, x, y);
     body(b, s, x, y, CW);
     face(b, s, x, y, c);
 }
@@ -1515,7 +1491,7 @@ static void rail(const struct sol *b, struct eng_surface *s, const char *msg, un
     }
     say(b, s, T_LABEL, "Moves", x0 + 12, ty, PEN_SOFT, 0);
     digits(t, moves);
-    say(b, s, T_FIGURE, t, x0 + 18 + (b->art ? text_w(b, T_LABEL, "Moves") / 4 : 44), ty, PEN, 0);
+    say(b, s, T_FIGURE, t, x0 + 18 + text_w(b, T_LABEL, "Moves") / 4, ty, PEN, 0);
     time_text(t, ms);
     say(b, s, T_FIGURE, t, x1 - 12, ty, PEN, 2);
 }
@@ -1768,42 +1744,42 @@ static void flights(const struct sol *b, struct eng_surface *s) {
 
 /* Where the felt need not be painted: what is painted over it opaque (a column's cards, a top-row
  * card, a board at rest), each box short of its round corners, in x order; how many. */
+static int box_at(short (*out)[4], int n, int x0, int x1, int y0, int y1) {
+    out[n][0] = (short)x0, out[n][1] = (short)x1, out[n][2] = (short)y0, out[n][3] = (short)y1;
+    return n + 1;
+}
+static int card_at(short (*out)[4], int n, int x, int y, int h) { /* cards' bodies x, y, h tall */
+    return box_at(out, n, x, x + CW, y + 5, y + h - 5);
+}
+/* the start board's: the deck, the board, then the three court cards, as x, y, w, h */
+static const short start_covers[5][4] = { { 27, 117, CW, CH }, { (ENG_W - BOARD_W) / 2, BOARD_Y + 3, BOARD_W, BOARD_H - 6 },
+                                          { 304, 92, CW, CH }, { 300, 160, CW, CH }, { 312, 126, CW, CH } };
+
 static int covers(const struct sol *b, short (*out)[4]) {
-    int n = 0;
-#define COVER(x0_, x1_, y0_, y1_) out[n][0] = (short)(x0_), out[n][1] = (short)(x1_), out[n][2] = (short)(y0_), out[n++][3] = (short)(y1_)
-    COVER(0, ENG_W, b->rail, b->h); /* the rail's wood, under nothing else */
+    int n = box_at(out, 0, 0, ENG_W, b->rail, b->h), x, y; /* the rail's wood, under nothing else */
     if (b->mode == START) {
-        COVER(27, 27 + CW, 117 + 5, 117 + CH - 5); /* the deck, the board, then the three court cards */
-        COVER((ENG_W - BOARD_W) / 2, (ENG_W - BOARD_W) / 2 + BOARD_W, BOARD_Y + 8, BOARD_Y + BOARD_H - 8);
-        COVER(304, 304 + CW, 92 + 5, 92 + CH - 5);
-        COVER(300, 300 + CW, 160 + 5, 160 + CH - 5);
-        COVER(312, 312 + CW, 126 + 5, 126 + CH - 5);
+        for (int k = 0; k < 5; ++k)
+            n = box_at(out, n, start_covers[k][0], start_covers[k][0] + start_covers[k][2],
+                       start_covers[k][1] + 5, start_covers[k][1] + start_covers[k][3] - 5);
         return n;
+    }
+    for (int k = 0; k < 4; ++k) { /* the card a foundation shows: its top, or the one under a top that is away */
+        int f = b->g.found[k], away = f && (in_flight(b, P_FOUND + k, f - 1) || (b->hand && b->hfrom == P_FOUND + k));
+        if (f - away > 0) n = card_at(out, n, colx[3 + k], TOP_Y, CH);
     }
     if (b->mode == WON) {
-        for (int k = 0; k < 4; ++k) COVER(colx[3 + k], colx[3 + k] + CW, TOP_Y + 5, TOP_Y + CH - 5); /* the kings */
-        if (b->t >= BOARD_AT) COVER(ENG_W / 2 - 116, ENG_W / 2 + 116, WIN_Y - 89 + 8, WIN_Y + 89 - 8);
+        if (b->t >= BOARD_AT) n = box_at(out, n, ENG_W / 2 - 116, ENG_W / 2 + 116, WIN_Y - 89 + 8, WIN_Y + 89 - 8);
         return n;
     }
-    if (b->g.slen && !b->nfl) COVER(STOCK_X, STOCK_X + CW, TOP_Y + 5, TOP_Y + CH - 5);
-    if (b->g.wlen && !b->nfl && !(b->hand && b->hfrom == P_WASTE)) {
-        int x, y;
-        place_xy(b, P_WASTE, b->g.wlen - 1, &x, &y);
-        COVER(x, x + CW, TOP_Y + 5, TOP_Y + CH - 5);
-    }
-    for (int k = 0; k < 4; ++k) { /* the card it shows: its top, or the one under a top that is away */
-        int f = b->g.found[k], away = f && (in_flight(b, P_FOUND + k, f - 1) || (b->hand && b->hfrom == P_FOUND + k));
-        if (f - away > 0) COVER(colx[3 + k], colx[3 + k] + CW, TOP_Y + 5, TOP_Y + CH - 5);
-    }
+    if (b->g.slen && !b->nfl) n = card_at(out, n, STOCK_X, TOP_Y, CH);
+    if (b->g.wlen && !b->nfl && !(b->hand && b->hfrom == P_WASTE))
+        place_xy(b, P_WASTE, b->g.wlen - 1, &x, &y), n = card_at(out, n, x, TOP_Y, CH);
     for (int k = 0; k < 7; ++k) { /* a column at rest: from its first card to its last */
-        int p = P_TAB + k, len = b->g.tlen[k], x, y0, y1, still = len && !(b->hand && b->hfrom == p) &&
-                                                               !(b->flip_t && b->flip_p == p);
+        int p = P_TAB + k, len = b->g.tlen[k], y1,
+            still = len && !(b->hand && b->hfrom == p) && !(b->flip_t && b->flip_p == p);
         for (int i = 0; still && i < len; ++i) still = !in_flight(b, p, i);
-        if (!still) continue;
-        place_xy(b, p, 0, &x, &y0), place_xy(b, p, len - 1, &x, &y1);
-        COVER(x, x + CW, y0 + 5, y1 + CH - 5);
+        if (still) place_xy(b, p, 0, &x, &y), place_xy(b, p, len - 1, &x, &y1), n = card_at(out, n, x, y, y1 - y + CH);
     }
-#undef COVER
     return n;
 }
 
@@ -1811,6 +1787,11 @@ static void draw(const void *state, struct eng_surface *s) {
     const struct sol *b = state;
     char msg[32];
     short cover[16][4];
+    if (!b->art) { /* no art file: a plain felt and a word why, the game still kept and played */
+        eng_fill(s, s->x0, s->y0, s->x1 - s->x0, s->y1 - s->y0, FELT);
+        eng_text(s, "Cabin Solitaire's art is missing", ENG_W / 2, 140, 24, 16, 0xffffff, 1);
+        return;
+    }
     felt(b, s, s->x0, s->y0, s->x1 - s->x0, s->y1 - s->y0, cover, covers(b, cover));
     if (b->mode == START) {
         rail(b, s, "Play: deal", 0, 0);

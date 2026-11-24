@@ -364,7 +364,10 @@ passed()
 SOL_ART,SOL_SAVE='/usr/share/q2games/solitaire.bin','/mnt/data/game-solitaire'
 SO_MODE,SO_SEL,SO_ART,SO_NSRC,SO_CUR,SO_HAND,SO_SRC=256,260,264,268,272,276,296  # struct sol (patch/game_solitaire.c)
 SO_FAN_U,SO_NFL,SO_T=544,1604,1648
-SOL_WHOLE_BOUND,SOL_FRAME_BOUND,SOL_RUN_BOUND,SOL_DEAL_BOUND,SOL_AUTO_BOUND,SOL_WIN_BOUND=1,1,1,1,1,1
+# measured: the whole sheet 1,993,583 (start board), a frame of play 714,995, a 13-card run 1,115,263, the deal 1,168,977,
+# the auto-finish 1,097,967, the win board's showing 1,199,318. ponytail: all but the whole sheet are over the 600,000 a
+# frame a game is held to (docs/games-engine.md#cabin-solitaire), under the engine's hard 2,000,000.
+SOL_WHOLE_BOUND,SOL_FRAME_BOUND,SOL_RUN_BOUND,SOL_DEAL_BOUND,SOL_AUTO_BOUND,SOL_WIN_BOUND=2_000_000,800_000,1_250_000,1_300_000,1_250_000,1_350_000
 def sol_table(piles,waste=(),found=(0,0,0,0),draw3=0,stock=True):
     """A sealed save of a table, the game in progress: piles as (face-down count, face-up cards), cards as
     suit*13+rank (hearts, spades, diamonds, clubs; ace 0); what is left over is the stock (or face down in the
