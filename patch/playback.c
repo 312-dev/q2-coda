@@ -750,7 +750,7 @@ static unsigned rec_id(unsigned i) {
             (unsigned)I(r, REC_TRACK) * 0x9e3779b1u;
     else {
         const char *path = P(r, REC_PATH);
-        unsigned n = strlen(path);
+        unsigned n = path ? strlen(path) : 0; /* fnv takes a row with no path as an empty one */
         h = fnv(FNV_SEED, (const unsigned char *)(n > ID_TAIL ? path + n - ID_TAIL : path)) ^
             n * 0x9e3779b1u;
     }
