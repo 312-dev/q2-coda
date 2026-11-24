@@ -104,9 +104,7 @@ static watched xfade_file = {0, ~0u}, mono_file = {0, ~0u}, swap_file = {0, ~0u}
 /* A tail held in memory has a ring of float frames, mapped for the hold at the hold's own size and unmapped when the
  * mix ends: XF_FLOATS is the most it may be. ponytail: 6 MB; 15 s at 48 kHz stereo, 7.5 s at 96, 3.75 s at 192. A tail
  * read from the file has no ring and no such limit (XF_FILED_S). */
-#ifndef XF_FLOATS /* test/player/run.py builds a player with a larger one, to compare a long hi-res tail against */
-#define XF_FLOATS (6u << 18)
-#endif
+#define XF_FLOATS (ring_mb() << 18)
 #define XF_SLACK (1u << 17)  /* room for one block past the held tail */
 #define XF_FILED_S 120u      /* the longest hold of a tail read from the file: beyond any plan */
 #define XF_EVENTS 16         /* changes of the stages' settings a hold remembers for the frames not yet read back */
@@ -165,6 +163,17 @@ static struct {
     float *win;                   /* the mix's window: held frames from win_lo, as float, after the stages */
     unsigned win_cap, win_lo, win_n;
 } xf;
+
+/* The ring's most, in MB. Q2PLAYER_XF_RING=MB: test/player/run.py's player that holds every tail in memory
+ * (ring_only), in a ring of up to that size, which a tail read from the file is compared with. */
+static unsigned ring_mb(void) {
+    static unsigned mb;
+    if (!mb) {
+        const char *e = getenv("Q2PLAYER_XF_RING");
+        mb = e && atoi(e) > 0 && atoi(e) <= 256 ? (unsigned)atoi(e) : 6;
+    }
+    return mb;
+}
 
 /* The tail is over, mixed or dropped: its memory goes back, and a second open is closed. */
 static void tail_drop(void) {
@@ -290,11 +299,7 @@ static unsigned smart_want(struct dsp *s, double pts, int length, int rate, unsi
  * stood at the hold's first frame, with each later change of a setting taken at the frame it came in at. Anything else
  * (no second open, not level in time, a scan, a seek) is the ring. */
 
-static int ring_only(void) { /* Q2PLAYER_XF_RING: test/player/run.py's player that holds every tail in memory */
-    static int only = -1;
-    if (only < 0) only = getenv("Q2PLAYER_XF_RING") != NULL;
-    return only;
-}
+static int ring_only(void) { return getenv("Q2PLAYER_XF_RING") != NULL; }
 
 static void floats(float *out, const uint8_t *data, int n, int bytes, int is_float) {
     if (is_float) memcpy(out, data, (size_t)n * 4);
@@ -325,8 +330,8 @@ static void reader_before(struct dsp *s, int said, const uint8_t *data, unsigned
     s->raw = data, s->rd_ahead = 0;
     if (s->rd_state == RD_OFF) return;
     if (s->rd_state == RD_NONE) {
-        if (s->frame < 0 || !(said & XF_MS) || !s->url || ring_only()) return;
-        if (!(s->length > 0 && s->pts >= 0 && s->pts > s->length - XF_SMART_LEAD_S)) return;
+        if (s->frame < 0 || !(said & XF_MS) || !s->url) return;
+        if (!(s->length > 0 && s->pts >= 0 && s->pts > s->length - XF_SMART_LEAD_S) || ring_only()) return;
         struct pcm_format f = {s->rate, s->nch, s->bytes, s->is_float, DSD_PCM};
         s->rd = tail_open(s->url, &f, s->frame + frames + (int64_t)(RD_AHEAD_S * s->rate));
         s->rd_state = s->rd ? RD_OPEN : RD_OFF;
@@ -579,7 +584,7 @@ static unsigned crossfade(struct dsp *s, float *a, unsigned frames, int nch, int
             xf.set = xf.told = (struct xf_set){s->mono, s->swap, s->mute};
             xf.muted = s->was_muted, xf.in = xf.out = 0, xf.events = 0, xf.eq_gen = s->eq_gen, xf.said = 0;
             xf.win_lo = xf.win_n = 0;
-            note("q2player: crossfade: the tail read from the file, nothing held in memory", 0);
+            note("q2player: crossfade: the tail read from the file a second time, no ring mapped", 0);
         }
     }
     unsigned k = (frames + 1) / 2;
