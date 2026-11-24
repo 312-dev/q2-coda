@@ -1,4 +1,5 @@
-/* Ember Garden's art (tools/embergarden_art.py writes this and assets/games/embergarden.bin; do not edit): the
+/* Ember Garden's art (the design's design/games/sky-defense/src/export.py writes this and
+ * assets/games/embergarden.bin; do not edit): the
  * file's size and parts, and the scene's places. */
 #define EG_ART_BYTES 219200u
 #define EG_ART_MAGIC 0x31414745u

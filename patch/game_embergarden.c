@@ -5,7 +5,7 @@
  * ends the game. Waves grow denser and faster, the light turns from dawn to night across them, and
  * every tenth wave is a lull of slow cinders worth double.
  *
- * The scene is the art file's (tools/embergarden_art.py), read once when the game opens: a byte a
+ * The scene is the art file's (the design's sky-defense/src/export.py), read once when the game opens: a byte a
  * pixel into a palette a band of rows, four colours an entry (dawn, day, dusk, night), so a time
  * of day is a palette and the light's turn is two palettes mixed, painted a strip of rows a frame.
  * Each step marks the boxes that changed and joins them into at most ENG_RECTS; each is painted as
@@ -96,7 +96,7 @@ struct eg {
 
 typedef unsigned quad __attribute__((may_alias)); /* four of the scene's bytes read at once */
 
-struct part { /* a row of the file's table (tools/embergarden_art.py Pack) */
+struct part { /* a row of the file's table (export.py's Pack) */
     unsigned at;
     unsigned short w, h;
     short ax, ay; /* the anchor: a sprite's centre, a glyph's pen at its middle row */
