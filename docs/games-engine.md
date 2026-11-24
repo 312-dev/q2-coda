@@ -138,6 +138,10 @@ ponytail: three sounds, and the buzzer has one. Sounds of a game's own belong in
 
 `fx` is 16.16: `FX()`, `FX_INT`, `fx_mul` (a 64-bit product, one `mult` on MIPS), `fx_div` (32-bit, exact to 8 fraction bits, for |a| under 128). `eng_sin`, `eng_cos`, `eng_atan2` (1024 a turn) and `eng_sqrt` are Vortex's tables. The X2000 has an FPU and the payload uses `float` where stock's vector canvas wants it, but a game's `step` and `draw` stay in integers: results are then the same on the host tests, under Unicorn and on the Q2, and a test can assert a ball's place exactly.
 
+### Full screen
+
+A game with `ENG_FULL` has the whole panel, 375 x 320, its sheet's height 320: `full_screen` in `patch/games.c` hides the status row (the window manager paints it over the windows), moves the page over its place and the sheet to the screen's top, and puts both back when the game closes. A pause shows the status row again, its clock and battery over the game, and hides it on resuming (`hold`, `run`). Everything a player must read still keeps `eng_inset(y)` in from each end of its row.
+
 ## The demo scene
 
 `patch/engine_demo.c`: a ball (a 6 px `eng_disc` at 2.25 and 2.5 px a step, so its edge moves by parts of a pixel) bouncing in a field, a paddle the raw wheel moves 2 px a position, a finger places and Previous and Next push; Center changes the speed of the next serve, Play/Pause leaves (`eng_quit`), a paddle hit clicks and counts, a miss beeps and serves again, and the best count is saved at a pause (`/mnt/data/game-demo`). A frame marks the ball's old and new box, and the paddle's when it moved: 2 to 5 rects of about 15 x 15 px.

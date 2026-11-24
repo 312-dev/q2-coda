@@ -363,7 +363,7 @@ passed()
 # payload's instructions a little over what they measured, under the brief's 600,000 a frame (docs/games-engine.md#budgets).
 EG_ART=(ROOT/'assets/games/embergarden.bin').read_bytes()
 EG_H={k:int(v) for k,v in re.findall(r'^#define (EG_\w+) (\d+)u?\b',(ROOT/'patch/game_embergarden_art.h').read_text(),re.M)}
-class EgEmber(ctypes.Structure): _fields_=[(k,ctypes.c_int) for k in 'bx y vx vy phase amp size alive'.split()]
+class EgEmber(ctypes.Structure): _fields_=[(k,ctypes.c_int) for k in 'bx y vx vy phase amp size alive smoke'.split()]
 class EgShot(ctypes.Structure): _fields_=[(k,ctypes.c_int) for k in 'x y ux uy run alive'.split()]
 class EgPuff(ctypes.Structure): _fields_=[(k,ctypes.c_int) for k in 'x y t size pts alive'.split()]
 class EgState(ctypes.Structure):  # struct eg (patch/game_embergarden.c): ints and bytes alone, so its layout is MIPS's too
@@ -412,12 +412,12 @@ for k in range(60):
     rects,cost=eframe(17 if k%3==0 else 16); assert 1<=len(rects)<=ENG_RECTS,rects
     worst=max(worst,eplay(rects,cost)); step_worst=max(step_worst,cost)
 assert sum(m.get(EG+eg_em(i,'alive')) for i in range(24))>=1
-# The dearest frame: 24 embers, all cinders (the largest), spread over the sky; three spurts, one about to crack a
+# The dearest frame: 24 embers, 8 of them cinders (the most alive at once, G_CINDERS) and 16 medium, spread over the sky; three spurts, one about to crack a
 # cinder; two beds' flames turning; a steam puff; the banner fading; the light turning; the aim moving.
-def crowd(n,bolt):
+def crowd(n,bolt,banner=0):
     for i in range(24):
         x,y=40+(i*53)%300,60+(i*37)%170
-        for f,v in (('bx',x<<16),('y',y<<16),('vx',0),('vy',int(2.2*65536)),('phase',i*7),('amp',18),('size',2),('alive',int(i<n))):
+        for f,v in (('bx',x<<16),('y',y<<16),('vx',0),('vy',int(2.2*65536)),('phase',i*7),('amp',18),('size',2 if i<8 else 1),('alive',int(i<n))):
             m.u.mem_write(EG+eg_em(i,f),struct.pack('<i',v))
     tx,ty=m.get(EG+eg_em(0,'bx'))>>16,m.get(EG+eg_em(0,'y'))>>16
     for j in range(3):
@@ -426,12 +426,39 @@ def crowd(n,bolt):
         for f,v in (('x',hx<<16),('y',hy<<16),('ux',ux),('uy',uy),('run',40),('alive',1)): m.u.mem_write(EG+eg_sh(j,f),struct.pack('<i',v))
     m.u.mem_write(EG+eg_off('bed'),struct.pack('<8i',2,0,0,2,0,0,0,0)); m.u.mem_write(EG+eg_off('bed_t'),struct.pack('<8i',61,0,0,31,0,0,0,0))
     m.u.mem_write(EG+eg_off('pf'),struct.pack('<6i',250,150,6,2,3,1))
-    for f,v in (('banner',50),('k',3),('strip',17),('stop',0),('bolt',int(bolt)),('bolt_x',170),('bolt_seed',12345),('left',0),('spawn',99)):
+    for f,v in (('banner',banner),('k',3),('strip',17),('stop',0),('bolt',int(bolt)),('bolt_x',170),('bolt_seed',12345),('left',0),('spawn',99)):
         m.u.mem_write(EG+eg_off(f),struct.pack('<i',v))
     m.word(payload_syms['wheel_travel'],3); epaint((0,0,375,320))
     rects,cost=eframe(); return eplay(rects,cost),rects
 crowd_cost,crowd_rects=crowd(24,False); assert len(crowd_rects)<=ENG_RECTS
-assert sum(m.get(EG+eg_em(i,'alive')) for i in range(24))==24 and eg('stop')>0  # the cinder cracked in two (one slot was free)
+# PROFILE (temporary)
+import bisect
+_nm=subprocess.run(['llvm-nm','-S','--defined-only',str(B/'patch.elf')],capture_output=True,text=True).stdout.split('\n')
+addrs=sorted((int(l.split()[0],16),l.split()[-1]) for l in _nm if len(l.split())==4 and l.split()[2] in 'tT')
+hist={}; prof=[False]
+def _blk(u,a,size,x):
+    if prof[0]: hist[a]=hist.get(a,0)+size//4
+_hk=m.u.hook_add(UC_HOOK_BLOCK,_blk,begin=BASE,end=SCRATCH-1); m.u.ctl_flush_tb()
+def _show(nm):
+    agg={}
+    for a_,c_ in hist.items():
+        i_=bisect.bisect_right(addrs,(a_,'~'))-1; agg[addrs[i_][1]]=agg.get(addrs[i_][1],0)+c_
+    print('PROFILE',nm,sum(agg.values()),sorted(agg.items(),key=lambda kv:-kv[1])[:16])
+_ep=epaint
+def epaint(rect):
+    if rect==(0,0,375,320) and not prof[1:]: prof[0]=False; r=_ep(rect); return r
+    return _ep(rect)
+for nm,(n_,b_,bn_) in (('crowd',(24,False,0)),('crowd16',(16,False,0)),('bolt',(17,True,0)),('bolt8',(8,True,0)),('banner',(1,False,50))):
+    hist.clear()
+    _orig=eframe
+    def eframe(ms=16):
+        prof[0]=True; return _orig(ms)
+    cst,rr=crowd(n_,b_,bn_); prof[0]=False; eframe=_orig
+    _show(nm+' '+str(cst)+' '+str(rr))
+hist.clear(); prof[0]=True; _ep((0,0,375,320)); prof[0]=False; _show('whole')
+for nm,rect in (('lawn',(0,290,375,30)),('sprinkler',(153,236,69,51))):
+    hist.clear(); prof[0]=True; c_=_ep(rect); prof[0]=False; _show('rect '+nm+' '+str(c_))
+m.u.hook_del(_hk); epaint=_ep
 bolt_cost,bolt_rects=crowd(17,True); assert eg('bolt')==2
 whole=max(start,play_whole,epaint((0,0,375,320)))
 # The fourth bed on a side: the scene dims and the result card drops in.

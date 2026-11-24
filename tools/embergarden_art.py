@@ -9,8 +9,8 @@ ported here. What it writes:
   scene as one byte a pixel, indexes into a palette of its own for each band of BAND rows, with four colours an
   index, one for each time of day (dawn, day, dusk, night), found together (a k-means over the four colours as one
   point), so a time of day is a palette and a move between two is the palettes mixed; the scene's beds charred, the
-  same way, as boxes the game copies over the scene's; the sprites, premultiplied 0xAARRGGBB; the lettering, masks
-  of 4 bits a pixel, coloured when drawn.
+  same way, as boxes the game copies over the scene's; the sprites, premultiplied 0xAARRGGBB, then each row's first
+  and last-plus-one inked column (a byte each); the lettering, masks of 4 bits a pixel, coloured when drawn.
 - patch/game_embergarden_art.h: the file's size, its parts' numbers and the scene's places, for the game.
 
 The font is not in the repository (it is needed only to draw the lettering again): Baloo 2 (SIL OFL 1.1), from
@@ -549,10 +549,11 @@ def premultiplied(draw, w, h, ax, ay):
     return (a.astype(np.uint32) << 24) | (pre[..., 0].astype(np.uint32) << 16) | (pre[..., 1].astype(np.uint32) << 8) | pre[..., 2].astype(np.uint32)
 
 
-def ember(c, x, y, size, sway):
-    """sky.py's ember at rest (t 0), its glow at GLOW."""
+def ember(c, x, y, size, sway, smoke=True):
+    """sky.py's ember at rest (t 0), its glow at GLOW; without its smoke thread, the short tail the game gives the embers
+    that fall while many others do (SPEC.md's frame cost: the smoke thread goes first)."""
     r = (3.0, 4.6, 7.0)[size]
-    for i in range(1, 7):
+    for i in range(1, 7 if smoke else 1):
         c.ell(x - sway * i * 0.9 + math.sin(i * 1.3) * 0.8, y - i * r * 1.05, max(0.6, r * (0.8 - i * 0.09)), col='#3A2E3A', a=95 - i * 12)
     for i in range(1, 5):
         c.ell(x - sway * i * 0.6, y - i * r * 0.75, r * (0.92 - i * 0.17), col=EMBER, a=200 - i * 42)
@@ -575,6 +576,15 @@ def fire(c, x, y, f):
                 (x + dx - w_ * 0.55, y - h * 0.5)], EMBER)
         c.poly([(x + dx - w_ * 0.55, y), (x + dx + w_ * 0.55, y), (x + dx + lean, y - h * 0.62)], '#FFC23A')
     c.poly([(x - 2.2, y), (x + 2.2, y), (x + lean * 0.6, y - 7)], '#FFF2B0')
+
+
+def puff(c, x, y, f):
+    """sky.py's steam, frames 1 to 4 (the puff rising and thinning) of a medium ember's, in the day's haze; the game
+    draws frame 0's flash, the flecks, the dead cinder and the points itself."""
+    r0, k = 7, f / 4
+    for (dx, dy, r) in [(0, 0, 1.0), (-0.9, -0.5, 0.78), (0.85, -0.7, 0.82), (-0.2, -1.4, 0.68), (1.0, -1.8, 0.5), (-1.2, -2.0, 0.46)]:
+        c.ell(x + dx * r0 * (0.8 + k * 0.7), y + dy * r0 * (0.8 + k * 0.7) - k * 9, r * r0 * (0.75 + 0.5 * (1 - abs(k - 0.4))),
+              col=mix('#FFFFFF', TOD['day']['haze'], 0.25), a=235 * (1 - k) ** 0.8 + 20)
 
 
 def mask(draw, w, h, ax, ay):
@@ -617,7 +627,11 @@ class Pack:
         ys, xs = np.nonzero(a)
         x0, x1, y0, y1 = xs.min(), xs.max() + 1, ys.min(), ys.max() + 1
         cut = words[y0:y1, x0:x1]
-        self.add(name, 1, x1 - x0, y1 - y0, ax - x0, ay - y0, cut.astype('<u4').tobytes())
+        spans = b''  # each row's first and last-plus-one column with ink, so the game skips the clear ends
+        for row in (cut >> 24) & 255:
+            ink = np.nonzero(row)[0]
+            spans += bytes((int(ink.min()), int(ink.max()) + 1) if len(ink) else (0, 0))
+        self.add(name, 1, x1 - x0, y1 - y0, ax - x0, ay - y0, cut.astype('<u4').tobytes() + spans)
 
     def glyph(self, name, a, ax, ay, adv=0):
         a, ax, ay = trimmed(a, ax, ay)
@@ -689,15 +703,19 @@ def build():
     pk.add('SCENE', 0, W, H, 0, 0, idx.tobytes())
     pk.add('PALETTE', 0, COLOURS, H // BAND, 0, 0, pal.tobytes())
     pk.add('CHARRED', 0, boxes[0][2], boxes[0][3] * 8, 0, 0, b''.join(c.tobytes() for c in cidx))
-    for size in range(3):  # upright: the game leans a tail by shifting its rows (draw_ember)
-        r = (3.0, 4.6, 7.0)[size]
-        w, h = int(2 * r + 14), int(r * 7.5 + r + 14)
-        ax, ay = w // 2, h - int(r) - 8
-        pk.sprite(f'EMBER{size}', premultiplied(lambda c, x, y: ember(c, x + 0.5, y + 0.5, size, 0.0), w, h, ax, ay), ax, ay)
+    for smoke in (True, False):  # upright: the game leans a tail by shifting its rows (patch/game_embergarden.c sprite)
+        for size in range(3):
+            r = (3.0, 4.6, 7.0)[size]
+            w, h = int(2 * r + 14), int(r * 7.5 + r + 14)
+            ax, ay = w // 2, h - int(r) - 8
+            pk.sprite(f'EMBER{size}' if smoke else f'SHORT{size}',
+                      premultiplied(lambda c, x, y: ember(c, x + 0.5, y + 0.5, size, 0.0, smoke), w, h, ax, ay), ax, ay)
     pk.glyph('FIREGLOW', mask(lambda c, x, y: c.glow(x + 0.5, y - 4, 22, '#FFFFFF', 70 + 60 * GLOW, 6, 13), 50, 40, 25, 28),
              25, 28)
     for f in range(3):
         pk.sprite(f'FIRE{f}', premultiplied(lambda c, x, y: fire(c, x + 0.5, y, f), 50, 40, 25, 28), 25, 28)
+    for f in range(1, 5):
+        pk.sprite(f'PUFF{f}', premultiplied(lambda c, x, y: puff(c, x + 0.5, y + 0.5, f), 48, 56, 24, 36), 24, 36)
     pk.glyph('BOLTGLOW', mask(lambda c, x, y: c.glow(x + 0.5, y + 0.5, 34, '#FFFFFF', 150, 7), 72, 72, 36, 36), 36, 36)
     text_parts(pk)
     data = pk.write()

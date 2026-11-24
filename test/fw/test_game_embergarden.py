@@ -29,7 +29,7 @@ R = [3.0, 4.6, 7.0]
 
 
 class Ember(C.Structure):
-    _fields_ = [(k, C.c_int) for k in 'bx y vx vy phase amp size alive'.split()]
+    _fields_ = [(k, C.c_int) for k in 'bx y vx vy phase amp size alive smoke'.split()]
 
 
 class Shot(C.Structure):
@@ -595,6 +595,24 @@ def test_the_title_card_the_score_and_the_result_card_are_drawn(fw):
     assert list(buf[282 * 375:300 * 375]) != zero
     ink = [buf[y * 375 + x] & 0xffffff for y in range(284, 298) for x in range(60, 110)]
     assert 0x381e11 in ink  # the score in the marker's ink, #3A2414 in dawn's light
+    g.close()
+
+
+@pytest.mark.parametrize('aim', [-17000, -13000, -9000, -6000, -2300, -1000])
+def test_the_sprinklers_barrel_lies_along_the_aim(fw, aim):
+    """The barrel, a stroke 6.4 px wide from 5 px behind the pivot to 20 px out, in brass lit by the time of day: its
+    middle is brass, 6 px to either side of it is not."""
+    g = Game(fw)
+    c, buf = canvas(fw)
+    g.play()
+    g.quiet()
+    g.g.aim = aim
+    g.paint((c, buf))
+    a = math.radians(aim / 100)
+    ux, uy = math.cos(a), math.sin(a)
+    brass = 0xd9 * 251 >> 8 << 16 | 0xa6 * 220 >> 8 << 8 | 0x32 * 225 >> 8  # #D9A632 in dawn's light
+    at = lambda d, side: buf[int(270 + uy * d + ux * side) * 375 + int(187.5 + ux * d - uy * side)] & 0xffffff
+    assert at(14, 0) == brass and at(14, 6) != brass and at(14, -6) != brass
     g.close()
 
 
