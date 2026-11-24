@@ -10,7 +10,7 @@ import struct
 import pytest
 
 from test_engine import E_CENTRE, E_NEXT, E_PREV, E_TOUCH, ENGINE, RETURN, Eng, GameDef, Input, api, screen
-from test_games import PAGE, Canvas, Page, fnv1a
+from test_games import PAGE, Canvas, Page, fnv1a, heard
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 ART = (ROOT / 'assets/games/embergarden.bin').read_bytes()
@@ -28,7 +28,7 @@ TICK, TAP, ALERT = 1, 2, 3  # clicker_kind as eng_sfx sets it
 R = [3.0, 4.6, 7.0]
 
 
-class Ember(C.Structure):
+class Ember(C.Structure):  # G_EMBERS of them
     _fields_ = [(k, C.c_int) for k in 'bx y vx vy phase amp size alive smoke'.split()]
 
 
@@ -37,15 +37,15 @@ class Shot(C.Structure):
 
 
 class Puff(C.Structure):
-    _fields_ = [(k, C.c_int) for k in 'x y t size pts alive'.split()]
+    _fields_ = [(k, C.c_int) for k in 'x y f t size pts alive'.split()]
 
 
 class State(C.Structure):
     _fields_ = [('art', C.c_uint * (HDR['EG_ART_BYTES'] // 4)), ('pal', C.c_uint * (320 // BAND * 256)),
-                ('grow', C.c_ubyte * (8 * CH_W * CH_H)), ('ok', C.c_int), ('em', Ember * 24), ('sh', Shot * 3), ('pf', Puff * 4),
-                *((k, C.c_int) for k in 'mode aim recoil spray repeat stop h'.split()), ('bed', C.c_int * 8),
-                ('bed_t', C.c_int * 8), ('land_x', C.c_int), ('land_t', C.c_int), ('last', C.c_int * 2),
-                *((k, C.c_int) for k in 'blink wave lull left spawn gap banner cleared light frm k strip dim bolt bolt_x '
+                ('grow', C.c_ubyte * (8 * CH_W * CH_H)), ('ok', C.c_int), ('em', Ember * 12), ('sh', Shot * 3), ('pf', Puff * 3),
+                *((k, C.c_int) for k in 'mode aim recoil spray repeat stop h tick'.split()), ('bed', C.c_int * 8),
+                ('bed_t', C.c_int * 8), ('land_x', C.c_int), ('land_t', C.c_int), ('last', C.c_int * 2), ('blink', C.c_int),
+                ('flame', C.c_ubyte * 8), *((k, C.c_int) for k in 'wave lull left spawn gap banner cleared light frm k strip dim bolt bolt_x '
                                        'bolt_seed bolt_wait card seq runs wait'.split()),
                 ('score', C.c_uint), ('seed', C.c_uint), ('boxes', C.c_int), ('box', (C.c_int * 4) * 64),
                 *((k, C.c_uint) for k in 'magic best best_wave sum saved'.split())]
@@ -143,20 +143,14 @@ def test_the_game_opens_on_its_title_card_full_screen_with_its_art_in_its_heap(f
 
 
 @pytest.mark.parametrize('art', [None, ART[:-4], b'X' + ART[1:], ART[:8] + b'\0\0\0\0' + ART[12:]])
-def test_a_missing_or_damaged_art_file_leaves_a_plain_scene_and_the_game_whole(fw, art):
+def test_a_missing_or_damaged_art_file_says_so_and_leaves(fw, art):
+    toasts = heard(fw)
     g = Game(fw, art=art)
-    assert g.g.ok == 0
-    g.play()
-    g.quiet()
-    g.ember(0, 100, 200, size=2, vy=1)
-    buf = g.paint(canvas(fw))
-    mix = lambda a, b, k, n: sum((((a >> s) & 255) + int((((b >> s) & 255) - ((a >> s) & 255)) * k / n)) << s for s in (16, 8, 0))
-    assert buf[10 * 375 + 187] & 0xffffff == mix(0x2f86d8, 0xd6f0f8, 10, 198) == 0x378bd9
-    assert buf[300 * 375 + 10] & 0xffffff == 0x4c843d  # the lawn's green in dawn's light
-    assert buf[200 * 375 + 100] & 0xffffff == 0xff7a1a  # the ember, a disc
-    for _ in range(80):
-        g.step()
-    assert g.g.bed[2] == CAUGHT or g.g.bed[2] == BURNING  # it landed on the nearest bed
+    assert g.g.ok == 0 and toasts == [b"Ember Garden's art is missing"]
+    c, buf = canvas(fw)
+    g.paint((c, buf))
+    assert set(buf) == {0xff000000}  # black until it leaves
+    assert g.step(pressed=E_CENTRE) == 0 and Eng.from_address(fw.var('engine__en', C.c_void_p).value).quit == 1
     g.close()
 
 
@@ -483,6 +477,26 @@ def test_the_light_turns_a_strip_of_8_rows_a_step_the_palette_a_32nd_further_eac
     y = 100
     i = SCENE[y * 375 + 50]
     assert g.g.pal[(y // BAND) * 256 + i] & 0xffffff == colour(DAY, y, i)
+    g.close()
+
+
+def test_a_full_sky_leaves_the_extras_for_a_step_with_room(fw):
+    """Twelve embers with long tails falling mark more than the step's budget: the light's strip, a due puff and the banner's fade
+    wait, and go on once the sky is quiet."""
+    g = Game(fw)
+    g.play()
+    g.quiet()
+    g.g.frm, g.g.light, g.g.k, g.g.strip = DAWN, DAY, 3, 5
+    for k in range(12):
+        g.ember(k, 40 + 25 * k, 60 + 9 * k, size=2 if k < 6 else 1, amp=18, vy=2).smoke = 1
+    g.g.pf[0].alive, g.g.pf[0].x, g.g.pf[0].y, g.g.pf[0].f, g.g.pf[0].t = 1, 100, 100, 1, 9
+    g.g.banner = 50
+    g.step()
+    assert (g.g.k, g.g.strip, g.g.pf[0].f, g.g.banner) == (3, 5, 1, 50)
+    for e in g.g.em:
+        e.alive = 0
+    g.step(), g.step()
+    assert g.g.strip > 5 and g.g.pf[0].f == 2 and g.g.banner > 50
     g.close()
 
 

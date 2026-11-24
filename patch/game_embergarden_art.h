@@ -1,6 +1,6 @@
 /* Ember Garden's art (tools/embergarden_art.py writes this and assets/games/embergarden.bin; do not edit): the
  * file's size and parts, and the scene's places. */
-#define EG_ART_BYTES 221632u
+#define EG_ART_BYTES 219200u
 #define EG_ART_MAGIC 0x31414745u
 #define EG_BAND 32    /* rows a palette */
 #define EG_COLOURS 256 /* colours a palette */
@@ -27,7 +27,6 @@ enum {
     EG_PUFF2, /* 29 x 29 */
     EG_PUFF3, /* 30 x 31 */
     EG_PUFF4, /* 31 x 32 */
-    EG_BOLTGLOW, /* 69 x 69 */
     EG_SIGN_0, /* 8 x 9 */
     EG_SIGN_1, /* 4 x 9 */
     EG_SIGN_2, /* 7 x 9 */

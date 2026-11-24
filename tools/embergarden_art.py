@@ -716,7 +716,6 @@ def build():
         pk.sprite(f'FIRE{f}', premultiplied(lambda c, x, y: fire(c, x + 0.5, y, f), 50, 40, 25, 28), 25, 28)
     for f in range(1, 5):
         pk.sprite(f'PUFF{f}', premultiplied(lambda c, x, y: puff(c, x + 0.5, y + 0.5, f), 48, 56, 24, 36), 24, 36)
-    pk.glyph('BOLTGLOW', mask(lambda c, x, y: c.glow(x + 0.5, y + 0.5, 34, '#FFFFFF', 150, 7), 72, 72, 36, 36), 36, 36)
     text_parts(pk)
     data = pk.write()
     return data, pk, boxes

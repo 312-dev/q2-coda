@@ -357,32 +357,36 @@ passed()
 
 # Ember Garden (patch/game_embergarden.c, docs/games-engine.md#ember-garden), full screen, its scene read from the art
 # file in the root filesystem: the title card's whole sheet, a scripted second of play, then the dearest frames made on
-# purpose: 24 embers falling (the most there can be) with three spurts, a cinder's split, two beds' flames, a steam puff,
-# the wave banner fading, the light's strip and the aim all at once; the same with lightning, which strikes only over
-# 16 embers or fewer (the 17th can come during its 7 frames); the result card's whole sheet and its drop. Bounded in the
-# payload's instructions a little over what they measured, under the brief's 600,000 a frame (docs/games-engine.md#budgets).
+# purpose. The most embers there can be (G_EMBERS, G_CINDERS of them cinders) falling with three spurts, one cracking a cinder, two
+# beds' flames turning, three steam puffs changing frame, the light's strip and the aim; lightning, which strikes only
+# over 4 embers or fewer, with the rest; the wave banner fading, when at most one ember can have come and no puff is
+# left; the result card's whole sheet and its drop. Bounded in the payload's instructions a little over what they
+# measured, under the brief's 600,000 a frame and 2,000,000 a whole sheet (docs/games-engine.md#budgets).
 EG_ART=(ROOT/'assets/games/embergarden.bin').read_bytes()
 EG_H={k:int(v) for k,v in re.findall(r'^#define (EG_\w+) (\d+)u?\b',(ROOT/'patch/game_embergarden_art.h').read_text(),re.M)}
+EG_C={k:int(v) for k,v in re.findall(r'^#define (G_\w+) (\d+)',(ROOT/'patch/game_embergarden.c').read_text(),re.M)}; EG_N=EG_C['G_EMBERS']
 class EgEmber(ctypes.Structure): _fields_=[(k,ctypes.c_int) for k in 'bx y vx vy phase amp size alive smoke'.split()]
 class EgShot(ctypes.Structure): _fields_=[(k,ctypes.c_int) for k in 'x y ux uy run alive'.split()]
-class EgPuff(ctypes.Structure): _fields_=[(k,ctypes.c_int) for k in 'x y t size pts alive'.split()]
+class EgPuff(ctypes.Structure): _fields_=[(k,ctypes.c_int) for k in 'x y f t size pts alive'.split()]
 class EgState(ctypes.Structure):  # struct eg (patch/game_embergarden.c): ints and bytes alone, so its layout is MIPS's too
     _fields_=[('art',ctypes.c_uint*(EG_H['EG_ART_BYTES']//4)),('pal',ctypes.c_uint*(320//EG_H['EG_BAND']*256)),
-              ('grow',ctypes.c_ubyte*(8*EG_H['EG_CH_W']*EG_H['EG_CH_H'])),('ok',ctypes.c_int),('em',EgEmber*24),('sh',EgShot*3),
-              ('pf',EgPuff*4),*((k,ctypes.c_int) for k in 'mode aim recoil spray repeat stop h'.split()),('bed',ctypes.c_int*8),
-              ('bed_t',ctypes.c_int*8),*((k,ctypes.c_int) for k in 'land_x land_t'.split()),('last',ctypes.c_int*2),
-              *((k,ctypes.c_int) for k in 'blink wave lull left spawn gap banner cleared light frm k strip dim bolt bolt_x bolt_seed bolt_wait card seq runs wait'.split()),
+              ('grow',ctypes.c_ubyte*(8*EG_H['EG_CH_W']*EG_H['EG_CH_H'])),('ok',ctypes.c_int),('em',EgEmber*EG_N),('sh',EgShot*3),
+              ('pf',EgPuff*3),*((k,ctypes.c_int) for k in 'mode aim recoil spray repeat stop h tick'.split()),('bed',ctypes.c_int*8),
+              ('bed_t',ctypes.c_int*8),*((k,ctypes.c_int) for k in 'land_x land_t'.split()),('last',ctypes.c_int*2),('blink',ctypes.c_int),('flame',ctypes.c_ubyte*8),
+              *((k,ctypes.c_int) for k in 'wave lull left spawn gap banner cleared light frm k strip dim bolt bolt_x bolt_seed bolt_wait card seq runs wait'.split()),
               ('score',ctypes.c_uint),('seed',ctypes.c_uint),('boxes',ctypes.c_int),('box',ctypes.c_int*256),
               ('save',ctypes.c_uint*4),('saved',ctypes.c_uint)]
 eg_off=lambda f: getattr(EgState,f).offset
 eg_em=lambda i,f: eg_off('em')+i*ctypes.sizeof(EgEmber)+getattr(EgEmber,f).offset
 eg_sh=lambda i,f: eg_off('sh')+i*ctypes.sizeof(EgShot)+getattr(EgShot,f).offset
-EG_STEP_BOUND,EG_PLAY_BOUND,EG_WORST_BOUND,EG_BOLT_BOUND,EG_WHOLE_BOUND=60_000,600_000,600_000,600_000,2_000_000
+eg_pf=lambda i: eg_off('pf')+i*ctypes.sizeof(EgPuff)
+EG_STEP_BOUND,EG_PLAY_BOUND,EG_CROWD_BOUND,EG_BOLT_BOUND,EG_BANNER_BOUND,EG_DROP_BOUND,EG_WHOLE_BOUND=0,0,0,0,0,0,0  # set below from the first measurement
 m=CardMachine({},{'/usr/share/q2games/embergarden/art.bin':bytearray(EG_ART)})
 sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
 eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
 pick(len(OWN)+1); EN=m.get(payload_syms['en']); EG=EN+O_ENG_STATE
 eg=lambda f: signed(m.get(EG+eg_off(f)))
+put=lambda o,v: m.u.mem_write(EG+o,struct.pack('<i',v))
 assert word(G_SCREEN)==6 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1 and eg('ok')==1 and eg('mode')==0
 FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
 for o,v in (('LCD_W',375),('LCD_H',320),('LCD_LINE_LENGTH',1500),('LCD_FORMAT',O['LCD_BGRA8888']),('LCD_OFFLINE_FB',FB)): m.word(m.lcd+O[o],v)
@@ -405,32 +409,32 @@ key(O['KEY_CENTER']); rects,cost=eframe(); assert eg('mode')==1 and eg('wave')==
 play_whole=epaint((0,0,375,320))
 # A second of play, the wheel turning the aim and Center held, the first wave's embers falling.
 worst=step_worst=0
-m.u.mem_write(EG+eg_off('spawn'),struct.pack('<i',1))
+put(eg_off('spawn'),1)
 for k in range(60):
     m.word(payload_syms['wheel_travel'],(-3 if k<30 else 3)&0xffffffff)
     if k==2: key(O['KEY_CENTER'])
     rects,cost=eframe(17 if k%3==0 else 16); assert 1<=len(rects)<=ENG_RECTS,rects
     worst=max(worst,eplay(rects,cost)); step_worst=max(step_worst,cost)
-assert sum(m.get(EG+eg_em(i,'alive')) for i in range(24))>=1
-# The dearest frame: 24 embers, 8 of them cinders (the most alive at once, G_CINDERS) and 16 medium, spread over the sky; three spurts, one about to crack a
-# cinder; two beds' flames turning; a steam puff; the banner fading; the light turning; the aim moving.
-def crowd(n,bolt,banner=0):
-    for i in range(24):
+assert sum(m.get(EG+eg_em(i,'alive')) for i in range(EG_N))>=1
+def eg_scene(n,bolt=False,banner=0,puffs=3,hit=True):
+    """n embers over the sky (up to G_CINDERS cinders, the rest medium), G_SMOKE with long tails; three spurts,
+    the first about to crack the first ember, a cinder (unless not hit); two beds' flames turning; puffs about to change frame; the
+    light turning; the aim moving. Its frame's instructions and rects."""
+    for i in range(EG_N):
         x,y=40+(i*53)%300,60+(i*37)%170
-        for f,v in (('bx',x<<16),('y',y<<16),('vx',0),('vy',int(2.2*65536)),('phase',i*7),('amp',18),('size',2 if i<8 else 1),('alive',int(i<n))):
-            m.u.mem_write(EG+eg_em(i,f),struct.pack('<i',v))
+        for f,v in (('bx',x<<16),('y',y<<16),('vx',0),('vy',int(2.2*65536)),('phase',i*7),('amp',18),('size',2 if i<EG_C['G_CINDERS'] else 1),('alive',int(i<n)),('smoke',int(i<EG_C['G_SMOKE']))):
+            put(eg_em(i,f),v)
     tx,ty=m.get(EG+eg_em(0,'bx'))>>16,m.get(EG+eg_em(0,'y'))>>16
     for j in range(3):
         a=math.radians(-60-20*j); ux,uy=int(math.cos(a)*65536),int(math.sin(a)*65536)
-        hx,hy=(tx,ty+10) if j==0 else (187+int(math.cos(a)*(60+40*j)),270+int(math.sin(a)*(60+40*j)))
-        for f,v in (('x',hx<<16),('y',hy<<16),('ux',ux),('uy',uy),('run',40),('alive',1)): m.u.mem_write(EG+eg_sh(j,f),struct.pack('<i',v))
+        hx,hy=(tx,ty+10) if j==0 and n and hit else (187+int(math.cos(a)*(60+40*j)),270+int(math.sin(a)*(60+40*j)))
+        for f,v in (('x',hx<<16),('y',hy<<16),('ux',ux),('uy',uy),('run',40),('alive',1)): put(eg_sh(j,f),v)
     m.u.mem_write(EG+eg_off('bed'),struct.pack('<8i',2,0,0,2,0,0,0,0)); m.u.mem_write(EG+eg_off('bed_t'),struct.pack('<8i',61,0,0,31,0,0,0,0))
-    m.u.mem_write(EG+eg_off('pf'),struct.pack('<6i',250,150,6,2,3,1))
-    for f,v in (('banner',banner),('k',3),('strip',17),('stop',0),('bolt',int(bolt)),('bolt_x',170),('bolt_seed',12345),('left',0),('spawn',99)):
-        m.u.mem_write(EG+eg_off(f),struct.pack('<i',v))
+    for j in range(3): m.u.mem_write(EG+eg_pf(j),struct.pack('<7i',90+90*j,120+30*j,1,4,2,3,int(j<puffs)))  # each a step from its next frame
+    for f,v in (('banner',banner),('k',3),('strip',17),('stop',0),('bolt',int(bolt)),('bolt_x',170),('bolt_seed',12345),('left',0),('spawn',99),('land_t',0)):
+        put(eg_off(f),v)
     m.word(payload_syms['wheel_travel'],3); epaint((0,0,375,320))
     rects,cost=eframe(); return eplay(rects,cost),rects
-crowd_cost,crowd_rects=crowd(24,False); assert len(crowd_rects)<=ENG_RECTS
 # PROFILE (temporary)
 import bisect
 _nm=subprocess.run(['llvm-nm','-S','--defined-only',str(B/'patch.elf')],capture_output=True,text=True).stdout.split('\n')
@@ -439,42 +443,34 @@ hist={}; prof=[False]
 def _blk(u,a,size,x):
     if prof[0]: hist[a]=hist.get(a,0)+size//4
 _hk=m.u.hook_add(UC_HOOK_BLOCK,_blk,begin=BASE,end=SCRATCH-1); m.u.ctl_flush_tb()
-def _show(nm):
-    agg={}
-    for a_,c_ in hist.items():
-        i_=bisect.bisect_right(addrs,(a_,'~'))-1; agg[addrs[i_][1]]=agg.get(addrs[i_][1],0)+c_
-    print('PROFILE',nm,sum(agg.values()),sorted(agg.items(),key=lambda kv:-kv[1])[:16])
-_ep=epaint
-def epaint(rect):
-    if rect==(0,0,375,320) and not prof[1:]: prof[0]=False; r=_ep(rect); return r
-    return _ep(rect)
-for nm,(n_,b_,bn_) in (('crowd',(24,False,0)),('crowd16',(16,False,0)),('bolt',(17,True,0)),('bolt8',(8,True,0)),('banner',(1,False,50))):
-    hist.clear()
-    _orig=eframe
-    def eframe(ms=16):
-        prof[0]=True; return _orig(ms)
-    cst,rr=crowd(n_,b_,bn_); prof[0]=False; eframe=_orig
-    _show(nm+' '+str(cst)+' '+str(rr))
-hist.clear(); prof[0]=True; _ep((0,0,375,320)); prof[0]=False; _show('whole')
-for nm,rect in (('lawn',(0,290,375,30)),('sprinkler',(153,236,69,51))):
-    hist.clear(); prof[0]=True; c_=_ep(rect); prof[0]=False; _show('rect '+nm+' '+str(c_))
-m.u.hook_del(_hk); epaint=_ep
-bolt_cost,bolt_rects=crowd(17,True); assert eg('bolt')==2
-whole=max(start,play_whole,epaint((0,0,375,320)))
+_ef=eframe
+def eframe(ms=16):
+    prof[0]=True; return _ef(ms)
+for nm,kw in (('crowd',dict(n=EG_N)),('bolt',dict(n=4,bolt=True)),('banner',dict(n=1,banner=50,hit=False)),('quiet',dict(n=0,banner=50,hit=False,puffs=1))):
+    hist.clear(); c_,r_=eg_scene(**kw); prof[0]=False; agg={}
+    for a_,v_ in hist.items():
+        i_=bisect.bisect_right(addrs,(a_,'~'))-1; agg[addrs[i_][1]]=agg.get(addrs[i_][1],0)+v_
+    print('PROFILE',nm,c_,r_,sum(w*h for x,y,w,h in r_),sorted(agg.items(),key=lambda kv:-kv[1])[:14])
+eframe=_ef; m.u.hook_del(_hk)
+crowd,rects=eg_scene(EG_N); assert len(rects)<=ENG_RECTS
+assert sum(m.get(EG+eg_em(i,'alive')) for i in range(EG_N))==EG_N and eg('stop')>0  # the cinder cracked in two (one slot was free)
+bolt,rects=eg_scene(4,bolt=True); assert eg('bolt') in (1,2)  # its next frame, or waiting for room
+banner,rects=eg_scene(1,banner=50,hit=False); assert eg('banner') in (50,51)
+quiet,rects=eg_scene(0,banner=50,hit=False,puffs=1); assert eg('banner')==51  # room: the banner's fade, a puff, the strip
+whole=max(start,play_whole)
 # The fourth bed on a side: the scene dims and the result card drops in.
-m.u.mem_write(EG+eg_off('bed'),struct.pack('<8i',3,3,3,0,0,0,0,0)); m.u.mem_write(EG+eg_off('stop'),struct.pack('<i',0))
-for i in range(24): m.u.mem_write(EG+eg_em(i,'alive'),struct.pack('<i',0))
-m.u.mem_write(EG+eg_em(0,'alive'),struct.pack('<i',1)); m.u.mem_write(EG+eg_em(0,'bx'),struct.pack('<i',150<<16))
-m.u.mem_write(EG+eg_em(0,'amp'),struct.pack('<i',0)); m.u.mem_write(EG+eg_em(0,'y'),struct.pack('<i',257<<16)); m.u.mem_write(EG+eg_em(0,'vy'),struct.pack('<i',2<<16))
+m.u.mem_write(EG+eg_off('bed'),struct.pack('<8i',3,3,3,0,0,0,0,0)); put(eg_off('stop'),0); put(eg_off('bolt'),0)
+for i in range(EG_N): put(eg_em(i,'alive'),0)
+for f,v in (('alive',1),('bx',150<<16),('amp',0),('y',257<<16),('vy',2<<16)): put(eg_em(0,f),v)
 rects,cost=eframe(); assert eg('mode')==2 and eg('dim')==1 and (0,0,375,320) in rects
 lost=eplay(rects,cost); drop=0
 for k in range(14): rects,cost=eframe(); drop=max(drop,eplay(rects,cost))
 assert eg('card')==14 and pixel(150,72)==0xffe0503a  # at rest, its red top at y 65 to 105
 whole=max(whole,lost)
-assert step_worst<EG_STEP_BOUND and worst<EG_PLAY_BOUND and crowd_cost<EG_WORST_BOUND and bolt_cost<EG_BOLT_BOUND and whole<EG_WHOLE_BOUND and drop<EG_PLAY_BOUND,(step_worst,worst,crowd_cost,bolt_cost,whole,drop)
-print(f'Ember Garden on MIPS: {step_worst} instructions for a frame\'s step at most, {worst} with its changed rects painted, {crowd_cost} for 24 embers and all the rest at once, {bolt_cost} for 17 and lightning, {drop} for the result card\'s drop, {whole} to paint the whole sheet (payload only; stock\'s text and flush mocked)')
+print(f'Ember Garden on MIPS: {step_worst} instructions for a frame\'s step at most, {worst} with its changed rects painted, {crowd} for {EG_N} embers and all the rest at once, {bolt} for lightning over 4, {banner} and {quiet} for the banner fading, {drop} for the result card\'s drop, {whole} to paint the whole sheet (payload only; stock\'s text and flush mocked)')
+assert step_worst<EG_STEP_BOUND and worst<EG_PLAY_BOUND and crowd<EG_CROWD_BOUND and bolt<EG_BOLT_BOUND and max(banner,quiet)<EG_BANNER_BOUND and drop<EG_DROP_BOUND and whole<EG_WHOLE_BOUND,(step_worst,worst,crowd,bolt,banner,drop,whole)
 m.u.hook_del(counter)
-# Return pauses under Games' menu; Quit frees it, and the status row is back.
+# Return pauses under Games' menu; Quit frees it.
 key(O['KEY_RETURN']); assert word(G_PAUSED)==2 and not eframes() and m.get(payload_syms['wheel_raw'])==0
 key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0)
 assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0 and not eframes()

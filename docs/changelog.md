@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Games: **Ember Garden**, a new game in Games. Embers fall from a volcano's ash cloud onto a kitchen garden; aim the brass sprinkler with the wheel (or Previous and Next, or a finger) and press Center to spray them out before they land. A large ember cracks into two small ones, a landing ember sets the nearest bed alight, and losing four beds on one side ends the game. The waves grow faster as the day turns to night, every tenth is a lull of large embers worth double, and your best score and wave are kept. It fills the whole screen; the clock shows when you pause.
   - Bluetooth: each paired device has its own **Volume Limit** on its page, No Limit until you set one. While that device is connected the volume stops at its limit, from the wheel, Control Center, Settings, the Car Remote or the device's own buttons, and Max Volume still applies on top. Wired and USB headphones and your other Bluetooth devices keep their own levels.
   - Lyrics: after you scroll synced lyrics away, they go back to the line being sung and follow the song again once you leave them alone for 5 seconds. Tapping a synced line plays the song from that line; tap the line being sung to show the lyrics full screen as before.
   - Streamed songs: a song from your server starts as soon as its first 3 seconds have downloaded, up to half a second sooner than before, where the Subsonic app waited for its next progress report.
