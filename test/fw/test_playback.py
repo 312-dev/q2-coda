@@ -3233,3 +3233,17 @@ def test_a_song_taken_out_under_a_shuffle_leaves_the_rest_of_the_order(fw, playe
     del rows[gone]
     fw.fn('playback_poll', None)()
     assert player.up_next()[:6] == [i for i in coming[:7] if i != gone]
+
+
+def test_a_next_between_shuffle_on_and_its_ui_pass_plays_stocks_draw_then_the_order_from_it(fw, player, mcl):
+    """Now Playing's Shuffle and an at-once Next or song end before the UI pass that takes the order (shuffle_own):
+    that one change is stock's draw, and the order is then drawn from the song it chose, so Up Next lists what plays
+    from there; nothing listed before the pass was ever shown."""
+    player.load(player.albums(6), 2)
+    mcl.type, mcl.mode = LIBRARY, 2
+    fw.mock('stock_next_trampoline', lambda auto, *_: setattr(mcl, 'pos', 4) or 0)  # stock's pick from its pool
+    assert player.next(0) == 0 and player.s.active == 0 and mcl.pos == 4
+    fw.fn('playback_poll', None)()
+    assert player.s.active == 1 and player.s.order[player.s.cursor].index == 4
+    coming = player.up_next()
+    assert player.run(5) == coming[:5]
