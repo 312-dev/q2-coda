@@ -30,16 +30,18 @@
 #define P_LOST 302    /* a ball whose centre is this low is wholly behind the counter: missed */
 #define P_PAD_W 60
 #define P_WIDE_W 90
-#define P_WHEEL 2   /* px a wheel position */
-#define P_KEY 4     /* px a step while Previous or Next is held */
-#define P_STEEP 43  /* 15 degrees (1024 a turn): the shallowest a path may be */
-#define P_TILT 171  /* 60 degrees: the trampoline's end turns a path this far from vertical */
-#define P_TRIO 85   /* 30 degrees: TRIO's two balls leave this far either side */
-#define P_HUD_Y 21  /* the HUD plaques' middle row; paused, P_HUD_Y2 */
-#define P_HUD_Y2 38 /* 38.5 in the design */
-#define P_SEQ 6     /* frames between the sounds of a run */
-#define P_FX 20     /* effects at once */
-#define P_BULBS 32  /* the beam's 14 and 9 down each wall: one bit each */
+#define P_WHEEL 2       /* px a wheel position */
+#define P_KEY 4         /* px a step while Previous or Next is held */
+#define P_STEEP 43      /* 15 degrees (1024 a turn): the shallowest a path may be */
+#define P_TILT 171      /* 60 degrees: the trampoline's end turns a path this far from vertical */
+#define P_TRIO 85       /* 30 degrees: TRIO's two balls leave this far either side */
+#define P_HUD_Y 21      /* the HUD plaques' middle row; paused, P_HUD_Y2 */
+#define P_HUD_Y2 38     /* 38.5 in the design */
+#define P_SEQ 6         /* frames between the sounds of a run */
+#define P_FX 20         /* effects at once */
+#define P_BULBS 32      /* the beam's 14 and 9 down each wall: one bit each */
+#define P_BULBS_STEP 10 /* bulbs that change in a frame (step) */
+#define P_FX_AREA 12000 /* px a frame's boxes may cover before an effect waits (effects) */
 #define P_MAGIC 0x31535450 /* "PTS1": the save */
 #define P_ART "/usr/share/q2games/popstall/art.bin"
 
@@ -137,12 +139,23 @@ static int pad_w(const struct pstall *b) { return b->wide_t ? P_WIDE_W : P_PAD_W
 
 /* ---- changed rects ---- */
 
-/* This part of the sheet changes: kept as at most ENG_RECTS boxes, a new one joined to the box it
- * grows least, so a frame's many small changes never become one box over the whole stall. */
+/* This part of the sheet changes: kept as at most ENG_RECTS boxes that never overlap, one that
+ * overlaps another joined to it, and past ENG_RECTS a new one joined to the box it grows least, so
+ * a frame's many small changes never become one box over the whole stall. */
 static void mark(struct pstall *b, int x, int y, int w, int h) {
     int x1 = x + w, y1 = y + h, best = 0;
     long long grow = -1;
-    if (w <= 0 || h <= 0) return;
+    x = x < 0 ? 0 : x, y = y < 0 ? 0 : y, x1 = x1 > ENG_W ? ENG_W : x1, y1 = y1 > b->h ? b->h : y1;
+    if (x1 <= x || y1 <= y) return;
+    for (int k = 0; k < b->marks;) { /* a box this overlaps joins it: no pixel is painted twice */
+        struct rect *r = &b->mark[k];
+        if (r->x0 < x1 && x < r->x1 && r->y0 < y1 && y < r->y1) {
+            x = x < r->x0 ? x : r->x0, y = y < r->y0 ? y : r->y0;
+            x1 = x1 > r->x1 ? x1 : r->x1, y1 = y1 > r->y1 ? y1 : r->y1;
+            *r = b->mark[--b->marks], k = 0;
+        } else
+            ++k;
+    }
     if (b->marks < ENG_RECTS) {
         struct rect *r = &b->mark[b->marks++];
         r->x0 = (short)x, r->y0 = (short)y, r->x1 = (short)x1, r->y1 = (short)y1;
@@ -167,6 +180,14 @@ static void flush_marks(struct pstall *b) {
     }
     b->marks = 0;
 }
+/* The area the frame's boxes cover so far. */
+static int marked(const struct pstall *b) {
+    int n = 0;
+    for (int k = 0; k < b->marks; ++k)
+        n += (b->mark[k].x1 - b->mark[k].x0) * (b->mark[k].y1 - b->mark[k].y0);
+    return n;
+}
+
 static void mark_all(struct pstall *b) {
     b->marks = 0;
     eng_dirty_all();
@@ -285,19 +306,45 @@ static const short fx_box[10][4] = {
 };
 static const unsigned char fx_life[10] = { 0, 12, 8, 10, 8, 30, 40, 24, 16, 3 };
 
+/* Whether effect e's frame t looks other than its frame t - 1 (or ends it): text rises a pixel at a
+ * time; a pop holds its flash, its burst and its first shreds two or three frames each; the star's
+ * stars move every other frame; the sparkles stand still. */
+static int fx_paints(const struct effect *e, int t) {
+    if (t <= 0) return !t; /* not shown yet; shown first */
+    if (t >= fx_life[e->kind]) return 1;
+    return e->kind == F_SCORE   ? t * 10 / 30 != (t - 1) * 10 / 30
+           : e->kind == F_CALL  ? t * 6 / 40 != (t - 1) * 6 / 40
+           : e->kind == F_POP   ? t == 2 || t == 4 || t >= 7
+           : e->kind == F_STARS ? !(t & 1)
+                                : e->kind != F_SPARK;
+}
+
 static void fx_mark(struct pstall *b, const struct effect *e) {
     const short *x = fx_box[e->kind];
     mark(b, e->x + x[0], e->y + x[1], x[2], x[3]);
 }
-static int add_fx(struct pstall *b, int kind, int x, int y, int v) {
+/* The frame's room left for effects: P_FX_AREA less what is marked and what each ball in play will
+ * mark at the step's end. */
+static int fx_room(const struct pstall *b) {
+    return P_FX_AREA - marked(b) - 1200 * (b->ball[0].live + b->ball[1].live + b->ball[2].live);
+}
+
+/* A new effect, shown delay frames from now; one that would not fit the frame's room waits a frame
+ * (its cell already gone, the old picture stays that frame). Its slot, or -1 when all are taken. */
+static int fx_new(struct pstall *b, int kind, int x, int y, int v, int delay) {
     for (int k = 0; k < P_FX; ++k)
         if (!b->fx[k].kind) {
             struct effect *e = &b->fx[k];
-            e->kind = (short)kind, e->t = 0, e->x = (short)x, e->y = (short)y, e->v = v;
-            fx_mark(b, e);
+            e->kind = (short)kind, e->x = (short)x, e->y = (short)y, e->v = v;
+            if (!delay && fx_box[kind][2] * fx_box[kind][3] > fx_room(b)) delay = 1;
+            e->t = (short)-delay;
+            if (!delay) fx_mark(b, e);
             return k;
         }
     return -1;
+}
+static int add_fx(struct pstall *b, int kind, int x, int y, int v) {
+    return fx_new(b, kind, x, y, v, 0);
 }
 
 static void sound(struct pstall *b, int kind, int n) {
@@ -455,8 +502,8 @@ static void hit(struct pstall *b, int i, int from_x) {
         }
         b->chain_n = m, b->chain_t = 2;
         b->star_fx = add_fx(b, F_SCORE, x, y - 29, (int)pts | 1 << 24);
-        add_fx(b, F_CALL, x, y - 44, C_GRAND);
-        add_fx(b, F_STARS, x, y, 0);
+        fx_new(b, F_CALL, x, y - 44, C_GRAND, 3); /* staggered: each its own frame to appear */
+        fx_new(b, F_STARS, x, y, 0, 5);
         b->allon_t = 60;
         for (int p = 0; p < 4; ++p) hop(b, p, p == 0 || p == 3 ? 2 : -2, 2);
         sound(b, ENG_SFX_TAP, 2);
@@ -578,8 +625,8 @@ static void over(struct pstall *b) {
     if (b->save.best + b->save.level != b->saved &&
         eng_save("popstall", &b->save, sizeof b->save, P_MAGIC))
         b->saved = b->save.best + b->save.level;
-    b->ball[0].live = b->ball[1].live = b->ball[2].live = 0;
-    mark_all(b);
+    b->ball[0].live = b->ball[1].live = b->ball[2].live =
+        0; /* the rows dim and the ticket rises in step */
 }
 
 /* The last ball in play went behind the counter: a life, and the next ball onto the mat. */
@@ -668,16 +715,35 @@ static void ball_box(const struct pstall *b, const struct ball *o, int *box) {
 
 static int fade_row(int r) { return r * 16 / (P_ROWS - 1); }
 
+/* The level clear's banner's top at frame t: it drops from behind the beam to 116 with one 3 px
+ * bounce. */
+static int banner_y(int t) {
+    static const signed char drop[10] = { -54, -40, -22, -5, 10, 22, 31, 63, 60, 60 };
+    return t < 0 ? P_TOP - 54 : t < 9 ? P_TOP + drop[t] : 116;
+}
+/* The game over's ticket, this far below its place at frame t: up from behind the counter in 10
+ * frames after the rows dim. */
+static int ticket_dy(int t) { return t < 5 ? 230 : t < 15 ? (15 - t) * 23 : 0; }
+
 /* The level clear's confetti piece k, the same every time: x, y, w, h and its colour's index. Four
  * come a frame once the banner has landed. */
-static void confetto(int k, int *p) {
+static void confetto_next(int first, int *p) { /* the next piece, or the first again */
     static const unsigned char sz[4][2] = { { 3, 2 }, { 2, 3 }, { 3, 3 }, { 4, 2 } };
-    unsigned r = 0x1b873593u;
-    for (int n = 0; n <= k; ++n) {
-        p[0] = 34 + (int)(rng(&r) % 304), p[1] = 70 + (int)(rng(&r) % 207);
-        int z = (int)(rng(&r) & 3);
-        p[2] = sz[z][0], p[3] = sz[z][1], p[4] = (int)(rng(&r) % 9);
-    }
+    static const unsigned seed = 0x1b873593u;
+    if (first) p[5] = (int)seed;
+    unsigned r = (unsigned)p[5];
+    p[0] = 34 + (int)(rng(&r) % 304), p[1] = 70 + (int)(rng(&r) % 207);
+    int z = (int)(rng(&r) & 3);
+    p[2] = sz[z][0], p[3] = sz[z][1], p[4] = (int)(rng(&r) % 9), p[5] = (int)r;
+}
+static void confetto(int k, int *p) {
+    for (int n = 0; n <= k; ++n) confetto_next(!n, p);
+}
+
+static void confetto_mark(struct pstall *b, int k) {
+    int p[6];
+    confetto(k, p);
+    mark(b, p[0], p[1], p[2] + 1, p[3] + 1);
 }
 
 static unsigned lit(const struct pstall *b) {
@@ -708,22 +774,25 @@ static void bulbs_mark(struct pstall *b, unsigned was, unsigned now) {
     if (hi[2] >= 0) mark(b, 362, lo[2] - 7, 13, hi[2] - lo[2] + 15);
 }
 
+/* Each effect a frame on. One whose next frame would repaint more of the stall than a frame has
+ * room for (P_FX_AREA, with what the balls and the rest marked) waits a frame instead, its picture
+ * held: a crowd of pops slows a little rather than a frame running long. Each frame starts from
+ * another effect, and the first always moves, so none waits for long. */
 static void effects(struct pstall *b) {
-    for (int k = 0; k < P_FX; ++k) {
+    for (int n = 0, k = b->frame % P_FX; n < P_FX; ++n, k = (k + 1) % P_FX) {
         struct effect *e = &b->fx[k];
         if (!e->kind) continue;
+        const short *x = fx_box[e->kind];
+        if (n && x[2] * x[3] > fx_room(b) && fx_paints(e, e->t + 1)) continue;
         ++e->t;
         if (e->kind == F_POP && e->t == 4) lean(b, e->v >> 8, 0);
         if (e->kind == F_BAG) {
             static const unsigned char swing[10] = { 1, 2, 3, 3, 2, 2, 1, 1, 0, 0 };
             int i = e->v >> 1;
-            b->lean_x[i] = (signed char)(e->t < 10 ? (e->v & 1 ? -1 : 1) * swing[e->t] : 0);
+            b->lean_x[i] =
+                (signed char)(e->t >= 0 && e->t < 10 ? (e->v & 1 ? -1 : 1) * swing[e->t] : 0);
         }
-        /* text rises a pixel at a time: painted only when it moved */
-        int moving = e->kind == F_SCORE   ? e->t * 10 / 30 != (e->t - 1) * 10 / 30
-                     : e->kind == F_CALL  ? e->t * 6 / 40 != (e->t - 1) * 6 / 40
-                     : e->kind == F_SPARK ? 0
-                                          : 1;
+        int moving = fx_paints(e, e->t);
         if (e->t >= fx_life[e->kind]) {
             fx_mark(b, e);
             if (e->kind == F_BAG) b->lean_x[e->v >> 1] = 0;
@@ -748,8 +817,8 @@ static void hops(struct pstall *b) {
         else
             --b->hop_t[k];
         if (hop_dy(b, k) != before || !b->hop_t[k]) {
-            const struct art_pic *p = &art_sprites[SP_PLUSH_0 + k];
-            mark(b, plush_x[k] + p->dx - 1, plush_y[k] + p->dy - 4, p->w + 2, p->h + 8);
+            mark(b, plush_x[k] - 9, plush_y[k] - 20, 18,
+                 42); /* a prize: 14 x 30 from 13 above, and its hop */
         }
     }
 }
@@ -832,21 +901,28 @@ static int step(void *state, const struct eng_input *in) {
             b->tk[0].kind = b->tk[1].kind = 0;
             for (int k = 0; k < 4; ++k) hop(b, k, 3, k);
             sound(b, ENG_SFX_TICK, 3);
-            mark(b, 0, 56, ENG_W, 236);
+            for (int i = 0; i < P_CELLS;
+                 ++i) /* the bags go with the level (pops finish on their own) */
+                if (b->cell[i] == SACK)
+                    mark(b, cell_xi(i / P_COLS, i % P_COLS) - 11, cell_y(i / P_COLS) - 12, 24, 28);
         } else if (!alive)
             missed(b, last_x);
     } else if (b->mode == CLEAR) {
         ++b->t;
-        if (b->t <= 9 || b->t == 90) mark(b, 60, 56, 256, 124); /* the banner dropping, then gone */
-        for (int k = (b->t - 10) * 4; b->t > 9 && k < (b->t - 9) * 4 && k < 32; ++k) {
-            int piece[5];
-            confetto(k, piece);
-            mark(b, piece[0], piece[1], piece[2] + 1, piece[3] + 1);
+        if (b->t <= 9 ||
+            b->t == 90) { /* the banner dropping, its old place and its new, then gone */
+            int was = banner_y(b->t - 1), now = b->t == 90 ? was : banner_y(b->t);
+            mark(b, 62, P_TOP, 252, (was > now ? was : now) + 62 - P_TOP);
         }
-        if (b->t == 100) { /* the confetti cleared, the next level's rows to come */
+        int in = (b->t - 9) * 4,
+            out = (b->t - 91) * 4; /* four pieces of confetti a frame, in and out */
+        for (int k = in - 4; k < in && k < 32; ++k)
+            if (k >= 0) confetto_mark(b, k);
+        for (int k = out - 4; k < out && k < 32; ++k)
+            if (k >= 0) confetto_mark(b, k);
+        if (b->t == 100) { /* the next level's rows to come */
             b->mode = INFLATE, b->t = 0;
             build(b, -1);
-            mark(b, 30, 66, 316, 222);
         }
     } else if (b->mode == INFLATE) {
         ++b->t;
@@ -857,7 +933,10 @@ static int step(void *state, const struct eng_input *in) {
     } else {
         ++b->t;
         if (b->t <= 4) mark(b, 24, cell_y(2 * b->t - 2) - 12, 327, 2 * P_PY + 10);
-        if (b->t > 4 && b->t <= 15) mark(b, 52, 86, 272, 234);
+        if (b->t > 4 && b->t <= 15) { /* the ticket sliding up: its old place and its new */
+            int was = ticket_dy(b->t - 1), now = ticket_dy(b->t);
+            mark(b, 47, 88 + now, 281, 150 + was - now);
+        }
         if (b->t > 15 && b->t <= 26 && b->best_new) mark(b, 132, 162, 112, 36);
         if (b->t > 15 && in->pressed & ENG_CENTRE) new_game(b);
     }
@@ -878,7 +957,12 @@ static int step(void *state, const struct eng_input *in) {
     effects(b);
     hops(b);
     tickets(b);
-    unsigned now = lit(b);
+    /* the bulbs change P_BULBS_STEP a frame at most, the rest the frames after: a chase starting, a
+     * brown-out or every bulb coming on is a ripple, not one frame repainting the stall's edges */
+    unsigned want = lit(b), now = was;
+    for (int i = 0, n = 0; i < P_BULBS && n < P_BULBS_STEP; ++i) {
+        if ((want ^ now) >> i & 1) now ^= 1u << i, ++n; /* the beam's first, then down the walls */
+    }
     if (now != was) bulbs_mark(b, was, now);
     if (b->pad != pad0 || pad_w(b) != w0) {
         int lo = pad0 < b->pad ? pad0 : b->pad, hi = pad0 < b->pad ? b->pad : pad0,
@@ -944,11 +1028,38 @@ static inline unsigned blend(unsigned dst, unsigned rgb, unsigned a) { /* a of 2
     unsigned g = ((rgb & 0xff00) * a + (dst & 0xff00) * (256 - a)) >> 8 & 0xff00;
     return 0xff000000 | rb | g;
 }
+/* x, y, w, h in rgb, four at a time: eng_fill's work for less. */
+static void fill(struct eng_surface *s, int x, int y, int w, int h, unsigned rgb) {
+    int c[4];
+    if (!clip(s, x, y, w, h, c)) return;
+    rgb |= 0xff000000;
+    for (int j = c[1]; j < c[3]; ++j) {
+        unsigned *p = at(s, c[0], j);
+        int n = c[2] - c[0];
+        for (; n >= 4; n -= 4, p += 4) p[0] = rgb, p[1] = rgb, p[2] = rgb, p[3] = rgb;
+        while (n-- > 0) *p++ = rgb;
+    }
+}
+
+/* A premultiplied 0xAARRGGBB pixel v laid over d. */
+static inline unsigned lay(unsigned d, unsigned v) {
+    unsigned ia = 255 - (v >> 24);
+    return 0xff000000 | ((v & 0xffffff) + (((d & 0xff00ff) * ia >> 8) & 0xff00ff) +
+                         (((d & 0xff00) * ia >> 8) & 0xff00));
+}
+
 /* rgb a 256ths of the way up from black: the game over's dimmed rows. */
 static unsigned dim(unsigned rgb, int a) {
     return a >= 256 ? rgb
                     : ((rgb & 0xff00ff) * (unsigned)a >> 8 & 0xff00ff) |
                           ((rgb & 0xff00) * (unsigned)a >> 8 & 0xff00);
+}
+
+/* n pixels of the stall at rest from its indices q, through the palette, four at a time. */
+static void indexed(unsigned *p, const unsigned char *q, int n, const unsigned *pal) {
+    for (; n >= 4; n -= 4, p += 4, q += 4)
+        p[0] = pal[q[0]], p[1] = pal[q[1]], p[2] = pal[q[2]], p[3] = pal[q[3]];
+    while (n-- > 0) *p++ = pal[*q++];
 }
 
 /* The stall at rest, rows y0 to y1 of the paint. */
@@ -967,34 +1078,70 @@ static void stall(const struct pstall *b, struct eng_surface *s, int y0, int y1)
         return;
     }
     const unsigned *pal = b->art + ART_PAL / 4;
-    const unsigned char *bg = (const unsigned char *)b->art + ART_BG;
+    const unsigned char *bg = (const unsigned char *)b->art + ART_BG,
+                        *cork = bg - ART_BG + ART_BOARD;
+    const unsigned short *rows = (const unsigned short *)((const char *)b->art + ART_FLECK_ROWS);
+    const unsigned char *flecks = (const unsigned char *)b->art + ART_FLECKS;
     for (int y = c[1]; y < c[3]; ++y) {
-        const unsigned char *q = bg + y * ENG_W + c[0];
-        for (unsigned *p = at(s, c[0], y), *end = p + (c[2] - c[0]); p < end;) *p++ = pal[*q++];
+        const unsigned char *q = bg + y * ENG_W;
+        unsigned *row = at(s, 0, y);
+        if (y < BOARD_Y0 || y >= BOARD_Y1 || c[2] <= BOARD_X0 || c[0] >= BOARD_X1) {
+            indexed(row + c[0], q + c[0], c[2] - c[0], pal);
+            continue;
+        }
+        /* the cork: its row's color filled, then its flecks; the walls' and beam's shade either
+         * side */
+        int f0 = c[0] > BOARD_X0 ? c[0] : BOARD_X0, f1 = c[2] < BOARD_X1 ? c[2] : BOARD_X1;
+        indexed(row + c[0], q + c[0], f0 - c[0], pal);
+        indexed(row + f1, q + f1, c[2] - f1, pal);
+        unsigned v = pal[cork[y - BOARD_Y0]], *p = row + f0;
+        int n = f1 - f0;
+        for (; n >= 4; n -= 4, p += 4) p[0] = v, p[1] = v, p[2] = v, p[3] = v;
+        while (n--) *p++ = v;
+        for (int k = rows[y - BOARD_Y0]; k < rows[y - BOARD_Y0 + 1]; ++k) {
+            const unsigned char *e = flecks + 4 * k;
+            int x = e[0] | e[1] << 8;
+            if (x >= f0 && x < f1) row[x] = pal[e[2]];
+        }
     }
 }
 
-/* A sprite with its anchor at x, y; its colours scaled by a (256: as drawn). */
+/* A sprite with its anchor at x, y; its colours scaled by a (256: as drawn). Its rows are runs
+ * (export_art.py runs): a clear run is skipped, a solid one copied, a blended one laid over what is
+ * there by its coverage, each cut to the columns being painted. */
 static void sprite(const struct pstall *b, struct eng_surface *s, int id, int x, int y, int a) {
-    const struct art_pic *pic = &art_sprites[id];
+    const struct art_pic *pic = (const struct art_pic *)((const char *)b->art + ART_SPRITES) + id;
     int c[4];
     x += pic->dx, y += pic->dy;
     if (!b->art_ok || !clip(s, x, y, pic->w, pic->h, c)) return;
     const unsigned *src = b->art + pic->off / 4;
+    int whole = c[0] == x && c[2] == x + pic->w && a >= 256; /* every column: no run is cut */
     for (int j = c[1]; j < c[3]; ++j) {
-        const unsigned *q = src + (j - y) * pic->w + (c[0] - x);
-        unsigned *p = at(s, c[0], j);
-        for (int i = c[0]; i < c[2]; ++i, ++p) {
-            unsigned w = *q++, al = w >> 24;
-            if (!al) continue;
-            if (a < 256) w = (w & 0xff000000) | dim(w & 0xffffff, a);
-            if (al == 255) {
-                *p = w;
+        const unsigned *q = src + src[j - y];
+        unsigned *row = at(s, 0, j), *p = row + x;
+        for (int u = x; u < c[2];) {
+            unsigned head = *q++, kind = head >> 16;
+            int n = (int)(head & 0xffff);
+            if (whole) { /* the quick way: each run as it comes */
+                if (kind == 1) {
+                    for (; n >= 4; n -= 4, p += 4, q += 4)
+                        p[0] = q[0], p[1] = q[1], p[2] = q[2], p[3] = q[3];
+                    while (n--) *p++ = *q++;
+                } else if (kind)
+                    for (; n--; ++p, ++q) *p = lay(*p, *q);
+                else
+                    p += n;
+                u = (int)(p - row);
                 continue;
             }
-            unsigned d = *p, ia = 255 - al;
-            *p = 0xff000000 | ((w & 0xffffff) + (((d & 0xff00ff) * ia >> 8) & 0xff00ff) +
-                               (((d & 0xff00) * ia >> 8) & 0xff00));
+            int i0 = u < c[0] ? c[0] : u, i1 = u + n > c[2] ? c[2] : u + n;
+            const unsigned *w = q + (i0 - u);
+            if (kind) q += n;
+            u += n;
+            for (unsigned *d = row + i0; kind && d < row + i1; ++d, ++w) {
+                unsigned v = a < 256 ? (*w & 0xff000000) | dim(*w & 0xffffff, a) : *w;
+                *d = kind == 1 ? v : lay(*d, v);
+            }
         }
     }
 }
@@ -1017,26 +1164,29 @@ static void masked(const struct pstall *b, struct eng_surface *s, const struct a
 }
 static void mask(const struct pstall *b, struct eng_surface *s, int id, int x, int y,
                  unsigned rgb) {
-    masked(b, s, &art_masks[id], x, y, rgb);
+    masked(b, s, (const struct art_pic *)((const char *)b->art + ART_MASKS) + id, x, y, rgb);
 }
 
 /* ---- type: Bungee from the art's glyphs ---- */
 
-static const struct art_face *face(int px, int edged) {
-    for (unsigned k = 0; k < sizeof art_faces / sizeof *art_faces; ++k)
-        if (art_faces[k].px == px && art_faces[k].edged == edged) return &art_faces[k];
-    return &art_faces[0];
+static const struct art_face *face(const struct pstall *b, int px, int edged) {
+    const struct art_face *f = (const struct art_face *)((const char *)b->art + ART_FACES);
+    for (int k = 0; k < ART_FACE_COUNT; ++k)
+        if (f[k].px == px && f[k].edged == edged) return &f[k];
+    return f;
 }
-static const struct art_glyph *glyph(const struct art_face *f, char ch) {
+static const struct art_glyph *glyph(const struct pstall *b, const struct art_face *f, char ch) {
+    const struct art_glyph *g = (const struct art_glyph *)((const char *)b->art + f->glyphs);
     for (int k = 0; k < f->n; ++k)
-        if (f->g[k].ch == ch) return &f->g[k];
+        if (g[k].ch == ch) return &g[k];
     return 0;
 }
-static int text_w(int px, const char *t) { /* 1/16 px */
-    const struct art_face *f = face(px, 0);
+static int text_w(const struct pstall *b, int px, const char *t) { /* 1/16 px */
+    if (!b->art_ok) return 0;
+    const struct art_face *f = face(b, px, 0);
     int w = 0;
     for (; *t; ++t) {
-        const struct art_glyph *g = glyph(f, *t);
+        const struct art_glyph *g = glyph(b, f, *t);
         w += g ? g->adv : 0;
     }
     return w;
@@ -1045,15 +1195,15 @@ static int text_w(int px, const char *t) { /* 1/16 px */
  * of 1 px in edge when edge is not ~0u. Its width. */
 static int type(const struct pstall *b, struct eng_surface *s, const char *t, int x, int y, int px,
                 unsigned rgb, unsigned edge, int align) {
-    const struct art_face *f = face(px, 0), *e = face(px, 1);
-    int w = text_w(px, t);
+    const struct art_face *f = face(b, px, 0), *e = face(b, px, 1);
+    int w = text_w(b, px, t);
     if (!b->art_ok)
         return eng_text(s, t, align ? x : x, y - px, 2 * px, px < 15 ? 15 : px, rgb, align);
     int x16 = align ? x * 16 + 8 - w / 2 : x * 16, base = y + (f->mid + 8) / 16;
     for (int pass = edge == ~0u; pass < 2; ++pass) {
         int pen = x16;
         for (const char *c = t; *c; ++c) {
-            const struct art_glyph *g = glyph(f, *c), *ge = pass ? 0 : glyph(e, *c);
+            const struct art_glyph *g = glyph(b, f, *c), *ge = pass ? 0 : glyph(b, e, *c);
             const struct art_glyph *use = pass ? g : ge;
             if (use) {
                 struct art_pic pic = { use->off, use->w, use->h, use->dx, use->dy };
@@ -1091,50 +1241,40 @@ static int cell_shown(const struct pstall *b,
     return 99;
 }
 
+/* The balloons within reach of the paint, row by row from the top, so a lower row's balloons cover
+ * the strings and shadows of the row above (each balloon's sprite carries its shadow). */
 static void lattice(const struct pstall *b, struct eng_surface *s) {
     int r0 = (s->y0 - P_Y0 - 16) / P_PY, r1 = (s->y1 - P_Y0 + 14) / P_PY;
     r0 = r0 < 0 ? 0 : r0, r1 = r1 >= P_ROWS ? P_ROWS - 1 : r1;
     if (s->y1 < P_Y0 - 16 || s->y0 > cell_y(P_ROWS - 1) + 20) return;
-    for (int pass = 0; pass < 2; ++pass)
-        for (int r = r0; r <= r1; ++r) {
-            int y = cell_y(r), step = cell_shown(b, r), a = 256;
-            int c0 = (s->x0 - P_X0 - (r & 1) * 10 - 14) / P_PX,
-                c1 = (s->x1 - P_X0 - (r & 1) * 10 + 14) / P_PX;
-            if (b->mode == OVER && 2 * b->t > r) a = 107; /* 0.42 */
-            c0 = c0 < 0 ? 0 : c0, c1 = c1 >= cols(r) ? cols(r) - 1 : c1;
-            if (step <= 0) continue;
-            for (int c = c0; c <= c1; ++c) {
-                int i = r * P_COLS + c, k = b->cell[i], x = cell_xi(r, c) + b->lean_x[i],
-                    yy = y + b->lean_y[i];
-                if (!k) continue;
-                if (b->mode == OVER && b->t >= 15 && x > 62 && x < 313 && yy > 96 && yy < 228)
-                    continue;                 /* under the ticket */
-                if (step <= 4 && k != SACK) { /* inflating: a small disc, then a bigger */
-                    if (pass)
-                        eng_disc(s, FX(x) + FX(1) / 2, FX(yy), step <= 2 ? FX(3) : FX(6),
-                                 row_col[k == STAR ? 7 : r]);
-                    continue;
-                }
-                if (!b->art_ok) {
-                    if (pass)
-                        eng_disc(s, FX(x) + FX(1) / 2, FX(yy), FX(P_RC),
-                                 dim(k == SACK ? 0xb08a58 : row_col[k == STAR ? 7 : r], a));
-                    continue;
-                }
-                if (!pass) {
-                    if (a == 256)
-                        mask(b, s, k == STAR ? MK_SHADOW_STAR : MK_SHADOW, x, yy, K_SHADOW);
-                    continue;
-                }
-                int id = k == SACK   ? SP_SACK
-                         : k == STAR ? SP_STAR
-                                     : SP_BAL_0N + 4 * r +
-                                           (k == DBL       ? 1
-                                            : b->squash[i] ? 3
-                                                           : 0);
-                sprite(b, s, id, x, yy, a);
-            }
+    for (int r = r0; r <= r1; ++r) {
+        int y = cell_y(r), step = cell_shown(b, r),
+            a = b->mode == OVER && 2 * b->t > r ? 107 : 256; /* 0.42 */
+        int c0 = (s->x0 - P_X0 - (r & 1) * 10 - 14) / P_PX,
+            c1 = (s->x1 - P_X0 - (r & 1) * 10 + 14) / P_PX;
+        c0 = c0 < 0 ? 0 : c0, c1 = c1 >= cols(r) ? cols(r) - 1 : c1;
+        for (int c = c0; step > 0 && c <= c1; ++c) {
+            int i = r * P_COLS + c, k = b->cell[i], x = cell_xi(r, c) + b->lean_x[i],
+                yy = y + b->lean_y[i];
+            if (!k || (b->mode == OVER && b->t >= 15 && x > 62 && x < 313 && yy > 96 && yy < 228))
+                continue;               /* none, or under the game over's ticket */
+            if (step <= 4 && k != SACK) /* inflating: a small disc, then a bigger */
+                eng_disc(s, FX(x) + FX(1) / 2, FX(yy), step <= 2 ? FX(3) : FX(6),
+                         row_col[k == STAR ? 7 : r]);
+            else if (!b->art_ok)
+                eng_disc(s, FX(x) + FX(1) / 2, FX(yy), FX(P_RC),
+                         dim(k == SACK ? 0xb08a58 : row_col[k == STAR ? 7 : r], a));
+            else
+                sprite(b, s,
+                       k == SACK   ? SP_SACK
+                       : k == STAR ? SP_STAR
+                                   : SP_BAL_0N + 4 * r +
+                                         (k == DBL       ? 1
+                                          : b->squash[i] ? 3
+                                                         : 0),
+                       x, yy, a);
         }
+    }
 }
 
 static void dust(struct eng_surface *s, int x, int y, int t, int n, unsigned rgb, int up) {
@@ -1161,7 +1301,7 @@ static void shreds(struct eng_surface *s, int x, int y, int t, int n, unsigned c
         int v = v0[i] * 100 + t * v1[i]; /* hundredths */
         int px = x + v * eng_cos(a) / 6553600,
             py = y + v * 9 / 10 * eng_sin(a) / 6553600 + t * t / 1000;
-        eng_round(s, px - 1, py - 1, 3, 2, 1, i % 3 ? light : col);
+        fill(s, px - 1, py - 1, 3, 2, i % 3 ? light : col); /* 3 x 2: too small to round */
     }
 }
 
@@ -1172,6 +1312,7 @@ static void effect(const struct pstall *b, struct eng_surface *s, const struct e
         e->y + box[1] + box[3] <= s->y0)
         return;
     int x = e->x, y = e->y, f = e->t;
+    if (f < 0) return; /* not shown yet */
     if (e->kind == F_POP) {
         int r = e->v & 255, gold = r == 7;
         if (f < 2)
@@ -1209,7 +1350,7 @@ static void effect(const struct pstall *b, struct eng_surface *s, const struct e
             mask(b, s, k & 2 ? MK_SPARKLE_S : MK_SPARKLE, x + sp[k][0], y + sp[k][1], rgb);
     } else if (e->kind == F_STARS) {
         for (int k = 0; k < 8; ++k) {
-            int a = k * 128 + 49, d = 8 + f * 23 / 16; /* out to 31 px across, 25 down */
+            int a = k * 128 + 49, d = 8 + (f & ~1) * 23 / 16; /* out to 31 px across, 25 down */
             mask(b, s, MK_STARP, x + d * eng_cos(a) / 65536, y + d * 25 / 31 * eng_sin(a) / 65536,
                  K_GOLD);
         }
@@ -1301,8 +1442,36 @@ static void ticket(const struct pstall *b, struct eng_surface *s, int k) {
         sprite(b, s, SP_TICKET_0S + 2 * kind, x, y, 256);
 }
 
-static void plaque(struct eng_surface *s, int x0, int y0, int x1, int y1, unsigned rgb) {
-    eng_round(s, x0, y0, x1 - x0, y1 - y0, (y1 - y0) / 2, rgb);
+/* A rounded box as eng_round draws it, for less: its straight parts filled, each corner a mask
+ * (export_art.py CORNERS). */
+static void panel(const struct pstall *b, struct eng_surface *s, int x, int y, int w, int h, int r,
+                  unsigned rgb) {
+    if (!b->art_ok || r < 3 || r > 8) {
+        eng_round(s, x, y, w, h, r, rgb);
+        return;
+    }
+    fill(s, x + r, y, w - 2 * r, h, rgb);
+    fill(s, x, y + r, r, h - 2 * r, rgb);
+    fill(s, x + w - r, y + r, r, h - 2 * r, rgb);
+    for (int k = 0; k < 4;
+         ++k) /* each corner a disc 2r across, smoothed as eng_round smooths one */
+        mask(b, s, MK_CORNER_3 + r - 3, k & 1 ? x + w - 2 * r : x, k & 2 ? y + h - 2 * r : y, rgb);
+}
+
+static int outside(const struct eng_surface *s, const int *h, struct eng_surface *part);
+/* A panel with its shadow 2 px right and 4 down, the shadow drawn only where it shows. */
+static void shadowed_panel(const struct pstall *b, struct eng_surface *s, int x, int y, int w,
+                           int h, int r, unsigned rgb) {
+    int hole[4] = { x + r, y + r, x + w, y + h }; /* the shadow's part the panel covers */
+    struct eng_surface part[4];
+    for (int k = 0, n = outside(s, hole, part); k < n; ++k)
+        panel(b, &part[k], x + 2, y + 4, w, h, r, 0x7c5232);
+    panel(b, s, x, y, w, h, r, rgb);
+}
+
+static void plaque(const struct pstall *b, struct eng_surface *s, int x0, int y0, int x1, int y1,
+                   unsigned rgb) {
+    panel(b, s, x0, y0, x1 - x0, y1 - y0, (y1 - y0) / 2, rgb);
 }
 
 static void hud(const struct pstall *b, struct eng_surface *s) {
@@ -1310,8 +1479,8 @@ static void hud(const struct pstall *b, struct eng_surface *s) {
     char t[24];
     if (s->y0 >= y + 14 || s->y1 <= y - 13) return;
     digits(t, b->score);
-    int tw = text_w(14, t);
-    plaque(s, in, y - 7, in + (tw + 15) / 16 + 13, y + 7, K_INK);
+    int tw = text_w(b, 14, t);
+    plaque(b, s, in, y - 7, in + (tw + 15) / 16 + 13, y + 7, K_INK);
     type(b, s, t, in + 6, y, 14, K_GOLD, ~0u, 0);
     int combo = b->combo, sw = b->swell;
     if (combo >= 2 && !b->paused) {
@@ -1320,9 +1489,9 @@ static void hud(const struct pstall *b, struct eng_surface *s) {
         unsigned bg = combo < 5 ? K_INK : combo < 10 ? 0xff9f1c : K_GOLD;
         unsigned ink = combo < 5 ? K_CREAM : combo < 10 ? K_INK : K_CRIMSON_DD;
         if (combo >= 10)
-            plaque(s, 187 - w / 2 - 1, y - h / 2 - 2, 188 + w / 2 + 2, y + (h + 1) / 2 + 2,
+            plaque(b, s, 187 - w / 2 - 1, y - h / 2 - 2, 188 + w / 2 + 2, y + (h + 1) / 2 + 2,
                    0xffffff);
-        plaque(s, 187 - w / 2, y - h / 2, 188 + w / 2, y + (h + 1) / 2, bg);
+        plaque(b, s, 187 - w / 2, y - h / 2, 188 + w / 2, y + (h + 1) / 2, bg);
         if (combo < 5)
             *digits(put(t, "x"), (unsigned)combo) = 0;
         else if (combo < 10)
@@ -1332,7 +1501,7 @@ static void hud(const struct pstall *b, struct eng_surface *s) {
         type(b, s, t, 187, y, 11, ink, ~0u, 1);
     }
     int n = b->slots, r0 = ENG_W - in - 10; /* 329.5 */
-    plaque(s, r0 - (n - 1) * 25 / 2 - 9, y - 7, r0 + 10, y + 8, K_INK);
+    plaque(b, s, r0 - (n - 1) * 25 / 2 - 9, y - 7, r0 + 10, y + 8, K_INK);
     for (int i = 0; i < n; ++i) {
         int x = r0 - (i * 25 + 1) / 2;
         if (i < b->lives)
@@ -1349,18 +1518,21 @@ static void hud(const struct pstall *b, struct eng_surface *s) {
 }
 
 static void banner(const struct pstall *b, struct eng_surface *s) {
-    static const signed char drop[10] = {
-        -54, -40, -22, -5, 10, 22, 31, 63, 60, 60
-    }; /* to 116, a 3 px bounce */
-    int y0 = b->t < 9 ? 56 + drop[b->t] : 116, x0 = 74, x1 = 301, y1 = y0 + 54;
+    int y0 = banner_y(b->t), x0 = 74, x1 = 301, y1 = y0 + 54;
     char t[40];
-    if (s->y1 <= 56 || s->y0 >= y1 + 8 || s->x1 <= x0 - 12 || s->x0 >= x1 + 12) return;
+    struct eng_surface under = *s; /* it hangs behind the beam until it drops below it */
+    s = &under;
+    s->y0 = s->y0 < P_TOP ? P_TOP : s->y0;
+    if (s->y1 <= s->y0 || s->y0 >= y1 + 8 || s->x1 <= x0 - 12 || s->x0 >= x1 + 12) return;
     eng_fill(s, x0 + 22, P_TOP, 1, y0 + 2 - P_TOP, K_STRING);
     eng_fill(s, x1 - 22, P_TOP, 1, y0 + 2 - P_TOP, K_STRING);
     sprite(b, s, SP_TAIL_L, x0, y0, 256);
     sprite(b, s, SP_TAIL_R, x1, y0, 256);
-    eng_round(s, x0, y0, x1 - x0, y1 - y0, 5, K_CRIMSON);
-    eng_round(s, x0 + 3, y0 + 3, x1 - x0 - 6, y1 - y0 - 6, 3, K_CREAM);
+    int in[4] = { x0 + 6, y0 + 6, x1 - 6, y1 - 6 }; /* the crimson only where the cream leaves it */
+    struct eng_surface part[4];
+    for (int k = 0, n = outside(s, in, part); k < n; ++k)
+        panel(b, &part[k], x0, y0, x1 - x0, y1 - y0, 5, K_CRIMSON);
+    panel(b, s, x0 + 3, y0 + 3, x1 - x0 - 6, y1 - y0 - 6, 3, K_CREAM);
     type(b, s, "LEVEL CLEAR!", 187, y0 + 19, 20, K_CRIMSON, ~0u, 1);
     char *p = digits(put(t, "+"), (unsigned)(100 * (b->level - 1)));
     p = put(p, " BONUS   LEVEL ");
@@ -1371,22 +1543,18 @@ static void banner(const struct pstall *b, struct eng_surface *s) {
 static void confetti(const struct pstall *b, struct eng_surface *s) {
     static const unsigned cc[9] = { 0xff5470, 0xff9f1c, 0xffd23f, 0x3bceac, 0x5aa9f5,
                                     0xf4f1ea, 0xf15bb5, K_GOLD,   K_CREAM };
-    for (int k = 0; k < 32 && k < (b->t - 9) * 4; ++k) {
-        int p[5];
-        confetto(k, p);
-        eng_round(s, p[0], p[1], p[2], p[3], 1, cc[p[4]]);
+    for (int k = 0, p[6]; k < 32 && k < (b->t - 9) * 4; ++k) {
+        confetto_next(k ? 0 : 1, p);
+        if (k >= (b->t > 91 ? (b->t - 91) * 4 : 0))
+            eng_round(s, p[0], p[1], p[2], p[3], 1, cc[p[4]]);
     }
 }
 
 static void big_ticket(const struct pstall *b, struct eng_surface *s) {
-    int dy = b->t < 5    ? 230
-             : b->t < 15 ? (15 - b->t) * 23
-                         : 0,
-        x0 = 58, x1 = 317, y0 = 92 + dy, y1 = 232 + dy;
+    int dy = ticket_dy(b->t), x0 = 58, x1 = 317, y0 = 92 + dy, y1 = 232 + dy;
     char t[40];
     if (s->y1 <= y0 || s->x1 <= x0 - 9 || s->x0 >= x1 + 9 || b->t < 5) return;
-    eng_round(s, x0 + 2, y0 + 4, x1 - x0, y1 - y0, 7, 0x7c5232);
-    eng_round(s, x0, y0, x1 - x0, y1 - y0, 7, 0xffe8a3);
+    shadowed_panel(b, s, x0, y0, x1 - x0, y1 - y0, 7, 0xffe8a3);
     for (int x = x0; x <= x1; x += x1 - x0) eng_disc(s, FX(x), FX((y0 + y1) / 2), FX(9), 0xb6875a);
     for (int x = x0 + 26; x <= x1 - 26; x += x1 - x0 - 52)
         for (int y = y0 + 6; y < y1 - 6; y += 6) eng_fill(s, x, y, 1, 3, 0xc8a45a);
@@ -1414,29 +1582,31 @@ static void sign(const struct pstall *b, struct eng_surface *s) {
     if (s->y1 <= P_TOP || s->y0 >= 192 || s->x1 <= 100 || s->x0 >= 278) return;
     eng_fill(s, 150, P_TOP, 1, 132 - P_TOP, K_STRING);
     eng_fill(s, 225, P_TOP, 1, 132 - P_TOP, K_STRING);
-    eng_round(s, 104, 132, 171, 58, 6, 0x7c5232);
-    eng_round(s, 102, 128, 171, 58, 6, K_WOOD_1);
-    eng_round(s, 105, 131, 165, 52, 4, 0x8f5c36);
+    shadowed_panel(b, s, 102, 128, 171, 58, 6, K_WOOD_1);
+    panel(b, s, 105, 131, 165, 52, 4, 0x8f5c36);
     eng_disc(s, FX(150), FX(133.5), FX(1.6), K_WOOD_SEAM);
     eng_disc(s, FX(225), FX(133.5), FX(1.6), K_WOOD_SEAM);
     type(b, s, "PAUSED", 187, 151, 20, K_CREAM, ~0u, 1);
     type(b, s, "CENTER TO RESUME", 187, 171, 9, 0xf0d2a0, ~0u, 1);
 }
 
-static void draw(const void *state, struct eng_surface *s) {
-    const struct pstall *b = state;
+/* Everything under the panels, in the rows and columns s paints. */
+static void scene(const struct pstall *b, struct eng_surface *s) {
     unsigned on = b->paused ? 0x11111111u : b->bulbs; /* paused: one in four */
     char t[24];
     stall(b, s, s->y0, s->y1);
-    for (int k = 0; k < P_FX; ++k)
-        if (b->fx[k].kind == F_KNOCK) effect(b, s, &b->fx[k]);
-    for (int i = 0; b->art_ok && i < P_BULBS; ++i)
+    for (int i = 0; b->art_ok && i < P_BULBS; ++i) /* a lit bulb: its patch of the lit stall */
         if (on >> i & 1) {
-            int x, y;
+            int x, y, c[4];
             bulb_box(i, &x, &y);
-            if (x + 7 > s->x0 && x - 7 < s->x1 && y + 8 > s->y0 && y - 7 < s->y1)
-                sprite(b, s, i < 14 ? SP_BULB_BEAM : SP_BULB_SIDE, x, y, 256);
+            if (!clip(s, x - 6, y - 6, 13, 13, c)) continue;
+            const unsigned char *q = (const unsigned char *)b->art + ART_BULBS + 169 * i;
+            for (int j = c[1]; j < c[3]; ++j)
+                indexed(at(s, c[0], j), q + 13 * (j - y + 6) + c[0] - x + 6, c[2] - c[0],
+                        b->art + ART_PAL / 4);
         }
+    for (int k = 0; k < P_FX; ++k) /* a knocked plank or beam flashes, over its bulbs' glow */
+        if (b->fx[k].kind == F_KNOCK) effect(b, s, &b->fx[k]);
     if (b->combo >= 10 && !b->paused &&
         s->y0 < 60) /* x10: a sparkle on every fourth bulb of the beam */
         for (int k = 1; k < 14; k += 4) mask(b, s, MK_SPARKLE, 25 + 25 * k, 54, 0xffffff);
@@ -1450,7 +1620,6 @@ static void draw(const void *state, struct eng_surface *s) {
     for (int k = 0; k < 2; ++k)
         if (b->tk[k].kind) ticket(b, s, k);
     if (b->mode == CLEAR && b->t > 9) confetti(b, s);
-    if (b->mode == CLEAR && b->t < 90) banner(b, s);
     if (((b->mode == READY && b->fresh) || b->mode == INFLATE) && s->y1 > 212 && s->y0 < 258) {
         *digits(put(t, "LEVEL "), (unsigned)b->level) = 0;
         type(b, s, t, 187, 228, 20, K_CREAM, K_INK, 1);
@@ -1469,6 +1638,46 @@ static void draw(const void *state, struct eng_surface *s) {
     for (int k = 0; k < P_FX; ++k)
         if (b->fx[k].kind == F_DUST && b->fx[k].v >> 8 == 3) effect(b, s, &b->fx[k]);
     hud(b, s);
+}
+
+/* The parts of s's paint outside the box h (x0 y0 x1 y1): up to four, as part; how many. */
+static int outside(const struct eng_surface *s, const int *h, struct eng_surface *part) {
+    int n = 0;
+    if (h[2] <= s->x0 || h[0] >= s->x1 || h[3] <= s->y0 || h[1] >= s->y1 || h[3] <= h[1]) {
+        part[0] = *s;
+        return 1;
+    }
+    int y0 = h[1] > s->y0 ? h[1] : s->y0, y1 = h[3] < s->y1 ? h[3] : s->y1;
+    int box[4][4] = { { s->x0, s->y0, s->x1, y0 }, /* above, below, then beside it */
+                      { s->x0, y1, s->x1, s->y1 },
+                      { s->x0, y0, h[0] < s->x1 ? h[0] : s->x1, y1 },
+                      { h[2] > s->x0 ? h[2] : s->x0, y0, s->x1, y1 } };
+    for (int k = 0; k < 4; ++k)
+        if (box[k][2] > box[k][0] && box[k][3] > box[k][1]) {
+            part[n] = *s;
+            part[n].x0 = box[k][0], part[n].y0 = box[k][1], part[n].x1 = box[k][2],
+            part[n].y1 = box[k][3];
+            ++n;
+        }
+    return n;
+}
+
+/* The scene, then the panel over it: what the panel's solid middle hides is not drawn (the banner,
+ * the game over's ticket, the pause's sign), so a frame that moves one pays for the panel alone. */
+static void draw(const void *state, struct eng_surface *s) {
+    const struct pstall *b = state;
+    int h[4] = { 0, 0, 0, 0 }; /* the panel's solid middle: x0 y0 x1 y1 */
+    if (b->mode == OVER && b->t >= 5) {
+        int dy = ticket_dy(b->t);
+        h[0] = 65, h[1] = 99 + dy, h[2] = 310, h[3] = 225 + dy;
+    } else if (b->paused)
+        h[0] = 108, h[1] = 134, h[2] = 267, h[3] = 180;
+    else if (b->mode == CLEAR && b->t < 90)
+        h[0] = 80, h[1] = banner_y(b->t) + 6, h[2] = 295, h[3] = banner_y(b->t) + 48;
+    h[1] = h[1] < P_TOP ? P_TOP : h[1];
+    struct eng_surface part[4];
+    for (int k = 0, n = outside(s, h, part); k < n; ++k) scene(b, &part[k]);
+    if (b->mode == CLEAR && b->t < 90) banner(b, s);
     if (b->mode == OVER) big_ticket(b, s);
     if (b->paused) sign(b, s);
 }

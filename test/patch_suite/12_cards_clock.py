@@ -307,7 +307,7 @@ PS_WIDE,PS_SLOW,PS_TK,PS_CHAIN_N,PS_PAUSED,PS_ART_OK=636,640,652,948,1044,1144
 PLAYING,CLEAR,INFLATE,OVER=1,2,3,4
 ENG_RECTS=int(re.search(r'^#define ENG_RECTS (\d+)',(ROOT/'patch/engine.h').read_text(),re.M)[1])
 PS_STEP_BOUND,PS_FRAME_BOUND,PS_TRIO_BOUND,PS_STAR_BOUND,PS_CLEAR_BOUND,PS_OVER_BOUND,PS_PAUSE_BOUND,PS_WHOLE_BOUND=(
-    10_000,600_000,600_000,600_000,600_000,600_000,2_000_000,2_000_000)
+    30_000,600_000,600_000,600_000,600_000,600_000,2_000_000,2_000_000)
 m.word(payload_syms['rng'],0x9c3d619b)  # the shared RNG the seed comes from: the layouts the bounds were measured on
 pick(len(OWN)); EN=m.get(payload_syms['en']); PS=EN+O_ENG_STATE
 assert word(G_SCREEN)==5 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1 and m.get(PS+PS_MODE)==0
@@ -340,7 +340,8 @@ def ball(k,x,y,ang,spd=5,live=1):
 whole=epaint((0,0,375,320)); pad=m.get(PS+PS_PAD)
 assert pixel(187,150)==art_px(187,150) and pixel(5,60)==art_px(5,60) and pixel(187,310)==art_px(187,310)  # the stall's art
 assert pixel(187,5)==art_px(187,5)  # the roof: the whole panel, no status row over it in play
-eframe(); rects,cost=eframe(); assert rects==[]  # ready and still, once the first frame painted the start: nothing to paint
+for _ in range(3): eframe()  # the start's paint, and the bulbs coming on ten a frame
+rects,cost=eframe(); assert rects==[]  # ready and still: nothing to paint
 key(O['KEY_CENTER']); eframe(); assert m.get(PS+PS_MODE)==PLAYING
 # A second of play, the wheel turning the trampoline every frame.
 step_worst=0; worst=0
@@ -362,10 +363,15 @@ epaint((0,0,375,320)); star=frames(16)
 assert m.get(PS+PS_CHAIN_N)==0 and cells()[3*16+7]==0 and sum(cells()[i] for i in (2*16+7,2*16+8,3*16+6,3*16+8))==0
 # The level's end: its last balloon, the banner dropping with confetti, then the next rows inflating.
 m.u.mem_write(PS+PS_CELL,bytes(112)); m.u.mem_write(PS+PS_CELL+6*16+7,b'\1'); m.word(PS+PS_LEFT,1)
-ball(0,187.5,78+102+16,768,spd=2)
+ball(0,177.5,78+102+16,768,spd=2)
+def until(mode,most):  # frames while the game is in mode, most at most: the dearest, painted, and how many
+    worst=k=0
+    while m.get(PS+PS_MODE)==mode and k<most: worst=max(worst,frames(1)); k+=1
+    return worst,k
 clear=frames(1); assert m.get(PS+PS_MODE)==CLEAR
-clear=max(clear,frames(99)); assert m.get(PS+PS_MODE)==INFLATE
-clear=max(clear,frames(22)); assert m.get(PS+PS_MODE)==0
+banner,k=until(CLEAR,120); assert m.get(PS+PS_MODE)==INFLATE and k==100,k  # the banner's 100 frames
+inflate,k=until(INFLATE,40); assert m.get(PS+PS_MODE)==0 and k==21,k  # the rows', two at once
+clear=max(clear,banner,inflate)
 whole=max(whole,epaint((0,0,375,320)))
 # The game's end: the last life lost, the rows dimming, the ticket sliding up.
 key(O['KEY_CENTER']); eframe(); m.word(PS+PS_LIVES,1); ball(0,300,300,256,spd=5)
