@@ -206,10 +206,20 @@ int eng_touch(void *ctx, void *event) {
     return 0;
 }
 
+/* ENG_FULL: the status row is a window of its own over every page (stock's system_bar): hidden
+ * while the game runs, so the game has the panel's top rows, and shown while it is held. */
+static void bar_shown(const struct eng *e, int on) {
+    void *bar = *(void *const *)system_bar;
+    if (!bar || !(e->game->flags & ENG_FULL)) return;
+    widget_set_visible(bar, on, 0);
+    if (on) widget_invalidate_force(bar, 0);
+}
+
 void eng_run(void) {
     struct eng *e = en;
     if (!e || e->running) return;
     e->running = 1;
+    bar_shown(e, 0);
     e->acc = 0;
     e->keys = e->pressed = e->released = 0;
     e->ticks = e->fast = 0;
@@ -222,6 +232,7 @@ void eng_hold(void) {
     struct eng *e = en;
     if (!e || !e->running) return;
     e->running = 0;
+    bar_shown(e, 1);
     wheel_raw = WHEEL_TICKS;
     stop_timer(&e->timer);
     if (e->game->pause) e->game->pause(e->state);

@@ -999,9 +999,13 @@ def test_each_screen_of_the_design_paints_whole_with_its_parts_in_place(fw, name
 def test_pop_stall_is_games_first_engine_row_on_the_whole_panel_and_pauses_its_own_way(fw):
     p = Page(fw, {ART_FILE: ART})
     assert p.s.engines == 1 and p.s.rows == 1
-    moved = []
+    moved, shown = [], []
     fw.mock('widget_move_resize', lambda w, x, y, ww, hh, *_: moved.append((x, y, ww, hh)) or 0)
+    bar = C.create_string_buffer(0x400)  # stock's system_bar, the status row's window
+    fw.var('fw_ctx_system_bar', C.c_void_p).value = C.addressof(bar)
+    fw.mock('widget_set_visible', lambda w, on, *_: shown.append(on) if w == C.addressof(bar) else None)
     p.go(ENGINE)
+    assert shown[-1] == 0  # running: no status row over the stall
     assert p.s.screen == ENGINE and api(fw)['eng_live']() and moved[-1] == (0, 0, 375, 320)
     assert Eng.from_address(fw.var('engine__en', C.c_void_p).value).h == 320
     canvas = Canvas(fw)
@@ -1012,9 +1016,9 @@ def test_pop_stall_is_games_first_engine_row_on_the_whole_panel_and_pauses_its_o
         return [t.lower() for t in texts(paint(p, canvas))]
     assert not said()  # all of it the stall's own art
     p.key(RETURN)  # Return: Games' Continue / Quit, over the stall's own pause
-    assert p.s.paused == 2 and not api(fw)['eng_live']() and 'continue' in said()
+    assert p.s.paused == 2 and not api(fw)['eng_live']() and 'continue' in said() and shown[-1] == 1
     p.key(RETURN)
-    assert p.s.paused == 0
+    assert p.s.paused == 0 and shown[-1] == 0
     fw.var('g_backlight_status', C.c_ubyte).value = 0  # the screen off: held, with no pop-up over the stall's sign
     api(fw)['frame'](None)
     fw.var('g_backlight_status', C.c_ubyte).value = 1
@@ -1022,6 +1026,6 @@ def test_pop_stall_is_games_first_engine_row_on_the_whole_panel_and_pauses_its_o
     p.key(CENTER)
     assert p.s.paused == 0
     p.go(0)
-    assert moved[-1] == (0, 58, 375, 262)  # the chooser's sheet under the status row again
+    assert moved[-1] == (0, 58, 375, 262) and shown[-1] == 1  # the chooser's sheet under the status row again
     p.close()
     assert not fw.var('engine__en', C.c_void_p).value
