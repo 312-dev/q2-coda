@@ -570,6 +570,7 @@ static unsigned crossfade(struct dsp *s, float *a, unsigned frames, int nch, int
         if (reader_may(s) && want && length > 0 && pts >= 0 && pts > length - 2.0 * want / rate - XF_LEAD_S - RD_LEAD_S)
             reader_open(s, frames);
         if (!ending) return frames;
+        tail_drop(); /* a hold that came to nothing (its only block one frame) left its ring or its second open */
         int level = s->rd_state == RD_LEVEL && !s->rd_ahead && s->frame >= 0;
         if (!level) {
             if (s->rd_state == RD_OPEN || s->rd_state == RD_LEVEL)
