@@ -478,7 +478,7 @@ class Firmware:
 
 
 class Fake:
-    """q2-fakesonic's control socket (its -ctl): what it was asked, and the cuts and delays it is scripted with."""
+    """q2-fakesonic's control socket (its -ctl): what it was asked, and the cuts, delays and rates it is scripted with."""
     def __init__(self, path):
         self.path = path
 
@@ -506,6 +506,10 @@ class Fake:
 
     def delay(self, op, ms):
         self.call('POST', '/delay', op=op, ms=ms)
+
+    def rate(self, sid, bps):
+        """sid's bytes sent at about bps bytes a second from its next request on (0: full speed)."""
+        self.call('POST', '/rate', id=sid, bps=bps)
 
 
 def die_with_parent():
