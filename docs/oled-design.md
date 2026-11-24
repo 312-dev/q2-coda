@@ -1110,7 +1110,7 @@ Flow's open holds Home).
   An action that names what it loads has its caption under the square: Inter 15 px in Text Secondary (`#ABABAB`) on a
   `#1C1C1E` plate 28 px tall with 12 px corners, its top 8 px under the square, 14 px of plate either side of the
   words and 240 px at most, a longer caption ending in an ellipsis; sentence case, the verb and what it acts on, an
-  ellipsis after: "Shuffling songs…", "Shuffling albums…", "Sorting songs…".
+  ellipsis after: "Shuffling songs…", "Shuffling albums…", "Sorting songs…", "Loading server songs…".
 - **When:** only once the action has run 300 ms (`LOAD_SHOW_MS`); one done sooner shows nothing, so a quick press
   never flashes it. Input is held from the press on, shown or not.
 - **Place:** centered on the whole screen, status row included: x 155 to 219, y 128 to 192. A window under the status

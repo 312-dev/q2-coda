@@ -2159,3 +2159,89 @@ def test_a_job_under_way_stops_for_the_card_and_runs_again_once_it_is_back(rig, 
     fw.fn('catalogue_card_back', None)()
     rig.poll()
     assert rig.files.files[DONE] == b'1 ok 1\n' and rig.shown() == ['Server One']
+
+
+def reboot_cat(fw):
+    """catalogue.c's RAM as a boot leaves it: nothing indexed, no app's seq taken, no job."""
+    C.memset(C.addressof(cat_head(fw)), 0, fw.sizes['catalogue__cat'])
+
+
+def hold_jobs(fw):
+    """pthread_create starts nothing: each job's function is kept for the test to run."""
+    held = []
+    def create(t, attr, fn, arg, *_):
+        held.append(fn)
+        C.c_ulong.from_address(t).value = 1
+        return 0
+    fw.mock('fw_pthread_create', create)
+    return held
+
+
+def run(held):
+    C.CFUNCTYPE(C.c_void_p, C.c_void_p)(held.pop(0))(None)
+
+
+def test_a_boot_shows_the_last_imports_rows_before_any_import_and_keeps_its_seq(rig, fw):
+    """The server's rows the last session imported are in the Library from the boot's first job, which only
+    reads that file; a catalogue at the seq it holds is not imported again."""
+    has = fw.fn('catalogue_has', C.c_int)
+    rig.write(7, [song_row('s1', 'Server One', 'Band', 'Album', 1, 180, 5000)])
+    rig.poll()
+    assert rig.files.files.pop(DONE) == b'7 ok 1\n'
+    reboot_cat(fw)
+    assert not has()
+    rig.poll(2)  # the boot's job, then taken
+    assert has() and rig.shown() == ['Server One']
+    rig.poll(3)
+    assert DONE not in rig.files.files  # seq 7 is the file's: nothing imported
+
+
+def test_a_new_catalogue_after_a_boot_is_imported_while_the_old_rows_stay_shown(rig, fw):
+    has = fw.fn('catalogue_has', C.c_int)
+    filling = fw.fn('catalogue_filling', C.c_int)
+    rig.write(7, [song_row('s1', 'Server One', 'Band', 'Album', 1, 180, 5000)])
+    rig.poll()
+    rig.files.files.pop(DONE)
+    reboot_cat(fw)
+    rig.write(8, [song_row('s2', 'Server Two', 'Band', 'Album', 2, 190, 5100)])
+    held = hold_jobs(fw)
+    rig.poll()
+    assert len(held) == 1 and filling()  # the boot's read of the last file, nothing shown yet
+    run(held)
+    rig.poll()  # taken: seq 7's rows; seq 8's import starts
+    assert has() and not filling() and len(held) == 1
+    assert rig.shown() == ['Server One']  # shown while the import runs
+    run(held)
+    rig.poll()
+    assert rig.files.files[DONE] == b'8 ok 1\n' and rig.shown() == ['Server Two'] and has()
+
+
+def test_a_file_from_before_the_seqs_were_kept_is_shown_then_imported_again(rig, fw):
+    has = fw.fn('catalogue_has', C.c_int)
+    rig.write(7, [song_row('s1', 'Server One', 'Band', 'Album', 1, 180, 5000)])
+    rig.poll()
+    rig.files.files.pop(DONE)
+    db = sqlite3.connect(rig.tmp/'catalogue.db')
+    db.execute('drop table serverseq')
+    db.commit()
+    db.close()
+    reboot_cat(fw)
+    held = hold_jobs(fw)
+    rig.poll()
+    run(held)
+    rig.poll()
+    assert has() and len(held) == 1  # shown, and seq 7 imported again: the file named no seq
+    run(held)
+    rig.poll()
+    assert rig.files.files[DONE] == b'7 ok 1\n' and rig.shown() == ['Server One']
+
+
+def test_a_first_import_has_nothing_shown_until_it_ends(rig, fw):
+    filling = fw.fn('catalogue_filling', C.c_int)
+    held = hold_jobs(fw)
+    rig.write(7, [song_row('s1', 'Server One', 'Band', 'Album', 1, 180, 5000)])
+    rig.poll()
+    assert len(held) == 1 and filling()  # no file yet: the import is the first job
+    run(held)
+    rig.poll()
+    assert not filling() and fw.fn('catalogue_has', C.c_int)()

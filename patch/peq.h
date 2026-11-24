@@ -555,6 +555,7 @@ void catalogue_row_unfav(void *r), catalogue_fav_changed(void);
 unsigned catalogue_fav_gen(void);
 char *catalogue_union(const char *sql), *catalogue_search(const char *sql);
 const char *catalogue_rows(void); /* library_query's union, "" without one */
+int catalogue_filling(void); /* a signed-in app's rows on their way, none shown yet */
 void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_poll(void);
 void catalogue_card_away(void);
 int catalogue_card_release(void), catalogue_away(void); /* card_release.c's: the card let go of, */
