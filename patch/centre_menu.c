@@ -24,7 +24,7 @@
  * nothing. Any move past CM_SLOP (a drag, a scroll), a lift or an abort first ends it. */
 #include "navigation.h"
 
-/* Stock's long press for Centre: input_device_status_on_input_event's key-down adds the key's
+/* Stock's long press for Centre: input_device_status_handle_event's key-down adds the key's
  * long-press timer with li $a2, 0x3e8 at 0x6b3654 (500 only for key 232, unused on the Q2), and
  * on_wm_keylong_fun opens Shut Down? from it (tools/build.py HOLD_KEYS). */
 #define STOCK_CENTRE_HOLD_MS 1000
