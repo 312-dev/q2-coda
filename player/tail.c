@@ -144,12 +144,13 @@ static void *reader(void *arg) {
     unsigned cap = (unsigned)(TAIL_AHEAD_S * t->fmt.rate);
     uint8_t *ring = s ? malloc((size_t)cap * t->unit) : NULL;
     if (s && !ring) why = "q2player: crossfade: the tail held in memory, no memory to decode ahead in", source_close(s), s = NULL;
+    /* said before the answer is there to act on: the song closes this as soon as it reads the answer */
+    if (why && !__atomic_load_n(&t->closed, __ATOMIC_RELAXED)) say(why, 0, 0);
     pthread_mutex_lock(&mu);
     t->src = s, t->ring = ring, t->cap = cap;
     if (!s) t->state = T_FAILED;
     pthread_cond_broadcast(&t->more);
     pthread_mutex_unlock(&mu);
-    if (why && !__atomic_load_n(&t->closed, __ATOMIC_RELAXED)) say(why, 0, 0);
     int64_t decoded = t->from;
     while (s) {
         const uint8_t *data;
