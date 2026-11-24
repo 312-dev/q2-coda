@@ -400,12 +400,16 @@ def sframe(ms=16):  # the frame timer's pass: the rects it invalidated, its inst
     made=[c for c in m.calls if c[0]=='widget_invalidate_force']; assert all(c[1]==sheet for c in made)
     box=lambda k: [signed(m.get(EN+O_ENG_RECT+16*k+4*j)) for j in range(4)]
     return [(x0,y0,x1-x0,y1-y0) for x0,y0,x1,y1 in map(box,range(len(made)))],n[0]
+SLOG=[]  # each frame splay made: its number, rects and cost
+SWITCH=[0]  # the dearest frame that changed the game's screen (the start board, the deal, the win): the whole sheet's bound
 def splay(frames,keys={}):  # frames of play, keys[k] pressed before frame k: the dearest frame, painted
     worst=0
     for k in range(frames):
         if k in keys: key(keys[k])
-        rects,cost=sframe(17 if k%3==0 else 16); assert len(rects)<=ENG_RECTS,rects
-        worst=max(worst,cost+sum(epaint(x) for x in rects))
+        mode=m.get(SO+SO_MODE); rects,cost=sframe(17 if k%3==0 else 16); assert len(rects)<=ENG_RECTS,rects
+        total=cost+sum(epaint(x) for x in rects); SLOG.append((k,rects,total))
+        if m.get(SO+SO_MODE)!=mode: SWITCH[0]=max(SWITCH[0],total)
+        else: worst=max(worst,total)
     return worst
 EN,SO=sopen()
 assert m.get(sheet+O['W_Y'])==signed(-m.get(m.page+O['W_Y'])) and m.get(sheet+O['W_H'])==320  # the whole screen
@@ -438,12 +442,12 @@ m.files[SOL_SAVE]=bytearray(sol_table([(0,[S+12,H+11,S+10]),(0,[H+12,CL+11]),(0,
                                       found=(9,8,9,7),stock=False))
 EN,SO=sopen(); key(O['KEY_NEXT']); key(O['KEY_NEXT']); sframe(); key(O['KEY_CENTER']); sframe()
 auto=splay(4*19+12,{0:O['KEY_PLAY']}); assert m.get(SO+SO_MODE)==4
-won=splay(60); assert m.get(SO+SO_T)>24+14+10
+won=splay(60); assert m.get(SO+SO_T)>24+10
 whole_won=epaint((0,0,375,320))
 squit(); m.close(); assert m.get(payload_syms['g'])==0
 m.u.hook_del(counter)
-print(f'Cabin Solitaire on MIPS: the whole sheet {whole_start} (start board), {whole_table} (a table), {whole_won} (won); the dearest frame of a second of play {play}, of a 13-card run lifted and dropped {run}, of the deal {dealt}, of the auto-finish {auto}, of the win board\'s drop {won} (payload only; stock\'s text and flush mocked)')
-assert max(whole_start,whole_table,whole_won)<SOL_WHOLE_BOUND and play<SOL_FRAME_BOUND and run<SOL_RUN_BOUND and dealt<SOL_DEAL_BOUND and auto<SOL_AUTO_BOUND and won<SOL_WIN_BOUND
+print(f'Cabin Solitaire on MIPS: the whole sheet {whole_start} (start board), {whole_table} (a table), {whole_won} (won), a screen change {SWITCH[0]}; the dearest frame of a second of play {play}, of a 13-card run lifted and dropped {run}, of the deal {dealt}, of the auto-finish {auto}, of the win board\'s showing {won} (payload only; stock\'s text and flush mocked)')
+assert max(whole_start,whole_table,whole_won,SWITCH[0])<SOL_WHOLE_BOUND and play<SOL_FRAME_BOUND and run<SOL_RUN_BOUND and dealt<SOL_DEAL_BOUND and auto<SOL_AUTO_BOUND and won<SOL_WIN_BOUND
 passed()
 
 # Videos (patch/videos.c, docs/internals.md#videos): the card's Videos folder (case aside) is browsed

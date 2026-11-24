@@ -4,16 +4,16 @@
 #define GAME_SOLITAIRE_ART_H
 
 #define ART_MAGIC 0x314c4f53u
-#define ART_BYTES 37180 /* the whole file, its seal the last word */
+#define ART_BYTES 37856 /* the whole file, its seal the last word */
 #define ART_ENTRIES 181 /* from byte 4: offset (bit 31: a palette image), w, h, dx, dy */
-#define ART_TILE 22232 /* 64 x 64 fibre steps, 4 bits, 7 is none */
-#define ART_SHADE 24280 /* 94 x 80 shade cells of 4 px, 128 is none */
+#define ART_TILE 22908 /* 64 x 64 fibre steps, 4 bits, 7 is none */
+#define ART_SHADE 24956 /* 94 x 80 shade cells of 4 px, 128 is none */
 #define ART_SHADE_W 94
 #define ART_SHADE_H 80
-#define ART_LUT 31800 /* a felt pixel: 15 words a shade level, from ART_LUT_LO, by fibre step */
+#define ART_LUT 32476 /* a felt pixel: 15 words a shade level, from ART_LUT_LO, by fibre step */
 #define ART_LUT_LO 87
 #define ART_LUT_LEVELS 64
-#define ART_STYLES 35640 /* per style: 96 entry numbers (255: none), 96 advances in 1/4 px, from ' ' */
+#define ART_STYLES 36316 /* per style: 96 entry numbers (255: none), 96 advances in 1/4 px, from ' ' */
 
 enum {
     A_RANK_A = 0,

@@ -55,8 +55,9 @@ class Sol(C.Structure):
                 *((k, C.c_int) for k in 'flash_t flash_p spark_t spark_p flip_t flip_p flip_i msg msg_t stuck t kings '
                                        'best_new deal_left auto_wait seq runs wait'.split()),
                 ('last_ms', C.c_uint), *((k, C.c_int) for k in 'shown_s since_save unsaved nmark all'.split()),
-                ('marks', (C.c_short * 4) * 8),
-                ('tile', C.c_ubyte * 4096), ('felt_lut', C.c_uint * (LAYOUT['ART_LUT_LEVELS'] * 15)), ('back', (C.c_uint * 41) * 56),
+                ('marks', (C.c_short * 4) * 9),
+                ('tile', C.c_ubyte * 4096), ('felt_lut', C.c_uint * (LAYOUT['ART_LUT_LEVELS'] * 15)), ('back', (C.c_uint * 41) * 56), ('deco_p', ((C.c_uint * 57) * 83) * 5), ('deco_t', ((C.c_ubyte * 57) * 83) * 5),
+                ('deco_run', ((C.c_ubyte * 4) * 83) * 5), ('deco_tmp', (C.c_uint * 57) * 83),
                 ('file', C.c_uint * (LAYOUT['ART_BYTES'] // 4))]
 
 
@@ -436,7 +437,7 @@ def test_the_art_file_is_whole_sealed_and_laid_out_as_its_header_says(fw):
     for e in range(LAYOUT['ART_ENTRIES']):
         off, w, h, dx, dy = struct.unpack_from('<IBBbb', ART, 4 + 8 * e)
         start = (off & 0x7fffffff) + (64 if off >> 31 else 0)
-        assert 0 < w and 0 < h and start + (w * h + 1) // 2 <= LAYOUT['ART_TILE'], e
+        assert 0 < w and 0 < h and start + h * ((w + 1) // 2) <= LAYOUT['ART_TILE'], e  # rows from a byte's start
     g = Game(fw)
     assert g.b.art == 1 and set(g.b.tile) <= set(range(0, 60, 4))  # byte offsets of 15 steps
     g.close()
@@ -993,6 +994,7 @@ def test_a_frame_repaints_every_pixel_that_changed(fw, seed):
             g.key(last)
         for r in g.frame():
             paint(part, r)
+        C.memset(whole, 0x5a, C.sizeof(whole))  # a pixel the paint leaves would show
         paint(whole, (0, 0, 375, 320))
         if bytes(part) != bytes(whole):
             diff = [i for i in range(375 * 320) if part[i] != whole[i]]
