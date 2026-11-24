@@ -1017,6 +1017,7 @@ def test_pop_stall_is_games_first_engine_row_on_the_whole_panel_and_pauses_its_o
     assert not said()  # all of it the stall's own art
     p.key(RETURN)  # Return: Games' Continue / Quit, over the stall's own pause
     assert p.s.paused == 2 and not api(fw)['eng_live']() and 'continue' in said() and shown[-1] == 1
+    assert any(o.kind == 'fill' and o.rect == (0, 0, 375, 320) for o in canvas.ops)  # the menu dims all of it
     p.key(RETURN)
     assert p.s.paused == 0 and shown[-1] == 0
     fw.var('g_backlight_status', C.c_ubyte).value = 0  # the screen off: held, with no pop-up over the stall's sign

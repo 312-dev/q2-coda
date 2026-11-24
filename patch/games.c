@@ -994,10 +994,12 @@ static void hud(void *canvas, const char *name, unsigned v, int x, int y, int ri
 /* The theme's pop-up mid-screen over the dimmed game: a title, then a hint (a) or two choices (a,
  * b), in a dark box, the chosen one on the accent's bar. */
 static void popup(void *canvas, const char *title, const char *a, const char *b, int choice) {
+    /* the sheet's height: a whole-panel game's runs from the screen's top (show) */
+    int sh = g->screen >= ENGINE && eng_game(g->screen - ENGINE)->flags & ENG_FULL ? g->h + bar_foot(0) : g->h;
     int top = POP_ROW + 6, h = b ? top + 2 * POP_ROW + 8 : POP_ROW + 44;
-    int x = (375 - POP_W) / 2, y = (g->h - h) / 2;
+    int x = (375 - POP_W) / 2, y = (sh - h) / 2;
     stock_canvas_set_fill_color(canvas, 0x80000000u); /* black at half, final */
-    canvas_fill_rect(canvas, 0, 0, 375, g->h);
+    canvas_fill_rect(canvas, 0, 0, 375, sh);
     round_box(canvas, x, y, POP_W, h, 0x1c1c1c, 12);
     frame_rect(canvas, x, y, POP_W, h, 0x3a3a3a, 12);
     text_at(canvas, title, 187, y + 4, POP_ROW, 20, rgba(0xffffff, 255), MID);
