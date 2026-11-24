@@ -716,8 +716,12 @@ static int show(const void *unused) {
     int from = g->screen;
     hold(RUN);
     if (from >= ENGINE) eng_close();
+    /* the sheet under the status row, or from the screen's top for a whole-panel game */
+    int full = g->target >= ENGINE && eng_game(g->target - ENGINE)->flags & ENG_FULL;
+    int top = full ? bar_foot(g->page) - bar_foot(0) : bar_foot(g->page), h = full ? g->h + bar_foot(0) : g->h;
+    widget_move_resize(g->sheet, 0, top, 375, h);
     if (g->target >= ENGINE && /* no memory for its state: the list stays */
-        !eng_open(eng_game(g->target - ENGINE), g->page, g->sheet, g->h, engine_held, engine_left))
+        !eng_open(eng_game(g->target - ENGINE), g->page, g->sheet, h, engine_held, engine_left))
         g->target = CHOOSER;
     g->screen = g->target;
     g->picking = g->confirm = 0;
@@ -1229,8 +1233,10 @@ void games_paint(void *w, void *canvas) {
     if (!g || w != g->sheet || g->screen == CHOOSER || !P(canvas, CANVAS_LCD)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), tone = accent_tone(2);
     unsigned raw = ui_ink_raw(0);
-    if (g->screen >= ENGINE)
-        ui_ink_raw(1), eng_paint(canvas), ui_ink_raw(0), paused_popup(canvas, 0); /* its colours are final */
+    if (g->screen >= ENGINE) { /* its colours are final; a whole-panel game draws its own pause */
+        ui_ink_raw(1), eng_paint(canvas), ui_ink_raw(0);
+        if (g->paused == MENU || !(eng_game(g->screen - ENGINE)->flags & ENG_FULL)) paused_popup(canvas, 0);
+    }
     else if (HAS(SUDOKU) && g->screen == SUDOKU)
         sudoku_paint(canvas, tone);
     else if (HAS(SOLITAIRE) && g->screen == SOLITAIRE)

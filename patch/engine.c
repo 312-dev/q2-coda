@@ -22,7 +22,7 @@ static struct eng {
 /* The registry: Games' rows after its own, in this order. The demo scene is a --dev build's, last,
  * and only with [Q2POD] ENGINEDEMO=1 in config.ini; a release build links none of it. */
 static const struct eng_game *const eng_games[] = {
-    &eng_bricks,
+    &eng_popstall,
 #if Q2POD_DEV
     &eng_demo,
 #endif
@@ -357,5 +357,7 @@ void eng_paint(void *canvas) {
     x1 = x1 > w ? w : x1, y1 = y1 > h ? h : y1;
     s.x0 = x0 - s.ox < 0 ? 0 : x0 - s.ox, s.y0 = y0 - s.oy < 0 ? 0 : y0 - s.oy;
     s.x1 = x1 - s.ox > ENG_W ? ENG_W : x1 - s.ox, s.y1 = y1 - s.oy > e->h ? e->h : y1 - s.oy;
+    /* a whole-panel game held: the status row's band is stock's again, over the sheet's top rows */
+    if ((e->game->flags & ENG_FULL) && !e->running && s.y0 < ENG_BAR) s.y0 = ENG_BAR;
     if (s.x1 > s.x0 && s.y1 > s.y0) e->game->draw(e->state, &s);
 }
