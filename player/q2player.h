@@ -218,6 +218,7 @@ struct xf_plan {
     int64_t fade;    /* its fade-in's frames, 0 for none */
     int next_rate;
     char next[URL_MAX]; /* the song the skip and the fade-in are for */
+    int in_body;        /* the overlap begins in the song's body, before its quiet run: it fades out as cos squared */
 };
 void smart_begin(const char *url, float rg);
 int smart_poll(struct xf_plan *plan);

@@ -1959,6 +1959,191 @@ def test_the_overlays_spinner_is_centred_on_the_whole_screen(fw):
         assert x <= dx and dx + dw <= x + w and y <= dy and dy + dh <= y + h
 
 
+WARM_IDLE_MS = int(re.findall(r'#define WARM_IDLE_MS (\d+)', (host.ROOT/'patch/name_order.c').read_text())[0])
+NO_SONGS = 1
+WARM_SQL = b'select * from songs'  # library_query leaves it as it is, an open's and the warm's alike
+
+
+class Warm:
+    """name_order.c's load ahead over Sorts: getAllMusic is Songs' query (library_warm's for NO_SONGS); open() is
+    the Library's open of Songs; the thread a poll starts is held (threads) until the test runs it, any other runs
+    as it starts; the clock is now."""
+    def __init__(self, fw, st, n=NO_MIN + 5, extra=0):
+        self.fw, self.s, self.threads, self.now, self.extra = fw, Sorts(fw, n), [], 100000, extra
+        self.polling = False
+        fw.mock('getAllMusic', self.query)
+        fw.mock('fw_deque_pop_back', lambda q, *_: self.s.q[q].pop() and 0)
+        fw.mock('time_now_ms', lambda *_: self.now)
+        fw.mock('fw_pthread_create', self.create)
+        fw.var('g_backlight_status', C.c_ubyte).value = 0  # dark: no input to wait out
+        st('last_input', C.c_uint).value = 0
+        self.gen = fw.var('library_gen', C.c_uint)
+        self.poll_fn = fw.fn('name_order_poll', None)
+        self.list_is = fw.fn('name_order_list', None, C.c_uint)
+        C.memset(C.addressof(fw.var('name_order__nw', C.c_ubyte)), 0, fw.sizes['name_order__nw'])
+
+    def query(self, *_):
+        n = self.s.named(b'db', WARM_SQL, None, 1)
+        for i in range(self.extra):  # stock's rows after its sort, as getAllArtist's Unknown row
+            self.s.q[self.s.staging.value].append(self.s.record(self.s.ids[i]))
+        return n
+
+    def create(self, out, attr, run, arg, *_):
+        C.c_ulong.from_address(out).value = 99
+        if self.polling:
+            self.threads.append(run)
+        else:
+            C.CFUNCTYPE(C.c_void_p, C.c_void_p)(run)(None)
+        return 0
+
+    def poll(self):
+        self.polling = True
+        try:
+            self.poll_fn()
+        finally:
+            self.polling = False
+
+    def run(self):
+        C.CFUNCTYPE(C.c_void_p, C.c_void_p)(self.threads.pop())(None)
+
+    def open(self):
+        self.s.calls.clear()
+        self.list_is(NO_SONGS)
+        self.query()
+        self.list_is(0)
+        return list(self.s.calls)
+
+    def change(self):
+        """The records change (another title: an import's or a scan's) and library_gen moves."""
+        self.s.titles[5] = 'T00' if self.s.titles[5] != 'T00' else 'T01'
+        self.gen.value += 1
+
+
+def test_a_changed_library_sorts_a_kept_list_ahead_and_its_open_takes_that_order(fw, st):
+    """name_order.c: after library_gen moves, a Library list with a kept order is loaded again in the UI's quiet;
+    its records, no longer the kept ones, are sorted on a thread of their own with stock's comparator; the next
+    open moves its rows into that order without a sort, the order a sort at the open would have given."""
+    w = Warm(fw, st)
+    assert w.open() == SORTED
+    w.change()
+    w.s.calls.clear()
+    w.poll()
+    assert w.s.calls == [('dbquery', 0)] and len(w.threads) == 1  # loaded on the UI thread, not sorted there
+    w.run()
+    assert w.s.calls[-1] == ('sort', CMP['NAME_CMP_PINYIN'])
+    w.poll()  # the sort collected and kept
+    assert w.open() == [('dbquery', 0)] and w.s.listed() == w.s.order()
+    w.s.calls.clear()
+    w.poll()
+    assert not w.s.calls and not w.threads  # nothing more due
+
+
+def test_a_load_ahead_of_unchanged_records_sorts_nothing(fw, st):
+    w = Warm(fw, st)
+    w.open()
+    w.gen.value += 1  # an import that changed none of these records
+    w.s.calls.clear()
+    w.poll()
+    assert w.s.calls == [('dbquery', 0)] and not w.threads
+    assert w.open() == [('dbquery', 0)] and w.s.listed() == w.s.order()
+
+
+def test_a_kept_order_of_no_library_list_is_never_loaded_ahead(fw, st):
+    w = Warm(fw, st)
+    w.query()  # the same rows, from no Library list's open
+    w.change()
+    w.s.calls.clear()
+    w.poll()
+    assert not w.s.calls
+
+
+def test_nothing_is_loaded_ahead_until_library_gen_moves(fw, st):
+    w = Warm(fw, st)
+    w.open()
+    w.s.calls.clear()
+    w.poll()
+    assert not w.s.calls
+
+
+def test_a_lit_screen_waits_for_quiet_and_a_scan_for_its_end(fw, st):
+    w = Warm(fw, st)
+    w.open()
+    w.change()
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    st('last_input', C.c_uint).value = w.now - WARM_IDLE_MS + 1
+    w.s.calls.clear()
+    w.poll()
+    assert not w.s.calls
+    w.now += 1  # WARM_IDLE_MS since the last input
+    claim(O['SCAN_THREAD'])
+    saved = C.string_at(O['SCAN_DONE'], 8)
+    try:
+        C.c_int.from_address(O['SCAN_THREAD']).value, C.c_int.from_address(O['SCAN_DONE']).value = 1, 0
+        w.poll()
+        assert not w.s.calls  # a scan running: its end moves library_gen again
+    finally:
+        C.memmove(O['SCAN_DONE'], saved, 8)
+        C.c_int.from_address(O['SCAN_THREAD']).value = 0
+    w.poll()
+    assert w.s.calls == [('dbquery', 0)] and len(w.threads) == 1
+
+
+def test_rows_stock_adds_after_its_sort_are_left_out_of_the_sort_ahead(fw, st):
+    """getAllArtist and its kin add an Unknown row after their query's sort: the warm sorts the records it hashed,
+    and keeps them only while they are those."""
+    w = Warm(fw, st, extra=2)
+    w.open()
+    w.change()
+    w.poll()
+    w.run()
+    w.poll()
+    w.s.calls.clear()
+    w.list_is(NO_SONGS)
+    w.s.named(b'db', WARM_SQL, None, 1)
+    assert w.s.calls == [('dbquery', 0)] and w.s.listed() == w.s.order()
+
+
+def test_an_open_that_meets_the_sort_ahead_waits_for_it_rather_than_sorting(fw, st):
+    w = Warm(fw, st)
+    w.open()
+    w.change()
+    w.poll()
+    assert len(w.threads) == 1
+    sleeps = []
+    fw.mock('fw_usleep', lambda us, *_: sleeps.append(us) or (len(sleeps) == 3 and w.run()) or 0)
+    assert w.open() == [('dbquery', 0), ('sort', CMP['NAME_CMP_PINYIN'])]  # the warm's sort, run while it waited
+    assert len(sleeps) == 3 and w.s.listed() == w.s.order()
+    w.s.calls.clear()
+    w.poll()
+    assert not w.threads and not w.s.calls
+
+
+def test_a_changed_list_takes_its_own_slot_not_another_lists(fw, st):
+    """Four slots: a list's new order replaces that list's old one, so three other kept loads stay kept."""
+    w = Warm(fw, st)
+    w.open()
+    for sql in (b'select * from a', b'select * from b', b'select * from c'):
+        assert w.s.named(b'db', sql, None, 1) == len(w.s.ids)
+    was, w.s.titles[5] = w.s.titles[5], 'T00'
+    assert w.open() == SORTED  # the records changed: Songs sorted again, in Songs' slot
+    w.s.titles[5] = was  # the other three loads' records as they were kept
+    for sql in (b'select * from a', b'select * from b', b'select * from c'):
+        w.s.calls.clear()
+        w.s.named(b'db', sql, None, 1)
+        assert w.s.calls == [('dbquery', 0)], sql
+
+
+def test_the_list_a_kept_order_is_outlives_a_reboot(fw, st, library):
+    Files(fw)
+    w = Warm(fw, st)
+    w.open()
+    reboot(fw, library)
+    C.memset(C.addressof(fw.var('name_order__nw', C.c_ubyte)), 0, fw.sizes['name_order__nw'])
+    w.change()
+    w.poll()
+    assert len(w.threads) == 1  # the card's head named Songs
+
+
 def test_no_framebuffer_no_spinner_and_no_thread_sorts_in_place(fw):
     s = Sorts(fw, NO_MIN)
     fw.mock('fw_open', lambda *_: -1)  # pthread_create's stub starts nothing: sorted in place
@@ -3011,8 +3196,9 @@ class CfPage(C.Structure):
     """coverflow.c's cf as far as the pool reads it: cf.slide, and cf.count at the end (coverflow.h)."""
     _fields_ = [*((k, C.c_void_p) for k in 'page body covers slide name artist title albums tracks stock'.split()),
                 *((k, C.c_int) for k in 'sort sort_read year_old artists on_sort resort'.split()),
-                ('jobs', C.c_void_p), ('thread', C.c_ulong), ('timer', C.c_uint), ('title_timer', C.c_uint), ('titled', C.c_int),
-                ('offline', C.c_int), ('saved_album', C.c_uint), ('albums_gen', C.c_uint),
+                ('jobs', C.c_void_p), ('thread', C.c_ulong), ('timer', C.c_uint), ('title_timer', C.c_uint),
+                *((k, C.c_uint) for k in 'art_timer art_at'.split()), *((k, C.c_int) for k in 'art_told art_ring want'.split()),
+                ('titled', C.c_int), ('offline', C.c_int), ('saved_album', C.c_uint), ('albums_gen', C.c_uint),
                 *((k, C.c_int) for k in 'screen album running done total cancel scoped all_sort'.split()),
                 *((k, C.c_void_p) for k in 'all_albums all_stock hearts'.split()), ('count', C.c_int)]
 

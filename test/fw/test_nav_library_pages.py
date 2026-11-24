@@ -3006,12 +3006,12 @@ class CfOpen:
                     TICK(fn)(ctx)
 
     def watch(self, ms):
-        """ms later, the ticks that wait (open_step's, Preparing artwork's poll) run as the main loop would: the cf
-        lines they added."""
+        """ms later, the ticks that wait (open_step's, and the art build's look, art_poll) run as the main loop
+        would: the cf lines they added."""
         self.clock[0] += ms
         before = len(self.lines)
         ticks = {C.cast(self.fw.lib.coverflow__open_step, C.c_void_p).value,
-                 C.cast(self.fw.lib.coverflow__poll, C.c_void_p).value}
+                 C.cast(self.fw.lib.coverflow__art_poll, C.c_void_p).value}
         for t, (fn, ctx, _ms) in list(self.ui.timers.items()):
             if fn in ticks:
                 del self.ui.timers[t]
@@ -3048,7 +3048,8 @@ def test_a_cover_flow_open_in_its_cover_lookup_says_how_far(fw, ui, song):
                               '0 without a cover file']
 
 
-# the page up on Preparing artwork (a build of its art, on a thread) and closed before any cover shows
+# the covers up at once with their art to build behind them (on a thread), and the page closed before the build
+# ends: the line says how far it got
 def test_a_cover_flow_page_closed_while_its_art_builds_says_so(fw, ui, song):
     def statfs(path, buf, *_):  # the card has room for the art
         words = C.cast(buf, C.POINTER(C.c_uint))
@@ -3059,11 +3060,12 @@ def test_a_cover_flow_page_closed_while_its_art_builds_says_so(fw, ui, song):
     cf = CfOpen(fw, ui, song)
     cf.steps()
     page = ui.top()
-    assert ui.name[page] == 'coverflow_page' and not any(line.startswith('I cover flow shown') for line in cf.lines)
-    assert cf.watch(5000) == ['W cover flow not shown 5 s after its open: the thumbnail build, 0 of 2 done']
+    assert ui.name[page] == 'coverflow_page'
+    assert cf.lines[-1].startswith('I cover flow shown: covers, 2 albums, ') and ' ms after its open, 2 covers to build' in cf.lines[-1]
+    assert cf.watch(5000) == []  # shown: nothing waits
+    cf.clock[0] += 1500
     ui.close(page)
-    assert cf.lines[-1].startswith('I cover flow closed ') and cf.lines[-1].endswith(
-        'not shown: the thumbnail build, 0 of 2 done')
+    assert cf.lines[-1] == 'I cover flow art stopped: 0 of 2 covers, 6500 ms'
     assert cf.watch(60000) == []
 
 

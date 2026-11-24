@@ -1208,9 +1208,9 @@ with tempfile.TemporaryDirectory() as directory:
         assert m.sqls if not back else not m.sqls,m.sqls
         assert m.db.execute('select count(*) from songtable').fetchone()[0]==(1000 if back else 0); m.db.close()  # kept, or made again
 passed()
-# Albums without art start the thread behind a progress screen; destroy joins it and drops the poll.
+# Albums without art start the thread behind the covers, which show at once; destroy joins it and drops its poll.
 m=CoverflowMachine(cached=False); page=m.open()
-assert len(m.threads)==1 and m.timers and any((t or '').startswith('Preparing artwork') for t in m.texts()) and 'Cancel' in m.texts()
+assert len(m.threads)==1 and m.timers and m.find('slide_menu') and not any((t or '').startswith('Preparing') for t in m.texts()) and 'Cancel' not in m.texts()
 f,ctx=m.handler(page,O['EVT_DESTROY']); m.freed=0; assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0
 assert m.joins==[77] and not m.timers and m.freed==4; passed()  # three job paths and the job array
 # Tracks list and play in album order (disc, track, then path, then CUE start), named without
@@ -1240,8 +1240,9 @@ for action,want in ((0,['A','early','late','B','C']),(1,None)):
     assert m.names()==(want or played_last(m,['early','late'])) and not m.playback() and not m.plays and m.top==m.page
     assert m.query[:2]==('getMusicByAlbum','Album 2') and m.names(m.get(syms['tools_pdeq_directory']))==['staged']; passed()
 m=CoverflowMachine(); m.open(); assert len(m.nodes[m.slide]['children'])==3; passed()  # no Sort or Refresh card to hold
-for kwargs in ({'albums':0},{'cached':False}):
-    m=CoverflowMachine(**kwargs); m.open(); m.press(100); assert m.hold()==0; passed()
+m=CoverflowMachine(albums=0); m.open(); m.press(100); assert m.hold()==0; passed()  # no albums: nothing to hold
+# art still building behind the covers: they are live, and a hold opens the centre cover's menu
+m=CoverflowMachine(cached=False); m.open(); m.press(100); assert m.hold()==11 and m.release()==0 and m.labels()==[*COVER_ALBUM,'Go to Artist']; passed()
 for invalidate in ('selection','closed','tracks'):
     m=CoverflowMachine(); m.open(); m.press(100); assert m.hold()==11; m.release()
     if invalidate=='selection': m.word(m.slide+O['SLIDE_INDEX'],1)

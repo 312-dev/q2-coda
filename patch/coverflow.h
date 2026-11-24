@@ -25,7 +25,9 @@ enum { RATED_ALBUMS = 1, ALBUM_TRACKS, PLAYLISTS }; /* cf.scoped */
 typedef struct {
     char *track; /* the album's first track, copied so the thread never reads stock deques */
     unsigned key;
-    int shared; /* another album has a track in this folder, so its cover.jpg may be theirs */
+    int at;               /* the album's place in cf.albums; a build's jobs are in that order */
+    unsigned char shared; /* another album has a track in its folder: its cover.jpg may be theirs */
+    unsigned char made;   /* the worker's: built, or found to have none */
 } job_t;
 typedef struct {
     void *page, *body, *covers, *slide, *name, *artist, *title;
@@ -38,8 +40,14 @@ typedef struct {
     job_t *jobs;
     unsigned long thread;
     unsigned timer, title_timer; /* title_timer: the captions follow the centre cover mid-move */
-    int titled;                  /* the album the captions name, + 1 */
-    int offline;                 /* that album can't play now: its captions greyed (caption_mark) */
+    /* The art build behind the covers (art_build): its timer's look (art_poll), when it began, the
+     * jobs made at the look before, and the album it builds nearest to (the covers' position) of
+     * the ring's albums. */
+    unsigned art_timer, art_at;
+    int art_told, art_ring;
+    volatile int want;
+    int titled;  /* the album the captions name, + 1 */
+    int offline; /* that album can't play now: its captions greyed (caption_mark) */
     unsigned saved_album, albums_gen; /* albums_gen: library_gen when albums was queried */
     int screen, album, running;
     volatile int done, total, cancel;

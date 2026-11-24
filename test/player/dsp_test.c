@@ -358,7 +358,7 @@ static void smart_pair(int ra, int na, wave fa, int rb, int nb, wave fb, unsigne
     xfade_view(0);
 }
 static struct xf_plan plan_of(int64_t overlap, int64_t trail, int64_t skip, int64_t fade, int rate) {
-    struct xf_plan p = {overlap, trail, skip, fade, rate, "b"};
+    struct xf_plan p = {overlap, trail, skip, fade, rate, "b", 0};
     return p;
 }
 static float tone(unsigned i, int c) { return 0.99f * sinf(6.2831853f * 1000 * (i % 48) / 48000); }
@@ -400,6 +400,17 @@ static void smart_check(void) {
     assert((unsigned)(cut + 23999 * step) == 441000 - 4410 - 1); /* the overlap's last frame read */
     for (unsigned t = 24000; t < out_b; ++t) assert(song_b[t] == 0);
 
+    /* An overlap that begins in A's body (the next intro's or the floor's, in_body): A fades out as cos squared. */
+    smart_given = plan_of(24000, 0, 0, 0, 48000);
+    smart_given.in_body = 1;
+    smart_pair(48000, 2, ramp, 48000, 2, zero, 48000, smart, 0);
+    cut = 480000 - 24000;
+    assert(out_a == cut);
+    for (unsigned t = 0; t < 24000; ++t) {
+        float go = cosf((t + 0.5f) / 24000 * 1.5707963f);
+        assert(fabsf(song_b[2 * t] - go * go * ramp(cut + t, 0)) < 2e-6f);
+    }
+
     /* The next song: its leading frames dropped, then in over its fade-in, or at full level from its first frame (a
      * hard start). */
     smart_given = plan_of(24000, 0, 4800, 9600, 48000);
@@ -425,6 +436,22 @@ static void smart_check(void) {
     assert(out_a == 10 * 48000 - 5 * 48000);
     smart_answer = SMART_PLAIN;
     free(song_a), free(song_b), song_a = song_b = 0;
+
+    /* The analysis is asked for once, XF_SMART_LEAD_S (45 s) before a 60 s song's end: not at 14.9 s, by 15.1 s. */
+    length = 60;
+    xfade_view(smart);
+    struct dsp *d = track(48000, 2);
+    dsp_path(d, "a");
+    static float buf[2 * 1024];
+    int begun = smart_begun;
+    unsigned n = 0;
+    while (n + 1024 <= (unsigned)(14.9 * 48000)) block(d, buf, 1024, &n, 0, 48000);
+    assert(smart_begun == begun);
+    while (n < (unsigned)(15.1 * 48000)) block(d, buf, 1024, &n, 0, 48000);
+    assert(smart_begun == begun + 1);
+    dsp_close(d, 0);
+    xfade_view(0);
+    length = 10;
 }
 
 /* Mono Audio and Swap L/R: demo's files, looked for once a second of audio; set, each stereo frame is its channels'

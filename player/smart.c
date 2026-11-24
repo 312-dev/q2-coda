@@ -6,14 +6,20 @@
  * applies them (dsp.c chain). Its windows are counted back from the file's last frame, so the plan is in frames from
  * the song's end, which the hold in dsp.c also counts from: an inexact seek moves nothing. The tail is decoded twice,
  * once to find that last frame and once to measure, as the last frame is only known at the end and the envelope is
- * cheaper to make again than the frames are to keep (15 MB at 192 kHz). The next song, from XFADE_NEXT, is decoded
+ * cheaper to make again than the frames are to keep (23 MB at 192 kHz). The next song, from XFADE_NEXT, is decoded
  * from its start for SR.head_s seconds, its windows counted from its first frame.
  *
  * Rules (SR, one table to tune them; body is a song's median window over what was decoded):
  *   tail_end   the end of the last window above max(SR.floor_db, body - SR.tail_below); after it, dropped
- *   out_point  the start of the final run of windows below body - SR.quiet_below that ends at tail_end, when that run
- *              is SR.run_min_ms to SR.run_max_ms long; else tail_end - SR.fallback_ms
+ *   out run    the final run of windows below body - SR.quiet_below that ends at tail_end, when it starts inside the
+ *              span (else none)
  *   skip       the next song's leading windows below SR.floor_db, at most SR.skip_max_ms
+ *   intro      the next song's run of windows from its first sound below its later body - SR.intro_below; its later
+ *              body is the median of its windows from SR.overlap_max_ms after its first sound on, or its body when
+ *              fewer than SR.later_min_ms of those were decoded (a song shorter than the span)
+ *   overlap    the longest of the out run, the intro and SR.overlap_min_ms, at most SR.overlap_max_ms, ending at
+ *              tail_end; out_point is its start. When the intro or the floor decided it, it begins in the song's body
+ *              (in_body), and dsp.c fades the song out faster
  *   fade       the next song's fade-in: none when its start (its loudest window in SR.start_ms after the skip) is
  *              within SR.hard_within of its body, a hard start; else SR.fade_min_ms, more for a quieter start, at most
  *              SR.fade_max_ms (SR.fade_span dB further down)
@@ -33,17 +39,17 @@
 
 static const struct smart_rules {
     int window_ms, tail_s, head_s;
-    double floor_db, tail_below, quiet_below, hard_within, fade_span;
-    int run_min_ms, run_max_ms, fallback_ms, skip_max_ms, start_ms, fade_min_ms, fade_max_ms;
+    double floor_db, tail_below, quiet_below, intro_below, hard_within, fade_span;
+    int overlap_min_ms, overlap_max_ms, later_min_ms, skip_max_ms, start_ms, fade_min_ms, fade_max_ms;
 } SR = {
-    .window_ms = 50, .tail_s = 20, .head_s = 15,
-    .floor_db = -60, .tail_below = 45, .quiet_below = 12, .hard_within = 6, .fade_span = 14,
-    .run_min_ms = 1000, .run_max_ms = 15000, .fallback_ms = 5000, .skip_max_ms = 5000, .start_ms = 200,
+    .window_ms = 50, .tail_s = 30, .head_s = 30,
+    .floor_db = -60, .tail_below = 45, .quiet_below = 12, .intro_below = 10, .hard_within = 6, .fade_span = 14,
+    .overlap_min_ms = 5000, .overlap_max_ms = 15000, .later_min_ms = 5000, .skip_max_ms = 5000, .start_ms = 200,
     .fade_min_ms = 300, .fade_max_ms = 1000,
 };
 #define SILENT_DB (-200.0) /* a window of digital silence */
 #define SMART_NICE 10     /* the analysis thread's nice: the playback thread before it */
-#define MAX_WINDOWS 512    /* the most of either span: SR.tail_s or SR.head_s at SR.window_ms */
+#define MAX_WINDOWS 600    /* the most of either span: SR.tail_s or SR.head_s at SR.window_ms */
 
 struct job {
     char cur[URL_MAX], next[URL_MAX];
@@ -213,12 +219,22 @@ static int plan(const struct job *j, struct xf_plan *p, char *why, size_t n) {
     if (te == nt) return snprintf(why, n, "no sound in the playing song's last seconds"), 0;
     int run = te;
     while (run < nt && tail[run] < ba - SR.quiet_below) ++run;
-    int64_t quiet = (int64_t)(run - te) * SR.window_ms;
+    int64_t out = run < nt ? (run - te) * wa : 0; /* a run that reaches the span's start is no fade */
     p->trail = te * wa;
-    p->overlap = quiet >= SR.run_min_ms && quiet <= SR.run_max_ms && run < nt ? (run - te) * wa
-                                                                               : (int64_t)ra * SR.fallback_ms / 1000;
     int skip = 0;
     while (skip < nh && skip * SR.window_ms < SR.skip_max_ms && head[skip] < SR.floor_db) ++skip;
+    int from = skip + SR.overlap_max_ms / SR.window_ms; /* past the longest intro an overlap can use */
+    double later = nh - from >= SR.later_min_ms / SR.window_ms ? body(head + from, nh - from) : bb;
+    int lead = skip;
+    while (lead < nh && head[lead] < later - SR.intro_below) ++lead;
+    int64_t intro = (int64_t)(lead - skip) * SR.window_ms * ra / 1000, least = (int64_t)ra * SR.overlap_min_ms / 1000;
+    int64_t most = (int64_t)ra * SR.overlap_max_ms / 1000, o;
+    const char *by;
+    if (out >= intro && out >= least) o = out, by = "out run";
+    else if (intro >= least) o = intro, by = "next intro";
+    else o = least, by = "floor";
+    p->overlap = o < most ? o : most;
+    p->in_body = o != out;
     double start = SILENT_DB;
     for (int i = skip; i < nh && (i - skip) * SR.window_ms < SR.start_ms; ++i)
         if (head[i] > start) start = head[i];
@@ -232,12 +248,14 @@ static int plan(const struct job *j, struct xf_plan *p, char *why, size_t n) {
     p->fade = (int64_t)rb * fade_ms / 1000;
     p->next_rate = rb;
     snprintf(p->next, sizeof p->next, "%s", j->next);
-    char line[256];
+    char line[384];
     int k = snprintf(line, sizeof line,
-                     "q2player: smart crossfade: body %.1f dB, overlap %.2f s from %.2f s before the end, %.2f s of tail "
-                     "dropped; next body %.1f dB, %.2f s skipped, start %.1f dB, fade-in %d ms",
-                     ba, (double)p->overlap / ra, (double)(p->overlap + p->trail) / ra, (double)p->trail / ra, bb,
-                     (double)p->skip / rb, start, fade_ms);
+                     "q2player: smart crossfade: body %.1f dB, overlap %.2f s by the %s (out run %.2f s, next intro "
+                     "%.2f s, floor %.2f s) from %.2f s before the end, %.2f s of tail dropped; next body %.1f dB, "
+                     "later %.1f dB, %.2f s skipped, start %.1f dB, fade-in %d ms",
+                     ba, (double)p->overlap / ra, by, (double)out / ra, (double)intro / ra, (double)least / ra,
+                     (double)(p->overlap + p->trail) / ra, (double)p->trail / ra, bb, later, (double)p->skip / rb,
+                     start, fade_ms);
     plog('I', line, k < (int)sizeof line ? k : (int)sizeof line - 1);
     return 1;
 }

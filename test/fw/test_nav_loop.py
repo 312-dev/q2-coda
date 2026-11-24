@@ -1050,6 +1050,123 @@ def test_a_level_the_headset_already_shows_is_kept(fw):
     assert not fw.calls('btctl_transport_set_volume')
 
 
+# A device's Volume Curve (bt_vol_limit.c): Gentle, for a headset with no taper of its own, is the 40 dB curve,
+# 127 x 10^(-40 dB x (100 - v) / 100 / 20), rising at least 127 v / 400 below 58 and at least 1 above 0.
+def gentle(v):
+    return 0 if v <= 0 else max(1, round(127 * 10 ** (-40 * (100 - v) / 2000)), round(127 * v / 400))
+
+
+def reads_as_gentle(level):
+    """The Q2 volume a headset level reads as on Gentle: the nearest, the lowest of those as near."""
+    return min(range(101), key=lambda v: (abs(gentle(v) - level), v))
+
+
+BTLIM = '/mnt/data/q2-btvollimit'
+PX7_MAC, OTHER_MAC = 'AA:BB:CC:DD:EE:07', 'AA:BB:CC:DD:EE:08'
+
+
+def device(fw, mac=PX7_MAC, store=b''):
+    """The Bluetooth output (mclGetOutputWay 1) going to mac (stock's link list's last item), with the store's
+    lines: its curve and limit."""
+    fw.var('g_bluetoothflag', C.c_ubyte).value = 1
+    fw.mock('mclGetOutputWay', lambda *_: 1)
+    fw.mock('getBtLinkSize', lambda *_: 1)
+
+    def item(i, status, out, *_):
+        C.c_int.from_address(status).value = 3
+        C.memmove(out, mac.encode() + b'\0', len(mac) + 1)
+        return 0
+    fw.mock('getBtLinkItem', item)
+    return Files(fw, {BTLIM: store})
+
+
+@pytest.mark.parametrize('store, levels', [(b'', [curve(v) for v in range(101)]),
+                                           (f'{PX7_MAC} gentle\n'.encode(), [gentle(v) for v in range(101)]),
+                                           (f'{OTHER_MAC} gentle\n'.encode(), [curve(v) for v in range(101)])])
+def test_the_devices_volume_curve_picks_the_headsets_levels(fw, store, levels):
+    device(fw, store=store)
+    avrcp = fw.fn('navigation__bt_vol_avrcp', C.c_uint, C.c_int)
+    assert [avrcp(v) for v in range(101)] == levels
+
+
+def test_gentle_is_the_40_db_curve(fw):
+    device(fw, store=f'{PX7_MAC} gentle\n'.encode())
+    avrcp = fw.fn('navigation__bt_vol_avrcp', C.c_uint, C.c_int)
+    table = [avrcp(v) for v in range(101)]
+    assert (table[0], table[1], table[50], table[100]) == (0, 1, 16, 127)  # half volume an eighth of the range, -20 dB
+    assert (avrcp(-5), avrcp(150)) == (0, 127)
+    # never down, and at most four volumes share a level, so a step of the wheel is never far from a change
+    assert all(b >= a for a, b in zip(table, table[1:])) and all(table[v + 4] > table[v] for v in range(97))
+
+
+@pytest.mark.parametrize('gentle_on', [0, 1])
+def test_a_round_trip_through_the_headset_lands_on_the_same_level_on_either_curve(fw, gentle_on):
+    """Q2 -> AVRCP -> Q2: on Even the volume itself; on Gentle the lowest volume that shares its level, which writes
+    the same level again. AVRCP -> Q2: the nearest volume on the device's own curve."""
+    device(fw, store=f'{PX7_MAC} gentle\n'.encode() if gentle_on else b'')
+    level_of, reads = (gentle, reads_as_gentle) if gentle_on else (curve, reads_as)
+    avrcp = fw.fn('navigation__bt_vol_avrcp', C.c_uint, C.c_int)
+    q2 = fw.fn('navigation__bt_vol_q2', C.c_int, C.c_uint)
+    for v in range(101):
+        back = q2(avrcp(v))
+        assert avrcp(back) == avrcp(v) == level_of(v)
+        assert back == (v if not gentle_on else min(u for u in range(101) if gentle(u) == gentle(v)))
+    for level in range(128):
+        assert q2(level) == reads(level)
+    if not gentle_on:
+        assert all(q2(avrcp(v)) == v for v in range(101))
+
+
+@pytest.mark.parametrize('gentle_on', [0, 1])
+@pytest.mark.parametrize('cap', ['max', 'device'])
+def test_the_headsets_own_keys_stop_at_the_limit_on_either_curve(fw, stock_bytes, gentle_on, cap):
+    """The limit is on the Q2's scale (vol_cap): the headset's keys at its top read as the Q2's 100, held to 40,
+    and the headset is sent the curve's level for 40."""
+    stock_bytes(0xa4cbb5, 1)
+    lines = (f'{PX7_MAC} gentle\n' if gentle_on else '') + (f'{PX7_MAC} 40\n' if cap == 'device' else '')
+    device(fw, store=lines.encode())
+    vol = VolPoll(fw, limit=40 if cap == 'max' else 100, volume=30)
+    fw.mock('device_set_volume', lambda v, notify, *_: vol.headset.btvol(v, v) and 0)
+    vol.headset.level = 127
+    vol.poll()
+    assert fw.var('g_volume', C.c_ubyte).value == 40
+    assert vol.headset.level == (gentle(40) if gentle_on else curve(40)) == (13 if gentle_on else 51)
+
+
+def test_a_curve_chosen_for_the_connected_device_moves_the_headset_at_once(fw):
+    """Its volume sent again: the headset takes the new curve's level for the same Q2 volume, and its own read back
+    (an unmoved headset) changes nothing."""
+    files = device(fw)
+    vol = VolPoll(fw, volume=50)
+    fw.mock('device_set_volume', lambda v, notify, *_: vol.headset.btvol(v, v) and 0)
+    assert vol.headset.level == curve(50) == 64
+    fw.fn('btlim_edit', None, C.c_char_p)(PX7_MAC.encode())
+    fw.fn('btlim_edit_curve_take', None, C.c_int)(1)
+    assert vol.headset.level == gentle(50) == 16 and files.files[BTLIM] == f'{PX7_MAC} gentle\n'.encode()
+    vol.clock.now += 1000
+    vol.poll()
+    assert fw.var('g_volume', C.c_ubyte).value == 50
+    fw.fn('btlim_edit_curve_take', None, C.c_int)(0)
+    assert vol.headset.level == 64 and files.files[BTLIM] == b''
+
+
+def test_switching_curves_resends_every_volume(fw):
+    """For every Q2 volume, a curve change leaves the headset at the new curve's level for it, never at a level of
+    the old curve that happens to read as it."""
+    device(fw)
+    headset = Headset(fw)
+    bt_link(fw)
+    fw.mock('device_set_volume', lambda v, notify, *_: headset.btvol(v, v) and 0)
+    fw.fn('btlim_edit', None, C.c_char_p)(PX7_MAC.encode())
+    for v in range(101):
+        fw.var('g_volume', C.c_ubyte).value = v
+        headset.btvol(v, v)
+        fw.fn('btlim_edit_curve_take', None, C.c_int)(1)
+        assert headset.level == gentle(v), v
+        fw.fn('btlim_edit_curve_take', None, C.c_int)(0)
+        assert headset.level == curve(v), v
+
+
 # Link Volume unset: on for headphones and headsets (their Class), off for anything else; a choice saved wins.
 CLASSES = {'headphones': 0x240418, 'headset': 0x240404, 'speaker': 0x240414, 'car': 0x240420, 'unknown': 0}
 PX7 = 'AA:BB:CC:DD:EE:07'

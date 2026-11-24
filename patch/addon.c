@@ -101,7 +101,7 @@ enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR, LAY_ALBUM };
 #define ADDON_CAPS                                                                                 \
     "playlist progress pages library goto sleep game audio sections art window urls sort field "   \
     "more fav now catalogue ratings likes artist album playlists storage signin libsource radio "  \
-    "status"
+    "status holdmenu"
 #define ADDON_SECTIONS 8  /* sections an app's first page may have */
 #define SWIPE_CLAIM_PX 24 /* a sideways move this far, twice as far as up or down, is a swipe's */
 #define SWIPE_PX 60       /* and this far at the lift, more than up or down, changes section */
@@ -110,6 +110,8 @@ enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR, LAY_ALBUM };
 #define ART_MAX 128  /* the most a cover's or an icon's file may be, either way; larger is none */
 #define ART_KEEP 24  /* the rows' covers kept decoded around the list's scroll position */
 #define ART_URL (APP_ID + 32) /* art_file's file:// URL, its NUL included */
+#define QUEUE_KEEP 16  /* an app's .queue lines remembered as queued (queue_poll); it keeps 8 */
+#define QUEUE_RAW 4096 /* and its .queue read this far: 8 lines of a seq, a word, a card path */
 
 /* An app found on the card, kept for the life of demo in its slot. present: on the card at the
  * last scan; relaunch: stopped for USB storage, to start again; restart: stopped by Retry (its
@@ -129,6 +131,9 @@ typedef struct {
     int reach;       /* its state file's reach=down: its server out of reach (addon_offline) */
     char srverr[24]; /* its srverr= as read last: the server failure toasted last (reach_read) */
     int offline;     /* q2app's offline=1: it syncs a Library item offline (addon_offline_ask) */
+    unsigned queue;  /* its .queue as read last, hashed (queue_poll) */
+    unsigned taken[QUEUE_KEEP], next_taken; /* the .queue lines' seqs queued, hashed, a ring */
+    int queue_seen;                         /* its .queue looked at once since demo started */
 } app_t;
 
 static struct {
@@ -1243,6 +1248,72 @@ static void stream_poll(app_t *a) {
     }
 }
 
+/* Play Next and Play Last from an app's own page (a song row's hold menu, "holdmenu" in the caps,
+ * docs/internals.md#card-apps): the app fetches the song to the card, then names it in
+ * /tmp/q2-<id>.queue, written whole, its latest requests a line each, "<seq> next <card path>" or
+ * "<seq> last <card path>", seq a word of its own never reused. Each line is queued once, as the
+ * hold menu's Play Next or Play Last queues a Library song (library_pages.c queue_add), and toasted
+ * with its words; the seqs queued are kept (taken, QUEUE_KEEP of them), so a line the app keeps in
+ * its next write is not queued again. What the file holds the first time it is looked at since demo
+ * started was there before: none of it is queued. A song whose file is not there, or a queue that
+ * takes none (a stream's), is "Queue unchanged". */
+static int queue_taken(app_t *a, unsigned seq) {
+    for (unsigned i = 0; i < QUEUE_KEEP; ++i)
+        if (a->taken[i] == seq) return 1;
+    a->taken[a->next_taken++ % QUEUE_KEEP] = seq;
+    return 0;
+}
+
+/* The card song at path as a queue's record, named by its tags (card_record_tags), alone in a new
+ * deque: empty when its folder's listing has no such song. */
+static void *path_song(const char *path) {
+    void *out = _create_deque("stSongInfo");
+    deque_init(out);
+    const char *slash = strrchr(path, '/');
+    char dir[512];
+    if (!slash || (unsigned)(slash - path) >= sizeof dir) return out;
+    tk_snprintf(dir, sizeof dir, "%.*s", (int)(slash - path), path);
+    void *songs = app_album_songs(dir);
+    for (unsigned i = 0, n = songs ? deque_size(songs) : 0; i < n; ++i) {
+        void *r = deque_at(songs, i);
+        if (P(r, REC_PATH) && !strcmp(P(r, REC_PATH), path)) {
+            card_record_tags(r);
+            _deque_push_back(out, r);
+            break;
+        }
+    }
+    if (songs) deque_destroy(songs);
+    return out;
+}
+
+static void queue_poll(app_t *a) {
+    char path[48], raw[QUEUE_RAW];
+    tk_snprintf(path, sizeof path, "/tmp/q2-%s.queue", a->id);
+    unsigned got = state_read(path, raw, sizeof raw);
+    if (got >= sizeof raw - 2) strrchr(raw, '\n')[1] = 0; /* cut: its last line goes whole */
+    unsigned h = got ? hash_bytes(FNV_SEED, (const unsigned char *)raw, strlen(raw)) : 0;
+    int first = !a->queue_seen;
+    if (!first && h == a->queue) return;
+    a->queue = h, a->queue_seen = 1;
+    const char *said = 0;
+    for (char *line = got ? raw + 1 : 0, *end; line && *line; line = end) {
+        if ((end = strstr(line, "\n"))) *end++ = 0;
+        char *word = strstr(line, " "), *song = word ? strstr(word + 1, " ") : 0;
+        if (!song || word == line) continue;
+        *word++ = 0, *song++ = 0;
+        int next = !strcmp(word, "next");
+        if ((!next && strcmp(word, "last")) ||
+            queue_taken(a, hash_bytes(FNV_SEED, (const unsigned char *)line, strlen(line))) ||
+            first)
+            continue;
+        void *add = card_path(song) ? path_song(song) : (void *)0;
+        int ok = add && deque_size(add) && queue_add(add, next ? 1 : 2);
+        if (add) deque_destroy(add);
+        said = !ok ? "Queue unchanged" : next ? "Playing Next" : "Playing Last";
+    }
+    if (said) toast(said); /* once all are queued: its loop runs the polls again */
+}
+
 /* Sleep timers (q2-podcasts' Sleep Timer): an app's /tmp/q2-<id>.sleep holds "until <time>"
  * (seconds since the epoch, at most SLEEP_MAX_S away) or "end" (the track playing now ends). Q2 Muse
  * keeps the timer itself, so it pauses whatever plays (media_set_playing) once the app has stopped
@@ -1393,6 +1464,7 @@ static void poll_one(app_t *a) {
     reach_read(a, raw);
     offline_read(a, raw);
     stream_poll(a);
+    queue_poll(a);
     sleep_read(a);
     if (access(a->pid, 0) && now - a->launch_at > ADDON_START_MS)
         a->launched = a->hold = a->sync = a->reach = 0;
@@ -1919,6 +1991,11 @@ static int req_done(void) {
  * as any other, and Back returns to the section. The wheel never changes section. */
 enum { K_LOAD, K_READY, K_ERROR, K_WAIT }; /* K_WAIT: no socket yet, the app starting */
 enum { G_ROW, G_SHOW, G_SEARCH, G_SECTION, G_FIND, G_SORT, G_FIELD };
+/* The request in flight (pg.act): a level's fetch (0), a row's action, whose reply is toasted, or a
+ * row's hold op "hold", whose reply's rows are its menu (hold_send) */
+enum { A_FETCH, A_ACTION, A_HOLD };
+#define HOLD_OP "hold"
+#define HOLD_ROWS 8 /* a hold menu's rows at most */
 
 /* A level's page that can't show the app's rows (an error, or a load or start taking SLOW_MS) has a
  * Stop row whenever the app may be running, so a frozen one can always be ended; unless its q2app
@@ -1950,8 +2027,8 @@ static struct {
     void *page, *view, *edit;
     unsigned timer, go, leave, again; /* again: when a waiting or live level asks again */
     int depth, act, next, arg, a,
-        code; /* act: what the request in flight is for, 1 an action; a: the app's slot; code: its
-                 QR code to show at the first answer */
+        code; /* act: what the request in flight is for (A_*); a: the app's slot; code: its QR code
+                 to show at the first answer */
     int arow, busy; /* the action's row, and whether it says Working… (busy_row) */
     int qrnext; /* an action's refresh in flight: a remote row under the cursor opens its page */
     unsigned acted; /* when the action was sent */
@@ -2009,14 +2086,15 @@ static void fetch(lv_t *l) {
  * go() sends none while one is in flight: the app has usually done it, and a second would drop its
  * reply, so a toggle pressed twice undid itself. */
 static void busy_row(int on);
-static void action(int i, const char *op, const char *ctx) {
+static void send_act(int i, const char *op, const char *ctx, int act) {
     char a[sizeof top()->args] = "";
     if (ctx[0] && !put(a, sizeof a, ctx)) return;
     busy_row(0);
     tk_snprintf(pg.aop, sizeof pg.aop, "%s", op);
     req_send(app()->browse, op, a);
-    pg.act = 1, pg.arow = i, pg.busy = 0, pg.acted = time_now_ms();
+    pg.act = act, pg.arow = i, pg.busy = 0, pg.acted = time_now_ms();
 }
+static void action(int i, const char *op, const char *ctx) { send_act(i, op, ctx, A_ACTION); }
 
 static int clicked(void *ctx, void *event);
 
@@ -2675,6 +2753,67 @@ static int artist_hold(lv_t *l) {
     return 0;
 }
 
+/* A row's own menu ("holdmenu" in the caps, docs/internals.md#card-apps): a row whose position is
+ * the op "hold" (q2-subsonic's song rows) has it sent with the row's context when Play/Pause is
+ * held on the row (addon_hold), or Centre or a finger (addon_row_hold, from hold_menu.c's song row
+ * hold), and the reply's action rows are its menu sheet, headed by the row's title and its
+ * subtitle's first part (sub_parts: an album's artist, a song list's album). A row's symbol is its
+ * op's: next and last as the hold menu's Play Next and Play Last, toggle as its Sync Offline
+ * (cloud-slash for a row that takes the item out, "Stop ..."). A pick sends that row's op with its
+ * context as an action, as a press of the row would, the reply toasted (got). A reply with no rows
+ * is an action's. */
+static struct {
+    char *buf;                  /* the reply its rows point into */
+    char *f[4 + 6 * HOLD_ROWS]; /* the reply cut (spot_reply) */
+    int at[HOLD_ROWS], row;     /* the menu's rows' reply rows; the held row of the level */
+} hm __attribute__((section(".scratch")));
+
+static const char *hm_cell(int i, int k) { return hm.f[4 + 6 * i + k]; }
+
+static void hold_pick(int k) {
+    lv_t *l = pg.page ? top() : 0;
+    if (!l || !hm.buf || k < 0 || k >= HOLD_ROWS || l->state != K_READY || pg.act || pg.pend ||
+        pg.hold)
+        return;
+    action(hm.row, hm_cell(hm.at[k], 1), hm_cell(hm.at[k], 4)); /* both copied into the request */
+    free(hm.buf);
+    hm.buf = 0;
+}
+
+static int hold_menu(char *reply, char **f, int n) {
+    const char *names[HOLD_ROWS], *icons[HOLD_ROWS];
+    int k = 0;
+    free(hm.buf);
+    hm.buf = 0;
+    memcpy(hm.f, f, (unsigned)(4 + 6 * n) * sizeof *f);
+    for (int i = 0; i < n; ++i) {
+        const char *op = hm_cell(i, 1), *title = hm_cell(i, 2);
+        if (strcmp(hm_cell(i, 0), "action") || !*op || !*title) continue;
+        icons[k] = !strcmp(op, "next")   ? "arrow-bend-down-right"
+                   : !strcmp(op, "last") ? "queue"
+                   : !strcmp(op, "toggle")
+                       ? (!strncmp(title, "Stop", 4) ? "cloud-slash" : "cloud-arrow-down")
+                       : (const char *)0;
+        names[k] = title, hm.at[k++] = i;
+    }
+    if (!k || pg.arow < 0 || pg.arow >= top()->n) return 0;
+    char sub[128], len[12];
+    sub_parts(pg.arow, sub, sizeof sub, len, sizeof len);
+    modal_head(cell(pg.arow, 2), sub, (void *)0);
+    if (!modal_actions(names, icons, k, hold_pick)) return 0;
+    hm.buf = reply, hm.row = pg.arow;
+    return 1;
+}
+
+/* Row i's hold op sent, its reply the menu (got); 1 when it went. Not while a request is out: a
+ * level's load, or an action the app may still be doing. */
+static int hold_send(int i) {
+    if (req.running || req.done || pg.act || pg.pend || pg.hold || strcmp(cell(i, 5), HOLD_OP))
+        return 0;
+    send_act(i, HOLD_OP, cell(i, 4), A_HOLD);
+    return pg.act == A_HOLD;
+}
+
 /* A reply with nothing in it (an empty artist or album: its info row, "No albums", and the sync
  * toggle over nothing) under the menu sheet: no rows, the house empty note instead
  * (docs/oled-design.md#empty-and-offline), the info row's title over its subtitle as the hint, and
@@ -3005,10 +3144,14 @@ static void got(void) {
     while (req.fail == REQ_OK && skip < req.n && reply[skip] != '\t') ++skip;
     if (req.fail == REQ_OK && skip < req.n)
         hash = hash_bytes(FNV_SEED, (const unsigned char *)reply + skip, req.n - skip);
-    int act = pg.act, n = req.fail == REQ_OK
-                              ? spot_reply(reply, req.n, act ? head : g, act ? 0 : ADDON_ROWS)
-                              : -1;
-    char **f = act ? head : g;
+    /* an action's reply has no rows, a hold's its menu's, a level's its list's */
+    int act = pg.act;
+    char **f = act == A_ACTION ? head : g;
+    int n = req.fail == REQ_OK ? spot_reply(reply, req.n, f,
+                                            act == A_HOLD ? HOLD_ROWS
+                                            : act         ? 0
+                                                          : ADDON_ROWS)
+                               : -1;
     int qrnext = !act && pg.qrnext; /* this reply is the refresh an action asked for */
     if (!act) pg.qrnext = 0;
     req.buf = 0;
@@ -3021,11 +3164,15 @@ static void got(void) {
                 app()->name);
     if (act) busy_row(0); /* before the toast, whose loop can pop the level */
     pg.act = 0;
-    if (act) {
+    if (act == A_HOLD && ok && n > 0 && l == top() && l->state == K_READY &&
+        hold_menu(reply, f, n)) {
+        reply = 0; /* the menu's rows point into it */
+    } else if (act) {
         if (n >= 0 && f[2][0])
             toast(f[2]);
         else if (!ok)
             toast(why);
+        if (ok) queue_poll(app()); /* an action that queued a song: queued and toasted at once */
         if (ok && !strcmp(pg.aop, "stop")) {
             app()->launched = app()->hold = 0;
             navigator_back();
@@ -3375,6 +3522,8 @@ static int closed(void *ctx, void *event) {
     free(pg.f);
     free(pg.sec);
     memset(&pg, 0, sizeof pg);
+    free(hm.buf); /* a row's menu left unpicked */
+    hm.buf = 0;
     return 0;
 }
 
@@ -3752,8 +3901,8 @@ int addon_radio_answer(unsigned seq) {
 }
 
 
-/* ringnav_keylong: Play/Pause held on a row with a hold op (a list: all of it downloaded) sends it;
- * 1 when it was one. */
+/* ringnav_keylong: Play/Pause held on a row with a hold op (a list: all of it downloaded) sends it,
+ * the op "hold" as the row's menu (hold_send); 1 when it was one. */
 int addon_hold(void *w) {
     lv_t *l = pg.page && w == pg.page ? top() : 0;
     int i = l && l->state == K_READY && pg.view ? widget_get_prop_int(pg.view, "_ringnav_index", -1)
@@ -3762,8 +3911,22 @@ int addon_hold(void *w) {
     if (i >= 0 && l->lay) /* a cover row: its reply row is its click's (cover_row) */
         i = widget_get_prop_int(widget_get_child(pg.view, (unsigned)i), "_ar_row", -1);
     if (i < 0 || i >= l->n || !cell(i, 5)[0] || !strcmp(cell(i, 0), "progress")) return 0;
+    if (!strcmp(cell(i, 5), HOLD_OP)) return hold_send(i); /* its own menu */
     action(i, cell(i, 5), cell(i, 4));
     return 1;
+}
+
+/* hold_menu.c's song row hold, Centre held on the page or a finger on a row it has selected: the
+ * selected row's own menu (hold_send) when its hold op is "hold"; 1 when it is on its way. Any
+ * other row, and the lit pair of an artist's or album's page, keep what they did. */
+int addon_row_hold(void *w) {
+    lv_t *l = pg.page && w == pg.page ? top() : 0;
+    int i = l && l->state == K_READY && pg.view ? widget_get_prop_int(pg.view, "_ringnav_index", -1)
+                                                : -1;
+    if (i < 0 || ((l->lay == LAY_ARTIST || l->lay == LAY_ALBUM) && l->stop)) return 0;
+    if (l->lay) /* a cover row or a track: its reply row is its click's (cover_row, track_row) */
+        i = widget_get_prop_int(widget_get_child(pg.view, (unsigned)i), "_ar_row", -1);
+    return i >= 0 && i < l->n && hold_send(i);
 }
 
 /* The QR code page (qrcode_page), redrawn every half second from an app's status file:
