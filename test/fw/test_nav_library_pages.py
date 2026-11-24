@@ -432,10 +432,18 @@ def test_shuffle_page_opens_again_once_closed(fw, ui):
     assert len(ui.windows) == 1
 
 
+def waited(ui):
+    """The loading wait a Shuffle row starts (list_marks.c load_wait_sync) run to its end, a step a frame."""
+    for _ in range(4):
+        if not ui.pending('lo_tick') or ui.fire('lo_tick') != REPEAT:
+            return
+
+
 def test_shuffle_songs_with_no_library_says_to_update_it(fw, ui, mcl):
     Library(fw, ui)
     call(fw, 'shuffle_menu')
     ui.click(ui.top(), 0)
+    waited(ui)
     assert ui.toasts == ['Update Local Music first'] and not ui.played
 
 
@@ -444,6 +452,7 @@ def test_shuffle_songs_plays_the_library_from_a_random_song(fw, ui, mcl, song):
     library = Library(fw, ui, songs)
     call(fw, 'shuffle_menu')
     ui.click(ui.top(), 0)
+    waited(ui)
     (queue, at, cls), = ui.played
     assert queue == songs and 0 <= at < 4 and cls == LIBRARY
     assert library.asked == [3]  # unsorted: Shuffle has no use for the title sort
@@ -476,6 +485,7 @@ def test_shuffle_albums_and_folders_with_no_library(fw, ui, mcl, row, folders):
     Library(fw, ui)
     call(fw, 'shuffle_menu')
     ui.click(ui.top(), row)
+    waited(ui)
     assert ui.toasts == ['Update Local Music first'] and not ui.played
 
 
@@ -488,6 +498,7 @@ def test_shuffle_albums_and_folders_play_the_whole_library_grouped(fw, ui, mcl, 
     fw.mock('mclLoadPlayList', lambda dq, *_: library.deques[queue].__setitem__(slice(None), library.deques[dq]))
     call(fw, 'shuffle_menu')
     ui.click(ui.top(), row)
+    waited(ui)
     (played, at, cls), = ui.played
     assert played == songs and cls == LIBRARY and not ui.toasts
     assert fw.fn('playback_option', C.c_int, C.c_int)(2) == folders  # grouped by album or by folder
@@ -500,6 +511,7 @@ def test_shuffle_albums_over_the_queue_s_limit_says_so(fw, ui, mcl):
     fw.mock('mclLoadPlayList', lambda dq, *_: ui.deques[queue].__setitem__(slice(None), ui.deques[dq]))
     call(fw, 'shuffle_menu')
     ui.click(ui.top(), 1)
+    waited(ui)
     assert ui.toasts == ['Too many songs to shuffle'] and not ui.played and library.asked == [3]
 
 
@@ -2783,11 +2795,25 @@ def holding(fw, ui, mcl, st, playing):
     st('rs_long').value, st('rs_total').value = 1, 3600
 
 
+def shuffle_all(fw, kind=0):
+    """The Shuffle page's row (library_lists.c sp_pick) run to its end: Shuffle Songs (kind 0), Albums (1) or Folders
+    (2) started, then each step a UI pass takes (the library's read, then the play) until none is left."""
+    if kind:
+        fw.fn('library_lists__shuffle_groups_start', None, C.c_int)(kind)
+    else:
+        fw.fn('shuffle_songs_start', None)()
+    poll = fw.fn('shuffle_songs_poll', C.c_int)
+    for _ in range(4):
+        if poll():
+            return
+    raise AssertionError('Shuffle Songs never finished')
+
+
 def test_shuffle_songs_of_the_one_song_holding_its_place_is_now_playing(fw, ui, song, mcl, st):
     playing = song(b'/m/book.flac')
     holding(fw, ui, mcl, st, playing)
     Library(fw, ui, [song(b'/m/book.flac')])
-    call(fw, 'shuffle_songs')
+    shuffle_all(fw)
     assert not ui.played and [C.string_at(c[1][0]) for c in fw.calls('navigator_switch_to_with_context')] == [b'playing_page']
 
 
@@ -2796,8 +2822,35 @@ def test_shuffle_songs_starts_anywhere_but_the_song_holding_its_place(fw, ui, so
     for _ in range(8):  # rand_below's picks: never the held one
         Library(fw, ui, [song(b'/m/book.flac'), song(b'/m/other.flac')])
         ui.played.clear()
-        call(fw, 'shuffle_songs')
+        shuffle_all(fw)
         assert ui.played[0][1] == 1
+
+
+# The Shuffle page's rows under the loading wait (list_marks.c load_wait_sync, docs/internals.md#loading-wait): each
+# step a frame of its own, the page held under the overlay, and Return before the play's step lets the songs read go
+# with nothing played. The owner, 2026-11-24: "... same mechanism / backout options".
+def shuffle_page(fw, ui, song, kind=0):
+    library = Library(fw, ui, [song(b'/m/a.flac'), song(b'/m/b.flac'), song(b'/m/c.flac')])
+    call(fw, 'shuffle_menu')
+    page = ui.top()
+    fw.fn(ui_name(fw.lib, 'sp_pick'), C.c_int, C.c_void_p, C.c_void_p)(kind, None)
+    return library, page, fw.var('list_marks__lo', Lo)
+
+
+@pytest.mark.parametrize('kind', [0, 1, 2])
+def test_a_shuffle_row_runs_its_steps_under_the_wait(fw, ui, song, kind):
+    library, page, lo = shuffle_page(fw, ui, song, kind)
+    assert lo.win == page and lo.caption.decode().startswith('Shuffling') and library.asked == []  # nothing yet
+    assert ui.fire('lo_tick') == REPEAT and len(library.asked) == 1 and not ui.played  # the read, a frame of its own
+    assert ui.fire('lo_tick') == 7 and lo.win is None and len(ui.played) == 1  # the play, and the wait is done
+
+
+def test_return_before_the_play_shuffles_nothing(fw, ui, song):
+    library, page, lo = shuffle_page(fw, ui, song)
+    ui.fire('lo_tick')  # the library read
+    assert gate(fw, O['EVT_KEY_DOWN'], O['KEY_RETURN']) == 1 and gate(fw, O['EVT_KEY_UP'], O['KEY_RETURN']) == 1
+    assert lo.win is None and not ui.pending('lo_tick') and not ui.played and ui.top() == page
+    assert fw.fn('shuffle_songs_poll', C.c_int)() == 1 and not ui.played  # the songs read were let go
 
 
 # The queue menu's tracks for a row.
@@ -3316,7 +3369,7 @@ def test_a_streaming_service_with_no_link_is_the_empty_state_and_its_row_opens_w
 # spinner over the window the menu was held on meanwhile (list_marks.c load_over), Return or a tap off it giving up.
 class Lo(C.Structure):
     _fields_ = [('win', C.c_void_p), ('cancel', C.c_void_p), ('step', C.c_void_p), ('caption', C.c_char_p),
-                ('timer', C.c_uint)]
+                ('timer', C.c_uint), ('at', C.c_uint), ('blocking', C.c_int)]
 
 
 def gate(fw, type, a, b=0):

@@ -269,11 +269,11 @@ def test_a_refused_shuffle_changes_no_mode_and_shows_only_the_gate_s_message(fw,
 
 
 def test_a_refused_shuffle_songs_row_says_nothing_of_the_library(fw, refusing):
-    from test_nav_library_pages import Library, call
+    from test_nav_library_pages import Library, shuffle_all
     ui, asked = refusing
     Library(fw, ui, songs_of(fw, ui))
     before = unchanged(fw, ui)
-    call(fw, 'shuffle_songs')
+    shuffle_all(fw)
     assert asked == [0] and unchanged(fw, ui) == before
 
 
@@ -281,11 +281,11 @@ def test_a_refused_shuffle_songs_row_says_nothing_of_the_library(fw, refusing):
 def test_a_refused_shuffle_albums_or_folders_loads_no_queue(fw, refusing, folders):
     """Shuffle Albums and Folders loaded the whole library as the queue (playback_groups' mclLoadPlayList) before
     the navigator refused its Now Playing: asked first, before the library is read."""
-    from test_nav_library_pages import Library
+    from test_nav_library_pages import Library, shuffle_all
     ui, asked = refusing
     library = Library(fw, ui, songs_of(fw, ui))
     before = unchanged(fw, ui)
-    fw.fn('library_lists__shuffle_groups', C.c_int, C.c_void_p, C.c_void_p)(folders, None)
+    shuffle_all(fw, 1 + folders)
     assert asked == [0] and unchanged(fw, ui) == before and library.asked == []
 
 

@@ -361,7 +361,6 @@ void home_fades(void *canvas, void *list, int list_y, int cols, int split, int s
 void *parallax_slide(float *percent) { return 0; }
 int parallax_under_x(int w, float percent) { return 0; }
 unsigned parallax_dim(float percent) { return 0; }
-int shuffle_songs(void *ctx, void *event) { return 0; }
 /* Home's first row, edit mode and folders' rule (home_np.c, library_edit.c, home.c, navigation.c): Home as stock has it, none of it edited or playing here */
 void home_np_bind(void *win) {}
 void home_np_sync(void) {}

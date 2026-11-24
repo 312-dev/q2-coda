@@ -71,18 +71,28 @@ int shuffle_play(void *all) {
  * Shuffle Songs in steps), each a part of one UI pass: shuffle_songs_start takes the request,
  * shuffle_songs_poll does the next step, the read of every song and then the play, and is 1 once
  * none is left, and shuffle_songs_cancel lets the songs read go. Until the play's step nothing
- * the user hears or sees has changed. sg.step: 0 none, 1 the read is next, 2 the play. */
+ * the user hears or sees has changed. The Shuffle page's Shuffle Albums and Folders take the same
+ * steps (sg.kind 1 and 2: the play groups them, shuffle_groups). sg.step: 0 none, 1 the read is
+ * next, 2 the play. */
 static struct {
     void *all;
-    int step;
+    int step, kind;
 } sg __attribute__((section(".scratch")));
+static void shuffle_groups(void *all, int folder);
 void shuffle_songs_cancel(void) {
     if (sg.all) deque_destroy(sg.all);
-    sg.all = 0, sg.step = 0;
+    sg.all = 0, sg.step = 0, sg.kind = 0;
 }
 void shuffle_songs_start(void) {
     shuffle_songs_cancel();
     sg.step = 1;
+}
+/* Shuffle Albums (kind 1) or Folders (2): the gate asks first, before the library is read; refused,
+ * there is no step left. */
+static void shuffle_groups_start(int kind) {
+    shuffle_songs_start();
+    sg.kind = kind;
+    if (check_forbid_play_no_headset(0)) sg.step = 0;
 }
 int shuffle_songs_poll(void) {
     int n;
@@ -91,44 +101,38 @@ int shuffle_songs_poll(void) {
         sg.step = 2;
         return 0;
     }
-    if (sg.step == 2 && !shuffle_play(sg.all)) toast("Update Local Music first");
+    if (sg.step == 2 && sg.kind)
+        shuffle_groups(sg.all, sg.kind - 1);
+    else if (sg.step == 2 && !shuffle_play(sg.all))
+        toast("Update Local Music first");
     shuffle_songs_cancel();
     return 1;
 }
-/* The Library's Shuffle Songs, and Home's row of that name (coverflow.c coverflow_home): every
- * step at once. */
-int shuffle_songs(void *ctx, void *event) {
-    shuffle_songs_start();
-    while (!shuffle_songs_poll()) {}
-    return 0;
-}
 
-/* Shuffle Albums (ctx 0) or Folders (1): the whole library loaded as the queue and grouped, so the
- * gate asks first, before the library is read or the queue loaded. */
-static int shuffle_groups(void *ctx, void *event) {
-    int n;
-    if (check_forbid_play_no_headset(0)) return 0;
-    void *all = staged(songs_unsorted, (void *)1, &n);
-    if (!playback_groups(all, (int)(long)ctx))
+/* Shuffle Albums (folder 0) or Folders (1): the whole library, read, loaded as the queue and
+ * grouped. */
+static void shuffle_groups(void *all, int folder) {
+    if (!playback_groups(all, folder))
         toast(deque_size(all) ? "Too many songs to shuffle" : "Update Local Music first");
     else
-        feedback_shuffled(ctx ? "Shuffled Folders" : "Shuffled Albums", (int)deque_size(all));
-    deque_destroy(all);
-    return 0;
+        feedback_shuffled(folder ? "Shuffled Folders" : "Shuffled Albums", (int)deque_size(all));
 }
 
 /* The Library's Shuffle row opens these three actions on one page. A pick starts playback and
  * leaves the page open, as Most Played's rows do. Album and folder shuffles queue and group the
- * whole library, hence the note, and each runs under the loading wait (shuffle_wait.c). */
-static int sp_run(void *ctx, void *event) {
-    if ((long)ctx)
-        shuffle_groups((void *)((long)ctx - 1), 0);
-    else
-        shuffle_songs(0, 0);
-    return 0;
-}
+ * whole library, hence the note. Each runs its steps under the loading wait (list_marks.c
+ * load_wait_sync, docs/internals.md#loading-wait): the overlay over the page from 300 ms on, and
+ * Return before the play's step lets the songs read go and leaves the page as it was. */
 static int sp_pick(void *ctx, void *event) {
-    shuffle_wait_pick(sp_run, ctx);
+    static const char *const what[] = { "Shuffling songs\xe2\x80\xa6",
+                                        "Shuffling albums\xe2\x80\xa6",
+                                        "Shuffling folders\xe2\x80\xa6" };
+    long kind = (long)ctx;
+    if (kind)
+        shuffle_groups_start((int)kind);
+    else
+        shuffle_songs_start();
+    load_wait_sync(ll.sp_page, what[kind], shuffle_songs_poll, shuffle_songs_cancel);
     return 0;
 }
 

@@ -1859,7 +1859,7 @@ LOAD_TICK_MS = int(re.findall(r'#define LOAD_TICK_MS (\d+)', (host.ROOT/'patch/l
 
 class Shown:
     """The shown framebuffer page (320 x 375, 32 bpp, the second of two pages shown), an off-screen canvas of
-    LOAD_AREA for load_sync_begin's plate (its fills are stock's stubs: it holds what the framebuffer showed), and the
+    LOAD_AREA for sync_begin's plate (its fills are stock's stubs: it holds what the framebuffer showed), and the
     threads pthread_create starts: the overlay's painter (fb_painter, by its address) on a real thread with a clock
     of its own, a tick a LOAD_TICK_MS sleep; any other held in others for the test to run."""
     def __init__(self, fw):

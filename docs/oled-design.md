@@ -1123,10 +1123,9 @@ Flow's open holds Home).
   own menu keeps its Stop row.
 - **Once it is there** the new page opens as any page does, sliding in; one that failed opens on its error page (Retry,
   Stop), after the app's 15 s at most.
-- **Where:** Now Playing's Shuffle turned on, and the Library's Shuffle page (Shuffle Songs, Shuffle Albums, Shuffle
-  Folders), while the play order is built; where the work is one call the Q2 cannot step out of (the Shuffle page's
-  read of the whole library; the order's build while it is one call, `shuffle_wait.c`) the overlay shows and turns, but Return waits for
-  it. A card app's (a music server's) list rows: an artist, an album, a playlist, a folder of the server's
+- **Where:** the Library's Shuffle page (Shuffle Songs, Shuffle Albums, Shuffle Folders), while the whole library is
+  read and then played, over the page; Return during the read gives it up and nothing plays, while a press during the
+  play waits for it, as the play is one call the Q2 cannot step out of. A card app's (a music server's) list rows: an artist, an album, a playlist, a folder of the server's
   browse, the search results, Albums and the other rows of an artist's page, a sort, More…, and a list's Next page and
   Previous page rows, the new window taking the old one's place once it is there. A row pressed while a list's next
   page is on its way lets that page go, the list's Loading… row More… again, so a cancel leaves the rest a press away.
