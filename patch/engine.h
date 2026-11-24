@@ -12,6 +12,9 @@
 #define ENG_RECTS 8      /* changed rects a frame; more join the last */
 #define ENG_ACCEL_MAX 10 /* fast's most steps a tick (offsets.inc VOL_ACCEL_MAX, the volume's) */
 #define ENG_W 375        /* the sheet's width; its height is eng_surface's h (the theme's page) */
+/* ENG_OWN_PAUSE held: the rows the status row's glyphs and caption take, left to stock (they
+ * centre on y 23, docs/oled-design.md#status-row) */
+#define ENG_BAR 30
 
 /* Fixed point, 16.16. fx_div's quotient is exact to 8 fraction bits and needs |a| < 128.0. */
 typedef int fx;
@@ -56,7 +59,9 @@ struct eng_surface {
 enum {
     ENG_RAW = 1,   /* the wheel as travel (wheel), no ticks */
     ENG_STILL = 2, /* turn-based: the frame timer runs only after input and while step returns 1 */
-    ENG_FULL = 4   /* the whole screen, 375 x 320, the status row hidden but at a pause (games.c) */
+    ENG_FULL = 4,  /* the whole screen, 375 x 320, the status row hidden except while held (games.c) */
+    ENG_OWN_PAUSE = 8 /* held, the game draws its own pause below the status row's ENG_BAR rows, and
+                       * Games' "Paused" pop-up is left out (Return's Continue / Quit stays) */
 };
 
 struct eng_game {
@@ -109,7 +114,7 @@ void games_seal(void *b, unsigned n, unsigned magic);
 int games_text(void *canvas, const char *s, int x, int y, int h, unsigned px, unsigned color,
                int align);
 
-extern const struct eng_game eng_bricks;    /* game_bricks.c */
+extern const struct eng_game eng_popstall;  /* game_popstall.c */
 extern const struct eng_game eng_solitaire; /* game_solitaire.c */
 extern const struct eng_game eng_sudoku;    /* game_sudoku.c */
 extern const struct eng_game eng_demo;      /* engine_demo.c */

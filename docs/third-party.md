@@ -143,6 +143,7 @@ license (`docs/ipod.md`).
 | Playfair Display (1.203, weight 800, in Cabin Solitaire) | OFL-1.1 | `assets/games/solitaire.bin`, `patch/game_sudoku_art.inc`, `assets/games/PlayfairDisplay-OFL.txt` | Cabin Solitaire's two board titles and the Evening Puzzle's masthead, title and SOLVED stamp, as glyph masks. Its Reserved Font Name is not used: no font is shipped, only the masks |
 | Patrick Hand                                 | OFL-1.1 | `patch/game_sudoku_art.inc`                                     | The Evening Puzzle's handwritten digits and notes |
 | Special Elite                                | Apache-2.0 | `patch/game_sudoku_art.inc`                                  | The Evening Puzzle's small typewritten capitals |
+| Bungee 2.000 (The Bungee Project Authors)    | OFL-1.1 | `assets/popstall/art.bin` (its glyphs only), `assets/popstall/Bungee-OFL.txt` | Pop Stall's type: the glyphs it draws at 9, 11, 14, 20 and 30 px, pictures made from the font by the game's design ([games-engine](games-engine.md#pop-stall)); the notice ships beside them in `usr/share/q2games/popstall/` |
 
 The Evening Puzzle's masks are packed by `tools/game_art.py` from the font files (`FONTS` names each and its SHA-256), which stay out of the repository ([games-engine](games-engine.md#evening-puzzle)); Cabin Solitaire's are in its art file, written by the design's `src/export.py`.
 

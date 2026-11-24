@@ -121,7 +121,7 @@ struct sol {
     int flash_t, flash_p, spark_t, spark_p, flip_t, flip_p, flip_i;
     int msg, msg_t, stuck;
     int t, kings, best_new, deal_left, auto_wait;
-    int seq, runs, wait; /* a run of one sound, as Bricks has */
+    int seq, runs, wait; /* a run of one sound */
     unsigned last_ms;    /* the clock at the last step of play: 0 after a pause */
     int shown_s, since_save, unsaved;
     int nmark, all;          /* a step's changed rects, joined, then handed to the engine */

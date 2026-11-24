@@ -12,7 +12,7 @@ CENTER, PREV, NEXT, PLAY, RETURN, BACK_BTN, FWD_BTN = 218, 172, 173, 171, 170, 2
 E_CENTRE, E_PLAY, E_PREV, E_NEXT, E_TOUCH = 1, 2, 4, 8, 16
 RAW, STILL = 1, 2
 ENGINE = 5  # games.c's screen of the engine's first game
-DEMO = ENGINE + 3  # the demo scene's: eng_games[] lists it last, after Bricks, Cabin Solitaire and the Evening Puzzle
+DEMO = ENGINE + 3  # the demo scene's: eng_games[] lists it last, after Pop Stall, Cabin Solitaire and the Evening Puzzle
 REPEAT = 8
 SHEET = 0x7300  # Page's first widget: the sheet
 

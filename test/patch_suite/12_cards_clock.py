@@ -90,12 +90,12 @@ class CardMachine(DepthMachine):
         self.returns(ret,clobber=True)
 
 # Games (patch/games.c, iPod): Home's Games row, always there, opens a chooser of the games the build ships: the
-# engine's (Bricks, Cabin Solitaire), games.c's Sudoku, Vortex, Solitaire and Snake left out of the payload by peq.h's
-# GAME_* until the games in progress are finished. Their checks below run again once peq.h turns them all back on.
+# engine's (Pop Stall, Cabin Solitaire, the Evening Puzzle), games.c's Sudoku, Vortex, Solitaire and Snake left out
+# of the payload by peq.h's GAME_* until the games in progress are finished. Their checks below run again once peq.h turns them all back on.
 # A game's keys never reach stock's filter or the media keys; Return goes game -> chooser -> Library; closing frees
 # the state.
 OWN_GAMES=re.findall(r'^#define GAME_(\w+) (\d)',(ROOT/'patch/peq.h').read_text(),re.M)
-OWN=[n.capitalize() for n,on in OWN_GAMES if on=='1']; SHIPPED=['Games',*OWN,'Bricks','Cabin Solitaire','Evening Puzzle']
+OWN=[n.capitalize() for n,on in OWN_GAMES if on=='1']; SHIPPED=['Games',*OWN,'Pop Stall','Cabin Solitaire','Evening Puzzle']
 m=CardMachine({},{})
 G_SCREEN,G_PICKING,G_PAUSED,G_CELL,G_CUR,G_VX=36,44,56,76,157,164
 # labels(w): the texts of the hscroll_labels under w, in node order
@@ -290,26 +290,34 @@ else:
     m.close(); assert m.get(payload_syms['g'])==0
 passed()
 
-# Bricks (patch/game_bricks.c, docs/games-engine.md#bricks), the engine's first game, in every build: a scripted second
-# of play, then the dearest frames it can have, each made on purpose: the keystone taking its six neighbours in one
-# frame, and each frame of the next level's fade. Bounded in the payload's instructions a little over what they
-# measured, under the brief's 600,000 a frame (docs/games-engine.md#budgets).
-m=CardMachine({},{})
+# Pop Stall (patch/game_popstall.c, docs/games-engine.md#pop-stall), the engine's first game, on the whole panel
+# (ENG_FULL) with its art read from the root filesystem: a scripted second of play, then the dearest frames it can
+# have, each made on purpose: TRIO's three balls in the lattice, the star's ring popping with its callout, stars and
+# every bulb, the level's banner and confetti, the next rows inflating, the game over's ticket sliding up, the pause
+# and the resume. Bounded in the payload's instructions a little over what they measured, under the brief's 600,000
+# a frame and 2,000,000 for the whole sheet (docs/games-engine.md#budgets).
+PS_ART=(ROOT/'assets/popstall/art.bin').read_bytes()
+m=CardMachine({},{'/usr/share/q2games/popstall/art.bin':bytearray(PS_ART)})
 sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
 eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
 O_ENG_RECT,O_ENG_STATE=80,216  # struct eng's rect and the game's state after it (patch/engine.c), on MIPS
-BR_X,BR_Y,BR_SPD,BR_ANG,BR_PAD,BR_TOP,BR_MODE,BR_T,BR_LEVEL,BR_LEFT,BR_SCORE,BR_CELL=0,4,8,12,16,24,32,36,40,52,68,76  # struct bricks
-ENG_RECTS=int(re.search(r'^#define ENG_RECTS (\d+)',(ROOT/'patch/engine.h').read_text(),re.M)[1])  # a frame's rects at most (engine.c eng_dirty)
-BR_STEP_BOUND,BR_FRAME_BOUND,BR_KEY_BOUND,BR_FADE_BOUND,BR_WHOLE_BOUND=2_500,250_000,200_000,270_000,1_450_000  # measured on OLED's 262 px sheet: 2,157, 216,412 (a frame's play can break a brick, move the paddle and score at once), 174,268, 233,143 and 1,177,926
-# Bricks seeds its layouts from the shared RNG (playback.c rand_below), which whatever ran before draws from: set
-# to what it held here when the bounds were measured (Games' own four ran first then), so the layouts are those.
-m.word(payload_syms['rng'],0x9c3d619b)
-pick(len(OWN)); EN=m.get(payload_syms['en']); BR=EN+O_ENG_STATE
-assert word(G_SCREEN)==5 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1 and m.get(BR+BR_MODE)==0
+# struct pstall (patch/game_popstall.c), on MIPS: a ball is nine words, x y ang live spin bounce stuck held cx
+PS_BALL,PS_SPD,PS_PAD,PS_MODE,PS_T,PS_LEVEL,PS_LIVES,PS_LEFT,PS_COMBO,PS_SCORE,PS_CELL=0,108,112,120,124,128,132,140,144,164,176
+PS_WIDE,PS_SLOW,PS_TK,PS_CHAIN_N,PS_PAUSED,PS_ART_OK=636,640,652,948,1044,1144
+PLAYING,CLEAR,INFLATE,OVER=1,2,3,4
+ENG_RECTS=int(re.search(r'^#define ENG_RECTS (\d+)',(ROOT/'patch/engine.h').read_text(),re.M)[1])
+PS_STEP_BOUND,PS_FRAME_BOUND,PS_TRIO_BOUND,PS_STAR_BOUND,PS_CLEAR_BOUND,PS_OVER_BOUND,PS_PAUSE_BOUND,PS_WHOLE_BOUND=(
+    30_000,600_000,600_000,600_000,600_000,600_000,2_000_000,2_000_000)
+m.word(payload_syms['rng'],0x9c3d619b)  # the shared RNG the seed comes from: the layouts the bounds were measured on
+pick(len(OWN)); EN=m.get(payload_syms['en']); PS=EN+O_ENG_STATE
+assert word(G_SCREEN)==5 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1 and m.get(PS+PS_MODE)==0
+assert m.get(PS+PS_ART_OK)==1 and m.get(EN+O_ENG_RECT-40)==320  # the art read and sealed; the sheet is all 320 rows
 FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
 for o,v in (('LCD_W',375),('LCD_H',320),('LCD_LINE_LENGTH',1500),('LCD_FORMAT',O['LCD_BGRA8888']),('LCD_OFFLINE_FB',FB)): m.word(m.lcd+O[o],v)
 n=[0]; counter=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)
 pixel=lambda x,y: m.get(FB+4*(y*375+x))
+art_px=lambda x,y: 0xff000000|int.from_bytes(PS_ART[4+4*PS_ART[ART_BG+y*375+x]:7+4*PS_ART[ART_BG+y*375+x]],'little')&0xffffff
+ART_BG=int(re.search(r'#define ART_BG (\d+)u',(ROOT/'patch/game_popstall_art.h').read_text())[1])
 def eframe(ms=16):  # the frame timer's pass: the rects it invalidated, its instructions
     m.now+=ms; m.calls=[]; n[0]=0; assert m.call(address=payload_syms['eng_frame'],args=(0,0,0,0),gap=0,clear=False)==8
     made=[c for c in m.calls if c[0]=='widget_invalidate_force']; assert all(c[1]==sheet for c in made)
@@ -317,40 +325,75 @@ def eframe(ms=16):  # the frame timer's pass: the rects it invalidated, its inst
     return [(x0,y0,x1-x0,y1-y0) for x0,y0,x1,y1 in map(box,range(len(made)))],n[0]
 def epaint(rect): m.clip=rect; n[0]=0; paint(); return n[0]
 def eplay(rects,cost): return cost+sum(epaint(x) for x in rects)
-cell_x=lambda r,c: 37.5+(r&1)*10+20*c
-cells=lambda: bytes(m.u.mem_read(BR+BR_CELL,112))
+def frames(k,setup=None):  # k frames of play: the dearest, painted
+    worst=0
+    for i in range(k):
+        if setup: setup(i)
+        rects,cost=eframe(17 if i%3==0 else 16); assert len(rects)<=ENG_RECTS,rects; worst=max(worst,eplay(rects,cost))
+    return worst
+cell_xy=lambda r,c: (37+(r&1)*10+20*c,78+17*r)
 lattice=[(r,c) for r in range(7) for c in range(16-(r&1))]
-whole=epaint((0,0,375,320)); top=m.get(BR+BR_TOP); pad=m.get(BR+BR_PAD)
-assert pixel(pad,top+4)==0xffffffff and pixel(5,120)==0xff000000
-key_at=next(r*16+c for r,c in lattice if cells()[r*16+c]==3); assert pixel(int(cell_x(key_at//16,key_at%16)),48+17*(key_at//16))==0xff2160d8
-eframe(); rects,cost=eframe(); assert rects==[]  # ready and still, once the first frame painted the start: nothing to paint
-key(O['KEY_CENTER']); eframe(); assert m.get(BR+BR_MODE)==1  # the press reaches the next step: launched
-# A second of play, the wheel turning the paddle every frame.
-worst=step_worst=0; broke=cells()
+cells=lambda: bytes(m.u.mem_read(PS+PS_CELL,112))
+def ball(k,x,y,ang,spd=5,live=1):
+    for o,v in ((0,int(x*65536)),(4,int(y*65536)),(8,ang),(12,live),(20,0),(24,0)): m.word(PS+PS_BALL+36*k+o,v)
+    m.word(PS+PS_SPD,spd*65536)
+whole=epaint((0,0,375,320)); pad=m.get(PS+PS_PAD)
+assert pixel(187,150)==art_px(187,150) and pixel(5,60)==art_px(5,60) and pixel(187,310)==art_px(187,310)  # the stall's art
+assert pixel(187,5)==art_px(187,5)  # the roof: the whole panel, no status row over it in play
+for _ in range(3): eframe()  # the start's paint, and the bulbs coming on ten a frame
+rects,cost=eframe(); assert rects==[]  # ready and still: nothing to paint
+key(O['KEY_CENTER']); eframe(); assert m.get(PS+PS_MODE)==PLAYING
+# A second of play, the wheel turning the trampoline every frame.
+step_worst=0; worst=0
 for k in range(60):
     m.word(payload_syms['wheel_travel'],(-3 if k<30 else 3)&0xffffffff)
-    rects,cost=eframe(17 if k%3==0 else 16); assert 1<=len(rects)<=ENG_RECTS,rects  # the frame cost bounds below hold whatever their number
+    rects,cost=eframe(17 if k%3==0 else 16); assert 1<=len(rects)<=ENG_RECTS,rects
     worst=max(worst,eplay(rects,cost)); step_worst=max(step_worst,cost)
-# The keystone with all six neighbours: the ball under it, rising at top speed.
-m.u.mem_write(BR+BR_CELL,bytes(1 if (i//16,i%16) in lattice else 0 for i in range(112)))
-m.u.mem_write(BR+BR_CELL+3*16+7,b'\3'); m.word(BR+BR_LEFT,109)
-for o,v in ((BR_X,int(187.5*65536)),(BR_Y,(48+51+15)*65536),(BR_ANG,768),(BR_SPD,5*65536),(BR_MODE,1)): m.word(BR+o,v)
-epaint((0,0,375,320)); rects,cost=eframe(); keystone=eplay(rects,cost)
-assert m.get(BR+BR_LEFT)==102 and sum(cells()[i]==0 for i,_ in enumerate(cells()) if (i//16,i%16) in lattice)==7 and len(rects)<=4,rects
-# The level's end: its last cell, then the next lattice's fade, every frame of it.
-m.u.mem_write(BR+BR_CELL,bytes(112)); m.u.mem_write(BR+BR_CELL+6*16+7,b'\1'); m.word(BR+BR_LEFT,1)
-for o,v in ((BR_X,int(177.5*65536)),(BR_Y,(48+102+14)*65536),(BR_ANG,768),(BR_SPD,2*65536),(BR_MODE,1)): m.word(BR+o,v)  # under it
-rects,cost=eframe(); fade=eplay(rects,cost); assert m.get(BR+BR_MODE)==2 and m.get(BR+BR_LEFT)>=12
-for k in range(20):
-    rects,cost=eframe(); assert len(rects)<=4; fade=max(fade,eplay(rects,cost))
-assert m.get(BR+BR_MODE)==0 and m.get(BR+BR_LEVEL)>=2
+# TRIO: three balls through a full lattice at top speed, popping as they go, a WIDE trampoline blinking its end.
+m.u.mem_write(PS+PS_CELL,bytes(1 if (i//16,i%16) in lattice else 0 for i in range(112))); m.word(PS+PS_LEFT,109)
+m.word(PS+PS_LIVES,3); m.word(PS+PS_WIDE,150); m.word(PS+PS_COMBO,6)
+for k,(x,a) in enumerate(((120,700),(187,768),(260,830))): ball(k,x,200,a)
+trio=frames(30); step_worst=max(step_worst,0)
+# The star with its ring, under the ball's path from the left gap: the ring pops two frames apart, GRAND PRIZE!
+m.u.mem_write(PS+PS_CELL,bytes(1 if (i//16,i%16) in lattice else 0 for i in range(112))); m.word(PS+PS_LEFT,108)
+for r,c in ((4,7),(4,8)): m.u.mem_write(PS+PS_CELL+r*16+c,b'\0')
+m.u.mem_write(PS+PS_CELL+3*16+7,b'\3'); m.word(PS+PS_COMBO,8)
+ball(0,187.5,129+17+8,768,spd=2); ball(1,0,0,0,live=0); ball(2,0,0,0,live=0)
+epaint((0,0,375,320)); star=frames(16)
+assert m.get(PS+PS_CHAIN_N)==0 and cells()[3*16+7]==0 and sum(cells()[i] for i in (2*16+7,2*16+8,3*16+6,3*16+8))==0
+# The level's end: its last balloon, the banner dropping with confetti, then the next rows inflating.
+m.u.mem_write(PS+PS_CELL,bytes(112)); m.u.mem_write(PS+PS_CELL+6*16+7,b'\1'); m.word(PS+PS_LEFT,1)
+ball(0,177.5,78+102+16,768,spd=2)
+def until(mode,most):  # frames while the game is in mode, most at most: the dearest, painted, and how many
+    worst=k=0
+    while m.get(PS+PS_MODE)==mode and k<most: worst=max(worst,frames(1)); k+=1
+    return worst,k
+clear=frames(1); assert m.get(PS+PS_MODE)==CLEAR
+banner,k=until(CLEAR,120); assert m.get(PS+PS_MODE)==INFLATE and k==100,k  # the banner's 100 frames
+inflate,k=until(INFLATE,40); assert m.get(PS+PS_MODE)==0 and k==21,k  # the rows', two at once
+clear=max(clear,banner,inflate)
 whole=max(whole,epaint((0,0,375,320)))
-assert whole<BR_WHOLE_BOUND and worst<BR_FRAME_BOUND and step_worst<BR_STEP_BOUND and keystone<BR_KEY_BOUND and fade<BR_FADE_BOUND,(whole,worst,step_worst,keystone,fade)
-print(f'Bricks on MIPS: {step_worst} instructions for a frame\'s step at most, {worst} with its changed rects painted, {keystone} for the keystone\'s frame, {fade} for the dearest frame of a fade, {whole} to paint the whole sheet (payload only; stock\'s text and flush mocked)')
+# The game's end: the last life lost, the rows dimming, the ticket sliding up.
+key(O['KEY_CENTER']); eframe(); m.word(PS+PS_LIVES,1); ball(0,300,300,256,spd=5)
+over=frames(30); assert m.get(PS+PS_MODE)==OVER
+whole=max(whole,epaint((0,0,375,320)))
+# A full lattice of double skins, the dearest whole sheet: a resume paints it all.
+key(O['KEY_CENTER']); eframe(); m.u.mem_write(PS+PS_CELL,bytes(2 if (i//16,i%16) in lattice else 0 for i in range(112)))
+whole=max(whole,epaint((0,0,375,320)))
 m.u.hook_del(counter)
-# Return pauses under Games' menu; Quit frees it.
-key(O['KEY_RETURN']); assert word(G_PAUSED)==2 and not eframes() and m.get(payload_syms['wheel_raw'])==0
-key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0)
+# Return pauses under Games' menu, the stall's sign under it and the status row's band left to stock; the resume
+# repaints the HUD's strip and the sign's box. Quit frees it.
+counter=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)
+key(O['KEY_RETURN']); assert word(G_PAUSED)==2 and not eframes() and m.get(payload_syms['wheel_raw'])==0 and m.get(PS+PS_PAUSED)==1
+m.u.mem_write(FB,b'\0'*(375*320*4)); pause=epaint((0,0,375,320))
+assert pixel(187,10)==0 and pixel(187,40)!=0  # the status row's band is stock's; the stall from y 30
+key(O['KEY_RETURN']); rects,cost=eframe(); resume=eplay(rects,cost); assert m.get(PS+PS_PAUSED)==0 and rects
+pause=max(pause,resume)
+m.u.hook_del(counter)
+assert step_worst<PS_STEP_BOUND and worst<PS_FRAME_BOUND and trio<PS_TRIO_BOUND and star<PS_STAR_BOUND,(step_worst,worst,trio,star)
+assert clear<PS_CLEAR_BOUND and over<PS_OVER_BOUND and pause<PS_PAUSE_BOUND and whole<PS_WHOLE_BOUND,(clear,over,pause,whole)
+print(f'Pop Stall on MIPS: {step_worst} instructions for a frame\'s step at most, {worst} for a second of play\'s dearest frame with its changed rects painted, {trio} for TRIO\'s, {star} for the star\'s ring, {clear} for the level\'s clear and inflate, {over} for the game over, {pause} for the pause or resume, {whole} to paint the whole sheet (payload only; stock\'s text and flush mocked)')
+key(O['KEY_RETURN']); key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0)
 assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0 and not eframes()
 m.close(); assert m.get(payload_syms['g'])==0
 passed()

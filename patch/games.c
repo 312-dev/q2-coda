@@ -1260,8 +1260,11 @@ void games_paint(void *w, void *canvas) {
     if (!g || w != g->sheet || g->screen == CHOOSER || !P(canvas, CANVAS_LCD)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), tone = accent_tone(2);
     unsigned raw = ui_ink_raw(0);
-    if (g->screen >= ENGINE)
-        ui_ink_raw(1), eng_paint(canvas), ui_ink_raw(0), paused_popup(canvas, 0); /* its colours are final */
+    if (g->screen >= ENGINE) { /* its colours are final; an ENG_OWN_PAUSE game draws its own held look */
+        ui_ink_raw(1), eng_paint(canvas), ui_ink_raw(0);
+        if (g->paused == MENU || !(eng_game(g->screen - ENGINE)->flags & ENG_OWN_PAUSE))
+            paused_popup(canvas, 0);
+    }
     else if (HAS(SUDOKU) && g->screen == SUDOKU)
         sudoku_paint(canvas, tone);
     else if (HAS(SOLITAIRE) && g->screen == SOLITAIRE)

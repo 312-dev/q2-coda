@@ -947,7 +947,7 @@ def test_nothing_but_the_felt_and_the_rails_wood_falls_under_the_glass(fw, name)
 
 def test_cabin_solitaire_is_games_second_engine_row_and_opens_over_the_whole_screen(fw):
     """Its sheet is the whole screen and the system bar (a window over every page) is hidden while it runs, shown
-    again while it is paused (its clock and battery then) and for any other game."""
+    again while it is paused (its clock and battery then) and for the list."""
     BAR = 0x7700
     fw.var('fw_ctx_system_bar', C.c_void_p).value = BAR
     p = Page(fw, {ART_FILE: ART})
@@ -964,7 +964,7 @@ def test_cabin_solitaire_is_games_second_engine_row_and_opens_over_the_whole_scr
     assert p.s.paused == 2 and not api(fw)['eng_live']() and bar == [0, 1]
     p.key(RETURN)  # Continue
     assert bar == [0, 1, 0]
-    p.go(ENGINE)  # Bricks: under the status row again
+    p.go(0)  # the list: under the status row again
     assert moved[-1][3:] == (375, p.s.h) and moved[-1][2] > 0 and bar == [0, 1, 0, 1]
     p.close()
     assert not fw.var('engine__en', C.c_void_p).value
