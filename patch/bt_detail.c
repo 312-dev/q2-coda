@@ -25,10 +25,10 @@
 #define BD_LINE_H 22
 #define BD_NAME_MAX 30     /* a name, as the Q2's own (bt_name.c BT_NAME_MAX) */
 #define BD_VALUE_W 120     /* Battery's value, right-aligned in this much */
-#define BD_LIMIT_RIGHT 300 /* Volume Limit's value ends here, before the chevron */
+#define BD_LIMIT_RIGHT 318 /* Volume Limit's value ends here, as Settings' values do */
 #define BD_ROWS 5
-#define BD_LIMIT_ROW                                                                               \
-    "label_btlimit" /* Volume Limit's value, which the slider page sets (crossfade.c) */
+/* Volume Limit's value, which the slider page sets (crossfade.c) */
+#define BD_LIMIT_ROW "label_btlimit"
 /* BTLINKMAC: stock's last connected device, [SYSSET] BTLINKMAC in config.ini, 32 bytes at a fixed
  * address (readBtLinkMac fills it, 0x4fa1f0); autoLinkBluetooth connects it at boot and Bluetooth
  * on */
@@ -137,7 +137,7 @@ static void fill(void) {
             tk_snprintf(s, sizeof s, "%d%%", level > 100 ? 100 : level);
             widget_set_text_utf8(v, s);
         }
-        if (bd.rows[i] == ROW_LIMIT) { /* the value before row_into's chevron (x 302) */
+        if (bd.rows[i] == ROW_LIMIT) { /* the value before row_into's chevron */
             void *v = label(item, BD_LIMIT_RIGHT - BD_VALUE_W, 0, BD_VALUE_W, I(item, W_H),
                             "s_scrlabel_white20r", TYPE(20), 0xff000000u | tok(TOK_SECONDARY));
             widget_set_name(v, BD_LIMIT_ROW);
