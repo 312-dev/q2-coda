@@ -732,10 +732,11 @@ static void moved(struct eg *g, int n0, int n1) {
         --g->boxes;
     }
 }
+/* A spurt's box: its lead drop, and its trail 26 px back along its heading, sagging. */
 static void shot_box(struct eg *g, const struct shot *h) {
     int x = FX_INT(h->x), y = FX_INT(h->y), tx = FX_INT(h->x - h->ux * 26), ty = FX_INT(h->y - h->uy * 26);
     mark(g, (x < tx ? x : tx) - 7, (y < ty ? y : ty) - 7, (x < tx ? tx - x : x - tx) + 15,
-         (y < ty ? ty - y : y - ty) + 16);
+         (y < ty ? ty - y : y - ty) + 20); /* below: the trail's sag, 7 px, and its last drop */
 }
 static void sight_box(struct eg *g) {
     int a = angle(g->aim), x0 = G_PX + (eng_cos(a) * 38 >> 16), y0 = G_PY + (eng_sin(a) * 38 >> 16),
@@ -853,7 +854,7 @@ static void hit(struct eg *g, struct ember *e) {
             g->em[k].vx = FX(1.6);
             break;
         }
-    if (!g->stop) g->stop = G_STOP;
+    if (!g->stop) g->stop = G_STOP - 1; /* this step, then G_STOP - 1 more */
     sound(g, ENG_SFX_TAP, 2);
 }
 
@@ -940,8 +941,8 @@ static void aim(struct eg *g, const struct eng_input *in) {
     int a = g->aim + in->wheel * G_WHEEL;
     if (in->held & ENG_PREV) a -= G_KEY;
     if (in->held & ENG_NEXT) a += G_KEY;
-    if (in->held & ENG_TOUCH && in->ty < G_PY - 4)
-        a = eng_atan2((in->ty - G_PY) * 16, in->tx * 16 + 8 - G_PX * 16) * 36000 / 1024 - 36000;
+    if (in->held & ENG_TOUCH) /* a finger level with the pivot or under it: the arc's nearer end */
+        a = eng_atan2(in->ty < G_PY ? (in->ty - G_PY) * 16 : -1, in->tx * 16 + 8 - G_PX * 16) * 36000 / 1024 - 36000;
     g->aim = a < G_AIM_LO ? G_AIM_LO : a > G_AIM_HI ? G_AIM_HI : a;
 }
 
@@ -979,6 +980,7 @@ static void play(struct eg *g, const struct eng_input *in) {
         if (h->alive) shot_box(g, h);
         moved(g, n0, g->boxes);
     }
+    frozen |= g->stop > 0; /* a split in this step: the embers stop from now */
     for (int k = 0; k < G_EMBERS && !frozen; ++k) {
         struct ember *e = &g->em[k];
         if (!e->alive) continue;
@@ -1038,7 +1040,11 @@ static int step(void *state, const struct eng_input *in) {
         if (g->recoil) --g->recoil;
         if (g->spray) --g->spray;
         if (g->aim != aim0) sight_box(g);
-        if (g->aim != aim0 || g->recoil || recoil || g->spray || spray || shots(g) != left) {
+        if (g->spray || spray) { /* the spray, out to 45 px along the aim */
+            int a = angle(g->aim);
+            mark(g, G_PX + (eng_cos(a) * 34 >> 16) - 13, G_PY + (eng_sin(a) * 34 >> 16) - 13, 28, 28);
+        }
+        if (g->aim != aim0 || g->recoil || recoil || shots(g) != left) {
             mark(g, 153, 236, 69, 51);
             if (g->aim != aim0) {
                 int a = g->aim;

@@ -55,7 +55,8 @@ class Game(C.Structure):
                 *((k, C.c_int) for k in 'h screen target picking pick confirm paused choice carry dirty'.split()),
                 ('sud', Sudoku), ('vx', Vortex), ('best', Best), ('sol', Sol), ('save', C.c_uint), ('pop_at', C.c_uint),
                 ('pop_ring', C.c_int), ('pop_seg', C.c_int), ('trail', (C.c_int * 2) * 4), ('record', C.c_int),
-                ('sn_best', Best), ('sn', Snake), ('rows', C.c_int), ('title', C.c_void_p), ('engines', C.c_int)]
+                ('sn_best', Best), ('sn', Snake), ('rows', C.c_int), ('title', C.c_void_p), ('engines', C.c_int),
+                ('full', C.c_int), ('box', C.c_int * 4)]
 
 
 def test_structs_are_the_saves_sizes():
@@ -1898,12 +1899,12 @@ def card_apps(fw, apps):
     return {f'/mnt/mmc/.{k}/q2app': v for k, v in apps.items()}
 
 
-SHIPPED = ['Bricks']  # the build's games (peq.h GAME_*, engine.c eng_games[]): the owner's, 2026-11-22
+SHIPPED = ['Bricks', 'Ember Garden']  # the build's games (peq.h GAME_*, engine.c eng_games[])
 
 
-def test_the_build_ships_bricks_alone(fw):
-    """The owner, 2026-11-22: Games lists Bricks alone in this build, its own Sudoku, Vortex, Solitaire and Snake
-    left out while the games in progress are finished. A card with no games: the chooser is the build's list."""
+def test_the_build_ships_the_engines_games_alone(fw):
+    """Games lists the engine's games alone in this build, its own Sudoku, Vortex, Solitaire and Snake left out
+    while the games in progress are finished. A card with no games: the chooser is the build's list."""
     texts = []
     fw.mock('widget_set_text_utf8', lambda w, s, *_: texts.append(C.string_at(s).decode()))
     p = Page(fw, card_apps(fw, {}))
@@ -1929,15 +1930,15 @@ def test_the_chooser_lists_its_games_then_the_card_s_by_name_and_each_row_opens_
     texts = []
     fw.mock('widget_set_text_utf8', lambda w, s, *_: texts.append(C.string_at(s).decode()))
     p = Page(fw, files)
-    assert texts[-3:] == [*SHIPPED, 'Blocks', 'Zork']  # Tunes isn't a game
+    assert texts[-4:] == [*SHIPPED, 'Blocks', 'Zork']  # Tunes isn't a game
     rows = handlers(fw, EVT_CLICK)
-    assert len(rows) == 3  # the engine's Bricks, the card's two
+    assert len(rows) == 4  # the engine's two, the card's two
     fw.mock('fw_fork', lambda *_: 4242)
     toasts, tried = heard(fw), []
     fw.mock('fw_access', lambda path, *_: tried.append(C.string_at(path)) or len(tried) == 1)  # Blocks' isn't there
-    press(rows[1])  # Blocks, the card's first by name
+    press(rows[2])  # Blocks, the card's first by name
     assert tried == [b'/mnt/mmc/.blocks/q2-blocks'] and not fw.fn('addon_game_on', C.c_int)() and len(toasts) == 1
-    press(rows[2])  # Zork, its second, over the whole screen
+    press(rows[3])  # Zork, its second, over the whole screen
     assert fw.fn('addon_game_on', C.c_int)() == 4242 and tried[-1] == b'/mnt/mmc/.zork/q2-zork'
     assert p.s.screen == CHOOSER and not p.timers
     press(rows[0])  # Bricks, the engine's first, from the next loop pass
@@ -1961,7 +1962,7 @@ def test_a_game_on_screen_takes_no_tap_for_the_chooser_hidden_under_it(fw):
     assert not fw.fn('addon_game_on', C.c_int)()
     p.go(CHOOSER)
     assert sensitive == {chooser: 1}
-    press(rows[1])  # Zork, after the engine's Bricks
+    press(rows[2])  # Zork, after the engine's two
     assert fw.fn('addon_game_on', C.c_int)() == 4242
 
 

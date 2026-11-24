@@ -95,7 +95,7 @@ class CardMachine(DepthMachine):
 # A game's keys never reach stock's filter or the media keys; Return goes game -> chooser -> Library; closing frees
 # the state.
 OWN_GAMES=re.findall(r'^#define GAME_(\w+) (\d)',(ROOT/'patch/peq.h').read_text(),re.M)
-OWN=[n.capitalize() for n,on in OWN_GAMES if on=='1']; SHIPPED=['Games',*OWN,'Bricks']
+OWN=[n.capitalize() for n,on in OWN_GAMES if on=='1']; SHIPPED=['Games',*OWN,'Bricks','Ember Garden']
 m=CardMachine({},{})
 G_SCREEN,G_PICKING,G_PAUSED,G_CELL,G_CUR,G_VX=36,44,56,76,157,164
 # labels(w): the texts of the hscroll_labels under w, in node order
@@ -250,7 +250,7 @@ else:
     eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
     O_ENG_RECT,O_ENG_STEPS=80,208  # struct eng's rect and steps (patch/engine.c), on MIPS
     ENG_STEP_BOUND,ENG_FRAME_BOUND,ENG_WHOLE_BOUND=600,70_000,780_000  # measured: 499, 61,511 and 703,036
-    pick(len(SHIPPED)-1); EN=m.get(payload_syms['en']); assert word(G_SCREEN)==6 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1
+    pick(len(SHIPPED)-1); EN=m.get(payload_syms['en']); assert word(G_SCREEN)==7 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1
     FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
     for o,v in (('LCD_W',375),('LCD_H',320),('LCD_LINE_LENGTH',1500),('LCD_FORMAT',O['LCD_BGRA8888']),('LCD_OFFLINE_FB',FB)): m.word(m.lcd+O[o],v)
     n=[0]; counter=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)
@@ -349,6 +349,105 @@ assert whole<BR_WHOLE_BOUND and worst<BR_FRAME_BOUND and step_worst<BR_STEP_BOUN
 print(f'Bricks on MIPS: {step_worst} instructions for a frame\'s step at most, {worst} with its changed rects painted, {keystone} for the keystone\'s frame, {fade} for the dearest frame of a fade, {whole} to paint the whole sheet (payload only; stock\'s text and flush mocked)')
 m.u.hook_del(counter)
 # Return pauses under Games' menu; Quit frees it.
+key(O['KEY_RETURN']); assert word(G_PAUSED)==2 and not eframes() and m.get(payload_syms['wheel_raw'])==0
+key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0)
+assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0 and not eframes()
+m.close(); assert m.get(payload_syms['g'])==0
+passed()
+
+# Ember Garden (patch/game_embergarden.c, docs/games-engine.md#ember-garden), full screen, its scene read from the art
+# file in the root filesystem: the title card's whole sheet, a scripted second of play, then the dearest frames made on
+# purpose: 24 embers falling (the most there can be) with three spurts, a cinder's split, two beds' flames, a steam puff,
+# the wave banner fading, the light's strip and the aim all at once; the same with lightning, which strikes only over
+# 16 embers or fewer (the 17th can come during its 7 frames); the result card's whole sheet and its drop. Bounded in the
+# payload's instructions a little over what they measured, under the brief's 600,000 a frame (docs/games-engine.md#budgets).
+EG_ART=(ROOT/'assets/games/embergarden.bin').read_bytes()
+EG_H={k:int(v) for k,v in re.findall(r'^#define (EG_\w+) (\d+)u?\b',(ROOT/'patch/game_embergarden_art.h').read_text(),re.M)}
+class EgEmber(ctypes.Structure): _fields_=[(k,ctypes.c_int) for k in 'bx y vx vy phase amp size alive'.split()]
+class EgShot(ctypes.Structure): _fields_=[(k,ctypes.c_int) for k in 'x y ux uy run alive'.split()]
+class EgPuff(ctypes.Structure): _fields_=[(k,ctypes.c_int) for k in 'x y t size pts alive'.split()]
+class EgState(ctypes.Structure):  # struct eg (patch/game_embergarden.c): ints and bytes alone, so its layout is MIPS's too
+    _fields_=[('art',ctypes.c_uint*(EG_H['EG_ART_BYTES']//4)),('pal',ctypes.c_uint*(320//EG_H['EG_BAND']*256)),
+              ('grow',ctypes.c_ubyte*(8*EG_H['EG_CH_W']*EG_H['EG_CH_H'])),('ok',ctypes.c_int),('em',EgEmber*24),('sh',EgShot*3),
+              ('pf',EgPuff*4),*((k,ctypes.c_int) for k in 'mode aim recoil spray repeat stop h'.split()),('bed',ctypes.c_int*8),
+              ('bed_t',ctypes.c_int*8),*((k,ctypes.c_int) for k in 'land_x land_t'.split()),('last',ctypes.c_int*2),
+              *((k,ctypes.c_int) for k in 'blink wave lull left spawn gap banner cleared light frm k strip dim bolt bolt_x bolt_seed bolt_wait card seq runs wait'.split()),
+              ('score',ctypes.c_uint),('seed',ctypes.c_uint),('boxes',ctypes.c_int),('box',ctypes.c_int*256),
+              ('save',ctypes.c_uint*4),('saved',ctypes.c_uint)]
+eg_off=lambda f: getattr(EgState,f).offset
+eg_em=lambda i,f: eg_off('em')+i*ctypes.sizeof(EgEmber)+getattr(EgEmber,f).offset
+eg_sh=lambda i,f: eg_off('sh')+i*ctypes.sizeof(EgShot)+getattr(EgShot,f).offset
+EG_STEP_BOUND,EG_PLAY_BOUND,EG_WORST_BOUND,EG_BOLT_BOUND,EG_WHOLE_BOUND=60_000,600_000,600_000,600_000,2_000_000
+m=CardMachine({},{'/usr/share/q2games/embergarden/art.bin':bytearray(EG_ART)})
+sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
+eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
+pick(len(OWN)+1); EN=m.get(payload_syms['en']); EG=EN+O_ENG_STATE
+eg=lambda f: signed(m.get(EG+eg_off(f)))
+assert word(G_SCREEN)==6 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1 and eg('ok')==1 and eg('mode')==0
+FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
+for o,v in (('LCD_W',375),('LCD_H',320),('LCD_LINE_LENGTH',1500),('LCD_FORMAT',O['LCD_BGRA8888']),('LCD_OFFLINE_FB',FB)): m.word(m.lcd+O[o],v)
+n=[0]; counter=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)
+pixel=lambda x,y: m.get(FB+4*(y*375+x))
+def eframe(ms=16):  # the frame timer's pass: the rects it invalidated, its instructions
+    m.now+=ms; m.calls=[]; n[0]=0; assert m.call(address=payload_syms['eng_frame'],args=(0,0,0,0),gap=0,clear=False,count=20_000_000)==8
+    made=[c for c in m.calls if c[0]=='widget_invalidate_force']; assert all(c[1]==sheet for c in made)
+    box=lambda k: [signed(m.get(EN+O_ENG_RECT+16*k+4*j)) for j in range(4)]
+    return [(x0,y0,x1-x0,y1-y0) for x0,y0,x1,y1 in map(box,range(len(made)))],n[0]
+def epaint(rect): m.clip=rect; n[0]=0; paint(); return n[0]
+def eplay(rects,cost): return cost+sum(epaint(x) for x in rects)
+start=epaint((0,0,375,320))
+pal=lambda y: [m.get(EG+eg_off('pal')+4*((y//EG_H['EG_BAND'])*256+i)) for i in range(256)]
+idx=lambda x,y: m.u.mem_read(EG+m.get(EG+16)+y*375+x,1)[0]  # the scene's index there (the file's first part)
+assert pixel(20,300)==pal(300)[idx(20,300)] and pixel(187,8)!=pixel(187,300)  # the scene from the art: the lawn, the canopy
+assert pixel(150,60)==0xffe0503a  # the seed packet's red top
+rects,cost=eframe(); rects,cost=eframe(); assert rects==[]  # the title card, still: nothing to paint
+key(O['KEY_CENTER']); rects,cost=eframe(); assert eg('mode')==1 and eg('wave')==1 and (0,0,375,320) in rects
+play_whole=epaint((0,0,375,320))
+# A second of play, the wheel turning the aim and Center held, the first wave's embers falling.
+worst=step_worst=0
+m.u.mem_write(EG+eg_off('spawn'),struct.pack('<i',1))
+for k in range(60):
+    m.word(payload_syms['wheel_travel'],(-3 if k<30 else 3)&0xffffffff)
+    if k==2: key(O['KEY_CENTER'])
+    rects,cost=eframe(17 if k%3==0 else 16); assert 1<=len(rects)<=ENG_RECTS,rects
+    worst=max(worst,eplay(rects,cost)); step_worst=max(step_worst,cost)
+assert sum(m.get(EG+eg_em(i,'alive')) for i in range(24))>=1
+# The dearest frame: 24 embers, all cinders (the largest), spread over the sky; three spurts, one about to crack a
+# cinder; two beds' flames turning; a steam puff; the banner fading; the light turning; the aim moving.
+def crowd(n,bolt):
+    for i in range(24):
+        x,y=40+(i*53)%300,60+(i*37)%170
+        for f,v in (('bx',x<<16),('y',y<<16),('vx',0),('vy',int(2.2*65536)),('phase',i*7),('amp',18),('size',2),('alive',int(i<n))):
+            m.u.mem_write(EG+eg_em(i,f),struct.pack('<i',v))
+    tx,ty=m.get(EG+eg_em(0,'bx'))>>16,m.get(EG+eg_em(0,'y'))>>16
+    for j in range(3):
+        a=math.radians(-60-20*j); ux,uy=int(math.cos(a)*65536),int(math.sin(a)*65536)
+        hx,hy=(tx,ty+10) if j==0 else (187+int(math.cos(a)*(60+40*j)),270+int(math.sin(a)*(60+40*j)))
+        for f,v in (('x',hx<<16),('y',hy<<16),('ux',ux),('uy',uy),('run',40),('alive',1)): m.u.mem_write(EG+eg_sh(j,f),struct.pack('<i',v))
+    m.u.mem_write(EG+eg_off('bed'),struct.pack('<8i',2,0,0,2,0,0,0,0)); m.u.mem_write(EG+eg_off('bed_t'),struct.pack('<8i',61,0,0,31,0,0,0,0))
+    m.u.mem_write(EG+eg_off('pf'),struct.pack('<6i',250,150,6,2,3,1))
+    for f,v in (('banner',50),('k',3),('strip',17),('stop',0),('bolt',int(bolt)),('bolt_x',170),('bolt_seed',12345),('left',0),('spawn',99)):
+        m.u.mem_write(EG+eg_off(f),struct.pack('<i',v))
+    m.word(payload_syms['wheel_travel'],3); epaint((0,0,375,320))
+    rects,cost=eframe(); return eplay(rects,cost),rects
+crowd_cost,crowd_rects=crowd(24,False); assert len(crowd_rects)<=ENG_RECTS
+assert sum(m.get(EG+eg_em(i,'alive')) for i in range(24))==24 and eg('stop')>0  # the cinder cracked in two (one slot was free)
+bolt_cost,bolt_rects=crowd(17,True); assert eg('bolt')==2
+whole=max(start,play_whole,epaint((0,0,375,320)))
+# The fourth bed on a side: the scene dims and the result card drops in.
+m.u.mem_write(EG+eg_off('bed'),struct.pack('<8i',3,3,3,0,0,0,0,0)); m.u.mem_write(EG+eg_off('stop'),struct.pack('<i',0))
+for i in range(24): m.u.mem_write(EG+eg_em(i,'alive'),struct.pack('<i',0))
+m.u.mem_write(EG+eg_em(0,'alive'),struct.pack('<i',1)); m.u.mem_write(EG+eg_em(0,'bx'),struct.pack('<i',150<<16))
+m.u.mem_write(EG+eg_em(0,'amp'),struct.pack('<i',0)); m.u.mem_write(EG+eg_em(0,'y'),struct.pack('<i',257<<16)); m.u.mem_write(EG+eg_em(0,'vy'),struct.pack('<i',2<<16))
+rects,cost=eframe(); assert eg('mode')==2 and eg('dim')==1 and (0,0,375,320) in rects
+lost=eplay(rects,cost); drop=0
+for k in range(14): rects,cost=eframe(); drop=max(drop,eplay(rects,cost))
+assert eg('card')==14 and pixel(150,72)==0xffe0503a  # at rest, its red top at y 65 to 105
+whole=max(whole,lost)
+assert step_worst<EG_STEP_BOUND and worst<EG_PLAY_BOUND and crowd_cost<EG_WORST_BOUND and bolt_cost<EG_BOLT_BOUND and whole<EG_WHOLE_BOUND and drop<EG_PLAY_BOUND,(step_worst,worst,crowd_cost,bolt_cost,whole,drop)
+print(f'Ember Garden on MIPS: {step_worst} instructions for a frame\'s step at most, {worst} with its changed rects painted, {crowd_cost} for 24 embers and all the rest at once, {bolt_cost} for 17 and lightning, {drop} for the result card\'s drop, {whole} to paint the whole sheet (payload only; stock\'s text and flush mocked)')
+m.u.hook_del(counter)
+# Return pauses under Games' menu; Quit frees it, and the status row is back.
 key(O['KEY_RETURN']); assert word(G_PAUSED)==2 and not eframes() and m.get(payload_syms['wheel_raw'])==0
 key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0)
 assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0 and not eframes()
