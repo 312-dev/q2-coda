@@ -1770,9 +1770,9 @@ assert m.fade(3)==0 and m.fade(0)==SMART  # the image's two CUE tracks; Album A 
 m.files.pop(NEXT); m.byte(O['MCL_GAPLESS'],0); assert m.fade()==0 and NEXT not in m.files  # no fade: no songs named
 m.byte(O['MCL_GAPLESS'],1); assert m.fade()==SMART and NEXT in m.files
 m.word(O['MCL_MODE'],1); assert m.fade()==0  # Repeat One: no next file
-m.word(O['MCL_MODE'],2); assert m.fade()==SMART  # stock Shuffle: the next is drawn at the change, another album's
+m.word(O['MCL_MODE'],2); assert m.fade()==SMART  # stock Shuffle: taken as an order, every change fades
 m.byte(O['MCL_GAPLESS'],0); assert m.fade()==0; m.byte(O['MCL_GAPLESS'],1)
-m.word(O['MCL_MODE'],0); assert m.fade()==SMART
+m.word(O['MCL_MODE'],0); m.fn('playback_clear'); assert m.fade()==SMART  # Shuffle off ends the order, as ringnav_mode does
 m.word(O['MCL_MODE'],0); assert m.fade(6)==0  # the last track
 # Repeat All at the queue's end: stock preloads position 0, so the wrap fades when that's another album's.
 m.word(O['MCL_MODE'],3); assert m.fade(6)==0  # 'ALBUM A' back to 'album a': gapless
@@ -1809,11 +1809,12 @@ m.word(0xa50084,1); assert m.fade()==SMART|1<<16
 m=XfadeMachine(); m.missing.add('/B/01.flac'); assert m.fade(0)==0,m.fade(0)
 m=XfadeMachine(); m.empty.add('/B/01.flac'); assert m.fade(0)==0
 m=XfadeMachine(); m.word(m.library_rows[1]+O['REC_PATH'],m.string('http://x/y.flac')); m.missing.add('http://x/y.flac'); assert m.fade(0)==SMART
-# Stock Shuffle's next drawn ahead: the file asked about is the one that plays, the pick overridden; a
-# DSD or missing draw asks no fade, any other fades whichever album. Uniform over the pool but the current,
-# which the draw leaves alone; Previous, a Play next and a new queue go their own way.
+# Stock Shuffle's next drawn ahead, where stock still draws (a DLNA queue, class 2: a local one is played as
+# an order, below): the file asked about is the one that plays, the pick overridden; a DSD or missing draw
+# asks no fade, any other fades whichever album. Uniform over the pool but the current, which the draw
+# leaves alone; Previous, a Play next and a new queue go their own way.
 def shuffled(pool=None):
-    m=XfadeMachine(); m.word(O['MCL_MODE'],2); m.word(O['MCL_POS'],0)
+    m=XfadeMachine(); m.word(O['MCL_MODE'],2); m.word(O['MCL_POS'],0); m.word(O['MCL_TYPE'],2)
     m.word(O['MCL_POOL'],m.deque(pool if pool is not None else list(range(7)),'int')); return m
 m=shuffled(); assert m.fade()==SMART
 seen=[]
@@ -1864,6 +1865,7 @@ queue=list(m.items(m.get(syms['mcl_pdeqplaylist']))); path=lambda r: m.text(m.ge
 out=m.alloc(24*4); up=[m.get(out+4*i) for i in range(m.fn('playback_upcoming',out,24))]
 assert m.files[NEXT]==path(queue[m.current()])+b'\n'+path(queue[up[0]])+b'\n',m.files[NEXT]
 m.fn('ringnav_preload'); assert m.mcl('MCL_PREPOS')==up[0] and m.mcl('MCL_PRELOAD')==1
+m.word(O['MCL_PRELOAD'],0)  # stock's gapless handoff isn't run here: each change starts its song
 assert m.sequence(limit=len(up))[1:]==up  # this pass and the next, as listed
 # Shuffle off: an album's own next stays gapless again; another album's fades.
 m=XfadeMachine(); m.word(O['MCL_TYPE'],0xf001); m.word(O['MCL_MODE'],0); assert m.fade(3)==0 and m.fade(0)==SMART
