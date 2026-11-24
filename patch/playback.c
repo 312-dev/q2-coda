@@ -29,6 +29,71 @@ static card_blob queue_store __attribute__((section(".scratch"))),
 static card_blob tail_store __attribute__((section(".scratch")));
 static int tail_kept __attribute__((section(".scratch"))); /* one written since boot: drop it */
 #define TAIL_STORE card_blob_at(&tail_store, TAIL_FILE, 0, QUEUE_HELD_MAX)
+/* The three records above reach the card on a thread of their own (docs/internals.md#the-queue-writer):
+ * a card write is a sync and a rename, tens of milliseconds to seconds on a busy card, and the UI
+ * thread makes none. A post for a store is W_DROP, W_FLUSH or a record, a heap block of its length
+ * and then its bytes, the writer's from the post on; the newest post replaces one not yet written
+ * (a flush never does: the record waiting is the newer copy), and one writer at a time takes them
+ * in the stores' order. A write the card refused sets the store's bit in w_failed, which the
+ * poster reads back at once when the writer has already run (no thread to be had: the post writes
+ * on the caller's), and playback_poll reads on a later pass otherwise (store_failures).
+ * store_drain waits the writer out, for the restore that reads the files and for a power-off.
+ * Only the writer, or a caller after store_drain, touches the three card_blobs. */
+enum { W_QUEUE, W_TAIL, W_ELAPSED, W_STORES };
+#define W_DROP ((unsigned *)1)
+#define W_FLUSH ((unsigned *)2)
+static unsigned *volatile w_post[W_STORES] __attribute__((section(".scratch")));
+static volatile int w_busy __attribute__((section(".scratch"))),
+    w_failed __attribute__((section(".scratch")));
+static card_blob *w_store(int k);
+static void *w_thread(void *unused) {
+    for (int k = 0, left = 1; left; k = (k + 1) % W_STORES) {
+        unsigned *j = __sync_lock_test_and_set(&w_post[k], 0);
+        if (j == W_FLUSH)
+            card_blob_flush(w_store(k));
+        else if (j == W_DROP)
+            card_blob_drop(w_store(k));
+        else if (j) {
+            if (!card_blob_write(w_store(k), j + 1, j[0])) __sync_fetch_and_or(&w_failed, 1 << k);
+            free(j);
+        }
+        if (k < W_STORES - 1) continue;
+        /* a round done: over once nothing is posted, unless a post came as the writer left */
+        w_busy = 0;
+        left = (w_post[0] || w_post[1] || w_post[2]) && __sync_bool_compare_and_swap(&w_busy, 0, 1);
+    }
+    return unused;
+}
+static void store_post(int k, unsigned *j) {
+    unsigned long thread;
+    __sync_fetch_and_and(&w_failed, ~(1 << k));
+    if (j == W_FLUSH)
+        (void)__sync_bool_compare_and_swap(&w_post[k], 0, j);
+    else if ((j = __sync_lock_test_and_set(&w_post[k], j)) > W_FLUSH)
+        free(j);
+    if (!__sync_bool_compare_and_swap(&w_busy, 0, 1)) return; /* the writer running takes it */
+    if (pthread_create(&thread, 0, w_thread, 0))
+        w_thread(0);
+    else
+        pthread_detach(thread);
+}
+/* Whether store k's last write was refused, read once. */
+static int store_failed(int k) { return __sync_fetch_and_and(&w_failed, ~(1 << k)) >> k & 1; }
+/* A record of n bytes for store_write: its bytes go from the address returned on. */
+static unsigned *store_record(unsigned n) {
+    unsigned *j = calloc(1, n + 4);
+    if (j) j[0] = n;
+    return j;
+}
+/* j posted as store k's record: 1 unless the writer has already been refused it. */
+static int store_write(int k, unsigned *j) {
+    store_post(k, j);
+    return !store_failed(k);
+}
+static void store_drain(void) {
+    for (int ms = 0; w_busy && ms < 10000; ++ms) usleep(1000);
+    if (__sync_bool_compare_and_swap(&w_busy, 0, 1)) w_thread(0);
+}
 #define QUEUE_LIMIT 65536
 #define HISTORY_LIMIT 4096
 /* ponytail: Play Next's pending list holds 64 queue indices; a new one past that drops the oldest
@@ -52,6 +117,9 @@ extern int resume_held(void);       /* navigation.c */
 extern void resume_restart(void);
 extern void un_source_take(void *q, int at, int type); /* upnext.c */
 
+/* A queue index as the tables below hold it: QUEUE_LIMIT is its range. */
+typedef unsigned short qix;
+/* make_order's working row: a song, its group and its place within it. */
 typedef struct {
     unsigned index, group, rank;
 } entry;
@@ -64,15 +132,27 @@ typedef struct {
     int next_valid, next_value;
     unsigned next_pos;
     unsigned resume_key, resume_pos;
-    entry *order, *cycle;
-    unsigned *groups, *seen, *history;
+    /* This pass and the next, queue indices in play order. Shuffle Songs draws the next one only
+     * when a listing or this pass's end reaches it (next_pass); the grouped modes keep both. */
+    qix *order, *cycle;
+    /* groups: each entry's album or folder (its smallest index), only while a mode reads them
+     * (groups_wanted). mark: per entry, its identity (rec_id) above bit 0, played this pass.
+     * Shuffle Songs so holds 4 bytes a song, and 2 more once the next pass is drawn. */
+    unsigned *groups;
+    unsigned short *mark;
+    unsigned *history;
     unsigned poll_stamp;
     unsigned plain_size; /* the queue's size the plain run was taken at (plain_follow) */
 } playback;
 static playback s __attribute__((section(".scratch")));
-/* Each queue entry's identity (its path's hash and CUE start) as the last rebuild took the queue, so
- * follow_queue can tell which entries a stock edit took out; and playback_poll's thread, the UI's. */
-static unsigned *ids __attribute__((section(".scratch")));
+/* The queue file is empty since the last drop: a queue too long to save drops it once, not at
+ * every save. */
+static int queue_dropped __attribute__((section(".scratch")));
+static void queue_drop(void) {
+    if (!queue_dropped) store_post(W_QUEUE, W_DROP);
+    queue_dropped = 1;
+}
+/* playback_poll's thread, the UI's. */
 unsigned long ui_thread __attribute__((section(".scratch")));
 /* Stock Shuffle's Previous plays the last track, but the track it left stays unplayed in the pool,
  * so stock's Next draws a random one instead: ringnav_shuffle returns to it (playback_back).
@@ -545,20 +625,29 @@ int ringnav_open_preload(void) {
     }
     return stock_open_preload_trampoline();
 }
-static void release(void) {
+/* What Up Next and the car list (the order, the place in it, what played, Playing Next) changed:
+ * the cached next goes, and playback_stamp moves, so a listing made at the stamp it saw still holds. */
+static unsigned stamp_now __attribute__((section(".scratch")));
+static void order_changed(void) {
     s.next_valid = 0;
+    ++stamp_now;
+}
+unsigned playback_stamp(void) { return stamp_now; }
+#define SEEN(x) (s.mark[x] & 1)
+static void seen_set(unsigned x, int on) { s.mark[x] = (unsigned short)((s.mark[x] & ~1u) | (on != 0)); }
+static void release(void) {
+    order_changed();
     if (s.order) free(s.order);
     if (s.cycle) free(s.cycle);
     if (s.groups) free(s.groups);
-    if (s.seen) free(s.seen);
+    if (s.mark) free(s.mark);
     if (s.history) free(s.history);
-    if (ids) free(ids);
-    ids = 0;
     s.order = s.cycle = 0;
-    s.groups = s.seen = s.history = 0;
+    s.groups = s.history = 0;
+    s.mark = 0;
     s.n = s.hn = s.cursor = s.npend = 0;
     s.resume_key = s.resume_pending = s.resume_wait = s.save_failed = 0;
-    card_blob_drop(QUEUE_STORE);
+    queue_drop();
     s.dirty = 1; /* the next save writes a plain snapshot whole */
 }
 /* Albums as Coverflow tells them apart (album_cmp: tagged albums first), or folders. */
@@ -596,12 +685,26 @@ static void shuffle(entry *v, unsigned n) {
         v[j] = t;
     }
 }
-static void make_order(entry *v) {
-    for (unsigned i = 0; i < s.n; ++i) v[i] = (entry){ i, s.groups[i], 0 };
-    if (s.shuffle == 1) { /* no sort first: the shuffle undoes it, seconds on a big library */
-        shuffle(v, s.n);
+static void order_grouped(entry *v);
+/* A pass of the queue into v. Shuffle Songs is a Fisher-Yates draw over the indices alone, uniform
+ * over every order, with no sort, no group and no look at a record: n steps of a few instructions.
+ * The grouped modes sort and draw in w, n working rows the caller lends. */
+static void make_order(qix *v, entry *w) {
+    if (s.shuffle == 1) {
+        for (unsigned i = 0; i < s.n; ++i) v[i] = (qix)i;
+        for (unsigned i = s.n; i > 1; --i) {
+            unsigned j = rand_below(i);
+            qix t = v[i - 1];
+            v[i - 1] = v[j];
+            v[j] = t;
+        }
         return;
     }
+    for (unsigned i = 0; i < s.n; ++i) w[i] = (entry){ i, s.groups[i], 0 };
+    order_grouped(w);
+    for (unsigned i = 0; i < s.n; ++i) v[i] = (qix)w[i].index;
+}
+static void order_grouped(entry *v) {
     qsort(v, s.n, sizeof *v, compare);
     if (s.shuffle == 2 || s.shuffle == 4)
         for (unsigned i = 0, j; i < s.n; i = j) {
@@ -609,14 +712,15 @@ static void make_order(entry *v) {
             shuffle(v + i, j - i);
         }
     if (s.shuffle == 3 || s.shuffle == 4) {
-        /* Rank groups with a shuffled permutation, so even random ties cannot split a group. */
-        for (unsigned i = 0; i < s.n; ++i) s.cycle[i].rank = i;
+        /* Rank groups with a shuffled permutation, so even random ties cannot split a group. The
+         * ranks stand in the rows' own rank fields, which the sort above is done with. */
+        for (unsigned i = 0; i < s.n; ++i) v[i].rank = i;
         for (unsigned i = s.n; i > 1; --i) {
-            unsigned j = rand_below(i), t = s.cycle[i - 1].rank;
-            s.cycle[i - 1].rank = s.cycle[j].rank;
-            s.cycle[j].rank = t;
+            unsigned j = rand_below(i), t = v[i - 1].rank;
+            v[i - 1].rank = v[j].rank;
+            v[j].rank = t;
         }
-        for (unsigned i = 0; i < s.n; ++i) v[i].group = s.cycle[s.groups[v[i].index]].rank;
+        for (unsigned i = 0; i < s.n; ++i) v[i].group = v[s.groups[v[i].index]].rank;
         /* Stable group sort: rank is the within-group order just generated. */
         for (unsigned i = 0; i < s.n; ++i) v[i].rank = i;
         qsort(v, s.n, sizeof *v, compare);
@@ -631,103 +735,164 @@ static void history(unsigned at) {
     }
     s.history[s.hn++] = at;
 }
+/* A queue entry's identity in 15 bits, mark's upper bits, by which follow_queue tells which
+ * entries a stock edit took out: a library row's from its id, disc and track, any other row's (a
+ * folder's, a card app's download) from its path's length and last ID_TAIL bytes, each with the
+ * CUE start. Neither walks a whole path: a library-wide queue's are a few multiplies a row. Two
+ * rows side by side that share one are told apart no better than two copies of a song. */
+#define ID_TAIL 24
 static unsigned rec_id(unsigned i) {
     void *r = deque_at(queue(), i);
-    return hash_bytes(fnv(FNV_SEED, P(r, REC_PATH)), (const unsigned char *)r + REC_CUE_START, 4);
+    int id = I(r, REC_ID);
+    unsigned h;
+    if (id > 0)
+        h = (unsigned)id * 2654435761u ^ (unsigned)I(r, REC_DISC) * 40503u ^
+            (unsigned)I(r, REC_TRACK) * 0x9e3779b1u;
+    else {
+        const char *path = P(r, REC_PATH);
+        unsigned n = strlen(path);
+        h = fnv(FNV_SEED, (const unsigned char *)(n > ID_TAIL ? path + n - ID_TAIL : path)) ^
+            n * 0x9e3779b1u;
+    }
+    h = (h ^ (unsigned)I(r, REC_CUE_START)) * 0x85ebca6bu;
+    return (h ^ h >> 15 ^ h >> 30) & 0x7fff;
 }
 /* A local queue's only: a DLNA controller or an online queue (0xf1, 0xf2) keeps stock's way. */
 static int local_class(int cls) { return cls == 1 || (cls & 0xf000) == 0xf000; }
+/* Whether the mode reads albums or folders: every one but Shuffle Songs without a repeat of the
+ * category. Shuffle Songs otherwise never sorts the queue into them (group_table). */
+static int groups_wanted(void) { return s.shuffle != 1 || s.repeat == 1 || s.repeat == 4; }
+/* Each entry's group into groups, w lent as in make_order: sorted by group_cmp, each run's group
+ * its smallest index. */
+static void group_table(unsigned *groups, entry *w) {
+    unsigned n = s.n;
+    for (unsigned i = 0; i < n; ++i) w[i].index = i;
+    qsort(w, n, sizeof *w, group_before);
+    for (unsigned i = 0, first = 0; i < n; ++i) {
+        if (!i || group_cmp(deque_at(queue(), w[i - 1].index), deque_at(queue(), w[i].index)))
+            first = w[i].index;
+        groups[w[i].index] = first;
+    }
+}
+/* The order's place of at as the cursor, looked for from the cursor outwards: the song before or
+ * after it is a step away, whatever the queue's size. */
+static void cursor_to(unsigned at) {
+    if (s.cursor >= s.n) s.cursor = 0;
+    for (unsigned d = 0; d < s.n; ++d) {
+        if (d <= s.cursor && s.order[s.cursor - d] == at) {
+            s.cursor -= d;
+            return;
+        }
+        if (s.cursor + d < s.n && s.order[s.cursor + d] == at) {
+            s.cursor += d;
+            return;
+        }
+    }
+}
+/* Shuffle Songs' next pass, drawn when a listing or this pass's end first reaches it. */
+static int next_pass(void) {
+    if (s.cycle) return 1;
+    if (s.shuffle != 1 || !(s.cycle = calloc(s.n + 1, sizeof *s.cycle))) return 0;
+    make_order(s.cycle, 0);
+    return 1;
+}
 static int rebuild(int keep) {
-    s.next_valid = 0;
+    order_changed();
     unsigned n = queue() ? deque_size(queue()) : 0;
-    if (n > QUEUE_LIMIT) { /* before the tables below take 36 B a song */
+    if (n > QUEUE_LIMIT) {
         playback_clear();
         return 0;
     }
-    unsigned *oldseen = s.seen, *oldhistory = s.history;
+    unsigned short *oldmark = s.mark;
+    unsigned *oldhistory = s.history;
     unsigned oldn = s.n, oldhn = s.hn;
-    entry *order = calloc(n + 1, sizeof *order), *cycle = calloc(n + 1, sizeof *cycle);
-    unsigned *groups = calloc(n + 1, sizeof *groups), *seen = calloc(n + 1, sizeof *seen),
-             *hist = calloc(HISTORY_LIMIT, sizeof *hist), *id = calloc(n + 1, sizeof *id);
-    if (!order || !cycle || !groups || !seen || !hist || !id) {
+    int grouped = groups_wanted(), flat = s.shuffle == 1;
+    qix *order = calloc(n + 1, sizeof *order), *cycle = flat ? 0 : calloc(n + 1, sizeof *cycle);
+    unsigned *groups = grouped ? calloc(n + 1, sizeof *groups) : 0,
+             *hist = calloc(HISTORY_LIMIT, sizeof *hist);
+    unsigned short *mark = calloc(n + 1, sizeof *mark);
+    entry *w = grouped || !flat ? calloc(n + 1, sizeof *w) : 0;
+    if (!order || (!flat && !cycle) || (grouped && !groups) || !hist || !mark ||
+        ((grouped || !flat) && !w)) {
         free(order);
         free(cycle);
         free(groups);
-        free(seen);
         free(hist);
-        free(id);
+        free(mark);
+        free(w);
         playback_clear(); /* every caller ends advanced play: no older queue's snapshot stays */
         return 0;
     }
     if (s.order) free(s.order);
     if (s.cycle) free(s.cycle);
     if (s.groups) free(s.groups);
-    if (ids) free(ids);
-    for (unsigned i = 0; i < n; ++i) id[i] = rec_id(i);
-    ids = id;
+    for (unsigned i = 0; i < n; ++i)
+        mark[i] = (unsigned short)(rec_id(i) << 1 | (keep && i < oldn ? oldmark[i] & 1 : 0));
     s.order = order;
     s.cycle = cycle;
     s.groups = groups;
-    s.seen = seen;
+    s.mark = mark;
     s.history = hist;
     s.n = n;
     s.hn = keep ? oldhn : 0;
-    if (keep) {
-        memcpy(hist, oldhistory, oldhn * sizeof *hist);
-        memcpy(seen, oldseen, (oldn < n ? oldn : n) * sizeof *seen);
-    }
-    if (oldseen) free(oldseen);
+    if (keep) memcpy(hist, oldhistory, oldhn * sizeof *hist);
+    if (oldmark) free(oldmark);
     if (oldhistory) free(oldhistory);
-    /* Sort by group_cmp; each run's group is its smallest index. cycle is scratch here. */
-    for (unsigned i = 0; i < n; ++i) cycle[i].index = i;
-    qsort(cycle, n, sizeof *cycle, group_before);
-    for (unsigned i = 0, first = 0; i < n; ++i) {
-        if (!i || group_cmp(deque_at(queue(), cycle[i - 1].index), deque_at(queue(), cycle[i].index)))
-            first = cycle[i].index;
-        groups[cycle[i].index] = first;
-    }
-    make_order(order);
+    if (grouped) group_table(groups, w);
+    make_order(order, w);
     unsigned at = (unsigned)M(MCL_POS), k = 0;
     if (at < n) {
         if (!keep) history(at);
-        if (s.shuffle == 1) {
-            /* Shuffle All pins the current occurrence between visited and remaining entries. */
-            for (unsigned i = 0; i < n; ++i)
-                if (order[i].index != at && seen[order[i].index]) cycle[k++] = order[i];
-            s.cursor = k;
-            cycle[k++] = (entry){ at, groups[at], 0 };
-            for (unsigned i = 0; i < n; ++i)
-                if (order[i].index != at && !seen[order[i].index]) cycle[k++] = order[i];
-            memcpy(order, cycle, n * sizeof *order);
+        if (flat) {
+            /* Shuffle All pins the current occurrence between visited and remaining entries: with
+             * none visited (a new order) it moves to the front, the rest closing up behind it. */
+            qix *t = keep ? calloc(n + 1, sizeof *t) : 0;
+            if (t) {
+                for (unsigned i = 0; i < n; ++i)
+                    if (order[i] != at && SEEN(order[i])) t[k++] = order[i];
+                s.cursor = k;
+                t[k++] = (qix)at;
+                for (unsigned i = 0; i < n; ++i)
+                    if (order[i] != at && !SEEN(order[i])) t[k++] = order[i];
+                memcpy(order, t, n * sizeof *order);
+                free(t);
+            } else {
+                while (k < n && order[k] != at) ++k;
+                for (; k > 0; --k) order[k] = order[k - 1];
+                order[0] = (qix)at;
+                s.cursor = 0;
+                for (unsigned i = 0; keep && i < n; ++i) mark[i] &= ~1u; /* no room to sort them */
+            }
         } else {
             if (s.shuffle >= 3) {
                 /* Finish the current category before the other shuffled categories; keep its
                  * track order, even when the playing track is halfway through that category. */
                 for (unsigned i = 0; i < n; ++i)
-                    if (groups[order[i].index] == groups[at]) cycle[k++] = order[i];
+                    if (groups[order[i]] == groups[at]) cycle[k++] = order[i];
                 for (unsigned i = 0; i < n; ++i)
-                    if (groups[order[i].index] != groups[at]) cycle[k++] = order[i];
+                    if (groups[order[i]] != groups[at]) cycle[k++] = order[i];
                 memcpy(order, cycle, n * sizeof *order);
             }
             if (s.shuffle == 2 || s.shuffle == 4) {
                 unsigned first = 0, current = 0;
-                while (first < n && groups[order[first].index] != groups[at]) ++first;
-                while (current < n && order[current].index != at) ++current;
-                entry playing = order[current];
+                while (first < n && groups[order[first]] != groups[at]) ++first;
+                while (current < n && order[current] != at) ++current;
+                qix playing = order[current];
                 for (; current > first; --current) order[current] = order[current - 1];
                 order[first] = playing;
             }
             for (unsigned i = 0; i < n; ++i)
-                if (order[i].index == at) {
+                if (order[i] == at) {
                     s.cursor = i;
                     break;
                 }
-            for (unsigned i = 0; i < s.cursor; ++i) seen[order[i].index] = 1;
+            for (unsigned i = 0; i < s.cursor; ++i) mark[order[i]] |= 1;
         }
-        seen[at] = 1;
+        mark[at] |= 1;
     }
-    /* Generate the following cycle on commit, never in the preload/peek path. */
-    make_order(cycle);
+    /* The grouped modes generate the following cycle on commit, never in the preload/peek path. */
+    if (!flat) make_order(cycle, w);
+    free(w);
     s.dirty = 1;
     return 1;
 }
@@ -737,7 +902,7 @@ static int rebuild(int keep) {
  * at). A song new to the queue goes at the end of this pass, in queue order, and somewhere in the
  * next one. Taken with the tables to free; with no memory rebuild's new order stands. */
 typedef struct {
-    entry *order, *cycle;
+    qix *order, *cycle;
     unsigned n;
 } pass_t;
 static pass_t pass_take(void) {
@@ -745,36 +910,36 @@ static pass_t pass_take(void) {
     if (s.active && s.shuffle == 1) p.order = s.order, p.cycle = s.cycle, s.order = s.cycle = 0;
     return p;
 }
-static int pass_carry(entry *dst, const entry *old, unsigned n0, const unsigned *map, unsigned at,
+static int pass_carry(qix *dst, const qix *old, unsigned n0, const unsigned *map, unsigned at,
                       unsigned add, int scatter) {
     unsigned char *in = calloc(s.n + 1, 1);
-    entry *v = calloc(s.n + 1, sizeof *v);
+    qix *v = calloc(s.n + 1, sizeof *v);
     unsigned k = 0;
     if (!in || !v) return free(in), free(v), 0;
     for (unsigned i = 0; i < n0; ++i) {
-        unsigned x = old[i].index;
+        unsigned x = old[i];
         x = map ? (x < n0 ? map[x] : ~0u) : x >= at ? x + add : x;
-        if (x < s.n && !in[x]) in[x] = 1, v[k++] = (entry){ x, s.groups[x], 0 };
+        if (x < s.n && !in[x]) in[x] = 1, v[k++] = (qix)x;
     }
     for (unsigned x = 0; x < s.n; ++x) {
         if (in[x]) continue;
         unsigned j = scatter ? rand_below(k + 1) : k;
         for (unsigned i = k++; i > j; --i) v[i] = v[i - 1];
-        v[j] = (entry){ x, s.groups[x], 0 };
+        v[j] = (qix)x;
     }
     memcpy(dst, v, s.n * sizeof *v);
     free(in), free(v);
     return 1;
 }
+/* The next pass comes back only if it was drawn (next_pass); undrawn, it is drawn over the queue as
+ * it then is. */
 static void pass_keep(pass_t p, const unsigned *map, unsigned at, unsigned add) {
-    if (s.active && p.order && s.shuffle == 1 &&
-        pass_carry(s.order, p.order, p.n, map, at, add, 0) &&
-        pass_carry(s.cycle, p.cycle, p.n, map, at, add, 1))
-        for (unsigned i = 0; i < s.n; ++i)
-            if (s.order[i].index == (unsigned)M(MCL_POS)) {
-                s.cursor = i;
-                break;
-            }
+    if (s.active && p.order && s.shuffle == 1 && pass_carry(s.order, p.order, p.n, map, at, add, 0)) {
+        if (p.cycle && !s.cycle && (s.cycle = calloc(s.n + 1, sizeof *s.cycle)) &&
+            !pass_carry(s.cycle, p.cycle, p.n, map, at, add, 1))
+            free(s.cycle), s.cycle = 0;
+        cursor_to((unsigned)M(MCL_POS));
+    }
     free(p.order), free(p.cycle);
 }
 /* Stock's own queue edit (View Queue's delete) takes entries out behind advanced play, so its
@@ -790,8 +955,10 @@ static int follow_queue(void) {
     if (!s.active || m == s.n) return 0;
     if (pthread_self() != ui_thread) return 1;
     close_preload();
-    unsigned *map = ids ? calloc(s.n + 1, sizeof *map) : 0, *seen = calloc(m + 1, sizeof *seen);
-    for (unsigned i = 0; map && i < s.n; ++i) map[i] = j < m && rec_id(j) == ids[i] ? j++ : ~0u;
+    unsigned *map = s.mark ? calloc(s.n + 1, sizeof *map) : 0;
+    unsigned short *seen = calloc(m + 1, sizeof *seen);
+    for (unsigned i = 0; map && i < s.n; ++i)
+        map[i] = j < m && rec_id(j) == (unsigned)s.mark[i] >> 1 ? j++ : ~0u;
     if (!map || !seen || j != m) {
         free(map);
         free(seen);
@@ -800,7 +967,7 @@ static int follow_queue(void) {
         return 0;
     }
     for (unsigned i = 0; i < s.n; ++i)
-        if (map[i] != ~0u) seen[map[i]] = s.seen[i];
+        if (map[i] != ~0u) seen[map[i]] = s.mark[i] & 1;
     for (unsigned i = 0; i < s.hn; ++i)
         if (s.history[i] < s.n && map[s.history[i]] != ~0u) s.history[k++] = map[s.history[i]];
     s.hn = k;
@@ -808,8 +975,8 @@ static int follow_queue(void) {
     for (unsigned i = 0; i < s.npend; ++i)
         if (s.pend[i] < s.n && map[s.pend[i]] != ~0u) s.pend[k++] = map[s.pend[i]];
     s.npend = k;
-    free(s.seen);
-    s.seen = seen;
+    free(s.mark);
+    s.mark = seen;
     pass_t pass = pass_take();
     s.n = m;
     unsigned at = (unsigned)M(MCL_POS);
@@ -857,9 +1024,12 @@ int playback_groups(void *all, int folder) {
     s.shuffle = 3;
     s.repeat = 2;
     s.active = rebuild(0);
+    entry *w = s.active ? calloc(s.n + 1, sizeof *w) : 0;
+    if (s.active && !w) playback_clear();
     if (!s.active) return 0;
-    make_order(s.order);
-    int at = (int)s.order[0].index;
+    make_order(s.order, w);
+    free(w);
+    int at = (int)s.order[0];
     s.grouping = 1; /* the load play_folder starts must not end the groups it was started for */
     play_folder(all, at, 0xf001);
     s.grouping = 0;
@@ -974,27 +1144,28 @@ static int unplayable(unsigned x) {
     void *q = queue();
     return q && x < deque_size(q) && catalogue_unavailable(deque_at(q, x));
 }
-/* The indices that play after this track, in order, ignoring the single-song rules. Peek has no
- * side effects, RNG or history writes. */
+/* The indices that play after this track, in order, ignoring the single-song rules. A peek moves
+ * nothing and writes no history; one that asks for rows past this pass's end has Shuffle Songs'
+ * next pass drawn (next_pass), once, and that pass is then the one that plays. */
 static unsigned upcoming(unsigned *out, unsigned max) {
     unsigned at = (unsigned)M(MCL_POS), k = 0;
     if (!s.active || at >= s.n) return 0;
-    int category = s.repeat == 1 || s.repeat == 4;
+    int category = (s.repeat == 1 || s.repeat == 4) && s.groups;
     /* Play Next's list first, in order; the order walk below skips its members */
     for (unsigned j = 0; j < s.npend && k < max; ++j) {
         unsigned x = s.pend[j];
         if (!category || s.groups[x] == s.groups[at]) out[k++] = x;
     }
     for (unsigned i = s.cursor + 1; i < s.n && k < max; ++i) {
-        unsigned x = s.order[i].index;
-        if (!s.seen[x] && pend_find(x) == s.npend && (!category || s.groups[x] == s.groups[at]) &&
+        unsigned x = s.order[i];
+        if (!SEEN(x) && pend_find(x) == s.npend && (!category || s.groups[x] == s.groups[at]) &&
             !unplayable(x))
             out[k++] = x;
     }
-    if (s.repeat < 3) return k;
+    if (s.repeat < 3 || k >= max || !next_pass()) return k;
     /* the next pass after the order runs out: the cycle, wrapped */
     for (unsigned i = 0; i < s.n && k < max; ++i) {
-        unsigned x = s.cycle[i].index;
+        unsigned x = s.cycle[i];
         if (!category || s.groups[x] == s.groups[at]) out[k++] = x;
     }
     return k;
@@ -1047,34 +1218,51 @@ int playback_successor(int automatic) {
  * order intact, even when the order sorted it before the cursor (already marked seen). */
 static void play_now(unsigned next) {
     unsigned i = 0;
-    while (i < s.n && s.order[i].index != next) ++i;
+    while (i < s.n && s.order[i] != next) ++i;
     if (i < s.cursor) {
-        entry t = s.order[i];
+        qix t = s.order[i];
         for (; i < s.cursor; ++i) s.order[i] = s.order[i + 1];
         s.order[i] = t;
         --s.cursor;
     } else if (i > s.cursor && i < s.n) {
-        entry t = s.order[i];
+        qix t = s.order[i];
         for (; i > s.cursor + 1; --i) s.order[i] = s.order[i - 1];
         s.order[i] = t;
     }
-    s.seen[next] = 0;
+    seen_set(next, 0);
+}
+/* The pass ran out: the next one becomes this one, nothing in it played. Shuffle Songs' is drawn
+ * here unless a listing already drew it, copied over this one and let go, to be drawn again when
+ * next reached; a grouped mode draws the one after at once. With no memory for either, the pass
+ * that ended plays again in its order. */
+static void pass_wrap(void) {
+    if (s.shuffle == 1) {
+        if (next_pass()) {
+            memcpy(s.order, s.cycle, s.n * sizeof *s.order);
+            free(s.cycle);
+            s.cycle = 0;
+        }
+    } else {
+        entry *w = calloc(s.n + 1, sizeof *w);
+        memcpy(s.order, s.cycle, s.n * sizeof *s.order);
+        if (w) make_order(s.cycle, w);
+        free(w);
+    }
+    for (unsigned x = 0; x < s.n; ++x) s.mark[x] &= ~1u;
 }
 static void commit(unsigned next) {
     s.resume_key = s.resume_pending = 0;
     if (pend_take(next)) play_now(next);
     unsigned i = s.cursor + 1;
-    while (i < s.n && s.order[i].index != next) ++i;
-    if ((i == s.n || s.seen[next]) && !(s.repeat == 3 && next == (unsigned)M(MCL_POS))) {
-        memcpy(s.order, s.cycle, s.n * sizeof *s.order);
-        memset(s.seen, 0, s.n * sizeof *s.seen);
-        make_order(s.cycle);
-        for (i = 0; i < s.n && s.order[i].index != next; ++i) {}
+    while (i < s.n && s.order[i] != next) ++i;
+    if ((i == s.n || SEEN(next)) && !(s.repeat == 3 && next == (unsigned)M(MCL_POS))) {
+        pass_wrap();
+        for (i = 0; i < s.n && s.order[i] != next; ++i) {}
     }
     if (i < s.n) s.cursor = i;
-    s.seen[next] = 1;
+    seen_set(next, 1);
     history(next);
-    s.next_valid = 0;
+    order_changed();
     s.dirty = 1;
 }
 /* player_start_queue: stock's View Queue row (and its queue delete, DLNA and URL plays) start queue
@@ -1258,14 +1446,10 @@ int ringnav_prev(void) {
     unsigned at = s.history[s.hn - 1];
     close_preload();
     /* The track left is unplayed again, so Next comes back to it rather than skipping it. */
-    if ((unsigned)M(MCL_POS) < s.n) s.seen[M(MCL_POS)] = 0;
+    if ((unsigned)M(MCL_POS) < s.n) seen_set((unsigned)M(MCL_POS), 0);
     M(MCL_POS) = (int)at;
-    for (unsigned i = 0; i < s.n; ++i)
-        if (s.order[i].index == at) {
-            s.cursor = i;
-            break;
-        }
-    s.next_valid = 0;
+    cursor_to(at);
+    order_changed();
     s.dirty = 1;
     return mclStartPlayer();
 }
@@ -1309,7 +1493,7 @@ static int restart_refused(int key, int restarts) {
  * Shuffle, Next on the last song queued played the playlist's next download). */
 static int order_next_queued(void) {
     unsigned x;
-    return s.active && upcoming(&x, 1) && x < s.n && !s.seen[x];
+    return s.active && upcoming(&x, 1) && x < s.n && !SEEN(x);
 }
 /* Manual Next/Prev (player_change_music). List Play stops at a library queue's end, as above. At
  * queue index 0 or n-1 stock wraps or loads a sibling folder itself; in Repeat All without Folder
@@ -1454,22 +1638,30 @@ int playback_group_skip(int forward) {
     if (!s.active && !playback_set(2, s.folder)) return 0;
     unsigned at = (unsigned)M(MCL_POS), next = s.n;
     if (at >= s.n) return 0;
+    if (!s.groups) { /* Shuffle Songs kept none: sorted into them at the first skip */
+        entry *w = calloc(s.n + 1, sizeof *w);
+        unsigned *groups = calloc(s.n + 1, sizeof *groups);
+        if (!w || !groups) return free(w), free(groups), 0;
+        group_table(groups, w);
+        free(w);
+        s.groups = groups;
+    }
     unsigned group = s.groups[at];
     if (forward) {
         for (unsigned i = s.cursor + 1; i < s.n; ++i)
-            if (!s.seen[s.order[i].index] && s.groups[s.order[i].index] != group) {
-                next = s.order[i].index;
+            if (!SEEN(s.order[i]) && s.groups[s.order[i]] != group) {
+                next = s.order[i];
                 break;
             }
-        if (next == s.n && s.repeat >= 3)
+        if (next == s.n && s.repeat >= 3 && next_pass())
             for (unsigned i = 0; i < s.n; ++i)
-                if (s.groups[s.cycle[i].index] != group) {
-                    next = s.cycle[i].index;
+                if (s.groups[s.cycle[i]] != group) {
+                    next = s.cycle[i];
                     break;
                 }
         if (next == s.n) return 0;
         for (unsigned i = 0; i < s.n; ++i)
-            if (s.groups[i] == group) s.seen[i] = 1;
+            if (s.groups[i] == group) seen_set(i, 1);
         s.npend = 0;
         commit(next);
     } else {
@@ -1478,19 +1670,19 @@ int playback_group_skip(int forward) {
         if (!h) return 0;
         group = s.groups[s.history[h - 1]];
         for (unsigned i = 0; i < s.n; ++i)
-            if (s.groups[s.order[i].index] == group) {
-                next = s.order[i].index;
+            if (s.groups[s.order[i]] == group) {
+                next = s.order[i];
                 s.cursor = i;
                 break;
             }
         if (next == s.n) return 0;
         for (unsigned i = 0; i < s.n; ++i)
-            if (s.groups[i] == group) s.seen[i] = 0;
+            if (s.groups[i] == group) seen_set(i, 0);
         s.hn = h;
         history(next);
-        s.seen[next] = 1;
+        seen_set(next, 1);
         s.npend = s.resume_key = s.resume_pending = 0;
-        s.next_valid = 0;
+        order_changed();
         s.dirty = 1;
     }
     close_preload();
@@ -1516,15 +1708,15 @@ void playback_insert(unsigned at, unsigned n, int next) {
     }
     close_preload();
     /* Remap occurrences before grouping is recomputed; Shuffle Songs' order comes back after. */
-    unsigned *seen = calloc(s.n + n + 1, sizeof *seen);
+    unsigned short *seen = calloc(s.n + n + 1, sizeof *seen);
     if (!seen) {
         s.active = 0;
         release();
         return;
     }
-    for (unsigned i = 0; i < s.n; ++i) seen[i >= at ? i + n : i] = s.seen[i];
-    free(s.seen);
-    s.seen = seen;
+    for (unsigned i = 0; i < s.n; ++i) seen[i >= at ? i + n : i] = s.mark[i] & 1;
+    free(s.mark);
+    s.mark = seen;
     pass_t pass = pass_take();
     s.n += n;
     for (unsigned i = 0; i < s.hn; ++i)
@@ -1603,7 +1795,7 @@ int playback_move(unsigned from) {
     if (!s.active || !q || deque_size(q) != s.n || pos >= s.n || from >= s.n || from == pos)
         return -1;
     close_preload();
-    s.next_valid = 0;
+    order_changed();
     s.dirty = 1;
     pend_front(from);
     playback_save();
@@ -1667,7 +1859,7 @@ int playback_next_move(unsigned from, unsigned to) {
     for (k = from; k < to; ++k) s.pend[k] = s.pend[k + 1];
     s.pend[to] = x;
     close_preload();
-    s.next_valid = 0;
+    order_changed();
     s.dirty = 1;
     playback_save();
     return 1;
@@ -1696,7 +1888,7 @@ int playback_next_clear(void) {
     free(map);
     follow_queue();
     s.plain_size = w;
-    s.next_valid = 0;
+    order_changed();
     s.dirty = 1;
     playback_save();
     return w < size;
@@ -1729,7 +1921,7 @@ int playback_queue_remove(unsigned at) {
     free(map);
     follow_queue();
     s.plain_size = size - 1;
-    s.next_valid = 0;
+    order_changed();
     s.dirty = 1;
     playback_save();
     return 1;
@@ -1756,7 +1948,7 @@ int playback_queue_rest(void *add) {
     free(map);
     follow_queue();
     s.plain_size = 1;
-    s.next_valid = 0;
+    order_changed();
     s.dirty = 1;
     if (unshuffle && !s.restoring) config_playmode(playback_unshuffle(), 1);
     if (add && deque_size(add)) playback_queue_insert(q, add, 0);
@@ -1776,10 +1968,16 @@ typedef struct {
 typedef struct {
     unsigned checksum, snapshot, pos, elapsed;
 } checkpoint;
+static card_blob *w_store(int k) {
+    return k == W_QUEUE ? QUEUE_STORE : k == W_TAIL ? TAIL_STORE : ELAPSED_STORE;
+}
 static int save_elapsed(int sec) {
     checkpoint c = { 0, s.saved_sum, s.saved_pos, (unsigned)sec };
+    unsigned *j = store_record(sizeof c);
+    if (!j) return 0;
     c.checksum = hash_bytes(FNV_SEED, (const unsigned char *)&c.snapshot, 3 * 4);
-    return card_blob_write(ELAPSED_STORE, &c, sizeof c);
+    memcpy(j + 1, &c, sizeof c);
+    return store_write(W_ELAPSED, j);
 }
 /* The tail beside the snapshot whose checksum is sum, of n songs: magic, its own checksum (of what
  * follows it), sum, the count, then each path and its NUL. With none, one written since boot is
@@ -1790,17 +1988,17 @@ static int save_elapsed(int sec) {
 static void save_tail(unsigned sum, unsigned n) {
     unsigned k = 0, bytes = 0;
     char *paths = addon_pending_paths(SAVE_LIMIT - n, &k, &bytes);
-    unsigned *buf = paths ? calloc(1, 16 + bytes) : 0;
-    if (!buf) {
+    unsigned *j = paths ? store_record(16 + bytes) : 0, *buf = j ? j + 1 : 0;
+    if (!j) {
         free(paths);
-        if (tail_kept) card_blob_drop(TAIL_STORE), tail_kept = 0;
+        if (tail_kept) store_post(W_TAIL, W_DROP), tail_kept = 0;
         return;
     }
     buf[0] = TAIL_MAGIC, buf[2] = sum, buf[3] = k;
     memcpy(buf + 4, paths, bytes);
     buf[1] = hash_bytes(FNV_SEED, (const unsigned char *)(buf + 2), 8 + bytes);
-    tail_kept = card_blob_write(TAIL_STORE, buf, 16 + bytes);
-    free(buf), free(paths);
+    tail_kept = store_write(W_TAIL, j);
+    free(paths);
 }
 /* The tail of the snapshot whose checksum is sum, on the heap (the caller frees it), its paths from
  * byte 16, *n of them; 0 when there is none, or it is another snapshot's or damaged. */
@@ -1854,7 +2052,7 @@ void playback_save(void) {
     unsigned n = plain ? deque_size(queue()) : s.n;
     if (plain && !n) return; /* boot's empty queue, before the snapshot restores */
     if (!n || n > SAVE_LIMIT) {
-        card_blob_drop(QUEUE_STORE);
+        queue_drop();
         s.dirty = 0;
         s.saved_queue = 0;
         return;
@@ -1888,8 +2086,9 @@ void playback_save(void) {
         if (!len || len >= 1024) return;
         size += 12 + len + 1;
     }
-    unsigned char *buf = calloc(size, 1);
-    if (!buf) return;
+    unsigned *j = store_record(size);
+    unsigned char *buf = (unsigned char *)(j + 1);
+    if (!j) return;
     snapshot h = { 0x5132524e,
                    plain ? 4 : 3,
                    size,
@@ -1906,13 +2105,14 @@ void playback_save(void) {
                    type };
     memcpy(buf, &h, sizeof h);
     unsigned char *p = buf + sizeof h;
+    int pass = !plain && (s.cycle || next_pass()); /* the next pass, or with no memory this one again */
     for (unsigned i = 0; i < n * 3 + hn + npend; ++i) {
         /* plain: the queue's order twice, nothing seen */
         unsigned index = plain && i < n * 2 ? i % n
                          : plain            ? 0
-                         : i < n            ? s.order[i].index
-                         : i < n * 2        ? s.cycle[i - n].index
-                         : i < n * 3        ? s.seen[i - n * 2]
+                         : i < n            ? s.order[i]
+                         : i < n * 2        ? (pass ? s.cycle : s.order)[i - n]
+                         : i < n * 3        ? SEEN(i - n * 2)
                          : i < n * 3 + hn   ? s.history[i - n * 3]
                                             : s.pend[i - n * 3 - hn];
         memcpy(p, &index, 4);
@@ -1929,9 +2129,8 @@ void playback_save(void) {
         p += identity[0];
     }
     unsigned sum = ((snapshot *)buf)->checksum = hash_bytes(FNV_SEED, buf, size);
-    int ok = card_blob_write(QUEUE_STORE, buf, size);
-    free(buf);
-    if (ok) {
+    queue_dropped = 0;
+    if (store_write(W_QUEUE, j)) {
         save_tail(sum, n);
         s.saved_elapsed = sec;
         s.saved_pos = pos;
@@ -1970,6 +2169,7 @@ static int stock_memory(void *out) {
 }
 int ringnav_memory(void *out) {
     if (!g_memory_play && !g_carmode) return stock_memory(out);
+    store_drain();                /* the writer's records are in the files first */
     card_blob_flush(QUEUE_STORE); /* a RAM copy is not in the file: the card's turn first */
     card_blob_flush(ELAPSED_STORE);
     void *f = card_blob_open(QUEUE_STORE);
@@ -2152,23 +2352,20 @@ int ringnav_memory(void *out) {
         if (s.active) {
             unsigned k = 0;
             for (unsigned i = 0; i < h.n; ++i)
-                if (map[indices[i]] != ~0u) s.order[k++].index = map[indices[i]];
+                if (map[indices[i]] != ~0u) s.order[k++] = (qix)map[indices[i]];
             k = 0;
-            for (unsigned i = 0; i < h.n; ++i)
-                if (map[indices[h.n + i]] != ~0u) s.cycle[k++].index = map[indices[h.n + i]];
+            for (unsigned i = 0; (s.cycle || next_pass()) && i < h.n; ++i)
+                if (map[indices[h.n + i]] != ~0u) s.cycle[k++] = (qix)map[indices[h.n + i]];
             s.hn = 0;
             for (unsigned i = 0; i < h.hn; ++i)
                 if (map[indices[h.n * 3 + i]] != ~0u) history(map[indices[h.n * 3 + i]]);
             if (!s.hn || s.history[s.hn - 1] != pos) history(pos);
-            memset(s.seen, 0, s.n * 4);
+            for (unsigned i = 0; i < s.n; ++i) seen_set(i, 0);
             for (unsigned i = 0; i < h.n; ++i)
-                if (map[i] != ~0u) s.seen[map[i]] = indices[h.n * 2 + i];
-            s.seen[pos] = 1;
-            for (unsigned i = 0; i < s.n; ++i)
-                if (s.order[i].index == pos) {
-                    s.cursor = i;
-                    break;
-                }
+                if (map[i] != ~0u) seen_set(map[i], (int)indices[h.n * 2 + i]);
+            seen_set(pos, 1);
+            s.cursor = 0;
+            cursor_to(pos);
             s.npend = 0;
             if (h.version == 2) {
                 /* the run [forced-1, force_end), in order */
@@ -2265,6 +2462,13 @@ static int playback_next(void) {
 static int playback_shuffled(void) {
     return s.active ? s.shuffle == 1 || s.shuffle == 2 || s.shuffle == 4 : M(MCL_MODE) == 2;
 }
+/* A record the writer was refused after its post returned: saved again as a failed save is. */
+static void store_failures(void) {
+    if (!w_failed) return;
+    if (store_failed(W_QUEUE)) s.dirty = s.save_failed = 1, queue_dropped = 0;
+    if (store_failed(W_ELAPSED)) s.save_failed = 1;
+    if (store_failed(W_TAIL)) tail_kept = 0;
+}
 void playback_poll(void) {
     ui_thread = pthread_self();
     wheel_pct(); /* the saved sensitivity from the first UI pass */
@@ -2276,20 +2480,23 @@ void playback_poll(void) {
         restart_ask = 0;
         toast("Press again to restart");
     }
+    store_failures();
     follow_queue(); /* before Crossfade reads the next track */
     shuffle_own();  /* stock Shuffle as Shuffle Songs, so Crossfade knows its next too */
     xfade_poll(playback_next(), playback_shuffled());
     mono_sync();
     unsigned now = time_now_ms();
-    /* playback_save writes only what changed, at most every 5 s. A track that just plays on
-     * writes its elapsed second every 30 s instead (a synced card write each, or a RAM copy while
-     * the card is away, written here once it is back); a new track, a pause or a seek go within
-     * 5 s, a failed write retries every 30 s, and power-off saves exactly (ringnav_savequeue). */
+    /* playback_save posts only what changed, at most every 5 s. A track that just plays on
+     * posts its elapsed second every 30 s instead (a synced card write each, the writer's, or a
+     * RAM copy while the card is away, posted here to be written once it is back); a new track, a
+     * pause or a seek go within 5 s, a failed write retries every 30 s, and power-off saves
+     * exactly (ringnav_savequeue). */
     if (!(s.dirty && !s.save_failed)) {
         if (now - s.stamp < (s.save_failed ? 30000u : 5000u) || now - s.poll_stamp < 5000) return;
         s.poll_stamp = now;
-        card_blob_flush(QUEUE_STORE);
-        card_blob_flush(ELAPSED_STORE);
+        /* a RAM copy kept while the card was away: the writer's, once the card is back */
+        if (QUEUE_STORE->held) store_post(W_QUEUE, W_FLUSH);
+        if (ELAPSED_STORE->held) store_post(W_ELAPSED, W_FLUSH);
         int sec = 0, total = 0;
         mclGetPlayTime(&sec, &total);
         if (now - s.stamp < 30000 && !s.save_failed && mclGetPlayStatus() == 2 &&
@@ -2304,6 +2511,7 @@ int ringnav_savequeue(void) {
     ulog_end("power-off");
     ringnav_clean_end(); /* stock's only call is into_poweroff's */
     playback_save();
+    store_drain(); /* on the card before the power goes */
     return stock_savequeue_trampoline();
 }
 

@@ -141,6 +141,15 @@ def fw_dev(dev_library, tmp_path):
     loaded = host.Fw(dev_library, tmp_path)
     label = C.create_string_buffer(0x400)  # as fw's
     loaded.mock('hscroll_label_create', lambda *_: C.addressof(label))
+    # playback.c's queue writer (store_post) runs to its end at the post, so a save's files are there when the
+    # save returns; any other thread is started and never runs, the stub's own answer. A test that holds the
+    # writer back mocks fw_pthread_create itself.
+    writer = C.cast(loaded.lib.playback__w_thread, C.c_void_p).value
+    def create(t, attr, fn, arg, *_):
+        if fn == writer:
+            C.CFUNCTYPE(C.c_void_p, C.c_void_p)(fn)(arg)
+        return 0
+    loaded.mock('fw_pthread_create', create)
     yield loaded
     loaded.close()
 
@@ -157,6 +166,15 @@ def fw(library, tmp_path):
     # page_list sizes its rows by its title label's fields (I(t, W_H)): a zeroed widget to read
     label = C.create_string_buffer(0x400)
     loaded.mock('hscroll_label_create', lambda *_: C.addressof(label))
+    # playback.c's queue writer (store_post) runs to its end at the post, so a save's files are there when the
+    # save returns; any other thread is started and never runs, the stub's own answer. A test that holds the
+    # writer back mocks fw_pthread_create itself.
+    writer = C.cast(loaded.lib.playback__w_thread, C.c_void_p).value
+    def create(t, attr, fn, arg, *_):
+        if fn == writer:
+            C.CFUNCTYPE(C.c_void_p, C.c_void_p)(fn)(arg)
+        return 0
+    loaded.mock('fw_pthread_create', create)
     yield loaded
     unknown = loaded.unknown()
     loaded.close()
