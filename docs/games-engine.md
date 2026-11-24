@@ -223,7 +223,18 @@ In the emulator, 10 s of play (`design/games/bricks/bricks-play.mp4`, a finger f
 
 **Save:** `/mnt/data/game-callerten`, `CTN1`: the best score of each contest and the contests played, written at a contest's end. A best over 1,000 or a count over 99,999,999 reads as none.
 
-**Frames.** FRAMES_TABLE
+**Frames.** A frame of play marks each thing that changed once (`flush`: the glass, ON AIR, the replay lamp, the rings, the lamps, the knob, the handset, the dial, the band, the score line, the rows, joined where they touch), so it never passes the engine's eight rects. The reveal paints the rows at once and the glass, the hub, the band and the score in the next two frames, and the score counts up after the summary's sheet is up, so no frame carries all of them. Measured on build `--dev --new-player`, full screen:
+
+| What                                                                          | Instructions (MIPS, payload) | Bound in `test/patch.py` |
+| ----------------------------------------------------------------------------- | ---------------------------- | ------------------------ |
+| A frame's step, the dearest of the needle's slide and a second of the clock   | 639                          | 1,000                    |
+| That second's dearest frame painted (the dial turned and sprung, two rows, the lamps, the rings) | 465,622      | 520,000                  |
+| The call's dearest frame (the handset lifting)                                | 366,256                      | 410,000                  |
+| The reveal's dearest frame (the four rows)                                    | 513,738                      | 570,000                  |
+| The summary's dearest frame (the sheet coming up, the score counting)        | 313,492                      | 350,000                  |
+| The whole sheet (the open, a round's start, the end)                          | 1,259,741                    | 1,400,000                |
+
+The whole sheet is about 10 instructions a pixel, most of it the room's runs; `blit` writes a run in unrolled loops and leaves out the rows a sheet drawn over it covers. A round's first frame and the end are whole-sheet paints, as Bricks's start is. EMULATOR_LINE The payload grows by PAYLOAD_LINE; the state is STATE_LINE bytes and the heap at most HEAP_LINE with the art and the worker's rows; no `.scratch`.
 
 ## Libraries
 

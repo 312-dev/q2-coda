@@ -461,6 +461,7 @@ static int gwidth(const unsigned char *art, int face, const char *t) {
 }
 static void gtext(struct eng_surface *s, const unsigned char *art, int face, const char *t, int x4,
                   int y4, unsigned rgb, int align) {
+    if (y4 / 4 + 24 <= s->y0 || y4 / 4 - 24 >= s->y1) return; /* the tallest face is 36 px */
     unsigned ft = W32(art, 24) + 8 * face, words = W32(art, ft);
     int base = (y4 + (int)W32(art, ft + 4) + 2) >> 2;
     x4 -= gwidth(art, face, t) * align / 2;
@@ -508,9 +509,14 @@ static int measure(void *canvas, const unsigned *w, int n, int px) {
     canvas_set_font(canvas, face, (unsigned)fpx);
     return (int)(canvas_measure_text(canvas, w, (unsigned)n) + 0.5f);
 }
+/* a line of text whose middle is row ym is outside the rows being painted */
+static int unseen(const struct eng_surface *s, int ym) {
+    return ym + 14 <= s->y0 || ym - 14 >= s->y1;
+}
 static int utext(struct eng_surface *s, const unsigned *w, int n, int x, int ym, int px,
                  unsigned rgb, int align) {
     if (n <= 0) return 0;
+    if (unseen(s, ym)) return 0;
     int tw = measure(s->canvas, w, n, px);
     x -= tw * align / 2;
     int r[4] = { x - 1, ym - 12, tw + 2, 24 };
@@ -519,6 +525,7 @@ static int utext(struct eng_surface *s, const unsigned *w, int n, int x, int ym,
 }
 static int atext(struct eng_surface *s, const char *a, int x, int ym, int px, unsigned rgb,
                  int align) {
+    if (unseen(s, ym)) return 0;
     unsigned w[48];
     return utext(s, w, wide(a, w, 48), x, ym, px, rgb, align);
 }
@@ -674,6 +681,7 @@ static void heading(struct eng_surface *s, const unsigned char *art, const char 
 
 /* An answer row's title: fitted, or scrolled through its whole width within its line. */
 static void row_text(struct eng_surface *s, struct ct *g, int i, unsigned ink) {
+    if (unseen(s, ROW_Y(i)) && g->fit_px[i]) return; /* measured once, at the round's whole paint */
     unsigned w[CT_TITLE + 3];
     int n = wide(song_text(g, g->row[i]), w, CT_TITLE), y = ROW_Y(i), was[4];
     int maxw = TITLE_W - (answered(g) && i == g->right ? 20 : 0);
@@ -908,7 +916,8 @@ static void flush(struct ct *g) {
     if (m & M_RINGS) mark_pic(g, A_RINGS_1, 0, 0);
     if (m & M_LAMPS) eng_dirty(148, 89, 172, 16);
     if (m & M_KNOB) mark_pic(g, A_KNOB_0, 0, 0);
-    if (m & M_POSE) mark_pic(g, A_POSE_0, 0, 0), mark_pic(g, A_CORD_0, 0, 0);
+    if (m & M_POSE) /* the handset and cord; the dial's top in that box is drawn again with it */
+        mark_pic(g, A_POSE_0, 0, 0), mark_pic(g, A_CORD_0, 0, 0);
     if (m & M_DIAL) mark_pic(g, A_DIAL_1, 0, 0);
     if (m & M_BAND) eng_dirty(NX0, NY0, NX1 - NX0, 23);
     if (m & M_SCORE) eng_dirty(NX0, NY1 - 28, NX1 - NX0, 28);
@@ -998,7 +1007,7 @@ static void call(struct ct *g, int row) {
     g->phase = P_CALL, g->t = 0, g->turn_t = -1;
     g->lift = g->reduced ? 6 : 0, g->lift_dir = 1;
     sfx(g, ENG_SFX_TICK);
-    MARK(g, M_POSE | M_DIAL);
+    MARK(g, M_POSE);
 }
 
 static void answer(struct ct *g) {
@@ -1267,8 +1276,8 @@ static int step_in(struct ct *g, const struct eng_input *in) {
         g->needle4 = g->needle_from + (to - g->needle_from) * EASE[++g->needle_t] / 104;
         MARK(g, M_GLASS), moving = 1;
     }
-    if (g->lift_dir > 0 && g->lift < 6) g->lift++, MARK(g, M_POSE | M_DIAL), moving = 1;
-    if (g->lift_dir < 0 && g->lift > 0) g->lift--, MARK(g, M_POSE | M_DIAL), moving = 1;
+    if (g->lift_dir > 0 && g->lift < 6) g->lift++, MARK(g, M_POSE), moving = 1;
+    if (g->lift_dir < 0 && g->lift > 0) g->lift--, MARK(g, M_POSE), moving = 1;
     switch (g->screen) {
     case S_TUNE: {
         int sel = g->sel + in->ticks;

@@ -373,7 +373,7 @@ CT_FIELDS=('k h screen phase mode sel t at reduced round rounds wrongs rights st
 CT={}; at=0
 for f in CT_FIELDS:
     name,_,n=f.partition(':'); CT[name]=at; at+=4*int(n or 1)
-CT_STEP_BOUND,CT_FRAME_BOUND,CT_CALL_BOUND,CT_REVEAL_BOUND,CT_SUMMARY_BOUND,CT_WHOLE_BOUND=1_000,560_000,560_000,400_000,560_000,1_450_000
+CT_STEP_BOUND,CT_FRAME_BOUND,CT_CALL_BOUND,CT_REVEAL_BOUND,CT_SUMMARY_BOUND,CT_WHOLE_BOUND=1_000,520_000,410_000,570_000,350_000,1_400_000  # measured 639, 465,622, 366,256, 513,738, 313,492 and 1,259,741
 pick(len(OWN)+1); EN=m.get(payload_syms['en']); S=EN+O_ENG_STATE
 cw=lambda f,v: m.word(S+CT[f],v); cr=lambda f: signed(m.get(S+CT[f]))
 K=m.get(S); ART=m.get(K)
