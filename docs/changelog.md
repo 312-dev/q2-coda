@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Library: after your server's library or the songs on the card change, Songs, Albums and Artists are sorted again while you are not using the Q2 (screen off, or a few seconds after your last press), so the next time you open them they show at once, where they waited behind a spinner for a few seconds on a large library.
   - Bluetooth: each paired device has its own **Volume Limit** on its page, No Limit until you set one. While that device is connected the volume stops at its limit, from the wheel, Control Center, Settings, the Car Remote or the device's own buttons, and Max Volume still applies on top. Wired and USB headphones and your other Bluetooth devices keep their own levels.
   - Lyrics: after you scroll synced lyrics away, they go back to the line being sung and follow the song again once you leave them alone for 5 seconds. Tapping a synced line plays the song from that line; tap the line being sung to show the lyrics full screen as before.
   - Streamed songs: a song from your server starts as soon as its first 3 seconds have downloaded, up to half a second sooner than before, where the Subsonic app waited for its next progress report.
