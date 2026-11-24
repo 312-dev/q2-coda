@@ -196,7 +196,7 @@ def home_back(full):
     long_return(m); m.call(O['KEY_RETURN'],gap=0)
     assert not destinations(m); passed()
 def home_carousel():
-    # A saved HOME=2, Carousel's before it went (its Home had no way back to Settings): Split at init, the
+    # A stored HOME=2, or any value but 0 and 1: Split at init, the
     # main list and the art shown, stock's carousel and arrows hidden and taking no taps, none of its cards
     # bound by the payload.
     CONFIG.update(HOME='2',SHORTCUT='5'); m=ShuffleMachine(); del CONFIG['HOME'],CONFIG['SHORTCUT']; view,imgs=home_list(m)

@@ -16,42 +16,12 @@ int config_value(const char *section, const char *key, int n, int def) {
 }
 
 #define ROCKBOX_BIN "/mnt/mmc/.rockbox/rockbox"
-#define GROOVEBOX_BIN "/mnt/mmc/.groovebox/q2-groovebox"
 /* glibc 2.28 MIPS o32 stat v3: st_mode at byte 20, as stock's fs stat reads it. */
 static int bin_available(const char *path) {
     unsigned info[36];
     return !__xstat(3, path, info) && (info[5] & 0170000) == 0100000;
 }
 int rockbox_available(void) { return bin_available(ROCKBOX_BIN); }
-/* The Groovebox card app (a game with the sound, addon.c). */
-int groovebox_available(void) { return bin_available(GROOVEBOX_BIN); }
-
-/* The two as last looked at, cheap enough to ask on every paint: looked at again once a library
- * scan has rewritten the library (library_gen), at once after the Shelf installs or removes an app
- * (card_bins_changed), and when the card or its app folders change (card_watch.c's generation: a
- * binary copied in by hand, the card put in or taken out). Without that watch, again
- * CARD_RECHECK_MS after the last look. Stat'ing both on each paint cost Now Playing 150 syscalls a
- * second.
- * ponytail: their one reader was Home's Shortcut, Carousel's card, removed with it; nothing calls
- * rockbox_seen or groovebox_seen now, so the payload's link drops them (test/fw still builds and
- * tests them). Kept, with card_watch.c's watches of the two app folders, for a row that would name
- * or open Rockbox or Groovebox; removing them is card_watch.c's change too. */
-static struct {
-    unsigned at, gen, card;
-    unsigned char read, rockbox, groovebox;
-} cb __attribute__((section(".scratch")));
-void card_bins_changed(void) { cb.read = 0; }
-static void card_bins(void) {
-    unsigned now = time_now_ms(), card = card_watch_gen();
-    if (cb.read && cb.gen == library_gen &&
-        (card ? cb.card == card : now - cb.at < CARD_RECHECK_MS))
-        return;
-    cb.read = 1, cb.gen = library_gen, cb.at = now, cb.card = card;
-    cb.rockbox = (unsigned char)rockbox_available();
-    cb.groovebox = (unsigned char)groovebox_available();
-}
-int rockbox_seen(void) { return card_bins(), cb.rockbox; }
-int groovebox_seen(void) { return card_bins(), cb.groovebox; }
 
 /* Light Mode (docs/ipod.md#light-mode): a neutral colour, its channels within LIGHT_SPREAD, flipped
  * per channel from black to the light half's paper and white to its ink (LIGHT_PAPER and LIGHT_INK
@@ -142,22 +112,18 @@ _Static_assert(V_SPLIT_ART == V_SPLIT_ROW + SPLIT_ART &&
 int split_geom(int k) { return geom_val(V_SPLIT_ROW + k); }
 /* The lists end their whole rows by this screen row (282: the grid's bar and list_end). */
 int list_fit_end(void) { return geom_val(V_BAR) + geom_val(V_LIST_END); }
-/* The Display rows' settings, by ringnav_display's index: 0 Accent, 1 Home (0 Split, 1 Full; a
- * stored 2, Carousel's before it was removed, reads as Split), 2 Battery, 3 Shortcut, 4 Light Mode,
- * 5 Smart Awake, 6 the Clicker's output (no row of its own: Controls' Key Tone row shows it,
- * clicker.c), 7 Reduce Motion; 8 on: the theme's own options, SETTING_OWN + k for theme_keys[k]. */
-static const char *const setting_keys[] = { "ACCENT",    "HOME",    "BATTERY", "SHORTCUT",
-                                            "LIGHT",     "KEEPLIT", "CLICKER", "REDUCEMOTION" };
-const int setting_counts[] = { SETTING_N_ACCENT,
-                               SETTING_N_HOME,
-                               SETTING_N_BATTERY,
-                               SETTING_N_SHORTCUT,
-                               SETTING_N_LIGHT,
-                               2,
-                               3,
-                               2 };
-int *const setting_values[] = { &st.accent,     &st.home,     &st.battery, &st.shortcut,
-                                &st.light,      &st.keep_lit, &st.clicker,   &st.reduce_motion };
+/* The Display rows' settings, by ringnav_display's index: 0 Accent, 1 Home (0 Split, 1 Full; any
+ * other stored value reads as Split), 2 Battery, 3 Light Mode, 4 Smart Awake, 5 the Clicker's
+ * output (no row of its own: Controls' Key Tone row shows it, clicker.c), 6 Reduce Motion; 7 on:
+ * the theme's own options, SETTING_OWN + k for theme_keys[k]. IPOD SHORTCUT is not a key here and
+ * is never read. */
+static const char *const setting_keys[] = { "ACCENT",  "HOME",    "BATTERY",     "LIGHT",
+                                            "KEEPLIT", "CLICKER", "REDUCEMOTION" };
+const int setting_counts[] = {
+    SETTING_N_ACCENT, SETTING_N_HOME, SETTING_N_BATTERY, SETTING_N_LIGHT, 2, 3, 2
+};
+int *const setting_values[] = { &st.accent,   &st.home,    &st.battery,      &st.light,
+                                &st.keep_lit, &st.clicker, &st.reduce_motion };
 /* An option's value and config key: the accent's are the theme's own, an own option's st.own[] and
  * theme_keys[], the rest setting_values'. */
 int *option_slot(const theme_t *T, int setting) {
@@ -209,8 +175,6 @@ void light_apply(const int *tm) {
 __attribute__((noinline)) static void settings_read(void) {
     for (int i = 0; i < 3; ++i)
         *setting_values[i] = config_value("IPOD", setting_keys[i], setting_counts[i], 0);
-    /* read and kept so the tables stay positional; nothing opens a Shortcut since Carousel went */
-    st.shortcut = config_value("IPOD", "SHORTCUT", SETTING_N_SHORTCUT, SETTING_N_SHORTCUT);
     st.light = config_value("IPOD", "LIGHT", 3, 0); /* dark unless chosen; 2 Auto */
     /* Smart Awake on unless chosen (tools/build.py DEFAULT_IPOD writes it so after a reset) */
     st.keep_lit = config_value("IPOD", "KEEPLIT", 2, 1);

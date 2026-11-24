@@ -1,5 +1,26 @@
-# (rockbox_open, the Rockbox hand-over, has no caller since Home's Carousel and its Shortcut card went, so the
-# payload's link drops it: test/fw/test_nav_loop.py tests it; docs/boot.md#rockbox-from-home.)
+# General's Rockbox row (docs/boot.md#rockbox-from-home): its click saves the queue as power-off does,
+# stops the player, leaves S90play's flag and kills demo; without Rockbox on the card it says so.
+class RockboxMachine(Machine):
+    def hook(self,u,address,size,unused):
+        name=self.handlers.get(address,'')
+        if not name.startswith('r:'): return super().hook(u,address,size,unused)
+        name=name[2:].split('@')[0]; a=u.reg_read(UC_MIPS_REG_A0); self.calls.append((name,a))
+        self.returns(0x2000000 if name=='fopen' else 0)
+def rockbox(card):
+    m=RockboxMachine(); m.rockbox_mode=0o100755 if card else 0
+    for n in ('fopen@GLIBC_2.2','fclose@GLIBC_2.2','system@GLIBC_2.0'): m.handlers[syms[n]]='r:'+n
+    m.mock('save_memoryplay_info','player_stop','switch_charge_enable','navigator_to_with_context')
+    assert m.call(address=payload_syms['rockbox_open'],args=(0,m.event,0,0),gap=0)==0
+    return m,[c[0] for c in m.calls]
+m,names=rockbox(True)
+texts={c[0]:m.text(c[1]) for c in m.calls if c[0] in ('fopen','system')}
+assert texts=={'fopen':'/tmp/q2pod-rockbox',
+               'system':'killall -9 hciplayer; kill -9 $(cat /tmp/q2-librespot); '
+                         'killall -9 librespot aplay; rm -f /tmp/q2-librespot /tmp/q2-librespot.state /tmp/q2-librespot.out /tmp/q2-librespot.download; sync; kill -9 $PPID'}
+assert [n for n in names if n in ('fclose','save_memoryplay_info','player_stop','system')]==['fclose','save_memoryplay_info','player_stop','system']; passed()
+m,names=rockbox(False)
+assert not {'fopen','player_stop','system'} & set(names)
+assert [m.text(c[1]) for c in m.calls if c[0]=='navigator_to_with_context']==['dialog/msginfo_dialog']; passed()
 # The wheel walks onto the new rows and Centre clicks them, as any fixed settings list.
 m,view,_=display({},sub=0)
 m.paint(view)

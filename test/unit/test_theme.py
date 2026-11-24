@@ -642,7 +642,7 @@ def test_scheme_mode_paper_ink():
     assert {(s['mode'], s['paper'], s['ink']) for i, s in enumerate(o['schemes']) if o['accents'] >> i & 1} == {(0, 0xffffff, 0)}
     assert all(s == theme.zero_scheme() for i, s in enumerate(o['schemes']) if not o['accents'] >> i & 1)
     assert {(s['mode'], s['paper'], s['ink']) for s in resolved('')['schemes']} == {(0, 0xf4f4f4, 0x161616)}
-    assert o['undeclared'] == ['SETTING_SHORTCUT']
+    assert o['undeclared'] == []
     assert o['opts'][0] == opt('SETTING_LIGHT', preset=0, keep=2)
     assert not theme.shared(o) and theme.shared(resolved(''))
 
@@ -704,8 +704,8 @@ def test_emit_mode_and_undeclared(tmp_path):
     dark, light = (inc.split(f'static const scheme_t oled_{a}[] = {{')[1].split('};')[0] for a in ('schemes', 'light'))
     assert '.paper = 0x000000, .ink = 0xffffff' in dark and '.paper = 0xffffff, .ink = 0x000000' in light
     assert '.light = oled_light,' in inc and '_Static_assert(sizeof oled_light == sizeof oled_schemes' in inc
-    assert '.undeclared = (1 << SETTING_SHORTCUT),' in inc
-    assert '.undeclared = (1 << SETTING_LIGHT) | (1 << SETTING_HOME) | (1 << SETTING_BATTERY) | (1 << SETTING_SHORTCUT),' in inc
+    assert '.undeclared = 0,' in inc
+    assert '.undeclared = (1 << SETTING_LIGHT) | (1 << SETTING_HOME) | (1 << SETTING_BATTERY),' in inc
 
 
 @pytest.mark.parametrize('body, message', [

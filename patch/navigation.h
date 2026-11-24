@@ -263,7 +263,7 @@ typedef struct {
     unsigned lyric_seek_at; /* when it was sent, or last seen paused (lyric_seek_ms) */
     /* The Display settings, read from config.ini on first use, and the display page's value labels.
      */
-    int settings_read, accent, home, battery, shortcut, light,
+    int settings_read, accent, home, battery, light,
         light_day,       /* light_day: Auto's answer for now (LIGHT=2) */
         keep_lit,        /* Smart Awake (#57, keep_lit_poll) */
         reduce_motion,   /* Reduce Motion, IPOD REDUCEMOTION (ui_kit.c motion_reduced) */
@@ -275,7 +275,7 @@ typedef struct {
     unsigned keep_lit_at;
     void *sel_accent; /* the row on a coloured selection, for Light Mode's ink */
     int style_depth;  /* nested style hooks (a mutable style's fallback) map nothing */
-    void *setting_label[8 + THEME_KEYS]; /* SETTING_OWN + THEME_KEYS */
+    void *setting_label[7 + THEME_KEYS]; /* SETTING_OWN + THEME_KEYS */
     unsigned tone_key;  /* the wheel key whose press ringnav_keydown silenced, 0 when none */
     unsigned tick_drop; /* tick_gate: the wheel keys whose press it dropped, bits */
     unsigned tick_at;   /* tick_gate: the last tick it passed (ringnav_sleep's dark turn) */
@@ -874,7 +874,6 @@ enum {
     SETTING_ACCENT,
     SETTING_HOME,
     SETTING_BATTERY,
-    SETTING_SHORTCUT,
     SETTING_LIGHT,
     SETTING_KEEPLIT,
     SETTING_CLICKER, /* the Clicker's output: stored here, its row Controls' Key Tone row

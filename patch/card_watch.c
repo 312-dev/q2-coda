@@ -1,15 +1,12 @@
-/* The card's changes as events (docs/internals.md#card-watch): what Home's status row and its
- * Folders row read from the card (theme_engine.c card_bins: the Rockbox and Groovebox binaries;
- * home.c home_folders: the card and its root) is looked at again when it may have changed, not on a
- * clock. A thread waits in poll() on an inotify descriptor watching the card's root,
- * /mnt/mmc/.rockbox and /mnt/mmc/.groovebox for entries made, removed or moved, and on
- * /proc/mounts, which the kernel marks (POLLPRI) whenever a file system is mounted or unmounted: a
- * card put in, taken out, or handed to USB storage and back. Each change counts in a generation the
- * two caches compare, after the watches are set again (a new .rockbox, the card's new mount), so a
- * binary copied in before its folder's watch stood is still seen by the look that follows. Nothing
- * on the card or in the mount table, and the thread sleeps. Without inotify, /proc/mounts or the
- * thread, card_watch_gen answers 0 and the caches look again every CARD_RECHECK_MS, as they did
- * before. */
+/* The card's changes as events (docs/internals.md#card-watch): what Home's Folders row reads from
+ * the card (home.c home_folders: the card and its root) and whether the card is mounted (system.c
+ * card_mounted) are looked at again when they may have changed, not on a clock. A thread waits in
+ * poll() on an inotify descriptor watching the card's root for entries made, removed or moved, and
+ * on /proc/mounts, which the kernel marks (POLLPRI) whenever a file system is mounted or unmounted:
+ * a card put in, taken out, or handed to USB storage and back. Each change counts in a generation
+ * the caches compare, after the watch is set again (the card's new mount). Nothing on the card or
+ * in the mount table, and the thread sleeps. Without inotify, /proc/mounts or the thread,
+ * card_watch_gen answers 0 and the caches look again every CARD_RECHECK_MS. */
 #include "navigation.h"
 
 #define SYS_POLL 4188 /* o32 */
@@ -37,13 +34,11 @@ static struct {
     volatile unsigned gen; /* changes counted, 1 on from the thread's first look */
 } cw __attribute__((section(".scratch")));
 
-/* The watches, while the card is mounted: its root, and each app folder that is there. Setting one
- * that stands again changes nothing. */
+/* The watch, while the card is mounted: its root. Setting it again while it stands changes nothing.
+ */
 static void cw_arm(void) {
     if (!card_mounted_now()) return; /* card_mounted's answer follows this thread's generation */
-    static const char *const dirs[] = { "/mnt/mmc", "/mnt/mmc/.rockbox", "/mnt/mmc/.groovebox" };
-    for (unsigned i = 0; i < sizeof dirs / sizeof *dirs; ++i)
-        cw_syscall(SYS_INOTIFY_ADD_WATCH, cw.in, (long)dirs[i], CW_MASK);
+    cw_syscall(SYS_INOTIFY_ADD_WATCH, cw.in, (long)"/mnt/mmc", CW_MASK);
 }
 
 /* One wait and what it found: 1 to wait again, 0 when a descriptor failed (the thread ends).

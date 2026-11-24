@@ -334,7 +334,7 @@ def appearance(fw, ui, **config):
 # The payload's Appearance rows (setting_text, setting_keys[]): a setting's title and its stored key. A theme's own
 # option brings its own label and key, its accent the theme's key.
 PAYLOAD = {'SETTING_LIGHT': ('Light Mode', 'LIGHT'), 'SETTING_ACCENT': ('Accent', None), 'SETTING_HOME': ('Home', 'HOME'),
-           'SETTING_SHORTCUT': ('Shortcut', 'SHORTCUT'), 'SETTING_BATTERY': ('Battery', 'BATTERY')}
+           'SETTING_BATTERY': ('Battery', 'BATTERY')}
 
 
 def appearance_titles(t):
@@ -393,9 +393,9 @@ def test_home_cycles_split_and_full(fw):
 
 
 @pytest.mark.parametrize('stored', (b'2', b'3', b'9', b'x'))
-def test_a_saved_carousel_reads_as_split_and_is_never_saved_again(fw, stored):
-    """HOME=2 was Carousel, whose Home had no way to Settings: a unit left on it (or on any value but Split's 0 and
-    Full's 1) shows Split, and the row's next save writes Full and then Split, never the old value."""
+def test_any_other_home_reads_as_split_and_is_never_saved_back(fw, stored):
+    """Any stored HOME but Split's 0 and Full's 1 shows Split, and the row's next saves write Full and then Split,
+    never the stored value."""
     ui = Ui(fw)
     page = appearance(fw, ui, HOME=stored)
     assert dict(rows(page.view()))['Home'] == 'Split' and fw.fn('ipod_home', C.c_int)() == 0
@@ -696,6 +696,29 @@ def test_general_adds_its_rows_and_hides_stock_s_but_network(fw):
     assert len(fw.calls('check_updatefw_exist')) == 1 and len(opened) == 3  # the card's check, not stock's page
     ui.click(button_of(page.view, 'Storage'))
     assert fw.calls('window_create')
+
+
+@pytest.mark.parametrize('there', (True, False))
+def test_general_has_a_rockbox_row_only_with_rockbox_on_the_card_and_it_hands_over(fw, there):
+    """Settings > General > Rockbox (settings_display.c rockbox_row, docs/boot.md#rockbox-from-home): with
+    /mnt/mmc/.rockbox/rockbox a regular file, a row after the page's own rows and before Restart's gap, whose click is
+    rockbox_open's hand-over (its flag for S90play, demo ended); with no Rockbox on the card, no row."""
+    def stat(version, path, info, *_):
+        C.c_uint.from_address(info + 20).value = 0o100755
+        return 0 if there and C.string_at(path) == b'/mnt/mmc/.rockbox/rockbox' else -1
+    fw.mock('fw___xstat', stat)
+    ui = Ui(fw)
+    Config(fw)
+    page = Settings(fw, ui)
+    rows = [item.name or item.labels()[0].text for item in page.view.children if item.name or item.labels()]
+    assert ('Rockbox' in rows) == there
+    if not there:
+        return
+    assert rows[rows.index('Rockbox') + 1:] == ['Restart', 'Shut Down', 'system_reset']
+    card = Files(fw, {})
+    ui.click(button_of(page.view, 'Rockbox'))
+    assert host.tools_build.ROCKBOX_FLAG in card.files and fw.calls('save_memoryplay_info')
+    assert C.string_at(fw.calls('fw_system')[-1][1][0]).endswith(b'kill -9 $PPID')
 
 
 @pytest.mark.parametrize('pick, shown', [(0, 'Automatic'), (1, 'Charge Only'), (2, 'Transfer Files'),

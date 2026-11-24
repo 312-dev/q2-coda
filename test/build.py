@@ -81,7 +81,7 @@ def boot_check():
         script = host(BOOT_HOOK[1])
         for d in ('proc', 'mnt/data', 'mnt/mmc/.rockbox', 'tmp', 'usr/bin', 'release/bin', 'bin'): (r/d).mkdir(parents=True)
         def exe(path, body): (r/path).write_text('#!/bin/sh\n' + body + '\n'); (r/path).chmod(0o755)
-        # demo takes Home's Rockbox row (leaves the flag) as many times as the shortcuts file says
+        # demo takes General's Rockbox row (leaves the flag) as many times as the shortcuts file says
         flag, shortcuts = f'{r}{ROCKBOX_FLAG}', r/'shortcuts'
         # a demo that leaves q2-state (r/keep): it ended without ringnav_clean_end
         demo = (f'echo demo >> {r}/ran; echo demo >> {r}/order; n=$(cat {shortcuts}); '

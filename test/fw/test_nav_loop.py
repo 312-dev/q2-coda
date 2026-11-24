@@ -4072,8 +4072,8 @@ def test_homes_list_stops_at_both_ends(fw, keys):
         assert sv.ints[SEL] == 0
 
 
-def test_homes_list_ends_on_its_last_shown_row_over_a_hidden_shortcut_row(fw, keys):
-    """Shortcut: None leaves Home's row hidden, last: the end is the shown rows'."""
+def test_homes_list_ends_on_its_last_shown_row_over_a_hidden_row(fw, keys):
+    """A hidden row last on Home's list (Edit Home's): the end is the shown rows'."""
     ui = Ui(fw)
     sv = list_page(ui, 'home_page', rows=6)
     select(fw, sv, 4)

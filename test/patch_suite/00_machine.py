@@ -22,7 +22,7 @@ assert manifest.get('compact_code')
 from ipod import GEOM_VALS, INC, O, VALUE_NAMES  # patch/offsets.inc and its integer #defines; the geometry tables' columns
 from theme import MOTION_WIDGET, MOTION_WINDOW, SCHEME_MODE_OFF, THEME_MOTION_OFF, builtins as theme_builtins, built_geometry
 from theme import theme_keys  # tools/theme.py: the theme's own keys
-CONFIG_READS=8+len(theme_keys(theme_builtins()))  # settings_read: the payload's eight keys (REDUCEMOTION last), then the theme's own
+CONFIG_READS=7+len(theme_keys(theme_builtins()))  # settings_read: the payload's seven keys (REDUCEMOTION last), then the theme's own
 DC=O['DOUBLE_CLICK_MS']  # centre double-press window
 # iPod accent presets: {gradient top, bottom, light tone, red tone, highlight} per Accent setting value.
 ACCENTS=[tuple(int(v,16) for v in g) for g in re.findall(r'\{ 0x(\w+), 0x(\w+), 0x(\w+), 0x(\w+), 0x(\w+) \}',INC)]

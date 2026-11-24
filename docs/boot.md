@@ -46,9 +46,9 @@ Nothing is saved for the way back. `wifi_switch` writes `WIFI` to `/mnt/data/con
 
 ### Rockbox from Home
 
-ponytail: nothing opens this hand-over now. Home's list has had no Rockbox row since the menu review (2026-11-15), and its last way in, the Shortcut card of Home's Carousel, went with Carousel (2026-11-24); `rockbox_open` is kept, tested in `test/fw`, and dropped by the payload's link until a row calls it again, and `S90play` still honours its flag. Without it the way to Rockbox is the boot choice. The hand-over always launched Rockbox regardless of the saved boot choice, and was the way to Rockbox with Bluetooth: Rockbox plays through headphones Q2 Muse connected.
+**Settings → General → Rockbox**, after General's own rows and before Restart and Shut Down, is shown only while the Rockbox binary is a regular file (`rockbox_available`; `ringnav_systemset`, `patch/nav/settings_display.c`). Activation checks the file again in case the card was removed after the row appeared. This handover always launches Rockbox regardless of the saved boot choice (Battery's **Boot to** row). It is the way to Rockbox with Bluetooth: shut Rockbox down (Q2 Muse starts), connect the headphones in Q2 Muse, then pick **Rockbox** in General, and Rockbox plays through them.
 
-demo cannot start Rockbox itself, as Rockbox takes the screen, the keys and ALSA, so it hands over to `S90play` (`rockbox_open`, `patch/navigation.c`):
+demo cannot start Rockbox itself, as Rockbox takes the screen, the keys and ALSA, so it hands over to `S90play` (`rockbox_open`, `patch/nav/playback_power.c`):
 
 1. With no `/mnt/mmc/.rockbox/rockbox` it shows "Rockbox is not on the card" and stays.
 2. It creates `/tmp/q2pod-rockbox` (`ROCKBOX_FLAG`), saves Memory Playback's queue and position with stock `save_memoryplay_info` (what power-off does), stops the player, and hands back charging (Charge Limit) as Rockbox finds it at power-on.

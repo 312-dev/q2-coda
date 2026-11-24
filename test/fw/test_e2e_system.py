@@ -463,9 +463,9 @@ def test_home_takes_a_new_layout_at_once_and_boots_into_it(q2):
 
 
 @in_fork
-def test_a_unit_saved_on_carousel_boots_into_split_and_reaches_display(fw, library, tmp_path):
-    """HOME=2 was Carousel, whose Home had no row to Settings: such a unit boots into Split, Display's Home row reads
-    Split, and its next save is Full's 1, never 2 again."""
+def test_a_stored_home_2_boots_into_split_and_reaches_display(fw, library, tmp_path):
+    """A stored HOME=2 boots into Split with Settings on Home's list, Display's Home row reads Split, and its next
+    save is Full's 1."""
     q2 = Q2(fw, library, tmp_path, Flash(IPOD_THEME='3', IPOD_HOME='2'))
     boot(q2)
     w = home(q2)
