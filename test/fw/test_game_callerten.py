@@ -199,7 +199,7 @@ class Rig:
 
     @property
     def pk(self):
-        return Pick.from_address(C.cast(self.g.k, C.c_void_p).value and self.g.k.contents.pk)
+        return Pick.from_address(self.g.k.contents.pk or 0)
 
     def clips(self):
         """The clips asked of the player: (path, second)."""
