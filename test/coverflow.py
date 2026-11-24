@@ -330,12 +330,12 @@ static void *wm_stack[4]; /* the window manager's windows, bottom first: none un
 static int wm_n;
 unsigned widget_count_children(void *x) { return x == &wm_repaints ? (unsigned)wm_n : (unsigned)W(x)->nkids; }
 void *widget_get_child(void *x, unsigned i) { return x == &wm_repaints ? wm_stack[i] : &w[W(x)->kids[i]]; }
-static void *home_art, *home_list; /* iPod Home's art and list; none in the carousel tests */
+static void *home_art, *home_list; /* iPod Home's art and list; none in the slide tests */
 void *widget_lookup(void *x, const char *n, int r) {
     return !x ? 0 : !strcmp(n, "img_cover_flow") ? x : !strcmp(n, "img_homeart") ? home_art :
            !strcmp(n, "list_view_home") ? home_list : 0;
 }
-static int home_mode, alt, light; /* home_mode: HOME, 0 Split, 1 Full, 2 Carousel; alt: shim_themes' index */
+static int home_mode, alt, light; /* home_mode: HOME, 0 Split, 1 Full; alt: shim_themes' index */
 int ipod_home(void) { return home_mode; }
 int home_lib_on(void) { return 1; }
 int row_preview_on(void) { return 1; }
@@ -362,12 +362,10 @@ void *parallax_slide(float *percent) { return 0; }
 int parallax_under_x(int w, float percent) { return 0; }
 unsigned parallax_dim(float percent) { return 0; }
 int shuffle_songs(void *ctx, void *event) { return 0; }
-/* Home's first row, edit mode, folders' rule and shortcut (home_np.c, library_edit.c, home.c, theme_engine.c,
- * navigation.c): Home as stock has it, none of it edited or playing here */
+/* Home's first row, edit mode and folders' rule (home_np.c, library_edit.c, home.c, navigation.c): Home as stock has it, none of it edited or playing here */
 void home_np_bind(void *win) {}
 void home_np_sync(void) {}
 void home_sets_bind(void *win) {}
-void ipod_shortcut_seen(void) {}
 void lr_home_tag(void *view) {}
 void lr_home_apply(void *view, int np) {}
 void lr_edit_labels(void *view, int on) {}
@@ -475,8 +473,6 @@ unsigned tok(int t) { /* ui_kit.c's: the token in the mode shown */
     return tokens[t][light ? 1 : 0];
 }
 int ipod_home_rockbox(void) { return 0; }
-const char *ipod_home_shortcut(void) { return "Rockbox"; }
-int home_shortcut_open(void *x, void *e) { return 0; }
 int widget_move_resize(void *x, int left, int top, int ww, int h) {
     int *r = (int *)W(x)->raw; /* W_X, W_Y, W_W, W_H */
     r[0] = left; r[1] = top; r[2] = ww; r[3] = h;

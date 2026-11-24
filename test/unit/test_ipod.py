@@ -64,25 +64,6 @@ def menu():
     return w('slide_menu', w('btn_playing'), local_card(), w('btn_folder'), w('btn_stream'), w('btn_playset'), w('btn_sysset'), kind='slide_menu')
 
 
-def test_home_card():
-    m = menu()
-    ipod.home_card(m, 2, 'coverflow', 'Cover Flow')
-    card = m[3][2]
-    assert card[2]['name'] == 'btn_coverflow'
-    image, label = card[3]
-    assert image[2] == {'name': 'img_cover_flow', 'style:normal:bg_image': 'menu_coverflow', 'style:focused:bg_image': 'menu_coverflowdown', 'draw': 'menu_music'}
-    assert label[2] == {'name': 'label_cover_flow', 'text': 'Cover Flow'}  # not stock's img_coverflow and label_coverflow, which it binds and translates
-    assert m[3][1] == local_card() and len(m[3]) == 7
-
-
-@pytest.mark.parametrize('image,label', [('x', 'label_localmusic'), ('img_localmusic', 'x')])
-def test_home_card_wants_the_local_music_card(image, label):
-    m = menu()
-    m[3][1][3][0][2]['name'], m[3][1][3][1][2]['name'] = image, label
-    with pytest.raises(ValueError, match='^Unexpected Local Music card$'):
-        ipod.home_card(m, 2, 'coverflow', 'Cover Flow')
-
-
 def home():
     m = menu()
     m[3].insert(2, w('btn_coverflow', w('img_coverflow', kind='image'), w('label_coverflow', kind='label', text='Album Wall')))  # stock V1.36's own card
@@ -106,13 +87,8 @@ def test_ipod_home():
                                             'btn_set_car', 'btn_set_display', 'btn_set_controls', 'btn_set_power']
     assert [r[3][0][2]['text'] for r in sets] == ['Wi-Fi', 'Bluetooth', 'General', 'Playback', 'Streaming', 'Car Remote',
                                                   'Display', 'Controls', 'Battery']  # Streaming after Playback
-    carousel = root[3][3]
-    assert [c[2]['name'] for c in carousel[3]] == ['btn_playing', 'btn_localmusic', 'btn_coverflow', 'btn_folder', 'btn_rockbox',
-                                                   'btn_stream', 'btn_playset', 'btn_sysset']
-    assert carousel[3][2][3][1][2]['text'] == 'Cover Flow' and carousel[3][4][3][1][2]['text'] == 'Rockbox'
-    assert carousel[3][1][3][1][2] == {'name': 'label_library', 'text': 'Library'}
-    assert carousel[3][2][3][1][2]['name'] == 'label_cover_flow' and carousel[3][2][3][0][2]['draw'] == 'menu_music'  # ours, cloned; stock's card is gone
-    assert [n[2]['name'] for n in rows[5][3]] == ['label_cover_flow', 'img_cover_flow'] and carousel[3][2][3][0][2]['name'] == 'img_cover_flow'
+    stock = home()[3][0][3]
+    assert root[3][3][3] == stock[:2] + stock[3:]  # stock's cards, Album Wall's gone, the carousel only hidden
     for n in root[3][3:]:
         assert n[2]['visible'] == 'false' and n[2]['sensitive'] == 'false'
 
@@ -674,7 +650,7 @@ def test_ipod_home_art_fills_the_client_height():
 def test_oled_home_rows_are_32():
     root = home(); ipod.ipod_home(root, g=OLED_SET); n = named(root)
     assert n['list_view_home'][1] == [0, ipod.HOME_TOP, 375, 7 * 32] and n['list_view_home'][2]['item_height'] == '32'
-    rows = named(n['list_view_home'])  # the carousel's cards take the same names
+    rows = named(n['list_view_home'])
     assert [rows['btn_' + r][1] for r in ipod.HOME_ROWS] == [[0, 32 * i, 375, 32] for i in range(8)]
     assert named(n['list_view_home'])['scroll_view_home'][1] == [0, 0, 375, 7 * 32]  # seven at rest, the eighth scrolls in
     foot = 320 - OLED_SET.bar - ipod.HOME_TOP  # Settings' list runs on to the window's foot: its eighth row peeks

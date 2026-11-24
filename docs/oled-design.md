@@ -500,7 +500,7 @@ There is no Done button: the wheel's keys and a finger do it all. Edit Home is t
 Home's list.
 
 - **Entered by** Center held about half a second (550 ms) on the Library or on Home's list (not
-  Carousel, not a list a Home row opens), or a finger held as long on a row, which then drags that
+  a list a Home row opens), or a finger held as long on a row, which then drags that
   row. Center held again, or Return when no row is lifted, saves and leaves.
 - **In it** the status row reads "Edit Library" or "Edit Home", every row the user can show is
   listed, each row's chevron gives way to a grip (three 18x2 px bars 5 px apart, centered where the
@@ -1991,7 +1991,7 @@ interruptible: a turn mid-run starts from where it is.
   stops at its end with no bounce; the remembered-row recall, the captioned row's grow, Edit Library's slide-aside,
   the radio pill's grow and the switches' knob are at their end at once; Now Playing's art keeps its size on pause, and a track change and the cover into Now Playing cross-fade in place; the status row's bars and pause swap at once; the charging sweep stands at the level and Up
   Next's level bars stand still; a toast and the confirmation card fade only (150 ms in, 120 ms out). Kept: swipe
-  back's finger tracking and its finish (the page under it still and undimmed), the selection bar, wheel scroll, Cover Flow's and the carousel's wheel step
+  back's finger tracking and its finish (the page under it still and undimmed), the selection bar, wheel scroll, Cover Flow's wheel step
   (the scroll itself), the volume, brightness and progress bars, the marquee and its fades, the scroll indicator's and
   A-Z index's fades, and spinners.
 - **Marquee fades.** A scrolling text (the selected row's title, the status row's title, Now

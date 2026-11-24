@@ -214,18 +214,21 @@ def test_an_unknown_format_or_no_bitmap_is_left_to_stock(fw, bitmaps):
     assert bitmaps.locked == [] and bm.get(0, 0) == RED_PX
 
 
-@pytest.mark.parametrize('name', [b'file:///mnt/mmc/Music/a.jpg', b'/usr/share/x.png', b'http://host/a.png', b'menu_music'])
-def test_covers_by_path_and_home_s_cards_keep_their_colours(fw, bitmaps, name):
+@pytest.mark.parametrize('name', [b'file:///mnt/mmc/Music/a.jpg', b'/usr/share/x.png', b'http://host/a.png'])
+def test_covers_by_path_keep_their_colours(fw, bitmaps, name):
     theme(fw, LIGHT='1')
     bm = bitmaps(fw, [[RED_PX, WHITE]])
     image_add(fw, name, bm)
     assert bm.rows() == [[RED_PX, WHITE]]
 
 
-def test_home_s_arrows_still_flip_in_light_mode(fw, bitmaps):
+@pytest.mark.parametrize('name', [b'menu_left', b'menu_music'])
+def test_stock_s_card_art_is_a_theme_image_like_any(fw, bitmaps, name):
+    """Home's carousel is never shown, so its cards' art (menu_*) has no exception: it flips in Light Mode as any
+    theme image does."""
     theme(fw, LIGHT='1')
     bm = bitmaps(fw, [[WHITE, CLEAR]])
-    image_add(fw, b'menu_left', bm)
+    image_add(fw, name, bm)
     assert bm.rows() == [[(INK, INK, INK, 255), CLEAR]]
 
 

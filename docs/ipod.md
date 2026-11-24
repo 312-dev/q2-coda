@@ -117,7 +117,7 @@ between two tracks keeps it), the row goes, in Split and Full, and it comes back
 starts (`np_loaded`, checked on each bar paint and by `np_due` when the 3 s are up;
 `coverflow_home_layout` restacks the hidden row last). Coming or going it keeps
 the selection on the same row and the same rows in view (`home_keep`); on Now Playing as it
-goes, the selection moves to the row after it. Carousel keeps its Now Playing card. **Folders** is stock's
+goes, the selection moves to the row after it. **Folders** is stock's
 Folder card under its plural name, shown only while the SD card has folders to list (`home_folders`, the empty
 Folders page's test) until the user shows or hides it. **Edit Home** (Center held on the list, or a finger held on a
 row; [oled-design](oled-design.md#edit-library), [internals](internals.md#library-order)) puts the rows in the
@@ -125,8 +125,7 @@ user's order and shows or hides each, Settings always shown. **Search** opens th
 letter strip under `list.entry.ipod`, OLED's, stock's search without it): every song, artist and album, the one
 search across everything; each list page searches its own rows from its search bar. Shuffle Songs and the
 Shortcut row are not on the list: the Library's Shuffle page keeps Shuffle Songs, and the Shortcut
-(`IPOD/SHORTCUT` 0-11, read as a decimal by `config_value`, with no Appearance row to change it) is only
-Carousel's card: Rockbox when the card has it, else Favorites, or the value an older build saved: Artists, Albums, Favorites, Rated Albums, Shuffle, Games, Playlists, Podcasts, Audiobooks or Groovebox (`home_shortcut_open`; Groovebox (10, `SHORTCUT_GROOVEBOX`) is the App Store's Groovebox card game, started by id through `addon_game_open` as its Games row would start it (the tap toasts when no card game has the id); `bar_sync` lays Home out again when the card's Rockbox or Groovebox comes or goes, `ipod_shortcut_seen`; Rated Albums is Ratings → Albums, `rated_albums`; Shuffle is the Library's Shuffle page, `shuffle_menu`; Playlists is the Library's list, opened as stock's Home opens it; Podcasts and Audiobooks are the card's folders, opened as their Local Music rows open them, `media_click`, which toasts "No Podcasts folder on the card" without one); None (11, `SHORTCUT_NONE`), and a value this build does not know, are the default. Carousel's cards are stock's and have none for Search. Settings opens its own list in the menu's place, as an iPod's submenu: Wi-Fi, Bluetooth, General, Playback, Streaming, Car Remote, Display, Controls and Battery ([Settings](#settings)); Return restores the menu's previous selection, and a short Return on the main menu selects
+(`IPOD/SHORTCUT` 0-11, read as a decimal by `config_value`, with no Appearance row to change it) was Carousel's card and went with it; the key is still read and means nothing. Settings opens its own list in the menu's place, as an iPod's submenu: Wi-Fi, Bluetooth, General, Playback, Streaming, Car Remote, Display, Controls and Battery ([Settings](#settings)); Return restores the menu's previous selection, and a short Return on the main menu selects
 its first row, Now Playing while it shows; a short Return with Now Playing selected opens it without
 changing playback. Return there goes back to Home. Both lists end at their ends, as every list does: the wheel stops there and the selection leans against the end ([internals.md](internals.md#list-ends)).
 Folder opens directly at the SD root when a card is in and no OTG drive is connected; Back at that root returns
@@ -152,8 +151,9 @@ payload lays them out (below). Long translated labels ellipsize and scroll.
 The background view paints before the transparent menus, and both menus are clipped to the
 window while sliding.
 
-Display settings offers **Home: Split / Full / Carousel**, stored as `IPOD/HOME` 0, 1 or 2; invalid or absent
-values mean Split. `coverflow_home_layout` moves the asset's widgets at runtime:
+Display settings offers **Home: Split / Full**, stored as `IPOD/HOME` 0 or 1; any other value, absent, invalid, or
+the 2 a unit saved on Carousel (removed on 2026-11-24: its Home had no row to Settings, so Display and the Home row
+could not be reached again), means Split, and the row's next save writes 0 or 1. `coverflow_home_layout` moves the asset's widgets at runtime:
 Split narrows both menus to the grid's `split_row` (OLED's 204; `HOME_SPLIT_W`, 187, half the
 screen, in the built-in set) and shows the cover itself in the panel right of them, from `split_art`
 (OLED's 196) to the screen's edge, and with OLED's `split_art_up` from the top edge, under the status
@@ -176,7 +176,7 @@ drops what a paint invalidates when the frame ends, so a 0 ms timer then repaint
 otherwise the new art and its fit would reach only the regions repainted later. `g_playcover_finishflag` remains
 stock-owned. Now Playing and Spotify's page keep their black background behind the art.
 
-**Carousel** replaces the lists and the art with stock's home carousel. It has eight cards: Now Playing, Library, Cover Flow, Folder, the Rockbox shortcut, Streaming, Playback Settings and System Settings. The Rockbox shortcut card opens what the saved Shortcut chooses ([Home](#home)), and stays when its target is gone (no Rockbox, or no Groovebox, on the card), where tapping it shows a message. With Shortcut: None, or no key, it shows and opens Rockbox when the card has it, else Favorites. The cards keep their own colors, as on the stock Home, whatever the accent or Light Mode. The wheel moves through the carousel ([internals.md](internals.md#home-carousel)), Center opens the card and touch drags and taps as in stock; Return keeps stock's behavior there. Leaving Carousel for Split or Full shows the main list.
+Stock's home carousel (its `slide_menu` of cards, less V1.36's Album Wall card, and the two arrows) stays in Home's window, hidden and taking no taps, as `home_page_init`'s visitor binds the arrows and cards by name (`tools/ipod.py` `ipod_home`); nothing shows or steps it.
 
 The player writes every track's cover to the same `/tmp` file, so before Split loads it `coverflow_home_art` drops AWTK's cached bitmap of that name, as the full-screen art does; otherwise the image manager hands back the last track's cover.
 

@@ -15,7 +15,7 @@ ACCENT_NAMES = [n.lower() for n in re.findall(r'\}\s*,?\s*/\* (\w+)', ACCENTS_BL
 ACCENT_TONES = [[int(x, 16) for x in re.findall(r'0x([0-9a-fA-F]{6})', row)] for row in re.findall(r'\{([^}]*)\}', ACCENTS_BLOCK)]
 ALL_ACCENTS = (1 << len(ACCENT_NAMES)) - 1
 SETTINGS = {'light': ('SETTING_LIGHT', ('off', 'on', 'auto')), 'accent': ('SETTING_ACCENT', ACCENT_NAMES),
-            'home': ('SETTING_HOME', ('split', 'full', 'carousel')),
+            'home': ('SETTING_HOME', ('split', 'full')),
             'battery': ('SETTING_BATTERY', ('icon', 'percent', 'both', 'inside')),
             'shortcut': ('SETTING_SHORTCUT', ('rockbox', 'artists', 'albums', 'favorites', 'rated_albums', 'shuffle', 'games', 'playlists', 'podcasts', 'audiobooks', 'groovebox', 'none'))}
 ACCENT_KEYS = {'ACCENT': '&st.accent'}

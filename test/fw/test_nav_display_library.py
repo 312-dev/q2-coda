@@ -386,10 +386,20 @@ def test_oled_accent_offers_its_blue_alone(fw):
     assert clicks_of(fw, ui, page, 'Accent', 2) == [(accent_name(t, v), [(t['accent_key'], v)])] * 2
 
 
-def test_home_cycles_split_full_carousel(fw):
+def test_home_cycles_split_and_full(fw):
     ui = Ui(fw)
     page = appearance(fw, ui)
-    assert clicks_of(fw, ui, page, 'Home', 3) == [('Full', [('HOME', 1)]), ('Carousel', [('HOME', 2)]), ('Split', [('HOME', 0)])]
+    assert clicks_of(fw, ui, page, 'Home', 3) == [('Full', [('HOME', 1)]), ('Split', [('HOME', 0)]), ('Full', [('HOME', 1)])]
+
+
+@pytest.mark.parametrize('stored', (b'2', b'3', b'9', b'x'))
+def test_a_saved_carousel_reads_as_split_and_is_never_saved_again(fw, stored):
+    """HOME=2 was Carousel, whose Home had no way to Settings: a unit left on it (or on any value but Split's 0 and
+    Full's 1) shows Split, and the row's next save writes Full and then Split, never the old value."""
+    ui = Ui(fw)
+    page = appearance(fw, ui, HOME=stored)
+    assert dict(rows(page.view()))['Home'] == 'Split' and fw.fn('ipod_home', C.c_int)() == 0
+    assert clicks_of(fw, ui, page, 'Home', 2) == [('Full', [('HOME', 1)]), ('Split', [('HOME', 0)])]
 
 
 def test_oled_battery_takes_only_its_two_styles(fw):

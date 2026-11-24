@@ -196,26 +196,19 @@ def home_back(full):
     long_return(m); m.call(O['KEY_RETURN'],gap=0)
     assert not destinations(m); passed()
 def home_carousel():
-    # Home: Carousel at init: stock's carousel and arrows in the lists' place, the lists and the art
-    # hidden and taking no taps. The carousel's own Coverflow and Shortcut cards open what their rows
-    # do, the Shortcut's labelled as the setting; Return leaves the carousel to stock.
+    # A saved HOME=2, Carousel's before it went (its Home had no way back to Settings): Split at init, the
+    # main list and the art shown, stock's carousel and arrows hidden and taking no taps, none of its cards
+    # bound by the payload.
     CONFIG.update(HOME='2',SHORTCUT='5'); m=ShuffleMachine(); del CONFIG['HOME'],CONFIG['SHORTCUT']; view,imgs=home_list(m)
     assert m.call(address=home_hook[0],args=(m.top,0,0,0),gap=0)==0
-    for name,on in (('slide_menu',1),('img_left',1),('img_right',1),('list_view_home',0),('list_view_homeset',0)):
-        n=m.nodes[named(m,m.top,name)]; assert n['visible']==n['sensitive']==on,name
-    assert not m.nodes[named(m,m.top,'img_homeart')]['visible']
+    for name,on in (('slide_menu',0),('img_left',0),('img_right',0),('list_view_home',1),('list_view_homeset',0)):
+        n=m.nodes[named(m,m.top,name)]; taps=n.get('sensitive',int(n['asset'].get('sensitive')!='false'))  # the asset's, untouched
+        assert n['visible']==taps==on,name
+    assert m.nodes[named(m,m.top,'img_homeart')]['visible']
     slide=named(m,m.top,'slide_menu')
-    for row in ('coverflow','rockbox'):
-        assert m.handler(named(m,slide,'img_'+HOME_OURS.get(row,row)),O['EVT_CLICK'])[0]==m.handler(named(m,m.top,'img_'+HOME_OURS.get(row,row)),O['EVT_CLICK'])[0]
-    assert m.nodes[named(m,slide,'label_rockbox')]['text']==m.nodes[named(m,m.top,'label_rockbox')]['text']=='Shuffle'
-    m.calls=[]; m.call(O['KEY_RETURN']); m.call(O['KEY_RETURN']); assert not destinations(m); passed()
-    # A card centred (its SEL written), then a page sliding over Home: Home's snapshot shows the card
-    # alone, no list selection (dot, bar or chevron) on the carousel.
-    m=Machine(); w=m.page('home_page','slide_menu'); m.word(w+O['SLIDE_INDEX'],1)
-    assert m.confirm()==11 and m.selected(w)==1
-    m.word(w+O['W_PARENT'],m.top); m.word(m.top+O['W_PARENT'],m.wm)
-    m.page_list(3,name='display_page'); m.nodes[m.top]['anim_hint']=HINT
-    m.paint(w,gap=0); assert not m.drawn() and not m.icons; passed()
+    def under(w): return [w]+[d for c in m.nodes[w].get('children',[]) for d in under(c)]
+    assert not [w for w in under(slide) if any(t==O['EVT_CLICK'] for t,*_ in m.nodes[w].get('handlers',[]))]
+    passed()
 home_carousel()
 for full in (0,1):
     home_settings(full); home_back(full)
@@ -737,18 +730,6 @@ assert m.u.mem_read(syms['g_folder_layer'],1)[0]==4
 m.folder('/mnt/mmc/Audiobooks'); m.byte(syms['g_folder_layer'],3)
 m.call(address=HOOKS['folder_back'][0],args=(0,0,0,0),gap=0)
 assert m.u.mem_read(syms['g_folder_layer'],1)[0]==1; passed()
-# Shortcut: Podcasts (8) and Audiobooks (9) open the card's folder as Local Music's rows do; without it a toast says so.
-CONFIG['SHORTCUT']='8'; m=ShuffleMachine(); del CONFIG['SHORTCUT']; m.card=[('Podcasts',4)]
-m.handlers[int(manifest['patch_symbols']['stock_folder_trampoline'],16)]='stock_folder'
-assert m.text(m.call(address=payload_syms['ipod_home_shortcut'],args=(0,0,0,0),gap=0))=='Podcasts'
-m.calls=[]; assert m.call(address=payload_syms['home_shortcut_open'],args=(0,m.event,0,0),gap=0)==0
-assert [m.text(c[1]) for c in m.calls if c[0]=='navigator_to']==['folder_page']
-win=m.node('window','folder_page'); assert m.call(address=HOOKS['folder_page_init'][0],args=(win,0,0,0),gap=0)==0
-assert m.text(syms['g_folder_path'])=='/mnt/mmc/Podcasts' and m.u.mem_read(syms['g_folder_layer'],1)[0]==3
-CONFIG['SHORTCUT']='9'; m=ShuffleMachine(); del CONFIG['SHORTCUT']; m.card=[('Podcasts',4)]
-assert m.text(m.call(address=payload_syms['ipod_home_shortcut'],args=(0,0,0,0),gap=0))=='Audiobooks'
-m.calls=[]; assert m.call(address=payload_syms['home_shortcut_open'],args=(0,m.event,0,0),gap=0)==0
-assert not [c for c in m.calls if c[0]=='navigator_to'] and m.toasts[-1][3]=='No Audiobooks folder on the card'; passed()
 
 # Folder visits bypass the storage selector only when OTG was absent and the card present on entry
 # (stock's check_tfstatus: /tmp/mmc_add).

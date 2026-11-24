@@ -1,6 +1,11 @@
-/* Home and Coverflow step their slide_menu with one retargeted animator (home_step): stock
- * scroll_to (0x606290) starts a new animator per call and orphans the running one, so fast
- * ticks leave several fighting over the offset and committing the index twice. */
+/* Cover Flow steps its slide_menu with one retargeted animator (home_step): stock scroll_to
+ * (0x606290) starts a new animator per call and orphans the running one, so fast ticks leave
+ * several fighting over the offset and committing the index twice.
+ * ponytail: home_page is still a carousel page here, from when Home had stock's carousel of cards
+ * as a layout. Its slide_menu stays in Home's window hidden and taking no taps (tools/ipod.py
+ * ipod_home), so nothing reaches it; the MIPS suite's slide tests (test/patch_suite/01) run on
+ * Home's page, and moving them to Cover Flow's, whose own paths (the thumb, the pooled glide) then
+ * apply, would let this name Cover Flow's page alone. */
 static int carousel_page(void *top) {
     const char *name = top ? widget_get_prop_str(top, "name", "") : "";
     return !tk_strcmp(name, "home_page") || !tk_strcmp(name, "coverflow_page");

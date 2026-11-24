@@ -746,7 +746,7 @@ static void quick_poll(void) {
         compact_now_playing();
     }
 }
-/* Home's Cover Flow row, or the Carousel's card, held: Display's Cover Flow page over Home. Here
+/* Home's Cover Flow row held: Display's Cover Flow page over Home. Here
  * (not home.c) for the selection, which is this file's. */
 static int home_cf_hold(void *top) {
     void *wm = window_manager();

@@ -1,5 +1,5 @@
 static void setting_text(int i) {
-    static const char *const home[] = { "Home: Split", "Home: Full", "Home: Carousel" },
+    static const char *const home[] = { "Home: Split", "Home: Full" },
                              *const battery[] = { "Battery: Icon", "Battery: Percent",
                                                   "Battery: Icon + Percent",
                                                   "Battery: Percent Inside" },
@@ -295,7 +295,7 @@ static void setting_row(void *view, int i) {
  * inline slider row in its place (inline_slider.c). Smart Awake and Night Shift (the brightness
  * icon, opening its slider page, crossfade.c) follow Brightness and Screen Off Time, then
  * Appearance and Coverflow, each opening stock's page again (display_open) with its stock rows
- * dropped and its own instead: the theme's options (OLED's: Light Mode, Accent, Home, Shortcut,
+ * dropped and its own instead: the theme's options (OLED's: Light Mode, Accent, Home,
  * Battery, Song Artist, Song Length, Track Time); Artist View, Coverflow Sort and Refresh
  * Coverflow. Controls is System settings' row (ringnav_systemset) on the same page: the wheel, the
  * buttons and what the buttons do. The value rows show it in the label and have no chevron, since

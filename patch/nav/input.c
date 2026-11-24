@@ -382,7 +382,7 @@ int ringnav_buzzer(int on) {
  * before the release moves anything. A wheel press on a page whose release ringnav() takes as row
  * navigation runs the whole stock body with the flag off for that one synchronous call, so its
  * gates and latches still run, and the release clicks when the selection changes. The test reads
- * the tree only: nothing is loaded, selected or restored. Carousels, the pixel-scroll fallback,
+ * the tree only: nothing is loaded, selected or restored. Cover Flow's slide menu, the pixel-scroll fallback,
  * scrub, the volume and every other key keep the stock click. */
 int ringnav_keydown(void *ctx, void *event) {
     unsigned key = event ? (unsigned)I(event, EVENT_KEY) : 0;
@@ -821,7 +821,7 @@ int ringnav(void *ctx, void *event) {
         return STOP;
     /* Return on Home's main list selects its first row, Now Playing while something is loaded
      * (coverflow.c np_loaded); on Now Playing's row it opens Now Playing with the current queue
-     * untouched. The carousel keeps stock's Return. */
+     * untouched. */
     if (key == KEY_RETURN && usable()) {
         void *wm = window_manager(), *top = window_manager_get_top_window(wm);
         void *w = home_menu(top) && !window_manager_is_animating(wm)

@@ -2306,7 +2306,6 @@ PAYLOAD_WINDOWS = {'searchstrip_page', 'playlistedit_page', 'playlistsongs_page'
                    'storage_page', 'downloads_page', 'usbchoose_page', 'usbdebug_page', 'usbpick_page', 'devopts_page', 'adbtrust_page',
                    'swupdate_page', 'empty_page', 'btdevice_page', 'btstopped_page',
                    'guestnp_page', 'guestset_page', 'guesttrust_page', 'hotspot_page', 'guestconnect_page', 'guestfail_page'}
-ICONS = [f'menu_{c}{s}.png' for c in ('coverflow', 'rockbox') for s in ('', 'down')]
 # The stock EQ preset page and the images only it and the stock equalizer page show: the PEQ
 # editor clears that page's widgets on init and never binds the preset button, so none can load.
 STOCK_EQ = ['release/assets/default/raw/ui/playset/preseteq_page.bin'] + [
@@ -3139,18 +3138,15 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
             src = out/pathlib.Path(path).name
             src.write_bytes(data)
             p = swap_inode(p, path.encode(), src)
-    # New inodes, each with its stock image's metadata: Home's Coverflow and Shortcut card icons (menu_music's,
-    # in their own colours like stock's cards), the Local Music and Spotify rows' icons, drawn in assets/icons/ (stock's
-    # 52px style) or else a copy of the stock image named (not the copies iPod pre-sizes for Settings), and q2video.
+    # New inodes, each with its stock image's metadata: the Local Music and Spotify rows' icons, drawn in assets/icons/
+    # (stock's 52px style) or else a copy of the stock image named (not the copies iPod pre-sizes for Settings), and q2video.
     xx = 'release/assets/default/raw/images/xx/'
-    icons = {n: ('menu_musicdown.png' if n.endswith('down.png') else 'menu_music.png',
-                 (ROOT/'assets/icons'/n).read_bytes()) for n in ICONS}
     drawn = ('podcasts', 'audiobooks', 'videos')
-    icons.update({f'local_{n}.png': (like, (ROOT/'assets/icons'/f'local_{n}.png').read_bytes() if n in drawn
+    icons = {f'local_{n}.png': (like, (ROOT/'assets/icons'/f'local_{n}.png').read_bytes() if n in drawn
                                      else cat(xx+like)) for n, like in dict(
         shuffle='playset_playmode.png', scrobble='wifiset_wifi.png', podcasts='netservice_dlna.png',
         audiobooks='playset_foldercover.png', videos='system_display.png', longsongs='system_time.png',
-        era='local_genre.png').items()})
+        era='local_genre.png').items()}
     icons['local_games.png'] = ('system_language.png', (ROOT/'assets/icons/local_games.png').read_bytes())
     for n in ('spotify', 'radio', 'app', 'config'):  # Streaming's Spotify, Internet Radio, card app and Configuration rows
         icons[f'stream_{n}.png'] = ('list_tidal.png', (ROOT/'assets/icons'/f'stream_{n}.png').read_bytes())
@@ -3205,7 +3201,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         stock = need(inode(p, like.encode()), f'Missing stock inode for {path}')
         name = path.rsplit('/', 1)[-1]
         if path not in (HELPER, BOOT, SPLASH, REMOTE, Q2EQ, CODA_RC, GUEST, Q2SEND, RADIOFETCH, Q2IAP): (out/name).write_bytes(data)  # package the hashed bytes, as the logo
-        if inode(p, path.encode()):  # stock has a file of that name (V1.36's own menu_coverflow*.png): ours takes its inode
+        if inode(p, path.encode()):  # stock has a file of that name: ours takes its inode
             changed_assets[path] = dict(original_sha256=sha(cat(path)), sha256=sha(data))
             p = swap_inode(p, path.encode(), out/name)
             continue

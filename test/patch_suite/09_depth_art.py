@@ -761,7 +761,7 @@ for gain in ('gain_low','gain_high','switch_on','switch_off'):
 passed()
 
 # Images: decoded 32-bit theme bitmaps are mapped in place before stock caches them; covers by
-# path or URL, Home: Carousel's cards and other formats are left alone. bitmap_t w @0, h @4, line_length @8, format @0xe.
+# path or URL and other formats are left alone. bitmap_t w @0, h @4, line_length @8, format @0xe.
 def image(config,name,fmt=3,prep=None,px=None):
     m=Machine(); m.config=config; m.handlers[tramp['image']]='stock_image'
     if prep: prep(m)
@@ -782,8 +782,7 @@ assert TRACE.getvalue().splitlines()[-1]=='ret\tringnav_image_add\t00000000\t'+h
 TRACE=saved; passed()
 stock=bytes([0x48,0x14,0xff,0x80,0x80,0x80,0x80,0xff])+b'\xee'*4
 for config,name,fmt in (({},'file:///tmp/coverpic.jpg',3),({},'/mnt/mmc/a/cover.jpg',3),
-                        ({},'https://resources.tidal.com/images/a/320x320.jpg',3),({},'switch_on',5),
-                        ({},'menu_music',3),({},'menu_coverflowdown',3),({'LIGHT':'1'},'menu_folder',3)):  # Home: Carousel's cards
+                        ({},'https://resources.tidal.com/images/a/320x320.jpg',3),({},'switch_on',5)):
     assert image(config,name,fmt)==[stock,stock],(config,name,fmt); passed()
 # Artwork is rounded before caching, including the cached opacity flag. Straight RGB and row
 # padding survive; every byte order and an already transparent source corner are supported. A playlist's row art (its
@@ -963,7 +962,7 @@ assert m.nodes[cf_gap]['type']=='label' and m.get(cf_gap+O['W_H'])==12
 ctl=display_page(m,3); wheel,hold,tone,lock,wake=m.nodes[ctl]['children']  # tone: the Clicker
 assert [row_text(r) for r in (hold,tone)]==['Hold Return: Recent','Clicker: Off']; passed()
 view=display_page(m,1); rows=setting_rows(m,view)
-# the theme's options (assets/themes/oled/theme.xml), Home's Shortcut being the Carousel's card alone
+# the theme's options (assets/themes/oled/theme.xml): no Shortcut row
 kids=m.nodes[view]['children']; light,song_artist,song_length,np_time=kids[0],kids[4],kids[5],kids[6]
 assert [row_text(r) for r in kids]==['Light Mode: Off','Accent: Blue','Home: Split','Battery: Icon','Song Artist: Inline','Song Length: Albums','Track Time: Remaining'],[row_text(r) for r in kids]
 assert kids==[light,*rows,song_artist,song_length,np_time] and m.nodes[rows[0]].get('visible',1)==1
@@ -1016,7 +1015,7 @@ def preset_writes(config):  # theme_preset's saves for config, from OLED's optio
     for o in OLED['opts']:
         key=o.get('key') or OPT_KEY[o['setting']]
         n,d=(theme_keys(theme_builtins())[key][:2] if o.get('key') or key=='OLED_ACCENT' else
-             {'LIGHT':(3,0),'HOME':(3,0),'SHORTCUT':(12,12),'BATTERY':(4,0)}[key])
+             {'LIGHT':(3,0),'HOME':(2,0),'SHORTCUT':(12,12),'BATTERY':(4,0)}[key])  # HOME: Split, Full; a saved 2 reads Split
         s=config.get(key,''); v=int(s) if s.isdigit() and int(s)<n else d
         if o['values'] and o['def']>=0 and not o['values']>>v&1: v=o['def']
         if o['preset']>=0 and v!=o['keep'] and v!=o['preset']: out.append((o['preset'],'IPOD',key))
@@ -1057,18 +1056,6 @@ f,ctx=m.handler(m.nodes[cf_refresh]['children'][0],O['EVT_CLICK']); m.mock('open
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.toasts[-1][3]=='Cover Flow rebuilds artwork next time'
 assert [m.text(c[1]) for c in m.calls if c[0]=='opendir@GLIBC_2.0']==['/mnt/mmc/.coverflow','/mnt/mmc/.sldp']
 assert did(m,'image_manager_unload_all') and m.nodes[refresh_label]['text']=='Refresh Cover Flow'; passed()
-# Shortcut: no key is Rockbox on a card with it, else Favorites.
-for card,first in ((True,'Rockbox'),(False,'Favorites')):
-    CONFIG.clear(); d=Machine(); d.rockbox_mode=0o100755 if card else 0
-    assert d.text(d.call(address=payload_syms['ipod_home_shortcut'],args=(0,0,0,0),gap=0))==first
-d.rockbox_mode=0o100755; d.now+=O['CARD_RECHECK_MS']  # a card mounted after the first read: the default follows it, once looked at again
-assert d.text(d.call(address=payload_syms['ipod_home_shortcut'],args=(0,0,0,0),gap=0))=='Rockbox'
-passed()
-# Shortcut: Playlists (7) opens the Library's Playlists list, as stock's Home does (context 0: not Add to Playlist).
-CONFIG.clear(); CONFIG['SHORTCUT']='7'; d=Machine(); del CONFIG['SHORTCUT']
-assert d.text(d.call(address=payload_syms['ipod_home_shortcut'],args=(0,0,0,0),gap=0))=='Playlists'
-d.calls=[]; d.call(address=payload_syms['home_shortcut_open'],args=(0,d.event,0,0),gap=0)
-assert [(d.text(c[1]),c[2]) for c in d.calls if c[0]=='navigator_to_with_context']==[('localmusic/playlist_page',0)]; passed()
 assert texts()==['Accent: Blue','Home: Split','Battery: Icon']; passed()
 def click(i):
     m.calls=[]; f,ctx=m.handler(buttons[i],O['EVT_CLICK'])
@@ -1101,24 +1088,23 @@ def home_bounds(full):
             assert x==x0 and width>0 and x+width==row-e and m.get(r+O['W_W'])==row,(name,x,width,row)
     assert m.nodes[art]['visible']==(not full)
     assert tuple(signed(m.get(art+O[k])) for k in ('W_X','W_Y','W_W','W_H'))==(OLED_G.split_art,0,375-OLED_G.split_art,320)  # the pane, up under the status row (coverflow.c pane_y)
-def carousel(on):
-    """Home: Carousel: stock's carousel and arrows in the lists' place, the art hidden; else the
-    main list, the carousel hidden, neither taking taps while hidden."""
+def carousel():
+    """Stock's carousel and arrows hidden and taking no taps in every layout (tools/ipod.py ipod_home); the main
+    list shown, the Settings list not until opened."""
     def shown(name):
         w=named(m,home,name); n=m.nodes[w]
         taps=n.get('sensitive',int(n['asset'].get('sensitive')!='false'))
         assert n['visible']==taps,name
         return n['visible']
-    assert [shown(n) for n in ('slide_menu','img_left','img_right','list_view_home','list_view_homeset')]==[on]*3+[not on,0]
-    if on: assert not m.nodes[art]['visible']
-# (Appearance has no Shortcut row: the Carousel's card keeps its default, tested with ipod_home_shortcut above.)
-home_bounds(False); carousel(False)
+    assert [shown(n) for n in ('slide_menu','img_left','img_right','list_view_home','list_view_homeset')]==[0]*3+[1,0]
+# (Appearance has no Shortcut row.)
+home_bounds(False); carousel()
 writes=click(1); assert [(w[0],m.text(w[2])) for w in writes]==[(1,'HOME')] and texts()[1]=='Home: Full'
-home_bounds(True); carousel(False)
+home_bounds(True); carousel()
 assert not [c for c in m.calls if c[0]=='image_manager_unload_all']; passed()
-writes=click(1); assert [(w[0],m.text(w[2])) for w in writes]==[(2,'HOME')] and texts()[1]=='Home: Carousel'
-carousel(True); assert not [c for c in m.calls if c[0]=='image_manager_unload_all']; passed()
-click(1); assert texts()[1]=='Home: Split'; home_bounds(False); carousel(False); passed()
+# Home has two layouts: Full's next click is Split, written as 0 (a saved 2, Carousel's, reads as Split: test/fw)
+writes=click(1); assert [(w[0],m.text(w[2])) for w in writes]==[(0,'HOME')] and texts()[1]=='Home: Split'
+home_bounds(False); carousel(); passed()
 # Light Mode: no key is Off; a click saves On, then Auto (LIGHT=2), then Off; each drops the cached images and repaints.
 light_label=m.nodes[m.nodes[light]['children'][0]]['children'][1]; assert row_text(light)=='Light Mode: Off'
 f,ctx=f_light,ctx_light=m.handler(m.nodes[light]['children'][0],O['EVT_CLICK'])

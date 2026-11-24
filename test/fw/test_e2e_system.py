@@ -420,20 +420,31 @@ def test_a_unit_left_on_another_theme_takes_oleds_preset_once(fw, library, tmp_p
     q2.close()
 
 
-# Home (docs/ipod.md#home): Split, Full or Carousel, and its Shortcut row.
+# Home (docs/ipod.md#home): Split or Full.
 
 def home(q2):
-    """Home (home_page_init, hooked: coverflow_home) with its list, art panel, carousel and Shortcut row."""
+    """Home (home_page_init, hooked: coverflow_home) with its list, art panel and stock's hidden carousel."""
     win = q2.screen.window('home_page', 'img_homeart', 'list_view_home', 'slide_menu', 'img_left', 'img_right',
                            ('btn_rockbox', 'button', 'list_view_home'), 'label_rockbox')
+    for name in ('slide_menu', 'img_left', 'img_right'):  # hidden in the asset (tools/ipod.py ipod_home)
+        q2.screen.shown[q2.screen.lookup(win, name)] = 0
     q2.fw.fn('coverflow_home', C.c_int, C.c_void_p, C.c_void_p)(win, 0)
     return {name: q2.screen.lookup(win, name)
             for name in ('img_homeart', 'list_view_home', 'slide_menu', 'label_rockbox')}
 
 
+class Shown:
+    """A widget's visibility as the screen has it: shown unless something hid it (widget_get_visible's default)."""
+    def __init__(self, q2):
+        self.q2 = q2
+
+    def __getitem__(self, w):
+        return self.q2.screen.shown.get(w, 1)
+
+
 def test_home_takes_a_new_layout_at_once_and_boots_into_it(q2):
     w = home(q2)
-    shown, width = q2.screen.shown, lambda: q2.screen.at(w['list_view_home'])[2]
+    shown, width = Shown(q2), lambda: q2.screen.at(w['list_view_home'])[2]
     assert shown[w['img_homeart']] and not shown[w['slide_menu']]  # Split: the list beside the art
     split = width()
     assert split < 375
@@ -443,12 +454,28 @@ def test_home_takes_a_new_layout_at_once_and_boots_into_it(q2):
     assert not shown[w['img_homeart']] and width() == 375 > split  # the same Home, never rebuilt, relaid at once
     q2.power_on()
     w = home(q2)
-    shown = q2.screen.shown
+    shown = Shown(q2)
     assert not shown[w['img_homeart']] and width() == 375
     appearance(q2)
+    q2.screen.click('Home')  # two layouts: Full's next is Split
+    assert q2.screen.row('Home') == 'Home: Split' and q2.flash.get('IPOD', 'HOME') == '0'
+    assert shown[w['img_homeart']] and shown[w['list_view_home']] and not shown[w['slide_menu']] and width() < 375
+
+
+@in_fork
+def test_a_unit_saved_on_carousel_boots_into_split_and_reaches_display(fw, library, tmp_path):
+    """HOME=2 was Carousel, whose Home had no row to Settings: such a unit boots into Split, Display's Home row reads
+    Split, and its next save is Full's 1, never 2 again."""
+    q2 = Q2(fw, library, tmp_path, Flash(IPOD_THEME='3', IPOD_HOME='2'))
+    boot(q2)
+    w = home(q2)
+    shown = Shown(q2)
+    assert shown[w['img_homeart']] and shown[w['list_view_home']] and not shown[w['slide_menu']]
+    appearance(q2)
+    assert q2.screen.row('Home') == 'Home: Split'
     q2.screen.click('Home')
-    assert q2.screen.row('Home') == 'Home: Carousel'
-    assert shown[w['slide_menu']] and not shown[w['list_view_home']] and not shown[w['img_homeart']]
+    assert q2.screen.row('Home') == 'Home: Full' and q2.flash.get('IPOD', 'HOME') == '1'
+    q2.close()
 
 
 # Display settings saved and read back after a restart.

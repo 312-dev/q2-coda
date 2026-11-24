@@ -2412,25 +2412,6 @@ def test_every_scrolling_label_holds_then_runs_at_most_the_pace(fw, speed, paced
 # The Display settings the list engine reads.
 
 
-@pytest.mark.parametrize('shortcut, page, context', [
-    (1, b'localmusic/localclass_page', 0xf004), (3, b'localmusic/allmusic_page', 0xf00a),
-    (7, b'localmusic/playlist_page', 0), (11, b'localmusic/allmusic_page', 0xf00a),  # None: the carousel's card opens Favorites
-])
-def test_the_home_shortcut_opens_its_list(fw, shortcut, page, context):
-    theme(fw, SHORTCUT=shortcut)
-    fw.fn('home_shortcut_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
-    (name, ctx), = [a[:2] for _, a in fw.calls('navigator_to_with_context')]
-    assert C.string_at(name) == page and ctx == context
-
-
-def test_the_albums_shortcut_opens_all_albums(fw):
-    theme(fw, SHORTCUT=2)
-    seen = []
-    fw.mock('navigator_to_with_context', lambda name, ctx, *_: seen.append((C.string_at(name), C.c_int.from_address(ctx).value)))
-    fw.fn('home_shortcut_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
-    assert seen == [(b'localmusic/album_page', O['CLASS_ALBUMS'])]
-
-
 @pytest.mark.parametrize('light', [0, 1])
 def test_unflip_finds_the_grey_light_mode_draws_as_v(fw, light):
     theme(fw, LIGHT=light)

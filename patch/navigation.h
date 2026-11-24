@@ -263,7 +263,7 @@ typedef struct {
     unsigned lyric_seek_at; /* when it was sent, or last seen paused (lyric_seek_ms) */
     /* The Display settings, read from config.ini on first use, and the display page's value labels.
      */
-    int settings_read, accent, home, battery, home_rockbox, home_groovebox, shortcut, light,
+    int settings_read, accent, home, battery, shortcut, light,
         light_day,       /* light_day: Auto's answer for now (LIGHT=2) */
         keep_lit,        /* Smart Awake (#57, keep_lit_poll) */
         reduce_motion,   /* Reduce Motion, IPOD REDUCEMOTION (ui_kit.c motion_reduced) */
@@ -895,7 +895,6 @@ const int *clock_now(int *buf);
 unsigned flip(unsigned c) __attribute__((pure));
 unsigned flip_v(unsigned v, unsigned paper, unsigned ink);
 int ipod_home(void);
-const char *ipod_home_shortcut(void);
 void light_apply(const int *tm);
 int light_day(const int *tm);
 int neutral(unsigned c);
@@ -904,7 +903,6 @@ const option_t *option_of(const theme_t *T, int setting);
 int *option_slot(const theme_t *T, int setting);
 unsigned red_map(unsigned c, unsigned tone, unsigned glyph, int light);
 int setting(int i);
-int shortcut(void);
 unsigned tone_of(const unsigned *a, int tone);
 extern const char *const accent_names[];
 extern const int setting_counts[];

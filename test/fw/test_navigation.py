@@ -408,7 +408,7 @@ def test_artists_default_to_album_artist(fw):
 
 
 @pytest.mark.parametrize('values, home, light', [
-    ({}, 0, 0), (dict(HOME=b'2', LIGHT=b'1'), 2, 1), (dict(HOME=b'3', LIGHT=b'3'), 0, 0),
+    ({}, 0, 0), (dict(HOME=b'1', LIGHT=b'1'), 1, 1), (dict(HOME=b'2', LIGHT=b'1'), 0, 1), (dict(HOME=b'3', LIGHT=b'3'), 0, 0),
 ])
 def test_display_settings(fw, clock, values, home, light):
     Config(fw, **values)
@@ -429,7 +429,7 @@ def boot(fw):
 # (theme.xml: Split Home, Light Mode off unless Auto) applied once, and THEME 3 written.
 @pytest.mark.parametrize('theme', [{'THEME': b'0'}, {'THEME': b'1'}, {'THEME': b'2'}, {}])
 def test_a_unit_on_a_retired_theme_takes_oled_s_preset_once(fw, clock, theme):
-    config = Config(fw, HOME=b'2', LIGHT=b'1', **theme)
+    config = Config(fw, HOME=b'1', LIGHT=b'1', **theme)
     written = boot(fw)
     assert fw.fn('theme', C.c_void_p)() == C.addressof(fw.var('themes', C.c_char))  # themes[0]: OLED
     assert written == [('LIGHT', 0), ('HOME', 0), ('THEME', 3)]
@@ -439,30 +439,14 @@ def test_a_unit_on_a_retired_theme_takes_oled_s_preset_once(fw, clock, theme):
 
 
 def test_a_unit_on_oled_keeps_its_choices(fw, clock):
-    Config(fw, THEME=b'3', HOME=b'2', LIGHT=b'1')
+    Config(fw, THEME=b'3', HOME=b'1', LIGHT=b'1')
     assert boot(fw) == []
-    assert (fw.fn('ipod_home', C.c_int)(), fw.fn('ipod_light', C.c_int)()) == (2, 1)
+    assert (fw.fn('ipod_home', C.c_int)(), fw.fn('ipod_light', C.c_int)()) == (1, 1)
 
 
 def test_the_preset_keeps_light_mode_s_auto(fw, clock):
     Config(fw, THEME=b'0', HOME=b'0', LIGHT=b'2')
     assert boot(fw) == [('THEME', 3)]
-
-
-@pytest.mark.parametrize('value, rockbox, name', [
-    (b'', 1, b'Rockbox'), (b'', 0, b'Favorites'), (b'0', 0, b'Rockbox'), (b'1', 0, b'Artists'), (b'2', 0, b'Albums'),
-    (b'3', 0, b'Favorites'),
-    (b'4', 0, b'Rated Albums'), (b'5', 0, b'Shuffle'), (b'6', 0, b'Games'), (b'7', 0, b'Playlists'), (b'8', 0, b'Podcasts'),
-    (b'9', 0, b'Audiobooks'), (b'10', 0, b'Groovebox'), (b'11', 1, b'Rockbox'), (b'11', 0, b'Favorites'),  # None: the carousel's card takes the default
-    (b'12', 1, b'Rockbox'), (b'12', 0, b'Favorites'), (b'1x', 0, b'Favorites'),
-])
-def test_shortcut(fw, clock, value, rockbox, name):
-    Config(fw, **({'SHORTCUT': value} if value else {}))
-    def stat(version, path, info, *_):
-        struct.pack_into('<I', (C.c_char * 144).from_address(info), 20, 0o100755)
-        return 0 if rockbox and C.string_at(path) == b'/mnt/mmc/.rockbox/rockbox' else -1
-    fw.mock('fw___xstat', stat)
-    assert fw.fn('ipod_home_shortcut', C.c_char_p)() == name
 
 
 @pytest.mark.parametrize('fn, path', [('rockbox_available', b'/mnt/mmc/.rockbox/rockbox'),

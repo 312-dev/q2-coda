@@ -380,9 +380,6 @@ static void bar_sync(void *bar) {
     } else if (c && st.codec_step >= CODEC_STEPS)
         image_base_set_image(st.bar_bt, BT_GLYPH);
     accent(); /* reads the settings */
-    if (st.home_rockbox != rockbox_seen() ||
-        (shortcut() == SHORTCUT_GROOVEBOX && st.home_groovebox != groovebox_seen()))
-        coverflow_home_layout();
     coverflow_home_np(); /* Now Playing's row, there while something is loaded */
     /* the slim battery (list_marks.c): the set's body */
     int body = geom_val(V_BATT_W), inside = BATT_INSIDE_W;

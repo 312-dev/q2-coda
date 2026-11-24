@@ -307,7 +307,7 @@ static inline int arc_out(int r, int y) {
 #define EDIT_OK_PX 18 /* the date, time and sleep timer pages' OK label, on that card */
 #define PAGE_SLIDE_MS 220 /* a page's push; its pop is page_parallax.c's PAGE_POP_MS */
 #define GLIDE_MS 300 /* a remembered row's recall glide */
-#define HOME_SLIDE_MS 200 /* Cover Flow's and the carousel's wheel step */
+#define HOME_SLIDE_MS 200 /* Cover Flow's wheel step */
 #define HOME_FAST_SLIDE_MS 120 /* ... and within HOME_FAST_WINDOW_MS of the last */
 #define NP_ARTIST_RGB 0xcccccc
 /* Now Playing's text (local, Spotify and Radio): the title over the artist and album, the album

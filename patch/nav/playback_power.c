@@ -245,8 +245,10 @@ static int bt_vol_q2(unsigned level) {
     return best;
 }
 
-/* Home's Rockbox row (docs/boot.md#rockbox-from-home), bound by coverflow_home: a click leaves
- * Q2 Muse for Rockbox. demo cannot start it itself: Rockbox needs the screen, the keys and ALSA. So
+/* Rockbox from Home (docs/boot.md#rockbox-from-home): a click leaves Q2 Muse for Rockbox.
+ * ponytail: its one caller was Home's Shortcut, Carousel's card, removed with it, so the payload's
+ * link drops it until a row opens it again; test/fw still tests it, and S90play still looks for
+ * the flag. demo cannot start it itself: Rockbox needs the screen, the keys and ALSA. So
  * demo leaves S90play's flag and ends; S90play sees it, runs Rockbox and starts demo again when
  * Rockbox exits. Bluetooth's daemons are not demo's children and keep the headphones connected, so
  * Rockbox finds them and plays there (q2-rockbox's pcm-alsa). The queue is saved as power-off
