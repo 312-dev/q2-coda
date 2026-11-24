@@ -187,7 +187,8 @@ static void release_car(void) {
  * A2DP stream at each tick; then the silence is dropped and a PCM of its own closed. Anything else asked of the
  * player (a song, a resume, a stop, a seek, a preload, another output) ends it at once. On the headphone DAC the line
  * is unmuted for it, its release waited for, and muted again after. A PCM that will not open is not tried again
- * for CLICK_RETRY_MS (Bluetooth chosen with no headset's PCM yet). */
+ * for CLICK_RETRY_MS (Bluetooth chosen with no headset's PCM yet). Each session ends with one line in the unified log:
+ * its clicks and the frames of silence written for them, a warning when none were, as nothing was then heard. */
 enum { CLICK_HOLD_MS = 3000, CLICK_TICK_MS = 30, CLICK_RETRY_MS = 10000, CLICK_RATE = 48000 };
 static int last_hw = 17; /* the type of the device the last song was opened on (a Q2's) */
 
@@ -209,7 +210,8 @@ static void click_session(int way, int kind, int paused) {
     }
     dac_unmute(way, 1);
     int64_t last = now_ms();
-    output_idle_click(out, kind);
+    int clicks = 1;
+    long frames = output_idle_click(out, kind);
     for (;;) {
         struct timespec until;
         clock_gettime(CLOCK_REALTIME, &until);
@@ -226,13 +228,17 @@ static void click_session(int way, int kind, int paused) {
         c->click = 0;
         pthread_mutex_unlock(&c->mu);
         int64_t now = now_ms();
-        if (click) output_click(out, click), last = now;
+        if (click) output_click(out, click), last = now, clicks++;
         if (other || now - last >= CLICK_HOLD_MS) break;
-        output_idle_fill(out);
+        frames += output_idle_fill(out);
     }
     dac_mute(way);
     output_idle_end(out);
     if (!paused) close_output(0);
+    char line[128];
+    int n = snprintf(line, sizeof line, "q2player: %d click%s %s on way %d, %ld frames of silence written for them", clicks,
+                     clicks == 1 ? "" : "s", paused ? "paused" : "with nothing playing", way, frames);
+    plog(frames ? 'I' : 'W', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
 }
 
 /* ---- a USB DAC unplugged (docs/player.md#usb-dacs): its card is not there to open, or went under a write. The song
