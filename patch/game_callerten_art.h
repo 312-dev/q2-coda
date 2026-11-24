@@ -4,7 +4,7 @@
 #define GAME_CALLERTEN_ART_H
 
 #define ART_MAGIC 0x31415443u /* 'CTA1' */
-#define ART_BYTES 185220u   /* the whole file, its seal the last word */
+#define ART_BYTES 192228u   /* the whole file, its seal the last word */
 
 enum {
     A_BG,
@@ -69,6 +69,11 @@ enum {
     A_POSE_2,
     A_POSE_3,
     A_POSE_4,
+    A_CORD_0,
+    A_CORD_1,
+    A_CORD_2,
+    A_CORD_3,
+    A_CORD_4,
     A_PAD_ROUND,
     A_PAD_TUNE,
     A_PAD_STANDBY,

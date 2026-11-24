@@ -468,7 +468,7 @@ def test_draw_shows_the_score_line_the_ready_hint_and_the_end(fw):
 
 def test_bricks_is_games_first_engine_row_and_pauses_under_its_menu(fw):
     p = Page(fw)
-    assert p.s.engines == 1 and p.s.rows == 1  # the chooser's one row: Games' own are not shipped
+    assert p.s.engines == 2 and p.s.rows == 2  # the chooser's rows, Bricks and Caller Ten: Games' own are not shipped
     p.go(ENGINE)
     assert p.s.screen == ENGINE and api(fw)['eng_live']()
     canvas = Canvas(fw)
@@ -480,7 +480,7 @@ def test_bricks_is_games_first_engine_row_and_pauses_under_its_menu(fw):
     assert p.s.paused == 0 and api(fw)['eng_live']()
     p.close()
     assert not fw.var('engine__en', C.c_void_p).value
-    assert DEMO == ENGINE + 1 and PLAY and E_CENTRE
+    assert DEMO == ENGINE + 2 and PLAY and E_CENTRE
 
 
 def test_a_fading_row_is_drawn_in_its_colours_scaled_toward_black(fw):

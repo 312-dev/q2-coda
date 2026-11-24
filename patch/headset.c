@@ -136,9 +136,9 @@ static unsigned media_session(void) {
            *(volatile unsigned *)mcl_pdeqplaylist;
 }
 void media_set_playing(int playing) {
-    if (playing && addon_game_audio()) return; /* a game with the sound (a card game, Caller
-                                                  Ten): nothing of stock's starts over it; media_key
-                                                  too */
+    /* a game with the sound (a card game, Caller Ten): nothing of stock's starts over it;
+     * media_key too */
+    if (playing && addon_game_audio()) return;
     hs.automatic = 1;
     int owner = media_owner();
     if (owner == 5)

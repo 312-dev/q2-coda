@@ -13,9 +13,9 @@
  * heard, and when the game is left the Library's song is given back as it was, playing or paused
  * (ct_watch). Songs are picked on a worker thread (pick_worker), SQL never on the UI thread. */
 #include "engine.h"
+#include "game_callerten_art.h"
 #include "navigation.h"
 #include "ui_kit.h"
-#include "game_callerten_art.h"
 
 #define CT_ART PEQ_ROOT "/usr/share/q2games/callerten.bin"
 #define CT_ROUNDS 10
@@ -26,12 +26,12 @@
 #define CT_TITLE 128 /* bytes of a title kept, cut at a character */
 #define CT_ARTIST 80
 #define CT_PATH 512
-#define CT_MIN_SEC 40 /* a clip starts 30 to 60 percent in and plays about 13 s at most */
-#define CT_CLOCK 600  /* the round's clock: 100 points falling to 10 over 10 s */
-#define CT_CALL 20    /* steps the clip plays on after the call is placed */
-#define CT_REVEAL 60  /* steps the answer shows before the next caller */
-#define CT_ASK 6      /* steps between asks of the player's state while a clip is cued */
-#define CT_CUE_MAX 300 /* steps a clip may take to be heard before its song is passed over */
+#define CT_MIN_SEC 40       /* a clip starts 30 to 60 percent in and plays about 13 s at most */
+#define CT_CLOCK 600        /* the round's clock: 100 points falling to 10 over 10 s */
+#define CT_CALL 20          /* steps the clip plays on after the call is placed */
+#define CT_REVEAL 60        /* steps the answer shows before the next caller */
+#define CT_ASK 6            /* steps between asks of the player's state while a clip is cued */
+#define CT_CUE_MAX 300      /* steps a clip may take to be heard before its song is passed over */
 #define CT_MAGIC 0x314e5443 /* "CTN1" */
 #define CT_WATCH_MS 100     /* how soon after the game is left its music is given back */
 
@@ -58,8 +58,8 @@ enum { WHY_OK, WHY_SONGS, WHY_ARTISTS, WHY_PLAYABLE, WHY_LIBRARY };
 #define STATION_X4(k) (702 + (k) * 237)  /* the needle on 90.1, 98.1, 106.1: 160 + (f - 88) 7.4 */
 
 /* What the worker reads, kept for the game: the candidates (the answers first), and the ten
- * rounds' paths. The game reads none of it before done; whichever of the game and the worker lets go
- * last frees it (refs), so a game left while the worker runs leaks nothing. */
+ * rounds' paths. The game reads none of it before done; whichever of the game and the worker lets
+ * go last frees it (refs), so a game left while the worker runs leaks nothing. */
 struct song {
     unsigned id, key, style;
     int sec, year;
@@ -79,7 +79,8 @@ struct pick {
 struct keep {
     unsigned char *art;
     struct pick *pk;
-    int owned, was_playing; /* the sound is the game's; the Library's song played when it was taken */
+    int owned,
+        was_playing; /* the sound is the game's; the Library's song played when it was taken */
     unsigned watch;
 };
 
@@ -122,7 +123,7 @@ static void clip_start(struct ct *g, const char *path, int sec) {
     tk_snprintf(m + n, sizeof m - n, "|ss=%d|512|20|0|17|90}", sec);
     char vol[5];
     if (!output_device(vol)) dac_take(); /* the jack readied as stock's start readies it */
-    char *a; /* answers about the clip before: each a malloc'd copy */
+    char *a;                             /* answers about the clip before: each a malloc'd copy */
     while ((a = mcl_reply_take_by_key("player-status"))) free(a);
     while ((a = mcl_reply_take_by_key("player-stopstatus"))) free(a);
     say(m);
@@ -164,7 +165,8 @@ static void give_back(struct keep *k) {
     if (!k->owned) return;
     k->owned = 0;
     say("{mcl-stop\\null}");
-    int held = now_page_status() == 3 && mclGetPlayStatus() != 3; /* held: stopped, read as paused */
+    int held =
+        now_page_status() == 3 && mclGetPlayStatus() != 3; /* held: stopped, read as paused */
     if (held && k->was_playing)
         now_take_back();
     else if (held)
@@ -235,8 +237,8 @@ struct scan {
     char (*paths)[CT_PATH]; /* the first 2 * CT_ANS candidates' files, for the answers' checks */
 };
 
-/* A song of the query: kept unless a server's row or, for Deep cuts, played twice or more. 1 (enough)
- * stops the query. */
+/* A song of the query: kept unless a server's row or, for Deep cuts, played twice or more. 1
+ * (enough) stops the query. */
 static int cand_row(void *ctx, int n, char **v, char **c) {
     struct scan *sc = ctx;
     struct pick *p = sc->p;
@@ -294,15 +296,16 @@ static void *pick_worker(void *arg) {
         struct song s = p->song[i];
         p->song[i] = p->song[a], p->song[a] = s;
         copy_text(p->path[a], sc.paths[i], CT_PATH);
-        if (i != a) memcpy(sc.paths[i], sc.paths[a], CT_PATH); /* the row moved to i takes its path */
+        if (i != a)
+            memcpy(sc.paths[i], sc.paths[a], CT_PATH); /* the row moved to i takes its path */
         p->song[a].sec = sec;
         p->answers++;
     }
     if (p->why == WHY_OK)
-        p->why = p->n < CT_MIN                 ? WHY_SONGS
-                 : distinct < 4                ? p->mode == M_ARTISTS ? WHY_ARTISTS : WHY_SONGS
-                 : p->answers < 1              ? WHY_PLAYABLE
-                                               : WHY_OK;
+        p->why = p->n < CT_MIN    ? WHY_SONGS
+                 : distinct < 4   ? p->mode == M_ARTISTS ? WHY_ARTISTS : WHY_SONGS
+                 : p->answers < 1 ? WHY_PLAYABLE
+                                  : WHY_OK;
     free(sc.paths);
     __atomic_store_n(&p->done, 1, __ATOMIC_RELEASE);
     if (__atomic_sub_fetch(&p->refs, 1, __ATOMIC_ACQ_REL) == 0) free(p);
@@ -337,7 +340,8 @@ static void look_ahead(struct pick *p, int slot) {
     pthread_detach(t);
 }
 
-/* ---- drawing: the art file's pictures and faces, the library's text through stock's canvas ---- */
+/* ---- drawing: the art file's pictures and faces, the library's text through stock's canvas ----
+ */
 
 #define W32(b, o) (*(const unsigned *)((const unsigned char *)(b) + (o)))
 #define INK 0x1E1410
@@ -361,11 +365,40 @@ static const unsigned *pic_entry(const unsigned char *art, int id) {
     return (const unsigned *)(art + W32(art, 16) + 12 * id);
 }
 
+/* A run's pixels: v from o to end (fill), or the palette's colours of q's indices (copy); unrolled,
+ * as the payload is built -Oz and a frame's cost is mostly these two loops. */
+static inline __attribute__((always_inline)) void fill(unsigned *o, unsigned *end, unsigned v) {
+    for (; o + 4 <= end; o += 4) o[0] = v, o[1] = v, o[2] = v, o[3] = v;
+    for (; o < end; ++o) *o = v;
+}
+static inline __attribute__((always_inline)) void
+copy(unsigned *o, unsigned *end, const unsigned char *q, const unsigned *pal) {
+    for (; o + 2 <= end; o += 2, q += 2) o[0] = pal[q[0]], o[1] = pal[q[1]];
+    if (o < end) *o = pal[*q];
+}
+static void blend(unsigned *o, unsigned *end, const unsigned char *q, unsigned v,
+                  const unsigned *pal, unsigned a) {
+    for (; o < end; ++o) *o = mixc(*o, q ? pal[*q++] : v, a);
+}
+
+/* One run of a row from column i, k long, written within lo..hi: its literal indices q, or one
+ * colour v when q is 0. */
+static inline __attribute__((always_inline)) void run(unsigned *out, int i, int lo, int hi,
+                                                      const unsigned char *q, unsigned v,
+                                                      const unsigned *pal, unsigned a) {
+    if (a < 256)
+        blend(out + lo, out + hi, q ? q + (lo - i) : 0, v, pal, a);
+    else if (q)
+        copy(out + lo, out + hi, q + (lo - i), pal);
+    else
+        fill(out + lo, out + hi, v);
+}
+
 /* Picture id at its place moved dx, dy: its rows decoded within the part being painted and outside
  * the hole (x0 y0 x1 y1 on the sheet, a box a picture drawn after it covers whole; 0 none), at a of
  * 256 over what is there, its first w columns only (w < 0: all). */
-static void blit(struct eng_surface *s, const unsigned char *art, int id, int dx, int dy, unsigned a,
-                 int w, const int *hole) {
+static void blit(struct eng_surface *s, const unsigned char *art, int id, int dx, int dy,
+                 unsigned a, int w, const int *hole) {
     const unsigned *e = pic_entry(art, id), *pal = (const unsigned *)(art + W32(art, 8));
     int x = (short)(e[1] >> 16) + dx, y = (short)(e[1] & 0xffff) + dy, h = (int)(e[2] & 0xffff);
     int pw = (int)(e[2] >> 16), c1 = x + (w >= 0 && w < pw ? w : pw);
@@ -376,37 +409,28 @@ static void blit(struct eng_surface *s, const unsigned char *art, int id, int dx
     for (int j = r0; j < r1; ++j) {
         const unsigned char *p = data + ((const unsigned *)data)[j - y];
         unsigned *out = row_at(s, j);
-        /* the hole's columns in this row, h0 <= q < h1: none when h1 <= h0 */
-        int h0 = c1, h1 = c1;
-        if (hole && j >= hole[1] && j < hole[3]) h0 = hole[0], h1 = hole[2];
-        for (int i = x; i < c1;) {
+        /* the columns written: c0..a1, then b0..c1 past the hole in this row */
+        int a1 = c1, b0 = c1;
+        if (hole && j >= hole[1] && j < hole[3] && hole[0] < c1 && hole[2] > c0)
+            a1 = hole[0] > c0 ? hole[0] : c0, b0 = hole[2] < c1 ? hole[2] : c1;
+        for (int i = x, k; i < c1; i += k) {
             unsigned n = *p++;
-            int k = n < 128 ? (int)n + 1 : (int)n - 126, lo = i > c0 ? i : c0, hi = i + k < c1 ? i + k : c1;
-            if (lo < hi) {
-                /* a run across the hole is written in two parts, round it */
-                int m0 = hi > h0 && lo < h1 ? (h0 > lo ? h0 : lo) : hi, m1 = m0 < hi ? (h1 < hi ? h1 : hi) : hi;
-                if (n < 128) {
-                    const unsigned char *q = p - i;
-                    if (a >= 256) {
-                        for (int c = lo; c < m0; ++c) out[c] = pal[q[c]];
-                        for (int c = m1; c < hi; ++c) out[c] = pal[q[c]];
-                    } else {
-                        for (int c = lo; c < m0; ++c) out[c] = mixc(out[c], pal[q[c]], a);
-                        for (int c = m1; c < hi; ++c) out[c] = mixc(out[c], pal[q[c]], a);
-                    }
-                } else {
-                    unsigned v = pal[*p];
-                    if (a >= 256) {
-                        for (unsigned *o = out + lo, *end = out + m0; o < end; ++o) *o = v;
-                        for (unsigned *o = out + m1, *end = out + hi; o < end; ++o) *o = v;
-                    } else {
-                        for (int c = lo; c < m0; ++c) out[c] = mixc(out[c], v, a);
-                        for (int c = m1; c < hi; ++c) out[c] = mixc(out[c], v, a);
-                    }
-                }
+            const unsigned char *q = n < 128 ? p : 0;
+            k = n < 128 ? (int)n + 1 : (int)n - 126;
+            p += q ? k : 1;
+            if (i + k <= c0) continue; /* before the part painted */
+            unsigned v = q ? 0 : pal[p[-1]];
+            if (i >= c0 && i + k <= a1 && a >= 256) { /* the most of them: whole, opaque */
+                if (q)
+                    copy(out + i, out + i + k, q, pal);
+                else
+                    fill(out + i, out + i + k, v);
+                continue;
             }
-            p += n < 128 ? k : 1;
-            i += k;
+            int lo = i > c0 ? i : c0, hi = i + k < a1 ? i + k : a1;
+            if (lo < hi) run(out, i, lo, hi, q, v, pal, a);
+            lo = i > b0 ? i : b0, hi = i + k < c1 ? i + k : c1;
+            if (lo < hi) run(out, i, lo, hi, q, v, pal, a);
         }
     }
 }
@@ -427,7 +451,8 @@ static int gwidth(const unsigned char *art, int face, const char *t) {
     unsigned words = W32(art, W32(art, 24) + 8 * face);
     int w = 0;
     for (; *t; ++t) {
-        unsigned c = (unsigned char)*t, rec = c >= 32 && c < 128 ? W32(art, words + 4 * (c - 32)) : 0;
+        unsigned c = (unsigned char)*t,
+                 rec = c >= 32 && c < 128 ? W32(art, words + 4 * (c - 32)) : 0;
         if (rec) w += *(const short *)(art + rec);
     }
     return w;
@@ -438,10 +463,12 @@ static void gtext(struct eng_surface *s, const unsigned char *art, int face, con
     int base = (y4 + (int)W32(art, ft + 4) + 2) >> 2;
     x4 -= gwidth(art, face, t) * align / 2;
     for (; *t; ++t) {
-        unsigned c = (unsigned char)*t, rec = c >= 32 && c < 128 ? W32(art, words + 4 * (c - 32)) : 0;
+        unsigned c = (unsigned char)*t,
+                 rec = c >= 32 && c < 128 ? W32(art, words + 4 * (c - 32)) : 0;
         if (!rec) continue;
         const unsigned char *r = art + rec, *m = r + 6;
-        int w = r[2], h = r[3], gx = ((x4 + 2) >> 2) + (signed char)r[4], gy = base + (signed char)r[5];
+        int w = r[2], h = r[3], gx = ((x4 + 2) >> 2) + (signed char)r[4],
+            gy = base + (signed char)r[5];
         int c0 = gx < s->x0 ? s->x0 : gx, c1 = gx + w > s->x1 ? s->x1 : gx + w;
         int r0 = gy < s->y0 ? s->y0 : gy, r1 = gy + h > s->y1 ? s->y1 : gy + h;
         for (int j = r0; j < r1; ++j) {
@@ -479,8 +506,8 @@ static int measure(void *canvas, const unsigned *w, int n, int px) {
     canvas_set_font(canvas, face, (unsigned)fpx);
     return (int)(canvas_measure_text(canvas, w, (unsigned)n) + 0.5f);
 }
-static int utext(struct eng_surface *s, const unsigned *w, int n, int x, int ym, int px, unsigned rgb,
-                 int align) {
+static int utext(struct eng_surface *s, const unsigned *w, int n, int x, int ym, int px,
+                 unsigned rgb, int align) {
     if (n <= 0) return 0;
     int tw = measure(s->canvas, w, n, px);
     x -= tw * align / 2;
@@ -511,8 +538,9 @@ static int clip_to(struct eng_surface *s, int x0, int y0, int x1, int y1, int *w
 }
 
 /* w[0..n) fitted to maxw (SPEC: Long titles): at px, else a px smaller down to 14, else cut at 14
- * px with "...". Returns the px; *keep is n when it fits whole, else -1 - the characters kept before
- * the "..."; *full is its whole width at the px returned (14 when cut), which a scroll runs over. */
+ * px with "...". Returns the px; *keep is n when it fits whole, else -1 - the characters kept
+ * before the "..."; *full is its whole width at the px returned (14 when cut), which a scroll runs
+ * over. */
 static int fit_text(void *cv, const unsigned *w, int n, int maxw, int px, int *keep, int *full) {
     unsigned b[CT_TITLE + 3];
     for (*keep = n; px >= 14; --px)
@@ -549,19 +577,23 @@ static void fit(struct ct *g, void *cv, int i, const unsigned *w, int n, int max
 
 static const char *const STATION[] = { "TITLES", "ARTISTS", "DEEP CUTS" };
 
-static const char *song_text(const struct ct *g, int song) {
-    return visible(g->k->pk, song);
-}
+static const char *song_text(const struct ct *g, int song) { return visible(g->k->pk, song); }
 
-static int answered(const struct ct *g) { return g->screen == S_END || (g->screen == S_ROUND && g->phase == P_REVEAL); }
+static int answered(const struct ct *g) {
+    return g->screen == S_END || (g->screen == S_ROUND && g->phase == P_REVEAL);
+}
 
 /* The glass's one line. */
 static const char *glass_words(const struct ct *g, char *b) {
     switch (g->screen) {
-    case S_TUNE: return STATION[g->sel];
-    case S_STANDBY: return STATION[g->mode];
-    case S_NOSIGNAL: return "NO SIGNAL";
-    case S_END: return g->wrongs >= 3 ? "LINES ARE CLOSED" : "THAT'S THE SHOW";
+    case S_TUNE:
+        return STATION[g->sel];
+    case S_STANDBY:
+        return STATION[g->mode];
+    case S_NOSIGNAL:
+        return "NO SIGNAL";
+    case S_END:
+        return g->wrongs >= 3 ? "LINES ARE CLOSED" : "THAT'S THE SHOW";
     case S_ROUND:
         if (g->phase != P_REVEAL) return g->mode == M_ARTISTS ? "WHO IS PLAYING?" : "NAME THE SONG";
         if (g->pick != g->right) return "NOT THIS TIME";
@@ -580,7 +612,7 @@ static int lamp(const struct ct *g, int i, unsigned *a) {
         return (i - c + 10) % 10 < 3 ? A_LAMP0_AMBER + 2 * i : 0;
     }
     if (g->screen != S_ROUND || !g->heard) return 0;
-    int lit = g->lamps, red = lit <= 3; /* the last three burn red */
+    int lit = g->lamps, red = lit <= 3;                         /* the last three burn red */
     if (g->phase == P_AIR && g->at < 10 && i > g->at) return 0; /* lighting left to right */
     if (i == g->dim && g->dim_t < 6) {
         *a = (unsigned)(256 * (6 - g->dim_t) / 6);
@@ -622,7 +654,10 @@ static int pose(int lift) { return lift >= 5 ? 4 : lift - 1; }
 static const signed char TURN[9] = { 1, 2, 3, 3, 2, 2, 1, 0, 0 }; /* 16 degree steps: out, back */
 
 static void draw_phone(struct eng_surface *s, const struct ct *g, const unsigned char *art) {
-    if (g->lift > 0) pic(s, art, A_POSE_0 + pose(g->lift), 0, 0, 256, -1);
+    if (g->lift > 0) { /* the handset and its cord's lower loops */
+        pic(s, art, A_POSE_0 + pose(g->lift), 0, 0, 256, -1);
+        pic(s, art, A_CORD_0 + pose(g->lift), 0, 0, 256, -1);
+    }
     int sel = g->screen == S_ROUND || g->screen == S_END ? g->sel : 1;
     pic(s, art, A_DIAL_1 + sel - 1, 0, 0, 256, -1);
     if (g->turn_t >= 0 && g->turn_t < 9 && TURN[g->turn_t])
@@ -664,7 +699,8 @@ static void draw_round_pad(struct eng_surface *s, struct ct *g, const unsigned c
     tk_snprintf(b, sizeof b, "CALLER %d OF %d", g->round + 1 > g->rounds ? g->rounds : g->round + 1,
                 g->rounds);
     heading(s, art, b, NX0);
-    for (int k = 0; k < 3; ++k) pic(s, art, k < g->wrongs ? A_BOX_CROSS : A_BOX_EMPTY, 17 * k, 0, 256, -1);
+    for (int k = 0; k < 3; ++k)
+        pic(s, art, k < g->wrongs ? A_BOX_CROSS : A_BOX_EMPTY, 17 * k, 0, 256, -1);
     int shown = answered(g);
     for (int i = 0; i < 4; ++i) {
         int dy = 30 * i, look = 0;
@@ -705,7 +741,8 @@ static void draw_desk(struct eng_surface *s, struct ct *g, const unsigned char *
     switch (g->screen) {
     case S_TUNE: {
         static const char *const name[] = { "Titles", "Artists", "Deep cuts" };
-        static const char *const sub[] = { "Name the song", "Who is playing?", "Songs you rarely play" };
+        static const char *const sub[] = { "Name the song", "Who is playing?",
+                                           "Songs you rarely play" };
         pic(s, art, A_PAD_TUNE, 0, 0, 256, -1);
         heading(s, art, "TONIGHT'S CONTESTS", NX0);
         for (int i = 0; i < 3; ++i) {
@@ -730,9 +767,10 @@ static void draw_desk(struct eng_surface *s, struct ct *g, const unsigned char *
     case S_NOSIGNAL: {
         int why = g->k->pk ? g->k->pk->why : WHY_LIBRARY;
         heading(s, art, "NO CONTEST TONIGHT", NX0);
-        atext(s, why == WHY_LIBRARY ? "The library" : "Add more music", (NX0 + NX1) / 2, NY0 + 56, 20,
+        atext(s, why == WHY_LIBRARY ? "The library" : "Add more music", (NX0 + NX1) / 2, NY0 + 56,
+              20, INK, 1);
+        atext(s, why == WHY_LIBRARY ? "is not ready" : "to play", (NX0 + NX1) / 2, NY0 + 80, 20,
               INK, 1);
-        atext(s, why == WHY_LIBRARY ? "is not ready" : "to play", (NX0 + NX1) / 2, NY0 + 80, 20, INK, 1);
         atext(s,
               why == WHY_ARTISTS    ? "A contest needs 4 artists"
               : why == WHY_PLAYABLE ? "None of them can play"
@@ -742,7 +780,8 @@ static void draw_desk(struct eng_surface *s, struct ct *g, const unsigned char *
         atext(s, "Center: quit", (NX0 + NX1) / 2, NY1 - 13, 14, INK_SOFT, 1);
         break;
     }
-    default: draw_round_pad(s, g, art);
+    default:
+        draw_round_pad(s, g, art);
     }
 }
 
@@ -770,7 +809,8 @@ static void draw_summary(struct eng_surface *s, struct ct *g, const unsigned cha
     }
     gtext(s, art, F_R14, g->nmissed ? "MISSED: CENTER PLAYS ONE" : "NONE MISSED", 4 * (SX0 + 10),
           838, INK_SOFT, 0);
-    if (!g->nmissed) atext(s, "Play/Pause: a new contest", (SX0 + SX1) / 2, SUM_Y(1), 15, INK_SOFT, 1);
+    if (!g->nmissed)
+        atext(s, "Play/Pause: a new contest", (SX0 + SX1) / 2, SUM_Y(1), 15, INK_SOFT, 1);
     for (int r = 0; r < SUM_ROWS && g->top + r < g->nmissed; ++r) {
         int m = g->top + r, y = SUM_Y(r), on = m == g->sel;
         const struct song *sg = &g->k->pk->song[g->missed[m]];
@@ -809,7 +849,8 @@ static void draw(const void *state, struct eng_surface *s) {
     }
     int was[4];
     struct eng_surface up = *s, low = *s;
-    if (g->cut > 0 && clip_to(&up, 0, 0, ENG_W, g->cut, was)) { /* the desk until the sheet covers it */
+    if (g->cut > 0 &&
+        clip_to(&up, 0, 0, ENG_W, g->cut, was)) { /* the desk until the sheet covers it */
         draw_desk(&up, g, art);
         canvas_set_clip_rect(s->canvas, was);
     }
@@ -840,9 +881,20 @@ static int sfx_step(struct ct *g) {
 /* What a step can change, each a box of the sheet: flush marks each set one once, so a step never
  * passes the engine's eight rects and none is joined into a large one. */
 enum {
-    M_GLASS = 1, M_ONAIR = 2, M_REPLAY = 4, M_RINGS = 8, M_LAMPS = 16, M_KNOB = 32, M_POSE = 64,
-    M_DIAL = 128, M_BAND = 256, M_SCORE = 512, M_ROW = 1024,          /* rows: 4 bits */
-    M_TUNE = 1 << 14, M_SUMSCORE = 1 << 17, M_SUMROWS = 1 << 18       /* tune rows: 3 bits */
+    M_GLASS = 1,
+    M_ONAIR = 2,
+    M_REPLAY = 4,
+    M_RINGS = 8,
+    M_LAMPS = 16,
+    M_KNOB = 32,
+    M_POSE = 64,
+    M_DIAL = 128,
+    M_BAND = 256,
+    M_SCORE = 512,
+    M_ROW = 1024, /* rows: 4 bits */
+    M_TUNE = 1 << 14,
+    M_SUMSCORE = 1 << 17,
+    M_SUMROWS = 1 << 18 /* tune rows: 3 bits */
 };
 static void flush(struct ct *g) {
     unsigned m = g->marks;
@@ -854,7 +906,7 @@ static void flush(struct ct *g) {
     if (m & M_RINGS) mark_pic(g, A_RINGS_1, 0, 0);
     if (m & M_LAMPS) eng_dirty(148, 89, 172, 16);
     if (m & M_KNOB) mark_pic(g, A_KNOB_0, 0, 0);
-    if (m & M_POSE) mark_pic(g, A_POSE_0, 0, 0);
+    if (m & M_POSE) mark_pic(g, A_POSE_0, 0, 0), mark_pic(g, A_CORD_0, 0, 0);
     if (m & M_DIAL) mark_pic(g, A_DIAL_1, 0, 0);
     if (m & M_BAND) eng_dirty(NX0, NY0, NX1 - NX0, 23);
     if (m & M_SCORE) eng_dirty(NX0, NY1 - 28, NX1 - NX0, 28);
@@ -888,17 +940,20 @@ static void deal(struct ct *g) {
         for (int i = 0; i < p->n; ++i) {
             if (i == g->song || same(visible(p, i), visible(p, g->song))) continue;
             int dup = 0;
-            for (int k = 0; k < n; ++k) dup |= i == chosen[k] || same(visible(p, i), visible(p, chosen[k]));
+            for (int k = 0; k < n; ++k)
+                dup |= i == chosen[k] || same(visible(p, i), visible(p, chosen[k]));
             if (dup) continue;
             int sc = (a->style && p->song[i].style == a->style ? 8 : 0) +
-                     (a->year > 0 && p->song[i].year / 10 == a->year / 10 ? 4 : 0) + (int)rand_below(6);
+                     (a->year > 0 && p->song[i].year / 10 == a->year / 10 ? 4 : 0) +
+                     (int)rand_below(6);
             if (sc > best_score) best = i, best_score = sc;
         }
         if (best < 0) break; /* the worker saw four that read otherwise: not reached */
         chosen[n++] = best;
     }
     g->right = (int)rand_below(4);
-    for (int i = 0, k = 0; i < 4; ++i) g->row[i] = i == g->right ? g->song : k < n ? chosen[k++] : g->song;
+    for (int i = 0, k = 0; i < 4; ++i)
+        g->row[i] = i == g->right ? g->song : k < n ? chosen[k++] : g->song;
 }
 
 static void contest_end(struct ct *g);
@@ -907,7 +962,8 @@ static void contest_end(struct ct *g);
  * contest ends. */
 static void round_start(struct ct *g) {
     struct pick *p = g->k->pk;
-    while (g->slot < p->answers && __atomic_load_n(&p->there[g->slot], __ATOMIC_ACQUIRE) < 0) ++g->slot;
+    while (g->slot < p->answers && __atomic_load_n(&p->there[g->slot], __ATOMIC_ACQUIRE) < 0)
+        ++g->slot;
     if (g->slot >= p->answers) {
         contest_end(g);
         return;
@@ -916,7 +972,8 @@ static void round_start(struct ct *g) {
     deal(g);
     look_ahead(p, g->slot);
     g->phase = P_CUE, g->t = g->at = 0, g->sel = 1, g->pick = -1, g->pts = 0, g->replay = 0;
-    g->lamps = 10, g->dim = -1, g->ring = g->ring_from = 0, g->swell = 0, g->turn_t = -1, g->scroll_t = 0;
+    g->lamps = 10, g->dim = -1, g->ring = g->ring_from = 0, g->swell = 0, g->turn_t = -1,
+    g->scroll_t = 0;
     g->lift = g->lift > 3 ? 3 : g->lift, g->lift_dir = -1; /* the handset back down */
     for (int i = 0; i < 4; ++i) g->fit_px[i] = 0, g->scroll[i] = 0;
     g->clip_sec = p->song[g->song].sec * (30 + (int)rand_below(31)) / 100;
@@ -1049,7 +1106,8 @@ static int row_at_finger(const struct eng_input *in, int y0, int pitch, int rows
 }
 
 static int round_step(struct ct *g, const struct eng_input *in) {
-    if (++g->t % 60 == 0) eng_awake(); /* the screen kept lit while the caller listens, as for a video */
+    if (++g->t % 60 == 0)
+        eng_awake(); /* the screen kept lit while the caller listens, as for a video */
     if (g->phase == P_CUE || g->phase == P_AIR) {
         if (in->ticks) dial(g, in->ticks);
         if (g->turn_t >= 0 && ++g->turn_t >= 9) g->turn_t = -1;
@@ -1119,17 +1177,20 @@ static int round_step(struct ct *g, const struct eng_input *in) {
         }
         break;
     }
-    if (g->screen == S_ROUND && g->dim >= 0 && g->dim_t < 6) g->dim_t++, MARK(g, M_LAMPS); /* a lamp going out */
+    if (g->screen == S_ROUND && g->dim >= 0 && g->dim_t < 6)
+        g->dim_t++, MARK(g, M_LAMPS); /* a lamp going out */
     if (g->screen == S_ROUND) scroll_step(g);
     return 1;
 }
 
-static const short CUT[15] = { 320, 290, 254, 219, 186, 158, 136, 119, 109, 104, 103, 104, 106, 107, 108 };
+static const short CUT[15] = { 320, 290, 254, 219, 186, 158, 136, 119,
+                               109, 104, 103, 104, 106, 107, 108 };
 
 static int end_step(struct ct *g, const struct eng_input *in) {
     g->end_t++;
     int moving = 0;
-    if (g->end_t <= 14 && !g->reduced) { /* the sheet comes up from under the edge, a 5 px overshoot */
+    if (g->end_t <= 14 &&
+        !g->reduced) { /* the sheet comes up from under the edge, a 5 px overshoot */
         int was = g->cut;
         g->cut = CUT[g->end_t];
         int y0 = was < g->cut ? was : g->cut, y1 = was < g->cut ? g->cut : was;
@@ -1191,7 +1252,8 @@ static int step_in(struct ct *g, const struct eng_input *in) {
         say("{mcl-play\\null}");
         g->clip_held = 0;
     }
-    if (k->owned && I(g_dacoff_time, 0) > 0) I(g_dacoff_time, 0) = 0; /* the DAC kept on, as a video */
+    if (k->owned && I(g_dacoff_time, 0) > 0)
+        I(g_dacoff_time, 0) = 0; /* the DAC kept on, as a video */
     g->reduced = motion_reduced();
     int moving = sfx_step(g);
     if (g->needle_t < 8) { /* the needle slides 59 px in 8 frames, easing out */
@@ -1230,8 +1292,10 @@ static int step_in(struct ct *g, const struct eng_input *in) {
     case S_NOSIGNAL:
         if (in->pressed & ENG_CENTRE) eng_quit();
         return moving;
-    case S_ROUND: return round_step(g, in) | moving;
-    case S_END: return end_step(g, in) | moving;
+    case S_ROUND:
+        return round_step(g, in) | moving;
+    case S_END:
+        return end_step(g, in) | moving;
     }
     return moving;
 }
@@ -1267,5 +1331,6 @@ static void init(void *state, int h) {
     eng_dirty_all();
 }
 
-const struct eng_game eng_callerten = { "Caller Ten", sizeof(struct ct), ENG_STILL | ENG_FULL,
-                                        init, step, draw, pause };
+const struct eng_game eng_callerten = {
+    "Caller Ten", sizeof(struct ct), ENG_STILL | ENG_FULL, init, step, draw, pause
+};
