@@ -415,7 +415,7 @@ refill before it plays on: 3 s of the song ahead, then 6 s and 12 s at the stall
 ([internals](internals.md#streaming-configuration)). Its open of such a file analyses at most
 100 ms of audio (`GROW_ANALYZE_US`): an embedded cover, which its FFmpeg cannot size, otherwise held the open
 until 5 s of audio had come ([internals](internals.md#streaming-configuration)). While it waits it writes `/tmp/q2player.wait`, the path and a newline, and removes the file
-once it plays again. `done`, `fail`, a stale file or no line: the end of the bytes is the song's end.
+once it plays again. Each wait logs two lines in the unified log, `q2player: waiting for the song's download: byte 1234567 of 9876543` (a warning) at its start and `q2player: the wait for the song's download ended after 10900 ms, at byte 1234567` at its end (`grow.c` `wait_mark`): meanwhile the song is playing as demo sees it, its position stands, and the PCM is open with nothing written (on Bluetooth the PCM's own silence goes to the headset, and Bluetooth's close after a pause does not apply: a pause asked during the wait is taken once the bytes come). `test/player/run.py` `test_bt_song_stalled_in_its_download`. `done`, `fail`, a stale file or no line: the end of the bytes is the song's end.
 
 **What the firmware shows.** A server song is loading while it is the song Now Playing shows and
 either it has not started (the pressed song, `catalogue_np_now`: the app's first `.stream` line) or
