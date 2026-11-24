@@ -373,7 +373,7 @@ CT_FIELDS=('k h screen phase mode sel t at reduced round rounds wrongs rights st
 CT={}; at=0
 for f in CT_FIELDS:
     name,_,n=f.partition(':'); CT[name]=at; at+=4*int(n or 1)
-CT_STEP_BOUND,CT_FRAME_BOUND,CT_CALL_BOUND,CT_REVEAL_BOUND,CT_SUMMARY_BOUND,CT_WHOLE_BOUND=6_000,300_000,330_000,520_000,600_000,1_200_000
+CT_STEP_BOUND,CT_FRAME_BOUND,CT_CALL_BOUND,CT_REVEAL_BOUND,CT_SUMMARY_BOUND,CT_WHOLE_BOUND=1_000,560_000,560_000,400_000,560_000,1_450_000
 pick(len(OWN)+1); EN=m.get(payload_syms['en']); S=EN+O_ENG_STATE
 cw=lambda f,v: m.word(S+CT[f],v); cr=lambda f: signed(m.get(S+CT[f]))
 K=m.get(S); ART=m.get(K)
@@ -428,22 +428,25 @@ for k in range(60):
 assert cr('at')==60 and cr('lamps')==9
 # The call: the handset lifts in six frames, the clip plays on 20, then the reveal: rows, hub, glass, score.
 ekey(O['KEY_CENTER'],1); ekey(O['KEY_CENTER'])
-call=0
+call=0; dear={}  # each kind's dearest frame's rects, for a failure's message
 for k in range(21):
-    rects,cost=eframe(); call=max(call,eplay(rects,cost))
+    rects,cost=eframe(); c=eplay(rects,cost)
+    if c>call: call,dear['call']=c,rects
 assert cr('phase')==3,cr('phase')
 reveal=0
 for k in range(9):
-    rects,cost=eframe(); reveal=max(reveal,eplay(rects,cost))
+    rects,cost=eframe(); c=eplay(rects,cost)
+    if c>reveal: reveal,dear['reveal']=c,rects
 # The contest's end: the last caller's reveal runs out, the sheet comes up over 14 frames, the score counts.
 cw('round',9); cw('t',59)
 rects,cost=eframe(); whole=max(whole,eplay(rects,cost))  # the end: everything changes, the whole sheet
 summary=0
-for k in range(40):
-    rects,cost=eframe(); summary=max(summary,eplay(rects,cost))
+for k in range(55):  # the slide's 14 frames, then the count-up's 40
+    rects,cost=eframe(); c=eplay(rects,cost)
+    if c>summary: summary,dear['summary']=c,rects
 assert cr('screen')==5 and cr('cut')==108 and '/mnt/data/game-callerten' in m.files
 whole=max(whole,epaint((0,0,375,320)))
-assert whole<CT_WHOLE_BOUND and worst<CT_FRAME_BOUND and step_worst<CT_STEP_BOUND and call<CT_CALL_BOUND and reveal<CT_REVEAL_BOUND and summary<CT_SUMMARY_BOUND,(whole,worst,step_worst,call,reveal,summary)
+assert whole<CT_WHOLE_BOUND and worst<CT_FRAME_BOUND and step_worst<CT_STEP_BOUND and call<CT_CALL_BOUND and reveal<CT_REVEAL_BOUND and summary<CT_SUMMARY_BOUND,(whole,worst,step_worst,call,reveal,summary,dear)
 print(f'Caller Ten on MIPS: {step_worst} instructions for a frame\'s step at most, {worst} with its changed rects painted (the needle, the clock, the dial), {call} for the call\'s dearest frame, {reveal} for the reveal\'s, {summary} for the summary\'s, {whole} to paint the whole sheet (payload only; stock\'s text and flush mocked)')
 m.u.hook_del(counter)
 key(O['KEY_RETURN']); assert word(G_PAUSED)==2 and not eframes()

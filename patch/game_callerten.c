@@ -411,8 +411,10 @@ static void blit(struct eng_surface *s, const unsigned char *art, int id, int dx
         unsigned *out = row_at(s, j);
         /* the columns written: c0..a1, then b0..c1 past the hole in this row */
         int a1 = c1, b0 = c1;
-        if (hole && j >= hole[1] && j < hole[3] && hole[0] < c1 && hole[2] > c0)
+        if (hole && j >= hole[1] && j < hole[3] && hole[0] < c1 && hole[2] > c0) {
             a1 = hole[0] > c0 ? hole[0] : c0, b0 = hole[2] < c1 ? hole[2] : c1;
+            if (a1 == c0 && b0 == c1) continue; /* the whole row's part is under the hole */
+        }
         for (int i = x, k; i < c1; i += k) {
             unsigned n = *p++;
             const unsigned char *q = n < 128 ? p : 0;
@@ -436,7 +438,7 @@ static void blit(struct eng_surface *s, const unsigned char *art, int id, int dx
 }
 static void pic(struct eng_surface *s, const unsigned char *art, int id, int dx, int dy, unsigned a,
                 int w) {
-    blit(s, art, id, dx, dy, a, w, 0);
+    if (a) blit(s, art, id, dx, dy, a, w, 0);
 }
 
 static void mark_pic(const struct ct *g, int id, int dx, int dy) {
@@ -989,6 +991,7 @@ static void pass_over(struct ct *g) {
 }
 
 static void call(struct ct *g, int row) {
+    if (row + 1 != g->sel) mark_row(g, g->sel - 1), mark_row(g, row); /* a finger's row, chosen */
     g->pick = row;
     g->sel = row + 1;
     g->pts = 100 - 3 * (g->at < CT_CLOCK ? g->at : CT_CLOCK) / 20;
@@ -996,7 +999,6 @@ static void call(struct ct *g, int row) {
     g->lift = g->reduced ? 6 : 0, g->lift_dir = 1;
     sfx(g, ENG_SFX_TICK);
     MARK(g, M_POSE | M_DIAL);
-    for (int i = 0; i < 4; ++i) mark_row(g, i);
 }
 
 static void answer(struct ct *g) {
@@ -1012,8 +1014,8 @@ static void answer(struct ct *g) {
         g->missed[g->nmissed++] = g->song;
         sfx(g, ENG_SFX_ALERT);
     }
-    for (int i = 0; i < 4; ++i) mark_row(g, i);
-    MARK(g, M_GLASS | M_DIAL | M_ONAIR | M_BAND | M_SCORE); /* the hub, a strike box */
+    for (int i = 0; i < 4; ++i)
+        mark_row(g, i); /* the answer at once; the rest in the next two frames */
 }
 
 static void contest_end(struct ct *g) {
@@ -1160,7 +1162,9 @@ static int round_step(struct ct *g, const struct eng_input *in) {
         if (g->t >= CT_CALL) answer(g);
         break;
     case P_REVEAL:
-        if (g->t <= 8) /* the wash, the check, the strike */
+        if (g->t == 1) MARK(g, M_GLASS | M_DIAL | M_ONAIR); /* the words, the hub */
+        if (g->t == 2) MARK(g, M_BAND | M_SCORE);           /* a strike box, the points */
+        if (g->t <= 8)                                      /* the wash, the check, the strike */
             mark_row(g, g->right), g->pick >= 0 ? mark_row(g, g->pick) : (void)0;
         if (g->shown != g->score) {
             int from = g->score - g->pts;
@@ -1198,11 +1202,12 @@ static int end_step(struct ct *g, const struct eng_input *in) {
         moving = 1;
     }
     if (g->end_t == 14 && g->best_new) MARK(g, M_SUMSCORE);
-    if (g->shown != g->score) {
-        g->shown = g->end_t >= 40 ? g->score : g->score * g->end_t / 40;
+    if (g->shown != g->score &&
+        g->end_t > 14) { /* the score counts up in 40 frames once it is up */
+        g->shown = g->end_t >= 54 ? g->score : g->score * (g->end_t - 14) / 40;
         MARK(g, M_SUMSCORE);
-        moving = 1;
     }
+    moving |= g->shown != g->score;
     if (in->ticks && g->nmissed) {
         int sel = g->sel + (in->ticks > 0 ? 1 : -1);
         sel = sel < 0 ? 0 : sel >= g->nmissed ? g->nmissed - 1 : sel;
