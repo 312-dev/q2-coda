@@ -21,7 +21,7 @@ extern int stock_home_trampoline(void *win, void *ctx), stock_scan_all_trampolin
 
 extern void storage_scanned(void); /* storage.c: a whole scan's end, saved */
 
-enum { PREPARING, COVERS, TRACKS };
+enum { LOADING, COVERS, TRACKS }; /* cf.screen; LOADING: none shown yet */
 cf_page_t cf __attribute__((section(".scratch")));
 
 static void pick(int i);
@@ -562,13 +562,45 @@ void art_note(const char *note, unsigned key, const char *track) {
     }
 }
 
+/* Album a's distance from album c round the ring of n albums. */
+static int ring_gap(int a, int c, int n) {
+    int d = ABS(a - c);
+    return n - d < d ? n - d : d;
+}
+/* The worker's next job: of those not made, the one nearest the covers' position (cf.want), so
+ * the albums on the screen come first wherever the wheel takes them; -1 once every one is made.
+ * The jobs are in album order, so the nearest is the first not made after the position or the
+ * last before it, round the ring. */
+static int next_job(void) {
+    int n = cf.total, want = cf.want, lo = 0, hi = n;
+    while (lo < hi) { /* the first job at or after the position */
+        int mid = (lo + hi) / 2;
+        if (cf.jobs[mid].at < want)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    int after = -1, before = -1;
+    for (int k = 0; k < n && after < 0; ++k)
+        if (!cf.jobs[(lo + k) % n].made) after = (lo + k) % n;
+    for (int k = 1; k <= n && before < 0; ++k)
+        if (!cf.jobs[(lo - k + n) % n].made) before = (lo - k + n) % n;
+    if (after < 0) return -1;
+    return ring_gap(cf.jobs[before].at, want, cf.art_ring) <
+                   ring_gap(cf.jobs[after].at, want, cf.art_ring)
+               ? before
+               : after;
+}
+
 static unsigned art_counts[2]; /* crash_note's, every 50th album */
 static void *worker(void *unused) {
-    while (cf.done < cf.total && !cf.cancel) {
-        crash_note(cf.jobs[cf.done].track, "/tmp/q2-art-file", "/tmp/q2-art.log", 50, art_counts);
-        art_note(BUILDING, cf.jobs[cf.done].key, cf.jobs[cf.done].track);
+    for (int k; !cf.cancel && (k = next_job()) >= 0;) {
+        job_t *j = &cf.jobs[k];
+        crash_note(j->track, "/tmp/q2-art-file", "/tmp/q2-art.log", 50, art_counts);
+        art_note(BUILDING, j->key, j->track);
         if (cf.cancel) break; /* a clean end since the loop's head: its note goes with the exit */
-        build_art(&cf.jobs[cf.done]);
+        build_art(j);
+        j->made = 1;
         ++cf.done;
     }
     unlink(BUILDING);
@@ -642,7 +674,7 @@ int card_space(const char *dir) { return card_room(dir, MIN_FREE_MB, 0); }
  * library_gen it was queried at, its size) show the covers at once, with no file asked for per
  * album on the UI thread, which cost 6,000 albums 20-28 ms on the emulator: a thread looks again
  * behind them (verify), and an album found without art makes the next open a cold one, which
- * builds it with Preparing artwork as before. The cover drawn meanwhile is the placeholder, as for
+ * builds it behind its covers (art_build). The cover drawn meanwhile is the placeholder, as for
  * any album whose art file is missing (art_url). The first album is found from where it was last
  * (centre_of), so a reopen passes over the albums only when the queue's album moved. */
 static struct {
@@ -750,7 +782,7 @@ static void art_find(void) {
         int state = art_state(r, path, sizeof path);
         aj.bare += state == 2, aj.looked = i + 1;
         if (state == 1 && (j->track = strdup(P(r, REC_PATH)))) {
-            j->key = album_key(r);
+            j->key = album_key(r), j->at = (int)i;
             j->shared = shared ? shared[i] : 1; /* no memory: no cover.jpg that may be another's */
             ++aj.total;
         }
@@ -758,14 +790,24 @@ static void art_find(void) {
     free(shared);
 }
 
-/* Cancel stops after the current album; finished thumbnails stay, so the next open resumes. */
-static void stop(void) {
-    worker_stop(cf.thread, &cf.running, &cf.cancel, &cf.timer);
-    verify_join();
+/* The art build stopped after the album in hand and its jobs freed; finished thumbnails stay, so
+ * the next open goes on with the rest. The covers stay as they are. */
+static void cw_art(const char *how);
+static void art_stop(void) {
+    if (worker_stop(cf.thread, &cf.running, &cf.cancel, &cf.art_timer) && cf.done < cf.total)
+        cw_art("stopped");
     for (int i = 0; i < cf.total; ++i) free(cf.jobs[i].track);
     free(cf.jobs);
     cf.jobs = 0;
     cf.total = cf.done = 0;
+}
+/* The card about to go (card_release.c): the build lets go of it. */
+void coverflow_art_stop(void) { art_stop(); }
+/* The page's work stopped: the art build, a screen change it scheduled, the art check. */
+static void stop(void) {
+    art_stop();
+    stop_timer(&cf.timer);
+    verify_join();
 }
 
 static void fx_close(void);
@@ -2997,30 +3039,54 @@ static void retitle_bar(void) {
 
 static int to_covers(const void *unused) {
     cf.timer = 0;
-    stop();
     covers();
     retitle_bar();
     if (cf.scoped == PLAYLISTS) rearm(&pl_again, playlists_again, 0); /* edits from the panel */
     return 0;
 }
 
-static int cancel_row(void *ctx, void *event) {
-    rearm(&cf.timer, to_covers, 0);
-    return 0;
-}
-
-static int poll(const void *unused) {
-    cf.timer = 0;
-    if (cf.done == cf.total) { /* stop() joins the thread's last steps */
-        if (!cf.scoped) art_cleaned();
-        return to_covers(0);
+/* Whether album a has a job the worker has made (its file written, or found to have none). The
+ * flag is the worker's; a look that misses one just made sees it at the next. */
+static int art_made(int a) {
+    int lo = 0, hi = cf.total;
+    while (lo < hi) {
+        int mid = (lo + hi) / 2;
+        if (cf.jobs[mid].at < a)
+            lo = mid + 1;
+        else
+            hi = mid;
     }
-    cw_check();
-    char progress[64];
-    tk_snprintf(progress, sizeof(progress), "Preparing artwork\xe2\x80\xa6 %d/%d", cf.done,
-                cf.total);
-    page_retitle(cf.page, cf.title, progress);
-    cf.timer = timer_add(poll, 0, 250);
+    return lo < cf.total && cf.jobs[lo].at == a && cf.jobs[lo].made;
+}
+/* The covers the build made since its last look shown: a slot on the placeholder whose album has
+ * been made decodes again at the next frame; the flat covers set their images again. */
+static void art_shown(void) {
+    int redraw = 0;
+    for (int i = 0; fx.tex && i < fx_slots(); ++i)
+        if (fx.album[i] && fx.art[i] == FX_PLACEHOLDER && art_made(fx.album[i] - 1))
+            fx.art[i] = 0, fx.drawn = 0, redraw = 1;
+    if (cf.slide && !fx.frame) changed(0, 0), redraw = 1;
+    if (redraw) widget_invalidate_force(cf.page, 0);
+}
+/* The art build's look, every ART_POLL_MS while it runs behind the covers (art_build): the
+ * position it builds nearest to, the covers it made shown, and once every job is made the thread
+ * joined and, for the library's albums, their art known (art_cleaned). */
+#define ART_POLL_MS 250
+static int art_poll(const void *unused) {
+    cf.art_timer = 0;
+    if (cf.slide) {
+        int c = I(cf.slide, SLIDE_INDEX);
+        cf.want = c < 0 ? 0 : c < cf.art_ring ? c : cf.art_ring - 1; /* the cards: the last album */
+    }
+    int done = cf.done;
+    if (done != cf.art_told) cf.art_told = done, art_shown();
+    if (done == cf.total) {
+        cw_art("built");
+        if (!cf.scoped) art_cleaned();
+        art_stop(); /* joins the thread's last steps */
+        return 0;
+    }
+    cf.art_timer = timer_add(art_poll, 0, ART_POLL_MS);
     return 0;
 }
 
@@ -3228,7 +3294,7 @@ static void load_albums(unsigned t0) {
         job_t *j = cf.jobs ? &cf.jobs[cf.total] : 0;
         if (j && art_missing(r, path, sizeof path) && (j->track = strdup(P(r, REC_PATH)))) {
             cf_cold(t0);
-            j->key = key;
+            j->key = key, j->at = (int)i;
             j->shared = shared ? shared[i] : 1; /* no memory: no cover.jpg that may be another's */
             ++cf.total;
         }
@@ -3239,17 +3305,20 @@ static void load_albums(unsigned t0) {
     if (on_sort) cf.album = (int)count; /* the Sort card, pressed again and again */
     art_build();
 }
-/* The jobs found (cf.jobs) built on the worker with Preparing artwork, or the covers when none. */
+/* The covers at once, and the jobs found (cf.jobs) built behind them on the worker, the albums
+ * nearest the position first (next_job); each cover shows the placeholder until its art is made
+ * (art_poll). */
 static void art_build(void) {
     mkdir(ART_DIR, 0755);
-    cf.done = cf.cancel = 0;
+    cf.done = cf.cancel = cf.art_told = 0;
+    cf.art_ring = (int)deque_size(cf.albums);
+    cf.want = cf.album < cf.art_ring ? cf.album : cf.art_ring - 1; /* the cards: the last album */
     if (cf.total && card_space(ART_DIR) && !pthread_create(&cf.thread, 0, worker, 0)) {
         cf.running = 1;
-        cf.screen = PREPARING;
-        page_row_detail(list("", 1), 0, "Cancel", 0, cancel_row);
-        poll(0);
-    } else
-        to_covers(0);
+        cf.art_at = (unsigned)time_now_ms();
+        cf.art_timer = timer_add(art_poll, 0, ART_POLL_MS);
+    }
+    to_covers(0);
 }
 
 /* Album queues use stock's album class (0xff10), never folder class 1: Folder Skip only acts on
@@ -3535,7 +3604,7 @@ static void *page_under(void) {
  * covers or the message -> Home, or back out of a scoped page (one album's tracks too). */
 static int keyup(void *ctx, void *event) {
     if (I(event, EVENT_KEY) != KEY_RETURN) return 0;
-    if ((cf.screen == TRACKS && cf.scoped != ALBUM_TRACKS) || cf.screen == PREPARING)
+    if (cf.screen == TRACKS && cf.scoped != ALBUM_TRACKS)
         rearm(&cf.timer, to_covers, 0);
     else if (cf.scoped) {
         /* The playlists' covers: the unseen Playlists page under them closes first, unanimated
@@ -3749,12 +3818,13 @@ int coverflow_wait_input(void *e) {
     return 0;
 }
 /* Cover Flow's open in the unified log (docs/internals.md#cover-flow-log): an I line as Home's
- * Cover Flow opens, one when its covers (or its no-albums page) first show, with the time since,
- * and, while nothing shows, a W line CW_FIRST_MS after the open and every CW_AGAIN_MS after that
- * naming the phase it waits in, looked for by the ticks that wait (open_step's and Preparing
- * artwork's poll); an I line too if the open is given up or the page closed first. A few lines an
- * open, never one a frame or an album. The trace file (cf_trace) reaches the card only after a
- * forced restart; these go with every flush of the log. */
+ * Cover Flow opens, one when its covers (or its no-albums page) first show, with the time since
+ * and the covers left to build behind them, and, while nothing shows, a W line CW_FIRST_MS after
+ * the open and every CW_AGAIN_MS after that naming the phase it waits in, looked for by the tick
+ * that waits (open_step's); an I line too if the open is given up or the page closed first, and
+ * one when an art build behind the covers ends or is stopped (cw_art, any Cover Flow page's). A
+ * few lines an open, never one a frame or an album. The trace file (cf_trace) reaches the card only
+ * after a forced restart; these go with every flush of the log. */
 #define CW_FIRST_MS 5000
 #define CW_AGAIN_MS 60000
 void ulog(char level, const char *src, const char *msg);
@@ -3784,8 +3854,6 @@ static const char *cw_phase(char *buf, unsigned size) {
         n = snprintf(buf, size, "the open's last step");
     else if (!cf.page)
         n = snprintf(buf, size, "no page");
-    else if (cf.screen == PREPARING)
-        n = snprintf(buf, size, "the thumbnail build, %d of %d done", cf.done, cf.total);
     else
         n = snprintf(buf, size, "its page, the covers not shown");
     if (cw.refused && n > 0 && (unsigned)n < size)
@@ -3814,10 +3882,18 @@ static void cw_open(void) {
 }
 static void cw_shown(const char *what) {
     if (!cw.at) return;
-    cw_say('I', "cover flow shown: %s, %u albums, %u ms after its open%s%s", what,
-           cf.albums ? deque_size(cf.albums) : 0, cw_ms(), cw.refused ? "; no memory for " : "",
-           cw.refused ? cw.refused : "");
+    char left[40] = "";
+    if (cf.running) snprintf(left, sizeof left, ", %d covers to build", cf.total);
+    cw_say('I', "cover flow shown: %s, %u albums, %u ms after its open%s%s%s", what,
+           cf.albums ? deque_size(cf.albums) : 0, cw_ms(), left,
+           cw.refused ? "; no memory for " : "", cw.refused ? cw.refused : "");
     cw_end();
+}
+/* An art build behind the covers ended (how "built") or stopped first (the page closed, the card
+ * taken): how far it got, and in how long. */
+static void cw_art(const char *how) {
+    cw_say('I', "cover flow art %s: %d of %d covers, %u ms", how, cf.done, cf.total,
+           (unsigned)time_now_ms() - cf.art_at);
 }
 static void cw_given_up(void) {
     if (!cw.at || cf.page) return;

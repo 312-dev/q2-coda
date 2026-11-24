@@ -3011,8 +3011,9 @@ class CfPage(C.Structure):
     """coverflow.c's cf as far as the pool reads it: cf.slide, and cf.count at the end (coverflow.h)."""
     _fields_ = [*((k, C.c_void_p) for k in 'page body covers slide name artist title albums tracks stock'.split()),
                 *((k, C.c_int) for k in 'sort sort_read year_old artists on_sort resort'.split()),
-                ('jobs', C.c_void_p), ('thread', C.c_ulong), ('timer', C.c_uint), ('title_timer', C.c_uint), ('titled', C.c_int),
-                ('offline', C.c_int), ('saved_album', C.c_uint), ('albums_gen', C.c_uint),
+                ('jobs', C.c_void_p), ('thread', C.c_ulong), ('timer', C.c_uint), ('title_timer', C.c_uint),
+                *((k, C.c_uint) for k in 'art_timer art_at'.split()), *((k, C.c_int) for k in 'art_told art_ring want'.split()),
+                ('titled', C.c_int), ('offline', C.c_int), ('saved_album', C.c_uint), ('albums_gen', C.c_uint),
                 *((k, C.c_int) for k in 'screen album running done total cancel scoped all_sort'.split()),
                 *((k, C.c_void_p) for k in 'all_albums all_stock hearts'.split()), ('count', C.c_int)]
 
