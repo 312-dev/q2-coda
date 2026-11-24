@@ -926,6 +926,7 @@ def check_smart(a, b, names, got, log):
     na, nb, ny = len(A) // 2, len(B) // 2, len(Y) // 2
     cut = na - trail - overlap  # out_point
     assert names == ['0000_44100_2_s16.raw'], names
+    assert not any(bad in log for bad in BAD_TAIL), log[-2000:]  # BAD_TAIL: below, with the tail's own tests
     assert f'overlap {overlap / 44100:.2f} s by the {why}' in log, f'{plan}: {log[-2000:]}'
     assert ny == cut + nb - skip, f'{ny} frames, expected {cut + nb - skip} (plan {plan}): {log[-1500:]}'
     assert Y[:2 * cut] == A[:2 * cut], f'A before out_point, first difference at frame {first_difference(Y[:2 * cut].tobytes(), A[:2 * cut].tobytes()) // 4}'
@@ -1090,6 +1091,283 @@ def test_smart_crossfade_off_is_gapless(player, songs, tmp):
     assert got == reference(a) + reference(b), 'not the two songs joined'
     assert 'smart crossfade' not in log, log[-800:]
     return 'A and B joined bit for bit, nothing analysed'
+
+
+# ---- the tail from the file (player/tail.c, dsp.c; docs/internals.md#the-tail-from-the-file)
+BAD_TAIL = ('differs from the first decode', 'frames fewer than the tail held', 'differs from the first')
+TAIL_B_S = 47  # each B here: over XF_SMART_LEAD_S long, as B_SECONDS
+# Q2PLAYER_XF_WAIT (player/tail.c): the player waits for its analysis and for the second open's decode wherever it
+# would otherwise go on without them, so what these tests compare does not depend on how busy the machine is
+TAIL_WAIT = {'Q2PLAYER_XF_WAIT': '1'}
+
+
+def tail_song(path, rate=44100, bits=16, kind='fade', codec=('-c:a', 'flac'), tags=()):
+    """A song of noise and a tone, so no two stretches of it are alike. fade (A, 40 s): at 0.6 to 27.5 s, then a quiet
+    run 14 dB down falling 1.44 dB a second to 38 s, then 2 s of silence: an out run of about 10.5 s and a 2 s trail,
+    12.5 s held. hard (A, 36 s): at 0.6 to its last frame, so the overlap is the 5 s floor. next (B, TAIL_B_S): half a
+    second of silence, then noise and a tone at 0.3."""
+    seconds = {'fade': 40, 'hard': 36, 'next': TAIL_B_S}[kind]
+    shape = {'fade': "volume=0.6,volume='if(lt(t,27.5),1,if(lt(t,38),0.2*pow(10,-(t-27.5)*1.44/20),0))':eval=frame",
+             'hard': 'volume=0.6', 'next': 'volume=0.3,adelay=500:all=1'}[kind]
+    fmt = [] if codec[1].startswith('pcm') or codec[1] == 'libmp3lame' else ['-sample_fmt', 's16' if bits == 16 else 's32', '-bits_per_raw_sample', str(bits)]
+    if codec[1] == 'alac': fmt = ['-sample_fmt', 's16p' if bits == 16 else 's32p', '-bits_per_raw_sample', str(bits)]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', f'anoisesrc=d={seconds}:c=pink:r={rate}:a=0.5:seed={3 if kind == "next" else 1}',
+                    '-f', 'lavfi', '-i', f'sine=f={330 if kind == "next" else 220}:r={rate}:d={seconds}', '-filter_complex',
+                    f'[0][1]amix=inputs=2:normalize=0,{shape},aformat=channel_layouts=stereo', '-t', str(seconds), *codec, *fmt, *tags, path], check=True)
+    return path
+
+
+def tail_runs(player, songs, d, a, b, ring_mb, steps=None, runs=('file', 'ring'), env=None):
+    """a into b by smart_scenario, once for each of runs: 'file', the player as it is (a FLAC's, an ALAC's or a PCM
+    file's tail read from the file a second time), with env; 'ring', every tail held in memory in a ring of up to
+    ring_mb MB (Q2PLAYER_XF_RING); 'ring6', in the 6 MB ring a song has without a second open. Each with TAIL_WAIT.
+    {run: (PCM names, PCM, log)}."""
+    out = {}
+    for run in runs:
+        e = dict(TAIL_WAIT, **(env or {})) if run == 'file' else dict(TAIL_WAIT, Q2PLAYER_XF_RING='6' if run == 'ring6' else str(ring_mb))
+        s, names, got, log = smart_play(player, songs, d/run, steps or smart_scenario(a, b, end=110.0), env=e)
+        out[run] = (names, got, log)
+    return out
+
+
+def plan_line(log):
+    lines = [l.split('q2player: ')[-1] for l in log.splitlines() if 'smart crossfade: body' in l]
+    return lines[0] if lines else None
+
+
+def check_tail(runs, planned=True):
+    """The change with its tail read from the file is, byte for byte, the change with its tail held in memory: the
+    same plan, the same PCM opens, the same output; the file's run held nothing, and no frame it read differed from
+    the first decode's or was missing. The ring's size in KB."""
+    (fn, fg, fl), (rn, rg, rl) = runs['file'], runs['ring']
+    assert 'the tail read from the file' in fl and 'held in memory' not in fl, fl[-1500:]
+    assert not any(bad in fl for bad in BAD_TAIL), fl[-1500:]
+    held = re.search(r'the tail held in memory, (\d+) KB', rl)
+    assert held and 'read from the file' not in rl, rl[-1500:]
+    for log in (fl, rl):
+        assert 'overlap cut' not in log and 'smart crossfade: plain' not in log, log[-1500:]
+    assert plan_line(fl) == plan_line(rl) and (plan_line(fl) is not None) == planned, (plan_line(fl), plan_line(rl))
+    assert fn == rn, (fn, rn)
+    at = first_difference(fg, rg)
+    assert at is None, f'{len(fg)} bytes read from the file, {len(rg)} held in memory; first difference at byte {at}'
+    return int(held[1])
+
+
+def overlap_s(log): return float(re.search(r'overlap ([\d.]+) s by the', plan_line(log))[1])
+
+
+def test_tail_file_flac_16(player, songs, tmp):
+    """FLAC, 44.1 kHz 16-bit: a 12.5 s hold read from the file is the 6 MB ring's, byte for byte."""
+    d = tmp/'tail16'
+    a, b = tail_song(d/'a.flac'), tail_song(d/'b.flac', kind='next')
+    runs = tail_runs(player, songs, d, a, b, 6)
+    kb = check_tail(runs)
+    assert overlap_s(runs['file'][2]) > 10
+    return f'{len(runs["file"][1]) // 4} frames the same, a {overlap_s(runs["file"][2]):.2f} s overlap; the ring was {kb} KB'
+
+
+def test_tail_file_flac_24_96_past_the_ring(player, songs, tmp):
+    """FLAC, 96 kHz 24-bit: the 12.5 s hold is more than the 6 MB ring has room for at this rate (7.5 s), so in that
+    ring the overlap is cut, logged; read from the file it is whole, and byte for byte what a ring large enough gives."""
+    d = tmp/'tail96'
+    a, b = tail_song(d/'a.flac', 96000, 24), tail_song(d/'b.flac', 96000, 24, kind='next')
+    runs = tail_runs(player, songs, d, a, b, 64, runs=('file', 'ring', 'ring6'))
+    kb = check_tail(runs)
+    assert runs['file'][0] == ['0000_96000_2_s32.raw'], runs['file'][0]
+    cut = runs['ring6'][2]
+    assert 'overlap cut to what the hold has room for' in cut and len(runs['ring6'][1]) > len(runs['file'][1]), cut[-1500:]
+    return (f'{len(runs["file"][1]) // 8} frames the same as a {kb} KB ring\'s, a {overlap_s(runs["file"][2]):.2f} s overlap; '
+            f'the 6 MB ring cut it and played {(len(runs["ring6"][1]) - len(runs["file"][1])) / 8 / 96000:.2f} s longer')
+
+
+def test_tail_file_flac_24_192_floor(player, songs, tmp):
+    """FLAC, 192 kHz 24-bit, loud to its last frame, into a 44.1 kHz 16-bit song: the overlap is the 5 s floor, more
+    than the 6 MB ring holds at 192 kHz (3.75 s), which cuts it; read from the file it is whole, mixed under the next
+    song at that song's rate after the PCM opens again, byte for byte what a ring large enough gives."""
+    d = tmp/'tail192'
+    a, b = tail_song(d/'a.flac', 192000, 24, kind='hard'), tail_song(d/'b.flac', kind='next')
+    runs = tail_runs(player, songs, d, a, b, 64, runs=('file', 'ring', 'ring6'))
+    kb = check_tail(runs)
+    assert runs['file'][0] == ['0000_192000_2_s32.raw', '0001_44100_2_s16.raw'], runs['file'][0]
+    assert overlap_s(runs['file'][2]) == 5.0 and 'overlap cut to what the hold has room for' in runs['ring6'][2]
+    return f'{len(runs["file"][1])} bytes the same as a {kb} KB ring\'s: the 5 s floor whole at 192 kHz, cut by the 6 MB ring'
+
+
+def test_tail_file_alac_and_wav(player, songs, tmp):
+    """ALAC in MP4 and PCM in WAV, 44.1 kHz 16-bit: each tail read from the file is the ring's, byte for byte."""
+    said = []
+    for ext, codec in (('m4a', ('-c:a', 'alac')), ('wav', ('-c:a', 'pcm_s16le'))):
+        d = tmp/f'tail{ext}'
+        a, b = tail_song(d/f'a.{ext}', codec=codec), tail_song(d/f'b.{ext}', codec=codec, kind='next')
+        runs = tail_runs(player, songs, d, a, b, 6)
+        check_tail(runs)
+        said.append(f'{ext}: {len(runs["file"][1]) // 4} frames the same')
+    return ', '.join(said)
+
+
+def test_tail_mp3_is_held_in_memory(player, songs, tmp):
+    """MP3: FFmpeg's integer decoder carries its rounding from sample to sample, so a second decode is never the
+    first's samples, and the player says so and holds the tail in a ring, mapped at the hold's own size; the output is
+    the same whether or not it was let try the file."""
+    d = tmp/'tailmp3'
+    a, b = tail_song(d/'a.mp3', codec=('-c:a', 'libmp3lame', '-q:a', '2')), tail_song(d/'b.mp3', codec=('-c:a', 'libmp3lame', '-q:a', '2'), kind='next')
+    runs = tail_runs(player, songs, d, a, b, 6)
+    (fn, fg, fl), (rn, rg, rl) = runs['file'], runs['ring']
+    assert 'a second decode of this codec is not the first\'s' in fl and 'read from the file' not in fl, fl[-1500:]
+    held = re.search(r'the tail held in memory, (\d+) KB', fl)
+    assert held and int(held[1]) < 6 * 1024 and plan_line(fl) == plan_line(rl) and plan_line(fl)
+    at = first_difference(fg, rg)
+    assert fn == rn and at is None, at
+    return f'held in a {held[1]} KB ring, as said; {len(fg) // 4} frames the same either way'
+
+
+def test_tail_file_eq_and_replaygain(player, songs, tmp):
+    """The EQ on and a ReplayGain tag on the first song, read as track gain: the file's frames go through the same
+    stages as the ring's did (the scale and its clip, the EQ from the memory it had at the hold's first frame), and
+    the second song takes on the EQ's memory of the first's last frame: byte for byte the ring's, and not what plays
+    with the EQ off."""
+    d = tmp/'taileq'
+    a = tail_song(d/'a.flac', tags=('-metadata', 'REPLAYGAIN_TRACK_GAIN=-4.00 dB', '-metadata', 'REPLAYGAIN_TRACK_PEAK=0.600000'))
+    b = tail_song(d/'b.flac', kind='next')
+    state = d/'eq.state'
+    subprocess.run([tool(tmp, 'peq_ref', '-DPEQ_ROOT=""'), 'save', state, '6', '-3'], check=True)
+    def steps(eq):
+        st = smart_scenario(a, b, end=110.0)
+        st = [x for x in st if not (isinstance(x[1], str) and x[1].startswith('{mcl-replaygain'))] + [(0.0, '{mcl-replaygain\\1}')]
+        if eq: st.append((0.2, fakedemo.put('mnt/data/peq-active', state.read_bytes())))
+        return sorted(st, key=lambda x: x[0])
+    runs = tail_runs(player, songs, d, a, b, 6, steps=steps(True))
+    check_tail(runs)
+    s, names, flat, log = smart_play(player, songs, d/'flat', steps(False), env=TAIL_WAIT)
+    assert flat != runs['file'][1], 'the EQ changed nothing'
+    plain = tail_runs(player, songs, d/'norg', a, b, 6, runs=('file',))['file'][1]
+    assert plain != flat, 'ReplayGain changed nothing'
+    return f'{len(runs["file"][1]) // 4} frames the same through ReplayGain and the EQ'
+
+
+def test_tail_file_plain_fade(player, songs, tmp):
+    """demo's word with no XF_SMART, 3 s: the plain fade's tail read from the file is the ring's, byte for byte."""
+    d = tmp/'tailplain'
+    a, b = tail_song(d/'a.flac'), tail_song(d/'b.flac', kind='next')
+    runs = tail_runs(player, songs, d, a, b, 6, steps=smart_scenario(a, b, end=110.0, word=3000))
+    check_tail(runs, planned=False)
+    return f'{len(runs["file"][1]) // 4} frames the same'
+
+
+def test_tail_file_second_open_late(player, songs, tmp):
+    """The second open comes too late (Q2PLAYER_TAIL_DELAY_MS, as a starved player's would), at 96 kHz 24-bit: the
+    hold begins without it, said in the log, the tail is held in the 6 MB ring with its overlap cut, and the change
+    is byte for byte the one a player with no second open gives."""
+    d = tmp/'taillate'
+    a, b = tail_song(d/'a.flac', 96000, 24), tail_song(d/'b.flac', 96000, 24, kind='next')
+    runs = tail_runs(player, songs, d, a, b, 6, runs=('file', 'ring6'), env={'Q2PLAYER_TAIL_DELAY_MS': '600000'})
+    (fn, fg, fl), (rn, rg, rl) = runs['file'], runs['ring6']
+    assert 'the second open was not level when the hold began' in fl and 'read from the file' not in fl, fl[-1500:]
+    assert 'overlap cut to what the hold has room for' in fl and 'overlap cut to what the hold has room for' in rl
+    at = first_difference(fg, rg)
+    assert fn == rn and at is None, at
+    return f'held in the ring, logged; {len(fg) // 8} frames the same as with no second open'
+
+
+TAIL_HOLD, TAIL_MIX = 13.1, 27.55  # tail_song's fade A: its hold begins about here, and its mix here, in its seconds
+
+
+def tail_stalled(player, songs, tmp, name, at, frames):
+    """tail_song's A into B, FLAC 44.1 kHz 16-bit, the second open's decode stopped at A's second `at` until `frames`
+    more are taken (Q2PLAYER_TAIL_STALL; below 0, for good), and the same held in the 6 MB ring."""
+    d = tmp/name
+    a, b = tail_song(d/'a.flac'), tail_song(d/'b.flac', kind='next')
+    return tail_runs(player, songs, d, a, b, 6, env={'Q2PLAYER_TAIL_STALL': f'{int(at * 44100)}:{frames}'})
+
+
+def test_tail_file_card_stalls_2s(player, songs, tmp):
+    """The card does not answer the second open for 2 s of the song, once inside the hold and once under the next
+    song: the frames those 2 s need were decoded ahead, off the playback thread, so the song never finds the open
+    short (its own count, logged), and the change is byte for byte the ring's."""
+    said = []
+    for where, at in (('hold', TAIL_HOLD + 7), ('mix', TAIL_MIX + 5)):
+        runs = tail_stalled(player, songs, tmp, f'tailstall{where}', at, 2 * 44100)
+        check_tail(runs)
+        m = re.search(r'reader was stalled while (\d+) frames were taken, and the song found it short (\d+) times', runs['file'][2])
+        assert m and int(m[1]) >= 2 * 44100 and m[2] == '0', runs['file'][2][-1500:]
+        said.append(f'in the {where}: stalled while {m[1]} frames played, never short, {len(runs["file"][1]) // 4} frames the same')
+    return '; '.join(said)
+
+
+def test_tail_file_card_gone_before_the_hold(player, songs, tmp):
+    """The card stops answering the second open for good just before the hold: the song does not wait, the tail is
+    held in the ring, said in the log, and the change is byte for byte the ring's."""
+    runs = tail_stalled(player, songs, tmp, 'tailgone0', TAIL_HOLD - 0.3, -1)
+    (fn, fg, fl), (rn, rg, rl) = runs['file'], runs['ring']
+    lines = [l.split('q2player: ')[-1] for l in fl.splitlines() if 'the tail held in memory, the second open' in l]
+    assert lines and 'read from the file' not in fl and re.search(r'the tail held in memory, \d+ KB', fl), fl[-1500:]
+    at = first_difference(fg, rg)
+    assert fn == rn and at is None, at
+    return f'{lines[0]}; {len(fg) // 4} frames the same as the ring\'s'
+
+
+def test_tail_file_card_gone_in_the_hold(player, songs, tmp):
+    """The card stops answering the second open for good 7 s into the hold: every frame it had decoded plays, in
+    order (the ring's bytes up to there), then after XF_HOLD_WAIT_MS the hold is left as at a seek, logged, the song
+    plays on from where its decode is, and the next song plays whole to its end."""
+    at = TAIL_HOLD + 7
+    runs = tail_stalled(player, songs, tmp, 'tailgone1', at, -1)
+    (fn, fg, fl), (rn, rg, rl) = runs['file'], runs['ring']
+    assert 'the second open stopped giving frames' in fl and 'the tail read from the file' in fl, fl[-1500:]
+    upto = (int(at * 44100) - 8192) * 4
+    assert fn == rn and fg[:upto] == rg[:upto], first_difference(fg[:upto], rg[:upto])
+    assert len(fg) < len(rg) and fg[-20 * 44100 * 4:] == rg[-20 * 44100 * 4:], (len(fg), len(rg))
+    return f'the ring\'s bytes to within a block of second {at:.1f}, then {(len(rg) - len(fg)) / 4 / 44100:.2f} s of the song left out; the next song\'s last 20 s the same'
+
+
+def test_tail_file_card_gone_under_the_next_song(player, songs, tmp):
+    """The card stops answering the second open for good 5 s into the mix: the tail fades out over its last decoded
+    frames, logged; up to there the change is the ring's bytes, the next song loses no frame, and once the ring's
+    own mix is over the two are the same again."""
+    at = TAIL_MIX + 5
+    runs = tail_stalled(player, songs, tmp, 'tailgone2', at, -1)
+    (fn, fg, fl), (rn, rg, rl) = runs['file'], runs['ring']
+    assert re.search(r'the tail faded out \d+ ms early', fl), fl[-1500:]
+    upto = (int(at * 44100) - int(0.2 * 44100) - 8192) * 4
+    after = (38 * 44100 + 8192) * 4  # the tail's last frame, and the limiter's recovery
+    assert fn == rn and len(fg) == len(rg) and fg[:upto] == rg[:upto] and fg[after:] == rg[after:]
+    assert fg[upto:after] != rg[upto:after]
+    return f'the ring\'s bytes to {upto // 4 / 44100:.2f} s, the tail gone by {at:.1f} s, the same again from 38.2 s; {len(fg) // 4} frames either way'
+
+
+def test_tail_file_starved(player, songs, tmp):
+    """As test_smart_crossfade_starved, on one core with two busy loops and stopped 300 ms of every second, with no
+    Q2PLAYER_XF_WAIT: whatever the starved player manages (the smart fade or, the analysis too slow, the plain one,
+    logged; the tail read from the file or, the second open late or behind, held in memory, logged), the change is
+    whole: byte for byte one of the two an unstarved player holding the tail in memory gives."""
+    d = tmp/'tailstarved'
+    a, b = tail_song(d/'a.flac'), tail_song(d/'b.flac', kind='next')
+    ring = dict(TAIL_WAIT, Q2PLAYER_XF_RING='6')
+    want = {'smart': smart_play(player, songs, d/'smart', smart_scenario(a, b, end=110.0), env=ring)[2],
+            'plain': smart_play(player, songs, d/'plain', smart_scenario(a, b, end=110.0), env=dict(ring, Q2PLAYER_SMART_DELAY_MS='60000'))[2]}
+    assert want['smart'] != want['plain']
+    cpu = str(max(os.sched_getaffinity(0)))
+    wrap = tmp/'tailstarved.sh'
+    wrap.write_text(f'#!/bin/sh\nexec taskset -c {cpu} {player}\n')
+    wrap.chmod(0o755)
+    busy = [subprocess.Popen(['taskset', '-c', cpu, sys.executable, '-c', 'while True: pass']) for _ in range(2)]
+    was = os.environ.get('Q2_TEST_STARVE')
+    os.environ['Q2_TEST_STARVE'] = '300/1000'
+    try:
+        s, names, got, log = smart_play(str(wrap), songs, d/'starved', smart_scenario(a, b, end=110.0))
+    finally:
+        for p in busy: p.kill(), p.wait()
+        if was is None: os.environ.pop('Q2_TEST_STARVE', None)
+        else: os.environ['Q2_TEST_STARVE'] = was
+    assert not any(bad in log for bad in BAD_TAIL), log[-1500:]
+    assert 'stopped giving frames' not in log and 'faded out' not in log, log[-1500:]
+    kind = 'plain' if 'smart crossfade: plain' in log else 'smart'
+    at = first_difference(got, want[kind])
+    assert at is None, f'starved, the {kind} fade differs from the unstarved one at byte {at} of {len(got)}, {len(want[kind])}: {log[-1500:]}'
+    how = 'read from the file' if 'the tail read from the file' in log else 'held in memory'
+    assert how == 'read from the file' or 'the tail held in memory, ' in log, log[-1500:]
+    return f'the {kind} fade, its tail {how}: {len(got) // 4} frames, the same as unstarved'
 
 
 # mcl-replaygain's scale for each file of music.REPLAYGAIN and b1.mp3, by mode: hciplayer's rule (player/source.c
@@ -2773,7 +3051,7 @@ SERIAL = ('test_scan', 'test_grow_seek_beyond', 'test_grow_seek_inside', 'test_c
           'test_grow_opens_a_song_with_a_cover_on_its_first_audio', 'test_car_feed_keeps_the_car_close_behind',
           'test_car_feed_reader_sleeps_while_no_source_writes', 'test_car_release_while_paused',
           # smart-crossfade's: the player on one core shared with busy loops
-          'test_smart_crossfade_starved')
+          'test_smart_crossfade_starved', 'test_tail_file_starved')
 WIDTH = 8  # tests and fixtures side by side: each mostly waits on a player running in real time or faster
 STALL_S = 0.1  # a 5 ms sleep that took this much longer: the machine did not run this process (measured: 650 ms under
                # a nice-19 job on a busy core, under 10 ms when the core is shared fairly)
