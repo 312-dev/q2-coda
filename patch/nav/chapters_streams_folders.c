@@ -206,8 +206,8 @@ int media_find(int kind, char *path) {
     return found;
 }
 
-/* A Local Music row's, or Home's Shortcut's (Podcasts, Audiobooks): the folder found again, as the
- * card may have changed since; without it, a toast. */
+/* A Local Music row's (Podcasts, Audiobooks): the folder found again, as the card may have
+ * changed since; without it, a toast. */
 int media_click(void *ctx, void *event) {
     int kind = (int)(long)ctx;
     char root[sizeof st.media_root], t[48];

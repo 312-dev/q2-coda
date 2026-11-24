@@ -516,7 +516,7 @@ kids=m.rebuild(); assert m.get(m.mode)==0 and len(kids)==shown; passed()
 
 # Playlist View: Cover Flow (Display, PLAYLISTCF): the page opens unseen (opacity 0, no slide) and its playlists go to
 # Cover Flow on the next pass (coverflow_playlists, test/coverflow.py), the page shown under them for their Return; once
-# per page, so coming back to it shows the list. Library's row, Home's list and shortcut 7 all open it through this
+# per page, so coming back to it shows the list. Library's row and Home's list open it through this
 # rebuild. Off, the Add to Playlist picker, no playlists, or the page gone or covered first: the list, as before. The
 # covers are the playlists' art.
 PL_HINT='htranslate(duration=200)'

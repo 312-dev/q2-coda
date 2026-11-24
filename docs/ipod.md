@@ -123,9 +123,9 @@ Folders page's test) until the user shows or hides it. **Edit Home** (Center hel
 row; [oled-design](oled-design.md#edit-library), [internals](internals.md#library-order)) puts the rows in the
 user's order and shows or hides each, Settings always shown. **Search** opens the Library's search (`library_search_open`: the
 letter strip under `list.entry.ipod`, OLED's, stock's search without it): every song, artist and album, the one
-search across everything; each list page searches its own rows from its search bar. Shuffle Songs and the
-Shortcut row are not on the list: the Library's Shuffle page keeps Shuffle Songs, and the Shortcut
-(`IPOD/SHORTCUT` 0-11, read as a decimal by `config_value`, with no Appearance row to change it) was Carousel's card and went with it; the key is still read and means nothing. Settings opens its own list in the menu's place, as an iPod's submenu: Wi-Fi, Bluetooth, General, Playback, Streaming, Car Remote, Display, Controls and Battery ([Settings](#settings)); Return restores the menu's previous selection, and a short Return on the main menu selects
+search across everything; each list page searches its own rows from its search bar. Shuffle Songs is not on
+the list: the Library's Shuffle page keeps it. A stored `IPOD/SHORTCUT` is not a setting and is never read. Rockbox, when
+the card has it, is a row of Settings → General ([boot](boot.md#rockbox-from-home)). Settings opens its own list in the menu's place, as an iPod's submenu: Wi-Fi, Bluetooth, General, Playback, Streaming, Car Remote, Display, Controls and Battery ([Settings](#settings)); Return restores the menu's previous selection, and a short Return on the main menu selects
 its first row, Now Playing while it shows; a short Return with Now Playing selected opens it without
 changing playback. Return there goes back to Home. Both lists end at their ends, as every list does: the wheel stops there and the selection leans against the end ([internals.md](internals.md#list-ends)).
 Folder opens directly at the SD root when a card is in and no OTG drive is connected; Back at that root returns
@@ -151,9 +151,8 @@ payload lays them out (below). Long translated labels ellipsize and scroll.
 The background view paints before the transparent menus, and both menus are clipped to the
 window while sliding.
 
-Display settings offers **Home: Split / Full**, stored as `IPOD/HOME` 0 or 1; any other value, absent, invalid, or
-the 2 a unit saved on Carousel (removed on 2026-11-24: its Home had no row to Settings, so Display and the Home row
-could not be reached again), means Split, and the row's next save writes 0 or 1. `coverflow_home_layout` moves the asset's widgets at runtime:
+Display settings offers **Home: Split / Full**, stored as `IPOD/HOME` 0 or 1; any other value, absent or invalid
+(2 among them), means Split, and the row's next save writes 0 or 1. `coverflow_home_layout` moves the asset's widgets at runtime:
 Split narrows both menus to the grid's `split_row` (OLED's 204; `HOME_SPLIT_W`, 187, half the
 screen, in the built-in set) and shows the cover itself in the panel right of them, from `split_art`
 (OLED's 196) to the screen's edge, and with OLED's `split_art_up` from the top edge, under the status
@@ -1031,7 +1030,7 @@ there is no picker ([internals.md](internals.md#themes)).
 left on another (`THEME` 0 Minimal, 1 Classic, 2 Modern, or no key, which read as Minimal) takes OLED's
 preset once, at its first boot on this build, as choosing OLED did, and keeps 3 from then on (`theme_boot`,
 `theme_preset` in `patch/navigation.c`): Light Mode Off unless it was on Auto, Blue (`OLED_ACCENT` 9), Home
-Split, Song Artist Inline, Song Length Albums and Track Time Remaining; the battery and the Shortcut are kept
+Split, Song Artist Inline, Song Length Albums and Track Time Remaining; the battery is kept
 (a Battery value OLED does not offer, Icon + Percent or Percent Inside, reads as Icon), and only values
 that change are saved. The retired themes' own keys stay in `config.ini`, unread ([Display
 settings](#display-settings)).

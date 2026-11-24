@@ -94,7 +94,7 @@ assert not idle(a) and not idle(a) and any(c[0]=='reset_poweroptions_timer' for 
 # A card game with the sound (q2app audio=1): the output is handed over before the fork as for a video (now_hold,
 # the jack readied by dac_take) and the binary gets q2video's arguments: the device, and on Bluetooth or USB the
 # volume (h: the DAC's own); Play/Pause and the side buttons reach it; the DAC stays on and nothing ends it for
-# idling; the Shortcut opens it by id, -1 for an id no card game has.
+# idling.
 g=AppMachine(); g.handlers.pop(syms['mclGetPlayStatus'],None); g.word(0xa50084,2); g.mock('player_save_stop','player_save_start')  # the Library playing
 card_app(g,'groovebox','name=Groovebox\ngame=1\naudio=1\n'); GB='/mnt/mmc/.groovebox/q2-groovebox'; GS2='/tmp/q2-groovebox.input.sock'
 def gn(name,*args): return g.call(address=payload_syms[name],args=(args+(0,0,0,0))[:4],gap=0,clear=False,count=5_000_000)
@@ -121,7 +121,6 @@ g.word(syms['g_dacoff_time'],5); g.now+=120_001; g.waited=0; assert poll(g)==0 a
 g.now+=120_001; assert poll(g)==0 and any(c[0]=='reset_poweroptions_timer' for c in g.calls)
 g.waited=4243; g.calls=[]; poll(g); assert gn('addon_game_on')==0 and gn('addon_game_audio')==0
 assert [c[1] for c in g.calls if c[0]=='player_save_start']==[1]; passed()  # the held song back, paused (now_release)
-# (addon_game_open, a card game by id, has no caller since Home's Shortcut went: the link drops it; test/fw tests it.)
 # Stock's Baidu Netdisk row (a Chinese cloud drive; list_baidu's icon) is gone from Streaming, destroyed; its
 # TIDAL row stays first.
 m=AppMachine(); view=m.node('scroll_view','scroll_view_streamsset')
@@ -1112,7 +1111,7 @@ assert m.files[DONE]==b'14 error No memory card\n'; m.import_ret=1
 m.files.pop('/tmp/mmc_add'); m.files[LIB]=bytearray(b'15\nscan\n'); m.poll(); assert m.files[DONE]==b'15 error No memory card\n'; passed()
 # Neither the import nor the scan starts while a scan runs or its dialog is open (the user's own Update Local
 # Music), so no import races the scan's database writes and no second dialog opens; nor the import under a
-# library page whose list it replaces, Home's Albums shortcut (album_page) as well.
+# library page whose list it replaces (album_page among them).
 m.files['/tmp/mmc_add']=bytearray(); m.word(0xa50084,1); m.word(O['SCAN_THREAD'],0x1234); m.word(O['SCAN_DONE'],0)  # stopped
 k,n=len(m.imports),len(m.opened); m.files[LIB]=bytearray(f'16\nimport {EXP}/Navidrome - Mix.m3u\n'.encode()); m.poll(); assert len(m.imports)==k
 m.word(O['SCAN_DONE'],1); windows(m,'updatemusic_page'); m.poll(); assert len(m.imports)==k  # its OK not pressed yet

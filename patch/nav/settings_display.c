@@ -8,7 +8,7 @@ static void setting_text(int i) {
     int a = accent();
     const scheme_t *S = scheme();
     const char *const names[] = { S->label ? (const char *)0 : accent_names[a], home[st.home],
-                                  battery[st.battery], (const char *)0, light[st.light] };
+                                  battery[st.battery], light[st.light] };
     char text[64];
     if (i == 0 && S->label) {
         tk_snprintf(text, sizeof text, "Accent: %s", S->label);
@@ -25,7 +25,7 @@ static void setting_text(int i) {
         row_label(st.setting_label[i], text);
         return;
     }
-    static const char *const toggles[] = { "Smart Awake", 0 /* 6: the Clicker's, no row */,
+    static const char *const toggles[] = { "Smart Awake", 0 /* the Clicker's, no row */,
                                            "Reduce Motion" };
     if (i >= SETTING_KEEPLIT) {
         list_toggle(st.setting_label[i], toggles[i - SETTING_KEEPLIT], *setting_values[i]);
@@ -62,7 +62,7 @@ static void setting_put(int *value, int v, const char *key) {
 }
 /* The theme's preset (its theme.xml's: OLED's dark, Blue, Full), as choosing the theme applied it
  * when there were others: theme_boot's once for a unit an older build left on another (THEME_OLED).
- * Light Mode's Auto, the battery and the Shortcut are kept. Only a change is saved. */
+ * Light Mode's Auto and the battery are kept. Only a change is saved. */
 static void theme_preset(const theme_t *T) {
     int buf[11];
     st.light_day = light_day(clock_now(buf));
@@ -460,6 +460,9 @@ int ringnav_systemset(void *win, void *ctx) {
     /* Developer Options (adb_trust.c): Trusted Computers, the computers adb lets in */
     if (view) widget_set_text_utf8(list_row_into(view, "playset_folderjump", adb_dev_open, 0), "Developer Options");
 #endif
+    /* Rockbox (docs/boot.md#rockbox-from-home): the hand-over, while the card has it */
+    if (view && rockbox_available())
+        widget_set_text_utf8(list_row(view, "system_powermanager", rockbox_open, 0), "Rockbox");
     power_rows(view, reset); /* Restart, Shut Down and Reset Settings, last */
     return result;
 }

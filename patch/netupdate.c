@@ -906,7 +906,7 @@ static int sh_wait(const void *unused) {
     /* its files replaced or gone: an update that failed or was cancelled before it stopped its app leaves it running, still tracked,
      * and a remove cut off by USB storage leaves it marked to start again with the card */
     if (r == SH_OK && (job == JOB_REMOVE || job == JOB_INSTALL))
-        addon_forget(apps[i].dir), card_bins_changed(); /* Home's Shortcut: Rockbox, Groovebox */
+        addon_forget(apps[i].dir);
     if (job == JOB_CHECK) /* the rows built again: the list may have changed */
         if (sh.next) memcpy(apps, sh.next, sizeof apps), shelf_n = sh.n, sh.rows = -1;
     if (job == JOB_ERASE || (job != JOB_CHECK && is(i, "spotify")))

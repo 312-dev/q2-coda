@@ -674,8 +674,8 @@ for label_name in ('label_del','label_rename'):
 passed()
 
 m=Machine(); style_color(m,red)
-# config_value passes its default in decimal: SHORTCUT's SETTING_N_SHORTCUT (12) is out of range, so no shortcut
-assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY')]+[('/mnt/data/config.ini','IPOD','SHORTCUT','12'),('/mnt/data/config.ini','IPOD','LIGHT','0'),('/mnt/data/config.ini','IPOD','KEEPLIT','1'),('/mnt/data/config.ini','IPOD','CLICKER','0'),('/mnt/data/config.ini','IPOD','REDUCEMOTION','0')]+[('/mnt/data/config.ini','IPOD',key,str(d)) for key,(_,d,_) in theme_keys(theme_builtins()).items()]; passed()  # the theme's own, in table order
+# config_value passes its default in decimal; IPOD SHORTCUT is not a setting and is never read
+assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY')]+[('/mnt/data/config.ini','IPOD','LIGHT','0'),('/mnt/data/config.ini','IPOD','KEEPLIT','1'),('/mnt/data/config.ini','IPOD','CLICKER','0'),('/mnt/data/config.ini','IPOD','REDUCEMOTION','0')]+[('/mnt/data/config.ini','IPOD',key,str(d)) for key,(_,d,_) in theme_keys(theme_builtins()).items()]; passed()  # the theme's own, in table order
 # theme()/scheme(): OLED, the one built-in (themes[0]), and its Blue scheme, settings read on first use; THEME is no
 # setting the engine reads. Light Mode's On picks the light half's row (oled_light), Auto by the clock, Off the dark
 # one; both point at oled_tones and derive their half (SCHEME_DERIVE, scheme_t.mode @4).
@@ -921,7 +921,7 @@ passed()
 
 # Display settings: after the stock rows, Appearance, Cover Flow and Controls, each opening stock's page
 # again (display_sub) with its stock rows dropped and its own rows instead. Appearance holds OLED's declared options
-# (Light Mode, Accent, Home, Shortcut, Battery, then its own Song Artist, Song Length and Track Time) in the native row
+# (Light Mode, Accent, Home, Battery, then its own Song Artist, Song Length and Track Time) in the native row
 # widgets and styles, each a title with its value on the right (settings.values text), with the Display, cover mode
 # and power manager icons; Centre or tap cycles and saves each; a new accent or Light Mode drops the image cache and
 # repaints, a new Battery mode repaints the bar.
@@ -1007,15 +1007,15 @@ assert OLED_G.bar==58 and Machine().call(address=payload_syms['client_h'],args=(
 # Migration (navigation.c theme_boot): a unit an older build left on another theme (IPOD THEME other than 3, or no
 # key) takes OLED's preset once at its first system_bar load, as choosing OLED did, then THEME 3 is written; with
 # THEME 3 nothing is written. The preset is theme.xml's (theme_preset): Light Mode off unless Auto (keep), Blue,
-# Home Split, and its own options' presets; Shortcut and Battery are kept, and only a change is saved. A second load
+# Home Split, and its own options' presets; Battery is kept, and only a change is saved. A second load
 # does nothing again.
-OPT_KEY={'SETTING_LIGHT':'LIGHT','SETTING_ACCENT':'OLED_ACCENT','SETTING_HOME':'HOME','SETTING_SHORTCUT':'SHORTCUT','SETTING_BATTERY':'BATTERY'}
+OPT_KEY={'SETTING_LIGHT':'LIGHT','SETTING_ACCENT':'OLED_ACCENT','SETTING_HOME':'HOME','SETTING_BATTERY':'BATTERY'}
 def preset_writes(config):  # theme_preset's saves for config, from OLED's options (oled/theme.xml), in their order
     out=[]
     for o in OLED['opts']:
         key=o.get('key') or OPT_KEY[o['setting']]
         n,d=(theme_keys(theme_builtins())[key][:2] if o.get('key') or key=='OLED_ACCENT' else
-             {'LIGHT':(3,0),'HOME':(2,0),'SHORTCUT':(12,12),'BATTERY':(4,0)}[key])  # HOME: Split, Full; a saved 2 reads Split
+             {'LIGHT':(3,0),'HOME':(2,0),'BATTERY':(4,0)}[key])  # HOME: Split, Full; any other value reads Split
         s=config.get(key,''); v=int(s) if s.isdigit() and int(s)<n else d
         if o['values'] and o['def']>=0 and not o['values']>>v&1: v=o['def']
         if o['preset']>=0 and v!=o['keep'] and v!=o['preset']: out.append((o['preset'],'IPOD',key))

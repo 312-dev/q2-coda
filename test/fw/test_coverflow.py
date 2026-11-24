@@ -3119,7 +3119,7 @@ def test_home_owns_its_lists_rows(fw):
 
 @pytest.mark.parametrize('home', ('0', '1'))
 def test_home_s_list_has_no_shortcut_row(fw, home):
-    # Home's list has no Shortcut row (the menu review's, 2026-11-15): a row the asset had is left as it was
+    # Home's list has no Shortcut row, and a stored IPOD SHORTCUT is ignored: a row the asset had is left as it was
     themed(fw, SHORTCUT='0', HOME=home)
     ui = Ui(fw)
     h = Homes(ui, rockbox=True)
@@ -3151,7 +3151,7 @@ def shown_rows(ui, h):
 @pytest.mark.parametrize('status, shown', ((1, False), (0, False), (2, True), (3, True)))
 def test_now_playing_s_row_shows_only_while_something_is_loaded(fw, home, status, shown):
     """An iPod's main menu: Now Playing only while a song plays or is paused, in Split and Full; hidden, it is
-    restacked last and takes no taps, and the Shortcut stays after Folder."""
+    restacked last and takes no taps."""
     ui, h, playing, _, _ = np_home(fw, status, home)
     rows = ui[h.view].kids
     assert ui[playing].visible == shown and ui[playing].sensitive == shown
@@ -3218,8 +3218,8 @@ def test_now_playing_s_row_coming_keeps_the_selected_row_in_sight(fw, sel, y, wa
 
 @pytest.mark.parametrize('mode', ('1', '2', '7'))
 def test_full_hides_the_art_and_a_saved_carousel_is_split(fw, mode):
-    """Full hides the art; HOME=2, Carousel's before it went (its Home had no way to Settings), and any other value
-    lay Home out as Split, the carousel left hidden."""
+    """Full hides the art; HOME=2, and any other value but 0 and 1, lays Home out as Split, the carousel left
+    hidden."""
     themed(fw, HOME=mode)
     ui = Ui(fw)
     h = Homes(ui, carousel=True)

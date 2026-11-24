@@ -5747,34 +5747,30 @@ def toasts(fw):
     return out
 
 
-def test_groovebox_by_id_starts_the_card_game_with_the_sound(fw):
+def start_only_game(fw):
+    """The card's one card game started as its Games row starts it (addon_game_start), after the scan."""
+    assert fw.fn('addon_games', C.c_int)() == 1
+    return fw.fn('addon_game_start', C.c_int, C.c_int)(0)
+
+
+def test_groovebox_starts_as_the_card_game_with_the_sound(fw):
     from test_radio import Library
     lib = Library(fw)
     card(fw, groovebox=b'name=Groovebox\ngame=1\naudio=1\n')
     fw.mock('fw_fork', lambda *_: 77)
     fw.mock('fw_socket', lambda *_: 9)
     seen = toasts(fw)
-    assert fw.fn('addon_game_open', C.c_int, C.c_char_p)(b'groovebox') == 1 and seen == []
+    assert start_only_game(fw) == 1 and seen == []
     gm = fw.var('addon__gm', Game)
     assert (gm.pid, gm.audio, gm.sock, gm.path) == (77, 1, 9, b'/tmp/q2-groovebox.input.sock')
     assert lib.calls == ['save_stop'] and fw.calls('mclSetMute') and fw.calls('device_set_volume')  # held; the jack readied, dac_take
-
-
-@pytest.mark.parametrize('folder', [{}, {'groovebox': b'name=Groovebox\n'}])
-def test_a_card_game_by_id_is_found_only_when_its_q2app_is_a_game_s(fw, folder):
-    """No .groovebox, or one whose q2app isn't a game's: no card game has the id."""
-    card(fw, other=b'name=Other\ngame=1\n', **folder)
-    fw.mock('fw_fork', lambda *_: 77)
-    opened = fw.fn('addon_game_open', C.c_int, C.c_char_p)
-    assert opened(b'groovebox') == -1 and not fw.calls('fw_fork')
-    assert opened(b'other') == 1 and fw.calls('fw_fork') and not fw.calls('player_stop') and not fw.calls('player_save_stop')  # a game without the sound
 
 
 def test_a_card_game_that_can_t_fork_says_so(fw):
     card(fw, groovebox=b'name=Groovebox\ngame=1\naudio=1\n')
     fw.mock('fw_fork', lambda *_: -1)
     seen = toasts(fw)
-    assert fw.fn('addon_game_open', C.c_int, C.c_char_p)(b'groovebox') == 0
+    assert start_only_game(fw) == 0
     assert seen == [b"It couldn't start"] and fw.var('addon__gm', Game).pid == 0
 
 
@@ -5799,7 +5795,7 @@ def test_a_game_with_the_sound_holds_the_library_where_it_was_and_gives_it_back(
     card(fw, groovebox=b'name=Groovebox\ngame=1\naudio=1\n')
     fw.mock('fw_fork', lambda *_: 77)
     fw.mock('fw_socket', lambda *_: 9)
-    assert fw.fn('addon_game_open', C.c_int, C.c_char_p)(b'groovebox') == 1
+    assert start_only_game(fw) == 1
     assert lib.calls[0] == 'save_stop', lib.calls
     assert lib.now() == (3, 61)
     fw.mock('fw_waitpid', lambda *_: 77)
@@ -5816,7 +5812,7 @@ def test_a_game_with_the_sound_that_can_t_start_gives_the_library_back_at_once(f
     card(fw, groovebox=b'name=Groovebox\ngame=1\naudio=1\n')
     fw.mock('fw_fork', lambda *_: -1)
     toasts(fw)
-    assert fw.fn('addon_game_open', C.c_int, C.c_char_p)(b'groovebox') == 0
+    assert start_only_game(fw) == 0
     assert lib.calls == ['save_stop', 'save_start 1'] and lib.now() == (3, 61)
 
 

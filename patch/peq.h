@@ -475,7 +475,6 @@ int addon_offline_ok(const char *id), addon_offline_ask(const char *id, int add,
 int addon_games(void), addon_game_start(int k), addon_game_on(void);
 int addon_game_audio(
     void); /* a card game with audio=1 runs: the sound and the media keys are its */
-int addon_game_open(const char *id); /* Home's Shortcut: the card game with this id, -1 none */
 const char *addon_game_name(int k);
 /* games.c: the theme's pop-up for a card game (Q2_POPUP's value), 7 + 6 * 7 + 64 * 7 + 1 bytes at
  * most */
@@ -827,10 +826,7 @@ void *coverflow_playlist(void *page), *coverflow_playlists_close(void);
 void playlist_open(void *win, int cd_num);
 unsigned playlist_index(int cd_num);
 int rockbox_available(void);   /* theme_engine.c: a regular Rockbox binary on the card */
-int groovebox_available(void); /* theme_engine.c: the Groovebox card app's binary on the card */
-/* theme_engine.c: the two as last looked at, for every paint; card_bins_changed: look again now */
-int rockbox_seen(void), groovebox_seen(void);
-void card_bins_changed(void);
+int rockbox_open(void *ctx, void *event); /* playback_power.c: General's Rockbox row, the hand-over */
 int page_keyup(void *ctx, void *event); /* navigation.c: Return leaves a payload page */
 int ringnav_localclass(int cls);        /* navigation.c: load_localclass_list's hook */
 int shelf_open(void *ctx, void *event); /* netupdate.c: System settings' Apps page */

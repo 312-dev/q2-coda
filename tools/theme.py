@@ -16,8 +16,7 @@ ACCENT_TONES = [[int(x, 16) for x in re.findall(r'0x([0-9a-fA-F]{6})', row)] for
 ALL_ACCENTS = (1 << len(ACCENT_NAMES)) - 1
 SETTINGS = {'light': ('SETTING_LIGHT', ('off', 'on', 'auto')), 'accent': ('SETTING_ACCENT', ACCENT_NAMES),
             'home': ('SETTING_HOME', ('split', 'full')),
-            'battery': ('SETTING_BATTERY', ('icon', 'percent', 'both', 'inside')),
-            'shortcut': ('SETTING_SHORTCUT', ('rockbox', 'artists', 'albums', 'favorites', 'rated_albums', 'shuffle', 'games', 'playlists', 'podcasts', 'audiobooks', 'groovebox', 'none'))}
+            'battery': ('SETTING_BATTERY', ('icon', 'percent', 'both', 'inside'))}
 ACCENT_KEYS = {'ACCENT': '&st.accent'}
 # The IPOD keys the payload reads itself (theme_engine.c setting_keys[], every "IPOD", "<KEY>" literal): a
 # theme's own key is never one of them.

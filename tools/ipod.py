@@ -376,8 +376,8 @@ def ipod_home(root, g):
     check([n[2]['name'] for n in root[3][0][3]] == ['btn_' + r for r in
             ('playing', 'localmusic', 'coverflow', 'folder', 'stream', 'playset', 'sysset')], 'Unexpected home cards')
     # Stock's carousel of cards and its two arrows stay in the window, hidden and taking no taps: home_page_init's
-    # visitor (0x534750) binds the arrows to the slide_menu and the cards' img_* by name, so the three are left for
-    # it rather than removed. Home is its lists alone (Split or Full); nothing shows or steps the carousel. Stock
+    # visitor (0x534750) binds the arrows to the slide_menu and the cards' img_* by name, so the three stay for
+    # it. Home is its lists alone (Split or Full); nothing shows or steps the carousel. Stock
     # V1.36's Album Wall card goes: its page does not ship (STOCK_PAGES), and no shipped page names img_coverflow.
     del root[3][0][3][2]
     for n in root[3]:

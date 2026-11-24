@@ -449,8 +449,7 @@ def test_the_preset_keeps_light_mode_s_auto(fw, clock):
     assert boot(fw) == [('THEME', 3)]
 
 
-@pytest.mark.parametrize('fn, path', [('rockbox_available', b'/mnt/mmc/.rockbox/rockbox'),
-                                      ('groovebox_available', b'/mnt/mmc/.groovebox/q2-groovebox')])
+@pytest.mark.parametrize('fn, path', [('rockbox_available', b'/mnt/mmc/.rockbox/rockbox')])
 @pytest.mark.parametrize('result, mode, available', [(0, 0o100755, 1), (0, 0o040755, 0), (-1, 0o100755, 0)])
 def test_rockbox_is_a_file_on_the_card(fw, fn, path, result, mode, available):
     def stat(version, p, info, *_):
@@ -459,32 +458,6 @@ def test_rockbox_is_a_file_on_the_card(fw, fn, path, result, mode, available):
         return result
     fw.mock('fw___xstat', stat)
     assert fw.fn(fn, C.c_int)() == available
-
-
-def test_the_status_rows_binaries_are_looked_at_again_only_when_due(fw):
-    """rockbox_seen and groovebox_seen, asked on every status-row paint: the card again CARD_RECHECK_MS on, at once after
-    a library scan (library_gen) or the Shelf's install or removal (card_bins_changed)."""
-    now, stats, on = [100000], [], [True]
-    fw.mock('time_now_ms', lambda *_: now[0])
-
-    def stat(version, path, info, *_):
-        stats.append(C.string_at(path))
-        C.c_uint.from_address(info + 20).value = 0o100755
-        return 0 if on[0] else -1
-    fw.mock('fw___xstat', stat)
-    rockbox, groovebox = fw.fn('rockbox_seen', C.c_int), fw.fn('groovebox_seen', C.c_int)
-    assert (rockbox(), groovebox()) == (1, 1) and len(stats) == 2  # both binaries, once
-    on[0] = False
-    now[0] += O['CARD_RECHECK_MS'] - 1
-    assert [rockbox() for _ in range(100)] == [1] * 100 and len(stats) == 2  # a paint a pass: no stat
-    now[0] += 1
-    assert (rockbox(), groovebox()) == (0, 0) and len(stats) == 4  # the card gone: seen at the next look
-    on[0] = True
-    fw.var('library_gen', C.c_uint).value += 1  # a scan has rewritten the library
-    assert rockbox() == 1 and len(stats) == 6
-    on[0] = False
-    fw.fn('card_bins_changed', None)()  # the Shelf removed it
-    assert rockbox() == 0 and len(stats) == 8
 
 
 def test_homes_folders_rule_looks_at_the_card_only_when_due(fw):
@@ -543,33 +516,6 @@ class CardWatch:
         assert self.wait() == 1
 
 
-def test_the_status_rows_binaries_follow_the_cards_changes_not_a_clock(fw):
-    """A Rockbox copied in by hand, or the card taken out, shows on the next paint; with nothing changing, no clock
-    looks again."""
-    now, stats, on = [100000], [], [False]
-    fw.mock('time_now_ms', lambda *_: now[0])
-
-    def stat(version, path, info, *_):
-        stats.append(C.string_at(path))
-        C.c_uint.from_address(info + 20).value = 0o100755
-        return 0 if on[0] else -1
-    fw.mock('fw___xstat', stat)
-    watch = CardWatch(fw)
-    rockbox = fw.fn('rockbox_seen', C.c_int)
-    assert rockbox() == 0 and len(stats) == 2
-    assert watch.watches == ['/mnt/mmc', '/mnt/mmc/.rockbox', '/mnt/mmc/.groovebox']
-    on[0] = True  # copied over a minute later
-    now[0] += 12 * O['CARD_RECHECK_MS']
-    assert [rockbox() for _ in range(50)] == [0] * 50 and len(stats) == 2  # nothing said it changed: no stat
-    watch.step('in')  # .rockbox/rockbox made
-    assert watch.watches == ['/mnt/mmc', '/mnt/mmc/.rockbox', '/mnt/mmc/.groovebox']  # set again before the count
-    assert rockbox() == 1 and len(stats) == 4
-    on[0] = False
-    watch.step('mounts')  # the card taken out
-    assert [a[0] for _, a in fw.calls('fw_close')] == [CardWatch.MOUNTS]  # opened again from the table as it is
-    assert rockbox() == 0 and len(stats) == 6
-
-
 def test_homes_folders_rule_follows_the_cards_root_at_once(fw):
     now, looked, listed, card = [100000], [], [], {'mtime': 1}
     fw.mock('time_now_ms', lambda *_: now[0])
@@ -583,6 +529,7 @@ def test_homes_folders_rule_follows_the_cards_root_at_once(fw):
     watch = CardWatch(fw)
     folders = fw.fn('home_folders', C.c_int)
     assert folders() == 1 and (len(looked), len(listed)) == (1, 1)
+    assert watch.watches == ['/mnt/mmc']  # the card's root alone
     now[0] += 3 * O['CARD_RECHECK_MS']
     assert folders() == 1 and (len(looked), len(listed)) == (1, 1)  # no clock
     card['mtime'] = 2

@@ -1587,19 +1587,6 @@ int addon_is_game(const char *id) {
     return 0;
 }
 
-/* The card game with this id started as its Games row would start it (1 running, 0 not, with
- * addon_game_start's toast); -1 when no card game has the id (no q2app with game=1 in its folder,
- * or no slot left).
- * ponytail: its caller was Home's Shortcut (Groovebox), Carousel's card, removed with it, so the
- * payload's link drops it; test/fw starts games with the sound through it. A row that starts a
- * card game by id would bring it back. */
-int addon_game_open(const char *id) {
-    int n = addon_games();
-    for (int k = 0; k < n; ++k)
-        if (!strcmp(ap.a[ap.game[k]].id, id)) return addon_game_start(k);
-    return -1;
-}
-
 /* Card game k started over the screen: 1 when it runs. */
 int addon_game_start(int k) {
     app_t *a = k >= 0 && k < ap.games ? &ap.a[ap.game[k]] : 0;
