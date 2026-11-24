@@ -732,10 +732,10 @@ static int rebuild(int keep) {
     return 1;
 }
 /* Shuffle Songs' pass and the next one, kept over a queue edit (follow_queue, playback_insert), so
- * what Up Next lists stays what plays: rebuild draws both again, and each takes back the order it had
- * (old, n0 entries), every index as it now is (map[x], ~0u gone; else x, moved up by add from at).
- * A song new to the queue goes at the end of this pass, in queue order, and somewhere in the next
- * one. Taken with the tables to free; with no memory rebuild's new order stands. */
+ * what Up Next lists stays what plays: rebuild draws both again, and each takes back the order it
+ * had (old, n0 entries), every index as it now is (map[x], ~0u gone; else x, moved up by add from
+ * at). A song new to the queue goes at the end of this pass, in queue order, and somewhere in the
+ * next one. Taken with the tables to free; with no memory rebuild's new order stands. */
 typedef struct {
     entry *order, *cycle;
     unsigned n;
@@ -767,7 +767,8 @@ static int pass_carry(entry *dst, const entry *old, unsigned n0, const unsigned 
     return 1;
 }
 static void pass_keep(pass_t p, const unsigned *map, unsigned at, unsigned add) {
-    if (s.active && p.order && s.shuffle == 1 && pass_carry(s.order, p.order, p.n, map, at, add, 0) &&
+    if (s.active && p.order && s.shuffle == 1 &&
+        pass_carry(s.order, p.order, p.n, map, at, add, 0) &&
         pass_carry(s.cycle, p.cycle, p.n, map, at, add, 1))
         for (unsigned i = 0; i < s.n; ++i)
             if (s.order[i].index == (unsigned)M(MCL_POS)) {
@@ -778,11 +779,12 @@ static void pass_keep(pass_t p, const unsigned *map, unsigned at, unsigned add) 
 }
 /* Stock's own queue edit (View Queue's delete) takes entries out behind advanced play, so its
  * indices name other tracks or none. On the UI thread they follow: the entries left keep their seen
- * marks, history and Play Next places, shifted down as playback_insert shifts them up, and the order
- * is drawn again over them, as an insert's is. Anything but a deletion (or no memory) takes a new
- * order over the queue, as a new load gets, Play Next and the history gone. Off the UI thread
- * (headset keys, a natural change) it returns 1 and the caller takes stock's way this once; the
- * next UI pass follows. Only a size change is seen: a delete always makes one. */
+ * marks, history and Play Next places, shifted down as playback_insert shifts them up, and the
+ * order is drawn again over them, as an insert's is, Shuffle Songs' keeping its sequence
+ * (pass_keep). Anything but a deletion (or no memory) takes a new order over the queue, as a new
+ * load gets, Play Next and the history gone. Off the UI thread (headset keys, a natural change) it
+ * returns 1 and the caller takes stock's way this once; the next UI pass follows. Only a size
+ * change is seen: a delete always makes one. */
 static int follow_queue(void) {
     unsigned m = queue() ? deque_size(queue()) : 0, j = 0, k = 0;
     if (!s.active || m == s.n) return 0;
@@ -818,10 +820,13 @@ static int follow_queue(void) {
     free(map);
     return 0;
 }
-/* Whether the extended play (the hold menu's shuffles and repeats) runs: playback_option's values play only then.
- * Stock Shuffle played as Shuffle Songs (shuffle_own, playback_shuffle) is not: Now Playing's shuffle and repeat
- * say what plays there, and a change of them is stock's mode, which a new order follows. */
-int playback_active(void) { return s.active && !(s.shuffle == 1 && s.repeat == 5 && M(MCL_MODE) == 2); }
+/* Whether the extended play (the hold menu's shuffles and repeats) runs: playback_option's values
+ * play only then. Stock Shuffle played as Shuffle Songs (shuffle_own, playback_shuffle) is not: Now
+ * Playing's shuffle and repeat say what plays there, and a change of them is stock's mode, which a
+ * new order follows. */
+int playback_active(void) {
+    return s.active && !(s.shuffle == 1 && s.repeat == 5 && M(MCL_MODE) == 2);
+}
 int playback_option(int kind) {
     return kind == 0 ? (s.active ? s.shuffle : 0) : kind == 1 ? (s.active ? s.repeat : 2) : s.folder;
 }
@@ -883,8 +888,8 @@ int playback_shuffle(int mode) {
 }
 /* Stock Shuffle on a local queue is played as Shuffle Songs (playback_shuffle, the mode to restore
  * kept): stock draws each next at random at the change, so it has no order Up Next could list, the
- * car could show or Crossfade could look ahead to. Taken on the UI pass after Shuffle is chosen or a
- * queue loads under it (playback_poll), so the order is drawn while the song that was playing is
+ * car could show or Crossfade could look ahead to. Taken on the UI pass after Shuffle is chosen or
+ * a queue loads under it (playback_poll), so the order is drawn while the song that was playing is
  * still the only one stock's shuffle has played, and it starts the history. A queue it could not
  * take (out of memory) is not tried again until it changes or a mode is chosen (own_tried, the
  * queue's loads and size + 1). A DLNA or online queue keeps stock's shuffle. */
@@ -1510,7 +1515,7 @@ void playback_insert(unsigned at, unsigned n, int next) {
         return;
     }
     close_preload();
-    /* Remap occurrences before grouping is recomputed. */
+    /* Remap occurrences before grouping is recomputed; Shuffle Songs' order comes back after. */
     unsigned *seen = calloc(s.n + n + 1, sizeof *seen);
     if (!seen) {
         s.active = 0;
@@ -2169,9 +2174,10 @@ int playback_resumed(void *r) {
     return pending && s.resume_elapsed && (unsigned)M(MCL_POS) == s.resume_pos &&
            fnv(FNV_SEED, P(r, REC_PATH)) == s.resume_key;
 }
-/* Stock Shuffle's next, drawn ahead so Crossfade can ask about the file. Stock's pick (0x5ba7d0) takes
- * the current index out of the pool and sets the position to a random one left there, which stays
- * until it is current: so ringnav_shuffle overrides the position with this draw, a uniform one of the
+/* Stock Shuffle's next where stock still draws it (a queue shuffle_own leaves to it: DLNA, online,
+ * too large), drawn ahead so Crossfade can ask about the file. Stock's pick (0x5ba7d0) takes the
+ * current index out of the pool and sets the position to a random one left there, which stays until
+ * it is current: so ringnav_shuffle overrides the position with this draw, a uniform one of the
  * same set. Neither touches the pool. The two records say the queue under it hasn't changed.
  * ponytail: with under 2 in the pool the pick refills it (or Folder Skip jumps): -2, unknown. */
 static struct { unsigned at, index; void *now, *next; } peek __attribute__((section(".scratch")));
@@ -2219,10 +2225,10 @@ static int playback_next(void) {
     if (mode == 3 && n && at + 1 == n) return 0;
     return (mode == 0 || mode == 3) && at + 1 < n ? (int)at + 1 : -1;
 }
-/* Whether songs play shuffled, for Crossfade, which fades every change then, a next song of the same
- * album too (crossfade.c xfade_poll): stock Shuffle, Shuffle Songs (which stock Shuffle plays as on a
- * local queue, shuffle_own), and a shuffle within albums (2, 4). Shuffle Albums' own order (3) keeps
- * each album's tracks in order, gapless. */
+/* Whether songs play shuffled, for Crossfade, which fades every change then, a next song of the
+ * same album too (crossfade.c xfade_poll): stock Shuffle, Shuffle Songs (which stock Shuffle plays
+ * as on a local queue, shuffle_own), and a shuffle within albums (2, 4). Shuffle Albums' own order
+ * (3) keeps each album's tracks in order, gapless. */
 static int playback_shuffled(void) {
     return s.active ? s.shuffle == 1 || s.shuffle == 2 || s.shuffle == 4 : M(MCL_MODE) == 2;
 }

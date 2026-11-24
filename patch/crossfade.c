@@ -490,11 +490,13 @@ int xfade_key(void *top, unsigned key) {
 
 /* playback_poll, each UI pass: the next change's fade into XFADE_FILE, made whole under another
  * name first. A fade only when Smart Crossfade and stock's Gapless are on and the next track is
- * another album's (album_cmp), so albums stay gapless; stock Shuffle's next always counts as
- * another album's, and is -2 when not drawn ahead (playback.c shuffle_peek). The word is
+ * another album's (album_cmp), so albums stay gapless; under a shuffle (shuffled: playback.c
+ * playback_shuffled) every next counts as another album's, so it always fades. Stock Shuffle on a
+ * local queue plays as an order (playback.c shuffle_own), so its next is known; where stock still
+ * draws at the change it is -2 when not drawn ahead (playback.c shuffle_peek). The word is
  * XF_FALLBACK_MS with XF_SMART: the player plans the overlap and falls back to that plain fade,
- * from the two paths in XFADE_NEXT, written each time the change's songs do. Stock Shuffle's
- * change is a cold start (stock preloads nothing in Shuffle), which the filter's tail waits out
+ * from the two paths in XFADE_NEXT, written each time the change's songs do. A change stock draws
+ * is a cold start (stock preloads nothing in its own Shuffle), which the filter's tail waits out
  * (XF_COLD_NS). Each stop moves the count beside the fade, so no tail outlives a stop: status 1 and
  * no file error. An error's status is no stop: stock's dialog timer takes the file away and shows
  * its modal toast, passes running under it, before it plays the next (on_wm_timer_dialog,

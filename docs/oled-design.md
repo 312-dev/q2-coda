@@ -789,6 +789,9 @@ as a menu's; a lit row's foot never passes y 282.
   three Accent Blue [level bars](#level-bars) (3 px wide, 4.5 px apart, 5 to 12 px high) 7 px after it, moving
   while it plays and still while paused, and its artist and album
   ("Pink Floyd · The Dark Side of the Moon").
+- **Under a shuffle, what played** stands above the header, a row each as the rest of the queue's,
+  the latest right above it (at most 100): the sheet opens with the header at the list's top and
+  scrolls up into them. Center on one plays it again.
 - **Playing Next** (Inter Medium 13 px, Text Secondary) heads the songs queued with Play Next, Play
   Last and the bump, with a **Clear** pill on its right, 22 px high, ending at x 359 with the
   selection bar: `#2C2C2E` with `#7FA6F5` Inter Medium 15 px at rest (Light Mode `#E5E5EA`, the tab

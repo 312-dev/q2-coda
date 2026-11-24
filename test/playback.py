@@ -1846,16 +1846,27 @@ m=XfadeMachine(); rows=list(m.library_rows); assert m.fade(3)==0
 m.word(syms['mcl_pdeqplaylist'],m.deque(rows[:4]+[rows[0]]+rows[4:])); assert m.fade()==SMART
 m.word(syms['mcl_pdeqplaylist'],m.deque(rows)); assert m.fade()==0
 m=XfadeMachine('0'); assert m.fade()==0 and m.files.keys()<={'/proc/mounts'} and not m.attaches  # off: no file
-# Shuffle Songs (the reports' mode, #164): the next is the shuffle's successor, not pos + 1, and
-# the fade follows album_cmp of the two records at every automatic change.
+# Shuffle Songs (the reports' mode, #164): the next is the shuffle's successor, not pos + 1, and every
+# automatic change fades, a next of the same album too, as stock Shuffle's always did (playback_shuffled).
 m=XfadeMachine(); assert m.fn('playback_shuffle',2)==1
-rows=m.library_rows; fades=set()
+rows=m.library_rows; same=0
 for _ in range(6):
     pos,nxt=m.current(),m.fn('playback_successor',1); assert 0<=nxt<len(rows)
-    want=SMART if m.fn('album_cmp',rows[pos],rows[nxt]) else 0
-    assert m.fade()==want,(pos,nxt,m.fade(),want); fades.add(want)
+    same+=not m.fn('album_cmp',rows[pos],rows[nxt])
+    assert m.fade()==SMART,(pos,nxt)
     assert m.advance_song(1)>=0
-assert fades=={0,SMART},fades  # both cases met along the way
+assert same,same  # a change within an album met along the way, faded all the same
+# Stock Shuffle on a local queue is that order from the next UI pass (playback.c shuffle_own): the file
+# names the real next, the gapless preload opens it, and the songs that play are Up Next's, in its order.
+m=XfadeMachine(); m.word(O['MCL_TYPE'],0xf001); m.word(O['MCL_MODE'],2)
+assert m.fade()==SMART and m.fn('playback_option',0)==1 and m.fn('playback_active')==0
+queue=list(m.items(m.get(syms['mcl_pdeqplaylist']))); path=lambda r: m.text(m.get(r+O['REC_PATH'])).encode()
+out=m.alloc(24*4); up=[m.get(out+4*i) for i in range(m.fn('playback_upcoming',out,24))]
+assert m.files[NEXT]==path(queue[m.current()])+b'\n'+path(queue[up[0]])+b'\n',m.files[NEXT]
+m.fn('ringnav_preload'); assert m.mcl('MCL_PREPOS')==up[0] and m.mcl('MCL_PRELOAD')==1
+assert m.sequence(limit=len(up))[1:]==up  # this pass and the next, as listed
+# Shuffle off: an album's own next stays gapless again; another album's fades.
+m=XfadeMachine(); m.word(O['MCL_TYPE'],0xf001); m.word(O['MCL_MODE'],0); assert m.fade(3)==0 and m.fade(0)==SMART
 print('Crossfade: the next change\'s fade, album and Gapless gates, the shared file, the filter and Shuffle Songs passed')
 
 # What waits for the DAC (crossfade.c press_stamp, docs/internals.md#wired-start): demo's stamp in PRESS_FILE.

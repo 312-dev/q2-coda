@@ -7,7 +7,7 @@ int playback_set(int kind, int value);
 int playback_groups(void *all, int folder);
 int playback_unshuffle(void);   /* the stock mode Shuffle Songs replaces */
 int playback_shuffle(int mode); /* the queue as Shuffle Songs, Repeat All; the next restores mode */
-int playback_listable(void);    /* View Queue: a shuffle's order is up (stock Shuffle taken first) */
+int playback_listable(void); /* View Queue: a shuffle's order is up (stock Shuffle taken first) */
 int playback_group_skip(int forward);
 int playback_back(void); /* the track stock Shuffle's Previous left, once; else -1 */
 int playback_peek(unsigned at); /* stock Shuffle's next drawn ahead from at, once; else -1 */

@@ -251,7 +251,11 @@ static void un_fill(int sel) {
     }
     if (un.nh && sel < 0) un_open_at();
     if (stop)
-        ringnav_select(view, sel < 0 ? (first < 0 ? stop - 1 : first) : sel < stop ? sel : stop - 1, stop);
+        ringnav_select(view,
+                       sel < 0      ? (first < 0 ? stop - 1 : first)
+                       : sel < stop ? sel
+                                    : stop - 1,
+                       stop);
     widget_invalidate_force(un.page, (void *)0);
 }
 
@@ -259,10 +263,10 @@ static void un_fill(int sel) {
  * end padded so the header can reach the top over a short rest of the queue. */
 static void un_open_at(void) {
     void *view = un.view;
-    int y = I(un.now, W_Y), h = I(view, W_H),
-        content = widget_get_prop_int(view, "virtual_h", 0);
+    int y = I(un.now, W_Y), h = I(view, W_H), content = widget_get_prop_int(view, "virtual_h", 0);
     if (content < y + h) {
-        widget_set_prop_int(view, "_list_pad", widget_get_prop_int(view, "_list_pad", 0) + y + h - content);
+        widget_set_prop_int(view, "_list_pad",
+                            widget_get_prop_int(view, "_list_pad", 0) + y + h - content);
         widget_set_prop_int(view, "_list_padded", y + h);
         widget_set_prop_int(view, "virtual_h", y + h);
     }
@@ -273,7 +277,8 @@ static void un_open_at(void) {
 static int un_place(int stop) { return stop - (int)un.nh - (un.npn ? 1 : 0); }
 
 /* A played row pressed: it plays again, as a row of the queue does (un_click), and then is the
- * playing song, its order the one after it as Shuffle Songs' pick (playback.c ringnav_start_queue). */
+ * playing song, its order the one after it as Shuffle Songs' pick (playback.c ringnav_start_queue).
+ */
 static int un_past_click(void *ctx, void *event) {
     (void)event;
     void *q = P(mcl_pdeqplaylist, 0);
