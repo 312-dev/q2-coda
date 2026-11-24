@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Shuffle: turning Shuffle on or off responds at once on a library of any size, where the Q2 could freeze for a moment while it sorted every song and wrote the queue to the card. The queue is saved in the background, so a slow or busy card never holds up a button.
   - Bluetooth: each paired device has a **Volume Curve** on its page, **Even** or **Gentle**. Even, the default, suits most headphones. Gentle is for headphones that are already loud at half volume (such as the Bowers & Wilkins Px7): each step of the Q2's volume sounds like the same change, and half volume is much quieter. It changes the volume of the connected device at once, and its Volume Limit still applies.
   - Smart Crossfade: every crossfade overlaps for at least 5 seconds and up to 15, judged from the last 30 seconds of one song and the first 30 seconds of the next. A song that fades out overlaps for as long as its fade, and a next song with a soft intro plays that intro under the end of the one before, where a song with a short fade-out got only a second or two of overlap.
   - Cover Flow: opens straight onto its covers, even the first time on a large library or after new covers arrive, where it showed "Preparing artwork" until every album's cover was made (about a minute on a large server library). Covers not made yet show the placeholder and fill in a few at a time, the ones on screen first, following the wheel; leaving keeps what was made, and the next visit finishes the rest.
