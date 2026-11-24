@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Smart Crossfade: every crossfade overlaps for at least 5 seconds and up to 15, judged from the last 30 seconds of one song and the first 30 seconds of the next. A song that fades out overlaps for as long as its fade, and a next song with a soft intro plays that intro under the end of the one before, where a song with a short fade-out got only a second or two of overlap.
   - Bluetooth: each paired device has its own **Volume Limit** on its page, No Limit until you set one. While that device is connected the volume stops at its limit, from the wheel, Control Center, Settings, the Car Remote or the device's own buttons, and Max Volume still applies on top. Wired and USB headphones and your other Bluetooth devices keep their own levels.
   - Lyrics: after you scroll synced lyrics away, they go back to the line being sung and follow the song again once you leave them alone for 5 seconds. Tapping a synced line plays the song from that line; tap the line being sung to show the lyrics full screen as before.
   - Streamed songs: a song from your server starts as soon as its first 3 seconds have downloaded, up to half a second sooner than before, where the Subsonic app waited for its next progress report.
