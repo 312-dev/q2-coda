@@ -586,6 +586,7 @@ void catalogue_row_mark(void *w, void *canvas, void *row, int x, int y);
 void catalogue_fit(void *entry, void *surface, int limit);
 int catalogue_np_info(const char *path, char *genre, int *year);
 int catalogue_cover(const char *path, char *out, unsigned size);
+int catalogue_cover_name(const char *path, char *out, unsigned size);
 int catalogue_cover_large(const char *path, char *out, unsigned size);
 /* catalogue.c: a Stream Cache copy's record takes its server row's title, artist and album (1) */
 int catalogue_copy_tags(void *r);

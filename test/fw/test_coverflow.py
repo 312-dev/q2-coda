@@ -4137,3 +4137,67 @@ def test_while_radio_owns_now_playing_the_pane_is_radio_s_and_ticks_only_while_i
         rt_var.value = None
     fw.fn('coverflow_home_art', None, C.c_void_p)(h.win)
     assert home.show in (SHOW_NOW, SHOW_LIB) and len(fw.calls('widget_load_image')) > loads  # the covers again
+
+
+class Folders:
+    """The card's folders as the art look reads them: __xstat gives each a time (o32: st_mtime word 16, its
+    nanoseconds 17), opendir and readdir list its names (host.py's struct dirent: d_name at 11), access counts each
+    file asked for. reads counts the folders listed."""
+    def __init__(self, fw, names):
+        self.names, self.time, self.reads, self.asked, self.keep, self.left = names, 1, 0, [], [], []
+        fw.mock('fw___xstat', self.stat)
+        fw.mock('fw_opendir', self.opendir)
+        fw.mock('fw_readdir', self.readdir)
+        fw.mock('fw_closedir', lambda *_: 0)
+        fw.mock('fw_access', lambda path, *_: self.asked.append(C.string_at(path)) or -1)
+        fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))  # libc's, as stock's
+
+    def stat(self, version, path, info, *_):
+        if C.string_at(path).decode() not in self.names:
+            return -1
+        words = (C.c_uint * 36).from_address(info)
+        words[16], words[17] = 1800000000, self.time
+        return 0
+
+    def opendir(self, path, *_):
+        self.left = list(self.names.get(C.string_at(path).decode(), ()))
+        self.reads += 1
+        return 0x77
+
+    def readdir(self, d, *_):
+        if not self.left:
+            return 0
+        name = self.left.pop(0).encode()
+        ent = C.create_string_buffer(268)
+        C.memmove(C.addressof(ent) + 11, name, len(name))
+        self.keep.append(ent)
+        return C.addressof(ent)
+
+
+# The owner's Q2 (2026-11-24): a file looked up in a 5,000-name exFAT folder took about 12 ms, and the look asked the
+# card for two an album. The look reads the art cache and the app's covers folder once each and answers every album
+# from their names: cached (0), a cover to build from (1), nothing to build from (2); a folder is read again only once
+# its time moves.
+def test_the_art_look_reads_each_folder_once_and_answers_every_album_from_its_names(fw):
+    key = fw.fn('album_key', C.c_uint, C.c_void_p)
+    state = fw.fn('coverflow__art_state', C.c_int, C.c_void_p, C.c_char_p, C.c_uint)
+    covers = '/mnt/mmc/.subsonic/covers'
+    made, cover, none = (Rec(a, f'/mnt/mmc/.subsonic/cat/{a}/s1.flac', 'Art') for a in ('alb1', 'alb2', 'alb3'))
+    card = Folders(fw, {'/mnt/mmc/.coverflow': [f'{key(made.p):08x}.jpg', 'building', f'{key(cover.p):08x}.jpg.tmp'],
+                        covers: ['alb1.jpg', 'alb2.jpg', 'alb9.jpg.tmp']})
+    path = C.create_string_buffer(512)
+    assert [state(r.p, path, 512) for r in (made, cover, none)] == [0, 1, 2]
+    assert card.reads == 2 and card.asked == []
+    assert [state(r.p, path, 512) for r in (made, cover, none)] == [0, 1, 2] and card.reads == 2
+    card.names[covers].append('alb3.jpg')  # the app fetched it: the folder's time moves
+    card.time += 1
+    assert state(none.p, path, 512) == 1 and card.reads == 4 and card.asked == []
+
+
+# A folder that can't be read (no such folder, or no memory for its names) leaves each album to the card's answer.
+def test_the_art_look_asks_the_card_when_a_folder_can_t_be_read(fw):
+    state = fw.fn('coverflow__art_state', C.c_int, C.c_void_p, C.c_char_p, C.c_uint)
+    card = Folders(fw, {})
+    r = Rec('alb1', '/mnt/mmc/.subsonic/cat/alb1/s1.flac', 'Art')
+    assert state(r.p, C.create_string_buffer(512), 512) == 2
+    assert card.reads == 0 and len(card.asked) == 2
