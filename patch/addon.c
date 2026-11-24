@@ -1566,7 +1566,8 @@ int addon_games(void) { return addon_scan(), ap.games; }
 int addon_games_last(void) { return ap.games; }
 const char *addon_game_name(int k) { return k >= 0 && k < ap.games ? ap.a[ap.game[k]].name : 0; }
 int addon_game_on(void) { return gm.pid; }
-int addon_game_audio(void) { return gm.pid && gm.audio; }
+/* a card game with audio=1 runs, or Caller Ten (game_callerten.c) holds the sound for a contest */
+int addon_game_audio(void) { return (gm.pid && gm.audio) || callerten_sound(); }
 
 static void game_kill(const char *how) {
     char cmd[24];

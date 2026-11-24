@@ -474,7 +474,8 @@ int addon_offline_ok(const char *id), addon_offline_ask(const char *id, int add,
  */
 int addon_games(void), addon_game_start(int k), addon_game_on(void);
 int addon_game_audio(
-    void); /* a card game with audio=1 runs: the sound and the media keys are its */
+    void); /* a card game with audio=1 runs, or Caller Ten's contest: the sound and media keys are its */
+int callerten_sound(void); /* game_callerten.c: Caller Ten holds the sound for a contest */
 const char *addon_game_name(int k);
 /* games.c: the theme's pop-up for a card game (Q2_POPUP's value), 7 + 6 * 7 + 64 * 7 + 1 bytes at
  * most */
