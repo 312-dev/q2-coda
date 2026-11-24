@@ -1096,6 +1096,7 @@ def test_smart_crossfade_off_is_gapless(player, songs, tmp):
 # ---- the tail from the file (player/tail.c, dsp.c; docs/internals.md#the-tail-from-the-file)
 BAD_TAIL = ('differs from the first decode', 'frames fewer than the tail held', 'differs from the first')
 TAIL_B_S = 47  # each B here: over XF_SMART_LEAD_S long, as B_SECONDS
+TAIL_SPEED = int(os.environ.get('Q2_TEST_TAIL_SPEED', '4'))  # see tail_runs
 
 
 def tail_song(path, rate=44100, bits=16, kind='fade', codec=('-c:a', 'flac'), tags=()):
@@ -1118,11 +1119,14 @@ def tail_song(path, rate=44100, bits=16, kind='fade', codec=('-c:a', 'flac'), ta
 def tail_runs(player, songs, d, a, b, ring_mb, steps=None, runs=('file', 'ring')):
     """a into b by smart_scenario, once for each of runs: 'file', the player as it is (a FLAC's, an ALAC's or a PCM
     file's tail read from the file a second time); 'ring', every tail held in memory in a ring of up to ring_mb MB
-    (Q2PLAYER_XF_RING); 'ring6', in the 6 MB ring a song has without a second open. {run: (PCM names, PCM, log)}."""
+    (Q2PLAYER_XF_RING); 'ring6', in the 6 MB ring a song has without a second open. {run: (PCM names, PCM, log)}.
+    At TAIL_SPEED, 4, not the other tests' 8: the analysis and the second open have the 18 s of audio between
+    XF_SMART_LEAD_S and the hold to be done in, 2.2 s of this machine's time at 8, and on a starved machine both came
+    late (the plain fade, or the tail held in memory: right for the player, but not what these compare)."""
     out = {}
     for run in runs:
         env = None if run == 'file' else {'Q2PLAYER_XF_RING': '6' if run == 'ring6' else str(ring_mb)}
-        s, names, got, log = smart_play(player, songs, d/run, steps or smart_scenario(a, b, end=110.0), env=env)
+        s, names, got, log = smart_play(player, songs, d/run, steps or smart_scenario(a, b, end=110.0), speed=TAIL_SPEED, env=env)
         out[run] = (names, got, log)
     return out
 
