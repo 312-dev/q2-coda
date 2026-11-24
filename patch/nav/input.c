@@ -25,32 +25,22 @@ static int remote_match(void *e, int spend);
  * counts started over as a press's (reset_poweroptions_timer) and its wake window and lit pacing as
  * a Center wake's (woke). Play/Pause, Previous and Next go on and act, a hold of the skips seeking;
  * Return's press only wakes, its long press and release dropped with it (wake_return), so a hold
- * from dark does not open Home; a wheel turn's first tick only wakes, and the turn's ticks after it
- * are dropped while they come within WAKE_TURN_MS of each other (wake_turn_at), so neither the
- * volume nor a list moves on the turn that woke it. Center is left to stock's release, which lights
- * it as it always has. A key the Buttons Lock holds is left to keylock.c, whose card lights the
- * screen. */
-#define WAKE_TURN_MS 300
+ * from dark does not open Home. The wheel never gets here dark: wheel_lock_gate (keylock.c), before
+ * this gate, drops its ticks, so a turn neither wakes nor acts. Center is left to stock's release,
+ * which lights it as it always has. A key the Buttons Lock holds is left to keylock.c, whose card
+ * lights the screen. */
 static int wake_key(void *e, unsigned type, unsigned key, unsigned now) {
     if (key == KEY_RETURN && st.wake_return) { /* the waking press's long press and release */
         if (type == EVT_KEY_UP) st.wake_return = 0;
         return 1;
     }
-    int wheel = key == KEY_PREV || key == KEY_NEXT;
-    if (wheel && st.wake_turn_at && now - st.wake_turn_at < WAKE_TURN_MS) {
-        st.wake_turn_at = now | 1; /* the turn goes on */
-        return 1;
-    }
-    st.wake_turn_at = 0;
     if (g_backlight_status || type != EVT_KEY_DOWN) return 0;
     int media = key == KEY_PLAY || key == KEY_BACK_BTN || key == KEY_FWD_BTN;
-    if ((!media && !wheel && key != KEY_RETURN) || remote_match(e, 0) || keylock_holds(key))
-        return 0;
+    if ((!media && key != KEY_RETURN) || remote_match(e, 0) || keylock_holds(key)) return 0;
     awake_screen();
     reset_poweroptions_timer(1, 1, 1);
     woke(now);
     if (key == KEY_RETURN) st.wake_return = 1;
-    if (wheel) st.wake_turn_at = now | 1;
     return !media;
 }
 static int wake_gate(void *e) {
@@ -238,6 +228,7 @@ static void vol_step(unsigned key) {
 }
 int ringnav_input(void *wm, void *e) {
     if (e && tick_gate(e)) return 0;
+    if (e && wheel_lock_gate(e)) return 0; /* the wheel while locked or dark (keylock.c) */
     if (e && (chord_gate(e) || wake_gate(e))) return 0;
     if (e && keylock_gate(e, remote_match(e, 0))) return 0; /* keylock.c */
     if (e && charge_gate(e)) return 0;                      /* the plug-in screen (charging.c) */

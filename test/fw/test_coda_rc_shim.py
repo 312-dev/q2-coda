@@ -265,6 +265,17 @@ def test_seek_and_volume(fw, ui, mcl, recs):
     assert q2.ack(keep=True) == b'6 1\n'
 
 
+def test_the_car_remotes_volume_works_with_the_screen_off(fw, ui, mcl, recs):
+    """The wheel is off while the screen is (keylock.c wheel_lock_gate); the Car Remote's volume is a command, not a
+    wheel tick, and still sets the volume dark."""
+    q2 = Q2(fw, ui, recs)
+    fw.var('g_maxvolume', C.c_ubyte).value = 100
+    fw.var('g_backlight_status', C.c_ubyte).value = 0
+    q2.files[CMD] = b'5 volume 30\n'
+    q2.tick()
+    assert fw.var('g_volume', C.c_ubyte).value == 30 and q2.ack(keep=True) == b'5 0\n'
+
+
 def card_route(fw, ui):
     """navigator_to opening stock's sortselect_dialog, as confirm() (feedback.c) asks for its card."""
     def go(name, *_):

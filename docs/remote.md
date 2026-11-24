@@ -70,7 +70,7 @@ All of it is injected by writing input events to `/dev/input/eventN`, so the fir
 ## Working with it
 
 - Take a `shot --settle` after every action and look at it before the next step.
-- If input seems to do nothing, the screen may be off: `shot` warns then, and `wake` lights it. While it's dark the wheel changes the volume. Don't wake it with `key centre`: on a lit screen that clicks the selected row.
+- If input seems to do nothing, the screen may be off: `shot` warns then, and `wake` lights it. While it's dark the wheel does nothing (`wheel N` changes nothing and does not wake it). Don't wake it with `key centre`: on a lit screen that clicks the selected row.
 - Quick Settings opens with `swipe 187 5 187 220` and closes with a swipe up from the bottom edge, `swipe 187 310 187 0`.
 - With a cable in, the Q2 shows **USB Connected** and the wheel changes the volume. `key return` ends USB storage and the Q2 mounts its card again; eject it on the PC first.
 - With **Wake: Double Press** on, a dark Q2 needs two Center presses to wake.
