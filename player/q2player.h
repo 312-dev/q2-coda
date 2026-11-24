@@ -229,18 +229,23 @@ int smart_poll(struct xf_plan *plan);
 void smart_cancel(const char *why);
 
 /* tail.c: the playing song's file opened a second time, from frame on, for crossfade to read its last seconds from
- * (docs/internals.md#the-tail-from-the-file). f: the first open's format, which the second must match. The open runs
- * on its own thread: tail_ready answers 0 until it is done, then 1, or -1 when the file is not one whose second decode
- * can stand for its first (the reason logged). */
+ * (docs/internals.md#the-tail-from-the-file). f: the first open's format, which the second must match. A thread of
+ * its own opens the file and decodes it ahead; nothing here reads the card on the caller's thread. tail_ready answers
+ * 0 until the open is done and its first frames are decoded, then 1, or -1 when the file is not one whose second
+ * decode can stand for its first (the reason logged). */
 struct tail;
 struct tail *tail_open(const char *url, const struct pcm_format *f, int64_t frame);
 int tail_ready(struct tail *);
 int64_t tail_at(const struct tail *); /* the frame the next read gives */
-/* up to frames of the file's own format into out; how many, fewer only at the file's end or on an error */
-int tail_read(struct tail *, uint8_t *out, int frames);
+/* Up to frames of the file's own format into out, of those already decoded, after waiting at most wait_ms for the
+ * decode to get there: how many, fewer when it has not (a card that does not answer) or at the file's end. */
+int tail_read(struct tail *, uint8_t *out, int frames, int wait_ms);
+/* The frames decoded and not yet read, after waiting at most wait_ms for there to be need; *whole: the file's end is
+ * among them, so no more will come. */
+int tail_ahead(struct tail *, int need, int wait_ms, int *whole);
 /* a block of the first decode that a later tail_read will reach: that read checks itself against it */
 void tail_note(struct tail *, const uint8_t *data, int frames);
-void tail_close(struct tail *);
+void tail_close(struct tail *); /* returns at once: the thread lets the file go */
 
 /* dsd.c: DSD packets made into DoP or Native frames */
 enum { DSD_CHANNELS = 8 };

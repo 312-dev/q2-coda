@@ -112,6 +112,8 @@ static watched xfade_file = {0, ~0u}, mono_file = {0, ~0u}, swap_file = {0, ~0u}
 #define XF_EVENTS 16         /* changes of the stages' settings a hold remembers for the frames not yet read back */
 #define RD_AHEAD_S 3.0       /* the second open begins this far ahead of the song */
 #define RD_LEAD_S 6.0        /* and is asked for this long before the hold: RD_AHEAD_S, and as much again to spare */
+#define XF_HOLD_WAIT_MS 4000 /* a hold waits this long for a second open that has nothing decoded, then leaves it */
+#define XF_CUT_S 0.2         /* a tail whose second open falls behind under the next song fades out over this */
 #define XF_LEAD_S 2.0        /* the hold starts this much early, for the length's whole seconds */
 #define XF_STALE_NS 3000000000LL /* a tail cut short, or a mix, not taken on this soon is dropped */
 #define XF_COLD_NS 30000000000LL /* the same for a tail its file's end left: a cold start */
@@ -166,6 +168,8 @@ static struct {
     size_t file_cap;
     float *win;                   /* the mix's window: held frames from win_lo, as float, after the stages */
     unsigned win_cap, win_lo, win_n;
+    int cut;                      /* the second open fell behind in the mix: the tail fades out early, */
+    unsigned cut_from, cut_at;    /* from this held frame to nothing at this one, the last one decoded */
 } xf;
 
 /* The ring's most, in MB. Q2PLAYER_XF_RING=MB: test/player/run.py's player that holds every tail in memory
@@ -186,7 +190,7 @@ static void tail_drop(void) {
     free(xf.file);
     free(xf.win);
     xf.ring = NULL, xf.rd = NULL, xf.file = NULL, xf.win = NULL;
-    xf.file_cap = 0, xf.win_cap = xf.win_lo = xf.win_n = 0;
+    xf.file_cap = 0, xf.win_cap = xf.win_lo = xf.win_n = 0, xf.cut = 0;
     xf.len = xf.total = 0;
 }
 
@@ -264,6 +268,9 @@ static unsigned smart_want(struct dsp *s, double pts, int length, int rate, unsi
     }
     if (s->smart == SMART_RUN) {
         int r = smart_poll(&s->plan);
+        /* Q2PLAYER_XF_WAIT (tail.c): test/player/run.py's player waits for the analysis, however busy the machine */
+        for (int i = 0; r == SMART_RUN && getenv("Q2PLAYER_XF_WAIT") && !getenv("Q2PLAYER_SMART_DELAY_MS") && i < 60000; ++i)
+            usleep(1000), r = smart_poll(&s->plan);
         if (r == SMART_RUN) {
             if (pts <= length - 2.0 * plain / rate - XF_LEAD_S) return 0;
             smart_cancel("the analysis took too long");
@@ -322,12 +329,14 @@ static void reader_off(struct dsp *s, const char *why) {
     if (why) note(why, 0);
 }
 
-/* The second open's next frames are these of the song's: read into the output's buffer, which the block has not
- * reached yet. */
+/* The second open's next frames are these of the song's (1), are not (0), or are not decoded yet (-1: it has fallen
+ * behind the song, which does not wait for it): read into the output's buffer, which the block has not reached yet. */
 static int same(struct dsp *s, const uint8_t *data, unsigned frames) {
     size_t unit = (size_t)s->nch * s->bytes;
-    return grow(s, (int)frames) && tail_read(s->rd, s->out, (int)frames) == (int)frames && !memcmp(s->out, data, frames * unit);
+    if (!grow(s, (int)frames) || tail_read(s->rd, s->out, (int)frames, 0) != (int)frames) return -1;
+    return !memcmp(s->out, data, frames * unit);
 }
+static const char RD_BEHIND[] = "q2player: crossfade: the tail held in memory, the second open fell behind the song";
 
 /* Whether the song may still get a second open: its blocks have a place in a file that is named. */
 static int reader_may(const struct dsp *s) { return s->rd_state == RD_NONE && s->frame >= 0 && s->url && !ring_only(); }
@@ -355,9 +364,9 @@ static void reader_before(struct dsp *s, int said, const uint8_t *data, unsigned
         int64_t at = tail_at(s->rd);
         if (at < s->frame) reader_off(s, "q2player: crossfade: the tail held in memory, the second open came after the song had passed it");
         else if (at < s->frame + frames) { /* the song has reached it: the rest of this block is the same frames */
-            if (same(s, data + (size_t)(at - s->frame) * s->nch * s->bytes, (unsigned)(s->frame + frames - at)))
-                s->rd_state = RD_LEVEL, s->rd_ahead = 1;
-            else reader_off(s, "q2player: crossfade: the tail held in memory, the second open is not at the song's frames");
+            int r = same(s, data + (size_t)(at - s->frame) * s->nch * s->bytes, (unsigned)(s->frame + frames - at));
+            if (r > 0) s->rd_state = RD_LEVEL, s->rd_ahead = 1;
+            else reader_off(s, r ? RD_BEHIND : "q2player: crossfade: the tail held in memory, the second open is not at the song's frames");
         }
         return;
     }
@@ -369,8 +378,8 @@ static void reader_before(struct dsp *s, int said, const uint8_t *data, unsigned
 
 /* After a block that no hold took from the second open: the open reads the same frames, and stays level. */
 static void reader_after(struct dsp *s, const uint8_t *data, unsigned frames) {
-    if (s->rd_state == RD_LEVEL && !s->rd_ahead && !same(s, data, frames))
-        reader_off(s, "q2player: crossfade: the tail held in memory, the second decode differs from the first");
+    int r = s->rd_state == RD_LEVEL && !s->rd_ahead ? same(s, data, frames) : 1;
+    if (r <= 0) reader_off(s, r ? RD_BEHIND : "q2player: crossfade: the tail held in memory, the second decode differs from the first");
     s->frame = -1;
 }
 
@@ -394,7 +403,8 @@ static void stages(float *a, unsigned n) {
 }
 
 /* The next n frames of the tail from the file into dst, as float after the holder's stages, each change of a setting
- * taken at its frame. Frames the file does not give are silence, logged. */
+ * taken at its frame. Only frames already decoded are taken (the callers see to it that they are, or play without
+ * them); frames that are not there are silence, logged. */
 static void filed(float *dst, unsigned n) {
     int nch = xf.nch;
     size_t unit = (size_t)nch * xf.unit;
@@ -402,8 +412,8 @@ static void filed(float *dst, unsigned n) {
         uint8_t *b = realloc(xf.file, (size_t)n * unit);
         if (b) xf.file = b, xf.file_cap = (size_t)n * unit;
     }
-    unsigned got = (size_t)n * unit <= xf.file_cap ? (unsigned)tail_read(xf.rd, xf.file, (int)n) : 0;
-    if (got < n && !(xf.said & 1)) xf.said |= 1, note("q2player: crossfade: the file gave %lu frames fewer than the tail held", n - got);
+    unsigned got = (size_t)n * unit <= xf.file_cap ? (unsigned)tail_read(xf.rd, xf.file, (int)n, 0) : 0;
+    if (got < n && !xf.cut && !(xf.said & 1)) xf.said |= 1, note("q2player: crossfade: the file gave %lu frames fewer than the tail held", n - got);
     floats(dst, xf.file, (int)(got * nch), xf.unit, xf.is_float);
     memset(dst + (size_t)got * nch, 0, (size_t)(n - got) * nch * sizeof *dst);
     while (n) {
@@ -509,6 +519,20 @@ static unsigned crossfade(struct dsp *s, float *a, unsigned frames, int nch, int
              * of the place as it is stepped) */
             unsigned lo = (unsigned)xf.pos, hi = (unsigned)(xf.pos + (n ? n - 1 : 0) * xf.step) + 2;
             if (hi > xf.len - 1) hi = xf.len - 1;
+            if (xf.rd && n && !xf.cut) {
+                /* The frames this block reaches are decoded ahead (tail.c). When they, and XF_CUT_S more, are not
+                 * (the card has not answered the second open for as long as it decodes ahead), the tail fades out
+                 * over the frames there are, so it ends without a step and the next song plays on untouched. */
+                unsigned got = xf.win_lo + xf.win_n, need = hi + 1 > got ? hi + 1 - got : 0, ramp = (unsigned)(XF_CUT_S * xf.rate);
+                unsigned ahead = need + ramp < xf.len - got ? need + ramp : xf.len - got;
+                int whole, have = tail_ahead(xf.rd, (int)ahead, 0, &whole);
+                if ((unsigned)have < ahead && !whole) {
+                    xf.cut = 1, xf.cut_at = got + (unsigned)have;
+                    xf.cut_from = xf.cut_at > lo + ramp ? xf.cut_at - ramp : lo;
+                    note("q2player: crossfade: the second open fell behind under the next song, the tail faded out %lu ms early",
+                         (unsigned long)((xf.len - xf.cut_at) * 1000.0 / xf.rate));
+                }
+            }
             const float *win = xf.rd && n ? window(lo, hi) : NULL;
             if (xf.rd && !win) n = 0; /* no memory for the window: the tail is not mixed */
             /* The gains turn by a fixed angle a frame: exact at each block's start, rotated after, in double (and
@@ -521,6 +545,7 @@ static unsigned crossfade(struct dsp *s, float *a, unsigned frames, int nch, int
             for (unsigned i = 0; i < n; ++i, xf.pos += xf.step) {
                 unsigned at = (unsigned)xf.pos, next = at + 1 < xf.len ? at + 1 : at;
                 float frac = (float)(xf.pos - at), fo = (float)(xf.smart && xf.plan.in_body ? out * out : out);
+                if (xf.cut) fo = at >= xf.cut_at ? 0 : at > xf.cut_from ? fo * (float)(xf.cut_at - at) / (float)(xf.cut_at - xf.cut_from) : fo;
                 float fi = !xf.smart ? (float)in : xf.t < xf.fade ? sinf((xf.t + 0.5f) / xf.fade * 1.5707963f) : 1;
                 const float *h0, *h1;
                 if (win) {
@@ -599,12 +624,22 @@ static unsigned crossfade(struct dsp *s, float *a, unsigned frames, int nch, int
     }
     unsigned k = (frames + 1) / 2;
     if (xf.rd) { /* the block is counted and noted; what plays is the file's frames from where the hold has got to */
+        if (xf.len + frames > want && xf.len + frames - want > k) k = xf.len + frames - want;
+        if (k > frames) k = frames;
+        /* Those frames are decoded ahead (tail.c), so this is a look, not a read of the card. With none after
+         * XF_HOLD_WAIT_MS the card has not answered the second open for that long and more: the hold is left, as at
+         * a seek, this block plays as it came, and the frames between are not heard. */
+        int whole;
+        if (tail_ahead(xf.rd, (int)k, XF_HOLD_WAIT_MS, &whole) < (int)k && !whole) {
+            note("q2player: crossfade: the second open stopped giving frames, %lu ms of the song left unplayed",
+                 (unsigned long)(xf.len * 1000.0 / rate));
+            tail_drop();
+            return frames;
+        }
         told(s);
         tail_note(xf.rd, s->raw, (int)frames);
         xf.in += frames, xf.next = s->frame + frames;
         xf.len += frames;
-        if (xf.len > want && xf.len - want > k) k = xf.len - want;
-        if (k > frames) k = frames;
         filed(a, k);
     } else {
         ring_copy(a, (xf.head + xf.len) % xf.cap, frames, xf.cap, nch, 1);
