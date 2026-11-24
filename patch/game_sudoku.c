@@ -968,7 +968,7 @@ static void dial(const struct sudoku *s, struct eng_surface *sf) {
 /* The levels: the puzzle column's head, a card a level (its name, its clues' pattern, its best),
  * the unfinished puzzle clipped under them. */
 static void levels(const struct sudoku *s, struct eng_surface *sf) {
-    char t[24];
+    char t[56];
     mid(s, sf, A_TITLE, 375, 60, sty.ink);
     fill(sf, 48, 46, 279, 1, sty.ink), fill(sf, 48, 49, 279, 1, sty.soft);
     caps(s, sf, "SUDOKU      A NEW PUZZLE EVERY TIME      ONE SOLUTION", 187, 60, sty.soft, 1);
@@ -1001,9 +1001,8 @@ static void levels(const struct sudoku *s, struct eng_surface *sf) {
         clock(t, s->v.elapsed);
         hand(s, sf, t, 250, 258, sty.pen, 1);
     }
-    caps(s, sf,
-         started(s) ? "CENTER: START      PLAY: CONTINUE THE UNFINISHED ONE" : "CENTER: START", 187,
-         296, sty.soft, 1);
+    word(t, "CENTER: START      PLAY: CONTINUE THE UNFINISHED ONE")[started(s) ? 0 : -39] = 0;
+    caps(s, sf, t, 187, 296, sty.soft, 1); /* the hint, its second half with a puzzle to continue */
 }
 
 /* Solved: the red stamp over the page and the result on a note: the time, the best or "new best!",
@@ -1020,7 +1019,7 @@ static void solved(const struct sudoku *s, struct eng_surface *sf) {
     }
     sticky(sf, 109, 198, 156, 68, 0);
     clock(t, s->v.elapsed);
-    say(s, sf, t, A_PEN, "0123456789:", 121, 231, sty.pen, 0);
+    say(s, sf, t, A_PEN, A_HAND_SET, 121, 231, sty.pen, 0); /* its first 11 are A_PEN's */
     if (s->record)
         hand(s, sf, "new best!", 255, 222, sty.red, 2),
             line(sf, 191 * 16, 227 * 16, 255 * 16, 225 * 16, 19, sty.red);

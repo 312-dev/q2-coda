@@ -315,6 +315,10 @@ def test_a_fresh_game_opens_on_the_levels_and_rests(fw):
     assert C.sizeof(Save) == 436 and (s.mode, s.sel) == (CHOOSE, GENTLE)
     assert not g.e['eng_live']()  # the first frame painted; nothing moves: no timer
     assert fw.var('wheel_raw', C.c_int).value == 0  # ticks
+    art = Art(fw)
+    px = draw(g)  # no puzzle to continue: the hint's first half alone, centred
+    assert art.written(px, art.say('CENTER: START', 'A_CAPS', 187, 296, 1), SOFT)
+    assert not art.written(px, art.say('UNFINISHED', 'A_CAPS', 96, 249), SOFT)
     g.close()
 
 
