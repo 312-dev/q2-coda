@@ -1104,7 +1104,7 @@ def test_sudoku_is_the_engines_second_row_full_screen_with_the_status_row_at_a_p
     moved.clear(), shown.clear()
     p.go(SUDOKU)
     assert p.s.screen == SUDOKU and p.s.full and list(p.s.box) == [0, 30, 375, 290]
-    assert (PAGE, 0, 0, 375, 320) in moved and (sheet, 0, 0, 375, 320) in moved
+    assert (PAGE, 0, 0, 375, 320) in moved and (sheet, 0, 0, 375, 320) in moved and p.s.h == 320  # the popup's too
     assert (C.addressof(bar), 0) in shown  # the status row hidden
     assert C.c_int.from_address(fw.var('engine__en', C.c_void_p).value + Eng.h.offset).value == 320
     art = Art(fw)

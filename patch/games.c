@@ -721,7 +721,8 @@ static void engine_held(void) {
 static void engine_left(void) { to(CHOOSER); }
 
 /* An ENG_FULL game (docs/games-engine.md#full-screen): the status row hidden, the page moved over
- * its place and the sheet the whole 375 x 320; else the page's own place again, under the bar. */
+ * its place and the sheet, h with it (the pause's popup centres in it), the whole 375 x 320; else
+ * the page's own place again, under the bar. */
 static void full_screen(int on) {
     if (on == g->full) return;
     bar_shown(!on);
@@ -730,7 +731,8 @@ static void full_screen(int on) {
     g->full = on;
     widget_move_resize(g->page, on ? 0 : g->box[0], on ? 0 : g->box[1], on ? 375 : g->box[2],
                        on ? 320 : g->box[3]);
-    widget_move_resize(g->sheet, 0, on ? 0 : bar_foot(g->page), 375, on ? 320 : g->h);
+    g->h = on ? 320 : page_room(g->page);
+    widget_move_resize(g->sheet, 0, on ? 0 : bar_foot(g->page), 375, g->h);
 }
 
 static const char *const game_names[] = { "Games", "Sudoku", "Vortex", "Solitaire", "Snake" };
@@ -743,7 +745,7 @@ static int show(const void *unused) {
     const struct eng_game *game = g->target >= ENGINE ? eng_game(g->target - ENGINE) : 0;
     full_screen(game && game->flags & ENG_FULL);
     if (game && /* no memory for its state: the list stays */
-        !eng_open(game, g->page, g->sheet, g->full ? 320 : g->h, engine_held, engine_left))
+        !eng_open(game, g->page, g->sheet, g->h, engine_held, engine_left))
         g->target = CHOOSER, full_screen(0);
     g->screen = g->target;
     g->picking = g->confirm = 0;
