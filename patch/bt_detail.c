@@ -3,9 +3,9 @@
  * held does (bt_ui_hold). The status row names the device; under it the path the sound takes,
  * "Q2 → WH-1000XM5", and its codec line in 14 px Text Tertiary ("LDAC · 96 kHz · 990 kbps", what is
  * known of it, bt_codec_line, or "Not Connected"); then Battery (when the device reports one),
- * Disconnect (Connect, the first row, when it is not connected), Volume Limit (its value No Limit or
- * the limit, opening the slider page, crossfade.c xfade_open 5; bt_vol_limit.c keeps it), Rename and
- * Forget This Device in Negative red.
+ * Disconnect (Connect, the first row, when it is not connected), Volume Limit (its value No Limit
+ * or the limit, opening the slider page, crossfade.c xfade_open 5; bt_vol_limit.c keeps it), Rename
+ * and Forget This Device in Negative red.
  *
  * Disconnect and Connect are stock's own row click on the device (bt_stock_click), so its output
  * switch and its toasts stay stock's. Forget asks on the confirmation card (feedback.c confirm:
@@ -13,8 +13,8 @@
  * pairing removed (handleBluetoothPair: BlueZ's RemoveDevice, which needs no link, so a device out
  * of range goes too), the output back to a jack when it was this device, the list read again; and
  * the saved link (BTLINKMAC) cleared when it names the device, so boot and Bluetooth on do not try
- * it again, and its Volume Limit dropped; the page closes. Rename sets BlueZ's Alias for the device, which its list shows,
- * through the letter strip. */
+ * it again, and its Volume Limit dropped; the page closes. Rename sets BlueZ's Alias for the
+ * device, which its list shows, through the letter strip. */
 #include "navigation.h"
 
 #define BD_HEAD 64   /* the path's lines above the rows */
@@ -23,11 +23,12 @@
 #define BD_CODEC_Y 36 /* ... and the codec line's */
 #define BD_CODEC_PX TYPE(14)
 #define BD_LINE_H 22
-#define BD_NAME_MAX 30 /* a name, as the Q2's own (bt_name.c BT_NAME_MAX) */
-#define BD_VALUE_W 120 /* Battery's value, right-aligned in this much */
+#define BD_NAME_MAX 30     /* a name, as the Q2's own (bt_name.c BT_NAME_MAX) */
+#define BD_VALUE_W 120     /* Battery's value, right-aligned in this much */
 #define BD_LIMIT_RIGHT 300 /* Volume Limit's value ends here, before the chevron */
 #define BD_ROWS 5
-#define BD_LIMIT_ROW "label_btlimit" /* Volume Limit's value, which the slider page sets (crossfade.c) */
+#define BD_LIMIT_ROW                                                                               \
+    "label_btlimit" /* Volume Limit's value, which the slider page sets (crossfade.c) */
 /* BTLINKMAC: stock's last connected device, [SYSSET] BTLINKMAC in config.ini, 32 bytes at a fixed
  * address (readBtLinkMac fills it, 0x4fa1f0); autoLinkBluetooth connects it at boot and Bluetooth
  * on */

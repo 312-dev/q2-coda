@@ -1655,9 +1655,10 @@ Settings > Bluetooth and its pages ([internals](internals.md#bluetooth-page), `p
   a found row pairs. Play/Pause held on any paired row opens its page too.
 - **A device's page**: the status row names it; under it the path, "Q2 → WH-1000XM5" in 17 px, and the codec
   line in 14 px Text Tertiary ("LDAC · 96 kHz · 990 kbps", only what is known: the bit rate where the codec
-  fixes it; "Not Connected" when it is not), then Battery (when reported), Disconnect, Rename and Forget This
-  Device in Negative red; not connected, Connect first (selected as the page opens), Rename and Forget This
-  Device. Forget asks on the [confirmation card](#confirmation-card): "Forget WH-1000XM5?", "You'll need to pair
+  fixes it; "Not Connected" when it is not), then Battery (when reported), Disconnect, Volume Limit, Rename and
+  Forget This Device in Negative red; not connected, Connect first (selected as the page opens), Volume Limit,
+  Rename and Forget This Device. Volume Limit is a chevron row with its value, No Limit or the limit, on the
+  right in Text Secondary, and opens the slider page (0 to No Limit). Forget asks on the [confirmation card](#confirmation-card): "Forget WH-1000XM5?", "You'll need to pair
   again to use it.", Cancel first and Forget Device in red; it works with the device out of range. Rename is the
   letter strip, "Shows on this Q2" under the name.
 - **Quality**: one list, no submenu (the user's, 2026-11-18, from mock B). First a switch row, "Adapt to Signal"
@@ -2040,7 +2041,7 @@ pattern.
 | Equalizer (Simple)                  | Vertical slider             | Its [tabs](#tabs), then rows: the switch, Presets, Reset                                                   |
 | Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, the one header, "Searching..." on its line; glyphs at right; the network joining, joined or whose join failed is the first row under it, one line like the rest (in scan order), with the list's spinner, the Accent check (and its trash) or the Negative `warning-circle` before its lock and signal, and "Connecting…", "Connected", "Wrong password" or "Couldn't connect" as a [caption](#list-row) under its bar while selected; a press moves the network there with the selection; a failed one stays first until the next join or scan (variant E, the owner's, 2026-11-23); Reset Network Settings last |
 | Bluetooth                           | [Bluetooth](#bluetooth)     | Devices first under My Devices and Other Devices, the connected one two lines ("Connected · LDAC · 72%" after the Positive dot); then Audio |
-| A Bluetooth device                  | [Bluetooth](#bluetooth)     | The path and its codec line, then Battery, Disconnect, Rename and Forget This Device                      |
+| A Bluetooth device                  | [Bluetooth](#bluetooth)     | The path and its codec line, then Battery, Disconnect, Volume Limit, Rename and Forget This Device        |
 | Bluetooth Stopped                   | [USB](#usb)'s mode page     | The warning on an orange circle, the restart's countdown and Not Now (`bt_stopped.c`)                      |
 | Guest Play and its pages            | [Guest Play](#guest-play)   | The prompts on the confirmation card, the guest's Now Playing, the settings, Let a Guest Connect, Hotspot  |
 | Bluetooth receiver (a phone playing to the Q2) | [USB](#usb)'s mode page | The accent circle with the Bluetooth glyph, the phone's title over its artist ("Playing from Phone" over "Wheel sets the volume" before it names one), the codec in the pill (`bt_recv.c`) |

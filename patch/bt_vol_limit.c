@@ -1,9 +1,9 @@
 /* A Bluetooth device's Volume Limit (docs/internals.md#headset-controls-and-volume): each paired
  * device may cap the Q2's volume, 0 to 100 on its scale, while it is the connected Bluetooth
  * output; 100, No Limit, is the default and is never stored. Max Volume (g_maxvolume) still applies
- * everywhere, so over Bluetooth the volume's top is the lower of the two (vol_cap), which the wheel,
- * Control Center, Playback's Volume page, the Car Remote and the headset's own keys all stop at.
- * Wired and USB outputs never see a device's limit.
+ * everywhere, so over Bluetooth the volume's top is the lower of the two (vol_cap), which the
+ * wheel, Control Center, Playback's Volume page, the Car Remote and the headset's own keys all stop
+ * at. Wired and USB outputs never see a device's limit.
  *
  * The limits are kept in BTLIM_FILE, one "AA:BB:CC:DD:EE:FF 60" line a device with a limit,
  * BTLIM_MAX at most, written whole under another name and renamed, and read once into the cache

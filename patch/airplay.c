@@ -23,7 +23,7 @@ static struct {
     cast_tap *t;
     unsigned look;  /* time_now_ms of the last look for the file */
     int on;         /* a speaker playing, as the volume was last swapped */
-    int local, limit, way; /* the earphones' volume, Volume Limit and output while it plays */
+    int local, limit, way; /* the earphones' volume, Max Volume and output while it plays */
     unsigned spk_seq; /* the app's spk_seq as last taken */
     unsigned song;  /* the hash of the song CAST_TRACK names */
     int len, arriving; /* the length it gave, and whether the song was still arriving then */
@@ -73,7 +73,7 @@ static int air_speaker(cast_tap *t) {
                                                            : config_value("Q2POD", "AIRVOL", 101, AIR_VOLUME);
 }
 
-/* A speaker starting: the earphones' volume, Volume Limit and output kept in RAM (the volume saved
+/* A speaker starting: the earphones' volume, Max Volume and output kept in RAM (the volume saved
  * under its output's key too), the limit lifted (it is the earphones'), and the speaker's taken up;
  * the DAC keeps the earphones' level (ALSA's last half second before the mute plays through it; the
  * wheel sets it later, silent). While it plays ringnav_write_config saves PLAYSET VOLUME as Q2POD

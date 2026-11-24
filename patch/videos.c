@@ -197,8 +197,9 @@ void video_poll(void) {
 /* Return quits, Play/Pause pauses, the side buttons seek. The wheel is the volume, as on Now
  * Playing; Centre toggles it to seeking, which ends SCRUB_MS after the last tick (video_poll). The
  * volume steps as the volume dialog's ticks (volume.c vol_next): 1 a tick turned slowly, more at
- * speed, up to 100 and g_maxvolume, through device_set_volume (the DAC's, or hciplayer's for
- * Bluetooth and a soft USB volume) and saved; the helper gets it for that soft gain and its bar. */
+ * speed, up to vol_cap (100, Max Volume and a Bluetooth device's Volume Limit), through
+ * device_set_volume (the DAC's, or hciplayer's for Bluetooth and a soft USB volume) and saved; the
+ * helper gets it for that soft gain and its bar. */
 void video_key(unsigned key) {
     vid.paused_at = 0; /* a key restarts a pause's VIDEO_PAUSE_QUIT_MS */
     if (key == KEY_PLAY || key == KEY_FWD_BTN || key == KEY_BACK_BTN || key == KEY_RETURN)

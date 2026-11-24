@@ -299,8 +299,10 @@ int ringnav_write_config(int value, const char *section, const char *key) {
         section = "Q2POD", key = "AIRVOL"; /* an AirPlay speaker's, while it plays (airplay.c) */
     else if (!tk_strcmp(section, "PLAYSET") && !tk_strcmp(key, "VOLUME") && mclGetOutputWay() == 1)
         key = "BT_VOLUME";
-    if (!tk_strcmp(section, "PLAYSET") && (!tk_strcmp(key, "VOLUME") || !tk_strcmp(key, "BT_VOLUME")))
-        btlim_saved(); /* the user's level now, not one a device's limit pulled down (bt_vol_limit.c) */
+    if (!tk_strcmp(section, "PLAYSET") &&
+        (!tk_strcmp(key, "VOLUME") || !tk_strcmp(key, "BT_VOLUME")))
+        btlim_saved(); /* the user's level now, not one a device's limit pulled down
+                          (bt_vol_limit.c) */
     if (config_hold(value, section, key)) return 0;
     return stock_write_config_trampoline(value, section, key);
 }
@@ -390,11 +392,11 @@ static void bt_volume_poll(void) {
     unsigned now = time_now_ms();
     if (bt_vol_event_take()) btvol.pending = 1;
     int live = bt_vol_event_live();
-    unsigned gap = btvol.failed                       ? BT_VOLUME_SLOW_MS
-                   : live                             ? BT_VOLUME_FALLBACK_MS
-                   : g_backlight_status               ? 400u
-                   : btvol.ready && vol_cap() < 100   ? BT_VOLUME_LIMIT_MS
-                                                      : BT_VOLUME_SLOW_MS;
+    unsigned gap = btvol.failed                     ? BT_VOLUME_SLOW_MS
+                   : live                           ? BT_VOLUME_FALLBACK_MS
+                   : g_backlight_status             ? 400u
+                   : btvol.ready && vol_cap() < 100 ? BT_VOLUME_LIMIT_MS
+                                                    : BT_VOLUME_SLOW_MS;
     if (btvol.pending && !btvol.failed && gap > BT_VOLUME_EVENT_GAP_MS)
         gap = BT_VOLUME_EVENT_GAP_MS;
     if (now - btvol.checked < gap) return;

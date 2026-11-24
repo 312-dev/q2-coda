@@ -659,8 +659,9 @@ void *label(void *parent, int x, int y, int w, int h, const char *style, int px,
 void spot_yield(void), spot_stop(void), radio_stop(void);
 void headset_volume_reset(void);
 int vol_next(unsigned key); /* volume.c: the volume a wheel tick moves to, at the wheel's speed */
-/* bt_vol_limit.c: a Bluetooth device's Volume Limit (docs/internals.md#headset-controls-and-volume);
- * vol_cap is the volume's top now, Max Volume and over Bluetooth the device's limit */
+/* bt_vol_limit.c: a Bluetooth device's Volume Limit
+ * (docs/internals.md#headset-controls-and-volume); vol_cap is the volume's top now, Max Volume and
+ * over Bluetooth the device's limit */
 int vol_cap(void), btlim_get(const char *mac), btlim_departing(int v), btlim_entering(int v);
 int btlim_edit_get(void);
 void btlim_poll(void), btlim_saved(void), btlim_set(const char *mac, int v);
