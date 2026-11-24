@@ -7,12 +7,13 @@ int playback_set(int kind, int value);
 int playback_groups(void *all, int folder);
 int playback_unshuffle(void);   /* the stock mode Shuffle Songs replaces */
 int playback_shuffle(int mode); /* the queue as Shuffle Songs, Repeat All; the next restores mode */
-int playback_listable(void);    /* View Queue: a shuffle's order is up (stock Shuffle given one) */
+int playback_listable(void);    /* View Queue: a shuffle's order is up (stock Shuffle taken first) */
 int playback_group_skip(int forward);
 int playback_back(void); /* the track stock Shuffle's Previous left, once; else -1 */
 int playback_peek(unsigned at); /* stock Shuffle's next drawn ahead from at, once; else -1 */
 int shuffle_forced(void);       /* navigation.c: a Play next stock Shuffle goes to next, or -1 */
 unsigned playback_upcoming(unsigned *out, unsigned max); /* Up Next: queue indices, in play order */
+unsigned playback_played(unsigned *out, unsigned max); /* a shuffle's played songs, oldest first */
 /* Play Next (next 1), Play Last (2), an app's Add (0): the tracks land at pos+1, at the end of
  * Playing Next or at the end; returns that index */
 unsigned playback_queue_insert(void *queue, void *add, int next);
