@@ -239,6 +239,37 @@ Entries 7 to 17 are costs the code marks itself.
 - **State:** the name sort's order is kept, in RAM and on the card ([internals](internals.md#name-order)): the first Songs open after a boot took 534 ms from the load to the first paint, from 1,855-2,930 ms. After a library or catalogue change, Songs, Albums and Artists, once opened, are loaded again and sorted ahead in the UI's quiet, so their next open finds the order kept ([internals](internals.md#name-order), Sorted ahead). A Library list opened within seconds of a change, or after a firmware update (the kept orders carry the firmware's version), still sorts at its open. Nothing repeats a query within one open.
 - **Decision:** three indexes are made at the end of a full scan when `/mnt/data` has 8 MB free (the album grouping's three terms, `album`, and the album-artist expression; [internals](internals.md#coverflow), Indexes): back to back in this emulator the grouping went from 240-347 ms to 171-273 ms and both Unknown checks from 37-67 ms to 0-2 ms, for 1.69 MB of `/mnt/data` (17.7 MB) at 20,103 songs, more with real paths, and 0.5-1.6 s at the end of the scan under QEMU. The rest left as is. The double-press wait is Center's (a second press turns the screen off). A sort that still runs at an open runs on a thread of its own with stock's own call and comparator, the UI thread drawing a spinner over the screen meanwhile; the wait itself is unchanged. ponytail: every open still runs its query and, for Albums, the album split (a kept Albums open's pass 290-650 ms in the emulator, about 1 s on the Q2); keeping the loaded records across opens would save that for about 3 MB of RAM held all the time at 9,212 songs (about 320 bytes a song), which is why it was not done.
 
+### 36. Shuffle sorted the queue into albums and saved it on the UI thread (resolved)
+
+- **Where:** `patch/playback.c` (`rebuild`, `make_order`, `playback_save`, the queue writer), `patch/coda_rc_shim.c` (`cr_queue`); [internals](internals.md#shuffle-order), [the queue writer](internals.md#the-queue-writer).
+- **What it was:** turning Shuffle on sorted every song of the queue into its album (a `qsort` over stock's album comparison) for an order that never reads albums, hashed every path, drew two orders of 12-byte rows (36 bytes a song in all), and wrote the queue's records to the card in the same UI pass; a queue past `SAVE_LIMIT` emptied its file again at every 5 s save; Car Remote walked 5,000 rows of the order every 500 ms; Previous searched the order from its start.
+- **Measured, payload instructions under Unicorn** (`test/playback.py`'s `LibraryMachine`, 9,198 songs in 6,174 albums; stock's and libc's own instructions are not counted, their calls are):
+
+  | Action                                         |                                       Before |                          After |
+  | ---------------------------------------------- | -------------------------------------------: | -----------------------------: |
+  | Shuffle on, rows with library ids              | 16.8 M, 81,413 `deque_at`, 36,105 `strcasecmp` |        0.98 M, 9,203 `deque_at` |
+  | Shuffle on, rows without (a folder's)          |                                       18.4 M |                         5.4 M |
+  | file writes in that pass                       |                                            1 |                             0 |
+  | Next; Previous                                 |                                     427; 144 |                      424; 176 |
+  | Next; Previous, 3,000 songs into the pass      |                                  427; 18,144 |                      424; 176 |
+  | Remove from Queue (rows without ids)           |                                       31.4 M |                         4.6 M |
+  | Car Remote's poll while nothing moves          |              590,002 and 15,000 stock calls |                a few compares |
+  | queue file emptied, a 9,198-song queue playing |                                    every 5 s |                          once |
+  | memory for the order                           |                    36 B a song (331 KB) + 16 KB |    4 B a song (37 KB) + 16 KB |
+
+- **Measured in the pool emulator** (a `--dev` build with a millisecond probe round each step and every UI pass of 2 ms or more logged, a library of 9,198 songs in 6,174 albums in the card's table, the queue all of Songs, three runs each; the host's load was 23 to 28 during the runs before and 5 to 12 during the runs after, so only the steps timed by themselves compare; the Q2 is about three times slower):
+
+  | Step                                             |        Before |        After |
+  | ------------------------------------------------ | ------------: | -----------: |
+  | Shuffle on: the order (`rebuild`)                |     97-153 ms |      7-16 ms |
+  | Songs > Shuffle: the order (`playback_shuffle`)  |      82-95 ms |       1-3 ms |
+  | a save's card write on the UI thread             | 2-214 ms each |         none |
+  | Shuffle on: the whole UI pass                    |    227-332 ms |   112-198 ms |
+  | Songs > Shuffle: the whole UI pass               |    489-582 ms |   472-563 ms |
+
+- **What is left, and is stock's:** a Shuffle tap in Now Playing rewrites `config.ini` twice in its pass, `np_mode_set`'s `IPOD NPSHUFONE` (82-181 ms in the emulator) and `config_playmode`'s play mode (60-131 ms); `mclSetPlayMode` itself is under a millisecond. Shuffle over a list is stock's `play_folder` (354-371 ms: the queue's copy, the first song's start, Now Playing) and the same play mode write (43-126 ms), and Home's Shuffle Songs reads every song first (Songs' own read of them was a 214 ms pass). A Next or Previous is a 370-700 ms pass shuffled or not: stock's start of the song (`player_change_music`, 303-551 ms).
+- **Decision:** Shuffle Songs keeps 2-byte indices and no albums, draws its next pass when it is first read, and every write of the queue's records is the queue writer's. Shuffle Songs has three calls for a loading indicator to run between its steps ([internals](internals.md#shuffle-order), Shuffle Songs in steps). ponytail: the two `config.ini` writes of a mode tap stay on the UI thread; writing the kept shuffle bit only when Repeat One is chosen, or stock's settings from a thread, would lift them, and a Q2's flash has to be timed first, as the emulator's `/mnt/data` is the host's disk.
+
 ## Polling and wakeups
 
 Entry 36. Everything in Q2 Muse that runs on a clock rather than on an event, what it costs in wakeups, and what could wake it instead. Read on `release/p32` at `d089e02c` (2026-11-17); the `file:LINE` references are from that reading. Every wakeup takes a core out of idle, so a timer that runs while nothing needs it costs battery whatever it does when it wakes; the overheat review of 2026-11-17 found nothing spinning, and this is the next layer down. USB cable detection, a one-second read until the GPIO edge thread in `patch/usb_event.c` ([internals](internals.md#usb-cable-events)), is the model for most of the conversions below.

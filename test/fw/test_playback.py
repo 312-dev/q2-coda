@@ -21,8 +21,7 @@ ONE_SONG, ONE_GROUP, ONE_PASS, REPEAT_SONG, REPEAT_GROUP, REPEAT_ALL = range(6)
 SEEDS = (1, 7, 0x2545f491, 0xdeadbeef, 12345)
 
 
-class Entry(C.Structure):
-    _fields_ = [(n, C.c_uint) for n in ('index', 'group', 'rank')]
+Qix = C.c_ushort  # a queue index as the order's tables hold it
 
 
 def fields(names, ctype=C.c_int):
@@ -34,8 +33,8 @@ class State(C.Structure):
                 fields('n cursor npend hn stamp', C.c_uint) + [('pend', C.c_uint * 64)] +
                 fields('saved_elapsed save_failed resume_pending resume_elapsed resume_wait') +
                 fields('saved_pos saved_sum saved_queue', C.c_uint) + fields('next_valid next_value') +
-                fields('next_pos resume_key resume_pos', C.c_uint) + fields('order cycle', C.POINTER(Entry)) +
-                fields('groups seen history', C.POINTER(C.c_uint)) + fields('poll_stamp plain_size', C.c_uint))
+                fields('next_pos resume_key resume_pos', C.c_uint) + fields('order cycle', C.POINTER(Qix)) +
+                [('groups', C.POINTER(C.c_uint)), ('mark', C.POINTER(C.c_ushort)), ('history', C.POINTER(C.c_uint))] + fields('poll_stamp plain_size', C.c_uint))
 
 
 class Player:
@@ -88,13 +87,16 @@ class Player:
         return struct.unpack_from('<i', C.string_at(self.deques[self.handle][i], 0x60), O['REC_TRACK'])[0]
 
     def order(self):
-        return [self.s.order[i].index for i in range(self.s.n)]
+        return [self.s.order[i] for i in range(self.s.n)]
 
     def cycle(self):
-        return [self.s.cycle[i].index for i in range(self.s.n)]
+        """The next pass, which Shuffle Songs draws when first asked for (next_pass)."""
+        if not self.s.cycle:
+            assert self.fw.fn('playback__next_pass', C.c_int)() == 1
+        return [self.s.cycle[i] for i in range(self.s.n)]
 
     def seen(self):
-        return {i for i in range(self.s.n) if self.s.seen[i]}
+        return {i for i in range(self.s.n) if self.s.mark[i] & 1}
 
     def pending(self):
         return list(self.s.pend[:self.s.npend])
@@ -124,14 +126,14 @@ def plan(player, order, at=None, cursor=0, seen=(), pend=(), groups=None, cycle=
     fw, s, n = player.fw, player.s, len(order)
     calloc = fw.fn('calloc', C.c_void_p, C.c_size_t, C.c_size_t)
     table = lambda kind, count: C.cast(calloc(count, C.sizeof(kind)), C.POINTER(kind))
-    s.order, s.cycle, s.groups, s.seen, s.history = (table(Entry, n + 1), table(Entry, n + 1), table(C.c_uint, n + 1),
-                                                     table(C.c_uint, n + 1), table(C.c_uint, 4096))
+    s.order, s.cycle, s.groups, s.mark, s.history = (table(Qix, n + 1), table(Qix, n + 1), table(C.c_uint, n + 1),
+                                                     table(C.c_ushort, n + 1), table(C.c_uint, 4096))
     for i, index in enumerate(order):
-        s.order[i].index = index
-        s.cycle[i].index = (cycle or order)[i]
+        s.order[i] = index
+        s.cycle[i] = (cycle or order)[i]
         s.groups[i] = groups[i] if groups else 0
     for i in seen:
-        s.seen[i] = 1
+        s.mark[i] = 1
     s.active, s.repeat, s.shuffle, s.n, s.cursor, s.npend = 1, repeat, shuffle, n, cursor, len(pend)
     s.pend[:len(pend)] = list(pend)
     player.mcl.pos = order[cursor] if at is None else at
@@ -307,7 +309,7 @@ def test_the_automatic_answer_is_kept_until_the_track_changes(fw, player):
     successor = fw.fn('playback_successor', C.c_int, C.c_int)
     plan(player, [0, 1, 2, 3], seen=(0,))
     assert successor(1) == 1
-    player.s.order[1].index, player.s.order[2].index = 2, 1
+    player.s.order[1], player.s.order[2] = 2, 1
     assert successor(1) == 1  # the preload's answer, while this track plays
     player.mcl.pos = 3
     assert successor(1) == 2 and player.s.next_pos == 3
@@ -3113,7 +3115,7 @@ def test_stock_shuffle_is_an_order_from_the_next_ui_pass(player):
     stock_shuffle(player)
     assert (player.s.active, player.s.shuffle, player.s.repeat) == (1, 1, REPEAT_ALL)
     coming = player.up_next(64)
-    assert len(coming) == 7 + 8 and player.s.order[player.s.cursor].index == 2  # this pass, then the next one whole
+    assert len(coming) == 7 + 8 and player.s.order[player.s.cursor] == 2  # this pass, then the next one whole
     assert player.run(15) == coming  # every automatic next is the row below, into the next pass too
     assert played(player, 64) == [2] + coming[:14]
 
@@ -3186,7 +3188,7 @@ def test_shuffle_off_plays_the_queue_on_from_the_song_and_on_again_draws_anew(fw
     assert played(player) == []
     mode(2)
     fw.fn('playback_poll', None)()
-    assert player.s.active == 1 and player.s.order[player.s.cursor].index == at and played(player) == []
+    assert player.s.active == 1 and player.s.order[player.s.cursor] == at and played(player) == []
     assert sorted(player.up_next()[:7]) == sorted(set(range(8)) - {at})
 
 
@@ -3244,6 +3246,6 @@ def test_a_next_between_shuffle_on_and_its_ui_pass_plays_stocks_draw_then_the_or
     fw.mock('stock_next_trampoline', lambda auto, *_: setattr(mcl, 'pos', 4) or 0)  # stock's pick from its pool
     assert player.next(0) == 0 and player.s.active == 0 and mcl.pos == 4
     fw.fn('playback_poll', None)()
-    assert player.s.active == 1 and player.s.order[player.s.cursor].index == 4
+    assert player.s.active == 1 and player.s.order[player.s.cursor] == 4
     coming = player.up_next()
     assert player.run(5) == coming[:5]
