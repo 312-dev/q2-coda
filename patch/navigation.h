@@ -1021,6 +1021,7 @@ void config_settle(int now_too);
 
 /* library_lists.c */
 int era_menu(void *ctx, void *event);
+void era_rows_finish(void *page); /* a decade's page's rows all made now (search_bar.c) */
 int era_sql(const char *sql, int (*row)(void *, int, char **, char **), void *ctx);
 int long_songs(void *ctx, void *event);
 /* durations.c: UI-thread API (duration_seconds and duration_text in peq.h); the worker alone

@@ -2343,6 +2343,87 @@ def test_a_decade_lists_its_albums_by_year(fw, ui):
     assert ui.rows(page) == [('Play All', '3 albums'), ('Shuffle', 'Every song, shuffled'), ('Blue', 'Band • 1991'),
                              ('Grey', '1995'), ('Red', 'Band • 1999')]
     assert 'having release_year between 1990 and 1999' in db.asked[-1]
+    # only albums with a track dated in the decade are grouped: an album's year is its latest track's
+    assert "between 1990 and 1999) group by album" in db.asked[-1]
+
+
+def big_decade(fw, ui, n):
+    """A decade of n albums opened: (the page, its album rows' titles as made so far)."""
+    albums = [(b'Album %04d' % i, b'Band', b'2011', b'/m/%d/1.flac' % i) for i in range(n)]
+    EraDb(fw, decades=[(b'2010', b'%d' % n)], albums=albums)
+    call(fw, 'era_menu')
+    ui.click(ui.top(), 0)
+    page = ui.top()
+    return page, [r[0] for r in ui.rows(page)[2:]]
+
+
+# The owner's 2010s held 2,664 albums: every row's widgets in one pass held the screen about 1.3 s on the Q2 (2026-11-24).
+# The page opens with a screenful made, and the rest follow a chunk a pass (era_rows_due), in order.
+def test_a_large_decade_opens_with_a_screenful_of_rows_and_makes_the_rest_a_chunk_a_pass(fw, ui):
+    page, made = big_decade(fw, ui, 1000)
+    assert ui.rows(page)[0] == ('Play All', '1000 albums') and 1 <= len(made) <= 32  # not 1,000 in the open's pass
+    passes = 0
+    while ui.pending('era_rows_due'):
+        before = len(ui.rows(page))
+        ui.fire('era_rows_due')
+        assert len(ui.rows(page)) - before <= 128  # each pass bounded
+        passes += 1
+    made = [r[0] for r in ui.rows(page)[2:]]
+    assert made == ['Album %04d' % i for i in range(1000)] and 5 <= passes <= 70
+
+
+class Steps:
+    """The step ui_watch.c names for the UI pass an action runs in: one late pass around each action."""
+    def __init__(self, fw):
+        self.fw, self.ms, self.lines = fw, 1000, []
+        fw.mock('time_now_ms', lambda *_: self.ms)
+        fw.var('g_backlight_status', C.c_ubyte).value = 1
+        fw.mock('fw_write', lambda fd, data, n, *_: fd == 2 and self.lines.append(C.string_at(data, n).decode()) or n)
+        fw.fn('ui_watch_woke', None)()
+
+    def of(self, action):
+        action()
+        self.ms += 5000  # late, and past the one-line-a-second limit
+        self.fw.fn('ui_watch_enter', None)()
+        self.fw.fn('ui_watch_polled', None)()
+        self.fw.fn('ui_watch_woke', None)()
+        found = re.search(r'step ([^,]*),', self.lines[-1])
+        assert found
+        return found[1]
+
+
+def test_years_names_each_step_of_a_decade(fw, ui, song, mcl):
+    steps = Steps(fw)
+    fw.mock('fw_access', lambda *_: 0)
+    Library(fw, ui, [song(b'/m/1.flac', id_=1)])
+    Albums(fw, ui, song)
+    albums = [(b'Blue', b'Band', b'1991', b'/m/blue/1.flac')] * 40
+    db = EraDb(fw, decades=[(b'1990', b'40')], albums=albums)
+    assert steps.of(lambda: call(fw, 'era_menu')) == 'years list'
+    assert steps.of(lambda: ui.click(ui.top(), 0)) == 'decade albums'
+    page = ui.top()
+    assert steps.of(lambda: ui.fire('era_rows_due')) == 'decade rows'
+    db.albums = [(b'1',)]
+    assert steps.of(lambda: ui.click(page, 0)) == 'decade play all'
+    assert steps.of(lambda: ui.click(page, 1)) == 'decade shuffle'
+    db.albums = albums
+    assert steps.of(lambda: ui.click(page, 2)) == 'decade album'
+
+
+def test_a_decade_closed_while_its_rows_are_made_stops_making_them(fw, ui):
+    page, _ = big_decade(fw, ui, 500)
+    assert ui.pending('era_rows_due')
+    ui.close(page)
+    assert not ui.pending('era_rows_due')
+
+
+# the search bar's search reads the page's rows: they are all made first (search_bar.c)
+def test_a_decade_s_rows_are_all_made_before_its_search_reads_them(fw, ui):
+    page, _ = big_decade(fw, ui, 300)
+    fw.fn('era_rows_finish', None, C.c_void_p)(page)
+    assert len(ui.rows(page)) == 302 and not ui.pending('era_rows_due')
+    fw.fn('era_rows_finish', None, C.c_void_p)(page)  # done: nothing more
+    assert len(ui.rows(page)) == 302
 
 
 def test_a_decade_s_albums_stop_at_its_count(fw, ui):
@@ -2380,18 +2461,20 @@ def test_a_failing_decade_query_says_era_unavailable(fw, ui):
 def test_a_failing_song_query_says_era_unavailable(fw, ui, row):
     db, page = era_decade(fw, ui)
     run = db.run
-    fw.mock('sqlite3_exec', lambda d, sql, *a: 1 if b'select distinct s.id' in C.string_at(sql) else run(d, sql, *a))
+    fw.mock('sqlite3_exec', lambda d, sql, *a: 1 if b'select s.id from songtable s' in C.string_at(sql) else run(d, sql, *a))
     fw.mock('getMusicByAlbum', lambda *_: -1)  # stock's count when its query fails (toolsQueryDbTable: no database, or sqlite3_exec fails)
     ui.click(page, row)
     assert ui.toasts == ['Years unavailable'] and not ui.played
 
 
-# Shuffle's key query worked but loading the library failed: still 'Years unavailable', not 'Storage unavailable'
-def test_shuffle_with_the_library_failing_says_era_unavailable(fw, ui, mcl):
+# Play All's or Shuffle's key query worked but loading the library failed: still 'Years unavailable', not 'Storage
+# unavailable'
+@pytest.mark.parametrize('row', [0, 1])
+def test_play_all_or_shuffle_with_the_library_failing_says_era_unavailable(fw, ui, mcl, row):
     fw.mock('getAllMusic', lambda *_: -1)
     db, page = era_decade(fw, ui)
     db.albums = [(b'9',)]
-    ui.click(page, 1)
+    ui.click(page, row)
     assert ui.toasts == ['Years unavailable'] and not ui.played
 
 
@@ -2402,25 +2485,6 @@ def test_an_album_row_with_a_partial_failing_query_says_era_unavailable(fw, ui, 
     load = albums.load
     fw.mock('getMusicByAlbum', lambda name, *_: [load(name), -1][1])
     ui.click(page, 2)
-    assert ui.toasts == ['Years unavailable'] and not ui.played
-
-
-# Play All skips an album whose query failed and plays the rest; it says so only when every album failed
-def test_play_all_skips_a_failed_album(fw, ui, song):
-    albums = Albums(fw, ui, song)
-    db, page = era_decade(fw, ui)
-    load = albums.load
-    fw.mock('getMusicByAlbum', lambda name, *_: -1 if C.string_at(name) == b'Grey' else load(name))
-    ui.click(page, 0)
-    (queue, at, cls), = ui.played
-    assert [field(r, 'title') for r in queue] == [b'B1', b'B2', b'R1'] and not ui.toasts
-
-
-def test_play_all_with_every_album_failing_says_era_unavailable(fw, ui, song):
-    Albums(fw, ui, song)
-    db, page = era_decade(fw, ui)
-    fw.mock('getMusicByAlbum', lambda *_: -1)
-    ui.click(page, 0)
     assert ui.toasts == ['Years unavailable'] and not ui.played
 
 
@@ -2438,19 +2502,51 @@ class Albums:
         fw.mock('fw_access', lambda p, *_: -1 if C.string_at(p) in gone else 0)
 
 
-def test_play_all_plays_the_decade_s_albums_in_order(fw, ui, song):
-    Albums(fw, ui, song)
-    db, page = era_decade(fw, ui)
+def play_all(fw, ui, songs, keys, albums=ERA_ALBUMS):
+    """Play All on a decade whose key query gives keys (song ids, in its order) over the library songs: the queue
+    played, or None."""
+    library = Library(fw, ui, songs)
+    db, page = era_decade(fw, ui, albums=albums)
+    db.albums = [(b'%d' % k,) for k in keys]
     ui.click(page, 0)
-    (queue, at, cls), = ui.played
-    assert [field(r, 'title') for r in queue] == [b'B1', b'B2', b'G1', b'R1'] and at == 0 and cls == LIBRARY
+    return db, library, ui.played[0] if ui.played else None
+
+
+# one query in the page's order (each album's tracks by disc, track, path), then the library filtered by it
+def test_play_all_plays_the_decade_s_songs_in_the_query_s_order(fw, ui, song):
+    fw.mock('fw_access', lambda *_: 0)
+    songs = [song(b'/m/%d.flac' % i, b'T%d' % i, id_=i) for i in (5, 9, 1, 7)]  # the library's order
+    db, library, (queue, at, cls) = play_all(fw, ui, songs, [9, 1, 5])
+    assert [field(r, 'title') for r in queue] == [b'T9', b'T1', b'T5'] and at == 0 and cls == LIBRARY
+    assert 'order by g.y,g.a COLLATE NOCASE,g.b COLLATE NOCASE,g.d,ifnull(s.cd_num,0),ifnull(s.track,0)' in db.asked[-1]
+    assert library.asked == [3]
+
+
+# a song the query gave twice keeps its first place
+def test_play_all_keeps_a_song_once(fw, ui, song):
+    fw.mock('fw_access', lambda *_: 0)
+    songs = [song(b'/m/%d.flac' % i, b'T%d' % i, id_=i) for i in (1, 2)]
+    _, _, (queue, _, _) = play_all(fw, ui, songs, [2, 1, 2])
+    assert [field(r, 'title') for r in queue] == [b'T2', b'T1']
+
+
+# The cost: Play All on the owner's 2010s (2,664 albums) made two stock queries an album, 1.2 s in the emulator and
+# about 4.5 s on the Q2 (2026-11-24). Now one SQLite query and one library load, whatever the album count.
+def test_play_all_s_queries_do_not_grow_with_the_decade_s_albums(fw, ui, song):
+    fw.mock('fw_access', lambda *_: 0)
+    by_album = []
+    fw.mock('getMusicByAlbum', lambda *a: by_album.append(a) and 0)
+    albums = [(b'Album %04d' % i, b'Band', b'1995', b'/m/%d/1.flac' % i) for i in range(300)]
+    songs = [song(b'/m/%d/1.flac' % i, b'T%d' % i, id_=i + 1) for i in range(300)]
+    db, library, (queue, _, _) = play_all(fw, ui, songs, range(1, 301), albums=albums)
+    assert len(queue) == 300 and not by_album and library.asked == [3]
+    assert sum('select s.id from songtable s' in q for q in db.asked) == 1
 
 
 def test_play_all_with_the_card_away_says_so(fw, ui, song):
-    Albums(fw, ui, song, gone={b'/m/blue/1.flac'})
-    db, page = era_decade(fw, ui)
-    ui.click(page, 0)
-    assert ui.toasts == ['Storage unavailable'] and not ui.played
+    fw.mock('fw_access', lambda p, *_: -1 if C.string_at(p) == b'/m/1.flac' else 0)
+    assert play_all(fw, ui, [song(b'/m/1.flac', id_=1), song(b'/m/2.flac', id_=2)], [1, 2])[2] is None
+    assert ui.toasts == ['Storage unavailable']
 
 
 # a server row (catalogue.c) has no file: Play All goes on to play_folder, whose load hands it to the app or says
@@ -2458,12 +2554,10 @@ def test_play_all_with_the_card_away_says_so(fw, ui, song):
 def test_play_all_from_a_server_song_plays_rather_than_saying_storage_unavailable(fw, ui, song):
     server = b'/mnt/mmc/.subsonic/cat/al1/s%d.flac'
     fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))  # stock's, for catalogue_path
-    albums = Albums(fw, ui, song, gone={server % 1, server % 2})
-    albums.songs[b'Blue'] = [song(server % 2, b'B2', album=b'Blue', track=2), song(server % 1, b'B1', album=b'Blue', track=1)]
-    db, page = era_decade(fw, ui, albums=[(b'Blue', b'Band', b'1991', server % 1), *ERA_ALBUMS[1:]])
-    ui.click(page, 0)
-    (queue, at, cls), = ui.played
-    assert [field(r, 'title') for r in queue] == [b'B1', b'B2', b'G1', b'R1'] and not ui.toasts
+    fw.mock('fw_access', lambda *_: -1)
+    songs = [song(server % 1, b'B1', id_=1), song(server % 2, b'B2', id_=2)]
+    _, _, (queue, _, _) = play_all(fw, ui, songs, [1, 2])
+    assert [field(r, 'title') for r in queue] == [b'B1', b'B2'] and not ui.toasts
 
 
 def test_shuffle_plays_the_decade_s_songs_shuffled(fw, ui, song, mcl):
@@ -2864,6 +2958,124 @@ def test_a_library_query_on_the_ui_thread_gives_a_running_cover_flow_step_up_fir
     assert len(fw.calls('fw_pthread_join')) == joins + 1 and not fw.fn('coverflow_spinner', C.c_int)()
     assert not ui.timers or all(fn != C.cast(fw.lib.coverflow__open_step, C.c_void_p).value
                                 for fn, _c, _m in ui.timers.values())
+
+
+class CfOpen:
+    """Home's Cover Flow pressed (coverflow_open) over albums A and B: each step's thread runs when the test says
+    (steps), the clock is the test's, and the unified log's cf lines are kept (lines)."""
+    def __init__(self, fw, ui, song):
+        self.fw, self.ui, self.clock, self.thread, self.lines = fw, ui, [1000], [], []
+        Files(fw)
+        fw.mock('time_now_ms', lambda *_: self.clock[0])
+        fw.var('g_backlight_status', C.c_ubyte).value = 1
+        home = ui.new('window_create', 0, 0, 0, 0, 0)
+        ui.name[home] = 'home_page'
+        rows = [song(b'/m/a/1.flac', album=b'A', id_=1), song(b'/m/b/1.flac', album=b'B', id_=2)]
+        put = lambda *_: ui.deques[fw.var('fw_ctx_tools_pdeq_directory', C.c_uint).value].extend(rows) or 2  # noqa: E731
+        fw.mock('getAllAlbum', put)
+        fw.mock('toolsQueryDbTable', put)
+        fw.mock('fw_pthread_create', self.create)
+        fw.mock('fw_usleep', lambda us, *_: self.clock.__setitem__(0, self.clock[0] + us // 1000) or 0)
+        fw.mock('widget_load_image', lambda *_: 1)
+        fw.mock('fw_write', self.write)
+        fw.fn('coverflow__coverflow_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+
+    def create(self, out, attr, run, arg, *_):
+        C.c_ulong.from_address(out).value = 99
+        self.thread.append([run, arg])
+        return 0
+
+    def write(self, fd, data, n, *_):
+        line = C.string_at(data, n).decode().rstrip('\n').split(' ', 4)
+        if fd == 2 and line[3] == 'cf':
+            self.lines.append(line[2] + ' ' + line[4])
+        return n
+
+    def steps(self, n=10, until=None):
+        """Each running step ends and a pass of the main loop collects it, n times; a step until (its k) is left
+        running, as is the art build's worker."""
+        worker = C.cast(self.fw.lib.coverflow__worker, C.c_void_p).value
+        for _ in range(n):
+            for t in self.thread:
+                if t[0] and t[0] != worker and t[1] != until:
+                    run, t[0] = t[0], None
+                    C.CFUNCTYPE(C.c_void_p, C.c_void_p)(run)(t[1])
+            for t, (fn, ctx, _ms) in list(self.ui.timers.items()):
+                if fn == C.cast(self.fw.lib.coverflow__open_step, C.c_void_p).value:
+                    del self.ui.timers[t]
+                    TICK(fn)(ctx)
+
+    def watch(self, ms):
+        """ms later, the ticks that wait (open_step's, Preparing artwork's poll) run as the main loop would: the cf
+        lines they added."""
+        self.clock[0] += ms
+        before = len(self.lines)
+        ticks = {C.cast(self.fw.lib.coverflow__open_step, C.c_void_p).value,
+                 C.cast(self.fw.lib.coverflow__poll, C.c_void_p).value}
+        for t, (fn, ctx, _ms) in list(self.ui.timers.items()):
+            if fn in ticks:
+                del self.ui.timers[t]
+                TICK(fn)(ctx)
+        return self.lines[before:]
+
+
+# Cover Flow's open in the unified log (docs/internals.md#cover-flow-log): "Cover Flow never loaded" (the owner,
+# 2026-11-24) left no line to say why. An open says what it opens, its covers when they show and how long after.
+def test_a_cover_flow_open_logs_its_albums_and_when_its_covers_show(fw, ui, song):
+    cf = CfOpen(fw, ui, song)
+    assert cf.lines == ['I cover flow open: the albums to query']
+    cf.clock[0] += 1200
+    cf.steps()
+    assert ui.name[ui.top()] == 'coverflow_page'
+    assert cf.lines[-1].startswith('I cover flow shown: ') and ', 2 albums, ' in cf.lines[-1]
+    assert cf.watch(60000) == []  # nothing left to watch
+
+
+# Not shown 5 s after the open: a W line naming the phase it waits in, then one a minute while it still waits
+def test_a_cover_flow_open_still_waiting_says_where_after_5_s_then_each_minute(fw, ui, song):
+    cf = CfOpen(fw, ui, song)
+    assert cf.watch(4000) == []
+    assert cf.watch(1000) == ["W cover flow not shown 5 s after its open: the albums' query (step 1 of 3)"]
+    assert cf.watch(16) == [] and cf.watch(59000) == []  # never a line a tick
+    assert cf.watch(1000) == ["W cover flow not shown 65 s after its open: the albums' query (step 1 of 3)"]
+
+
+# the cover lookup (OPEN_ART, its own thread) says how far it is, and how many albums have no cover file to make art from
+def test_a_cover_flow_open_in_its_cover_lookup_says_how_far(fw, ui, song):
+    cf = CfOpen(fw, ui, song)
+    cf.steps(until=4)
+    assert cf.watch(5000) == ['W cover flow not shown 5 s after its open: the cover lookup, 0 of 2 albums looked at, '
+                              '0 without a cover file']
+
+
+# the page up on Preparing artwork (a build of its art, on a thread) and closed before any cover shows
+def test_a_cover_flow_page_closed_while_its_art_builds_says_so(fw, ui, song):
+    def statfs(path, buf, *_):  # the card has room for the art
+        words = C.cast(buf, C.POINTER(C.c_uint))
+        words[1], words[7] = 4096, 1 << 20
+        return 0
+    fw.mock('fw_statfs', statfs)
+    fw.mock('fw_access', lambda p, *_: -1 if b'/.coverflow/' in C.string_at(p) else 0)  # no album's art made yet
+    cf = CfOpen(fw, ui, song)
+    cf.steps()
+    page = ui.top()
+    assert ui.name[page] == 'coverflow_page' and not any(line.startswith('I cover flow shown') for line in cf.lines)
+    assert cf.watch(5000) == ['W cover flow not shown 5 s after its open: the thumbnail build, 0 of 2 done']
+    ui.close(page)
+    assert cf.lines[-1].startswith('I cover flow closed ') and cf.lines[-1].endswith(
+        'not shown: the thumbnail build, 0 of 2 done')
+    assert cf.watch(60000) == []
+
+
+# Return while it waits: the open given up, and the line says where it was
+def test_a_cover_flow_open_given_up_says_where_it_was(fw, ui, song):
+    cf = CfOpen(fw, ui, song)
+    key = (C.c_uint * 16)()
+    key[O['EVENT_TYPE'] // 4], key[O['EVENT_KEY'] // 4] = O['EVT_KEY_UP'], O['KEY_RETURN']
+    assert fw.fn('coverflow_wait_input', C.c_int, C.c_void_p)(key) == 1
+    assert cf.lines[-1].startswith('I cover flow open given up after ') and \
+        cf.lines[-1].endswith("in the albums' query (step 1 of 3)")
+    assert cf.watch(60000) == []
 
 
 def test_albums_none_of_them_rated_says_so(fw, ui, song):

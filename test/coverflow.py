@@ -289,6 +289,7 @@ void *window_manager_get_top_window(void *wm) { return top_window; }
 int window_manager_is_animating(void *wm) { return animating; }
 static unsigned clock_ms, pressed = 1, paused;
 unsigned time_now_ms(void) { return clock_ms; }
+void ulog(char level, const char *src, const char *msg) { (void)level, (void)src, (void)msg; } /* no log here */
 int window_manager_get_pointer_pressed(void *wm) { return pressed; }
 int widget_animator_pause(void *a) { ++paused; return 0; }
 static int animators_gone;

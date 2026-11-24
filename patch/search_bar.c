@@ -92,6 +92,7 @@ int search_bar_key(void *top, unsigned key) {
     if (key != KEY_CENTER) return 0;
     char title[48] = "";
     if (st.bar_title) widget_get_text_utf8(st.bar_title, title, sizeof title);
+    era_rows_finish(sb.page); /* a decade's rows made a pass at a time: the search reads them all */
     search_strip_scoped(sb.page, sb.surface, title);
     return 1;
 }

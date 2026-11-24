@@ -317,6 +317,11 @@ def era_track(m,album,aa,*t):
     r=track(m,*t); m.word(r+O['REC_ALBUM'],m.string(album)); m.word(r+O['REC_ALBUM_ARTIST'],m.string(aa)); return r
 m=EraPlay(SONGS); m.by_album={'Alpha':[era_track(m,'Alpha','','a1','/mnt/mmc/m/a/1.mp3',1,1)],
                               'Beta':[era_track(m,'Beta','Beta Band','b2','/mnt/mmc/m/b/2.mp3',1,2),era_track(m,'Beta','Beta Band','b1','/mnt/mmc/m/b/1.mp3',1,1)]}
+# Play All's songs are one query's, ordered as the page (year, then name) and each album by disc, track and path, matched
+# to the library's records by song-table id (SONGS' rows 1-3), whatever the library's own order.
+m.found=[era_track(m,'Beta','Beta Band','b2','/mnt/mmc/m/b/2.mp3',1,2),era_track(m,'Alpha','','a1','/mnt/mmc/m/a/1.mp3',1,1),
+         era_track(m,'Beta','Beta Band','b1','/mnt/mmc/m/b/1.mp3',1,1)]
+for r,ident in zip(m.found,(3,1,2)): m.word(r+O['REC_ID'],ident)
 m.open_era(); m.decade(1); albums=m.page
 row=lambda i: m.handler(m.nodes[m.find('scroll_view',albums)]['children'][i],O['EVT_CLICK'])
 f,ctx=row(0); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
