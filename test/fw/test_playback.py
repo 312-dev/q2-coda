@@ -1893,7 +1893,7 @@ def test_a_snapshot_path_is_at_most_1023(saved, path, kept):
     assert bool(saved.disk.files.get(QUEUE_FILE)) == kept
 
 
-PLAIN = high_halves(3)
+PLAIN = high_halves(5)
 PLAIN_MAPPED = set()
 
 
@@ -1942,6 +1942,31 @@ def test_a_plain_queue_restores_without_advanced_play(saved):
     saved.save()
     assert restore(saved) == 1
     assert saved.s.active == 0 and saved.deques[saved.handle] == rows and saved.deques[saved.out] == rows
+
+
+@pytest.mark.parametrize('at, pos', [(0, 1), (3, 2), (4, 2)])
+def test_a_song_removed_from_the_queue_stays_out_after_a_restart(saved, at, pos):
+    """Up Next's Remove from Queue (playback_queue_remove): the row leaves, the playing one (2) plays on at its new
+    place, and the snapshot it saves restores that queue. A row before it moves the position back one."""
+    fw = saved.fw
+    fw.mock('fw_deque_pop_back', lambda q, *_: saved.deques[q].pop() and 0)
+    rows = saved.load([plain_song(saved, b'/m/%d.flac' % i, i) for i in range(5)], 2)
+    saved.mcl.type = FOLDER
+    saved.deques[saved.library][:] = rows
+    want = [p for i, p in enumerate(paths(rows)) if i != at]
+    assert fw.fn('playback_queue_remove', C.c_int, C.c_uint)(at) == 1
+    assert paths(saved.deques[saved.handle]) == want and saved.mcl.pos == pos
+    assert paths(saved.deques[saved.handle])[pos] == b'/m/2.flac'  # the song playing, still the one playing
+    saved.save()
+    restore(saved)
+    assert paths(saved.deques[saved.handle]) == want and saved.mcl.pos == pos
+
+
+def test_the_playing_song_and_a_row_past_the_end_are_not_removed(saved):
+    fw = saved.fw
+    rows = saved.load([plain_song(saved, b'/m/%d.flac' % i, i) for i in range(3)], 1)
+    remove = fw.fn('playback_queue_remove', C.c_int, C.c_uint)
+    assert remove(1) == 0 and remove(3) == 0 and saved.deques[saved.handle] == rows and saved.mcl.pos == 1
 
 
 def test_a_plain_queue_is_kept_only_for_memory_playback(saved):

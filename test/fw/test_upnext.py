@@ -716,3 +716,56 @@ def test_a_row_of_the_playing_songs_album_takes_the_cover_now_playing_shows(fw, 
     page.open()
     assert starts == ['/mnt/mmc/m/Speak No Evil.flac']  # Speak No Evil's cover fetched from its file, once
     fw.var('album_cover__ac', C.c_uint).value = 0  # the fetch over (ac.busy), for the tests after
+
+
+# Remove from Queue (the song menu's row on a queued song, upnext.c un_remove, playback.c playback_queue_remove).
+def remove(fw, at):
+    return fw.fn('playback_queue_remove', C.c_int, C.c_uint)(at)
+
+
+def test_remove_from_queue_takes_a_coming_song_out_and_the_playing_one_plays_on(fw, plain):
+    queue, page = plain
+    before = queue.names()
+    assert remove(fw, 5) == 1
+    assert queue.names() == before[:5] + before[6:] and queue.mcl.pos == 2 and queue.name(2) == before[2]
+    page.open()
+    assert before[5] not in page.captions and page.captions == before[3:5] + before[6:]
+
+
+def test_removing_a_playing_next_song_shortens_playing_next(fw, plain):
+    queue, page = plain
+    queue.queue(7, 1)  # Play Next 07: at 3
+    queue.queue(0, 2)  # Play Last 00: at 4
+    assert remove(fw, 3) == 1
+    page.open()
+    assert [q[:2] for q in page.queued] == ['00'] and queue.mcl.pos == 2
+
+
+def test_removing_a_song_before_the_playing_one_keeps_it_playing(fw, plain):
+    queue, page = plain
+    playing = queue.name(2)
+    assert remove(fw, 0) == 1 and queue.mcl.pos == 1 and queue.name(1) == playing
+
+
+def test_remove_under_advanced_play_keeps_every_other_song_to_come(fw, up):
+    """Shuffle Songs' order is drawn again over the rows left (follow_queue): which song comes when is the order's,
+    so only the set is checked, not the order."""
+    queue, page = up
+    for r in queue.records:  # no artists: the regrouping reads REC_ALBUM's cell whole
+        C.c_uint.from_address(r + O['REC_ARTIST']).value = 0
+    page.open()
+    before = page.captions
+    page.close()
+    playing = queue.name(queue.mcl.pos)
+    gone = next(i for i in range(len(NAMES)) if i != queue.mcl.pos)
+    name = queue.name(gone)
+    assert remove(fw, gone) == 1
+    assert queue.name(queue.mcl.pos) == playing and name not in queue.names() and len(queue.names()) == len(NAMES) - 1
+    page.open()
+    assert sorted(page.captions) == sorted(c for c in before if c != name)
+
+
+def test_the_playing_song_is_never_removed(fw, plain):
+    queue, page = plain
+    before = queue.names()
+    assert remove(fw, 2) == 0 and queue.names() == before

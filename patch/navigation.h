@@ -1199,6 +1199,9 @@ int playlist_page_song_hold(void *top);
 /* hold_menu.c: a song row's hold menu from a held Centre or finger (centre_menu.c) */
 int qm_centre_hold(void *top);
 int qm_touch_hold(void *top, int x, int y);
+/* search_strip.c: a song result held, by a key (the selected one) or a finger at (x, y) */
+int search_strip_song_hold(void *top);
+int search_strip_touch_hold(void *top, int x, int y);
 /* upnext.c: the same over Up Next's queued song (centre: Playing Next's rows keep their lift) */
 int un_menu_hold(void *top, int centre);
 /* centre_menu.c: Centre's press and release, a finger's raw pointer events (input.c) */

@@ -578,6 +578,73 @@ def test_a_tap_on_a_result_opens_it_and_a_drag_scrolls(fw, ui, song):
     assert s.ss.focus == ON_LIST and s.ss.sel == 3 and ui.played == [(songs, 3, LIBRARY)]
 
 
+# A song result held (search_strip.c search_strip_song_hold): the song's hold menu, the one a Library song gets, by
+# Play/Pause, Centre (hold_menu.c qm_centre_hold) or a finger (qm_touch_hold); an artist's or album's result keeps
+# what it does.
+def held_key(fw, key):
+    """Stock's input status with key held: the hold's key record (hold_menu.c key_record, play_key)."""
+    keys = C.create_string_buffer(O['INPUT_KEYS'] + 16 * O['INPUT_KEY_SIZE'])
+    struct.pack_into('<IIQ', keys, O['INPUT_KEYS'], key, 0, 0x77)
+    fw.mock('window_manager_get_input_device_status', lambda *_: C.addressof(keys))
+    return keys
+
+
+def menu_for(fw, ui, st, s):
+    """What a hold queued: qm_open's timer, and the record at the menu's index in the list it holds."""
+    opens = [t for t in ui.timers.values() if t[2] == 0]
+    at = fw.fn('fw_deque_at', C.c_void_p, C.c_void_p, C.c_uint)(s.ss.songs, st('qm_idx').value)
+    return len(opens), at
+
+
+def test_centre_held_on_a_song_result_opens_its_menu(fw, ui, song, st):
+    s = Strip(fw, ui, library(song))
+    s.type('joy')
+    s.enter()
+    keys = held_key(fw, KEY_CENTER)
+    match = C.cast(s.ss.match, C.POINTER(C.c_void_p))
+    assert fw.fn('qm_centre_hold', C.c_int, C.c_void_p)(ui.top()) == 1
+    assert menu_for(fw, ui, st, s) == (1, match[0])  # Love Will Tear Us Apart, at its place in the library's songs
+    del keys
+
+
+def test_play_pause_held_on_a_song_result_opens_the_same_menu(fw, ui, song, st):
+    s = Strip(fw, ui, library(song))
+    s.type('joy')
+    s.enter()
+    s.key(KEY_NEXT)  # Atmosphere
+    keys = held_key(fw, KEY_PLAY)
+    event = C.create_string_buffer(0x40)
+    struct.pack_into('<i', event, O['EVENT_KEY'], KEY_PLAY)
+    assert fw.fn('ringnav_keylong', C.c_int, C.c_void_p, C.c_void_p)(None, event) == 11  # STOP
+    match = C.cast(s.ss.match, C.POINTER(C.c_void_p))
+    assert menu_for(fw, ui, st, s) == (1, match[1])
+    assert st('qm_press', C.c_ulonglong).value == 0x77  # its release latched, as a Library song's hold
+    del keys
+
+
+def test_an_artist_result_or_the_strip_keeps_what_it_did(fw, ui, song, st):
+    s = Strip(fw, ui, library(song))
+    s.type('joy')
+    keys = held_key(fw, KEY_CENTER)
+    hold = fw.fn('qm_centre_hold', C.c_int, C.c_void_p)
+    assert hold(ui.top()) == 0  # the wheel on the strip
+    s.enter()
+    s.key(KEY_NEXT, KEY_NEXT)  # artist: Joy Division
+    assert s.ss.sel == 2 and hold(ui.top()) == 0 and not [t for t in ui.timers.values() if t[2] == 0]
+    del keys
+
+
+def test_a_finger_held_on_a_song_result_selects_it_and_opens_its_menu(fw, ui, song, st):
+    s = Strip(fw, ui, library(song))
+    s.type('joy')
+    s.enter()
+    touch = fw.fn('qm_touch_hold', C.c_int, C.c_void_p, C.c_int, C.c_int)
+    assert touch(ui.top(), 100, LIST_Y + 2 * 32 + 10) == 0 and s.ss.sel == 0  # the artist's row: nothing, the bar kept
+    assert touch(ui.top(), 100, LIST_Y + 32 + 10) == 1 and s.ss.sel == 1 and s.ss.pressed == 0
+    match = C.cast(s.ss.match, C.POINTER(C.c_void_p))
+    assert menu_for(fw, ui, st, s) == (1, match[1])
+
+
 def test_a_tap_below_the_results_does_nothing(fw, ui, song):
     s = Strip(fw, ui, library(song))
     s.type('joy')

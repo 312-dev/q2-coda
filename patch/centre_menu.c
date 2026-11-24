@@ -2,7 +2,8 @@
  * opens (hold_menu.c qm_open, docs/internals.md#centre-hold-menu), on every song list the hold menu
  * knows: the Library's lists over the showlist (Songs, an album's or an artist's songs, a genre's
  * and the rest), Folders' audio files, Cover Flow's tracks, Most Played and the Ratings lists, a
- * playlist's page and Up Next's queue (upnext.c un_menu_hold).
+ * playlist's page, Search's song results (search_strip.c search_strip_song_hold) and Up Next's
+ * queue (upnext.c un_menu_hold), whose menu ends with Remove from Queue.
  *
  * It fires after CENTRE_MENU_MS, half of stock's Centre hold (STOCK_CENTRE_HOLD_MS, the Shut Down?
  * prompt), so a press meant for the menu is let go well before the prompt could come. The press

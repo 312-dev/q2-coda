@@ -19,6 +19,8 @@ unsigned playback_queue_insert(void *queue, void *add, int next);
 unsigned playback_next_rows(unsigned *out, unsigned max); /* Up Next's Playing Next, in order */
 int playback_next_move(unsigned from, unsigned to); /* Playing Next's entry from goes to place to */
 int playback_next_clear(void); /* Up Next's Clear: Playing Next's tracks leave the queue */
+/* Up Next's Remove from Queue: the queue's row at leaves it, never the one playing (1) */
+int playback_queue_remove(unsigned at);
 /* A radio of the song playing: the queue becomes that song then add's, with no load (1) */
 int playback_queue_rest(void *add);
 /* song_rows.c: r is the song playing or paused, by its path and CUE track (a server row by its
