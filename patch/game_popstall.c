@@ -1215,7 +1215,7 @@ static int type(const struct pstall *b, struct eng_surface *s, const char *t, in
     return (w + 15) / 16;
 }
 
-/* v with a comma between each three digits, after a prefix. */
+/* v at out with a comma between each three digits; the end of it. */
 static char *digits(char *out, unsigned v) {
     char d[16];
     int n = 0;
@@ -1235,10 +1235,9 @@ static char *put(char *out, const char *w) {
 
 /* ---- the scene ---- */
 
-static int cell_shown(const struct pstall *b,
-                      int r) { /* the inflate's or the game over's step for row r */
-    if (b->mode == INFLATE) return b->t - fade_row(r);
-    return 99;
+/* Row r's step of the inflate, 1 to 4 its small and bigger discs; 99 (any other time): whole. */
+static int cell_shown(const struct pstall *b, int r) {
+    return b->mode == INFLATE ? b->t - fade_row(r) : 99;
 }
 
 /* The balloons within reach of the paint, row by row from the top, so a lower row's balloons cover
