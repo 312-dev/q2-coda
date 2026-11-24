@@ -78,7 +78,7 @@ PTRS = set('''bar_bt bar_wifi bar_pct bar_slot bar_icon bar_idle bar_state bar_e
     np_album np_slider np_remain np_elapsed np_cover np_title np_artist np_slide np_lrc genre_label'''.split())
 UNSIGNED = set('''codec_timer batt_key bar_timer np_hash np_art scrub_timer scrub_track settle_timer lyric_push_at
     lyric_at lyric_follow_at lyric_song lyric_rows_song bc_timer bc_track bc_repaint bc_key bc_box bc_shape bc_url
-    clock_key clock_timer keep_lit_at genre_timer last_input'''.split())
+    clock_key clock_timer keep_lit_at genre_timer last_input lyric_held_at lyric_seek_at'''.split())
 
 
 class State:
@@ -1509,6 +1509,7 @@ def test_oleds_scrub_keeps_the_accent_and_marks_the_playhead_with_a_knob(fw, ui,
 # takes them, a finger's drag holds them; a tap takes them full screen, over the whole window.
 LINES = [(f'Line {i}', 10 * i) for i in range(12)]
 SLOT = O['LYRIC_SLOT']
+LRC_FAR_SEC = 0x7fffffff // 1000  # an untimed line's lrc_time (lyrics.c lyrics_rows: LRC_FAR's seconds)
 LYRICS = host.defines('lyrics.c', 'LYRIC_')
 
 
@@ -1697,6 +1698,81 @@ def test_a_drag_holds_the_lyrics_and_a_tap_holds_nothing(fw, ui, mcl, st):
     assert st.lyric_held == 1 and lyr.settle() == at + 70
 
 
+RESUME = 5000  # the owner's 5 s, LYRIC_RESUME_MS
+
+
+def hold_by_wheel(lyr, wheel, ticks=None):
+    """A turn past a push (clockwise, down the lyrics), the thumb let go in the same pass: held from this pass."""
+    travel, held = wheel
+    travel.value = -(ticks or O['LYRIC_PUSH_DETENTS'] + 1) * O['WHEEL_TICK_UNITS']
+    lyr.poll(1)
+    assert lyr.st.lyric_held == 1
+    return lyr.ui.now
+
+
+def rest(lyr, until, ms=25):
+    """UI passes every ms until the clock reads until."""
+    while lyr.ui.now + ms <= until:
+        lyr.poll(1, ms=ms)
+    if lyr.ui.now < until:
+        lyr.poll(1, ms=until - lyr.ui.now)
+
+
+def test_held_timed_lyrics_follow_again_after_resume_ms_of_rest_and_not_before(fw, ui, mcl, st, wheel):
+    theme(fw, st)
+    assert NAV.get('LYRIC_RESUME_MS') == RESUME
+    lyr = Lyrics(fw, ui, mcl, st, sec=35)
+    lyr.settle()
+    t0 = hold_by_wheel(lyr, wheel)
+    taken = lyr.settle()
+    lyr.sec = 55  # the song goes on two lines
+    rest(lyr, t0 + RESUME - 100)
+    assert st.lyric_held == 1 and lyr.y() == taken != centre(5)  # 4.9 s: still where the wheel left them
+    rest(lyr, t0 + RESUME)
+    assert st.lyric_held == 0  # 5 s: following again
+    assert lyr.settle() == centre(5)
+    lyr.sec = 75
+    assert lyr.settle() == centre(7)  # and goes on with the song
+
+
+def test_another_turn_or_a_touch_starts_the_rest_again(fw, ui, mcl, st, wheel):
+    theme(fw, st)
+    lyr = Lyrics(fw, ui, mcl, st, sec=35)
+    lyr.settle()
+    t0 = hold_by_wheel(lyr, wheel)
+    rest(lyr, t0 + RESUME - 1000)
+    t1 = hold_by_wheel(lyr, wheel, ticks=O['LYRIC_PUSH_DETENTS'] + 1)  # another turn before the 5 s
+    rest(lyr, t0 + RESUME + 500)
+    assert st.lyric_held == 1  # past the first turn's 5 s
+    travel, held = wheel
+    held.value = 1  # the thumb rests on the wheel: no rest while it stays
+    rest(lyr, t1 + RESUME + 2000)
+    assert st.lyric_held == 1
+    held.value = 0
+    lyr.poll(1)
+    t2 = ui.now
+    lyr.pressed = 1  # a finger on the page, held there, then lifted without moving them
+    rest(lyr, t2 + 3000)
+    lyr.pressed = 0
+    lyr.poll(1)
+    t3 = ui.now
+    rest(lyr, t3 + RESUME - 100)
+    assert st.lyric_held == 1
+    rest(lyr, t3 + RESUME)
+    assert st.lyric_held == 0
+
+
+def test_held_untimed_lyrics_stay_where_they_were_left(fw, ui, mcl, st, wheel):
+    theme(fw, st)
+    untimed = [(f'Line {i}', LRC_FAR_SEC) for i in range(12)]
+    lyr = Lyrics(fw, ui, mcl, st, sec=35, lyrics=untimed)
+    lyr.settle()
+    t0 = hold_by_wheel(lyr, wheel)
+    taken = lyr.settle()
+    rest(lyr, t0 + 3 * RESUME)
+    assert st.lyric_held == 1 and lyr.y() == taken
+
+
 def test_a_swipe_away_and_back_keeps_the_hold_and_a_new_song_starts_at_the_top(fw, ui, mcl, st, wheel):
     theme(fw, st)
     lyr = Lyrics(fw, ui, mcl, st, sec=35)
@@ -1708,13 +1784,26 @@ def test_a_swipe_away_and_back_keeps_the_hold_and_a_new_song_starts_at_the_top(f
     assert st.lyric_held == 1
     ui.ints[lyr.slide, b'value'] = 2  # the info page
     lyr.sec = 55  # the song goes on meanwhile
-    lyr.poll(10, ms=250)
+    lyr.poll(10, ms=100)  # back within LYRIC_RESUME_MS of the turn
     assert st.lyric_held == 1 and fw.var('wheel_raw', C.c_int).value == 0
     ui.ints[lyr.slide, b'value'] = 1
     assert lyr.settle() == held != centre(5)  # where the wheel left them, not the playing line
     mcl.pos = 4
     lyr.poll(1)
     assert st.lyric_held == 0 and lyr.y() < centre(3)  # the next song's lyrics from the top
+
+
+def test_a_rest_away_on_another_page_counts_and_they_come_back_following(fw, ui, mcl, st, wheel):
+    theme(fw, st)
+    lyr = Lyrics(fw, ui, mcl, st, sec=35)
+    lyr.settle()
+    t0 = hold_by_wheel(lyr, wheel)
+    ui.ints[lyr.slide, b'value'] = 0  # the art page for longer than the rest
+    lyr.sec = 55
+    rest(lyr, t0 + RESUME, ms=250)
+    assert st.lyric_held == 0 and lyr.y() == centre(5)  # off the page the follow jumps
+    ui.ints[lyr.slide, b'value'] = 1
+    assert lyr.settle() == centre(5)
 
 
 @pytest.mark.parametrize('end', ['gone', 'replaced'])
@@ -1781,8 +1870,8 @@ def tap_line(ui, lyr, y):
 def test_full_screen_lyrics_end_with_a_swipe_or_off_their_page(fw, ui, mcl, st, end):
     theme(fw, st)
     lyr = Lyrics(fw, ui, mcl, st, sec=35)
-    tap(ui, lyr.lyric, O['EVT_POINTER_DOWN'], 100, 100)
-    tap(ui, lyr.lyric, O['EVT_POINTER_UP_BEFORE'], 100, 100)
+    tap(ui, lyr.lyric, O['EVT_POINTER_DOWN'], 100, 50)  # the blank slot over the first line
+    tap(ui, lyr.lyric, O['EVT_POINTER_UP_BEFORE'], 100, 50)
     assert st.np_full == 2  # over the whole window
     tap_px = NAV['TAP_PX']
     if end == 'far':  # a lift far off, with no move between, is no tap
@@ -1823,8 +1912,8 @@ def test_a_tap_takes_the_lyrics_over_the_whole_window_and_back(fw, ui, mcl, st):
     view, (_, _, win_w, win_h) = ui.parent(lyr.lrc), ui.box(lyr.win)
     col, slide, dots, lines = ui.box(lyr.col), ui.box(lyr.slide), ui.box(lyr.dots), ui.box(view)
     at = ui.kids[lyr.win].index(lyr.col)
-    tap(ui, lyr.lyric, O['EVT_POINTER_DOWN'], 100, 100)
-    assert tap(ui, lyr.lyric, O['EVT_POINTER_UP_BEFORE'], 108, 95) == [0]
+    tap(ui, lyr.lyric, O['EVT_POINTER_DOWN'], 100, 50)  # the blank slot over the first line
+    assert tap(ui, lyr.lyric, O['EVT_POINTER_UP_BEFORE'], 108, 45) == [0]
     assert ui.box(lyr.col) == (0, 0, win_w, win_h) and st.np_full == 2  # 2: over the whole window, which the way back keeps
     assert ui.prop(lyr.col, b'style:normal:bg_color') == b'#000000'
     foot = ui.box(lyr.slide)[3]  # the pages down to the dots
@@ -1840,6 +1929,72 @@ def test_a_tap_takes_the_lyrics_over_the_whole_window_and_back(fw, ui, mcl, st):
     assert places[2:] == [(lyr.dots, '0', str(dots[1]), '100%', str(dots[3])),
                           (view, '0', str(lines[1]), '100%', str(lines[3]))]  # both self_layouts their old place
     assert [a[1] for _, a in fw.calls('widget_restack')] == [len(ui.kids[lyr.win]), at]
+
+
+def row_y(line):
+    """The middle of line's row in scroll_lrc's content (one-row lines, ROW apart after a blank SLOT); a tap hits it
+    only while it is in the 178 px view."""
+    return SLOT + ROW * line + ROW // 2
+
+
+@pytest.mark.parametrize('status, expect', [(2, [40]), (3, [('set', 40)])])
+def test_a_tap_on_a_timed_line_seeks_to_its_start_and_the_view_goes_there(fw, ui, mcl, st, status, expect):
+    theme(fw, st)
+    lyr = Lyrics(fw, ui, mcl, st, sec=35, status=status)
+    lyr.settle()
+    assert tap_line(ui, lyr, row_y(4)) == [0]  # the line under the playing one
+    assert lyr.seeks() == expect and st.np_full == 0  # line 4's 40 s: playing at once, paused on Play
+    assert lyr.value() == 40 and st.lyric_held == 0
+    assert lyr.settle() == centre(4)  # before the player reports it: the tapped line, lit as it starts
+    lyr.sec = 40
+    assert lyr.settle() == centre(4) and st.lyric_seek == 0
+    lyr.sec = 55
+    assert lyr.settle() == centre(5)  # following on from there
+
+
+def test_a_tap_off_the_playing_line_seeks_from_a_held_view_too(fw, ui, mcl, st, wheel):
+    theme(fw, st)
+    lyr = Lyrics(fw, ui, mcl, st, sec=35)
+    lyr.settle()
+    hold_by_wheel(lyr, wheel, ticks=4)
+    at = lyr.settle()  # four rows on: line 3, playing, out of view
+    assert at > row_y(3) and at <= row_y(7) - ROW // 2
+    tap_line(ui, lyr, row_y(7))
+    assert lyr.seeks() == [70] and st.lyric_held == 0
+    assert lyr.settle() == centre(7)
+
+
+def test_a_tap_on_the_playing_line_still_takes_them_full_screen(fw, ui, mcl, st):
+    theme(fw, st)
+    lyr = Lyrics(fw, ui, mcl, st, sec=35)
+    lyr.settle()
+    tap_line(ui, lyr, row_y(3))
+    assert lyr.seeks() == [] and st.np_full == 2
+
+
+@pytest.mark.parametrize('end', ['drag', 'far'])
+def test_a_drag_of_the_lines_seeks_nowhere(fw, ui, mcl, st, end):
+    theme(fw, st)
+    lyr = Lyrics(fw, ui, mcl, st, sec=35)
+    lyr.settle()
+    at = ui.screen(lyr.lrc)[1] - lyr.y() + row_y(4)
+    tap(ui, lyr.lyric, O['EVT_POINTER_DOWN'], 100, at)
+    if end == 'drag':  # scroll_lrc takes the drag: its abort, then the lift where it came down
+        tap(ui, lyr.lyric, O['EVT_POINTER_ABORT'], 100, at - NAV['TAP_PX'] - 1)
+        tap(ui, lyr.lyric, O['EVT_POINTER_UP_BEFORE'], 100, at)
+    else:  # lifted over another line, past TAP_PX
+        tap(ui, lyr.lyric, O['EVT_POINTER_UP_BEFORE'], 100, at + ROW)
+    assert lyr.seeks() == [] and st.np_full == 0
+
+
+@pytest.mark.parametrize('case', ['untimed', 'stopped'])
+def test_untimed_lyrics_or_a_stopped_player_take_a_tap_full_screen_as_before(fw, ui, mcl, st, case):
+    theme(fw, st)
+    lines = [(f'Line {i}', LRC_FAR_SEC) for i in range(12)] if case == 'untimed' else LINES
+    lyr = Lyrics(fw, ui, mcl, st, sec=35, lyrics=lines, status=1 if case == 'stopped' else 2)
+    lyr.settle()
+    tap_line(ui, lyr, row_y(4))
+    assert lyr.seeks() == [] and st.np_full == 2
 
 
 # Smart Awake (keep_lit_poll): Now Playing off its art page, a song playing, holds the screen on.

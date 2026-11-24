@@ -46,10 +46,13 @@ static int scrub_expire(const void *info) {
 /* The lyrics: stock's 250 ms timer scrolls scroll_lrc to the current line whenever it is elsewhere.
  * Once the wheel or a finger moves them they stay (ringnav_lyric_follow), while the timer keeps the
  * bar and the highlight going, until Now Playing goes or another song starts, a swipe to another
- * page and back included. A scrub under way ends first. */
+ * page and back included; timed lyrics go back to following once LYRIC_RESUME_MS pass with no
+ * wheel or touch on them, on their page or off it (lyric_poll). A scrub under way ends first. */
+#define LYRIC_RESUME_MS 5000
 static void lyric_hold(void) {
     scrub_end();
     st.lyric_held = 1;
+    st.lyric_held_at = (unsigned)time_now_ms();
 }
 
 /* The glide's step, every UI pass: a dt / (dt + LYRIC_EASE_MS) share of the way left, at least a
@@ -91,9 +94,10 @@ static void lyric_snap(void *lrc) {
  * to the nearest row top (lyric_snap). A finger that came down on the lyrics and dragged them holds
  * them as the wheel does; stock's scroll animation stops as it lands, so only the finger moves
  * them, and a swipe that brings the page in holds nothing. A swipe to another page and back keeps
- * the hold; leaving Now Playing drops it (np_gone). Another song starts at the top, its hold
- * gone. The lyrics page's rows are its lines, a tick's worth a one-row line's height
- * (lyrics_row_h), so a tick lands on a row top. */
+ * the hold; leaving Now Playing drops it (np_gone), and so do LYRIC_RESUME_MS with no wheel or
+ * touch on timed lyrics. Another song starts at the top, its hold gone. The lyrics page's rows are
+ * its lines, a tick's worth a one-row line's height (lyrics_row_h), so a tick lands on a row top.
+ */
 #define LYRIC_ROW_PX 20
 
 /* Now Playing's lyrics are the lyrics page's (lyrics.c): the rows full width after a blank
@@ -108,7 +112,27 @@ static void lyric_init(void) {
  * gliding there while the page shows, else jumping, unless the wheel or a finger holds them or a
  * finger is on the screen. Its rows repaint while it is in front (front) and lit. */
 #define LYRIC_FOLLOW_MS 250
+/* A tap's seek to a line (np_lyric_line) goes by whole seconds and the player reports it a poll or
+ * two later, so until then the follow takes the tapped line's start, lyric_seek - 1, for the
+ * position: the view goes straight to that line, not back to the one playing before. It ends once
+ * the player is at the line or past its start, or after LYRIC_SEEK_MS of playing without getting
+ * there; paused, it waits for Play, as the bar does (settle_poll). ponytail: a tapped line that
+ * started under LYRIC_SEEK_MS before the position counts as reached at once, so the old line shows
+ * until the player gets there; a second from before the seek would tell the two apart. */
+#define LYRIC_SEEK_MS 2000
+static int lyric_seek_ms(int ms) {
+    if (!st.lyric_seek) return ms;
+    int to = st.lyric_seek - 1, sec = to / 1000 * 1000;
+    unsigned now = (unsigned)time_now_ms();
+    if (mclGetPlayStatus() != 2) st.lyric_seek_at = now;
+    if ((ms >= to && ms < sec + LYRIC_SEEK_MS) || now - st.lyric_seek_at >= LYRIC_SEEK_MS) {
+        st.lyric_seek = 0;
+        return ms;
+    }
+    return to;
+}
 static void lyric_follow(void *lrc, int ms, int front, int shown) {
+    ms = lyric_seek_ms(ms);
     int line = lyrics_line(lrc, ms, front), to = lyric_centre(lrc, line > 0 ? line : 0);
     if (to < 0) to = 0;
     if (st.lyric_held || st.lyric_spun == 2 || pointer_down())
@@ -273,6 +297,17 @@ static void lyric_poll(void) {
     } else if (shown && st.lyric_spun && !wheel_held) {
         st.lyric_spun = 0;
         lyric_snap(lrc);
+    }
+    /* A hold on timed lyrics lasts LYRIC_RESUME_MS past the last wheel travel or touch on them, a
+     * finger resting on the wheel or on the page counting as one; then the follow takes them back
+     * to the playing line and goes on with it. Untimed lyrics have no playing line and stock's
+     * rows (lyrics_on 0) no table to say so: both stay where they were left. */
+    if (st.lyric_held) {
+        unsigned at = (unsigned)time_now_ms();
+        if ((on && wheel_held) || st.lyric_touch == 1)
+            st.lyric_held_at = at;
+        else if (at - st.lyric_held_at >= LYRIC_RESUME_MS && lyrics_timed(lrc))
+            st.lyric_held = 0;
     }
     /* The page in front and usable (lit): the clock and the follow every pass (it narrows on each
      * second's change, lyrics_now). Else the follow, which only jumps, at stock's timer's pace on
@@ -562,11 +597,48 @@ static void np_art_poll(void) {
     widget_invalidate_force(st.np_cover, (void *)0);
 }
 
+/* A tap at the screen's (x, y) on a timed line of the lyrics page that is not the playing one:
+ * the playing track goes to that line's start, its whole second, as a chapter row's pick seeks
+ * (chapter_pick): playing it plays on from there, paused it goes there on Play (scrub_end,
+ * seek_position), and the bar shows the target until the player has it (settle_poll), as the bar's
+ * own scrub does for the same songs: Now Playing shows only the Library's player (now_source.c), a
+ * card file or a stream it reads (a card app's or a URL queue's); Spotify, the radios and videos
+ * have pages of their own and no lyrics page. A Library held for one of those (now_hold) is
+ * stopped, and a stopped player takes no seek. The hold drops, so the follow goes to the line (lyric_seek_ms).
+ * 1 when it seeked. */
+static int np_lyric_line(int x, int y) {
+    void *lrc = st.np_lrc;
+    int xy[2] = { x, y }, status = mclGetPlayStatus(), ms = -1;
+    if (!st.np_win || !lyrics_on(lrc) || (status != 2 && status != 3)) return 0;
+    widget_to_local(lrc, xy); /* the content's: its scroll counted */
+    if (xy[0] < 0 || xy[0] >= I(lrc, W_W) || xy[1] < I(lrc, SCROLL_Y) ||
+        xy[1] >= I(lrc, SCROLL_Y) + I(lrc, W_H))
+        return 0;
+    for (int i = 0, n = widget_count_children(lrc); i < n; ++i) {
+        void *row = widget_get_child(lrc, i);
+        if (xy[1] >= I(row, W_Y) && xy[1] < I(row, W_Y) + I(row, W_H)) ms = lyrics_row_ms(lrc, i);
+    }
+    if (ms < 0) return 0;
+    st.rs_pending = 0; /* no resume after it, as after a chapter's pick */
+    st.rs_go_key = 0;
+    st.scrub_track = np_track();
+    st.scrub_to = ms / 1000;
+    st.scrub = st.scrub_moved = 1;
+    playing_timer_clear(st.np_win);
+    if (st.np_slider) widget_set_prop_int(st.np_slider, "value", st.scrub_to);
+    if (st.np_elapsed) clock_text(st.np_elapsed, 0, st.scrub_to);
+    scrub_end();
+    st.lyric_held = 0;
+    st.lyric_seek = ms + 1, st.lyric_seek_at = (unsigned)time_now_ms();
+    return 1;
+}
+
 /* Now Playing's lyrics page (ringnav_playing): a touch that lifts within TAP_PX of where it came
- * down, so neither a swipe nor a drag of the lines, switches them to full screen and back
- * (np_full), once there are lyrics to show. The slide_view or scroll_lrc taking the touch (its
- * abort) ends full screen at once, so the pages slide in their column. Returns 0: a STOP would
- * keep the slide_view's grab (rate_fav_click). */
+ * down, so neither a swipe nor a drag of the lines, on a timed line other than the playing one
+ * seeks to it (np_lyric_line); any other, once there are lyrics to show, switches them to full
+ * screen and back (np_full). The slide_view or scroll_lrc taking the touch (its abort) ends full
+ * screen at once, so the pages slide in their column. Returns 0: a STOP would keep the
+ * slide_view's grab (rate_fav_click). */
 static int np_lyric_touch(void *ctx, void *event) {
     int type = I(event, EVENT_TYPE), x = I(event, EVENT_X), y = I(event, EVENT_Y);
     int tap = (unsigned)(x - st.np_tap_x + TAP_PX) <= 2 * TAP_PX &&
@@ -578,7 +650,7 @@ static int np_lyric_touch(void *ctx, void *event) {
     st.np_tap_x = 1 << 20; /* used or taken for a swipe: a later lift is no tap */
     if (type == EVT_POINTER_ABORT) {
         if (st.np_full) np_full(0);
-    } else if (tap && (st.np_full || lyrics_on(st.np_lrc)))
+    } else if (tap && !np_lyric_line(x, y) && (st.np_full || lyrics_on(st.np_lrc)))
         np_full(!st.np_full);
     return 0;
 }
