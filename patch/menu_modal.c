@@ -82,6 +82,8 @@ static struct {
     void *win, *list, *view;
     int top, high; /* the rows' box on screen, at rest */
     int ly, off;   /* the list's place in the window at rest, and how far the motion has it lower */
+    int head_y; /* the header's space's place in the rows: 0 unless rows stand above it (Up Next's)
+                 */
     head_t head;
 } modals[MODAL_MAX] __attribute__((section(".scratch")));
 static head_t head_next __attribute__((section(".scratch"))); /* modal_head's, for the next frame */
@@ -422,12 +424,13 @@ int modal_is_red(void *row) { return row && widget_get_prop_int(row, MM_RED, 0);
 static int modal_lit(const void *unused);
 /* An open dialog as the sheet: its title bar gone, its list the sheet's rows, the page under it
  * receding (modal_paint). The header's space (MM_HEAD) heads the rows when the modal has a header
- * (modal_head; a picker over another modal takes that one's), so it scrolls away with them; with
- * none the rows start where a page's do. Rows are stacked as they stand, a gap's 12 px included
- * (none when there are more than MODAL_ROWS rows, so the rows scroll, and end, on whole rows), each
- * row MODAL_ROW high and the screen's width. The list runs to the screen's foot, its content
- * padded by what lies past the list end, so the wheel's and a drag's last row both end on it
- * (navigation.c list_pad). The list's forced row height and default go, so the gaps keep theirs
+ * (modal_head; a picker over another modal takes that one's), so it scrolls away with them, and the
+ * header is painted where the space stands (head_y: Up Next lists a shuffle's played rows above
+ * it); with none the rows start where a page's do. Rows are stacked as they stand, a gap's 12 px
+ * included (none when there are more than MODAL_ROWS rows, so the rows scroll, and end, on whole
+ * rows), each row MODAL_ROW high and the screen's width. The list runs to the screen's foot, its
+ * content padded by what lies past the list end, so the wheel's and a drag's last row both end on
+ * it (navigation.c list_pad). The list's forced row height and default go, so the gaps keep theirs
  * (ipod_list_layout stacks each child by its own) and the list never reads as a settings list
  * (navigation.c settings_list), which would move it. A dialog with no list (a playlist's More) has
  * its list_items for rows, placed in it the same way. */
@@ -503,6 +506,7 @@ void modal_frame(void *win, void *list) {
     }
     modals[k].win = win, modals[k].list = list, modals[k].view = view;
     modals[k].top = top + wy, modals[k].high = y, modals[k].ly = top;
+    modals[k].head_y = space ? I(space, W_Y) : 0;
     modals[k].off = 0; /* laid out at rest: the motion's drop again */
     sheet_shift(k, mo_off());
     st.touch_mode = 0; /* opens on its row, lit, however it was asked for */
@@ -823,8 +827,9 @@ void modal_after(void *w, void *canvas) {
         ++i;
     if (i == MODAL_MAX || !P(canvas, CANVAS_LCD)) return;
     const head_t *h = &modals[i].head;
-    int scroll = modals[i].list ? I(w, SCROLL_Y) : 0, top = modals[i].top - scroll + modals[i].off,
-        ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), light = ipod_light(), c[4];
+    int scroll = modals[i].list ? I(w, SCROLL_Y) : 0,
+        top = modals[i].top - scroll + modals[i].head_y + modals[i].off, ox = I(canvas, CANVAS_X),
+        oy = I(canvas, CANVAS_Y), light = ipod_light(), c[4];
     unsigned *fb = sheet_fb(canvas);
     sheet_clip(canvas, c);
     /* only within the rows' box: the canvas's clip may be the window's */

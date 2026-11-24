@@ -769,3 +769,65 @@ def test_the_playing_song_is_never_removed(fw, plain):
     queue, page = plain
     before = queue.names()
     assert remove(fw, 2) == 0 and queue.names() == before
+
+
+# Under a shuffle: what played above the playing song, the list opening on it.
+def header(page):
+    return next(i for i, w in enumerate(page.kids()) if page.names.get(w) == b'_mm_head')
+
+
+def no_artists(queue):
+    """No artists: the header reads the playing song's album, whose cell an artist fills here."""
+    for r in queue.records:
+        C.c_uint.from_address(r + O['REC_ARTIST']).value = 0
+
+
+def test_a_shuffle_lists_what_played_above_the_playing_song_and_opens_on_it(fw, up):
+    queue, page = up
+    no_artists(queue)
+    before = queue.name(queue.mcl.pos)
+    then = queue.played(3)
+    page.open()
+    kids, at = page.kids(), header(page)
+    assert at == 3 and [page.props[(w, b'_un_title')] for w in kids[:at + 1]] == [before] + then  # oldest first
+    assert page.stops[:3] == [before] + then[:2] and page.captions[3:] == queue.played(4)
+    (view, x, y), = [a[:3] for _, a in fw.calls('scroll_view_set_offset')]
+    assert view == page.view and y == page.box(kids[at])[1] == 3 * 46  # the playing song at the list's top
+    assert page.selected()[0] == 3  # the first song to come, under it
+
+
+def test_previous_plays_the_row_above_and_next_the_row_below(fw, up):
+    queue, page = up
+    no_artists(queue)
+    queue.played(2)
+    page.open()
+    above, below = page.stops[1], page.captions[2]
+    assert fw.fn('ringnav_prev', C.c_int)() >= 0 and queue.name(queue.mcl.pos) == above
+    page.run(1000)  # the poll: the rows taken again round the song now playing
+    assert page.props[(page.kids()[header(page)], b'_un_title')] == above and page.captions[1] == page.stops[1]
+    nxt = page.stops[page.selected()[0]]
+    assert fw.fn('ringnav_next', C.c_int, C.c_int)(0) >= 0 and queue.name(queue.mcl.pos) == nxt
+
+
+def test_a_played_row_pressed_plays_it_again(fw, up):
+    queue, page = up
+    no_artists(queue)
+    first = queue.name(queue.mcl.pos)
+    queue.played(2)
+    page.open()
+    assert page.tap(0) == 0
+    (at, *_), = [a for _, a in fw.calls('player_start_queue')]
+    assert queue.name(at) == first and fw.calls('navigator_back')
+
+
+def test_a_new_order_lists_nothing_above_the_playing_song(fw, up):
+    queue, page = up
+    page.open()
+    assert header(page) == 0 and not fw.calls('scroll_view_set_offset')
+
+
+def test_outside_a_shuffle_nothing_is_listed_above_the_playing_song(fw, plain):
+    queue, page = plain
+    fw.fn('ringnav_next', C.c_int, C.c_int)(1)
+    page.open()
+    assert header(page) == 0 and not fw.calls('scroll_view_set_offset')

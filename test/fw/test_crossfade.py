@@ -324,6 +324,26 @@ def test_a_draw_on_a_queue_that_changed_is_not_forced(fw, fade):
     assert fw.fn('playback_peek', C.c_int, C.c_uint)(0) == -1
 
 
+@pytest.mark.parametrize('shuffle, albums, want', [
+    (0, 'AAB', 0), (0, 'ABA', SMART),  # Shuffle off: an album's next stays gapless, another album's fades
+    (1, 'AAAA', SMART), (1, 'ABCD', SMART),  # Shuffle on: every change fades, the same album's too
+])
+def test_only_a_shuffle_fades_within_an_album(fw, fade, shuffle, albums, want):
+    """Stock Shuffle on a local queue is played as an order (playback.c shuffle_own), so its next is known: it still
+    fades whatever the album, even into the track after it, and the next file names that real next song."""
+    fade.load(*albums)
+    fade.mcl.type, fade.mcl.mode = LIBRARY, 2 if shuffle else 0
+    assert fade.fade(0) == want
+    s = fw.var('playback__s', C.c_int * 2)
+    assert list(s) == ([1, 1] if shuffle else [0, 0])  # active, shuffle: stock Shuffle taken as Shuffle Songs
+    if shuffle:
+        out = (C.c_uint * 8)()
+        nxt = out[:fw.fn('playback_upcoming', C.c_uint, C.POINTER(C.c_uint), C.c_uint)(out, 8)][0]
+        assert fade.shared.text[NEXT_FILE] == '/m/%s/0.flac\n/m/%s/%d.flac\n' % (albums[0], albums[nxt], nxt)
+        fw.fn('ringnav_next', C.c_int, C.c_int)(1)
+        assert fade.mcl.pos == nxt  # the song the player was told of is the one that plays
+
+
 def test_a_dsd_draw_asks_no_fade(fw, fade):
     shuffled(fade, [0, 1], 'AB')
     assert fade.fade() == SMART and fw.fn('playback_peek', C.c_int, C.c_uint)(0) == 1  # the one other track

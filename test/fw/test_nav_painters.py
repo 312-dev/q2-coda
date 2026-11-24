@@ -3833,3 +3833,24 @@ def test_a_neutral_stock_confirm_opens_on_its_verb_the_rest_on_cancel(fw, st, pr
     fw.mock('widget_get_text_utf8', utf8)
     confirm.paint()
     assert confirm.win.props.get('_ringnav_index') == selected
+
+
+def test_a_sheets_header_is_painted_where_its_space_stands(fw, st):
+    """Up Next lists a shuffle's played rows above the playing song's header (upnext.c), so the header's space is not
+    the rows' first: scrolled to it, the header paints at the list's top just as one at the head of the rows does
+    unscrolled, and scrolled back to the start it is that many rows lower."""
+    def title_y(above, scroll):
+        ui, win, view, canvas, buf = sheet(fw, st, rows=0)  # its header's space made, the rows' only child
+        space = view.children[0]
+        rows = [ui.add('list_item', view, (0, 0, 375, 32)) for _ in range(above + 6)]
+        view.children[:] = rows[:above] + [space] + rows[above:]
+        fw.fn('modal_head', None, C.c_char_p, C.c_char_p, C.c_void_p)(b'Time', b'Pink Floyd', None)
+        fw.fn('modal_frame', None, C.c_void_p, C.c_void_p)(win.addr, view.parent.addr)
+        C.c_int.from_address(view.addr + O['SCROLL_Y']).value = C.c_int.from_address(space.addr + O['W_Y']).value if scroll else 0
+        canvas.texts.clear()
+        fw.fn('modal_after', None, C.c_void_p, C.c_void_p)(view.addr, canvas.addr)
+        return [r[1] for t, r, _ in canvas.texts if t == 'Time']
+    at_head = title_y(0, False)
+    assert at_head and title_y(3, True) == at_head
+    lower = title_y(1, False)
+    assert lower and lower[0] > at_head[0]

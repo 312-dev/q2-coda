@@ -3092,3 +3092,144 @@ def test_a_tracks_start_sends_its_folders_speed(saved, fw):
     saved.mcl.pos = 1
     start()
     assert [a[0] for _, a in fw.calls('stock_speed_trampoline')] == [3, 0]  # the decoder keeps the last otherwise
+
+
+# Stock Shuffle as an order: the one Up Next lists, the car shows and Crossfade looks ahead to is the one that plays.
+def stock_shuffle(player, n=8, pos=2, seed=0x2545f491):
+    """A library queue under stock Shuffle (MCL_MODE 2), taken on the next UI pass (playback.c shuffle_own)."""
+    player.load(player.albums(n), pos)
+    player.mcl.type, player.mcl.mode = LIBRARY, 2
+    player.rng(seed)
+    player.fw.fn('playback_poll', None)()
+    return player
+
+
+def played(player, limit=200):
+    out = (C.c_uint * limit)()
+    return list(out[:player.fw.fn('playback_played', C.c_uint, C.POINTER(C.c_uint), C.c_uint)(out, limit)])
+
+
+def test_stock_shuffle_is_an_order_from_the_next_ui_pass(player):
+    stock_shuffle(player)
+    assert (player.s.active, player.s.shuffle, player.s.repeat) == (1, 1, REPEAT_ALL)
+    coming = player.up_next(64)
+    assert len(coming) == 7 + 8 and player.s.order[player.s.cursor].index == 2  # this pass, then the next one whole
+    assert player.run(15) == coming  # every automatic next is the row below, into the next pass too
+    assert played(player, 64) == [2] + coming[:14]
+
+
+def test_the_rows_above_are_what_previous_plays_and_next_comes_back_down(fw, player):
+    stock_shuffle(player)
+    coming = player.up_next()
+    player.run(4)
+    assert played(player) == [2] + coming[:3] and player.mcl.pos == coming[3]
+    for back in reversed([2] + coming[:3]):
+        assert player.prev() >= 0 and player.mcl.pos == back
+    assert played(player) == [] and player.up_next()[:4] == coming[:4]
+    assert [player.next(0) >= 0 and player.mcl.pos for _ in range(4)] == coming[:4]  # manual Next, row by row
+
+
+def test_up_next_lists_no_played_rows_outside_a_shuffle(player):
+    plan(player, [0, 1, 2, 3])
+    player.run(2)
+    assert played(player) == []
+
+
+def test_played_rows_stop_at_their_limit_oldest_gone(player):
+    stock_shuffle(player, n=4)
+    player.run(60)
+    assert len(played(player, 1000)) == 60 and played(player, 10) == played(player, 1000)[-10:]
+
+
+def test_a_queue_taken_once_is_not_drawn_again_each_pass(fw, player):
+    stock_shuffle(player)
+    order = player.order()
+    fw.fn('playback_poll', None)()
+    assert player.s.active == 1 and player.order() == order
+
+
+@pytest.mark.parametrize('kind', [2, 0xf1, 0xf2])  # DLNA, the online queues
+def test_a_dlna_or_online_queue_keeps_stocks_shuffle(fw, player, kind):
+    player.load(player.albums(4), 0)
+    player.mcl.type, player.mcl.mode = kind, 2
+    fw.fn('playback_poll', None)()
+    assert player.s.active == 0
+
+
+def test_a_queue_that_could_not_be_taken_is_not_tried_each_pass(fw, player):
+    """A queue past advanced play's limit (QUEUE_LIMIT) keeps stock's shuffle, marked tried (own_tried) so no pass
+    rebuilds it again; a mode chosen clears the mark."""
+    player.load([0] * 65537, 0)
+    player.mcl.type, player.mcl.mode = LIBRARY, 2
+    tried, poll = fw.var('playback__own_tried', C.c_uint), fw.fn('playback_poll', None)
+    poll()
+    assert player.s.active == 0 and tried.value
+    mark = tried.value
+    poll()
+    assert tried.value == mark
+    fw.mock('stock_mode_trampoline', lambda mode, *_: 0)
+    fw.fn('ringnav_mode', C.c_int, C.c_int)(2)  # Shuffle chosen again: tried again
+    assert tried.value == 0
+    player.load(player.albums(4), 0)
+    poll()
+    assert player.s.active == 1 and tried.value == 0
+
+
+def test_shuffle_off_plays_the_queue_on_from_the_song_and_on_again_draws_anew(fw, player):
+    stock_shuffle(player)
+    player.run(3)
+    at = player.mcl.pos
+    fw.mock('stock_mode_trampoline', lambda mode, *_: setattr(player.mcl, 'mode', mode) or 0)
+    mode = fw.fn('ringnav_mode', C.c_int, C.c_int)
+    mode(0)
+    assert player.s.active == 0 and player.mcl.pos == at and player.up_next() == list(range(at + 1, 8))
+    assert played(player) == []
+    mode(2)
+    fw.fn('playback_poll', None)()
+    assert player.s.active == 1 and player.s.order[player.s.cursor].index == at and played(player) == []
+    assert sorted(player.up_next()[:7]) == sorted(set(range(8)) - {at})
+
+
+def put_in(fw, player, rows, next_):
+    """Rows put in as the hold menu's Play Next (1), Play Last (2) or an app (0), stock's shuffle pool alongside."""
+    pool = player.deques.new()
+    C.c_uint64.from_address(O['MCL_POOL']).value = pool
+    fw.mock('fw__deque_push_back', lambda q, v, *_: player.deques[q].append(v))
+    fw.mock('fw_deque_at', lambda q, i, *_: player.deques[q][i] if q != pool else C.addressof(C.c_int(0)))
+    add = player.deques.new(rows)
+    return fw.fn('playback_queue_insert', C.c_uint, C.c_void_p, C.c_void_p, C.c_int)(player.handle, add, next_)
+
+
+@pytest.mark.parametrize('next_', [1, 2, 0])
+def test_a_song_put_in_under_a_shuffle_leaves_the_rest_of_the_order_as_it_was(fw, player, next_):
+    """Play Next lands right below the playing song; Play Last too, after any Playing Next (the end of the pending
+    list); an app's song after the rest of this pass. The order already listed stays as it was in each."""
+    stock_shuffle(player)
+    coming = player.up_next()
+    at = put_in(fw, player, [player.song(b'/m/new.flac', b'Z')], next_)
+    moved = [i + (i >= at) for i in coming]
+    new = player.up_next()
+    if next_:
+        assert new[0] == at and new[1:8] == moved[:7]
+    else:
+        assert new[:8] == moved[:7] + [at]
+
+
+def test_play_last_goes_after_playing_next(fw, player):
+    stock_shuffle(player)
+    coming = player.up_next()
+    first = put_in(fw, player, [player.song(b'/m/one.flac', b'Y')], 1)
+    last = put_in(fw, player, [player.song(b'/m/two.flac', b'Z')], 2)
+    assert player.pending() == [first, last] and player.up_next()[:2] == [first, last]
+    assert player.up_next()[2:9] == [i + (i >= first) for i in coming][:7]
+
+
+def test_a_song_taken_out_under_a_shuffle_leaves_the_rest_of_the_order(fw, player):
+    stock_shuffle(player)
+    fw.fn('playback_poll', None)()  # the UI thread's, which follow_queue takes edits on
+    coming, rows = player.up_next(), player.deques[player.handle]
+    assert len(coming) == 15
+    gone = 7  # after the playing song's row (2), which keeps its index as stock's position does
+    del rows[gone]
+    fw.fn('playback_poll', None)()
+    assert player.up_next()[:6] == [i for i in coming[:7] if i != gone]
