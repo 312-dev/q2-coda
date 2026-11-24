@@ -408,7 +408,7 @@ def test_artists_default_to_album_artist(fw):
 
 
 @pytest.mark.parametrize('values, home, light', [
-    ({}, 0, 0), (dict(HOME=b'2', LIGHT=b'1'), 2, 1), (dict(HOME=b'3', LIGHT=b'3'), 0, 0),
+    ({}, 0, 0), (dict(HOME=b'1', LIGHT=b'1'), 1, 1), (dict(HOME=b'2', LIGHT=b'1'), 0, 1), (dict(HOME=b'3', LIGHT=b'3'), 0, 0),
 ])
 def test_display_settings(fw, clock, values, home, light):
     Config(fw, **values)
@@ -439,9 +439,9 @@ def test_a_unit_on_a_retired_theme_takes_oled_s_preset_once(fw, clock, theme):
 
 
 def test_a_unit_on_oled_keeps_its_choices(fw, clock):
-    Config(fw, THEME=b'3', HOME=b'2', LIGHT=b'1')
+    Config(fw, THEME=b'3', HOME=b'1', LIGHT=b'1')
     assert boot(fw) == []
-    assert (fw.fn('ipod_home', C.c_int)(), fw.fn('ipod_light', C.c_int)()) == (2, 1)
+    assert (fw.fn('ipod_home', C.c_int)(), fw.fn('ipod_light', C.c_int)()) == (1, 1)
 
 
 def test_the_preset_keeps_light_mode_s_auto(fw, clock):

@@ -1,5 +1,5 @@
 static void setting_text(int i) {
-    static const char *const home[] = { "Home: Split", "Home: Full", "Home: Carousel" },
+    static const char *const home[] = { "Home: Split", "Home: Full" },
                              *const battery[] = { "Battery: Icon", "Battery: Percent",
                                                   "Battery: Icon + Percent",
                                                   "Battery: Percent Inside" },
