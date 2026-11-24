@@ -302,9 +302,10 @@ static void usb_case(const char *name, int song_rate, int ch, int bytes) {
 }
 
 /* A click with nothing playing on `way` (engine.c click_session): a PCM opened for it at 48 kHz, or a paused song's
- * taken (output_hold, after 2000 frames of it written), with link frames of delay after the ring; the click and ten of
- * the session's fills, no time passing. The frames in the ring and the loudest sample: IDLE_AHEAD_MS of silence (3840
- * frames at 48 kHz) with the click in it. */
+ * taken (output_hold, after 2000 frames of it written; paused 2: opened for the click with nothing written, as a
+ * song paused on Bluetooth has its PCM opened again after BT_PAUSE_MS closed it), with link frames of delay after the
+ * ring; the click and ten of the session's fills, no time passing. The frames in the ring and the loudest sample:
+ * IDLE_AHEAD_MS of silence (3840 frames at 48 kHz) with the click in it. */
 static void idle_case(const char *name, int way, long link, int paused) {
     struct pcm_format f = {0};
     f.rate = 48000, f.channels = 2, f.bytes = 2;
@@ -314,11 +315,8 @@ static void idle_case(const char *name, int way, long link, int paused) {
     struct output *o = output_open(&f, way, 17);
     if (!o) { printf("%s open-failed\n", name); return; }
     counting = 1, queued = loudest = 0, link_frames = link;
-    if (paused) {
-        output_write(o, (const uint8_t *)song, 2000);
-        output_pause(o, 1);
-        output_hold(o);
-    }
+    if (paused == 1) output_write(o, (const uint8_t *)song, 2000), output_pause(o, 1);
+    if (paused) output_hold(o);
     output_idle_click(o, CLICK_WHEEL);
     for (int i = 0; i < 10; ++i) output_idle_fill(o);
     printf("%s queued %ld loudest %ld\n", name, queued, loudest);
@@ -342,6 +340,7 @@ int main(int argc, char **argv) {
     if (argc > 1 && !strcmp(argv[1], "idle")) { /* run.py test_click_idle_alsa */
         idle_case("bt-stopped", 1, 13440, 0);  /* the Pixel Buds: 280 ms of Delay at 48 kHz */
         idle_case("bt-paused", 1, 13440, 1);
+        idle_case("bt-reopened", 1, 13440, 2); /* a paused song's PCM opened again for the click */
         idle_case("dac-stopped", 0, 0, 0);     /* the headphone DAC: nothing after the ring */
         idle_case("dac-paused", 0, 0, 1);
         return 0;
