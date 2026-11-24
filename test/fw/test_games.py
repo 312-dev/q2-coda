@@ -1898,11 +1898,11 @@ def card_apps(fw, apps):
     return {f'/mnt/mmc/.{k}/q2app': v for k, v in apps.items()}
 
 
-SHIPPED = ['Bricks']  # the build's games (peq.h GAME_*, engine.c eng_games[]): the owner's, 2026-11-22
+SHIPPED = ['Pop Stall']  # the build's games (peq.h GAME_*, engine.c eng_games[])
 
 
-def test_the_build_ships_bricks_alone(fw):
-    """The owner, 2026-11-22: Games lists Bricks alone in this build, its own Sudoku, Vortex, Solitaire and Snake
+def test_the_build_ships_pop_stall_alone(fw):
+    """Games lists Pop Stall alone in this build, its own Sudoku, Vortex, Solitaire and Snake
     left out while the games in progress are finished. A card with no games: the chooser is the build's list."""
     texts = []
     fw.mock('widget_set_text_utf8', lambda w, s, *_: texts.append(C.string_at(s).decode()))
@@ -1915,12 +1915,12 @@ def test_the_build_ships_bricks_alone(fw):
 
 def test_saves_of_the_games_left_out_are_neither_read_nor_touched(fw):
     """A Q2 that played Sudoku or Solitaire before this build: Games opens on its list, the saves' files stay as
-    they were (for the games' return); Bricks opens."""
+    they were (for the games' return); Pop Stall opens."""
     files = {SUDOKU_FILE: b'\x01' * 8, SOLITAIRE_FILE: b'\x02' * 8}
     p = Page(fw, dict(files))
     assert p.s.screen == CHOOSER and {k: p.card.files[k] for k in files} == files
     rows = handlers(fw, EVT_CLICK)
-    press(rows[0])  # Bricks, from the next loop pass
+    press(rows[0])  # Pop Stall, from the next loop pass
     assert p.s.target == ENGINE
 
 
@@ -1931,7 +1931,7 @@ def test_the_chooser_lists_its_games_then_the_card_s_by_name_and_each_row_opens_
     p = Page(fw, files)
     assert texts[-3:] == [*SHIPPED, 'Blocks', 'Zork']  # Tunes isn't a game
     rows = handlers(fw, EVT_CLICK)
-    assert len(rows) == 3  # the engine's Bricks, the card's two
+    assert len(rows) == 3  # the engine's Pop Stall, the card's two
     fw.mock('fw_fork', lambda *_: 4242)
     toasts, tried = heard(fw), []
     fw.mock('fw_access', lambda path, *_: tried.append(C.string_at(path)) or len(tried) == 1)  # Blocks' isn't there
@@ -1940,7 +1940,7 @@ def test_the_chooser_lists_its_games_then_the_card_s_by_name_and_each_row_opens_
     press(rows[2])  # Zork, its second, over the whole screen
     assert fw.fn('addon_game_on', C.c_int)() == 4242 and tried[-1] == b'/mnt/mmc/.zork/q2-zork'
     assert p.s.screen == CHOOSER and not p.timers
-    press(rows[0])  # Bricks, the engine's first, from the next loop pass
+    press(rows[0])  # Pop Stall, the engine's first, from the next loop pass
     assert p.s.screen == CHOOSER and p.s.target == ENGINE and p.timers[-1][1] == 0
 
 
@@ -1961,7 +1961,7 @@ def test_a_game_on_screen_takes_no_tap_for_the_chooser_hidden_under_it(fw):
     assert not fw.fn('addon_game_on', C.c_int)()
     p.go(CHOOSER)
     assert sensitive == {chooser: 1}
-    press(rows[1])  # Zork, after the engine's Bricks
+    press(rows[1])  # Zork, after the engine's Pop Stall
     assert fw.fn('addon_game_on', C.c_int)() == 4242
 
 
