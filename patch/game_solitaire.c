@@ -119,8 +119,11 @@ struct sol {
     int seq, runs, wait; /* a run of one sound, as Bricks has */
     unsigned last_ms;    /* the clock at the last step of play: 0 after a pause */
     int shown_s, since_save, unsaved;
-    unsigned char tile[64 * 64];
+    int nmark, all;          /* a step's changed rects, joined, then handed to the engine */
+    short marks[ENG_RECTS][4];
+    unsigned char tile[64 * 64]; /* the fibre steps, as byte offsets into a shade level's colours */
     unsigned felt_lut[ART_LUT_LEVELS * 15];
+    unsigned back[CH - 2][CW - 2]; /* the back's pixels inside the edge, 0 where the face shows */
     unsigned file[ART_BYTES / 4];
 };
 
@@ -370,20 +373,57 @@ static void place_xy(const struct sol *b, int p, int i, int *x, int *y) {
 }
 
 /* The marks for a change: a card's box with its shadow and gold edge; a whole column. */
-static void dirty_card(int x, int y, int h) { eng_dirty(x - 4, y - 5, CW + 10, h + 15); }
-static void dirty_place(const struct sol *b, int p) {
+/* A rect this step changed. One inside another is dropped, one around another takes its place, and
+ * past ENG_RECTS a rect joins the one it grows least: the engine's last rect would take them all. */
+static void mark(struct sol *b, int x, int y, int w, int h) {
+    int r[4] = { x < 0 ? 0 : x, y < 0 ? 0 : y, x + w > ENG_W ? ENG_W : x + w, y + h > b->h ? b->h : y + h };
+    int best = 0, grow = 1 << 30;
+    if (r[2] <= r[0] || r[3] <= r[1] || b->all) return;
+    for (int k = 0; k < b->nmark; ++k) {
+        short *q = b->marks[k];
+        int u0 = q[0] < r[0] ? q[0] : r[0], u1 = q[1] < r[1] ? q[1] : r[1];
+        int u2 = q[2] > r[2] ? q[2] : r[2], u3 = q[3] > r[3] ? q[3] : r[3];
+        int more = (u2 - u0) * (u3 - u1) - (q[2] - q[0]) * (q[3] - q[1]);
+        if (q[0] <= r[0] && q[1] <= r[1] && q[2] >= r[2] && q[3] >= r[3]) return;
+        if (more < grow) grow = more, best = k;
+    }
+    short *q;
+    if (b->nmark < ENG_RECTS)
+        q = b->marks[b->nmark++];
+    else {
+        q = b->marks[best];
+        r[0] = q[0] < r[0] ? q[0] : r[0], r[1] = q[1] < r[1] ? q[1] : r[1];
+        r[2] = q[2] > r[2] ? q[2] : r[2], r[3] = q[3] > r[3] ? q[3] : r[3];
+    }
+    q[0] = (short)r[0], q[1] = (short)r[1], q[2] = (short)r[2], q[3] = (short)r[3];
+}
+static void mark_all(struct sol *b) {
+    b->all = 1;
+    eng_dirty_all();
+}
+/* the step's rects to the engine */
+static void marked(struct sol *b) {
+    for (int k = 0; k < b->nmark && !b->all; ++k) {
+        short *q = b->marks[k];
+        eng_dirty(q[0], q[1], q[2] - q[0], q[3] - q[1]);
+    }
+    b->nmark = b->all = 0;
+}
+
+static void dirty_card(struct sol *b, int x, int y, int h) { mark(b, x - 4, y - 5, CW + 10, h + 15); }
+static void dirty_place(struct sol *b, int p) {
     if (p >= P_TAB)
-        eng_dirty(colx[p - P_TAB] - 4, TAB_Y - 6, CW + 10, b->limit - TAB_Y + 14);
+        mark(b, colx[p - P_TAB] - 4, TAB_Y - 6, CW + 10, b->limit - TAB_Y + 14);
     else if (p == P_WASTE)
-        eng_dirty(WASTE_X - 4, TOP_Y - 6, CW + 2 * WASTE_FAN + 10, CH + 16);
+        mark(b, WASTE_X - 4, TOP_Y - 6, CW + 2 * WASTE_FAN + 10, CH + 16);
     else {
         int x, y;
         place_xy(b, p, 0, &x, &y);
-        eng_dirty(x - 6, y - 6, CW + 12, CH + 16);
+        mark(b, x - 6, y - 6, CW + 12, CH + 16);
     }
 }
-static void dirty_slip(const struct sol *b) {
-    eng_dirty(SLIP_X0, b->rail, SLIP_X1 - SLIP_X0 + 4, RAIL_H);
+static void dirty_slip(struct sol *b) {
+    mark(b, SLIP_X0, b->rail, SLIP_X1 - SLIP_X0 + 4, RAIL_H);
 }
 
 /* ---- sound: the Clicker's three, as rhythm ---- */
@@ -427,15 +467,28 @@ static void flight_xy(const struct flight *f, int *x, int *y) {
          (f->arc ? f->arc * eng_sin(f->t * 512 / f->dur) / 65536 : 0);
 }
 
+/* Card i of place p starts turning; one still turning elsewhere is shown turned at once. */
+static void turn(struct sol *b, int p, int i) {
+    int x, y;
+    if (b->flip_t) place_xy(b, b->flip_p, b->flip_i, &x, &y), dirty_card(b, x, y, CH);
+    b->flip_t = FLIP, b->flip_p = p, b->flip_i = i;
+}
+
 static void land(struct sol *b, const struct flight *f) {
     int x = f->x1, y = f->y1;
-    dirty_card(x, y, CH);
-    if (f->flags & F_HOME) {
+    dirty_card(b, x, y, CH);
+    if (f->flags & F_HOME) { /* a flash or sparks still on another foundation go first */
+        int px_, py;
+        if (b->flash_t || b->spark_t) {
+            place_xy(b, b->spark_t ? b->spark_p : b->flash_p, 0, &px_, &py);
+            mark(b, px_ - 40, py - 44, CW + 80, CH + 88);
+            if (b->flash_t && b->flash_p != b->spark_p) place_xy(b, b->flash_p, 0, &px_, &py), dirty_card(b, px_, py, CH);
+        }
         b->flash_t = FLASH, b->flash_p = f->place;
         b->spark_t = SPARK, b->spark_p = f->place;
-        eng_dirty(x - 40, y - 44, CW + 80, CH + 88);
+        mark(b, x - 40, y - 44, CW + 80, CH + 88);
     }
-    if (f->flags & F_FLIP) b->flip_t = FLIP, b->flip_p = f->place, b->flip_i = f->idx;
+    if (f->flags & F_FLIP) turn(b, f->place, f->idx);
 }
 
 /* Every card in flight lands now: input is never kept waiting for a glide. */
@@ -443,7 +496,7 @@ static void settle(struct sol *b) {
     for (int k = 0; k < b->nfl; ++k) {
         int x, y;
         flight_xy(&b->fl[k], &x, &y);
-        dirty_card(x, y, CH);
+        dirty_card(b, x, y, CH);
         land(b, &b->fl[k]);
     }
     b->nfl = 0;
@@ -460,7 +513,7 @@ static void cursor_dirty(struct sol *b) {
     if (b->cur >= b->nsrc || b->mode != PLAY) return;
     int p = b->src[b->cur][0], n = b->src[b->cur][1], x, y;
     place_xy(b, p, plen(b, p) - n, &x, &y);
-    dirty_card(x, y - 2, run_h(b, p, n) + 2);
+    dirty_card(b, x, y - 2, run_h(b, p, n) + 2);
 }
 
 /* The state changed: the cursor's places again, the fans, and the stuck message. */
@@ -488,6 +541,18 @@ static void hand_xy(const struct sol *b, int *x, int *y) {
     *x = b->hx0 + (b->hx - b->hx0) * e / 256, *y = b->hy0 + (b->hy - b->hy0) * e / 256;
 }
 
+/* What a move changed in place p: a column from card i down (its new top card, or the old one now
+ * covered), or the whole column when its fan changed (fan: its steps before); any other place whole. */
+static void dirty_from(struct sol *b, int p, int i, const int *fan) {
+    int x, y, k = p - P_TAB;
+    if (p < P_TAB || fan[0] != b->fan_d[k] || fan[1] != b->fan_u[k] || i < 0) {
+        dirty_place(b, p);
+        return;
+    }
+    place_xy(b, p, i, &x, &y);
+    mark(b, x - 4, y - 6, CW + 10, b->limit - y + 14);
+}
+
 /* A move made, or undone (back): the cards it carries glide from where they lay (or from the hand)
  * to where they land, a draw's one after another; a card home flashes, a card turned turns. A
  * recycle carries the waste's top card alone. */
@@ -502,7 +567,9 @@ static void make(struct sol *b, struct move *m, int back, int from_hand) {
         } else
             place_xy(b, a, len - n + i, &x0[i], &y0[i]);
     }
-    dirty_place(b, a), dirty_place(b, z);
+    int lz = plen(b, z), fa[2] = { 0, 0 }, fz[2] = { 0, 0 };
+    if (a >= P_TAB) fa[0] = b->fan_d[a - P_TAB], fa[1] = b->fan_u[a - P_TAB];
+    if (z >= P_TAB) fz[0] = b->fan_d[z - P_TAB], fz[1] = b->fan_u[z - P_TAB];
     if (back)
         unapply(b, m), b->g.moves -= b->g.moves != 0;
     else
@@ -514,8 +581,8 @@ static void make(struct sol *b, struct move *m, int back, int from_hand) {
         fly(b, pcard(b, z, len - n + i), z, len - n + i, x0[i], y0[i],
             m->kind == M_DRAW && !back ? 2 * i : 0, GLIDE, 0,
             z >= P_FOUND && z < P_TAB ? F_HOME : 0);
-    dirty_place(b, a), dirty_place(b, z), dirty_slip(b);
-    if (m->turned && !back) b->flip_t = FLIP, b->flip_p = a, b->flip_i = plen(b, a) - 1;
+    dirty_from(b, a, plen(b, a) - 1, fa), dirty_from(b, z, lz - 1, fz), dirty_slip(b);
+    if (m->turned && !back) turn(b, a, plen(b, a) - 1);
 }
 
 static void play_move(struct sol *b, struct move *m, int from_hand) {
@@ -541,14 +608,14 @@ static void play_undo(struct sol *b) {
     sound(b, ENG_SFX_TICK, 1);
 }
 
-static void hand_dirty(const struct sol *b) {
+static void hand_dirty(struct sol *b) {
     int h = run_h(b, b->hfrom, b->hn), x, y;
     hand_xy(b, &x, &y);
-    eng_dirty(x - 4, y + 1, CW + 20, h + 34);
+    mark(b, x - 4, y + 1, CW + 20, h + 34);
     for (int k = 0; k < b->ndst; ++k) { /* the gold outlines */
         int x, y, p = b->dst[k];
         place_xy(b, p, plen(b, p), &x, &y);
-        eng_dirty(x - 4, y - 4, CW + 8, CH + 8);
+        mark(b, x - 4, y - 4, CW + 8, CH + 8);
     }
 }
 
@@ -640,14 +707,14 @@ static void new_deal(struct sol *b) {
             fly(b, b->g.tab[c][r], P_TAB + c, r, STOCK_X, TOP_Y, n * DEAL_GAP, DEAL_FLY, 10,
                 F_DOWN | (r == c ? F_FLIP : 0));
     b->deal_left = n;
-    eng_dirty_all();
+    mark_all(b);
 }
 
 static void finish_deal(struct sol *b) {
     settle(b);
     b->mode = PLAY;
     changed(b);
-    eng_dirty_all();
+    cursor_dirty(b), dirty_slip(b);
 }
 
 /* The next card the auto-finish sends home: the lowest any column's top or the waste offers. */
@@ -674,7 +741,7 @@ static void win(struct sol *b) {
     b->unsaved = 1;
     eng_save("solitaire", &b->g, sizeof b->g, S_MAGIC); /* the game's end, not a frame of play */
     b->unsaved = 0, b->since_save = 0;
-    eng_dirty_all(); /* the columns' empty places go: the table is the felt and the four kings */
+    mark_all(b); /* the columns' empty places go: the table is the felt and the four kings */
 }
 
 /* ---- the start board ---- */
@@ -693,10 +760,10 @@ static void start_act(struct sol *b) {
     if (b->sel == 2) { /* resume */
         b->mode = PLAY, b->last_ms = 0;
         changed(b);
-        eng_dirty_all();
+        mark_all(b);
         return;
     }
-    eng_dirty((ENG_W - BOARD_W) / 2, row_y(0), BOARD_W, 2 * ROW_H);
+    mark(b, (ENG_W - BOARD_W) / 2, row_y(0), BOARD_W, 2 * ROW_H);
     sound(b, ENG_SFX_TAP, 1);
 }
 
@@ -789,7 +856,7 @@ static void start_input(struct sol *b, const struct eng_input *in) {
     int n = rows(b);
     if (in->ticks) {
         b->sel = ((b->sel + in->ticks) % n + n) % n;
-        eng_dirty((ENG_W - BOARD_W) / 2, row_y(0), BOARD_W, 3 * ROW_H);
+        mark(b, (ENG_W - BOARD_W) / 2, row_y(0), BOARD_W, 3 * ROW_H);
         sound(b, ENG_SFX_TICK, 1);
     }
     if (in->pressed & ENG_TOUCH)
@@ -832,7 +899,7 @@ static int animate(struct sol *b) {
         flight_xy(f, &x, &y);
         ++f->t;
         flight_xy(f, &x1, &y1);
-        eng_dirty((x < x1 ? x : x1) - 4, (y < y1 ? y : y1) - 5, CW + 10 + (x < x1 ? x1 - x : x - x1),
+        mark(b, (x < x1 ? x : x1) - 4, (y < y1 ? y : y1) - 5, CW + 10 + (x < x1 ? x1 - x : x - x1),
                   CH + 15 + (y < y1 ? y1 - y : y - y1));
         if (f->t >= f->dur) {
             land(b, f);
@@ -844,20 +911,20 @@ static int animate(struct sol *b) {
     if (b->flash_t) {
         int x, y;
         place_xy(b, b->flash_p, 0, &x, &y);
-        if (!--b->flash_t) dirty_card(x, y, CH);
+        if (!--b->flash_t) dirty_card(b, x, y, CH);
         moving = 1;
     }
     if (b->spark_t) {
         int x, y;
         place_xy(b, b->spark_p, 0, &x, &y);
-        eng_dirty(x - 40, y - 44, CW + 80, CH + 88);
+        mark(b, x - 40, y - 44, CW + 80, CH + 88);
         --b->spark_t;
         moving = 1;
     }
     if (b->flip_t) {
         int x, y; /* the turning card is its column's top: its box alone */
         place_xy(b, b->flip_p, b->flip_i, &x, &y);
-        dirty_card(x, y, CH);
+        dirty_card(b, x, y, CH);
         --b->flip_t;
         moving = 1;
     }
@@ -895,7 +962,7 @@ static int step(void *state, const struct eng_input *in) {
                                   { 0 } };
                 apply(b, &m);
             }
-            eng_dirty_all();
+            mark_all(b);
         }
     } else if (b->mode == WON && (in->pressed & (ENG_CENTRE | ENG_PLAY | ENG_TOUCH)))
         new_deal(b), sound(b, ENG_SFX_TAP, 1);
@@ -925,9 +992,9 @@ static int step(void *state, const struct eng_input *in) {
             dirty_place(b, P_FOUND + b->kings - 1);
             eng_sfx(ENG_SFX_TICK);
         }
-        if (b->t >= DROP_AT && b->t <= DROP_AT + DROP + 1) eng_dirty(60, 0, 256, 300);
+        if (b->t >= DROP_AT && b->t <= DROP_AT + DROP + 1) mark(b, 60, 0, 256, 300);
         if (b->best_new && b->t >= DROP_AT + DROP && b->t <= DROP_AT + DROP + TAG + 1)
-            eng_dirty(220, 70, 155, 50);
+            mark(b, 220, 70, 155, 50);
         if (b->best_new && b->t == DROP_AT + DROP + 1) sound(b, ENG_SFX_TAP, 2);
         moving = b->t <= DROP_AT + DROP + TAG + 1 || moving;
     }
@@ -937,6 +1004,7 @@ static int step(void *state, const struct eng_input *in) {
         if (eng_save("solitaire", &b->g, sizeof b->g, S_MAGIC)) b->unsaved = 0;
         b->since_save = 0;
     }
+    marked(b);
     return moving;
 }
 
@@ -946,7 +1014,7 @@ static const unsigned char *bytes_at(const struct sol *b, int off) {
     return (const unsigned char *)b->file + off;
 }
 
-static inline unsigned blendc(unsigned dst, unsigned rgb, unsigned a) { /* a of 256 */
+static inline __attribute__((always_inline)) unsigned blendc(unsigned dst, unsigned rgb, unsigned a) { /* a of 256 */
     unsigned rb = ((rgb & 0xff00ff) * a + (dst & 0xff00ff) * (256 - a)) >> 8 & 0xff00ff;
     unsigned g = ((rgb & 0xff00) * a + (dst & 0xff00) * (256 - a)) >> 8 & 0xff00;
     return 0xff000000 | rb | g;
@@ -971,19 +1039,26 @@ static void felt(const struct sol *b, struct eng_surface *s, int x, int y, int w
         return;
     }
     const unsigned char *map = bytes_at(b, ART_SHADE);
-    for (int j = c[1]; j < c[3]; ++j) {
+    for (int j = c[1]; j < c[3]; ++j) { /* a cell's 4 px from one row of the table; tile steps are byte offsets */
         const unsigned char *t = b->tile + (j & 63) * 64, *m = map + (j >> 2) * ART_SHADE_W;
         unsigned *p = px(s, c[0], j);
-        for (int i = c[0]; i < c[2];) {
-            const unsigned *lut = b->felt_lut + m[i >> 2] * 15;
-            int end = (i | 3) + 1 < c[2] ? (i | 3) + 1 : c[2];
-            for (; i < end; ++i) *p++ = lut[t[i & 63]];
+        int i = c[0];
+        for (; i < c[2] && (i & 3); ++i)
+            *p++ = *(const unsigned *)((const char *)(b->felt_lut + m[i >> 2] * 15) + t[i & 63]);
+        for (; i + 4 <= c[2]; i += 4, p += 4) {
+            const char *lut = (const char *)(b->felt_lut + m[i >> 2] * 15);
+            const unsigned char *q = t + (i & 63);
+            p[0] = *(const unsigned *)(lut + q[0]), p[1] = *(const unsigned *)(lut + q[1]);
+            p[2] = *(const unsigned *)(lut + q[2]), p[3] = *(const unsigned *)(lut + q[3]);
         }
+        for (; i < c[2]; ++i)
+            *p++ = *(const unsigned *)((const char *)(b->felt_lut + m[i >> 2] * 15) + t[i & 63]);
     }
 }
 
 /* A rounded box with a smoothed edge at a (of 256), its corners in 1/16 px (x0, y0, x1, y1 and the
- * radius r); with line, only its rim line/16 px wide. The pixels of hole (x, y, w, h, whole px),
+ * radius r); with line, only its rim line/16 px wide. The pixels of hole (x, y, w, h, whole px,
+ * and how far in from each corner its round ends),
  * which a card painted after covers, are left. A pixel's cover is its centre's distance in from the
  * edge, over one pixel; a row clear of the corners has a run of whole pixels (the rim's hollow,
  * with line), filled (or passed) without measuring each. */
@@ -997,8 +1072,8 @@ static void rbox(struct eng_surface *s, int x0, int y0, int x1, int y1, int r, u
         int cy = j * 16 + 8, qy = y0 + r - cy > cy - y1 + r ? y0 + r - cy : cy - y1 + r;
         int hx0 = 1 << 20, hx1 = -(1 << 20), f0 = 1 << 20, f1 = -(1 << 20);
         if (hole && j >= hole[1] && j < hole[1] + hole[3]) {
-            int corner = j < hole[1] + 5 || j >= hole[1] + hole[3] - 5;
-            hx0 = hole[0] + (corner ? 5 : 0), hx1 = hole[0] + hole[2] - (corner ? 5 : 0);
+            int k = hole[4], corner = j < hole[1] + k || j >= hole[1] + hole[3] - k;
+            hx0 = hole[0] + (corner ? k : 0), hx1 = hole[0] + hole[2] - (corner ? k : 0);
         }
         if (qy <= 0 &&
             qy <= r - 8 - line) /* the whole pixels: from x0 + 8 to x1 - 8, the rim's in by line */
@@ -1019,7 +1094,12 @@ static void rbox(struct eng_surface *s, int x0, int y0, int x1, int y1, int r, u
                     for (; i < end; ++i, ++p) *p = blendc(*p, rgb, (unsigned)a);
                 continue;
             }
-            if (i < hx0 || i >= hx1) {
+            if (i >= hx0 && i < hx1) { /* under the card: past it at once */
+                int to = hx1 < c[2] ? hx1 : c[2];
+                p += to - i, i = to;
+                continue;
+            }
+            {
                 int cx = i * 16 + 8, qx = x0 + r - cx > cx - x1 + r ? x0 + r - cx : cx - x1 + r, d;
                 if (qx <= 0 && qy <= 0)
                     d = (qx > qy ? qx : qy) - r;
@@ -1052,7 +1132,7 @@ static void rbox(struct eng_surface *s, int x0, int y0, int x1, int y1, int r, u
 /* A rounded box laid against an anchor box (x, y, w, h px): x0 and y0 from its left and top, x1
  * from its right and y1 from its bottom (from its top with L_TOP), all in 1/16 px; a of 255.
  * L_HOLE: the anchor box is a card painted after it, so its pixels are left (rbox's hole). */
-enum { L_HOLE = 1, L_TOP = 2 };
+enum { L_HOLE = 1, L_TOP = 2, L_ROUND = 4 }; /* L_ROUND: the box over it rounds 8 px, not a card's 4.5 */
 struct layer {
     short x0, y0, x1, y1;
     unsigned char r, a, line, flags;
@@ -1062,9 +1142,9 @@ struct layer {
 
 static void layers(struct eng_surface *s, const struct layer *l, int n, int x, int y, int w,
                    int h) {
-    int hole[4] = { x, y, w, h };
+    int hole[5] = { x, y, w, h, 5 };
     for (; n-- > 0; ++l)
-        rbox(s, x * 16 + l->x0, y * 16 + l->y0, (x + w) * 16 + l->x1,
+        hole[4] = l->flags & L_ROUND ? 9 : 5, rbox(s, x * 16 + l->x0, y * 16 + l->y0, (x + w) * 16 + l->x1,
              (l->flags & L_TOP ? y : y + h) * 16 + l->y1, l->r, l->rgb, l->a + (l->a >> 7), l->line,
              l->flags & L_HOLE ? hole : 0);
 }
@@ -1186,6 +1266,13 @@ static void body(const struct sol *b, struct eng_surface *s, int x, int y, int w
     for (int j = c[1]; j < c[3]; ++j) {
         int v = j - y, cv = v < 5 ? v : v >= CH - 5 ? CH - 1 - v : -1;
         unsigned *p = px(s, c[0], j);
+        if (cv < 0) { /* clear of the corners: the edge's column at each end, the face between */
+            int i = c[0], end = c[2] < x + w - 1 ? c[2] : x + w - 1;
+            if (i == x) *p++ = 0xff000000 | rim, ++i;
+            for (; i < end; ++i) *p++ = 0xff000000 | FACE;
+            if (i < c[2]) *p = 0xff000000 | rim;
+            continue;
+        }
         for (int i = c[0]; i < c[2]; ++i, ++p) {
             int u = i - x, cu = u < 5 ? u : u >= w - 5 ? w - 1 - u : -1;
             if (cu >= 0 && cv >= 0) {
@@ -1203,9 +1290,15 @@ static unsigned ink(int c) { return red(c) ? RED : BLACK; }
 /* The card's face or back over its body. */
 static void face(const struct sol *b, struct eng_surface *s, int x, int y, int c) {
     if (!(c & UP)) {
-        if (b->art)
-            art(b, s, A_BACK, x, y, 0);
-        else
+        int c4[4];
+        if (b->art && clip(s, x + 1, y + 1, CW - 2, CH - 2, c4))
+            for (int j = c4[1]; j < c4[3]; ++j) {
+                const unsigned *q = b->back[j - y - 1] + c4[0] - x - 1;
+                unsigned *p = px(s, c4[0], j);
+                for (int i = c4[0]; i < c4[2]; ++i, ++q, ++p)
+                    if (*q) *p = *q;
+            }
+        else if (!b->art)
             eng_round(s, x + 3, y + 3, CW - 6, CH - 6, 3, 0xa8232b);
         return;
     }
@@ -1274,7 +1367,7 @@ static const struct layer rail_layers[] = {
     { L16(48), L16(15), RIGHT(104), L16(15.6), 0, 90, 0, L_TOP, RAIL_D },
     { L16(290), L16(8), RIGHT(330), L16(8.8), 0, 120, 0, L_TOP, RAIL_D },
     { L16(298), L16(15), RIGHT(350), L16(15.6), 0, 90, 0, L_TOP, RAIL_D },
-    { L16(SLIP_X0 + 2), L16(4), RIGHT(SLIP_X1 + 2), L16(6), 48, 150, 0, 0, SLIP_SHADOW },
+    { L16(SLIP_X0 + 2), L16(4), RIGHT(SLIP_X1 + 2), L16(6), 48, 150, 0, 0, SLIP_SHADOW }, /* under the slip */
     { L16(SLIP_X0), L16(2), RIGHT(SLIP_X1), L16(6), 48, 255, 0, 0, FACE },
     { L16(SLIP_X0 + 3), L16(2), RIGHT(SLIP_X1 - 3), L16(3), 0, 255, 0, L_TOP, 0xffffff },
 };
@@ -1303,7 +1396,7 @@ static void disc(struct eng_surface *s, int x16, int y16, int r16, unsigned rgb)
 
 /* A wooden board with brass pins, centred on x, y (render.board). */
 static const struct layer board_layers[] = {
-    { L16(3), L16(5), L16(3), L16(5), 128, 130, 0, 0, SHADOW },
+    { L16(3), L16(5), L16(3), L16(5), 128, 130, 0, L_HOLE | L_ROUND, SHADOW }, /* where the board is not */
     { 0, 0, 0, 0, 128, 255, 0, 0, RAIL_D },
     { L16(3), L16(3), L16(-3), L16(-3), 96, 255, 0, 0, RAIL },
     { L16(3), L16(3), L16(-3), L16(5), 32, 255, 0, L_TOP, RAIL_L },
@@ -1324,7 +1417,8 @@ static void board(struct eng_surface *s, int x, int y, int w, int h) {
 static int score_card(const struct sol *b, struct eng_surface *s, int x0, int x1, int y0, int n,
                       const char *const *label, const char *const *value, int rh, int sel) {
     int y1 = y0 + (8 + rh * n) * 16;
-    rbox(s, x0 + 24, y0 + 32, x1 + 24, y1 + 32, 48, SLIP_SHADOW, 150 * 256 / 255, 0, 0);
+    int paper[5] = { (x0 >> 4) + 1, (y0 >> 4) + 1, (x1 >> 4) - (x0 >> 4) - 2, (y1 >> 4) - (y0 >> 4) - 2, 5 }; /* its shadow shows only outside it */
+    rbox(s, x0 + 24, y0 + 32, x1 + 24, y1 + 32, 48, SLIP_SHADOW, 150 * 256 / 255, 0, paper);
     rbox(s, x0, y0, x1, y1, 48, FACE, 256, 0, 0);
     for (int i = 0; i < n; ++i) {
         int yy = y0 + (4 * 2 + rh * (2 * i + 1)) * 8; /* the row's middle, 1/16 px */
@@ -1605,12 +1699,20 @@ static void load_art(struct sol *b) {
              games_ok(b->file, ART_BYTES, ART_MAGIC);
     if (!b->art) return;
     const unsigned char *t = bytes_at(b, ART_TILE), *map = bytes_at(b, ART_SHADE);
-    for (int i = 0; i < 64 * 64; ++i) b->tile[i] = t[i >> 1] >> ((i & 1) << 2) & 15;
+    for (int i = 0; i < 64 * 64; ++i) b->tile[i] = (unsigned char)((t[i >> 1] >> ((i & 1) << 2) & 15) * 4);
     for (int i = 0; i < ART_SHADE_W * ART_SHADE_H; ++i)
         if (map[i] < ART_LUT_LO || map[i] >= ART_LUT_LO + ART_LUT_LEVELS) b->art = 0;
     unsigned char *m = (unsigned char *)b->file + ART_SHADE; /* levels from 0 */
     for (int i = 0; b->art && i < ART_SHADE_W * ART_SHADE_H; ++i)
         m[i] = (unsigned char)(m[i] - ART_LUT_LO);
+    const unsigned char *e = bytes_at(b, 4 + 8 * A_BACK), *d; /* the back, its palette's colours */
+    unsigned off = (e[0] | e[1] << 8 | e[2] << 16 | (unsigned)e[3] << 24) & 0x7fffffff;
+    d = bytes_at(b, (int)off);
+    for (int j = 0; j < e[5] && j < CH - 2; ++j)
+        for (int i = 0, n = j * e[4]; i < e[4] && i < CW - 2; ++i, ++n) {
+            int v = d[64 + (n >> 1)] >> ((n & 1) << 2) & 15;
+            b->back[j][i] = v ? 0xff000000 | ((const unsigned *)d)[v] : 0;
+        }
     const unsigned char *lut = bytes_at(b, ART_LUT);
     for (int i = 0; i < ART_LUT_LEVELS * 15; ++i)
         b->felt_lut[i] = 0xff000000 | lut[4 * i] | lut[4 * i + 1] << 8 | lut[4 * i + 2] << 16;
@@ -1627,7 +1729,7 @@ static void init(void *state, int h) {
     if (!b->g.live) deal(b, b->g.seed ? b->g.seed : 1, b->g.draw3);
     b->mode = START, b->sel = 0;
     refan(b);
-    eng_dirty_all();
+    mark_all(b);
 }
 
 /* Before the menu, the screen going off or leaving: the game saved when it changed; the clock stops

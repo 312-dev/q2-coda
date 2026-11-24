@@ -11,9 +11,10 @@ import zlib
 import pytest
 
 import solitaire_solver
-from conftest import ROOT
-from test_engine import (CENTER, E_CENTRE, E_NEXT, E_PLAY, E_PREV, E_TOUCH, ENGINE, RETURN, SHEET, Eng, GameDef,
+from conftest import O, ROOT
+from test_engine import (BACK_BTN, CENTER, E_CENTRE, FWD_BTN, NEXT, PREV, E_NEXT, E_PLAY, E_PREV, E_TOUCH, ENGINE, RETURN, SHEET, Eng, GameDef,
                          Input, api, screen)
+from test_engine import PLAY as PLAY_KEY
 from test_games import PAGE, Canvas, Page, fnv1a, texts
 
 ART_FILE, SAVE = '/usr/share/q2games/solitaire.bin', '/mnt/data/game-solitaire'
@@ -53,8 +54,9 @@ class Sol(C.Structure):
                 ('fl', Flight * MAXF), ('nfl', C.c_int),
                 *((k, C.c_int) for k in 'flash_t flash_p spark_t spark_p flip_t flip_p flip_i msg msg_t stuck t kings '
                                        'best_new deal_left auto_wait seq runs wait'.split()),
-                ('last_ms', C.c_uint), *((k, C.c_int) for k in 'shown_s since_save unsaved'.split()),
-                ('tile', C.c_ubyte * 4096), ('felt_lut', C.c_uint * (LAYOUT['ART_LUT_LEVELS'] * 15)),
+                ('last_ms', C.c_uint), *((k, C.c_int) for k in 'shown_s since_save unsaved nmark all'.split()),
+                ('marks', (C.c_short * 4) * 8),
+                ('tile', C.c_ubyte * 4096), ('felt_lut', C.c_uint * (LAYOUT['ART_LUT_LEVELS'] * 15)), ('back', (C.c_uint * 41) * 56),
                 ('file', C.c_uint * (LAYOUT['ART_BYTES'] // 4))]
 
 
@@ -436,7 +438,7 @@ def test_the_art_file_is_whole_sealed_and_laid_out_as_its_header_says(fw):
         start = (off & 0x7fffffff) + (64 if off >> 31 else 0)
         assert 0 < w and 0 < h and start + (w * h + 1) // 2 <= LAYOUT['ART_TILE'], e
     g = Game(fw)
-    assert g.b.art == 1 and set(g.b.tile) <= set(range(15))
+    assert g.b.art == 1 and set(g.b.tile) <= set(range(0, 60, 4))  # byte offsets of 15 steps
     g.close()
 
 
@@ -965,3 +967,41 @@ def test_cabin_solitaire_is_games_second_engine_row_and_opens_over_the_whole_scr
     assert moved[-1][3:] == (375, p.s.h) and moved[-1][2] > 0 and bar == [0, 1, 0, 1]
     p.close()
     assert not fw.var('engine__en', C.c_void_p).value
+
+
+@pytest.mark.parametrize('seed', [11, 12, 13])
+def test_a_frame_repaints_every_pixel_that_changed(fw, seed):
+    """Two screens kept side by side through a game played by its keys: one painted only in the rects each frame
+    marked, the other painted whole; they never differ, so no change goes unmarked."""
+    g = Game(fw)
+    canvas = Canvas(fw)
+    part, whole = (C.c_uint * (375 * 320))(), (C.c_uint * (375 * 320))()
+    clip = [(0, 0, 375, 320)]
+    screen(canvas, origin=(0, 0))
+    fw.mock('canvas_get_clip_rect', lambda c, r, *_: C.memmove(r, (C.c_int * 4)(*clip[0]), 16) and 0)
+
+    def paint(buf, rect):
+        C.c_void_p.from_buffer(canvas.lcd, O['LCD_OFFLINE_FB']).value = C.addressof(buf)
+        clip[0] = rect
+        g.e['eng_paint'](canvas.p)
+    paint(part, (0, 0, 375, 320))
+    rnd, moves = random.Random(seed), 0
+    keys = [CENTER] * 5 + [PLAY_KEY] * 3 + [NEXT, NEXT, PREV, BACK_BTN, FWD_BTN]
+    for k in range(700):
+        if k % 3 == 0:
+            last = rnd.choice(keys)
+            g.key(last)
+        for r in g.frame():
+            paint(part, r)
+        paint(whole, (0, 0, 375, 320))
+        if bytes(part) != bytes(whole):
+            diff = [i for i in range(375 * 320) if part[i] != whole[i]]
+            xs, ys = [i % 375 for i in diff], [i // 375 for i in diff]
+            if SHOTS:
+                png(os.path.join(SHOTS, 'part.png'), part), png(os.path.join(SHOTS, 'whole.png'), whole)
+            raise AssertionError((k, g.b.mode, last, len(diff), (min(xs), min(ys), max(xs), max(ys)), g.rects))
+        if g.b.mode == WON and g.b.t > 60:
+            g.key(CENTER)
+        moves = max(moves, g.b.g.moves)
+    assert moves > 40, moves  # the game was played, not left on its board
+    g.close()
