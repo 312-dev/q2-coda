@@ -1290,6 +1290,7 @@ static void queue_poll(app_t *a) {
     char path[48], raw[QUEUE_RAW];
     tk_snprintf(path, sizeof path, "/tmp/q2-%s.queue", a->id);
     unsigned got = state_read(path, raw, sizeof raw);
+    if (got >= sizeof raw - 2) strrchr(raw, '\n')[1] = 0; /* cut: its last line goes whole */
     unsigned h = got ? hash_bytes(FNV_SEED, (const unsigned char *)raw, strlen(raw)) : 0;
     int first = !a->queue_seen;
     if (!first && h == a->queue) return;

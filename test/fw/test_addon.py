@@ -6767,3 +6767,14 @@ def test_an_albums_lit_pair_keeps_centre_and_its_tracks_get_their_menu(fw, nav_s
             5 if C.string_at(k) == b'_ar_row' else d)
     assert fw.fn('addon_row_hold', C.c_int, C.c_void_p)(p.page) == 1
     assert p.request().endswith(b'\thold\tsong:s1 album:al2 1\n')
+
+
+def test_a_queue_file_past_its_limit_loses_its_cut_last_line_not_a_toast(fw, mcl, songs):
+    """A line cut at QUEUE_RAW would name a path that is not there: it is left out whole, the lines before it
+    queued."""
+    s = queueing(fw, mcl, songs)
+    s.land(Y)
+    head = b'8 last ' + Y + b'\n'
+    s.world.files[QUEUE] = head + b'9 last /mnt/mmc/' + b'a' * 4096 + b'.flac\n'
+    s.step()
+    assert s.queued() == [A, B, C3, Y] and s.toasts == [b'Playing Last']
