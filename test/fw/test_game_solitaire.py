@@ -25,7 +25,7 @@ P_STOCK, P_WASTE, P_FOUND, P_TAB, PLACES = 0, 1, 2, 6, 13
 START, DEAL, PLAY, AUTO, WON = range(5)
 M_DRAW, M_RECYCLE, M_MOVE = range(3)
 CW, CH, TOP_Y, TAB_Y = 43, 58, 26, 88
-COLX = [19, 68, 116, 165, 213, 262, 310]
+COLX = [19, 68, 116, 165, 213, 262, 309]
 TICK, TAP, ALERT = 1, 2, 3  # clicker_kind as eng_sfx sets it
 SHOTS = os.environ.get('SOL_SHOTS')  # a folder: each screen the tests draw is written there as a PNG
 
@@ -55,7 +55,7 @@ class Sol(C.Structure):
                                        'best_new deal_left auto_wait seq runs wait'.split()),
                 ('last_ms', C.c_uint), *((k, C.c_int) for k in 'shown_s since_save unsaved'.split()),
                 ('tile', C.c_ubyte * 4096), ('felt_lut', C.c_uint * (LAYOUT['ART_LUT_LEVELS'] * 15)),
-                ('a_o', (C.c_ubyte * 5) * 5), ('a_f', (C.c_ubyte * 5) * 5), ('file', C.c_uint * (LAYOUT['ART_BYTES'] // 4))]
+                ('file', C.c_uint * (LAYOUT['ART_BYTES'] // 4))]
 
 
 def rank(c):
@@ -579,3 +579,383 @@ def test_each_screen_paints_whole_and_nothing_but_felt_and_the_rail_lies_under_t
     buf = g.shot(name)
     assert all(v >> 24 == 0xff for v in buf)
     g.close()
+
+
+# ---- play through the inputs ----
+
+def test_the_wheel_walks_the_cursor_through_the_sources_both_ways_and_wraps(fw):
+    g = table(Game(fw), DEFAULT)
+    src = g.sources()
+    assert len(src) >= 3 and g.b.cur == 0
+    g.press(0, ticks=1)
+    assert g.b.cur == 1 and g.sounds[-1] == TICK
+    g.press(0, ticks=-2)
+    assert g.b.cur == len(src) - 1
+    g.press(0, ticks=len(src))
+    assert g.b.cur == len(src) - 1
+    g.close()
+
+
+def test_centre_picks_up_and_the_hand_hovers_over_the_best_place_the_wheel_moves_it_and_centre_drops(fw):
+    g = table(Game(fw), DEFAULT)
+    cursor_on(g, P_TAB + 5, 1)  # the four of diamonds: home or on the five of spades
+    g.sounds.clear()
+    g.press(E_CENTRE)
+    b = g.b
+    assert b.hand and (b.hfrom, b.hn) == (P_TAB + 5, 1) and list(b.dst[:b.ndst]) == [P_FOUND + 2, P_TAB + 4]
+    assert b.hover == 0 and (b.hx, b.hy) == g.xy(P_FOUND + 2, 3) and g.sounds == [TAP]
+    g.press(0, ticks=1)
+    assert b.hover == 1 and (b.hx, b.hy) == g.xy(P_TAB + 4, 5)
+    g.press(0, ticks=1)
+    assert b.hover == 0
+    g.press(0, ticks=1)
+    moves = b.g.moves
+    g.press(E_CENTRE)
+    assert not b.hand and g.cards(P_TAB + 4)[-1] == cid('4d') | UP and b.g.moves == moves + 1 and b.ucount == 1
+    g.close()
+
+
+def test_previous_puts_the_hand_back_and_otherwise_undoes(fw):
+    g = table(Game(fw), DEFAULT)
+    cursor_on(g, P_TAB + 5, 1)
+    before = bytes(g.b.g)
+    g.press(E_CENTRE)
+    g.press(E_PREV)
+    assert not g.b.hand and bytes(g.b.g) == before
+    g.press(E_CENTRE)
+    g.press(E_CENTRE)  # home
+    assert g.b.g.found[2] == 4
+    g.step(pressed=E_PREV, held=E_PREV)
+    assert g.b.msg == 1  # "Undo: 23 moves" for a second and a half
+    g.idle()
+    assert bytes(g.b.g)[:-36] == before[:-36] and g.b.g.moves == 23 and g.b.msg == 0
+    for _ in range(3):
+        g.press(E_PREV)  # nothing left to undo: nothing happens
+    assert bytes(g.b.g)[:-36] == before[:-36]
+    g.close()
+
+
+def test_undo_reaches_back_64_moves_and_no_further(fw):
+    g = Game(fw)
+    g.deal(3)
+    start = bytes(g.b.g)[:-36]
+    for _ in range(70):
+        g.press(E_PLAY)
+    assert g.b.ucount == 64
+    for _ in range(70):
+        g.press(E_PREV)
+    assert g.b.ucount == 0 and bytes(g.b.g)[:-36] != start  # the first six draws stay
+    g.close()
+
+
+def test_next_sends_the_cursors_card_home_when_it_can_go(fw):
+    g = table(Game(fw), DEFAULT)
+    cursor_on(g, P_TAB + 5, 1)
+    g.sounds.clear()
+    g.press(E_NEXT)
+    assert g.b.g.found[2] == 4 and g.sounds[0] == TAP
+    cursor_on(g, P_WASTE, 1)  # the seven of spades cannot go home
+    found = list(g.b.g.found)
+    g.press(E_NEXT)
+    assert list(g.b.g.found) == found
+    g.press(E_CENTRE)  # with a hand: Next takes it home only if home is one of its places
+    assert g.b.hand
+    g.press(E_NEXT)
+    assert g.b.hand and list(g.b.g.found) == found
+    g.close()
+
+
+def test_play_draws_and_once_everything_is_up_finishes_every_card_home(fw):
+    g = Game(fw)
+    g.deal(11)
+    w = g.b.g.wlen
+    g.press(E_PLAY)
+    assert g.b.g.wlen == w + 1 and g.b.g.moves == 1
+    scene(g, '10-auto-finish')
+    assert g.b.mode == AUTO
+    g.idle(2000)
+    assert g.b.mode == WON and list(g.b.g.found) == [13] * 4 and g.b.g.wins == 1
+    g.close()
+
+
+def test_centre_in_the_finish_sends_the_rest_home_at_once(fw):
+    g = scene(Game(fw), '10-auto-finish')
+    g.step(pressed=E_CENTRE, held=E_CENTRE)
+    assert list(g.b.g.found) == [13] * 4
+    g.idle()
+    assert g.b.mode == WON
+    g.close()
+
+
+def test_a_finger_on_the_stock_draws_on_a_card_picks_it_and_on_a_place_drops_it(fw):
+    g = table(Game(fw), DEFAULT)
+    x, y = g.xy(P_TAB + 5, 5)  # the four of diamonds
+    g.press(E_TOUCH, tx=x + 20, ty=y + 30)
+    assert g.b.hand and g.b.hfrom == P_TAB + 5
+    fx, fy = g.xy(P_FOUND + 2, 3)
+    g.press(E_TOUCH, tx=fx + 20, ty=fy + 20)
+    assert not g.b.hand and g.b.g.found[2] == 4
+    x, y = g.xy(P_TAB + 4, 4)
+    g.press(E_TOUCH, tx=x + 20, ty=y + 30)  # the five of spades has nowhere to go: nothing
+    assert not g.b.hand
+    w = g.b.g.wlen
+    g.press(E_TOUCH, tx=30, ty=40)
+    assert g.b.g.wlen == w + 1
+    x, y = g.xy(P_WASTE, g.b.g.wlen - 1)
+    g.close()
+
+
+def test_a_finger_away_from_every_place_puts_the_hand_back(fw):
+    g = table(Game(fw), DEFAULT)
+    cursor_on(g, P_TAB + 5, 1)
+    g.press(E_CENTRE)
+    g.press(E_TOUCH, tx=180, ty=250)
+    assert not g.b.hand and g.b.g.found[2] == 3
+    g.close()
+
+
+def test_with_nothing_to_move_the_slip_says_so_once(fw):
+    g = Game(fw)
+    g.deal(7)
+    b = g.b.g
+    for k in range(7):  # every column a lone king, nothing in the stock or the waste
+        b.tlen[k] = 1
+        b.tab[k][0] = (k % 4 * 13 + 12) | UP
+    b.slen = b.wlen = 0
+    g.sounds.clear()
+    g.fn['changed'](g.p)
+    assert g.b.stuck and g.b.msg == 2 and g.sounds == [ALERT]
+    g.fn['changed'](g.p)
+    assert g.sounds == [ALERT]
+    g.close()
+
+
+# ---- the start board ----
+
+def test_the_start_board_changes_its_rows_and_play_deals_by_them(fw):
+    g = Game(fw)
+    b = g.b
+    assert b.mode == START and b.sel == 0 and not b.g.live
+    g.press(E_CENTRE)
+    assert b.g.opt_random == 1
+    g.press(0, ticks=1)
+    g.press(E_CENTRE)
+    assert b.g.opt_draw3 == 1 and b.sel == 1
+    g.press(0, ticks=1)
+    assert b.sel == 0  # two rows: no game to resume
+    g.page.card.files.clear()
+    g.step(pressed=E_PLAY, held=E_PLAY)
+    assert b.mode == DEAL and b.g.draw3 == 1 and b.g.live and b.g.played == 1
+    g.idle()
+    assert b.mode == PLAY and g.everything() == list(range(52))
+    g.close()
+
+
+def test_a_winnable_deal_is_one_of_the_tables_seeds(fw):
+    g = Game(fw)
+    seeds = [int(s) for s in __import__('re').findall(r'\d+', (ROOT/'patch/game_solitaire_seeds.h').read_text().split('{')[1])]
+    assert len(seeds) == 256 == len(set(seeds))
+    for _ in range(5):
+        g.b.mode = START
+        g.step(pressed=E_PLAY, held=E_PLAY)
+        assert g.b.g.seed in seeds
+        g.idle()
+    g.close()
+
+
+def test_resume_returns_to_the_game_in_progress(fw):
+    g = Game(fw)
+    g.step(pressed=E_PLAY, held=E_PLAY)
+    g.idle()
+    g.press(E_PLAY)
+    saved = bytes(g.b.g)
+    g.e['eng_hold']()
+    g.close()
+    g = Game(fw, files=g.page.card.files)
+    assert g.b.mode == START and g.b.g.live and bytes(g.b.g)[4:-4] == saved[4:-4]
+    g.press(0, ticks=2)
+    g.press(E_CENTRE)
+    assert g.b.mode == PLAY
+    g.close()
+
+
+# ---- time, saves and pauses ----
+
+def test_time_counts_between_steps_of_play_and_not_across_a_pause(fw):
+    g = Game(fw)
+    g.deal(5)
+    g.step()
+    g.page.now += 5000
+    g.step()
+    assert g.b.g.time_ms == 5000
+    g.page.now += 700000  # a long while with the screen on: counted up to ten minutes
+    g.step()
+    assert g.b.g.time_ms == 605000
+    g.e['eng_hold']()
+    g.page.now += 60000
+    g.e['eng_run']()
+    g.step()
+    assert g.b.g.time_ms == 605000
+    g.close()
+
+
+def test_every_tenth_move_is_saved_after_its_glide_and_a_pause_saves_the_rest(fw):
+    g = Game(fw)
+    g.deal(5)
+    for k in range(9):
+        g.press(E_PLAY)
+    assert SAVE not in g.page.card.files
+    g.step(pressed=E_PLAY, held=E_PLAY)
+    assert SAVE not in g.page.card.files and g.b.nfl  # not while the card glides
+    g.idle()
+    saved = g.page.card.files[SAVE]
+    assert saved[:4] == struct.pack('<I', MAGIC) and len(saved) == C.sizeof(Record)
+    assert int.from_bytes(saved[-4:], 'little') == fnv1a(saved[:-4])
+    g.press(E_PLAY)
+    assert g.page.card.files[SAVE] == saved
+    g.e['eng_hold']()
+    assert g.page.card.files[SAVE] != saved and Record.from_buffer_copy(g.page.card.files[SAVE]).moves == 11
+    g.close()
+
+
+def record(g, **kw):
+    r = Record.from_buffer_copy(bytes(g.b.g))
+    for k, v in kw.items():
+        setattr(r, k, v)
+    raw = bytearray(bytes(r))
+    raw[:4] = struct.pack('<I', MAGIC)
+    raw[-4:] = struct.pack('<I', fnv1a(bytes(raw[:-4])))
+    return bytes(raw)
+
+
+def test_a_save_loads_only_whole_sane_and_a_whole_deck(fw):
+    g = Game(fw)
+    g.deal(77)
+    g.press(E_PLAY)
+    good = record(g, wins=3, played=9)
+    g.close()
+    tab = bytes(Record.from_buffer_copy(good).tab)
+    twice = bytearray(good)
+    twice[4 + 6 * NTAB + 1] = twice[4 + 6 * NTAB]  # a card in two places
+    twice[-4:] = struct.pack('<I', fnv1a(bytes(twice[:-4])))
+    cases = [(good, True), (good[:-1] + bytes([good[-1] ^ 1]), False), (good[:50], False), (bytes(twice), False),
+             (b'XXXX' + good[4:], False)]
+    for raw, ok in cases:
+        g = Game(fw, files={SAVE: raw})
+        assert (g.b.g.played == 9) == ok and g.b.mode == START
+        assert g.everything() == list(range(52))
+        g.close()
+    g = Game(fw)
+    g.deal(77)
+    for bad in (dict(wins=10, played=9), dict(slen=25), dict(draw3=2), dict(time_ms=400000000)):
+        assert not g.fn['sane'](C.addressof(Record.from_buffer_copy(record(g, **bad))))
+    assert g.fn['sane'](C.addressof(Record.from_buffer_copy(record(g))))
+    r = Record.from_buffer_copy(record(g))
+    r.tab[6][0] |= UP  # a face-up card under a face-down one
+    assert not g.fn['sane'](C.addressof(r))
+    g.close()
+
+
+def test_the_old_solitaires_save_is_left_alone(fw):
+    old = b'old built-in game'
+    g = Game(fw, files={'/mnt/data/ringnav-solitaire': old})
+    g.step(pressed=E_PLAY, held=E_PLAY)
+    g.idle()
+    g.e['eng_hold']()
+    assert g.page.card.files['/mnt/data/ringnav-solitaire'] == old and SAVE in g.page.card.files
+    g.close()
+
+
+def test_a_win_counts_keeps_the_best_and_is_saved_at_once(fw):
+    g = scene(Game(fw), '11-win-new-best')
+    b = g.b
+    assert b.mode == WON and b.best_new and b.g.best_ms == 472000 and b.g.wins == 13 and b.g.fewest == 126
+    assert Record.from_buffer_copy(g.page.card.files[SAVE]).wins == 13 and not b.g.live
+    g.close()
+    g = scene(Game(fw), '11-win')
+    assert not g.b.best_new and g.b.g.best_ms == 400000
+    g.step(pressed=E_CENTRE, held=E_CENTRE)
+    assert g.b.mode == DEAL and g.b.g.played == 32
+    g.close()
+
+
+# ---- the solver's wins, replayed through the game ----
+
+@pytest.mark.parametrize('draw', [3, 1])
+def test_the_tables_deals_are_won_again_and_the_wins_play_through_the_games_own_moves(fw, tmp_path, draw):
+    exe = solitaire_solver.build(tmp_path)
+    seeds = [int(s) for s in __import__('re').findall(r'\d+', (ROOT/'patch/game_solitaire_seeds.h').read_text().split('{')[1])]
+    sample = random.Random(draw).sample(seeds, 12)
+    wins = solitaire_solver.solve(exe, draw, sample)
+    g = Game(fw)
+    for seed in sample:
+        assert wins[seed], seed
+        g.deal(seed, draw == 3)
+        for m in wins[seed]:
+            if m == 'D':
+                assert g.b.g.slen or g.b.g.wlen
+                g.move(M_DRAW)
+            else:
+                frm, to, n = m
+                assert to in g.dests(frm, n), (seed, m)
+                g.move(M_MOVE, frm, to, n)
+            g.fn['changed'](g.p)
+        assert list(g.b.g.found) == [13] * 4, seed
+    g.close()
+
+
+# ---- the engine's side ----
+
+def test_at_rest_the_frame_timer_stops_and_a_key_answers_on_the_next_pass(fw):
+    g = Game(fw)
+    g.frame()
+    assert not g.e['eng_live']()
+    g.key(CENTER)  # the start board's row changes
+    rects = g.frame()
+    assert g.b.g.opt_random == 1 and rects and not g.e['eng_live']()
+    g.close()
+
+
+def felt(x, y):
+    """The felt's pixel at x, y as the art file makes it (cards.felt_image, the shade map stepped by its 4 px cells)."""
+    t = ART[LAYOUT['ART_TILE'] + (y % 64 * 64 + x % 64) // 2] >> (4 * (x & 1)) & 15
+    level = ART[LAYOUT['ART_SHADE'] + (y >> 2) * LAYOUT['ART_SHADE_W'] + (x >> 2)] - LAYOUT['ART_LUT_LO']
+    return 0xff000000 | struct.unpack_from('<I', ART, LAYOUT['ART_LUT'] + 4 * (level * 15 + t))[0]
+
+
+def glass(x, y):
+    """Under the glass's 80 px corners (a pixel's centre outside the round)."""
+    ox = 80 - x - .5 if x < 80 else x + .5 - 295
+    oy = 80 - y - .5 if y < 80 else y + .5 - 240
+    return ox > 0 and oy > 0 and (ox * ox + oy * oy) ** .5 > 80
+
+
+@pytest.mark.parametrize('name', ['01-start', '03-play', '04-picked-hints', '08-long-pile', '09-draw-three', '11-win-new-best'])
+def test_nothing_but_the_felt_and_the_rails_wood_falls_under_the_glass(fw, name):
+    """Each screen against the same sheet with nothing on it: no pixel that differs is in a corner the glass hides."""
+    g = scene(Game(fw), name)
+    buf = g.shot()
+    rail = g.b.rail
+    bad = [(x, y) for y in range(rail - 2) for x in (*range(80), *range(295, 375))
+           if glass(x, y) and buf[y * 375 + x] != felt(x, y)]
+    assert bad == [], bad[:10]
+    g.close()
+
+
+def test_cabin_solitaire_is_games_second_engine_row_and_opens_over_the_whole_screen(fw):
+    p = Page(fw, {ART_FILE: ART})
+    moved = []
+    fw.mock('widget_move_resize', lambda w, x, y, ww, hh, *_: moved.append((w, x, y, ww, hh)) and 0)
+    assert p.s.engines >= 2 and fw.var('eng_solitaire', GameDef).name == b'Cabin Solitaire'
+    p.go(ENGINE + 1)
+    assert p.s.screen == ENGINE + 1 and api(fw)['eng_live']()
+    assert moved[-1] == (p.s.sheet, 0, 0, 375, 320)  # the page is the window, from the screen's top
+    en = Eng.from_address(fw.var('engine__en', C.c_void_p).value)
+    assert en.h == 320
+    p.key(RETURN)
+    assert p.s.paused == 2 and not api(fw)['eng_live']()
+    p.key(RETURN)  # Continue
+    p.go(ENGINE)  # Bricks: under the status row again
+    assert moved[-1][3:] == (375, p.s.h) and moved[-1][2] > 0
+    p.close()
+    assert not fw.var('engine__en', C.c_void_p).value
