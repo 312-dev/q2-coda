@@ -659,6 +659,16 @@ void *label(void *parent, int x, int y, int w, int h, const char *style, int px,
 void spot_yield(void), spot_stop(void), radio_stop(void);
 void headset_volume_reset(void);
 int vol_next(unsigned key); /* volume.c: the volume a wheel tick moves to, at the wheel's speed */
+/* bt_vol_limit.c: a Bluetooth device's Volume Limit
+ * (docs/internals.md#headset-controls-and-volume); vol_cap is the volume's top now, Max Volume and
+ * over Bluetooth the device's limit */
+int vol_cap(void), btlim_get(const char *mac), btlim_departing(int v), btlim_entering(int v);
+int btlim_edit_get(void);
+void btlim_poll(void), btlim_saved(void), btlim_set(const char *mac, int v);
+void btlim_forget(const char *mac), btlim_text(int v, char *s, unsigned n);
+void btlim_edit(const char *mac), btlim_edit_take(int v), btlim_edit_save(void);
+void btlim_edit_row(void *label);
+int wheel_level(int value, int lo, int hi, int full, int dir); /* levels.c: a wheel tick's level */
 void headset_poll(void), headset_eq_poll(void), headset_manual(void);
 /* loop_wake.c: any thread ends the UI loop's idle (docs/internals.md#the-ui-loops-wait); the touch
  * thread's per-sample form only while it idles */
@@ -746,6 +756,7 @@ void slider_page_dirty(
 void stock_more_speed(void *win);
 int xfade_page(void *top);                       /* crossfade.c */
 int xfade_volume_shown(void *top);               /* crossfade.c */
+int xfade_open(void *ctx, void *event);          /* crossfade.c: its slider page, by row */
 int night_page(void *top);                       /* crossfade.c */
 void xfade_ends(char *lo, char *hi, unsigned n); /* crossfade.c: its page's range ends */
 /* slider_page.c: EQ's Simple tab as a set_switch theme draws it (docs/oled-design.md Progress and

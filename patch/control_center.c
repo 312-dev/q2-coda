@@ -479,10 +479,12 @@ void cc_paint(void *win, void *canvas) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
-/* Volume to v of 100, up to Volume Limit, saved for the output in use, as Car Remote sets it. */
+/* Volume to v of 100, up to vol_cap (Max Volume and a Bluetooth device's Volume Limit), saved for
+ * the output in use, as Car Remote sets it. */
 static void cc_volume(int v) {
+    int top = vol_cap();
     if (v < 0) v = 0;
-    if (v > g_maxvolume) v = g_maxvolume;
+    if (v > top) v = top;
     if (v == g_volume) return;
     g_volume = (unsigned char)v;
     device_set_volume(v, 1);
@@ -617,7 +619,8 @@ static int cc_drag(void *track, void *event) {
     for (void *p = track; p; p = P(p, W_PARENT)) at -= I(p, W_X);
     if (w > 0 && pointer_down()) {
         int v = (at < 0 ? 0 : at > w ? w : at) * 100 / w;
-        ccv.want = (unsigned char)((v > g_maxvolume ? g_maxvolume : v) + 1);
+        int top = vol_cap();
+        ccv.want = (unsigned char)((v > top ? top : v) + 1);
         unsigned since = (unsigned)time_now_ms() - ccv.at;
         if (since >= CC_VOL_WRITE_MS)
             cc_vol_write();

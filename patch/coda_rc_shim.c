@@ -682,9 +682,10 @@ static void cr_run(const char *raw) {
         cr_said(seq, verb + 1, before, code == 3 ? "not that song now" : code ? "refused" : 0);
         cr_ack(seq, code);
     } else if (verb && __isoc99_sscanf(verb, " volume %d", &v) == 1 && v >= 0 && v <= 100) {
-        /* as the AirPlay app sets it (airplay.c): up to Volume Limit, saved for the output in use */
+        /* as the AirPlay app sets it (airplay.c): up to vol_cap (Max Volume and a Bluetooth
+         * device's Volume Limit, bt_vol_limit.c), saved for the output in use */
         cr_said(seq, verb + 1, media_status(), 0);
-        if (v > g_maxvolume) v = g_maxvolume;
+        if (v > vol_cap()) v = vol_cap();
         int from = g_volume;
         g_volume = (unsigned char)v;
         device_set_volume(v, 1);

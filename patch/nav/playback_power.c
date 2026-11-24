@@ -299,6 +299,10 @@ int ringnav_write_config(int value, const char *section, const char *key) {
         section = "Q2POD", key = "AIRVOL"; /* an AirPlay speaker's, while it plays (airplay.c) */
     else if (!tk_strcmp(section, "PLAYSET") && !tk_strcmp(key, "VOLUME") && mclGetOutputWay() == 1)
         key = "BT_VOLUME";
+    if (!tk_strcmp(section, "PLAYSET") &&
+        (!tk_strcmp(key, "VOLUME") || !tk_strcmp(key, "BT_VOLUME")))
+        btlim_saved(); /* the user's level now, not one a device's limit pulled down
+                          (bt_vol_limit.c) */
     if (config_hold(value, section, key)) return 0;
     return stock_write_config_trampoline(value, section, key);
 }
@@ -308,7 +312,8 @@ int ringnav_output(int way) {
     int changed = (old == 1) != (way == 1);
     if (changed &&
         !airplay_on()) { /* a speaker's level stays its own; airplay.c swaps back at its end */
-        write_int_config(g_volume, "PLAYSET", "VOLUME");
+        /* Bluetooth's level as it was before a device's limit pulled it down (bt_vol_limit.c) */
+        write_int_config(old == 1 ? btlim_departing(g_volume) : g_volume, "PLAYSET", "VOLUME");
         config_settle(1); /* the old output's level on the flash before the new one's is read */
         char s[256] = "";
         toolsReadConfig("/mnt/data/config.ini", "PLAYSET", way == 1 ? "BT_VOLUME" : "VOLUME", s,
@@ -318,6 +323,7 @@ int ringnav_output(int way) {
         for (i = 0; i < 3 && s[i] >= '0' && s[i] <= '9'; ++i) v = v * 10 + s[i] - '0';
         if (!i || s[i] || v > 100) v = g_volume;
         if (v > g_maxvolume) v = g_maxvolume;
+        if (way == 1) v = btlim_entering(v); /* and the device's Volume Limit (bt_vol_limit.c) */
         g_volume = (unsigned char)v;
         headset_volume_reset();
     }
@@ -382,14 +388,15 @@ int ringnav_btvol(int left, int right) {
  * absolute volume gets the slow pace lit too, signal or not. ponytail: without the signal, dark,
  * the headset's keys can pass the limit for up to BT_VOLUME_LIMIT_MS before it is pulled back. */
 static void bt_volume_poll(void) {
+    btlim_poll(); /* the connected device's Volume Limit, Link Volume on or off (bt_vol_limit.c) */
     unsigned now = time_now_ms();
     if (bt_vol_event_take()) btvol.pending = 1;
     int live = bt_vol_event_live();
-    unsigned gap = btvol.failed                       ? BT_VOLUME_SLOW_MS
-                   : live                             ? BT_VOLUME_FALLBACK_MS
-                   : g_backlight_status               ? 400u
-                   : btvol.ready && g_maxvolume < 100 ? BT_VOLUME_LIMIT_MS
-                                                      : BT_VOLUME_SLOW_MS;
+    unsigned gap = btvol.failed                     ? BT_VOLUME_SLOW_MS
+                   : live                           ? BT_VOLUME_FALLBACK_MS
+                   : g_backlight_status             ? 400u
+                   : btvol.ready && vol_cap() < 100 ? BT_VOLUME_LIMIT_MS
+                                                    : BT_VOLUME_SLOW_MS;
     if (btvol.pending && !btvol.failed && gap > BT_VOLUME_EVENT_GAP_MS)
         gap = BT_VOLUME_EVENT_GAP_MS;
     if (now - btvol.checked < gap) return;
@@ -412,7 +419,7 @@ static void bt_volume_poll(void) {
     }
     if (cur == btvol.last) return;
     int v = bt_vol_q2((unsigned)cur), from = g_volume;
-    int limit = g_maxvolume < 100 ? g_maxvolume : 100;
+    int limit = vol_cap(); /* Max Volume and the device's Volume Limit */
     if (v > limit) v = limit;
     btvol.last = cur;
     g_volume = (unsigned char)v;
