@@ -230,6 +230,27 @@ b.poll(O['BT_VOLUME_SLOW_MS']-400); assert any(c[0]=='btctl_transport_get_volume
 b=BtVolumeMachine(); b.byte(syms['g_maxvolume'],60); b.poll(); b.byte(syms['g_backlight_status'],0); b.absolute=127
 b.poll(); assert not b.writes()
 b.poll(O['BT_VOLUME_LIMIT_MS']-400); assert b.writes()==[76] and b.u.mem_read(syms['g_volume'],1)[0]==60; passed()
+# A Bluetooth device's Volume Limit (bt_vol_limit.c): the headset's own keys are pulled back to it, Link Volume on, as
+# to Max Volume, and the lower of the two holds; another device connected has none. Stock's link list's last item is
+# the device, at status 3.
+class BtLimitMachine(BtVolumeMachine):
+    def __init__(self,mac='AA:BB:CC:DD:EE:01'):
+        super().__init__(); self.mac=mac
+        self.handlers[syms['getBtLinkSize']]='getBtLinkSize'; self.handlers[syms['getBtLinkItem']]='getBtLinkItem'
+    def hook(self,u,address,size,unused):
+        name=self.handlers.get(address,'')
+        if name=='getBtLinkSize': self.returns(1); return
+        if name=='getBtLinkItem':
+            self.word(u.reg_read(REGS[1]),3); u.mem_write(u.reg_read(REGS[2]),self.mac.encode()+b'\0'); self.returns(0); return
+        return super().hook(u,address,size,unused)
+    def limit(self,v,mac='AA:BB:CC:DD:EE:01'):
+        self.call(address=payload_syms['btlim_set'],args=(self.string(mac),v,0,0),gap=0)
+for top,limit,want in ((100,40,40),(30,40,30),(100,100,100)):
+    b=BtLimitMachine(); b.byte(syms['g_maxvolume'],top); b.limit(limit); b.poll(); b.calls=[]; b.absolute=127  # its keys, up to the top
+    b.poll(); assert b.u.mem_read(syms['g_volume'],1)[0]==want and b.writes()==([] if want==100 else [(127*want+50)//100]),(top,limit)
+    passed()
+b=BtLimitMachine(mac='AA:BB:CC:DD:EE:02'); b.limit(40); b.poll(); b.absolute=127; b.poll()
+assert b.u.mem_read(syms['g_volume'],1)[0]==100 and not b.writes(); passed()  # another device: no limit
 # A headset that can't report absolute volume is asked again at the slow pace, lit too, not every 400 ms.
 b=BtVolumeMachine(); b.absolute=-1; asks=[]
 for _ in range(2*O['BT_VOLUME_SLOW_MS']//400): b.poll(); asks.append(sum(c[0]=='stock_btvol' for c in b.calls))
