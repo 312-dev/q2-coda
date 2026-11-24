@@ -374,9 +374,12 @@ class Q2:
         """A list's rows as they show: each row's caption and detail (its labels' text, in order)."""
         return [tuple(self.texts.get(label) for label in self.children.get(item, [])) for item in self.children.get(view, [])]
 
-    def songs_of(self, view):
-        """Up Next's songs after the playing one (upnext.c): each queued or coming row's title, as (title,)."""
-        return [(self.titles[item],) for item in self.children.get(view, []) if item in self.titles and
+    def songs_of(self, view, played=False):
+        """Up Next's songs after the playing one (upnext.c): each queued or coming row's title, as (title,); played,
+        the rows above the playing song's header instead (a shuffle's songs played, oldest first)."""
+        kids = self.children.get(view, [])
+        head = next((i for i, w in enumerate(kids) if self.names.get(w) == b'_mm_head'), 0)
+        return [(self.titles[item],) for item in (kids[:head] if played else kids[head:]) if item in self.titles and
                 (item, O['EVT_CLICK']) in self.handlers]
 
     def tap_song(self, title, view=None):
@@ -1124,22 +1127,18 @@ def test_under_stock_shuffle_crossfade_asks_about_the_very_track_that_plays_next
     q = q2(files, tags, config={'XFADE': '1'})
     C.c_ubyte.from_address(O['MCL_GAPLESS']).value = 1
     q.update()
-    q.call('mclSetPlayMode', SHUFFLE)  # Play Mode: stock's Shuffle, which draws each next at the change
+    q.call('mclSetPlayMode', SHUFFLE)  # Play Mode: stock's Shuffle
     q.songs()
     q.pick('Dawn', SONGS)
     asked = []
     for _ in range(24):
         q.play_for(SONG - 1)
-        drawn = len(q.pool_left()) >= 2  # drawn ahead; with one left the pool refills at the change, unknown
         ms = fade(q)[0]
         q.play_for(1)
-        if drawn:
-            asked.append((ms, q.opened[-1] == ECHO))
-    # Stock's pool holds the queue's 8 at the first change and loses the track left at each; emptied, it refills with
-    # the 7 not playing. So the 8th, 15th and 22nd changes draw at the change and the other 21 were drawn ahead. The
-    # first 7 are one pass over the pool, the 7 tracks after Dawn each once: the DSD file comes next once among them.
-    assert len(asked) == 24 - 3 and sum(dsd for _, dsd in asked[:7]) == 1
-    # no fade into the DSD file exactly when it comes next: the fade was set for the track that then played
+        asked.append((ms, q.opened[-1] == ECHO))
+    # Stock's Shuffle is played as an order (playback.c shuffle_own), so every change's next is known ahead: the first
+    # 7 are the rest of the first pass, the 7 tracks after Dawn each once, and the DSD file comes next once among them.
+    assert sum(dsd for _, dsd in asked[:7]) == 1
     assert all((ms == 0) == dsd for ms, dsd in asked)
 
 
@@ -1221,9 +1220,11 @@ def test_a_shuffle_restarted_with_memory_playback_plays_on_in_the_order_it_had(q
     q.fw.fn('shuffle_menu', C.c_int, C.c_void_p, C.c_void_p)(None, None)
     q.tap('Shuffle Songs')
     rows = [title for title, in up_next(q)]
+    first = title_of(q, q.opened[-1])
     q.play_for(2 * SONG + 5)  # the third song of the pass, 5 s in
     playing = title_of(q, q.opened[-1])
     assert playing == rows[1]
+    played = [first, rows[0]]
     q.call('save_memoryplay_info')
 
     q = restart(q, TRACK)
@@ -1231,6 +1232,7 @@ def test_a_shuffle_restarted_with_memory_playback_plays_on_in_the_order_it_had(q
     q.call('player_play_pause')
     assert [title_of(q, p) for p in q.opened] == [playing] and q.elapsed() == 0  # Track: the song, from its start
     assert [title for title, in up_next(q)] == rows[2:]  # Up Next as it was
+    assert [title for title, in q.songs_of(q.last('scroll_view_create'), played=True)] == played  # and above it
     q.play_for(11 * SONG)
     assert [title_of(q, p) for p in q.opened[1:]] == rows[2:]  # the rest of the pass, then the next as it was drawn
 

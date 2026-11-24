@@ -759,8 +759,8 @@ static int pass_carry(entry *dst, const entry *old, unsigned n0, const unsigned 
     for (unsigned x = 0; x < s.n; ++x) {
         if (in[x]) continue;
         unsigned j = scatter ? rand_below(k + 1) : k;
-        memmove(v + j + 1, v + j, (k - j) * sizeof *v);
-        v[j] = (entry){ x, s.groups[x], 0 }, ++k;
+        for (unsigned i = k++; i > j; --i) v[i] = v[i - 1];
+        v[j] = (entry){ x, s.groups[x], 0 };
     }
     memcpy(dst, v, s.n * sizeof *v);
     free(in), free(v);
