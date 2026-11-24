@@ -661,6 +661,14 @@ def test_the_board_is_drawn_in_its_inks_and_washes(fw):
     like = [i for i in range(81) if i != 2 and (s.v.clue[i] or s.v.ent[i]) == SOLVED[2]]
     assert like and all(at(i, 6, 4) == TWIN for i in like)
     assert all(at(i, 6, 4) in (PAPER, GRAIN, FLECK, PEER) for i in range(81) if i != 2 and i not in like)
+    s.v.cur, s.last = 0, SOLVED[2]  # an empty cell: the last digit placed, the one its dial opens on
+    for _ in range(5):
+        g.step()
+    assert all(s.key[i] & B_TWIN for i in like) and not s.key[1] & B_TWIN  # (cell 1 is empty too)
+    s.last = 0
+    for _ in range(3):
+        g.step()
+    assert not any(k & B_TWIN for k in s.key)  # none placed yet: no twins
     g.close()
 
 

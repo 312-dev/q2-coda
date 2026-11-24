@@ -1,8 +1,8 @@
-/* Sudoku (docs/games-engine.md#evening-puzzle), "The Evening Puzzle": a 9 x 9 grid made on the device for
- * one of three levels, on a newspaper's puzzle page over the whole screen, entered with the wheel
- * through a dial of digits on a sticky note. The generator fills a grid by randomized backtracking,
- * then empties it in symmetric pairs while the level's test still finds one solution, a slice of
- * work a step so no frame is late. */
+/* Sudoku (docs/games-engine.md#evening-puzzle), "The Evening Puzzle": a 9 x 9 grid made on the
+ * device for one of three levels, on a newspaper's puzzle page over the whole screen, entered with
+ * the wheel through a dial of digits on a sticky note. The generator fills a grid by randomized
+ * backtracking, then empties it in symmetric pairs while the level's test still finds one solution,
+ * a slice of work a step so no frame is late. */
 #include "engine.h"
 #include "game_sudoku_art.inc"
 #include "peq_platform.h" /* time_now_ms, stock's clock: the puzzle's time between inputs */
@@ -298,19 +298,19 @@ static int peer(const struct sudoku *s, int i, int j) { /* i itself too */
     return s->of[i][0] == s->of[j][0] || s->of[i][1] == s->of[j][1] || s->of[i][2] == s->of[j][2];
 }
 
-/* A cell's washes: the cursor's row, column and box (peer), the cells holding the cursor's digit
- * (twin), the cursor, a finished unit's wave. */
+/* A cell's washes: the cursor's row, column and box (peer), the cells holding the cursor's digit,
+ * or on an empty cell the last digit placed, the one its dial opens on (twin), the cursor, a
+ * finished unit's wave. */
 enum { B_PEER = 1, B_TWIN = 2, B_CUR = 4, B_WAVE = 8 };
 enum { K_CLUE = 1, K_ENTRY, K_CLASH };
 /* How cell i looks: its washes (B_*) in bits 0-3, its digit's kind (K_*) in 4-5, the digit in 6-9,
  * in 10 a digit a slip clashes with (underlined), its notes in 11-19 when it has no digit. The
  * peers and twins are of wcur, which the wash follows the cursor to a stage a step (step). */
 static unsigned look(const struct sudoku *s, int i) {
-    int d = digit(s, i), w = s->wcur, bg = 0;
+    int d = digit(s, i), w = s->wcur, bg = 0, t = digit(s, w) ? digit(s, w) : s->last;
     if (s->mode == PLAY) {
         if (s->wash)
-            bg = (peer(s, i, w) ? B_PEER : 0) |
-                 (s->wash > 1 && i != w && d && d == digit(s, w) ? B_TWIN : 0);
+            bg = (peer(s, i, w) ? B_PEER : 0) | (s->wash > 1 && i != w && d && d == t ? B_TWIN : 0);
         bg |= i == s->v.cur ? B_CUR : 0;
     }
     for (int k = 0; s->wave && k < 9; ++k)
