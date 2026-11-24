@@ -808,20 +808,35 @@ int np_queue(const void *unused) {
     return 0;
 }
 
-static int qm_apply(void *add, int next) {
+/* add into the queue playing, or loaded as a queue of class cls when there is none (album: an
+ * album's, remembered as one). */
+static int queue_apply(void *add, int next, int cls, int album) {
     void *queue = P(mcl_pdeqplaylist, 0);
     if (!queue || airplayGetFlag() == 2) return 0;
     unsigned size = deque_size(queue), type = (unsigned)MCL(MCL_TYPE), n = deque_size(add);
     /* Only a local (folder or library) queue grows; streams keep theirs. */
     if (size && type != 1 && (type & 0xf000) != 0xf000) return 0;
-    int album = st.qm_kind == QM_COVERFLOW || st.qm_kind == QM_COVERALBUM;
-    if (n && !size) { /* loads without starting playback; only a real folder is class 1 */
+    if (n && !size) { /* loads without starting playback */
         if (album) album_memory(deque_at(add, 0));
-        mclLoadPlayList(add, 0, st.qm_kind == QM_FOLDER ? 1 : album ? 0xff10 : (int)st.qm_cls);
+        mclLoadPlayList(add, 0, cls);
     } else if (n)
         qm_insert(queue, add, next);
     return n != 0;
 }
+
+static int qm_apply(void *add, int next) {
+    int album = st.qm_kind == QM_COVERFLOW || st.qm_kind == QM_COVERALBUM;
+    /* only a real folder is class 1 */
+    return queue_apply(add, next,
+                       st.qm_kind == QM_FOLDER ? 1
+                       : album                 ? 0xff10
+                                               : (int)st.qm_cls,
+                       album);
+}
+
+/* A card app's song queued from its own page (addon.c queue_poll): as a song list's (0xf001, the
+ * class an app's stream plays as) when nothing is queued. */
+int queue_add(void *add, int next) { return queue_apply(add, next, 0xf001, 0); }
 
 /* A 1.5 s modal dialog (oled-design.md's toast): its loop runs every ringnav_sleep poll
  * again, so a poll clears or latches what it toasts first (logo_poll). */

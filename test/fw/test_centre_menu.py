@@ -8,7 +8,7 @@ import struct
 import pytest
 
 from conftest import O, claim, ui_name
-from test_nav_hold import (Hold, Ui, recs, scratch, song, st, use_set)  # noqa: F401
+from test_nav_hold import (Hold, Ui, cstr, directory, field, recs, scratch, song, st, use_set)  # noqa: F401
 from test_nav_loop import key_event, stock_bytes  # noqa: F401
 from test_upnext import PAGE, Low, Page, Queue, low  # noqa: F401
 
@@ -298,3 +298,175 @@ def test_centre_held_on_playing_next_keeps_its_lift_and_a_finger_does_not(fw, pl
     page.select(1)
     assert fw.fn('un_menu_hold', C.c_int, C.c_void_p, C.c_int)(PAGE, 0) == 1
     del keys
+
+
+# A card app's own page (addon.c addon_row_hold, docs/internals.md#card-apps): a row whose hold op is "hold" (an app that
+# sees "holdmenu" in the caps, q2-subsonic's song rows) gets the menu the app answers that op with.
+def app_song(i, hold=b'hold'):
+    return (b'action', b'play', b'Song %d' % i, b'Settle \xc2\xb7 4:1%d' % i, b'song:s%d top:ar1 %d album:al1' % (i, i), hold)
+
+
+APP_MENU = [(b'action', b'next', b'Play Next', b'', b'song:s1 top:ar1 1 album:al1', b''),
+            (b'action', b'last', b'Play Last', b'', b'song:s1 top:ar1 1 album:al1', b''),
+            (b'action', b'toggle', b'Sync Offline', b'', b'song:s1', b'')]
+
+
+class Head(C.Structure):
+    _fields_ = [('title', C.c_char * 96), ('sub', C.c_char * 96), ('url', C.c_char * 160), ('bars', C.c_int)]
+
+
+class Modal(C.Structure):
+    """menu_modal.c's modals[]: an open sheet, its header kept."""
+    _fields_ = [*((n, C.c_void_p) for n in ('win', 'list', 'view')), *((n, C.c_int) for n in ('top', 'high', 'ly', 'off', 'head_y')),
+                ('head', Head)]
+
+
+def sheet_head(fw):
+    """The open sheet's header, its title and subtitle."""
+    open_ = [m for m in fw.var('menu_modal__modals', Modal * 2) if m.win]
+    return (open_[0].head.title, open_[0].head.sub) if open_ else None
+
+
+class AppPage:
+    """An app's Top Songs (LAY_TOP) open in the Ui world, the worker never run: answer() puts the reply where its thread
+    would and the page's tick takes it, as test_addon.py's Page does."""
+    def __init__(self, fw, ui, hold, rows):
+        from test_addon import LAY_TOP, Ap, Pg, Req
+        self.fw, self.ui, self.hold = fw, ui, hold
+        ap = fw.var('addon__ap', Ap)
+        ap.n, a = 1, ap.a[0]
+        a.id, a.name, a.bin, a.pid = b'foo', b'Foo', b'/mnt/mmc/.foo/q2-foo', b'/tmp/q2-foo'
+        a.state, a.browse = b'/tmp/q2-foo.state', b'/tmp/q2-foo.browse.sock'
+        a.present = a.launched = a.queue_seen = 1
+        hold.card.files.update({'/mnt/mmc/.foo/q2-foo': b'', '/tmp/q2-foo': b'1'})
+        fw.mock('fw_pthread_create', lambda *_: 0)
+        def screen(*_):  # a window is the screen's size, as stock makes it: the page's list lays out under its title
+            w = ui.window('')
+            ui.place(w, 0, 0, 375, 320)
+            return w
+        fw.mock('window_create', ui.guard(screen))
+        self.pg, self.req = fw.var('addon__pg', Pg), fw.var('addon__req', Req)
+        at = fw.fn('addon__page_at', C.c_int, C.c_int, C.c_char_p, C.c_char_p, C.c_char_p, C.c_int)
+        assert at(0, b'top', b'\tartist:ar1', b'Top Songs', 0) == 1
+        self.pg.lv[0].lay = LAY_TOP
+        self.rows = rows
+        self.answer(rows)
+        self.page, self.view = self.pg.page, self.pg.view
+        C.c_ubyte.from_address(self.view + O['VIEW_VERTICAL']).value = 1  # stock's scroll_view in a list_view scrolls so
+        assert self.ui.top() == self.page and self.pg.lv[0].n == len(rows)
+
+    def answer(self, rows=(), msg=b'', status=b'ok'):
+        assert self.req.buf, 'no request in flight to answer'
+        data = b'Q2SPOT/1\n%d\t%s\t%s\t\n' % (self.req.id, status, msg) + b''.join(b'\t'.join(r) + b'\n' for r in rows)
+        C.memmove(self.req.buf, data + b'\0', len(data) + 1)
+        self.req.n, self.req.fail, self.req.done = len(data), 0, 1
+        self.fw.fn('addon__tick', C.c_int, C.c_void_p)(None)
+
+    def request(self):
+        return C.string_at(self.req.buf)[:self.req.len] if self.req.buf else b''
+
+    def select(self, i):
+        self.fw.fn('ringnav_select', None, C.c_void_p, C.c_int, C.c_int)(self.view, i, self.pg.lv[0].n)
+
+    def menu(self):
+        view = self.hold.view() if self.hold.dialog in self.ui.stack else 0
+        return [(self.ui.label(k), self.ui.nodes[k].props.get('_mm_icon')) for k in self.ui.items(view)] if view else None
+
+
+@pytest.fixture
+def app(fw, ui, hold):
+    return AppPage(fw, ui, hold, [app_song(i) for i in range(3)] + [(b'info', b'', b'3 songs', b'', b'', b'')])
+
+
+def test_centre_held_on_an_apps_song_asks_the_app_for_its_menu_and_shows_it(app, centre, ui):
+    app.select(1)
+    centre.press()
+    assert armed(ui) == [HOLD_MS]
+    centre.wait()
+    assert app.request().endswith(b'\thold\tsong:s1 top:ar1 1 album:al1\n')
+    assert not centre.shutdown_pending()  # this press never reaches Shut Down?
+    assert centre.release() == STOP  # nor plays the song
+    app.answer(APP_MENU)
+    assert app.menu() == [('Play Next', 'arrow-bend-down-right'), ('Play Last', 'queue'), ('Sync Offline', 'cloud-arrow-down')]
+    assert sheet_head(app.fw) == (b'Song 1', b'Settle')  # the row's title, its subtitle's first part
+
+
+def test_a_pick_from_an_apps_menu_sends_that_rows_op(app, centre, ui):
+    app.select(1)
+    centre.press()
+    centre.wait()
+    app.answer(APP_MENU)
+    ui.click(ui.find(app.hold.view(), 'Play Last'))
+    ui.due('menu_modal__pick_run')
+    assert app.request().endswith(b'\tlast\tsong:s1 top:ar1 1 album:al1\n')
+
+
+def test_an_apps_row_with_another_hold_op_keeps_stock_s_centre_hold(fw, ui, hold, centre):
+    page = AppPage(fw, ui, hold, [app_song(i, b'toggle') for i in range(3)])
+    page.select(1)
+    sent = page.req.id
+    centre.press()
+    centre.wait()
+    assert page.req.id == sent and centre.shutdown_pending()  # nothing asked; Shut Down? still at 1000 ms
+
+
+def test_a_finger_held_on_an_apps_song_selects_it_and_its_lift_clicks_nothing(app, ui, fw):
+    to_local(ui)
+    aborts = []
+    fw.mock('widget_dispatch_event_to_target_recursive', lambda w, e, *_: aborts.append(C.c_int.from_address(e + EVENT_TYPE).value) or 0)
+    app.select(0)
+    x, y, w = 100, 10, ui.items(app.view)[2]
+    while w in ui.nodes:  # a point in the third row, on the screen
+        dx, dy = ui.nodes[w].rect()[:2]
+        x, y, w = x + dx, y + dy, ui.nodes[w].parent
+    ui.pressed = 1
+    finger(fw, POINTER_DOWN, x, y)
+    ui.due('cm_touch_due')
+    assert ui.prop(app.view, '_ringnav_index', -1) == 2
+    assert app.request().endswith(b'\thold\tsong:s2 top:ar1 2 album:al1\n')
+    assert aborts == [EVT_POINTER_ABORT]  # the row's press let go: the lift plays nothing
+
+
+def test_play_next_and_play_last_from_an_apps_menu_land_where_the_hold_menus_do(fw, ui, hold, centre, recs):
+    """The app fetches the song, names it in its .queue and answers; the firmware queues it at once as the Library's
+    hold menu does (library_pages.c queue_add): Play Next after the song playing, Play Last at the end of what plays
+    next, each toasted with its words."""
+    songs = [song(recs, i) for i in range(3)]
+    hold.now_playing(songs, at=0, held=True)
+    pool, cells = C.c_uint64.from_address(O['MCL_POOL']).value & 0xffffffff, []
+    def push(q, v, *_):  # stock's shuffle pool holds ints: deque_at gives an element's address
+        if q & 0xffffffff == pool:
+            cells.append(C.c_int(v))
+            v = C.addressof(cells[-1])
+        return hold.deques.push(q, v)
+    fw.mock('fw__deque_push_back', push)
+    app = AppPage(fw, ui, hold, [app_song(i) for i in range(3)])
+    fetched = {}
+    def listing(path, *_):
+        folder = cstr(path)
+        rows, q = [r for p, r in fetched.items() if p.rsplit('/', 1)[0] == folder], directory(fw)
+        hold.deques.free(q)
+        for r in rows:  # stock's listing: its own copy of each record
+            hold.deques.push(q, r)
+        return len(rows)
+    fw.mock('toolsLoadDirectory', listing)
+    queue_file = ''
+    for i, (row, op, said) in enumerate((('Play Next', 'next', 'Playing Next'), ('Play Last', 'last', 'Playing Last'))):
+        app.select(i)
+        centre.press()
+        centre.wait()
+        centre.release()
+        app.answer(APP_MENU)
+        ui.click(ui.find(hold.view(), row))
+        ui.due('menu_modal__pick_run')
+        assert app.request().endswith(b'\t%s\tsong:s1 top:ar1 1 album:al1\n' % op.encode())
+        path = f'/mnt/mmc/.foo/stream/a/song {i} [s{i}].flac'
+        fetched[path] = recs(path=path, title=f'Fetched {i}', album='Settle', artist='Disclosure')
+        queue_file += f'{7 + i} {op} {path}\n'
+        hold.card.files['/tmp/q2-foo.queue'] = queue_file.encode()
+        app.answer()  # its reply says nothing: the song is queued and toasted at once
+        assert ui.toasts[-1] == said
+        app.answer(app.rows)  # the level asked again after the action, as after any
+    queued = [field(r, O['REC_PATH']) for r in hold.deques[hold.queue]]
+    assert queued == ['/mnt/mmc/Music/0.flac', '/mnt/mmc/.foo/stream/a/song 0 [s0].flac',
+                      '/mnt/mmc/.foo/stream/a/song 1 [s1].flac', '/mnt/mmc/Music/1.flac', '/mnt/mmc/Music/2.flac']

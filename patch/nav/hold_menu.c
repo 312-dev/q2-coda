@@ -634,12 +634,13 @@ static int qm_hold(int songs) {
 /* Centre held on top's selected row (centre_menu.c): a song's hold menu, the one Play/Pause's hold
  * opens, on Up Next's queued song (upnext.c un_menu_hold), a payload playlist page's song
  * (playlist_page_song_hold), a song result of Search (search_strip.c search_strip_song_hold) or a
- * list's song row (qm_hold's songs); 1 when it is on its way. Any
- * other row is left as it was: stock's Centre hold, or the page's own. */
+ * list's song row (qm_hold's songs); a card app's row its own menu, the app's (addon.c
+ * addon_row_hold); 1 when it is on its way. Any other row is left as it was: stock's Centre hold,
+ * or the page's own. */
 static int qm_song_row_hold(void *top, unsigned by, int centre) {
     qm_hold_key = by;
     int taken = un_menu_hold(top, centre) || playlist_page_song_hold(top) ||
-                search_strip_song_hold(top) || qm_hold(1);
+                search_strip_song_hold(top) || addon_row_hold(top) || qm_hold(1);
     qm_hold_key = 0;
     return taken;
 }
