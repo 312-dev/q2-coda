@@ -234,7 +234,7 @@ In the emulator, 10 s of play (`design/games/bricks/bricks-play.mp4`, a finger f
 | The summary's dearest frame (the sheet coming up, the score counting)        | 313,492                      | 350,000                  |
 | The whole sheet (the open, a round's start, the end)                          | 1,259,741                    | 1,400,000                |
 
-The whole sheet is about 10 instructions a pixel, most of it the room's runs; `blit` writes a run in unrolled loops and leaves out the rows a sheet drawn over it covers. A round's first frame and the end are whole-sheet paints, as Bricks's start is. EMULATOR_LINE The payload grows by PAYLOAD_LINE; the state is STATE_LINE bytes and the heap at most HEAP_LINE with the art and the worker's rows; no `.scratch`.
+The whole sheet is about 10 instructions a pixel, most of it the room's runs; `blit` writes a run in unrolled loops and leaves out the rows a sheet drawn over it covers. A round's first frame and the end are whole-sheet paints, as Bricks's start is. In the emulator, 10 s of a round with the dial turned back and forth all the while (`design/games/guess-the-song`'s capture, `capture.py`): 44.8 flips a second, median gap 17.8 ms, 95th 19.6 ms, with the host's load average near 10; the 12 gaps over 34 ms (the longest 178 ms) fall where the dial had sprung back and the next turn had not come (the driver starts a process for each), the picture at rest, which paints nothing. The payload grows by 22,176 bytes (`patch_bytes` 1,381,912, of the 28 KB a game may add, the full-screen page's code in `games.c` included); the state is 360 bytes and the heap at most about 216 KB with the art and the worker's rows; no `.scratch`.
 
 ## Libraries
 
