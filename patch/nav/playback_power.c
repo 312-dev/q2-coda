@@ -537,6 +537,7 @@ static int playing_stream(void) {
 int ringnav_sleep(void *loop) {
     ui_watch_enter();  /* the UI pass watchdog (ui_watch.c): this pass's work so far */
     cover_wake_poll(); /* stock's album cover thread, woken for a request (cover_wake.c) */
+    name_order_poll(); /* a Library list's order sorted ahead after a library change */
     splash_poll();
     usb_ui_poll(); /* USB and charging toasts, adbd's questions (usb_ui.c) */
     stale_heal();

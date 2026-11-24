@@ -1275,6 +1275,13 @@ void song_order(void *list);
 void rec_permute(void *list, unsigned *at);
 /* name_order.c: a sorted query's records in stock's order, kept across loads (library_query) */
 void name_order(const char *sql, int sort, void *list);
+#define NO_SONGS 1 /* the Library lists name_order_list names, their kept orders loaded ahead */
+#define NO_ALBUMS 2
+#define NO_ARTISTS 3
+void name_order_list(unsigned cls); /* the Library list the next loads are for, 0 for none */
+void name_order_poll(void);         /* every UI loop pass: a list due loaded and sorted ahead */
+void library_warm(unsigned cls, void *into); /* nav/library_pages.c: list cls's load, as its open */
+int coverflow_opening(void);                 /* coverflow.c: an open's step runs */
 void cstl_sort(void *list, void *cmp);
 extern unsigned long ui_thread; /* playback.c: the UI thread, from its first pass */
 
