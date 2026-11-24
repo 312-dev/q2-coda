@@ -6,11 +6,13 @@ carries the server id; an app too old for radios says so. The rig is test_coda_r
 test_nav_library_pages' fake and the songs test_nav_hold's Records."""
 import ctypes as C
 
+import pytest
+
 from conftest import O, mcl  # noqa: F401
 from test_coda_rc_shim import ACK, CMD, Q2
 from test_nav_library_pages import ui  # noqa: F401
 from test_nav_hold import recs  # noqa: F401
-from test_addon import card, carry, scan
+from test_addon import Qa, ap, card, carry, scan
 
 SONGS = [  # (id, artist, genre)
     (10, 'Ann', 'Rock'),  # the seed
@@ -237,3 +239,49 @@ def test_a_radio_started_mid_song_leaves_the_song_playing(fw, ui, mcl, recs):
     q2.ms += 1000
     q2.radio_poll()
     assert not fw.calls('player_seek_time') and not fw.calls('player_start_queue')
+
+
+def app_radio_rig(fw, ui, mcl, recs, mode):
+    """streaming's, Now Playing's mode set to mode (stock's MCL_MODE: 1 Repeat One, 2 shuffle, 3 Repeat All), and
+    the Radio tapped: the app is asked, and its answer's seq returned."""
+    q2, world = streaming(fw, ui, recs, b'name=Subsonic\nradio=1\n')
+    fw.mock('config_playmode', lambda m, notify, *_: setattr(mcl, 'mode', m) or 0)
+    fw.mock('write_int_config', lambda *_: 0)
+    mcl.mode = mode
+    q2.tap(None)
+    seq = world.files[b'/tmp/q2-subsonic.radio'].split(b' ')[0].decode()
+    return q2, world, seq
+
+
+def app_radio_plays(fw, q2, world, seq, title='Wasteland'):
+    """The app answers that its radio started, its queue playing (addon.c's qa: the app's, no load since), and says
+    radio=<title> in its state file while it plays; a poll a second on reads it (addon_radio)."""
+    world.files[b'/tmp/q2-subsonic.state'] = f'version=1\nradioack={seq} 0\nradio={title}\n'.encode()
+    qa = fw.var('addon__qa', Qa)
+    qa.app, qa.loads = C.addressof(ap(fw).a[0]), q2.loads.value
+    world.ms += 1000  # the card's clock (World's time_now_ms)
+    q2.radio_poll()
+
+
+@pytest.mark.parametrize('mode', [1, 2, 3], ids=['repeat one', 'shuffle', 'repeat all'])
+def test_an_apps_radio_plays_in_its_order_and_puts_the_modes_back(fw, ui, mcl, recs, mode):
+    """Repeat One left on under the app's radio played each of its songs again at its end, twice in a row, and
+    Now Playing's repeat and shuffle are dimmed while a radio plays, so it could not be turned off there. The app's
+    radio plays as the library's does: shuffle and repeat off while it plays, put back when it ends."""
+    q2, world, seq = app_radio_rig(fw, ui, mcl, recs, mode)
+    app_radio_plays(fw, q2, world, seq)
+    assert q2.on() == 1 and mcl.mode == 0  # in the radio's order, no song again
+    world.files[b'/tmp/q2-subsonic.state'] = b'version=1\n'  # the radio ended (stopped, or its songs ran out)
+    world.ms += 1000
+    q2.radio_poll()
+    assert q2.on() == 0 and mcl.mode == mode
+
+
+def test_another_list_ending_an_apps_radio_gets_the_modes_back(fw, ui, mcl, recs):
+    q2, world, seq = app_radio_rig(fw, ui, mcl, recs, 1)
+    app_radio_plays(fw, q2, world, seq)
+    assert mcl.mode == 0
+    q2.loads.value += 1  # the user played another list: the queue is no longer the app's
+    world.ms += 1000
+    q2.radio_poll()
+    assert q2.on() == 0 and mcl.mode == 1
