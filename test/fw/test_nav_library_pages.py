@@ -2372,6 +2372,42 @@ def test_a_large_decade_opens_with_a_screenful_of_rows_and_makes_the_rest_a_chun
     assert made == ['Album %04d' % i for i in range(1000)] and 5 <= passes <= 70
 
 
+class Steps:
+    """The step ui_watch.c names for the UI pass an action runs in: one late pass around each action."""
+    def __init__(self, fw):
+        self.fw, self.ms, self.lines = fw, 1000, []
+        fw.mock('time_now_ms', lambda *_: self.ms)
+        fw.var('g_backlight_status', C.c_ubyte).value = 1
+        fw.mock('fw_write', lambda fd, data, n, *_: fd == 2 and self.lines.append(C.string_at(data, n).decode()) or n)
+        fw.fn('ui_watch_woke', None)()
+
+    def of(self, action):
+        action()
+        self.ms += 5000  # late, and past the one-line-a-second limit
+        self.fw.fn('ui_watch_enter', None)()
+        self.fw.fn('ui_watch_polled', None)()
+        self.fw.fn('ui_watch_woke', None)()
+        return re.search(r'step ([^,]*),', self.lines[-1])[1]
+
+
+def test_years_names_each_step_of_a_decade(fw, ui, song, mcl):
+    steps = Steps(fw)
+    fw.mock('fw_access', lambda *_: 0)
+    Library(fw, ui, [song(b'/m/1.flac', id_=1)])
+    Albums(fw, ui, song)
+    albums = [(b'Blue', b'Band', b'1991', b'/m/blue/1.flac')] * 40
+    db = EraDb(fw, decades=[(b'1990', b'40')], albums=albums)
+    assert steps.of(lambda: call(fw, 'era_menu')) == 'years list'
+    assert steps.of(lambda: ui.click(ui.top(), 0)) == 'decade albums'
+    page = ui.top()
+    assert steps.of(lambda: ui.fire('era_rows_due')) == 'decade rows'
+    db.albums = [(b'1',)]
+    assert steps.of(lambda: ui.click(page, 0)) == 'decade play all'
+    assert steps.of(lambda: ui.click(page, 1)) == 'decade shuffle'
+    db.albums = albums
+    assert steps.of(lambda: ui.click(page, 2)) == 'decade album'
+
+
 def test_a_decade_closed_while_its_rows_are_made_stops_making_them(fw, ui):
     page, _ = big_decade(fw, ui, 500)
     assert ui.pending('era_rows_due')

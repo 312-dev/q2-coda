@@ -2,6 +2,8 @@
 took UI_LATE_MS or more while the screen was lit, with the step its caller marked last."""
 import ctypes as C
 
+import pytest
+
 
 class Loop:
     """ringnav_sleep's three marks around a pass, a clock in ms, the screen's state and ulog's lines on stderr."""
@@ -74,3 +76,18 @@ def test_nothing_is_logged_while_the_screen_is_dark(fw):
     fw.var('g_backlight_status', C.c_ubyte).value = 0
     loop.pass_(900)
     assert loop.lines == []
+
+
+# A Library list's load names its pass: the owner's late passes while browsing Years said "step -" (2026-11-24).
+@pytest.mark.parametrize('cls, step', [(0xf001, 'songs list'), (0xf003, 'albums list'), (0xf004, 'artists list'),
+                                       (0xf005, 'composers list'), (0xf006, 'genres list'), (0xff10, 'library list')])
+def test_a_library_list_load_names_its_step(fw, cls, step):
+    loop = Loop(fw)
+    fw.mock('stock_localclass_trampoline', lambda *_: 0)
+    fw.mock('getAllMusic', lambda *_: 0)
+    fw.mock('timer_add', lambda *_: 0)
+    loop.pass_(5)
+    loop.ms += 400
+    fw.fn('ringnav_localclass', C.c_int, C.c_int)(cls)
+    loop.pass_(0)
+    assert loop.lines[-1][2] == f'ui pass 400 ms, step {step}, 0 more late since'
