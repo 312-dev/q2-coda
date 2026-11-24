@@ -1029,6 +1029,9 @@ void durations_cancel(void), durations_poll(void), durations_shutdown(int bounde
 void mp_counted(void *r, unsigned key, unsigned evicted);
 int most_played(void *ctx, void *event);
 int shuffle_menu(void *ctx, void *event), shuffle_songs(void *ctx, void *event);
+/* library_lists.c: Shuffle Songs a step a UI pass, for a caller that shows a loading indicator */
+void shuffle_songs_start(void), shuffle_songs_cancel(void);
+int shuffle_songs_poll(void);
 int shuffle_play(void *all);
 /* shuffle_wait.c: the Shuffle order's build as a job the loading wait holds (start: 1 while it
  * runs; poll each frame: 1 once in place; cancel: nothing of it kept), and Shuffle's waits: Now

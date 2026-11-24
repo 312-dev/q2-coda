@@ -450,6 +450,27 @@ def test_shuffle_songs_plays_the_library_from_a_random_song(fw, ui, mcl, song):
     assert ui.windows  # the page stays, as Most Played's rows leave it
 
 
+def test_shuffle_songs_in_steps_reads_then_plays_and_a_cancel_between_changes_nothing(fw, ui, mcl, song):
+    """The three calls a loading indicator drives (library_lists.c): the first poll reads the library and plays
+    nothing, the second plays and says it is done; cancelled after the read, nothing plays and a poll is done."""
+    songs = [song(b'/m/%d.flac' % i) for i in range(4)]
+    library = Library(fw, ui, songs)
+    start, cancel = fw.fn('shuffle_songs_start', None), fw.fn('shuffle_songs_cancel', None)
+    poll = fw.fn('shuffle_songs_poll', C.c_int)
+    assert poll() == 1 and not library.asked, 'nothing asked for: done, and nothing read'
+    start()
+    assert not library.asked and not ui.played
+    assert poll() == 0 and library.asked == [3] and not ui.played
+    cancel()
+    assert poll() == 1 and library.asked == [3] and not ui.played and not ui.toasts
+    start()
+    assert poll() == 0 and not ui.played
+    assert poll() == 1
+    (queue, at, cls), = ui.played
+    assert queue == songs and 0 <= at < 4 and cls == LIBRARY and library.asked == [3, 3]
+    assert poll() == 1 and len(ui.played) == 1, 'done stays done'
+
+
 @pytest.mark.parametrize('row, folders', [(1, 0), (2, 1)])
 def test_shuffle_albums_and_folders_with_no_library(fw, ui, mcl, row, folders):
     Library(fw, ui)

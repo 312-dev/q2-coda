@@ -101,6 +101,7 @@ class PlaybackMachine(QueueMachine):
         elif name=='start_queue': self.word(O['MCL_POS'],a); self.starts.append(a); ret=1  # mclSetPlayPos, mclStartPlayer
         elif name=='mclSetStartSeekTime': self.seek=a; ret=1
         elif name=='mcl_open_preload': self.word(O['MCL_PRELOAD'],1); ret=1
+        elif name=='thread': self.held.append((c,d)); self.word(a,77)  # hold_writer: started, run by write()
         elif name=='toolsRandnum':
             self.random_calls+=1; self.rng=(self.rng*1103515245+12345)&0x7fffffff; ret=self.rng%a
         elif name=='getAllMusic':
@@ -112,6 +113,13 @@ class PlaybackMachine(QueueMachine):
             self.deqs[a][1]=[self.copy('stSongInfo',e) for e in rows]; self.word(syms['g_memory_info'],cls)
         self.returns(ret,clobber=True)
     def fn(self,name,*args): return signed(self.call(address=ps[name],args=tuple(args)+(0,)*(4-len(args)),gap=0))
+    def hold_writer(self):
+        """The queue writer's thread (playback.c store_post) starts and waits, as a thread does: write() runs it."""
+        self.held=[]; self.handlers[syms['pthread_create@GLIBC_2.2']]='p:thread'
+    def write(self):
+        held,self.held=self.held,[]
+        for start,arg in held: self.call(address=start,args=(arg,0,0,0),gap=0)
+        return len(held)
     def options(self,shuffle,repeat,folder):
         for kind,value in ((2,folder),(0,shuffle),(1,repeat)): assert self.fn('playback_set',kind,value)==1
     def advance_song(self,auto=1): return self.fn('ringnav_next',auto)
@@ -528,8 +536,9 @@ for failure in ('alloc','open','write','close','rename'):
     m.fail=''; m.now+=1; m.fn('playback_poll')
     assert m.files['/mnt/mmc/.q2pod/ringnav-queue']!=previous
     assert struct.unpack_from('<I',m.files['/mnt/mmc/.q2pod/ringnav-queue'],20)[0]==m.current()
-    assert m.allocations==attempts[0]+1 and m.write_opens==attempts[1]+2
-    m.fn('playback_save'); assert m.allocations==attempts[0]+1
+    # the save that goes through: two records for the writer, the snapshot's and the checkpoint's
+    assert m.allocations==attempts[0]+2 and m.write_opens==attempts[1]+2
+    m.fn('playback_save'); assert m.allocations==attempts[0]+2
     checks+=1
 
 # Selecting a stock mode during playback also closes a stale advanced repeat preload.
@@ -1601,6 +1610,57 @@ for n in (8,128):
         assert len(m.files['/mnt/mmc/.q2pod/ringnav-queue-elapsed'])==16
         print(f'queue={n} repeat={repeat}: successor uncached={uncached}, cold={cold}, cached={warm} instructions, traversal reads {scanned} -> 0; elapsed save {full_bytes} full -> 16 bytes')
 print('Checkpoint and polling performance checks passed')
+
+# Shuffle on a queue of the whole library (docs/internals.md#shuffle-order). The UI pass that takes stock Shuffle
+# over as an owned order (playback_poll's shuffle_own) is bounded in payload instructions, sorts no song into
+# its album, and writes no file: the queue's records go on the writer's thread. Next and Previous under it cost
+# the same at any size and any place in the order, and a queue too long to save drops its file once, not at
+# every save. 9,198 songs are a real library's; LIBRARY_BOUND is 150 instructions a song, FOLDER_BOUND 700 for
+# rows with no library id, whose identity hashes the end of the path.
+class LibraryMachine(PlaybackMachine):
+    """n songs as Songs or a folder queues them, song n//3 playing, the instructions of the payload counted."""
+    def __init__(self,n,library=True):
+        super().__init__(); self.budget=400_000_000
+        self.u.mem_map(0x20000000,0x4000000); self.next=0x20000000  # the machine's 2 MB heap holds a few hundred rows
+        self.install([(f's{i}',f'/mnt/mmc/Music/Artist {i%977}/Album {i%6174}/{i:05d} a song.flac',f'Album {i%6174}',1,i%17,0,0) for i in range(n)],n//3)
+        for i,r in enumerate(self.library_rows): self.word(r+O['REC_ID'],i+1 if library else 0)  # 0: a folder's row
+        self.word(O['MCL_TYPE'],0xf001); self.cost=0; self.sorts=0
+        self.u.hook_add(UC_HOOK_CODE,self.count_one,begin=BASE,end=SCRATCH-1)
+        self.u.hook_add(UC_HOOK_CODE,self.sorted_one,begin=ps['group_cmp'],end=ps['group_cmp'])
+    def count_one(self,*unused): self.cost+=1
+    def sorted_one(self,*unused): self.sorts+=1
+    def costs(self,name,*args):
+        self.cost=0; result=self.fn(name,*args); return self.cost,result
+N_LIBRARY=9198; LIBRARY_BOUND=150*N_LIBRARY; FOLDER_BOUND=700*N_LIBRARY
+toggle={}
+for library in (True,False):
+    m=LibraryMachine(N_LIBRARY,library); m.hold_writer(); m.fn('playback_poll')
+    m.word(O['MCL_MODE'],2); opens=m.write_opens; files=dict(m.files)
+    toggle[library],_=m.costs('playback_poll')
+    assert [m.fn('playback_option',k) for k in range(2)]==[1,5] and m.mcl('MCL_POS')==N_LIBRARY//3
+    assert toggle[library]<(LIBRARY_BOUND if library else FOLDER_BOUND),toggle
+    assert m.sorts==0, 'Shuffle Songs reads no album or folder'
+    assert m.write_opens==opens and m.files==files, 'the pass that takes Shuffle writes no file'
+    assert m.write()==1 and m.files['/mnt/mmc/.q2pod/ringnav-queue']==b'' and m.write_opens==opens+1  # the writer: a queue past SAVE_LIMIT keeps no file
+    # every 5 s the poll saves again: nothing more to write, on either thread
+    for _ in range(8): m.now+=5000; m.fn('playback_poll')
+    assert m.write()==0 and m.write_opens==opens+1, 'the dropped queue file is dropped once'
+    # Shuffle off: the queue was never reordered, so its own order is there at once
+    m.word(O['MCL_MODE'],0); off,_=m.costs('ringnav_mode',0); assert off<1000 and m.fn('playback_option',0)==0,off
+# A queue short enough to save: the snapshot is the writer's too, whole and restorable once it has run.
+m=LibraryMachine(300); m.hold_writer(); m.fn('playback_poll'); m.word(O['MCL_MODE'],2); opens=m.write_opens; files=dict(m.files)
+m.fn('playback_poll'); assert m.fn('playback_option',0)==1 and m.write_opens==opens and m.files==files
+assert m.write()==1 and m.files['/mnt/mmc/.q2pod/ringnav-queue'][:4]==struct.pack('<I',0x5132524e) and len(m.files['/mnt/mmc/.q2pod/ringnav-queue-elapsed'])==16
+# Next and Previous: the same cost at 64 songs and 9,198, at the order's start and 3,000 songs in.
+step={}
+for n in (64,N_LIBRARY):
+    m=LibraryMachine(n); m.word(O['MCL_MODE'],2); m.fn('playback_poll'); assert m.fn('playback_option',0)==1
+    first=m.costs('ringnav_next',0)[0]; m.fn('ringnav_next',0); back=m.costs('ringnav_prev')[0]
+    for _ in range(3000 if n>64 else 40): assert m.fn('ringnav_next',0)==1
+    at=m.mcl('MCL_POS'); deep=m.costs('ringnav_next',0)[0]; deep_back=m.costs('ringnav_prev')[0]; assert m.mcl('MCL_POS')==at
+    step[n]=(first,back,deep,deep_back); assert max(step[n])<1000,step
+assert max(abs(a-b) for a,b in zip(step[64],step[N_LIBRARY]))<100,step
+print(f'Shuffle on {N_LIBRARY} songs: {toggle[True]} payload instructions with library ids (bound {LIBRARY_BOUND}), {toggle[False]} without (bound {FOLDER_BOUND}), no file written in the pass; Next, Previous, and both 3,000 songs in: {step[N_LIBRARY]} instructions')
 
 # A checkpoint publication failure after full commit retries without rewriting the queue.
 m=PlaybackMachine(); m.options(0,5,0)
