@@ -1373,20 +1373,36 @@ void output_hold(struct output *o) {
     if (o) hold(o, dev_delay(o));
 }
 
-void output_idle_fill(struct output *o) {
-    if (!o || o->f.dsd) return;
-    int fb = o->in.channels * o->in.bytes, n = (int)((int64_t)o->in.rate * IDLE_AHEAD_MS / 1000 - output_delay(o));
-    if (n <= 0 || grow((void **)&o->zbuf, &o->zcap, n * fb, 1)) return;
-    memset(o->zbuf, 0, (size_t)n * fb); /* silence in the song's format: zero is silence in each, float's too */
-    o->idle = 1;
-    output_write(o, o->zbuf, n);
+/* What is ahead of what plays in the PCM's own ring, in the song's frames. Not snd_pcm_delay: bluealsa's plugin adds
+ * the headset's own delay to it (its Delay, 280 ms on the Pixel Buds; libasound_module_pcm_bluealsa.so 0x5b64)
+ * whether the PCM has started or not, more than IDLE_AHEAD_MS, so a fill measured by it wrote nothing on Bluetooth
+ * and the click was never heard. */
+static int64_t idle_ahead(struct output *o) {
+#ifdef HAVE_ALSA
+    if (o->pcm) {
+        snd_pcm_sframes_t room = snd_pcm_avail(o->pcm);
+        int64_t d = room < 0 ? 0 : room >= (snd_pcm_sframes_t)o->ring ? 0 : (int64_t)o->ring - room;
+        if (o->in.rate != o->f.rate) d = d * o->in.rate / o->f.rate;
+        return d + (o->swr ? swr_get_delay(o->swr, o->in.rate) : 0);
+    }
+#endif
+    return output_delay(o);
 }
 
-void output_idle_click(struct output *o, int kind) {
-    if (!o || o->f.dsd) return;
+int output_idle_fill(struct output *o) {
+    if (!o || o->f.dsd) return 0;
+    int fb = o->in.channels * o->in.bytes, n = (int)((int64_t)o->in.rate * IDLE_AHEAD_MS / 1000 - idle_ahead(o));
+    if (n <= 0 || grow((void **)&o->zbuf, &o->zcap, n * fb, 1)) return 0;
+    memset(o->zbuf, 0, (size_t)n * fb); /* silence in the song's format: zero is silence in each, float's too */
+    o->idle = 1;
+    return output_write(o, o->zbuf, n) < 0 ? 0 : n;
+}
+
+int output_idle_click(struct output *o, int kind) {
+    if (!o || o->f.dsd) return 0;
     o->idle = 1;
     output_click(o, kind);
-    output_idle_fill(o);
+    return output_idle_fill(o);
 }
 
 /* The silence not yet heard dropped; a held song's PCM left as paused, empty, for output_pause's resume. */

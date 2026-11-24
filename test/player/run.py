@@ -1986,7 +1986,26 @@ def test_click_idle(player, songs, tmp):
     firsts = wheel_clicks(idle, 48000)
     assert len(firsts) == 2 and firsts[0] < 480 and abs(firsts[1] - firsts[0] - second * 48000) < 1900, f'clicks at {firsts}'
     assert 2.5 < len(idle) / 2 / 48000 < 4.5, f'{len(idle) / 2 / 48000:.2f} s open'
+    # one line a session in the unified log (engine.c click_session), so a click never heard leaves a trace
+    said = re.findall(r' I player q2player: 2 clicks (paused|with nothing playing) on way 0, ([1-9]\d*) frames of silence',
+                      (tmp/'click-idle'/'player.log').read_text())
+    assert [w for w, _ in said] == ['paused', 'with nothing playing'], said
     return f'paused: 2 clicks, {held:.2f} s held, the song on from frame {at}; stopped: 2 clicks in a 48 kHz PCM'
+
+
+def test_click_idle_alsa(player, songs, tmp):
+    """A click with nothing playing, through output.c against alsa_test.c's counting ring: a song paused or none, on
+    Bluetooth and on the headphone DAC, IDLE_AHEAD_MS of silence (3840 frames at 48 kHz) goes into the ring with the
+    click in it. bluealsa's plugin counts the headset's own delay in snd_pcm_delay (280 ms on the Pixel Buds,
+    13440 frames) whether the PCM has started or not: a fill measured by that wrote nothing on Bluetooth, the PCM never
+    started, and no click was heard paused or stopped, only into a song playing (2026-11-24)."""
+    got = subprocess.run([tool(tmp, 'alsa_test', '-DHAVE_ALSA', '-DQ2_CAR_USB'), 'idle'], check=True, capture_output=True,
+                         text=True).stdout.split('\n')
+    lines = {l.split()[0]: l.split() for l in got if l}
+    for k in ('bt-stopped', 'bt-paused', 'dac-stopped', 'dac-paused'):
+        got = lines[k]
+        assert abs(int(got[2]) - 3840) <= 64 and int(got[4]) > 0, f'{" ".join(got)}: want about 3840 frames queued and the click in them'
+    return 'paused and stopped, on Bluetooth (280 ms of link delay) and the DAC: 80 ms of silence queued, the click in it'
 
 
 def test_click_volume(player, songs, tmp):

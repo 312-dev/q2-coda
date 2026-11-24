@@ -181,10 +181,11 @@ int output_click(struct output *, int kind); /* mixed into what is about to be h
 /* A click with nothing playing (docs/internals.md#key-tone; engine.c click_session). output_hold: a paused song's
  * frames not yet heard taken back (kept, written again by output_pause's resume) and the PCM left empty, running. Then
  * output_idle_click for each click, output_idle_fill to keep silence ahead of what plays, and output_idle_end, which
- * drops that silence: a held PCM is paused again as far as the song is concerned. */
+ * drops that silence: a held PCM is paused again as far as the song is concerned. The click and the fill answer the
+ * frames of silence they wrote. */
 void output_hold(struct output *);
-void output_idle_click(struct output *, int kind);
-void output_idle_fill(struct output *);
+int output_idle_click(struct output *, int kind);
+int output_idle_fill(struct output *);
 void output_idle_end(struct output *);
 /* the headphone DAC (output way 0; on the others only dac_song's mode) */
 void dac_song(int outputway, int dsd);     /* at each song's start: DoP or PCM mode */

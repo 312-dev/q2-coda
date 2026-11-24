@@ -97,6 +97,12 @@ int snd_pcm_sw_params_set_silence_size(snd_pcm_t *p, snd_pcm_sw_params_t *s, snd
 int snd_pcm_sw_params(snd_pcm_t *p, snd_pcm_sw_params_t *s) { applied = *s, sw_calls++; return 0; }
 static int prepares, drops, pauses, pause_err; /* pause_err: what snd_pcm_pause answers (the car's gadget: -EINVAL) */
 static long delay_now, first_written;        /* what snd_pcm_delay answers; the last write's first sample */
+/* A ring that counts (run.py test_click_idle_alsa): what is written stays in it (no time passes), snd_pcm_delay is
+ * that plus link_frames, which bluealsa's plugin adds for the headset's own delay whether the PCM has started or not
+ * (libasound_module_pcm_bluealsa.so 0x5b64: its Delay, 2800 tenths of a ms on the Pixel Buds), and snd_pcm_avail the
+ * ring's room; loudest is the largest sample written while it counts. */
+static int counting;
+static long queued, link_frames, loudest;
 int snd_pcm_prepare(snd_pcm_t *p) { prepares++; return prepare_fails && prepare_fails-- ? -19 : 0; }
 static int last_zero; /* the last write all silence */
 /* A car that stopped reading (StopUSBDeviceModeAudio, 2026-11-23) with room left in its ring for `room` frames (stall
@@ -123,10 +129,11 @@ snd_pcm_sframes_t snd_pcm_writei(snd_pcm_t *p, const void *b, snd_pcm_uframes_t 
     }
     last_zero = 1;
     for (snd_pcm_uframes_t i = 0; i < n * 2; ++i) last_zero &= !((const int16_t *)b)[i];
+    if (counting) queued += (long)n, loudest = peak > loudest ? peak : loudest;
     return (snd_pcm_sframes_t)n;
 }
-int snd_pcm_delay(snd_pcm_t *p, snd_pcm_sframes_t *d) { *d = delay_now; return 0; }
-snd_pcm_sframes_t snd_pcm_avail(snd_pcm_t *p) { avail_calls++; return stall ? room : avail_now; }
+int snd_pcm_delay(snd_pcm_t *p, snd_pcm_sframes_t *d) { *d = counting ? queued + link_frames : delay_now; return 0; }
+snd_pcm_sframes_t snd_pcm_avail(snd_pcm_t *p) { avail_calls++; return counting ? RING - queued : stall ? room : avail_now; }
 int snd_pcm_state(snd_pcm_t *p) { return 3; } /* SND_PCM_STATE_RUNNING */
 snd_pcm_sframes_t snd_pcm_forward(snd_pcm_t *p, snd_pcm_uframes_t n) { forwarded = (long)n; return (snd_pcm_sframes_t)n; }
 snd_pcm_sframes_t snd_pcm_rewindable(snd_pcm_t *p) { return 0; }
@@ -145,7 +152,7 @@ int snd_pcm_wait(snd_pcm_t *p, int ms) {
     return stall ? room > 0 : waits > wait_busy;
 }
 int snd_pcm_pause(snd_pcm_t *p, int on) { pauses++; return pause_err; }
-int snd_pcm_drop(snd_pcm_t *p) { drops++; return 0; }
+int snd_pcm_drop(snd_pcm_t *p) { drops++, queued = 0; return 0; }
 int snd_pcm_drain(snd_pcm_t *p) { return 0; }
 const char *snd_strerror(int e) { return "error"; }
 
@@ -294,6 +301,32 @@ static void usb_case(const char *name, int song_rate, int ch, int bytes) {
     dev_nrates = dev_s16 = dev_stereo = 0;
 }
 
+/* A click with nothing playing on `way` (engine.c click_session): a PCM opened for it at 48 kHz, or a paused song's
+ * taken (output_hold, after 2000 frames of it written), with link frames of delay after the ring; the click and ten of
+ * the session's fills, no time passing. The frames in the ring and the loudest sample: IDLE_AHEAD_MS of silence (3840
+ * frames at 48 kHz) with the click in it. */
+static void idle_case(const char *name, int way, long link, int paused) {
+    struct pcm_format f = {0};
+    f.rate = 48000, f.channels = 2, f.bytes = 2;
+    static int16_t song[4000];
+    for (int i = 0; i < 4000; ++i) song[i] = 0;
+    rate = 48000, avail_now = 0;
+    struct output *o = output_open(&f, way, 17);
+    if (!o) { printf("%s open-failed\n", name); return; }
+    counting = 1, queued = loudest = 0, link_frames = link;
+    if (paused) {
+        output_write(o, (const uint8_t *)song, 2000);
+        output_pause(o, 1);
+        output_hold(o);
+    }
+    output_idle_click(o, CLICK_WHEEL);
+    for (int i = 0; i < 10; ++i) output_idle_fill(o);
+    printf("%s queued %ld loudest %ld\n", name, queued, loudest);
+    output_idle_end(o);
+    counting = 0, queued = link_frames = 0;
+    output_close(o);
+}
+
 int main(int argc, char **argv) {
     unsetenv("Q2PLAYER_PCM");
     setenv("Q2PLAYER_DEVICE", "test", 1);
@@ -304,6 +337,13 @@ int main(int argc, char **argv) {
         usb_err_case("usb-eio", -5, 1, 0);        /* -EIO: the song's failure, not the device gone */
         usb_err_case("usb-gone-open", 0, 0, -2);  /* the open finds no card: gone */
         usb_err_case("usb-gone-write", -19, 2, 0); /* opened again, then -ENODEV under two writes: gone, said once */
+        return 0;
+    }
+    if (argc > 1 && !strcmp(argv[1], "idle")) { /* run.py test_click_idle_alsa */
+        idle_case("bt-stopped", 1, 13440, 0);  /* the Pixel Buds: 280 ms of Delay at 48 kHz */
+        idle_case("bt-paused", 1, 13440, 1);
+        idle_case("dac-stopped", 0, 0, 0);     /* the headphone DAC: nothing after the ring */
+        idle_case("dac-paused", 0, 0, 1);
         return 0;
     }
     if (argc > 1 && !strcmp(argv[1], "car-slow") && car_file) { /* run.py test_car_write_slow, seconds of real time */
