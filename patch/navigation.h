@@ -961,11 +961,12 @@ void ulog(char level, const char *src, const char *msg);
 void ulog_end(const char *why);
 void ulog_flush(void); /* q2guard's logs on the card now, as they are (LocalSend's Send Logs) */
 /* ui_watch.c: the UI pass watchdog (docs/internals.md#ui-pass-watchdog), from ringnav_sleep; a
- * step a long pass may be in, named by its caller (a string constant) */
+ * step a long pass may be in, named by its caller (a string constant); each poll's start, named */
 void ui_watch_enter(void);
 void ui_watch_polled(void);
 void ui_watch_woke(void);
 void ui_watch_step(const char *step);
+void ui_watch_poll(const char *name);
 void cover_wake_poll(void); /* cover_wake.c: the album cover thread woken, every UI loop pass */
 
 /* power_rows.c */
@@ -1029,6 +1030,14 @@ void mp_counted(void *r, unsigned key, unsigned evicted);
 int most_played(void *ctx, void *event);
 int shuffle_menu(void *ctx, void *event), shuffle_songs(void *ctx, void *event);
 int shuffle_play(void *all);
+/* shuffle_wait.c: the Shuffle order's build as a job the loading wait holds (start: 1 while it
+ * runs; poll each frame: 1 once in place; cancel: nothing of it kept), and Shuffle's waits: Now
+ * Playing's Shuffle turned on (its repeat as np_mode_set's rep), the Shuffle page's rows. */
+int shuffle_order_start(void), shuffle_order_poll(void);
+void shuffle_order_cancel(void);
+void shuffle_wait_np(int rep);
+void shuffle_wait_pick(int (*pick)(void *, void *), void *ctx);
+void playback_shuffle_now(void); /* playback.c: stock Shuffle's order taken now (shuffle_own) */
 int tidal_downloads(void *ctx, void *event);
 
 /* ratings.c */

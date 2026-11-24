@@ -68,20 +68,33 @@ typedef struct {
     const char *title, *line, *pill; /* pill 0: none */
 } mode_page_t;
 int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m);
-/* list_marks.c: the loading overlay's spinner (docs/oled-design.md#loading), on window w over what
- * it shows, centred on the whole screen (status row included) whatever w's own y; whether a
- * pointer event's screen point is on it; and a touch on window page while it shows, taken from its
- * rows and cancel called for a lift off it (RET_STOP). */
+/* list_marks.c: the loading wait (docs/internals.md#loading-wait, docs/oled-design.md#loading).
+ * Its spinner on window w over what it shows, centred on the whole screen (status row included)
+ * whatever w's own y, drawn once the wait has lasted LOAD_SHOW_MS; whether a pointer event's
+ * screen point is on it; and a touch on window page while it shows, taken from its rows and cancel
+ * called for a lift off it (RET_STOP). */
 #define LOAD_SPIN_BOX 64
+#define LOAD_SHOW_MS 300
 void load_spinner_paint(void *w, void *canvas);
 int load_spinner_hit(int x, int y);
 int load_touch(void *page, void *event, void (*cancel)(void));
-/* ... and the same overlay over a window another module owns, until a page opens from it
- * (load_over: win 0 ends it), its paint and its input gate (nav/row_paint.c, nav/input.c). */
+/* ... the wait over a window another module owns: load_wait runs step every frame until it
+ * answers 1 (no step: the caller ends it, load_over(0, 0) or load_wait(0, ...)), caption under the
+ * spinner (0 none), Return or a tap off the spinner calling cancel; load_over is load_wait with no
+ * caption or step. Its paint and its input gate (nav/row_paint.c, nav/input.c). */
+void load_wait(void *win, const char *caption, int (*step)(void), void (*cancel)(void));
 void load_over(void *win, void (*cancel)(void));
 int load_over_for(void (*cancel)(void));
+int load_waiting(void);
 void load_over_paint(void *w, void *canvas);
 int load_over_input(void *e);
+/* ... and the same overlay drawn straight on the framebuffer by a thread of its own around one
+ * call the UI thread cannot slice or leave (load_sync_begin before it: 0 when no overlay could be
+ * readied; load_sync_end after), or while the UI thread waits for *done, set by work on another
+ * thread (load_block); caption as above. */
+int load_sync_begin(const char *caption);
+void load_sync_end(void);
+void load_block(volatile int *done, const char *caption);
 
 /* The focus ring's rule (docs/oled-design.md#focus-ring), for every screen with one or two buttons
  * and the confirmation card: shown while the last navigation input was the wheel (a turn, or

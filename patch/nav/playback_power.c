@@ -555,38 +555,40 @@ static int playing_stream(void) {
     return type - 2 < 2 || type - 0xf1 < 2;
 }
 
+/* A poll of the pass, timed for the UI pass watchdog: a late pass with no step names its longest. */
+#define POLL(f) (ui_watch_poll(#f), f())
 int ringnav_sleep(void *loop) {
     ui_watch_enter();  /* the UI pass watchdog (ui_watch.c): this pass's work so far */
-    cover_wake_poll(); /* stock's album cover thread, woken for a request (cover_wake.c) */
-    name_order_poll(); /* a Library list's order sorted ahead after a library change */
-    splash_poll();
-    usb_ui_poll(); /* USB and charging toasts, adbd's questions (usb_ui.c) */
-    stale_heal();
-    quick_poll();
-    headset_poll();
-    bt_ui_poll(); /* Settings > Bluetooth's scan, the connection toasts (bt_ui.c) */
-    headset_eq_poll();
-    bt_volume_poll();
-    video_poll();
-    spot_poll();
-    radio_poll();
-    tuner_poll(); /* Radio's list and receiver (radio_tuner.c) */
-    addon_poll();
-    now_poll(); /* the car's Bluetooth told of a radio and of the position (now_source.c) */
-    coda_rc_poll();
-    song_radio_poll();
-    airplay_poll();
-    playback_poll();
-    resume_poll();
-    scrobble_auto();
-    power_poll();
-    thumb_poll();
-    tilt_poll();
-    swipe_back_poll();
-    lyric_poll();
-    keep_lit_poll();
-    np_art_poll();
-    np_settle_poll();
+    POLL(cover_wake_poll); /* stock's album cover thread, woken for a request (cover_wake.c) */
+    POLL(name_order_poll); /* a Library list's order sorted ahead after a library change */
+    POLL(splash_poll);
+    POLL(usb_ui_poll); /* USB and charging toasts, adbd's questions (usb_ui.c) */
+    POLL(stale_heal);
+    POLL(quick_poll);
+    POLL(headset_poll);
+    POLL(bt_ui_poll); /* Settings > Bluetooth's scan, the connection toasts (bt_ui.c) */
+    POLL(headset_eq_poll);
+    POLL(bt_volume_poll);
+    POLL(video_poll);
+    POLL(spot_poll);
+    POLL(radio_poll);
+    POLL(tuner_poll); /* Radio's list and receiver (radio_tuner.c) */
+    POLL(addon_poll);
+    POLL(now_poll); /* the car's Bluetooth told of a radio and of the position (now_source.c) */
+    POLL(coda_rc_poll);
+    POLL(song_radio_poll);
+    POLL(airplay_poll);
+    POLL(playback_poll);
+    POLL(resume_poll);
+    POLL(scrobble_auto);
+    POLL(power_poll);
+    POLL(thumb_poll);
+    POLL(tilt_poll);
+    POLL(swipe_back_poll);
+    POLL(lyric_poll);
+    POLL(keep_lit_poll);
+    POLL(np_art_poll);
+    POLL(np_settle_poll);
     if ((st.np_slide && widget_get_prop_int(st.np_slide, "value", 0)) || /* off the art page */
         np_about_page()) /* the details over it (np_about.c) */
         *(volatile signed char *)BC_IDLE = BC_IDLE_FULL;

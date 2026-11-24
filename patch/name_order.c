@@ -8,7 +8,7 @@
  * id in that order under a hash of the records as they came, in RAM and on the card. The next load
  * whose records come the same (the query's text and sort, the comparator flag, the count and the
  * hash, after a reboot too) moves them into the kept order instead (rec_permute). A full sort runs
- * on a thread of its own while the UI thread draws a spinner on the screen (spin_sort). After a
+ * on a thread of its own under the loading overlay (spin_sort, list_marks.c load_block). After a
  * library or catalogue change the Library's Songs, Albums and Artists are loaded again and sorted
  * ahead in the UI's quiet (name_order_poll), so their next open finds the order kept. */
 #include "navigation.h"
@@ -17,10 +17,6 @@
 #define NO_MIN 512 /* below this many records the sort is a few ms: nothing kept */
 #define NO_FILE "/mnt/mmc/.q2pod/order%d"
 #define NO_MAGIC 0x314f4e51u /* "QNO1" */
-#define SPIN_AFTER_MS 250    /* a sort still running this long shows the spinner */
-#define SPIN_TICK_MS 20
-#define SPIN_STEP_MS 80   /* a dot a step, 8 a turn */
-#define SPIN_BOX 64       /* px, a #1c1c1e square with 12 px corners at the screen's centre */
 #define WARM_IDLE_MS 3000 /* with the screen lit, no list is loaded ahead this soon after input */
 
 /* A slot's head, also its file's: the firmware (Q2POD_VERSION's hash: ringnav_sort_key is in the
@@ -188,87 +184,30 @@ static void keep(unsigned key, unsigned long long sum, void *list, unsigned cls)
     if (!blob_io(s, tmp, f, sizeof *f + n * 4, 1)) unlink(tmp);
 }
 
-/* The spinner, straight onto the shown framebuffer page (320 x 375, 32 bpp, rotated: a square at
- * the centre is one either way), what it covers saved first and put back after, as no frame is
- * painted meanwhile: the UI thread is waiting here. */
-static struct {
-    unsigned char *map;
-    unsigned len, stride, *at, *under;
-} sp __attribute__((section(".scratch")));
-static int spin_open(void) {
-    unsigned var[40], fix[17];
-    int fd = open("/dev/fb0", 2 /* O_RDWR */);
-    if (fd < 0) return 0;
-    int ok = !ioctl(fd, 0x4600 /* FBIOGET_VSCREENINFO */, var) && !ioctl(fd, 0x4602, fix) &&
-             var[0] == 320 && var[1] == 375 && var[6] == 32 && fix[11] >= 1280 &&
-             (sp.under = calloc(SPIN_BOX * SPIN_BOX, 4)) &&
-             (sp.map = mmap(0, fix[5], 3, 1, fd, 0)) != (void *)-1 && sp.map;
-    close(fd);
-    if (!ok) return free(sp.under), sp.map = 0, 0;
-    sp.len = fix[5], sp.stride = fix[11] / 4;
-    sp.at = (unsigned *)sp.map + (var[5] + 187 - SPIN_BOX / 2) * sp.stride + 160 - SPIN_BOX / 2;
-    for (int y = 0; y < SPIN_BOX; ++y)
-        memcpy(sp.under + y * SPIN_BOX, sp.at + y * sp.stride, SPIN_BOX * 4);
-    return 1;
-}
-/* A coverage 0-255 from a squared distance (half pixels) inside r2 - w and out by r2. */
-static int cover(int d2, int r2, int w) {
-    return d2 >= r2 ? 0 : d2 <= r2 - w ? 255 : (r2 - d2) * 255 / w;
-}
-/* Frame f: eight dots 15 px out, the lit one at dot f & 7 and each before it dimmer. */
-static void spin_paint(int f) {
-    static const signed char dots[8][2] = { { 0, -15 }, { 11, -11 }, { 15, 0 },  { 11, 11 },
-                                            { 0, 15 },  { -11, 11 }, { -15, 0 }, { -11, -11 } };
-    static const unsigned char lit[8] = { 255, 200, 160, 128, 100, 80, 64, 56 };
-    for (int y = 0; y < SPIN_BOX; ++y)
-        for (int x = 0; x < SPIN_BOX; ++x) {
-            int u = 2 * x + 1 - SPIN_BOX,
-                v = 2 * y + 1 - SPIN_BOX; /* half pixels from the centre */
-            int ex = (u < 0 ? -u : u) - 40, ey = (v < 0 ? -v : v) - 40, box, ink = 0, gray = 0;
-            ex = ex < 0 ? 0 : ex, ey = ey < 0 ? 0 : ey;
-            if (!(box = cover(ex * ex + ey * ey, 625, 96))) continue;
-            for (int k = 0; k < 8; ++k) {
-                int du = u - 2 * dots[k][0], dv = v - 2 * dots[k][1],
-                    a = cover(du * du + dv * dv, 49, 24);
-                if (a > ink) ink = a, gray = lit[(f - k) & 7];
-            }
-            unsigned under = sp.under[y * SPIN_BOX + x], out = under & 0xff000000u;
-            for (int c = 0; c < 24; c += 8) {
-                int bg = (c ? 0x1c : 0x1e) + (gray - (c ? 0x1c : 0x1e)) * ink / 255,
-                    was = under >> c & 255;
-                out |= (unsigned)(was + (bg - was) * box / 255) << c;
-            }
-            sp.at[y * sp.stride + x] = out;
-        }
-}
-/* The UI thread waits for *done, the spinner shown from SPIN_AFTER_MS, and puts back what it
- * covered. */
-static void spin_wait(volatile int *done) {
-    for (int ms = 0, shown = 0; !*done; ms += SPIN_TICK_MS) {
-        usleep(SPIN_TICK_MS * 1000);
-        if (ms >= SPIN_AFTER_MS && (shown || (shown = spin_open()))) spin_paint(ms / SPIN_STEP_MS);
-    }
-    if (sp.map) {
-        for (int y = 0; y < SPIN_BOX; ++y)
-            memcpy(sp.at + y * sp.stride, sp.under + y * SPIN_BOX, SPIN_BOX * 4);
-        munmap(sp.map, sp.len), free(sp.under), sp.map = 0;
-    }
+/* What a sort's wait says under the spinner (list_marks.c load_block): the Library list it sorts,
+ * by name_order_list's cls. */
+static const char *sort_caption(unsigned cls) {
+    return cls == NO_SONGS     ? "Sorting songs\xe2\x80\xa6"
+           : cls == NO_ALBUMS  ? "Sorting albums\xe2\x80\xa6"
+           : cls == NO_ARTISTS ? "Sorting artists\xe2\x80\xa6"
+                               : "Sorting\xe2\x80\xa6";
 }
 static void *sorter(void *arg) {
     cstl_sort(no.list, no.cmp);
     no.done = 1;
     return arg;
 }
-/* list sorted on a thread of its own, the spinner shown from SPIN_AFTER_MS until it is done; in
- * place when no thread starts (a started one has a nonzero id). */
-static void spin_sort(void *list, void *cmp) {
+/* list sorted on a thread of its own while the UI thread waits under the loading overlay, caption
+ * under it (list_marks.c load_block: it shows once the sort has run LOAD_SHOW_MS); in place when
+ * no thread starts (a started one has a nonzero id). */
+static void spin_sort(void *list, void *cmp, const char *caption) {
     unsigned long t = 0;
     no.list = list, no.cmp = cmp, no.done = 0;
     if (pthread_create(&t, 0, sorter, 0) || !t) {
         cstl_sort(list, cmp);
         return;
     }
-    spin_wait(&no.done);
+    load_block(&no.done, caption);
     pthread_join(t, 0);
 }
 
@@ -328,12 +267,12 @@ void name_order(const char *sql, int sort, void *list) {
     }
     no_slot *k = find(key, n, sum);
     if (!k && nw.running) { /* the warm's sort may be this load's: waited for, then looked again */
-        spin_wait(&nw.done);
+        load_block(&nw.done, sort_caption(nw.cls));
         warm_end();
         k = find(key, n, sum);
     }
     if (k && apply(k, list)) return;
-    spin_sort(list, cmp);
+    spin_sort(list, cmp, sort_caption(nw.cls));
     keep(key, sum, list, nw.cls);
 }
 
