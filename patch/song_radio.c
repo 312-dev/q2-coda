@@ -9,9 +9,9 @@
  * file carries its server id (stream_path.h). Any other song, one the app answers is not its own,
  * or one whose app is too old to play radios (addon_radio_missing), is this file's local radio:
  * the library's songs by the seed's artist, then of its genre, each shuffled, leaving out the last
- * SR_RECENT played or queued, SR_BATCH at a time, SR_LOW left before more join the queue's end. A
- * local radio plays in order (Now Playing's shuffle and repeat off, put back when it ends) and
- * ends when another queue loads.
+ * SR_RECENT played or queued, SR_BATCH at a time, SR_LOW left before more join the queue's end.
+ * Either radio plays in order (Now Playing's shuffle and repeat off, put back when it ends: an
+ * app's by app_modes); a local radio ends when another queue loads.
  *
  * The song playing as the seed plays on untouched: the rows after it are replaced, nothing loads
  * (playback.c playback_queue_rest; an app's radio through addon.c, song_radio_keeps). A radio
@@ -44,6 +44,7 @@ static struct {
     int sec;                    /* its place at the tap (-1: from its start, or played on) */
     unsigned seek_at;    /* the seed sought once the radio's queue plays it, until SR_SEEK_MS */
     unsigned seek_loads; /* playback_loads at the tap: the radio's queue is a later one */
+    int app_held;        /* an app's radio plays, and shuf and rep hold the modes from before it */
 } sr __attribute__((section(".scratch")));
 
 /* A line in the system log (q2-log) for each radio decision: the drive of 2026-11-22 showed "Radio
@@ -153,7 +154,10 @@ static int local_start(void *r, int sec, const char *app) {
     }
     if (all) deque_destroy(all);
     if (got) {
-        if (!sr.local) sr.shuf = np_mode_shuffle(), sr.rep = np_mode_repeat();
+        if (sr.app_held) /* an app's radio gave way to this one: its modes from before stay */
+            sr.app_held = 0;
+        else if (!sr.local)
+            sr.shuf = np_mode_shuffle(), sr.rep = np_mode_repeat();
         np_mode_set(0, 0); /* the radio picks the order */
         sr.seek_loads = playback_loads, sr.seek_at = 0, sr.sec = -1;
         if (keep) /* no load: no gap, no seek (out of memory: song_radio_poll's refill adds) */
@@ -264,8 +268,26 @@ int song_radio_car(int id, int stop_it) {
     return ok;
 }
 
-/* Every UI pass (ringnav_sleep): an app's answer, the seed's place, and a local radio's next songs.
- */
+/* An app's radio plays in its own order, as a local one does: while its state file says radio=
+ * (addon_radio), Now Playing's shuffle and repeat are off, and they are put back when it ends (its
+ * stop, its songs running out, another queue). Left on, Repeat One would play each radio song twice
+ * in a row and shuffle would reorder it, with both buttons dimmed and deaf while a radio plays. */
+static void app_modes(void) {
+    int on = addon_radio();
+    if (on && !sr.app_held && !sr.local) {
+        sr.app_held = 1;
+        sr.shuf = np_mode_shuffle(), sr.rep = np_mode_repeat();
+        np_mode_set(0, 0);
+        say("an app's radio: shuffle and repeat off, were", sr.shuf * 10 + sr.rep);
+    } else if (!on && sr.app_held) {
+        sr.app_held = 0;
+        np_mode_set(sr.shuf, sr.rep);
+        say("an app's radio ended: shuffle and repeat back,", sr.shuf * 10 + sr.rep);
+    }
+}
+
+/* Every UI pass (ringnav_sleep): an app's answer, the seed's place, an app's radio's modes, and a
+ * local radio's next songs. */
 void song_radio_poll(void) {
     unsigned now = time_now_ms();
     if (sr.ask) {
@@ -301,6 +323,7 @@ void song_radio_poll(void) {
         sr.seek_at = 0; /* the radio's first song is the seed, or the seed is past */
     }
     if (r && key(r) != sr.last_id) sr.last_id = key(r), heard(key(r));
+    app_modes();
     if (!sr.local) return;
     if (playback_loads != sr.loads) { /* another queue: the radio's is gone */
         local_end();

@@ -179,8 +179,47 @@ static void release_car(void) {
     plog('I', line, sizeof line - 1);
 }
 
-/* ---- the Clicker's click with nothing playing (docs/internals.md#key-tone): a song paused keeps its PCM, whose
- * frames not yet heard are taken back (output_hold) and written again at the resume; with none, a PCM is opened for
+/* ---- a pause on Bluetooth (docs/internals.md#bluetooth-pause): bluealsa's PCM is kept paused for BT_PAUSE_MS, so a
+ * pause and a play a moment apart go on in the same stream, then closed, and bluealsa's keep-alive (5 s) lets the
+ * A2DP stream go (AVDTP suspend), as a phone's goes at a pause. A PCM held paused keeps the stream started with nothing
+ * in it for as long as the pause lasts, and AirPods held so for minutes play nothing at the Play until a reconnect. The
+ * Play, a click or a seek opens a PCM again, the song where it was heard. Q2PLAYER_BT_PAUSE_MS sets it for a test. */
+enum { BT_PAUSE_MS = 20000 };
+static int bt_pause_ms(void) {
+    static int ms;
+    if (!ms) {
+        const char *e = getenv("Q2PLAYER_BT_PAUSE_MS");
+        ms = e && atoi(e) > 0 ? atoi(e) : BT_PAUSE_MS;
+    }
+    return ms;
+}
+static int64_t bt_closed_at; /* when a pause closed the Bluetooth PCM; 0 while none is closed so */
+static void release_bt(int64_t frame) {
+    output_drop(out);
+    close_output(0);
+    bt_closed_at = now_ms();
+    char line[192];
+    int n = snprintf(line, sizeof line,
+                     "q2player: paused on Bluetooth for %d ms, its PCM closed so bluealsa can let the stream go; "
+                     "the song held at frame %lld",
+                     bt_pause_ms(), (long long)frame);
+    plog('I', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
+}
+/* The line for a Bluetooth PCM opened again after release_bt, for what opened it. */
+static void bt_reopened(int way, const char *why, int paused, int64_t frame) {
+    int64_t closed = bt_closed_at;
+    bt_closed_at = 0;
+    if (!closed || way != 1) return;
+    char line[192];
+    int n = snprintf(line, sizeof line,
+                     "q2player: Bluetooth's PCM opened again for %s, %lld ms after its close; the song %s frame %lld", why,
+                     (long long)(now_ms() - closed), paused ? "held at" : "on from", (long long)frame);
+    plog('I', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
+}
+
+/* ---- the Clicker's click with nothing playing (docs/internals.md#key-tone): a song paused keeps its PCM (on
+ * Bluetooth past BT_PAUSE_MS, an empty one opened again for the click: play_through), whose frames not yet heard
+ * are taken back (output_hold) and written again at the resume; with none, a PCM is opened for
  * the clicks, CLICK_RATE stereo S16 on the output demo chose, with the type of the last song's device. Either way
  * silence is written CLICK_TICK_MS apart a little ahead of what plays (output_idle_fill), each click mixed into it,
  * and the PCM is held so for CLICK_HOLD_MS after the last click, so a turn of the wheel does not start and stop an
@@ -411,7 +450,10 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
     int64_t origin = source_frames(s); /* frames of this song written to the PCM count from here */
     int64_t offset = origin;           /* and this is where in the song that was */
     int heard = 0, pausing = 0;
-    int64_t resume_at = -1; /* a car PCM released while paused (mcl-dropcar): the frame the song goes on from */
+    /* a PCM closed while paused (the car's on mcl-dropcar, Bluetooth's after BT_PAUSE_MS): the frame the song goes on
+     * from */
+    int64_t resume_at = -1;
+    int64_t quiet_from = 0;            /* paused: since when nothing was asked of the PCM (a click ends a quiet) */
     int64_t car_look = now_ms();       /* when the car's wish (car_way) was last looked at */
 
     for (;;) {
@@ -424,7 +466,27 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
                 pthread_mutex_lock(&c->mu);
                 continue;
             }
-            if (!pausing && out) dac_mute(way), output_pause(out, 1), pausing = 1;
+            if (!pausing && out) dac_mute(way), output_pause(out, 1), pausing = 1, quiet_from = now_ms();
+            if (out && pausing && way == 1) { /* Bluetooth: closed once BT_PAUSE_MS have passed quiet */
+                int64_t left = quiet_from + bt_pause_ms() - now_ms();
+                if (left <= 0) {
+                    /* nothing of the song written since the last seek or open (a PCM opened for a click): it stands
+                     * where that left it, whatever bluealsa's delay says of an empty PCM (the headset's own) */
+                    if (source_frames(s) == origin) resume_at = offset;
+                    else if (!rw.on && !scan) resume_at = heard_at(s, sx, &rw, origin, offset) - output_held(out);
+                    int64_t frame = resume_at;
+                    pthread_mutex_unlock(&c->mu);
+                    release_bt(frame);
+                    pthread_mutex_lock(&c->mu);
+                    continue;
+                }
+                struct timespec until;
+                clock_gettime(CLOCK_REALTIME, &until);
+                until.tv_sec += left / 1000, until.tv_nsec += (left % 1000) * 1000000L;
+                if (until.tv_nsec >= 1000000000L) until.tv_sec++, until.tv_nsec -= 1000000000L;
+                pthread_cond_timedwait(&c->wake, &c->mu, &until);
+                continue;
+            }
             pthread_cond_wait(&c->wake, &c->mu);
         }
         c->car_release = 0; /* while the song plays its writes go on: the unbind's -ENODEV ends the car's way (sink) */
@@ -439,15 +501,23 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
         c->seek = c->preload = c->close_preload = c->eq_changed = c->click = 0;
         int paused = c->paused;
         pthread_mutex_unlock(&c->mu);
-        if (!out) { /* released while paused: a PCM for the way the car's file says now, the song where it was heard */
+        /* Released while paused: a PCM for the way the car's file says now, the song where it was heard, once
+         * something needs one (the Play, a click, a seek or a turn of the scan); a preload or its cancel does not.
+         * Paused, the new PCM is left empty and unstarted, which is paused as it stands (snd_pcm_pause would refuse
+         * it). */
+        if (!out && (!paused || click || seek || (want_scan < 0) != rw.on)) {
             way = car_way(c->outputway);
             if (way == 3) output_car_song(f->rate, 0);
-            if (!(out = output_open(f, way, song->hw))) return FAILED;
+            if (!(out = output_open(f, way, song->hw))) {
+                if (!paused) return FAILED;
+                continue; /* paused, with no PCM to be had (the headset gone): the click or the seek is let go */
+            }
             out_way = way, pausing = 0;
             volume_at_start(way);
+            bt_reopened(way, !paused ? "the play" : click ? "a click" : "a seek", paused, resume_at);
             if (resume_at >= 0 && source_seek_frame(s, resume_at) < 0) return ENDED;
             resume_at = -1;
-            if (paused) output_pause(out, 1), pausing = 1;
+            if (paused) pausing = 1, quiet_from = now_ms();
             else dac_unmute(way, 1);
             origin = offset = source_frames(s);
         }
@@ -482,7 +552,7 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
         if (want_scan != scan) stretch_speed(sx, (scan = want_scan) < 0 ? -scan / 100.0 : scan / 100.0);
         if (volume >= 0 && (way == 1 || way == 2)) output_volume(out, volume);
         if (paused) { /* a preload or a seek taken while paused: back to waiting; a click sounds in silence first */
-            if (click && pausing) click_session(way, click, 1);
+            if (click && pausing) click_session(way, click, 1), quiet_from = now_ms();
             continue;
         }
         if (pausing) dac_unmute(way, 1), output_pause(out, 0), pausing = 0; /* a resume is always a person's */
@@ -504,9 +574,12 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
             if (n < 0 && __atomic_load_n(&c->cut, __ATOMIC_RELAXED)) continue;
             return ENDED;
         }
+        const uint8_t *read = data;
+        int64_t first = source_frames(s) - n; /* the block's first frame in the file, when it is the file's own */
         if (sx) n = stretch_run(sx, data, n, &data);
         int uv[2] = {0, 0}, gone = 0;
         if (n > 0) {
+            dsp_frame(d, !rw.on && data == read ? first : -1); /* a scan's block has no place */
             n = dsp_run(d, data, n, (double)heard_at(s, sx, &rw, origin, offset) / f->rate, &data);
             if (metering) dsp_meter(f, untouched, data, n, uv);
             int w = output_write(out, data, n);
