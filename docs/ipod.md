@@ -843,8 +843,15 @@ to a new line glides too. While they follow, the wheel meets a list end's resist
 finger stays and springing back when it lets go, still following, so a stray touch keeps the follow.
 Lyrics moved by the wheel or a finger stay where they are, while the bar and the
 highlight go on, a swipe to another page and back included, until Now Playing closes or another
-song starts at the top. A tap shows them full screen, and another brings the
-page back. A song from a card app's server (Subsonic's) with no lyrics of its own has them asked of its app
+song starts at the top; timed lyrics left alone for 5 seconds (`LYRIC_RESUME_MS`; no turn, no
+touch on the page, no thumb resting on the wheel, on the page or away from it) go back to the
+playing line and follow it again. Untimed lyrics have no playing line, so they stay where they
+were left. A tap on a timed line other than the playing one plays the song from that line's
+start (its whole second; paused, from there on Play), and the lyrics go to it and follow on; a
+drag of the lines seeks nowhere. A tap on the playing line, off the lines, or on untimed lyrics
+shows them full screen, and another brings the page back. Center on the lyrics page starts a
+scrub of the bar, as on the art page, which the wheel's next turn ends as it scrolls the lyrics; the
+lyrics have no selected line for Center to play. A song from a card app's server (Subsonic's) with no lyrics of its own has them asked of its app
 while the page shows it; the page shows none until they arrive, then fills in
 ([Lyrics from a card app's server](internals.md#server-lyrics)). Under OLED the album art's glow is behind them
 ([Rating page](#rating-page)). See [internals.md](internals.md#scrub-ipod) and [Word-timed lyrics](internals.md#word-timed-lyrics).
