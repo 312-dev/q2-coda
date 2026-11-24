@@ -13,6 +13,7 @@
 #include "engine.h"
 #include "game_embergarden_art.h"
 #include "peq.h"
+#include "stock.h" /* Q2POD_DEV */
 
 #define G_ART "/usr/share/q2games/embergarden/art.bin"
 #define G_MAGIC 0x31474d45 /* "EMG1" */
@@ -1003,7 +1004,7 @@ static void aim(struct eg *g, const struct eng_input *in) {
     int a = g->aim + in->wheel * G_WHEEL;
     if (in->held & ENG_PREV) a -= G_KEY;
     if (in->held & ENG_NEXT) a += G_KEY;
-    if (in->held & ENG_TOUCH) /* a finger level with the pivot or under it: the arc's nearer end */
+    if ((in->held | in->pressed) & ENG_TOUCH) /* a tap too; level with the pivot or under: the nearer end */
         a = eng_atan2(in->ty < G_PY ? (in->ty - G_PY) * 16 : -1, in->tx * 16 + 8 - G_PX * 16) * 36000 / 1024 - 36000;
     g->aim = a < G_AIM_LO ? G_AIM_LO : a > G_AIM_HI ? G_AIM_HI : a;
 }

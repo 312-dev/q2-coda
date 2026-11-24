@@ -180,6 +180,9 @@ def test_a_finger_aims_at_itself_and_a_press_fires(fw, tx, ty, aim):
     assert abs(g.g.aim - aim) <= 40 and sum(h.alive for h in g.g.sh) == 1
     g.step(held=E_TOUCH, tx=tx, ty=ty)
     assert sum(h.alive for h in g.g.sh) == 1  # a held finger aims; it fires on its press only
+    g.g.aim = -9000 if aim != -9000 else -4000
+    g.step(pressed=E_TOUCH, tx=tx, ty=ty)  # a tap: pressed and lifted within one frame, so never held
+    assert abs(g.g.aim - aim) <= 40 and sum(h.alive for h in g.g.sh) == 2
     g.close()
 
 
@@ -642,3 +645,11 @@ def test_ember_garden_is_games_second_engine_row_full_screen_and_pauses_under_it
     assert p.s.paused == 0 and api(fw)['eng_live']()
     p.close()
     assert not fw.var('engine__en', C.c_void_p).value
+
+
+def test_a_dev_build_starts_play_at_the_wave_config_asks_in_its_light(fw_dev):
+    fw_dev.mock('toolsReadConfig', lambda path, sec, key, out, d, *_: C.memmove(out, b'7\0', 2) and 0)
+    g = Game(fw_dev)
+    g.step(pressed=E_CENTRE)
+    assert (g.g.mode, g.g.wave, g.g.light, g.g.frm, g.g.k) == (PLAY, 7, DUSK, DUSK, 32)
+    g.close()
