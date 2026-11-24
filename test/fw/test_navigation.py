@@ -2300,7 +2300,7 @@ def test_a_full_ratings_table_refuses(fw):
     assert keep(0, 0xfffffff8, 2) == 0 and keep(0, 8, 2) == 1
 
 
-# Era's Shuffle.
+# Era's Shuffle and Play All: the decade's songs (era_decade_songs).
 def test_era_shuffle_is_the_decades_songs_in_library_order(fw, heap):
     keep, deques = [], Deques(fw)
     state = fw.var('library_lists__era', Era)
@@ -2314,20 +2314,27 @@ def test_era_shuffle_is_the_decades_songs_in_library_order(fw, heap):
             for key in (b'7', b'1', b'9'):
                 call(None, 1, row(key), None)
     fw.mock('sqlite3_exec', run)
-    out = fw.fn('library_lists__era_shuffle_songs', C.c_long)()
+    out = fw.fn('library_lists__era_decade_songs', C.c_long, C.c_int)(0)
     assert [struct.unpack_from('<i', C.string_at(r, 8), O['REC_ID'])[0] for r in deques[out]] == [9, 1, 7]
+    assert not fw.var('library_lists__era_keys', EraKeys).v
+    out = fw.fn('library_lists__era_decade_songs', C.c_long, C.c_int)(1)  # Play All: the query's order
+    assert [struct.unpack_from('<i', C.string_at(r, 8), O['REC_ID'])[0] for r in deques[out]] == [7, 1, 9]
     assert not fw.var('library_lists__era_keys', EraKeys).v
 
 
 def test_era_shuffle_of_nothing(fw):
     deques = Deques(fw)
-    assert deques[fw.fn('library_lists__era_shuffle_songs', C.c_long)()] == []
+    assert deques[fw.fn('library_lists__era_decade_songs', C.c_long, C.c_int)(0)] == []
     assert not fw.calls('sqlite3_exec')
 
 
 # Era.
+class EraKey(C.Structure):
+    _fields_ = [('key', C.c_uint), ('rank', C.c_uint)]
+
+
 class EraKeys(C.Structure):
-    _fields_ = [('v', C.POINTER(C.c_uint)), ('n', C.c_uint), ('cap', C.c_uint)]
+    _fields_ = [('v', C.POINTER(EraKey)), ('n', C.c_uint), ('cap', C.c_uint)]
 
 
 class EraRow(C.Structure):
@@ -2336,7 +2343,8 @@ class EraRow(C.Structure):
 
 class Era(C.Structure):
     _fields_ = [('page', C.c_void_p), ('albums', C.c_void_p), ('decade', C.c_int * 32), ('count', C.c_int * 32), ('n', C.c_int),
-                ('v', C.POINTER(EraRow)), ('m', C.c_uint), ('cap', C.c_uint)]
+                ('v', C.POINTER(EraRow)), ('m', C.c_uint), ('cap', C.c_uint), ('view', C.c_void_p), ('built', C.c_uint),
+                ('timer', C.c_uint)]
 
 
 def row(*values):
@@ -2438,7 +2446,8 @@ def test_era_keys_grow_and_keep_their_values(fw):
     add = fw.fn('library_lists__era_key_row', *ROW)
     for i in range(3000):
         assert add(None, 1, row(b'%d' % i), None) == 0
-    assert keys.n == 3000 and keys.cap == 4096 and list(keys.v[:3000]) == list(range(3000))
+    assert keys.n == 3000 and keys.cap == 4096
+    assert [(k.key, k.rank) for k in keys.v[:3000]] == [(i, i) for i in range(3000)]  # each its place in the query
 
 
 @pytest.mark.parametrize('n, values', [(0, ()), (2, (b'1', b'2')), (1, (None,))])
@@ -2449,7 +2458,14 @@ def test_era_keys_ignore_a_bad_row(fw, n, values):
 
 @pytest.mark.parametrize('a, b, order', [(1, 2, -1), (2, 1, 1), (7, 7, 0), (0xffffffff, 1, 1), (1, 0x80000000, -1)])
 def test_era_key_cmp_is_unsigned(fw, a, b, order):
-    assert fw.fn('library_lists__era_key_cmp', C.c_int, C.POINTER(C.c_uint), C.POINTER(C.c_uint))(C.c_uint(a), C.c_uint(b)) == order
+    cmp = fw.fn('library_lists__era_key_cmp', C.c_int, C.POINTER(EraKey), C.POINTER(EraKey))
+    assert cmp(EraKey(a, 0), EraKey(b, 0)) == order
+
+
+# one song twice: its first place first, so Play All keeps that one
+def test_era_key_cmp_puts_a_key_s_first_place_first(fw):
+    cmp = fw.fn('library_lists__era_key_cmp', C.c_int, C.POINTER(EraKey), C.POINTER(EraKey))
+    assert cmp(EraKey(7, 1), EraKey(7, 4)) == -1 and cmp(EraKey(7, 4), EraKey(7, 1)) == 1
 
 
 @pytest.mark.parametrize('decade, name', [(1960, b'60s'), (1990, b'90s'), (1900, b'00s'), (2000, b'2000s'), (2010, b'2010s')])

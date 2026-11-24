@@ -2387,7 +2387,9 @@ class Steps:
         self.fw.fn('ui_watch_enter', None)()
         self.fw.fn('ui_watch_polled', None)()
         self.fw.fn('ui_watch_woke', None)()
-        return re.search(r'step ([^,]*),', self.lines[-1])[1]
+        found = re.search(r'step ([^,]*),', self.lines[-1])
+        assert found
+        return found[1]
 
 
 def test_years_names_each_step_of_a_decade(fw, ui, song, mcl):
