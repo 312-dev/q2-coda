@@ -233,3 +233,138 @@ def test_the_device_page_shows_its_limit_and_opens_the_slider(fw):
     assert d.detail_rows()[1] == 'Volume Limit' and '45' in d.ui.shown(d.page)
     d.ui.click(d.page, 1)
     assert 'playset/bootvol_page' in d.ui.went and fw.fn('btlim_edit_get', C.c_int)() == 45  # the slider page
+
+
+# A device's Volume Curve (Link Volume's mapping onto the headset's 0 to 127): Even by default, Gentle a 40 dB taper
+# for a headset with none of its own; kept per device in the same store, a "MAC gentle" line of its own.
+GENTLE = [0 if v == 0 else max(1, round(127 * 10 ** (-40 * (100 - v) / 2000)), round(127 * v / 400)) for v in range(101)]
+EVEN = [0 if v == 0 else 127 if v == 100 else max(1, (127 * v + 50) // 100) for v in range(101)]
+
+
+def curve_of(fw, mac):
+    return fw.fn('btlim_curve', C.c_int, C.c_char_p)(mac.encode())
+
+
+def set_curve(fw, mac, c):
+    fw.fn('btlim_curve_set', None, C.c_char_p, C.c_int)(mac.encode(), c)
+
+
+def restart(fw):
+    """What a restart leaves of the cache: .scratch is zero at start, so the next look reads the store again."""
+    fw.var('bt_vol_limit__bl', C.c_int).value = 0
+
+
+def test_an_unknown_device_is_even(fw):
+    link = Link(fw)
+    assert curve_of(fw, HEAD) == 0 and curve_of(fw, 'AA:BB:CC:DD:EE:99') == 0
+    assert fw.fn('vol_gentle', C.c_int)() == 0 and TMP not in link.files.files
+
+
+def test_gentle_for_one_device_leaves_another_even_and_survives_a_restart(fw):
+    link = Link(fw)
+    fw.fn('btlim_edit', None, C.c_char_p)(HEAD.encode())
+    fw.fn('btlim_edit_curve_take', None, C.c_int)(1)
+    assert curve_of(fw, HEAD) == 1 and curve_of(fw, CAR) == 0
+    assert link.files.files[STORE] == f'{HEAD} gentle\n'.encode() and TMP not in link.files.files
+    assert fw.fn('vol_gentle', C.c_int)() == 1  # the headset is the output
+    link.mac = CAR
+    assert fw.fn('vol_gentle', C.c_int)() == 0
+    link.way = 0  # the jack: no device's curve
+    link.mac = HEAD
+    assert fw.fn('vol_gentle', C.c_int)() == 0
+    restart(fw)
+    assert curve_of(fw, HEAD) == 1 and curve_of(fw, CAR) == 0
+    fw.fn('btlim_edit_curve_take', None, C.c_int)(0)  # back to Even: nothing kept
+    assert link.files.files[STORE] == b''
+    restart(fw)
+    assert curve_of(fw, HEAD) == 0
+
+
+def test_a_limit_and_a_curve_are_kept_side_by_side(fw):
+    """Each its own line, so a build that knows only limits still reads the limit and passes over the curve."""
+    link = Link(fw, mac=CAR)
+    fw.fn('btlim_edit', None, C.c_char_p)(HEAD.encode())
+    link.set(40, HEAD)
+    fw.fn('btlim_edit_curve_take', None, C.c_int)(1)
+    assert link.files.files[STORE] == f'{HEAD} 40\n{HEAD} gentle\n'.encode()
+    restart(fw)
+    assert link.limit(HEAD) == 40 and curve_of(fw, HEAD) == 1
+    link.set(100, HEAD)  # No Limit: the curve stays
+    fw.fn('btlim_edit_save', None)()
+    assert link.files.files[STORE] == f'{HEAD} gentle\n'.encode()
+    restart(fw)
+    assert link.limit(HEAD) == 100 and curve_of(fw, HEAD) == 1
+
+
+def test_the_store_reads_curve_lines_and_passes_over_bad_ones(fw):
+    files = {STORE: (f'{HEAD} gentle\n'
+                     f'{CAR} gentlest\n'           # not the word
+                     'AA:BB:CC:DD:EE:04 60 gentle\n'  # both on one line: not a line this build writes
+                     'aa:bb:cc:dd:ee:05 gentle\n'
+                     'AA:BB:CC:DD:EE:05 25').encode()}  # any case, a limit for the same device
+    link = Link(fw, files=files)
+    assert curve_of(fw, HEAD) == 1 and link.limit(HEAD) == 100
+    assert curve_of(fw, CAR) == 0 and curve_of(fw, 'AA:BB:CC:DD:EE:04') == 0 and link.limit('AA:BB:CC:DD:EE:04') == 100
+    assert curve_of(fw, 'AA:BB:CC:DD:EE:05') == 1 and link.limit('AA:BB:CC:DD:EE:05') == 25
+
+
+def test_a_device_with_a_curve_counts_toward_the_store_s_room(fw):
+    """BTLIM_MAX (16) devices with a limit or a curve; the 17th takes the oldest one's place."""
+    link = Link(fw)
+    macs = [f'AA:BB:CC:DD:01:{i:02X}' for i in range(17)]
+    for i, mac in enumerate(macs):
+        if i % 2:
+            set_curve(fw, mac, 1)
+        else:
+            link.set(30, mac)
+    assert link.limit(macs[0]) == 100 and curve_of(fw, macs[1]) == 1  # the oldest out, the next kept
+    assert link.limit(macs[16]) == 30 and curve_of(fw, macs[15]) == 1
+
+
+def test_forgetting_a_device_drops_its_curve_too(fw):
+    d = Detail(fw)
+    Answers(fw, d)
+    files = d.files.files
+    files[STORE] = f'{HEAD} 20\n{CAR} 50\n{CAR} gentle\n'.encode()
+    d.click_row('d1')  # the car
+    fw.fn('bt_detail__forget', None, C.c_void_p, C.c_int, C.c_int)(None, 1, 0)
+    assert files[STORE] == f'{HEAD} 20\n'.encode()
+
+
+def test_the_device_page_shows_its_curve_and_opens_the_picker(fw):
+    d = Detail(fw)
+    d.files.files[STORE] = f'{CAR} gentle\n'.encode()
+    d.click_row('d0')
+    assert d.detail_rows()[3] == 'Volume Curve' and 'Even' in d.ui.shown(d.page)
+    fw.fn('bt_detail__bd_closed', C.c_int, C.c_void_p, C.c_void_p)(d.page, None)
+    d.click_row('d1')
+    assert d.detail_rows() == ['Connect', 'Volume Limit', 'Volume Curve', 'Rename', 'Forget This Device']
+    assert 'Gentle' in d.ui.shown(d.page)
+    d.ui.click(d.page, 2)
+    assert 'systemset/keylock_page' in d.ui.went and fw.fn('btlim_edit_curve', C.c_int)() == 1  # the picker
+
+
+def test_the_volume_curve_picker_checks_the_choice_and_a_pick_is_sent_at_once(fw):
+    """The picker (stock's Buttons Lock page, its rows ours): Even and Gentle, the device's choice checked; a pick is
+    saved and, the device being the output, the volume sent again so the headset takes the new curve's level."""
+    from test_nav_display_library import Config, Pages, Ui
+    ui = Ui(fw)
+    Config(fw)
+    page = Pages(fw, ui)
+    link = Link(fw, volume=50)
+    fw.fn('btlim_edit', None, C.c_char_p)(HEAD.encode())
+    fw.fn('bt_curve_open', None)()
+    assert page.opened == ['systemset/keylock_page'] and page.title() == 'Volume Curve'
+
+    def marks():
+        return [(item.labels()[0].text, item.children[0].children[0].props['image']) for item in page.view().children]
+    assert marks() == [('Even', b'select'), ('Gentle', b'unselect')]
+    ui.click(page.view().children[1].children[0])
+    assert marks() == [('Even', b'unselect'), ('Gentle', b'select')]
+    assert link.files.files[STORE] == f'{HEAD} gentle\n'.encode() and link.played() == [50]
+    ui.click(page.view().children[1].children[0])  # the same again: nothing to send
+    assert link.played() == [50]
+    fw.fn('btlim_edit', None, C.c_char_p)(CAR.encode())
+    fw.fn('bt_curve_open', None)()
+    ui.click(page.view().children[1].children[0])  # another device's pick is saved, not sent
+    assert link.files.files[STORE] == f'{HEAD} gentle\n{CAR} gentle\n'.encode() and link.played() == [50]

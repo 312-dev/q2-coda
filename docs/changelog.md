@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: each paired device has a **Volume Curve** on its page, **Even** or **Gentle**. Even, the default, suits most headphones. Gentle is for headphones that are already loud at half volume (such as the Bowers & Wilkins Px7): each step of the Q2's volume sounds like the same change, and half volume is much quieter. It changes the volume of the connected device at once, and its Volume Limit still applies.
   - Bluetooth: each paired device has its own **Volume Limit** on its page, No Limit until you set one. While that device is connected the volume stops at its limit, from the wheel, Control Center, Settings, the Car Remote or the device's own buttons, and Max Volume still applies on top. Wired and USB headphones and your other Bluetooth devices keep their own levels.
   - Lyrics: after you scroll synced lyrics away, they go back to the line being sung and follow the song again once you leave them alone for 5 seconds. Tapping a synced line plays the song from that line; tap the line being sung to show the lyrics full screen as before.
   - Streamed songs: a song from your server starts as soon as its first 3 seconds have downloaded, up to half a second sooner than before, where the Subsonic app waited for its next progress report.

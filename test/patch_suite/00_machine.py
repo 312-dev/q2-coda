@@ -208,6 +208,7 @@ class Machine:
         self.handlers[syms['__xstat@GLIBC_2.0']]='rockbox_stat'
         self.handlers[syms['strcmp@GLIBC_2.0']]='tk_strcmp'
         self.handlers[syms['memcpy@GLIBC_2.0']]='memcpy'
+        self.handlers[syms['memmove@GLIBC_2.0']]='memcpy'  # memcpy's read then write is memmove's: overlap holds
         self.handlers[syms['memset@GLIBC_2.0']]='memset'
         # the UI loop's pass asks adbd's socket for a question each second (usb_ui.c auth_poll): no adbd here
         self.handlers[syms['socket@GLIBC_2.0']]='no_socket'
