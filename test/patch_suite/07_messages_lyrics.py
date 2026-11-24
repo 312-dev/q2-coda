@@ -783,7 +783,7 @@ at13125(m); assert lit(m)==3*CW*125//500; m.advance(625,clear=False); loop(m,ms=
 # no lyrics nothing to show.
 class FullMachine(KaraokeMachine):
     def __init__(self):
-        super().__init__(); self.restack=True
+        super().__init__(); self.restack=True; self.playing=None  # the playing line's index (full_page sets it)
         for n in ('widget_layout','widget_index_of'): self.handlers[syms[n]]='c:'+n
     def hook(self,u,address,size,unused):
         name=self.handlers.get(address,'')
@@ -814,7 +814,15 @@ class FullMachine(KaraokeMachine):
         r=self.call(address=f,args=(ctx,ev,0,0),gap=0,clear=False)
         assert r==0,(kind,r)  # never STOP: the slide_view's grab, and its swipe from the first move
         return r
-    def tap(self,x=150,y=100,dx=0,dy=0):  # a finger down and up, a UI loop pass with each: no drag of the lines
+    def line_y(self,i):  # the screen's y of line i's row's middle, where it shows (its view's scroll counted)
+        r=self.lyric_row(i); y=self.get(r+O['W_Y'])+self.get(r+O['W_H'])//2-signed(self.get(self.lrc+O['SCROLL_Y']))
+        w=self.lrc
+        while w and w!=self.wm: y+=signed(self.get(w+O['W_Y'])); w=self.get(w+O['W_PARENT'])
+        return y
+    def playing_y(self):  # on the playing line (np_lyric_touch: a tap there takes them full screen, any other seeks)
+        return self.line_y(self.playing) if self.nodes[self.lrc]['children'] and self.playing is not None else 100
+    def tap(self,x=150,y=None,dx=0,dy=0):  # a finger down and up, a UI loop pass with each: no drag of the lines
+        if y is None: y=self.playing_y()
         self.touch('EVT_POINTER_DOWN',x,y); self.pressed=1; loop(self)
         self.touch('EVT_POINTER_UP_BEFORE',x+dx,y+dy); self.pressed=0; loop(self)
     def full(self):  # the column's place, x and width, its slide_view's size and background, the rows' width
@@ -826,7 +834,9 @@ class FullMachine(KaraokeMachine):
 COLUMN,FULL=(1,0,375,375,186,'#00000000',{375}),(2,0,375,375,290-20,'#000000',{375})  # FULL: the window's last child, its foot less NP_FULL_FOOT
 PLACED=((1,0,375,375,186,'#00000000'),[40,192],('0','182','100%','10'),('0','0','100%','178'))  # back: the column's place and self_layouts
 def full_page(lines=((5,'x'*15),(9,'Two two'),(12,'Three')),playtime=9):
-    m=FullMachine(); m.lines=list(lines); m.show(playtime); return m
+    m=FullMachine(); m.lines=list(lines)
+    timed=[i for i,(t,_) in enumerate(m.lines) if t!=FAR and t<=playtime]
+    m.playing=timed[-1] if timed else (0 if m.lines else None); m.show(playtime); return m
 def centre_of(m,i,view):  # the offset that centres line i's row in a view that high (C's division)
     r=m.lyric_row(i); return m.get(r+O['W_Y'])+int((m.get(r+O['W_H'])-view)/2)
 m=full_page(); assert m.full()[1:3]==(0,375)
@@ -855,7 +865,8 @@ assert m.nodes[m.lyric].get('handlers',[])==want,m.nodes[m.lyric].get('handlers'
 # A tap goes full screen however long the finger stayed down, and another, wherever it lands, brings the column back
 # with the song where it was. A touch the slide_view or scroll_lrc took (its abort) or a lift out of the box is no
 # tap, and one they took in full screen ends it.
-def tap_line(m,y=160,dy=0,abort=False,ms=0,dx=0):
+def tap_line(m,y=None,dy=0,abort=False,ms=0,dx=0):
+    if y is None: y=m.playing_y()
     m.calls=[]; m.touch('EVT_POINTER_DOWN',150,y); m.pressed=1; loop(m)
     if abort: m.touch('EVT_POINTER_ABORT',150+dx,y+dy)  # where the finger is
     if ms: m.advance(ms,clear=False)
@@ -873,9 +884,20 @@ assert tap_line(m,dx=11,abort=True)==[] and not full_on(m); passed()  # the slid
 # Unsynced lines: full screen and back as any lyrics.
 m=full_page(lines=((FAR,'x'*15),(FAR,'Two two'),(FAR,'Three'))); settle(m); m.tap(); settle(m); assert full_on(m)
 assert tap_line(m)==[] and not full_on(m); passed()
+# A tap on a timed line other than the playing one (np_lyric_line) seeks to its start, in either layout, and the
+# view goes to it; a drag of it seeks nowhere; the playing line, off the lines and a stopped player toggle full screen.
+m=full_page(); settle(m)
+assert tap_line(m,y=m.line_y(2))==[('player_seek_time',12)] and not full_on(m)
+assert m.get(m.lrc+O['SCROLL_Y'])!=centre_of(m,2,178) and settle(m)[-1]==centre_of(m,2,178); passed()  # before the player's 12 s
+m=full_page(); settle(m)
+assert tap_line(m,y=m.line_y(2),dy=10,abort=True)==[] and tap_line(m,y=m.line_y(2),dy=40)==[] and not full_on(m); passed()
+m=full_page(); settle(m); m.tap(); settle(m); assert full_on(m)
+assert tap_line(m,y=m.line_y(0))==[('player_seek_time',5)] and full_on(m); passed()  # full screen: seeks and stays
+m=full_page(); settle(m); m.word(PLAY_STATUS,1)
+assert tap_line(m,y=m.line_y(2))==[] and full_on(m); passed()  # stopped: no seek, full screen as before
 # A page without stock's slide_view (a layout of its own) has no column: a tap on its lyrics leaves
 # everything as it was, where np_full read the column off a NULL slide_view (W_PARENT at 0x48).
-m=FullMachine(); m.lines=[(5,'x'*15),(9,'Two two'),(12,'Three')]; m.show(9,slide='pages')
+m=FullMachine(); m.lines=[(5,'x'*15),(9,'Two two'),(12,'Three')]; m.playing=1; m.show(9,slide='pages')
 m.tap(); assert m.full()[:6]==COLUMN[:5]+(None,),m.full()
 m.tap(); assert m.full()[:6]==COLUMN[:5]+(None,),m.full(); passed()
 # Get Album Lyrics (onlinematch.c ringnav_playermore): after stock's 8 ⋯ rows (its init mocked), one
