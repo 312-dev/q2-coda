@@ -1103,7 +1103,7 @@ def test_sudoku_is_the_engines_second_row_full_screen_with_the_status_row_at_a_p
     canvas = Canvas(fw)
     buf = screen(canvas, origin=(0, 0))
     paint(p, canvas)
-    assert art.written([v & 0xffffff for v in buf], art.mid(art.id['A_TITLE'], 375, 60), INK)  # the levels, at the top
+    assert art.written([v & 0xffffff for v in buf], art.mid(art.id['A_TITLE'], 375, 65), INK)  # the levels, at the top
     shown.clear()
     p.key(CENTER)  # a release: Centre on Gentle
     p.key(RETURN)

@@ -933,7 +933,7 @@ static void margins(const struct sudoku *s, struct eng_surface *sf) {
     }
     clock(t, s->mode == MAKE ? 0 : s->v.elapsed);
     hand(s, sf, t, 356, 218, sty.pen, 1);
-    line(sf, 342 * 16, 222 * 16 + 8, 370 * 16, 221 * 16 + 8, 14, sty.pen);
+    line(sf, 342 * 16, 222 * 16 + 8, 368 * 16, 221 * 16 + 8, 14, sty.pen);
     caps(s, sf, names[lv], 356, 235, sty.soft, 1);
     if (s->mode == PLAY && s->v.slips)
         word(num(t, s->v.slips), s->v.slips > 1 ? " slips" : " slip"),
@@ -969,7 +969,7 @@ static void dial(const struct sudoku *s, struct eng_surface *sf) {
  * the unfinished puzzle clipped under them. */
 static void levels(const struct sudoku *s, struct eng_surface *sf) {
     char t[56];
-    mid(s, sf, A_TITLE, 375, 60, sty.ink);
+    mid(s, sf, A_TITLE, 375, 65, sty.ink);
     fill(sf, 48, 46, 279, 1, sty.ink), fill(sf, 48, 49, 279, 1, sty.soft);
     caps(s, sf, "SUDOKU      A NEW PUZZLE EVERY TIME      ONE SOLUTION", 187, 60, sty.soft, 1);
     for (int k = 0; k < LEVELS; ++k) {
