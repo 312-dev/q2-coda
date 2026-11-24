@@ -762,11 +762,10 @@ static void shot_box(struct eg *g, const struct shot *h) {
     mark(g, (x < tx ? x : tx) - 7, (y < ty ? y : ty) - 7, (x < tx ? tx - x : x - tx) + 15,
          (y < ty ? ty - y : y - ty) + 20); /* below: the trail's sag, 7 px, and its last drop */
 }
-static void sight_box(struct eg *g) {
-    int a = angle(g->aim), x0 = G_PX + (eng_cos(a) * 38 >> 16), y0 = G_PY + (eng_sin(a) * 38 >> 16),
-        x1 = G_PX + (eng_cos(a) * 79 >> 16), y1 = G_PY + (eng_sin(a) * 79 >> 16);
-    mark(g, (x0 < x1 ? x0 : x1) - 3, (y0 < y1 ? y0 : y1) - 3, (x0 < x1 ? x1 - x0 : x0 - x1) + 7,
-         (y0 < y1 ? y1 - y0 : y0 - y1) + 7);
+static void sight_box(struct eg *g) { /* a box a dot: the line's own box is mostly sky */
+    int a = angle(g->aim);
+    for (int k = 0; k < 5; ++k)
+        mark(g, G_PX + (eng_cos(a) * (40 + 9 * k) >> 16) - 2, G_PY + (eng_sin(a) * (40 + 9 * k) >> 16) - 2, 6, 6);
 }
 /* The lightning's box: its bolt and its branch, and their strokes' widths. */
 static void bolt_box(struct eg *g) {
