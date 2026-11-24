@@ -661,9 +661,7 @@ static void draw(const void *state, struct eng_surface *s) {
         int x = G_PX - (w + n) / 2;
         word(g, s, EG_T_WAVE_BIG, x, 96, 0, 0xfff6dc, 1, 0x2a1838, a);
         numeral(g, s, EG_BIG_0, 2, 0, (unsigned)g->wave, x + w, 96, 0, 0xfff6dc, 0x2a1838, a);
-        int light = LIGHT_OF[(g->wave - 1) % 10];
-        if (g->wave == 1 || light != LIGHT_OF[(g->wave + 8) % 10])
-            word(g, s, EG_T_DAWN + 2 * light, G_PX, 120, 1, 0xffe27a, 1, 0x2a1838, a);
+        word(g, s, EG_T_DAWN + 2 * LIGHT_OF[(g->wave - 1) % 10], G_PX, 120, 1, 0xffe27a, 1, 0x2a1838, a);
     }
     if (g->lull && g->mode == PLAY) word(g, s, EG_T_LULL, G_PX, 22, 1, 0xffe27a, 1, 0x120c26, 256);
     if (g->mode != PLAY) draw_card(g, s);
@@ -937,6 +935,8 @@ static void save_best(struct eg *g) {
 /* The fourth bed on a side lost: the scene dims, the result card drops in. */
 static void lose(struct eg *g) {
     g->mode = LOST, g->card = 0, g->boxes = 0;
+    for (int k = 0; k < 8; ++k) /* the bed that ended it shows its fire, as the game holds */
+        if (g->bed[k] == CAUGHT) g->bed[k] = BURNING;
     for (int k = 0; k < G_EMBERS; ++k) g->em[k].alive = 0;
     for (int k = 0; k < G_SHOTS; ++k) g->sh[k].alive = 0;
     for (int k = 0; k < G_PUFFS; ++k) g->pf[k].alive = 0;

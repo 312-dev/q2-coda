@@ -335,7 +335,7 @@ def test_the_third_bed_lost_on_a_side_frames_its_last_and_the_fourth_ends_the_ga
     g.sounds.clear()
     g.ember(0, 10, 257, size=0, vy=1)  # the far left: the last left bed is the nearest growing one
     g.step()
-    assert g.g.bed[3] == CAUGHT and g.g.mode == LOST and g.g.dim == 1 and not g.alive()
+    assert g.g.bed[3] == BURNING and g.g.mode == LOST and g.g.dim == 1 and not g.alive()
     assert g.sounds[:2] == [ALERT, ALERT]
     raw = g.page.card.files[FILE]
     assert struct.unpack('<4I', raw) [:3] == (MAGIC, 70, 1) and g.g.saved == 71
