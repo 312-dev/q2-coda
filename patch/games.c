@@ -858,9 +858,14 @@ static void engine_key(unsigned key) {
 }
 
 /* ringnav_keydown, before stock: a running engine game's press, so it knows a held button and
- * stock makes no click of its own. Return's and a paused game's stay stock's. */
+ * stock makes no click of its own, and a Centre held for play never reaches stock's hold (Shut
+ * Down?) or the song menu's. Return's and a paused game's stay stock's. */
 int games_keydown(void *top, unsigned key) {
     if (!g || top != g->page || g->screen < ENGINE || g->paused) return 0;
+    if (key == KEY_CENTER && st.centre_hold) { /* a held Centre is the game's: no Shut Down? */
+        timer_remove(st.centre_hold);
+        st.centre_hold = 0;
+    }
     return eng_key(key, 1);
 }
 

@@ -7,6 +7,7 @@ import pytest
 
 from conftest import O
 from test_games import PAGE, Canvas, Card, Page, fnv1a, paint, texts
+from test_nav_hold import scratch, st  # noqa: F401
 
 CENTER, PREV, NEXT, PLAY, RETURN, BACK_BTN, FWD_BTN = 218, 172, 173, 171, 170, 222, 223
 E_CENTRE, E_PLAY, E_PREV, E_NEXT, E_TOUCH = 1, 2, 4, 8, 16
@@ -554,3 +555,26 @@ def test_a_game_that_cannot_open_leaves_the_list(fw):
     r.page.go(ENGINE)
     assert r.page.s.screen == 0 and r.s.game == C.addressof(r.game)
     r.e['eng_close']()
+
+
+@pytest.mark.parametrize('k', range(3))  # Pop Stall, Cabin Solitaire, the Evening Puzzle
+def test_centre_held_through_a_game_is_the_games_alone_and_never_stocks_shut_down(fw, st, k):
+    """Stock's Centre hold (Shut Down? at 1000 ms, ringnav_hold_timer's st.centre_hold) is set at the press, before
+    ringnav_keydown: a running engine game takes it away at its first press, and the game sees Centre held for all 3 s
+    of the hold's repeats (every 50 ms). Paused, the menu's keys are stock's again and the hold stays."""
+    p, removed = Page(fw), []
+    fw.mock('timer_remove', lambda t, *_: removed.append(t) or 1)
+    keydown = fw.fn('games_keydown', C.c_int, C.c_void_p, C.c_uint)
+    p.go(ENGINE + k)
+    en = Eng.from_address(fw.var('engine__en', C.c_void_p).value)
+    st('centre_hold').value = 0x4f0001  # stock's own hold, Shut Down?
+    for _ in range(60):
+        assert keydown(PAGE, CENTER) and en.keys & E_CENTRE
+        p.now += 50
+    assert 0x4f0001 in removed and st('centre_hold').value == 0
+    p.key(RETURN)  # the pause menu: its keys go to Games' list of choices, stock's hold left as it is
+    removed.clear()
+    st('centre_hold').value = 0x4f0002
+    assert not keydown(PAGE, CENTER) and not removed and st('centre_hold').value == 0x4f0002
+    st('centre_hold').value = 0
+    p.close()
