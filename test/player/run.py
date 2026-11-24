@@ -2150,6 +2150,52 @@ def test_bt_play_and_click_after_the_release(player, songs, tmp):
     return '; '.join(said)
 
 
+def test_bt_song_stalled_in_its_download(player, songs, tmp):
+    """A server song on Bluetooth whose download stops (player/grow.c): 4 s of a1 on the card, its .stream saying get
+    twice a second with no more bytes, the rest landing at 14 s. While it waits the song is playing as demo sees it, the
+    Bluetooth PCM stays open with nothing more written to it (on a Q2, the PCM's own silence goes to the headset),
+    the position stands where the bytes ran out, /tmp/q2player.wait names it, and the unified log says so, once at the
+    wait's start and once at its end (q2player: waiting for the song's download ...): the BT_PAUSE_MS close is a
+    pause's, not a wait's. Once the rest lands the song plays on to its end, whole."""
+    out = tmp/'bt-stall'
+    card, status = out/'mnt/mmc/.foo', out/'tmp/q2-foo.stream'
+    card.mkdir(parents=True, exist_ok=True)
+    whole, path = (songs/'a1.flac').read_bytes(), card/'grow.flac'
+    head, landed = len(whole) * 4 // 20, []
+    path.write_bytes(whole[:head])
+    line = lambda state, n: put(status, f'#Q2STREAM/1\tseq=1\n{state}\t{n}\t{len(whole)}\t20000\t/mnt/mmc/.foo/grow.flac\n')
+    beat = lambda s: landed or line('get', head)
+    def land(s):
+        with open(path, 'ab') as f: f.write(whole[head:])
+        landed.append(1), line('done', len(whole))
+    looks = []
+    look = lambda s: looks.append((len(bt_fds(s)), sum(p.stat().st_size for p in (out/'pcm').glob('*_bt.raw')) // 4,
+                                   (out/'tmp/q2player.wait').exists(), s.positions[-1][1] if s.positions else None))
+    steps = sorted([(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'),
+                    (0.1, fakedemo.vol(100, 100)), (1.0, fakedemo.song('set-songurl', str(path)))]
+                   + [(k / 2, beat) for k in range(2, 28)] + [(6.0 + k, look) for k in range(7)] + [(14.0, land)],
+                   key=lambda st: st[0]) + [(34.0, None)]
+    s = fakedemo.Session(out)
+    s.music = songs
+    s.wait_exits = 1
+    line('get', head)
+    s.run(steps, fakedemo.launch_host(player, str(songs), 1, {'LD_PRELOAD': '', 'Q2PLAYER_BT_PAUSE_MS': '3000'}), 1)
+    assert all(n == 1 for n, _, _, _ in looks), f'Bluetooth PCMs open while it waits: {[n for n, _, _, _ in looks]}'
+    assert len({f for _, f, _, _ in looks}) == 1, f'frames written while it waits: {[f for _, f, _, _ in looks]}'
+    assert all(w for _, _, w, _ in looks) and len({p for _, _, _, p in looks}) == 1, f'wait file, position: {looks}'
+    log = (out/'player.log').read_text()
+    waits = re.findall(r"q2player: waiting for the song's download: byte \d+ of (\d+)", log)
+    ends = re.findall(r"q2player: the wait for the song's download ended after (\d+) ms", log)
+    assert len(waits) == 1 and int(waits[0]) == len(whole) and len(ends) == 1 and int(ends[0]) >= 7000, (waits, ends, log[-1500:])
+    assert 'its PCM closed' not in log, log[-1500:]
+    pcm = b''.join(p.read_bytes() for p in sorted((out/'pcm').glob('*.raw')))
+    assert abs(len(pcm) // 4 - 20 * 48000) < 4800, f'{len(pcm) // 4} frames, a1 is 20 s at 48 kHz'
+    exits = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
+    assert exits == ['{player-status\\exit}'], exits
+    return (f'waited {int(ends[0]) / 1000:.1f} s at {looks[0][1]} frames, position {looks[0][3]} s, the PCM open; '
+            f'logged its start and end, then the song whole')
+
+
 def tones(d, *rates, secs=5):
     """A 1 kHz sine at each rate (t44100.flac and so on), so that a stretch of any PCM says the speed it plays at."""
     d.mkdir(parents=True, exist_ok=True)

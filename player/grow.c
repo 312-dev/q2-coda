@@ -48,6 +48,7 @@ struct grow {
     int playing;        /* the open is done (grow_playing): a stall from here on waits for a refill */
     int64_t refill;     /* bytes to be there ahead of pos before a stalled read goes on; 0 while not refilling */
     int refill_s;       /* the next stall's refill, seconds */
+    struct timespec wait_from; /* when the read began waiting (wait_mark) */
 };
 
 /* The .stream file for url, into out, and the card path in url; NULL when url is not under an app's folder. */
@@ -115,13 +116,28 @@ int grow_have(const char *url, int64_t *have, int64_t *total, int64_t *ms) {
     return 1;
 }
 
+/* WAIT_FILE while the read waits for the song's bytes, and a line in the unified log at each wait's start and end:
+ * nothing else says that a song shown playing is waiting (the position stands, the PCM is open with nothing written,
+ * and a pause asked meanwhile is taken only once the bytes come). */
 static void wait_mark(struct grow *g, int on) {
     if (on == g->waiting) return;
     g->waiting = on;
+    char line[128];
+    int n;
     if (!on) {
+        struct timespec t;
+        clock_gettime(CLOCK_MONOTONIC, &t);
+        long long ms = (t.tv_sec - g->wait_from.tv_sec) * 1000LL + (t.tv_nsec - g->wait_from.tv_nsec) / 1000000;
+        n = snprintf(line, sizeof line, "q2player: the wait for the song's download ended after %lld ms, at byte %lld", ms,
+                     (long long)g->pos);
+        plog('I', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
         unlink(WAIT_FILE);
         return;
     }
+    clock_gettime(CLOCK_MONOTONIC, &g->wait_from);
+    n = snprintf(line, sizeof line, "q2player: waiting for the song's download: byte %lld of %lld", (long long)g->pos,
+                 (long long)g->total);
+    plog('W', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
     char tmp[sizeof WAIT_FILE + 4];
     snprintf(tmp, sizeof tmp, "%s.tmp", WAIT_FILE);
     FILE *f = fopen(tmp, "wb");
