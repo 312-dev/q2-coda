@@ -2928,6 +2928,7 @@ static int retitle(const void *unused) {
  * as before, one child per album. ponytail: the flat fallback (no memory for the frame) still makes
  * a child per album; a pool there would rebind the images round the visual centre mid-glide. */
 static void cw_shown(const char *what);
+static void cw_check(void);
 static void covers(void) {
     cf.screen = COVERS;
     widget_set_visible(cf.body, 0, 0);
@@ -3014,6 +3015,7 @@ static int poll(const void *unused) {
         if (!cf.scoped) art_cleaned();
         return to_covers(0);
     }
+    cw_check();
     char progress[64];
     tk_snprintf(progress, sizeof(progress), "Preparing artwork\xe2\x80\xa6 %d/%d", cf.done,
                 cf.total);
@@ -3715,6 +3717,7 @@ static int open_step(const void *unused) {
                 continue;
             }
             if (!op.spin) op.spin = 1, widget_invalidate_force(op.home, 0); /* the row's spinner */
+            cw_check();
             op.timer = timer_add(open_step, 0, STEP_TICK_MS);
             return 0;
         }
@@ -3748,14 +3751,15 @@ int coverflow_wait_input(void *e) {
 /* Cover Flow's open in the unified log (docs/internals.md#cover-flow-log): an I line as Home's
  * Cover Flow opens, one when its covers (or its no-albums page) first show, with the time since,
  * and, while nothing shows, a W line CW_FIRST_MS after the open and every CW_AGAIN_MS after that
- * naming the phase it waits in; an I line too if the open is given up or the page closed first. A
- * few lines an open, never one a frame or an album. The trace file (cf_trace) reaches the card only
- * after a forced restart; these go with every flush of the log. */
+ * naming the phase it waits in, looked for by the ticks that wait (open_step's and Preparing
+ * artwork's poll); an I line too if the open is given up or the page closed first. A few lines an
+ * open, never one a frame or an album. The trace file (cf_trace) reaches the card only after a
+ * forced restart; these go with every flush of the log. */
 #define CW_FIRST_MS 5000
 #define CW_AGAIN_MS 60000
 void ulog(char level, const char *src, const char *msg);
 static struct {
-    unsigned at, timer;  /* the open's time (0: no open watched), the watch's timer */
+    unsigned at, next;   /* the open's time (0: no open watched), the next W line's */
     const char *refused; /* the memory last refused this open, or 0 */
 } cw __attribute__((section(".scratch")));
 #define cw_say(level, ...)                                                                         \
@@ -3789,28 +3793,24 @@ static const char *cw_phase(char *buf, unsigned size) {
     return buf;
 }
 static unsigned cw_ms(void) { return (unsigned)time_now_ms() - cw.at; }
-static void cw_end(void) {
-    stop_timer(&cw.timer);
-    cw.at = 0;
-}
-static int cw_tick(const void *unused) {
-    cw.timer = 0;
-    if (!cw.at) return 0;
+static void cw_end(void) { cw.at = 0; }
+/* A waiting tick's look: the W line once it is due. */
+static void cw_check(void) {
+    unsigned now = (unsigned)time_now_ms();
+    if (!cw.at || (int)(now - cw.next) < 0) return;
     char phase[128];
     cw_say('W', "cover flow not shown %u s after its open: %s", cw_ms() / 1000,
            cw_phase(phase, sizeof phase));
-    cw.timer = timer_add(cw_tick, 0, CW_AGAIN_MS);
-    return 0;
+    cw.next = now + CW_AGAIN_MS;
 }
 static void cw_open(void) {
-    cw_end();
     cw.at = (unsigned)time_now_ms() | 1, cw.refused = 0;
+    cw.next = cw.at + CW_FIRST_MS;
     if (cf.stock)
         cw_say('I', "cover flow open: %u albums kept, %s", deque_size(cf.stock),
                art_clean() ? "their art known" : "their art to look for");
     else
         cw_say('I', "cover flow open: the albums to query");
-    cw.timer = timer_add(cw_tick, 0, CW_FIRST_MS);
 }
 static void cw_shown(const char *what) {
     if (!cw.at) return;
