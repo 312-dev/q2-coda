@@ -986,12 +986,12 @@ class Headset:
 
 
 def curve(v):
-    """The headset's level for Q2 volume v on its 40 dB curve (docs/internals.md#headset-controls-and-volume)."""
-    return 0 if v == 0 else max(1, round(127 * 10 ** (-40 * (100 - v) / 2000)), round(127 * v / 400))
+    """The headset's level for Q2 volume v: its share of 127 (docs/internals.md#headset-controls-and-volume)."""
+    return 0 if v <= 0 else 127 if v >= 100 else max(1, (127 * v + 50) // 100)
 
 
 def reads_as(level):
-    """The Q2 volume a headset level reads as: the nearest on the curve, the lowest of those sharing it."""
+    """The Q2 volume a headset level reads as: the nearest, the lower of two as near."""
     return min(range(101), key=lambda v: (abs(curve(v) - level), v))
 
 
@@ -1017,13 +1017,13 @@ def test_control_device_volume_hands_the_volume_to_the_headset_and_follows_its_k
              *((f'stock_{i}', 'list_item', 'scroll_view_bluetooth') for i in range(4)))
     q2.screen.click('Link Volume')
     assert q2.screen.switch('Link Volume') == 'switch_on' and q2.flash.get('Q2POD', 'BTVOLLINK') == '1'
-    # the Q2's level sent, on the curve, and the Q2's own gain full
-    assert headset.level == curve(55) == 17 and headset.gain[-1] == (100, 100)
-    headset.level = 100  # its own keys: 100 of its 127, which reads as the Q2's 95
+    # the Q2's level sent, as its share of 127, and the Q2's own gain full
+    assert headset.level == curve(55) == 70 and headset.gain[-1] == (100, 100)
+    headset.level = 100  # its own keys: 100 of its 127, which reads as the Q2's 79
     q2.loop(ms=500)
-    assert q2.var('g_volume').value == reads_as(100) == 95
+    assert q2.var('g_volume').value == reads_as(100) == 79
     q2.loop(ms=3000)  # saved once it settles (config_ini.c config_settle)
-    assert q2.flash.get('PLAYSET', 'BT_VOLUME') == '95'
+    assert q2.flash.get('PLAYSET', 'BT_VOLUME') == '79'
     q2.var('g_maxvolume').value = 60
     headset.level = 127
     q2.loop(ms=500)
