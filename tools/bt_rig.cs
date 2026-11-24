@@ -13,6 +13,7 @@
 //   btrig unpair MAC                    forget it
 //   btrig service MAC UUID on|off       one of a paired device's Bluetooth services on Windows
 //   btrig link MAC                      the device's connection status
+//   btrig scan SECONDS MAC [UUID]       a passive LE scan: advertisements from MAC or naming the service UUID
 //   btrig create ID                     AudioPlaybackConnection.TryCreateFromId alone (does Windows take this source)
 //   btrig receive --device MAC --seconds N --out FILE.wav [--route NAME] [--endpoint] [--no-open] [--stop-file F]
 //   btrig selftest --route NAME --seconds N --out FILE.wav   a tone routed as receive routes, recorded as it records
@@ -650,6 +651,29 @@ static class Program {
                     Thread.Sleep(20);
                 }
                 Json.Say("event", "guard_end");
+                return 0;
+            }
+            case "scan": {  // scan SECONDS MAC [UUID]: passive LE scan; each advertisement from MAC or naming UUID
+                var want = ParseMac(args[2]);
+                var svc = args.Length > 3 ? new Guid(args[3]) : Guid.Empty;
+                var w = new Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementWatcher();
+                w.ScanningMode = Windows.Devices.Bluetooth.Advertisement.BluetoothLEScanningMode.Passive;
+                int seen = 0, total = 0;
+                w.Received += (o, e) => {
+                    Interlocked.Increment(ref total);
+                    bool ours = e.BluetoothAddress == want || (svc != Guid.Empty && e.Advertisement.ServiceUuids.Contains(svc));
+                    if (!ours) return;
+                    Interlocked.Increment(ref seen);
+                    Json.Say("event", "advertisement", "utc", DateTime.UtcNow.ToString("o"), "address", Mac(e.BluetoothAddress),
+                             "name", e.Advertisement.LocalName, "rssi", (int)e.RawSignalStrengthInDBm,
+                             "services", new RawJson("[" + string.Join(", ", e.Advertisement.ServiceUuids.Select(g => Json.Q(g.ToString()))) + "]"));
+                };
+                Json.Say("event", "scanning", "utc", DateTime.UtcNow.ToString("o"));
+                w.Start();
+                Thread.Sleep((int)(double.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture) * 1000));
+                w.Stop();
+                Json.Say("event", "scan_end", "utc", DateTime.UtcNow.ToString("o"), "matching", seen, "all_advertisements", total,
+                         "status", w.Status.ToString());
                 return 0;
             }
             case "routed": Json.Say("policy", Policy.Routed(int.Parse(args[1]))); return 0;
