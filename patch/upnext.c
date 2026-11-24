@@ -14,7 +14,9 @@
  * moment. Centre held on a queued row lifts it onto a raised card, as the Library's Edit Library
  * does (library_edit.c): the wheel carries it among Playing Next's rows, each showing a grip,
  * Centre puts it down there and Return puts it back. The rest of the queue is the queue's own
- * order: no arrow, no lift, and Play/Pause does nothing on it. Nothing toasts. Return lets the
+ * order: no arrow, no lift, and Play/Pause does nothing on it. Centre held on one of its songs, or
+ * a finger held on any queued song, opens the song's hold menu (un_menu_hold, centre_menu.c).
+ * Nothing toasts. Return lets the
  * sheet fall away (un_back, menu_modal.c modal_close), as do a tap on the page above it and a drag
  * down on it (menu_modal.c modal_touch_close).
  *
@@ -302,6 +304,21 @@ int un_hold(void *top) {
     if (!top || top != un.page) return 0;
     timer_add(un_hold_due, (void *)0, 0);
     return 1;
+}
+
+/* Centre or a finger held on a song's row (hold_menu.c qm_centre_hold, qm_touch_hold): the song's
+ * hold menu over the queue, as a playlist page's song gets it (qm_song_hold), at the row's queue
+ * index. Centre (centre) leaves a Playing Next row to its lift (un_keydown); a pending row (a card
+ * app's song not yet queued) and the header have none. 1 when the menu is on its way. */
+int un_menu_hold(void *top, int centre) {
+    if (!top || top != un.page || un.lifted) return 0;
+    int k = un_place(widget_get_prop_int(un.view, SEL, -1));
+    void *q = P(mcl_pdeqplaylist, 0);
+    if (k < 0 || (unsigned)k >= un.n || (centre && (unsigned)k < un.npn) || !q) return 0;
+    unsigned at = un.idx[k];
+    if ((at & UN_PEND_ROW) || at >= deque_size(q)) return 0;
+    stop_timer(&un.hold);
+    return qm_song_hold(un.page, q, at, (const char *)0, (void (*)(void))0);
 }
 
 /* The lifted row moved to place to of Playing Next: the view's children reordered (the row's

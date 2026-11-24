@@ -30,6 +30,7 @@ static struct {
     unsigned eat;   /* the keys whose press was dropped here: their long press and release go too */
     unsigned timer; /* the card's end */
     int shown;      /* the card is up, the screen lit for it */
+    unsigned wheel; /* the wheel's keys whose tick wheel_lock_gate dropped (key_bit) */
 } kl __attribute__((section(".scratch")));
 
 /* A key's bit in kl.eat: Return, Play/Pause, the wheel's two, the previous and next buttons, and
@@ -43,7 +44,7 @@ static unsigned key_bit(unsigned key) {
 }
 
 /* Buttons Lock is Off or On (navigation.c lock_set saves On as SYSSET LOCKMODE 2): the dark wheel
- * sets nothing (volume.c vol_wm_keyup), so stock's modes that lock it, 1 (Volume only) and 3
+ * does nothing (wheel_lock_gate), so stock's modes that lock it, 1 (Volume only) and 3
  * (Everything), lock nothing more. One saved by an earlier version is made one of the two once at
  * boot, before or after config_init reads it (playback.c ringnav_bootmode): 1, whose buttons were
  * free, is Off; any other is On. */
@@ -105,6 +106,30 @@ static void card_on(void) {
 /* Whether a press of key now is the lock's: held back, its card shown dark (keylock_gate). */
 int keylock_holds(unsigned key) {
     return key_bit(key) && locked(key) && !video_on() && !addon_game_on();
+}
+
+/* ringnav_input, before the wake gate: 1 drops a wheel tick (its press, long press and release)
+ * while the Q2 is locked: the screen off, whatever Wake and Buttons Lock are set to, Buttons Lock's
+ * card up, or stock's lock screen (g_lockscreen_pageflag; build.py SAVER_OFF keeps it shut). So a
+ * turn in a pocket changes no volume, moves no list, makes no click and never lights the screen
+ * (docs/internals.md#wheel-volume). A tick is judged at its press, so a release keeps it whole. A
+ * headset's volume (headset.c, past the window manager) and the Car Remote's (coda_rc_shim.c, a
+ * command, not a key) are no wheel ticks and never come here. */
+int wheel_lock_gate(void *e) {
+    unsigned type = (unsigned)I(e, EVENT_TYPE), key = (unsigned)I(e, EVENT_KEY);
+    if ((key != KEY_PREV && key != KEY_NEXT) ||
+        (type != EVT_KEY_DOWN && type != EVT_KEY_LONG && type != EVT_KEY_UP))
+        return 0;
+    unsigned bit = key_bit(key);
+    if (type == EVT_KEY_DOWN) {
+        if (!g_backlight_status || kl.shown || g_lockscreen_pageflag)
+            kl.wheel |= bit;
+        else
+            kl.wheel &= ~bit;
+    }
+    int drop = (kl.wheel & bit) != 0;
+    if (type == EVT_KEY_UP) kl.wheel &= ~bit;
+    return drop;
 }
 
 /* ringnav_input, after the wake gate: 1 drops the event. remote: SyncLink's play control

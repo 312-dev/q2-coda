@@ -212,7 +212,7 @@ int csv_toggle(char *list, unsigned size, const char *item) {
 }
 
 /* Buttons Lock, Off or On: On is stock's LOCKMODE 2, which with the screen off locks Return,
- * Play/Pause and the skip keys. The dark wheel sets nothing (volume.c vol_wm_keyup), so stock's
+ * Play/Pause and the skip keys. The dark wheel does nothing (keylock.c wheel_lock_gate), so stock's
  * wheel modes (1, 3) lock nothing more; keylock.c keylock_boot makes an earlier one of these two.
  * KEY_LOCKOUT is the separate, temporary debounce after a button press. */
 static const char *const lock_names[] = { "Off", "On" };

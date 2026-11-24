@@ -3099,8 +3099,9 @@ def input_event(kind, key, at):
     return e
 
 
-# Wake (Wake setting Single, the default): a device key lights a dark screen; Play/Pause, Previous and Next act too,
-# Return and a wheel turn only wake. Double: only a second Center press wakes, Return is dropped, the rest act blind.
+# Wake (Wake setting Single, the default): a device button lights a dark screen; Play/Pause, Previous and Next act too,
+# Return only wakes and the wheel does nothing (wheel_lock_gate). Double: only a second Center press wakes, Return is
+# dropped, the rest act blind.
 @pytest.fixture
 def dark(fw, st, guard):
     """The screen off; awake_screen and the screen's timer counted, awake_screen lighting it as stock's does."""
@@ -3127,15 +3128,67 @@ def test_return_dark_only_wakes_and_its_hold_and_release_stay_out(fw, st, dark):
     assert gate(DOWN, KEY_RETURN, 500) == 0 and gate(UP, KEY_RETURN, 50) == 0  # the next press is Return's
 
 
-def test_a_wheel_turn_dark_only_wakes_its_ticks_eaten_till_it_stops(fw, st, dark):
-    gate = Gate(fw, 'wake_gate')
-    assert gate(DOWN, KEY_NEXT) == 1 and dark == [1] and gate(UP, KEY_NEXT, 5) == 1
-    for _ in range(10):  # the same turn, a tick every 60 ms, lit now
-        assert gate(DOWN, KEY_NEXT, 55) == 1 and gate(UP, KEY_NEXT, 5) == 1
-    assert gate(DOWN, KEY_PREV, 55) == 1  # turned back in the same go
-    assert gate(UP, KEY_PREV, 5) == 1
-    assert gate(DOWN, KEY_NEXT, 600) == 0 and gate(UP, KEY_NEXT, 5) == 0  # a new turn: the list's or the volume's
-    assert dark == [1]
+class Wheel:
+    """ringnav_input fed the wheel's ticks as the ring's thread posts them (a fresh frame stamped for tick_gate), and
+    what reached stock's input (stock_input_trampoline: the window manager, its key hooks, the volume and the click)."""
+    def __init__(self, fw):
+        self.fw, self.now, self.passed = fw, 100000, []
+        fw.mock('time_now_ms', lambda *_: self.now)
+        fw.mock('stock_input_trampoline', lambda wm, e, *_: self.passed.append(
+            (C.c_int.from_address(e + O['EVENT_TYPE']).value, C.c_int.from_address(e + O['EVENT_KEY']).value)) and 0)
+        self.send = fw.fn('ringnav_input', C.c_int, C.c_void_p, C.c_void_p)
+
+    def tick(self, key=KEY_NEXT, after=60):
+        self.now += after
+        self.fw.var('wheel_frame_at', C.c_uint).value = self.now  # the ring was turned this very ms
+        for kind in (DOWN, UP):
+            self.send(None, input_event(kind, key, self.now))
+        return self.passed
+
+
+@pytest.mark.parametrize('double', [0, 1])
+def test_a_wheel_turn_dark_does_nothing_and_leaves_the_screen_off(fw, st, dark, double):
+    """The owner's ruling (2026-11-24): with the screen off the wheel is off, whatever Wake is set to: no volume, no
+    list, no click (all stock's, past stock_input_trampoline) and no wake."""
+    st('wake_double').value = double
+    wheel = Wheel(fw)
+    for _ in range(6):
+        wheel.tick(KEY_NEXT), wheel.tick(KEY_PREV)
+    assert wheel.passed == [] and dark == [] and fw.var('g_backlight_status', C.c_ubyte).value == 0
+
+
+def test_a_wheel_turn_lit_and_unlocked_still_reaches_stock(fw, st, dark):
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    wheel = Wheel(fw)
+    assert wheel.tick(KEY_NEXT) == [(DOWN, KEY_NEXT), (UP, KEY_NEXT)]
+
+
+def test_the_wheel_is_off_under_the_buttons_lock_card(fw, st, dark):
+    """A locked button dark lights the screen with Buttons Lock's card: lit, the wheel still reaches nothing."""
+    fw.var('g_keylock_flag', C.c_ubyte).value = 1
+    fw.var('g_keylock_mode', C.c_ubyte).value = 2
+    wheel = Wheel(fw)
+    for kind in (DOWN, UP):
+        wheel.send(None, input_event(kind, KEY_PLAY, wheel.now))  # held back: the card lights the screen
+    assert fw.var('g_backlight_status', C.c_ubyte).value == 1 and wheel.passed == []
+    assert wheel.tick(KEY_NEXT) == []
+
+
+def test_the_wheel_is_off_on_stocks_lock_screen(fw, st, dark):
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    fw.var('g_lockscreen_pageflag', C.c_ubyte).value = 1
+    wheel = Wheel(fw)
+    assert wheel.tick(KEY_NEXT) == []
+
+
+def test_a_tick_pressed_lit_keeps_its_release_after_the_screen_went_off(fw, st, dark):
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    wheel = Wheel(fw)
+    wheel.fw.var('wheel_frame_at', C.c_uint).value = wheel.now
+    wheel.send(None, input_event(DOWN, KEY_NEXT, wheel.now))
+    fw.var('g_backlight_status', C.c_ubyte).value = 0
+    wheel.send(None, input_event(UP, KEY_NEXT, wheel.now))
+    assert wheel.passed == [(DOWN, KEY_NEXT), (UP, KEY_NEXT)]  # a press whole, never its down alone
 
 
 def test_center_dark_passes_for_stock_to_light_as_before(fw, st, dark):

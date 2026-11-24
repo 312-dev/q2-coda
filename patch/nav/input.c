@@ -25,32 +25,22 @@ static int remote_match(void *e, int spend);
  * counts started over as a press's (reset_poweroptions_timer) and its wake window and lit pacing as
  * a Center wake's (woke). Play/Pause, Previous and Next go on and act, a hold of the skips seeking;
  * Return's press only wakes, its long press and release dropped with it (wake_return), so a hold
- * from dark does not open Home; a wheel turn's first tick only wakes, and the turn's ticks after it
- * are dropped while they come within WAKE_TURN_MS of each other (wake_turn_at), so neither the
- * volume nor a list moves on the turn that woke it. Center is left to stock's release, which lights
- * it as it always has. A key the Buttons Lock holds is left to keylock.c, whose card lights the
- * screen. */
-#define WAKE_TURN_MS 300
+ * from dark does not open Home. The wheel never gets here dark: wheel_lock_gate (keylock.c), before
+ * this gate, drops its ticks, so a turn neither wakes nor acts. Center is left to stock's release,
+ * which lights it as it always has. A key the Buttons Lock holds is left to keylock.c, whose card
+ * lights the screen. */
 static int wake_key(void *e, unsigned type, unsigned key, unsigned now) {
     if (key == KEY_RETURN && st.wake_return) { /* the waking press's long press and release */
         if (type == EVT_KEY_UP) st.wake_return = 0;
         return 1;
     }
-    int wheel = key == KEY_PREV || key == KEY_NEXT;
-    if (wheel && st.wake_turn_at && now - st.wake_turn_at < WAKE_TURN_MS) {
-        st.wake_turn_at = now | 1; /* the turn goes on */
-        return 1;
-    }
-    st.wake_turn_at = 0;
     if (g_backlight_status || type != EVT_KEY_DOWN) return 0;
     int media = key == KEY_PLAY || key == KEY_BACK_BTN || key == KEY_FWD_BTN;
-    if ((!media && !wheel && key != KEY_RETURN) || remote_match(e, 0) || keylock_holds(key))
-        return 0;
+    if ((!media && key != KEY_RETURN) || remote_match(e, 0) || keylock_holds(key)) return 0;
     awake_screen();
     reset_poweroptions_timer(1, 1, 1);
     woke(now);
     if (key == KEY_RETURN) st.wake_return = 1;
-    if (wheel) st.wake_turn_at = now | 1;
     return !media;
 }
 static int wake_gate(void *e) {
@@ -238,6 +228,7 @@ static void vol_step(unsigned key) {
 }
 int ringnav_input(void *wm, void *e) {
     if (e && tick_gate(e)) return 0;
+    if (e && wheel_lock_gate(e)) return 0; /* the wheel while locked or dark (keylock.c) */
     if (e && (chord_gate(e) || wake_gate(e))) return 0;
     if (e && keylock_gate(e, remote_match(e, 0))) return 0; /* keylock.c */
     if (e && charge_gate(e)) return 0;                      /* the plug-in screen (charging.c) */
@@ -263,6 +254,7 @@ int ringnav_input(void *wm, void *e) {
         st.touch_y = I(e, EVENT_Y);
         /* a tap on a status row slot (status_row.c), upright: the panel's raw axes are portrait */
         status_touch(type, st.touch_y, 319 - st.touch_x);
+        cm_touch(type, st.touch_x, st.touch_y); /* a finger held on a song row (centre_menu.c) */
     }
     if ((type == EVT_KEY_DOWN || type == EVT_KEY_UP || type == EVT_KEY_LONG) &&
         (key == KEY_PREV || key == KEY_NEXT || key == KEY_CENTER) && usb_prompt()) {
@@ -406,6 +398,7 @@ int ringnav_keydown(void *ctx, void *event) {
     search_strip_down(top, key); /* Return held on a letter strip: its card (search_strip.c) */
     cc_keydown(key);             /* ... on a Control Center stop: its page (control_center.c) */
     un_keydown(key);             /* ... on a queued song in Up Next: it lifts (upnext.c) */
+    cm_keydown(key);             /* ... on a song row: its hold menu (centre_menu.c) */
     unsigned char tone = g_keytone_flag;
     void *row = (void *)0;
     entries_t s = { &row, 0, 1, 4096 };
@@ -726,6 +719,8 @@ int ringnav(void *ctx, void *event) {
     if (usable() && tuner_key(window_manager_get_top_window(window_manager()), key)) return STOP;
     if (usable() && radio_take_back(window_manager_get_top_window(window_manager()), key))
         return STOP;
+    /* the release of the Centre hold that opened a song's menu (centre_menu.c) */
+    if (cm_key_release(key)) return STOP;
     /* the row editors' keys, and the release of the Center hold that entered or left one */
     if (lr_edit_key(window_manager_get_top_window(window_manager()), key, owned)) return STOP;
     /* a grabbed inline slider's keys: the wheel sets it, Centre or Return sets it down */

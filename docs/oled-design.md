@@ -811,6 +811,10 @@ as a menu's; a lit row's foot never passes y 282.
   its title in Inter Medium 18 px; Playing Next's songs show a grip (three 18 x 2 px bars) on the
   right column in place of their arrows; the wheel carries it, Center puts it down, Return puts it
   back where it was.
+- **A song's menu**: Center held half a second on a song of the rest of the queue, or a finger held
+  on any queued song, opens the song's hold menu over the sheet (Play Next, Play Last, Add to
+  Playlist, Favorite, the Go to rows), as on every song list
+  ([internals](internals.md#centre-hold-menu)).
 - Nothing toasts. Center on a song plays it and closes Up Next at once; Return lets the sheet fall
   away. The list follows the queue as songs end, the header with it.
 - **A finger closes it too** (the user's, 2026-11-18): a tap on the dimmed page above the sheet

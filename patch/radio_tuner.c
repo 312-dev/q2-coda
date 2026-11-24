@@ -297,8 +297,8 @@ static void fine_turn(int n, int fast, int piezo) {
 /* The touch wheel, raw while the tuner screen is the top window's and lit (wheel_raw, playback.h):
  * its travel as steps, STEP_THIRDS thirds of a unit each, clockwise up; fast when they came under
  * FAST_MS apart. No key event comes, so travel holds the screen on itself, as Now Playing's lyrics
- * do. Given back to ticks anywhere else, and with the screen off, so a turn wakes it as a tick
- * does. */
+ * do. Given back to ticks anywhere else, and with the screen off, where a tick does nothing
+ * (keylock.c wheel_lock_gate). */
 static void wheel(unsigned now) {
     int raw = rt->page && rt->screen == TUNER && !rt->vol && g_backlight_status &&
               window_manager_get_top_window(window_manager()) == rt->page;

@@ -207,6 +207,21 @@ def test_subscribed_the_level_is_read_every_fallback_period_lit_or_dark(fw, lit)
     assert vol.reads() == reads + 1
 
 
+def test_a_headsets_own_volume_key_still_sets_the_volume_with_the_screen_off(fw, stock_bytes):
+    """The wheel is off while the screen is (keylock.c wheel_lock_gate); a headset's own keys are not the wheel: its
+    level, read from BlueZ, still sets the Q2's with the screen dark."""
+    stock_bytes(0xa4cbb5, 1)
+    stock_bytes(O['VOL_DIALOG_COUNT'], 1)
+    Front(fw, b'playing_page')
+    vol, ev = subscribed(fw, volume=40)
+    fw.var('g_backlight_status', C.c_ubyte).value = 0
+    vol.clock.now += 1000
+    vol.headset.level = 127
+    ev.feed(changed())
+    vol.poll()
+    assert fw.var('g_volume', C.c_ubyte).value == 100
+
+
 def test_a_headsets_change_shows_on_the_lit_screen_on_the_pass_after_its_signal(fw, stock_bytes):
     """The latency: the overlay opens on the first UI pass after BlueZ's signal, the clock not moved, where the
     timed read alone would wait the fallback period."""

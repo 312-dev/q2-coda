@@ -148,7 +148,6 @@ typedef struct {
         wake_down, /* 1: the held Centre press passes; 2: it is dropped */
         charge_held, artist_cf, year_old, resume, artist_az, hold_home, standby_limit, eq_output,
         smart_wifi, big_library, playlist_cf, scan_durations, cf_position;
-    unsigned wake_turn_at; /* wake_key: the waking wheel turn's last tick (| 1), 0 none */
     int wake_return;       /* ... a waking Return press, its long press and release to come */
     void *pod_label[POD_COUNT];
     char art_cf_hint[64]; /* the page cf_veil hides: its anim_hint */
@@ -859,6 +858,7 @@ int video_on(void);
 /* keylock.c: Buttons Lock's card (docs/internals.md#buttons-lock); its padlock is a status_row.c
  * slot */
 int keylock_gate(void *e, int remote);
+int wheel_lock_gate(void *e); /* keylock.c: a wheel tick while locked (the screen off) */
 int keylock_holds(unsigned key); /* keylock.c: the Buttons Lock holds key back now */
 void keylock_paint(void *w, void *canvas);
 /* feedback.c: an overlay card's scrim over the top window and the status bar; 1 on the window */
@@ -1195,6 +1195,16 @@ void add_songs_search(void *songs); /* search_strip.c: the strip over Add Songs'
 void search_yield(void);    /* search_strip.c: Search's load, if it runs, ended (staged_into) */
 void coverflow_yield(void); /* coverflow.c: a Cover Flow open's step given up (open_yield) */
 int playlist_page_hold(void *top);
+int playlist_page_song_hold(void *top);
+/* hold_menu.c: a song row's hold menu from a held Centre or finger (centre_menu.c) */
+int qm_centre_hold(void *top);
+int qm_touch_hold(void *top, int x, int y);
+/* upnext.c: the same over Up Next's queued song (centre: Playing Next's rows keep their lift) */
+int un_menu_hold(void *top, int centre);
+/* centre_menu.c: Centre's press and release, a finger's raw pointer events (input.c) */
+void cm_keydown(unsigned key);
+int cm_key_release(unsigned key);
+void cm_touch(unsigned type, int x, int y);
 int qm_song_hold(void *page, void *list, unsigned at, const char *extra, void (*pick)(void));
 int otg_count(void);
 void pv_paint(void *w, void *canvas);

@@ -510,6 +510,7 @@ demo	0x6b2bb4	0x4	glyph_cache_lookup	the load of $25 for the only call to time_n
 demo	0x6b2bb8	0x4	glyph_cache_lookup	the only call to time_now_ms; tools/build.py GLYPH_STAMP
 demo	0x6b3514	0x4	input_device_status_handle_event	`sb $zero, 0xc($17)` (2nd of 2 such), after "double clicked"; patch/nav/hold_menu.c STALE_NOTES
 demo	0x6b35fc	0x4	input_device_status_handle_event	`beqz $2, +18 words` (6th of 9 such), before 1st of 2 calls to memset, after "double clicked"; tools/build.py KEY_ABORTED
+demo	0x6b3654	0x4	input_device_status_handle_event	`addiu $6, $zero, 0x3e8`, before the only call to timer_add, after "double clicked"; patch/centre_menu.c STOCK_CENTRE_HOLD_MS
 demo	0x6b3658	0x4	input_device_status_handle_event	the load of $25 for the only call to timer_add, after "double clicked"; tools/build.py HOLD_KEYS
 demo	0x6b3668	0x4	input_device_status_handle_event	the only call to timer_add, after "double clicked"; tools/build.py HOLD_KEYS
 demo	0x6b39b8	0x4	input_device_status_on_long_press_timer	the only call to input_device_status_find_key_long_press_info; tools/build.py HOLD_KEYS
