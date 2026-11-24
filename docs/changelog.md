@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Subsonic: a restart that resumes a song from your server starts the app once, where two copies of it could start and both run until the next restart, each checking the server and writing the same files.
   - Bluetooth: music paused for more than a couple of minutes plays again when you press Play, where AirPods could stay silent, still connected, until you disconnected and reconnected them. After 20 seconds paused the Q2 lets the headset's audio stream stop, as a phone does, and starts it again at Play or a click.
   - Radio: a radio of a song from your server (the Subsonic app's) plays with shuffle and repeat off, as the library's own radio does, and puts them back when it ends. With Repeat One on, every song of the radio played twice in a row, and the dimmed buttons could not turn it off while the radio played.
   - Bluetooth: each paired device has a **Volume Curve** on its page, **Even** or **Gentle**. Even, the default, suits most headphones. Gentle is for headphones that are already loud at half volume (such as the Bowers & Wilkins Px7): each step of the Q2's volume sounds like the same change, and half volume is much quieter. It changes the volume of the connected device at once, and its Volume Limit still applies.
