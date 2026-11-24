@@ -9,8 +9,8 @@
  * the design's own code and read once from usr/share/q2games/popstall/art.bin into the state
  * (game_popstall_art.h says where each is); without that file the game draws flat stand-ins. */
 #include "engine.h"
-#include "peq.h"
 #include "game_popstall_art.h"
+#include "peq.h"
 
 #define P_L 24 /* the wall faces and the beam's underside: the ball's edge stays inside them */
 #define P_R 351
@@ -39,12 +39,13 @@
 #define P_HUD_Y2 38 /* 38.5 in the design */
 #define P_SEQ 6     /* frames between the sounds of a run */
 #define P_FX 20     /* effects at once */
+#define P_BULBS 32  /* the beam's 14 and 9 down each wall: one bit each */
 #define P_MAGIC 0x31535450 /* "PTS1": the save */
 #define P_ART "/usr/share/q2games/popstall/art.bin"
 
 enum { READY, PLAY, CLEAR, INFLATE, OVER };
-enum { NONE, BAL, DBL, STAR, SACK };                       /* a cell */
-enum { T_WIDE = 1, T_TRIO, T_GLUE, T_SLOW, T_LIFE };     /* a ticket */
+enum { NONE, BAL, DBL, STAR, SACK };                 /* a cell */
+enum { T_WIDE = 1, T_TRIO, T_GLUE, T_SLOW, T_LIFE }; /* a ticket */
 enum { F_POP = 1, F_STRIP, F_BAG, F_DUST, F_SCORE, F_CALL, F_SPARK, F_STARS, F_KNOCK };
 enum { C_WIDE, C_TRIO, C_GLUE, C_SLOW, C_LIFE, C_GRAND }; /* the callouts */
 
@@ -73,9 +74,11 @@ static const unsigned row_light[8] = { 0xffb1be, 0xffd08c, 0xffefa8, 0xa6ecda,
                                        0xb4d8fb, 0xffffff, 0xf9b4dd, 0xffefa8 };
 static const unsigned tk_paper[5] = { 0xffe8a3, 0x9fe3ff, 0xffc46b, 0xa8f0cc, 0xffb1be };
 static const unsigned tk_ink[5] = { 0xc8324a, 0x1b3a7a, 0x7a3a0a, 0x0e5a42, 0x8e1f36 };
-static const char *const callouts[6] = { "WIDE!", "TRIO!", "GLUE!", "SLOW!", "+1 BALL!", "GRAND PRIZE!" };
+static const char *const callouts[6] = { "WIDE!", "TRIO!",    "GLUE!",
+                                         "SLOW!", "+1 BALL!", "GRAND PRIZE!" };
 static const unsigned call_fill[6] = { K_GOLD, 0x9fe3ff, 0xffc46b, 0xa8f0cc, 0xffb1be, K_GOLD };
-static const unsigned call_edge[6] = { K_CRIMSON_DD, 0x1b3a7a, 0x7a3a0a, 0x0e5a42, 0x8e1f36, K_CRIMSON_DD };
+static const unsigned call_edge[6] = { K_CRIMSON_DD, 0x1b3a7a, 0x7a3a0a,
+                                       0x0e5a42,     0x8e1f36, K_CRIMSON_DD };
 /* The mat's depth at the contact, quarter px, a frame each from the contact: down in two frames,
  * back through one 1.5 px overshoot, at rest on frame 11 (fair.py DIP_CURVE). */
 static const signed char dip_curve[12] = { 8, 16, 15, 11, 5, 0, -4, -6, -5, -3, -1, 0 };
@@ -85,7 +88,7 @@ static const short plush_x[4] = { 13, 13, 362, 362 }, plush_y[4] = { 118, 196, 1
 struct ball {
     fx x, y;
     int ang, live, spin, bounce; /* bounce 4..1: the squash then the stretches after a bounce */
-    int stuck, held, cx;         /* GLUE: stuck to the mat this far from its middle, for held frames */
+    int stuck, held, cx; /* GLUE: stuck to the mat this far from its middle, for held frames */
 };
 struct effect {
     short kind, t, x, y;
@@ -102,7 +105,8 @@ struct pstall {
     unsigned score, seed, rs;
     unsigned char cell[P_CELLS], squash[P_CELLS];
     signed char lean_x[P_CELLS], lean_y[P_CELLS];
-    int dip_t, dip_x, dip_q; /* the dip's frame (12: at rest), its x, its depth in eighths of 4 px */
+    int dip_t, dip_x,
+        dip_q; /* the dip's frame (12: at rest), its x, its depth in eighths of 4 px */
     int wide_t, slow_t, glue_n, frame;
     struct {
         int kind, x, t;
@@ -120,6 +124,7 @@ struct pstall {
         unsigned magic, best, level, sum;
     } save;
     unsigned saved;
+    int fresh; /* a level's start: Ready shows its title and hint; after a miss it shows none */
     int art_ok;
     unsigned art[]; /* ART_BYTES, read at init */
 };
@@ -254,7 +259,8 @@ static void build(struct pstall *b, int bags) {
         if (i / P_COLS >= 1 && i / P_COLS <= 5 && b->cell[i] == BAL) cand[m++] = i;
     bags = bags < 0 ? bags_for(b->level) : bags;
     for (int guard = 0; placed < bags && m && guard < 60; ++guard) {
-        int i = cand[rng(&s) % (unsigned)m], r = i / P_COLS, j = r * P_COLS + cols(r) - 1 - i % P_COLS;
+        int i = cand[rng(&s) % (unsigned)m], r = i / P_COLS,
+            j = r * P_COLS + cols(r) - 1 - i % P_COLS;
         if (j == i || b->cell[j] != BAL || touching(i, j) || touching(i, key) || touching(j, key))
             continue;
         int clash = 0;
@@ -273,7 +279,7 @@ static void build(struct pstall *b, int bags) {
 
 static const short fx_box[10][4] = {
     /* x y w h from the effect's x y */
-    { 0, 0, 0, 0 },       { -32, -30, 66, 68 }, { -30, -28, 62, 62 }, { -12, -14, 26, 30 },
+    { 0, 0, 0, 0 },       { -32, -30, 66, 68 }, { -30, -28, 62, 62 },  { -12, -14, 26, 30 },
     { -22, -16, 46, 34 }, { -30, -19, 62, 28 }, { -76, -18, 152, 30 }, { -58, -26, 118, 32 },
     { -38, -32, 78, 66 }, { -9, -8, 18, 16 },
 };
@@ -328,7 +334,7 @@ static void ball_rest(struct pstall *b) {
 static void band_mark(struct pstall *b) { mark(b, 60, 212, 256, 46); }
 
 static void ready(struct pstall *b) {
-    b->mode = READY;
+    b->mode = READY, b->fresh = 1;
     b->side = b->side > 0 ? -1 : 1;
     ball_rest(b);
     band_mark(b);
@@ -353,7 +359,8 @@ static void init(void *state, int h) {
     b->h = h;
     b->pad = ENG_W / 2;
     b->dip_t = 12;
-    b->art_ok = blob_io(P_ART, P_ART, b->art, ART_BYTES, 0) && games_ok(b->art, ART_BYTES, ART_MAGIC);
+    b->art_ok =
+        blob_io(P_ART, P_ART, b->art, ART_BYTES, 0) && games_ok(b->art, ART_BYTES, ART_MAGIC);
     if (!eng_load("popstall", &b->save, sizeof b->save, P_MAGIC) || b->save.best > 99999999 ||
         b->save.level > 99)
         b->save.best = b->save.level = 0; /* a save that no game made */
@@ -389,6 +396,7 @@ static void score(struct pstall *b, unsigned n) {
 static unsigned combo_up(struct pstall *b) {
     ++b->combo;
     if (b->combo >= 2) b->swell = 6, mark(b, 128, 9, 120, 25);
+    if (b->combo == 10) hop(b, 0, 2, 0), hop(b, 2, 2, 0); /* x10: the two top prizes hop */
     unsigned pts = (unsigned)(b->level * (b->combo < 10 ? b->combo : 10));
     score(b, pts);
     return pts;
@@ -399,7 +407,8 @@ static void lean(struct pstall *b, int i, int on) {
     for (int k = around(r, c, near); k--;) {
         int j = near[k];
         if (b->cell[j] != BAL && b->cell[j] != DBL && b->cell[j] != STAR) continue;
-        int dx = cell_xi(j / P_COLS, j % P_COLS) - cell_xi(r, c), dy = cell_y(j / P_COLS) - cell_y(r);
+        int dx = cell_xi(j / P_COLS, j % P_COLS) - cell_xi(r, c),
+            dy = cell_y(j / P_COLS) - cell_y(r);
         /* 1.5 px away from the pop: 2 across a row, 1 and 1 to a row above or below */
         b->lean_x[j] = (signed char)(on ? ((dx > 0) - (dx < 0)) * (dy ? 1 : 2) : 0);
         b->lean_y[j] = (signed char)(on ? (dy > 0) - (dy < 0) : 0);
@@ -435,10 +444,13 @@ static void hit(struct pstall *b, int i, int from_x) {
         for (int q = 0; q < n; ++q) {
             int j = near[q];
             if (b->cell[j] != BAL && b->cell[j] != DBL) continue;
-            int a = eng_atan2((cell_y(j / P_COLS) - y) * 64, (cell_xi(j / P_COLS, j % P_COLS) - x) * 64) & 1023;
+            int a = eng_atan2((cell_y(j / P_COLS) - y) * 64,
+                              (cell_xi(j / P_COLS, j % P_COLS) - x) * 64) &
+                    1023;
             a = a > 512 ? a - 1024 : a;
             int at = m++;
-            for (; at && key[at - 1] > a; --at) key[at] = key[at - 1], b->chain[at] = b->chain[at - 1];
+            for (; at && key[at - 1] > a; --at)
+                key[at] = key[at - 1], b->chain[at] = b->chain[at - 1];
             key[at] = a, b->chain[at] = j;
         }
         b->chain_n = m, b->chain_t = 2;
@@ -453,7 +465,8 @@ static void hit(struct pstall *b, int i, int from_x) {
     add_fx(b, F_SCORE, x + 3, y - 17, (int)pts | (b->combo >= 10) << 24);
     if ((b->tk[0].kind == 0 || b->tk[1].kind == 0) && rng(&b->rs) % 8 == 0) {
         int t = b->tk[0].kind ? 1 : 0;
-        b->tk[t].kind = 1 + (int)(rng(&b->rs) % 5), b->tk[t].x = x, b->tk[t].y = FX(y), b->tk[t].t = 0;
+        b->tk[t].kind = 1 + (int)(rng(&b->rs) % 5), b->tk[t].x = x, b->tk[t].y = FX(y),
+        b->tk[t].t = 0;
     }
     sound(b, ENG_SFX_TAP, 1);
 }
@@ -583,6 +596,7 @@ static void missed(struct pstall *b, int x) {
         return;
     }
     ready(b);
+    b->fresh = 0;
     b->ball[0].bounce = 4, b->ball[0].cx = FX_INT(b->ball[0].x);
     dip(b, FX_INT(b->ball[0].x), 8);
 }
@@ -631,17 +645,20 @@ static void launch(struct pstall *b, struct ball *o) {
 /* What a ball's paint depends on, as one word: alive, its pixel, its frame, stuck or not. */
 static int ball_look(const struct ball *o) {
     if (!o->live) return 0;
-    int x = o->bounce == 4 ? o->cx : FX_INT(o->x + FX(1) / 2); /* the squash is drawn where it hit */
-    return 1 | (x & 511) << 1 | (FX_INT(o->y + FX(1) / 2) & 511) << 10 | o->spin << 19 | o->bounce << 21 |
-           o->stuck << 24;
+    int x =
+        o->bounce == 4 ? o->cx : FX_INT(o->x + FX(1) / 2); /* the squash is drawn where it hit */
+    return 1 | (x & 511) << 1 | (FX_INT(o->y + FX(1) / 2) & 511) << 10 | o->spin << 19 |
+           o->bounce << 21 | o->stuck << 24;
 }
 
 /* The ball's box with its trail and motes, as a rect. */
 static void ball_box(const struct pstall *b, const struct ball *o, int *box) {
     int x = FX_INT(o->x), y = FX_INT(o->y), m = b->slow_t ? 14 : 11;
     box[0] = x - m, box[1] = y - m, box[2] = x + m + 1, box[3] = y + m + 1;
-    if (o->bounce == 4) box[1] = box[1] < P_REST - 10 ? box[1] : P_REST - 10, box[3] = P_REST + 13,
-                        box[0] = o->cx - 12 < box[0] ? o->cx - 12 : box[0], box[2] = o->cx + 13 > box[2] ? o->cx + 13 : box[2];
+    if (o->bounce == 4)
+        box[1] = box[1] < P_REST - 10 ? box[1] : P_REST - 10, box[3] = P_REST + 13,
+        box[0] = o->cx - 12 < box[0] ? o->cx - 12 : box[0],
+        box[2] = o->cx + 13 > box[2] ? o->cx + 13 : box[2];
     if (b->mode == PLAY && !o->stuck) {
         int tx = x - (22 * eng_cos(o->ang) >> 16), ty = y - (22 * eng_sin(o->ang) >> 16);
         box[0] = tx - 5 < box[0] ? tx - 5 : box[0], box[1] = ty - 5 < box[1] ? ty - 5 : box[1];
@@ -664,23 +681,24 @@ static void confetto(int k, int *p) {
 }
 
 static unsigned lit(const struct pstall *b) {
-    unsigned all = (1u << 30) - 1, m = 0;
+    unsigned all = ~0u, m = 0;
     if (b->mode == OVER || b->brown_t) return 0;
     if (b->allon_t || b->mode == CLEAR || b->combo >= 10) return all ^ (b->flip_t ? b->flip : 0);
-    for (int i = 0; i < 30; ++i)
+    for (int i = 0; i < P_BULBS; ++i)
         if (b->combo >= 5 ? (i + b->chase) % 3 != 0 : !(i & 1)) m |= 1u << i;
     return m ^ (b->flip_t ? b->flip : 0);
 }
+/* Bulb i's place: 14 along the beam, then 9 down each wall (fair.py beam_bulbs, side_bulbs). */
 static void bulb_box(int i, int *x, int *y) {
-    *x = i < 14 ? 25 + 25 * i : i < 22 ? 5 : 370;
-    *y = i < 14 ? 52 : 92 + 22 * ((i - 14) & 7);
+    *x = i < 14 ? 25 + 25 * i : i < 23 ? 5 : 370;
+    *y = i < 14 ? 52 : 92 + 22 * (i < 23 ? i - 14 : i - 23);
 }
 static void bulbs_mark(struct pstall *b, unsigned was, unsigned now) {
     unsigned d = was ^ now;
     int lo[3] = { 999, 999, 999 }, hi[3] = { -1, -1, -1 };
-    for (int i = 0; i < 30; ++i)
+    for (int i = 0; i < P_BULBS; ++i)
         if (d >> i & 1) {
-            int x, y, g = i < 14 ? 0 : i < 22 ? 1 : 2, v;
+            int x, y, g = i < 14 ? 0 : i < 23 ? 1 : 2, v;
             bulb_box(i, &x, &y);
             v = g ? y : x;
             lo[g] = v < lo[g] ? v : lo[g], hi[g] = v > hi[g] ? v : hi[g];
@@ -702,8 +720,8 @@ static void effects(struct pstall *b) {
             b->lean_x[i] = (signed char)(e->t < 10 ? (e->v & 1 ? -1 : 1) * swing[e->t] : 0);
         }
         /* text rises a pixel at a time: painted only when it moved */
-        int moving = e->kind == F_SCORE ? e->t * 10 / 30 != (e->t - 1) * 10 / 30
-                     : e->kind == F_CALL ? e->t * 6 / 40 != (e->t - 1) * 6 / 40
+        int moving = e->kind == F_SCORE   ? e->t * 10 / 30 != (e->t - 1) * 10 / 30
+                     : e->kind == F_CALL  ? e->t * 6 / 40 != (e->t - 1) * 6 / 40
                      : e->kind == F_SPARK ? 0
                                           : 1;
         if (e->t >= fx_life[e->kind]) {
@@ -757,7 +775,8 @@ static void tickets(struct pstall *b) {
 static int step(void *state, const struct eng_input *in) {
     struct pstall *b = state;
     unsigned was = b->bulbs;
-    int balls[3][4] = { { 0 } }, look[3], w0 = pad_w(b), pad0 = b->pad, mode0 = b->mode, slow0 = !b->slow_t;
+    int balls[3][4] = { { 0 } }, look[3], w0 = pad_w(b), pad0 = b->pad, mode0 = b->mode,
+        slow0 = !b->slow_t;
     for (int k = 0; k < 3; ++k) {
         if (b->ball[k].live) ball_box(b, &b->ball[k], balls[k]);
         look[k] = ball_look(&b->ball[k]);
@@ -768,7 +787,7 @@ static int step(void *state, const struct eng_input *in) {
         b->paused = 0;
         mark(b, 0, 0, ENG_W, 60);
         mark(b, 100, 56, 178, 136);
-        bulbs_mark(b, 0, (1u << 30) - 1);
+        bulbs_mark(b, 0, ~0u);
     }
     int pad = b->pad + in->wheel * P_WHEEL, wv = pad_w(b);
     if (in->held & ENG_TOUCH) pad = in->tx;
@@ -832,15 +851,14 @@ static int step(void *state, const struct eng_input *in) {
     } else if (b->mode == INFLATE) {
         ++b->t;
         for (int r = 0; r < P_ROWS; ++r)
-            if (b->t > fade_row(r) && b->t <= fade_row(r) + 5)
-                mark(b, 24, cell_y(r) - 14, 327, 30);
+            if (b->t > fade_row(r) && b->t <= fade_row(r) + 5) mark(b, 24, cell_y(r) - 14, 327, 30);
         if (b->t == 1) band_mark(b);
         if (b->t >= fade_row(P_ROWS - 1) + 5) ready(b);
     } else {
         ++b->t;
         if (b->t <= 4) mark(b, 24, cell_y(2 * b->t - 2) - 12, 327, 2 * P_PY + 10);
         if (b->t > 4 && b->t <= 15) mark(b, 52, 86, 272, 234);
-        if (b->t > 15 && b->t <= 26 && b->best_new) mark(b, 150, 160, 76, 42);
+        if (b->t > 15 && b->t <= 26 && b->best_new) mark(b, 132, 162, 112, 36);
         if (b->t > 15 && in->pressed & ENG_CENTRE) new_game(b);
     }
     /* timers */
@@ -863,7 +881,8 @@ static int step(void *state, const struct eng_input *in) {
     unsigned now = lit(b);
     if (now != was) bulbs_mark(b, was, now);
     if (b->pad != pad0 || pad_w(b) != w0) {
-        int lo = pad0 < b->pad ? pad0 : b->pad, hi = pad0 < b->pad ? b->pad : pad0, ww = w0 > pad_w(b) ? w0 : pad_w(b);
+        int lo = pad0 < b->pad ? pad0 : b->pad, hi = pad0 < b->pad ? b->pad : pad0,
+            ww = w0 > pad_w(b) ? w0 : pad_w(b);
         mark(b, lo - ww / 2 - 2, 272, hi - lo + ww + 5, 23);
     }
     for (int k = 0; k < 3; ++k) {
@@ -874,16 +893,21 @@ static int step(void *state, const struct eng_input *in) {
             if (!b->slow_t || b->frame & 1) o->spin = (o->spin + dx) & 3;
         }
         if (o->live) ball_box(b, o, box);
-        /* a ball that looks as it did, where it was, with the same trail and motes: nothing to paint */
-        if (look[k] == ball_look(o) && mode0 == b->mode && slow0 == !b->slow_t && !(b->slow_t && o->live)) continue;
+        /* a ball that looks as it did, where it was, with the same trail and motes: nothing to
+         * paint */
+        if (look[k] == ball_look(o) && mode0 == b->mode && slow0 == !b->slow_t &&
+            !(b->slow_t && o->live))
+            continue;
         if (o->live && balls[k][2] > balls[k][0]) {
             int *p = balls[k];
             int u0 = p[0] < box[0] ? p[0] : box[0], v0 = p[1] < box[1] ? p[1] : box[1];
             int u1 = p[2] > box[2] ? p[2] : box[2], v1 = p[3] > box[3] ? p[3] : box[3];
-            if ((u1 - u0) * (v1 - v0) <= 2 * ((p[2] - p[0]) * (p[3] - p[1]) + (box[2] - box[0]) * (box[3] - box[1])))
+            if ((u1 - u0) * (v1 - v0) <=
+                2 * ((p[2] - p[0]) * (p[3] - p[1]) + (box[2] - box[0]) * (box[3] - box[1])))
                 mark(b, u0, v0, u1 - u0, v1 - v0);
             else
-                mark(b, p[0], p[1], p[2] - p[0], p[3] - p[1]), mark(b, box[0], box[1], box[2] - box[0], box[3] - box[1]);
+                mark(b, p[0], p[1], p[2] - p[0], p[3] - p[1]),
+                    mark(b, box[0], box[1], box[2] - box[0], box[3] - box[1]);
         } else if (o->live)
             mark(b, box[0], box[1], box[2] - box[0], box[3] - box[1]);
         else if (balls[k][2] > balls[k][0])
@@ -933,9 +957,12 @@ static void stall(const struct pstall *b, struct eng_surface *s, int y0, int y1)
     if (!clip(s, 0, y0, ENG_W, y1 - y0, c)) return;
     if (!b->art_ok) { /* no art: flat stand-ins in the stall's colours */
         for (int y = c[1]; y < c[3]; ++y) {
-            unsigned rgb = y < 56 ? (y < 46 ? 0xd62c42 : 0x8a5a34) : y >= P_COUNTER ? (y < 299 ? K_LEDGE : K_CREAM) : 0xb5885a;
+            unsigned rgb = y < 56           ? (y < 46 ? 0xd62c42 : 0x8a5a34)
+                           : y >= P_COUNTER ? (y < 299 ? K_LEDGE : K_CREAM)
+                                            : 0xb5885a;
             eng_fill(s, c[0], y, c[2] - c[0], 1, rgb);
-            if (y >= 56 && y < P_COUNTER) eng_fill(s, 0, y, P_L, 1, K_WOOD_1), eng_fill(s, P_R, y, ENG_W - P_R, 1, K_WOOD_1);
+            if (y >= 56 && y < P_COUNTER)
+                eng_fill(s, 0, y, P_L, 1, K_WOOD_1), eng_fill(s, P_R, y, ENG_W - P_R, 1, K_WOOD_1);
         }
         return;
     }
@@ -973,8 +1000,8 @@ static void sprite(const struct pstall *b, struct eng_surface *s, int id, int x,
 }
 
 /* A mask in rgb, its anchor at x, y. */
-static void masked(const struct pstall *b, struct eng_surface *s, const struct art_pic *pic,
-                   int x, int y, unsigned rgb) {
+static void masked(const struct pstall *b, struct eng_surface *s, const struct art_pic *pic, int x,
+                   int y, unsigned rgb) {
     int c[4];
     x += pic->dx, y += pic->dy;
     if (!b->art_ok || !clip(s, x, y, pic->w, pic->h, c)) return;
@@ -988,7 +1015,8 @@ static void masked(const struct pstall *b, struct eng_surface *s, const struct a
         }
     }
 }
-static void mask(const struct pstall *b, struct eng_surface *s, int id, int x, int y, unsigned rgb) {
+static void mask(const struct pstall *b, struct eng_surface *s, int id, int x, int y,
+                 unsigned rgb) {
     masked(b, s, &art_masks[id], x, y, rgb);
 }
 
@@ -1019,7 +1047,8 @@ static int type(const struct pstall *b, struct eng_surface *s, const char *t, in
                 unsigned rgb, unsigned edge, int align) {
     const struct art_face *f = face(px, 0), *e = face(px, 1);
     int w = text_w(px, t);
-    if (!b->art_ok) return eng_text(s, t, align ? x : x, y - px, 2 * px, px < 15 ? 15 : px, rgb, align);
+    if (!b->art_ok)
+        return eng_text(s, t, align ? x : x, y - px, 2 * px, px < 15 ? 15 : px, rgb, align);
     int x16 = align ? x * 16 + 8 - w / 2 : x * 16, base = y + (f->mid + 8) / 16;
     for (int pass = edge == ~0u; pass < 2; ++pass) {
         int pen = x16;
@@ -1056,7 +1085,8 @@ static char *put(char *out, const char *w) {
 
 /* ---- the scene ---- */
 
-static int cell_shown(const struct pstall *b, int r) { /* the inflate's or the game over's step for row r */
+static int cell_shown(const struct pstall *b,
+                      int r) { /* the inflate's or the game over's step for row r */
     if (b->mode == INFLATE) return b->t - fade_row(r);
     return 99;
 }
@@ -1068,53 +1098,69 @@ static void lattice(const struct pstall *b, struct eng_surface *s) {
     for (int pass = 0; pass < 2; ++pass)
         for (int r = r0; r <= r1; ++r) {
             int y = cell_y(r), step = cell_shown(b, r), a = 256;
-            int c0 = (s->x0 - P_X0 - (r & 1) * 10 - 14) / P_PX, c1 = (s->x1 - P_X0 - (r & 1) * 10 + 14) / P_PX;
+            int c0 = (s->x0 - P_X0 - (r & 1) * 10 - 14) / P_PX,
+                c1 = (s->x1 - P_X0 - (r & 1) * 10 + 14) / P_PX;
             if (b->mode == OVER && 2 * b->t > r) a = 107; /* 0.42 */
             c0 = c0 < 0 ? 0 : c0, c1 = c1 >= cols(r) ? cols(r) - 1 : c1;
             if (step <= 0) continue;
             for (int c = c0; c <= c1; ++c) {
-                int i = r * P_COLS + c, k = b->cell[i], x = cell_xi(r, c) + b->lean_x[i], yy = y + b->lean_y[i];
+                int i = r * P_COLS + c, k = b->cell[i], x = cell_xi(r, c) + b->lean_x[i],
+                    yy = y + b->lean_y[i];
                 if (!k) continue;
-                if (b->mode == OVER && b->t >= 15 && x > 62 && x < 313 && yy > 96 && yy < 228) continue; /* under the ticket */
+                if (b->mode == OVER && b->t >= 15 && x > 62 && x < 313 && yy > 96 && yy < 228)
+                    continue;                 /* under the ticket */
                 if (step <= 4 && k != SACK) { /* inflating: a small disc, then a bigger */
-                    if (pass) eng_disc(s, FX(x) + FX(1) / 2, FX(yy), step <= 2 ? FX(3) : FX(6), row_col[k == STAR ? 7 : r]);
+                    if (pass)
+                        eng_disc(s, FX(x) + FX(1) / 2, FX(yy), step <= 2 ? FX(3) : FX(6),
+                                 row_col[k == STAR ? 7 : r]);
                     continue;
                 }
                 if (!b->art_ok) {
-                    if (pass) eng_disc(s, FX(x) + FX(1) / 2, FX(yy), FX(P_RC), dim(k == SACK ? 0xb08a58 : row_col[k == STAR ? 7 : r], a));
+                    if (pass)
+                        eng_disc(s, FX(x) + FX(1) / 2, FX(yy), FX(P_RC),
+                                 dim(k == SACK ? 0xb08a58 : row_col[k == STAR ? 7 : r], a));
                     continue;
                 }
                 if (!pass) {
-                    if (a == 256) mask(b, s, k == STAR ? MK_SHADOW_STAR : MK_SHADOW, x, yy, K_SHADOW);
+                    if (a == 256)
+                        mask(b, s, k == STAR ? MK_SHADOW_STAR : MK_SHADOW, x, yy, K_SHADOW);
                     continue;
                 }
                 int id = k == SACK   ? SP_SACK
                          : k == STAR ? SP_STAR
-                                     : SP_BAL_0N + 4 * r + (k == DBL ? 1 : b->squash[i] ? 3 : 0);
+                                     : SP_BAL_0N + 4 * r +
+                                           (k == DBL       ? 1
+                                            : b->squash[i] ? 3
+                                                           : 0);
                 sprite(b, s, id, x, yy, a);
             }
         }
 }
 
 static void dust(struct eng_surface *s, int x, int y, int t, int n, unsigned rgb, int up) {
-    static const unsigned char jit[7] = { 1, 3, 0, 2, 4, 1, 3 }, rad[7] = { 22, 14, 30, 18, 26, 16, 24 };
+    static const unsigned char jit[7] = { 1, 3, 0, 2, 4, 1, 3 },
+                               rad[7] = { 22, 14, 30, 18, 26, 16, 24 };
     for (int i = 0; i < n; ++i) {
         int a = up ? 512 + (2 * i + 1) * 512 / (2 * n) : i * 1024 / n;
         int v = 3 * 16 + t * 16 * 10 / 8 + jit[i] * 16; /* 1/16 px */
-        int r = rad[i] * (88 - 5 * t) / 80;              /* tenths of a px, shrinking */
-        fx dx = (fx)((long long)v * eng_cos(a) >> 4), dy = (fx)((long long)v * eng_sin(a) * 6 / 10 >> 4);
+        int r = rad[i] * (88 - 5 * t) / 80;             /* tenths of a px, shrinking */
+        fx dx = v * eng_cos(a) >> 4,
+           dy = v * eng_sin(a) / 10 * 6 >> 4; /* under 2^31: v is 300 at most */
         eng_disc(s, FX(x) + dx, FX(y) + dy, r * FX(1) / 10, rgb);
     }
 }
 
-static void shreds(struct eng_surface *s, int x, int y, int t, int n, unsigned col, unsigned light) {
+static void shreds(struct eng_surface *s, int x, int y, int t, int n, unsigned col,
+                   unsigned light) {
     /* t in hundredths of the way: fair.py shreds(), the jitter fixed */
     static const signed char ja[9] = { 20, -31, 12, -8, 40, -22, 5, 33, -15 };
-    static const unsigned char v0[9] = { 12, 9, 14, 11, 15, 10, 13, 9, 12 }, v1[9] = { 10, 12, 8, 13, 9, 11, 12, 10, 8 };
+    static const unsigned char v0[9] = { 12, 9, 14, 11, 15, 10, 13, 9, 12 },
+                               v1[9] = { 10, 12, 8, 13, 9, 11, 12, 10, 8 };
     for (int i = 0; i < n; ++i) {
         int a = i * 1024 / n + ja[i];
         int v = v0[i] * 100 + t * v1[i]; /* hundredths */
-        int px = x + v * eng_cos(a) / 6553600, py = y + v * 9 / 10 * eng_sin(a) / 6553600 + t * t / 1000;
+        int px = x + v * eng_cos(a) / 6553600,
+            py = y + v * 9 / 10 * eng_sin(a) / 6553600 + t * t / 1000;
         eng_round(s, px - 1, py - 1, 3, 2, 1, i % 3 ? light : col);
     }
 }
@@ -1145,7 +1191,11 @@ static void effect(const struct pstall *b, struct eng_surface *s, const struct e
         if (f < 5) mask(b, s, MK_RING_BIG, x, y, row_light[e->v]);
     } else if (e->kind == F_DUST) {
         int kind = e->v >> 8;
-        dust(s, x, y, f, e->v & 255, kind == 1 ? K_SACK_L : kind == 2 ? K_FACE : K_LEDGE, kind == 3);
+        dust(s, x, y, f, e->v & 255,
+             kind == 1   ? K_SACK_L
+             : kind == 2 ? K_FACE
+                         : K_LEDGE,
+             kind == 3);
     } else if (e->kind == F_SCORE) {
         digits(put(t, "+"), (unsigned)(e->v & 0xffffff));
         int big = e->v >> 24;
@@ -1155,11 +1205,13 @@ static void effect(const struct pstall *b, struct eng_surface *s, const struct e
     } else if (e->kind == F_SPARK) {
         static const signed char sp[4][2] = { { -52, -9 }, { 50, -12 }, { -30, -18 }, { 34, -20 } };
         unsigned rgb = e->v == T_WIDE ? K_GOLD_L : 0xffffff;
-        for (int k = 0; k < 4; ++k) mask(b, s, k & 2 ? MK_SPARKLE_S : MK_SPARKLE, x + sp[k][0], y + sp[k][1], rgb);
+        for (int k = 0; k < 4; ++k)
+            mask(b, s, k & 2 ? MK_SPARKLE_S : MK_SPARKLE, x + sp[k][0], y + sp[k][1], rgb);
     } else if (e->kind == F_STARS) {
         for (int k = 0; k < 8; ++k) {
             int a = k * 128 + 49, d = 8 + f * 23 / 16; /* out to 31 px across, 25 down */
-            mask(b, s, MK_STARP, x + d * eng_cos(a) / 65536, y + d * 25 / 31 * eng_sin(a) / 65536, K_GOLD);
+            mask(b, s, MK_STARP, x + d * eng_cos(a) / 65536, y + d * 25 / 31 * eng_sin(a) / 65536,
+                 K_GOLD);
         }
     } else if (e->kind == F_KNOCK) {
         if (e->v < 2)
@@ -1169,15 +1221,17 @@ static void effect(const struct pstall *b, struct eng_surface *s, const struct e
     }
 }
 
-static int mat_depth(const struct pstall *b, int px, int w) { /* px: a column; px + 0.5 its middle */
+static int mat_depth(const struct pstall *b, int px,
+                     int w) { /* px: a column; px + 0.5 its middle */
     if (b->dip_t >= 12) return 0;
-    int k = 2 * px + 1 - 2 * b->dip_x, e = 2 * (w / 2 - (px < b->pad ? b->pad - px : px - b->pad)); /* half px */
+    int k = 2 * px + 1 - 2 * b->dip_x,
+        e = 2 * (w / 2 - (px < b->pad ? b->pad - px : px - b->pad)); /* half px */
     if (k * k >= 1600 || e <= 0) return 0;
     int sn = 1600 - k * k, q = dip_curve[b->dip_t] * b->dip_q; /* 1/32 px */
     e = e > 12 ? 12 : e;
-    long long v = (long long)q * sn * sn * e; /* / (32 * 1600^2 * 12) px */
-    long long den = 32LL * 2560000 * 12;
-    return (int)((v >= 0 ? v + den / 2 : v - den / 2) / den);
+    int v = q * (sn * sn >> 10) * e,
+        den = 32 * 2500 * 12; /* (1 - u^2)^2 as sn^2 / 2,560,000, in 32 bits */
+    return (v >= 0 ? v + den / 2 : v - den / 2) / den;
 }
 
 static void tramp_back(const struct pstall *b, struct eng_surface *s) {
@@ -1216,8 +1270,8 @@ static void ball(const struct pstall *b, struct eng_surface *s, const struct bal
     if (b->mode == PLAY && !o->stuck && o->bounce != 4)
         for (int i = 0; i < 3; ++i) {
             int d = 9 * 2 + i * 13; /* half px: 9, 15.5, 22 */
-            sprite(b, s, SP_TRAIL_0 + i, x - (d * eng_cos(o->ang) / 2 + 32768 >> 16),
-                   y - (d * eng_sin(o->ang) / 2 + 32768 >> 16), 256);
+            sprite(b, s, SP_TRAIL_0 + i, x - ((d * eng_cos(o->ang) / 2 + 32768) >> 16),
+                   y - ((d * eng_sin(o->ang) / 2 + 32768) >> 16), 256);
         }
     if (b->slow_t && o->live && (b->slow_t > 2 * ENG_HZ || b->slow_t / 8 & 1))
         for (int i = 0; i < 6; ++i) {
@@ -1238,7 +1292,8 @@ static void ball(const struct pstall *b, struct eng_surface *s, const struct bal
 
 static void ticket(const struct pstall *b, struct eng_surface *s, int k) {
     int kind = b->tk[k].kind - 1, x = b->tk[k].x, y = FX_INT(b->tk[k].y), f = b->tk[k].t / 6 & 3;
-    if (f == 0) sprite(b, s, SP_TICKET_0 + 2 * kind, x, y, 256);
+    if (f == 0)
+        sprite(b, s, SP_TICKET_0 + 2 * kind, x, y, 256);
     else if (f == 2) {
         eng_round(s, x - 13, y - 2, 26, 4, 2, tk_paper[kind]);
         eng_fill(s, x - 11, y, 22, 1, blend(tk_paper[kind], tk_ink[kind], 120));
@@ -1264,7 +1319,9 @@ static void hud(const struct pstall *b, struct eng_surface *s) {
         w = w * (100 + 22 * sw / 6) / 100, h = h * (100 + 14 * sw / 6) / 100;
         unsigned bg = combo < 5 ? K_INK : combo < 10 ? 0xff9f1c : K_GOLD;
         unsigned ink = combo < 5 ? K_CREAM : combo < 10 ? K_INK : K_CRIMSON_DD;
-        if (combo >= 10) plaque(s, 187 - w / 2 - 1, y - h / 2 - 2, 188 + w / 2 + 2, y + (h + 1) / 2 + 2, 0xffffff);
+        if (combo >= 10)
+            plaque(s, 187 - w / 2 - 1, y - h / 2 - 2, 188 + w / 2 + 2, y + (h + 1) / 2 + 2,
+                   0xffffff);
         plaque(s, 187 - w / 2, y - h / 2, 188 + w / 2, y + (h + 1) / 2, bg);
         if (combo < 5)
             *digits(put(t, "x"), (unsigned)combo) = 0;
@@ -1279,7 +1336,8 @@ static void hud(const struct pstall *b, struct eng_surface *s) {
     for (int i = 0; i < n; ++i) {
         int x = r0 - (i * 25 + 1) / 2;
         if (i < b->lives)
-            b->art_ok ? sprite(b, s, SP_MINI, x, y, 256) : eng_disc(s, FX(x), FX(y), FX(4), 0xb07cf6);
+            b->art_ok ? sprite(b, s, SP_MINI, x, y, 256)
+                      : eng_disc(s, FX(x), FX(y), FX(4), 0xb07cf6);
         else
             eng_disc(s, FX(x) + FX(1) / 2, FX(y) + FX(1) / 2, FX(2.6), 0x3a2c22);
         if (b->lost_t && i == b->lives) mask(b, s, MK_RING_LOST, x, y, 0xffffff);
@@ -1291,7 +1349,9 @@ static void hud(const struct pstall *b, struct eng_surface *s) {
 }
 
 static void banner(const struct pstall *b, struct eng_surface *s) {
-    static const signed char drop[10] = { -54, -40, -22, -5, 10, 22, 31, 63, 60, 60 }; /* to 116, a 3 px bounce */
+    static const signed char drop[10] = {
+        -54, -40, -22, -5, 10, 22, 31, 63, 60, 60
+    }; /* to 116, a 3 px bounce */
     int y0 = b->t < 9 ? 56 + drop[b->t] : 116, x0 = 74, x1 = 301, y1 = y0 + 54;
     char t[40];
     if (s->y1 <= 56 || s->y0 >= y1 + 8 || s->x1 <= x0 - 12 || s->x0 >= x1 + 12) return;
@@ -1309,7 +1369,8 @@ static void banner(const struct pstall *b, struct eng_surface *s) {
 }
 
 static void confetti(const struct pstall *b, struct eng_surface *s) {
-    static const unsigned cc[9] = { 0xff5470, 0xff9f1c, 0xffd23f, 0x3bceac, 0x5aa9f5, 0xf4f1ea, 0xf15bb5, K_GOLD, K_CREAM };
+    static const unsigned cc[9] = { 0xff5470, 0xff9f1c, 0xffd23f, 0x3bceac, 0x5aa9f5,
+                                    0xf4f1ea, 0xf15bb5, K_GOLD,   K_CREAM };
     for (int k = 0; k < 32 && k < (b->t - 9) * 4; ++k) {
         int p[5];
         confetto(k, p);
@@ -1318,13 +1379,15 @@ static void confetti(const struct pstall *b, struct eng_surface *s) {
 }
 
 static void big_ticket(const struct pstall *b, struct eng_surface *s) {
-    int dy = b->t < 5 ? 230 : b->t < 15 ? (15 - b->t) * 23 : 0, x0 = 58, x1 = 317, y0 = 92 + dy, y1 = 232 + dy;
+    int dy = b->t < 5    ? 230
+             : b->t < 15 ? (15 - b->t) * 23
+                         : 0,
+        x0 = 58, x1 = 317, y0 = 92 + dy, y1 = 232 + dy;
     char t[40];
     if (s->y1 <= y0 || s->x1 <= x0 - 9 || s->x0 >= x1 + 9 || b->t < 5) return;
     eng_round(s, x0 + 2, y0 + 4, x1 - x0, y1 - y0, 7, 0x7c5232);
     eng_round(s, x0, y0, x1 - x0, y1 - y0, 7, 0xffe8a3);
-    for (int x = x0; x <= x1; x += x1 - x0)
-        eng_disc(s, FX(x), FX((y0 + y1) / 2), FX(9), 0xb6875a);
+    for (int x = x0; x <= x1; x += x1 - x0) eng_disc(s, FX(x), FX((y0 + y1) / 2), FX(9), 0xb6875a);
     for (int x = x0 + 26; x <= x1 - 26; x += x1 - x0 - 52)
         for (int y = y0 + 6; y < y1 - 6; y += 6) eng_fill(s, x, y, 1, 3, 0xc8a45a);
     for (int k = 0; k < 4; ++k)
@@ -1333,10 +1396,10 @@ static void big_ticket(const struct pstall *b, struct eng_surface *s) {
     digits(t, b->score);
     type(b, s, t, 187, y0 + 56, 30, K_INK, ~0u, 1);
     if (b->best_new) {
-        int pulse = b->t > 15 && b->t < 26 ? (b->t - 15 < 5 ? b->t - 15 : 25 - b->t) : 0;
-        (void)pulse;
+        /* the badge pulses once as the ticket lands: 2 px wider a side and back over 10 frames */
+        int pulse = b->t > 15 && b->t < 26 ? (b->t - 15 < 5 ? b->t - 15 : 25 - b->t) * 2 / 5 : 0;
         mask(b, s, MK_BADGE, 187, y0 + 88, K_GOLD);
-        eng_round(s, 137, y0 + 80, 101, 16 + 0 * pulse, 8, K_GOLD);
+        eng_round(s, 137 - pulse, y0 + 80 - pulse / 2, 101 + 2 * pulse, 16 + pulse, 8, K_GOLD);
         type(b, s, "NEW BEST!", 187, y0 + 88, 11, K_CRIMSON_DD, ~0u, 1);
     } else {
         char *p = digits(put(t, "BEST "), b->save.best);
@@ -1362,28 +1425,33 @@ static void sign(const struct pstall *b, struct eng_surface *s) {
 
 static void draw(const void *state, struct eng_surface *s) {
     const struct pstall *b = state;
-    unsigned on = b->paused ? 0x11111111u & ((1u << 30) - 1) : b->bulbs;
+    unsigned on = b->paused ? 0x11111111u : b->bulbs; /* paused: one in four */
     char t[24];
     stall(b, s, s->y0, s->y1);
     for (int k = 0; k < P_FX; ++k)
         if (b->fx[k].kind == F_KNOCK) effect(b, s, &b->fx[k]);
-    for (int i = 0; b->art_ok && i < 30; ++i)
+    for (int i = 0; b->art_ok && i < P_BULBS; ++i)
         if (on >> i & 1) {
             int x, y;
             bulb_box(i, &x, &y);
             if (x + 7 > s->x0 && x - 7 < s->x1 && y + 8 > s->y0 && y - 7 < s->y1)
                 sprite(b, s, i < 14 ? SP_BULB_BEAM : SP_BULB_SIDE, x, y, 256);
         }
-    for (int k = 0; k < 4; ++k) sprite(b, s, SP_PLUSH_0 + k, plush_x[k], plush_y[k] + hop_dy(b, k), 256);
+    if (b->combo >= 10 && !b->paused &&
+        s->y0 < 60) /* x10: a sparkle on every fourth bulb of the beam */
+        for (int k = 1; k < 14; k += 4) mask(b, s, MK_SPARKLE, 25 + 25 * k, 54, 0xffffff);
+    for (int k = 0; k < 4; ++k)
+        sprite(b, s, SP_PLUSH_0 + k, plush_x[k], plush_y[k] + hop_dy(b, k), 256);
     if (b->mode != CLEAR) lattice(b, s);
     for (int k = 0; k < P_FX; ++k)
-        if (b->fx[k].kind && b->fx[k].kind != F_KNOCK && !(b->fx[k].kind == F_DUST && b->fx[k].v >> 8 == 3))
+        if (b->fx[k].kind && b->fx[k].kind != F_KNOCK &&
+            !(b->fx[k].kind == F_DUST && b->fx[k].v >> 8 == 3))
             effect(b, s, &b->fx[k]);
     for (int k = 0; k < 2; ++k)
         if (b->tk[k].kind) ticket(b, s, k);
     if (b->mode == CLEAR && b->t > 9) confetti(b, s);
     if (b->mode == CLEAR && b->t < 90) banner(b, s);
-    if ((b->mode == READY || b->mode == INFLATE) && s->y1 > 212 && s->y0 < 258) {
+    if (((b->mode == READY && b->fresh) || b->mode == INFLATE) && s->y1 > 212 && s->y0 < 258) {
         *digits(put(t, "LEVEL "), (unsigned)b->level) = 0;
         type(b, s, t, 187, 228, 20, K_CREAM, K_INK, 1);
         if (b->mode == READY) type(b, s, "PRESS CENTER TO LAUNCH", 187, 248, 9, K_HINT, ~0u, 1);
@@ -1405,5 +1473,6 @@ static void draw(const void *state, struct eng_surface *s) {
     if (b->paused) sign(b, s);
 }
 
-const struct eng_game eng_popstall = { "Pop Stall", sizeof(struct pstall) + ART_BYTES, ENG_RAW | ENG_FULL,
-                                       init, step, draw, pause };
+const struct eng_game eng_popstall = {
+    "Pop Stall", sizeof(struct pstall) + ART_BYTES, ENG_RAW | ENG_FULL, init, step, draw, pause
+};

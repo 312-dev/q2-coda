@@ -59,9 +59,10 @@ struct eng_surface {
 enum {
     ENG_RAW = 1,   /* the wheel as travel (wheel), no ticks */
     ENG_STILL = 2, /* turn-based: the frame timer runs only after input and while step returns 1 */
-    ENG_FULL = 4   /* the whole panel: the sheet starts at the screen's top, with no status row over
-                    * it while the game runs; paused, the status row shows over its top and the game
-                    * draws its own pause in place of Games' "Paused" pop-up (Continue / Quit stays) */
+    ENG_FULL =
+        4 /* the whole panel: the sheet starts at the screen's top, with no status row over
+           * it while the game runs; paused, the status row shows over its top and the game
+           * draws its own pause in place of Games' "Paused" pop-up (Continue / Quit stays) */
 };
 
 struct eng_game {
@@ -115,6 +116,6 @@ int games_text(void *canvas, const char *s, int x, int y, int h, unsigned px, un
                int align);
 
 extern const struct eng_game eng_popstall; /* game_popstall.c */
-extern const struct eng_game eng_demo;   /* engine_demo.c */
+extern const struct eng_game eng_demo;     /* engine_demo.c */
 
 #endif

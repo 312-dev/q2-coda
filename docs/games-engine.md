@@ -1,6 +1,6 @@
 # The game engine
 
-A small engine inside the UI payload for games drawn at the panel's refresh: a fixed 60 Hz step, a frame's input as one record, drawing straight into the screen's buffer inside the rects a step said changed, the Clicker's sounds, and sealed saves. It is `patch/engine.c` and `patch/engine.h`; `patch/engine_demo.c` is a scene that proves it and shows a game's four calls. Games (`patch/games.c`) is its page: the chooser lists the engine's games after its own (those `GAME_*` in `patch/peq.h` ships: none in this build, so Bricks is the first row), and the pause menu is Games' pop-up.
+A small engine inside the UI payload for games drawn at the panel's refresh: a fixed 60 Hz step, a frame's input as one record, drawing straight into the screen's buffer inside the rects a step said changed, the Clicker's sounds, and sealed saves. It is `patch/engine.c` and `patch/engine.h`; `patch/engine_demo.c` is a scene that proves it and shows a game's four calls. Games (`patch/games.c`) is its page: the chooser lists the engine's games after its own (those `GAME_*` in `patch/peq.h` ships: none in this build, so Pop Stall is the first row), and the pause menu is Games' pop-up.
 
 This page is the design, the measurements behind it, the API, the budgets and the libraries considered. The older games (Sudoku, Vortex, Solitaire, Snake) are in [internals: Games](internals.md#games) and do not use the engine.
 
@@ -86,7 +86,7 @@ The shim's sleep is 16 ms plus the frame's work, so about 58 flips a second is t
 ```c
 struct eng_game {
     const char *name;
-    unsigned size, flags;                                 /* state bytes, zeroed; ENG_RAW, ENG_STILL */
+    unsigned size, flags;                                 /* state bytes, zeroed; ENG_RAW, ENG_STILL, ENG_FULL */
     void (*init)(void *state, int h);                     /* h: the sheet's height */
     int (*step)(void *state, const struct eng_input *in); /* 1/60 s; 1 while something moves */
     void (*draw)(const void *state, struct eng_surface *s);
@@ -123,6 +123,10 @@ Return never reaches a game. A game that sets neither flag gets ticks and runs i
 | `eng_inset(y)` | not a drawing: the columns the glass's 80 px corners hide at each end of the sheet's row `y`   |
 
 A buffer that is not stock's 375 x 320 BGRA8888 `lcd_mem` (a window animation's snapshot of another layout) is left as stock drew it.
+
+### The whole panel
+
+A game that sets `ENG_FULL` has all 375 x 320 of the panel: `show` (`patch/games.c`) moves the sheet up to the screen's top and makes it 320 rows tall before `eng_open`, so the game's `h` is 320 and its sheet's rows are the screen's, and puts the sheet back under the status row when the list shows again. Stock paints the status row first and the sheet over it, so while the game runs nothing of the row shows. Held (the screen off, another window, Return's menu), `eng_paint` leaves the sheet's first `ENG_BAR` (30) rows to stock, where the status row's caption, clock and glyphs stand (centred on y 23, [oled-design](oled-design.md#status-row)), and Games draws no "Paused" pop-up over such a game: its `draw` shows its own pause from its `pause` call until its next step. Return's Continue / Quit is still Games' pop-up over it. A game without the flag is laid out as before, under the status row.
 
 ### Sound
 

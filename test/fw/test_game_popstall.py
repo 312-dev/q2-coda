@@ -23,7 +23,7 @@ L, R, TOP, MAT, REST, PAD_W, WIDE_W = 24, 351, 56, 280, 273, 60, 90
 READY, PLAYING, CLEAR, INFLATE, OVER = range(5)
 NONE, BAL, DBL, STAR, SACK = range(5)
 T_WIDE, T_TRIO, T_GLUE, T_SLOW, T_LIFE = range(1, 6)
-F_POP, F_STRIP, F_BAG, F_DUST, F_SCORE, F_CALL = range(1, 7)
+F_POP, F_STRIP, F_BAG, F_DUST, F_SCORE, F_CALL, F_SPARK, F_STARS, F_KNOCK = range(1, 10)
 MAGIC, FILE = 0x31535450, '/mnt/data/game-popstall'
 FULL = 4  # ENG_FULL
 FX = 65536
@@ -54,7 +54,7 @@ class Stall(C.Structure):
                 *((k, C.c_int) for k in 'flip_t allon_t brown_t chase'.split()),
                 *((k, C.c_int * 4) for k in 'hop_t hop_amp hop_wait'.split()),
                 *((k, C.c_int) for k in 'lost_t gain_t slots paused best_new marks'.split()), ('mark', C.c_short * 32),
-                *((k, C.c_uint) for k in 'magic best best_level sum saved'.split()), ('art_ok', C.c_int)]
+                *((k, C.c_uint) for k in 'magic best best_level sum saved'.split()), ('fresh', C.c_int), ('art_ok', C.c_int)]
 
 
 def cx(r, c):
@@ -100,7 +100,7 @@ class Game:
             'build': (None, C.c_void_p, C.c_int), 'around': (C.c_int, C.c_int, C.c_int, C.POINTER(C.c_int)),
             'steep': (C.c_int, C.c_int), 'step': (C.c_int, C.c_void_p, C.POINTER(Input)), 'pause': (None, C.c_void_p),
             'mat_depth': (C.c_int, C.c_void_p, C.c_int, C.c_int), 'lit': (C.c_uint, C.c_void_p),
-            'hit': (None, C.c_void_p, C.c_int, C.c_int)}.items()}
+            'hit': (None, C.c_void_p, C.c_int, C.c_int), 'lean': (None, C.c_void_p, C.c_int, C.c_int)}.items()}
         self.canvas = Canvas(fw)
 
     def step(self, wheel=0, held=0, pressed=0, tx=0, n=1):
@@ -420,7 +420,7 @@ def test_the_combo_counts_to_ten_for_points_and_shows_past_it(fw):
         g.launch(cx(r, c), cy(r) + 16, 768, spd=2)
         g.step()
     assert b.combo == 12 and b.score == sum(min(k, 10) for k in range(1, 13))
-    assert g.fn['lit'](C.addressof(b)) == (1 << 30) - 1  # x10: every bulb on
+    assert g.fn['lit'](C.addressof(b)) == 0xffffffff  # x10: all 32 bulbs on
     g.close()
 
 
@@ -715,32 +715,282 @@ def test_nothing_the_player_reads_or_the_ball_touches_falls_under_the_glass(fw):
     g.close()
 
 
-def test_screens_draw_the_stall_from_its_art(fw):
-    """Each main screen painted whole; with POPSTALL_SHOTS set, written there for a look against the mockups."""
-    g = Game(fw)
+def play_cells(g):
+    """render.py play_cells(): level 3 of seed 0x51AA with four bags, the lower right carved out."""
     b = g.b
-    b.seed, b.level, b.side = 0x51AC, 1, 1
-    g.fn['build'](C.addressof(b), -1)
-    b.ball[0].x = (187 + 20) * FX
-    buf = g.shot('01-ready')
-    assert rgb(buf, 187, 150) != 0  # the board
-    # play: level 3 of 0x51AA with four bags, the lower right carved out
     b.seed, b.level = 0x51AA, 3
     g.fn['build'](C.addressof(b), 4)
     for r, c in on_lattice():
         if b.cell[r * COLS + c] != SACK and math.hypot(cx(r, c) - 258, (cy(r) - 176) * 1.1) < 50:
             b.cell[r * COLS + c] = NONE
-    b.mode, b.score, b.pad = PLAYING, 384, 232
-    o = b.ball[0]
-    o.x, o.y, o.ang, o.spin = 214 * FX, 228 * FX, 1024 - 42 * 1024 // 360, 0
-    g.shot('02-play')
-    b.paused = 1
-    g.e['eng_hold']()
-    g.shot('24-paused')
-    g.e['eng_run']()
-    b.paused = 0
-    b.mode, b.t, b.best_new, b.score = OVER, 20, 1, 3120
-    g.shot('23-high-score')
+    b.left = sum(1 for r, c in on_lattice() if b.cell[r * COLS + c] in (BAL, DBL, STAR))
+
+
+def nearest(g, x, y, kinds=(BAL,)):
+    return min(((r, c) for r, c in on_lattice() if g.b.cell[r * COLS + c] in kinds), key=lambda p: math.hypot(cx(*p) - x, cy(p[0]) - y))
+
+
+def fx(g, kind, t, x, y, v):
+    e = next(e for e in g.b.fx if not e.kind)
+    e.kind, e.t, e.x, e.y, e.v = kind, t, int(x), int(y), v
+
+
+def ball(g, x, y, vx=0.0, vy=0.0, k=0, **kw):
+    o = g.b.ball[k]
+    o.x, o.y, o.live = int(x * FX), int(y * FX), 1
+    o.ang = round(math.atan2(vy, vx) * 512 / math.pi) % 1024 if vx or vy else 768
+    for key, v in kw.items():
+        setattr(o, key, v)
+
+
+def pop_at(g, x, y, f, kinds=(BAL,)):
+    """The balloon nearest x, y popped f frames ago (render.py's pop frame 2 is f 4 to 6): its neighbours leaning."""
+    r, c = nearest(g, x, y, kinds)
+    i = r * COLS + c
+    gold = g.b.cell[i] == STAR
+    g.b.cell[i] = NONE
+    if f < 4:
+        g.fn['lean'](C.addressof(g.b), i, 1)
+    fx(g, F_POP, f, cx(r, c), cy(r), (7 if gold else r) | i << 8)
+    return r, c
+
+
+def scene_ready(g):
+    b = g.b
+    b.seed, b.level, b.side = 0x51AC, 1, 1
+    g.fn['build'](C.addressof(b), -1)
+    ball(g, 187 + 20, REST)
+
+
+def scene_play(g):
+    play_cells(g)
+    g.b.mode, g.b.score, g.b.pad = PLAYING, 384, 232
+    ball(g, 214, 228, 2.2, -2.0)
+
+
+def scene_pop(g):
+    play_cells(g)
+    b = g.b
+    r, c = pop_at(g, 240, 150, 4)
+    b.mode, b.score, b.combo, b.swell, b.pad = PLAYING, 438, 2, 4, 268
+    fx(g, F_SCORE, 0, cx(r, c) + 3, cy(r) - 17, 6)
+    ball(g, cx(r, c) + 10, cy(r) + 23, 1.4, 2.6)
+
+
+def scene_skin(g):
+    play_cells(g)
+    b = g.b
+    r, c = nearest(g, 150, 170, (DBL,))
+    b.cell[r * COLS + c], b.squash[r * COLS + c] = BAL, 3
+    fx(g, F_STRIP, 1, cx(r, c), cy(r), r)
+    fx(g, F_SCORE, 0, cx(r, c) + 2, cy(r) - 18, 9)
+    b.mode, b.score, b.combo, b.swell, b.pad = PLAYING, 630, 3, 4, 120
+    ball(g, cx(r, c) - 9, cy(r) + 22, -1.3, 2.7)
+
+
+def scene_bag(g):
+    play_cells(g)
+    b = g.b
+    r, c = nearest(g, 200, 150, (SACK,))
+    b.lean_x[r * COLS + c] = 3
+    fx(g, F_DUST, 2, cx(r, c) - 4, cy(r) + 9, 0x100 | 5)
+    b.mode, b.score, b.combo, b.pad = PLAYING, 630, 3, 150
+    ball(g, cx(r, c) - 11, cy(r) + 22, -1.6, 2.5)
+
+
+def scene_star(g):
+    play_cells(g)
+    b = g.b
+    r, c = nearest(g, 0, 0, (STAR,))
+    ring = [p for p in neighbours(r, c) if b.cell[p[0] * COLS + p[1]] in (BAL, DBL)]
+    ring.sort(key=lambda p: math.atan2(cy(p[0]) - cy(r), cx(*p) - cx(r, c)))
+    b.cell[r * COLS + c] = NONE
+    fx(g, F_POP, 2, cx(r, c), cy(r), 7 | (r * COLS + c) << 8)
+    for k, (rr, cc) in enumerate(ring):  # the chain round the ring, two frames a balloon
+        b.cell[rr * COLS + cc] = NONE
+        fx(g, F_POP, (5, 5, 3, 3, 1, 1)[k % 6], cx(rr, cc), cy(rr), rr | (rr * COLS + cc) << 8)
+    fx(g, F_STARS, 4, cx(r, c), cy(r), 0)
+    fx(g, F_CALL, 0, cx(r, c), cy(r) - 44, 5)
+    fx(g, F_SCORE, 0, cx(r, c), cy(r) - 29, 165 | 1 << 24)
+    b.mode, b.score, b.combo, b.pad, b.allon_t = PLAYING, 1284, 10, 150, 30
+    for k, d in enumerate((-2, 2, 2, -2)):
+        b.hop_t[k], b.hop_amp[k] = 7, -d
+    ball(g, cx(r, c) - 17, cy(r) + 36, -1.6, 2.4)
+
+
+def scene_combo(g, n):
+    play_cells(g)
+    b = g.b
+    for r, cc in on_lattice():
+        if b.cell[r * COLS + cc] in (BAL, DBL) and math.hypot(cx(r, cc) - 150, cy(r) - 178) < (30 if n < 10 else 52):
+            b.cell[r * COLS + cc] = NONE
+    r, c = pop_at(g, 150, 150 if n < 10 else 128, 2)
+    fx(g, F_SCORE, 0, cx(r, c) + 2, cy(r) - 18, 3 * n | (n >= 10) << 24)
+    b.mode, b.score, b.combo, b.swell, b.pad = PLAYING, 921 if n < 10 else 1176, n, 4, 200
+    if n >= 10:
+        b.hop_t[0], b.hop_amp[0], b.hop_t[2], b.hop_amp[2] = 7, 2, 7, 2
+    ball(g, cx(r, c) + 9, cy(r) + 22, 1.2, 2.8)
+
+
+def scene_ticket(g):
+    play_cells(g)
+    b = g.b
+    r, c = pop_at(g, 118, 160, 8)
+    b.tk[0].kind, b.tk[0].x, b.tk[0].y, b.tk[0].t = T_WIDE, int(cx(r, c)) + 5, int((cy(r) + 56) * FX), 0
+    b.mode, b.score, b.combo, b.pad = PLAYING, 512, 3, 150
+    ball(g, 214, 228, 2.2, -2.0)
+
+
+def caught(g, pad, kind, callout):
+    play_cells(g)
+    b = g.b
+    r, c = nearest(g, 118, 160)
+    b.cell[r * COLS + c] = NONE
+    b.mode, b.pad = PLAYING, pad
+    fx(g, F_CALL, 0, pad, 256, callout)
+    if kind in (T_WIDE, T_LIFE):
+        fx(g, F_SPARK, 0, pad, 280, kind)
+
+
+def scene_wide(g):
+    caught(g, 126, T_WIDE, 0)
+    g.b.score, g.b.combo, g.b.wide_t, g.b.dip_t, g.b.dip_x, g.b.dip_q = 562, 3, 1000, 1, 126, 3
+    g.b.hop_t[0], g.b.hop_amp[0] = 7, 3
+    ball(g, 262, 166, 1.8, -2.4)
+
+
+def scene_trio(g):
+    caught(g, 205, T_TRIO, 1)
+    g.b.score, g.b.combo = 846, 4
+    play_cells(g)
+    for k, (x, y, vx, vy) in enumerate(((150, 206, -2.3, -1.9), (204, 226, .2, -3), (262, 212, 2.4, -1.8))):
+        ball(g, x, y, vx, vy, k=k)
+
+
+def scene_glue(g):
+    caught(g, 168, T_GLUE, 2)
+    g.b.ball[0].live = 0
+    g.b.score, g.b.glue_n = 904, 2
+    g.b.fx[0].y = 226
+    ball(g, 180, REST, stuck=1, cx=12)
+
+
+def scene_slow(g):
+    caught(g, 250, T_SLOW, 3)
+    g.b.score, g.b.combo, g.b.slow_t, g.b.frame = 958, 2, 500, 3
+    ball(g, 236, 222, -.9, -1.6)
+
+
+def scene_life(g):
+    caught(g, 140, T_LIFE, 4)
+    g.b.score, g.b.combo, g.b.lives, g.b.slots, g.b.gain_t = 1012, 2, 4, 4, 30
+    for k in (1, 3):
+        g.b.hop_t[k], g.b.hop_amp[k] = 7, 3
+    ball(g, 250, 190, 2, -2.2)
+
+
+def scene_bounce(g):
+    play_cells(g)
+    g.b.mode, g.b.score, g.b.pad, g.b.dip_t, g.b.dip_x, g.b.dip_q = PLAYING, 1284, 150, 1, 167, 8
+    ball(g, 168, REST - 3, 1.5, -3, bounce=3)
+
+
+def scene_wall(g):
+    play_cells(g)
+    g.b.mode, g.b.score, g.b.pad = PLAYING, 1284, 250
+    fx(g, F_KNOCK, 0, 354, 212, 1)
+    fx(g, F_DUST, 3, 349, 214, 0x200 | 5)
+    ball(g, 336, 200, -2.6, -2.0)
+
+
+def scene_beam(g):
+    play_cells(g)
+    g.b.mode, g.b.score, g.b.combo, g.b.pad, g.b.flip, g.b.flip_t = PLAYING, 1284, 1, 250, 3 << 10, 5
+    fx(g, F_KNOCK, 0, 289, 53, 2)
+    fx(g, F_DUST, 3, 290, 58, 0x200 | 5)
+    ball(g, 298, 74, 1.6, 2.8)
+
+
+def scene_miss(g):
+    play_cells(g)
+    g.b.mode, g.b.score, g.b.lives, g.b.pad = PLAYING, 1284, 2, 150
+    ball(g, 96, 284, .9, 3.8)
+
+
+def scene_new_ball(g):
+    play_cells(g)
+    g.b.mode, g.b.score, g.b.lives, g.b.pad, g.b.brown_t, g.b.lost_t = READY, 1284, 2, 150, 20, 20
+    g.b.dip_t, g.b.dip_x, g.b.dip_q, g.b.side, g.b.fresh = 2, 150, 8, 0, 0
+    for k in range(4):
+        g.b.hop_t[k], g.b.hop_amp[k] = 7, -2
+    fx(g, F_DUST, 3, 99, 289, 0x300 | 7)
+    ball(g, 150, REST, bounce=4, cx=150)
+
+
+def scene_clear(g):
+    g.clear_cells({})
+    g.b.mode, g.b.t, g.b.score, g.b.level, g.b.pad = CLEAR, 20, 2980, 4, 215
+    for k, a in enumerate((3, 1, 1, 3)):
+        g.b.hop_t[k], g.b.hop_amp[k] = 7, a
+    ball(g, 215, REST)
+
+
+def scene_inflate(g):
+    b = g.b
+    b.seed, b.level = 0x51AD, 4
+    g.fn['build'](C.addressof(b), -1)
+    b.mode, b.t, b.score, b.pad = INFLATE, 12, 2980, 215
+    ball(g, 235, REST)
+
+
+def scene_over(g, best):
+    play_cells(g)
+    b = g.b
+    b.mode, b.t, b.score, b.lives, b.pad, b.best_new = OVER, 20, 3120, 0, 150, best
+    b.ball[0].live = 0
+    b.best, b.best_level = (3120, 3) if best else (4820, 5)
+    for k in range(4):
+        b.hop_t[k], b.hop_amp[k] = 7, -2
+
+
+def scene_paused(g):
+    play_cells(g)
+    g.b.mode, g.b.score, g.b.lives, g.b.pad, g.b.paused = PLAYING, 1284, 2, 150, 1
+    ball(g, 214, 228, 2.2, -2.0)
+
+
+SCENES = {'01-ready': scene_ready, '02-play': scene_play, '03-pop': scene_pop, '04-double-skin': scene_skin,
+          '05-sandbag': scene_bag, '06-star-balloon': scene_star, '07-combo-x5': lambda g: scene_combo(g, 5),
+          '08-combo-x10': lambda g: scene_combo(g, 10), '09-ticket-fall': scene_ticket, '10-wide': scene_wide,
+          '11-trio': scene_trio, '12-glue': scene_glue, '13-slow': scene_slow, '14-life': scene_life,
+          '15-bounce': scene_bounce, '16-wall-hit': scene_wall, '17-beam-hit': scene_beam, '18-miss': scene_miss,
+          '19-new-ball': scene_new_ball, '20-level-clear': scene_clear, '21-next-level': scene_inflate,
+          '22-game-over': lambda g: scene_over(g, 0), '23-high-score': lambda g: scene_over(g, 1), '24-paused': scene_paused}
+
+
+@pytest.mark.parametrize('name', SCENES)
+def test_each_screen_of_the_design_paints_whole_with_its_parts_in_place(fw, name):
+    """Each of the design's 24 screens set up as render.py draws it and painted whole (with POPSTALL_SHOTS set,
+    written there to compare with the mockups): the stall's art behind, the HUD on the roof, and the ball,
+    balloons and text all clear of the glass."""
+    g = Game(fw)
+    b = g.b
+    for e in b.fx:
+        e.kind = 0
+    b.combo = b.swell = 0
+    SCENES[name](g)
+    if b.mode != OVER:
+        b.bulbs = g.fn['lit'](C.addressof(b))
+    if b.paused:
+        g.e['eng_hold']()
+    buf = g.shot(name)
+    inset = lambda y: g.e['eng_inset'](y)
+    ink = 0x1b1240
+    y = 38 if b.paused else 21
+    row = [x for x in range(375) if rgb(buf, x, y) == ink]
+    assert row and min(row) >= inset(y - 7) and max(row) <= 375 - inset(y - 7)  # the plaques clear of the glass
+    if b.paused:
+        assert rgb(buf, 187, 10) == 0  # the status row's band is stock's: nothing drawn there
     g.close()
 
 

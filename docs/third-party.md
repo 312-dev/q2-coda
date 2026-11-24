@@ -139,6 +139,7 @@ license (`docs/ipod.md`).
 | Component                                    | License | Files                                                          | Used for                                                                                                       |
 | -------------------------------------------- | ------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | Phosphor Icons, `@phosphor-icons/core` 2.1.1 | MIT     | `assets/icons/phosphor/*.svg`, `assets/icons/phosphor/LICENSE` | Theme: OLED's glyphs, drawn into bitmaps at build time by `tools/art.py` ([oled-design](oled-design.md#icons)) |
+| Bungee 2.000 (The Bungee Project Authors)    | OFL-1.1 | `assets/popstall/art.bin` (its glyphs only), `assets/popstall/Bungee-OFL.txt` | Pop Stall's type: the glyphs it draws at 9, 11, 14, 20 and 30 px, pictures made from the font by the game's design ([games-engine](games-engine.md#pop-stall)); the notice ships beside them in `usr/share/q2games/popstall/` |
 
 ## What the scan still finds
 
