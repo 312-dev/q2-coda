@@ -97,10 +97,15 @@ static void shuffle_groups_start(int kind) {
 int shuffle_songs_poll(void) {
     int n;
     if (sg.step == 1) {
+        ui_watch_step("shuffle read"); /* the UI pass watchdog's name for this pass */
+#if Q2POD_DEV /* a slow card's read, to see the wait in the emulator: the file there adds 1.5 s */
+        if (!access("/mnt/mmc/.q2pod/slow-read", 0)) usleep(1500000);
+#endif
         sg.all = staged(songs_unsorted, (void *)1, &n);
         sg.step = 2;
         return 0;
     }
+    if (sg.step == 2) ui_watch_step("shuffle play");
     if (sg.step == 2 && sg.kind)
         shuffle_groups(sg.all, sg.kind - 1);
     else if (sg.step == 2 && !shuffle_play(sg.all))
