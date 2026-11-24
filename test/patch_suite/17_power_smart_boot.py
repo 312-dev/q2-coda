@@ -722,7 +722,8 @@ for _ in range(8): m.call()  # stock's two, our six, then Boot to
 assert m.confirm()==11 and m.dispatched()[0][1]==button; passed()
 # General (Settings' System page, ringnav_systemset): About, System Update, Storage, USB, Date & Time, App Store, stock's
 # Network row, Reset Settings, then stock's other eight hidden (the wheel skips them), a --dev build's Developer Options
-# (adb_trust.c), a 12 px gap, Restart and Shut Down (power_rows.c). The rows stock moved to its System page open stock's pages; Car Remote and Controls are Settings' own.
+# (adb_trust.c), Rockbox while the card has it (rockbox_open, docs/boot.md#rockbox-from-home), a 12 px gap, Restart and
+# Shut Down (power_rows.c). The rows stock moved to its System page open stock's pages; Car Remote and Controls are Settings' own.
 for mode in (0o100755,0):
     m=BootMachine({}); m.rockbox_mode=mode; m.restack=True
     m.handlers[int(manifest['patch_symbols']['stock_systemset_trampoline'],16)]='stock_systemset'
@@ -730,11 +731,14 @@ for mode in (0o100755,0):
     view=m.node('scroll_view','scroll_view_sysset',entries.copy())
     m.top=m.node('window','sysset_page',[m.node('list_view','list_view_sysset',[view])])
     assert m.call(address=HOOKS['systemset_sysset_page_init'][0],args=(m.top,5,0,0),gap=0)==0
-    dev=1 if manifest['dev'] else 0
-    kids=m.nodes[view]['children']; assert len(kids)==19+dev
+    dev=1 if manifest['dev'] else 0; rb=1 if mode else 0
+    kids=m.nodes[view]['children']; assert len(kids)==19+dev+rb
     assert [kids.index(e) for e in entries]==[7,8,6,9,10,11,12,13,14]  # Network (stock's third) in place, the rest hidden; Reset is last
     assert [m.nodes[e]['visible'] for e in entries]==[0,0,1,0,0,0,0,0,0]
-    about,update,storage,usb,date,apps,reset=(m.nodes[kids[i]]['children'][0] for i in (0,1,2,3,4,5,18+dev))
+    about,update,storage,usb,date,apps,reset=(m.nodes[kids[i]]['children'][0] for i in (0,1,2,3,4,5,18+dev+rb))
+    if rb:
+        rockbox=m.nodes[kids[15+dev]]['children'][0]
+        assert m.nodes[m.nodes[rockbox]['children'][1]]['text']=='Rockbox' and m.handler(rockbox,O['EVT_CLICK'])[0]==payload_syms['rockbox_open']
     if dev:
         devopts=m.nodes[kids[15]]['children'][0]
         assert m.nodes[m.nodes[devopts]['children'][1]]['text']=='Developer Options' and m.handler(devopts,O['EVT_CLICK'])[0]==payload_syms['adb_dev_open']
@@ -745,7 +749,7 @@ for mode in (0o100755,0):
     for b,key,page in ((date,'system_time','systemset/datetime_page'),(reset,'system_reset','systemset/reset_page'),(about,'system_about','systemset/about_page')):
         f,ctx=m.handler(b,O['EVT_CLICK']); assert m.nodes[m.nodes[b]['children'][1]]['text']==key and m.nodes[m.nodes[b]['children'][0]]['image']==key
         m.calls=[]; assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==(page,None),key
-    assert m.nodes[kids[15+dev]]['type']=='label' and [m.nodes[m.nodes[m.nodes[k]['children'][0]]['children'][1]]['text'] for k in kids[16+dev:18+dev]]==['Restart','Shut Down']  # then Reset Settings, last
+    assert m.nodes[kids[15+dev+rb]]['type']=='label' and [m.nodes[m.nodes[m.nodes[k]['children'][0]]['children'][1]]['text'] for k in kids[16+dev+rb:18+dev+rb]]==['Restart','Shut Down']  # then Reset Settings, last
     passed()
 print('Boot settings: conditional row/order, restart, card removal and failed atomic writes passed.')
 
