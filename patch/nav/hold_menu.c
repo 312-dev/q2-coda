@@ -633,11 +633,13 @@ static int qm_hold(int songs) {
 
 /* Centre held on top's selected row (centre_menu.c): a song's hold menu, the one Play/Pause's hold
  * opens, on Up Next's queued song (upnext.c un_menu_hold), a payload playlist page's song
- * (playlist_page_song_hold) or a list's song row (qm_hold's songs); 1 when it is on its way. Any
+ * (playlist_page_song_hold), a song result of Search (search_strip.c search_strip_song_hold) or a
+ * list's song row (qm_hold's songs); 1 when it is on its way. Any
  * other row is left as it was: stock's Centre hold, or the page's own. */
 static int qm_song_row_hold(void *top, unsigned by, int centre) {
     qm_hold_key = by;
-    int taken = un_menu_hold(top, centre) || playlist_page_song_hold(top) || qm_hold(1);
+    int taken = un_menu_hold(top, centre) || playlist_page_song_hold(top) ||
+                search_strip_song_hold(top) || qm_hold(1);
     qm_hold_key = 0;
     return taken;
 }
@@ -647,6 +649,10 @@ int qm_centre_hold(void *top) { return qm_song_row_hold(top, KEY_CENTER, 1); }
  * selection and gets the menu Centre's hold gives it; a row that is no song gets its selection
  * back. 1 when the menu is on its way. */
 int qm_touch_hold(void *top, int x, int y) {
+    qm_hold_key = QM_BY_TOUCH; /* Search's results are painted, not rows: its own hit test */
+    int found = search_strip_touch_hold(top, x, y);
+    qm_hold_key = 0;
+    if (found) return 1;
     void *w = top ? surface_under(top, (void *)0, (void *)0, 0) : (void *)0;
     if (!w || !load(&g_menu, w, 1) || g_menu.kind == 3) return 0;
     int was = widget_get_prop_int(w, SEL, -1), rows = g_menu.rows;
@@ -759,7 +765,8 @@ static int home_cf_hold(void *top) {
  * toasts), on a card app's row its hold op (addon_hold: a Deezer list downloaded whole), in Quick
  * Settings (not OLED's) the wheel's brightness/volume switch, on a saved Wi-Fi network Forget's
  * card (wifi_flows_hold), on View Queue's shuffle list
- * Play Next (un_hold), on a Library artist's page under OLED nothing (artist_local_on: its rows
+ * Play Next (un_hold), on a song result of Search its song's menu (search_strip_song_hold), on a
+ * Library artist's page under OLED nothing (artist_local_on: its rows
  * are no showlist records), in Edit Library or Edit Home nothing (its tap shows or hides a row),
  * the release latched as the queue menu's. A held Previous or Next that scans (seek_held) stops
  * first. */
@@ -775,7 +782,7 @@ int ringnav_keylong(void *ctx, void *event) {
     const char *fav = radio_hold(top);
     int taken = fav || spot_hold(top) || addon_hold(top) || storage_hold(top) || bt_ui_hold(top) ||
                 wifi_flows_hold(top) || un_hold(top) || home_cf_hold(top) || artist_local_on(top) ||
-                playlist_page_hold(top) ||
+                playlist_page_hold(top) || search_strip_song_hold(top) ||
                 lr_editing(top); /* Edit Library and Edit Home: Play/Pause's tap alone */
     if (!taken && qm_hold(0)) return STOP;
     if (taken) {

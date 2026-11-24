@@ -34,7 +34,8 @@
  * goes back to the strip, the text, cursor and tab kept; Return there or on the tabs leaves. On a
  * name's or a box's page the shut strip leaves the text in place, the wheel doing nothing, and
  * Play/Pause is still its OK. A held Return closes Search from any of them (search_strip_hold, from
- * Hold Return's compact_now_playing). Off the strip Play/Pause is the player's.
+ * Hold Return's compact_now_playing). Off the strip Play/Pause is the player's; held on a song
+ * result, as Centre or a finger held there, it opens the song's hold menu (search_strip_song_hold).
  *
  * The key pop (ss_pop_paint): when the wheel or a drag lands on a character, or a tap types one,
  * its key grows a bubble holding it large, and the key keeps it at the strip's size, dimmed; it
@@ -1003,6 +1004,43 @@ int search_strip_hold(void *top) {
 /* Whether top is the strip's page, where Previous and Next are the text's cursor: no scan of the
  * song on their hold (seek.c), and no long press of stock's (hold_menu.c ringnav_keylong). */
 int search_strip_owns(void *top) { return ss.page && top == ss.page; }
+
+/* A song result held (hold_menu.c: Play/Pause's hold, Centre's or a finger's): the song's hold
+ * menu, the one a Library song gets (qm_song_hold), at its record's place in the list it came
+ * from: the library's songs (ss.songs) for Search, the page's showlist for a list page's own search
+ * (sc). 1 when the menu is on its way. An artist's or album's result, the strip, the tabs, Add
+ * Songs' pick and a name's or box's page are left as they were. */
+int search_strip_song_hold(void *top) {
+    if (!ss.page || top != ss.page || ss.focus != SS_ON_LIST || ss.pick || ss_named() ||
+        ss.sel < 0 || ss.sel >= ss.nmatch || ss.kind[ss.sel] != SS_SONG ||
+        (sc.kind && sc.kind != SC_SONGS))
+        return 0;
+    void *r = ss.match[ss.sel], *list = sc.kind ? P(p_deque_showlist, 0) : ss.songs;
+    for (unsigned i = 0, n = list ? deque_size(list) : 0; i < n; ++i)
+        if (deque_at(list, i) == r) return qm_song_hold(ss.page, list, i, (const char *)0, 0);
+    return 0;
+}
+/* A finger held still at the UI point (x, y) (hold_menu.c qm_touch_hold): the result under it,
+ * as the list stands, becomes the selection and is held as above; anything else under it (the
+ * query, the tabs, the strip) keeps the selection it had. The touch's press is let go here
+ * (ss.pressed), so the abort and the lift that follow it open nothing. */
+int search_strip_touch_hold(void *top, int x, int y) {
+    if (!ss.page || top != ss.page || !ss.sheet || ss_named()) return 0;
+    int xy[2] = { x, y };
+    widget_to_local(ss.sheet, xy);
+    int at = xy[1] - ss_list_y(), row = at / SS_PITCH, sel = ss.sel, focus = ss.focus;
+    if (at < 0 || row >= ss_rows() || ss.top + row >= ss.nmatch) return 0;
+    ss.sel = ss.top + row;
+    ss.focus = SS_ON_LIST;
+    if (search_strip_song_hold(top)) {
+        ss.pressed = 0;
+        ss_keep();
+        ss_dirty();
+        return 1;
+    }
+    ss.sel = sel, ss.focus = focus;
+    return 0;
+}
 /* swipe_back.c: 2 when top is the strip's page with the strip open, 1 with it shut, else 0. */
 int search_strip_open(void *top) { return !ss.page || top != ss.page ? 0 : ss.focus ? 1 : 2; }
 /* swipe_back.c, an edge swipe claimed on top: the open strip shut in the page's place (ss_shut), 1;
