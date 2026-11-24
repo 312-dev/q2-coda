@@ -665,14 +665,16 @@ static int qm_song_row_hold(void *top, unsigned by, int centre) {
 int qm_centre_hold(void *top) { return qm_song_row_hold(top, KEY_CENTER, 1); }
 
 /* Whether a row is under the selection on top (centre_menu.c, a Centre hold that opened no menu):
- * Search's results, or the selected row of the list surface the wheel moves on (a list, a table,
- * Cover Flow's covers), with rows; never Now Playing, whose surfaces are no rows. */
+ * Search's results, or a selected row of the list surface the wheel moves on (a list, a table,
+ * Cover Flow's covers) as ringnav_select left it, read without loading the surface again (load
+ * would reset a selection whose count it reads otherwise); never Now Playing, whose surfaces are
+ * no rows. */
 int qm_row_under(void *top) {
     if (!top || !tk_strcmp(widget_get_prop_str(top, "name", ""), "playing_page")) return 0;
     if (search_strip_owns(top)) return search_strip_on_row(top);
     void *w = surface_under(top, (void *)0, (void *)0, 0);
-    return w && load(&g_menu, w, 1) && g_menu.ctx >= 0 && g_menu.rows > 0 &&
-           widget_get_prop_int(w, SEL, -1) >= 0;
+    int sel = w ? widget_get_prop_int(w, SEL, -1) : -1;
+    return sel >= 0 && sel < widget_get_prop_int(w, COUNT, 0);
 }
 
 /* A finger held still at the UI point (x, y) (centre_menu.c): the row under it becomes the

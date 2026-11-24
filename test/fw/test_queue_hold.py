@@ -13,7 +13,7 @@ import pytest
 from conftest import O
 from test_centre_menu import (EVT_POINTER_ABORT, EVENT_TYPE, HOLD_MS, POINTER_DOWN, STOP, Centre, finger,  # noqa: F401
                               to_local)
-from test_nav_hold import Hold, Ui, recs, scratch, song, st, use_set  # noqa: F401
+from test_nav_hold import Hold, Ui, field, recs, scratch, song, st, use_set  # noqa: F401
 from test_nav_loop import stock_bytes  # noqa: F401
 
 KEY_CENTER = O['KEY_CENTER']
@@ -63,6 +63,7 @@ class Sheet:
         self.page = hold.dialog
         assert ui.top() == self.page
         self.view = ui.lookup(self.page, 'scroll_view', 1)
+        C.c_ubyte.from_address(self.view + O['VIEW_VERTICAL']).value = 1  # stock's sortselect list scrolls so
 
     def stops(self):
         """Each stop's words: a song's title, 'Clear' for the pill."""
@@ -132,12 +133,11 @@ def test_a_finger_held_on_a_played_song_opens_its_menu(fw, ui, hold, recs):
 
 def test_remove_from_queue_on_a_played_song_takes_it_out_and_the_playing_one_plays_on(fw, ui, hold, recs, centre, mcl):
     s = Sheet(fw, ui, hold, recs, shuffle=True, played=2)
-    playing = hold.deques[hold.queue][mcl.pos]
+    playing = field(hold.deques[hold.queue][mcl.pos], O['REC_PATH'])
     n = len(hold.deques[hold.queue])
     held(centre, s, 0)
     hold.pick('Remove from Queue')
-    assert len(hold.deques[hold.queue]) == n - 1 and C.string_at(hold.deques[hold.queue][mcl.pos], O['REC_SIZE']) == \
-        C.string_at(playing, O['REC_SIZE'])
+    assert len(hold.deques[hold.queue]) == n - 1 and field(hold.deques[hold.queue][mcl.pos], O['REC_PATH']) == playing
 
 
 def test_centre_held_on_clear_opens_nothing_and_never_shut_down(fw, ui, hold, recs, centre, st):
