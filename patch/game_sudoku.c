@@ -21,7 +21,6 @@
 #define S_LATE                                                                                     \
     (135 * S_WORK) /* and no fresh grid after this much work: the last is kept, in 3 s             \
                     */
-#define S_HOLD 45  /* steps Play is held on the board to open the levels */
 #define S_SEQ 6    /* steps between the sounds of a run */
 #define S_WAVE 3   /* steps a cell of a finished unit's highlighter wave */
 #define S_TIME_MAX (99u * 3600 * ENG_HZ) /* elapsed and bests stop at 99 hours */
@@ -71,13 +70,13 @@ struct save {
 
 struct sudoku {
     struct save v;
-    int mode, sel, dial, pencil, pick, sx, sy, hold, last, dirty, record, held;
+    int mode, sel, dial, pencil, pick, sx, sy, last, dirty, record, held;
     int seq, runs, wait;
     int timed;         /* at holds the last step's time: the puzzle's time runs from there */
     unsigned at, owed; /* time_now_ms at the last step of play; the part of a step, 1/60000 s */
-    int wash, wcur; /* round wcur, a step behind the cursor: 0 no wash, 1 its peers, 2 and twins */
-    int wave, wt;   /* a finished unit's wave: the unit and one, its steps */
-    unsigned key[81];                                 /* each cell as last painted (look) */
+    int wash, wcur;    /* round wcur, behind the cursor: 0 no wash, 1 its peers, 2 and twins */
+    int wave, wt;      /* a finished unit's wave: the unit and one, its steps */
+    unsigned key[81];  /* each cell as last painted (look) */
     unsigned long long side;                          /* the margin as last painted (margin_key) */
     struct solver sv;                                 /* the generator's */
     unsigned rng;                                     /* its xorshift */
@@ -87,6 +86,7 @@ struct sudoku {
     unsigned char cells[27][9],
         of[81][3]; /* the units (rows, columns, boxes): their cells; a cell's */
     int slip;      /* the cell, and one, of the last digit placed that clashed; 0 none */
+    int busy;      /* this step opened, shut or redrew the dial's note: the wash waits a step */
     /* the masks (unpack): where each starts in art, and in span, their rows unpacked */
     unsigned short art_at[A_COUNT], span_at[A_COUNT];
     unsigned char span[A_SPAN_BYTES];
@@ -304,8 +304,7 @@ enum { B_PEER = 1, B_TWIN = 2, B_CUR = 4, B_WAVE = 8 };
 enum { K_CLUE = 1, K_ENTRY, K_CLASH };
 /* How cell i looks: its washes (B_*) in bits 0-3, its digit's kind (K_*) in 4-5, the digit in 6-9,
  * in 10 a digit a slip clashes with (underlined), its notes in 11-19 when it has no digit. The
- * peers are of wcur while the wash shows, a step behind the cursor, and the twins a step behind
- * them (step). */
+ * peers and twins are of wcur, which the wash follows the cursor to a stage a step (step). */
 static unsigned look(const struct sudoku *s, int i) {
     int d = digit(s, i), w = s->wcur, bg = 0;
     if (s->mode == PLAY) {
@@ -371,7 +370,8 @@ static void margin(struct sudoku *s) {
     if (k != s->side) s->side = k, eng_dirty(337, 60, ENG_W - 337, 210);
 }
 
-static void dial_dirty(const struct sudoku *s) {
+static void dial_dirty(struct sudoku *s) {
+    s->busy = 1;
     eng_dirty(s->sx - NOTE - 1, s->sy - NOTE - 1, 2 * NOTE + 6, 2 * NOTE + 7);
 }
 static void pick_dirty(const struct sudoku *s, int d) { /* the hub, and d's place */
@@ -390,7 +390,7 @@ static void sound(struct sudoku *s, int kind, int n) {
 static int started(const struct sudoku *s) { return s->v.sol[0] && !s->v.done; }
 
 static void to(struct sudoku *s, int mode) {
-    s->mode = mode, s->dial = 0, s->hold = 0, s->wave = 0, s->wash = 2, s->wcur = s->v.cur;
+    s->mode = mode, s->dial = 0, s->wave = 0, s->wash = 2, s->wcur = s->v.cur;
     eng_dirty_all();
     refresh(s, 0);
     s->side = margin_key(s);
@@ -428,7 +428,7 @@ static void place(struct sudoku *s, int d) {
     shut(s);
     if (!d || s->v.ent[i] == d) return;
     s->v.ent[i] = (unsigned char)d, s->last = d;
-    s->wash = 0; /* this step's wash the peers alone, the new digit's twins the next's */
+    s->wash = s->wash ? 1 : 0; /* the new digit's twins after the note's frame (step) */
     for (int j = 0; j < 81; ++j)
         if (peer(s, i, j)) s->v.note[j] &= (unsigned short)~bit(d);
     while (k < 81 && digit(s, k) == s->v.sol[k]) ++k;
@@ -499,12 +499,7 @@ static void play(struct sudoku *s, const struct eng_input *in) {
     if (tap) i = r * 9 + c;
     s->v.cur = (unsigned char)i;
     if (!s->v.clue[i] && (in->pressed & ENG_CENTRE || tap)) open_dial(s);
-    if (in->pressed & ENG_PLAY) s->hold = 1;
-    if (s->hold && in->held & ENG_PLAY && !(in->released & ENG_PLAY) && ++s->hold >= S_HOLD)
-        to(s, CHOOSE); /* held: the levels, the puzzle kept */
-    else if (s->hold &&
-             in->released & ENG_PLAY) { /* a short press: the entry, else the notes, cleared */
-        s->hold = 0;
+    if (in->pressed & ENG_PLAY) { /* the entry, else the notes, cleared */
         if (s->v.ent[i])
             s->v.ent[i] = 0;
         else
@@ -532,13 +527,16 @@ static int step(void *state, const struct eng_input *in) {
         play(s, in);
         if (s->mode == PLAY) {
             if (s->wave && ++s->wt > 9 * S_WAVE + 12) s->wave = 0;
-            /* the old peers' and twins' wash off on the cursor's move, the new peers' on the next
-             * step and their twins' on the one after: no frame repaints two of them
-             * (docs/games-engine.md#evening-puzzle) */
-            if (s->wash && s->wcur != s->v.cur)
-                s->wash = 0;
+            /* The wash follows the cursor a stage a step: the old twins off, then the old peers,
+             * then the new peers on, then their twins; none while the dial is open or on the step
+             * that put it away, so no frame repaints two of them or one with the dial's note
+             * (docs/games-engine.md#evening-puzzle). */
+            if (s->busy || s->dial)
+                s->busy = 0;
+            else if (s->wash && s->wcur != s->v.cur)
+                --s->wash;
             else if (s->wash < 2)
-                s->wash = s->wash + 1, s->wcur = s->v.cur;
+                ++s->wash, s->wcur = s->v.cur;
             refresh(s, 1);
         }
     } else if (s->mode == CHOOSE) {
@@ -569,7 +567,8 @@ static int step(void *state, const struct eng_input *in) {
         to(s, CHOOSE);
     }
     if (lift) eng_dirty_all();
-    return s->mode == MAKE || s->runs || s->hold || (s->mode == PLAY && (s->wash < 2 || s->wave));
+    return s->mode == MAKE || s->runs ||
+           (s->mode == PLAY && ((!s->dial && (s->wash < 2 || s->wcur != s->v.cur)) || s->wave));
 }
 
 /* A saved puzzle whose solution is a whole grid and whose clues, entries and notes fit it. */
@@ -639,7 +638,7 @@ static void init(void *state, int h) {
     if (eng_load("sudoku", &s->v, sizeof s->v, S_MAGIC) && !sane(s)) /* a save that no game made */
         for (unsigned k = 0; k < sizeof s->v; ++k) ((unsigned char *)&s->v)[k] = 0;
     s->sel = s->v.level;
-    to(s, started(s) ? PLAY : CHOOSE);
+    to(s, CHOOSE); /* the levels first, an unfinished puzzle under them for Play/Pause */
 }
 
 /* ---- drawing ---- */

@@ -21,7 +21,7 @@ GENTLE, STEADY, SHARP = range(3)
 CHOOSE, MAKE, PLAYING, DONE = range(4)
 G_FILL, G_PICK, G_TEST, G_FINAL, G_DONE = range(5)
 TARGET = (36, 30, 24)
-WORK, HOLD, TRIES = 7200, 45, 9
+WORK, TRIES = 7200, 9
 LATE = 135 * WORK
 MAGIC, FILE, OLD = 0x314b4453, '/mnt/data/game-sudoku', '/mnt/data/ringnav-sudoku'
 TICK, TAP, ALERT = 1, 2, 3  # clicker_kind as eng_sfx sets it
@@ -48,12 +48,12 @@ class Save(C.Structure):
 
 class Sudoku(C.Structure):
     _fields_ = [('v', Save), *((k, C.c_int) for k in
-                                'mode sel dial pencil pick sx sy hold last dirty record held seq runs wait timed'.split()),
+                                'mode sel dial pencil pick sx sy last dirty record held seq runs wait timed'.split()),
                 ('at', C.c_uint), ('owed', C.c_uint), *((k, C.c_int) for k in 'wash wcur wave wt'.split()),
                 ('key', C.c_uint * 81), ('side', C.c_ulonglong), ('sv', Solver), ('rng', C.c_uint),
                 *((k, C.c_int) for k in 'glevel gphase gpair gclues gtries gdeep'.split()), ('gwork', C.c_uint), ('order', C.c_ubyte * 41),
                 ('puz', C.c_ubyte * 81), ('gsol', C.c_ubyte * 81), ('cells', (C.c_ubyte * 9) * 27), ('of', (C.c_ubyte * 3) * 81),
-                ('slip', C.c_int), ('art_at', C.c_ushort * A_COUNT), ('span_at', C.c_ushort * A_COUNT),
+                ('slip', C.c_int), ('busy', C.c_int), ('art_at', C.c_ushort * A_COUNT), ('span_at', C.c_ushort * A_COUNT),
                 ('span', C.c_ubyte * A_SPAN_BYTES)]
 
 
@@ -187,7 +187,7 @@ class Game:
         v = self.s.v
         v.clue[:], v.sol[:], v.ent[:], v.note[:] = clue, sol, ent or [0] * 81, [0] * 81
         v.level, v.done, v.cur, v.elapsed = level, 0, cur, 0
-        self.s.mode, self.s.dial, self.s.hold = PLAYING, 0, 0
+        self.s.mode, self.s.dial = PLAYING, 0
         self.step()
         C.c_int.from_address(self.fw.var('engine__en', C.c_void_p).value + Eng.rects.offset).value = 0  # no frame took them
 
@@ -568,22 +568,20 @@ def test_a_digit_placed_leaves_the_notes_of_its_row_column_and_box(fw):
     g.close()
 
 
-def test_play_with_the_dial_shut_clears_the_entry_then_the_notes_and_held_opens_the_levels(made):
+def test_play_with_the_dial_shut_clears_the_entry_then_the_notes_and_the_levels_keep_it_unfinished(made):
     g, s = made, made.s
     i = next(k for k in range(81) if not s.v.clue[k])
     s.v.cur, s.v.ent[i], s.v.note[i] = i, 4, 0b101
-    g.press(E_PLAY)
+    g.step(held=E_PLAY, pressed=E_PLAY)  # at the press
     assert s.v.ent[i] == 0 and s.v.note[i] == 0b101 and s.mode == PLAYING
+    g.step(released=E_PLAY)
     g.press(E_PLAY)
     assert s.v.note[i] == 0
     puzzle = bytes(s.v)
-    assert g.step(held=E_PLAY, pressed=E_PLAY) == 1  # held: the timer keeps going
-    for _ in range(HOLD - 3):
-        assert g.step(held=E_PLAY) == 1 and s.mode == PLAYING
-    g.step(held=E_PLAY)
-    assert s.mode == CHOOSE and s.hold == 0
-    g.step(released=E_PLAY)
-    assert s.mode == CHOOSE and bytes(s.v)[:-20] == puzzle[:-20]  # the puzzle kept (but its time)
+    g.e['eng_hold'](), g.e['eng_close']()  # Quit, and the game again: the levels, the puzzle kept
+    g.e['eng_open'](g.game, PAGE, SHEET, 320, g.done, g.done)
+    g.s = s = Sudoku.from_address(g.fw.var('engine__en', C.c_void_p).value + C.sizeof(Eng) + (-C.sizeof(Eng)) % 8)
+    assert s.mode == CHOOSE and bytes(s.v)[4:-20] == puzzle[4:-20]  # (but its magic, its time and its seal)
     art = Art(g.fw)
     px = draw(g)
     assert art.written(px, art.say('CENTER: START      PLAY: CONTINUE THE UNFINISHED ONE', 'A_CAPS', 187, 296, 1), SOFT)
@@ -665,38 +663,59 @@ def test_the_board_is_drawn_in_its_inks_and_washes(fw):
     g.close()
 
 
-def test_a_cursor_move_takes_the_old_wash_off_then_puts_the_new_one_on_a_frame_later(fw):
+def test_a_cursor_move_takes_the_old_wash_off_and_puts_the_new_one_on_a_stage_a_frame(fw):
     g = Game(fw)
-    g.puzzle(half(SOLVED, set(range(0, 81, 2))), SOLVED, cur=0)
+    g.puzzle(half(SOLVED, set(range(27, 81))), SOLVED, cur=0)  # the first three rows printed
     s = g.s
     g.frame(), g.frame()
-    assert s.wash and s.wcur == 0 and g.frame() == []
+    assert s.wash == 2 and s.wcur == 0 and g.frame() == []
+    twins = lambda c: [i for i in range(81) if i != c and SOLVED[i] == SOLVED[c] and s.v.clue[i]]
+    assert twins(0) and twins(1) and all(s.key[i] & B_TWIN for i in twins(0))
     g.key(NEXT)
-    first = g.frame()
-    assert s.v.cur == 1 and not s.wash and g.e['eng_live']()  # the old peers' wash off, the cursor moved
-    assert all(covers(first, box(i)[0], box(i)[1], CS, CS) for i in PEERS[0] | {0, 1})
-    assert len(first) <= 9 and all(GX - 2 <= x and x + w <= GX + 9 * CS + 3 for x, _, w, _ in first)
-    second = g.frame()
-    assert s.wash == 1 and s.wcur == 1  # the new peers' on the next
-    assert all(covers(second, box(i)[0], box(i)[1], CS, CS) for i in PEERS[1] - PEERS[0])
-    twins = [i for i in range(81) if i != 1 and SOLVED[i] == SOLVED[1] and s.v.clue[i]]
-    assert twins and not any(s.key[i] & B_TWIN for i in twins)
-    third = g.frame()
-    assert s.wash == 2 and all(s.key[i] & B_TWIN for i in twins)  # and their twins' on the one after
-    assert all(covers(third, box(i)[0], box(i)[1], CS, CS) for i in twins) and len(third) == len(twins)
+    first = g.frame()  # the cursor moved; the old twins off
+    assert s.v.cur == 1 and s.wash == 1 and s.wcur == 0 and g.e['eng_live']()
+    assert not any(s.key[i] & B_TWIN for i in twins(0)) and all(s.key[i] & B_PEER for i in PEERS[0])
+    assert all(covers(first, box(i)[0], box(i)[1], CS, CS) for i in twins(0) + [0, 1])
+    second = g.frame()  # the old peers off
+    assert s.wash == 0 and not any(s.key[i] & B_PEER for i in range(81))
+    assert all(covers(second, box(i)[0], box(i)[1], CS, CS) for i in PEERS[0] - {1})
+    assert len(second) <= 8 and all(GX - 2 <= x and x + w <= GX + 9 * CS + 3 for x, _, w, _ in second)
+    third = g.frame()  # the new peers on
+    assert s.wash == 1 and s.wcur == 1 and all(s.key[i] & B_PEER for i in PEERS[1])
+    assert all(covers(third, box(i)[0], box(i)[1], CS, CS) for i in PEERS[1] - {0})
+    assert not any(s.key[i] & B_TWIN for i in twins(1))
+    fourth = g.frame()  # and their twins
+    assert s.wash == 2 and all(s.key[i] & B_TWIN for i in twins(1))
+    assert all(covers(fourth, box(i)[0], box(i)[1], CS, CS) for i in twins(1)) and len(fourth) == len(twins(1))
     assert g.frame() == [] and not g.e['eng_live']()  # at rest, nothing
     s.v.ent[:] = [0] * 81
     s.v.clue[:] = half(SOLVED, set(range(81)) - {0, 1, 2, 9})
     s.v.cur = 0
-    g.step(), g.step(), g.step()
+    for _ in range(5):
+        g.step()
     g.page.now += 16
     g.e['frame'](None)
-    g.key(NEXT)  # 1 to 2 in row 0 and box 0: the old wash's columns and the two cells
-    rects = g.frame()
-    # row 0's wash, then column 0's a row at a time: nine rows, the last two joined as the engine joins past eight
+    g.key(NEXT), g.frame()  # 0 to 1: its twins off, then its peers: row 0's wash, then column 0's a row at a time
+    rects = g.frame()  # nine rows, the last two joined as the engine joins past eight
     assert (GX - 2, GY - 2, 9 * CS + 5, CS + 5) in rects and len(rects) == 8
     assert rects[7] == (GX - 2, GY + 7 * CS - 2, CS + 5, 2 * CS + 5)
     g.close()
+
+
+def test_the_wash_waits_while_the_dial_is_open_and_on_the_frame_that_puts_it_away(made):
+    g, s = made, made.s
+    s.v.cur = next(k for k in range(81) if not s.v.clue[k] and k % 9 < 8 and not s.v.clue[k + 1])
+    for _ in range(5):
+        g.step()
+    g.step(ticks=1)
+    assert s.wash == 1  # moved: the old twins off
+    assert g.step(pressed=E_CENTRE, held=E_CENTRE) == 0  # the dial opened: the wash waits, and nothing moves
+    assert s.dial and s.wash == 1
+    assert g.step(ticks=1) == 0 and g.step(released=E_CENTRE) == 0 and s.wash == 1  # turned: still waiting
+    g.step(pressed=E_NEXT, held=E_NEXT)  # put away, nothing placed: that frame is the note's
+    assert not s.dial and s.wash == 1
+    assert g.step() == 1 and s.wash == 0  # then the old peers off
+    assert g.step() == 1 and s.wash == 1 and g.step() == 0 and s.wash == 2  # and the new on
 
 
 def test_the_dial_turning_repaints_the_hub_and_two_digits_and_opening_and_shutting_its_note(made):
@@ -981,14 +1000,15 @@ def a_save(**kw):
 def test_a_save_comes_back_with_its_entries_notes_cursor_time_and_bests(fw):
     g = Game(fw, files={FILE: blob(a_save())})
     s = g.s
-    assert s.mode == PLAYING and s.v.cur == 6 and s.v.ent[3] == SOLVED[3] and s.v.note[6] == 0b11
-    assert s.v.elapsed == 4321  # the first frame's step starts the clock
+    assert s.mode == CHOOSE and s.v.cur == 6 and s.v.ent[3] == SOLVED[3] and s.v.note[6] == 0b11  # the levels first
+    g.press(E_PLAY)  # the unfinished one
+    assert s.mode == PLAYING and s.v.elapsed == 4321  # the first step of play starts the clock
     assert list(s.v.best) == [100, 0, 7000] and s.v.level == SHARP
     s.v.note[9] = 0b100000001
     g.e['eng_hold']()  # a pause: written
     g.close()
     again = Game(fw, files=dict(g.page.card.files))
-    assert again.s.v.note[9] == 0b100000001 and again.s.v.note[6] == 0b11 and again.s.mode == PLAYING
+    assert again.s.v.note[9] == 0b100000001 and again.s.v.note[6] == 0b11 and again.s.mode == CHOOSE
     again.close()
 
 
@@ -1029,7 +1049,9 @@ def test_a_pause_saves_only_what_changed_and_never_an_empty_board(fw):
     g = Game(fw, files={FILE: blob(a_save())})
     del g.page.card.files[FILE]
     g.e['eng_hold']()
-    assert FILE in g.page.card.files  # the first frame's step of play: its time
+    assert FILE not in g.page.card.files  # the levels: nothing played
+    g.e['eng_run'](), g.press(E_PLAY), g.e['eng_hold']()
+    assert FILE in g.page.card.files  # a step of play: its time
     del g.page.card.files[FILE]
     g.e['eng_run'](), g.e['eng_hold']()
     assert FILE not in g.page.card.files
