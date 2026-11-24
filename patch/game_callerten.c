@@ -1291,7 +1291,7 @@ static int step_in(struct ct *g, const struct eng_input *in) {
             eng_sfx(ENG_SFX_TICK);
             moving = 1;
         }
-        if (row >= 0 || in->pressed & ENG_CENTRE) begin(g);
+        if (row >= 0 || in->pressed & ENG_CENTRE) begin(g), moving = 1; /* stand by goes on alone */
         return moving;
     }
     case S_STANDBY:

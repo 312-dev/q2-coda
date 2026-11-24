@@ -483,6 +483,17 @@ def test_after_a_replay_the_next_callers_rings_start_from_their_first_frame(fw, 
         r.step()
 
 
+def test_calling_in_keeps_the_frame_timer_until_the_first_caller_is_on(fw, tmp_path):
+    r = Rig(fw, tmp_path, songs=music(14))
+    r.e['eng_key'](CENTER, 1), r.e['eng_key'](CENTER, 0)
+    r.page.now += 16
+    r.e['frame'](None)
+    assert r.g.screen == STANDBY and r.e['eng_live']()  # stand by moves on by itself, with no key
+    r.page.now += 16
+    r.e['frame'](None)
+    assert r.g.screen == ROUND and r.e['eng_live']() and len(r.clips()) == 1
+
+
 def test_a_finger_on_a_row_places_the_call(fw, tmp_path):
     r = Rig(fw, tmp_path, songs=music(14))
     r.start()
