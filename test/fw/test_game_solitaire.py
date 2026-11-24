@@ -444,7 +444,7 @@ def test_the_art_file_is_whole_sealed_and_laid_out_as_its_header_says(fw):
 
 
 @pytest.mark.parametrize('broken', [ART[:100], ART[:-1] + bytes([ART[-1] ^ 1]), b''])
-def test_without_its_art_the_game_still_plays_and_draws_plainly(fw, broken):
+def test_without_its_art_the_game_keeps_its_state_and_shows_a_plain_felt(fw, broken):
     g = Game(fw, files={ART_FILE: broken} if broken else None, art=bool(broken))
     assert g.b.art == 0
     g.deal(7)
