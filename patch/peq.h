@@ -327,6 +327,7 @@ int geom_val(int v) __attribute__((pure));
 /* menu_modal.c */
 int modal_actions(const char *const *names, const char *const *icons, int n, void (*pick)(int i));
 int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i));
+void modal_head(const char *title, const char *sub, void *r); /* the next sheet's header */
 void list_toggle(void *label, const char *title, int on); /* navigation.c: a row's switch */
 void caption_row(void *label, const char *text); /* settings_pages.c: a row's caption */
 /* navigation.c: a set_text row's value */
@@ -418,6 +419,10 @@ void tidal_clear(void);
  * once replaced or removed, forgotten on the UI thread. */
 #define APPS_MAX 8 /* card apps on the card at once */
 int addon_scan(void), addon_open(void *ctx, void *event), addon_hold(void *top);
+int addon_row_hold(void *top); /* Centre or a finger held on a card app's row: its own menu */
+/* library_pages.c: songs into the queue playing as the hold menu's Play Next (next 1) or Play Last
+ * (2); 0 when the queue takes none */
+int queue_add(void *add, int next);
 void child_quit(int pid, unsigned quit_ms); /* radio.c: a child asked to quit, reaped or killed */
 int addon_games_last(void); /* the card's games as the last addon_scan found them */
 /* The games games.c's chooser ships, the one place to turn each on (docs/internals.md#games): 1

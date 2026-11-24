@@ -1050,10 +1050,10 @@ static int modal_list(void *under, const char *const *names, const char *const *
         void *label = hscroll_label_create(item, 0, 0, 0, MODAL_ROW);
         widget_use_style(label, "s_scrlabel_white24l");
         widget_set_text_utf8(label, names[i]);
-        if (icons) modal_row(item, label, icons[i], (const char *)0, MM_ACTION);
-        if (icons && icons[i] && !tk_strcmp(icons[i], "trash"))
-            modal_red(item); /* destructive */
-        else
+        if (icons) { /* an action: its symbol; a choice: the current one checked */
+            modal_row(item, label, icons[i], (const char *)0, MM_ACTION);
+            if (icons[i] && !tk_strcmp(icons[i], "trash")) modal_red(item); /* destructive */
+        } else
             modal_row(item, label, i == current ? "check" : (const char *)0, (const char *)0,
                       MM_CHOICE);
         widget_on(item, EVT_CLICK, pick_click, (void *)(long)i);

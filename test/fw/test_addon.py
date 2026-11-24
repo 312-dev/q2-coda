@@ -16,6 +16,7 @@ from test_radio import Rd  # test_radio.py keeps the mirror
 from test_tidal import Au, Queue, free_stubbed  # test_tidal.py keeps tidal.c's au mirror
 
 APPS_MAX = 8
+QUEUE_KEEP = 16  # an app's .queue lines remembered as queued (addon.c queue_poll)
 REPLY_MAX = 64 << 10
 ADDON_ROWS, ADDON_PAGES, ADDON_DEPTH = 50, 10, 6
 M3U_MAX = 256 << 10
@@ -40,7 +41,8 @@ class App(C.Structure):
                                          'lyrics', 'covers', 'resume')),
                 ('dl', C.c_char * 32), *((n, C.c_int) for n in ('sync', 'sync_pm')),
                 *((n, C.c_uint) for n in ('polled', 'launch_at', 'restart_at', 'play')),
-                ('reach', C.c_int), ('srverr', C.c_char * 24), ('offline', C.c_int)]
+                ('reach', C.c_int), ('srverr', C.c_char * 24), ('offline', C.c_int),
+                ('queue', C.c_uint), ('taken', C.c_uint * QUEUE_KEEP), ('next_taken', C.c_uint), ('queue_seen', C.c_int)]
 
 
 class Ap(C.Structure):
@@ -546,7 +548,7 @@ def test_more_apps_than_slots(fw):
 def test_the_features_are_published_at_every_scan(fw):
     world = card(fw)
     scan(fw)
-    assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings likes artist album playlists storage signin libsource radio status ahead\n'
+    assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings likes artist album playlists storage signin libsource radio status holdmenu ahead\n'
     # the server library's state goes first (library_settings.c), so an app that reads libsource in the caps finds it
     assert world.of('rename') == [(b'/tmp/q2-addon.library.tmp', b'/tmp/q2-addon.library'),
                                   (b'/tmp/q2-addon.caps.tmp', b'/tmp/q2-addon.caps')]
@@ -6615,3 +6617,164 @@ def test_a_status_reply_s_position_is_its_bar_and_without_an_action_it_has_no_bu
     fw.mock('widget_set_prop_int', lambda w, k, v, *_: props.__setitem__(C.string_at(k), C.c_int(v).value))
     p.answer(rows=[(b'info', b'status', b'Syncing 4 of 12', b'Rockstar', b'arrow-circle-down', b'333')])
     assert props[b'_es_bar'] == 334 and props[b'_es_row'] == b'' and props[b'_es_foot'] == b''
+
+
+# Play Next and Play Last from an app's own page (addon.c queue_poll, docs/internals.md#card-apps): the app names the
+# song it fetched in /tmp/q2-<id>.queue, and the firmware queues each line once.
+QUEUE = b'/tmp/q2-foo.queue'
+X, Y = b'/mnt/mmc/.foo/stream/x.flac', b'/mnt/mmc/Subsonic/Y/y.flac'
+
+
+def queueing(fw, mcl, songs):
+    """A playlist session of A, B and C3 playing its last, C3, its queue a library one (stock's load set its class),
+    and the toasts kept. Where Play Next and Play Last put a song in a queue is the hold menu's (test_centre_menu.py,
+    over whole records: Play Next hashes the record it put next, and a listing's records here have a name and a path
+    alone); here Play Last's is the queue's end."""
+    s = playlist(fw, mcl, songs, A, B, C3)
+    s.land(A, B, C3)
+    s.play(b'1 ' + PLAYLIST + b'\n')
+    s.step()
+    s.step()
+    assert s.queued() == [A, B, C3]
+    mcl.type, mcl.pos = LIBRARY, 2
+    s.toasts = []
+    navigate = s.navigate
+    def toast(name, ctx, *_):
+        if C.string_at(name) == b'dialog/msginfo_dialog':
+            s.toasts.append(C.string_at(ctx + 8))
+        return navigate(name, ctx)
+    fw.mock('navigator_to_with_context', toast)
+    return s
+
+
+def test_a_song_the_app_names_in_its_queue_file_is_queued(fw, mcl, songs):
+    s = queueing(fw, mcl, songs)
+    s.land(Y)
+    s.world.files[QUEUE] = b'8 last ' + Y + b'\n'
+    s.step()
+    assert s.queued() == [A, B, C3, Y] and s.toasts == [b'Playing Last']
+
+
+def test_a_queue_line_is_queued_once_though_the_app_keeps_it(fw, mcl, songs):
+    s = queueing(fw, mcl, songs)
+    s.land(X, Y)
+    s.world.files[QUEUE] = b'7 last ' + X + b'\n'
+    s.step()
+    s.world.files[QUEUE] = b'7 last ' + X + b'\n9 last ' + Y + b'\n'  # its latest lines, whole
+    s.step()
+    assert s.queued() == [A, B, C3, X, Y] and s.toasts == [b'Playing Last', b'Playing Last']
+
+
+def test_what_the_queue_file_held_when_first_looked_at_was_queued_before(fw, mcl, songs):
+    """A demo that started again finds the lines it queued before it went: none is queued again."""
+    s = Stream(fw, mcl, songs)
+    s.land(X)
+    s.world.files[QUEUE] = b'7 next ' + X + b'\n'
+    s.step()
+    s.world.files[QUEUE] += b'8 last ' + X + b'\n'
+    s.step()
+    assert len(fw.calls('mclLoadPlayList')) == 1  # only the new line, into the empty queue: loaded, not started
+
+
+@pytest.mark.parametrize('line', [b'7 last /mnt/mmc/.foo/stream/gone.flac', b'7 last /tmp/x.flac',
+                                  b'7 last /mnt/mmc/../etc/x.flac'])
+def test_a_song_not_on_the_card_leaves_the_queue_unchanged(fw, mcl, songs, line):
+    s = queueing(fw, mcl, songs)
+    s.world.files[QUEUE] = line + b'\n'
+    s.step()
+    assert s.queued() == [A, B, C3] and s.toasts == [b'Queue unchanged']
+
+
+@pytest.mark.parametrize('line', [b'7 first ' + X, b'7 next', b' next ' + X, b'7'])
+def test_a_line_that_is_none_is_passed_over(fw, mcl, songs, line):
+    s = queueing(fw, mcl, songs)
+    s.land(X)
+    s.world.files[QUEUE] = line + b'\n'
+    s.step()
+    assert s.queued() == [A, B, C3] and s.toasts == []
+
+
+def test_a_stream_of_urls_takes_no_song(fw, mcl, songs):
+    s = queueing(fw, mcl, songs)
+    mcl.type = 0x2  # stock's online queue: it keeps its own
+    s.land(X)
+    s.world.files[QUEUE] = b'7 last ' + X + b'\n'
+    s.step()
+    assert s.queued() == [A, B, C3] and s.toasts == [b'Queue unchanged']
+
+
+# A row's own menu (addon.c hold_send): its hold op "hold" is sent as a hold, whose reply's rows are the menu.
+def hold_rows(hold=b'hold'):
+    return [(b'action', b'play', b'Song %d' % i, b'Settle', b'song:s%d top:ar1 %d' % (i, i), hold) for i in range(3)]
+
+
+def test_centre_on_a_row_whose_hold_op_is_hold_asks_for_its_menu(fw):
+    p = Page(fw)
+    p.answer(rows=hold_rows())
+    p.sel = 2
+    assert fw.fn('addon_row_hold', C.c_int, C.c_void_p)(p.page) == 1
+    assert p.request().endswith(b'\thold\tsong:s2 top:ar1 2\n') and p.pg.act == 2 and p.pg.arow == 2
+    assert fw.fn('addon_row_hold', C.c_int, C.c_void_p)(p.page) == 0  # one in flight: no second
+
+
+def test_play_pause_on_a_row_whose_hold_op_is_hold_asks_for_its_menu_too(fw):
+    p = Page(fw)
+    p.answer(rows=hold_rows())
+    p.sel = 1
+    assert fw.fn('addon_hold', C.c_int, C.c_void_p)(p.page) == 1
+    assert p.request().endswith(b'\thold\tsong:s1 top:ar1 1\n') and p.pg.act == 2
+
+
+@pytest.mark.parametrize('rows', [hold_rows(b'toggle'), hold_rows(b''), [item(1, b'list', b'c', b'dl')]])
+def test_centre_on_any_other_row_sends_nothing(fw, rows):
+    p = Page(fw)
+    p.answer(rows=rows)
+    sent = p.req.id
+    p.sel = 0
+    assert fw.fn('addon_row_hold', C.c_int, C.c_void_p)(p.page) == 0 and p.req.id == sent
+    assert fw.fn('addon_row_hold', C.c_int, C.c_void_p)(None) == 0
+
+
+def test_centre_while_a_level_loads_sends_nothing(fw):
+    p = Page(fw)
+    p.answer(rows=hold_rows())
+    p.fw.fn('addon__fetch', None, C.POINTER(Lv))(p.pg.lv)  # the level asked again (a refresh)
+    sent = p.req.id
+    p.sel = 0
+    assert fw.fn('addon_row_hold', C.c_int, C.c_void_p)(p.page) == 0 and p.req.id == sent
+
+
+def test_a_hold_reply_without_rows_is_toasted_as_an_actions(fw):
+    p = Page(fw)
+    p.answer(rows=hold_rows())
+    p.sel = 0
+    fw.fn('addon_row_hold', C.c_int, C.c_void_p)(p.page)
+    p.answer(msg=b'Sign in first')
+    assert p.toasts == [b'Sign in first'] and p.pg.act == 0
+
+
+def test_an_albums_lit_pair_keeps_centre_and_its_tracks_get_their_menu(fw, nav_st):
+    p = oled_page(fw, nav_st)
+    rows = [r[:5] + (b'hold',) if r[4].startswith(b'song:') else r for r in album_rows()]
+    p.answer(rows=rows)
+    assert p.top.lay == LAY_ALBUM and p.top.stop == 1
+    p.sel = 1
+    sent = p.req.id
+    assert fw.fn('addon_row_hold', C.c_int, C.c_void_p)(p.page) == 0 and p.req.id == sent  # Play lit: Centre presses it
+    p.top.stop = 0
+    fw.mock('widget_get_child', lambda w, i, *_: p.made[0])  # the track row the selection is on
+    fw.mock('widget_get_prop_int', lambda w, k, d, *_: 1 if C.string_at(k) == b'_ringnav_index' else
+            5 if C.string_at(k) == b'_ar_row' else d)
+    assert fw.fn('addon_row_hold', C.c_int, C.c_void_p)(p.page) == 1
+    assert p.request().endswith(b'\thold\tsong:s1 album:al2 1\n')
+
+
+def test_a_queue_file_past_its_limit_loses_its_cut_last_line_not_a_toast(fw, mcl, songs):
+    """A line cut at QUEUE_RAW would name a path that is not there: it is left out whole, the lines before it
+    queued."""
+    s = queueing(fw, mcl, songs)
+    s.land(Y)
+    head = b'8 last ' + Y + b'\n'
+    s.world.files[QUEUE] = head + b'9 last /mnt/mmc/' + b'a' * 4096 + b'.flac\n'
+    s.step()
+    assert s.queued() == [A, B, C3, Y] and s.toasts == [b'Playing Last']
