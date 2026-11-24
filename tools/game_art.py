@@ -1,5 +1,5 @@
 """Sudoku's masks (patch/game_sudoku_art.inc, docs/games-engine.md#sudoku): the digits, the words and the stamp of
-its newspaper page, drawn from four fonts at the sizes the design gives, each packed for the engine's eng_glyph.
+its newspaper page, drawn from four fonts at the sizes the design gives, each packed for game_sudoku.c to unpack.
 
 The fonts are not in the repository (they are needed only to draw the masks again): Patrick Hand, Libre Baskerville
 and Playfair Display (SIL OFL 1.1) and Special Elite (Apache 2.0), from Google Fonts; FONTS names each file and the
@@ -8,8 +8,10 @@ SHA-256 the committed masks were drawn from. A mask is the fonts' output, not th
 usage: python3 tools/game_art.py FONT_DIR [OUT]   (OUT: patch/game_sudoku_art.inc)
 
 A packed mask is its width and height (a byte each), then nibbles, the high one of a byte first, left to right and
-top to bottom, crossing rows: 1 to 14 is one pixel of that alpha of 15, 0 and 15 take the next nibble as a run of
-that many and one clear (0) or solid (15) pixels."""
+top to bottom, crossing rows: 1 to 14 is one pixel of that alpha of 15, 0 and 15 take the next nibble n as a run of
+clear (0) or solid (15) pixels, n + 1 of them, or for n of 15 sixteen times one more than the nibble after it. A
+mask ends on a whole byte. The masks follow each other, each after its x, y and advance, in the order the .inc's
+enum lists them; game_sudoku.c finds each by walking them once."""
 import hashlib
 import math
 import pathlib
@@ -24,7 +26,7 @@ FONTS = {'hand': ('PatrickHand-Regular.ttf', '0f173b3e6cb6d1af25babf7f0057c5ac4e
          'serif': ('LibreBaskerville.ttf', '05a95421961341c5b2556285e8415df9db27dab4f4abe22b446b3c6a8b916c5d'),
          'display': ('PlayfairDisplay.ttf', 'c40f2293766a503bc70cce9e512ef844a4ccb7cbcde792fe2ea31d191917d8d6'),
          'type': ('SpecialElite-Regular.ttf', 'a776fcb4ceb8bdf03e2967688ebdad42680de5b91a7e62c17e718ae212d14bc4')}
-RUN = 16  # the longest run a nibble holds
+RUN = 256  # the longest run: the escape nibble's 16 times 16
 HAND = '0123456789:!abdefhilnoprstwyGS'  # Patrick Hand's small set: notes, times, bests, the level
 CAPS = 'ABCDEFGHIJKLMNOPRSTUVWYZ0123456789:,'  # Special Elite's capitals for the small type
 
@@ -65,7 +67,7 @@ def mask(filled, lines=(), width=0.0, more=()):
 
 
 def pack(w, h, alpha):
-    """A mask as eng_glyph reads it (the module's docstring)."""
+    """A mask as game_sudoku.c's unpack reads it (the module's docstring)."""
     q = [round(v * 15 / 255) for v in alpha]
     nib, i = [], 0
     while i < len(q):
@@ -73,7 +75,11 @@ def pack(w, h, alpha):
         if q[i] in (0, 15):
             while i + n < len(q) and n < RUN and q[i + n] == q[i]:
                 n += 1
-            nib += [q[i], n - 1]
+            if n < 16:
+                nib += [q[i], n - 1]
+            else:  # the escape: a multiple of 16, the rest a run of its own
+                n -= n % 16
+                nib += [q[i], 15, n // 16 - 1]
         else:
             nib.append(q[i])
         i += n
@@ -88,13 +94,45 @@ def unpack(data):
     out, k = [], 0
     while len(out) < w * h:
         if nib[k] in (0, 15):
-            out += [nib[k]] * (nib[k + 1] + 1)
-            k += 2
+            n = nib[k + 1] + 1 if nib[k + 1] < 15 else 16 * (nib[k + 2] + 1)
+            out += [nib[k]] * n
+            k += 2 if nib[k + 1] < 15 else 3
         else:
             out.append(nib[k])
             k += 1
     assert len(out) == w * h and len(nib) - k < 2, 'a mask packed whole'
     return w, h, out
+
+
+def walk(data):
+    """The offsets of the masks in data, the .inc's art: each one's x, y and advance, then its packed mask, whose
+    length is found by reading it (game_sudoku.c unpack does the same)."""
+    out, at = [], 0
+    while at < len(data):
+        out.append(at)
+        w, h = data[at + 3], data[at + 4]
+        k, n = 0, 0
+        nib = lambda j: data[at + 5 + j // 2] >> (4 - 4 * (j & 1)) & 15
+        while n < w * h:
+            v = nib(k)
+            if v in (0, 15):
+                r = nib(k + 1)
+                n, k = n + (r + 1 if r < 15 else 16 * (nib(k + 2) + 1)), k + (2 if r < 15 else 3)
+            else:
+                n, k = n + 1, k + 1
+        at += 5 + (k + 1) // 2
+    return out
+
+
+def span_bytes(packed):
+    """What game_sudoku.c's unpack makes of a packed mask: each row's first inked column and one past its last, a
+    byte each, then that span's alphas, a byte each."""
+    w, h, a = unpack(packed)
+    n = 0
+    for v in range(h):
+        inked = [u for u in range(w) if a[v * w + u]]
+        n += 2 + (inked[-1] + 1 - inked[0] if inked else 0)
+    return n
 
 
 def glyph(font, ch, px, wght=None, thicken=0.0):
@@ -139,22 +177,22 @@ def sets(fonts):
 
 def source(fonts):
     """patch/game_sudoku_art.inc's text."""
-    lines, data, at, n = [], bytearray(), [], 0
+    lines, data, n, spans = [], bytearray(), 0, 0
     enums = []
     groups, frame = sets(fonts)
     for name, glyphs in groups:
         enums.append(f'{name} = {n}')
         for x, y, adv, packed in glyphs:
-            at.append(len(data))
             data += bytes((x & 255, y & 255, adv)) + packed
+            spans += span_bytes(packed)
             n += 1
     lines.append('/* Sudoku\'s masks: made by tools/game_art.py, not edited. Each is its x and y from the pen on the')
-    lines.append(' * baseline (signed), its advance, then eng_glyph\'s packed mask. */')
+    lines.append(' * baseline (signed), its advance, then its packed mask, one after another in the enum\'s order. */')
     lines.append(f'#define A_HAND_SET "{HAND}"')
     lines.append(f'#define A_CAPS_SET "{CAPS}"')
+    lines.append(f'#define A_SPAN_BYTES {spans} /* the masks unpacked to rows of spans (game_sudoku.c unpack) */')
     lines.append('enum { ' + ', '.join(enums) + f', A_COUNT = {n} }};')
     lines.append(f'static const short art_frame[16] = {{ {", ".join(map(str, frame))} }};')
-    lines.append(f'static const unsigned short art_at[A_COUNT] = {{ {", ".join(map(str, at))} }};')
     lines.append(f'static const unsigned char art[{len(data)}] = {{')
     for k in range(0, len(data), 24):
         lines.append('    ' + ', '.join(str(b) for b in data[k:k + 24]) + ',')

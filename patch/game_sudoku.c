@@ -75,9 +75,9 @@ struct sudoku {
     int seq, runs, wait;
     int timed;         /* at holds the last step's time: the puzzle's time runs from there */
     unsigned at, owed; /* time_now_ms at the last step of play; the part of a step, 1/60000 s */
-    int wash, wcur;    /* the peer wash shown, round wcur: a step behind the cursor (look) */
-    int wave, wt;      /* a finished unit's wave: the unit and one, its steps */
-    unsigned key[81];  /* each cell as last painted (look) */
+    int wash, wcur; /* round wcur, a step behind the cursor: 0 no wash, 1 its peers, 2 and twins */
+    int wave, wt;   /* a finished unit's wave: the unit and one, its steps */
+    unsigned key[81];                                 /* each cell as last painted (look) */
     unsigned long long side;                          /* the margin as last painted (margin_key) */
     struct solver sv;                                 /* the generator's */
     unsigned rng;                                     /* its xorshift */
@@ -87,6 +87,9 @@ struct sudoku {
     unsigned char cells[27][9],
         of[81][3]; /* the units (rows, columns, boxes): their cells; a cell's */
     int slip;      /* the cell, and one, of the last digit placed that clashed; 0 none */
+    /* the masks (unpack): where each starts in art, and in span, their rows unpacked */
+    unsigned short art_at[A_COUNT], span_at[A_COUNT];
+    unsigned char span[A_SPAN_BYTES];
 };
 
 static int bit(int d) { return d ? 1 << (d - 1) : 0; }
@@ -210,9 +213,8 @@ static int sv_pass(struct sudoku *s, int hidden, int *work) {
 /* ---- the generator ---- */
 
 static void gen_fill(struct sudoku *s) {
-    static const unsigned char none[81];
     int work = 0;
-    sv_load(s, none, 1, &work);
+    sv_load(s, s->sv.g, 1, &work); /* its own grid, each cell cleared before it is read: none */
     s->gphase = G_FILL, s->gpair = 0;
 }
 
@@ -302,12 +304,14 @@ enum { B_PEER = 1, B_TWIN = 2, B_CUR = 4, B_WAVE = 8 };
 enum { K_CLUE = 1, K_ENTRY, K_CLASH };
 /* How cell i looks: its washes (B_*) in bits 0-3, its digit's kind (K_*) in 4-5, the digit in 6-9,
  * in 10 a digit a slip clashes with (underlined), its notes in 11-19 when it has no digit. The
- * peers and twins are of wcur while the wash shows, a step behind the cursor (step). */
+ * peers are of wcur while the wash shows, a step behind the cursor, and the twins a step behind
+ * them (step). */
 static unsigned look(const struct sudoku *s, int i) {
     int d = digit(s, i), w = s->wcur, bg = 0;
     if (s->mode == PLAY) {
         if (s->wash)
-            bg = (peer(s, i, w) ? B_PEER : 0) | (i != w && d && d == digit(s, w) ? B_TWIN : 0);
+            bg = (peer(s, i, w) ? B_PEER : 0) |
+                 (s->wash > 1 && i != w && d && d == digit(s, w) ? B_TWIN : 0);
         bg |= i == s->v.cur ? B_CUR : 0;
     }
     for (int k = 0; s->wave && k < 9; ++k)
@@ -328,16 +332,23 @@ static unsigned look(const struct sudoku *s, int i) {
 
 /* Each cell's look again; with mark, a row's changed cells marked as one rect, and the cursor's
  * frame, 2 px over a cell's edge, with them. */
+static void margin(struct sudoku *s);
 static void refresh(struct sudoku *s, int mark) {
+    signed char lo[9], hi[9];
     for (int r = 0; r < 9; ++r) {
-        int lo = 9, hi = -1;
+        lo[r] = 9, hi[r] = -1;
         for (int c = 0; c < 9; ++c) {
             unsigned k = look(s, r * 9 + c);
-            if (k != s->key[r * 9 + c]) s->key[r * 9 + c] = k, lo = lo < c ? lo : c, hi = c;
+            if (k != s->key[r * 9 + c])
+                s->key[r * 9 + c] = k, lo[r] = lo[r] < c ? lo[r] : (signed char)c,
+                               hi[r] = (signed char)c;
         }
-        if (hi >= 0 && mark)
-            eng_dirty(GX + lo * CS - 2, GY + r * CS - 2, (hi - lo + 1) * CS + 5, CS + 5);
     }
+    if (!mark) return;
+    margin(s); /* first, so the rows past the engine's rects join each other, not the margin */
+    for (int r = 0; r < 9; ++r)
+        if (hi[r] >= 0)
+            eng_dirty(GX + lo[r] * CS - 2, GY + r * CS - 2, (hi[r] - lo[r] + 1) * CS + 5, CS + 5);
 }
 
 /* The digits struck in the margin's tally (bit d - 1): those the board holds nine times, clashes
@@ -345,7 +356,8 @@ static void refresh(struct sudoku *s, int mark) {
 static unsigned tally(const struct sudoku *s) {
     unsigned char n[10] = { 0 };
     unsigned m = 0;
-    for (int i = 0; i < 81; ++i) n[(look(s, i) >> 4 & 3) == K_CLASH ? 0 : digit(s, i)]++;
+    for (int i = 0; i < 81; ++i) /* the looks as refresh left them */
+        n[(s->key[i] >> 4 & 3) == K_CLASH ? 0 : s->key[i] >> 6 & 15]++;
     for (int d = 1; d <= 9; ++d) m |= n[d] >= 9 ? (unsigned)bit(d) : 0;
     return m;
 }
@@ -378,7 +390,7 @@ static void sound(struct sudoku *s, int kind, int n) {
 static int started(const struct sudoku *s) { return s->v.sol[0] && !s->v.done; }
 
 static void to(struct sudoku *s, int mode) {
-    s->mode = mode, s->dial = 0, s->hold = 0, s->wave = 0, s->wash = 1, s->wcur = s->v.cur;
+    s->mode = mode, s->dial = 0, s->hold = 0, s->wave = 0, s->wash = 2, s->wcur = s->v.cur;
     eng_dirty_all();
     refresh(s, 0);
     s->side = margin_key(s);
@@ -416,6 +428,7 @@ static void place(struct sudoku *s, int d) {
     shut(s);
     if (!d || s->v.ent[i] == d) return;
     s->v.ent[i] = (unsigned char)d, s->last = d;
+    s->wash = 0; /* this step's wash the peers alone, the new digit's twins the next's */
     for (int j = 0; j < 81; ++j)
         if (peer(s, i, j)) s->v.note[j] &= (unsigned short)~bit(d);
     while (k < 81 && digit(s, k) == s->v.sol[k]) ++k;
@@ -519,14 +532,14 @@ static int step(void *state, const struct eng_input *in) {
         play(s, in);
         if (s->mode == PLAY) {
             if (s->wave && ++s->wt > 9 * S_WAVE + 12) s->wave = 0;
-            /* the old peers' wash off on the cursor's move, the new one's on the next step: no
-             * frame repaints both (docs/games-engine.md#sudoku) */
+            /* the old peers' and twins' wash off on the cursor's move, the new peers' on the next
+             * step and their twins' on the one after: no frame repaints two of them
+             * (docs/games-engine.md#evening-puzzle) */
             if (s->wash && s->wcur != s->v.cur)
                 s->wash = 0;
-            else if (!s->wash)
-                s->wash = 1, s->wcur = s->v.cur;
+            else if (s->wash < 2)
+                s->wash = s->wash + 1, s->wcur = s->v.cur;
             refresh(s, 1);
-            margin(s);
         }
     } else if (s->mode == CHOOSE) {
         int sel = s->sel + in->ticks, tap = in->pressed & ENG_TOUCH && in->ty >= 64 &&
@@ -556,7 +569,7 @@ static int step(void *state, const struct eng_input *in) {
         to(s, CHOOSE);
     }
     if (lift) eng_dirty_all();
-    return s->mode == MAKE || s->runs || s->hold || (s->mode == PLAY && (!s->wash || s->wave));
+    return s->mode == MAKE || s->runs || s->hold || (s->mode == PLAY && (s->wash < 2 || s->wave));
 }
 
 /* A saved puzzle whose solution is a whole grid and whose clues, entries and notes fit it. */
@@ -575,9 +588,47 @@ static int sane(const struct sudoku *s) {
     return !bad;
 }
 
+/* The art's packed masks (tools/game_art.py: each after its x, y and advance, its width and
+ * height, then nibbles, left to right and top to bottom across rows; 1-14 one pixel of that alpha
+ * of 15, 0 and 15 a run, the next nibble n its length less one, or for 15 sixteen times one more
+ * than the nibble after; a mask ends on a whole byte) found and unpacked into span once, at the
+ * game's start: each row as its first inked column and one past its last, then the alphas between,
+ * so a paint walks ink alone. */
+static unsigned nibble(const unsigned char **p, int *k) {
+    unsigned v = **p >> *k & 15;
+    if ((*k ^= 4) == 4) ++*p;
+    return v;
+}
+static void unpack(struct sudoku *s) {
+    const unsigned char *p = art;
+    unsigned at = 0;
+    for (int id = 0; id < A_COUNT; ++id) {
+        unsigned char row[256];
+        int w = p[3], h = p[4], k = 4, n = 0;
+        unsigned a = 0;
+        s->art_at[id] = (unsigned short)(p - art), s->span_at[id] = (unsigned short)at;
+        p += 5;
+        for (int v = 0; v < h; ++v) {
+            int x0 = w, x1 = 0;
+            for (int u = 0; u < w; ++u, --n) {
+                if (!n && (a = nibble(&p, &k), n = 1, !a || a == 15)) {
+                    unsigned r = nibble(&p, &k);
+                    n = r < 15 ? (int)r + 1 : 16 * ((int)nibble(&p, &k) + 1);
+                }
+                if ((row[u] = (unsigned char)a)) x0 = x0 < u ? x0 : u, x1 = u + 1;
+            }
+            x0 = x0 < x1 ? x0 : 0, x1 = x0 < x1 ? x1 : 0;
+            s->span[at] = (unsigned char)x0, s->span[at + 1] = (unsigned char)x1, at += 2;
+            for (int u = x0; u < x1; ++u) s->span[at++] = row[u];
+        }
+        p += !k; /* the last byte's low nibble, unread: the mask's end */
+    }
+}
+
 static void init(void *state, int h) {
     struct sudoku *s = state;
     (void)h; /* the sheet is the whole screen (ENG_FULL) */
+    unpack(s);
     for (int i = 0; i < 81; ++i) {
         int r = i / 9, c = i % 9, b = r / 3 * 3 + c / 3;
         s->of[i][0] = (unsigned char)r, s->of[i][1] = (unsigned char)(9 + c),
@@ -608,6 +659,12 @@ static int cut(const struct eng_surface *sf, int x, int y, int w, int h, int *c)
 static inline unsigned *at(const struct eng_surface *sf, int x, int y) {
     return sf->px + (y + sf->oy) * sf->stride + x + sf->ox;
 }
+/* one pixel at i, j of rgb at a of 256, if it is being painted */
+static void dot(struct eng_surface *sf, int i, int j, unsigned rgb, unsigned a) {
+    if (i < sf->x0 || i >= sf->x1 || j < sf->y0 || j >= sf->y1) return;
+    unsigned *q = at(sf, i, j);
+    *q = a >= 255 ? rgb | 0xff000000 : mix(*q, rgb, a);
+}
 /* eng_fill, four pixels a turn of the loop: on MIPS one a turn costs 6 instructions a pixel, four
  * about 2, and the paper under every paint is most of a frame's pixels. */
 static void fill(struct eng_surface *sf, int x, int y, int w, int h, unsigned rgb) {
@@ -620,43 +677,36 @@ static void fill(struct eng_surface *sf, int x, int y, int w, int h, unsigned rg
         while (p < end) *p++ = rgb;
     }
 }
-/* a box of rgb at alpha of 256 over what is there */
+/* a box of rgb at alpha of 256 over what is there: small (a note's shadow), so a dot at a time */
 static void shade(struct eng_surface *sf, int x, int y, int w, int h, unsigned rgb, unsigned a) {
-    int c[4];
-    if (!cut(sf, x, y, w, h, c)) return;
-    for (int j = c[1]; j < c[3]; ++j)
-        for (unsigned *p = at(sf, c[0], j), *end = p + (c[2] - c[0]); p < end; ++p)
-            *p = mix(*p, rgb, a);
+    for (int j = y; j < y + h; ++j)
+        for (int i = x; i < x + w; ++i) dot(sf, i, j, rgb, a);
 }
-/* A packed mask (tools/game_art.py): its width and height, then nibbles, left to right and top to
- * bottom across rows: 1-14 one pixel of that alpha of 15; 0 and 15 a run, the next nibble its
- * length less one, of clear or solid pixels. An edge pixel is blended where it lands; a run is
- * taken a row's part at a time, clipped once, so clear ones cost nothing a pixel. */
-static void stamp(struct eng_surface *sf, int x, int y, const unsigned char *m, unsigned rgb) {
-    int w = m[0], h = m[1], c[4], u = 0, v = 0, k = 4;
-    if (!cut(sf, x, y, w, h, c)) return;
-    unsigned *line = at(sf, x, y); /* the mask's row v, at its x */
-    m += 2;
+/* Mask id (game_sudoku_art.inc) in rgb, its top left at x, y, from its unpacked rows (unpack): only
+ * a row's inked span is walked, a solid pixel written and an edge one blended. A glyph lies on one
+ * ground but for a fleck or a rule, so the blends of rgb over the last ground met are kept, the
+ * fourteen made again only when the ground changes. */
+static void stamp(const struct sudoku *s, struct eng_surface *sf, int x, int y, int id,
+                  unsigned rgb) {
+    const unsigned char *m = art + s->art_at[id] + 3, *q = s->span + s->span_at[id];
+    int h = m[1], c[4];
+    if (!cut(sf, x, y, m[0], h, c)) return;
+    unsigned ground = 0, over[15];
     rgb |= 0xff000000;
-    while (v < h && y + v < c[3]) {
-        unsigned a = *m >> k & 15;
-        int n = 1;
-        if ((k ^= 4) == 4) ++m;
-        if (a && a < 15) {
-            if (y + v >= c[1] && x + u >= c[0] && x + u < c[2])
-                line[u] = mix(line[u], rgb, a * 17 + (a >> 3));
-            if (++u == w) u = 0, ++v, line += sf->stride;
-            continue;
-        }
-        n += *m >> k & 15;
-        if ((k ^= 4) == 4) ++m;
-        while (n) {
-            int span = w - u < n ? w - u : n, i0 = x + u, i1 = i0 + span;
-            i0 = i0 < c[0] ? c[0] : i0, i1 = i1 > c[2] ? c[2] : i1;
-            if (a && y + v >= c[1])
-                for (unsigned *p = line + (i0 - x), *e = line + (i1 - x); p < e; ++p) *p = rgb;
-            n -= span, u += span;
-            if (u == w) u = 0, ++v, line += sf->stride;
+    for (int v = 0; v < h && y + v < c[3]; q += 2 + q[1] - q[0], ++v) {
+        int x0 = q[0], i0 = x + x0 < c[0] ? c[0] - x : x0, i1 = x + q[1] > c[2] ? c[2] - x : q[1];
+        if (y + v < c[1]) continue;
+        unsigned *p = at(sf, x, y + v);
+        for (const unsigned char *a = q + 2 - x0; i0 < i1; ++i0) {
+            unsigned al = a[i0];
+            if (al == 15)
+                p[i0] = rgb;
+            else if (al) {
+                if (p[i0] != ground)
+                    for (unsigned k = 1, g = ground = p[i0]; k < 15; ++k)
+                        over[k] = mix(g, rgb, k * 17 + (k >> 3));
+                p[i0] = over[al];
+            }
         }
     }
 }
@@ -704,18 +754,13 @@ static void line(struct eng_surface *sf, int x0, int y0, int x1, int y1, int w, 
     for (int i = x0 >> 4; i <= x1 >> 4; ++i) {
         int c = y0 + (dx ? (i * 16 + 8 - x0) * dy / dx : 0);
         for (int j = (c - half - 8) >> 4; j <= (c + half + 8) >> 4; ++j) {
-            int d = j * 16 + 8 - c, a = (half + 8 - (d < 0 ? -d : d)) * 16, px = steep ? j : i,
-                py = steep ? i : j;
-            if (a > 0 && px >= sf->x0 && px < sf->x1 && py >= sf->y0 && py < sf->y1) {
-                unsigned *q = at(sf, px, py);
-                *q = mix(*q, rgb, (unsigned)(a > 256 ? 256 : a));
-            }
+            int d = j * 16 + 8 - c, a = (half + 8 - (d < 0 ? -d : d)) * 16;
+            if (a > 0) dot(sf, steep ? j : i, steep ? i : j, rgb, (unsigned)(a > 255 ? 255 : a));
         }
     }
 }
 
 static const char *const names[LEVELS] = { "Gentle", "Steady", "Sharp" };
-static const char *const heads[LEVELS] = { "GENTLE", "STEADY", "SHARP" };
 
 static char *word(char *out, const char *w) {
     while ((*out = *w++)) ++out;
@@ -737,46 +782,60 @@ static char *clock(char *out, unsigned steps) {
     return num(out, t % 10);
 }
 
-static const unsigned char *glyph(int id) { return art + art_at[id]; }
+static const unsigned char *glyph(const struct sudoku *s, int id) { return art + s->art_at[id]; }
 /* glyph id with its pen at x on the baseline y (nothing drawn without sf); its advance */
-static int put(struct eng_surface *sf, int id, int x, int y, unsigned rgb) {
-    const unsigned char *a = glyph(id);
-    if (sf) stamp(sf, x + (signed char)a[0], y + (signed char)a[1], a + 3, rgb);
+static int put(const struct sudoku *s, struct eng_surface *sf, int id, int x, int y, unsigned rgb) {
+    const unsigned char *a = glyph(s, id);
+    if (sf) stamp(s, sf, x + (signed char)a[0], y + (signed char)a[1], id, rgb);
     return a[2];
 }
 /* glyph id's ink centred on x2, y2, in half pixels */
-static void mid(struct eng_surface *sf, int id, int x2, int y2, unsigned rgb) {
-    const unsigned char *a = glyph(id) + 3;
-    stamp(sf, (x2 - a[0]) >> 1, (y2 - a[1]) >> 1, a, rgb);
+static void mid(const struct sudoku *s, struct eng_surface *sf, int id, int x2, int y2,
+                unsigned rgb) {
+    const unsigned char *a = glyph(s, id) + 3;
+    stamp(s, sf, (x2 - a[0]) >> 1, (y2 - a[1]) >> 1, id, rgb);
 }
-/* t in one of the art's sets (its first glyph and its characters; a space 4 px) on the baseline y:
+/* t in one of the art's sets (its first glyph and its characters; a space 4 px; small letters as
+ * capitals in the capitals' set) on the baseline y:
  * from x (0), centred on it (1) or ending at it (2); its width */
-static int say(struct eng_surface *sf, const char *t, int set, const char *chars, int x, int y,
-               unsigned rgb, int align) {
+static int say(const struct sudoku *s, struct eng_surface *sf, const char *t, int set,
+               const char *chars, int x, int y, unsigned rgb, int align) {
     int w = 0;
-    if (align) x -= say(0, t, set, chars, 0, 0, 0, 0) / (align == 1 ? 2 : 1);
+    if (align) x -= say(s, 0, t, set, chars, 0, 0, 0, 0) / (align == 1 ? 2 : 1);
     for (; *t; ++t) {
-        int k = 0;
-        while (chars[k] && chars[k] != *t) ++k;
-        w += chars[k] ? put(sf, set + k, x + w, y, rgb) : 4;
+        int k = 0, ch = set == A_CAPS && *t >= 'a' ? *t - 32 : *t;
+        while (chars[k] && chars[k] != ch) ++k;
+        w += chars[k] ? put(s, sf, set + k, x + w, y, rgb) : 4;
     }
     return w;
 }
-static int hand(struct eng_surface *sf, const char *t, int x, int y, unsigned rgb, int align) {
-    return say(sf, t, A_HAND, A_HAND_SET, x, y, rgb, align);
+static int hand(const struct sudoku *s, struct eng_surface *sf, const char *t, int x, int y,
+                unsigned rgb, int align) {
+    return say(s, sf, t, A_HAND, A_HAND_SET, x, y, rgb, align);
 }
-static int caps(struct eng_surface *sf, const char *t, int x, int y, unsigned rgb, int align) {
-    return say(sf, t, A_CAPS, A_CAPS_SET, x, y, rgb, align);
+static int caps(const struct sudoku *s, struct eng_surface *sf, const char *t, int x, int y,
+                unsigned rgb, int align) {
+    return say(s, sf, t, A_CAPS, A_CAPS_SET, x, y, rgb, align);
 }
 
-/* A box with round corners: four small eng_rounds for the corners, three fills for the rest (only
- * the corners' squares painted twice), as eng_round's corner test on every pixel of a big box costs
- * more than the frame allows. */
+/* A box with round corners of radius r, 1 to 5: three fills, then each corner's pixels at their
+ * cover of 255 from corner[], for radius r from (r - 1) r (2r - 1) / 6, a row of r at a time from
+ * the box's edge in: a pixel's distance from the corner's centre, a pixel's edge smoothed. */
+static const unsigned char corner[55] = { 208, 112, 240, 240, 255, 0,   160, 255, 160, 255, 255,
+                                          255, 255, 255, 0,   64,  192, 255, 64,  255, 255, 255,
+                                          192, 255, 255, 255, 255, 255, 255, 255, 0,   0,   96,
+                                          208, 255, 0,   144, 255, 255, 255, 96,  255, 255, 255,
+                                          255, 208, 255, 255, 255, 255, 255, 255, 255, 255, 255 };
 static void rbox(struct eng_surface *sf, int x, int y, int w, int h, int r, unsigned rgb) {
-    for (int k = 0; k < 4; ++k)
-        eng_round(sf, k & 1 ? x + w - 2 * r : x, k & 2 ? y + h - 2 * r : y, 2 * r, 2 * r, r, rgb);
+    const unsigned char *t = corner + (r - 1) * r * (2 * r - 1) / 6;
     fill(sf, x + r, y, w - 2 * r, r, rgb), fill(sf, x + r, y + h - r, w - 2 * r, r, rgb);
     fill(sf, x, y + r, w, h - 2 * r, rgb);
+    for (int v = 0; v < r; ++v)
+        for (int u = 0; u < r; ++u) {
+            unsigned a = t[v * r + u];
+            dot(sf, x + u, y + v, rgb, a), dot(sf, x + w - 1 - u, y + v, rgb, a);
+            dot(sf, x + u, y + h - 1 - v, rgb, a), dot(sf, x + w - 1 - u, y + h - 1 - v, rgb, a);
+        }
 }
 /* a box's 2 px pen frame */
 static void frame(struct eng_surface *sf, int x, int y, int w, int h, unsigned rgb) {
@@ -801,9 +860,10 @@ static void paper(struct eng_surface *sf) {
     for (int j = sf->y0; j < sf->y1; ++j) {
         unsigned h = (unsigned)j * 0x9e3779b1u;
         h = (h ^ h >> 15) * 0x85ebca6bu, h ^= h >> 13;
+        unsigned *row = at(sf, 0, j);
         for (int k = 0; k < 4; ++k, h >>= 8)
             if ((int)(h & 511) >= sf->x0 && (int)(h & 511) < sf->x1)
-                fill(sf, (int)(h & 511), j, 1, 1, k ? sty.grain : sty.fleck);
+                row[h & 511] = 0xff000000 | (k ? sty.grain : sty.fleck);
     }
 }
 
@@ -817,9 +877,9 @@ static void cell(const struct sudoku *s, struct eng_surface *sf, int i) {
     if (k & B_TWIN) rbox(sf, x + 2, y + 2, CS - 3, CS - 3, 3, sty.twin);
     if (k & B_CUR) fill(sf, x + 1, y + 1, CS - 1, CS - 1, sty.cursor);
     if (kind == K_CLUE)
-        mid(sf, A_PRINT + d - 1, x2, y2 + 1, sty.ink);
+        mid(s, sf, A_PRINT + d - 1, x2, y2 + 1, sty.ink);
     else if (kind) /* the hand wanders half a pixel */
-        mid(sf, A_PEN + d, x2 + i * 7 % 3 - 1, y2 + i * 5 % 3 - 1,
+        mid(s, sf, A_PEN + d, x2 + i * 7 % 3 - 1, y2 + i * 5 % 3 - 1,
             kind == K_CLASH ? sty.red : sty.pen);
     if (kind == K_CLASH) ring(sf, x2 * 8, y2 * 8, 222, 19, sty.red, 256);
     if (k >> 10 & 1) /* the digit a slip clashes with: underlined twice */
@@ -827,7 +887,7 @@ static void cell(const struct sudoku *s, struct eng_surface *sf, int i) {
             line(sf, x * 16 + 136, y * 16 + 498, x * 16 + 392, y * 16 + 486, 16, sty.red);
     for (int n = 0; n < 9; ++n) /* the notes, each digit in its ninth */
         if (k >> (11 + n) & 1)
-            mid(sf, A_HAND + n + 1, 2 * x + 22 * (n % 3) + 12, 2 * y + 22 * (n / 3) + 12,
+            mid(s, sf, A_HAND + n + 1, 2 * x + 22 * (n % 3) + 12, 2 * y + 22 * (n / 3) + 12,
                 sty.pencil);
 }
 
@@ -862,23 +922,23 @@ static void margins(const struct sudoku *s, struct eng_surface *sf) {
     char t[24];
     if (sf->x0 >= 34 && sf->x1 <= 337) return; /* the paint is the grid's alone */
     int lv = s->mode == MAKE ? s->glevel : s->v.level, f = 180 * s->gpair / 41;
-    mid(sf, A_HEAD, 38, 320, sty.ink);
+    mid(s, sf, A_HEAD, 38, 320, sty.ink);
     fill(sf, 31, 70, 1, 180, s->mode == MAKE ? sty.track : sty.ink);
     if (s->mode == MAKE) fill(sf, 30, 250 - f, 3, f, sty.ink);
     unsigned struck =
         s->mode == MAKE ? 0 : (unsigned)(s->side >> 32) & 0x1ff; /* tally's, at the step */
     for (int d = 1; s->mode != MAKE && d <= 9; ++d) {
         int y2 = 132 + (d - 1) * 308 / 10, out = (unsigned)bit(d) & struck;
-        mid(sf, A_TALLY + d - 1, 712, y2, out ? sty.ruled : sty.soft);
+        mid(s, sf, A_TALLY + d - 1, 712, y2, out ? sty.ruled : sty.soft);
         if (out) line(sf, 350 * 16, y2 * 8 + 40, 362 * 16, y2 * 8 - 40, 21, sty.pen);
     }
     clock(t, s->mode == MAKE ? 0 : s->v.elapsed);
-    hand(sf, t, 356, 218, sty.pen, 1);
+    hand(s, sf, t, 356, 218, sty.pen, 1);
     line(sf, 342 * 16, 222 * 16 + 8, 370 * 16, 221 * 16 + 8, 14, sty.pen);
-    caps(sf, heads[lv], 356, 235, sty.soft, 1);
+    caps(s, sf, names[lv], 356, 235, sty.soft, 1);
     if (s->mode == PLAY && s->v.slips)
         word(num(t, s->v.slips), s->v.slips > 1 ? " slips" : " slip"),
-            hand(sf, t, 356, 256, sty.red, 1);
+            hand(s, sf, t, 356, 256, sty.red, 1);
 }
 
 static void dial(const struct sudoku *s, struct eng_surface *sf) {
@@ -892,7 +952,7 @@ static void dial(const struct sudoku *s, struct eng_surface *sf) {
         if (d == s->pick)
             eng_disc(sf, FX(x) + FX(1) / 2, FX(y) + FX(1) / 2, FX(12), sty.cursor),
                 ring(sf, x * 16 + 8, y * 16 + 8, 189, 24, sty.pen, 256);
-        mid(sf, A_DIAL + d - 1, 2 * x + 1, 2 * y + 1,
+        mid(s, sf, A_DIAL + d - 1, 2 * x + 1, 2 * y + 1,
             out                         ? sty.ruled
             : d == s->pick && s->pencil ? sty.ink
                                         : sty.pen);
@@ -901,23 +961,23 @@ static void dial(const struct sudoku *s, struct eng_surface *sf) {
         if ((unsigned)bit(d) & notes) ring(sf, x * 16 + 8, y * 16 + 8, 200, 16, sty.pencil, 256);
     }
     if (s->pick) /* the hub: the pick in pen, or in pencil over NOTE */
-        mid(sf, A_PEN + s->pick, 2 * cx + 1, 2 * cy + (s->pencil ? -5 : 1),
+        mid(s, sf, A_PEN + s->pick, 2 * cx + 1, 2 * cy + (s->pencil ? -5 : 1),
             s->pencil ? sty.pencil : sty.pen);
-    if (s->pencil) caps(sf, "NOTE", cx, cy + 21, sty.pencil, 1);
+    if (s->pencil) caps(s, sf, "NOTE", cx, cy + 21, sty.pencil, 1);
 }
 
 /* The levels: the puzzle column's head, a card a level (its name, its clues' pattern, its best),
  * the unfinished puzzle clipped under them. */
 static void levels(const struct sudoku *s, struct eng_surface *sf) {
     char t[24];
-    mid(sf, A_TITLE, 375, 60, sty.ink);
+    mid(s, sf, A_TITLE, 375, 60, sty.ink);
     fill(sf, 48, 46, 279, 1, sty.ink), fill(sf, 48, 49, 279, 1, sty.soft);
-    caps(sf, "SUDOKU      A NEW PUZZLE EVERY TIME      ONE SOLUTION", 187, 60, sty.soft, 1);
+    caps(s, sf, "SUDOKU      A NEW PUZZLE EVERY TIME      ONE SOLUTION", 187, 60, sty.soft, 1);
     for (int k = 0; k < LEVELS; ++k) {
         int x = 38 + k * CARD, gx = x + 11;
         if (k == s->sel) /* the highlighter in a pen line: a round box in another */
             rbox(sf, x - 5, 67, 105, 150, 5, sty.pen), rbox(sf, x - 3, 69, 101, 146, 3, sty.cursor);
-        mid(sf, A_NAME + k, 2 * x + 94, 164, sty.ink);
+        mid(s, sf, A_NAME + k, 2 * x + 94, 164, sty.ink);
         for (int q = 0; q <= 9; ++q) /* a thumbnail: the level's share of clues, symmetric */
             fill(sf, gx + 8 * q, 96, 1, 73, q % 3 ? sty.track : sty.ink),
                 fill(sf, gx, 96 + 8 * q, 73, 1, q % 3 ? sty.track : sty.ink);
@@ -926,33 +986,34 @@ static void levels(const struct sudoku *s, struct eng_surface *sf) {
                 if (p = r * 9 + c, p = p > 40 ? 80 - p : p, (p * 17 + k * 11) % 41 < target[k] / 2)
                     fill(sf, gx + c * 8 + 2, 98 + r * 8, 4, 4, sty.ink);
         word(num(t, target[k]), " CLUES");
-        caps(sf, t, x + 47, 183, sty.soft, 1);
+        caps(s, sf, t, x + 47, 183, sty.soft, 1);
         if (s->v.best[k])
             clock(word(t, "best "), s->v.best[k]);
         else
             word(t, "none yet");
-        hand(sf, t, x + 47, 202, sty.pen, 1);
+        hand(s, sf, t, x + 47, 202, sty.pen, 1);
     }
     if (started(s)) {
-        const unsigned char *n = glyph(A_NAME + s->v.level) + 3;
+        const unsigned char *n = glyph(s, A_NAME + s->v.level) + 3;
         sticky(sf, 84, 233, 206, 40, 0);
         rbox(sf, 84, 233, 206, 40, 2, sty.strip);
-        caps(sf, "UNFINISHED", 96, 249, sty.soft, 0);
-        stamp(sf, 96, 261 - n[1] / 2, n, sty.ink);
+        caps(s, sf, "UNFINISHED", 96, 249, sty.soft, 0);
+        stamp(s, sf, 96, 261 - n[1] / 2, A_NAME + s->v.level, sty.ink);
         clock(t, s->v.elapsed);
-        hand(sf, t, 250, 258, sty.pen, 1);
+        hand(s, sf, t, 250, 258, sty.pen, 1);
     }
-    caps(sf, started(s) ? "CENTER: START      PLAY: CONTINUE THE UNFINISHED ONE" : "CENTER: START",
-         187, 296, sty.soft, 1);
+    caps(s, sf,
+         started(s) ? "CENTER: START      PLAY: CONTINUE THE UNFINISHED ONE" : "CENTER: START", 187,
+         296, sty.soft, 1);
 }
 
 /* Solved: the red stamp over the page and the result on a note: the time, the best or "new best!",
  * the level, the way on. */
 static void solved(const struct sudoku *s, struct eng_surface *sf) {
     char t[24];
-    const unsigned char *a = glyph(A_STAMP) + 3;
+    const unsigned char *a = glyph(s, A_STAMP) + 3;
     int x = 187 - a[0] / 2, y = 132 - a[1] / 2;
-    stamp(sf, x, y, a, sty.red);
+    stamp(s, sf, x, y, A_STAMP, sty.red);
     for (int b = 0; b < 16; b += 2) { /* its frame, a thick box and a thin one */
         const short *p = art_frame + b, *q = art_frame + (b & 8) + (b + 2) % 8;
         line(sf, x * 16 + p[0], y * 16 + p[1], x * 16 + q[0], y * 16 + q[1], b < 8 ? 38 : 10,
@@ -960,14 +1021,14 @@ static void solved(const struct sudoku *s, struct eng_surface *sf) {
     }
     sticky(sf, 109, 198, 156, 68, 0);
     clock(t, s->v.elapsed);
-    say(sf, t, A_PEN, "0123456789:", 121, 231, sty.pen, 0);
+    say(s, sf, t, A_PEN, "0123456789:", 121, 231, sty.pen, 0);
     if (s->record)
-        hand(sf, "new best!", 255, 222, sty.red, 2),
+        hand(s, sf, "new best!", 255, 222, sty.red, 2),
             line(sf, 191 * 16, 227 * 16, 255 * 16, 225 * 16, 19, sty.red);
     else
-        clock(word(t, "best "), s->v.best[s->v.level]), hand(sf, t, 255, 222, sty.pen, 2);
-    hand(sf, names[s->v.level], 255, 238, sty.pencil, 2);
-    caps(sf, "CENTER: A NEW PUZZLE", 187, 258, sty.ink, 1);
+        clock(word(t, "best "), s->v.best[s->v.level]), hand(s, sf, t, 255, 222, sty.pen, 2);
+    hand(s, sf, names[s->v.level], 255, 238, sty.pencil, 2);
+    caps(s, sf, "CENTER: A NEW PUZZLE", 187, 258, sty.ink, 1);
 }
 
 static void draw(const void *state, struct eng_surface *sf) {
@@ -979,12 +1040,12 @@ static void draw(const void *state, struct eng_surface *sf) {
         return;
     }
     ring(sf, 322 * 16, 292 * 16, 384, 51, sty.coffee, 32); /* last night's coffee, under the ink */
-    board(s, sf);
+    if (!s->held) board(s, sf);                            /* the blotter hides it all */
     margins(s, sf);
     if (s->mode == MAKE) { /* the generator's card */
         rbox(sf, 118, 140, 139, 40, 3, sty.ink), rbox(sf, 119, 141, 137, 38, 2, sty.strip);
-        caps(sf, "SETTING THE PUZZLE", 187, 156, sty.ink, 1);
-        caps(sf, "ONE SOLUTION, CHECKED", 187, 171, sty.soft, 1);
+        caps(s, sf, "SETTING THE PUZZLE", 187, 156, sty.ink, 1);
+        caps(s, sf, "ONE SOLUTION, CHECKED", 187, 171, sty.soft, 1);
     } else if (s->mode == DONE)
         solved(s, sf);
     else if (s->dial)
@@ -993,7 +1054,7 @@ static void draw(const void *state, struct eng_surface *sf) {
         rbox(sf, GX - 3, GY - 3, 9 * CS + 6, 9 * CS + 6, 5, sty.blot);
         rbox(sf, GX + 4, GY + 4, 9 * CS - 8, 9 * CS - 8, 3, sty.blot_in);
         word(clock(t, s->v.elapsed), " so far");
-        hand(sf, t, 187, 250, sty.cursor, 1);
+        hand(s, sf, t, 187, 250, sty.cursor, 1);
     }
 }
 

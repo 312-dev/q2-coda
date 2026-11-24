@@ -42,13 +42,15 @@ def test_pack_then_unpack_gives_the_mask_back_to_a_fifteenth(seed):
     assert game_art.unpack(data) == (w, h, [round(a * 15 / 255) for a in alpha])
 
 
-def test_a_run_is_at_most_sixteen_and_an_edge_one_nibble():
+def test_a_run_is_fifteen_at_most_or_sixteens_by_its_escape_and_an_edge_one_nibble():
     data = game_art.pack(40, 1, bytes([0] * 40))
-    assert data[2:] == bytes((0x0f, 0x0f, 0x07))  # 16, 16 and 8 clear
+    assert data[2:] == bytes((0x0f, 0x10, 0x70))  # 32 clear by the escape (15, then 1: twice 16), then 8
+    assert game_art.unpack(game_art.pack(150, 2, bytes([255] * 300)))[2] == [15] * 300  # 256 across the rows, then 32 and 12
+    assert game_art.pack(15, 1, bytes([0] * 15))[2:] == bytes((0x0e,))  # 15: no escape
     assert game_art.pack(3, 1, bytes((136, 255, 0)))[2:] == bytes((0x8f, 0x00, 0x00))  # an 8, a run of 1 solid, 1 clear
     assert game_art.pack(1, 1, bytes((119,)))[2:] == bytes((0x70,))  # a lone edge, padded
     with pytest.raises(AssertionError, match='packed whole'):
-        game_art.unpack(bytes((2, 1, 0x0f)))
+        game_art.unpack(bytes((2, 1, 0x0e)))  # a run of 15 in a mask of 2
 
 
 def test_a_glyph_is_its_ink_placed_from_the_pen_on_the_baseline():
@@ -83,15 +85,16 @@ def test_the_sets_are_in_the_order_and_sizes_game_sudoku_reads():
     assert len(frame) == 16 and frame[2] > frame[0] and frame[1] > frame[3]  # its top edge rises to the right
 
 
-def test_source_lists_every_mask_with_its_offset():
+def test_source_lists_every_mask_one_after_another_and_their_unpacked_size():
     groups, frame = inter_sets()
     f = inter()
     text = game_art.source({'hand': f, 'serif': f, 'display': f, 'type': f})
-    found = re.search(r'art_at\[A_COUNT\] = \{ ([^}]*) \}', text)
-    assert found
-    at = [int(v) for v in found.group(1).split(', ')]
     data = [int(v) for v in re.findall(r'\d+', text[text.index('art['):].split('= {', 1)[1])]
-    assert len(at) == sum(len(g) for _, g in groups) and at[0] == 0
+    glyphs = [g for _, gs in groups for g in gs]
+    at = game_art.walk(bytes(data))
+    assert at == [sum(3 + len(g[3]) for g in glyphs[:k]) for k in range(len(glyphs))]  # each found by reading the last
+    spans = re.search(r'#define A_SPAN_BYTES (\d+)', text)
+    assert spans and int(spans[1]) == sum(game_art.span_bytes(g[3]) for g in glyphs)
     first = groups[0][1][0]
     assert bytes(data[:3 + len(first[3])]) == bytes((first[0] & 255, first[1] & 255, first[2])) + first[3]
     assert f'#define A_HAND_SET "{game_art.HAND}"' in text and 'A_STAMP = ' in text

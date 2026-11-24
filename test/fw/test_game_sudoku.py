@@ -30,6 +30,11 @@ REST_MS = 300_000  # the most one rest adds to the time
 SUDOKU = ENGINE + 1  # games.c's screen of the engine's second game
 
 
+_ART = (ROOT/'patch/game_sudoku_art.inc').read_text()
+A_COUNT = int(re.search(r'A_COUNT = (\d+)', _ART)[1])
+A_SPAN_BYTES = int(re.search(r'#define A_SPAN_BYTES (\d+)', _ART)[1])
+
+
 class Solver(C.Structure):
     _fields_ = [('g', C.c_ubyte * 81), ('at', C.c_ubyte * 81), ('used', C.c_ushort * 27), ('left', C.c_ushort * 81),
                 *((k, C.c_int) for k in 'depth down found want n'.split())]
@@ -48,7 +53,8 @@ class Sudoku(C.Structure):
                 ('key', C.c_uint * 81), ('side', C.c_ulonglong), ('sv', Solver), ('rng', C.c_uint),
                 *((k, C.c_int) for k in 'glevel gphase gpair gclues gtries gdeep'.split()), ('gwork', C.c_uint), ('order', C.c_ubyte * 41),
                 ('puz', C.c_ubyte * 81), ('gsol', C.c_ubyte * 81), ('cells', (C.c_ubyte * 9) * 27), ('of', (C.c_ubyte * 3) * 81),
-                ('slip', C.c_int)]
+                ('slip', C.c_int), ('art_at', C.c_ushort * A_COUNT), ('span_at', C.c_ushort * A_COUNT),
+                ('span', C.c_ubyte * A_SPAN_BYTES)]
 
 
 # An independent solver and grader, in Python.
@@ -225,28 +231,15 @@ class Art:
         self.sets = dict(re.findall(r'#define (A_\w+)_SET "([^"]*)"', text))
         size = re.search(r'art\[(\d+)\]', text)
         assert size
-        n, size = self.id['A_COUNT'], int(size.group(1))
-        self.at = list(fw.var('game_sudoku__art_at', C.c_ushort * n))
-        self.data = bytes(fw.var('game_sudoku__art', C.c_ubyte * size))
+        self.data = bytes(fw.var('game_sudoku__art', C.c_ubyte * int(size.group(1))))
+        self.at = game_art.walk(self.data)
+        assert len(self.at) == self.id['A_COUNT']
 
     def glyph(self, k):
         """(x, y, advance, w, h, alpha 0-15)"""
-        d = self.data[self.at[k]:]
-        x, y = C.c_byte(d[0]).value, C.c_byte(d[1]).value
-        w, h, a = game_art.unpack(d[3:5] + self._body(d[3:]))
-        return x, y, d[2], w, h, a
-
-    @staticmethod
-    def _body(d):
-        """a mask's packed nibbles, as many as it takes"""
-        w, h, n, k, out = d[0], d[1], 0, 0, bytearray()
-        nib = [v for b in d[2:] for v in (b >> 4, b & 15)]
-        while n < w * h:
-            if nib[k] in (0, 15):
-                n, k = n + nib[k + 1] + 1, k + 2
-            else:
-                n, k = n + 1, k + 1
-        return bytes(d[2:2 + (k + 1) // 2])
+        d = self.data[self.at[k]:self.at[k + 1] if k + 1 < len(self.at) else len(self.data)]
+        w, h, a = game_art.unpack(d[3:])
+        return C.c_byte(d[0]).value, C.c_byte(d[1]).value, d[2], w, h, a
 
     def mid(self, k, x2, y2):
         """[(k, left, top)]: glyph k's ink centred on x2, y2 in half pixels"""
@@ -317,7 +310,7 @@ def reddish(v):
 def test_a_fresh_game_opens_on_the_levels_and_rests(fw):
     g = Game(fw)
     s = g.s
-    assert g.game.name == b'Evening Puzzle' and g.game.flags == 6 and g.game.size == C.sizeof(Sudoku) <= 2048  # ENG_STILL, ENG_FULL
+    assert g.game.name == b'Evening Puzzle' and g.game.flags == 6 and g.game.size == C.sizeof(Sudoku) <= 24 * 1024  # ENG_STILL, ENG_FULL; 2 KB and the masks unpacked
     assert C.sizeof(Save) == 436 and (s.mode, s.sel) == (CHOOSE, GENTLE)
     assert not g.e['eng_live']()  # the first frame painted; nothing moves: no timer
     assert fw.var('wheel_raw', C.c_int).value == 0  # ticks
@@ -497,8 +490,10 @@ def test_centre_places_the_digit_with_a_tap_and_the_dial_opens_at_the_cells_entr
     assert first == legal(g, i)[0]
     g.step(ticks=1)
     want = s.pick
-    g.press(E_CENTRE)
-    assert s.v.ent[i] == want and s.last == want and not s.dial and g.sounds[-1] in (TAP, ALERT)
+    g.step(held=E_CENTRE, pressed=E_CENTRE)
+    assert s.v.ent[i] == want and s.wash == 1  # the new digit's twins wait a step: not on the note's frame
+    g.step(released=E_CENTRE)
+    assert s.wash == 2 and s.v.ent[i] == want and s.last == want and not s.dial and g.sounds[-1] in (TAP, ALERT)
     g.press(E_CENTRE)
     assert s.pick == want  # its entry
     g.press(E_CENTRE)
@@ -662,7 +657,7 @@ def test_the_board_is_drawn_in_its_inks_and_washes(fw):
     x2, y2 = centre2(2)
     assert art.written(px, art.mid(art.id['A_PRINT'] + SOLVED[2] - 1, x2, y2 + 1), INK)  # a clue, printed
     s.v.cur = 2  # a clue: every other cell holding its digit takes the blue highlighter
-    g.step(), g.step()
+    g.step(), g.step(), g.step()
     px = draw(g)
     like = [i for i in range(81) if i != 2 and (s.v.clue[i] or s.v.ent[i]) == SOLVED[2]]
     assert like and all(at(i, 6, 4) == TWIN for i in like)
@@ -682,13 +677,18 @@ def test_a_cursor_move_takes_the_old_wash_off_then_puts_the_new_one_on_a_frame_l
     assert all(covers(first, box(i)[0], box(i)[1], CS, CS) for i in PEERS[0] | {0, 1})
     assert len(first) <= 9 and all(GX - 2 <= x and x + w <= GX + 9 * CS + 3 for x, _, w, _ in first)
     second = g.frame()
-    assert s.wash and s.wcur == 1  # the new peers' on the next
+    assert s.wash == 1 and s.wcur == 1  # the new peers' on the next
     assert all(covers(second, box(i)[0], box(i)[1], CS, CS) for i in PEERS[1] - PEERS[0])
+    twins = [i for i in range(81) if i != 1 and SOLVED[i] == SOLVED[1] and s.v.clue[i]]
+    assert twins and not any(s.key[i] & B_TWIN for i in twins)
+    third = g.frame()
+    assert s.wash == 2 and all(s.key[i] & B_TWIN for i in twins)  # and their twins' on the one after
+    assert all(covers(third, box(i)[0], box(i)[1], CS, CS) for i in twins) and len(third) == len(twins)
     assert g.frame() == [] and not g.e['eng_live']()  # at rest, nothing
     s.v.ent[:] = [0] * 81
     s.v.clue[:] = half(SOLVED, set(range(81)) - {0, 1, 2, 9})
     s.v.cur = 0
-    g.step(), g.step()
+    g.step(), g.step(), g.step()
     g.page.now += 16
     g.e['frame'](None)
     g.key(NEXT)  # 1 to 2 in row 0 and box 0: the old wash's columns and the two cells
