@@ -204,6 +204,10 @@ void dsp_eq_changed(struct dsp *);
 void dsp_close(struct dsp *, int ended); /* ended: the song played to its end, nobody cut it */
 int dsp_tail_held(void); /* crossfade holds a song's tail for the next one to mix in */
 void dsp_path(struct dsp *, const char *url); /* the song's file, for Smart Crossfade's analysis and plan */
+/* Before a dsp_run: the frame of the song's file its block begins at (source_frames' count), or below 0 when the block
+ * is not the file's own frames in order (a scan). Crossfade reads the tail from the file a second time only for
+ * blocks it can place (tail.c); with no call a block has no place. */
+void dsp_frame(struct dsp *, int64_t frame);
 void dsp_meter(const struct pcm_format *, int untouched, const uint8_t *data, int frames, int uv[2]);
 
 /* smart.c: Smart Crossfade's analysis (docs/internals.md#smart-crossfade), on a thread of its own. smart_begin starts
@@ -223,6 +227,20 @@ struct xf_plan {
 void smart_begin(const char *url, float rg);
 int smart_poll(struct xf_plan *plan);
 void smart_cancel(const char *why);
+
+/* tail.c: the playing song's file opened a second time, from frame on, for crossfade to read its last seconds from
+ * (docs/internals.md#the-tail-from-the-file). f: the first open's format, which the second must match. The open runs
+ * on its own thread: tail_ready answers 0 until it is done, then 1, or -1 when the file is not one whose second decode
+ * can stand for its first (the reason logged). */
+struct tail;
+struct tail *tail_open(const char *url, const struct pcm_format *f, int64_t frame);
+int tail_ready(struct tail *);
+int64_t tail_at(const struct tail *); /* the frame the next read gives */
+/* up to frames of the file's own format into out; how many, fewer only at the file's end or on an error */
+int tail_read(struct tail *, uint8_t *out, int frames);
+/* a block of the first decode that a later tail_read will reach: that read checks itself against it */
+void tail_note(struct tail *, const uint8_t *data, int frames);
+void tail_close(struct tail *);
 
 /* dsd.c: DSD packets made into DoP or Native frames */
 enum { DSD_CHANNELS = 8 };

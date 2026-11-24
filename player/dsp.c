@@ -29,7 +29,21 @@ struct dsp {
     char *url;           /* the song's file (dsp_path), for Smart Crossfade */
     int smart;           /* SMART_*: its analysis not asked, running, planned, or the plain fade */
     struct xf_plan plan; /* the plan, once SMART_PLAN */
+    /* The tail from the file (docs/internals.md#the-tail-from-the-file): the song's second open while it follows the
+     * song, until a hold takes it. */
+    struct tail *rd;
+    int rd_state;          /* RD_* */
+    int rd_ahead;          /* it became level inside the block in hand, and stands at that block's end */
+    int64_t frame;         /* the block in hand's first frame in the file; below 0, it has no place (dsp_frame) */
+    const uint8_t *raw;    /* that block as the decoder gave it */
+    peq_dsp before;        /* the EQ as it stood before the block in hand, kept while the second open is level */
+    int was_muted;         /* and whether the block before it played muted */
+    int mono, swap, mute;  /* the block in hand's settings */
+    int eq_gen;            /* the EQ changes taken (dsp_eq_changed) */
 };
+/* The second open: not asked for; opening, or open and ahead of the song; level with the song, every frame so far
+ * the same; given up, or taken by a hold. */
+enum { RD_NONE, RD_OPEN, RD_LEVEL, RD_OFF };
 
 /* ---- the EQ's filter memory across a gapless change (docs/internals.md#3eq, "Track changes"): the song that
  * played last leaves its settled filter here when it ends within XF_LEAD_S of its length, and the next adopts it on
@@ -87,8 +101,16 @@ static watched xfade_file = {0, ~0u}, mono_file = {0, ~0u}, swap_file = {0, ~0u}
  * docs/internals.md#smart-crossfade) holds what smart.c's plan says: the overlap and the trailing silence after it,
  * which is dropped; the next song loses its leading silence, comes in at full level or over its fade-in, the tail
  * fades out under it, and the sum is kept under XF_CEIL. A plan that is not there in time is the plain fade. */
-#define XF_FLOATS (6u << 18) /* ponytail: 6 MB; 15 s at 48 kHz stereo, 7.5 s at 96, 3.75 s at 192 */
+/* A tail held in memory has a ring of float frames, mapped for the hold at the hold's own size and unmapped when the
+ * mix ends: XF_FLOATS is the most it may be. ponytail: 6 MB; 15 s at 48 kHz stereo, 7.5 s at 96, 3.75 s at 192. A tail
+ * read from the file has no ring and no such limit (XF_FILED_S). */
+#ifndef XF_FLOATS /* test/player/run.py builds a player with a larger one, to compare a long hi-res tail against */
+#define XF_FLOATS (6u << 18)
+#endif
 #define XF_SLACK (1u << 17)  /* room for one block past the held tail */
+#define XF_FILED_S 120u      /* the longest hold of a tail read from the file: beyond any plan */
+#define XF_EVENTS 16         /* changes of the stages' settings a hold remembers for the frames not yet read back */
+#define RD_AHEAD_S 3.0       /* the second open begins this far ahead of the song */
 #define XF_LEAD_S 2.0        /* the hold starts this much early, for the length's whole seconds */
 #define XF_STALE_NS 3000000000LL /* a tail cut short, or a mix, not taken on this soon is dropped */
 #define XF_COLD_NS 30000000000LL /* the same for a tail its file's end left: a cold start */
@@ -98,12 +120,15 @@ static watched xfade_file = {0, ~0u}, mono_file = {0, ~0u}, swap_file = {0, ~0u}
 #define XF_MAX_S 15          /* a smart fade's longest overlap */
 #define XF_CEIL 0.99f        /* a smart mix's highest sample: under full scale */
 #define XF_RELEASE_S 0.05    /* its limiter's recovery, a time constant */
+struct xf_set { int mono, swap, mute; };
 static struct {
-    float *ring;
-    unsigned head, len;           /* frames held from head */
+    float *ring;                  /* NULL while nothing is held in memory */
+    size_t bytes;                 /* its mapping's size */
+    unsigned cap;                 /* its frames */
+    unsigned head, len;           /* frames held from head; of a tail read from the file, those still to read */
     unsigned total, left;         /* the mix: its frames at the next song's rate, and those still to go */
     double pos, step;             /* its read position in the held frames, and held frames per frame out */
-    int out, mixer;               /* the mix's output rate, and the song that mixed last */
+    int out_rate, mixer;          /* the mix's output rate, and the song that mixed last */
     int rate, nch, owner, length; /* the holder's format, song and length when it began */
     int stops;                    /* demo's stop count then: a stop since drops the tail (XF_STOPS) */
     int ended;                    /* the holder's file ended by itself */
@@ -115,7 +140,53 @@ static struct {
     unsigned skip, fade, t;       /* the mix: the next song's frames still to drop, its fade-in's, and those mixed */
     double env, rel;              /* the limiter's gain and its recovery a frame (double: in float it stalls short of 1) */
     int release;                  /* the limiter still recovering after the mix, on the next song alone */
+    /* The tail read from the file (rd set, no ring): the holder's second open, and the holder's stages as they stood
+     * at the frame it has reached, since the frames it gives have not been through them. */
+    struct tail *rd;
+    peq_dsp eq;
+    peq_preset preset;
+    float rg;
+    int unit, is_float;           /* a sample's bytes in the file's format, and whether it is float */
+    struct xf_set set, told;      /* the settings at the frame reached, and those of the holder's newest block */
+    int muted;                    /* the frame before the one reached played muted */
+    uint64_t in, out;             /* frames the hold was given, and frames read back */
+    int64_t next;                 /* the file's frame the holder's next block must begin at */
+    struct xf_event {
+        uint64_t at;              /* from this frame of the hold on */
+        struct xf_set set;
+        int eq;                   /* preset is a new EQ, taken as dsp_eq_changed takes it */
+        peq_preset preset;
+    } ev[XF_EVENTS];
+    unsigned events;
+    int eq_gen;                   /* the holder's eq_gen at its newest block */
+    int said;                     /* a shortfall or an overflow was logged for this tail */
+    uint8_t *file;                /* a read, in the file's format */
+    size_t file_cap;
+    float *win;                   /* the mix's window: held frames from win_lo, as float, after the stages */
+    unsigned win_cap, win_lo, win_n;
 } xf;
+
+/* The tail is over, mixed or dropped: its memory goes back, and a second open is closed. */
+static void tail_drop(void) {
+    if (xf.ring) munmap(xf.ring, xf.bytes);
+    tail_close(xf.rd);
+    free(xf.file);
+    free(xf.win);
+    xf.ring = NULL, xf.rd = NULL, xf.file = NULL, xf.win = NULL;
+    xf.file_cap = 0, xf.win_cap = xf.win_lo = xf.win_n = 0;
+    xf.len = xf.total = 0;
+}
+
+/* A ring for a hold of want frames, and a block more. */
+static int ring_open(unsigned want, int nch) {
+    unsigned most = XF_FLOATS / (unsigned)nch, cap = want + XF_SLACK / (unsigned)nch;
+    if (cap > most) cap = most;
+    size_t bytes = (size_t)cap * nch * sizeof(float);
+    void *p = mmap(0, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (p == MAP_FAILED) return 0;
+    xf.ring = p, xf.bytes = bytes, xf.cap = cap;
+    return 1;
+}
 
 /* n frames between a and the ring's frame at (of cap), into the ring if put: two spans where it wraps. */
 static void ring_copy(float *a, unsigned at, unsigned n, unsigned cap, int nch, int put) {
@@ -143,11 +214,35 @@ static void say(const char *what) {
     plog('I', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
 }
 
-/* The hold a smart fade wants, in frames at rate: the plan's overlap and trail, capped at XF_MAX_S and the ring's
- * room; plain (the plain fade's) until the analysis is asked for, while it is not wanted or failed, and when it came
- * too late for its hold; 0 while it runs, so no hold starts. The analysis starts XF_SMART_LEAD_S from the end, and
- * gives way to the plain fade when not done by the plain hold's start. */
-static unsigned smart_want(struct dsp *s, double pts, int length, int rate, unsigned room, unsigned plain) {
+static void note(const char *what, unsigned long n) {
+    char line[200];
+    int k = snprintf(line, sizeof line, what, n);
+    plog('I', line, k < (int)sizeof line ? k : (int)sizeof line - 1);
+}
+
+/* The song's plan made to fit a hold of room frames: its overlap cut, logged; 0, and the plain fade, when its trail
+ * alone is longer. */
+static int fit(struct dsp *s, unsigned room) {
+    struct xf_plan *p = &s->plan;
+    if (p->trail + s->rate / 10 > (int64_t)room) {
+        say("plain, its trailing silence is longer than the hold");
+        s->smart = SMART_PLAIN;
+        return 0;
+    }
+    if (p->overlap + p->trail > (int64_t)room) {
+        p->overlap = room - p->trail;
+        say("overlap cut to what the hold has room for at this rate");
+    }
+    return 1;
+}
+
+/* The hold a smart fade wants, in frames at rate: the plan's overlap and trail, capped at XF_MAX_S and at room, the
+ * hold's (the ring's, or XF_FILED_S while the tail may be read from the file); plain (the plain fade's) until the
+ * analysis is asked for, while it is not wanted or failed, and when it came too late for its hold; 0 while it runs,
+ * so no hold starts. A plan longer than ring, the ring's own room, that came too late for its hold is cut to the
+ * ring's before it is given up, as it is when there is no second open. The analysis starts XF_SMART_LEAD_S from the
+ * end, and gives way to the plain fade when not done by the plain hold's start. */
+static unsigned smart_want(struct dsp *s, double pts, int length, int rate, unsigned room, unsigned ring, unsigned plain) {
     if (!s->url || s->smart == SMART_PLAIN) return plain;
     if (s->smart == SMART_NONE) {
         if (!(length > 0 && pts >= 0 && pts > length - XF_SMART_LEAD_S)) return plain;
@@ -168,16 +263,12 @@ static unsigned smart_want(struct dsp *s, double pts, int length, int rate, unsi
         }
         struct xf_plan *p = &s->plan;
         if (p->overlap > (int64_t)XF_MAX_S * rate) p->overlap = (int64_t)XF_MAX_S * rate;
-        if (p->trail + rate / 10 > (int64_t)room) {
-            say("plain, its trailing silence is longer than the hold");
-            s->smart = SMART_PLAIN;
-            return plain;
-        }
-        if (p->overlap + p->trail > (int64_t)room) {
-            p->overlap = room - p->trail;
-            say("overlap cut to what the hold has room for at this rate");
-        }
+        if (!fit(s, room)) return plain;
         double at = length - 2.0 * (double)(p->overlap + p->trail) / rate - XF_LEAD_S;
+        if (at > 0 && pts > at && p->overlap + p->trail > (int64_t)ring) {
+            if (!fit(s, ring)) return plain;
+            at = length - 2.0 * (double)(p->overlap + p->trail) / rate - XF_LEAD_S;
+        }
         if (at > 0 && pts > at) {
             say("plain, the analysis came too late for its hold");
             s->smart = SMART_PLAIN;
@@ -186,6 +277,167 @@ static unsigned smart_want(struct dsp *s, double pts, int length, int rate, unsi
         s->smart = SMART_PLAN;
     }
     return (unsigned)(s->plan.overlap + s->plan.trail);
+}
+
+/* ---- the tail from the file (docs/internals.md#the-tail-from-the-file). A hold delays the song by up to the fade's
+ * length while the decoder runs ahead, and the mix then needs the song's last frames: both are the same frames a
+ * little later, so instead of keeping them the chain reads them from the file a second time (tail.c). The second open
+ * begins RD_AHEAD_S ahead of the song; once the song reaches it, each block is compared with the same frames read
+ * there, so it is level with the song and known to give the song's own samples. A hold that begins while it is level
+ * takes it: the first decode still runs ahead to the file's end and through its own stages, which keeps the engine,
+ * the position and the EQ memory handed to the next song as they are, but its frames are only counted and noted
+ * (tail_note); what plays, and what the mix reads, is the second open's frames through a copy of the stages as they
+ * stood at the hold's first frame, with each later change of a setting taken at the frame it came in at. Anything else
+ * (no second open, not level in time, a scan, a seek) is the ring. */
+
+static int ring_only(void) { /* Q2PLAYER_XF_RING: test/player/run.py's player that holds every tail in memory */
+    static int only = -1;
+    if (only < 0) only = getenv("Q2PLAYER_XF_RING") != NULL;
+    return only;
+}
+
+static void floats(float *out, const uint8_t *data, int n, int bytes, int is_float) {
+    if (is_float) memcpy(out, data, (size_t)n * 4);
+    else if (bytes == 2)
+        for (int i = 0; i < n; ++i) out[i] = ((const int16_t *)data)[i] * (1.0f / 32768);
+    else
+        for (int i = 0; i < n; ++i) out[i] = (float)(((const int32_t *)data)[i] * (1.0 / 2147483648.0));
+}
+
+static int grow(struct dsp *s, int frames);
+
+static void reader_off(struct dsp *s, const char *why) {
+    tail_close(s->rd);
+    s->rd = NULL, s->rd_state = RD_OFF;
+    if (why) note(why, 0);
+}
+
+/* The second open's next frames are these of the song's: read into the output's buffer, which the block has not
+ * reached yet. */
+static int same(struct dsp *s, const uint8_t *data, unsigned frames) {
+    size_t unit = (size_t)s->nch * s->bytes;
+    return grow(s, (int)frames) && tail_read(s->rd, s->out, (int)frames) == (int)frames && !memcmp(s->out, data, frames * unit);
+}
+
+/* Before a block's stages: the second open asked for once a fade is set and the song is XF_SMART_LEAD_S from its end,
+ * found level when the song reaches where it began, and given up when the block has no place or is not the next. */
+static void reader_before(struct dsp *s, int said, const uint8_t *data, unsigned frames) {
+    s->raw = data, s->rd_ahead = 0;
+    if (s->rd_state == RD_OFF) return;
+    if (s->rd_state == RD_NONE) {
+        if (s->frame < 0 || !(said & XF_MS) || !s->url || ring_only()) return;
+        if (!(s->length > 0 && s->pts >= 0 && s->pts > s->length - XF_SMART_LEAD_S)) return;
+        struct pcm_format f = {s->rate, s->nch, s->bytes, s->is_float, DSD_PCM};
+        s->rd = tail_open(s->url, &f, s->frame + frames + (int64_t)(RD_AHEAD_S * s->rate));
+        s->rd_state = s->rd ? RD_OPEN : RD_OFF;
+        return;
+    }
+    if (s->frame < 0 || !(said & XF_MS)) { /* a scan, or no fade any more: a fade set again holds its tail in memory */
+        reader_off(s, NULL);
+        return;
+    }
+    if (s->rd_state == RD_OPEN) {
+        int r = tail_ready(s->rd);
+        if (r < 0) reader_off(s, NULL); /* tail.c said why */
+        if (r <= 0) return;
+        int64_t at = tail_at(s->rd);
+        if (at < s->frame) reader_off(s, "q2player: crossfade: the tail held in memory, the second open came after the song had passed it");
+        else if (at < s->frame + frames) { /* the song has reached it: the rest of this block is the same frames */
+            if (same(s, data + (size_t)(at - s->frame) * s->nch * s->bytes, (unsigned)(s->frame + frames - at)))
+                s->rd_state = RD_LEVEL, s->rd_ahead = 1;
+            else reader_off(s, "q2player: crossfade: the tail held in memory, the second open is not at the song's frames");
+        }
+        return;
+    }
+    if (tail_at(s->rd) != s->frame) { /* a seek */
+        reader_off(s, NULL);
+        return;
+    }
+}
+
+/* After a block that no hold took from the second open: the open reads the same frames, and stays level. */
+static void reader_after(struct dsp *s, const uint8_t *data, unsigned frames) {
+    if (s->rd_state == RD_LEVEL && !s->rd_ahead && !same(s, data, frames))
+        reader_off(s, "q2player: crossfade: the tail held in memory, the second decode differs from the first");
+    s->frame = -1;
+}
+
+/* The holder's stages (chain's: ReplayGain, the EQ, Mono Audio, Swap L/R) on n frames read back from the file. */
+static void stages(float *a, unsigned n) {
+    int nch = xf.nch;
+    if (xf.rg != 1)
+        for (unsigned i = 0; i < n * nch; ++i) {
+            float x = a[i] * xf.rg;
+            a[i] = x > 1 ? 1 : x < -1 ? -1 : x;
+        }
+    if (xf.set.mute != xf.muted && !(xf.muted = xf.set.mute)) peq_reset(&xf.eq, xf.rate, nch, &xf.preset);
+    if (!xf.set.mute) peq_process(&xf.eq, a, n);
+    if (xf.set.mono)
+        for (float *p = a, *end = a + 2 * n; p < end; p += 2) p[0] = p[1] = (p[0] + p[1]) * 0.5f;
+    if (xf.set.swap)
+        for (float *p = a, *end = a + 2 * n; p < end; p += 2) {
+            float left = p[0];
+            p[0] = p[1], p[1] = left;
+        }
+}
+
+/* The next n frames of the tail from the file into dst, as float after the holder's stages, each change of a setting
+ * taken at its frame. Frames the file does not give are silence, logged. */
+static void filed(float *dst, unsigned n) {
+    int nch = xf.nch;
+    size_t unit = (size_t)nch * xf.unit;
+    if ((size_t)n * unit > xf.file_cap) {
+        uint8_t *b = realloc(xf.file, (size_t)n * unit);
+        if (b) xf.file = b, xf.file_cap = (size_t)n * unit;
+    }
+    unsigned got = (size_t)n * unit <= xf.file_cap ? (unsigned)tail_read(xf.rd, xf.file, (int)n) : 0;
+    if (got < n && !(xf.said & 1)) xf.said |= 1, note("q2player: crossfade: the file gave %lu frames fewer than the tail held", n - got);
+    floats(dst, xf.file, (int)(got * nch), xf.unit, xf.is_float);
+    memset(dst + (size_t)got * nch, 0, (size_t)(n - got) * nch * sizeof *dst);
+    while (n) {
+        while (xf.events && xf.ev[0].at <= xf.out) {
+            if (xf.ev[0].eq && peq_update(&xf.eq, &xf.ev[0].preset)) xf.preset = xf.ev[0].preset;
+            xf.set = xf.ev[0].set;
+            memmove(xf.ev, xf.ev + 1, --xf.events * sizeof *xf.ev);
+        }
+        unsigned m = xf.events && xf.ev[0].at - xf.out < n ? (unsigned)(xf.ev[0].at - xf.out) : n;
+        stages(dst, m);
+        dst += (size_t)m * nch, n -= m, xf.out += m;
+    }
+}
+
+/* A block given to a hold that reads its tail from the file: a setting that differs from the block before's is
+ * remembered for the frame this block begins at. More than XF_EVENTS waiting: the newest takes the last one's frame. */
+static void told(struct dsp *s) {
+    struct xf_set now = {s->mono, s->swap, s->mute};
+    int eq = s->eq_gen != xf.eq_gen;
+    if (!eq && !memcmp(&now, &xf.told, sizeof now)) return;
+    struct xf_event *e = &xf.ev[XF_EVENTS - 1];
+    if (xf.events == XF_EVENTS) {
+        if (!(xf.said & 2)) xf.said |= 2, note("q2player: crossfade: settings changed more than %lu times in one hold", XF_EVENTS);
+    } else e = &xf.ev[xf.events++], e->at = xf.in, e->eq = 0;
+    e->set = now;
+    if (eq) e->eq = 1, e->preset = s->preset;
+    xf.told = now, xf.eq_gen = s->eq_gen;
+}
+
+/* The held frames lo to hi of a tail read from the file, as float after the stages: frame lo's place. */
+static const float *window(unsigned lo, unsigned hi) {
+    int nch = xf.nch;
+    unsigned have = xf.win_lo + xf.win_n;
+    if (hi >= have) {
+        unsigned drop = lo < have ? lo - xf.win_lo : xf.win_n, add = hi + 1 - have;
+        if (drop) memmove(xf.win, xf.win + (size_t)drop * nch, (size_t)(xf.win_n - drop) * nch * sizeof *xf.win);
+        xf.win_lo += drop, xf.win_n -= drop;
+        if (xf.win_n + add > xf.win_cap) {
+            float *w = realloc(xf.win, (size_t)(xf.win_n + add) * nch * sizeof *w);
+            if (!w) return NULL;
+            xf.win = w, xf.win_cap = xf.win_n + add;
+        }
+        filed(xf.win + (size_t)xf.win_n * nch, add);
+        xf.win_n += add;
+    }
+    return xf.win + (size_t)(lo - xf.win_lo) * nch;
 }
 
 /* Frames of a (interleaved, nch) put out in place: all of them, fewer while the hold fills or a smart mix drops the
@@ -198,7 +450,7 @@ static unsigned crossfade(struct dsp *s, float *a, unsigned frames, int nch, int
         xf.release = xf.env < 1;
     }
     if (!ms && !xf.len) return frames;
-    unsigned cap = XF_FLOATS / (unsigned)nch;
+    unsigned slack = XF_SLACK / (unsigned)nch, ring = XF_FLOATS / (unsigned)nch - slack; /* a ring's longest hold */
     long long now = now_ns();
     double pts = s->pts;
     int mine = xf.len && xf.owner == s->id;
@@ -209,12 +461,12 @@ static unsigned crossfade(struct dsp *s, float *a, unsigned frames, int nch, int
          * Mid-mix, its song's pause only waits; a stop, or a song more than XF_STALE_NS on, drops what is left. A
          * song shorter than the fade hands the rest to the next, retimed at another rate. */
         if (xf.total && (stopped || (s->id != xf.mixer && now - xf.last > XF_STALE_NS)))
-            xf.len = xf.total = 0;
-        else if (xf.total && rate != xf.out) {
+            tail_drop();
+        else if (xf.total && rate != xf.out_rate) {
             double step = (double)xf.rate / rate;
             xf.total = (unsigned)(xf.total * xf.step / step);
             xf.left = (unsigned)((xf.len - xf.pos) / step);
-            xf.step = step, xf.out = rate;
+            xf.step = step, xf.out_rate = rate;
         } else if (!xf.total) {
             if (!stopped && now - xf.last <= (xf.ended ? XF_COLD_NS : XF_STALE_NS)) {
                 if (xf.smart) { /* the trailing silence goes; the next song's side is its own if it is the one planned */
@@ -225,10 +477,10 @@ static unsigned crossfade(struct dsp *s, float *a, unsigned frames, int nch, int
                     xf.env = 1, xf.rel = 1 - exp(-1 / (XF_RELEASE_S * rate)), xf.release = 0;
                     if (!planned) say("the next song is not the one analysed: no skip, no fade-in");
                 }
-                xf.step = (double)xf.rate / rate, xf.pos = 0, xf.out = rate;
+                xf.step = (double)xf.rate / rate, xf.pos = 0, xf.out_rate = rate;
                 xf.total = xf.left = (unsigned)(xf.len / xf.step);
             }
-            if (!xf.total) xf.len = 0;
+            if (!xf.total) tail_drop();
         }
         if (xf.total && xf.skip) { /* the next song's leading silence */
             unsigned d = frames < xf.skip ? frames : xf.skip;
@@ -238,9 +490,15 @@ static unsigned crossfade(struct dsp *s, float *a, unsigned frames, int nch, int
             if (!frames) return 0;
         }
         if (xf.total) {
-            int hn = xf.nch; /* the ring holds the holder's channels */
-            unsigned hcap = XF_FLOATS / (unsigned)hn;
+            int hn = xf.nch; /* the tail is in the holder's channels */
+            unsigned hcap = xf.cap;
             unsigned n = frames < xf.left ? frames : xf.left;
+            /* a tail read from the file: the held frames this block reaches, read now (a frame over for the rounding
+             * of the place as it is stepped) */
+            unsigned lo = (unsigned)xf.pos, hi = (unsigned)(xf.pos + (n ? n - 1 : 0) * xf.step) + 2;
+            if (hi > xf.len - 1) hi = xf.len - 1;
+            const float *win = xf.rd && n ? window(lo, hi) : NULL;
+            if (xf.rd && !win) n = 0; /* no memory for the window: the tail is not mixed */
             /* The gains turn by a fixed angle a frame: exact at each block's start, rotated after, in double (and
              * cos d as 1 - 2 sin^2 d/2) or a long fade's rounding drifts to 1e-4. A smart mix's tail fades out the
              * same way over its own quiet run, and as cos squared over an overlap that begins in its body (in_body),
@@ -252,9 +510,14 @@ static unsigned crossfade(struct dsp *s, float *a, unsigned frames, int nch, int
                 unsigned at = (unsigned)xf.pos, next = at + 1 < xf.len ? at + 1 : at;
                 float frac = (float)(xf.pos - at), fo = (float)(xf.smart && xf.plan.in_body ? out * out : out);
                 float fi = !xf.smart ? (float)in : xf.t < xf.fade ? sinf((xf.t + 0.5f) / xf.fade * 1.5707963f) : 1;
-                if ((at += xf.head) >= hcap) at -= hcap;
-                if ((next += xf.head) >= hcap) next -= hcap;
-                const float *h0 = xf.ring + at * hn, *h1 = xf.ring + next * hn;
+                const float *h0, *h1;
+                if (win) {
+                    h0 = win + (size_t)((at < hi ? at : hi) - lo) * hn, h1 = win + (size_t)((next < hi ? next : hi) - lo) * hn;
+                } else {
+                    if ((at += xf.head) >= hcap) at -= hcap;
+                    if ((next += xf.head) >= hcap) next -= hcap;
+                    h0 = xf.ring + at * hn, h1 = xf.ring + next * hn;
+                }
                 for (int c = 0; c < nch; ++c) {
                     /* stereo under mono is its mean, as Mono Audio's; mono is both sides */
                     int l = hn > nch ? 0 : c % hn, r = hn > nch ? 1 : l;
@@ -268,38 +531,74 @@ static unsigned crossfade(struct dsp *s, float *a, unsigned frames, int nch, int
             if (!(xf.left -= n)) {
                 xf.release = xf.smart && xf.env < 1;
                 for (unsigned i = n; i < frames && xf.release && xf.env < 1; ++i) limit(a + i * nch, nch);
-                xf.len = xf.total = 0;
+                tail_drop();
             }
             xf.last = now, xf.mixer = s->id;
             return frames;
         }
     }
     int length = mine ? xf.length : s->length;
-    unsigned room = cap - XF_SLACK / (unsigned)nch, plain = (unsigned)ms * (unsigned)(rate / 10) / 100;
+    /* a tail read from the file has no ring to fit: this song's hold may be as long as its plan asks */
+    int filed_tail = mine ? xf.rd != NULL : s->rd_state == RD_OPEN || s->rd_state == RD_LEVEL;
+    unsigned room = filed_tail ? XF_FILED_S * (unsigned)rate : ring, plain = (unsigned)ms * (unsigned)(rate / 10) / 100;
     if (plain > room) plain = room;
-    unsigned want = (said & XF_SMART) && ms ? smart_want(s, pts, length, rate, room, plain) : plain;
+    int smart = (said & XF_SMART) && ms;
+    unsigned want = smart ? smart_want(s, pts, length, rate, room, ring, plain) : plain;
     int ending = want && length > 0 && pts >= 0 && pts > length - 2.0 * want / rate - XF_LEAD_S;
     mine = xf.len && xf.owner == s->id;
-    if (mine && (__builtin_fabs(pts - xf.pts) > XF_SEEK_S || xf.len + frames > cap))
-        xf.len = mine = 0; /* a seek: the held audio was left behind */
+    /* a seek: the held audio was left behind. A tail read from the file is also left at any block that is not the
+     * file's next frames (a scan, a seek of any size), as the second open reads on from where the hold began. */
+    if (mine && (__builtin_fabs(pts - xf.pts) > XF_SEEK_S || (xf.rd ? s->frame != xf.next : xf.len + frames > xf.cap)))
+        tail_drop(), mine = 0;
     /* A hold once begun is finished, whatever demo says now: no fade any more only stops it growing, and the next
      * song mixes what is held. Chosen over playing it out: no block runs after the file's end to carry the rest. */
     if (mine && !ms) want = xf.len;
-    if (!mine && (!ending || frames > cap - want || (!xf.ring && !(xf.ring = calloc(XF_FLOATS, sizeof(float))))))
-        return frames;
-    if (!xf.len) {
+    if (mine && !xf.rd && want > xf.cap - slack) want = xf.cap - slack; /* the ring was mapped for the hold it began as */
+    if (!mine) {
+        if (!ending) return frames;
+        int level = s->rd_state == RD_LEVEL && !s->rd_ahead && s->frame >= 0;
+        if (!level) {
+            if (s->rd_state == RD_OPEN || s->rd_state == RD_LEVEL)
+                reader_off(s, "q2player: crossfade: the tail held in memory, the second open was not level when the hold began");
+            if (want > ring) { /* asked of the file: asked again of the ring, whose hold begins later */
+                if (smart && s->smart == SMART_PLAN) fit(s, ring);
+                if (plain > ring) plain = ring;
+                want = smart ? smart_want(s, pts, length, rate, ring, ring, plain) : plain;
+                if (!(want && pts > length - 2.0 * want / rate - XF_LEAD_S)) return frames;
+            }
+            if (frames > slack || !ring_open(want, nch)) return frames;
+            note("q2player: crossfade: the tail held in memory, %lu KB", (unsigned long)(xf.bytes >> 10));
+        }
         xf.head = 0, xf.owner = s->id, xf.rate = rate, xf.nch = nch, xf.length = length;
         xf.stops = said >> XF_STOPS, xf.ended = 0;
         xf.smart = s->smart == SMART_PLAN && want == (unsigned)(s->plan.overlap + s->plan.trail);
         if (xf.smart) xf.trail = (unsigned)s->plan.trail, xf.plan = s->plan;
+        if (level) { /* the second open and the stages as they stood before this block */
+            xf.rd = s->rd, s->rd = NULL, s->rd_state = RD_OFF;
+            xf.eq = s->before, xf.preset = s->preset, xf.rg = s->rg, xf.unit = s->bytes, xf.is_float = s->is_float;
+            xf.set = xf.told = (struct xf_set){s->mono, s->swap, s->mute};
+            xf.muted = s->was_muted, xf.in = xf.out = 0, xf.events = 0, xf.eq_gen = s->eq_gen, xf.said = 0;
+            xf.win_lo = xf.win_n = 0;
+            note("q2player: crossfade: the tail read from the file, nothing held in memory", 0);
+        }
     }
-    ring_copy(a, (xf.head + xf.len) % cap, frames, cap, nch, 1);
-    xf.len += frames;
     unsigned k = (frames + 1) / 2;
-    if (xf.len > want && xf.len - want > k) k = xf.len - want;
-    if (k > frames) k = frames;
-    ring_copy(a, xf.head, k, cap, nch, 0);
-    xf.head = (xf.head + k) % cap;
+    if (xf.rd) { /* the block is counted and noted; what plays is the file's frames from where the hold has got to */
+        told(s);
+        tail_note(xf.rd, s->raw, (int)frames);
+        xf.in += frames, xf.next = s->frame + frames;
+        xf.len += frames;
+        if (xf.len > want && xf.len - want > k) k = xf.len - want;
+        if (k > frames) k = frames;
+        filed(a, k);
+    } else {
+        ring_copy(a, (xf.head + xf.len) % xf.cap, frames, xf.cap, nch, 1);
+        xf.len += frames;
+        if (xf.len > want && xf.len - want > k) k = xf.len - want;
+        if (k > frames) k = frames;
+        ring_copy(a, xf.head, k, xf.cap, nch, 0);
+        xf.head = (xf.head + k) % xf.cap;
+    }
     xf.len -= k;
     xf.last = now;
     xf.pts = pts;
@@ -466,7 +765,7 @@ struct dsp *dsp_open(const struct pcm_format *f, int untouched, float replaygain
     struct dsp *s = calloc(1, sizeof *s);
     if (!s) return NULL;
     s->id = ++ids, s->rate = f->rate, s->nch = f->channels, s->bytes = f->bytes, s->is_float = f->is_float;
-    s->rg = replaygain, s->length = length;
+    s->rg = replaygain, s->length = length, s->frame = -1;
     s->pass = untouched || f->rate < 8000 || f->rate > 384000 || f->channels < 1 || f->channels > PEQ_CHANNELS;
     if (!s->pass) {
         peq_load_active(&s->preset);
@@ -480,7 +779,7 @@ struct dsp *dsp_open(const struct pcm_format *f, int untouched, float replaygain
  * ramp. An unchanged or unreadable state keeps the current filter. */
 void dsp_eq_changed(struct dsp *s) {
     peq_preset p;
-    if (s && !s->pass && peq_load_active(&p) && memcmp(&p, &s->preset, sizeof p) && peq_update(&s->dsp, &p)) s->preset = p;
+    if (s && !s->pass && peq_load_active(&p) && memcmp(&p, &s->preset, sizeof p) && peq_update(&s->dsp, &p)) s->preset = p, ++s->eq_gen;
 }
 
 int dsp_tail_held(void) { return xf.len != 0; }
@@ -489,11 +788,16 @@ void dsp_path(struct dsp *s, const char *url) {
     if (s && !s->url) s->url = strdup(url);
 }
 
+void dsp_frame(struct dsp *s, int64_t frame) {
+    if (s) s->frame = frame;
+}
+
 void dsp_close(struct dsp *s, int ended) {
     if (!s) return;
     if (!s->pass) leave(s);
     if (xf.len && xf.owner == s->id) xf.ended = ended;
     if (s->smart == SMART_RUN) smart_cancel(NULL); /* the song is gone before its plan */
+    tail_close(s->rd); /* a second open no hold took */
     free(s->url);
     free(s->buf);
     free(s->out);
@@ -513,12 +817,7 @@ static int grow(struct dsp *s, int frames) {
 }
 
 static void to_float(const struct dsp *s, const uint8_t *data, int frames) {
-    int n = frames * s->nch;
-    if (s->is_float) memcpy(s->buf, data, (size_t)n * 4);
-    else if (s->bytes == 2)
-        for (int i = 0; i < n; ++i) s->buf[i] = ((const int16_t *)data)[i] * (1.0f / 32768);
-    else
-        for (int i = 0; i < n; ++i) s->buf[i] = (float)(((const int32_t *)data)[i] * (1.0 / 2147483648.0));
+    floats(s->buf, data, frames * s->nch, s->bytes, s->is_float);
 }
 
 /* The one conversion back: round to nearest and saturate, as hciplayer's float-to-integer converters
@@ -543,7 +842,7 @@ int dsp_run(struct dsp *s, const uint8_t *data, int frames, double pts, const ui
     *out = data;
     if (!s || frames <= 0) return frames;
     if (s->pass) {
-        xf.len = xf.total = xf.release = 0; /* DSD or the like plays between: the tail has nothing to mix under */
+        tail_drop(), xf.release = 0; /* DSD or the like plays between: the tail has nothing to mix under */
         cast_tap *cast = cast_live(s->rate, 4096);
         if (cast) cast->dsd = 1; /* played untouched: the app says so */
         last_id = s->id;
@@ -569,9 +868,13 @@ static int chain(struct dsp *s, const uint8_t *data, int frames, double pts, con
     int eq = !s->dsp.current.bypass || s->dsp.ramp || s->dsp.waiting;
     int mono = nch == 2 && watch(&mono_file, MONO_FILE, rate, n), swap = nch == 2 && watch(&swap_file, SWAP_FILE, rate, n);
     int said = watch(&xfade_file, XFADE_FILE, rate, n), fade = xf.len || xf.release || (said & XF_MS);
-    if (!(s->rg != 1 || eq || mono || swap || fade || cast || mute || mute != cs.muted))
+    reader_before(s, said, data, n);
+    if (s->rd_state == RD_LEVEL && !s->rd_ahead) s->before = s->dsp, s->was_muted = cs.muted; /* a hold may begin here */
+    if (!(s->rg != 1 || eq || mono || swap || fade || cast || mute || mute != cs.muted) || !grow(s, frames)) {
+        s->frame = -1;
         return frames; /* nothing to change: the block as it came */
-    if (!grow(s, frames)) return frames;
+    }
+    s->mono = mono, s->swap = swap, s->mute = mute;
     to_float(s, data, frames);
     float *a = s->buf;
     if (s->rg != 1) /* hciplayer's replaygain filter, MPlayer's volume filter: the scale, then a hard clip */
@@ -591,6 +894,7 @@ static int chain(struct dsp *s, const uint8_t *data, int frames, double pts, con
             p[0] = p[1], p[1] = left;
         }
     n = crossfade(s, a, n, nch, rate, said);
+    reader_after(s, data, (unsigned)frames);
     if (cast) cast_tap_block(cast, s, a, n, nch, rate);
     if (mute) memset(a, 0, (size_t)n * nch * 4);
     from_float(s, (int)n);

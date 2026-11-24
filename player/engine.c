@@ -504,9 +504,12 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
             if (n < 0 && __atomic_load_n(&c->cut, __ATOMIC_RELAXED)) continue;
             return ENDED;
         }
+        const uint8_t *read = data;
+        int64_t at = source_frames(s) - n; /* the block's first frame, when it is the file's own (no scan) */
         if (sx) n = stretch_run(sx, data, n, &data);
         int uv[2] = {0, 0}, gone = 0;
         if (n > 0) {
+            dsp_frame(d, !rw.on && data == read ? at : -1);
             n = dsp_run(d, data, n, (double)heard_at(s, sx, &rw, origin, offset) / f->rate, &data);
             if (metering) dsp_meter(f, untouched, data, n, uv);
             int w = output_write(out, data, n);

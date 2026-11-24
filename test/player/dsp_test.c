@@ -29,6 +29,13 @@ int smart_poll(struct xf_plan *p) {
 }
 void smart_cancel(const char *why) { ++smart_cancels; }
 void plog(char level, const char *msg, int n) { fprintf(stderr, "%.*s\n", n, msg); }
+/* tail.c: no file here, so no second open, and every tail is held in memory */
+struct tail *tail_open(const char *url, const struct pcm_format *f, int64_t frame) { return NULL; }
+int tail_ready(struct tail *t) { return -1; }
+int64_t tail_at(const struct tail *t) { return 0; }
+int tail_read(struct tail *t, uint8_t *out, int frames) { return 0; }
+void tail_note(struct tail *t, const uint8_t *data, int frames) {}
+void tail_close(struct tail *t) {}
 
 static peq_preset active(double preamp, double gain) {
     peq_preset p;
