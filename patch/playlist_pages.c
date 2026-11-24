@@ -222,16 +222,22 @@ static void pv_remove(void) {
                           .back = -1,
                           .answer = pv_remove_answer });
 }
-/* ringnav_keylong's Play/Pause hold on the page: a song's whole menu, as a Library song's, with
- * Remove from Playlist (or On-The-Go) last; 1 when it is ours. */
+/* A song row held on the page, by Play/Pause (playlist_page_hold) or Centre (hold_menu.c
+ * qm_centre_hold): a song's whole menu, as a Library song's, with Remove from Playlist (or
+ * On-The-Go) last; 1 when it is on its way, 0 on an action row or another page. */
+int playlist_page_song_hold(void *top) {
+    int at = pv.page && top == pv.page ? widget_get_prop_int(pv.view, SEL, -1) - pv.acts : -1;
+    if (at < 0 || at >= pv_size()) return 0;
+    pv_held = deque_at(pv.songs, (unsigned)at);
+    return qm_song_hold(pv.page, pv.songs, (unsigned)at,
+                        pv.dest == ON_THE_GO ? "Remove from On-The-Go" : "Remove from Playlist",
+                        pv_remove);
+}
+/* ringnav_keylong's Play/Pause hold on the page: a song's menu; 1 when it is ours, an action row's
+ * too (nothing, its release dropped). */
 int playlist_page_hold(void *top) {
     if (!pv.page || top != pv.page) return 0;
-    int at = widget_get_prop_int(pv.view, SEL, -1) - pv.acts;
-    if (at < 0 || at >= pv_size()) return 1; /* an action row: nothing, its release dropped */
-    pv_held = deque_at(pv.songs, (unsigned)at);
-    qm_song_hold(pv.page, pv.songs, (unsigned)at,
-                 pv.dest == ON_THE_GO ? "Remove from On-The-Go" : "Remove from Playlist",
-                 pv_remove);
+    playlist_page_song_hold(top);
     return 1;
 }
 

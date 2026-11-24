@@ -1192,6 +1192,16 @@ void add_songs_search(void *songs); /* search_strip.c: the strip over Add Songs'
 void search_yield(void);    /* search_strip.c: Search's load, if it runs, ended (staged_into) */
 void coverflow_yield(void); /* coverflow.c: a Cover Flow open's step given up (open_yield) */
 int playlist_page_hold(void *top);
+int playlist_page_song_hold(void *top);
+/* hold_menu.c: a song row's hold menu from a held Centre or finger (centre_menu.c) */
+int qm_centre_hold(void *top);
+int qm_touch_hold(void *top, int x, int y);
+/* upnext.c: the same over Up Next's queued song (centre: Playing Next's rows keep their lift) */
+int un_menu_hold(void *top, int centre);
+/* centre_menu.c: Centre's press and release, a finger's raw pointer events (input.c) */
+void cm_keydown(unsigned key);
+int cm_key_release(unsigned key);
+void cm_touch(unsigned type, int x, int y);
 int qm_song_hold(void *page, void *list, unsigned at, const char *extra, void (*pick)(void));
 int otg_count(void);
 void pv_paint(void *w, void *canvas);

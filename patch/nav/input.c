@@ -263,6 +263,7 @@ int ringnav_input(void *wm, void *e) {
         st.touch_y = I(e, EVENT_Y);
         /* a tap on a status row slot (status_row.c), upright: the panel's raw axes are portrait */
         status_touch(type, st.touch_y, 319 - st.touch_x);
+        cm_touch(type, st.touch_x, st.touch_y); /* a finger held on a song row (centre_menu.c) */
     }
     if ((type == EVT_KEY_DOWN || type == EVT_KEY_UP || type == EVT_KEY_LONG) &&
         (key == KEY_PREV || key == KEY_NEXT || key == KEY_CENTER) && usb_prompt()) {
@@ -406,6 +407,7 @@ int ringnav_keydown(void *ctx, void *event) {
     search_strip_down(top, key); /* Return held on a letter strip: its card (search_strip.c) */
     cc_keydown(key);             /* ... on a Control Center stop: its page (control_center.c) */
     un_keydown(key);             /* ... on a queued song in Up Next: it lifts (upnext.c) */
+    cm_keydown(key);             /* ... on a song row: its hold menu (centre_menu.c) */
     unsigned char tone = g_keytone_flag;
     void *row = (void *)0;
     entries_t s = { &row, 0, 1, 4096 };
@@ -726,6 +728,8 @@ int ringnav(void *ctx, void *event) {
     if (usable() && tuner_key(window_manager_get_top_window(window_manager()), key)) return STOP;
     if (usable() && radio_take_back(window_manager_get_top_window(window_manager()), key))
         return STOP;
+    /* the release of the Centre hold that opened a song's menu (centre_menu.c) */
+    if (cm_key_release(key)) return STOP;
     /* the row editors' keys, and the release of the Center hold that entered or left one */
     if (lr_edit_key(window_manager_get_top_window(window_manager()), key, owned)) return STOP;
     /* a grabbed inline slider's keys: the wheel sets it, Centre or Return sets it down */
