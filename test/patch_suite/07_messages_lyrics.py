@@ -1240,8 +1240,9 @@ for action,want in ((0,['A','early','late','B','C']),(1,None)):
     assert m.names()==(want or played_last(m,['early','late'])) and not m.playback() and not m.plays and m.top==m.page
     assert m.query[:2]==('getMusicByAlbum','Album 2') and m.names(m.get(syms['tools_pdeq_directory']))==['staged']; passed()
 m=CoverflowMachine(); m.open(); assert len(m.nodes[m.slide]['children'])==3; passed()  # no Sort or Refresh card to hold
-for kwargs in ({'albums':0},{'cached':False}):
-    m=CoverflowMachine(**kwargs); m.open(); m.press(100); assert m.hold()==0; passed()
+m=CoverflowMachine(albums=0); m.open(); m.press(100); assert m.hold()==0; passed()  # no albums: nothing to hold
+# art still building behind the covers: they are live, and a hold opens the centre cover's menu
+m=CoverflowMachine(cached=False); m.open(); m.press(100); assert m.hold()==11 and m.release()==0 and m.labels()==[*COVER_ALBUM,'Go to Artist']; passed()
 for invalidate in ('selection','closed','tracks'):
     m=CoverflowMachine(); m.open(); m.press(100); assert m.hold()==11; m.release()
     if invalidate=='selection': m.word(m.slide+O['SLIDE_INDEX'],1)
