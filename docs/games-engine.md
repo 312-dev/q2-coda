@@ -208,7 +208,7 @@ Every one is an original game in its genre. None reproduces an Apple iPod game's
 
 The crowded frames' bounds are the brief's own 600,000, which they come close to: TRIO and the star are the frames to watch after a change to the drawing.
 
-EMULATOR_LINE
+In the emulator, 10 s of play (`design/games/balloon-fair/popstall-play.mp4`, `balloon-fair/autopilot.py`: a finger under the lowest ball, Center every 0.3 s), on the same build: 58.6 and 58.4 flips a second with the host's load average near 5.5, none over 34 ms; a third at 56.2, whose three long gaps (134 to 196 ms) are Ready after a miss, the game at rest painting nothing (the frames either side of each were saved and show it). With the load near 7 one capture gave 56.5 flips a second with 10 gaps over 34 ms (the longest 38.6 ms), and with it at 11 to 15, 57.8 (none over 34 ms) and 58.2 (two, the longest 38.9 ms); no long gap was seen at the same moment of play twice. The payload grows by 26,176 bytes over the build it replaces Bricks in (Pop Stall's code and constants, `ENG_FULL`'s handling in `engine.c` and `games.c`, less Bricks' 7,344), of the 28 KB it may add; the root filesystem gains 256,103 bytes (`art.bin` and its notice); the state and art make a heap of 252,700 bytes; no `.scratch`.
 
 ## Libraries
 
