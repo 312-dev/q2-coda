@@ -56,7 +56,7 @@ class Sol(C.Structure):
                                        'best_new deal_left auto_wait seq runs wait'.split()),
                 ('last_ms', C.c_uint), *((k, C.c_int) for k in 'shown_s since_save unsaved nmark all'.split()),
                 ('marks', (C.c_short * 4) * 9),
-                ('tile', C.c_ubyte * 4096), ('felt_lut', C.c_uint * (LAYOUT['ART_LUT_LEVELS'] * 15)), ('back', (C.c_uint * 41) * 56), ('deco_p', ((C.c_uint * 57) * 83) * 5), ('deco_t', ((C.c_ubyte * 57) * 83) * 5),
+                ('tile', C.c_ubyte * 4096), ('shade', C.c_ushort * (LAYOUT['ART_SHADE_W'] * LAYOUT['ART_SHADE_H'])), ('felt_lut', C.c_uint * (LAYOUT['ART_LUT_LEVELS'] * 15)), ('back', (C.c_uint * 41) * 56), ('deco_p', ((C.c_uint * 57) * 83) * 5), ('deco_t', ((C.c_ubyte * 57) * 83) * 5),
                 ('deco_run', ((C.c_ubyte * 4) * 83) * 5), ('deco_tmp', (C.c_uint * 57) * 83),
                 ('file', C.c_uint * (LAYOUT['ART_BYTES'] // 4))]
 

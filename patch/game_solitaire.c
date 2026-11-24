@@ -127,6 +127,7 @@ struct sol {
     int nmark, all;          /* a step's changed rects, joined, then handed to the engine */
     short marks[ENG_RECTS + 1][4];
     unsigned char tile[64 * 64]; /* the fibre steps, as byte offsets into a shade level's colours */
+    unsigned short shade[ART_SHADE_W * ART_SHADE_H]; /* each 4 px cell's level, as a byte offset into felt_lut */
     unsigned felt_lut[ART_LUT_LEVELS * 15];
     unsigned back[CH - 2][CW - 2]; /* the back's pixels inside the edge, 0 where the face shows */
     /* each look's shadows, edges and contact shade round a card, made once from look_layers: a
@@ -448,6 +449,15 @@ static void dirty_slip(struct sol *b) {
     mark(b, SLIP_X0, b->rail, SLIP_X1 - SLIP_X0 + 4, RAIL_H);
 }
 
+/* One of the slip's figures changed: the moves (0) or the time (1), or the whole slip while it shows
+ * a message instead. */
+static void dirty_figure(struct sol *b, int time) {
+    if (b->msg || b->mode != PLAY)
+        dirty_slip(b);
+    else
+        mark(b, time ? 205 : 150, b->rail + 3, time ? SLIP_X1 - 205 : 60, RAIL_H - 3);
+}
+
 /* ---- sound: the Clicker's three, as rhythm ---- */
 
 static void sound(struct sol *b, int kind, int n) {
@@ -611,7 +621,7 @@ static void make(struct sol *b, struct move *m, int back, int from_hand) {
         fly(b, pcard(b, z, len - n + i), z, len - n + i, x0[i], y0[i],
             m->kind == M_DRAW && !back ? 2 * i : 0, GLIDE, 0,
             z >= P_FOUND && z < P_TAB ? F_HOME : 0);
-    dirty_from(b, a, plen(b, a) - 1, fa), dirty_from(b, z, lz - 1, fz), dirty_slip(b);
+    dirty_from(b, a, plen(b, a) - 1, fa), dirty_from(b, z, lz - 1, fz), dirty_figure(b, 0);
     if (m->turned && !back) turn(b, a, plen(b, a) - 1);
 }
 
@@ -635,6 +645,7 @@ static void play_undo(struct sol *b) {
     b->uhead = (b->uhead + UNDO - 1) % UNDO, --b->ucount;
     make(b, &m, 1, 0);
     b->msg = MSG_UNDO, b->msg_t = MSG_FRAMES;
+    dirty_slip(b);
     sound(b, ENG_SFX_TICK, 1);
 }
 
@@ -909,7 +920,7 @@ static void clock(struct sol *b) {
     }
     b->last_ms = now ? now : 1;
     int s = (int)(b->g.time_ms / 1000);
-    if (s != b->shown_s) b->shown_s = s, dirty_slip(b);
+    if (s != b->shown_s) b->shown_s = s, dirty_figure(b, 1);
 }
 
 static int animate(struct sol *b) {
@@ -1060,19 +1071,19 @@ static int clip(const struct eng_surface *s, int x, int y, int w, int h, int *c)
 /* The felt: the fibre tile repeated, shaded by the map's 4 px cells (cards.felt_image), tile steps
  * as byte offsets. */
 static void felt_row(const struct sol *b, const struct eng_surface *s, int j, int i, int end) {
-    const unsigned char *t = b->tile + (j & 63) * 64,
-                        *m = bytes_at(b, ART_SHADE) + (j >> 2) * ART_SHADE_W;
+    const unsigned char *t = b->tile + (j & 63) * 64;
+    const unsigned short *m = b->shade + (j >> 2) * ART_SHADE_W;
     unsigned *p = px(s, i, j);
     for (; i < end && (i & 3); ++i) /* a cell's 4 px from one shade level's colours */
-        *p++ = *(const unsigned *)((const char *)(b->felt_lut + m[i >> 2] * 15) + t[i & 63]);
+        *p++ = *(const unsigned *)(((const char *)b->felt_lut + m[i >> 2]) + t[i & 63]);
     for (; i + 4 <= end; i += 4, p += 4) {
-        const char *lut = (const char *)(b->felt_lut + m[i >> 2] * 15);
+        const char *lut = ((const char *)b->felt_lut + m[i >> 2]);
         const unsigned char *q = t + (i & 63);
         p[0] = *(const unsigned *)(lut + q[0]), p[1] = *(const unsigned *)(lut + q[1]);
         p[2] = *(const unsigned *)(lut + q[2]), p[3] = *(const unsigned *)(lut + q[3]);
     }
     for (; i < end; ++i)
-        *p++ = *(const unsigned *)((const char *)(b->felt_lut + m[i >> 2] * 15) + t[i & 63]);
+        *p++ = *(const unsigned *)(((const char *)b->felt_lut + m[i >> 2]) + t[i & 63]);
 }
 
 /* The felt over x, y, w, h, but for the cover boxes (x0 x1 y0 y1, in x order), which something
@@ -1728,14 +1739,30 @@ static void hand(const struct sol *b, struct eng_surface *s) {
 
 static const struct layer flight_shadow[] = { { L16(4), L16(7), L16(4), L16(7), 80, 100, 0, L_HOLE,
                                                 SHADOW } };
+/* The cards in flight, lowest in their place first; a run's card is drawn down to where the next in
+ * flight above it covers it, as a fan's is. */
 static void flights(const struct sol *b, struct eng_surface *s) {
-    for (int k = 0; k < b->nfl; ++k) {
+    for (int done = 0, last = -1; done < b->nfl; ++done) {
+        int k = -1, x, y, lim = 1 << 20;
+        for (int i = 0; i < b->nfl; ++i) /* the next by place and index */
+            if (b->fl[i].place * 64 + b->fl[i].idx > last &&
+                (k < 0 || b->fl[i].place * 64 + b->fl[i].idx < b->fl[k].place * 64 + b->fl[k].idx))
+                k = i;
         const struct flight *f = &b->fl[k];
-        int x, y;
+        last = f->place * 64 + f->idx;
         if (f->wait) continue;
+        for (int i = 0; i < b->nfl; ++i)
+            if (b->fl[i].place == f->place && b->fl[i].idx == f->idx + 1 && !b->fl[i].wait && b->fl[i].t == f->t) {
+                int nx;
+                flight_xy(&b->fl[i], &nx, &lim);
+                lim += 5;
+            }
         flight_xy(f, &x, &y);
-        layers(s, flight_shadow, 1, x, y, CW, CH);
-        card(b, s, x, y, f->flags & F_DOWN ? f->card & 63 : f->card, C_FLAT, 1 << 20);
+        struct eng_surface sc = *s;
+        if (lim < sc.y1) sc.y1 = lim;
+        if (sc.y1 <= sc.y0) continue;
+        layers(&sc, flight_shadow, 1, x, y, CW, CH);
+        card(b, &sc, x, y, f->flags & F_DOWN ? f->card & 63 : f->card, C_FLAT, 1 << 20);
     }
 }
 
@@ -1744,11 +1771,17 @@ static void flights(const struct sol *b, struct eng_surface *s) {
 static int covers(const struct sol *b, short (*out)[4]) {
     int n = 0;
 #define COVER(x0_, x1_, y0_, y1_) out[n][0] = (short)(x0_), out[n][1] = (short)(x1_), out[n][2] = (short)(y0_), out[n++][3] = (short)(y1_)
+    COVER(0, ENG_W, b->rail, b->h); /* the rail's wood, under nothing else */
     if (b->mode == START) {
+        COVER(27, 27 + CW, 117 + 5, 117 + CH - 5); /* the deck, the board, then the three court cards */
         COVER((ENG_W - BOARD_W) / 2, (ENG_W - BOARD_W) / 2 + BOARD_W, BOARD_Y + 8, BOARD_Y + BOARD_H - 8);
+        COVER(304, 304 + CW, 92 + 5, 92 + CH - 5);
+        COVER(300, 300 + CW, 160 + 5, 160 + CH - 5);
+        COVER(312, 312 + CW, 126 + 5, 126 + CH - 5);
         return n;
     }
     if (b->mode == WON) {
+        for (int k = 0; k < 4; ++k) COVER(colx[3 + k], colx[3 + k] + CW, TOP_Y + 5, TOP_Y + CH - 5); /* the kings */
         if (b->t >= BOARD_AT) COVER(ENG_W / 2 - 116, ENG_W / 2 + 116, WIN_Y - 89 + 8, WIN_Y + 89 - 8);
         return n;
     }
@@ -1777,7 +1810,7 @@ static int covers(const struct sol *b, short (*out)[4]) {
 static void draw(const void *state, struct eng_surface *s) {
     const struct sol *b = state;
     char msg[32];
-    short cover[12][4];
+    short cover[16][4];
     felt(b, s, s->x0, s->y0, s->x1 - s->x0, s->y1 - s->y0, cover, covers(b, cover));
     if (b->mode == START) {
         rail(b, s, "Play: deal", 0, 0);
@@ -1847,9 +1880,8 @@ static void load_art(struct sol *b) {
     for (int i = 0; i < 64 * 64; ++i) b->tile[i] = (unsigned char)((t[i >> 1] >> ((i & 1) << 2) & 15) * 4);
     for (int i = 0; i < ART_SHADE_W * ART_SHADE_H; ++i)
         if (map[i] < ART_LUT_LO || map[i] >= ART_LUT_LO + ART_LUT_LEVELS) b->art = 0;
-    unsigned char *m = (unsigned char *)b->file + ART_SHADE; /* levels from 0 */
-    for (int i = 0; b->art && i < ART_SHADE_W * ART_SHADE_H; ++i)
-        m[i] = (unsigned char)(m[i] - ART_LUT_LO);
+    for (int i = 0; b->art && i < ART_SHADE_W * ART_SHADE_H; ++i) /* a level's colours, as a byte offset */
+        b->shade[i] = (unsigned short)((map[i] - ART_LUT_LO) * 15 * 4);
     const unsigned char *e = bytes_at(b, 4 + 8 * A_BACK), *d; /* the back, its palette's colours */
     unsigned off = (e[0] | e[1] << 8 | e[2] << 16 | (unsigned)e[3] << 24) & 0x7fffffff;
     d = bytes_at(b, (int)off);
