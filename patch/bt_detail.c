@@ -3,8 +3,9 @@
  * held does (bt_ui_hold). The status row names the device; under it the path the sound takes,
  * "Q2 → WH-1000XM5", and its codec line in 14 px Text Tertiary ("LDAC · 96 kHz · 990 kbps", what is
  * known of it, bt_codec_line, or "Not Connected"); then Battery (when the device reports one),
- * Disconnect (Connect, the first row, when it is not connected), Rename and Forget This Device in
- * Negative red.
+ * Disconnect (Connect, the first row, when it is not connected), Volume Limit (its value No Limit or
+ * the limit, opening the slider page, crossfade.c xfade_open 5; bt_vol_limit.c keeps it), Rename and
+ * Forget This Device in Negative red.
  *
  * Disconnect and Connect are stock's own row click on the device (bt_stock_click), so its output
  * switch and its toasts stay stock's. Forget asks on the confirmation card (feedback.c confirm:
@@ -12,7 +13,7 @@
  * pairing removed (handleBluetoothPair: BlueZ's RemoveDevice, which needs no link, so a device out
  * of range goes too), the output back to a jack when it was this device, the list read again; and
  * the saved link (BTLINKMAC) cleared when it names the device, so boot and Bluetooth on do not try
- * it again; the page closes. Rename sets BlueZ's Alias for the device, which its list shows,
+ * it again, and its Volume Limit dropped; the page closes. Rename sets BlueZ's Alias for the device, which its list shows,
  * through the letter strip. */
 #include "navigation.h"
 
@@ -24,14 +25,16 @@
 #define BD_LINE_H 22
 #define BD_NAME_MAX 30 /* a name, as the Q2's own (bt_name.c BT_NAME_MAX) */
 #define BD_VALUE_W 120 /* Battery's value, right-aligned in this much */
-#define BD_ROWS 4
+#define BD_LIMIT_RIGHT 300 /* Volume Limit's value ends here, before the chevron */
+#define BD_ROWS 5
+#define BD_LIMIT_ROW "label_btlimit" /* Volume Limit's value, which the slider page sets (crossfade.c) */
 /* BTLINKMAC: stock's last connected device, [SYSSET] BTLINKMAC in config.ini, 32 bytes at a fixed
  * address (readBtLinkMac fills it, 0x4fa1f0); autoLinkBluetooth connects it at boot and Bluetooth
  * on */
 #define BD_LINK_MAC ((char *)0xa4c0d8)
 #define BD_LINK_MAC_N 32
 
-enum { ROW_BATTERY, ROW_LINK, ROW_RENAME, ROW_FORGET };
+enum { ROW_BATTERY, ROW_LINK, ROW_LIMIT, ROW_RENAME, ROW_FORGET };
 
 static struct {
     void *page, *view, *path, *codec;
@@ -94,6 +97,7 @@ static void fill(void) {
     bd.n = 0;
     if (level >= 0) bd.rows[bd.n++] = ROW_BATTERY;
     bd.rows[bd.n++] = ROW_LINK;
+    bd.rows[bd.n++] = ROW_LIMIT;
     bd.rows[bd.n++] = ROW_RENAME;
     bd.rows[bd.n++] = ROW_FORGET;
     /* where it was, or first Disconnect (Connect): Battery only says */
@@ -115,10 +119,11 @@ static void fill(void) {
     if (!connected() || !bt_codec_line(s, sizeof s)) tk_snprintf(s, sizeof s, "Not Connected");
     widget_set_text_utf8(bd.codec, s);
     for (int i = 0; i < bd.n; ++i) {
-        static const char *const names[] = { "Battery", 0, "Rename", "Forget This Device" };
+        static const char *const names[] = { "Battery", 0, "Volume Limit", "Rename",
+                                             "Forget This Device" };
         const char *caption =
             bd.rows[i] == ROW_LINK ? (connected() ? "Disconnect" : "Connect") : names[bd.rows[i]];
-        void *item = bd.rows[i] == ROW_RENAME
+        void *item = bd.rows[i] == ROW_RENAME || bd.rows[i] == ROW_LIMIT
                          ? page_row_detail_into(bd.view, i, caption, 0, bd_click)
                          : page_row_detail(bd.view, i, caption, 0, bd_click);
         if (bd.rows[i] ==
@@ -129,6 +134,13 @@ static void fill(void) {
             void *v = label(item, right - BD_VALUE_W, 0, BD_VALUE_W, I(item, W_H),
                             "s_scrlabel_white20r", TYPE(20), 0xff000000u | tok(TOK_SECONDARY));
             tk_snprintf(s, sizeof s, "%d%%", level > 100 ? 100 : level);
+            widget_set_text_utf8(v, s);
+        }
+        if (bd.rows[i] == ROW_LIMIT) { /* the value before row_into's chevron (x 302) */
+            void *v = label(item, BD_LIMIT_RIGHT - BD_VALUE_W, 0, BD_VALUE_W, I(item, W_H),
+                            "s_scrlabel_white20r", TYPE(20), 0xff000000u | tok(TOK_SECONDARY));
+            widget_set_name(v, BD_LIMIT_ROW);
+            btlim_text(btlim_get(bd.mac), s, sizeof s);
             widget_set_text_utf8(v, s);
         }
     }
@@ -193,6 +205,7 @@ static void forget(void *ctx, int row, int toggle_on) {
         }
     }
     forget_link(bd.mac);
+    btlim_forget(bd.mac);
     toast("Device Forgotten");
     getSearchResult();
     player_save_start(1);
@@ -240,6 +253,10 @@ static int bd_click(void *ctx, void *event) {
     case ROW_LINK:
         if (dev >= 0) bt_stock_click(dev, 0);
         fill();
+        break;
+    case ROW_LIMIT:
+        btlim_edit(bd.mac);
+        xfade_open((void *)5, 0);
         break;
     case ROW_RENAME:
         search_strip_note("Shows on this Q2");

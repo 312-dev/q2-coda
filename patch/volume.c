@@ -23,26 +23,39 @@ int vol_accel(void) {
     return n < 1 ? 1 : n > VOL_ACCEL_MAX ? VOL_ACCEL_MAX : (int)n;
 }
 /* The volume a wheel tick (KEY_NEXT up, KEY_PREV down) moves to: vol_accel's steps (levels.c
- * wheel_level), up to 100 and g_maxvolume (never down to them from above), down to 0. A change
+ * wheel_level), up to vol_cap (100, Max Volume and a Bluetooth device's Volume Limit,
+ * bt_vol_limit.c; never down to it from above), down to 0. A change
  * starts the bar's ease from where it was (vol_bar). Nothing is set: the caller does, as stock's
  * dialog would. */
 int vol_next(unsigned key) {
-    int v = g_volume, limit = g_maxvolume < 100 ? g_maxvolume : 100;
+    int v = g_volume, limit = vol_cap();
     int to = wheel_level(v, 0, limit, 100, key == KEY_NEXT ? 1 : -1);
     if (to != v) level_ease_from(&vol_bar, v);
     return to;
 }
 /* volume_dialog_on_keyup (HOOKS): a wheel tick takes g_volume to one step short of vol_next's, so
  * stock's own step (its clamps, device_set_volume, the save, slider_vol and the 3 s count) lands on
- * it; every other key is stock's. */
+ * it; every other key is stock's. Stock's step clamps at Max Volume alone, so a tick up at a
+ * Bluetooth device's lower Volume Limit is also set one short, landing on the limit again, and a
+ * limit of 0 is set back after stock's step. */
 int vol_keyup(void *dialog, void *e) {
     unsigned key = e ? (unsigned)I(e, EVENT_KEY) : 0;
     if (key == KEY_NEXT || key == KEY_PREV) {
         /* A dialog left open past the screen-off: its tick goes on to vol_wm_keyup, which drops it
          * dark, as stock's own dialog leaves it (tools/build.py VOL_DARK) */
         if (!g_backlight_status) return 0;
-        int to = vol_next(key);
-        if (to != g_volume) g_volume = (unsigned char)(to + (key == KEY_NEXT ? -1 : 1));
+        int to = vol_next(key), top = vol_cap();
+        if (to != g_volume || (key == KEY_NEXT && to >= top && to > 0 && top < g_maxvolume))
+            g_volume = (unsigned char)(to + (key == KEY_NEXT ? -1 : 1));
+        int r = stock_vol_keyup_trampoline(dialog, e);
+        if (g_volume > top) { /* stock's step past a limit of 0 */
+            g_volume = (unsigned char)top;
+            device_set_volume(top, 1);
+            write_int_config(top, "PLAYSET", "VOLUME");
+            void *slider = widget_lookup(dialog, "slider_vol", 1);
+            if (slider) widget_set_prop_int(slider, "value", top);
+        }
+        return r;
     }
     return stock_vol_keyup_trampoline(dialog, e);
 }

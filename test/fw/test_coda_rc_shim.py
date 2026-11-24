@@ -265,6 +265,21 @@ def test_seek_and_volume(fw, ui, mcl, recs):
     assert q2.ack(keep=True) == b'6 1\n'
 
 
+@pytest.mark.parametrize('way, volume', [(1, 35), (0, 60)])
+def test_volume_stops_at_the_bluetooth_device_s_limit(fw, ui, mcl, recs, way, volume):
+    """Over Bluetooth, at the connected device's Volume Limit too (bt_vol_limit.c); the jack never sees it."""
+    q2 = Q2(fw, ui, recs)
+    fw.var('g_maxvolume', C.c_ubyte).value = 60
+    fw.var('g_bluetoothflag', C.c_ubyte).value = 1
+    fw.mock('mclGetOutputWay', lambda *_: way)
+    fw.mock('getBtLinkSize', lambda *_: 1)
+    fw.mock('getBtLinkItem', lambda i, status, mac, *_: C.memmove(mac, b'AA:BB:CC:DD:EE:01\0', 18) and 0)
+    fw.fn('btlim_set', None, C.c_char_p, C.c_int)(b'AA:BB:CC:DD:EE:01', 35)
+    q2.files[CMD] = b'5 volume 90\n'
+    q2.tick()
+    assert fw.var('g_volume', C.c_ubyte).value == volume and q2.ack(keep=True) == b'5 0\n'
+
+
 def card_route(fw, ui):
     """navigator_to opening stock's sortselect_dialog, as confirm() (feedback.c) asks for its card."""
     def go(name, *_):
