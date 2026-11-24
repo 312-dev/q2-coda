@@ -961,11 +961,12 @@ void ulog(char level, const char *src, const char *msg);
 void ulog_end(const char *why);
 void ulog_flush(void); /* q2guard's logs on the card now, as they are (LocalSend's Send Logs) */
 /* ui_watch.c: the UI pass watchdog (docs/internals.md#ui-pass-watchdog), from ringnav_sleep; a
- * step a long pass may be in, named by its caller (a string constant) */
+ * step a long pass may be in, named by its caller (a string constant); each poll's start, named */
 void ui_watch_enter(void);
 void ui_watch_polled(void);
 void ui_watch_woke(void);
 void ui_watch_step(const char *step);
+void ui_watch_poll(const char *name);
 void cover_wake_poll(void); /* cover_wake.c: the album cover thread woken, every UI loop pass */
 
 /* power_rows.c */

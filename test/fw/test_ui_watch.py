@@ -39,7 +39,7 @@ def test_a_long_pass_is_logged_with_its_step(fw):
     loop.pass_(5, sleep=4000)  # an idle wait, however long, is no work
     assert loop.lines == []
     loop.pass_(340, step=b'stream play')
-    assert loop.lines == [['W', 'ui', 'ui pass 340 ms, step stream play, 0 more late since']]
+    assert loop.lines == [['W', 'ui', 'ui pass 340 ms, step stream play, 0 more late since; events 340 ms, polls 0 ms']]
 
 
 def test_the_polls_count_with_the_work_and_a_pass_just_under_is_quiet(fw):
@@ -48,7 +48,7 @@ def test_the_polls_count_with_the_work_and_a_pass_just_under_is_quiet(fw):
     loop.pass_(100, polls=49)
     assert loop.lines == []
     loop.pass_(100, polls=50)
-    assert loop.lines == [['W', 'ui', 'ui pass 150 ms, step -, 0 more late since']]
+    assert loop.lines == [['W', 'ui', 'ui pass 150 ms, step -, 0 more late since; events 100 ms, polls 50 ms']]
 
 
 def test_a_step_names_only_the_pass_it_was_marked_in(fw):
@@ -67,7 +67,24 @@ def test_lines_are_a_second_apart_the_rest_counted(fw):
     assert len(loop.lines) == 1
     loop.pass_(200, sleep=300)
     loop.pass_(200)
-    assert [l[2] for l in loop.lines] == ['ui pass 200 ms, step -, 0 more late since', 'ui pass 200 ms, step -, 4 more late since']
+    assert [l[2] for l in loop.lines] == ['ui pass 200 ms, step -, 0 more late since; events 200 ms, polls 0 ms',
+                                              'ui pass 200 ms, step -, 4 more late since; events 200 ms, polls 0 ms']
+
+
+# A pass no caller named says which half held it and its longest poll (ringnav_sleep's POLL): the owner's 17 s pass
+# of 2026-11-24 said only "step -".
+def test_an_unnamed_pass_names_its_longest_poll(fw):
+    loop = Loop(fw)
+    poll = fw.fn('ui_watch_poll', None, C.c_char_p)
+    loop.pass_(5)
+    loop.ms += 30
+    loop.enter()
+    for name, ms in ((b'addon_poll', 40), (b'catalogue_poll', 900), (b'np_art_poll', 10)):
+        poll(name)
+        loop.ms += ms
+    loop.polled()
+    assert loop.lines == [['W', 'ui', 'ui pass 980 ms, step -, 0 more late since; events 30 ms, polls 950 ms '
+                                      '(longest catalogue_poll 900 ms)']]
 
 
 def test_nothing_is_logged_while_the_screen_is_dark(fw):
@@ -90,4 +107,4 @@ def test_a_library_list_load_names_its_step(fw, cls, step):
     loop.ms += 400
     fw.fn('ringnav_localclass', C.c_int, C.c_int)(cls)
     loop.pass_(0)
-    assert loop.lines[-1][2] == f'ui pass 400 ms, step {step}, 0 more late since'
+    assert loop.lines[-1][2] == f'ui pass 400 ms, step {step}, 0 more late since; events 400 ms, polls 0 ms'
