@@ -147,11 +147,13 @@ unsigned queue_hash(void *q) {
 }
 
 /* A payload page's own songs held (qm_song_hold): the page, its list, its last row's words and
- * what that row runs. */
+ * what that row runs; play, for a song the queue does not hold yet (qm_far_hold), what its Play
+ * row runs. */
 static struct {
     void *page, *list;
     const char *extra;
     void (*pick)(void);
+    void (*play)(void);
 } qm_held __attribute__((section(".scratch")));
 static int qm_held_on(void *page) {
     return st.qm_kind == QM_COVERFLOW && page && page == qm_held.page;

@@ -1020,6 +1020,11 @@ int search_strip_song_hold(void *top) {
         if (deque_at(list, i) == r) return qm_song_hold(ss.page, list, i, (const char *)0, 0);
     return 0;
 }
+/* Whether the selection is on one of the results (hold_menu.c qm_row_under), not the strip, the
+ * tabs or the query. */
+int search_strip_on_row(void *top) {
+    return ss.page && top == ss.page && ss.focus == SS_ON_LIST && ss.sel >= 0 && ss.sel < ss.nmatch;
+}
 /* A finger held still at the UI point (x, y) (hold_menu.c qm_touch_hold): the result under it,
  * as the list stands, becomes the selection and is held as above; anything else under it (the
  * query, the tabs, the strip) keeps the selection it had. The touch's press is let go here

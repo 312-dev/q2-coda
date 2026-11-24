@@ -17,8 +17,9 @@
  * moment. Centre held on a queued row lifts it onto a raised card, as the Library's Edit Library
  * does (library_edit.c): the wheel carries it among Playing Next's rows, each showing a grip,
  * Centre puts it down there and Return puts it back. The rest of the queue is the queue's own
- * order: no arrow, no lift, and Play/Pause does nothing on it. Centre held on one of its songs, or
- * a finger held on any queued song, opens the song's hold menu (un_menu_hold, centre_menu.c).
+ * order: no arrow, no lift, and Play/Pause does nothing on it. Centre held on one of its songs, on
+ * a played song or on a pending row, or a finger held on any song row, opens the song's hold menu
+ * (un_menu_hold, centre_menu.c).
  * Nothing toasts. Return lets the
  * sheet fall away (un_back, menu_modal.c modal_close), as do a tap on the page above it and a drag
  * down on it (menu_modal.c modal_touch_close).
@@ -88,6 +89,7 @@ static struct {
     unsigned npend;
     unsigned *past, nh; /* a shuffle's played songs above the header, oldest first (heap) */
     unsigned at;        /* the playing song's index the rows were taken at */
+    void **far, *far_list; /* a pending row held: its song's own record, alone in a list (un_far) */
 } un __attribute__((section(".scratch")));
 
 /* A pick that loads a queue (playback.c ringnav_load): where it came from, for "From ...": an
@@ -370,20 +372,51 @@ static void un_remove(void) {
     if (un.page) un_fill(widget_get_prop_int(un.view, SEL, -1));
 }
 
-/* Centre or a finger held on a song's row (hold_menu.c qm_centre_hold, qm_touch_hold): the song's
- * hold menu over the queue, as a playlist page's song gets it (qm_song_hold), at the row's queue
- * index, with Remove from Queue last. Centre (centre) leaves a Playing Next row to its lift
- * (un_keydown); a pending row (a card app's song not yet queued) and the header have none. 1 when
- * the menu is on its way. */
+/* A pending row's held song let go: its list, then its record (the list's row shares its strings) */
+static void un_far_free(void) {
+    if (un.far_list) deque_destroy(un.far_list);
+    addon_pending_free(un.far, un.far ? 1 : 0);
+    un.far = (void **)0, un.far_list = (void *)0;
+}
+
+/* Play on a pending row's menu (qm_far_hold): Now Playing moves to it, as its press does
+ * (un_click) */
+static void un_far_play(void) {
+    void *r = un.far_list && deque_size(un.far_list) ? deque_at(un.far_list, 0) : (void *)0;
+    if (r) addon_pending_play(P(r, REC_PATH));
+    navigator_back();
+}
+
+/* Centre or a finger held on a song's row (hold_menu.c qm_centre_hold, qm_touch_hold,
+ * docs/internals.md#centre-hold-menu): the song's hold menu over the queue, as a playlist page's
+ * song gets it (qm_song_hold), at the row's queue index, with Remove from Queue last, on the
+ * queue's songs and a shuffle's played songs above the playing one alike. Centre (centre) leaves
+ * a Playing Next row to its lift while one is timed (un_keydown; none from a touch). A pending row
+ * (a card app's song not yet queued, no file yet) gets what applies to it (qm_far_hold: Play, as
+ * its press, Sync Offline, Go to), from a record of its own, as the rows are taken again every
+ * second. Clear and the header have none. 1 when the menu is on its way. */
 int un_menu_hold(void *top, int centre) {
     if (!top || top != un.page || un.lifted) return 0;
-    int k = un_place(widget_get_prop_int(un.view, SEL, -1));
+    int stop = widget_get_prop_int(un.view, SEL, -1), k = un_place(stop);
     void *q = P(mcl_pdeqplaylist, 0);
-    if (k < 0 || (unsigned)k >= un.n || (centre && (unsigned)k < un.npn) || !q) return 0;
+    if (!q) return 0;
+    if (stop >= 0 && (unsigned)stop < un.nh) { /* a played song, above the playing one */
+        unsigned at = un.past[stop];
+        return at < deque_size(q) && qm_song_hold(un.page, q, at, "Remove from Queue", un_remove);
+    }
+    if (k < 0 || (unsigned)k >= un.n || (centre && (unsigned)k < un.npn && un.hold)) return 0;
     unsigned at = un.idx[k];
-    if ((at & UN_PEND_ROW) || at >= deque_size(q)) return 0;
     stop_timer(&un.hold);
-    return qm_song_hold(un.page, q, at, "Remove from Queue", un_remove);
+    if (at & UN_PEND_ROW) {
+        void *r = un_record(at);
+        un_far_free();
+        if (!r || !(un.far = addon_pending_one(P(r, REC_PATH)))) return 0;
+        un.far_list = _create_deque("stSongInfo");
+        deque_init(un.far_list);
+        _deque_push_back(un.far_list, un.far[0]);
+        return qm_far_hold(un.page, un.far_list, un_far_play);
+    }
+    return at < deque_size(q) && qm_song_hold(un.page, q, at, "Remove from Queue", un_remove);
 }
 
 /* The lifted row moved to place to of Playing Next: the view's children reordered (the row's
@@ -510,6 +543,7 @@ static int un_closed(void *ctx, void *event) {
     un_unload();
     addon_pending_free(un.pend, un.npend);
     un.pend = (void **)0, un.npend = 0;
+    un_far_free();
     free(un.past);
     un.past = (unsigned *)0, un.nh = 0;
     stop_timer(&un.poll);

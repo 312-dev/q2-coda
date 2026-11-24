@@ -1034,6 +1034,13 @@ static void *pending_record(const char *path) {
     card_record_tags(r);
     return r;
 }
+/* A pending row's song again, a record of its own in a one-row array (addon_pending_free): Up
+ * Next's menu on it keeps it while the rows are taken again (upnext.c un_menu_hold). */
+void **addon_pending_one(const char *path) {
+    void **rows = calloc(1, sizeof *rows);
+    if (rows && !(rows[0] = pending_record(path))) free(rows), rows = 0;
+    return rows;
+}
 void addon_pending_free(void **rows, unsigned n) {
     for (unsigned i = 0; rows && i < n; ++i)
         if (rows[i]) toolsFreeStSongInfo(rows[i]), free(rows[i]); /* its strings, then it */

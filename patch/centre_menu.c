@@ -8,9 +8,17 @@
  * It fires after CENTRE_MENU_MS, half of stock's Centre hold (STOCK_CENTRE_HOLD_MS, the Shut Down?
  * prompt), so a press meant for the menu is let go well before the prompt could come. The press
  * that opens the menu removes stock's hold timer (st.centre_hold), as Edit Library's and Up Next's
- * holds do, so that press never goes on to Shut Down?, however long it is held; the prompt is a
- * fresh Centre hold anywhere but a song row (the open menu included). The release is taken
- * (cm_key_release), so it neither plays the song nor picks the menu's first row.
+ * holds do, so that press never goes on to Shut Down?, however long it is held. The release is
+ * taken (cm_key_release), so it neither plays the song nor picks the menu's first row.
+ *
+ * A row with no menu (an album, an artist, a settings row, a card app's row with no hold op of its
+ * own, Up Next's Clear) gets nothing at CENTRE_MENU_MS, and at CM_GUARD_MS the press's Shut Down?
+ * is let go and its release taken, when nothing else took the press meanwhile (stock's hold still
+ * pending, the window it began on still in front): a hold that began on a row never ends in the
+ * prompt, which the owner read as a misfire. A row is a list's selected row (hold_menu.c
+ * qm_row_under: any list surface the wheel moves on, Search's results, Cover Flow's covers); the
+ * prompt stays a Centre hold where none is under the selection: Now Playing, a page with no list,
+ * Search's letter strip.
  *
  * Centre's hold is timed from its press (cm_keydown) and needs, when it fires, the same press still
  * down with stock's hold still pending: a release, a rim chord (input.c chord_gate ends the hold
@@ -31,21 +39,47 @@
 #define STOCK_CENTRE_HOLD_MS 1000
 #define CENTRE_MENU_MS (STOCK_CENTRE_HOLD_MS / 2)
 #define CM_SLOP 8 /* a finger that moves this far before its hold is a drag (LR_SLOP) */
+/* A hold on a row with no menu lets Shut Down? go this long after its press: after every other
+ * payload hold of Centre (Up Next's lift, Edit Library's and Edit Home's, the tuner's, Control
+ * Center's, all at 550 ms) has had its turn, before stock's own */
+#define CM_GUARD_MS (STOCK_CENTRE_HOLD_MS - 100)
 
 static struct {
     unsigned hold, at;  /* Centre's hold timer and the press it times (chord_gate's centre_at) */
     unsigned touch;     /* the finger's */
     int x, y;           /* where the finger landed, in the UI's coordinates */
-    unsigned char held; /* a Centre hold opened the menu: its release is taken */
+    unsigned char held; /* a Centre hold opened the menu, or was let go on a row: its release taken */
+    void *top;          /* the window the press began on */
 } cm __attribute__((section(".scratch")));
+
+/* Stock's own hold, Shut Down?, removed: this press never reaches it, and its release is taken */
+static void cm_take(void) {
+    timer_remove(st.centre_hold);
+    st.centre_hold = 0;
+    cm.held = 1;
+}
+
+/* The same press still down on the window it began on, nothing having taken stock's hold since */
+static int cm_still(void *top) {
+    return st.centre_hold && st.centre_at == cm.at && usable() && top == cm.top;
+}
+
+/* CM_GUARD_MS on, a press on a row with no menu that nothing else took: its Shut Down? let go */
+static int cm_guard_due(const void *unused) {
+    cm.hold = 0;
+    void *top = window_manager_get_top_window(window_manager());
+    if (cm_still(top) && qm_row_under(top)) cm_take();
+    return 0;
+}
 
 static int cm_centre_due(const void *unused) {
     cm.hold = 0;
-    if (!st.centre_hold || st.centre_at != cm.at || !usable()) return 0;
-    if (!qm_centre_hold(window_manager_get_top_window(window_manager()))) return 0;
-    timer_remove(st.centre_hold); /* stock's own hold, Shut Down?, never comes */
-    st.centre_hold = 0;
-    cm.held = 1;
+    void *top = window_manager_get_top_window(window_manager());
+    if (!cm_still(top)) return 0;
+    if (qm_centre_hold(top))
+        cm_take();
+    else if (qm_row_under(top)) /* a row with no menu: nothing now, and no Shut Down? later */
+        cm.hold = timer_add(cm_guard_due, (void *)0, CM_GUARD_MS - CENTRE_MENU_MS);
     return 0;
 }
 
@@ -55,10 +89,12 @@ void cm_keydown(unsigned key) {
     if (cm.held && st.centre_at != cm.at) cm.held = 0; /* a release that never came */
     if (cm.hold || cm.held || !st.centre_at || st.center_timer || !usable()) return;
     cm.at = st.centre_at;
+    cm.top = window_manager_get_top_window(window_manager());
     cm.hold = timer_add(cm_centre_due, (void *)0, CENTRE_MENU_MS);
 }
 
-/* input.c ringnav's key filter: 1 for the release of the Centre hold that opened the menu. */
+/* input.c ringnav's key filter: 1 for the release of the Centre hold that opened the menu or was
+ * let go on a row (cm_take). */
 int cm_key_release(unsigned key) {
     if (key != KEY_CENTER) return 0;
     stop_timer(&cm.hold);
