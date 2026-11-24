@@ -821,14 +821,37 @@ def synth(path, seconds, level, rate=44100, channels=2, hz=None):
     return path
 
 
+B_SECONDS = 55  # each B: over XF_SMART_LEAD_S long, so its own change's analysis is not asked for before demo's word
+                # for it (0, the queue's end) is there
+
+
 def smart_songs(d, rate_b=44100, channels_b=2, b_level=None):
-    """A: a 440 Hz tone at half scale for 16 s, a 6 s linear fade to nothing, 2 s of silence. B: 1.5 s of silence,
-    then a 660 Hz tone at half scale from its first frame (a hard start), 43.5 s of it: over XF_SMART_LEAD_S long, so
-    its own change's analysis is not asked for before demo's word for it (0, the queue's end) is there."""
+    """A: a 440 Hz tone at half scale for 16 s, a 6 s linear fade to nothing (its part 12 dB under the tone 1.5 s
+    long), 2 s of silence: shorter than the 30 s measured. B: 1.5 s of silence, then a 660 Hz tone at half scale from
+    its first frame (a hard start), B_SECONDS in all."""
     d.mkdir(parents=True, exist_ok=True)
     a = synth(d/'sa.flac', 24, lambda t: 0.5 if t < 16 else max(0.0, 0.5 * (1 - (t - 16) / 6)) if t < 22 else 0.0)
-    b = synth(d/'sb.flac', 45, b_level or (lambda t: 0.0 if t < 1.5 else 0.5), rate=rate_b, channels=channels_b, hz=660)
+    b = synth(d/'sb.flac', B_SECONDS, b_level or (lambda t: 0.0 if t < 1.5 else 0.5), rate=rate_b, channels=channels_b, hz=660)
     return a, b
+
+
+def hard_end(d):
+    """A 440 Hz tone at half scale for 40 s, to its last frame: no quiet run at all."""
+    d.mkdir(parents=True, exist_ok=True)
+    return synth(d/'sa_hard.flac', 40, lambda t: 0.5)
+
+
+def soft_intro(d, seconds):
+    """B: 1 s of silence, seconds of a 660 Hz tone at 0.04 (22 dB under what follows: a soft intro), then the tone at
+    half scale, B_SECONDS in all."""
+    d.mkdir(parents=True, exist_ok=True)
+    return synth(d/f'sb_intro{seconds}.flac', B_SECONDS, lambda t: 0.0 if t < 1 else 0.04 if t < 1 + seconds else 0.5, hz=660)
+
+
+def long_fade(d):
+    """A: a 440 Hz tone at half scale for 10 s, then a 25 s fade of 2 dB a second (50 dB in all) to its end."""
+    d.mkdir(parents=True, exist_ok=True)
+    return synth(d/'sa_fade25.flac', 35, lambda t: 0.5 if t < 10 else 0.5 * 10 ** (-2 * (t - 10) / 20))
 
 
 def windows(x, channels, w, from_end):
@@ -845,24 +868,30 @@ def windows(x, channels, w, from_end):
 
 def smart_plan(a, b, ca=2, cb=2, ra=44100, rb=44100):
     """smart.c's rules, written again here from docs/internals.md#smart-crossfade: (overlap, trail, skip, fade) in
-    frames."""
+    frames, and what decided the overlap ('out run', 'next intro' or 'floor')."""
     wa, wb = ra // 20, rb // 20
-    tail = windows(a, ca, wa, True)[:400]
-    head = windows(b[:cb * 15 * rb], cb, wb, False)[:300]
+    tail = windows(a, ca, wa, True)[:600]
+    head = windows(b[:cb * 30 * rb], cb, wb, False)[:600]
     body = sorted(tail)[(len(tail) - 1) // 2]
     loud = max(-60, body - 45)
     te = next(k for k, v in enumerate(tail) if v > loud)
     run = te
     while run < len(tail) and tail[run] < body - 12: run += 1
-    quiet_ms = (run - te) * 50
-    overlap = (run - te) * wa if 1000 <= quiet_ms <= 15000 and run < len(tail) else ra * 5
+    out = (run - te) * wa if run < len(tail) else 0  # a run that starts inside the span
     skip = 0
     while skip < len(head) and skip * 50 < 5000 and head[skip] < -60: skip += 1
     bb = sorted(head)[(len(head) - 1) // 2]
+    after = head[skip + 300:]  # 15 s on from the first sound
+    ref = sorted(after)[(len(after) - 1) // 2] if len(after) >= 100 else bb
+    intro = skip
+    while intro < len(head) and head[intro] < ref - 10: intro += 1
+    intro = (intro - skip) * 50 * ra // 1000
+    floor = 5 * ra
+    overlap, why = (out, 'out run') if out >= intro and out >= floor else (intro, 'next intro') if intro >= floor else (floor, 'floor')
     start = max(head[skip:skip + 4])
     gap = bb - 6 - start
     fade_ms = 300 + int(700 * min(1, gap / 14)) if gap > 0 else 0
-    return overlap, te * wa, skip * wb, rb * fade_ms // 1000
+    return min(overlap, 15 * ra), te * wa, skip * wb, rb * fade_ms // 1000, why
 
 
 def smart_scenario(a, b, gapless_at=12.0, end=80.0, word=SMART, next_text=None):
@@ -888,40 +917,72 @@ def smart_play(player, songs, out, steps, speed=8, env=None, exits=2):
 
 def check_smart(a, b, names, got, log):
     """got is a's and b's smart crossfade by smart_plan's rules: a exact up to out_point, then b from its first sound
-    mixed with a's quiet end (b at full level, no fade-in: a hard start; a fading out, cos), a's trailing silence never
-    played, then b exact; no step at either end of the overlap; one PCM. The plan and the largest step off."""
+    (at full level, or over its fade-in as sin) mixed with a's end fading out, as cos over its own quiet run and as cos
+    squared over an overlap longer than that run (the next intro's or the floor's, which starts in a's body), a's
+    trailing silence never played, then b exact; no step at either end of the overlap; one PCM; the plan's log line
+    naming what decided the overlap. The plan and the largest step off."""
     A, B, Y = (array.array('h', x) for x in (reference(a), reference(b), got))
-    overlap, trail, skip, fade = smart_plan(A, B)
-    assert fade == 0 and skip == 66150 and 44100 <= overlap <= 3 * 44100, (overlap, trail, skip, fade)
+    overlap, trail, skip, fade, why = plan = smart_plan(A, B)
     na, nb, ny = len(A) // 2, len(B) // 2, len(Y) // 2
     cut = na - trail - overlap  # out_point
     assert names == ['0000_44100_2_s16.raw'], names
-    assert 'smart crossfade: body' in log, log[-2000:]
-    assert ny == cut + nb - skip, f'{ny} frames, expected {cut + nb - skip} (plan {overlap, trail, skip, fade}): {log[-1500:]}'
+    assert f'overlap {overlap / 44100:.2f} s by the {why}' in log, f'{plan}: {log[-2000:]}'
+    assert ny == cut + nb - skip, f'{ny} frames, expected {cut + nb - skip} (plan {plan}): {log[-1500:]}'
     assert Y[:2 * cut] == A[:2 * cut], f'A before out_point, first difference at frame {first_difference(Y[:2 * cut].tobytes(), A[:2 * cut].tobytes()) // 4}'
     worst = 0
     for k in range(overlap):
-        go = math.cos((k + 0.5) / overlap * math.pi / 2)
+        go = math.cos((k + 0.5) / overlap * math.pi / 2) ** (1 if why == 'out run' else 2)
+        gi = math.sin((k + 0.5) / fade * math.pi / 2) if k < fade else 1
         for c in (0, 1):
-            want = B[2 * (skip + k) + c] + A[2 * (cut + k) + c] * go
+            want = B[2 * (skip + k) + c] * gi + A[2 * (cut + k) + c] * go
             worst = max(worst, abs(Y[2 * (cut + k) + c] - want))
-    assert worst <= 2, f'the overlap is {worst} steps from B + A cos'
+    assert worst <= 2, f'the overlap is {worst} steps from B + A by the {why} (plan {plan})'
     assert Y[2 * (cut + overlap):] == B[2 * (skip + overlap):], 'B after the overlap'
     def step(i): return max(abs(Y[2 * i + c] - Y[2 * (i - 1) + c]) for c in (0, 1))
     around = max(max(step(i) for i in range(cut - 50, cut - 1)), max(step(i) for i in range(cut + overlap + 2, cut + overlap + 50)))
     assert step(cut) <= around and step(cut + overlap) <= around, (step(cut), step(cut + overlap), around)
-    return (overlap, trail, skip, fade), worst
+    return plan, worst
+
+
+def smart_case(player, songs, tmp, name, a, b, want):
+    """A into B, smart: check_smart's output, the plan as want(plan) asserts; a line saying what played."""
+    s, names, got, log = smart_play(player, songs, tmp/name, smart_scenario(a, b))
+    plan, worst = check_smart(a, b, names, got, log)
+    overlap, trail, skip, fade, why = plan
+    assert want(plan), plan
+    cpu = re.findall(r'analysis took (\d+) ms of CPU', log)
+    return (f'plan {overlap / 44100:.2f} s overlap by the {why}, {trail / 44100:.2f} s trail, {skip / 44100:.2f} s skipped, '
+            f'fade-in {fade * 1000 // 44100} ms, as the reference; A exact to out_point, the overlap within {worst:.1f} steps, '
+            f'B exact after; analysis {cpu} ms CPU')
 
 
 def test_smart_crossfade(player, songs, tmp):
-    """A fades out into silence, B starts hard after 1.5 s of silence: the plan is the reference's (its rules written
-    again in Python over the reference decodes) and the output check_smart's."""
+    """A fades out into silence, its quiet run 1.5 s, B starts hard after 1.5 s of silence: the overlap is the 5 s
+    floor, the plan the reference's (its rules written again in Python over the reference decodes) and the output
+    check_smart's."""
     a, b = smart_songs(tmp/'smart')
-    s, names, got, log = smart_play(player, songs, tmp/'smart/run', smart_scenario(a, b))
-    (overlap, trail, skip, fade), worst = check_smart(a, b, names, got, log)
-    cpu = re.findall(r'analysis took (\d+) ms of CPU', log)
-    return (f'plan {overlap / 44100:.2f} s overlap, {trail / 44100:.2f} s trail, {skip / 44100:.2f} s skipped, no fade-in, '
-            f'as the reference; A exact to out_point, the overlap within {worst:.1f} steps, B exact after; analysis {cpu} ms CPU')
+    return smart_case(player, songs, tmp, 'smart/run', a, b,
+                      lambda p: p[4] == 'floor' and p[0] == 5 * 44100 and p[2] == 66150 and p[3] == 0)
+
+
+def test_smart_crossfade_intro(player, songs, tmp):
+    """A loud to its last frame, B a 10 s soft intro after 1 s of silence: the overlap is the intro, 10 s, B's intro
+    under A's last 10 s, B faded in (its start 22 dB under its body)."""
+    a, b = hard_end(tmp/'smartintro'), soft_intro(tmp/'smartintro', 10)
+    return smart_case(player, songs, tmp, 'smartintro/run', a, b,
+                      lambda p: p[4] == 'next intro' and p[0] == 10 * 44100 and p[1] == 0 and p[2] == 44100 and p[3] == 44100)
+
+
+def test_smart_crossfade_cap(player, songs, tmp):
+    """A loud to its last frame, B a 20 s soft intro: the overlap is 15 s, XF_MAX_S, the rest of the intro B's own."""
+    a, b = hard_end(tmp/'smartcap'), soft_intro(tmp/'smartcap', 20)
+    return smart_case(player, songs, tmp, 'smartcap/run', a, b, lambda p: p[4] == 'next intro' and p[0] == 15 * 44100)
+
+
+def test_smart_crossfade_long_fade(player, songs, tmp):
+    """A fades for its last 25 s, all of it inside the 30 s measured, B hard: A's quiet run is the overlap, over 8 s."""
+    a, b = long_fade(tmp/'smartfade'), smart_songs(tmp/'smartfade')[1]
+    return smart_case(player, songs, tmp, 'smartfade/run', a, b, lambda p: p[4] == 'out run' and p[0] > 8 * 44100)
 
 
 def test_smart_crossfade_starved(player, songs, tmp):
@@ -947,8 +1008,8 @@ def test_smart_crossfade_starved(player, songs, tmp):
         assert len(lines) == 1, lines
         worst = check_plain(*(array.array('h', x) for x in (reference(a), reference(b), got)), 5 * 44100)
         return f'the plain fade, whole (within {worst:.1f} steps), logged: {lines[0].split("q2player: ")[-1]}'
-    (overlap, *_), worst = check_smart(a, b, names, got, log)
-    return f'the smart fade, whole: {overlap / 44100:.2f} s overlap within {worst:.1f} steps, on one core shared with two busy loops'
+    (overlap, *_, why), worst = check_smart(a, b, names, got, log)
+    return f'the smart fade, whole: {overlap / 44100:.2f} s overlap by the {why} within {worst:.1f} steps, on one core shared with two busy loops'
 
 
 def check_plain(A, B, Y, h):

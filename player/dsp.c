@@ -93,7 +93,8 @@ static watched xfade_file = {0, ~0u}, mono_file = {0, ~0u}, swap_file = {0, ~0u}
 #define XF_STALE_NS 3000000000LL /* a tail cut short, or a mix, not taken on this soon is dropped */
 #define XF_COLD_NS 30000000000LL /* the same for a tail its file's end left: a cold start */
 #define XF_SEEK_S 1.5        /* a position jump this large while holding is a seek */
-#define XF_SMART_LEAD_S 40.0 /* a smart fade's analysis starts this far from the song's end */
+#define XF_SMART_LEAD_S 45.0 /* a smart fade's analysis starts this far from the song's end: the longest hold (the
+                              * ring's 16.3 s at 44.1 kHz stereo) starts 34.7 s from it, leaving over 10 s */
 #define XF_MAX_S 15          /* a smart fade's longest overlap */
 #define XF_CEIL 0.99f        /* a smart mix's highest sample: under full scale */
 #define XF_RELEASE_S 0.05    /* its limiter's recovery, a time constant */
@@ -242,12 +243,14 @@ static unsigned crossfade(struct dsp *s, float *a, unsigned frames, int nch, int
             unsigned n = frames < xf.left ? frames : xf.left;
             /* The gains turn by a fixed angle a frame: exact at each block's start, rotated after, in double (and
              * cos d as 1 - 2 sin^2 d/2) or a long fade's rounding drifts to 1e-4. A smart mix's tail fades out the
-             * same way; the next song is at full level but for its fade-in, and the limiter keeps the sum down. */
+             * same way over its own quiet run, and as cos squared over an overlap that begins in its body (in_body),
+             * so its loud part gives way sooner; the next song is at full level but for its fade-in, and the limiter
+             * keeps the sum down. */
             float d = 1.5707963f / xf.total, p = (xf.total - xf.left + 0.5f) * d, h = sinf(d / 2);
             double in = sinf(p), out = cosf(p), sd = sinf(d), cd = 1 - 2.0 * h * h;
             for (unsigned i = 0; i < n; ++i, xf.pos += xf.step) {
                 unsigned at = (unsigned)xf.pos, next = at + 1 < xf.len ? at + 1 : at;
-                float frac = (float)(xf.pos - at), fo = (float)out;
+                float frac = (float)(xf.pos - at), fo = (float)(xf.smart && xf.plan.in_body ? out * out : out);
                 float fi = !xf.smart ? (float)in : xf.t < xf.fade ? sinf((xf.t + 0.5f) / xf.fade * 1.5707963f) : 1;
                 if ((at += xf.head) >= hcap) at -= hcap;
                 if ((next += xf.head) >= hcap) next -= hcap;
