@@ -436,10 +436,20 @@ int songs_open(const char *path, const char *title, int album) {
  * and the untagged have none. ponytail: decades only, no year level or covers, and the album rows
  * have no hold menu; a year page, or the decade as a scoped Coverflow, if asked for. */
 #define ERA_DECADES 32
-#define ERA_ALBUMS                                                                                 \
+#define ERA_SELECT                                                                                 \
     "select album,ifnull(nullif(albumsonger,''),songer)," ALBUM_YEAR                               \
     " as release_year," ALBUM_TRACK " from songtable "                                             \
-    "where " MUSIC_WHERE " and ifnull(album,'')<>''" ALBUM_GROUP
+    "where " MUSIC_WHERE " and ifnull(album,'')<>''"
+/* ALBUM_GROUP's three keys as an order, after the year and the name: the page's rows and Play All's
+ * songs in one order, two albums of one name and year included. */
+#define ERA_ORDER                                                                                  \
+    "ifnull(albumsonger,'') COLLATE NOCASE,case ifnull(albumsonger,'') when '' then "              \
+    "rtrim(fileurl,replace(fileurl,'/','')) end"
+/* A decade's page makes its first ERA_FIRST album rows as it opens and ERA_CHUNK more each UI pass
+ * after (era_rows_due), so a large decade costs a pass a screenful rather than one pass for every
+ * row's four widgets (docs/internals.md#era). */
+#define ERA_FIRST 16
+#define ERA_CHUNK 96
 typedef struct {
     char *album, *artist, *path;
     int year;
@@ -449,6 +459,9 @@ static struct {
     int decade[ERA_DECADES], count[ERA_DECADES], n;
     era_t *v; /* the open decade's albums, oldest first, room for cap */
     unsigned m, cap;
+    void *view;     /* the decade's rows */
+    unsigned built; /* its album rows made so far, of m */
+    unsigned timer; /* era_rows_due's while built < m */
 } era __attribute__((section(".scratch")));
 
 int era_sql(const char *sql, int (*row)(void *, int, char **, char **), void *ctx) {
@@ -503,7 +516,11 @@ static void era_free(void) {
 }
 static int era_closed(void *ctx, void *event) {
     if (ctx == era.page) era.page = 0;
-    if (ctx == era.albums) era.albums = 0, era_free();
+    if (ctx == era.albums) {
+        stop_timer(&era.timer);
+        era.albums = era.view = 0, era.built = 0;
+        era_free();
+    }
     return 0;
 }
 /* "60s" to "90s", then "2000s" on. */
@@ -521,77 +538,79 @@ static void *era_record(unsigned i, void **songs, int *n) {
         if (!strcmp(P(deque_at(*songs, k), REC_PATH), era.v[i].path)) return deque_at(*songs, k);
     return 0;
 }
-/* Every album's tracks, in the page's order, each in album order; an album whose query failed is
- * skipped, and 0 if every album's did.
- * ponytail: two queries an album, as Coverflow's All albums; one decade query split back into
- * albums if a large decade drags. */
-static void *era_songs(void) {
-    void *all = _create_deque("stSongInfo");
-    deque_init(all);
-    unsigned failed = 0;
-    for (unsigned i = 0; i < era.m; ++i) {
-        int n;
-        void *songs, *r = era_record(i, &songs, &n);
-        failed += n < 0;
-        void *t = r && n >= 0 ? coverflow_album_tracks(r) : 0;
-        for (unsigned j = 0; t && j < deque_size(t); ++j) _deque_push_back(all, deque_at(t, j));
-        if (t) deque_destroy(t);
-        deque_destroy(songs);
-    }
-    if (era.m && failed == era.m) return deque_destroy(all), (void *)0;
-    return all;
-}
-/* Shuffle's songs: one query for the decade's files, then the library filtered by them; its
- * order is about to be shuffled, so era_songs' two queries an album would only cost time. */
+/* The decade's songs in one query, then the library's music filtered by them: the files of
+ * ERA_SELECT's groups dated in the decade, matched on ALBUM_GROUP's keys. ordered (Play All): in
+ * the page's album order, each album in album order (disc, track, path), as Coverflow's All albums
+ * plays; else (Shuffle) in the library's order, about to be shuffled. 0 if a query failed. One
+ * query, as two stock queries an album cost 1.2 s for 2,664 albums in the emulator. */
+typedef struct {
+    unsigned key, rank; /* a song-table id, and its place in the query's order */
+} era_key_t;
 static struct {
-    unsigned *v, n, cap;
+    era_key_t *v;
+    unsigned n, cap;
 } era_keys __attribute__((section(".scratch")));
 static int era_key_row(void *ctx, int n, char **v, char **c) {
     if (n != 1 || !v[0]) return 0;
     if (era_keys.n == era_keys.cap) {
-        unsigned cap = era_keys.cap ? era_keys.cap * 2 : 1024, *p = calloc(cap, sizeof *p);
+        unsigned cap = era_keys.cap ? era_keys.cap * 2 : 1024;
+        era_key_t *p = calloc(cap, sizeof *p);
         if (!p) return 1;
         if (era_keys.n) memcpy(p, era_keys.v, era_keys.n * sizeof *p);
         free(era_keys.v);
         era_keys.v = p, era_keys.cap = cap;
     }
-    era_keys.v[era_keys.n++] = (unsigned)atoi(v[0]);
+    era_keys.v[era_keys.n].key = (unsigned)atoi(v[0]);
+    era_keys.v[era_keys.n].rank = era_keys.n;
+    ++era_keys.n;
     return 0;
 }
 static int era_key_cmp(const void *a, const void *b) {
-    unsigned x = *(const unsigned *)a, y = *(const unsigned *)b;
-    return x < y ? -1 : x > y;
+    const era_key_t *x = a, *y = b;
+    return x->key != y->key ? (x->key < y->key ? -1 : 1)
+                            : (x->rank > y->rank) - (x->rank < y->rank);
 }
-static void *era_shuffle_songs(void) { /* 0 if the query failed */
+static void *era_decade_songs(int ordered) {
     char sql[2048];
     int from = era.m ? era.v[0].year / 10 * 10 : 0, n;
-    /* The songs of ERA_ALBUMS' groups dated in the decade, matched on ALBUM_GROUP's keys. */
     tk_snprintf(
         sql, sizeof sql,
-        "%s from songtable s join (select album a,ifnull(albumsonger,'') b,case "
+        "select s.id from songtable s join (select album a,ifnull(albumsonger,'') b,case "
         "ifnull(albumsonger,'') when '' then rtrim(fileurl,replace(fileurl,'/','')) end d,"
         "%s as y from songtable where %s and ifnull(album,'')<>''%s having y between %d and %d) g "
         "on s.album=g.a COLLATE NOCASE and ifnull(s.albumsonger,'')=g.b COLLATE NOCASE and "
-        "(g.d is null or rtrim(s.fileurl,replace(s.fileurl,'/',''))=g.d)",
-        "select distinct s.id", ALBUM_YEAR, MUSIC_WHERE, ALBUM_GROUP, from, from + 9);
+        "(g.d is null or rtrim(s.fileurl,replace(s.fileurl,'/',''))=g.d)%s",
+        ALBUM_YEAR, MUSIC_WHERE, ALBUM_GROUP, from, from + 9,
+        ordered ? " order by g.y,g.a COLLATE NOCASE,g.b COLLATE NOCASE,g.d,ifnull(s.cd_num,0),"
+                  "ifnull(s.track,0),s.fileurl,s.id"
+                : "");
     era_keys.n = 0;
-    void *out = 0;
+    void *out = 0, **slot = 0;
     if (!era.m || era_sql(sql, era_key_row, 0)) out = _create_deque("stSongInfo"), deque_init(out);
+    if (out && era_keys.n && ordered && !(slot = calloc(era_keys.n, sizeof *slot)))
+        deque_destroy(out), out = 0;
     if (out && era_keys.n) {
         qsort(era_keys.v, era_keys.n, sizeof *era_keys.v, era_key_cmp);
         void *all = staged(songs_unsorted, (void *)1, &n);
         if (n < 0) deque_destroy(out), out = 0; /* the library load failed */
         for (unsigned i = 0; out && i < deque_size(all); ++i) {
             unsigned key = (unsigned)I(deque_at(all, i), REC_ID), lo = 0, hi = era_keys.n;
-            while (lo < hi) /* the first key not below this one */
-                if (era_keys.v[(lo + hi) / 2] < key)
+            while (lo < hi) /* the first key not below this one: its first place */
+                if (era_keys.v[(lo + hi) / 2].key < key)
                     lo = (lo + hi) / 2 + 1;
                 else
                     hi = (lo + hi) / 2;
-            if (lo < era_keys.n && era_keys.v[lo] == key) _deque_push_back(out, deque_at(all, i));
+            if (lo == era_keys.n || era_keys.v[lo].key != key) continue;
+            if (!ordered)
+                _deque_push_back(out, deque_at(all, i));
+            else if (!slot[era_keys.v[lo].rank])
+                slot[era_keys.v[lo].rank] = deque_at(all, i);
         }
+        for (unsigned i = 0; out && slot && i < era_keys.n; ++i)
+            if (slot[i]) _deque_push_back(out, slot[i]);
         deque_destroy(all);
     }
+    free(slot);
     free(era_keys.v);
     era_keys.v = 0, era_keys.n = era_keys.cap = 0;
     return out;
@@ -601,7 +620,8 @@ static void *era_shuffle_songs(void) { /* 0 if the query failed */
 static int era_pick(void *ctx, void *event) {
     int i = (int)(long)ctx;
     if (i < 2) {
-        void *all = i ? era_shuffle_songs() : era_songs();
+        ui_watch_step(i ? "decade shuffle" : "decade play all");
+        void *all = era_decade_songs(!i);
         if (!all) {
             toast("Years unavailable"); /* as a decade's albums: not a card that's away */
             return 0;
@@ -615,6 +635,7 @@ static int era_pick(void *ctx, void *event) {
         deque_destroy(all);
         return 0;
     }
+    ui_watch_step("decade album");
     int n = 0;
     void *songs, *r = (unsigned)(i - 2) < era.m ? era_record((unsigned)(i - 2), &songs, &n) : 0;
     if (n < 0) /* partial rows then an error: not an album to open */
@@ -624,14 +645,45 @@ static int era_pick(void *ctx, void *event) {
     if ((unsigned)(i - 2) < era.m) deque_destroy(songs);
     return 0;
 }
+/* The decade's album rows up to its row upto (of m), after those made. */
+static void era_rows_to(unsigned upto) {
+    char detail[300];
+    for (; era.built < upto && era.built < era.m; ++era.built) {
+        const era_t *e = &era.v[era.built];
+        tk_snprintf(detail, sizeof detail, *e->artist ? "%s \xe2\x80\xa2 %d" : "%s%d", e->artist,
+                    e->year);
+        page_row_detail_into(era.view, (int)era.built + 2, e->album, detail, era_pick);
+    }
+}
+/* The rows' timer: ERA_CHUNK more a pass until all are made. */
+static int era_rows_due(const void *unused) {
+    ui_watch_step("decade rows");
+    era_rows_to(era.built + ERA_CHUNK);
+    if (era.built < era.m) return 8; /* RET_REPEAT */
+    era.timer = 0;
+    return 0;
+}
+/* Every row of page made now, when it is a decade's still being filled: the search bar's
+ * (search_bar.c), whose search reads the page's rows. */
+void era_rows_finish(void *page) {
+    if (!page || page != era.albums || era.built >= era.m) return;
+    stop_timer(&era.timer);
+    ui_watch_step("decade rows");
+    era_rows_to(era.m);
+}
 static int era_open_decade(void *ctx, void *event) {
     int k = (int)(long)ctx, from = era.decade[k];
     if (era.albums) return 0;
-    char sql[1024], name[16], detail[300];
-    tk_snprintf(
-        sql, sizeof sql, /* MUSIC_WHERE's like patterns hold '%': an argument, not the format */
-        "%s having release_year between %d and %d order by release_year,album COLLATE NOCASE",
-        ERA_ALBUMS, from, from + 9);
+    ui_watch_step("decade albums");
+    char sql[1536], name[16], detail[32];
+    /* The groups of albums with a track dated in the decade: an album's year is its latest
+     * track's, so no other group can be in it, and the grouping reads that much less. */
+    tk_snprintf(sql,
+                sizeof sql, /* MUSIC_WHERE's like patterns hold '%': an argument, not the format */
+                "%s and album COLLATE NOCASE in (select album from songtable where " TRACK_YEAR
+                " between %d and %d)" ALBUM_GROUP " having release_year between %d and %d order by "
+                "release_year,album COLLATE NOCASE," ERA_ORDER,
+                ERA_SELECT, from, from + 9, from, from + 9);
     era.v =
         calloc((unsigned)era.count[k] + 1, sizeof *era.v); /* the decade's count, from era_menu */
     era.cap = era.v ? (unsigned)era.count[k] : 0;
@@ -644,19 +696,18 @@ static int era_open_decade(void *ctx, void *event) {
         era_free();
         return 0;
     }
-    void *view = page_list(era.albums, era.albums, 0, era_name(name, from), (int)era.m + 2, 64);
+    era.view = page_list(era.albums, era.albums, 0, era_name(name, from), (int)era.m + 2, 64);
     tk_snprintf(detail, sizeof detail, era.m == 1 ? "%u album" : "%u albums", era.m);
-    page_row_detail(view, 0, "Play All", detail, era_pick);
-    page_row_detail(view, 1, "Shuffle", "Every song, shuffled", era_pick);
-    for (unsigned i = 0; i < era.m; ++i) {
-        tk_snprintf(detail, sizeof detail, *era.v[i].artist ? "%s \xe2\x80\xa2 %d" : "%s%d",
-                    era.v[i].artist, era.v[i].year);
-        page_row_detail_into(view, (int)i + 2, era.v[i].album, detail, era_pick);
-    }
+    page_row_detail(era.view, 0, "Play All", detail, era_pick);
+    page_row_detail(era.view, 1, "Shuffle", "Every song, shuffled", era_pick);
+    era.built = 0;
+    era_rows_to(ERA_FIRST);
+    if (era.built < era.m) era.timer = timer_add(era_rows_due, (void *)0, 0);
     return 0;
 }
 int era_menu(void *ctx, void *event) {
     if (era.page) return 0;
+    ui_watch_step("years list");
     era.n = 0;
     if (!era_sql("select year/10*10,count(*) from (select " ALBUM_YEAR
                  " year from songtable where " MUSIC_WHERE " and ifnull(album,'')<>''" ALBUM_GROUP

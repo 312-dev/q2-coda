@@ -660,7 +660,25 @@ static int songs_load(void) {
     return (int)deque_size(list);
 }
 
+/* The step a late UI pass names while a Library list loads (ui_watch.c). */
+static const char *class_step(int cls) {
+    switch (cls) {
+    case 0xf001:
+        return "songs list";
+    case CLASS_ALBUMS:
+        return "albums list";
+    case 0xf004:
+        return "artists list";
+    case 0xf005:
+        return "composers list";
+    case 0xf006:
+        return "genres list";
+    default:
+        return "library list";
+    }
+}
 int ringnav_localclass(int cls) {
+    ui_watch_step(class_step(cls));
     I(g_artist_type, 0) = I(artist_type, 0) == 1;
     int saved = library_music;
     library_music = 1;
