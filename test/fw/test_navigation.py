@@ -429,7 +429,7 @@ def boot(fw):
 # (theme.xml: Split Home, Light Mode off unless Auto) applied once, and THEME 3 written.
 @pytest.mark.parametrize('theme', [{'THEME': b'0'}, {'THEME': b'1'}, {'THEME': b'2'}, {}])
 def test_a_unit_on_a_retired_theme_takes_oled_s_preset_once(fw, clock, theme):
-    config = Config(fw, HOME=b'2', LIGHT=b'1', **theme)
+    config = Config(fw, HOME=b'1', LIGHT=b'1', **theme)
     written = boot(fw)
     assert fw.fn('theme', C.c_void_p)() == C.addressof(fw.var('themes', C.c_char))  # themes[0]: OLED
     assert written == [('LIGHT', 0), ('HOME', 0), ('THEME', 3)]

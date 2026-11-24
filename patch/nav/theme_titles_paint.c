@@ -894,11 +894,6 @@ int ringnav_image_add(void *manager, const char *name, void *bitmap) {
              glyph = 0xffffff, light = flip_if(paper, tone_of(tones_of(preset), TONE_LIGHT));
     if (control && bright_tone(tone)) glyph = CONFIRM_SURFACE;
     while (s && *s && *s != '/' && *s != ':') ++s;
-    /* Home: Carousel's cards keep stock's colours in every Theme, accent and Light Mode; its white
-     * arrows (menu_left, menu_right) still flip in Light Mode, or they vanish on the paper */
-    if (s && !*s && tk_str_start_with(name, "menu_") && tk_strcmp(name, "menu_left") &&
-        tk_strcmp(name, "menu_right"))
-        s = (void *)0;
     /* art_final: the theme's own images (tools/art.py, named by its art prefix) are final */
     if (s && !*s && T->art_final && tk_str_start_with(name, T->art)) s = (void *)0;
     /* icons_badge_muted: the codec badges (img_flac, img_mp3, ...: red with the name cut out) take

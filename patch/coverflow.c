@@ -3944,7 +3944,6 @@ static struct {
     void *win, *art, *list, *sets; /* sets: the Settings list, in the list's place while open */
     void *lib;             /* the Library's rows the same way: only a set with home_lib has it */
     void *stream;          /* and Streaming's, which the Settings list's row opens */
-    void *carousel[3];     /* Home: Carousel's slide_menu and its img_left, img_right */
     unsigned key, repaint; /* repaint: the timer of home_repaint */
     /* drift: home_drift's timer, tick its period; drift_last: its last step */
     unsigned drift, drift_last, tick;
@@ -3973,8 +3972,8 @@ static struct {
     unsigned np_stop, np_timer;
     unsigned rtick; /* radio_tick's timer, while Radio's pane moves */
 } home __attribute__((section(".scratch")));
-extern int ipod_home(void), home_shortcut_open(void *, void *);
-extern void ipod_shortcut_seen(void), home_sets_bind(void *win); /* theme_engine.c, navigation.c */
+extern int ipod_home(void);
+extern void home_sets_bind(void *win); /* navigation.c */
 extern void home_np_bind(void *win), home_np_sync(void); /* home_np.c: Home's first row */
 extern void library_rows(void *list), stream_rows(void *list);
 /* home.c: Home's overflow */
@@ -3988,7 +3987,6 @@ extern void lr_home_tag(void *view), lr_home_apply(void *view, int np),
     lr_edit_labels(void *view, int on);
 extern int lr_home_editing(void), home_folders(void);
 extern int library_count(const char *sql), msg_counting(void);
-extern const char *ipod_home_shortcut(void);
 /* Split's menu width; the art fills the rest. */
 
 /* player_parsecover_thd writes the playing track's cover and then sets g_playcover_type, as Now
@@ -4956,7 +4954,7 @@ void *coverflow_home_view(void) {
                                                          : (void *)0;
 }
 
-/* Home's main list's view when top is Home showing it (not a list its rows open, not Carousel):
+/* Home's main list's view when top is Home showing it (not a list its rows open):
  * what Edit Home edits (library_edit.c), else 0. */
 void *coverflow_home_edit_view(void *top) {
     return top && top == home.win && !home_open() && ipod_home() != 2 &&
@@ -5034,17 +5032,15 @@ void coverflow_home_np(void) {
     int top = window_manager_get_top_window(window_manager()) == home.win;
     if (np_loaded() != home.np || (top && home_folders() != home.folders)) coverflow_home_layout();
 }
-/* Stored HOME=0/1/2 is Split/Full/Carousel in every theme: Split halves the screen, the art in the
- * right panel; Full hides the art and widens the list, its rows to the theme's home_full_row;
- * Carousel hides the art and shows stock's cards (tools/ipod.py ipod_home) in the
- * lists' place, and leaving it, the main list. The main list's rows go in the user's order and
+/* Stored HOME=0/1 is Split/Full in every theme (any other value reads as Split: theme_engine.c
+ * settings_read): Split halves the screen, the art in the right panel; Full hides the art and
+ * widens the list, its rows to the theme's home_full_row. The main list's rows go in the user's order and
  * show as the user set them (library_edit.c lr_home_apply: Now Playing only with something loaded,
  * Folders by default only while the card has folders); hidden rows are restacked last because the
  * native layout includes hidden rows, and made insensitive, as hidden rows keep their taps. Edit
- * Home lays Split out as Full (theme_engine.c ipod_home). Carousel keeps its Now Playing card, as
- * stock's. */
+ * Home lays Split out as Full (theme_engine.c ipod_home). */
 void coverflow_home_layout(void) {
-    int mode = ipod_home(), full = mode == 1, carousel = mode == 2;
+    int mode = ipod_home(), full = mode == 1;
     const theme_t *T = theme();
     /* The art goes back to the panel; Split's next paint resumes the pan. */
     stop_timer(&home.drift);
@@ -5053,14 +5049,6 @@ void coverflow_home_layout(void) {
     home.folders = home_folders();
     lr_home_apply(coverflow_home_view(), np); /* the user's order and rows, Now Playing's with np */
     home.np = np;
-    /* ponytail: the Shortcut is the carousel's card alone (Home's list has none); the card stays
-     * when its target is gone (Shortcut: Rockbox, no Rockbox on the card; its tap says so), as the
-     * slide_menu lays out hidden cards too; removing it would mean re-adding it once the card has
-     * Rockbox */
-    ipod_shortcut_seen();
-    if (home.carousel[0])
-        widget_set_text_utf8(widget_lookup(home.carousel[0], "label_rockbox", 1),
-                             ipod_home_shortcut());
     int split = split_geom(SPLIT_ROW), outer = full ? 375 : split,
         inner = !full ? split : T->home_full_row, x = T->home_text_x, end = T->home_label_end[full];
     home_width(home.list, outer, inner, x, end, 0);
@@ -5076,11 +5064,6 @@ void coverflow_home_layout(void) {
         if (!open || !widget_get_visible(open)) continue;
         home_show(open, 0);
         home_show(home.list, 1);
-    }
-    if (home.carousel[0] && carousel != widget_get_visible(home.carousel[0])) {
-        for (int i = 0; i < 3; ++i) home_show(home.carousel[i], carousel);
-        home_show(home.list, !carousel);
-        if (home.sets) home_show(home.sets, 0);
     }
     home.key = ~0u; /* Split shows the current cover again, next frame if laid out mid-paint */
     rearm(&home.repaint, home_repaint, 0);
@@ -5158,7 +5141,7 @@ static void home_fill(void *from, void *list, int service) {
 
 /* Home's Library row in Split (a set with home_lib): its rows slide in as Settings' do, each filled
  * by the page's own constructor (home.c library_rows) in Home's rows' shape, and open what
- * they open from the page. Full and Carousel keep the page. */
+ * they open from the page. Full keeps the page. */
 static int home_library(void *ctx, void *event) {
     if (ipod_home() || !home.lib) return on_home_music_onclick(ctx, event);
     if (widget_get_visible(home.lib)) return 0;
@@ -5169,7 +5152,7 @@ static int home_library(void *ctx, void *event) {
 
 /* The Settings list's Streaming row (after Playback, tools/ipod.py HOME_SETS), the same way over
  * the Settings list (home.c stream_rows); Return goes back to Settings (coverflow_home_back). The
- * rebuild frees the rows, so the highlighted row goes first. Full and Carousel keep the page. */
+ * rebuild frees the rows, so the highlighted row goes first. Full keeps the page. */
 static int home_streaming(void *ctx, void *event) {
     if (ipod_home() || !home.stream) return on_home_stream_onclick(ctx, event);
     if (widget_get_visible(home.stream)) return 0;
@@ -5263,11 +5246,6 @@ int coverflow_home(void *win, void *ctx) {
         widget_on(widget_lookup(win, "img_set_stream", 1), EVT_CLICK, on_home_stream_onclick, win);
     widget_on(widget_lookup(win, "img_games", 1), EVT_CLICK, games_open, 0);
     widget_on(widget_lookup(win, "img_radio", 1), EVT_CLICK, tuner_open, 0); /* radio_tuner.c */
-    static const char *const carousel[] = { "slide_menu", "img_left", "img_right" };
-    for (int i = 0; i < 3; ++i) home.carousel[i] = widget_lookup(win, carousel[i], 1);
-    /* The carousel's own Coverflow and Shortcut cards; the lists' come first in the window. */
-    widget_on(widget_lookup(home.carousel[0], "img_cover_flow", 1), EVT_CLICK, coverflow_open, 0);
-    widget_on(widget_lookup(home.carousel[0], "img_rockbox", 1), EVT_CLICK, home_shortcut_open, 0);
     coverflow_home_layout();
     return result;
 }

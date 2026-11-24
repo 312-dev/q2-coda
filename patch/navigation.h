@@ -261,7 +261,7 @@ typedef struct {
     unsigned lyric_at, lyric_follow_at, lyric_song, lyric_rows_song;
     /* The Display settings, read from config.ini on first use, and the display page's value labels.
      */
-    int settings_read, accent, home, battery, home_rockbox, home_groovebox, shortcut, light,
+    int settings_read, accent, home, battery, shortcut, light,
         light_day,       /* light_day: Auto's answer for now (LIGHT=2) */
         keep_lit,        /* Smart Awake (#57, keep_lit_poll) */
         reduce_motion,   /* Reduce Motion, IPOD REDUCEMOTION (ui_kit.c motion_reduced) */

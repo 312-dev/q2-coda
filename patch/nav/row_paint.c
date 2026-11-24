@@ -235,8 +235,7 @@ static int cover_flow_row(void *row) {
 
 /* The iPod `>` of each drill row, where stock rows place img_into, as stock hides its own
  * list_into: not in multi-select, and not on grid tiles. The theme's own on each row, on the set's
- * right column (list_marks.c), Home's list's too under chevron_home (not Carousel's cards, which
- * are stock's), and on Home's Cover Flow row, selected, the spinner while Cover Flow opens
+ * right column (list_marks.c), Home's list's too under chevron_home, and on Home's Cover Flow row, selected, the spinner while Cover Flow opens
  * (coverflow.c coverflow_spinner). */
 static void paint_chevrons(void *w, void *canvas) {
     rect_t old;
@@ -653,8 +652,7 @@ static void paint_selection(void *w, void *canvas) {
         /* The page under a sliding one, painted into the animator's snapshot, or under OLED's
          * toast, which leaves the page in sight: draw the row it holds. Loading, recall and
          * settling read the top page's state, so none of it runs. A pending untouch is a Return by
-         * button, which shows the row of the page behind. Home's carousel shows its selected card,
-         * as below. Under a menu sheet the row shows, dimmed with the page: it names what the
+         * button, which shows the row of the page behind. Under a menu sheet the row shows, dimmed with the page: it names what the
          * menu acts on. */
         if (!usable() || !load_rows(&g_menu, w) || g_menu.kind == 3) return;
         i = index_of(&g_menu, widget_get_prop_int(w, SEL, -1));

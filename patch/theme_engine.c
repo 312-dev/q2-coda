@@ -26,8 +26,8 @@ int rockbox_available(void) { return bin_available(ROCKBOX_BIN); }
 /* The Groovebox card app (a game with the sound, addon.c), Home's Shortcut when it is installed. */
 int groovebox_available(void) { return bin_available(GROOVEBOX_BIN); }
 
-/* The two as the status row asks on every paint (bar_sync, shortcut): looked at again once a
- * library scan has rewritten the library (library_gen), at once after the Shelf installs or
+/* The two as shortcut and the Shortcut's name ask, cheap enough for every paint: looked at again
+ * once a library scan has rewritten the library (library_gen), at once after the Shelf installs or
  * removes an app (card_bins_changed), and when the card or its app folders change (card_watch.c's
  * generation: a binary copied in by hand, the card put in or taken out). Without that watch, again
  * CARD_RECHECK_MS after the last look. Stat'ing both on each paint cost Now Playing 150 syscalls a
@@ -138,10 +138,10 @@ _Static_assert(V_SPLIT_ART == V_SPLIT_ROW + SPLIT_ART &&
 int split_geom(int k) { return geom_val(V_SPLIT_ROW + k); }
 /* The lists end their whole rows by this screen row (282: the grid's bar and list_end). */
 int list_fit_end(void) { return geom_val(V_BAR) + geom_val(V_LIST_END); }
-/* The Display rows' settings, by ringnav_display's index: 0 Accent, 1 Home (0 Split, 1 Full,
- * 2 Carousel), 2 Battery, 3 Shortcut, 4 Light Mode, 5 Smart Awake, 6 the Clicker's output (no row
- * of its own: Controls' Key Tone row shows it, clicker.c), 7 Reduce Motion; 8 on:
- * the theme's own options, SETTING_OWN + k for theme_keys[k]. */
+/* The Display rows' settings, by ringnav_display's index: 0 Accent, 1 Home (0 Split, 1 Full; a
+ * stored 2, Carousel's before it was removed, reads as Split), 2 Battery, 3 Shortcut, 4 Light Mode,
+ * 5 Smart Awake, 6 the Clicker's output (no row of its own: Controls' Key Tone row shows it,
+ * clicker.c), 7 Reduce Motion; 8 on: the theme's own options, SETTING_OWN + k for theme_keys[k]. */
 static const char *const setting_keys[] = { "ACCENT",    "HOME",    "BATTERY", "SHORTCUT",
                                             "LIGHT",     "KEEPLIT", "CLICKER", "REDUCEMOTION" };
 const int setting_counts[] = { SETTING_N_ACCENT,
@@ -276,20 +276,22 @@ int np_time_toggle(void) {
 }
 /* Shortcut with no key (or a value this build does not know, such as an old build's reading of a
  * newer one) is Rockbox while the card has it, else Favorites: asked each time (rockbox_seen), as
- * the card may mount after the first read. SHORTCUT_NONE is read as it is, for the picker; the
- * carousel's card, which cannot leave, takes the default (shortcut_target). */
+ * the card may mount after the first read. SHORTCUT_NONE is read as it is, for the picker, and
+ * opens and names the default (shortcut_target).
+ * ponytail: the Shortcut was Home's Carousel's card, and nothing in the firmware shows or opens it
+ * since Carousel went; shortcut, ipod_home_shortcut and home_shortcut_open (with what they reach:
+ * rockbox_open, addon_game_open, the card binaries' cache) stay, tested, for a Home row that would
+ * open it. Removing them is a change of its own. */
 int shortcut(void) {
     accent();
     return st.shortcut < SETTING_N_SHORTCUT ? st.shortcut : rockbox_seen() ? 0 : 3;
 }
-/* What the Shortcut opens and names: None's card, in Carousel, is the default's.
- * ponytail: Carousel keeps the card (home_card clones in stock's slide_menu, which lays out hidden
- * cards too); a card left out would need re-adding with the setting. */
+/* What the Shortcut opens and names: None's, the default's. */
 static int shortcut_target(void) {
     int s = shortcut();
     return s == SHORTCUT_NONE ? (rockbox_seen() ? 0 : 3) : s;
 }
-/* Home's layout, HOME's Split, Full or Carousel; Split shows as Full while Edit Home is open
+/* Home's layout, HOME's Split or Full; Split shows as Full while Edit Home is open
  * (library_edit.c), the editor's hint and grips across the screen. */
 int ipod_home(void) {
     accent();
@@ -298,12 +300,6 @@ int ipod_home(void) {
 int ipod_light(void) {
     int v = accent();
     return light_on(themes, v);
-}
-/* The card's Rockbox and Groovebox as the carousel's Shortcut card was last named for
- * (coverflow_home_layout): the bar's pass lays it out again when either comes or goes. */
-void ipod_shortcut_seen(void) {
-    st.home_rockbox = rockbox_seen();
-    st.home_groovebox = groovebox_seen();
 }
 const char *ipod_home_shortcut(void) {
     static const char *const names[] = { "Rockbox",

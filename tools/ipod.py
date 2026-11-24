@@ -302,28 +302,8 @@ def artist_tabs(root):
     check(sorted(found) == sorted([*ARTIST_TABS, 'pages']), 'Unexpected artist tabs')
 
 
-# Home: Carousel's carousel: stock's cards, plus clones of Local Music for Coverflow at index 2 and
-# the Shortcut (rockbox) after Folder, each on its own icons; their
-# images (patch/coverflow.c binds them) are the click targets. Stock translates label_* by name and
-# ignores these, so their text is literal (the Shortcut's is set at runtime). Local Music's label is
-# literal too, "Library" in every language: stock would set label_localmusic's text to small_local
-# ("Local Songs"), a key only Home uses.
 HOME_PAGE = 'home_page.bin'
 LIBRARY = {'name': 'label_library', 'text': 'Library'}
-
-
-def home_card(menu, at, row, text):
-    card = copy.deepcopy(menu[3][1])
-    card[2]['name'] = 'btn_' + row
-    image, label = card[3]
-    check(image[2].get('name') == 'img_localmusic' and label[2].get('name') == 'label_localmusic',
-            'Unexpected Local Music card')
-    image[2]['name'] = 'img_' + HOME_OURS.get(row, row)
-    label[2]['name'] = 'label_' + HOME_OURS.get(row, row)
-    label[2]['text'] = text
-    for key, value in image[2].items():  # assets/icons/menu_<row>*.png, added to the rootfs by build.py
-        if key.endswith(':bg_image'): image[2][key] = value.replace('menu_music', 'menu_' + row)
-    menu[3].insert(at, card)
 
 
 # Home becomes a list of the stock cards' names in the user's order (menu review, 2026-11-15): Now Playing,
@@ -393,15 +373,10 @@ def home_list(name, rows, g, extra=None, view_name=None):
 def ipod_home(root, g):
     geo = with_geometry(g)
     check([n[0] for n in root[3]] == ['slide_menu', 'image', 'image'], 'Unexpected home carousel')
-    check([n[2]['name'] for n in root[3][0][3]] == ['btn_' + r for r in
-            ('playing', 'localmusic', 'coverflow', 'folder', 'stream', 'playset', 'sysset')], 'Unexpected home cards')
-    menu = root[3][0]
-    del menu[3][2]  # stock V1.36's Album Wall card: not offered, and Cover Flow's card has its place
-    home_card(menu, 2, 'coverflow', 'Cover Flow')
-    home_card(menu, 4, 'rockbox', 'Rockbox')
-    menu[3][1][3][1][2].update(LIBRARY)
-    # Home: Carousel's (coverflow_home_layout): the carousel and its arrows, over the lists, hidden and
-    # taking no taps until chosen.
+    # Stock's carousel of cards and its two arrows stay in the window as stock made them, hidden and taking no
+    # taps: home_page_init's visitor (0x534750) binds the arrows to the slide_menu and the cards' img_* by name,
+    # so the three are left for it rather than removed. Home is its lists alone (Split or Full); nothing shows or
+    # steps the carousel.
     for n in root[3]:
         n[2].update(visible='false', sensitive='false')
     # An image for the playing track's art, moved to the right panel and fitted by coverflow_home_art.

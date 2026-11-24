@@ -50,7 +50,7 @@ class Slide(C.Structure):
 
 
 class Home(C.Structure):
-    _fields_ = [*((k, C.c_void_p) for k in 'win art list sets lib stream'.split()), ('carousel', C.c_void_p * 3),
+    _fields_ = [*((k, C.c_void_p) for k in 'win art list sets lib stream'.split()),
                 *((k, C.c_uint) for k in 'key repaint drift drift_last tick'.split()), ('sl', Slide * 2),
                 ('frame', C.c_void_p), *((k, C.c_uint) for k in 'fade drawn'.split()), ('show', C.c_int), ('seed', C.c_uint),
                 ('row', C.c_void_p), ('kind', C.c_int), ('pane_timer', C.c_uint),
@@ -2942,7 +2942,8 @@ class Ui:
 
 class Homes:
     """A Home window as OLED's asset lays it out: the art, the main list's rows, the Settings list (hidden, two rows: a
-    button with its label and icon), and Carousel's slide_menu and arrows. OLED's set has no home_lib, so no Library
+    button with its label and icon), and stock's carousel (its slide_menu and arrows, hidden, as the asset keeps them).
+    OLED's set has no home_lib, so no Library
     or Streaming list (tools/ipod.py ipod_home)."""
     ROWS = ('img_playing', 'img_library', 'img_cover_flow', 'img_folder', 'img_rockbox', 'img_shuffle_songs', 'img_games',
             'img_home_search', 'img_settings')
@@ -2975,8 +2976,8 @@ class Homes:
                              ui.make(self.win, 'image', name='img_right')]
             for name in ('img_cover_flow', 'img_rockbox', 'label_rockbox'):
                 ui.make(self.carousel[0], 'image', name=name)
-            for w in self.carousel:
-                ui[w].visible = 0
+            for w in self.carousel:  # tools/ipod.py ipod_home: hidden, taking no taps
+                ui[w].visible = ui[w].sensitive = 0
         ui.top = self.win
 
     def open(self, fw, result=0):
@@ -3015,14 +3016,13 @@ def test_home_s_labels_end_clear_of_the_chevron(fw, library, mode):
         assert x + w - 2 <= chevron, (mode, x, w, width)  # navigation.h HSCROLL_MARGIN
 
 
-def test_home_binds_its_cards_and_lists(fw):
+def test_home_binds_its_lists_and_never_the_carousel(fw):
     themed(fw)
     ui = Ui(fw)
     h = Homes(ui, carousel=True)
     assert h.open(fw, 5) == 5  # stock's answer
     home = fw.var('coverflow__home', Home)
     assert (home.win, home.art, home.list, home.sets, home.lib, home.stream) == (h.win, h.art, h.main, h.sets, h.lib, h.stream)
-    assert list(home.carousel) == h.carousel
     assert not any(ui[w].sensitive for w in (h.art, h.sets))  # taps find the shown list's rows
     want = {'img_cover_flow': ('coverflow__coverflow_open', 0), 'img_settings': ('coverflow__home_settings', 0),
             'img_home_search': ('library_search_open', 0), 'img_games': ('games_open', 0)}  # Games: Home's, 2026-11-19
@@ -3031,8 +3031,8 @@ def test_home_binds_its_cards_and_lists(fw):
     assert not ui.handlers(h.rows['img_library'])  # stock's, by name
     # Streaming is Settings' row, after Playback; with no home_lib (OLED's set) it opens stock's Streaming page
     assert ui.handlers(h.set_stream) == [(address(fw, 'on_home_stream_onclick'), h.win)]
-    on_card = [ui.handlers(ui.lookup(h.carousel[0], n)) for n in ('img_cover_flow', 'img_rockbox')]
-    assert on_card == [[(address(fw, 'coverflow__coverflow_open'), 0)], [(address(fw, 'home_shortcut_open'), 0)]]
+    assert not any(ui.handlers(ui.lookup(h.carousel[0], n)) for n in ('img_cover_flow', 'img_rockbox'))
+    assert not any(ui[w].visible for w in h.carousel)
 
 
 def test_a_page_list_runs_on_to_the_screen_s_foot(fw, library):
@@ -3117,26 +3117,23 @@ def test_home_owns_its_lists_rows(fw):
     assert owns(h.rows['img_library']) and owns(h.main) and not owns(h.art) and not owns(h.win) and not owns(None)
 
 
-@pytest.mark.parametrize('home', ('0', '1', '2'))
-@pytest.mark.parametrize('shortcut, label', (('0', 'Rockbox'), ('6', 'Games'), ('11', 'Favorites'), ('12', 'Favorites')))
-def test_the_carousel_s_shortcut_card_names_its_target_and_the_list_has_no_shortcut(fw, home, shortcut, label):
-    # Home's list has no Shortcut row (the menu review's, 2026-11-15): a row the asset had is left as it was; the
-    # carousel's card names the saved target, None and an unknown value the default
-    themed(fw, SHORTCUT=shortcut, HOME=home)
+@pytest.mark.parametrize('home', ('0', '1'))
+def test_home_s_list_has_no_shortcut_row(fw, home):
+    # Home's list has no Shortcut row (the menu review's, 2026-11-15): a row the asset had is left as it was
+    themed(fw, SHORTCUT='0', HOME=home)
     ui = Ui(fw)
-    h = Homes(ui, carousel=True, rockbox=True)
+    h = Homes(ui, rockbox=True)
     rockbox = h.rows['img_rockbox']
     before = list(ui[h.view].kids)
     h.open(fw)
     assert [r for r in ui[h.view].kids if r != rockbox] == [r for r in before if r != rockbox]
-    assert ui[ui.lookup(h.carousel[0], 'label_rockbox')].text == label
 
 
 def np_home(fw, status=1, home='0'):
     """Home with its Now Playing row named as the asset names it, play's state status[0] and the clock now[0]."""
     themed(fw, HOME=home)
     ui = Ui(fw)
-    h = Homes(ui, carousel=True, rockbox=True)
+    h = Homes(ui, rockbox=True)
     playing = h.rows['img_playing']
     ui[playing].name = 'btn_playing'
     state, now = [status], [1000]
@@ -3219,26 +3216,16 @@ def test_now_playing_s_row_coming_keeps_the_selected_row_in_sight(fw, sel, y, wa
     assert offsets and offsets[0] == want
 
 
-@pytest.mark.parametrize('mode', (1, 2))
-def test_full_and_carousel_hide_the_art_and_carousel_shows_its_cards(fw, mode):
-    themed(fw, HOME=str(mode))
+@pytest.mark.parametrize('mode', ('1', '2', '7'))
+def test_full_hides_the_art_and_a_saved_carousel_is_split(fw, mode):
+    """Full hides the art; HOME=2, Carousel's before it went (its Home had no way to Settings), and any other value
+    lay Home out as Split, the carousel left hidden."""
+    themed(fw, HOME=mode)
     ui = Ui(fw)
     h = Homes(ui, carousel=True)
     h.open(fw)
-    assert not ui[h.art].visible
-    assert all(ui[w].visible == (mode == 2) for w in h.carousel)
-    assert ui[h.main].visible == (mode != 2) and not ui[h.sets].visible
-
-
-def test_split_puts_the_carousel_away(fw):
-    themed(fw)
-    ui = Ui(fw)
-    h = Homes(ui, carousel=True)
-    for w in h.carousel:
-        ui[w].visible = 1
-    ui[h.main].visible = 0
-    h.open(fw)
-    assert not any(ui[w].visible or ui[w].sensitive for w in h.carousel) and ui[h.main].visible and ui[h.art].visible
+    assert ui[h.art].visible == (mode != '1') and ui[h.main].visible and not ui[h.sets].visible
+    assert not any(ui[w].visible or ui[w].sensitive for w in h.carousel)
 
 
 # Split's pane: what the highlighted row shows
@@ -3283,9 +3270,9 @@ def test_a_paint_s_row_change_shows_in_the_next_frame(fw):
     assert ui.dirty == [pane_rect(fw, h)] and not home.pane_timer
 
 
-@pytest.mark.parametrize('keys', ({'HOME': '1'}, {'HOME': '2'}, {'ART': ''}))
+@pytest.mark.parametrize('keys', ({'HOME': '1'}, {'ART': ''}))
 def test_without_the_pane_rows_change_nothing(fw, keys):
-    """Full, Carousel or no art: no pane, so a row it would follow leaves it as it was."""
+    """Full or no art: no pane, so a row it would follow leaves it as it was."""
     _, ui, h, home = home_open(fw, **{k: v for k, v in keys.items() if k != 'ART'})
     if 'ART' in keys:
         home.art = 0
@@ -4069,18 +4056,13 @@ def test_split_s_scrolled_rows_are_the_ground_under_the_clock(fw):
 
 def test_only_homes_main_list_can_be_edited_never_its_settings_list(fw):
     """Settings keeps a fixed order (user ruling, 2026-11-16): Edit Home takes Home's main list alone, not the
-    Settings list a Home row opens, nor Carousel."""
+    Settings list a Home row opens."""
     _, ui, h, _ = home_open(fw, HOME='1')
     edit_view = fw.fn('coverflow_home_edit_view', C.c_void_p, C.c_void_p)
     assert edit_view(h.win) == h.view
     assert not edit_view(h.main) and not edit_view(None)  # only with Home on top
     ui.click(h.rows['img_settings'])
     assert ui[h.sets].visible and not edit_view(h.win)
-
-
-def test_carousel_has_no_edit_home(fw):
-    _, ui, h, _ = home_open(fw, carousel=True, HOME='2')
-    assert not fw.fn('coverflow_home_edit_view', C.c_void_p, C.c_void_p)(h.win)
 
 
 # A page the payload builds (page_open), full-bleed as stock's (docs/oled-design.md#full-bleed).
