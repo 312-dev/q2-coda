@@ -3282,7 +3282,7 @@ static int named_album(widget *covers_view, int n) {
    second, gone by the landing, and none with Fast Navigation on, which keeps the row at speed. ---- */
 void cf_thumb_arch(float arch), cf_arch_pose(int t, float arch, int *out);
 
-/* ---- Pages, the scoped pages' cards, Go to Album, the build's Cancel row. ---- */
+/* ---- Pages, the scoped pages' cards, Go to Album. ---- */
 extern int coverflow_rated(int (*)(void *)), coverflow_goto_album(void *), coverflow_shows_album(void *);
 extern void *coverflow_tracks(void *);
 extern void coverflow_by_year(void *);
@@ -3357,36 +3357,6 @@ static void scoped_pages(void) {
     free(mine);
 }
 
-/* The build's Cancel row, as Return: the album in hand finishes, the rest wait for the next open. */
-static void cancel_build(void) {
-    album("Hold", "cover.jpg"), album("Back", "cover.jpg");
-    rescan();
-    block_at = calls;
-    widget home;
-    memset(&home, 0, sizeof(home));
-    coverflow_home(&home, 0);
-    page = &w[nw + 1];
-    home.click(home.ctx, 0);
-    while (!blocked) usleep(1000);
-    widget *row = row_under(page, 0);
-    assert(!strncmp(title(), "Preparing artwork", 17) && row && !strcmp(label_in(row, 0)->text, "Cancel"));
-    row->click(row->ctx, 0);
-    pthread_t t;
-    joining = 0;
-    pthread_create(&t, 0, release, 0);
-    run();
-    pthread_join(t, 0);
-    assert(size("Hold") == 9 && size("Back") == -1 && !tmp_files() && slide() && slide()->visible);
-    close_page();
-    block_at = -1;
-    open_page();
-    close_page();
-    assert(size("Back") == 9);
-    albums -= 2;
-    rescan();
-}
-
-
 /* ---- Each step in letters slides the held row there, through the albums between, on a follower
    slide_ms long: on at once from where it is, never back, never past the letter's first album, the
    caption on the album nearest the middle as it passes, the letter and the one click at the step. A
@@ -3452,6 +3422,93 @@ static int read_half(int a, unsigned *half) { /* album a's half copy, 80 x 80 */
     int ok = f && fread(half, 4, 80 * 80, f) == 80 * 80;
     if (f) fclose(f);
     return ok;
+}
+
+/* ---- A cold open shows the covers at once and builds the missing art behind them, on its thread
+   (docs/internals.md#coverflow): the album at the position first, then the nearest round the ring,
+   following the position as it moves; a cover on the screen fills in once its file is made, the
+   rest show the placeholder meanwhile, and a close keeps what was made, the next open going on
+   with the rest. ---- */
+static int built(int a) { char path[600]; cache_file(cf_album_key(a), "", path); return size_of(path) > 0; }
+static int index_of(const char *name) { /* Artist's album name's place in the covers' order, -1 when not there */
+    char want[600], got[600];
+    art_file(want, name);
+    for (int a = 0; a < slide_count(slide()); ++a)
+        if (cache_file(cf_album_key(a), "", got), !strcmp(want, got)) return a;
+    return -1;
+}
+static void step_build(void) { /* the worker's album in hand finished, and it blocks in the next */
+    block_at = calls;
+    blocked = 0;
+    while (!blocked) usleep(1000);
+}
+/* The art build's timer, taken as the open left it: a paint's own timer (the captions') takes the
+   shim's one slot after, where the main loop would run both. */
+static int (*art_fn)(const void *);
+static void art_tick(void) { /* one look of the build's timer, as the main loop would make it */
+    timer_fn = 0;
+    art_fn(0);
+}
+static void progressive_build(void) {
+    int first = albums, ring = 7;
+    char name[16];
+    for (int i = 0; i < ring; ++i) snprintf(name, sizeof name, "Ring %d", i), album(name, "cover.jpg");
+    rescan();
+    frame_fail = 0;
+    block_at = calls; /* the worker stops in its first album */
+    blocked = 0;
+    widget home;
+    memset(&home, 0, sizeof(home));
+    coverflow_home(&home, 0);
+    page = &w[nw + 1];
+    home.click(home.ctx, 0);
+    while (!blocked) usleep(1000);
+    widget *s = slide();
+    assert(s && s->visible && w[s->parent].visible && strncmp(title(), "Preparing", 9)); /* the covers, no progress page */
+    assert((art_fn = timer_fn));
+    int at[7];
+    for (int i = 0; i < ring; ++i) snprintf(name, sizeof name, "Ring %d", i), at[i] = index_of(name), assert(at[i] >= 0);
+    for (int i = 0; i < ring; ++i) assert(!built(at[i]));
+    /* The position moves onto Ring 3 while the first album builds: its cover is the placeholder,
+       and the next album built is Ring 3, then the nearest to it. */
+    int canvas[16] = { 0 };
+    *(int *)(s->raw + SLIDE_INDEX) = at[3], *(int *)(s->raw + SLIDE_OFFSET) = 0;
+    for (int k = 0; k < 3; ++k) coverflow_paint(s, canvas);
+    assert(cf_fx_has(at[3]) == 3);
+    art_tick();
+    step_build();
+    int made1 = -1;
+    for (int i = 0; i < ring; ++i) if (built(at[i])) assert(made1 < 0), made1 = i;
+    assert(made1 >= 0); /* the first, picked before the move */
+    step_build();
+    assert(built(at[3]));
+    /* Ring 3's cover, on the screen, fills in at the timer's next look; a neighbour not built yet
+       still shows the placeholder. */
+    art_tick();
+    for (int k = 0; k < 3; ++k) coverflow_paint(s, canvas);
+    assert(cf_fx_has(at[3]) == 2);
+    if (made1 != 2) assert(cf_fx_has(at[2]) == 3);
+    step_build();
+    assert(made1 == 2 || made1 == 4 ? built(at[2]) && built(at[4]) : built(at[2]) != built(at[4]));
+    /* A close keeps what was made; the next open builds only the rest, and none twice. */
+    int done = 0;
+    for (int i = 0; i < ring; ++i) done += built(at[i]);
+    pthread_t t;
+    joining = 0;
+    pthread_create(&t, 0, release, 0); /* the album in hand finishes once the cancel is set */
+    close_page();
+    pthread_join(t, 0);
+    block_at = -1;
+    int kept = 0;
+    for (int i = 0; i < ring; ++i) kept += built(at[i]);
+    assert(kept == done + 1 && !tmp_files());
+    int before = calls;
+    open_page();
+    for (int i = 0; i < ring; ++i) assert(built(index_of((snprintf(name, sizeof name, "Ring %d", i), name))));
+    assert(calls - before == ring - kept);
+    close_page();
+    albums = first;
+    rescan();
 }
 
 /* ---- The loader: going by letters the half copies are read on a thread of its own, the nearest
@@ -4736,8 +4793,8 @@ int main(void) {
     assert(calls == 3 && access(PEQ_ROOT "/mnt/data/q2-cf-trace", 0));
     close_page();
 
-    /* Cancel mid-build (Return on the progress screen) keeps the finished thumbnails, leaves no
-       .tmp, and shows the covers; the next open resumes with the rest. */
+    /* A close mid-build (the covers up at once, the art building behind them) stops after the album
+       in hand: the finished thumbnails stay, no .tmp is left, and the next open builds the rest. */
     album("A", "cover.jpg"); album("B", "cover.jpg"); album("C", "cover.jpg");
     rescan();
     block_at = calls + 1;
@@ -4747,19 +4804,16 @@ int main(void) {
     page = &w[nw + 1];
     home.click(home.ctx, 0);
     while (!blocked) usleep(1000);
-    assert(!strncmp(title(), "Preparing artwork", 17));
-    int e[16] = {0}; e[EVENT_KEY / 4] = KEY_RETURN;
-    w[8190].click(0, e);
+    assert(slide() && slide()->visible && strncmp(title(), "Preparing", 9));
     pthread_t t;
     joining = 0;
     pthread_create(&t, 0, release, 0); /* finish the album in hand once the cancel is set */
-    run();
-    pthread_join(t, 0);
-    assert(size("A") == 9 && size("B") == 9 && size("C") == -1 && !tmp_files() && slide() && slide()->visible);
     close_page();
+    pthread_join(t, 0);
+    assert((size("A") == 9) + (size("B") == 9) + (size("C") == 9) == 2 && !tmp_files());
     block_at = -1;
     open_page();
-    assert(size("C") == 9 && !strcmp(made[calls - 1], "cover.jpg"));
+    assert(size("A") == 9 && size("B") == 9 && size("C") == 9 && !strcmp(made[calls - 1], "cover.jpg"));
 
     /* Display settings' Refresh Cover Flow (coverflow_refresh_art) clears the cache and, at the next
        open, queries the albums again and rebuilds every one. Stock's Library covers go too, with
@@ -4826,7 +4880,7 @@ int main(void) {
     ffmpeg_art();
     player_cover();
     scoped_pages();
-    cancel_build();
+    progressive_build();
     unknown_resume();
     playlist_art_files();
     playlist_art_crash();
@@ -5152,13 +5206,13 @@ def main():
             for raw in sorted((tmp/'frames').glob('*.rgba')):  # RGBA8888 rows, the frame's byte order
                 (a.captures/(raw.stem + '.png')).write_bytes(imagemagick(
                     '-size', size, '-depth', '8', 'rgba:-', '-alpha', 'off', 'png:-', data=raw.read_bytes()))
-    print('Coverflow: art order, ffmpeg fallback, locks, markers, resume, cancel, Refresh, album list reuse, low space and empty library passed;'
+    print('Coverflow: art order, ffmpeg fallback, locks, markers, resume, a close mid-build, Refresh, album list reuse, low space and empty library passed;'
           ' depth renderer (exact centre, clipping, symmetry, reflection, continuity),'
           ' its texture window, centre click, small libraries and flat fallback passed;'
           ' Sort by artist, year, recently added, most played and random, kept across opens, passed;'
           ' Home art sources, fit, clip, cache and Split/Full layout passed;'
           ' playlist art (own picture, 2x2, bad picture, songs changed mid-build, card full or gone) passed; playlists as covers (captions, art filling in, Centre, Return) passed;'
-          ' the scoped pages\' cards, Go to Album, the Cancel row and the Unknown Album card\'s resume after a restart passed.')
+          ' the scoped pages\' cards, Go to Album, the art built behind the covers from the position outwards and the Unknown Album card\'s resume after a restart passed.')
 
 
 if __name__ == '__main__':

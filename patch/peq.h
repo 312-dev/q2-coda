@@ -327,6 +327,7 @@ int geom_val(int v) __attribute__((pure));
 /* menu_modal.c */
 int modal_actions(const char *const *names, const char *const *icons, int n, void (*pick)(int i));
 int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i));
+void modal_head(const char *title, const char *sub, void *r); /* the next sheet's header */
 void list_toggle(void *label, const char *title, int on); /* navigation.c: a row's switch */
 void caption_row(void *label, const char *text); /* settings_pages.c: a row's caption */
 /* navigation.c: a set_text row's value */
@@ -418,6 +419,10 @@ void tidal_clear(void);
  * once replaced or removed, forgotten on the UI thread. */
 #define APPS_MAX 8 /* card apps on the card at once */
 int addon_scan(void), addon_open(void *ctx, void *event), addon_hold(void *top);
+int addon_row_hold(void *top); /* Centre or a finger held on a card app's row: its own menu */
+/* library_pages.c: songs into the queue playing as the hold menu's Play Next (next 1) or Play Last
+ * (2); 0 when the queue takes none */
+int queue_add(void *add, int next);
 void child_quit(int pid, unsigned quit_ms); /* radio.c: a child asked to quit, reaped or killed */
 int addon_games_last(void); /* the card's games as the last addon_scan found them */
 /* The games games.c's chooser ships, the one place to turn each on (docs/internals.md#games): 1
@@ -660,7 +665,7 @@ void *label(void *parent, int x, int y, int w, int h, const char *style, int px,
 void spot_yield(void), spot_stop(void), radio_stop(void);
 void headset_volume_reset(void);
 int vol_next(unsigned key); /* volume.c: the volume a wheel tick moves to, at the wheel's speed */
-/* bt_vol_limit.c: a Bluetooth device's Volume Limit
+/* bt_vol_limit.c: a Bluetooth device's Volume Limit and Volume Curve
  * (docs/internals.md#headset-controls-and-volume); vol_cap is the volume's top now, Max Volume and
  * over Bluetooth the device's limit */
 int vol_cap(void), btlim_get(const char *mac), btlim_departing(int v), btlim_entering(int v);
@@ -669,6 +674,14 @@ void btlim_poll(void), btlim_saved(void), btlim_set(const char *mac, int v);
 void btlim_forget(const char *mac), btlim_text(int v, char *s, unsigned n);
 void btlim_edit(const char *mac), btlim_edit_take(int v), btlim_edit_save(void);
 void btlim_edit_row(void *label);
+/* ... and its Volume Curve, Link Volume's mapping onto the headset's 0 to 127 (playback_power.c
+ * bt_vol_avrcp); vol_gentle is the Bluetooth output's device's, 1 for Gentle */
+enum { BTLIM_EVEN, BTLIM_GENTLE_CURVE };
+#define BTLIM_CURVE_ROW "label_btcurve" /* the device page's Volume Curve value (bt_detail.c) */
+int btlim_curve(const char *mac), vol_gentle(void), btlim_edit_curve(void);
+void btlim_curve_set(const char *mac, int c), btlim_edit_curve_take(int c);
+const char *btlim_curve_name(int c);
+void bt_curve_open(void); /* library_settings.c: the Volume Curve picker for btlim_edit's device */
 int wheel_level(int value, int lo, int hi, int full, int dir); /* levels.c: a wheel tick's level */
 void headset_poll(void), headset_eq_poll(void), headset_manual(void);
 /* loop_wake.c: any thread ends the UI loop's idle (docs/internals.md#the-ui-loops-wait); the touch
@@ -848,6 +861,7 @@ const char *shelf_moving(void);         /* netupdate.c: the app folder deleted o
 int shelf_erase(int start);             /* netupdate.c: Spotify's erase, started or running */
 void stream_erased(void);               /* stream_config.c: Configuration follows a finished erase */
 void album_lyrics_stop(void); /* onlinematch.c: Get Album Lyrics before USB storage */
+void coverflow_art_stop(void); /* coverflow.c: Cover Flow's art build, before the card goes */
 /* release_sig.c (docs/internals.md#release-signatures): the release key's checks */
 enum { SIG_OK, SIG_BAD, SIG_IO, SIG_CANCELLED };
 void sig_hex(const unsigned char *in, unsigned n, char *out);

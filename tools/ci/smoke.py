@@ -12,8 +12,8 @@ This drives the build as a user would, in about a minute and a half:
 
     boot                     Home on top; a guardian card (No Temperature Sensor) confirmed, any other dialog fails
     Library > Songs > Center Now Playing opens (playing_page); Return to Songs; back to Home
-    Cover Flow > Center      its art built first (no "Preparing artwork"), then an album's tracks; Center on a
-                             track: Now Playing
+    Cover Flow > Center      its covers shown first (their art builds behind them), then an album's tracks;
+                             Center on a track: Now Playing
     Settings                 General, Playback, Display and Battery open and close
     Control Center           pulled down from the top (statusbar_dialog), Return closes it
     Search                   the letter strip types "AU" and results show; a held Return closes it
@@ -90,8 +90,8 @@ WM_GOT, WM_OFF, WM_CHILDREN, W_NAME, W_VT, VT_TYPE = 0xa3aae0 - 0x7f44, 0x1420, 
 BOOTKEY_FLAG = 0xa4ca59
 # A widget's flags word and its visible bit (widget_get_visible 0x67795c: lw 0x24($a0); ext 2, 1).
 W_FLAGS, W_VISIBLE = 0x24, 2
-# s for Cover Flow's first open to build its art ("Preparing artwork n/N"): every lease starts with no art
-# cached; the fixture's five albums take about 0.5 s, and took 1 to 3 s while its 16-bit PNG covers went to ffmpeg
+# s for Cover Flow's first open to show its covers: every lease starts with no art cached, which builds behind
+# the covers once they show (patch/coverflow.c art_build)
 ART_S = 60
 
 
@@ -187,9 +187,7 @@ def window_tree(pid, name):
 def coverflow_screen(tree):
     """What Cover Flow's page shows, from its widget tree (window_tree): 'covers' (the carousel, its slide_menu
     shown), 'tracks' (the carousel built and hidden under an album's text list) or 'building' (no carousel yet:
-    "Preparing artwork n/N" with its Cancel row, or the albums still loading). A Center on 'building' presses
-    Cancel (patch/coverflow.c art_build, cancel_row), which shows the covers: a change of screen, and not the
-    album's tracks the walk wanted. None for no page."""
+    the albums still loading). None for no page."""
     if not tree:
         return None
 
@@ -602,7 +600,7 @@ def steps(e, say, stream=None):
     e.row(HOME_FROM_END['cover flow'], from_end=True)
     e.do('key', 'centre')
     e.expect('coverflow_page', 'Cover Flow')
-    e.coverflow_shows('covers', 'Cover Flow\'s art built', ART_S)
+    e.coverflow_shows('covers', 'Cover Flow\'s covers shown', ART_S)
     say('Cover Flow > Center: the album\'s tracks')
     e.do('key', 'centre')
     e.coverflow_shows('tracks', 'Center on an album', STEP_S)

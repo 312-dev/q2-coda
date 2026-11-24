@@ -1058,3 +1058,47 @@ def test_control_device_volume_hands_the_volume_to_the_headset_and_follows_its_k
     assert q2.var('g_volume').value == 60 and headset.level == curve(60)
     q2.loop(ms=500)
     assert q2.var('g_volume').value == 60 and headset.level == curve(60)
+
+
+def gentle(v):
+    """The headset's level for Q2 volume v on a device's Gentle Volume Curve: the 40 dB curve."""
+    return 0 if v <= 0 else max(1, round(127 * 10 ** (-40 * (100 - v) / 2000)), round(127 * v / 400))
+
+
+def test_a_devices_gentle_volume_curve_moves_its_headset_at_once_and_holds_across_a_restart(q2, response_level):
+    """Link Volume on, the Px7 connected at 50: Even sends 64 of 127. Its Volume Curve set to Gentle (its page's picker)
+    sends 16 at once; after a restart the same device at the same volume is left at 16, the curve read back from the
+    store, where Even would have sent 64 again."""
+    mac = b'AA:BB:CC:DD:EE:07'
+
+    def connect():
+        q2.var('g_bluetoothflag').value = q2.var('bt_linkstatus').value = q2.var('g_backlight_status').value = 1
+        q2.fw.var('fw_ctx_bt_showcoding', C.c_int).value = 1
+        q2.var('g_maxvolume').value = 100
+        q2.way = 1
+        q2.fw.mock('getBtLinkSize', lambda *_: 1)
+
+        def item(i, status, out, *_):
+            C.c_int.from_address(status).value = 3
+            C.memmove(out, mac + b'\0', len(mac) + 1)
+            return 0
+        q2.fw.mock('getBtLinkItem', item)
+
+    q2.flash.ini[b'Q2POD', b'BTVOLLINK'] = b'1'
+    connect()
+    set_volume(q2, 50)
+    headset = Headset(q2, 30)
+    q2.loop()
+    q2.loop(ms=500)
+    assert headset.level == curve(50) == 64
+    q2.fw.fn('btlim_edit', None, C.c_char_p)(mac)
+    q2.fw.fn('btlim_edit_curve_take', None, C.c_int)(1)
+    assert headset.level == gentle(50) == 16 and q2.var('g_volume').value == 50
+    q2.loop(ms=3000)
+    q2.power_on()
+    connect()
+    q2.var('g_volume').value = 50
+    headset = Headset(q2, 16)  # the headset kept its level
+    q2.loop()
+    q2.loop(ms=500)
+    assert headset.level == 16 and q2.var('g_volume').value == 50

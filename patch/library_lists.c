@@ -67,12 +67,39 @@ int shuffle_play(void *all) {
     return size;
 }
 
-/* The Library's Shuffle Songs, and Home's row of that name (coverflow.c coverflow_home). */
-int shuffle_songs(void *ctx, void *event) {
+/* Shuffle Songs in steps a loading indicator can run between (docs/internals.md#shuffle-order,
+ * Shuffle Songs in steps), each a part of one UI pass: shuffle_songs_start takes the request,
+ * shuffle_songs_poll does the next step, the read of every song and then the play, and is 1 once
+ * none is left, and shuffle_songs_cancel lets the songs read go. Until the play's step nothing
+ * the user hears or sees has changed. sg.step: 0 none, 1 the read is next, 2 the play. */
+static struct {
+    void *all;
+    int step;
+} sg __attribute__((section(".scratch")));
+void shuffle_songs_cancel(void) {
+    if (sg.all) deque_destroy(sg.all);
+    sg.all = 0, sg.step = 0;
+}
+void shuffle_songs_start(void) {
+    shuffle_songs_cancel();
+    sg.step = 1;
+}
+int shuffle_songs_poll(void) {
     int n;
-    void *all = staged(songs_unsorted, (void *)1, &n);
-    if (!shuffle_play(all)) toast("Update Local Music first");
-    deque_destroy(all);
+    if (sg.step == 1) {
+        sg.all = staged(songs_unsorted, (void *)1, &n);
+        sg.step = 2;
+        return 0;
+    }
+    if (sg.step == 2 && !shuffle_play(sg.all)) toast("Update Local Music first");
+    shuffle_songs_cancel();
+    return 1;
+}
+/* The Library's Shuffle Songs, and Home's row of that name (coverflow.c coverflow_home): every
+ * step at once. */
+int shuffle_songs(void *ctx, void *event) {
+    shuffle_songs_start();
+    while (!shuffle_songs_poll()) {}
     return 0;
 }
 
@@ -92,12 +119,16 @@ static int shuffle_groups(void *ctx, void *event) {
 
 /* The Library's Shuffle row opens these three actions on one page. A pick starts playback and
  * leaves the page open, as Most Played's rows do. Album and folder shuffles queue and group the
- * whole library, hence the note. */
-static int sp_pick(void *ctx, void *event) {
+ * whole library, hence the note, and each runs under the loading wait (shuffle_wait.c). */
+static int sp_run(void *ctx, void *event) {
     if ((long)ctx)
         shuffle_groups((void *)((long)ctx - 1), 0);
     else
         shuffle_songs(0, 0);
+    return 0;
+}
+static int sp_pick(void *ctx, void *event) {
+    shuffle_wait_pick(sp_run, ctx);
     return 0;
 }
 

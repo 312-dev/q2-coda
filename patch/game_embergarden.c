@@ -15,7 +15,7 @@
 #include "peq.h"
 #include "stock.h" /* Q2POD_DEV */
 
-#define G_ART "/usr/share/q2games/embergarden/art.bin"
+#define G_ART "/usr/share/q2games/embergarden.bin"
 #define G_MAGIC 0x31474d45 /* "EMG1" */
 #define G_EMBERS 12        /* alive at once: the brief's 24 cut for the frame's cost */
 #define G_SHOTS 3          /* spurts in flight */

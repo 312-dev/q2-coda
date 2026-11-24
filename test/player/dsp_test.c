@@ -29,6 +29,40 @@ int smart_poll(struct xf_plan *p) {
 }
 void smart_cancel(const char *why) { ++smart_cancels; }
 void plog(char level, const char *msg, int n) { fprintf(stderr, "%.*s\n", n, msg); }
+/* tail.c's side: a song's file is filed (its frames, float) while a check has one, and a second open reads it from the
+ * frame asked; with none there is no second open, and every tail is held in memory. From frame filed_stop on (0: none)
+ * the stand-in has nothing decoded and never will, as a card that stopped answering. opens, reads, notes and closes
+ * count what dsp.c asked. */
+static const float *filed;
+static unsigned filed_frames, filed_nch, filed_stop, tail_opens, tail_reads, tail_notes, tail_closes;
+struct tail { int64_t at; };
+struct tail *tail_open(const char *url, const struct pcm_format *f, int64_t frame) {
+    if (!filed) return NULL;
+    struct tail *t = calloc(1, sizeof *t);
+    t->at = frame, ++tail_opens;
+    return t;
+}
+int tail_ready(struct tail *t) { return 1; }
+int64_t tail_at(const struct tail *t) { return t->at; }
+static int filed_there(const struct tail *t) {
+    unsigned end = filed_stop && filed_stop < filed_frames ? filed_stop : filed_frames;
+    return t->at < end ? (int)(end - t->at) : 0;
+}
+int tail_ahead(struct tail *t, int need, int wait_ms, int *whole) {
+    *whole = !filed_stop;
+    return filed_there(t);
+}
+int tail_read(struct tail *t, uint8_t *out, int frames, int wait_ms) {
+    int n = filed_there(t) < frames ? filed_there(t) : frames;
+    memcpy(out, filed + (size_t)t->at * filed_nch, (size_t)n * filed_nch * 4);
+    t->at += n, tail_reads += (unsigned)n;
+    return n;
+}
+void tail_note(struct tail *t, const uint8_t *data, int frames) { tail_notes += (unsigned)frames; }
+void tail_close(struct tail *t) {
+    if (t) ++tail_closes;
+    free(t);
+}
 
 static peq_preset active(double preamp, double gain) {
     peq_preset p;
@@ -358,7 +392,7 @@ static void smart_pair(int ra, int na, wave fa, int rb, int nb, wave fb, unsigne
     xfade_view(0);
 }
 static struct xf_plan plan_of(int64_t overlap, int64_t trail, int64_t skip, int64_t fade, int rate) {
-    struct xf_plan p = {overlap, trail, skip, fade, rate, "b"};
+    struct xf_plan p = {overlap, trail, skip, fade, rate, "b", 0};
     return p;
 }
 static float tone(unsigned i, int c) { return 0.99f * sinf(6.2831853f * 1000 * (i % 48) / 48000); }
@@ -400,6 +434,17 @@ static void smart_check(void) {
     assert((unsigned)(cut + 23999 * step) == 441000 - 4410 - 1); /* the overlap's last frame read */
     for (unsigned t = 24000; t < out_b; ++t) assert(song_b[t] == 0);
 
+    /* An overlap that begins in A's body (the next intro's or the floor's, in_body): A fades out as cos squared. */
+    smart_given = plan_of(24000, 0, 0, 0, 48000);
+    smart_given.in_body = 1;
+    smart_pair(48000, 2, ramp, 48000, 2, zero, 48000, smart, 0);
+    cut = 480000 - 24000;
+    assert(out_a == cut);
+    for (unsigned t = 0; t < 24000; ++t) {
+        float go = cosf((t + 0.5f) / 24000 * 1.5707963f);
+        assert(fabsf(song_b[2 * t] - go * go * ramp(cut + t, 0)) < 2e-6f);
+    }
+
     /* The next song: its leading frames dropped, then in over its fade-in, or at full level from its first frame (a
      * hard start). */
     smart_given = plan_of(24000, 0, 4800, 9600, 48000);
@@ -425,6 +470,22 @@ static void smart_check(void) {
     assert(out_a == 10 * 48000 - 5 * 48000);
     smart_answer = SMART_PLAIN;
     free(song_a), free(song_b), song_a = song_b = 0;
+
+    /* The analysis is asked for once, XF_SMART_LEAD_S (45 s) before a 60 s song's end: not at 14.9 s, by 15.1 s. */
+    length = 60;
+    xfade_view(smart);
+    struct dsp *d = track(48000, 2);
+    dsp_path(d, "a");
+    static float buf[2 * 1024];
+    int begun = smart_begun;
+    unsigned n = 0;
+    while (n + 1024 <= (unsigned)(14.9 * 48000)) block(d, buf, 1024, &n, 0, 48000);
+    assert(smart_begun == begun);
+    while (n < (unsigned)(15.1 * 48000)) block(d, buf, 1024, &n, 0, 48000);
+    assert(smart_begun == begun + 1);
+    dsp_close(d, 0);
+    xfade_view(0);
+    length = 10;
 }
 
 /* Mono Audio and Swap L/R: demo's files, looked for once a second of audio; set, each stereo frame is its channels'
@@ -690,6 +751,165 @@ static void meter_check(void) {
     assert(uv[0] == -60 && uv[1] == -60);
 }
 
+/* ---- the tail from the file (docs/internals.md#the-tail-from-the-file): the same two songs through the same change,
+ * once with A's tail held in the ring and once read from A's file a second time (the stand-in above), must come out
+ * the same to the bit, whatever the stages do meanwhile. */
+static float noise(unsigned i, int c) { /* a different, repeatable value for each sample */
+    unsigned x = (i * 2 + (unsigned)c + 1) * 2654435761u;
+    x ^= x >> 15, x *= 2246822519u, x ^= x >> 13;
+    return (float)((int)(x >> 8 & 0xffff) - 32768) * (0.6f / 32768);
+}
+enum { FILED_RATE = 48000, FILED_S = 20 };
+/* A (FILED_S of noise, 48 kHz stereo, ReplayGain rg) to its end, then bframes of B at rb Hz and nb channels, the
+ * frames out of both into out (their count): from the file if file, else from the ring. what: 1, a new EQ while the
+ * hold runs; 2, Mono Audio turned on and Swap L/R off while it runs; 4, a block out of place (a seek) while it runs. */
+enum { SIG_NOISE, SIG_COUNT, SIG_LEVEL };
+static int filed_sig;        /* A: noise; channel 0 its frame's number and the EQ off; or 0.5 throughout and the EQ off */
+static float filed_b = 0.25f; /* B's level */
+static unsigned filed_seek;  /* what & 4: the frames the seek at 15 s skips */
+static unsigned filed_a_out; /* A's frames out */
+static unsigned filed_pair(int file, int word, float rg, int rb, int nb, unsigned bframes, int what, float *out) {
+    static float *a_song, buf[2 * 4096];
+    unsigned total = FILED_S * FILED_RATE, got = 0, sizes[] = {4096, 1000, 2311, 64, 4096, 3333};
+    static volatile int *mono, *swap;
+    if (!mono) mono = shared(MONO_FILE), swap = shared(SWAP_FILE);
+    if (!a_song) a_song = malloc((size_t)total * 2 * sizeof *a_song);
+    for (unsigned i = 0; i < total; ++i)
+        for (int c = 0; c < 2; ++c)
+            a_song[2 * i + c] = filed_sig == SIG_NOISE ? noise(i, c) : filed_sig == SIG_LEVEL || c ? 0.5f : (float)i;
+    filed = file ? a_song : NULL, filed_frames = total, filed_nch = 2;
+    tail_opens = tail_reads = tail_notes = tail_closes = 0;
+    *mono = 0, *swap = what & 2 ? 1 : 0;
+    if (filed_sig == SIG_NOISE) active(-2, 6);
+    else unlink(PEQ_ACTIVE);
+    xfade_view(word);
+    length = FILED_S;
+    struct pcm_format f = {FILED_RATE, 2, 4, 1, DSD_PCM};
+    struct dsp *a = dsp_open(&f, 0, rg, length);
+    dsp_path(a, "a");
+    int done = 0;
+    for (unsigned n = 0, j = 0; n < total; ++j) {
+        unsigned m = sizes[j % 6] < total - n ? sizes[j % 6] : total - n;
+        memcpy(buf, a_song + (size_t)n * 2, (size_t)m * 8);
+        if (n > 15 * FILED_RATE && !done) { /* inside the hold, which begins by 12 s */
+            done = 1;
+            if (what & 1) active(1, -5), dsp_eq_changed(a);
+            if (what & 2) *mono = 1, *swap = 0;
+        }
+        if (what & 4 && n > 15 * FILED_RATE && done != 2) { /* a seek forward: the next block is from further on */
+            done = 2, n += filed_seek;
+            if (m > total - n) m = total - n;
+            memcpy(buf, a_song + (size_t)n * 2, (size_t)m * 8);
+        }
+        dsp_frame(a, (int64_t)n);
+        n += m;
+        unsigned k = run(a, buf, m, 2, (double)n / FILED_RATE);
+        memcpy(out + (size_t)got * 2, buf, (size_t)k * 8), got += k;
+    }
+    dsp_close(a, 1);
+    filed_a_out = got;
+    struct pcm_format g = {rb, nb, 4, 1, DSD_PCM};
+    struct dsp *b = dsp_open(&g, 0, 1, length);
+    dsp_path(b, "b");
+    for (unsigned n = 0; n < bframes;) {
+        unsigned m = bframes - n < 1024 ? bframes - n : 1024;
+        for (unsigned i = 0; i < m; ++i)
+            for (int c = 0; c < nb; ++c) buf[i * nb + c] = filed_b * noise(n + i + 99, c);
+        n += m;
+        unsigned k = run(b, buf, m, nb, (double)n / rb);
+        memcpy(out + (size_t)got * 2, buf, (size_t)k * nb * 4), got += (k * (unsigned)nb + 1) / 2;
+    }
+    dsp_close(b, 1);
+    xfade_view(0);
+    *mono = *swap = 0;
+    filed = NULL, filed_stop = 0, length = 10;
+    return got;
+}
+static void filed_check(void) {
+    size_t room = (size_t)(FILED_S + 12) * FILED_RATE * 2;
+    float *ring = calloc(room, sizeof *ring), *file = calloc(room, sizeof *file);
+    static const struct { int word; float rg; int rb, nb, what; int64_t overlap, trail; } cases[] = {
+        {3000, 1, 48000, 2, 0, 0, 0},                               /* the plain fade, the EQ's memory carried into B */
+        {3000, 0.7f, 44100, 1, 0, 0, 0},                            /* ReplayGain, another rate, mono under stereo */
+        {3000 | XF_SMART, 1, 48000, 2, 0, 4 * 48000, 48000 / 2},    /* a plan: 4 s and half a second dropped */
+        {3000 | XF_SMART, 1.3f, 96000, 2, 0, 6 * 48000 + 1, 4801},  /* frames between two of B's, ReplayGain's clip */
+        {3000, 1, 48000, 2, 1, 0, 0},                               /* a new EQ in the hold */
+        {3000 | XF_SMART, 0.7f, 48000, 2, 3, 5 * 48000, 0},         /* a new EQ, Mono Audio on and Swap L/R off in it */
+        {3000, 1, 44100, 2, 2, 0, 0},                               /* Mono Audio on and Swap L/R off in it alone */
+    };
+    for (unsigned i = 0; i < sizeof cases / sizeof *cases; ++i) {
+        smart_answer = cases[i].word & XF_SMART ? SMART_PLAN : SMART_PLAIN;
+        smart_given = plan_of(cases[i].overlap, cases[i].trail, 0, 0, cases[i].rb);
+        unsigned bframes = (unsigned)cases[i].rb * 8;
+        unsigned n = filed_pair(0, cases[i].word, cases[i].rg, cases[i].rb, cases[i].nb, bframes, cases[i].what, ring);
+        assert(!tail_opens && !tail_reads);
+        unsigned m = filed_pair(1, cases[i].word, cases[i].rg, cases[i].rb, cases[i].nb, bframes, cases[i].what, file);
+        /* read from the file: the frames before the hold that were compared, the hold's and the mix's (9 s and more
+         * of the song's last 11); every block of the hold noted (8 s and more); the open closed */
+        assert(tail_opens == 1 && tail_closes == 1 && tail_notes > 6 * FILED_RATE && tail_reads > 9 * FILED_RATE);
+        assert(n == m && n > (FILED_S - 6) * FILED_RATE);
+        for (size_t k = 0; k < (size_t)n * 2; ++k)
+            if (memcmp(&ring[k], &file[k], 4)) {
+                fprintf(stderr, "filed case %u: sample %zu of %u frames: ring %g, file %g\n", i, k, n, ring[k], file[k]);
+                assert(0);
+            }
+    }
+    /* ---- a seek while the hold reads the file (A's channel 0 is its frame's number, the EQ off, so the frames out
+     * say which frames played): that tail is left behind and the open closed, as the ring leaves its own at a seek
+     * of XF_SEEK_S; what plays is A's frames in order with one step forward, at the seek, to the frame sought: none
+     * twice, none out of order, none of the frames before the seek after it. The hold that begins again is the
+     * ring's, and the change plays through. A seek of half a second and one of 3 s. */
+    smart_answer = SMART_PLAIN, filed_sig = SIG_COUNT;
+    for (int big = 0; big < 2; ++big) {
+        filed_seek = big ? 3 * FILED_RATE : FILED_RATE / 2;
+        unsigned n = filed_pair(1, 3000, 1, 48000, 2, 8 * 48000, 4, file), steps = 0, at = 0;
+        assert(tail_opens == 1 && tail_closes == 1 && tail_reads > FILED_RATE && n > (FILED_S - 7) * FILED_RATE);
+        for (unsigned i = 1; i < filed_a_out; ++i)
+            if (file[2 * i] != file[2 * (i - 1)] + 1) ++steps, at = i;
+        assert(steps == 1 && file[2 * at] > file[2 * (at - 1)] + filed_seek);    /* forward, past what the hold held */
+        assert(file[2 * at] > 15 * FILED_RATE + filed_seek && file[2 * (at - 1)] < 15 * FILED_RATE + 4096); /* at the seek */
+        assert(file[2 * (filed_a_out - 1)] < FILED_S * FILED_RATE);
+    }
+    /* ---- a second open that stops giving frames (filed_stop: a card that no longer answers it), by where:
+     * before the hold, the song does not wait: the tail is held in the ring, and the change is the ring's to the bit */
+    filed_sig = SIG_NOISE, filed_seek = 0;
+    unsigned n = filed_pair(0, 3000, 1, 48000, 2, 8 * 48000, 0, ring);
+    filed_stop = 10 * FILED_RATE + 100;
+    unsigned m = filed_pair(1, 3000, 1, 48000, 2, 8 * 48000, 0, file);
+    assert(tail_opens == 1 && tail_closes == 1 && !tail_notes && n == m && !memcmp(ring, file, (size_t)n * 8));
+    /* in the hold: the frames it gave play, in order; then the hold is left, as at a seek, and the song plays on
+     * from where its decode is: one step forward, nothing twice */
+    filed_sig = SIG_COUNT, filed_stop = 15 * FILED_RATE;
+    m = filed_pair(1, 3000, 1, 48000, 2, 8 * 48000, 0, file);
+    unsigned steps = 0, at = 0;
+    for (unsigned i = 1; i < filed_a_out; ++i)
+        if (file[2 * i] != file[2 * (i - 1)] + 1) ++steps, at = i;
+    assert(tail_closes == 1 && steps == 1 && file[2 * at] > file[2 * (at - 1)]);
+    assert(file[2 * (at - 1)] < 15 * FILED_RATE && file[2 * (at - 1)] >= 15 * FILED_RATE - 4096); /* to within a block of the last it gave */
+    /* under the next song (A at 0.5 throughout, B silent, so the frames out are the tail's gain): the tail fades to
+     * nothing over the frames there are, XF_CUT_S, and no step is larger than that ramp's; the next song's frames
+     * all play, as many as with the whole tail */
+    filed_sig = SIG_LEVEL, filed_b = 0;
+    n = filed_pair(0, 3000, 1, 48000, 2, 8 * 48000, 0, ring);
+    unsigned a_out = filed_a_out;
+    filed_stop = 18 * FILED_RATE; /* the tail is the last 3 s: its first second there */
+    m = filed_pair(1, 3000, 1, 48000, 2, 8 * 48000, 0, file);
+    assert(n == m && a_out == filed_a_out && tail_closes == 1);
+    unsigned gone = 0;
+    float worst = 0;
+    for (unsigned i = a_out + 1; i < n; ++i) {
+        float d = fabsf(file[2 * i] - file[2 * (i - 1)]);
+        assert(file[2 * i] <= file[2 * (i - 1)] + 1e-6f && file[2 * i] <= ring[2 * i] + 1e-6f); /* only ever down */
+        if (d > worst) worst = d;
+        if (!gone && file[2 * i] == 0) gone = i;
+    }
+    assert(!memcmp(ring, file, (size_t)(a_out + FILED_RATE * 3 / 4) * 8)); /* the same to XF_CUT_S and a block before */
+    assert(gone > a_out + FILED_RATE * 9 / 10 && gone <= a_out + FILED_RATE + 1 && ring[2 * gone] > 0.1f); /* gone at 1 s */
+    assert(worst <= 0.5f / (0.2f * FILED_RATE) * 1.05f);
+    filed_sig = SIG_NOISE, filed_b = 0.25f, filed_stop = 0;
+    free(ring), free(file);
+}
+
 int main(void) {
     assert(!mkdir(PEQ_ROOT "/mnt", 0755) && !mkdir(PEQ_ROOT "/mnt/data", 0755) && !mkdir(PEQ_ROOT "/tmp", 0755));
     bypass_check();
@@ -697,11 +917,12 @@ int main(void) {
     crossfade_check();
     midmix_check();
     smart_check();
+    filed_check(); /* before mono_check, which removes the files this one's Mono Audio and Swap L/R are set through */
     mono_check();
     cast_check();
     carry_check();
     meter_check();
     puts("dsp: bypass and the round trip, ReplayGain's clip, DSD, the EQ at 8-384 kHz and 1-8 channels, "
-         "the reread, 3EQ and its held preamp, crossfade, mid-mix, smart crossfade, mono and swap, AirPlay's tap, carried filter memory, the meter");
+         "the reread, 3EQ and its held preamp, crossfade, mid-mix, smart crossfade, mono and swap, AirPlay's tap, carried filter memory, the tail from the file, the meter");
     return 0;
 }

@@ -23,7 +23,7 @@ HOME_PW = 188  # coverflow.c HOME_PW: the widest pane, home.ring's and home.held
 _G = host.tools_theme.built_geometry(host.tools_theme.builtins())
 PANE_W, PANE_H = 375 - _G.split_art, 320 - _G.bar + _G.split_art_up
 TEX_H = PANE_H * 11 // 10
-PREPARING, COVERS, TRACKS = range(3)
+LOADING, COVERS, TRACKS = range(3)
 RATED_ALBUMS, PLAYLISTS = 1, 3  # coverflow.h's cf.scoped
 CF_REACH, CF_WIDE_REACH = 3, 7  # the ring's slots either side of the centre: fx_ring's, and its callers' window
 SORT_ALBUM, SORT_ARTIST, SORT_ADDED, SORT_PLAYED, SORT_RANDOM, SORT_RATING, SORT_YEAR = range(7)
@@ -34,7 +34,9 @@ r = C.byref
 class Cf(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'page body covers slide name artist title albums tracks stock'.split()),
                 *((k, C.c_int) for k in 'sort sort_read year_old artists on_sort resort'.split()),
-                ('jobs', C.c_void_p), ('thread', C.c_ulong), ('timer', C.c_uint), ('title_timer', C.c_uint), ('titled', C.c_int), ('offline', C.c_int),
+                ('jobs', C.c_void_p), ('thread', C.c_ulong), ('timer', C.c_uint), ('title_timer', C.c_uint),
+                ('art_timer', C.c_uint), ('art_at', C.c_uint), ('art_told', C.c_int), ('art_ring', C.c_int), ('want', C.c_int),
+                ('titled', C.c_int), ('offline', C.c_int),
                 ('saved_album', C.c_uint), ('albums_gen', C.c_uint),
                 *((k, C.c_int) for k in 'screen album running done total cancel scoped all_sort'.split()),
                 *((k, C.c_void_p) for k in 'all_albums all_stock hearts'.split()), ('count', C.c_int)]
@@ -68,7 +70,7 @@ class Pose(C.Structure):
 
 
 class Job(C.Structure):
-    _fields_ = [('track', C.c_char_p), ('key', C.c_uint), ('shared', C.c_int)]
+    _fields_ = [('track', C.c_char_p), ('key', C.c_uint), ('at', C.c_int), ('shared', C.c_ubyte), ('made', C.c_ubyte)]
 
 
 class Dirent(C.Structure):
@@ -1195,7 +1197,7 @@ def cf(fw):
     return fw.var('cf', Cf)
 
 
-@pytest.mark.parametrize('slide, screen, timer, live', ((1, COVERS, 0, 1), (0, COVERS, 0, 0), (1, TRACKS, 0, 0), (1, PREPARING, 0, 0), (1, COVERS, 5, 0)))
+@pytest.mark.parametrize('slide, screen, timer, live', ((1, COVERS, 0, 1), (0, COVERS, 0, 0), (1, TRACKS, 0, 0), (1, LOADING, 0, 0), (1, COVERS, 5, 0)))
 def test_covers_live_needs_the_covers_with_no_change_pending(fw, slide, screen, timer, live):
     c = cf(fw)
     c.slide, c.screen, c.timer = slide, screen, timer
@@ -1860,7 +1862,7 @@ def art(key, suffix=''):
 
 
 def job(track, key=0xabc, shared=0):
-    return Job(track, key, shared)
+    return Job(track, key, 0, shared)
 
 
 def builder(fw, card, cover=False, thumb=False, ff=None):
@@ -1960,9 +1962,9 @@ def test_the_worker_notes_each_album_before_its_build_and_drops_the_note_after_t
     builder(fw, card, ff=0)
     noted = []
     fw.mock('toolsGetAlbumCover', lambda *_: noted.append(card.files.get(BUILDING)) or 0)
-    jobs = (Job * 2)(Job(b'/m/a.mp3', 0xa, 0), Job(b'/m/b.mp3', 0xb, 0))
+    jobs = (Job * 2)(Job(b'/m/a.mp3', 0xa, 0), Job(b'/m/b.mp3', 0xb, 1))
     c = cf(fw)
-    c.jobs, c.total, c.done, c.cancel = C.addressof(jobs), 2, 0, 0
+    c.jobs, c.total, c.done, c.cancel, c.art_ring, c.want = C.addressof(jobs), 2, 0, 0, 2, 0
     assert g.worker(None) is None and c.done == 2
     assert noted == [struct.pack('<I', 0xa) + b'/m/a.mp3', struct.pack('<I', 0xb) + b'/m/b.mp3']
     assert set(card.files) == {'/m/a.mp3', '/m/b.mp3', art(0xa), art(0xb)}  # no note, no temporary
@@ -2009,9 +2011,9 @@ def test_a_clean_end_mid_build_stops_the_worker_before_the_next_album_s_note(fw,
         fw.mock('toolsGetAlbumCover', lambda *_: g.coverflow_clean_end() or 0)
     else:
         fw.mock('fw_fsync', lambda *_: g.coverflow_clean_end() or 0)
-    jobs = (Job * 2)(Job(b'/m/a.mp3', 0xa, 0), Job(b'/m/b.mp3', 0xb, 0))
+    jobs = (Job * 2)(Job(b'/m/a.mp3', 0xa, 0), Job(b'/m/b.mp3', 0xb, 1))
     c = cf(fw)
-    c.jobs, c.total, c.done, c.cancel = C.addressof(jobs), 2, 0, 0
+    c.jobs, c.total, c.done, c.cancel, c.art_ring, c.want = C.addressof(jobs), 2, 0, 0, 2, 0
     assert g.worker(None) is None and c.done == (during == 'cover')
     assert set(card.files) == {'/m/a.mp3', '/m/b.mp3'} | ({art(0xa)} if during == 'cover' else set())
 

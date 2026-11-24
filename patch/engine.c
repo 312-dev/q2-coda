@@ -23,6 +23,7 @@ static struct eng {
  * and only with [Q2POD] ENGINEDEMO=1 in config.ini; a release build links none of it. */
 static const struct eng_game *const eng_games[] = {
     &eng_bricks,
+    &eng_solitaire,
     &eng_embergarden,
 #if Q2POD_DEV
     &eng_demo,

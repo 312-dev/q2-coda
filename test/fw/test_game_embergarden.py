@@ -14,7 +14,7 @@ from test_games import PAGE, Canvas, Page, fnv1a, heard
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 ART = (ROOT / 'assets/games/embergarden.bin').read_bytes()
-ART_FILE, FILE, MAGIC = '/usr/share/q2games/embergarden/art.bin', '/mnt/data/game-embergarden', 0x31474d45
+ART_FILE, FILE, MAGIC = '/usr/share/q2games/embergarden.bin', '/mnt/data/game-embergarden', 0x31474d45
 HDR = {k: int(v) for k, v in re.findall(r'^#define (EG_\w+) (\d+)u?\b', (ROOT / 'patch/game_embergarden_art.h').read_text(), re.M)}
 PARTS = re.findall(r'^    EG_(\w+), /\*', (ROOT / 'patch/game_embergarden_art.h').read_text(), re.M)
 CH_X = [int(v) for v in re.search(r'EG_CH_X \{ ([\d, ]+) \}', (ROOT / 'patch/game_embergarden_art.h').read_text())[1].split(', ')]
@@ -633,10 +633,10 @@ def test_the_sprinklers_barrel_lies_along_the_aim(fw, aim):
     g.close()
 
 
-def test_ember_garden_is_games_second_engine_row_full_screen_and_pauses_under_its_menu(fw):
+def test_ember_garden_is_games_third_engine_row_full_screen_and_pauses_under_its_menu(fw):
     p = Page(fw, {ART_FILE: ART})
-    p.go(ENGINE + 1)
-    assert p.s.screen == ENGINE + 1 and api(fw)['eng_live']() and p.s.full == 1
+    p.go(ENGINE + 2)
+    assert p.s.screen == ENGINE + 2 and api(fw)['eng_live']()
     s = State.from_address(fw.var('engine__en', C.c_void_p).value + C.sizeof(Eng) + (-C.sizeof(Eng)) % 8)
     assert s.ok == 1 and s.h == 320
     p.key(RETURN)

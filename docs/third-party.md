@@ -139,6 +139,8 @@ license (`docs/ipod.md`).
 | Component                                    | License | Files                                                          | Used for                                                                                                       |
 | -------------------------------------------- | ------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | Phosphor Icons, `@phosphor-icons/core` 2.1.1 | MIT     | `assets/icons/phosphor/*.svg`, `assets/icons/phosphor/LICENSE` | Theme: OLED's glyphs, drawn into bitmaps at build time by `tools/art.py` ([oled-design](oled-design.md#icons)) |
+| Libre Baskerville 2.005 (bold and regular)   | OFL-1.1 | `assets/games/solitaire.bin`, `assets/games/LibreBaskerville-OFL.txt` | Cabin Solitaire: the cards' indexes and the figures and words of its slip and boards, as glyph masks of only the sizes and letters it draws ([games-engine](games-engine.md#cabin-solitaire)) |
+| Playfair Display 1.203 (weight 800)          | OFL-1.1 | `assets/games/solitaire.bin`, `assets/games/PlayfairDisplay-OFL.txt`  | Cabin Solitaire: its boards' two titles, as glyph masks. Its Reserved Font Name is not used: no font is shipped, only the masks |
 | Baloo 2 (Ek Type), Bold                      | OFL-1.1 | `assets/games/embergarden.bin` (its letters drawn as masks; the font file is not in the repository or the firmware) | Ember Garden's lettering, drawn by `tools/embergarden_art.py` ([games-engine](games-engine.md#ember-garden)) |
 
 ## What the scan still finds

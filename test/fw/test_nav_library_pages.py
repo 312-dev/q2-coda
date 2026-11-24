@@ -10,7 +10,7 @@ import struct
 import pytest
 
 import host
-from conftest import FNV_PRIME, O, Deques, Files, claim, favdir_card, fnv1a, high_halves, in_fork, libc, stock_prop_str, ui_name
+from conftest import FNV_PRIME, O, Deques, Files, block, claim, favdir_card, fnv1a, high_halves, in_fork, libc, stock_prop_str, ui_name
 from conftest import Rows as HeldRows  # Rows here is Folder view's list
 
 from test_navigation import Sa  # test_navigation.py keeps the mirror
@@ -448,6 +448,27 @@ def test_shuffle_songs_plays_the_library_from_a_random_song(fw, ui, mcl, song):
     assert queue == songs and 0 <= at < 4 and cls == LIBRARY
     assert library.asked == [3]  # unsorted: Shuffle has no use for the title sort
     assert ui.windows  # the page stays, as Most Played's rows leave it
+
+
+def test_shuffle_songs_in_steps_reads_then_plays_and_a_cancel_between_changes_nothing(fw, ui, mcl, song):
+    """The three calls a loading indicator drives (library_lists.c): the first poll reads the library and plays
+    nothing, the second plays and says it is done; cancelled after the read, nothing plays and a poll is done."""
+    songs = [song(b'/m/%d.flac' % i) for i in range(4)]
+    library = Library(fw, ui, songs)
+    start, cancel = fw.fn('shuffle_songs_start', None), fw.fn('shuffle_songs_cancel', None)
+    poll = fw.fn('shuffle_songs_poll', C.c_int)
+    assert poll() == 1 and not library.asked, 'nothing asked for: done, and nothing read'
+    start()
+    assert not library.asked and not ui.played
+    assert poll() == 0 and library.asked == [3] and not ui.played
+    cancel()
+    assert poll() == 1 and library.asked == [3] and not ui.played and not ui.toasts
+    start()
+    assert poll() == 0 and not ui.played
+    assert poll() == 1
+    (queue, at, cls), = ui.played
+    assert queue == songs and 0 <= at < 4 and cls == LIBRARY and library.asked == [3, 3]
+    assert poll() == 1 and len(ui.played) == 1, 'done stays done'
 
 
 @pytest.mark.parametrize('row, folders', [(1, 0), (2, 1)])
@@ -3006,12 +3027,12 @@ class CfOpen:
                     TICK(fn)(ctx)
 
     def watch(self, ms):
-        """ms later, the ticks that wait (open_step's, Preparing artwork's poll) run as the main loop would: the cf
-        lines they added."""
+        """ms later, the ticks that wait (open_step's, and the art build's look, art_poll) run as the main loop
+        would: the cf lines they added."""
         self.clock[0] += ms
         before = len(self.lines)
         ticks = {C.cast(self.fw.lib.coverflow__open_step, C.c_void_p).value,
-                 C.cast(self.fw.lib.coverflow__poll, C.c_void_p).value}
+                 C.cast(self.fw.lib.coverflow__art_poll, C.c_void_p).value}
         for t, (fn, ctx, _ms) in list(self.ui.timers.items()):
             if fn in ticks:
                 del self.ui.timers[t]
@@ -3048,7 +3069,8 @@ def test_a_cover_flow_open_in_its_cover_lookup_says_how_far(fw, ui, song):
                               '0 without a cover file']
 
 
-# the page up on Preparing artwork (a build of its art, on a thread) and closed before any cover shows
+# the covers up at once with their art to build behind them (on a thread), and the page closed before the build
+# ends: the line says how far it got
 def test_a_cover_flow_page_closed_while_its_art_builds_says_so(fw, ui, song):
     def statfs(path, buf, *_):  # the card has room for the art
         words = C.cast(buf, C.POINTER(C.c_uint))
@@ -3059,11 +3081,12 @@ def test_a_cover_flow_page_closed_while_its_art_builds_says_so(fw, ui, song):
     cf = CfOpen(fw, ui, song)
     cf.steps()
     page = ui.top()
-    assert ui.name[page] == 'coverflow_page' and not any(line.startswith('I cover flow shown') for line in cf.lines)
-    assert cf.watch(5000) == ['W cover flow not shown 5 s after its open: the thumbnail build, 0 of 2 done']
+    assert ui.name[page] == 'coverflow_page'
+    assert cf.lines[-1].startswith('I cover flow shown: covers, 2 albums, ') and ' ms after its open, 2 covers to build' in cf.lines[-1]
+    assert cf.watch(5000) == []  # shown: nothing waits
+    cf.clock[0] += 1500
     ui.close(page)
-    assert cf.lines[-1].startswith('I cover flow closed ') and cf.lines[-1].endswith(
-        'not shown: the thumbnail build, 0 of 2 done')
+    assert cf.lines[-1] == 'I cover flow art stopped: 0 of 2 covers, 6500 ms'
     assert cf.watch(60000) == []
 
 
@@ -3292,7 +3315,8 @@ def test_a_streaming_service_with_no_link_is_the_empty_state_and_its_row_opens_w
 # Chapters under the loading overlay (docs/oled-design.md#loading): the page opens once ffmpeg's chapters are read, the
 # spinner over the window the menu was held on meanwhile (list_marks.c load_over), Return or a tap off it giving up.
 class Lo(C.Structure):
-    _fields_ = [('win', C.c_void_p), ('cancel', C.c_void_p)]
+    _fields_ = [('win', C.c_void_p), ('cancel', C.c_void_p), ('step', C.c_void_p), ('caption', C.c_char_p),
+                ('timer', C.c_uint)]
 
 
 def gate(fw, type, a, b=0):
@@ -3366,3 +3390,105 @@ def test_the_window_closing_gives_chapters_up(fw, ui, song, mcl):
     book, home, lo = held_chapters(fw, ui, song, mcl)
     ui.close(home)
     assert lo.win is None and book.killed == [(123, 9)]
+
+
+# The loading wait with work of its own (list_marks.c load_wait, docs/internals.md#loading-wait): its step runs every
+# frame on the UI thread until it answers done, the window it was asked on held under the overlay meanwhile; Return
+# or the window going gives it up and its cancel stops the work. The owner, 2026-11-24: "any action that requires
+# loading items should show a loading spinner like we do for cover flow, same mechanism / backout options".
+class Work:
+    """A job of left slices: step answers 1 on the last; cancel counts."""
+    def __init__(self, left):
+        self.left, self.slices, self.cancelled = left, 0, 0
+        self.step = C.CFUNCTYPE(C.c_int)(self.run)
+        self.cancel = C.CFUNCTYPE(None)(self.drop)
+
+    def run(self):
+        self.slices += 1
+        return int(self.slices >= self.left)
+
+    def drop(self):
+        self.cancelled += 1
+
+
+def waiting(fw, ui, left=3):
+    home = ui.new('window_create', 0, 0, 0, 0, 0)
+    work = Work(left)
+    fw.fn('load_wait', None, C.c_void_p, C.c_char_p, C.c_void_p, C.c_void_p)(
+        home, 'Shuffling songs…'.encode(), C.cast(work.step, C.c_void_p), C.cast(work.cancel, C.c_void_p))
+    return home, work, fw.var('list_marks__lo', Lo)
+
+
+def test_a_wait_runs_its_step_each_frame_until_done(fw, ui):
+    home, work, lo = waiting(fw, ui)
+    assert lo.win == home and lo.caption == 'Shuffling songs…'.encode()
+    assert [ms for _, ms in ui.pending('lo_tick')] == [16]  # a frame
+    assert ui.fire('lo_tick') == REPEAT and ui.fire('lo_tick') == REPEAT and lo.win == home
+    assert ui.fire('lo_tick') == 7 and lo.win is None and not ui.pending('lo_tick')  # done: RET_REMOVE, no overlay
+    assert work.slices == 3 and not work.cancelled
+
+
+def test_return_gives_a_wait_up_and_stops_its_work(fw, ui):
+    home, work, lo = waiting(fw, ui)
+    ui.fire('lo_tick')
+    assert gate(fw, O['EVT_KEY_DOWN'], O['KEY_RETURN']) == 1 and lo.win == home and not work.cancelled
+    assert gate(fw, O['EVT_KEY_UP'], O['KEY_RETURN']) == 1 and lo.win is None and work.cancelled == 1
+    assert not ui.pending('lo_tick') and work.slices == 1  # no slice after the cancel
+
+
+@pytest.mark.parametrize('type', ['EVT_KEY_DOWN', 'EVT_KEY_LONG', 'EVT_KEY_UP'])
+def test_centre_during_a_wait_does_nothing_and_the_wheel_stays_the_pages(fw, ui, type):
+    home, work, lo = waiting(fw, ui)
+    assert gate(fw, O[type], O['KEY_CENTER']) == 1 and lo.win == home and not work.cancelled  # a second press asks nothing
+    assert gate(fw, O[type], O['KEY_NEXT']) == 0 and lo.win == home  # the page's own: Now Playing's volume
+
+
+def test_a_window_closing_during_a_wait_stops_its_work(fw, ui):
+    home, work, lo = waiting(fw, ui)
+    ui.close(home)
+    assert lo.win is None and work.cancelled == 1 and not ui.pending('lo_tick')
+
+
+def test_a_new_wait_takes_the_place_of_one_running(fw, ui):
+    home, first, lo = waiting(fw, ui)
+    _, second, lo = waiting(fw, ui)
+    assert first.cancelled == 1 and not second.cancelled and len(ui.pending('lo_tick')) == 1
+
+
+class Painted:
+    """A canvas over an LCD and the rounded boxes painted on it (fill_box), on a clock in ms."""
+    def __init__(self, fw):
+        self.fw, self.now, self.boxes = fw, 1000, []
+        fw.mock('time_now_ms', lambda *_: self.now)
+        fw.mock('canvas_fill_rounded_rect', lambda canvas, r, *_: self.boxes.append(tuple((C.c_int * 4).from_address(r))) or 0)
+        self.canvas, lcd = block(fw, size=4096), block(fw, size=4096)
+        C.c_void_p.from_address(self.canvas + O['CANVAS_LCD']).value = lcd
+
+    def frames(self, paint, w, upto):
+        """paint on w every frame (100 ms, as the spinner's timer asks) up to upto ms after the first: the boxes of
+        the last."""
+        start = self.now
+        while self.now - start <= upto:
+            self.boxes.clear()
+            paint(w, self.canvas)
+            self.now += 100
+        return self.boxes
+
+
+def test_the_overlay_shows_only_once_a_wait_has_lasted_its_delay(fw, ui):
+    home, work, lo = waiting(fw, ui)
+    p, paint = Painted(fw), fw.fn('load_over_paint', None, C.c_void_p, C.c_void_p)
+    assert p.frames(paint, home, 200) == []  # a quick action never flashes it
+    square, *rest = p.frames(paint, home, 100)  # 300 ms in
+    assert square == (155, 128, 64, 64) and len(rest) == 9  # the square, its eight dots and the caption's plate
+    plate = rest[-1]
+    assert plate[1] == 128 + 64 + 8 and plate[3] == 28 and abs(plate[0] + plate[2] / 2 - 375 / 2) <= 1
+
+
+def test_a_pages_own_overlay_waits_its_delay_too_and_a_new_wait_counts_again(fw, ui):
+    page = ui.new('window_create', 0, 0, 0, 0, 0)
+    p, paint = Painted(fw), fw.fn('load_spinner_paint', None, C.c_void_p, C.c_void_p)
+    assert p.frames(paint, page, 200) == []
+    assert len(p.frames(paint, page, 0)) == 9  # the square and its dots, no caption
+    p.now += 1000  # no paint for a second: the wait ended; the next is a new one
+    assert p.frames(paint, page, 0) == []

@@ -4,8 +4,9 @@
  * "Q2 → WH-1000XM5", and its codec line in 14 px Text Tertiary ("LDAC · 96 kHz · 990 kbps", what is
  * known of it, bt_codec_line, or "Not Connected"); then Battery (when the device reports one),
  * Disconnect (Connect, the first row, when it is not connected), Volume Limit (its value No Limit
- * or the limit, opening the slider page, crossfade.c xfade_open 5; bt_vol_limit.c keeps it), Rename
- * and Forget This Device in Negative red.
+ * or the limit, opening the slider page, crossfade.c xfade_open 5; bt_vol_limit.c keeps it), Volume
+ * Curve (its value Even or Gentle, opening its picker, library_settings.c bt_curve_open;
+ * bt_vol_limit.c keeps it too), Rename and Forget This Device in Negative red.
  *
  * Disconnect and Connect are stock's own row click on the device (bt_stock_click), so its output
  * switch and its toasts stay stock's. Forget asks on the confirmation card (feedback.c confirm:
@@ -13,8 +14,8 @@
  * pairing removed (handleBluetoothPair: BlueZ's RemoveDevice, which needs no link, so a device out
  * of range goes too), the output back to a jack when it was this device, the list read again; and
  * the saved link (BTLINKMAC) cleared when it names the device, so boot and Bluetooth on do not try
- * it again, and its Volume Limit dropped; the page closes. Rename sets BlueZ's Alias for the
- * device, which its list shows, through the letter strip. */
+ * it again, and its Volume Limit and Volume Curve dropped; the page closes. Rename sets BlueZ's
+ * Alias for the device, which its list shows, through the letter strip. */
 #include "navigation.h"
 
 #define BD_HEAD 64   /* the path's lines above the rows */
@@ -25,8 +26,8 @@
 #define BD_LINE_H 22
 #define BD_NAME_MAX 30     /* a name, as the Q2's own (bt_name.c BT_NAME_MAX) */
 #define BD_VALUE_W 120     /* Battery's value, right-aligned in this much */
-#define BD_LIMIT_RIGHT 318 /* Volume Limit's value ends here, as Settings' values do */
-#define BD_ROWS 5
+#define BD_LIMIT_RIGHT 318 /* the two values end here, as Settings' values do */
+#define BD_ROWS 6
 /* Volume Limit's value, which the slider page sets (crossfade.c) */
 #define BD_LIMIT_ROW "label_btlimit"
 /* BTLINKMAC: stock's last connected device, [SYSSET] BTLINKMAC in config.ini, 32 bytes at a fixed
@@ -35,7 +36,7 @@
 #define BD_LINK_MAC ((char *)0xa4c0d8)
 #define BD_LINK_MAC_N 32
 
-enum { ROW_BATTERY, ROW_LINK, ROW_LIMIT, ROW_RENAME, ROW_FORGET };
+enum { ROW_BATTERY, ROW_LINK, ROW_LIMIT, ROW_CURVE, ROW_RENAME, ROW_FORGET };
 
 static struct {
     void *page, *view, *path, *codec;
@@ -99,6 +100,7 @@ static void fill(void) {
     if (level >= 0) bd.rows[bd.n++] = ROW_BATTERY;
     bd.rows[bd.n++] = ROW_LINK;
     bd.rows[bd.n++] = ROW_LIMIT;
+    bd.rows[bd.n++] = ROW_CURVE;
     bd.rows[bd.n++] = ROW_RENAME;
     bd.rows[bd.n++] = ROW_FORGET;
     /* where it was, or first Disconnect (Connect): Battery only says */
@@ -120,11 +122,11 @@ static void fill(void) {
     if (!connected() || !bt_codec_line(s, sizeof s)) tk_snprintf(s, sizeof s, "Not Connected");
     widget_set_text_utf8(bd.codec, s);
     for (int i = 0; i < bd.n; ++i) {
-        static const char *const names[] = { "Battery", 0, "Volume Limit", "Rename",
-                                             "Forget This Device" };
+        static const char *const names[] = { "Battery",      0,        "Volume Limit",
+                                             "Volume Curve", "Rename", "Forget This Device" };
         const char *caption =
             bd.rows[i] == ROW_LINK ? (connected() ? "Disconnect" : "Connect") : names[bd.rows[i]];
-        void *item = bd.rows[i] == ROW_RENAME || bd.rows[i] == ROW_LIMIT
+        void *item = bd.rows[i] == ROW_RENAME || bd.rows[i] == ROW_LIMIT || bd.rows[i] == ROW_CURVE
                          ? page_row_detail_into(bd.view, i, caption, 0, bd_click)
                          : page_row_detail(bd.view, i, caption, 0, bd_click);
         if (bd.rows[i] ==
@@ -137,11 +139,16 @@ static void fill(void) {
             tk_snprintf(s, sizeof s, "%d%%", level > 100 ? 100 : level);
             widget_set_text_utf8(v, s);
         }
-        if (bd.rows[i] == ROW_LIMIT) { /* the value before row_into's chevron */
+        if (bd.rows[i] == ROW_LIMIT || bd.rows[i] == ROW_CURVE) { /* before row_into's chevron */
             void *v = label(item, BD_LIMIT_RIGHT - BD_VALUE_W, 0, BD_VALUE_W, I(item, W_H),
                             "s_scrlabel_white20r", TYPE(20), 0xff000000u | tok(TOK_SECONDARY));
-            widget_set_name(v, BD_LIMIT_ROW);
-            btlim_text(btlim_get(bd.mac), s, sizeof s);
+            if (bd.rows[i] == ROW_LIMIT) {
+                widget_set_name(v, BD_LIMIT_ROW);
+                btlim_text(btlim_get(bd.mac), s, sizeof s);
+            } else {
+                widget_set_name(v, BTLIM_CURVE_ROW);
+                tk_snprintf(s, sizeof s, "%s", btlim_curve_name(btlim_curve(bd.mac)));
+            }
             widget_set_text_utf8(v, s);
         }
     }
@@ -258,6 +265,10 @@ static int bd_click(void *ctx, void *event) {
     case ROW_LIMIT:
         btlim_edit(bd.mac);
         xfade_open((void *)5, 0);
+        break;
+    case ROW_CURVE:
+        btlim_edit(bd.mac);
+        bt_curve_open();
         break;
     case ROW_RENAME:
         search_strip_note("Shows on this Q2");

@@ -6,8 +6,8 @@
  *   Sorting    Songs > (a picker), Artist's Albums, Years
  *   Playlists  Playlist View, then after a gap Import Playlists and Export Playlists
  *   Folders    Folder Root, Folder Skip (stock's own row), Folder Album Cover
- * The pickers (Songs' order here, Display > Cover Flow's Sort) are stock's Buttons Lock page
- * opened again (picker_open), its rows ours.
+ * The pickers (Songs' order here, Display > Cover Flow's Sort, a Bluetooth device's Volume Curve)
+ * are stock's Buttons Lock page opened again (picker_open), its rows ours.
  *
  * A signed-in card app's server songs are always in the Library (catalogue.c; the user's,
  * 2026-11-19: no setting). An older build's [Q2POD] LIBRARYSOURCE is never read. Card apps that
@@ -18,6 +18,7 @@
 #define LIB_FILE "/tmp/q2-addon.library"
 #define PICK_SONGS 1
 #define PICK_CF_SORT 2
+#define PICK_BT_CURVE 3
 #define ARROW_UP " \xe2\x86\x91" /* ↑: ascending, as Title's A to Z */
 #define ARROW_DOWN " \xe2\x86\x93"
 
@@ -50,12 +51,20 @@ static int songs_gone(void *label, void *event) {
 
 /* ---- The pickers ---- */
 
-static int picker_count(void) { return ls.kind == PICK_SONGS ? SORT_N : coverflow_sort_count(); }
-static int picker_now(void) { return ls.kind == PICK_SONGS ? song_sort() : coverflow_sort_now(); }
+static int picker_count(void) {
+    return ls.kind == PICK_SONGS ? SORT_N : ls.kind == PICK_BT_CURVE ? 2 : coverflow_sort_count();
+}
+static int picker_now(void) {
+    return ls.kind == PICK_SONGS      ? song_sort()
+           : ls.kind == PICK_BT_CURVE ? btlim_edit_curve()
+                                      : coverflow_sort_now();
+}
 static void picker_text(void *label, int i) {
     char t[40];
     if (ls.kind == PICK_SONGS)
         song_sort_text(t, sizeof t, i);
+    else if (ls.kind == PICK_BT_CURVE)
+        tk_snprintf(t, sizeof t, "%s", btlim_curve_name(i));
     else
         tk_snprintf(t, sizeof t, "%s", coverflow_sort_at(i));
     widget_set_text_utf8(label, t);
@@ -71,7 +80,8 @@ static void picker_marks(void *view) {
 }
 /* A pick: Songs' current order again flips its direction, another takes its natural one (titles,
  * artists and albums A to Z, the newest first), and Songs reloads in it when it is on top again;
- * Cover Flow takes its order at its next open. The picker stays, as Buttons Lock's does. */
+ * Cover Flow takes its order at its next open; a device's Volume Curve is saved and sent to it at
+ * once when it is connected. The picker stays, as Buttons Lock's does. */
 static int picker_pick(void *ctx, void *event) {
     int i = (int)(long)ctx;
     if (ls.kind == PICK_SONGS) {
@@ -79,6 +89,8 @@ static int picker_pick(void *ctx, void *event) {
         song_sort_set(i, again ? !song_down() : i == SORT_ADDED);
         song_sort_commit();
         songs_text();
+    } else if (ls.kind == PICK_BT_CURVE) {
+        btlim_edit_curve_take(i);
     } else {
         coverflow_sort_set(i);
         pod_text_again(POD_CF_SORT);
@@ -99,7 +111,10 @@ int picker_rows(void *win) {
     void *view = win && win == ls.win ? widget_lookup(win, "scroll_view_keylock", 1) : (void *)0;
     if (!view) return 0;
     void *nav = widget_lookup(win, "view_navbar", 1), *title = nav ? widget_get_child(nav, 0) : 0;
-    if (title) widget_set_text_utf8(title, ls.kind == PICK_SONGS ? "Songs" : "Sort");
+    if (title)
+        widget_set_text_utf8(title, ls.kind == PICK_SONGS      ? "Songs"
+                                    : ls.kind == PICK_BT_CURVE ? "Volume Curve"
+                                                               : "Sort");
     widget_destroy_children(view);
     for (int i = 0, n = picker_count(); i < n; ++i)
         list_row(view, "unselect", picker_pick, (void *)(long)i);
@@ -114,6 +129,8 @@ static int picker_open(void *ctx, void *event) {
 }
 /* Display > Cover Flow's Sort row (navigation.c pod_click) */
 void cf_sort_open(void) { picker_open((void *)PICK_CF_SORT, 0); }
+/* A Bluetooth device page's Volume Curve row (bt_detail.c), for btlim_edit's device */
+void bt_curve_open(void) { picker_open((void *)PICK_BT_CURVE, 0); }
 
 /* ---- The server library's state ---- */
 

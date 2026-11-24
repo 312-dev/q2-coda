@@ -660,6 +660,24 @@ static int songs_load(void) {
     return (int)deque_size(list);
 }
 
+static int albums_query(void *unused) { return getAllAlbum(); }
+static int artists_query(void *unused) {
+    return I(g_artist_type, 0) ? GetAllAlbumArtist() : getAllArtist();
+}
+/* name_order.c's load ahead: list cls's query into into, as ringnav_localclass's open runs it
+ * (the server's songs beside the card's, the artist tag the artist page uses). */
+void library_warm(unsigned cls, void *into) {
+    int saved = library_music;
+    library_music = 1;
+    I(g_artist_type, 0) = I(artist_type, 0) == 1;
+    staged_into(into,
+                cls == NO_SONGS    ? songs_sorted
+                : cls == NO_ALBUMS ? albums_query
+                                   : artists_query,
+                0);
+    library_music = saved;
+}
+
 /* The step a late UI pass names while a Library list loads (ui_watch.c). */
 static const char *class_step(int cls) {
     switch (cls) {
@@ -682,7 +700,12 @@ int ringnav_localclass(int cls) {
     I(g_artist_type, 0) = I(artist_type, 0) == 1;
     int saved = library_music;
     library_music = 1;
+    name_order_list(cls == 0xf001         ? NO_SONGS
+                    : cls == CLASS_ALBUMS ? NO_ALBUMS
+                    : cls == 0xf004       ? NO_ARTISTS
+                                          : 0);
     int n = cls == 0xf001 ? songs_load() : stock_localclass_trampoline(cls);
+    name_order_list(0);
     void *list = P(p_deque_showlist, 0), *dir = P(tools_pdeq_directory, 0), *a = album_opened();
     if (n > 0 && cls == 0xff20) n = music_records(list, 0);
     /* These stored lists bypass songtable too. Keep Discovery out of their displayed copies,
@@ -808,20 +831,35 @@ int np_queue(const void *unused) {
     return 0;
 }
 
-static int qm_apply(void *add, int next) {
+/* add into the queue playing, or loaded as a queue of class cls when there is none (album: an
+ * album's, remembered as one). */
+static int queue_apply(void *add, int next, int cls, int album) {
     void *queue = P(mcl_pdeqplaylist, 0);
     if (!queue || airplayGetFlag() == 2) return 0;
     unsigned size = deque_size(queue), type = (unsigned)MCL(MCL_TYPE), n = deque_size(add);
     /* Only a local (folder or library) queue grows; streams keep theirs. */
     if (size && type != 1 && (type & 0xf000) != 0xf000) return 0;
-    int album = st.qm_kind == QM_COVERFLOW || st.qm_kind == QM_COVERALBUM;
-    if (n && !size) { /* loads without starting playback; only a real folder is class 1 */
+    if (n && !size) { /* loads without starting playback */
         if (album) album_memory(deque_at(add, 0));
-        mclLoadPlayList(add, 0, st.qm_kind == QM_FOLDER ? 1 : album ? 0xff10 : (int)st.qm_cls);
+        mclLoadPlayList(add, 0, cls);
     } else if (n)
         qm_insert(queue, add, next);
     return n != 0;
 }
+
+static int qm_apply(void *add, int next) {
+    int album = st.qm_kind == QM_COVERFLOW || st.qm_kind == QM_COVERALBUM;
+    /* only a real folder is class 1 */
+    return queue_apply(add, next,
+                       st.qm_kind == QM_FOLDER ? 1
+                       : album                 ? 0xff10
+                                               : (int)st.qm_cls,
+                       album);
+}
+
+/* A card app's song queued from its own page (addon.c queue_poll): as a song list's (0xf001, the
+ * class an app's stream plays as) when nothing is queued. */
+int queue_add(void *add, int next) { return queue_apply(add, next, 0xf001, 0); }
 
 /* A 1.5 s modal dialog (oled-design.md's toast): its loop runs every ringnav_sleep poll
  * again, so a poll clears or latches what it toasts first (logo_poll). */

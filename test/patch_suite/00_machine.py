@@ -176,6 +176,7 @@ class Machine:
             for name in ('paint','dispatch','paint_bg'):
                 self.handlers[int(manifest['patch_symbols']['stock_'+name+'_trampoline'],16)]='stock_'+name
         self.mock('pthread_create@GLIBC_2.2','pthread_detach@GLIBC_2.0','pthread_self@GLIBC_2.0')  # pthread_self: playback_poll's UI thread
+        self.handlers[syms['pthread_create@GLIBC_2.2']]='thread:queue'  # playback.c's queue writer runs at once; any other thread never
         self.mock('mkdir@GLIBC_2.0')  # card_store.c's folder on the card
         self.mock('write@GLIBC_2.0','clock_gettime@GLIBC_2.2')  # ulog.c's line on stderr (a clean end's shutdown line)
         self.mock('reset_poweroptions_timer','screen_action','enable_fb','usleep@GLIBC_2.0','sprintf@GLIBC_2.0',
@@ -208,6 +209,7 @@ class Machine:
         self.handlers[syms['__xstat@GLIBC_2.0']]='rockbox_stat'
         self.handlers[syms['strcmp@GLIBC_2.0']]='tk_strcmp'
         self.handlers[syms['memcpy@GLIBC_2.0']]='memcpy'
+        self.handlers[syms['memmove@GLIBC_2.0']]='memcpy'  # memcpy's read then write is memmove's: overlap holds
         self.handlers[syms['memset@GLIBC_2.0']]='memset'
         # the UI loop's pass asks adbd's socket for a question each second (usb_ui.c auth_poll): no adbd here
         self.handlers[syms['socket@GLIBC_2.0']]='no_socket'
@@ -337,6 +339,9 @@ class Machine:
         elif name=='strncpy@GLIBC_2.0': self.u.mem_write(a,self.raw(b)[:c].ljust(c,b'\0')); ret=a
         elif name=='memset': self.u.mem_write(a,bytes([b&255])*c); ret=a
         elif name=='thread:run': self.word(a,77); self.nested(c,d); ret=0  # its id written, as pthread_create does
+        elif name=='thread:queue':  # the queue's records are in their files when the save returns (playback.c store_post)
+            if c==payload_syms.get('w_thread'): self.word(a,77); self.nested(c,d)
+            ret=0
         elif name in ('table_row_create', 'list_item_create', 'button_create', 'image_create', 'view_create',
                        'hscroll_label_create', 'gif_image_create', 'label_create'):
             kind = {'gif_image_create': 'gif'}.get(name, name.removesuffix('_create'))

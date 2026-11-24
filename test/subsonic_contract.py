@@ -5,7 +5,8 @@ the pinned build: `python3 test/subsonic_contract.py [--zip ZIP] [--repo Q2_SUBS
 Firmware and app agree only through words and files (docs/internals.md#card-apps,
 docs/server-library.md#download-ahead-and-the-streaming-state): the caps line demo writes to /tmp/q2-addon.caps
 (patch/addon.c ADDON_CAPS, plus stream_state.c ahead_caps' " ahead grow"), and the /tmp/q2-<id>.* files one side
-writes and the other reads (.catplay, .playing, .ahead, .stream). Checked here, with no build and no emulator:
+writes and the other reads (.catplay, .playing, .ahead, .stream, .queue). Checked here, with no build and no
+emulator:
 
 - the pinned zip (~/.cache/q2-apps, or --zip) is BUNDLED_APPS' by size and SHA-256, and its name's commit is in
   q2-subsonic's repository (--repo, ~/repos/q2-subsonic by default);
@@ -33,7 +34,7 @@ from build import APPS_DIR, BUNDLED_APPS  # noqa: E402
 
 # The card files of one app, by what the firmware does with each (the source that writes or reads it).
 FILES = {'catplay': 'patch/catalogue.c', 'playing': 'patch/addon.c', 'ahead': 'patch/stream_state.c',
-         'stream': 'patch/stream_state.c'}
+         'stream': 'patch/stream_state.c', 'queue': 'patch/addon.c'}
 
 
 def firmware_caps(root=ROOT):

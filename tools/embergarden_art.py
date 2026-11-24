@@ -5,7 +5,7 @@ The shapes, colours and places are the design's (the emulator project's design/g
 kit.py, drawn there with Pillow at four times the panel's size and box-filtered down); the parts the game shows are
 ported here. What it writes:
 
-- assets/games/embergarden.bin, read once by the game when it opens (usr/share/q2games/embergarden/art.bin): the
+- assets/games/embergarden.bin, read once by the game when it opens (usr/share/q2games/embergarden.bin): the
   scene as one byte a pixel, indexes into a palette of its own for each band of BAND rows, with four colours an
   index, one for each time of day (dawn, day, dusk, night), found together (a k-means over the four colours as one
   point), so a time of day is a palette and a move between two is the palettes mixed; the scene's beds charred, the

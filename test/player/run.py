@@ -821,14 +821,37 @@ def synth(path, seconds, level, rate=44100, channels=2, hz=None):
     return path
 
 
+B_SECONDS = 55  # each B: over XF_SMART_LEAD_S long, so its own change's analysis is not asked for before demo's word
+                # for it (0, the queue's end) is there
+
+
 def smart_songs(d, rate_b=44100, channels_b=2, b_level=None):
-    """A: a 440 Hz tone at half scale for 16 s, a 6 s linear fade to nothing, 2 s of silence. B: 1.5 s of silence,
-    then a 660 Hz tone at half scale from its first frame (a hard start), 43.5 s of it: over XF_SMART_LEAD_S long, so
-    its own change's analysis is not asked for before demo's word for it (0, the queue's end) is there."""
+    """A: a 440 Hz tone at half scale for 16 s, a 6 s linear fade to nothing (its part 12 dB under the tone 1.5 s
+    long), 2 s of silence: shorter than the 30 s measured. B: 1.5 s of silence, then a 660 Hz tone at half scale from
+    its first frame (a hard start), B_SECONDS in all."""
     d.mkdir(parents=True, exist_ok=True)
     a = synth(d/'sa.flac', 24, lambda t: 0.5 if t < 16 else max(0.0, 0.5 * (1 - (t - 16) / 6)) if t < 22 else 0.0)
-    b = synth(d/'sb.flac', 45, b_level or (lambda t: 0.0 if t < 1.5 else 0.5), rate=rate_b, channels=channels_b, hz=660)
+    b = synth(d/'sb.flac', B_SECONDS, b_level or (lambda t: 0.0 if t < 1.5 else 0.5), rate=rate_b, channels=channels_b, hz=660)
     return a, b
+
+
+def hard_end(d):
+    """A 440 Hz tone at half scale for 40 s, to its last frame: no quiet run at all."""
+    d.mkdir(parents=True, exist_ok=True)
+    return synth(d/'sa_hard.flac', 40, lambda t: 0.5)
+
+
+def soft_intro(d, seconds):
+    """B: 1 s of silence, seconds of a 660 Hz tone at 0.04 (22 dB under what follows: a soft intro), then the tone at
+    half scale, B_SECONDS in all."""
+    d.mkdir(parents=True, exist_ok=True)
+    return synth(d/f'sb_intro{seconds}.flac', B_SECONDS, lambda t: 0.0 if t < 1 else 0.04 if t < 1 + seconds else 0.5, hz=660)
+
+
+def long_fade(d):
+    """A: a 440 Hz tone at half scale for 10 s, then a 25 s fade of 2 dB a second (50 dB in all) to its end."""
+    d.mkdir(parents=True, exist_ok=True)
+    return synth(d/'sa_fade25.flac', 35, lambda t: 0.5 if t < 10 else 0.5 * 10 ** (-2 * (t - 10) / 20))
 
 
 def windows(x, channels, w, from_end):
@@ -845,24 +868,30 @@ def windows(x, channels, w, from_end):
 
 def smart_plan(a, b, ca=2, cb=2, ra=44100, rb=44100):
     """smart.c's rules, written again here from docs/internals.md#smart-crossfade: (overlap, trail, skip, fade) in
-    frames."""
+    frames, and what decided the overlap ('out run', 'next intro' or 'floor')."""
     wa, wb = ra // 20, rb // 20
-    tail = windows(a, ca, wa, True)[:400]
-    head = windows(b[:cb * 15 * rb], cb, wb, False)[:300]
+    tail = windows(a, ca, wa, True)[:600]
+    head = windows(b[:cb * 30 * rb], cb, wb, False)[:600]
     body = sorted(tail)[(len(tail) - 1) // 2]
     loud = max(-60, body - 45)
     te = next(k for k, v in enumerate(tail) if v > loud)
     run = te
     while run < len(tail) and tail[run] < body - 12: run += 1
-    quiet_ms = (run - te) * 50
-    overlap = (run - te) * wa if 1000 <= quiet_ms <= 15000 and run < len(tail) else ra * 5
+    out = (run - te) * wa if run < len(tail) else 0  # a run that starts inside the span
     skip = 0
     while skip < len(head) and skip * 50 < 5000 and head[skip] < -60: skip += 1
     bb = sorted(head)[(len(head) - 1) // 2]
+    after = head[skip + 300:]  # 15 s on from the first sound
+    ref = sorted(after)[(len(after) - 1) // 2] if len(after) >= 100 else bb
+    intro = skip
+    while intro < len(head) and head[intro] < ref - 10: intro += 1
+    intro = (intro - skip) * 50 * ra // 1000
+    floor = 5 * ra
+    overlap, why = (out, 'out run') if out >= intro and out >= floor else (intro, 'next intro') if intro >= floor else (floor, 'floor')
     start = max(head[skip:skip + 4])
     gap = bb - 6 - start
     fade_ms = 300 + int(700 * min(1, gap / 14)) if gap > 0 else 0
-    return overlap, te * wa, skip * wb, rb * fade_ms // 1000
+    return min(overlap, 15 * ra), te * wa, skip * wb, rb * fade_ms // 1000, why
 
 
 def smart_scenario(a, b, gapless_at=12.0, end=80.0, word=SMART, next_text=None):
@@ -888,40 +917,73 @@ def smart_play(player, songs, out, steps, speed=8, env=None, exits=2):
 
 def check_smart(a, b, names, got, log):
     """got is a's and b's smart crossfade by smart_plan's rules: a exact up to out_point, then b from its first sound
-    mixed with a's quiet end (b at full level, no fade-in: a hard start; a fading out, cos), a's trailing silence never
-    played, then b exact; no step at either end of the overlap; one PCM. The plan and the largest step off."""
+    (at full level, or over its fade-in as sin) mixed with a's end fading out, as cos over its own quiet run and as cos
+    squared over an overlap longer than that run (the next intro's or the floor's, which starts in a's body), a's
+    trailing silence never played, then b exact; no step at either end of the overlap; one PCM; the plan's log line
+    naming what decided the overlap. The plan and the largest step off."""
     A, B, Y = (array.array('h', x) for x in (reference(a), reference(b), got))
-    overlap, trail, skip, fade = smart_plan(A, B)
-    assert fade == 0 and skip == 66150 and 44100 <= overlap <= 3 * 44100, (overlap, trail, skip, fade)
+    overlap, trail, skip, fade, why = plan = smart_plan(A, B)
     na, nb, ny = len(A) // 2, len(B) // 2, len(Y) // 2
     cut = na - trail - overlap  # out_point
     assert names == ['0000_44100_2_s16.raw'], names
-    assert 'smart crossfade: body' in log, log[-2000:]
-    assert ny == cut + nb - skip, f'{ny} frames, expected {cut + nb - skip} (plan {overlap, trail, skip, fade}): {log[-1500:]}'
+    assert not any(bad in log for bad in BAD_TAIL), log[-2000:]  # BAD_TAIL: below, with the tail's own tests
+    assert f'overlap {overlap / 44100:.2f} s by the {why}' in log, f'{plan}: {log[-2000:]}'
+    assert ny == cut + nb - skip, f'{ny} frames, expected {cut + nb - skip} (plan {plan}): {log[-1500:]}'
     assert Y[:2 * cut] == A[:2 * cut], f'A before out_point, first difference at frame {first_difference(Y[:2 * cut].tobytes(), A[:2 * cut].tobytes()) // 4}'
     worst = 0
     for k in range(overlap):
-        go = math.cos((k + 0.5) / overlap * math.pi / 2)
+        go = math.cos((k + 0.5) / overlap * math.pi / 2) ** (1 if why == 'out run' else 2)
+        gi = math.sin((k + 0.5) / fade * math.pi / 2) if k < fade else 1
         for c in (0, 1):
-            want = B[2 * (skip + k) + c] + A[2 * (cut + k) + c] * go
+            want = B[2 * (skip + k) + c] * gi + A[2 * (cut + k) + c] * go
             worst = max(worst, abs(Y[2 * (cut + k) + c] - want))
-    assert worst <= 2, f'the overlap is {worst} steps from B + A cos'
+    assert worst <= 2, f'the overlap is {worst} steps from B + A by the {why} (plan {plan})'
     assert Y[2 * (cut + overlap):] == B[2 * (skip + overlap):], 'B after the overlap'
     def step(i): return max(abs(Y[2 * i + c] - Y[2 * (i - 1) + c]) for c in (0, 1))
     around = max(max(step(i) for i in range(cut - 50, cut - 1)), max(step(i) for i in range(cut + overlap + 2, cut + overlap + 50)))
     assert step(cut) <= around and step(cut + overlap) <= around, (step(cut), step(cut + overlap), around)
-    return (overlap, trail, skip, fade), worst
+    return plan, worst
+
+
+def smart_case(player, songs, tmp, name, a, b, want):
+    """A into B, smart: check_smart's output, the plan as want(plan) asserts; a line saying what played."""
+    s, names, got, log = smart_play(player, songs, tmp/name, smart_scenario(a, b))
+    plan, worst = check_smart(a, b, names, got, log)
+    overlap, trail, skip, fade, why = plan
+    assert want(plan), plan
+    cpu = re.findall(r'analysis took (\d+) ms of CPU', log)
+    return (f'plan {overlap / 44100:.2f} s overlap by the {why}, {trail / 44100:.2f} s trail, {skip / 44100:.2f} s skipped, '
+            f'fade-in {fade * 1000 // 44100} ms, as the reference; A exact to out_point, the overlap within {worst:.1f} steps, '
+            f'B exact after; analysis {cpu} ms CPU')
 
 
 def test_smart_crossfade(player, songs, tmp):
-    """A fades out into silence, B starts hard after 1.5 s of silence: the plan is the reference's (its rules written
-    again in Python over the reference decodes) and the output check_smart's."""
+    """A fades out into silence, its quiet run 1.5 s, B starts hard after 1.5 s of silence: the overlap is the 5 s
+    floor, the plan the reference's (its rules written again in Python over the reference decodes) and the output
+    check_smart's."""
     a, b = smart_songs(tmp/'smart')
-    s, names, got, log = smart_play(player, songs, tmp/'smart/run', smart_scenario(a, b))
-    (overlap, trail, skip, fade), worst = check_smart(a, b, names, got, log)
-    cpu = re.findall(r'analysis took (\d+) ms of CPU', log)
-    return (f'plan {overlap / 44100:.2f} s overlap, {trail / 44100:.2f} s trail, {skip / 44100:.2f} s skipped, no fade-in, '
-            f'as the reference; A exact to out_point, the overlap within {worst:.1f} steps, B exact after; analysis {cpu} ms CPU')
+    return smart_case(player, songs, tmp, 'smart/run', a, b,
+                      lambda p: p[4] == 'floor' and p[0] == 5 * 44100 and p[2] == 66150 and p[3] == 0)
+
+
+def test_smart_crossfade_intro(player, songs, tmp):
+    """A loud to its last frame, B a 10 s soft intro after 1 s of silence: the overlap is the intro, 10 s, B's intro
+    under A's last 10 s, B faded in (its start 22 dB under its body)."""
+    a, b = hard_end(tmp/'smartintro'), soft_intro(tmp/'smartintro', 10)
+    return smart_case(player, songs, tmp, 'smartintro/run', a, b,
+                      lambda p: p[4] == 'next intro' and p[0] == 10 * 44100 and p[1] == 0 and p[2] == 44100 and p[3] == 44100)
+
+
+def test_smart_crossfade_cap(player, songs, tmp):
+    """A loud to its last frame, B a 20 s soft intro: the overlap is 15 s, XF_MAX_S, the rest of the intro B's own."""
+    a, b = hard_end(tmp/'smartcap'), soft_intro(tmp/'smartcap', 20)
+    return smart_case(player, songs, tmp, 'smartcap/run', a, b, lambda p: p[4] == 'next intro' and p[0] == 15 * 44100)
+
+
+def test_smart_crossfade_long_fade(player, songs, tmp):
+    """A fades for its last 25 s, all of it inside the 30 s measured, B hard: A's quiet run is the overlap, over 8 s."""
+    a, b = long_fade(tmp/'smartfade'), smart_songs(tmp/'smartfade')[1]
+    return smart_case(player, songs, tmp, 'smartfade/run', a, b, lambda p: p[4] == 'out run' and p[0] > 8 * 44100)
 
 
 def test_smart_crossfade_starved(player, songs, tmp):
@@ -947,8 +1009,8 @@ def test_smart_crossfade_starved(player, songs, tmp):
         assert len(lines) == 1, lines
         worst = check_plain(*(array.array('h', x) for x in (reference(a), reference(b), got)), 5 * 44100)
         return f'the plain fade, whole (within {worst:.1f} steps), logged: {lines[0].split("q2player: ")[-1]}'
-    (overlap, *_), worst = check_smart(a, b, names, got, log)
-    return f'the smart fade, whole: {overlap / 44100:.2f} s overlap within {worst:.1f} steps, on one core shared with two busy loops'
+    (overlap, *_, why), worst = check_smart(a, b, names, got, log)
+    return f'the smart fade, whole: {overlap / 44100:.2f} s overlap by the {why} within {worst:.1f} steps, on one core shared with two busy loops'
 
 
 def check_plain(A, B, Y, h):
@@ -1029,6 +1091,283 @@ def test_smart_crossfade_off_is_gapless(player, songs, tmp):
     assert got == reference(a) + reference(b), 'not the two songs joined'
     assert 'smart crossfade' not in log, log[-800:]
     return 'A and B joined bit for bit, nothing analysed'
+
+
+# ---- the tail from the file (player/tail.c, dsp.c; docs/internals.md#the-tail-from-the-file)
+BAD_TAIL = ('differs from the first decode', 'frames fewer than the tail held', 'differs from the first')
+TAIL_B_S = 47  # each B here: over XF_SMART_LEAD_S long, as B_SECONDS
+# Q2PLAYER_XF_WAIT (player/tail.c): the player waits for its analysis and for the second open's decode wherever it
+# would otherwise go on without them, so what these tests compare does not depend on how busy the machine is
+TAIL_WAIT = {'Q2PLAYER_XF_WAIT': '1'}
+
+
+def tail_song(path, rate=44100, bits=16, kind='fade', codec=('-c:a', 'flac'), tags=()):
+    """A song of noise and a tone, so no two stretches of it are alike. fade (A, 40 s): at 0.6 to 27.5 s, then a quiet
+    run 14 dB down falling 1.44 dB a second to 38 s, then 2 s of silence: an out run of about 10.5 s and a 2 s trail,
+    12.5 s held. hard (A, 36 s): at 0.6 to its last frame, so the overlap is the 5 s floor. next (B, TAIL_B_S): half a
+    second of silence, then noise and a tone at 0.3."""
+    seconds = {'fade': 40, 'hard': 36, 'next': TAIL_B_S}[kind]
+    shape = {'fade': "volume=0.6,volume='if(lt(t,27.5),1,if(lt(t,38),0.2*pow(10,-(t-27.5)*1.44/20),0))':eval=frame",
+             'hard': 'volume=0.6', 'next': 'volume=0.3,adelay=500:all=1'}[kind]
+    fmt = [] if codec[1].startswith('pcm') or codec[1] == 'libmp3lame' else ['-sample_fmt', 's16' if bits == 16 else 's32', '-bits_per_raw_sample', str(bits)]
+    if codec[1] == 'alac': fmt = ['-sample_fmt', 's16p' if bits == 16 else 's32p', '-bits_per_raw_sample', str(bits)]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', f'anoisesrc=d={seconds}:c=pink:r={rate}:a=0.5:seed={3 if kind == "next" else 1}',
+                    '-f', 'lavfi', '-i', f'sine=f={330 if kind == "next" else 220}:r={rate}:d={seconds}', '-filter_complex',
+                    f'[0][1]amix=inputs=2:normalize=0,{shape},aformat=channel_layouts=stereo', '-t', str(seconds), *codec, *fmt, *tags, path], check=True)
+    return path
+
+
+def tail_runs(player, songs, d, a, b, ring_mb, steps=None, runs=('file', 'ring'), env=None):
+    """a into b by smart_scenario, once for each of runs: 'file', the player as it is (a FLAC's, an ALAC's or a PCM
+    file's tail read from the file a second time), with env; 'ring', every tail held in memory in a ring of up to
+    ring_mb MB (Q2PLAYER_XF_RING); 'ring6', in the 6 MB ring a song has without a second open. Each with TAIL_WAIT.
+    {run: (PCM names, PCM, log)}."""
+    out = {}
+    for run in runs:
+        e = dict(TAIL_WAIT, **(env or {})) if run == 'file' else dict(TAIL_WAIT, Q2PLAYER_XF_RING='6' if run == 'ring6' else str(ring_mb))
+        s, names, got, log = smart_play(player, songs, d/run, steps or smart_scenario(a, b, end=110.0), env=e)
+        out[run] = (names, got, log)
+    return out
+
+
+def plan_line(log):
+    lines = [l.split('q2player: ')[-1] for l in log.splitlines() if 'smart crossfade: body' in l]
+    return lines[0] if lines else None
+
+
+def check_tail(runs, planned=True):
+    """The change with its tail read from the file is, byte for byte, the change with its tail held in memory: the
+    same plan, the same PCM opens, the same output; the file's run held nothing, and no frame it read differed from
+    the first decode's or was missing. The ring's size in KB."""
+    (fn, fg, fl), (rn, rg, rl) = runs['file'], runs['ring']
+    assert 'the tail read from the file' in fl and 'held in memory' not in fl, fl[-1500:]
+    assert not any(bad in fl for bad in BAD_TAIL), fl[-1500:]
+    held = re.search(r'the tail held in memory, (\d+) KB', rl)
+    assert held and 'read from the file' not in rl, rl[-1500:]
+    for log in (fl, rl):
+        assert 'overlap cut' not in log and 'smart crossfade: plain' not in log, log[-1500:]
+    assert plan_line(fl) == plan_line(rl) and (plan_line(fl) is not None) == planned, (plan_line(fl), plan_line(rl))
+    assert fn == rn, (fn, rn)
+    at = first_difference(fg, rg)
+    assert at is None, f'{len(fg)} bytes read from the file, {len(rg)} held in memory; first difference at byte {at}'
+    return int(held[1])
+
+
+def overlap_s(log): return float(re.search(r'overlap ([\d.]+) s by the', plan_line(log))[1])
+
+
+def test_tail_file_flac_16(player, songs, tmp):
+    """FLAC, 44.1 kHz 16-bit: a 12.5 s hold read from the file is the 6 MB ring's, byte for byte."""
+    d = tmp/'tail16'
+    a, b = tail_song(d/'a.flac'), tail_song(d/'b.flac', kind='next')
+    runs = tail_runs(player, songs, d, a, b, 6)
+    kb = check_tail(runs)
+    assert overlap_s(runs['file'][2]) > 10
+    return f'{len(runs["file"][1]) // 4} frames the same, a {overlap_s(runs["file"][2]):.2f} s overlap; the ring was {kb} KB'
+
+
+def test_tail_file_flac_24_96_past_the_ring(player, songs, tmp):
+    """FLAC, 96 kHz 24-bit: the 12.5 s hold is more than the 6 MB ring has room for at this rate (7.5 s), so in that
+    ring the overlap is cut, logged; read from the file it is whole, and byte for byte what a ring large enough gives."""
+    d = tmp/'tail96'
+    a, b = tail_song(d/'a.flac', 96000, 24), tail_song(d/'b.flac', 96000, 24, kind='next')
+    runs = tail_runs(player, songs, d, a, b, 64, runs=('file', 'ring', 'ring6'))
+    kb = check_tail(runs)
+    assert runs['file'][0] == ['0000_96000_2_s32.raw'], runs['file'][0]
+    cut = runs['ring6'][2]
+    assert 'overlap cut to what the hold has room for' in cut and len(runs['ring6'][1]) > len(runs['file'][1]), cut[-1500:]
+    return (f'{len(runs["file"][1]) // 8} frames the same as a {kb} KB ring\'s, a {overlap_s(runs["file"][2]):.2f} s overlap; '
+            f'the 6 MB ring cut it and played {(len(runs["ring6"][1]) - len(runs["file"][1])) / 8 / 96000:.2f} s longer')
+
+
+def test_tail_file_flac_24_192_floor(player, songs, tmp):
+    """FLAC, 192 kHz 24-bit, loud to its last frame, into a 44.1 kHz 16-bit song: the overlap is the 5 s floor, more
+    than the 6 MB ring holds at 192 kHz (3.75 s), which cuts it; read from the file it is whole, mixed under the next
+    song at that song's rate after the PCM opens again, byte for byte what a ring large enough gives."""
+    d = tmp/'tail192'
+    a, b = tail_song(d/'a.flac', 192000, 24, kind='hard'), tail_song(d/'b.flac', kind='next')
+    runs = tail_runs(player, songs, d, a, b, 64, runs=('file', 'ring', 'ring6'))
+    kb = check_tail(runs)
+    assert runs['file'][0] == ['0000_192000_2_s32.raw', '0001_44100_2_s16.raw'], runs['file'][0]
+    assert overlap_s(runs['file'][2]) == 5.0 and 'overlap cut to what the hold has room for' in runs['ring6'][2]
+    return f'{len(runs["file"][1])} bytes the same as a {kb} KB ring\'s: the 5 s floor whole at 192 kHz, cut by the 6 MB ring'
+
+
+def test_tail_file_alac_and_wav(player, songs, tmp):
+    """ALAC in MP4 and PCM in WAV, 44.1 kHz 16-bit: each tail read from the file is the ring's, byte for byte."""
+    said = []
+    for ext, codec in (('m4a', ('-c:a', 'alac')), ('wav', ('-c:a', 'pcm_s16le'))):
+        d = tmp/f'tail{ext}'
+        a, b = tail_song(d/f'a.{ext}', codec=codec), tail_song(d/f'b.{ext}', codec=codec, kind='next')
+        runs = tail_runs(player, songs, d, a, b, 6)
+        check_tail(runs)
+        said.append(f'{ext}: {len(runs["file"][1]) // 4} frames the same')
+    return ', '.join(said)
+
+
+def test_tail_mp3_is_held_in_memory(player, songs, tmp):
+    """MP3: FFmpeg's integer decoder carries its rounding from sample to sample, so a second decode is never the
+    first's samples, and the player says so and holds the tail in a ring, mapped at the hold's own size; the output is
+    the same whether or not it was let try the file."""
+    d = tmp/'tailmp3'
+    a, b = tail_song(d/'a.mp3', codec=('-c:a', 'libmp3lame', '-q:a', '2')), tail_song(d/'b.mp3', codec=('-c:a', 'libmp3lame', '-q:a', '2'), kind='next')
+    runs = tail_runs(player, songs, d, a, b, 6)
+    (fn, fg, fl), (rn, rg, rl) = runs['file'], runs['ring']
+    assert 'a second decode of this codec is not the first\'s' in fl and 'read from the file' not in fl, fl[-1500:]
+    held = re.search(r'the tail held in memory, (\d+) KB', fl)
+    assert held and int(held[1]) < 6 * 1024 and plan_line(fl) == plan_line(rl) and plan_line(fl)
+    at = first_difference(fg, rg)
+    assert fn == rn and at is None, at
+    return f'held in a {held[1]} KB ring, as said; {len(fg) // 4} frames the same either way'
+
+
+def test_tail_file_eq_and_replaygain(player, songs, tmp):
+    """The EQ on and a ReplayGain tag on the first song, read as track gain: the file's frames go through the same
+    stages as the ring's did (the scale and its clip, the EQ from the memory it had at the hold's first frame), and
+    the second song takes on the EQ's memory of the first's last frame: byte for byte the ring's, and not what plays
+    with the EQ off."""
+    d = tmp/'taileq'
+    a = tail_song(d/'a.flac', tags=('-metadata', 'REPLAYGAIN_TRACK_GAIN=-4.00 dB', '-metadata', 'REPLAYGAIN_TRACK_PEAK=0.600000'))
+    b = tail_song(d/'b.flac', kind='next')
+    state = d/'eq.state'
+    subprocess.run([tool(tmp, 'peq_ref', '-DPEQ_ROOT=""'), 'save', state, '6', '-3'], check=True)
+    def steps(eq):
+        st = smart_scenario(a, b, end=110.0)
+        st = [x for x in st if not (isinstance(x[1], str) and x[1].startswith('{mcl-replaygain'))] + [(0.0, '{mcl-replaygain\\1}')]
+        if eq: st.append((0.2, fakedemo.put('mnt/data/peq-active', state.read_bytes())))
+        return sorted(st, key=lambda x: x[0])
+    runs = tail_runs(player, songs, d, a, b, 6, steps=steps(True))
+    check_tail(runs)
+    s, names, flat, log = smart_play(player, songs, d/'flat', steps(False), env=TAIL_WAIT)
+    assert flat != runs['file'][1], 'the EQ changed nothing'
+    plain = tail_runs(player, songs, d/'norg', a, b, 6, runs=('file',))['file'][1]
+    assert plain != flat, 'ReplayGain changed nothing'
+    return f'{len(runs["file"][1]) // 4} frames the same through ReplayGain and the EQ'
+
+
+def test_tail_file_plain_fade(player, songs, tmp):
+    """demo's word with no XF_SMART, 3 s: the plain fade's tail read from the file is the ring's, byte for byte."""
+    d = tmp/'tailplain'
+    a, b = tail_song(d/'a.flac'), tail_song(d/'b.flac', kind='next')
+    runs = tail_runs(player, songs, d, a, b, 6, steps=smart_scenario(a, b, end=110.0, word=3000))
+    check_tail(runs, planned=False)
+    return f'{len(runs["file"][1]) // 4} frames the same'
+
+
+def test_tail_file_second_open_late(player, songs, tmp):
+    """The second open comes too late (Q2PLAYER_TAIL_DELAY_MS, as a starved player's would), at 96 kHz 24-bit: the
+    hold begins without it, said in the log, the tail is held in the 6 MB ring with its overlap cut, and the change
+    is byte for byte the one a player with no second open gives."""
+    d = tmp/'taillate'
+    a, b = tail_song(d/'a.flac', 96000, 24), tail_song(d/'b.flac', 96000, 24, kind='next')
+    runs = tail_runs(player, songs, d, a, b, 6, runs=('file', 'ring6'), env={'Q2PLAYER_TAIL_DELAY_MS': '600000'})
+    (fn, fg, fl), (rn, rg, rl) = runs['file'], runs['ring6']
+    assert 'the second open was not level when the hold began' in fl and 'read from the file' not in fl, fl[-1500:]
+    assert 'overlap cut to what the hold has room for' in fl and 'overlap cut to what the hold has room for' in rl
+    at = first_difference(fg, rg)
+    assert fn == rn and at is None, at
+    return f'held in the ring, logged; {len(fg) // 8} frames the same as with no second open'
+
+
+TAIL_HOLD, TAIL_MIX = 13.1, 27.55  # tail_song's fade A: its hold begins about here, and its mix here, in its seconds
+
+
+def tail_stalled(player, songs, tmp, name, at, frames):
+    """tail_song's A into B, FLAC 44.1 kHz 16-bit, the second open's decode stopped at A's second `at` until `frames`
+    more are taken (Q2PLAYER_TAIL_STALL; below 0, for good), and the same held in the 6 MB ring."""
+    d = tmp/name
+    a, b = tail_song(d/'a.flac'), tail_song(d/'b.flac', kind='next')
+    return tail_runs(player, songs, d, a, b, 6, env={'Q2PLAYER_TAIL_STALL': f'{int(at * 44100)}:{frames}'})
+
+
+def test_tail_file_card_stalls_2s(player, songs, tmp):
+    """The card does not answer the second open for 2 s of the song, once inside the hold and once under the next
+    song: the frames those 2 s need were decoded ahead, off the playback thread, so the song never finds the open
+    short (its own count, logged), and the change is byte for byte the ring's."""
+    said = []
+    for where, at in (('hold', TAIL_HOLD + 7), ('mix', TAIL_MIX + 5)):
+        runs = tail_stalled(player, songs, tmp, f'tailstall{where}', at, 2 * 44100)
+        check_tail(runs)
+        m = re.search(r'reader was stalled while (\d+) frames were taken, and the song found it short (\d+) times', runs['file'][2])
+        assert m and int(m[1]) >= 2 * 44100 and m[2] == '0', runs['file'][2][-1500:]
+        said.append(f'in the {where}: stalled while {m[1]} frames played, never short, {len(runs["file"][1]) // 4} frames the same')
+    return '; '.join(said)
+
+
+def test_tail_file_card_gone_before_the_hold(player, songs, tmp):
+    """The card stops answering the second open for good just before the hold: the song does not wait, the tail is
+    held in the ring, said in the log, and the change is byte for byte the ring's."""
+    runs = tail_stalled(player, songs, tmp, 'tailgone0', TAIL_HOLD - 0.3, -1)
+    (fn, fg, fl), (rn, rg, rl) = runs['file'], runs['ring']
+    lines = [l.split('q2player: ')[-1] for l in fl.splitlines() if 'the tail held in memory, the second open' in l]
+    assert lines and 'read from the file' not in fl and re.search(r'the tail held in memory, \d+ KB', fl), fl[-1500:]
+    at = first_difference(fg, rg)
+    assert fn == rn and at is None, at
+    return f'{lines[0]}; {len(fg) // 4} frames the same as the ring\'s'
+
+
+def test_tail_file_card_gone_in_the_hold(player, songs, tmp):
+    """The card stops answering the second open for good 7 s into the hold: every frame it had decoded plays, in
+    order (the ring's bytes up to there), then after XF_HOLD_WAIT_MS the hold is left as at a seek, logged, the song
+    plays on from where its decode is, and the next song plays whole to its end."""
+    at = TAIL_HOLD + 7
+    runs = tail_stalled(player, songs, tmp, 'tailgone1', at, -1)
+    (fn, fg, fl), (rn, rg, rl) = runs['file'], runs['ring']
+    assert 'the second open stopped giving frames' in fl and 'the tail read from the file' in fl, fl[-1500:]
+    upto = (int(at * 44100) - 8192) * 4
+    assert fn == rn and fg[:upto] == rg[:upto], first_difference(fg[:upto], rg[:upto])
+    assert len(fg) < len(rg) and fg[-20 * 44100 * 4:] == rg[-20 * 44100 * 4:], (len(fg), len(rg))
+    return f'the ring\'s bytes to within a block of second {at:.1f}, then {(len(rg) - len(fg)) / 4 / 44100:.2f} s of the song left out; the next song\'s last 20 s the same'
+
+
+def test_tail_file_card_gone_under_the_next_song(player, songs, tmp):
+    """The card stops answering the second open for good 5 s into the mix: the tail fades out over its last decoded
+    frames, logged; up to there the change is the ring's bytes, the next song loses no frame, and once the ring's
+    own mix is over the two are the same again."""
+    at = TAIL_MIX + 5
+    runs = tail_stalled(player, songs, tmp, 'tailgone2', at, -1)
+    (fn, fg, fl), (rn, rg, rl) = runs['file'], runs['ring']
+    assert re.search(r'the tail faded out \d+ ms early', fl), fl[-1500:]
+    upto = (int(at * 44100) - int(0.2 * 44100) - 8192) * 4
+    after = (38 * 44100 + 8192) * 4  # the tail's last frame, and the limiter's recovery
+    assert fn == rn and len(fg) == len(rg) and fg[:upto] == rg[:upto] and fg[after:] == rg[after:]
+    assert fg[upto:after] != rg[upto:after]
+    return f'the ring\'s bytes to {upto // 4 / 44100:.2f} s, the tail gone by {at:.1f} s, the same again from 38.2 s; {len(fg) // 4} frames either way'
+
+
+def test_tail_file_starved(player, songs, tmp):
+    """As test_smart_crossfade_starved, on one core with two busy loops and stopped 300 ms of every second, with no
+    Q2PLAYER_XF_WAIT: whatever the starved player manages (the smart fade or, the analysis too slow, the plain one,
+    logged; the tail read from the file or, the second open late or behind, held in memory, logged), the change is
+    whole: byte for byte one of the two an unstarved player holding the tail in memory gives."""
+    d = tmp/'tailstarved'
+    a, b = tail_song(d/'a.flac'), tail_song(d/'b.flac', kind='next')
+    ring = dict(TAIL_WAIT, Q2PLAYER_XF_RING='6')
+    want = {'smart': smart_play(player, songs, d/'smart', smart_scenario(a, b, end=110.0), env=ring)[2],
+            'plain': smart_play(player, songs, d/'plain', smart_scenario(a, b, end=110.0), env=dict(ring, Q2PLAYER_SMART_DELAY_MS='60000'))[2]}
+    assert want['smart'] != want['plain']
+    cpu = str(max(os.sched_getaffinity(0)))
+    wrap = tmp/'tailstarved.sh'
+    wrap.write_text(f'#!/bin/sh\nexec taskset -c {cpu} {player}\n')
+    wrap.chmod(0o755)
+    busy = [subprocess.Popen(['taskset', '-c', cpu, sys.executable, '-c', 'while True: pass']) for _ in range(2)]
+    was = os.environ.get('Q2_TEST_STARVE')
+    os.environ['Q2_TEST_STARVE'] = '300/1000'
+    try:
+        s, names, got, log = smart_play(str(wrap), songs, d/'starved', smart_scenario(a, b, end=110.0))
+    finally:
+        for p in busy: p.kill(), p.wait()
+        if was is None: os.environ.pop('Q2_TEST_STARVE', None)
+        else: os.environ['Q2_TEST_STARVE'] = was
+    assert not any(bad in log for bad in BAD_TAIL), log[-1500:]
+    assert 'stopped giving frames' not in log and 'faded out' not in log, log[-1500:]
+    kind = 'plain' if 'smart crossfade: plain' in log else 'smart'
+    at = first_difference(got, want[kind])
+    assert at is None, f'starved, the {kind} fade differs from the unstarved one at byte {at} of {len(got)}, {len(want[kind])}: {log[-1500:]}'
+    how = 'read from the file' if 'the tail read from the file' in log else 'held in memory'
+    assert how == 'read from the file' or 'the tail held in memory, ' in log, log[-1500:]
+    return f'the {kind} fade, its tail {how}: {len(got) // 4} frames, the same as unstarved'
 
 
 # mcl-replaygain's scale for each file of music.REPLAYGAIN and b1.mp3, by mode: hciplayer's rule (player/source.c
@@ -1711,6 +2050,58 @@ def test_car_way_needs_the_car_build(player, songs, tmp):
     return 'Bluetooth, as without a car'
 
 
+def test_bt_pause_releases_the_pcm(player, songs, tmp):
+    """docs/internals.md#bluetooth-pause: a song paused on Bluetooth keeps bluealsa's PCM for BT_PAUSE_MS (3 s here,
+    Q2PLAYER_BT_PAUSE_MS), then closes it, so bluealsa's keep-alive lets the A2DP stream stop. A PCM held paused keeps
+    the stream started with nothing in it for the whole pause, and AirPods held so for minutes (pauses of 2.5 and 6.4
+    minutes in a device log, no AVDTP suspend in either) play nothing at the Play until a reconnect. A pause shorter than that keeps the PCM; after it, a click opens a PCM for itself (the click in it) that is closed
+    again BT_PAUSE_MS after the click's hold, and the Play opens one more, the song on from the frame heard. The
+    Bluetooth PCM (the file sink's ..._bt.raw) is read from /proc/PID/fd, the player run without q2-heavy's preload."""
+    def bt_fds(s):
+        fds = []
+        for fd in pathlib.Path(f'/proc/{s.proc.pid}/fd').iterdir():
+            try:
+                if os.readlink(fd).endswith('_bt.raw'): fds.append(fd.name)
+            except OSError: pass
+        return fds
+    seen = {}
+    look = lambda name: (lambda s: seen.setdefault(name, bt_fds(s)))
+    steps = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'),
+             (0.1, fakedemo.vol(100, 100)), (1.0, fakedemo.song('set-songurl', f'{songs}/whole48.wav')),
+             (2.0, '{mcl-pause\\null}'), (2.5, look('short pause')), (3.0, '{mcl-play\\null}'), (4.0, '{mcl-pause\\null}'),
+             (6.5, look('2.5 s paused')), (7.6, look('3.6 s paused')), (8.0, '{mcl-click\\wheel}'), (8.6, look('click')),
+             (14.6, look('after the click')), (15.0, '{mcl-play\\null}'), (15.6, look('playing again')),
+             (17.0, '{mcl-stop\\null}'), (18.0, None)]
+    s = fakedemo.Session(tmp/'bt-pause')
+    s.music = songs
+    s.run(steps, fakedemo.launch_host(player, str(songs), 1, {'LD_PRELOAD': '', 'Q2PLAYER_BT_PAUSE_MS': '3000'}), 1)
+    open_ = {k: len(v) for k, v in seen.items()}
+    assert open_ == {'short pause': 1, '2.5 s paused': 1, '3.6 s paused': 0, 'click': 1, 'after the click': 0,
+                     'playing again': 1}, f'Bluetooth PCMs open: {open_}'
+    names = sorted(p.name for p in (tmp/'bt-pause'/'pcm').glob('*.raw'))
+    pcm = [(tmp/'bt-pause'/'pcm'/n).read_bytes() for n in names]
+    assert [n.split('_', 1)[1] for n in names] == ['48000_2_s16_bt.raw'] * 3, names
+    ref = reference(songs/'whole48.wav')
+    assert pcm[0] == ref[:len(pcm[0])], 'the song up to the long pause, the short one in it, is not the song'
+    click = array.array('h', pcm[1])
+    firsts = wheel_clicks(click, 48000)
+    assert len(firsts) == 1 and firsts[0] < 480, f'click at {firsts} in the PCM opened for it'
+    at = ref.find(pcm[2][:4800 * 4]) // 4
+    unheard = len(pcm[0]) // 4 - at
+    assert at > 0 and 2400 <= unheard <= 28800, f'went on at frame {at}, {unheard} frames before the frame written last'
+    assert pcm[2] == ref[4 * at:4 * at + len(pcm[2])], 'the song does not go on from the frame heard'
+    log = (tmp/'bt-pause'/'player.log').read_text()
+    stamp = lambda text: [int(m) for m in re.findall(rf'^\S+ (\d+) \w player {re.escape(text)}', log, re.M)]
+    closed, opened = stamp('q2player: paused on Bluetooth for 3000 ms, its PCM closed'), stamp("q2player: Bluetooth's PCM opened again")
+    pauses = stamp('q2player: mcl-pause')
+    assert len(closed) == 2 and len(opened) == 2 and len(pauses) == 2, (closed, opened, pauses)
+    assert 2950 <= closed[0] - pauses[1] <= 3400, f'closed {closed[0] - pauses[1]} ms after the pause'
+    assert re.search(r"Bluetooth's PCM opened again for a click, \d+ ms after its close; the song held at frame \d+", log) \
+        and re.search(r"Bluetooth's PCM opened again for the play, \d+ ms after its close; the song on from frame \d+", log), log[-1500:]
+    return (f'kept through a 1 s pause, closed {closed[0] - pauses[1]} ms into a long one; a click in a PCM of its own, '
+            f'closed again; the Play went on {unheard * 1000 // 48000} ms back, at the frame heard')
+
+
 def tones(d, *rates, secs=5):
     """A 1 kHz sine at each rate (t44100.flac and so on), so that a stretch of any PCM says the speed it plays at."""
     d.mkdir(parents=True, exist_ok=True)
@@ -1995,17 +2386,19 @@ def test_click_idle(player, songs, tmp):
 
 def test_click_idle_alsa(player, songs, tmp):
     """A click with nothing playing, through output.c against alsa_test.c's counting ring: a song paused or none, on
-    Bluetooth and on the headphone DAC, IDLE_AHEAD_MS of silence (3840 frames at 48 kHz) goes into the ring with the
+    Bluetooth and on the headphone DAC, and a song paused on Bluetooth whose PCM is opened again for the click after
+    BT_PAUSE_MS closed it (bt-reopened), IDLE_AHEAD_MS of silence (3840 frames at 48 kHz) goes into the ring with the
     click in it. bluealsa's plugin counts the headset's own delay in snd_pcm_delay (280 ms on the Pixel Buds,
     13440 frames) whether the PCM has started or not: a fill measured by that wrote nothing on Bluetooth, the PCM never
     started, and no click was heard paused or stopped, only into a song playing (2026-11-24)."""
     got = subprocess.run([tool(tmp, 'alsa_test', '-DHAVE_ALSA', '-DQ2_CAR_USB'), 'idle'], check=True, capture_output=True,
                          text=True).stdout.split('\n')
     lines = {l.split()[0]: l.split() for l in got if l}
-    for k in ('bt-stopped', 'bt-paused', 'dac-stopped', 'dac-paused'):
+    for k in ('bt-stopped', 'bt-paused', 'bt-reopened', 'dac-stopped', 'dac-paused'):
         got = lines[k]
         assert abs(int(got[2]) - 3840) <= 64 and int(got[4]) > 0, f'{" ".join(got)}: want about 3840 frames queued and the click in them'
-    return 'paused and stopped, on Bluetooth (280 ms of link delay) and the DAC: 80 ms of silence queued, the click in it'
+    return ('paused, stopped and paused with the PCM opened again, on Bluetooth (280 ms of link delay), and the DAC: '
+            '80 ms of silence queued, the click in it')
 
 
 def test_click_volume(player, songs, tmp):
@@ -2658,7 +3051,7 @@ SERIAL = ('test_scan', 'test_grow_seek_beyond', 'test_grow_seek_inside', 'test_c
           'test_grow_opens_a_song_with_a_cover_on_its_first_audio', 'test_car_feed_keeps_the_car_close_behind',
           'test_car_feed_reader_sleeps_while_no_source_writes', 'test_car_release_while_paused',
           # smart-crossfade's: the player on one core shared with busy loops
-          'test_smart_crossfade_starved')
+          'test_smart_crossfade_starved', 'test_tail_file_starved')
 WIDTH = 8  # tests and fixtures side by side: each mostly waits on a player running in real time or faster
 STALL_S = 0.1  # a 5 ms sleep that took this much longer: the machine did not run this process (measured: 650 ms under
                # a nice-19 job on a busy core, under 10 ms when the core is shared fairly)

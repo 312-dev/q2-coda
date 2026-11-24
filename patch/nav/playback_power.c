@@ -226,20 +226,41 @@ static void resume_poll(void) {
     }
 }
 
-/* The headset's absolute volume (AVRCP, 0 to 127) for the Q2's volume v (0 to 100): the same share
- * of the headset's range, 127 v / 100 rounded, as a phone sends its own volume, so a headset that
- * shapes the value into loudness itself (Pixel Buds do) is as even on the Q2 as on a phone. At
- * least 1 above 0, so only 0 mutes. docs/internals.md#headset-controls-and-volume. */
-static unsigned bt_vol_avrcp(int v) {
-    return v <= 0 ? 0 : v >= 100 ? 127 : v == 1 ? 1 : (127u * (unsigned)v + 50) / 100;
+/* The headset's absolute volume (AVRCP, 0 to 127) for the Q2's volume v (0 to 100), on the
+ * connected device's Volume Curve (bt_vol_limit.c vol_gentle), 0 silent and 100 the headset's top
+ * on both. docs/internals.md#headset-controls-and-volume.
+ *
+ * Even, the default: the same share of the headset's range, 127 v / 100 rounded, as a phone sends
+ * its own volume, so a headset that shapes the value into loudness itself (Pixel Buds do) is as
+ * even on the Q2 as on a phone. At least 1 above 0, so only 0 mutes.
+ *
+ * Gentle, for a headset that takes the value as a plain gain (the Bowers & Wilkins Px7 seemed
+ * to): a 40 dB curve, 127 x 10^(-40 dB x (100 - v) / 100 / 20), so each Q2 step is the same 0.4 dB
+ * louder wherever it is, even to the ear, and half volume is 20 dB under the top. Under v 58 the
+ * curve's levels come closer together than AVRCP's steps, so there the value rises no slower than
+ * 127 v / 400, about a level every three steps, and no more than four volumes share a level. At
+ * least 1 above 0. */
+static const unsigned char bt_vol_gentle[101] = {
+    0,  1,  1,  1,  2,  2,  2,  2,  3,  3,  3,  3,   4,   4,   4,   5,   5,  5,  6,  6,  6,
+    7,  7,  7,  8,  8,  8,  9,  9,  9,  10, 10, 10,  10,  11,  11,  11,  12, 12, 12, 13, 13,
+    13, 14, 14, 14, 15, 15, 15, 16, 16, 16, 17, 17,  17,  17,  18,  18,  18, 19, 20, 21, 22,
+    23, 24, 25, 27, 28, 29, 30, 32, 33, 35, 37, 38,  40,  42,  44,  46,  48, 51, 53, 55, 58,
+    61, 64, 67, 70, 73, 77, 80, 84, 88, 92, 96, 101, 106, 111, 116, 121, 127
+};
+static unsigned bt_vol_level(int v, int gentle) {
+    v = v < 0 ? 0 : v > 100 ? 100 : v;
+    if (gentle) return bt_vol_gentle[v];
+    return v == 0 ? 0 : v == 100 ? 127 : v == 1 ? 1 : (127u * (unsigned)v + 50) / 100;
 }
-/* The Q2 volume a headset's level reads as: the one whose level is nearest, the lower of two as
- * near, so a level the Q2 wrote reads back as the volume that wrote it. */
+static unsigned bt_vol_avrcp(int v) { return bt_vol_level(v, vol_gentle()); }
+/* The Q2 volume a headset's level reads as, on the same curve: the one whose level is nearest, the
+ * lowest of those as near, so a level the Q2 wrote reads back as a volume that writes it again (on
+ * Gentle's low steps, where several volumes share a level, the lowest of them). */
 static int bt_vol_q2(unsigned level) {
-    int best = 0;
+    int best = 0, gentle = vol_gentle();
     unsigned off = 255;
     for (int v = 0; v <= 100; ++v) {
-        unsigned l = bt_vol_avrcp(v), d = l > level ? l - level : level - l;
+        unsigned l = bt_vol_level(v, gentle), d = l > level ? l - level : level - l;
         if (d < off) best = v, off = d;
     }
     return best;
@@ -534,37 +555,40 @@ static int playing_stream(void) {
     return type - 2 < 2 || type - 0xf1 < 2;
 }
 
+/* A poll of the pass, timed for the UI pass watchdog: a late pass with no step names its longest. */
+#define POLL(f) (ui_watch_poll(#f), f())
 int ringnav_sleep(void *loop) {
     ui_watch_enter();  /* the UI pass watchdog (ui_watch.c): this pass's work so far */
-    cover_wake_poll(); /* stock's album cover thread, woken for a request (cover_wake.c) */
-    splash_poll();
-    usb_ui_poll(); /* USB and charging toasts, adbd's questions (usb_ui.c) */
-    stale_heal();
-    quick_poll();
-    headset_poll();
-    bt_ui_poll(); /* Settings > Bluetooth's scan, the connection toasts (bt_ui.c) */
-    headset_eq_poll();
-    bt_volume_poll();
-    video_poll();
-    spot_poll();
-    radio_poll();
-    tuner_poll(); /* Radio's list and receiver (radio_tuner.c) */
-    addon_poll();
-    now_poll(); /* the car's Bluetooth told of a radio and of the position (now_source.c) */
-    coda_rc_poll();
-    song_radio_poll();
-    airplay_poll();
-    playback_poll();
-    resume_poll();
-    scrobble_auto();
-    power_poll();
-    thumb_poll();
-    tilt_poll();
-    swipe_back_poll();
-    lyric_poll();
-    keep_lit_poll();
-    np_art_poll();
-    np_settle_poll();
+    POLL(cover_wake_poll); /* stock's album cover thread, woken for a request (cover_wake.c) */
+    POLL(name_order_poll); /* a Library list's order sorted ahead after a library change */
+    POLL(splash_poll);
+    POLL(usb_ui_poll); /* USB and charging toasts, adbd's questions (usb_ui.c) */
+    POLL(stale_heal);
+    POLL(quick_poll);
+    POLL(headset_poll);
+    POLL(bt_ui_poll); /* Settings > Bluetooth's scan, the connection toasts (bt_ui.c) */
+    POLL(headset_eq_poll);
+    POLL(bt_volume_poll);
+    POLL(video_poll);
+    POLL(spot_poll);
+    POLL(radio_poll);
+    POLL(tuner_poll); /* Radio's list and receiver (radio_tuner.c) */
+    POLL(addon_poll);
+    POLL(now_poll); /* the car's Bluetooth told of a radio and of the position (now_source.c) */
+    POLL(coda_rc_poll);
+    POLL(song_radio_poll);
+    POLL(airplay_poll);
+    POLL(playback_poll);
+    POLL(resume_poll);
+    POLL(scrobble_auto);
+    POLL(power_poll);
+    POLL(thumb_poll);
+    POLL(tilt_poll);
+    POLL(swipe_back_poll);
+    POLL(lyric_poll);
+    POLL(keep_lit_poll);
+    POLL(np_art_poll);
+    POLL(np_settle_poll);
     if ((st.np_slide && widget_get_prop_int(st.np_slide, "value", 0)) || /* off the art page */
         np_about_page()) /* the details over it (np_about.c) */
         *(volatile signed char *)BC_IDLE = BC_IDLE_FULL;

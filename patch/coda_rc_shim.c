@@ -75,6 +75,7 @@ static struct {
     unsigned at, started_at, seq, now_hash, now_n, q_hash, q_gen;
     unsigned q_list_hash, q_list; /* the queue's own version (cr_queue): its deque, size and loads */
     unsigned *q_rows, q_listed, q_place; /* a shuffle's listing (cr_queue): its queue indices, the playing one's place */
+    unsigned q_walked, q_walk_list, q_walk_pos, q_walk_stamp; /* that listing's last walk: when (0 none), and of what */
     unsigned play_timer, toast_timer;
     int want; /* a Pause (1) or Play (2) waiting for the player; 0 none */
     unsigned want_seq, want_at;
@@ -348,7 +349,15 @@ static void cr_queue(void *q, unsigned pos) {
     h = hash_bytes(h, (const unsigned char *)&n, sizeof n);
     h = hash_bytes(h, (const unsigned char *)&playback_loads, sizeof playback_loads);
     if (h != cr.q_list_hash) cr.q_list_hash = h, ++cr.q_list;
+    /* A shuffle's lines are a walk of up to CR_QUEUE_MAX rows of its order, each asked whether it can play: walked
+     * again only once the order, the place in it or what played moved (playback_stamp), a song changed, or
+     * CR_FILES_MS on, as a server row coming or going changes what plays next and moves none of those. */
+    unsigned stamp = playback_stamp(), now = time_now_ms();
+    if (playback_option(0) && cr.q_walked && h == cr.q_walk_list && pos == cr.q_walk_pos &&
+        stamp == cr.q_walk_stamp && now - cr.q_walked < CR_FILES_MS)
+        return;
     unsigned *rows = n && pos < n && playback_option(0) ? calloc(CR_QUEUE_MAX, sizeof *rows) : 0, listed;
+    cr.q_walked = rows ? now | 1 : 0, cr.q_walk_list = h, cr.q_walk_pos = pos, cr.q_walk_stamp = stamp;
     if (rows) {
         unsigned k = playback_played(rows, CR_QUEUE_MAX / 2);
         rows[k] = pos;

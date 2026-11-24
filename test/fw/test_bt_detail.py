@@ -1,6 +1,6 @@
 """bt_detail.c: a Bluetooth device's page. Centre on a saved device's row opens it, connected or not (a found row
 pairs, as stock), Play/Pause held on one too: the path ("Q2 → WH-1000XM5"), its codec line, then Battery, Disconnect
-(Connect), Volume Limit, Rename and Forget This Device; Forget asks on the confirmation card, then does what stock's Unpair does and
+(Connect), Volume Limit, Volume Curve, Rename and Forget This Device; Forget asks on the confirmation card, then does what stock's Unpair does and
 clears the saved link (BTLINKMAC) when it names the device."""
 import ctypes as C
 
@@ -45,7 +45,7 @@ def test_centre_on_the_connected_row_opens_its_page(fw):
     d = Detail(fw)
     d.click_row('d0')
     assert d.page and not d.clicks
-    assert d.detail_rows() == ['Battery', 'Disconnect', 'Volume Limit', 'Rename', 'Forget This Device']
+    assert d.detail_rows() == ['Battery', 'Disconnect', 'Volume Limit', 'Volume Curve', 'Rename', 'Forget This Device']
     shown = d.ui.shown(d.page)
     assert 'Q2 → WH-1000XM5' in shown and 'LDAC · 96 kHz · 990 kbps' in shown and '72%' in shown
     assert fw.fn('bt_detail_title', C.c_char_p, C.c_char_p)(b'btdevice_page') == b'WH-1000XM5'
@@ -55,7 +55,7 @@ def test_centre_on_a_saved_row_that_is_not_connected_opens_its_page(fw):
     d = Detail(fw)
     d.click_row('d1')
     assert d.page and not d.clicks  # no connect: Connect is the page's first row
-    assert d.detail_rows() == ['Connect', 'Volume Limit', 'Rename', 'Forget This Device']
+    assert d.detail_rows() == ['Connect', 'Volume Limit', 'Volume Curve', 'Rename', 'Forget This Device']
     shown = d.ui.shown(d.page)
     assert 'Q2 → BMW 6R81' in shown and 'Not Connected' in shown
     assert fw.fn('bt_detail_title', C.c_char_p, C.c_char_p)(b'btdevice_page') == b'BMW 6R81'
@@ -88,7 +88,7 @@ def test_play_pause_held_on_a_paired_row_opens_its_page_with_connect(fw):
     d = Detail(fw)
     d.ui.props[(d.view, '_ringnav_index')] = d.rows().index(d.row('d1'))
     assert fw.fn('bt_ui_hold', C.c_int, C.c_void_p)(d.win) == 1
-    assert d.detail_rows() == ['Connect', 'Volume Limit', 'Rename', 'Forget This Device'] and 'Not Connected' in d.ui.shown(d.page)
+    assert d.detail_rows() == ['Connect', 'Volume Limit', 'Volume Curve', 'Rename', 'Forget This Device'] and 'Not Connected' in d.ui.shown(d.page)
 
 
 def test_held_on_a_found_row_or_a_header_is_not_taken(fw):
@@ -133,7 +133,7 @@ def test_forget_asks_on_the_card_then_unpairs_as_stock(fw):
     d = Detail(fw)
     a = Answers(fw, d)
     d.click_row('d0')
-    d.ui.click(d.page, 4)
+    d.ui.click(d.page, 5)
     assert 'dialog/sortselect_dialog' in d.ui.went  # the confirmation card
     forget = fw.fn('bt_detail__forget', None, C.c_void_p, C.c_int, C.c_int)
     forget(None, 0, 0)  # Cancel
@@ -156,7 +156,7 @@ def test_forget_removes_a_saved_device_that_is_not_connected(fw):
     d = Detail(fw)
     a = Answers(fw, d)
     d.click_row('d1')
-    d.ui.click(d.page, 3)
+    d.ui.click(d.page, 4)
     assert 'dialog/sortselect_dialog' in d.ui.went
     fw.fn('bt_detail__forget', None, C.c_void_p, C.c_int, C.c_int)(None, 1, 0)
     assert a.calls == [('pair', 1), ('read',), ('start', 1), ('close', d.page)]
@@ -204,7 +204,7 @@ def test_a_failed_unpair_does_nothing_more(fw):
 def test_rename_sets_blue_z_s_alias_and_the_list_s_name(fw):
     d = Detail(fw)
     d.click_row('d0')
-    d.ui.click(d.page, 3)
+    d.ui.click(d.page, 4)
     ss = d.ui.windows[-1]
     assert d.ui.name.get(ss) == 'searchstrip_page'
     done = fw.fn('bt_detail__renamed', C.c_char_p, C.c_char_p)
@@ -221,7 +221,7 @@ def test_the_page_follows_the_link(fw):
     d.click_row('d0')
     d.links = []
     d.poll()
-    assert d.detail_rows() == ['Connect', 'Volume Limit', 'Rename', 'Forget This Device']
+    assert d.detail_rows() == ['Connect', 'Volume Limit', 'Volume Curve', 'Rename', 'Forget This Device']
     d.links = [(HEAD, 3)]
     d.poll()
     assert d.detail_rows()[1] == 'Disconnect'
@@ -234,7 +234,7 @@ def test_rename_s_return_key_is_a_check(fw):
     from test_search_strip import Ss
     d = Detail(fw)
     d.click_row('d0')
-    d.ui.click(d.page, 3)
+    d.ui.click(d.page, 4)
     assert fw.var('search_strip__ss', Ss).ret == STRIP_SAVE
 
 

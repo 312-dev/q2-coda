@@ -12,8 +12,9 @@
  * and at its system("poweroff") and system("reboot") (ringnav_card_down):
  * - everything of ours that holds the card asked to let go (card_release): CARD_HOLD written with
  * demo's pid, which q2guard (no log write to the card, the lines kept in RAM) and coda-rc (no
- * catalogue opened) read; the card apps asked to end, Get Album Lyrics, playlist art's worker and
- * the song durations' pass stopped, as for USB storage (addon_card_away); demo's own catalogue
+ * catalogue opened) read; the card apps asked to end, Get Album Lyrics, playlist art's worker,
+ * Cover Flow's art build and the song durations' pass stopped, as for USB storage
+ * (addon_card_away); demo's own catalogue
  * connections let go (catalogue.c catalogue_card_release: detached, none attached again, a running
  * import or match stopped) and the ratings copy's pass ended (ratings.c); coda-rc's library
  * connection closed (a SIGUSR1); then the
@@ -145,6 +146,7 @@ static void card_release(const char *why) {
     addon_card_away(); /* the card apps, and the server catalogue on stock's connection */
     album_lyrics_stop();
     playlist_art_stop();
+    coverflow_art_stop();
     durations_shutdown(1);
     int job = catalogue_card_release(), pass = ratings_card_release();
     if (job || pass) /* what of demo's own was using the card */

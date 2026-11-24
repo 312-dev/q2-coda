@@ -13,6 +13,7 @@ int playback_back(void); /* the track stock Shuffle's Previous left, once; else 
 int playback_peek(unsigned at); /* stock Shuffle's next drawn ahead from at, once; else -1 */
 int shuffle_forced(void);       /* navigation.c: a Play next stock Shuffle goes to next, or -1 */
 unsigned playback_upcoming(unsigned *out, unsigned max); /* Up Next: queue indices, in play order */
+unsigned playback_stamp(void); /* moves whenever the order, the place in it, what played or Playing Next does */
 unsigned playback_played(unsigned *out, unsigned max); /* a shuffle's played songs, oldest first */
 /* Play Next (next 1), Play Last (2), an app's Add (0): the tracks land at pos+1, at the end of
  * Playing Next or at the end; returns that index */

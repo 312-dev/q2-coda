@@ -7,7 +7,10 @@ import math
 import re
 import sqlite3
 import struct
+import threading
+import time
 from collections import Counter
+from typing import Callable
 
 import pytest
 
@@ -1850,49 +1853,81 @@ def test_a_damaged_or_foreign_order_file_is_never_used(fw, library, damage):
     assert s.load() == SORTED and s.listed() == s.order()
 
 
-def test_a_full_sort_runs_on_its_own_thread_under_the_spinner(fw):
-    """The sort on a thread of its own; from SPIN_AFTER_MS the UI thread draws on the shown framebuffer page, and
-    puts back what it covered once the sort is done."""
-    s = Sorts(fw, NO_MIN)
-    page = 320 * 375 * 4
-    fb = (C.c_ubyte * (2 * page))(*bytes(range(256)) * (2 * page // 256))
-    before = bytes(fb)
-    seen, ticks, thread = {}, [], {}
+LOAD_SHOW_MS = int(re.findall(r'#define LOAD_SHOW_MS (\d+)', (host.ROOT/'patch/ui_kit.h').read_text())[0])
+LOAD_TICK_MS = int(re.findall(r'#define LOAD_TICK_MS (\d+)', (host.ROOT/'patch/list_marks.c').read_text())[0])
 
-    def ioctl(fd, request, out, *_):
+
+class Shown:
+    """The shown framebuffer page (320 x 375, 32 bpp, the second of two pages shown), an off-screen canvas of
+    LOAD_AREA for load_sync_begin's plate (its fills are stock's stubs: it holds what the framebuffer showed), and the
+    threads pthread_create starts: the overlay's painter (fb_painter, by its address) on a real thread with a clock
+    of its own, a tick a LOAD_TICK_MS sleep; any other held in others for the test to run."""
+    def __init__(self, fw):
+        self.fw, self.page = fw, 320 * 375 * 4
+        self.fb = (C.c_ubyte * (2 * self.page))(*bytes(range(256)) * (2 * self.page // 256))
+        self.before, self.others, self.ui_ticks = bytes(self.fb), [], []
+        self.painter: threading.Thread | None = None
+        self.on_ui_tick: Callable[[int], object] = lambda n: None  # the test's work at the UI thread's nth sleep
+        self.first_drawn = None  # the painter's tick it first changed the page at
+        self.ticks = 0
+        self.off = (C.c_uint * (240 * 100))()
+        canvas, lcd = block(fw, size=4096), block(fw, size=4096)
+        C.c_void_p.from_address(canvas + O['CANVAS_LCD']).value = lcd
+        C.c_void_p.from_address(lcd + O['LCD_OFFLINE_FB']).value = C.addressof(self.off)
+        C.c_int.from_address(lcd + O['LCD_LINE_LENGTH']).value = 240 * 4
+        fw.mock('canvas_offline_create', lambda *_: canvas)
+        fw.mock('fw_open', lambda *_: 5)
+        fw.mock('fw_ioctl', self.ioctl)
+        fw.mock('fw_mmap', lambda *_: C.addressof(self.fb))
+        fw.mock('fw_usleep', self.usleep)
+        fw.mock('fw_pthread_create', self.create)
+        fw.mock('fw_pthread_join', self.join)
+        self.painter_fn = C.cast(getattr(fw.lib, ui_name(fw.lib, 'fb_painter')), C.c_void_p).value
+
+    def ioctl(self, fd, request, out, *_):
         if request == 0x4600:  # var: 320 x 375, 32 bpp, the second page shown
             C.memmove(out, struct.pack('<7I', 320, 375, 320, 750, 0, 375, 32), 28)
         else:  # fix: smem_len at word 5, line_length at word 11
             fix = [0] * 17
-            fix[5], fix[11] = 2 * page, 1280
+            fix[5], fix[11] = 2 * self.page, 1280
             C.memmove(out, struct.pack('<17I', *fix), 68)
         return 0
 
-    def usleep(us, *_):
-        ticks.append(us)
-        if len(ticks) == 20:  # 400 ms in: the spinner up, the sort not done yet
-            seen['during'] = bytes(fb)
-            C.CFUNCTYPE(C.c_void_p, C.c_void_p)(thread['run'])(None)
+    def usleep(self, us, *_):
+        if threading.current_thread() is self.painter:
+            self.ticks += 1
+            if self.first_drawn is None and bytes(self.fb) != self.before:
+                self.first_drawn = self.ticks
+            time.sleep(.0005)
+        else:
+            self.ui_ticks.append(us)
+            self.on_ui_tick(len(self.ui_ticks))
         return 0
 
-    def create(out, attr, run, arg, *_):
-        C.c_ulong.from_address(out).value, thread['run'] = 99, run
+    def create(self, out, attr, run, arg, *_):
+        C.c_ulong.from_address(out).value = 90 + len(self.others)
+        body = C.CFUNCTYPE(C.c_void_p, C.c_void_p)(run)
+        if run == self.painter_fn:
+            self.painter = threading.Thread(target=body, args=(None,))
+            self.painter.start()
+        else:
+            self.others.append(body)
         return 0
-    fw.mock('fw_open', lambda *_: 5)
-    fw.mock('fw_ioctl', ioctl)
-    fw.mock('fw_mmap', lambda *_: C.addressof(fb))
-    fw.mock('fw_usleep', usleep)
-    fw.mock('fw_pthread_create', create)
-    assert s.load() == SORTED and s.listed() == s.order()
-    assert set(ticks) == {20000} and len(ticks) == 20
-    changed = [i for i in range(2 * page) if seen['during'][i] != before[i]]
-    rows = {i // 1280 for i in changed}
-    assert min(rows) >= 375 + 187 - 32 and max(rows) < 375 + 187 + 32  # on the shown page, at its centre
-    assert {i % 1280 // 4 for i in changed} <= set(range(128, 192))
-    assert bytes(fb) == before and fw.calls('fw_munmap') and fw.calls('fw_pthread_join')
+
+    def join(self, *_):
+        if self.painter:
+            self.painter.join(5)
+        return 0
+
+    def drawn(self):
+        """Wait (real time, 5 s at most) for the painter to have drawn; the page as it was then."""
+        end = time.monotonic() + 5
+        while self.first_drawn is None and time.monotonic() < end:
+            time.sleep(.001)
+        return bytes(self.fb)
 
 
-def upright_box(changed, page, shown=1):
+def upright_box(changed, shown=1):
     """The bounding box (x0, y0, x1, y1), half open, of changed framebuffer bytes as the screen shows them: upright
     375 x 320, the portrait page turned counterclockwise (tools/q2remote.py framebuffer_png: x the page's row, y 319
     less its column)."""
@@ -1901,48 +1936,53 @@ def upright_box(changed, page, shown=1):
     return min(xs), min(ys), max(xs) + 1, max(ys) + 1
 
 
-def test_the_sort_spinner_is_centred_on_the_whole_screen(fw):
-    """The spinner's centre is the screen's, 375 x 320 with the status row, within a pixel either way: not the
-    centre of the room under the status row."""
-    s = Sorts(fw, NO_MIN)
-    page = 320 * 375 * 4
-    fb = (C.c_ubyte * (2 * page))(*bytes(range(256)) * (2 * page // 256))
-    before, seen, ticks, thread = bytes(fb), {}, [], {}
+def sort_under_overlay(fw):
+    """A full sort on its own thread under the loading overlay: the sort run at the UI thread's tenth sleep, once the
+    painter has drawn. (the sort, the framebuffer, the page as the painter drew it)."""
+    s, f, seen = Sorts(fw, NO_MIN), Shown(fw), {}
 
-    def ioctl(fd, request, out, *_):
-        if request == 0x4600:
-            C.memmove(out, struct.pack('<7I', 320, 375, 320, 750, 0, 375, 32), 28)
-        else:
-            fix = [0] * 17
-            fix[5], fix[11] = 2 * page, 1280
-            C.memmove(out, struct.pack('<17I', *fix), 68)
-        return 0
+    def tick(n):
+        if n == 10:
+            seen['during'] = f.drawn()
+            f.others[0](None)  # the sort's thread: its work, then done
+    f.on_ui_tick = tick
+    assert s.load() == SORTED and s.listed() == s.order()
+    return s, f, seen['during']
 
-    def usleep(us, *_):
-        ticks.append(us)
-        if len(ticks) == 20:
-            seen['during'] = bytes(fb)
-            C.CFUNCTYPE(C.c_void_p, C.c_void_p)(thread['run'])(None)
-        return 0
 
-    def create(out, attr, run, arg, *_):
-        C.c_ulong.from_address(out).value, thread['run'] = 99, run
-        return 0
-    fw.mock('fw_open', lambda *_: 5)
-    fw.mock('fw_ioctl', ioctl)
-    fw.mock('fw_mmap', lambda *_: C.addressof(fb))
-    fw.mock('fw_usleep', usleep)
-    fw.mock('fw_pthread_create', create)
-    s.load()
-    x0, y0, x1, y1 = upright_box([i for i in range(2 * page) if seen['during'][i] != before[i]], page)
-    assert (x1 - x0, y1 - y0) == (64, 64)
+def test_a_full_sort_runs_on_its_own_thread_under_the_overlay(fw):
+    """The sort on a thread of its own; the overlay drawn on the shown framebuffer page by a painter thread from
+    LOAD_SHOW_MS of its own clock, and what it covered put back once the sort is done."""
+    s, f, during = sort_under_overlay(fw)
+    assert set(f.ui_ticks) == {LOAD_TICK_MS * 1000} and len(f.ui_ticks) == 10
+    # drawn after the sleep that reached LOAD_SHOW_MS, seen at the next: nothing sooner, so no flash
+    assert f.first_drawn == LOAD_SHOW_MS // LOAD_TICK_MS + 1
+    changed = [i for i in range(2 * f.page) if during[i] != f.before[i]]
+    assert changed and {i // 1280 for i in changed} <= set(range(375, 750))  # on the shown page
+    assert bytes(f.fb) == f.before and fw.calls('fw_munmap') and f.painter and not f.painter.is_alive()
+
+
+def test_the_sort_overlay_is_centred_on_the_whole_screen(fw):
+    """The spinner's dots (the plate's fills are stock's, stubbed here) centre on the screen's centre, 375 x 320 with
+    the status row, within a pixel either way: not the centre of the room under the status row."""
+    s, f, during = sort_under_overlay(fw)
+    x0, y0, x1, y1 = upright_box([i for i in range(2 * f.page) if during[i] != f.before[i]])
+    assert x1 - x0 <= 64 and y1 - y0 <= 64
     assert abs((x0 + x1) / 2 - 375 / 2) <= 1 and abs((y0 + y1) / 2 - 320 / 2) <= 1
 
 
+def test_a_sort_done_before_the_delay_shows_nothing(fw):
+    s, f = Sorts(fw, NO_MIN), Shown(fw)
+    f.on_ui_tick = lambda n: n == 1 and f.others[0](None)
+    assert s.load() == SORTED
+    assert f.first_drawn is None and bytes(f.fb) == f.before and f.painter and not f.painter.is_alive()
+
+
 def test_the_overlays_spinner_is_centred_on_the_whole_screen(fw):
-    """Painted over a page the payload builds (page_open's, full-bleed: the whole screen), the box's centre is the
-    screen's (187.5, 160) within a pixel, not the rows' under the status row."""
-    boxes = []
+    """Painted over a page the payload builds (page_open's, full-bleed: the whole screen), once its wait has lasted
+    LOAD_SHOW_MS, the box's centre is the screen's (187.5, 160) within a pixel, not the rows' under the status row."""
+    boxes, now = [], [5000]
+    fw.mock('time_now_ms', lambda *_: now[0])
     fw.mock('canvas_fill_rounded_rect', lambda canvas, r, *_: boxes.append(tuple((C.c_int * 4).from_address(r))) or 0)
     page = page_block(fw)
     fw.mock('window_create', lambda *_: page)
@@ -1950,13 +1990,202 @@ def test_the_overlays_spinner_is_centred_on_the_whole_screen(fw):
     win = fw.fn('page_open', C.c_void_p, C.c_char_p, C.c_void_p, C.c_void_p)(b'radio_page', None, None)
     canvas, lcd = block(fw, size=4096), block(fw, size=4096)
     C.c_void_p.from_address(canvas + O['CANVAS_LCD']).value = lcd
-    fw.fn('load_spinner_paint', None, C.c_void_p, C.c_void_p)(win, canvas)
+    paint = fw.fn('load_spinner_paint', None, C.c_void_p, C.c_void_p)
+    for _ in range(LOAD_SHOW_MS // 100 + 1):  # a frame each 100 ms, as the spinner's timer asks
+        boxes.clear()
+        paint(win, canvas)
+        now[0] += 100
     x, y, w, h = boxes[0]
     wy = C.c_int.from_address(win + O['W_Y']).value
     assert wy == 0  # the window from the screen's top
     assert (w, h) == (64, 64) and abs(x + w / 2 - 375 / 2) <= 1 and abs(wy + y + h / 2 - 320 / 2) <= 1
     for dx, dy, dw, dh in boxes[1:]:  # the dots inside it
         assert x <= dx and dx + dw <= x + w and y <= dy and dy + dh <= y + h
+
+
+WARM_IDLE_MS = int(re.findall(r'#define WARM_IDLE_MS (\d+)', (host.ROOT/'patch/name_order.c').read_text())[0])
+NO_SONGS = 1
+WARM_SQL = b'select * from songs'  # library_query leaves it as it is, an open's and the warm's alike
+
+
+class Warm:
+    """name_order.c's load ahead over Sorts: getAllMusic is Songs' query (library_warm's for NO_SONGS); open() is
+    the Library's open of Songs; the thread a poll starts is held (threads) until the test runs it, any other runs
+    as it starts; the clock is now."""
+    def __init__(self, fw, st, n=NO_MIN + 5, extra=0):
+        self.fw, self.s, self.threads, self.now, self.extra = fw, Sorts(fw, n), [], 100000, extra
+        self.polling = False
+        fw.mock('getAllMusic', self.query)
+        fw.mock('fw_deque_pop_back', lambda q, *_: self.s.q[q].pop() and 0)
+        fw.mock('time_now_ms', lambda *_: self.now)
+        fw.mock('fw_pthread_create', self.create)
+        fw.var('g_backlight_status', C.c_ubyte).value = 0  # dark: no input to wait out
+        st('last_input', C.c_uint).value = 0
+        self.gen = fw.var('library_gen', C.c_uint)
+        self.poll_fn = fw.fn('name_order_poll', None)
+        self.list_is = fw.fn('name_order_list', None, C.c_uint)
+        C.memset(C.addressof(fw.var('name_order__nw', C.c_ubyte)), 0, fw.sizes['name_order__nw'])
+
+    def query(self, *_):
+        n = self.s.named(b'db', WARM_SQL, None, 1)
+        for i in range(self.extra):  # stock's rows after its sort, as getAllArtist's Unknown row
+            self.s.q[self.s.staging.value].append(self.s.record(self.s.ids[i]))
+        return n
+
+    def create(self, out, attr, run, arg, *_):
+        C.c_ulong.from_address(out).value = 99
+        if self.polling:
+            self.threads.append(run)
+        else:
+            C.CFUNCTYPE(C.c_void_p, C.c_void_p)(run)(None)
+        return 0
+
+    def poll(self):
+        self.polling = True
+        try:
+            self.poll_fn()
+        finally:
+            self.polling = False
+
+    def run(self):
+        C.CFUNCTYPE(C.c_void_p, C.c_void_p)(self.threads.pop())(None)
+
+    def open(self):
+        self.s.calls.clear()
+        self.list_is(NO_SONGS)
+        self.query()
+        self.list_is(0)
+        return list(self.s.calls)
+
+    def change(self):
+        """The records change (another title: an import's or a scan's) and library_gen moves."""
+        self.s.titles[5] = 'T00' if self.s.titles[5] != 'T00' else 'T01'
+        self.gen.value += 1
+
+
+def test_a_changed_library_sorts_a_kept_list_ahead_and_its_open_takes_that_order(fw, st):
+    """name_order.c: after library_gen moves, a Library list with a kept order is loaded again in the UI's quiet;
+    its records, no longer the kept ones, are sorted on a thread of their own with stock's comparator; the next
+    open moves its rows into that order without a sort, the order a sort at the open would have given."""
+    w = Warm(fw, st)
+    assert w.open() == SORTED
+    w.change()
+    w.s.calls.clear()
+    w.poll()
+    assert w.s.calls == [('dbquery', 0)] and len(w.threads) == 1  # loaded on the UI thread, not sorted there
+    w.run()
+    assert w.s.calls[-1] == ('sort', CMP['NAME_CMP_PINYIN'])
+    w.poll()  # the sort collected and kept
+    assert w.open() == [('dbquery', 0)] and w.s.listed() == w.s.order()
+    w.s.calls.clear()
+    w.poll()
+    assert not w.s.calls and not w.threads  # nothing more due
+
+
+def test_a_load_ahead_of_unchanged_records_sorts_nothing(fw, st):
+    w = Warm(fw, st)
+    w.open()
+    w.gen.value += 1  # an import that changed none of these records
+    w.s.calls.clear()
+    w.poll()
+    assert w.s.calls == [('dbquery', 0)] and not w.threads
+    assert w.open() == [('dbquery', 0)] and w.s.listed() == w.s.order()
+
+
+def test_a_kept_order_of_no_library_list_is_never_loaded_ahead(fw, st):
+    w = Warm(fw, st)
+    w.query()  # the same rows, from no Library list's open
+    w.change()
+    w.s.calls.clear()
+    w.poll()
+    assert not w.s.calls
+
+
+def test_nothing_is_loaded_ahead_until_library_gen_moves(fw, st):
+    w = Warm(fw, st)
+    w.open()
+    w.s.calls.clear()
+    w.poll()
+    assert not w.s.calls
+
+
+def test_a_lit_screen_waits_for_quiet_and_a_scan_for_its_end(fw, st):
+    w = Warm(fw, st)
+    w.open()
+    w.change()
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    st('last_input', C.c_uint).value = w.now - WARM_IDLE_MS + 1
+    w.s.calls.clear()
+    w.poll()
+    assert not w.s.calls
+    w.now += 1  # WARM_IDLE_MS since the last input
+    claim(O['SCAN_THREAD'])
+    saved = C.string_at(O['SCAN_DONE'], 8)
+    try:
+        C.c_int.from_address(O['SCAN_THREAD']).value, C.c_int.from_address(O['SCAN_DONE']).value = 1, 0
+        w.poll()
+        assert not w.s.calls  # a scan running: its end moves library_gen again
+    finally:
+        C.memmove(O['SCAN_DONE'], saved, 8)
+        C.c_int.from_address(O['SCAN_THREAD']).value = 0
+    w.poll()
+    assert w.s.calls == [('dbquery', 0)] and len(w.threads) == 1
+
+
+def test_rows_stock_adds_after_its_sort_are_left_out_of_the_sort_ahead(fw, st):
+    """getAllArtist and its kin add an Unknown row after their query's sort: the warm sorts the records it hashed,
+    and keeps them only while they are those."""
+    w = Warm(fw, st, extra=2)
+    w.open()
+    w.change()
+    w.poll()
+    w.run()
+    w.poll()
+    w.s.calls.clear()
+    w.list_is(NO_SONGS)
+    w.s.named(b'db', WARM_SQL, None, 1)
+    assert w.s.calls == [('dbquery', 0)] and w.s.listed() == w.s.order()
+
+
+def test_an_open_that_meets_the_sort_ahead_waits_for_it_rather_than_sorting(fw, st):
+    w = Warm(fw, st)
+    w.open()
+    w.change()
+    w.poll()
+    assert len(w.threads) == 1
+    sleeps = []
+    fw.mock('fw_usleep', lambda us, *_: sleeps.append(us) or (len(sleeps) == 3 and w.run()) or 0)
+    assert w.open() == [('dbquery', 0), ('sort', CMP['NAME_CMP_PINYIN'])]  # the warm's sort, run while it waited
+    assert len(sleeps) == 3 and w.s.listed() == w.s.order()
+    w.s.calls.clear()
+    w.poll()
+    assert not w.threads and not w.s.calls
+
+
+def test_a_changed_list_takes_its_own_slot_not_another_lists(fw, st):
+    """Four slots: a list's new order replaces that list's old one, so three other kept loads stay kept."""
+    w = Warm(fw, st)
+    w.open()
+    for sql in (b'select * from a', b'select * from b', b'select * from c'):
+        assert w.s.named(b'db', sql, None, 1) == len(w.s.ids)
+    was, w.s.titles[5] = w.s.titles[5], 'T00'
+    assert w.open() == SORTED  # the records changed: Songs sorted again, in Songs' slot
+    w.s.titles[5] = was  # the other three loads' records as they were kept
+    for sql in (b'select * from a', b'select * from b', b'select * from c'):
+        w.s.calls.clear()
+        w.s.named(b'db', sql, None, 1)
+        assert w.s.calls == [('dbquery', 0)], sql
+
+
+def test_the_list_a_kept_order_is_outlives_a_reboot(fw, st, library):
+    Files(fw)
+    w = Warm(fw, st)
+    w.open()
+    reboot(fw, library)
+    C.memset(C.addressof(fw.var('name_order__nw', C.c_ubyte)), 0, fw.sizes['name_order__nw'])
+    w.change()
+    w.poll()
+    assert len(w.threads) == 1  # the card's head named Songs
 
 
 def test_no_framebuffer_no_spinner_and_no_thread_sorts_in_place(fw):
@@ -3011,8 +3240,9 @@ class CfPage(C.Structure):
     """coverflow.c's cf as far as the pool reads it: cf.slide, and cf.count at the end (coverflow.h)."""
     _fields_ = [*((k, C.c_void_p) for k in 'page body covers slide name artist title albums tracks stock'.split()),
                 *((k, C.c_int) for k in 'sort sort_read year_old artists on_sort resort'.split()),
-                ('jobs', C.c_void_p), ('thread', C.c_ulong), ('timer', C.c_uint), ('title_timer', C.c_uint), ('titled', C.c_int),
-                ('offline', C.c_int), ('saved_album', C.c_uint), ('albums_gen', C.c_uint),
+                ('jobs', C.c_void_p), ('thread', C.c_ulong), ('timer', C.c_uint), ('title_timer', C.c_uint),
+                *((k, C.c_uint) for k in 'art_timer art_at'.split()), *((k, C.c_int) for k in 'art_told art_ring want'.split()),
+                ('titled', C.c_int), ('offline', C.c_int), ('saved_album', C.c_uint), ('albums_gen', C.c_uint),
                 *((k, C.c_int) for k in 'screen album running done total cancel scoped all_sort'.split()),
                 *((k, C.c_void_p) for k in 'all_albums all_stock hearts'.split()), ('count', C.c_int)]
 

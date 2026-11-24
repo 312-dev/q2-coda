@@ -251,6 +251,19 @@ for top,limit,want in ((100,40,40),(30,40,30),(100,100,100)):
     passed()
 b=BtLimitMachine(mac='AA:BB:CC:DD:EE:02'); b.limit(40); b.poll(); b.absolute=127; b.poll()
 assert b.u.mem_read(syms['g_volume'],1)[0]==100 and not b.writes(); passed()  # another device: no limit
+# A device's Volume Curve (bt_vol_limit.c): Gentle sends the 40 dB curve's level (50 is 16, 40 is 13, 20 is 6), and
+# the choice reaches the connected headset at once through stock's device_set_volume; another device stays Even.
+def gentle(b,mac='AA:BB:CC:DD:EE:01',c=1):
+    b.call(address=payload_syms['btlim_curve_set'],args=(b.string(mac),c,0,0),gap=0)
+b=BtLimitMachine(); assert b.volume(50,50)==[(100,100)] and b.writes()==[64]
+b.byte(syms['g_volume'],50); b.calls=[]; gentle(b); assert b.writes()==[16] and b.absolute==16
+b.calls=[]; assert b.volume(20,20)==[(100,100)] and b.writes()==[6]
+b.calls=[]; gentle(b,c=0); assert b.writes()==[64]; passed()  # back to Even, sent again
+b=BtLimitMachine(mac='AA:BB:CC:DD:EE:02'); gentle(b); assert b.volume(50,50)==[(100,100)] and b.writes()==[64]; passed()
+# The limit is on the Q2's scale on either curve: the headset's keys at its top held to 40, sent 40's level.
+for curve,level in ((0,51),(1,13)):
+    b=BtLimitMachine(); gentle(b,c=curve); b.limit(40); b.poll(); b.calls=[]; b.absolute=127
+    b.poll(); assert b.u.mem_read(syms['g_volume'],1)[0]==40 and b.writes()==[level],(curve,b.writes()); passed()
 # A headset that can't report absolute volume is asked again at the slow pace, lit too, not every 400 ms.
 b=BtVolumeMachine(); b.absolute=-1; asks=[]
 for _ in range(2*O['BT_VOLUME_SLOW_MS']//400): b.poll(); asks.append(sum(c[0]=='stock_btvol' for c in b.calls))
