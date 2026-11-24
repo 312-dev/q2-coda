@@ -603,6 +603,24 @@ def test_a_catalogue_app_not_running_is_started_and_handed_the_list_once_it_list
     assert rig.files.files[catplay].startswith(b'2 2\n')  # never written for it
 
 
+def test_a_second_wake_while_the_app_starts_launches_nothing_more(rig, fw):
+    """A boot that resumes an app's stream wakes the app twice in one addon_poll, the resume's request
+    (addon.c resume_poll) and the catalogue's autostart (cat_autostart), before its launcher has written its pid
+    file: two launchers then both find no app running, and two copies run. The second wake finds the first's
+    start under way and launches nothing; a start with no pid file ADDON_START_MS (10 s) on is over, and the next
+    wake launches again."""
+    rig.write(1, [song_row('s1', 'Cached', 'B', 'A', 1, 100, 1, local='/mnt/mmc/.subsonic/stream/s1.flac')])
+    rig.poll()
+    rig.files.files[f'/mnt/mmc/.{APP}/q2-{APP}'] = b''
+    started = []
+    fw.mock('fw_system', lambda cmd, *_: started.append(C.string_at(cmd)) or 0)
+    wake = fw.fn('addon_wake', C.c_int, C.c_char_p)
+    assert wake(APP.encode()) == 1 and wake(APP.encode()) == 1
+    assert started == [f'/bin/sh /mnt/mmc/.{APP}/run &'.encode()]
+    rig.poll(11)  # past ADDON_START_MS with no pid file: poll_one ends the start
+    assert wake(APP.encode()) == 1 and len(started) == 2
+
+
 @pytest.mark.parametrize('case', ['offline', 'signed out', 'no app'])
 def test_no_app_is_started_offline_signed_out_or_without_a_catalogue_app(rig, fw, case):
     """Offline the list plays from the card at once, a signed-out app's row is gone from the Library and starts

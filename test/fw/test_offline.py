@@ -87,6 +87,8 @@ def test_an_app_without_the_word_has_no_row(fw, tmp_path):
 def test_a_press_asks_the_app_once_it_listens_and_toasts_its_answer(rig, fw):
     """The request waits for the app's socket (one there at its start it takes as answered), goes once, and the
     app's offlineack= is the toast; a second request replaces the first."""
+    rig.now += 11_000  # the rig's autostart (catalogue.c cat_autostart), never listening, over: the press starts it
+    fw.fn('addon_poll', None)()
     started = []
     fw.mock('fw_system', lambda cmd, *_: started.append(C.string_at(cmd)) or 0)
     rig.files.files[f'/mnt/mmc/.{APP}/q2-{APP}'] = b''
