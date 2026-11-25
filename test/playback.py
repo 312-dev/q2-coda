@@ -2077,3 +2077,30 @@ m.advance_song(1); assert m.at()==0
 m=guarded(StartMachine); m.install([('a','/a/a','A',0,0,0,0),('b','/a/b','A',0,0,0,0)],0); m.word(ps['press_natural'],2); m.site(); m.word(ps['press_natural'],0); asks(m,'player_start',m.get(syms['mcl_pdeqplaylist']),1,1,2)
 assert m.stock==['xf:player_start'] and m.site()==STOCK and m.at()==0  # another song's pick starts: it mutes, and clears the mark it isn't for
 print('Start: a natural start on the jack skips demo\'s mute and sleep and marks the word; everything else keeps stock\'s')
+# Stock's player_save_stop (0x52069c): mclSetMute(1), usleep 100 ms, mclStop (which waits for the player's stopstatus),
+# usleep 300 ms. Stock's OTG pass (check_otg_status) calls it on the UI thread when a USB DAC comes or goes, before it
+# restarts the song on the new way; the 300 ms after a stop q2player has already answered is cut there
+# (patch/usb_otg.c otg_stop_sleep), and kept for every other caller.
+class SaveStopMachine(StartMachine):
+    def __init__(self):
+        super().__init__()
+        self.handlers.pop(syms['mclGetPlayStatus'],None); self.word(0xa50084,2)  # playing
+        self.mock('mclGetPlayTime','mclSetSavePlayStatus','mclSetStartSeekTime','mclStop','notifyPlayStatus',
+                  'dmrNotifyPlayStatus','sendBtHeadsetPlayStatus')
+        self.handlers[syms['toolsGpioGetValue']]='xf:gpio'; self.handlers[ps['stock_otg_status_trampoline']]='xf:otgpass'
+        self.byte(syms['g_last_otgid'],1)  # the bus power on, a USB DAC just enumerated: stock's host pass
+    def hook(self,u,address,size,unused):
+        name=self.handlers.get(address,'')
+        if name=='xf:gpio': return self.returns(0)  # PD18 low: the adapter's ID
+        if name=='xf:otgpass': self.nested(syms['player_save_stop']); return self.returns(0)  # its DAC branch's stop
+        return super().hook(u,address,size,unused)
+    def stop(self):
+        self.quiet=[]; self.handlers.pop(syms['player_save_stop'],None); self.call(address=syms['player_save_stop'],args=(0,0,0,0),gap=0); return self.quiet
+    def otg_pass(self):
+        self.quiet=[]; self.handlers.pop(syms['player_save_stop'],None); self.call(address=ps['ringnav_otg_status'],args=(0,0,0,0),gap=0); return self.quiet
+SAVE_STOP=[('mute',1),('usleep',100000),('usleep',300000)]
+m=SaveStopMachine(); assert m.stop()==SAVE_STOP  # any other caller: stock's
+q=m.otg_pass(); assert q==SAVE_STOP[:2],q  # the OTG pass: the mute and its 100 ms, no wait after the stop
+assert m.stop()==SAVE_STOP  # and only inside the pass
+assert m.get(0x52077c)==jal(ps['otg_stop_sleep'])
+print('Save stop: stock\'s OTG pass skips player_save_stop\'s 300 ms after the stop; every other caller keeps it')
