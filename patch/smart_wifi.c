@@ -91,15 +91,65 @@ static int net_page_open(void) {
     return 0;
 }
 
-/* Something needs the network: a USB cable in; AirPlay or DLNA on (Network service); Car Remote while a
- * phone may come over this Wi-Fi or through q2-iroh: a link up and Car Remote used within its last 10 minutes
- * (coda_rc_shim.c coda_rc_wants_wifi; with no network joined its phone comes over Bluetooth);
- * SyncLink over Wi-Fi or a SyncLink session, LocalSend's daemon (a transfer runs on past its page); a stock stream queue (Tidal's: the
- * types on_wm_timer_networkstatus stops once offline, whatever it is doing, as Play must fetch its
- * URL at once), Spotify's librespot running or waiting to start (it never retries a Connect login
- * or mDNS that failed), a station playing, a card app running, a scrobble upload, Network Update's
- * download or an Apps job, Get Album Lyrics, a Tidal download, a time zone lookup (autozone.c) or
- * an action held for the link (smart_hold); a time sync pending on a link; or a page above. */
+#if Q2POD_DEV
+/* --dev builds: q2remote (remote.c, docs/remote.md) reaches the Q2 over Wi-Fi alone, so it needs
+ * the network for REMOTE_HOLD_MS after its last request and for demo's first REMOTE_BOOT_MS
+ * (offsets.inc says why). Each authenticated request renames a new REMOTE_USED into place (remote.c
+ * mark_used); an inode unlike the last (ino) is a request, timed by demo's own clock (at), so the
+ * two processes share none, and a stat a second opens nothing. boot: the hold after boot runs. A
+ * demo started later takes a file left from before as a request. A log line as each hold starts
+ * and as it ends. */
+#define REMOTE_USED "/tmp/q2remote.used"
+static struct {
+    unsigned at, ino;
+    int boot;
+} rh __attribute__((section(".scratch")));
+/* demo's first poll, 0 before it: a global so test/patch.py can start its Q2 long after boot */
+unsigned remote_boot_at __attribute__((section(".scratch")));
+#define remote_say(what, ms)                                                                       \
+    do {                                                                                           \
+        char line_[96];                                                                            \
+        tk_snprintf(line_, sizeof line_, what, (ms) / 60000u);                                     \
+        ulog('I', "wifi", line_);                                                                  \
+    } while (0)
+static void remote_poll(unsigned now) {
+    unsigned info[36] = { 0 };
+    if (!remote_boot_at) {
+        remote_boot_at = now | !now, rh.boot = 1;
+        remote_say("q2remote: Wi-Fi needed for %u min after boot", REMOTE_BOOT_MS);
+    }
+    if (rh.boot && now - remote_boot_at >= REMOTE_BOOT_MS) {
+        rh.boot = 0;
+        remote_say("q2remote: the hold after boot ended, %u min on", REMOTE_BOOT_MS);
+    }
+    if (!__xstat(3, REMOTE_USED, info) && info[4] != rh.ino) {
+        if (!rh.at)
+            remote_say("q2remote: a session needs Wi-Fi until %u min after its last request",
+                       REMOTE_HOLD_MS);
+        rh.at = now | !now;
+        rh.ino = info[4];
+    } else if (rh.at && now - rh.at >= REMOTE_HOLD_MS) {
+        rh.at = 0;
+        remote_say("q2remote: the session's hold ended, %u min after its last request",
+                   REMOTE_HOLD_MS);
+    }
+}
+static int remote_wants_wifi(void) { return rh.boot || rh.at; }
+#else
+#define remote_poll(now) ((void)(now))
+#define remote_wants_wifi() 0
+#endif
+
+/* Something needs the network: a USB cable in; AirPlay or DLNA on (Network service); Car Remote
+ * while a phone may come over this Wi-Fi or through q2-iroh: a link up and Car Remote used within
+ * its last 10 minutes (coda_rc_shim.c coda_rc_wants_wifi; with no network joined its phone comes
+ * over Bluetooth); SyncLink over Wi-Fi or a SyncLink session, LocalSend's daemon (a transfer runs
+ * on past its page); a stock stream queue (Tidal's: the types on_wm_timer_networkstatus stops once
+ * offline, whatever it is doing, as Play must fetch its URL at once), Spotify's librespot running
+ * or waiting to start (it never retries a Connect login or mDNS that failed), a station playing, a
+ * card app running, a scrobble upload, Network Update's download or an Apps job, Get Album Lyrics,
+ * a Tidal download, a time zone lookup (autozone.c) or an action held for the link (smart_hold); a
+ * time sync pending on a link; a page above; or, in a --dev build, q2remote (remote_wants_wifi). */
 static int smart_needed(void) {
     unsigned type = (unsigned)mclGetPlayType();
     return g_usbdet_value || g_airplayflag || g_dlnaflag || coda_rc_wants_wifi() ||
@@ -107,7 +157,8 @@ static int smart_needed(void) {
            airplayGetFlag() == 2 || type - 2 < 2 || type - 0xf1 < 2 || spot_running() ||
            radio_status() == 2 || addon_running() || scrobble_busy() || netupdate_busy() ||
            album_lyrics_busy() || tidal_busy() || autozone_busy() || sw.hold_timer ||
-           (g_syncnettime_flag && networkGetConnectStatus() > 0) || net_page_open();
+           (g_syncnettime_flag && networkGetConnectStatus() > 0) || net_page_open() ||
+           remote_wants_wifi();
 }
 
 /* Background scans held while A2DP streams (docs/internals.md#scan-hold): the RTL8733BS is one
@@ -229,12 +280,13 @@ static void scan_hold_poll(unsigned now) {
 
 /* power_poll, every SMART_POLL_MS. The row off, or the user's Wi-Fi off: stock's, and a radio Smart
  * Wi-Fi had off comes back. Otherwise a use or a new link restarts the count, a use wakes the
- * radio, and SMART_IDLE_MS without one, associated or not, turns it off. The scan hold is kept
- * first, whether the row is on or not. */
+ * radio, and SMART_IDLE_MS without one, associated or not, turns it off. q2remote's requests (a
+ * --dev build) and the scan hold are kept first, whether the row is on or not. */
 void smart_poll(void) {
     unsigned now = time_now_ms();
     if (sw.at && now - sw.at < SMART_POLL_MS) return;
     sw.at = now | !now;
+    remote_poll(now); /* before smart_needed's first ask, the scan hold's */
     scan_hold_poll(now);
     /* ponytail: while stock refuses its switch (smart_ready), a waiter that asks after this expiry
      * starts another SMART_CONNECT_MS: one more 15 s at most; keep each waiter's own start if it

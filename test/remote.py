@@ -205,7 +205,7 @@ for bad in (frame[:20], frame[:-1], frame[:5] + struct.pack("<IIII", w + 1, h, s
 
 with tempfile.TemporaryDirectory(prefix="q2-remote-") as td:
     root = pathlib.Path(td); keyfile = root / "key"; keyfile.write_text("0123456789abcdef\n")
-    mounts, cache = root / "mounts", root / "cache"
+    mounts, cache, used = root / "mounts", root / "cache", root / "used"
     # Away, only a mount whose path starts with the card's is left: it isn't the card.
     card = lambda on: mounts.write_text(f"/dev/mmcblk4p1 {root} vfat rw 0 0\n" if on else f"tmpfs {root}-x tmpfs rw 0 0\n")
     card(False)
@@ -213,7 +213,7 @@ with tempfile.TemporaryDirectory(prefix="q2-remote-") as td:
     q.PORT = port
     exe = root / "q2remote"
     subprocess.run(["cc", "-DREMOTE_HOST", f'-DKEY_FILE="{keyfile}"', f'-DCARD="{root}"', f'-DMOUNTS="{mounts}"',
-                    f'-DCACHE_FILE="{cache}"', f"-DPORT={port}",
+                    f'-DCACHE_FILE="{cache}"', f'-DUSED_FILE="{used}"', f"-DPORT={port}",
                     str(pathlib.Path(__file__).resolve().parents[1] / "patch/remote.c"), "-o", str(exe)], check=True)
     shim = root / "shim.so"; (root / "shim.c").write_text(SHIM)
     subprocess.run(["cc", "-shared", "-fPIC", str(root / "shim.c"), "-o", str(shim), "-ldl"], check=True)
@@ -397,11 +397,18 @@ with tempfile.TemporaryDirectory(prefix="q2-remote-") as td:
                     while part := s.recv(4096): reply += part
             return bytes(reply)
         marker = root / "ran"; touch = f"touch {marker}".encode()
+        # Each authenticated request puts a new USED_FILE in place, holding its pid, which Smart Wi-Fi reads as a
+        # use in a --dev build (smart_wifi.c remote_poll); a rejected one leaves nothing.
+        os.unlink(used)
         for request in (b"fedcba987654321\n" + touch + b"\n", b"fedcba98765432100\n" + touch + b"\n",
                         b"fedcba9876543210\n" + touch + b"\0\n", b"fedcba9876543210\n" + touch + b"\r\n",
                         b"fedcba9876543210\n" + touch + b" #" + b"x" * 5000 + b"\n"):
-            assert ask(request) == b"ERR\n" and not marker.exists(), request[:40]
+            assert ask(request) == b"ERR\n" and not marker.exists() and not used.exists(), request[:40]
         assert ask(b"fedcba9876543210\n" + touch + b" #" + b"x" * 4000 + b"\n") == b"OK\n" and marker.exists()
+        first = used.read_text()
+        assert re.fullmatch(r"[1-9]\d*\n", first), first
+        assert ask(b"fedcba9876543210\ntrue\n") == b"OK\n" and used.read_text() not in ("", first)
+        assert not os.path.lexists(f"{used}.tmp")
         # The card's key: 16-126 characters from A-Z a-z 0-9 _ -, on a line of its own (docs/remote.md). One
         # malformed on the card revokes the copy, as a missing one does.
         def accepted(key): return ask(f"{key}\nprintf in\n".encode()) == b"OK\nin"
