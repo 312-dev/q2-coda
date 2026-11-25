@@ -17,7 +17,8 @@ shows it from, the daemon's /tmp/coda-rc.pair, through /proc/PID/root of the pro
 Checks, in order: pairing (a fresh key, the Dialog's screenshot) and a second session on the kept key; browse
 from the root to an album, its rows numbered apart from their titles, no number on search or Tracks rows, and
 NOT_FOUND for ids that name nothing; Play of the album from its first song, then the State push that follows with
-that song, and the queue at it; Pause, Play and Play/Pause, each played by the time its Ack comes; Next to another of the album's songs; Previous back; the album's
+that song, and the queue at it; Pause, Play and Play/Pause, each played by the time its Ack comes; a Seek while paused, which stays paused at
+the target; Next to another of the album's songs; Previous back; the album's
 cover as an image; then SetMode (shuffle on and off, repeat one, all and off, each in the next State), Rate (three
 hearts, Favorites, none; another song's id NOT_FOUND), PlayQueueItem (the third song; a stale id NOT_FOUND), and Resume
 (the album again after another list, from the song it was left on; Resume while it plays carries on). Each step prints
@@ -262,6 +263,17 @@ def run(argv=None):
     check('Play again', playing(s).get('play_state') == 1)
     s.transport('toggle')
     check('Play/Pause', playing(s).get('play_state') == 2)
+    # a seek while paused (the phone's scrubber, Android Auto's, the car's in iPhone mode) moves the song and leaves it
+    # paused, the position on the target (docs/internals.md#scrub-ipod); the Play/Pause after it plays on from there
+    st = s.get_state()
+    before = st.get('position', {}).get('position_ms', 0) // 1000
+    to = 1 if before >= 3 else before + 2
+    s.transport('seek', to)
+    time.sleep(3)  # demo's status poll, paused once a second, and the shim's state after it
+    st = s.get_state()
+    at = st.get('position', {}).get('position_ms', -1)
+    check('Seek while paused stays paused', st.get('now_playing', {}).get('play_state') == 2 and at // 1000 == to,
+          f"play_state {st.get('now_playing', {}).get('play_state')}, {before} s to {to} s: at {at} ms")
     s.transport('toggle')
     # Next and Previous as the wheel's buttons: with Shuffle on, Next is another of the album's songs, not the second
     ids = {t['id']: t['title'] for t in tracks}
