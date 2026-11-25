@@ -266,3 +266,78 @@ def test_a_new_codec_s_segment_with_no_seconds_yet():
     for st in streams:
         q2bt.classify(st)
     assert [(s.codec, len(s.samples)) for s in streams] == [('SBC', 19), ('aptX-HD', 0)]
+
+
+# ---- the recorder's lines (2026-11-25 on: patch/q2bt.c, docs/bluetooth.md's sampler) ----
+
+def new_line(sec, kbps=240, wq=0, rssi=-20, ue='0'):
+    return (f'{t(sec)} up={1000 + sec} kbps={kbps} brx=1 acl={kbps // 5} wq={wq} rssi={rssi} afh=60 wtx=0 wrx=20 '
+            f'cpu=21 ba=13.8 own=0.4 h=11 er=40 done={kbps // 5} fly=1 bp=- pl=2.0 dk=12 gw=0 ue={ue}\n')
+
+
+def test_a_line_without_the_dead_fields_reads_and_shows_only_its_own():
+    """lq, tpl, err, ew, fcc, pr, pd and pw left the line: a newer log's stall table has none of their columns, and
+    its ue (the UART's counts) is read as their sum."""
+    log = [f'{t(0)} START h=11 mtu=1021 bufs=5 raw=ok\n', f'{t(0)} CODEC AAC 48000 Hz delay=150.0 ms\n']
+    log += [new_line(i) for i in range(1, 20)] + [new_line(20, 60, wq=3648, ue='2/5/1/0/0'), new_line(21)]
+    streams, _ = q2bt.parse(log)
+    s = streams[0].samples[19]
+    assert (s.f['brx'], s.f['ue'], s.f['ew'], s.f['pw']) == (1, 8, None, None)
+    assert streams[0].samples[0].f['ue'] == 0
+    out = io.StringIO()
+    q2bt.report(streams, [], out)
+    text = out.getvalue()
+    head = [ln for ln in text.splitlines() if ln.startswith('time ')][0]
+    assert ' ue' in head and ' brx' in head and ' lq' not in head and ' pw' not in head
+    assert 'LINK stall' in text and 'ue 0->8' in text
+
+
+IDLE_LOG = [f'{t(0)} ACL h=11 dev=04:00:6E:D3:96:6D rssi=-7 afh=50\n',
+            f'{t(0)} ACLINFO h=11 dev=04:00:6E:D3:96:6D role=central lsto=20000ms flush=none txmax=4\n',
+            f'{t(0)} WIFI freq=2412 band=2.4 ch=1 state=COMPLETED\n',
+            f'{t(0)} COEX TDMA = 61 30 03 11 11 (case-3, TDMA-On)\n']
+IDLE_LOG += [f'{t(i)} IDLE up={1000 + i} btx=0 brx=0 wtx=0 wrx=1 wq=0 ue=0\n' for i in range(1, 60)]
+IDLE_LOG += [f'{t(i * 10)} ACL h=11 dev=04:00:6E:D3:96:6D rssi={-7 - 4 * i} afh=50\n' for i in range(1, 6)]
+IDLE_LOG += [f'{t(33)} IDLE up=1033 btx=0 brx=0 wtx=0 wrx=1 wq=0 ue=0/3/0/0/0\n',
+             f'{t(60)} WIFI freq=5180 band=5 ch=36 state=COMPLETED\n',
+             f'{t(61)} ACL gone h=11 dev=04:00:6E:D3:96:6D\n']
+
+
+def test_an_idle_link_s_lines_are_the_links_section_not_notes():
+    """A paused headset carried out of range: no stream at all. Its seconds are not notes (one a second would bury
+    them), but a second with UART errors and the link's end are; the links section has its RSSI falling before it
+    went, what the controller agreed for it, and the band it went on."""
+    streams, notes = q2bt.parse(IDLE_LOG)
+    assert streams == []
+    assert [text for _, text in notes] == ['UART errors on an idle link: ue=0/3/0/0/0 (fe/pe/brk/oe/bo)',
+                                           'ACL gone h=11 dev=04:00:6E:D3:96:6D']
+    links, bands = q2bt.recorder(IDLE_LOG)
+    assert [(ln.h, ln.dev, ln.gone is not None) for ln in links] == [(11, '04:00:6E:D3:96:6D', True)]
+    assert links[0].info == 'role=central lsto=20000ms flush=none txmax=4'
+    assert [b for _, b in bands] == ['2.4 GHz ch 1', '5 GHz ch 36']
+    out = io.StringIO()
+    q2bt.report_links(links, bands, out)
+    text = out.getvalue()
+    assert 'rssi median -17, lowest -27' in text and 'the last minute before it went: rssi -7 -11 -15 -19 -23 -27' in text
+    assert 'Wi-Fi 5 GHz ch 36 from 2026-11-17 20:01:00' in text
+
+
+def test_a_link_still_up_with_nothing_read_and_wifi_not_joined():
+    log = [f'{t(0)} ACL h=12 dev=06:05:04:03:02:01 rssi=- afh=-\n', f'{t(0)} WIFI freq=- band=- ch=- state=-\n',
+           f'{t(10)} ACL h=12 dev=06:05:04:03:02:01 rssi=- afh=-\n']
+    out = io.StringIO()
+    q2bt.report_links(*q2bt.recorder(log), out)
+    text = out.getvalue()
+    assert 'h=12: 2026-11-17 20:00:00 to last seen 20:00:10; no ACLINFO; rssi not read' in text
+    assert 'Wi-Fi not joined from' in text and 'before it went' not in text
+    quiet = io.StringIO()
+    q2bt.report_links([], [], quiet)
+    assert quiet.getvalue() == ''
+
+
+def test_main_prints_the_links_after_the_streams(tmp_path, capsys):
+    f = tmp_path / 'q2-bt.0'
+    f.write_text(''.join(IDLE_LOG))
+    q2bt.main([str(f)])
+    text = capsys.readouterr().out
+    assert 'No stream in the log.' in text and text.index('No stream') < text.index('Links (the recorder')
