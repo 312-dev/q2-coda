@@ -2203,6 +2203,21 @@ def test_bt_no_click_holds_a_headset_that_paused_us(player, songs, tmp):
     return 'no PCM for clicks after the headset\'s pause; clicks in the stream again after the Play'
 
 
+def test_bt_a_warm_click_stream_gives_way_to_radio(player, songs, tmp):
+    """Radio, a video or Internet Radio opening stops the Library's player first (patch/videos.c video_start's
+    player_stop, {mcl-stop\\null}) and then opens the output itself, q2video waiting out a busy one 5 s: a warm click
+    stream holding Bluetooth's PCM closes at that stop, within a tick, so the receiver's open finds it free, and no
+    click opens it again under the source (patch/clicker.c sends none then: test/fw test_nav_loop.py)."""
+    looks = {}
+    look = lambda k: (lambda s: looks.setdefault(k, len(bt_fds(s))))
+    steps = [(1.0, '{mcl-click\\wheel}'), (1.5, look('warm')), (2.0, '{mcl-stop\\null}'), (2.15, look('after the stop')),
+             (3.0, None)]
+    s, names, pcm, log = bt_session(tmp, 'bt-warm-radio', player, songs, steps, WARM)
+    assert looks == {'warm': 1, 'after the stop': 0}, looks
+    assert '1 click with nothing playing on way 1' in log and 'the PCM kept for the song' not in log, log[-800:]
+    return 'the warm stream closed within 150 ms of the stop that Radio\'s open sends'
+
+
 def test_bt_a_paused_songs_warm_hold_lets_go_as_it_ends(player, songs, tmp):
     """A click with a song paused on Bluetooth (the user's pause) holds the stream warm BT_CLICK_WARM_MS after the
     click, then the PCM is let go at once, not BT_PAUSE_MS more on; the Play goes on from the frame held."""
