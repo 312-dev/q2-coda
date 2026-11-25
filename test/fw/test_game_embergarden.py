@@ -31,7 +31,7 @@ R = [3.0, 4.6, 7.0]
 
 
 class Ember(C.Structure):  # G_EMBERS of them
-    _fields_ = [(k, C.c_int) for k in 'bx y vx vy phase amp size alive smoke'.split()]
+    _fields_ = [(k, C.c_int) for k in 'bx y vx vy phase amp size alive f'.split()]
 
 
 class Shot(C.Structure):
@@ -44,7 +44,7 @@ class Puff(C.Structure):
 
 class State(C.Structure):
     _fields_ = [('art', C.c_uint * (HDR['EG_ART_BYTES'] // 4)), ('pal', C.c_uint * (320 // BAND * 256)),
-                ('grow', C.c_ubyte * (8 * CH_W * CH_H)), ('ok', C.c_int), ('em', Ember * 12), ('sh', Shot * 3), ('pf', Puff * 3),
+                ('grow', C.c_ubyte * (8 * CH_W * CH_H)), ('ok', C.c_int), ('em', Ember * 12), ('sh', Shot * 3), ('pf', Puff * 3), ('sky', (C.c_short * 3) * 15),
                 *((k, C.c_int) for k in 'mode aim recoil spray repeat stop h tick'.split()), ('bed', C.c_int * 8),
                 ('bed_t', C.c_int * 8), ('land_x', C.c_int), ('land_t', C.c_int), ('last', C.c_int * 2), ('blink', C.c_int),
                 ('flame', C.c_ubyte * 8), *((k, C.c_int) for k in 'wave lull left spawn gap banner cleared light frm k strip dim bolt bolt_x '
@@ -558,7 +558,7 @@ def test_the_light_turns_a_strip_of_8_rows_a_step_the_palette_a_32nd_further_eac
         if k == 40:
             assert g.g.k == 2
     assert g.g.k == 32 and g.g.strip == 0
-    assert seen[-1] == []  # done: nothing more to paint
+    assert all(r[2] < 375 for r in seen[-1])  # done: no more strips, only the sky's own turn
     y = 100
     i = SCENE[y * 375 + 50]
     assert g.g.pal[(y // BAND) * 256 + i] & 0xffffff == colour(DAY, y, i)
@@ -566,22 +566,97 @@ def test_the_light_turns_a_strip_of_8_rows_a_step_the_palette_a_32nd_further_eac
 
 
 def test_a_full_sky_leaves_the_extras_for_a_step_with_room(fw):
-    """Twelve embers with long tails falling mark more than the step's budget: the light's strip, a due puff and the banner's fade
-    wait, and go on once the sky is quiet."""
+    """Twelve embers falling fast and a wide box beside them (a landing's, two beds') mark more than the step's budget:
+    the light's strip, a due puff, the banner's fade and the sky's turn wait, and go on once the sky is quiet."""
     g = Game(fw)
     g.play()
     g.quiet()
     g.g.frm, g.g.light, g.g.k, g.g.strip = DAWN, DAY, 3, 5
     for k in range(12):
-        g.ember(k, 40 + 25 * k, 60 + 9 * k, size=2 if k < 6 else 1, amp=18, vy=2).smoke = 1
+        g.ember(k, 40 + 25 * k, 60 + 9 * k, size=2 if k < 6 else 1, amp=18, vy=2)
     g.g.pf[0].alive, g.g.pf[0].x, g.g.pf[0].y, g.g.pf[0].f, g.g.pf[0].t = 1, 100, 100, 1, 9
     g.g.banner = 50
+    g.g.tick = 16 * 15 + 8  # the turn of the crater's glow, which swells every turn
+    glow = g.g.sky[9][2]
+    g.fn['mark'](C.addressof(g.g), 0, 200, 375, 22)
     g.step()
-    assert (g.g.k, g.g.strip, g.g.pf[0].f, g.g.banner) == (3, 5, 1, 50)
+    assert (g.g.k, g.g.strip, g.g.pf[0].f, g.g.banner, g.g.sky[9][2]) == (3, 5, 1, 50, glow)
     for e in g.g.em:
         e.alive = 0
     g.step(), g.step()
     assert g.g.strip > 5 and g.g.pf[0].f == 2 and g.g.banner > 50
+    g.close()
+
+
+def test_an_ember_is_a_flame_of_four_frames_six_steps_each_and_holds_through_a_hit_stop(fw):
+    g = Game(fw)
+    g.play()
+    g.quiet()
+    a, b = g.ember(0, 100, 60, size=0), g.ember(5, 250, 60, size=2)
+    seen = []
+    for _ in range(48):
+        g.step()
+        seen.append((a.f, b.f))
+    assert [f for f, _ in seen[::6]] in ([k % 4 for k in range(n, n + 8)] for n in range(4))  # round and round
+    assert all(seen[k][0] == seen[k - k % 6][0] or seen[k][0] == seen[k - k % 6 + 5][0] for k in range(48))
+    assert all((y - x) % 4 == 1 for x, y in seen)  # each ember a frame apart by its number, never all as one
+    flames = [k for k in PARTS if k.startswith('FLAME')]
+    assert flames == [f'FLAME{size}_{f}' for size in range(3) for f in range(4)]
+    for size in range(3):  # each frame holds the ember's own disc, the one a spurt meets, round its anchor
+        for f in range(4):
+            at, w, h, ax, ay, kind, _ = part(f'FLAME{size}_{f}')
+            px = struct.unpack_from(f'<{w * h}I', ART, at)
+            r = int(R[size])
+            assert kind == 1 and all(px[(ay + dy) * w + ax + dx] >> 24 == 255 for dx, dy in ((0, 0), (-r + 1, 0), (r - 1, 0), (0, r - 1)))
+            assert ay > 2 * r + 4 and h - ay < r + 7  # the flame streams up from it
+    g.g.stop = 3
+    held = (a.f, b.f, a.y)
+    g.step(), g.step()
+    assert (a.f, b.f, a.y) == held
+    g.close()
+
+
+def test_the_sky_moves_one_thing_a_step_clouds_drift_the_glow_pulses_and_the_lava_runs(fw):
+    g = Game(fw)
+    sky = lambda: [tuple(v) for v in g.g.sky]
+    start = sky()
+    assert [v[:2] for v in start[0::4]] == [(40, 150), (118, 168), (300, 142), (350, 170)]  # the clouds, as the design's
+    seen, rects = [start], []
+    g.frame()  # the whole sheet the open asked for
+    for k in range(15 * 500):
+        before = sky()
+        marked = g.frame()
+        changed = [i for i, (x, y) in enumerate(zip(before, sky())) if x != y]
+        assert changed in ([], [g.g.tick % 15]) and (not marked or changed)  # the title card: nothing else moves
+        rects += marked
+        if g.g.tick % 15 == 0:
+            seen.append(sky())
+    cloud = lambda i: [s[i][0] for s in seen]
+    near, far = cloud(0), cloud(4)
+    assert near[1] - near[0] == 1 and near[100] - near[0] == 100 and far[100] - far[0] == 50  # a pixel a turn, or two turns
+    assert min(cloud(8)) == -44 and max(cloud(8)) == 375 + 44  # off one edge and in again at the other
+    glow = [s[9][2] for s in seen]
+    assert 5 <= min(glow) <= 20 and 180 <= max(glow) <= 195 and all(abs(a - b) <= 32 for a, b in zip(glow, glow[1:]))
+    lava = [[s[i][2] for i in (2, 6, 10)] for s in seen[1:]]
+    assert all(sum(a >= 16 for a in row) in (1, 2) and max(row) >= 120 for row in lava)  # one or two lit, never none
+    peak = [next(n for n, row in enumerate(lava) if row[i] >= 250) for i in range(3)]
+    assert (peak[1] - peak[0]) % 12 in (3, 4, 5) and (peak[2] - peak[1]) % 12 in (3, 4, 5)  # each a third of a round on
+    for i in (1, 5, 7, 13, 14):  # the billows keep within 3 px of their places
+        assert all(abs(s[i][0] - start[i][0]) <= 6 and abs(s[i][1] - start[i][1]) <= 4 for s in seen)
+    for i in (3, 11):  # the puffs climb the column and fade at both ends
+        assert min(s[i][1] for s in seen) < 50 and max(s[i][1] for s in seen) > 125 and max(s[i][2] for s in seen) > 140
+    assert all(w * h <= 2800 for _, _, w, h in rects)  # each turn's box is its own thing's, the glow's the widest
+    g.play()
+    g.quiet()
+    for k in range(4):
+        g.g.bed[k] = CHARRED if k < 3 else GROWING
+    g.ember(0, 40, 257, size=0, vy=1)
+    g.step()
+    assert g.g.mode == LOST
+    still = sky()
+    for _ in range(60):
+        g.step()
+    assert sky() == still  # under the result card the sky rests
     g.close()
 
 
