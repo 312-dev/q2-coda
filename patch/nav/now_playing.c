@@ -1,5 +1,5 @@
-/* Paused, the seek waits for Play (scrub_end) and the player's second stands still until then,
- * and the page's timer would put the bar back on it. The bar keeps the
+/* Paused, the track stays paused at the seek (scrub_end), and the player reports the target a poll
+ * or so later; until then the page's timer would put the bar back on the old second. The bar keeps the
  * target until the player reports it, the track changes or stops, or SETTLE_PLAY_MS of playing
  * pass without it; then the page's timer comes back. */
 #define SETTLE_MS 250
