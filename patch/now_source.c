@@ -163,7 +163,8 @@ int now_page_time(int *sec, int *total) {
 }
 
 /* Radio (radio_tuner.c tuner_open), an Internet Radio station (radio.c radio_play), a video
- * (videos.c video_play) or a card game with the sound (addon.c addon_game_start) takes the output:
+ * (videos.c video_play), a card game with the sound (addon.c addon_game_start) or Caller Ten's
+ * contest (game_callerten.c take) takes the output:
  * the Library's song, playing or paused, is stopped with its place kept (player_save_stop; a paused
  * q2player would keep the PCM they need, and stock's player_stop, which video_start calls, forgets
  * the place), and now_time reads it paused there for as long as they have it, Radio's page shut or
@@ -172,7 +173,8 @@ int now_page_time(int *sec, int *total) {
  * radio.c radio_take_back), and any start of its player, a pick among them, plays from the player's
  * own place (now_drop: radio_tuner.c tuner_yield and ringnav_start_player); a Radio page that found
  * no stations, shut, and a video's or a sound game's end load the song again paused there for the
- * user's Play (now_release), never playing on its own. A Library that was stopped is left as it is.
+ * user's Play (now_release), never playing on its own; Caller Ten, left, plays one that was playing
+ * on from there (now_take_back), as it found it. A Library that was stopped is left as it is.
  */
 void now_hold(void) {
     int status = mclGetPlayStatus();
