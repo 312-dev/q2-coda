@@ -917,6 +917,9 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   as wide as its text and 16 px each side, centered on y 252 (y 236 to 268), above the bottom
   glass curve. It is the only raised surface in the theme. The page stays in sight round it,
   with its status row and its selection; it lasts 1.5 s (stock's own toasts their own time).
+  One toast at a time: a new one, the Vamp's or stock's, takes the place of the one showing at once, the same pill
+  with the new words and its own time, never a second pill over the first (`feedback.c` `toast_swap`, 2026-11-25).
+  Find My Vamp's "Find My Vamp" stays up while its jingle plays, up to a minute (`findmy.c`).
   Words in sentence case ("Playing Last", "Name can't be empty"). A toast that says what holds for as long as it
   holds stays up as the same pill, painted by its page (`feedback.c` `toast_stay`), and takes no keys: Radio's
   "No Wi-Fi" while the link is down (2026-11-20).

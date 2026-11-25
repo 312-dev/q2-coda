@@ -86,6 +86,7 @@ class Q2:
         self.axp = axp
         self.pins = {17: 1, 18: 1, 19: 1, 'PC20': 0, 'PE22': 0}
         self.online, self.udc, self.dev, self.snd = 0, 'not_attached', 0, 0
+        self.hprt0 = 0  # the regdump's HPRT0: bit 0 a device's connect on the host port
         self.udc_changed = False
         self.forward = True  # demo's --dev build sends PD17's edges
         self.lines: dict[int, list] = {18: [], 19: []}
@@ -118,7 +119,8 @@ class Q2:
         if p == HOSTDEV and self.dev:
             text = '0a12\n'
         if p == REGDUMP and C.c_int.in_dll(self.L, 'ut_debugfs').value:
-            text = 'GOTGCTL = 0x000d00fc\nGOTGINT = 0x00000000\nGINTSTS = 0x04008028\nDSTS = 0x0024f900\nHPRT0 = 0x00000000\n'
+            text = ('GOTGCTL = 0x000d00fc\nGOTGINT = 0x00000000\nGINTSTS = 0x04008028\nDSTS = 0x0024f900\n'
+                    f'HPRT0 = 0x{self.hprt0:08x}\n')
         if p == STOP and self.stop:
             text = ''
         if text is None:
@@ -241,6 +243,7 @@ def dac(q, t=5.0):
     kernel's device 0.56 s after, the PCM 0.82 s after; out 20 s later."""
     q.edge(t, 18, 0)
     q.set(t + 3.0, PC20=1, PE22=1).edge(t + 3.0, 17, 0)
+    q.set(t + 3.25, hprt0=0x21401)  # its pull-up, as 2026-11-25's DACs read 0.25 to 0.41 s after the power
     q.set(t + 3.56, dev=1)  # sysfs first, then the uevent, as the kernel does
     q.uevent(t + 3.56, 'add', '/devices/platform/ahb2/13500000.otg/usb1/1-1', 'usb', 'usb_device', 'bus/usb/001/002')
     q.uevent(t + 3.82, 'add', '/devices/platform/ahb2/13500000.otg/usb1/1-1/1-1:1.0/sound/card1', 'sound')
@@ -250,7 +253,7 @@ def dac(q, t=5.0):
     q.set(t + 23.0, dev=0, snd=0)
     q.uevent(t + 23.0, 'remove', '/devices/platform/ahb2/13500000.otg/usb1/1-1', 'usb', 'usb_device')
     q.edge(t + 23.05, 18, 1)
-    q.set(t + 23.6, PC20=0, PE22=0).edge(t + 25.2, 17, 1)
+    q.set(t + 23.6, PC20=0, PE22=0, hprt0=0x400).edge(t + 25.2, 17, 1)
     return q
 
 
@@ -327,6 +330,20 @@ def test_a_dac_s_cycle_has_its_edges_uevents_stock_s_power_and_the_shadow_s_gran
     out = []
     assert R.report(R.cycles(lines), [], type('W', (), {'write': lambda self, s: out.append(s)})()) == 0
     assert 'cycle 1 dac' in ''.join(out)
+
+
+def test_a_laptop_the_wrong_way_round_is_off_in_the_shadow_once_hprt0_reads_no_connect(L):
+    """2026-11-25 cycle 7 (usbtrace-2026-11-25.trace): an ID low with no VBUS, stock's power 3.9 s on, HPRT0 0x1000
+    through its trial: the shadow's trial, timed from stock's power, ends at UF_CONNECT_MS, says replug UF_WRONG_MS
+    later and asks for no second grant."""
+    q = Q2(L)
+    q.edge(5, 18, 0).set(8.9, PC20=1, PE22=1, hprt0=0x1000).edge(8.9, 17, 0)
+    q.set(17, PC20=0, PE22=0, hprt0=0).edge(18.6, 17, 1)
+    lines = R.parse(q.run().trace().splitlines())
+    would = [(ln.t, ln.rest.split(' at ')[0]) for ln in lines if ln.kind == 'shadow:' and ln.rest.startswith('would')]
+    on = next(ln.t for ln in lines if ln.kind == 'stock' and ln.rest == 'otg-on')
+    assert [w for _, w in would] == ['would grant', 'would revoke', 'would replug'], would
+    assert abs(would[1][0] - on - 2.5 * S) < 300 * MS, 'off UF_CONNECT_MS after the power, give or take a read'
 
 
 def test_stock_powering_a_low_the_shadow_would_not_is_a_disagreement(L):

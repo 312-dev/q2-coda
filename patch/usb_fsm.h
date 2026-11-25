@@ -21,9 +21,16 @@
                                   * phantom logged was 2.15 s at 0.54 s samples) is short of one logged low that
                                   * lasted 4.28 s, nothing attached, before stock's power held it (q2-pull-state.log
                                   * 21:0x, test_usb_fsm.py pull-up phantom 1) */
-#define UF_TRIAL_MS 3000         /* bus power with no device on the host port this long ends the trial [M: the AB13X
-                                  * earbuds' 1-1 appeared 1.87 and 2.06 s after otg-on, 2026-11-23; the study's 1.5 s
-                                  * would have cut both] */
+#define UF_TRIAL_MS 3000         /* HPRT0 not read: bus power with no device on the host port this long ends the trial
+                                  * [M: the AB13X earbuds' 1-1 appeared 1.87 and 2.06 s after otg-on, 2026-11-23; the
+                                  * study's 1.5 s would have cut both] */
+#define UF_CONNECT_MS 2500       /* bus power with HPRT0's connect status read clear this long: nothing pulled D+ or
+                                  * D- up, so nothing will enumerate; a computer the wrong way round, as both on
+                                  * 2026-11-25 kept HPRT0 at 0x1000 through 3 and 8 s of stock's power [M]. Each of
+                                  * that day's seven USB DACs read connected at its first read, 0.25 to 0.41 s on [M];
+                                  * USB 2.0 gives a device 100 ms from VBUS to attach (tSIGATT [Q]), and the AB13X
+                                  * earbuds, the slowest, were enumerated by 1.87 and 2.06 s, so connected sooner [M] */
+#define UF_TRIAL_SLOW_MS 8000    /* a connect read: a device is there, given usb_otg.c's OTG_TRIAL_MS to enumerate */
 #define UF_WRONG_MS 1000         /* ID still low this long after a failed trial, no VBUS: "replug" (F5) */
 #define UF_RETRY_MS 2000         /* a failed trial is tried once more this long after its end */
 #define UF_RETRIES 1
@@ -58,6 +65,7 @@ enum usb_fsm_event {
     UF_EV_UDC,     /* v 1: the UDC is addressed or configured by a host; 0: any other state */
     UF_EV_TIMER,   /* a deadline came (usb_fsm_advance gives these) */
     UF_EV_WAKE,    /* back from Standby: stock's device_standby turned the bus power off */
+    UF_EV_CONNECT, /* v: HPRT0's connect status (bit 0) as just read: 1 a device's pull-up on the host port */
     UF_EVENTS
 };
 
@@ -76,12 +84,13 @@ enum usb_fsm_event {
 
 struct usb_fsm {
     int state;
-    int vbus, idlow, online, power, hostdev, pcm, udc; /* the last value fed of each, -1 none yet */
+    int vbus, idlow, online, power, hostdev, pcm, udc, connect; /* the last value fed of each, -1 none yet */
     int granted;              /* the machine's own bus power */
     int retries;              /* trials used since the ID went low */
     int said_replug;          /* UA_REPLUG given this episode */
     int refused;              /* no trial until VBUS from a real source, an ID high or a wake */
     int done;                 /* the state's one-shot timer has fired (RESIDUE's replug, SRC_COOLDOWN's check) */
+    int no_device;            /* the last trial ended with no connect read: no trial once more */
     long long t_enter;        /* the state's start */
     long long t_vbus;         /* PD17 went low (the sink session's start) */
     long long t_vbus_high;    /* PD17 went high in a sink state, the debounce's start; UF_NEVER while low */

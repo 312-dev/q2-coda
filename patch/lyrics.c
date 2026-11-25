@@ -261,7 +261,7 @@ int ringnav_lyric(void) {
         unsigned at = (unsigned)I(TAGLIB_NEW_GOT, 0);
         char **(*get)(void *, const char *) =
             (char **(*)(void *, const char *))((lib = at - TAGLIB_FILE_NEW) + TAGLIB_PROPERTY_GET);
-        if (at != (unsigned)taglib_file_new) { /* an unbound entry still holds demo's stub */
+        if (at != (unsigned)PEQ_AT_taglib_file_new) { /* an unbound entry still holds demo's stub */
             v = get(f, "LYRICS");
             if (!v || !*v || !**v) {
                 if (v) ((void (*)(char **))(lib + TAGLIB_PROPERTY_FREE))(v);

@@ -301,19 +301,19 @@ static void tidal_pages(int (*page)(void *), int (*parse)(const char *), void *a
 }
 
 int ringnav_tidal_playlist(void *id) {
-    tidal_pages(stock_tidalplaylist_trampoline, parseTidalPlaylistDetailJson, id, I(stTidalTracks, 8), 0);
+    tidal_pages(stock_tidalplaylist_trampoline, PEQ_AT_parseTidalPlaylistDetailJson, id, I(stTidalTracks, 8), 0);
     tidal_albuminfo_thread_run = 2;
     return 0;
 }
 int ringnav_tidal_album(void *id) {
-    tidal_pages(stock_tidalalbum_trampoline, parseTidalAlbumDetailJson, id, I(stTidalTracks, 8), 0);
+    tidal_pages(stock_tidalalbum_trampoline, PEQ_AT_parseTidalAlbumDetailJson, id, I(stTidalTracks, 8), 0);
     tidal_albuminfo_thread_run = 2;
     return 0;
 }
 /* My Collection's Tracks: stock pages these on a touch scroll to the list's end, which the wheel
  * evidently doesn't reach (inferred from #101, not traced); after the whole list stTidalTracks' offset is the last page's, so that check finds no more. */
 int ringnav_tidal_favs(void *offset) {
-    tidal_pages(stock_tidalfavs_trampoline, parseTidalColTracksJson, 0, (int)(long)offset, 1);
+    tidal_pages(stock_tidalfavs_trampoline, PEQ_AT_parseTidalColTracksJson, 0, (int)(long)offset, 1);
     tidal_collection_thread_run = 2;
     return 0;
 }

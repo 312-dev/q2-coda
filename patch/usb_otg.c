@@ -11,7 +11,10 @@
  * - any other low reaches stock only once it has read low, with the cable sense PD17 showing no
  *   VBUS, on every pass for OTG_SETTLE_MS;
  * - the bus power is a trial: with no device on the host port within OTG_TRIAL_MS it goes off,
- *   and is not tried again until a cable's VBUS is seen or the Q2 wakes from Standby (A);
+ *   and is not tried again until a cable's VBUS is seen or the Q2 wakes from Standby (A); where
+ *   the controller's HPRT0 can be read (the dwc2's regdump, while debugfs is mounted) and shows no
+ *   device's connect OTG_CONNECT_MS in, the trial ends then: a computer the wrong way round, which
+ *   no wait would bring (docs/usb.md#the-plan, phase 2);
  * - the PHY's ID pull-up is held on and the controller's role held at device (C, D) except while
  *   the bus power is granted, so a phantom ID low moves neither.
  * PD18's own pull-up is set at boot (S12usbcharge, and platform_init: tools/build.py ID_PULL_UP).
@@ -42,6 +45,16 @@
 #define OTG_ACCESSORY_MS 8000
 /* Bus power with no device enumerated on the host port goes off after this. */
 #define OTG_TRIAL_MS 8000
+/* Bus power with HPRT0's connect status (bit 0) read clear this long goes off: nothing pulled D+ or
+ * D- up, so nothing will enumerate. Each USB DAC of 2026-11-25 read connected at the first read,
+ * 0.25 to 0.41 s after otg-on (seven of seven); the two laptops the wrong way round kept HPRT0 at
+ * 0x1000 through 3 and 8 s of power (usbtrace-2026-11-25.trace, usb_fsm.h UF_CONNECT_MS, whose
+ * reasoning this is). The regdump is read at most every OTG_CONNECT_LOOK_MS of the trial until a
+ * connect or a device is seen; [Q2POD] USBCONNECT=0 keeps the OTG_TRIAL_MS trial alone. */
+#define OTG_CONNECT_MS 2500
+#define OTG_CONNECT_LOOK_MS 250
+#define OTG_REGDUMP "/sys/kernel/debug/usb/13500000.otg/regdump"
+#define OTG_REGDUMP_MAX 16384
 /* In host role an ID high with no device on the host port this long ends it; with one, the device
  * going does. The AB13X earbuds' ID read high 0.98 s after their power came on, while the kernel
  * enumerated them (2026-11-23 12966.731), and stock's pass cut the power then. */
@@ -61,9 +74,12 @@
 #define OTG_PLAYPAUSE_RET 0x4f2fd8
 #define OTG_CONNECTING "Connecting USB audio..." /* ringnav_forbid_play's message */
 /* A trial ended with nothing on the host port and the ID still low this long after, no VBUS: most
- * likely a computer whose roles resolved the wrong way (the Q2 the source, it the sink), which stays so
- * while its cable is in (2026-11-23 17777.35 to 17833.67, pd18-owner2.log); a replug re-resolves it. */
-#define OTG_WRONG_MS 3000
+ * likely a computer whose roles resolved the wrong way (the Q2 the source, it the sink), which
+ * stays so while its cable is in (2026-11-23 17777.35 to 17833.67, pd18-owner2.log; on 2026-11-25
+ * 16.8 and 48 s past the power's end, usbtrace-2026-11-25.trace): the bus power off does not
+ * re-resolve it, a replug does, and was a device at once both times. Past the Q2's own VBUS dying
+ * away (PD17 read it 1.6 s, OTG_OWN_VBUS_MS), so a replug at the message meets no 5 V of the Q2's. */
+#define OTG_WRONG_MS 2000
 #define OTG_REPLUG "Unplug the cable and plug it in again"
 /* The PMIC's USB supply: 1 for a computer's or a charger's VBUS, already in the pass of the cable's
  * edge, on some 250 lines of the USB record; 0 for the Q2's own power dying away and for the AB13X
@@ -85,7 +101,7 @@
 /* The record's word for the bus power's end, and why: the host port's device gone (the ID high, or
  * low past the trial); OTG_ID_HIGH_MS of ID high with nothing enumerated; stock's pass otherwise
  * (its PD18 read high between this file's read and its own). A trial with nothing enumerated is
- * otg-trial-off. */
+ * otg-trial-off, and otg-trial-off why=no-connect when HPRT0 read no connect (OTG_CONNECT_MS). */
 #define OTG_OFF_GONE "otg-off why=gone"
 #define OTG_OFF_ID_HIGH "otg-off why=id-high"
 #define OTG_OFF_STOCK "otg-off why=stock"
@@ -105,6 +121,9 @@ static struct {
     unsigned blanked_at; /* when the blank caught the low still read */
     unsigned id_high_at; /* host role: when PD18 first read high; id_high: it reads high now */
     int id_high, had_dev; /* had_dev: a device seen on the host port in this grant */
+    int look, connected, unread; /* this grant: HPRT0 to be read ([Q2POD] USBCONNECT), its connect
+                                    seen, a read made with none; look_at the last read */
+    unsigned look_at;
     int id_as_low;        /* stock's PD18 read gives 0 (ringnav_gpio_value) */
     unsigned own_at;     /* when the Q2's own bus power last ended; own: PD17 not read high since */
     int own, id_low;     /* id_low: PD18 as the last pass read it */
@@ -151,6 +170,8 @@ static int otg_stock(unsigned now, int id_as_low, const char *off) {
         if (g_last_otgid == 1) {
             otg.host_at = now;
             otg.id_high = 0, otg.had_dev = 0, otg.changes = 0;
+            otg.connected = 0, otg.unread = 0, otg.look_at = now - OTG_CONNECT_LOOK_MS;
+            otg.look = config_value("Q2POD", "USBCONNECT", 2, 1);
         } else {
             gone(now);
             otg.own = 1, otg.own_at = now;
@@ -222,6 +243,29 @@ static int host_device(void) {
     return f != 0;
 }
 
+/* HPRT0's connect status from the dwc2's regdump (OTG_CONNECT_MS): 1 or 0, or -1 when it cannot be
+ * read (no debugfs mounted, as in a release build). */
+static int host_connect(void) {
+    void *f = fopen(OTG_REGDUMP, "rb");
+    if (!f) return -1;
+    char *dump = calloc(1, OTG_REGDUMP_MAX + 1);
+    int n = dump ? (int)fread(dump, 1, OTG_REGDUMP_MAX, f) : 0;
+    fclose(f);
+    int v = -1;
+    for (char *s = n > 0 ? dump : 0; s && (s = strstr(s, "HPRT0")); s += 5) {
+        if (s != dump && s[-1] != '\n') continue;
+        char *x = strstr(s, "0x");
+        if (!x || x - s > 12) break;
+        unsigned h = 0;
+        for (x += 2; (*x >= '0' && *x <= '9') || (*x >= 'a' && *x <= 'f'); ++x)
+            h = h << 4 | (unsigned)(*x <= '9' ? *x - '0' : *x - 'a' + 10);
+        v = (int)(h & 1);
+        break;
+    }
+    free(dump);
+    return v;
+}
+
 int ringnav_otg_status(void) {
     unsigned now = time_now_ms();
     int gap = otg.have_last && now - otg.last > OTG_GAP_MS;
@@ -249,7 +293,16 @@ int ringnav_otg_status(void) {
             return otg_stock(now, !end, !end ? OTG_OFF_STOCK : otg.had_dev ? OTG_OFF_GONE : OTG_OFF_ID_HIGH);
         }
         otg.id_high = 0;
-        if (now - otg.host_at >= OTG_TRIAL_MS && !dev) {
+        if (otg.look && !dev && !otg.connected && now - otg.look_at >= OTG_CONNECT_LOOK_MS) {
+            otg.look_at = now;
+            int c = host_connect();
+            if (c == 1) otg.connected = 1;
+            else if (c == 0) otg.unread = 1;
+            else otg.look = 0; /* no regdump: the OTG_TRIAL_MS trial */
+        }
+        int no_connect =
+            otg.look && otg.unread && !otg.connected && now - otg.host_at >= OTG_CONNECT_MS;
+        if ((now - otg.host_at >= OTG_TRIAL_MS || no_connect) && !dev) {
             toolsGpioSetValue("PC20", 0);
             toolsGpioSetValue("PE22", 0); /* the charge guard (usb_charge.c) sets its own next */
             g_last_otgid = 0;
@@ -258,7 +311,9 @@ int ringnav_otg_status(void) {
             gone(now);
             otg.own = 1, otg.own_at = now;
             otg_hold();
-            usb_record(otg.had_dev ? OTG_OFF_GONE : "otg-trial-off");
+            usb_record(otg.had_dev  ? OTG_OFF_GONE
+                       : no_connect ? "otg-trial-off why=no-connect"
+                                    : "otg-trial-off");
             return 0;
         }
         return otg_stock(now, 0, OTG_OFF_STOCK);

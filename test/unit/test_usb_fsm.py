@@ -18,7 +18,7 @@ FIXTURES = ROOT / 'test/fixtures/usb_fsm'
 NEVER = -0x7fffffffffffffff
 MS = 1_000_000
 S = 1_000_000_000
-VBUS, IDLOW, ONLINE, POWER, HOSTDEV, PCM, UDC, TIMER, WAKE = range(9)
+VBUS, IDLOW, ONLINE, POWER, HOSTDEV, PCM, UDC, TIMER, WAKE, CONNECT = range(10)
 ACTIONS = ['grant', 'revoke', 'gadget-on', 'gadget-off', 'cable-in', 'cable-out', 'host-seen', 'charger', 'replug',
            'dac', 'dac-gone']
 
@@ -32,6 +32,7 @@ VBUS_GONE, RESIDUE, RESIDUE_REPLUG, CHARGER = (define(n) for n in ('UF_VBUS_GONE
                                                                    'UF_RESIDUE_REPLUG_MS', 'UF_CHARGER_MS'))
 WINDOW, FRESH, PHANTOM, TRIAL = (define(n) for n in ('UF_WINDOW_MS', 'UF_ID_FRESH_MS', 'UF_ID_PHANTOM_MS', 'UF_TRIAL_MS'))
 WRONG, RETRY, VBUS_OFF = (define(n) for n in ('UF_WRONG_MS', 'UF_RETRY_MS', 'UF_VBUS_OFF_MS'))
+CONNECT_MS, TRIAL_SLOW = (define(n) for n in ('UF_CONNECT_MS', 'UF_TRIAL_SLOW_MS'))
 
 
 class Out(C.Structure):
@@ -184,6 +185,36 @@ def test_a_trial_with_nothing_on_the_host_port_ends_says_replug_tries_once_more_
     assert m.names() == ['grant', 'revoke', 'replug', 'grant', 'revoke'] and m.now_state() == 'refused'
     m.ev(IDLOW, 0).after(10).ev(IDLOW, 1).after(FRESH + 1)  # an ID high ends the refusal
     assert m.names()[-1] == 'grant'
+
+
+def test_a_trial_with_no_connection_on_the_host_port_ends_at_the_connect_rule_says_replug_and_never_retries(L):
+    """HPRT0's connect status read 0 (UF_EV_CONNECT 0): no device pulled D+ or D- up, so nothing will enumerate (the
+    two laptops the wrong way round, usbtrace-2026-11-25); the replug comes with no grant after it, so the replug
+    never meets the Q2's 5 V (F3)."""
+    m = idle(L).ev(CONNECT, 0).ev(IDLOW, 1).after(FRESH + CONNECT_MS - 1)
+    assert m.names() == ['grant']
+    m.after(1)
+    assert m.names() == ['grant', 'revoke'] and m.at('revoke')[0] - m.at('grant')[0] == CONNECT_MS * MS
+    m.after(WRONG)
+    assert m.names()[-1] == 'replug'
+    m.after(60_000)
+    assert m.names() == ['grant', 'revoke', 'replug'] and m.now_state() == 'refused'
+
+
+def test_a_device_that_connects_but_enumerates_slowly_keeps_the_power_to_the_slow_trial(L):
+    m = idle(L).ev(CONNECT, 0).ev(IDLOW, 1).after(FRESH + 300).ev(CONNECT, 1).after(TRIAL + 1000)
+    assert m.names() == ['grant'] and m.now_state() == 'src-trial', 'connected: past UF_TRIAL_MS'
+    m.ev(HOSTDEV, 1)
+    assert m.now_state() == 'host'
+    n = idle(L).ev(CONNECT, 0).ev(IDLOW, 1).after(FRESH + 300).ev(CONNECT, 1).after(TRIAL_SLOW)
+    assert n.names() == ['grant', 'revoke'] and n.at('revoke')[0] - n.at('grant')[0] == TRIAL_SLOW * MS
+    n.after(RETRY)
+    assert n.names()[-1] == 'grant', 'a device was there: the trial once more'
+
+
+def test_with_no_connect_status_read_the_trial_is_as_it_was(L):
+    m = idle(L).ev(IDLOW, 1).after(FRESH + TRIAL)
+    assert m.names() == ['grant', 'revoke']
 
 
 def test_a_real_source_on_a_powered_bus_turns_the_power_off_at_once(L):
@@ -442,3 +473,136 @@ def test_tonight_s_owner_plugs_two_wrong_way_laptops_and_headphones_behind_a_hub
     assert revokes == [846_921 * MS, 851_921 * MS, 4587_277 * MS, 4608_614 * MS]
     assert replugs == [847_921 * MS] and 855_917 * MS - replugs[0] > 7 * S
     assert m.at('host-seen')[-1] == 4624_168 * MS
+
+
+# ---- the owner's trace of 2026-11-25, every cycle ----
+
+USBTRACE = 'usbtrace-2026-11-25.trace'
+
+
+def usbtrace_runs(L):
+    """Each run of the tracer in the fixture, in shadow as q2-usbtrace ran it: [(machine, its lines, its cycles)]."""
+    out = []
+    for lines in R.runs(R.parse((FIXTURES / USBTRACE).read_text().splitlines())):
+        m = Fsm(L, shadow=True)
+        m.t = lines[0].t
+        for t, ev, v in R.fsm_events(lines):
+            if ev != 'start':
+                m.ev(ev, v, t)
+        m.until(lines[-1].t)
+        out.append((m, lines, [c for c in R.cycles(lines) if c.n]))
+    return out
+
+
+def in_cycle(m, c, name):
+    return [t for t in m.at(name) if c.start <= t <= c.end]
+
+
+def test_the_owner_s_trace_in_shadow_every_dac_kept_and_both_wrong_way_laptops_end_at_the_connect_rule(L):
+    """Every cycle of the five runs: each USB DAC's grant waited for stock's power, saw HPRT0 connect at its first read
+    (0.25 to 0.41 s on) and was kept with its device until it left; each laptop the wrong way round (cycles 7 and 12
+    of the last run, HPRT0 0x1000 through stock's 8 s trial) is off UF_CONNECT_MS after stock's power, says replug
+    UF_WRONG_MS later and is never powered again before the replug; no other cycle is powered."""
+    runs = usbtrace_runs(L)
+    dacs, wrong = 0, []
+    for m, lines, cs in runs:
+        ons = R.grants(lines)
+        for c in cs:
+            grants = in_cycle(m, c, 'grant')
+            stock = [g for g in ons if c.start <= g.on <= c.end]
+            if c.summary['type'] == 'dac':
+                dacs += 1
+                g, = stock
+                assert grants and in_cycle(m, c, 'dac'), c.n
+                assert g.connect and g.connect - g.on < 410 * MS, (c.n, 'connected at the first read')
+                assert g.dev
+                left = g.off or c.end
+                assert not [t for t in in_cycle(m, c, 'revoke') if grants[0] < t < min(left, g.dev + 1)], (c.n, 'kept')
+            elif stock and not any(g.dev for g in stock):
+                g, = stock
+                wrong.append((c.n, g.on))
+                assert grants == [grants[0]] and grants[0] < g.on, c.n
+                assert in_cycle(m, c, 'revoke') == [g.on + CONNECT_MS * MS], c.n
+                assert in_cycle(m, c, 'replug') == [g.on + (CONNECT_MS + WRONG) * MS], c.n
+            else:
+                assert not grants, (c.n, c.summary['type'])
+    assert dacs == 7 and [n for n, _ in wrong] == [7, 12]
+    # cycle 12: stock's power went off 20.681 s into it, and nothing said replug before 23.7 s (that day's 3 s
+    # OTG_WRONG_MS after)
+    n, on = wrong[1]
+    m, lines, cs = runs[-1]
+    c12, = [c for c in cs if c.n == 12]
+    assert (in_cycle(m, c12, 'revoke')[0] - c12.start) / S < 14.3 < 20.681
+
+
+def own_replay(L, lines, cs):
+    """A run replayed with the machine owning the bus power (shadow 0): the port's levels from the trace, but none of
+    stock's grants (their power, the PD17 low and online reads it caused, the device's arrival under it), and each
+    grant the machine makes gets the device of its cycle's stock grant at the offsets that grant measured (HPRT0's
+    connect read, 1-1, the PCM); for a grant whose device never connected, HPRT0 read with no connect at once. A
+    device's leaving (the cable out) stays at its own time."""
+    ons = R.grants(lines)
+    powered = [(x.on - S // 2, (x.off or lines[-1].t) + 2 * S) for x in ons]  # its PD17 edge comes before the sample
+    keep = (VBUS, IDLOW, ONLINE, UDC, HOSTDEV, PCM)
+    queue = [(t, ev, v) for t, ev, v in R.fsm_events(lines) if ev in keep and not (ev in (HOSTDEV, PCM) and v) and
+             not (ev in (VBUS, ONLINE) and any(a <= t <= b for a, b in powered))]
+    m = Fsm(L)
+    m.t = queue[0][0]
+    pending, seen = [], 0
+
+    def schedule():
+        nonlocal seen
+        for at in m.at('grant')[seen:]:
+            g = next((x for c in cs if c.start <= at <= c.end for x in ons if c.start <= x.on <= c.end), None)
+            if g and g.connect:
+                pending.extend([(at + g.connect - g.on, CONNECT, 1)] +
+                               [(at + x - g.on, ev, 1) for x, ev in ((g.dev, HOSTDEV), (g.pcm, PCM)) if x])
+            else:
+                pending.append((at, CONNECT, 0))
+        seen = len(m.at('grant'))
+        pending.sort()
+
+    while queue or pending:
+        nxt = min(([queue[0][0]] if queue else []) + ([pending[0][0]] if pending else []))
+        d = L.usb_fsm_deadline(m.f)
+        if d != NEVER and d < nxt:
+            m.until(d)
+            schedule()
+            continue
+        t, ev, v = (pending if pending and pending[0][0] == nxt else queue).pop(0)
+        m.ev(ev, v, max(t, m.t))
+        schedule()
+    m.until(lines[-1].t)
+    return m
+
+
+def test_the_owner_s_trace_owned_every_dac_is_powered_and_kept_and_cycle_12_is_a_device_again_in_11_1_s(L):
+    """The phase 2 decision for this case, the machine owning the bus power: cycle 12 (ID low 3.584 s after the
+    laptop's VBUS left, inside the window) is granted at UF_ID_PHANTOM_MS, off at UF_CONNECT_MS with no connect,
+    11.084 s into the cycle where stock's power stayed on to 20.681 s, and says replug 1 s later with no grant after
+    it; cycle 7 (outside the window) is off 2.7 s after its ID low; every DAC cycle, given its own device's measured
+    timings, is powered and kept."""
+    dacs = 0
+    for _, lines, cs in usbtrace_runs(L):
+        ons = R.grants(lines)
+        m = own_replay(L, lines, cs)
+        for c in cs:
+            stock = [x for x in ons if c.start <= x.on <= c.end]
+            grants = in_cycle(m, c, 'grant')
+            if not stock:
+                assert not grants, (c.n, c.summary['type'])
+                continue
+            g = stock[0]
+            if c.summary['type'] == 'dac':
+                dacs += 1
+                assert len(grants) == 1 and in_cycle(m, c, 'dac') and g.dev, c.n
+                assert not [t for t in in_cycle(m, c, 'revoke') if grants[0] < t < grants[0] + (g.dev - g.on) + S], c.n
+            else:
+                idlow = c.start + int(float(c.summary['id-']) * S)
+                need = PHANTOM if c.n == 12 else FRESH
+                assert len(grants) == 1 and abs(grants[0] - idlow - need * MS) < MS, c.n  # id- is in ms
+                assert in_cycle(m, c, 'revoke') == [grants[0] + CONNECT_MS * MS], c.n
+                assert in_cycle(m, c, 'replug') == [grants[0] + (CONNECT_MS + WRONG) * MS], c.n
+                if c.n == 12:
+                    assert round((in_cycle(m, c, 'revoke')[0] - c.start) / MS) == 11_084
+    assert dacs == 7

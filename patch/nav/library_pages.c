@@ -897,19 +897,8 @@ static int qm_apply(void *add, int next) {
  * class an app's stream plays as) when nothing is queued. */
 int queue_add(void *add, int next) { return queue_apply(add, next, 0xf001, 0); }
 
-/* A 1.5 s modal dialog (oled-design.md's toast): its loop runs every ringnav_sleep poll
- * again, so a poll clears or latches what it toasts first (logo_poll). */
-void toast(const char *text) {
-    struct {
-        int kind, ms;
-        char text[0x400];
-    } info = { 1, 1500, { 0 } };
-    for (unsigned i = 0; text[i] && i < sizeof info.text - 1; ++i) info.text[i] = text[i];
-    coda_rc_note(info.text); /* the car shows it too (coda_rc_shim.c) */
-    ++st.toasts;             /* its loop runs the UI's polls, which may toast again */
-    navigator_to_with_context("dialog/msginfo_dialog", &info);
-    --st.toasts;
-}
+/* A 1.5 s toast (oled-design.md's), feedback.c toast_for's: it takes the place of one already up. */
+void toast(const char *text) { toast_for(0, text, 1500); }
 
 /* Every song in stock's title order: music (LIBRARY_MUSIC) or every card song (0) or, beside them,
  * the server's (LIBRARY_ALL), as library_music says. */

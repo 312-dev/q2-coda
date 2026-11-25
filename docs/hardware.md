@@ -50,7 +50,7 @@ Read off a Q2 running stock V1.36's kernel (`/proc`, `/sys`, the device tree) an
 | Buttons           | `md-gpio-keys` (`keyboard_gpio_add`), plus the AXP2101's power key                                                                  | GPIO                           |
 | Wi-Fi + Bluetooth | Realtek RTL8733BS (SDIO `0x024c:0xb733`, `8733bs`), two antennas; Bluetooth over UART H5 (`hci_uart_h5`) on `ttyS0`               | MSC 3 (SDIO), UART 0           |
 | microSD           | X2000 SDHCI (ADMA), `mmcblk4`; cards run at SD High Speed (50 MHz bus), not UHS-I; exFAT or FAT32                                   | MSC 4                          |
-| Speaker           | Buzzer on the X2000's built-in MCU (`soc_mcu`, `cmd_mcu write_str buzzer`)                                                          |                                |
+| Speaker           | Buzzer on PWM channel 1 (pin `PC01`), clicked by the X2000's built-in MCU (`soc_mcu`, `cmd_mcu write_str buzzer`); Linux plays tones on it through `/dev/jz_pwm` (Find My Vamp) |                                |
 | USB               | Synopsys DesignWare OTG (`dwc2`, 9 endpoints), high speed (USB 2.0); host drivers for storage, HID core, audio and UVC are built in |                                |
 | Clock             | The X2000's RTC (`rtc-ingenic`), with a wake alarm                                                                                  |                                |
 | Other             | Watchdog (`soc_watchdog`), SAR ADC (`soc_adc`, four aux channels), PWM, rotator (`soc_rotator`)                                     |                                |

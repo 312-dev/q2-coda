@@ -13,7 +13,8 @@ A trace line is `UPTIME KIND ...`, UPTIME CLOCK_MONOTONIC seconds with six decim
 seconds). The kinds are in docs/internals.md#usb-tracer. Exit 1 when a cycle disagreed or was unsafe.
 
 The module also turns a trace into the state machine's events (fsm_events), as q2usbtrace_core.c feeds them, which
-test/unit/test_usb_fsm.py replays recorded traces with."""
+test/unit/test_usb_fsm.py replays recorded traces with, and lists stock's grants with their devices' measured
+timings (grants), which it replays against grants the machine makes itself."""
 from __future__ import annotations
 
 import argparse
@@ -23,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Iterable, Iterator, TextIO
 
 # usb_fsm.h's events
-VBUS, IDLOW, ONLINE, POWER, HOSTDEV, PCM, UDC, TIMER, WAKE = range(9)
+VBUS, IDLOW, ONLINE, POWER, HOSTDEV, PCM, UDC, TIMER, WAKE, CONNECT = range(10)
 ADDRESSED = ('addressed', 'configured')
 
 
@@ -109,9 +110,54 @@ def fsm_events(lines: Iterable[Line]) -> Iterator[tuple[int, int, int] | tuple[i
                     yield from level(PCM, int(w[0] == 'add'), t)
         elif k == 'udc':
             yield from level(UDC, int(ln.rest.split()[0] in ADDRESSED), t)
+        elif k == 'otg':
+            hprt0 = ln.fields().get('hprt0', '?')
+            if hprt0 != '?':  # its connect status: a device's pull-up on the host port
+                yield from level(CONNECT, int(hprt0, 16) & 1, t)
         elif k == 'wake':
             yield t, WAKE, 0
             fed.clear()
+
+
+def runs(lines: list[Line]) -> list[list[Line]]:
+    """The lines split at each `start`, in file order: each run of the tracer, with its own clock (a boot's)."""
+    out: list[list[Line]] = []
+    for ln in lines:
+        if ln.kind == 'start' or not out:
+            out.append([])
+        out[-1].append(ln)
+    return out
+
+
+@dataclass
+class Grant:
+    on: int  # stock's otg-on (a sample's PC20=1), ns
+    off: int | None  # its otg-off
+    connect: int | None  # the first HPRT0 read with its connect status set after on
+    dev: int | None  # the host port's device (add usb 1-1)
+    pcm: int | None  # the USB DAC's playback PCM (add sound pcmC1D0p)
+
+
+def grants(lines: Iterable[Line]) -> list[Grant]:
+    """Stock's grants in one run's lines, each with when the device on the host port connected, enumerated and gave
+    its PCM: the measured timings a replay applies to a grant made at another time (test/unit/test_usb_fsm.py)."""
+    out: list[Grant] = []
+    for ln in lines:
+        g = out[-1] if out and out[-1].off is None else None
+        if ln.kind == 's' and ln.fields().get('PC20') in ('0', '1'):
+            if ln.fields()['PC20'] == '1' and g is None:
+                out.append(Grant(ln.t, None, None, None, None))
+            elif ln.fields()['PC20'] == '0' and g is not None:
+                g.off = ln.t
+        elif g is None:
+            continue
+        elif ln.kind == 'otg' and ln.fields().get('hprt0', '?') != '?' and int(ln.fields()['hprt0'], 16) & 1:
+            g.connect = g.connect or ln.t
+        elif ln.kind == 'u' and ln.rest.split()[:3] == ['add', 'usb', '1-1']:
+            g.dev = g.dev or ln.t
+        elif ln.kind == 'u' and ln.rest.split()[:3] == ['add', 'sound', 'pcmC1D0p']:
+            g.pcm = g.pcm or ln.t
+    return out
 
 
 @dataclass

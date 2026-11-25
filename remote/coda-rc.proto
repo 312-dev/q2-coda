@@ -33,6 +33,7 @@ option java_multiple_files = true;
 //   0x20 Transport        -> 0x21 Ack
 //   0x22 SetMode          -> 0x21 Ack              (CAP_MODES)
 //   0x24 Rate             -> 0x21 Ack              (CAP_RATE)
+//   0x26 Find             -> 0x21 Ack              (CAP_FIND)
 //   0x30 Browse           -> 0x31 BrowseResp
 //   0x32 Search           -> 0x33 SearchResp
 //   0x40 Play             -> 0x21 Ack
@@ -91,6 +92,7 @@ enum Capability {
   CAP_NOTICE = 32768;    // NowPlaying.notice and notice_id: the Vamp's toasts
   CAP_REMOTE = 65536;    // GetRemote: how to reach this Vamp from another network
   CAP_IROH_ALLOW = 131072;  // RegisterRemote: across networks only paired phones' iroh keys are let in
+  CAP_FIND = 262144;     // Find, and NowPlaying.finding: Find My Vamp
 }
 
 // type 0x03. Asks the Q2 to show a 6-digit code. Refused with BUSY while another phone pairs,
@@ -201,6 +203,7 @@ message NowPlaying {
   // signed in, no album artist). Added within version 1 with no capability bit: a Q2 without them never sends them.
   string album_id = 20;
   string artist_id = 21;
+  bool finding = 22;     // CAP_FIND: Find My Vamp's jingle is playing on the Q2's buzzer
 }
 
 enum PlayState {
@@ -273,6 +276,15 @@ message SetMode {
 message Rate {
   string track_id = 1;
   uint32 hearts = 2;  // 0..5
+}
+
+// type 0x26, CAP_FIND. Find My Vamp: the Q2 plays its jingle on its internal buzzer, over and over, with its screen
+// lit and a "Find My Vamp" toast, until a key, the wheel or a touch on the Q2, a Find with stop, or a minute; what
+// plays goes on, headphones in or not. A Find while it plays starts its minute again. NowPlaying.finding says while
+// it plays. Acked once it plays (or, with stop, once it is stopped); UNAVAILABLE when the Q2 has no buzzer to play
+// on (an emulator) or its UI did not take it.
+message Find {
+  bool stop = 1;
 }
 
 // ---- browse ---------------------------------------------------------------------------------------

@@ -994,3 +994,34 @@ def test_a_shuffle_turned_on_and_off_moves_the_listing_not_the_queue(fw, ui, mcl
     q2.queue(at=0)  # another queue
     q2.tick()
     assert q2.now()['qlist'] != qlist
+
+
+def test_find_plays_the_jingle_and_now_playing_says_so_until_find_stop(fw, ui, mcl, recs):
+    """Find My Vamp (findmy.c): "find" starts the jingle and is answered 0 once it plays, with find=1 in Now Playing
+    (NowPlaying.finding) before the ack; "find stop" stops it, and find=0 once its worker has let the buzzer go."""
+    q2 = Q2(fw, ui, recs)
+    q2.queue()
+    fw.mock('fw_open', lambda path, *_: 9 if C.string_at(path) == b'/dev/jz_pwm' else -1)
+    workers = []
+    fw.mock('fw_pthread_create', lambda t, attr, fn, arg, *_: workers.append(fn) or 0)  # started, not run yet
+    q2.tick()
+    assert q2.now()['find'] == '0'
+    q2.files[CMD] = b'31 find\n'
+    q2.tick()
+    assert q2.ack() == b'31 0\n' and q2.now()['find'] == '1' and len(workers) == 1
+    q2.files[CMD] = b'32 find stop\n'
+    q2.tick()
+    assert q2.ack() == b'32 0\n'
+    C.CFUNCTYPE(C.c_void_p, C.c_void_p)(workers[0])(0)  # the worker sees the stop and ends
+    q2.tick()
+    assert q2.now()['find'] == '0'
+
+
+def test_find_with_no_buzzer_is_refused(fw, ui, mcl, recs):
+    """No /dev/jz_pwm (an emulator): answered 2, which the daemon sends as UNAVAILABLE."""
+    q2 = Q2(fw, ui, recs)
+    q2.queue()
+    fw.mock('fw_open', lambda *_: -1)
+    q2.files[CMD] = b'33 find\n'
+    q2.tick()
+    assert q2.ack() == b'33 2\n' and q2.now()['find'] == '0'

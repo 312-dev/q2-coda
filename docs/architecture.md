@@ -45,7 +45,7 @@ A build writes these into `--out`, and the C includes them from there (`-I out`)
 
 ### Calling stock
 
-- **A stock function with a symbol:** add its name and C signature to `FUNCTIONS` (`tools/build.py`). `function_macros` (`tools/peq.py`) turns it into a macro that calls demo's address, read from the stock symbol table at build time.
+- **A stock function with a symbol:** add its name and C signature to `FUNCTIONS` (`tools/build.py`). `function_stubs` (`tools/peq.py`) turns it into a call to a 12-byte stub, `peq_fn_<name>`, that sets `$t9` (stock's PIC prologue reads it) and jumps to demo's address, read from the stock symbol table at build time: one `jal` a call site, where a call through the address took a `lui` and an `ori` before its `jalr` at every site (66,432 bytes of a `--dev` payload on 2026-11-25). C that hands a stock function on as a value, to compare or unregister it, takes `PEQ_AT_<name>`, its own address.
 - **A stock function with no symbol:** add its address to `PRIVATE_FUNCTIONS` (`tools/build.py`) and its name to `tools/stock_map.tsv`, which [rebasing](rebasing.md) carries to the next stock version.
 - **A libc function:** `LIBC` (`tools/peq.py`). The call goes through demo's own GOT slot; a name demo does not import is left a plain `extern`, which the payload must define itself.
 - **A stock global or a widget's field:** `patch/offsets.inc`, which the test mocks parse too.

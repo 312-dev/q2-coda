@@ -2204,6 +2204,9 @@ static int parse(const char *path) {
 #define parseTidalPlaylistDetailJson parse
 #define parseTidalAlbumDetailJson parse
 #define parseTidalColTracksJson parse
+#define PEQ_AT_parseTidalPlaylistDetailJson parse /* the address tidal.c hands stock: tools/peq.py function_macros */
+#define PEQ_AT_parseTidalAlbumDetailJson parse
+#define PEQ_AT_parseTidalColTracksJson parse
 static int stubbed(void) { /* the page's own parse is left an empty reply; removes it */
     char p[32], b[32] = ""; snprintf(p, sizeof p, "/tmp/tidal_%u", (unsigned)pthread_self());
     FILE *f = fopen(p, "r"); if (!f) return 0;

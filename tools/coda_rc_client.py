@@ -13,6 +13,7 @@ usage: coda_rc_client.py [--host H] [--port P] [--keys DIR] COMMAND ...
   shuffle off|on | repeat off|one|all
   rate HEARTS SONG_ID                0..5 hearts for the playing song (5 is Favorites)
   radio [SEED_ID|stop]               a radio of the playing song, a "song:" id or an "artist:" node; or stop it
+  find [stop]                        Find My Vamp: the Q2 plays its jingle on its buzzer for a minute; or stop it
   key play|pause|toggle|next|previous|volume-up|volume-down
   seek SECONDS | volume 0..100
   cover ART_ID OUT [--px N]
@@ -39,7 +40,7 @@ VERSION = 1
 SEALED = 1
 T = dict(HELLO=0x01, HELLO_RESP=0x02, PAIR_START=0x03, PAIR_CHALLENGE=0x04, PAIR_FINISH=0x05, PAIR_RESULT=0x06,
          AUTH=0x07, AUTH_RESP=0x08, ERROR=0x0F, SUBSCRIBE=0x10, STATE=0x11, GET_STATE=0x12, TRANSPORT=0x20, ACK=0x21,
-         SET_MODE=0x22, RATE=0x24, BROWSE=0x30, BROWSE_RESP=0x31, SEARCH=0x32, SEARCH_RESP=0x33, PLAY=0x40,
+         SET_MODE=0x22, RATE=0x24, FIND=0x26, BROWSE=0x30, BROWSE_RESP=0x31, SEARCH=0x32, SEARCH_RESP=0x33, PLAY=0x40,
          GET_QUEUE=0x42, QUEUE_RESP=0x43, PLAY_QUEUE_ITEM=0x44, START_RADIO=0x46, GET_COVER=0x50, COVER=0x51, GET_REMOTE=0x60,
          REMOTE_INFO=0x61, REGISTER_REMOTE=0x62, PING=0x7E, PONG=0x7F)
 ERRORS = {1: "UNSUPPORTED", 2: "UNAUTHORIZED", 3: "BAD_REQUEST", 4: "NOT_FOUND", 5: "BUSY", 6: "PAIRING_FAILED",
@@ -144,7 +145,8 @@ def state(raw):
                               "buffering": bool(one(n, 13, 0)), "buffered_bytes": one(n, 14, 0),
                               "total_bytes": one(n, 15, 0), "buffered_ms": one(n, 16, 0),
                               "radio": bool(one(n, 17, 0)), "notice": text(n, 18), "notice_id": one(n, 19, 0),
-                              "album_id": text(n, 20), "artist_id": text(n, 21)}
+                              "album_id": text(n, 20), "artist_id": text(n, 21),
+                              "finding": bool(one(n, 22, 0))}
     if 2 in m:
         p = decode(m[2][0])
         out["position"] = {"position_ms": one(p, 1, 0), "at_ms": one(p, 2, 0)}
@@ -306,6 +308,10 @@ class Session:
         """StartRadio (CAP_RADIO): seed_id "" is the playing song, else a "song:" id or an "artist:" node."""
         self.call(T["START_RADIO"], encode([(1, seed_id or None), (2, stop or None)]), T["ACK"])
 
+    def find(self, stop=False):
+        """Find (CAP_FIND): Find My Vamp's jingle on the Q2's buzzer, or stop it; NowPlaying.finding while it plays."""
+        self.call(T["FIND"], encode([(1, stop or None)]), T["ACK"])
+
     def remote(self):
         """GetRemote (CAP_REMOTE): the Q2's q2-iroh endpoint id and home relay (docs/remote.md#car-remote-across-networks)."""
         m = decode(self.call(T["GET_REMOTE"], b"", T["REMOTE_INFO"]))
@@ -455,6 +461,9 @@ def main(argv=None):
     elif a.cmd == "radio":
         seed = a.args[0] if a.args else ""
         s.start_radio(stop=True) if seed == "stop" else s.start_radio(seed)
+        out = {"ok": True}
+    elif a.cmd == "find":
+        s.find(stop=a.args[:1] == ["stop"])
         out = {"ok": True}
     elif a.cmd == "queue":
         out = s.queue(a.offset, a.limit)
