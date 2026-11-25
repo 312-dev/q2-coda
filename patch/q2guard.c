@@ -21,9 +21,13 @@
  * Every Bluetooth line of it is copied into the Bluetooth event log, q2-btev, kept longer
  * (docs/internals.md#bluetooth-event-log): flushed with the others, and at least every
  * BTEV_FLUSH_MS while it holds a line.
+ * Each tick also runs the Wi-Fi fault recorder (q2wifi.c, docs/internals.md#wi-fi-fault-recorder): wlan0's
+ * check at boot, a deaf radio's snapshots and each association, into a q2-wifi log; bt_sleep waits on its
+ * wpa_supplicant monitor too (bt_also_wait).
  * It writes nothing to /mnt/data. No MIPS sysroot: glibc 2.28's declarations, as boot.c. */
 #include "q2bt.h"
 #include "q2log.h"
+#include "q2wifi.h"
 
 #define GUARD_TICK_MS 5000 /* a sample; 1 s while powering off */
 #define LINE_MS 30000      /* a log line when nothing is warm, plugged in or busy */
@@ -333,12 +337,12 @@ static void sample(struct heat_sample *s, int busy, int temp, int raw, int die, 
  * The watching process keeps every line in card_store.c's ring: card_mounted is false there, so
  * card_log_append only holds. The child is forked when card_ready and says the card is up, so its
  * card_log_flush appends the rings to the files; the watcher then drops what the child was given. */
-static card_log heat, btlog, ulog, btev; /* q2-heat, q2bt.c's q2-bt, the unified q2-log, q2-btev */
+static card_log heat, btlog, ulog, btev, wifilog; /* q2-heat, q2bt.c's q2-bt, the unified q2-log, q2-btev, q2wifi.c's q2-wifi */
 static int in_writer;        /* true in the child */
 int card_mounted(void) { return in_writer; }
 static struct {
     pid_t pid;
-    unsigned len, dropped, bt_len, bt_dropped, u_len, u_dropped, e_len, e_dropped; /* what the child was given of each */
+    unsigned len, dropped, bt_len, bt_dropped, u_len, u_dropped, e_len, e_dropped, w_len, w_dropped; /* what the child was given of each */
     int done; /* the last flush ended (written, failed or given up) */
 } fl;
 /* The writer handed the logs. all: every line (a final flush); else the Bluetooth log's lines
@@ -354,6 +358,7 @@ static void flush_start(int all) {
     fl.len = heat.len, fl.dropped = heat.dropped, fl.done = 0;
     fl.bt_len = btlog.len, fl.bt_dropped = btlog.dropped;
     fl.u_len = ulog.len, fl.u_dropped = ulog.dropped;
+    fl.w_len = wifilog.len, fl.w_dropped = wifilog.dropped;
     unsigned now = now_ms();
     fl.e_len = all || now < BTEV_HOLD_MS ? btev.len : ulog_settled(&btev, now - BTEV_HOLD_MS);
     fl.e_dropped = btev.dropped;
@@ -362,7 +367,8 @@ static void flush_start(int all) {
         in_writer = 1, btev.len = fl.e_len; /* the child's copy: what it was handed of the Bluetooth log */
         _exit((heat_flush(&heat, LOGS) ? 1 : 0) | (bt_flush(&btlog, LOGS) ? 2 : 0) |
               (ulog_flush(&ulog, LOGS, "q2-log", ULOG_FILE_MAX, ULOG_FILES) ? 4 : 0) |
-              (ulog_flush(&btev, LOGS, "q2-btev", BTEV_FILE_MAX, BTEV_FILES) ? 8 : 0));
+              (ulog_flush(&btev, LOGS, "q2-btev", BTEV_FILE_MAX, BTEV_FILES) ? 8 : 0) |
+              (wifi_flush(&wifilog, LOGS) ? 16 : 0));
     }
     fl.pid = pid;
     if (pid < 0) fl.pid = 0, fl.done = 1;
@@ -380,11 +386,12 @@ static void flush_reap(void) {
     if (fl.pid <= 0 || waitpid(fl.pid, &status, WNOHANG) != fl.pid) return;
     fl.pid = 0, fl.done = 1;
     ulog_bt_freeze(0, 0);
-    int failed = status & 0x7f ? 15 : status >> 8 & 0xff; /* killed: none; else its exit's bits */
+    int failed = status & 0x7f ? 31 : status >> 8 & 0xff; /* killed: none; else its exit's bits */
     if (!(failed & 1)) written(&heat, fl.len, fl.dropped);
     if (!(failed & 2)) written(&btlog, fl.bt_len, fl.bt_dropped);
     if (!(failed & 4)) written(&ulog, fl.u_len, fl.u_dropped);
     if (!(failed & 8)) written(&btev, fl.e_len, fl.e_dropped);
+    if (!(failed & 16)) written(&wifilog, fl.w_len, fl.w_dropped);
 }
 
 /* ---- demo ---- */
@@ -520,6 +527,9 @@ int main(int argc, char **argv) {
     dev_build = argc > 1 && !strcmp(argv[1], "--dev");
     argv += dev_build, argc -= dev_build;
     const char *build = argc > 1 ? argv[1] : "?", *last = argc > 2 ? argv[2] : "?";
+    /* the Wi-Fi recorder: its boot check once a boot, not in a q2guard started again */
+    wifi_init(card_log_at(&wifilog, LOGS "/q2-wifi.0", WIFI_RAM), &ulog, !strcmp(last, "respawn"));
+    bt_also_wait(wifi_fd, wifi_drain);
     snprintf(b, sizeof b, "BOOT build=%s last=%s", build, last);
     note(b);
     /* the unified log's boot marker: was the last shutdown clean (S90play's word, BOOT_HOOK) */
@@ -636,8 +646,9 @@ int main(int argc, char **argv) {
             last_line = now;
         }
         if (snap_why) snapshot(snap_why, 'W'), snap_why = 0;
+        if (!g.off) wifi_tick(now_ms(), temp, line); /* the Wi-Fi recorder (q2wifi.c), after the heat line it quotes */
         if (o.kill_player) note("NOANSWER demo: player stopped"), kill_players();
-        if (o.flush || (line_due && o.event != EV_NONE) || bt_flush_due() ||
+        if (o.flush || (line_due && o.event != EV_NONE) || bt_flush_due() | wifi_flush_due() ||
             (warn_due && now - last_warn >= WARN_GAP_MS) ||
             ((btev.len || btev.dropped) && now - last_flush >= BTEV_FLUSH_MS) ||
             now - last_flush >= (unsigned)flush_every(fast, bt_streaming())) {

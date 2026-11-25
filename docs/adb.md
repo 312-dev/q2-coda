@@ -26,6 +26,7 @@ python3 tools/q2log.py --adb                                                    
 python3 tools/q2log.py --adb --btev                                                  # the Bluetooth event log alone (q2guard --dump-bt), days of it
 adb exec-out 'cd /mnt/mmc/.q2muse/logs; cat q2-heat.3 q2-heat.2 q2-heat.1 q2-heat.0 2>/dev/null' | python3 tools/q2heat.py -   # the heat log, oldest file first
 adb exec-out 'cd /mnt/mmc/.q2muse/logs; cat q2-bt.3 q2-bt.2 q2-bt.1 q2-bt.0 2>/dev/null' | python3 tools/q2bt.py -   # the Bluetooth link log
+adb exec-out 'cd /mnt/mmc/.q2muse/logs; cat q2-wifi.3 q2-wifi.2 q2-wifi.1 q2-wifi.0 2>/dev/null' | python3 tools/q2wifi.py -   # the Wi-Fi fault log
 python3 tools/q2remote.py shot --adb out.png   # the screen as an upright PNG, over adb exec-out
 ```
 

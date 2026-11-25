@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Logs: a new Wi-Fi log on the card records what Wi-Fi was doing when it goes wrong: whether Wi-Fi's driver started at power-on (and if not, what the system said about it), a detailed reading every 5 minutes while Wi-Fi sees no networks or does not join your saved one, and every time it joins or drops with the reason. It only records; it never restarts or changes Wi-Fi. Network names are never written.
   - USB (development builds): when a computer's USB-C port meets the Q2 the wrong way round, the Q2 stops powering the port 2.5 seconds in instead of 8, and says to unplug and plug the cable back in about 7 seconds sooner. USB headphones and DACs are unaffected.
   - **Find My Vamp**: tap Find My Vamp in the Vamp app (on the phone, or in the car) and the Q2 plays a loud jingle on its own speaker, with its screen lit and a "Find My Vamp" toast, for up to a minute or until you press a key, turn the wheel, touch the screen or tap Stop in the app. It plays with headphones in, keeps the music playing, and reaches the Q2 over Bluetooth as well as Wi-Fi.
   - Toasts no longer stack: a new message takes the place of the one showing at once, where two could be on screen together, the older one's words showing round the newer one's.

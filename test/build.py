@@ -588,7 +588,9 @@ def validate_assets(directory):
     assert sha(sidecar) == manifest['q2_iroh_sha256'] and len(sidecar) == manifest['q2_iroh_bytes']
     assert sidecar[:4] == b'\x7fELF' and sidecar[36:40] == helper[36:40]
     assert (sha(sidecar), len(sidecar)) == iroh.PIN[:2]
-    assert read('rootfs.squashfs', GUARD)[:4] == b'\x7fELF'  # q2guard, which S90play starts (build.py BOOT_HOOK)
+    guard = read('rootfs.squashfs', GUARD)
+    assert guard[:4] == b'\x7fELF'  # q2guard, which S90play starts (build.py BOOT_HOOK)
+    assert b'/q2-wifi.0' in guard and b'CTRL-EVENT-DISCONNECTED' in guard  # the Wi-Fi recorder, release and --dev (patch/q2wifi.c)
     from build import BT_CODEC  # the link monitor's codec switch, which q2guard runs (docs/internals.md#bluetooth-link-monitor)
     codec = read('rootfs.squashfs', BT_CODEC)
     assert codec[:4] == b'\x7fELF' and codec[36:40] == helper[36:40] and b'libdbus-1.so' in codec

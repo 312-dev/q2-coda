@@ -514,6 +514,9 @@ void bt_init(card_log *l, card_log *u); /* the q2-bt log, and the unified log (E
 /* Sleep ms; while a stream runs, wake each second to sample it. A signal that sets guard_woke
  * (q2guard.c: a request, a SIGTERM) ends it early. */
 void bt_sleep(unsigned ms);
+/* One more socket bt_sleep waits on, drained as it wakes: the Wi-Fi recorder's monitor (q2wifi.c wifi_fd,
+ * wifi_drain); fd answers -1 while there is none */
+void bt_also_wait(int (*fd)(void), void (*drain)(void));
 int bt_streaming(void);
 int bt_flush_due(void); /* once after a stream's START or STOP: its lines to the card at once */
 int bt_dev_warned(void); /* once after a device line at W (a drop, a failed connect): flush soon */
