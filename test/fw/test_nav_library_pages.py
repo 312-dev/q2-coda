@@ -3453,6 +3453,9 @@ class Work:
     """A job of left slices: step answers 1 on the last; cancel counts."""
     def __init__(self, left):
         self.left, self.slices, self.cancelled = left, 0, 0
+        # the caption load_wait keeps a pointer to, held as long as the wait: a temporary bytes passed instead is
+        # freed after the call, and a later allocation reused its memory (the plate gone in a full fw run)
+        self.caption = C.create_string_buffer('Shuffling songs…'.encode())
         self.step = C.CFUNCTYPE(C.c_int)(self.run)
         self.cancel = C.CFUNCTYPE(None)(self.drop)
 
@@ -3467,8 +3470,8 @@ class Work:
 def waiting(fw, ui, left=3):
     home = ui.new('window_create', 0, 0, 0, 0, 0)
     work = Work(left)
-    fw.fn('load_wait', None, C.c_void_p, C.c_char_p, C.c_void_p, C.c_void_p)(
-        home, 'Shuffling songs…'.encode(), C.cast(work.step, C.c_void_p), C.cast(work.cancel, C.c_void_p))
+    fw.fn('load_wait', None, C.c_void_p, C.c_void_p, C.c_void_p, C.c_void_p)(
+        home, C.addressof(work.caption), C.cast(work.step, C.c_void_p), C.cast(work.cancel, C.c_void_p))
     return home, work, fw.var('list_marks__lo', Lo)
 
 
