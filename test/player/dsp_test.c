@@ -488,6 +488,41 @@ static void smart_check(void) {
     length = 10;
 }
 
+/* Swap L/R comes before the EQ, so the EQ's balance and its Channel: L and R bands act on the ear each channel is heard
+ * in, as stock's Balance does: with Swap on, a block plays bit for bit as the same block with its channels swapped plays
+ * with Swap off, Mono Audio off and on. A swap after the EQ would give the left ear's band and balance to the right. The
+ * files stay, at 0, for mono_check, which maps the same ones. */
+static void swap_order_check(void) {
+    enum { N = 1024 };
+    static float a[2 * N], b[2 * N];
+    peq_preset p;
+    peq_default(&p);
+    p.bypass = 0, p.preamp = -6, p.count = 2, p.automatic = 2, p.balance = 4; /* the left 4 dB down */
+    p.bands[0] = (peq_band){2, 0, 1000, 6, 1};  /* Channel: L */
+    p.bands[1] = (peq_band){3, 0, 3000, -5, 2}; /* Channel: R */
+    assert(peq_save(PEQ_ACTIVE, &p, 1) == 1);
+    volatile int *mono = shared(MONO_FILE), *swap = shared(SWAP_FILE);
+    for (int m = 0; m < 2; ++m) {
+        *mono = m;
+        struct dsp *on = track(48000, 2), *off = track(48000, 2);
+        unsigned n = 0;
+        for (int blk = 0; blk < 60; ++blk, n += N) { /* past the first second, by which both files are found */
+            for (unsigned i = 0; i < N; ++i) {
+                float l = 0.4f * sinf((n + i) * 0.031f), r = 0.3f * sinf((n + i) * 0.17f + 1);
+                a[2 * i] = l, a[2 * i + 1] = r, b[2 * i] = r, b[2 * i + 1] = l;
+            }
+            *swap = 1;
+            assert(run(on, a, N, 2, (double)(n + N) / 48000) == N);
+            *swap = 0;
+            assert(run(off, b, N, 2, (double)(n + N) / 48000) == N);
+            if (blk >= 50) assert(!memcmp(a, b, sizeof a));
+        }
+        dsp_close(on, 1), dsp_close(off, 1);
+    }
+    *mono = *swap = 0;
+    unlink(PEQ_ACTIVE);
+}
+
 /* Mono Audio and Swap L/R: demo's files, looked for once a second of audio; set, each stereo frame is its channels'
  * mean, or the two swapped; cleared, the block plays exactly. */
 static void mono_check(void) {
@@ -918,6 +953,7 @@ int main(void) {
     midmix_check();
     smart_check();
     filed_check(); /* before mono_check, which removes the files this one's Mono Audio and Swap L/R are set through */
+    swap_order_check(); /* before mono_check too */
     mono_check();
     cast_check();
     carry_check();
