@@ -14,6 +14,9 @@
 #ifndef MOUNTS
 #define MOUNTS "/proc/mounts"
 #endif
+#ifndef USED_FILE
+#define USED_FILE "/tmp/q2remote.used"
+#endif
 #define KEY_MIN 16
 #define LINE 4096
 #define HELLO_S 10
@@ -50,7 +53,7 @@ void *mmap(void*,unsigned,int,int,int,long); unsigned alarm(unsigned); void (*si
 int strcmp(const char*,const char*);
 int unlink(const char*), rename(const char*,const char*), fsync(int), memcmp(const void*,const void*,unsigned);
 char *strstr(const char*,const char*);
-long ptrace(int,int,void*,void*); int waitpid(int,int*,int), atoi(const char*), snprintf(char*,unsigned,const char*,...);
+long ptrace(int,int,void*,void*); int waitpid(int,int*,int), atoi(const char*), snprintf(char*,unsigned,const char*,...), getpid(void);
 int pread(int,void*,unsigned,long);
 #endif
 #define FBIOGET_VSCREENINFO 0x4600
@@ -119,6 +122,17 @@ static int write_all(int fd, const void *data, unsigned n) {
 }
 #define SAY(fd,s) write_all(fd,s,sizeof s-1)
 
+/* Smart Wi-Fi keeps the radio on REMOTE_HOLD_MS after the last request (smart_wifi.c remote_poll, --dev
+ * builds, docs/internals.md#smart-wi-fi): each authenticated one leaves its pid in USED_FILE, a new text
+ * each time, which demo reads once a second as a use. */
+static void mark_used(void) {
+    char pid[16];
+    int n=snprintf(pid,sizeof pid,"%d\n",getpid()), fd=open(USED_FILE,O_SAVE,0644);
+    if (fd<0) return;
+    write_all(fd,pid,n);
+    close(fd);
+}
+
 static void serve(int c) {
     char key[128], got[128], cmd[LINE];
     alarm(HELLO_S);
@@ -127,6 +141,7 @@ static void serve(int c) {
     for (int i=0;i<n;++i) diff|=key[i]^got[i];
     if (diff) { SAY(c,"ERR\n"); return; }
     alarm(0);
+    mark_used();
     SAY(c,"OK\n");
     signal(SIGCHLD,SIG_DFL);
     for (int i=0;i<3;++i) if (dup2(c,i)<0) { SAY(c,"q2remote: dup failed\n"); return; }

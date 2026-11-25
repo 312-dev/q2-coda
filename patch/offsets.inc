@@ -485,6 +485,14 @@ static inline int arc_out(int r, int y) {
 #define SMART_POLL_MS 1000
 #define SMART_IDLE_MS 300000
 #define SMART_CONNECT_MS 15000
+/* --dev builds only (smart_wifi.c remote_poll): q2remote (docs/remote.md) reaches the Q2 over Wi-Fi
+ * alone, and nothing it does counts as a use otherwise, so Smart Wi-Fi would end a developer's
+ * session SMART_IDLE_MS after the last other use, and with the radio off nothing can connect. Its
+ * requests need the network for REMOTE_HOLD_MS after the last one, long enough for a build and an
+ * install between two; and demo's first REMOTE_BOOT_MS do, so a Q2 just updated or restarted can be
+ * reached before anything else wakes its radio. */
+#define REMOTE_HOLD_MS 1800000
+#define REMOTE_BOOT_MS 1800000
 #define NET_TYPE 0xa500d4 /* no symbol: initNetworkModule's type, 2 Wi-Fi; networkStart and networkStop act only then */
 /* The Wi-Fi signal (ringnav_wifi_signal) is read from the driver again at most every
  * WIFI_SIGNAL_MS; its two pollers each ask about once a second. */

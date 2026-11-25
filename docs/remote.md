@@ -32,6 +32,10 @@ It listens on TCP port 2302 and sends the key and every command **unencrypted**.
 
 Each connection rereads `/mnt/mmc/q2remote.key` while the card is mounted, so replacing the file rotates the key and deleting it revokes access, the internal copy included. A change made over USB storage applies once the cable is out.
 
+## Smart Wi-Fi
+
+With **Smart Wi-Fi** on, the Q2 turns its radio off once nothing has needed the network for 5 minutes, and while it is off q2remote cannot be reached. In a `--dev` build q2remote counts as needing it: Wi-Fi stays on for 30 minutes after each request (`REMOTE_HOLD_MS`; any command that passes the key, `find` not included), and for the first 30 minutes after demo starts (`REMOTE_BOOT_MS`), so a Q2 just updated or restarted can be found. Past both, once Smart Wi-Fi has the radio off, no request can arrive to bring it back: wake it on the Q2 (open Streaming or the Wi-Fi page), plug in the cable, or turn Smart Wi-Fi off. Each hold's start and end is a line in the [unified log](internals.md#unified-log) (`q2remote: ...`, source `wifi`). How it works: [internals: Smart Wi-Fi](internals.md#smart-wi-fi).
+
 ## Commands
 
 | Command                        | Does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -85,12 +89,12 @@ All of it is injected by writing input events to `/dev/input/eventN`, so the fir
 ## Troubleshooting
 
 - **`authentication rejected`:** the key differs from the card's file, the file is malformed, or the key is new and the USB cable is still connected (setup step 3).
-- **`cannot reach Q2` / `No route to host`:** the Q2 isn't on the network yet (after a boot or a reboot it can take a few minutes), or is in Rockbox, which has no q2remote. Make sure the PC is on the same network and not still on wired Ethernet.
+- **`cannot reach Q2` / `No route to host`:** the Q2 isn't on the network yet (after a boot or a reboot it can take a few minutes), Smart Wi-Fi has its radio off ([Smart Wi-Fi](#smart-wi-fi)), or it is in Rockbox, which has no q2remote. Make sure the PC is on the same network and not still on wired Ethernet.
 - **`no md-gpio-keys input device`:** run `devices`; the firmware may name its devices differently.
 
 ## Protocol
 
-The client sends the key, a newline, the command, a newline, then any stdin. `sh` sends its script as that stdin and runs it under `setsid`, recording its pid in `/tmp/q2remote-*.pid` so Ctrl-C can kill its process group, and ends the output with `\n\0q2rc=STATUS\n`, where the client stops reading: a job left in the background doesn't hold the reply. The script isn't exported, so it may be any size. The helper answers `OK\n` and then streams the command's output until it exits, or answers `ERR\n` and closes. A handshake has to arrive within 10 seconds. `q2remote --shot` writes `Q2FB\0`, then the width, height, stride and size as little-endian 32-bit integers, then the displayed page; the client has it gzipped on the Q2, then rotates and encodes it. `state` reads demo's byte globals with `dd` from `/proc/<pid>/mem` at stock V1.36's addresses (`GLOBALS` in `tools/q2remote.py`). `python3 test/remote.py` builds the helper for the host and checks authentication, rotation, revocation, the internal copy, framing and the input encoders.
+The client sends the key, a newline, the command, a newline, then any stdin. `sh` sends its script as that stdin and runs it under `setsid`, recording its pid in `/tmp/q2remote-*.pid` so Ctrl-C can kill its process group, and ends the output with `\n\0q2rc=STATUS\n`, where the client stops reading: a job left in the background doesn't hold the reply. The script isn't exported, so it may be any size. The helper answers `OK\n` and then streams the command's output until it exits, or answers `ERR\n` and closes. A handshake has to arrive within 10 seconds. `q2remote --shot` writes `Q2FB\0`, then the width, height, stride and size as little-endian 32-bit integers, then the displayed page; the client has it gzipped on the Q2, then rotates and encodes it. `state` reads demo's byte globals with `dd` from `/proc/<pid>/mem` at stock V1.36's addresses (`GLOBALS` in `tools/q2remote.py`). Each request that passes the key first writes the serving process's pid to `/tmp/q2remote.used`, which a `--dev` demo reads as a use ([Smart Wi-Fi](#smart-wi-fi)). `python3 test/remote.py` builds the helper for the host and checks authentication, rotation, revocation, the internal copy, that use file, framing and the input encoders.
 
 ## Car Remote across networks
 
