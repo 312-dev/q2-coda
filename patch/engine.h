@@ -106,8 +106,12 @@ int eng_save(const char *name, void *buf, unsigned size, unsigned magic);
 
 /* engine.c, for a game's draw. Colours are the screen's, 0xRRGGBB; Light Mode leaves them. */
 /* The part of the box x, y, w, h inside this paint's rows and columns, as x0 y0 x1 y1 in c; 0 when
- * none is. */
-int eng_clip(const struct eng_surface *s, int x, int y, int w, int h, int *c);
+ * none is. Inline: the games' blits call it per sprite and per glyph in a frame. */
+static inline int eng_clip(const struct eng_surface *s, int x, int y, int w, int h, int *c) {
+    c[0] = x < s->x0 ? s->x0 : x, c[1] = y < s->y0 ? s->y0 : y;
+    c[2] = x + w > s->x1 ? s->x1 : x + w, c[3] = y + h > s->y1 ? s->y1 : y + h;
+    return c[2] > c[0] && c[3] > c[1];
+}
 void eng_fill(struct eng_surface *s, int x, int y, int w, int h, unsigned rgb);
 /* a disc with a smoothed edge, its centre and radius in 16.16 so it moves by parts of a pixel */
 void eng_disc(struct eng_surface *s, fx cx, fx cy, fx r, unsigned rgb);

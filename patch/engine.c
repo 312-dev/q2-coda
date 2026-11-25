@@ -317,12 +317,6 @@ static inline unsigned blend1(unsigned dst, unsigned rgb, unsigned a) { /* a of 
     return 0xff000000 | rb | g;
 }
 
-/* The part of x, y, w, h being painted, as x0 y0 x1 y1 in c; 0 when none of it is. */
-int eng_clip(const struct eng_surface *s, int x, int y, int w, int h, int *c) {
-    c[0] = x < s->x0 ? s->x0 : x, c[1] = y < s->y0 ? s->y0 : y;
-    c[2] = x + w > s->x1 ? s->x1 : x + w, c[3] = y + h > s->y1 ? s->y1 : y + h;
-    return c[2] > c[0] && c[3] > c[1];
-}
 static inline unsigned *row(const struct eng_surface *s, int x, int y) {
     return s->px + (y + s->oy) * s->stride + x + s->ox;
 }
