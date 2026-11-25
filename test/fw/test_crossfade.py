@@ -104,7 +104,8 @@ class Fade:
         fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = self.queue
         self.missing, self.empty = {'/tmp/notfile', '/tmp/notsupport'}, set()
         self.status, self.toast = 2, 0  # playing, no modal toast up
-        fw.mock('fw_access', lambda path, *_: -(C.string_at(path).decode() in self.missing))
+        # q2player's output failure (output_fail.c, from the same poll) never here: a stop is a stop
+        fw.mock('fw_access', lambda path, *_: -(C.string_at(path).decode() in self.missing | {'/tmp/q2outfail'}))
         fw.mock('fw___xstat', self.stat)
         fw.mock('mclGetPlayStatus', lambda *_: self.status)
         fw.mock('navigator_window_is_exist', lambda *_: self.toast)

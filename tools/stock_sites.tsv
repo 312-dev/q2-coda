@@ -245,7 +245,7 @@ demo	0x4f4288	0x4	on_wm_idle_status	1st of 2 calls to device_reboot, after "dial
 demo	0x4f42a4	0x4	on_wm_idle_status	the only call to player_mainscheduling, after "dialog/msginfo_dialog"; tools/build.py MAINSCHEDULING_CALL
 demo	0x4f448c	0x4	on_wm_idle_status	2nd of 2 calls to navigator_to_with_context, after "msg_btabnormal"; tools/build.py BT_ABNORMAL_TOASTS
 demo	0x4f449c	0x4	on_wm_idle_status	2nd of 2 calls to device_reboot, after "dialog/msginfo_dialog"; patch/system.c BT_ABNORMAL
-demo	0x4f4d18	0x4	on_wm_timer_dialog	`addiu $4, $17, 0x23f4, forming "/tmp/notfile"`, the delay slot of 1st of 2 calls to access, after "dialog/msginfo_dialog"; patch/crossfade.c fades_into
+demo	0x4f4d18	0x4	on_wm_timer_dialog	`addiu $4, $17, 0x23f4, forming "/tmp/notfile"`, the delay slot of 1st of 2 calls to access, after "dialog/msginfo_dialog"; patch/crossfade.c fades_into, patch/output_fail.c
 demo	0x4f4ddc	0x4	on_wm_timer_dialog	`b +139 words` (1st of 12 such), before 2nd of 4 calls to navigator_window_is_exist, after "dialog/msginfo_dialog"; patch/playback.c UNPLAYABLE_NEXT_RET
 demo	0x4f5390	0x4	navigator_create_page_by_name	the only call to window_open_and_close, after "single_instance"; tools/build.py WINDOW_OPENS
 demo	0x4f79b8	0x4	albumcoverinfo_init	the load of $25 for the only call to _deque_push_back; tools/build.py COVER_PUSH
