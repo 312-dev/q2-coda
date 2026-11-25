@@ -771,6 +771,7 @@ void usb_ui_poll(void) {
     else if (car == USB_CAR_CHARGER) usb_charger_in();
     usb_record_poll();  /* usb_record.c: a cable edge's second line */
     usb_otg_poll();     /* usb_otg.c: a Play asked while USB audio connected */
+    usb_keys_poll();    /* usb_keys.c: a USB-C headset's buttons */
     charging_poll();    /* charging.c's plug-in screen and weak charger */
     toast_later_poll(); /* a toast USB or charging left */
     auth_poll();
