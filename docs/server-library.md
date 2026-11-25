@@ -447,6 +447,49 @@ loading state above), `buffered_bytes` (14) and `total_bytes` (15) (the `.stream
 not streaming) and `buffered_ms` (16) (bytes over total times length, 0 when unknown), sent when they change,
 at most twice a second.
 
+## Clips
+
+Status: the firmware's half built (Caller Ten, `patch/game_callerten.c`); the app's half not yet
+(q2-subsonic). Caller Ten plays short clips of the whole library, a server's songs streamed and the
+card's as the fallback. A clip is never part of the stream run: it is not in `.play`, `.stream`,
+`.ahead` or `.playing`, it is not in the Stream Cache, and it is never reported as played. The
+capability word is `clip` (`/tmp/q2-addon.caps`).
+
+**`/tmp/q2-<id>.clips`** (app to firmware), written whole: the app's answers. The app writes it at
+its start with its header alone and keeps the header's `server=` current; it deletes it at its exit.
+The firmware streams clips only while the file is there and says `server=up`; otherwise a contest
+draws from the card and the server's offline copies, and a library too small for that says "Can't
+reach your music server".
+
+```text
+#Q2CLIPS/1	server=up|down
+<seq>	<slot>	get|done|fail	<offset ms>	<card path>
+```
+
+**`/tmp/q2-<id>.clip`** (firmware to app), written whole by a thread of the game's while a contest
+runs, whenever what it asks changes: the clips it wants now, this caller's and the next one's.
+
+```text
+#Q2CLIP/1	seq=<n>
+<slot>	<sid>	<from ms>	<length ms>
+```
+
+What the app does with a line: fetch the song's `/rest/stream` as it streams one (its format and
+bit rate) from about the byte of `<from ms>` (`Range: bytes=<size x from / duration>-`, which
+`Client.Get`'s `from` already sends), stop after `<length ms>` of it (25 s), and write it whole
+(temp and rename) to `/mnt/mmc/.<id>/clips/<sid>.<suffix>`; then answer `done` with the ms of the
+song the file starts at (`<offset ms>`; 0 when the server sent the song from its start, a 200 to
+the range), which the firmware plays from `<from> - <offset>`. A song it cannot fetch answers
+`fail`. A clip no longer named in the request is deleted, and a request with no lines (the contest
+over, the game left) deletes them all, so the app holds two clips at most (about 1 MB each at 320
+kbps). Nothing here may touch the stream run, its cache or `plays` (the server's scrobble).
+
+**The firmware's bounds.** A clip asked for and not `done` within 8 s (`CT_FETCH_MS`, the thread's)
+or 480 frames of the caller's wait (`CT_FETCH_MAX`) is given up, the caller's number kept: a card
+song plays instead, and the contest's later callers are the card's; a `fail` passes over that song
+alone. The next caller's clip is asked for while this one plays, so a caller does not wait when
+the server keeps up.
+
 ## Keeping in step with the server
 
 From a study of Ultrasonic, Tempus, Amperfy and Supersonic (all GPL-3.0, so their ideas and not their
