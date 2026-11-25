@@ -282,6 +282,10 @@ SPLASH = 'usr/bin/q2splash'
 REMOTE = 'usr/bin/q2remote'
 # --dev only (docs/adb.md#q2eq, patch/q2eq.c): the EQ editor from a computer, through demo's q2eq_poll
 Q2EQ = 'usr/bin/q2eq'
+# --dev only (docs/internals.md#usb-tracer, patch/q2usbtrace.c): the USB port's read-only recorder and the state
+# machine's shadow (patch/usb_fsm.c), started by S90play (USBTRACE_HOOK)
+USBTRACE = 'usr/bin/q2-usbtrace'
+USBTRACE_SOURCES = ['q2usbtrace', 'q2usbtrace_core', 'usb_fsm', 'q2guard_card']
 # The car remote daemon (docs/remote-protocol.md, docs/internals.md#car-remote): demo's payload starts it
 # while Settings > Car Remote is on (patch/coda_rc_shim.c). SQLite reads the library; Bluetooth LE is its own
 # GATT server on the kernel's sockets (patch/coda_rc_ble.c).
@@ -510,6 +514,12 @@ Q2UPDATE = 'usr/bin/q2update'
 ADB_HOOK = (b'/usr/bin/q2remote &\n',
             b'/usr/bin/q2remote &\n/usr/bin/q2adb-gadget setup && (while :; do /usr/bin/adbd </dev/null >/dev/null 2>&1 &'
             b' /usr/bin/q2adb-gadget bind; wait $!; sleep 2; done) &\n')
+# --dev only (docs/internals.md#usb-tracer): q2-usbtrace, after ADB_HOOK's lines. Started again if it ends
+# with an error, three times a boot at most; it ends with 0, and is not started again, when one of its two flag
+# files is there (/mnt/data/q2-usbtrace.off, the card's .q2muse/usbtrace.off), which it checks each second.
+USBTRACE_HOOK = (ADB_HOOK[1],
+                 ADB_HOOK[1] + b'(n=0; while [ $n -lt 4 ]; do /usr/bin/q2-usbtrace </dev/null >/dev/null 2>&1 && break;'
+                 b' n=$((n+1)); sleep 5; done) &\n')
 # Stock's USB scripts, which demo runs to start and stop USB storage and the USB DAC: in a --dev build each is
 # wrapped (adb_wrapper) and stock's kept beside it as <name>_stock.sh, so the ADB gadget gives way to stock's.
 USB_SCRIPTS = ('storage_config.sh', 'uac_device_config.sh')
@@ -3061,7 +3071,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(s90play.count(LOG_HOOK[0]) == 1, 'Unexpected demo loop')
     check(s90play.count(WHEEL_LOG_HOOK[0]) == 1, 'Unexpected card path')
     check(s90play.count(GUARD_DEV_HOOK[0]) == 1, 'Unexpected q2guard start')
-    (out/'S90play').write_bytes(s90play.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK) if dev else s90play)
+    (out/'S90play').write_bytes(s90play.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*USBTRACE_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK) if dev else s90play)
     (out/'config.ini').write_bytes(default_config(cat(DEFAULT_CONFIG)))
     s11logo = cat(S11LOGO)
     check(s11logo.count(LOGO_HOOK[0]) == 1, 'Unexpected S11logo_display_shell')
@@ -3205,10 +3215,12 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                **{FONT_DIR + n: ('etc/hosts', (ROOT/'assets/fonts'/n).read_bytes()) for n in FONT_NOTICES},
                                **(adb_files(out, cat) if dev else {}),
                                **({REMOTE: (HELPER_LIKE, compile_helper(out, cat, 'remote', 'q2remote', HELPER_LIBS[:1])),
-                                   Q2EQ: (HELPER_LIKE, compile_helper(out, cat, 'q2eq', 'q2eq', HELPER_LIBS[:1]))} if dev else {})}.items():
+                                   Q2EQ: (HELPER_LIKE, compile_helper(out, cat, 'q2eq', 'q2eq', HELPER_LIBS[:1])),
+                                   USBTRACE: (HELPER_LIKE, compile_helper(out, cat, USBTRACE_SOURCES, 'q2-usbtrace',
+                                                                          HELPER_LIBS[:1]))} if dev else {})}.items():
         stock = need(inode(p, like.encode()), f'Missing stock inode for {path}')
         name = path.rsplit('/', 1)[-1]
-        if path not in (HELPER, BOOT, SPLASH, REMOTE, Q2EQ, CODA_RC, GUEST, Q2SEND, RADIOFETCH, Q2IAP): (out/name).write_bytes(data)  # package the hashed bytes, as the logo
+        if path not in (HELPER, BOOT, SPLASH, REMOTE, Q2EQ, USBTRACE, CODA_RC, GUEST, Q2SEND, RADIOFETCH, Q2IAP): (out/name).write_bytes(data)  # package the hashed bytes, as the logo
         if inode(p, path.encode()):  # stock has a file of that name: ours takes its inode
             changed_assets[path] = dict(original_sha256=sha(cat(path)), sha256=sha(data))
             p = swap_inode(p, path.encode(), out/name)
@@ -3287,7 +3299,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         **({'aic_notifier': aic_notifier} if aic_notifier else {}),
         patch_bytes=len(payload), scratch_free_bytes=scratch_free, ring_step_pixels=RING_STEP,
         audio_extension_calls=[dict(address=hex(a), original='0x0320f809', replacement=hex(jal(ps['ringnav_audio_extension']))) for a in AUDIO_EXTENSION_CALLS],
-        version=version, dev=dev, update_repo=repo, signing_key=key.hex(), bluealsa_sha256=sha(bluealsa), bluetoothd_sha256=sha(bluetoothd), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), q2_iroh_sha256=sha((out/'q2-iroh').read_bytes()), q2_iroh_bytes=len((out/'q2-iroh').read_bytes()), q2_guest_sha256=sha((out/'q2-guest').read_bytes()), q2_iap_sha256=sha((out/'q2-iap').read_bytes()), q2_iap_bytes=len((out/'q2-iap').read_bytes()), usb_f_uac1_sha256=sha((out/'usb_f_uac1.ko').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
+        version=version, dev=dev, update_repo=repo, signing_key=key.hex(), bluealsa_sha256=sha(bluealsa), bluetoothd_sha256=sha(bluetoothd), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), q2_iroh_sha256=sha((out/'q2-iroh').read_bytes()), q2_iroh_bytes=len((out/'q2-iroh').read_bytes()), q2_guest_sha256=sha((out/'q2-guest').read_bytes()), q2_iap_sha256=sha((out/'q2-iap').read_bytes()), q2_iap_bytes=len((out/'q2-iap').read_bytes()), usb_f_uac1_sha256=sha((out/'usb_f_uac1.ko').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes()), 'q2_usbtrace_sha256': sha((out/'q2-usbtrace').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
         **({'rotator_clock': rotator} if rotator else {}),
         **({'adbd': adbd_record(out)} if dev else {}),
         q2player_sha256=sha(q2player.read_bytes()),

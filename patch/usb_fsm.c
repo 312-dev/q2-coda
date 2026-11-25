@@ -229,7 +229,8 @@ unsigned usb_fsm_step(struct usb_fsm *f, int ev, int v, long long t, struct usb_
     unsigned a = 0;
     out->why = "";
     switch (ev) {
-    case UF_EV_VBUS:
+    case UF_EV_VBUS: {
+        int was = f->vbus;
         f->vbus = v, f->online = -1; /* the PMIC's last read was of the other VBUS */
         if (v) {
             if (sink_state(f->state))
@@ -241,10 +242,11 @@ unsigned usb_fsm_step(struct usb_fsm *f, int ev, int v, long long t, struct usb_
         } else {
             if (sink_state(f->state)) {
                 if (f->t_vbus_high == UF_NEVER) f->t_vbus_high = t;
-            } else
-                f->t_gone = t;
+            } else if (was == 1)
+                f->t_gone = t; /* VBUS left (a first read of none is not a leaving) */
         }
         break;
+    }
     case UF_EV_IDLOW:
         f->idlow = v;
         if (v) {

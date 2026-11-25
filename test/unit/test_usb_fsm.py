@@ -427,3 +427,18 @@ def test_a_wake_with_a_computer_keeps_the_link_and_a_slow_one_reads_as_a_charger
     hosts, chargers = m.at('host-seen'), m.at('charger')
     assert len(hosts) == 3 and chargers == [4027_374 * MS + CHARGER * MS]
     assert not m.at('grant') and not m.at('replug')
+
+
+def test_tonight_s_owner_plugs_two_wrong_way_laptops_and_headphones_behind_a_hub(L):
+    """2026-11-25 (usblog2.txt). The first laptop the wrong way round, its ID low by 5.06 s after the unplug (inside the
+    window): the shadow's grant at UF_ID_PHANTOM_MS, its trial from stock's otg-on, the replug 1 s after its end, at
+    847.921, 8 s before stock's wrong-role toast (855.917). The headphones behind a hub (1-1, then 1-1.1): powered 2.8 s
+    before stock, kept while 1-1 was there, off as it left with stock's why=gone. The second laptop: its trial empty
+    (8.4 s after its grant, which waited for stock's power), off at 4608.614, 3 s before stock's why=id-high (4611.579);
+    the ID went high before any replug was due, and its VBUS came 10.5 s after the shadow's off."""
+    (m, lines), = replay(L, 'owner-2026-11-25.trace')
+    grants, revokes, replugs = m.at('grant'), m.at('revoke'), m.at('replug')
+    assert grants == [840_673 * MS, 848_921 * MS, 4580_806 * MS, 4602_814 * MS]
+    assert revokes == [846_921 * MS, 851_921 * MS, 4587_277 * MS, 4608_614 * MS]
+    assert replugs == [847_921 * MS] and 855_917 * MS - replugs[0] > 7 * S
+    assert m.at('host-seen')[-1] == 4624_168 * MS

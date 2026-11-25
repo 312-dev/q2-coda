@@ -1,0 +1,44 @@
+# q2-usbtrace trace format (docs/internals.md#usb-tracer), built from a device log for test/unit/test_usb_fsm.py.
+# Source: usbprobe/usblog2.txt, 2026-11-25, the owner's plugs, unified log lines (uptime ms as s; the kernel's and
+# demo's share the clock), on the trunk's 3 s settle. Measured: the cable out at 830.614 and PD18 low by its out+5s
+# line (835.673), otg-on 843.921, otg-trial-off 852.884, wrong-role 855.917 (a laptop the wrong way round); a computer
+# in at 3211.629, out 4488.311, in 4498.375, out 4508.636; USB-C headphones: otg-on 4583.606, the kernel's errors for
+# "usb 1-1.1" (behind a hub in the headphones) at 4586.084 and "Not connected", otg-off why=gone 4587.327; a laptop
+# the wrong way round again: otg-on 4605.614, otg-off why=id-high 4611.579 (2 s of ID high, OTG_ID_HIGH_MS, so high
+# by 4609.579), its cable seen in at 4619.123. Not in the log: when each ID low began (put at the out+5s line for the
+# first, which may be late, and 3 s before otg-on, the settle, for the others) [I]; the hub's 1-1 add (put 0.56 s after
+# otg-on, as 2026-11-23 measured [E]) and its removal (put 50 ms before otg-off why=gone) [I]; online (1 with a
+# computer's or the laptop's VBUS in, else 0) [I]; a computer's address (put at its in+5s line, so its "charger" at
+# 3 s is the log's resolution, not the computer's) [I].
+800.000000 start
+800.000000 s PD17=0 PD18=1 PC20=0 on=1 dev=0
+800.000000 udc configured
+830.614000 s PD17=1 on=0
+830.614000 udc suspended
+835.673000 s PD18=0
+843.921000 s PC20=1 PD17=0 on=0
+843.921000 s id=host
+843.921000 udc not_attached
+852.884000 s PC20=0 PD17=1
+3211.629000 s PD17=0 PD18=1 on=1
+3216.704000 udc configured
+4488.311000 s PD17=1 on=0
+4488.311000 udc suspended
+4498.375000 s PD17=0 on=1
+4503.456000 udc configured
+4508.636000 s PD17=1 on=0
+4508.636000 udc suspended
+4580.606000 s PD18=0
+4583.606000 s PC20=1 PD17=0 on=0
+4584.166000 u add usb 1-1
+4586.084000 u add usb 1-1.1
+4587.277000 u remove usb 1-1.1
+4587.277000 u remove usb 1-1
+4587.327000 s PC20=0 PD17=1 PD18=1
+4602.614000 s PD18=0
+4605.614000 s PC20=1 PD17=0 on=0
+4609.579000 s PD18=1
+4611.579000 s PC20=0
+4613.179000 s PD17=1
+4619.123000 s PD17=0 on=1
+4624.168000 udc configured
