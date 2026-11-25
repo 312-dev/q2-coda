@@ -113,8 +113,34 @@ SQLITE_PROGRESS_DELTA = -648348
 CSTL_ITER = 'typedef struct { unsigned w[7]; } cstl_iter;'
 
 def function_macros(address):
-    """Each stock function in address (name -> its C address) as a macro calling it there."""
-    return [f'#define {name} (({ret} (*)({args})){address[name]})' for name, (ret, args) in FUNCTIONS.items() if name in address]
+    """Each stock function in address (name -> its C address) as a macro calling it there, and as PEQ_AT_<name>,
+    the function's own address, for C that hands it on as a value (a handler to unregister, a callback stock
+    compares) rather than calling it."""
+    out = []
+    for name, (ret, args) in FUNCTIONS.items():
+        if name in address:
+            cast = f'(({ret} (*)({args})){address[name]})'
+            out += [f'#define PEQ_AT_{name} {cast}', f'#define {name} {cast}']
+    return out
+
+
+def function_stubs(address):
+    """The payload's calls to stock functions (name -> its address as an int), through a stub each: function_macros'
+    lines, then each name made peq_fn_<name>, an extern the C calls with one jal, and the stubs' assembly. A call
+    through the address itself takes a lui and an ori before its jalr at every call site, as stock's PIC prologue
+    needs $t9 to hold the address; the stub sets $t9 once and jumps (in the payload's 256 MB segment, as stock is),
+    so each site is 8 bytes shorter and each function called adds a 12-byte stub. --gc-sections drops the stubs
+    nothing calls."""
+    header = function_macros({name: f'0x{a:x}u' for name, a in address.items()})
+    asm = []
+    for name, (ret, args) in FUNCTIONS.items():
+        if name not in address:
+            continue
+        a = address[name]
+        header += [f'#undef {name}', f'extern {ret} peq_fn_{name}({args});', f'#define {name} peq_fn_{name}']
+        asm += [f'.section .text.peq_fn_{name},"ax",@progbits', f'.globl peq_fn_{name}', f'peq_fn_{name}:',
+                f'lui $t9, {a >> 16}', f'j 0x{a:x}', f'ori $t9, $t9, {a & 65535}']
+    return header, asm
 
 def compile_common(out, binary):  # pragma: no mutate block
     got = {}
@@ -179,7 +205,9 @@ def compile_common(out, binary):  # pragma: no mutate block
         if name in ('memcpy', 'memset', '__udivdi3'):
             asm += [f'.globl {name}', f'.set {name}, peq_lib_{name}']
     syms = symbols(binary) | PRIVATE_FUNCTIONS
-    header += function_macros({name: f'0x{syms[name]:x}u' for name in FUNCTIONS if syms.get(name)})
+    stub_header, stub_asm = function_stubs({name: syms[name] for name in FUNCTIONS if syms.get(name)})
+    header += stub_header
+    asm += stub_asm
     # build.py has already checked each is a one-byte global.
     header += [f'#define {name} (*(volatile unsigned char *)0x{syms[name]:x}u)' for name in GLOBALS]
     (out/'peq_platform.h').write_text('\n'.join(header)+'\n')

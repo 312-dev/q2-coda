@@ -726,7 +726,7 @@ void bt_page(void *view, int on) {
         }
         if (b) {
             widget_set_prop_int(item, "_bt_dev", atoi(widget_get_prop_str(b, "name", "")) + 1);
-            widget_off_by_func(b, EVT_CLICK, (void *)btmenu_item_on_click, b);
+            widget_off_by_func(b, EVT_CLICK, (void *)PEQ_AT_btmenu_item_on_click, b);
             widget_on(b, EVT_CLICK, row_click, b);
         } else { /* stock's header (btmenu_msginfo_layout): paired first, then found */
             other = k > 2;
