@@ -277,6 +277,8 @@ def test_it_opens_every_device_file_read_only_and_asks_only_input_events_and_smb
     others = [(p, a) for w, p, a, _, _ in calls if w == 'ioctl' and p == 'other']
     assert others == [('other', SLAVE_FORCE)]
     assert {p for w, p, *_ in calls if w == 'append'} == {'/tmp/q2-demo.log'}
+    # the name and length demo's usb_event.c sends to (test/fw/test_usb_ui.py): AF_UNIX, abstract, 2 + 1 + 16 bytes
+    assert ('bind', 'q2-usbtrace-pd17', 40, 19, 1) in calls
     assert {w for w, *_ in calls} <= {'open', 'close', 'mmap', 'ioctl', 'socket', 'bind', 'poll', 'append', 'mount'}
 
 
