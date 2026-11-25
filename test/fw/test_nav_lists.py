@@ -2014,6 +2014,7 @@ class Warm:
     as it starts; the clock is now."""
     def __init__(self, fw, st, n=NO_MIN + 5, extra=0):
         self.fw, self.s, self.threads, self.now, self.extra = fw, Sorts(fw, n), [], 100000, extra
+        self.files = Files(fw, card=True)  # the card mounted: a load ahead reads its library
         self.polling = False
         fw.mock('getAllMusic', self.query)
         fw.mock('fw_deque_pop_back', lambda q, *_: self.s.q[q].pop() and 0)
@@ -2127,6 +2128,14 @@ def test_a_list_never_opened_is_sorted_ahead_after_a_change(fw, st):
     assert w.open() == [('dbquery', 0)] and w.s.listed() == w.s.order()
 
 
+def test_nothing_is_loaded_ahead_without_the_card(fw, st):
+    w = Warm(fw, st)
+    w.files.files.pop('/proc/mounts')
+    w.s.calls.clear()
+    w.poll()
+    assert not w.s.calls and not w.threads
+
+
 def test_nothing_more_is_loaded_ahead_until_library_gen_moves(fw, st):
     w = Warm(fw, st)
     w.open()
@@ -2205,7 +2214,6 @@ def test_a_changed_list_takes_its_own_slot_not_another_lists(fw, st):
 
 
 def test_after_a_reboot_a_changed_list_is_sorted_ahead(fw, st, library):
-    Files(fw)
     w = Warm(fw, st)
     w.open()
     reboot(fw, library)

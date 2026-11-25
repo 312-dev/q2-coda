@@ -214,7 +214,8 @@ static void spin_sort(void *list, void *cmp, const char *caption) {
 /* Sorted ahead (docs/internals.md#name-order): after a boot, and each time the library or the
  * server catalogue has changed since (library_gen moved: a scan's end, a catalogue's load or
  * import), Songs, Albums and Artists are each loaded again as their open loads them (library_warm,
- * on the UI thread, with the screen dark or WARM_IDLE_MS after the last input), opened before or
+ * on the UI thread, with the card mounted and the screen dark or WARM_IDLE_MS after the last
+ * input), opened before or
  * not, and when their records are not the kept ones (changed, or kept by another firmware) they
  * are sorted on a thread of their own with stock's call and comparator while the UI runs on, and
  * kept as an open's sort keeps them. The open after it finds its order kept. An open that meets
@@ -288,7 +289,7 @@ void name_order_poll(void) {
     if (!nw.seen || nw.gen != library_gen)
         nw.seen = 1, nw.gen = library_gen,
         nw.due = 1u << NO_SONGS | 1u << NO_ALBUMS | 1u << NO_ARTISTS;
-    if (!nw.due || library_scanning() || coverflow_opening() ||
+    if (!nw.due || !card_mounted() || library_scanning() || coverflow_opening() ||
         (g_backlight_status && (unsigned)time_now_ms() - st.last_input < WARM_IDLE_MS))
         return;
     unsigned cls = 0;
