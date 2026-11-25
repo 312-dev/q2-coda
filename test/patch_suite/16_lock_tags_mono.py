@@ -572,7 +572,7 @@ m,rows,texts,icons,click=settings_page('btrows','scroll_view_bluetooth',stock_ro
 assert len(rows)==4 and icons==[None]*4 and texts(kv=False)==['Resume on Connect','Link Volume','Name','Guest Play']  # Guest Play's row (guest_ui.c); Name's value the device's name
 view=named(m,m.top,'scroll_view_bluetooth'); name_row=rows[2]
 assert m.nodes[view]['children'].index(name_row)==1 and m.get(name_row+O['W_H'])==m.get(m.entries[1]+O['W_H']) and m.entries[1] not in m.nodes[view]['children']
-assert 'Q2 Muse' in [m.nodes[c].get('text') for c in m.nodes[m.nodes[name_row]['children'][0]]['children']]
+assert 'Vamp' in [m.nodes[c].get('text') for c in m.nodes[m.nodes[name_row]['children'][0]]['children']]
 rows=rows[:2]
 for k,row in enumerate(rows):
     kids=m.nodes[m.nodes[row]['children'][0]]['children']  # the label and its switch

@@ -150,7 +150,7 @@ def test_only_one_card_at_a_time(fw, ui, st):
 
 
 # pair_prompt.c: one pairing presentation over the card, Car Remote's and Guest Play's (docs/oled-design.md#pairing).
-def pair(fw, card, phone, code=b'242610', body=b'Enter this code in Q2 Muse Remote', timeout=120000):
+def pair(fw, card, phone, code=b'242610', body=b'Enter this code in the Vamp app', timeout=120000):
     rows = (C.c_char_p * 1)(b'Cancel')
     card.rows = rows
     return fw.fn('pair_prompt', C.c_void_p, C.c_char_p, C.c_char_p, C.c_char_p, C.c_void_p, C.c_int, C.c_int,
@@ -165,7 +165,7 @@ def test_a_pairing_names_the_phone_over_its_code_with_the_phone_glyph(fw, ui, st
     assert pair(fw, card, b'Pixel 10 Pro') == card.dialog
     assert card.selected == 0
     canvas = card.paint()
-    assert [t[0] for t in canvas.texts] == ['Pair with Pixel 10 Pro?', 'Enter this code in Q2 Muse Remote', '242 610']
+    assert [t[0] for t in canvas.texts] == ['Pair with Pixel 10 Pro?', 'Enter this code in the Vamp app', '242 610']
     h = 18 + 28 + 6 + 24 + 4 + 19 + 6 + 40 + 14 + 32 + 8
     assert [b[0] for b in canvas.boxes if b[0][0] == 42 and b[0][2] == 291] == [(42, 168 - h // 2, 291, h)]
     assert any(b[0][3] == 2 for b in canvas.boxes)  # the timeout's track along the foot
@@ -287,7 +287,7 @@ def test_the_wheel_moves_between_the_answers_and_the_list_never_scrolls(fw, ui, 
     (p31, 2026-11-16). The answers stand whole: the wheel lights each in turn and the list stays put."""
     theme(fw)
     card = Card(fw, ui)
-    assert card.ask('Install %s?', ['Cancel', 'Install and Restart'], kind=CONSEQUENTIAL, name='Q2 Muse Dev · V0RHi',
+    assert card.ask('Install %s?', ['Cancel', 'Install and Restart'], kind=CONSEQUENTIAL, name='Vamp Dev · V0RHi',
                     body='58.5 MB, over V0RHi. Takes about 2 min;\nyour music and settings stay.')
     rows = rect(ui, card.list)
     view = ui.nodes[card.view]
@@ -310,25 +310,25 @@ def test_a_long_body_wraps_at_words_and_the_card_grows(fw, ui, st):
     canvas = Canvas(fw, char_w=8)  # 31 characters to the column
     fw.mock('widget_get_canvas', lambda *_: canvas.addr)
     card = Card(fw, ui)
-    assert card.ask('Install Q2 Muse?', ['Cancel', 'Install and Restart'], kind=CONSEQUENTIAL,
+    assert card.ask('Install Vamp?', ['Cancel', 'Install and Restart'], kind=CONSEQUENTIAL,
                     body='58.5 MB, over V0RHi. Takes about 2 min;\nyour music and settings stay.')
     fw.fn('confirm_paint', None, C.c_void_p, C.c_void_p)(card.dialog, canvas.addr)
-    body = [t[0] for t in canvas.texts if t[0] != 'Install Q2 Muse?']
+    body = [t[0] for t in canvas.texts if t[0] != 'Install Vamp?']
     assert body == ['58.5 MB, over V0RHi. Takes', 'about 2 min;', 'your music and settings stay.']
     h = 18 + 24 + 4 + 3 * 19 + 14 + 2 * 32 + 8
     assert [b[0] for b in canvas.boxes if b[0][0] == 42 and b[0][2] == 291] == [(42, 168 - h // 2, 291, h)]
 
 
 def test_the_install_cards_long_title_scrolls_never_cut(fw, ui, st):
-    """Software Update's 'Install Q2 Muse Dev · V0RHi?' is wider than the column: it scrolls, drawn twice, never cut
+    """Software Update's 'Install Vamp 1.8.2 beta 2 · V1822?' is wider than the column: it scrolls, drawn twice, never cut
     with an ellipsis."""
     theme(fw)
     card = Card(fw, ui)
-    card.ask('Install %s?', ['Cancel', 'Install and Restart'], kind=CONSEQUENTIAL, name='Q2 Muse Dev · V0RHi')
+    card.ask('Install %s?', ['Cancel', 'Install and Restart'], kind=CONSEQUENTIAL, name='Vamp 1.8.2 beta 2 · V1822')
     canvas = Canvas(fw)
     fw.fn('confirm_paint', None, C.c_void_p, C.c_void_p)(card.dialog, canvas.addr)
     titles = [t[0] for t in canvas.texts if t[0].startswith('Install')]
-    assert titles == ['Install Q2 Muse Dev · V0RHi?'] * 2 and ui.fn('feedback__card_marq') in ui.pending()
+    assert titles == ['Install Vamp 1.8.2 beta 2 · V1822?'] * 2 and ui.fn('feedback__card_marq') in ui.pending()
     for _ in range(3):  # every frame repaints and asks for the next
         card.now[0] += 33
         assert repeat(ui, 'feedback__card_marq') == [8]

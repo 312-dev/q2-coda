@@ -1,6 +1,6 @@
 # Boot
 
-The Q2 splash shown on the screen at power-on is a JPEG inside the rootfs, and on Q2 Muse's default builds in Dark Mode a short animation played over it ([Boot animation](#boot-animation)). A JPEG on the SD card replaces both without a firmware update; a build can also change the built-in one ([Custom boot logo](#custom-boot-logo)).
+The Q2 splash shown on the screen at power-on is a JPEG inside the rootfs, and on Vamp's default builds in Dark Mode a short animation played over it ([Boot animation](#boot-animation)). A JPEG on the SD card replaces both without a firmware update; a build can also change the built-in one ([Custom boot logo](#custom-boot-logo)).
 
 | What       | Where                                                                                                                                                          |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -19,18 +19,18 @@ BusyBox `init` runs `/etc/init.d/rcS`, which starts the `S??*` scripts in order:
 4. `S20urandom`, `S40network`.
 5. `S90play`: starts `dbus-daemon`, then the player: `/release/bin/demo`, or Rockbox first when the card has it ([Rockbox](#rockbox)).
 
-demo's `platform_init` starts `checkappprocess.sh &`, stock's watchdog: every 2 s it checked with `pgrep` that `/release/bin/demo` runs and rebooted if not, a process start or two each time for the life of the Q2. In Q2 Muse the script ends at once (`WATCHDOG_STUB` in `tools/build.py`): `S90play` runs demo and waits for it, so it reboots when demo ends instead ([Rockbox](#rockbox)).
+demo's `platform_init` starts `checkappprocess.sh &`, stock's watchdog: every 2 s it checked with `pgrep` that `/release/bin/demo` runs and rebooted if not, a process start or two each time for the life of the Q2. In Vamp the script ends at once (`WATCHDOG_STUB` in `tools/build.py`): `S90play` runs demo and waits for it, so it reboots when demo ends instead ([Rockbox](#rockbox)).
 
 ## Framebuffer
 
 `/dev/fb0` is 320x375 (portrait), 32 bpp, red at bit 16 (BGRA in memory), with two pages: `module_driver/soc_fb.sh` loads `soc_fb.ko` with `layer0_frames=2` and `is_rotated=0`, and the driver makes `yres_virtual` = `yres` x frames. Landscape content is stored turned 90° clockwise, as the stock splash is.
 
 - `display_logo` opens the framebuffer through `libhardware2` (`fb_open`, `fb_enable`), refuses a depth under 18 bpp, writes each pixel as `0xff000000 | R << 16 | G << 8 | B` and pans to page 0 (`fb_pan_display(fd, info, 0)`). It does not scale.
-- demo's AWTK flush thread draws one page while the other is shown and swaps them with `FBIOPAN_DISPLAY`, then `FBIO_WAITFORVSYNC`. Q2 Muse's video player shares the same two pages ([internals.md](internals.md#videos)).
+- demo's AWTK flush thread draws one page while the other is shown and swaps them with `FBIOPAN_DISPLAY`, then `FBIO_WAITFORVSYNC`. Vamp's video player shares the same two pages ([internals.md](internals.md#videos)).
 
 ## Rockbox
 
-Q2 Muse can share the device with [Rockbox](https://github.com/DiamondBond/q2-rockbox/tree/shanlingq2), which runs from the SD card. Rockbox is the initial power-on default when installed: **holding Play/Pause while powering on** starts Q2 Muse for that session instead, and Rockbox's **Boot stock OS** returns to Q2 Muse the same way. A final **System settings → Power → Boot to: Rockbox / Q2 Muse** row appears while `/mnt/mmc/.rockbox/rockbox` is a regular file. Tap or Center toggles the next power-on choice. The choice is saved in `/mnt/data/boot-target` as `rockbox` or `q2pod`, through a synced temporary file and rename. A failed save reports an error and keeps the displayed choice. Missing or invalid preferences default to Rockbox, and missing Rockbox always falls back to Q2 Muse.
+Vamp can share the device with [Rockbox](https://github.com/DiamondBond/q2-rockbox/tree/shanlingq2), which runs from the SD card. Rockbox is the initial power-on default when installed: **holding Play/Pause while powering on** starts Vamp for that session instead, and Rockbox's **Boot stock OS** returns to Vamp the same way. A final **System settings → Power → Boot to: Rockbox / Vamp** row appears while `/mnt/mmc/.rockbox/rockbox` is a regular file. Tap or Center toggles the next power-on choice. The choice is saved in `/mnt/data/boot-target` as `rockbox` or `q2pod`, through a synced temporary file and rename. A failed save reports an error and keeps the displayed choice. Missing or invalid preferences default to Rockbox, and missing Rockbox always falls back to Vamp.
 
 | What       | Where                                                                                      |
 | ---------- | ------------------------------------------------------------------------------------------ |
@@ -38,7 +38,7 @@ Q2 Muse can share the device with [Rockbox](https://github.com/DiamondBond/q2-ro
 | Rockbox    | `/mnt/mmc/.rockbox/rockbox`, run from that folder, its output in `rockbox.log` there       |
 | Started by | `S90play`, in place of `/release/bin/demo &`                                               |
 
-When the saved choice is Rockbox and Play/Pause is not held, `S90play` waits up to 3 s for the card (`/tmp/mmc_add`); the card's driver polls for it, so it can't tell an empty slot from a card still being read. If the card has Rockbox, it runs Rockbox and appends `exit N` to `rockbox.log`; any exit, including 0x51 (81) from **Boot stock OS**, falls through to demo, which starts with its usual name so the watchdog finds it. Install Rockbox by unzipping its `rockbox.zip` to the card's root. A Rockbox that hangs keeps Q2 Muse away: hold Play/Pause at the next power-on, or remove `/.rockbox/rockbox` with a card reader.
+When the saved choice is Rockbox and Play/Pause is not held, `S90play` waits up to 3 s for the card (`/tmp/mmc_add`); the card's driver polls for it, so it can't tell an empty slot from a card still being read. If the card has Rockbox, it runs Rockbox and appends `exit N` to `rockbox.log`; any exit, including 0x51 (81) from **Boot stock OS**, falls through to demo, which starts with its usual name so the watchdog finds it. Install Rockbox by unzipping its `rockbox.zip` to the card's root. A Rockbox that hangs keeps Vamp away: hold Play/Pause at the next power-on, or remove `/.rockbox/rockbox` with a card reader.
 
 Wi-Fi is off while Rockbox runs: Rockbox can't use it, and the radio costs battery. Rockbox only starts through `rockbox()` in the hook, so at power-on and from Home alike it first runs `WIFI_OFF`, `killall -9 wifi_connect.sh udhcpc wpa_supplicant; ifconfig wlan0 down`, which ends where stock's Wi-Fi off does (`networkStop`, `0x5c2058`). `wifi_connect.sh` is there because demo may have just started it. From Home, `S90play` first waits 300 ms: demo is gone, so nothing new can start, and a shell it forked just before dying has time to become a process `WIFI_OFF` kills. A second pass 2 s later catches a slower one, called off if Rockbox has already left, since demo is then starting Wi-Fi again. At a power-on nothing waits, as Wi-Fi has not started and wlan0 is down, so it changes nothing. Stock's `ifconfig wlan0 0.0.0.0` is left out, as BusyBox brings a down interface up to set an address; demo clears the address when it starts.
 
@@ -46,7 +46,7 @@ Nothing is saved for the way back. `wifi_switch` writes `WIFI` to `/mnt/data/con
 
 ### Rockbox from Home
 
-**Settings → General → Rockbox**, after General's own rows and before Restart and Shut Down, is shown only while the Rockbox binary is a regular file (`rockbox_available`; `ringnav_systemset`, `patch/nav/settings_display.c`). Activation checks the file again in case the card was removed after the row appeared. This handover always launches Rockbox regardless of the saved boot choice (Battery's **Boot to** row). It is the way to Rockbox with Bluetooth: shut Rockbox down (Q2 Muse starts), connect the headphones in Q2 Muse, then pick **Rockbox** in General, and Rockbox plays through them.
+**Settings → General → Rockbox**, after General's own rows and before Restart and Shut Down, is shown only while the Rockbox binary is a regular file (`rockbox_available`; `ringnav_systemset`, `patch/nav/settings_display.c`). Activation checks the file again in case the card was removed after the row appeared. This handover always launches Rockbox regardless of the saved boot choice (Battery's **Boot to** row). It is the way to Rockbox with Bluetooth: shut Rockbox down (Vamp starts), connect the headphones in Vamp, then pick **Rockbox** in General, and Rockbox plays through them.
 
 demo cannot start Rockbox itself, as Rockbox takes the screen, the keys and ALSA, so it hands over to `S90play` (`rockbox_open`, `patch/nav/playback_power.c`):
 
@@ -58,7 +58,7 @@ demo cannot start Rockbox itself, as Rockbox takes the screen, the keys and ALSA
 
 demo runs with its stderr appended to `/tmp/q2-demo.err`, in RAM. Stock starts `rtk_hciattach`, `wifi_connect.sh`, `wpa_supplicant` and `udhcpc` from demo with `system()`, so they inherit the descriptor, and the reasons they give for failing (`rtk_hciattach`'s sync and firmware errors, for one) land there instead of on the serial console nobody reads. A loop in the hook rolls the file once a minute if it has grown past 256 KB: a copy to `/tmp/q2-demo.err.1` (the one before goes), then the file emptied (`O_APPEND` keeps demo writing at its end, as the dev log's does). `q2guard` reads it as it grows into the [unified log](internals.md#unified-log) on the card, across the roll; the crash log takes the last 60 lines of `.1` and the file together as `== stderr`, and an empty section means it said nothing. stdout stays on the console as stock's: a file would block-buffer it, and how much of it there is has not been measured. `--dev` builds take both to `/tmp/q2-demo.log` instead ([remote.md](remote.md#log)).
 
-Bluetooth survives the hand-over: demo starts `rtk_hciattach`, `bluetoothd` and `bluealsa` with `system("... &")`, so none is demo's child and the headphones stay connected. Wi-Fi goes off ([Rockbox](#rockbox)), but `8733bs` stays loaded: it also holds Bluetooth's power line (`gpio_bt_dis_n`, `module_driver/rtl8733bs.sh`). Rockbox opens bluez-alsa's `bluealsa` PCM (the most recently connected device, through `plug` for its rate and format) whenever it opens, and the DAC otherwise ([q2-rockbox](https://github.com/DiamondBond/q2-rockbox), `shanlingq2_codec.c`). bluealsa is Q2 Muse's, so AirPods keep its 48 kHz AAC fix ([internals.md](internals.md#bluetooth-aac)). When Rockbox exits, demo starts afresh and sets Bluetooth up again. Rockbox's volume is pcm-alsa's software mixer alone, so before the hand-over `rockbox_open` sets the headset's AVRCP absolute volume to the Maximum volume limit (`btctl_transport_set_volume`); left at the Q2's volume it would cap Rockbox's. demo syncs the headset back to the Q2's volume once it starts again.
+Bluetooth survives the hand-over: demo starts `rtk_hciattach`, `bluetoothd` and `bluealsa` with `system("... &")`, so none is demo's child and the headphones stay connected. Wi-Fi goes off ([Rockbox](#rockbox)), but `8733bs` stays loaded: it also holds Bluetooth's power line (`gpio_bt_dis_n`, `module_driver/rtl8733bs.sh`). Rockbox opens bluez-alsa's `bluealsa` PCM (the most recently connected device, through `plug` for its rate and format) whenever it opens, and the DAC otherwise ([q2-rockbox](https://github.com/DiamondBond/q2-rockbox), `shanlingq2_codec.c`). bluealsa is Vamp's, so AirPods keep its 48 kHz AAC fix ([internals.md](internals.md#bluetooth-aac)). When Rockbox exits, demo starts afresh and sets Bluetooth up again. Rockbox's volume is pcm-alsa's software mixer alone, so before the hand-over `rockbox_open` sets the headset's AVRCP absolute volume to the Maximum volume limit (`btctl_transport_set_volume`); left at the Q2's volume it would cap Rockbox's. demo syncs the headset back to the Q2's volume once it starts again.
 
 ## Boot animation
 
@@ -92,13 +92,13 @@ python3 tools/splash.py /tmp/q2-frames assets/boot-anim.q2a
 
 ### From the card
 
-Put your logo on the SD card as `/Q2Muse/boot/boot-logo.jpg`. While Q2 Muse is running, it checks the file on each card mount (including startup and leaving USB storage mode) and copies it to `/mnt/data/boot-logo.jpg`, through a synced temporary file and rename; the splash is drawn before the card is read, so the new logo shows from the next power-on after synchronization. Booting directly into Rockbox does not import a new card logo; start Q2 Muse once first.
+Put your logo on the SD card as `/Q2Muse/boot/boot-logo.jpg`. While Vamp is running, it checks the file on each card mount (including startup and leaving USB storage mode) and copies it to `/mnt/data/boot-logo.jpg`, through a synced temporary file and rename; the splash is drawn before the card is read, so the new logo shows from the next power-on after synchronization. Booting directly into Rockbox does not import a new card logo; start Vamp once first.
 
-- **Size: 320x375, stored turned 90° clockwise as the stock splash is, or upright at 375x320**, which Q2 Muse turns itself with the Q2's own `ffmpeg`.
+- **Size: 320x375, stored turned 90° clockwise as the stock splash is, or upright at 375x320**, which Vamp turns itself with the Q2's own `ffmpeg`.
 - **Format: 8-bit, three-component baseline JPEG, at most 512 KB** ([Making a logo that works](#making-a-logo-that-works)).
 - A file that doesn't qualify shows "Boot logo must be a 320x375 JPEG", and one that can't be saved "Could not save boot logo"; either way the current logo stays. `logo_poll` clears the failure before its toast: the toast's dialog runs the UI loop, which polls again, so a failure still set would toast inside each toast until the watchdog restarted the Q2, at every boot.
 - A refused file is reported once, not at each power-on or mount. A changed file, or a good logo or none in between, is reported again. To see it again, remove the file for one mount or save it again.
-- Removing the file from the card deletes `/mnt/data/boot-logo.jpg` at the next mount while Q2 Muse is running; the following power-on shows the built-in splash.
+- Removing the file from the card deletes `/mnt/data/boot-logo.jpg` at the next mount while Vamp is running; the following power-on shows the built-in splash.
 
 ### In a build
 

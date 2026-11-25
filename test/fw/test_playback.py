@@ -2543,7 +2543,7 @@ def test_boot_restores_with_its_mode_unsaved(fw, player):
 
 @pytest.mark.parametrize('saved, written', [(b'1', [(0, b'SYSSET', b'SCREENSAVER')]), (b'0', []), (None, [])])
 def test_boot_saves_a_lock_screen_saved_on_off_once(fw, player, saved, written):
-    """docs/internals.md#screen-off-and-wake: SYSSET SCREENSAVER 1, from stock or an earlier Q2 Muse, is saved 0 before
+    """docs/internals.md#screen-off-and-wake: SYSSET SCREENSAVER 1, from stock or an earlier Vamp, is saved 0 before
     config_init reads it; 0 or no key writes nothing."""
     def config(path, section, key, out, default, *_):
         value = saved if (C.string_at(section), C.string_at(key)) == (b'SYSSET', b'SCREENSAVER') and saved else C.string_at(default)

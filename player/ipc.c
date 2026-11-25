@@ -203,14 +203,14 @@ static void command(const char *name, const char *arg) {
     } else if (!strcmp(name, "mcl-playspeed")) {
         c->speed = atoi(arg);
     } else if (!strcmp(name, "mcl-scan")) {
-        /* Q2 Muse's own: the payload's hold-to-scan (patch/seek.c), sent only while SCAN_FILE says this player plays */
+        /* Vamp's own: the payload's hold-to-scan (patch/seek.c), sent only while SCAN_FILE says this player plays */
         c->scan = atoi(arg), wake = 1;
     } else if (!strcmp(name, "mcl-setexplayinfo")) {
         if ((unsigned)atoi(arg) < 3) c->explay = atoi(arg);
     } else if (!strcmp(name, "mcl-mqadecodemode")) {
         c->mqa = atoi(arg);
     } else if (!strcmp(name, "mcl-seteq")) {
-        /* stock's ten gains and flag; Q2 Muse's payload sends it after each change to the EQ state on disk
+        /* stock's ten gains and flag; Vamp's payload sends it after each change to the EQ state on disk
          * (patch/peq_ui.c peq_stock_eq), which is what plays (docs/player-plan.md#deviations) */
         const char *p = arg;
         for (int i = 0; i < 10 && p; i++, p = strchr(p, '|') ? strchr(p, '|') + 1 : NULL) c->eq[i] = strtof(p, NULL);

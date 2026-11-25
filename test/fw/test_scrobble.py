@@ -9,7 +9,7 @@ import urllib.parse
 import pytest
 
 LOG, INI, CA = '/mnt/mmc/.scrobbler.log', '/mnt/mmc/.scrobble.ini', '/etc/scrobble-ca.pem'
-HEADER = b'#AUDIOSCROBBLER/1.1\n#TZ/UTC\n#CLIENT/Q2 Muse\n'
+HEADER = b'#AUDIOSCROBBLER/1.1\n#TZ/UTC\n#CLIENT/Vamp\n'
 LB_URL, FM_URL = 'https://api.listenbrainz.org/1/submit-listens', 'https://ws.audioscrobbler.com/2.0/'
 BODY_MAX = 384 << 10
 ACCOUNT = {('LISTENBRAINZ', 'TOKEN'): 'tok', ('LASTFM', 'USER'): 'u', ('LASTFM', 'PASSWORD'): 'p&w',

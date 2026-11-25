@@ -1,4 +1,4 @@
-// coda-rc: Q2 Muse's own remote-control protocol, version 1.
+// coda-rc: Vamp's own remote-control protocol, version 1.
 //
 // The wire format, transports, pairing and error handling are in docs/remote-protocol.md; this file is
 // the message set. Every frame's payload is one of these messages in protobuf's binary encoding, chosen by
@@ -88,8 +88,8 @@ enum Capability {
   CAP_RECENT = 4096;     // the library's "recent" node: the 100 songs added last, newest first
   CAP_BUFFERING = 8192;  // NowPlaying.buffering and its bytes: a server song loading
   CAP_RADIO = 16384;     // StartRadio, and NowPlaying.radio
-  CAP_NOTICE = 32768;    // NowPlaying.notice and notice_id: the Q2 Muse's toasts
-  CAP_REMOTE = 65536;    // GetRemote: how to reach this Q2 Muse from another network
+  CAP_NOTICE = 32768;    // NowPlaying.notice and notice_id: the Vamp's toasts
+  CAP_REMOTE = 65536;    // GetRemote: how to reach this Vamp from another network
   CAP_IROH_ALLOW = 131072;  // RegisterRemote: across networks only paired phones' iroh keys are let in
 }
 
@@ -191,7 +191,7 @@ message NowPlaying {
   uint32 total_bytes = 15;     // the whole song, 0 unknown
   uint32 buffered_ms = 16;     // buffered_bytes as a share of the song's length, 0 unknown
   bool radio = 17;       // CAP_RADIO: a radio plays (the Q2's blue Radio pill): it picks the order and adds songs
-  // CAP_NOTICE: the toast the Q2 Muse showed last ("Radio isn't available for this song"), for its 4 s; empty
+  // CAP_NOTICE: the toast the Vamp showed last ("Radio isn't available for this song"), for its 4 s; empty
   // otherwise. notice_id is new for each toast, so the same words twice are two notices.
   string notice = 18;
   uint32 notice_id = 19;
@@ -444,7 +444,7 @@ message Cover {
   uint32 height = 7;
 }
 
-// type 0x60, CAP_REMOTE. How a paired phone reaches this Q2 Muse from another network: its q2-iroh sidecar,
+// type 0x60, CAP_REMOTE. How a paired phone reaches this Vamp from another network: its q2-iroh sidecar,
 // an iroh endpoint that carries each QUIC stream to this port's frame stream
 // (docs/remote.md#car-remote-across-networks). Sealed, like every request after Auth, so only a paired phone
 // learns it. UNAVAILABLE while the sidecar is not running (Car Remote just turned on, no Wi-Fi link, or no q2-iroh).

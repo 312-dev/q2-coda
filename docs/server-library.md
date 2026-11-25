@@ -183,7 +183,7 @@ playlists.
 
 A server playlist changed on the Q2 (OLED's Add Songs, Add to Playlist…, Remove, Rename, Delete;
 docs/oled-design.md#playlists) goes back to the server through its app, when the app declares the
-caps word `playlists` (Q2 Muse writes it beside `catalogue`). The firmware appends a line to
+caps word `playlists` (Vamp writes it beside `catalogue`). The firmware appends a line to
 `/mnt/mmc/.<id>/playlists.out` for each change, in the card-app channel's escapes, as it appends
 to `ratings.out` (`catalogue_playlist_sync`, `patch/catalogue.c`):
 

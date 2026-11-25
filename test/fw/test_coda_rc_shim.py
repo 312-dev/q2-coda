@@ -564,7 +564,7 @@ def test_jump_plays_a_queue_entry_if_it_is_still_that_song(fw, ui, mcl, recs):
 
 
 def test_modes_follow_now_playings_buttons_both_ways(fw, ui, mcl, recs):
-    """Shuffle and repeat set on the Q2 Muse's Now Playing (np_bar.c: stock's MCL_MODE and [IPOD] NPSHUFONE/NPREPOFF)
+    """Shuffle and repeat set on the Vamp's Now Playing (np_bar.c: stock's MCL_MODE and [IPOD] NPSHUFONE/NPREPOFF)
     never reached the car, and the car's SetMode never moved Now Playing's buttons (2026-11-16 14:38): the shim read
     and set only playback.c's extended modes, which play only while the hold menu's shuffle is on. Outside it,
     both go through Now Playing's own pair."""
@@ -657,7 +657,7 @@ def test_a_queued_stream_download_carries_its_path_title_and_artist(fw, ui, mcl,
 
 
 def test_a_toast_goes_to_the_car_for_four_seconds(fw, ui, mcl, recs):
-    """The Q2 Muse toasted "Radio isn't available for this song" and the car, which draws no toast, showed nothing
+    """The Vamp toasted "Radio isn't available for this song" and the car, which draws no toast, showed nothing
     (2026-11-18 00:28). Every toast (library_pages.c toast) is Now Playing's note for CR_NOTE_MS, counted, so the
     daemon sends it as NowPlaying.notice; none is kept while Car Remote is off."""
     q2 = Q2(fw, ui, recs)

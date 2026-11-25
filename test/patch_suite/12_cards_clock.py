@@ -1080,7 +1080,7 @@ m=SpotMachine({}); button=stream_page(m)
 icon,label=m.nodes[button]['children'][:2]
 assert m.nodes[icon]['image']=='stream_spotify' and m.nodes[label]['text']=='Spotify' and not m.nodes[button].get('name')
 page=spot_open(m,button); info,msg=m.nodes[page]['children']
-assert not m.nodes[info]['visible'] and m.nodes[msg]['visible'] and texts(msg)==["Spotify isn't on the card",'See the Q2 Muse guide to add it']
+assert not m.nodes[info]['visible'] and m.nodes[msg]['visible'] and texts(msg)==["Spotify isn't on the card",'See the Vamp guide to add it']
 m.poll(); assert not m.systems; m.close(); passed()
 # With it, the first open starts it once (its launcher backgrounds itself); with no state yet, or no
 # Connect session, the page waits for a confirmed authentication response.

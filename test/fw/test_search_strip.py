@@ -1475,7 +1475,7 @@ def test_a_named_row_s_text_is_a_cell_in_the_row_the_wheel_was_on_with_its_note_
     """Bluetooth's Name: the row's own place on the page under, an accent-lined box, the label at its left in Text
     Secondary, the name right-aligned with its cursor at its end, and who sees it 24 px under the row."""
     under_page(fw, ui, st)
-    s = text_on_strip(fw, ui, b'Q2 Muse', b'Name', b'Phones and cars see this name')
+    s = text_on_strip(fw, ui, b'Vamp', b'Name', b'Phones and cars see this name')
     y = 58 + 32 - sheet_y(ui, s)
     assert (s.ss.form, s.ss.row_y, s.ss.row_h) == (2, y, 32)
     c = clipped(fw, s)
@@ -1483,8 +1483,8 @@ def test_a_named_row_s_text_is_a_cell_in_the_row_the_wheel_was_on_with_its_note_
     assert boxes[:2] == [(16, y, 343, 32), (18, y + 2, 339, 28)]  # the accent line, then the box in it
     texts = {t: r for t, r, _ in c.texts}
     assert texts['Name'][0] == 24
-    assert texts['Q2 Muse'][0] == 347 - 73  # right-aligned: 70 px of text and the cursor's 3
-    assert cursor(c) == 347 - 73 + 70 + 1  # after the text's last character
+    assert texts['Vamp'][0] == 347 - 43  # right-aligned: 40 px of text and the cursor's 3
+    assert cursor(c) == 347 - 43 + 40 + 1  # after the text's last character
     assert texts['Phones and cars see this name'][1] + 16 == y + 32 + 24  # centred 24 px under the row
     assert not [t for t in texts if t.startswith('Press ')]
 

@@ -174,7 +174,7 @@ static int local_start(void *r, int sec, const char *app) {
         tk_snprintf(msg, sizeof msg, "Update %s to use Radio", app);
         toast(msg);
     } else if (!got)
-        toast("No similar songs on this Q2 Muse");
+        toast("No similar songs on this Vamp");
     return got != 0;
 }
 

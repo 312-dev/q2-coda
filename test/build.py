@@ -100,7 +100,7 @@ def boot_check():
             subprocess.run(['sh', '-c', script], check=True, env=dict(os.environ, PATH=f'{r}/bin:' + os.environ['PATH']))
             return (r/'ran').read_text().split(), target.exists() and target.read_text().strip()
         (r/'proc/mounts').write_text('')
-        # the first boot over a config.ini from before the q2-defaults mark (stock's, or an earlier build's) puts Q2 Muse's
+        # the first boot over a config.ini from before the q2-defaults mark (stock's, or an earlier build's) puts Vamp's
         # defaults in its place, before demo; the saved Wi-Fi stays; every later boot keeps the user's settings
         ours, config, wifi, mark = r/'release/assets/default/raw/config.ini', r/'mnt/data/config.ini', r/'mnt/data/wpa_supplicant.conf', r/'mnt/data/q2-defaults'
         ours.parent.mkdir(parents=True)
@@ -112,11 +112,11 @@ def boot_check():
         config.write_text('[PLAYSET]\nCOVERMODE=1\n')  # the user's own choice since
         assert boot(False, False) == (['demo'], False) and config.read_text() == '[PLAYSET]\nCOVERMODE=1\n'
         rockbox = [str(rb.parent), 'demo']
-        assert boot(False, False) == (['demo'], False)          # no Rockbox on the card: Q2 Muse
-        assert boot(False, True, 1) == (rockbox, False)         # Rockbox by default; a crash starts Q2 Muse
+        assert boot(False, False) == (['demo'], False)          # no Rockbox on the card: Vamp
+        assert boot(False, True, 1) == (rockbox, False)         # Rockbox by default; a crash starts Vamp
         assert (r/'mnt/mmc/.rockbox/rockbox.log').read_text() == 'exit 1\n'
-        assert boot(False, True) == (rockbox, False)            # Boot stock OS (0x51): Q2 Muse starts, nothing saved
-        assert boot(True, True, 1) == (['demo'], False)         # Play/Pause held: Q2 Muse, this session
+        assert boot(False, True) == (rockbox, False)            # Boot stock OS (0x51): Vamp starts, nothing saved
+        assert boot(True, True, 1) == (['demo'], False)         # Play/Pause held: Vamp, this session
         assert boot(False, True, 1) == (rockbox, False)         # the next power-on is Rockbox again
         target.write_text('stock\n')                            # a stale V8.4 choice is ignored
         assert boot(False, True, 1) == (rockbox, 'stock')
@@ -130,10 +130,10 @@ def boot_check():
             assert boot(False, False) == (['demo'], value.strip())
             assert boot(True, True, 81, 1) == (['demo', *rockbox], value.strip())
         target.unlink()
-        # Home's Rockbox row: Rockbox, then Q2 Muse again, as often as it is taken; the flag is gone after
+        # Home's Rockbox row: Rockbox, then Vamp again, as often as it is taken; the flag is gone after
         assert boot(True, True, 81, 1) == (['demo', *rockbox], False)
         assert boot(False, True, 81, 2) == (rockbox * 3, False) and not pathlib.Path(flag).exists()
-        assert boot(True, False, 81, 1) == (['demo', 'demo'], False)  # no Rockbox on the card: Q2 Muse again
+        assert boot(True, False, 81, 1) == (['demo', 'demo'], False)  # no Rockbox on the card: Vamp again
         # Wi-Fi goes off before every start of Rockbox and at no other time; demo follows Rockbox whatever its status
         def order(*args): boot(*args); return (r/'order').read_text().split()
         session = ['gpio', 'wifi', 'rockbox', 'demo']  # charging is allowed before Rockbox starts
@@ -325,7 +325,7 @@ def boot_check():
         wcopy.write_bytes(b'x' * 262143); wheel.write_text('== wheel: four\n'); boot(True, False, status=0)
         assert wcopy.read_bytes().endswith(b'== wheel: four\n') and not wheel.exists() and not (r/'mnt/data/q2-wheel.log.m').exists()
         for f in (crash, copy, wheel, wcopy): f.unlink(missing_ok=True)
-    print('Dual boot: Rockbox by default, one-session Q2 Muse, stale choice ignored, card fallback, Home Rockbox row and Wi-Fi off before Rockbox passed.')
+    print('Dual boot: Rockbox by default, one-session Vamp, stale choice ignored, card fallback, Home Rockbox row and Wi-Fi off before Rockbox passed.')
 boot_check()
 
 
@@ -668,7 +668,7 @@ def validate_assets(directory):
     assert read('rootfs.squashfs', BT_MAIN) == read('stock.squashfs', BT_MAIN).replace(*BT_DISCOVERABLE).replace(*BT_NAME).replace(*BT_EXPERIMENTAL)
     assert b'\nExperimental = true\n' in read('rootfs.squashfs', BT_MAIN)
     assert b'\nDiscoverableTimeout = 180\n' in read('rootfs.squashfs', BT_MAIN)
-    assert b'\nName = Q2 Muse\n' in read('rootfs.squashfs', BT_MAIN) and b'Shanling' not in read('rootfs.squashfs', BT_MAIN)
+    assert b'\nName = Vamp\n' in read('rootfs.squashfs', BT_MAIN) and b'Shanling' not in read('rootfs.squashfs', BT_MAIN)
     # The boot deletes Baidu Netdisk's saved sign-in.
     assert expected_start.count(b'\n        rm -f /mnt/data/baidu_token.conf\n') == 1
     # bluealsa: AAC capability, AAC's peak and VBR mode, the two DROP jumps, the silence sites, and one appended LOAD payload.
@@ -1051,7 +1051,7 @@ def validate_assets(directory):
             continue
         if short == PLAYING_PAGE:  # OLED's grid (tools/ipod.py np_grid; its boxes are test/unit/test_ipod.py's)
             named = {n[2].get('name'): n for n in walk(root)}
-            # stock names kept, but the two buttons that open its spectrum and VU pages, which Q2 Muse does not offer
+            # stock names kept, but the two buttons that open its spectrum and VU pages, which Vamp does not offer
             assert {n[2].get('name') for n in walk(decode(original))} - set(named) == {'img_spectrum', 'img_vu'}
             # the info page first and hidden: out of the swipe, for ⋯'s About (np_about.c); the play mode's target last
             assert [n[2].get('name') for n in root[3]] == ['view_info', 'view_buttons', 'label_playtime', 'label_playlen', 'label_ipod_remain',

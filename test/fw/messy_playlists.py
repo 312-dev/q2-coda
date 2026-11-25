@@ -3,7 +3,7 @@
 
 cd 1: 20,000 untagged singles, each in its own folder (20,000 albums); cd 2: 5,000 songs of 500 albums
 with 4 KB album tags and 800-byte fileurls holding non-UTF-8 bytes; cd 3: 300 songs, 280 of them
-gone from the card; cd 0 (Q2 Muse's first playlist) and cd 4-100: 300 songs each; and 50 junk rows (cd_num NULL, -1 or 999, fileurl NULL
+gone from the card; cd 0 (Vamp's first playlist) and cd 4-100: 300 songs each; and 50 junk rows (cd_num NULL, -1 or 999, fileurl NULL
 or empty, duplicates)."""
 import random
 import sqlite3

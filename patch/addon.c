@@ -1,6 +1,6 @@
-/* Card apps: programs that run from the card beside Q2 Muse, installed by System
+/* Card apps: programs that run from the card beside Vamp, installed by System
  * settings' Apps from their own GitHub releases (netupdate.c) or unzipped to the card by hand, as
- * Spotify's librespot is. Q2 Muse knows none of them by name: each is a card folder .<id> holding
+ * Spotify's librespot is. Vamp knows none of them by name: each is a card folder .<id> holding
  *   q2app    its manifest, key=value lines: name (its Streaming row's), search (the search box's
  *            hint), qr (1: its row turns it on and shows its QR code once it answers), scrobble
  *            (0: its songs stay out of the scrobble log, addon_scrobbles), stop (0: its page has no
@@ -1332,7 +1332,7 @@ static void queue_poll(app_t *a) {
 }
 
 /* Sleep timers (q2-podcasts' Sleep Timer): an app's /tmp/q2-<id>.sleep holds "until <time>"
- * (seconds since the epoch, at most SLEEP_MAX_S away) or "end" (the track playing now ends). Q2 Muse
+ * (seconds since the epoch, at most SLEEP_MAX_S away) or "end" (the track playing now ends). Vamp
  * keeps the timer itself, so it pauses whatever plays (media_set_playing) once the app has stopped
  * too. A time is kept as the time left on the boot clock (boot_s), which counts Standby and doesn't
  * move when Wi-Fi sets the clock; one the Q2 slept through by more than SLEEP_LATE_S is let go.

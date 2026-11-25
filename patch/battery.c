@@ -14,7 +14,7 @@
  * Within a history the level only falls, from 100 at most to 1 (0 never reads: demo powers off
  * first), so BH_ROWS rows always hold one. ponytail: a charge of BH_REBOUND or less while powered
  * off reads as the same history, its rows below the last one's level again. */
-#define BH_FLASH PEQ_ROOT "/mnt/data/q2-battery" /* before Q2 Muse kept it on the card */
+#define BH_FLASH PEQ_ROOT "/mnt/data/q2-battery" /* before Vamp kept it on the card */
 #define BH_FILE CARD_STORE_DIR "/q2-battery"
 #define BH_MAGIC 0x31484251u /* "QBH1" */
 #define BH_ROWS 100

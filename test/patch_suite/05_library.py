@@ -23,7 +23,7 @@ for index,x,want,listed in ((0,200,200,['/m/0']),(1,200,0,['/m/1']),(2,81,0,['/m
     m=SpecFolderMachine(); assert m.tap(index,x)==(listed,(0x77,want)),(index,x,m.listed,m.seen)
 m=SpecFolderMachine(); assert m.tap(1,200,on_row=False)==([],(0x77,200)); passed()
 # Update Local Music: the stock scanner, nested folders and all, has no song limit: stock's 20,000 went with V1.36, and
-# Q2 Muse's own 65,000 with it. Only the folder listing, paths and database insert are mocked.
+# Vamp's own 65,000 with it. Only the folder listing, paths and database insert are mocked.
 SONGS,STOP,LISTING=0xa50524,0xa50528,0xa50118  # toolsGetMusicNum's count, toolsStopUpdateMusic's flag, the listing deque
 class ScanMachine(Machine):
     def __init__(self,tree,songs,patched=True,stop_at=None):

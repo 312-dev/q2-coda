@@ -816,7 +816,7 @@ m=BrowseMachine(); m.caps=(); m.open(); m.answer(*ME); m.row(1)
 m.answer(*OK,[('playlist','spotify:playlist:a','A','','','')]); m.row(0); m.answer(*OK,[])
 assert m.labels()==['Nothing here']; passed()
 
-# Card apps (patch/addon.c): programs on the card Q2 Muse knows only by their folder, .<id> holding its
+# Card apps (patch/addon.c): programs on the card Vamp knows only by their folder, .<id> holding its
 # manifest q2app, its launcher run and its binary q2-<id>; Streaming lists them after Spotify, by name,
 # and a row's page is the app's list over Q2SPOT/1 on its own socket, each row's kind saying what a
 # press does.

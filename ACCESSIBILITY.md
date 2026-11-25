@@ -1,6 +1,6 @@
 # Accessibility
 
-Q2 Muse runs on the Shanling Q2's small screen and is driven by its wheel and buttons. There is no screen reader or spoken feedback.
+Vamp runs on the Shanling Q2's small screen and is driven by its wheel and buttons. There is no screen reader or spoken feedback.
 
 - **Contrast:** Light Mode switches between light and dark looks, and the accent colour can be changed.
 - **Motion:** Settings > Display > Reduce Motion turns slides, zooms and bounces into short fades or nothing (pages

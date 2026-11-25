@@ -1579,14 +1579,14 @@ static int run(int *sent) {
 }
 static void write_log(int n) {
     FILE *f = fopen(ROOT "/mnt/mmc/.scrobbler.log", "wb");
-    fputs("#AUDIOSCROBBLER/1.1\n#TZ/UTC\n#CLIENT/Q2 Muse\n", f);
+    fputs("#AUDIOSCROBBLER/1.1\n#TZ/UTC\n#CLIENT/Vamp\n", f);
     for (int i = 0; i < n; i++)
         fprintf(f, "Art \"%d\" \\ &=+%%\xc3\xa9\t%s\tTitle %d\t%d\t%d\tL\t%d\t\n", i, i % 10 ? "Alb/um" : "", i, i, 200 + i, 1700000000 + i);
     fputs("Skipped\tA\tT\t\t200\tS\t1700000000\t\njunk\n# a comment\n", f);
     fclose(f);
 }
 #define LOG ROOT "/mnt/mmc/.scrobbler.log"
-#define HEADER "#AUDIOSCROBBLER/1.1\n#TZ/UTC\n#CLIENT/Q2 Muse\n"
+#define HEADER "#AUDIOSCROBBLER/1.1\n#TZ/UTC\n#CLIENT/Vamp\n"
 
 int main(void) {
     int sent = -1;
@@ -2354,7 +2354,7 @@ def shelf_check(tmp, lib):
                                               ('__MACOSX/.rockbox/._wps', b'mac')]),
                  2: zip_of(tmp/'spotify.zip', [('.spotify/run', b'#!/bin/sh'), ('.spotify/librespot', b'ELF'),
                                                ('.spotify/cache/credentials.json', b'theirs'), ('.spotify/.cache-size', b'1M')])}
-    # sources.list's lines into the apps: the id less "q2-", Q2 Muse's own by their repo's name.
+    # sources.list's lines into the apps: the id less "q2-", Vamp's own by their repo's name.
     class App(C.Structure):
         _fields_ = [('name', C.c_char * 32), ('id', C.c_char * 16), ('repo', C.c_char * 80), ('dir', C.c_char * 17),
                     ('bin', C.c_char * 40), ('latest', C.c_char * 32), ('dropped', C.c_char), ('keep', C.c_char_p),

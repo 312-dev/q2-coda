@@ -85,7 +85,7 @@ static int64_t now_ms(void) {
 
 /* demo learns of a song's end only from the newest player-status it reads: a second exit inside one of its UI passes
  * (up to 222 ms) is lost, and with it the move to the next song, as when a preloaded file has no audio and ends as it
- * starts. So an exit goes no sooner than 300 ms after the one before, as in Q2 Muse's player
+ * starts. So an exit goes no sooner than 300 ms after the one before, as in Vamp's player
  * (docs/internals.md#a-bad-file-next). A song of 300 ms or more never waits. */
 enum { EXIT_HOLD_MS = 300 };
 static void send_exit(void) {

@@ -1,4 +1,4 @@
-/* Card-backed records (docs/internals.md#where-q2-muse-writes): files written often enough to wear the
+/* Card-backed records (docs/internals.md#where-vamp-writes): files written often enough to wear the
  * flash live on the card, in CARD_STORE_DIR, and the Q2 works on without a card in the meantime. Only
  * stdio, rename, mkdir and the heap: a separate program can link this file too (q2guard: q2guard_card.c).
  *

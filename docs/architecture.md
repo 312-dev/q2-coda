@@ -4,12 +4,12 @@ How the pieces fit: what a build makes, where the payload lives in stock's `demo
 
 ## What is patched
 
-Q2 Muse ships no program of Shanling's and no source of theirs. `tools/build.py` takes the stock V1.36 ZIP, checks its SHA-256 (`ZIP_SHA` in `tools/build.py`, compared in `build()`), changes these files inside its `rootfs.squashfs` and packs `update.tar` again. The kernel (`xImage`) is byte-identical.
+Vamp ships no program of Shanling's and no source of theirs. `tools/build.py` takes the stock V1.36 ZIP, checks its SHA-256 (`ZIP_SHA` in `tools/build.py`, compared in `build()`), changes these files inside its `rootfs.squashfs` and packs `update.tar` again. The kernel (`xImage`) is byte-identical.
 
 | File on the Q2                                | Change                                                                  | Where                                                          |
 | --------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------- |
 | `release/bin/demo` (the UI)                   | hooks, single words, and the payload mapped at `0xb00000`               | `build()` in `tools/build.py`; `patch_code` in `tools/ipod.py` |
-| `usr/bin/hciplayer` (the player)              | replaced by `q2player`, Q2 Muse's own player (`player/`)                | `tools/player.py`, installed by `build()` in `tools/build.py`  |
+| `usr/bin/hciplayer` (the player)              | replaced by `q2player`, Vamp's own player (`player/`)                | `tools/player.py`, installed by `build()` in `tools/build.py`  |
 | `usr/bin/bluealsa`                            | AAC capability, DROP handling, silence through a skip                   | `patch_bluealsa` in `tools/build.py`                           |
 | `usr/lib/libtag_c.so.2.0.1`                   | M4B covers                                                              | `patch_m4b_cover` in `tools/build.py`                          |
 | UI assets, styles, strings and icons          | rewritten in place from the audit in `patch/ipod.json`                  | `patch_asset` in `tools/ipod.py`; `tools/art.py`               |

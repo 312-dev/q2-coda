@@ -1,5 +1,5 @@
 /* card_store.c: records kept on the card, with a RAM copy while it is away
- * (docs/internals.md#where-q2-muse-writes). The structs are the caller's, zero at start (.scratch or
+ * (docs/internals.md#where-vamp-writes). The structs are the caller's, zero at start (.scratch or
  * static) but for the names and caps. card_mounted() is the caller's: system.c's in demo. */
 #ifndef CARD_STORE_H
 #define CARD_STORE_H

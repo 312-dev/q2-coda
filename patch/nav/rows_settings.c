@@ -716,7 +716,7 @@ static const unsigned char playset_order[] = {
 /* General, iOS's: About first, then device maintenance, Network's receivers and Reset. Stock's
  * Language, Wireless, Display, Power, Wheel Function, In-Vehicle, General and System stay hidden,
  * its page left whole: Settings on Home has Wi-Fi, Bluetooth, Display and Battery's rows itself
- * (home_sets_bind), the wheel is Q2 Muse's (tools/build.py WHEEL_MODE), Battery and Controls have
+ * (home_sets_bind), the wheel is Vamp's (tools/build.py WHEEL_MODE), Battery and Controls have
  * In-Vehicle's, Key tone's and Buttons lock's rows (pod_click, keylock_open), and the rows stock
  * moved to System are here, as they were (ringnav_systemset). */
 #define SYSSET_RESET 12 /* Reset's index as built; power_rows moves it past Shut Down */

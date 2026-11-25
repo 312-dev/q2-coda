@@ -97,7 +97,7 @@ def info(L, text):
 
 
 def me():
-    return Info(alias='Q2 Muse "Gray\'s"'.encode(), model=b'Q2', type=b'headless', fp=b'AB' * 32, port=53317)
+    return Info(alias='Vamp "Gray\'s"'.encode(), model=b'Q2', type=b'headless', fp=b'AB' * 32, port=53317)
 
 
 def test_info_from_the_reference_announcement(L):
@@ -116,7 +116,7 @@ def test_info_json_round_trips_and_is_what_the_app_reads(L):
     for with_port, announce, keys in ((1, 1, {'port', 'protocol', 'announce'}), (0, -1, set()), (1, -1, {'port', 'protocol'})):
         n = L.ls_info_json(out, 512, ctypes.byref(me()), with_port, announce)
         d = json.loads(out.raw[:n])
-        assert d['alias'] == 'Q2 Muse "Gray\'s"' and d['version'] == '2.2' and d['fingerprint'] == 'AB' * 32
+        assert d['alias'] == 'Vamp "Gray\'s"' and d['version'] == '2.2' and d['fingerprint'] == 'AB' * 32
         assert {'port', 'protocol', 'announce'} & set(d) == keys
         if announce == 1:
             assert d['announce'] is True and d['port'] == 53317 and d['protocol'] == 'https'

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Carry Q2 Muse's stock addresses from one stock firmware ZIP to the next; see docs/rebasing.md.
+"""Carry Vamp's stock addresses from one stock firmware ZIP to the next; see docs/rebasing.md.
 
   rebase.py report OLD.zip NEW.zip   what Shanling changed, and which of our addresses sit in it
   rebase.py apply OLD.zip NEW.zip    rewrite the addresses, expected stock words and pins in patch/, tools/, test/ and docs/

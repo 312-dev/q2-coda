@@ -1,5 +1,5 @@
 /* q2boot: exits 0 while Play/Pause is held, else 1. S90play runs it at power-on to switch between
- * Q2 Muse and Rockbox (docs/boot.md#rockbox). The keys are "md-gpio-keys", Play/Pause KEY_DOWN (108).
+ * Vamp and Rockbox (docs/boot.md#rockbox). The keys are "md-gpio-keys", Play/Pause KEY_DOWN (108).
  * No MIPS sysroot: glibc 2.28's declarations, with MIPS o32 ioctl numbers. */
 #define KEY_PLAY 108
 #define EVIOCGNAME32 0x40204506u /* _IOC(_IOC_READ, 'E', 0x06, 32); MIPS reads are 2 << 29 */

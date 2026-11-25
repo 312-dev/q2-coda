@@ -128,7 +128,7 @@ def test_no_phones_is_the_empty_state_with_pair_a_phone_a_row_of_the_one_list(fw
     how-to page."""
     Car(fw, ui, recs)
     page = open_page(fw, ui)
-    assert empty_state(ui, page) == ('', 'No Paired Phones', 'Open Q2 Muse Remote on your phone to pair',  # compact
+    assert empty_state(ui, page) == ('', 'No Paired Phones', 'Open the Vamp app on your phone to pair',  # compact
                                      None)  # its button is the page's row, not the empty state's
     assert len([w for w in ui.subtree(page) if ui.kind[w] == 'scroll_view_create']) == 1  # one list for the wheel
     view = lists(ui, page)[-1]
@@ -299,17 +299,17 @@ BLE = '/tmp/coda-rc.ble'
 IROH, QR = '/tmp/coda-rc.iroh', '/tmp/coda-rc.qr'
 ENDPOINT = '8aace45aa34b357c67fae6d1433685921c74f979a8be842802efc17807939913'
 RELAY = b'relay https://use1-1.relay.n0.iroh.link./\n'
-# What Q2 Muse Remote's one Pair a Q2 Muse screen asks of the phone, beside the QR code and over the code alone
-QR_HOW = ['On your phone, open', 'Q2 Muse Remote', 'Tap Pair a Q2 Muse,', 'then scan this or', 'type the code']
-CODE_HOW = ['On your phone, open Q2 Muse Remote,', 'tap Pair a Q2 Muse and type this code']
+# What the Vamp app's one Pair a Vamp screen asks of the phone, beside the QR code and over the code alone
+QR_HOW = ['On your phone, open', 'the Vamp app', 'Tap Pair a Vamp,', 'then scan this or', 'type the code']
+CODE_HOW = ['On your phone, open the Vamp app,', 'tap Pair a Vamp and type this code']
 NEARBY = 'Bluetooth  Phones nearby can find it'
 SAME_WIFI = ['Wi-Fi  192.168.1.30', 'Phone on the same Wi-Fi']
 WAITING = 'Waiting for a phone…'
 
 
 def howto_texts(fw, ui, howto):
-    """What Pair a Phone paints, in order. None of it names the app's old tabs or a Next button: its Pair a Q2 Muse
-    screen is the one flow, the Q2 Muses it finds by Bluetooth and on the Wi-Fi in one list."""
+    """What Pair a Phone paints, in order. None of it names the app's old tabs or a Next button: its Pair a Vamp
+    screen is the one flow, the Vamps it finds by Bluetooth and on the Wi-Fi in one list."""
     lcd, canvas = C.create_string_buffer(0x200), C.create_string_buffer(0x200)
     C.c_void_p.from_address(C.addressof(canvas) + O['CANVAS_LCD']).value = C.addressof(lcd)
     texts = []
@@ -378,7 +378,7 @@ def test_a_stale_advertising_file_with_bluetooth_off_is_not_believed(fw, ui, mcl
 def test_with_no_link_it_says_to_turn_on_bluetooth_or_join_wi_fi_and_waits_for_nothing(fw, ui, mcl, recs):
     _, howto, _ = open_howto(fw, ui, recs, wifi=False)
     assert howto_texts(fw, ui, howto) == ['1', 'Turn on Bluetooth, or', '2', 'join a Wi-Fi network in',
-                                          'Settings > Wi-Fi', '3', 'Come back here to pair', 'Q2 Muse',
+                                          'Settings > Wi-Fi', '3', 'Come back here to pair', 'Vamp',
                                           'Not reachable yet']
 
 
@@ -408,7 +408,7 @@ def test_before_q2_iroh_has_a_relay_the_qr_code_works_from_the_same_wi_fi_only(f
     """Without a relay iroh cannot cross networks: the QR code reaches the Q2 at its Wi-Fi address alone."""
     q2, howto, encoded = open_qr(fw, ui, recs, relay=False)
     texts = howto_texts(fw, ui, howto)
-    assert texts == ['042 917'] + QR_HOW + ['Phone on the same', 'Wi-Fi as this Q2 Muse', 'Wi-Fi 192.168.1.30',
+    assert texts == ['042 917'] + QR_HOW + ['Phone on the same', 'Wi-Fi as this Vamp', 'Wi-Fi 192.168.1.30',
                                             'Waiting…']
     assert encoded[-1] == f'Q2MUSE:1:042917:{ENDPOINT.upper()}:192.168.1.30:'
 
@@ -471,7 +471,7 @@ def test_without_randomness_there_is_no_code_and_nothing_to_scan(fw, ui, mcl, re
     """The daemon then makes its own code when the phone asks and shows it on the pairing card."""
     q2, howto, encoded = open_qr(fw, ui, recs, random=4294967295)  # rejected every time
     assert QR not in q2.files and encoded == []
-    assert howto_texts(fw, ui, howto) == ['On your phone, open Q2 Muse Remote', 'and tap Pair a Q2 Muse. The code',
+    assert howto_texts(fw, ui, howto) == ['On your phone, open the Vamp app', 'and tap Pair a Vamp. The code',
                                           'shows when your phone asks'] + SAME_WIFI + [WAITING]
 
 

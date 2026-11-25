@@ -426,12 +426,12 @@ static void spot_refresh(void) {
     widget_set_visible(ui.msg, !track, 0);
     if (!track) {
         const char *note = "Loading…", *sub = "Waiting for Spotify";
-        if (!installed) note = "Spotify isn't on the card", sub = "See the Q2 Muse guide to add it";
+        if (!installed) note = "Spotify isn't on the card", sub = "See the Vamp guide to add it";
         else if (sp.auth < 0) note = "Open Spotify on your phone", sub = "and choose Q2";
         else if (sp.loading == 3) note = "Spotify refused this account", sub = "Its tracks can't play on the Q2";
         else if (sp.loading == 2) note = "Playback didn't start", sub = "Go back and try again";
         else if (sp.loading) sub = "Starting playback";
-        else if (sp.old) note = "Update Spotify on the card", sub = "See the Q2 Muse guide";
+        else if (sp.old) note = "Update Spotify on the card", sub = "See the Vamp guide";
         else if (sp.auth > 0) note = "Nothing playing", sub = "Choose music in Spotify";
         widget_set_text_utf8(ui.note, note);
         widget_set_text_utf8(ui.sub, sub);

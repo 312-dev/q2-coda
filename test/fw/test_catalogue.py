@@ -1373,7 +1373,7 @@ def test_now_playing_shows_a_pressed_server_song_until_the_player_parses_one(rig
 
 def test_the_car_remote_names_a_pressed_server_song_at_the_press_not_once_it_plays(rig, fw, recs):
     """The device and the car, 2026-11-18 00:24: Shuffle Songs from the car pressed a server song still to download;
-    the Q2 Muse's Now Playing named it at once (catalogue_np_now) but the car's NowPlaying (coda_rc_shim.c's
+    the Vamp's Now Playing named it at once (catalogue_np_now) but the car's NowPlaying (coda_rc_shim.c's
     /tmp/coda-rc.now) kept the queue's song until the player started it, 2 to 3 s later, after its buffering. The
     shim writes the pressed song from the press: its id, title, artist, album, path (the daemon's art id) and its
     server length, at 0, unrated while it is not the player's; then the player's song again."""

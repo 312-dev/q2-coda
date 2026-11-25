@@ -20,7 +20,7 @@ def flag(fw):
 # ---- the switch held on ----
 
 def test_the_switch_is_held_on_whatever_config_ini_says(fw):
-    """config.ini's WITHOUTPHONE=0 (every Q2 until now) read by stock's config_init: Q2 Muse sets it on after."""
+    """config.ini's WITHOUTPHONE=0 (every Q2 until now) read by stock's config_init: Vamp sets it on after."""
     f = flag(fw)
     f.value = 0
     fw.mock('stock_usb_config_trampoline', lambda *_: (setattr(f, 'value', 0), 0)[1])
@@ -75,7 +75,7 @@ def test_the_cable_out_ends_the_car_s_output(fw):
     assert valid(fw, 0) == 0
 
 
-# ---- the starts of Q2 Muse's own players ----
+# ---- the starts of Vamp's own players ----
 
 def forbid(fw, forbidden):
     asked = []

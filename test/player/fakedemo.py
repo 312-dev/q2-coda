@@ -169,7 +169,7 @@ def scenarios(m):
            for n, e in PAIRS.items()},
         # the DSP (docs/player-plan.md, phase 3). put() steps write the files the payload writes: the EQ state in
         # /mnt/data, the fade's length in /tmp, under the session's directories (the player's /mnt/data and /tmp).
-        # Each sends the mcl-seteq that puts Q2 Muse's filter in hciplayer's chain: demo's at boot with the EQ on,
+        # Each sends the mcl-seteq that puts Vamp's filter in hciplayer's chain: demo's at boot with the EQ on,
         # or patch/crossfade.c's peq_chain while a fade is set.
         # Crossfade: a 2 s fade asked before the first song, the second preloaded as Gapless would
         'xfade': boot + [(0.2, put('tmp/q2xfade', (2000).to_bytes(4, 'little'))), (0.3, SETEQ), (1.0, song('set-songurl', a1, flag=1)),
@@ -674,7 +674,7 @@ def launch_host(player, music, speed=1, env=None):
         (s.out / 'pcm').mkdir(exist_ok=True)
         for f in (s.out / 'pcm').glob('*'): f.unlink()
         shutil.rmtree(s.out / 'mnt/data', ignore_errors=True); (s.out / 'mnt/data').mkdir(parents=True)
-        # the CA bundle q2player checks HTTPS against (Q2 Muse's player's, docs/internals.md#stock-https): the test CA's
+        # the CA bundle q2player checks HTTPS against (Vamp's player's, docs/internals.md#stock-https): the test CA's
         (s.out / 'etc/ssl/certs').mkdir(parents=True, exist_ok=True)
         shutil.copy(s.ca, s.out / 'etc/ssl/certs/ca-certificates.crt')
         e = dict(os.environ, Q2PLAYER_SOCK=str(s.tmp / 'sock_play'), Q2PLAYER_PUSH=str(s.tmp / 'q2player.push'), Q2PLAYER_PCM=str(s.out / 'pcm'), Q2PLAYER_SPEED=str(speed), **(env or {}))
