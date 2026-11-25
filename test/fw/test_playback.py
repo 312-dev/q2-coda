@@ -3249,3 +3249,53 @@ def test_a_next_between_shuffle_on_and_its_ui_pass_plays_stocks_draw_then_the_or
     assert player.s.active == 1 and player.s.order[player.s.cursor] == 4
     coming = player.up_next()
     assert player.run(5) == coming[:5]
+
+
+# The owner's log of 2026-11-24 from 16:13:45Z: a resume of 999 songs at boot, then late UI passes of 2 to 5 s about
+# every 5 s for two and a half minutes. A queue past SAVE_LIMIT had its file dropped at every 5 s save, a rewrite on
+# the card on the UI thread (before docs/internals.md#shuffle-order's queue writer). With the card's writes made slow
+# (each queue file opened, renamed or removed on the UI thread costs SLOW_MS), the UI pass watchdog's line names
+# playback_poll as the pass's longest poll if the save is still on the UI thread, and there is no late pass if not.
+SLOW_MS = 2000
+
+
+def test_a_slow_card_under_a_long_queue_leaves_no_late_ui_pass(saved, fw):
+    import threading
+    saved.load([saved.song(b'/m/%04d.flac' % i, b'A', track=i) for i in range(1200)], 5)
+    saved.mcl.type = LIBRARY
+    clock, lines, ui = [100000], [], threading.main_thread()
+    fw.mock('time_now_ms', lambda *_: clock[0])
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+
+    def slow(real):
+        def call(path, *rest):
+            if threading.current_thread() is ui and b'ringnav-queue' in C.string_at(path):
+                clock[0] += SLOW_MS  # the card's write, on the UI thread
+            return real(path, *rest)
+        return call
+    fw.mock('fw_fopen', slow(saved.disk.fopen))
+    fw.mock('fw_rename', slow(saved.disk.rename))
+    fw.mock('fw_unlink', slow(lambda path, *_: saved.disk.files.pop(C.string_at(path).decode(), None) and 0))
+    fw.mock('fw_write', lambda fd, data, n, *_: fd == 2 and lines.append(C.string_at(data, n).decode()) or n)
+    threads = []  # a thread the payload starts runs on a thread of its own, as on the Q2
+
+    def create(out, attr, run, arg, *_):
+        C.c_ulong.from_address(out).value = 77
+        t = threading.Thread(target=C.CFUNCTYPE(C.c_void_p, C.c_void_p)(run), args=(arg,))
+        threads.append(t)
+        t.start()
+        return 0
+    fw.mock('fw_pthread_create', create)
+    enter, polled, woke = (fw.fn(n, None) for n in ('ui_watch_enter', 'ui_watch_polled', 'ui_watch_woke'))
+    mark, poll = fw.fn('ui_watch_poll', None, C.c_char_p), fw.fn('playback_poll', None)
+    for _ in range(6):  # ringnav_sleep's pass with playback_poll among its polls, 5 s apart
+        clock[0] += 5000
+        woke()
+        enter()
+        mark(b'playback_poll')
+        poll()
+        polled()
+        for t in threads:
+            t.join(5)
+    late = [l for l in lines if 'ui pass' in l]
+    assert late == [], late

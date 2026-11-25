@@ -2,7 +2,10 @@
 the file right before stock's own write, here a model of it that does what V1.36's did in the emulator."""
 import ctypes as C
 
+import pytest
+
 from conftest import Files
+from test_nav_library_pages import scratch, st  # noqa: F401  navigation.c's state by field
 
 INI = '/mnt/data/config.ini'
 # The config.ini a reset copies in, cut short: stock's ends on this line with no newline.
@@ -165,3 +168,93 @@ def test_a_read_through_config_value_sees_the_held_value(fw):
         files[INI], C.string_at(s), C.string_at(k), b'%d' % C.c_int(v).value)) or 0)
     q2.step(55)
     assert fw.fn('config_value', C.c_int, C.c_char_p, C.c_char_p, C.c_int, C.c_int)(b'PLAYSET', b'VOLUME', 101, 0) == 55
+
+
+# A Shuffle or Repeat tap on Now Playing (np_bar.c np_mode_set): the mode takes effect at once, and its three keys
+# (stock's PLAYSET PLAYMODE through config_playmode, and np_bar.c's IPOD NPSHUFONE and NPREPOFF) are held by
+# write_int_config's hook, so the tap's own pass rewrites no file. Each is written MODE_SETTLE_MS later, one a pass;
+# a power-off inside that window writes them at once, and a restart reads the mode back. In the emulator each of
+# the two writes in the tap's pass was 60-181 ms of it (docs/inefficiencies.md).
+MODE_SETTLE_MS = 1000
+# Shuffle on with Repeat Off: np_bar.c's pair (Repeat Off, kept as NPREPOFF 1) and stock's mode
+TAPPED = [(1, 'IPOD', 'NPREPOFF'), (1, 'IPOD', 'NPSHUFONE'), (2, 'PLAYSET', 'PLAYMODE')]
+
+
+class Tap(Settle):
+    """np_mode_set over the device's wiring: write_int_config is the hook (ringnav_write_config), stock's
+    config_playmode sets the mode word and writes PLAYMODE through it; the file is config.ini as stock writes it,
+    and every file opened for writing, renamed or synced is counted."""
+    def __init__(self, fw, mcl, st):
+        super().__init__(fw)
+        self.mcl, self.st, self.file, self.touched = mcl, st, b'[PLAYSET]\nPLAYMODE=0\n[IPOD]\nNPSHUFONE=0\n', []
+        hook = fw.fn('ringnav_write_config', C.c_int, C.c_int, C.c_void_p, C.c_void_p)
+        fw.mock('write_int_config', lambda v, s, k, *_: hook(v, s, k))
+        keys = [C.c_char_p(b'PLAYSET'), C.c_char_p(b'PLAYMODE')]
+        fw.mock('config_playmode', lambda m, notify, *_: setattr(mcl, 'mode', m) or hook(
+            m, C.cast(keys[0], C.c_void_p), C.cast(keys[1], C.c_void_p)))
+        fw.mock('stock_write_config_trampoline', self.write_file)
+        fw.mock('toolsReadConfig', lambda path, s, k, out, d, *_: C.memmove(out, (read(
+            self.file, C.string_at(s).decode(), C.string_at(k).decode()) or C.string_at(d).decode()).encode() + b'\0',
+            4) and 0)
+        for name in ('fw_fopen', 'fw_open', 'fw_rename', 'fw_fsync', 'fw_system'):  # sync is a system("sync")
+            if hasattr(fw.lib, 'fw_mock_' + name):
+                fw.mock(name, lambda *a, n=name: self.touched.append(n) and 0)
+        self.set = fw.fn('np_mode_set', None, C.c_int, C.c_int)
+
+    def write_file(self, v, s, k, *_):
+        self.saved.append((C.c_int(v).value, C.string_at(s).decode(), C.string_at(k).decode()))
+        self.file = stock_write(self.file, C.string_at(s), C.string_at(k), b'%d' % C.c_int(v).value)
+        self.touched.append('config.ini')
+        return 0
+
+    def restart(self):
+        """A new demo: Now Playing's pair read back from config.ini, the mode from its PLAYMODE."""
+        self.st('np_modes_read', C.c_ubyte).value = 0
+        self.mcl.mode = int(read(self.file, 'PLAYSET', 'PLAYMODE'))
+
+
+def test_a_shuffle_tap_writes_no_file_in_its_pass(fw, mcl, st):
+    q2 = Tap(fw, mcl, st)
+    mcl.mode = 0
+    q2.set(1, 0)  # Shuffle on, Repeat Off
+    assert mcl.mode == 2 and q2.touched == [] and q2.saved == []  # the mode at once, no file touched
+
+
+def test_a_shuffle_tap_reaches_the_file_a_key_a_pass_and_survives_a_restart(fw, mcl, st):
+    q2 = Tap(fw, mcl, st)
+    mcl.mode = 0
+    q2.set(1, 0)
+    q2.ms += MODE_SETTLE_MS - 1
+    q2.settle(0)
+    assert q2.saved == []
+    q2.ms += 1
+    for n in (1, 2, 3, 3):  # power_poll's passes after it: one rewrite each, then nothing held
+        q2.settle(0)
+        assert len(q2.saved) == n and len(q2.touched) == n
+    assert sorted(q2.saved) == TAPPED
+    q2.restart()
+    assert mcl.mode == 2 and fw.fn('np_mode_shuffle', C.c_int)() == 1
+
+
+@pytest.mark.parametrize('rep, mode', [(2, 1), (1, 3)])
+def test_a_repeat_tap_is_held_the_same_way(fw, mcl, st, rep, mode):
+    q2 = Tap(fw, mcl, st)
+    mcl.mode = 0
+    q2.set(0, rep)  # Repeat One, or Repeat All
+    assert mcl.mode == mode and q2.touched == []
+    q2.ms += MODE_SETTLE_MS
+    for _ in range(3):
+        q2.settle(0)
+    q2.restart()
+    assert mcl.mode == mode and fw.fn('np_mode_repeat', C.c_int)() == rep
+
+
+def test_a_power_off_inside_the_window_still_saves_the_mode(fw, mcl, st):
+    q2 = Tap(fw, mcl, st)
+    mcl.mode = 0
+    q2.set(1, 0)
+    q2.ms += 100
+    fw.fn('ringnav_clean_end', None)()  # power-off, Restart or an update's shutdown, 100 ms after the tap
+    assert sorted(q2.saved) == TAPPED
+    q2.restart()
+    assert mcl.mode == 2 and fw.fn('np_mode_shuffle', C.c_int)() == 1

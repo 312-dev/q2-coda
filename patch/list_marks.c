@@ -107,7 +107,7 @@ void spinner_painted(void *w, const rect_t *r) {
  * an ellipsis past LOAD_CAP_MAX; the same in every theme. It shows only once a wait has lasted
  * LOAD_SHOW_MS, so a quick action never flashes it. load_draw paints it on canvas with the screen's
  * (ox, oy) at the canvas's origin: a window's own canvas (0, 0: every page takes the whole screen,
- * docs/oled-design.md#full-bleed), or load_sync_begin's off-screen one (f -1: no dots, which its
+ * docs/oled-design.md#full-bleed), or sync_begin's off-screen one (f -1: no dots, which its
  * painter puts on). */
 #define LOAD_SPIN_R 12
 #define LOAD_DOT 7
@@ -205,7 +205,11 @@ static struct {
     int (*step)(void);
     const char *caption;
     unsigned timer;
+    unsigned at;  /* time_now_ms() the wait began */
+    int blocking; /* each step is one call the UI thread cannot leave (load_wait_sync) */
 } lo __attribute__((section(".scratch")));
+static int sync_begin(const char *caption, unsigned delay);
+static void sync_end(void);
 static int lo_gone(void *ctx, void *event);
 static void lo_end(void) {
     if (lo.timer) timer_remove(lo.timer);
@@ -228,7 +232,15 @@ static int lo_gone(void *ctx, void *event) {
 }
 static int lo_tick(const void *unused) {
     (void)unused;
-    if (!lo.step || !lo.step()) return 8; /* RET_REPEAT */
+    if (!lo.step) return 8; /* RET_REPEAT */
+    int done, shown = 0;
+    if (lo.blocking) { /* the overlay on the framebuffer while the step holds the UI thread */
+        unsigned waited = (unsigned)time_now_ms() - lo.at;
+        shown = sync_begin(lo.caption, waited < LOAD_SHOW_MS ? LOAD_SHOW_MS - waited : 0);
+    }
+    done = lo.step();
+    if (shown) sync_end();
+    if (!done) return 8;
     lo.timer = 0;                         /* this timer goes with its RET_REMOVE */
     lo_end();
     return 7; /* RET_REMOVE */
@@ -239,10 +251,18 @@ void load_wait(void *win, const char *caption, int (*step)(void), void (*cancel)
     if (lo.win && win) lo_cancel();
     lo_end();
     if (!win) return;
-    lo.win = win, lo.cancel = cancel, lo.step = step, lo.caption = caption;
+    lo.win = win, lo.cancel = cancel, lo.step = step, lo.caption = caption, lo.blocking = 0;
+    lo.at = (unsigned)time_now_ms();
     widget_on(win, EVT_DESTROY, lo_gone, win);
     widget_invalidate_force(win, 0);
     if (step) lo.timer = timer_add(lo_tick, (void *)0, LOAD_STEP_MS);
+}
+/* The same, each step one call the UI thread cannot leave (a stock library query, the queue's
+ * play): the overlay is drawn on the framebuffer while a step runs (sync_begin), from LOAD_SHOW_MS
+ * after the wait began, and Return between two steps gives the wait up. */
+void load_wait_sync(void *win, const char *caption, int (*step)(void), void (*cancel)(void)) {
+    load_wait(win, caption, step, cancel);
+    lo.blocking = lo.win != 0;
 }
 /* The wait for a page that opens once its content is there (a card app's first, Chapters); the
  * caller ends it. */
@@ -271,22 +291,25 @@ int load_over_input(void *e) {
     return 1;
 }
 
-/* The same wait where the work is one call on the UI thread that it cannot slice, leave or abandon
- * (stock's library query under Shuffle Songs, a Library list's sort under load_localclass_list):
- * load_sync_begin before it, load_sync_end after. No frame is painted while the call runs, so the
+/* The same wait where the work is one call on the UI thread that it cannot slice or leave (a step
+ * of load_wait_sync: Shuffle Songs' library read, the queue's play; load_block: a Library list's
+ * sort under load_localclass_list): sync_begin before it, sync_end after. No frame is painted
+ * while the call runs, so the
  * overlay goes straight onto the shown framebuffer page (/dev/fb0 at its FBIOGET_VSCREENINFO y
  * offset; 320 x 375, 32 bpp, the panel's x the screen's 319 - y and its y the screen's x). The UI
  * thread draws it once, over what the framebuffer shows in LOAD_AREA, through an off-screen canvas
  * with no dots (plate); a thread of its own (fb_painter), which touches only these buffers and the
- * framebuffer, waits LOAD_SHOW_MS and then puts the plate and the frame's dots there every
- * LOAD_TICK_MS until the end, which joins it and puts back what it covered. A call done within
- * LOAD_SHOW_MS never shows it. Nothing cancels the call: no input is read while it runs. */
+ * framebuffer, waits its delay (what is left of the wait's LOAD_SHOW_MS) and then puts the plate
+ * and the frame's dots there every LOAD_TICK_MS until the end, which joins it and puts back what
+ * it covered. A wait done within LOAD_SHOW_MS never shows it. Nothing cancels the call itself: no
+ * input is read while it runs. */
 #define LOAD_TICK_MS 20
 static struct {
     unsigned char *map;
     unsigned len, stride, *row0, *under, *plate, *frame;
     unsigned long thread;
     volatile int stop, drawn;
+    unsigned delay; /* ms before the painter's first frame */
 } fbw __attribute__((section(".scratch")));
 /* The framebuffer's pixel of LOAD_AREA's (x, y), from its top left. */
 static unsigned *fb_px(int x, int y) {
@@ -329,7 +352,7 @@ static void fb_dots(int f) {
 static void *fb_painter(void *unused) {
     for (unsigned ms = 0; !fbw.stop;) {
         usleep(LOAD_TICK_MS * 1000);
-        if ((ms += LOAD_TICK_MS) < LOAD_SHOW_MS || fbw.stop) continue;
+        if ((ms += LOAD_TICK_MS) < fbw.delay || fbw.stop) continue;
         fb_dots((int)(ms / SPIN_FRAME_MS));
         fb_put(fbw.frame);
         fbw.drawn = 1;
@@ -341,9 +364,10 @@ static void fb_free(void) {
     free(fbw.under), free(fbw.plate), free(fbw.frame);
     fbw.map = 0, fbw.under = fbw.plate = fbw.frame = 0;
 }
-/* The overlay with caption readied and its painter started; 0 when it cannot be (no framebuffer,
- * memory or thread, or a wait already on), the call then running with no overlay. */
-int load_sync_begin(const char *caption) {
+/* The overlay with caption readied and its painter started, its first frame delay ms on; 0 when
+ * it cannot be (no framebuffer, memory or thread, or one already on), the call then running with
+ * no overlay. */
+static int sync_begin(const char *caption, unsigned delay) {
     unsigned var[40], fix[17], n = LOAD_AREA_W * LOAD_AREA_H;
     if (fbw.map) return 0;
     int fd = open("/dev/fb0", 2 /* O_RDWR */);
@@ -371,14 +395,14 @@ int load_sync_begin(const char *caption) {
         memcpy(fbw.plate, px, n * 4);
     }
     if (c) canvas_offline_destroy(c);
-    fbw.stop = fbw.drawn = 0;
+    fbw.stop = fbw.drawn = 0, fbw.delay = delay;
     unsigned long t = 0;
     if (!px || pthread_create(&t, 0, fb_painter, 0) || !t) return fb_free(), 0;
     fbw.thread = t;
     return 1;
 }
 /* The call is done: the painter joined and, if it drew, what the overlay covered put back. */
-void load_sync_end(void) {
+static void sync_end(void) {
     if (!fbw.map) return;
     fbw.stop = 1;
     pthread_join(fbw.thread, 0);
@@ -387,9 +411,9 @@ void load_sync_end(void) {
 }
 /* The UI thread waiting for *done, set by work on another thread, under the same overlay. */
 void load_block(volatile int *done, const char *caption) {
-    int shown = load_sync_begin(caption);
+    int shown = sync_begin(caption, LOAD_SHOW_MS);
     while (!*done) usleep(LOAD_TICK_MS * 1000);
-    if (shown) load_sync_end();
+    if (shown) sync_end();
 }
 
 /* ... or, on the selected row while Cover Flow opens, the spinner (coverflow.c coverflow_spinner)

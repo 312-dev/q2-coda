@@ -2338,7 +2338,7 @@ def test_centre_while_loading_sends_nothing_again(fw):
 # the window it was opened from meanwhile (list_marks.c load_over), fed input by ringnav_input (load_over_input).
 class Lo(C.Structure):
     _fields_ = [('win', C.c_void_p), ('cancel', C.c_void_p), ('step', C.c_void_p), ('caption', C.c_char_p),
-                ('timer', C.c_uint)]
+                ('timer', C.c_uint), ('at', C.c_uint), ('blocking', C.c_int)]
 
 
 def first_open(fw):
