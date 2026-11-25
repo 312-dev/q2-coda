@@ -1669,10 +1669,22 @@ static void draw(const void *state, struct eng_surface *s) {
     if (b->paused) sign(b, s);
 }
 
+/* Quick resume (docs/games-engine.md#quick-resume): everything before art_ok is the game; a game
+ * over is none. Restart: a new game at level 1. */
+static int resume(void *state, int op) {
+    struct pstall *b = state;
+    if (op == ENG_RESTART) new_game(b);
+    return b->mode != OVER;
+}
+
 const struct eng_game eng_popstall = { "Pop Stall",
                                        sizeof(struct pstall) + ART_BYTES,
                                        ENG_RAW | ENG_FULL | ENG_OWN_PAUSE,
                                        init,
                                        step,
                                        draw,
-                                       pause };
+                                       pause,
+                                       "popstall",
+                                       "Arcade",
+                                       __builtin_offsetof(struct pstall, art_ok),
+                                       resume };

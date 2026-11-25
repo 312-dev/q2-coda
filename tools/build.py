@@ -333,12 +333,14 @@ RADIOFETCH_SOURCES = ['radiofetch', 'radiofetch_core']
 RADIOFETCH_LIBS = ['lib/libc-2.28.so', 'lib/libm-2.28.so', 'usr/lib/libcurl.so.4.7.0']
 RADIO_DATA = 'usr/share/q2radio'
 RADIO_TABLES = ('stations.bin', 'zcta.bin')
-# The engine games' art (docs/games-engine.md#games), read once when a game opens: each file's path under
-# GAMES_DATA, from its path under assets/
+# The engine games' art (docs/games-engine.md#games), read once when a game opens, and their rows' icons in
+# Games' list: each file's path under GAMES_DATA, from its path under assets/
 GAMES_DATA = 'usr/share/q2games'
 GAMES_ART = {'solitaire.bin': 'games/solitaire.bin', 'popstall/art.bin': 'popstall/art.bin',
              'popstall/Bungee-OFL.txt': 'popstall/Bungee-OFL.txt', 'callerten.bin': 'games/callerten.bin',
-             'callerten-fonts.txt': 'games/callerten-fonts.txt', 'embergarden.bin': 'games/embergarden.bin'}
+             'callerten-fonts.txt': 'games/callerten-fonts.txt', 'embergarden.bin': 'games/embergarden.bin',
+             # made by each game's design folder's src/icon.py (patch/games.c game_row, GAMES_ICONS/SLUG.png)
+             **{f'icons/{n}.png': f'games/icons/{n}.png' for n in ('popstall', 'solitaire', 'sudoku', 'callerten', 'embergarden')}}
 GAMES_DIRS = sorted({f'{GAMES_DATA}/{n.rpartition("/")[0]}' for n in GAMES_ART if '/' in n})
 # Card apps the firmware carries (docs/internals.md#bundled-apps): id -> (version, release zip, its size, its
 # SHA-256, builtin), each the zip its release ships, read from --apps (APPS_DIR). Its .<id>/ files go

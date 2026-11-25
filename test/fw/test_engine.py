@@ -29,11 +29,13 @@ class Surface(C.Structure):
 
 INIT, STEP = C.CFUNCTYPE(None, C.c_void_p, C.c_int), C.CFUNCTYPE(C.c_int, C.c_void_p, C.POINTER(Input))
 DRAW, PAUSE = C.CFUNCTYPE(None, C.c_void_p, C.POINTER(Surface)), C.CFUNCTYPE(None, C.c_void_p)
+RESUME = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_int)
+KEEP, LOAD, RESTART = range(3)  # resume's op
 
 
 class GameDef(C.Structure):
     _fields_ = [('name', C.c_char_p), ('size', C.c_uint), ('flags', C.c_uint), ('init', INIT), ('step', STEP), ('draw', DRAW),
-                ('pause', PAUSE)]
+                ('pause', PAUSE), ('slug', C.c_char_p), ('kind', C.c_char_p), ('keep', C.c_uint), ('resume', RESUME)]
 
 
 class Eng(C.Structure):
@@ -544,8 +546,8 @@ def test_the_demo_pauses_under_games_popup_and_leaves_by_its_menu_or_its_own_qui
     p.key(CENTER)
     assert p.s.paused == 0 and p.e['eng_live']() and p.rects == [None]
     p.key(RETURN, NEXT)
-    assert p.s.paused == 2 and p.s.choice == 1 and [t.lower() for t in texts(paint(p, canvas))[-3:]] == ['paused', 'continue', 'quit']
-    p.key(CENTER)
+    assert p.s.paused == 2 and p.s.choice == 1 and [t.lower() for t in texts(paint(p, canvas))[-4:]] == ['paused', 'continue', 'restart', 'quit']
+    p.key(NEXT, CENTER)
     p.g.show(None)
     assert p.s.screen == 0 and not fw.var('engine__en', C.c_void_p).value
     p.go(DEMO)

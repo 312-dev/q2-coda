@@ -1264,9 +1264,9 @@ takes every key but Power and a held Return, so the music keeps playing untouche
 | Game      | Wheel                                    | Center                                          | Play/Pause            | Previous/Next                                                           | Return                              |
 | --------- | ---------------------------------------- | ----------------------------------------------- | --------------------- | ----------------------------------------------------------------------- | ----------------------------------- |
 | Sudoku    | Moves through the cells; picks the digit | Opens the digit, then writes it                 | New game (asks first) | Up or down a row                                                        | Cancels the digit; back to Games    |
-| Vortex    | Turns the paddle                         | Launches; plays again after a game              | Pauses and resumes    |                                                                         | Pause menu: Continue or Quit        |
+| Vortex    | Turns the paddle                         | Launches; plays again after a game              | Pauses and resumes    |                                                                         | Pause menu: Continue, Restart, Quit |
 | Solitaire | Moves between the piles                  | Draws; picks up, drops; twice sends a card home | New game (asks first) | Up or down a row                                                        | Drops the held cards; back to Games |
-| Snake     | Disabled                                 | Plays again after a crash                       | Pauses and resumes    | Turn left/right; wheel or Previous/Next picks Continue/Quit in the menu | Pause menu: Continue or Quit        |
+| Snake     | Disabled                                 | Plays again after a crash                       | Pauses and resumes    | Turn left/right; wheel or Previous/Next picks in the pause menu         | Pause menu: Continue, Restart, Quit |
 
 ## Review sheets
 

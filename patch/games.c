@@ -747,8 +747,8 @@ static int show(const void *unused) {
     if (from >= ENGINE) eng_close();
     const struct eng_game *game = g->target >= ENGINE ? eng_game(g->target - ENGINE) : 0;
     full_screen(game && game->flags & ENG_FULL);
-    if (game && /* no memory for its state: the list stays */
-        !eng_open(game, g->page, g->sheet, g->h, engine_held, engine_left))
+    int open = game ? eng_open(game, g->page, g->sheet, g->h, engine_held, engine_left) : 0;
+    if (game && !open) /* no memory for its state: the list stays */
         g->target = CHOOSER, full_screen(0);
     g->screen = g->target;
     g->picking = g->confirm = 0;
@@ -764,6 +764,8 @@ static int show(const void *unused) {
         vortex_new(&g->vx), run();
     else if (HAS(SNAKE) && g->screen == SNAKE)
         snake_new(&g->sn), run();
+    else if (open > 1 && !(game->flags & ENG_STILL))
+        hold(HELD); /* a real-time game resumed waits paused (docs/games-engine.md#quick-resume) */
     widget_invalidate_force(g->page, 0);
     return 0;
 }
@@ -818,21 +820,33 @@ static void sudoku_key(unsigned key) {
         to(CHOOSER);
 }
 
+/* A new game of the one open, running: the menu's Restart (an engine game's of the same mode,
+ * docs/games-engine.md#quick-resume), and Centre after Vortex's or Snake's end. */
+static void again(void) {
+    if (g->screen >= ENGINE)
+        eng_restart();
+    else if (HAS(SNAKE) && g->screen == SNAKE)
+        snake_new(&g->sn);
+    else if (HAS(VORTEX))
+        vortex_new(&g->vx);
+    run();
+}
+
 /* Vortex's and Snake's shared keys: Return's Continue/Quit menu, Play/Pause's pause, Centre again
  * after game over. 0 for a key left to the game. */
 static int arcade_key(unsigned key, int over) {
     if (g->paused == MENU) {
-        if (key == KEY_NEXT || key == KEY_PREV)
-            g->choice = !g->choice;
-        else if (key == KEY_CENTER && g->choice)
+        if (key == KEY_NEXT || key == KEY_PREV) /* Continue, Restart, Quit, round */
+            g->choice = (g->choice + (key == KEY_NEXT ? 1 : 2)) % 3;
+        else if (key == KEY_CENTER && g->choice == 2)
             to(CHOOSER);
+        else if (key == KEY_CENTER && g->choice)
+            again();
         else if (key == KEY_CENTER || key == KEY_RETURN || key == KEY_PLAY)
             run();
     } else if (over) {
-        if (HAS(SNAKE) && key == KEY_CENTER && g->screen == SNAKE)
-            snake_new(&g->sn), run();
-        else if (HAS(VORTEX) && key == KEY_CENTER)
-            vortex_new(&g->vx), run();
+        if (key == KEY_CENTER)
+            again();
         else if (key == KEY_RETURN)
             to(CHOOSER);
     } else if (key == KEY_RETURN)
@@ -1023,10 +1037,12 @@ static void hud(void *canvas, const char *name, unsigned v, int x, int y, int ri
 
 #define POP_W 281
 #define POP_ROW 32 /* the title's rows, and a choice's */
-/* The theme's pop-up mid-screen over the dimmed game: a title, then a hint (a) or two choices (a,
- * b), in a dark box, the chosen one on the accent's bar. */
-static void popup(void *canvas, const char *title, const char *a, const char *b, int choice) {
-    int top = POP_ROW + 6, h = b ? top + 2 * POP_ROW + 8 : POP_ROW + 44;
+/* The theme's pop-up mid-screen over the dimmed game: a title, then a hint (a) or two or three
+ * choices (a, b and c), in a dark box, the chosen one on the accent's bar. */
+static void popup(void *canvas, const char *title, const char *a, const char *b, const char *c,
+                  int choice) {
+    const char *row[3] = { a, b, c };
+    int n = c ? 3 : 2, top = POP_ROW + 6, h = b ? top + n * POP_ROW + 8 : POP_ROW + 44;
     int x = (375 - POP_W) / 2, y = (g->h - h) / 2; /* mid-sheet, an ENG_FULL game's whole screen too */
     stock_canvas_set_fill_color(canvas, 0x80000000u); /* black at half, final */
     canvas_fill_rect(canvas, 0, 0, 375, g->h);
@@ -1034,12 +1050,12 @@ static void popup(void *canvas, const char *title, const char *a, const char *b,
     frame_rect(canvas, x, y, POP_W, h, 0x3a3a3a, 12);
     text_at(canvas, title, 187, y + 4, POP_ROW, 20, rgba(0xffffff, 255), MID);
     if (!b) text_at(canvas, a, 187, y + POP_ROW + 2, 30, 16, rgba(0xaaaaaa, 255), MID);
-    for (int k = 0; b && k < 2; ++k) {
+    for (int k = 0; b && k < n; ++k) {
         int ry = y + top + k * POP_ROW, on = k == choice;
         if (on) /* the accent's bar, white on it in either mode */
             round_box(canvas, x + 10, ry + 1, POP_W - 20, POP_ROW - 2, accent_tone(0), 6);
-        text_at(canvas, k ? b : a, 187, ry, POP_ROW, 18,
-                rgba(!on ? 0xaaaaaa : unflipped(0xff), 255), MID);
+        text_at(canvas, row[k], 187, ry, POP_ROW, 18, rgba(!on ? 0xaaaaaa : unflipped(0xff), 255),
+                MID);
     }
 }
 
@@ -1060,11 +1076,11 @@ void popup_env(char *out, unsigned size) {
 /* Vortex's and Snake's: Return's menu, the game over, the pause. */
 static void paused_popup(void *canvas, int over) {
     if (g->paused == MENU)
-        popup(canvas, "Paused", "Continue", "Quit", g->choice);
+        popup(canvas, "Paused", "Continue", "Restart", "Quit", g->choice);
     else if (over)
-        popup(canvas, g->record ? "New best!" : "Game over", "Center: play again", 0, 0);
+        popup(canvas, g->record ? "New best!" : "Game over", "Center: play again", 0, 0, 0);
     else if (g->paused)
-        popup(canvas, "Paused", "Play/Pause: resume", 0, 0);
+        popup(canvas, "Paused", "Play/Pause: resume", 0, 0, 0);
 }
 
 /* Clues on grey, entries plain in the tone, a conflict red and underlined, the cursor framed, and
@@ -1103,9 +1119,9 @@ static void sudoku_paint(void *canvas, unsigned tone) {
     frame_rect(canvas, x0 + s->cur % 9 * cell, y0 + s->cur / 9 * cell, cell, cell,
                    g->picking ? 0xffffff : accent_tone(3), 0);
     if (g->confirm)
-        popup(canvas, "New game?", "Center: yes   Return: no", 0, 0);
+        popup(canvas, "New game?", "Center: yes   Return: no", 0, 0, 0);
     else if (sud_done(s))
-        popup(canvas, "Solved!", "Play/Pause: new game", 0, 0);
+        popup(canvas, "Solved!", "Play/Pause: new game", 0, 0, 0);
 }
 
 static void arc(void *vg, float cx, float cy, int r, int a0, int a1, int width, unsigned color) {
@@ -1227,9 +1243,9 @@ static void solitaire_paint(void *canvas, unsigned tone) {
     }
     ui_ink_raw(0);
     if (g->confirm)
-        popup(canvas, "New game?", "Center: yes   Return: no", 0, 0);
+        popup(canvas, "New game?", "Center: yes   Return: no", 0, 0, 0);
     else if (sol_won(s))
-        popup(canvas, "You win!", "Play/Pause: new game", 0, 0);
+        popup(canvas, "You win!", "Play/Pause: new game", 0, 0, 0);
 }
 
 /* The board dark in a grey frame, the body rounded in the tone, the head brighter, the apple round
@@ -1293,6 +1309,22 @@ static int closed(void *ctx, void *event) {
     return 0;
 }
 
+/* An engine game's row (docs/oled-design.md#two-line-row): its icon (GAMES_ICONS, 40 px at the
+ * text column, 6 px down), its name and kind beside it, the kind's ink from 32 px down the row (5
+ * px over page_row_detail's second line), and the chevron. */
+static void game_row(int k) {
+    const struct eng_game *e = eng_game(k);
+    char url[72];
+    int x = page_x();
+    void *item = page_row_detail_into(g->view, GAMES_BUILTIN + k, e->name, e->kind, pick_game);
+    for (int i = 0; i < 2; ++i) {
+        void *label = widget_get_child(item, i);
+        widget_move_resize(label, x + 48, I(label, W_Y) - 5 * i, 268 - x, I(label, W_H));
+    }
+    tk_snprintf(url, sizeof url, "file://" GAMES_ICONS "/%s.png", e->slug);
+    image_base_set_image(image_create(item, x, 6, 40, 40), url);
+}
+
 /* Home's Games row: the chooser, and for the own games that ship the Sudoku in progress, Vortex's
  * and Snake's best scores and the Solitaire deal read. */
 int games_open(void *ctx, void *event) {
@@ -1313,15 +1345,14 @@ int games_open(void *ctx, void *event) {
     int cards = addon_games(); /* then the card's games (addon.c), by name */
     g->engines = eng_count(); /* then the engine's (engine.c), before the card's */
     g->rows = GAMES_BUILTIN + g->engines + cards;
-    g->view = page_list(page, g->list, 0, "Games", g->rows, 48);
+    g->view = page_list(page, g->list, 0, "Games", g->rows, 64); /* two-line rows */
     g->title = theme()->page_title_h ? (void *)0 : widget_lookup(g->list, PAGE_TITLE, 1);
     for (int k = 0, n = 0; k < (int)(sizeof own / sizeof *own); ++k)
-        if (own[k].on) page_row_into(g->view, n++, own[k].name, pick_game);
-    for (int k = 0; k < g->engines; ++k)
-        page_row_into(g->view, GAMES_BUILTIN + k, eng_game(k)->name, pick_game);
-    for (int k = 0; k < cards; ++k)
-        page_row_into(g->view, GAMES_BUILTIN + g->engines + k, addon_game_name(k),
-                      pick_card_game);
+        if (own[k].on) page_row_detail_into(g->view, n++, own[k].name, "", pick_game);
+    for (int k = 0; k < g->engines; ++k) game_row(k);
+    for (int k = 0; k < cards; ++k) /* its name centred in the row */
+        page_row_detail_into(g->view, GAMES_BUILTIN + g->engines + k, addon_game_name(k), "",
+                             pick_card_game);
     widget_on(g->sheet, EVT_POINTER_DOWN, eng_touch, 0); /* a finger on an engine game */
     widget_on(page, EVT_POINTER_MOVE_BEFORE, eng_touch, 0);
     widget_on(page, EVT_POINTER_UP_BEFORE, eng_touch, 0);

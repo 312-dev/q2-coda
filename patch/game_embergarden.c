@@ -94,10 +94,6 @@ static const struct sky {
 #define SKY_N (int)(sizeof SKY / sizeof *SKY)
 
 struct eg {
-    unsigned art[EG_ART_BYTES / 4];           /* the art file, whole */
-    unsigned pal[H_BANDS][EG_COLOURS];        /* the palette now, 0xffRRGGBB */
-    unsigned char grow[8][EG_CH_H * EG_CH_W]; /* each bed's box of the scene as it opened */
-    int ok;                                   /* the art was read */
     struct ember em[G_EMBERS];
     struct shot sh[G_SHOTS];
     struct puff pf[G_PUFFS];
@@ -120,6 +116,12 @@ struct eg {
         unsigned magic, best, wave, sum;
     } save;
     unsigned saved;
+    /* the art from here on, never kept (quick resume): the scene's charred beds and the palette
+     * are made again from the game's own beds and light */
+    unsigned art[EG_ART_BYTES / 4];           /* the art file, whole */
+    unsigned pal[H_BANDS][EG_COLOURS];        /* the palette now, 0xffRRGGBB */
+    unsigned char grow[8][EG_CH_H * EG_CH_W]; /* each bed's box of the scene as it opened */
+    int ok;                                   /* the art was read */
 };
 
 /* ---- the art file ---- */
@@ -1022,6 +1024,14 @@ static void save_best(struct eg *g) {
         g->saved = g->save.best + g->save.wave;
 }
 
+/* Bed k's charred box over its place in the scene. */
+static void char_bed(struct eg *g, int k) {
+    unsigned char *idx = scene_idx(g);
+    const unsigned char *ch = (const unsigned char *)data(g, EG_CHARRED) + k * EG_CH_W * EG_CH_H;
+    for (int j = 0; j < EG_CH_H; ++j)
+        memcpy(idx + (EG_CH_Y + j) * ENG_W + CH_X[k], ch + j * EG_CH_W, EG_CH_W);
+}
+
 /* The fourth bed on a side lost: the scene dims, the result card drops in. */
 static void lose(struct eg *g) {
     g->mode = LOST, g->card = 0, g->boxes = 0;
@@ -1313,14 +1323,7 @@ static int step(void *state, const struct eng_input *in) {
             else if (g->bed[k] == BURNING) {
                 if (!--g->bed_t[k]) {
                     g->bed[k] = CHARRED;
-                    {
-                        unsigned char *idx = scene_idx(g);
-                        const unsigned char *ch =
-                            (const unsigned char *)data(g, EG_CHARRED) + k * EG_CH_W * EG_CH_H;
-                        for (int j = 0; j < EG_CH_H; ++j)
-                            memcpy(idx + (EG_CH_Y + j) * ENG_W + CH_X[k], ch + j * EG_CH_W,
-                                   EG_CH_W);
-                    }
+                    char_bed(g, k);
                     bed_box(g, k);
                 }
             }
@@ -1343,6 +1346,26 @@ static void pause(void *state) {
     if (g->mode == LOST) save_best(g);
 }
 
-const struct eng_game eng_embergarden = {
-    "Ember Garden", sizeof(struct eg), ENG_RAW | ENG_FULL, init, step, draw, pause
-};
+/* Quick resume (docs/games-engine.md#quick-resume): everything before art is the game; the title
+ * card and a garden lost are none. Read back, the charred beds are charred in the scene again and
+ * the palette is the light's. Restart: play again from wave 1. */
+static int resume(void *state, int op) {
+    struct eg *g = state;
+    if (op == ENG_RESTART) new_game(g, PLAY);
+    for (int k = 0; op == ENG_LOAD && g->ok && k < 8; ++k)
+        if (g->bed[k] == CHARRED) char_bed(g, k);
+    palette(g);
+    return g->mode == PLAY;
+}
+
+const struct eng_game eng_embergarden = { "Ember Garden",
+                                          sizeof(struct eg),
+                                          ENG_RAW | ENG_FULL,
+                                          init,
+                                          step,
+                                          draw,
+                                          pause,
+                                          "embergarden",
+                                          "Arcade",
+                                          __builtin_offsetof(struct eg, art),
+                                          resume };

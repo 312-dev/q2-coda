@@ -64,9 +64,16 @@ enum {
     ENG_FULL =
         4, /* the whole screen, 375 x 320, the status row hidden except while held (games.c) */
     ENG_OWN_PAUSE = 8, /* held, the game draws its own pause below the status row's ENG_BAR rows,
-                        * and Games' "Paused" pop-up is left out (Return's Continue / Quit stays) */
+                        * and Games' "Paused" pop-up is left out (Return's menu stays) */
     ENG_CLOCK = 16     /* ENG_STILL with a shown time: at rest, a step with no input every
                         * ENG_SECOND_MS (docs/games-engine.md#play-time) */
+};
+
+/* resume's op (docs/games-engine.md#quick-resume) */
+enum {
+    ENG_KEEP,   /* held: 1 while a game is in progress, its kept bytes then written */
+    ENG_LOAD,   /* the kept bytes just read over a fresh state: what they point to made again */
+    ENG_RESTART /* the menu's Restart: a new game of the same mode */
 };
 
 struct eng_game {
@@ -77,6 +84,11 @@ struct eng_game {
     void (*draw)(const void *state, struct eng_surface *s);
     void (*pause)(
         void *state); /* before the menu, the screen going off or the page closing: save */
+    /* slug: its files' name (/mnt/data/game-SLUG.run, the list's icon); kind: the list's second
+     * line; keep: the state's first bytes that are the game in progress (0: none kept) */
+    const char *slug, *kind;
+    unsigned keep;
+    int (*resume)(void *state, int op);
 };
 
 /* A game's random numbers: xorshift32 on its own seed (never 0), the same on the host and the Q2 so
@@ -124,11 +136,14 @@ int eng_text(struct eng_surface *s, const char *text, int x, int y, int h, unsig
 /* engine.c, for games.c: the page's side. */
 int eng_count(void); /* the games in eng_games[], Games' rows after its own */
 const struct eng_game *eng_game(int k);
+/* 0: no memory for it; 1 open; 2 open on the game in progress it kept (quick resume). Held writes
+ * the game in progress (eng_hold), so eng_hold is also what a power-off calls. */
 int eng_open(const struct eng_game *game, void *page, void *sheet, int h, void (*held)(void),
              void (*left)(void));
 void eng_close(void);
 void eng_run(void), eng_hold(void);
-int eng_live(void); /* the frame timer runs: the UI loop keeps its pace (navigation.c) */
+void eng_restart(void); /* the menu's Restart: a new game, kept in place of the one in progress */
+int eng_live(void);     /* the frame timer runs: the UI loop keeps its pace (navigation.c) */
 void *eng_state_of(const struct eng_game *game); /* its state while open, else 0 */
 int eng_key(unsigned key, int down);
 int eng_touch(void *ctx, void *event); /* the sheet's and the page's pointer events */

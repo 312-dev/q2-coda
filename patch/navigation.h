@@ -326,6 +326,7 @@ extern int spot_media(unsigned key), spot_key(void *top, unsigned key),
     spot_open(void *ctx, void *event), spot_hold(void *top);
 extern int radio_media(unsigned key), radio_open(void *ctx, void *event);
 extern int games_key(void *top, unsigned key), games_open(void *ctx, void *event);
+void eng_hold(void); /* engine.c: the open game held, its game in progress kept */
 /* now_source.c: Now Playing for every reader (docs/internals.md#now-playing-source). source: who
  * owns playback; state 0 stopped, 1 playing, 2 paused (AVRCP's and iAP2's order); pos_ms and len_ms
  * -1 for none (a radio has neither); rec the Library's record (queue or pressed), 0 for another

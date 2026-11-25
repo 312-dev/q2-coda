@@ -80,10 +80,8 @@ struct song {
     char title[CT_TITLE], artist[CT_ARTIST];
 };
 struct pick {
-    int refs, done, mode, why, n, answers;
-    int played_n;
-    unsigned played[PLAYS_SLOTS]; /* Deep cuts: the songs counted twice or more, sorted */
-    unsigned seed;                /* the UI's, for the answers' order */
+    /* up to refs, a contest's songs, kept with the game in progress (quick resume) */
+    int mode, why, n, answers;
     struct song song[CT_CAND];
     char path[CT_ANS][CT_PATH]; /* a card file or offline copy; a streamed song's server path */
     int there[CT_ANS]; /* the check one round ahead: 1 the file is there, -1 gone, 0 not looked */
@@ -92,12 +90,18 @@ struct pick {
      * the UI), the clip's start in the song; the app's answer (got: 1 there at clip, its file
      * starting off ms into the song; -1 given up), written by clip_worker */
     char app[16];
-    int stream, seq, quit;
-    int kind[CT_ANS], from_ms[CT_ANS], want[CT_ANS], got[CT_ANS], off[CT_ANS];
+    int stream, kind[CT_ANS];
+    char sid[CT_ANS][CT_SID];
+    int refs, done, seq, quit;
+    int played_n;
+    unsigned played[PLAYS_SLOTS]; /* Deep cuts: the songs counted twice or more, sorted */
+    unsigned seed;                /* the UI's, for the answers' order */
+    int from_ms[CT_ANS], want[CT_ANS], got[CT_ANS], off[CT_ANS];
     unsigned asked[CT_ANS];
-    char sid[CT_ANS][CT_SID], clip[CT_ANS][CT_CLIP];
+    char clip[CT_ANS][CT_CLIP];
     char sent[2048]; /* the request last written: the clip thread's alone */
 };
+#define CT_KEPT __builtin_offsetof(struct pick, refs) /* the songs' bytes kept */
 
 /* What outlives the game's state: Games frees that at a close without a word to the game, so what
  * must be given back then (the music, the art, the worker's rows) is here, for ct_watch. */
@@ -110,7 +114,6 @@ struct keep {
 };
 
 struct ct {
-    struct keep *k;
     int h, screen, phase, mode, sel, t, at, reduced;
     int round, rounds, wrongs, rights, streak, score, shown, pts, best_new, slot, stream_dead;
     int row[4], right, pick, song; /* the round's rows (song indices), the right row, the call */
@@ -125,6 +128,8 @@ struct ct {
     struct {
         unsigned magic, best[3], played, sum;
     } save;
+    unsigned songs[CT_KEPT / 4]; /* the contest's songs, its pick's first CT_KEPT bytes, as held */
+    struct keep *k;              /* from here on, never kept (quick resume) */
 };
 
 /* ---- the player: clips over demo's socket, its answers from demo's reply list ---- */
@@ -1307,13 +1312,12 @@ static void begin(struct ct *g) {
     pthread_detach(t);
 }
 
-static void contest_start(struct ct *g) {
+/* The contest on air: the sound taken, each clip's start, the clip thread for streamed songs. */
+static void on_air(struct ct *g) {
     struct pick *p = g->k->pk;
     int streamed = 0;
     take(g->k);
-    g->rounds = p->answers < CT_ROUNDS ? p->answers : CT_ROUNDS;
-    g->round = g->slot = g->score = g->shown = g->wrongs = g->rights = g->streak = g->nmissed = 0;
-    g->stream_dead = 0;
+    g->screen = S_ROUND;
     for (int s = 0; s < p->answers; ++s) { /* each clip's start: 30 to 60 percent in */
         p->from_ms[s] = p->song[s].sec * (300 + 10 * (int)rand_below(31));
         streamed += p->kind[s] == K_STREAM;
@@ -1327,7 +1331,14 @@ static void contest_start(struct ct *g) {
         else
             pthread_detach(t);
     }
-    g->screen = S_ROUND;
+}
+
+static void contest_start(struct ct *g) {
+    struct pick *p = g->k->pk;
+    g->rounds = p->answers < CT_ROUNDS ? p->answers : CT_ROUNDS;
+    g->round = g->slot = g->score = g->shown = g->wrongs = g->rights = g->streak = g->nmissed = 0;
+    g->stream_dead = 0;
+    on_air(g);
     round_start(g);
 }
 
@@ -1611,6 +1622,35 @@ static void init(void *state, int h) {
     eng_dirty_all();
 }
 
-const struct eng_game eng_callerten = {
-    "Caller Ten", sizeof(struct ct), ENG_STILL | ENG_FULL, init, step, draw, pause
-};
+/* Quick resume (docs/games-engine.md#quick-resume): a contest under way, with its songs (songs, a
+ * copy of its pick's). Read back, the songs are a pick again and the caller's round starts over
+ * from its clip, as a clip cannot go on where it stopped; a caller already answered (the reveal)
+ * goes on to the next. Restart: a new contest on the same station. */
+static int resume(void *state, int op) {
+    struct ct *g = state;
+    struct pick *p;
+    if (op == ENG_RESTART) g->clip_held = 0, g->sel = g->mode, begin(g);
+    if (op == ENG_KEEP && g->screen == S_ROUND) memcpy(g->songs, g->k->pk, CT_KEPT);
+    if (op == ENG_LOAD) {
+        p = g->k && g->k->art ? calloc(1, sizeof *p) : 0;
+        if (!p) return g->screen = S_BROKEN, g->t = 0; /* no art, or no room: back to the list */
+        memcpy(p, g->songs, CT_KEPT);
+        p->refs = p->done = 1;
+        g->k->pk = p;
+        on_air(g);
+        if (g->phase != P_REVEAL) g->slot = g->song, round_start(g);
+    }
+    return g->screen == S_ROUND;
+}
+
+const struct eng_game eng_callerten = { "Caller Ten",
+                                        sizeof(struct ct),
+                                        ENG_STILL | ENG_FULL,
+                                        init,
+                                        step,
+                                        draw,
+                                        pause,
+                                        "callerten",
+                                        "Music quiz",
+                                        __builtin_offsetof(struct ct, k),
+                                        resume };

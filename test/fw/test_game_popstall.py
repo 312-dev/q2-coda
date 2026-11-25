@@ -94,7 +94,8 @@ class Game:
         fw.mock('buzzeer_switch', lambda *_: self.sounds.append(fw.var('clicker_kind', C.c_int).value))
         self.done = C.CFUNCTYPE(None)(lambda: None)
         self.game = fw.var('eng_popstall', GameDef)
-        assert self.e['eng_open'](self.game, PAGE, SHEET, h, self.done, self.done) == 1
+        self.opened = self.e['eng_open'](self.game, PAGE, SHEET, h, self.done, self.done)  # 2: on the game in progress kept
+        assert self.opened in (1, 2)
         self.b = Stall.from_address(fw.var('engine__en', C.c_void_p).value + C.sizeof(Eng) + (-C.sizeof(Eng)) % 8)
         self.fn = {k: fw.fn(f'game_popstall__{k}', *v) for k, v in {
             'build': (None, C.c_void_p, C.c_int), 'around': (C.c_int, C.c_int, C.c_int, C.POINTER(C.c_int)),

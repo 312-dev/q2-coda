@@ -109,7 +109,7 @@ struct record {
 
 struct sol {
     struct record g;
-    int h, rail, limit, mode, sel, art;
+    int h, rail, limit, mode, sel;
     int nsrc, cur, hand, hfrom, hn, hover, ndst; /* the cursor; the hand, from hfrom, hn cards */
     unsigned char src[MAXSRC][2], dst[8];
     int hx, hy, hx0, hy0, ht; /* the hand's place (its landing spot's), and the glide to it */
@@ -126,6 +126,7 @@ struct sol {
     int shown_s, since_save, unsaved;
     int nmark, all; /* a step's changed rects, joined, then handed to the engine */
     short marks[ENG_RECTS + 1][4];
+    int art; /* the art file read whole; from here on, the table made at init, never kept */
     unsigned char tile[64 * 64]; /* the fibre steps, as byte offsets into a shade level's colours */
     unsigned short shade[ART_SHADE_W *
                          ART_SHADE_H]; /* each 4 px cell's level, as a byte offset into felt_lut */
@@ -1922,6 +1923,24 @@ static void pause(void *state) {
         b->unsaved = 0, b->since_save = 0;
 }
 
-const struct eng_game eng_solitaire = {
-    "Cabin Solitaire", sizeof(struct sol), ENG_STILL | ENG_FULL | ENG_CLOCK, init, step, draw, pause
-};
+/* Quick resume (docs/games-engine.md#quick-resume): everything before art is the game; the start
+ * board and a game won are none. The play clock starts over from the open (last_ms 0), its time
+ * to the pause being in the game's. Restart: a new deal of the same Deal and Draw. */
+static int resume(void *state, int op) {
+    struct sol *b = state;
+    if (op == ENG_RESTART) new_deal(b);
+    b->last_ms = 0;
+    return b->mode != START && b->mode != WON;
+}
+
+const struct eng_game eng_solitaire = { "Cabin Solitaire",
+                                        sizeof(struct sol),
+                                        ENG_STILL | ENG_FULL | ENG_CLOCK,
+                                        init,
+                                        step,
+                                        draw,
+                                        pause,
+                                        "solitaire",
+                                        "Cards",
+                                        __builtin_offsetof(struct sol, art),
+                                        resume };
