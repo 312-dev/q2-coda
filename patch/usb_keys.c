@@ -63,56 +63,39 @@ static struct {
 } uk __attribute__((section(".scratch")));
 
 /* A report descriptor's input fields that carry the keys, into c; *ids whether reports start with
- * a report ID. Their count. Long items and Push/Pop are passed over (no headset seen uses them). */
+ * a report ID. Their count. Global items are kept by tag (g: 0 Usage Page, 1 Logical Minimum, 7
+ * Report Size, 8 Report ID, 9 Report Count); a long item is passed over and Push and Pop are not
+ * followed. */
 static int uk_parse(const unsigned char *d, int n, uk_check_t *c, int *ids) {
     unsigned short offs[256]; /* the next input bit of each report ID */
-    unsigned page = 0, size = 0, count = 0, rid = 0, used[16], nu = 0, umin = 0, umax = 0,
-             range = 0;
-    int lmin = 0, found = 0;
+    unsigned g[16], used[16], nu = 0, umin = 0, umax = 0, range = 0;
+    int found = 0;
     memset(offs, 0, sizeof offs);
+    memset(g, 0, sizeof g);
     *ids = 0;
     for (int i = 0; i < n;) {
-        unsigned b = d[i], sz = b & 3, v = 0;
+        unsigned b = d[i], sz = (b & 3) == 3 ? 4 : b & 3, type = b >> 2 & 3, tag = b >> 4, v = 0;
         if (b == 0xfe) { /* a long item: its data size, then its tag */
             i += 3 + (i + 1 < n ? d[i + 1] : 0);
             continue;
         }
-        if (sz == 3) sz = 4;
         if (i + 1 + (int)sz > n) break;
         for (unsigned k = 0; k < sz; ++k) v |= (unsigned)d[i + 1 + k] << 8 * k;
         i += 1 + sz;
-        unsigned full =
-            sz == 4 ? v : page << 16 | v; /* a local usage takes the page unless it has one */
-        switch (b & 0xfc) {
-        case 0x04:
-            page = v;
-            break;
-        case 0x14:
-            lmin = sz == 1 ? (signed char)v : sz == 2 ? (short)v : (int)v;
-            break;
-        case 0x74:
-            size = v;
-            break;
-        case 0x84:
-            rid = v & 0xff, *ids = 1;
-            break;
-        case 0x94:
-            count = v;
-            break;
-        case 0x08:
-            if (nu < 16) used[nu++] = full;
-            break;
-        case 0x18:
-            umin = full, range = 1;
-            break;
-        case 0x28:
-            umax = full, range = 1;
-            break;
-        case 0x80: { /* Input: data, not constant. Each slot's usage: a variable field's (the last
-                        repeated), or the one an array field's index j holds */
+        if (type == 1) { /* global; the Logical Minimum signed */
+            g[tag] = tag == 1 && sz && sz < 4 && v >> (8 * sz - 1) ? v - (1u << 8 * sz) : v;
+            *ids |= tag == 8;
+        } else if (type == 2) { /* local: a usage takes the page unless it has one */
+            unsigned full = sz == 4 ? v : g[0] << 16 | v;
+            if (!tag && nu < 16) used[nu++] = full;
+            if (tag == 1) umin = full, range = 1;
+            if (tag == 2) umax = full, range = 1;
+        } else if (!type) { /* main; an Input (data, not constant) gives each slot's usage: a
+                               variable field's (the last repeated), or an array index j's */
+            unsigned size = g[7], count = g[9], rid = g[8] & 0xff;
             unsigned slots = v & 2 ? count : range ? umax - umin + 1 : nu;
-            for (unsigned j = 0;
-                 !(v & 1) && size && size <= 16 && count && (range || nu) && j < slots && j < 1024;
+            for (unsigned j = 0; tag == 8 && !(v & 1) && size && size <= 16 && count &&
+                                 (range || nu) && j < slots && j < 1024;
                  ++j) {
                 unsigned u =
                     range ? (umin + j <= umax ? umin + j : umax) : used[j < nu ? j : nu - 1];
@@ -121,14 +104,12 @@ static int uk_parse(const unsigned char *d, int n, uk_check_t *c, int *ids) {
                         c[found++] =
                             v & 2 ? (uk_check_t){ offs[rid] + j * size, 0, rid, size, 0, k }
                                   : (uk_check_t){
-                                        offs[rid], lmin + j, rid, size, count > 255 ? 255 : count, k
+                                        offs[rid], g[1] + j, rid, size, count > 255 ? 255 : count, k
                                     };
             }
-            offs[rid] += size * count;
-            break;
+            if (tag == 8) offs[rid] += size * count;
+            nu = range = umin = umax = 0; /* a main item ends the local ones */
         }
-        }
-        if (!(b & 0x0c)) nu = range = umin = umax = 0; /* a main item ends the local ones */
     }
     return found;
 }
@@ -276,7 +257,7 @@ static void *uk_worker(void *arg) {
             int ms = rep_at ? (int)(rep_at - now) : -1;
             if (multi_at && (ms < 0 || (int)(multi_at - now) < ms)) ms = (int)(multi_at - now);
             unsigned set[32] = { 0 };
-            long tv[2] = { 0, ms * 1000 }; /* under UK_MULTI_MS, so under a second */
+            long tv[2] = { 0, ms * 1000 };  /* under UK_MULTI_MS, so under a second */
             set[fd / 32] = 1u << (fd % 32); /* writable: the URB done, or the device gone */
             int r = select(fd + 1, 0, set, 0, ms < 0 ? 0 : tv);
             void *done = 0;
