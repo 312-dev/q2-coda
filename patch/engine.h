@@ -12,6 +12,11 @@
 #define ENG_RECTS 8      /* changed rects a frame; more join the last */
 #define ENG_ACCEL_MAX 10 /* fast's most steps a tick (offsets.inc VOL_ACCEL_MAX, the volume's) */
 #define ENG_W 375        /* the sheet's width; its height is eng_surface's h (the theme's page) */
+#define ENG_SECOND_MS 1000 /* ENG_CLOCK's timer at rest: a step a second, for the shown time */
+#define ENG_REST_MS 300000 /* play time counts this long after the last input, then stands */
+/* ENG_OWN_PAUSE held: the rows the status row's glyphs and caption take, left to stock (they
+ * centre on y 23, docs/oled-design.md#status-row) */
+#define ENG_BAR 30
 
 /* Fixed point, 16.16. fx_div's quotient is exact to 8 fraction bits and needs |a| < 128.0. */
 typedef int fx;
@@ -56,7 +61,12 @@ struct eng_surface {
 enum {
     ENG_RAW = 1,   /* the wheel as travel (wheel), no ticks */
     ENG_STILL = 2, /* turn-based: the frame timer runs only after input and while step returns 1 */
-    ENG_FULL = 4   /* the whole screen, 375 x 320, over the status row: Games opens the sheet so */
+    ENG_FULL =
+        4, /* the whole screen, 375 x 320, the status row hidden except while held (games.c) */
+    ENG_OWN_PAUSE = 8, /* held, the game draws its own pause below the status row's ENG_BAR rows,
+                        * and Games' "Paused" pop-up is left out (Return's Continue / Quit stays) */
+    ENG_CLOCK = 16     /* ENG_STILL with a shown time: at rest, a step with no input every
+                        * ENG_SECOND_MS (docs/games-engine.md#play-time) */
 };
 
 struct eng_game {
@@ -69,12 +79,24 @@ struct eng_game {
         void *state); /* before the menu, the screen going off or the page closing: save */
 };
 
+/* A game's random numbers: xorshift32 on its own seed (never 0), the same on the host and the Q2 so
+ * a seed gives the same level or deal everywhere. Inline: the Evening Puzzle's generator calls it
+ * in its inner loop. */
+static inline unsigned eng_rng(unsigned *s) {
+    unsigned x = *s;
+    x ^= x << 13, x ^= x >> 17, x ^= x << 5;
+    return *s = x;
+}
+
 /* engine.c, for a game's step. */
 void eng_dirty(int x, int y, int w, int h); /* this part of the sheet changed: painted next frame */
 void eng_dirty_all(void);
 int eng_inset(int y); /* the columns the glass's corners hide at each end of the sheet's row y */
 void eng_quit(void);  /* back to Games' list, after this step */
 void eng_awake(void); /* the screen's timeout starts over, as a key does it */
+/* Play time, ms: counted while the game runs, not while it is held, and at most ENG_REST_MS past
+ * the last input (a player who walks away stops the clock five minutes on). */
+unsigned eng_play_ms(void);
 enum { ENG_SFX_TICK, ENG_SFX_TAP, ENG_SFX_ALERT }; /* the Clicker's wheel, button and beep */
 void eng_sfx(int kind);
 /* A save, /mnt/data/game-NAME: its first word the magic, its last the sum of the rest, written to
@@ -83,6 +105,13 @@ int eng_load(const char *name, void *buf, unsigned size, unsigned magic);
 int eng_save(const char *name, void *buf, unsigned size, unsigned magic);
 
 /* engine.c, for a game's draw. Colours are the screen's, 0xRRGGBB; Light Mode leaves them. */
+/* The part of the box x, y, w, h inside this paint's rows and columns, as x0 y0 x1 y1 in c; 0 when
+ * none is. Inline: the games' blits call it per sprite and per glyph in a frame. */
+static inline int eng_clip(const struct eng_surface *s, int x, int y, int w, int h, int *c) {
+    c[0] = x < s->x0 ? s->x0 : x, c[1] = y < s->y0 ? s->y0 : y;
+    c[2] = x + w > s->x1 ? s->x1 : x + w, c[3] = y + h > s->y1 ? s->y1 : y + h;
+    return c[2] > c[0] && c[3] > c[1];
+}
 void eng_fill(struct eng_surface *s, int x, int y, int w, int h, unsigned rgb);
 /* a disc with a smoothed edge, its centre and radius in 16.16 so it moves by parts of a pixel */
 void eng_disc(struct eng_surface *s, fx cx, fx cy, fx r, unsigned rgb);
@@ -100,6 +129,7 @@ int eng_open(const struct eng_game *game, void *page, void *sheet, int h, void (
 void eng_close(void);
 void eng_run(void), eng_hold(void);
 int eng_live(void); /* the frame timer runs: the UI loop keeps its pace (navigation.c) */
+void *eng_state_of(const struct eng_game *game); /* its state while open, else 0 */
 int eng_key(unsigned key, int down);
 int eng_touch(void *ctx, void *event); /* the sheet's and the page's pointer events */
 void eng_paint(void *canvas);
@@ -109,8 +139,11 @@ void games_seal(void *b, unsigned n, unsigned magic);
 int games_text(void *canvas, const char *s, int x, int y, int h, unsigned px, unsigned color,
                int align);
 
-extern const struct eng_game eng_bricks;    /* game_bricks.c */
-extern const struct eng_game eng_solitaire; /* game_solitaire.c */
-extern const struct eng_game eng_demo;      /* engine_demo.c */
+extern const struct eng_game eng_popstall;    /* game_popstall.c */
+extern const struct eng_game eng_solitaire;   /* game_solitaire.c */
+extern const struct eng_game eng_sudoku;      /* game_sudoku.c */
+extern const struct eng_game eng_callerten;   /* game_callerten.c */
+extern const struct eng_game eng_embergarden; /* game_embergarden.c */
+extern const struct eng_game eng_demo;        /* engine_demo.c */
 
 #endif

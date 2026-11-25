@@ -101,7 +101,7 @@ enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR, LAY_ALBUM };
 #define ADDON_CAPS                                                                                 \
     "playlist progress pages library goto sleep game audio sections art window urls sort field "   \
     "more fav now catalogue ratings likes artist album playlists storage signin libsource radio "  \
-    "status holdmenu"
+    "status holdmenu clip"
 #define ADDON_SECTIONS 8  /* sections an app's first page may have */
 #define SWIPE_CLAIM_PX 24 /* a sideways move this far, twice as far as up or down, is a swipe's */
 #define SWIPE_PX 60       /* and this far at the lift, more than up or down, changes section */
@@ -1204,7 +1204,7 @@ static void stream_poll(app_t *a) {
     if (sm.state == S_WAIT && sm.urls) { /* played whole at once, by stock's Tidal player */
         if (playback_loads != sm.loads || playback_picks != sm.picks)
             sm.state = S_DONE; /* the user played a queue, or another song, before it started */
-        else if (!sm.timer && !scan && !addon_game_audio()) /* not under a card game's sound */
+        else if (!sm.timer && !scan && !addon_game_audio()) /* not under a game's sound */
             sm.timer = timer_add(urls_start, 0, 0);
         return;
     }
@@ -1655,7 +1655,8 @@ int addon_games(void) { return addon_scan(), ap.games; }
 int addon_games_last(void) { return ap.games; }
 const char *addon_game_name(int k) { return k >= 0 && k < ap.games ? ap.a[ap.game[k]].name : 0; }
 int addon_game_on(void) { return gm.pid; }
-int addon_game_audio(void) { return gm.pid && gm.audio; }
+/* a card game with audio=1 runs, or Caller Ten (game_callerten.c) holds the sound for a contest */
+int addon_game_audio(void) { return (gm.pid && gm.audio) || callerten_sound(); }
 
 static void game_kill(const char *how) {
     char cmd[24];

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Run the actual MIPS DROP paths with the encoder signal deliberately delayed, SBC's bitpool step and
-the A2DP write MTU clamp through each codec's encoder thread.
+"""Run the actual MIPS DROP paths with the encoder signal deliberately delayed, SBC's bitpool step, AAC's peak step
+and the A2DP write MTU clamp through each codec's encoder thread.
 
 Usage: python test/bluealsa.py BUILD_DIRECTORY (requires the existing Unicorn).
 """
@@ -8,8 +8,8 @@ import pathlib, struct, subprocess, sys
 from unicorn import UC_HOOK_CODE
 from unicorn.mips_const import *
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'tools'))
-from build import (BLUEALSA, BT_DROP, BT_DROP_HANDLER, BT_MTU_MAX, BT_PCM_CALLERS, BT_SBC_POOL, BT_SILENCE_SAMPLES,
-                   bt_silence, load_elf, machine, read, word)
+from build import (BLUEALSA, BT_AAC_RATE, BT_DROP, BT_DROP_HANDLER, BT_MTU_MAX, BT_PCM_CALLERS, BT_SBC_POOL,
+                   BT_SILENCE_SAMPLES, bt_silence, load_elf, machine, read, word)
 
 
 def check_drop(raw, queued, caller=None):
@@ -240,7 +240,8 @@ ENCODERS = {SBC: 0x4060e0, AAC: 0x416d0c, APTX: 0x417e80, APTX_HD: 0x418988}
 # Stock's .plt stubs the harness answers (all others return 0): libc's memory calls, libopenaptx's and fdk-aac's.
 STUBS = {0x430670: 'malloc', 0x430030: 'calloc', 0x42ff80: 'realloc', 0x430270: 'free', 0x4300e0: 'memset',
          0x430450: 'memcpy', 0x430830: 'memmove', 0x430200: 'aptx_init', 0x430710: 'aptx_encode',
-         0x430560: 'aptx_finish', 0x4309d0: 'aacEncOpen', 0x430980: 'aacEncInfo', 0x430b60: 'aacEncEncode'}
+         0x430560: 'aptx_finish', 0x4309d0: 'aacEncOpen', 0x430980: 'aacEncInfo', 0x430b60: 'aacEncEncode',
+         0x430600: 'aacEncoder_SetParam'}
 PLT = (0x42fcc0, 0x430b80)
 L2CAP_2DH5 = 679  # a 2-DH5's payload: the most one baseband packet carries on 2 Mbps EDR
 
@@ -264,10 +265,15 @@ def acquire(raw, codec, mtu):
     return read(u, t + 0x48)
 
 
-def encode(raw, aptx, codec, mtu, aac=(), packets=3):
+def encode(raw, aptx, codec, mtu, aac=(), packets=3, aac_conf=None, asks=None, sets=None, set_fails=(), rate=None):
     """codec's encoder thread under Unicorn, on the shipped encoder (SBC is built into bluealsa, aptX and aptX HD are
     libopenaptx, loaded at 0), with mtu as the transport's write MTU, fed PCM as fast as it asks: the first packets
-    it writes. AAC's fdk-aac is scripted instead: each aacEncEncode gives the next of aac's frame lengths."""
+    it writes. AAC's fdk-aac is scripted instead: each aacEncEncode gives the next of aac's frame lengths. For AAC,
+    aac_conf is the stream's configuration (the transport's four bytes at 0x1a4: object type, rates and channels,
+    VBR and bitrate), asks maps a frame's index to the byte q2guard writes at BT_AAC_RATE before it, and sets (a
+    list) gets each aacEncoder_SetParam made after aacEncInfo, (the index of the frame it comes before, the handle,
+    the parameter, the value); a call before a frame in set_fails answers an error. rate (a list) gets the four
+    bytes at BT_AAC_RATE once the packets are written."""
     u = machine(raw, 0x1000000)
     load_elf(u, aptx)
     u.mem_map(0x2000000, 0x200000)  # the heap
@@ -286,10 +292,16 @@ def encode(raw, aptx, codec, mtu, aac=(), packets=3):
     u.mem_write(pcm + 0x2a, struct.pack('<H', width << 8 | width * 8))
     if codec == SBC:
         u.mem_write(t + 0x1a4, bytes([0x11, 0x15, 2, 53]))  # 48 kHz joint stereo, 16 blocks, 8 subbands
-        try:
-            u.mem_map(BT_SBC_POOL & ~0xfff, 0x1000)  # stock has no payload there
-        except Exception:
-            pass
+    if codec == AAC and aac_conf:
+        u.mem_write(t + 0x1a4, aac_conf)
+    try:
+        u.mem_map(BT_SBC_POOL & ~0xfff, 0x1000)  # stock has no payload there
+    except Exception:
+        pass
+    asks = dict(asks or {})
+    if 0 in asks:
+        u.mem_write(BT_AAC_RATE, bytes([asks[0]]))
+    encoded, info = [0], [False]
     def alloc(n):
         heap[0] = (heap[0] + 15) & ~15
         heap[0] += n
@@ -319,6 +331,12 @@ def encode(raw, aptx, codec, mtu, aac=(), packets=3):
         elif name == 'aacEncInfo':  # maxOutBufBytes, maxAncBytes, inBufFillLevel, inputChannels, frameLength
             u.mem_write(a[1], struct.pack('<5I', 6144 * 2, 0, 0, 2, 1024))
             result = 0
+            info[0] = True
+        elif name == 'aacEncoder_SetParam':
+            result = 0
+            if info[0] and sets is not None:  # past the encoder's setup: the loop's
+                sets.append((encoded[0], a[0], a[1], a[2]))
+                result = 0x20 if encoded[0] in set_fails else 0  # AACENC_INVALID_CONFIG
         elif name == 'aacEncEncode':
             result = 0
             if a[1]:
@@ -329,6 +347,9 @@ def encode(raw, aptx, codec, mtu, aac=(), packets=3):
                     u.mem_write(read(u, read(u, a[2] + 4)), bytes(i & 0xff for i in range(len(out) * 7, len(out) * 7 + n)))
                 word(u, args, n)
                 word(u, args + 4, read(u, a[3]))  # every sample taken
+                encoded[0] += 1
+                if encoded[0] in asks:  # q2guard's write, between frames
+                    u.mem_write(BT_AAC_RATE, bytes([asks[encoded[0]]]))
         elif address == 0x4145d0:  # io_poll_and_read_pcm: all it asks for
             u.mem_write(a[2], bytes((i * 37) & 0xff for i in range(a[3] * width)))
             result = a[3]
@@ -351,7 +372,49 @@ def encode(raw, aptx, codec, mtu, aac=(), packets=3):
         u.reg_write(register, value)
     u.emu_start(ENCODERS[codec], 0x100ff00, count=50_000_000)
     assert len(out) == packets, f'{codec:#x}: {len(out)} packets'
+    if rate is not None:
+        rate.extend(u.mem_read(BT_AAC_RATE, 4))
     return out
+
+
+AACENC_BITRATE, AACENC_PEAK_BITRATE, AAC_HANDLE = 0x101, 0x207, 0x2000f00
+# The transport's AAC configuration (0x1a4): MPEG-2 AAC LC, 48 kHz, stereo, then VBR (bit 7) and the 23-bit bitrate.
+AAC_VBR_240 = bytes([0x80, 0x00, 0x84, 0x80 | 0x03, 0xa9, 0x80])
+AAC_CBR_240 = bytes([0x80, 0x00, 0x84, 0x03, 0xa9, 0x80])
+
+
+def check_aac_peak(stock, raw, aptx):
+    """The AAC encoder thread sets fdk-aac's peak (VBR) or bitrate (CBR) from BT_AAC_RATE's byte before the next
+    frame, once a change, only below the stream's own, and its own again at 0; it publishes its own; stock ignores
+    the byte. fdk-aac is scripted (encode's), so this is the calls made, not the frames' new sizes."""
+    frames = [400] * 10
+    def run(binary, conf, asks, fails=(), rate=None):
+        sets = []
+        out = encode(binary, aptx, AAC, BT_MTU_MAX, aac=frames, packets=10, aac_conf=conf, asks=asks, sets=sets,
+                     set_fails=fails, rate=rate)
+        assert [len(p) for p in out] == [412] * 10, 'every frame one packet, as without the byte'
+        return sets
+    asks = {2: 192, 4: 160, 5: 160, 6: 128, 8: 0}
+    assert run(stock, AAC_VBR_240, asks) == [], 'stock: the byte is not read'
+    sets = run(raw, AAC_VBR_240, asks)
+    assert sets == [(2, AAC_HANDLE, AACENC_PEAK_BITRATE, 192000), (4, AAC_HANDLE, AACENC_PEAK_BITRATE, 160000),
+                    (6, AAC_HANDLE, AACENC_PEAK_BITRATE, 128000), (8, AAC_HANDLE, AACENC_PEAK_BITRATE, 240000)], \
+        'VBR: the peak, before the next frame, once a change, back to the configured 240000 at 0'
+    assert run(raw, AAC_CBR_240, asks) == [(f, h, AACENC_BITRATE, v) for f, h, _, v in sets], 'CBR: the bitrate'
+    assert run(raw, AAC_VBR_240, {1: 240, 2: 250, 3: 255}) == [], 'at or above its own: its own, already in use'
+    assert run(raw, AAC_VBR_240, {0: 128}) == [(0, AAC_HANDLE, AACENC_PEAK_BITRATE, 128000)], \
+        'a byte left from before: from the first frame'
+    rate = []
+    assert run(raw, AAC_VBR_240, {2: 192, 4: 160}, fails=(2,), rate=rate) == [
+        (2, AAC_HANDLE, AACENC_PEAK_BITRATE, 192000)], 'a set that fails: nothing more asked of the stream'
+    assert rate == [160, 0, 0, 5], 'its own published as 0 after the failure, the own peak still in use'
+    for conf, mode in ((AAC_VBR_240, 5), (AAC_CBR_240, 0)):
+        rate = []
+        run(raw, conf, {3: 160}, rate=rate)
+        assert rate == [160, 240, 160, mode], 'asked, its own (kbit/s), in use, its mode (VBR 5 as the build sets it)'
+    rate = []
+    run(stock, AAC_VBR_240, {3: 160}, rate=rate)
+    assert rate == [160, 0, 0, 0], 'stock publishes nothing'
 
 
 def ldac_mtu(ldac, mtu):
@@ -461,9 +524,12 @@ def check(directory):
     check_silence(stock, patched)
     check_sbc_bitpool(stock, patched)
     lib = lambda name: subprocess.check_output(['unsquashfs', '-cat', str(directory / 'rootfs.squashfs'), name])
+    check_aac_peak(stock, patched, lib('usr/lib/libopenaptx.so.0.2.1'))
     check_mtu(stock, patched, lib('usr/lib/libopenaptx.so.0.2.1'), lib('usr/lib/libldacBT.so.2.0.19'))
     print("Bluetooth silence: Drain's or PAUSE's 100 ms timeout fills silence until real PCM or the budget ends; stock sends nothing.")
     print('SBC bitpool: the encoder follows BT_SBC_POOL from the next frame, never above its own; stock ignores it.')
+    print("AAC peak: the encoder sets fdk-aac's peak (VBR) or bitrate (CBR) from BT_AAC_RATE before the next frame, "
+          'only below its own; stock ignores it.')
     print(f'A2DP write MTU: {BT_MTU_MAX} (one 2-DH5) for SBC, AAC, aptX and aptX HD, each packet filled; LDAC keeps its own; stock keeps 1021.')
     print('Bluetooth DROP: delayed encoder signal preserves new PCM, flushes all old PCM and resets pacing; stock reproduces the fault.')
 

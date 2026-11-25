@@ -55,7 +55,8 @@ class Game(C.Structure):
                 *((k, C.c_int) for k in 'h screen target picking pick confirm paused choice carry dirty'.split()),
                 ('sud', Sudoku), ('vx', Vortex), ('best', Best), ('sol', Sol), ('save', C.c_uint), ('pop_at', C.c_uint),
                 ('pop_ring', C.c_int), ('pop_seg', C.c_int), ('trail', (C.c_int * 2) * 4), ('record', C.c_int),
-                ('sn_best', Best), ('sn', Snake), ('rows', C.c_int), ('title', C.c_void_p), ('engines', C.c_int)]
+                ('sn_best', Best), ('sn', Snake), ('rows', C.c_int), ('title', C.c_void_p), ('engines', C.c_int),
+                ('full', C.c_int), ('box', C.c_int * 4), ('bar_hidden', C.c_int)]
 
 
 def test_structs_are_the_saves_sizes():
@@ -1898,13 +1899,12 @@ def card_apps(fw, apps):
     return {f'/mnt/mmc/.{k}/q2app': v for k, v in apps.items()}
 
 
-SHIPPED = ['Bricks', 'Cabin Solitaire']  # the build's games (peq.h GAME_*, engine.c eng_games[])
+SHIPPED = ['Pop Stall', 'Cabin Solitaire', 'Evening Puzzle', 'Caller Ten', 'Ember Garden']  # the build's games (peq.h GAME_*, engine.c eng_games[])
 
 
 def test_the_build_ships_the_engines_games_alone(fw):
     """Games lists the engine's games alone in this build, its own Sudoku, Vortex, Solitaire and Snake left out
-    (the owner, 2026-11-22) while the redesigned games replace them. A card with no games: the chooser is the
-    build's list."""
+    while the redesigned games replace them. A card with no games: the chooser is the build's list."""
     texts = []
     fw.mock('widget_set_text_utf8', lambda w, s, *_: texts.append(C.string_at(s).decode()))
     p = Page(fw, card_apps(fw, {}))
@@ -1916,12 +1916,12 @@ def test_the_build_ships_the_engines_games_alone(fw):
 
 def test_saves_of_the_games_left_out_are_neither_read_nor_touched(fw):
     """A Q2 that played Sudoku or Solitaire before this build: Games opens on its list, the saves' files stay as
-    they were (for the games' return); Bricks opens."""
+    they were (for the games' return); Pop Stall opens."""
     files = {SUDOKU_FILE: b'\x01' * 8, SOLITAIRE_FILE: b'\x02' * 8}
     p = Page(fw, dict(files))
     assert p.s.screen == CHOOSER and {k: p.card.files[k] for k in files} == files
     rows = handlers(fw, EVT_CLICK)
-    press(rows[0])  # Bricks, from the next loop pass
+    press(rows[0])  # Pop Stall, from the next loop pass
     assert p.s.target == ENGINE
 
 
@@ -1941,7 +1941,7 @@ def test_the_chooser_lists_its_games_then_the_card_s_by_name_and_each_row_opens_
     press(rows[len(SHIPPED) + 1])  # Zork, its second, over the whole screen
     assert fw.fn('addon_game_on', C.c_int)() == 4242 and tried[-1] == b'/mnt/mmc/.zork/q2-zork'
     assert p.s.screen == CHOOSER and not p.timers
-    press(rows[0])  # Bricks, the engine's first, from the next loop pass
+    press(rows[0])  # Pop Stall, the engine's first, from the next loop pass
     assert p.s.screen == CHOOSER and p.s.target == ENGINE and p.timers[-1][1] == 0
 
 

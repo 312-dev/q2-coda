@@ -6,13 +6,14 @@ import math
 import pytest
 
 from conftest import O
-from test_games import PAGE, Canvas, Card, Page, fnv1a, paint, texts
+from test_games import PAGE, SHIPPED, Canvas, Card, Page, fnv1a, paint, texts
+from test_nav_hold import scratch, st  # noqa: F401
 
 CENTER, PREV, NEXT, PLAY, RETURN, BACK_BTN, FWD_BTN = 218, 172, 173, 171, 170, 222, 223
 E_CENTRE, E_PLAY, E_PREV, E_NEXT, E_TOUCH = 1, 2, 4, 8, 16
 RAW, STILL = 1, 2
 ENGINE = 5  # games.c's screen of the engine's first game
-DEMO = ENGINE + 2  # the demo scene's: eng_games[] lists it last, after Bricks and Cabin Solitaire
+DEMO = ENGINE + 5  # the demo scene's: eng_games[] lists it last, after the five games (test_games.SHIPPED)
 REPEAT = 8
 SHEET = 0x7300  # Page's first widget: the sheet
 
@@ -39,7 +40,7 @@ class Eng(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'game page sheet held left'.split()), *((k, C.c_uint) for k in 'timer at acc'.split()),
                 *((k, C.c_int) for k in 'running quit h first'.split()), *((k, C.c_uint) for k in 'keys pressed released'.split()),
                 *((k, C.c_int) for k in 'ticks fast tx ty rects'.split()), ('rect', (C.c_int * 4) * 8), ('steps', C.c_uint),
-                ('frames', C.c_uint)]
+                *((k, C.c_uint) for k in 'frames second play play_at input_at'.split())]
 
 
 class Demo(C.Structure):
@@ -54,7 +55,7 @@ def api(fw):
            'eng_live': (i,), 'eng_key': (i, u, i), 'eng_touch': (i, p, p), 'eng_paint': (None, p), 'eng_count': (i,),
            'eng_dirty': (None, i, i, i, i), 'eng_inset': (i, i), 'eng_dirty_all': (None,), 'eng_quit': (None,), 'eng_awake': (None,), 'eng_sfx': (None, i),
            'eng_load': (i, C.c_char_p, p, u, u), 'eng_save': (i, C.c_char_p, p, u, u), 'eng_sin': (i, i), 'eng_cos': (i, i),
-           'eng_atan2': (i, i, i), 'eng_sqrt': (u, C.c_ulonglong), 'engine__eng_frame': (i, p),
+           'eng_atan2': (i, i, i), 'eng_sqrt': (u, C.c_ulonglong), 'engine__eng_frame': (i, p), 'engine__eng_second': (i, p),
            'eng_fill': (None, C.POINTER(Surface), i, i, i, i, u),
            'eng_disc': (None, C.POINTER(Surface), i, i, i, u), 'eng_round': (None, C.POINTER(Surface), i, i, i, i, i, u),
            'eng_text': (i, C.POINTER(Surface), C.c_char_p, i, i, i, u, u, i), 'games_keydown': (i, p, u)}
@@ -411,6 +412,16 @@ def demo(fw, files=None):
     return p
 
 
+def seconds(fw, timers):
+    """The ENG_CLOCK timer's adds among Page's timers (fn, ms): one each time the game came to rest."""
+    at = C.addressof(fw.var('engine__eng_second', C.c_char))
+    return [t for t in timers if t[0] == at]
+
+
+def engine(fw):
+    return Eng.from_address(fw.var('engine__en', C.c_void_p).value)
+
+
 def tick(p, n=1, ms=16):
     for _ in range(n):
         p.now += ms
@@ -420,10 +431,10 @@ def tick(p, n=1, ms=16):
 def test_the_demo_is_listed_only_where_a_dev_build_asks(fw):
     e, p = api(fw), Page(fw)
     fw.mock('toolsReadConfig', lambda path, sec, key, out, d, *_: C.memmove(out, b'1\0', 2) and 0)
-    assert e['eng_count']() == 2 and p.s.engines == 2 and p.s.rows == 2  # test/fw builds as a release does: no demo
+    assert e['eng_count']() == 5 and p.s.engines == 5 and p.s.rows == 5  # test/fw builds as a release does: no demo
 
 
-@pytest.mark.parametrize('asked,count', [(b'1', 3), (b'0', 2)])
+@pytest.mark.parametrize('asked,count', [(b'1', 6), (b'0', 5)])
 def test_a_dev_build_lists_the_demo_last_when_asked(fw_dev, asked, count):
     fw_dev.mock('toolsReadConfig', lambda path, sec, key, out, d, *_: C.memmove(out, asked + b'\0', 2) and 0)
     assert api(fw_dev)['eng_count']() == count
@@ -554,3 +565,26 @@ def test_a_game_that_cannot_open_leaves_the_list(fw):
     r.page.go(ENGINE)
     assert r.page.s.screen == 0 and r.s.game == C.addressof(r.game)
     r.e['eng_close']()
+
+
+@pytest.mark.parametrize('k', range(len(SHIPPED)))  # every game the build ships
+def test_centre_held_through_a_game_is_the_games_alone_and_never_stocks_shut_down(fw, st, k):
+    """Stock's Centre hold (Shut Down? at 1000 ms, ringnav_hold_timer's st.centre_hold) is set at the press, before
+    ringnav_keydown: a running engine game takes it away at its first press, and the game sees Centre held for all 3 s
+    of the hold's repeats (every 50 ms). Paused, the menu's keys are stock's again and the hold stays."""
+    p, removed = Page(fw), []
+    fw.mock('timer_remove', lambda t, *_: removed.append(t) or 1)
+    keydown = fw.fn('games_keydown', C.c_int, C.c_void_p, C.c_uint)
+    p.go(ENGINE + k)
+    en = Eng.from_address(fw.var('engine__en', C.c_void_p).value)
+    st('centre_hold').value = 0x4f0001  # stock's own hold, Shut Down?
+    for _ in range(60):
+        assert keydown(PAGE, CENTER) and en.keys & E_CENTRE
+        p.now += 50
+    assert 0x4f0001 in removed and st('centre_hold').value == 0
+    p.key(RETURN)  # the pause menu: its keys go to Games' list of choices, stock's hold left as it is
+    removed.clear()
+    st('centre_hold').value = 0x4f0002
+    assert not keydown(PAGE, CENTER) and not removed and st('centre_hold').value == 0x4f0002
+    st('centre_hold').value = 0
+    p.close()

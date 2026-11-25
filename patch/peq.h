@@ -428,8 +428,8 @@ int addon_games_last(void); /* the card's games as the last addon_scan found the
 /* The games games.c's chooser ships, the one place to turn each on (docs/internals.md#games): 1
  * lists it and builds it into the payload, 0 leaves it out of both, its source kept in games.c
  * (test/fw builds every one, GAMES_ALL, so its tests keep running). Sudoku, Vortex, Solitaire
- * and Snake wait while the games in progress are finished (the owner, 2026-11-22); Bricks is the
- * engine's (engine.c eng_games[]), always listed. */
+ * and Snake wait while the games in progress are finished ; the engine's games
+ * (engine.c eng_games[]) are always listed. */
 #define GAME_SUDOKU 0
 #define GAME_VORTEX 0
 #define GAME_SOLITAIRE 0
@@ -479,7 +479,8 @@ int addon_offline_ok(const char *id), addon_offline_ask(const char *id, int add,
  */
 int addon_games(void), addon_game_start(int k), addon_game_on(void);
 int addon_game_audio(
-    void); /* a card game with audio=1 runs: the sound and the media keys are its */
+    void); /* a card game with audio=1 runs, or Caller Ten's contest: the sound and media keys are its */
+int callerten_sound(void); /* game_callerten.c: Caller Ten holds the sound for a contest */
 const char *addon_game_name(int k);
 /* games.c: the theme's pop-up for a card game (Q2_POPUP's value), 7 + 6 * 7 + 64 * 7 + 1 bytes at
  * most */

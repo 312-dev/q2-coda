@@ -574,7 +574,8 @@ static struct game {
     int rows; /* the chooser's: its own games, then the card's */
     void *title; /* the caption the bar reads, where the theme's bar holds it */
     int engines; /* the engine's games, the chooser's rows after its own (GAMES_BUILTIN) */
-    int bar_hidden; /* an ENG_FULL game runs over the system bar, hidden meanwhile */
+    int full, box[4]; /* an ENG_FULL game's page over the whole screen; the page's own place */
+    int bar_hidden;   /* the status row hidden over an ENG_FULL game in play */
 } *g __attribute__((section(".scratch")));
 
 static int sud_started(const struct sudoku *s) {
@@ -607,26 +608,23 @@ static void changed(int game) {
     if (!g->save) g->save = timer_add(save_due, (void *)0, SAVE_MS);
 }
 
-/* An ENG_FULL game plays over the status row: the system bar (its own window, over every page) is
- * hidden while the game runs, and shown again while it is paused (the clock and battery then) or
- * gone. */
-static void bar_over(int hide) {
+/* The status row shown or hidden: the window manager paints it over the windows, so a full-screen
+ * game hides it, but for a pause, when its clock and battery show. Set only when it changes. */
+static void bar_shown(int on) {
     void *bar = *(void *const *)system_bar;
-    if (!bar || hide == g->bar_hidden) return;
-    g->bar_hidden = hide;
-    widget_set_visible(bar, !hide, 0);
-}
-static int full_screen(void) {
-    return g->screen >= ENGINE && eng_game(g->screen - ENGINE)->flags & ENG_FULL;
+    if (!bar || g->bar_hidden == !on) return;
+    g->bar_hidden = !on;
+    widget_set_visible(bar, on, 0), widget_invalidate_force(bar, 0);
 }
 
-/* The frame timer off and the wheel back to ticks. */
+/* The frame timer off and the wheel back to ticks; a full-screen game's pause shows the status
+ * row. */
 static void hold(int paused) {
+    if (g->full && paused != g->paused) bar_shown(paused != RUN);
     g->paused = paused;
     wheel_raw = 0;
     stop_timer(&g->frame);
     eng_hold();
-    bar_over(0);
 }
 
 /* A record score saved; an unfinished game never is. */
@@ -705,8 +703,8 @@ int games_live(void) { return g && (g->frame || eng_live()); }
 static void run(void) {
     g->paused = RUN;
     if (g->screen >= ENGINE) { /* its own timer and wheel (engine.c) */
+        if (g->full) bar_shown(0);
         eng_run();
-        bar_over(full_screen());
         return;
     }
     g->at = (unsigned)time_now_ms();
@@ -725,6 +723,21 @@ static void engine_held(void) {
 }
 static void engine_left(void) { to(CHOOSER); }
 
+/* An ENG_FULL game (docs/games-engine.md#full-screen): the status row hidden, the page moved over
+ * its place and the sheet, h with it (the pause's popup centres in it), the whole 375 x 320; else
+ * the page's own place again, under the bar. */
+static void full_screen(int on) {
+    if (on == g->full) return;
+    bar_shown(!on);
+    if (on)
+        for (int k = 0; k < 4; ++k) g->box[k] = I(g->page, W_X + 4 * k);
+    g->full = on;
+    widget_move_resize(g->page, on ? 0 : g->box[0], on ? 0 : g->box[1], on ? 375 : g->box[2],
+                       on ? 320 : g->box[3]);
+    g->h = on ? 320 : page_room(g->page);
+    widget_move_resize(g->sheet, 0, on ? 0 : bar_foot(g->page), 375, g->h);
+}
+
 static const char *const game_names[] = { "Games", "Sudoku", "Vortex", "Solitaire", "Snake" };
 /* The chooser or the game target, from the next loop pass. */
 static int show(const void *unused) {
@@ -732,16 +745,13 @@ static int show(const void *unused) {
     int from = g->screen;
     hold(RUN);
     if (from >= ENGINE) eng_close();
-    int full = g->target >= ENGINE && eng_game(g->target - ENGINE)->flags & ENG_FULL;
-    /* an ENG_FULL game's sheet is the whole screen, over the status row; the others' starts under it */
-    widget_move_resize(g->sheet, 0, full ? -I(g->page, W_Y) : bar_foot(g->page), 375, full ? 320 : g->h);
-    if (g->target >= ENGINE && /* no memory for its state: the list stays */
-        !eng_open(eng_game(g->target - ENGINE), g->page, g->sheet, full ? 320 : g->h, engine_held,
-                  engine_left))
-        g->target = CHOOSER;
+    const struct eng_game *game = g->target >= ENGINE ? eng_game(g->target - ENGINE) : 0;
+    full_screen(game && game->flags & ENG_FULL);
+    if (game && /* no memory for its state: the list stays */
+        !eng_open(game, g->page, g->sheet, g->h, engine_held, engine_left))
+        g->target = CHOOSER, full_screen(0);
     g->screen = g->target;
     g->picking = g->confirm = 0;
-    bar_over(full_screen());
     widget_set_visible(g->list, g->screen == CHOOSER, 0);
     widget_set_sensitive(g->list, g->screen == CHOOSER); /* hidden, its rows still took a game's taps */
     widget_set_visible(g->sheet, g->screen != CHOOSER, 0);
@@ -848,9 +858,14 @@ static void engine_key(unsigned key) {
 }
 
 /* ringnav_keydown, before stock: a running engine game's press, so it knows a held button and
- * stock makes no click of its own. Return's and a paused game's stay stock's. */
+ * stock makes no click of its own, and a Centre held for play never reaches stock's hold (Shut
+ * Down?) or the song menu's. Return's and a paused game's stay stock's. */
 int games_keydown(void *top, unsigned key) {
     if (!g || top != g->page || g->screen < ENGINE || g->paused) return 0;
+    if (key == KEY_CENTER && st.centre_hold) { /* a held Centre is the game's: no Shut Down? */
+        timer_remove(st.centre_hold);
+        st.centre_hold = 0;
+    }
     return eng_key(key, 1);
 }
 
@@ -1012,10 +1027,9 @@ static void hud(void *canvas, const char *name, unsigned v, int x, int y, int ri
  * b), in a dark box, the chosen one on the accent's bar. */
 static void popup(void *canvas, const char *title, const char *a, const char *b, int choice) {
     int top = POP_ROW + 6, h = b ? top + 2 * POP_ROW + 8 : POP_ROW + 44;
-    int sh = g->screen >= ENGINE && eng_game(g->screen - ENGINE)->flags & ENG_FULL ? 320 : g->h;
-    int x = (375 - POP_W) / 2, y = (sh - h) / 2; /* mid-sheet, an ENG_FULL game's whole screen too */
+    int x = (375 - POP_W) / 2, y = (g->h - h) / 2; /* mid-sheet, an ENG_FULL game's whole screen too */
     stock_canvas_set_fill_color(canvas, 0x80000000u); /* black at half, final */
-    canvas_fill_rect(canvas, 0, 0, 375, sh);
+    canvas_fill_rect(canvas, 0, 0, 375, g->h);
     round_box(canvas, x, y, POP_W, h, 0x1c1c1c, 12);
     frame_rect(canvas, x, y, POP_W, h, 0x3a3a3a, 12);
     text_at(canvas, title, 187, y + 4, POP_ROW, 20, rgba(0xffffff, 255), MID);
@@ -1251,8 +1265,11 @@ void games_paint(void *w, void *canvas) {
     if (!g || w != g->sheet || g->screen == CHOOSER || !P(canvas, CANVAS_LCD)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), tone = accent_tone(2);
     unsigned raw = ui_ink_raw(0);
-    if (g->screen >= ENGINE)
-        ui_ink_raw(1), eng_paint(canvas), ui_ink_raw(0), paused_popup(canvas, 0); /* its colours are final */
+    if (g->screen >= ENGINE) { /* its colours are final; an ENG_OWN_PAUSE game draws its own held look */
+        ui_ink_raw(1), eng_paint(canvas), ui_ink_raw(0);
+        if (g->paused == MENU || !(eng_game(g->screen - ENGINE)->flags & ENG_OWN_PAUSE))
+            paused_popup(canvas, 0);
+    }
     else if (HAS(SUDOKU) && g->screen == SUDOKU)
         sudoku_paint(canvas, tone);
     else if (HAS(SOLITAIRE) && g->screen == SOLITAIRE)
@@ -1267,6 +1284,7 @@ void games_paint(void *w, void *canvas) {
 
 static int closed(void *ctx, void *event) {
     hold(RUN);
+    if (g->full) bar_shown(1); /* the page goes; the status row stays */
     stop_timer(&g->timer);
     flush(0);
     eng_close();

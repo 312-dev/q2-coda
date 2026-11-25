@@ -29,7 +29,7 @@ passed()
 CAPS='/tmp/q2-addon.caps'
 m=AppMachine(); stream_rows(m); caps=bytes(m.files[CAPS])
 assert caps.endswith(b'\n') and caps.count(b'\n')==1,caps
-assert set(caps.split())=={b'playlist',b'progress',b'pages',b'library',b'goto',b'sleep',b'game',b'audio',b'sections',b'art',b'window',b'urls',b'sort',b'field',b'more',b'fav',b'now',b'catalogue',b'ratings',b'likes',b'artist',b'album',b'playlists',b'storage',b'signin',b'libsource',b'ahead',b'radio',b'status',b'holdmenu'},caps
+assert set(caps.split())=={b'playlist',b'progress',b'pages',b'library',b'goto',b'sleep',b'game',b'audio',b'sections',b'art',b'window',b'urls',b'sort',b'field',b'more',b'fav',b'now',b'catalogue',b'ratings',b'likes',b'artist',b'album',b'playlists',b'storage',b'signin',b'libsource',b'ahead',b'radio',b'status',b'holdmenu',b'clip'},caps
 m.files[CAPS]=bytearray(b'stale\n'); stream_rows(m); assert m.files[CAPS]==caps; passed()
 # Card games (addon.c, q2app game=1): Library's Games lists them, Streaming doesn't. A row runs the binary
 # over the screen; each input event reaches its socket as a text datagram instead of the UI (a held Return

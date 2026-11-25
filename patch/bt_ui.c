@@ -762,8 +762,9 @@ void bt_page(void *view, int on) {
 /* ---- Quality: Adapt to Signal, then the codecs (docs/oled-design.md#bluetooth) ----
  * [Q2POD] BTSTEPDOWN, off unless 1 (a Q2 that never saved the key is off): under Auto,
  * q2guard moves a link the radio cannot keep up with from aptX HD or aptX straight to SBC, and back
- * once it is clean, and on SBC (Auto's, or SBC HQ or SBC chosen) lowers its bitpool and raises
- * it again (q2bt.c, docs/internals.md#bluetooth-link-monitor); q2guard reads the key itself
+ * once it is clean, and on SBC (Auto's, or SBC HQ or SBC chosen) lowers its bitpool and on AAC
+ * (Auto's) its peak, and raises them again (q2bt.c, docs/internals.md#bluetooth-link-monitor);
+ * q2guard reads the key itself
  * (q2bt.h's BT_STEP_KEY, the same name: q2guard's headers are not the payload's).
  * Added before the picker's first layout and found again by its item's _bt_step on every later
  * one; no state of its own. quality_order puts it first, over a CODEC header and the choices. */

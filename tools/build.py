@@ -330,9 +330,13 @@ RADIOFETCH_SOURCES = ['radiofetch', 'radiofetch_core']
 RADIOFETCH_LIBS = ['lib/libc-2.28.so', 'lib/libm-2.28.so', 'usr/lib/libcurl.so.4.7.0']
 RADIO_DATA = 'usr/share/q2radio'
 RADIO_TABLES = ('stations.bin', 'zcta.bin')
-# The engine games' art (docs/games-engine.md#cabin-solitaire), read once when a game opens: assets/games/<name>
+# The engine games' art (docs/games-engine.md#games), read once when a game opens: each file's path under
+# GAMES_DATA, from its path under assets/
 GAMES_DATA = 'usr/share/q2games'
-GAMES_ART = ('solitaire.bin',)
+GAMES_ART = {'solitaire.bin': 'games/solitaire.bin', 'popstall/art.bin': 'popstall/art.bin',
+             'popstall/Bungee-OFL.txt': 'popstall/Bungee-OFL.txt', 'callerten.bin': 'games/callerten.bin',
+             'callerten-fonts.txt': 'games/callerten-fonts.txt', 'embergarden.bin': 'games/embergarden.bin'}
+GAMES_DIRS = sorted({f'{GAMES_DATA}/{n.rpartition("/")[0]}' for n in GAMES_ART if '/' in n})
 # Card apps the firmware carries (docs/internals.md#bundled-apps): id -> (version, release zip, its size, its
 # SHA-256, builtin), each the zip its release ships, read from --apps (APPS_DIR). Its .<id>/ files go
 # to BUNDLED_DIR/<id> (patch/addon.c BUNDLED) with a version file, a bundle file naming the zip and the program's
@@ -342,8 +346,8 @@ GAMES_ART = ('solitaire.bin',)
 # updates are firmware updates. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
 BUNDLED_APPS = {
-    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-141cf4d.zip', 3733570,
-                 'c8e71975289bcf37d4d2a32b51847b34dfba8c717f56bf32f211d947328f5bc1', True),
+    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-9065736.zip', 3738531,
+                 '0592db9cc02a6d611f911722c04e4251d57e9bc953ce14ad2a2f22effd085ef3', True),
 }
 APPS_DIR = pathlib.Path.home()/'.cache/q2-apps'
 S90PLAY = 'etc/init.d/S90play'
@@ -672,15 +676,22 @@ BT_SILENCE, BT_SILENCE_SAMPLES = 0x450400, 192000
 # (address, stock word, patched with: j or jal to a bt_silence.S symbol, or a word):
 # poll's timeout, poll's timeout path (its delay slot takes the moved move a1,zero), the PCM read,
 # and the signal jump table's PAUSE entry: demo pauses hciplayer before some skips, so PAUSE takes
-# Drain's case (a 100 ms poll, then the fill) instead of polling again unbounded; then SBC's bitpool and the write MTU.
+# Drain's case (a 100 ms poll, then the fill) instead of polling again unbounded; then SBC's bitpool, the write MTU
+# and AAC's peak (its encoder thread's one aacEncInfo and its loop's aacEncEncode).
 BT_SILENCE_SITES = ((0x41465c, 0x8e460030, 'j', 'timeout'), (0x414684, 0x00002825, 'j', 'fill'),
                     (0x414688, 0x0c10c2b0, None, 0x00002825), (0x414754, 0x0c105053, 'jal', 'read'),
                     (0x42d09c, 0x0041463c, None, 0x004147a0), (0x406580, 0x0c100e38, 'jal', 'sbc_bp'),
-                    (0x40abf8, 0x0c10c044, 'jal', 'mtu_clamp'))
+                    (0x40abf8, 0x0c10c044, 'jal', 'mtu_clamp'), (0x417268, 0x0c10c260, 'jal', 'aac_info'),
+                    (0x4175a4, 0x0c10c2d8, 'jal', 'aac_rate'))
 # SBC's bitpool (docs/internals.md#bluetooth-link-monitor): the SBC encoder thread's one sbc_encode call
 # (0x406580, a site above) goes through bt_silence.S's sbc_bp, which takes the bitpool from the byte at
 # BT_SBC_POOL, the lesser of it and the thread's own; q2guard writes it (patch/q2bt.h's BT_SBC_POOL, the same).
 BT_SBC_POOL = BT_SILENCE + 0x200
+# AAC's peak (docs/internals.md#bluetooth-link-monitor, AAC peak): the AAC encoder thread's aacEncInfo call (0x417268)
+# goes through bt_silence.S's aac_info, which publishes the stream's own bitrate and mode, and its loop's aacEncEncode
+# (0x4175a4) through aac_rate, which sets fdk-aac's peak (VBR) or bitrate (CBR) to the byte at BT_AAC_RATE when that
+# is below the stream's own; q2guard writes it (patch/q2bt.h's BT_AAC_RATE, the same).
+BT_AAC_RATE = BT_SBC_POOL + 4
 # The A2DP write MTU (docs/internals.md#bluetooth-link-monitor, Packet size): transport_acquire_bt_a2dp's
 # g_dbus_message_get_unix_fd_list call (0x40abf8, the last site above), whose delay slot stores Acquire's write MTU,
 # goes through bt_silence.S's mtu_clamp, which cuts it to BT_MTU_MAX for every codec but LDAC. The chip's
@@ -2209,6 +2220,7 @@ FUNCTIONS = {
  'wifi_switch': ('int', 'int'),
  'networkGetConnectStatus': ('int', 'void'),  # 0 no link (networkStop), above 0 connected
  'mclGetPlayType': ('int', 'void'),  # the queue's type: 2, 3, 0xf1 and 0xf2 stream (on_wm_timer_networkstatus)
+ 'mcl_reply_take_by_key': ('char *', 'const char *'),  # PRIVATE_FUNCTIONS: a player reply by name, malloc'd, or 0
  # Settings > Wi-Fi's flows (wifi_flows.c): a scan record's join and Forget by its index in wifi_showlist,
  # whether a network is saved, wpa_supplicant's disconnect, and the saved list dropped and read again
  'wifi_action_connect': ('int', 'int'), 'wifi_action_deleterecord': ('int', 'int'),
@@ -2228,6 +2240,9 @@ PRIVATE_FUNCTIONS = {
     'quick_lock': HOOKS['quick_lock'][0],
     "playlist_rebuild": HOOKS['playlist_rebuild'][0],  # picker init and re-entry rebuild all rows
     "stock_search": 0x5350d4,
+    # takes a player reply by its name from demo's reply deque under its mutex, a malloc'd copy of its argument or 0;
+    # never waits (game_callerten.c: the clip's player-status answers)
+    'mcl_reply_take_by_key': 0x5ba538,
     "slide_menu_item_width": 0x605ed0,
     "slide_menu_on_scroll_done": 0x6064e4,
     "mcl_preload": HOOKS['mcl_preload'][0],
@@ -2368,7 +2383,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_volume.c', 'output_rule.c', 'usb_record.c', 'usb_ui.c', 'usb_car.c', 'standby_usb.c', 'card_release.c', 'adb_trust.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'localsend_ui.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'search_bar.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'album_cover.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'game_solitaire.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'centre_menu.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_pair.c', 'bt_ui.c', 'bt_trace.c', 'bt_detail.c', 'bt_vol_limit.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'vol_pill.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'np_rate.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c', 'autozone.c', 'player_push.c', 'card_watch.c', 'offline.c', 'radio_tuner.c', 'radio_pane.c', 'bt_cover.c', 'now_source.c', 'ui_watch.c', 'output_fail.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_volume.c', 'output_rule.c', 'usb_record.c', 'usb_ui.c', 'usb_car.c', 'standby_usb.c', 'card_release.c', 'adb_trust.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'localsend_ui.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'search_bar.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'album_cover.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_callerten.c', 'game_popstall.c', 'game_solitaire.c', 'game_embergarden.c', 'game_sudoku.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'centre_menu.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_pair.c', 'bt_ui.c', 'bt_trace.c', 'bt_detail.c', 'bt_vol_limit.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'vol_pill.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'np_rate.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c', 'autozone.c', 'player_push.c', 'card_watch.c', 'offline.c', 'radio_tuner.c', 'radio_pane.c', 'bt_cover.c', 'now_source.c', 'ui_watch.c', 'output_fail.c']
 
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
@@ -2606,6 +2621,7 @@ def patch_bluealsa(raw):
     words += [0] * ((BT_SILENCE - BT_DROP_PAYLOAD) // 4 - len(words))
     code, sym = bt_silence()
     check(sym['sbc_pool'] == BT_SBC_POOL, 'SBC bitpool bytes not at BT_SBC_POOL')
+    check(sym['aac_ask'] == BT_AAC_RATE, 'AAC peak bytes not at BT_AAC_RATE')
     payload = struct.pack(f'<{len(words)}I', *words) + code
     append_payload(image, payload, BT_DROP_PAYLOAD, len(payload), 'bluealsa')
     struct.pack_into('<2I', image, fileoff(raw, BT_DROP),
@@ -3106,7 +3122,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     lib_dir = need(re.search(rb'^usr/lib D (\d+) (\d+) (\d+) (\d+)$', p, re.M), 'Missing usr/lib pseudo inode')
     program, data_file = need(inode(p, HELPER_LIKE.encode()), 'Missing program inode'), need(inode(p, b'etc/hosts'), 'Missing etc/hosts inode')
     bundled = {}
-    for d in [BUNDLED_DIR, *(f'{BUNDLED_DIR}/{i}' for i in BUNDLED_APPS), RADIO_DATA, GAMES_DATA]:
+    for d in [BUNDLED_DIR, *(f'{BUNDLED_DIR}/{i}' for i in BUNDLED_APPS), RADIO_DATA, GAMES_DATA, *GAMES_DIRS]:
         p += d.encode() + b' D ' + b' '.join(lib_dir.groups()) + b'\n'
         player_added.append([d.encode(), b'D', *lib_dir.groups()])
     for app_id in BUNDLED_APPS:
@@ -3208,7 +3224,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                                                         RADIOFETCH_LIBS)),
                                **{f'{RADIO_DATA}/{n}': ('etc/hosts', (ROOT/'assets/radio'/n).read_bytes())
                                   for n in RADIO_TABLES},
-                               **{f'{GAMES_DATA}/{n}': ('etc/hosts', (ROOT/'assets/games'/n).read_bytes()) for n in GAMES_ART},
+                               **{f'{GAMES_DATA}/{n}': ('etc/hosts', (ROOT/'assets'/src).read_bytes())
+                                  for n, src in GAMES_ART.items()},
                                GUEST_DBUS: ('etc/dbus-1/system.d/bluealsa.conf', (ROOT/'assets/dbus/bluealsa-sink.conf').read_bytes()),
                                GUEST_HOTSPOT: (HELPER_LIKE, (ROOT/'patch/q2_hotspot.sh').read_bytes()),
                                **{path: (FONT, data) for path, (data, _) in fonts.items()},
