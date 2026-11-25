@@ -216,6 +216,19 @@ def test_wired_headphones_coming_or_going_repaint_the_row(fw, row):
     assert row.sync_sig() == 0
 
 
+def test_a_slot_that_changes_on_stock_s_tick_repaints_the_row(fw, row):
+    """Stock's showface each second (ringnav_showface): a slot that changed (here wired headphones plugged in) repaints
+    the bar then, not at whatever paints it next; a tick with nothing new repaints nothing."""
+    jacks(fw)
+    row.sync()
+    row.dirty.clear()
+    row.sync()
+    assert row.dirty == []
+    jacks(fw, po=1)
+    row.sync()
+    assert row.dirty == [None]
+
+
 def test_the_slot_s_kind_repaints_the_row(fw, row):
     bt_link(fw, 1, None, None, 1)
     row.sync_sig()

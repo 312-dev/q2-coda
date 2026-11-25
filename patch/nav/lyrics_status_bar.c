@@ -258,8 +258,8 @@ static int slider_page(void *top);
  * CLOCK_BESIDE past the widest clock's text (status_row.c status_strip_room), and scroll there when
  * they run past it, so the clock never moves. Where Home in Split's art runs up under the row the
  * clock is in Text Primary, as it was over the art. The box is sized to the text as measured in the
- * bar's face, with hscroll_label's 2 px margins, so the label's own alignment plays no part. Runs in
- * the bar's background paint, before the clock draws; a move repaints the bar after. */
+ * bar's face, with hscroll_label's 2 px margins, so the label's own alignment plays no part. Runs
+ * in the bar's background paint, before the clock draws; a move repaints the bar after. */
 #define CLOCK_BESIDE 7 /* the text's box: 8 px of ground between the digits' ink and the slot */
 static int clock_width(void *canvas, const unsigned *s) {
     int n = (int)wide_len(s), px = theme()->font_px[ROLE_BAR];
@@ -402,18 +402,18 @@ static void bar_sync(void *bar) {
  * relayouts a second and a frame with EQ drawn in the play icon's place. Correct it before paint,
  * dark or not, so a wake never shows stock's hidden icon; the badge waits for paint. Stock writes
  * the battery into label_battery and img_battery, which bar_sync hides, so their writes repaint
- * nothing and a new level showed only when something else painted the bar: a new level or charge
- * repaints the bar here, outside a paint, while lit (a wake paints it all). */
+ * nothing, and the status row's slots (status_row.c) are the payload's own paint: a new level or
+ * charge, or a slot that changed (Wi-Fi's level, a headset, wired headphones, the lock), repaints
+ * the bar here, outside a paint, while lit (a wake paints it all). */
 int ringnav_showface(void *bar) {
     int result = stock_showface_trampoline(bar);
-    bar_state_sync(bar); /* no I/O, and a relayout waits for a paint */
+    int changed = bar_state_sync(bar); /* no I/O, and a relayout waits for a paint */
     if (st.bar_pct && st.bar_icon && g_backlight_status) {
         unsigned key = battery_now();
-        if (key != st.batt_key) {
-            st.batt_key = key; /* what this repaint shows: bar_sync has nothing more to repaint */
-            widget_invalidate_force(bar, (void *)0);
-        }
+        if (key != st.batt_key)
+            st.batt_key = key, changed = 1; /* what the repaint shows: bar_sync has none to do */
     }
+    if (changed && g_backlight_status) widget_invalidate_force(bar, (void *)0);
     return result;
 }
 

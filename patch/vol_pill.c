@@ -18,12 +18,12 @@
  * The same pill says a short thing that happened, a glyph and words (status_pill_show: adb's
  * "MacBook-Pro allowed", adb_trust.c), as wide as they are (VP_MSG_GLYPH, VP_SPK_GAP, the words
  * in Inter Regular 15, VP_PAD from each end), from the same left, or where the slots leave too
- * little ending VP_CLEAR short of them; it shows on Now Playing too (no volume), holds and fades as the volume's
- * does, and a volume change takes its place. */
+ * little ending VP_CLEAR short of them; it shows on Now Playing too (no volume), holds and fades as
+ * the volume's does, and a volume change takes its place. */
 #include "navigation.h"
 
-#define VP_W 199        /* the widest pill */
-#define VP_MIN_W 141    /* narrower, it leaves the clock's place and ends at the slots' edge */
+#define VP_W 199     /* the widest pill */
+#define VP_MIN_W 141 /* narrower, it leaves the clock's place and ends at the slots' edge */
 #define VP_X (STATUS_ROW_INSET - VP_PAD) /* its left: the speaker where the clock's text starts */
 #define VP_H 30         /* rows 8 to 37 on the row's centre, 23 */
 #define VP_CLEAR 8      /* the ground left before the leftmost status slot, as the clock's */
@@ -34,7 +34,7 @@
 #define VP_NUM_W 32     /* the number's column: three tabular digits at 15 px, "100" */
 #define VP_MSG_GLYPH 15 /* a message's glyph, tools/art.py ADB_PILL_PX */
 #define VP_MSG_PX TYPE(15)
-#define VP_MSG_LEFT 24  /* the furthest left it goes, the text column's */
+#define VP_MSG_LEFT 24 /* the furthest left it goes, the text column's */
 #define VP_HOLD_MS 2000
 #define VP_FADE_MS 250
 
@@ -50,13 +50,15 @@ static struct {
     char glyph[24], msg[48]; /* a message instead of the volume, or "" */
 } vp __attribute__((section(".scratch")));
 
-/* The pill's box in the bar's pixels, from VP_X, the clock's place: VP_W wide when the slots leave it
- * room, narrower down to VP_MIN_W to end VP_CLEAR short of the leftmost slot, then VP_MIN_W ending
- * there, never nearer the screen's left than VP_MSG_LEFT. A message hugs its words from VP_X, or
- * ends VP_CLEAR short of the slots when they leave too little, its words cut. */
+/* The pill's box in the bar's pixels, from VP_X, the clock's place: VP_W wide when the slots leave
+ * it room, narrower down to VP_MIN_W to end VP_CLEAR short of the leftmost slot, then VP_MIN_W
+ * ending there, never nearer the screen's left than VP_MSG_LEFT. A message hugs its words from
+ * VP_X, or ends VP_CLEAR short of the slots when they leave too little, its words cut. */
 static rect_t vp_box(void) {
     int edge = status_slots_left() - VP_CLEAR, x = VP_X,
-        w = vp.msg[0] ? (vp.msg_w ? vp.msg_w : VP_W) : edge - x < VP_W ? edge - x : VP_W;
+        w = vp.msg[0]         ? (vp.msg_w ? vp.msg_w : VP_W)
+            : edge - x < VP_W ? edge - x
+                              : VP_W;
     if (vp.msg[0] ? w > edge - x : w < VP_MIN_W) {
         if (!vp.msg[0]) w = VP_MIN_W;
         x = edge - w < VP_MSG_LEFT ? VP_MSG_LEFT : edge - w;

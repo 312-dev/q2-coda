@@ -15,21 +15,21 @@
  * shown, so Home always has a way back.
  *
  * Under OLED, Center held LR_HOLD_MS on the Library page or Home's main list, or a finger held as
- * long on a row, enters the editor: the bar's hidden title reads "Edit Library" or "Edit Home", every row
- * the user can show shows (a hidden one dimmed to Text Tertiary), each with a check circle at its
- * left, its words moved right of it, each row's chevron gives way to a grip, and a hint shows under
- * the rows: the list ends LR_ROOM higher, and its rows past that end and above its top fade as
- * every list's do, into the hint's band (lr_edit_room, lr_edit_foot). Home is laid out as Full
- * while it is open (theme_engine.c ipod_home). A finger on a row's grip (the last LR_GRIP_ZONE px)
- * drags it at once, a finger held on a row drags it after LR_HOLD_MS, the row held inside the
- * list's box; the rows it passes slide aside over LR_SLIDE_MS (at once under Reduce Motion), the
- * list scrolls while the finger is within LR_EDGE px of its top or bottom, and the lift puts the
- * row in its place and saves. Center lifts the selected row (on a raised card in the selection
- * bar's box, its words in Inter Medium, nothing of it moved), the wheel carries it, Center puts it
- * down and saves; Return while it is carried puts it back where it was. Play/Pause, or a tap on a
- * row's circle (its first LR_VIS_ZONE px), shows or hides the row. Return, or Center held again,
- * saves and leaves; the rows hidden then leave the list. A row the editor doesn't show keeps its
- * place: the shown rows' new order fills the places they held (lr_merge). */
+ * long on a row, enters the editor: the bar's hidden title reads "Edit Library" or "Edit Home",
+ * every row the user can show shows (a hidden one dimmed to Text Tertiary), each with a check
+ * circle at its left, its words moved right of it, each row's chevron gives way to a grip, and a
+ * hint shows under the rows: the list ends LR_ROOM higher, and its rows past that end and above its
+ * top fade as every list's do, into the hint's band (lr_edit_room, lr_edit_foot). Home is laid out
+ * as Full while it is open (theme_engine.c ipod_home). A finger on a row's grip (the last
+ * LR_GRIP_ZONE px) drags it at once, a finger held on a row drags it after LR_HOLD_MS, the row held
+ * inside the list's box; the rows it passes slide aside over LR_SLIDE_MS (at once under Reduce
+ * Motion), the list scrolls while the finger is within LR_EDGE px of its top or bottom, and the
+ * lift puts the row in its place and saves. Center lifts the selected row (on a raised card in the
+ * selection bar's box, its words in Inter Medium, nothing of it moved), the wheel carries it,
+ * Center puts it down and saves; Return while it is carried puts it back where it was. Play/Pause,
+ * or a tap on a row's circle (its first LR_VIS_ZONE px), shows or hides the row. Return, or Center
+ * held again, saves and leaves; the rows hidden then leave the list. A row the editor doesn't show
+ * keeps its place: the shown rows' new order fills the places they held (lr_merge). */
 #include "navigation.h"
 
 #define LR_FILE "/mnt/data/ringnav-library-order"

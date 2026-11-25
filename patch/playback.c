@@ -107,8 +107,8 @@ extern int stock_load_trampoline(void *, int, int), stock_next_trampoline(int),
     stock_memory_trampoline(void *), stock_savequeue_trampoline(void), stock_change_trampoline(int),
     stock_seek_time_trampoline(int), stock_seek_start_trampoline(void),
     stock_reboot_trampoline(void), stock_checkfw_trampoline(void *, void *),
-    stock_speed_trampoline(int), stock_open_preload_trampoline(void), stock_start_queue_trampoline(int),
-    stock_player_start_trampoline(void *, int, int, int);
+    stock_speed_trampoline(int), stock_open_preload_trampoline(void),
+    stock_start_queue_trampoline(int), stock_player_start_trampoline(void *, int, int, int);
 extern void *staged(int (*)(void *), void *, int *);
 extern int album_before(const void *, const void *), folder_cmp(void *, void *),
     album_only(void *, void *, int);

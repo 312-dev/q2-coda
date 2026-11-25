@@ -1927,7 +1927,8 @@ static int ss_closed(void *ctx, void *event) {
 
 /* The page and its sheet, caption its name in the bar's hidden title. */
 static void ss_sheet(const char *caption) {
-    void *title = text(ss.page, 0, bar_foot(ss.page), 375, 28); /* the bar's hidden title reads it */
+    void *title =
+        text(ss.page, 0, bar_foot(ss.page), 375, 28); /* the bar's hidden title reads it */
     widget_set_text_utf8(title, caption);
     widget_set_name(title, PAGE_TITLE);
     widget_set_visible(title, 0, 0);

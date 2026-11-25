@@ -341,8 +341,7 @@ static const char *bar_title_of(void *win, void **label) {
     if (msg_title(name)) return msg_title(name); /* the library scan's (scan_page.c) */
     if (!tk_strcmp(name, "qrcode_page")) return addon_qr_title(win); /* the card app's name */
     if (!tk_strcmp(name, "search_dialog")) return "Search"; /* stock's toolbar has no label */
-    if (!tk_strcmp(name, "statusbar_dialog"))
-        return "";                       /* Control Center: no name, as Home's */
+    if (!tk_strcmp(name, "statusbar_dialog")) return "";    /* Control Center: no name, as Home's */
     if (artist_local_on(win)) return ""; /* the design's artist page: the header names it */
     void *nav = widget_lookup(win, "view_navbar", 1);
     if (nav) {
