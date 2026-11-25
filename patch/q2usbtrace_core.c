@@ -159,7 +159,7 @@ static const char *cycle_type(const struct ut_cycle *c) {
 
 static void cycle_close(struct trace *tr, long long t) {
     struct ut_cycle *c = &tr->cyc;
-    char a[32], b[32], d[32], e[32], f[32], g[32], h[32], i[32], j[32], k[32], l[32], m[32], n[32], o[32];
+    char a[32], b[32], d[32], e[32], f[32], g[32], h[32], i[32], j[32], k[32], l[32], m[32], n[32], o[32], p[32];
     const char *stock = c->stock_grants ? "grant" : "none", *shadow = c->shadow_grants ? "grant" : "none";
     if (!c->stock_grants != !c->shadow_grants) {
         trace_line(tr, t, "shadow: disagree in cycle %d: stock=%s at %s, shadow=%s at %s", c->n, stock,
@@ -168,9 +168,9 @@ static void cycle_close(struct trace *tr, long long t) {
     }
     const char *type = cycle_type(c);
     trace_line(tr, t,
-               "cycle n=%d type=%s from=%s vbus+=%s vbus-=%s id-=%s id+=%s on1=%s addr=%s conf=%s dev+=%s dev-=%s "
+               "cycle n=%d at=%s type=%s from=%s vbus+=%s vbus-=%s id-=%s id+=%s on1=%s addr=%s conf=%s dev+=%s dev-=%s "
                "pcm+=%s stock-on=%s stock-off=%s shadow-on=%s shadow-replug=%s stock=%s shadow=%s %s%s",
-               c->n, type, c->start_state, rel(a, c->vbus_on, c->start), rel(b, c->vbus_off, c->start),
+               c->n, ts(p, c->start), type, c->start_state, rel(a, c->vbus_on, c->start), rel(b, c->vbus_off, c->start),
                rel(d, c->id_low, c->start), rel(e, c->id_high, c->start), rel(f, c->online1, c->start),
                rel(g, c->addr, c->start), rel(h, c->conf, c->start), rel(i, c->dev_add, c->start),
                rel(j, c->dev_rm, c->start), rel(k, c->pcm_add, c->start), rel(l, c->stock_on, c->start),

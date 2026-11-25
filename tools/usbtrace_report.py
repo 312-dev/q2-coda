@@ -119,14 +119,17 @@ class Cycle:
     n: int
     summary: dict[str, str]
     lines: list[Line] = field(default_factory=list)
+    closed: int = 0  # the summary's time: the cycle's quiet end
 
     @property
     def start(self) -> int:
-        return self.lines[0].t if self.lines else 0
+        """The cycle's start as the tracer counted it (its `at`), else its first line's time."""
+        at = stamp(self.summary.get('at', ''))
+        return at if at is not None else self.lines[0].t if self.lines else 0
 
     @property
     def end(self) -> int:
-        return self.lines[-1].t if self.lines else 0
+        return max(self.lines[-1].t if self.lines else 0, self.closed)
 
     @property
     def bad(self) -> bool:
@@ -145,7 +148,8 @@ def cycles(lines: list[Line]) -> list[Cycle]:
             continue
         f = ln.fields()
         verdict = ' '.join(w for w in ln.rest.split() if '=' not in w)
-        out.append(Cycle(int(f.get('n', '0')), {**f, 'verdict': verdict}, [p for p in pending if p.kind != 'start']))
+        out.append(Cycle(int(f.get('n', '0')), {**f, 'verdict': verdict}, [p for p in pending if p.kind != 'start'],
+                         ln.t))
         pending = []
     rest = [p for p in pending if p.kind not in ('start', 'clock')]
     if any(p.kind in ('e', 'u', 'udc', 'stock') for p in rest):

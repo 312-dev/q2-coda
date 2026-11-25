@@ -62,7 +62,7 @@ def L(tmp_path):
                     *(ROOT / f'patch/{n}.c' for n in ('q2usbtrace', 'q2usbtrace_core', 'usb_fsm', 'card_store')),
                     ROOT / 'test/unit/q2usbtrace_host.c', '-o', out], check=True)
     lib = C.CDLL(str(out))
-    lib.root = tmp_path / 'root'
+    lib.root = tmp_path / 'root'  # type: ignore[attr-defined]  # where PEQ_ROOT put the card
     (lib.root / 'mnt/mmc').mkdir(parents=True)  # the card's mount point
     lib.q2usbtrace_main.argtypes = [C.c_int, C.c_void_p]
     return lib
@@ -289,7 +289,9 @@ def test_its_device_calls_cannot_write_to_a_device():
     assert 'mmap(0, len, UT_PROT_READ, UT_MAP_SHARED' in device and len(re.findall(r'\bmmap\(', device)) == 1
     body = re.sub(r'int t_append\(.*?\n}\n', '', device, flags=re.S)
     assert 'write(' not in body and 'O_WRONLY' not in body and 'O_RDWR' not in body
-    t_append = re.search(r'int t_append\(.*?\n}\n', device, re.S).group()
+    found = re.search(r'int t_append\(.*?\n}\n', device, re.S)
+    assert found
+    t_append = found.group()
     assert re.findall(r'open\(path, ([^)]*)\)', t_append) == ['O_WRONLY | O_APPEND | O_CLOEXEC']
     every = ''.join((ROOT / f'patch/{n}').read_text() for n in ('q2usbtrace.c', 'q2usbtrace_core.c', 'q2usbtrace.h'))
     every = re.sub(r'/\*.*?\*/', '', every, flags=re.S)  # the code, not what its comments say it never does
