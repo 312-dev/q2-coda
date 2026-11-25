@@ -16,6 +16,8 @@ static struct eng {
     int ticks, fast, tx, ty;
     int rects, rect[ENG_RECTS][4]; /* x0 y0 x1 y1 on the sheet */
     unsigned steps, frames;        /* counted: steps taken, frames that painted */
+    unsigned second;               /* ENG_CLOCK's timer while the frame timer is off */
+    unsigned play, play_at, input_at; /* play time (ms), when it was last counted, the last input */
     long long state[];             /* the game's, aligned for anything */
 } *en __attribute__((section(".scratch")));
 
@@ -99,12 +101,66 @@ int eng_save(const char *name, void *buf, unsigned size, unsigned magic) {
     return 0;
 }
 
+/* Play time to now: the part up to ENG_REST_MS past the last input, while the game runs. */
+static void count_play(struct eng *e, unsigned now) {
+    unsigned cap = e->input_at + ENG_REST_MS, to = (int)(now - cap) < 0 ? now : cap;
+    if (e->running && (int)(to - e->play_at) > 0) e->play += to - e->play_at;
+    e->play_at = now;
+}
+unsigned eng_play_ms(void) {
+    count_play(en, (unsigned)time_now_ms());
+    return en->play;
+}
+
+/* The rects the step marked, to the sheet. */
+static void flush(struct eng *e) {
+    e->frames += e->rects != 0;
+    for (int k = 0; k < e->rects; ++k) {
+        int *r = e->rect[k], box[4] = { r[0], r[1], r[2] - r[0], r[3] - r[1] };
+        widget_invalidate_force(e->sheet, box);
+    }
+    e->rects = 0;
+}
+
 static int eng_frame(const void *unused);
+static int eng_second(const void *unused);
+/* An ENG_CLOCK game at rest: its second timer on. */
+static void tick(struct eng *e) {
+    if (e->running && !e->timer && !e->second && e->game->flags & ENG_CLOCK)
+        e->second = timer_add(eng_second, 0, ENG_SECOND_MS);
+}
+/* The screen off or another window on top: the game is held (games.c), the passing timer ending. */
+static int covered(struct eng *e) {
+    if (g_backlight_status && window_manager_get_top_window(window_manager()) == e->page) return 0;
+    e->held();
+    return 1;
+}
+
+/* ENG_CLOCK's pass at rest: a step with no input, its rects painted (the shown time's); the frame
+ * timer again if it starts something moving. The screen off, another window or ENG_REST_MS past
+ * the last input ends it: nothing wakes the loop for a clock that stands. */
+static void arm(void);
+static int eng_second(const void *unused) {
+    struct eng *e = en;
+    struct eng_input in = { 0 };
+    unsigned id = e->second;
+    e->second = 0; /* ending, unless it repeats: no timer to remove */
+    if (covered(e)) return 0;
+    int moving = e->game->step(e->state, &in);
+    ++e->steps;
+    flush(e);
+    if (moving) return arm(), 0;
+    if ((int)((unsigned)time_now_ms() - e->input_at) >= ENG_REST_MS) return 0;
+    e->second = id;
+    return 8; /* RET_REPEAT */
+}
+
 /* The frame timer on, its first pass a step: a turn-based game's answer to a key comes with the
  * next pass of the loop. */
 static void arm(void) {
     struct eng *e = en;
     if (e->timer || !e->running) return;
+    stop_timer(&e->second);
     e->at = (unsigned)time_now_ms();
     e->first = 1;
     e->timer = timer_add(eng_frame, 0, ENG_TIMER_MS);
@@ -117,11 +173,10 @@ static void arm(void) {
  * The screen off or another window on top pauses. */
 static int eng_frame(const void *unused) {
     struct eng *e = en;
-    if (!g_backlight_status || window_manager_get_top_window(window_manager()) != e->page) {
-        e->timer = 0; /* ending: no timer to remove */
-        e->held();
-        return 0;
-    }
+    unsigned id = e->timer;
+    e->timer = 0; /* ending: no timer to remove */
+    if (covered(e)) return 0;
+    e->timer = id;
     unsigned now = (unsigned)time_now_ms(), gap = now - e->at;
     int n, moving = 0;
     e->at = now;
@@ -141,22 +196,24 @@ static int eng_frame(const void *unused) {
     if (e->game->flags & ENG_RAW) in.wheel = -__sync_lock_test_and_set(&wheel_travel, 0);
     e->ticks = e->fast = 0;
     e->pressed = e->released = 0;
-    if (in.wheel || in.ticks || in.pressed || in.released) eng_awake();
+    if (in.wheel || in.ticks || in.pressed || in.released) {
+        eng_awake();
+        count_play(e, now); /* the rest before this input is counted to its cap, then starts over */
+        e->input_at = now;
+    }
     for (int k = 0; k < n && !e->quit; ++k) {
         moving = e->game->step(e->state, &in);
         in.wheel = in.ticks = in.fast = 0;
         in.pressed = in.released = 0;
     }
     e->steps += (unsigned)n;
-    e->frames += e->rects != 0;
-    for (int k = 0; k < e->rects; ++k) {
-        int *r = e->rect[k], box[4] = { r[0], r[1], r[2] - r[0], r[3] - r[1] };
-        widget_invalidate_force(e->sheet, box);
-    }
-    e->rects = 0;
+    flush(e);
     if (e->quit || ((e->game->flags & ENG_STILL) && !moving)) {
         e->timer = 0;
-        if (e->quit) e->left();
+        if (e->quit)
+            e->left();
+        else
+            tick(e); /* at rest: an ENG_CLOCK game's second timer */
         return 0;
     }
     return 8;
@@ -216,6 +273,7 @@ void eng_run(void) {
     struct eng *e = en;
     if (!e || e->running) return;
     e->running = 1;
+    e->play_at = e->input_at = (unsigned)time_now_ms(); /* back from a pause: as an input */
     e->acc = 0;
     e->keys = e->pressed = e->released = 0;
     e->ticks = e->fast = 0;
@@ -227,9 +285,11 @@ void eng_run(void) {
 void eng_hold(void) {
     struct eng *e = en;
     if (!e || !e->running) return;
+    count_play(e, (unsigned)time_now_ms());
     e->running = 0;
     wheel_raw = WHEEL_TICKS;
     stop_timer(&e->timer);
+    stop_timer(&e->second);
     if (e->game->pause) e->game->pause(e->state);
 }
 

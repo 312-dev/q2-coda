@@ -12,7 +12,7 @@ import pytest
 
 import game_art
 from host import ROOT
-from test_engine import (CENTER, E_CENTRE, E_NEXT, E_PLAY, E_PREV, E_TOUCH, ENGINE, NEXT, PLAY, PREV, RETURN, SHEET, Eng,
+from test_engine import (engine, seconds, CENTER, E_CENTRE, E_NEXT, E_PLAY, E_PREV, E_TOUCH, ENGINE, NEXT, PLAY, PREV, RETURN, SHEET, Eng,
                          GameDef, Input, api, screen)
 from conftest import O
 from test_games import BAR, PAGE, SHIPPED, Canvas, Page, fnv1a, paint
@@ -221,6 +221,7 @@ TRACK, NOTE_Y, BLOT, BLOT_IN, STRIP = 0xb9ae98, 0xffe873, 0x2e5a48, 0x3a6e58, 0x
 B_PEER, B_TWIN, B_CUR, B_WAVE = 1, 2, 4, 8
 K_CLUE, K_ENTRY, K_CLASH = 1, 2, 3
 MARGIN = (337, 60, 38, 210)
+CLOCK = (337, 205, 38, 17)  # the margin's time line, repainted alone when only the seconds change
 
 
 class Art:
@@ -311,7 +312,7 @@ def reddish(v):
 def test_a_fresh_game_opens_on_the_levels_and_rests(fw):
     g = Game(fw)
     s = g.s
-    assert g.game.name == b'Evening Puzzle' and g.game.flags == 6 and g.game.size == C.sizeof(Sudoku) <= 24 * 1024  # ENG_STILL, ENG_FULL; 2 KB and the masks unpacked
+    assert g.game.name == b'Evening Puzzle' and g.game.flags == 2 | 4 | 16 and g.game.size == C.sizeof(Sudoku) <= 24 * 1024  # ENG_STILL, ENG_FULL, ENG_CLOCK; 2 KB and the masks unpacked
     assert C.sizeof(Save) == 436 and (s.mode, s.sel) == (CHOOSE, GENTLE)
     assert not g.e['eng_live']()  # the first frame painted; nothing moves: no timer
     assert fw.var('wheel_raw', C.c_int).value == 0  # ticks
@@ -874,12 +875,13 @@ def test_the_margin_repaints_when_its_second_tally_or_slips_change(made):
     g.frame()
     s.v.elapsed = 60 * 754
     g.key(NEXT)
-    assert covers(g.frame(), *MARGIN)  # 12:34, the rows' rects before it
+    frame = g.frame()
+    assert covers(frame, *CLOCK) and not covers(frame, *MARGIN)  # 12:34: the time's line, the rows' rects before it
     px = draw(g)
     assert art.written(px, art.say('12:34', 'A_HAND', 356, 218, 1), PEN)
     assert art.written(px, art.say('GENTLE', 'A_CAPS', 356, 235, 1), SOFT)
     g.key(NEXT)
-    assert not covers(g.frame(), *MARGIN)  # the same second
+    assert not covers(g.frame(), *CLOCK)  # the same second
     s.v.ent[:] = [0 if s.v.clue[i] or s.v.sol[i] != 5 else 5 for i in range(81)]
     g.key(NEXT)
     assert covers(g.frame(), *MARGIN) and g.fn['tally'](C.addressof(s)) == 1 << 4  # every 5: struck
@@ -916,17 +918,19 @@ def test_a_time_reads_as_minutes_and_seconds(fw, steps, text):
     g.close()
 
 
-def test_time_counts_the_clock_between_steps_a_rest_five_minutes_at_most_and_stops_at_99_hours(made):
+def test_time_counts_play_alone_a_rest_five_minutes_after_the_last_input_at_most_and_stops_at_99_hours(made):
     g, s = made, made.s
     s.v.elapsed = s.owed = 0
     g.step()
+    played = engine(g.fw).play  # since the engine's last input (its open, here)
     g.step(rested=10_000)  # ten seconds at rest: 600 steps
     assert s.v.elapsed == 600
     g.step(rested=51)  # 3.06 steps: the part is kept for the next
     assert s.v.elapsed == 603 and s.owed == 60
-    g.step(rested=REST_MS * 4)  # a rest the screen may have gone dark in counts five minutes
-    assert s.v.elapsed == 603 + REST_MS * 60 // 1000
+    g.step(rested=REST_MS * 4)  # walked away with the screen on: counted to five minutes after the last input
+    assert engine(g.fw).play == REST_MS and s.v.elapsed == (REST_MS - played) * 60 // 1000
     s.v.elapsed = TIME_MAX - 1
+    engine(g.fw).input_at = g.page.now  # an input, so the next rest counts
     g.step(rested=100)
     assert s.v.elapsed == TIME_MAX
     s.mode = CHOOSE
@@ -945,6 +949,53 @@ def test_time_counts_the_clock_between_steps_a_rest_five_minutes_at_most_and_sto
     g.e['eng_run']()
     g.frame()
     assert 600 <= s.v.elapsed <= 603
+
+
+def test_at_rest_the_time_moves_a_second_at_a_time_on_its_line_alone_until_five_minutes_after_the_last_input(made):
+    """The owner's rule (2026-11-24), as Cabin Solitaire's: with the frame timer off the engine steps the puzzle once
+    a second (ENG_CLOCK) and the margin's time follows, only its line repainted (rows 209 to 218, measured from paints
+    of 0:59/1:00, 9:59/10:00 and 99:59/100:00); it stands five minutes after the last input, and nothing wakes while
+    the puzzle is held or the screen is dark."""
+    g, s = made, made.s
+    removed = []
+    g.fw.mock('timer_remove', lambda t, *_: removed.append(t) or 1)
+    g.key(NEXT)  # an input: the cursor moves, then the board comes to rest
+    while g.e['eng_live']():
+        g.frame()
+    en = engine(g.fw)
+    assert en.second and seconds(g.fw, g.page.timers)[-1][1] == 1000
+    t0, p0, now0 = s.v.elapsed, en.play, g.page.now
+    for _ in range(5):  # five seconds of thinking
+        g.rects.clear()
+        g.page.now += 1000
+        assert g.e['second'](None) == 8 and not g.e['eng_live']()
+        assert g.rects == [(337, 205, 375 - 337, 17)]  # the time's line alone
+    assert s.v.elapsed == t0 + 5 * 60
+    g.page.now += 400_000  # walked away with the screen on
+    assert g.e['second'](None) == 0 and not en.second
+    assert en.play - p0 == en.input_at + REST_MS - now0  # counted to five minutes after the last input, no further
+    assert abs(s.v.elapsed - t0 - (en.play - p0) * 60 // 1000) <= 1
+    stood = s.v.elapsed
+    g.page.now += 60_000
+    assert s.v.elapsed == stood and not en.second  # nothing ran
+    g.e['eng_hold']()
+    adds = len(seconds(g.fw, g.page.timers))
+    g.page.now += 60_000
+    g.e['eng_run']()
+    while g.e['eng_live']():
+        g.frame()
+    assert len(seconds(g.fw, g.page.timers)) == adds + 1 and s.v.elapsed - stood < 60  # back: the clock runs on
+    held = en.second
+    g.e['eng_hold']()  # held: the second timer removed, none added
+    assert held in removed and not en.second and len(seconds(g.fw, g.page.timers)) == adds + 1
+    g.e['eng_run']()
+    while g.e['eng_live']():
+        g.frame()
+    g.fw.var('g_backlight_status', C.c_ubyte).value = 0  # dark: the pass ends, nothing counted
+    before = s.v.elapsed
+    g.page.now += 1000
+    assert g.e['second'](None) == 0 and not en.second and s.v.elapsed == before
+    g.fw.var('g_backlight_status', C.c_ubyte).value = 1
 
 
 def test_touch_moves_the_cursor_opens_the_dial_places_a_digit_and_a_tap_off_the_note_shuts_it(made):

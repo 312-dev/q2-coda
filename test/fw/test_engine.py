@@ -40,7 +40,7 @@ class Eng(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'game page sheet held left'.split()), *((k, C.c_uint) for k in 'timer at acc'.split()),
                 *((k, C.c_int) for k in 'running quit h first'.split()), *((k, C.c_uint) for k in 'keys pressed released'.split()),
                 *((k, C.c_int) for k in 'ticks fast tx ty rects'.split()), ('rect', (C.c_int * 4) * 8), ('steps', C.c_uint),
-                ('frames', C.c_uint)]
+                *((k, C.c_uint) for k in 'frames second play play_at input_at'.split())]
 
 
 class Demo(C.Structure):
@@ -55,7 +55,7 @@ def api(fw):
            'eng_live': (i,), 'eng_key': (i, u, i), 'eng_touch': (i, p, p), 'eng_paint': (None, p), 'eng_count': (i,),
            'eng_dirty': (None, i, i, i, i), 'eng_inset': (i, i), 'eng_dirty_all': (None,), 'eng_quit': (None,), 'eng_awake': (None,), 'eng_sfx': (None, i),
            'eng_load': (i, C.c_char_p, p, u, u), 'eng_save': (i, C.c_char_p, p, u, u), 'eng_sin': (i, i), 'eng_cos': (i, i),
-           'eng_atan2': (i, i, i), 'eng_sqrt': (u, C.c_ulonglong), 'engine__eng_frame': (i, p),
+           'eng_atan2': (i, i, i), 'eng_sqrt': (u, C.c_ulonglong), 'engine__eng_frame': (i, p), 'engine__eng_second': (i, p),
            'eng_fill': (None, C.POINTER(Surface), i, i, i, i, u),
            'eng_disc': (None, C.POINTER(Surface), i, i, i, u), 'eng_round': (None, C.POINTER(Surface), i, i, i, i, i, u),
            'eng_text': (i, C.POINTER(Surface), C.c_char_p, i, i, i, u, u, i), 'games_keydown': (i, p, u)}
@@ -410,6 +410,16 @@ def demo(fw, files=None):
     p.go(DEMO)
     p.d = Demo.from_address(fw.var('engine__en', C.c_void_p).value + C.sizeof(Eng) + (-C.sizeof(Eng)) % 8)
     return p
+
+
+def seconds(fw, timers):
+    """The ENG_CLOCK timer's adds among Page's timers (fn, ms): one each time the game came to rest."""
+    at = C.addressof(fw.var('engine__eng_second', C.c_char))
+    return [t for t in timers if t[0] == at]
+
+
+def engine(fw):
+    return Eng.from_address(fw.var('engine__en', C.c_void_p).value)
 
 
 def tick(p, n=1, ms=16):

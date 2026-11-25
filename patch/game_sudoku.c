@@ -5,7 +5,6 @@
  * work a step so no frame is late. */
 #include "engine.h"
 #include "game_sudoku_art.inc"
-#include "peq_platform.h" /* time_now_ms, stock's clock: the puzzle's time between inputs */
 
 #define S_MAGIC 0x314b4453 /* "SDK1" */
 #define S_WORK                                                                                     \
@@ -24,7 +23,6 @@
 #define S_SEQ 6    /* steps between the sounds of a run */
 #define S_WAVE 3   /* steps a cell of a finished unit's highlighter wave */
 #define S_TIME_MAX (99u * 3600 * ENG_HZ) /* elapsed and bests stop at 99 hours */
-#define S_REST_MS 300000u /* the most one rest between two steps adds to the puzzle's time */
 
 /* The look (design/games/sudoku/STYLE.md), all of it here and in the draw functions below: the
  * geometry the steps also use (the grid, the dial's note, the level cards, for changed rects and a
@@ -73,7 +71,7 @@ struct sudoku {
     int mode, sel, dial, pencil, pick, sx, sy, last, dirty, record, held;
     int seq, runs, wait;
     int timed;         /* at holds the last step's time: the puzzle's time runs from there */
-    unsigned at, owed; /* time_now_ms at the last step of play; the part of a step, 1/60000 s */
+    unsigned at, owed; /* eng_play_ms at the last step of play; the part of a step, 1/60000 s */
     int wash, wcur;    /* round wcur, behind the cursor: 0 no wash, 1 its peers, 2 and twins */
     int wave, wt;      /* a finished unit's wave: the unit and one, its steps */
     unsigned key[81];  /* each cell as last painted (look) */
@@ -360,14 +358,20 @@ static unsigned tally(const struct sudoku *s) {
     for (int d = 1; d <= 9; ++d) m |= n[d] >= 9 ? (unsigned)bit(d) : 0;
     return m;
 }
-/* What the right margin shows: the seconds, the tally, the slips; repainted when it changes. */
+/* What the right margin shows: the seconds, the tally, the slips; repainted when it changes, the
+ * time's line alone when only the seconds did (a second at rest, ENG_CLOCK). */
 static unsigned long long margin_key(const struct sudoku *s) {
     return s->v.elapsed / ENG_HZ | (unsigned long long)tally(s) << 32 |
            (unsigned long long)s->v.slips << 41;
 }
 static void margin(struct sudoku *s) {
     unsigned long long k = margin_key(s);
-    if (k != s->side) s->side = k, eng_dirty(337, 60, ENG_W - 337, 210);
+    if (k == s->side) return;
+    if ((k ^ s->side) >> 32)
+        eng_dirty(337, 60, ENG_W - 337, 210);
+    else
+        eng_dirty(337, 205, ENG_W - 337, 17); /* the time, drawn in rows 209 to 218 */
+    s->side = k;
 }
 
 static void dial_dirty(struct sudoku *s) {
@@ -515,12 +519,12 @@ static int step(void *state, const struct eng_input *in) {
     if (s->runs && !--s->wait) eng_sfx(s->seq), s->wait = S_SEQ, --s->runs;
     s->timed &= s->mode == PLAY; /* the levels' and the generator's time is not the puzzle's */
     if (s->mode == PLAY) {
-        /* The puzzle's time: the clock's, from step to step, as the engine runs no steps at rest.
-         * A rest counts S_REST_MS at most, as the screen may have gone off in it (ponytail: the
-         * engine tells a game nothing of a dark rest; docs/games-engine.md#evening-puzzle). */
-        unsigned now = time_now_ms(), gap = s->timed ? now - s->at : 0, t;
+        /* The puzzle's time: the engine's play time from step to step (none while held, none past
+         * five minutes after the last input, docs/games-engine.md#play-time); at rest the engine
+         * steps once a second (ENG_CLOCK), so the margin's time follows. */
+        unsigned now = eng_play_ms(), gap = s->timed ? now - s->at : 0, t;
         s->at = now, s->timed = 1;
-        s->owed += (gap > S_REST_MS ? S_REST_MS : gap) * ENG_HZ;
+        s->owed += gap * ENG_HZ;
         t = s->v.elapsed + s->owed / 1000, s->owed %= 1000;
         s->v.elapsed = t > S_TIME_MAX ? S_TIME_MAX : t;
         s->dirty = 1;
@@ -1066,5 +1070,5 @@ static void pause(void *state) {
 }
 
 const struct eng_game eng_sudoku = {
-    "Evening Puzzle", sizeof(struct sudoku), ENG_STILL | ENG_FULL, init, step, draw, pause
+    "Evening Puzzle", sizeof(struct sudoku), ENG_STILL | ENG_FULL | ENG_CLOCK, init, step, draw, pause
 };

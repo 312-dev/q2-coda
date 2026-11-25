@@ -300,7 +300,7 @@ PS_ART=(ROOT/'assets/popstall/art.bin').read_bytes()
 m=CardMachine({},{'/usr/share/q2games/popstall/art.bin':bytearray(PS_ART)})
 sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
 eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
-O_ENG_RECT,O_ENG_STATE=80,216  # struct eng's rect and the game's state after it (patch/engine.c), on MIPS
+O_ENG_RECT,O_ENG_STATE=80,232  # struct eng's rect and the game's state after it (patch/engine.c), on MIPS
 # struct pstall (patch/game_popstall.c), on MIPS: a ball is nine words, x y ang live spin bounce stuck held cx
 PS_BALL,PS_SPD,PS_PAD,PS_MODE,PS_T,PS_LEVEL,PS_LIVES,PS_LEFT,PS_COMBO,PS_SCORE,PS_CELL=0,108,112,120,124,128,132,140,144,164,176
 PS_WIDE,PS_SLOW,PS_TK,PS_CHAIN_N,PS_PAUSED,PS_ART_OK=636,640,652,948,1044,1144
@@ -613,7 +613,7 @@ m=CardMachine({},{'/usr/share/q2games/callerten.bin':bytearray(CT_ART)})
 m.word(O['MCL_FD'],-1)  # no player socket: the game's messages to it go nowhere
 sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
 eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
-O_ENG_RECT,O_ENG_STATE=80,216  # struct eng (patch/engine.c), on MIPS
+O_ENG_RECT,O_ENG_STATE=80,232  # struct eng (patch/engine.c), on MIPS
 CT_FIELDS=('k h screen phase mode sel t at reduced round rounds wrongs rights streak score shown pts best_new slot row:4 '
            'right pick song missed:10 nmissed top clip_sec clip_on clip_held heard ask replay needle4 needle_from needle_t '
            'turn_t lift lift_dir ring ring_from lamps dim dim_t cut end_t swell fit_px:4 fit_n:4 full_w:4 maxw:4 scroll:4 '

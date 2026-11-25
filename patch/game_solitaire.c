@@ -122,7 +122,7 @@ struct sol {
     int msg, msg_t, stuck;
     int t, kings, best_new, deal_left, auto_wait;
     int seq, runs, wait; /* a run of one sound */
-    unsigned last_ms;    /* the clock at the last step of play: 0 after a pause */
+    unsigned last_ms;    /* eng_play_ms + 1 at the last step of play: 0 at a deal's start */
     int shown_s, since_save, unsaved;
     int nmark, all;          /* a step's changed rects, joined, then handed to the engine */
     short marks[ENG_RECTS + 1][4];
@@ -910,15 +910,13 @@ static void start_input(struct sol *b, const struct eng_input *in) {
         new_deal(b), sound(b, ENG_SFX_TAP, 1);
 }
 
-/* The time of play: the clock's, between steps of play; a pause starts it over (last_ms 0), so time
- * away is not counted. The slip shows it as of the last step that painted. */
+/* The time of play: the engine's play time between steps of play (none while held, none past five
+ * minutes after the last input, docs/games-engine.md#play-time); a new deal starts it over
+ * (last_ms 0). At rest the engine steps once a second (ENG_CLOCK), so the slip's figure follows. */
 static void clock(struct sol *b) {
-    unsigned now = time_now_ms();
-    if (b->last_ms) {
-        unsigned gap = now - b->last_ms;
-        b->g.time_ms += gap > 600000 ? 600000 : gap;
-    }
-    b->last_ms = now ? now : 1;
+    unsigned now = eng_play_ms() + 1; /* never 0: 0 is a deal's start */
+    if (b->last_ms) b->g.time_ms += now - b->last_ms;
+    b->last_ms = now;
     int s = (int)(b->g.time_ms / 1000);
     if (s != b->shown_s) b->shown_s = s, dirty_figure(b, 1);
 }
@@ -1891,11 +1889,11 @@ static void init(void *state, int h) {
     mark_all(b);
 }
 
-/* Before the menu, the screen going off or leaving: the game saved when it changed; the clock stops
- * until play goes on. */
+/* Before the menu, the screen going off or leaving: the game saved when it changed (the play time
+ * stands while it is held, eng_play_ms). */
 static void pause(void *state) {
     struct sol *b = state;
-    b->last_ms = 0;
+    if (b->mode == PLAY || b->mode == AUTO) clock(b); /* the time to the pause, in the save */
     settle(b);
     if (b->mode == DEAL) finish_deal(b);
     if (b->unsaved && eng_save("solitaire", &b->g, sizeof b->g, S_MAGIC))
@@ -1903,5 +1901,5 @@ static void pause(void *state) {
 }
 
 const struct eng_game eng_solitaire = {
-    "Cabin Solitaire", sizeof(struct sol), ENG_STILL | ENG_FULL, init, step, draw, pause
+    "Cabin Solitaire", sizeof(struct sol), ENG_STILL | ENG_FULL | ENG_CLOCK, init, step, draw, pause
 };

@@ -12,6 +12,8 @@
 #define ENG_RECTS 8      /* changed rects a frame; more join the last */
 #define ENG_ACCEL_MAX 10 /* fast's most steps a tick (offsets.inc VOL_ACCEL_MAX, the volume's) */
 #define ENG_W 375        /* the sheet's width; its height is eng_surface's h (the theme's page) */
+#define ENG_SECOND_MS 1000 /* ENG_CLOCK's timer at rest: a step a second, for the shown time */
+#define ENG_REST_MS 300000 /* play time counts this long after the last input, then stands */
 /* ENG_OWN_PAUSE held: the rows the status row's glyphs and caption take, left to stock (they
  * centre on y 23, docs/oled-design.md#status-row) */
 #define ENG_BAR 30
@@ -60,8 +62,10 @@ enum {
     ENG_RAW = 1,   /* the wheel as travel (wheel), no ticks */
     ENG_STILL = 2, /* turn-based: the frame timer runs only after input and while step returns 1 */
     ENG_FULL = 4,  /* the whole screen, 375 x 320, the status row hidden except while held (games.c) */
-    ENG_OWN_PAUSE = 8 /* held, the game draws its own pause below the status row's ENG_BAR rows, and
-                       * Games' "Paused" pop-up is left out (Return's Continue / Quit stays) */
+    ENG_OWN_PAUSE = 8, /* held, the game draws its own pause below the status row's ENG_BAR rows, and
+                        * Games' "Paused" pop-up is left out (Return's Continue / Quit stays) */
+    ENG_CLOCK = 16     /* ENG_STILL with a shown time: at rest, a step with no input every
+                        * ENG_SECOND_MS (docs/games-engine.md#play-time) */
 };
 
 struct eng_game {
@@ -80,6 +84,9 @@ void eng_dirty_all(void);
 int eng_inset(int y); /* the columns the glass's corners hide at each end of the sheet's row y */
 void eng_quit(void);  /* back to Games' list, after this step */
 void eng_awake(void); /* the screen's timeout starts over, as a key does it */
+/* Play time, ms: counted while the game runs, not while it is held, and at most ENG_REST_MS past
+ * the last input (a player who walks away stops the clock five minutes on). */
+unsigned eng_play_ms(void);
 enum { ENG_SFX_TICK, ENG_SFX_TAP, ENG_SFX_ALERT }; /* the Clicker's wheel, button and beep */
 void eng_sfx(int kind);
 /* A save, /mnt/data/game-NAME: its first word the magic, its last the sum of the rest, written to

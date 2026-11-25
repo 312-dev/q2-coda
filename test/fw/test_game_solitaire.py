@@ -13,9 +13,11 @@ import pytest
 import solitaire_solver
 from conftest import O, ROOT
 from test_engine import (BACK_BTN, CENTER, E_CENTRE, FWD_BTN, NEXT, PREV, E_NEXT, E_PLAY, E_PREV, E_TOUCH, ENGINE, RETURN, SHEET, Eng, GameDef,
-                         Input, api, screen)
+                         Input, api, engine, screen, seconds)
 from test_engine import PLAY as PLAY_KEY
 from test_games import PAGE, Canvas, Page, fnv1a, texts
+
+SLIP_X1, RAIL_H = 281, 22  # game_solitaire.c: the slip's right edge, the rail's height
 
 ART_FILE, SAVE = '/usr/share/q2games/solitaire.bin', '/mnt/data/game-solitaire'
 ART = (ROOT/'assets/games/solitaire.bin').read_bytes()
@@ -784,21 +786,66 @@ def test_resume_returns_to_the_game_in_progress(fw):
 
 # ---- time, saves and pauses ----
 
-def test_time_counts_between_steps_of_play_and_not_across_a_pause(fw):
+def test_time_counts_play_alone_a_rest_five_minutes_after_the_last_input_at_most(fw):
     g = Game(fw)
     g.deal(5)
     g.step()
     g.page.now += 5000
     g.step()
     assert g.b.g.time_ms == 5000
-    g.page.now += 700000  # a long while with the screen on: counted up to ten minutes
+    g.page.now += 700000  # a long while with the screen on: counted up to five minutes after the last input
     g.step()
-    assert g.b.g.time_ms == 605000
+    assert g.b.g.time_ms == 300000
     g.e['eng_hold']()
     g.page.now += 60000
-    g.e['eng_run']()
+    g.e['eng_run']()  # play again: as an input
     g.step()
-    assert g.b.g.time_ms == 605000
+    assert g.b.g.time_ms == 300000
+    g.page.now += 2000
+    g.step()
+    assert g.b.g.time_ms == 302000
+    g.close()
+
+
+def test_at_rest_the_time_moves_a_second_at_a_time_on_its_figure_alone_until_five_minutes_after_the_last_input(fw):
+    """The owner's rule (2026-11-24): a clock that stands while the player thinks looks broken. At rest the frame timer
+    is off and the engine's second timer steps the game once a second (ENG_CLOCK): the slip's time follows, only its
+    figure repainted. It stands five minutes after the last input, and nothing wakes while held or dark."""
+    g = Game(fw)
+    removed = []
+    fw.mock('timer_remove', lambda t, *_: removed.append(t) or 1)
+    g.deal(5)
+    while g.e['eng_live']():
+        g.frame()
+    assert [ms for _, ms in seconds(fw, g.page.timers)] == [1000]
+    en, t0, s0 = engine(fw), g.b.g.time_ms, g.b.shown_s
+    for _ in range(5):  # five seconds of thinking
+        g.rects.clear()
+        g.page.now += 1000
+        assert g.e['second'](None) == 8 and not g.e['eng_live']()
+        assert g.rects == [(205, g.b.rail + 3, SLIP_X1 - 205, RAIL_H - 3)]  # the time's figure alone
+    assert g.b.g.time_ms == t0 + 5000 and g.b.shown_s == s0 + 5
+    played = en.play
+    g.page.now += 400_000  # walked away with the screen on
+    assert g.e['second'](None) == 0 and not en.second  # the clock stands: no more passes
+    assert en.play == 300_000 and g.b.g.time_ms == t0 + 5000 + 300_000 - played
+    stood = g.b.g.time_ms
+    g.key(NEXT)  # back: the next input
+    while g.e['eng_live']():
+        g.frame()
+    assert g.b.g.time_ms - stood < 1000 and len(seconds(fw, g.page.timers)) == 2  # a second timer again
+    g.e['eng_hold']()  # held: its timer removed, none added
+    assert removed and not en.second and len(seconds(fw, g.page.timers)) == 2
+    g.page.now += 60_000
+    assert g.b.g.time_ms - stood < 1000
+    g.e['eng_run']()
+    while g.e['eng_live']():
+        g.frame()
+    fw.var('g_backlight_status', C.c_ubyte).value = 0  # dark: the pass ends and holds the game
+    before = g.b.g.time_ms
+    g.page.now += 1000
+    assert g.e['second'](None) == 0 and not en.second and g.b.g.time_ms == before
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
     g.close()
 
 
