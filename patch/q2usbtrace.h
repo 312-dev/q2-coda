@@ -208,6 +208,10 @@ void trace_burst(struct trace *tr, long long t_ns);
 /* What a flush should write, and its rotation: 1 when name.0 must first move to name.1 (size its bytes). */
 int trace_rotate_needed(long size);
 
+/* n / d, its remainder in *rem (may be 0): the helpers link libc alone, which has no 64-bit division (libgcc's
+ * __udivdi3), so the uptimes are divided bit by bit. */
+unsigned long long ut_udiv(unsigned long long n, unsigned d, unsigned *rem);
+
 /* Parsers of what the device gives, tested here. */
 int ut_udc_addressed(const char *state); /* "addressed" or "configured" */
 int ut_regdump_word(const char *text, const char *name, long *v); /* "GOTGCTL = 0x000d00fc" */

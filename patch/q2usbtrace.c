@@ -220,7 +220,7 @@ static void flush(long long now, int force) {
 
 void ut_ulog(struct trace *t, char level, const char *msg) {
     char line[320];
-    int n = ulog_line(line, sizeof line, t_wall(), (unsigned)(t_now(CLOCK_MONOTONIC) / MS), level, "usbtrace", msg,
+    int n = ulog_line(line, sizeof line, t_wall(), (unsigned)ut_udiv((unsigned long long)t_now(CLOCK_MONOTONIC), MS, 0), level, "usbtrace", msg,
                       (int)strlen(msg));
     t_append(UT_ULOG, line, n);
 }
@@ -278,12 +278,12 @@ int q2usbtrace_main(int argc, char **argv) {
         long long slept = t_now(CLOCK_BOOTTIME) - now - d.slept_base;
         if (slept > UT_WAKE_MS * MS) {
             d.slept_base += slept;
-            trace_wake(&tr, slept / MS, now);
+            trace_wake(&tr, (long long)ut_udiv((unsigned long long)slept, MS, 0), now);
             d.line_retry[1] = d.line_retry[2] = 0;
             udc_read(now);
         }
         long long wake = trace_next_wake(&tr);
-        int timeout = wake <= now ? 0 : (int)((wake - now + MS - 1) / MS);
+        int timeout = wake <= now ? 0 : (int)ut_udiv((unsigned long long)(wake - now + MS - 1), MS, 0);
         if (timeout > UT_IDLE_MS) timeout = UT_IDLE_MS;
         struct pollfd p[5];
         int src[5], n = 0;

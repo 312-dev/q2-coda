@@ -20,7 +20,9 @@ const unsigned char ut_axp_regs[UT_AXP_REGS] = { 0x00, 0x40, 0x41, 0x42, 0x48, 0
 static const char *ts(char *b, long long t) {
     if (t == UF_NEVER) return "-";
     if (t < 0) t = 0;
-    snprintf(b, 32, "%lu.%06lu", (unsigned long)(t / 1000000000LL), (unsigned long)(t % 1000000000LL / 1000));
+    unsigned ns;
+    unsigned long s = (unsigned long)ut_udiv((unsigned long long)t, 1000000000u, &ns);
+    snprintf(b, 32, "%lu.%06u", s, ns / 1000);
     return b;
 }
 /* d (ns) as seconds with three decimals; "-" for UF_NEVER */
@@ -29,7 +31,9 @@ static const char *rel(char *b, long long t, long long from) {
     long long d = t - from;
     const char *sign = d < 0 ? "-" : "";
     if (d < 0) d = -d;
-    snprintf(b, 32, "%s%lu.%03lu", sign, (unsigned long)(d / 1000000000LL), (unsigned long)(d % 1000000000LL / 1000000));
+    unsigned ns;
+    unsigned long s = (unsigned long)ut_udiv((unsigned long long)d, 1000000000u, &ns);
+    snprintf(b, 32, "%s%lu.%03u", sign, s, ns / 1000000);
     return b;
 }
 
@@ -385,7 +389,9 @@ void trace_slow(struct trace *tr, const struct ut_slow *s, long long t) {
 }
 
 void trace_wake(struct trace *tr, long long slept_ms, long long t) {
-    trace_line(tr, t, "wake slept=%lu.%03lu", (unsigned long)(slept_ms / 1000), (unsigned long)(slept_ms % 1000));
+    unsigned ms;
+    unsigned long s = (unsigned long)ut_udiv((unsigned long long)(slept_ms < 0 ? 0 : slept_ms), 1000u, &ms);
+    trace_line(tr, t, "wake slept=%lu.%03u", s, ms);
     feed(tr, UF_EV_WAKE, 0, t);
     for (int i = 0; i < UT_FED_N; ++i) tr->fed[i] = -1;
     tr->have_last = 0, tr->have_slow = 0, tr->udc[0] = 0; /* the next sample is written whole and fed again */
@@ -412,6 +418,16 @@ long long trace_next_wake(const struct trace *tr) {
 }
 
 int trace_rotate_needed(long size) { return size >= UT_FILE_MAX; }
+
+unsigned long long ut_udiv(unsigned long long n, unsigned d, unsigned *rem) {
+    unsigned long long q = 0, r = 0;
+    for (int i = 63; i >= 0; --i) {
+        r = r << 1 | (n >> i & 1);
+        if (r >= d) r -= d, q |= 1ULL << i;
+    }
+    if (rem) *rem = (unsigned)r;
+    return q;
+}
 
 /* ---- parsers ---- */
 int ut_regdump_word(const char *text, const char *name, long *v) {
