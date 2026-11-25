@@ -467,7 +467,9 @@ reach your music server".
 ```
 
 **`/tmp/q2-<id>.clip`** (firmware to app), written whole by a thread of the game's while a contest
-runs, whenever what it asks changes: the clips it wants now, this caller's and the next one's.
+runs, whenever what it asks changes: the clips it wants now, this caller's and the next one's,
+each named until its caller has played (whether its clip has come or not), so the app keeps it.
+An answer `get` (the clip on its way) is waited for; `fail` has an empty path.
 
 ```text
 #Q2CLIP/1	seq=<n>

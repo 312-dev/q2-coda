@@ -871,12 +871,18 @@ class App:
 
     def answer(self, state='done'):
         seq, want = self.request()
+        named = {slot for slot, *_ in want}
+        for slot in [k for k in self.answers if k not in named]:  # the spec: a clip no longer named goes
+            self.r.present.discard(self.answers.pop(slot).split('\t')[4])
         for slot, sid, start, length in want:
+            if slot in self.answers and self.answers[slot].split('\t')[2] == 'done':
+                continue
             path = f'/mnt/mmc/.subsonic/clips/{sid}.mp3'
             if state == 'done':
                 self.r.present.add(path)
                 self.r.lengths[path] = int(length) // 1000
-            self.answers[slot] = f'{seq}\t{slot}\t{state}\t{start}\t{path}'
+            self.answers[slot] = (f'{seq}\t{slot}\tfail\t0\t' if state == 'fail'  # the app's fail: no path
+                                  else f'{seq}\t{slot}\t{state}\t{start}\t{path}')
         head = self.r.files.files[CLIP_ANS].decode().splitlines()[0]
         self.r.files.files[CLIP_ANS] = '\n'.join([head, *self.answers.values()]).encode() + b'\n'
 
@@ -934,6 +940,7 @@ def test_the_next_callers_clip_is_asked_for_while_this_one_plays(fw, tmp_path):
         assert r.g.song == nxt and r.g.phase == CUE  # no wait for it
         if r.pk.kind[nxt] == STREAM_K:
             assert r.clips()[-1][0].endswith(f'{r.pk.sid[nxt].value.decode()}.mp3')
+            assert r.clips()[-1][0] in r.present  # still there: the request named it until it played
 
 
 def test_a_stalled_stream_gives_way_to_a_card_song_within_its_bound(fw, tmp_path):
@@ -996,3 +1003,23 @@ def test_a_streamed_contest_gives_the_music_back_and_ends_its_clips(fw, tmp_path
     seq, want = app.request()
     assert want == []  # the app's clips asked for no more: it deletes them
     assert not any('{set-songurl' in m and '/stream/' in m for m in r.sent)  # never the user's stream cache
+
+
+def test_an_answer_downloading_is_pending_and_a_fail_with_no_path_is_given_up(fw, tmp_path):
+    r = Rig(fw, tmp_path, songs=music(12), server=server_songs(60))
+    app = App(r)
+    r.start()
+    s = r.g.song if r.pk.kind[r.g.song] == STREAM_K else None
+    clip_pass(r)
+    slots = [int(w[0]) for w in app.request()[1]]
+    app.answer('get')
+    clip_pass(r)
+    assert slots and all(r.pk.got[k] == 0 for k in slots)  # downloading: still waited for
+    assert [int(w[0]) for w in app.request()[1]] == slots  # and still asked for
+    app.answers.clear()
+    app.answer('fail')
+    clip_pass(r)
+    assert all(r.pk.got[k] == -1 for k in slots)
+    if s is not None:
+        r.step()
+        assert r.pk.kind[r.g.song] != STREAM_K or r.g.song != s  # that song passed over at once

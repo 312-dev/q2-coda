@@ -441,21 +441,23 @@ static void *pick_worker(void *arg) {
 /* ---- streamed clips: the app's clip channel (docs/server-library.md#clips) ---- */
 
 /* One pass of the clip thread: the request rewritten when the game's asks changed (each streamed
- * answer the game wants and has not got, its server id, start and length), the app's answers
- * read, an ask unanswered CT_FETCH_MS given up. When the contest is over (quit) the request names
- * nothing, and the app lets its clips go. */
+ * answer the game wants, its clip had or not, with its server id, start and length), the app's
+ * answers read (get: on its way; done; fail), an ask unanswered CT_FETCH_MS given up. When the
+ * contest is over (quit) the request names nothing, and the app lets its clips go. */
 static void clip_pass(struct pick *p) {
     char req[2048], path[48];
     unsigned now = (unsigned)time_now_ms(), n;
     int quit = __atomic_load_n(&p->quit, __ATOMIC_ACQUIRE);
     int k = tk_snprintf(req, sizeof req, "#Q2CLIP/1\tseq=%d\n", p->seq);
     for (int s = 0; !quit && s < p->answers; ++s) {
-        if (p->kind[s] != K_STREAM || !__atomic_load_n(&p->want[s], __ATOMIC_ACQUIRE) ||
-            __atomic_load_n(&p->got[s], __ATOMIC_ACQUIRE))
+        /* named while wanted (this caller's and the next one's), its clip had or not: the app
+         * keeps a clip as long as the request names it */
+        int got = __atomic_load_n(&p->got[s], __ATOMIC_ACQUIRE);
+        if (p->kind[s] != K_STREAM || !__atomic_load_n(&p->want[s], __ATOMIC_ACQUIRE) || got < 0)
             continue;
         if (!p->asked[s]) p->asked[s] = now | 1;
-        if ((int)(now - p->asked[s]) >=
-            CT_FETCH_MS) { /* signed: | 1 can be past now */ /* -2: stalled, not refused */
+        /* signed, as | 1 can be past now; -2: stalled, not refused */
+        if (!got && (int)(now - p->asked[s]) >= CT_FETCH_MS) {
             __atomic_store_n(&p->got[s], -2, __ATOMIC_RELEASE);
             continue;
         }
