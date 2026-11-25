@@ -166,6 +166,16 @@ python3 -m pytest test/fw --basetemp ~/.cache/q2-pytest/fw  # the firmware's C o
 - **Scenarios** (`test/fw/test_seam_subsonic.py`): an album started from the Library (the catalogue imported into SQLite by catalogue.c, the press through `catalogue_load`) whose next songs are fetched ahead; Next onto a song the server holds back, which waits and plays; Repeat All, stock's and Shuffle Songs', once every downloaded song has played; the owner's 9,199-song list across the app's moving 1,000-song window (an Up Next tap to its end, Next past its edge, Previous back) and shuffled whole; a download cut mid-song that stalls and resumes with Range; a `.coverask-iap` answered while a song downloads; Radio started, stopped and started again, and a slow Radio that does not replace a later list; a song pressed from a slow server, whose amount on Now Playing (`np_stream_loading`) counts up while it downloads. It found two bugs, both since fixed and kept as tests: under Shuffle, Next on the queue's last song played the list's next instead of Up Next's first, and Download Ahead Off still fetched two songs at a list's start.
 - **Proved on the bugs:** against q2-subsonic `32bd2cd` (the pin before `132e232`) seven of the nine fail, each for its bug (the window, Range, `.coverask-iap`, the slow Radio, both Repeat Alls); against `132e232` all pass, in about 75 s, about 140 s on a busy machine.
 
+## USB trace report
+
+`tools/usbtrace_report.py` reads a `--dev` Q2's [USB tracer](internals.md#usb-tracer) log back: per plug cycle its type, the time from its start to each milestone, what stock did, what the [USB shadow](internals.md#usb-shadow) would have done, and every disagreement or bus power with `online` 1, then a tally; it exits 1 when any cycle disagreed or was unsafe. With the [unified log](internals.md#unified-log) beside it, stock's own `usb` and `usbtrace` lines are printed in each cycle, matched by uptime.
+
+```sh
+adb exec-out cat /mnt/mmc/.q2muse/logs/q2-usbtrace.1 /mnt/mmc/.q2muse/logs/q2-usbtrace.0 > usbtrace.log
+adb exec-out q2guard --dump > q2-log.txt
+python3 tools/usbtrace_report.py usbtrace.log --ulog q2-log.txt
+```
+
 ## Fast test runs
 
 For many branches at once on one machine. The tools are in `tools/ci/` (outside `source_sha256`, so editing one does not make a build stale); their own checks run with `python3 -m pytest tools/ci -q`. How work flows through them, from a worker's first edit to a release image, is [orchestration](orchestration.md).

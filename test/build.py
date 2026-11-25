@@ -394,7 +394,7 @@ def validate_assets(directory):
     at, old, new = ID_PULL_UP
     assert struct.unpack_from('<I', stock, fileoff(stock, at))[0] == old and struct.unpack_from('<I', demo, fileoff(demo, at))[0] == new
     from build import patch_timezones, TIMEZONES, CJK, english_ui
-    from build import ADB_HOOK, ADBD, ADB_GADGET, Q2UPDATE, USB_SCRIPTS, adb_wrapper
+    from build import ADB_HOOK, ADBD, ADB_GADGET, Q2UPDATE, USB_SCRIPTS, adb_wrapper, USBTRACE, USBTRACE_HOOK
     zones = bytearray(stock)
     patch_timezones(zones)
     start = fileoff(stock, 0x77efb0)
@@ -600,7 +600,11 @@ def validate_assets(directory):
         q2eq = read('rootfs.squashfs', Q2EQ)  # docs/adb.md#q2eq
         assert sha(q2eq) == manifest['q2eq_sha256'] and q2eq[:4] == b'\x7fELF' and q2eq[36:40] == helper[36:40]
         assert b'Q2EQR01' in demo
-        expected_start = expected_start.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK)
+        usbtrace = read('rootfs.squashfs', USBTRACE)  # docs/internals.md#usb-tracer
+        assert sha(usbtrace) == manifest['q2_usbtrace_sha256'] and usbtrace[:4] == b'\x7fELF'
+        assert usbtrace[36:40] == helper[36:40]
+        assert b'q2-usbtrace-pd17' in demo  # usb_event.c's forwarding of PD17's edges
+        expected_start = expected_start.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*USBTRACE_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK)
         assert b'q2-wheel.log' in demo
         # adbd (docs/adb.md): an ELF with the stock binaries' ABI flags and glibc alone, its gadget script, stock's USB
         # scripts wrapped and kept beside the wrappers
@@ -620,7 +624,10 @@ def validate_assets(directory):
         assert b'q2-wheel.log' not in demo and b'q2-wheel.log' not in expected_start  # a test build's diagnostic
         assert 'q2remote_sha256' not in manifest and 'q2eq_sha256' not in manifest
         assert not (directory/'q2remote').exists() and not (directory/'q2eq').exists()
-        for path in (REMOTE, Q2EQ):
+        # the USB tracer is --dev only: no binary, no start line, no PD17 forwarding in demo
+        assert 'q2_usbtrace_sha256' not in manifest and not (directory/'q2-usbtrace').exists()
+        assert b'q2-usbtrace' not in expected_start and b'q2-usbtrace-pd17' not in demo
+        for path in (REMOTE, Q2EQ, USBTRACE):
             absent = subprocess.run(['unsquashfs', '-cat', str(directory/'rootfs.squashfs'), path],
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             assert absent.returncode != 0, f'release rootfs contains {path}'

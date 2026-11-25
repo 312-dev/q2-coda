@@ -1,0 +1,27 @@
+# q2-usbtrace trace format (docs/internals.md#usb-tracer), built from a device log for test/unit/test_usb_fsm.py.
+# Source: drain9/q2-demo.log, 2026-11-25, V205i (6 s settle), the unified log's usb and player lines (demo ms as s).
+# Measured: otg-on at 1273.890 and 1498.858, otg-off why=gone at 1355.395 and 1555.358, q2player's "hw:1,0 is gone" at
+# 1354.346, its mcl-stop for the DAC's restart at 1276.515 and 1501.576. Not in this log (the pin trace is card-only,
+# dmesg had rolled past): the ID's low, put 6.0 s before each otg-on (V205i's settle) [I]; 1-1's add, put 0.56 s
+# after otg-on as measured on 2026-11-23 [E]; the PCM's add, put just before stock's restart [I]; the second
+# removal, put at its mcl-stop [I].
+5.184000 start
+5.184000 s PD17=1 PD18=1 PC20=0 on=0 dev=0
+1267.890000 s PD18=0
+1273.890000 s PC20=1 PD17=0 on=0
+1274.450000 u add usb 1-1
+1276.400000 u add sound pcmC1D0p
+1354.346000 u remove usb 1-1
+1354.346000 u remove sound pcmC1D0p
+1354.400000 s PD18=1
+1355.395000 s PC20=0
+1357.000000 s PD17=1
+1492.858000 s PD18=0
+1498.858000 s PC20=1 PD17=0 on=0
+1499.418000 u add usb 1-1
+1501.400000 u add sound pcmC1D0p
+1554.932000 u remove usb 1-1
+1554.932000 u remove sound pcmC1D0p
+1555.000000 s PD18=1
+1555.358000 s PC20=0
+1557.000000 s PD17=1

@@ -14,7 +14,7 @@ Q2 Muse ships no program of Shanling's and no source of theirs. `tools/build.py`
 | `usr/lib/libtag_c.so.2.0.1`                   | M4B covers                                                              | `patch_m4b_cover` in `tools/build.py`                          |
 | UI assets, styles, strings and icons          | rewritten in place from the audit in `patch/ipod.json`                  | `patch_asset` in `tools/ipod.py`; `tools/art.py`               |
 | `etc/init.d/S90play`, `S11logo_display_shell` | dual boot, the crash log, the splash                                    | `BOOT_HOOK`, `LOGO_HOOK` in `tools/build.py`                   |
-| added programs                                | `q2video`, `q2boot`, `q2splash` and, in `--dev`, `q2remote`             | `compile_helper` in `tools/build.py`                           |
+| added programs                                | `q2video`, `q2boot`, `q2splash` and, in `--dev`, `q2remote` and `q2-usbtrace` | `compile_helper` in `tools/build.py`                     |
 | kernel modules (`--dev` flags only)           | `soc_aic.ko`, `soc_rotator.ko`, the PWM pair                            | `tools/aic.py`, `tools/rotator.py`, `tools/pwm.py`             |
 
 ## The payload

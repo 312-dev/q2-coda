@@ -1,0 +1,27 @@
+# q2-usbtrace trace format (docs/internals.md#usb-tracer), built from a device log for test/unit/test_usb_fsm.py.
+# Source: q2-pull-state.log, 2026-11-17 21:0x, PD18's pull-up on (PU18=1 every line), a sample every 0.54 s, nothing
+# attached, as transcribed in test/fw/test_usb_otg.py (PULLED, PU_*) and docs/internals.md#otg-host-power. Four ID lows
+# after VBUS left: (1) 2.15 s after, 4.28 s long before stock's bus power came on and held it low; (2) 7.02 s after,
+# 3.21 s before stock's power; (3) 5.37 s after that power's end, 2.15 s uncut; (4) after a laptop's cable, 2.15 s
+# uncut. Assumed: a cable in before each unplug (the log's earlier rows are not in the repo), online 1 with it and 0
+# without (the log has no online field), stock's power off 0.44 s after the ID high in (1) (its next pass) [E].
+830.000000 start
+830.000000 s PD17=0 PD18=1 PC20=0 on=1
+840.050000 s PD17=1 on=0
+842.200000 s PD18=0
+846.480000 s PC20=1 PD17=0 on=0
+847.560000 s PD18=1
+848.000000 s PC20=0
+849.600000 s PD17=1
+1090.000000 s PD17=0 on=1
+1095.340000 s PD17=1 on=0
+1102.360000 s PD18=0
+1105.570000 s PC20=1 PD17=0 on=0
+1106.650000 s PC20=0 PD18=1
+1108.250000 s PD17=1
+1112.020000 s PD18=0
+1114.170000 s PD18=1
+1120.620000 s PD17=0 on=1
+1122.760000 s PD17=1 on=0
+1128.140000 s PD18=0
+1130.290000 s PD18=1

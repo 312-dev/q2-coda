@@ -45,15 +45,41 @@ unsigned long long usb_event_now_ns(void) {
     return (unsigned long long)t.s * 1000000000ull + (unsigned long long)t.ns;
 }
 
+#if Q2POD_DEV
+/* --dev only: each edge read is sent on as it is (its kernel time and direction) to q2-usbtrace
+ * (docs/internals.md#usb-tracer), which cannot ask for this line while this file holds it. A datagram
+ * to an abstract name nobody has bound fails at once (ECONNREFUSED) and raises no signal, and the
+ * socket never blocks, so the tracer's absence costs this thread one failed call an edge. */
+#define USB_TRACE_NAME "q2-usbtrace-pd17" /* q2usbtrace.h UT_EDGES_NAME */
+static int usb_trace_fd __attribute__((section(".scratch"))); /* the socket + 1; 0 not made yet */
+static void usb_event_forward(const struct gpioevent_data *e) {
+    if (!usb_trace_fd)
+        usb_trace_fd = socket(1 /* AF_UNIX */, 1 /* SOCK_DGRAM on MIPS */ | 0x80000 /* SOCK_CLOEXEC */ |
+                                                   0x80 /* SOCK_NONBLOCK */,
+                              0) + 1;
+    if (usb_trace_fd <= 0) return;
+    struct {
+        unsigned short family;
+        char path[sizeof USB_TRACE_NAME + 1];
+    } a = { 1, "\0" USB_TRACE_NAME };
+    sendto(usb_trace_fd - 1, e, sizeof *e, 0x40 /* MSG_DONTWAIT */ | 0x4000 /* MSG_NOSIGNAL */, &a,
+           2 + sizeof a.path - 1 /* the abstract name, its NUL left out */);
+}
+#else
+#define usb_event_forward(e) ((void)0)
+#endif
+
 /* One burst: the edge read (blocking), the contacts' bounce let pass, its other edges drained. 0
  * when the line's file is gone. */
 int usb_event_wait(int fd) {
     struct gpioevent_data e;
     if (read(fd, &e, sizeof e) != (int)sizeof e) return 0;
+    usb_event_forward(&e);
     unsigned long long first = e.timestamp;
     usleep(USB_SETTLE_MS * 1000);
     fcntl(fd, 4 /* F_SETFL */, 0x80 /* O_NONBLOCK */);
     while (read(fd, &e, sizeof e) == (int)sizeof e) {
+        usb_event_forward(&e);
     }
     fcntl(fd, 4 /* F_SETFL */, 0);
     ue.edge_ns = first;
