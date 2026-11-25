@@ -192,8 +192,8 @@ def test_the_toast_shows_while_it_plays_and_goes_with_it(fw):
     fw.var('g_backlight_status', C.c_ubyte).value = 0
     assert pwm.play() == 1
     assert len(fw.calls('awake_screen')) == 1
-    show = C.cast(fw.lib.findmy__fm_show, C.c_void_p).value
-    tick = C.cast(fw.lib.findmy__fm_tick, C.c_void_p).value
+    show = C.cast(fw.lib.findmy__fm_show, C.c_void_p).value or 0
+    tick = C.cast(fw.lib.findmy__fm_tick, C.c_void_p).value or 0
     assert [(fn, ms) for fn, ms in timers] == [(show, 0), (tick, 250)]
     opened = []
     fw.mock('navigator_to_with_context', lambda name, info, *_: opened.append(

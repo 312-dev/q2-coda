@@ -68,7 +68,7 @@ def test_stock_s_toast_over_ours_takes_its_place_and_its_glyph(fw, world):
     t.toast_icon(b'oled_usb_audio', b'USB audio')
     info = C.create_string_buffer(0x408)
     struct.pack_into('<2i', info, 0, 1, 2000)
-    info[8:8 + 13] = b'Not supported'
+    C.memmove(C.addressof(info) + 8, b'Not supported', 13)
     fw.fn('navigator_to_with_context', C.c_int, C.c_char_p, C.c_void_p)(b'dialog/msginfo_dialog', info)
     assert len(t.opened) == 1 and t.up() == ['Not supported']
     assert world.timers[-1][2] == 2000
