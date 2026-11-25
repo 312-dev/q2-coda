@@ -121,7 +121,7 @@ From stock under qemu ([Capturing](#capturing)); times in seconds, polls every 2
 - **Next:** `{player-nextstatus\exit}` 60-80 ms after `set-nexturl`, then as a start.
 - **Stop:** `{player-stopstatus\exit}` 60-160 ms after `mcl-stop`. With nothing loaded, no answer.
 - **A missing file, a file of noise:** `{player-status\error}` about 55 ms after `set-songurl`, with `/tmp/notfile` and `/tmp/notsupport` made.
-- **Pause:** `player-status` goes on answering `playing`; the position stands still. A seek while paused shows in the position only after `mcl-play`.
+- **Pause:** `player-status` goes on answering `playing`; the position stands still. A seek while paused shows in the position only after `mcl-play`; q2player's shows it at once, still paused ([player-plan: Deviations](player-plan.md#deviations)).
 - **A seek:** the position follows 0.2 to 1.5 s later. A FLAC seek can end the song: to 15 s of a 20 s file it did, half a second later (`stock-transport.txt`, `stock-gapless-flac.txt`), and to 16 s of the same file it did not (`stock-end.txt`); Vamp's player plays on in all three.
 
 The transcripts are in `test/player/fixtures/` (`stock-*.txt` from stock's binary, `pod-*.txt` from Vamp's patched one), and `test/player/run.py` holds the new player to them.

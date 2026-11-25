@@ -2875,6 +2875,28 @@ def test_pause_then_pick(player, songs, tmp):
     return f'{old / 44100:.2f} s of the paused song, then the pick'
 
 
+def test_pause_then_seek(player, songs, tmp):
+    """A song paused at 3 s, a seek to 10 s at 4 s, Play at 6 s, a stop at 8 s: the seek moves the song and it stays
+    paused. What was written is the song's start up to the pause (2 s and the PCM's half second), then a1 from 10 s
+    exactly, and only as much of it as the time from the Play allows (a seek that played would write 2 s more). The
+    position answered is the target's from the seek on, paused too, so Now Playing, Car Remote and Resume see it;
+    stock's stood still until the Play (KNOWN's pod-pause-seek)."""
+    s, pcm, names = play(player, songs, 'pause-seek', tmp/'pause-seek')
+    out, ref = b''.join(pcm), reference(songs/'a1.flac')
+    old = (first_difference(out, ref) or 0) // 4
+    assert old <= int(2.6 * 44100), f'{old} frames of the start, {old / 44100:.2f} s: some came after the pause'
+    tail = out[old * 4:]
+    assert tail and ref[10 * 44100 * 4:].startswith(tail), f'after the pause: not a1 from 10 s ({len(tail) // 4} frames)'
+    played = next(float(l.split()[0]) for l in s.lines if l.endswith('{mcl-play\\null}'))
+    stopped = next(float(l.split()[0]) for l in s.lines if l.endswith('{mcl-stop\\null}'))
+    most = int((stopped - played + 0.6) * 44100)
+    assert len(tail) // 4 <= most, f'{len(tail) // 4} frames from 10 s, at most {most}: the paused seek played'
+    sought = next(float(l.split()[0]) for l in s.lines if l.endswith('{mcl-seek\\10}'))
+    paused = [p for t, p in parse((tmp/'pause-seek/transcript.txt').read_text())[1] if sought + 0.15 < t < played]
+    assert paused and set(paused) == {10}, f'positions while paused after the seek {paused}'
+    return f'{old / 44100:.2f} s before the pause, {len(tail) // 4} frames from 10 s after the Play'
+
+
 def qq_env(tmp):
     """The environment that has q2player load qmstub.c as libQMDecryption.so."""
     lib = tmp/'qmstub'/'libQMDecryption.so'
@@ -2978,7 +3000,9 @@ KNOWN = {
     'stock-seek': 'the same after a seek to 9 s: stock ends the song at 13 s',
     'stock-cancel': 'the same after the seek to 12 s, before the preload is cancelled',
     'stock-emptynext': 'the same after the seek to 14 s, before the preload is sent',
-    'stock-badnext': 'stock stops the song when its preload is not audio; Vamp plays it to its end, and so does q2player',
+    'pod-pause-seek': 'Vamp\'s hciplayer, as stock\'s, showed a paused seek\'s position only after the Play; q2player shows it '
+                      'at once (test_pause_then_seek)',
+    'stock-badnext':'stock stops the song when its preload is not audio; Vamp plays it to its end, and so does q2player',
     'stock-formats-all': 'compared per file by test_media_info_per_format, with its deviations',
     'pod-formats-all': 'compared per file by test_media_info_per_format, with its deviations',
     'stock-dsd-2-2': 'Native DSD on a USB DAC: stock asks ALSA for format 31, SND_PCM_FORMAT_SPECIAL, which is refused, and plays '

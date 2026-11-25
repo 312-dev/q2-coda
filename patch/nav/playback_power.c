@@ -184,9 +184,10 @@ static void resume_poll(void) {
             st.ls_pct = pct >= 1 && pct <= 100 ? pct : 0;
         }
         /* up to 3 s on counts as heard: dark, the cached second is up to DARK_POLL_US old, so two
-         * reads a second apart can be 3 s apart; a longer step is a seek */
+         * reads a second apart can be 3 s apart; a longer step is a seek, and so is any step while
+         * paused (the player shows a paused seek at once) */
         int d = sec - st.ls_sec;
-        if (d > 0 && d <= 3) st.ls_heard += d;
+        if (d > 0 && d <= 3 && mclGetPlayStatus() != 3) st.ls_heard += d;
         st.ls_sec = sec;
         int listen = total / 2 < LISTEN_MAX_S ? total / 2 : LISTEN_MAX_S;
         if (!st.ls_done && total > LISTEN_MIN_S && st.ls_heard >= listen) {
@@ -207,7 +208,9 @@ static void resume_poll(void) {
         st.rs_pending = st.rs_go;
     }
     if (st.rs_pending) {
-        if (sec < 1) return; /* not playing yet: a paused boot resume waits for Play */
+        /* not playing yet: a paused boot resume waits for Play, and so does a paused seek near the start, which
+         * stock's seek here would resume */
+        if (sec < 1 || mclGetPlayStatus() == 3) return;
         if (sec < RESUME_START_S) {
             /* blocks the UI up to 2 s, as Scrub's commit; past the hook: nobody pressed, no wait */
             stock_seek_time_trampoline(st.rs_pending);

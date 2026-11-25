@@ -108,6 +108,20 @@ int seek_target(int to, int dir, int step, int total) {
     return to < 0 ? 0 : to;
 }
 
+/* A seek of a paused track to `to` track seconds (docs/internals.md#scrub-ipod): the player alone is sent there,
+ * in file seconds, and the track stays paused, Play going on from the target; stock's player_seek_time and
+ * player_seek_start would resume it (config_outputchannel, then mclSetResume). A target past the track's last second
+ * stops on it, as a scan does, so the player stays on the track. 1 when sent; 0 when nothing is paused. */
+int seek_paused(int to) {
+    unsigned at, n;
+    void *r = mclGetPlayStatus() == 3 ? queue_now(&at, &n) : 0;
+    if (!r) return 0;
+    int sec = -1, total = 0;
+    player_playtime_and_length(&sec, &total);
+    mclSetSeek(seek_target(to, 0, 0, total) + I(r, REC_CUE_START));
+    return 1;
+}
+
 /* Whether a hold here scans. The track must be a local one (a folder or the library: no stream,
  * Spotify, radio or video owns the buttons) playing or paused, and the buttons must not be another
  * page's: a game's, the playlist editor's, a time field's, the letter strip's, or a dialog's (the

@@ -1539,19 +1539,24 @@ int ringnav_change(int next) {
     return result;
 }
 /* A user's seek stamps: a scrub or chapter (player_seek_time; Resume Songs' jump goes past this hook) and
- * Previous restarting the track. A-B Repeat and a phone call mclSetSeek themselves. */
+ * Previous restarting the track. A-B Repeat and a phone call mclSetSeek themselves. Paused, every caller's
+ * seek (Now Playing's drag, Car Remote's and the car's seek) moves the track and leaves it paused (seek_paused),
+ * unstamped, as Play waits for the DAC by itself (dac_resume). */
 int ringnav_seek_time(int sec) {
+    if (seek_paused(sec)) return 1;
     press_stamp();
     return stock_seek_time_trampoline(sec);
 }
 /* player_prev_music's first move, its only caller, on anything playing or paused: from PREV_RESTART_S
  * stock seeks to the track's start and returns 1, in any queue and mode, without reaching
- * player_change_music (its test of 11 s is 3 s: tools/build.py PREV_RESTART). A refusal returns 1 too, so
- * it goes no further. Before it stock returns 0 and Previous changes track. */
+ * player_change_music (its test of 11 s is 3 s: tools/build.py PREV_RESTART); paused, the track goes
+ * to its start and stays paused (seek_paused). A refusal returns 1 too, so it goes no further. Before it
+ * stock returns 0 and Previous changes track. */
 #define PREV_RESTART_S 3
 int ringnav_seek_start(void) {
     int restarts = player_playtime() >= PREV_RESTART_S;
     if (restart_refused(0, restarts && place_held())) return 1;
+    if (restarts && seek_paused(0)) return 1;
     if (restarts) press_stamp();
     return stock_seek_start_trampoline();
 }
