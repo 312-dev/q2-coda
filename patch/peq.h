@@ -719,8 +719,8 @@ void spot_set_playing(int playing), radio_set_playing(int playing), video_set_pl
 int video_start(const char *file, int radio); /* videos.c */
 /* radio_tuner.c: Radio's receiver, 0 none, 1 playing, 2 paused (its page shut or not); played or
  * paused, or a media key, from a headset, the car or Car Remote (headset.c); ended for the Library
- * (tuner_stop; tuner_yield, a pick, playback.c ringnav_load, its held song dropped too); its page
- * (tuner_open) */
+ * (tuner_stop: any start of the Library's player, ringnav_start_player; tuner_yield, a pick,
+ * playback.c ringnav_load, its held song dropped too); its page (tuner_open) */
 int tuner_state(void), tuner_open(void *ctx, void *event);
 int tuner_dial(void); /* ...the dial's frequency, 10 kHz, 0 with no receiver */
 /* radio_pane.c: Home's art pane while Radio is Now Playing (coverflow.c): a frame of it into an
@@ -736,6 +736,10 @@ void rp_words(void *w, void *canvas, const rp_words_t *k);
 void rp_enter(const unsigned *cover, int w, int h), rp_free(void);
 int rp_moving(void);
 void tuner_set_playing(int playing), tuner_media(unsigned key), tuner_stop(void), tuner_yield(void);
+/* output_fail.c: a song's output that failed said once, and a run of songs that will not play ended
+ * (docs/internals.md#output-failure) */
+void output_fail_poll(void), output_fail_skipped(void), output_fail_start(void);
+int output_fail_skip(void);
 /* peq_ui.c's T9 edit, named EDIT_NAME: navigation.c's search_key cancels it on Return while its
  * keyboard is up. */
 #define EDIT_NAME "q2_edit"
