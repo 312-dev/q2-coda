@@ -227,11 +227,21 @@ static void animate(void) {
     redraw();
 }
 
+/* The receiver started on the output in use (videos.c video_start, which stops the Library's player
+ * first), with a line in the unified log, as its stop (audio_halt) and its end (tuner_poll) have. */
+static int receiver_start(const char *why) {
+    int pid = video_start("-", 2);
+    char line[64];
+    tk_snprintf(line, sizeof line, "the receiver started (%s): pid %d", why, pid);
+    ulog('I', "radio", line);
+    return pid;
+}
+
 /* The dial moved to rt->freq (or play or pause): the needle glides there, the stream it lands on
  * starts LAND_MS later, a stream the dial left stays warm WARM_MS. */
 static void tune(void) {
     if (!rt->audio && time_now_ms() - rt->ended > 3000) /* gone: started again, at most every 3 s */
-        rt->audio = video_start("-", 2), rt->volume = 0;
+        rt->audio = receiver_start("again"), rt->volume = 0;
     float n = needle();
     if ((float)rt->freq != n) rt->from = n, rt->glide_at = time_now_ms();
     int s = rt->playing ? source() : -1;
@@ -481,8 +491,10 @@ void tuner_poll(void) {
         redraw();
     }
     if (rt->audio && waitpid(rt->audio, &status,
-                             1)) /* the receiver gone (no output to open): tune starts it again */
+                             1)) { /* the receiver gone (no output to open): tune starts it again */
+        ulog('W', "radio", "the receiver ended by itself");
         rt->audio = 0, rt->ended = now | 1, rt->feed = -1, rt->locked_at = 0;
+    }
     if (!rt->audio) return;
     if (now - rt->polled < STATE_MS) return;
     rt->polled = now;
@@ -1170,6 +1182,7 @@ static void audio_halt(void) {
     if (!rt->audio) return;
     rt_send("q");
     child_quit(rt->audio, QUIT_MS); /* radio.c */
+    ulog('I', "radio", "the receiver stopped");
     rt->audio = 0;
 }
 
@@ -1284,7 +1297,7 @@ int tuner_open(void *ctx, void *event) {
     smart_wake(); /* Smart Wi-Fi's radio back now; tuner_page holds it on (smart_wifi.c
                      net_page_open) */
     now_hold();   /* the Library paused where it was, not stopped and forgotten (now_source.c) */
-    rt->audio = video_start("-", 2);
+    rt->audio = receiver_start("Radio opened");
     rt->volume = headset_gain() + 1;
     z[0] = 0;
     f = fopen(ZIP_FILE, "rb");

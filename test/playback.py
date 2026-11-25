@@ -90,7 +90,8 @@ class PlaybackMachine(QueueMachine):
             if self.fail=='rename' or (self.fail=='checkpoint-rename' and self.text(b).endswith('-elapsed')): ret=-1
             else: self.files[self.text(b)]=self.files.pop(self.text(a))
         elif name=='unlink': self.files.pop(self.text(a),None)
-        elif name=='access': ret=-1 if self.text(a) in self.missing else 0
+        elif name=='access':  # a file is there unless missing; /tmp/q2outfail only once a test makes it (output_fail.c)
+            path=self.text(a); ret=-1 if path in self.missing or (path=='/tmp/q2outfail' and path not in self.files) else 0
         elif name=='mkdir': ret=-1  # card_store.c's CARD_STORE_DIR, there already (EEXIST)
         elif name=='speed': self.sent_speed=a; ret=1
         elif name=='toast': self.toasts.append(self.text(a))
@@ -2028,6 +2029,46 @@ m=guarded(); m.held=0; asks(m,'player_change_music',1); assert m.at()==5001; m.h
 m=guarded(); m.handlers.pop(syms['player_next_music'],None); m.u.reg_write(UC_MIPS_REG_GP,0xa3aae0)
 m.call(address=0x4f5020,args=(0,0,0,0),gap=0); assert m.stock==['xf:change'] and m.nothing() and not m.get(ps['restart_ask'])
 print('Press: Next, Previous, a list pick and a user\'s seek stamp; a natural change forgets, stamps nothing and makes no file')
+# A song that will not play is said once, never a loop round the queue (output_fail.c, docs/internals.md#output-failure).
+class FailMachine(PressMachine):
+    def __init__(self):
+        super().__init__(); self.later=[]; self.logs=[]; self.radio=0; self.radio_stops=0
+        for name in ('toast_later','ulog','tuner_state','tuner_stop','stock_start_player_trampoline'): self.handlers[ps[name]]='xf:'+name
+    def hook(self,u,address,size,unused):
+        name=self.handlers.get(address,'')
+        a,b,c=(u.reg_read(r) for r in REGS[:3])
+        if name=='xf:toast_later': self.later.append(self.text(b)); return self.returns(0)
+        if name=='xf:ulog': self.logs.append(self.text(c)); return self.returns(0)
+        if name=='xf:tuner_state': return self.returns(self.radio)
+        if name=='xf:tuner_stop': self.radio_stops+=1; self.radio=0; return self.returns(0)
+        if name=='xf:stock_start_player_trampoline': self.stock.append('xf:start_player'); return self.returns(0)
+        return super().hook(u,address,size,unused)
+    def skip(self):  # on_wm_timer_dialog's own skip past a song that would not play (0x4f5020, as above)
+        self.handlers.pop(syms['player_next_music'],None); self.u.reg_write(UC_MIPS_REG_GP,0xa3aae0)
+        self.stock=[]; self.call(address=0x4f5020,args=(0,0,0,0),gap=0); return 'xf:change' in self.stock
+# Stock's dialog timer with neither of its files, as q2player leaves it for an output that failed: from its first
+# access to its return (0x4f4d08 to 0x4f46d8) it toasts nothing and skips nothing.
+m=FailMachine(); m.missing|={'/tmp/notfile','/tmp/notsupport'}; m.files['/tmp/q2outfail']=b''
+m.u.reg_write(UC_MIPS_REG_GP,0xa3aae0); m.u.reg_write(UC_MIPS_REG_S0,2)
+m.u.reg_write(UC_MIPS_REG_SP,0x7000f000); m.word(0x7000f018,0xa3aae0)  # its frame: $gp is reloaded from 0x18($sp) after each call
+m.u.emu_start(0x4f4d08,0x4f46d8,count=400); assert m.u.reg_read(UC_MIPS_REG_PC)==0x4f46d8 and not m.stock
+# The player stopped on it: one toast, the file taken, nothing started; playing, or with no file, nothing.
+m.word(0xa50084,2); m.fn('playback_poll'); assert not m.later and '/tmp/q2outfail' in m.files
+m.word(0xa50084,1); m.fn('playback_poll'); m.fn('playback_poll')
+assert m.later==['Audio output unavailable'] and '/tmp/q2outfail' not in m.files and not m.stock, (m.later,m.stock)
+assert m.logs==['stopped: the output would not open or take audio, so no next song'], m.logs
+# Songs that truly fail: the first two skip on, the third in a row is refused, stopped, said once.
+m=FailMachine(); assert m.skip() and m.skip() and not m.skip() and m.later==["Couldn't play 3 songs in a row"]
+assert m.get(ps['press_natural'])==0
+assert m.skip()  # the count starts again after a refusal
+# Any other start of the Library's player begins the count again; one undecodable song still skips once.
+m=FailMachine(); assert m.skip() and m.skip(); m.fn('output_fail_start'); assert m.skip() and m.skip() and not m.skip()
+# A start of the Library's player ends Radio first, its receiver's output then free (02:22:45 on 2026-11-25:
+# an output change's player_save_start met the receiver's held PCM); with no Radio nothing is stopped.
+m=FailMachine(); m.radio=2; m.fn('ringnav_start_player')
+assert m.radio_stops==1 and m.stock==['xf:start_player'] and "the receiver stopped: the Library's player starts" in m.logs, (m.radio_stops,m.stock,m.logs)
+m=FailMachine(); m.fn('ringnav_start_player'); assert m.radio_stops==0 and m.stock==['xf:start_player']
+print('Output failure: stock skips nothing without its files, one toast; three failed songs in a row stop; a start ends Radio')
 # What mclStartPlayer does on the jack from the idle player, its own code run from the way's test to the send (0x5bf8b0-0x5bf65c).
 class StartMachine(PressMachine):
     def __init__(self):

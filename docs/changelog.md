@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Playback: when the headphone output is held by something else, the song stops once with "Audio output unavailable", and Play tries again, where every song in the queue said "Not Supported" in turn, round and round, for as long as it lasted. Three songs in a row that cannot be played stop the queue with one message instead of skipping on for ever.
+  - Radio: paused for a couple of seconds, Radio lets go of the headphone output, and playing anything from the Library ends Radio first, so a paused Radio can no longer leave the Library unable to play.
   - Bluetooth: a song or a click that comes just as the last click's sound ends starts, where it could fail while the headset's audio was still being let go: the Q2 waits a moment for it.
   - Bluetooth: when your headphones pause the Q2 (their own control, or AirPods moving to your phone), the Q2 lets their audio stream stop at once, so Play on the Q2 starts it again and is heard, where it could stay silent until you reconnected.
   - After a software update the song comes back paused where it was (with Memory Playback set to Location), where it started again from 0:00.
