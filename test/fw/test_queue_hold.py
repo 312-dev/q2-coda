@@ -1,9 +1,8 @@
 """A held Centre or finger on Up Next's rows (upnext.c un_menu_hold, centre_menu.c, docs/internals.md#centre-hold-menu):
 every kind of row the queue can show gets the song's menu at CENTRE_MENU_MS, or, where no menu applies, nothing at
 all, and never stock's Shut Down? at 1000 ms. The rows: the queue's coming songs, Playing Next's, a shuffle's
-played songs above the playing one, a card app's stream session's songs not yet queued (pending rows: the owner's
-Subsonic queue, almost all of it, 2026-11-24, "holding center button on items in queue ... just brings up shutdown
-screen"), and Clear. Up Next is opened in test_nav_hold's Ui world, as Now Playing's queue button opens it
+played songs above the playing one, a card app's stream session's songs not yet queued (pending rows: most of a Subsonic
+queue), and Clear. Up Next is opened in test_nav_hold's Ui world, as Now Playing's queue button opens it
 (navigation.c np_queue). A pending row's record (addon.c pending_record) is the Q2's 4-byte layout, which the
 host's 8-byte P() cannot draw: its menu is proven on the emulator against the fake Subsonic server instead."""
 import ctypes as C
@@ -161,3 +160,15 @@ def test_centre_held_where_no_row_is_keeps_shut_down(fw, ui, hold, recs, centre)
     centre.wait()
     ui.due('cm_guard_due')
     assert centre.shutdown_pending()
+
+
+def test_centre_held_on_a_playing_next_song_opens_its_menu_not_its_lift(fw, ui, hold, recs, centre):
+    """A Playing Next row's Centre lift (un_keydown, UN_HOLD_MS) is timed with the press, and the menu, at
+    CENTRE_MENU_MS, comes first and lets it go: the menu, never a lifted card, and never Shut Down?."""
+    s = Sheet(fw, ui, hold, recs, queued=True)
+    s.select(1)
+    centre.press()
+    assert ui.fn('upnext__un_lift_due') in ui.pending()  # the lift timed with the press
+    assert centre.wait()
+    assert ui.fn('upnext__un_lift_due') not in ui.pending() and s.menu() == SONG_MENU
+    assert not centre.shutdown_pending() and centre.release() == STOP

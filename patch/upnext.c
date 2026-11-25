@@ -17,9 +17,10 @@
  * moment. Centre held on a queued row lifts it onto a raised card, as the Library's Edit Library
  * does (library_edit.c): the wheel carries it among Playing Next's rows, each showing a grip,
  * Centre puts it down there and Return puts it back. The rest of the queue is the queue's own
- * order: no arrow, no lift, and Play/Pause does nothing on it. Centre held on one of its songs, on
- * a played song or on a pending row, or a finger held on any song row, opens the song's hold menu
- * (un_menu_hold, centre_menu.c).
+ * order: no arrow, no lift, and Play/Pause does nothing on it. Centre held on any song row (one
+ * of Playing Next's too, before its lift), on a played song or on a pending row, or a finger held
+ * on any of them, opens the song's hold menu (un_menu_hold, centre_menu.c); the lift is then a
+ * Centre hold that opens no menu (a double press's second, which times none).
  * Nothing toasts. Return lets the
  * sheet fall away (un_back, menu_modal.c modal_close), as do a tap on the page above it and a drag
  * down on it (menu_modal.c modal_touch_close).
@@ -390,8 +391,8 @@ static void un_far_play(void) {
 /* Centre or a finger held on a song's row (hold_menu.c qm_centre_hold, qm_touch_hold,
  * docs/internals.md#centre-hold-menu): the song's hold menu over the queue, as a playlist page's
  * song gets it (qm_song_hold), at the row's queue index, with Remove from Queue last, on the
- * queue's songs and a shuffle's played songs above the playing one alike. Centre (centre) leaves
- * a Playing Next row to its lift while one is timed (un_keydown; none from a touch). A pending row
+ * queue's songs, Playing Next's (Centre's menu comes at CENTRE_MENU_MS, before the row's lift,
+ * which it cancels) and a shuffle's played songs above the playing one alike. A pending row
  * (a card app's song not yet queued, no file yet) gets what applies to it (qm_far_hold: Play, as
  * its press, Sync Offline, Go to), from a record of its own, as the rows are taken again every
  * second. Clear and the header have none. 1 when the menu is on its way. */
@@ -404,7 +405,8 @@ int un_menu_hold(void *top, int centre) {
         unsigned at = un.past[stop];
         return at < deque_size(q) && qm_song_hold(un.page, q, at, "Remove from Queue", un_remove);
     }
-    if (k < 0 || (unsigned)k >= un.n || (centre && (unsigned)k < un.npn && un.hold)) return 0;
+    (void)centre;
+    if (k < 0 || (unsigned)k >= un.n) return 0;
     unsigned at = un.idx[k];
     stop_timer(&un.hold);
     if (at & UN_PEND_ROW) {
