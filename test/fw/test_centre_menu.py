@@ -262,7 +262,8 @@ def test_centre_held_on_a_song_in_up_next_opens_its_menu(fw, plain, st, recs):
 
 class Held(C.Structure):
     """hold_menu.c's qm_held: a payload page's song list held (qm_song_hold), its last row's words and what it runs."""
-    _fields_ = [('page', C.c_void_p), ('list', C.c_void_p), ('extra', C.c_char_p), ('pick', C.c_void_p), ('play', C.c_void_p)]
+    _fields_ = [('page', C.c_void_p), ('list', C.c_void_p), ('extra', C.c_char_p), ('pick', C.c_void_p), ('play', C.c_void_p),
+                ('move', C.c_void_p)]
 
 
 def test_up_next_s_menu_ends_with_remove_from_queue_which_takes_that_song_out(fw, plain, st, recs):

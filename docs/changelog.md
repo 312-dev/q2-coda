@@ -5,6 +5,7 @@
   - Bluetooth: a song or a click that comes just as the last click's sound ends starts, where it could fail while the headset's audio was still being let go: the Q2 waits a moment for it.
   - Bluetooth: when your headphones pause the Q2 (their own control, or AirPods moving to your phone), the Q2 lets their audio stream stop at once, so Play on the Q2 starts it again and is heard, where it could stay silent until you reconnected.
   - After a software update the song comes back paused where it was (with Memory Playback set to Location), where it started again from 0:00.
+  - Up Next: a song you queued (under Playing Next) has **Move** in its menu: hold Center on it, choose Move, then turn the wheel to carry it and press Center to put it down. Now Playing's More → Queue opens Up Next too, so every way to the queue has the same menus.
   - Logs: when Wi-Fi does not join a saved network, the log says so 30 seconds after Wi-Fi starts and each minute after: whether it is still scanning, how many networks it saw, how often it rescans and why. Joining and getting an address are logged with the seconds they took.
   - Subsonic: a restart that resumes a song from your server starts the app once, where two copies of it could start and both run until the next restart, each checking the server and writing the same files.
   - Cover Flow: on a large server library it opens in a second or two, where the first open after a change could sit on Home's spinner for over a minute while it checked every album's cover on the card one by one, the spinner stuttering meanwhile.
