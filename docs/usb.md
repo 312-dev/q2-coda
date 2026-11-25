@@ -1,0 +1,195 @@
+# USB detection
+
+How the Q2 tells what is on its USB-C port, what goes wrong, what the hardware can and cannot report, and the plan that replaces timers with events. The board's signals and registers are in [hardware: USB port](hardware.md#usb-port); the firmware's current handling is in [internals](internals.md) under [OTG host power](internals.md#otg-host-power), [USB cable events](internals.md#usb-cable-events), [USB pages](internals.md#usb-pages), [USB record](internals.md#usb-record) and [Standby and the USB link](internals.md#standby-and-the-usb-link). This page is the reasoning behind the plan: two studies of 2026-11-24 and 25 and the read-only probes of a Q2 on 2026-11-25.
+
+Each figure says how it is known: measured on a Q2 (from a device log or a probe, with its date), from code (ours, stock's binaries, the kernel image or its device tree), from a datasheet or manual, inferred, or estimated.
+
+## Where it stands
+
+The port's truth is spread over five signals nobody reads together or on time: the Type-C controller's ID output (`PD18`), a low-threshold VBUS sense (`PD17`), the PMIC's VBUS good (`online`, no interrupt), the dwc2 controller (which follows the ID pad by itself and never learns of an unplug), and stock demo, which samples the pins once a second on the UI thread and does everything inline (bus power, gadget scripts, the player's restart). Every fix so far is a timer over that poll. The result is right most of the time and slow all of the time.
+
+The plan is one event-driven state machine, run first in shadow beside stock's logic, then given the port. Phases 0 and 1 are built:
+
+- **Phase 0, the tracer:** `q2-usbtrace` in `--dev` builds records every signal with kernel timestamps ([internals: USB tracer](internals.md#usb-tracer)); [building: USB trace report](building.md#usb-trace-report) reads a trace back per plug cycle.
+- **Phase 1, the shadow:** `patch/usb_fsm.c` is the state machine as a pure function, fed by the tracer, logging what it would do beside what stock did ([internals: USB shadow](internals.md#usb-shadow), with its states, rules and constants).
+
+Phases 2 and 3 ([below](#the-plan)) wait on shadow data.
+
+## How detection works today
+
+Per kind of plug, on the firmware of `integ/q2-1202`. The settle is `OTG_SETTLE_MS` (3 s) in `patch/usb_otg.c`; the measured totals below were taken at 6 s, so take 3 s off them.
+
+**USB-C headphones or a DAC**, nothing unplugged in the last 10 s:
+
+| Step                            | Who                                                       | Time                                                                         |
+| ------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| CC attach, `PD18` low           | the Type-C controller                                     | 0.1 to 0.2 s (tCCDebounce, `PD_T_CC_DEBOUNCE` in Linux's `pd.h`); not logged |
+| `PD18` read                     | stock's pass, once a second                               | 0 to 1 s (code)                                                              |
+| Settle                          | `usb_otg.c` `OTG_SETTLE_MS`                               | 3 s (code)                                                                   |
+| `PC20` on (`otg-on`)            | stock's pass                                              | t0                                                                           |
+| The kernel sees the device      | dwc2 host                                                 | t0 + 0.56 s (measured 2026-11-23)                                            |
+| Descriptors read, mixer made    | usbcore, `snd-usb-audio`                                  | t0 + 0.82 s (measured)                                                       |
+| Stock finds `/dev/snd/pcmC1D0p` | an `access()` each UI pass                                | t0 + 2.6 to 2.7 s (measured 2026-11-24, two plugs)                           |
+| The song restarted on the DAC   | `player_save_stop`, `player_save_start`, on the UI thread | + 0.43 to 0.87 s, a UI pass that long (measured)                             |
+
+Plug to playing: about 9.5 to 10.5 s at the 6 s settle (an estimate from the rows), so about 7 s now. Within 10 s of an unplug (`OTG_BLANK_MS`) a low ID must last `OTG_ACCESSORY_MS` (8 s) instead, so about 12 s. The 1.8 s between the mixer and stock finding the PCM is not explained by any log (the sound card's registration or `mdev` making the node, inferred); the tracer's uevent times settle it.
+
+**Unplugging them:** `q2player` learns from a failed write (`hw:1,0 is gone`); stock's pass ends the grant up to 1 s later (`otg-off why=gone`), and that UI pass took 624 and 660 ms (measured).
+
+**A computer, with the gadget already bound (USB Debugging):** the bus reset, address and configuration come 0.1 to 0.15 s after VBUS (measured: `new device is high-speed`, then the address 33 ms later, configured 90 ms after that). demo's `in` line comes 25 to 34 ms after its edge (`cable in, seen after its edge`, measured 2026-11-25).
+
+**A computer on Automatic:** the iPhone gadget is bound 70 ms after the `in`, the host addresses it 0.29 s later and the verdict "computer" comes 73 ms after the address; the storage gadget is bound 1.05 s after the `in` and addressed 0.28 s after that, so Transfer Files reaches the computer about 1.3 s after the plug (measured 2026-11-23, one sample).
+
+**A car:** the verdict comes 307 to 1076 ms after the car addresses the Q2, audio 1000 ms after the car asks for it (measured over six car cables, `q2car-summary.log`).
+
+**A charger:** nothing addresses the gadget; the verdict is the 3 s probe timeout (`USB_PROBE_MS`, code).
+
+**Ask Every Time:** a probe gadget, the UDC's state read every 100 ms, the chooser when configured, a 3 s limit (code).
+
+**Screen off and Standby.** With the screen off the UI loop still runs stock's one-second pass and `usb_event.c`'s edge thread wakes it at once. In Standby (suspend to RAM) nothing runs; `device_standby` sets `PC20` to 0 first. Whether a cable wakes the Q2 from Standby is not established.
+
+## Failure catalogue
+
+The numbers are the studies'; the tracer's reports and test fixtures use them.
+
+| #   | Failure                                                         | Mechanism                                                                                                                                                                                                                                                                                                           | Seen                                                                               | Where it lives                                                        |
+| --- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| F1  | Headphones take seconds to play                                 | the settle, the one-second poll, the late PCM find and the UI-thread restart, added                                                                                                                                                                                                                                 | every plug (measured)                                                              | payload timers over a board limit                                     |
+| F2  | A phantom ID low after VBUS leaves                              | `PD18` goes low once, starting 2.15 to 7.02 s after VBUS leaves and lasting up to 2.15 s uncut with the pull-up on; one logged low lasted 4.28 s; cause not identified                                                                                                                                              | most unplugs in the 2026-11-17 logs (measured)                                     | the board: the Type-C controller or its wiring                        |
+| F3  | Back-feed into a computer                                       | stock powers the bus on any ID low, and a laptop will not source onto a live VBUS                                                                                                                                                                                                                                   | before `OTG_BLANK_MS`; none logged since                                           | stock demo, masked by the payload                                     |
+| F4  | An accessory never powered until re-seated                      | `PD17` low, `online` 0, `PD18` high, and the gadget side logs `new device is full-speed` bursts. Hypothesis H1 (inferred): the gadget's D+ pull-up back-powers the accessory, VBUS sits above vSafe0V (0.8 V, the Type-C specification), and a source may not attach until VBUS is at vSafe0V, so ID never goes low | 4 of 6 seats on 2026-11-23, 2 of 3 in another log, 0 of 2 on 2026-11-24 (measured) | the pull-up with no VBUS, if H1 holds; else the board                 |
+| F5  | A computer the wrong way round                                  | two dual-role ports resolve the Q2 as source: ID low, no VBUS, until a replug (56 s once)                                                                                                                                                                                                                           | 1 of about 6 laptop plugs one night (measured)                                     | the board: a DRP controller with no I²C cannot be told to prefer sink |
+| F6  | The Q2's own VBUS read as a cable                               | `PD17` stays low 1.6 s after `PC20` off (measured): a low threshold (inferred)                                                                                                                                                                                                                                      | every grant's end; filtered by `OTG_OWN_VBUS_MS`                                   | the board, masked by the payload                                      |
+| F7  | Power cut while a device enumerates                             | ID read high 0.98 s into the grant                                                                                                                                                                                                                                                                                  | fixed: the grant is kept while `1-1` exists                                        | stock demo                                                            |
+| F8  | A DAC lost mid-grant                                            | `usb 1-1: USB disconnect` with `PC20` on, the cause not in the record                                                                                                                                                                                                                                               | twice on 2026-11-23 (measured)                                                     | not known: the device, the cable, or the role following the pad       |
+| F9  | The UI stalls at a DAC change                                   | stock restarts the player on the UI thread                                                                                                                                                                                                                                                                          | passes of 434, 624, 660, 869 and 897 ms (measured)                                 | stock demo                                                            |
+| F10 | The UDC never sees an unplug                                    | `out+5s` reads `conn=connect udc=suspended` (measured); session valid forced in `GOTGCTL` and the CPM (measured 2026-11-25)                                                                                                                                                                                         | every unplug with a gadget bound                                                   | the kernel's and device tree's setup                                  |
+| F11 | Quick replugs missed; deaf after an unanswered chooser          | the 1 to 2 s poll; a probe gadget left bound                                                                                                                                                                                                                                                                        | fixed (`usb_event.c`, `usb_probe_stop`)                                            | stock demo                                                            |
+| F12 | The link dead after Standby                                     | the dwc2 keeps the gadget configured through suspend; the role came back as host once                                                                                                                                                                                                                               | fixed by `soft_connect` and `otg_hold`                                             | the kernel                                                            |
+| F13 | A charger's verdict takes 3 s, and a silent host looks the same | no BC1.2 anywhere (the AXP2101 has none)                                                                                                                                                                                                                                                                            | every charger                                                                      | physics                                                               |
+| F14 | `system()` on the UI thread                                     | `otg_hold` forks a shell and four `devmem`s a call; the gadget scripts                                                                                                                                                                                                                                              | every grant's end, wake and mode change (code)                                     | the payload                                                           |
+| F15 | A 2 A input limit for every source                              | `pmu_usbpc_cur = 2000` in the device tree; `16h` reads `0x05` (measured)                                                                                                                                                                                                                                            | always                                                                             | the board's description; out of this work's scope                     |
+
+## What the hardware can tell us
+
+**Settled** (the detail is in [hardware: USB port](hardware.md#usb-port)):
+
+- The Type-C controller is dual-role, pin-strapped and on no bus: an `i2cdetect -r` of every bus on 2026-11-25 found only the known clients, and no Type-C software exists in stock or the kernel. Orientation, the source's current, audio and debug accessories are unreadable unless one of its outputs reaches a SoC pin. `PD18` is its "attached as source" output, already debounced.
+- `PD17` plus `online` separate a real source from residue: `online` read 1 on every line with a real source and 0 for the Q2's own dying 5 V and for F4 (about 640 record lines).
+- `49h` bits 7 and 6 of the AXP2101 latch the last VBUS crossing of 3.75 V with no interrupt; `0x8b` read with a source attached (measured).
+- No PMIC interrupt reaches the kernel ([hardware: The PMIC's interrupt line](hardware.md#the-pmics-interrupt-line)), so `online` is a read over the bit-banged bus, not an event.
+- The role is already owned by software: `USBRDT` bits 24 and 23 read `1 1`, the role forced to device by `otg_hold` (measured). The same register can force host; that is not yet tested.
+- Session valid is forced in `GOTGCTL` (all six override bits) and the CPM: the mechanism of F10 (measured). `soft_connect` `disconnect` gives the functions a real unplug from userspace (5.10.21's `usb_gadget_disconnect` calls the driver's `disconnect()`, code), so F10 needs no kernel work.
+- Events that exist: GPIO line events on gpiochip3 (`PD17` in use by demo, `PD18` and `PD19` by the tracer); uevents for `usb1/1-1`, `sound/card1` and block devices (`mdev -df` already consumes them); `sysfs_notify` on the UDC's `state`. No event for the ID's role or the PMIC.
+- A kernel module is possible: it builds as `usb_f_uac1.ko` does (`tools/uac1_module/uac1_build.py`, vermagic `5.10.21+ SMP preempt mod_unload MIPS32_R5 32BIT`, no `MODVERSIONS`), and every symbol one would need is exported by the stock kernel (`gpiod_to_irq`, `request_threaded_irq`, `irq_find_mapping`, `irq_create_mapping_affinity`, extcon, `usb_udc_vbus_handler`, `ioremap_prot`, `regmap_read` and the rest). A `usb_role_switch` would be useless: the dwc2 uses one only when its device-tree node has `usb-role-switch`.
+
+**Open**, each with what settles it (the commands are under [On the device](#on-the-device)):
+
+| Question                                                              | Settled by                                                                                                                                                                                        |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Which part is the Type-C controller, and is any of its outputs routed | a sharp photo of the IC beside the port; a meter from its pins to `PD16`, `PD19`, VBUS                                                                                                            |
+| Why the phantom low (F2)                                              | a scope on CC1, CC2, VBUS and `PD18` through 10 unplugs, cable pulled at the Q2 and at the far end; without a scope, the tracer's `PD18` edges give each pulse's start and length per unplug type |
+| H1 (F4)                                                               | 20 seats of the earbuds with the UDC soft-disconnected against 20 with a gadget connected: ID low within 1 s, `PD17`, `online`                                                                    |
+| Is `PD19` the audio-accessory output                                  | R1 or R2 with a passive USB-C to 3.5 mm adapter: `PD19` low means yes                                                                                                                             |
+| Is `PD16` "attached as sink"                                          | R2: low only while a source is attached means yes                                                                                                                                                 |
+| Does the PMIC's IRQ pin reach `PC21`                                  | W1                                                                                                                                                                                                |
+| Does the PHY's own comparator see real VBUS                           | W3                                                                                                                                                                                                |
+| Does `power_supply` send uevents                                      | the tracer's `u` lines through a plug, an unplug and a charge to full                                                                                                                             |
+| Does a cable wake the Q2 from Standby                                 | one Standby with a plug and an unplug; the tracer's `wake` lines                                                                                                                                  |
+| Where the 1.8 s of F1 goes                                            | the tracer's uevent times for `1-1`, `card1`, `pcmC1D0p`                                                                                                                                          |
+| Host by `USBRDT`                                                      | bit 24 set and bit 23 clear with `PC20` on and earbuds in a failing seat: does `1-1` appear                                                                                                       |
+
+## Options
+
+| Option | What                                                                                                                                                           | Effort (worker-days, estimated)      | Risk                                                           | Fixes                                                                                           | Cannot fix                                                                                                   |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| a      | Events inside demo: a payload thread on `PD18` and `PD19` edges, a uevent socket, `poll` on the UDC's state; stock's poll as the fallback                      | 4 to 6                               | low to medium (the 128 KB scratch, the UI-thread rules)        | most of F1, F14                                                                                 | F9; the gadget scripts on the UI thread; the state still split over five files                               |
+| b      | `q2-usbd`, a daemon: one state machine owning detection, role, `PC20`, `PE22` and the gadgets, demo told over a socket                                         | 12 to 18 over the phases             | medium; the guard rails below carry it                         | F1, F4 (if H1), F6, F9 with a player change, F10, F14; F5 and F13 cut to a quick honest message | F2's cause, F5 itself, F13's ambiguity                                                                       |
+| c      | A kernel module (`q2usbx.ko`): GPIO interrupts with kernel timestamps, the PMIC's VBUS interrupts if its line works, extcon, `GOTGCTL` writes without the race | 2 to 3 on the existing build harness | a bad handler hangs the Q2; loaded late, with a boot-skip flag | the PMIC interrupt (if wired); sub-millisecond GPIO to role                                     | nothing a daemon cannot do otherwise; held until W1 shows the line works or userspace writes race the driver |
+| d      | The algorithm, wherever it lives: a pure function replayed against recorded traces                                                                             | 3 to 4, inside b                     | low                                                            | the multi-second waits                                                                          | the physically ambiguous cases                                                                               |
+
+A new device tree would hand the kernel real VBUS and ID, but means reflashing the kernel (a brick risk) and gives nothing a daemon cannot already do through gpiochip, `/dev/mem` and `soft_connect`.
+
+**Chosen:** b reached through a, with d as its core. `usb_fsm.c` is that core, compiled into the tracer now and into the daemon and the host tests later.
+
+What b must take over from stock: `check_otg_status` and `check_usb_status` become payload functions that apply the daemon's last state; `usb_detect` returns its cable bit; `toolsGpioGetValue("PD18")` stays filtered. Stock still needs its globals set: `g_usbdet_value` (the charging UI, power-off timers, In-Vehicle Mode), `g_usblink_status` (the Standby gate, the power-off page, keys), `g_usbmode`, `g_last_otgid` (the battery read, power-off) and `g_otg_status` (`check_outputdevice`, `has_valid_output_device`). Stock's `usbmode_page` and `usbmode_exit` (the card's unmount, remount, the scan prompt) stay stock's, opened by the payload on the daemon's "configured as storage". USB Debugging, Transfer Files, USB Audio and Car Audio are configfs compositions the daemon binds; Charge Only binds nothing and keeps the pull-up off; Ask Every Time and Automatic are its probe; OTG DAC is the host branch.
+
+### Perfect is not possible here
+
+- A charger and a host that has not yet enumerated are the same electrically: no BC1.2, the CC level unreadable. Best: charge at once, keep the gadget offered, say "charger" at 3 s, take a late host silently.
+- A dual-role power bank or phone can resolve either way and the Q2 cannot steer it. Best: see the wrong way in under 3 s and say so; never power VBUS while `online` is 1.
+- A passive analog adapter cannot be heard by this hardware unless `PD19` proves to be the accessory output, and even then there is no analog switch to the port (inferred). Best: a message, if `PD19` works.
+- A hub: the host branch; the kernel takes what is behind it.
+- The phantom low cannot be told from an accessory in its first seconds inside the 10 s window, unless `PD16` turns out to be "attached as sink".
+
+## The plan
+
+| Phase    | Ships                                                                                                                                                                                                                                                                                                                                                                  | Takes off the wait                                                             | Rollback                                         |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------ |
+| 0, built | `q2-usbtrace` in `--dev` builds ([USB tracer](internals.md#usb-tracer))                                                                                                                                                                                                                                                                                                | nothing; settles H1, F2 and the 1.8 s                                          | the off flag, or a release build                 |
+| 1, built | the state machine in shadow, logging `shadow: would ...` beside stock and each disagreement ([USB shadow](internals.md#usb-shadow)); still to come in this phase: `PD18` edges and a uevent-driven PCM find in the payload (option a)                                                                                                                                  | up to 1 s of poll and about 1.8 s of the PCM find (estimated)                  | config key back to `stock`                       |
+| 2        | after a week with no unsafe shadow decision: the daemon owns `PC20`, `PE22`'s host rule, the role (`USBRDT`) and the pull-up; `usb_otg.c` becomes the fallback; the player switches output live instead of stock's stop and start (2 to 3 days of it); `soft_connect` `disconnect` at each real VBUS removal (F10, and H1); the module only if W1 proves the PMIC line | the settle (to 0.2 s), the 8 s waits (to the shadow's constants), the UI stall | the same key; the payload's logic stays compiled |
+| 3        | gadget ownership: compositions bound by the daemon without shell scripts; `q2car` and `q2adb-gadget` become requests                                                                                                                                                                                                                                                   | fork and script time at each mode change; a cleaner Standby                    | a key per function                               |
+
+Targets, from the study (estimates where today is not measured): headphones playing in a median 1.8 s and a 95th percentile of 3 s with no recent unplug (5.5 s within 10 s of one); a pre-bound gadget configured in under 0.3 s and Transfer Files on Automatic under 1.5 s, as now; no missed plug in 1,000 cycles; no phantom bus power, counted by the shadow; no UI pass over 100 ms caused by USB; an accessory never powered in under 1 of 50 seats.
+
+**Guard rails** for phases 2 and 3:
+
+- Charging never depends on the daemon: `PE22` defaults to charging allowed, only a live daemon in `host` may hold it off, and the payload asserts its own choice every pass. The payload forces `PC20` to 0 when the daemon's 1 s heartbeat is 3 s late, and `device_standby`, power-off and reboot do as now.
+- USB Debugging never depends on it: a `--dev` boot binds the ADB gadget before the daemon starts; the daemon unbinds it only for an explicit pick and restores it if it dies. `q2remote` over Wi-Fi stays the second way in.
+- A mode key `stock|shadow|own` on the flash. Three daemon exits in five minutes, or a missed heartbeat, put the payload back on its own logic for the boot; two such boots write `stock`. A key held at boot (Return proposed) forces `stock` for that boot.
+- No bus power into a source: `PC20` only with `online` 0 and `PD17` high within the last 50 ms, checked in the daemon and again in the payload.
+- The daemon never runs on the UI thread, and demo never waits on it.
+- A module is loaded late, from the daemon's start, never from `S11module_driver_default`, with `/mnt/data/q2usbx.loading` written before `insmod` and removed 30 s after: found at the next boot, the module is skipped and that is logged.
+
+## On the device
+
+Over adb ([adb](adb.md)) or `q2remote`. GPIO port C's registers are at `0x10010200`, port D's at `0x10010300` ([hardware: GPIO](hardware.md#gpio)).
+
+**Reads** (none changes anything):
+
+| #   | Command                                                                                                                                                | Answers                                                                                             |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| R1  | `for o in 00 10 20 30 40 50 70 80 90; do echo $o $(devmem 0x100103$o 32); done`, cable in, cable out, the passive 3.5 mm adapter                       | which of `PD14`, `PD15`, `PD16`, `PD19` follow attach, detach and an accessory, and each pin's mode |
+| R2  | `devmem 0x10010300 32` at 20 Hz for 30 s through a laptop C-to-C in and out, a charger, earbuds, the passive adapter, an empty OTG adapter             | the truth table of `PD14` to `PD19`; whether `PD16` is low only while sinking                       |
+| R3  | the R1 loop on `0x100102$o`                                                                                                                            | `PC21`'s mode and whether `FLG` bit 21 latched                                                      |
+| R4  | `grep -E 'axp\|KEY_POWER' /proc/interrupts; grep axp /sys/kernel/debug/gpio; i2cget -f -y 6 0x34 0x49` before and after three presses of the power key | whether the PMIC line ever moves                                                                    |
+| R5  | `i2cget -f -y 6 0x34 0x49` cable in, out, in                                                                                                           | `49h` bits 7 and 6 as the VBUS latch                                                                |
+| R6  | `i2cdetect -y -r 3`; `i2cdetect -y -r 5` while music plays                                                                                             | bus 3's busy 0x15; bus 5's other DACs answering once powered, proving the method                    |
+| R7  | `grep -E 'pin (11[0-9]\|8[0-9]) ' /sys/kernel/debug/pinctrl/*/pinmux-pins`                                                                             | the mux of `PD14` to `PD19` and `PC16` to `PC24`                                                    |
+
+R1, R3 (cable in), R4 (before the presses), R5 (cable in), R6 (bus 3) and R7 were run on 2026-11-25; their results are in [hardware: USB port](hardware.md#usb-port). The rest need the owner's hands on the cable.
+
+**Writes**, only if a read leaves the question open, each with its risk and undo:
+
+| #   | Write                                                                                                                                                                                                                                | Proves                                                                                               | Risk                                                                                                                            | Undo                                                                  |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| W1  | `i2cset -f -y 6 0x34 0x49 0x0b` (clears only the pending power-key bits 3, 1 and 0), then read `PC21` (`devmem 0x10010200 32`, bit 21) and `49h`, press the power key, read both again and `/proc/interrupts`                        | whether the PMIC's IRQ output reaches `PC21`'s pad: wired, the pad goes low at the press             | low: those bits feed only `axp20x-pek`, whose IRQs never fire; the power key is read through `PE31`                             | none; a press latches them again                                      |
+| W2  | do **not** set `41h` bits 7 and 6 with `i2cset`: an enabled source with no handler holds a level line low and can storm IRQ 72                                                                                                       |                                                                                                      | high                                                                                                                            | `i2cset -f -y 6 0x34 0x41 0x03`                                       |
+| W3  | one detached command that restores itself if adb drops: `nohup sh -c 'g=$(devmem 0x13500000 32); devmem 0x13500000 32 $((g & ~0x40)); sleep 1; devmem 0x13500000 32 > /tmp/w3; devmem 0x13500000 32 $g' &`, cable in, then cable out | whether the PHY's B-session comparator sees real VBUS (`BSesVld`, bit 19, with `BvalidOvEn` cleared) | medium: if the PHY's VBUS pin is not wired, B-valid drops and the gadget (adb) disconnects for 1 s; only with the owner present | the command restores the word itself; `q2remote` is the second way in |
+| W4  | `echo disconnect > /sys/class/udc/13500000.otg/soft_connect` 1 s after an unplug, `connect` at the next plug                                                                                                                         | that the functions see the unplug (F10 from userspace)                                               | low: the payload already does it at Standby (F12)                                                                               | `echo connect > ...`                                                  |
+
+**The plug protocol**, with the tracer running, each step announced and stamped:
+
+1. A laptop C-to-C: 20 cycles of 10 s in and 10 s out; 20 with 1 s out; 20 pulled at the laptop end with the cable left in the Q2.
+2. The same with an A-to-C cable and with a wall charger, 20 each.
+3. Earbuds: 20 seats with a gadget bound, 20 with the UDC soft-disconnected (H1), both orientations.
+4. Earbuds 2 s, 5 s and 9 s after pulling the laptop cable, 10 each.
+5. A passive analog adapter, an OTG adapter empty and with a DAC, a power bank, a phone: 5 each.
+6. Standby with a cable in, a plug during Standby, an unplug during Standby: 3 each.
+7. The car: one drive with the tracer running.
+
+The targets are the pass criteria; every miss becomes a fixture in `test/fixtures/usb_fsm/`.
+
+## Open questions
+
+Each with the studies' default:
+
+1. Open the case for a sharp photo of the IC beside the port? Yes, at the next convenient time; nothing else waits on it.
+2. A logic analyser or scope for F2? Assume none; use the tracer's edges.
+3. Accept a 200 ms grant outside the 10 s window once a week of shadow data shows no phantom there? Yes.
+4. A daemon, or everything in the payload? The daemon, with the pure-function core shared.
+5. The boot escape key? Return held at power-on.
+6. Should the Q2 ever power the port for a power-only accessory? No, not in this work.
+7. Lower the 2 A input limit for plain USB ports (F15)? A separate item.
+8. The 1,000-cycle test on a switched cable (a relay box, about a day to make)? 200 by hand first.
