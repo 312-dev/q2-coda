@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - USB-C headphones and USB DACs get power 3 to 4 seconds after you plug them in, where it took 6 to 7; plugged in right after unplugging a cable they still wait about 8 seconds, as before.
   - USB-C headphones and USB DACs: when the Q2 finds one, or loses it, and moves the song there, the screen and the wheel stall for 0.3 s less, where the move held them for close to half a second or more.
   - Bluetooth: a song or a click that comes just as the last click's sound ends starts, where it could fail while the headset's audio was still being let go: the Q2 waits a moment for it.
   - Bluetooth: when your headphones pause the Q2 (their own control, or AirPods moving to your phone), the Q2 lets their audio stream stop at once, so Play on the Q2 starts it again and is heard, where it could stay silent until you reconnected.
