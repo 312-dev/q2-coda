@@ -145,6 +145,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
              for big, px in (('', art.NP_STAR_PX), ('_big', art.NP_STAR_BIG_PX)) for k in ('d', 'l')}  # np_rate.c's
     marks = [f'stream_{n}_{k}' for n in ('tidal', 'spotify', 'app', 'radio', 'airplay', 'config', 'subsonic') for k in ('d', 'l', 'w')]
     menus = [f'menu_{n}_{k}' for n in art.MENU_ICONS for k in ('d', 'l', 'w')] + ['menu_check_a']
+    menus += [f'menu_grip_{k}' for k in ('d', 'l', 'w')]  # Move's grip (hold_menu.c), q2-coda's own glyph
     # the menu sheet's Unfavorite (hold_menu.c): heart (fill) in Favorite pink-red, both halves, white on the bar
     menufav = {'menu_heart-fill_d': 0xff375f, 'menu_heart-fill_l': 0xff375f, 'menu_heart-fill_w': 0xffffff}
     speakers = [f'vol_{n}_{k}' for n in ('lo', 'hi') for k in ('d', 'l')]  # the volume's ends on Now Playing (fill, 16 px)
