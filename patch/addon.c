@@ -412,6 +412,15 @@ static void stop_cmd(const char *pid, char *cmd, unsigned n) {
     snprintf(cmd, n, "kill $(cat %s) 2>/dev/null || rm -f %s", pid, pid);
 }
 
+/* A launch under way: started, its launcher not yet at its pid file (it copies the app to /tmp
+ * first), and ADDON_START_MS not past, when poll_one ends it. A second launch then would find no
+ * app running too, and both copies would run (docs/internals.md#card-apps). ponytail: a wake that
+ * finds a running app (addon_wake) restarts the count, so one that exits within ADDON_START_MS of
+ * that waits out the rest before a wake starts it again; a flag set by launch alone would close it. */
+static int starting(const app_t *a) {
+    return a->launched && access(a->pid, 0) && time_now_ms() - a->launch_at < ADDON_START_MS;
+}
+
 /* The app's run script started in the background: system() waits only for its shell, not for the
  * script, which exits at once when the app runs already and otherwise copies itself and the app to
  * /tmp and forks its loop (about 210 ms on the emulator, which the UI pass waited for; 65 ms with
@@ -443,6 +452,7 @@ int addon_wake(const char *id) {
         if (!a->launched) a->launched = 1, a->launch_at = time_now_ms(); /* its .play polled */
         return 0;
     }
+    if (starting(a)) return 1; /* boot's resume and the catalogue's autostart, one poll apart */
     unlink(a->browse);
     launch(a);
     return a->launched ? 1 : -1;
@@ -1033,6 +1043,13 @@ static void *pending_record(const char *path) {
     I(r, REC_TYPE) = 8;
     card_record_tags(r);
     return r;
+}
+/* A pending row's song again, a record of its own in a one-row array (addon_pending_free): Up
+ * Next's menu on it keeps it while the rows are taken again (upnext.c un_menu_hold). */
+void **addon_pending_one(const char *path) {
+    void **rows = calloc(1, sizeof *rows);
+    if (rows && !(rows[0] = pending_record(path))) free(rows), rows = 0;
+    return rows;
 }
 void addon_pending_free(void **rows, unsigned n) {
     for (unsigned i = 0; rows && i < n; ++i)
@@ -3572,7 +3589,10 @@ static int page_at(int k, const char *op, const char *args, const char *title, i
         return free(pg.lv), free(pg.f), free(pg.kept), pg.lv = 0, pg.f = 0, pg.kept = 0, 0;
     pg.a = k;
     app_t *a = app();
-    if (!missing && (!a->launched || access(a->pid, 0))) launch(a), pg.code = qr && a->qr;
+    if (!missing && (!a->launched || access(a->pid, 0))) {
+        if (!starting(a)) launch(a); /* one under way since boot is the page's */
+        pg.code = qr && a->qr;
+    }
     pg.depth = 1;
     if (!pg.page) pg.hold = 1 + K_LOAD, load_over(from, held_cancel); /* the page once it answers */
     lv_t *l = top();

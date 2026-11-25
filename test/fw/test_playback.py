@@ -34,7 +34,7 @@ class State(C.Structure):
                 fields('saved_elapsed save_failed resume_pending resume_elapsed resume_wait') +
                 fields('saved_pos saved_sum saved_queue', C.c_uint) + fields('next_valid next_value') +
                 fields('next_pos resume_key resume_pos', C.c_uint) + fields('order cycle', C.POINTER(Qix)) +
-                [('groups', C.POINTER(C.c_uint)), ('mark', C.POINTER(C.c_ushort)), ('history', C.POINTER(C.c_uint))] + fields('poll_stamp plain_size', C.c_uint))
+                [('groups', C.POINTER(C.c_uint)), ('mark', C.POINTER(C.c_ushort)), ('history', C.POINTER(C.c_uint))] + fields('poll_stamp plain_size', C.c_uint) + fields('going_down'))
 
 
 class Player:
@@ -2718,6 +2718,52 @@ def test_power_off_saves_the_second_it_is_at(polled):
     assert struct.unpack('<4I', polled.disk.files[CHECKPOINT])[3] == 14
 
 
+@pytest.mark.parametrize('status, stopped_sec', [(2, -1), (2, 0), (3, -1)])
+def test_an_update_keeps_the_second_while_it_flashes(polled, status, stopped_sec):
+    """An update (Software Update's Install and Restart, or q2update install over adb) saves at its dialog's open
+    (ringnav_checkfw), and stock's init then stops the player; the UI loop runs on through the flash, about 50 s,
+    before the countdown's reboot. Those passes, the player stopped, must not save its 0 over the second saved: the
+    next boot resumes the song paused there (Memory Playback: Location), as after a power-off."""
+    polled.status = status
+    assert polled.after(6000, sec=90) or True
+    def stock_checkfw(*_):  # dialog_checkfw_dialog_init: the player stopped before its thread flashes
+        polled.status, polled.sec = 1, stopped_sec
+        return 8
+    polled.fw.mock('stock_checkfw_trampoline', stock_checkfw)
+    polled.fw.mock('stock_savequeue_trampoline', lambda *_: 3)
+    assert polled.fw.fn('ringnav_checkfw', C.c_int, C.c_void_p, C.c_void_p)(None, None) == 8
+    assert struct.unpack('<4I', polled.disk.files[CHECKPOINT])[3] == 90
+    for _ in range(12):  # a minute of passes while it flashes
+        polled.after(5000, sec=stopped_sec)
+    assert struct.unpack('<4I', polled.disk.files[CHECKPOINT])[3] == 90, 'the stopped player saved over the second'
+    restore(polled)
+    assert polled.fw.calls('mclSetStartSeekTime')[-1][1][0] == 90
+    assert polled.s.resume_elapsed == 90  # the seconds a streamed queue's app is asked to resume at (ask_resume)
+
+
+def test_an_update_that_does_not_restart_lets_the_saves_go_on(polled):
+    """The update's dialog closed without the reboot (stock's answer: no file, the same version, a bad tar): its
+    destroy (sw_update.c sw_dialog_gone, registered by sw_update_restarting) clears the hold, and the next pass saves
+    the second the song is at again."""
+    handlers = []
+    polled.fw.mock('widget_on', lambda win, evt, fn, ctx, *_: handlers.append((fn, ctx)) or 1)
+    polled.fw.mock('widget_lookup', lambda *_: 0)
+    polled.fw.mock('stock_savequeue_trampoline', lambda *_: 3)
+    def stock_checkfw(*_):
+        polled.status, polled.sec = 1, -1
+        return 8
+    polled.fw.mock('stock_checkfw_trampoline', stock_checkfw)
+    polled.after(6000, sec=90)
+    win = C.create_string_buffer(64)
+    assert polled.fw.fn('ringnav_checkfw', C.c_int, C.c_void_p, C.c_void_p)(C.addressof(win), None) == 8
+    assert polled.s.going_down == 1 and len(handlers) == 1
+    C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(handlers[0][0])(handlers[0][1], None)
+    assert polled.s.going_down == 0
+    polled.status = 2
+    polled.after(31000, sec=120)
+    assert struct.unpack('<4I', polled.disk.files[CHECKPOINT])[3] == 120
+
+
 def snapshot_of(paths, cut=0):
     """A sealed version 3 snapshot of paths in queue order, the first playing, cut bytes short of its table."""
     n = len(paths)
@@ -3249,3 +3295,53 @@ def test_a_next_between_shuffle_on_and_its_ui_pass_plays_stocks_draw_then_the_or
     assert player.s.active == 1 and player.s.order[player.s.cursor] == 4
     coming = player.up_next()
     assert player.run(5) == coming[:5]
+
+
+# The owner's log of 2026-11-24 from 16:13:45Z: a resume of 999 songs at boot, then late UI passes of 2 to 5 s about
+# every 5 s for two and a half minutes. A queue past SAVE_LIMIT had its file dropped at every 5 s save, a rewrite on
+# the card on the UI thread (before docs/internals.md#shuffle-order's queue writer). With the card's writes made slow
+# (each queue file opened, renamed or removed on the UI thread costs SLOW_MS), the UI pass watchdog's line names
+# playback_poll as the pass's longest poll if the save is still on the UI thread, and there is no late pass if not.
+SLOW_MS = 2000
+
+
+def test_a_slow_card_under_a_long_queue_leaves_no_late_ui_pass(saved, fw):
+    import threading
+    saved.load([saved.song(b'/m/%04d.flac' % i, b'A', track=i) for i in range(1200)], 5)
+    saved.mcl.type = LIBRARY
+    clock, lines, ui = [100000], [], threading.main_thread()
+    fw.mock('time_now_ms', lambda *_: clock[0])
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+
+    def slow(real):
+        def call(path, *rest):
+            if threading.current_thread() is ui and b'ringnav-queue' in C.string_at(path):
+                clock[0] += SLOW_MS  # the card's write, on the UI thread
+            return real(path, *rest)
+        return call
+    fw.mock('fw_fopen', slow(saved.disk.fopen))
+    fw.mock('fw_rename', slow(saved.disk.rename))
+    fw.mock('fw_unlink', slow(lambda path, *_: saved.disk.files.pop(C.string_at(path).decode(), None) and 0))
+    fw.mock('fw_write', lambda fd, data, n, *_: fd == 2 and lines.append(C.string_at(data, n).decode()) or n)
+    threads = []  # a thread the payload starts runs on a thread of its own, as on the Q2
+
+    def create(out, attr, run, arg, *_):
+        C.c_ulong.from_address(out).value = 77
+        t = threading.Thread(target=C.CFUNCTYPE(C.c_void_p, C.c_void_p)(run), args=(arg,))
+        threads.append(t)
+        t.start()
+        return 0
+    fw.mock('fw_pthread_create', create)
+    enter, polled, woke = (fw.fn(n, None) for n in ('ui_watch_enter', 'ui_watch_polled', 'ui_watch_woke'))
+    mark, poll = fw.fn('ui_watch_poll', None, C.c_char_p), fw.fn('playback_poll', None)
+    for _ in range(6):  # ringnav_sleep's pass with playback_poll among its polls, 5 s apart
+        clock[0] += 5000
+        woke()
+        enter()
+        mark(b'playback_poll')
+        poll()
+        polled()
+        for t in threads:
+            t.join(5)
+    late = [l for l in lines if 'ui pass' in l]
+    assert late == [], late

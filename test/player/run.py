@@ -2050,20 +2050,24 @@ def test_car_way_needs_the_car_build(player, songs, tmp):
     return 'Bluetooth, as without a car'
 
 
+def bt_fds(s):
+    """The player's open files that are a Bluetooth PCM (the file sink's ..._bt.raw)."""
+    fds = []
+    for fd in pathlib.Path(f'/proc/{s.proc.pid}/fd').iterdir():
+        try:
+            if os.readlink(fd).endswith('_bt.raw'): fds.append(fd.name)
+        except OSError: pass
+    return fds
+
+
 def test_bt_pause_releases_the_pcm(player, songs, tmp):
     """docs/internals.md#bluetooth-pause: a song paused on Bluetooth keeps bluealsa's PCM for BT_PAUSE_MS (3 s here,
     Q2PLAYER_BT_PAUSE_MS), then closes it, so bluealsa's keep-alive lets the A2DP stream stop. A PCM held paused keeps
     the stream started with nothing in it for the whole pause, and AirPods held so for minutes (pauses of 2.5 and 6.4
-    minutes in a device log, no AVDTP suspend in either) play nothing at the Play until a reconnect. A pause shorter than that keeps the PCM; after it, a click opens a PCM for itself (the click in it) that is closed
-    again BT_PAUSE_MS after the click's hold, and the Play opens one more, the song on from the frame heard. The
-    Bluetooth PCM (the file sink's ..._bt.raw) is read from /proc/PID/fd, the player run without q2-heavy's preload."""
-    def bt_fds(s):
-        fds = []
-        for fd in pathlib.Path(f'/proc/{s.proc.pid}/fd').iterdir():
-            try:
-                if os.readlink(fd).endswith('_bt.raw'): fds.append(fd.name)
-            except OSError: pass
-        return fds
+    minutes in a device log, no AVDTP suspend in either) play nothing at the Play until a reconnect. A pause shorter
+    than that keeps the PCM; after it, a click opens a PCM for itself (the click in it) that is closed again
+    BT_PAUSE_MS after the click's hold, and the Play opens one more, the song on from the frame heard. The Bluetooth
+    PCM (the file sink's ..._bt.raw) is read from /proc/PID/fd, the player run without q2-heavy's preload."""
     seen = {}
     look = lambda name: (lambda s: seen.setdefault(name, bt_fds(s)))
     steps = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'),
@@ -2100,6 +2104,125 @@ def test_bt_pause_releases_the_pcm(player, songs, tmp):
         and re.search(r"Bluetooth's PCM opened again for the play, \d+ ms after its close; the song on from frame \d+", log), log[-1500:]
     return (f'kept through a 1 s pause, closed {closed[0] - pauses[1]} ms into a long one; a click in a PCM of its own, '
             f'closed again; the Play went on {unheard * 1000 // 48000} ms back, at the frame heard')
+
+
+def test_bt_headset_pause_releases_at_once(player, songs, tmp):
+    """docs/internals.md#bluetooth-pause: a pause the headset sent (patch/headset.c sends {mcl-btrelease\\null} after
+    demo's pause: a multipoint headset moving to another source pauses the Q2 so) closes the Bluetooth PCM at once,
+    not BT_PAUSE_MS (20 s) on, so bluealsa's keep-alive lets the stream go and the Play starts it afresh, the path
+    every Play heard on a Q2 took; a held stream after a headset's pause was not heard. The command while the song
+    plays changes nothing, and the Play opens a PCM again with the song on from the frame heard."""
+    out, looks = tmp/'bt-headset-pause', {}
+    look = lambda name: (lambda s: looks.setdefault(name, (len(bt_fds(s)), sum(p.stat().st_size for p in (out/'pcm').glob('*_bt.raw')))))
+    steps = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'),
+             (0.1, fakedemo.vol(100, 100)), (1.0, fakedemo.song('set-songurl', f'{songs}/whole48.wav')),
+             (1.5, '{mcl-btrelease\\null}'), (1.9, look('playing')), (2.0, '{mcl-pause\\null}'),
+             (2.02, '{mcl-btrelease\\null}'), (2.5, look('0.5 s paused')), (4.0, '{mcl-play\\null}'),
+             (4.6, look('playing again')), (5.6, look('a second on')), (6.0, '{mcl-stop\\null}'), (7.0, None)]
+    s = fakedemo.Session(out)
+    s.music = songs
+    s.run(steps, fakedemo.launch_host(player, str(songs), 1, {'LD_PRELOAD': ''}), 1)
+    assert {k: n for k, (n, _) in looks.items()} == {'playing': 1, '0.5 s paused': 0, 'playing again': 1, 'a second on': 1}, looks
+    assert looks['a second on'][1] - looks['playing again'][1] >= 0.8 * 48000 * 4, looks
+    log = (out/'player.log').read_text()
+    held = re.search(r'q2player: the headset paused: its Bluetooth PCM closed at once .* the song held at frame (\d+)', log)
+    assert held and len(re.findall('the headset paused', log)) == 1, log[-1500:]
+    assert f"Bluetooth's PCM opened again for the play" in log and f'the song on from frame {held[1]}' in log, log[-1500:]
+    names = sorted((out/'pcm').glob('*_bt.raw'))
+    ref, last = reference(songs/'whole48.wav'), names[-1].read_bytes()
+    at = int(held[1])
+    assert len(names) == 2 and last == ref[4 * at:4 * at + len(last)], 'the song not on from the frame held'
+    return f'closed at once on the headset\'s pause (held at frame {at}), ignored while playing, the Play on from it'
+
+
+BT_PLAY_S = int(os.environ.get('Q2TEST_BT_PLAY_S', '10'))  # how long the click-and-play test listens after the Play
+
+
+def test_bt_play_and_click_after_the_release(player, songs, tmp):
+    """docs/internals.md#bluetooth-pause: demo sends a key click with the Play, so after a long pause on Bluetooth (the
+    PCM closed BT_PAUSE_MS in, 3 s here) the click and the Play reach the player together, in either order. A click
+    first opens the PCM paused for itself and its session ends at the Play; the song then goes on in that PCM, and
+    the log says so (q2player: the play goes on in the Bluetooth PCM a click opened ...); the Play first opens it for
+    the play and the click goes into the song. In each order, for BT_PLAY_S after the Play (10 s: past the pause's
+    3 s and the click's 3 s hold, the two timers that close a PCM), the PCM stays open, the song's frames reach it
+    at its rate, from the frame held at the close, and no close is logged after the Play."""
+    orders = {'click, then the play 50 ms on': [(6.0, '{mcl-click\\wheel}'), (6.05, '{mcl-play\\null}')],
+              'click and play in one read': [(6.0, '{mcl-click\\wheel}{mcl-play\\null}')],
+              'play and click in one read': [(6.0, '{mcl-play\\null}{mcl-click\\wheel}')]}
+    ref, said = reference(songs/'whole48.wav'), []
+    for i, (name, act) in enumerate(orders.items()):
+        out, looks = tmp/f'bt-click-play{i}', []
+        look = lambda s: looks.append((len(bt_fds(s)), sum(p.stat().st_size for p in (out/'pcm').glob('*_bt.raw')) // 4))
+        steps = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'),
+                 (0.1, fakedemo.vol(100, 100)), (1.0, fakedemo.song('set-songurl', f'{songs}/whole48.wav')),
+                 (2.0, '{mcl-pause\\null}'), *act] + [(6.5 + k, look) for k in range(BT_PLAY_S + 1)] + \
+                [(7.0 + BT_PLAY_S, '{mcl-stop\\null}'), (8.0 + BT_PLAY_S, None)]
+        s = fakedemo.Session(out)
+        s.music = songs
+        s.run(steps, fakedemo.launch_host(player, str(songs), 1, {'LD_PRELOAD': '', 'Q2PLAYER_BT_PAUSE_MS': '3000'}), 1)
+        log = (out/'player.log').read_text()
+        assert all(n == 1 for n, _ in looks), f'{name}: Bluetooth PCMs open each second after the Play {[n for n, _ in looks]}'
+        frames = looks[-1][1] - looks[0][1]
+        assert frames >= 0.9 * BT_PLAY_S * 48000, f'{name}: {frames} frames written in the {BT_PLAY_S} s after the Play'
+        held = int(re.search(r'paused on Bluetooth for 3000 ms, its PCM closed .* the song held at frame (\d+)', log)[1])
+        last = (sorted((out/'pcm').glob('*_bt.raw'))[-1]).read_bytes()
+        # from 0.2 s on: a click taken into the song (the Play first) is mixed into its first frames
+        at = last.find(ref[4 * (held + 9600):4 * (held + 14400)])
+        assert at >= 9600 * 4 and last[at:] == ref[4 * (held + 9600):4 * (held + 9600) + len(last) - at], \
+            f'{name}: the song not on from frame {held}'
+        after = log[log.index('q2player: mcl-play'):]
+        assert 'its PCM closed' not in after, f'{name}: a close after the Play: {after[:800]}'
+        said_play = re.search(r"q2player: (Bluetooth's PCM opened again for the play, \d+ ms after its close|the play goes on in the Bluetooth PCM a "
+                              r"click opened, \d+ ms after it opened); the song on from frame (\d+)", after)
+        assert said_play and int(said_play[2]) == held, f'{name}: the log does not say the play went on at {held}: {after[:800]}'
+        said.append(f'{name}: {frames} frames in {BT_PLAY_S} s, ' + ('a click\'s PCM' if 'click' in said_play[1] else 'opened for the play'))
+    return '; '.join(said)
+
+
+def test_bt_song_stalled_in_its_download(player, songs, tmp):
+    """A server song on Bluetooth whose download stops (player/grow.c): 4 s of a1 on the card, its .stream saying get
+    twice a second with no more bytes, the rest landing at 14 s. While it waits the song is playing as demo sees it, the
+    Bluetooth PCM stays open with nothing more written to it (on a Q2, the PCM's own silence goes to the headset),
+    the position stands where the bytes ran out, /tmp/q2player.wait names it, and the unified log says so, once at the
+    wait's start and once at its end (q2player: waiting for the song's download ...): the BT_PAUSE_MS close is a
+    pause's, not a wait's. Once the rest lands the song plays on to its end, whole."""
+    out = tmp/'bt-stall'
+    card, status = out/'mnt/mmc/.foo', out/'tmp/q2-foo.stream'
+    card.mkdir(parents=True, exist_ok=True)
+    whole, path = (songs/'a1.flac').read_bytes(), card/'grow.flac'
+    head, landed = len(whole) * 4 // 20, []
+    path.write_bytes(whole[:head])
+    line = lambda state, n: put(status, f'#Q2STREAM/1\tseq=1\n{state}\t{n}\t{len(whole)}\t20000\t/mnt/mmc/.foo/grow.flac\n')
+    beat = lambda s: landed or line('get', head)
+    def land(s):
+        with open(path, 'ab') as f: f.write(whole[head:])
+        landed.append(1), line('done', len(whole))
+    looks = []
+    look = lambda s: looks.append((len(bt_fds(s)), sum(p.stat().st_size for p in (out/'pcm').glob('*_bt.raw')) // 4,
+                                   (out/'tmp/q2player.wait').exists(), s.positions[-1][1] if s.positions else None))
+    steps = sorted([(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'),
+                    (0.1, fakedemo.vol(100, 100)), (1.0, fakedemo.song('set-songurl', str(path)))]
+                   + [(k / 2, beat) for k in range(2, 28)] + [(6.0 + k, look) for k in range(7)] + [(14.0, land)],
+                   key=lambda st: st[0]) + [(34.0, None)]
+    s = fakedemo.Session(out)
+    s.music = songs
+    s.wait_exits = 1
+    line('get', head)
+    s.run(steps, fakedemo.launch_host(player, str(songs), 1, {'LD_PRELOAD': '', 'Q2PLAYER_BT_PAUSE_MS': '3000'}), 1)
+    assert all(n == 1 for n, _, _, _ in looks), f'Bluetooth PCMs open while it waits: {[n for n, _, _, _ in looks]}'
+    assert len({f for _, f, _, _ in looks}) == 1, f'frames written while it waits: {[f for _, f, _, _ in looks]}'
+    assert all(w for _, _, w, _ in looks) and len({p for _, _, _, p in looks}) == 1, f'wait file, position: {looks}'
+    log = (out/'player.log').read_text()
+    waits = re.findall(r"q2player: waiting for the song's download: byte \d+ of (\d+)", log)
+    ends = re.findall(r"q2player: the wait for the song's download ended after (\d+) ms", log)
+    assert len(waits) == 1 and int(waits[0]) == len(whole) and len(ends) == 1 and int(ends[0]) >= 7000, (waits, ends, log[-1500:])
+    assert 'its PCM closed' not in log, log[-1500:]
+    pcm = b''.join(p.read_bytes() for p in sorted((out/'pcm').glob('*.raw')))
+    assert abs(len(pcm) // 4 - 20 * 48000) < 4800, f'{len(pcm) // 4} frames, a1 is 20 s at 48 kHz'
+    exits = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
+    assert exits == ['{player-status\\exit}'], exits
+    return (f'waited {int(ends[0]) / 1000:.1f} s at {looks[0][1]} frames, position {looks[0][3]} s, the PCM open; '
+            f'logged its start and end, then the song whole')
 
 
 def tones(d, *rates, secs=5):
@@ -2382,6 +2505,25 @@ def test_click_idle(player, songs, tmp):
                       (tmp/'click-idle'/'player.log').read_text())
     assert [w for w, _ in said] == ['paused', 'with nothing playing'], said
     return f'paused: 2 clicks, {held:.2f} s held, the song on from frame {at}; stopped: 2 clicks in a 48 kHz PCM'
+
+
+def test_bt_open_waits_out_a_busy_pcm(player, songs, tmp):
+    """docs/internals.md#bluetooth-pause: bluealsa's plugin claims its one client's place at hw_params and answers
+    -EBUSY while another client has it, or while bluealsa has not yet seen the last one's close: a click session's
+    PCM closed and another opened in the same moment met it on a Q2 (a click session's line and the busy line in the
+    same millisecond, and the transport let go 5 s later, so nothing else held it). The open waits it out a bounded
+    time, BT_BUSY_MS, and says how long, so a song or a click after a session's close is not lost to that moment; a
+    PCM held for good is given up after it, with the wait in the log. output.c against alsa_test.c's libasound."""
+    got = subprocess.run([tool(tmp, 'alsa_test', '-DHAVE_ALSA', '-DQ2_CAR_USB'), 'busy'], check=True, capture_output=True,
+                         text=True)
+    lines = {l.split()[0]: l.split() for l in got.stdout.split('\n') if l}
+    # tries of hw_params, and the 50 ms waits between them (alsa_test.c counts usleep, no time passing)
+    assert lines['busy0'][1:] == ['opened', 'tries', '1', 'sleeps', '0'], lines
+    assert lines['busy6'][1:] == ['opened', 'tries', '7', 'sleeps', '6'], f'busy for 6 tries: {lines["busy6"]}'
+    assert lines['busy1000'][1:] == ['failed', 'tries', '31', 'sleeps', '30'], f'held for good: {lines["busy1000"]}'
+    assert "q2player: bluealsa's PCM was busy; it opened after 300 ms" in got.stderr, got.stderr[-800:]
+    assert "q2player: bluealsa's PCM still busy after 1500 ms: another client holds it" in got.stderr, got.stderr[-800:]
+    return 'free: at once; busy 6 tries: opened after 300 ms; held: given up after 1500 ms, said once'
 
 
 def test_click_idle_alsa(player, songs, tmp):

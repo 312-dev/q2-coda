@@ -106,6 +106,9 @@ static int qm_run(const void *unused) {
         st.qm_choice = 0;
     } else if (a == QA_OFFLINE) { /* the item worked out for its row (offline.c) */
         offline_press();
+    } else if (r && a == QA_PLAY && qm_held.play &&
+               qm_held_on(window_manager_get_top_window(window_manager()))) {
+        qm_held.play(); /* a song not on the card yet: its row's own press (qm_far_hold) */
     } else if (r && a == QA_CHAPTERS) {
         chapters_open(r);
     } else if (r && a == QA_QUEUE) {
@@ -342,6 +345,10 @@ static int qm_open(const void *unused) {
      * On-The-Go (while it is on), Add to Playlist…, Favorite, then the Go to rows; its playlist:
      * Play, Shuffle, Rename and, after a gap, Delete */
     int list = st.qm_kind == QM_PLAYLIST, own = song && st.qm_kind != QM_PLAYING;
+    /* held: a payload page's song (a playlist's page: a song's whole menu, then its Remove); far:
+     * a song not on the card yet (qm_far_hold), Play, Sync Offline and Go to alone */
+    int held = qm_held_on(page), far = held && qm_held.play;
+    if (far) acts[n++] = QA_PLAY;
     /* Sync Offline for a server's song, album, artist or playlist (offline.c): a playlist's before
      * its Rename and Delete, any other's after its Favorite and Add to Playlist rows */
     int okind = song                                                    ? OFF_SONG
@@ -351,17 +358,17 @@ static int qm_open(const void *unused) {
                                                                         : 0;
     const char *offl = offline_row(okind, r, list ? (int)st.qm_idx : -1);
     if (list) acts[n++] = QA_PLAY;
-    if (!list) acts[n++] = QA_NEXT, acts[n++] = QA_ADD;
-    if (own && ringnav_otg()) acts[n++] = QA_OTG;
+    if (!list && !far) acts[n++] = QA_NEXT, acts[n++] = QA_ADD;
+    if (own && !far && ringnav_otg()) acts[n++] = QA_OTG;
     if (st.qm_kind == QM_PLAYING) {
         if (chapter_file(r)) acts[n++] = QA_CHAPTERS;
         acts[n++] = QA_QUEUE;
     }
-    if (own) acts[n++] = QA_PLAYLIST;
+    if (own && !far) acts[n++] = QA_PLAYLIST;
     if (!song) acts[n++] = QA_SHUFFLE;
     if (list && offl) acts[n++] = QA_OFFLINE;
     if (list) acts[n++] = QA_RENAME, acts[n++] = QA_DELETE;
-    if (song) acts[n++] = rate_fav(r) ? QA_UNFAV : QA_FAV;
+    if (song && !far) acts[n++] = rate_fav(r) ? QA_UNFAV : QA_FAV;
     /* an album's own favourite, its hearts' 5 (ratings.c rate_album_favs) */
     unsigned aid = song ? 0 : qm_album_id(r);
     if (aid) acts[n++] = rate_kept(1, aid) == 5 ? QA_UNFAV : QA_FAV;
@@ -369,14 +376,13 @@ static int qm_open(const void *unused) {
     if (!list && offl) acts[n++] = QA_OFFLINE;
     /* a card app's song isn't in the Library: Go to only to the app's own page */
     int hidden = song && !addon_goes(P(r, REC_PATH));
-    int held = qm_held_on(page); /* a playlist's page: a song's whole menu, then its Remove */
     if ((st.qm_kind == QM_SONG || st.qm_kind == QM_PLAYING || held) && !hidden &&
         (cls & 0xfff0) != 0xff10 && qm_goes(r, 1))
         acts[n++] = QA_ALBUM;
     if ((song || cls == CLASS_ALBUMS) && !hidden && qm_goes(r, 0)) acts[n++] = QA_ARTIST;
     /* ponytail: hidden while a folder_page is open (as Go to's single-instance pages), so a folder
      * play's Now Playing has none; Back reaches that folder_page instead. */
-    if (song && !navigator_window_is_exist("folder_page") && song_folder(r, st.go_folder))
+    if (song && !far && !navigator_window_is_exist("folder_page") && song_folder(r, st.go_folder))
         acts[n++] = QA_FOLDER;
     if (st.qm_kind == QM_PLAYING) {
         acts[n++] = QA_ADV_SHUFFLE;
@@ -522,6 +528,7 @@ int qm_song_hold(void *page, void *list, unsigned at, const char *extra, void (*
         return 0;
     st.qm_choice = 0;
     qm_held.page = page, qm_held.list = list, qm_held.extra = extra, qm_held.pick = pick;
+    qm_held.play = 0;
     st.qm_kind = QM_COVERFLOW; /* a song of a list on the top page, as Cover Flow's tracks */
     st.qm_cls = 0xf001;
     st.qm_idx = at;
@@ -529,6 +536,17 @@ int qm_song_hold(void *page, void *list, unsigned at, const char *extra, void (*
     st.qm_hash = rec_hash(r);
     qm_latch(key);
     drop_input();
+    return 1;
+}
+
+/* A song a payload page lists that is not on the card yet (Up Next's pending row: a card app's
+ * song still to download), alone in list, held: its menu is Play, which runs play (the row's own
+ * press), then what applies to a song with no file yet, Sync Offline and Go to; no Play Next,
+ * Play Last, playlist or Favorite rows, which would name a file that is not there. 1 when the menu
+ * is on its way. */
+int qm_far_hold(void *page, void *list, void (*play)(void)) {
+    if (!play || !qm_song_hold(page, list, 0, (const char *)0, 0)) return 0;
+    qm_held.play = play;
     return 1;
 }
 
@@ -645,6 +663,19 @@ static int qm_song_row_hold(void *top, unsigned by, int centre) {
     return taken;
 }
 int qm_centre_hold(void *top) { return qm_song_row_hold(top, KEY_CENTER, 1); }
+
+/* Whether a row is under the selection on top (centre_menu.c, a Centre hold that opened no menu):
+ * Search's results, or a selected row of the list surface the wheel moves on (a list, a table,
+ * Cover Flow's covers) as ringnav_select left it, read without loading the surface again (load
+ * would reset a selection whose count it reads otherwise); never Now Playing, whose surfaces are
+ * no rows. */
+int qm_row_under(void *top) {
+    if (!top || !tk_strcmp(widget_get_prop_str(top, "name", ""), "playing_page")) return 0;
+    if (search_strip_owns(top)) return search_strip_on_row(top);
+    void *w = surface_under(top, (void *)0, (void *)0, 0);
+    int sel = w ? widget_get_prop_int(w, SEL, -1) : -1;
+    return sel >= 0 && sel < widget_get_prop_int(w, COUNT, 0);
+}
 
 /* A finger held still at the UI point (x, y) (centre_menu.c): the row under it becomes the
  * selection and gets the menu Centre's hold gives it; a row that is no song gets its selection

@@ -694,13 +694,135 @@ static int art_clean(void) {
     return aw.clean && aw.clean == cf.stock && aw.clean_gen == library_gen &&
            aw.clean_n == deque_size(cf.stock);
 }
+/* The art look's view of the card (docs/internals.md#coverflow): a folder's names read once, kept
+ * as hashes sorted for a binary search, and read again only when the folder's modification time
+ * moves (or the art build has written to it, names_stale). On the owner's Q2 (exFAT, 2026-11-24)
+ * a lookup of one file in a folder of 5,000 names took about 12 ms, so a look that asked the card
+ * twice an album held a first open of 6,173 albums behind Home's spinner for over a minute; a
+ * folder's read is one pass over it. The art cache's names are their keys (%08x.jpg), a covers
+ * folder's the FNV hash of each name. NAMES_DIRS folders are kept, the art cache and the apps'
+ * covers, 4 bytes a name on the heap: the owner's 6,200 cached albums and 5,240 covers, 46 KB. A
+ * folder past NAMES_MAX names (256 KB), or one that can't be read, is not kept, and names_has
+ * answers -1: the caller asks the card, a lookup a file. A hash two cover names share answers
+ * "there" for both: the build then finds no cover file, marks nothing, and the next look asks
+ * again. */
+#define NAMES_DIRS 5
+#define NAMES_MAX 65536
+static struct {
+    char dir[72];
+    unsigned mtime[2], n, *h, used; /* used: when it was last asked (nm_looks), for its reuse */
+} nm[NAMES_DIRS] __attribute__((section(".scratch")));
+/* the folders' asks so far */
+static unsigned nm_looks __attribute__((section(".scratch")));
+static volatile int nm_reads __attribute__((section(".scratch"))); /* folders read this look */
+/* qsort's */
+static int names_cmp(const void *a, const void *b) {
+    unsigned x = *(const unsigned *)a, y = *(const unsigned *)b;
+    return (x > y) - (x < y);
+}
+/* A name's hash in folder dir: an art cache name its key, 8 hex digits before ".jpg" (1, else 0
+ * for any other name there: a .tmp, a half copy, the notes); a covers folder's the FNV hash. */
+static int name_hash(const char *name, int keys, unsigned *h) {
+    if (!keys) return *h = fnv(FNV_SEED, (const unsigned char *)name), 1;
+    unsigned k = 0;
+    for (int i = 0; i < 8; ++i) {
+        char c = name[i];
+        int d = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+        if (d < 0) return 0;
+        k = k << 4 | (unsigned)d;
+    }
+    return strcmp(name + 8, ".jpg") ? 0 : (*h = k, 1);
+}
+/* Folder dir's slot, read again when it changed; -1 when it can't be kept. */
+static int names_of(const char *dir, int keys) {
+    unsigned st[36];
+    int i = 0;
+    if (strlen(dir) >= sizeof nm[0].dir || __xstat(3, dir, st)) return -1;
+    while (i < NAMES_DIRS && strcmp(nm[i].dir, dir)) ++i;
+    if (i < NAMES_DIRS && nm[i].h && nm[i].mtime[0] == st[16] && nm[i].mtime[1] == st[17])
+        return nm[i].used = ++nm_looks, i;
+    if (i == NAMES_DIRS) /* a free slot, else the one asked longest ago */
+        for (int k = i = 0; k < NAMES_DIRS; ++k)
+            if (!nm[k].dir[0] ? nm[i].dir[0] != 0 : nm[i].dir[0] && nm[k].used < nm[i].used) i = k;
+    free(nm[i].h);
+    memset(&nm[i], 0, sizeof nm[i]);
+    void *d = opendir(dir);
+    unsigned n = 0, cap = 0, *h = 0, x;
+    for (struct dirent *e; d && (e = readdir(d));) {
+        if (!name_hash(e->d_name, keys, &x)) continue;
+        if (n == cap) {
+            unsigned *more = cap < NAMES_MAX ? realloc(h, (cap = cap ? cap * 2 : 1024) * 4) : 0;
+            if (!more) {
+                free(h), h = 0;
+                break;
+            }
+            h = more;
+        }
+        h[n++] = x;
+    }
+    if (d) closedir(d);
+    ++nm_reads;
+    if (!h && n) return -1;
+    /* an empty folder: kept, none there */
+    if (!h && !(h = calloc(1, 4))) return -1;
+    unsigned *fit = n && n < cap ? realloc(h, n * 4) : 0; /* what the names take, no more */
+    if (fit) h = fit;
+    qsort(h, n, 4, names_cmp);
+    snprintf(nm[i].dir, sizeof nm[i].dir, "%s", dir);
+    nm[i].mtime[0] = st[16], nm[i].mtime[1] = st[17], nm[i].h = h, nm[i].n = n,
+    nm[i].used = ++nm_looks;
+    return i;
+}
+/* Whether the file name is in folder dir (1 or 0) from its kept names; -1 when the folder isn't
+ * kept. keys: the art cache, its names hashed as name_hash does. */
+static int names_has(const char *dir, const char *name, int keys) {
+    unsigned x;
+    int i = names_of(dir, keys);
+    if (i < 0 || !name_hash(name, keys, &x)) return -1;
+    unsigned lo = 0, hi = nm[i].n;
+    while (lo < hi) {
+        unsigned mid = (lo + hi) / 2;
+        if (nm[i].h[mid] < x)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return lo < nm[i].n && nm[i].h[lo] == x;
+}
+/* The art cache changed under its kept names (the build wrote to it, Refresh emptied it): read
+ * again at the next look, whatever its time says (exFAT keeps a folder's time to 10 ms). */
+static void names_stale(void) {
+    for (int i = 0; i < NAMES_DIRS; ++i)
+        if (!strcmp(nm[i].dir, ART_DIR)) nm[i].mtime[0] = nm[i].mtime[1] = ~0u;
+}
+/* path (a folder, then a name) there: from its folder's kept names, else the card's answer. */
+static int file_there(char *path, int keys, int mode) {
+    char *slash = strrchr(path, '/');
+    int there = -1;
+    if (slash) {
+        *slash = 0;
+        there = names_has(path, slash + 1, keys);
+        *slash = '/';
+    }
+    return there >= 0 ? there : !access(path, mode);
+}
+/* The last look over an open's albums (art_find, load_albums' pass): how many it looked at, in how
+ * many ms, reading how many folders; cw_shown's line names it. */
+static struct {
+    unsigned n, ms, reads, at;
+} lk __attribute__((section(".scratch")));
+static void look_begin(void) { nm_reads = 0, lk.at = (unsigned)time_now_ms(); }
+static void look_end(unsigned n) {
+    lk.n = n, lk.ms = (unsigned)time_now_ms() - lk.at, lk.reads = (unsigned)nm_reads;
+}
 /* Album r's art: 0 cached, 1 not cached and a build could make it (load_albums' job test), 2 not
  * cached and nothing to make it from: a server album whose app has no cover file, drawn as the
- * placeholder, no job. */
+ * placeholder, no job. Each file asked of the folders' kept names (file_there). */
 static int art_state(void *r, char *path, unsigned size) {
     const char *p = P(r, REC_PATH);
-    if (!p || !access(art_path(path, album_key(r), ""), 0)) return 0;
-    return !catalogue_path(p) || catalogue_cover(p, path, size) ? 1 : 2;
+    if (!p || file_there(art_path(path, album_key(r), ""), 1, 0)) return 0;
+    if (!catalogue_path(p)) return 1;
+    return catalogue_cover_name(p, path, size) && file_there(path, 0, 4) ? 1 : 2;
 }
 static int art_missing(void *r, char *path, unsigned size) { return art_state(r, path, size) == 1; }
 /* The thread: files and the albums' records only, read-only; every change to the list joins it
@@ -776,6 +898,7 @@ static void art_find(void) {
     }
     aj.albums = cf.albums, aj.gen = library_gen, aj.count = count;
     unsigned char *shared = folders_shared(cf.albums, count);
+    look_begin();
     for (unsigned i = 0; i < count && !open_cancelled(); ++i) { /* a given-up open's look stops */
         void *r = deque_at(cf.albums, i);
         job_t *j = &aj.jobs[aj.total];
@@ -787,6 +910,7 @@ static void art_find(void) {
             ++aj.total;
         }
     }
+    look_end(aj.looked);
     free(shared);
 }
 
@@ -794,8 +918,9 @@ static void art_find(void) {
  * the next open goes on with the rest. The covers stay as they are. */
 static void cw_art(const char *how);
 static void art_stop(void) {
-    if (worker_stop(cf.thread, &cf.running, &cf.cancel, &cf.art_timer) && cf.done < cf.total)
-        cw_art("stopped");
+    int ran = worker_stop(cf.thread, &cf.running, &cf.cancel, &cf.art_timer);
+    if (ran && cf.done < cf.total) cw_art("stopped");
+    if (ran) names_stale(); /* it wrote to the art cache */
     for (int i = 0; i < cf.total; ++i) free(cf.jobs[i].track);
     free(cf.jobs);
     cf.jobs = 0;
@@ -3283,6 +3408,7 @@ static void load_albums(unsigned t0) {
     art_strike(BUILDING);
     if (!(cf.jobs = calloc(count, sizeof(job_t)))) cw_refused("the art build's jobs");
     unsigned char *shared = folders_shared(cf.albums, count);
+    look_begin();
     for (unsigned i = 0; i < count; ++i) {
         if (i && !(i % 1000)) cf_trace(t0, "jobs ", i, count);
         void *r = deque_at(cf.albums, i);
@@ -3299,6 +3425,7 @@ static void load_albums(unsigned t0) {
             ++cf.total;
         }
     }
+    look_end(count);
     free(shared);
     if (!cf.total && cf.jobs && !cf.scoped) art_cleaned(); /* every album's art is there */
     cf_trace(t0, "done jobs=", cf.total, count);
@@ -3528,6 +3655,7 @@ void coverflow_refresh_art(void) {
         if (dir) closedir(dir);
     }
     image_manager_unload_all(image_manager());
+    names_stale();
     ++library_gen;
 }
 
@@ -3835,7 +3963,7 @@ static struct {
 } cw __attribute__((section(".scratch")));
 #define cw_say(level, ...)                                                                         \
     do {                                                                                           \
-        char line_[160];                                                                           \
+        char line_[224];                                                                           \
         snprintf(line_, sizeof line_, __VA_ARGS__);                                                \
         ulog(level, "cf", line_);                                                                  \
     } while (0)
@@ -3873,7 +4001,7 @@ static void cw_check(void) {
     cw.next = now + CW_AGAIN_MS;
 }
 static void cw_open(void) {
-    cw.at = (unsigned)time_now_ms() | 1, cw.refused = 0;
+    cw.at = (unsigned)time_now_ms() | 1, cw.refused = 0, lk.n = 0;
     cw.next = cw.at + CW_FIRST_MS;
     if (cf.stock)
         cw_say('I', "cover flow open: %u albums kept, %s", deque_size(cf.stock),
@@ -3883,10 +4011,13 @@ static void cw_open(void) {
 }
 static void cw_shown(const char *what) {
     if (!cw.at) return;
-    char left[40] = "";
+    char left[40] = "", look[72] = "";
     if (cf.running) snprintf(left, sizeof left, ", %d covers to build", cf.total);
-    cw_say('I', "cover flow shown: %s, %u albums, %u ms after its open%s%s%s", what,
-           cf.albums ? deque_size(cf.albums) : 0, cw_ms(), left,
+    if (lk.n)
+        snprintf(look, sizeof look, ", art looked up for %u albums in %u ms (%u folder reads)",
+                 lk.n, lk.ms, lk.reads);
+    cw_say('I', "cover flow shown: %s, %u albums, %u ms after its open%s%s%s%s", what,
+           cf.albums ? deque_size(cf.albums) : 0, cw_ms(), look, left,
            cw.refused ? "; no memory for " : "", cw.refused ? cw.refused : "");
     cw_end();
 }

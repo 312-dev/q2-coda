@@ -304,6 +304,39 @@ def test_pause_keys_only_pause(fw, code, status, toggles):
     assert player.toggles() == toggles
 
 
+def released(fw, way):
+    """The player's socket (MCL_FD) and output way; what headset.c sends on it."""
+    sent = []
+    C.c_int.from_address(O['MCL_FD']).value = 7
+    fw.mock('mclGetOutputWay', lambda *_: way)
+    fw.mock('fw_send', lambda fd, data, n, flags, *_: sent.append((fd, C.string_at(data, n), flags)) or n)
+    return sent
+
+
+RELEASE = (7, b'{mcl-btrelease\\null}', 0x4040)
+
+
+@pytest.mark.parametrize('code', [PAUSE, PAUSECD, STOP])
+@pytest.mark.parametrize('way, status, want', [(1, PLAYING, [RELEASE]), (0, PLAYING, []), (2, PLAYING, []),
+                                              (1, PAUSED, []), (1, STOPPED, [])])
+def test_a_headset_pause_on_bluetooth_asks_the_player_to_let_go(fw, code, way, status, want):
+    """docs/internals.md#bluetooth-pause: a pause the headset sends while the Q2 plays to it asks q2player to close its
+    Bluetooth PCM at once ({mcl-btrelease\\null}, after the pause, never waiting on the player); on the DAC or a USB
+    DAC, or with nothing playing, nothing is sent."""
+    sent = released(fw, way)
+    player = Player(fw, status=status)
+    command(fw, player, code)
+    assert sent == want and player.status == (PAUSED if status == PLAYING else status)
+
+
+def test_an_ear_s_pause_keeps_the_pcm(fw):
+    """A bud out of an ear pauses as before and asks nothing more: its pause keeps the PCM BT_PAUSE_MS, so the bud back
+    in resumes in the same stream."""
+    sent = released(fw, 1)
+    player = Player(fw)
+    assert ears(fw, player, 3, 1, 3) == [0, 1, 2] and sent == []
+
+
 @pytest.mark.parametrize('code', [PLAYCD, PLAYKEY])
 @pytest.mark.parametrize('status, toggles', [(PLAYING, 0), (PAUSED, 1)])
 def test_play_keys_only_play(fw, code, status, toggles):

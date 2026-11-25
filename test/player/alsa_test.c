@@ -81,7 +81,13 @@ int snd_pcm_hw_params_set_rate_near(snd_pcm_t *p, snd_pcm_hw_params_t *h, unsign
 }
 int snd_pcm_hw_params_set_buffer_time_near(snd_pcm_t *p, snd_pcm_hw_params_t *h, unsigned *v, int *d) { return 0; }
 int snd_pcm_hw_params_set_periods_near(snd_pcm_t *p, snd_pcm_hw_params_t *h, unsigned *v, int *d) { return 0; }
-int snd_pcm_hw_params(snd_pcm_t *p, snd_pcm_hw_params_t *h) { return 0; }
+/* busy_hw: bluealsa's plugin claims its PCM at hw_params, and answers -EBUSY while another client holds it, or
+ * while the server has not yet seen the last client's close (run.py test_bt_open_waits_out_a_busy_pcm) */
+static int busy_hw, hw_tries;
+int snd_pcm_hw_params(snd_pcm_t *p, snd_pcm_hw_params_t *h) {
+    hw_tries++;
+    return busy_hw && busy_hw-- ? -16 : 0;
+}
 int snd_pcm_get_params(snd_pcm_t *p, snd_pcm_uframes_t *b, snd_pcm_uframes_t *s) { *b = RING, *s = PERIOD; return 0; }
 /* alsa-lib's defaults after hw_params (pcm.c, _snd_pcm_hw_params_internal) */
 int snd_pcm_sw_params_malloc(snd_pcm_sw_params_t **p) { *p = calloc(1, sizeof **p); return *p ? 0 : -12; }
@@ -335,6 +341,20 @@ int main(int argc, char **argv) {
         usb_err_case("usb-eio", -5, 1, 0);        /* -EIO: the song's failure, not the device gone */
         usb_err_case("usb-gone-open", 0, 0, -2);  /* the open finds no card: gone */
         usb_err_case("usb-gone-write", -19, 2, 0); /* opened again, then -ENODEV under two writes: gone, said once */
+        return 0;
+    }
+    if (argc > 1 && !strcmp(argv[1], "busy")) { /* run.py test_bt_open_waits_out_a_busy_pcm: usleep counted */
+        struct pcm_format f = {0};
+        f.rate = 48000, f.channels = 2, f.bytes = 2;
+        for (int n = 0; n < 3; ++n) {
+            static const int busy[] = { 0, 6, 1000 }; /* free; busy for 6 tries; held for good */
+            busy_hw = busy[n], hw_tries = 0;
+            sleeps = 0;
+            struct output *o = output_open(&f, 1, 0);
+            printf("busy%d %s tries %d sleeps %d\n", busy[n], o ? "opened" : "failed", hw_tries, sleeps);
+            if (o) output_close(o);
+        }
+        busy_hw = 0;
         return 0;
     }
     if (argc > 1 && !strcmp(argv[1], "idle")) { /* run.py test_click_idle_alsa */

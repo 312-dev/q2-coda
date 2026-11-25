@@ -88,12 +88,11 @@ int load_over_for(void (*cancel)(void));
 int load_waiting(void);
 void load_over_paint(void *w, void *canvas);
 int load_over_input(void *e);
-/* ... and the same overlay drawn straight on the framebuffer by a thread of its own around one
- * call the UI thread cannot slice or leave (load_sync_begin before it: 0 when no overlay could be
- * readied; load_sync_end after), or while the UI thread waits for *done, set by work on another
- * thread (load_block); caption as above. */
-int load_sync_begin(const char *caption);
-void load_sync_end(void);
+/* ... load_wait_sync: the same where each step is one call the UI thread cannot leave, the
+ * overlay drawn straight on the framebuffer by a thread of its own while a step runs, Return taken
+ * between steps; and load_block, that overlay while the UI thread waits for *done, set by work on
+ * another thread inside a stock call; caption as above. */
+void load_wait_sync(void *win, const char *caption, int (*step)(void), void (*cancel)(void));
 void load_block(volatile int *done, const char *caption);
 
 /* The focus ring's rule (docs/oled-design.md#focus-ring), for every screen with one or two buttons

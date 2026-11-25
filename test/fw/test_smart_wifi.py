@@ -4,7 +4,7 @@ import ctypes as C
 
 import pytest
 
-from conftest import O, stock_start_with
+from conftest import O, Files, stock_start_with
 from test_nav_display_library import scratch, st  # noqa: F401 (fixtures)
 from test_nav_library_pages import Config
 
@@ -101,7 +101,10 @@ class Scans(Q2):
         self.names: dict[int, C.Array[C.c_char]] = {}
         fw.mock('networkGetConnectStatus', lambda *_: self.linked)
         fw.mock('fw___xstat', self.stat)
-        fw.mock('fw_system', lambda cmd, *_: self.sent.append(C.string_at(cmd).decode()) or 0)
+        self.asked: list[str] = []  # the join watch's wpa_cli status, apart from the intervals
+        self.files = Files(fw)  # wlan0's operstate and the join watch's wpa_cli output
+        self.status = b''  # what wpa_cli status and scan_results | wc -l print
+        fw.mock('fw_system', self.system)
         fw.mock('mclGetPlayStatus', lambda *_: self.playing)
         fw.mock('mclGetOutputWay', lambda *_: self.out)
         fw.mock('window_manager', lambda *_: 0x9000)
@@ -110,6 +113,15 @@ class Scans(Q2):
         fw.mock('widget_get_prop_str', self.prop)
         fw.mock('tk_str_start_with', stock_start_with)
         fw.mock('tk_strcmp', lambda a, b, *_: C.string_at(a) != C.string_at(b))
+
+    def system(self, cmd, *_):
+        cmd = C.string_at(cmd).decode()
+        if 'scan_interval' in cmd:
+            self.sent.append(cmd)
+        else:
+            self.asked.append(cmd)
+            self.files.files['/tmp/q2-wpa-status'] = self.status
+        return 0
 
     def stat(self, version, path, info, *_):
         if self.sock is None or C.string_at(path) != b'/var/run/wpa_supplicant/wlan0':
@@ -228,3 +240,52 @@ def test_a_headset_s_hold_wins_over_the_backoff(fw, st):
     q2.lit.value = 0
     q2.idle(5 * 60_000)
     assert q2.sent == [HOLD]
+
+
+def wifi_lines(fw):
+    """demo's stderr as (level, message) for its wifi lines"""
+    out = []
+    fw.mock('fw_write', lambda fd, data, n, *_: (fd == 2 and (lambda f: f[3] == 'wifi' and out.append((f[2], f[4])))(
+        C.string_at(data, n).decode().rstrip('\n').split(' ', 4))) or n)
+    return out
+
+
+@pytest.mark.parametrize('playing', [2, 3])
+def test_a_boot_after_an_update_rescans_every_5_s_with_the_cable_in(fw, st, playing):
+    """A restart by the updater: the screen dark and nobody touching it, the cable in, a headset's connect under
+    way and the resumed stream on the Bluetooth output, played or paused. The cable needs the network, so neither
+    the hold nor the dark backoff applies: wpa_supplicant rescans every 5 s."""
+    q2 = Scans(fw, st, CARREMOTE=b'0')
+    q2.lit.value, q2.cable.value, q2.playing, q2.out = 0, 1, playing, 1
+    q2.idle(10 * 60_000)
+    assert q2.sent == [FREE]
+
+
+def test_a_wpa_supplicant_that_never_joins_says_why_once_a_minute(fw, st):
+    """The join watch: unassociated 30 s after wpa_supplicant's socket appeared, then each minute, a line with its
+    wpa_state, the networks its last scan saw, the interval it was given and why, and stock's switch flags; the
+    association and the link (a lease) as they come, with the seconds since its start."""
+    said = wifi_lines(fw)
+    q2 = Scans(fw, st, CARREMOTE=b'0')
+    q2.playing, q2.lit.value = 3, 0  # paused, dark, no cable: the backoff
+    q2.status = (b'bssid=\nwpa_state=DISCONNECTED\naddress=00:11:22:33:44:55\n'
+                 b'3\n')  # scan_results: its header and two networks
+    q2.idle(29_000)
+    assert said == [] and q2.asked == []
+    q2.idle(2_000)
+    assert said == [('W', 'not joined 30 s after wpa_supplicant started: wpa_state=DISCONNECTED, 2 networks in its '
+                          'last scan, rescans every 20 s (dark backoff), switch 1 scan 0 connect 0')]
+    assert '/tmp/q2-wpa-status' not in q2.files.files
+    q2.idle(56_000)
+    assert len(said) == 1
+    q2.idle(2_000)
+    assert len(said) == 2 and said[1][1].startswith('not joined 90 s after wpa_supplicant started')
+    q2.files.files['/sys/class/net/wlan0/operstate'] = b'up\n'
+    q2.idle(1_000)
+    assert said[2:] == [('I', 'associated, 93 s after wpa_supplicant started')]
+    q2.linked = 1
+    q2.idle(1_000)
+    assert said[3:] == [('I', 'link up (a lease), 95 s after wpa_supplicant started')]
+    q2.idle(5 * 60_000)
+    assert len(said) == 4 and len(q2.asked) == 2  # joined: nothing more asked
+

@@ -290,10 +290,8 @@ void np_mode_set(int on, int rep) {
         st.np_shuf_one = !!on;
         write_int_config(st.np_shuf_one, "IPOD", "NPSHUFONE");
     }
-    int to = rep == NP_REPEAT_ONE ? 1 : on ? 2 : rep == NP_REPEAT_ALL ? 3 : 0,
-        was = *(volatile int *)MCL_MODE;
-    if (to != was) config_playmode(to, 1);
-    if (to == 2 && was != 2) shuffle_wait_np(rep); /* its order, under the loading wait */
+    int to = rep == NP_REPEAT_ONE ? 1 : on ? 2 : rep == NP_REPEAT_ALL ? 3 : 0;
+    if (to != *(volatile int *)MCL_MODE) config_playmode(to, 1);
     void *mode = st.np_win ? widget_lookup(st.np_win, "img_playmode", 1) : (void *)0;
     if (mode) widget_invalidate_force(mode, (void *)0);
 }

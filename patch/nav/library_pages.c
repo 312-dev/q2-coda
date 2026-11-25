@@ -147,11 +147,13 @@ unsigned queue_hash(void *q) {
 }
 
 /* A payload page's own songs held (qm_song_hold): the page, its list, its last row's words and
- * what that row runs. */
+ * what that row runs; play, for a song the queue does not hold yet (qm_far_hold), what its Play
+ * row runs. */
 static struct {
     void *page, *list;
     const char *extra;
     void (*pick)(void);
+    void (*play)(void);
 } qm_held __attribute__((section(".scratch")));
 static int qm_held_on(void *page) {
     return st.qm_kind == QM_COVERFLOW && page && page == qm_held.page;
@@ -676,6 +678,38 @@ void library_warm(unsigned cls, void *into) {
                                    : artists_query,
                 0);
     library_music = saved;
+}
+
+/* Songs, Albums or Artists pressed (a click on stock's Library row, on the Library page or Home's
+ * Library list) while a signed-in server's rows are on their way and none is shown yet
+ * (catalogue_filling: the boot's read of the last session's catalogue, or an app's first import):
+ * the loading wait over that window, captioned, and the press made again once the rows are there,
+ * so the list never opens with the card's songs alone. Return gives the wait up and opens nothing. */
+#define FILLING "Loading server songs\xe2\x80\xa6"
+static void *lw_row;
+static int lw_step(void) {
+    if (catalogue_filling()) return 0;
+    void *row = lw_row;
+    unsigned click[12];
+    lw_row = 0;
+    if (row) stock_dispatch_trampoline(row, pointer_event_init(click, EVT_CLICK, row, 0, 0));
+    return 1;
+}
+static void lw_cancel(void) { lw_row = 0; }
+int library_row_wait(void *target, void *event) {
+    if (!target || !event || I(event, EVENT_TYPE) != EVT_CLICK || !catalogue_filling()) return 0;
+    const char *name = widget_get_prop_str(target, "name", "");
+    void *view = P(target, W_PARENT);
+    for (int up = 0; view && up < 3 &&
+                     tk_strcmp(widget_get_prop_str(view, "name", ""), "scroll_view_localmusic");
+         ++up)
+        view = P(view, W_PARENT); /* the row's button is a child of the rows' view's own row */
+    if (!view || tk_strcmp(widget_get_prop_str(view, "name", ""), "scroll_view_localmusic") ||
+        !name || name[0] < '1' || name[0] > '3' || name[1]) /* All Songs, Album, Artist */
+        return 0;
+    lw_row = target;
+    load_wait(page_in_use(), FILLING, lw_step, lw_cancel);
+    return 1;
 }
 
 /* The step a late UI pass names while a Library list loads (ui_watch.c). */

@@ -556,6 +556,7 @@ void catalogue_row_unfav(void *r), catalogue_fav_changed(void);
 unsigned catalogue_fav_gen(void);
 char *catalogue_union(const char *sql), *catalogue_search(const char *sql);
 const char *catalogue_rows(void); /* library_query's union, "" without one */
+int catalogue_filling(void); /* a signed-in app's rows on their way, none shown yet */
 void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_poll(void);
 void catalogue_card_away(void);
 int catalogue_card_release(void), catalogue_away(void); /* card_release.c's: the card let go of, */
@@ -587,6 +588,7 @@ void catalogue_row_mark(void *w, void *canvas, void *row, int x, int y);
 void catalogue_fit(void *entry, void *surface, int limit);
 int catalogue_np_info(const char *path, char *genre, int *year);
 int catalogue_cover(const char *path, char *out, unsigned size);
+int catalogue_cover_name(const char *path, char *out, unsigned size);
 int catalogue_cover_large(const char *path, char *out, unsigned size);
 /* catalogue.c: a Stream Cache copy's record takes its server row's title, artist and album (1) */
 int catalogue_copy_tags(void *r);

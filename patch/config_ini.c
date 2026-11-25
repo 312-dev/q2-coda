@@ -74,17 +74,27 @@ int ringnav_ini_write(const char *path, const char *section, const char *key, co
     return stock_ini_write_trampoline(path, section, key, value);
 }
 
-/* Settled writes (docs/internals.md#where-q2-muse-writes): the keys a wheel steps, each step a whole
- * rewrite of config.ini on the flash, are held by write_int_config's hook (ringnav_write_config)
- * and written once CONFIG_SETTLE_MS after their last change, so a turn of ten steps is one write.
- * config_settle(1) writes what is held at once: before the payload reads one of them back
- * (config_value, ringnav_output), at Standby and at a clean end. ponytail: a forced restart or a
- * flat battery within CONFIG_SETTLE_MS of the last step loses that step's value, the one before it
- * coming back at boot. */
-static const char *const settle_keys[][2] = {
-    { "PLAYSET", "VOLUME" },     { "PLAYSET", "BT_VOLUME" }, { "Q2POD", "AIRVOL" },
-    { "PLAYSET", "MAXVOLUME" },  { "PLAYSET", "BOOTVOLUME" }, { "PLAYSET", "BALANCE" },
-    { "SYSSET", "LIGHTNESS" },
+/* Settled writes (docs/internals.md#where-q2-muse-writes): the keys a wheel steps or a tap toggles,
+ * each change a whole rewrite of config.ini on the flash (60-180 ms on the UI thread in the
+ * emulator), are held by write_int_config's hook (ringnav_write_config) and written once their
+ * delay after their last change has passed, from power_poll's pass, one key a pass (step "config settle"
+ * for the UI pass watchdog), so a turn of ten steps is one write and a tap's own pass writes nothing. The
+ * wheel's keys wait CONFIG_SETTLE_MS; the play mode's, which Now Playing's Shuffle and Repeat and
+ * stock's play mode setting write (stock's config_playmode through the same hook, and
+ * np_bar.c's own two), MODE_SETTLE_MS. config_settle(1) writes what is held at once: before the
+ * payload reads one of them back (config_value, ringnav_output), at Standby and at a clean end
+ * (power-off, Restart, an update, Rockbox). ponytail: a forced restart or a flat battery within
+ * the delay of the last change loses that change, the value before it coming back at boot. */
+#define MODE_SETTLE_MS 1000
+static const struct {
+    const char *section, *key;
+    unsigned ms;
+} settle_keys[] = {
+    { "PLAYSET", "VOLUME", CONFIG_SETTLE_MS },     { "PLAYSET", "BT_VOLUME", CONFIG_SETTLE_MS },
+    { "Q2POD", "AIRVOL", CONFIG_SETTLE_MS },       { "PLAYSET", "MAXVOLUME", CONFIG_SETTLE_MS },
+    { "PLAYSET", "BOOTVOLUME", CONFIG_SETTLE_MS }, { "PLAYSET", "BALANCE", CONFIG_SETTLE_MS },
+    { "SYSSET", "LIGHTNESS", CONFIG_SETTLE_MS },   { "PLAYSET", "PLAYMODE", MODE_SETTLE_MS },
+    { "IPOD", "NPSHUFONE", MODE_SETTLE_MS },       { "IPOD", "NPREPOFF", MODE_SETTLE_MS },
 };
 #define SETTLE_N (sizeof settle_keys / sizeof *settle_keys)
 static struct {
@@ -94,7 +104,7 @@ static struct {
 
 int config_hold(int value, const char *section, const char *key) {
     for (unsigned i = 0; i < SETTLE_N; i++)
-        if (!tk_strcmp(section, settle_keys[i][0]) && !tk_strcmp(key, settle_keys[i][1])) {
+        if (!tk_strcmp(section, settle_keys[i].section) && !tk_strcmp(key, settle_keys[i].key)) {
             unsigned now = (unsigned)time_now_ms();
             settle.value[i] = value;
             settle.at[i] = now | !now;
@@ -106,8 +116,11 @@ int config_hold(int value, const char *section, const char *key) {
 void config_settle(int now_too) {
     unsigned now = (unsigned)time_now_ms();
     for (unsigned i = 0; i < SETTLE_N; i++)
-        if (settle.at[i] && (now_too || now - settle.at[i] >= CONFIG_SETTLE_MS)) {
+        if (settle.at[i] && (now_too || now - settle.at[i] >= settle_keys[i].ms)) {
             settle.at[i] = 0;
-            stock_write_config_trampoline(settle.value[i], settle_keys[i][0], settle_keys[i][1]);
+            ui_watch_step("config settle");
+            stock_write_config_trampoline(settle.value[i], settle_keys[i].section,
+                                          settle_keys[i].key);
+            if (!now_too) return; /* one rewrite a pass: a tap's two keys go on two passes */
         }
 }

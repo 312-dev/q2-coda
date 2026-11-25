@@ -211,15 +211,18 @@ static void spin_sort(void *list, void *cmp, const char *caption) {
     pthread_join(t, 0);
 }
 
-/* Sorted ahead (docs/internals.md#name-order): once the library or the server catalogue has
- * changed (library_gen moved: a scan's end, a catalogue's import), each Library list that has a
- * kept order (its slot's cls) is loaded again as its open loads it (library_warm, on the UI thread,
- * with the screen dark or WARM_IDLE_MS after the last input), and when its records are not the
- * kept ones they are sorted on a thread of their own with stock's call and comparator while the UI
- * runs on, and kept as an open's sort keeps them. The open after it finds its order kept. An open
- * that meets that sort still running waits for it, under the spinner, rather than sorting again. */
+/* Sorted ahead (docs/internals.md#name-order): after a boot (once the screen is first lit), and each time the library or the
+ * server catalogue has changed since (library_gen moved: a scan's end, a catalogue's load or
+ * import), Songs, Albums and Artists are each loaded again as their open loads them (library_warm,
+ * on the UI thread, with the card mounted and the screen dark or WARM_IDLE_MS after the last
+ * input), opened before or
+ * not, and when their records are not the kept ones (changed, or kept by another firmware) they
+ * are sorted on a thread of their own with stock's call and comparator while the UI runs on, and
+ * kept as an open's sort keeps them. The open after it finds its order kept. An open that meets
+ * that sort still running waits for it, under the spinner, rather than sorting again. */
 static struct {
     unsigned gen, due;  /* library_gen as last looked at; a bit (1 << cls) per list to load again */
+    int seen;           /* library_gen looked at since the boot */
     unsigned cls;       /* the list a load is for: an open's (name_order_list), or the warm's */
     int warming;        /* name_order is called from library_warm: a sort is noted, not run */
     int noted, running; /* the warm's records to sort (key, sum, n, sort); its sort on a thread */
@@ -283,14 +286,13 @@ void name_order_poll(void) {
         if (nw.done) warm_end();
         return;
     }
-    if (nw.gen != library_gen) {
-        nw.gen = library_gen, nw.due = 0;
-        read_heads();
-        for (int i = 0; i < NO_SLOTS; ++i)
-            if (no.s[i].h.n && no.s[i].h.cls && no.s[i].h.cls < 32) nw.due |= 1u << no.s[i].h.cls;
-    }
-    if (!nw.due || library_scanning() || coverflow_opening() ||
-        (g_backlight_status && (unsigned)time_now_ms() - st.last_input < WARM_IDLE_MS))
+    /* a boot's round waits for the screen's first light: a dark pass with nothing changed touches no
+     * file (docs/internals.md#the-ui-loops-wait) */
+    if (nw.gen != library_gen || (!nw.seen && g_backlight_status))
+        nw.seen = 1, nw.gen = library_gen,
+        nw.due = 1u << NO_SONGS | 1u << NO_ALBUMS | 1u << NO_ARTISTS;
+    if (!nw.due || (g_backlight_status && (unsigned)time_now_ms() - st.last_input < WARM_IDLE_MS) ||
+        !card_mounted() || library_scanning() || coverflow_opening())
         return;
     unsigned cls = 0;
     while (!(nw.due >> cls & 1)) ++cls;

@@ -119,6 +119,11 @@ static struct {
     int away;
     volatile int stop;
     cat_ix ix;
+    /* job_load: the boot's job, which only reads the file the last session left (cat_load): its
+     * index, and each app's seq it holds (job_seqs, by app slot) */
+    int job_load, loaded;
+    char job_seqs[CAT_APPS][24];
+    unsigned job_at, job_local, job_shown; /* its start; card songs; server rows shown meanwhile */
     /* the server rows' names with an offline copy, by group (group_unavailable); built again when
      * local_gen has moved since (an import, catalogue.avail) */
     cat_set local[G_KINDS];
@@ -743,6 +748,8 @@ static const char *const SCHEMA =
     "create table if not exists nw.serverpl(app,pid,name);"
     "create table if not exists nw.serveritem(app,pid,sid,path);"
     "create table if not exists nw.serverlists(app,pid,list integer,twin integer);"
+    /* the seq of each app's catalogue these rows came from: a boot's load takes them as imported */
+    "create table if not exists nw.serverseq(app primary key,seq);"
     "create index if not exists nw.servertable_album on servertable(album collate nocase);"
     "create index if not exists nw.servermeta_url on servermeta(fileurl);"
     /* the UI's lookups by a row's path: Up Next's tags, Now Playing's info, My Fav's insert */
@@ -754,14 +761,17 @@ static const char *const SCHEMA =
 static void copy_old(const char *skip) {
     if (sqlite3_exec(jb.db, "select 1 from cat.servermeta limit 0", 0, 0, 0)) return; /* none */
     static const char *const tables[] = { "serverall", "servermeta", "serverpl", "serveritem",
-                                          "serverlists" };
+                                          "serverseq", "serverlists" };
+    /* a file from before serverseq has none to copy */
+    int seqs = !sqlite3_exec(jb.db, "select 1 from cat.serverseq limit 0", 0, 0, 0);
     for (unsigned i = 0; i < sizeof tables / sizeof *tables; ++i) {
         char *o = jb.sql;
+        if (i == 4 && !seqs) continue;
         PUT(o, JEND, "insert into nw.%s select * from cat.%s", tables[i], tables[i]);
         if (skip && i == 0)
             PUT(o, JEND, " where id not in (select id from cat.servermeta where app="),
                 o = sq(o, JEND, skip), PUT(o, JEND, ")");
-        else if (skip && i < 4)
+        else if (skip && i < 5)
             PUT(o, JEND, " where app<>"), o = sq(o, JEND, skip);
         job_run(o);
     }
@@ -1032,10 +1042,48 @@ static void ix_build(void) {
         ix_free(jb.ix);
 }
 
+/* serverseq's rows: each app's seq, into its slot's job_seqs */
+static int seq_row(void *ctx, int n, char **v, char **c) {
+    for (int i = 0; n >= 2 && v[0] && v[1] && i < cat.napps; ++i)
+        if (!strcmp(v[0], cat.app[i].id))
+            tk_snprintf(cat.job_seqs[i], sizeof cat.job_seqs[i], "%s", v[1]);
+    return 0;
+}
+static int count_row(void *ctx, int n, char **v, char **c) {
+    *(unsigned *)ctx = n && v[0] ? (unsigned)atoi(v[0]) : 0;
+    return 0;
+}
+/* The boot's job (cat_load): the file the last session left read as it is, nothing written, so its
+ * rows show while the app's catalogue is looked at again: its index built (ix_build, which reads
+ * schema nw) and each app's seq it holds. */
+static void load_worker(char *why, unsigned size) {
+    memset(cat.job_seqs, 0, sizeof cat.job_seqs);
+    if (!(jb.sql = calloc(1, CAT_SQL)) || sqlite3_open("/mnt/data/database.db", &jb.db) ||
+        sqlite3_exec(jb.db, "PRAGMA busy_timeout=2000;PRAGMA cache_size=256", 0, 0, 0) ||
+        sqlite3_exec(jb.db, "attach '" CAT_DB "' as nw", 0, 0, 0)) {
+        tk_snprintf(why, size, "Couldn't open the database");
+        return;
+    }
+    sqlite3_progress_handler(jb.db, 1000, job_stopped, 0);
+    sqlite3_exec(jb.db, "select count(*) from main.songtable", count_row, &cat.job_local, 0);
+    sqlite3_exec(jb.db, "select app,seq from nw.serverseq", seq_row, 0, 0); /* none: imported again */
+    ix_build();
+    if (cat.stop || jb.bad) tk_snprintf(why, size, "Couldn't read the catalog");
+}
+
 static void *cat_worker(void *unused) {
     char why[96] = "";
     int slot = cat.job_app;
     memset(&jb, 0, sizeof jb);
+    if (cat.job_load) {
+        load_worker(why, sizeof why);
+        if (jb.db) sqlite3_close(jb.db);
+        jb.db = 0;
+        free(jb.sql);
+        tk_snprintf(cat.job_why, sizeof cat.job_why, "%s", why);
+        __atomic_store_n(&cat.done, 1, __ATOMIC_RELEASE);
+        return 0;
+    }
     unlink(CAT_NEW), unlink(CAT_NEW "-journal");
     mkdir(CAT_DIR, 0755);
     if (!(jb.sql = calloc(1, CAT_SQL)) || sqlite3_open("/mnt/data/database.db", &jb.db) ||
@@ -1051,8 +1099,14 @@ static void *cat_worker(void *unused) {
         job_exec(SCHEMA);
         copy_old(slot >= 0 ? cat.app[slot].id : 0);
         /* a job with no seq only takes the app's rows out (signed out, its file gone) */
-        if (slot >= 0 && cat.job_seq[0] && !jb.bad)
-            import_file(slot, cat.app[slot].id, cat.job_seq, why, sizeof why);
+        if (slot >= 0 && cat.job_seq[0] && !jb.bad &&
+            import_file(slot, cat.app[slot].id, cat.job_seq, why, sizeof why)) {
+            char *o = jb.sql;
+            PUT(o, JEND, "insert or replace into nw.serverseq values (");
+            o = sq(o, JEND, cat.app[slot].id), *o++ = ',', o = sq(o, JEND, cat.job_seq);
+            PUT(o, JEND, ")");
+            job_run(o);
+        }
         if (!why[0]) cat_match();
         if (!jb.bad && job_exec("commit")) tk_snprintf(why, sizeof why, "Couldn't save");
         if (!why[0] && jb.bad) tk_snprintf(why, sizeof why, "Couldn't write the catalog");
@@ -1372,10 +1426,11 @@ int catalogue_same_song(const char *a, const char *b) {
 }
 
 /* The album cover the app keeps for path's album (docs/server-library.md#covers): path a server
- * row's (/mnt/mmc/.<id>/cat/<album id>/<sid>.<suffix>) or its offline copy's, the cover
- * /mnt/mmc/.<id>/covers/<album id>.jpg, into out, when it is there. 0 for any other path, or none
- * fetched yet. */
-int catalogue_cover(const char *path, char *out, unsigned size) {
+ * row's (/mnt/mmc/.<id>/cat/<album id>/<sid>.<suffix>) or its offline copy's, the cover's name
+ * /mnt/mmc/.<id>/covers/<album id>.jpg into out, whether the card has it or not; 0 for any other
+ * path. Cover Flow's art look answers "is it there" from a read of the folder (coverflow.c
+ * names_has), as a lookup an album in a 5,000-file exFAT folder took the owner's Q2 about 12 ms. */
+int catalogue_cover_name(const char *path, char *out, unsigned size) {
     const cat_ent *e = path && !catalogue_path(path) ? cat_copy_of(path) : 0;
     const char *row = e && !e->dup ? ix_str(&cat.ix, e->path) : path;
     if (!catalogue_path(row)) return 0;
@@ -1385,7 +1440,12 @@ int catalogue_cover(const char *path, char *out, unsigned size) {
     if (!*end || end == album) return 0;
     int n = tk_snprintf(out, size, "%.*s/covers/%.*s.jpg", (int)(cat_at - row), row,
                         (int)(end - album), album);
-    return n > 0 && (unsigned)n < size && !access(out, 4);
+    return n > 0 && (unsigned)n < size;
+}
+/* The album cover the app keeps for path's album, as catalogue_cover_name names it, when the card
+ * has it; 0 for any other path, or none fetched yet. */
+int catalogue_cover(const char *path, char *out, unsigned size) {
+    return catalogue_cover_name(path, out, size) && !access(out, 4);
 }
 
 /* The app's larger cover of path's album, covers/512/<album>.jpg (q2-subsonic saves 500 px there,
@@ -1543,6 +1603,11 @@ int catalogue_greyed(void *w, unsigned *color) {
 int catalogue_greys(void) { return (int)cat.ngrey; }
 /* Whether a signed-in app's songs are in the Library now: its rows indexed. */
 int catalogue_has(void) { return cat.ix.n > 0; }
+/* Whether a signed-in app's rows are on their way with none shown yet: the boot's load of the last
+ * session's file, or the first import of an app's catalogue (library_row_wait). */
+int catalogue_filling(void) {
+    return cat.running && !cat.ix.n && (cat.job_load || (cat.job_app >= 0 && cat.job_seq[0]));
+}
 /* Whether row (as catalogue_row_ink takes it) is a greyed or marked row's, so carries a mark. */
 int catalogue_row_greyed(void *row) { return grey_of(row, 4) >= 0; }
 /* Whether row (a list's entry, or a widget a few levels inside its row) is a greyed row's, and that
@@ -1678,23 +1743,68 @@ static void cat_answer(int slot, const char *seq, const char *why, unsigned rows
                         : tk_snprintf(line, sizeof line, "%s ok %u\n", seq, rows);
     blob_io(path, "/tmp/q2-catalogue.tmp", line, (unsigned)n, 1);
 }
+/* The server rows the index holds now: its entries less the card files a match linked. */
+static unsigned cat_shown(void) {
+    unsigned n = 0;
+    for (unsigned i = 0; i < cat.ix.n; ++i) n += !cat.ix.e[i].dup;
+    return n;
+}
 static void cat_start(int slot, const char *seq) {
     cat.job_app = slot;
     tk_snprintf(cat.job_seq, sizeof cat.job_seq, "%s", seq ? seq : "");
     cat.done = 0;
     cat.gen = library_gen;
     cat.pending = 0;
+    cat.job_at = time_now_ms(), cat.job_shown = cat_shown();
     if (!pthread_create(&cat.thread, 0, cat_worker, 0)) cat.running = 1;
+    if (!cat.running || slot < 0 || !*cat.job_seq) return;
+    char msg[128];
+    tk_snprintf(msg, sizeof msg, "catalogue import started: %s seq %s, %u server rows shown meanwhile",
+                cat.app[slot].id, cat.job_seq, cat.job_shown);
+    ulog('I', "cat", msg);
+}
+/* The boot's first job, when the last session left a file: its rows shown before any import. */
+static void cat_load(void) {
+    cat.job_load = 1;
+    cat_start(-1, 0);
+    if (!cat.running) cat.job_load = 0;
 }
 /* The job's end: its file swapped in, its index taken, the app answered. */
 static void cat_swap(void) {
+    ui_watch_step("catalogue swap");
     pthread_join(cat.thread, 0);
     cat.running = 0;
-    int slot = cat.job_app;
+    int slot = cat.job_app, load = cat.job_load;
+    cat.job_load = 0;
+    char msg[160];
     if (cat.stop) { /* stopped for the card: its file gone, the app not answered, the job due again */
         cat.stop = 0;
         ix_free(&cat.job_ix);
-        if (slot < 0) cat.gen = library_gen - 1;
+        if (load) cat.loaded = 0; /* read again once the card is back */
+        else if (slot < 0) cat.gen = library_gen - 1;
+        return;
+    }
+    if (load) { /* the last session's file, as it is: its index, and the seqs it was imported at */
+        unsigned ms = time_now_ms() - cat.job_at;
+        if (!cat.job_why[0] && cat.job_ix.n) {
+            ix_free(&cat.ix);
+            cat.ix = cat.job_ix;
+            memset(&cat.job_ix, 0, sizeof cat.job_ix);
+            for (int i = 0; i < cat.napps; ++i)
+                if (cat.job_seqs[i][0])
+                    tk_snprintf(cat.app[i].seq, sizeof cat.app[i].seq, "%s", cat.job_seqs[i]);
+            ++cat.local_gen;
+            int matched = cat.gen == library_gen;
+            ++library_gen;
+            if (matched) cat.gen = library_gen;
+        }
+        ix_free(&cat.job_ix);
+        tk_snprintf(msg, sizeof msg,
+                    "library at boot: %u card songs, %u server rows kept from the last import "
+                    "(%s), read in %u ms%s%s",
+                    cat.job_local, cat_shown(), cat.app[0].seq[0] ? cat.app[0].seq : "no seq",
+                    ms, cat.job_why[0] ? "; " : "", cat.job_why);
+        ulog(cat.job_why[0] ? 'W' : 'I', "cat", msg);
         return;
     }
     if (!cat.job_why[0]) {
@@ -1718,6 +1828,14 @@ static void cat_swap(void) {
         tk_snprintf(cat.app[slot].seq, sizeof cat.app[slot].seq, "%s", cat.job_seq);
         if (cat.job_seq[0]) cat_answer(slot, cat.job_seq, cat.job_why, cat.job_rows);
     }
+    if (slot < 0 || !cat.job_seq[0]) return;
+    tk_snprintf(msg, sizeof msg,
+                "catalogue import %s: %s seq %s, %u rows in %u ms, %u server rows shown until "
+                "then, %u now%s%s",
+                cat.job_why[0] ? "failed" : "done", cat.app[slot].id, cat.job_seq, cat.job_rows,
+                time_now_ms() - cat.job_at, cat.job_shown, cat_shown(),
+                cat.job_why[0] ? ": " : "", cat.job_why);
+    ulog(cat.job_why[0] ? 'W' : 'I', "cat", msg);
 }
 
 /* catalogue.avail's new lines: an offline copy for a sid, or none ("-<sid>"). */
@@ -1727,6 +1845,7 @@ static void cat_avail(int slot) {
     long size = file_size(path);
     cat_app_t *a = &cat.app[slot];
     if (size < 0 || size == a->avail_at) return;
+    ui_watch_step("catalogue avail");
     if (size < a->avail_at) a->avail_at = 0;
     void *f = fopen(path, "rb");
     if (!f || fseek(f, a->avail_at, 0)) {
@@ -1823,6 +1942,14 @@ void catalogue_poll(void) {
     cat.online = up && (networkGetConnectStatus() > 0 || smart_wifi_back());
     catplay_poll();
     if (cat.running || cat.away || library_scanning() || !card_mounted()) return;
+    /* the boot's first job: the last session's file read, so its rows show before any import */
+    if (!cat.loaded && cat.napps) {
+        cat.loaded = 1;
+        if (!cat.ix.n && !access(CAT_DB, 0)) {
+            cat_load();
+            return;
+        }
+    }
     for (int i = 0; i < cat.napps; ++i) {
         int has = *seqs[i] && cat_signed_in(i);
         if (has && strcmp(seqs[i], cat.app[i].seq)) {
@@ -2503,6 +2630,7 @@ static void ratings_in(int slot) {
     tk_snprintf(taking, sizeof taking, "%s.taking", in);
     tk_snprintf(outp, sizeof outp, "/mnt/mmc/.%s/ratings.out", cat.app[slot].id);
     if (access(taking, 0) && (access(in, 0) || rename(in, taking))) return;
+    ui_watch_step("catalogue ratings");
     unsigned size = 0, osize = 0, lines = 0, nout = 0;
     char *raw = read_all(taking, 1 << 20, &size);
     char *out = raw ? read_all(outp, 1 << 20, &osize) : 0;

@@ -403,6 +403,7 @@ void now_cover_forget(void); /* coverflow.c: the player's cover files, from AWTK
  * freed by addon_pending_free; 0 none), what they were taken from, and one of them tapped */
 void **addon_pending(unsigned max, unsigned *n);
 void addon_pending_free(void **rows, unsigned n);
+void **addon_pending_one(const char *path); /* a pending row's song, its own record */
 unsigned addon_pending_sig(void);
 int addon_pending_play(const char *path);
 
@@ -1028,19 +1029,11 @@ int durations_start(void *songs), durations_busy(int *done, int *total);
 void durations_cancel(void), durations_poll(void), durations_shutdown(int bounded);
 void mp_counted(void *r, unsigned key, unsigned evicted);
 int most_played(void *ctx, void *event);
-int shuffle_menu(void *ctx, void *event), shuffle_songs(void *ctx, void *event);
+int shuffle_menu(void *ctx, void *event);
 /* library_lists.c: Shuffle Songs a step a UI pass, for a caller that shows a loading indicator */
 void shuffle_songs_start(void), shuffle_songs_cancel(void);
 int shuffle_songs_poll(void);
 int shuffle_play(void *all);
-/* shuffle_wait.c: the Shuffle order's build as a job the loading wait holds (start: 1 while it
- * runs; poll each frame: 1 once in place; cancel: nothing of it kept), and Shuffle's waits: Now
- * Playing's Shuffle turned on (its repeat as np_mode_set's rep), the Shuffle page's rows. */
-int shuffle_order_start(void), shuffle_order_poll(void);
-void shuffle_order_cancel(void);
-void shuffle_wait_np(int rep);
-void shuffle_wait_pick(int (*pick)(void *, void *), void *ctx);
-void playback_shuffle_now(void); /* playback.c: stock Shuffle's order taken now (shuffle_own) */
 int tidal_downloads(void *ctx, void *event);
 
 /* ratings.c */
@@ -1211,6 +1204,7 @@ int qm_centre_hold(void *top);
 int qm_touch_hold(void *top, int x, int y);
 /* search_strip.c: a song result held, by a key (the selected one) or a finger at (x, y) */
 int search_strip_song_hold(void *top);
+int search_strip_on_row(void *top); /* the selection on a result */
 int search_strip_touch_hold(void *top, int x, int y);
 /* upnext.c: the same over Up Next's queued song (centre: Playing Next's rows keep their lift) */
 int un_menu_hold(void *top, int centre);
@@ -1219,6 +1213,8 @@ void cm_keydown(unsigned key);
 int cm_key_release(unsigned key);
 void cm_touch(unsigned type, int x, int y);
 int qm_song_hold(void *page, void *list, unsigned at, const char *extra, void (*pick)(void));
+int qm_far_hold(void *page, void *list, void (*play)(void));
+int qm_row_under(void *top); /* a row under the selection on top, menu or not (hold_menu.c) */
 int otg_count(void);
 void pv_paint(void *w, void *canvas);
 int playlists_transfer(void *ctx, void *event); /* Settings: Import (ctx 0) or Export Playlists */
@@ -1293,6 +1289,7 @@ void name_order(const char *sql, int sort, void *list);
 void name_order_list(unsigned cls); /* the Library list the next loads are for, 0 for none */
 void name_order_poll(void);         /* every UI loop pass: a list due loaded and sorted ahead */
 void library_warm(unsigned cls, void *into); /* nav/library_pages.c: list cls's load, as its open */
+int library_row_wait(void *target, void *event); /* nav/library_pages.c: Songs and kin pressed early */
 int coverflow_opening(void);                 /* coverflow.c: an open's step runs */
 void cstl_sort(void *list, void *cmp);
 extern unsigned long ui_thread; /* playback.c: the UI thread, from its first pass */

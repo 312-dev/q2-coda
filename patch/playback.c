@@ -143,6 +143,7 @@ typedef struct {
     unsigned *history;
     unsigned poll_stamp;
     unsigned plain_size; /* the queue's size the plain run was taken at (plain_follow) */
+    int going_down; /* an update's dialog is flashing: its save is made (ringnav_checkfw) */
 } playback;
 static playback s __attribute__((section(".scratch")));
 /* The queue file is empty since the last drop: a queue too long to save drops it once, not at
@@ -1072,9 +1073,6 @@ static void shuffle_own(void) {
         return;
     own_tried = playback_shuffle(playback_unshuffle()) ? 0 : sig;
 }
-/* Stock Shuffle's order taken now, not at the next UI pass (shuffle_wait.c's synchronous
- * shuffle_order_start). */
-void playback_shuffle_now(void) { shuffle_own(); }
 /* View Queue: 1 if a shuffle's play order is up, which Up Next lists rather than stock's queue
  * order. Stock Shuffle is taken as Shuffle Songs here too, should the UI pass not have taken it yet
  * (shuffle_own). Advanced play without a shuffle plays in queue order, as stock's list shows it. */
@@ -2043,6 +2041,10 @@ static void ask_resume(const unsigned char *songs, unsigned n, const unsigned *m
     free(paths), free(in), free(tail);
 }
 void playback_save(void) {
+    /* An update's dialog stops the player after its save and flashes for about a minute before the
+     * reboot; the UI loop's passes meanwhile would write the stopped player's 0 over that second, and
+     * the next boot would resume the song at its start. */
+    if (s.going_down && mclGetPlayStatus() == 1) return;
     /* Without advanced play a local queue (folder or library, as Play Next grows) is kept plain,
      * while Memory Playback or car mode would restore it (ringnav_memory reads nothing otherwise). */
     int plain = !s.active;
@@ -2542,9 +2544,13 @@ int ringnav_reboot(void) {
     return ringnav_reboot_from(caller);
 }
 void sw_update_restarting(void *win); /* sw_update.c */
+/* sw_update.c, when the update's dialog closes without the reboot (stock's answer: no file, the
+ * same version, a bad tar): the queue is saved as before. */
+void playback_going_down(int on) { s.going_down = on; }
 int ringnav_checkfw(void *win, void *ctx) {
     ulog_end("update");
     reboot_save();
+    s.going_down = 1; /* until the dialog closes (sw_update_restarting) or the Q2 restarts */
     int result = stock_checkfw_trampoline(win, ctx);
     sw_update_restarting(win); /* drawn as Restarting to Install */
     return result;

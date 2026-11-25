@@ -1,5 +1,6 @@
-/* Smart Wi-Fi: the radio off while nothing uses the network, back for what needs it; and the scan
- * hold, wpa_supplicant's rescans held off while A2DP streams and backed off while dark. */
+/* Smart Wi-Fi: the radio off while nothing uses the network, back for what needs it; the scan
+ * hold, wpa_supplicant's rescans held off while A2DP streams and backed off while dark; and the
+ * join watch, a log of a wpa_supplicant that does not join. */
 #include "navigation.h"
 
 /* Smart Wi-Fi (docs/internals.md#smart-wi-fi): with Power's row on and the user's Wi-Fi switch on,
@@ -133,8 +134,8 @@ static int smart_needed(void) {
 #define SCAN_BACKOFF_MAX_S 120
 #define SCAN_RETRY_MS 10000
 static struct {
-    unsigned sock, tried, since;
-    int sent;
+    unsigned sock, tried, since, up_at, said;
+    int sent, assoc, linked;
 } sh __attribute__((section(".scratch")));
 static int scan_interval_s(unsigned now) {
     int a2dp = (media_playing() && mclGetOutputWay() == 1) || (signed char)bt__recv_pageflag == 2;
@@ -152,14 +153,67 @@ static int scan_interval_s(unsigned now) {
     }
     return (int)s;
 }
+/* The join watch (docs/internals.md#scan-hold): what a wpa_supplicant that never joins was doing,
+ * in the log. From its control socket's appearance (up_at), the association (wlan0's operstate) and
+ * the link (networkGetConnectStatus, a lease) are said as they change, with the seconds since;
+ * unassociated, JOIN_FIRST_MS on and every JOIN_EVERY_MS after, one line says its wpa_state, the
+ * networks its last scan saw (a count, no names), the rescan interval it was given and why, and
+ * stock's switch flags (g_wififlag, wifi_initstatus, wifi_connectstatus). */
+#define JOIN_FIRST_MS 30000
+#define JOIN_EVERY_MS 60000
+#define WPA_OUT "/tmp/q2-wpa-status"
+static void join_watch(unsigned now, int want) {
+    char raw[700], line[200];
+    if (!sh.up_at) {
+        sh.up_at = now | !now, sh.assoc = sh.linked = 0;
+        sh.said = now - (JOIN_EVERY_MS - JOIN_FIRST_MS);
+    }
+    unsigned s = (now - sh.up_at) / 1000;
+    state_read("/sys/class/net/wlan0/operstate", raw, 16);
+    int assoc = !strncmp(raw + 1, "up", 2), linked = networkGetConnectStatus() > 0;
+    if (assoc != sh.assoc || linked != sh.linked) {
+        tk_snprintf(line, sizeof line, "%s, %u s after wpa_supplicant started",
+                    linked != sh.linked ? (linked ? "link up (a lease)" : "link down")
+                                        : (assoc ? "associated" : "association lost"),
+                    s);
+        ulog('I', "wifi", line);
+        sh.assoc = assoc, sh.linked = linked;
+    }
+    if (assoc || now - sh.said < JOIN_EVERY_MS) return;
+    sh.said = now;
+    system("wpa_cli -i wlan0 status >" WPA_OUT " 2>/dev/null; wpa_cli -i wlan0 scan_results | wc -l >>" WPA_OUT);
+    unsigned n = state_read(WPA_OUT, raw, sizeof raw);
+    unlink(WPA_OUT);
+    int seen = -1; /* scan_results' lines, its header the first */
+    if (n) {
+        char *c = raw + n + 1; /* the count, the output's last line */
+        while (c > raw + 1 && c[-1] == '\n') *--c = 0;
+        while (c > raw && c[-1] >= '0' && c[-1] <= '9') --c;
+        seen = atoi(c) - 1;
+    }
+    char st[24] = "?", *at = strstr(raw, "\nwpa_state=");
+    for (unsigned k = 0; at && k + 1 < sizeof st && at[11 + k] && at[11 + k] != '\n'; ++k)
+        st[k] = at[11 + k], st[k + 1] = 0;
+    tk_snprintf(line, sizeof line,
+                "not joined %u s after wpa_supplicant started: wpa_state=%s, %d networks in its last "
+                "scan, rescans every %d s (%s), switch %d scan %d connect %d",
+                s, st, seen, want,
+                want == SCAN_HOLD_S ? "held: a headset plays"
+                : want > 5          ? "dark backoff"
+                                    : "not held",
+                g_wififlag, wifi_initstatus, wifi_connectstatus);
+    ulog('W', "wifi", line);
+}
+
 static void scan_hold_poll(unsigned now) {
     unsigned info[36] = { 0 };
     if (!g_wififlag || __xstat(3, WPA_SOCK, info)) {
         sh.sock = 0; /* no wpa_supplicant: the next one starts at 5 s */
-        sh.since = 0;
+        sh.since = sh.up_at = 0;
         return;
     }
     int want = scan_interval_s(now);
+    join_watch(now, want);
     if (sh.sock == info[4] && sh.sent == want) return;
     if (sh.tried && now - sh.tried < SCAN_RETRY_MS) return;
     char cmd[64];

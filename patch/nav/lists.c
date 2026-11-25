@@ -638,7 +638,8 @@ static int confirm_center(const void *info) {
         *(volatile unsigned char *)KEY_LOCKOUT = 0;
         void *target = g_menu.at[index_of(&g_menu, st.center_id)];
         char click[0x30];
-        stock_dispatch_trampoline(target, pointer_event_init(click, EVT_CLICK, target, 0, 0));
+        void *e = pointer_event_init(click, EVT_CLICK, target, 0, 0);
+        if (!library_row_wait(target, e)) stock_dispatch_trampoline(target, e);
     }
     return 0;
 }

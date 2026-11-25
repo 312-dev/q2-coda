@@ -413,6 +413,16 @@ static void avrcp_say(int code) {
              a[9], a[8], a[7], a[6], a[5], a[4], media_status());
     ulog('I', "bt", line);
 }
+/* A pause the headset sent (its key, or the pause a multipoint headset sends the Q2 as it moves to another
+ * source: AirPods' automatic switching): q2player is asked to close its Bluetooth PCM at once rather than
+ * BT_PAUSE_MS on, so bluealsa's keep-alive lets the A2DP stream go and the next Play starts it afresh
+ * (docs/internals.md#bluetooth-pause). An ear's pause (headset_ears) keeps the PCM as any pause does. Stock's
+ * player ignores the command. Never waits on the player (MSG_DONTWAIT | MSG_NOSIGNAL). */
+static void headset_release(void) {
+    int fd = *(volatile int *)MCL_FD;
+    static const char m[] = "{mcl-btrelease\\null}";
+    if (fd != -1) send(fd, m, sizeof m - 1, 0x4040);
+}
 void headset_command(int code) {
     avrcp_say(code);
     unsigned now = time_now_ms();
@@ -434,6 +444,7 @@ void headset_command(int code) {
             hs.recent_owner = media_owner();
             hs.recent_session = media_session();
             media_set_playing(0);
+            if (hs.recent_owner == 1 && mclGetOutputWay() == 1) headset_release();
         }
     } else if (code == 200 || code == 207) {
         if (hs.paused || connect_hold(now)) return; /* insertion is governed by the ear count */
