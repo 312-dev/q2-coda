@@ -194,15 +194,19 @@ static int bt_pause_ms(void) {
     return ms;
 }
 static int64_t bt_closed_at; /* when a pause closed the Bluetooth PCM; 0 while none is closed so */
-static void release_bt(int64_t frame) {
+static void release_bt(int64_t frame, int by_headset) {
     output_drop(out);
     close_output(0);
     bt_closed_at = now_ms();
     char line[192];
-    int n = snprintf(line, sizeof line,
-                     "q2player: paused on Bluetooth for %d ms, its PCM closed so bluealsa can let the stream go; "
-                     "the song held at frame %lld",
-                     bt_pause_ms(), (long long)frame);
+    int n = by_headset ? snprintf(line, sizeof line,
+                                  "q2player: the headset paused: its Bluetooth PCM closed at once so bluealsa can let "
+                                  "the stream go; the song held at frame %lld",
+                                  (long long)frame)
+                       : snprintf(line, sizeof line,
+                                  "q2player: paused on Bluetooth for %d ms, its PCM closed so bluealsa can let the "
+                                  "stream go; the song held at frame %lld",
+                                  bt_pause_ms(), (long long)frame);
     plog('I', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
 }
 /* The line for a Bluetooth PCM opened again after release_bt, for what opened it; 1 when it was one. */
@@ -479,16 +483,19 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
                 continue;
             }
             if (!pausing && out) dac_mute(way), output_pause(out, 1), pausing = 1, quiet_from = now_ms();
-            if (out && pausing && way == 1) { /* Bluetooth: closed once BT_PAUSE_MS have passed quiet */
+            if (out && pausing && way == 1) { /* Bluetooth: closed once BT_PAUSE_MS have passed quiet, or at once
+                                                * when the headset sent the pause (mcl-btrelease) */
                 int64_t left = quiet_from + bt_pause_ms() - now_ms();
-                if (left <= 0) {
+                int by_headset = c->bt_release;
+                if (left <= 0 || by_headset) {
+                    c->bt_release = 0;
                     /* nothing of the song written since the last seek or open (a PCM opened for a click): it stands
                      * where that left it, whatever bluealsa's delay says of an empty PCM (the headset's own) */
                     if (source_frames(s) == origin) resume_at = offset;
                     else if (!rw.on && !scan) resume_at = heard_at(s, sx, &rw, origin, offset) - output_held(out);
                     int64_t frame = resume_at;
                     pthread_mutex_unlock(&c->mu);
-                    release_bt(frame);
+                    release_bt(frame, by_headset);
                     click_pcm = 0;
                     pthread_mutex_lock(&c->mu);
                     continue;
@@ -502,6 +509,7 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
             }
             pthread_cond_wait(&c->wake, &c->mu);
         }
+        c->bt_release = 0;  /* a headset's pause taken, or a play since */
         c->car_release = 0; /* while the song plays its writes go on: the unbind's -ENODEV ends the car's way (sink) */
         /* set-nexturl cuts the song. set-songurl alone does not: stock only notes it and plays it when this song
          * has ended (captured: fixtures/stock-replace.txt). demo sends it only when it believes nothing plays. */

@@ -2106,6 +2106,35 @@ def test_bt_pause_releases_the_pcm(player, songs, tmp):
             f'closed again; the Play went on {unheard * 1000 // 48000} ms back, at the frame heard')
 
 
+def test_bt_headset_pause_releases_at_once(player, songs, tmp):
+    """docs/internals.md#bluetooth-pause: a pause the headset sent (patch/headset.c sends {mcl-btrelease\\null} after
+    demo's pause: a multipoint headset moving to another source pauses the Q2 so) closes the Bluetooth PCM at once,
+    not BT_PAUSE_MS (20 s) on, so bluealsa's keep-alive lets the stream go and the Play starts it afresh, the path
+    every Play heard on a Q2 took; a held stream after a headset's pause was not heard. The command while the song
+    plays changes nothing, and the Play opens a PCM again with the song on from the frame heard."""
+    out, looks = tmp/'bt-headset-pause', {}
+    look = lambda name: (lambda s: looks.setdefault(name, (len(bt_fds(s)), sum(p.stat().st_size for p in (out/'pcm').glob('*_bt.raw')))))
+    steps = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\1}'),
+             (0.1, fakedemo.vol(100, 100)), (1.0, fakedemo.song('set-songurl', f'{songs}/whole48.wav')),
+             (1.5, '{mcl-btrelease\\null}'), (1.9, look('playing')), (2.0, '{mcl-pause\\null}'),
+             (2.02, '{mcl-btrelease\\null}'), (2.5, look('0.5 s paused')), (4.0, '{mcl-play\\null}'),
+             (4.6, look('playing again')), (5.6, look('a second on')), (6.0, '{mcl-stop\\null}'), (7.0, None)]
+    s = fakedemo.Session(out)
+    s.music = songs
+    s.run(steps, fakedemo.launch_host(player, str(songs), 1, {'LD_PRELOAD': ''}), 1)
+    assert {k: n for k, (n, _) in looks.items()} == {'playing': 1, '0.5 s paused': 0, 'playing again': 1, 'a second on': 1}, looks
+    assert looks['a second on'][1] - looks['playing again'][1] >= 0.8 * 48000 * 4, looks
+    log = (out/'player.log').read_text()
+    held = re.search(r'q2player: the headset paused: its Bluetooth PCM closed at once .* the song held at frame (\d+)', log)
+    assert held and len(re.findall('the headset paused', log)) == 1, log[-1500:]
+    assert f"Bluetooth's PCM opened again for the play" in log and f'the song on from frame {held[1]}' in log, log[-1500:]
+    names = sorted((out/'pcm').glob('*_bt.raw'))
+    ref, last = reference(songs/'whole48.wav'), names[-1].read_bytes()
+    at = int(held[1])
+    assert len(names) == 2 and last == ref[4 * at:4 * at + len(last)], 'the song not on from the frame held'
+    return f'closed at once on the headset\'s pause (held at frame {at}), ignored while playing, the Play on from it'
+
+
 BT_PLAY_S = int(os.environ.get('Q2TEST_BT_PLAY_S', '10'))  # how long the click-and-play test listens after the Play
 
 

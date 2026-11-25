@@ -58,6 +58,9 @@ struct ctl {
     /* mcl-dropcar (or mcl-carrelease, or SIGUSR2: docs/player.md#releasing-the-car): the car's gadget is about to go,
      * so a car PCM held paused or between songs is closed at once; cleared as the playback thread takes it */
     int car_release;
+    /* mcl-btrelease (patch/headset.c: the headset sent the pause): a song paused on Bluetooth closes its PCM at once,
+     * not BT_PAUSE_MS on (docs/internals.md#bluetooth-pause); cleared by a play and as the playback thread takes it */
+    int bt_release;
     /* status */
     int state, has_info, position;
     struct info info;
