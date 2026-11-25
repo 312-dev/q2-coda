@@ -980,3 +980,21 @@ def test_a_kept_grant_s_change_lines_are_bounded(fw):
     assert p.pins['PC20'] == 1 and n <= define('OTG_TRACE_MAX') + define('OTG_TRACE_CHANGES'), n
     traced(p, 60000)
     assert len(pin_lines(p)) == n, 'nothing more once both are spent'
+
+
+def test_player_save_stop_s_wait_after_the_stop_is_left_out_only_inside_stock_s_pass(fw):
+    """Stock's pass restarts the song when a USB DAC comes (player_save_stop, then player_save_start) on the UI thread;
+    the build sends player_save_stop's usleep(300000) after mclStop to otg_stop_sleep (tools/build.py
+    OTG_STOP_SLEEP_CALL), which leaves it out there and sleeps it for every other caller."""
+    p = Port(fw, id_pin=0)
+    stop_sleep = fw.fn('otg_stop_sleep', C.c_int, C.c_uint)
+    model = p.stock
+    inside = []
+
+    def stock(*_):  # the DAC branch's stop, inside the pass
+        inside.append(stop_sleep(300000))
+        return model()
+    fw.mock('stock_otg_status_trampoline', stock)
+    p.run(SETTLE + 2 * PASS_MS)
+    assert p.pins['PC20'] == 1 and inside and not fw.calls('fw_usleep')
+    assert stop_sleep(300000) == 0 and [a[0] for _, a in fw.calls('fw_usleep')] == [300000]

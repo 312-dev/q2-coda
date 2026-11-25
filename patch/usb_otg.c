@@ -115,6 +115,7 @@ static struct {
     int wrong;
     unsigned nosrc_at; /* PD17 low with no source since; nosrc: 1 so, 2 said */
     int nosrc;
+    int in_pass; /* inside stock's pass (otg_stock): otg_stop_sleep leaves out player_save_stop's wait */
 } otg __attribute__((section(".scratch")));
 
 /* The PHY's ID pull-up on and the controller held at device: at boot (usb_record.c
@@ -137,7 +138,9 @@ static void gone(unsigned now) {
 static int otg_stock(unsigned now, int id_as_low, const char *off) {
     int was = g_last_otgid;
     otg.id_as_low = id_as_low;
+    otg.in_pass = 1;
     int result = stock_otg_status_trampoline();
+    otg.in_pass = 0;
     otg.id_as_low = 0;
     if (g_last_otgid != was) {
         usb_record(g_last_otgid == 1 ? "otg-on" : off);
@@ -152,6 +155,13 @@ static int otg_stock(unsigned now, int id_as_low, const char *off) {
     }
     return result;
 }
+
+/* player_save_stop's usleep(300000) after mclStop (0x52077c, tools/build.py OTG_STOP_SLEEP_CALL). Stock's pass calls
+ * player_save_stop on the UI thread when a USB DAC comes or goes, then restarts the song on the new way
+ * (player_save_start); mclStop has already waited for q2player's stopstatus, which it sends once its PCM is closed
+ * (player/engine.c), so inside the pass the wait only held the UI (docs/internals.md#otg-host-power). Every other
+ * caller keeps it: q2video or a game opening bluealsa's PCM after a stop needs bluealsa to have seen the close. */
+int otg_stop_sleep(unsigned us) { return otg.in_pass ? 0 : usleep(us); }
 
 /* PD17's VBUS (1 for VBUS on the port) as a cable's: 0 while the Q2's own bus power, ended, dies
  * away (OTG_OWN_VBUS_MS). Every PD17 read of this file and stock's cable read (usb_charge.c
