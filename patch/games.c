@@ -1310,7 +1310,8 @@ static int closed(void *ctx, void *event) {
 }
 
 /* An engine game's row (docs/oled-design.md#two-line-row): its icon (GAMES_ICONS, 40 px at the
- * text column, 6 px down), its name and kind beside it, and the chevron. */
+ * text column, 6 px down), its name and kind beside it, the kind's ink from 32 px down the row (5 px
+ * over page_row_detail's second line), and the chevron. */
 static void game_row(int k) {
     const struct eng_game *e = eng_game(k);
     char url[72];
@@ -1318,7 +1319,7 @@ static void game_row(int k) {
     void *item = page_row_detail_into(g->view, GAMES_BUILTIN + k, e->name, e->kind, pick_game);
     for (int i = 0; i < 2; ++i) {
         void *label = widget_get_child(item, i);
-        widget_move_resize(label, x + 48, I(label, W_Y), 268 - x, I(label, W_H));
+        widget_move_resize(label, x + 48, I(label, W_Y) - 5 * i, 268 - x, I(label, W_H));
     }
     tk_snprintf(url, sizeof url, "file://" GAMES_ICONS "/%s.png", e->slug);
     image_base_set_image(image_create(item, x, 6, 40, 40), url);
