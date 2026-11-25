@@ -1,15 +1,18 @@
 /* Ember Garden (docs/games-engine.md#ember-garden): a far volcano's ash cloud rains embers on a
  * kitchen garden; a brass sprinkler on the lawn puts them out with spurts of water. Embers fall on
- * slow sine paths in three sizes; a cinder hit cracks into two small embers; an ember that reaches
- * the ground sets the nearest growing bed on its side alight, and the fourth bed lost on one side
- * ends the game. Waves grow denser and faster, the light turns from dawn to night across them, and
- * every tenth wave is a lull of slow cinders worth double.
+ * slow sine paths in three sizes, each a flame of four frames; a cinder hit cracks into two small
+ * embers; an ember that reaches the ground sets the nearest growing bed on its side alight, and the
+ * fourth bed lost on one side ends the game. Waves start sparse and slow and grow denser and
+ * faster, the sky holds only so many embers a wave, nothing cracks before wave G_CRACK, the light
+ * turns from dawn to night across the waves, and every tenth is a lull of slow cinders worth
+ * double. The sky is alive under it all: clouds drift, the ash billows, the crater glows and the
+ * lava runs (sky_turn), one of them moving a step.
  *
- * The scene is the art file's (the design's sky-defense/src/export.py), read once when the game
- * opens: a byte a pixel into a palette a band of rows, four colours an entry (dawn, day, dusk,
- * night), so a time of day is a palette and the light's turn is two palettes mixed, painted a strip
- * of rows a frame. Each step marks the boxes that changed and joins them into at most ENG_RECTS;
- * each is painted as the scene restored and what lies over it drawn again. */
+ * The scene is the art file's (the design's sky-defense/src/export_retune.py), read once when the
+ * game opens: a byte a pixel into a palette a band of rows, four colours an entry (dawn, day,
+ * dusk, night), so a time of day is a palette and the light's turn is two palettes mixed, painted
+ * a strip of rows a frame. Each step marks the boxes that changed and joins them into at most
+ * ENG_RECTS; each is painted as the scene restored and what lies over it drawn again. */
 #include "engine.h"
 #include "game_embergarden_art.h"
 #include "peq.h"
@@ -21,9 +24,9 @@
 #define G_SHOTS 3          /* spurts in flight */
 #define G_PUFFS 3          /* steam puffs */
 #define G_CINDERS 6        /* cinders alive at once: more are spawned medium (the frame's cost) */
-#define G_SMOKE 8  /* an ember spawned while this many fall has a short tail (the frame's cost) */
-#define G_BOXES 64 /* a step's changed boxes before they are joined */
-#define G_PX 187   /* the sprinkler's pivot, (187.5, 270) */
+#define G_LICK 6           /* steps a frame of an ember's flame shows */
+#define G_BOXES 64         /* a step's changed boxes before they are joined */
+#define G_PX 187           /* the sprinkler's pivot, (187.5, 270) */
 #define G_PY 270
 #define G_GROUND 258      /* an ember reaching this row has landed */
 #define G_BED_Y 252       /* a bed's top */
@@ -34,7 +37,7 @@
 #define G_REPEAT 12   /* steps between spurts while Center is held */
 #define G_SPEED FX(6) /* a spurt's lead drop, a step */
 #define G_HIT 72      /* its radius, 1/16 px (4.5) */
-#define G_SWAY 18     /* an ember's sway, px each way, and its period in steps */
+#define G_SWAY 18     /* an ember's widest sway, px each way, and its period in steps */
 #define G_PERIOD 180
 #define G_BURN 90      /* steps a bed burns before it is charred */
 #define G_FLAME 8      /* steps a flame frame shows, each bed's a step apart from the next's */
@@ -43,6 +46,9 @@
 #define G_HOLD 45      /* the wave banner's steps whole, then G_FADE fading */
 #define G_FADE 15
 #define G_STOP 3    /* hit-stop on a cinder's split */
+#define G_CRACK 4   /* the first wave with cinders: nothing cracks before it */
+#define G_CALM 90   /* steps from a crack to the next ember at least */
+#define G_BREATH 40 /* and from a full sky's first gap */
 #define G_STRIP 8   /* rows a step while the light turns */
 #define G_TURN 32   /* passes of the strips from one light to the next */
 #define G_DROP 14   /* steps the result card takes to drop in */
@@ -57,7 +63,7 @@ enum { DAWN, DAY, DUSK, NIGHT };
 struct ember {
     fx bx, y, vx, vy; /* its path's middle, its height, a split's kick and its fall a step */
     int phase, amp, size, alive;
-    int smoke; /* its tail has the smoke thread: falling while few others do (G_SMOKE) */
+    int f; /* its flame's frame, 0 to 3 */
 };
 struct shot {
     fx x, y, ux, uy; /* the lead drop and its heading */
@@ -67,6 +73,26 @@ struct puff {
     int x, y, f, t, size, pts, alive; /* its frame, 0 to 4, and the steps it has shown */
 };
 
+/* The sky's moving things (sky_turn): each a mask of the art's, drawn in one colour. */
+enum { DRIFT, BOB, RISE, PULSE, MARCH };
+enum { C_CLOUD, C_PLUME, C_GLOW, C_LAVA };
+#define VX 214 /* the crater */
+#define VY 143
+static const struct sky {
+    unsigned char kind, part, colour, p; /* p: a cloud's turns a pixel, else its phase */
+    short x, y;
+} SKY[] = {
+    { DRIFT, EG_CLOUD0, C_CLOUD, 1, 40, 150 },  { BOB, EG_BILLOW, C_PLUME, 0, 52, 28 },
+    { MARCH, EG_LAVA0, C_LAVA, 0, VX, VY },     { RISE, EG_BILLOW, C_PLUME, 0, 0, 0 },
+    { DRIFT, EG_CLOUD1, C_CLOUD, 2, 118, 168 }, { BOB, EG_BILLOW, C_PLUME, 77, 122, 30 },
+    { MARCH, EG_LAVA1, C_LAVA, 1, VX, VY },     { BOB, EG_BILLOW, C_PLUME, 154, 196, 30 },
+    { DRIFT, EG_CLOUD2, C_CLOUD, 1, 300, 142 }, { PULSE, EG_VGLOW, C_GLOW, 0, VX, VY },
+    { MARCH, EG_LAVA2, C_LAVA, 2, VX, VY },     { RISE, EG_BILLOW, C_PLUME, 128, 0, 0 },
+    { DRIFT, EG_CLOUD3, C_CLOUD, 2, 350, 170 }, { BOB, EG_BILLOW, C_PLUME, 231, 268, 28 },
+    { BOB, EG_BILLOW, C_PLUME, 52, 338, 28 },
+};
+#define SKY_N (int)(sizeof SKY / sizeof *SKY)
+
 struct eg {
     unsigned art[EG_ART_BYTES / 4];           /* the art file, whole */
     unsigned pal[H_BANDS][EG_COLOURS];        /* the palette now, 0xffRRGGBB */
@@ -75,7 +101,11 @@ struct eg {
     struct ember em[G_EMBERS];
     struct shot sh[G_SHOTS];
     struct puff pf[G_PUFFS];
-    int mode, aim, recoil, spray, repeat, stop, h, tick; /* tick: play's steps, the flames' clock */
+    struct {
+        short x, y, a; /* where each of SKY's is drawn, and how strongly (of 256) */
+    } sky[SKY_N];
+    int mode, aim, recoil, spray, repeat, stop, h;
+    int tick; /* the steps since the game opened: every moving picture's clock */
     int bed[8], bed_t[8], land_x, land_t, last[2], blink;
     unsigned char flame[8]; /* each burning bed's flame frame */
     int wave, lull, left, spawn, gap, banner, cleared;
@@ -407,9 +437,7 @@ static int ember_lean(const struct ember *e) {
         (e->amp * eng_cos(e->phase * 1024 / G_PERIOD) / G_SWAY * 154 >> 16) + (e->vx * 96 >> 16);
     return -sway * 83 * 16 / (100 * R16[e->size]);
 }
-static int ember_part(const struct ember *e) {
-    return (e->smoke ? EG_EMBER0 : EG_SHORT0) + e->size;
-}
+static int ember_part(const struct ember *e) { return EG_FLAME0_0 + 4 * e->size + e->f; }
 static int shots(const struct eg *g) {
     int n = 0;
     for (int k = 0; k < G_SHOTS; ++k) n += g->sh[k].alive;
@@ -455,6 +483,31 @@ static void draw_bolt(const struct eg *g, struct eng_surface *s) {
               120 * flash >> 8); /* the sheath on the bolt, not its branch */
     bolt_line(s, pts, 8, 21, 0xffffff, flash + 51 > 256 ? 256 : flash + 51);
     bolt_line(s, br, 4, 14, 0xf0e8ff, flash);
+}
+
+/* The sky's moving things over the scene: the clouds in the day's light, the billows in the plume's
+ * colour as the scene has it at EG_PLUME_X, EG_PLUME_Y, the crater's glow and the lava's dashes.
+ * Like the scene, none of it is painted where the card's body (rows card0 to card1) will cover it:
+ * the rect is painted as its rows above the card, those below, and the columns to each side. */
+static void draw_sky(const struct eg *g, struct eng_surface *s, int card0, int card1) {
+    unsigned col[4] = { lit(g, 0xffffff),
+                        g->pal[EG_PLUME_Y / EG_BAND][((const unsigned char *)data(
+                            g, EG_SCENE))[EG_PLUME_Y * ENG_W + EG_PLUME_X]] &
+                            0xffffff,
+                        g->dim ? dimmed(EMBER) : EMBER, g->dim ? dimmed(0xffe27a) : 0xffe27a };
+    struct eng_surface t = *s;
+    int y0 = s->y0 > card0 ? s->y0 : card0, y1 = s->y1 < card1 ? s->y1 : card1;
+    int cut[4][4] = { { s->x0, s->y0, s->x1, s->y1 < card0 ? s->y1 : card0 },
+                      { s->x0, s->y0 > card1 ? s->y0 : card1, s->x1, s->y1 },
+                      { s->x0, y0, s->x1 < CARD_X ? s->x1 : CARD_X, y1 },
+                      { s->x0 > CARD_X + 150 ? s->x0 : CARD_X + 150, y0, s->x1, y1 } };
+    for (int n = 0; n < 4; ++n) {
+        t.x0 = cut[n][0], t.y0 = cut[n][1], t.x1 = cut[n][2], t.y1 = cut[n][3];
+        if (t.x0 >= t.x1 || t.y0 >= t.y1 || t.y0 >= 205)
+            continue; /* all of it is above the hedge */
+        for (int i = 0; i < SKY_N; ++i)
+            glyph(g, &t, SKY[i].part, g->sky[i].x, g->sky[i].y, col[SKY[i].colour], g->sky[i].a);
+    }
 }
 
 /* The sprinkler's head, turned to the aim and kicked back after a spurt, and its collar's drops:
@@ -641,6 +694,7 @@ static void draw(const void *state, struct eng_surface *s) {
     int top =
         g->mode == PLAY ? -999 : (g->mode == LOST ? CARD_Y[g->card] : 128) - 75; /* the card's */
     scene(g, s, top + 6, top + 144);
+    draw_sky(g, s, top + 6, top + 144);
     if (g->bolt) draw_bolt(g, s);
     for (int k = 0; k < 8; ++k) {
         int x = BED_X[k];
@@ -844,8 +898,8 @@ static void next_wave(struct eg *g) {
     int lull = g->wave % 10 == 0;
     if (lull != g->lull) mark(g, 130, 10, 115, 24);
     g->lull = lull;
-    g->left = lull ? 5 : 6 + 2 * g->wave > 40 ? 40 : 6 + 2 * g->wave;
-    g->gap = lull ? 60 : 70 - 4 * g->wave < 18 ? 18 : 70 - 4 * g->wave;
+    g->left = lull ? 5 : 5 + g->wave > 30 ? 30 : 5 + g->wave;
+    g->gap = lull ? 90 : 180 - 10 * g->wave < 44 ? 44 : 180 - 10 * g->wave;
     g->spawn = G_HOLD;
     g->banner = 1;
     banner_box(g);
@@ -854,23 +908,31 @@ static void next_wave(struct eg *g) {
     sound(g, ENG_SFX_TICK, 2);
 }
 
+/* The embers that may fall at once: two in the first wave, one more every second wave. */
+static int sky(const struct eg *g) {
+    int n = 2 + g->wave / 2;
+    return g->lull ? 5 : n > G_EMBERS ? G_EMBERS : n;
+}
+
 static void spawn(struct eg *g) {
     for (int k = 0; k < G_EMBERS; ++k) {
         struct ember *e = &g->em[k];
         if (e->alive) continue;
-        int pc = 10 + 3 * g->wave > 35 ? 35 : 10 + 3 * g->wave,
-            pm = 25 + 3 * g->wave > 40 ? 40 : 25 + 3 * g->wave;
+        int pc = g->wave < G_CRACK      ? 0
+                 : 3 * g->wave - 6 > 30 ? 30
+                                        : 3 * g->wave - 6,
+            pm = 15 + 4 * g->wave > 40 ? 40 : 15 + 4 * g->wave;
         int r = (int)(eng_rng(&g->seed) % 100), cinders = 0, alive = 0;
         for (int j = 0; j < G_EMBERS; ++j)
             cinders += g->em[j].alive && g->em[j].size == 2, alive += g->em[j].alive;
-        e->smoke = alive < G_SMOKE;
         e->size = g->lull ? 2 : r < pc ? 2 : r < pc + pm ? 1 : 0;
         if (e->size == 2 && cinders >= G_CINDERS) e->size = 1; /* the frame's cost: see G_CINDERS */
-        e->amp = G_SWAY, e->phase = (int)(eng_rng(&g->seed) % G_PERIOD), e->vx = 0;
+        e->amp = 5 + 3 * g->wave / 2 > G_SWAY ? G_SWAY : 5 + 3 * g->wave / 2;
+        e->phase = (int)(eng_rng(&g->seed) % G_PERIOD), e->vx = 0;
         e->bx = FX(30 + G_SWAY + (int)(eng_rng(&g->seed) % (315 - 2 * G_SWAY)));
-        e->y = FX(40);
-        e->vy = g->lull ? FX(0.5) : FX(0.5) + (g->wave - 1) * (FX(6) / 100);
-        e->vy = e->vy > FX(2.2) ? FX(2.2) : e->vy;
+        e->y = FX(40), e->f = 0;
+        e->vy = g->lull ? FX(0.42) : FX(0.42) + (g->wave - 1) * (FX(5) / 100);
+        e->vy = e->vy > FX(1.8) ? FX(1.8) : e->vy;
         e->alive = 1;
         ember_box(g, e);
         --g->left;
@@ -879,6 +941,7 @@ static void spawn(struct eg *g) {
 }
 
 static void lose(struct eg *g);
+static void sky_turn(struct eg *g, int *load);
 
 /* An ember on the ground: the nearest growing bed on its side catches; the side's third lost
  * lights its last bed's frame, its fourth ends the game. */
@@ -926,7 +989,7 @@ static void hit(struct eg *g, struct ember *e) {
         return;
     }
     fx x = FX(ember_x(e));
-    e->size = 0, e->amp = 0, e->bx = x, e->vx = -FX(1.6), e->smoke = 0;
+    e->size = 0, e->amp = 0, e->bx = x, e->vx = -FX(1.6);
     for (int k = 0; k < G_EMBERS; ++k)
         if (!g->em[k].alive) {
             g->em[k] = *e;
@@ -934,6 +997,7 @@ static void hit(struct eg *g, struct ember *e) {
             break;
         }
     if (!g->stop) g->stop = G_STOP - 1; /* this step, then G_STOP - 1 more */
+    if (g->spawn < G_CALM) g->spawn = G_CALM;
     sound(g, ENG_SFX_TAP, 2);
 }
 
@@ -1022,6 +1086,8 @@ static void init(void *state, int h) {
         g->save.wave > 9999)
         g->save.best = g->save.wave = 0; /* a save that no game made */
     g->saved = g->save.best + g->save.wave;
+    for (int load = 0; g->ok && g->tick < SKY_N; ++g->tick)
+        sky_turn(g, &load); /* each at its start */
     new_game(g, START);
 }
 
@@ -1078,6 +1144,7 @@ static void play(struct eg *g, const struct eng_input *in) {
         if (!e->alive) continue;
         int n0 = g->boxes;
         ember_box(g, e);
+        e->f = (g->tick / G_LICK + k) & 3;
         if (e->amp) e->phase = (e->phase + 1) % G_PERIOD;
         e->bx += e->vx, e->vx = e->vx * 15 / 16;
         int r = R16[e->size] / 16 + 1;
@@ -1094,21 +1161,66 @@ static void play(struct eg *g, const struct eng_input *in) {
         ember_box(g, e);
         moved(g, n0, g->boxes);
     }
-    if (!frozen && g->left && !--g->spawn) {
-        spawn(g);
-        g->spawn = g->gap;
-    }
     int alive = 0;
     for (int k = 0; k < G_EMBERS; ++k) alive += g->em[k].alive;
+    if (alive >= sky(g)) { /* a full sky: the cloud holds its next ember */
+        if (g->spawn < G_BREATH) g->spawn = G_BREATH;
+    } else if (!frozen && g->left && !--g->spawn) {
+        spawn(g);
+        g->spawn = g->gap, ++alive;
+    }
     if (!g->left && !alive && !g->banner) next_wave(g);
     /* lightning in the ash column, after dusk and in a lull, never over many embers */
     if (g->bolt_wait) --g->bolt_wait;
 }
 
+/* The sky's life: each step one of SKY's things takes its turn (so each every SKY_N steps), and is
+ * marked where its picture changed. A cloud slides a pixel to the right every p turns and comes
+ * round again; a billow circles its place on the canopy, 4 px to each side and 2 up and down; a
+ * puff climbs the ash column from the crater, strongest half way; the crater's glow swells and
+ * sinks; each of the lava's three masks of dashes brightens and fades a third of a round after the
+ * one before, so the dashes run down the cone. A turn whose boxes would take the step past its
+ * budget is passed over. */
+static void sky_turn(struct eg *g, int *load) {
+    int i = g->tick % SKY_N, t = g->tick / SKY_N, first = g->tick < SKY_N;
+    const struct sky *k = &SKY[i];
+    const struct part *p = part(g, k->part);
+    int x = first ? k->x : g->sky[i].x, y = k->y, a = 256;
+    if (k->kind == DRIFT) {
+        if (!first && t % k->p == 0 && ++x > ENG_W + 44) x = -44;
+    } else if (k->kind == BOB) {
+        x = k->x + (eng_cos(t * 40 + k->p * 4) * 4 >> 16),
+        y += eng_sin(t * 40 + k->p * 4) * 2 >> 16;
+        a = 220;
+    } else if (k->kind == RISE) {
+        int u = (t * 3 + k->p) & 255;
+        x = VX - 2 - 46 * u / 256, y = VY - 12 - 84 * u / 256,
+        a = (u < 128 ? u : 255 - u) * 220 / 128;
+    } else if (k->kind == PULSE)
+        a = 100 + (eng_sin(t * 56) * 90 >> 16);
+    else {
+        int d = (t * 85 - k->p * 341) & 1023;
+        d = d < 512 ? d : 1024 - d;
+        a = d > 341 ? 0 : 256 - d * 3 / 4;
+    }
+    if (x == g->sky[i].x && y == g->sky[i].y && a == g->sky[i].a) return;
+    if (!first) {
+        int px = (p->w + 2) * (p->h + 2); /* its old box and its new, a pixel or two apart */
+        if (*load + px > G_BUDGET) return;
+        *load += px;
+        int n0 = g->boxes;
+        mark(g, g->sky[i].x - p->ax, g->sky[i].y - p->ay, p->w, p->h);
+        mark(g, x - p->ax, y - p->ay, p->w, p->h);
+        moved(g, n0, g->boxes);
+    }
+    g->sky[i].x = (short)x, g->sky[i].y = (short)y, g->sky[i].a = (short)a;
+}
+
 /* What waits for a lighter frame: the extras of a step (the banner's fade, the lightning's next
- * frame, a puff's and the flames' next frames, a strike, the light's strip) are painted only while
- * the step's boxes, with theirs, stay within G_BUDGET pixels; one that does not fit waits for a
- * step that has room, so no frame pays for everything at once (docs/games-engine.md#ember-garden).
+ * frame, a puff's and the flames' next frames, a strike, the light's strip, the sky's turn) are
+ * painted only while the step's boxes, with theirs, stay within G_BUDGET pixels; one that does not
+ * fit waits for a step that has room, so no frame pays for everything at once
+ * (docs/games-engine.md#ember-garden).
  */
 #define ROOM(a) (load + (a) <= G_BUDGET ? (load += (a), 1) : 0)
 static void extras(struct eg *g) {
@@ -1146,6 +1258,7 @@ static void extras(struct eg *g) {
         mark(g, 0, g->strip * G_STRIP, ENG_W, G_STRIP);
         g->strip = (g->strip + 1) % (320 / G_STRIP);
     }
+    sky_turn(g, &load);
 }
 #undef ROOM
 
@@ -1157,10 +1270,14 @@ static int step(void *state, const struct eng_input *in) {
     }
     int aim0 = g->aim, recoil = g->recoil, spray = g->spray, left = shots(g);
     if (g->runs && !--g->wait) eng_sfx(g->seq), g->wait = 6, --g->runs;
+    ++g->tick;
     if (g->mode == START) {
-        if (in->pressed & (ENG_CENTRE | ENG_TOUCH)) new_game(g, PLAY);
+        int load = 0;
+        if (in->pressed & (ENG_CENTRE | ENG_TOUCH))
+            new_game(g, PLAY);
+        else
+            sky_turn(g, &load); /* the title card's sky moves too */
     } else if (g->mode == PLAY) {
-        ++g->tick;
         aim(g, in);
         play(g, in);
     } else {

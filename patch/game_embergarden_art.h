@@ -1,7 +1,7 @@
-/* Ember Garden's art (the design's design/games/sky-defense/src/export.py writes this and
+/* Ember Garden's art (the design's design/games/sky-defense/src/export_retune.py writes this and
  * assets/games/embergarden.bin; do not edit): the
  * file's size and parts, and the scene's places. */
-#define EG_ART_BYTES 219200u
+#define EG_ART_BYTES 234036u
 #define EG_ART_MAGIC 0x31414745u
 #define EG_BAND 32    /* rows a palette */
 #define EG_COLOURS 256 /* colours a palette */
@@ -9,17 +9,25 @@
 #define EG_CH_W 34
 #define EG_CH_H 41
 #define EG_CH_X { 27, 62, 97, 132, 209, 244, 279, 314 }
+#define EG_PLUME_X 176 /* a pixel of the ash column's light side */
+#define EG_PLUME_Y 65
 
 enum {
     EG_SCENE, /* 375 x 320 */
     EG_PALETTE, /* 256 x 10 */
     EG_CHARRED, /* 34 x 328 */
-    EG_EMBER0, /* 17 x 29 */
-    EG_EMBER1, /* 21 x 41 */
-    EG_EMBER2, /* 25 x 59 */
-    EG_SHORT0, /* 17 x 19 */
-    EG_SHORT1, /* 21 x 26 */
-    EG_SHORT2, /* 25 x 36 */
+    EG_FLAME0_0, /* 13 x 22 */
+    EG_FLAME0_1, /* 15 x 26 */
+    EG_FLAME0_2, /* 15 x 20 */
+    EG_FLAME0_3, /* 15 x 23 */
+    EG_FLAME1_0, /* 17 x 28 */
+    EG_FLAME1_1, /* 19 x 32 */
+    EG_FLAME1_2, /* 17 x 25 */
+    EG_FLAME1_3, /* 19 x 30 */
+    EG_FLAME2_0, /* 21 x 37 */
+    EG_FLAME2_1, /* 23 x 42 */
+    EG_FLAME2_2, /* 23 x 34 */
+    EG_FLAME2_3, /* 23 x 40 */
     EG_FIREGLOW, /* 45 x 27 */
     EG_FIRE0, /* 22 x 18 */
     EG_FIRE1, /* 22 x 16 */
@@ -28,6 +36,15 @@ enum {
     EG_PUFF2, /* 29 x 29 */
     EG_PUFF3, /* 30 x 31 */
     EG_PUFF4, /* 31 x 32 */
+    EG_CLOUD0, /* 73 x 10 */
+    EG_CLOUD1, /* 53 x 10 */
+    EG_CLOUD2, /* 81 x 10 */
+    EG_CLOUD3, /* 45 x 10 */
+    EG_BILLOW, /* 24 x 18 */
+    EG_VGLOW, /* 61 x 45 */
+    EG_LAVA0, /* 26 x 59 */
+    EG_LAVA1, /* 26 x 65 */
+    EG_LAVA2, /* 26 x 61 */
     EG_SIGN_0, /* 8 x 9 */
     EG_SIGN_1, /* 4 x 9 */
     EG_SIGN_2, /* 7 x 9 */

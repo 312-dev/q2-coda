@@ -3,12 +3,14 @@ drop alone, the embers' sizes, splits and landings, the beds, the waves and the 
 the glass's corners; then through Games' page."""
 import ctypes as C
 import math
+import os
 import pathlib
 import re
 import struct
 
 import pytest
 
+import embergarden_player
 from test_engine import E_CENTRE, E_NEXT, E_PREV, E_TOUCH, ENGINE, RETURN, Eng, GameDef, Input, api, screen
 from test_games import PAGE, Canvas, Page, fnv1a, heard
 
@@ -29,7 +31,7 @@ R = [3.0, 4.6, 7.0]
 
 
 class Ember(C.Structure):  # G_EMBERS of them
-    _fields_ = [(k, C.c_int) for k in 'bx y vx vy phase amp size alive smoke'.split()]
+    _fields_ = [(k, C.c_int) for k in 'bx y vx vy phase amp size alive f'.split()]
 
 
 class Shot(C.Structure):
@@ -42,7 +44,7 @@ class Puff(C.Structure):
 
 class State(C.Structure):
     _fields_ = [('art', C.c_uint * (HDR['EG_ART_BYTES'] // 4)), ('pal', C.c_uint * (320 // BAND * 256)),
-                ('grow', C.c_ubyte * (8 * CH_W * CH_H)), ('ok', C.c_int), ('em', Ember * 12), ('sh', Shot * 3), ('pf', Puff * 3),
+                ('grow', C.c_ubyte * (8 * CH_W * CH_H)), ('ok', C.c_int), ('em', Ember * 12), ('sh', Shot * 3), ('pf', Puff * 3), ('sky', (C.c_short * 3) * 15),
                 *((k, C.c_int) for k in 'mode aim recoil spray repeat stop h tick'.split()), ('bed', C.c_int * 8),
                 ('bed_t', C.c_int * 8), ('land_x', C.c_int), ('land_t', C.c_int), ('last', C.c_int * 2), ('blink', C.c_int),
                 ('flame', C.c_ubyte * 8), *((k, C.c_int) for k in 'wave lull left spawn gap banner cleared light frm k strip dim bolt bolt_x '
@@ -82,7 +84,8 @@ class Game:
         self.fn = {k: fw.fn(f'game_embergarden__{k}', *v) for k, v in {
             'step': (C.c_int, C.c_void_p, C.POINTER(Input)), 'draw': (None, C.c_void_p, C.c_void_p),
             'spawn': (None, C.c_void_p), 'land': (None, C.c_void_p, C.c_int), 'next_wave': (None, C.c_void_p),
-            'flush': (None, C.c_void_p), 'mark': (None, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int)}.items()}
+            'sky': (C.c_int, C.c_void_p), 'flush': (None, C.c_void_p), 'mark': (None, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int)}.items()}
+        self.fn_new = fw.fn('game_embergarden__new_game', None, C.c_void_p, C.c_int)
 
     def step(self, wheel=0, held=0, pressed=0, tx=0, ty=0):
         return self.fn['step'](C.addressof(self.g), C.byref(Input(wheel, 0, 0, held, pressed, 0, tx, ty)))
@@ -414,26 +417,105 @@ def test_waves_grow_denser_and_faster_and_every_tenth_is_a_lull_of_slow_cinders(
     g = Game(fw)
     g.play()
     rows = []
-    for wave in range(1, 22):
+    for wave in range(1, 32):
         g.g.wave = wave - 1
         g.fn['next_wave'](C.addressof(g.g))
-        rows.append((g.g.wave, g.g.lull, g.g.left, g.g.gap))
+        rows.append((g.g.wave, g.g.lull, g.g.left, g.g.gap, g.fn['sky'](C.addressof(g.g))))
         if wave in (10, 20):
             g.quiet()
             g.g.left, g.g.spawn = 5, 1
             g.step()
             e = g.alive()[0]
-            assert e.size == 2 and e.vy == FX // 2
-    assert [r[2] for r in rows if not r[1]] == sorted(r[2] for r in rows if not r[1])  # more embers each wave, to 40
-    assert [r[3] for r in rows if not r[1]] == sorted((r[3] for r in rows if not r[1]), reverse=True)
-    assert [r[0] for r in rows if r[1]] == [10, 20] and all(r[2] == 5 for r in rows if r[1])
+            assert e.size == 2 and e.vy == int(0.42 * FX)
+    plain = [r for r in rows if not r[1]]
+    assert all(r[2:] == (min(5 + r[0], 30), max(180 - 10 * r[0], 44), min(2 + r[0] // 2, 12)) for r in plain)
+    assert plain[0][2:] == (6, 170, 2) and plain[-1][2:] == (30, 44, 12)  # wave 1 and wave 31
+    assert [r[0] for r in rows if r[1]] == [10, 20, 30] and all(r[2:] == (5, 90, 5) for r in rows if r[1])
     g.quiet()
-    for wave, fall in ((1, 0.5), (11, 1.1), (40, 2.2)):
+    for wave, fall, sway in ((1, 0.42, 6), (5, 0.62, 12), (11, 0.92, 18), (40, 1.8, 18)):
         g.g.wave, g.g.lull, g.g.left, g.g.spawn = wave, 0, 1, 1
         g.step()
         e = g.alive()[-1]
-        assert abs(e.vy / FX - min(0.5 + 0.06 * (wave - 1), 2.2)) < 0.001 and 30 <= e.bx / FX - 18 and e.bx / FX + 18 <= 345
+        assert abs(e.vy / FX - fall) < 0.001 and e.amp == sway and 30 <= e.bx / FX - 18 and e.bx / FX + 18 <= 345
         e.alive = 0
+    g.close()
+
+
+def test_nothing_cracks_before_wave_4(fw):
+    """Waves 1 to 3 drop small and medium embers alone; from wave 4 some are cinders, more as the waves go."""
+    g = Game(fw)
+    g.play()
+    share = {}
+    for wave in (1, 2, 3, 4, 8, 20):
+        sizes = []
+        for k in range(400):
+            g.quiet()
+            g.g.wave, g.g.left, g.g.spawn, g.g.seed = wave, 1, 1, 1 + 7919 * k
+            g.step()
+            sizes.append(g.alive()[0].size)
+        share[wave] = sizes.count(2) / 400
+        assert sizes.count(0) and sizes.count(1)
+    assert share[1] == share[2] == share[3] == 0 and 0.02 < share[4] < 0.12 and 0.12 < share[8] < 0.25 and 0.24 < share[20] < 0.37
+    g.close()
+
+
+def test_the_sky_holds_few_embers_early_and_more_as_the_waves_go(fw):
+    """With nobody at the wheel the most that fall at once is 2 in wave 1 and never over the wave's own count (3 in
+    waves 2 and 3, 4 in wave 4). A full sky holds the cloud's next ember, and a gap in it is G_BREATH steps old before
+    one comes."""
+    g = Game(fw)
+    g.play()
+    most = {}
+    for _ in range(9000):
+        g.step()
+        for k in range(8):
+            g.g.bed[k] = GROWING  # the garden never lost: the waves go on
+        most[g.g.wave] = max(most.get(g.g.wave, 0), len(g.alive()))
+        if g.g.wave == 5:
+            break
+    assert most[1] == 2 and all(1 < most[w] <= 2 + w // 2 for w in (2, 3, 4))
+    g.quiet()
+    g.g.wave, g.g.left, g.g.spawn = 1, 3, 1
+    g.ember(0, 100, 60, vy=0), g.ember(1, 200, 60, vy=0)
+    for _ in range(300):
+        g.step()
+    assert len(g.alive()) == 2 and g.g.left == 3  # held, however long
+    g.g.em[0].alive = 0
+    for k in range(40):
+        assert len(g.alive()) == 1, k
+        g.step()
+    assert len(g.alive()) == 2 and g.g.left == 2
+    g.close()
+
+
+def test_a_crack_holds_the_next_ember_90_steps(fw):
+    g = Game(fw)
+    g.play()
+    g.quiet()
+    g.g.wave, g.g.left, g.g.spawn, g.g.gap = 8, 5, 20, 100
+    g.ember(0, 187.5, 150, size=2, vy=0)
+    g.g.aim = -9000
+    g.step(pressed=E_CENTRE)
+    for k in range(30):
+        g.step()
+        if g.g.stop:
+            break
+    assert len(g.alive()) == 2 and g.g.spawn == 90  # the pieces alone for a second and a half
+    for _ in range(3 + 88):
+        g.step()
+    assert len(g.alive()) == 2
+    g.step()
+    assert len(g.alive()) == 3
+    g.close()
+
+
+def test_a_new_player_on_the_wheel_keeps_the_garden_through_the_first_minute(fw):
+    """The playtest's newcomer (embergarden_player.NEW: a slow, imprecise thumb that watches each spurt land) loses no
+    garden in the first minute of any of these games, sees three embers at once at most, and nothing cracks."""
+    g = Game(fw)
+    for seed in (1000, 1037, 1074, 1111, 1148, 1185):
+        r = embergarden_player.play(g, embergarden_player.NEW, seed, 60)
+        assert r['over'] is None and max(r['alive']) <= 3 and r['splits'] == 0 and r['beds'] <= 3, (seed, r)
     g.close()
 
 
@@ -476,7 +558,7 @@ def test_the_light_turns_a_strip_of_8_rows_a_step_the_palette_a_32nd_further_eac
         if k == 40:
             assert g.g.k == 2
     assert g.g.k == 32 and g.g.strip == 0
-    assert seen[-1] == []  # done: nothing more to paint
+    assert all(r[2] < 375 for r in seen[-1])  # done: no more strips, only the sky's own turn
     y = 100
     i = SCENE[y * 375 + 50]
     assert g.g.pal[(y // BAND) * 256 + i] & 0xffffff == colour(DAY, y, i)
@@ -484,22 +566,118 @@ def test_the_light_turns_a_strip_of_8_rows_a_step_the_palette_a_32nd_further_eac
 
 
 def test_a_full_sky_leaves_the_extras_for_a_step_with_room(fw):
-    """Twelve embers with long tails falling mark more than the step's budget: the light's strip, a due puff and the banner's fade
-    wait, and go on once the sky is quiet."""
+    """Twelve embers falling fast and a wide box beside them (a landing's, two beds') mark more than the step's budget:
+    the light's strip, a due puff, the banner's fade and the sky's turn wait, and go on once the sky is quiet."""
     g = Game(fw)
     g.play()
     g.quiet()
     g.g.frm, g.g.light, g.g.k, g.g.strip = DAWN, DAY, 3, 5
     for k in range(12):
-        g.ember(k, 40 + 25 * k, 60 + 9 * k, size=2 if k < 6 else 1, amp=18, vy=2).smoke = 1
+        g.ember(k, 40 + 25 * k, 60 + 9 * k, size=2 if k < 6 else 1, amp=18, vy=2)
     g.g.pf[0].alive, g.g.pf[0].x, g.g.pf[0].y, g.g.pf[0].f, g.g.pf[0].t = 1, 100, 100, 1, 9
     g.g.banner = 50
+    g.g.tick = 16 * 15 + 8  # the turn of the crater's glow, which swells every turn
+    glow = g.g.sky[9][2]
+    g.fn['mark'](C.addressof(g.g), 0, 200, 375, 22)
     g.step()
-    assert (g.g.k, g.g.strip, g.g.pf[0].f, g.g.banner) == (3, 5, 1, 50)
+    assert (g.g.k, g.g.strip, g.g.pf[0].f, g.g.banner, g.g.sky[9][2]) == (3, 5, 1, 50, glow)
     for e in g.g.em:
         e.alive = 0
     g.step(), g.step()
     assert g.g.strip > 5 and g.g.pf[0].f == 2 and g.g.banner > 50
+    g.close()
+
+
+def test_an_ember_is_a_flame_of_four_frames_six_steps_each_and_holds_through_a_hit_stop(fw):
+    g = Game(fw)
+    g.play()
+    g.quiet()
+    a, b = g.ember(0, 100, 60, size=0), g.ember(5, 250, 60, size=2)
+    seen = []
+    for _ in range(48):
+        g.step()
+        seen.append((a.f, b.f))
+    assert [f for f, _ in seen[::6]] in ([k % 4 for k in range(n, n + 8)] for n in range(4))  # round and round
+    assert all(seen[k][0] == seen[k - k % 6][0] or seen[k][0] == seen[k - k % 6 + 5][0] for k in range(48))
+    assert all((y - x) % 4 == 1 for x, y in seen)  # each ember a frame apart by its number, never all as one
+    flames = [k for k in PARTS if k.startswith('FLAME')]
+    assert flames == [f'FLAME{size}_{f}' for size in range(3) for f in range(4)]
+    for size in range(3):  # each frame holds the ember's own disc, the one a spurt meets, round its anchor
+        for f in range(4):
+            at, w, h, ax, ay, kind, _ = part(f'FLAME{size}_{f}')
+            px = struct.unpack_from(f'<{w * h}I', ART, at)
+            r = int(R[size])
+            assert kind == 1 and all(px[(ay + dy) * w + ax + dx] >> 24 == 255 for dx, dy in ((0, 0), (-r + 1, 0), (r - 1, 0), (0, r - 1)))
+            assert ay > 2 * r + 4 and h - ay < r + 7  # the flame streams up from it
+    g.g.stop = 3
+    held = (a.f, b.f, a.y)
+    g.step(), g.step()
+    assert (a.f, b.f, a.y) == held
+    g.close()
+
+
+def test_the_sky_moves_one_thing_a_step_clouds_drift_the_glow_pulses_and_the_lava_runs(fw):
+    g = Game(fw)
+    sky = lambda: [tuple(v) for v in g.g.sky]
+    start = sky()
+    assert [v[:2] for v in start[0::4]] == [(40, 150), (118, 168), (300, 142), (350, 170)]  # the clouds, as the design's
+    seen, rects = [start], []
+    g.frame()  # the whole sheet the open asked for
+    for k in range(15 * 500):
+        before = sky()
+        marked = g.frame()
+        changed = [i for i, (x, y) in enumerate(zip(before, sky())) if x != y]
+        assert changed in ([], [g.g.tick % 15]) and (not marked or changed)  # the title card: nothing else moves
+        rects += marked
+        if g.g.tick % 15 == 0:
+            seen.append(sky())
+    cloud = lambda i: [s[i][0] for s in seen]
+    near, far = cloud(0), cloud(4)
+    assert near[1] - near[0] == 1 and near[100] - near[0] == 100 and far[100] - far[0] == 50  # a pixel a turn, or two turns
+    assert min(cloud(8)) == -44 and max(cloud(8)) == 375 + 44  # off one edge and in again at the other
+    glow = [s[9][2] for s in seen]
+    assert 5 <= min(glow) <= 20 and 180 <= max(glow) <= 195 and all(abs(a - b) <= 32 for a, b in zip(glow, glow[1:]))
+    lava = [[s[i][2] for i in (2, 6, 10)] for s in seen[1:]]
+    assert all(sum(a >= 16 for a in row) in (1, 2) and max(row) >= 120 for row in lava)  # one or two lit, never none
+    peak = [next(n for n, row in enumerate(lava) if row[i] >= 250) for i in range(3)]
+    assert (peak[1] - peak[0]) % 12 in (3, 4, 5) and (peak[2] - peak[1]) % 12 in (3, 4, 5)  # each a third of a round on
+    for i, (x, y) in zip((1, 5, 7, 13, 14), ((52, 28), (122, 30), (196, 30), (268, 28), (338, 28))):  # the billows circle their places
+        dx, dy = {s[i][0] - x for s in seen}, {s[i][1] - y for s in seen}
+        assert min(dx) == -4 and max(dx) in (3, 4) and min(dy) == -2 and max(dy) in (1, 2)
+    for i in (3, 11):  # the puffs climb the column and fade at both ends
+        assert min(s[i][1] for s in seen) < 50 and max(s[i][1] for s in seen) > 125 and max(s[i][2] for s in seen) > 140
+    assert all(w * h <= 2800 for _, _, w, h in rects)  # each turn's box is its own thing's, the glow's the widest
+    g.play()
+    g.quiet()
+    for k in range(4):
+        g.g.bed[k] = CHARRED if k < 3 else GROWING
+    g.ember(0, 40, 257, size=0, vy=1)
+    g.step()
+    assert g.g.mode == LOST
+    still = sky()
+    for _ in range(60):
+        g.step()
+    assert sky() == still  # under the result card the sky rests
+    g.close()
+
+
+def test_the_title_cards_sky_moves_behind_the_card_and_its_rects_hold_every_changed_pixel(fw):
+    g = Game(fw)
+    c, buf = canvas(fw)
+    g.g.sky[0][0], g.g.sky[8][0] = 100, 250  # two clouds at the card's edges (x 112 and 262)
+    g.frame()
+    g.paint((c, buf))
+    card = [buf[y * 375 + x] for y in range(70, 190) for x in range(113, 261)]
+    moved = 0
+    for k in range(15 * 30):
+        rects = g.frame()
+        moved += len(rects)
+        for r in rects:
+            g.paint((c, buf), r)
+        after = bytes(buf)
+        g.paint((c, buf))
+        assert bytes(buf) == after, k
+    assert moved > 100 and g.g.sky[0][0] == 130 and [buf[y * 375 + x] for y in range(70, 190) for x in range(113, 261)] == card
     g.close()
 
 
@@ -652,4 +830,12 @@ def test_a_dev_build_starts_play_at_the_wave_config_asks_in_its_light(fw_dev):
     g = Game(fw_dev)
     g.step(pressed=E_CENTRE)
     assert (g.g.mode, g.g.wave, g.g.light, g.g.frm, g.g.k) == (PLAY, 7, DUSK, DUSK, 32)
+    g.close()
+
+
+@pytest.mark.skipif(not os.environ.get('EMBER_PLAYTEST'), reason='EMBER_PLAYTEST=N plays N games a profile and prints the tables')
+def test_playtest_tables(fw):
+    g = Game(fw)
+    for line in embergarden_player.report(g, int(os.environ['EMBER_PLAYTEST']), int(os.environ.get('EMBER_SECONDS', 300))):
+        print(line)
     g.close()
