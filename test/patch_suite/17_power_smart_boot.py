@@ -235,6 +235,9 @@ class SmartMixin:
         self.link=0; self.status=None  # status: stock's connect status when not the link's (its own poll)
         self.nodes[self.wm]=dict(type='window_manager',name='',children=[],visible=1,enable=1)
         self.byte(syms['g_wififlag'],1); self.word(O['NET_TYPE'],2)  # the user's Wi-Fi on, the module up
+        # a --dev build's q2remote needs the network for REMOTE_BOOT_MS after demo's first poll (smart_wifi.c
+        # remote_poll): this Q2 started long before, so these idle counts are a release build's (test/fw has the hold)
+        if manifest['dev']: self.word(payload_syms['remote_boot_at'],1)
     def hook(self,u,address,size,unused):
         name=self.handlers.get(address,'')
         if not name.startswith('w:'): return super().hook(u,address,size,unused)

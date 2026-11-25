@@ -96,14 +96,16 @@ static int net_page_open(void) {
  * the network for REMOTE_HOLD_MS after its last request and for demo's first REMOTE_BOOT_MS
  * (offsets.inc says why). Each authenticated request renames a new REMOTE_USED into place (remote.c
  * mark_used); an inode unlike the last (ino) is a request, timed by demo's own clock (at), so the
- * two processes share none, and a stat a second opens nothing. start: demo's first poll; boot: its
- * hold runs. A demo started later takes a file left from before as a request. A log line as each
- * hold starts and as it ends. */
+ * two processes share none, and a stat a second opens nothing. boot: the hold after boot runs. A
+ * demo started later takes a file left from before as a request. A log line as each hold starts
+ * and as it ends. */
 #define REMOTE_USED "/tmp/q2remote.used"
 static struct {
-    unsigned start, at, ino;
+    unsigned at, ino;
     int boot;
 } rh __attribute__((section(".scratch")));
+/* demo's first poll, 0 before it: a global so test/patch.py can start its Q2 long after boot */
+unsigned remote_boot_at __attribute__((section(".scratch")));
 #define remote_say(what, ms)                                                                       \
     do {                                                                                           \
         char line_[96];                                                                            \
@@ -112,11 +114,11 @@ static struct {
     } while (0)
 static void remote_poll(unsigned now) {
     unsigned info[36] = { 0 };
-    if (!rh.start) {
-        rh.start = now | !now, rh.boot = 1;
+    if (!remote_boot_at) {
+        remote_boot_at = now | !now, rh.boot = 1;
         remote_say("q2remote: Wi-Fi needed for %u min after boot", REMOTE_BOOT_MS);
     }
-    if (rh.boot && now - rh.start >= REMOTE_BOOT_MS) {
+    if (rh.boot && now - remote_boot_at >= REMOTE_BOOT_MS) {
         rh.boot = 0;
         remote_say("q2remote: the hold after boot ended, %u min on", REMOTE_BOOT_MS);
     }
