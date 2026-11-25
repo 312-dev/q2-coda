@@ -403,6 +403,7 @@ void now_cover_forget(void); /* coverflow.c: the player's cover files, from AWTK
  * freed by addon_pending_free; 0 none), what they were taken from, and one of them tapped */
 void **addon_pending(unsigned max, unsigned *n);
 void addon_pending_free(void **rows, unsigned n);
+void **addon_pending_one(const char *path); /* a pending row's song, its own record */
 unsigned addon_pending_sig(void);
 int addon_pending_play(const char *path);
 
@@ -1203,6 +1204,7 @@ int qm_centre_hold(void *top);
 int qm_touch_hold(void *top, int x, int y);
 /* search_strip.c: a song result held, by a key (the selected one) or a finger at (x, y) */
 int search_strip_song_hold(void *top);
+int search_strip_on_row(void *top); /* the selection on a result */
 int search_strip_touch_hold(void *top, int x, int y);
 /* upnext.c: the same over Up Next's queued song (centre: Playing Next's rows keep their lift) */
 int un_menu_hold(void *top, int centre);
@@ -1211,6 +1213,8 @@ void cm_keydown(unsigned key);
 int cm_key_release(unsigned key);
 void cm_touch(unsigned type, int x, int y);
 int qm_song_hold(void *page, void *list, unsigned at, const char *extra, void (*pick)(void));
+int qm_far_hold(void *page, void *list, void (*play)(void));
+int qm_row_under(void *top); /* a row under the selection on top, menu or not (hold_menu.c) */
 int otg_count(void);
 void pv_paint(void *w, void *canvas);
 int playlists_transfer(void *ctx, void *event); /* Settings: Import (ctx 0) or Export Playlists */
