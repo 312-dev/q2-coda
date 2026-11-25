@@ -234,7 +234,8 @@ static unsigned fold_hash(const char *s) {
 
 struct scan {
     struct pick *p;
-    char (*paths)[CT_PATH]; /* the first 2 * CT_ANS candidates' files, for the answers' checks */
+    char (*paths)[CT_PATH]; /* every candidate's file, for the answers' checks */
+    int full;               /* the query was stopped with CT_CAND kept: no failure */
 };
 
 /* A song of the query: kept unless a server's row or, for Deep cuts, played twice or more. 1
@@ -252,8 +253,8 @@ static int cand_row(void *ctx, int n, char **v, char **c) {
     s->year = v[5] ? atoi(v[5]) : 0, s->sec = 0;
     copy_text(s->title, v[2], sizeof s->title);
     copy_text(s->artist, v[3] ? v[3] : "", sizeof s->artist);
-    if (p->n < 2 * CT_ANS) copy_text(sc->paths[p->n], v[1], CT_PATH);
-    return ++p->n >= CT_CAND;
+    copy_text(sc->paths[p->n], v[1], CT_PATH);
+    return sc->full = ++p->n >= CT_CAND;
 }
 
 /* path's length in seconds by TagLib, as durations.c measures it; 0 unknown */
@@ -275,7 +276,7 @@ static const char *visible(const struct pick *p, int i) {
 static void *pick_worker(void *arg) {
     struct pick *p = arg;
     thread_lower(0);
-    struct scan sc = { p, calloc(2 * CT_ANS, CT_PATH) };
+    struct scan sc = { p, calloc(CT_CAND, CT_PATH), 0 };
     char sql[640];
     tk_snprintf(sql, sizeof sql,
                 "select id,fileurl,name,ifnull(songer,''),ifnull(style,''),ifnull(year,0) from "
@@ -284,13 +285,14 @@ static void *pick_worker(void *arg) {
                 MUSIC_WHERE, p->mode == M_ARTISTS ? " and ifnull(songer,'')<>''" : "");
     unsigned seen[CT_CAND];
     int distinct = 0;
-    if (!sc.paths || !era_sql(sql, cand_row, &sc)) p->why = WHY_LIBRARY, p->n = 0;
+    /* a query cand_row stopped once it had enough ends in SQLite's abort, which era_sql reports */
+    if (!sc.paths || (!era_sql(sql, cand_row, &sc) && !sc.full)) p->why = WHY_LIBRARY, p->n = 0;
     for (int i = 0; i < p->n; ++i) { /* the answers' rows must differ, four at least */
         unsigned h = fold_hash(visible(p, i)), k = 0;
         while (k < (unsigned)distinct && seen[k] != h) ++k;
         if (k == (unsigned)distinct) seen[distinct++] = h;
     }
-    for (int i = 0; sc.paths && i < p->n && i < 2 * CT_ANS && p->answers < CT_ANS; ++i) {
+    for (int i = 0; sc.paths && i < p->n && p->answers < CT_ANS; ++i) {
         int a = p->answers, sec = access(sc.paths[i], 4) ? 0 : seconds(sc.paths[i]); /* R_OK */
         if (sec < CT_MIN_SEC) continue;
         struct song s = p->song[i];

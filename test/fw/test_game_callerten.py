@@ -308,6 +308,22 @@ def test_a_library_too_small_for_a_contest_says_so_honestly(fw, rig, n, why):
         assert r.g.screen == ROUND and r.g.rounds == 10 and len(r.clips()) == 1
 
 
+@pytest.mark.parametrize('local, short, server, screen, callers', [
+    (12, 0, 0, ROUND, 10), (13, 0, 0, ROUND, 10), (40, 0, 0, ROUND, 10), (9000, 0, 0, ROUND, 10),
+    (13, 12, 0, ROUND, 1),        # the pool card: twelve 25 s tones and one song a clip can come from
+    (40, 30, 0, ROUND, 10),       # ten long enough among forty, wherever the random order puts them
+    (12, 0, 9000, ROUND, 10),     # a server's library, a dozen songs on the card
+    (11, 0, 9000, NOSIGNAL, 0),   # one fewer on the card: no contest
+])
+def test_the_callers_are_the_card_songs_a_clip_can_come_from_up_to_ten(fw, tmp_path, local, short, server, screen,
+                                                                         callers):
+    songs = [(*s[:5], 25 if i < short else 200) for i, s in enumerate(music(local))]
+    songs += [(f'/mnt/mmc/.subsonic/cat/{i}.mp3', f'Server {i}', f'Cloud {i % 50}', 'Rock', 2001, 300) for i in range(server)]
+    r = Rig(fw, tmp_path, songs=songs)
+    r.start()
+    assert r.g.screen == screen and (r.g.rounds if screen == ROUND else 0) == callers
+
+
 def test_spoken_audio_and_a_servers_rows_never_count_nor_play(fw, rig):
     spoken = [(f'/mnt/mmc/{d}/x{i}.mp3', f'Talk {d}{i}', 'Host', 'Speech', 2000, 900)
               for d in ('Audiobooks', 'audiobooks', 'Podcasts') for i in range(6)]
