@@ -3209,7 +3209,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                STOCK_CA: ('etc/hosts', mozilla_ca()),
                                BOOT: (HELPER_LIKE, compile_helper(out, cat, 'boot', 'q2boot', HELPER_LIBS[:1])),
                                SPLASH: (HELPER_LIKE, compile_helper(out, cat, 'splash', 'q2splash', HELPER_LIBS[:1])),
-                               GUARD: (HELPER_LIKE, compile_helper(out, cat, ['q2guard', 'q2guard_core', 'q2guard_pmic', 'q2guard_card', 'q2bt', 'q2bt_core', 'q2log_core', 'q2dbus'], 'q2guard', HELPER_LIBS[:1])),
+                               GUARD: (HELPER_LIKE, compile_helper(out, cat, ['q2guard', 'q2guard_core', 'q2guard_pmic', 'q2guard_card', 'q2bt', 'q2bt_core', 'q2log_core', 'q2dbus', 'q2wifi', 'q2wifi_core'], 'q2guard', HELPER_LIBS[:1])),
                                **({path: (xx+'list_tidal.png', data) for path, data in anim.items()} if anim else {}),
                                CODA_RC: (HELPER_LIKE, compile_helper(out, cat, CODA_RC_SOURCES, 'coda-rc', CODA_RC_LIBS)),
                                BT_CODEC: (HELPER_LIKE, compile_helper(out, cat, 'q2bt_codec', 'q2bt-codec', BT_CODEC_LIBS)),

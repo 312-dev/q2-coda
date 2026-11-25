@@ -1121,6 +1121,10 @@ int bt_flush_due(void) {
     return due;
 }
 
+static int (*also_fd)(void);
+static void (*also_drain)(void);
+void bt_also_wait(int (*fd)(void), void (*drain)(void)) { also_fd = fd, also_drain = drain; }
+
 void bt_sleep(unsigned ms) {
     unsigned end_at = now_ms() + ms;
     for (;;) {
@@ -1132,14 +1136,16 @@ void bt_sleep(unsigned ms) {
             int due = (int)(bt.at + BT_TICK_MS - now);
             step = due <= 0 ? 0 : due < left ? due : left;
         }
-        struct pollfd p[2];
-        int np = 0;
+        struct pollfd p[3];
+        int np = 0, af = step > 0 && also_fd ? also_fd() : -1;
         if (step > 0 && mgmt_ok(now)) p[np++] = (struct pollfd){ bt.mgmt, POLLIN, 0 };
         if (step > 0 && dbus_up(now)) p[np++] = (struct pollfd){ dbus.fd, POLLIN, 0 };
-        if (np) { /* the wait, or until a device or transport event: logged at once */
+        if (af >= 0) p[np++] = (struct pollfd){ af, POLLIN, 0 };
+        if (np) { /* the wait, or until a device, transport or Wi-Fi event: logged at once */
             int got = poll(p, (unsigned long)np, step); /* a signal ends it early (EINTR) */
             mgmt_drain();
             dbus_drain();
+            if (af >= 0) also_drain();
             /* woken early by an event: the rest of the wait, so the tick below keeps its time */
             if (got > 0 && (int)(now_ms() - now) < step) continue;
         } else if (step > 0) {
