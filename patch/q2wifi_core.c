@@ -5,7 +5,10 @@
 
 /* ---- privacy ---- */
 static int hexval(int c) {
-    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+    return c >= '0' && c <= '9'   ? c - '0'
+           : c >= 'a' && c <= 'f' ? c - 'a' + 10
+           : c >= 'A' && c <= 'F' ? c - 'A' + 10
+                                  : -1;
 }
 static int is_mac(const char *s) { /* xx:xx:xx:xx:xx:xx */
     for (int i = 0; i < 17; ++i)
@@ -14,7 +17,8 @@ static int is_mac(const char *s) { /* xx:xx:xx:xx:xx:xx */
 }
 unsigned wifi_salt(const char *boot_id) {
     unsigned h = 2166136261u;
-    for (const char *s = boot_id; s && *s && *s != '\n'; ++s) h = (h ^ (unsigned char)*s) * 16777619u;
+    for (const char *s = boot_id; s && *s && *s != '\n'; ++s)
+        h = (h ^ (unsigned char)*s) * 16777619u;
     return h;
 }
 void wifi_hash(unsigned salt, const char *mac, char *out) {
@@ -28,7 +32,8 @@ void wifi_hash(unsigned salt, const char *mac, char *out) {
     for (int i = 0; i < 6; ++i) out[1 + i] = hex[h >> (20 - 4 * i) & 15];
     out[7] = 0;
 }
-static int has_ssid(const char *s, const char *end) { /* "ssid", any case, in [s, end), but "bssid" (hashed) */
+static int has_ssid(const char *s,
+                    const char *end) { /* "ssid", any case, in [s, end), but "bssid" (hashed) */
     for (const char *p = s; p + 4 <= end; ++p)
         if ((p[0] | 32) == 's' && (p[1] | 32) == 's' && (p[2] | 32) == 'i' && (p[3] | 32) == 'd' &&
             (p == s || (p[-1] | 32) != 'b'))
@@ -79,8 +84,8 @@ int wifi_state(const char *status, char *state, int n) {
     static const struct {
         const char *name;
         int ws;
-    } names[] = { { "COMPLETED", WS_COMPLETED },   { "DISCONNECTED", WS_DISCONNECTED },
-                  { "SCANNING", WS_SCANNING },     { "INACTIVE", WS_INACTIVE },
+    } names[] = { { "COMPLETED", WS_COMPLETED },         { "DISCONNECTED", WS_DISCONNECTED },
+                  { "SCANNING", WS_SCANNING },           { "INACTIVE", WS_INACTIVE },
                   { "INTERFACE_DISABLED", WS_DISABLED }, { "DISABLED", WS_DISABLED } };
     char v[32];
     if (!value(status ? status : "", "wpa_state", v, sizeof v)) {
@@ -90,12 +95,16 @@ int wifi_state(const char *status, char *state, int n) {
     snprintf(state, n, "%s", v);
     for (unsigned i = 0; i < sizeof names / sizeof names[0]; ++i)
         if (!strcmp(v, names[i].name)) return names[i].ws;
-    return WS_JOINING; /* AUTHENTICATING, ASSOCIATING, ASSOCIATED, 4WAY_HANDSHAKE, GROUP_HANDSHAKE */
+    return WS_JOINING; /* AUTHENTICATING, ASSOCIATING, ASSOCIATED, 4WAY_HANDSHAKE, GROUP_HANDSHAKE
+                        */
 }
 int wifi_status_line(const char *status, unsigned salt, char *out, int size) {
-    /* wpa_state first; ssid=, address=, uuid=, p2p_device_address= and ip_address= are never copied */
-    static const char *const keys[] = { "wpa_state", "freq", "mode", "key_mgmt", "pairwise_cipher", "group_cipher",
-                                        "wifi_generation", "id" };
+    /* wpa_state first; ssid=, address=, uuid=, p2p_device_address= and ip_address= are never copied
+     */
+    static const char *const keys[] = {
+        "wpa_state",       "freq", "mode", "key_mgmt", "pairwise_cipher", "group_cipher",
+        "wifi_generation", "id"
+    };
     char v[64], h[8];
     int n = 0;
     out[0] = 0;
@@ -104,7 +113,9 @@ int wifi_status_line(const char *status, unsigned salt, char *out, int size) {
             n += snprintf(out + n, size - n, "%s%s=%s", n ? " " : "", i ? keys[i] : "state", v);
     if (n < size && value(status, "bssid", v, sizeof v) && strlen(v) >= 17 && is_mac(v))
         wifi_hash(salt, v, h), n += snprintf(out + n, size - n, "%sap=%s", n ? " " : "", h);
-    if (n < size) n += snprintf(out + n, size - n, "%sip=%d", n ? " " : "", value(status, "ip_address", v, sizeof v));
+    if (n < size)
+        n += snprintf(out + n, size - n, "%sip=%d", n ? " " : "",
+                      value(status, "ip_address", v, sizeof v));
     return n < size ? n : size - 1;
 }
 /* the field'th tab-separated field of a line into v (n bytes), its length or -1 */
@@ -124,7 +135,8 @@ static const char *next_line(const char *s) {
     s = strchr(s, '\n');
     return s ? s + 1 : 0;
 }
-/* a saved network's SSID (LIST_NETWORKS: id, ssid, bssid, flags) matches ssid, and it is not [DISABLED] */
+/* a saved network's SSID (LIST_NETWORKS: id, ssid, bssid, flags) matches ssid, and it is not
+ * [DISABLED] */
 static int saved(const char *networks, const char *ssid) {
     char v[72], f[64];
     if (!networks || !ssid[0]) return 0;
@@ -171,7 +183,8 @@ static int event_field(const char *msg, const char *key, char *v, int n) {
     return 1;
 }
 /* out: "WORD" and each of keys present in msg, " key=value", an address field hashed */
-static int event_line(const char *msg, unsigned salt, const char *word, const char *const *keys, char *out, int size) {
+static int event_line(const char *msg, unsigned salt, const char *word, const char *const *keys,
+                      char *out, int size) {
     char v[48], h[8];
     int n = snprintf(out, size, "%s", word);
     for (; *keys && n < size; ++keys)
@@ -213,10 +226,12 @@ int wifi_event(const char *msg, unsigned salt, char *out, int size, int *reason,
         *local = event_field(msg, "locally_generated", v, sizeof v) && v[0] == '1';
         return WE_DISCONNECTED;
     }
-    if (!strncmp(msg, "CTRL-EVENT-TERMINATING", 22)) return snprintf(out, size, "WPA terminating"), WE_TERMINATING;
+    if (!strncmp(msg, "CTRL-EVENT-TERMINATING", 22))
+        return snprintf(out, size, "WPA terminating"), WE_TERMINATING;
     if (!strncmp(msg, "CTRL-EVENT-SCAN-STARTED", 23)) return WE_SCAN_STARTED;
     if (!strncmp(msg, "CTRL-EVENT-SCAN-RESULTS", 23)) return WE_SCAN_RESULTS;
-    if (!strncmp(msg, "CTRL-EVENT-SCAN-FAILED", 22)) return event_line(msg, salt, "SCAN-FAILED", ret, out, size), WE_SCAN_FAILED;
+    if (!strncmp(msg, "CTRL-EVENT-SCAN-FAILED", 22))
+        return event_line(msg, salt, "SCAN-FAILED", ret, out, size), WE_SCAN_FAILED;
     static const struct {
         const char *ev, *word;
         const char *const *keys;
@@ -235,8 +250,11 @@ int wifi_event(const char *msg, unsigned salt, char *out, int size, int *reason,
 }
 
 /* ---- the deaf radio ---- */
-/* not joined though there is something to join: a failed try (WS_JOINING, then DISCONNECTED again) counts too */
-static int unjoined(int ws) { return ws == WS_DISCONNECTED || ws == WS_SCANNING || ws == WS_JOINING; }
+/* not joined though there is something to join: a failed try (WS_JOINING, then DISCONNECTED again)
+ * counts too */
+static int unjoined(int ws) {
+    return ws == WS_DISCONNECTED || ws == WS_SCANNING || ws == WS_JOINING;
+}
 static int ended(struct wifi_watch *w, unsigned now, int why) {
     int was = w->deaf;
     unsigned at = w->deaf_at;
@@ -267,10 +285,12 @@ int wifi_step(struct wifi_watch *w, const struct wifi_obs *o) {
         }
     } else if (o->nets > 0) {
         w->empty_since = 0;
-        if (w->deaf == WIFI_DEAF_EMPTY) return ended(w, now, WIFI_END_SCAN); /* a scan found networks again */
+        if (w->deaf == WIFI_DEAF_EMPTY)
+            return ended(w, now, WIFI_END_SCAN); /* a scan found networks again */
         if (unjoined(o->state) && o->known > 0) {
             if (!w->nojoin_since) w->nojoin_since = now | !now;
-            if (!w->deaf && (int)(now - w->nojoin_since) >= WIFI_NOJOIN_MS) return started(w, now, WIFI_DEAF_NOJOIN);
+            if (!w->deaf && (int)(now - w->nojoin_since) >= WIFI_NOJOIN_MS)
+                return started(w, now, WIFI_DEAF_NOJOIN);
         } else if (!w->deaf) {
             w->nojoin_since = 0;
         }
@@ -284,9 +304,11 @@ int wifi_step(struct wifi_watch *w, const struct wifi_obs *o) {
 
 /* ---- the boot's evidence ---- */
 int wifi_kmsg_keep(const char *msg) {
-    static const char *const fail[] = { "allocation failure", "vmalloc", "Call Trace", "Oops", "BUG:", "WARNING:",
-                                        "Out of memory" };
-    static const char *const plain[] = { "8733", "rtw_", "rtl", "RTW", "rtk_", "wlan", "mmc1", "sdio", "SDIO", "insmod" };
+    static const char *const fail[] = {
+        "allocation failure", "vmalloc", "Call Trace", "Oops", "BUG:", "WARNING:", "Out of memory"
+    };
+    static const char *const plain[] = { "8733", "rtw_", "rtl",  "RTW",  "rtk_",
+                                         "wlan", "mmc1", "sdio", "SDIO", "insmod" };
     for (unsigned i = 0; i < sizeof fail / sizeof fail[0]; ++i)
         if (strstr(msg, fail[i])) return 2;
     for (unsigned i = 0; i < sizeof plain / sizeof plain[0]; ++i)
@@ -315,8 +337,10 @@ void wifi_vmalloc_sum(const char *text, struct wifi_vm *v) {
         int n = e ? (int)(e - l) : (int)strlen(l);
         char row[256];
         snprintf(row, sizeof row, "%.*s", n < 255 ? n : 255, l);
-        if (!v->areas) v->lo = lo;
-        else if (lo > last && lo - last > v->gap) v->gap = lo - last;
+        if (!v->areas)
+            v->lo = lo;
+        else if (lo > last && lo - last > v->gap)
+            v->gap = lo - last;
         if (hi > last) last = hi;
         ++v->areas, v->used += size;
         if (strstr(row, " vmalloc")) v->vmalloc += size;
@@ -325,11 +349,15 @@ void wifi_vmalloc_sum(const char *text, struct wifi_vm *v) {
     v->hi = last;
 }
 int wifi_vm_text(const struct wifi_vm *v, char *out, int size) {
-    return snprintf(out, size, "vmalloc areas=%d used=%lukB vmalloc=%lukB ioremap=%lukB largest_gap=%lukB from=0x%lx to=0x%lx",
-                    v->areas, v->used >> 10, v->vmalloc >> 10, v->ioremap >> 10, v->gap >> 10, v->lo, v->hi);
+    return snprintf(out, size,
+                    "vmalloc areas=%d used=%lukB vmalloc=%lukB ioremap=%lukB largest_gap=%lukB "
+                    "from=0x%lx to=0x%lx",
+                    v->areas, v->used >> 10, v->vmalloc >> 10, v->ioremap >> 10, v->gap >> 10,
+                    v->lo, v->hi);
 }
 int wifi_mem_brief(const char *meminfo, char *out, int size) {
-    static const char *const keys[] = { "MemFree:", "MemAvailable:", "Cached:", "Slab:", "VmallocUsed:" };
+    static const char *const keys[] = { "MemFree:", "MemAvailable:", "Cached:", "Slab:",
+                                        "VmallocUsed:" };
     int n = 0;
     out[0] = 0;
     for (unsigned i = 0; i < sizeof keys / sizeof keys[0] && n < size; ++i) {
@@ -357,8 +385,10 @@ int wifi_lines_with(const char *text, const char *words, char *out, int size) {
         int start = n;
         for (const char *p = row; *p && n < size - 1; ++p) {
             int blank = *p == ' ' || *p == '\t';
-            if (!blank) out[n++] = *p;
-            else if (n > start && out[n - 1] != ' ') out[n++] = ' ';
+            if (!blank)
+                out[n++] = *p;
+            else if (n > start && out[n - 1] != ' ')
+                out[n++] = ' ';
         }
         while (n > start && out[n - 1] == ' ') --n;
         out[n] = 0;
@@ -377,4 +407,6 @@ int wifi_line(char *out, int size, long wall, unsigned up_s, const char *what) {
     out[size - 2] = '\n', out[size - 1] = 0; /* cut, still one line */
     return size - 1;
 }
-int wifi_flush(card_log *l, const char *dir) { return log_flush(l, dir, "q2-wifi", WIFI_FILE_MAX, WIFI_FILES); }
+int wifi_flush(card_log *l, const char *dir) {
+    return log_flush(l, dir, "q2-wifi", WIFI_FILE_MAX, WIFI_FILES);
+}

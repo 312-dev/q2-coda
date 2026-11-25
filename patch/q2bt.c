@@ -29,7 +29,8 @@
  * on the kernel's management channel, whose device events (connects and who began them, drops,
  * failures, pairings, Forgets, discoveries and the devices each found) go to the unified log as
  * they come (docs/internals.md#bluetooth-devices), and on the system bus's socket, whose A2DP
- * transport signals (q2dbus.c) do too (docs/internals.md#bluetooth-event-log). */
+ * transport signals (q2dbus.c) do too (docs/internals.md#bluetooth-event-log), and on one socket
+ * q2guard.c adds (bt_also_wait: the Wi-Fi recorder's wpa_supplicant monitor, q2wifi.c). */
 #include "q2bt.h"
 #include "q2dbus.h"
 #include "q2log.h"

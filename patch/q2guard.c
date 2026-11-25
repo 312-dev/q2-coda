@@ -21,6 +21,9 @@
  * Every Bluetooth line of it is copied into the Bluetooth event log, q2-btev, kept longer
  * (docs/internals.md#bluetooth-event-log): flushed with the others, and at least every
  * BTEV_FLUSH_MS while it holds a line.
+ * Each tick also runs the Wi-Fi fault recorder (q2wifi.c, docs/internals.md#wi-fi-fault-recorder): wlan0's
+ * check at boot, a deaf radio's snapshots and each association, into a q2-wifi log; bt_sleep waits on its
+ * wpa_supplicant monitor too (bt_also_wait).
  * It writes nothing to /mnt/data. No MIPS sysroot: glibc 2.28's declarations, as boot.c. */
 #include "q2bt.h"
 #include "q2log.h"

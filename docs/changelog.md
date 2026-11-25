@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Logs: a new Wi-Fi log on the card records what Wi-Fi was doing when it goes wrong: whether Wi-Fi's driver started at power-on (and if not, what the system said about it), a detailed reading every 5 minutes while Wi-Fi sees no networks or does not join your saved one, and every time it joins or drops with the reason. It only records; it never restarts or changes Wi-Fi. Network names are never written.
   - Library: picking a song in Songs, an album, an artist or Search plays that song when another one has the same title, such as two artists' songs of one name on your server, or two files of one name in different folders, where it always played the first of them.
   - Status row: the clock is at the top left on every page and the row no longer names the page, as on an iPhone; the icons stay at the right. A headphones icon shows while wired headphones play (the 3.5 or 4.4 mm jack, or USB-C headphones and USB DACs), where Bluetooth's icon shows while Bluetooth plays, and the Bluetooth icon is now as tall as the battery so the icons line up. The volume pill takes the clock's place at the left.
   - USB-C headphones: the buttons on USB-C earbuds and headsets, and on wired earbuds through a USB-C to 3.5 mm adapter with its own DAC, now control the Q2: volume up and down (hold to keep going), play/pause, and a double or triple press of the middle button to skip forward or back. They work from any page and with the screen off.
