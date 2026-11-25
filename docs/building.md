@@ -35,16 +35,16 @@ The build replaces the stock equalizer page with a 30-band PEQ editor (bands, sh
 
 ### Bundled apps
 
-The build carries the Subsonic card app in the root filesystem ([internals](internals.md#bundled-apps)), from its release zip, pinned in `BUNDLED_APPS` (`tools/build.py`) by version, zip name, size and SHA-256. It reads the zip from `--apps DIR`, `~/.cache/q2-apps` by default, and stops when the file is missing or is not the pinned one. The zip's name carries the q2-subsonic commit it was built from (`q2-subsonic-v1.0-141cf4d.zip`); make it from q2-subsonic's source at that commit, with a clean tree:
+The build carries the Subsonic card app in the root filesystem ([internals](internals.md#bundled-apps)), from its release zip, pinned in `BUNDLED_APPS` (`tools/build.py`) by version, zip name, size and SHA-256. It reads the zip from `--apps DIR`, `~/.cache/q2-apps` by default, and stops when the file is missing or is not the pinned one. The zip's name carries the q2-subsonic commit it was built from (`q2-subsonic-v1.0-9065736.zip`); make it from q2-subsonic's source at that commit, with a clean tree:
 
 ```sh
 contrib/shanlingq2/build.sh /tmp/q2-subsonic                 # in q2-subsonic, at the pinned commit
-mkdir -p ~/.cache/q2-apps && mv /tmp/q2-subsonic/q2-subsonic-v1.0-141cf4d.zip ~/.cache/q2-apps/
+mkdir -p ~/.cache/q2-apps && mv /tmp/q2-subsonic/q2-subsonic-v1.0-9065736.zip ~/.cache/q2-apps/
 ```
 
 The build refuses a zip named `-dirty` (built from a tree with uncommitted changes), and, when the zip carries a `version` file (q2-subsonic's `build.sh` stamps one, `q2-v1.0+<commit>`), one whose commit is not its name's. Beside the app in the image it writes `/usr/lib/q2apps/<id>/bundle`, which says which build the Q2 carries: the zip, its SHA-256, the program's SHA-256 and the zip's stamp (`-` when it has none). On a Q2, `cat /usr/lib/q2apps/subsonic/bundle` and `sha256sum /usr/lib/q2apps/subsonic/q2-subsonic` answer which commit runs. The build's `manifest.json` (`bundled_apps`) and a release's `release.json` and notes record the same, and `test/build.py --build` checks that the image's program is the pinned zip's, byte for byte.
 
-Subsonic's entry is `builtin`: the firmware's copy is the only one that runs and the App Store does not list it, so a new Subsonic reaches Q2s only in a firmware update. A new version is a new pin, chosen by whoever integrates the app change into the firmware: build its zip at a commit that is on q2-subsonic's remote, then set its version, name, size and SHA-256 in `BUNDLED_APPS`, and release the firmware ([releasing](releasing.md#the-app-list)). The source hash covers the pin, so a build made with the old zip counts as stale. With the current pin (3,708,782 bytes, commit 141cf4d on `feat/row-hold-menu`) a `--dev` build of p32 leaves about 24 MB of the 75,497,472 bytes `rootfs_fits` allows.
+Subsonic's entry is `builtin`: the firmware's copy is the only one that runs and the App Store does not list it, so a new Subsonic reaches Q2s only in a firmware update. A new version is a new pin, chosen by whoever integrates the app change into the firmware: build its zip at a commit that is on q2-subsonic's remote, then set its version, name, size and SHA-256 in `BUNDLED_APPS`, and release the firmware ([releasing](releasing.md#the-app-list)). The source hash covers the pin, so a build made with the old zip counts as stale. With the current pin (3,738,531 bytes, commit 9065736 on `feat/bt-pace`, which paces its background downloads while Bluetooth shares 2.4 GHz: [internals](internals.md#bluetooth-coexistence-pacing)) a `--dev` build's root filesystem is 55,472,128 bytes (2026-11-25), about 20 MB under the 75,497,472 bytes `rootfs_fits` allows.
 
 ### What the rootfs drops
 
