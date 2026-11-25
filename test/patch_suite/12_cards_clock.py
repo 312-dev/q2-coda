@@ -614,7 +614,7 @@ m.word(O['MCL_FD'],-1)  # no player socket: the game's messages to it go nowhere
 sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
 eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
 O_ENG_RECT,O_ENG_STATE=80,232  # struct eng (patch/engine.c), on MIPS
-CT_FIELDS=('k h screen phase mode sel t at reduced round rounds wrongs rights streak score shown pts best_new slot row:4 '
+CT_FIELDS=('k h screen phase mode sel t at reduced round rounds wrongs rights streak score shown pts best_new slot stream_dead row:4 '
            'right pick song missed:10 nmissed top clip_sec clip_on clip_held heard ask replay needle4 needle_from needle_t '
            'turn_t lift lift_dir ring ring_from lamps dim dim_t cut end_t swell fit_px:4 fit_n:4 full_w:4 maxw:4 scroll:4 '
            'scroll_t').split()  # struct ct, a word each on MIPS
@@ -655,11 +655,11 @@ for k in range(9):
     rects,cost=eframe(); worst=max(worst,eplay(rects,cost)); step_worst=max(step_worst,cost)
 assert cr('sel')==1 and cr('needle4')==702+237
 # A round, as the worker's rows and a heard clip leave it: eight songs, the third the answer.
-PK=m.big_alloc(23376); m.u.mem_write(PK,bytes(23376))
+PK=m.big_alloc(29936); m.u.mem_write(PK,bytes(29936))  # struct pick, the worker's rows
 for i,(t,a) in enumerate((('Harbor Lights','The Lamplighters'),('Paper Lanterns','June Abbott'),('Slow Train Home','Northern Line'),
                           ('Midnight Orchard','Marlowe & Finch'),('Copper Kettle','June Abbott'),('Low Tide','Northern Line'),
                           ('Sparrow Hill','The Lamplighters'),('Old Mill Road','Marlowe & Finch'))):
-    song=PK+2076+228*i; m.word(song+12,200); m.u.mem_write(song+20,t.encode()); m.u.mem_write(song+148,a.encode())
+    song=PK+2080+228*i; m.word(song+12,200); m.u.mem_write(song+20,t.encode()); m.u.mem_write(song+148,a.encode())
 for o,v in ((0,1),(4,1),(16,8),(20,8)): m.word(PK+o,v)  # refs, done, n, answers
 m.word(K+4,PK)
 for f,v in (('screen',4),('phase',1),('heard',1),('at',0),('lamps',10),('dim',-1),('turn_t',-1),('sel',1),('rounds',10),
