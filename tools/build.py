@@ -342,8 +342,8 @@ GAMES_ART = ('solitaire.bin',)
 # updates are firmware updates. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
 BUNDLED_APPS = {
-    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-2596032.zip', 3716968,
-                 '4cc5489d8bcb3410a2de9e320d9d20b8022253102452d19a21e27cbafb1604b4', True),
+    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-141cf4d.zip', 3733570,
+                 'c8e71975289bcf37d4d2a32b51847b34dfba8c717f56bf32f211d947328f5bc1', True),
 }
 APPS_DIR = pathlib.Path.home()/'.cache/q2-apps'
 S90PLAY = 'etc/init.d/S90play'
