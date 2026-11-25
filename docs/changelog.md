@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Security: the TLS library behind downloads, the App Store, radio, scrobbling and lyrics (mbedTLS) is updated to 3.6.8, which closes a flaw that let a man in the middle on the network finish a TLS 1.2 connection without the secrets it should depend on, and several parsing and memory-leak flaws.
   - Bluetooth: clicks in your headphones while nothing plays are heard steadily as you browse: the Q2 keeps the headphones' audio running for 15 seconds after the last click instead of starting it again for each burst, and a song you pick starts in it straight away. After your headphones pause the Q2 (or move to your phone), clicks sound only on the Q2's own speaker (with the Clicker on Both) until you press Play.
   - Swap L/R now swaps the channels before the EQ, so the EQ's Balance and an AutoEQ file's left and right lines act on the ear you hear them in, as the Balance in Playback settings always did. If you have Swap L/R on with an EQ balance or a per-channel AutoEQ preset, that emphasis moves to the other ear: it now lands on the side the preset meant.
   - USB-C headphones and USB DACs get power 3 to 4 seconds after you plug them in, where it took 6 to 7; plugged in right after unplugging a cable they still wait about 8 seconds, as before.
