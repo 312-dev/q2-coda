@@ -372,8 +372,49 @@ static struct {
 
 extern int stock_fwupdate_trampoline(void *win, void *ctx);
 
+/* Pacing (docs/internals.md#bluetooth-coexistence-pacing): q2guard's /tmp/q2-bt-coex
+ * (patch/q2bt.h's BT_PACE_FILE) says "paced=1 rate=BYTES" while A2DP streams with Wi-Fi joined
+ * on 2.4 GHz, where the Q2's own downloads take the airtime the headset's link needs (the stall
+ * cluster of 2026-11-24 was the Q2 receiving 1.5 to 2 MB/s). A transfer's write callback, on its
+ * worker thread, then holds it to rate bytes a second; the socket's receive window passes that back
+ * to the server. The file is read at most once a second, so a stream's start or end reaches a
+ * running download within one. */
+#define PACE_FILE "/tmp/q2-bt-coex"
+#define PACE_MAX 100000000 /* bytes a second: a rate past it is no rate written by q2guard */
+static struct {
+    unsigned read_at, at, sent; /* the file's last read; this second's start and bytes */
+    int rate;                   /* bytes a second, 0 unpaced */
+} pace __attribute__((section(".scratch")));
+
+/* The rate in the pace file's text: 0 unless it says paced=1 with a rate of 1 to PACE_MAX */
+int netupdate_pace_rate(const char *text) {
+    const char *r = strstr(text, "rate=");
+    unsigned v = 0;
+    if (strncmp(text, "paced=1", 7) || !r) return 0;
+    for (r += 5; *r >= '0' && *r <= '9'; ++r)
+        if ((v = v * 10 + (unsigned)(*r - '0')) > PACE_MAX) return 0;
+    return (int)v;
+}
+static void pace_wait(unsigned n) {
+    unsigned now = time_now_ms();
+    if (!pace.read_at || now - pace.read_at >= 1000) {
+        char text[64] = "";
+        void *f = fopen(PACE_FILE, "r");
+        if (f) text[fread(text, 1, sizeof text - 1, f)] = 0, fclose(f);
+        pace.rate = netupdate_pace_rate(text), pace.read_at = now | !now;
+    }
+    if (!pace.rate) return;
+    if (!pace.at || now - pace.at >= 1000) pace.at = now | !now, pace.sent = 0;
+    pace.sent += n;
+    unsigned due = pace.sent / (unsigned)(pace.rate / 1000 ? pace.rate / 1000 : 1),
+             spent = now - pace.at;
+    if (due > spent) usleep((due - spent) * 1000);
+}
+
 static unsigned save(const void *data, unsigned size, unsigned n, void *file) {
-    return fwrite(data, size, n, file) * size;
+    unsigned wrote = fwrite(data, size, n, file) * size;
+    pace_wait(wrote);
+    return wrote;
 }
 
 /* xfer: a cancel flag followed by a percentage, nu's or the Apps page's. */

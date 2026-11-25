@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """Read q2guard's Bluetooth link log (patch/q2bt.c, docs/internals.md#bluetooth-link-monitor) back as a timeline:
-each stream with its codec, the seconds it fell behind, and what every signal did in the 10 s before each.
+each stream with its codec, the seconds it fell behind, and what every signal did in the 10 s before each; then each
+classic link the recorder saw, streaming or idle, with its RSSI before it went, and the Wi-Fi bands.
 
     python3 tools/q2bt.py q2-bt.3 q2-bt.2 q2-bt.1 q2-bt.0   # oldest file first, as the Q2 keeps them
     adb shell 'cd /mnt/mmc/.q2muse/logs; cat q2-bt.3 q2-bt.2 q2-bt.1 q2-bt.0 2>/dev/null' | python3 tools/q2bt.py -
     python3 tools/q2bt.py --all q2-bt.0                # every second, not only the stalls
 
-A line is `TIME up=S kbps= acl= wq= rssi= lq= tpl= afh= err= wtx= wrx= cpu= ba= own= h= er= ew= fcc= done= fly= bp= pl= pr= pd= pw= dk= gw=`,
-one a second while a stream runs (`ba` and `own` in percent of one core, written in tenths by older logs: 90 for 9.0; `er`
-and `ew` in ms a second; `done` packets a second the controller delivered, `fly` packets in it, so fly/done is how long
-one waits there; `bp` SBC's bitpool on the last frame; `pl` the player's CPU as `ba`, `pr`, `pd` and `pw` its kB/s read,
-read from storage and written, `dk` the card's busy ms, `gw` 1 while the player waits for a song still arriving); a note
-is `TIME WORD ...` (START, ENCODER, CODEC, LINK, PLAY, STEP, UART, H5, STOP). The card store's `== N lines lost while the
-card was away` is a GAP. A stream is cut into one segment per codec, at each ENCODER note (bluealsa's encoder thread,
+A line is `TIME up=S kbps= brx= acl= wq= rssi= afh= wtx= wrx= cpu= ba= own= h= er= done= fly= bp= pl= dk= gw= ue=`,
+one a second while a stream runs (`brx` kbit/s from the controller; `ba` and `own` in percent of one core, written in
+tenths by older logs: 90 for 9.0; `er` in ms a second; `done` packets a second the controller delivered, `fly` packets in
+it, so fly/done is how long one waits there; `bp` SBC's bitpool on the last frame; `pl` the player's CPU as `ba`, `dk` the
+card's busy ms, `gw` 1 while the player waits for a song still arriving; `ue` the UART's framing, parity, break and
+overrun counts in the second, `fe/pe/brk/oe/bo` or 0, read here as their sum). Logs before 2026-11-25 also have `lq`,
+`tpl`, `err`, `ew`, `fcc`, `pr`, `pd` and `pw`, read when there. A note is `TIME WORD ...` (START, ENCODER, CODEC, LINK,
+PLAY, STEP, UART, H5, PACE, STOP). The recorder's lines (`IDLE`, a link's second with no stream; `ACL` and `ACLINFO`,
+each link every 10 s and once; `ACL gone`; `WIFI` and `COEX`, every minute) go to the links section, not the notes, but
+for an `IDLE` second with UART errors. The card store's `== N lines lost while the card was away` is a GAP. A stream is cut into one segment per codec, at each ENCODER note (bluealsa's encoder thread,
 named for its codec, seen within a second of a change) or CODEC note that names another codec; a CODEC note can come up
 to a minute late (older logs have no ENCODER notes), so the seconds since the last gap in sending before it go to the
 new codec. A second is behind when the controller was handed under BEHIND of its segment's median rate:
@@ -42,8 +46,11 @@ BEFORE = 10    # seconds shown before each stall
 ENC_RUN = 800  # ms a second on a CPU: the encoder could not keep up
 ENC_WAIT = 100  # ms a second waiting for a CPU: the encoder was kept from one
 SWITCH_S = 3   # seconds before a codec change whose slow seconds are the reconnect
-SIGNALS = ('kbps', 'acl', 'wq', 'rssi', 'lq', 'tpl', 'afh', 'err', 'wtx', 'wrx', 'cpu', 'ba', 'own', 'h', 'er', 'ew', 'fcc',
-           'done', 'fly', 'bp', 'pl', 'pr', 'pd', 'pw', 'dk', 'gw')
+SIGNALS = ('kbps', 'brx', 'acl', 'wq', 'rssi', 'afh', 'wtx', 'wrx', 'cpu', 'ba', 'own', 'h', 'er', 'done', 'fly', 'bp',
+           'pl', 'dk', 'gw', 'ue',
+           # older logs' (before 2026-11-25): read when there, shown only where a segment has them
+           'lq', 'tpl', 'err', 'ew', 'fcc', 'pr', 'pd', 'pw')
+RECORDER = ('IDLE', 'ACL', 'ACLINFO', 'WIFI', 'COEX')  # the recorder's lines: the links section, not the notes
 TENTHS = ('ba', 'own', 'pl')  # percent of one core, held in tenths (older logs wrote the tenths: 90 for 9.0)
 ENCODERS = {'sbc': 'SBC', 'aac': 'AAC', 'aptx': 'aptX', 'aptx-hd': 'aptX-HD', 'ldac': 'LDAC'}  # ba-a2dp-<name>
 
@@ -73,7 +80,11 @@ class Stream:
 
 
 def value(v, key=''):
-    """A field as an int, None for "-"; ba and own in tenths of a percent, whether written 9.0 or (older logs) 90."""
+    """A field as an int, None for "-"; ba and own in tenths of a percent, whether written 9.0 or (older logs) 90; ue
+    the sum of its five counts."""
+    if key == 'ue' and '/' in v:
+        parts = [value(x) for x in v.split('/')]
+        return None if None in parts else sum(parts)
     try:
         return round(float(v) * 10) if key in TENTHS and '.' in v else int(v)
     except ValueError:
@@ -145,9 +156,74 @@ def parse(lines):
             if cur:
                 cur.end = when
             cur = None
+        elif parts[0] == 'IDLE':
+            ue = re.search(r'\bue=([\d/]+)', rest)
+            if ue and value(ue[1], 'ue'):
+                notes.append((when, f'UART errors on an idle link: ue={ue[1]} (fe/pe/brk/oe/bo)'))
+        elif parts[0] in RECORDER and parts[:2] != ['ACL', 'gone']:
+            continue
         else:
             notes.append((when, rest))
     return streams, notes
+
+
+@dataclass
+class Link:
+    """One classic link the recorder saw (its handle and address), from its first ACL line to its last."""
+    h: int
+    dev: str
+    first: datetime.datetime
+    last: datetime.datetime
+    info: str = ''        # ACLINFO's fields
+    rssi: list = field(default_factory=list)  # (time, rssi), every 10 s
+    gone: Optional[datetime.datetime] = None
+
+
+def recorder(lines):
+    """The recorder's lines: each link in the order it came, and the Wi-Fi bands as (time, band and channel) when it
+    changed."""
+    links, bands, by = [], [], {}
+    for raw in lines:
+        m = TIME.match(raw.rstrip('\n'))
+        if not m:
+            continue
+        when = datetime.datetime.strptime(m[1], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc)
+        parts = m[2].split()
+        kv = dict(x.split('=', 1) for x in parts if '=' in x)
+        if parts[0] in ('ACL', 'ACLINFO') and 'h' in kv:
+            key = (kv['h'], kv.get('dev', '-'))
+            ln = by.get(key)
+            if ln is None or ln.gone:
+                ln = by[key] = Link(int(kv['h']), kv.get('dev', '-'), when, when)
+                links.append(ln)
+            ln.last = when
+            if parts[0] == 'ACLINFO':
+                ln.info = ' '.join(x for x in parts[1:] if not x.startswith(('h=', 'dev=')))
+            elif parts[1] != 'gone':
+                ln.rssi.append((when, value(kv.get('rssi', '-'))))
+            else:
+                ln.gone = when
+        elif parts[0] == 'WIFI':
+            band = f"{kv.get('band', '-')} GHz ch {kv.get('ch', '-')}" if kv.get('band', '-') != '-' else 'not joined'
+            if not bands or bands[-1][1] != band:
+                bands.append((when, band))
+    return links, bands
+
+
+def report_links(links, bands, out):
+    if not links and not bands:
+        return
+    print('\nLinks (the recorder: streaming or idle, RSSI every 10 s)', file=out)
+    for ln in links:
+        vals = [v for _, v in ln.rssi if v is not None]
+        rssi = f'rssi median {statistics.median(vals):g}, lowest {min(vals)}' if vals else 'rssi not read'
+        end = f'gone {ln.gone:%H:%M:%S}' if ln.gone else f'last seen {ln.last:%H:%M:%S}'
+        print(f'  {ln.dev} h={ln.h}: {ln.first:%Y-%m-%d %H:%M:%S} to {end}; {ln.info or "no ACLINFO"}; {rssi}', file=out)
+        if ln.gone and ln.rssi:
+            tail = ' '.join(fmt(v) for _, v in ln.rssi[-6:])
+            print(f'    the last minute before it went: rssi {tail}', file=out)
+    for when, band in bands:
+        print(f'  Wi-Fi {band} from {when:%Y-%m-%d %H:%M:%S}', file=out)
 
 
 def classify(stream):
@@ -212,13 +288,18 @@ def fmt(v, key=''):
     return f'{v / 10:.1f}' if key in TENTHS else str(v)
 
 
-def row(s, out):
+def shown(samples):
+    """The signals any of these seconds has: a log's own fields, an older log's dead ones left out of a newer's."""
+    return [k for k in SIGNALS if any(s.f[k] is not None for s in samples)] or list(SIGNALS[:20])
+
+
+def row(s, out, cols=SIGNALS):
     mark = {'link': 'LINK', 'encoder': 'ENC', 'source': 'SRC', 'switch': 'swch', 'idle': 'idle'}.get(s.kind, '')
-    print(f'{s.when:%H:%M:%S}  {mark:<4} ' + ' '.join(f'{fmt(s.f[k], k):>5}' for k in SIGNALS), file=out)
+    print(f'{s.when:%H:%M:%S}  {mark:<4} ' + ' '.join(f'{fmt(s.f[k], k):>5}' for k in cols), file=out)
 
 
-def header(out):
-    print('time      kind ' + ' '.join(f'{k:>5}' for k in SIGNALS), file=out)
+def header(out, cols=SIGNALS):
+    print('time      kind ' + ' '.join(f'{k:>5}' for k in cols), file=out)
 
 
 def trend(window):
@@ -328,18 +409,19 @@ def report(streams, notes, out=None, every=False):
                   file=out)
         eps = episodes(st)
         found += [(st, e) for e in eps]
+        cols = shown(st.samples)
         if every:
-            header(out)
+            header(out, cols)
             for s in st.samples:
-                row(s, out)
+                row(s, out, cols)
             continue
         for kind, a, b in eps:
             first = st.samples[a]
             print(f'\n  {kind.upper()} stall {first.when:%H:%M:%S}, {b - a + 1} s; the {BEFORE} s before: '
                   f'{trend(st.samples[max(0, a - BEFORE):a + 1])}', file=out)
-            header(out)
+            header(out, cols)
             for s in st.samples[max(0, a - BEFORE):b + 1]:
-                row(s, out)
+                row(s, out, cols)
     print('\ncodec      seconds  link  enc  source  queued  kbps  rssi(med/min)  bluealsa  q2guard (% of a core)', file=out)
     for codec, n, link, enc, source, queued, kbps, rssi, low, ba, own in summary(streams):
         pct = [('-' if v is None else f'{v:.1f}%') for v in (ba, own)]
@@ -358,6 +440,8 @@ def main(argv=None):
         lines += sys.stdin.readlines() if f == '-' else open(f, encoding='utf-8', errors='replace').readlines()
     streams, notes = parse(lines)
     report(streams, notes, every=args.all)
+    links, bands = recorder(lines)
+    report_links(links, bands, sys.stdout)
 
 
 if __name__ == '__main__':

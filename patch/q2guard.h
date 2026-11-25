@@ -100,7 +100,8 @@ int connect(int, const void *, unsigned);
 ssize_t send(int, const void *, size_t, int);
 unsigned getuid(void);
 #define AF_UNIX 1
-#define SOCK_STREAM 2 /* MIPS's (SOCK_DGRAM is 1 there) */
+#define SOCK_STREAM 2 /* MIPS's */
+#define SOCK_DGRAM 1  /* MIPS's: q2bt.c's wpa_supplicant control socket */
 #define MSG_NOSIGNAL 0x4000
 #endif
 

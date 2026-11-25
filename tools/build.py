@@ -346,8 +346,8 @@ GAMES_DIRS = sorted({f'{GAMES_DATA}/{n.rpartition("/")[0]}' for n in GAMES_ART i
 # updates are firmware updates. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
 BUNDLED_APPS = {
-    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-141cf4d.zip', 3733570,
-                 'c8e71975289bcf37d4d2a32b51847b34dfba8c717f56bf32f211d947328f5bc1', True),
+    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-9065736.zip', 3738531,
+                 '0592db9cc02a6d611f911722c04e4251d57e9bc953ce14ad2a2f22effd085ef3', True),
 }
 APPS_DIR = pathlib.Path.home()/'.cache/q2-apps'
 S90PLAY = 'etc/init.d/S90play'
