@@ -61,6 +61,9 @@ struct ctl {
     /* mcl-btrelease (patch/headset.c: the headset sent the pause): a song paused on Bluetooth closes its PCM at once,
      * not BT_PAUSE_MS on (docs/internals.md#bluetooth-pause); cleared by a play and as the playback thread takes it */
     int bt_release;
+    /* the headset sent the last pause (mcl-btrelease taken): it may have left for another host, so the Clicker's clicks
+     * open no Bluetooth PCM for themselves (the buzzer still clicks) until a play, a song or another output */
+    int bt_away;
     /* status */
     int state, has_info, position;
     struct info info;
@@ -186,6 +189,7 @@ int output_click(struct output *, int kind); /* mixed into what is about to be h
  * output_idle_click for each click, output_idle_fill to keep silence ahead of what plays, and output_idle_end, which
  * drops that silence: a held PCM is paused again as far as the song is concerned. The click and the fill answer the
  * frames of silence they wrote. */
+void output_busy_wait(int ms); /* how long a Bluetooth open waits out a busy PCM, BT_BUSY_MS unless set */
 void output_hold(struct output *);
 int output_idle_click(struct output *, int kind);
 int output_idle_fill(struct output *);

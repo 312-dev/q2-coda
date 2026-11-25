@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: clicks in your headphones while nothing plays are heard steadily as you browse: the Q2 keeps the headphones' audio running for 15 seconds after the last click instead of starting it again for each burst, and a song you pick starts in it straight away. After your headphones pause the Q2 (or move to your phone), clicks sound only on the Q2's own speaker (with the Clicker on Both) until you press Play.
   - USB-C headphones and USB DACs: when the Q2 finds one, or loses it, and moves the song there, the screen and the wheel stall for 0.3 s less, where the move held them for close to half a second or more.
   - Bluetooth: a song or a click that comes just as the last click's sound ends starts, where it could fail while the headset's audio was still being let go: the Q2 waits a moment for it.
   - Bluetooth: when your headphones pause the Q2 (their own control, or AirPods moving to your phone), the Q2 lets their audio stream stop at once, so Play on the Q2 starts it again and is heard, where it could stay silent until you reconnected.

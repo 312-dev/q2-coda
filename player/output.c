@@ -32,6 +32,11 @@
 
 enum { BUFFER_US = 500000, PERIODS = 16 };
 enum { BT_ASK = 48000 }; /* what stock asks bluealsa for, whatever the file (reinit_audio_chain, 0x42ecc0) */
+/* A Bluetooth open's wait for a busy PCM (alsa_open_bt), BT_BUSY_MS unless output_busy_wait set it (a click's, shorter:
+ * engine.c CLICK_BUSY_MS) */
+enum { BT_BUSY_MS = 1500, BT_BUSY_STEP_MS = 50 };
+static int busy_ms = BT_BUSY_MS;
+void output_busy_wait(int ms) { busy_ms = ms < 0 ? BT_BUSY_MS : ms; }
 
 /* What a device takes, asked on the DAC's and a USB DAC's ways (choose): bit i of rates is RATES[i] (at the open's
  * format and channels), own the song's rate when the device takes it and it is none of RATES; fmts is CAP_* bits,
@@ -525,11 +530,11 @@ done:
  * another opened at once met it on a Q2. On Bluetooth the open is tried again BT_BUSY_STEP_MS apart for up to
  * BT_BUSY_MS (docs/internals.md#bluetooth-pause), the play loop held meanwhile, and the wait is said once: opened
  * after it, or still busy, as another client (an AirPlay receiver, q2video's sources) holds the PCM. */
-enum { BT_BUSY_MS = 1500, BT_BUSY_STEP_MS = 50 };
+
 static int alsa_open_bt(struct output *o, int outputway, int hw) {
     struct pcm_format f = o->f;
     int r, waited = 0;
-    while ((r = alsa_open(o, outputway, hw)) == -EBUSY && outputway == 1 && waited < BT_BUSY_MS)
+    while ((r = alsa_open(o, outputway, hw)) == -EBUSY && outputway == 1 && waited < busy_ms)
         usleep(BT_BUSY_STEP_MS * 1000), waited += BT_BUSY_STEP_MS, o->f = f;
     if (r == -EBUSY && outputway == 1)
         fprintf(stderr, "q2player: bluealsa's PCM still busy after %d ms: another client holds it\n", waited);
