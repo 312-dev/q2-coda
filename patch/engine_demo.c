@@ -116,5 +116,6 @@ static void pause(void *state) {
         d->saved = d->save.best;
 }
 
-const struct eng_game eng_demo = { "Engine Demo", sizeof(struct demo), ENG_RAW, init, step, draw,
-                                   pause,       "demo",              "Test",      0, 0 };
+const struct eng_game eng_demo = {
+    "Engine Demo", sizeof(struct demo), ENG_RAW, init, step, draw, pause, "demo", "Test", 0, 0
+};

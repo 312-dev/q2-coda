@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Games: each game's row in Games shows its own picture and what kind of game it is. A game you leave (Quit, Home, the screen going off or turning the Q2 off) opens just where you left it next time, with no question; Pop Stall and Ember Garden come back paused, and Caller Ten at the start of the caller you were on. A finished game starts new. The pause menu has **Restart**, a new game of the same kind.
   - Library: picking a song in Songs, an album, an artist or Search plays that song when another one has the same title, such as two artists' songs of one name on your server, or two files of one name in different folders, where it always played the first of them.
   - USB-C headphones: the buttons on USB-C earbuds and headsets, and on wired earbuds through a USB-C to 3.5 mm adapter with its own DAC, now control the Q2: volume up and down (hold to keep going), play/pause, and a double or triple press of the middle button to skip forward or back. They work from any page and with the screen off.
   - Playback: seeking a paused song keeps it paused, however you seek: dragging the position on Now Playing, Previous going back to the start, or a seek from the Vamp app, Android Auto or the car in iPhone mode. Now Playing shows the new position at once, Resume keeps it, and Play goes on from there; a seek to the very end stops on the song's last second. Before, these started the song playing.

@@ -1054,8 +1054,8 @@ static void popup(void *canvas, const char *title, const char *a, const char *b,
         int ry = y + top + k * POP_ROW, on = k == choice;
         if (on) /* the accent's bar, white on it in either mode */
             round_box(canvas, x + 10, ry + 1, POP_W - 20, POP_ROW - 2, accent_tone(0), 6);
-        text_at(canvas, row[k], 187, ry, POP_ROW, 18,
-                rgba(!on ? 0xaaaaaa : unflipped(0xff), 255), MID);
+        text_at(canvas, row[k], 187, ry, POP_ROW, 18, rgba(!on ? 0xaaaaaa : unflipped(0xff), 255),
+                MID);
     }
 }
 
@@ -1310,8 +1310,8 @@ static int closed(void *ctx, void *event) {
 }
 
 /* An engine game's row (docs/oled-design.md#two-line-row): its icon (GAMES_ICONS, 40 px at the
- * text column, 6 px down), its name and kind beside it, the kind's ink from 32 px down the row (5 px
- * over page_row_detail's second line), and the chevron. */
+ * text column, 6 px down), its name and kind beside it, the kind's ink from 32 px down the row (5
+ * px over page_row_detail's second line), and the chevron. */
 static void game_row(int k) {
     const struct eng_game *e = eng_game(k);
     char url[72];
@@ -1349,11 +1349,10 @@ int games_open(void *ctx, void *event) {
     g->title = theme()->page_title_h ? (void *)0 : widget_lookup(g->list, PAGE_TITLE, 1);
     for (int k = 0, n = 0; k < (int)(sizeof own / sizeof *own); ++k)
         if (own[k].on) page_row_detail_into(g->view, n++, own[k].name, "", pick_game);
-    for (int k = 0; k < g->engines; ++k)
-        game_row(k);
-    for (int k = 0; k < cards; ++k)
+    for (int k = 0; k < g->engines; ++k) game_row(k);
+    for (int k = 0; k < cards; ++k) /* its name centred in the row */
         page_row_detail_into(g->view, GAMES_BUILTIN + g->engines + k, addon_game_name(k), "",
-                             pick_card_game); /* its name centred in the row */
+                             pick_card_game);
     widget_on(g->sheet, EVT_POINTER_DOWN, eng_touch, 0); /* a finger on an engine game */
     widget_on(page, EVT_POINTER_MOVE_BEFORE, eng_touch, 0);
     widget_on(page, EVT_POINTER_UP_BEFORE, eng_touch, 0);

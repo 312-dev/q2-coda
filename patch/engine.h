@@ -143,7 +143,7 @@ int eng_open(const struct eng_game *game, void *page, void *sheet, int h, void (
 void eng_close(void);
 void eng_run(void), eng_hold(void);
 void eng_restart(void); /* the menu's Restart: a new game, kept in place of the one in progress */
-int eng_live(void); /* the frame timer runs: the UI loop keeps its pace (navigation.c) */
+int eng_live(void);     /* the frame timer runs: the UI loop keeps its pace (navigation.c) */
 void *eng_state_of(const struct eng_game *game); /* its state while open, else 0 */
 int eng_key(unsigned key, int down);
 int eng_touch(void *ctx, void *event); /* the sheet's and the page's pointer events */

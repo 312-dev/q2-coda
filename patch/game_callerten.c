@@ -129,7 +129,7 @@ struct ct {
         unsigned magic, best[3], played, sum;
     } save;
     unsigned songs[CT_KEPT / 4]; /* the contest's songs, its pick's first CT_KEPT bytes, as held */
-    struct keep *k; /* from here on, never kept (quick resume) */
+    struct keep *k;              /* from here on, never kept (quick resume) */
 };
 
 /* ---- the player: clips over demo's socket, its answers from demo's reply list ---- */
