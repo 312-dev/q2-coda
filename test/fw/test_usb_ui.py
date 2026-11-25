@@ -437,6 +437,35 @@ def test_a_burst_of_edges_is_one_cable_change_stamped_with_its_first_edge(fw):
     assert not take(C.byref(edge))
 
 
+def tracer_sends(f):
+    """One burst through usb_event_wait with the socket calls recorded: (sockets made, datagrams sent)."""
+    socks, sent = [], []
+    f.mock('fw_socket', lambda dom, typ, proto, *_: socks.append((dom, typ, proto)) or 9)
+    f.mock('fw_sendto', lambda fd, buf, n, flags, addr, alen, *_:
+           sent.append((fd, C.string_at(buf, n), flags, C.string_at(addr, alen))) and -1)  # nobody bound
+    take = f.fn('usb_event_take', C.c_int, C.POINTER(C.c_uint64))
+    edge = C.c_uint64()
+    assert edges(f, 7_000_000, 7_400_000, 9_000_000) == [20000]
+    assert take(C.byref(edge)) == 1 and edge.value == 7_000_000, 'the burst counted once, as before'
+    return socks, sent
+
+
+def test_a_dev_build_sends_each_edge_on_to_the_usb_tracer(fw_dev):
+    """--dev (docs/internals.md#usb-tracer): every edge of the burst, as read (its kernel time and direction), to the
+    abstract datagram name q2-usbtrace binds, MSG_DONTWAIT and MSG_NOSIGNAL; a send nobody hears fails and the burst
+    is counted as before."""
+    socks, sent = tracer_sends(fw_dev)
+    assert socks == [(1, 0x80081, 0)]  # AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK (MIPS)
+    stamp = lambda ns: ns.to_bytes(8, 'little') + b'\x01\0\0\0\0\0\0\0'
+    name = b'\x01\x00' + b'\0q2-usbtrace-pd17'
+    assert sent == [(9, stamp(ns), 0x4040, name) for ns in (7_000_000, 7_400_000, 9_000_000)]
+
+
+def test_a_release_build_sends_the_usb_tracer_nothing(fw):
+    """A release build makes no socket and sends nothing at an edge."""
+    assert tracer_sends(fw) == ([], [])
+
+
 def test_an_edge_runs_stock_s_cable_read_and_the_usb_check_in_the_same_pass(fw):
     """usb_ui_poll, every UI pass: an edge runs get_battery_capacity (which sets g_usbdet_value, as the status bar's
     one-second timer would) and check_usb_status's hook at once, so the probe starts in that pass with no
