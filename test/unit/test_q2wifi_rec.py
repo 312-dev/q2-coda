@@ -7,7 +7,6 @@ an association of its own). Each trigger fires once, repeats every 5 minutes, st
 address is written; nothing is sent that changes Wi-Fi's state; and with Wi-Fi off or joined it costs no file open."""
 import ctypes as C
 import os
-import pathlib
 import re
 import socket
 import threading
@@ -58,6 +57,7 @@ class Wpa(threading.Thread):
                 self.sock.sendto(self.answers.get(cmd, 'UNKNOWN COMMAND\n').encode(), addr)
 
     def event(self, msg):
+        assert self.mon is not None, 'not attached'
         self.sock.sendto(f'<3>{msg}'.encode(), self.mon)
 
     def close(self):
@@ -81,6 +81,44 @@ KMSG = [
     '4,11,19000700,-;Normal: 4*4kB 2*8kB = 32kB',
     '6,12,25000000,-;random: crng init done',
 ]
+
+
+class Rig:
+    """The built recorder, its fake files under root, and its wpa_supplicant while one runs."""
+
+    def __init__(self, L, root, home):
+        self.L, self.root, self.home, self.wpa = L, root, home, None
+
+    def start(self, again=0):
+        self.L.start(str(self.home).encode(), again)
+
+    def up(self):
+        self.wpa = Wpa('w.sock')
+        return self.wpa
+
+    def down(self):
+        assert self.wpa
+        self.wpa.close()
+        os.unlink('w.sock')  # the socket file wpa_supplicant removes as it ends
+        self.wpa = None
+
+    def log(self):
+        return self.L.log_ram()[:self.L.log_used()].decode()
+
+    def ulog(self):
+        return self.L.ulog_ram()[:self.L.ulog_used()].decode()
+
+    def tick(self, ms):
+        self.L.tick(ms, 412, b'2026-11-25T20:31:00Z up=5 t=41.2 g=ok\n')
+
+    def sent(self):
+        return [self.L.sent_at(i).decode() for i in range(self.L.sent_count())]
+
+
+def ap_of(log):
+    m = re.search(r'ap=(#[0-9a-f]{6})', log)
+    assert m
+    return m.group(1)
 
 
 @pytest.fixture
@@ -116,29 +154,7 @@ def rig(tmp_path, monkeypatch):
         getattr(L, f).restype = C.c_char_p
     L.tick.argtypes = [C.c_uint, C.c_int, C.c_char_p]
 
-    class Rig:
-        pass
-    r = Rig()
-    r.L, r.root, r.wpa = L, root, None
-
-    def start(again=0):
-        L.start(str(tmp_path).encode(), again)
-    r.start = start
-
-    def up():
-        r.wpa = Wpa('w.sock')
-        return r.wpa
-    r.up = up
-
-    def down():
-        r.wpa.close()
-        os.unlink('w.sock')  # the socket file wpa_supplicant removes as it ends
-        r.wpa = None
-    r.down = down
-    r.log = lambda: L.log_ram()[:L.log_used()].decode()
-    r.ulog = lambda: L.ulog_ram()[:L.ulog_used()].decode()
-    r.tick = lambda ms: L.tick(ms, 412, b'2026-11-25T20:31:00Z up=5 t=41.2 g=ok\n')
-    r.sent = lambda: [L.sent_at(i).decode() for i in range(L.sent_count())]
+    r = Rig(L, root, tmp_path)
     yield r
     if r.wpa:
         r.wpa.close()
@@ -228,7 +244,7 @@ def test_the_deaf_radio_of_2026_11_25(rig):
     assert [l.split(' up=', 1)[1] for l in lines(log, 'DEAF')] == \
         ['121 DEAF start kind=nojoin after=120 s state=DISCONNECTED nets=2 2.4=1/-55 5=1/-61 6=0 known=1']
     assert 'W wifi deaf radio (nojoin)' in rig.ulog()
-    ap = re.search(r'ap=(#[0-9a-f]{6})', log).group(1)
+    ap = ap_of(log)
     assert f'SNAP status state=DISCONNECTED freq=0 mode=station key_mgmt=WPA2-PSK id=0 ap={ap} ip=0' in log
     assert 'SNAP scan nets=2 2.4=1/-55 5=1/-61 6=0 known=1 scans=0 failed=0' in log
     assert re.search(r'F drvdir( \S+)+', log) and 'F fwstate fwstate=0x8' in log
@@ -314,7 +330,7 @@ def test_each_association_and_disassociation_is_a_line_with_its_reasons(rig):
     wpa.event(f'CTRL-EVENT-CONNECTED - Connection to {BSSID} completed [id=0 id_str=]')
     rig.L.set_clock(134000)
     rig.L.drain()
-    ap = re.search(r'ap=(#[0-9a-f]{6})', rig.log()).group(1)
+    ap = ap_of(rig.log())
     assert [l.split(' up=', 1)[1] for l in lines(rig.log(), '(ASSOC|DISASSOC)')] == [
         f'4 ASSOC ap={ap} id=0 freq=5240',
         f'124 DISASSOC bssid={ap} reason=3 locally_generated=1 up=120 s drv=last disconnect reason: Receiving Deauth '
