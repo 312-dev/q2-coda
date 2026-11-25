@@ -386,6 +386,9 @@ void trace_slow(struct trace *tr, const struct ut_slow *s, long long t) {
     put_hex(r, sizeof r, "hprt0", s->hprt0, tr->slow.hprt0, all);
     if (r[3]) trace_line(tr, t, "%s", r);
     tr->slow = *s, tr->have_slow = 1;
+    /* HPRT0's connect status: a device's pull-up on the host port, which a trial's length follows (usb_fsm.h
+     * UF_CONNECT_MS) */
+    if (s->hprt0 >= 0) feed_level(tr, UT_FED_CONNECT, UF_EV_CONNECT, (int)(s->hprt0 & 1), t);
 }
 
 void trace_wake(struct trace *tr, long long slept_ms, long long t) {

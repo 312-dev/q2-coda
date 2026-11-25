@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - USB (development builds): when a computer's USB-C port meets the Q2 the wrong way round, the Q2 stops powering the port 2.5 seconds in instead of 8, and says to unplug and plug the cable back in about 7 seconds sooner. USB headphones and DACs are unaffected.
   - Library: picking a song in Songs, an album, an artist or Search plays that song when another one has the same title, such as two artists' songs of one name on your server, or two files of one name in different folders, where it always played the first of them.
   - USB-C headphones: the buttons on USB-C earbuds and headsets, and on wired earbuds through a USB-C to 3.5 mm adapter with its own DAC, now control the Q2: volume up and down (hold to keep going), play/pause, and a double or triple press of the middle button to skip forward or back. They work from any page and with the screen off.
   - Playback: seeking a paused song keeps it paused, however you seek: dragging the position on Now Playing, Previous going back to the start, or a seek from the Vamp app, Android Auto or the car in iPhone mode. Now Playing shows the new position at once, Resume keeps it, and Play goes on from there; a seek to the very end stops on the song's last second. Before, these started the song playing.

@@ -7,13 +7,18 @@ host. Nothing else in demo writes PC20 high (into_poweroff, device_reboot and de
 import ctypes as C
 import pathlib
 import re
+import sys
 
 import pytest
+
+sys.path.insert(0, str(pathlib.Path(__file__).parents[2]/'tools'))
+import usbtrace_report as R  # noqa: E402
 
 PULL_UP = '/usr/bin/cmd_gpio set_func PD18 input pull_up >/dev/null 2>&1'
 PULL_FUNC = b'/tmp/q2-pd18.func'
 PULL_CHECK = '/usr/bin/cmd_gpio get_func PD18 >/tmp/q2-pd18.func 2>&1'
 HOST_DEV = b'/sys/bus/usb/devices/1-1/idVendor'
+REGDUMP = b'/sys/kernel/debug/usb/13500000.otg/regdump'  # the dwc2's registers, while debugfs is mounted
 rmw = lambda addr, op: f'devmem {addr} 32 $(( $(devmem {addr}) {op} ))'
 HOLD = rmw('0x1000003c', '| 0x20000000') + '; ' + rmw('0x10000040', '| 0x01800000')  # the PHY's ID pull-up, role device
 FROM_PIN = rmw('0x10000040', '& ~0x01800000')  # the controller's role from the pin
@@ -29,6 +34,7 @@ def define(name):
 
 
 SETTLE, BLANK, TRIAL = define('OTG_SETTLE_MS'), define('OTG_BLANK_MS'), define('OTG_TRIAL_MS')
+CONNECT_MS = define('OTG_CONNECT_MS')
 ACCESSORY = define('OTG_ACCESSORY_MS') if '#define OTG_ACCESSORY_MS' in _SOURCE else 20000
 
 
@@ -43,6 +49,7 @@ class Port:
         self.now = 100000
         self.backfeed = []  # times the Q2 powered the bus while a computer's VBUS was on it
         self.powered = []  # times the Q2 powered the bus at all
+        self.ons = []  # times the bus power came on
         self.otgid = fw.var('g_last_otgid', C.c_byte)
         self.otgid.value = 0
         self.guard = fw.fn('ringnav_otg_status', C.c_int)
@@ -53,6 +60,9 @@ class Port:
         self.func = b'input pull_up\n'  # what cmd_gpio get_func PD18 answers into PULL_FUNC
         fw.mock('fw_system', lambda cmd, *_: self.commands.append(C.string_at(cmd).decode()))
         self.hostdev = False  # a device enumerated on the Q2's host port
+        self.regdump = False  # debugfs mounted (a --dev build's q2-usbtrace mounts it), so HPRT0 can be read
+        self.hprt0 = 0x1000  # HPRT0 while the bus is powered: bit 0 a device's pull-up (0x1000, power alone: none)
+        self.regdump_reads = 0
         fw.mock('fw_fopen', self.fopen)
         fw.mock('fw_fread', self.fread)
         fw.mock('toolsGpioSetValue', self.write)
@@ -61,6 +71,9 @@ class Port:
 
     def fopen(self, path, *_):
         name = C.string_at(path)
+        if name == REGDUMP and self.regdump:
+            self.regdump_reads += 1
+            return 11
         return 9 if name == PULL_FUNC else 10 if name == HOST_DEV and self.hostdev else 0
 
     def write(self, name, value, *_):
@@ -69,10 +82,14 @@ class Port:
     def set(self, pin, value):
         if pin == 'PC20' and self.pins['PC20'] and not value:
             self.off_at = self.now
+        if pin == 'PC20' and value and not self.pins['PC20']:
+            self.ons.append(self.now)
         self.pins[pin] = value
 
     def fread(self, buf, size, n, f, *_):
-        data = self.func[:size * n]
+        dump = ('GOTGCTL = 0x002c00fc\nGINTSTS = 0x04000021\n' + 'DIEPCTL = 0x00000000\n' * 200 +
+                f'HPRT0 = 0x{self.hprt0 if self.pins["PC20"] else 0x400:08x}\nHCCHAR0 = 0x00000000\n').encode()
+        data = (dump if f == 11 else self.func)[:size * n]
         C.memmove(buf, data, len(data))
         return len(data) // size
 
@@ -591,7 +608,7 @@ def test_a_computer_whose_roles_resolved_the_wrong_way_gets_one_replug_toast(fw)
     """2026-11-23, the owner's round 3 (pd18-owner2.log, uptime): the laptop's cable out at 17745.42, back in at 17777.35,
     and the ID went low with no VBUS from the laptop (the Q2 resolved as the source); the settle's bus power at
     17784.78, its trial ended at 17793.82 with nothing on the host port, and the ID stayed low until the cable came
-    out at 17833.67; the replug at 17841.91 configured in 0.5 s. One toast, 3 s past the trial's end; nothing else."""
+    out at 17833.67; the replug at 17841.91 configured in 0.5 s. One toast, OTG_WRONG_MS past the trial's end; nothing else."""
     p = toasts(fw, Port(fw))
     unplug(p, ms(17745.42, 17777.35))
     p.id = 0
@@ -628,6 +645,76 @@ def test_the_replug_toast_comes_once_an_episode_and_again_after_the_id_was_high(
     p.cable = False
     p.run(BLANK + SETTLE + TRIAL + 5000)
     assert p.toasts == [REPLUG, REPLUG]
+
+
+# ---- a computer the wrong way round, ended by HPRT0 (usb_otg.c OTG_CONNECT_MS), against every USB DAC of 2026-11-25 ----
+
+USBTRACE = pathlib.Path(__file__).parents[2]/'test/fixtures/usb_fsm/usbtrace-2026-11-25.trace'
+
+
+def trace_grants():
+    """Stock's grants in the owner's trace, by run, with each device's measured connect, 1-1 and PCM."""
+    return [g for run in R.runs(R.parse(USBTRACE.read_text().splitlines())) for g in R.grants(run)]
+
+
+def test_cycle_12_the_laptop_the_wrong_way_round_is_a_device_again_2_5_s_into_its_power(fw):
+    """2026-11-25 cycle 12 (usbtrace-2026-11-25.trace): the laptop's VBUS left at 2712.604, the ID went low at
+    2715.996 (inside the blank) with no VBUS; the accessory wait powered the bus 11.7 s into the cycle, HPRT0 read
+    0x1000 through it, and stock's trial kept the power to 20.68 s with nothing told until 23.7 s. With HPRT0 read the
+    power ends OTG_CONNECT_MS in, the controller held at device, and the replug is said OTG_WRONG_MS after; nothing
+    powers the bus again while the ID stays low."""
+    p = toasts(fw, Port(fw))
+    p.regdump = True
+    unplug(p, ms(2712.604, 2715.996))
+    gone = p.now - ms(2712.604, 2715.996)
+    p.id = 0
+    traced(p, 30000)
+    on, = p.ons
+    assert p.seen == ['otg-on', 'otg-trial-off why=no-connect', 'wrong-role'] and p.toasts == [REPLUG]
+    assert CONNECT_MS <= p.off_at - on <= CONNECT_MS + 300, 'off at the first look past OTG_CONNECT_MS'
+    assert (p.off_at - gone) / 1000 < 15 < 20.68, 'a device again 6 s before stock\'s'
+    assert p.pins == {'PC20': 0, 'PE22': 0} and p.commands[-1] == HOLD
+    traced(p, 60000)
+    assert p.ons == [on] and p.toasts == [REPLUG]
+
+
+@pytest.mark.parametrize('n', range(7))
+def test_every_usb_dac_of_2026_11_25_keeps_its_power_with_hprt0_read(fw, n):
+    """Each of the seven DAC grants in the owner's trace, its device's pull-up read and its 1-1 at the offsets measured
+    from stock's otg-on (0.25 to 0.41 s, and 0.79 to 1.09 s): the power stays on past OTG_TRIAL_MS, as before."""
+    g = [g for g in trace_grants() if g.dev][n]
+    p = Port(fw)
+    p.regdump = True
+    p.hprt0 = 0x1000
+    p.id = 0
+    traced(p, SETTLE + 2 * PASS_MS)
+    on, = p.ons
+    connect, dev = (g.connect - g.on) // 1_000_000, (g.dev - g.on) // 1_000_000
+    while p.now < on + TRIAL + 5000:
+        if p.now - on >= connect:
+            p.hprt0 = 0x21401
+        if p.now - on >= dev:
+            p.hostdev = True
+        traced(p, 50, step=50)
+    assert p.seen == ['otg-on'] and p.pins['PC20'] == 1 and p.regdump_reads
+
+
+def test_without_the_regdump_the_trial_is_stock_s_8_s(fw):
+    """A release build has no debugfs: HPRT0 unread, the trial is OTG_TRIAL_MS as it was."""
+    p = Port(fw)
+    p.id = 0
+    traced(p, SETTLE + TRIAL + 2 * PASS_MS)
+    assert p.seen == ['otg-on', 'otg-trial-off']
+    assert TRIAL <= p.off_at - p.ons[0] <= TRIAL + 1000
+
+
+def test_a_device_that_connects_but_enumerates_late_keeps_the_trial(fw):
+    p = Port(fw)
+    p.regdump = True
+    p.hprt0 = 0x21401  # pulled up at once, enumerating slowly
+    p.id = 0
+    traced(p, SETTLE + 2 * PASS_MS + CONNECT_MS + 1000)
+    assert p.seen == ['otg-on'] and p.pins['PC20'] == 1
 
 
 # ---- an accessory read as a cable: PD17 low with no source (usb_otg.c usb_otg_cable) ----
