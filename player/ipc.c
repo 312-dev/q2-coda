@@ -155,6 +155,7 @@ static void command(const char *name, const char *arg) {
         reply("{mcl-pcmstate\\0}");
     } else if (!strcmp(name, "set-songurl") || !strcmp(name, "set-nexturl")) {
         parse_song(arg, &c->play_song, 1);
+        c->bt_away = 0;
         /* A stop before this song is not this song's (engine.c engine_thread). One the playback thread has not yet
          * taken from a song open or opening is that song's: it is kept, to end it, and this song waits for it to be
          * taken. demo's restart after an output change sends the two (player_save_start): the drive of 2026-11-23
@@ -178,7 +179,7 @@ static void command(const char *name, const char *arg) {
     } else if (!strcmp(name, "mcl-play")) {
         if (c->play) c->play_paused = 0;
         if (c->state != IDLE) c->paused = 0, wake = 1;
-        c->bt_release = 0;
+        c->bt_release = c->bt_away = 0;
     } else if (!strcmp(name, "mcl-seek")) {
         if (c->state != IDLE) c->seek = 1, c->seek_to = atoi(arg), wake = 1;
     } else if (!strcmp(name, "mcl-stop")) {
@@ -186,7 +187,7 @@ static void command(const char *name, const char *arg) {
     } else if (!strcmp(name, "mcl-dropcar") || !strcmp(name, "mcl-carrelease")) {
         c->car_release = 1, wake = 1;
     } else if (!strcmp(name, "mcl-btrelease")) {
-        if (c->state != IDLE && c->paused) c->bt_release = 1, wake = 1;
+        if (c->state != IDLE && c->paused) c->bt_release = c->bt_away = 1, wake = 1;
     } else if (!strcmp(name, "mcl-orderstop")) {
         /* stock closes a PCM left open after the last song; this player has none open while idle */
     } else if (!strcmp(name, "mcl-setvol")) {
@@ -194,7 +195,7 @@ static void command(const char *name, const char *arg) {
     } else if (!strcmp(name, "mcl-softvolflag")) {
         c->softvol = atoi(arg);
     } else if (!strcmp(name, "mcl-setoutputway")) {
-        c->outputway = atoi(arg);
+        c->outputway = atoi(arg), c->bt_away = 0;
     } else if (!strcmp(name, "mcl-dsdmode")) {
         c->dsdmode = atoi(arg);
     } else if (!strcmp(name, "mcl-replaygain")) {
@@ -222,7 +223,8 @@ static void command(const char *name, const char *arg) {
         int kind = !strcmp(arg, "wheel") ? CLICK_WHEEL : !strcmp(arg, "button") ? CLICK_BUTTON : !strcmp(arg, "beep") ? CLICK_BEEP
                    : !strcmp(arg, "charge") ? CLICK_CHARGE : 0;
         int playing = c->state == PLAYING && !c->paused, idle = (c->state == IDLE || (c->state == PLAYING && c->paused)) && !c->play;
-        if (kind && (playing || (kind != CLICK_CHARGE && idle))) c->click = kind, wake = 1;
+        int away = c->bt_away && c->outputway == 1 && !playing; /* the headset paused us: not held for a click */
+        if (kind && !away && (playing || (kind != CLICK_CHARGE && idle))) c->click = kind, wake = 1;
     }
     if (wake) pthread_cond_broadcast(&c->wake);
     pthread_mutex_unlock(&c->mu);

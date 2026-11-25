@@ -1805,6 +1805,29 @@ def test_the_clicker_routes_a_click(fw, clicker, listening, there, status, buzze
     assert all(fd == 7 and flags == 0x4040 for fd, _, flags in player.sent)  # never waits, never a SIGPIPE
 
 
+@pytest.mark.parametrize('owner', [dict(video=5), dict(radio=9), dict(spotify=1), 'tuner'])
+def test_no_click_goes_to_the_player_under_another_source(fw, owner):
+    """docs/internals.md#bluetooth-click-warm: while a video, Internet Radio or Spotify (or Radio's receiver) owns the
+    output, a click goes to the buzzer alone (Both), none to q2player, whose click session would open the output under
+    the source (on Bluetooth bluealsa's one client, held 15 s); the Library's own player takes it again after."""
+    Config(fw, CLICKER=b'0')
+    buzzer, player = Buzzer(fw), Player(fw, status=1)
+    fw.var('g_po_status', C.c_ubyte).value = 1
+    from test_headset import players
+    rt = C.c_void_p.from_address(C.addressof(fw.var('radio_tuner__rt', C.c_void_p)))
+    if owner == 'tuner':  # Radio's page with its receiver paused (radio_tuner.c tuner_state 2): it has let go of
+        state = C.create_string_buffer(4096)  # the wired output after 2 s and takes it back itself on a click
+        rt.value = C.addressof(state)
+    else:
+        players(fw, **owner)
+    buzzer.click(1)
+    assert buzzer.clicks() == [1] and player.clicks() == []
+    rt.value = None
+    players(fw)  # nothing else: the Library's player takes the click again
+    buzzer.click(1)
+    assert player.clicks() == [WHEEL]
+
+
 @pytest.mark.parametrize('keytone_hp', [b'0', b'1'])
 def test_an_old_config_is_both(fw, keytone_hp):
     """No CLICKER key: Both, whatever Click With Headphones (KEYTONEHP) said; Key Tone off is Off."""

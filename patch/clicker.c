@@ -70,12 +70,16 @@ static int player_mixes(void) { return player_there() && mclGetPlayStatus() == 2
 /* ringnav_buzzer's routing of one click: the mixed one sent here (ROUTE_MIXED), and whether the
  * buzzer clicks too (ROUTE_BUZZER). listening: headphones, Bluetooth or a USB DAC take the sound,
  * where Speaker's buzzer stays quiet. */
+int media_owner(void); /* headset.c: 1 the Library's player, else Spotify, Radio, a video or the tuner */
 int clicker_route(int listening) {
     static const char *const sends[] = { "{mcl-click\\wheel}", "{mcl-click\\button}",
                                          "{mcl-click\\beep}" };
     int mode = shown(), mixed = 0;
     if (mode == SHOWN_OFF) return 0;
-    if ((mode == SHOWN_HEADPHONES || mode == SHOWN_BOTH) && player_there()) {
+    /* the Library's player alone takes it: while Radio, a video, Internet Radio or Spotify owns the output
+     * (headset.c media_owner), a click there would open the output under it (on Bluetooth, bluealsa's one client,
+     * held BT_CLICK_WARM_MS: docs/internals.md#bluetooth-click-warm) */
+    if ((mode == SHOWN_HEADPHONES || mode == SHOWN_BOTH) && player_there() && media_owner() == 1) {
         int fd = *(volatile int *)MCL_FD, k = clicker_kind;
         const char *m =
             sends[k >= CLICK_KIND_WHEEL && k <= CLICK_KIND_BEEP ? k - CLICK_KIND_WHEEL : 0];

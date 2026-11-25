@@ -354,10 +354,16 @@ int main(int argc, char **argv) {
             printf("busy%d %s tries %d sleeps %d\n", busy[n], o ? "opened" : "failed", hw_tries, sleeps);
             if (o) output_close(o);
         }
-        busy_hw = 1000; /* the headphone DAC held for good: no wait, the holder named (Q2PLAYER_PROC) */
-        struct output *o = output_open(&f, 0, 0);
-        printf("dac-held %s\n", o ? "opened" : "failed");
+        output_busy_wait(200); /* a click's open (engine.c CLICK_BUSY_MS): another source holding the PCM */
+        busy_hw = 1000, hw_tries = 0, sleeps = 0;
+        struct output *o = output_open(&f, 1, 0);
+        printf("click %s tries %d sleeps %d\n", o ? "opened" : "failed", hw_tries, sleeps);
         if (o) output_close(o);
+        output_busy_wait(-1);
+        busy_hw = 1000; /* the headphone DAC held for good: no wait, the holder named (Q2PLAYER_PROC) */
+        struct output *d = output_open(&f, 0, 0);
+        printf("dac-held %s\n", d ? "opened" : "failed");
+        if (d) output_close(d);
         busy_hw = 0;
         return 0;
     }

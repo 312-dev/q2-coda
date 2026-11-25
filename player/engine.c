@@ -245,6 +245,19 @@ static void bt_play_in_click_pcm(int64_t opened, int64_t frame) {
  * for CLICK_RETRY_MS (Bluetooth chosen with no headset's PCM yet). Each session ends with one line in the unified log:
  * its clicks and the frames of silence written for them, a warning when none were, as nothing was then heard. */
 enum { CLICK_HOLD_MS = 3000, CLICK_TICK_MS = 30, CLICK_RETRY_MS = 10000, CLICK_RATE = 48000 };
+/* Bluetooth's hold (docs/internals.md#bluetooth-click-warm): the A2DP stream a click starts is kept, silence written,
+ * BT_CLICK_WARM_MS after the last click, so the clicks of a browse go into one running stream, not each into one
+ * starting up; a song asked for meanwhile takes the click's PCM as it is (output_take), and a paused song's PCM is let
+ * go as the hold ends. A click's open waits out a busy PCM CLICK_BUSY_MS at most (another source holding it). */
+enum { BT_CLICK_WARM_MS = 15000, CLICK_BUSY_MS = 200 };
+static int bt_click_warm_ms(void) { /* Q2PLAYER_BT_CLICK_WARM_MS sets it for a test */
+    static int ms;
+    if (!ms) {
+        const char *e = getenv("Q2PLAYER_BT_CLICK_WARM_MS");
+        ms = e && atoi(e) > 0 ? atoi(e) : BT_CLICK_WARM_MS;
+    }
+    return ms;
+}
 static int last_hw = 17; /* the type of the device the last song was opened on (a Q2's) */
 
 static void click_session(int way, int kind, int paused) {
@@ -256,7 +269,10 @@ static void click_session(int way, int kind, int paused) {
         struct pcm_format f = {CLICK_RATE, 2, 2, 0, DSD_PCM};
         dac_song(way, DSD_PCM); /* the DAC may be in DoP mode from the last song */
         dac_mute(way);
-        if (!(out = output_open(&f, way, last_hw))) { failed_at = now; return; }
+        output_busy_wait(CLICK_BUSY_MS);
+        out = output_open(&f, way, last_hw);
+        output_busy_wait(-1);
+        if (!out) { failed_at = now; return; }
         out_way = way, failed_at = 0;
         output_volume(out, UNITY);
     } else {
@@ -264,8 +280,8 @@ static void click_session(int way, int kind, int paused) {
         output_hold(out);
     }
     dac_unmute(way, 1);
-    int64_t last = now_ms();
-    int clicks = 1;
+    int64_t last = now_ms(), hold = way == 1 ? bt_click_warm_ms() : CLICK_HOLD_MS;
+    int clicks = 1, song = 0;
     long frames = output_idle_click(out, kind);
     for (;;) {
         struct timespec until;
@@ -279,20 +295,24 @@ static void click_session(int way, int kind, int paused) {
         if (!c->click && !other) pthread_cond_timedwait(&c->wake, &c->mu, &until);
         int click = c->click;
         other = c->play || c->stop || c->seek || c->preload || c->close_preload || (paused && !c->paused) ||
-                car_way(c->outputway) != way;
+                car_way(c->outputway) != way || c->bt_release;
+        song = c->play && !c->stop;
         c->click = 0;
         pthread_mutex_unlock(&c->mu);
         int64_t now = now_ms();
         if (click) output_click(out, click), last = now, clicks++;
-        if (other || now - last >= CLICK_HOLD_MS) break;
+        if (other || now - last >= hold) break;
         frames += output_idle_fill(out);
     }
     dac_mute(way);
     output_idle_end(out);
-    if (!paused) close_output(0);
-    char line[128];
-    int n = snprintf(line, sizeof line, "q2player: %d click%s %s on way %d, %ld frames of silence written for them", clicks,
-                     clicks == 1 ? "" : "s", paused ? "paused" : "with nothing playing", way, frames);
+    int handed = !paused && song && way == 1; /* the song asked for takes this PCM: the stream runs on */
+    if (handed) out_cut = 1;                  /* its silence is not to be played out first */
+    else if (!paused) close_output(0);
+    char line[160];
+    int n = snprintf(line, sizeof line, "q2player: %d click%s %s on way %d, %ld frames of silence written for them%s",
+                     clicks, clicks == 1 ? "" : "s", paused ? "paused" : "with nothing playing", way, frames,
+                     handed ? "; the PCM kept for the song" : "");
     plog(frames ? 'I' : 'W', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
 }
 
@@ -575,7 +595,8 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
         if (want_scan != scan) stretch_speed(sx, (scan = want_scan) < 0 ? -scan / 100.0 : scan / 100.0);
         if (volume >= 0 && (way == 1 || way == 2)) output_volume(out, volume);
         if (paused) { /* a preload or a seek taken while paused: back to waiting; a click sounds in silence first */
-            if (click && pausing) click_session(way, click, 1), quiet_from = now_ms();
+            /* on Bluetooth the session was the warm hold: the PCM is let go as it ends, not BT_PAUSE_MS on */
+            if (click && pausing) click_session(way, click, 1), quiet_from = now_ms() - (way == 1 ? bt_pause_ms() : 0);
             continue;
         }
         if (pausing) dac_unmute(way, 1), output_pause(out, 0), pausing = 0; /* a resume is always a person's */
