@@ -1,7 +1,8 @@
 /* The DSP chain (docs/player-plan.md#architecture): what Q2 Muse's filter in hciplayer does (patch/peq_player.c),
- * as stages on the playback thread. In order, each left out while its setting is off: ReplayGain, the PEQ or 3EQ
- * (patch/peq.c, Q2 Muse's engine, compiled in as it is into the payload), Mono Audio, Swap L/R, crossfade (the hold
- * and the equal-power mix), AirPlay's tap. With every stage off a block goes to the output as the decoder gave it,
+ * as stages on the playback thread. In order, each left out while its setting is off: ReplayGain, Swap L/R, the PEQ
+ * or 3EQ (patch/peq.c, Q2 Muse's engine, compiled in as it is into the payload), Mono Audio, crossfade (the hold and
+ * the equal-power mix), AirPlay's tap. Swap L/R comes before the EQ so that the EQ's balance and its Channel: L and R
+ * bands act on the ear each channel is heard in, as stock's Balance (the DAC's or the output's volume) does. With every stage off a block goes to the output as the decoder gave it,
  * not a bit changed. With any on, the block is float from the first stage to one conversion
  * back at the end, which rounds and saturates as hciplayer's converters do.
  *
@@ -383,7 +384,7 @@ static void reader_after(struct dsp *s, const uint8_t *data, unsigned frames) {
     s->frame = -1;
 }
 
-/* The holder's stages (chain's: ReplayGain, the EQ, Mono Audio, Swap L/R) on n frames read back from the file. */
+/* The holder's stages (chain's: ReplayGain, Swap L/R, the EQ, Mono Audio) on n frames read back from the file. */
 static void stages(float *a, unsigned n) {
     int nch = xf.nch;
     if (xf.rg != 1)
@@ -391,15 +392,15 @@ static void stages(float *a, unsigned n) {
             float x = a[i] * xf.rg;
             a[i] = x > 1 ? 1 : x < -1 ? -1 : x;
         }
-    if (xf.set.mute != xf.muted && !(xf.muted = xf.set.mute)) peq_reset(&xf.eq, xf.rate, nch, &xf.preset);
-    if (!xf.set.mute) peq_process(&xf.eq, a, n);
-    if (xf.set.mono)
-        for (float *p = a, *end = a + 2 * n; p < end; p += 2) p[0] = p[1] = (p[0] + p[1]) * 0.5f;
     if (xf.set.swap)
         for (float *p = a, *end = a + 2 * n; p < end; p += 2) {
             float left = p[0];
             p[0] = p[1], p[1] = left;
         }
+    if (xf.set.mute != xf.muted && !(xf.muted = xf.set.mute)) peq_reset(&xf.eq, xf.rate, nch, &xf.preset);
+    if (!xf.set.mute) peq_process(&xf.eq, a, n);
+    if (xf.set.mono)
+        for (float *p = a, *end = a + 2 * n; p < end; p += 2) p[0] = p[1] = (p[0] + p[1]) * 0.5f;
 }
 
 /* The next n frames of the tail from the file into dst, as float after the holder's stages, each change of a setting
@@ -933,16 +934,16 @@ static int chain(struct dsp *s, const uint8_t *data, int frames, double pts, con
             a[i] = x > 1 ? 1 : x < -1 ? -1 : x;
         }
     if (cast) cast_jump(cast, s, n, rate);
+    if (swap) /* Swap L/R, before the EQ: its balance and Channel: L and R bands are the ear's, as stock's Balance is */
+        for (float *p = a, *end = a + 2 * n; p < end; p += 2) {
+            float left = p[0];
+            p[0] = p[1], p[1] = left;
+        }
     if (mute != cs.muted && !(cs.muted = mute)) /* the EQ's filters start again from rest */
         peq_reset(&s->dsp, rate, nch, &s->preset);
     if (!mute) peq_process(&s->dsp, a, n);
     if (mono) /* Mono Audio (patch/crossfade.c mono_sync), after the EQ's sides */
         for (float *p = a, *end = a + 2 * n; p < end; p += 2) p[0] = p[1] = (p[0] + p[1]) * 0.5f;
-    if (swap)
-        for (float *p = a, *end = a + 2 * n; p < end; p += 2) {
-            float left = p[0];
-            p[0] = p[1], p[1] = left;
-        }
     n = crossfade(s, a, n, nch, rate, said);
     reader_after(s, data, (unsigned)frames);
     if (cast) cast_tap_block(cast, s, a, n, nch, rate);

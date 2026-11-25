@@ -813,8 +813,10 @@ as a menu's; a lit row's foot never passes y 282.
 - **Moving a queued song**: a lifted song sits on a `#2C2C2E` card with 10 px corners, its title
   in Inter Medium 18 px; Playing Next's songs show a grip (three 18 x 2 px bars) on the right
   column in place of their arrows; the wheel carries it, Center puts it down, Return puts it back
-  where it was. Center held lifts a queued song only when the hold opens no menu (the second press
-  of a double press): the menu below comes first on every song row.
+  where it was. **Move**, in a Playing Next song's menu, lifts it, the word Edit Library's hint uses
+  for its lift ("Drag ≡ to move"), and its symbol the lift's grip; it stands last before the gap
+  and Remove from Queue, as a menu's destructive row is last after a gap. Center held lifts a
+  queued song itself only when the hold opens no menu (the second press of a double press).
 - **A song's menu**: Center held half a second on any song row (Playing Next's, the rest of the
   queue's, a shuffle's played songs above the playing one, a song still to download), or a finger
   held on one, opens the song's hold menu over the sheet (Play Next, Play Last, Add to Playlist,

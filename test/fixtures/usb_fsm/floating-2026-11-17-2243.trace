@@ -1,0 +1,16 @@
+# q2-usbtrace trace format (docs/internals.md#usb-tracer), built from a device log for test/unit/test_usb_fsm.py.
+# Source: q2-ab-state.log, 2026-11-17 22:43, build 8fd0ddcd, before PD18's pull-up (ID_PULL_UP): the pin floated; a
+# sample every 0.25 s, nothing attached, as transcribed in test/fw/test_usb_otg.py (AB_*): VBUS left at 431.82, PD18
+# low at 443.93 (12.1 s on: outside the window), that build's 6 s settle powered the bus at 450.47, PD18 high at
+# 461.11, and 7 s after the power's end PD18 low again at 468.54 (how long it lasted is not transcribed). What a
+# floating pin did, not the board with its pull-up. Assumed: a cable before 431.82, online 1 with it, 0 after;
+# stock's power off at 461.60 (its next pass) and the dying VBUS 1.6 s after [E].
+420.000000 start
+420.000000 s PD17=0 PD18=1 PC20=0 on=1
+431.820000 s PD17=1 on=0
+443.930000 s PD18=0
+450.470000 s PC20=1 PD17=0 on=0
+461.110000 s PD18=1
+461.600000 s PC20=0
+463.200000 s PD17=1
+468.540000 s PD18=0

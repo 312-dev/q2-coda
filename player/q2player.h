@@ -61,6 +61,9 @@ struct ctl {
     /* mcl-btrelease (patch/headset.c: the headset sent the pause): a song paused on Bluetooth closes its PCM at once,
      * not BT_PAUSE_MS on (docs/internals.md#bluetooth-pause); cleared by a play and as the playback thread takes it */
     int bt_release;
+    /* the headset sent the last pause (mcl-btrelease taken): it may have left for another host, so the Clicker's clicks
+     * open no Bluetooth PCM for themselves (the buzzer still clicks) until a play, a song or another output */
+    int bt_away;
     /* status */
     int state, has_info, position;
     struct info info;
@@ -186,6 +189,7 @@ int output_click(struct output *, int kind); /* mixed into what is about to be h
  * output_idle_click for each click, output_idle_fill to keep silence ahead of what plays, and output_idle_end, which
  * drops that silence: a held PCM is paused again as far as the song is concerned. The click and the fill answer the
  * frames of silence they wrote. */
+void output_busy_wait(int ms); /* how long a Bluetooth open waits out a busy PCM, BT_BUSY_MS unless set */
 void output_hold(struct output *);
 int output_idle_click(struct output *, int kind);
 int output_idle_fill(struct output *);
@@ -267,6 +271,8 @@ void dsd_reset(struct dsd_pack *);
 int dsd_pack(struct dsd_pack *, const uint8_t *data, int bytes, int planar, int lsb_first, int skip, const uint8_t **out);
 
 #define SCAN_FILE PEQ_ROOT "/tmp/q2scan" /* there while the song playing can be scanned at speed (mcl-scan, patch/seek.c) */
+/* made with {player-status\error} for a song whose output would not open or take audio (patch/output_fail.c) */
+#define OUTPUT_FAILED_FILE PEQ_ROOT "/tmp/q2outfail"
 /* stretch.c: scan's time-stretch, the song at 2 to 8 times its speed at its own pitch (docs/player.md#scan) */
 struct stretch;
 double stretch_top(int rate);                         /* the highest speed at a rate */

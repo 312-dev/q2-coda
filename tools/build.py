@@ -282,6 +282,10 @@ SPLASH = 'usr/bin/q2splash'
 REMOTE = 'usr/bin/q2remote'
 # --dev only (docs/adb.md#q2eq, patch/q2eq.c): the EQ editor from a computer, through demo's q2eq_poll
 Q2EQ = 'usr/bin/q2eq'
+# --dev only (docs/internals.md#usb-tracer, patch/q2usbtrace.c): the USB port's read-only recorder and the state
+# machine's shadow (patch/usb_fsm.c), started by S90play (USBTRACE_HOOK)
+USBTRACE = 'usr/bin/q2-usbtrace'
+USBTRACE_SOURCES = ['q2usbtrace', 'q2usbtrace_core', 'usb_fsm', 'q2guard_card']
 # The car remote daemon (docs/remote-protocol.md, docs/internals.md#car-remote): demo's payload starts it
 # while Settings > Car Remote is on (patch/coda_rc_shim.c). SQLite reads the library; Bluetooth LE is its own
 # GATT server on the kernel's sockets (patch/coda_rc_ble.c).
@@ -514,6 +518,12 @@ Q2UPDATE = 'usr/bin/q2update'
 ADB_HOOK = (b'/usr/bin/q2remote &\n',
             b'/usr/bin/q2remote &\n/usr/bin/q2adb-gadget setup && (while :; do /usr/bin/adbd </dev/null >/dev/null 2>&1 &'
             b' /usr/bin/q2adb-gadget bind; wait $!; sleep 2; done) &\n')
+# --dev only (docs/internals.md#usb-tracer): q2-usbtrace, after ADB_HOOK's lines. Started again if it ends
+# with an error, three times a boot at most; it ends with 0, and is not started again, when one of its two flag
+# files is there (/mnt/data/q2-usbtrace.off, the card's .q2muse/usbtrace.off), which it checks each second.
+USBTRACE_HOOK = (ADB_HOOK[1],
+                 ADB_HOOK[1] + b'(n=0; while [ $n -lt 4 ]; do /usr/bin/q2-usbtrace </dev/null >/dev/null 2>&1 && break;'
+                 b' n=$((n+1)); sleep 5; done) &\n')
 # Stock's USB scripts, which demo runs to start and stop USB storage and the USB DAC: in a --dev build each is
 # wrapped (adb_wrapper) and stock's kept beside it as <name>_stock.sh, so the ADB gadget gives way to stock's.
 USB_SCRIPTS = ('storage_config.sh', 'uac_device_config.sh')
@@ -842,6 +852,9 @@ MAINSCHEDULING_CALL = (0x4f42a4, 0x0320f809)
 # mclStartPlayer's wired mute and sleep from the idle player (crossfade.c start_mute, docs/internals.md#wired-start).
 START_MUTE_CALL = (0x5bf8c4, 0x0411fefa)  # bal mclSetMute; its delay slot (a0=1) stays
 START_SLEEP_CALL = (0x5bf8dc, 0x0320f809)  # jalr usleep, a0=100000
+# player_save_stop's wait after mclStop, left out inside stock's OTG pass (usb_otg.c otg_stop_sleep,
+# docs/internals.md#otg-host-power).
+OTG_STOP_SLEEP_CALL = (0x52077c, 0x0320f809)  # jalr usleep; its delay slot (a0=300000) stays
 # checkBluetoothStatus' jalr player_save_start once a headset's A2DP comes up (a0 0: the queue restarts
 # unpaused, whatever it was doing). It becomes jal ringnav_bt_connect_start (docs/internals.md#resume-on-connect).
 BT_CONNECT_START = (0x4fdcbc, 0x0320f809)
@@ -2363,7 +2376,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_volume.c', 'output_rule.c', 'usb_record.c', 'usb_ui.c', 'usb_car.c', 'standby_usb.c', 'card_release.c', 'adb_trust.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'localsend_ui.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'search_bar.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'album_cover.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_callerten.c', 'game_popstall.c', 'game_solitaire.c', 'game_embergarden.c', 'game_sudoku.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'centre_menu.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_pair.c', 'bt_ui.c', 'bt_trace.c', 'bt_detail.c', 'bt_vol_limit.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'vol_pill.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'np_rate.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c', 'autozone.c', 'player_push.c', 'card_watch.c', 'offline.c', 'radio_tuner.c', 'radio_pane.c', 'bt_cover.c', 'now_source.c', 'ui_watch.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_volume.c', 'output_rule.c', 'usb_record.c', 'usb_ui.c', 'usb_car.c', 'standby_usb.c', 'card_release.c', 'adb_trust.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'localsend_ui.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'search_bar.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'album_cover.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_callerten.c', 'game_popstall.c', 'game_solitaire.c', 'game_embergarden.c', 'game_sudoku.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'centre_menu.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_pair.c', 'bt_ui.c', 'bt_trace.c', 'bt_detail.c', 'bt_vol_limit.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'vol_pill.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'np_rate.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c', 'autozone.c', 'player_push.c', 'card_watch.c', 'offline.c', 'radio_tuner.c', 'radio_pane.c', 'bt_cover.c', 'now_source.c', 'ui_watch.c', 'output_fail.c']
 
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
@@ -2398,7 +2411,7 @@ def compile_payload(out):  # pragma: no mutate block
     # -O2: lld merges a string constant that ends another into its tail, which -O1 does not (3,328 bytes)
     run('ld.lld','-m','elf32ltsmip','-O2','--gc-sections','-T',ROOT/'patch/link.ld','-e','ringnav',
         *[f'--undefined={name}' for _, name, _ in HOOKS.values()], f'--undefined={GRADIENT_LEAF[2]}', '--undefined=ringnav_lrc_open',
-        f'--undefined={WM_PAINT_LEAF[2]}', f'--undefined={QUEUE_LEAF[2]}', '--undefined=ringnav_audio_extension', '--undefined=start_mute', '--undefined=start_sleep', '--undefined=ringnav_genre_copy', '--undefined=ringnav_lyric_save', '--undefined=ringnav_lyric_drop', '--undefined=ringnav_cover_copy','--undefined=ringnav_folder_rm','--undefined=ringnav_bootmode', '--undefined=ringnav_ts_read',
+        f'--undefined={WM_PAINT_LEAF[2]}', f'--undefined={QUEUE_LEAF[2]}', '--undefined=ringnav_audio_extension', '--undefined=start_mute', '--undefined=start_sleep', '--undefined=otg_stop_sleep', '--undefined=ringnav_genre_copy', '--undefined=ringnav_lyric_save', '--undefined=ringnav_lyric_drop', '--undefined=ringnav_cover_copy','--undefined=ringnav_folder_rm','--undefined=ringnav_bootmode', '--undefined=ringnav_ts_read',
         '--undefined=ringnav_baidu_poll', '--undefined=ringnav_stock_tls', '--undefined=ringnav_tidal_poll', '--undefined=catalogue_access', '--undefined=addon_m3u_dir', f'--undefined={COVERINFO_CALL[2]}',
         '--undefined=coverflow_player_cover', '--undefined=coverflow_grid_cover', '--undefined=coverflow_album_cover', '--undefined=coverflow_folder_cover', '--undefined=headset_bt_init', '--undefined=bt_pair_register',
         '--undefined=headset_status_register', '--undefined=bt_quality_site', '--undefined=headset_bt_autolink', '--undefined=bt_stopped_toast',
@@ -2821,6 +2834,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     patch_word(patched, *MAINSCHEDULING_CALL, jal(ps['ringnav_mainscheduling']), 'player scheduling paced')
     patch_word(patched, *START_MUTE_CALL, jal(ps['start_mute']), 'natural start: no mute before the end')
     patch_word(patched, *START_SLEEP_CALL, jal(ps['start_sleep']), 'natural start: no sleep before the end')
+    patch_word(patched, *OTG_STOP_SLEEP_CALL, jal(ps['otg_stop_sleep']), "USB DAC's restart: no wait after the stop")
     for address, old, new, fn in HOLD_KEYS:
         patch_word(patched, address, old, new or jal(ps[fn]), 'Play/Pause and Return hold time')
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, 0x51dcbc))[0] == 0x8f99b770,
@@ -3065,7 +3079,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(s90play.count(LOG_HOOK[0]) == 1, 'Unexpected demo loop')
     check(s90play.count(WHEEL_LOG_HOOK[0]) == 1, 'Unexpected card path')
     check(s90play.count(GUARD_DEV_HOOK[0]) == 1, 'Unexpected q2guard start')
-    (out/'S90play').write_bytes(s90play.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK) if dev else s90play)
+    (out/'S90play').write_bytes(s90play.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*USBTRACE_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK) if dev else s90play)
     (out/'config.ini').write_bytes(default_config(cat(DEFAULT_CONFIG)))
     s11logo = cat(S11LOGO)
     check(s11logo.count(LOGO_HOOK[0]) == 1, 'Unexpected S11logo_display_shell')
@@ -3210,10 +3224,12 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                **{FONT_DIR + n: ('etc/hosts', (ROOT/'assets/fonts'/n).read_bytes()) for n in FONT_NOTICES},
                                **(adb_files(out, cat) if dev else {}),
                                **({REMOTE: (HELPER_LIKE, compile_helper(out, cat, 'remote', 'q2remote', HELPER_LIBS[:1])),
-                                   Q2EQ: (HELPER_LIKE, compile_helper(out, cat, 'q2eq', 'q2eq', HELPER_LIBS[:1]))} if dev else {})}.items():
+                                   Q2EQ: (HELPER_LIKE, compile_helper(out, cat, 'q2eq', 'q2eq', HELPER_LIBS[:1])),
+                                   USBTRACE: (HELPER_LIKE, compile_helper(out, cat, USBTRACE_SOURCES, 'q2-usbtrace',
+                                                                          HELPER_LIBS[:1]))} if dev else {})}.items():
         stock = need(inode(p, like.encode()), f'Missing stock inode for {path}')
         name = path.rsplit('/', 1)[-1]
-        if path not in (HELPER, BOOT, SPLASH, REMOTE, Q2EQ, CODA_RC, GUEST, Q2SEND, RADIOFETCH, Q2IAP): (out/name).write_bytes(data)  # package the hashed bytes, as the logo
+        if path not in (HELPER, BOOT, SPLASH, REMOTE, Q2EQ, USBTRACE, CODA_RC, GUEST, Q2SEND, RADIOFETCH, Q2IAP): (out/name).write_bytes(data)  # package the hashed bytes, as the logo
         if inode(p, path.encode()):  # stock has a file of that name: ours takes its inode
             changed_assets[path] = dict(original_sha256=sha(cat(path)), sha256=sha(data))
             p = swap_inode(p, path.encode(), out/name)
@@ -3292,7 +3308,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         **({'aic_notifier': aic_notifier} if aic_notifier else {}),
         patch_bytes=len(payload), scratch_free_bytes=scratch_free, ring_step_pixels=RING_STEP,
         audio_extension_calls=[dict(address=hex(a), original='0x0320f809', replacement=hex(jal(ps['ringnav_audio_extension']))) for a in AUDIO_EXTENSION_CALLS],
-        version=version, dev=dev, update_repo=repo, signing_key=key.hex(), bluealsa_sha256=sha(bluealsa), bluetoothd_sha256=sha(bluetoothd), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), q2_iroh_sha256=sha((out/'q2-iroh').read_bytes()), q2_iroh_bytes=len((out/'q2-iroh').read_bytes()), q2_guest_sha256=sha((out/'q2-guest').read_bytes()), q2_iap_sha256=sha((out/'q2-iap').read_bytes()), q2_iap_bytes=len((out/'q2-iap').read_bytes()), usb_f_uac1_sha256=sha((out/'usb_f_uac1.ko').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
+        version=version, dev=dev, update_repo=repo, signing_key=key.hex(), bluealsa_sha256=sha(bluealsa), bluetoothd_sha256=sha(bluetoothd), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), q2_iroh_sha256=sha((out/'q2-iroh').read_bytes()), q2_iroh_bytes=len((out/'q2-iroh').read_bytes()), q2_guest_sha256=sha((out/'q2-guest').read_bytes()), q2_iap_sha256=sha((out/'q2-iap').read_bytes()), q2_iap_bytes=len((out/'q2-iap').read_bytes()), usb_f_uac1_sha256=sha((out/'usb_f_uac1.ko').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes()), 'q2_usbtrace_sha256': sha((out/'q2-usbtrace').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
         **({'rotator_clock': rotator} if rotator else {}),
         **({'adbd': adbd_record(out)} if dev else {}),
         q2player_sha256=sha(q2player.read_bytes()),

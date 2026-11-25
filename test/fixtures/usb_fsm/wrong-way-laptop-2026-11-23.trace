@@ -1,0 +1,30 @@
+# q2-usbtrace trace format (docs/internals.md#usb-tracer), built from a device log for test/unit/test_usb_fsm.py.
+# Source: pd18-owner2.log, 2026-11-23, V1PXi, a read-only sampler every 0.25 s (uptime), the owner's rounds 1 to 3
+# with a laptop's USB-C cable; stock's otg-on and otg-trial-off from q2-usb-2.log (demo ms 17780646 and 17789643,
+# uptime = demo + 4.13 s here: owner2's PD17 went low with the power at 17784.78). Round 3: the cable back in at
+# 17777.35 brought PD18 low and no VBUS (the Q2 resolved as the source), out at 17833.67, replugged at 17841.91.
+# The sampler has no online field: 1 is assumed while the laptop's VBUS is in, 0 otherwise.
+17660.000000 start
+17660.000000 s PD17=0 PD18=1 PC20=0 on=1 id=device
+17660.000000 udc configured
+17668.640000 s PD17=1 on=0
+17668.640000 udc suspended
+17693.120000 s PD17=0 on=1
+17693.380000 udc configured
+17702.410000 udc suspended
+17702.680000 s PD17=1 on=0
+17736.670000 s PD17=0 on=1
+17736.670000 udc default
+17736.930000 udc configured
+17745.150000 udc suspended
+17745.420000 s PD17=1 on=0
+17777.350000 s PD18=0
+17784.780000 s PC20=1 PD17=0 on=0
+17785.050000 s id=host
+17785.050000 udc not_attached
+17793.820000 s PC20=0 PD17=1
+17794.090000 s id=device
+17833.670000 s PD18=1
+17841.910000 s PD17=0 on=1
+17842.170000 udc addressed
+17842.440000 udc configured

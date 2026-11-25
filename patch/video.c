@@ -439,8 +439,8 @@ static int radio(int argc, char **argv) {
 }
 
 /* -t DEVICE [VOLUME]: Radio's sound (radio_tuner.c, docs/internals.md#radio-static). One
- * process for the tuner's whole stay: the FM receiver (fmrx.c) runs continuously on ALSA DEVICE, hiss between
- * stations, and a station's stream, when demo names one, is its programme: ffmpeg decodes the URL to 48 kHz
+ * process for the tuner's whole stay: the FM receiver (fmrx.c) runs on ALSA DEVICE while it plays, hiss between
+ * stations (paused, it lets DEVICE go: tuner_release), and a station's stream, when demo names one, is its programme: ffmpeg decodes the URL to 48 kHz
  * stereo into a TUNER_RING ring, which the receiver plays from once TUNER_PRIME of it is in. A ring that runs
  * dry (the network stalled) drops the carrier, the empty channel's hiss, until it is primed again, as a fading
  * signal would; a stream whose ffmpeg ends is started again for as long as its station is tuned, later each time
@@ -467,6 +467,8 @@ static struct {
     long long ended; /* when the stream's ffmpeg ended, to start it again */
     fmrx_params p;   /* demo's; the writer copies it a write at a time */
     char url[512], state[12], title[256], codec[16];
+    char dev[32]; /* the ALSA device, for the writer to open again after a release */
+    int dac;      /* the headphone DAC's control (sound_open), -1 on another output */
 } tu;
 static fmrx rx;
 
@@ -536,11 +538,42 @@ static void tuner_start(void) {
     tuner_state("connecting");
 }
 
+/* The output let go while the receiver has nothing to play (TUNER_RELEASE_MS paused and faded): the
+ * DAC muted first, as hciplayer mutes it at a close, so the Library's player or anything else can
+ * open it (docs/internals.md#output-failure). */
+#define TUNER_RELEASE_MS 2000
+#define TUNER_REOPEN_MS 200 /* an output another holds, asked again this often */
+static void tuner_say(const char *what, const char *why) { /* a line on stderr, demo's log */
+    char s[112];
+    int n = snprintf(s, sizeof s, "q2video: the receiver %s %s%s\n", what, tu.dev, why);
+    write(2, s, (unsigned)n < sizeof s ? (unsigned)n : sizeof s - 1);
+}
+static void tuner_release(void) {
+    int on = 1;
+    if (!au.pcm) return;
+    if (tu.dac >= 0) ioctl(tu.dac, DAC_MUTE, &on);
+    snd_pcm_close(au.pcm);
+    au.pcm = 0;
+    tuner_say("let go of", ": nothing to play");
+}
+/* ...and taken again when there is: 0 when it is open, -1 while another holds it. */
+static int tuner_reclaim(void) {
+    int off = 0, err;
+    if (au.pcm) return 0;
+    if ((err = snd_pcm_open(&au.pcm, tu.dev, 0, 0))) return au.pcm = 0, -1;
+    if ((err = snd_pcm_set_params(au.pcm, 2, 3, 2, RATE, 1, LATENCY))) /* S16_LE, RW_INTERLEAVED */
+        return snd_pcm_close(au.pcm), au.pcm = 0, -1;
+    if (tu.dac >= 0) ioctl(tu.dac, DAC_PCM, &off), ioctl(tu.dac, DAC_MUTE, &off);
+    tuner_say("took", " again");
+    return 0;
+}
+
 /* The receiver, a write at a time, from the ring when it is primed. */
 static void *tuner_writer(void *unused) {
     static short pcm[2 * TUNER_FRAMES];
     static float in[2 * TUNER_FRAMES], out[2 * TUNER_FRAMES];
     int idle = 0;
+    long long idle_at = 0;
     while (!tu.quit) {
         int prog = tuner_take(&tu.feed, tu.head - tu.tail); /* dry: the carrier drops until primed again */
         for (unsigned i = 0; prog && i < TUNER_FRAMES; ++i) {
@@ -554,8 +587,14 @@ static void *tuner_writer(void *unused) {
         if (click) tuner_click_start(&tu.click, click, RATE);
         int ran = fmrx_run(&rx, &p, prog ? in : 0, out, TUNER_FRAMES); /* 0: silence in out */
         if (!ran && tu.click.left <= 0) {
-            if (!idle) snd_pcm_drop(au.pcm), idle = 1; /* paused and faded: nothing to compute or play */
+            if (!idle && au.pcm) snd_pcm_drop(au.pcm); /* paused and faded: nothing to compute or play */
+            if (!idle) idle = 1, idle_at = now_ms();
+            if (now_ms() - idle_at >= TUNER_RELEASE_MS) tuner_release();
             usleep(20000);
+            continue;
+        }
+        if (tuner_reclaim()) { /* the output is another's for now: tried again, nothing written */
+            usleep(TUNER_REOPEN_MS * 1000);
             continue;
         }
         if (idle) snd_pcm_prepare(au.pcm), idle = 0;
@@ -598,7 +637,10 @@ static void tuner_key(int sock, int soft) {
 }
 
 static int tuner(int argc, char **argv) {
-    int soft = argc > 2 && argv[2][0] != 'h', dac = sound_open(argv[1], argc > 2 ? argv[2] : 0, RATE), on = 1;
+    char usb[16];
+    snprintf(tu.dev, sizeof tu.dev, "%s", strcmp(argv[1], "usb") ? argv[1] : usb_device(usb));
+    int soft = argc > 2 && argv[2][0] != 'h', dac = sound_open(tu.dev, argc > 2 ? argv[2] : 0, RATE), on = 1;
+    tu.dac = dac;
     tu.ring = malloc(TUNER_RING * 4);
     tu.ap = tu.ep = -1;
     tu.p.level = FMRX_NO_CARRIER, tu.p.gain = 1;

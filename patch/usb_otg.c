@@ -26,8 +26,12 @@
 #include "navigation.h"
 
 /* The ID low and no VBUS this long before the Q2 powers the bus, for a low the blank did not catch.
- * The board's own lows, with nothing attached, came after VBUS left and are the blank's. */
-#define OTG_SETTLE_MS 6000
+ * Every low logged with the pull-up on and nothing attached began 2.15 to 7.02 s after VBUS left
+ * (OTG_BLANK_MS's), and the longest that nothing cut short lasted 2.15 s: read on stock's
+ * once-a-second pass, such a low spans at most three reads 2 s apart, short of this, should one
+ * ever begin outside the blank. The power comes on the fourth pass that reads an adapter's low,
+ * 3 to 4 s after the plug. */
+#define OTG_SETTLE_MS 3000
 /* A low ID starting this soon after VBUS left the port is the board's, not an adapter's: with
  * PD18's pull-up on, the lows started 2.15 to 7.02 s after it (q2-pull-state.log, 2026-11-17,
  * 0.54 s samples, 4 lows). */
@@ -115,6 +119,7 @@ static struct {
     int wrong;
     unsigned nosrc_at; /* PD17 low with no source since; nosrc: 1 so, 2 said */
     int nosrc;
+    int in_pass; /* inside stock's pass (otg_stock): otg_stop_sleep leaves out player_save_stop's wait */
 } otg __attribute__((section(".scratch")));
 
 /* The PHY's ID pull-up on and the controller held at device: at boot (usb_record.c
@@ -137,7 +142,9 @@ static void gone(unsigned now) {
 static int otg_stock(unsigned now, int id_as_low, const char *off) {
     int was = g_last_otgid;
     otg.id_as_low = id_as_low;
+    otg.in_pass = 1;
     int result = stock_otg_status_trampoline();
+    otg.in_pass = 0;
     otg.id_as_low = 0;
     if (g_last_otgid != was) {
         usb_record(g_last_otgid == 1 ? "otg-on" : off);
@@ -152,6 +159,13 @@ static int otg_stock(unsigned now, int id_as_low, const char *off) {
     }
     return result;
 }
+
+/* player_save_stop's usleep(300000) after mclStop (0x52077c, tools/build.py OTG_STOP_SLEEP_CALL). Stock's pass calls
+ * player_save_stop on the UI thread when a USB DAC comes or goes, then restarts the song on the new way
+ * (player_save_start); mclStop has already waited for q2player's stopstatus, which it sends once its PCM is closed
+ * (player/engine.c), so inside the pass the wait only held the UI (docs/internals.md#otg-host-power). Every other
+ * caller keeps it: q2video or a game opening bluealsa's PCM after a stop needs bluealsa to have seen the close. */
+int otg_stop_sleep(unsigned us) { return otg.in_pass ? 0 : usleep(us); }
 
 /* PD17's VBUS (1 for VBUS on the port) as a cable's: 0 while the Q2's own bus power, ended, dies
  * away (OTG_OWN_VBUS_MS). Every PD17 read of this file and stock's cable read (usb_charge.c

@@ -1,0 +1,17 @@
+# q2-usbtrace trace format (docs/internals.md#usb-tracer), built from a device log for test/unit/test_usb_fsm.py.
+# Source: q2-usb-2.log, 2026-11-22, a computer's cable in through two Standbys (demo ms as s; demo's clock does not
+# run in a suspend, the wall time says how long it slept). First: the link kept (udc configured at standby, wake and
+# wake+5s). Second: the link down at the standby and the wake (conn=disconn, udc not_attached), configured again by
+# wake+5s (4032.425): a host that answers only seconds after the wake.
+541.000000 start
+541.000000 s PD17=0 PD18=1 PC20=0 on=1 dev=0
+541.000000 udc configured
+541.393000 wake slept=88.000
+541.393000 s PD17=0 PD18=1 PC20=0 on=1 dev=0
+541.393000 udc configured
+546.917000 s conn=connect
+4027.273000 udc not_attached
+4027.374000 wake slept=57.000
+4027.374000 s PD17=0 PD18=1 PC20=0 on=1 dev=0
+4027.374000 udc not_attached
+4032.425000 udc configured

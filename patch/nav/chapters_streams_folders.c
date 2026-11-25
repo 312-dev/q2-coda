@@ -332,14 +332,16 @@ int ringnav_usbmode(void *a, void *b, void *c, void *d) {
     return stock_usbmode_trampoline(a, b, c, d);
 }
 
-/* mclStartPlayer, every local track's start: a playing librespot or radio station lets the DAC's
- * PCM go first, a hold on the Library's place (now_source.c now_hold) ends, and where the song
- * starts is noted for Now Playing until it is heard (now_source.c now_starting). A track too long
- * for RAM fails as stock's own checks do, with -1; so, silently, does any start while a game has
- * the sound (addon.c addon_game_audio: a card game's, Caller Ten's contest): a jack or USB DAC
- * change and a Bluetooth drop come here through player_save_start, and the game keeps its PCM; and
- * so does player_start's replay of the queue it had after a press that loaded nothing (a server
- * row, playback.c playback_start_refused). */
+/* mclStartPlayer, every local track's start: a playing librespot, radio station or Radio's receiver
+ * lets the output go first (Radio ends: stock's own starts, an output change's player_save_start and
+ * its dialog's skip, come here and not through ringnav_load's tuner_yield, and met the receiver's held
+ * PCM, docs/internals.md#output-failure), a hold on the Library's place (now_source.c now_hold) ends,
+ * and where the song starts is noted for Now Playing until it is heard (now_source.c now_starting).
+ * A track too long for RAM fails as stock's own checks do, with -1; so, silently, does any start
+ * while a game has the sound (addon.c addon_game_audio: a card game's, Caller Ten's contest): a jack
+ * or USB DAC change and a Bluetooth drop come here through player_save_start, and the game keeps its
+ * PCM; and so does player_start's replay of the queue it had after a press that loaded nothing (a
+ * server row, playback.c playback_start_refused). */
 int ringnav_start_player(void) {
     if (playback_start_refused()) return -1;
     if (addon_game_audio()) return -1;
@@ -347,8 +349,13 @@ int ringnav_start_player(void) {
     headset_manual();
     spot_yield();
     radio_stop();
-    now_drop();     /* the player's own place from now on, not a hold's (now_source.c) */
-    now_starting(); /* where it starts, read until it is heard (now_source.c) */
+    now_drop(); /* the player's own place from now on, not a hold's (now_source.c) */
+    if (tuner_state()) {
+        ulog('I', "radio", "the receiver stopped: the Library's player starts");
+        tuner_stop(); /* after now_drop, so Radio's end gives back no held song */
+    }
+    output_fail_start(); /* a start that is not stock's skip ends a run of failed songs */
+    now_starting();      /* where it starts, read until it is heard (now_source.c) */
     playback_track_speed();
     return stock_start_player_trampoline();
 }

@@ -1,0 +1,32 @@
+# q2-usbtrace trace format (docs/internals.md#usb-tracer), built from a device log for test/unit/test_usb_fsm.py.
+# Source: q2-replug2-state.log, 2026-11-17, build p32b (before the blank and the settle), a pin sample every 0.5 s,
+# as transcribed in test/fw/test_usb_otg.py LOGGED and docs/internals.md#otg-host-power: each run is an unplug from a
+# computer, PD18 low after it, and stock's bus power "in the next pass (within 0.53 s every time)", so otg-on is put
+# 0.53 s into the low (an upper bound). The log has no online field: 1 is assumed while the computer's cable is in,
+# 0 after. After stock's otg-on the pins are stock's doing (its power holds PD18 low and masks the cable), so the
+# replay is judged only up to that line; each run ends there.
+602.900000 start
+602.900000 s PD17=0 PD18=1 PC20=0 on=1
+607.900000 s PD17=1 on=0
+608.970000 s PD18=0
+609.500000 s PC20=1 PD17=0
+617.250000 start
+617.250000 s PD17=0 PD18=1 PC20=0 on=1
+622.250000 s PD17=1 on=0
+623.320000 s PD18=0
+623.850000 s PC20=1 PD17=0
+637.940000 start
+637.940000 s PD17=0 PD18=1 PC20=0 on=1
+642.940000 s PD17=1 on=0
+644.530000 s PD18=0
+645.060000 s PC20=1 PD17=0
+650.130000 start
+650.130000 s PD17=0 PD18=1 PC20=0 on=1
+655.130000 s PD17=1 on=0
+658.310000 s PD18=0
+658.840000 s PC20=1 PD17=0
+660.200000 start
+660.200000 s PD17=0 PD18=1 PC20=0 on=1
+665.200000 s PD17=1 on=0
+665.730000 s PD18=0
+666.260000 s PC20=1 PD17=0

@@ -505,6 +505,57 @@ def test_return_puts_a_lifted_row_back(fw, plain):
     assert [q[:2] for q in page.queued] == ['05', '06'] and page.selected()[0] == 1
 
 
+def test_move_in_a_playing_next_rows_menu_lifts_it_and_centre_puts_it_down(fw, plain, recs):
+    """Move, the menu's row for a Playing Next song (qm_held_move, upnext.c un_move): the same lift as the held Centre,
+    the wheel carrying it, Centre putting it down; on a coming row, no Move."""
+    from test_centre_menu import Held, keyrec, library_records
+    queue, page = plain
+    for at in (5, 6, 7):
+        queue.queue(at, 2)
+    page.open()
+    library_records(queue, recs)  # the hold menu hashes records whole
+    page.select(1)  # Playing Next's first, queue index 3
+    keys = keyrec(fw, O['KEY_PLAY'])  # un_menu_hold called alone: the key a held Play/Pause records
+    assert fw.fn('un_menu_hold', C.c_int, C.c_void_p, C.c_int)(PAGE, 1) == 1
+    held = fw.var('navigation__qm_held', Held)
+    assert held.move and held.extra == b'Remove from Queue'
+    C.CFUNCTYPE(None)(held.move)()  # Move picked, once qm_run has checked the record
+    assert page.key(KEY_NEXT) == 1 and page.key(KEY_NEXT) == 1
+    assert page.key(KEY_CENTER) == 1
+    assert page.queued == ['Song 4', 'Song 5', 'Song 3']
+    del keys
+
+
+def test_move_then_return_puts_the_row_back(fw, plain, recs):
+    from test_centre_menu import Held, keyrec, library_records
+    queue, page = plain
+    for at in (5, 6):
+        queue.queue(at, 2)
+    page.open()
+    library_records(queue, recs)
+    page.select(1)
+    keys = keyrec(fw, O['KEY_PLAY'])  # un_menu_hold called alone: the key a held Play/Pause records
+    assert fw.fn('un_menu_hold', C.c_int, C.c_void_p, C.c_int)(PAGE, 1) == 1
+    C.CFUNCTYPE(None)(fw.var('navigation__qm_held', Held).move)()
+    page.key(KEY_NEXT)
+    assert page.key(KEY_RETURN) == 1
+    assert page.queued == ['Song 3', 'Song 4'] and page.selected()[0] == 1
+    del keys
+
+
+def test_a_coming_rows_menu_has_no_move(fw, plain, recs):
+    from test_centre_menu import Held, keyrec, library_records
+    queue, page = plain
+    queue.queue(7, 2)
+    page.open()
+    library_records(queue, recs)
+    page.select(2)  # the rest of the queue
+    keys = keyrec(fw, O['KEY_PLAY'])  # un_menu_hold called alone: the key a held Play/Pause records
+    assert fw.fn('un_menu_hold', C.c_int, C.c_void_p, C.c_int)(PAGE, 1) == 1
+    assert not fw.var('navigation__qm_held', Held).move
+    del keys
+
+
 def test_centre_held_on_a_coming_row_lifts_nothing(fw, plain):
     queue, page = plain
     queue.queue(7, 2)

@@ -16,6 +16,7 @@
 #include "q2player.h"
 #include <errno.h>
 #include <math.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +33,11 @@
 
 enum { BUFFER_US = 500000, PERIODS = 16 };
 enum { BT_ASK = 48000 }; /* what stock asks bluealsa for, whatever the file (reinit_audio_chain, 0x42ecc0) */
+/* A Bluetooth open's wait for a busy PCM (alsa_open_bt), BT_BUSY_MS unless output_busy_wait set it (a click's, shorter:
+ * engine.c CLICK_BUSY_MS) */
+enum { BT_BUSY_MS = 1500, BT_BUSY_STEP_MS = 50 };
+static int busy_ms = BT_BUSY_MS;
+void output_busy_wait(int ms) { busy_ms = ms < 0 ? BT_BUSY_MS : ms; }
 
 /* What a device takes, asked on the DAC's and a USB DAC's ways (choose): bit i of rates is RATES[i] (at the open's
  * format and channels), own the song's rate when the device takes it and it is none of RATES; fmts is CAP_* bits,
@@ -525,16 +531,71 @@ done:
  * another opened at once met it on a Q2. On Bluetooth the open is tried again BT_BUSY_STEP_MS apart for up to
  * BT_BUSY_MS (docs/internals.md#bluetooth-pause), the play loop held meanwhile, and the wait is said once: opened
  * after it, or still busy, as another client (an AirPlay receiver, q2video's sources) holds the PCM. */
-enum { BT_BUSY_MS = 1500, BT_BUSY_STEP_MS = 50 };
+/* Who holds card's first playback PCM, for the busy line: its owner_pid from the kernel's status of the substream and
+ * that process's command line, as `pid 812 (/usr/bin/q2video -t plughw:0,0)` (docs/internals.md#output-failure);
+ * Q2PLAYER_PROC stands for /proc in a host test. Empty when the status names no owner. */
+static void pcm_holder(int card, char *out, size_t size) {
+    const char *proc = getenv("Q2PLAYER_PROC") ? getenv("Q2PLAYER_PROC") : "/proc";
+    char path[96], line[96], cmd[64] = "";
+    int pid = 0;
+    out[0] = 0;
+    snprintf(path, sizeof path, "%s/asound/card%d/pcm0p/sub0/status", proc, card);
+    FILE *f = fopen(path, "r");
+    while (f && !pid && fgets(line, sizeof line, f)) sscanf(line, "owner_pid : %d", &pid);
+    if (f) fclose(f);
+    if (pid <= 0) return;
+    snprintf(path, sizeof path, "%s/%d/cmdline", proc, pid);
+    int fd = open(path, O_RDONLY | O_CLOEXEC), n = fd >= 0 ? (int)read(fd, cmd, sizeof cmd - 1) : 0;
+    if (fd >= 0) close(fd);
+    for (int i = 0; i < n - 1; ++i)
+        if (!cmd[i]) cmd[i] = ' '; /* its arguments, NUL apart */
+    cmd[n > 0 ? n : 0] = 0;
+    snprintf(out, size, ", held by pid %d (%s)", pid, cmd[0] ? cmd : "gone");
+}
+
+/* bluealsa's PCM has no kernel status to name its client, and bluealsa says nothing of it to another: so the busy line
+ * names the processes running that open it (q2video's sources, the AirPlay receiver, librespot, aplay), from
+ * /proc/PID/cmdline, as `, running: pid 812 (/usr/bin/q2video -t bluealsa)`; empty when none runs. */
+static void bt_clients(char *out, size_t size) {
+    static const char *const names[] = { "q2video", "shairport", "librespot", "aplay" };
+    const char *proc = getenv("Q2PLAYER_PROC") ? getenv("Q2PLAYER_PROC") : "/proc";
+    size_t at = 0;
+    out[0] = 0;
+    DIR *d = opendir(proc);
+    for (struct dirent *e; d && (e = readdir(d));) {
+        int pid = atoi(e->d_name);
+        if (pid <= 0 || pid == getpid()) continue;
+        char path[96], cmd[64];
+        snprintf(path, sizeof path, "%s/%d/cmdline", proc, pid);
+        int fd = open(path, O_RDONLY | O_CLOEXEC), n = fd >= 0 ? (int)read(fd, cmd, sizeof cmd - 1) : 0;
+        if (fd >= 0) close(fd);
+        if (n <= 0) continue;
+        for (int i = 0; i < n - 1; ++i)
+            if (!cmd[i]) cmd[i] = ' ';
+        cmd[n] = 0;
+        int known = 0;
+        for (unsigned k = 0; k < sizeof names / sizeof *names; ++k) known |= strstr(cmd, names[k]) != NULL;
+        if (known && at + 1 < size)
+            at += (size_t)snprintf(out + at, size - at, "%s pid %d (%s)", at ? "," : ", running:", pid, cmd);
+        if (at >= size) at = size - 1;
+    }
+    if (d) closedir(d);
+}
+
 static int alsa_open_bt(struct output *o, int outputway, int hw) {
     struct pcm_format f = o->f;
     int r, waited = 0;
-    while ((r = alsa_open(o, outputway, hw)) == -EBUSY && outputway == 1 && waited < BT_BUSY_MS)
+    while ((r = alsa_open(o, outputway, hw)) == -EBUSY && outputway == 1 && waited < busy_ms)
         usleep(BT_BUSY_STEP_MS * 1000), waited += BT_BUSY_STEP_MS, o->f = f;
-    if (r == -EBUSY && outputway == 1)
-        fprintf(stderr, "q2player: bluealsa's PCM still busy after %d ms: another client holds it\n", waited);
-    else if (r == -EBUSY)
-        fprintf(stderr, "q2player: %s: %s\n", device(outputway, hw), snd_strerror(r));
+    if (r == -EBUSY && outputway == 1) {
+        char clients[160];
+        bt_clients(clients, sizeof clients);
+        fprintf(stderr, "q2player: bluealsa's PCM still busy after %d ms: another client holds it%s\n", waited, clients);
+    } else if (r == -EBUSY) {
+        char holder[112];
+        pcm_holder(strstr(device(outputway, hw), ":1,") ? 1 : 0, holder, sizeof holder); /* hw:1,0 is card 1's */
+        fprintf(stderr, "q2player: %s: %s%s\n", device(outputway, hw), snd_strerror(r), holder);
+    }
     else if (waited && r == 0)
         fprintf(stderr, "q2player: bluealsa's PCM was busy; it opened after %d ms\n", waited);
     return r < 0 ? -1 : 0;

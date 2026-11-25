@@ -109,6 +109,9 @@ static int qm_run(const void *unused) {
     } else if (r && a == QA_PLAY && qm_held.play &&
                qm_held_on(window_manager_get_top_window(window_manager()))) {
         qm_held.play(); /* a song not on the card yet: its row's own press (qm_far_hold) */
+    } else if (r && a == QA_MOVE && qm_held.move &&
+               qm_held_on(window_manager_get_top_window(window_manager()))) {
+        qm_held.move(); /* the row lifted on its page (qm_held_move) */
     } else if (r && a == QA_CHAPTERS) {
         chapters_open(r);
     } else if (r && a == QA_QUEUE) {
@@ -390,13 +393,14 @@ static int qm_open(const void *unused) {
         acts[n++] = QA_GROUP;
         if (np_more()) acts[n++] = QA_MORE; /* last: Now Playing's own menu */
     }
+    if (held && qm_held.move) acts[n++] = QA_MOVE;    /* the last before the destructive gap */
     if (held && qm_held.extra) acts[n++] = QA_REMOVE; /* destructive, last */
     static const char *const rows[] = {
         "Play Next",       "Play Last",   "Shuffle",        "Favorite",         "Unfavorite",
         "Add to Playlist", "Go to Album", "Go to Artist",   "Shuffle",          "Repeat",
         "Group by",        "Next Album",  "Previous Album", "Resume",           "View Queue",
         "Go to Folder",    "Chapters",    "More…",          "Add to On-The-Go", "Play",
-        "Rename",          "Delete",      "Remove",         "Sync Offline"
+        "Rename",          "Delete",      "Remove",         "Sync Offline",     "Move"
     };
     /* the menu sheet's symbols (tools/art.py MENU_ICONS), by row; Unfavorite's filled heart is
      * drawn in Favorite pink-red, white on the bar (art.py menu_heart-fill_*) */
@@ -423,7 +427,8 @@ static int qm_open(const void *unused) {
                                          "pencil-simple",
                                          "trash",
                                          "trash",
-                                         "cloud-arrow-down" };
+                                         "cloud-arrow-down",
+                                         "grip" };
     /* stock sortselect row styles; the menu sheet's rows */
     int pitch = MODAL_PITCH, width = modal_row_w();
     for (int i = 0; i < n; ++i) {
@@ -528,7 +533,7 @@ int qm_song_hold(void *page, void *list, unsigned at, const char *extra, void (*
         return 0;
     st.qm_choice = 0;
     qm_held.page = page, qm_held.list = list, qm_held.extra = extra, qm_held.pick = pick;
-    qm_held.play = 0;
+    qm_held.play = 0, qm_held.move = 0;
     st.qm_kind = QM_COVERFLOW; /* a song of a list on the top page, as Cover Flow's tracks */
     st.qm_cls = 0xf001;
     st.qm_idx = at;
@@ -544,6 +549,10 @@ int qm_song_hold(void *page, void *list, unsigned at, const char *extra, void (*
  * press), then what applies to a song with no file yet, Sync Offline and Go to; no Play Next,
  * Play Last, playlist or Favorite rows, which would name a file that is not there. 1 when the menu
  * is on its way. */
+/* The row qm_song_hold just held can be lifted and moved on its page (Up Next's Playing Next): its
+ * menu has Move, which runs move, before its last row (docs/oled-design.md#up-next). */
+void qm_held_move(void (*move)(void)) { qm_held.move = move; }
+
 int qm_far_hold(void *page, void *list, void (*play)(void)) {
     if (!play || !qm_song_hold(page, list, 0, (const char *)0, 0)) return 0;
     qm_held.play = play;

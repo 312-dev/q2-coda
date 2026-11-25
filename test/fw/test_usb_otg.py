@@ -187,7 +187,7 @@ def test_the_board_s_id_pulse_after_vbus_leaves_never_powers_the_bus_nor_loops(f
 
 # 22:43 (q2-ab-state.log, build 8fd0ddcd, which predates PD18's pull-up (ID_PULL_UP): the pin floated; the PHY's ID
 # pull-up and the controller held at device, 0.25 s samples, nothing attached): VBUS left at 431.82, PD18 read low at
-# 443.93 (12.1 s on) and the 6 s settle powered the bus at 450.47; PD18 read high at 461.11, and 7 s after the power's
+# 443.93 (12.1 s on) and that build's 6 s settle powered the bus at 450.47; PD18 read high at 461.11, and 7 s after the power's
 # end PD18 read low again (468.54). What a floating pin did, not what the board does with the pull-up on.
 AB_OUT, AB_LOW, AB_HIGH = 431.82, 443.93, 461.11
 
@@ -211,7 +211,7 @@ def test_the_floating_pin_s_long_low_gets_one_trial_and_no_loop(fw):
 
 
 def test_the_logged_pulse_under_the_settle_alone_powers_the_bus(fw):
-    """Without the blank (vbus never seen leaving), the same 17 s low passes the 6 s settle: why the blank is needed."""
+    """Without the blank (vbus never seen leaving), the same 17 s low passes the settle: why the blank is needed."""
     p = Port(fw)
     p.id = 0
     p.run(ms(AB_LOW, AB_HIGH))
@@ -755,7 +755,7 @@ def test_a_play_while_an_accessory_attaches_says_so_and_starts_on_it(fw):
 
 
 def test_a_play_while_an_adapter_settles_is_kept_too(fw):
-    """No cable out lately: the 6 s settle, then the trial; the Play waits through both."""
+    """No cable out lately: the settle, then the trial; the Play waits through both."""
     p = Port(fw)
     pl = Player(fw, p)
     p.id = 0
@@ -881,6 +881,7 @@ CAR1129 = [
     (1151.214, 'seat', 'none'), (1157.212, 'out', None), (1163.471, 'seat', 'none'), (1167.72, 'out', None),
     (1173.968, 'seat', 'host'), (1181.35, 'dev', True), (1189.218, 'out', None), (1200.0, 'end', None)]
 CAR1129_ON = (1137.646, 1180.619)  # the record's otg-on lines
+CAR1129_SETTLE = 6000  # the settle of that build (V1SSi): each otg-on comes OTG_SETTLE_MS less than that sooner
 
 
 def replay_car1129(p):
@@ -911,7 +912,7 @@ def test_the_car1129_earbuds_keep_bus_power_while_on_the_host_port_and_lose_it_o
     assert p.records() == ['no-source', 'no-source', 'otg-on', GONE, 'no-source', 'no-source', 'otg-on', GONE]
     assert p.toasts == [REPLUG] * 4
     ons = [now for (now, on, _), (_, was, _) in zip(power[1:], power) if on and not was]
-    assert [abs(a - int(b * 1000)) <= PASS_MS for a, b in zip(ons, CAR1129_ON)] == [True, True], ons
+    assert [abs(a - int(b * 1000) + CAR1129_SETTLE - SETTLE) <= PASS_MS for a, b in zip(ons, CAR1129_ON)] == [True, True], ons
     assert all(on for _, on, dev in power if dev), 'a device on the host port without bus power'
     for gone in (1144.976, 1189.218):
         after = [on for now, on, _ in power if now > gone * 1000]
@@ -980,3 +981,60 @@ def test_a_kept_grant_s_change_lines_are_bounded(fw):
     assert p.pins['PC20'] == 1 and n <= define('OTG_TRACE_MAX') + define('OTG_TRACE_CHANGES'), n
     traced(p, 60000)
     assert len(pin_lines(p)) == n, 'nothing more once both are spent'
+
+
+def test_player_save_stop_s_wait_after_the_stop_is_left_out_only_inside_stock_s_pass(fw):
+    """Stock's pass restarts the song when a USB DAC comes (player_save_stop, then player_save_start) on the UI thread;
+    the build sends player_save_stop's usleep(300000) after mclStop to otg_stop_sleep (tools/build.py
+    OTG_STOP_SLEEP_CALL), which leaves it out there and sleeps it for every other caller."""
+    p = Port(fw, id_pin=0)
+    stop_sleep = fw.fn('otg_stop_sleep', C.c_int, C.c_uint)
+    model = p.stock
+    inside = []
+
+    def stock(*_):  # the DAC branch's stop, inside the pass
+        inside.append(stop_sleep(300000))
+        return model()
+    fw.mock('stock_otg_status_trampoline', stock)
+    p.run(SETTLE + 2 * PASS_MS)
+    assert p.pins['PC20'] == 1 and inside and not fw.calls('fw_usleep')
+    assert stop_sleep(300000) == 0 and [a[0] for _, a in fw.calls('fw_usleep')] == [300000]
+
+
+def test_an_adapter_put_in_long_after_any_unplug_gets_bus_power_within_4_s(fw):
+    """Outside the blank the settle is a debounce: a USB DAC or USB-C headphones plugged in with no cable out in the
+    last OTG_BLANK_MS get the bus power on the status pass that has seen the ID low for OTG_SETTLE_MS, 3 to 4 s after
+    the plug at stock's once-a-second pass, where it was 6 to 7 s."""
+    p = Port(fw)
+    unplug(p, BLANK + 20000)
+    p.id = 0
+    p.hostdev = True
+    plugged = p.now + 500  # between two passes
+    p.now += 500
+    p.run(10000)
+    assert p.powered and 3000 <= p.powered[0] - plugged <= 4000, (p.powered[:1], plugged, p.records())
+
+
+def test_the_latest_logged_board_pulse_inside_the_blank_still_never_powers_the_bus(fw):
+    """The pull-up's lows began 2.15 to 7.02 s after VBUS left and lasted up to 4.28 s with stock's power on them: the
+    latest start and the longest low together, inside the blank, are refused as before."""
+    p = Port(fw)
+    unplug(p, 7020)
+    p.id = 0
+    p.run(4280)
+    p.id = 1
+    p.run(BLANK + 5000)
+    assert p.powered == [] and p.otgid.value == 0 and p.records() == []
+
+
+def test_a_low_outside_the_blank_gone_before_the_settle_powers_nothing(fw):
+    """A low read on one pass and high on the next, long after any unplug (a seat being made, or a glitch), never
+    reaches stock's pass."""
+    p = Port(fw)
+    unplug(p, BLANK + 20000)
+    for _ in range(5):
+        p.id = 0
+        p.run(PASS_MS)
+        p.id = 1
+        p.run(PASS_MS)
+    assert p.powered == [] and p.otgid.value == 0 and p.records() == []
