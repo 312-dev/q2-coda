@@ -1,4 +1,4 @@
-/* Now Playing's bar: the bar's title, the theme's progress bar and its fill. */
+/* Now Playing's bar: the theme's progress bar and its fill. */
 #include "navigation.h"
 #include "ui_kit.h"
 

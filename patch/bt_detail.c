@@ -1,6 +1,6 @@
 /* A Bluetooth device's page (docs/oled-design.md#bluetooth, docs/internals.md#bluetooth-page):
  * Centre on a paired device's row in Settings > Bluetooth opens it, connected or not, as Play/Pause
- * held does (bt_ui_hold). The status row names the device; under it the path the sound takes,
+ * held does (bt_ui_hold). Under the status row the path the sound takes,
  * "Q2 → WH-1000XM5", and its codec line in 14 px Text Tertiary ("LDAC · 96 kHz · 990 kbps", what is
  * known of it, bt_codec_line, or "Not Connected"); then Battery (when the device reports one),
  * Disconnect (Connect, the first row, when it is not connected), Volume Limit (its value No Limit
@@ -172,7 +172,7 @@ void bt_detail_open(int dev) {
     fill();
 }
 
-/* The page's status row title, its device's name; 0 for another page. */
+/* The page's hidden bar title, its device's name; 0 for another page. */
 const char *bt_detail_title(const char *name) {
     return bd.page && !tk_strcmp(name, "btdevice_page") ? bd.name : (const char *)0;
 }

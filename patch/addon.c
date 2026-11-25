@@ -3960,7 +3960,7 @@ int addon_row_hold(void *w) {
  *    phone, check: the accent's (the phone has the form; the server is being asked), done: green,
  *    then the page closes itself after QR_DONE_MS so the app's page, signed in now, shows; fail
  *    (the server not reached) and error (anything else): red.
- * The status row names the app (addon_qr_title). While the page is open /tmp/q2-<id>.qrpage exists,
+ * The bar's hidden title is the app's name (addon_qr_title). While the page is open /tmp/q2-<id>.qrpage exists,
  * so the app knows the page was left by its going ("signin" in ADDON_CAPS), not by guessing from
  * the pauses in its page's refreshes, which the screen turning off makes too. The wheel does
  * nothing here, as on every page that is not a playback screen (volume.c vol_wm_keyup). */
@@ -3984,7 +3984,7 @@ typedef struct {
     unsigned timer, leave, done, seen; /* seen: the state file as last read, hashed */
     const char *state;
     char marker[48]; /* /tmp/q2-<id>.qrpage */
-    char name[32];   /* the app's, the status row's title */
+    char name[32];   /* the app's, the bar's hidden title */
     int size, code;  /* code: the file has one to draw */
     char step[8], title[64], line[96], addr[64], pin[16], note[128];
     char hex[QR_HEX];  /* the code's rows */
@@ -4083,7 +4083,7 @@ static void qr_open(const char *state, const char *title) {
     qp->timer = timer_add(qr_tick, 0, 500);
 }
 
-/* The status row's title on the QR page: the app's name (navigation.c bar_title_of); 0 elsewhere.
+/* The bar's hidden title on the QR page: the app's name (navigation.c bar_title_of); 0 elsewhere.
  */
 const char *addon_qr_title(void *win) { return qp && win == qp->page ? qp->name : 0; }
 

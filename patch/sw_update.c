@@ -71,7 +71,6 @@ enum { QUIT_NOFILE = 9, QUIT_LATEST = 13, QUIT_BAD = 18 };
 #define SW_BAR_Y 172
 #define SW_BAR_W 180
 #define SW_BAR_H 6
-#define SW_STATUS_PX TYPE(15) /* the status row's title, Inter Medium 15 */
 /* The product's name in the update's (sw_update_name) */
 #define SW_PRODUCT "Vamp"
 /* The offer (29 v3): a 60 px accent circle centred on y 92 with its 30 px glyph, the name (Inter
@@ -718,9 +717,6 @@ void sw_update_paint(void *w, void *canvas) {
         else
             swu.link.w = 0;
     } else {
-        /* stock's dialog covers the status row: its title drawn in its place and face */
-        ui_text(canvas, "Software Update", 1, SW_STATUS_PX, tok(TOK_SECONDARY), 1, STATUS_ROW_INSET,
-                geom_val(V_STATUS_Y) - dy, 240, 2);
         int top =
             mode_page_paint(w, canvas, dy,
                             &(mode_page_t){ accent, "modepage_restart", 0, "Restarting to Install",
@@ -735,7 +731,7 @@ void sw_update_paint(void *w, void *canvas) {
     stock_canvas_set_text_color(canvas, text);
 }
 
-/* The status row's title on the result pages; 0 for another page (navigation.c's bar titles). */
+/* The bar's hidden title on the result pages; 0 for another page (navigation.c's bar titles). */
 const char *sw_update_title(const char *name) {
     return !tk_strcmp(name, "swupdate_page") ? "Software Update" : (const char *)0;
 }

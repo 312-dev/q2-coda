@@ -352,7 +352,7 @@ void usb_ui_ejected(void *win) {
     widget_invalidate_force(win, (void *)0);
 }
 
-/* The status row's title on a USB page (navigation.c's bar titles); 0 for another page. */
+/* The bar's hidden title on a USB page (navigation.c's bar titles); 0 for another page. */
 const char *usb_ui_title(const char *name) {
     if (!tk_strcmp(name, "usbmode_page")) return g_usbmode == USB_MODE_DAC ? "USB Audio" : "Transfer Files";
     if (!tk_strcmp(name, "usbdebug_page")) return "USB Debugging";

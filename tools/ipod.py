@@ -70,7 +70,7 @@ class Geometry:
     set_rows: int = inc('SET_ROWS')
     set_icon: int = inc('SET_ICON')
     stream_row: int = inc('SET_ROW')
-    bar_px: int = 0  # the status row's title and clock px (status_row)
+    bar_px: int = 0  # the status row's clock px (status_row)
     batt_w: int = inc('BATT_BODY_W')  # the slim battery's body (list_marks.c battery_slim), its nub outside
     batt_h: int = inc('BATT_BODY_H')
     text_x: int = 0  # list text's left edge, clear of the glass at the first row (0: stock's)

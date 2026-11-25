@@ -1,7 +1,7 @@
 /* A set_switch theme's slider page (docs/oled-design.md Progress and sliders): stock's four slider
  * windows (Brightness, Max Volume, Channel Balance, Default Volume, whose window crossfade.c also
  * dresses as Crossfade, Wheel Sensitivity, Resume Songs and Night Shift) in one form. Under the
- * status row, which names the page: the feature's switch as a selected row when the page has one
+ * status row: the feature's switch as a selected row when the page has one
  * (Default Volume's, Crossfade's, Night Shift's img_bootswitch, its toolbar hidden); the value
  * centred in Inter Medium; a 6 px round track on the text and right columns, Track behind and the
  * accent's fill to a white knob; the range's ends in Text Tertiary under it. Stock's -/+ discs go

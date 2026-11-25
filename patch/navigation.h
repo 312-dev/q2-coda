@@ -1077,7 +1077,7 @@ int rt_play(void *ctx, void *event);
 /* scan_page.c */
 void msg_open(void *win);
 void msg_paint(void *w, void *canvas);
-const char *msg_title(const char *name); /* its status row's title, else 0 */
+const char *msg_title(const char *name); /* its hidden bar title, else 0 */
 
 /* playlists.c */
 /* The Playlists rows (pl_dress): a page's add mode (ringnav_playlist), the button of a row that

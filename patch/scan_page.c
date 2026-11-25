@@ -120,7 +120,7 @@ static void *msg_count(void *unused) {
     return 0;
 }
 int msg_counting(void) { return cp.msg_counting == 1; } /* coverflow.c's library_counting */
-/* The status row's title over the scan's dialog (navigation.c bar_title_of), which paints the bar
+/* The bar's hidden title over the scan's dialog (navigation.c bar_title_of), which paints the bar
  * it covers as Control Center does (msg_paint); 0 for another window. */
 const char *msg_title(const char *name) {
     return !tk_strcmp(name, "updatemusic_dialog") ? "Update Library" : (const char *)0;

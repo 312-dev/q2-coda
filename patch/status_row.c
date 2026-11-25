@@ -82,9 +82,10 @@ static struct {
 
 #if Q2POD_DEV
 /* --dev builds only, for the emulator, which has no radio or charger: STATUS_FAKE's "wifi=N
- * charge=N headphones=N" (charge 1 a charging cable, 2 one holding it full; headphones 0 none, 1 a
- * jack, 2 a USB DAC; each found by its first letter, key) stands in for what the Q2 would report;
- * -1 when the file does not name it. Read at most every STATUS_FAKE_MS. */
+ * charge=N headphones=N bluetooth=N" (charge 1 a charging cable, 2 one holding it full; headphones
+ * 0 none, 1 a jack, 2 a USB DAC; bluetooth 1 a device connected; each found by its first letter,
+ * key) stands in for what the Q2 would report; -1 when the file does not name it. Read at most
+ * every STATUS_FAKE_MS. */
 #define STATUS_FAKE "/mnt/data/q2-status.fake"
 #define STATUS_FAKE_MS 500
 int status_fake(char key) {
@@ -157,6 +158,8 @@ static int wired_shown(void);
 static int bt_slot(void) {
     if (guest_active()) return BT_SLOT_GUEST; /* a guest plays (guest_ui.c) */
     if (wired_shown()) return BT_SLOT_NONE;   /* the sound goes to the wire: its glyph alone */
+    int fake = status_fake('b');              /* a --dev build's stand-in, -1 on a release */
+    if (fake >= 0) return fake ? BT_SLOT_RUNE : BT_SLOT_NONE;
     char item[32] = "";
     int status = 0, n = g_bluetoothflag ? getBtLinkSize() : 0;
     if (n > 0) getBtLinkItem(n - 1, &status, item);

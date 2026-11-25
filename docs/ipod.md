@@ -300,12 +300,12 @@ playing, or a cover the frame cannot hold, the pane is the window's panel, as it
 timer) finds each status bar widget with a recursive `widget_lookup` from the bar,
 so parents and order are free to change. Every tick it re-shows the volume,
 EQ, Bluetooth, SyncLink and Wi-Fi widgets and sets their images and text, but
-never their geometry. `system_bar.bin` is therefore OLED's status row (`tools/ipod.py` `status_row`): the title on the
-left and the clock, the payload's glyph slots and the battery on the right ([Theme](#theme), [Status row
+never their geometry. `system_bar.bin` is therefore OLED's status row (`tools/ipod.py` `status_row`): the clock on the
+left, the payload's glyph slots and the battery on the right ([Theme](#theme), [Status row
 slots](internals.md#status-row-slots)), every other widget stock updates kept off-screen at `x = -200`. Stock's tick also hides `img_state` whenever its own player is stopped, as it is under Spotify, radio or a video; `ringnav_showface` runs `bar_state_sync`, the play state and the `Q2` label alone, straight after the tick, so the payload's play state is back before any paint, dark or not (no file reads; a relayout waits for the paint); the codec badge, accent and Rockbox check wait for paint (`bar_sync`). A new battery level or charge state repaints the bar from the tick while lit ([Status bar](internals.md#status-bar-ipod)). Correcting it at paint time instead relaid the row twice a second, and EQ was drawn for a frame in the play icon's place. When `bar_sync` changes `img_state` while another window paints (Now Playing paints every 250 ms, so it usually sees a Play/Pause first), it arms a 0 ms timer that runs `widget_invalidate_force` on the bar after the frame: an invalidate made mid-paint is dropped with that frame's dirty rects, and `img_state` keeps its dirty flag (`+0x24` bit `0x200`), which makes stock `widget_invalidate` return early, so the 1 s tick's own invalidates skipped it until something else repainted the bar (#116). `bar_sync` updates its visibility without moving the clock. The payload paints the bar and writes the time into
 `label_clock` (see [internals.md](internals.md#status-bar-ipod)).
 
-**Time in Title.** There is no such setting: the status row names the page in a title of its own, the clock centred after it (`bar_title`). An `IPOD TIMETITLE` key an older build wrote is never read.
+**Time in Title.** There is no such setting: the status row shows the clock at its left and names no page (its `label_title` is hidden, kept for the page's name the Search bar, the letter strip and Up Next read). An `IPOD TIMETITLE` key an older build wrote is never read.
 
 **Codec.** The Bluetooth images are 42-pixel canvases with their ink at the right: the glyph takes
 10 pixels, while stock's codec badges take up to 40 (aptX HD). A new badge shows for a second
@@ -329,7 +329,7 @@ In Icon and Icon + Percent, charging fills the icon solid green (`BATT_CHARGE_RG
 `BATT_LOW_RGB` (`#FF1448`) under every accent; OLED's slim battery fills green while charging and
 red (`#FF453A`) under 20 %. The bar is black, or Light Mode's paper. The payload shows the icon alone where the
 battery and the status row's glyphs would have to scroll: `batt_room` (navigation.c) is the span from the battery's end
-(`STATUS_ROW_INSET`) to `CLOCK_BESIDE` past the widest clock, centred (`strip_left`), and the group is the
+(`STATUS_ROW_INSET`) to `CLOCK_BESIDE` past the widest clock at the row's left (`strip_left`), and the group is the
 battery's form and `status_slots_reach`.
 
 The navbar is hidden, as on the local pages, on the settings pages
@@ -1048,20 +1048,20 @@ Now Playing's bar has no thumb: stock draws its dragger (a box and knob, the sto
 `slider_knobless` the second, which stock's default slider style would otherwise supply. 1.3.9 first
 painted it white, which drew the box at rest.
 
-- **The status row.** No bar band: the page's title, small and gray, from x 62, and on the right, right to left, a
+- **The status row.** No bar band: the clock, small and gray, from x 62, and on the right, right to left, a
   slim battery ending 62 px from the right edge (`STATUS_ROW_INSET`), three level bars while something plays (a pause
   in their place while paused, in the same white; a tap on either opens Now Playing), Wi-Fi's signal while connected
   (iOS's fan; a crossed glyph with no link past the access point), a card app's sync (turning arrows while it checks, a filling ring while it
-  downloads), a Bluetooth headset's battery, a 13 px padlock while Buttons Lock is on, and an orange crossed-out cloud while a card
+  downloads), wired headphones while a jack or a USB DAC takes the sound, Bluetooth (a headset's battery) while it does, a 13 px
+  padlock while Buttons Lock is on, and an orange crossed-out cloud while a card
   app's server can't be reached, each the clock's digits' height (11 px) on their
-  rows, 6 px apart, up in the glass's top curve and clear of it ([Status row slots](internals.md#status-row-slots)). A press Buttons Lock
+  rows (the headphones and the Bluetooth rune the battery's 12), 6 px apart, up in the glass's top curve and clear of it ([Status row slots](internals.md#status-row-slots)). A press Buttons Lock
   blocks with the screen off shows a card saying so for 1.5 s, as the iPod's Hold switch did ([Buttons
-  lock](internals.md#buttons-lock)). The clock, in the title's face and gray, is centered across the row,
-  and the title ends with an ellipsis 12 px short of the widest clock ("00:00"), however long it is: under a status row a
+  lock](internals.md#buttons-lock)). The clock's text starts 62 px in (`STATUS_ROW_INSET`) on every page, as the battery
+  ends 62 px from the right, and the row names no page, as iOS's (the user's layout D, 2026-11-25): under a status row a
   page's caption never takes a row of its own (`bar_title_fits`), so the list keeps its top. Glyphs that would reach the clock
-  scroll between it and the battery instead (the strip's marquee). A page with no title (Home, Now Playing, Cover Flow's covers;
-  an artist's are titled by the artist) has the clock centered too, but Home in Split puts it over the list at the row's left, its text 62 px in (`STATUS_ROW_INSET`), as the battery ends 62 px from
-  the right; the glyphs stay over the art at the right, inked white or black, one ink for the row (`clock_place`, `home_ink`).
+  scroll between it and the battery instead (the strip's marquee). On Home in Split the clock stands over the list and
+  the glyphs over the art at the right, inked white or black, one ink for the row (`clock_place`, `home_ink`).
 - **The grid.** 32 px rows from y 58 with their text at x 24, seven to a screen: the list ends at y 282, above
   the bottom corners, and the strip below it stays black (`list_end`, `fit_rows`). Chevrons and values share one column 28 px
   from the right edge on every row. Settings, the Library, Home (Full and Split) and stock's own list pages all
@@ -1182,7 +1182,7 @@ painted it white, which drew the box at rest.
   paints the page under it: `ss_place` paints that page once into a bitmap as it opens (`under_snap`, the swipe
   back's) and finds the row from navigation's selection (`st.sel_w`, `sel_y`, `sel_h`, matched only while the row's
   list is still in that page), and with no such row in sight, or one the strip would cover, the text goes in a field
-  of its own. The status row reads New Playlist or Rename Playlist. Capitals are ABC's. Previous and Next move the cursor along
+  of its own. Capitals are ABC's. Previous and Next move the cursor along
   the name; submitting (Play/Pause, or Center on the return key) creates the playlist (`ringnav_playlist_create`,
   "Playlist created", and the list goes back to open on it) or saves the new name ("Renamed"), and the page closes;
   an empty name ("Name can't be empty") or one taken ("A playlist has that name") says so and stays. Return, held

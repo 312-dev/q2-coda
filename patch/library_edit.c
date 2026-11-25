@@ -15,7 +15,7 @@
  * shown, so Home always has a way back.
  *
  * Under OLED, Center held LR_HOLD_MS on the Library page or Home's main list, or a finger held as
- * long on a row, enters the editor: the status row reads "Edit Library" or "Edit Home", every row
+ * long on a row, enters the editor: the bar's hidden title reads "Edit Library" or "Edit Home", every row
  * the user can show shows (a hidden one dimmed to Text Tertiary), each with a check circle at its
  * left, its words moved right of it, each row's chevron gives way to a grip, and a hint shows under
  * the rows: the list ends LR_ROOM higher, and its rows past that end and above its top fade as
@@ -457,7 +457,7 @@ static int lr_move(void *row, int b) {
     return 1;
 }
 
-/* The status row's title follows the page in or out of its editor. */
+/* The bar's hidden title follows the page in or out of its editor. */
 static void lr_title(void *page) {
     title_gone((void *)0, (void *)0);
     bar_title_sync(page);

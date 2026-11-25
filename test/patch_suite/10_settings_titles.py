@@ -392,9 +392,9 @@ def tt_bar(cls=Machine):
     ttm=cls(); oled_set(ttm); ttm.clock_minutes=True
     ttt=ttm.node('hscroll_label','label_title',visible=0); ttc=ttm.node('hscroll_label','label_clock')
     slot=ttm.node('view','view_battery'); row=ttm.node('view','view_right',[slot])
-    for w,box in ((ttt,(60,11,240,24)),(ttc,(60,11,240,24)),(row,(0,15,313,16)),(slot,(288,0,25,16))):
+    for w,box in ((ttt,(60,11,240,24)),(ttc,(0,11,240,24)),(row,(0,15,313,16)),(slot,(288,0,25,16))):  # the clock anywhere
         for off,v in zip(('W_X','W_Y','W_W','W_H'),box): ttm.word(w+O[off],v)
-    ttb=oled_bar(ttm,ttt,ttc,row); ttm.word(row+O['W_PARENT'],ttb)
+    ttb=oled_bar(ttm,ttt,ttc,row); ttm.word(row+O['W_PARENT'],ttb); ttm.word(slot+O['W_PARENT'],row)
     def show(win):
         ttm.top=win; ttm.word(win+O['W_PARENT'],ttm.wm)
         for _ in range(2): ttm.call(address=HOOKS['widget_on_paint_background'][0],args=(ttb,ttm.canvas,0,0),gap=0); ttm.advance(1)

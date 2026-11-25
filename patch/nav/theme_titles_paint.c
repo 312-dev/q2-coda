@@ -316,7 +316,7 @@ static const char *bar_title_of(void *win, void **label) {
     const char *name = widget_get_prop_str(win, "name", "");
     /* the status row shows the clock on Now Playing (tools/ipod.py status_row) */
     if (tk_str_start_with(name, "playing_page")) return "";
-    /* the status row names the Library and its whole Songs list as Home does, not by stock's "Local
+    /* the bar names the Library and its whole Songs list as Home does, not by stock's "Local
      * Songs" in both: allmusic_page's other lists (an album, a playlist, Recently Added) keep their
      * own (0xf001: all songs, az_index.c name_sorted's class) */
     if (!tk_strcmp(name, "localmusic_page"))
@@ -342,7 +342,7 @@ static const char *bar_title_of(void *win, void **label) {
     if (!tk_strcmp(name, "qrcode_page")) return addon_qr_title(win); /* the card app's name */
     if (!tk_strcmp(name, "search_dialog")) return "Search"; /* stock's toolbar has no label */
     if (!tk_strcmp(name, "statusbar_dialog"))
-        return "";                       /* Control Center: the clock centred, as Home's */
+        return "";                       /* Control Center: no name, as Home's */
     if (artist_local_on(win)) return ""; /* the design's artist page: the header names it */
     void *nav = widget_lookup(win, "view_navbar", 1);
     if (nav) {
@@ -472,7 +472,7 @@ void bar_title_sync(void *win) {
     if (modal_win(win) && !(win = feedback_under(win))) return;
     static const unsigned none = 0;
     char s[256], now[256]; /* stock writes nothing unless all of it fits */
-    /* Home names the list it shows; the status row names none of Home's own, and shows the clock */
+    /* Home names the list it shows, and none of Home's own */
     const char *t = !home_menu(win)        ? (const char *)0
                     : lr_editing(win)      ? lr_edit_title()
                     : !coverflow_home_sub() ? ""

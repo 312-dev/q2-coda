@@ -44,7 +44,7 @@ void bt_recv_load(void *win) {
     widget_on(win, EVT_DESTROY, bt_recv_gone, win);
 }
 
-/* The status row's title on the page; 0 for another. */
+/* The bar's hidden title, the page's name; 0 for another page. */
 const char *bt_recv_title(const char *name) {
     return tk_strcmp(name, "bluetoothrecv_page") ? (const char *)0 : "Bluetooth";
 }
