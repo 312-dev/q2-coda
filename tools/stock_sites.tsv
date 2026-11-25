@@ -318,7 +318,7 @@ demo	0x51f0ec	0x4	player_seek_start	`slti $2, $2, 0xb`, before 2nd of 4 calls to
 demo	0x51f5c8	0x4	player_get_id3info	the load of $25 for 1st of 2 calls to strcpy; tools/build.py ID3_PATH, tools/build.py build
 demo	0x51f5d0	0x4	player_get_id3info	1st of 2 calls to strcpy; tools/build.py ID3_PATH
 demo	0x51f6c0	0x4	player_get_id3info	`lw $4, 0x28($16)` (2nd of 4 such), before 2nd of 4 calls to player_set_coverinfo; patch/offsets.inc REC_COVER
-demo	0x52077c	0x4	player_save_stop	2nd of 2 calls to usleep, after the only call to mclStop; patch/usb_otg.c otg_stop_sleep, tools/build.py OTG_STOP_SLEEP_CALL
+demo	0x52077c	0x4	player_save_stop	2nd of 2 calls to usleep; patch/usb_otg.c otg_stock, tools/build.py OTG_STOP_SLEEP_CALL
 demo	0x5264c4	0x4	startPlayFolderSong	`addiu $18, $zero, 0x1`, before 2nd of 2 calls to getFormatString, after "stSongInfo"; patch/playback.c has_server_row
 demo	0x5266b4	0x4	startPlayClassSong	`addiu $18, $zero, 0x1`, before 2nd of 2 calls to getFormatString, after "stSongInfo"; patch/playback.c has_server_row
 demo	0x52c7c8	0x4	sub_52c660	the only call to player_set_coverinfo; patch/cover_wake.c
