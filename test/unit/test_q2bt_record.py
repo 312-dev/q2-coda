@@ -38,8 +38,8 @@ class Acl(C.Structure):
 
 
 class Idle(C.Structure):
-    _fields_ = [('wall', C.c_long), ('up', C.c_uint)] + [(n, C.c_int) for n in (
-        'btx', 'brx', 'wtx', 'wrx', 'wq')] + [('ue', C.c_int * 5), ('ue_ok', C.c_int)]
+    _fields_ = [('wall', C.c_long), ('up', C.c_uint), ('btx', C.c_int), ('brx', C.c_int), ('wtx', C.c_int),
+                ('wrx', C.c_int), ('wq', C.c_int), ('ue', C.c_int * 5), ('ue_ok', C.c_int)]
 
 
 AIRPODS = bytes([0x6d, 0x96, 0xd3, 0x6e, 0x00, 0x04])  # 04:00:6E:D3:96:6D, last byte first as bdaddr_t holds it

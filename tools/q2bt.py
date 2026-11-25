@@ -201,7 +201,7 @@ def recorder(lines):
                 ln.info = ' '.join(x for x in parts[1:] if not x.startswith(('h=', 'dev=')))
             elif parts[1] != 'gone':
                 ln.rssi.append((when, value(kv.get('rssi', '-'))))
-            elif key in by:
+            else:
                 ln.gone = when
         elif parts[0] == 'WIFI':
             band = f"{kv.get('band', '-')} GHz ch {kv.get('ch', '-')}" if kv.get('band', '-') != '-' else 'not joined'
@@ -440,7 +440,8 @@ def main(argv=None):
         lines += sys.stdin.readlines() if f == '-' else open(f, encoding='utf-8', errors='replace').readlines()
     streams, notes = parse(lines)
     report(streams, notes, every=args.all)
-    report_links(*recorder(lines), sys.stdout)
+    links, bands = recorder(lines)
+    report_links(links, bands, sys.stdout)
 
 
 if __name__ == '__main__':

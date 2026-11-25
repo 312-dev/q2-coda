@@ -80,9 +80,11 @@ class Counts(C.Structure):
 
 
 class Sample(C.Structure):
-    _fields_ = [('wall', C.c_long), ('up', C.c_uint)] + [(n, C.c_int) for n in (
-        'kbps', 'brx', 'acl', 'wq', 'rssi', 'afh', 'wtx', 'wrx', 'cpu', 'ba', 'own', 'h', 'er', 'done', 'fly', 'bp',
-        'pl', 'dk', 'gw')] + [('ue', C.c_int * 5), ('ue_ok', C.c_int)]
+    _fields_ = [('wall', C.c_long), ('up', C.c_uint), ('kbps', C.c_int), ('brx', C.c_int), ('acl', C.c_int),
+                ('wq', C.c_int), ('rssi', C.c_int), ('afh', C.c_int), ('wtx', C.c_int), ('wrx', C.c_int),
+                ('cpu', C.c_int), ('ba', C.c_int), ('own', C.c_int), ('h', C.c_int), ('er', C.c_int), ('done', C.c_int),
+                ('fly', C.c_int), ('bp', C.c_int), ('pl', C.c_int), ('dk', C.c_int), ('gw', C.c_int),
+                ('ue', C.c_int * 5), ('ue_ok', C.c_int)]
 
 
 # ---- is a stream running ----

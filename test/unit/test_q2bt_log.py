@@ -324,9 +324,12 @@ def test_an_idle_link_s_lines_are_the_links_section_not_notes():
 
 def test_a_link_still_up_with_nothing_read_and_wifi_not_joined():
     log = [f'{t(0)} ACL h=12 dev=06:05:04:03:02:01 rssi=- afh=-\n', f'{t(0)} WIFI freq=- band=- ch=- state=-\n',
-           f'{t(10)} ACL h=12 dev=06:05:04:03:02:01 rssi=- afh=-\n']
+           '== 3 lines lost while the card was away\n', f'{t(10)} ACL h=12 dev=06:05:04:03:02:01 rssi=- afh=-\n',
+           f'{t(60)} WIFI freq=- band=- ch=- state=-\n']
     out = io.StringIO()
-    q2bt.report_links(*q2bt.recorder(log), out)
+    links, bands = q2bt.recorder(log)
+    assert len(bands) == 1  # the same band a minute on is no change
+    q2bt.report_links(links, bands, out)
     text = out.getvalue()
     assert 'h=12: 2026-11-17 20:00:00 to last seen 20:00:10; no ACLINFO; rssi not read' in text
     assert 'Wi-Fi not joined from' in text and 'before it went' not in text

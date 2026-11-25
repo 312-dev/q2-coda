@@ -37,7 +37,7 @@ def L(tmp_path):
     (tmp_path / 'tmp').mkdir()
     lib.set_files(1, BTCOEX)
     lib.start(str(tmp_path).encode())
-    lib.pace = lambda: (tmp_path / 'tmp/q2-bt-coex').read_text()
+    setattr(lib, 'pace', lambda: (tmp_path / 'tmp/q2-bt-coex').read_text())
     return lib
 
 

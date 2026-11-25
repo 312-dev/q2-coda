@@ -1145,7 +1145,7 @@ The RTL8733BS is one 2.4 GHz radio for Wi-Fi and Bluetooth ([bluetooth: Coexiste
 
 **The firmware's downloads.** Network Update and the App Store's installs fetch through `netupdate.c`'s `fetch`, whose write callback (`save`) holds a paced transfer to the file's rate (`pace_wait`: the file read at most once a second through `netupdate_pace_rate`; the bytes of each second counted and the callback sleeping off any lead), so the socket's receive window slows the server; curl's stall limit (1 KB/s for 30 s) is far below it. `test/fw/test_netupdate.py` downloads a 1 MB release paced (held about 4 to 5 s) and unpaced (not held). Internet Radio, Spotify, Tidal and AirPlay are the music playing, not background work, and are not paced; the lyrics and time-zone lookups are a few kB.
 
-**Card apps.** An app that downloads in the background reads the same file. q2-subsonic (from its `feat/bt-pace` line) holds its Download Ahead songs and Offline Sync's to the rate and pauses its rounds of album covers while paced; the song playing is held only while it is well ahead of where it plays, never while it arrives slower than it plays. An app without that reading goes on as before.
+**Card apps.** An app that downloads in the background reads the same file. q2-subsonic (from its `feat/bt-pace` line) holds its Download Ahead songs, Offline Sync's and Caller Ten's clips to the rate and pauses its rounds of album covers while paced (a round running stops at its next cover); the song playing is held only while it is well ahead of where it plays, never while it arrives slower than it plays. An app without that reading goes on as before.
 
 ## Bluetooth devices
 
