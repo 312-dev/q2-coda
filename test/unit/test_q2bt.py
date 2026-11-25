@@ -2,7 +2,7 @@
 kernel's hci_dev_info and connection list as laid out, the four HCI commands and their answers, the A2DP socket's
 queue from /proc/net/l2cap, the codec from bluealsa's GetPCMs, the log line and its rotation, the EDR
 packet-type command to the A2DP sink's link, the step-down from aptX HD or aptX to SBC (bt_step, the config it obeys,
-the PCM path SelectCodec goes to, and the commute replayed through it) and SBC's bitpool. Built for this machine
+the PCM path SelectCodec goes to, and the commute replayed through it), SBC's bitpool and AAC's peak. Built for this machine
 with test/unit/q2guard_host.c."""
 import ctypes as C
 import subprocess
@@ -56,6 +56,9 @@ def L(tmp_path_factory):
     lib.bt_sbc_step.argtypes = [C.c_void_p, C.c_uint, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int]
     lib.bt_sbc_next.argtypes = [C.c_int, C.c_int, C.c_int]
     lib.bt_sbc_allowed.argtypes = [C.c_char_p]
+    lib.bt_aac_step.argtypes = [C.c_void_p, C.c_uint, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int]
+    lib.bt_aac_next.argtypes = [C.c_int, C.c_int, C.c_int]
+    lib.bt_aac_allowed.argtypes = [C.c_char_p]
     lib.flush_every.argtypes = [C.c_int, C.c_int]
     lib.bt_proc_io.argtypes = [C.c_char_p, C.POINTER(C.c_uint), C.POINTER(C.c_uint), C.POINTER(C.c_uint)]
     lib.bt_disk_busy.argtypes = [C.c_char_p, C.c_char_p, C.POINTER(C.c_uint)]
@@ -751,7 +754,7 @@ def test_a_codec_not_known_yet_keeps_where_it_started(L):
 # ---- SBC's bitpool: lowered frame to frame while the radio is the limit (bt_sbc_step) ----
 
 class Sbc(C.Structure):
-    _fields_ = [('pool', C.c_int), ('stall', C.c_int), ('clean', C.c_int), ('have', C.c_int), ('last', C.c_uint),
+    _fields_ = [('rung', C.c_int), ('stall', C.c_int), ('clean', C.c_int), ('have', C.c_int), ('last', C.c_uint),
                 ('up_ms', C.c_uint), ('raised', C.c_int), ('raised_at', C.c_uint)]
 
 
@@ -804,7 +807,7 @@ def test_sbc_climbs_back_a_rung_after_30_clean_seconds(L):
     s = Sbc()
     for t, wq in ((0, 6080), (1, 6080), (4, 6080), (5, 6080), (8, 6080), (9, 6080)):
         sbc(L, s, t, wq, BUFS)
-    assert s.pool == 19
+    assert s.rung == 19
     ups = [(t, r) for t in range(10, 400) if (r := sbc(L, s, t, 0, 2)) != NONE]
     assert ups == [(69, 23), (129, 29), (189, 0)]
 
@@ -1128,3 +1131,101 @@ def test_the_codec_s_configuration_and_capability_are_read(L):
     assert dbus_bytes(L, printed, None, b'"Configuration"') == (0, '')
     cut = TRANSPORT[:TRANSPORT.index(b'a9')]  # the read stopped mid-array
     assert dbus_bytes(L, cut, b'/fd', b'"Configuration"') == (0, '')
+
+
+# ---- AAC's peak: lowered frame to frame while the radio is the limit (bt_aac_step) ----
+
+def aac(L, s, t, wq, fly, own=240, allowed=1, on=1, bufs=BUFS):
+    return L.bt_aac_step(C.byref(s), int(t * 1000), allowed, on, own, wq, fly, bufs)
+
+
+def test_the_aac_ladder_below_the_streams_own(L):
+    """192, 160 and the floor 128 kbit/s, each only below the stream's own (240 as the build sets it), up a rung and
+    then 0 (its own)."""
+    assert [L.bt_aac_next(r, 240, -1) for r in (0, 192, 160, 128)] == [192, 160, 128, -1]
+    assert [L.bt_aac_next(r, 240, 1) for r in (128, 160, 192, 0)] == [160, 192, 0, -1]
+    assert L.bt_aac_next(0, 200, -1) == 192 and L.bt_aac_next(192, 200, 1) == 0
+    assert L.bt_aac_next(0, 160, -1) == 128 and L.bt_aac_next(128, 160, 1) == 0   # a sink's lower own
+    assert L.bt_aac_next(0, 128, -1) == -1                                         # at the floor already: nothing
+    assert L.bt_aac_next(0, 0, -1) == -1                                           # own not known: nothing
+
+
+def test_aac_steps_its_peak_down_while_the_socket_backs_up_with_the_buffers_full(L):
+    """The study's bad band: every ACL buffer held and the A2DP socket backed up, second after second."""
+    s = Sbc()
+    assert aac(L, s, 0, 0, 3) == NONE
+    assert aac(L, s, 1, 6080, BUFS) == NONE                 # one second: not yet
+    assert aac(L, s, 2, 6080, BUFS) == 192                  # two in a row: a rung down, the next frame
+    assert [aac(L, s, t, 9000, BUFS) for t in range(3, 7)] == [NONE, NONE, NONE, 160]   # 2 s to drain first
+    assert [aac(L, s, t, 9000, BUFS) for t in range(7, 11)] == [NONE, NONE, NONE, 128]
+    assert all(aac(L, s, t, 9000, BUFS) == NONE for t in range(11, 60))   # the floor
+
+
+def test_a_queue_without_full_buffers_does_not_lower_aac(L):
+    s = Sbc()
+    assert all(aac(L, s, t, 9000, BUFS - 1) == NONE for t in range(10))     # the encoder or the player
+    assert all(aac(L, s, t, 4096, BUFS) == NONE for t in range(10, 20))     # 4 kB is not over
+    assert all(aac(L, s, t, 9000, -1) == NONE for t in range(20, 30))       # fly not read
+
+
+def test_aac_climbs_back_a_rung_after_30_clean_seconds_and_a_minute(L):
+    s = Sbc()
+    for t in (0, 1, 4, 5, 8, 9):
+        aac(L, s, t, 6080, BUFS)
+    assert s.rung == 128
+    ups = [(t, r) for t in range(10, 400) if (r := aac(L, s, t, 0, 2)) != NONE]
+    assert ups == [(69, 160), (129, 192), (189, 0)]
+    s = Sbc()
+    aac(L, s, 0, 6080, BUFS)
+    assert aac(L, s, 1, 6080, BUFS) == 192
+    assert next(t for t in range(2, 200) if aac(L, s, t, 0, 2) != NONE) == 61     # up to its own (0)
+    aac(L, s, 70, 6080, BUFS)
+    assert aac(L, s, 71, 6080, BUFS) == 192                                       # down again 10 s on
+    assert next(t for t in range(72, 400) if aac(L, s, t, 0, 2) != NONE) == 191   # the wait doubled
+
+
+def test_another_codec_or_the_setting_off_puts_aacs_peak_back(L):
+    s = Sbc()
+    aac(L, s, 0, 6080, BUFS)
+    assert aac(L, s, 1, 6080, BUFS) == 192
+    assert aac(L, s, 5, 0, 2, allowed=0) == 0               # turned off: its own at once
+    assert aac(L, s, 6, 0, 2, allowed=0) == NONE            # once
+    assert all(aac(L, s, t, 9000, BUFS, allowed=0) == NONE for t in range(7, 20))
+    s = Sbc()
+    aac(L, s, 0, 6080, BUFS)
+    aac(L, s, 1, 6080, BUFS)
+    assert aac(L, s, 9, 0, 2, on=0) == 0                    # another codec now: the next AAC stream starts whole
+    assert all(aac(L, s, t, 9000, BUFS, on=0) == NONE for t in range(10, 20))
+    assert all(aac(L, s, t, 9000, BUFS, allowed=-1) == NONE for t in range(20, 30))  # another Quality choice
+
+
+def test_an_aac_own_not_known_or_at_the_floor_steps_nothing(L):
+    s = Sbc()
+    assert all(aac(L, s, t, 9000, BUFS, own=0) == NONE for t in range(10))     # unpatched, or a set that failed
+    assert all(aac(L, s, t, 9000, BUFS, own=128) == NONE for t in range(10, 20))   # a sink capped at 128
+
+
+@pytest.mark.parametrize('coding, key, allowed', [
+    (b'2', b'', 0),                      # Auto, the switch never touched: off
+    (b'2', b'BTSTEPDOWN=1\r\n', 1),      # Auto, on: AAC on AirPods
+    (b'5', b'BTSTEPDOWN=1\r\n', 1),      # AAC chosen by hand, with the switch on
+    (b'5', b'BTSTEPDOWN=0\r\n', 0),
+    (b'6', b'BTSTEPDOWN=1\r\n', -1),     # SBC HQ: not AAC's
+    (b'3', b'BTSTEPDOWN=1\r\n', -1),     # aptX HD
+    (b'0', b'', -1),                     # LDAC Best
+])
+def test_aac_is_adapted_under_auto_or_aac_only_with_the_switch_on(L, coding, key, allowed):
+    assert L.bt_aac_allowed(INI_SBC % (coding, key)) == allowed
+    assert L.bt_aac_allowed(b'') == -1
+
+
+def test_the_aac_bytes_are_where_the_build_puts_them(L):
+    """q2bt.c writes bluealsa's byte at BT_AAC_RATE through /proc/PID/mem; tools/build.py links bt_silence.S's
+    aac_ask there (BT_AAC_RATE), just past SBC's, and the build checks its own side."""
+    import re
+    import sys
+    sys.path.insert(0, str(ROOT / 'tools'))
+    import build
+    header = (ROOT / 'patch/q2bt.h').read_text()
+    m = re.search(r'#define BT_AAC_RATE (0x[0-9a-f]+)', header)
+    assert m and int(m[1], 16) == build.BT_AAC_RATE == build.BT_SBC_POOL + 4

@@ -868,11 +868,13 @@ def test_bt_silence_commands(monkeypatch):
 def test_bt_silence():
     code, symbols = build.bt_silence()
     assert len(code) % 4 == 0 and len(code) > 0
-    for name in ('timeout', 'fill', 'read', 'sbc_bp', 'mtu_clamp'):
+    for name in ('timeout', 'fill', 'read', 'sbc_bp', 'mtu_clamp', 'aac_info', 'aac_rate'):
         assert build.BT_SILENCE <= symbols[name] < build.BT_SILENCE + len(code)
     assert symbols['timeout'] == build.BT_SILENCE  # its entry
-    # SBC's three bytes where q2guard writes them (patch/q2bt.h BT_SBC_POOL), past the code
-    assert symbols['sbc_pool'] == build.BT_SBC_POOL and len(code) == build.BT_SBC_POOL - build.BT_SILENCE + 4
+    # SBC's three bytes and AAC's four where q2guard writes them (patch/q2bt.h BT_SBC_POOL and BT_AAC_RATE), then
+    # AAC's two stubs
+    assert symbols['sbc_pool'] == build.BT_SBC_POOL and symbols['aac_ask'] == build.BT_AAC_RATE == build.BT_SBC_POOL + 4
+    assert symbols['aac_info'] == build.BT_AAC_RATE + 4 < symbols['aac_rate'] < build.BT_SILENCE + len(code)
 
 
 # AAC's quality (docs/internals.md#bluetooth-aac): stock bluealsa's words, read from V1.36's binary, and what the
@@ -898,7 +900,8 @@ def bluealsa():
 @pytest.fixture
 def silence(monkeypatch):
     symbols = {'timeout': build.BT_SILENCE, 'fill': build.BT_SILENCE + 8, 'read': build.BT_SILENCE + 16,
-               'sbc_bp': build.BT_SILENCE + 20, 'mtu_clamp': build.BT_SILENCE + 24, 'sbc_pool': build.BT_SBC_POOL}
+               'sbc_bp': build.BT_SILENCE + 20, 'mtu_clamp': build.BT_SILENCE + 24, 'sbc_pool': build.BT_SBC_POOL,
+               'aac_ask': build.BT_AAC_RATE, 'aac_info': build.BT_SILENCE + 32, 'aac_rate': build.BT_SILENCE + 40}
     monkeypatch.setattr(build, 'bt_silence', lambda: (b'\x11' * 24, symbols))
     return symbols
 
@@ -945,7 +948,9 @@ def test_patch_bluealsa_hooks(silence):
     expected = {0x41465c: build.j(silence['timeout']), 0x414684: build.j(silence['fill']), 0x414688: 0x00002825,
                 0x414754: build.jal(silence['read']), 0x42d09c: 0x004147a0,
                 0x406580: build.jal(silence['sbc_bp']),  # the SBC encoder's one sbc_encode
-                0x40abf8: build.jal(silence['mtu_clamp'])}  # where the A2DP acquire stores the write MTU
+                0x40abf8: build.jal(silence['mtu_clamp']),  # where the A2DP acquire stores the write MTU
+                0x417268: build.jal(silence['aac_info']),  # the AAC encoder's one aacEncInfo
+                0x4175a4: build.jal(silence['aac_rate'])}  # and its loop's aacEncEncode
     for address, new in expected.items():
         assert struct.unpack_from('<I', out, build.fileoff(raw, address))[0] == new
 
@@ -957,7 +962,7 @@ def test_patch_bluealsa_refuses_a_moved_caller(silence):
         build.patch_bluealsa(bytes(raw))
 
 
-@pytest.mark.parametrize('site', range(7))
+@pytest.mark.parametrize('site', range(9))
 def test_patch_bluealsa_refuses_a_moved_site(silence, site):
     raw = bytearray(bluealsa())
     struct.pack_into('<I', raw, build.fileoff(raw, build.BT_SILENCE_SITES[site][0]), 0xdead)
@@ -1006,6 +1011,12 @@ def test_the_launcher_starts_q2_bip_behind_bluealsa():
 def test_patch_bluealsa_refuses_sbc_bytes_elsewhere(silence):
     silence['sbc_pool'] += 4
     with pytest.raises(ValueError, match='^SBC bitpool bytes not at BT_SBC_POOL$'):
+        build.patch_bluealsa(bluealsa())
+
+
+def test_patch_bluealsa_refuses_aac_bytes_elsewhere(silence):
+    silence['aac_ask'] += 4
+    with pytest.raises(ValueError, match='^AAC peak bytes not at BT_AAC_RATE$'):
         build.patch_bluealsa(bluealsa())
 
 

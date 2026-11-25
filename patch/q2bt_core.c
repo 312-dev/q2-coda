@@ -305,33 +305,44 @@ int bt_step(struct bt_step *s, unsigned now, int allowed, int rank, const struct
     return to;
 }
 
-/* ---- SBC's bitpool ----
- * The rungs: at 48 kHz joint stereo, 8 subbands and 16 blocks, 45 is about 309 kbit/s, 35 245, 29
+/* ---- SBC's bitpool and AAC's peak ----
+ * SBC's rungs: at 48 kHz joint stereo, 8 subbands and 16 blocks, 45 is about 309 kbit/s, 35 245, 29
  * 213, 23 177 and 19 153 (SBC's own; the link adds its headers). */
 static const unsigned char sbc_rungs[] = { 45, 35, 29, 23, BT_SBC_FLOOR };
-#define SBC_RUNGS ((int)sizeof sbc_rungs)
-int bt_sbc_next(int pool, int own, int dir) {
+/* AAC's, in kbit/s: a VBR stream at 48 kHz (mode 5 and its own 240, 207 on average) measured 181,
+ * 140 and 118 on average under peaks of 192, 160 and 128; a CBR stream runs at the rung
+ * (docs/internals.md#bluetooth-link-monitor, AAC peak). */
+static const unsigned char aac_rungs[] = { 192, 160, BT_AAC_FLOOR };
+/* The rung after pool on a ladder of n rungs, highest first (bt_sbc_next's) */
+static int ladder_next(const unsigned char *rungs, int n, int pool, int own, int dir) {
     if (own <= 0) return -1;
     if (dir < 0) {
         int at = pool ? pool : own;
-        for (int i = 0; i < SBC_RUNGS; ++i)
-            if (sbc_rungs[i] < at) return sbc_rungs[i];
+        for (int i = 0; i < n; ++i)
+            if (rungs[i] < at) return rungs[i];
         return -1;
     }
     if (!pool) return -1;
-    for (int i = SBC_RUNGS - 1; i >= 0; --i)
-        if (sbc_rungs[i] > pool) return sbc_rungs[i] < own ? sbc_rungs[i] : 0;
+    for (int i = n - 1; i >= 0; --i)
+        if (rungs[i] > pool) return rungs[i] < own ? rungs[i] : 0;
     return 0;
+}
+int bt_sbc_next(int pool, int own, int dir) {
+    return ladder_next(sbc_rungs, (int)sizeof sbc_rungs, pool, own, dir);
+}
+int bt_aac_next(int rate, int own, int dir) {
+    return ladder_next(aac_rungs, (int)sizeof aac_rungs, rate, own, dir);
 }
 /* bt_step's trigger and its clean seconds, a rung at a time each way: down after BT_STEP_STALL
  * congested seconds, BT_SBC_SETTLE_MS after a change for the queue to drain at the new rate; up
  * after BT_SBC_CLEAN clean ones and s->up_ms since the last change. A rung up undone within that
- * wait doubles it, so a link that carries one rung and not the next settles below. */
-int bt_sbc_step(struct bt_sbc *s, unsigned now, int allowed, int rank, int own, int wq, int fly,
-                int bufs) {
-    if (allowed <= 0 || rank != 1) { /* another codec, or not SBC's to change: its own, once */
-        int back = s->pool ? 0 : -1;
-        s->pool = s->stall = s->clean = 0;
+ * wait doubles it, so a link that carries one rung and not the next settles below. on: the stream
+ * is the ladder's codec and the setting allows it; next: its ladder. */
+static int rung_step(struct bt_rung *s, unsigned now, int on, int own, int wq, int fly, int bufs,
+                     int (*next)(int, int, int)) {
+    if (!on) { /* another codec, or not the ladder's to change: the stream's own, once */
+        int back = s->rung ? 0 : -1;
+        s->rung = s->stall = s->clean = 0;
         return back;
     }
     if (own <= 0 || (s->have && now - s->last <= BT_SBC_SETTLE_MS)) {
@@ -343,18 +354,26 @@ int bt_sbc_step(struct bt_sbc *s, unsigned now, int allowed, int rank, int own, 
     s->stall = wq > BT_STEP_WQ && full ? s->stall + 1 : 0;
     s->clean = wq == 0 && fly >= 0 && !full ? s->clean + 1 : 0;
     int to = -1;
-    if (s->stall >= BT_STEP_STALL && (to = bt_sbc_next(s->pool, own, -1)) >= 0) {
+    if (s->stall >= BT_STEP_STALL && (to = next(s->rung, own, -1)) >= 0) {
         if (s->raised && now - s->raised_at < s->up_ms)
             s->up_ms = s->up_ms * 2 > BT_SBC_UP_MAX_MS ? BT_SBC_UP_MAX_MS : s->up_ms * 2;
         s->raised = 0;
     } else if (s->clean >= BT_SBC_CLEAN && (!s->have || now - s->last >= s->up_ms) &&
-               (to = bt_sbc_next(s->pool, own, 1)) >= 0) {
+               (to = next(s->rung, own, 1)) >= 0) {
         s->raised = 1, s->raised_at = now;
     } else {
         return -1;
     }
-    s->pool = to, s->have = 1, s->last = now, s->stall = s->clean = 0;
+    s->rung = to, s->have = 1, s->last = now, s->stall = s->clean = 0;
     return to;
+}
+int bt_sbc_step(struct bt_rung *s, unsigned now, int allowed, int rank, int own, int wq, int fly,
+                int bufs) {
+    return rung_step(s, now, allowed > 0 && rank == 1, own, wq, fly, bufs, bt_sbc_next);
+}
+int bt_aac_step(struct bt_rung *s, unsigned now, int allowed, int aac, int own, int wq, int fly,
+                int bufs) {
+    return rung_step(s, now, allowed > 0 && aac, own, wq, fly, bufs, bt_aac_next);
 }
 
 /* config.ini's [section] key's value (up to its line's end), 0 when it has none */
@@ -396,6 +415,11 @@ int bt_sbc_allowed(const char *ini) {
     static const int rows[] = { BT_LDAC_AUTO, BT_SBC_HQ, BT_SBC_ROW };
     int on;
     return coding_in(ini, rows, 3, &on) < 0 ? -1 : on;
+}
+int bt_aac_allowed(const char *ini) {
+    static const int rows[] = { BT_LDAC_AUTO, BT_AAC_ROW };
+    int on;
+    return coding_in(ini, rows, 2, &on) < 0 ? -1 : on;
 }
 int bt_pcms_path(const char *text, char *path, int n) {
     const char *src = strstr(text, "/a2dpsrc"), *a = src, *b = src;

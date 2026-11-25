@@ -672,15 +672,22 @@ BT_SILENCE, BT_SILENCE_SAMPLES = 0x450400, 192000
 # (address, stock word, patched with: j or jal to a bt_silence.S symbol, or a word):
 # poll's timeout, poll's timeout path (its delay slot takes the moved move a1,zero), the PCM read,
 # and the signal jump table's PAUSE entry: demo pauses hciplayer before some skips, so PAUSE takes
-# Drain's case (a 100 ms poll, then the fill) instead of polling again unbounded; then SBC's bitpool and the write MTU.
+# Drain's case (a 100 ms poll, then the fill) instead of polling again unbounded; then SBC's bitpool, the write MTU
+# and AAC's peak (its encoder thread's one aacEncInfo and its loop's aacEncEncode).
 BT_SILENCE_SITES = ((0x41465c, 0x8e460030, 'j', 'timeout'), (0x414684, 0x00002825, 'j', 'fill'),
                     (0x414688, 0x0c10c2b0, None, 0x00002825), (0x414754, 0x0c105053, 'jal', 'read'),
                     (0x42d09c, 0x0041463c, None, 0x004147a0), (0x406580, 0x0c100e38, 'jal', 'sbc_bp'),
-                    (0x40abf8, 0x0c10c044, 'jal', 'mtu_clamp'))
+                    (0x40abf8, 0x0c10c044, 'jal', 'mtu_clamp'), (0x417268, 0x0c10c260, 'jal', 'aac_info'),
+                    (0x4175a4, 0x0c10c2d8, 'jal', 'aac_rate'))
 # SBC's bitpool (docs/internals.md#bluetooth-link-monitor): the SBC encoder thread's one sbc_encode call
 # (0x406580, a site above) goes through bt_silence.S's sbc_bp, which takes the bitpool from the byte at
 # BT_SBC_POOL, the lesser of it and the thread's own; q2guard writes it (patch/q2bt.h's BT_SBC_POOL, the same).
 BT_SBC_POOL = BT_SILENCE + 0x200
+# AAC's peak (docs/internals.md#bluetooth-link-monitor, AAC peak): the AAC encoder thread's aacEncInfo call (0x417268)
+# goes through bt_silence.S's aac_info, which publishes the stream's own bitrate and mode, and its loop's aacEncEncode
+# (0x4175a4) through aac_rate, which sets fdk-aac's peak (VBR) or bitrate (CBR) to the byte at BT_AAC_RATE when that
+# is below the stream's own; q2guard writes it (patch/q2bt.h's BT_AAC_RATE, the same).
+BT_AAC_RATE = BT_SBC_POOL + 4
 # The A2DP write MTU (docs/internals.md#bluetooth-link-monitor, Packet size): transport_acquire_bt_a2dp's
 # g_dbus_message_get_unix_fd_list call (0x40abf8, the last site above), whose delay slot stores Acquire's write MTU,
 # goes through bt_silence.S's mtu_clamp, which cuts it to BT_MTU_MAX for every codec but LDAC. The chip's
@@ -2606,6 +2613,7 @@ def patch_bluealsa(raw):
     words += [0] * ((BT_SILENCE - BT_DROP_PAYLOAD) // 4 - len(words))
     code, sym = bt_silence()
     check(sym['sbc_pool'] == BT_SBC_POOL, 'SBC bitpool bytes not at BT_SBC_POOL')
+    check(sym['aac_ask'] == BT_AAC_RATE, 'AAC peak bytes not at BT_AAC_RATE')
     payload = struct.pack(f'<{len(words)}I', *words) + code
     append_payload(image, payload, BT_DROP_PAYLOAD, len(payload), 'bluealsa')
     struct.pack_into('<2I', image, fileoff(raw, BT_DROP),

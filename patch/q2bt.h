@@ -3,7 +3,8 @@
  * sent, what is waiting for it, what the controller says of the link, and what else was busy. Two
  * things it changes: the headset's link is allowed EDR packets (bt_edr_step), once a handle; and
  * under Auto, aptX HD or aptX is stepped down to SBC while the radio cannot keep up
- * (bt_step), and SBC's bitpool lowered (bt_sbc_step), both with Adapt to Signal on. The
+ * (bt_step), and SBC's bitpool or AAC's peak lowered (bt_sbc_step, bt_aac_step), all with Adapt to
+ * Signal on. The
  * decisions, parsers and the line, with no reads of the device: q2bt_core.c, tested on this machine
  * by test/unit/test_q2bt.py. The device's side is q2bt.c; tools/q2bt.py reads the log. The
  * controller watchdog (bt_wedge, test/unit/test_q2bt_wedge.py) lives here too, and the device
@@ -184,8 +185,9 @@ int bt_dbus_bytes(const char *text, const char *after, const char *key, char *he
 #define BT_SBC_CLEAN 30         /* seconds in a row with nothing waiting before a rung up, */
 #define BT_SBC_UP_MS 60000      /* and no sooner than this after the last change; */
 #define BT_SBC_UP_MAX_MS 480000 /* doubled, to this, each time a rung up stalls again within it */
-struct bt_sbc {
-    int pool;         /* the bitpool asked for, 0 the thread's own */
+/* A ladder's place: SBC's bitpool, or AAC's peak (bt_aac_step, with the same timing) */
+struct bt_rung {
+    int rung;         /* the rung asked for (a bitpool, or kbit/s), 0 the stream's own */
     int stall, clean; /* seconds in a row congested, clean */
     int have;         /* last is set */
     unsigned last;    /* ms of the last change */
@@ -199,13 +201,33 @@ int bt_sbc_next(int pool, int own, int dir);
 /* One line: allowed (bt_sbc_allowed), the codec's rank (bt_codec_rank), own, wq, fly (-1 not read)
  * and the controller's buffer count, as bt_step's. The bitpool to ask for now (0 the thread's own),
  * else -1. Another codec, or the switch turned off, asks for 0 once. */
-int bt_sbc_step(struct bt_sbc *s, unsigned now, int allowed, int rank, int own, int wq, int fly,
+int bt_sbc_step(struct bt_rung *s, unsigned now, int allowed, int rank, int own, int wq, int fly,
                 int bufs);
 #define BT_SBC_HQ 6 /* [SYSSET] BTCODING's SBC HQ and SBC rows (g_btcoding) */
 #define BT_SBC_ROW 7
 /* config.ini's text: 1 Auto, SBC HQ or SBC with BT_STEP_KEY's switch on, 0 those with it off,
  * -1 another choice (or none saved) */
 int bt_sbc_allowed(const char *ini);
+
+/* ---- AAC's peak (docs/internals.md#bluetooth-link-monitor, AAC peak) ----
+ * bluealsa's AAC encoder sets fdk-aac's peak bitrate (a VBR stream: every frame's header stays as it
+ * was, only the frames shrink) or its bitrate (CBR) to tools/bt_silence.S's aac_ask byte, in kbit/s,
+ * before its next frame, when that is below the stream's own, and back to its own at 0. The four bytes
+ * at BT_AAC_RATE in bluealsa (tools/build.py's BT_AAC_RATE): the rate asked for (q2guard writes it
+ * through /proc/PID/mem), the stream's own (its configured bitrate, 240 as the build sets it; 0 not
+ * known, or a set that failed), the one in use (0 its own) and fdk-aac's bitrate mode (0 CBR). */
+#define BT_AAC_RATE 0x450604
+#define BT_AAC_FLOOR 128 /* the lowest rung: every frame at most 341 bytes at 48 kHz, a packet that fits a 2-DH3 */
+/* As bt_sbc_next, on AAC's rungs in kbit/s (192, 160, BT_AAC_FLOOR) below the stream's own. */
+int bt_aac_next(int rate, int own, int dir);
+/* As bt_sbc_step, on AAC: aac 1 while the stream is AAC, own its rate in kbit/s (0 not known).
+ * The rate to ask for now (0 the stream's own), else -1. */
+int bt_aac_step(struct bt_rung *s, unsigned now, int allowed, int aac, int own, int wq, int fly,
+                int bufs);
+#define BT_AAC_ROW 5 /* [SYSSET] BTCODING's AAC row (g_btcoding) */
+/* config.ini's text: 1 Auto or AAC with BT_STEP_KEY's switch on, 0 those with it off, -1 another
+ * choice (or none saved) */
+int bt_aac_allowed(const char *ini);
 
 /* ---- the A2DP socket's queue ----
  * /proc/net/l2cap's largest Wmem (bytes an L2CAP socket has waiting: the kernel holds them only
