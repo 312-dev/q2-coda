@@ -26,8 +26,12 @@
 #include "navigation.h"
 
 /* The ID low and no VBUS this long before the Q2 powers the bus, for a low the blank did not catch.
- * The board's own lows, with nothing attached, came after VBUS left and are the blank's. */
-#define OTG_SETTLE_MS 6000
+ * Every low logged with the pull-up on and nothing attached began 2.15 to 7.02 s after VBUS left
+ * (OTG_BLANK_MS's), and the longest that nothing cut short lasted 2.15 s: read on stock's
+ * once-a-second pass, such a low spans at most three reads 2 s apart, short of this, should one
+ * ever begin outside the blank. The power comes on the fourth pass that reads an adapter's low,
+ * 3 to 4 s after the plug. */
+#define OTG_SETTLE_MS 3000
 /* A low ID starting this soon after VBUS left the port is the board's, not an adapter's: with
  * PD18's pull-up on, the lows started 2.15 to 7.02 s after it (q2-pull-state.log, 2026-11-17,
  * 0.54 s samples, 4 lows). */
