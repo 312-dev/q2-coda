@@ -1,0 +1,31 @@
+# q2-usbtrace trace format (docs/internals.md#usb-tracer), built from a device log for test/unit/test_usb_fsm.py.
+# Source: car1129/logs/q2-usb.log lines 337 to 700, 2026-11-23, V1SSi (demo ms as s; dmesg's uptime is demo + 4.052),
+# the AB13X earbuds the night docs/internals.md#otg-host-power tells: the laptop's cable out at 989.412, four seats
+# that held PD17 low with no source (usb/online 0; the no-source lines), and two that brought PD18 low, each powered by
+# stock's 6 s settle, enumerated, and cut once the device left (otg-off why=gone). The pin trace's lines are 250 ms
+# apart, so the times below are samples, not edges. Not in the record: when each no-source seat's PD17 went low (put
+# 2 s before its no-source line, OTG_NO_SOURCE_MS) and, for the first two, when it went high (1112.0 put between them)
+# [I]; the second device's removal is dmesg's "usb 1-1: USB disconnect" at 1193.270 (demo 1189.218).
+1.127000 start
+1.127000 s PD17=0 PD18=1 PC20=0 on=1 dev=0
+1.127000 udc configured
+989.412000 s PD17=1 on=0
+989.412000 udc suspended
+1107.554000 s PD17=0 on=0
+1107.554000 udc default
+1112.000000 s PD17=1 on=0
+1115.612000 s PD17=0 on=0
+1131.622000 s PD17=1 PD18=0 on=0
+1137.646000 s PD17=0 PC20=1 on=0
+1139.701000 s dev=1
+1144.976000 s PD18=1 dev=0
+1146.118000 s PD17=1 PC20=0
+1151.214000 s PD17=0 on=0
+1157.212000 s PD17=1 on=0
+1163.471000 s PD17=0 on=0
+1167.720000 s PD17=1 on=0
+1173.968000 s PD18=0
+1180.619000 s PD17=0 PC20=1 on=0
+1182.484000 s dev=1
+1189.218000 s dev=0
+1190.116000 s PD17=1 PD18=1 PC20=0
