@@ -2105,9 +2105,13 @@ def boot_round(w):
 
 def test_after_a_boot_every_library_list_is_loaded_ahead_opened_or_not(fw, st):
     """A boot's first quiet loads Songs, Albums and Artists ahead whether or not they were opened (a firmware
-    update leaves every kept order another firmware's), and the first open takes the order sorted ahead."""
+    update leaves every kept order another firmware's), and the first open takes the order sorted ahead. Dark, a
+    boot's first passes touch nothing: the round waits for the screen's first light."""
     w = Warm(fw, st)
     w.s.calls.clear()
+    w.poll()
+    assert not w.s.calls and not w.threads  # dark since the boot
+    fw.var('g_backlight_status', C.c_ubyte).value = 1  # lit, its last input long ago
     w.poll()
     assert w.s.calls == [('dbquery', 0)] and len(w.threads) == 1
     w.run()

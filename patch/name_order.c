@@ -211,7 +211,7 @@ static void spin_sort(void *list, void *cmp, const char *caption) {
     pthread_join(t, 0);
 }
 
-/* Sorted ahead (docs/internals.md#name-order): after a boot, and each time the library or the
+/* Sorted ahead (docs/internals.md#name-order): after a boot (once the screen is first lit), and each time the library or the
  * server catalogue has changed since (library_gen moved: a scan's end, a catalogue's load or
  * import), Songs, Albums and Artists are each loaded again as their open loads them (library_warm,
  * on the UI thread, with the card mounted and the screen dark or WARM_IDLE_MS after the last
@@ -286,11 +286,13 @@ void name_order_poll(void) {
         if (nw.done) warm_end();
         return;
     }
-    if (!nw.seen || nw.gen != library_gen)
+    /* a boot's round waits for the screen's first light: a dark pass with nothing changed touches no
+     * file (docs/internals.md#the-ui-loops-wait) */
+    if (nw.gen != library_gen || (!nw.seen && g_backlight_status))
         nw.seen = 1, nw.gen = library_gen,
         nw.due = 1u << NO_SONGS | 1u << NO_ALBUMS | 1u << NO_ARTISTS;
-    if (!nw.due || !card_mounted() || library_scanning() || coverflow_opening() ||
-        (g_backlight_status && (unsigned)time_now_ms() - st.last_input < WARM_IDLE_MS))
+    if (!nw.due || (g_backlight_status && (unsigned)time_now_ms() - st.last_input < WARM_IDLE_MS) ||
+        !card_mounted() || library_scanning() || coverflow_opening())
         return;
     unsigned cls = 0;
     while (!(nw.due >> cls & 1)) ++cls;
