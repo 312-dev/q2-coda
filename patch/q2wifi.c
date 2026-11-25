@@ -172,7 +172,7 @@ static void snapshot(int assoc) {
     }
     if (!wf.listed) drv_list();
     for (unsigned i = 0; i < sizeof drv_files / sizeof drv_files[0]; ++i) {
-        char path[96], tag[40];
+        char path[256], tag[40];
         snprintf(path, sizeof path, DRV "/%s", drv_files[i]);
         snprintf(tag, sizeof tag, "F %s", drv_files[i]);
         put_file(tag, path, WIFI_PROC_MAX);
@@ -261,9 +261,9 @@ static void boot_kernel(void) {
                     int d = 0;
                     for (const char *p = c2 + 1; *p >= '0' && *p <= '9' && d < 20;) us[d++] = *p++;
                     us[d] = 0;
-                    int secs = d > 6 ? d - 6 : 0;
-                    snprintf(line, sizeof line, "[%.*s.%s] %.900s", secs ? secs : 1, secs ? us : "0",
-                             d > 6 ? us + secs : us, semi + 1);
+                    /* the kernel's microseconds as seconds, by their digits: no 64-bit division on the Q2 */
+                    if (d > 6) snprintf(line, sizeof line, "[%.*s.%s] %.900s", d - 6, us, us + d - 6, semi + 1);
+                    else snprintf(line, sizeof line, "[0.%06d] %.900s", atoi(us), semi + 1);
                     wifi_scrub(line, wf.salt, clean, sizeof clean);
                     put_lines("K", clean);
                     used += (int)strlen(clean) + 32;
