@@ -41,7 +41,7 @@ static const char *mdns_if = "wlan0";
 uint8_t crc_device_id[8];
 
 typedef struct {
-    int seq, state, pos_ms, len_s, id, shuffle, repeat, volume, qpos, qlen, qgen, qlist, radio;
+    int seq, state, pos_ms, len_s, id, shuffle, repeat, volume, qpos, qlen, qgen, qlist, radio, find;
     int hearts; /* 0-5, -1 when the song can't be rated */
     int buf, bhave, btotal, bms; /* a server song loading: its bytes and length (np_stream.c) */
     int noten;                   /* the Vamp's toasts so far; note the last, while shown */
@@ -436,7 +436,7 @@ static void np_parse(const char *b, np_t *o) {
             NUM("state", state) NUM("pos", pos_ms) NUM("len", len_s) NUM("id", id) NUM("shuffle", shuffle)
             NUM("repeat", repeat) NUM("volume", volume) NUM("qpos", qpos) NUM("qlen", qlen) NUM("qgen", qgen) NUM("qlist", qlist)
             NUM("seq", seq) NUM("hearts", hearts) NUM("buf", buf) NUM("bhave", bhave) NUM("btotal", btotal)
-            NUM("bms", bms) NUM("radio", radio) NUM("noten", noten) STR("note", note) STR("path", path) STR("title", title) STR("artist", artist) STR("album", album)
+            NUM("bms", bms) NUM("radio", radio) NUM("find", find) NUM("noten", noten) STR("note", note) STR("path", path) STR("title", title) STR("artist", artist) STR("album", album)
             if (dst) {
                 if (vn > cap - 1) vn = cap - 1;
                 memcpy(dst, v, vn);
@@ -467,7 +467,7 @@ int crc_shim_alive(void) {
 
 uint32_t crc_caps(void) {
     return CAP_BROWSE | CAP_SEARCH | CAP_QUEUE | CAP_COVERS | CAP_FAVORITES | CAP_RECENT |
-           (crc_shim_alive() ? CAP_PLAY | CAP_SEEK | CAP_MODES | CAP_QUEUE_JUMP | CAP_RATE | CAP_RESUME | CAP_BUFFERING | CAP_RADIO | CAP_NOTICE : 0) |
+           (crc_shim_alive() ? CAP_PLAY | CAP_SEEK | CAP_MODES | CAP_QUEUE_JUMP | CAP_RATE | CAP_RESUME | CAP_BUFFERING | CAP_RADIO | CAP_NOTICE | CAP_FIND : 0) |
            (lib_has_server() ? CAP_SERVER : 0) | CAP_REMOTE | CAP_IROH_ALLOW;
 }
 
@@ -536,6 +536,7 @@ static void put_now_playing(pbw *w) {
     np_nodes(id, &album_id, &artist_id);
     pb_str(w, 20, album_id); /* the Browse pages of its album and album artist: left out when none */
     pb_str(w, 21, artist_id);
+    pb_varint(w, 22, np.find != 0); /* CAP_FIND: the jingle plays */
     pb_end(w, m);
 }
 
@@ -915,6 +916,13 @@ static int queue_item(crc_session *s, unsigned req_id, const uint8_t *p, size_t 
     return crc_shim_command(s, req_id, verb);
 }
 
+/* Find (CAP_FIND): Find My Vamp's jingle, the shim's "find" or, with stop, "find stop" (findmy.c) */
+static int find(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
+    unsigned v[5];
+    if (fields(p, n, v, 0, 0, 0) < 0) return crc_error(s, req_id, E_BAD_REQUEST, "Find");
+    return crc_shim_command(s, req_id, v[1] ? "find stop" : "find");
+}
+
 /* ---- authenticated requests ---- */
 
 /* The value of "key value" lines' key in b into out ("" without one) */
@@ -967,6 +975,7 @@ int crc_app(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t 
     case T_SET_MODE: np_read(); return set_mode(s, req_id, p, n);
     case T_RATE: np_read(); return rate(s, req_id, p, n);
     case T_PLAY_QUEUE_ITEM: np_read(); return queue_item(s, req_id, p, n);
+    case T_FIND: return find(s, req_id, p, n);
     case T_GET_REMOTE: return get_remote(s, req_id);
     case T_REGISTER_REMOTE: return register_remote(s, req_id, p, n);
     case T_BROWSE: case T_SEARCH: case T_GET_QUEUE: case T_GET_COVER: case T_PLAY: case T_START_RADIO:

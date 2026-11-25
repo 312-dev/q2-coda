@@ -28,6 +28,7 @@ SOURCES = [PATCH / 'coda_rc.c', PATCH / 'coda_rc_core.c', PATCH / 'coda_rc_lib.c
 SQLITE = '/usr/lib/x86_64-linux-gnu/libsqlite3.so.0'
 CAP_RADIO = 16384
 CAP_IROH_ALLOW = 131072
+CAP_FIND = 262144
 # the shim's "taken" answer (coda_rc_cmdq.h CRC_ACK_TAKEN)
 TAKEN = int(re.findall(r'#define CRC_ACK_TAKEN (\d+)', (PATCH / 'coda_rc_cmdq.h').read_text())[0])
 CONNECT = socket.socket.connect  # conftest refuses it to a test; the daemons here listen on loopback alone
@@ -179,6 +180,31 @@ def test_now_playing_says_radio(q2):
     else:
         raise AssertionError('no push with radio on')
     assert s.get_state()['now_playing']['radio'] is True
+
+
+def test_find_goes_to_the_shim_and_now_playing_says_it_plays(q2):
+    """Find My Vamp (CAP_FIND, docs/remote-protocol.md#find-my-vamp): Find is the shim's "find", Find with stop its
+    "find stop", each acked once the shim answers; NowPlaying.finding is the shim's find=1. A shim with no buzzer
+    answers 2: UNAVAILABLE."""
+    s, shim = q2
+    shim.verbs.clear()
+    assert s.info['caps'] & CAP_FIND
+    s.find()
+    s.find(stop=True)
+    assert shim.verbs == ['find', 'find stop']
+    shim.code = 2
+    with pytest.raises(client.RemoteError) as e:
+        s.find()
+    assert e.value.code == 11  # UNAVAILABLE
+    shim.code = 0
+    assert s.get_state()['now_playing']['finding'] is False
+    shim.now(radio=0, extra='find=1\n')
+    for _ in range(50):
+        if s.get_state()['now_playing']['finding']:
+            break
+        WAIT(0.02)
+    assert s.get_state()['now_playing']['finding'] is True
+    shim.now(radio=0)
 
 
 def test_now_playing_carries_the_q2_muses_toast(q2):

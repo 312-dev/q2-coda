@@ -355,6 +355,49 @@ def test_a_whole_session_pairs_and_authenticates_over_ble(q2):
     s.subscribe(position=False)
 
 
+def test_find_my_vamp_over_ble_alone(q2):
+    """Find My Vamp with no Wi-Fi: a phone that reaches the Q2 by Bluetooth alone (Smart Wi-Fi's radio off, nothing
+    on TCP) finds CAP_FIND in Hello and sends Find and Find with stop over the GATT session; each goes to demo's shim
+    as "find" and "find stop" and is acked, and NowPlaying.finding follows the shim's find=."""
+    verbs = []
+    tmp = q2.root / 'tmp'
+    (tmp / 'coda-rc.now').write_text('seq=1\nstate=2\nfind=0\n')  # demo's shim is there (crc_shim_alive)
+    done = threading.Event()
+
+    def shim():  # demo's half: each command answered 0 in the ack file, as coda_rc_shim.c cr_ack
+        while not done.is_set():
+            cmd = tmp / 'coda-rc.cmd'
+            if cmd.exists():
+                seq, verb = cmd.read_text().strip().split(' ', 1)
+                cmd.unlink()
+                verbs.append(verb)
+                (tmp / 'coda-rc.ack.tmp').write_text(f'{seq} 0\n')
+                (tmp / 'coda-rc.ack.tmp').rename(tmp / 'coda-rc.ack')
+                if verb == 'find':
+                    (tmp / 'coda-rc.now.tmp').write_text('seq=2\nstate=2\nfind=1\n')
+                    (tmp / 'coda-rc.now.tmp').rename(tmp / 'coda-rc.now')
+            WAIT(0.01)
+    t = threading.Thread(target=shim, daemon=True)
+    t.start()
+    try:
+        c = connect(q2)
+        c.exchange(247)
+        c.notify()
+        s = client.Session(c, 'Pixel 10')
+        assert s.hello()['caps'] & 262144  # CAP_FIND
+        point = s.pair_start()
+        assert wait_for((q2.root / 'tmp/coda-rc.pair').exists)
+        code = (q2.root / 'tmp/coda-rc.pair').read_text().split('\n')[0]
+        s.auth(s.pair_finish(code, point)[1])
+        s.find()
+        assert s.get_state()['now_playing']['finding'] is True
+        s.find(stop=True)
+        assert verbs == ['find', 'find stop']
+    finally:
+        done.set()
+        t.join(2)
+
+
 def test_pipelined_requests_are_answered_in_order_one_at_a_time(q2):
     """Four 3 KB Pings in one go at MTU 23, sealed (before Auth a Ping is echoed only up to CRC_PING_PLAIN): each
     answer whole and in order (the daemon takes the next once the one before has left, coda_rc_ble.c feed)."""
