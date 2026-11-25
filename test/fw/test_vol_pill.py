@@ -12,8 +12,9 @@ from test_nav_painters import Canvas, scratch, st  # noqa: F401
 from test_status_row import Row
 
 # Row's bar: the battery's body at x 322, the level bars (playing) 6 + 10 px left of it, so the leftmost slot's
-# edge is 306 and the pill ends VP_CLEAR (8) short of 298: 199 wide (VP_W, odd so it centres on 187.5), x 88.
-BOX = (88, 23 - 15, 199, 30)
+# edge is 306. The pill takes the clock's place at the row's left: from x 50 (VP_X, its speaker at the clock's text,
+# STATUS_ROW_INSET 62, less VP_PAD), 199 wide (VP_W), so it ends short of 298, VP_CLEAR (8) before the slots.
+BOX = (50, 23 - 15, 199, 30)
 HOLD, FADE = 2000, 250
 RAISED, TRACK, PRIMARY, SECONDARY = 0x1c1c1e, 0x333333, 0xffffff, 0xababab
 
@@ -75,9 +76,9 @@ def pill(fw, st):
 
 
 def test_a_headsets_change_off_now_playing_shows_the_pill_in_the_clocks_place(fw, pill):
-    """A Raised pill 30 px tall on the row's centre, centred across the row, the speaker, a 4 px track in Track
-    filled in Text Primary to 62 of 100, and "62" in Text Secondary ending 12 px in from its right end; the clock
-    and the title out (opacity 0), and stock's volume dialog not opened."""
+    """A Raised pill 30 px tall on the row's centre, from the clock's place at the row's left, the speaker, a 4 px
+    track in Track filled in Text Primary to 62 of 100, and "62" in Text Secondary ending 12 px in from its right end;
+    the clock out (opacity 0), and stock's volume dialog not opened."""
     assert pill.up() and pill.opened == []
     box, rest, texts, names = pill.pill()
     assert box == (BOX, rgba(RAISED))
@@ -87,12 +88,12 @@ def test_a_headsets_change_off_now_playing_shows_the_pill_in_the_clocks_place(fw
     assert rest == [((track_x, 23 - 2, track_w, 4), rgba(TRACK)), ((track_x, 21, track_w * 62 // 100, 4), rgba(PRIMARY))]
     assert [(t, r[0] + r[2] - 1, c) for t, r, c in texts] == [('62', num, rgba(SECONDARY))]  # right-aligned at num
     assert names == ['oled_status_vol_d']
-    assert pill.opacity == {'label_clock': 0, 'label_title': 0}
+    assert pill.opacity == {'label_clock': 0}
 
 
 def test_it_follows_each_change_and_repaints_only_its_box(fw, pill):
     """A change while it shows repaints the pill's box alone, never the page or the whole row (the lesson of
-    perf/cc-volume-drag); the first one repaints the band where the clock and title stand too, as they go out."""
+    perf/cc-volume-drag); the first one repaints the band where the clock stands too, as it goes out."""
     assert pill.dirty == [(0, BOX[1], 306, BOX[3])]  # the first: from the left to the slots, in the pill's rows
     pill.dirty.clear()
     for v in (63, 64, 70):
@@ -116,7 +117,7 @@ def test_it_holds_two_seconds_after_the_last_change_then_fades_back_to_the_clock
         alphas.append(pill.opacity['label_clock'])
         pill.now += 33
     assert alphas[0] == 0 and alphas == sorted(alphas) and len(alphas) >= FADE // 33 - 1  # the clock fades back in
-    assert not pill.up() and pill.opacity == {'label_clock': 255, 'label_title': 255}
+    assert not pill.up() and pill.opacity == {'label_clock': 255}
     assert pill.pill()[0] is None  # gone
 
 
@@ -124,8 +125,29 @@ def test_reduce_motion_puts_the_clock_back_at_once(fw, st, pill):
     st('reduce_motion').value = 1
     pill.now += HOLD
     pill.fire()
-    assert not pill.up() and pill.opacity == {'label_clock': 255, 'label_title': 255}
+    assert not pill.up() and pill.opacity == {'label_clock': 255}
     assert not pill.frame()
+
+
+@pytest.mark.parametrize('slots, box', [
+    ('lock', BOX),  # bars, Wi-Fi and the padlock, 57 px: room for all of it
+    ('sync', (50, 8, 185, 30)),  # and a download's ring, 79 px: narrower, ending VP_CLEAR short of the leftmost
+    ('crowd', (35, 8, 141, 30)),  # every slot, 138 px: VP_MIN_W, ending there, so it leaves the clock's place
+])
+def test_it_narrows_from_its_right_end_as_the_slots_reach_left(fw, pill, slots, box):
+    """The pill keeps the clock's place and ends VP_CLEAR short of the leftmost slot, VP_W at most; at VP_MIN_W (141)
+    it moves left instead."""
+    pill.wifi(3)
+    fw.var('g_keylock_flag', C.c_ubyte).value = 1
+    if slots != 'lock':
+        pill.app(2, 500)
+    if slots == 'crowd':
+        pill.ap.a[0].reach = 1
+        from test_status_row import bt_link
+        bt_link(fw, status=3, level=70)
+    pill.dirty.clear()
+    pill.volume(40)  # up already: its box alone repaints
+    assert pill.dirty == [box]
 
 
 @pytest.mark.parametrize('page', ['playing_page', 'radionp_page', 'airplay_page'])

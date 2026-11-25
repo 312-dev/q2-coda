@@ -87,22 +87,6 @@ int np_time_tap(void *ctx, void *event) {
     return 0;
 }
 
-/* The status row (tools/ipod.py status_row) names the page in its own label, label_title: the
- * title where the page has one, the clock centred after it either way (navigation.c clock_place
- * places both). This runs in a paint, which drops the label's invalidate, so bar_repaint follows;
- * the clock waits for its timer. */
-void bar_title(void *bar) {
-    if (!st.bar_title) return; /* bar_sync has not found the row's labels */
-    const unsigned *own = widget_get_text(st.bar_title);
-    int titled = own && *own;
-    void *clock = titled != st.bar_titled ? widget_lookup(bar, "label_clock", 1) : (void *)0;
-    if (!clock) return;
-    st.bar_titled = titled;
-    st.clock_key = 0;
-    rearm(&st.clock_timer, clock_due, 0); /* clock_show writes it again */
-    if (!st.bar_timer) st.bar_timer = timer_add(bar_repaint, (void *)0, 0);
-}
-
 /* No knob in any state on a plain slider (tools/ipod.py plain_slider): Now Playing's, Quick
  * Settings' brightness and the settings slider pages'. The asset's style name has no theme entry,
  * and stock then reads what the inline style leaves out from its default slider style (0x6b48cc),

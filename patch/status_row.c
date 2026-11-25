@@ -1,17 +1,17 @@
 /* The status row's glyph slots (docs/oled-design.md#status-row,
  * docs/internals.md#status-row-slots): right to left the battery, the play state's level bars,
- * Wi-Fi, a card app's sync, Bluetooth (its link, a headset's battery, a car), Buttons Lock's
- * padlock and a card app's server out of reach. Each slot that shows takes its box and the gap
- * before the one on its right. On a full-width row the clock holds the centre (navigation.c
+ * Wi-Fi, a card app's sync, wired headphones, Bluetooth (its link, a headset's battery, a car),
+ * Buttons Lock's padlock and a card app's server out of reach. Each slot that shows takes its box
+ * and the gap before the one on its right. The clock stands at the row's left (navigation.c
  * clock_place) and the slots left of the battery are a strip with the room from the clock to the
  * battery (status_strip_room); a strip wider than that scrolls in it as a marquee, its cut ends
- * faded, and the battery never moves. Home in Split has no room set: there the clock stands at the
- * row's left, over the list. Nothing in the row ever wraps. The battery is stock's view_battery,
+ * faded, and the battery never moves. Nothing in the row ever wraps. The battery is stock's view_battery,
  * laid out by the bar's right group and painted by navigation.c paint_battery; every other slot is
  * painted here, from the bar's background (ringnav_paint_bg), so Home in Split inks them over its
  * art (coverflow.c home_ink, one ink for the row). Every glyph is the clock's digits' height, 11 px
- * on rows 17 to 27 (cy 23), with SR_GAP of ground between two (docs/oled-design.md#status-row); the
- * animated ones repaint only their own box. */
+ * on rows 17 to 27 (cy 23), but the Bluetooth rune and wired headphones, the battery's body's 12 on
+ * rows 16 to 27, with SR_GAP of ground between two (docs/oled-design.md#status-row); the animated
+ * ones repaint only their own box. */
 #include "navigation.h"
 
 #define SR_TURN_MS 1000 /* the sync arrows' half turn (the glyph repeats every half turn) */
@@ -30,6 +30,7 @@
 #define SR_GLYPH 14    /* tools/art.py STATUS_PX: a status glyph's box's height */
 #define SR_WIFI_W 16   /* tools/art.py STATUS_WIFI_W: the fan's 15.6 px */
 #define SR_CAR_W 19    /* tools/art.py STATUS_CAR_W: car-profile 11 px tall is 18.5 wide */
+#define SR_RUNE_W 9    /* tools/art.py STATUS_TALL_FIT: the Bluetooth rune 12 px tall is 8.4 wide */
 #define SR_LOCK 13     /* the padlock's box, tools/art.py STATE_PX */
 #define SR_RING 16     /* the download ring's box: a 14 px ring and its stroke */
 #define SR_SPIN_W 12   /* the turning arrows' box: frame 0's ink, 12 of its SR_GLYPH art's 14 */
@@ -81,9 +82,9 @@ static struct {
 
 #if Q2POD_DEV
 /* --dev builds only, for the emulator, which has no radio or charger: STATUS_FAKE's "wifi=N
- * charge=N" (charge 1 a charging cable, 2 one holding it full; either, each found by its first
- * letter, key) stands in for what the Q2 would report; -1 when the file does not name it. Read at
- * most every STATUS_FAKE_MS. */
+ * charge=N headphones=N" (charge 1 a charging cable, 2 one holding it full; headphones 0 none, 1 a
+ * jack, 2 a USB DAC; each found by its first letter, key) stands in for what the Q2 would report;
+ * -1 when the file does not name it. Read at most every STATUS_FAKE_MS. */
 #define STATUS_FAKE "/mnt/data/q2-status.fake"
 #define STATUS_FAKE_MS 500
 int status_fake(char key) {
@@ -142,7 +143,8 @@ static int sync_shown(void) {
 }
 /* The Bluetooth slot (docs/oled-design.md#status-row, P9): what the link is, BT_SLOT_*. Stock's
  * link list's last item is the device it links (status 3 connected, as its rows read it); a link
- * thread running (bt_connectstatus 1) is a device connecting. */
+ * thread running (bt_connectstatus 1) is a device connecting. Nothing while wired headphones take
+ * the sound (wired_shown), but a guest's phone. */
 enum {
     BT_SLOT_NONE,
     BT_SLOT_CONNECTING,
@@ -151,8 +153,10 @@ enum {
     BT_SLOT_CAR,
     BT_SLOT_GUEST
 };
+static int wired_shown(void);
 static int bt_slot(void) {
     if (guest_active()) return BT_SLOT_GUEST; /* a guest plays (guest_ui.c) */
+    if (wired_shown()) return BT_SLOT_NONE;   /* the sound goes to the wire: its glyph alone */
     char item[32] = "";
     int status = 0, n = g_bluetoothflag ? getBtLinkSize() : 0;
     if (n > 0) getBtLinkItem(n - 1, &status, item);
@@ -178,9 +182,20 @@ static int headset_shown(void) {
     return slot == BT_SLOT_NONE      ? 0
            : slot == BT_SLOT_HEADSET ? SR_GLYPH + SR_BT_GAP + SR_HS_BATT_W + SR_HS_NUB
            : slot == BT_SLOT_CAR     ? SR_CAR_W
-                                     : SR_GLYPH;
+                                     : SR_RUNE_W;
 }
 static int lock_shown(void) { return g_keylock_flag ? SR_LOCK : 0; }
+/* Wired headphones taking the sound: the player's output way 2, a USB DAC (USB-C headphones among
+ * them), or 0, the Q2's own DAC, with either jack in (g_po_status 3.5 mm, g_bal_status 4.4 mm;
+ * stock's way stays 0 with both out, and nothing then sounds). Bluetooth is way 1, so with a
+ * headset linked and a jack in, the one the sound goes to shows (stock plays to the jack last
+ * plugged in, docs/internals.md#eq-per-output). */
+static int wired_shown(void) {
+    int way = status_fake('h'); /* a --dev build's stand-in, -1 on a release */
+    if (way >= 0) return way ? SR_GLYPH : 0;
+    way = mclGetOutputWay();
+    return way == 2 || (!way && (g_po_status || g_bal_status)) ? SR_GLYPH : 0;
+}
 static int offline_shown(void) { return addon_offline() ? SR_OFFLINE : 0; }
 
 /* The play state, in Text Primary as every glyph: playing, the level bars (ui_kit.h lvl_h16, the
@@ -306,10 +321,10 @@ static void sync_paint(void *bar, void *canvas, int x, int cy) {
 static void headset_paint(void *bar, void *canvas, int x, int cy) {
     switch (bt_slot()) {
     case BT_SLOT_CONNECTING:
-        glyph(bar, canvas, "status_btdim", x, SR_GLYPH, cy, SR_GLYPH);
+        status_art(bar, canvas, "status_btdim", x, cy);
         break;
     case BT_SLOT_RUNE:
-        glyph(bar, canvas, "status_bt", x, SR_GLYPH, cy, SR_GLYPH);
+        status_art(bar, canvas, "status_bt", x, cy);
         break;
     case BT_SLOT_CAR:
         status_art(bar, canvas, "status_car", x, cy);
@@ -334,6 +349,12 @@ static void headset_paint(void *bar, void *canvas, int x, int cy) {
     }
 }
 
+/* Wired headphones: Phosphor's headphones (regular), 12 px tall on rows 16 to 27 (tools/art.py
+ * STATUS_TALL_FIT). */
+static void wired_paint(void *bar, void *canvas, int x, int cy) {
+    status_art(bar, canvas, "status_wired", x, cy);
+}
+
 /* Buttons Lock's padlock (keylock.c), the theme's keylock art in Text Primary. */
 static void lock_paint(void *bar, void *canvas, int x, int cy) {
     glyph(bar, canvas, "keylock", x, SR_LOCK, cy, SR_LOCK);
@@ -353,13 +374,14 @@ static const status_slot_t slots[SLOT_N] = {
     [SLOT_PLAY] = { play_shown, SR_GAP, play_paint },
     [SLOT_WIFI] = { wifi_shown, SR_GAP, wifi_paint },
     [SLOT_SYNC] = { sync_shown, SR_GAP, sync_paint },
+    [SLOT_WIRED] = { wired_shown, SR_GAP, wired_paint },
     [SLOT_HEADSET] = { headset_shown, SR_GAP, headset_paint },
     [SLOT_LOCK] = { lock_shown, SR_GAP, lock_paint },
     [SLOT_OFFLINE] = { offline_shown, SR_GAP, offline_paint },
 };
 
-/* The strip's room's left edge, the bar's pixels (clock_place: SR_GAP's worth past the centred
- * clock's widest); 0 for none (Home in Split, where the clock is at the row's left). */
+/* The strip's room's left edge, the bar's pixels (clock_place: past the widest clock at the row's
+ * left); 0 for none. */
 void status_strip_room(int left) { sr.room = left > 0 ? left : 0; }
 
 /* How far the marquee has slid at t ms into its cycle, 0 to over. */
@@ -404,8 +426,8 @@ static rect_t strip_box(void *bar) {
     return r;
 }
 
-/* The leftmost shown slot's left (the battery's with no other), the edge the volume pill and the
- * title's box end short of; the screen's right edge before the bar is found. */
+/* The leftmost shown slot's left (the battery's with no other), the edge the volume pill ends short
+ * of; the screen's right edge before the bar is found. */
 int status_slots_left(void) {
     int left = layout();
     return left < 0 ? 375 : left;
@@ -608,9 +630,8 @@ static int sr_strip_frame(void) {
  * the bars' loop while they move, the strip's marquee while it runs past its room (from rest when
  * it newly does), the arrows' loop while lit and they turn; 1 when what the slots show changed
  * (which slots, the play state, Wi-Fi's level or its internet, the sync's kind and its ring to the
- * 50th, the Bluetooth slot's kind and the headset's level, the lock, a server out of reach, the
- * strip scrolling or not), so the bar repaints whole after the frame and, in Home's Split, the
- * clock moves beside the new leftmost slot. */
+ * 50th, wired headphones, the Bluetooth slot's kind and the headset's level, the lock, a server out
+ * of reach, the strip scrolling or not), so the bar repaints whole after the frame. */
 int status_row_sync(void) {
 #if Q2POD_DEV
     vol_pill_fake(); /* the emulator's stand-in for a headset's volume (vol_pill.c) */
@@ -633,7 +654,7 @@ int status_row_sync(void) {
                        << 14 |
                    (unsigned)!!g_keylock_flag << 21 | 1u << 22 | (unsigned)bt_slot() << 23 |
                    (unsigned)home_np_lead() << 26 | (unsigned)addon_offline() << 27 |
-                   (unsigned)!!sr.over << 28;
+                   (unsigned)!!sr.over << 28 | (unsigned)!!wired_shown() << 29;
     if (sig == sr.sig) return 0;
     sr.sig = sig;
     return 1;

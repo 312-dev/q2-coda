@@ -981,7 +981,7 @@ f,ctx=m.handler(m.nodes[keep_lit]['children'][0],O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and not did(m,'image_manager_unload_all')
 assert [(c[1],m.text(c[2]),m.text(c[3])) for c in m.calls if c[0]=='write_int_config']==[(0,'IPOD','KEEPLIT')]
 m.call(address=f,args=(ctx,m.event,0,0),gap=0)
-# Time in Title has no row and no key: the status row keeps its clock beside the title (np_bar.c bar_title).
+# Time in Title has no row and no key: the status row shows its clock at the left and names no page.
 assert not [r for r in kids if row_text(r).startswith('Time in Title')]
 # The window loader loads each window by the name asked.
 load=HOOKS['ui_loader_load_widget_with_parent'][0]; m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'

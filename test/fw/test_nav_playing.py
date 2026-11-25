@@ -666,25 +666,6 @@ def window(ui, name, navbar_title=None, navbar_shown=0):
     return win
 
 
-def bar_title(fw, bar):
-    fw.fn('bar_title', None, C.c_void_p)(bar.bar)
-
-
-def test_oled_s_status_row_keeps_the_clock_beside_a_title(fw, st, ui):
-    """OLED's status row shows the page's title and the clock at once (navigation.c clock_place places them); the title
-    keeps the box clock_place gives it."""
-    theme(fw, st)
-    bar = Bar(fw, ui, title=True)
-    st.bar_title = bar.title
-    ui.set_text(bar.title, 'Albums')
-    bar_title(fw, bar)
-    assert st.bar_titled == 1 and ui.text(bar.clock) == '12:00' and len(ui.due('clock_due')) == 1
-    assert ui.box(bar.title)[2] == 91  # not widened to EQ's left edge
-    ui.set_text(bar.title, '')  # a page with no title: the clock alone, timed again
-    bar_title(fw, bar)
-    assert st.bar_titled == 0 and len(ui.due('clock_due')) == 1
-
-
 # The theme's faces (theme_font, theme_face): its own face (Inter) where it has the text's characters, else its
 # fallback, stock's, which has CJK, at the fallback's share of the px.
 LATIN, CYRILLIC, CJK = 'Albums', 'Альбом', '专辑'

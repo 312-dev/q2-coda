@@ -233,19 +233,20 @@ def phosphor(name, px, rgb, ink=0.0):
     return glyph_png(phosphor_polys(name, px), px, rgb, ink)
 
 
-def status_fit(polys, w):
-    """polys, a glyph laid in a STATUS_PX box, as the status row sizes it: scaled until its ink is STATUS_INK px tall
-    (its height, not its longer side, so a wide glyph such as wifi-x is as tall as the clock's digits too), its ink's
-    top on STATUS_TOP and centred across a w px wide box."""
+def status_fit(polys, w, ink=None, top=None):
+    """polys, a glyph laid in a STATUS_PX box, as the status row sizes it: scaled until its ink is ink px tall
+    (STATUS_INK by default; its height, not its longer side, so a wide glyph such as wifi-x is as tall as the clock's
+    digits too), its ink's top on row top (STATUS_TOP) and centred across a w px wide box."""
+    ink, top = STATUS_INK if ink is None else ink, STATUS_TOP if top is None else top
     xs, ys = [x for poly in polys for x, _ in poly], [y for poly in polys for _, y in poly]
-    k, cx = STATUS_INK / (max(ys) - min(ys)), (min(xs) + max(xs)) / 2
-    return [[(w / 2 + (x - cx) * k, STATUS_TOP + (y - min(ys)) * k) for x, y in poly] for poly in polys]
+    k, cx = ink / (max(ys) - min(ys)), (min(xs) + max(xs)) / 2
+    return [[(w / 2 + (x - cx) * k, top + (y - min(ys)) * k) for x, y in poly] for poly in polys]
 
 
-def status_glyph(name, w, rgb):
+def status_glyph(name, w, rgb, ink=None, top=None):
     """Phosphor's icon name at the status row's size (status_fit), a w x STATUS_PX PNG in rgb."""
     box = (0, 0, w, STATUS_PX)
-    return png(w, STATUS_PX, laid(w, STATUS_PX, [(coverage_nonzero(status_fit(phosphor_polys(name, STATUS_PX), w), box),
+    return png(w, STATUS_PX, laid(w, STATUS_PX, [(coverage_nonzero(status_fit(phosphor_polys(name, STATUS_PX), w, ink, top), box),
                                                   lambda x, y: (rgb, 1))]))
 
 
@@ -300,7 +301,7 @@ SPIN_STROKE = 1.9
 SPIN_FADE = 0.1
 STATE_INKS = inks('primary', 'd', 'l')
 # The status row's glyphs by role (status_row.c, docs/oled-design.md#status-row), each in Text Primary per half
-# (STATE_INKS). Every one is STATUS_INK px tall, the clock's digits' height, with its ink's top STATUS_TOP rows into a
+# (STATE_INKS). Every one but STATUS_TALL_FIT's is STATUS_INK px tall, the clock's digits' height, with its ink's top STATUS_TOP rows into a
 # STATUS_PX tall box that status_row.c puts on the row's centre less 7, so the glyphs stand on rows 17 to 27 with the
 # digits. STATUS_FIT's are Phosphor's, sized by their ink's height (status_fit), centred across their box: STATUS_PX
 # square, or wider where the ink is (wifi-x, the car); the volume pill's speakers among them. The Bluetooth rune dims while
@@ -318,11 +319,16 @@ STATUS_FAN_DEG = 90
 STATUS_FAN = ((0, 3.6), (5.0, 7.3), (8.7, 11.0))  # the dot and the bands' radii: 1.4 px of ground between
 STATUS_GLYPHS = {'play': ('play-fill', STATE_PX, 0), 'pause': ('pause-fill', STATE_PX, 0), 'keylock': ('lock-simple-fill', STATE_PX, 0),
                  'status_down': ('arrow-down-bold', 8, 0)}
-STATUS_FIT = {'status_wifi_x': ('wifi-x-bold', STATUS_WIFI_W), 'status_bt': ('bluetooth-bold', STATUS_PX),
+STATUS_FIT = {'status_wifi_x': ('wifi-x-bold', STATUS_WIFI_W),
               'status_headphones': ('headphones-bold', STATUS_PX), 'status_car': ('car-profile-bold', STATUS_CAR_W),
               # the volume pill's speaker, and muted at 0 (vol_pill.c)
               'status_vol': ('speaker-simple-high-fill', STATUS_PX), 'status_mute': ('speaker-simple-x-fill', STATUS_PX)}
 STATUS_UNLIT = {'d': 0x3a3a3c, 'l': 0xc7c7cc}
+# The Bluetooth rune and wired headphones (status_row.c SR_RUNE_W, SR_GLYPH) stand as tall as the battery's body,
+# STATUS_TALL px from the box's top row, so rows 16 to 27, their ink centred on row 21.5 with the battery's and the
+# fan's (the user's mockup, 2026-11-25); each box as wide as its ink.
+STATUS_TALL = 12.0
+STATUS_TALL_FIT = {'status_bt': ('bluetooth-bold', 9), 'status_wired': ('headphones', STATUS_PX)}
 STATUS_SECONDARY = inks('secondary', 'd', 'l')
 STATUS_SPIN = 30  # status_row.c SR_SPIN: a half turn a second at 30 fps
 KEYLOCK_CARD_PX = 56  # Buttons Lock's card's padlock (keylock.c CARD_GLYPH)
@@ -737,7 +743,10 @@ def status_images(prefix):
     out |= {f'{prefix}_status_wifi_{n}_{k}': status_wifi(n, c, STATUS_UNLIT[k])
             for n in (1, 2, 3) for k, c in STATE_INKS.items()}
     # the Bluetooth slot while a device connects: the rune in Text Tertiary per half (status_row.c headset_paint)
-    out |= {f'{prefix}_status_btdim_{k}': status_glyph('bluetooth-bold', STATUS_PX, c) for k, c in BT_SPIN_INKS.items()}
+    out |= {f'{prefix}_{n}_{k}': status_glyph(g, w, c, STATUS_TALL, 0) for n, (g, w) in STATUS_TALL_FIT.items()
+            for k, c in STATE_INKS.items()}
+    out |= {f'{prefix}_status_btdim_{k}': status_glyph('bluetooth-bold', STATUS_TALL_FIT['status_bt'][1], c, STATUS_TALL, 0)
+            for k, c in BT_SPIN_INKS.items()}
     # a card app's server out of reach (status_row.c SLOT_OFFLINE): cloud-slash in Warning, the same in both halves;
     # its ink 13.6 px wide at 11 tall, so a STATUS_PX box
     out |= {f'{prefix}_status_offline_{k}': status_glyph('cloud-slash-bold', STATUS_PX, token('warning')) for k in STATE_INKS}

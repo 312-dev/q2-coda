@@ -398,7 +398,7 @@ static int cc_land(const void *info) {
 }
 
 /* The page, under the window's children (navigation.c's paint of statusbar_dialog): the status row
- * the dialog covers first, its clock centred, then the blocks, whose top reaches up into it, moved
+ * the dialog covers first, its clock at the left, then the blocks, whose top reaches up into it, moved
  * down by the landing's spring (cc_spring). */
 void cc_paint(void *win, void *canvas) {
     void *bar = *(void *const *)system_bar;

@@ -1025,7 +1025,8 @@ for name in ('allmusic_page','albuminfo_page','artistinfo_page','album_page','fo
 # The status bar as built (ui/system_bar.bin), OLED's status row, laid out by the stock row layouter
 # (children_layouter_default, 0x63bda8) with every icon shown: the left group empty (its glyphs off-screen
 # for stock to update), the right one the battery's, STATUS_ROW_ICON high and ending STATUS_ROW_INSET from
-# the screen's edge, and the title's and clock's box starting on that inset (ipod.py status_row).
+# the screen's edge, and the title's and clock's box starting on that inset (ipod.py status_row), the title hidden: the
+# row names no page.
 from ipod import STATUS_BAR, STATUS_ROW_ICON
 m=Machine(); m.mock('strtol@GLIBC_2.0','strstr@GLIBC_2.0'); m.mock('tk_calloc','tk_free',prefix='alloc:')
 bar=asset_tree(m,STATUS_BAR); m.word(bar+O['W_W'],375)
@@ -1044,6 +1045,7 @@ assert not m.nodes[views[0]]['children'] and cells and all(h==STATUS_ROW_ICON fo
 assert cells[-1][0]+cells[-1][1]==375-O['STATUS_ROW_INSET'], cells
 assert not any(m.get(c+O['W_Y']) for v in views for c in m.nodes[v]['children'] if m.nodes[c]['visible'])  # at y 0 of their group's box
 for name in ('label_title','label_clock'): assert m.get(named(m,bar,name)+O['W_X'])==O['STATUS_ROW_INSET']-2, name  # hscroll_label's 2 px
+assert [m.nodes[named(m,bar,n)]['visible'] for n in ('label_title','label_clock')]==[0,1]
 passed()
 # The battery's slot (bar_sync shows view_battery alone, stock's img_battery and label_battery hidden): the layout skips
 # the hidden two, and the slot as built (ipod.py BATT_H_W, its widest) ends on the row's inset.

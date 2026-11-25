@@ -181,8 +181,9 @@ typedef struct {
     /* The status bar's Bluetooth, Wi-Fi and battery widgets, looked up once (the bar is never
      * destroyed); the codec badge shown (index + 1 in BT_CODECS, 0 none), its fade step (0 showing,
      * CODEC_STEPS the glyph fading in, 2 * CODEC_STEPS done) and timer; the battery slot's last
-     * level, charge and low state. The bar also has a title (bar_title_sync), from the
-     * top window title_win and, when a label holds it, title_lbl (both found once per window). */
+     * level, charge and low state. The bar also has a hidden title, the page's name
+     * (bar_title_sync), from the top window title_win and, when a label holds it, title_lbl (both
+     * found once per window). */
     void *bar_bt, *bar_wifi, *bar_pct, *bar_slot, *bar_icon, *bar_idle, *bar_state, *bar_eq,
         *bar_title, *title_win, *title_lbl,
         *action_view, /* Songs' action bar on title_win (the set's action_row) */
@@ -233,11 +234,10 @@ typedef struct {
     void *genre_label;
     int genre_off;
     unsigned genre_timer;
-    /* The selected row's marquee (marq_moved); the bar's title (bar_title). */
+    /* The selected row's marquee (marq_moved). */
     void *marq_row, *marq_label;
     unsigned marq_timer;
     int marq_id, marq_passes;
-    int bar_titled;
     /* Scrub: scrub_to is the target second, scrub_moved set once the wheel changed it. */
     unsigned scrub_timer, scrub_track, settle_timer;
     /* Now Playing's Centre cycle (np_centre): its stage (NP_STAGE_*), the stage's timeout, and when
@@ -697,14 +697,15 @@ void charge_tap(void);
 void charging_poll(void);
 /* status_row.c: the status row's glyph slots, right to left (docs/oled-design.md#status-row): the
  * strip's room left of the battery (status_strip_room: its left edge, 0 for none, from
- * clock_place), their left edge (status_slots_left: the title's box and the volume pill end short
- * of it), paint (ringnav_paint_bg), the slot under a touch, the sync bar_state_sync runs (1:
- * repaint the bar), ringnav_input's touches; the headset's battery, 0-100 or -1 */
+ * clock_place), their left edge (status_slots_left: the volume pill ends short of it), paint
+ * (ringnav_paint_bg), the slot under a touch, the sync bar_state_sync runs (1: repaint the bar),
+ * ringnav_input's touches; the headset's battery, 0-100 or -1 */
 enum {
     SLOT_BATTERY,
     SLOT_PLAY,
     SLOT_WIFI,
     SLOT_SYNC,
+    SLOT_WIRED,
     SLOT_HEADSET,
     SLOT_LOCK,
     SLOT_OFFLINE,
@@ -834,7 +835,6 @@ void paint_art(void *w, void *canvas, const char *name, int x, int y); /* naviga
 
 /* np_bar.c */
 int np_sync(void *top);
-void bar_title(void *bar);
 void slider_fill(void *slider, unsigned color);
 void slider_knobless(void *slider);
 void np_theme(void);

@@ -5151,28 +5151,11 @@ static int bar_rows(void *canvas, int *r) {
 
 /* Whether top is Home in Split, its art beside the list (1), and 2 when the art runs up under the
  * status row (a split_art_up and a slide that fills the pane: a cover, or the placeholder with
- * none), where the bar's glyphs are inked
- * over it; navigation.c's clock_place puts the clock at the row's left, over the list, either way. */
+ * none), where the bar's glyphs are inked over it (the clock at the row's left stands over the list,
+ * navigation.c clock_place). */
 int coverflow_home_split(void *top) {
     if (!home.art || top != home.win || !widget_get_visible(home.art)) return 0;
     return pane_up() && home.sl[0].tw ? 2 : 1;
-}
-
-/* page_parallax.c: the page under a window's slide */
-extern void *parallax_slide(float *percent);
-
-/* Whether Home in Split is the page under a window's slide (page_parallax.c), its band, the rows
- * under the status row, in sight left of the sliding page: *open the columns from the left that
- * the sliding page does not cover yet, else the screen's width. The bar's title then shows only
- * over the sliding page (theme_titles_paint.c bar_title_fades). */
-int coverflow_home_slide(int *open) {
-    float percent = 0;
-    *open = 375;
-    void *under = window_manager_is_animating(window_manager()) ? parallax_slide(&percent) : 0;
-    if (!under || under != home.win) return 0;
-    int w = I(under, W_W);
-    *open = w - (int)(w * percent + 0.5f);
-    return *open > 0 && coverflow_home_split(under);
 }
 
 /* The bar's background (ringnav_paint_bg), with Home on top and still: the pane's rows under the

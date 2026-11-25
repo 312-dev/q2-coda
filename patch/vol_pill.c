@@ -1,28 +1,30 @@
 /* The volume pill (docs/oled-design.md#status-row, docs/internals.md#volume-pill): a volume change
  * made off Now Playing (a headset's own keys or its AVRCP volume, the Car Remote) shows in the
- * status row, in the clock's place: a Raised pill VP_H tall on the row's centre, a speaker, a thin
- * track filled in Text Primary to the level, and the number in Text Secondary. It holds VP_HOLD_MS
+ * status row, in the clock's place at its left: a Raised pill VP_H tall on the row's centre, a
+ * speaker where the clock's text starts, a thin track filled in Text Primary to the level, and the
+ * number in Text Secondary. It holds VP_HOLD_MS
  * after the last change, then fades back to the clock over VP_FADE_MS (at once under Reduce
  * Motion). Volume 0 is the mute: the muted speaker and an empty track. The level is the Q2's 0 to
  * 100 in every case: with Link Volume on a headset, its 0 to 127 as bt_volume_poll reads it back
  * (bt_vol_q2, within the volume limit), so a number here means what it means everywhere else.
  *
  * It is drawn by the status row itself, from the bar's background (status_row.c
- * status_slots_paint), so it goes wherever the bar is painted; the clock and the title under it are
- * faded out by their opacity while it shows. A change repaints the pill's box alone, a fade frame
- * the pill and the labels beside it (vp_dirty): never the page. Nothing shows on a volume page
+ * status_slots_paint), so it goes wherever the bar is painted; the clock under it is faded out by
+ * its opacity while it shows. A change repaints the pill's box alone, a fade frame
+ * the pill and the clock beside it (vp_dirty): never the page. Nothing shows on a volume page
  * (volume.c vol_page: Now Playing has its own volume), over Control Center (its slider follows the
  * volume) or a video.
  *
  * The same pill says a short thing that happened, a glyph and words (status_pill_show: adb's
  * "MacBook-Pro allowed", adb_trust.c), as wide as they are (VP_MSG_GLYPH, VP_SPK_GAP, the words
- * in Inter Regular 15, VP_PAD from each end), centred, or where the slots leave too little ending
- * VP_CLEAR short of them; it shows on Now Playing too (no volume), holds and fades as the volume's
+ * in Inter Regular 15, VP_PAD from each end), from the same left, or where the slots leave too
+ * little ending VP_CLEAR short of them; it shows on Now Playing too (no volume), holds and fades as the volume's
  * does, and a volume change takes its place. */
 #include "navigation.h"
 
-#define VP_W 199        /* the widest pill: odd, so it centres on x 187.5 exactly */
-#define VP_MIN_W 141    /* narrower, it leaves the centre and ends at the slots' edge */
+#define VP_W 199        /* the widest pill */
+#define VP_MIN_W 141    /* narrower, it leaves the clock's place and ends at the slots' edge */
+#define VP_X (STATUS_ROW_INSET - VP_PAD) /* its left: the speaker where the clock's text starts */
 #define VP_H 30         /* rows 8 to 37 on the row's centre, 23 */
 #define VP_CLEAR 8      /* the ground left before the leftmost status slot, as the clock's */
 #define VP_PAD 12       /* from each end to the speaker and to the number's last digit */
@@ -32,7 +34,7 @@
 #define VP_NUM_W 32     /* the number's column: three tabular digits at 15 px, "100" */
 #define VP_MSG_GLYPH 15 /* a message's glyph, tools/art.py ADB_PILL_PX */
 #define VP_MSG_PX TYPE(15)
-#define VP_MSG_LEFT 24  /* a long message's left end, the text column's */
+#define VP_MSG_LEFT 24  /* the furthest left it goes, the text column's */
 #define VP_HOLD_MS 2000
 #define VP_FADE_MS 250
 
@@ -42,36 +44,29 @@ static struct {
     unsigned timer;          /* the hold's timer */
     unsigned char on;        /* shown or fading */
     unsigned char fading;    /* past its hold, fading */
-    unsigned char dim;       /* 255 less the labels' opacity as last set */
+    unsigned char dim;       /* 255 less the clock's opacity as last set */
     unsigned char alpha;     /* the pill's, as the last frame set it */
     unsigned short msg_w;    /* a message's box, measured at its first paint; 0 until then */
     char glyph[24], msg[48]; /* a message instead of the volume, or "" */
 } vp __attribute__((section(".scratch")));
 
-/* The pill's box in the bar's pixels: VP_W centred on the row when the slots leave it room,
- * narrower and still centred down to VP_MIN_W, then VP_MIN_W ending VP_CLEAR short of the leftmost
- * slot. */
+/* The pill's box in the bar's pixels, from VP_X, the clock's place: VP_W wide when the slots leave it
+ * room, narrower down to VP_MIN_W to end VP_CLEAR short of the leftmost slot, then VP_MIN_W ending
+ * there, never nearer the screen's left than VP_MSG_LEFT. A message hugs its words from VP_X, or
+ * ends VP_CLEAR short of the slots when they leave too little, its words cut. */
 static rect_t vp_box(void) {
-    int edge = status_slots_left() - VP_CLEAR, w = 2 * edge - 375, x;
-    if (w > VP_W) w = VP_W;
-    if (vp.msg[0]) { /* a message hugs its words: centred while that clears the slots, else ending
-                      * VP_CLEAR short of them, never nearer the screen's left than VP_MSG_LEFT */
-        int want = vp.msg_w ? vp.msg_w : VP_W;
-        if (want <= w)
-            return (rect_t){ (375 - want) / 2, geom_val(V_STATUS_Y) - VP_H / 2, want, VP_H };
-        x = edge - want < VP_MSG_LEFT ? VP_MSG_LEFT : edge - want;
-        return (rect_t){ x, geom_val(V_STATUS_Y) - VP_H / 2, edge - x, VP_H };
+    int edge = status_slots_left() - VP_CLEAR, x = VP_X,
+        w = vp.msg[0] ? (vp.msg_w ? vp.msg_w : VP_W) : edge - x < VP_W ? edge - x : VP_W;
+    if (vp.msg[0] ? w > edge - x : w < VP_MIN_W) {
+        if (!vp.msg[0]) w = VP_MIN_W;
+        x = edge - w < VP_MSG_LEFT ? VP_MSG_LEFT : edge - w;
+        if (vp.msg[0]) w = edge - x;
     }
-    if ((375 - w) & 1) --w;
-    if (w >= VP_MIN_W)
-        x = (375 - w) / 2;
-    else
-        w = VP_MIN_W, x = edge - w;
     return (rect_t){ x, geom_val(V_STATUS_Y) - VP_H / 2, w, VP_H };
 }
 
 /* What a change repaints: the pill's box; with whole, from the screen's left to the leftmost slot
- * in the pill's rows, where the clock and the title stand, as their opacity changes. */
+ * in the pill's rows, where the clock stands, as its opacity changes. */
 static void vp_dirty(int whole) {
     void *bar = *(void *const *)system_bar;
     if (!bar) return;
@@ -80,21 +75,20 @@ static void vp_dirty(int whole) {
     widget_invalidate_force(bar, &r);
 }
 
-/* The clock's and the title's opacity, 255 less dim; set only when it changes. */
-static void vp_labels(int dim) {
+/* The clock's opacity, 255 less dim; set only when it changes. */
+static void vp_clock(int dim) {
     void *bar = *(void *const *)system_bar;
     if (!bar || dim == vp.dim) return;
     void *clock = widget_lookup(bar, "label_clock", 1);
     vp.dim = (unsigned char)dim;
     if (clock) widget_set_opacity(clock, 255u - (unsigned)dim);
-    if (st.bar_title) widget_set_opacity(st.bar_title, 255u - (unsigned)dim);
 }
 
-/* Gone: the labels back at once. */
+/* Gone: the clock back at once. */
 static void vp_end(void) {
     vp.on = vp.fading = vp.alpha = 0;
     vp.msg[0] = 0, vp.msg_w = 0;
-    vp_labels(0);
+    vp_clock(0);
 }
 
 /* Where the pill has no place: a volume page in use (Now Playing's own volume; a message is no
@@ -114,12 +108,12 @@ static int vp_alpha_now(void) {
 }
 
 /* The shared loop's (ui_kit.c motion_loop) frame while the pill fades: the pill a step fainter and
- * the labels a step back, their band repainted; dropped once the pill is gone, or shown again. */
+ * the clock a step back, its band repainted; dropped once the pill is gone, or shown again. */
 static int vp_frame(void) {
     if (!vp.on || !vp.fading) return 0;
     int a = vp_alpha_now();
     vp.alpha = (unsigned char)a;
-    vp_labels(a); /* the labels at 255 less the pill's alpha */
+    vp_clock(a); /* the clock at 255 less the pill's alpha */
     vp_dirty(1);
     if (a) return 1;
     vp_end();
@@ -147,8 +141,8 @@ static int vp_due(const void *info) {
     return 0;
 }
 
-/* A change to show (volume.c vol_show): the pill at full, the labels out, its hold started again.
- * A pill already up repaints its box alone; a new one (or one fading) the labels' band too. */
+/* A change to show (volume.c vol_show): the pill at full, the clock out, its hold started again.
+ * A pill already up repaints its box alone; a new one (or one fading) the clock's band too. */
 void vol_pill_show(void) {
     if (vp.msg[0]) { /* a message gives way: the volume's own box, and its own places, from here */
         vp_dirty(1);
@@ -162,7 +156,7 @@ void vol_pill_show(void) {
     int fresh = !vp.on || vp.fading;
     vp.at = (unsigned)time_now_ms();
     vp.on = 1, vp.fading = 0, vp.alpha = 255;
-    vp_labels(255);
+    vp_clock(255);
     vp_dirty(fresh);
     if (!vp.timer) vp.timer = timer_add(vp_due, (void *)0, VP_HOLD_MS);
 }
@@ -180,7 +174,7 @@ void status_pill_show(const char *glyph, const char *text) {
     vp.msg_w = 0;
     vp.at = (unsigned)time_now_ms();
     vp.on = 1, vp.fading = 0, vp.alpha = 255;
-    vp_labels(255);
+    vp_clock(255);
     vp_dirty(1);
     if (!vp.timer) vp.timer = timer_add(vp_due, (void *)0, VP_HOLD_MS);
 }
@@ -189,7 +183,7 @@ void status_pill_show(const char *glyph, const char *text) {
 int vol_pill_up(void) { return vp.on; }
 
 /* status_slots_paint, in final colours: the pill at its alpha, or nothing; where it has no place it
- * ends here, so the labels painted after the bar's background are back in this frame. */
+ * ends here, so the clock painted after the bar's background is back in this frame. */
 void vol_pill_paint(void *bar, void *canvas) {
     if (!vp.on) return;
     if (vp_hidden()) {

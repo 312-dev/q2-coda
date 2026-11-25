@@ -151,7 +151,7 @@ static void clock_show(void) {
     char s[16] = "--:--";
     if (ok && full)
         tk_snprintf(s, sizeof s, "%02d:%02d", tm[2], tm[1]);
-    else if (ok && st.bar_title) /* beside the bar's title: AM or PM would reach it */
+    else if (ok && st.bar_title) /* the status row's, as iOS's: no AM or PM */
         tk_snprintf(s, sizeof s, "%d:%02d", (tm[2] + 11) % 12 + 1, tm[1]);
     else if (ok)
         tk_snprintf(s, sizeof s, "%d:%02d %s", (tm[2] + 11) % 12 + 1, tm[1],
@@ -251,64 +251,52 @@ int bar_repaint(const void *info) {
  * than batt_room allows. widget_set_visible does nothing for an unchanged state and relayouts the
  * view for a new one. */
 static int slider_page(void *top);
-/* A status row's clock (tools/ipod.py status_row; docs/oled-design.md#status-row): on a full-width
- * row, titled or not, centred on the screen (x 187.5), the title's box ending CLOCK_CLEAR short of
- * the widest clock, "00:00", centred, so its ellipsis does; the glyph slots left of the battery get
- * the room from CLOCK_BESIDE past that widest clock's text (status_row.c status_strip_room), and
- * scroll there when they run past it, so the clock never moves. On Home's Split, with its art
- * beside the list, the clock goes over the list at the row's left, its text starting
- * STATUS_ROW_INSET in, as the battery ends that far from the right; the slots keep the row's right
- * with no room set, and the title's box (empty there) ends CLOCK_CLEAR short of a widest clock
- * beside them. Where the art runs up under the row the clock is in Text Primary, as it was over the
- * art. The box is sized to the text as measured in the bar's face, with
- * hscroll_label's 2 px margins, so the label's own alignment plays no part. Runs in the bar's
- * background paint, before the clock draws; a move repaints the bar after. */
+/* A status row's clock (tools/ipod.py status_row; docs/oled-design.md#status-row): at the row's
+ * left on every page, its text starting STATUS_ROW_INSET in, as the battery ends that far from the
+ * right; the row names no page (the hidden label_title keeps the page's name for the Search bar,
+ * the letter strip and Up Next). The glyph slots left of the battery get the room from
+ * CLOCK_BESIDE past the widest clock's text (status_row.c status_strip_room), and scroll there when
+ * they run past it, so the clock never moves. Where Home in Split's art runs up under the row the
+ * clock is in Text Primary, as it was over the art. The box is sized to the text as measured in the
+ * bar's face, with hscroll_label's 2 px margins, so the label's own alignment plays no part. Runs in
+ * the bar's background paint, before the clock draws; a move repaints the bar after. */
 #define CLOCK_BESIDE 7 /* the text's box: 8 px of ground between the digits' ink and the slot */
-#define CLOCK_CLEAR 12
 static int clock_width(void *canvas, const unsigned *s) {
     int n = (int)wide_len(s), px = theme()->font_px[ROLE_BAR];
     canvas_set_font(canvas, theme_face(s, n, &px), px);
     return (int)(canvas_measure_text(canvas, s, (unsigned)n) + 0.5f);
 }
+/* The bar's clock label, found once; 0 before the bar is. */
+static void *bar_clock(void) {
+    static void *clock;
+    void *bar = *(void *const *)system_bar;
+    if (!clock && bar) clock = widget_lookup(bar, "label_clock", 1);
+    return clock;
+}
 /* The widest clock, "00:00", as measured once in the bar's face (it holds until a restart); 0
- * before the title has a canvas to measure on. */
+ * before the clock has a canvas to measure on. */
 static int clock_widest(void) {
     static const unsigned zeros[] = { '0', '0', ':', '0', '0', 0 };
     static int widest;
-    void *canvas = st.bar_title ? widget_get_canvas(st.bar_title) : (void *)0;
-    if (!widest && canvas) widest = clock_width(canvas, zeros);
+    void *canvas = !widest && bar_clock() ? widget_get_canvas(bar_clock()) : (void *)0;
+    if (canvas) widest = clock_width(canvas, zeros);
     return widest;
 }
-/* The left edge of the strip's room on a full-width row: CLOCK_BESIDE past the widest clock's
- * text, centred; 0 before the widest is measured. */
-static int strip_left(int widest) {
-    int ww = widest + 4; /* the box: hscroll_label's 2 px margins */
-    return widest ? (375 - ww + 1) / 2 + ww - 2 + CLOCK_BESIDE : 0;
-}
-static void clock_place(void *bar, void *top) {
-    static void *clock;
+/* The left edge of the strip's room: CLOCK_BESIDE past the widest clock's text at the row's left;
+ * 0 before the widest is measured. */
+static int strip_left(int widest) { return widest ? STATUS_ROW_INSET + widest + CLOCK_BESIDE : 0; }
+static void clock_place(void *top) {
     static int ink, set_color; /* set_color: the colour written last, compared in place of
                                 * a read-back of the style's current state */
-    void *canvas = st.bar_title ? widget_get_canvas(st.bar_title) : (void *)0;
+    void *clock = bar_clock(), *canvas = clock ? widget_get_canvas(clock) : (void *)0;
     if (!st.bar_slot || !canvas) return;
-    if (!clock) {
-        if (!(clock = widget_lookup(bar, "label_clock", 1))) return;
-        ink = style_get_int(P(clock, W_ASTYLE), "text_color", (int)RGBA(RGB_SECONDARY));
-    }
+    if (!ink) ink = style_get_int(P(clock, W_ASTYLE), "text_color", (int)RGBA(RGB_SECONDARY));
     int widest = clock_widest();
     const unsigned *text = widget_get_text(clock);
-    int split = coverflow_home_split(top);
-    status_strip_room(split ? 0 : strip_left(widest));
-    int edge = status_slots_left() - CLOCK_BESIDE,
-        w = (text && *text ? clock_width(canvas, text) : widest) + 4,
-        x = split ? STATUS_ROW_INSET - 2 : (375 - w + 1) / 2,
-        color = split == 2 ? (int)RGBA(0xffffff) : ink,
-        title_w = (split ? edge - widest : (375 - widest - 4 + 1) / 2 + 2) - CLOCK_CLEAR + 2 -
-                  I(st.bar_title, W_X);
-    if (I(st.bar_title, W_W) != title_w)
-        widget_resize(st.bar_title, title_w, I(st.bar_title, W_H));
-    else if (I(clock, W_X) == x && I(clock, W_W) == w && (set_color ? set_color : ink) == color)
-        return;
+    status_strip_room(strip_left(widest));
+    int w = (text && *text ? clock_width(canvas, text) : widest) + 4, x = STATUS_ROW_INSET - 2,
+        color = coverflow_home_split(top) == 2 ? (int)RGBA(0xffffff) : ink;
+    if (I(clock, W_X) == x && I(clock, W_W) == w && (set_color ? set_color : ink) == color) return;
     widget_move_resize(clock, x, I(clock, W_Y), w, I(clock, W_H));
     /* each state status_row styles: the label paints in whichever it is in */
     widget_set_prop_int(clock, "style:normal:text_color", color);
@@ -352,7 +340,7 @@ static unsigned battery_now(void) {
     return key | (unsigned)((icon && !tk_strcmp(icon, "bar_lowcharge")) || (held && level < 15));
 }
 /* The room the battery and the slots left of it have on OLED's status row: from the battery's end
- * (STATUS_ROW_INSET in from the right edge) to the strip's room's edge past the centred clock
+ * (STATUS_ROW_INSET in from the right edge) to the strip's room's edge past the clock
  * (strip_left), so the percentage gives way to the icon before the glyphs would have to scroll.
  * Before the clock's widest is measured (no paint yet) there is no limit. */
 static int batt_room(void) {

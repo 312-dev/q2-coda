@@ -372,33 +372,61 @@ for ly in (0,32):
     lend=-(-(672-(OLG.list_end-ly))//48)*48  # the first 48 px row's top at or past the end
     assert max(tops)==lend,(ly,max(tops),lend)
 passed()
-# The status row names a payload page by its 48 px caption, the first in any of the window's children (Games' list follows
-# its empty sheet). An app's page rebuilds its caption under the live window; the bar's new text is forced on to the panel
-# just after the paint that wrote it (an invalidate in that paint is lost and the bar then redraws only the clock's rect).
+# The status row names no page (the user's layout D, 2026-11-25), but its hidden title still holds the page's name for
+# the Search bar, the letter strip and Up Next: a payload page's 48 px caption, the first in any of the window's children
+# (Games' list follows its empty sheet), followed as an app's page rebuilds it under the live window, written only when
+# it changes, and never repainted for it (nothing shows it).
 tm=oled_set(Machine()); tl=tm.node('hscroll_label','title',text='Games'); tm.word(tl+O['W_H'],48)
 tsheet=tm.node('view','sheet'); tlist=tm.node('view','list',[tl]); tm.top=tm.node('window','games_page',[tsheet,tlist]); tm.word(tm.top+O['W_PARENT'],tm.wm)
 tbar_label=tm.node('hscroll_label','label_title'); tbar=oled_bar(tm,tbar_label)
 tpaint=lambda: (tm.call(address=HOOKS['widget_on_paint_background'][0],args=(tbar,tm.canvas,0,0),gap=0),tm.nodes[tbar_label].get('text'))[1]
-tdue=payload_syms['title_due']; tforced=lambda: ('widget_invalidate_force',tbar_label) in [c[:2] for c in tm.calls]
-tadded=lambda: [x[:2] for x in tm.calls if x[:2]==('timer_add',tdue)]
-assert tpaint()=='Games' and tadded() and not tforced(); tm.advance(1,clear=True); assert tforced()
-assert tpaint()=='Games' and not tadded()  # no change, none forced
-tm.nodes[tl]['text']='Renamed'; assert tpaint()=='Renamed' and tadded(); tm.advance(1,clear=True); assert tforced(); passed()
-# The status row keeps the clock beside a title (np_bar.c bar_title); Now Playing has no title
-# there, the clock alone (navigation.c bar_title_of), as a page with none. The clock is in the bar role's face
-# (theme.xml bar.title) and follows the minute.
-def tt_bar():
-    ttm=Machine(); oled_set(ttm); ttm.clock_minutes=True
-    ttt=ttm.node('hscroll_label','label_title'); ttc=ttm.node('hscroll_label','label_clock'); ttb=oled_bar(ttm,ttt,ttc)
+twrites=lambda: [c for c in tm.calls if c[:2]==('widget_set_text_utf8',tbar_label)]
+tshown=lambda: [c for c in tm.calls if c[1]==tbar_label and c[0] in ('widget_invalidate_force','widget_set_visible','widget_set_opacity','widget_move_resize','widget_resize')]
+tm.calls=[]; assert tpaint()=='Games' and len(twrites())==1 and not tshown()
+tm.advance(1,clear=True); assert tpaint()=='Games' and not twrites() and not tshown()  # no change, nothing written
+tm.nodes[tl]['text']='Renamed'; assert tpaint()=='Renamed' and len(twrites())==1 and not tshown(); passed()
+# The clock stands at the row's left on every page, its text from STATUS_ROW_INSET (the user's layout D, 2026-11-25):
+# Home, Now Playing, a titled page, Settings and Control Center alike, the title hidden and never moved or sized. The
+# clock is in the bar role's face (theme.xml bar.title) and follows the minute.
+def tt_bar(cls=Machine):
+    ttm=cls(); oled_set(ttm); ttm.clock_minutes=True
+    ttt=ttm.node('hscroll_label','label_title',visible=0); ttc=ttm.node('hscroll_label','label_clock')
+    slot=ttm.node('view','view_battery'); row=ttm.node('view','view_right',[slot])
+    for w,box in ((ttt,(60,11,240,24)),(ttc,(60,11,240,24)),(row,(0,15,313,16)),(slot,(288,0,25,16))):
+        for off,v in zip(('W_X','W_Y','W_W','W_H'),box): ttm.word(w+O[off],v)
+    ttb=oled_bar(ttm,ttt,ttc,row); ttm.word(row+O['W_PARENT'],ttb)
     def show(win):
         ttm.top=win; ttm.word(win+O['W_PARENT'],ttm.wm)
-        ttm.call(address=HOOKS['widget_on_paint_background'][0],args=(ttb,ttm.canvas,0,0),gap=0); ttm.advance(1)
-        return ttm.nodes[ttt].get('text',''),ttm.nodes[ttc].get('text')
-    return ttm,ttc,show
-ttm,ttc,show=tt_bar()
-assert show(ttm.node('window','playing_page'))==('','6:14') and show(ttm.node('window','bare_page'))==('','6:14')
+        for _ in range(2): ttm.call(address=HOOKS['widget_on_paint_background'][0],args=(ttb,ttm.canvas,0,0),gap=0); ttm.advance(1)
+        return ttm.nodes[ttt].get('text',''),ttm.nodes[ttc].get('text'),signed(ttm.get(ttc+O['W_X']))
+    return ttm,ttt,ttc,show
+ttm,ttt,ttc,show=tt_bar()
+caption=lambda t: (lambda l: (ttm.word(l+O['W_H'],48),l)[1])(ttm.node('hscroll_label','title',text=t))
+pages=[('playing_page',[],''),('bare_page',[],''),('games_page',[caption('Games')],'Games'),
+       ('sysset_page',[caption('General')],'General'),('statusbar_dialog',[],'')]
+for name,kids,title in pages:
+    assert show(ttm.node('window',name,kids))==(title,'6:14',O['STATUS_ROW_INSET']-2),name  # hscroll_label's 2 px
+    assert ttm.nodes[ttt].get('visible',1)==0 and signed(ttm.get(ttt+O['W_X']))==60 and ttm.get(ttt+O['W_W'])==240,name
+assert not [c for c in ttm.calls if c[1]==ttt and c[0] in ('widget_set_visible','widget_set_opacity','widget_move_resize','widget_resize')]
 ttm.clock=(18,15); ttm.advance(61000); assert ttm.nodes[ttc]['text']=='6:15'
 assert [(ttm.nodes[ttc][f'style:{s}:font_name'],ttm.nodes[ttc][f'style:{s}:font_size']) for s in STATES]==[(FACE_NAMES[OLT['font[ROLE_BAR]']],OLT['font_px[ROLE_BAR]'])]*3
+passed()
+# Wired headphones (the user's, 2026-11-25): their glyph, 14 px and SR_GAP (6) more left of the battery, while the player's output is the Q2's DAC with a jack in (3.5 mm g_po_status, 4.4 mm g_bal_status) or a
+# USB DAC (way 2); nothing with no jack in, on Bluetooth (way 1) or on the car's USB audio (way 3).
+class WayMachine(Machine):
+    def __init__(self):
+        super().__init__(); self.way=0; self.handlers[syms['mclGetOutputWay']]='w:way'
+    def hook(self,u,address,size,_):
+        if self.handlers.get(address)!='w:way': return super().hook(u,address,size,_)
+        self.calls.append(('mclGetOutputWay',0,0,0)); self.returns(self.way,clobber=True)
+wm_,_,_,wshow=tt_bar(WayMachine)
+def wleft(way,po,bal):
+    wm_.way=way; wm_.byte(syms['g_po_status'],po); wm_.byte(syms['g_bal_status'],bal)
+    wshow(wm_.node('window','bare_page'))
+    return signed(wm_.call(address=payload_syms['status_slots_left'],args=(0,0,0,0),gap=0))
+wbase=wleft(0,0,0); assert 0<wbase<=288,wbase
+for way,po,bal,glyph in ((0,1,0,1),(0,0,1,1),(2,0,0,1),(1,1,0,0),(3,0,0,0),(0,0,0,0)):
+    assert wleft(way,po,bal)==wbase-(6+14)*glyph,(way,po,bal)
 passed()
 # Home on the status row names none of its own lists' and shows the clock, whether or not music plays: no flip as music
 # starts or stops.
@@ -409,7 +437,7 @@ hhome=hm.node('window','home_page'); hm.top=hhome; hm.word(hhome+O['W_PARENT'],h
 for status in (0,2,0):
     hm.word(0xa50084,status)
     for _ in range(2): hm.call(address=HOOKS['widget_on_paint_background'][0],args=(hbar,hm.canvas,0,0),gap=0); hm.advance(1)
-    assert (hm.nodes[htt].get('text',''),hm.nodes[htt].get('visible',1),hm.nodes[hcl].get('text'))==('',1,'6:14'),status
+    assert (hm.nodes[htt].get('text',''),hm.nodes[hcl].get('text'))==('','6:14'),status
 passed()
 # OLED's list.art.placeholder: stock's 52 px grey tiles (Folder view's folder and song) are drawn that size in their
 # middle, the rest clear (navigation.c shrink_centred), their source's first column at its left edge; a cover by path keeps

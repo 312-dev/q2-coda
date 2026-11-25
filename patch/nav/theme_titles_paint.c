@@ -458,17 +458,11 @@ static void shuffle_paint(void *w, void *canvas) {
               geom_val(V_TEXT_X), (h - SHUFFLE_ICON) / 2);
 }
 
-static int title_due(const void *info) {
-    (void)info;
-    widget_invalidate_force(st.bar_title, (void *)0);
-    return 0;
-}
-
-/* The bar's title (label_title, in the theme's system bar) names the top window win,
- * Home by the list it shows; a dialog keeps the window's title. The title's source is found once
- * per top window; after that a paint compares only that label's text with the title's (none for a
- * title by name), and the title is written only when it changes, with the face that has its
- * characters (stock draws a character its face lacks as nothing). */
+/* The bar's title (label_title, in the theme's system bar, hidden: the status row names no page)
+ * names the top window win, Home by the list it shows; a dialog keeps the window's title. The
+ * Search bar, the letter strip and Up Next's "From" read it. The title's source is found once per
+ * top window; after that a paint compares only that label's text with the title's (none for a title
+ * by name), and the title is written only when it changes. */
 void bar_title_sync(void *win) {
     /* a page under the top window that writes its caption would flip the bar with each paint */
     if (feedback_toast(win)) win = feedback_under(win); /* OLED's toast leaves the page in sight */
@@ -513,14 +507,8 @@ void bar_title_sync(void *win) {
             : !tk_strcmp(widget_get_prop_str(win, "name", ""), "folder_page") ? folder_title(s)
                                                                               : s;
     }
-    if (widget_get_text_utf8(st.bar_title, now, sizeof now) || tk_strcmp(now, t)) {
+    if (widget_get_text_utf8(st.bar_title, now, sizeof now) || tk_strcmp(now, t))
         widget_set_text_utf8(st.bar_title, t);
-        theme_font(st.bar_title, ROLE_BAR, FONT_ROW);
-        /* this runs mid-paint, where an invalidate is lost and the bar then redraws only the
-         * clock's rect: a page's new caption under the same window would wait for a window's change
-         */
-        timer_add(title_due, (void *)0, 0);
-    }
 }
 
 /* A page_title's caption was an empty page's message, and the bar holds captions: the message stays
@@ -538,39 +526,11 @@ void page_empty(void *body, const char *name) {
     bar_title_sync(window_manager_get_top_window(window_manager()));
 }
 
-/* Whether label's text fits the bar's title box: the status row's box fits any, as its label ends a
- * long one in an ellipsis (docs/oled-design.md#status-row). A bar not found yet fits nothing. */
+/* Whether the bar's title can hold label's text as the page's name: any, once the bar is found (the
+ * status row shows no title, docs/oled-design.md#status-row). */
 int bar_title_fits(void *label) {
     (void)label;
     return st.bar_title && widget_get_canvas(st.bar_title);
-}
-
-/* The title's clip before a slide's fade (bar_title_fades), and whether one is on */
-static struct {
-    int on, clip[4];
-} title_fade __attribute__((section(".scratch")));
-/* Under a window's slide over Home's band in Split (coverflow_home_slide), the bar's title is the
- * sliding page's: it shows only over that page, faded as far as the page is out, so Home's band
- * beside it keeps no title. It stays in place, clear of the status row's glyphs. Begun in the
- * title's background paint (begin 1) and ended in its border paint. */
-static void bar_title_fades(void *w, void *canvas, int begin) {
-    int open, clip[4];
-    float percent;
-    if (!w || w != st.bar_title) return;
-    if (!begin) {
-        if (title_fade.on) {
-            canvas_set_global_alpha(canvas, 0xff);
-            canvas_set_clip_rect(canvas, title_fade.clip);
-        }
-        title_fade.on = 0;
-        return;
-    }
-    title_fade.on = 0;
-    if (!coverflow_home_slide(&open) || !parallax_slide(&percent)) return;
-    clip_within(canvas, title_fade.clip, clip, open, 0, 375 - open, 320);
-    canvas_set_clip_rect(canvas, clip);
-    canvas_set_global_alpha(canvas, (unsigned)(0xff * percent + 0.5f));
-    title_fade.on = 1;
 }
 
 /* Stock paints a widget's background before its children, so the bar sits behind the rows.
@@ -582,7 +542,6 @@ static void bar_title_fades(void *w, void *canvas, int begin) {
 int ringnav_paint_bg(void *w, void *canvas) {
     st.paint_w = w;
     table_clip_begin(w, canvas); /* a virtual table's rows inside its box (row_paint.c) */
-    bar_title_fades(w, canvas, 1);
     np_settle_begin(w, canvas); /* the art settled smaller: stock paints none of it */
     np_skip_begin(w, canvas);   /* a new song's lines: the old copied first (np_skip.c) */
     swipe_back_paint(w, canvas); /* the page under a swipe back, left of the page */
@@ -651,8 +610,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
         }
         bar_sync(bar);
         bar_title_sync(top);
-        bar_title(bar);
-        clock_place(bar, feedback_top()); /* beside Split's art under a toast too */
+        clock_place(feedback_top()); /* beside Split's art under a toast too */
         if (st.action_view) action_row(st.action_view);
         feedback_songs(top, st.action_view); /* OLED: an empty list's note, no Shuffle row */
         feedback_folder(top);                /* an empty folder level's note */
