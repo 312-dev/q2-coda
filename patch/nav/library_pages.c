@@ -94,7 +94,7 @@ enum {
     QA_PLAY, /* the menu sheet's playlist: Play, Rename, Delete (playlists.c) */
     QA_RENAME,
     QA_DELETE,
-    QA_REMOVE, /* a payload page's own last row (qm_song_hold): Remove from Playlist */
+    QA_REMOVE,  /* a payload page's own last row (qm_song_hold): Remove from Playlist */
     QA_OFFLINE, /* Sync Offline, or Stop Syncing Offline, for a server's item (offline.c) */
     QA_MOVE     /* a payload page's row lifted to be moved (qm_held_move: Up Next's Playing Next) */
 };

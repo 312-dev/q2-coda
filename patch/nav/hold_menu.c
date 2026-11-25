@@ -393,7 +393,7 @@ static int qm_open(const void *unused) {
         acts[n++] = QA_GROUP;
         if (np_more()) acts[n++] = QA_MORE; /* last: Now Playing's own menu */
     }
-    if (held && qm_held.move) acts[n++] = QA_MOVE; /* the last before the destructive gap */
+    if (held && qm_held.move) acts[n++] = QA_MOVE;    /* the last before the destructive gap */
     if (held && qm_held.extra) acts[n++] = QA_REMOVE; /* destructive, last */
     static const char *const rows[] = {
         "Play Next",       "Play Last",   "Shuffle",        "Favorite",         "Unfavorite",
