@@ -136,8 +136,9 @@ static unsigned media_session(void) {
            *(volatile unsigned *)mcl_pdeqplaylist;
 }
 void media_set_playing(int playing) {
-    if (playing && addon_game_audio()) return; /* a card game with the sound: nothing of stock's
-                                                  starts over its PCM; media_key too */
+    /* a game with the sound (a card game, Caller Ten): nothing of stock's starts over it;
+     * media_key too */
+    if (playing && addon_game_audio()) return;
     hs.automatic = 1;
     int owner = media_owner();
     if (owner == 5)
@@ -164,7 +165,7 @@ static int focus(void) {
 int media_focused(void) { return focus() != 0; }
 void media_key(unsigned key) {
     headset_manual();
-    if (addon_game_audio()) { /* a card game with the sound: stock's player must not retake it;
+    if (addon_game_audio()) { /* a game with the sound: stock's player must not retake it;
                                  Play/Pause still pauses what plays (a Spotify a phone resumed) */
         if (key == KEY_PLAY && media_playing()) media_set_playing(0);
         return;

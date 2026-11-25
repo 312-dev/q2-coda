@@ -13,7 +13,7 @@ CENTER, PREV, NEXT, PLAY, RETURN, BACK_BTN, FWD_BTN = 218, 172, 173, 171, 170, 2
 E_CENTRE, E_PLAY, E_PREV, E_NEXT, E_TOUCH = 1, 2, 4, 8, 16
 RAW, STILL = 1, 2
 ENGINE = 5  # games.c's screen of the engine's first game
-DEMO = ENGINE + 3  # the demo scene's: eng_games[] lists it last, after Pop Stall, Cabin Solitaire and the Evening Puzzle
+DEMO = ENGINE + 4  # the demo scene's: eng_games[] lists it last, after Pop Stall, Cabin Solitaire, the Evening Puzzle and Caller Ten
 REPEAT = 8
 SHEET = 0x7300  # Page's first widget: the sheet
 
@@ -421,10 +421,10 @@ def tick(p, n=1, ms=16):
 def test_the_demo_is_listed_only_where_a_dev_build_asks(fw):
     e, p = api(fw), Page(fw)
     fw.mock('toolsReadConfig', lambda path, sec, key, out, d, *_: C.memmove(out, b'1\0', 2) and 0)
-    assert e['eng_count']() == 3 and p.s.engines == 3 and p.s.rows == 3  # test/fw builds as a release does: no demo
+    assert e['eng_count']() == 4 and p.s.engines == 4 and p.s.rows == 4  # test/fw builds as a release does: no demo
 
 
-@pytest.mark.parametrize('asked,count', [(b'1', 4), (b'0', 3)])
+@pytest.mark.parametrize('asked,count', [(b'1', 5), (b'0', 4)])
 def test_a_dev_build_lists_the_demo_last_when_asked(fw_dev, asked, count):
     fw_dev.mock('toolsReadConfig', lambda path, sec, key, out, d, *_: C.memmove(out, asked + b'\0', 2) and 0)
     assert api(fw_dev)['eng_count']() == count

@@ -330,7 +330,8 @@ RADIO_TABLES = ('stations.bin', 'zcta.bin')
 # GAMES_DATA, from its path under assets/
 GAMES_DATA = 'usr/share/q2games'
 GAMES_ART = {'solitaire.bin': 'games/solitaire.bin', 'popstall/art.bin': 'popstall/art.bin',
-             'popstall/Bungee-OFL.txt': 'popstall/Bungee-OFL.txt'}
+             'popstall/Bungee-OFL.txt': 'popstall/Bungee-OFL.txt', 'callerten.bin': 'games/callerten.bin',
+             'callerten-fonts.txt': 'games/callerten-fonts.txt'}
 GAMES_DIRS = sorted({f'{GAMES_DATA}/{n.rpartition("/")[0]}' for n in GAMES_ART if '/' in n})
 # Card apps the firmware carries (docs/internals.md#bundled-apps): id -> (version, release zip, its size, its
 # SHA-256, builtin), each the zip its release ships, read from --apps (APPS_DIR). Its .<id>/ files go
@@ -2199,6 +2200,7 @@ FUNCTIONS = {
  'wifi_switch': ('int', 'int'),
  'networkGetConnectStatus': ('int', 'void'),  # 0 no link (networkStop), above 0 connected
  'mclGetPlayType': ('int', 'void'),  # the queue's type: 2, 3, 0xf1 and 0xf2 stream (on_wm_timer_networkstatus)
+ 'mcl_reply_take_by_key': ('char *', 'const char *'),  # PRIVATE_FUNCTIONS: a player reply by name, malloc'd, or 0
  # Settings > Wi-Fi's flows (wifi_flows.c): a scan record's join and Forget by its index in wifi_showlist,
  # whether a network is saved, wpa_supplicant's disconnect, and the saved list dropped and read again
  'wifi_action_connect': ('int', 'int'), 'wifi_action_deleterecord': ('int', 'int'),
@@ -2218,6 +2220,9 @@ PRIVATE_FUNCTIONS = {
     'quick_lock': HOOKS['quick_lock'][0],
     "playlist_rebuild": HOOKS['playlist_rebuild'][0],  # picker init and re-entry rebuild all rows
     "stock_search": 0x5350d4,
+    # takes a player reply by its name from demo's reply deque under its mutex, a malloc'd copy of its argument or 0;
+    # never waits (game_callerten.c: the clip's player-status answers)
+    'mcl_reply_take_by_key': 0x5ba538,
     "slide_menu_item_width": 0x605ed0,
     "slide_menu_on_scroll_done": 0x6064e4,
     "mcl_preload": HOOKS['mcl_preload'][0],
@@ -2358,7 +2363,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_volume.c', 'output_rule.c', 'usb_record.c', 'usb_ui.c', 'usb_car.c', 'standby_usb.c', 'card_release.c', 'adb_trust.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'localsend_ui.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'search_bar.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'album_cover.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_popstall.c', 'game_solitaire.c', 'game_sudoku.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'centre_menu.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_pair.c', 'bt_ui.c', 'bt_trace.c', 'bt_detail.c', 'bt_vol_limit.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'vol_pill.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'np_rate.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c', 'autozone.c', 'player_push.c', 'card_watch.c', 'offline.c', 'radio_tuner.c', 'radio_pane.c', 'bt_cover.c', 'now_source.c', 'ui_watch.c', 'shuffle_wait.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_volume.c', 'output_rule.c', 'usb_record.c', 'usb_ui.c', 'usb_car.c', 'standby_usb.c', 'card_release.c', 'adb_trust.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'localsend_ui.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'search_bar.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'album_cover.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_callerten.c', 'game_popstall.c', 'game_solitaire.c', 'game_sudoku.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'centre_menu.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_pair.c', 'bt_ui.c', 'bt_trace.c', 'bt_detail.c', 'bt_vol_limit.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'vol_pill.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'np_rate.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c', 'autozone.c', 'player_push.c', 'card_watch.c', 'offline.c', 'radio_tuner.c', 'radio_pane.c', 'bt_cover.c', 'now_source.c', 'ui_watch.c', 'shuffle_wait.c']
 
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its

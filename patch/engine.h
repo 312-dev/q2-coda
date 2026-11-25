@@ -105,6 +105,7 @@ int eng_open(const struct eng_game *game, void *page, void *sheet, int h, void (
 void eng_close(void);
 void eng_run(void), eng_hold(void);
 int eng_live(void); /* the frame timer runs: the UI loop keeps its pace (navigation.c) */
+void *eng_state_of(const struct eng_game *game); /* its state while open, else 0 */
 int eng_key(unsigned key, int down);
 int eng_touch(void *ctx, void *event); /* the sheet's and the page's pointer events */
 void eng_paint(void *canvas);
@@ -117,6 +118,7 @@ int games_text(void *canvas, const char *s, int x, int y, int h, unsigned px, un
 extern const struct eng_game eng_popstall;  /* game_popstall.c */
 extern const struct eng_game eng_solitaire; /* game_solitaire.c */
 extern const struct eng_game eng_sudoku;    /* game_sudoku.c */
+extern const struct eng_game eng_callerten; /* game_callerten.c */
 extern const struct eng_game eng_demo;      /* engine_demo.c */
 
 #endif

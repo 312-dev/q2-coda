@@ -15,7 +15,7 @@ from host import ROOT
 from test_engine import (CENTER, E_CENTRE, E_NEXT, E_PLAY, E_PREV, E_TOUCH, ENGINE, NEXT, PLAY, PREV, RETURN, SHEET, Eng,
                          GameDef, Input, api, screen)
 from conftest import O
-from test_games import BAR, PAGE, Canvas, Page, fnv1a, paint
+from test_games import BAR, PAGE, SHIPPED, Canvas, Page, fnv1a, paint
 
 GENTLE, STEADY, SHARP = range(3)
 CHOOSE, MAKE, PLAYING, DONE = range(4)
@@ -1098,7 +1098,7 @@ def test_sudoku_is_the_engines_third_row_full_screen_with_the_status_row_at_a_pa
 
 
 def status_row_at_a_pause(fw, p, moved, shown, bar):
-    assert p.s.engines == 3 and p.s.rows == 3
+    assert p.s.engines == p.s.rows == len(SHIPPED) and SHIPPED[2] == 'Evening Puzzle'
     C.memmove(PAGE + O['W_X'], (C.c_int * 4)(0, 30, 375, 290), 16)  # a page under a 30 px bar
     sheet, foot = p.s.sheet, BAR  # the sheet from the status row's foot (OLED's page is full-bleed, under the row)
     moved.clear(), shown.clear()

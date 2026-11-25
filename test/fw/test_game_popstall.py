@@ -13,7 +13,7 @@ import pytest
 
 from conftest import O
 from test_engine import CENTER, E_CENTRE, E_NEXT, E_PLAY, E_PREV, E_TOUCH, ENGINE, RETURN, SHEET, Eng, GameDef, Input, api, screen
-from test_games import PAGE, Canvas, Page, fnv1a, paint, texts
+from test_games import PAGE, SHIPPED, Canvas, Page, fnv1a, paint, texts
 
 ROOT = Path(__file__).resolve().parents[2]
 ART_FILE = '/usr/share/q2games/popstall/art.bin'
@@ -998,7 +998,7 @@ def test_each_screen_of_the_design_paints_whole_with_its_parts_in_place(fw, name
 
 def test_pop_stall_is_games_first_engine_row_on_the_whole_panel_and_pauses_its_own_way(fw):
     p = Page(fw, {ART_FILE: ART})
-    assert p.s.engines == 3 and p.s.rows == 3  # Pop Stall the first of the engine's three
+    assert p.s.engines == p.s.rows == len(SHIPPED) and SHIPPED[0] == 'Pop Stall'  # the engine's first
     moved, shown = [], []
     fw.mock('widget_move_resize', lambda w, x, y, ww, hh, *_: moved.append((x, y, ww, hh)) or 0)
     bar = C.create_string_buffer(0x400)  # stock's system_bar, the status row's window

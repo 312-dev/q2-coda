@@ -25,6 +25,7 @@ static const struct eng_game *const eng_games[] = {
     &eng_popstall,
     &eng_solitaire,
     &eng_sudoku,
+    &eng_callerten,
 #if Q2POD_DEV
     &eng_demo,
 #endif
@@ -36,6 +37,8 @@ int eng_count(void) {
 const struct eng_game *eng_game(int k) { return eng_games[k]; }
 
 int eng_live(void) { return en && en->timer; }
+/* game's state while it is the one open, held or running; else 0 (it was never opened, or closed) */
+void *eng_state_of(const struct eng_game *game) { return en && en->game == game ? en->state : 0; }
 
 void eng_dirty(int x, int y, int w, int h) {
     struct eng *e = en;
