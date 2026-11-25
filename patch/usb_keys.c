@@ -19,6 +19,7 @@ void vol_show(int from);  /* volume.c */
 void usb_keys_poll(void); /* from usb_ui_poll */
 
 #define UK_DEVICES "/sys/bus/usb/devices"
+#define UK_CARD "/sys/class/sound/card1/device" /* the USB DAC's interface (stock's hw:1) */
 /* A held volume key steps at once, then after UK_REPEAT_FIRST_MS every UK_REPEAT_MS: the Q2's own
  * keys' repeat (Center's measured at about 258 ms, then 50 ms: docs/internals.md#wake). */
 #define UK_REPEAT_FIRST_MS 250
@@ -107,29 +108,25 @@ static int uk_parse(const unsigned char *d, int n, uk_check_t *c, int *ids) {
         case 0x28:
             umax = full, range = 1;
             break;
-        case 0x80: /* Input: data, not constant */
-            for (int k = 0; k < 7 && !(v & 1) && size && size <= 16; ++k) {
-                unsigned u = 0xc0000u | uk_usage[k];
-                if (v & 2) /* variable: a usage a field, the last repeated */
-                    for (unsigned j = 0; j < count && found < UK_CHECKS; ++j) {
-                        unsigned uj = range ? (umin + j <= umax ? umin + j : umax)
-                                      : nu  ? used[j < nu ? j : nu - 1]
-                                            : 0;
-                        if (uj == u)
-                            c[found++] = (uk_check_t){ offs[rid] + j * size, 0, rid, size, 0, k };
-                    }
-                else { /* array: each field a usage's index from the logical minimum */
-                    int idx = range && u >= umin && u <= umax ? (int)(u - umin) : -1;
-                    for (unsigned j = 0; !range && j < nu; ++j)
-                        if (used[j] == u) idx = j;
-                    if (idx >= 0 && count && found < UK_CHECKS)
-                        c[found++] = (uk_check_t){
-                            offs[rid], lmin + idx, rid, size, count > 255 ? 255 : count, k
-                        };
-                }
+        case 0x80: { /* Input: data, not constant. Each slot's usage: a variable field's (the last
+                        repeated), or the one an array field's index j holds */
+            unsigned slots = v & 2 ? count : range ? umax - umin + 1 : nu;
+            for (unsigned j = 0;
+                 !(v & 1) && size && size <= 16 && count && (range || nu) && j < slots && j < 1024;
+                 ++j) {
+                unsigned u =
+                    range ? (umin + j <= umax ? umin + j : umax) : used[j < nu ? j : nu - 1];
+                for (int k = 0; k < 7 && found < UK_CHECKS; ++k)
+                    if (u == (0xc0000u | uk_usage[k]))
+                        c[found++] =
+                            v & 2 ? (uk_check_t){ offs[rid] + j * size, 0, rid, size, 0, k }
+                                  : (uk_check_t){
+                                        offs[rid], lmin + j, rid, size, count > 255 ? 255 : count, k
+                                    };
             }
             offs[rid] += size * count;
             break;
+        }
         }
         if (!(b & 0x0c)) nu = range = umin = umax = 0; /* a main item ends the local ones */
     }
@@ -163,43 +160,36 @@ static unsigned uk_keys(const unsigned char *r, int n, const uk_check_t *c, int 
     return held;
 }
 
-/* A sysfs attribute of UK_DEVICES/dev as a number in base, -1 if none. */
-static int uk_attr(const char *dev, const char *name, int base) {
+/* A sysfs attribute of UK_DEVICES/dev as a decimal number, -1 if none. A class reads so too: "03".
+ */
+static int uk_attr(const char *dev, const char *name) {
     char path[96], buf[16];
     snprintf(path, sizeof path, UK_DEVICES "/%s/%s", dev, name);
     int fd = open(path, 0x80000), n = fd < 0 ? -1 : read(fd, buf, sizeof buf - 1); /* O_CLOEXEC */
     if (fd >= 0) close(fd);
     if (n <= 0) return -1;
     buf[n] = 0;
-    return (int)strtol(buf, 0, base);
+    return atoi(buf);
 }
 
-/* The USB device that has both an audio interface (class 1) and a HID one (class 3): its usbfs
- * node into path and the HID interface's number, or -1. */
+/* The USB DAC's device, as stock's hw:1 (card1) names its interface ("../../../1-1.2:1.0"): its
+ * usbfs node into path and the number of its first HID interface (class 3) of interfaces 0 to 7,
+ * or -1. */
 static int uk_find(char *path, unsigned size) {
-    struct {
-        char name[24];
-        int cls;
-    } it[16];
-    int n = 0;
-    void *d = opendir(UK_DEVICES);
-    for (struct dirent *e; d && n < 16 && (e = readdir(d));) /* interfaces: "1-1.2:1.3" */
-        if (strstr(e->d_name, ":") && strlen(e->d_name) < sizeof it[0].name) {
-            snprintf(it[n].name, sizeof it[n].name, "%s", e->d_name);
-            it[n].cls = uk_attr(e->d_name, "bInterfaceClass", 16);
-            ++n;
+    char link[128], name[48];
+    int n = readlink(UK_CARD, link, sizeof link - 1);
+    if (n <= 0) return -1;
+    link[n] = 0;
+    char *base = strrchr(link, '/'), *colon = strstr(link, ":"), *dot = strrchr(link, '.');
+    if (!base++ || colon < base || dot < colon) return -1;
+    for (int i = 0; i < 8; ++i) {
+        snprintf(name, sizeof name, "%.*s.%d", (int)(dot - base), base, i); /* "1-1.2:1.3" */
+        if (uk_attr(name, "bInterfaceClass") == 3) {
+            *colon = 0; /* the device, "1-1.2" */
+            snprintf(path, size, "/dev/bus/usb/%03d/%03d", uk_attr(base, "busnum"),
+                     uk_attr(base, "devnum"));
+            return i;
         }
-    if (d) closedir(d);
-    for (int i = 0; i < n; ++i) {
-        int dev = (int)(strstr(it[i].name, ":") - it[i].name);
-        for (int j = 0; it[i].cls == 3 && j < n; ++j)
-            if (it[j].cls == 1 && !strncmp(it[i].name, it[j].name, dev + 1)) {
-                char name[24];
-                snprintf(name, sizeof name, "%.*s", dev, it[i].name);
-                snprintf(path, size, "/dev/bus/usb/%03d/%03d", uk_attr(name, "busnum", 10),
-                         uk_attr(name, "devnum", 10));
-                return uk_attr(it[i].name, "bInterfaceNumber", 16);
-            }
     }
     return -1;
 }
@@ -214,10 +204,10 @@ static void uk_interface(const unsigned char *d, int n, int iface, unsigned *len
         if (p[1] == 2 || p[1] == 4) { /* a configuration or an interface: ours ends there */
             if (in) return;
             in = p[1] == 4 && p[0] >= 9 && p[2] == iface && !p[3];
-        } else if (in && p[1] == 0x21) { /* HID: its class descriptors, type and length */
-            for (int k = 0; 9 + 3 * k <= p[0] && k < p[5]; ++k)
-                if (p[6 + 3 * k] == 0x22) *len = p[7 + 3 * k] | p[8 + 3 * k] << 8;
-        } else if (in && p[1] == 5 && p[0] >= 7 && p[2] & 0x80 && (p[3] & 3) == 3 && !*ep)
+        } else if (in && p[1] == 0x21 && p[0] >= 9 &&
+                   p[6] == 0x22)     /* HID: the report descriptor, */
+            *len = p[7] | p[8] << 8; /* its first class descriptor (HID 1.11, 6.2.1) */
+        else if (in && p[1] == 5 && p[0] >= 7 && p[2] & 0x80 && (p[3] & 3) == 3 && !*ep)
             *ep = p[2], *maxp = p[4] | (p[5] & 7) << 8;
     }
 }
@@ -265,9 +255,10 @@ static void *uk_worker(void *arg) {
         int length, actual, start, packets, errors;
         unsigned signr;
         void *context;
-    } urb = {
-        1, (unsigned char)ep, 0, 0, rep, maxp < sizeof rep ? (int)maxp : (int)sizeof rep
-    }; /* interrupt */
+    } urb = { .type = 1, /* interrupt */
+              .endpoint = (unsigned char)ep,
+              .buffer = rep,
+              .length = maxp < sizeof rep ? (int)maxp : (int)sizeof rep };
     if (ep && len && ioctl(fd, UK_DISCONNECT_CLAIM, &dc) >= 0 &&
         (n = ioctl(fd, UK_CONTROL, &get)) > 0)
         nc = uk_parse(buf, n, c, &ids);
@@ -285,7 +276,7 @@ static void *uk_worker(void *arg) {
             int ms = rep_at ? (int)(rep_at - now) : -1;
             if (multi_at && (ms < 0 || (int)(multi_at - now) < ms)) ms = (int)(multi_at - now);
             unsigned set[32] = { 0 };
-            long tv[2] = { ms / 1000, ms % 1000 * 1000 };
+            long tv[2] = { 0, ms * 1000 }; /* under UK_MULTI_MS, so under a second */
             set[fd / 32] = 1u << (fd % 32); /* writable: the URB done, or the device gone */
             int r = select(fd + 1, 0, set, 0, ms < 0 ? 0 : tv);
             void *done = 0;

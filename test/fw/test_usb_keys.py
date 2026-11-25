@@ -92,38 +92,31 @@ def descriptors(hid_len, hid=True, iface=2):
 class Device:
     """The headset on the Q2's port, through sysfs and usbfs. `script` is [(ms after the start, report or 'gone')]:
     each report completes the URB in flight at its time; past the script the device is unplugged."""
-    def __init__(self, fw, rdesc=BITMAP, script=(), hid=True, driver_busy=False):
-        self.fw, self.rdesc, self.script, self.hid = fw, rdesc, list(script), hid
+    def __init__(self, fw, rdesc=BITMAP, script=(), hid=True, driver_busy=False, dev='1-1'):
+        self.fw, self.rdesc, self.script, self.hid, self.dev = fw, rdesc, list(script), hid, dev
         self.now = self.start = 50000
         self.posted, self.ioctls, self.claimed, self.urb, self.gone, self.opened = [], [], [], None, False, []
         self.driver_busy = driver_busy
         self.errno = C.c_int(0)
         self.uk = fw.var('usb_keys__uk', Uk)
-        ifaces = {'1-1:1.0': '01', '1-1:1.1': '01', **({'1-1:1.2': '03'} if hid else {})}
+        ifaces = {f'{dev}:1.0': '01', f'{dev}:1.1': '01', **({f'{dev}:1.2': '03'} if hid else {})}
         self.sys = {f'/sys/bus/usb/devices/{n}/bInterfaceClass': c for n, c in ifaces.items()}
-        self.sys |= {f'/sys/bus/usb/devices/{n}/bInterfaceNumber': n[-1].rjust(2, '0') for n in ifaces}
-        self.sys |= {'/sys/bus/usb/devices/1-1/busnum': '1', '/sys/bus/usb/devices/1-1/devnum': '5'}
-        self.names = ['1-0:1.0', 'usb1', '1-1', *ifaces]
-        self.sys['/sys/bus/usb/devices/1-0:1.0/bInterfaceClass'] = '09'  # the root hub's
-        self.fds, self.keep = {}, []
+        self.sys |= {f'/sys/bus/usb/devices/{dev}/busnum': '1', f'/sys/bus/usb/devices/{dev}/devnum': '5'}
+        self.fds = {}
         fw.mock('time_now_ms', lambda *_: self.now)
         fw.mock('fw___errno_location', lambda *_: C.addressof(self.errno))
-        fw.mock('fw_opendir', lambda path, *_: 0x77 if C.string_at(path) == b'/sys/bus/usb/devices' else 0)
-        fw.mock('fw_readdir', self.readdir)
+        fw.mock('fw_readlink', self.readlink)
         fw.mock('fw_open', self.open)
         fw.mock('fw_read', self.read)
         fw.mock('fw_ioctl', self.ioctl)
         fw.mock('fw_select', self.select)
-        self.listing = list(self.names)
 
-    def readdir(self, d, *_):
-        if not self.listing:
-            return 0
-        ent = C.create_string_buffer(268)
-        name = self.listing.pop(0).encode()
-        C.memmove(C.addressof(ent) + 11, name, len(name))
-        self.keep.append(ent)
-        return C.addressof(ent)
+    def readlink(self, path, buf, n, *_):
+        """card1's device: the USB DAC's audio control interface, as the kernel links it"""
+        assert C.string_at(path) == b'/sys/class/sound/card1/device'
+        link = f'../../../{self.dev}:1.0'.encode()[:n]
+        C.memmove(buf, link, len(link))
+        return len(link)
 
     def open(self, path, flags, *_):
         path = C.string_at(path).decode()
@@ -260,6 +253,12 @@ def test_unplugged_mid_press_stops_and_saves(fw):
     assert posted[-1] == (500, SAVE) and dev.script  # it left at the unplug: the later report never read
 
 
+def test_a_headset_behind_a_hub(fw):
+    """The DAC's device named by its port path through a hub, "1-1.3": its HID interface is found the same way."""
+    dev = Device(fw, BITMAP, press('bitmap', 'up', 100), dev='1-1.3')
+    assert dev.run() == [(100, VOLUP), (140, SAVE)] and '/dev/bus/usb/001/005' in dev.opened
+
+
 def test_a_report_id_s_keys_are_its_own(fw):
     """The keyboard's report (ID 1) changes no consumer key, whatever its bytes: Volume Up stays held through it."""
     script = [(100, b'\x02\x20'), (150, b'\x01\x00\x00\xe9\xea\xcd\x00\x00\x00'), (300, b'\x02\x00')]
@@ -320,7 +319,7 @@ def test_nothing_runs_without_a_usb_dac(fw):
     fw.var('g_otg_status', C.c_ubyte).value = 0
     for _ in range(3):
         poll(fw)
-    assert started == [] and fw.calls('fw_opendir') == [] and fw.calls('fw_open') == []
+    assert started == [] and fw.calls('fw_readlink') == [] and fw.calls('fw_open') == []
 
 
 def test_one_worker_per_attach(fw):
@@ -403,3 +402,10 @@ def test_play_pause_play_and_pause(fw, status, code, toggles):
     player = Player(fw, status)
     post(fw, code)
     assert len(fw.calls('player_play_pause')) == toggles and (player.status != status) == bool(toggles)
+
+
+def test_a_variable_field_past_its_usages_takes_the_last(fw):
+    """Three 1-bit fields, two usages (Play/Pause, Volume Up): the third field is Volume Up too, as the HID parser
+    gives the last usage to the fields after it."""
+    rdesc = bytes.fromhex('050c 0901 a101 1500 2501 7501 9503 09cd 09e9 8102 9505 8101 c0')
+    assert Device(fw, rdesc, [(100, b'\x04'), (140, b'\x00')]).run() == [(100, VOLUP), (140, SAVE)]
