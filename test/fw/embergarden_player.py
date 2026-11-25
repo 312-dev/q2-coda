@@ -36,6 +36,7 @@ PLAY, LOST = 1, 2
 GROWING = 0
 R = (3.0, 4.6, 7.0)
 E_CENTRE = 1
+WARN = float(__import__('os').environ.get('EMBER_WARN', 0))  # ms of warning before an ember: an experiment
 
 
 @dataclass(frozen=True)
@@ -94,7 +95,7 @@ class Player:
             if k not in self.seen or self.sizes[k] != e.size:  # new, or a cinder's pieces
                 others = sum(1 for _ in self.seen)
                 late = self.rng.gauss(self.p.rt, self.p.rt_sd) + min(self.p.crowd * others, self.p.crowd_max)
-                self.seen[k], self.sizes[k] = self.now + steps(max(120, late)), e.size
+                self.seen[k], self.sizes[k] = self.now + steps(max(120, late - WARN)), e.size
                 if self.target == k:
                     self.target = None
             ang = e.phase * 2 * math.pi / 180

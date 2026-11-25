@@ -84,7 +84,7 @@ class Game:
         self.fn = {k: fw.fn(f'game_embergarden__{k}', *v) for k, v in {
             'step': (C.c_int, C.c_void_p, C.POINTER(Input)), 'draw': (None, C.c_void_p, C.c_void_p),
             'spawn': (None, C.c_void_p), 'land': (None, C.c_void_p, C.c_int), 'next_wave': (None, C.c_void_p),
-            'flush': (None, C.c_void_p), 'mark': (None, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int)}.items()}
+            'sky': (C.c_int, C.c_void_p), 'flush': (None, C.c_void_p), 'mark': (None, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int)}.items()}
         self.fn_new = fw.fn('game_embergarden__new_game', None, C.c_void_p, C.c_int)
 
     def step(self, wheel=0, held=0, pressed=0, tx=0, ty=0):
@@ -417,26 +417,105 @@ def test_waves_grow_denser_and_faster_and_every_tenth_is_a_lull_of_slow_cinders(
     g = Game(fw)
     g.play()
     rows = []
-    for wave in range(1, 22):
+    for wave in range(1, 32):
         g.g.wave = wave - 1
         g.fn['next_wave'](C.addressof(g.g))
-        rows.append((g.g.wave, g.g.lull, g.g.left, g.g.gap))
+        rows.append((g.g.wave, g.g.lull, g.g.left, g.g.gap, g.fn['sky'](C.addressof(g.g))))
         if wave in (10, 20):
             g.quiet()
             g.g.left, g.g.spawn = 5, 1
             g.step()
             e = g.alive()[0]
-            assert e.size == 2 and e.vy == FX // 2
-    assert [r[2] for r in rows if not r[1]] == sorted(r[2] for r in rows if not r[1])  # more embers each wave, to 40
-    assert [r[3] for r in rows if not r[1]] == sorted((r[3] for r in rows if not r[1]), reverse=True)
-    assert [r[0] for r in rows if r[1]] == [10, 20] and all(r[2] == 5 for r in rows if r[1])
+            assert e.size == 2 and e.vy == int(0.42 * FX)
+    plain = [r for r in rows if not r[1]]
+    assert all(r[2:] == (min(5 + r[0], 30), max(180 - 10 * r[0], 44), min(2 + r[0] // 2, 12)) for r in plain)
+    assert plain[0][2:] == (6, 170, 2) and plain[-1][2:] == (30, 44, 12)  # wave 1 and wave 31
+    assert [r[0] for r in rows if r[1]] == [10, 20, 30] and all(r[2:] == (5, 90, 5) for r in rows if r[1])
     g.quiet()
-    for wave, fall in ((1, 0.5), (11, 1.1), (40, 2.2)):
+    for wave, fall, sway in ((1, 0.42, 6), (5, 0.62, 12), (11, 0.92, 18), (40, 1.8, 18)):
         g.g.wave, g.g.lull, g.g.left, g.g.spawn = wave, 0, 1, 1
         g.step()
         e = g.alive()[-1]
-        assert abs(e.vy / FX - min(0.5 + 0.06 * (wave - 1), 2.2)) < 0.001 and 30 <= e.bx / FX - 18 and e.bx / FX + 18 <= 345
+        assert abs(e.vy / FX - fall) < 0.001 and e.amp == sway and 30 <= e.bx / FX - 18 and e.bx / FX + 18 <= 345
         e.alive = 0
+    g.close()
+
+
+def test_nothing_cracks_before_wave_4(fw):
+    """Waves 1 to 3 drop small and medium embers alone; from wave 4 some are cinders, more as the waves go."""
+    g = Game(fw)
+    g.play()
+    share = {}
+    for wave in (1, 2, 3, 4, 8, 20):
+        sizes = []
+        for k in range(400):
+            g.quiet()
+            g.g.wave, g.g.left, g.g.spawn, g.g.seed = wave, 1, 1, 1 + 7919 * k
+            g.step()
+            sizes.append(g.alive()[0].size)
+        share[wave] = sizes.count(2) / 400
+        assert sizes.count(0) and sizes.count(1)
+    assert share[1] == share[2] == share[3] == 0 and 0.02 < share[4] < 0.12 and 0.12 < share[8] < 0.25 and 0.24 < share[20] < 0.37
+    g.close()
+
+
+def test_the_sky_holds_few_embers_early_and_more_as_the_waves_go(fw):
+    """With nobody at the wheel the most that fall at once is 2 in wave 1 and never over the wave's own count (3 in
+    waves 2 and 3, 4 in wave 4). A full sky holds the cloud's next ember, and a gap in it is G_BREATH steps old before
+    one comes."""
+    g = Game(fw)
+    g.play()
+    most = {}
+    for _ in range(9000):
+        g.step()
+        for k in range(8):
+            g.g.bed[k] = GROWING  # the garden never lost: the waves go on
+        most[g.g.wave] = max(most.get(g.g.wave, 0), len(g.alive()))
+        if g.g.wave == 5:
+            break
+    assert most[1] == 2 and all(1 < most[w] <= 2 + w // 2 for w in (2, 3, 4))
+    g.quiet()
+    g.g.wave, g.g.left, g.g.spawn = 1, 3, 1
+    g.ember(0, 100, 60, vy=0), g.ember(1, 200, 60, vy=0)
+    for _ in range(300):
+        g.step()
+    assert len(g.alive()) == 2 and g.g.left == 3  # held, however long
+    g.g.em[0].alive = 0
+    for k in range(40):
+        assert len(g.alive()) == 1, k
+        g.step()
+    assert len(g.alive()) == 2 and g.g.left == 2
+    g.close()
+
+
+def test_a_crack_holds_the_next_ember_90_steps(fw):
+    g = Game(fw)
+    g.play()
+    g.quiet()
+    g.g.wave, g.g.left, g.g.spawn, g.g.gap = 8, 5, 20, 100
+    g.ember(0, 187.5, 150, size=2, vy=0)
+    g.g.aim = -9000
+    g.step(pressed=E_CENTRE)
+    for k in range(30):
+        g.step()
+        if g.g.stop:
+            break
+    assert len(g.alive()) == 2 and g.g.spawn == 90  # the pieces alone for a second and a half
+    for _ in range(3 + 88):
+        g.step()
+    assert len(g.alive()) == 2
+    g.step()
+    assert len(g.alive()) == 3
+    g.close()
+
+
+def test_a_new_player_on_the_wheel_keeps_the_garden_through_the_first_minute(fw):
+    """The playtest's newcomer (embergarden_player.NEW: a slow, imprecise thumb that watches each spurt land) loses no
+    garden in the first minute of any of these games, sees three embers at once at most, and nothing cracks."""
+    g = Game(fw)
+    for seed in (1000, 1037, 1074, 1111, 1148, 1185):
+        r = embergarden_player.play(g, embergarden_player.NEW, seed, 60)
+        assert r['over'] is None and max(r['alive']) <= 3 and r['splits'] == 0 and r['beds'] <= 3, (seed, r)
     g.close()
 
 

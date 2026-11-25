@@ -43,6 +43,9 @@
 #define G_HOLD 45      /* the wave banner's steps whole, then G_FADE fading */
 #define G_FADE 15
 #define G_STOP 3    /* hit-stop on a cinder's split */
+#define G_CRACK 4   /* the first wave with cinders: nothing cracks before it */
+#define G_CALM 90   /* steps from a crack to the next ember at least */
+#define G_BREATH 40 /* and from a full sky's first gap */
 #define G_STRIP 8   /* rows a step while the light turns */
 #define G_TURN 32   /* passes of the strips from one light to the next */
 #define G_DROP 14   /* steps the result card takes to drop in */
@@ -844,8 +847,8 @@ static void next_wave(struct eg *g) {
     int lull = g->wave % 10 == 0;
     if (lull != g->lull) mark(g, 130, 10, 115, 24);
     g->lull = lull;
-    g->left = lull ? 5 : 6 + 2 * g->wave > 40 ? 40 : 6 + 2 * g->wave;
-    g->gap = lull ? 60 : 70 - 4 * g->wave < 18 ? 18 : 70 - 4 * g->wave;
+    g->left = lull ? 5 : 5 + g->wave > 30 ? 30 : 5 + g->wave;
+    g->gap = lull ? 90 : 180 - 10 * g->wave < 44 ? 44 : 180 - 10 * g->wave;
     g->spawn = G_HOLD;
     g->banner = 1;
     banner_box(g);
@@ -854,23 +857,30 @@ static void next_wave(struct eg *g) {
     sound(g, ENG_SFX_TICK, 2);
 }
 
+/* The embers that may fall at once: two in the first wave, one more every second wave. */
+static int sky(const struct eg *g) {
+    int n = 2 + g->wave / 2;
+    return g->lull ? 5 : n > G_EMBERS ? G_EMBERS : n;
+}
+
 static void spawn(struct eg *g) {
     for (int k = 0; k < G_EMBERS; ++k) {
         struct ember *e = &g->em[k];
         if (e->alive) continue;
-        int pc = 10 + 3 * g->wave > 35 ? 35 : 10 + 3 * g->wave,
-            pm = 25 + 3 * g->wave > 40 ? 40 : 25 + 3 * g->wave;
+        int pc = g->wave < G_CRACK ? 0 : 3 * g->wave - 6 > 30 ? 30 : 3 * g->wave - 6,
+            pm = 15 + 4 * g->wave > 40 ? 40 : 15 + 4 * g->wave;
         int r = (int)(eng_rng(&g->seed) % 100), cinders = 0, alive = 0;
         for (int j = 0; j < G_EMBERS; ++j)
             cinders += g->em[j].alive && g->em[j].size == 2, alive += g->em[j].alive;
         e->smoke = alive < G_SMOKE;
         e->size = g->lull ? 2 : r < pc ? 2 : r < pc + pm ? 1 : 0;
         if (e->size == 2 && cinders >= G_CINDERS) e->size = 1; /* the frame's cost: see G_CINDERS */
-        e->amp = G_SWAY, e->phase = (int)(eng_rng(&g->seed) % G_PERIOD), e->vx = 0;
+        e->amp = 5 + 3 * g->wave / 2 > G_SWAY ? G_SWAY : 5 + 3 * g->wave / 2;
+        e->phase = (int)(eng_rng(&g->seed) % G_PERIOD), e->vx = 0;
         e->bx = FX(30 + G_SWAY + (int)(eng_rng(&g->seed) % (315 - 2 * G_SWAY)));
         e->y = FX(40);
-        e->vy = g->lull ? FX(0.5) : FX(0.5) + (g->wave - 1) * (FX(6) / 100);
-        e->vy = e->vy > FX(2.2) ? FX(2.2) : e->vy;
+        e->vy = g->lull ? FX(0.42) : FX(0.42) + (g->wave - 1) * (FX(5) / 100);
+        e->vy = e->vy > FX(1.8) ? FX(1.8) : e->vy;
         e->alive = 1;
         ember_box(g, e);
         --g->left;
@@ -934,6 +944,7 @@ static void hit(struct eg *g, struct ember *e) {
             break;
         }
     if (!g->stop) g->stop = G_STOP - 1; /* this step, then G_STOP - 1 more */
+    if (g->spawn < G_CALM) g->spawn = G_CALM;
     sound(g, ENG_SFX_TAP, 2);
 }
 
@@ -1094,12 +1105,14 @@ static void play(struct eg *g, const struct eng_input *in) {
         ember_box(g, e);
         moved(g, n0, g->boxes);
     }
-    if (!frozen && g->left && !--g->spawn) {
-        spawn(g);
-        g->spawn = g->gap;
-    }
     int alive = 0;
     for (int k = 0; k < G_EMBERS; ++k) alive += g->em[k].alive;
+    if (alive >= sky(g)) { /* a full sky: the cloud holds its next ember */
+        if (g->spawn < G_BREATH) g->spawn = G_BREATH;
+    } else if (!frozen && g->left && !--g->spawn) {
+        spawn(g);
+        g->spawn = g->gap, ++alive;
+    }
     if (!g->left && !alive && !g->banner) next_wave(g);
     /* lightning in the ash column, after dusk and in a lull, never over many embers */
     if (g->bolt_wait) --g->bolt_wait;
