@@ -2306,3 +2306,43 @@ def test_a_job_that_can_t_start_says_so_and_the_row_stays(fw):
     s.wifi = 1
     s.click()
     assert s.toasts == ["Can't start the download"] and s.sh.job == 0 and not s.sh.running and s.labels() == ['Install']
+
+
+# ---- pacing while A2DP streams on 2.4 GHz (docs/internals.md#bluetooth-coexistence-pacing) ----
+
+PACE = b'/tmp/q2-bt-coex'
+
+
+@pytest.mark.parametrize('text, rate', [(b'paced=1 rate=204800 freq=2412\n', 204800), (b'paced=0 rate=0 freq=5180\n', 0),
+                                        (b'paced=1 rate=0 freq=2412\n', 0), (b'', 0), (b'paced=1\n', 0),
+                                        (b'paced=1 rate=99999999999 freq=2412\n', 0)])
+def test_the_pace_file_s_rate(fw, text, rate):
+    assert fw.fn('netupdate_pace_rate', C.c_int, C.c_char_p)(text) == rate
+
+
+class Clock:
+    """time_now_ms, moved on by each usleep, whose sleeps are kept"""
+    def __init__(self, fw):
+        self.ms, self.slept = 5_000_000, []
+        fw.mock('time_now_ms', lambda *_: self.ms)
+        def usleep(us, *_):
+            self.slept.append(us)
+            self.ms += us // 1000
+            return 0
+        fw.mock('fw_usleep', usleep)
+
+
+@pytest.mark.parametrize('paced', [True, False])
+def test_a_download_is_held_to_200_kb_a_second_while_paced(fw, paced):
+    """q2guard says a stream runs on 2.4 GHz: Network Update's 1 MB comes in about 5 s, not at once, held by its
+    write callback, which TCP passes back to the server. Unpaced (5 GHz, or no stream) it is not held at all."""
+    clock = Clock(fw)
+    body = bytes(range(256)) * 4096  # 1 MB
+    text = b'paced=1 rate=204800 freq=2412\n' if paced else b'paced=0 rate=0 freq=5180\n'
+    state, net, card = update(fw, asset=(0, 200, None, body), card=Disk(fw, {PACE: text}))
+    assert state == NU_DONE
+    held = sum(clock.slept) / 1e6
+    if paced:
+        assert 3.7 <= held <= 5.2, held  # 1 MB at 200 KB/s, its first second's worth free
+    else:
+        assert held == 0
