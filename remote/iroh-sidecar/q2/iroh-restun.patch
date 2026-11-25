@@ -20,7 +20,7 @@ opens one, as it does from any new network.
  fn new_re_stun_timer(initial_delay: bool) -> time::Interval {
 -    // Pick a random duration between 20 and 26 seconds (just under 30s,
 -    // a common UDP NAT timeout on Linux,etc)
-+    // Q2 Muse: between 300 and 330 seconds, not 20 to 26 (remote/iroh-sidecar/q2/iroh-restun.patch).
++    // Vamp: between 300 and 330 seconds, not 20 to 26 (remote/iroh-sidecar/q2/iroh-restun.patch).
      let mut rng = rand::rng();
 -    let d: Duration = rng.random_range(Duration::from_secs(20)..=Duration::from_secs(26));
 +    let d: Duration = rng.random_range(Duration::from_secs(300)..=Duration::from_secs(330));

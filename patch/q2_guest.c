@@ -606,7 +606,7 @@ static void reap(void) {
 /* ---- the hotspot (docs/internals.md#guest-play-hotspot): q2-hotspot does the work ---- */
 
 /* The hotspot's name: Guest Play's, or the Q2's default Bluetooth name (bt_name.c). */
-static void hotspot_ssid(char *out) { copy(out, *qg.name ? qg.name : "Q2 Muse", QG_NAME); }
+static void hotspot_ssid(char *out) { copy(out, *qg.name ? qg.name : "Vamp", QG_NAME); }
 
 /* Wi-Fi's join QR code text: WIFI:T:WPA;S:name;P:password;; with \ ; , : and " escaped. Exposed for
  * the tests. */

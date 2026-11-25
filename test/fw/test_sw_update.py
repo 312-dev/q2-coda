@@ -126,8 +126,8 @@ def test_stocks_checks_as_pages(fw, code, page):
     assert fw.fn('sw_stock_answer', C.c_int, C.c_int)(code) == page
 
 
-@pytest.mark.parametrize('tag, name', [(b'V1820', 'Q2 Muse 1.8.2 · V1820'), (b'V1822', 'Q2 Muse 1.8.2 beta 2 · V1822'),
-                                       (b'V101I', 'Q2 Muse 1.0.1 · V101I'), (b'V0JZi', 'Q2 Muse Dev · V0JZi'),
+@pytest.mark.parametrize('tag, name', [(b'V1820', 'Vamp 1.8.2 · V1820'), (b'V1822', 'Vamp 1.8.2 beta 2 · V1822'),
+                                       (b'V101I', 'Vamp 1.0.1 · V101I'), (b'V0JZi', 'Vamp Dev · V0JZi'),
                                        (b'V1.36', 'V1.36'), (b'V18200', 'V18200')])
 def test_the_updates_name(fw, tag, name):
     out = C.create_string_buffer(64)

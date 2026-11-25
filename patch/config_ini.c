@@ -74,7 +74,7 @@ int ringnav_ini_write(const char *path, const char *section, const char *key, co
     return stock_ini_write_trampoline(path, section, key, value);
 }
 
-/* Settled writes (docs/internals.md#where-q2-muse-writes): the keys a wheel steps or a tap toggles,
+/* Settled writes (docs/internals.md#where-vamp-writes): the keys a wheel steps or a tap toggles,
  * each change a whole rewrite of config.ini on the flash (60-180 ms on the UI thread in the
  * emulator), are held by write_int_config's hook (ringnav_write_config) and written once their
  * delay after their last change has passed, from power_poll's pass, one key a pass (step "config settle"

@@ -698,14 +698,14 @@ def boot_said(m,button,label):  # the row as it reads: the title, and its value 
 def toggle_boot(m,button):
     f,ctx=m.handler(button,O['EVT_CLICK']); m.calls=[]
     assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0
-for value,expected in ((None,'Rockbox'),(b'bad','Rockbox'),(b'q2pod','Q2 Muse'),(b'rockbox','Rockbox'),
-                       (b'q2pod\n','Q2 Muse'),(b'q2pod\0bad','Rockbox')):
+for value,expected in ((None,'Rockbox'),(b'bad','Rockbox'),(b'q2pod','Vamp'),(b'rockbox','Rockbox'),
+                       (b'q2pod\n','Vamp'),(b'q2pod\0bad','Rockbox')):
     m,button,label=boot_row(value)
     assert boot_said(m,button,label)=='Boot to: '+expected
     toggle_boot(m,button)
-    next_value=b'rockbox' if expected=='Q2 Muse' else b'q2pod'
+    next_value=b'rockbox' if expected=='Vamp' else b'q2pod'
     assert m.files['/mnt/data/boot-target']==next_value
-    assert boot_said(m,button,label)=='Boot to: '+('Rockbox' if next_value==b'rockbox' else 'Q2 Muse')
+    assert boot_said(m,button,label)=='Boot to: '+('Rockbox' if next_value==b'rockbox' else 'Vamp')
     restarted,b2,l=boot_row(next_value); assert boot_said(restarted,b2,l)==boot_said(m,button,label)
     passed()
 for mode in (0,0o040755,0o020644): boot_row(mode=mode); passed()

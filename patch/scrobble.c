@@ -42,7 +42,7 @@ static struct {
     char cfg[CONFIG_N][256];
 } up __attribute__((section(".scratch")));
 
-static const char header[] = "#AUDIOSCROBBLER/1.1\n#TZ/UTC\n#CLIENT/Q2 Muse\n";
+static const char header[] = "#AUDIOSCROBBLER/1.1\n#TZ/UTC\n#CLIENT/Vamp\n";
 
 /* Bit 0 ListenBrainz, bit 1 Last.fm: its API pair with a session key (SESSION_KEY, which
  * tools/lastfm_key.py puts in the password's place) or with the user and password that fetch one
@@ -221,7 +221,7 @@ static int listenbrainz(const entry_t *e, int n, buf_t *b, reply_t *r) {
             put(b, "\",\"release_name\":\"", 0);
             put(b, e[i].album, 2);
         }
-        put(b, "\",\"additional_info\":{\"submission_client\":\"Q2 Muse\"}}}", 0);
+        put(b, "\",\"additional_info\":{\"submission_client\":\"Vamp\"}}}", 0);
     }
     put(b, "]}", 0);
     tk_snprintf(auth, sizeof auth, "Authorization: Token %s", up.cfg[LB_TOKEN]);

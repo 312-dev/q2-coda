@@ -110,7 +110,7 @@ int coda_rc_enabled(void) {
     return cr.on;
 }
 
-/* A toast the Q2 Muse shows (library_pages.c toast): the car shows it too, for CR_NOTE_MS, in place of its
+/* A toast the Vamp shows (library_pages.c toast): the car shows it too, for CR_NOTE_MS, in place of its
  * artist (NowPlaying.notice), as Android Auto draws no phone toast. */
 void coda_rc_note(const char *text) {
     if (!coda_rc_enabled() || !text || !*text) return;
@@ -419,7 +419,7 @@ static void cr_modes(int *shuf, int *rep) {
     }
 }
 
-/* Now Playing as now_source.c has it (now_get: the Library's song as the Q2 Muse's own page shows it, a
+/* Now Playing as now_source.c has it (now_get: the Library's song as the Vamp's own page shows it, a
  * pressed server song from the press on, or another owner's), with the queue, the modes and the hearts beside
  * it. A pressed song is at 0 with no hearts until it plays, as the Q2's rating works only on the song
  * playing. Another owner is source=radio (Radio), netradio (Internet Radio), spotify or video, with no hearts
@@ -784,7 +784,7 @@ static void pair_answer(void *ctx, int row, int toggle_on) {
 static void pair_show(const char *code, const char *name) {
     static const char *const rows[] = { "Cancel" };
     reset_poweroptions_timer(1, 1, 1); /* the screen on and kept on, as a key press would */
-    cr.pair_page = pair_prompt(name, code, "Enter this code in Q2 Muse Remote", rows, 1, 0,
+    cr.pair_page = pair_prompt(name, code, "Enter this code in the Vamp app", rows, 1, 0,
                                120000, 0, pair_answer, 0);
     if (cr.pair_page) widget_on(cr.pair_page, EVT_DESTROY, pair_closed, 0);
 }

@@ -1271,7 +1271,7 @@ static int flac_picture(const char *path, cover_t *c) {
 }
 
 /* A server album with no covers/<album>.jpg: the picture in a song of it streamed lately, from the app's stream cache
- * (stream_sid's files, in any account, quality and shard folder), the one the Q2 Muse shows while it plays. */
+ * (stream_sid's files, in any account, quality and shard folder), the one the Vamp shows while it plays. */
 static int stream_picture(const char *art, const char *app, size_t appn, cover_t *c) {
     sqlite3_stmt *st;
     int found = 0;

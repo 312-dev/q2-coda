@@ -5522,7 +5522,7 @@ int coverflow_home_sub(void) { return home_open() != (void *)0; }
 /* The bar's title on Home (navigation.c bar_title_sync). */
 const char *coverflow_home_title(void) {
     void *open = home_open();
-    return !open                 ? "Q2 Muse"
+    return !open                 ? "Vamp"
            : open == home.lib    ? "Library"
            : open == home.stream ? "Streaming"
                                  : "Settings";

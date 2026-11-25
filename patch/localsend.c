@@ -1005,8 +1005,8 @@ int main(int argc, char **argv) {
     snprintf(g.run, sizeof g.run, "/tmp");
     snprintf(g.data, sizeof g.data, "/mnt/data/q2send");
     snprintf(g.recv, sizeof g.recv, "/mnt/mmc/Received");
-    snprintf(g.me.alias, sizeof g.me.alias, "Q2 Muse");
-    snprintf(g.me.model, sizeof g.me.model, "Q2 Muse");
+    snprintf(g.me.alias, sizeof g.me.alias, "Vamp");
+    snprintf(g.me.model, sizeof g.me.model, "Vamp");
     snprintf(g.me.type, sizeof g.me.type, "headless");
     for (int i = 1; i < argc; ++i)
         if (!arg(argc, argv, &i, "--run", g.run, sizeof g.run) && !arg(argc, argv, &i, "--data", g.data, sizeof g.data) &&

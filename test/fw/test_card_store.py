@@ -1,4 +1,4 @@
-"""card_store.c (docs/internals.md#where-q2-muse-writes): a card file with a RAM copy while the card is away, written
+"""card_store.c (docs/internals.md#where-vamp-writes): a card file with a RAM copy while the card is away, written
 when it is back, and an appended log whose lines wait in a RAM ring, in order."""
 import ctypes as C
 

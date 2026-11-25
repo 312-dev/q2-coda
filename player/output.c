@@ -608,7 +608,7 @@ static int alsa_open_bt(struct output *o, int outputway, int hw) {
  * on output way 0 alone the line is muted before the PCM opens, closes, pauses or drops for a seek, and unmuted
  * after. The unmute lets the line go 90-100 ms later and the volume ramps back, so where a
  * person is waiting for sound (a press, a seek, a resume) the first frame follows DAC_RELEASE_MS after it, as in
- * Q2 Muse's player (docs/internals.md#wired-start). */
+ * Vamp's player (docs/internals.md#wired-start). */
 enum { DAC_MODE = 0xc0044d1b, DAC_INIT = 0xc0044d0a, DAC_MUTE = 0xc0044d1f };
 enum { DAC_RELEASE_MS = 130, DAC_PRESS_MS = 5000 };
 static int dac_fd = -2, dac_muted;
@@ -1037,7 +1037,7 @@ static int sink_to(struct output *o, const uint8_t *data, int frames) {
     if (o->pcm) {
         /* Off Bluetooth a PCM that ran dry plays on (alsa_sw): hw_ptr is past appl_ptr, and frames written there would
          * be lost until appl_ptr caught up, heard as the song jumping ahead. So appl_ptr moves to a period past hw_ptr,
-         * over the silence ALSA left there: a gap, and the song carries on where it stopped (as Q2 Muse's player does,
+         * over the silence ALSA left there: a gap, and the song carries on where it stopped (as Vamp's player does,
          * patch/peq_player.c ao_write). What the history holds leads up to the gap, so a click no longer rewinds into
          * it. Bluetooth's plugin stops at its own underrun (docs/internals.md#bluetooth-resampler): EPIPE below. */
         snd_pcm_sframes_t avail = o->way != 1 ? snd_pcm_avail(o->pcm) : 0;

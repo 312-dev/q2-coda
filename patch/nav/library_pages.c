@@ -954,7 +954,7 @@ static int page_closed(void *ctx, void *event) {
 }
 
 /* Places and play counts, on the card with the songs they are of (card_store.c,
- * docs/internals.md#where-q2-muse-writes); the flash files earlier releases wrote are read until
+ * docs/internals.md#where-vamp-writes); the flash files earlier releases wrote are read until
  * the card has a copy. */
 #define RESUME_FILE CARD_STORE_DIR "/ringnav-resume"
 #define PLAYS_FILE CARD_STORE_DIR "/ringnav-plays"

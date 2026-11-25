@@ -352,7 +352,7 @@ int source_read(struct source *s, const uint8_t **data) {
             if (s->pkt->stream_index != s->stream) { av_packet_unref(s->pkt); continue; }
             /* AAC in MP4 says its padding as the last packet's shorter duration (FFmpeg's muxer in stts, iTunes in
              * the iTunSMPB tag FFmpeg reads), and the decoder still gives the whole frame: the end is believed only
-             * when no packet follows, as in Q2 Muse's player (docs/internals.md#lossy-gapless-playback). */
+             * when no packet follows, as in Vamp's player (docs/internals.md#lossy-gapless-playback). */
             if (s->aac_mp4 && s->pkt->duration > 0 && s->pkt->duration < AAC_FRAME && s->pkt->pts != AV_NOPTS_VALUE) {
                 int a;
                 while ((a = av_read_frame(s->fmt, s->ahead)) >= 0 && s->ahead->stream_index != s->stream) av_packet_unref(s->ahead);

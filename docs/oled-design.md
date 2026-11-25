@@ -1,6 +1,6 @@
 # OLED design standard
 
-The OLED theme gives Q2 Muse the look of a present-day iPod classic: a black screen, white
+The OLED theme gives Vamp the look of a present-day iPod classic: a black screen, white
 sentence-case type, one blue accent, and nothing on screen that is not music or a way to reach
 it. This file is the standard the theme is built and reviewed against. It states what each
 surface looks like on the Q2's 375x320 screen, in pixels, and why.
@@ -104,7 +104,7 @@ those spots are under the glass. So:
   list has scrolled, its rows run on under the status row to the screen's top edge, fading to black
   there ([List edges](#list-edges)). A selected row is never
   faded and never lands past y 282: scrolled to its end, by the wheel or a drag, the last row's
-  foot is on y 282 (Q2 Muse's `list_end`, `navigation.c` `list_fade`; a virtual table's, Songs and the other Library tables, by `lyrics_status_bar.c` `ringnav_table_drag` and `ringnav_table_scroll`, a drag and a fling alike), also after
+  foot is on y 282 (Vamp's `list_end`, `navigation.c` `list_fade`; a virtual table's, Songs and the other Library tables, by `lyrics_status_bar.c` `ringnav_table_drag` and `ringnav_table_scroll`, a drag and a fling alike), also after
   the page comes back on top (Return from a row's page) or its list is rebuilt (Bluetooth's, as it
   scans), or a caption closes under the wheel's move to the last row (Battery's In-Vehicle Mode, then Battery History): the layout itself puts the padding and the scroll back (`row_paint.c` `list_relaid`), so
   no frame shows the rows lower and no part of the screen keeps that frame. A row that grows in place, a captioned row showing its caption
@@ -154,7 +154,7 @@ add a lighter or darker blue.
 
 ### Light Mode
 
-The concept has no light screens; Q2 Muse's Light Mode exists and must keep working. The light
+The concept has no light screens; Vamp's Light Mode exists and must keep working. The light
 half flips grays, not hues:
 
 | Token          | Dark      | Light     |
@@ -568,7 +568,7 @@ Search's All, Songs, Artists and Albums ([ipod](ipod.md#search)), the theme's on
   starts at 72.
 - No dividers (the user's, 2026-11-15): rows stand on space alone, in every list. A row with no
   second line is a one-line row at Home's pitch, even in a list whose other rows have one (a card
-  app's, `addon.c` `stack_rows`). Q2 Muse's own two-line lists (Era, View Queue, Most Played,
+  app's, `addon.c` `stack_rows`). Vamp's own two-line lists (Era, View Queue, Most Played,
   Ratings' lists) end as every list does ([Corners](#corners)).
 
 ### Song rows
@@ -604,7 +604,7 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
 - Which list is which comes from its page: Songs' page (`allmusic_page`, which also holds a genre's songs
   and the other lists stock opens there) is mixed, the artist page's songs (OLED draws that page as the [artist page](#artist-page)) are an artist's, the album page is an
   album, Folder view (`folder_page`) a folder, and an album's tracks opened from Cover Flow are an album too (their
-  status row names the album, with no row of its own above the tracks). Lists Q2 Muse draws itself (Most Played,
+  status row names the album, with no row of its own above the tracks). Lists Vamp draws itself (Most Played,
   Long Songs, Ratings) keep their own rows.
 - Streaming's rows are one line, 32 px, each service's mark (20 px, monochrome, no disc) centered on x 34 in Text
   Secondary, white on the selection, its name from x 52: Phosphor's `spotify-logo`, `app-window` (a card app without
@@ -979,7 +979,7 @@ consequential kind; the user's ruling, 2026-11-16; the Bluetooth device's card `
 - The phone glyph (Phosphor `device-mobile`, 28 px, the accent) over the title "Pair with Pixel 10 Pro?", the phone
   as it names itself, scrolling when long; never cut short in the status row. A card the glyph would take past the
   glass's foot (y 44 to 302: a guest's, with two body lines and three answers) goes without it and shows whole.
-- What to do with the code, in the body: Car Remote's "Enter this code in Q2 Muse Remote"; a guest's "Wants to play
+- What to do with the code, in the body: Car Remote's "Enter this code in the Vamp app"; a guest's "Wants to play
   music. Check it's on Alex's phone."; a Bluetooth device's "Make sure both codes match". A Bluetooth device whose
   name BlueZ does not have yet is "Pair with this device?" over "Unknown device" and its address, and the card
   changes to the name in place when it comes; one the request does not identify is "Unknown device" alone.
@@ -1063,7 +1063,7 @@ the gray one.
 | Internet Radio, a station list with none | `radio` | No Stations | Add stations from your computer | |
 | Streaming, a service with no link | `cloud-slash` | Not Connected | Turn on Wi-Fi to stream | **Turn on Wi-Fi** (opens Settings > Wi-Fi) |
 | Library, no SD card | `sd-card` (Phosphor's `memory`) | No SD Card | Insert an SD card with music | |
-| Car Remote, no phone paired | none (compact) | No Paired Phones | Open Q2 Muse Remote on your phone to pair | **Pair a Phone** (opens the how-to page), under the switch ([Car Remote](#car-remote)) |
+| Car Remote, no phone paired | none (compact) | No Paired Phones | Open the Vamp app on your phone to pair | **Pair a Phone** (opens the how-to page), under the switch ([Car Remote](#car-remote)) |
 | Downloads (Tidal Downloads, a card app's songs) | `download-simple` | No Downloads Yet | Synced music shows up here | |
 | Chapters | `list-numbers` | No Chapters | This file has no chapter marks (or: This file's chapters couldn't be read) | |
 
@@ -1810,7 +1810,7 @@ the status row "Software Update" over mode pages as USB's:
   at most) failing, from no Wi-Fi link, no DNS, no internet or a timeout, never fails or holds up the card's: the
   card's result shows, with "Couldn't check online · Try Again" under it.
 - **The offer** (29 v3): a 60 px accent circle (its glyph white, 30 px: `download-simple` from the internet,
-  `file-arrow-down` from the card) centered on y 92, the update's name ("Q2 Muse 1.8.3", Inter Medium 22) on 142, "From
+  `file-arrow-down` from the card) centered on y 92, the update's name ("Vamp 1.8.3", Inter Medium 22) on 142, "From
   the internet · 55.6 MB" or "From the SD card · 55.6 MB" (15 px Text Secondary) on 168, "Installed: 1.8.2" (13 px
   Text Tertiary) on 188, and the [button](#buttons), selected, centered on 225: **Download and Install** or
   **Install**. When both have an update the internet's is offered and "Install from SD Card instead" sits under the
@@ -1819,7 +1819,7 @@ the status row "Software Update" over mode pages as USB's:
   one in focus.
 - **Downloading the Update**, its percent ("Verifying…" while the signature is checked) and the restart's bar
   filling in Accent Blue; Return leaves and cancels it. Then the card's check runs on what it fetched.
-- **Install Update?** on the [confirmation card](#confirmation-card) over the check's page: "Install Q2 Muse 1.8.3 ·
+- **Install Update?** on the [confirmation card](#confirmation-card) over the check's page: "Install Vamp 1.8.3 ·
   V1830?", its body "SIZE MB, over TAG. Takes about 2 min;" over "your music and settings stay.", then Cancel
   (selected) and Install and Restart.
 - **Restarting to Install**, "Don't turn off the Q2": `arrow-clockwise` bold on Accent Blue, and a 180 x 6 bar with
@@ -1856,12 +1856,12 @@ the canvas's origin, not the view's own y:
 
 Settings > Car Remote (approved 2026-11-16, `design/carremote-page`, `mock_carremote.py`; `patch/carremote_page.c`):
 
-- **The switch** alone while off, its caption under it while selected ([Captioned row](#list-row)): "Control your Q2 Muse
-  from Android Auto with Q2 Muse Remote."
+- **The switch** alone while off, its caption under it while selected ([Captioned row](#list-row)): "Control your Vamp
+  from Android Auto with the Vamp app."
 - **No phones:** the [empty state](#empty-and-offline) under the switch in its compact form (no glyph), "No Paired
-  Phones", "Open Q2 Muse Remote on your phone to pair", and the Pair a Phone button, selected as the page opens.
+  Phones", "Open the Vamp app on your phone to pair", and the Pair a Phone button, selected as the page opens.
   The button is a row of the page's own list after the switch, so the wheel moves between the two. ponytail: the
-  mock-up's address line under the hint ("Q2 Muse at 192.168.1.30") needs a fourth line in the shared empty state;
+  mock-up's address line under the hint ("Vamp at 192.168.1.30") needs a fourth line in the shared empty state;
   the how-to page shows the address meanwhile.
 - **Phones:** 10 px under the switch, Pair a Phone as the blue top-action row (the accent's `plus-circle`, 18 px at x 26,
   its label at x 54 in the accent; white on the selection, as a playlist's action rows), then each phone as a
@@ -1873,14 +1873,14 @@ Settings > Car Remote (approved 2026-11-16, `design/carremote-page`, `mock_carre
   a 12 px gap, which asks on the [confirmation card](#confirmation-card), Cancel first. It opens on Rename.
 - **Pair a Phone** (the row and the button): one page with the pairing code ([internals: Car remote](internals.md#car-remote)).
   With a QR code, the 180 px plate at x 20, y 58, the code under it in Inter Medium 28, and beside it from x 216 (14 px
-  lines 17 px apart from y 72): "On your phone, open", "Q2 Muse Remote" in Inter Medium 16, "Tap Pair a Q2 Muse, then
+  lines 17 px apart from y 72): "On your phone, open", "the Vamp app" in Inter Medium 16, "Tap Pair a Vamp, then
   scan this or type the code", in Text Tertiary where it works from ("Works from any network" with a relay, else "Phone
-  on the same Wi-Fi as this Q2 Muse"), "Or nearby, by Bluetooth" while it advertises, "Wi-Fi 192.168.1.30" in 13 px,
+  on the same Wi-Fi as this Vamp"), "Or nearby, by Bluetooth" while it advertises, "Wi-Fi 192.168.1.30" in 13 px,
   and "Waiting…" level with the code. Without one, the code in Inter Medium 40 centred near the top, 15 px "On your
-  phone, open Q2 Muse Remote, tap Pair a Q2 Muse and type this code", in 14 px Text Tertiary "Bluetooth  Phones nearby
+  phone, open the Vamp app, tap Pair a Vamp and type this code", in 14 px Text Tertiary "Bluetooth  Phones nearby
   can find it" and "Wi-Fi  192.168.1.30", "Phone on the same Wi-Fi", then "Waiting for a phone…". With neither link,
   numbered steps (20 px Raised 2 discs, 15 px lines from y 66) "Turn on Bluetooth, or join a Wi-Fi network in Settings
-  > Wi-Fi", "Come back here to pair", then from y 190 "Q2 Muse" in Inter Medium 17 over "Not reachable yet". The Q2
+  > Wi-Fi", "Come back here to pair", then from y 190 "Vamp" in Inter Medium 17 over "Not reachable yet". The Q2
   Muse cannot start a pairing; the phone does.
 - **Pairing:** the code's Dialog over whatever shows, then the icon toast "Pixel 10 Pro paired" (Positive
   `check-circle`). ponytail: the card form with the 120 s countdown on Cancel's row is the shared pairing card's, not on
@@ -2030,11 +2030,11 @@ interruptible: a turn mid-run starts from where it is.
 
 ## Screens
 
-Q2 Muse's screens mapped to the patterns above, most-seen first. The inventory behind this
+Vamp's screens mapped to the patterns above, most-seen first. The inventory behind this
 table is the 126-screen survey in the design notes; screens not listed follow their nearest
 pattern.
 
-| Q2 Muse screen                       | Pattern                     | Notes                                                                                                      |
+| Vamp screen                       | Pattern                     | Notes                                                                                                      |
 | ----------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock, centered. Seven rows from y 58, all at rest; a list with more (Settings' eight) fades the rows below into black from y 266 to 316, and once scrolled runs on under the status row to the screen's top edge ([List edges](#list-edges)); scrolled to the end the last row's foot is at y 282: every list's ending ([Corners](#corners)) |
 | Home (Split)                        | List row beside art         | Rows from y 40 (just under the status row, the clock at its left) to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges: the playing cover panning slowly while a song plays, else the library's covers in turn, each zooming and drifting and cross-fading into the next; the art's top 50 px and bottom 40 px darkened toward 25% brightness (a vignette, approved as V4 on 2026-11-15); the status row's play state and battery over it at the right (the clock at the row's left, over the list), each glyph white or black by contrast with the darkened art under it. Seven rows, all at rest (the last's foot at y 264); a list with more (Settings' eight) fades the rows past them into black within 56 px of the glass's bottom edge and, once scrolled, the row above y 40 within 34 px of its top edge, both following its rounded corners |
@@ -2078,7 +2078,7 @@ pattern.
 | Buttons locked                      | Own                         | A padlock leftmost in the status row while Buttons Lock is on; a blocked press shows a #1C1C1E card over the page dimmed to 45%: a 56 px padlock, "Buttons Locked" 16 px Medium and the hint 13 px Secondary, for 1.5 s |
 | A card app's QR page (sign-in)      | Own                         | The status row names the app. The code on a white plate (166 px, radius 12) centered under it, the app's note ("Scan with your phone to sign in") 17 px Medium white and "or open ADDR · PIN 482 913" 15 px Text Tertiary under it. Once the app reports a step, a mode page: one solid 92 px circle (Accent for phone and check, #34C759 done, #FF453A fail and error) with a 44 px white Phosphor fill glyph (`device-mobile`, `arrows-clockwise`, `check` bold, `cloud-slash`, `x` bold), the title 22 px Medium and one line 15 px Text Secondary, the stack centered between the status row and the bottom; the wheel does nothing |
 
-The concept's Apple Music, Apple TV and CD sync pages have no Q2 Muse equivalent and are out of scope; its storage
+The concept's Apple Music, Apple TV and CD sync pages have no Vamp equivalent and are out of scope; its storage
 page became Settings > Storage. Spotify's pages follow the list patterns.
 
 ## Do and don't

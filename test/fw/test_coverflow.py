@@ -3061,7 +3061,7 @@ def test_settings_slides_in_over_the_list_and_return_slides_the_list_back(fw):
     theme's swap motion, the art hidden; Return slides the main list back in from the left by its own width."""
     t, ui, h, _ = home_open(fw)
     title, back = fw.fn('coverflow_home_title', C.c_char_p), fw.fn('coverflow_home_back', C.c_int, C.c_void_p)
-    assert title() == b'Q2 Muse' and not back(h.win)
+    assert title() == b'Vamp' and not back(h.win)
     ui.box(h.sets, 50, 0, 375, 290)  # a list still sliding goes to its rest first
     ui.click(h.rows['img_settings'])
     assert not ui[h.main].visible and not ui[h.main].sensitive and ui[h.sets].visible and ui[h.sets].sensitive
@@ -3073,7 +3073,7 @@ def test_settings_slides_in_over_the_list_and_return_slides_the_list_back(fw):
     assert ui[h.main].visible and ui[h.main].sensitive and not ui[h.sets].visible and not ui[h.sets].sensitive
     assert ui.at(h.main)[0] == -ui.at(h.main)[2] and ui.animators[-1][0] == h.main  # in from the left
     assert ui[h.art].visible
-    assert title() == b'Q2 Muse' and not back(h.win)
+    assert title() == b'Vamp' and not back(h.win)
 
 
 def test_under_home_lists_full_settings_is_a_page_and_return_brings_the_art_back(fw):

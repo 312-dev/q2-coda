@@ -1,4 +1,4 @@
-"""bt_name.c: the Q2's Bluetooth name. Q2 Muse by default (main.conf's Name, BlueZ's Alias of ""), a chosen one in
+"""bt_name.c: the Q2's Bluetooth name. Vamp by default (main.conf's Name, BlueZ's Alias of ""), a chosen one in
 config.ini's [Q2POD] BTNAME, set as BlueZ's adapter Alias over D-Bus at each Bluetooth on and at once after a
 rename; Settings > Bluetooth's Name row shows it and opens the letter strip in a text box's form."""
 import ctypes as C
@@ -34,8 +34,8 @@ def name(fw):
     return fw.fn('bt_name', C.c_char_p, C.c_char_p, C.c_uint)(out, 64).decode()
 
 
-@pytest.mark.parametrize('saved, shown', [(None, 'Q2 Muse'), (b'', 'Q2 Muse'), (b'Car Kit', 'Car Kit'),
-                                          (b' x', 'Q2 Muse'), (b'a' * 31, 'Q2 Muse'), (b"it's", 'Q2 Muse'),
+@pytest.mark.parametrize('saved, shown', [(None, 'Vamp'), (b'', 'Vamp'), (b'Car Kit', 'Car Kit'),
+                                          (b' x', 'Vamp'), (b'a' * 31, 'Vamp'), (b"it's", 'Vamp'),
                                           (b'a' * 30, 'a' * 30), (b'Q2', 'Q2')])
 def test_the_name_is_the_saved_one_or_q2_muse(fw, saved, shown):
     Config(fw, **({} if saved is None else {'BTNAME': saved}))
@@ -110,7 +110,7 @@ def test_the_name_row_opens_the_strip_as_a_text_box_on_the_name(fw, ui):
 
 def test_play_saves_applies_and_shows_the_new_name(fw, ui):
     r = Rename(fw, ui)
-    assert r.ss.text == b'Q2 Muse'
+    assert r.ss.text == b'Vamp'
     r.erase(7)
     r.type('My Q2')
     assert r.ss.text == b'My Q2'
@@ -123,7 +123,7 @@ def test_play_saves_applies_and_shows_the_new_name(fw, ui):
 def test_q2_muse_again_is_saved_as_none(fw, ui):
     r = Rename(fw, ui, BTNAME=b'Old')
     r.erase(3)
-    r.type('Q2 Muse')
+    r.type('Vamp')
     r.key(KEY_PLAY)
     assert r.config.values[b'BTNAME'] == b'' and "'variant:string:'" in r.system.commands[0] and ui.backs == 1
 
@@ -142,7 +142,7 @@ def test_edge_spaces_go_and_an_empty_name_is_refused(fw, ui):
 def test_the_name_stops_at_30_characters(fw, ui):
     r = Rename(fw, ui)
     r.type('x' * 40)
-    assert r.ss.text == b'Q2 Muse' + b'x' * 23
+    assert r.ss.text == b'Vamp' + b'x' * 23
 
 
 def test_a_held_return_leaves_the_name_as_it_was(fw, ui):
@@ -185,10 +185,10 @@ def test_the_command_hands_dbus_send_the_alias_as_typed(fw, tmp_path, saved, ali
                     f'variant:string:{alias}']
 
 
-@pytest.mark.parametrize('saved, written', [(b'Car #1 $HOME', 'Car #1 $HOME'), (b'', 'Q2 Muse'), (b"x'y", 'Q2 Muse')])
+@pytest.mark.parametrize('saved, written', [(b'Car #1 $HOME', 'Car #1 $HOME'), (b'', 'Vamp'), (b"x'y", 'Vamp')])
 def test_the_controller_is_given_the_name_itself(fw, tmp_path, saved, written):
     """The Alias set, the controller's own local name is written too (hciconfig hci0 name): on 2026-11-22 after a
-    boot BlueZ's Name and Alias read Q2 Muse while the RTL8733BS answered a name request with its ROM's RT_BT, the
+    boot BlueZ's Name and Alias read Vamp while the RTL8733BS answered a name request with its ROM's RT_BT, the
     name the car showed, and an Alias of "" or one BlueZ already holds changes nothing in BlueZ."""
     Config(fw, BTNAME=saved)
     s = System(fw)

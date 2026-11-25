@@ -87,7 +87,7 @@ def test_a_song_with_nothing_like_it_starts_nothing(fw, ui, mcl, recs):
     q2 = Radio(fw, ui, recs)
     C.c_int.from_address(O['MCL_POS']).value = 6  # Cy's, the only Jazz
     q2.tap(None)
-    assert not ui.played and q2.on() == 0 and ui.toasts == ['No similar songs on this Q2 Muse']
+    assert not ui.played and q2.on() == 0 and ui.toasts == ['No similar songs on this Vamp']
 
 
 def test_the_car_starts_and_stops_a_radio(fw, ui, mcl, recs):
@@ -195,7 +195,7 @@ def test_a_signed_out_app_asks_for_a_sign_in_and_starts_no_radio(fw, ui, mcl, re
 
 def test_an_app_too_old_for_radio_says_so(fw, ui, mcl, recs):
     """q2-subsonic before q2-v1.0 (the firmware carried q2-v0.9 until p32) has no radio=1: no app is asked, the
-    library has nothing like a server song, and "No similar songs on this Q2 Muse" read as the server having none."""
+    library has nothing like a server song, and "No similar songs on this Vamp" read as the server having none."""
     q2, world = streaming(fw, ui, recs, b'name=Subsonic\n')
     q2.tap(None)
     assert b'/tmp/q2-subsonic.radio' not in world.files and not ui.played

@@ -466,7 +466,7 @@ static int ls_trust_click(void *ctx, void *event) {
     if (i == s.ntrust) { /* Remove All */
         static const char *const rows[] = { "Cancel", "Remove All" };
         confirm(&(confirm_t){ .title = "Remove All Trusted Devices?",
-                              .body = "Each one asks again before\nsending to this Q2 Muse.",
+                              .body = "Each one asks again before\nsending to this Vamp.",
                               .rows = rows,
                               .n_rows = 2,
                               .kind = CONFIRM_DESTRUCTIVE,

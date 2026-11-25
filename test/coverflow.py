@@ -3567,7 +3567,7 @@ int sqlite3_close(void *db) { return 0; }
 /* The messy library, test/fw/messy_playlists.py's shape made here in a loop: cd 1 20,000 untagged
    singles, each in its own folder; cd 2 5,000 songs of 500 albums, 4 KB album tags and 800-byte
    fileurls with non-UTF-8 bytes; cd 3 300 songs, 280 gone from the card, 20 in folders with a
-   cover.jpg; cd 0 (Q2 Muse's first playlist) and cd 4 to 100 300 songs each; 50 junk rows (cd_num NULL, -1, 999; fileurl NULL or empty).
+   cover.jpg; cd 0 (Vamp's first playlist) and cd 4 to 100 300 songs each; 50 junk rows (cd_num NULL, -1, 999; fileurl NULL or empty).
    Their ids shuffled across the playlists: id 101 + k is row messy_at[k]. */
 enum { MESSY_ROWS = 20000 + 5000 + 300 + 98 * 300 + 50, MESSY_LIVE = 20 };
 static int messy, messy_at[MESSY_ROWS], messy_ui_execs, messy_reads; /* reads: a playlist's own */
@@ -4204,7 +4204,7 @@ static void playlist_art_messy(void) {
     run(); /* the worker's read, then the first build: 101 jobs */
     assert(pl_page_most == 1024); /* a page of rows a statement: a writer waits for one, never the table */
     assert(playlist_songs(1) == 20000 && playlist_songs(2) == 5000 && playlist_songs(3) == 300 && playlist_songs(5) == 320);
-    assert(playlist_songs(0) == 300); /* Q2 Muse's first playlist is cd 0 */
+    assert(playlist_songs(0) == 300); /* Vamp's first playlist is cd 0 */
     assert(!playlist_songs(-1) && !playlist_songs(999)); /* junk: no playlist's */
     int forks = ff_runs() - runs;
     printf("playlist art, messy library: %d rows; first build of 101 playlists forked %d ffmpeg runs, %d on files gone\n",

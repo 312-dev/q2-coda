@@ -1,8 +1,8 @@
 /* Settings > Car Remote (docs/internals.md#car-remote, docs/oled-design.md#car-remote): the switch, then, while it
  * is on, Pair a Phone and a row per paired phone, each opening the phone's page (Status, Paired, Last Connected,
  * Rename, Forget Phone); with none paired, the empty state with Pair a Phone as its button. Pair a Phone opens a
- * page that says how a phone pairs (the phone starts it, so the Q2 Muse can only wait): the pairing's code, under a
- * QR code for Q2 Muse Remote to scan while q2-iroh can be reached (it carries the code and how to reach this Q2
+ * page that says how a phone pairs (the phone starts it, so the Vamp can only wait): the pairing's code, under a
+ * QR code for the Vamp app to scan while q2-iroh can be reached (it carries the code and how to reach this Q2
  * Muse), else alone to type, with the ways a phone can find it now (Bluetooth while the daemon advertises, the Wi-Fi
  * address); with neither, the steps to make it reachable.
  *
@@ -134,7 +134,7 @@ static int cr_rewrite(const unsigned char *id, const char *name) {
     return ok;
 }
 
-/* The Q2 Muse's Wi-Fi address as a.b.c.d into out, or 0 with none (Wi-Fi off, or not joined). */
+/* The Vamp's Wi-Fi address as a.b.c.d into out, or 0 with none (Wi-Fi off, or not joined). */
 static const char *cr_address(char *out, unsigned n) {
     unsigned char ifr[40] = "wlan0";
     int fd = socket(2 /* AF_INET */, 1 /* MIPS SOCK_DGRAM */, 0), ok = 0;
@@ -296,8 +296,8 @@ static int cr_howto_open(void *ctx, void *event) {
     return 0;
 }
 
-/* How a phone can reach this Q2 Muse now (cr_howto_mode). Q2 Muse Remote's Pair a Q2 Muse is one screen: Scan QR
- * code, and a list of the Q2 Muses it finds by Bluetooth (the daemon's advertisement) and on the phone's Wi-Fi (its
+/* How a phone can reach this Vamp now (cr_howto_mode). The Vamp app's Pair a Vamp is one screen: Scan QR
+ * code, and a list of the Vamps it finds by Bluetooth (the daemon's advertisement) and on the phone's Wi-Fi (its
  * mDNS, docs/remote-protocol.md#discovery) at once, a code typed on the one tapped. The daemon's PairStart takes the
  * page's code whichever way the phone came (docs/remote-protocol.md#pairing-by-qr-code), so the page shows it in
  * both of the modes a phone can pair in: CR_BY_QR, the QR code with the code under it, while q2-iroh's id is known,
@@ -312,7 +312,7 @@ typedef struct {
 } cr_reach;
 
 /* The QR code's text into out ("" with no q2-iroh running): Q2MUSE:1:<code>:<endpoint id>:<Wi-Fi address>:<relay>, in
- * capitals so that QR's alphanumeric mode packs it into version 6 (Q2 Muse Remote reads it in any case; an empty
+ * capitals so that QR's alphanumeric mode packs it into version 6 (the Vamp app reads it in any case; an empty
  * field is unknown). The endpoint id and relay are q2-iroh's (CR_IROH), the code the one the daemon takes for the
  * next pairing (CR_QR, docs/remote-protocol.md#pairing-by-qr-code). */
 /* q2-iroh's endpoint id and home relay from CR_IROH into id[72] and relay[200] ("" each when not known) */
@@ -380,12 +380,12 @@ static unsigned cr_howto_sum(void) {
     return hash_bytes(h, (const unsigned char *)qr, strlen(qr));
 }
 
-/* CR_BY_QR: the QR code, the code under it in two groups of three, and beside it what to do in Q2 Muse Remote's
- * words (its Pair a Q2 Muse screen: Scan QR code, or the Q2 Muse it lists, then the code), where it works from (any
+/* CR_BY_QR: the QR code, the code under it in two groups of three, and beside it what to do in the Vamp app's
+ * words (its Pair a Vamp screen: Scan QR code, or the Vamp it lists, then the code), where it works from (any
  * network with a relay, else the same Wi-Fi), Bluetooth while it advertises and the Wi-Fi address. Each line fits
  * the 147 px column at its size; the lines flow down from y 72, Waiting at the code's line. */
 static void cr_howto_qr(void *w, void *canvas, const cr_reach *r) {
-    static const char *const how[] = { "Tap Pair a Q2 Muse,", "then scan this or", "type the code" };
+    static const char *const how[] = { "Tap Pair a Vamp,", "then scan this or", "type the code" };
     char text[400], code[8], line[32];
     int sy = cr_screen_y(w), x = CR_QR_SIDE_X, tw = 375 - CR_QR_SIDE_X - 12, foot = CR_QR_Y + CR_QR_PX + 26 - sy,
         y = 72 - sy;
@@ -395,12 +395,12 @@ static void cr_howto_qr(void *w, void *canvas, const cr_reach *r) {
     tk_snprintf(code, sizeof code, "%.3s %.3s", cp.code, cp.code + 3);
     ui_text(canvas, code, 1, TYPE(28), primary, 0, CR_QR_X + CR_QR_PX / 2, foot, CR_QR_PX, 1);
     ui_text(canvas, "On your phone, open", 0, TYPE(14), secondary, 0, x, y, tw, 2);
-    ui_text(canvas, "Q2 Muse Remote", 1, TYPE(16), primary, 0, x, y += 20, tw, 2);
+    ui_text(canvas, "the Vamp app", 1, TYPE(16), primary, 0, x, y += 20, tw, 2);
     y += 5;
     for (int i = 0; i < 3; ++i) ui_text(canvas, how[i], 0, TYPE(14), secondary, 0, x, y += 17, tw, 2);
     y += 5;
     ui_text(canvas, r->relay ? "Works from any" : "Phone on the same", 0, TYPE(14), muted, 0, x, y += 17, tw, 2);
-    ui_text(canvas, r->relay ? "network" : "Wi-Fi as this Q2 Muse", 0, TYPE(14), muted, 0, x, y += 17, tw, 2);
+    ui_text(canvas, r->relay ? "network" : "Wi-Fi as this Vamp", 0, TYPE(14), muted, 0, x, y += 17, tw, 2);
     if (r->ble) {
         y += 3;
         ui_text(canvas, "Or nearby,", 0, TYPE(14), muted, 0, x, y += 17, tw, 2);
@@ -413,15 +413,15 @@ static void cr_howto_qr(void *w, void *canvas, const cr_reach *r) {
     ui_text(canvas, "Waiting\xe2\x80\xa6", 0, TYPE(14), secondary, 0, x, foot, tw, 2);
 }
 
-/* CR_BY_CODE: the code big near the top, what to do in Q2 Muse Remote's words, how a phone finds this Q2 Muse now
+/* CR_BY_CODE: the code big near the top, what to do in the Vamp app's words, how a phone finds this Vamp now
  * (Bluetooth while it advertises, the Wi-Fi address with the same Wi-Fi), and that it waits. With no code made (no
  * randomness) the daemon makes one when the phone asks and shows it on the pairing card, so the words say that.
  * Each line fits the 327 px between the margins at its size. */
 static void cr_howto_code(void *w, void *canvas, const cr_reach *r) {
-    static const char *const how[2][3] = { { "On your phone, open Q2 Muse Remote", "and tap Pair a Q2 Muse. The code",
+    static const char *const how[2][3] = { { "On your phone, open the Vamp app", "and tap Pair a Vamp. The code",
                                              "shows when your phone asks" },
-                                           { "On your phone, open Q2 Muse Remote,",
-                                             "tap Pair a Q2 Muse and type this code", 0 } };
+                                           { "On your phone, open the Vamp app,",
+                                             "tap Pair a Vamp and type this code", 0 } };
     char code[8], line[40];
     int sy = cr_screen_y(w), y = 70 - sy, c = cp.code[0] != 0;
     unsigned primary = 0xffffff, muted = tok(TOK_TERTIARY);
@@ -443,7 +443,7 @@ static void cr_howto_code(void *w, void *canvas, const cr_reach *r) {
     ui_text(canvas, "Waiting for a phone\xe2\x80\xa6", 0, TYPE(14), tok(TOK_SECONDARY), 0, 24, y + 12, 327, 2);
 }
 
-/* Pair a Phone's page by mode. CR_BY_NONE: no phone can reach this Q2 Muse yet, so the steps make it reachable,
+/* Pair a Phone's page by mode. CR_BY_NONE: no phone can reach this Vamp yet, so the steps make it reachable,
  * numbered, Bluetooth or a Wi-Fi network (step 2's second line has no number), then "Not reachable yet" and nothing
  * to wait for; the page turns to the code once either comes (carremote_poll). Each line fits the 297 px beside its
  * number at CR_STEP_PX. */
@@ -474,7 +474,7 @@ static void cr_howto_paint(void *w, void *canvas) {
         ui_text(canvas, steps[i], 0, CR_STEP_PX, primary, 0, 54, y, 375 - 54 - 24, 2);
     }
     y = 190 - cr_screen_y(w);
-    ui_text(canvas, "Q2 Muse", 1, TYPE(17), primary, 0, 24, y, 327, 2);
+    ui_text(canvas, "Vamp", 1, TYPE(17), primary, 0, 24, y, 327, 2);
     ui_text(canvas, "Not reachable yet", 0, TYPE(14), tok(TOK_TERTIARY), 0, 24, y + 24, 327, 2);
 }
 
@@ -523,7 +523,7 @@ static int cr_phone_click(void *ctx, void *event) {
         tk_snprintf(cp.forget_name, sizeof cp.forget_name, "%s", p[i].name);
         confirm(&(confirm_t){ .title = "Forget %s?",
                               .name = cp.forget_name,
-                              .body = "It has to pair again to control\nthis Q2 Muse.",
+                              .body = "It has to pair again to control\nthis Vamp.",
                               .rows = rows,
                               .n_rows = 2,
                               .kind = CONFIRM_DESTRUCTIVE,
@@ -618,7 +618,7 @@ static int cr_page_show(const void *ctx) {
      * empty_compact; docs/oled-design.md#empty-and-offline). Its button, Pair a Phone, is a row of this list
      * (empty_state keeps its place in the stack and leaves it to the page), so the wheel has the one list: two
      * lists that each hold a selection give it none (nav/lists.c surface_under), and it moved nothing. */
-    static const empty_t none = { "car-profile", "No Paired Phones", "Open Q2 Muse Remote on your phone to pair",
+    static const empty_t none = { "car-profile", "No Paired Phones", "Open the Vamp app on your phone to pair",
                                   "Pair a Phone", 0, 0 };
     int free_top = cr_screen_y(view) + cr_switch_h(1);
     cp.cta_y = empty ? empty_row_y(free_top) - cr_screen_y(view) - CR_CTA_OUT : 0;
@@ -687,9 +687,9 @@ void carremote_paint(void *w, void *canvas) {
     void *label = widget_count_children(w) ? widget_get_child(w, 0) : (void *)0;
     char art[32];
     if (k == K_SWITCH && on && h > CR_ROW) {
-        ui_line(canvas, "Control your Q2 Muse from Android Auto", page_x(), 375 - 2 * page_x(),
+        ui_line(canvas, "Control your Vamp from Android Auto", page_x(), 375 - 2 * page_x(),
                 CR_CAP_TOP + CR_CAP_LINE / 2 + 1, 2, "inter", CR_CAP_PX, RGB_CAPTION_ON_ACCENT);
-        ui_line(canvas, "with Q2 Muse Remote.", page_x(), 375 - 2 * page_x(),
+        ui_line(canvas, "with the Vamp app.", page_x(), 375 - 2 * page_x(),
                 CR_CAP_TOP + CR_CAP_LINE + CR_CAP_LINE / 2 + 1, 2, "inter", CR_CAP_PX, RGB_CAPTION_ON_ACCENT);
     } else if (k == K_CTA) { /* the empty state's button, Pair a Phone: ringed while selected, darker pressed */
         const char *label = "Pair a Phone";

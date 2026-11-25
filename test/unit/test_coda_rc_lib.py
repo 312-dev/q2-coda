@@ -242,7 +242,7 @@ def test_a_streaming_songs_file_is_its_server_song(lib, tmp_path):
 
 
 def test_a_streamed_albums_cover_is_its_stream_files_picture(lib, tmp_path):
-    """No covers/<album>.jpg: the album's cover is the picture in the song streaming, the one the Q2 Muse shows."""
+    """No covers/<album>.jpg: the album's cover is the picture in the song streaming, the one the Vamp shows."""
     q2 = Q2(lib, tmp_path, server=SERVER, cat=True)
     image = b'\xff\xd8' + bytes(range(256)) * 4 + b'\xff\xd9'
     f = tmp_path / STREAM.format('foxtrot', 's2').lstrip('/')
@@ -342,7 +342,7 @@ def test_an_artists_radio_is_one_of_its_songs(lib, tmp_path):
 
 
 def test_a_queued_stream_download_is_named_as_its_server_song(lib, tmp_path):
-    """The car, 2026-11-18 00:24: every server song in the Q2 Muse queue read "[Not in the library]". A card app's
+    """The car, 2026-11-18 00:24: every server song in the Vamp queue read "[Not in the library]". A card app's
     playlist session queues its stream downloads, which have no library id: the shim's queue line is 0 and, after
     tabs, the download's path, title and artist (coda_rc_shim.c cr_queue). The sid in the path's brackets names the
     catalogue's song, as for NowPlaying (lib_stream_song): its id, title, artist, cover and length; a download the

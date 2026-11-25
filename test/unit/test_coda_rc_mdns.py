@@ -26,7 +26,7 @@ PTR, TXT, SRV, A, AAAA, ANY = 12, 16, 33, 1, 28, 255
 TTL = 120
 DEVICE_ID = bytes([0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x6f, 0x70, 0x81])
 SVC = '_q2muse._tcp.local'
-INST = 'Q2 Muse._q2muse._tcp.local'
+INST = 'Vamp._q2muse._tcp.local'
 HOST = 'q2muse-1a2b3c.local'
 GROUP = '224.0.0.251'
 
@@ -50,7 +50,7 @@ def lib(tmp_path_factory):
     return L
 
 
-def me(name=b'Q2 Muse', ip=(192, 168, 1, 23)):
+def me(name=b'Vamp', ip=(192, 168, 1, 23)):
     s = Self()
     s.ip[:] = ip
     s.id[:] = DEVICE_ID
@@ -179,6 +179,28 @@ def test_renamed_q2_answers_under_its_name(lib):
     assert ask(lib, query((INST, SRV)), s) == 0
 
 
+@pytest.mark.parametrize('config, name', [
+    (None, 'Vamp'),  # no name chosen: the default
+    ('[Q2POD]\nBTNAME=Q2 Muse\n', 'Q2 Muse'),  # the name builds before Vamp gave it, chosen
+])
+def test_any_app_finds_it_by_the_service_type_whatever_its_name(lib, tmp_path, config, name):
+    """The phone app browses _q2muse._tcp (WifiFinder.SERVICE, the same in every release of the app), keys a Q2 by
+    its TXT id and lists the instance name without matching it, so an app from before the name Vamp finds a Q2 that
+    says Vamp and the Vamp app finds one that says Q2 Muse. The name is config.ini's BTNAME, else the default."""
+    (tmp_path / 'mnt/data').mkdir(parents=True)
+    if config:
+        (tmp_path / 'mnt/data/config.ini').write_text(config)
+    ctypes.memmove(ctypes.addressof(ctypes.c_char.in_dll(lib, 'root')), str(tmp_path).encode() + b'\0',
+                   len(str(tmp_path)) + 1)
+    out = ctypes.create_string_buffer(64)
+    lib.crc_bt_name(out)
+    assert out.value == name.encode()
+    _, recs = parse(reply(lib, MD_PTR, s=me(name=out.value)))
+    inst = f'{name}._q2muse._tcp.local'
+    assert recs[0] == ('an', '_q2muse._tcp.local', PTR, 1, TTL, inst)
+    assert recs[2][1:3] == (inst, TXT) and recs[2][5] == ['id=1a2b3c4d5e6f7081', 'v=1']
+
+
 @pytest.mark.parametrize('q, want', [
     ((SVC, PTR), MD_PTR),
     (('_Q2MUSE._TCP.LOCAL', PTR), MD_PTR),  # names in any case
@@ -220,7 +242,7 @@ def test_known_answer_suppression(lib):
 def test_compressed_names(lib):
     # the question names the service type, the second one points back into it
     p = struct.pack('>HHHHHH', 0, 0, 2, 0, 0, 0) + wire(SVC) + struct.pack('>HH', PTR, 1)
-    p += b'\x07Q2 Muse\xc0\x0c' + struct.pack('>HH', SRV, 1)
+    p += b'\x04Vamp\xc0\x0c' + struct.pack('>HH', SRV, 1)
     assert ask(lib, p) == MD_PTR | MD_SRV
 
 

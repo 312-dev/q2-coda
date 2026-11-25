@@ -180,12 +180,12 @@ for owner,page,want in ((2,'spotbrowse_page',[(2,O['KEY_PLAY'])]),(1,'spotify_pa
                         (3,'radionp_page',[(3,O['KEY_PLAY'])]),(2,'tidal_downloads',[(1,'pause')]),(2,'home_page',[(2,O['KEY_PLAY'])])):
     m=HeadsetMachine(owner); m.top=m.node('window',page,[])
     m.fn('media_key',O['KEY_PLAY']); assert m.actions==want,(page,m.actions); passed()
-# Headphones Required (docs/internals.md): stock V1.36's switch lets nothing start with no output connected, and Q2 Muse's
+# Headphones Required (docs/internals.md): stock V1.36's switch lets nothing start with no output connected, and Vamp's
 # own starts ask stock's check_forbid_play_no_headset, as stock's do. Everywhere else this suite and test/fw answer for
 # that function; from here to Resume on connect stock's own code answers. First the gate alone, on both builds: it
 # refuses only with the switch on, outside test mode, and no output, which is a Bluetooth link with its codec up, a
 # USB DAC (g_otg_status 2, not 1) or either jack plugged. Refusing, it opens stock's 2 s message when asked with 0, as
-# Q2 Muse asks, and calls notifyPrompt when asked with 1.
+# Vamp asks, and calls notifyPrompt when asked with 1.
 GATE=syms['check_forbid_play_no_headset']
 def hp_on(m,**state):
     """m with stock's gate run, not answered, and the switch on; state's bytes are an output, test mode or the switch off."""
@@ -205,7 +205,7 @@ for patched in (True,False):
     for state in (dict(bt_linkstatus=1),dict(bt_showcoding=1),dict(g_otg_status=1)):
         assert forbids(patched,**state)==(1,NOTICE),state
 passed()
-# Q2 Muse's two starts of its own, with stock's gate run: each asks with 0 and starts nothing it refuses. Play/Pause
+# Vamp's two starts of its own, with stock's gate run: each asks with 0 and starts nothing it refuses. Play/Pause
 # when not playing (ringnav_play_pause, the hook on stock's player_play_pause, whose body is the toggle here; a pause
 # always goes through), the side buttons' and a headset's skip (media_key, playing or not). The toggle answers at +12,
 # past the 3-word PIC prologue the hook's trampoline skips (build.py), so ringnav_play_pause and the real gate run.
@@ -215,7 +215,7 @@ def hp_keys(key,playing=False,**state):
 for key,does in (('KEY_PLAY','play'),('KEY_FWD_BTN','local_next'),('KEY_BACK_BTN','local_prev')):
     assert hp_keys(key)==([],1) and hp_keys(key,g_po_status=1)==hp_keys(key,g_block_withoutphone_flag=0)==([(1,does)],0),key
 assert hp_keys('KEY_PLAY',True)==([(1,'pause')],0) and hp_keys('KEY_FWD_BTN',True)==([],1); passed()
-# Stock's own start runs through Q2 Muse's hook: Now Playing opened with a track to start, the way a list row's tap
+# Stock's own start runs through Vamp's hook: Now Playing opened with a track to start, the way a list row's tap
 # goes. Stock's playing_page_init, whole: refused, it shows the message, closes the window it was given and returns
 # STOP before it starts or builds anything, and ringnav_playing binds nothing to a window that is gone. With an
 # output the track starts and the labels bind, as they do opened with nothing to start (0xff), which asks nothing.

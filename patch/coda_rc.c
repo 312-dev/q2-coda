@@ -6,7 +6,7 @@
  * (crc_cover_ask, which asks the app itself through its /tmp files).
  *
  * demo starts it when Settings > Car Remote is on and kills it when that goes off; nothing else starts it.
- * It also answers mDNS for Q2 Muse Remote's Pair a Q2 Muse list (coda_rc_mdns.c) on wlan0, or the interface
+ * It also answers mDNS for the Vamp app's Pair a Vamp list (coda_rc_mdns.c) on wlan0, or the interface
  * --mdns-if names (the emulator's), and not at all with --no-mdns; the host build answers only with --mdns-if.
  * It runs at nice 19. --root DIR prefixes every path (the host tests); --no-ble, --ble-sim DIR, --port N (0: the
  * kernel's pick) and --iroh-port N (q2-iroh's loopback port, 7721; 0 none, any the kernel's pick) are for them too:
@@ -22,7 +22,7 @@
 #define AUTH_MS 150000    /* the longest a session lives unauthenticated, a pairing's included */
 #define HANDSHAKE_MS 15000 /* the longest one stays in a state other than pairing before Auth */
 #define ACK_MS 4000        /* the shim's answer to a command, at most this late */
-/* Once it answered "taken" (CRC_ACK_TAKEN): its final answer, at most this late. Under Q2 Muse Remote's own 8 s for
+/* Once it answered "taken" (CRC_ACK_TAKEN): its final answer, at most this late. Under the Vamp app's own 8 s for
  * any answer (CodaSession.TIMEOUT_MS), past which it drops the whole session. */
 #define ACK_TAKEN_MS 7000
 #define TICK_MS 1000 /* the loop's longest sleep: pairing's end, forgotten phones, the handshakes' limits */
@@ -44,7 +44,7 @@ typedef struct {
     int seq, state, pos_ms, len_s, id, shuffle, repeat, volume, qpos, qlen, qgen, qlist, radio;
     int hearts; /* 0-5, -1 when the song can't be rated */
     int buf, bhave, btotal, bms; /* a server song loading: its bytes and length (np_stream.c) */
-    int noten;                   /* the Q2 Muse's toasts so far; note the last, while shown */
+    int noten;                   /* the Vamp's toasts so far; note the last, while shown */
     char path[512], title[160], artist[160], album[160], note[96];
 } np_t;
 
