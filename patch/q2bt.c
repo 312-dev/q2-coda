@@ -14,7 +14,8 @@
  * (under Auto, or SBC chosen, with the same setting on) its bitpool is lowered a rung at a
  * time and raised again
  * (bt_sbc_step), written into bluealsa's BT_SBC_POOL byte through /proc/PID/mem, which its encoder
- * takes from the next frame. Every read that fails leaves its
+ * takes from the next frame, and on AAC under Auto its peak the same way (bt_aac_step, BT_AAC_RATE's
+ * byte). Every read that fails leaves its
  * field "-", and with no Bluetooth socket at all (the emulator) it tries again a minute later and
  * does nothing else. Apart from streams, the kernel's lines q2guard reads feed the controller
  * watchdog (bt_kmsg, bt_watch, docs/internals.md#bluetooth-controller-watchdog), and bt_sleep waits
@@ -85,9 +86,11 @@ static struct {
     char pcm[96];        /* the A2DP source PCM's object path, "" none */
     int codec_pid;       /* q2bt-codec running a switch, 0 none */
     int codec_failed;    /* a switch failed in this stream: no more until the next */
-    struct bt_sbc sbc;   /* SBC's bitpool, afresh at each START */
+    struct bt_rung sbc;  /* SBC's bitpool, afresh at each START */
     int sbc_allowed;     /* bt_sbc_allowed's, from config.ini */
     int sbc_failed;      /* bluealsa's byte would not take a write: none until the next START */
+    struct bt_rung aac;  /* AAC's peak, the same, under Auto (allowed) */
+    int aac_failed;      /* as sbc_failed, for AAC's byte */
     int pl;              /* the player's pid, 0 not found (looked for at pl_found_at) */
     unsigned pl_found_at, pl_ticks, io_r, io_w, io_d, dk_ms;
     int pl_ok, io_ok, dk_ok;  /* pl_ticks, io_* and dk_ms hold the last line's counters */
@@ -466,31 +469,34 @@ static void step_reap(unsigned now) {
     ulog_add(bt.ulog, time(0), now_ms(), 'W', "bt", line);
     bt.codec_failed = 1;
 }
-/* ---- SBC's bitpool: bluealsa's BT_SBC_POOL bytes, through /proc/PID/mem ---- */
-static int pool_at(int fd) { return lseek(fd, BT_SBC_POOL, SEEK_SET) == BT_SBC_POOL; }
-/* the bitpool asked for, the encoder thread's own and the last used, into b[3]: 1 read (0 with no
- * bluealsa, or one without the bytes: an unpatched build's address is not mapped) */
+/* ---- SBC's bitpool and AAC's peak: bluealsa's BT_SBC_POOL and BT_AAC_RATE bytes, through /proc/PID/mem ---- */
+#define POOL_BYTES (BT_AAC_RATE + 4 - BT_SBC_POOL)
+#define AAC_AT (BT_AAC_RATE - BT_SBC_POOL) /* AAC's four in pool_read's */
+static int pool_at(int fd, int at) { return lseek(fd, BT_SBC_POOL + at, SEEK_SET) == BT_SBC_POOL + at; }
+/* into b[POOL_BYTES]: SBC's bitpool asked for, the encoder thread's own and the last used, then from AAC_AT AAC's
+ * rate asked for, the stream's own, the one in use and its mode: 1 read (0 with no bluealsa, or one without the
+ * bytes: an unpatched build's address is not mapped) */
 static int pool_read(unsigned char *b) {
     char p[32];
     if (!bt.ba) return 0;
     snprintf(p, sizeof p, "/proc/%d/mem", bt.ba);
     int fd = open(p, O_RDONLY | O_CLOEXEC);
     if (fd < 0) return 0;
-    int ok = pool_at(fd) && read(fd, b, 3) == 3;
+    int ok = pool_at(fd, 0) && read(fd, b, POOL_BYTES) == POOL_BYTES;
     close(fd);
     return ok;
 }
-/* v asked for, and read back: 1 when bluealsa has it */
-static int pool_write(int v) {
+/* v asked for at the byte at (0 SBC's, AAC_AT AAC's), and read back: 1 when bluealsa has it */
+static int pool_write(int at, int v) {
     char p[32];
-    unsigned char b[3], c = (unsigned char)v;
+    unsigned char b[POOL_BYTES], c = (unsigned char)v;
     if (!bt.ba) return 0;
     snprintf(p, sizeof p, "/proc/%d/mem", bt.ba);
     int fd = open(p, O_RDWR | O_CLOEXEC);
     if (fd < 0) return 0;
-    int ok = pool_at(fd) && write(fd, &c, 1) == 1;
+    int ok = pool_at(fd, at) && write(fd, &c, 1) == 1;
     close(fd);
-    return ok && pool_read(b) && b[0] == c;
+    return ok && pool_read(b) && b[at] == c;
 }
 static void say(char level, const char *line) {
     note(line);
@@ -501,18 +507,33 @@ static void say(char level, const char *line) {
 static void sbc_step(unsigned now, int have, const unsigned char *pb, int wq, int fly, int bufs) {
     char line[64];
     int rank = bt_codec_rank(bt.codec), own = have ? pb[1] : 0;
-    int was = bt.sbc.pool ? bt.sbc.pool : own;
+    int was = bt.sbc.rung ? bt.sbc.rung : own;
     int to = bt_sbc_step(&bt.sbc, now, bt.sbc_allowed, rank, rank == 1 ? own : 0, wq, fly, bufs);
     if (to >= 0) {
         int now_pool = to ? to : own;
         snprintf(line, sizeof line, "STEP SBC bitpool %d -> %d", was, now_pool);
         say('I', line);
     }
-    if (!have || bt.sbc_failed || pb[0] == bt.sbc.pool) return;
-    if (pool_write(bt.sbc.pool)) return;
-    snprintf(line, sizeof line, "STEP failed SBC bitpool %d: /proc/%d/mem", bt.sbc.pool, bt.ba);
+    if (!have || bt.sbc_failed || pb[0] == bt.sbc.rung) return;
+    if (pool_write(0, bt.sbc.rung)) return;
+    snprintf(line, sizeof line, "STEP failed SBC bitpool %d: /proc/%d/mem", bt.sbc.rung, bt.ba);
     say('W', line);
     bt.sbc_failed = 1;
+}
+/* One line on AAC: bt_aac_step's peak, and bluealsa's byte made to agree with it, as sbc_step */
+static void aac_step(unsigned now, int have, const unsigned char *pb, int wq, int fly, int bufs) {
+    char line[64];
+    int own = have ? pb[AAC_AT + 1] : 0, was = bt.aac.rung ? bt.aac.rung : own;
+    int to = bt_aac_step(&bt.aac, now, bt.allowed, !strcmp(bt.codec, "AAC"), own, wq, fly, bufs);
+    if (to >= 0) {
+        snprintf(line, sizeof line, "STEP AAC peak %d -> %d kbit/s", was, to ? to : own);
+        say('I', line);
+    }
+    if (!have || bt.aac_failed || pb[AAC_AT] == bt.aac.rung) return;
+    if (pool_write(AAC_AT, bt.aac.rung)) return;
+    snprintf(line, sizeof line, "STEP failed AAC peak %d: /proc/%d/mem", bt.aac.rung, bt.ba);
+    say('W', line);
+    bt.aac_failed = 1;
 }
 
 static void step(unsigned now, const struct bt_sample *ls, int own, int bufs) {
@@ -521,7 +542,7 @@ static void step(unsigned now, const struct bt_sample *ls, int own, int bufs) {
     int rank = bt_codec_rank(bt.codec);
     struct bt_step_line l = { ls->kbps, ls->acl, ls->done, ls->wq, ls->fly,
                               bufs,     ls->afh, own,      0,      bt.hz };
-    l.lowered = bt.sbc.pool != 0;
+    l.lowered = bt.sbc.rung != 0;
     int to = bt_step(&bt.step, now, bt.allowed, rank, &l);
     if (!to || bt.codec_pid > 0 || bt.codec_failed || !bt.pcm[0]) return;
     snprintf(line, sizeof line, "STEP %s -> %s", bt.codec, bt_codec_name(to));
@@ -569,6 +590,7 @@ static void begin(unsigned now, const struct bt_counts *c) {
     busy_since(&bt.cpu, &cores);
     bt.codec[0] = 0, bt.hz = 0, bt.enc_name[0] = 0, bt.fly.have = 0, bt.codec_failed = 0;
     memset(&bt.sbc, 0, sizeof bt.sbc), bt.sbc_failed = 0;
+    memset(&bt.aac, 0, sizeof bt.aac), bt.aac_failed = 0;
     allowed_read();
     enc_find(now);
     bt.pl_ok = bt.io_ok = bt.dk_ok = 0; /* the player's and the card's first rates come a line on */
@@ -633,7 +655,7 @@ static void sample(unsigned now, const struct bt_counts *c) {
     s.er = got && got == bt.enc_stat ? bt_rate(run - bt.enc_run, ms) : -1;
     s.ew = got == 1 && bt.enc_stat == 1 ? bt_rate(wait - bt.enc_wait, ms) : -1;
     if (got) bt.enc_run = run, bt.enc_wait = wait, bt.enc_stat = got;
-    unsigned char pb[3];
+    unsigned char pb[POOL_BYTES];
     int have = pool_read(pb);
     s.bp = have && !strcmp(bt.enc_name, "ba-a2dp-sbc") ? pb[2] : -1;
     player_read(now, ms, &s);
@@ -642,6 +664,7 @@ static void sample(unsigned now, const struct bt_counts *c) {
     heat_add(bt.log, line);
     bt.was = *c, bt.at = now;
     sbc_step(now, have, pb, s.wq, s.fly, c->acl_pkts);
+    aac_step(now, have, pb, s.wq, s.fly, c->acl_pkts);
     step(now, &s, have ? pb[1] : 0, c->acl_pkts);
 }
 static void tick(unsigned now) {
