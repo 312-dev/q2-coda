@@ -4,15 +4,15 @@
  * embers; an ember that reaches the ground sets the nearest growing bed on its side alight, and the
  * fourth bed lost on one side ends the game. Waves start sparse and slow and grow denser and
  * faster, the sky holds only so many embers a wave, nothing cracks before wave G_CRACK, the light
- * turns from dawn to night across the waves, and every tenth is a lull of slow cinders worth double.
- * The sky is alive under it all: clouds drift, the ash billows, the crater glows and the lava runs
- * (sky_turn), one of them moving a step.
+ * turns from dawn to night across the waves, and every tenth is a lull of slow cinders worth
+ * double. The sky is alive under it all: clouds drift, the ash billows, the crater glows and the
+ * lava runs (sky_turn), one of them moving a step.
  *
- * The scene is the art file's (the design's sky-defense/src/export.py), read once when the game
- * opens: a byte a pixel into a palette a band of rows, four colours an entry (dawn, day, dusk,
- * night), so a time of day is a palette and the light's turn is two palettes mixed, painted a strip
- * of rows a frame. Each step marks the boxes that changed and joins them into at most ENG_RECTS;
- * each is painted as the scene restored and what lies over it drawn again. */
+ * The scene is the art file's (the design's sky-defense/src/export_retune.py), read once when the
+ * game opens: a byte a pixel into a palette a band of rows, four colours an entry (dawn, day,
+ * dusk, night), so a time of day is a palette and the light's turn is two palettes mixed, painted
+ * a strip of rows a frame. Each step marks the boxes that changed and joins them into at most
+ * ENG_RECTS; each is painted as the scene restored and what lies over it drawn again. */
 #include "engine.h"
 #include "game_embergarden_art.h"
 #include "peq.h"
@@ -24,9 +24,9 @@
 #define G_SHOTS 3          /* spurts in flight */
 #define G_PUFFS 3          /* steam puffs */
 #define G_CINDERS 6        /* cinders alive at once: more are spawned medium (the frame's cost) */
-#define G_LICK 6   /* steps a frame of an ember's flame shows */
-#define G_BOXES 64 /* a step's changed boxes before they are joined */
-#define G_PX 187   /* the sprinkler's pivot, (187.5, 270) */
+#define G_LICK 6           /* steps a frame of an ember's flame shows */
+#define G_BOXES 64         /* a step's changed boxes before they are joined */
+#define G_PX 187           /* the sprinkler's pivot, (187.5, 270) */
 #define G_PY 270
 #define G_GROUND 258      /* an ember reaching this row has landed */
 #define G_BED_Y 252       /* a bed's top */
@@ -82,13 +82,13 @@ static const struct sky {
     unsigned char kind, part, colour, p; /* p: a cloud's turns a pixel, else its phase */
     short x, y;
 } SKY[] = {
-    { DRIFT, EG_CLOUD0, C_CLOUD, 1, 40, 150 },   { BOB, EG_BILLOW, C_PLUME, 0, 52, 28 },
-    { MARCH, EG_LAVA0, C_LAVA, 0, VX, VY },      { RISE, EG_BILLOW, C_PLUME, 0, 0, 0 },
-    { DRIFT, EG_CLOUD1, C_CLOUD, 2, 118, 168 },  { BOB, EG_BILLOW, C_PLUME, 77, 122, 30 },
-    { MARCH, EG_LAVA1, C_LAVA, 1, VX, VY },      { BOB, EG_BILLOW, C_PLUME, 154, 196, 30 },
-    { DRIFT, EG_CLOUD2, C_CLOUD, 1, 300, 142 },  { PULSE, EG_VGLOW, C_GLOW, 0, VX, VY },
-    { MARCH, EG_LAVA2, C_LAVA, 2, VX, VY },      { RISE, EG_BILLOW, C_PLUME, 128, 0, 0 },
-    { DRIFT, EG_CLOUD3, C_CLOUD, 2, 350, 170 },  { BOB, EG_BILLOW, C_PLUME, 231, 268, 28 },
+    { DRIFT, EG_CLOUD0, C_CLOUD, 1, 40, 150 },  { BOB, EG_BILLOW, C_PLUME, 0, 52, 28 },
+    { MARCH, EG_LAVA0, C_LAVA, 0, VX, VY },     { RISE, EG_BILLOW, C_PLUME, 0, 0, 0 },
+    { DRIFT, EG_CLOUD1, C_CLOUD, 2, 118, 168 }, { BOB, EG_BILLOW, C_PLUME, 77, 122, 30 },
+    { MARCH, EG_LAVA1, C_LAVA, 1, VX, VY },     { BOB, EG_BILLOW, C_PLUME, 154, 196, 30 },
+    { DRIFT, EG_CLOUD2, C_CLOUD, 1, 300, 142 }, { PULSE, EG_VGLOW, C_GLOW, 0, VX, VY },
+    { MARCH, EG_LAVA2, C_LAVA, 2, VX, VY },     { RISE, EG_BILLOW, C_PLUME, 128, 0, 0 },
+    { DRIFT, EG_CLOUD3, C_CLOUD, 2, 350, 170 }, { BOB, EG_BILLOW, C_PLUME, 231, 268, 28 },
     { BOB, EG_BILLOW, C_PLUME, 52, 338, 28 },
 };
 #define SKY_N (int)(sizeof SKY / sizeof *SKY)
@@ -104,7 +104,8 @@ struct eg {
     struct {
         short x, y, a; /* where each of SKY's is drawn, and how strongly (of 256) */
     } sky[SKY_N];
-    int mode, aim, recoil, spray, repeat, stop, h, tick; /* tick: the steps, every moving picture's clock */
+    int mode, aim, recoil, spray, repeat, stop, h;
+    int tick; /* the steps since the game opened: every moving picture's clock */
     int bed[8], bed_t[8], land_x, land_t, last[2], blink;
     unsigned char flame[8]; /* each burning bed's flame frame */
     int wave, lull, left, spawn, gap, banner, cleared;
@@ -489,13 +490,11 @@ static void draw_bolt(const struct eg *g, struct eng_surface *s) {
  * Like the scene, none of it is painted where the card's body (rows card0 to card1) will cover it:
  * the rect is painted as its rows above the card, those below, and the columns to each side. */
 static void draw_sky(const struct eg *g, struct eng_surface *s, int card0, int card1) {
-    unsigned col[4] = {
-        lit(g, 0xffffff),
-        g->pal[EG_PLUME_Y / EG_BAND]
-              [((const unsigned char *)data(g, EG_SCENE))[EG_PLUME_Y * ENG_W + EG_PLUME_X]] &
-            0xffffff,
-        g->dim ? dimmed(EMBER) : EMBER, g->dim ? dimmed(0xffe27a) : 0xffe27a
-    };
+    unsigned col[4] = { lit(g, 0xffffff),
+                        g->pal[EG_PLUME_Y / EG_BAND][((const unsigned char *)data(
+                            g, EG_SCENE))[EG_PLUME_Y * ENG_W + EG_PLUME_X]] &
+                            0xffffff,
+                        g->dim ? dimmed(EMBER) : EMBER, g->dim ? dimmed(0xffe27a) : 0xffe27a };
     struct eng_surface t = *s;
     int y0 = s->y0 > card0 ? s->y0 : card0, y1 = s->y1 < card1 ? s->y1 : card1;
     int cut[4][4] = { { s->x0, s->y0, s->x1, s->y1 < card0 ? s->y1 : card0 },
@@ -504,7 +503,8 @@ static void draw_sky(const struct eg *g, struct eng_surface *s, int card0, int c
                       { s->x0 > CARD_X + 150 ? s->x0 : CARD_X + 150, y0, s->x1, y1 } };
     for (int n = 0; n < 4; ++n) {
         t.x0 = cut[n][0], t.y0 = cut[n][1], t.x1 = cut[n][2], t.y1 = cut[n][3];
-        if (t.x0 >= t.x1 || t.y0 >= t.y1 || t.y0 >= 205) continue; /* all of it is above the hedge */
+        if (t.x0 >= t.x1 || t.y0 >= t.y1 || t.y0 >= 205)
+            continue; /* all of it is above the hedge */
         for (int i = 0; i < SKY_N; ++i)
             glyph(g, &t, SKY[i].part, g->sky[i].x, g->sky[i].y, col[SKY[i].colour], g->sky[i].a);
     }
@@ -918,7 +918,9 @@ static void spawn(struct eg *g) {
     for (int k = 0; k < G_EMBERS; ++k) {
         struct ember *e = &g->em[k];
         if (e->alive) continue;
-        int pc = g->wave < G_CRACK ? 0 : 3 * g->wave - 6 > 30 ? 30 : 3 * g->wave - 6,
+        int pc = g->wave < G_CRACK      ? 0
+                 : 3 * g->wave - 6 > 30 ? 30
+                                        : 3 * g->wave - 6,
             pm = 15 + 4 * g->wave > 40 ? 40 : 15 + 4 * g->wave;
         int r = (int)(eng_rng(&g->seed) % 100), cinders = 0, alive = 0;
         for (int j = 0; j < G_EMBERS; ++j)
@@ -1084,7 +1086,8 @@ static void init(void *state, int h) {
         g->save.wave > 9999)
         g->save.best = g->save.wave = 0; /* a save that no game made */
     g->saved = g->save.best + g->save.wave;
-    for (int load = 0; g->ok && g->tick < SKY_N; ++g->tick) sky_turn(g, &load); /* each at its start */
+    for (int load = 0; g->ok && g->tick < SKY_N; ++g->tick)
+        sky_turn(g, &load); /* each at its start */
     new_game(g, START);
 }
 
@@ -1173,10 +1176,11 @@ static void play(struct eg *g, const struct eng_input *in) {
 
 /* The sky's life: each step one of SKY's things takes its turn (so each every SKY_N steps), and is
  * marked where its picture changed. A cloud slides a pixel to the right every p turns and comes
- * round again; a billow circles 3 px wide and 2 high over the canopy; a puff climbs the ash column
- * from the crater, strongest half way; the crater's glow swells and sinks; each of the lava's
- * three masks of dashes brightens and fades a third of a round after the one before, so the dashes
- * run down the cone. A turn whose boxes would take the step past its budget is passed over. */
+ * round again; a billow circles its place on the canopy, 4 px to each side and 2 up and down; a
+ * puff climbs the ash column from the crater, strongest half way; the crater's glow swells and
+ * sinks; each of the lava's three masks of dashes brightens and fades a third of a round after the
+ * one before, so the dashes run down the cone. A turn whose boxes would take the step past its
+ * budget is passed over. */
 static void sky_turn(struct eg *g, int *load) {
     int i = g->tick % SKY_N, t = g->tick / SKY_N, first = g->tick < SKY_N;
     const struct sky *k = &SKY[i];
@@ -1185,11 +1189,13 @@ static void sky_turn(struct eg *g, int *load) {
     if (k->kind == DRIFT) {
         if (!first && t % k->p == 0 && ++x > ENG_W + 44) x = -44;
     } else if (k->kind == BOB) {
-        x = k->x + (eng_cos(t * 40 + k->p * 4) * 3 >> 16), y += eng_sin(t * 40 + k->p * 4) * 2 >> 16;
-        a = 150;
+        x = k->x + (eng_cos(t * 40 + k->p * 4) * 4 >> 16),
+        y += eng_sin(t * 40 + k->p * 4) * 2 >> 16;
+        a = 220;
     } else if (k->kind == RISE) {
         int u = (t * 3 + k->p) & 255;
-        x = VX - 2 - 46 * u / 256, y = VY - 12 - 84 * u / 256, a = (u < 128 ? u : 255 - u) * 150 / 128;
+        x = VX - 2 - 46 * u / 256, y = VY - 12 - 84 * u / 256,
+        a = (u < 128 ? u : 255 - u) * 220 / 128;
     } else if (k->kind == PULSE)
         a = 100 + (eng_sin(t * 56) * 90 >> 16);
     else {
@@ -1211,9 +1217,10 @@ static void sky_turn(struct eg *g, int *load) {
 }
 
 /* What waits for a lighter frame: the extras of a step (the banner's fade, the lightning's next
- * frame, a puff's and the flames' next frames, a strike, the light's strip, the sky's turn) are painted only while
- * the step's boxes, with theirs, stay within G_BUDGET pixels; one that does not fit waits for a
- * step that has room, so no frame pays for everything at once (docs/games-engine.md#ember-garden).
+ * frame, a puff's and the flames' next frames, a strike, the light's strip, the sky's turn) are
+ * painted only while the step's boxes, with theirs, stay within G_BUDGET pixels; one that does not
+ * fit waits for a step that has room, so no frame pays for everything at once
+ * (docs/games-engine.md#ember-garden).
  */
 #define ROOM(a) (load + (a) <= G_BUDGET ? (load += (a), 1) : 0)
 static void extras(struct eg *g) {

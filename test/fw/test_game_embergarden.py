@@ -641,8 +641,8 @@ def test_the_sky_moves_one_thing_a_step_clouds_drift_the_glow_pulses_and_the_lav
     assert all(sum(a >= 16 for a in row) in (1, 2) and max(row) >= 120 for row in lava)  # one or two lit, never none
     peak = [next(n for n, row in enumerate(lava) if row[i] >= 250) for i in range(3)]
     assert (peak[1] - peak[0]) % 12 in (3, 4, 5) and (peak[2] - peak[1]) % 12 in (3, 4, 5)  # each a third of a round on
-    for i in (1, 5, 7, 13, 14):  # the billows keep within 3 px of their places
-        assert all(abs(s[i][0] - start[i][0]) <= 6 and abs(s[i][1] - start[i][1]) <= 4 for s in seen)
+    for i, (x, y) in zip((1, 5, 7, 13, 14), ((52, 28), (122, 30), (196, 30), (268, 28), (338, 28))):  # the billows circle their places
+        assert {s[i][0] - x for s in seen} == set(range(-4, 5)) and {s[i][1] - y for s in seen} == set(range(-2, 3))
     for i in (3, 11):  # the puffs climb the column and fade at both ends
         assert min(s[i][1] for s in seen) < 50 and max(s[i][1] for s in seen) > 125 and max(s[i][2] for s in seen) > 140
     assert all(w * h <= 2800 for _, _, w, h in rects)  # each turn's box is its own thing's, the glow's the widest
