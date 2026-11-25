@@ -178,6 +178,9 @@ HOOKS = {
     'player_start_queue': (0x520df0, 'ringnav_start_queue', 'start_queue'),
     # A list pick of the playing file only asks (playback.c)
     'player_start': (0x520b4c, 'ringnav_player_start', 'player_start'),
+    # A list's press starts the pressed row, not the first of its file name (playback.c ringnav_songlist)
+    'player_load_songlist': (0x51e2a8, 'ringnav_songlist', 'songlist'),
+    'load_searchsong_list': (0x51420c, 'ringnav_searchlist', 'searchlist'),  # Search's songs, the same
     # Card apps (patch/addon.c): USB mode's page, before it unmounts the card, ends them first
     'usbmode_page_init': (0x542e68, 'ringnav_usbmode', 'usbmode'),
     # Tidal cache (patch/tidal.c): the stream URL thread's player start, with its song id in $s2

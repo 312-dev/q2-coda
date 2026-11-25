@@ -198,21 +198,22 @@ for callback,button,pages in (
             passed()
 
 # Songs of one file name: two server songs of one title (a server row's file name is its title, catalogue.c imp_song)
-# or two card files of one name in two folders. Stock's own player_load_songlist runs here: it answers the first
-# record of the list with the pressed one's file name and CUE start, so a press on the later song started the
-# earlier. The press starts its own row (playback.c ringnav_songlist), from Songs and from an artist's tracks; a CUE
-# image's tracks, which share their file and differ by start, and a name that differs only in case each keep theirs.
+# or two card files of one name in two folders. Stock's own player_load_songlist and load_searchsong_list run here:
+# each answers the first song of its list with the pressed one's file name and CUE start, so a press on the later
+# song started the earlier. The press starts its own row (playback.c ringnav_songlist, ringnav_searchlist), from
+# Songs, an artist's tracks and Search's songs; a CUE image's tracks, which share their file and differ by start, and
+# a name that differs only in case each keep theirs, and a folder row before the songs moves none of them.
 class SameNameMachine(LookupMachine):
-    def __init__(self,rows,selected):
+    def __init__(self,rows,selected,search=False):
         super().__init__(['home_page','playing_page','allmusic_page'],selected,False)
-        self.handlers.pop(syms['player_load_songlist'])  # stock's, which copies the list and finds the start
+        for n in ('player_load_songlist','load_searchsong_list'): self.handlers.pop(syms[n],None)  # stock's: copy, find
         self.word(0xa3a0e8,0x1000014); self.handlers[0x1000014]='lookup:malloc'  # lazy-bound malloc, as the Era's
         self.word(0xa3a270,0x1000010); self.handlers[0x1000010]='lookup:free'
         self.handlers[payload_syms['catalogue_access']]='lookup:playable'  # a server row that can play now (online)
         recs=[]
-        for name,path,cue in rows:
-            r=self.song(name); self.word(r+O['REC_PATH'],self.string(path)); self.word(r+O['REC_CUE_START'],cue); recs.append(r)
-        self.word(syms['p_deque_showlist'],self.deque(recs))
+        for name,path,cue,*kind in rows:
+            r=self.song(name,*kind); self.word(r+O['REC_PATH'],self.string(path)); self.word(r+O['REC_CUE_START'],cue); recs.append(r)
+        self.word(syms['p_deque_searchshowlist' if search else 'p_deque_showlist'],self.deque(recs))
     def hook(self,u,address,size,unused):
         name=self.handlers.get(address,'')
         if name=='lookup:malloc': self.returns(self.alloc((u.reg_read(REGS[0])+3)&~3),clobber=True); return
@@ -228,14 +229,16 @@ for rows in ([('Downfall',f'{SERVER}/al1/s1.flac',0),('Downfall',f'{SERVER}/al2/
              [('Downfall.flac','/mnt/mmc/A/Downfall.flac',0),('Other.flac','/mnt/mmc/C/Other.flac',0),
               ('Downfall.flac','/mnt/mmc/B/Downfall.flac',0)],
              [('Downfall','/mnt/mmc/a.flac',0),('DOWNFALL','/mnt/mmc/b.flac',0)],
-             [('Live.cue','/mnt/mmc/Live.flac',0),('Live.cue','/mnt/mmc/Live.flac',245)]):
-    for callback,button in ((0x4aac14,'row'),(0x4af498,'track')):
-        for selected in range(len(rows)):
-            m=SameNameMachine(rows,selected)
+             [('Live.cue','/mnt/mmc/Live.flac',0),('Live.cue','/mnt/mmc/Live.flac',245)],
+             [('Live','/mnt/mmc/Live',0,4),('Downfall','/mnt/mmc/a.flac',0),('Downfall','/mnt/mmc/b.flac',0)]):
+    songs=[i for i,r in enumerate(rows) if r[3:]!=(4,)]  # what stock copies, and what a start indexes
+    for callback,button,search in ((0x4aac14,'row',False),(0x4af498,'track',False),(0x49d084,'track',True)):
+        for selected in songs:
+            m=SameNameMachine(rows,selected,search)
             w=m.node('button',f'{button}_{selected}'); m.word(w+0x10,m.string(f'{button}_{selected}'))
             m.word(w+O['ROW_INDEX'],selected); m.word(m.event+O['EVENT_TARGET'],w)
             assert m.call(address=callback,args=(w,m.event,0,0),gap=0)==0
-            assert m.start_at()==selected,(rows[selected],button,m.start_at())
+            assert m.start_at()==songs.index(selected),(rows[selected],callback,m.start_at())
             passed()
 
 # Now Playing More's Artist info (stock's 0x5398fc, build.py MORE_ARTIST_CLOSE, #303) closes the artist page and the

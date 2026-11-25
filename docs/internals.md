@@ -48,6 +48,8 @@ The table is the main hooks. `HOOKS` in `tools/build.py` is the whole list, each
 | `playermore_online` (unnamed)         | `0x539614` | More's Download Cover & Lyrics waits for [Smart Wi-Fi](#smart-wi-fi)'s link                                                             |
 | `toolsWriteConfig`                    | `0x5d0284` | Every `config.ini` write: a section run into the line before it is split first ([config.ini](#config-ini))                             |
 | `mclStartPlayer`                      | `0x5c0118` | A local track's start pauses librespot and stops the radio first                                                                        |
+| `player_load_songlist`                | `0x51e2a8` | A list's press starts the pressed row, not the first of its file name ([A row's song](#a-rows-song))                                    |
+| `load_searchsong_list`                | `0x51420c` | The same for Search's songs ([A row's song](#a-rows-song))                                                                              |
 | `networkGetWifiSignal`                | `0x5c25d8` | The Wi-Fi signal from the driver's `rx_signal`, not an ioctl that ends power save ([Battery](#battery))                                 |
 | `window_manager_paint`                | `0x680a1c` | `WM_PAINT_LEAF`: no PIC prologue; no painting while a video plays or the screen is off ([Battery](#battery))                            |
 | `main_loop_queue_event`               | `0x65c418` | `QUEUE_LEAF`: no PIC prologue; the touch thread's empty events stay out of the input queue (the Input queue paragraph below)            |
@@ -1614,6 +1616,10 @@ Checks: `test/player/run.py` `test_smart_crossfade` (A: a tone, a 6 s fade to no
 ponytail: DSD, DoP and native DSD output pass through bit-exact (`dsd()`) and stay stereo, and so does stock's AirPlay receiver. On the headphone DAC, switching Spotify's sink between `aplay` and `q2video` waits for the sink's next start (pause and play), like a new output device does. q2video already playing on another output follows the switch at once.
 
 Checks in `test/peq.py` (host builds): the filter's mix once the file appears, live, and exact again when cleared; `mono` on S16 at both ends of the range. `test/patch.py`: the row, its place after Balance, the saved key, and the shared int set live, mapped once.
+
+## A row's song
+
+A press on a song row loads its list and starts the pressed song: stock's `player_load_songlist` (`0x51e2a8`; Songs, an album's and an artist's tracks, stock's Cover Flow page) or, for Search's songs, its twin `load_searchsong_list` (`0x51420c`), copies the list's songs (`REC_TYPE` 8) into a new queue and answers the start. Stock answers the first song whose file name (`REC_NAME`) and CUE start equal the pressed row's (`strcmp` at `0x51e75c`, `0x5146bc`), so of two songs with one file name a press on the later started the earlier: two server songs of one title (a server row's file name is its title, `catalogue.c` `imp_song`), and two card files of one name in two folders. Each caller passes the pressed record's own `REC_NAME` pointer, from `p_deque_showlist` or `p_deque_searchshowlist`; `ringnav_songlist` and `ringnav_searchlist` (`playback.c`) run stock, then answer the place of the song holding that pointer. A name no record holds (`testmode_test_key`'s constant) keeps stock's answer. CUE tracks of one file, which differ by start, and names that differ only in case each started their own before and still do. The payload's own lists (Up Next, Song Radio, Most Played, Cover Flow's album tracks, Caller Ten's missed songs) start by index or by path, and Resume (`memeory_startplayer`) matches the file name and the path together, so none shares the fault. SyncLink (`synclinkLoadSongList`) is left as stock: the phone names the song.
 
 ## Resume
 
