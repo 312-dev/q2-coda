@@ -37,7 +37,7 @@
 #define G_REPEAT 12   /* steps between spurts while Center is held */
 #define G_SPEED FX(6) /* a spurt's lead drop, a step */
 #define G_HIT 72      /* its radius, 1/16 px (4.5) */
-#define G_SWAY 18     /* an ember's sway, px each way, and its period in steps */
+#define G_SWAY 18     /* an ember's widest sway, px each way, and its period in steps */
 #define G_PERIOD 180
 #define G_BURN 90      /* steps a bed burns before it is charred */
 #define G_FLAME 8      /* steps a flame frame shows, each bed's a step apart from the next's */
