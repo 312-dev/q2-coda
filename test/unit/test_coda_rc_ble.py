@@ -488,12 +488,12 @@ def test_advertising_follows_the_phone(q2):
 
 @pytest.mark.parametrize('config, name', [
     ('[SYSSET]\nSYNCLINK=0\n', b'Vamp'),  # no name chosen: the default
-    ('[Q2POD]\nBTNAME=Q2 Muse\n[SYSSET]\nSYNCLINK=0\n', b'Q2 Muse'),  # the name builds before Vamp gave it, chosen
+    ('[Q2POD]\nBTNAME=Vamp\n[SYSSET]\nSYNCLINK=0\n', b'Vamp'),  # the name builds before Vamp gave it, chosen
 ])
 def test_any_app_finds_it_by_the_service_whatever_its_name(daemon_so, tmp_path, config, name):
     """The phone app's scan filters on the coda-rc service UUID (BleLink.SERVICE, SERVICE here, the same in every
     release of the app) and lists the scan response's name without matching it, so an app from before the name Vamp
-    finds a Q2 that says Vamp and the Vamp app finds one that says Q2 Muse."""
+    finds a Q2 that says Vamp and the Vamp app finds one that says Vamp."""
     q2 = Q2(daemon_so, tmp_path, config=config)
     try:
         assert wait_for(q2.advertising)

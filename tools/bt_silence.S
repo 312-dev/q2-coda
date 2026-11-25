@@ -13,8 +13,8 @@
  * ponytail: one quiet/silent for every encoder thread, fine for one headset at a time; a second
  * stream, or a stream torn down mid-silence, shares or inherits up to BUDGET of silence.
  *
- * Also SBC's bitpool, lowered while the radio cannot keep up (sbc_bp below,
- * docs/internals.md#bluetooth-link-monitor), and the A2DP write MTU, cut so each media packet fits one
+ * Also SBC's bitpool and AAC's peak, lowered while the radio cannot keep up (sbc_bp, aac_info and aac_rate
+ * below, docs/internals.md#bluetooth-link-monitor), and the A2DP write MTU, cut so each media packet fits one
  * 2-DH5 (mtu_clamp below).
  */
 .set noreorder
@@ -148,3 +148,82 @@ sbc_pool: .byte 0
 sbc_own:  .byte 0
 sbc_now:  .byte 0
           .byte 0
+/* AAC's peak (tools/build.py BT_AAC_RATE, patch/q2bt.h), in kbit/s: the one asked for (q2guard writes it, 0 the
+ * stream's own), the stream's own (its configured bitrate, at most 255), the one in use (0 its own) and the
+ * stream's fdk-aac bitrate mode (1 to 5 VBR, 0 CBR). The last three are written by aac_info and aac_rate. */
+.globl aac_ask
+aac_ask:  .byte 0
+aac_own:  .byte 0
+aac_now:  .byte 0
+aac_mode: .byte 0
+
+/* 0x417268, in place of the AAC encoder thread's jal aacEncInfo (its one call, once a stream, after the encoder is
+ * set up; its delay slot, left as stock, points a1 at the info). s1 holds the bitrate mode the thread set (0 for
+ * CBR, which sets none) and the thread's frame its configured bitrate at 0x370: both published for aac_rate and
+ * q2guard, with the stream's own in use, as the new encoder was set up. t0-t3 only. */
+.globl aac_info
+aac_info:
+    lw    $8, 0x370($sp)
+    addiu $9, $zero, 1000
+    divu  $zero, $8, $9
+    mflo  $8
+    sltiu $9, $8, 256
+    addiu $10, $zero, 255
+    movz  $8, $10, $9         /* at most 255 */
+    lui   $11, %hi(aac_ask)
+    sb    $8, %lo(aac_own)($11)
+    sb    $zero, %lo(aac_now)($11)
+    j     0x430980            /* aacEncInfo's stub, as stock called it */
+    sb    $17, %lo(aac_mode)($11)
+
+/* 0x4175a4, in place of the encoder loop's jal aacEncEncode (its delay slot, left as stock, sets a1; a0 the
+ * handle, a2, a3 and the stack's fifth argument left as they are). The peak is aac_ask's, but only below the
+ * stream's own, else its own. When that is not the one in use, it is set before the frame, the stream's
+ * AACENC_PEAK_BITRATE on VBR (which keeps every frame's LATM header as it was: only the frames shrink) and its
+ * AACENC_BITRATE on CBR, at the asked rate or, back to its own, the configured bitrate the thread set it from.
+ * fdk-aac applies a changed parameter at the start of the next aacEncEncode, without resetting its input or its
+ * delay lines (docs/internals.md#bluetooth-link-monitor, AAC peak). A failed set publishes an own of 0, after
+ * which only the stream's own is asked for (tried again each frame while another is in use). The caller's argument
+ * slots hold a0-a3 meanwhile; t0-t3, s0 (saved) and v0. */
+.globl aac_rate
+aac_rate:
+    lui   $8, %hi(aac_ask)
+    lbu   $9, %lo(aac_ask)($8)
+    lbu   $10, %lo(aac_own)($8)
+    sltu  $11, $9, $10
+    movz  $9, $zero, $11      /* not below its own: its own */
+    lbu   $10, %lo(aac_now)($8)
+    beq   $9, $10, 2f         /* as it is */
+    nop
+    sw    $4, 0($sp)
+    sw    $5, 4($sp)
+    sw    $6, 8($sp)
+    sw    $7, 12($sp)
+    addiu $sp, $sp, -32
+    sw    $31, 28($sp)
+    sw    $16, 24($sp)
+    move  $16, $9
+    lw    $6, 0x370+32($sp)   /* back to its own: the configured bitrate */
+    addiu $10, $zero, 1000
+    mul   $11, $16, $10
+    movn  $6, $11, $16        /* else the asked rate */
+    lbu   $10, %lo(aac_mode)($8)
+    addiu $5, $zero, 0x207    /* AACENC_PEAK_BITRATE */
+    addiu $11, $zero, 0x101   /* AACENC_BITRATE */
+    movz  $5, $11, $10
+    jal   0x430600            /* aacEncoder_SetParam's stub */
+    lw    $4, 32($sp)
+    bnez  $2, 1f
+    lui   $8, %hi(aac_ask)
+    b     3f
+    sb    $16, %lo(aac_now)($8)     /* in use from this frame */
+1:  sb    $zero, %lo(aac_own)($8)   /* failed: only its own from now on */
+3:  lw    $16, 24($sp)
+    lw    $31, 28($sp)
+    addiu $sp, $sp, 32
+    lw    $4, 0($sp)
+    lw    $5, 4($sp)
+    lw    $6, 8($sp)
+    lw    $7, 12($sp)
+2:  j     0x430b60            /* aacEncEncode's stub, as stock called it */
+    nop

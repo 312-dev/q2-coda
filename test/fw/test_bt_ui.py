@@ -590,8 +590,8 @@ def step_row(ui, view):
 
 
 def test_quality_opens_with_the_adapt_to_signal_switch_off_by_default(fw):
-    """Adapt to Signal (docs/internals.md#bluetooth-link-monitor): q2guard's step-down from aptX HD under Auto
-    and SBC's bitpool, off unless [Q2POD] BTSTEPDOWN says 1, so a Q2 that never saved the key (the switch's
+    """Adapt to Signal (docs/internals.md#bluetooth-link-monitor): q2guard's step-down from aptX HD under Auto,
+    SBC's bitpool and AAC's peak, off unless [Q2POD] BTSTEPDOWN says 1, so a Q2 that never saved the key (the switch's
     default was on before) is off too; one row however often the picker lays out, its caption saying what it
     does."""
     ui, _, view = quality_page(fw)

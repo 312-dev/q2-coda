@@ -531,7 +531,9 @@ bluealsa	0x4147c8	0x4	sub_4145d0	`bnez $2, -74 words` (2nd of 2 such), before th
 bluealsa	0x4150dc	0x4	sub_414f78	`bgtz $2, +10 words` (1st of 2 such), before the only call to sub_40c5e4, after "PCM poll and read error: %s"; tools/build.py BT_PCM_CALLERS
 bluealsa	0x416f58	0x4	sub_416d0c	`addiu $17, $zero, 0x4`, before 6th of 11 calls to aacEncoder_SetParam; tools/build.py BT_AAC_SITES
 bluealsa	0x4171a0	0x4	sub_416d0c	`addiu $2, $zero, 0x4`, before 10th of 11 calls to aacEncoder_SetParam, after "Couldn't set channel mode: %s"; tools/build.py BT_AAC_SITES
+bluealsa	0x417268	0x4	sub_416d0c	the only call to aacEncInfo, after "Couldn't initialize AAC encoder: %s"; tools/bt_silence.S aac_mode, tools/build.py BT_SILENCE_SITES, tools/build.py BT_AAC_RATE
 bluealsa	0x41746c	0x4	sub_416d0c	`bgtz $2, +40 words` (1st of 3 such), before 1st of 3 calls to __errno_location, after "PCM poll and read error: %s"; tools/build.py BT_PCM_CALLERS
+bluealsa	0x4175a4	0x4	sub_416d0c	2nd of 2 calls to aacEncEncode, after "Couldn't create data buffers: %s"; tools/bt_silence.S aac_info, tools/build.py BT_SILENCE_SITES, tools/build.py BT_AAC_RATE
 bluealsa	0x418114	0x4	sub_417e80	`bgtz $2, +16 words` (1st of 2 such), before 2nd of 5 calls to __errno_location, after "PCM poll and read error: %s"; tools/build.py BT_PCM_CALLERS
 bluealsa	0x418c84	0x4	sub_418988	`bgtz $2, +16 words`, before 2nd of 5 calls to __errno_location, after "PCM poll and read error: %s"; tools/build.py BT_PCM_CALLERS
 bluealsa	0x41a6ec	0x4	sub_419e68	`bgtz $2, -9 words`, before the only call to sub_40c5e4, after "Couldn't set LDAC ABR thresholds"; tools/build.py BT_PCM_CALLERS

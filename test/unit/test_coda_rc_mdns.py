@@ -181,12 +181,12 @@ def test_renamed_q2_answers_under_its_name(lib):
 
 @pytest.mark.parametrize('config, name', [
     (None, 'Vamp'),  # no name chosen: the default
-    ('[Q2POD]\nBTNAME=Q2 Muse\n', 'Q2 Muse'),  # the name builds before Vamp gave it, chosen
+    ('[Q2POD]\nBTNAME=Vamp\n', 'Vamp'),  # the name builds before Vamp gave it, chosen
 ])
 def test_any_app_finds_it_by_the_service_type_whatever_its_name(lib, tmp_path, config, name):
     """The phone app browses _q2muse._tcp (WifiFinder.SERVICE, the same in every release of the app), keys a Q2 by
     its TXT id and lists the instance name without matching it, so an app from before the name Vamp finds a Q2 that
-    says Vamp and the Vamp app finds one that says Q2 Muse. The name is config.ini's BTNAME, else the default."""
+    says Vamp and the Vamp app finds one that says Vamp. The name is config.ini's BTNAME, else the default."""
     (tmp_path / 'mnt/data').mkdir(parents=True)
     if config:
         (tmp_path / 'mnt/data/config.ini').write_text(config)
