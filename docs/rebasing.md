@@ -1,6 +1,6 @@
 # Rebasing onto a new stock firmware
 
-Q2 Muse patches Shanling's `demo` and `bluealsa` at fixed addresses, each with the stock word it expects. Stock's `hciplayer` is not shipped (Q2 Muse's own `q2player` replaces it), so a new release's player needs nothing carried; its socket protocol is what `q2player` must still answer ([player.md](player.md)). A new stock release moves nearly all of them. `tools/rebase.py` carries what it can prove; this is the routine for the rest.
+Vamp patches Shanling's `demo` and `bluealsa` at fixed addresses, each with the stock word it expects. Stock's `hciplayer` is not shipped (Vamp's own `q2player` replaces it), so a new release's player needs nothing carried; its socket protocol is what `q2player` must still answer ([player.md](player.md)). A new stock release moves nearly all of them. `tools/rebase.py` carries what it can prove; this is the routine for the rest.
 
 The stock ZIPs are untrusted input and Shanling's copyright. Run everything that reads them with `python3 -I`, extract outside the repo, and commit nothing of theirs but addresses, instruction words and hashes. Decompiler output stays outside the repo too. `apply` writes a ZIP's version and `update.tar` folder name into our files as they are, so `rebase.py` refuses a ZIP whose version is not `V` and dotted numbers (as `V1.36` is) or whose folder is not plainly named.
 
@@ -27,7 +27,7 @@ Two tracked tables go with it, both carried by `apply`:
 3. Build. Each failing check names a site. Find it by its row in `tools/stock_sites.tsv` and `refs` on the string or callee the row names, then disassemble the old and new function side by side. Put the reason for any change beside the literal.
 4. Read every site that sits in a function Shanling changed against the new code, passing check or not. A word can match while its meaning moved: a row index, a table's length, a register that now holds something else, a count of children.
 5. Run the sweeps below for what the tool cannot see.
-6. Decide each new stock option by the rule in use: shown where our Settings order puts it, unless it conflicts with a Q2 Muse system; then held in RAM at the value that behaves as before, its row not offered, its key never written.
+6. Decide each new stock option by the rule in use: shown where our Settings order puts it, unless it conflicts with a Vamp system; then held in RAM at the value that behaves as before, its row not offered, its key never written.
 7. Check which of our patches stock made unnecessary. A fix of ours inside a function Shanling changed may now be stock's own: read the new function, and where it does the job, drop the hook with its test and its docs in a commit of its own.
 8. Run every suite in [building.md](building.md#tests). The fixtures stand in for stock, so a stock list that gained a row needs its fixture to gain one too.
 9. `check` must report nothing. Add the new functions that hold our sites to the stock map, then run `sitenotes.py` so the notes describe the new build, and `sitenotes.py --check` to confirm it.
@@ -50,7 +50,7 @@ Each of these left a wrong value in place on the V1.34 or the V1.36 rebase, and 
 - **An address written with eight digits** (`0x005b7e80`) reads as an instruction word and is never carried. Write addresses unpadded.
 - **A low half inside a replacement word.** A word we write that loads through a stock data address (`lw $2, 0x1e68($2)`) carries that address's low half, which moves. `docs/rebasing/memsweep.py` lists such words; derive them from the stock word at build time where possible.
 - **Position-dependent words we write**: branches, `bal`, `j` and `addiu` off a non-stack base. `docs/rebasing/wordsweep.py`.
-- **GOT loads left as they were** whose slot now names something else. `docs/rebasing/gpsweep.py`. The three loads Q2 Muse writes (of `tk_strncpy`, `navigator_close` and `dummy_destroy`) are checked by the build since V1.36, where two of them had come to name other functions' slots.
+- **GOT loads left as they were** whose slot now names something else. `docs/rebasing/gpsweep.py`. The three loads Vamp writes (of `tk_strncpy`, `navigator_close` and `dummy_destroy`) are checked by the build since V1.36, where two of them had come to name other functions' slots.
 - **A string's low half inside a replacement word** (`addiu $a0, $s1, 0x6404`): every string moved in V1.36, and `wordsweep.py` passes over an `addiu` on one register. Make such a word from the string's address (`0x26240000 | 0x786994 & 0xffff`), which `apply` carries as data the code names.
 - **A return address or a site with nothing beside it** (`#define VIEW_QUEUE_RET 0x53acf8`) is a bare literal, listed by `report` and never rewritten. Name its function in the line's comment and it is carried.
 - **A file offset** (`0x3852bd`, a byte of `demo` the build patches by position) is no address. `test/build.py` finds it.
@@ -90,14 +90,14 @@ analyzeHeadless PROJ demo -process demo -noanalysis -scriptPath docs/rebasing -p
 - Static functions change order between builds: align by callers and by address-forming code, never by position.
 - The `$gp` set-up is not an address, and GOT pages are not function starts.
 - Stock regroups its settings lists. A hook that counts stock's rows fails safe (it leaves the page as built) only if the count is checked first.
-- A new stock option can duplicate a Q2 Muse system outright: V1.34 read a headset's keys on a thread of its own, and each press would have acted twice.
+- A new stock option can duplicate a Vamp system outright: V1.34 read a headset's keys on a thread of its own, and each press would have acted twice.
 - `mutmut` ties a test to a function only when the function runs in that test, set-up included. Cached results in `mutants/` survive a test change: delete the folder for a fresh score.
 
 ## What V1.34 to V1.36 taught
 
 - A small release still moved everything in `demo`: every string by `0x590` to `0x610`, `.data` and `.bss` by `0x610`, the imports' GOT slots by three, the local ones unevenly. `hciplayer`, `bluealsa`, the libraries and the modules the experimental flags patch were byte for byte the same, so nothing of theirs was touched.
-- Stock can drop what a patch stood on. V1.36 has no 20,000-song limit to raise, so the patch that raised it went, and Q2 Muse's own limit with it; and it took the navigation bar's resize off one page, so that entry left `navbar_resize_calls`.
-- Stock can rework a subsystem Q2 Muse reshapes. V1.36 gave most rows' labels AWTK's seamless loop through one helper; one dropped call there keeps every label's pass as Q2 Muse's hooks expect it. Decide such a change as a new stock option is decided: taken, or held at what behaved as before.
+- Stock can drop what a patch stood on. V1.36 has no 20,000-song limit to raise, so the patch that raised it went, and Vamp's own limit with it; and it took the navigation bar's resize off one page, so that entry left `navbar_resize_calls`.
+- Stock can rework a subsystem Vamp reshapes. V1.36 gave most rows' labels AWTK's seamless loop through one helper; one dropped call there keeps every label's pass as Vamp's hooks expect it. Decide such a change as a new stock option is decided: taken, or held at what behaved as before.
 - An arithmetic in a test (a GOT page less a low half, `GP` less an import's offset) is not carried. Write the address whole and `apply` carries it.
 
 ## Writing hooks that survive

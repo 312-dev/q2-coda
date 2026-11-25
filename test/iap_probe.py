@@ -367,7 +367,7 @@ def test_iap2_through_identification(probe, tmp_path):
         got = [car.msg() for _ in range(6)]
         assert [g[0] for g in got] == [0x1D02, 0x4E0C, 0x4E0A, 0x4E09, 0x0B00, 0x0B03]
         assert got[1][1][0] == b'abababab-abab-abab-abab-abababababab\0', 'the UUID from --uuid'
-        assert got[3][1][0] == b'Q2 Muse\0' and got[4][1][0] == b'\x00\x05' and 2 in got[5][1]
+        assert got[3][1][0] == b'Vamp\0' and got[4][1][0] == b'\x00\x05' and 2 in got[5][1]
         assert time.time() - t0 < 2
         car.send(message(0xAE00, prm(0), prm(4), prm(5)))
         power = [car.msg() for _ in range(3)]

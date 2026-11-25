@@ -1097,7 +1097,7 @@ STEPPED_VOID(lib_play, "the shim's play list", (const unsigned *rids, unsigned n
 STEPPED(int, lib_queue, "the shim's queue file", (unsigned *rids, unsigned cap), (rids, cap))
 
 static const struct iap2_host io = { io_send,           boot_ms,           io_log,        io_now_playing_stepped,
-                                     "Q2 Muse",         uuid,              library_id,    io_audio_stepped,
+                                     "Vamp",            uuid,              library_id,    io_audio_stepped,
                                      io_command_stepped, io_artwork,    io_art_pending_stepped, &lib_t,  lib_load_stepped,
                                      lib_ready_stepped, lib_saved_stepped, lib_play_stepped,  lib_queue_stepped,
                                      io_backlog,        io_link_lost,      io_rate };

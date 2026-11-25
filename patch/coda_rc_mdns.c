@@ -1,9 +1,9 @@
 /* coda-rc's mDNS responder (docs/remote-protocol.md#discovery): while Car Remote is on and Wi-Fi is joined, the
- * Q2 answers multicast DNS (RFC 6762, IPv4, UDP 5353) for one DNS-SD service (RFC 6763), so Q2 Muse Remote's
- * Pair a Q2 Muse lists it without an address typed:
+ * Q2 answers multicast DNS (RFC 6762, IPv4, UDP 5353) for one DNS-SD service (RFC 6763), so the Vamp app's
+ * Pair a Vamp lists it without an address typed:
  *
  *   _q2muse._tcp.local                 PTR  <name>._q2muse._tcp.local      <name>: the Bluetooth name
- *   <name>._q2muse._tcp.local          SRV  0 0 7720 q2muse-<6 hex>.local  (config.ini BTNAME, else Q2 Muse)
+ *   <name>._q2muse._tcp.local          SRV  0 0 7720 q2muse-<6 hex>.local  (config.ini BTNAME, else Vamp)
  *   <name>._q2muse._tcp.local          TXT  id=<device id, 16 hex> v=1
  *   q2muse-<6 hex>.local               A    wlan0's address
  *   _services._dns-sd._udp.local       PTR  _q2muse._tcp.local             (service type enumeration)
@@ -234,7 +234,7 @@ size_t mdns_reply(const mdns_self *me, unsigned answers, uint32_t ttl, uint8_t *
 /* ---- the daemon's half ---- */
 
 #define CONFIG "/mnt/data/config.ini"
-#define NAME_DEFAULT "Q2 Muse"
+#define NAME_DEFAULT "Vamp"
 #define NAME_MAX 30 /* bt_name.c BT_NAME_MAX */
 
 static struct {

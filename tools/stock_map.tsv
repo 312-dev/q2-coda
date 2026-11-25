@@ -1,4 +1,4 @@
-# Our names for the stock functions Q2 Muse touches that Shanling leaves unnamed, at stock V1.36's addresses. docs/rebasing.md
+# Our names for the stock functions Vamp touches that Shanling leaves unnamed, at stock V1.36's addresses. docs/rebasing.md
 binary	address	size	name	what
 demo	0x484514	0x180	tidal_favourite_request	Tidal's favourites added and removed (addFavouriteTrack, removeFavourite*): a curl request with stock's TLS checks off, which tools/build.py STOCK_TLS_CALLS turns on
 demo	0x4847c8	0x17c	tidal_playlist_track_request	A Tidal playlist's tracks added and removed (addTrackToPlaylist, removeTrackFromPlaylist): a curl request with stock's TLS checks off, which tools/build.py STOCK_TLS_CALLS turns on

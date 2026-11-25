@@ -106,7 +106,7 @@ class Q2:
         self.run.mkdir()
         (work / 'mmc').mkdir()
         self.p = subprocess.Popen([*exe, '--run', str(self.run), '--data', str(self.data), '--recv', str(self.recv),
-                                   '--port', str(Q2PORT), '--alias', 'Q2 Muse'])
+                                   '--port', str(Q2PORT), '--alias', 'Vamp'])
 
     def f(self, name):
         return self.run / f'q2send.{name}'
@@ -178,7 +178,7 @@ def main():
         check('q2send lists the CLI', bool(peer), str(peer))
         clifp = peer[0][0] if peer else ''
         cli.pump(1)
-        check('the CLI lists q2send', b'Q2 Muse' in cli.out)
+        check('the CLI lists q2send', b'Vamp' in cli.out)
 
         # the CLI sends (it was started with -f: its device list is open; Enter sends to the first)
         cli.key('\r')

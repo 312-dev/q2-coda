@@ -32,7 +32,7 @@ def read(fw, text):
 
 
 def test_the_state_file_is_read_as_the_daemon_writes_it(fw):
-    ok, s, _, _ = read(fw, f'me\t{"B" * 64}\tQ2 Muse\t53317\n'
+    ok, s, _, _ = read(fw, f'me\t{"B" * 64}\tVamp\t53317\n'
                            f'peer\t{FP}\t192.168.1.20\t53317\tdesktop\tMacBook Air\tmacOS\n'
                            f'peer\t{"C" * 64}\t192.168.1.21\t53317\tmobile\tPixel 10 Pro\tAndroid\n'
                            'recv\trun\t5\t12\t21076377\t50541363\tPixel 10 Pro\t01 Speak to Me.flac\t1\n'

@@ -12,7 +12,7 @@ files in place of ALSA.
 - formats: each output is opened in the width stock opens for the same file.
 - status push: a datagram to demo's push socket for each change of what the status queries answer, none while
   paused (docs/internals.md#player-status-push).
-- protocol: for each transcript in fixtures/ (stock's and Q2 Muse's hciplayer under qemu, captured by
+- protocol: for each transcript in fixtures/ (stock's and Vamp's hciplayer under qemu, captured by
   fakedemo.py), the same commands get the same events and answers from q2player.
 
 The tests and the fixtures run side by side, WIDTH at once, each in a process and a folder of its own (AFTER's
@@ -2704,7 +2704,7 @@ def test_http_whole(player, songs, tmp):
 
 def test_http_seek(player, songs, tmp):
     """A seek to 15 s of a FLAC over HTTP, inside the cache: the rest is the reference from frame 15 x 44100, to the
-    end, and the song ends with exit (stock and Q2 Muse end it at the seek, as they end a file's: a deviation)."""
+    end, and the song ends with exit (stock and Vamp end it at the seek, as they end a file's: a deviation)."""
     s, pcm, names = play(player, songs, 'http', tmp/'http')
     got, ref = b''.join(pcm), reference(songs/'a1.flac')
     tail = ref[15 * 44100 * 4:]
@@ -2768,7 +2768,7 @@ def test_http_missing(player, songs, tmp):
 
 def test_https_checks(player, songs, tmp):
     """HTTPS against the CA bundle: a certificate the bundle's CA signed for localhost plays; one it signed for another
-    name and a self-signed one are refused (error, nothing played). Stock plays all three, Q2 Muse's player the first
+    name and a self-signed one are refused (error, nothing played). Stock plays all three, Vamp's player the first
     two (it checks the chain, not the name): a deviation."""
     s, pcm, names = play(player, songs, 'https-good', tmp/'https-good')
     got, ref = b''.join(pcm), reference(songs/'a1.flac')
@@ -2948,7 +2948,7 @@ def skeleton(lines, levels=True):
     meter's answers are compared with levels, but for a song whose peak moves within the meter's few ms (the
     controls scenario's tone under a sweep beats), where which block it measured decides; the spectrum's twelve
     zeros are q2player's, a deviation. get_cache_buffer's answers are left out: MPlayer's figure depends on when its
-    cache thread last ran (stock and Q2 Muse's answer 9 and 0 to the same stream), demo only asks whether it is above 0
+    cache thread last ran (stock and Vamp's answer 9 and 0 to the same stream), demo only asks whether it is above 0
     (playerqueue_page_init 0x53d1d4), and test_cache_first_fill checks them."""
     out = []
     for t, d, name, arg in lines:
@@ -2972,36 +2972,36 @@ def answers(lines):
 
 # Where q2player differs from the fixture on purpose; docs/player-plan.md#deviations has each one's reason.
 KNOWN = {
-    'stock-transport': 'stock ends this FLAC half a second after a seek to 15 s of its 20; Q2 Muse fixes it and so does q2player',
+    'stock-transport': 'stock ends this FLAC half a second after a seek to 15 s of its 20; Vamp fixes it and so does q2player',
     'stock-gapless-flac': 'the same: after the seek to 12 s stock ends the song at 15 s and is into the next by 6 s',
     'stock-start': 'the same fault after a start at 7 s: stock ends the song at 11 s',
     'stock-seek': 'the same after a seek to 9 s: stock ends the song at 13 s',
     'stock-cancel': 'the same after the seek to 12 s, before the preload is cancelled',
     'stock-emptynext': 'the same after the seek to 14 s, before the preload is sent',
-    'stock-badnext': 'stock stops the song when its preload is not audio; Q2 Muse plays it to its end, and so does q2player',
+    'stock-badnext': 'stock stops the song when its preload is not audio; Vamp plays it to its end, and so does q2player',
     'stock-formats-all': 'compared per file by test_media_info_per_format, with its deviations',
     'pod-formats-all': 'compared per file by test_media_info_per_format, with its deviations',
     'stock-dsd-2-2': 'Native DSD on a USB DAC: stock asks ALSA for format 31, SND_PCM_FORMAT_SPECIAL, which is refused, and plays '
                      'nothing; q2player sends DSD_U32_BE (test_native_usb)',
-    'pod-dsd-2-2': 'the same in Q2 Muse\'s hciplayer',
+    'pod-dsd-2-2': 'the same in Vamp\'s hciplayer',
     # streams (phase 5)
     'stock-http-slow': 'a WAV from a server slower than it plays: stock starts 10 s on, after its demuxer has looked at the '
                        'file\'s end over two more connections; q2player starts once the first fill is in (test_cache_first_fill)',
-    'pod-http-slow': 'the same in Q2 Muse\'s hciplayer',
-    'stock-http-big': 'the same at 4096 KB: stock starts 9 s on', 'pod-http-big': 'the same in Q2 Muse\'s hciplayer',
+    'pod-http-slow': 'the same in Vamp\'s hciplayer',
+    'stock-http-big': 'the same at 4096 KB: stock starts 9 s on', 'pod-http-big': 'the same in Vamp\'s hciplayer',
     'stock-http-stall': 'the same: stock starts after the server\'s 8 s stall, q2player before it and waits in it (test_http_stall)',
-    'pod-http-stall': 'the same in Q2 Muse\'s hciplayer',
-    'stock-http-gapless': 'stock ends a FLAC stream half a second after a seek near its end, as it ends a file; Q2 Muse\'s fix '
+    'pod-http-stall': 'the same in Vamp\'s hciplayer',
+    'stock-http-gapless': 'stock ends a FLAC stream half a second after a seek near its end, as it ends a file; Vamp\'s fix '
                           'is for files alone, so its player does too; q2player plays on (test_http_seek)',
-    'pod-http-gapless': 'the same in Q2 Muse\'s hciplayer',
-    'stock-http-norange': 'the same after a seek to 12 s of a server without ranges', 'pod-http-norange': 'the same in Q2 Muse\'s hciplayer',
+    'pod-http-gapless': 'the same in Vamp\'s hciplayer',
+    'stock-http-norange': 'the same after a seek to 12 s of a server without ranges', 'pod-http-norange': 'the same in Vamp\'s hciplayer',
     'stock-https-wrong': 'stock checks no certificate and plays; q2player refuses a certificate for another name (test_https_checks)',
-    'pod-https-wrong': 'Q2 Muse\'s hciplayer checks the chain, not the name, and plays; q2player refuses it',
-    'stock-https-self': 'stock plays a self-signed certificate; q2player refuses it, as Q2 Muse\'s does',
+    'pod-https-wrong': 'Vamp\'s hciplayer checks the chain, not the name, and plays; q2player refuses it',
+    'stock-https-self': 'stock plays a self-signed certificate; q2player refuses it, as Vamp\'s does',
 }
 
 
-# Where q2player's media-info differs from Q2 Muse's hciplayer's for a file of formats-all: docs/player-plan.md#deviations.
+# Where q2player's media-info differs from Vamp's hciplayer's for a file of formats-all: docs/player-plan.md#deviations.
 MEDIA_INFO_DEVIATIONS = {
     'k24.wv': 'BITS is the file\'s 24, where stock says 32',
     'z.dts': 'it plays; stock refuses this file (FFmpeg\'s own DTS encoder\'s) with an error',
@@ -3049,7 +3049,7 @@ def test_media_info_held(player, songs, tmp):
 
 
 def test_media_info_per_format(player, songs, tmp):
-    """formats-all: for each file, the media-info Q2 Muse's hciplayer gave (fixtures/pod-formats-all.txt): RATE, LENGTH,
+    """formats-all: for each file, the media-info Vamp's hciplayer gave (fixtures/pod-formats-all.txt): RATE, LENGTH,
     CODEC and BITS the same and BITRATE within 2%, but for MEDIA_INFO_DEVIATIONS."""
     def per_file(lines):
         out = {}
@@ -3068,7 +3068,7 @@ def test_media_info_per_format(player, songs, tmp):
     for f in fakedemo.ALL_FORMATS:
         w, g = want.get(f), got.get(f)
         same = w and g and w[1:3] + w[4:] == g[1:3] + g[4:] and abs(int(w[0]) - int(g[0])) <= max(2000, int(w[0]) // 50)
-        if bool(same) == (f in MEDIA_INFO_DEVIATIONS): bad.append(f'{f}: q2player {g}, Q2 Muse {w}')
+        if bool(same) == (f in MEDIA_INFO_DEVIATIONS): bad.append(f'{f}: q2player {g}, Vamp {w}')
     assert not bad, '\n  ' + '\n  '.join(bad)
     return f'{len(fakedemo.ALL_FORMATS)} files, {len(MEDIA_INFO_DEVIATIONS)} deviations as listed'
 

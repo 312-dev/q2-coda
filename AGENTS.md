@@ -1,10 +1,10 @@
-# Q2 Muse: index for agents
+# Vamp: index for agents
 
 `CLAUDE.md` is a symlink to this file. It is an index: follow the links, don't expect the detail here.
 
 ## What this is
 
-Q2 Muse is GPL-3.0 custom firmware for the Shanling Q2 music player, made by patching Shanling's stock V1.36 firmware, never by rebuilding it. `tools/build.py` takes the stock ZIP, checks its hash, and changes two stock programs in place, `demo` (the AWTK UI) and `bluealsa`, and replaces the player, `hciplayer`, with Q2 Muse's own `q2player` (`player/`). Checked MIPS prologues at stock addresses (`HOOKS` in `tools/build.py`) jump into a payload compiled from `patch/*.c` and mapped at `0xb00000` in `demo`; single instruction words are swapped where a hook is too much; and stock's UI assets (pages, styles, strings, icons) are rewritten at build time by `tools/ipod.py`, `tools/theme.py` and `tools/art.py`. The output is an `update.tar` the stock updater installs. Shanling's files are never in the repository.
+Vamp is GPL-3.0 custom firmware for the Shanling Q2 music player, made by patching Shanling's stock V1.36 firmware, never by rebuilding it. `tools/build.py` takes the stock ZIP, checks its hash, and changes two stock programs in place, `demo` (the AWTK UI) and `bluealsa`, and replaces the player, `hciplayer`, with Vamp's own `q2player` (`player/`). Checked MIPS prologues at stock addresses (`HOOKS` in `tools/build.py`) jump into a payload compiled from `patch/*.c` and mapped at `0xb00000` in `demo`; single instruction words are swapped where a hook is too much; and stock's UI assets (pages, styles, strings, icons) are rewritten at build time by `tools/ipod.py`, `tools/theme.py` and `tools/art.py`. The output is an `update.tar` the stock updater installs. Shanling's files are never in the repository.
 
 Read [docs/architecture.md](docs/architecture.md) first (20 minutes: the payload's layout and limits, how C calls stock, hooks, where to start per kind of change), then [docs/source-map.md](docs/source-map.md) (every file, one line each).
 

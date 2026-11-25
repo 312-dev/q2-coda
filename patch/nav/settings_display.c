@@ -291,7 +291,7 @@ static void setting_row(void *view, int i) {
 /* systemset_display_page_init: stock builds its four rows (0x4c6b94: a s_listitem_black list_item
  * holding a 335x70 s_btn_listitem button with a 52px icon, a 24px label at x 72 and list_into).
  * Its fourth, Show Navigation Bar, goes: the themes own the bar and each list's box, so stock's
- * switch is held on (tools/build.py NAV_SHOWN). Its third, Lock Screen, goes too: Q2 Muse has no
+ * switch is held on (tools/build.py NAV_SHOWN). Its third, Lock Screen, goes too: Vamp has no
  * lock screen (docs/internals.md#screen-off-and-wake). Its first, Brightness, is hidden for an
  * inline slider row in its place (inline_slider.c). Smart Awake and Night Shift (the brightness
  * icon, opening its slider page, crossfade.c) follow Brightness and Screen Off Time, then
@@ -382,7 +382,7 @@ void home_sets_bind(void *win) {
 #define BOOT_TARGET "/mnt/data/boot-target"
 static int boot_rockbox __attribute__((section(".scratch")));
 static void boot_text(void *label) {
-    row_value_text(label, boot_rockbox ? "Boot to: Rockbox" : "Boot to: Q2 Muse");
+    row_value_text(label, boot_rockbox ? "Boot to: Rockbox" : "Boot to: Vamp");
 }
 static int boot_click(void *label, void *event) {
     if (!rockbox_available()) {
@@ -445,7 +445,7 @@ int ringnav_systemset(void *win, void *ctx) {
         static const unsigned char hidden[] = { 1, 3, 4, 5, 6, 7, 8 };
         for (unsigned i = 0; i < sizeof hidden; ++i)
             widget_set_visible(widget_get_child(view, hidden[i]), 0, 0);
-        /* Language: Q2 Muse's pages and labels are English only, so stock's other languages read
+        /* Language: Vamp's pages and labels are English only, so stock's other languages read
          * half-blank; hidden until they are translated (docs/internals.md, English). */
         widget_set_visible(widget_get_child(view, 0), 0, 0);
         void *nav = widget_lookup(win, "view_navbar", 1),

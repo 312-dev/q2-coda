@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """q2-iroh's allow-list end to end on this machine (docs/remote-protocol.md#across-networks-only-paired-phones): a host
 build of coda-rc (patch/coda_rc*.c), a host q2-iroh serve beside it as demo's shim starts it (--forward-named,
---allow-file, --open-while), and q2-iroh dial as the phone, with a kept key as Q2 Muse Remote keeps one, through
+--allow-file, --open-while), and q2-iroh dial as the phone, with a kept key as the Vamp app keeps one, through
 n0's public relay, driven by tools/coda_rc_client.py.
 
 usage: coda_rc_iroh_e2e.py [--iroh BIN]

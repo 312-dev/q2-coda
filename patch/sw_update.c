@@ -73,7 +73,7 @@ enum { QUIT_NOFILE = 9, QUIT_LATEST = 13, QUIT_BAD = 18 };
 #define SW_BAR_H 6
 #define SW_STATUS_PX TYPE(15) /* the status row's title, Inter Medium 15 */
 /* The product's name in the update's (sw_update_name) */
-#define SW_PRODUCT "Q2 Muse"
+#define SW_PRODUCT "Vamp"
 /* The offer (29 v3): a 60 px accent circle centred on y 92 with its 30 px glyph, the name (Inter
  * Medium 22) on y 142, the source and size (15 px Text Secondary) on 168, the installed version
  * (13 px Text Tertiary) on 188, the button centred on 225 and the line under it (15 px accent
@@ -573,7 +573,7 @@ static int sw_unpacked(int w) {
     return !whole ? 0 : got >= swu.parts ? w : (int)((unsigned)(got >> 10) * (unsigned)w / whole);
 }
 
-/* "1.8.3" or the card's "Q2 Muse 1.8.3 · V1830" as the offer's name: the product and version,
+/* "1.8.3" or the card's "Vamp 1.8.3 · V1830" as the offer's name: the product and version,
  * without the tag. */
 static void sw_offer_name(char *out, unsigned n) {
     if (swu.result == SW_OFFER_NET) {

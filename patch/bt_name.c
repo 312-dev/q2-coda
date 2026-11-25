@@ -5,7 +5,7 @@
  * time demo turns Bluetooth on (openBluetooth, through headset.c's headset_status_register) and
  * after a rename, bt_name_apply sets BlueZ's adapter Alias over D-Bus to the chosen name, or to ""
  * with none, which BlueZ takes as "use main.conf's Name", then writes the same name into the
- * controller itself: so config.ini is the one record, and Q2 Muse's first-boot defaults (a
+ * controller itself: so config.ini is the one record, and Vamp's first-boot defaults (a
  * config.ini without BTNAME) give the Q2 its default name back even where BlueZ kept an old alias
  * in /mnt/data/bluetooth. The change is live: a phone scanning sees the new name at once, and one
  * already paired shows it the next time it reads the Q2's name.
@@ -15,7 +15,7 @@
  * submitting saves, a held Return leaves it as it was. */
 #include "navigation.h"
 
-#define BT_NAME_DEFAULT "Q2 Muse"
+#define BT_NAME_DEFAULT "Vamp"
 #define BT_NAME_KEY "BTNAME"
 #define BT_NAME_MAX                                                                                \
     30 /* characters; BlueZ takes 248 bytes, the row and the strip about this many */

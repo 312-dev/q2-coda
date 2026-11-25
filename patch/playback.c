@@ -8,7 +8,7 @@
 #include "stream_path.h"
 #include "stock.h"
 #define M(a) (*(volatile int *)(a))
-/* On the card (card_store.c, docs/internals.md#where-q2-muse-writes): a queue's songs are there too.
+/* On the card (card_store.c, docs/internals.md#where-vamp-writes): a queue's songs are there too.
  * The flash files earlier releases wrote are read until the card has a copy. */
 #define QUEUE_FLASH "/mnt/data/ringnav-queue"
 #define QUEUE_FILE CARD_STORE_DIR "/ringnav-queue"
@@ -1351,8 +1351,8 @@ extern void ringnav_read_artistype(void), keylock_boot(void);
 /* config_init applies the saved mode before the Home page can restore the queue; Artists is read
  * here too, as stock reads it only when a Library list or artist page opens, and Night Shift's
  * setting, so no paint reads one (nightshift.c night_paint). A lock screen saved on (SYSSET
- * SCREENSAVER 1, from stock or an earlier Q2 Muse) is saved off, once, before config_init reads it:
- * Q2 Muse has no lock screen (docs/internals.md#screen-off-and-wake). Buttons Lock's mode is made
+ * SCREENSAVER 1, from stock or an earlier Vamp) is saved off, once, before config_init reads it:
+ * Vamp has no lock screen (docs/internals.md#screen-off-and-wake). Buttons Lock's mode is made
  * Off or On the same way (keylock.c keylock_boot). */
 int ringnav_bootmode(int mode, int notify) {
     if (config_value("SYSSET", "SCREENSAVER", 2, 0)) write_int_config(0, "SYSSET", "SCREENSAVER");

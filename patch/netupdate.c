@@ -51,7 +51,7 @@ shelf_app shelf_apps[SH_MAX];
 int shelf_n;
 #define apps shelf_apps
 
-/* Q2 Muse's own, whose folders, binaries and kept files differ from a card app's (addon.c: .<id>,
+/* Vamp's own, whose folders, binaries and kept files differ from a card app's (addon.c: .<id>,
  * .<id>/q2-<id>, nothing kept); matched by the repo's name, so a fork is the same app. */
 static const struct {
     const char *repo, *id, *dir, *keep, *bin;
@@ -166,7 +166,7 @@ int shelf_sources(const char *text, shelf_app *out, int max) {
                 snprintf(a.bin, sizeof a.bin, "%s", special[k].bin);
                 a.keep = special[k].keep;
             } else if (strlen(special[k].id) == in && !memcmp(special[k].id, id, in))
-                bad = 1; /* another repo's "spotify" is not Q2 Muse's */
+                bad = 1; /* another repo's "spotify" is not Vamp's */
         }
         if (!*a.id) {
             if (in > 15 || !only(id, in, 0)) continue;
@@ -322,7 +322,7 @@ void shelf_remove(int i) {
     char *other[SH_MAX] = { 0 };
     for (int j = 0; j < shelf_n; ++j)
         if (j != i) app_file(path, sizeof path, j, ".files"), other[j] = lines(path, &m[j]);
-    if (*apps[i].bin) { /* first: a part remove still boots Q2 Muse */
+    if (*apps[i].bin) { /* first: a part remove still boots Vamp */
         snprintf(path, sizeof path, CARD "/%s", apps[i].bin);
         unlink(path);
     }

@@ -486,6 +486,25 @@ def test_advertising_follows_the_phone(q2):
     assert wait_for(lambda: 'ble: connected' in q2.log() and 'ble: disconnected' in q2.log())
 
 
+@pytest.mark.parametrize('config, name', [
+    ('[SYSSET]\nSYNCLINK=0\n', b'Vamp'),  # no name chosen: the default
+    ('[Q2POD]\nBTNAME=Q2 Muse\n[SYSSET]\nSYNCLINK=0\n', b'Q2 Muse'),  # the name builds before Vamp gave it, chosen
+])
+def test_any_app_finds_it_by_the_service_whatever_its_name(daemon_so, tmp_path, config, name):
+    """The phone app's scan filters on the coda-rc service UUID (BleLink.SERVICE, SERVICE here, the same in every
+    release of the app) and lists the scan response's name without matching it, so an app from before the name Vamp
+    finds a Q2 that says Vamp and the Vamp app finds one that says Q2 Muse."""
+    q2 = Q2(daemon_so, tmp_path, config=config)
+    try:
+        assert wait_for(q2.advertising)
+        op, p = q2.kernel.commands[0]
+        adv_n, scan_n = p[9], p[10]
+        assert op == ADD_ADV and p[11:11 + adv_n] == bytes([17, 0x07]) + le(SERVICE)
+        assert p[11 + adv_n:11 + adv_n + scan_n] == bytes([1 + len(name), 0x09]) + name
+    finally:
+        q2.stop()
+
+
 def test_a_session_the_daemon_ends_disconnects_the_phone(q2):
     """A malformed frame (len 2) closes the session; the link goes with it and advertising comes back."""
     c = connect(q2)

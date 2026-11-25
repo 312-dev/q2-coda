@@ -9,7 +9,7 @@ side works: [internals](internals.md#localsend).
 ## What it replaces
 
 Stock's Wi-Fi File Transfer: a web page served by thttpd 2.29 on port 8888 while Settings > Network > Wi-Fi File
-Transfer was open, to which Q2 Muse had added a PIN, an idle stop and its own CGIs. None of that is in Q2 Muse:
+Transfer was open, to which Vamp had added a PIN, an idle stop and its own CGIs. None of that is in Vamp:
 stock's thttpd binary, `/etc/thttpd.conf` and `/usr/share/web` stay in the rootfs as shipped (the repack keeps every
 stock inode), but nothing starts them: `switch_wifitransport` keeps a hook that refuses to start the server, so no
 stock path can bring port 8888 back. Network's third row (`netservice_wifitrans`) is **LocalSend** and opens its

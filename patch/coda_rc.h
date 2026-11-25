@@ -1,4 +1,4 @@
-/* coda-rc, Q2 Muse's own remote-control protocol (docs/remote-protocol.md, remote/coda-rc.proto).
+/* coda-rc, Vamp's own remote-control protocol (docs/remote-protocol.md, remote/coda-rc.proto).
  * The daemon is patch/coda_rc*.c, built as /usr/bin/coda-rc by tools/build.py (CODA_RC_SOURCES); it is not
  * part of demo's payload. coda_rc_core.c is the transport-agnostic part: frames, the protobuf subset, pairing,
  * authentication and sealing. coda_rc.c owns the transports and the data, coda_rc_ble.c the BLE GATT one.
@@ -51,8 +51,8 @@ enum {
 #define CAP_RECENT 4096u    /* the library's recent node (Recently Added) */
 #define CAP_BUFFERING 8192u /* NowPlaying.buffering and its bytes */
 #define CAP_RADIO 16384u    /* StartRadio, NowPlaying.radio */
-#define CAP_NOTICE 32768u   /* NowPlaying.notice: the Q2 Muse's toast, for the car to show a moment */
-#define CAP_REMOTE 65536u   /* GetRemote: q2-iroh's endpoint id and relay, to reach the Q2 Muse from another network */
+#define CAP_NOTICE 32768u   /* NowPlaying.notice: the Vamp's toast, for the car to show a moment */
+#define CAP_REMOTE 65536u   /* GetRemote: q2-iroh's endpoint id and relay, to reach the Vamp from another network */
 #define CAP_IROH_ALLOW 131072u /* RegisterRemote: q2-iroh admits only paired phones' iroh keys */
 
 /* ---- the protobuf subset: varints (wire type 0) and length-delimited fields (wire type 2) ---- */
@@ -186,7 +186,7 @@ void crc_ble_connected(void);
 void crc_ble_bytes(const uint8_t *p, size_t n);
 void crc_ble_gone(void);
 void crc_ble_advertising(int on); /* /tmp/coda-rc.ble while the advertisement stands */
-/* config.ini's [Q2POD] BTNAME when bt_name.c's bt_name_valid would take it, else "Q2 Muse"; out holds 31 */
+/* config.ini's [Q2POD] BTNAME when bt_name.c's bt_name_valid would take it, else "Vamp"; out holds 31 */
 void crc_bt_name(char *out);
 int crc_tcp_port(void); /* the port TCP sessions are accepted on (CRC_TCP_PORT, or --port) */
 

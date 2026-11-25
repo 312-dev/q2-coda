@@ -260,9 +260,9 @@ HELPER_SOURCES = ['video', 'fmrx', 'tuner_core']
 HELPER_LIBS = ['lib/libc-2.28.so', 'lib/libpthread-2.28.so', 'usr/lib/libasound.so.2.0.0']
 # Rockbox dual boot (docs/boot.md#rockbox): S90play starts Rockbox whenever the card has it, as an
 # iPod with Rockbox does. Play/Pause held at power-on (patch/boot.c reads the key) or Rockbox's
-# exit 0x51 (Boot stock OS) starts Q2 Muse for that session only. boot-target selects the next
+# exit 0x51 (Boot stock OS) starts Vamp for that session only. boot-target selects the next
 # power-on default (missing or invalid retains Rockbox). ponytail: the card's mount is awaited (up to 3 s without a card)
-# unless Q2 Muse was asked for, as the card probe can't tell "no card" from "not yet". Rockbox runs
+# unless Vamp was asked for, as the card probe can't tell "no card" from "not yet". Rockbox runs
 # with the launcher contract in its tools/shanlingq2/README; demo starts when it exits, or when the
 # card has none. iPod's Home Rockbox row (navigation.c rockbox_open) leaves ROCKBOX_FLAG and kills
 # demo: Rockbox runs again, then demo once more. Any other end of demo ends the loop and reboots, as
@@ -365,9 +365,9 @@ ROCKBOX_FLAG = '/tmp/q2pod-rockbox'
 # again, catches a shell that took longer. ponytail: 300 ms and 2 s are guesses; a shell slower than 2 s still escapes.
 WIFI_OFF = 'killall -9 wifi_connect.sh udhcpc wpa_supplicant 2>/dev/null; ifconfig wlan0 down 2>/dev/null'
 DEFAULT_CONFIG = 'release/assets/default/raw/config.ini'  # stock's reset copies it (DEFAULT_CONFIG_OFF below)
-DEFAULTS_MARK = '/mnt/data/q2-defaults'  # written once Q2 Muse's defaults replaced the config before it (BOOT_HOOK)
+DEFAULTS_MARK = '/mnt/data/q2-defaults'  # written once Vamp's defaults replaced the config before it (BOOT_HOOK)
 BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
-        # Q2 Muse's defaults over every config.ini from before the q2-defaults mark, once, before demo reads it: a stock
+        # Vamp's defaults over every config.ini from before the q2-defaults mark, once, before demo reads it: a stock
         # Shanling config, or an earlier build's, holds stock's values (Enlarged Album Art on); later updates keep
         # the user's settings. Saved Wi-Fi, Bluetooth pairings and the library are other files (docs/internals.md#first-boot)
         d={DEFAULTS_MARK}
@@ -394,7 +394,7 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             u=1
         }}
         rm -f /mnt/data/q2-cf-trace /mnt/data/q2-stall
-        # Baidu Netdisk's sign-in, which stock sends over plain HTTP: Q2 Muse has no Baidu row to use it from
+        # Baidu Netdisk's sign-in, which stock sends over plain HTTP: Vamp has no Baidu row to use it from
         rm -f /mnt/data/baidu_token.conf
         [ -f $c ] && (
             i=0
@@ -621,7 +621,7 @@ BT_MAIN = 'etc/bluetooth/main.conf'
 BT_DISCOVERABLE = (b'\nDiscoverableTimeout = 0\n', b'\nDiscoverableTimeout = 180\n')
 # The name a phone lists the Q2 as when the user chose none: BlueZ's own Name, which bt_name.c's Alias of "" falls
 # back to (docs/internals.md#bluetooth-name); a chosen one is [Q2POD] BTNAME in config.ini.
-BT_NAME = (b'\nName = Shanling Q2\n', b'\nName = Q2 Muse\n')
+BT_NAME = (b'\nName = Shanling Q2\n', b'\nName = Vamp\n')
 # BlueZ 5.66's experimental D-Bus interfaces, off in stock's file: BatteryProviderManager1 among them, through which
 # bluealsa hands BlueZ the level a headset reports over HFP, so it shows as the device's Battery1 (patch/bt_battery.c,
 # docs/internals.md#headset-battery).
@@ -702,14 +702,14 @@ BT_MTU_MAX = 679 - 4
 # found none: demo gone. S90play runs demo and waits for it (BOOT_HOOK), so it reboots there instead, and the script
 # platform_init still starts ends at once: no process starts every few seconds for the life of the Q2.
 WATCHDOG = 'usr/bin/checkappprocess.sh'
-WATCHDOG_STUB = (b'#!/bin/sh\n# Q2 Muse: S90play reboots when demo ends (tools/build.py BOOT_HOOK); demo still starts this\n'
+WATCHDOG_STUB = (b'#!/bin/sh\n# Vamp: S90play reboots when demo ends (tools/build.py BOOT_HOOK); demo still starts this\n'
                  b'exit 0\n')
 # The config a reset copies to /mnt/data: Enlarged Album Art (10 s wait) and Standby start off (Standby until a wake is
-# shown to bring the USB link back: docs/internals.md#standby-limit). So does stock's Wheel Function: Q2 Muse runs stock in Volume Mode whatever the key holds (WHEEL_MODE), and a Q2 reset here and returned to stock gets Menu Mode, the default stock's changelog names and a missing key gives (the shipped file says 1).
+# shown to bring the USB link back: docs/internals.md#standby-limit). So does stock's Wheel Function: Vamp runs stock in Volume Mode whatever the key holds (WHEEL_MODE), and a Q2 reset here and returned to stock gets Menu Mode, the default stock's changelog names and a missing key gives (the shipped file says 1).
 # Its TIMEZONE is UTC (DEFAULT_TIMEZONE), not stock's 22, Shanghai.
 # It also names the language, English (2): stock's config_init (0x5047f8) sets g_guideflag when SYSSET LANGUAGE is
-# missing, and the first boot and every reset opened stock's language guide, where Q2 Muse's wheel and Centre are off.
-# Q2 Muse is English only (Settings has no Language row), so the guide is never shown (docs/internals.md#first-boot).
+# missing, and the first boot and every reset opened stock's language guide, where Vamp's wheel and Centre are off.
+# Vamp is English only (Settings has no Language row), so the guide is never shown (docs/internals.md#first-boot).
 # Smart Awake (IPOD KEEPLIT) starts on, as a missing key reads (theme_engine.c settings_read); stock's file has no [IPOD],
 # and ends with no newline (docs/internals.md#config-ini), so the section starts on a line of its own.
 # Bluetooth Quality starts on Auto (BTCODING 2, docs/internals.md#bluetooth-page), as stock's file has it: checked,
@@ -803,7 +803,7 @@ CARD_RMMOD_CALL = (0x502460, 0x0320f809)
 CARD_RELOAD_CALL = (0x5024c8, 0x0320f809)
 CARD_DOWN_CALLS = ((0x502138, 0x0320f809), (0x5020d8, 0x0320f809))
 # config_init reads SYSSET NAVHIDE and WHEELMODE, V1.36's Show Navigation Bar and Wheel Function, into g_navhide_flag and
-# g_wheelmode. Q2 Muse's themes own the bar and every list's box, and its wheel is built on stock's Volume Mode (1): NAVHIDE's
+# g_wheelmode. Vamp's themes own the bar and every list's box, and its wheel is built on stock's Volume Mode (1): NAVHIDE's
 # sb stores $zero (the bar shown) and WHEELMODE's movz $v0, $zero, $v1 becomes li $v0, 1, whatever the keys hold. Neither
 # key is written, and stock's two rows are not offered (navigation.c ringnav_display, ringnav_systemset).
 NAV_SHOWN = (0x504b5c, 0xa0620000, 0xa0600000)
@@ -914,7 +914,7 @@ HSCROLL_ELLIPSIS = (0x5fc074, 0x0320f809)
 # paints (docs/internals.md#song-rows-cost). The stamp only orders the cache's glyphs for eviction.
 GLYPH_STAMP = (0x6b2bb8, 0x0320f809)
 # Since V1.36 set_hscroll_label_attribute gives a label a loop_interval_distance of its own width (widget_set_prop_int,
-# its jalr): the text runs off the label and comes back in after that gap, without an end to hold. Q2 Muse's labels hold
+# its jalr): the text runs off the label and comes back in after that gap, without an end to hold. Vamp's labels hold
 # at the start and the end and snap back (ringnav_hscroll_start, ringnav_hscroll_lull), so the call goes and the
 # distance stays at its default, -1, with which hscroll_label's range, timer and paint are V1.34's.
 HSCROLL_GAP = (0x4f1f4c, 0x0320f809, 0)
@@ -925,7 +925,7 @@ HSCROLL_GAP = (0x4f1f4c, 0x0320f809, 0)
 ALBUM_LABELS = (0x4a6cb8, 0x4a6f9c, 0x4a71e4, 0x4a742c)
 # V1.36 puts the focus back on the row that had it once the album page or Playlists has loaded its rows again, for
 # Menu Mode: widget_set_focused, which scrolls the list to that row, on a row it judges in view by stock's 78 px
-# pitch. Q2 Muse's selection is ringnav's and its rows are a theme's pitch, so neither page finds a focused row: the
+# pitch. Vamp's selection is ringnav's and its rows are a theme's pitch, so neither page finds a focused row: the
 # album page's beqz past the look is taken always, and Playlists' bnez to it never.
 FOCUS_RESTORE = ((0x4a8ee4, 0x1040000c, 0x1000000c), (0x4b5948, 0x14400061, 0))
 # The page refresh's bal to the lyric row builder (0x53b67c, which ends at offset 0) becomes jal
@@ -1206,7 +1206,7 @@ def tidal_https(data):
         data = data.replace(old, new)
     return data
 # Mozilla's CA bundle as curl publishes it, whole, for stock's HTTPS (above) and the player's (tools/peq.py TLS_OPTIONS),
-# whose hosts no list of ours could cover; /etc/scrobble-ca.pem stays the few roots Q2 Muse's own code needs.
+# whose hosts no list of ours could cover; /etc/scrobble-ca.pem stays the few roots Vamp's own code needs.
 STOCK_CA = 'etc/ssl/certs/ca-certificates.crt'
 STOCK_CA_SHA = '796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe'  # https://curl.se/ca/cacert-2026-10-20.pem
 # The same function's other command, no lyrics chosen: rm -rf "/mnt/mmc/.downpic/<name>" for the same system().
@@ -1507,8 +1507,8 @@ class Face:
 FACES = {
     'regular': Face('default'),
     # Inter 4.1 (OFL), Regular and Medium, with tabular figures: OLED's
-    'inter': Face('inter', 'Inter-Regular.ttf', 'Q2 Muse OLED', ('Inter-OFL.txt',), fallback='regular', fallback_pct=98, tabular='.tf'),
-    'inter-medium': Face('inter-medium', 'Inter-Medium.ttf', 'Q2 Muse OLED', ('Inter-OFL.txt',), fallback='regular', fallback_pct=98,
+    'inter': Face('inter', 'Inter-Regular.ttf', 'Vamp OLED', ('Inter-OFL.txt',), fallback='regular', fallback_pct=98, tabular='.tf'),
+    'inter-medium': Face('inter-medium', 'Inter-Medium.ttf', 'Vamp OLED', ('Inter-OFL.txt',), fallback='regular', fallback_pct=98,
                          tabular='.tf'),
 }
 # OFL 2 asks each copy to hold its licence, and the subsets' name tables don't: these ship beside the fonts
@@ -2344,7 +2344,7 @@ STOCK_EQ = ['release/assets/default/raw/ui/playset/preseteq_page.bin'] + [
     ['eq_bg', 'eq_off', 'eq_sidebg', 'eqbox'] + [f'eq_{p}{s}' for p in
     ('blues', 'classical', 'custon', 'dance', 'jazz', 'metal', 'pop', 'rock', 'scene') for s in ('', '_select')]]
 # Stock V1.36's Album Wall, spectrum and VU pages, and the images only they and the buttons that open them show.
-# Q2 Muse offers none: tools/ipod.py takes their Home card and their two Now Playing buttons out of the assets, and
+# Vamp offers none: tools/ipod.py takes their Home card and their two Now Playing buttons out of the assets, and
 # only those widgets' click handlers name the pages (on_home_coverflow_onclick, and Now Playing's two in
 # tools/stock_map.tsv, playing_page_vu_on_click and playing_page_spectrum_on_click), so nothing can load them.
 STOCK_PAGES = [f'release/assets/default/raw/ui/{n}_page.bin' for n in ('coverflow', 'spectrum', 'vu')] + [
@@ -2640,7 +2640,7 @@ def patch_bluealsa(raw):
 HTRANSLATE_VT = 0x93b234
 HTRANSLATE_SLOTS = ((0x696bd0, 'parallax_update'), (0x696d90, 'parallax_prev'), (0x696c40, 'parallax_curr'))
 
-PRODUCT_NAME = 'Q2 Muse'  # the product's name on screen (About); one place to rename it
+PRODUCT_NAME = 'Vamp'  # the product's name on screen (About); one place to rename it
 STOCK_VERSION = 'V1.36'
 
 def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
@@ -2970,7 +2970,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         patch_word(patched, *call, jal(ps['ringnav_table_scroll']), 'a fling stops at a table\'s list end')
     for word in FOLDER_NAME:
         patch_word(patched, *word, 'folder names are literal text')
-    # The GOT loads Q2 Muse writes (FOLDER_NAME's, and tools/ipod.py's two): no stock word beside one names its slot, and
+    # The GOT loads Vamp writes (FOLDER_NAME's, and tools/ipod.py's two): no stock word beside one names its slot, and
     # V1.36 moved two of the three to other functions' slots. Each slot holds its function, or the build stops.
     for load, name in ((FOLDER_NAME[1][2], 'tk_strncpy'), (CLOSE_LOAD, 'navigator_close'), (DUMMY_LOAD, 'dummy_destroy')):
         check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, GP + ((load & 0xffff) ^ 0x8000) - 0x8000))[0] == syms[name],

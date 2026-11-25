@@ -267,7 +267,7 @@ static int bt_vol_q2(unsigned level) {
 }
 
 /* Settings > General's Rockbox row (docs/boot.md#rockbox-from-home, settings_display.c
- * ringnav_systemset): a click leaves Q2 Muse for Rockbox. demo cannot start it itself: Rockbox
+ * ringnav_systemset): a click leaves Vamp for Rockbox. demo cannot start it itself: Rockbox
  * needs the screen, the keys and ALSA. So demo leaves S90play's flag and ends; S90play sees it, runs Rockbox and starts demo again when
  * Rockbox exits. Bluetooth's daemons are not demo's children and keep the headphones connected, so
  * Rockbox finds them and plays there (q2-rockbox's pcm-alsa). The queue is saved as power-off

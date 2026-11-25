@@ -118,7 +118,7 @@ def test_a_sound_file_is_left_alone(fw):
     assert q.renames == 0 and q.data == good.replace(b'x\n', b'x\nMONO=1\n')
 
 
-# Settled writes (docs/internals.md#where-q2-muse-writes): a key the wheel steps is written once it settles.
+# Settled writes (docs/internals.md#where-vamp-writes): a key the wheel steps is written once it settles.
 class Settle:
     def __init__(self, fw, way=0):
         self.fw, self.ms, self.saved = fw, 1000, []

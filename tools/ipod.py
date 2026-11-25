@@ -544,7 +544,7 @@ def np_slider(slider, x, cy, w, h):
 
 
 def np_buttons(named):
-    """Stock V1.36's Now Playing buttons without the two it added, for its spectrum and VU pages, which Q2 Muse doesn't
+    """Stock V1.36's Now Playing buttons without the two it added, for its spectrum and VU pages, which Vamp doesn't
     offer: playing_page_init's visitor (0x53c5dc) binds them by name, img_spectrum and img_vu, so with neither in the
     page nothing opens those. Stock places Return and More by layout since; here their boxes are set."""
     buttons = named['view_buttons']

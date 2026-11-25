@@ -357,7 +357,7 @@ int peq_export_file(const char *path, const peq_preset *p, int replace) {
 
 /* The 3EQ's fixed filters at gain dB each: a 155 Hz low shelf, a peak at 900 Hz to cut or 1750 Hz to
  * boost (Listener's reading of Apple's AirPods EQ; Q 0.707 and the frequencies within its ranges are
- * Q2 Muse's choices), a 5 kHz high shelf. A zero gain is an identity band. */
+ * Vamp's choices), a 5 kHz high shelf. A zero gain is an identity band. */
 void eq3_bands(peq_preset *p, const double gain[3]) {
     static const int types[3] = {1, 0, 2};
     static const double frequencies[3] = {155, 1750, 5000};

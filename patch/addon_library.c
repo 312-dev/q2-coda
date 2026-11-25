@@ -167,7 +167,7 @@ static const char *library_missing(char *why, unsigned size) {
  * Configuration, a card app's page and its QR code, Now Playing, and System and Playback settings'
  * own pages. Any other waits, a dialog's (this poll runs inside its own loop, a toast's too: no
  * request starts there), a Library page's (the import reloads p_deque_playlist and
- * p_deque_showlist under it; Q2 Muse's own keep records read from the database the scan rebuilds),
+ * p_deque_showlist under it; Vamp's own keep records read from the database the scan rebuilds),
  * the user's own Update Local Music, and a page this list doesn't know. */
 static int library_safe(void) {
     static const char *const safe[] = {

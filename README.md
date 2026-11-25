@@ -1,10 +1,10 @@
-> **Q2 Muse** (q2-coda) is a fork of DiamondBond's [Q2 Pod](https://github.com/DiamondBond/q2-pod) (GPL-3.0), maintained by
+> **Vamp** (q2-coda) is a fork of DiamondBond's [Q2 Pod](https://github.com/DiamondBond/q2-pod) (GPL-3.0), maintained by
 > 312.dev LLC. It follows upstream and replaces its themes with one, OLED ([design standard](docs/oled-design.md)),
 > developer documentation ([architecture](docs/architecture.md), [source map](docs/source-map.md)) and a local
 > [security scan](docs/building.md#security-scan). The rest of this README is upstream's, and its download links
 > point at upstream's releases. Not affiliated with Shanling or Apple.
 
-<h1 align="center">Q2 Muse</h1>
+<h1 align="center">Vamp</h1>
 
 <p align="center">
   <a href="https://github.com/DiamondBond/q2-pod/releases/latest"><img alt="Download the latest release" src="https://img.shields.io/badge/download-2F6FDE?style=flat-square" height="26"></a>
@@ -111,7 +111,7 @@ The [user guide][guide] covers every control, EQ, Cover Flow and more tips.
 
 ## Updating
 
-- **Over Wi-Fi:** **Settings → General → Software Update** looks online and on the card at once; **Download and Install** downloads the newest [q2-coda release](https://github.com/312-dev/q2-coda/releases/latest) to the card's `update.tar`, replacing any that's there, then asks to install it. Press Return to cancel the download. q2-coda's releases are signed, and the Q2 installs only one whose signature checks against the key built into it: Q2 Muse's own releases, unsigned, are refused, as is a release changed after it was signed.
+- **Over Wi-Fi:** **Settings → General → Software Update** looks online and on the card at once; **Download and Install** downloads the newest [q2-coda release](https://github.com/312-dev/q2-coda/releases/latest) to the card's `update.tar`, replacing any that's there, then asks to install it. Press Return to cancel the download. q2-coda's releases are signed, and the Q2 installs only one whose signature checks against the key built into it: Vamp's own releases, unsigned, are refused, as is a release changed after it was signed.
 - **By hand:** repeat the [install steps](#install) with the newest release.
 
 Your settings, ratings and play counts are kept. The updater skips a version that's already installed, so a newer release always goes on.
@@ -202,7 +202,7 @@ The [user guide][guide] has the steps for each.
 Copy your music to the card over USB-C, then run **Library → Update Local Music** on the Q2.
 
 - **More than music:** these folders at the card's root each add their own Library entry: `Podcasts/`, `Audiobooks/` and `Videos/`. `EQ/` holds EQ presets to import. See the [user guide][guide] for supported formats.
-- **Playlists:** M3U playlists import from the `_explaylist_data/` folder at the card's root, the same folder stock uses. Q2 Muse keeps it as it is, so your stock playlists carry over.
+- **Playlists:** M3U playlists import from the `_explaylist_data/` folder at the card's root, the same folder stock uses. Vamp keeps it as it is, so your stock playlists carry over.
 - **Long audiobooks:** a book too long for the Q2's memory (around 40 hours in one file) needs splitting into parts.
 - **Hiding a folder:** to keep a folder out of Songs, Albums, Artists, Cover Flow and library shuffle, put an empty file named `database.ignore` in it and run **Update Local Music** again. Its songs still play from Folder view and from playlists, and an empty `database.unignore` in a subfolder lets that subfolder back in ([details](docs/discovery.md)).
 
@@ -229,13 +229,13 @@ Copy your music to the card over USB-C, then run **Library → Update Local Musi
 <details>
 <summary><h2>License</h2></summary>
 
-Q2 Muse's code, tools, tests, documentation and artwork are under the [GNU General Public License, version 3](LICENSE) (GPL-3.0-only). The kernel-side files in `tools/` (`pwm_clock.c`, `pwm_clock.h`, `mcu_pwm_clock.c`, `aic_idle_wait.c`) are GPL-2.0-or-later, so they stay compatible with the kernel they build against. The font in `assets/fonts` keeps its own licence: Inter (OFL, shipped cut down, with a ▶ added, its digits and colon set to its tabular figures, and renamed Q2 Muse OLED). The Shanling firmware included in release images remains Shanling's. Q2 Muse is an independent project and is not affiliated with Shanling.
+Vamp's code, tools, tests, documentation and artwork are under the [GNU General Public License, version 3](LICENSE) (GPL-3.0-only). The kernel-side files in `tools/` (`pwm_clock.c`, `pwm_clock.h`, `mcu_pwm_clock.c`, `aic_idle_wait.c`) are GPL-2.0-or-later, so they stay compatible with the kernel they build against. The font in `assets/fonts` keeps its own licence: Inter (OFL, shipped cut down, with a ▶ added, its digits and colon set to its tabular figures, and renamed Vamp OLED). The Shanling firmware included in release images remains Shanling's. Vamp is an independent project and is not affiliated with Shanling.
 
 </details>
 
 ## Support
 
-Q2 Muse is free and built with love in spare time. If it has made your Q2 better and you'd like to give something back, you can [support development on Ko-fi](https://ko-fi.com/diamondbond). Otherwise if you can, please consider donating to a good cause instead ❤️
+Vamp is free and built with love in spare time. If it has made your Q2 better and you'd like to give something back, you can [support development on Ko-fi](https://ko-fi.com/diamondbond). Otherwise if you can, please consider donating to a good cause instead ❤️
 
 [guide]: https://github.com/DiamondBond/q2-pod/releases/latest/download/Q2-Pod-User-Guide.pdf
 [release]: https://github.com/DiamondBond/q2-pod/releases/latest

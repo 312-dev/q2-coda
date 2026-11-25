@@ -87,7 +87,7 @@ When the user has an integrator assemble an `integ/*` branch (an image ahead of 
 A brief has four parts and nothing else; the standing rules are in this page and in the hooks, not retyped each time.
 
 ```text
-You are a worker on Q2 Muse. Read docs/orchestration.md (The worker's contract and Worker hygiene) before
+You are a worker on Vamp. Read docs/orchestration.md (The worker's contract and Worker hygiene) before
 anything else and follow it exactly; AGENTS.md is the index to the code.
 
 ITEM: <one backlog item, one or two sentences: what the user should see when it is done>
@@ -202,7 +202,7 @@ git -C ~/repos/q2-pod config core.hooksPath "$H"
 mkdir -p ~/.config/systemd/user
 cat > ~/.config/systemd/user/q2-queue.service <<EOF
 [Unit]
-Description=Q2 Muse merge queue
+Description=Vamp merge queue
 
 [Service]
 ExecStart=$PY $W/tools/ci/merge_queue.py run --worktree $W --push

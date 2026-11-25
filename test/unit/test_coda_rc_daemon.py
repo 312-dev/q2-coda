@@ -182,7 +182,7 @@ def test_now_playing_says_radio(q2):
 
 
 def test_now_playing_carries_the_q2_muses_toast(q2):
-    """CAP_NOTICE: the car showed nothing when the Q2 Muse toasted that a radio could not start (2026-11-18 00:28);
+    """CAP_NOTICE: the car showed nothing when the Vamp toasted that a radio could not start (2026-11-18 00:28);
     Android Auto draws no toast. The shim's note and its count (coda_rc_shim.c coda_rc_note) go out as
     NowPlaying.notice and notice_id at once, the same words again with a new id, and none once the shim clears it."""
     s, shim = q2
@@ -201,7 +201,7 @@ def test_now_playing_carries_the_q2_muses_toast(q2):
 
 def test_get_remote_names_the_sidecars_endpoint(q2):
     """CAP_REMOTE (docs/remote.md#car-remote-across-networks): a paired phone learns the q2-iroh endpoint it can reach
-    the Q2 Muse by from another network, read from the sidecar's --info file; UNAVAILABLE without one."""
+    the Vamp by from another network, read from the sidecar's --info file; UNAVAILABLE without one."""
     s, shim = q2
     assert s.info['caps'] & 65536
     info = shim.root / 'tmp/coda-rc.iroh'

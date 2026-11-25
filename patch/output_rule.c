@@ -1,7 +1,7 @@
 /* No playback without an output (docs/internals.md#no-playback-without-an-output). Stock V1.36's
  * Headphones Required (g_block_withoutphone_flag, PLAYSET WITHOUTPHONE) refuses a start with nothing
  * to play to, and its gate, check_forbid_play_no_headset, already stands before every stock start and
- * Q2 Muse's own local ones. Q2 Muse holds the switch on whatever config.ini says (output_rule_config,
+ * Vamp's own local ones. Vamp holds the switch on whatever config.ini says (output_rule_config,
  * after config_init) and hides its row, so the rule cannot be turned off; test mode (g_testmode_flag)
  * still passes, as stock's gate lets it.
  *
