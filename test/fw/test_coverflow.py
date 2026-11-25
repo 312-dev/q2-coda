@@ -865,9 +865,9 @@ def test_a_slide_over_home_leaves_its_band_to_home_s_snapshot(fw, library):
     """A payload page sliding over Home in Split (a push, or a Return back to Home): stock paints the bar before each
     frame's percent, so page_parallax.c's draw of the new page paints it again. Home's band, its rows under the status
     row, is in Home's own snapshot, drifted and darkened with it, and the sliding page's ground is its own, full-bleed,
-    so the bar lays no flat ground; the title shows only over the sliding page, faded as far as it is out (user,
-    2026-11-17: Control Center > hold Bluetooth > Return, or Library > Return, ran a flat band across the top for the
-    whole slide, Home's raised top row cut, the closing page's title over it)."""
+    so the bar lays no flat ground (user, 2026-11-17: Control Center > hold Bluetooth > Return, or Library > Return,
+    ran a flat band across the top for the whole slide, Home's raised top row cut). The bar's title is hidden: nothing
+    clips or fades for it."""
     ui, home, win, bar = full_bleed_home(fw, library)
     title = ui.make(bar, 'hscroll_label', 64, 0, 120, 58, name='label_title')
     ui.top = ui.make(ui.wm, 'window', 0, 0, 375, 320, name='queue_page')  # the sliding page, full-bleed
@@ -903,7 +903,7 @@ def test_a_slide_over_home_leaves_its_band_to_home_s_snapshot(fw, library):
     assert painted[:1] == [bar] and home.list not in painted  # the band is Home's snapshot's, not the bar's
     assert (0x20000000, 0, 0, open_, 320) in canvas.rects  # Home's snapshot darkened, its band with it
     assert not [r for r in canvas.rects if r[0] != 0x20000000 and r[2] < 58]  # no flat ground: each page's own
-    assert (open_, 0, 375 - open_, 320) in clips and alphas == [128, 255]  # the title over the page alone, faded
+    assert (open_, 0, 375 - open_, 320) not in clips and alphas == []  # no title to clip or fade
     ui.animating = 0
 
 
