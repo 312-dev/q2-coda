@@ -1899,7 +1899,7 @@ def card_apps(fw, apps):
     return {f'/mnt/mmc/.{k}/q2app': v for k, v in apps.items()}
 
 
-SHIPPED = ['Pop Stall', 'Cabin Solitaire', 'Evening Puzzle', 'Caller Ten']  # the build's games (peq.h GAME_*, engine.c eng_games[])
+SHIPPED = ['Pop Stall', 'Cabin Solitaire', 'Evening Puzzle', 'Caller Ten', 'Ember Garden']  # the build's games (peq.h GAME_*, engine.c eng_games[])
 
 
 def test_the_build_ships_the_engines_games_alone(fw):

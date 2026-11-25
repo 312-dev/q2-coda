@@ -117,8 +117,9 @@ int games_text(void *canvas, const char *s, int x, int y, int h, unsigned px, un
 
 extern const struct eng_game eng_popstall;  /* game_popstall.c */
 extern const struct eng_game eng_solitaire; /* game_solitaire.c */
-extern const struct eng_game eng_sudoku;    /* game_sudoku.c */
-extern const struct eng_game eng_callerten; /* game_callerten.c */
+extern const struct eng_game eng_sudoku;      /* game_sudoku.c */
+extern const struct eng_game eng_callerten;   /* game_callerten.c */
+extern const struct eng_game eng_embergarden; /* game_embergarden.c */
 extern const struct eng_game eng_demo;      /* engine_demo.c */
 
 #endif

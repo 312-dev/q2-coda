@@ -26,6 +26,7 @@ static const struct eng_game *const eng_games[] = {
     &eng_solitaire,
     &eng_sudoku,
     &eng_callerten,
+    &eng_embergarden,
 #if Q2POD_DEV
     &eng_demo,
 #endif

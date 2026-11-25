@@ -6,14 +6,14 @@ import math
 import pytest
 
 from conftest import O
-from test_games import PAGE, Canvas, Card, Page, fnv1a, paint, texts
+from test_games import PAGE, SHIPPED, Canvas, Card, Page, fnv1a, paint, texts
 from test_nav_hold import scratch, st  # noqa: F401
 
 CENTER, PREV, NEXT, PLAY, RETURN, BACK_BTN, FWD_BTN = 218, 172, 173, 171, 170, 222, 223
 E_CENTRE, E_PLAY, E_PREV, E_NEXT, E_TOUCH = 1, 2, 4, 8, 16
 RAW, STILL = 1, 2
 ENGINE = 5  # games.c's screen of the engine's first game
-DEMO = ENGINE + 4  # the demo scene's: eng_games[] lists it last, after Pop Stall, Cabin Solitaire, the Evening Puzzle and Caller Ten
+DEMO = ENGINE + 5  # the demo scene's: eng_games[] lists it last, after the five games (test_games.SHIPPED)
 REPEAT = 8
 SHEET = 0x7300  # Page's first widget: the sheet
 
@@ -421,10 +421,10 @@ def tick(p, n=1, ms=16):
 def test_the_demo_is_listed_only_where_a_dev_build_asks(fw):
     e, p = api(fw), Page(fw)
     fw.mock('toolsReadConfig', lambda path, sec, key, out, d, *_: C.memmove(out, b'1\0', 2) and 0)
-    assert e['eng_count']() == 4 and p.s.engines == 4 and p.s.rows == 4  # test/fw builds as a release does: no demo
+    assert e['eng_count']() == 5 and p.s.engines == 5 and p.s.rows == 5  # test/fw builds as a release does: no demo
 
 
-@pytest.mark.parametrize('asked,count', [(b'1', 5), (b'0', 4)])
+@pytest.mark.parametrize('asked,count', [(b'1', 6), (b'0', 5)])
 def test_a_dev_build_lists_the_demo_last_when_asked(fw_dev, asked, count):
     fw_dev.mock('toolsReadConfig', lambda path, sec, key, out, d, *_: C.memmove(out, asked + b'\0', 2) and 0)
     assert api(fw_dev)['eng_count']() == count
@@ -557,7 +557,7 @@ def test_a_game_that_cannot_open_leaves_the_list(fw):
     r.e['eng_close']()
 
 
-@pytest.mark.parametrize('k', range(3))  # Pop Stall, Cabin Solitaire, the Evening Puzzle
+@pytest.mark.parametrize('k', range(len(SHIPPED)))  # every game the build ships
 def test_centre_held_through_a_game_is_the_games_alone_and_never_stocks_shut_down(fw, st, k):
     """Stock's Centre hold (Shut Down? at 1000 ms, ringnav_hold_timer's st.centre_hold) is set at the press, before
     ringnav_keydown: a running engine game takes it away at its first press, and the game sees Centre held for all 3 s
