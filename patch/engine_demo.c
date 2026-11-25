@@ -117,4 +117,4 @@ static void pause(void *state) {
 }
 
 const struct eng_game eng_demo = { "Engine Demo", sizeof(struct demo), ENG_RAW, init, step, draw,
-                                   pause };
+                                   pause,       "demo",              "Test",      0, 0 };

@@ -435,6 +435,7 @@ int addon_games_last(void); /* the card's games as the last addon_scan found the
 #define GAME_SOLITAIRE 0
 #define GAME_SNAKE 0
 #define GAMES_BUILTIN (GAME_SUDOKU + GAME_VORTEX + GAME_SOLITAIRE + GAME_SNAKE) /* chooser rows */
+#define GAMES_ICONS "/usr/share/q2games/icons" /* an engine game's row's icon, SLUG.png (tools/build.py GAMES_ART) */
 const char *addon_name(int a), *addon_id(int a), *addon_icon(int a);
 int card_path(const char *path); /* on the card, no ".." segment: what an app or server may name */
 /* stream_state.c: Download Ahead and a card app's .stream

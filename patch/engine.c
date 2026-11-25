@@ -98,6 +98,47 @@ int eng_save(const char *name, void *buf, unsigned size, unsigned magic) {
     return 0;
 }
 
+/* Quick resume (docs/games-engine.md#quick-resume): a game in progress is its state's first keep
+ * bytes, in /mnt/data/game-SLUG.run after RUN_MAGIC and keep (a file of another length is not
+ * read), sealed as a save is. */
+#define RUN_MAGIC 0x314e5552 /* "RUN1" */
+static void run_name(const struct eng_game *game, char *name) {
+    tk_snprintf(name, 24, "%s.run", game->slug);
+}
+/* Held: the game in progress written, or its file removed when it has none (finished, or not
+ * begun). */
+static void keep(struct eng *e) {
+    const struct eng_game *game = e->game;
+    char name[24], path[48], tmp[52];
+    unsigned *b;
+    if (!game->keep) return;
+    run_name(game, name);
+    if (!game->resume(e->state, ENG_KEEP)) {
+        save_path(path, tmp, name);
+        unlink(path);
+    } else if ((b = calloc(1, game->keep + 12))) {
+        b[1] = game->keep;
+        memcpy(b + 2, e->state, game->keep);
+        eng_save(name, b, game->keep + 12, RUN_MAGIC);
+        free(b);
+    }
+}
+/* At the open: the game in progress read over the fresh state, if its file is whole. 1 when it
+ * was. */
+static int resumed(struct eng *e) {
+    const struct eng_game *game = e->game;
+    char name[24];
+    unsigned *b = game->keep ? calloc(1, game->keep + 12) : 0;
+    int ok = 0;
+    if (b) {
+        run_name(game, name);
+        ok = eng_load(name, b, game->keep + 12, RUN_MAGIC) && b[1] == game->keep;
+        if (ok) memcpy(e->state, b + 2, game->keep), game->resume(e->state, ENG_LOAD);
+        free(b);
+    }
+    return ok;
+}
+
 /* Play time to now: the part up to ENG_REST_MS past the last input, while the game runs. */
 static void count_play(struct eng *e, unsigned now) {
     unsigned cap = e->input_at + ENG_REST_MS, to = (int)(now - cap) < 0 ? now : cap;
@@ -288,6 +329,14 @@ void eng_hold(void) {
     stop_timer(&e->timer);
     stop_timer(&e->second);
     if (e->game->pause) e->game->pause(e->state);
+    keep(e);
+}
+
+void eng_restart(void) {
+    struct eng *e = en;
+    if (!e->game->resume) return;
+    e->game->resume(e->state, ENG_RESTART);
+    keep(e); /* the game it replaces is not resumed after a power loss */
 }
 
 int eng_open(const struct eng_game *game, void *page, void *sheet, int h, void (*held)(void),
@@ -298,8 +347,9 @@ int eng_open(const struct eng_game *game, void *page, void *sheet, int h, void (
     e->held = held, e->left = left;
     en = e;
     if (game->init) game->init(e->state, h);
+    int again = resumed(e);
     eng_run();
-    return 1;
+    return 1 + again;
 }
 
 void eng_close(void) {

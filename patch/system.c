@@ -357,6 +357,7 @@ void ringnav_clean_end(void) {
     unlink(STATE_FILE);
     unlink(STALL_FILE); /* one the thread hadn't removed yet: S90play's next demo never would */
     coverflow_clean_end();
+    eng_hold(); /* an open game's game in progress kept (docs/games-engine.md#quick-resume) */
 }
 /* Reboot record (docs/internals.md#bluetooth-boot-reconnect): when its Bluetooth controller never
  * answers rtk_hciattach, stock's openBluetooth sets bt_rtk_error, checkBluetoothStatus makes that

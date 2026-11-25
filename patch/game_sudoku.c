@@ -506,6 +506,14 @@ static void play(struct sudoku *s, const struct eng_input *in) {
     }
 }
 
+/* A puzzle of level, made in slices from the next step. */
+static void make(struct sudoku *s, int level) {
+    s->mode = MAKE, s->glevel = level, s->gtries = 0, s->gwork = 0;
+    s->rng = rand_below(~0u) | 1;
+    gen_fill(s);
+    eng_dirty_all();
+}
+
 static int step(void *state, const struct eng_input *in) {
     struct sudoku *s = state;
     int lift =
@@ -543,12 +551,9 @@ static int step(void *state, const struct eng_input *in) {
                                             in->ty < 220 && in->tx >= 34 && in->tx < 34 + 3 * CARD;
         sel = tap ? (in->tx - 34) / CARD : sel < 0 ? 0 : sel > SHARP ? SHARP : sel;
         if (sel != s->sel) eng_dirty(30, 62, 316, 158), s->sel = sel;
-        if (in->pressed & ENG_CENTRE || tap) { /* a puzzle of that level, made in slices from now */
-            s->mode = MAKE, s->glevel = sel, s->gtries = 0, s->gwork = 0;
-            s->rng = rand_below(~0u) | 1;
-            gen_fill(s);
-            eng_dirty_all();
-        } else if (in->pressed & ENG_PLAY && started(s))
+        if (in->pressed & ENG_CENTRE || tap)
+            make(s, sel);
+        else if (in->pressed & ENG_PLAY && started(s))
             to(s, PLAY);
     } else if (s->mode == MAKE) {
         gen_run(s, S_WORK);
@@ -1064,10 +1069,22 @@ static void pause(void *state) {
     if (s->dirty && s->v.sol[0]) s->dirty = !eng_save("sudoku", &s->v, sizeof s->v, S_MAGIC);
 }
 
+/* Quick resume (docs/games-engine.md#quick-resume): everything before art_at is the game, a puzzle
+ * being made too; the levels and a puzzle finished are none. Restart: a new puzzle of its level. */
+static int resume(void *state, int op) {
+    struct sudoku *s = state;
+    if (op == ENG_RESTART) make(s, s->v.level);
+    return s->mode == PLAY || s->mode == MAKE;
+}
+
 const struct eng_game eng_sudoku = { "Evening Puzzle",
                                      sizeof(struct sudoku),
                                      ENG_STILL | ENG_FULL | ENG_CLOCK,
                                      init,
                                      step,
                                      draw,
-                                     pause };
+                                     pause,
+                                     "sudoku",
+                                     "Number puzzle",
+                                     __builtin_offsetof(struct sudoku, art_at),
+                                     resume };
