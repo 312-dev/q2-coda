@@ -83,7 +83,7 @@ int headset_bt_init(void *thread) {
     initBluetoothParam(); /* Lists must exist before callbacks; the later reset would erase links. */
     bt_pair_register((void *)0x4f9d20, 0); /* bt_pair.c's callback in place of stock's */
     headset_status_register();
-    btctl_set_a2dp_callback((void *)btrecvA2dpFunc, (void *)0x01020304);
+    btctl_set_a2dp_callback((void *)PEQ_AT_btrecvA2dpFunc, (void *)0x01020304);
     return btctl_create_daemon_thread(thread);
 }
 static struct {

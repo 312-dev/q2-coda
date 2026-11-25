@@ -1,0 +1,1580 @@
+# q2-usbtrace's own trace (docs/internals.md#usb-tracer), pulled whole from the owner's Q2 on 2026-11-25 (the card's
+# .q2muse/logs/q2-usbtrace.0, five runs of the tracer): seven USB DAC plugs, computers by USB-C, and two laptops the
+# wrong way round, cycle 7 of the last run (1152.305, a fresh plug) and cycle 12 (2712.412, 3.4 s after the laptop's
+# VBUS left), each replugged by hand (1180.954 and 2781.541) and then a device at once. Every line measured.
+# Source: q2-usbtrace.0, the --dev build of integ/q2-1202, unedited below this header.
+3.008002 start pd17=forwarded pd18=edges pd19=edges mem=ok i2c=ok regdump=ok uevent=ok udc=ok wall=1795592193
+3.008002 udc not
+3.008002 s PD17=0 PD18=1 PD19=1 PD14=0 PD15=0 PD16=0 PC20=0 PE22=1 on=0 id=device mode=otg conn=disconnect dev=0 snd=0 pcr=? rdt=02000096
+3.008002 shadow: idle -> sink-debounce; PD17 low: ask the PMIC
+3.008002 axp 00=18 40=00 41=03 42=00 48=00 49=40 4a=00
+3.008002 otg gotgctl=000d00fc gintsts=04000020 hprt0=00000000
+3.165133 u change udc 13500000.otg
+3.279481 udc default
+3.366124 udc addressed
+3.366124 shadow: would gadget-on at 3.366124; host-present; online 1: a real source
+3.366124 shadow: would cable-in at 3.366124; host-present; online 1: a real source
+3.366124 shadow: would host-seen at 3.366124; host-present; online 1: a real source
+3.367275 s conn=connect
+3.418126 otg gintsts=04008028
+3.455874 udc configured
+3.672374 otg gintsts=0400802a
+3.926305 otg hprt0=00000400
+4.180934 otg hprt0=00000000
+4.997610 s PE22=0 on=1
+5.101173 note PD18's events asked for again (its interrupt bit was clear)
+5.153082 s pcr=?
+5.205036 s rdt=03800096
+5.205036 axp 00=38 49=80 4a=08
+29.132628 otg hprt0=00000400
+29.386849 otg hprt0=00000000
+34.998764 cycle n=1 at=3.165133 type=other from=sink-debounce vbus+=- vbus-=- id-=- id+=- on1=1.832 addr=0.200 conf=0.290 dev+=- dev-=- pcm+=- stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+603.485093 clock wall=1795592792
+1203.722836 clock wall=1795593393
+1804.249324 clock wall=1795593993
+2404.977435 clock wall=1795594594
+3005.478370 clock wall=1795595194
+3606.112717 clock wall=1795595795
+4206.680430 clock wall=1795596395
+4298.597359 u change udc 13500000.otg
+4298.600169 udc not
+4298.648522 s conn=disconnect
+4298.851203 axp 00=28 49=8b 4a=10
+4328.601062 cycle n=2 at=4298.597359 type=other from=host-present vbus+=- vbus-=- id-=- id+=- on1=- addr=- conf=- dev+=- dev-=- pcm+=- stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+4807.566161 clock wall=1795596996
+5408.363890 clock wall=1795597597
+6009.110037 clock wall=1795598198
+6609.574349 clock wall=1795598798
+7210.443408 clock wall=1795599399
+7811.069195 clock wall=1795600000
+8411.490038 clock wall=1795600600
+9011.850029 clock wall=1795601201
+9612.438463 clock wall=1795601801
+10212.483446 clock wall=1795602401
+10812.892302 clock wall=1795603002
+11413.501300 clock wall=1795603602
+12013.815497 clock wall=1795604203
+12614.333358 clock wall=1795604803
+13214.975659 clock wall=1795605404
+13815.480297 clock wall=1795606004
+14416.135471 clock wall=1795606605
+15016.826059 clock wall=1795607206
+15616.936894 clock wall=1795607806
+16217.432508 clock wall=1795608406
+16818.055505 clock wall=1795609007
+17418.536126 clock wall=1795609607
+18019.245044 clock wall=1795610208
+18619.554014 clock wall=1795610808
+19220.178358 clock wall=1795611409
+19820.621811 clock wall=1795612009
+20421.314097 clock wall=1795612610
+21021.974113 clock wall=1795613211
+21622.365494 clock wall=1795613811
+22222.647677 clock wall=1795614411
+22823.026337 clock wall=1795615012
+23423.428930 clock wall=1795615612
+23667.799552 e PD17 0 fwd
+23667.799910 on 0
+23667.799910 axp 00=18 49=4b
+23667.799910 otg hprt0=00000c00
+23667.799571 e PD17 0 fwd
+23667.820022 on 0
+23667.799641 e PD17 1 fwd
+23667.820022 on 0
+23667.799658 e PD17 1 fwd
+23667.820022 on 0
+23667.799678 e PD17 1 fwd
+23667.820022 on 0
+23667.799700 e PD17 1 fwd
+23667.820022 on 0
+23667.799718 e PD17 1 fwd
+23667.820022 on 0
+23667.799733 e PD17 1 fwd
+23667.820022 on 0
+23667.799751 e PD17 1 fwd
+23667.820022 on 0
+23667.799766 e PD17 1 fwd
+23667.820022 on 0
+23667.799784 e PD17 1 fwd
+23667.820022 on 0
+23667.799802 e PD17 1 fwd
+23667.820022 on 0
+23667.799820 e PD17 1 fwd
+23667.820022 on 0
+23667.849938 on 0
+23667.840022 shadow: would gadget-off at 23667.840022; idle; PD17 high for UF_VBUS_GONE_MS: the source left
+23667.840022 shadow: would cable-out at 23667.840022; idle; PD17 high for UF_VBUS_GONE_MS: the source left
+23668.050478 on 0
+23674.633140 e PD18 0
+23674.633140 shadow: idle -> src-candidate; ID low inside the window: wait UF_ID_PHANTOM_MS
+23674.633179 on 0
+23674.633179 otg hprt0=00000000
+23674.683310 on 0
+23674.884142 on 0
+23676.440023 e PD18 1
+23676.440023 shadow: src-candidate -> idle; ID high
+23676.440066 on 0
+23676.440066 otg hprt0=00000c00
+23676.490980 on 0
+23676.690151 on 0
+23683.531622 otg hprt0=00000000
+23683.619724 e PD17 0 fwd
+23683.619724 shadow: idle -> sink-debounce; PD17 low: ask the PMIC
+23683.619795 on 0
+23683.619795 axp 49=8b
+23683.670793 on 1
+23683.670793 shadow: would gadget-on at 23683.670793; sink; online 1: a real source
+23683.670793 shadow: would cable-in at 23683.670793; sink; online 1: a real source
+23683.670793 axp 00=38 4a=08
+23683.874368 on 1
+23683.920549 u add sound card1
+23683.920549 u add sound pcmC1D0p
+23683.924331 u add sound controlC1
+23683.924331 u change udc 13500000.otg
+23683.937495 s snd=1
+23684.038972 otg gintsts=04008020 hprt0=00000800
+23684.040776 udc default
+23684.126342 udc addressed
+23684.126342 shadow: would host-seen at 23684.126342; host-present; a host addressed the gadget
+23684.140483 s conn=connect
+23684.292650 otg gintsts=0400802a hprt0=00000000
+23684.345285 u change udc 13500000.otg
+23684.345599 udc not
+23684.346270 u remove sound controlC1
+23684.346270 u remove sound pcmC1D0p
+23684.346270 u remove sound card1
+23684.394640 s conn=disconnect snd=0
+23684.831513 u change udc 13500000.otg
+23684.932103 udc default
+23685.019437 udc addressed
+23685.054674 s conn=connect
+23685.054674 otg gintsts=04008028
+23685.123758 udc configured
+23685.308083 otg gintsts=0400802a
+23689.320324 u change udc 13500000.otg
+23689.321654 udc not
+23689.371027 s conn=disconnect
+23689.798889 u change udc 13500000.otg
+23689.879882 otg gintsts=04008020 hprt0=00000400
+23689.899569 udc default
+23689.986407 udc addressed
+23690.032700 s conn=connect
+23690.033548 udc configured
+23690.134578 otg gintsts=0400802a hprt0=00000000
+23698.283576 otg hprt0=00000400
+23698.537505 otg hprt0=00000000
+23720.034355 cycle n=3 at=23667.799552 type=computer from=host-present vbus+=0.000 vbus-=0.000 id-=6.833 id+=8.640 on1=15.871 addr=16.326 conf=17.324 dev+=- dev-=- pcm+=16.120 stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+24023.578436 clock wall=1795616212
+24242.591091 u change udc 13500000.otg
+24242.593633 udc not
+24242.642999 s conn=disconnect
+24242.846010 axp 00=28 4a=10
+24272.594687 cycle n=4 at=24242.591091 type=other from=host-present vbus+=- vbus-=- id-=- id+=- on1=- addr=- conf=- dev+=- dev-=- pcm+=- stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+24514.725009 u change udc 13500000.otg
+24514.839540 udc default
+24514.926073 udc addressed
+24514.927189 s conn=connect
+24514.927189 otg gintsts=04008028
+24515.011039 udc configured
+24515.181359 otg gintsts=0400802a
+24524.314188 otg hprt0=00000400
+24524.567932 otg hprt0=00000000
+24540.545415 otg hprt0=00000400
+24540.799004 otg hprt0=00000000
+24541.815949 otg gintsts=0400803a hprt0=00000400
+24542.069484 otg gintsts=0400802a hprt0=00000000
+24544.610074 otg hprt0=00000400
+24544.864079 otg hprt0=00000000
+24545.011976 cycle n=5 at=24514.725009 type=other from=host-present vbus+=- vbus-=- id-=- id+=- on1=- addr=0.201 conf=0.286 dev+=- dev-=- pcm+=- stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+13.217826 start pd17=forwarded pd18=edges pd19=edges mem=ok i2c=ok regdump=ok uevent=ok udc=ok wall=1795616815
+13.217826 udc not
+13.217826 s PD17=0 PD18=1 PD19=1 PD14=0 PD15=0 PD16=0 PC20=0 PE22=1 on=0 id=device mode=otg conn=disconnect dev=0 snd=0 pcr=? rdt=02000096
+13.217826 shadow: idle -> sink-debounce; PD17 low: ask the PMIC
+13.217826 axp 00=18 40=00 41=03 42=00 48=00 49=40 4a=00
+13.217826 otg gotgctl=000d00fc gintsts=04000020 hprt0=00000000
+13.375760 u change udc 13500000.otg
+13.489941 udc default
+13.576652 udc addressed
+13.576652 shadow: would gadget-on at 13.576652; host-present; online 1: a real source
+13.576652 shadow: would cable-in at 13.576652; host-present; online 1: a real source
+13.576652 shadow: would host-seen at 13.576652; host-present; online 1: a real source
+13.578858 s conn=connect
+13.629438 otg gintsts=04008028
+13.660497 udc configured
+13.883192 otg gintsts=0400802a
+15.205541 s PE22=0 on=1
+15.307410 note PD18's events asked for again (its interrupt bit was clear)
+15.410060 s pcr=? rdt=03800096
+15.410060 axp 00=38 49=80 4a=08
+36.493838 otg hprt0=00000400
+36.766320 otg hprt0=00000000
+45.206348 cycle n=1 at=13.375760 type=other from=sink-debounce vbus+=- vbus-=- id-=- id+=- on1=1.829 addr=0.200 conf=0.284 dev+=- dev-=- pcm+=- stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+613.412885 clock wall=1795617416
+13.252014 start pd17=forwarded pd18=edges pd19=edges mem=ok i2c=ok regdump=ok uevent=ok udc=ok wall=1795617690
+13.252014 udc not
+13.252014 s PD17=0 PD18=1 PD19=1 PD14=0 PD15=0 PD16=0 PC20=0 PE22=1 on=0 id=device mode=otg conn=disconnect dev=0 snd=0 pcr=? rdt=02000096
+13.252014 shadow: idle -> sink-debounce; PD17 low: ask the PMIC
+13.252014 axp 00=18 40=00 41=03 42=00 48=00 49=40 4a=00
+13.252014 otg gotgctl=000d00fc gintsts=04000020 hprt0=00000000
+13.376508 u change udc 13500000.otg
+13.491814 udc default
+13.579254 udc addressed
+13.579254 shadow: would gadget-on at 13.579254; host-present; online 1: a real source
+13.579254 shadow: would cable-in at 13.579254; host-present; online 1: a real source
+13.579254 shadow: would host-seen at 13.579254; host-present; online 1: a real source
+13.580435 s conn=connect
+13.631267 otg gintsts=04008028
+13.672020 udc configured
+13.885545 otg gintsts=0400802a
+15.208242 s PE22=0 on=1
+15.360931 note PD18's events asked for again (its interrupt bit was clear)
+15.417523 s pcr=? rdt=03800096
+15.417523 axp 00=38 49=80 4a=08
+23.509598 otg hprt0=00000400
+23.771071 otg hprt0=00000000
+45.210069 cycle n=1 at=13.376508 type=other from=sink-debounce vbus+=- vbus-=- id-=- id+=- on1=1.831 addr=0.202 conf=0.295 dev+=- dev-=- pcm+=- stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+613.408555 clock wall=1795618290
+1214.235725 clock wall=1795618890
+1814.852756 clock wall=1795619491
+2415.330971 clock wall=1795620092
+2514.652414 udc suspended
+2514.905823 axp 00=28 4a=10
+2514.905823 otg hprt0=00000400
+2544.652693 cycle n=2 at=2514.652414 type=other from=host-present vbus+=- vbus-=- id-=- id+=- on1=- addr=- conf=- dev+=- dev-=- pcm+=- stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+3015.509834 clock wall=1795620692
+3616.362037 clock wall=1795621293
+4216.983185 clock wall=1795621893
+4361.884329 udc default
+4361.935070 s conn=disconnect
+4361.967504 udc addressed
+4361.985643 s conn=connect
+4362.116034 udc configured
+4362.137189 otg gintsts=04008028 hprt0=00000000
+4362.390770 otg gintsts=0400802a
+4366.700596 otg hprt0=00000400
+4366.954093 otg hprt0=00000000
+4374.306759 otg hprt0=00000400
+4374.560358 otg hprt0=00000000
+4387.236445 otg hprt0=00000400
+4387.490167 otg hprt0=00000000
+4391.293213 otg hprt0=00000400
+4391.546839 otg hprt0=00000000
+4392.116187 cycle n=3 at=4361.884329 type=other from=host-present vbus+=- vbus-=- id-=- id+=- on1=- addr=0.083 conf=0.231 dev+=- dev-=- pcm+=- stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+4817.884898 clock wall=1795622494
+5418.112439 clock wall=1795623094
+5641.709647 u change udc 13500000.otg
+5641.710638 udc not
+5641.759991 s conn=disconnect
+5641.962946 axp 49=8b
+5671.710835 cycle n=4 at=5641.709647 type=other from=host-present vbus+=- vbus-=- id-=- id+=- on1=- addr=- conf=- dev+=- dev-=- pcm+=- stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+6018.217691 clock wall=1795623694
+6307.867573 u change udc 13500000.otg
+13.190710 start pd17=forwarded pd18=edges pd19=edges mem=ok i2c=ok regdump=ok uevent=ok udc=ok wall=1795624060
+13.190710 udc not
+13.190710 s PD17=0 PD18=1 PD19=1 PD14=0 PD15=0 PD16=0 PC20=0 PE22=1 on=0 id=device mode=otg conn=disconnect dev=0 snd=0 pcr=? rdt=02000096
+13.190710 shadow: idle -> sink-debounce; PD17 low: ask the PMIC
+13.190710 axp 00=18 40=00 41=03 42=00 48=00 49=40 4a=00
+13.190710 otg gotgctl=000d00fc gintsts=04000020 hprt0=00000000
+13.337245 u change udc 13500000.otg
+13.450727 udc default
+13.537008 udc addressed
+13.537008 shadow: would gadget-on at 13.537008; host-present; online 1: a real source
+13.537008 shadow: would cable-in at 13.537008; host-present; online 1: a real source
+13.537008 shadow: would host-seen at 13.537008; host-present; online 1: a real source
+13.539164 s conn=connect
+13.589977 otg gintsts=04008028
+13.621208 udc configured
+13.843692 otg gintsts=0400802a
+15.170092 s PE22=0 on=1
+15.271824 note PD18's events asked for again (its interrupt bit was clear)
+15.373915 s pcr=? rdt=03800096
+15.373915 axp 00=38 49=80 4a=08
+27.636559 otg hprt0=00000400
+27.895732 otg hprt0=00000000
+29.694440 otg hprt0=00000400
+29.948325 otg hprt0=00000000
+40.541974 otg hprt0=00000400
+40.810336 otg hprt0=00000000
+45.170848 cycle n=1 at=13.337245 type=other from=sink-debounce vbus+=- vbus-=- id-=- id+=- on1=1.832 addr=0.199 conf=0.283 dev+=- dev-=- pcm+=- stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+614.095192 clock wall=1795624661
+1214.861607 clock wall=1795625262
+1452.696839 udc suspended
+1452.950328 axp 00=28 49=8b 4a=10
+1452.950328 otg hprt0=00000400
+1482.697708 cycle n=2 at=1452.696839 type=other from=host-present vbus+=- vbus-=- id-=- id+=- on1=- addr=- conf=- dev+=- dev-=- pcm+=- stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+1815.695551 clock wall=1795625863
+1961.667458 udc default
+1961.718201 s conn=disconnect
+1961.751300 udc addressed
+1961.768431 s conn=connect
+1961.920488 otg gintsts=04008028 hprt0=00000000
+1962.104890 udc configured
+1962.173735 otg gintsts=0400802a hprt0=00000400
+1962.427333 otg hprt0=00000000
+1992.105077 cycle n=3 at=1961.667458 type=other from=host-present vbus+=- vbus-=- id-=- id+=- on1=- addr=0.083 conf=0.437 dev+=- dev-=- pcm+=- stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+2415.826999 clock wall=1795626463
+2554.056066 udc suspended
+2554.106859 s on=0
+2554.210326 e PD17 0 fwd
+2554.210663 on 0
+2554.210663 axp 00=18 49=4b
+2554.210663 otg hprt0=00000400
+2554.210348 e PD17 0 fwd
+2554.230871 on 0
+2554.210350 e PD17 0 fwd
+2554.230871 on 0
+2554.210363 e PD17 0 fwd
+2554.230871 on 0
+2554.210372 e PD17 1 fwd
+2554.230871 on 0
+2554.210375 e PD17 1 fwd
+2554.230871 on 0
+2554.210381 e PD17 0 fwd
+2554.230871 on 0
+2554.210384 e PD17 1 fwd
+2554.230871 on 0
+2554.210390 e PD17 0 fwd
+2554.230871 on 0
+2554.210393 e PD17 0 fwd
+2554.230871 on 0
+2554.210399 e PD17 1 fwd
+2554.230871 on 0
+2554.210409 e PD17 1 fwd
+2554.230871 on 0
+2554.250871 shadow: would gadget-off at 2554.250871; idle; PD17 high for UF_VBUS_GONE_MS: the source left
+2554.250871 shadow: would cable-out at 2554.250871; idle; PD17 high for UF_VBUS_GONE_MS: the source left
+2554.261239 on 0
+2554.466023 on 0
+2559.348814 e PD18 0
+2559.348814 shadow: idle -> src-candidate; ID low inside the window: wait UF_ID_PHANTOM_MS
+2559.348876 on 0
+2559.399836 on 0
+2559.599548 on 0
+2564.348814 shadow: would grant at 2564.348814; src-trial; ID low long enough, online 0, PD17 high: grant
+2569.285527 e PD17 0 fwd
+2569.285661 on 0
+2569.308136 s PC20=1 PE22=1 rdt=02000096
+2569.308136 stock otg-on
+2569.336065 on 0
+2569.385013 udc not
+2569.410074 s conn=disconnect
+2569.511166 s id=host
+2569.535724 on 0
+2569.562175 otg gotgctl=002c00fc gintsts=04000023 hprt0=00021401
+2569.815870 otg gotgctl=002c00fd gintsts=04000021
+2570.070088 otg gintsts=04000029 hprt0=00021405
+2570.393943 u add usb 1-1
+2570.393943 shadow: src-trial -> host; a device on the host port: kept
+2570.394783 u change usb 1-1
+2570.398799 u bind usb 1-1
+2570.839170 otg gintsts=04000021
+2570.874116 u add usb 1-1.1
+2571.092782 otg gintsts=04000001
+2571.600655 otg hprt0=00021805
+2571.854526 otg hprt0=00021405
+2572.009377 u add sound card1
+2572.009975 u add sound pcmC1D0p
+2572.009975 shadow: would dac at 2572.009975; host; 
+2572.009975 u add sound pcmC1D0c
+2572.011333 u add sound controlC1
+2572.011333 u bind usb 1-1.1
+2572.059705 s snd=1
+2572.110517 otg gintsts=04000023
+2572.364354 otg gintsts=04000021
+2572.620113 otg gintsts=04000001 hprt0=00021805
+2572.874001 otg hprt0=00021405
+2573.127316 otg gintsts=04000021
+2575.412432 otg hprt0=00021805
+2575.920836 otg hprt0=00021405
+2586.595446 otg hprt0=00021805
+2586.849811 otg hprt0=00021405
+2587.864557 otg hprt0=00021805
+2588.118918 otg hprt0=00021405
+2588.627503 otg hprt0=00021805
+2588.881626 otg hprt0=00021405
+2589.389714 otg gintsts=04000023
+2589.643791 otg gintsts=04000021
+2589.898073 otg hprt0=00021805
+2590.151473 otg hprt0=00021405
+2591.421957 otg gintsts=04000023
+2591.675897 otg gintsts=04000021
+2592.438680 otg gintsts=04000023
+2592.693126 otg gintsts=04000021
+2600.319574 otg gintsts=04000023
+2600.573707 otg gintsts=04000021
+2602.060105 cycle n=4 at=2554.056066 type=dac from=host-present vbus+=0.154 vbus-=0.154 id-=5.292 id+=- on1=- addr=- conf=- dev+=16.337 dev-=- pcm+=17.953 stock-on=15.252 stock-off=- shadow-on=10.292 shadow-replug=- stock=grant shadow=grant agree
+2603.288301 e PD18 1
+2603.288363 on 0
+2603.288363 otg hprt0=00021000
+2603.339010 on 0
+2603.391401 s id=device
+2603.504553 u remove sound controlC1
+2603.504553 u remove sound pcmC1D0p
+2603.504553 shadow: would dac-gone at 2603.504553; host; 
+2603.504553 u remove sound pcmC1D0c
+2603.504553 u remove sound card1
+2603.504553 u unbind usb 1-1.1
+2603.504553 u remove usb 1-1.1
+2603.504553 u unbind usb 1-1
+2603.504553 u remove usb 1-1
+2603.504553 shadow: would revoke at 2603.504553; host-end; the host port's device left: off
+2603.539074 on 0
+2603.543478 s snd=0
+2603.543478 otg gotgctl=000d00fc gintsts=04008020 hprt0=00000400
+2603.797608 otg gintsts=04008022
+2604.305535 s PC20=0 PE22=0
+2604.305535 stock otg-off
+2604.448843 e PD17 0 fwd
+2604.449007 on 0
+2604.457369 s PD17=1
+2604.448847 e PD17 0 fwd
+2604.469143 on 0
+2604.448867 e PD17 0 fwd
+2604.469143 on 0
+2604.448879 e PD17 0 fwd
+2604.469143 on 0
+2604.448888 e PD17 1 fwd
+2604.469143 on 0
+2604.448890 e PD17 1 fwd
+2604.469143 on 0
+2604.448897 e PD17 1 fwd
+2604.469143 on 0
+2604.448899 e PD17 1 fwd
+2604.469143 on 0
+2604.448906 e PD17 0 fwd
+2604.469143 on 0
+2604.448908 e PD17 1 fwd
+2604.469143 on 0
+2604.448917 e PD17 1 fwd
+2604.469143 on 0
+2604.448923 e PD17 1 fwd
+2604.469143 on 0
+2604.500096 on 0
+2604.551340 s rdt=03800096
+2604.699324 on 0
+2604.955535 shadow: host-end -> idle; 
+2634.449914 cycle n=5 at=2603.288301 type=unplug from=host vbus+=1.160 vbus-=1.160 id-=- id+=0.000 on1=- addr=- conf=- dev+=- dev-=0.216 pcm+=- stock-on=- stock-off=1.017 shadow-on=- shadow-replug=- stock=none shadow=none agree
+2647.793957 e PD18 0
+2647.793957 shadow: idle -> src-candidate; ID low: wait UF_ID_FRESH_MS
+2647.794026 on 0
+2647.844600 on 0
+2647.993957 shadow: would grant at 2647.993957; src-trial; ID low long enough, online 0, PD17 high: grant
+2648.045449 on 0
+2651.308598 e PD17 0 fwd
+2651.308759 on 0
+2651.353316 s PC20=1 PE22=1 rdt=02000096
+2651.353316 stock otg-on
+2651.359265 on 0
+2651.556005 s id=host
+2651.559548 on 0
+2651.607087 otg gotgctl=002c00fc gintsts=04000021 hprt0=00021401
+2651.860614 otg gintsts=04000029 hprt0=00021405
+2652.155159 u add usb 1-1
+2652.155159 shadow: src-trial -> host; a device on the host port: kept
+2652.156002 u change usb 1-1
+2652.160976 u bind usb 1-1
+2652.368197 otg gintsts=0400002b
+2652.622259 otg gintsts=06000021
+2652.625401 u add usb 1-1.1
+2652.876358 otg gintsts=04000001
+2653.455414 u add sound card1
+2653.455779 u add sound pcmC1D0p
+2653.455779 shadow: would dac at 2653.455779; host; 
+2653.458364 u add sound pcmC1D0c
+2653.458364 u add sound controlC1
+2653.458364 u bind usb 1-1.1
+2653.488660 s snd=1
+2653.640862 otg gintsts=04000021
+2657.698122 otg hprt0=00021805
+2657.951560 otg hprt0=00021405
+2662.530840 otg gintsts=04000023
+2662.784765 otg gintsts=04000021
+2663.293487 otg gintsts=04000023 hprt0=00021805
+2663.547902 otg hprt0=00021405
+2664.055761 otg gintsts=04000021
+2670.924417 otg hprt0=00021805
+2671.180088 otg hprt0=00021405
+2671.434394 otg hprt0=00021805
+2671.688664 otg gintsts=04000023 hprt0=00021405
+2671.947145 otg gintsts=04000021
+2672.201473 otg hprt0=00021805
+2672.455784 otg hprt0=00021405
+2673.727520 otg gintsts=04000023 hprt0=00021805
+2673.981752 otg hprt0=00021405
+2674.239346 otg gintsts=04000021 hprt0=00021805
+2674.493775 otg hprt0=00021405
+2675.002401 otg hprt0=00021805
+2675.256676 otg hprt0=00021405
+2678.058968 otg gintsts=04000023
+2678.819598 otg gintsts=04000021
+2681.363982 otg hprt0=00021805
+2681.617801 otg hprt0=00021405
+2683.489220 cycle n=6 at=2647.793957 type=dac from=idle vbus+=3.514 vbus-=- id-=0.000 id+=- on1=- addr=- conf=- dev+=4.361 dev-=- pcm+=5.661 stock-on=3.559 stock-off=- shadow-on=0.200 shadow-replug=- stock=grant shadow=grant agree
+2714.552130 e PD18 1
+2714.552197 on 0
+2714.552197 otg hprt0=00021000
+2714.602899 on 0
+2714.655225 s id=device
+2714.751885 u remove sound controlC1
+2714.752094 u remove sound pcmC1D0p
+2714.752094 shadow: would dac-gone at 2714.752094; host; 
+2714.752608 u remove sound pcmC1D0c
+2714.752608 u remove sound card1
+2714.753922 u unbind usb 1-1.1
+2714.753922 u remove usb 1-1.1
+2714.754873 u unbind usb 1-1
+2714.754873 u remove usb 1-1
+2714.754873 shadow: would revoke at 2714.754873; host-end; the host port's device left: off
+2714.757009 s snd=0
+2714.802751 on 0
+2714.807173 otg gotgctl=000d00fc gintsts=04008020 hprt0=00000400
+2715.061330 otg gintsts=04008022
+2715.315350 s PC20=0 PE22=0
+2715.315350 stock otg-off
+2715.444763 e PD17 0 fwd
+2715.444923 on 0
+2715.444779 e PD17 0 fwd
+2715.465038 on 0
+2715.444782 e PD17 0 fwd
+2715.465038 on 0
+2715.444799 e PD17 0 fwd
+2715.465038 on 0
+2715.444808 e PD17 1 fwd
+2715.465038 on 0
+2715.444811 e PD17 1 fwd
+2715.465038 on 0
+2715.444820 e PD17 0 fwd
+2715.465038 on 0
+2715.444830 e PD17 1 fwd
+2715.465038 on 0
+2715.444840 e PD17 0 fwd
+2715.465038 on 0
+2715.444846 e PD17 1 fwd
+2715.465038 on 0
+2715.444864 e PD17 1 fwd
+2715.465038 on 0
+2715.444882 e PD17 1 fwd
+2715.465038 on 0
+2715.444901 e PD17 1 fwd
+2715.465038 on 0
+2715.495235 on 0
+2715.544117 s rdt=03800096
+2715.695668 on 0
+2715.965350 shadow: host-end -> idle; 
+2745.445760 cycle n=7 at=2714.552130 type=unplug from=host vbus+=0.892 vbus-=0.892 id-=- id+=0.000 on1=- addr=- conf=- dev+=- dev-=0.202 pcm+=- stock-on=- stock-off=0.763 shadow-on=- shadow-replug=- stock=none shadow=none agree
+3016.513951 clock wall=1795627064
+3200.088186 e PD18 0
+3200.088186 shadow: idle -> src-candidate; ID low: wait UF_ID_FRESH_MS
+3200.088261 on 0
+3200.139261 on 0
+3200.288186 shadow: would grant at 3200.288186; src-trial; ID low long enough, online 0, PD17 high: grant
+3200.338716 on 0
+3203.285428 e PD17 0 fwd
+3203.285562 on 0
+3203.290933 s PC20=1 PE22=1 rdt=02000096
+3203.290933 stock otg-on
+3203.336636 on 0
+3203.392819 otg gintsts=54008c20
+3203.494641 s id=host
+3203.536370 on 0
+3203.646232 otg gotgctl=002c00fd gintsts=04000021 hprt0=00021401
+3203.900456 otg gintsts=04000029 hprt0=00021101
+3204.144369 u add usb 1-1
+3204.144369 shadow: src-trial -> host; a device on the host port: kept
+3204.145002 u change usb 1-1
+3204.149474 u bind usb 1-1
+3204.153594 otg hprt0=00021405
+3204.409212 otg gintsts=04000021
+3204.615405 u add usb 1-1.1
+3204.664585 otg gintsts=04000001
+3205.171767 otg hprt0=00021805
+3205.425946 otg hprt0=00021405
+3206.187537 otg hprt0=00021805
+3206.441026 otg gintsts=04000021 hprt0=00021405
+3206.491927 s snd=1
+3206.494840 u add sound card1
+3206.494840 u add sound pcmC1D0p
+3206.494840 shadow: would dac at 3206.494840; host; 
+3206.494840 u add sound pcmC1D0c
+3206.494840 u add sound controlC1
+3206.494840 u bind usb 1-1.1
+3206.947461 otg hprt0=00021805
+3207.201619 otg gintsts=04000001
+3207.461250 otg gintsts=04000023 hprt0=00021405
+3207.715193 otg gintsts=04000021
+3208.475913 otg gintsts=04000023
+3208.984137 otg gintsts=04000021
+3210.002069 otg gintsts=04000023
+3210.256062 otg gintsts=04000021
+3211.017957 otg gintsts=04000023
+3211.525955 otg gintsts=04000021
+3216.860454 otg gintsts=04000023
+3217.114766 otg gintsts=04000021
+3217.622376 otg hprt0=00021805
+3217.876612 otg hprt0=00021405
+3218.130808 otg gintsts=04000023
+3218.385128 otg gintsts=04000021
+3220.166782 otg gintsts=04000023
+3220.421194 otg gintsts=04000021
+3221.436974 otg hprt0=00021805
+3221.690736 otg gintsts=04000023 hprt0=00021405
+3221.946677 otg gintsts=04000021
+3223.471014 otg hprt0=00021805
+3223.724809 otg hprt0=00021405
+3224.233016 otg hprt0=00021805
+3224.486708 otg hprt0=00021405
+3226.264981 otg hprt0=00021805
+3226.518756 otg hprt0=00021405
+3227.282406 otg hprt0=00021805
+3227.539346 otg hprt0=00021405
+3228.301564 otg gintsts=04000023
+3228.555798 otg gintsts=04000021
+3229.064458 otg gintsts=04000023 hprt0=00021805
+3229.318754 otg gintsts=04000021 hprt0=00021405
+3229.573088 otg gintsts=04000023
+3229.827592 otg gintsts=04000021
+3230.842698 otg gintsts=04000023
+3231.097060 otg gintsts=04000021 hprt0=00021805
+3231.350697 otg hprt0=00021405
+3231.858003 otg hprt0=00021805
+3232.112037 otg gintsts=04000023 hprt0=00021405
+3232.366434 otg gintsts=04000021
+3234.852996 e PD18 1
+3234.853079 on 0
+3234.853079 otg hprt0=00021000
+3234.904099 on 0
+3234.960602 s id=device
+3235.003735 u remove sound controlC1
+3235.003735 u remove sound pcmC1D0p
+3235.003735 shadow: would dac-gone at 3235.003735; host; 
+3235.003735 u remove sound pcmC1D0c
+3235.003735 u remove sound card1
+3235.003735 u unbind usb 1-1.1
+3235.003735 u remove usb 1-1.1
+3235.003735 u unbind usb 1-1
+3235.003735 u remove usb 1-1
+3235.003735 shadow: would revoke at 3235.003735; host-end; the host port's device left: off
+3235.010910 s snd=0
+3235.103414 on 0
+3235.162565 otg gotgctl=000d00fc gintsts=04008020 hprt0=00000400
+3235.315352 s PC20=0 PE22=0
+3235.315352 stock otg-off
+3235.416719 otg gintsts=04008022
+3235.440486 e PD17 0 fwd
+3235.440663 on 0
+3235.440505 e PD17 0 fwd
+3235.460770 on 0
+3235.440523 e PD17 0 fwd
+3235.460770 on 0
+3235.440533 e PD17 1 fwd
+3235.460770 on 0
+3235.440541 e PD17 0 fwd
+3235.460770 on 0
+3235.440544 e PD17 0 fwd
+3235.460770 on 0
+3235.440552 e PD17 1 fwd
+3235.460770 on 0
+3235.440556 e PD17 1 fwd
+3235.460770 on 0
+3235.440564 e PD17 0 fwd
+3235.460770 on 0
+3235.440574 e PD17 1 fwd
+3235.460770 on 0
+3235.440583 e PD17 0 fwd
+3235.460770 on 0
+3235.440586 e PD17 1 fwd
+3235.460770 on 0
+3235.440610 e PD17 1 fwd
+3235.460770 on 0
+3235.491086 on 0
+3235.541770 s rdt=03800096
+3235.691689 on 0
+3235.965352 shadow: host-end -> idle; 
+3265.441669 cycle n=8 at=3200.088186 type=dac from=idle vbus+=3.197 vbus-=35.352 id-=0.000 id+=34.764 on1=- addr=- conf=- dev+=4.056 dev-=34.915 pcm+=6.406 stock-on=3.202 stock-off=35.227 shadow-on=0.200 shadow-replug=- stock=grant shadow=grant agree
+3616.704538 clock wall=1795627664
+4216.716178 clock wall=1795628264
+4817.320990 clock wall=1795628865
+5418.252071 clock wall=1795629465
+6018.957535 clock wall=1795630066
+6619.628971 clock wall=1795630667
+7219.765632 clock wall=1795631267
+7820.697339 clock wall=1795631868
+8421.136027 clock wall=1795632468
+9021.160503 clock wall=1795633068
+9621.963210 clock wall=1795633669
+10222.570048 clock wall=1795634270
+10291.371714 e PD18 0
+10291.371714 shadow: idle -> src-candidate; ID low: wait UF_ID_FRESH_MS
+10291.371773 on 0
+13.306918 start pd17=forwarded pd18=edges pd19=edges mem=ok i2c=ok regdump=ok uevent=ok udc=ok wall=1795634444
+13.306918 udc not
+13.306918 s PD17=0 PD18=1 PD19=1 PD14=0 PD15=0 PD16=0 PC20=0 PE22=1 on=0 id=device mode=otg conn=disconnect dev=0 snd=0 pcr=? rdt=02000096
+13.306918 shadow: idle -> sink-debounce; PD17 low: ask the PMIC
+13.306918 axp 00=18 40=00 41=03 42=00 48=00 49=40 4a=00
+13.306918 otg gotgctl=000d00fc gintsts=04000020 hprt0=00000000
+13.438182 u change udc 13500000.otg
+13.554346 udc default
+13.641323 s conn=connect
+13.642042 udc addressed
+13.642042 shadow: would gadget-on at 13.642042; host-present; online 1: a real source
+13.642042 shadow: would cable-in at 13.642042; host-present; online 1: a real source
+13.642042 shadow: would host-seen at 13.642042; host-present; online 1: a real source
+13.692412 otg gintsts=04008028
+13.732725 udc configured
+13.946466 otg gintsts=0400802a
+15.216517 otg hprt0=00000400
+15.267803 s PE22=0 on=1
+15.370676 note PD18's events asked for again (its interrupt bit was clear)
+15.472731 s pcr=? rdt=03800096
+15.472731 axp 00=38 49=80 4a=08
+15.472731 otg hprt0=00000000
+25.010043 otg hprt0=00000400
+25.272745 otg hprt0=00000000
+45.268466 cycle n=1 at=13.438182 type=other from=sink-debounce vbus+=- vbus-=- id-=- id+=- on1=1.829 addr=0.203 conf=0.294 dev+=- dev-=- pcm+=- stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+188.980593 udc suspended
+3.034596 start pd17=forwarded pd18=edges pd19=edges mem=ok i2c=ok regdump=ok uevent=ok udc=ok wall=1795634633
+3.034596 udc not
+3.034596 s PD17=0 PD18=1 PD19=1 PD14=0 PD15=0 PD16=0 PC20=0 PE22=1 on=0 id=device mode=otg conn=disconnect dev=0 snd=0 pcr=? rdt=02000096
+3.034596 shadow: idle -> sink-debounce; PD17 low: ask the PMIC
+3.034596 axp 00=18 40=00 41=03 42=00 48=00 49=40 4a=00
+3.034596 otg gotgctl=000d00fc gintsts=04000020 hprt0=00000000
+3.168577 u change udc 13500000.otg
+3.281540 udc default
+3.367954 udc addressed
+3.367954 shadow: would gadget-on at 3.367954; host-present; online 1: a real source
+3.367954 shadow: would cable-in at 3.367954; host-present; online 1: a real source
+3.367954 shadow: would host-seen at 3.367954; host-present; online 1: a real source
+3.371129 s conn=connect
+3.421993 otg gintsts=04008028
+3.452656 udc configured
+3.676219 otg gintsts=0400802a
+4.947242 s PE22=0
+4.947242 axp 49=80
+4.998467 s on=1
+5.102602 note PD18's events asked for again (its interrupt bit was clear)
+5.153457 s pcr=? rdt=03800096
+5.204354 axp 00=38 4a=08
+5.715549 axp 00=39
+5.970047 axp 00=38
+11.871417 otg hprt0=00000400
+12.140057 otg hprt0=00000000
+15.074757 axp 00=39
+15.332403 axp 00=38
+23.390894 axp 49=82
+23.530806 u change udc 13500000.otg
+23.531451 udc not
+23.549920 s conn=disconnect
+23.652018 axp 49=8b
+51.671494 axp 00=39
+51.930900 axp 00=38
+53.532143 cycle n=1 at=3.168577 type=other from=sink-debounce vbus+=- vbus-=- id-=- id+=- on1=1.829 addr=0.199 conf=0.284 dev+=- dev-=- pcm+=- stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+596.856308 e PD17 0 fwd
+596.886365 on 0
+596.886365 axp 00=18 49=4b
+596.886365 otg hprt0=00000c00
+596.856320 e PD17 0 fwd
+596.906511 on 0
+596.856323 e PD17 0 fwd
+596.906511 on 0
+596.856346 e PD17 0 fwd
+596.906511 on 0
+596.856348 e PD17 0 fwd
+596.906511 on 0
+596.856360 e PD17 1 fwd
+596.906511 on 0
+596.856360 e PD17 1 fwd
+596.906511 on 0
+596.856370 e PD17 1 fwd
+596.906511 on 0
+596.856373 e PD17 1 fwd
+596.906511 on 0
+596.856391 e PD17 1 fwd
+596.906511 on 0
+596.856409 e PD17 1 fwd
+596.906511 on 0
+596.856424 e PD17 1 fwd
+596.906511 on 0
+596.906511 on 0
+596.926511 shadow: would gadget-off at 596.926511; idle; PD17 high for UF_VBUS_GONE_MS: the source left
+596.926511 shadow: would cable-out at 596.926511; idle; PD17 high for UF_VBUS_GONE_MS: the source left
+597.107003 on 0
+603.056684 clock wall=1795635231
+603.650365 e PD18 0
+603.650365 shadow: idle -> src-candidate; ID low inside the window: wait UF_ID_PHANTOM_MS
+603.650418 on 0
+603.701505 on 0
+603.900988 on 0
+604.220812 e PD18 1
+604.220812 shadow: src-candidate -> idle; ID high
+604.220875 on 0
+604.271346 on 0
+604.471576 on 0
+634.221523 cycle n=2 at=596.856308 type=no-source from=host-present vbus+=0.000 vbus-=0.000 id-=6.794 id+=7.364 on1=- addr=- conf=- dev+=- dev-=- pcm+=- stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+643.189140 e PD18 0
+643.189140 shadow: idle -> src-candidate; ID low: wait UF_ID_FRESH_MS
+643.189204 on 0
+643.239837 on 0
+643.389140 shadow: would grant at 643.389140; src-trial; ID low long enough, online 0, PD17 high: grant
+643.440094 on 0
+646.718711 e PD17 0 fwd
+646.719325 on 0
+646.751043 s PC20=1 PE22=1 rdt=02000096
+646.751043 stock otg-on
+646.768990 on 0
+646.953747 s id=host
+646.970132 on 0
+647.004781 otg gotgctl=002c00fc gintsts=04000021 hprt0=00021401
+647.258805 otg gotgctl=002c00fd hprt0=00021101
+647.512840 otg gintsts=04000029
+647.701639 u add usb 1-1
+647.701639 shadow: src-trial -> host; a device on the host port: kept
+647.766140 otg gintsts=04000009 hprt0=00021805
+647.969625 u add sound card1
+647.970091 u add sound pcmC1D0p
+647.970091 shadow: would dac at 647.970091; host; 
+647.970378 u add sound controlC1
+647.970669 u bind usb 1-1
+648.019985 s snd=1
+648.019985 otg gintsts=04000021 hprt0=00021405
+649.293152 otg hprt0=00021805
+649.546816 otg hprt0=00021405
+650.561599 otg gintsts=06000021 hprt0=00021805
+650.815638 otg gintsts=04000021
+651.069720 otg hprt0=00021405
+651.833010 otg hprt0=00021805
+652.086563 otg hprt0=00021405
+652.847092 otg hprt0=00021805
+653.100820 otg hprt0=00021405
+653.861589 otg gintsts=04000023 hprt0=00021805
+654.115908 otg gintsts=04000021 hprt0=00021405
+654.890392 otg hprt0=00021805
+655.144785 otg hprt0=00021405
+655.911566 otg gintsts=04000023
+656.165641 otg gintsts=04000021
+656.928525 otg hprt0=00021805
+657.186248 otg hprt0=00021405
+659.983088 otg hprt0=00021805
+660.236850 otg hprt0=00021405
+661.505505 otg hprt0=00021805
+662.013690 otg hprt0=00021405
+662.267713 otg gintsts=04000023
+662.522051 otg gintsts=04000021
+664.805477 otg hprt0=00021805
+665.059852 otg hprt0=00021405
+666.836809 otg hprt0=00021805
+667.090888 otg hprt0=00021405
+668.614964 otg gintsts=04000023
+668.869285 otg gintsts=04000021
+669.123560 otg gintsts=04000023
+669.377882 otg gintsts=04000021
+670.903967 otg hprt0=00021805
+671.157530 otg hprt0=00021405
+672.427354 otg gintsts=04000023
+672.937525 otg gintsts=04000021
+673.445561 otg hprt0=00021805
+673.699670 otg hprt0=00021405
+677.258373 otg hprt0=00021805
+677.511746 otg hprt0=00021405
+678.024663 cycle n=3 at=643.189140 type=dac from=idle vbus+=3.529 vbus-=- id-=0.000 id+=- on1=- addr=- conf=- dev+=4.512 dev-=- pcm+=4.780 stock-on=3.561 stock-off=- shadow-on=0.200 shadow-replug=- stock=grant shadow=grant agree
+758.525538 e PD18 1
+758.525590 on 0
+758.525590 otg hprt0=00021000
+758.576218 on 0
+758.627223 s id=device
+758.761333 u remove sound controlC1
+758.762252 u remove sound pcmC1D0p
+758.762252 shadow: would dac-gone at 758.762252; host; 
+758.762252 u remove sound card1
+758.762252 u unbind usb 1-1
+758.762252 u remove usb 1-1
+758.762252 shadow: would revoke at 758.762252; host-end; the host port's device left: off
+758.775845 on 0
+758.779252 s snd=0
+758.779252 otg gotgctl=000d00fc gintsts=04000020 hprt0=00000c00
+759.033432 otg gintsts=04000022
+759.697045 s PC20=0 PE22=0
+759.697045 stock otg-off
+759.835795 e PD17 1 fwd
+759.836034 on 0
+759.835814 e PD17 0 fwd
+759.856150 on 0
+759.835834 e PD17 0 fwd
+759.856150 on 0
+759.835834 e PD17 0 fwd
+759.856150 on 0
+759.835846 e PD17 0 fwd
+759.856150 on 0
+759.835849 e PD17 0 fwd
+759.856150 on 0
+759.835858 e PD17 1 fwd
+759.856150 on 0
+759.835869 e PD17 0 fwd
+759.856150 on 0
+759.835877 e PD17 1 fwd
+759.856150 on 0
+759.835880 e PD17 1 fwd
+759.856150 on 0
+759.835889 e PD17 0 fwd
+759.856150 on 0
+759.835897 e PD17 1 fwd
+759.856150 on 0
+759.888800 on 0
+759.940060 s rdt=03800096
+760.086218 on 0
+760.347045 shadow: host-end -> idle; 
+766.008917 e PD18 0
+766.008917 shadow: idle -> src-candidate; ID low inside the window: wait UF_ID_PHANTOM_MS
+766.008969 on 0
+766.060071 on 0
+766.259632 on 0
+771.008917 shadow: would grant at 771.008917; src-trial; ID low long enough, online 0, PD17 high: grant
+775.688807 e PD17 0 fwd
+775.688915 on 0
+775.714691 s PC20=1 PE22=1 rdt=02000096
+775.714691 stock otg-on
+775.739301 on 0
+775.739301 otg hprt0=00000400
+775.816499 otg gintsts=54000020
+775.920093 s id=host
+775.939766 on 0
+776.071932 otg gotgctl=002c00fd gintsts=04000021 hprt0=00021101
+776.326422 otg gintsts=04000029
+776.544560 u add usb 1-1
+776.544560 shadow: src-trial -> host; a device on the host port: kept
+776.545546 u change usb 1-1
+776.552134 u bind usb 1-1
+776.580353 otg hprt0=00021405
+776.851465 otg gintsts=04000021
+777.017562 u add usb 1-1.1
+777.105437 otg gintsts=04000001
+777.359800 otg hprt0=00021805
+777.613260 otg hprt0=00021005
+777.867262 otg hprt0=00021405
+778.121259 otg hprt0=00021805
+779.139155 otg hprt0=00021405
+779.397240 u add sound card1
+779.397663 u add sound pcmC1D0p
+779.397663 shadow: would dac at 779.397663; host; 
+779.398074 u add sound pcmC1D0c
+779.398329 u add sound controlC1
+779.398604 u bind usb 1-1.1
+779.444138 s snd=1
+780.154133 otg gintsts=04000023
+780.407402 otg gintsts=04000021
+781.677223 otg gintsts=04000023
+781.936510 otg gintsts=04000021
+782.446203 otg gintsts=04000001
+782.702818 otg gintsts=04000021
+786.263214 otg gintsts=04000023
+786.517516 otg gintsts=04000021
+786.771840 otg gintsts=04000023
+787.026168 otg gintsts=04000021
+788.805167 otg gintsts=04000023
+789.059671 otg gintsts=04000021
+789.567374 otg gintsts=04000023
+789.821822 otg gintsts=04000021
+790.329490 otg gintsts=04000029
+790.583926 otg gintsts=04000021
+791.600511 otg gintsts=04000023
+791.854810 otg gintsts=04000021
+792.617195 otg gintsts=04000023
+792.871612 otg gintsts=04000021
+795.667929 otg hprt0=00021805
+795.921664 otg hprt0=00021405
+800.240656 otg gintsts=06000021
+800.494938 otg gintsts=04000021
+802.527464 otg hprt0=00021805
+802.781643 otg hprt0=00021405
+805.322344 otg gintsts=04000023 hprt0=00021805
+805.576969 otg gintsts=04000021 hprt0=00021405
+809.444283 cycle n=4 at=758.525538 type=dac from=host vbus+=1.310 vbus-=1.310 id-=7.483 id+=0.000 on1=- addr=- conf=- dev+=18.019 dev-=0.236 pcm+=20.872 stock-on=17.189 stock-off=1.171 shadow-on=12.483 shadow-replug=- stock=grant shadow=grant agree
+834.260783 u remove sound controlC1
+834.261960 u remove sound pcmC1D0p
+834.261960 shadow: would dac-gone at 834.261960; host; 
+834.264494 u remove sound pcmC1D0c
+834.264494 u remove sound card1
+834.264494 u unbind usb 1-1.1
+834.264494 u remove usb 1-1.1
+834.266914 u unbind usb 1-1
+834.266914 u remove usb 1-1
+834.266914 shadow: would revoke at 834.266914; host-end; the host port's device left: off
+834.304012 e PD18 1
+834.304062 on 0
+834.304062 otg hprt0=00021000
+834.311448 s snd=0
+834.355174 on 0
+834.412974 s id=device
+834.514242 otg gotgctl=000d00fc gintsts=04000020 hprt0=00000c00
+834.554254 on 0
+834.716858 s PC20=0 PE22=0
+834.716858 stock otg-off
+834.767572 otg gintsts=04000022
+834.841550 e PD17 0 fwd
+834.841774 on 0
+834.841555 e PD17 0 fwd
+834.861892 on 0
+834.841574 e PD17 0 fwd
+834.861892 on 0
+834.841587 e PD17 0 fwd
+834.861892 on 0
+834.841596 e PD17 1 fwd
+834.861892 on 0
+834.841605 e PD17 0 fwd
+834.861892 on 0
+834.841613 e PD17 1 fwd
+834.861892 on 0
+834.841616 e PD17 1 fwd
+834.861892 on 0
+834.841625 e PD17 1 fwd
+834.861892 on 0
+834.841633 e PD17 0 fwd
+834.861892 on 0
+834.841643 e PD17 1 fwd
+834.861892 on 0
+834.841652 e PD17 1 fwd
+834.861892 on 0
+834.892490 on 0
+834.939090 s rdt=03800096
+835.091995 on 0
+835.366858 shadow: host-end -> idle; 
+839.673131 e PD18 0
+839.673131 shadow: idle -> src-candidate; ID low inside the window: wait UF_ID_PHANTOM_MS
+839.673184 on 0
+839.724116 on 0
+839.923509 on 0
+844.673131 shadow: would grant at 844.673131; src-trial; ID low long enough, online 0, PD17 high: grant
+848.706820 e PD17 0 fwd
+848.706932 on 0
+848.711269 s PC20=1 PE22=1 rdt=02000096
+848.711269 stock otg-on
+848.757989 on 0
+848.757989 otg hprt0=00000400
+848.913775 s id=host
+848.957500 on 0
+849.014617 otg gotgctl=002c00fc gintsts=04000021 hprt0=00021401
+849.268284 otg gotgctl=002c00fd gintsts=04000029 hprt0=00021405
+849.564124 u add usb 1-1
+849.564124 shadow: src-trial -> host; a device on the host port: kept
+849.564989 u change usb 1-1
+849.569164 u bind usb 1-1
+850.032840 otg gintsts=04000001
+850.047202 u add usb 1-1.1
+850.286057 otg gintsts=04000003 hprt0=00021805
+850.539331 otg gintsts=04000001 hprt0=00021405
+851.047324 otg hprt0=00021805
+851.554667 otg hprt0=00021405
+851.808057 otg hprt0=00021805
+852.185992 u add sound card1
+852.185992 u add sound pcmC1D0p
+852.185992 shadow: would dac at 852.185992; host; 
+852.187406 u add sound pcmC1D0c
+852.187406 u add sound controlC1
+852.187406 u bind usb 1-1.1
+852.214452 s snd=1
+852.581695 otg hprt0=00021405
+852.836255 otg gintsts=04000021
+853.850044 otg gintsts=04000023
+854.104035 otg gintsts=04000021
+854.358084 otg gintsts=04000023
+854.612297 otg gintsts=04000021
+855.885259 otg gintsts=04000023
+856.139596 otg gintsts=04000021
+857.923319 otg hprt0=00021805
+858.178149 otg hprt0=00021405
+859.450075 otg hprt0=00021805
+859.704162 otg hprt0=00021405
+863.528054 otg gintsts=04000023
+863.782336 otg gintsts=04000021
+864.543797 otg gintsts=04000023
+864.798202 otg gintsts=04000021
+865.052431 otg hprt0=00021805
+865.306758 otg hprt0=00021405
+866.324229 otg gintsts=04000023
+866.578514 otg gintsts=04000021
+867.850241 otg hprt0=00021805
+868.103753 otg hprt0=00021405
+869.375734 otg gintsts=04000023
+869.884366 otg gintsts=04000021 hprt0=00021805
+870.138796 otg hprt0=00021405
+872.426362 otg hprt0=00021805
+872.935249 otg hprt0=00021405
+875.987488 otg hprt0=00021805
+876.241823 otg hprt0=00021405
+879.043344 otg hprt0=00021805
+879.297711 otg hprt0=00021405
+881.076232 otg gintsts=04000023
+881.330737 otg gintsts=04000021
+882.215308 cycle n=5 at=834.260783 type=dac from=host vbus+=0.580 vbus-=0.580 id-=5.412 id+=0.043 on1=- addr=- conf=- dev+=15.303 dev-=0.006 pcm+=17.925 stock-on=14.450 stock-off=0.456 shadow-on=10.412 shadow-replug=- stock=grant shadow=grant agree
+1006.950992 e PD18 1
+1006.951037 on 0
+1006.951037 otg hprt0=00021000
+1007.001812 on 0
+1007.011286 u remove sound controlC1
+1007.011286 u remove sound pcmC1D0p
+1007.011286 shadow: would dac-gone at 1007.011286; host; 
+1007.011286 u remove sound pcmC1D0c
+1007.011286 u remove sound card1
+1007.011286 u unbind usb 1-1.1
+1007.011286 u remove usb 1-1.1
+1007.011286 u unbind usb 1-1
+1007.011286 u remove usb 1-1
+1007.011286 shadow: would revoke at 1007.011286; host-end; the host port's device left: off
+1007.054075 s PC20=0 PE22=0 id=device snd=0
+1007.054075 stock otg-off
+1007.201251 on 0
+1007.206614 otg gotgctl=000d00fc gintsts=04000020 hprt0=00000c00
+1007.238714 e PD17 0 fwd
+1007.238965 on 0
+1007.238965 otg gintsts=04000022
+1007.257351 s PD17=1
+1007.238719 e PD17 0 fwd
+1007.259117 on 0
+1007.238736 e PD17 0 fwd
+1007.259117 on 0
+1007.238752 e PD17 0 fwd
+1007.259117 on 0
+1007.238755 e PD17 0 fwd
+1007.259117 on 0
+1007.238764 e PD17 1 fwd
+1007.259117 on 0
+1007.238773 e PD17 0 fwd
+1007.259117 on 0
+1007.238783 e PD17 1 fwd
+1007.259117 on 0
+1007.238792 e PD17 0 fwd
+1007.259117 on 0
+1007.238800 e PD17 1 fwd
+1007.259117 on 0
+1007.238803 e PD17 1 fwd
+1007.259117 on 0
+1007.238810 e PD17 1 fwd
+1007.259117 on 0
+1007.288926 on 0
+1007.340082 s rdt=03800096
+1007.489280 on 0
+1007.704075 shadow: host-end -> idle; 
+1037.240071 cycle n=6 at=1006.950992 type=unplug from=host vbus+=0.287 vbus-=0.287 id-=- id+=0.000 on1=- addr=- conf=- dev+=- dev-=0.060 pcm+=- stock-on=- stock-off=0.103 shadow-on=- shadow-replug=- stock=none shadow=none agree
+1152.304751 e PD18 0
+1152.304751 shadow: idle -> src-candidate; ID low: wait UF_ID_FRESH_MS
+1152.304797 on 0
+1152.304797 otg hprt0=00000000
+1152.356677 on 0
+1152.504751 shadow: would grant at 1152.504751; src-trial; ID low long enough, online 0, PD17 high: grant
+1152.555174 on 0
+1156.137437 e PD17 0 fwd
+1156.137567 on 0
+1156.176310 s PC20=1 PE22=1 rdt=02000096
+1156.176310 stock otg-on
+1156.187993 on 0
+1156.380550 s id=host
+1156.380550 otg gotgctl=002c00fc gintsts=04000021
+1156.387620 on 0
+1156.634931 otg hprt0=00001000
+1157.677539 otg gintsts=04000023
+1157.932798 otg gintsts=04000021
+1159.176310 shadow: would revoke at 1159.176310; src-cooldown; nothing on the host port in UF_TRIAL_MS: off
+1160.176310 shadow: would replug at 1160.176310; src-cooldown; ID still low after the trial, no VBUS: replug
+1161.176310 shadow: src-cooldown -> refused; trials used: refused
+1164.059009 otg gintsts=04000023
+1164.081136 e PD17 1 fwd
+1164.081258 on 0
+1164.081258 otg gintsts=04000021
+1164.109431 s PC20=0 PE22=0 rdt=03800096
+1164.109431 stock otg-off
+1164.132097 on 0
+1164.132097 otg gintsts=04000023
+1164.210993 s id=device
+1164.312980 otg gotgctl=000d00fc gintsts=04000020 hprt0=00000000
+1164.331881 on 0
+1164.566497 otg gintsts=04000022
+1180.953693 e PD18 1
+1180.953693 shadow: refused -> idle; ID high
+1180.953732 on 0
+1180.953732 otg hprt0=00000c00
+1181.004625 on 0
+1181.203821 on 0
+1182.866219 otg hprt0=00000000
+1183.022990 e PD17 0 fwd
+1183.022990 shadow: idle -> sink-debounce; PD17 low: ask the PMIC
+1183.023075 on 0
+1183.023075 axp 49=8b
+1183.069546 s on=1
+1183.069546 shadow: would gadget-on at 1183.069546; sink; online 1: a real source
+1183.069546 shadow: would cable-in at 1183.069546; sink; online 1: a real source
+1183.073282 on 1
+1183.073282 axp 00=39
+1183.273651 on 1
+1183.358243 u add sound card1
+1183.358814 u add sound pcmC1D0p
+1183.359494 u add sound controlC1
+1183.363661 u change udc 13500000.otg
+1183.374814 s snd=1
+1183.374814 otg gintsts=04008020 hprt0=00000400
+1183.478724 udc default
+1183.565956 udc addressed
+1183.565956 shadow: would host-seen at 1183.565956; host-present; a host addressed the gadget
+1183.579127 s conn=connect
+1183.629502 axp 00=38
+1183.629502 otg gintsts=0400802a hprt0=00000000
+1183.730367 u change udc 13500000.otg
+1183.730367 s conn=disconnect snd=0
+1183.731711 u remove sound controlC1
+1183.731711 u remove sound pcmC1D0p
+1183.731711 u remove sound card1
+1183.731711 udc not
+1183.886275 axp 00=39
+1184.110908 u change udc 13500000.otg
+1184.141149 axp 00=38
+1184.141149 otg gintsts=04008020 hprt0=00000400
+1184.211207 udc default
+1184.298628 udc addressed
+1184.344917 s conn=connect
+1184.364617 udc configured
+1184.395839 otg gintsts=0400802a hprt0=00000000
+1189.599051 u change udc 13500000.otg
+1189.599128 udc not
+1189.631072 s conn=disconnect
+1190.191169 u change udc 13500000.otg
+1190.241769 otg gintsts=04008020 hprt0=00000400
+1190.291583 udc default
+1190.378630 udc addressed
+1190.393770 s conn=connect
+1190.423833 udc configured
+1190.494708 otg gintsts=0400802a hprt0=00000000
+1203.080445 clock wall=1795635831
+1220.424579 cycle n=7 at=1152.304751 type=computer from=idle vbus+=3.832 vbus-=11.776 id-=0.000 id+=28.648 on1=30.764 addr=31.261 conf=32.059 dev+=- dev-=- pcm+=31.054 stock-on=3.871 stock-off=11.804 shadow-on=0.200 shadow-replug=7.871 stock=grant shadow=grant agree
+1803.405553 clock wall=1795636431
+1946.715090 u change udc 13500000.otg
+1946.716879 udc not
+1946.766229 s conn=disconnect
+1976.717316 cycle n=8 at=1946.715090 type=other from=host-present vbus+=- vbus-=- id-=- id+=- on1=- addr=- conf=- dev+=- dev-=- pcm+=- stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+2403.872916 clock wall=1795637031
+2427.472844 e PD17 0 fwd
+2427.473093 on 0
+2427.473093 axp 00=18 49=4b
+2427.473093 otg hprt0=00000c00
+2427.472854 e PD17 0 fwd
+2427.493227 on 0
+2427.472875 e PD17 0 fwd
+2427.493227 on 0
+2427.472887 e PD17 1 fwd
+2427.493227 on 0
+2427.472895 e PD17 0 fwd
+2427.493227 on 0
+2427.472899 e PD17 0 fwd
+2427.493227 on 0
+2427.472907 e PD17 1 fwd
+2427.493227 on 0
+2427.472910 e PD17 1 fwd
+2427.493227 on 0
+2427.472918 e PD17 1 fwd
+2427.493227 on 0
+2427.472922 e PD17 1 fwd
+2427.493227 on 0
+2427.472930 e PD17 1 fwd
+2427.493227 on 0
+2427.472938 e PD17 1 fwd
+2427.493227 on 0
+2427.513227 shadow: would gadget-off at 2427.513227; idle; PD17 high for UF_VBUS_GONE_MS: the source left
+2427.513227 shadow: would cable-out at 2427.513227; idle; PD17 high for UF_VBUS_GONE_MS: the source left
+2427.523187 on 0
+2427.723939 on 0
+2434.082261 otg hprt0=00000000
+2434.141154 e PD18 0
+2434.141154 shadow: idle -> src-candidate; ID low inside the window: wait UF_ID_PHANTOM_MS
+2434.141191 on 0
+2434.191364 on 0
+2434.391684 on 0
+2439.141154 shadow: would grant at 2439.141154; src-trial; ID low long enough, online 0, PD17 high: grant
+2443.349422 e PD17 0 fwd
+2443.349559 on 0
+2443.349559 otg hprt0=00000c00
+2443.388421 s PC20=1 PE22=1 rdt=02000096
+2443.388421 stock otg-on
+2443.400143 on 0
+2443.400143 otg hprt0=00000400
+2443.540916 otg gintsts=54000020
+2443.591479 s id=host
+2443.600077 on 0
+2443.794947 otg gotgctl=002c00fd gintsts=04000021 hprt0=00021401
+2444.049110 otg gintsts=04000029 hprt0=00021405
+2444.394047 u add usb 1-1
+2444.394047 shadow: src-trial -> host; a device on the host port: kept
+2444.394736 u change usb 1-1
+2444.401284 u bind usb 1-1
+2444.810629 otg gintsts=04000021
+2444.867022 u add usb 1-1.1
+2445.065021 otg gintsts=04000001 hprt0=00021805
+2445.319200 otg gintsts=04000003 hprt0=00021405
+2445.573681 otg gintsts=04000001 hprt0=00021005
+2445.827779 otg hprt0=00021405
+2446.081567 otg hprt0=00021005
+2446.335232 otg hprt0=00021405
+2446.588967 otg gintsts=04000003 hprt0=00021805
+2446.742484 u add sound card1
+2446.742484 u add sound pcmC1D0p
+2446.742484 shadow: would dac at 2446.742484; host; 
+2446.743368 u add sound pcmC1D0c
+2446.744994 u add sound controlC1
+2446.744994 u bind usb 1-1.1
+2446.792401 s snd=1
+2446.843207 otg gintsts=04000021 hprt0=00021405
+2447.351448 otg gintsts=04000001
+2447.605886 otg hprt0=00021005
+2447.860311 otg gintsts=04000021 hprt0=00021405
+2450.910880 otg gintsts=04000023
+2451.164964 otg gintsts=04000029
+2451.418957 otg gintsts=04000021
+2453.199809 otg gintsts=04000023
+2453.454093 otg gintsts=04000021
+2454.218470 otg gintsts=04000003
+2454.472753 otg gintsts=04000021
+2455.247154 otg gintsts=04000023
+2455.501893 otg gintsts=04000021
+2457.284762 otg gintsts=04000023
+2457.540768 otg gintsts=04000021
+2457.795090 otg gintsts=04000023
+2458.048833 otg gintsts=04000021
+2459.320832 otg gintsts=04000001
+2459.577509 otg gintsts=04000021 hprt0=00021805
+2459.832670 otg hprt0=00021405
+2461.867512 otg gintsts=04000023
+2462.378573 otg gintsts=04000021
+2464.172275 otg gintsts=04000029
+2464.426971 otg gintsts=04000021
+2466.238134 otg gintsts=04000001 hprt0=00021805
+2466.492724 otg gintsts=04000021 hprt0=00021405
+2466.756033 otg gintsts=04000001 hprt0=00021805
+2467.009312 otg hprt0=00021405
+2467.263328 otg gintsts=04000021
+2471.603901 otg gintsts=04000023
+2471.857741 otg gintsts=04000021
+2473.135277 otg gintsts=04000001
+2473.389181 otg gintsts=04000021
+2473.643440 otg gintsts=04000023
+2473.897713 otg gintsts=04000021
+2474.151869 otg gintsts=04000023
+2474.405451 otg gintsts=04000021
+2475.422773 otg gintsts=04000023
+2475.676821 otg gintsts=04000021
+2475.930056 otg gintsts=04000023
+2476.183923 otg gintsts=04000021
+2476.692382 otg hprt0=00021805
+2476.793183 cycle n=9 at=2427.472844 type=dac from=host-present vbus+=0.000 vbus-=0.000 id-=6.668 id+=- on1=- addr=- conf=- dev+=16.921 dev-=- pcm+=19.269 stock-on=15.915 stock-off=- shadow-on=11.668 shadow-replug=- stock=grant shadow=grant agree
+2516.377876 e PD18 1
+2516.377922 on 0
+2516.377922 otg hprt0=00021000
+2516.428190 on 0
+2516.478644 s id=device
+2516.515906 u remove sound controlC1
+2516.515906 u remove sound pcmC1D0p
+2516.515906 shadow: would dac-gone at 2516.515906; host; 
+2516.515906 u remove sound pcmC1D0c
+2516.515906 u remove sound card1
+2516.515906 u unbind usb 1-1.1
+2516.515906 u remove usb 1-1.1
+2516.515906 u unbind usb 1-1
+2516.515906 u remove usb 1-1
+2516.515906 shadow: would revoke at 2516.515906; host-end; the host port's device left: off
+2516.528787 s snd=0
+2516.628362 on 0
+2516.629788 otg gotgctl=000d00fc gintsts=04000020 hprt0=00000c00
+2516.884586 otg gintsts=04000022
+2517.088161 s PC20=0 PE22=0
+2517.088161 stock otg-off
+2517.250136 e PD17 0 fwd
+2517.250427 on 0
+2517.250136 e PD17 0 fwd
+2517.272429 on 0
+2517.250154 e PD17 0 fwd
+2517.272429 on 0
+2517.250170 e PD17 0 fwd
+2517.272429 on 0
+2517.250173 e PD17 0 fwd
+2517.272429 on 0
+2517.250182 e PD17 1 fwd
+2517.272429 on 0
+2517.250185 e PD17 0 fwd
+2517.272429 on 0
+2517.250194 e PD17 0 fwd
+2517.272429 on 0
+2517.250202 e PD17 1 fwd
+2517.272429 on 0
+2517.250205 e PD17 0 fwd
+2517.272429 on 0
+2517.250216 e PD17 0 fwd
+2517.272429 on 0
+2517.250224 e PD17 1 fwd
+2517.272429 on 0
+2517.301056 on 0
+2517.351347 s rdt=03800096
+2517.500660 on 0
+2517.738161 shadow: host-end -> idle; 
+2547.250468 cycle n=10 at=2516.377876 type=unplug from=host vbus+=0.872 vbus-=0.872 id-=- id+=0.000 on1=- addr=- conf=- dev+=- dev-=0.138 pcm+=- stock-on=- stock-off=0.710 shadow-on=- shadow-replug=- stock=none shadow=none agree
+2614.402615 e PD17 0 fwd
+2614.402615 shadow: idle -> sink-debounce; PD17 low: ask the PMIC
+2614.402720 on 0
+2614.402720 axp 49=8b
+2614.402720 otg hprt0=00000000
+2614.453329 on 1
+2614.453329 shadow: would gadget-on at 2614.453329; sink; online 1: a real source
+2614.453329 shadow: would cable-in at 2614.453329; sink; online 1: a real source
+2614.453329 axp 00=38
+2614.653051 on 1
+2614.693717 u add sound card1
+2614.694196 u add sound pcmC1D0p
+2614.694634 u add sound controlC1
+2614.697859 u change udc 13500000.otg
+2614.706994 s snd=1
+2614.811607 udc default
+2614.898263 udc addressed
+2614.898263 shadow: would host-seen at 2614.898263; host-present; a host addressed the gadget
+2614.910411 s conn=connect
+2614.910411 otg gintsts=04008028
+2615.007060 u change udc 13500000.otg
+2615.007812 u remove sound controlC1
+2615.007812 u remove sound pcmC1D0p
+2615.007812 u remove sound card1
+2615.007812 udc not
+2615.012298 s conn=disconnect snd=0
+2615.164769 otg gintsts=0400802a
+2616.127171 u change udc 13500000.otg
+2616.181037 otg gintsts=04008020 hprt0=00000400
+2616.227480 udc default
+2616.314287 udc addressed
+2616.339480 s conn=connect
+2616.351810 udc configured
+2616.440941 otg gintsts=0400802a hprt0=00000000
+2646.352623 cycle n=11 at=2614.402615 type=computer from=idle vbus+=0.000 vbus-=- id-=- id+=- on1=0.050 addr=0.495 conf=1.949 dev+=- dev-=- pcm+=0.291 stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+2712.412108 udc suspended
+2712.462428 s on=0
+2712.603898 e PD17 0 fwd
+2712.604131 on 0
+2712.604131 axp 00=18 49=4b
+2712.604131 otg hprt0=00000400
+2712.614496 s PD17=1
+2712.603903 e PD17 0 fwd
+2712.624257 on 0
+2712.603925 e PD17 0 fwd
+2712.624257 on 0
+2712.603938 e PD17 0 fwd
+2712.624257 on 0
+2712.603941 e PD17 0 fwd
+2712.624257 on 0
+2712.603949 e PD17 0 fwd
+2712.624257 on 0
+2712.603953 e PD17 1 fwd
+2712.624257 on 0
+2712.603961 e PD17 0 fwd
+2712.624257 on 0
+2712.603964 e PD17 0 fwd
+2712.624257 on 0
+2712.603973 e PD17 1 fwd
+2712.624257 on 0
+2712.603981 e PD17 1 fwd
+2712.624257 on 0
+2712.603984 e PD17 1 fwd
+2712.624257 on 0
+2712.644257 shadow: would gadget-off at 2712.644257; idle; PD17 high for UF_VBUS_GONE_MS: the source left
+2712.644257 shadow: would cable-out at 2712.644257; idle; PD17 high for UF_VBUS_GONE_MS: the source left
+2712.654644 on 0
+2712.854588 on 0
+2714.044290 u change udc 13500000.otg
+2714.044715 udc not
+2714.075203 s conn=disconnect
+2714.176506 otg hprt0=00000c00
+2714.623611 u change udc 13500000.otg
+2714.685504 otg gintsts=04008020 hprt0=00000400
+2714.939277 otg gintsts=04008022
+2715.996379 e PD18 0
+2715.996379 shadow: idle -> src-candidate; ID low inside the window: wait UF_ID_PHANTOM_MS
+2715.996425 on 0
+2716.047347 on 0
+2716.246704 on 0
+2720.996379 shadow: would grant at 2720.996379; src-trial; ID low long enough, online 0, PD17 high: grant
+2724.099799 e PD17 0 fwd
+2724.110902 on 0
+2724.138545 s PC20=1 PE22=1 rdt=02000096
+2724.138545 stock otg-on
+2724.160139 on 0
+2724.205718 otg gintsts=54008c20
+2724.310066 s id=host
+2724.351743 on 0
+2724.467664 otg gotgctl=002c00fc gintsts=04000021 hprt0=00001000
+2727.138545 shadow: would revoke at 2727.138545; src-cooldown; nothing on the host port in UF_TRIAL_MS: off
+2727.551645 otg gintsts=04000023
+2727.823221 otg gintsts=04000021
+2728.138545 shadow: would replug at 2728.138545; src-cooldown; ID still low after the trial, no VBUS: replug
+2729.138545 shadow: would grant at 2729.138545; src-trial; the trial once more
+2732.138545 shadow: would revoke at 2732.138545; src-cooldown; nothing on the host port in UF_TRIAL_MS: off
+2733.093423 s PC20=0 PE22=0
+2733.093423 stock otg-off
+2733.098876 e PD17 1 fwd
+2733.100197 on 0
+2733.149353 on 0
+2733.213477 s rdt=03800096
+2733.315068 s id=device
+2733.315068 otg gotgctl=000d00fc gintsts=04008420 hprt0=00001440
+2733.350085 on 0
+2733.590078 otg gintsts=04008020 hprt0=00000400
+2733.860055 otg gintsts=04008022
+2735.093423 shadow: src-cooldown -> refused; trials used: refused
+2763.099318 cycle n=12 at=2712.412108 type=id-low-powered from=host-present vbus+=0.191 vbus-=20.686 id-=3.584 id+=- on1=- addr=- conf=- dev+=- dev-=- pcm+=- stock-on=11.726 stock-off=20.681 shadow-on=8.584 shadow-replug=15.726 stock=grant shadow=grant agree
+2781.540589 e PD18 1
+2781.540589 shadow: refused -> idle; ID high
+2781.540648 on 0
+2781.591411 on 0
+2781.790679 on 0
+2786.209075 e PD17 0 fwd
+2786.209075 shadow: idle -> sink-debounce; PD17 low: ask the PMIC
+2786.209201 on 0
+2786.209201 axp 49=8b
+2786.262496 on 1
+2786.262496 shadow: would gadget-on at 2786.262496; sink; online 1: a real source
+2786.262496 shadow: would cable-in at 2786.262496; sink; online 1: a real source
+2786.262496 axp 00=38
+2786.361447 udc default
+2786.449312 udc addressed
+2786.449312 shadow: would host-seen at 2786.449312; host-present; a host addressed the gadget
+2786.459492 on 1
+2786.482300 s conn=connect
+2786.482300 otg gintsts=0400802a hprt0=00000000
+2786.534836 udc configured
+2786.550335 u change udc 13500000.otg
+2786.550335 udc not
+2786.585507 s conn=disconnect
+2786.811856 u add sound card1
+2786.811856 u add sound pcmC1D0p
+2786.811856 u add sound controlC1
+2786.815075 u change udc 13500000.otg
+2786.852341 s snd=1
+2786.915479 udc default
+2787.002066 udc addressed
+2787.010070 s conn=connect
+2787.010070 otg gintsts=04008028
+2787.032263 u change udc 13500000.otg
+2787.033125 u remove sound controlC1
+2787.033125 u remove sound pcmC1D0p
+2787.033125 u remove sound card1
+2787.033125 udc not
+2787.061667 s conn=disconnect snd=0
+2787.270060 otg gintsts=0400802a
+2788.171912 u change udc 13500000.otg
+2788.272107 udc default
+2788.298338 otg gintsts=04008020 hprt0=00000400
+2788.358774 udc addressed
+2788.387475 udc configured
+2788.400065 s conn=connect
+2788.555678 otg gintsts=0400802a hprt0=00000000
+2818.388328 cycle n=13 at=2781.540589 type=computer from=refused vbus+=4.668 vbus-=- id-=- id+=0.000 on1=4.721 addr=4.908 conf=4.994 dev+=- dev-=- pcm+=5.271 stock-on=- stock-off=- shadow-on=- shadow-replug=- stock=none shadow=none agree
+3004.330766 clock wall=1795637632
+3048.870437 u change udc 13500000.otg
+3048.870592 udc not
+3048.920608 s conn=disconnect
+3049.660582 u change udc 13500000.otg
+3049.760728 udc default
+3049.847343 udc addressed
+3049.879717 udc configured
+3049.884871 s conn=connect
+3049.884871 otg gintsts=04008028
+3050.139087 otg gintsts=0400802a

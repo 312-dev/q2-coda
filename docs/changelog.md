@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - USB (development builds): when a computer's USB-C port meets the Q2 the wrong way round, the Q2 stops powering the port 2.5 seconds in instead of 8, and says to unplug and plug the cable back in about 7 seconds sooner. USB headphones and DACs are unaffected.
   - Library: picking a song in Songs, an album, an artist or Search plays that song when another one has the same title, such as two artists' songs of one name on your server, or two files of one name in different folders, where it always played the first of them.
   - Status row: the clock is at the top left on every page and the row no longer names the page, as on an iPhone; the icons stay at the right. A headphones icon shows while wired headphones play (the 3.5 or 4.4 mm jack, or USB-C headphones and USB DACs), where Bluetooth's icon shows while Bluetooth plays, and the Bluetooth icon is now as tall as the battery so the icons line up. The volume pill takes the clock's place at the left.
   - USB-C headphones: the buttons on USB-C earbuds and headsets, and on wired earbuds through a USB-C to 3.5 mm adapter with its own DAC, now control the Q2: volume up and down (hold to keep going), play/pause, and a double or triple press of the middle button to skip forward or back. They work from any page and with the screen off.

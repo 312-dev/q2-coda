@@ -151,7 +151,7 @@ struct ut_slow {                      /* read at edges and every UT_SLOW_EVERY b
 
 /* Which of the fed levels the shadow last saw (usb_fsm's events), so the same change from two sources (an edge
  * and a sample) is fed once. */
-enum { UT_FED_VBUS, UT_FED_IDLOW, UT_FED_POWER, UT_FED_HOSTDEV, UT_FED_PCM, UT_FED_UDC, UT_FED_N };
+enum { UT_FED_VBUS, UT_FED_IDLOW, UT_FED_POWER, UT_FED_HOSTDEV, UT_FED_PCM, UT_FED_UDC, UT_FED_CONNECT, UT_FED_N };
 
 /* A plug cycle: from the first movement after quiet to UT_BURST_FOR_MS with none. Times are ns, UF_NEVER unset. */
 struct ut_cycle {

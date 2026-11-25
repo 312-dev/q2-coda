@@ -32,8 +32,8 @@ const char *usb_fsm_action_name(unsigned bit) {
 
 void usb_fsm_init(struct usb_fsm *f) {
     f->state = UF_IDLE;
-    f->vbus = f->idlow = f->online = f->power = f->hostdev = f->pcm = f->udc = -1;
-    f->granted = f->retries = f->said_replug = f->refused = f->done = f->shadow = 0;
+    f->vbus = f->idlow = f->online = f->power = f->hostdev = f->pcm = f->udc = f->connect = -1;
+    f->granted = f->retries = f->said_replug = f->refused = f->done = f->shadow = f->no_device = 0;
     f->t_enter = 0;
     f->t_vbus = f->t_vbus_high = f->t_gone = f->t_idlow = f->t_off = f->t_power = UF_NEVER;
     f->need_ns = UF_ID_FRESH_MS * MS;
@@ -106,6 +106,12 @@ static unsigned grant(struct usb_fsm *f, long long t, struct usb_fsm_out *out, c
     return UA_GRANT;
 }
 
+/* The trial's length: UF_CONNECT_MS while HPRT0 reads no connect, UF_TRIAL_SLOW_MS once it has, UF_TRIAL_MS when it
+ * has not been read */
+static long long trial_ns(const struct usb_fsm *f) {
+    return (f->connect == 0 ? UF_CONNECT_MS : f->connect == 1 ? UF_TRIAL_SLOW_MS : UF_TRIAL_MS) * MS;
+}
+
 long long usb_fsm_deadline(const struct usb_fsm *f) {
     long long d = UF_NEVER;
 #define AT(x)                                                                                                 \
@@ -122,7 +128,7 @@ long long usb_fsm_deadline(const struct usb_fsm *f) {
     case UF_SINK: AT(f->t_enter + UF_CHARGER_MS * MS); break;
     case UF_SRC_CANDIDATE: AT(f->t_idlow + f->need_ns); break;
     case UF_SRC_TRIAL:
-        if (f->t_power != UF_NEVER) AT(f->t_power + UF_TRIAL_MS * MS);
+        if (f->t_power != UF_NEVER) AT(f->t_power + trial_ns(f));
         break;
     case UF_SRC_COOLDOWN:
         if (!f->done) AT(f->t_off + UF_WRONG_MS * MS);
@@ -185,9 +191,11 @@ static unsigned timer(struct usb_fsm *f, long long t, struct usb_fsm_out *out) {
             enter(f, UF_HOST, t);
             return 0;
         }
-        if (f->t_power == UF_NEVER || t - f->t_power < UF_TRIAL_MS * MS) return 0;
+        if (f->t_power == UF_NEVER || t - f->t_power < trial_ns(f)) return 0;
+        f->no_device = f->connect == 0;
         enter(f, UF_SRC_COOLDOWN, t);
-        out->why = "nothing on the host port in UF_TRIAL_MS: off";
+        out->why = f->no_device ? "no connect on the host port in UF_CONNECT_MS: off"
+                                : "nothing on the host port in UF_TRIAL_MS: off";
         return power_off(f, t);
     case UF_SRC_COOLDOWN: {
         unsigned a = 0;
@@ -204,10 +212,13 @@ static unsigned timer(struct usb_fsm *f, long long t, struct usb_fsm_out *out) {
             enter(f, UF_IDLE, t);
             return a;
         }
-        if (f->retries <= UF_RETRIES && may_grant(f)) return a | grant(f, t, out, "the trial once more");
+        /* none after a trial with no connect: nothing is there to enumerate, and a replug (said by now) must not
+         * meet the Q2's 5 V (F3) */
+        if (!f->no_device && f->retries <= UF_RETRIES && may_grant(f))
+            return a | grant(f, t, out, "the trial once more");
         f->refused = 1;
         enter(f, UF_REFUSED, t);
-        out->why = "trials used: refused";
+        out->why = f->no_device ? "no device on the host port: refused" : "trials used: refused";
         return a;
     }
     case UF_HOST_END:
@@ -347,11 +358,12 @@ unsigned usb_fsm_step(struct usb_fsm *f, int ev, int v, long long t, struct usb_
         /* stock's device_standby turned any bus power off before the suspend */
         if (f->granted || f->power == 1 || f->state == UF_HOST || f->state == UF_SRC_TRIAL) f->t_off = t;
         f->granted = 0, f->refused = 0, f->retries = 0, f->said_replug = 0;
-        f->vbus = f->idlow = f->online = f->power = f->hostdev = f->pcm = f->udc = -1;
+        f->vbus = f->idlow = f->online = f->power = f->hostdev = f->pcm = f->udc = f->connect = -1;
         f->t_vbus_high = UF_NEVER, f->t_gone = t;
         enter(f, UF_IDLE, t);
         out->why = "wake: the levels are read again";
         break;
+    case UF_EV_CONNECT: f->connect = v; break; /* the trial's deadline follows it */
     case UF_EV_TIMER: a = timer(f, t, out); break;
     }
     out->actions = a;
