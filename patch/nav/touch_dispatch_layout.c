@@ -138,6 +138,7 @@ int ringnav_dispatch(void *target, void *event) {
     /* a row's click from a drag's lift: no tap, so no row (a Settings switch or choice) changes */
     if (target && event && I(event, EVENT_TYPE) == EVT_CLICK && drag_click(target)) return STOP;
     if (np_tap_lift(target, event)) return STOP; /* a hold's lift under the art it opened */
+    if (library_row_wait(target, event)) return STOP; /* a list pressed before the server's rows are in */
     if (event && target != window_manager() &&
         ((I(event, EVENT_TYPE) >= EVT_KEY_DOWN && I(event, EVENT_TYPE) <= EVT_KEY_UP_BEFORE) ||
          I(event, EVENT_TYPE) == EVT_KEY_LONG) &&

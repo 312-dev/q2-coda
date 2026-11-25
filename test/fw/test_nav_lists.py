@@ -2014,6 +2014,7 @@ class Warm:
     as it starts; the clock is now."""
     def __init__(self, fw, st, n=NO_MIN + 5, extra=0):
         self.fw, self.s, self.threads, self.now, self.extra = fw, Sorts(fw, n), [], 100000, extra
+        self.files = Files(fw, card=True)  # the card mounted: a load ahead reads its library
         self.polling = False
         fw.mock('getAllMusic', self.query)
         fw.mock('fw_deque_pop_back', lambda q, *_: self.s.q[q].pop() and 0)
@@ -2092,21 +2093,60 @@ def test_a_load_ahead_of_unchanged_records_sorts_nothing(fw, st):
     assert w.open() == [('dbquery', 0)] and w.s.listed() == w.s.order()
 
 
-def test_a_kept_order_of_no_library_list_is_never_loaded_ahead(fw, st):
+def boot_round(w):
+    """The polls of a boot's own round: Songs, Albums and Artists each loaded ahead once (Albums' and
+    Artists' queries are stock's stand-ins here, which load nothing), each sort ahead run and kept."""
+    for _ in range(3):
+        w.poll()
+        while w.threads:
+            w.run()
+            w.poll()
+
+
+def test_after_a_boot_every_library_list_is_loaded_ahead_opened_or_not(fw, st):
+    """A boot's first quiet loads Songs, Albums and Artists ahead whether or not they were opened (a firmware
+    update leaves every kept order another firmware's), and the first open takes the order sorted ahead. Dark, a
+    boot's first passes touch nothing: the round waits for the screen's first light."""
     w = Warm(fw, st)
-    w.query()  # the same rows, from no Library list's open
+    w.s.calls.clear()
+    w.poll()
+    assert not w.s.calls and not w.threads  # dark since the boot
+    fw.var('g_backlight_status', C.c_ubyte).value = 1  # lit, its last input long ago
+    w.poll()
+    assert w.s.calls == [('dbquery', 0)] and len(w.threads) == 1
+    w.run()
+    w.poll()
+    assert w.open() == [('dbquery', 0)] and w.s.listed() == w.s.order()
+
+
+def test_a_list_never_opened_is_sorted_ahead_after_a_change(fw, st):
+    w = Warm(fw, st)
+    w.query()  # the same rows from no Library list's open: kept, the list never opened
+    boot_round(w)
     w.change()
     w.s.calls.clear()
     w.poll()
-    assert not w.s.calls
+    assert w.s.calls == [('dbquery', 0)] and len(w.threads) == 1
+    w.run()
+    w.poll()
+    assert w.open() == [('dbquery', 0)] and w.s.listed() == w.s.order()
 
 
-def test_nothing_is_loaded_ahead_until_library_gen_moves(fw, st):
+def test_nothing_is_loaded_ahead_without_the_card(fw, st):
     w = Warm(fw, st)
-    w.open()
+    w.files.files.pop('/proc/mounts')
     w.s.calls.clear()
     w.poll()
-    assert not w.s.calls
+    assert not w.s.calls and not w.threads
+
+
+def test_nothing_more_is_loaded_ahead_until_library_gen_moves(fw, st):
+    w = Warm(fw, st)
+    w.open()
+    boot_round(w)
+    w.s.calls.clear()
+    w.poll()
+    assert not w.s.calls and not w.threads
 
 
 def test_a_lit_screen_waits_for_quiet_and_a_scan_for_its_end(fw, st):
@@ -2177,8 +2217,7 @@ def test_a_changed_list_takes_its_own_slot_not_another_lists(fw, st):
         assert w.s.calls == [('dbquery', 0)], sql
 
 
-def test_the_list_a_kept_order_is_outlives_a_reboot(fw, st, library):
-    Files(fw)
+def test_after_a_reboot_a_changed_list_is_sorted_ahead(fw, st, library):
     w = Warm(fw, st)
     w.open()
     reboot(fw, library)
@@ -2186,6 +2225,77 @@ def test_the_list_a_kept_order_is_outlives_a_reboot(fw, st, library):
     w.change()
     w.poll()
     assert len(w.threads) == 1  # the card's head named Songs
+
+
+def library_page(ui):
+    """The Library page on top: its rows' view and stock's All Songs (1), Album (2) and Artist (3) rows, each a
+    button holding the button the click goes to, named as stock names them."""
+    win = ui.widget('window', ui.wm, (0, 0, 375, 320), name='localmusic_page')
+    view = ui.widget('scroll_view', win, (0, 58, 375, 262), name='scroll_view_localmusic')
+    rows = {}
+    for i in (1, 2, 3, 4):
+        row = ui.widget('button', view, (0, 58 + 32 * i, 375, 32), name=str(i))
+        rows[i] = ui.widget('button', row, (0, 0, 375, 32), name=str(i), click=True)
+    ui.top = win
+    return win, rows
+
+
+def click_event():
+    e = C.create_string_buffer(0x40)
+    struct.pack_into('<i', e, O['EVENT_TYPE'], EVT_CLICK)
+    return e
+
+
+def catalogue_job(fw, running):
+    """catalogue.c's job as a first import runs it (nothing indexed), or none."""
+    from test_catalogue import cat_head
+    c = cat_head(fw)
+    c.running, c.job_app, c.job_seq = running, 0, b'5'
+
+
+@pytest.mark.parametrize('row', [1, 2, 3])
+def test_songs_albums_and_artists_pressed_before_the_servers_rows_wait_then_open(fw, ui, row):
+    """While a signed-in server's rows are on their way with none shown, a press on All Songs, Album or Artist
+    opens nothing yet: the loading wait, captioned, holds the Library page, and once the rows are in the press is
+    made again."""
+    win, rows = library_page(ui)
+    sent = []
+    fw.mock('stock_dispatch_trampoline', lambda w, e, *_: sent.append(w) or 0)
+    wait = fw.fn('library_row_wait', C.c_int, C.c_void_p, C.c_void_p)
+    catalogue_job(fw, 1)
+    assert wait(rows[row].at, click_event()) == 1 and fw.fn('load_waiting', C.c_int)()
+    for t in list(ui.timers):
+        ui.fire(t)
+    assert not sent  # the rows still on their way
+    catalogue_job(fw, 0)
+    for t in list(ui.timers):
+        ui.fire(t)
+    assert sent == [rows[row].at] and not fw.fn('load_waiting', C.c_int)()
+
+
+def test_a_press_waits_only_for_those_rows_and_only_while_the_rows_are_on_their_way(fw, ui):
+    win, rows = library_page(ui)
+    wait = fw.fn('library_row_wait', C.c_int, C.c_void_p, C.c_void_p)
+    catalogue_job(fw, 1)
+    assert wait(rows[4].at, click_event()) == 0  # Genre: not a list the server's rows fill alone
+    catalogue_job(fw, 0)
+    assert wait(rows[1].at, click_event()) == 0
+
+
+def test_return_gives_the_wait_up_and_opens_nothing(fw, ui):
+    win, rows = library_page(ui)
+    sent = []
+    fw.mock('stock_dispatch_trampoline', lambda w, e, *_: sent.append(w) or 0)
+    catalogue_job(fw, 1)
+    fw.fn('library_row_wait', C.c_int, C.c_void_p, C.c_void_p)(rows[1].at, click_event())
+    e = C.create_string_buffer(0x40)
+    struct.pack_into('<i', e, O['EVENT_TYPE'], O['EVT_KEY_UP'])
+    struct.pack_into('<I', e, O['EVENT_KEY'], KEY_RETURN)
+    assert fw.fn('load_over_input', C.c_int, C.c_void_p)(e) == 1
+    catalogue_job(fw, 0)
+    for t in list(ui.timers):
+        ui.fire(t)
+    assert not sent and not fw.fn('load_waiting', C.c_int)()
 
 
 def test_no_framebuffer_no_spinner_and_no_thread_sorts_in_place(fw):

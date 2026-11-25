@@ -1285,6 +1285,7 @@ void name_order(const char *sql, int sort, void *list);
 void name_order_list(unsigned cls); /* the Library list the next loads are for, 0 for none */
 void name_order_poll(void);         /* every UI loop pass: a list due loaded and sorted ahead */
 void library_warm(unsigned cls, void *into); /* nav/library_pages.c: list cls's load, as its open */
+int library_row_wait(void *target, void *event); /* nav/library_pages.c: Songs and kin pressed early */
 int coverflow_opening(void);                 /* coverflow.c: an open's step runs */
 void cstl_sort(void *list, void *cmp);
 extern unsigned long ui_thread; /* playback.c: the UI thread, from its first pass */
