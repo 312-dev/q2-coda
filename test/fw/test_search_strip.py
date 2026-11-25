@@ -1483,8 +1483,8 @@ def test_a_named_row_s_text_is_a_cell_in_the_row_the_wheel_was_on_with_its_note_
     assert boxes[:2] == [(16, y, 343, 32), (18, y + 2, 339, 28)]  # the accent line, then the box in it
     texts = {t: r for t, r, _ in c.texts}
     assert texts['Name'][0] == 24
-    assert texts['Vamp'][0] == 347 - 73  # right-aligned: 70 px of text and the cursor's 3
-    assert cursor(c) == 347 - 73 + 70 + 1  # after the text's last character
+    assert texts['Vamp'][0] == 347 - 43  # right-aligned: 40 px of text and the cursor's 3
+    assert cursor(c) == 347 - 43 + 40 + 1  # after the text's last character
     assert texts['Phones and cars see this name'][1] + 16 == y + 32 + 24  # centred 24 px under the row
     assert not [t for t in texts if t.startswith('Press ')]
 

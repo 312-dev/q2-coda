@@ -463,7 +463,7 @@ def test_inter_faces(face):
     have = sorted(u for u in source.getBestCmap() if 0x20 <= u < 0x530 or 0x2000 <= u < 0x2200) + [build.PLAY_MARK]
     assert sorted(font.getBestCmap()) == have and 0x416 in have and 0x3a9 in have  # Cyrillic, Greek
     names = {rec.nameID: str(rec) for rec in font['name'].names}
-    assert all('Inter' not in names[i] for i in (1, 3, 4, 6)) and names[6] in ('Q2MuseOLED-Regular', 'Q2MuseOLED-Medium')
+    assert all('Inter' not in names[i] for i in (1, 3, 4, 6)) and names[6] in ('VampOLED-Regular', 'VampOLED-Medium')
     assert names[1] == ('Vamp OLED' if face == 'inter' else 'Vamp OLED Medium')
     assert names[0] == str(source['name'].getName(0, 3, 1, 0x409))
     assert re.fullmatch(rf'#define {f.ranges_macro} \{{0x20,0x7e,[0-9a-fx,]+\}}', ranges)

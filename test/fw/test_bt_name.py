@@ -142,7 +142,7 @@ def test_edge_spaces_go_and_an_empty_name_is_refused(fw, ui):
 def test_the_name_stops_at_30_characters(fw, ui):
     r = Rename(fw, ui)
     r.type('x' * 40)
-    assert r.ss.text == b'Vamp' + b'x' * 23
+    assert r.ss.text == b'Vamp' + b'x' * 26
 
 
 def test_a_held_return_leaves_the_name_as_it_was(fw, ui):

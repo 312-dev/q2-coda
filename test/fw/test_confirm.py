@@ -320,15 +320,15 @@ def test_a_long_body_wraps_at_words_and_the_card_grows(fw, ui, st):
 
 
 def test_the_install_cards_long_title_scrolls_never_cut(fw, ui, st):
-    """Software Update's 'Install Vamp Dev · V0RHi?' is wider than the column: it scrolls, drawn twice, never cut
+    """Software Update's 'Install Vamp 1.8.2 beta 2 · V1822?' is wider than the column: it scrolls, drawn twice, never cut
     with an ellipsis."""
     theme(fw)
     card = Card(fw, ui)
-    card.ask('Install %s?', ['Cancel', 'Install and Restart'], kind=CONSEQUENTIAL, name='Vamp Dev · V0RHi')
+    card.ask('Install %s?', ['Cancel', 'Install and Restart'], kind=CONSEQUENTIAL, name='Vamp 1.8.2 beta 2 · V1822')
     canvas = Canvas(fw)
     fw.fn('confirm_paint', None, C.c_void_p, C.c_void_p)(card.dialog, canvas.addr)
     titles = [t[0] for t in canvas.texts if t[0].startswith('Install')]
-    assert titles == ['Install Vamp Dev · V0RHi?'] * 2 and ui.fn('feedback__card_marq') in ui.pending()
+    assert titles == ['Install Vamp 1.8.2 beta 2 · V1822?'] * 2 and ui.fn('feedback__card_marq') in ui.pending()
     for _ in range(3):  # every frame repaints and asks for the next
         card.now[0] += 33
         assert repeat(ui, 'feedback__card_marq') == [8]
