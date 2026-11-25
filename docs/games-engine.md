@@ -100,13 +100,13 @@ A game is one such record, listed in `eng_games[]` (`patch/engine.c`) before `en
 
 `struct eng_input`, one a step. A frame's edges and travel go to its first step; what is held stays.
 
-| Field                         | Meaning                                                                                                                                                                               |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Field                         | Meaning                                                                                                                                                                                                                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `held`, `pressed`, `released` | bits `ENG_CENTRE`, `ENG_PLAY`, `ENG_PREV`, `ENG_NEXT`, `ENG_TOUCH`. A press comes from `ringnav_keydown` (`games_keydown`), so a held button is known and stock makes no click for it; a Centre held as long as play wants never opens stock's Shut Down? or a song menu |
-| `ticks`                       | the wheel's detents, clockwise positive (the wheel's sensitivity setting applies, as in a list)                                                                                       |
-| `fast`                        | the same with each tick worth 1 to `ENG_ACCEL_MAX` (10) by the wheel's speed: the volume's curve ([Wheel volume](internals.md#wheel-volume)), Rockbox's `(speed / 270)^4`             |
-| `wheel`                       | with `ENG_RAW`: raw travel, 200 a turn, clockwise positive, read from the wheel's own thread (`wheel_travel`); no ticks then                                                          |
-| `tx`, `ty`                    | the finger on the sheet while `ENG_TOUCH` is held or just released                                                                                                                    |
+| `ticks`                       | the wheel's detents, clockwise positive (the wheel's sensitivity setting applies, as in a list)                                                                                                                                                                          |
+| `fast`                        | the same with each tick worth 1 to `ENG_ACCEL_MAX` (10) by the wheel's speed: the volume's curve ([Wheel volume](internals.md#wheel-volume)), Rockbox's `(speed / 270)^4`                                                                                                |
+| `wheel`                       | with `ENG_RAW`: raw travel, 200 a turn, clockwise positive, read from the wheel's own thread (`wheel_travel`); no ticks then                                                                                                                                             |
+| `tx`, `ty`                    | the finger on the sheet while `ENG_TOUCH` is held or just released                                                                                                                                                                                                       |
 
 Return never reaches a game. A game that sets neither flag gets ticks and runs its timer always.
 
@@ -114,13 +114,13 @@ Return never reaches a game. A game that sets neither flag gets ticks and runs i
 
 `draw` gets a `struct eng_surface`: the screen's pixels, the sheet's origin, and the rows and columns of this paint. The sheet starts under the status row, `h` rows of it (262 to 290 by theme); a game flagged `ENG_FULL` gets the whole screen instead, 375 x 320 over the status row (Games moves its page and sheet over the status row for it: [Full screen](#full-screen)), so its `h` is 320 and its row y is the screen's. It paints its whole scene, background first; every call clips, so the cost is the changed part's. Coordinates are the sheet's, colors `0xRRGGBB` as they reach the screen (Light Mode does not flip them; Night Shift still warms them, as it reads every pixel written).
 
-| Call           | Draws                                                                                          |
-| -------------- | ---------------------------------------------------------------------------------------------- |
-| `eng_fill`     | a box, solid                                                                                   |
-| `eng_disc`     | a disc with a smoothed edge, its center and radius in 16.16: it moves by sixteenths of a pixel |
-| `eng_round`    | a box with round corners, smoothed                                                             |
-| `eng_text`     | ASCII in the theme's face through stock's canvas (left, centered or right); returns its width  |
-| `eng_inset(y)` | not a drawing: the columns the glass's 80 px corners hide at each end of the sheet's row `y`   |
+| Call           | Draws                                                                                                                       |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `eng_fill`     | a box, solid                                                                                                                |
+| `eng_disc`     | a disc with a smoothed edge, its center and radius in 16.16: it moves by sixteenths of a pixel                              |
+| `eng_round`    | a box with round corners, smoothed                                                                                          |
+| `eng_text`     | ASCII in the theme's face through stock's canvas (left, centered or right); returns its width                               |
+| `eng_inset(y)` | not a drawing: the columns the glass's 80 px corners hide at each end of the sheet's row `y`                                |
 | `eng_clip`     | not a drawing: the part of a box inside this paint, for a game's own blits (Pop Stall's, Cabin Solitaire's, Ember Garden's) |
 
 A buffer that is not stock's 375 x 320 BGRA8888 `lcd_mem` (a window animation's snapshot of another layout) is left as stock drew it.
@@ -165,20 +165,20 @@ To see it: a `--dev` build, `ENGINEDEMO=1` under `[Q2POD]` in `/mnt/data/config.
 
 ## Budgets
 
-**The payload** may hold 1,572,864 bytes of code and constants (1,048,576 when this was measured). With the engine and its demo, `patch_bytes` is 982,392 (build `--dev --new-player`), so 66,184 bytes are free. The engine is 5.9 KB of code and constants (`engine.o`), the demo 1.7 KB.
+**The payload** may hold 1,572,864 bytes of code and constants. With the five games, `patch_bytes` is 1,517,656 (build `--dev`, the games' integration branch), so 55,208 bytes are free. The games are 141,399 bytes of code and constants together, the table's column; the engine is 6,072 (`engine.o`), the demo 1.7 KB, and Games' page (`games.c`) 13,550. Three games are over the 28 KB a redesigned game was given: Pop Stall by 4,395 bytes, Cabin Solitaire by 3,195, the Evening Puzzle by 476. Their art in the root filesystem is 710,029 bytes before compression. Payload bytes are each game's `.text` and `.rodata` in its object; the dearest frame and the whole sheet are `test/patch.py`'s figures on the same build, each game's own frame bounds in its subsection.
 
-| Game (see [Games](#games)) | Payload bytes (measured) | Heap (`size`)              | A frame, worst (instructions) | Whole sheet |
-| -------------------------- | ------------------------ | -------------------------- | ----------------------------- | ----------- |
-| Pop Stall                  | POPBYTES (of 28 KB)      | 252,700, its art read in   | 600,000                       | 2,000,000   |
-| Cabin Solitaire            | 32,192 (of 28 KB)        | 210,652, its art read in   | 1,250,000 (its ponytail)      | 2,000,000   |
-| Evening Puzzle             | 28,640 (of 28 KB)        | 23,888, its masks unpacked | 600,000                       | 2,000,000   |
-| Caller Ten                 | CTBYTES (of 28 KB)       | about 216 KB, its art read in | 600,000                    | 2,000,000   |
-| Ember Garden               | EGBYTES (of 28 KB)       | 242,444, its art read in   | 600,000                       | 2,000,000   |
+| Game (see [Games](#games)) | Payload bytes (of 28 KB) | Heap (`size`)                                                     | Art in the root filesystem                 | Dearest frame (instructions) | Whole sheet |
+| -------------------------- | ------------------------ | ----------------------------------------------------------------- | ------------------------------------------ | ---------------------------- | ----------- |
+| Pop Stall                  | 33,067                   | 252,700, its art read in                                          | 251,552 and its 4,551-byte notice          | 587,001 (the star's ring)    | 1,482,933   |
+| Cabin Solitaire            | 31,867                   | 210,652, its art read in                                          | 37,856                                     | 1,195,562 (its ponytail)     | 1,983,926   |
+| Evening Puzzle             | 28,148                   | 23,888, its masks unpacked                                        | none (8,544 bytes of masks in the payload) | 556,544 (the dial opening)   | 1,680,410   |
+| Caller Ten                 | 21,754                   | 368, and 215,604 read in at its open (the art, the worker's rows) | 192,228 and its 4,642-byte notice          | 513,860 (the reveal)         | 1,259,795   |
+| Ember Garden               | 26,563                   | 242,444, its art read in                                          | 219,200                                    | 542,580 (lightning)          | 1,096,778   |
 
 - **A frame's hard limit is 2,000,000 instructions** of the payload's own (about 4 ms by the estimate above) for the step and every rect's paint together; 600,000 is what a game is held to, so stock's own painting of the same rects, the flush's turn of them onto the framebuffer and the loop's polls keep the rest of the 16.67 ms.
 - **Heap** is one game's at a time, freed on leaving it. The device has little to spare next to the player; 8 KB is the most a game's own state is given, and a game with stored art up to 256 KB for that art: Cabin Solitaire's state is 210,652 bytes (its 37,856 bytes of art read in and the tables made from it), the Evening Puzzle's 23,888 (21,459 of them its masks, unpacked at its start).
-- **Scratch** (131,072 bytes, about 31 KB free): the engine uses 4. A game uses none: its state is the heap's.
-- **The root filesystem** (at most 75,497,472 bytes, `ROOTFS_ROOM`) is not used by the engine itself. A game's art that would not fit its payload bytes is a file there, `usr/share/q2games/<name>.bin` from `assets/games/` (`GAMES_DATA` in `tools/build.py`), read once when the game opens, never in a step or a paint: Cabin Solitaire's is 37,856 bytes.
+- **Scratch** (131,072 bytes, 30,660 free): the engine uses 4. A game uses none: its state is the heap's.
+- **The root filesystem** (at most 75,497,472 bytes, `ROOTFS_ROOM`) is not used by the engine itself. A game's art that would not fit its payload bytes is a file there, under `usr/share/q2games/` (`GAMES_ART` in `tools/build.py` names each file's place there and its source under `assets/`), read once when the game opens, never in a step or a paint: the table's fourth column.
 - The older four games are out of the payload in this build (`GAME_*` in `patch/peq.h` all 0), which gave back 15,568 bytes (`patch_bytes` 1,331,960 to 1,316,392, 2026-11-22); turning them back on costs that again.
 
 ## Games
@@ -209,16 +209,16 @@ Every one is an original game in its genre. None reproduces an Apple iPod game's
 
 **Frames.** A step keeps its changed boxes itself (`mark`), at most `ENG_RECTS`, never overlapping (a box that overlaps another joins it, so no pixel is painted twice), and past `ENG_RECTS` a new one joins the box it grows least: a ball's box covers its trail and motes and is marked only when its picture changed; the trampoline's while it moves or dips; each effect's while its picture changes; each group of bulbs (the beam's, each wall's) that changed; the HUD's plaques when they change. What a frame repaints is held down the way the design's frame costs asked: the bulbs change ten a frame at most, the rest the frames after (a chase starting, a brown-out, every bulb coming on); the star's callout and stars come in three and five frames after it; an effect whose next picture would take the frame's boxes past `P_FX_AREA` (12,000 px, with 1,200 kept for each ball in play) waits a frame, its picture held, and each frame starts with another effect and the first always moves, so a crowd of pops slows a little rather than a frame running long; and the banner, the game over's ticket and the pause sign are opaque panels whose middles are not painted under. Measured on build `--dev --new-player`, the whole panel:
 
-| What                                                                                       | Instructions (MIPS, payload) | Bound in `test/patch.py` |
-| ------------------------------------------------------------------------------------------ | ---------------------------- | ------------------------ |
-| A frame's step, the dearest of a scripted second of play                                   | 7,332                        | 30,000                   |
-| That second's dearest frame with its changed rects painted                                 | 173,634                      | 600,000                  |
-| TRIO: three balls at top speed through a full lattice, WIDE blinking, the dearest of 30    | 511,546                      | 600,000                  |
-| The star's ring popping round it, its callout and stars, the dearest of 16                 | 586,964                      | 600,000                  |
-| The level clear: the banner dropping, the confetti, the next rows inflating, the dearest   | 583,826                      | 600,000                  |
-| The game over: the rows dimming, the ticket sliding up, the dearest                        | 565,653                      | 600,000                  |
-| The pause or the resume: Games repaints the whole page                                     | 1,415,073                    | 2,000,000                |
-| The whole sheet, the dearest (a full lattice of double skins)                              | 1,482,933                    | 2,000,000                |
+| What                                                                                     | Instructions (MIPS, payload) | Bound in `test/patch.py` |
+| ---------------------------------------------------------------------------------------- | ---------------------------- | ------------------------ |
+| A frame's step, the dearest of a scripted second of play                                 | 7,332                        | 30,000                   |
+| That second's dearest frame with its changed rects painted                               | 173,634                      | 600,000                  |
+| TRIO: three balls at top speed through a full lattice, WIDE blinking, the dearest of 30  | 511,546                      | 600,000                  |
+| The star's ring popping round it, its callout and stars, the dearest of 16               | 586,964                      | 600,000                  |
+| The level clear: the banner dropping, the confetti, the next rows inflating, the dearest | 583,826                      | 600,000                  |
+| The game over: the rows dimming, the ticket sliding up, the dearest                      | 565,653                      | 600,000                  |
+| The pause or the resume: Games repaints the whole page                                   | 1,415,073                    | 2,000,000                |
+| The whole sheet, the dearest (a full lattice of double skins)                            | 1,482,933                    | 2,000,000                |
 
 The crowded frames' bounds are the brief's own 600,000, which they come close to: TRIO and the star are the frames to watch after a change to the drawing.
 
@@ -261,6 +261,7 @@ In the emulator, 10 s of play (`design/games/balloon-fair/popstall-play.mp4`, `b
 ponytail: every frame but the whole sheet's is over the 600,000 a game is held to (under the engine's hard 2,000,000): a frame repaints whole cards, and a card costs 20,000 to 30,000 instructions (its looks, body, index and pip) over felt at about 6 an instruction a pixel. What would bring them under: a card's strip in a fan drawn from a cached image of the strip rather than from its pieces, and the glides moving fewer pixels (a run as one image).
 
 In the emulator, 10 s of play from the start board (a deal, then the wheel, Center, Play and Previous every 0.2 s): 190 page flips, a median gap of 17.4 ms while anything moved; the 31 gaps over 34 ms are the game at rest between inputs (`ENG_STILL` paints nothing then), with the host's load average near 5. The payload grows by 32,192 bytes over the integration branch's build, over the 28 KB a redesigned game may add (ponytail: the drawing that brought the frames down to the table above, the looks, the covers and the joined rects, added about 5 KB; cutting the flip, the sparks and the tag's pop would give back about 2 KB). The state is 210,652 bytes on the heap: the art file (37,856), each look's tables (117,000) and the felt's; no `.scratch`.
+
 ### Evening Puzzle
 
 `patch/game_sudoku.c` (`eng_sudoku`, `ENG_STILL`, `ENG_FULL`), Games' third engine row: Sudoku drawn as "The Evening Puzzle", the puzzle page of an evening paper over the whole screen ([Full screen](#full-screen)), from the design in the emulator project's `design/games/sudoku/` (`SPEC.md`, `STYLE.md`, the element sheet, layout B). Standard 9 x 9 Sudoku, every puzzle made on the Q2 with exactly one solution, at one of three levels:
@@ -293,14 +294,14 @@ In the emulator, 10 s of play from the start board (a deal, then the wheel, Cent
 
 **Frames.** Measured on build `--dev`, on the 320 px full-screen sheet (`test/patch.py`, payload instructions on MIPS):
 
-| What                                                                                 | Instructions | Bound     |
-| ------------------------------------------------------------------------------------ | ------------ | --------- |
-| A generator slice, the dearest of three Sharp puzzles and a Gentle one               | 142,516      | 150,000   |
-| That frame with its progress rule painted                                            | 197,444      | 220,000   |
-| The dearest frame of a scripted second of entry, painted                             | 474,093      | 530,000   |
+| What                                                                                   | Instructions | Bound     |
+| -------------------------------------------------------------------------------------- | ------------ | --------- |
+| A generator slice, the dearest of three Sharp puzzles and a Gentle one                 | 142,516      | 150,000   |
+| That frame with its progress rule painted                                              | 197,444      | 220,000   |
+| The dearest frame of a scripted second of entry, painted                               | 474,093      | 530,000   |
 | The dearest made on purpose: the dial's note opening (a cursor's move 420,779 at most) | 556,420      | 600,000   |
-| The whole sheet (the stamp; the levels 763,054, the blotter 915,512)                 | 1,679,544    | 1,850,000 |
-| Frames to make a Sharp puzzle, the most of three (38, 79, 24)                        | 79           | 180       |
+| The whole sheet (the stamp; the levels 763,054, the blotter 915,512)                   | 1,679,544    | 1,850,000 |
+| Frames to make a Sharp puzzle, the most of three (38, 79, 24)                          | 79           | 180       |
 
 So the slowest of those Sharp puzzles takes 1.3 s at 60 frames a second, within the brief's 3 s; the host test makes 200 a level and bounds every one at 180 frames. In the emulator a Sharp puzzle was made in 75 frames, 16 to 18.3 ms apart (58.1 flips a second, the host's load average near 8.6); in the play after it every frame of a wash or the dial's note came 17 to 19.6 ms after the one before, with the game at rest between the emulator's wheel detents (one every 60 to 100 ms). The payload grows by 28,640 bytes over the build without it (1,388,376 against 1,359,736; 8,544 of them the masks), within the 28 KB it was given; the state is 23,888 bytes on the heap (21,459 the unpacked masks); no `.scratch`.
 
@@ -326,14 +327,14 @@ So the slowest of those Sharp puzzles takes 1.3 s at 60 frames a second, within 
 
 **Frames.** A frame of play marks each thing that changed once (`flush`: the glass, ON AIR, the replay lamp, the rings, the lamps, the knob, the handset, the dial, the band, the score line, the rows, joined where they touch), so it never passes the engine's eight rects. The reveal paints the rows at once and the glass, the hub, the band and the score in the next two frames, and the score counts up after the summary's sheet is up, so no frame carries all of them. Measured on build `--dev --new-player`, full screen:
 
-| What                                                                          | Instructions (MIPS, payload) | Bound in `test/patch.py` |
-| ----------------------------------------------------------------------------- | ---------------------------- | ------------------------ |
-| A frame's step, the dearest of the needle's slide and a second of the clock   | 639                          | 1,000                    |
-| That second's dearest frame painted (the dial turned and sprung, two rows, the lamps, the rings) | 465,622      | 520,000                  |
-| The call's dearest frame (the handset lifting)                                | 366,256                      | 410,000                  |
-| The reveal's dearest frame (the four rows)                                    | 513,738                      | 570,000                  |
-| The summary's dearest frame (the sheet coming up, the score counting)        | 313,492                      | 350,000                  |
-| The whole sheet (the open, a round's start, the end)                          | 1,259,741                    | 1,400,000                |
+| What                                                                                             | Instructions (MIPS, payload) | Bound in `test/patch.py` |
+| ------------------------------------------------------------------------------------------------ | ---------------------------- | ------------------------ |
+| A frame's step, the dearest of the needle's slide and a second of the clock                      | 639                          | 1,000                    |
+| That second's dearest frame painted (the dial turned and sprung, two rows, the lamps, the rings) | 465,622                      | 520,000                  |
+| The call's dearest frame (the handset lifting)                                                   | 366,256                      | 410,000                  |
+| The reveal's dearest frame (the four rows)                                                       | 513,738                      | 570,000                  |
+| The summary's dearest frame (the sheet coming up, the score counting)                            | 313,492                      | 350,000                  |
+| The whole sheet (the open, a round's start, the end)                                             | 1,259,741                    | 1,400,000                |
 
 The whole sheet is about 10 instructions a pixel, most of it the room's runs; `blit` writes a run in unrolled loops and leaves out the rows a sheet drawn over it covers. A round's first frame and the end are whole-sheet paints. In the emulator, 10 s of a round with the dial turned back and forth all the while (`design/games/guess-the-song`'s capture, `capture.py`): 44.8 flips a second, median gap 17.8 ms, 95th 19.6 ms, with the host's load average near 10; the 12 gaps over 34 ms (the longest 178 ms) fall where the dial had sprung back and the next turn had not come (the driver starts a process for each), the picture at rest, which paints nothing. The payload grows by 22,176 bytes (`patch_bytes` 1,381,912, of the 28 KB a game may add, the full-screen page's code in `games.c` included); the state is 360 bytes and the heap at most about 216 KB with the art and the worker's rows; no `.scratch`.
 
@@ -357,15 +358,15 @@ The whole sheet is about 10 instructions a pixel, most of it the room's runs; `b
 
 <a id="frames-ember-garden"></a>**Frames.** A step marks the boxes that changed, each moving thing's old and new joined where they overlap, and `flush` joins them into at most `ENG_RECTS`: the pair whose joined box adds least area each time, overlapping ones first, each box keeping its cheapest partner. Measured on build `--dev`:
 
-| What                                                                                         | Instructions (MIPS, payload) | Bound in `test/patch.py` |
-| -------------------------------------------------------------------------------------------- | ---------------------------- | ------------------------ |
-| A frame's step, the dearest of the frames below                                              | 33,997                       | 40,000                   |
-| A scripted second of play, its dearest frame painted                                         | 296,867                      | 330,000                  |
+| What                                                                                           | Instructions (MIPS, payload) | Bound in `test/patch.py` |
+| ---------------------------------------------------------------------------------------------- | ---------------------------- | ------------------------ |
+| A frame's step, the dearest of the frames below                                                | 33,997                       | 40,000                   |
+| A scripted second of play, its dearest frame painted                                           | 296,867                      | 330,000                  |
 | 12 embers (6 cinders) falling, three spurts, one cracking a cinder, the aim moving, extras due | 540,043                      | 590,000                  |
-| Lightning over 4 embers, with the rest                                                       | 542,364                      | 590,000                  |
-| The wave banner fading (with an ember and three spurts; in a quiet sky)                      | 493,350                      | 540,000                  |
-| The result card dropping in                                                                  | 462,451                      | 510,000                  |
-| The whole sheet (the title card, play's start, the result card dimming the scene)            | 1,096,761                    | 1,250,000                |
+| Lightning over 4 embers, with the rest                                                         | 542,364                      | 590,000                  |
+| The wave banner fading (with an ember and three spurts; in a quiet sky)                        | 493,350                      | 540,000                  |
+| The result card dropping in                                                                    | 462,451                      | 510,000                  |
+| The whole sheet (the title card, play's start, the result card dimming the scene)              | 1,096,761                    | 1,250,000                |
 
 The brief's worst frame, 24 embers and 3 spurts moving, measured 2,540,226 on the first build (each ember's long sprite and its box, 7 to 8 instructions a pixel to restore the scene under them); cutting the embers at once to 12, the long tails to the first 8, the extras to a budget, joining boxes by their cheapest partner and restoring eight pixels in two loads brought the dearest frame to 542,364. In the emulator, 10 s of play at wave 3 with the wheel turning and Center pressed: 46.3 flips a second over the 10 s, median gap 17.97 ms, 95th 20.50, longest 414 ms, 5 over 34 ms, with the host's load average near 14 (other agents' builds and emulators); a capture of the lull, 24 s: median 17.38 ms, 95th 18.42. The long gaps are the game at rest (the banner's hold, the result card), when nothing is painted; a median of 18 ms against the engine demo's 17 is this game's heavier frames under the emulator. The payload grows by 26,608 bytes (`patch_bytes` 1,432,440 against 1,405,832 for the trunk it was merged on), the state is 242,444 bytes of heap (the art file read whole, 219,200, with the palette now and the beds' boxes), the art file 219,200 bytes (106,496 of squashfs), and no `.scratch`.
 
