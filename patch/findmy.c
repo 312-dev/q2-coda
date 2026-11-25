@@ -100,7 +100,6 @@ int findmy_start(void) {
         return 0;
     }
     pthread_detach(t);
-    ulog('I', "findmy", "the jingle plays");
     if (!g_backlight_status) awake_screen();
     if (!fm.show) fm.show = timer_add(fm_show, 0, 0);
     if (!fm.tick) fm.tick = timer_add(fm_tick, 0, FM_TICK_MS);
@@ -118,16 +117,12 @@ void findmy_stop(void) {
 /* ringnav_input, first: any key, a wheel tick or a touch while the jingle plays stops it, and that
  * press (its down, repeats and release) goes nowhere else. 1 drops the event. */
 int findmy_gate(void *e) {
-    unsigned type = (unsigned)I(e, EVENT_TYPE);
-    int key = type == EVT_KEY_DOWN || type == EVT_KEY_LONG || type == EVT_KEY_UP;
-    int touch = type >= EVT_POINTER_FIRST && type <= EVT_POINTER_ABORT;
-    if (!key && !touch) return 0;
-    if (fm.run && (type == EVT_KEY_DOWN || type == EVT_POINTER_FIRST)) {
-        findmy_stop();
-        fm.eat = 1;
-        return 1;
-    }
-    if (!fm.eat) return 0;
+    unsigned type = (unsigned)I(e, EVENT_TYPE), eat = fm.eat;
+    if ((type < EVT_KEY_DOWN || type > EVT_KEY_UP) &&
+        (type < EVT_POINTER_FIRST || type > EVT_POINTER_ABORT))
+        return 0; /* the keys' events are 0x110 to 0x114, the pointer's 0xff to 0x107 */
+    if (fm.run && (type == EVT_KEY_DOWN || type == EVT_POINTER_FIRST))
+        return findmy_stop(), fm.eat = 1;
     if (type == EVT_KEY_UP || type == EVT_POINTER_FIRST + 4 /* up */) fm.eat = 0;
-    return 1;
+    return (int)eat;
 }
