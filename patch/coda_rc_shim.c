@@ -462,6 +462,7 @@ static void cr_now(void) {
         ulog('I', "remote", radio ? "Now Playing: a radio plays" : "Now Playing: no radio");
     }
     put_int(b, sizeof b, &n, "radio", radio);
+    put_int(b, sizeof b, &n, "find", findmy_on()); /* Find My Vamp's jingle plays (NowPlaying.finding) */
     static const char *const sources[] = { "", "library", "radio", "netradio", "spotify", "video" };
     put(b, sizeof b, &n, "source", sources[now.source]);
     put_int(b, sizeof b, &n, "live", live);
@@ -716,6 +717,12 @@ static void cr_run(const char *raw) {
         int before = media_status(), code = cr_jump((unsigned)v, w);
         cr_said(seq, verb + 1, before, code == 3 ? "not that song now" : code ? "refused" : 0);
         cr_ack(seq, code);
+    } else if (!strcmp(word, "find")) {
+        /* Find My Vamp (findmy.c): "find" plays the jingle (its minute again if it plays), "find stop" ends it */
+        int stop = !strncmp(verb, " find stop", 10), ok = stop ? (findmy_stop(), 1) : findmy_start();
+        cr_said(seq, verb + 1, media_status(), ok ? 0 : "no buzzer");
+        cr_now(); /* find= before the ack, as cr_settle */
+        cr_ack(seq, ok ? 0 : 2);
     } else if (verb && __isoc99_sscanf(verb, " volume %d", &v) == 1 && v >= 0 && v <= 100) {
         /* as the AirPlay app sets it (airplay.c): up to vol_cap (Max Volume and a Bluetooth
          * device's Volume Limit, bt_vol_limit.c), saved for the output in use */

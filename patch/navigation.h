@@ -1379,6 +1379,15 @@ void sw_update_paint(void *w, void *canvas), sw_update_restarting(void *win);
 const char *sw_update_title(const char *name);
 int sw_update_key(void *top, unsigned key);           /* its page's wheel and Centre */
 void toast_icon(const char *glyph, const char *text); /* feedback.c */
+/* feedback.c: one toast at a time; a toast of text for ms (glyph a theme image's whole name, or 0); the nav_to hook's
+ * swap of a toast asked for while one is up; the next toast's number, and that toast taken down if still up */
+void toast_for(const char *glyph, const char *text, int ms), toast_end(unsigned n);
+int toast_swap(const char *name, const int *info);
+unsigned toast_next(void);
+/* findmy.c: Find My Vamp's jingle (docs/internals.md#find-my-vamp); nav/input.c's buzzer worker busy */
+int findmy_start(void), findmy_on(void), findmy_gate(void *e);
+void findmy_stop(void);
+extern volatile int tone_busy;
 void toast_stay(void *canvas, int top, const char *text); /* feedback.c: a toast a page paints while it holds */
 /* feedback.c: a toast with glyph (a theme image without its prefix) by the next loop pass */
 void toast_later(const char *glyph, const char *text), toast_later_poll(void);

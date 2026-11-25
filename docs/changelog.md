@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - **Find My Vamp**: tap Find My Vamp in the Vamp app (on the phone, or in the car) and the Q2 plays a loud jingle on its own speaker, with its screen lit and a "Find My Vamp" toast, for up to a minute or until you press a key, turn the wheel, touch the screen or tap Stop in the app. It plays with headphones in, keeps the music playing, and reaches the Q2 over Bluetooth as well as Wi-Fi.
+  - Toasts no longer stack: a new message takes the place of the one showing at once, where two could be on screen together, the older one's words showing round the newer one's.
   - Library: picking a song in Songs, an album, an artist or Search plays that song when another one has the same title, such as two artists' songs of one name on your server, or two files of one name in different folders, where it always played the first of them.
   - USB-C headphones: the buttons on USB-C earbuds and headsets, and on wired earbuds through a USB-C to 3.5 mm adapter with its own DAC, now control the Q2: volume up and down (hold to keep going), play/pause, and a double or triple press of the middle button to skip forward or back. They work from any page and with the screen off.
   - Playback: seeking a paused song keeps it paused, however you seek: dragging the position on Now Playing, Previous going back to the start, or a seek from the Vamp app, Android Auto or the car in iPhone mode. Now Playing shows the new position at once, Resume keeps it, and Play goes on from there; a seek to the very end stops on the song's last second. Before, these started the song playing.

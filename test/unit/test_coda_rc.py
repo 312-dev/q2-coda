@@ -615,7 +615,7 @@ def cover_answers():
 
 
 ANSWERS = {
-    0x10: ACK, 0x20: ACK, 0x22: ACK, 0x24: ACK, 0x40: ACK, 0x44: ACK, 0x46: ACK,
+    0x10: ACK, 0x20: ACK, 0x22: ACK, 0x24: ACK, 0x26: ACK, 0x40: ACK, 0x44: ACK, 0x46: ACK,
     0x60: lambda m: [(0x61, None, client.encode([(1, 'ab' * 32), (2, 'https://use1-1.relay.n0.iroh.link./')]))],
     0x12: lambda m: [(0x7F, 0, b''), (0x11, None, NOW)],  # a push first: kept, then the answer
     0x30: lambda m: [(0x31, None, client.encode([(1, client.text(m, 1)), (2, 'Albums'), (3, 2), (4, 0),
@@ -681,7 +681,7 @@ def test_client_commands(q2, capsys, tmp_path):
                                   'duration_ms': 200000, 'art': 'a:3', 'play_state': 1, 'shuffle': 1, 'repeat': 2,
                                   'volume': 40, 'hearts': 3, 'rateable': True, 'buffering': False, 'buffered_bytes': 0,
                                   'total_bytes': 0, 'buffered_ms': 0, 'radio': False, 'notice': '', 'notice_id': 0,
-                                  'album_id': '', 'artist_id': ''},
+                                  'album_id': '', 'artist_id': '', 'finding': False},
                   'position': {'position_ms': 30000, 'at_ms': 99}, 'queue': {'version': 4, 'index': 2, 'total': 9}}
     b = run(capsys, 'browse', 'albums', '--sort', 'name', '--limit', '2')
     assert b['items'][0] == {'id': 'al:1', 'title': 'One', 'subtitle': 'A', 'art': 'a:1', 'group': 'O',
@@ -718,6 +718,13 @@ def test_client_radio_and_remote(q2, capsys):
     for argv, fields in ((('radio',), {}), (('radio', 'song:t12'), {1: [b'song:t12']}), (('radio', 'stop'), {2: [1]})):
         assert run(capsys, *argv) == {'ok': True} and q2[-1].requests[0] == (0x46, fields)
     assert run(capsys, 'remote') == {'endpoint_id': 'ab' * 32, 'relay_url': 'https://use1-1.relay.n0.iroh.link./'}
+
+
+def test_client_find(q2, capsys):
+    """Find (CAP_FIND): the jingle, then stopped."""
+    run(capsys, 'pair')
+    for argv, fields in ((('find',), {}), (('find', 'stop'), {1: [1]})):
+        assert run(capsys, *argv) == {'ok': True} and q2[-1].requests[0] == (0x26, fields)
 
 
 def test_client_watch_prints_pushes_until_its_time(q2, capsys, monkeypatch):

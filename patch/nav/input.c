@@ -227,6 +227,7 @@ static void vol_step(unsigned key) {
     write_int_config(value, "PLAYSET", "VOLUME");
 }
 int ringnav_input(void *wm, void *e) {
+    if (e && findmy_gate(e)) return 0; /* any press stops Find My Vamp's jingle, and goes no further */
     if (e && tick_gate(e)) return 0;
     if (e && wheel_lock_gate(e)) return 0; /* the wheel while locked or dark (keylock.c) */
     if (e && (chord_gate(e) || wake_gate(e))) return 0;
@@ -340,7 +341,7 @@ unsigned long long ringnav_glyph_stamp(void) { return glyph_ms ? glyph_ms : now_
  * worker, not the UI thread; a buzzer click while one sounds is dropped, as the buzzer is busy
  * anyway. With the screen off a pass clicks once (tone_dark; ringnav_sleep).
  */
-static volatile int tone_busy;
+volatile int tone_busy;
 static void *tone_worker(void *on) {
     stock_buzzer_trampoline((int)(long)on);
     tone_busy = 0;
@@ -349,6 +350,7 @@ static void *tone_worker(void *on) {
 /* A buzzer click alone (clicker.c clicker_buzzes, nothing mixed), on the same worker and gates as
  * ringnav_buzzer: Radio's dial, whose wheel is read raw (radio_tuner.c fine_turn). */
 int ringnav_piezo(void) {
+    if (findmy_on()) return 0; /* Find My Vamp's jingle has the buzzer (findmy.c) */
     int listening = g_po_status || g_bal_status || mclGetOutputWay();
     if (!g_keytone_flag || tone_dark || !clicker_buzzes(listening) || tone_busy) return 0;
     unsigned long tid;
@@ -362,6 +364,7 @@ int ringnav_piezo(void) {
     return 1;
 }
 int ringnav_buzzer(int on) {
+    if (findmy_on()) return 0; /* Find My Vamp's jingle has the buzzer (findmy.c) */
     int listening = g_po_status || g_bal_status || mclGetOutputWay();
     if (!g_keytone_flag || tone_dark) return 0;
     int route = clicker_route(listening);

@@ -21,7 +21,7 @@ enum {
     T_HELLO = 0x01, T_HELLO_RESP, T_PAIR_START, T_PAIR_CHALLENGE, T_PAIR_FINISH, T_PAIR_RESULT, T_AUTH, T_AUTH_RESP,
     T_ERROR = 0x0f,
     T_SUBSCRIBE = 0x10, T_STATE, T_GET_STATE,
-    T_TRANSPORT = 0x20, T_ACK, T_SET_MODE, T_RATE = 0x24,
+    T_TRANSPORT = 0x20, T_ACK, T_SET_MODE, T_RATE = 0x24, T_FIND = 0x26,
     T_BROWSE = 0x30, T_BROWSE_RESP, T_SEARCH, T_SEARCH_RESP,
     T_PLAY = 0x40, T_GET_QUEUE = 0x42, T_QUEUE_RESP, T_PLAY_QUEUE_ITEM, T_START_RADIO = 0x46,
     T_GET_COVER = 0x50, T_COVER,
@@ -54,6 +54,7 @@ enum {
 #define CAP_NOTICE 32768u   /* NowPlaying.notice: the Vamp's toast, for the car to show a moment */
 #define CAP_REMOTE 65536u   /* GetRemote: q2-iroh's endpoint id and relay, to reach the Vamp from another network */
 #define CAP_IROH_ALLOW 131072u /* RegisterRemote: q2-iroh admits only paired phones' iroh keys */
+#define CAP_FIND 262144u       /* Find, NowPlaying.finding: Find My Vamp's jingle */
 
 /* ---- the protobuf subset: varints (wire type 0) and length-delimited fields (wire type 2) ---- */
 typedef struct { uint8_t *p; size_t n, cap; int over; } pbw;

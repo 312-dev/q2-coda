@@ -28,8 +28,10 @@ int ringnav_valid_output(void) { return stock_valid_output_trampoline() || usb_c
  * queue. Refused (stock's gate, which shows its toast), the navigator is not asked: the list stays
  * with its selection, and nothing is loaded, so the song playing or paused, the queue, its place
  * and a server song's app (catalogue.c catalogue_load, reached only from the page's player_start)
- * are as they were. The condition is playing_page_init's own (0x53e4a8), asked earlier. */
+ * are as they were. The condition is playing_page_init's own (0x53e4a8), asked earlier. A toast while one is up
+ * takes its place (feedback.c toast_swap), ours and stock's alike. */
 int ringnav_nav_to(const char *name, const int *ctx) {
+    if (toast_swap(name, ctx)) return 0; /* RET_OK */
     if (upnext_instead(name)) return STOP; /* stock's queue page: Up Next in its place (upnext.c) */
     if (name && ctx && !tk_strcmp(name, "playing_page") && ctx[2] != 0xff &&
         check_forbid_play_no_headset(0))

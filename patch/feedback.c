@@ -68,13 +68,81 @@ void toast_stay(void *canvas, int top, const char *text) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
+/* One toast at a time (docs/oled-design.md#dialogs-and-toasts): a toast asked for while one is up, ours or stock's,
+ * takes its place at once, the same dialog with the new words and a new time, never a second dialog over the first.
+ * Stock's toast is a modal dialog (msginfo_dialog), so a toast asked for from the polls its loop runs opened another
+ * over it, each closing on its own timer (two pills, the older one's words showing round the newer one's). */
+static struct {
+    int ours;   /* the msginfo_dialog being opened is toast_for's, with pill_glyph set for it */
+    unsigned n; /* toasts opened or swapped in so far (toast_next) */
+} ts __attribute__((section(".scratch")));
+
+static void *toast_up(void) {
+    void *wm = window_manager();
+    for (unsigned i = 0, n = widget_count_children(wm); i < n; ++i)
+        if (feedback_toast(widget_get_child(wm, i))) return widget_get_child(wm, i);
+    return (void *)0;
+}
+/* Stock's msginfo_dialog_on_timer (0x49b67c) as it is: the dialog quit, the timer gone (RET_REMOVE). */
+static int toast_due(const void *info) {
+    dialog_quit(P(info, TIMER_CTX), 0);
+    return 7;
+}
+static void toast_unarm(void *w) {
+    int t = widget_get_prop_int(w, "timer_idex", -1);
+    if (t != -1) timer_remove((unsigned)t);
+    widget_set_prop_int(w, "timer_idex", -1);
+}
+
+/* ringnav_nav_to, for every dialog/msginfo_dialog (info: stock's {kind, ms, text}): with a toast up, its words and
+ * time are info's and nothing opens (1); else 0, and it opens. */
+int toast_swap(const char *name, const int *info) {
+    if (!name || !info || tk_strcmp(name, "dialog/msginfo_dialog")) return 0;
+    if (!ts.ours) pill_glyph[0] = 0; /* stock's own toast: no glyph */
+    ts.ours = 0;
+    ++ts.n;
+    void *w = info[0] == 1 ? toast_up() : (void *)0, *line = (void *)0;
+    for (unsigned i = 0, n = w ? widget_count_children(w) : 0; i < n && !line; ++i) {
+        void *c = widget_get_child(w, i);
+        if (!tk_strcmp(widget_get_type(c), "label") || !tk_strcmp(widget_get_type(c), "hscroll_label")) line = c;
+    }
+    if (!line) return 0;
+    widget_set_text_utf8(line, (const char *)(info + 2));
+    toast_unarm(w);
+    widget_set_prop_int(w, "timer_idex", (int)timer_add(toast_due, w, (unsigned)info[1]));
+    widget_invalidate_force(w, (void *)0);
+    return 1;
+}
+
+/* The number the next toast opened or swapped in will have, for toast_end. */
+unsigned toast_next(void) { return ts.n + 1; }
+/* The toast numbered n taken down now, if it is still the one up (no other has taken its place). */
+void toast_end(unsigned n) {
+    void *w = n && n == ts.n ? toast_up() : (void *)0;
+    if (!w) return;
+    toast_unarm(w);
+    dialog_quit(w, 0);
+}
+
+/* A toast of text for ms, glyph (a theme image's whole name, or 0) before its words: stock's msginfo_dialog, modal,
+ * so its loop runs every ringnav_sleep poll again and a poll clears or latches what it toasts first (logo_poll). */
+void toast_for(const char *glyph, const char *text, int ms) {
+    struct {
+        int kind, ms;
+        char text[0x400];
+    } info = { 1, ms, { 0 } };
+    for (unsigned i = 0; text[i] && i < sizeof info.text - 1; ++i) info.text[i] = text[i];
+    coda_rc_note(info.text); /* the car shows it too (coda_rc_shim.c) */
+    tk_snprintf(pill_glyph, sizeof pill_glyph, "%s", glyph ? glyph : "");
+    ts.ours = 1;
+    ++st.toasts; /* its loop runs the UI's polls, which may toast again */
+    navigator_to_with_context("dialog/msginfo_dialog", &info);
+    --st.toasts;
+}
+
 /* A toast with a glyph before its words (docs/oled-design.md#dialogs-and-toasts): glyph a theme image's
  * whole name. */
-void toast_icon(const char *glyph, const char *text) {
-    tk_snprintf(pill_glyph, sizeof pill_glyph, "%s", glyph ? glyph : "");
-    toast(text);
-    pill_glyph[0] = 0;
-}
+void toast_icon(const char *glyph, const char *text) { toast_for(glyph, text, 1500); }
 /* A toast shown by the next UI loop pass (toast_later_poll, from ringnav_sleep's usb_ui_poll),
  * never inside stock's USB pass or an input's dispatch, whose own loop a toast's would run again:
  * USB's and charging's. glyph is a theme image's name without the art prefix; the last one asked
