@@ -591,6 +591,16 @@ static int un_back(void *dialog, void *event) {
     return STOP;
 }
 
+/* Stock's own queue page (playerqueue_page), which Now Playing's More opens from its Queue row
+ * (playermore_row_on_click), asked of the navigator (output_rule.c ringnav_nav_to): Up Next opens
+ * in its place, from the next loop pass, as View Queue and the queue button open it, so the queue
+ * has one page, its rows' menus and Move. 1 when it was that page. */
+int upnext_instead(const char *name) {
+    if (!name || tk_strcmp(name, "playerqueue_page")) return 0;
+    timer_add(np_queue, (void *)0, 0);
+    return 1;
+}
+
 /* Up Next opened in the sheet, named as its page was (contexts.inc, navigation.c own_order) */
 void up_next(void) {
     if (un.page || !(un.page = modal_sheet(un_back, un_closed))) return;

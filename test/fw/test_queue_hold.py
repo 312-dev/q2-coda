@@ -185,3 +185,17 @@ def test_move_on_a_playing_next_song_lifts_it_and_the_wheel_carries_it_down(fw, 
     key = fw.fn('un_key', C.c_int, C.c_void_p, C.c_uint, C.c_int)
     assert key(s.page, O['KEY_NEXT'], 0) == 1 and key(s.page, KEY_CENTER, 0) == 1
     assert s.stops()[:3] == ['Clear', 'Song 8', 'Song 9']
+
+
+def test_stock_s_queue_page_opens_up_next_in_its_place(fw, ui, hold, recs, centre):
+    """Now Playing's More > Queue asks the navigator for stock's playerqueue_page (playermore_row_on_click): Up Next
+    opens instead (upnext.c upnext_instead), so its rows get the menu, Move and no Shut Down? as every queue row does.
+    Any other page goes to stock's navigator as before."""
+    hold.now_playing([song(recs, i) for i in range(4)], held=True)
+    opened = []
+    fw.mock('stock_nav_to_trampoline', lambda name, *_: opened.append(C.string_at(name)) or 0)
+    nav_to = fw.fn('ringnav_nav_to', C.c_int, C.c_char_p, C.c_void_p)
+    assert nav_to(b'playerqueue_page', None) == STOP and opened == []
+    ui.due('np_queue')
+    assert ui.top() == hold.dialog and ui.nodes[ui.top()].name == 'upnext_page'
+    assert nav_to(b'settings_page', None) == 0 and opened == [b'settings_page']
