@@ -43,14 +43,15 @@ class Puff(C.Structure):
 
 
 class State(C.Structure):
-    _fields_ = [('art', C.c_uint * (HDR['EG_ART_BYTES'] // 4)), ('pal', C.c_uint * (320 // BAND * 256)),
-                ('grow', C.c_ubyte * (8 * CH_W * CH_H)), ('ok', C.c_int), ('em', Ember * 12), ('sh', Shot * 3), ('pf', Puff * 3), ('sky', (C.c_short * 3) * 15),
+    _fields_ = [('em', Ember * 12), ('sh', Shot * 3), ('pf', Puff * 3), ('sky', (C.c_short * 3) * 15),
                 *((k, C.c_int) for k in 'mode aim recoil spray repeat stop h tick'.split()), ('bed', C.c_int * 8),
                 ('bed_t', C.c_int * 8), ('land_x', C.c_int), ('land_t', C.c_int), ('last', C.c_int * 2), ('blink', C.c_int),
                 ('flame', C.c_ubyte * 8), *((k, C.c_int) for k in 'wave lull left spawn gap banner cleared light frm k strip dim bolt bolt_x '
                                        'bolt_seed bolt_wait card seq runs wait'.split()),
                 ('score', C.c_uint), ('seed', C.c_uint), ('boxes', C.c_int), ('box', (C.c_int * 4) * 64),
-                *((k, C.c_uint) for k in 'magic best best_wave sum saved'.split())]
+                *((k, C.c_uint) for k in 'magic best best_wave sum saved'.split()),
+                ('art', C.c_uint * (HDR['EG_ART_BYTES'] // 4)), ('pal', C.c_uint * (320 // BAND * 256)),
+                ('grow', C.c_ubyte * (8 * CH_W * CH_H)), ('ok', C.c_int)]
 
 
 def part(k):
@@ -79,7 +80,8 @@ class Game:
         fw.mock('buzzeer_switch', lambda *_: self.sounds.append(fw.var('clicker_kind', C.c_int).value))
         self.done = C.CFUNCTYPE(None)(lambda: None)
         self.game = fw.var('eng_embergarden', GameDef)
-        assert self.e['eng_open'](self.game, PAGE, 0x7300, 320, self.done, self.done) == 1
+        self.opened = self.e['eng_open'](self.game, PAGE, 0x7300, 320, self.done, self.done)  # 2: on the game in progress kept
+        assert self.opened in (1, 2)
         self.g = State.from_address(fw.var('engine__en', C.c_void_p).value + C.sizeof(Eng) + (-C.sizeof(Eng)) % 8)
         self.fn = {k: fw.fn(f'game_embergarden__{k}', *v) for k, v in {
             'step': (C.c_int, C.c_void_p, C.POINTER(Input)), 'draw': (None, C.c_void_p, C.c_void_p),

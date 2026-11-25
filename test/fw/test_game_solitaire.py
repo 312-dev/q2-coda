@@ -20,6 +20,7 @@ from test_games import PAGE, Canvas, Page, fnv1a, texts
 SLIP_X1, RAIL_H = 281, 22  # game_solitaire.c: the slip's right edge, the rail's height
 
 ART_FILE, SAVE = '/usr/share/q2games/solitaire.bin', '/mnt/data/game-solitaire'
+RUN = '/mnt/data/game-solitaire.run'  # the game in progress, kept by the engine (quick resume)
 ART = (ROOT/'assets/games/solitaire.bin').read_bytes()
 LAYOUT = {k: int(v) for k, v in __import__('re').findall(r'#define (ART_\w+) (\d+)', (ROOT/'patch/game_solitaire_art.h').read_text())}
 MAGIC = 0x31534343
@@ -50,14 +51,14 @@ class Record(C.Structure):
 
 
 class Sol(C.Structure):
-    _fields_ = [('g', Record), *((k, C.c_int) for k in 'h rail limit mode sel art nsrc cur hand hfrom hn hover ndst'.split()),
+    _fields_ = [('g', Record), *((k, C.c_int) for k in 'h rail limit mode sel nsrc cur hand hfrom hn hover ndst'.split()),
                 ('src', (C.c_ubyte * 2) * MAXSRC), ('dst', C.c_ubyte * 8), *((k, C.c_int) for k in 'hx hy hx0 hy0 ht'.split()),
                 ('fan_d', C.c_int * 7), ('fan_u', C.c_int * 7), ('undo', Move * UNDO), ('uhead', C.c_int), ('ucount', C.c_int),
                 ('fl', Flight * MAXF), ('nfl', C.c_int),
                 *((k, C.c_int) for k in 'flash_t flash_p spark_t spark_p flip_t flip_p flip_i msg msg_t stuck t kings '
                                        'best_new deal_left auto_wait seq runs wait'.split()),
                 ('last_ms', C.c_uint), *((k, C.c_int) for k in 'shown_s since_save unsaved nmark all'.split()),
-                ('marks', (C.c_short * 4) * 9),
+                ('marks', (C.c_short * 4) * 9), ('art', C.c_int),
                 ('tile', C.c_ubyte * 4096), ('shade', C.c_ushort * (LAYOUT['ART_SHADE_W'] * LAYOUT['ART_SHADE_H'])), ('felt_lut', C.c_uint * (LAYOUT['ART_LUT_LEVELS'] * 15)), ('back', (C.c_uint * 41) * 56), ('deco_p', ((C.c_uint * 57) * 83) * 5), ('deco_t', ((C.c_ubyte * 57) * 83) * 5),
                 ('deco_run', ((C.c_ubyte * 4) * 83) * 5), ('deco_tmp', (C.c_uint * 57) * 83),
                 ('file', C.c_uint * (LAYOUT['ART_BYTES'] // 4))]
@@ -96,7 +97,8 @@ class Game:
         fw.mock('buzzeer_switch', lambda *_: self.sounds.append(fw.var('clicker_kind', C.c_int).value))
         self.done = C.CFUNCTYPE(None)(lambda: None)
         self.game = fw.var('eng_solitaire', GameDef)
-        assert self.e['eng_open'](self.game, PAGE, SHEET, h, self.done, self.done) == 1
+        self.opened = self.e['eng_open'](self.game, PAGE, SHEET, h, self.done, self.done)  # 2: on the game in progress kept
+        assert self.opened in (1, 2)
         self.b = Sol.from_address(fw.var('engine__en', C.c_void_p).value + C.sizeof(Eng) + (-C.sizeof(Eng)) % 8)
         p, i = C.c_void_p, C.c_int
         self.fn = {k: fw.fn(f'game_solitaire__{k}', *v) for k, v in {
@@ -776,8 +778,13 @@ def test_resume_returns_to_the_game_in_progress(fw):
     saved = bytes(g.b.g)
     g.e['eng_hold']()
     g.close()
-    g = Game(fw, files=g.page.card.files)
-    assert g.b.mode == START and g.b.g.live and bytes(g.b.g)[4:-4] == saved[4:-4]
+    files = dict(g.page.card.files)
+    g = Game(fw, files=files)  # quick resume: straight back to the table
+    assert g.opened == 2 and g.b.mode == PLAY and bytes(g.b.g)[4:-4] == saved[4:-4]
+    g.close()
+    del files[RUN]  # no run file (as after an update to this firmware): the start board's Resume
+    g = Game(fw, files=files)
+    assert g.opened == 1 and g.b.mode == START and g.b.g.live and bytes(g.b.g)[4:-4] == saved[4:-4]
     g.press(0, ticks=2)
     g.press(E_CENTRE)
     assert g.b.mode == PLAY

@@ -1088,10 +1088,10 @@ def test_food_lands_only_on_free_cells_and_reaches_them_all(fw):
 # The page: its save files, keys, timers. page_open and the list go to stubs, so a page is a number.
 
 class Card:
-    """blob_io's files: fopen, fread, fwrite and rename on a dict."""
+    """blob_io's files: fopen, fread, fwrite, rename and unlink on a dict."""
     def __init__(self, fw, files=None):
         self.files, self.open, self.fail = dict(files or {}), {}, False
-        for name in 'fopen fread fwrite rename'.split():
+        for name in 'fopen fread fwrite rename unlink'.split():
             fw.mock('fw_' + name, getattr(self, name))
 
     def fopen(self, path, mode, *_):
@@ -1121,6 +1121,9 @@ class Card:
         self.files[C.string_at(b).decode()] = self.files.pop(C.string_at(a).decode())
         return 0
 
+    def unlink(self, path, *_):
+        return 0 if self.files.pop(C.string_at(path).decode(), None) is not None else -1
+
 
 # The page's window is zeroed memory, not a bare handle: under OLED's feedback painter bar_title_sync reads
 # the top window's parent (feedback.c top_named) as page_list opens the page.
@@ -1146,7 +1149,8 @@ class Page:
         self.widgets = []  # the sheet, then the chooser's list, each open: zeroed widgets at their boxes' tops
         fw.mock('widget_factory_create_widget', self.widget)
         fw.mock('list_item_create', lambda *_: 0x7100)
-        fw.mock('widget_get_child', lambda *_: 0x7200)
+        self.child = C.create_string_buffer(0x400)  # a row's label: game_row reads its box
+        fw.mock('widget_get_child', lambda *_: C.addressof(self.child))
         fw.mock('fw_fflush', lambda *_: 0)
         fw.mock('fw_fsync', lambda *_: 0)
         fw.mock('fw_fclose', lambda *_: 0)
@@ -1645,11 +1649,16 @@ def test_return_opens_the_menu_and_the_wheel_picks(fw):
     assert s.paused == MENU and not s.frame and s.choice == 0
     p.key(NEXT)
     assert s.choice == 1
-    p.key(PREV)
+    p.key(PREV, PREV)
+    assert s.choice == 2  # round: Continue, Restart, Quit
+    p.key(NEXT)
     assert s.choice == 0
     p.key(CENTER)
     assert s.paused == RUN and s.frame  # Continue
+    s.vx.score = 7
     p.key(RETURN, NEXT, CENTER)
+    assert s.paused == RUN and s.frame and s.vx.score == 0  # Restart: a new game, running
+    p.key(RETURN, NEXT, NEXT, CENTER)
     assert s.target == CHOOSER and s.timer  # Quit
 
 
@@ -1690,7 +1699,7 @@ def test_snake_the_side_keys_steer_and_the_wheel_is_ignored(fw):
     p.key(FWD_BTN)  # the menu: a side key picks
     assert s.choice == 1 and s.sn.dir == 2
     p.key(NEXT)  # so does the wheel
-    assert s.choice == 0
+    assert s.choice == 2
 
 
 def test_snake_after_a_crash_centre_plays_again(fw):
@@ -1900,6 +1909,9 @@ def card_apps(fw, apps):
 
 
 SHIPPED = ['Pop Stall', 'Cabin Solitaire', 'Evening Puzzle', 'Caller Ten', 'Ember Garden']  # the build's games (peq.h GAME_*, engine.c eng_games[])
+KINDS = ['Arcade', 'Cards', 'Number puzzle', 'Music quiz', 'Arcade']  # each one's row's second line
+SLUGS = ['popstall', 'solitaire', 'sudoku', 'callerten', 'embergarden']  # its icon's name, GAMES_ICONS/SLUG.png
+ROWS = [t for row in zip(SHIPPED, KINDS) for t in row]  # the rows' text, name then kind
 
 
 def test_the_build_ships_the_engines_games_alone(fw):
@@ -1908,10 +1920,25 @@ def test_the_build_ships_the_engines_games_alone(fw):
     texts = []
     fw.mock('widget_set_text_utf8', lambda w, s, *_: texts.append(C.string_at(s).decode()))
     p = Page(fw, card_apps(fw, {}))
-    assert texts[texts.index('Games') + 1:] == SHIPPED and len(handlers(fw, EVT_CLICK)) == len(SHIPPED)
+    assert texts[texts.index('Games') + 1:] == ROWS and len(handlers(fw, EVT_CLICK)) == len(SHIPPED)
     assert p.s.rows == len(SHIPPED)
     peq = (host.ROOT/'patch/peq.h').read_text()
     assert re.findall(r'^#define GAME_(\w+) (\d)', peq, re.M) == [(n, '0') for n in ('SUDOKU', 'VORTEX', 'SOLITAIRE', 'SNAKE')]
+
+
+def test_an_engine_game_s_row_is_two_lines_with_its_icon_at_the_text_column(fw):
+    """docs/oled-design.md#two-line-row: the row's 40 px icon at the text column, 6 px down; its name and kind moved
+    beside it to 72, ending before the chevron (316)."""
+    icons, moved = [], []
+    fw.mock('image_create', lambda parent, x, y, w, h, *_: icons.append((x, y, w, h)) or 0x7400 + len(icons))
+    fw.mock('image_base_set_image', lambda w, name, *_: icons.append(C.string_at(name).decode()))
+    fw.mock('widget_move_resize', lambda w, x, y, ww, h, *_: moved.append((x, ww)))
+    Page(fw, card_apps(fw, {}))
+    x = fw.fn('page_x', C.c_int)()
+    shown = [i for i in icons if isinstance(i, str) and 'q2games' in i]
+    assert shown == [f'file:///usr/share/q2games/icons/{n}.png' for n in SLUGS]
+    assert [i for i in icons if isinstance(i, tuple) and i[2] == 40] == [(x, 6, 40, 40)] * len(SHIPPED)
+    assert moved.count((x + 48, 268 - x)) == 2 * len(SHIPPED)  # each row's two labels
 
 
 def test_saves_of_the_games_left_out_are_neither_read_nor_touched(fw):
@@ -1930,7 +1957,7 @@ def test_the_chooser_lists_its_games_then_the_card_s_by_name_and_each_row_opens_
     texts = []
     fw.mock('widget_set_text_utf8', lambda w, s, *_: texts.append(C.string_at(s).decode()))
     p = Page(fw, files)
-    assert texts[-len(SHIPPED) - 2:] == [*SHIPPED, 'Blocks', 'Zork']  # Tunes isn't a game
+    assert texts[-len(ROWS) - 4:] == [*ROWS, 'Blocks', '', 'Zork', '']  # Tunes isn't a game; a card's has no kind
     rows = handlers(fw, EVT_CLICK)
     assert len(rows) == len(SHIPPED) + 2  # the engine's games, the card's two
     fw.mock('fw_fork', lambda *_: 4242)
@@ -2405,12 +2432,13 @@ def test_arcade_paint_return_s_menu_puts_the_choice_on_the_accent_s_bar(fw, ligh
     p.go(VORTEX)
     p.key(RETURN)
     ops = popup_ops(paint(p))
-    (title, _, _), (a, ca, ra), (b, cb, rb) = words(ops)
-    assert (title, a, b) == ('Paused', 'Continue', 'Quit')  # as written
+    (title, _, _), (a, ca, ra), (b, cb, rb), (c, cc, rc) = words(ops)
+    assert (title, a, b, c) == ('Paused', 'Continue', 'Restart', 'Quit')  # as written
     box, bar = [o for o in ops if o.kind == 'round']
     assert encloses(box.rect, bar.rect) and ra[1] <= bar.rect[1] and bar.rect[1] + bar.rect[3] <= ra[1] + ra[3] < rb[1] + rb[3]
     assert bar.color == ink(fw, rgba(fw.fn('accent_tone', C.c_uint, C.c_int)(0))) and not grey(bar.color)
-    assert light(ca) and grey(cb) and light(box.color) == (light_mode == b'1')  # white on the bar in either mode
+    assert rb[1] + rb[3] <= rc[1] and encloses(box.rect, (rc[0], rc[1], rc[2], rc[3]))
+    assert light(ca) and grey(cb) and grey(cc) and light(box.color) == (light_mode == b'1')  # white on the bar in either mode
     p.key(NEXT)
     _, bar = [o for o in popup_ops(paint(p)) if o.kind == 'round']
     assert rb[1] <= bar.rect[1] and bar.rect[1] + bar.rect[3] <= rb[1] + rb[3]
@@ -2432,7 +2460,7 @@ def test_a_card_game_s_q2_popup_is_the_pop_up_as_it_is_drawn(fw, light_mode):
     p.go(VORTEX)
     p.key(RETURN)
     ops = popup_ops(paint(p))
-    (_, ct, _), (_, ca, _), (_, cb, _) = words(ops)
+    (_, ct, _), (_, ca, _), (_, cb, _), _ = words(ops)
     style, c = popup_env(fw)
     box, frame, title, text, pick, pick_text = c[:6]
     assert (title, text, pick_text) == (rgb(ct), rgb(cb), rgb(ca))

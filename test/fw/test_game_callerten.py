@@ -12,7 +12,7 @@ import struct
 import pytest
 
 from conftest import O, Files, block, stock_start_with, threads_now
-from test_engine import CENTER, E_CENTRE, E_PLAY, E_TOUCH, ENGINE, NEXT, PLAY, RETURN, Eng, GameDef, Input, api, screen
+from test_engine import CENTER, E_CENTRE, E_PLAY, E_TOUCH, ENGINE, NEXT, PLAY, PREV, RETURN, Eng, GameDef, Input, api, screen
 from test_games import PAGE, SHIPPED, Canvas, Page, fnv1a
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -33,33 +33,36 @@ PICS = re.findall(r'A_(\w+),', (ROOT/'patch/game_callerten_art.h').read_text())
 A = {n: k for k, n in enumerate(PICS)}
 
 
-class Keep(C.Structure):
-    _fields_ = [('art', C.c_void_p), ('pk', C.c_void_p), ('owned', C.c_int), ('was_playing', C.c_int), ('watch', C.c_uint)]
-
-
-class Ct(C.Structure):
-    _fields_ = [('k', C.POINTER(Keep)),
-                *((n, C.c_int) for n in 'h screen phase mode sel t at reduced round rounds wrongs rights streak score shown '
-                                        'pts best_new slot stream_dead'.split()),
-                ('row', C.c_int * 4), *((n, C.c_int) for n in 'right pick song'.split()), ('missed', C.c_int * 10),
-                *((n, C.c_int) for n in 'nmissed top clip_sec clip_on clip_held heard ask replay needle4 needle_from '
-                                        'needle_t turn_t lift lift_dir ring ring_from lamps dim dim_t cut end_t swell'.split()),
-                *((n, C.c_int * 4) for n in 'fit_px fit_n full_w maxw scroll'.split()), ('scroll_t', C.c_int),
-                ('sfx', C.c_ubyte * 8), ('sfx_n', C.c_int), ('sfx_wait', C.c_int), ('marks', C.c_uint),
-                ('magic', C.c_uint), ('best', C.c_uint * 3), ('played', C.c_uint), ('sum', C.c_uint)]
-
-
 class Song(C.Structure):
     _fields_ = [('id', C.c_uint), ('key', C.c_uint), ('style', C.c_uint), ('sec', C.c_int), ('year', C.c_int),
                 ('title', C.c_char * 128), ('artist', C.c_char * 80)]
 
 
 class Pick(C.Structure):
-    _fields_ = [*((n, C.c_int) for n in 'refs done mode why n answers played_n'.split()), ('played', C.c_uint * 512),
-                ('seed', C.c_uint), ('song', Song * 80), ('path', (C.c_char * 384) * 13), ('there', C.c_int * 13),
-                ('app', C.c_char * 16), *((n, C.c_int) for n in 'stream seq quit'.split()),
-                *((n, C.c_int * 13) for n in 'kind from_ms want got off'.split()), ('asked', C.c_uint * 13),
-                ('sid', (C.c_char * 40) * 13), ('clip', (C.c_char * 128) * 13), ('sent', C.c_char * 2048)]
+    _fields_ = [*((n, C.c_int) for n in 'mode why n answers'.split()), ('song', Song * 80), ('path', (C.c_char * 384) * 13),
+                ('there', C.c_int * 13), ('app', C.c_char * 16), ('stream', C.c_int), ('kind', C.c_int * 13),
+                ('sid', (C.c_char * 40) * 13), *((n, C.c_int) for n in 'refs done seq quit played_n'.split()),
+                ('played', C.c_uint * 512), ('seed', C.c_uint), *((n, C.c_int * 13) for n in 'from_ms want got off'.split()),
+                ('asked', C.c_uint * 13), ('clip', (C.c_char * 128) * 13), ('sent', C.c_char * 2048)]
+
+
+KEPT = Pick.refs.offset  # the pick's bytes kept with a contest in progress (CT_KEPT)
+
+
+class Keep(C.Structure):
+    _fields_ = [('art', C.c_void_p), ('pk', C.c_void_p), ('owned', C.c_int), ('was_playing', C.c_int), ('watch', C.c_uint)]
+
+
+class Ct(C.Structure):
+    _fields_ = [*((n, C.c_int) for n in 'h screen phase mode sel t at reduced round rounds wrongs rights streak score shown '
+                                        'pts best_new slot stream_dead'.split()),
+                ('row', C.c_int * 4), *((n, C.c_int) for n in 'right pick song'.split()), ('missed', C.c_int * 10),
+                *((n, C.c_int) for n in 'nmissed top clip_sec clip_on clip_held heard ask replay needle4 needle_from '
+                                        'needle_t turn_t lift lift_dir ring ring_from lamps dim dim_t cut end_t swell'.split()),
+                *((n, C.c_int * 4) for n in 'fit_px fit_n full_w maxw scroll'.split()), ('scroll_t', C.c_int),
+                ('sfx', C.c_ubyte * 8), ('sfx_n', C.c_int), ('sfx_wait', C.c_int), ('marks', C.c_uint),
+                ('magic', C.c_uint), ('best', C.c_uint * 3), ('played', C.c_uint), ('sum', C.c_uint),
+                ('songs', C.c_ubyte * KEPT), ('k', C.POINTER(Keep))]
 
 
 def key(path):
@@ -289,7 +292,7 @@ class Rig:
 
     def quit(self):
         """Games' menu, Quit: the page shows its chooser on its next pass, the game closed."""
-        self.page.key(RETURN, NEXT)
+        self.page.key(RETURN, PREV)  # Quit, round from Continue
         self.page.key(CENTER)
         self.page.g.show(None)
         assert not self.fw.var('engine__en', C.c_void_p).value
@@ -312,7 +315,8 @@ def test_caller_ten_is_games_fourth_engine_row_full_screen_still_and_its_state_f
     assert game.name == b'Caller Ten' and game.flags == 2 | 4 and game.size == C.sizeof(Ct)  # ENG_STILL | ENG_FULL
     assert r.e['eng_count']() == r.page.s.engines == len(SHIPPED) and SHIPPED[3] == 'Caller Ten'
     assert r.g.h == 320 and r.g.screen == TUNE and r.g.k.contents.art and not r.g.k.contents.owned
-    assert C.sizeof(Ct) < 1024 and C.sizeof(Pick) < 32 * 1024  # with the art's 192 KB and the worker's 24, under 256 and len(ART) < 200 * 1024  # heap: the art, the rows, the state
+    # heap: the art, the worker's rows and the state, which holds a copy of the rows' songs for quick resume
+    assert C.sizeof(Ct) < 1024 + KEPT and C.sizeof(Pick) < 32 * 1024 and len(ART) + C.sizeof(Pick) + C.sizeof(Ct) < 256 * 1024
     assert r.status == 1 and not r.sent and not r.saves  # tuning takes nothing: the music plays on
 
 
@@ -1023,3 +1027,100 @@ def test_an_answer_downloading_is_pending_and_a_fail_with_no_path_is_given_up(fw
     if s is not None:
         r.step()
         assert r.pk.kind[r.g.song] != STREAM_K or r.g.song != s  # that song passed over at once
+
+
+# ---- quick resume (docs/games-engine.md#quick-resume) ----
+
+RUN = '/mnt/data/game-callerten.run'  # the contest in progress: RUN1, its length, the state's kept bytes, the seal
+
+
+def fresh(tmp_path, name):
+    """Another Q2's library folder, the same songs written again."""
+    (tmp_path / str(name)).mkdir()
+    return tmp_path / str(name)
+
+
+def progress(r):
+    return r.g.mode, r.g.round, r.g.rounds, r.g.score, r.g.rights, r.g.wrongs, r.g.streak, r.g.song, r.g.slot
+
+
+def test_a_contest_left_mid_round_opens_again_on_that_callers_round_with_its_songs(fw, tmp_path):
+    r = Rig(fw, tmp_path, songs=music(14), status=2)
+    r.start(ARTISTS)
+    r.call(r.right_row())
+    r.hear()
+    r.step(n=30)
+    was, songs, song = progress(r), bytes(r.pk)[:KEPT], r.g.song
+    path = r.pk.path[song].value.decode()
+    r.quit()
+    r.run_timers()  # the Library's song given back as it was
+    assert RUN in r.files.files and r.starts == [0]
+    r.sent.clear()
+    r.open()  # no "resume?": the same caller again, its clip from the start of its round
+    assert r.g.screen == ROUND and progress(r) == was and bytes(r.pk)[:KEPT] == songs and r.pk.done
+    assert r.g.phase == CUE and r.g.k.contents.owned and r.clips()[-1][0] == path
+    r.hear()
+    r.call(r.right_row())
+    assert r.g.round == was[1] + 1 and r.g.score > was[3]
+
+
+def test_a_contest_kept_survives_a_restart_of_the_player(fw, tmp_path):
+    r = Rig(fw, tmp_path, songs=music(14))
+    r.start()
+    r.call(r.wrong_row())
+    was, songs, missed = progress(r), bytes(r.pk)[:KEPT], r.g.missed[0]
+    r.quit()
+    again = Rig(fw, fresh(tmp_path, 'boot'), songs=music(14), files={RUN: r.files.files[RUN]})
+    assert again.g.screen == ROUND and progress(again) == was and bytes(again.pk)[:KEPT] == songs
+    assert again.g.nmissed == 1 and again.g.missed[0] == missed  # the summary will name it
+
+
+def test_a_caller_left_on_the_reveal_is_not_asked_again(fw, tmp_path):
+    r = Rig(fw, tmp_path, songs=music(14))
+    r.start()
+    r.hear()
+    r.step(ticks=r.right_row() + 1 - r.g.sel)
+    r.step(pressed=E_CENTRE)
+    r.step(n=21)
+    assert r.g.phase == REVEAL and r.g.rights == 1
+    was = progress(r)
+    r.quit()
+    r.open()
+    assert r.g.phase == REVEAL and progress(r) == was  # the answer counted once
+    r.step(n=60)
+    assert r.g.phase == CUE and r.g.round == 1 and r.g.song == was[-1] and r.g.rights == 1
+
+
+def test_a_corrupt_or_foreign_run_file_and_a_finished_contest_open_on_the_stations(fw, tmp_path):
+    r = Rig(fw, tmp_path, songs=music(14))
+    r.start()
+    r.hear()
+    r.quit()
+    good = r.files.files[RUN]
+    for k, bad in enumerate((good[:-1] + bytes([good[-1] ^ 1]), good[:-4], b'RUN2' + good[4:])):
+        again = Rig(fw, fresh(tmp_path, k), songs=music(14), files={RUN: bad})
+        assert again.g.screen == TUNE
+        again.quit()
+    r = Rig(fw, fresh(tmp_path, 'good'), songs=music(14), files={RUN: good})
+    assert r.g.screen == ROUND
+    r.g.wrongs = 2
+    r.call(r.wrong_row())  # the third wrong: lines closed
+    assert r.g.screen == END
+    r.quit()
+    assert RUN not in r.files.files
+    r.open()
+    assert r.g.screen == TUNE
+
+
+def test_restart_calls_a_new_contest_on_the_same_station(fw, tmp_path):
+    r = Rig(fw, tmp_path, songs=music(14), status=2)
+    r.start(ARTISTS)
+    r.call(r.right_row())
+    assert r.g.score > 0
+    r.page.key(RETURN, NEXT)  # Continue, Restart
+    assert r.page.s.paused == 2 and r.page.s.choice == 1
+    r.page.key(CENTER)
+    assert r.page.s.paused == 0 and r.g.screen == STANDBY and r.g.mode == ARTISTS
+    r.step()
+    assert r.g.screen == ROUND and r.g.round == 0 and r.g.score == 0 and r.g.phase == CUE
+    assert r.g.k.contents.owned  # the Library's song still held for the game

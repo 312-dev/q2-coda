@@ -24,6 +24,7 @@ TARGET = (36, 30, 24)
 WORK, TRIES = 7200, 9
 LATE = 135 * WORK
 MAGIC, FILE, OLD = 0x314b4453, '/mnt/data/game-sudoku', '/mnt/data/ringnav-sudoku'
+RUN = '/mnt/data/game-sudoku.run'  # the puzzle in progress, kept by the engine (quick resume)
 TICK, TAP, ALERT = 1, 2, 3  # clicker_kind as eng_sfx sets it
 TIME_MAX = 99 * 3600 * 60
 REST_MS = 300_000  # the most one rest adds to the time
@@ -142,7 +143,8 @@ class Game:
         fw.mock('buzzeer_switch', lambda *_: self.sounds.append(fw.var('clicker_kind', C.c_int).value))
         self.done = C.CFUNCTYPE(None)(lambda: None)
         self.game = fw.var('eng_sudoku', GameDef)
-        assert self.e['eng_open'](self.game, PAGE, SHEET, h, self.done, self.done) == 1
+        self.opened = self.e['eng_open'](self.game, PAGE, SHEET, h, self.done, self.done)  # 2: on the game in progress kept
+        assert self.opened in (1, 2)
         self.s = Sudoku.from_address(fw.var('engine__en', C.c_void_p).value + C.sizeof(Eng) + (-C.sizeof(Eng)) % 8)
         self.fn = {k: fw.fn(f'game_sudoku__{k}', *v) for k, v in {
             'gen_run': (C.c_int, C.c_void_p, C.c_int),
@@ -584,7 +586,8 @@ def test_play_with_the_dial_shut_clears_the_entry_then_the_notes_and_the_levels_
     g.press(E_PLAY)
     assert s.v.note[i] == 0
     puzzle = bytes(s.v)
-    g.e['eng_hold'](), g.e['eng_close']()  # Quit, and the game again: the levels, the puzzle kept
+    g.e['eng_hold'](), g.e['eng_close']()  # Quit, and the game again with no run file (as after an update to
+    del g.page.card.files[RUN]  # this firmware): the levels, the puzzle kept by its own save
     g.e['eng_open'](g.game, PAGE, SHEET, 320, g.done, g.done)
     g.s = s = Sudoku.from_address(g.fw.var('engine__en', C.c_void_p).value + C.sizeof(Eng) + (-C.sizeof(Eng)) % 8)
     assert s.mode == CHOOSE and bytes(s.v)[4:-20] == puzzle[4:-20]  # (but its magic, its time and its seal)
@@ -1064,7 +1067,7 @@ def test_a_save_comes_back_with_its_entries_notes_cursor_time_and_bests(fw):
     g.e['eng_hold']()  # a pause: written
     g.close()
     again = Game(fw, files=dict(g.page.card.files))
-    assert again.s.v.note[9] == 0b100000001 and again.s.v.note[6] == 0b11 and again.s.mode == CHOOSE
+    assert again.s.v.note[9] == 0b100000001 and again.s.v.note[6] == 0b11 and again.s.mode == PLAYING  # quick resume
     again.close()
 
 
