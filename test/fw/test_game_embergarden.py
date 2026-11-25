@@ -3,12 +3,14 @@ drop alone, the embers' sizes, splits and landings, the beds, the waves and the 
 the glass's corners; then through Games' page."""
 import ctypes as C
 import math
+import os
 import pathlib
 import re
 import struct
 
 import pytest
 
+import embergarden_player
 from test_engine import E_CENTRE, E_NEXT, E_PREV, E_TOUCH, ENGINE, RETURN, Eng, GameDef, Input, api, screen
 from test_games import PAGE, Canvas, Page, fnv1a, heard
 
@@ -83,6 +85,7 @@ class Game:
             'step': (C.c_int, C.c_void_p, C.POINTER(Input)), 'draw': (None, C.c_void_p, C.c_void_p),
             'spawn': (None, C.c_void_p), 'land': (None, C.c_void_p, C.c_int), 'next_wave': (None, C.c_void_p),
             'flush': (None, C.c_void_p), 'mark': (None, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int)}.items()}
+        self.fn_new = fw.fn('game_embergarden__new_game', None, C.c_void_p, C.c_int)
 
     def step(self, wheel=0, held=0, pressed=0, tx=0, ty=0):
         return self.fn['step'](C.addressof(self.g), C.byref(Input(wheel, 0, 0, held, pressed, 0, tx, ty)))
@@ -652,4 +655,12 @@ def test_a_dev_build_starts_play_at_the_wave_config_asks_in_its_light(fw_dev):
     g = Game(fw_dev)
     g.step(pressed=E_CENTRE)
     assert (g.g.mode, g.g.wave, g.g.light, g.g.frm, g.g.k) == (PLAY, 7, DUSK, DUSK, 32)
+    g.close()
+
+
+@pytest.mark.skipif(not os.environ.get('EMBER_PLAYTEST'), reason='EMBER_PLAYTEST=N plays N games a profile and prints the tables')
+def test_playtest_tables(fw):
+    g = Game(fw)
+    for line in embergarden_player.report(g, int(os.environ['EMBER_PLAYTEST']), int(os.environ.get('EMBER_SECONDS', 300))):
+        print(line)
     g.close()
