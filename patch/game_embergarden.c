@@ -485,9 +485,10 @@ static void draw_bolt(const struct eg *g, struct eng_surface *s) {
 }
 
 /* The sky's moving things over the scene: the clouds in the day's light, the billows in the plume's
- * colour as the scene has it at EG_PLUME_X, EG_PLUME_Y, the crater's glow and the lava's dashes. */
-static void draw_sky(const struct eg *g, struct eng_surface *s) {
-    if (s->y0 >= 205) return; /* all of it is above the hedge */
+ * colour as the scene has it at EG_PLUME_X, EG_PLUME_Y, the crater's glow and the lava's dashes.
+ * Like the scene, none of it is painted where the card's body (rows card0 to card1) will cover it:
+ * the rect is painted as its rows above the card, those below, and the columns to each side. */
+static void draw_sky(const struct eg *g, struct eng_surface *s, int card0, int card1) {
     unsigned col[4] = {
         lit(g, 0xffffff),
         g->pal[EG_PLUME_Y / EG_BAND]
@@ -495,8 +496,18 @@ static void draw_sky(const struct eg *g, struct eng_surface *s) {
             0xffffff,
         g->dim ? dimmed(EMBER) : EMBER, g->dim ? dimmed(0xffe27a) : 0xffe27a
     };
-    for (int i = 0; i < SKY_N; ++i)
-        glyph(g, s, SKY[i].part, g->sky[i].x, g->sky[i].y, col[SKY[i].colour], g->sky[i].a);
+    struct eng_surface t = *s;
+    int y0 = s->y0 > card0 ? s->y0 : card0, y1 = s->y1 < card1 ? s->y1 : card1;
+    int cut[4][4] = { { s->x0, s->y0, s->x1, s->y1 < card0 ? s->y1 : card0 },
+                      { s->x0, s->y0 > card1 ? s->y0 : card1, s->x1, s->y1 },
+                      { s->x0, y0, s->x1 < CARD_X ? s->x1 : CARD_X, y1 },
+                      { s->x0 > CARD_X + 150 ? s->x0 : CARD_X + 150, y0, s->x1, y1 } };
+    for (int n = 0; n < 4; ++n) {
+        t.x0 = cut[n][0], t.y0 = cut[n][1], t.x1 = cut[n][2], t.y1 = cut[n][3];
+        if (t.x0 >= t.x1 || t.y0 >= t.y1 || t.y0 >= 205) continue; /* all of it is above the hedge */
+        for (int i = 0; i < SKY_N; ++i)
+            glyph(g, &t, SKY[i].part, g->sky[i].x, g->sky[i].y, col[SKY[i].colour], g->sky[i].a);
+    }
 }
 
 /* The sprinkler's head, turned to the aim and kicked back after a spurt, and its collar's drops:
@@ -683,7 +694,7 @@ static void draw(const void *state, struct eng_surface *s) {
     int top =
         g->mode == PLAY ? -999 : (g->mode == LOST ? CARD_Y[g->card] : 128) - 75; /* the card's */
     scene(g, s, top + 6, top + 144);
-    draw_sky(g, s);
+    draw_sky(g, s, top + 6, top + 144);
     if (g->bolt) draw_bolt(g, s);
     for (int k = 0; k < 8; ++k) {
         int x = BED_X[k];

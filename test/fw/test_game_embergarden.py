@@ -660,6 +660,26 @@ def test_the_sky_moves_one_thing_a_step_clouds_drift_the_glow_pulses_and_the_lav
     g.close()
 
 
+def test_the_title_cards_sky_moves_behind_the_card_and_its_rects_hold_every_changed_pixel(fw):
+    g = Game(fw)
+    c, buf = canvas(fw)
+    g.g.sky[0][0], g.g.sky[8][0] = 100, 250  # two clouds at the card's edges (x 112 and 262)
+    g.frame()
+    g.paint((c, buf))
+    card = [buf[y * 375 + x] for y in range(70, 190) for x in range(113, 261)]
+    moved = 0
+    for k in range(15 * 30):
+        rects = g.frame()
+        moved += len(rects)
+        for r in rects:
+            g.paint((c, buf), r)
+        after = bytes(buf)
+        g.paint((c, buf))
+        assert bytes(buf) == after, k
+    assert moved > 100 and g.g.sky[0][0] == 130 and [buf[y * 375 + x] for y in range(70, 190) for x in range(113, 261)] == card
+    g.close()
+
+
 def test_a_turn_halfway_mixes_the_two_times_of_day(fw):
     g = Game(fw)
     g.g.frm, g.g.light, g.g.k = DAY, DUSK, 16
