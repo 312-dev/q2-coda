@@ -123,14 +123,16 @@ static int write_all(int fd, const void *data, unsigned n) {
 #define SAY(fd,s) write_all(fd,s,sizeof s-1)
 
 /* Smart Wi-Fi keeps the radio on REMOTE_HOLD_MS after the last request (smart_wifi.c remote_poll, --dev
- * builds, docs/internals.md#smart-wi-fi): each authenticated one leaves its pid in USED_FILE, a new text
- * each time, which demo reads once a second as a use. */
+ * builds, docs/internals.md#smart-wi-fi): each authenticated one renames a new USED_FILE into place,
+ * holding its pid, so the file's inode is new each time (tmpfs numbers each file anew); demo stats it
+ * once a second and takes a new inode as a use. */
 static void mark_used(void) {
     char pid[16];
-    int n=snprintf(pid,sizeof pid,"%d\n",getpid()), fd=open(USED_FILE,O_SAVE,0644);
+    int n=snprintf(pid,sizeof pid,"%d\n",getpid()), fd=open(USED_FILE ".tmp",O_SAVE,0644);
     if (fd<0) return;
-    write_all(fd,pid,n);
+    int ok=!write_all(fd,pid,n);
     close(fd);
+    if (!ok || rename(USED_FILE ".tmp",USED_FILE)) unlink(USED_FILE ".tmp");
 }
 
 static void serve(int c) {

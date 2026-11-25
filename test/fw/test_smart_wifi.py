@@ -79,22 +79,30 @@ def st_dev(fw_dev, dev_library):
 
 
 class Remote(Q2):
-    """q2remote's requests (patch/remote.c): each authenticated one writes its pid to /tmp/q2remote.used; logged is
-    the unified log's lines (demo's stderr), opened the paths fopen was asked for."""
+    """q2remote's requests (patch/remote.c): each authenticated one puts a new /tmp/q2remote.used in place, a new
+    inode (ino, None before the first); logged is the unified log's lines (demo's stderr), looked the paths stat or
+    fopen was asked for. No wpa_supplicant: the scan hold stays out of it."""
     USED = '/tmp/q2remote.used'
 
     def __init__(self, fw, st, **config):
         super().__init__(fw, st, **config)
-        self.files = Files(fw)
+        self.ino: int | None = None
         self.logged: list[str] = []
-        self.opened: list[str] = []
-        fopen = self.files.fopen
-        fw.mock('fw_fopen', lambda path, *a: self.opened.append(C.string_at(path).decode()) or fopen(path, *a))
+        self.looked: list[str] = []
+        fw.mock('fw___xstat', self.stat)
+        fw.mock('fw_fopen', lambda path, *_: self.looked.append(C.string_at(path).decode()) and 0)
         fw.mock('fw_write', lambda fd, data, n, *_: (fd == 2 and self.logged.append(C.string_at(data, n).decode()))
                 or n)
 
-    def request(self, pid):
-        self.files.files[self.USED] = f'{pid}\n'.encode()
+    def stat(self, version, path, info, *_):
+        self.looked.append(C.string_at(path).decode())
+        if self.ino is None or self.looked[-1] != self.USED:
+            return -1
+        (C.c_uint * 36).from_address(info)[4] = self.ino
+        return 0
+
+    def request(self):
+        self.ino = 1 if self.ino is None else self.ino + 1
 
 
 def test_dev_q2remote_holds_the_radio_after_boot_and_after_each_request(fw_dev, st_dev):
@@ -106,14 +114,14 @@ def test_dev_q2remote_holds_the_radio_after_boot_and_after_each_request(fw_dev, 
     assert q2.switched == [] and not q2.off()
     q2.idle(O['SMART_IDLE_MS'] + 2 * O['SMART_POLL_MS'])
     assert q2.switched == [0] and q2.off() == 1
-    q2.request(4242)
+    q2.request()
     q2.idle(O['SMART_POLL_MS'])
     assert q2.switched == [0, 1] and not q2.off()  # woken by the request
     said = lambda: [line for line in q2.logged if 'q2remote' in line]
     assert len(said()) == 3, q2.logged  # the boot hold's start and end, the session's start
     assert 'after boot' in said()[0] and 'ended' in said()[1] and 'session' in said()[2], q2.logged
     q2.idle(O['REMOTE_HOLD_MS'] // 2)
-    q2.request(4243)  # a later request: the hold counts from it, no new line
+    q2.request()  # a later request: the hold counts from it, no new line
     q2.idle(O['REMOTE_HOLD_MS'] - 2 * O['SMART_POLL_MS'])
     assert q2.switched == [0, 1] and len(said()) == 3
     q2.idle(O['SMART_IDLE_MS'] + 4 * O['SMART_POLL_MS'])
@@ -122,18 +130,18 @@ def test_dev_q2remote_holds_the_radio_after_boot_and_after_each_request(fw_dev, 
 
 
 def test_release_has_no_q2remote_hold(fw, st):
-    """A release build has no q2remote: the same requests' file changes nothing, and is never read. The radio goes
-    off SMART_IDLE_MS after boot, as test_nothing_needing_the_network_turns_the_radio_off has it."""
+    """A release build has no q2remote: the same requests' file changes nothing, and is never looked at. The radio
+    goes off SMART_IDLE_MS after boot, as test_nothing_needing_the_network_turns_the_radio_off has it."""
     q2 = Remote(fw, st, CARREMOTE=b'0')
-    q2.request(4242)
+    q2.request()
     q2.idle(O['SMART_IDLE_MS'] - O['SMART_POLL_MS'])
     assert q2.switched == [] and not q2.off()
     q2.idle(2 * O['SMART_POLL_MS'])
     assert q2.switched == [0] and q2.off() == 1
-    q2.request(4243)
+    q2.request()
     q2.idle(10 * O['SMART_POLL_MS'])
     assert q2.switched == [0] and q2.off() == 1
-    assert Remote.USED not in q2.opened and not [line for line in q2.logged if 'q2remote' in line]
+    assert Remote.USED not in q2.looked and not [line for line in q2.logged if 'q2remote' in line]
 
 
 @pytest.mark.parametrize('page', ['radio_page', 'tuner_page'])

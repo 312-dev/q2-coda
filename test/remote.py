@@ -397,8 +397,8 @@ with tempfile.TemporaryDirectory(prefix="q2-remote-") as td:
                     while part := s.recv(4096): reply += part
             return bytes(reply)
         marker = root / "ran"; touch = f"touch {marker}".encode()
-        # Each authenticated request leaves its pid in USED_FILE, which Smart Wi-Fi reads as a use in a --dev
-        # build (smart_wifi.c remote_poll); a rejected one leaves nothing.
+        # Each authenticated request puts a new USED_FILE in place, holding its pid, which Smart Wi-Fi reads as a
+        # use in a --dev build (smart_wifi.c remote_poll); a rejected one leaves nothing.
         os.unlink(used)
         for request in (b"fedcba987654321\n" + touch + b"\n", b"fedcba98765432100\n" + touch + b"\n",
                         b"fedcba9876543210\n" + touch + b"\0\n", b"fedcba9876543210\n" + touch + b"\r\n",
@@ -408,6 +408,7 @@ with tempfile.TemporaryDirectory(prefix="q2-remote-") as td:
         first = used.read_text()
         assert re.fullmatch(r"[1-9]\d*\n", first), first
         assert ask(b"fedcba9876543210\ntrue\n") == b"OK\n" and used.read_text() not in ("", first)
+        assert not os.path.lexists(f"{used}.tmp")
         # The card's key: 16-126 characters from A-Z a-z 0-9 _ -, on a line of its own (docs/remote.md). One
         # malformed on the card revokes the copy, as a missing one does.
         def accepted(key): return ask(f"{key}\nprintf in\n".encode()) == b"OK\nin"

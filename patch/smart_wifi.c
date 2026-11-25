@@ -94,15 +94,15 @@ static int net_page_open(void) {
 #if Q2POD_DEV
 /* --dev builds: q2remote (remote.c, docs/remote.md) reaches the Q2 over Wi-Fi alone, so it needs
  * the network for REMOTE_HOLD_MS after its last request and for demo's first REMOTE_BOOT_MS
- * (offsets.inc says why). Each authenticated request leaves its pid in REMOTE_USED (remote.c
- * mark_used); a text there unlike the last (seen) is a request, timed by demo's own clock (at), so
- * the two processes share none. start: demo's first poll; boot: its hold runs. A demo started later
- * takes a file left from before as a request. A log line as each hold starts and as it ends. */
+ * (offsets.inc says why). Each authenticated request renames a new REMOTE_USED into place (remote.c
+ * mark_used); an inode unlike the last (ino) is a request, timed by demo's own clock (at), so the
+ * two processes share none, and a stat a second opens nothing. start: demo's first poll; boot: its
+ * hold runs. A demo started later takes a file left from before as a request. A log line as each
+ * hold starts and as it ends. */
 #define REMOTE_USED "/tmp/q2remote.used"
 static struct {
-    unsigned start, at;
+    unsigned start, at, ino;
     int boot;
-    char seen[16];
 } rh __attribute__((section(".scratch")));
 #define remote_say(what, ms)                                                                       \
     do {                                                                                           \
@@ -111,7 +111,7 @@ static struct {
         ulog('I', "wifi", line_);                                                                  \
     } while (0)
 static void remote_poll(unsigned now) {
-    char raw[sizeof rh.seen + 2];
+    unsigned info[36] = { 0 };
     if (!rh.start) {
         rh.start = now | !now, rh.boot = 1;
         remote_say("q2remote: Wi-Fi needed for %u min after boot", REMOTE_BOOT_MS);
@@ -120,12 +120,12 @@ static void remote_poll(unsigned now) {
         rh.boot = 0;
         remote_say("q2remote: the hold after boot ended, %u min on", REMOTE_BOOT_MS);
     }
-    if (state_read(REMOTE_USED, raw, sizeof raw) && strcmp(raw + 1, rh.seen)) {
+    if (!__xstat(3, REMOTE_USED, info) && info[4] != rh.ino) {
         if (!rh.at)
             remote_say("q2remote: a session needs Wi-Fi until %u min after its last request",
                        REMOTE_HOLD_MS);
         rh.at = now | !now;
-        tk_snprintf(rh.seen, sizeof rh.seen, "%s", raw + 1);
+        rh.ino = info[4];
     } else if (rh.at && now - rh.at >= REMOTE_HOLD_MS) {
         rh.at = 0;
         remote_say("q2remote: the session's hold ended, %u min after its last request",
