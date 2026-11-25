@@ -21,11 +21,14 @@
 #define CT_ROUNDS 10
 #define CT_SPARES 3 /* answers checked beyond the ten, for a song that cannot play */
 #define CT_ANS (CT_ROUNDS + CT_SPARES)
-#define CT_CAND 64   /* songs the worker keeps: the answers and every round's decoys */
-#define CT_MIN 12    /* songs a contest needs (BRIEFS: fewer shows the honest message) */
-#define CT_TITLE 128 /* bytes of a title kept, cut at a character */
+#define CT_CARD 40            /* the card's songs the worker keeps, and as many of a server's */
+#define CT_CAND (2 * CT_CARD) /* all it keeps: the answers and every round's decoys */
+#define CT_MIN 12             /* songs a contest needs (BRIEFS: fewer shows the honest message) */
+#define CT_TITLE 128          /* bytes of a title kept, cut at a character */
 #define CT_ARTIST 80
-#define CT_PATH 512
+#define CT_PATH                                                                                    \
+    384 /* a path kept (a longer one is cut, its file not found: the song passed over) */
+#define CT_CLIP 128         /* a streamed clip's file, the app's clips folder */
 #define CT_MIN_SEC 40       /* a clip starts 30 to 60 percent in and plays about 13 s at most */
 #define CT_CLOCK 600        /* the round's clock: 100 points falling to 10 over 10 s */
 #define CT_CALL 20          /* steps the clip plays on after the call is placed */
@@ -34,11 +37,22 @@
 #define CT_CUE_MAX 300      /* steps a clip may take to be heard before its song is passed over */
 #define CT_MAGIC 0x314e5443 /* "CTN1" */
 #define CT_WATCH_MS 100     /* how soon after the game is left its music is given back */
+#define CT_CLIP_MS                                                                                 \
+    25000 /* a streamed clip's length asked of the app: the clock, the call, a replay */
+#define CT_FETCH_MS 8000 /* a streamed clip asked for and not there by then is given up */
+#define CT_FETCH_MAX 480 /* steps a caller waits for its streamed clip before a card song's */
+#define CT_SID 40
 
 enum { S_BROKEN, S_TUNE, S_STANDBY, S_NOSIGNAL, S_ROUND, S_END };
 enum { P_CUE, P_AIR, P_CALL, P_REVEAL };
 enum { M_TITLES, M_ARTISTS, M_DEEP };
-enum { WHY_OK, WHY_SONGS, WHY_ARTISTS, WHY_PLAYABLE, WHY_LIBRARY };
+enum { WHY_OK, WHY_SONGS, WHY_ARTISTS, WHY_PLAYABLE, WHY_LIBRARY, WHY_SERVER };
+enum { P_FETCH = P_REVEAL + 1 }; /* a caller's streamed clip not yet on the card */
+enum {
+    K_CARD,
+    K_COPY,
+    K_STREAM
+}; /* an answer's clip: a card file, a server song's offline copy, streamed */
 
 /* the pad (radio.py's NX0.. and ROW0/ROWH), the summary's sheet, the radio's glass and lamps */
 #define NX0 152
@@ -69,9 +83,20 @@ struct pick {
     int refs, done, mode, why, n, answers;
     int played_n;
     unsigned played[PLAYS_SLOTS]; /* Deep cuts: the songs counted twice or more, sorted */
+    unsigned seed;                /* the UI's, for the answers' order */
     struct song song[CT_CAND];
-    char path[CT_ANS][CT_PATH];
+    char path[CT_ANS][CT_PATH]; /* a card file or offline copy; a streamed song's server path */
     int there[CT_ANS]; /* the check one round ahead: 1 the file is there, -1 gone, 0 not looked */
+    /* Streamed clips (docs/server-library.md#clips): the app that streams them and whether its
+     * server answers (its .clips); each answer's kind and server id; the game's ask (want, from
+     * the UI), the clip's start in the song; the app's answer (got: 1 there at clip, its file
+     * starting off ms into the song; -1 given up), written by clip_worker */
+    char app[16];
+    int stream, seq, quit;
+    int kind[CT_ANS], from_ms[CT_ANS], want[CT_ANS], got[CT_ANS], off[CT_ANS];
+    unsigned asked[CT_ANS];
+    char sid[CT_ANS][CT_SID], clip[CT_ANS][CT_CLIP];
+    char sent[2048]; /* the request last written: the clip thread's alone */
 };
 
 /* What outlives the game's state: Games frees that at a close without a word to the game, so what
@@ -87,7 +112,7 @@ struct keep {
 struct ct {
     struct keep *k;
     int h, screen, phase, mode, sel, t, at, reduced;
-    int round, rounds, wrongs, rights, streak, score, shown, pts, best_new, slot;
+    int round, rounds, wrongs, rights, streak, score, shown, pts, best_new, slot, stream_dead;
     int row[4], right, pick, song; /* the round's rows (song indices), the right row, the call */
     int missed[CT_ROUNDS], nmissed, top;
     int clip_sec, clip_on, clip_held, heard, ask, replay;
@@ -182,6 +207,7 @@ int callerten_sound(void) {
 
 static void keep_free(struct keep *k) {
     struct pick *p = k->pk;
+    if (p) __atomic_store_n(&p->quit, 1, __ATOMIC_RELEASE); /* its clip thread lets its clips go */
     if (p && __atomic_sub_fetch(&p->refs, 1, __ATOMIC_ACQ_REL) == 0) free(p);
     free(k->art);
     free(k);
@@ -234,18 +260,18 @@ static unsigned fold_hash(const char *s) {
 
 struct scan {
     struct pick *p;
-    char (*paths)[CT_PATH]; /* every candidate's file, for the answers' checks */
-    int full;               /* the query was stopped with CT_CAND kept: no failure */
+    char (*paths)[CT_PATH]; /* every candidate's file (a server song's: its copy, or its path) */
+    char (*sids)[CT_SID];   /* a server song's id, "" for a card file */
+    int *secs;              /* a server song's seconds, from its catalogue */
+    int full, card, server; /* the query stopped with enough (no failure); rows kept of each */
+    int away;               /* a server's songs left out with no way to play them now */
 };
 
-/* A song of the query: kept unless a server's row or, for Deep cuts, played twice or more. 1
- * (enough) stops the query. */
-static int cand_row(void *ctx, int n, char **v, char **c) {
-    struct scan *sc = ctx;
+/* A card song of the query: kept unless a server's row or, for Deep cuts, played twice or more.
+ * 1 (enough) stops the query. */
+static int keep_row(struct scan *sc, const char *url, char **v) {
     struct pick *p = sc->p;
-    (void)c;
-    if (n < 6 || !v[0] || !v[1] || !v[2] || !v[2][0] || catalogue_path(v[1])) return 0;
-    unsigned key = fnv(FNV_SEED, (const unsigned char *)v[1]);
+    unsigned key = fnv(FNV_SEED, (const unsigned char *)url);
     key |= !key;
     if (p->mode == M_DEEP && played(p, key)) return 0;
     struct song *s = &p->song[p->n];
@@ -253,8 +279,39 @@ static int cand_row(void *ctx, int n, char **v, char **c) {
     s->year = v[5] ? atoi(v[5]) : 0, s->sec = 0;
     copy_text(s->title, v[2], sizeof s->title);
     copy_text(s->artist, v[3] ? v[3] : "", sizeof s->artist);
-    copy_text(sc->paths[p->n], v[1], CT_PATH);
-    return sc->full = ++p->n >= CT_CAND;
+    return 1;
+}
+static int cand_row(void *ctx, int n, char **v, char **c) {
+    struct scan *sc = ctx;
+    (void)c;
+    if (n < 6 || !v[0] || !v[1] || !v[2] || !v[2][0] || catalogue_path(v[1])) return 0;
+    if (!keep_row(sc, v[1], v)) return 0;
+    copy_text(sc->paths[sc->p->n], v[1], CT_PATH);
+    sc->sids[sc->p->n][0] = 0, sc->secs[sc->p->n] = 0;
+    sc->p->n++;
+    return sc->full = ++sc->card >= CT_CARD;
+}
+/* A server's song (cat.servertable with its servermeta): kept with its offline copy, or with its
+ * server path when the app streams clips now; else left out, counted. */
+static int server_row(void *ctx, int n, char **v, char **c) {
+    struct scan *sc = ctx;
+    struct pick *p = sc->p;
+    (void)c;
+    if (n < 10 || !v[0] || !v[1] || !v[2] || !v[2][0] || !v[6] || !v[6][0]) return 0;
+    const char *local = v[9] && v[9][0] && !access(v[9], 4) ? v[9] : 0; /* R_OK */
+    if (!local && !p->stream) return ++sc->away, 0;
+    if (!p->app[0] && v[8]) copy_text(p->app, v[8], sizeof p->app);
+    if (!keep_row(sc, v[1], v)) return 0;
+    copy_text(sc->paths[p->n], local ? local : v[1], CT_PATH);
+    copy_text(sc->sids[p->n], v[6], CT_SID);
+    sc->secs[p->n] = v[7] ? atoi(v[7]) : 0;
+    p->n++;
+    return sc->full = ++sc->server >= CT_CARD;
+}
+static int app_row(void *ctx, int n, char **v, char **c) {
+    (void)c;
+    if (n >= 1 && v[0]) copy_text(ctx, v[0], 16);
+    return 0;
 }
 
 /* path's length in seconds by TagLib, as durations.c measures it; 0 unknown */
@@ -270,46 +327,183 @@ static const char *visible(const struct pick *p, int i) {
     return p->mode == M_ARTISTS ? p->song[i].artist : p->song[i].title;
 }
 
-/* Songs in a random order (the library's music, MUSIC_WHERE, the card's table alone: a server's
- * rows are cat.servertable's), CT_CAND kept; then the answers, each a file that is there and long
- * enough, moved to the front. */
+/* s's first c, or 0 (the payload imports no strchr) */
+static char *findc(char *s, int c) {
+    for (; *s; ++s)
+        if (*s == c) return s;
+    return 0;
+}
+
+/* Whether app streams clips now: its answer file there, its server said up (#Q2CLIPS/1). */
+static int app_streams(const char *app) {
+    char path[48];
+    unsigned n = 0;
+    tk_snprintf(path, sizeof path, "/tmp/q2-%s.clips", app);
+    char *head = read_all(path, 1 << 14, &n), *nl = head ? findc(head, '\n') : 0;
+    if (nl) *nl = 0;
+    int up = head && !strncmp(head, "#Q2CLIPS/1", 10) && strstr(head, "server=up");
+    free(head);
+    return up;
+}
+
+static void swap_row(struct scan *sc, int i, int a) {
+    struct pick *p = sc->p;
+    struct song s = p->song[i];
+    char sid[CT_SID];
+    int sec = sc->secs[i];
+    p->song[i] = p->song[a], p->song[a] = s;
+    memcpy(sid, sc->sids[i], CT_SID), memcpy(sc->sids[i], sc->sids[a], CT_SID);
+    memcpy(sc->sids[a], sid, CT_SID);
+    sc->secs[i] = sc->secs[a], sc->secs[a] = sec;
+    char tmp[CT_PATH];
+    memcpy(tmp, sc->paths[i], CT_PATH), memcpy(sc->paths[i], sc->paths[a], CT_PATH);
+    memcpy(sc->paths[a], tmp, CT_PATH);
+}
+
+#define SONG_SQL                                                                                   \
+    "select id,fileurl,name,ifnull(songer,''),ifnull(style,''),ifnull(year,0) from "               \
+    "main.songtable "                                                                              \
+    "where %s and ifnull(time_end,0)=0 and ifnull(name,'')<>''%s order by random()"
+/* a server's songs with their catalogue's id, seconds, app and offline copy; servertable holds
+ * those not on the card already. Spoken word is left out by its genre: a server's rows have no
+ * Podcasts or Audiobooks folder. */
+#define SERVER_SQL                                                                                 \
+    "select id,fileurl,name,songer,style,year,sid,seconds,app,local from (select s.id as "         \
+    "id,s.fileurl as fileurl,s.name as name,ifnull(s.songer,'') as songer,ifnull(s.style,'') as "  \
+    "style,ifnull(s.year,0) as year,m.sid as sid,ifnull(m.seconds,0) as seconds,m.app as "         \
+    "app,ifnull(m.local,'') as local from cat.servertable s join cat.servermeta m on m.id=s.id) "  \
+    "where %s and ifnull(name,'')<>'' and style not like '%%audiobook%%' and style not like "      \
+    "'%%podcast%%'%s order by random()"
+
+/* Songs in a random order: the card's (the library's music, MUSIC_WHERE, songtable alone) and a
+ * signed-in server's (cat.servertable, docs/server-library.md), CT_CARD of each kept, a server's
+ * only with an offline copy unless its app streams clips now; then the answers, in a random order
+ * of them, moved to the front: a card file or copy that is there and long enough, or a streamed
+ * song of a length enough by its catalogue, ten streamed at most so the spares are the card's. */
 static void *pick_worker(void *arg) {
     struct pick *p = arg;
     thread_lower(0);
-    struct scan sc = { p, calloc(CT_CAND, CT_PATH), 0 };
-    char sql[640];
-    tk_snprintf(sql, sizeof sql,
-                "select id,fileurl,name,ifnull(songer,''),ifnull(style,''),ifnull(year,0) from "
-                "main.songtable where %s and ifnull(time_end,0)=0 and ifnull(name,'')<>''%s order "
-                "by random()",
-                MUSIC_WHERE, p->mode == M_ARTISTS ? " and ifnull(songer,'')<>''" : "");
+    struct scan sc = {
+        p, calloc(CT_CAND, CT_PATH), calloc(CT_CAND, CT_SID), calloc(CT_CAND, sizeof(int)), 0, 0, 0,
+        0
+    };
+    char sql[900];
+    const char *artist = p->mode == M_ARTISTS ? " and ifnull(songer,'')<>''" : "";
     unsigned seen[CT_CAND];
-    int distinct = 0;
-    /* a query cand_row stopped once it had enough ends in SQLite's abort, which era_sql reports */
-    if (!sc.paths || (!era_sql(sql, cand_row, &sc) && !sc.full)) p->why = WHY_LIBRARY, p->n = 0;
+    int distinct = 0, ok = sc.paths && sc.sids && sc.secs;
+    tk_snprintf(sql, sizeof sql, SONG_SQL, MUSIC_WHERE, artist);
+    /* a query a row callback stopped once it had enough ends in SQLite's abort, which era_sql
+     * reports */
+    if (!ok || (!era_sql(sql, cand_row, &sc) && !sc.full)) p->why = WHY_LIBRARY, p->n = 0;
+    /* a server's catalogue, when there is one (no cat schema: the query fails, the card plays) */
+    if (ok && p->why == WHY_OK &&
+        era_sql("select app from cat.servermeta limit 1", app_row, p->app) && p->app[0]) {
+        p->stream = app_streams(p->app);
+        sc.full = 0;
+        tk_snprintf(sql, sizeof sql, SERVER_SQL, MUSIC_WHERE, artist);
+        era_sql(sql, server_row, &sc);
+    }
     for (int i = 0; i < p->n; ++i) { /* the answers' rows must differ, four at least */
         unsigned h = fold_hash(visible(p, i)), k = 0;
         while (k < (unsigned)distinct && seen[k] != h) ++k;
         if (k == (unsigned)distinct) seen[distinct++] = h;
     }
-    for (int i = 0; sc.paths && i < p->n && p->answers < CT_ANS; ++i) {
-        int a = p->answers, sec = access(sc.paths[i], 4) ? 0 : seconds(sc.paths[i]); /* R_OK */
-        if (sec < CT_MIN_SEC) continue;
-        struct song s = p->song[i];
-        p->song[i] = p->song[a], p->song[a] = s;
-        copy_text(p->path[a], sc.paths[i], CT_PATH);
-        if (i != a)
-            memcpy(sc.paths[i], sc.paths[a], CT_PATH); /* the row moved to i takes its path */
-        p->song[a].sec = sec;
+    unsigned r = p->seed | 1;
+    for (int i = 0; ok && i < p->n; ++i) { /* a random order of the rows, card and server mixed */
+        r ^= r << 13, r ^= r >> 17, r ^= r << 5;
+        swap_row(&sc, i, i + (int)(r % (unsigned)(p->n - i)));
+    }
+    int streamed = 0;
+    for (int i = 0; ok && i < p->n && p->answers < CT_ANS; ++i) {
+        int a = p->answers, kind = !sc.sids[i][0]                ? K_CARD
+                                   : catalogue_path(sc.paths[i]) ? K_STREAM
+                                                                 : K_COPY;
+        int sec = kind == K_STREAM ? sc.secs[i] : access(sc.paths[i], 4) ? 0 : seconds(sc.paths[i]);
+        if (sec < CT_MIN_SEC || (kind == K_STREAM && streamed >= CT_ROUNDS)) continue;
+        swap_row(&sc, i, a);
+        copy_text(p->path[a], sc.paths[a], CT_PATH);
+        copy_text(p->sid[a], sc.sids[a], CT_SID);
+        p->kind[a] = kind, p->song[a].sec = sec;
+        streamed += kind == K_STREAM;
         p->answers++;
     }
     if (p->why == WHY_OK)
-        p->why = p->n < CT_MIN    ? WHY_SONGS
+        p->why = p->n < CT_MIN    ? sc.away ? WHY_SERVER : WHY_SONGS
                  : distinct < 4   ? p->mode == M_ARTISTS ? WHY_ARTISTS : WHY_SONGS
                  : p->answers < 1 ? WHY_PLAYABLE
                                   : WHY_OK;
-    free(sc.paths);
+    free(sc.paths), free(sc.sids), free(sc.secs);
     __atomic_store_n(&p->done, 1, __ATOMIC_RELEASE);
+    if (__atomic_sub_fetch(&p->refs, 1, __ATOMIC_ACQ_REL) == 0) free(p);
+    return 0;
+}
+
+/* ---- streamed clips: the app's clip channel (docs/server-library.md#clips) ---- */
+
+/* One pass of the clip thread: the request rewritten when the game's asks changed (each streamed
+ * answer the game wants, its clip had or not, with its server id, start and length), the app's
+ * answers read (get: on its way; done; fail), an ask unanswered CT_FETCH_MS given up. When the
+ * contest is over (quit) the request names nothing, and the app lets its clips go. */
+static void clip_pass(struct pick *p) {
+    char req[2048], path[48];
+    unsigned now = (unsigned)time_now_ms(), n;
+    int quit = __atomic_load_n(&p->quit, __ATOMIC_ACQUIRE);
+    int k = tk_snprintf(req, sizeof req, "#Q2CLIP/1\tseq=%d\n", p->seq);
+    for (int s = 0; !quit && s < p->answers; ++s) {
+        /* named while wanted (this caller's and the next one's), its clip had or not: the app
+         * keeps a clip as long as the request names it */
+        int got = __atomic_load_n(&p->got[s], __ATOMIC_ACQUIRE);
+        if (p->kind[s] != K_STREAM || !__atomic_load_n(&p->want[s], __ATOMIC_ACQUIRE) || got < 0)
+            continue;
+        if (!p->asked[s]) p->asked[s] = now | 1;
+        /* signed, as | 1 can be past now; -2: stalled, not refused */
+        if (!got && (int)(now - p->asked[s]) >= CT_FETCH_MS) {
+            __atomic_store_n(&p->got[s], -2, __ATOMIC_RELEASE);
+            continue;
+        }
+        k += tk_snprintf(req + k, sizeof req - (unsigned)k, "%d\t%s\t%d\t%d\n", s, p->sid[s],
+                         p->from_ms[s], CT_CLIP_MS);
+    }
+    if (strcmp(req, p->sent)) {
+        tk_snprintf(path, sizeof path, "/tmp/q2-%s.clip", p->app);
+        char tmp[52];
+        tk_snprintf(tmp, sizeof tmp, "%s.tmp", path);
+        if (blob_io(path, tmp, req, (unsigned)k, 1)) memcpy(p->sent, req, (unsigned)k + 1);
+    }
+    tk_snprintf(path, sizeof path, "/tmp/q2-%s.clips", p->app);
+    char *ans = read_all(path, 1 << 14, &n), *line = ans;
+    while (line && *line) { /* <seq> <slot> <state> <offset ms> <path>, tab-separated */
+        char *end = findc(line, '\n'), *f[5];
+        if (end) *end = 0;
+        int m = 0;
+        for (char *q = line; m < 5 && q; ++m) {
+            f[m] = q, q = m < 4 ? findc(q, '\t') : 0;
+            if (q) *q++ = 0;
+        }
+        int s = m == 5 ? atoi(f[1]) : -1;
+        if (m == 5 && atoi(f[0]) == p->seq && s >= 0 && s < p->answers &&
+            !__atomic_load_n(&p->got[s], __ATOMIC_ACQUIRE)) {
+            if (!strcmp(f[2], "done")) {
+                copy_text(p->clip[s], f[4], CT_CLIP);
+                p->off[s] = atoi(f[3]);
+                __atomic_store_n(&p->got[s], 1, __ATOMIC_RELEASE);
+            } else if (!strcmp(f[2], "fail"))
+                __atomic_store_n(&p->got[s], -1, __ATOMIC_RELEASE);
+        }
+        line = end ? end + 1 : 0;
+    }
+    free(ans);
+}
+/* The clip thread of a contest with streamed answers: a pass every 100 ms until its contest is
+ * over, then a last one (the request emptied); it holds a reference on the rows. */
+static void *clip_worker(void *arg) {
+    struct pick *p = arg;
+    thread_lower(0);
+    while (!__atomic_load_n(&p->quit, __ATOMIC_ACQUIRE)) {
+        clip_pass(p);
+        usleep(100000);
+    }
+    clip_pass(p);
     if (__atomic_sub_fetch(&p->refs, 1, __ATOMIC_ACQ_REL) == 0) free(p);
     return 0;
 }
@@ -323,7 +517,7 @@ struct ahead {
 static void *ahead_worker(void *arg) {
     struct ahead a = *(struct ahead *)arg;
     free(arg);
-    int there = access(a.p->path[a.slot], 4) ? -1 : 1;
+    int there = a.p->kind[a.slot] == K_STREAM || !access(a.p->path[a.slot], 4) ? 1 : -1;
     __atomic_store_n(&a.p->there[a.slot], there, __ATOMIC_RELEASE);
     if (__atomic_sub_fetch(&a.p->refs, 1, __ATOMIC_ACQ_REL) == 0) free(a.p);
     return 0;
@@ -779,10 +973,16 @@ static void draw_desk(struct eng_surface *s, struct ct *g, const unsigned char *
     case S_NOSIGNAL: {
         int why = g->k->pk ? g->k->pk->why : WHY_LIBRARY;
         heading(s, art, "NO CONTEST TONIGHT", NX0);
-        atext(s, why == WHY_LIBRARY ? "The library" : "Add more music", (NX0 + NX1) / 2, NY0 + 56,
-              20, INK, 1);
-        atext(s, why == WHY_LIBRARY ? "is not ready" : "to play", (NX0 + NX1) / 2, NY0 + 80, 20,
-              INK, 1);
+        atext(s,
+              why == WHY_LIBRARY  ? "The library"
+              : why == WHY_SERVER ? "Can't reach your"
+                                  : "Add more music",
+              (NX0 + NX1) / 2, NY0 + 56, 20, INK, 1);
+        atext(s,
+              why == WHY_LIBRARY  ? "is not ready"
+              : why == WHY_SERVER ? "music server"
+                                  : "to play",
+              (NX0 + NX1) / 2, NY0 + 80, 20, INK, 1);
         atext(s,
               why == WHY_ARTISTS    ? "A contest needs 4 artists"
               : why == WHY_PLAYABLE ? "None of them can play"
@@ -971,27 +1171,63 @@ static void deal(struct ct *g) {
 
 static void contest_end(struct ct *g);
 
-/* The next answer that is still there, its rows dealt, its clip asked for; with none left the
- * contest ends. */
+/* Whether slot s can't be a caller: its file gone, or streamed when streaming was given up for the
+ * contest or its clip could not be had. */
+static int skip(const struct ct *g, int s) {
+    const struct pick *p = g->k->pk;
+    if (__atomic_load_n(&p->there[s], __ATOMIC_ACQUIRE) < 0) return 1;
+    return p->kind[s] == K_STREAM &&
+           (g->stream_dead || __atomic_load_n(&p->got[s], __ATOMIC_ACQUIRE) < 0);
+}
+static int next_slot(const struct ct *g, int s) {
+    while (s < g->k->pk->answers && skip(g, s)) ++s;
+    return s;
+}
+
+/* This caller's streamed clip and the next caller's asked of the app (clip_worker), no other: the
+ * app keeps two clips at most and lets the rest go. */
+static void ask_clips(struct ct *g) {
+    struct pick *p = g->k->pk;
+    int next = next_slot(g, g->slot);
+    for (int s = 0; s < p->answers; ++s)
+        __atomic_store_n(&p->want[s], p->kind[s] == K_STREAM && (s == g->song || s == next),
+                         __ATOMIC_RELEASE);
+}
+
+/* The caller's clip to the player: a card file or copy from its start point, a streamed clip from
+ * that point less where the app's file of it begins. */
+static void play_clip(struct ct *g) {
+    struct pick *p = g->k->pk;
+    int s = g->song, ss = p->from_ms[s] / 1000;
+    if (p->kind[s] == K_STREAM) ss = (p->from_ms[s] - p->off[s]) / 1000, ss = ss < 0 ? 0 : ss;
+    g->clip_sec = ss, g->phase = P_CUE, g->t = 0;
+    clip_start(g, p->kind[s] == K_STREAM ? p->clip[s] : p->path[s], ss);
+}
+
+/* The next answer that can play, its rows dealt, its clip asked for (a streamed one waited for in
+ * P_FETCH); with none left the contest ends. */
 static void round_start(struct ct *g) {
     struct pick *p = g->k->pk;
-    while (g->slot < p->answers && __atomic_load_n(&p->there[g->slot], __ATOMIC_ACQUIRE) < 0)
-        ++g->slot;
+    g->slot = next_slot(g, g->slot);
     if (g->slot >= p->answers) {
         contest_end(g);
         return;
     }
     g->song = g->slot++;
     deal(g);
-    look_ahead(p, g->slot);
+    ask_clips(g);
+    look_ahead(p, next_slot(g, g->slot));
     g->phase = P_CUE, g->t = g->at = 0, g->sel = 1, g->pick = -1, g->pts = 0, g->replay = 0;
     g->lamps = 10, g->dim = -1, g->ring = g->ring_from = 0, g->swell = 0, g->turn_t = -1,
     g->scroll_t = 0;
     g->lift = g->lift > 3 ? 3 : g->lift, g->lift_dir = -1; /* the handset back down */
     for (int i = 0; i < 4; ++i) g->fit_px[i] = 0, g->scroll[i] = 0;
-    g->clip_sec = p->song[g->song].sec * (30 + (int)rand_below(31)) / 100;
+    g->clip_on = g->heard = 0;
     sfx(g, ENG_SFX_TAP); /* on air: before the clip, never over it */
-    clip_start(g, p->path[g->song], g->clip_sec);
+    if (p->kind[g->song] == K_STREAM && __atomic_load_n(&p->got[g->song], __ATOMIC_ACQUIRE) <= 0)
+        g->phase = P_FETCH;
+    else
+        play_clip(g);
     eng_dirty_all();
 }
 
@@ -1031,6 +1267,7 @@ static void answer(struct ct *g) {
 
 static void contest_end(struct ct *g) {
     say("{mcl-stop\\null}");
+    __atomic_store_n(&g->k->pk->quit, 1, __ATOMIC_RELEASE); /* its streamed clips let go */
     g->clip_on = 0;
     g->screen = S_END, g->end_t = 0, g->cut = g->reduced ? 108 : 320, g->sel = g->top = 0;
     g->lift_dir = -1, g->lift = g->lift > 3 ? 3 : g->lift; /* the handset back on its cradle */
@@ -1049,12 +1286,13 @@ static void contest_end(struct ct *g) {
 static void begin(struct ct *g) {
     struct keep *k = g->k;
     struct pick *old = k->pk, *p = calloc(1, sizeof *p);
+    if (old) __atomic_store_n(&old->quit, 1, __ATOMIC_RELEASE);
     if (old && __atomic_sub_fetch(&old->refs, 1, __ATOMIC_ACQ_REL) == 0) free(old);
     k->pk = p;
     g->mode = g->sel, g->screen = S_STANDBY, g->t = 0;
     eng_dirty_all();
     if (!p) return;
-    p->refs = 2, p->mode = g->mode;
+    p->refs = 2, p->mode = g->mode, p->seed = rand_below(0x7fffffff) + 1;
     if (g->mode == M_DEEP) { /* the play counts are the UI thread's: a sorted copy for the worker */
         plays_load();
         for (int j = 0; j < PLAYS_SLOTS; ++j)
@@ -1071,9 +1309,24 @@ static void begin(struct ct *g) {
 
 static void contest_start(struct ct *g) {
     struct pick *p = g->k->pk;
+    int streamed = 0;
     take(g->k);
     g->rounds = p->answers < CT_ROUNDS ? p->answers : CT_ROUNDS;
     g->round = g->slot = g->score = g->shown = g->wrongs = g->rights = g->streak = g->nmissed = 0;
+    g->stream_dead = 0;
+    for (int s = 0; s < p->answers; ++s) { /* each clip's start: 30 to 60 percent in */
+        p->from_ms[s] = p->song[s].sec * (300 + 10 * (int)rand_below(31));
+        streamed += p->kind[s] == K_STREAM;
+    }
+    p->seq = (int)rand_below(0x7fffffff) + 1;
+    unsigned long t = 0;
+    if (streamed) { /* the clip thread: it asks the app and reads its answers off the UI thread */
+        __atomic_add_fetch(&p->refs, 1, __ATOMIC_ACQ_REL);
+        if (pthread_create(&t, 0, clip_worker, p) || !t)
+            __atomic_sub_fetch(&p->refs, 1, __ATOMIC_ACQ_REL), g->stream_dead = 1;
+        else
+            pthread_detach(t);
+    }
     g->screen = S_ROUND;
     round_start(g);
 }
@@ -1121,12 +1374,23 @@ static int row_at_finger(const struct eng_input *in, int y0, int pitch, int rows
 static int round_step(struct ct *g, const struct eng_input *in) {
     if (++g->t % 60 == 0)
         eng_awake(); /* the screen kept lit while the caller listens, as for a video */
-    if (g->phase == P_CUE || g->phase == P_AIR) {
+    if (g->phase == P_CUE || g->phase == P_AIR || g->phase == P_FETCH) {
         if (in->ticks) dial(g, in->ticks);
         if (g->turn_t >= 0 && ++g->turn_t >= 9) g->turn_t = -1;
         if (g->turn_t >= 0) MARK(g, M_DIAL);
     }
     switch (g->phase) {
+    case P_FETCH: { /* the streamed clip not on the card yet: a card song after a stall or a refusal
+                     */
+        int got = __atomic_load_n(&g->k->pk->got[g->song], __ATOMIC_ACQUIRE);
+        if (got > 0)
+            play_clip(g);
+        else if (got < 0 || g->t > CT_FETCH_MAX) {
+            if (got != -1) g->stream_dead = 1; /* the server too slow: the card's songs from here */
+            pass_over(g);
+        }
+        break;
+    }
     case P_CUE: {
         if (--g->ask > 0) break;
         g->ask = CT_ASK;

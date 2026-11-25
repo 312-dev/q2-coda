@@ -40,7 +40,7 @@ class Keep(C.Structure):
 class Ct(C.Structure):
     _fields_ = [('k', C.POINTER(Keep)),
                 *((n, C.c_int) for n in 'h screen phase mode sel t at reduced round rounds wrongs rights streak score shown '
-                                        'pts best_new slot'.split()),
+                                        'pts best_new slot stream_dead'.split()),
                 ('row', C.c_int * 4), *((n, C.c_int) for n in 'right pick song'.split()), ('missed', C.c_int * 10),
                 *((n, C.c_int) for n in 'nmissed top clip_sec clip_on clip_held heard ask replay needle4 needle_from '
                                         'needle_t turn_t lift lift_dir ring ring_from lamps dim dim_t cut end_t swell'.split()),
@@ -56,7 +56,10 @@ class Song(C.Structure):
 
 class Pick(C.Structure):
     _fields_ = [*((n, C.c_int) for n in 'refs done mode why n answers played_n'.split()), ('played', C.c_uint * 512),
-                ('song', Song * 64), ('path', (C.c_char * 512) * 13), ('there', C.c_int * 13)]
+                ('seed', C.c_uint), ('song', Song * 80), ('path', (C.c_char * 384) * 13), ('there', C.c_int * 13),
+                ('app', C.c_char * 16), *((n, C.c_int) for n in 'stream seq quit'.split()),
+                *((n, C.c_int * 13) for n in 'kind from_ms want got off'.split()), ('asked', C.c_uint * 13),
+                ('sid', (C.c_char * 40) * 13), ('clip', (C.c_char * 128) * 13), ('sent', C.c_char * 2048)]
 
 
 def key(path):
@@ -73,7 +76,7 @@ def music(n, start=0, artists=None, length=200):
 class Rig:
     """Games' page with Caller Ten open over a real SQLite library in tmp_path, the card's files, the player's socket
     (what was sent; the replies it will give), its Library song's state and the timers with their contexts."""
-    def __init__(self, fw, tmp_path, songs=(), status=1, files=None, art=ART, open_game=True):
+    def __init__(self, fw, tmp_path, songs=(), status=1, files=None, art=ART, open_game=True, server=None):
         self.fw, self.e, self.tmp = fw, api(fw), tmp_path
         self.page = Page(fw)
         self.timers, self.removed = {}, []
@@ -102,10 +105,44 @@ class Rig:
             self.lengths[path] = sec
         db.commit()
         db.close()
-        fw.mock('sqlite3_open', lambda name, out, *_: self.lib.sqlite3_open(str(tmp_path/'database.db').encode(), out))
+        if server is not None:  # a server's catalogue (catalogue.c's file), attached as cat as catalogue_attach_db does
+            cat = sqlite3.connect(tmp_path/'catalogue.db')
+            cat.execute(SONGTABLE.replace('songtable', 'servertable'))
+            cat.execute('create table servermeta(id integer primary key,fileurl,app,sid,local,seconds integer,size integer,'
+                        'mbid,suffix,dup,ntitle integer,nartist integer,naa integer,nalbum integer,track integer)')
+            for k, (sid, title, artist, style, year, sec, local) in enumerate(server):
+                url = f'/mnt/mmc/.subsonic/cat/{sid}.mp3'
+                cat.execute('insert into servertable(id,fileurl,name,songer,style,year,time,time_end) values(?,?,?,?,?,?,0,0)',
+                            (0x40000000 + k, url, title, artist, style, year))
+                cat.execute('insert into servermeta(id,fileurl,app,sid,local,seconds) values(?,?,?,?,?,?)',
+                            (0x40000000 + k, url, 'subsonic', sid, local, sec))
+                if local:
+                    self.present.add(local)
+                    self.lengths[local] = sec
+            cat.commit()
+            cat.close()
+        def open_db(name, out, *_):
+            r = self.lib.sqlite3_open(str(tmp_path/'database.db').encode(), out)
+            if server is not None:
+                self.lib.sqlite3_exec(C.c_void_p.from_address(out).value,
+                                      f"attach '{tmp_path/'catalogue.db'}' as cat".encode(), None, None, None)
+            return r
+        fw.mock('sqlite3_open', open_db)
         fw.mock('sqlite3_exec', self.exec)
         fw.mock('sqlite3_close', lambda d, *_: self.lib.sqlite3_close(d))
         self.threads = threads_now(fw)
+        # the clips' thread runs here by its passes (clip_pass), not as a thread: the others run at once
+        worker = C.cast(fw.lib.game_callerten__clip_worker, C.c_void_p).value
+        self.clip_threads = []
+        def threads(t, attr, fn, arg, *_):
+            C.c_ulong.from_address(t).value = 1
+            if fn == worker:
+                self.clip_threads.append(arg)
+                return 0
+            self.threads.append((fn, arg))
+            C.CFUNCTYPE(C.c_void_p, C.c_void_p)(fn)(arg)
+            return 0
+        fw.mock('fw_pthread_create', threads)
         fw.mock('fw_pthread_detach', lambda *_: 0)
         fw.mock('fw_access', lambda p, m, *_: 0 if C.string_at(p).decode() in self.present | set(self.files.files) else -1)
         self.opened, self.keep = {}, []
@@ -275,7 +312,7 @@ def test_caller_ten_is_games_fourth_engine_row_full_screen_still_and_its_state_f
     assert game.name == b'Caller Ten' and game.flags == 2 | 4 and game.size == C.sizeof(Ct)  # ENG_STILL | ENG_FULL
     assert r.e['eng_count']() == r.page.s.engines == len(SHIPPED) and SHIPPED[3] == 'Caller Ten'
     assert r.g.h == 320 and r.g.screen == TUNE and r.g.k.contents.art and not r.g.k.contents.owned
-    assert C.sizeof(Ct) < 1024 and C.sizeof(Pick) < 32 * 1024 and len(ART) < 200 * 1024  # heap: the art, the rows, the state
+    assert C.sizeof(Ct) < 1024 and C.sizeof(Pick) < 32 * 1024  # with the art's 192 KB and the worker's 24, under 256 and len(ART) < 200 * 1024  # heap: the art, the rows, the state
     assert r.status == 1 and not r.sent and not r.saves  # tuning takes nothing: the music plays on
 
 
@@ -806,3 +843,183 @@ def test_a_frame_of_play_marks_only_what_moved(fw, tmp_path):
     r.step(n=12)
     quiet = [frame() for _ in range(30)]
     assert all(len(f) <= 2 for f in quiet) and any(f == [] for f in quiet)
+
+
+# Clips streamed from a music server: the bundled app's clip channel (docs/server-library.md#clips), faked here by
+# its two files, and the card's songs as the fallback.
+CLIP_REQ, CLIP_ANS = '/tmp/q2-subsonic.clip', '/tmp/q2-subsonic.clips'
+
+
+def server_songs(n, local=0, length=240):
+    """n server-only songs (sid, title, artist, style, year, seconds, offline copy), the first `local` with a copy."""
+    return [(f'sid{i}', f'Server {i}', f'Cloud {i % 9}', ('Rock', 'Jazz')[i % 2], 1990 + i % 30, length,
+             f'/mnt/mmc/.subsonic/stream/Cloud/Server {i} [sid{i}].mp3' if i < local else '') for i in range(n)]
+
+
+class App:
+    """The bundled app's side of the clip channel: it answers what the request asks, a clip a ranged fetch from its
+    start point, or nothing (a stall), or fail."""
+    def __init__(self, rig, up=True):
+        self.r, self.answers = rig, {}
+        rig.files.files[CLIP_ANS] = f'#Q2CLIPS/1\tserver={"up" if up else "down"}\n'.encode()
+
+    def request(self):
+        text = self.r.files.files.get(CLIP_REQ, b'').decode()
+        lines = text.splitlines()
+        seq = int(lines[0].split('seq=')[1]) if lines else 0
+        return seq, [tuple(line.split('\t')) for line in lines[1:]]
+
+    def answer(self, state='done'):
+        seq, want = self.request()
+        named = {slot for slot, *_ in want}
+        for slot in [k for k in self.answers if k not in named]:  # the spec: a clip no longer named goes
+            self.r.present.discard(self.answers.pop(slot).split('\t')[4])
+        for slot, sid, start, length in want:
+            if slot in self.answers and self.answers[slot].split('\t')[2] == 'done':
+                continue
+            path = f'/mnt/mmc/.subsonic/clips/{sid}.mp3'
+            if state == 'done':
+                self.r.present.add(path)
+                self.r.lengths[path] = int(length) // 1000
+            self.answers[slot] = (f'{seq}\t{slot}\tfail\t0\t' if state == 'fail'  # the app's fail: no path
+                                  else f'{seq}\t{slot}\t{state}\t{start}\t{path}')
+        head = self.r.files.files[CLIP_ANS].decode().splitlines()[0]
+        self.r.files.files[CLIP_ANS] = '\n'.join([head, *self.answers.values()]).encode() + b'\n'
+
+
+def clip_pass(r):
+    for arg in r.clip_threads:
+        r.fw.fn('game_callerten__clip_pass', None, C.c_void_p)(arg)
+
+
+def kinds(r):
+    return [r.pk.kind[i] for i in range(r.pk.answers)]
+
+
+CARD_K, COPY_K, STREAM_K = range(3)
+
+
+def test_a_library_mostly_on_the_server_gets_ten_callers_streamed(fw, tmp_path):
+    r = Rig(fw, tmp_path, songs=music(3), server=server_songs(300))
+    app = App(r)
+    r.start()
+    assert r.g.screen == ROUND and r.g.rounds == 10 and kinds(r).count(STREAM_K) == 10 and len(r.clip_threads) == 1
+    clip_pass(r)
+    seq, want = app.request()
+    assert len(want) == 2 and seq == r.pk.seq  # this caller's clip and the next's, prefetched
+    first = [w for w in want if int(w[0]) == r.g.song]
+    assert first and int(first[0][2]) == r.pk.from_ms[r.g.song]
+    app.answer()
+    clip_pass(r)
+    r.step()
+    path, sec = r.clips()[-1]
+    assert path.startswith('/mnt/mmc/.subsonic/clips/') and sec == 0  # the clip's file starts at its start
+    for k in range(10):
+        if r.g.screen != ROUND:
+            break
+        clip_pass(r), app.answer(), clip_pass(r)
+        r.step(n=2)
+        r.call(r.right_row())
+    assert r.g.screen == END and r.g.round == 10
+    played = [p for p, _ in r.clips()]
+    assert all(p.startswith(('/mnt/mmc/.subsonic/clips/', '/mnt/mmc/Music/')) for p in played)
+    assert sum(p.startswith('/mnt/mmc/.subsonic/clips/') for p in played) >= 7  # three card songs at most
+
+
+def test_the_next_callers_clip_is_asked_for_while_this_one_plays(fw, tmp_path):
+    r = Rig(fw, tmp_path, songs=music(3), server=server_songs(40))
+    app = App(r)
+    r.start()
+    clip_pass(r), app.answer(), clip_pass(r)
+    r.step()
+    for k in range(4):  # the next caller's clip, when it streams, is there before its round
+        nxt = r.g.slot
+        clip_pass(r), app.answer(), clip_pass(r)
+        assert r.pk.kind[nxt] != STREAM_K or r.pk.got[nxt] == 1
+        r.call(r.right_row())
+        assert r.g.song == nxt and r.g.phase == CUE  # no wait for it
+        if r.pk.kind[nxt] == STREAM_K:
+            assert r.clips()[-1][0].endswith(f'{r.pk.sid[nxt].value.decode()}.mp3')
+            assert r.clips()[-1][0] in r.present  # still there: the request named it until it played
+
+
+def test_a_stalled_stream_gives_way_to_a_card_song_within_its_bound(fw, tmp_path):
+    r = Rig(fw, tmp_path, songs=music(12), server=server_songs(60))
+    app = App(r)  # it never answers
+    r.start()
+    stream = [i for i in range(r.pk.answers) if r.pk.kind[i] == STREAM_K]
+    assert stream and r.g.song == stream[0] or r.pk.kind[r.g.song] != STREAM_K
+    if r.pk.kind[r.g.song] == STREAM_K:
+        for k in range(600):
+            clip_pass(r)
+            r.step()
+            if r.pk.kind[r.g.song] != STREAM_K:
+                break
+        assert k <= 481 and r.g.round == 0 and r.pk.kind[r.g.song] != STREAM_K
+    assert r.clips()[-1][0].startswith('/mnt/mmc/Music/')  # a card song's clip, the caller's number kept
+    while r.g.screen == ROUND and r.g.round < 3:
+        r.call(r.right_row())
+    assert all(r.pk.kind[s] != STREAM_K for s in [r.g.song])  # the stream given up for the contest
+
+
+@pytest.mark.parametrize('app_state', ['down', 'none'])
+def test_with_the_server_away_the_card_plays_on_its_own(fw, tmp_path, app_state):
+    r = Rig(fw, tmp_path, songs=music(14), server=server_songs(200, local=4))
+    if app_state == 'down':
+        App(r, up=False)
+    r.start()
+    assert r.g.screen == ROUND and not r.clip_threads
+    assert set(kinds(r)) <= {CARD_K, COPY_K} and kinds(r).count(COPY_K) <= 4
+
+
+def test_with_the_server_away_too_few_on_the_card_says_why(fw, tmp_path):
+    r = Rig(fw, tmp_path, songs=music(5), server=server_songs(200, local=3))
+    r.start()
+    assert r.g.screen == NOSIGNAL and r.pk.why == 5  # WHY_SERVER
+    canvas = Canvas(fw)
+    r.paint(canvas)
+    assert [o.text for o in canvas.ops if o.kind == 'text'][:3] == ["Can't reach your", 'music server', 'A contest needs 12 songs']
+
+
+def test_offline_copies_of_server_songs_play_as_card_songs(fw, tmp_path):
+    r = Rig(fw, tmp_path, songs=music(2), server=server_songs(30, local=30))
+    r.start()
+    assert r.g.screen == ROUND and r.g.rounds == 10 and set(kinds(r)) <= {CARD_K, COPY_K} and kinds(r).count(COPY_K) >= 8
+    assert r.clips()[-1][0].startswith(('/mnt/mmc/.subsonic/stream/', '/mnt/mmc/Music/'))
+
+
+@pytest.mark.parametrize('status', [2, 3, 1])
+def test_a_streamed_contest_gives_the_music_back_and_ends_its_clips(fw, tmp_path, status):
+    r = Rig(fw, tmp_path, songs=music(3), server=server_songs(60), status=status)
+    app = App(r)
+    r.start()
+    clip_pass(r), app.answer(), clip_pass(r)
+    r.step()
+    r.hear()
+    r.quit()
+    r.run_timers()
+    assert r.starts == ([0] if status == 2 else [1] if status == 3 else []) and r.status == status
+    clip_pass(r)
+    seq, want = app.request()
+    assert want == []  # the app's clips asked for no more: it deletes them
+    assert not any('{set-songurl' in m and '/stream/' in m for m in r.sent)  # never the user's stream cache
+
+
+def test_an_answer_downloading_is_pending_and_a_fail_with_no_path_is_given_up(fw, tmp_path):
+    r = Rig(fw, tmp_path, songs=music(12), server=server_songs(60))
+    app = App(r)
+    r.start()
+    s = r.g.song if r.pk.kind[r.g.song] == STREAM_K else None
+    clip_pass(r)
+    slots = [int(w[0]) for w in app.request()[1]]
+    app.answer('get')
+    clip_pass(r)
+    assert slots and all(r.pk.got[k] == 0 for k in slots)  # downloading: still waited for
+    assert [int(w[0]) for w in app.request()[1]] == slots  # and still asked for
+    app.answers.clear()
+    app.answer('fail')
+    clip_pass(r)
+    assert all(r.pk.got[k] == -1 for k in slots)
+    if s is not None:
+        r.step()
+        assert r.pk.kind[r.g.song] != STREAM_K or r.g.song != s  # that song passed over at once
