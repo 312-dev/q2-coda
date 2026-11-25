@@ -262,6 +262,10 @@ assert m.places()[0][1]==85 and not m.seeks; passed()
 m.poll(0,pos=0,n=3); assert not m.seeks  # back to A, paused at its start: waits for Play
 playing(m,1,n=3); assert m.seeks==[85] and m.places()[0][1]==85; passed()
 m=ResumeMachine(m.files); m.poll(0,pos=0,n=2); playing(m,2,n=1); assert m.seeks==[85]; passed()  # after a reboot
+# Paused at its start, a seek into its first RESUME_START_S (the player shows a paused seek at once) waits for Play
+# too: the jump, stock's seek, would resume the track.
+m=ResumeMachine(m.files); m.handlers.pop(syms['mclGetPlayStatus']); m.word(0xa50084,3); m.poll(0,pos=0,n=2); m.poll(2,n=2)
+assert not m.seeks; m.word(0xa50084,2); playing(m,2,n=1); assert m.seeks==[85]; passed()
 m=ResumeMachine(m.files); m.poll(0,pos=0,n=2); playing(m,O['RESUME_START_S'],n=1); assert not m.seeks; passed()  # already under way
 m.poll(3590,n=3); m.poll(0,pos=1,n=2); assert not m.places(); passed()  # finished: forgotten
 m=ResumeMachine(); cue=m.items(m.get(syms['mcl_pdeqplaylist']))[0]; m.word(cue+O['REC_CUE_START'],1200)
@@ -351,6 +355,10 @@ m.poll(0,200); playing(m,1,200,n=101); assert counts(m)==[(fnv('/p/A'),2)]; pass
 playing(m,0,200,pos=1,n=5); m.poll(150,200); playing(m,151,200,n=40); assert len(counts(m))==1; passed()  # seeked past half
 playing(m,0,20,pos=2,n=25); assert len(counts(m))==1; passed()  # too short
 playing(m,0,3600,pos=1,n=242); assert counts(m)[0]==(fnv('/p/B'),1); passed()  # 4 minutes of a long track
+# Paused, seeks of a few seconds (the player shows a paused seek at once) are no listening: none counts until it plays.
+p=ResumeMachine(); playing(p,0,200,pos=0,n=101); p.handlers.pop(syms['mclGetPlayStatus']); p.word(0xa50084,3)
+for s in (103,106,109): p.poll(s,200,n=2)
+assert not counts(p); p.word(0xa50084,2); playing(p,109,200,n=50); assert counts(p)==[(fnv('/p/A'),1)]; passed()
 log=m.files['/mnt/mmc/.scrobbler.log'].decode().split('\n')  # the same listens, scrobbled
 assert log[:3]==['#AUDIOSCROBBLER/1.1','#TZ/UTC','#CLIENT/Vamp'] and log[-1]=='' and len(log)==7
 assert log[3]==f'Artist\tAlbum\tA\t\t200\tL\t{1700000000-100}\t' and log[4]==log[3] and log[5].startswith('Artist\tAlbum\tB\t\t3600\tL\t'); passed()

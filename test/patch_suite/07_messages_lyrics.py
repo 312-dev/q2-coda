@@ -226,6 +226,25 @@ m.call(374,address=HOOKS['on_wm_tsdown_before_fun'][0],event_type=O['EVT_POINTER
 assert not m.starts and m.nodes[m.slider]['value']==105 and m.timers
 m.word(PLAY_STATUS,2); step(m,1000,wait=True); assert not m.starts
 step(m,1500,wait=True); assert m.starts==[m.win] and not m.timers; passed()
+# Paused, player_seek_time (Now Playing's touch drag and stock's key seek, Car Remote's and the car's seek, a
+# chapter's pick) and Previous's restart (player_seek_start) send the seek alone, in file seconds, and the track
+# stays paused: stock's follow it with config_outputchannel and mclSetResume. A target at the track's end stops a
+# second short of it, as the scan does. Playing, stock's seek runs as before, stamped as a press.
+class PausedSeekMachine(QueueMachine):
+    def __init__(self,status):
+        super().__init__(queue=3,pos=1); self.handlers.pop(syms['mclGetPlayStatus']); self.word(PLAY_STATUS,status)
+        for n in ('player_seek_time','player_seek_start'): self.handlers.pop(syms[n],None)
+        self.mock('config_outputchannel','dmrSendPlay'); self.handlers[syms['player_playtime']]='q:player_playtime'
+        self.playtime=10; self.word(self.items(self.get(syms['mcl_pdeqplaylist']))[1]+O['REC_CUE_START'],30)
+    def hook(self,u,address,size,unused):
+        if self.handlers.get(address)!='q:player_playtime': return super().hook(u,address,size,unused)
+        self.calls.append(('player_playtime',0,0,0)); self.returns(self.playtime,clobber=True)
+def paused_seek(status,fn,arg):
+    m=PausedSeekMachine(status); m.call(address=HOOKS[fn][0],args=(arg,0,0,0),gap=0,count=5_000_000)
+    return [(c[0],c[1]) for c in m.calls if c[0] in ('mclSetSeek','mclSetResume','config_outputchannel','stock_press_stamp')]
+for fn,arg,want in (('player_seek_time',40,70),('player_seek_time',225,254),('player_seek_time',-5,30),('player_seek_start',0,30)):
+    assert paused_seek(3,fn,arg)==[('mclSetSeek',want)],(fn,arg,paused_seek(3,fn,arg))
+assert paused_seek(2,'player_seek_time',40)[:2]==[('stock_press_stamp',40),('mclSetSeek',70)]; passed()
 # Leaving and reopening Now Playing, still paused on that track and second, puts the bar back on
 # the paused seek's target and waits for it again, so a new scrub starts from it; resumed (the
 # second moved), the bar is stock's.

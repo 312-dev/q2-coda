@@ -583,9 +583,10 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
                 return ENDED;
             if (!paused) dac_unmute(way, dac_stamp(1)); /* paused, the resume unmutes */
             origin = offset = source_frames(s);
-            /* paused, the position shows the seek only once playing again, as stock's; playing, it shows the target
-             * at once, so a song still arriving shows it while the read waits for its bytes (grow.c) */
-            if (seek && !paused) {
+            /* the position shows the target at once: playing, so a song still arriving shows it while the read waits
+             * for its bytes (grow.c); paused, so Now Playing, Car Remote and Resume see where Play goes on from
+             * (stock's showed a paused seek only once playing again) */
+            if (seek) {
                 pthread_mutex_lock(&c->mu);
                 c->position = target;
                 ipc_status_note(c);

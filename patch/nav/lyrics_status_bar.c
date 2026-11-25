@@ -107,16 +107,12 @@ static unsigned np_track(void) {
     return r ? fnv(hash_bytes(FNV_SEED, (const unsigned char *)&at, sizeof at), P(r, REC_PATH)) : 0;
 }
 
-/* Stock's seek resumes playback; a paused seek must wait for Play instead. */
+/* A scrub's commit: paused, the seek alone, which waits for Play (seek_paused), returning the player's second
+ * then plus one; playing, stock's, 0. */
 static int seek_position(int to) {
-    unsigned at, n;
-    void *r = mclGetPlayStatus() == 3 ? queue_now(&at, &n) : 0;
-    if (r) {
-        int sec = -1, total;
-        player_playtime_and_length(&sec, &total);
-        mclSetSeek(to + I(r, REC_CUE_START));
-        return sec + 1;
-    }
+    int sec = -1, total;
+    player_playtime_and_length(&sec, &total);
+    if (seek_paused(to)) return sec + 1;
     player_seek_time(to);
     return 0;
 }
