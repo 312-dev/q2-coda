@@ -545,7 +545,13 @@ static int sw_restart_tick(const void *info) {
     widget_invalidate_force(swu.restart, (void *)0);
     return 8;
 }
+void playback_going_down(int on); /* playback.c */
+static int sw_dialog_gone(void *ctx, void *event) {
+    playback_going_down(0); /* closed without the reboot: the queue's saves go on */
+    return 0;
+}
 void sw_update_restarting(void *win) {
+    if (win) widget_on(win, EVT_DESTROY, sw_dialog_gone, win);
     void *label = win ? widget_lookup(win, "scrlabel_checkfw", 1) : (void *)0;
     if (!label) return;
     widget_set_visible(label, 0, 0);
