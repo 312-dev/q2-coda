@@ -116,12 +116,8 @@ static unsigned char *scene_idx(struct eg *g) {
 /* The art file, read whole into the state; anything amiss (missing, short, another layout) and the
  * game says so and leaves. */
 static int load(struct eg *g) {
-    void *f = fopen(G_ART, "rb");
-    if (!f) return 0;
-    unsigned n = fread(g->art, 1, EG_ART_BYTES, f);
-    fclose(f);
-    if (n != EG_ART_BYTES || g->art[0] != EG_ART_MAGIC || g->art[1] != EG_ART_BYTES ||
-        g->art[2] != EG_PARTS || g->art[3] != EG_BAND)
+    if (!blob_io(G_ART, G_ART, g->art, EG_ART_BYTES, 0) || g->art[0] != EG_ART_MAGIC ||
+        g->art[1] != EG_ART_BYTES || g->art[2] != EG_PARTS || g->art[3] != EG_BAND)
         return 0;
     for (int k = 0; k < EG_PARTS; ++k) {
         const struct part *p = part(g, k);
@@ -193,12 +189,6 @@ static inline __attribute__((always_inline)) unsigned blend(unsigned dst, unsign
     unsigned gg = ((rgb & 0xff00) * a + (dst & 0xff00) * (256 - a)) >> 8 & 0xff00;
     return 0xff000000 | rb | gg;
 }
-/* The part of x, y, w, h being painted, as x0 y0 x1 y1 in c; 0 when none of it is. */
-static int clip(const struct eng_surface *s, int x, int y, int w, int h, int *c) {
-    c[0] = x < s->x0 ? s->x0 : x, c[1] = y < s->y0 ? s->y0 : y;
-    c[2] = x + w > s->x1 ? s->x1 : x + w, c[3] = y + h > s->y1 ? s->y1 : y + h;
-    return c[2] > c[0] && c[3] > c[1];
-}
 
 static unsigned isqrt(unsigned n) {
     unsigned r = 0, bit = 1u << 30;
@@ -215,7 +205,7 @@ static unsigned isqrt(unsigned n) {
  * distance across it), alpha of 256. */
 static void disc(struct eng_surface *s, int x16, int y16, int r16, unsigned rgb, int alpha) {
     int x = (x16 - r16 - 8) >> 4, y = (y16 - r16 - 8) >> 4, d = ((r16 + 8) >> 3) + 2, c[4];
-    if (r16 <= 0 || alpha <= 0 || !clip(s, x, y, d, d, c)) return;
+    if (r16 <= 0 || alpha <= 0 || !eng_clip(s, x, y, d, d, c)) return;
     int in = r16 > 8 ? r16 - 8 : 0, out = r16 + 8, den = out * out - in * in;
     for (int j = c[1]; j < c[3]; ++j) {
         int dy = j * 16 + 8 - y16;
@@ -255,8 +245,8 @@ static void bar(struct eng_surface *s, int x16, int y16, fx ux, fx uy, int len, 
         ey = y16 + (uy * len >> 16); /* all in int: |dx| * 65536 < 2^31 */
     int lo_x = (x16 < ex ? x16 : ex) - w, hi_x = (x16 > ex ? x16 : ex) + w;
     int lo_y = (y16 < ey ? y16 : ey) - w, hi_y = (y16 > ey ? y16 : ey) + w, c[4];
-    if (!clip(s, lo_x >> 4, lo_y >> 4, (hi_x >> 4) - (lo_x >> 4) + 2, (hi_y >> 4) - (lo_y >> 4) + 2,
-              c))
+    if (!eng_clip(s, lo_x >> 4, lo_y >> 4, (hi_x >> 4) - (lo_x >> 4) + 2,
+                  (hi_y >> 4) - (lo_y >> 4) + 2, c))
         return;
     int half = w / 2;
     for (int j = c[1]; j < c[3]; ++j) {
@@ -315,7 +305,7 @@ static void glyph(const struct eg *g, struct eng_surface *s, int id, int x, int 
     const unsigned char *src = data(g, id);
     int left = x - pt->ax, top = y - pt->ay, stride = (pt->w + 1) / 2, c[4];
     unsigned lut[16]; /* each of the mask's 16 levels at this alpha, of 256 */
-    if (alpha <= 0 || !clip(s, left, top, pt->w, pt->h, c)) return;
+    if (alpha <= 0 || !eng_clip(s, left, top, pt->w, pt->h, c)) return;
     for (int n = 0; n < 16; ++n) lut[n] = (unsigned)(n * 17 * alpha) >> 8, lut[n] += lut[n] >> 7;
 #define PUT(p, a) (*(p) = (a) >= 256 ? 0xff000000 | rgb : blend(*(p), rgb, (a)))
     for (int j = c[1]; j < c[3]; ++j) {
@@ -592,7 +582,7 @@ static void draw_spray(const struct eg *g, struct eng_surface *s) {
 /* The card's shadow: black at 110 of 256 over a box, its corners square. */
 static void shade(struct eng_surface *s, int x, int y, int w, int h) {
     int c[4];
-    if (!clip(s, x, y, w, h, c)) return;
+    if (!eng_clip(s, x, y, w, h, c)) return;
     for (int j = c[1]; j < c[3]; ++j)
         for (unsigned *p = at(s, c[0], j), *end = p + c[2] - c[0]; p < end; ++p)
             *p = 0xff000000 | ((*p & 0xff00ff) * 146 >> 8 & 0xff00ff) |
@@ -759,12 +749,6 @@ static void flush(struct eg *g) {
     g->boxes = 0;
 }
 
-static unsigned rng(struct eg *g) {
-    unsigned x = g->seed;
-    x ^= x << 13, x ^= x >> 17, x ^= x << 5;
-    return g->seed = x;
-}
-
 /* A run of n of one sound, six steps apart: the first now. */
 static void sound(struct eg *g, int kind, int n) {
     eng_sfx(kind);
@@ -876,14 +860,14 @@ static void spawn(struct eg *g) {
         if (e->alive) continue;
         int pc = 10 + 3 * g->wave > 35 ? 35 : 10 + 3 * g->wave,
             pm = 25 + 3 * g->wave > 40 ? 40 : 25 + 3 * g->wave;
-        int r = (int)(rng(g) % 100), cinders = 0, alive = 0;
+        int r = (int)(eng_rng(&g->seed) % 100), cinders = 0, alive = 0;
         for (int j = 0; j < G_EMBERS; ++j)
             cinders += g->em[j].alive && g->em[j].size == 2, alive += g->em[j].alive;
         e->smoke = alive < G_SMOKE;
         e->size = g->lull ? 2 : r < pc ? 2 : r < pc + pm ? 1 : 0;
         if (e->size == 2 && cinders >= G_CINDERS) e->size = 1; /* the frame's cost: see G_CINDERS */
-        e->amp = G_SWAY, e->phase = (int)(rng(g) % G_PERIOD), e->vx = 0;
-        e->bx = FX(30 + G_SWAY + (int)(rng(g) % (315 - 2 * G_SWAY)));
+        e->amp = G_SWAY, e->phase = (int)(eng_rng(&g->seed) % G_PERIOD), e->vx = 0;
+        e->bx = FX(30 + G_SWAY + (int)(eng_rng(&g->seed) % (315 - 2 * G_SWAY)));
         e->y = FX(40);
         e->vy = g->lull ? FX(0.5) : FX(0.5) + (g->wave - 1) * (FX(6) / 100);
         e->vy = e->vy > FX(2.2) ? FX(2.2) : e->vy;
@@ -1150,9 +1134,10 @@ static void extras(struct eg *g) {
         if (g->bed[k] == BURNING && (g->tick + k) % G_FLAME == 0 && ROOM(576))
             ++g->flame[k], mark(g, BED_X[k] - 12, 238, 24, 24);
     if (!g->bolt && !g->bolt_wait && (g->light >= DUSK || g->lull) && alive <= G_STRIKE &&
-        !g->banner && rng(g) % 64 == 0 && ROOM(9000)) {
-        g->bolt = 1, g->bolt_seed = (int)rng(g), g->bolt_x = 164 + (int)(rng(g) % 16);
-        g->bolt_wait = G_FLASH + (int)(rng(g) % 120);
+        !g->banner && eng_rng(&g->seed) % 64 == 0 && ROOM(9000)) {
+        g->bolt = 1, g->bolt_seed = (int)eng_rng(&g->seed),
+        g->bolt_x = 164 + (int)(eng_rng(&g->seed) % 16);
+        g->bolt_wait = G_FLASH + (int)(eng_rng(&g->seed) % 120);
         bolt_box(g);
     }
     /* the light's turn: a strip of rows a step, the palette a pass further at each pass's start */

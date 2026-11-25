@@ -14,21 +14,17 @@ static struct eng {
     int running, quit, h, first; /* first: the timer's first pass is a step, whenever it comes */
     unsigned keys, pressed, released; /* ENG_* held, and the edges since the last frame */
     int ticks, fast, tx, ty;
-    int rects, rect[ENG_RECTS][4]; /* x0 y0 x1 y1 on the sheet */
-    unsigned steps, frames;        /* counted: steps taken, frames that painted */
-    unsigned second;               /* ENG_CLOCK's timer while the frame timer is off */
+    int rects, rect[ENG_RECTS][4];    /* x0 y0 x1 y1 on the sheet */
+    unsigned steps, frames;           /* counted: steps taken, frames that painted */
+    unsigned second;                  /* ENG_CLOCK's timer while the frame timer is off */
     unsigned play, play_at, input_at; /* play time (ms), when it was last counted, the last input */
-    long long state[];             /* the game's, aligned for anything */
+    long long state[];                /* the game's, aligned for anything */
 } *en __attribute__((section(".scratch")));
 
 /* The registry: Games' rows after its own, in this order. The demo scene is a --dev build's, last,
  * and only with [Q2POD] ENGINEDEMO=1 in config.ini; a release build links none of it. */
 static const struct eng_game *const eng_games[] = {
-    &eng_popstall,
-    &eng_solitaire,
-    &eng_sudoku,
-    &eng_callerten,
-    &eng_embergarden,
+    &eng_popstall, &eng_solitaire, &eng_sudoku, &eng_callerten, &eng_embergarden,
 #if Q2POD_DEV
     &eng_demo,
 #endif
@@ -40,7 +36,8 @@ int eng_count(void) {
 const struct eng_game *eng_game(int k) { return eng_games[k]; }
 
 int eng_live(void) { return en && en->timer; }
-/* game's state while it is the one open, held or running; else 0 (it was never opened, or closed) */
+/* game's state while it is the one open, held or running; else 0 (it was never opened, or closed)
+ */
 void *eng_state_of(const struct eng_game *game) { return en && en->game == game ? en->state : 0; }
 
 void eng_dirty(int x, int y, int w, int h) {
@@ -321,7 +318,7 @@ static inline unsigned blend1(unsigned dst, unsigned rgb, unsigned a) { /* a of 
 }
 
 /* The part of x, y, w, h being painted, as x0 y0 x1 y1 in c; 0 when none of it is. */
-static int clip(const struct eng_surface *s, int x, int y, int w, int h, int *c) {
+int eng_clip(const struct eng_surface *s, int x, int y, int w, int h, int *c) {
     c[0] = x < s->x0 ? s->x0 : x, c[1] = y < s->y0 ? s->y0 : y;
     c[2] = x + w > s->x1 ? s->x1 : x + w, c[3] = y + h > s->y1 ? s->y1 : y + h;
     return c[2] > c[0] && c[3] > c[1];
@@ -332,7 +329,7 @@ static inline unsigned *row(const struct eng_surface *s, int x, int y) {
 
 void eng_fill(struct eng_surface *s, int x, int y, int w, int h, unsigned rgb) {
     int c[4];
-    if (!clip(s, x, y, w, h, c)) return;
+    if (!eng_clip(s, x, y, w, h, c)) return;
     rgb |= 0xff000000;
     for (int j = c[1]; j < c[3]; ++j)
         for (unsigned *p = row(s, c[0], j), *end = p + (c[2] - c[0]); p < end; ++p) *p = rgb;
@@ -362,7 +359,7 @@ static inline unsigned cover(int dx, int dy, int r) {
 void eng_disc(struct eng_surface *s, fx cx, fx cy, fx r, unsigned rgb) {
     int x16 = cx >> 12, y16 = cy >> 12, r16 = r >> 12, c[4];
     int x = (x16 - r16 - 8) >> 4, y = (y16 - r16 - 8) >> 4, d = ((r16 + 8) >> 3) + 2;
-    if (r16 <= 0 || !clip(s, x, y, d, d, c)) return;
+    if (r16 <= 0 || !eng_clip(s, x, y, d, d, c)) return;
     for (int j = c[1]; j < c[3]; ++j) {
         int dy = j * 16 + 8 - y16;
         unsigned *p = row(s, c[0], j);
@@ -376,7 +373,7 @@ void eng_disc(struct eng_surface *s, fx cx, fx cy, fx r, unsigned rgb) {
 void eng_round(struct eng_surface *s, int x, int y, int w, int h, int r, unsigned rgb) {
     int c[4];
     r = 2 * r > w ? w / 2 : r, r = 2 * r > h ? h / 2 : r;
-    if (!clip(s, x, y, w, h, c)) return;
+    if (!eng_clip(s, x, y, w, h, c)) return;
     for (int j = c[1]; j < c[3]; ++j) {
         int v = j - y, cyr = v < r ? r : v >= h - r ? h - r : -1; /* the corner's centre row */
         unsigned *p = row(s, c[0], j);
@@ -423,7 +420,8 @@ void eng_paint(void *canvas) {
     x1 = x1 > w ? w : x1, y1 = y1 > h ? h : y1;
     s.x0 = x0 - s.ox < 0 ? 0 : x0 - s.ox, s.y0 = y0 - s.oy < 0 ? 0 : y0 - s.oy;
     s.x1 = x1 - s.ox > ENG_W ? ENG_W : x1 - s.ox, s.y1 = y1 - s.oy > e->h ? e->h : y1 - s.oy;
-    /* an ENG_OWN_PAUSE game held: the status row's band is stock's again, over the sheet's top rows */
+    /* an ENG_OWN_PAUSE game held: the status row's band is stock's again, over the sheet's top rows
+     */
     if ((e->game->flags & ENG_OWN_PAUSE) && !e->running && s.y0 < ENG_BAR) s.y0 = ENG_BAR;
     if (s.x1 > s.x0 && s.y1 > s.y0) e->game->draw(e->state, &s);
 }

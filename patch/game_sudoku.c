@@ -1,8 +1,8 @@
-/* Sudoku (docs/games-engine.md#evening-puzzle), "The Evening Puzzle": a 9 x 9 grid made on the device for
- * one of three levels, on a newspaper's puzzle page over the whole screen, entered with the wheel
- * through a dial of digits on a sticky note. The generator fills a grid by randomized backtracking,
- * then empties it in symmetric pairs while the level's test still finds one solution, a slice of
- * work a step so no frame is late. */
+/* Sudoku (docs/games-engine.md#evening-puzzle), "The Evening Puzzle": a 9 x 9 grid made on the
+ * device for one of three levels, on a newspaper's puzzle page over the whole screen, entered with
+ * the wheel through a dial of digits on a sticky note. The generator fills a grid by randomized
+ * backtracking, then empties it in symmetric pairs while the level's test still finds one solution,
+ * a slice of work a step so no frame is late. */
 #include "engine.h"
 #include "game_sudoku_art.inc"
 
@@ -98,11 +98,6 @@ static int bits(unsigned m) {                               /* the digits in a m
     return n;
 }
 
-static unsigned rng(unsigned *x) {
-    *x ^= *x << 13, *x ^= *x >> 17, *x ^= *x << 5;
-    return *x;
-}
-
 /* ---- the solver ---- */
 
 static void sv_flip(struct sudoku *s, int i, int d) {
@@ -165,7 +160,7 @@ static int sv_search(struct sudoku *s, int *work, unsigned *seed) {
         }
         if (seed) {
             *work -= W_DRAW;
-            for (int j = (int)(rng(seed) % (unsigned)bits(m)); j--;) m &= m - 1;
+            for (int j = (int)(eng_rng(seed) % (unsigned)bits(m)); j--;) m &= m - 1;
         }
         v->left[k] &= (unsigned short)~(m & -m);
         sv_put(s, i, low(m));
@@ -230,7 +225,7 @@ static int gen_run(struct sudoku *s, int work) {
             if (!sv_search(s, &work, &s->rng)) break;
             for (int i = 0; i < 81; ++i) s->gsol[i] = s->puz[i] = v->g[i];
             for (int k = 0; k < 41; ++k) { /* 0-40 shuffled as they go in */
-                int j = (int)(rng(&s->rng) % (unsigned)(k + 1));
+                int j = (int)(eng_rng(&s->rng) % (unsigned)(k + 1));
                 s->order[k] = s->order[j], s->order[j] = (unsigned char)k;
             }
             s->gclues = 81, s->gphase = G_PICK;
@@ -1069,6 +1064,10 @@ static void pause(void *state) {
     if (s->dirty && s->v.sol[0]) s->dirty = !eng_save("sudoku", &s->v, sizeof s->v, S_MAGIC);
 }
 
-const struct eng_game eng_sudoku = {
-    "Evening Puzzle", sizeof(struct sudoku), ENG_STILL | ENG_FULL | ENG_CLOCK, init, step, draw, pause
-};
+const struct eng_game eng_sudoku = { "Evening Puzzle",
+                                     sizeof(struct sudoku),
+                                     ENG_STILL | ENG_FULL | ENG_CLOCK,
+                                     init,
+                                     step,
+                                     draw,
+                                     pause };

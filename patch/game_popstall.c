@@ -195,12 +195,6 @@ static void mark_all(struct pstall *b) {
 
 /* ---- the level ---- */
 
-static unsigned rng(unsigned *s) {
-    unsigned x = *s;
-    x ^= x << 13, x ^= x >> 17, x ^= x << 5;
-    return *s = x;
-}
-
 /* A cell's six neighbours that are on the lattice, as indices into cell[]; how many. */
 static int around(int r, int c, int *out) {
     int n = 0, lo = r & 1 ? c : c - 1;
@@ -248,15 +242,15 @@ static void build(struct pstall *b, int bags) {
     s = s ? s : 1;
     for (int tries = 0; n < 12; ++tries) {
         int kind = (int)((unsigned)(b->level - 1 + tries) + b->seed) & 3;
-        int p = kind == 0   ? 9 + (int)(rng(&s) % 7)
-                : kind == 1 ? 60 + (int)(rng(&s) % 50)
-                : kind == 2 ? 2 + (int)(rng(&s) % 7)
-                            : 5 + (int)(rng(&s) % 4);
-        int q = kind == 0   ? 4 + (int)(rng(&s) % 12)
-                : kind == 1 ? 20 + (int)(rng(&s) % 16)
-                : kind == 2 ? 3 + (int)(rng(&s) % 3)
-                            : 2 + (int)(rng(&s) % 2);
-        unsigned dbl = rng(&s) % g;
+        int p = kind == 0   ? 9 + (int)(eng_rng(&s) % 7)
+                : kind == 1 ? 60 + (int)(eng_rng(&s) % 50)
+                : kind == 2 ? 2 + (int)(eng_rng(&s) % 7)
+                            : 5 + (int)(eng_rng(&s) % 4);
+        int q = kind == 0   ? 4 + (int)(eng_rng(&s) % 12)
+                : kind == 1 ? 20 + (int)(eng_rng(&s) % 16)
+                : kind == 2 ? 3 + (int)(eng_rng(&s) % 3)
+                            : 2 + (int)(eng_rng(&s) % 2);
+        unsigned dbl = eng_rng(&s) % g;
         n = 0;
         for (int r = 0; r < P_ROWS; ++r)
             for (int c = 0; c < P_COLS; ++c) {
@@ -270,7 +264,7 @@ static void build(struct pstall *b, int bags) {
     }
     int axis = 0, key = -1, cand[P_CELLS], m = 0, placed = 0;
     for (int r = 1; r < P_ROWS; r += 2) axis += b->cell[r * P_COLS + 7] != NONE;
-    int k = (int)(rng(&s) % (unsigned)(axis ? axis : n));
+    int k = (int)(eng_rng(&s) % (unsigned)(axis ? axis : n));
     for (int i = 0; i < P_CELLS; ++i)
         if (b->cell[i] && (!axis || (i / P_COLS & 1 && i % P_COLS == 7)) && !k--) {
             b->cell[key = i] = STAR;
@@ -280,7 +274,7 @@ static void build(struct pstall *b, int bags) {
         if (i / P_COLS >= 1 && i / P_COLS <= 5 && b->cell[i] == BAL) cand[m++] = i;
     bags = bags < 0 ? bags_for(b->level) : bags;
     for (int guard = 0; placed < bags && m && guard < 60; ++guard) {
-        int i = cand[rng(&s) % (unsigned)m], r = i / P_COLS,
+        int i = cand[eng_rng(&s) % (unsigned)m], r = i / P_COLS,
             j = r * P_COLS + cols(r) - 1 - i % P_COLS;
         if (j == i || b->cell[j] != BAL || touching(i, j) || touching(i, key) || touching(j, key))
             continue;
@@ -510,9 +504,9 @@ static void hit(struct pstall *b, int i, int from_x) {
         return;
     }
     add_fx(b, F_SCORE, x + 3, y - 17, (int)pts | (b->combo >= 10) << 24);
-    if ((b->tk[0].kind == 0 || b->tk[1].kind == 0) && rng(&b->rs) % 8 == 0) {
+    if ((b->tk[0].kind == 0 || b->tk[1].kind == 0) && eng_rng(&b->rs) % 8 == 0) {
         int t = b->tk[0].kind ? 1 : 0;
-        b->tk[t].kind = 1 + (int)(rng(&b->rs) % 5), b->tk[t].x = x, b->tk[t].y = FX(y),
+        b->tk[t].kind = 1 + (int)(eng_rng(&b->rs) % 5), b->tk[t].x = x, b->tk[t].y = FX(y),
         b->tk[t].t = 0;
     }
     sound(b, ENG_SFX_TAP, 1);
@@ -678,7 +672,7 @@ static void caught(struct pstall *b, int kind) {
     add_fx(b, F_CALL, b->pad, 256, call);
     add_fx(b, F_SPARK, b->pad, 280, kind);
     dip(b, b->dip_t < 12 ? b->dip_x : b->pad, 3);
-    hop(b, (int)(rng(&b->rs) & 3), 3, 0);
+    hop(b, (int)(eng_rng(&b->rs) & 3), 3, 0);
     sound(b, ENG_SFX_TAP, 2);
 }
 
@@ -732,9 +726,9 @@ static void confetto_next(int first, int *p) { /* the next piece, or the first a
     static const unsigned seed = 0x1b873593u;
     if (first) p[5] = (int)seed;
     unsigned r = (unsigned)p[5];
-    p[0] = 34 + (int)(rng(&r) % 304), p[1] = 70 + (int)(rng(&r) % 207);
-    int z = (int)(rng(&r) & 3);
-    p[2] = sz[z][0], p[3] = sz[z][1], p[4] = (int)(rng(&r) % 9), p[5] = (int)r;
+    p[0] = 34 + (int)(eng_rng(&r) % 304), p[1] = 70 + (int)(eng_rng(&r) % 207);
+    int z = (int)(eng_rng(&r) & 3);
+    p[2] = sz[z][0], p[3] = sz[z][1], p[4] = (int)(eng_rng(&r) % 9), p[5] = (int)r;
 }
 static void confetto(int k, int *p) {
     for (int n = 0; n <= k; ++n) confetto_next(!n, p);
@@ -1014,12 +1008,6 @@ static void pause(void *state) {
 
 /* ---- drawing ---- */
 
-/* The part of x, y, w, h being painted, as x0 y0 x1 y1 in c; 0 when none of it is. */
-static int clip(const struct eng_surface *s, int x, int y, int w, int h, int *c) {
-    c[0] = x < s->x0 ? s->x0 : x, c[1] = y < s->y0 ? s->y0 : y;
-    c[2] = x + w > s->x1 ? s->x1 : x + w, c[3] = y + h > s->y1 ? s->y1 : y + h;
-    return c[2] > c[0] && c[3] > c[1];
-}
 static inline unsigned *at(const struct eng_surface *s, int x, int y) {
     return s->px + (y + s->oy) * s->stride + x + s->ox;
 }
@@ -1031,7 +1019,7 @@ static inline unsigned blend(unsigned dst, unsigned rgb, unsigned a) { /* a of 2
 /* x, y, w, h in rgb, four at a time: eng_fill's work for less. */
 static void fill(struct eng_surface *s, int x, int y, int w, int h, unsigned rgb) {
     int c[4];
-    if (!clip(s, x, y, w, h, c)) return;
+    if (!eng_clip(s, x, y, w, h, c)) return;
     rgb |= 0xff000000;
     for (int j = c[1]; j < c[3]; ++j) {
         unsigned *p = at(s, c[0], j);
@@ -1065,7 +1053,7 @@ static void indexed(unsigned *p, const unsigned char *q, int n, const unsigned *
 /* The stall at rest, rows y0 to y1 of the paint. */
 static void stall(const struct pstall *b, struct eng_surface *s, int y0, int y1) {
     int c[4];
-    if (!clip(s, 0, y0, ENG_W, y1 - y0, c)) return;
+    if (!eng_clip(s, 0, y0, ENG_W, y1 - y0, c)) return;
     if (!b->art_ok) { /* no art: flat stand-ins in the stall's colours */
         for (int y = c[1]; y < c[3]; ++y) {
             unsigned rgb = y < 56           ? (y < 46 ? 0xd62c42 : 0x8a5a34)
@@ -1113,7 +1101,7 @@ static void sprite(const struct pstall *b, struct eng_surface *s, int id, int x,
     const struct art_pic *pic = (const struct art_pic *)((const char *)b->art + ART_SPRITES) + id;
     int c[4];
     x += pic->dx, y += pic->dy;
-    if (!b->art_ok || !clip(s, x, y, pic->w, pic->h, c)) return;
+    if (!b->art_ok || !eng_clip(s, x, y, pic->w, pic->h, c)) return;
     const unsigned *src = b->art + pic->off / 4;
     int whole = c[0] == x && c[2] == x + pic->w && a >= 256; /* every column: no run is cut */
     for (int j = c[1]; j < c[3]; ++j) {
@@ -1151,7 +1139,7 @@ static void masked(const struct pstall *b, struct eng_surface *s, const struct a
                    int y, unsigned rgb) {
     int c[4];
     x += pic->dx, y += pic->dy;
-    if (!b->art_ok || !clip(s, x, y, pic->w, pic->h, c)) return;
+    if (!b->art_ok || !eng_clip(s, x, y, pic->w, pic->h, c)) return;
     const unsigned char *src = (const unsigned char *)b->art + pic->off;
     for (int j = c[1]; j < c[3]; ++j) {
         const unsigned char *q = src + (j - y) * pic->w + (c[0] - x);
@@ -1598,7 +1586,7 @@ static void scene(const struct pstall *b, struct eng_surface *s) {
         if (on >> i & 1) {
             int x, y, c[4];
             bulb_box(i, &x, &y);
-            if (!clip(s, x - 6, y - 6, 13, 13, c)) continue;
+            if (!eng_clip(s, x - 6, y - 6, 13, 13, c)) continue;
             const unsigned char *q = (const unsigned char *)b->art + ART_BULBS + 169 * i;
             for (int j = c[1]; j < c[3]; ++j)
                 indexed(at(s, c[0], j), q + 13 * (j - y + 6) + c[0] - x + 6, c[2] - c[0],
@@ -1681,6 +1669,10 @@ static void draw(const void *state, struct eng_surface *s) {
     if (b->paused) sign(b, s);
 }
 
-const struct eng_game eng_popstall = {
-    "Pop Stall", sizeof(struct pstall) + ART_BYTES, ENG_RAW | ENG_FULL | ENG_OWN_PAUSE, init, step, draw, pause
-};
+const struct eng_game eng_popstall = { "Pop Stall",
+                                       sizeof(struct pstall) + ART_BYTES,
+                                       ENG_RAW | ENG_FULL | ENG_OWN_PAUSE,
+                                       init,
+                                       step,
+                                       draw,
+                                       pause };

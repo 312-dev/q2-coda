@@ -121,6 +121,7 @@ Return never reaches a game. A game that sets neither flag gets ticks and runs i
 | `eng_round`    | a box with round corners, smoothed                                                             |
 | `eng_text`     | ASCII in the theme's face through stock's canvas (left, centered or right); returns its width  |
 | `eng_inset(y)` | not a drawing: the columns the glass's 80 px corners hide at each end of the sheet's row `y`   |
+| `eng_clip`     | not a drawing: the part of a box inside this paint, for a game's own blits (Pop Stall's, Cabin Solitaire's, Ember Garden's) |
 
 A buffer that is not stock's 375 x 320 BGRA8888 `lcd_mem` (a window animation's snapshot of another layout) is left as stock drew it.
 
@@ -150,7 +151,7 @@ An `ENG_STILL` game takes no steps at rest, so its time would stand still while 
 
 ### Fixed point
 
-`fx` is 16.16: `FX()`, `FX_INT`, `fx_mul` (a 64-bit product, one `mult` on MIPS), `fx_div` (32-bit, exact to 8 fraction bits, for |a| under 128). `eng_sin`, `eng_cos`, `eng_atan2` (1024 a turn) and `eng_sqrt` are Vortex's tables. The X2000 has an FPU and the payload uses `float` where stock's vector canvas wants it, but a game's `step` and `draw` stay in integers: results are then the same on the host tests, under Unicorn and on the Q2, and a test can assert a ball's place exactly.
+`fx` is 16.16: `FX()`, `FX_INT`, `fx_mul` (a 64-bit product, one `mult` on MIPS), `fx_div` (32-bit, exact to 8 fraction bits, for |a| under 128). `eng_sin`, `eng_cos`, `eng_atan2` (1024 a turn) and `eng_sqrt` are Vortex's tables. The X2000 has an FPU and the payload uses `float` where stock's vector canvas wants it, but a game's `step` and `draw` stay in integers: results are then the same on the host tests, under Unicorn and on the Q2, and a test can assert a ball's place exactly. `eng_rng(&seed)` is the games' random numbers, xorshift32 on a seed of the game's own, inline in `engine.h`: the same on the host, under Unicorn and on the Q2, so a seed makes the same level, deal or puzzle everywhere (Pop Stall's levels, the Evening Puzzle's generator, Ember Garden's embers).
 
 ### Full screen
 

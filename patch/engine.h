@@ -61,9 +61,10 @@ struct eng_surface {
 enum {
     ENG_RAW = 1,   /* the wheel as travel (wheel), no ticks */
     ENG_STILL = 2, /* turn-based: the frame timer runs only after input and while step returns 1 */
-    ENG_FULL = 4,  /* the whole screen, 375 x 320, the status row hidden except while held (games.c) */
-    ENG_OWN_PAUSE = 8, /* held, the game draws its own pause below the status row's ENG_BAR rows, and
-                        * Games' "Paused" pop-up is left out (Return's Continue / Quit stays) */
+    ENG_FULL =
+        4, /* the whole screen, 375 x 320, the status row hidden except while held (games.c) */
+    ENG_OWN_PAUSE = 8, /* held, the game draws its own pause below the status row's ENG_BAR rows,
+                        * and Games' "Paused" pop-up is left out (Return's Continue / Quit stays) */
     ENG_CLOCK = 16     /* ENG_STILL with a shown time: at rest, a step with no input every
                         * ENG_SECOND_MS (docs/games-engine.md#play-time) */
 };
@@ -77,6 +78,15 @@ struct eng_game {
     void (*pause)(
         void *state); /* before the menu, the screen going off or the page closing: save */
 };
+
+/* A game's random numbers: xorshift32 on its own seed (never 0), the same on the host and the Q2 so
+ * a seed gives the same level or deal everywhere. Inline: the Evening Puzzle's generator calls it
+ * in its inner loop. */
+static inline unsigned eng_rng(unsigned *s) {
+    unsigned x = *s;
+    x ^= x << 13, x ^= x >> 17, x ^= x << 5;
+    return *s = x;
+}
 
 /* engine.c, for a game's step. */
 void eng_dirty(int x, int y, int w, int h); /* this part of the sheet changed: painted next frame */
@@ -95,6 +105,9 @@ int eng_load(const char *name, void *buf, unsigned size, unsigned magic);
 int eng_save(const char *name, void *buf, unsigned size, unsigned magic);
 
 /* engine.c, for a game's draw. Colours are the screen's, 0xRRGGBB; Light Mode leaves them. */
+/* The part of the box x, y, w, h inside this paint's rows and columns, as x0 y0 x1 y1 in c; 0 when
+ * none is. */
+int eng_clip(const struct eng_surface *s, int x, int y, int w, int h, int *c);
 void eng_fill(struct eng_surface *s, int x, int y, int w, int h, unsigned rgb);
 /* a disc with a smoothed edge, its centre and radius in 16.16 so it moves by parts of a pixel */
 void eng_disc(struct eng_surface *s, fx cx, fx cy, fx r, unsigned rgb);
@@ -122,11 +135,11 @@ void games_seal(void *b, unsigned n, unsigned magic);
 int games_text(void *canvas, const char *s, int x, int y, int h, unsigned px, unsigned color,
                int align);
 
-extern const struct eng_game eng_popstall;  /* game_popstall.c */
-extern const struct eng_game eng_solitaire; /* game_solitaire.c */
+extern const struct eng_game eng_popstall;    /* game_popstall.c */
+extern const struct eng_game eng_solitaire;   /* game_solitaire.c */
 extern const struct eng_game eng_sudoku;      /* game_sudoku.c */
 extern const struct eng_game eng_callerten;   /* game_callerten.c */
 extern const struct eng_game eng_embergarden; /* game_embergarden.c */
-extern const struct eng_game eng_demo;      /* engine_demo.c */
+extern const struct eng_game eng_demo;        /* engine_demo.c */
 
 #endif
