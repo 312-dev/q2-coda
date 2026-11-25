@@ -95,7 +95,8 @@ enum {
     QA_RENAME,
     QA_DELETE,
     QA_REMOVE, /* a payload page's own last row (qm_song_hold): Remove from Playlist */
-    QA_OFFLINE /* Sync Offline, or Stop Syncing Offline, for a server's item (offline.c) */
+    QA_OFFLINE, /* Sync Offline, or Stop Syncing Offline, for a server's item (offline.c) */
+    QA_MOVE     /* a payload page's row lifted to be moved (qm_held_move: Up Next's Playing Next) */
 };
 
 static char *play_key(void) {
@@ -148,12 +149,13 @@ unsigned queue_hash(void *q) {
 
 /* A payload page's own songs held (qm_song_hold): the page, its list, its last row's words and
  * what that row runs; play, for a song the queue does not hold yet (qm_far_hold), what its Play
- * row runs. */
+ * row runs; move, for a row the page can lift (qm_held_move), what its Move row runs. */
 static struct {
     void *page, *list;
     const char *extra;
     void (*pick)(void);
     void (*play)(void);
+    void (*move)(void);
 } qm_held __attribute__((section(".scratch")));
 static int qm_held_on(void *page) {
     return st.qm_kind == QM_COVERFLOW && page && page == qm_held.page;

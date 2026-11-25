@@ -810,6 +810,8 @@ def images(t):
     # Unfavorite's heart (hold_menu.c, the user's 2026-11-20): filled in Favorite, as Now Playing's liked heart, both
     # halves, and white on the selection as every symbol there
     out |= {f'{prefix}_menu_heart-fill_{k}': phosphor('heart-fill', MENU_ICON_PX, c) for k, c in inks('favorite', 'd', 'l', 'w').items()}
+    # Move's grip (hold_menu.c, Up Next's Playing Next rows): q2-coda's own three bars, as the lifted rows show
+    out |= {f'{prefix}_menu_grip_{k}': phosphor('q2coda/grip', MENU_ICON_PX, c) for k, c in FOLDER_INKS.items()}
     # an artist's Shuffle and Radio panels and an album's Play (artist_page.c pair_paint): the accent's top tone at rest, white lit
     out |= {f'{prefix}_pair_{n}_{k}': phosphor(n, PAIR_ICON_PX, c) for n in PAIR_ICONS for k, c in {'a': on, 'w': 0xffffff}.items()}
     out |= {f'{prefix}_quality_{k}': phosphor('waveform-bold', QUALITY_PX, c) for k, c in STATE_INKS.items()}

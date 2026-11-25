@@ -1214,6 +1214,7 @@ int cm_key_release(unsigned key);
 void cm_touch(unsigned type, int x, int y);
 int qm_song_hold(void *page, void *list, unsigned at, const char *extra, void (*pick)(void));
 int qm_far_hold(void *page, void *list, void (*play)(void));
+void qm_held_move(void (*move)(void)); /* the held row's Move (hold_menu.c) */
 int qm_row_under(void *top); /* a row under the selection on top, menu or not (hold_menu.c) */
 int otg_count(void);
 void pv_paint(void *w, void *canvas);

@@ -14,13 +14,13 @@
  * player_start_queue) and Clear empties Playing Next (playback_next_clear), no confirm. A queued
  * song past the first has a bump arrow: a tap on it, or Play/Pause held on its row (un_hold),
  * moves it to the top of Playing Next (playback_next_move), where an accent edge marks it a
- * moment. Centre held on a queued row lifts it onto a raised card, as the Library's Edit Library
+ * moment. Move, in a queued row's menu, lifts it onto a raised card, as the Library's Edit Library
  * does (library_edit.c): the wheel carries it among Playing Next's rows, each showing a grip,
  * Centre puts it down there and Return puts it back. The rest of the queue is the queue's own
  * order: no arrow, no lift, and Play/Pause does nothing on it. Centre held on any song row (one
  * of Playing Next's too, before its lift), on a played song or on a pending row, or a finger held
- * on any of them, opens the song's hold menu (un_menu_hold, centre_menu.c); the lift is then a
- * Centre hold that opens no menu (a double press's second, which times none).
+ * on any of them, opens the song's hold menu (un_menu_hold, centre_menu.c); a Centre hold that
+ * opens no menu (a double press's second, which times none) lifts a queued row itself.
  * Nothing toasts. Return lets the
  * sheet fall away (un_back, menu_modal.c modal_close), as do a tap on the page above it and a drag
  * down on it (menu_modal.c modal_touch_close).
@@ -373,6 +373,8 @@ static void un_remove(void) {
     if (un.page) un_fill(widget_get_prop_int(un.view, SEL, -1));
 }
 
+static void un_move(void);
+
 /* A pending row's held song let go: its list, then its record, whose strings its row shares */
 static void un_far_free(void) {
     if (un.far_list) deque_destroy(un.far_list);
@@ -392,7 +394,8 @@ static void un_far_play(void) {
  * docs/internals.md#centre-hold-menu): the song's hold menu over the queue, as a playlist page's
  * song gets it (qm_song_hold), at the row's queue index, with Remove from Queue last, on the
  * queue's songs, Playing Next's (Centre's menu comes at CENTRE_MENU_MS, before the row's lift,
- * which it cancels) and a shuffle's played songs above the playing one alike. A pending row
+ * which it cancels; its Move lifts the row, un_move) and a shuffle's played songs above the
+ * playing one alike. A pending row
  * (a card app's song not yet queued, no file yet) gets what applies to it (qm_far_hold: Play, as
  * its press, Sync Offline, Go to), from a record of its own, as the rows are taken again every
  * second. Clear and the header have none. 1 when the menu is on its way. */
@@ -409,6 +412,11 @@ int un_menu_hold(void *top, int centre) {
     if (k < 0 || (unsigned)k >= un.n) return 0;
     unsigned at = un.idx[k];
     stop_timer(&un.hold);
+    if ((unsigned)k < un.npn) { /* Playing Next's: Move lifts it, as its held Centre did */
+        int taken = qm_song_hold(un.page, q, at, "Remove from Queue", un_remove);
+        if (taken) qm_held_move(un_move);
+        return taken;
+    }
     if (at & UN_PEND_ROW) {
         void *r = un_record(at);
         un_far_free();
@@ -439,18 +447,12 @@ static void un_carry(int to) {
     ringnav_select(un.view, (int)un.nh + to + 1, (int)(un.nh + un.n) + 1);
 }
 
-static int un_lift_due(const void *info) {
-    (void)info;
-    un.hold = 0;
-    int k = un_place(widget_get_prop_int(un.view, SEL, -1));
+/* Playing Next's row at place k lifted onto its card, the wheel to carry it (un_key); 1 when it
+ * was one. */
+static int un_lift(int k) {
     if (!un.page || window_manager_get_top_window(window_manager()) != un.page || k < 0 ||
-        (unsigned)k >= un.npn)
+        (unsigned)k >= un.npn || un.lifted)
         return 0;
-    if (st.centre_hold) { /* stock's own hold, Shut Down?, never comes */
-        timer_remove(st.centre_hold);
-        st.centre_hold = 0;
-    }
-    un.centre = 1;
     un.lifted = un.lift_from = k + 1;
     /* the raised card: the row's own background, so its cover stays over it (un_fill's rows are
      * new, so a drop or a cancel ends it) */
@@ -458,7 +460,32 @@ static int un_lift_due(const void *info) {
     widget_set_prop_int(row, "style:normal:bg_color", (int)RGBA(UN_LIFT_RGB));
     widget_set_prop_int(row, "style:normal:round_radius", 10);
     widget_invalidate_force(un.page, (void *)0);
+    return 1;
+}
+
+/* Centre held UN_HOLD_MS on a Playing Next row with no menu over it (a double press's second,
+ * which times none): the row lifted, the press's Shut Down? let go and its release taken */
+static int un_lift_due(const void *info) {
+    (void)info;
+    un.hold = 0;
+    if (!un_lift(un_place(widget_get_prop_int(un.view, SEL, -1)))) return 0;
+    if (st.centre_hold) { /* stock's own hold, Shut Down?, never comes */
+        timer_remove(st.centre_hold);
+        st.centre_hold = 0;
+    }
+    un.centre = 1;
     return 0;
+}
+
+/* Move on a Playing Next row's menu (qm_held_move, run once the menu closed on the sheet): that
+ * row lifted, as the held Centre lifts it, its place found again by its queue index */
+static void un_move(void) {
+    for (unsigned k = 0; k < un.npn; ++k)
+        if (un.idx[k] == st.qm_idx) {
+            ringnav_select(un.view, (int)(un.nh + k) + 1, (int)(un.nh + un.n) + 1);
+            un_lift((int)k);
+            return;
+        }
 }
 
 /* navigation.c's key-down: Centre pressed on a queued row starts the hold that lifts it */

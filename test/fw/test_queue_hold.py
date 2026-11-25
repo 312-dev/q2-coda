@@ -39,7 +39,7 @@ def centre(fw, ui, st, stock_bytes):
 
 class Sheet:
     """Up Next over a queue of songs, the third playing: its rows as up_next() builds them."""
-    def __init__(self, fw, ui, hold, recs, n=6, shuffle=False, played=0, queued=False):
+    def __init__(self, fw, ui, hold, recs, n=6, shuffle=False, played=0, queued=0):
         self.fw, self.ui, self.hold = fw, ui, hold
         self.songs = [song(recs, i) for i in range(n)]
         hold.now_playing(self.songs, at=0, held=True)
@@ -55,9 +55,9 @@ class Sheet:
             assert fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(0, 1) == 1
         for _ in range(played):
             assert fw.fn('ringnav_next', C.c_int, C.c_int)(1) >= 0
-        if queued:  # a song played next: Playing Next and its Clear head the sheet
-            add = hold.deques.rows([song(recs, 9)])
-            fw.fn('playback_queue_insert', C.c_uint, C.c_void_p, C.c_void_p, C.c_int)(hold.queue, add, 1)
+        for k in range(queued):  # songs played next: Playing Next and its Clear head the sheet
+            add = hold.deques.rows([song(recs, 9 - k)])
+            fw.fn('playback_queue_insert', C.c_uint, C.c_void_p, C.c_void_p, C.c_int)(hold.queue, add, 2)
         fw.fn('up_next', None)()
         self.page = hold.dialog
         assert ui.top() == self.page
@@ -142,7 +142,7 @@ def test_remove_from_queue_on_a_played_song_takes_it_out_and_the_playing_one_pla
 def test_centre_held_on_clear_opens_nothing_and_never_shut_down(fw, ui, hold, recs, centre, st):
     """Clear (Playing Next's pill) has no menu: the hold does nothing, its Shut Down? is let go before it comes, and
     the release clears nothing."""
-    s = Sheet(fw, ui, hold, recs, queued=True)
+    s = Sheet(fw, ui, hold, recs, queued=1)
     assert s.stops()[:2] == ['Clear', 'Song 9']
     s.select(0)
     centre.press()
@@ -165,10 +165,23 @@ def test_centre_held_where_no_row_is_keeps_shut_down(fw, ui, hold, recs, centre)
 def test_centre_held_on_a_playing_next_song_opens_its_menu_not_its_lift(fw, ui, hold, recs, centre):
     """A Playing Next row's Centre lift (un_keydown, UN_HOLD_MS) is timed with the press, and the menu, at
     CENTRE_MENU_MS, comes first and lets it go: the menu, never a lifted card, and never Shut Down?."""
-    s = Sheet(fw, ui, hold, recs, queued=True)
+    s = Sheet(fw, ui, hold, recs, queued=1)
     s.select(1)
     centre.press()
     assert ui.fn('upnext__un_lift_due') in ui.pending()  # the lift timed with the press
     assert centre.wait()
-    assert ui.fn('upnext__un_lift_due') not in ui.pending() and s.menu() == SONG_MENU
+    assert ui.fn('upnext__un_lift_due') not in ui.pending() and s.menu() == SONG_MENU[:-1] + ['Move', 'Remove from Queue']
     assert not centre.shutdown_pending() and centre.release() == STOP
+
+
+def test_move_on_a_playing_next_song_lifts_it_and_the_wheel_carries_it_down(fw, ui, hold, recs, centre, mcl):
+    """Move, after Remove from Queue's gap's rows (the last row before the destructive one), lifts the Playing Next
+    song as the held Centre did: the wheel carries it, Centre puts it down, and the queue takes the new order."""
+    s = Sheet(fw, ui, hold, recs, queued=2)
+    assert s.stops()[:3] == ['Clear', 'Song 9', 'Song 8']
+    assert held(centre, s, 1) == SONG_MENU[:-1] + ['Move', 'Remove from Queue']
+    centre.release()
+    hold.pick('Move')
+    key = fw.fn('un_key', C.c_int, C.c_void_p, C.c_uint, C.c_int)
+    assert key(s.page, O['KEY_NEXT'], 0) == 1 and key(s.page, KEY_CENTER, 0) == 1
+    assert s.stops()[:3] == ['Clear', 'Song 8', 'Song 9']
