@@ -1531,7 +1531,10 @@ static int change_music(int next) {
 #define UNPLAYABLE_NEXT_RET 0x4f4ddc
 int ringnav_change(int next) {
     press_natural = __builtin_return_address(0) == (void *)UNPLAYABLE_NEXT_RET;
+    /* a run of songs that will not play ends stopped, not round the queue (output_fail.c) */
+    if (press_natural && output_fail_skip()) return press_natural = 0;
     int result = change_music(next);
+    if (press_natural) output_fail_skipped();
     press_natural = 0;
     return result;
 }
@@ -2485,6 +2488,7 @@ void playback_poll(void) {
         restart_ask = 0;
         toast("Press again to restart");
     }
+    output_fail_poll(); /* a song's output that failed: said once, no skip (output_fail.c) */
     store_failures();
     follow_queue(); /* before Crossfade reads the next track */
     shuffle_own();  /* stock Shuffle as Shuffle Songs, so Crossfade knows its next too */

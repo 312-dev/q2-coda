@@ -360,6 +360,10 @@ int main(int argc, char **argv) {
         printf("click %s tries %d sleeps %d\n", o ? "opened" : "failed", hw_tries, sleeps);
         if (o) output_close(o);
         output_busy_wait(-1);
+        busy_hw = 1000; /* the headphone DAC held for good: no wait, the holder named (Q2PLAYER_PROC) */
+        struct output *d = output_open(&f, 0, 0);
+        printf("dac-held %s\n", d ? "opened" : "failed");
+        if (d) output_close(d);
         busy_hw = 0;
         return 0;
     }

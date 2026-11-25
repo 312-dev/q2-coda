@@ -406,8 +406,11 @@ def test_a_failure_already_replaced_is_not_reported(player, songs, tmp):
     s, pcm, names = play(player, songs, 'play-failure', tmp/'failure')
     events = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
     assert events == ['{player-status\\error}'], events
-    assert (tmp/'failure/tmp/notsupport').exists(), '/tmp/notsupport not made for a song that failed while it played'
-    return 'replaced: no error, the waiting song paused; alone: the error and /tmp/notsupport'
+    # the output failed, not the song: /tmp/q2outfail, never /tmp/notsupport, whose dialog in stock skips to the next
+    # song, which met the same held output, round the queue for 80 minutes on 2026-11-25 (patch/output_fail.c)
+    assert (tmp/'failure/tmp/q2outfail').exists(), '/tmp/q2outfail not made for a song whose output failed'
+    assert not (tmp/'failure/tmp/notsupport').exists(), '/tmp/notsupport made for an output that failed'
+    return 'replaced: no error, the waiting song paused; alone: the error and /tmp/q2outfail, no /tmp/notsupport'
 
 
 def test_status_push(player, songs, tmp):
@@ -2593,9 +2596,18 @@ def test_bt_open_waits_out_a_busy_pcm(player, songs, tmp):
     same millisecond, and the transport let go 5 s later, so nothing else held it). The open waits it out a bounded
     time, BT_BUSY_MS, and says how long, so a song or a click after a session's close is not lost to that moment; a
     PCM held for good is given up after it, with the wait in the log. output.c against alsa_test.c's libasound."""
+    # the headphone DAC's PCM held by Radio's receiver, as read on a Q2 on 2026-11-25: the kernel's status names its owner
+    proc = tmp/'proc'
+    (proc/'asound/card0/pcm0p/sub0').mkdir(parents=True, exist_ok=True)
+    (proc/'asound/card0/pcm0p/sub0/status').write_text('state: SETUP\nowner_pid   : 812\ntrigger_time: 2055.1\n')
+    (proc/'812').mkdir(exist_ok=True)
+    (proc/'812/cmdline').write_bytes(b'/usr/bin/q2video\0-t\0plughw:0,0\0')
     got = subprocess.run([tool(tmp, 'alsa_test', '-DHAVE_ALSA', '-DQ2_CAR_USB'), 'busy'], check=True, capture_output=True,
-                         text=True)
+                         text=True, env=os.environ | {'Q2PLAYER_PROC': str(proc)})
     lines = {l.split()[0]: l.split() for l in got.stdout.split('\n') if l}
+    assert lines['dac-held'][1:] == ['failed'], lines
+    # alsa_test.c's device and snd_strerror: "test: error"; on a Q2 "default: Device or resource busy" before it
+    assert ': error, held by pid 812 (/usr/bin/q2video -t plughw:0,0)\n' in got.stderr, got.stderr[-800:]
     # tries of hw_params, and the 50 ms waits between them (alsa_test.c counts usleep, no time passing)
     assert lines['busy0'][1:] == ['opened', 'tries', '1', 'sleeps', '0'], lines
     assert lines['busy6'][1:] == ['opened', 'tries', '7', 'sleeps', '6'], f'busy for 6 tries: {lines["busy6"]}'
@@ -2604,7 +2616,10 @@ def test_bt_open_waits_out_a_busy_pcm(player, songs, tmp):
     # hold the player up 1.5 s at each click
     assert lines['click'][1:] == ['failed', 'tries', '5', 'sleeps', '4'], f'a click\'s open: {lines["click"]}'
     assert "q2player: bluealsa's PCM was busy; it opened after 300 ms" in got.stderr, got.stderr[-800:]
-    assert "q2player: bluealsa's PCM still busy after 1500 ms: another client holds it" in got.stderr, got.stderr[-800:]
+    # bluealsa's PCM has no kernel status: the line names the audio clients running (q2video here, from the fake /proc)
+    assert ("q2player: bluealsa's PCM still busy after 1500 ms: another client holds it, running: pid 812 "
+            "(/usr/bin/q2video -t plughw:0,0)\n") in got.stderr, got.stderr[-800:]
+    assert "q2player: bluealsa's PCM still busy after 200 ms: another client holds it, running: pid 812" in got.stderr
     return 'free: at once; busy 6 tries: opened after 300 ms; held: given up after 1500 ms, said once'
 
 

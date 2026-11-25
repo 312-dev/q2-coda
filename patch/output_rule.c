@@ -30,6 +30,7 @@ int ringnav_valid_output(void) { return stock_valid_output_trampoline() || usb_c
  * and a server song's app (catalogue.c catalogue_load, reached only from the page's player_start)
  * are as they were. The condition is playing_page_init's own (0x53e4a8), asked earlier. */
 int ringnav_nav_to(const char *name, const int *ctx) {
+    if (upnext_instead(name)) return STOP; /* stock's queue page: Up Next in its place (upnext.c) */
     if (name && ctx && !tk_strcmp(name, "playing_page") && ctx[2] != 0xff &&
         check_forbid_play_no_headset(0))
         return STOP;
