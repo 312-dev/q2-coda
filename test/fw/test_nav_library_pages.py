@@ -3135,7 +3135,9 @@ def test_a_cover_flow_page_closed_while_its_art_builds_says_so(fw, ui, song):
     cf.steps()
     page = ui.top()
     assert ui.name[page] == 'coverflow_page'
-    assert cf.lines[-1].startswith('I cover flow shown: covers, 2 albums, ') and ' ms after its open, 2 covers to build' in cf.lines[-1]
+    shown = cf.lines[-1]  # the look's count and time, then the covers left to build behind them
+    assert shown.startswith('I cover flow shown: covers, 2 albums, ') and ' ms after its open, art looked up for 2 albums in ' in shown
+    assert ' folder reads), 2 covers to build' in shown
     assert cf.watch(5000) == []  # shown: nothing waits
     cf.clock[0] += 1500
     ui.close(page)

@@ -53,6 +53,9 @@ int shim_join(pthread_t, void **);
 #define __xstat shim_xstat /* o32's stat: st_size word 12, st_mtime word 16 */
 int shim_access(const char *, int);
 #define access shim_access /* counted: the UI thread's own (pool_library) */
+#include <dirent.h>
+struct dirent *shim_readdir(DIR *);
+#define readdir shim_readdir /* charged on the fake clock, as a slow card's are (slow_card) */
 #define tk_snprintf snprintf
 extern void *shim_queue;
 extern unsigned char shim_covertype;
@@ -133,6 +136,7 @@ TEST = r"""
 #undef pthread_mutex_unlock
 #undef pthread_join /* the payload's joins say so (shim_join); the tests' own are libc's */
 #undef access /* the payload's are counted (shim_access); the tests' own are libc's */
+#undef readdir
 #undef pthread_create
 #undef sem_post
 #undef memcpy
@@ -154,6 +158,7 @@ int catalogue_path(const char *path) { return 0; }
 int catalogue_missing(const char *path) { return access(path, 0); } /* a card row: its file gone */
 int catalogue_album_unavailable(void *r) { return 0; }
 int catalogue_cover(const char *path, char *out, unsigned size) { return 0; }
+int catalogue_cover_name(const char *path, char *out, unsigned size) { return 0; }
 void catalogue_grey(void *w, int on) {}
 int catalogue_row_ink(void *row, unsigned *ink) { return 0; }
 void catalogue_mark_paint(void *canvas, int x, int y, unsigned ink) {}
@@ -288,8 +293,14 @@ static int animating;
 void *window_manager_get_top_window(void *wm) { return top_window; }
 int window_manager_is_animating(void *wm) { return animating; }
 static unsigned clock_ms, pressed = 1, paused;
-unsigned time_now_ms(void) { return clock_ms; }
-void ulog(char level, const char *src, const char *msg) { (void)level, (void)src, (void)msg; } /* no log here */
+/* The owner's card (slow_card): each lookup of a file in the art cache or a covers folder, and each name a folder's
+   read returns, costs this much on the fake clock, summed from any thread in slow_us. */
+static volatile unsigned slow_lookup_us, slow_entry_us, slow_us;
+unsigned time_now_ms(void) { return clock_ms + slow_us / 1000; }
+static char cf_line[256]; /* the last "cf" line of the unified log */
+void ulog(char level, const char *src, const char *msg) {
+    if (!strcmp(src, "cf")) snprintf(cf_line, sizeof cf_line, "%c %s", level, msg);
+}
 int window_manager_get_pointer_pressed(void *wm) { return pressed; }
 int widget_animator_pause(void *a) { ++paused; return 0; }
 static int animators_gone;
@@ -886,8 +897,15 @@ static pthread_t main_thread;
 static volatile int ui_access, all_access;
 int shim_access(const char *path, int mode) {
     __sync_fetch_and_add(&all_access, 1);
+    if (slow_lookup_us && (strstr(path, "/.coverflow/") || strstr(path, "/covers/")))
+        __sync_fetch_and_add(&slow_us, slow_lookup_us);
     if (pthread_equal(pthread_self(), main_thread)) ++ui_access;
     return access(path, mode);
+}
+struct dirent *shim_readdir(DIR *d) {
+    struct dirent *e = readdir(d);
+    if (e && slow_entry_us) __sync_fetch_and_add(&slow_us, slow_entry_us);
+    return e;
 }
 /* The album in hand finishes once the cancel is set, however late the main thread gets to stop(); the caller clears
    joining before it starts this. */
@@ -3662,7 +3680,7 @@ int shim_xstat(int ver, const char *path, void *out) {
     unsigned *o = out;
     if (stat(path, &s)) return -1;
     memset(o, 0, 36 * 4);
-    o[5] = s.st_mode, o[12] = (unsigned)s.st_size, o[16] = (unsigned)s.st_mtime;
+    o[5] = s.st_mode, o[12] = (unsigned)s.st_size, o[16] = (unsigned)s.st_mtime, o[17] = (unsigned)s.st_mtim.tv_nsec;
     return 0;
 }
 /* A song of album in playlist cd, its file in music/<album>/. */
@@ -4686,24 +4704,59 @@ static void pool_library(void) {
     assert(loads == 7); /* album 4325 has no art: the placeholder, nothing decoded */
     slide_menu_set_value(s, 4321), changed_fn(0, 0);
     decode_ms = 0;
-    for (int i = 0; i < 5000 && all_access - all < BIG; ++i) usleep(1000); /* the look's thread */
-    assert(all_access - all >= BIG && ui_access - ui < 16);
+    usleep(200000); /* the look's thread: its answers from the art cache's names, read once */
+    assert(all_access - all < 16 && ui_access - ui < 16);
     close_page(); /* joins it */
     /* An album whose art went is found behind the covers, and built at the next open. */
     unlink(art_file(path, nm[17]));
     all = all_access;
     open_page();
     assert(size(nm[17]) == -1); /* not this time */
-    for (int i = 0, was = -1; i < 100 && all_access != was; ++i) was = all_access, usleep(50000); /* the look ends */
+    usleep(200000); /* the look ends */
     close_page();
     ui = ui_access, all = all_access;
     open_page();
-    assert(ui_access - ui < 16 && all_access - all >= 18); /* its look on the open's thread, to album 17 at least */
+    assert(ui_access - ui < 16 && all_access - all < 16); /* its look on the open's thread, from the folder's names */
     assert(size(nm[17]) >= 0); /* built: its art, or the "none" marker */
     close_page();
     memcpy(records, keep_rec, sizeof keep_rec), memcpy(names, keep_nm, sizeof keep_nm), memcpy(paths, keep_pa, sizeof keep_pa);
     albums = keep;
     free_blocks = room;
+    rescan();
+}
+
+/* ---- The owner's Q2 (2026-11-24): its card is exFAT, and a file looked up in a folder of 5,000 names cost about
+   12 ms, so a first open of 6,173 albums that asked the card once an album for its art sat behind Home's spinner for
+   over a minute ("the cover lookup, 417 of 6173 albums looked at" at 5 s). With those costs on the fake clock (12 ms a
+   lookup, 20 us a name read from a folder) a first open of 6,000 albums with their art made shows its covers within
+   2 s of the press, its line saying how many albums the look covered and in how long. ---- */
+static void slow_card(void) {
+    enum { BIG = 6000 };
+    static char nm[BIG][32], keep_rec[64][0x60], keep_nm[64][64], keep_pa[64][600];
+    char path[600];
+    int keep = albums;
+    assert(keep <= 64);
+    memcpy(keep_rec, records, sizeof keep_rec), memcpy(keep_nm, names, sizeof keep_nm), memcpy(keep_pa, paths, sizeof keep_pa);
+    albums = 0;
+    for (int i = 0; i < BIG; ++i) {
+        snprintf(nm[i], 32, "Slow %04d", i), album(nm[i], 0);
+        FILE *f = fopen(art_file(path, nm[i]), "w");
+        fputs("art", f), fclose(f);
+    }
+    rescan(); /* the albums to query, their art to look for */
+    slow_lookup_us = 12000, slow_entry_us = 20, slow_us = 0;
+    unsigned t0 = time_now_ms(), built = calls;
+    cf_line[0] = 0;
+    open_page();
+    unsigned took = time_now_ms() - t0;
+    slow_lookup_us = slow_entry_us = slow_us = 0; /* the clock the later cases set, time_now_ms's own again */
+    fprintf(stderr, "slow card: %d albums shown %u ms after the press (%s)\n", BIG, took, cf_line);
+    assert(slide() && slide()->visible && calls == (int)built);
+    assert(took < 2000);
+    assert(!strncmp(cf_line, "I cover flow shown: covers, 6000 albums, ", 41) && strstr(cf_line, "art looked up for 6000 albums in "));
+    close_page();
+    memcpy(records, keep_rec, sizeof keep_rec), memcpy(names, keep_nm, sizeof keep_nm), memcpy(paths, keep_pa, sizeof keep_pa);
+    albums = keep;
     rescan();
 }
 
@@ -4859,6 +4912,7 @@ int main(void) {
     rest_pinned();
     thumb_momentum();
     pool_library();
+    slow_card();
     held_row();
     fold_clearance();
     fold_frames();
