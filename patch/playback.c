@@ -108,7 +108,9 @@ extern int stock_load_trampoline(void *, int, int), stock_next_trampoline(int),
     stock_seek_time_trampoline(int), stock_seek_start_trampoline(void),
     stock_reboot_trampoline(void), stock_checkfw_trampoline(void *, void *),
     stock_speed_trampoline(int), stock_open_preload_trampoline(void), stock_start_queue_trampoline(int),
-    stock_player_start_trampoline(void *, int, int, int);
+    stock_player_start_trampoline(void *, int, int, int),
+    stock_songlist_trampoline(void *, const char *, int, int),
+    stock_searchlist_trampoline(void *, const char *, int, int);
 extern void *staged(int (*)(void *), void *, int *);
 extern int album_before(const void *, const void *), folder_cmp(void *, void *),
     album_only(void *, void *, int);
@@ -1637,6 +1639,33 @@ int ringnav_player_start(void *q, int at, int cls, int mode) {
     int result = stock_player_start_trampoline(q, at, cls, mode);
     in_start = 0;
     return result;
+}
+/* A list's press: stock's player_load_songlist (0x51e2a8, a library list's) and
+ * load_searchsong_list (0x51420c, Search's) copy the songs of their list into q and answer which to
+ * start: the first song whose file name and CUE start equal the pressed row's. Of two with one name
+ * (two server songs of one title, a server row's file name being its title; two card files of one
+ * name in two folders) a press on the later played the earlier. Each caller passes the pressed
+ * record's own REC_NAME pointer, so the pressed song is the one holding it
+ * (docs/internals.md#a-rows-song). A name no record holds (testmode_test_key's constant) keeps
+ * stock's answer. */
+static int pressed_song(void *q, const unsigned char *list, const char *name, int at) {
+    void *show = P(list, 0);
+    unsigned n = show && at >= 0 ? deque_size(show) : 0, k = 0;
+    int own = -1;
+    for (unsigned i = 0; i < n; ++i) {
+        void *r = deque_at(show, i);
+        if (I(r, REC_TYPE) != 8) continue;
+        if (P(r, REC_NAME) == name) own = (int)k;
+        ++k;
+    }
+    return own < 0 ? at : (int)(deque_size(q) - k) + own; /* stock put the list's k songs last */
+}
+int ringnav_songlist(void *q, const char *name, int cue, int cls) {
+    return pressed_song(q, p_deque_showlist, name, stock_songlist_trampoline(q, name, cue, cls));
+}
+int ringnav_searchlist(void *q, const char *name, int cue, int cls) {
+    return pressed_song(q, p_deque_searchshowlist, name,
+                        stock_searchlist_trampoline(q, name, cue, cls));
 }
 /* mclStartPlayer's: 1 while stock's player_start goes on after a load of nothing. It would start
  * the queue it had again, at its song's start: a paused song was heard from there until np_stop's
