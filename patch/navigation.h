@@ -168,7 +168,7 @@ typedef struct {
     unsigned charge_at, last_input;
     unsigned touch_at; /* the last pointer event's time, type and place (stale_heal, stale_note) */
     int touch_type, touch_x, touch_y, stale_notes;
-    int toasts; /* toast()'s dialogs open, nested ones too, for the stall record (stall_write) */
+    int toasts; /* toast_for's calls under way, a swapped one's too, for the stall record (stall_write) */
     void *pull_page, *pull_surface;
     int pull_x, pull_y, pull_claimed;
     unsigned pull_scope;

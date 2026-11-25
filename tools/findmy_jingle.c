@@ -2,10 +2,11 @@
  * /dev/jz_pwm as the payload's findmy.c plays it, then the buzzer left low and released. Static, no libc (raw o32
  * system calls), so it runs on the Q2's rootfs as it is (docs/internals.md#find-my-vamp):
  *
- *   clang --target=mipsel-linux-gnu -march=mips32r2 -mabi=32 -mfp64 -mnan=2008 -G0 -static -nostdlib -fuse-ld=lld \
- *       -O2 -o jingle tools/findmy_jingle.c
+ *   clang --target=mipsel-linux-gnu -march=mips32r2 -mabi=32 -mfp64 -mnan=2008 -G0 -fno-pic -mno-abicalls \
+ *       -static -nostdlib -fuse-ld=lld -O2 -o jingle tools/findmy_jingle.c
  *
- * nan2008 and fp64 are the ELF flags the Q2's kernel takes; -G0 keeps globals off $gp, which no start code sets.
+ * nan2008 and fp64 are the ELF flags the Q2's kernel takes; -G0 keeps globals off $gp and -fno-pic -mno-abicalls
+ * keep calls off it too, as no start code sets it.
  * Exit status: 0 played, 1 no /dev/jz_pwm, 2 the channel refused. */
 static long sys3(long n, long a, long b, long c) {
     register long v0 __asm__("$2") = n;

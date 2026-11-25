@@ -1,5 +1,5 @@
 /* OLED's feedback forms (docs/oled-design.md#dialogs-and-toasts): stock's toast as a pill over the
- * page; the confirmation card, ours (confirm) and stock's confirm pop-up drawn as it; an empty or
+ * page, one at a time (toast_swap); the confirmation card, ours (confirm) and stock's confirm pop-up drawn as it; an empty or
  * offline page's note (Folder's too); the confirmation after a shuffle. */
 #include "navigation.h"
 

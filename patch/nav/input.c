@@ -339,7 +339,8 @@ unsigned long long ringnav_glyph_stamp(void) { return glyph_ms ? glyph_ms : now_
  * wheel's, unless ringnav_keydown marked a button's.
  * The command waits out the buzzer and the MCU's park (tools/mcu_pwm_clock.c), so it runs on a
  * worker, not the UI thread; a buzzer click while one sounds is dropped, as the buzzer is busy
- * anyway. With the screen off a pass clicks once (tone_dark; ringnav_sleep).
+ * anyway. With the screen off a pass clicks once (tone_dark; ringnav_sleep). While Find My Vamp's
+ * jingle plays (findmy.c) the buzzer is its, and neither clicks it.
  */
 volatile int tone_busy;
 static void *tone_worker(void *on) {
