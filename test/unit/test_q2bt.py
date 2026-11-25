@@ -58,7 +58,6 @@ def L(tmp_path_factory):
     lib.bt_sbc_allowed.argtypes = [C.c_char_p]
     lib.bt_aac_step.argtypes = [C.c_void_p, C.c_uint, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int]
     lib.bt_aac_next.argtypes = [C.c_int, C.c_int, C.c_int]
-    lib.bt_aac_allowed.argtypes = [C.c_char_p]
     lib.flush_every.argtypes = [C.c_int, C.c_int]
     lib.bt_proc_io.argtypes = [C.c_char_p, C.POINTER(C.c_uint), C.POINTER(C.c_uint), C.POINTER(C.c_uint)]
     lib.bt_disk_busy.argtypes = [C.c_char_p, C.c_char_p, C.POINTER(C.c_uint)]
@@ -1205,18 +1204,12 @@ def test_an_aac_own_not_known_or_at_the_floor_steps_nothing(L):
     assert all(aac(L, s, t, 9000, BUFS, own=128) == NONE for t in range(10, 20))   # a sink capped at 128
 
 
-@pytest.mark.parametrize('coding, key, allowed', [
-    (b'2', b'', 0),                      # Auto, the switch never touched: off
-    (b'2', b'BTSTEPDOWN=1\r\n', 1),      # Auto, on: AAC on AirPods
-    (b'5', b'BTSTEPDOWN=1\r\n', 1),      # AAC chosen by hand, with the switch on
-    (b'5', b'BTSTEPDOWN=0\r\n', 0),
-    (b'6', b'BTSTEPDOWN=1\r\n', -1),     # SBC HQ: not AAC's
-    (b'3', b'BTSTEPDOWN=1\r\n', -1),     # aptX HD
-    (b'0', b'', -1),                     # LDAC Best
-])
-def test_aac_is_adapted_under_auto_or_aac_only_with_the_switch_on(L, coding, key, allowed):
-    assert L.bt_aac_allowed(INI_SBC % (coding, key)) == allowed
-    assert L.bt_aac_allowed(b'') == -1
+def test_aac_is_adapted_under_auto_only(L):
+    """bt_aac_step takes bt_step_allowed's answer: Auto with the switch on; AAC chosen by hand is -1, left alone."""
+    assert L.bt_step_allowed(INI_SBC % (b'2', b'BTSTEPDOWN=1\r\n')) == 1
+    assert L.bt_step_allowed(INI_SBC % (b'5', b'BTSTEPDOWN=1\r\n')) == -1
+    s = Sbc()
+    assert all(aac(L, s, t, 9000, BUFS, allowed=-1) == NONE for t in range(10))
 
 
 def test_the_aac_bytes_are_where_the_build_puts_them(L):

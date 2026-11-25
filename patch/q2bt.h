@@ -220,14 +220,12 @@ int bt_sbc_allowed(const char *ini);
 #define BT_AAC_FLOOR 128 /* the lowest rung: every frame at most 341 bytes at 48 kHz, a packet that fits a 2-DH3 */
 /* As bt_sbc_next, on AAC's rungs in kbit/s (192, 160, BT_AAC_FLOOR) below the stream's own. */
 int bt_aac_next(int rate, int own, int dir);
-/* As bt_sbc_step, on AAC: aac 1 while the stream is AAC, own its rate in kbit/s (0 not known).
- * The rate to ask for now (0 the stream's own), else -1. */
+/* As bt_sbc_step, on AAC under Auto: allowed bt_step_allowed's (Auto with the switch on; AAC chosen
+ * by hand is left alone, as Adapt to Signal's caption names Auto and SBC only), aac 1 while the
+ * stream is AAC, own its rate in kbit/s (0 not known). The rate to ask for now (0 the stream's
+ * own), else -1. */
 int bt_aac_step(struct bt_rung *s, unsigned now, int allowed, int aac, int own, int wq, int fly,
                 int bufs);
-#define BT_AAC_ROW 5 /* [SYSSET] BTCODING's AAC row (g_btcoding) */
-/* config.ini's text: 1 Auto or AAC with BT_STEP_KEY's switch on, 0 those with it off, -1 another
- * choice (or none saved) */
-int bt_aac_allowed(const char *ini);
 
 /* ---- the A2DP socket's queue ----
  * /proc/net/l2cap's largest Wmem (bytes an L2CAP socket has waiting: the kernel holds them only

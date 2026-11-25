@@ -14,8 +14,8 @@
  * (under Auto, or SBC chosen, with the same setting on) its bitpool is lowered a rung at a
  * time and raised again
  * (bt_sbc_step), written into bluealsa's BT_SBC_POOL byte through /proc/PID/mem, which its encoder
- * takes from the next frame, and on AAC (under Auto, or AAC chosen) its peak the same way (bt_aac_step,
- * BT_AAC_RATE's byte). Every read that fails leaves its
+ * takes from the next frame, and on AAC under Auto its peak the same way (bt_aac_step, BT_AAC_RATE's
+ * byte). Every read that fails leaves its
  * field "-", and with no Bluetooth socket at all (the emulator) it tries again a minute later and
  * does nothing else. Apart from streams, the kernel's lines q2guard reads feed the controller
  * watchdog (bt_kmsg, bt_watch, docs/internals.md#bluetooth-controller-watchdog), and bt_sleep waits
@@ -89,8 +89,7 @@ static struct {
     struct bt_rung sbc;  /* SBC's bitpool, afresh at each START */
     int sbc_allowed;     /* bt_sbc_allowed's, from config.ini */
     int sbc_failed;      /* bluealsa's byte would not take a write: none until the next START */
-    struct bt_rung aac;  /* AAC's peak, the same */
-    int aac_allowed;     /* bt_aac_allowed's */
+    struct bt_rung aac;  /* AAC's peak, the same, under Auto (allowed) */
     int aac_failed;      /* as sbc_failed, for AAC's byte */
     int pl;              /* the player's pid, 0 not found (looked for at pl_found_at) */
     unsigned pl_found_at, pl_ticks, io_r, io_w, io_d, dk_ms;
@@ -378,7 +377,6 @@ static void allowed_read(void) {
     int n = slurp(CONFIG, b, sizeof b);
     bt.allowed = n > 0 ? bt_step_allowed(b) : -1;
     bt.sbc_allowed = n > 0 ? bt_sbc_allowed(b) : -1;
-    bt.aac_allowed = n > 0 ? bt_aac_allowed(b) : -1;
 }
 static void pcms_start(unsigned now) {
     if (bt.pcms_pid > 0) return;
@@ -526,7 +524,7 @@ static void sbc_step(unsigned now, int have, const unsigned char *pb, int wq, in
 static void aac_step(unsigned now, int have, const unsigned char *pb, int wq, int fly, int bufs) {
     char line[64];
     int own = have ? pb[AAC_AT + 1] : 0, was = bt.aac.rung ? bt.aac.rung : own;
-    int to = bt_aac_step(&bt.aac, now, bt.aac_allowed, !strcmp(bt.codec, "AAC"), own, wq, fly, bufs);
+    int to = bt_aac_step(&bt.aac, now, bt.allowed, !strcmp(bt.codec, "AAC"), own, wq, fly, bufs);
     if (to >= 0) {
         snprintf(line, sizeof line, "STEP AAC peak %d -> %d kbit/s", was, to ? to : own);
         say('I', line);

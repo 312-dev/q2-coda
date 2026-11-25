@@ -416,11 +416,7 @@ int bt_sbc_allowed(const char *ini) {
     int on;
     return coding_in(ini, rows, 3, &on) < 0 ? -1 : on;
 }
-int bt_aac_allowed(const char *ini) {
-    static const int rows[] = { BT_LDAC_AUTO, BT_AAC_ROW };
-    int on;
-    return coding_in(ini, rows, 2, &on) < 0 ? -1 : on;
-}
+
 int bt_pcms_path(const char *text, char *path, int n) {
     const char *src = strstr(text, "/a2dpsrc"), *a = src, *b = src;
     if (!src) return 0;

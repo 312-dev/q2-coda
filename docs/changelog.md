@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: on **AAC** (AirPods and other AAC headphones, under **Auto** with **Adapt to Signal** on), when the radio can't keep up the Q2 now lowers AAC's quality a step at a time, down to 128 kbps, so the sound fits what the link has left instead of breaking up, and raises it again a step at a time once the link has been clean for a while. As with SBC there is no gap and nothing to reconnect: the next frames are simply smaller.
   - Bluetooth: clicks in your headphones while nothing plays are heard steadily as you browse: the Q2 keeps the headphones' audio running for 15 seconds after the last click instead of starting it again for each burst, and a song you pick starts in it straight away. After your headphones pause the Q2 (or move to your phone), clicks sound only on the Q2's own speaker (with the Clicker on Both) until you press Play.
   - Swap L/R now swaps the channels before the EQ, so the EQ's Balance and an AutoEQ file's left and right lines act on the ear you hear them in, as the Balance in Playback settings always did. If you have Swap L/R on with an EQ balance or a per-channel AutoEQ preset, that emphasis moves to the other ear: it now lands on the side the preset meant.
   - USB-C headphones and USB DACs get power 3 to 4 seconds after you plug them in, where it took 6 to 7; plugged in right after unplugging a cable they still wait about 8 seconds, as before.

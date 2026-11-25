@@ -138,7 +138,7 @@ python3 test/m4b.py /tmp/q2-build          # native TagLib M4B/MP4 metadata disp
 python3 test/player/run.py                  # the new player (player/): bit-exact output, the DSP, the click and the socket protocol; builds its FFmpeg on first use, needs ffmpeg, lame and cc, no ZIP
 python3 test/ldac.py /tmp/q2-build         # shipped LDAC intermediate rates and native adaptive controller
 python3 test/headset_io.py /tmp/q2-build   # real MIPS headset worker with simulated kernel I/O (cc)
-python3 test/bluealsa.py /tmp/q2-build     # the patched bluealsa's DROP paths against stock's, delayed encoder signal; SBC's bitpool; the write MTU through each encoder
+python3 test/bluealsa.py /tmp/q2-build     # the patched bluealsa's DROP paths against stock's, delayed encoder signal; SBC's bitpool; AAC's peak (fdk-aac scripted); the write MTU through each encoder
 python3 test/bluetoothd.py /tmp/q2-build   # the patched bluetoothd's GetElementAttributes and its AVRCP record's cover art entry, at a load address of its own, against stock's
 python3 test/alsa.py BUILD QEMU_MIPSEL     # ALSA startup lock regression (see internals.md)
 python3 test/thirdparty.py BUILD QEMU_MIPSEL  # the rebuilt OpenSSL, curl, zlib, SQLite, libpng, BusyBox, wpa_supplicant and FFmpeg in a bwrap chroot of BUILD's rootfs: versions, links, TLS (network; --offline skips it) (third-party.md)
