@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: a song or a click that comes just as the last click's sound ends starts, where it could fail while the headset's audio was still being let go: the Q2 waits a moment for it.
   - Logs: when Wi-Fi does not join a saved network, the log says so 30 seconds after Wi-Fi starts and each minute after: whether it is still scanning, how many networks it saw, how often it rescans and why. Joining and getting an address are logged with the seconds they took.
   - Subsonic: a restart that resumes a song from your server starts the app once, where two copies of it could start and both run until the next restart, each checking the server and writing the same files.
   - Cover Flow: on a large server library it opens in a second or two, where the first open after a change could sit on Home's spinner for over a minute while it checked every album's cover on the card one by one, the spinner stuttering meanwhile.
