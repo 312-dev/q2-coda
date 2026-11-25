@@ -76,10 +76,17 @@ static void sample(long long now) {
     trace_sample(&tr, &s, now);
 }
 
-static void slow(long long now) {
+/* The PMIC's registers and the regdump. full: the IRQ enables (40h to 42h) too, which only the kernel's driver
+ * changes, so a burst's 4 a second ask the four status registers alone (about 0.3 ms of bit-banged I2C each, the
+ * second USB study's estimate). */
+static void slow(long long now, int full) {
     struct ut_slow s;
     for (int i = 0; i < UT_AXP_REGS; ++i) {
         unsigned char data[34] = { 0 };
+        if (!full && ut_axp_regs[i] >= 0x40 && ut_axp_regs[i] <= 0x42) {
+            s.axp[i] = tr.slow.axp[i]; /* as last read */
+            continue;
+        }
         struct ut_smbus_args a;
         ut_smbus_read(&a, ut_axp_regs[i], data);
         s.axp[i] = d.i2c >= 0 && t_ioctl(d.i2c, UT_I2C_SMBUS, &a) >= 0 ? data[0] : -1;
@@ -99,7 +106,7 @@ static void slow(long long now) {
 /* At an edge: the PMIC asked at once (and 50 and 250 ms on, from the loop), its registers and the regdump. */
 static void edge_reads(long long now) {
     trace_online(&tr, read_num(UT_ONLINE), now);
-    slow(now);
+    slow(now, 1);
 }
 
 static void udc_read(long long now) {
@@ -265,7 +272,7 @@ int q2usbtrace_main(int argc, char **argv) {
                d.regdump ? "ok" : "none", d.uev >= 0 ? "ok" : "none", d.udc >= 0 ? "ok" : "none", t_wall());
     udc_read(now);
     sample(now);
-    slow(now);
+    slow(now, 1);
     for (;;) {
         now = t_now(CLOCK_MONOTONIC);
         long long slept = t_now(CLOCK_BOOTTIME) - now - d.slept_base;
@@ -306,7 +313,7 @@ int q2usbtrace_main(int argc, char **argv) {
         if (now >= tr.next_sample) {
             int burst = now < tr.burst_until;
             sample(now);
-            if (burst && tr.samples_in_burst % UT_SLOW_EVERY == 0) slow(now);
+            if (burst && tr.samples_in_burst % UT_SLOW_EVERY == 0) slow(now, 0);
             lines_check(now);
             if (stop_asked() || term) {
                 trace_line(&tr, now, "stop %s", term ? "SIGTERM" : "flag");

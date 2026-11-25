@@ -603,6 +603,7 @@ def validate_assets(directory):
         usbtrace = read('rootfs.squashfs', USBTRACE)  # docs/internals.md#usb-tracer
         assert sha(usbtrace) == manifest['q2_usbtrace_sha256'] and usbtrace[:4] == b'\x7fELF'
         assert usbtrace[36:40] == helper[36:40]
+        assert b'q2-usbtrace-pd17' in demo  # usb_event.c's forwarding of PD17's edges
         expected_start = expected_start.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*USBTRACE_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK)
         assert b'q2-wheel.log' in demo
         # adbd (docs/adb.md): an ELF with the stock binaries' ABI flags and glibc alone, its gadget script, stock's USB
