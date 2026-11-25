@@ -354,6 +354,10 @@ int main(int argc, char **argv) {
             printf("busy%d %s tries %d sleeps %d\n", busy[n], o ? "opened" : "failed", hw_tries, sleeps);
             if (o) output_close(o);
         }
+        busy_hw = 1000; /* the headphone DAC held for good: no wait, the holder named (Q2PLAYER_PROC) */
+        struct output *o = output_open(&f, 0, 0);
+        printf("dac-held %s\n", o ? "opened" : "failed");
+        if (o) output_close(o);
         busy_hw = 0;
         return 0;
     }

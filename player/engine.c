@@ -6,7 +6,8 @@
  *   {player-nextstatus\exit}  set-nexturl replaced it
  *   {player-stopstatus\exit}  mcl-stop
  *   {player-status\error}     it would not open or play, after /tmp/notfile or /tmp/notsupport is made for demo's
- *                             dialog; none for a song a waiting set-songurl or mcl-stop has already replaced
+ *                             dialog, or OUTPUT_FAILED_FILE when the output failed and not the song; none for a song
+ *                             a waiting set-songurl or mcl-stop has already replaced
  * A song preloaded by set-gapless is opened on a thread of its own while the one before plays, and starts on the frame
  * after that one's last, in the same PCM when rate, channels and width are the same. A preload that a queue edit, a
  * stop or a skip cancelled is closed by its thread when its open returns, and never played. */
@@ -904,7 +905,11 @@ void *engine_thread(void *unused) {
              * paused) is not reported: demo's error dialog would advance the queue and start the next song playing,
              * DAC powered, under a pause (docs/player-plan.md#a-failure-already-replaced). The waiting command is taken next. */
             if (waiting || stopping) break;
-            touch(PEQ_ROOT "/tmp/notsupport");
+            /* The output failed, not the song: OUTPUT_FAILED_FILE in place of /tmp/notsupport, so stock's dialog
+             * timer finds neither of its files and neither toasts nor skips (its next song would meet the same
+             * output), and demo says so once and stays stopped until the user's Play (patch/output_fail.c,
+             * docs/internals.md#output-failure). */
+            touch(OUTPUT_FAILED_FILE);
             ipc_event("{player-status\\error}");
             break;
         }
