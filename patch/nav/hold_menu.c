@@ -106,8 +106,8 @@ static int qm_run(const void *unused) {
         st.qm_choice = 0;
     } else if (a == QA_OFFLINE) { /* the item worked out for its row (offline.c) */
         offline_press();
-    } else if (r && a == QA_PLAY && qm_held.play && qm_held_on(window_manager_get_top_window(
-                                                         window_manager()))) {
+    } else if (r && a == QA_PLAY && qm_held.play &&
+               qm_held_on(window_manager_get_top_window(window_manager()))) {
         qm_held.play(); /* a song not on the card yet: its row's own press (qm_far_hold) */
     } else if (r && a == QA_CHAPTERS) {
         chapters_open(r);

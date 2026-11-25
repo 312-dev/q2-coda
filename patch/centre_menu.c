@@ -48,7 +48,7 @@ static struct {
     unsigned hold, at;  /* Centre's hold timer and the press it times (chord_gate's centre_at) */
     unsigned touch;     /* the finger's */
     int x, y;           /* where the finger landed, in the UI's coordinates */
-    unsigned char held; /* a Centre hold opened the menu, or was let go on a row: its release taken */
+    unsigned char held; /* the menu opened, or the hold let go on a row: its release is taken */
     void *top;          /* the window the press began on */
 } cm __attribute__((section(".scratch")));
 

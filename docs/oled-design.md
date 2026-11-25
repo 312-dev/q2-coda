@@ -810,14 +810,17 @@ as a menu's; a lit row's foot never passes y 282.
   stands on the right column of each queued song but the first. A tap on it, or Play/Pause held on
   the row, moves the song to the top of Playing Next, where a 3 px Accent Blue edge marks it for
   0.7 s. The rest of the queue has no arrow and Play/Pause does nothing on it.
-- **Moving a queued song**: Center held on it lifts it onto a `#2C2C2E` card with 10 px corners,
-  its title in Inter Medium 18 px; Playing Next's songs show a grip (three 18 x 2 px bars) on the
-  right column in place of their arrows; the wheel carries it, Center puts it down, Return puts it
-  back where it was.
-- **A song's menu**: Center held half a second on a song of the rest of the queue, or a finger held
-  on any queued song, opens the song's hold menu over the sheet (Play Next, Play Last, Add to
-  Playlist, Favorite, the Go to rows), as on every song list, with **Remove from Queue** last, in
-  red: the song leaves the queue and the list closes up
+- **Moving a queued song**: a lifted song sits on a `#2C2C2E` card with 10 px corners, its title
+  in Inter Medium 18 px; Playing Next's songs show a grip (three 18 x 2 px bars) on the right
+  column in place of their arrows; the wheel carries it, Center puts it down, Return puts it back
+  where it was. Center held lifts a queued song only when the hold opens no menu (the second press
+  of a double press): the menu below comes first on every song row.
+- **A song's menu**: Center held half a second on any song row (Playing Next's, the rest of the
+  queue's, a shuffle's played songs above the playing one, a song still to download), or a finger
+  held on one, opens the song's hold menu over the sheet (Play Next, Play Last, Add to Playlist,
+  Favorite, the Go to rows), as on every song list, with **Remove from Queue** last, in red: the
+  song leaves the queue and the list closes up. A song still to download has Play, Sync Offline
+  and the Go to rows alone. Center held on Clear does nothing, and never brings Shut Down
   ([internals](internals.md#centre-hold-menu)).
 - Nothing toasts. Center on a song plays it and closes Up Next at once; Return lets the sheet fall
   away. The list follows the queue as songs end, the header with it.

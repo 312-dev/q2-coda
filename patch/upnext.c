@@ -88,8 +88,8 @@ static struct {
     char source[128];  /* the queue's source (un_source_take) */
     void **pend;       /* the session's pending songs (addon_pending), npend of them */
     unsigned npend;
-    unsigned *past, nh; /* a shuffle's played songs above the header, oldest first (heap) */
-    unsigned at;        /* the playing song's index the rows were taken at */
+    unsigned *past, nh;    /* a shuffle's played songs above the header, oldest first (heap) */
+    unsigned at;           /* the playing song's index the rows were taken at */
     void **far, *far_list; /* a pending row held: its song's own record, alone in a list (un_far) */
 } un __attribute__((section(".scratch")));
 
@@ -373,7 +373,7 @@ static void un_remove(void) {
     if (un.page) un_fill(widget_get_prop_int(un.view, SEL, -1));
 }
 
-/* A pending row's held song let go: its list, then its record (the list's row shares its strings) */
+/* A pending row's held song let go: its list, then its record, whose strings its row shares */
 static void un_far_free(void) {
     if (un.far_list) deque_destroy(un.far_list);
     addon_pending_free(un.far, un.far ? 1 : 0);

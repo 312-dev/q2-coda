@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Up Next: holding Center (or a finger) on any song in the queue opens its menu, including songs already played under Shuffle and songs from your server that are still to download (those offer Play, Go to Album and Go to Artist). Holding Center on a row of a list never brings up the Shut Down prompt: on a row with no menu it does nothing. Hold Center on Now Playing to shut down.
   - Bluetooth: music paused for more than a couple of minutes plays again when you press Play, where AirPods could stay silent, still connected, until you disconnected and reconnected them. After 20 seconds paused the Q2 lets the headset's audio stream stop, as a phone does, and starts it again at Play or a click.
   - Radio: a radio of a song from your server (the Subsonic app's) plays with shuffle and repeat off, as the library's own radio does, and puts them back when it ends. With Repeat One on, every song of the radio played twice in a row, and the dimmed buttons could not turn it off while the radio played.
   - Loading: anything that takes a moment shows one spinner, centred, with a line under it saying what it is doing ("Shuffling songs…", "Sorting songs…"). It appears only after a third of a second, so quick actions never flash it, and a second press meanwhile does nothing. It covers turning Shuffle on in Now Playing, Shuffle Songs, Shuffle Albums and Shuffle Folders, and a Library list sorting after a change; a server's page, Spotify, Internet Radio and Chapters use the same spinner and delay, and Return still cancels those.
