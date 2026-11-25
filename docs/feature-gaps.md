@@ -239,7 +239,7 @@ From the other two yardsticks Vamp already has scrobbling (Last.fm and ListenBra
 | Built-in Voice Memos                                  | No microphone. A USB microphone through the OTG port might work (the kernel has USB audio host support), so this is listed as partial above. |
 | Video recording, camera                               | No camera.                                                                                                                                   |
 | Loudspeaker playback (alarm sounds, clicker on music) | The only speaker is the MCU's buzzer, which beeps and plays nothing else.                                                                    |
-| USB keyboard or remote input                          | The stock kernel has no `hid-generic` ([hardware.md](hardware.md)); a module could add it, but Vamp ships the stock kernel unchanged.      |
+| USB keyboard or remote input                          | The stock kernel has no `hid-generic` ([hardware.md](hardware.md)); a module could add it, but Vamp ships the stock kernel unchanged. A USB-C headset's own buttons do work: Vamp reads them through usbfs ([internals](internals.md#usb-headset-buttons)). |
 
 MQA decoding is possible in principle but excluded: stock's hciplayer never reaches its MQA decoder, and the decoder needs a license ([internals.md, MQA detection](internals.md#mqa-detection)).
 

@@ -181,6 +181,14 @@ R1, R3 (cable in), R4 (before the presses), R5 (cable in), R6 (bus 3) and R7 wer
 
 The targets are the pass criteria; every miss becomes a fixture in `test/fixtures/usb_fsm/`.
 
+## Headset buttons
+
+How a headset's remote reaches the Q2 depends on what is between them:
+
+- **A USB-C headset, or a USB-C to 3.5 mm adapter with its own DAC** (Apple's, Google's and the like): the adapter reads the wired remote and sends its presses as USB HID consumer usages beside its audio, as Android's USB-C to 3.5 mm adapter specification requires (Play/Pause `0xCD`, Volume Up `0xE9`, Volume Down `0xEA`, Voice Command `0xCF`). Vamp reads them through usbfs ([internals: USB headset buttons](internals.md#usb-headset-buttons)). Which interfaces a given adapter has is not recorded here; `cat /sys/bus/usb/devices/*:*/bInterfaceClass` with it in shows `03` beside its `01`s if it has the HID.
+- **A passive USB-C to 3.5 mm adapter** (Type-C's analog audio accessory mode, no chip): no sound, and so no remote. Audio accessory mode puts the left and right channels on the port's D+ and D- and the microphone and its buttons on SBU, which needs an analog switch on the board to the headphone amplifier and something to read SBU. Neither is known on the Q2: the Type-C controller is pin-strapped with no digital interface ([hardware: The Type-C controller](hardware.md#the-type-c-controller)), `PD19` is only a candidate for its accessory output (inferred, unmeasured: R1 above settles it), nothing in stock's rootfs, device tree or modules names a mux or the SBU lines, and Android's specification allows no passive adapter. The best possible is a message, if `PD19` proves to be the accessory output ([Options](#options)).
+- **The Q2's own 3.5 mm jack**: nothing reads an inline remote. Its detect is a GPIO switch (`PA07`; `PA08` for 4.4 mm), the CS43131 driver (`codec_cs43131.ko`) has no detect, microphone or button code (its strings name only the DAC's mute and balance), and the SoC's SAR ADC (`soc_adc`, `/dev/jz_adc_aux_0` to `_5`) is read by no stock program but the `cmd_adc` test tool and by no module, and the device tree's `sadc@10070000` node names no channel's use. Whether the jack's sleeve even reaches the board as a fourth contact is not known (a meter from the jack's pins, or a photo of the board, would settle it).
+
 ## Open questions
 
 Each with the studies' default:

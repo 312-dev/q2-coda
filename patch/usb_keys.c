@@ -2,14 +2,15 @@
  * USB-C to 3.5 mm adapter with its own DAC, sends its remote's presses on a USB HID interface
  * beside its audio interfaces, as consumer-page usages. The stock kernel binds usbhid to that
  * interface but has no hid-generic, so no HID driver takes the device and no input node appears
- * (docs/hardware.md#peripherals). So a worker reads the interface itself through usbfs: it takes
- * that interface alone from usbhid (USBDEVFS_DISCONNECT_CLAIM, only when usbhid or nothing holds
- * it), reads its report descriptor for where each key is, and waits on its interrupt endpoint with
- * one URB in flight. The audio interfaces are never claimed, and nothing runs without a USB DAC on
- * the port (g_otg_status 2). The UI loop then acts as for the Q2's own keys: a volume key steps the
- * volume one, as a slow wheel tick, repeated while held; Play/Pause, Next and Previous as a
- * Bluetooth headset's (media_key); and Play/Pause pressed twice is Next, three times Previous.
- * Built with peq.h alone, as headset.c is: navigation.h takes libc's select away. */
+ * (docs/hardware.md#inside-as-the-device-reports-it). So a worker reads the interface itself
+ * through usbfs: it takes that interface alone from usbhid (USBDEVFS_DISCONNECT_CLAIM, only when
+ * usbhid or nothing holds it), reads its report descriptor for where each key is, and waits on its
+ * interrupt endpoint with one URB in flight. The audio interfaces are never claimed, and nothing
+ * runs without a USB DAC on the port (g_otg_status 2). The UI loop then acts as for the Q2's own
+ * keys: a volume key steps the volume one, as a slow wheel tick, repeated while held; Play/Pause,
+ * Next and Previous as a Bluetooth headset's (media_key); and Play/Pause pressed twice is Next,
+ * three times Previous. Built with peq.h alone, as headset.c is: navigation.h takes libc's select
+ * away. */
 #include "offsets.inc"
 #include "peq.h"
 #include "stock.h"
