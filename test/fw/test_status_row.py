@@ -1,5 +1,6 @@
 """patch/status_row.c: the status row's glyph slots, right to left the battery, the level bars, Wi-Fi, a card app's
-sync, Bluetooth (its link, a headset's battery, a car) and Buttons Lock's padlock; their layout (the clock's edge), paint, taps and repaints."""
+sync, wired headphones, Bluetooth (its link, a headset's battery, a car) and Buttons Lock's padlock; their layout (the
+clock's edge), paint, taps and repaints."""
 import ctypes as C
 import struct
 
@@ -14,7 +15,8 @@ CY = 23  # OLED's status_y: the glyphs' centre row
 GAP = 6  # SR_GAP: the ground between two glyphs
 INK = 11  # SR_INK: every glyph's height, the clock's digits' (rows 17 to 27)
 WIFI_W = 16  # SR_WIFI_W
-SLOT_BATTERY, SLOT_PLAY, SLOT_WIFI, SLOT_SYNC, SLOT_HEADSET, SLOT_LOCK, SLOT_OFFLINE = range(7)
+SLOT_BATTERY, SLOT_PLAY, SLOT_WIFI, SLOT_SYNC, SLOT_WIRED, SLOT_HEADSET, SLOT_LOCK, SLOT_OFFLINE = range(8)
+RUNE_W = 9  # SR_RUNE_W: the Bluetooth rune, 12 px tall (tools/art.py STATUS_TALL_FIT)
 TOUCH_DOWN, TOUCH_UP = 0xff, 0x103
 BARS = [(7, 10, 3), (9, 8, 3), (11, 5, 5), (11, 3, 7), (9, 3, 10), (7, 4, 11), (5, 6, 11), (3, 9, 9), (3, 11, 7), (5, 11, 4)]
 
@@ -27,6 +29,8 @@ class Row(StatusRow):
         self.status = status
         self.online = 1
         fw.mock('networkGetConnectStatus', lambda *_: self.online)
+        self.way = 0  # the player's output: 0 the Q2's DAC (its jacks), 1 Bluetooth, 2 a USB DAC
+        fw.mock('mclGetOutputWay', lambda *_: self.way)
         self.timers: list = []
         fw.mock('timer_add', lambda fn, ctx, ms, *_: self.timers.append((fn, i32(ms))) or len(self.timers))
         self.dirty: list = []
@@ -63,7 +67,7 @@ class Row(StatusRow):
             return load(w, name, bitmap)
         self.fw.mock('widget_load_image', loaded)
         canvas.art = {n: (WIFI_W, 14) for n in ('oled_status_wifi_3_d', 'oled_status_wifi_2_d', 'oled_status_wifi_1_d', 'oled_status_wifi_x_d')}
-        canvas.art |= {'oled_keylock_d': (14, 14), 'oled_status_bt_d': (14, 14), 'oled_status_down_d': (14, 14),
+        canvas.art |= {'oled_keylock_d': (14, 14), 'oled_status_bt_d': (RUNE_W, 14), 'oled_status_down_d': (14, 14), 'oled_status_wired_d': (14, 14),
                        'oled_status_offline_d': (14, 14)}
         canvas.art |= {f'oled_status_sync_{f}_d': (14, 14) for f in range(30)}
         self.fw.fn('status_slots_paint', None, C.c_void_p, C.c_void_p)(self.bar.addr, canvas.addr)
@@ -137,8 +141,8 @@ def bt_link(fw, status=None, level=None, cls=None, thread=0):
 
 @pytest.mark.parametrize('status, thread, level, cls, width, art', [
     (None, 0, None, None, 0, []),  # off or idle: nothing
-    (1, 1, None, None, 14, ['oled_status_btdim_d']),  # connecting: the dim rune
-    (3, 0, None, None, 14, ['oled_status_bt_d']),  # connected, no level: the white rune
+    (1, 1, None, None, RUNE_W, ['oled_status_btdim_d']),  # connecting: the dim rune
+    (3, 0, None, None, RUNE_W, ['oled_status_bt_d']),  # connected, no level: the white rune
     (3, 0, 72, 0x240404, 14 + 2 + 15 + 2, ['oled_status_headphones_d']),  # a headset's level: headphones, battery
     (3, 0, None, 0x200420, 19, ['oled_status_car_d']),  # a car: 11 px tall, 19 wide (SR_CAR_W)
 ])
@@ -164,6 +168,65 @@ def test_the_headset_s_battery_is_15_by_8_and_red_under_20(fw, row, level, fill)
     fw.fn('status_row__headset_paint', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int)(row.bar.addr, canvas.addr, 200, CY)
     assert rgb(fw.calls('vgcanvas_set_fill_color')[0][1][1]) == fill  # the level's fill, then the nub's grey
     assert len(fw.calls('vgcanvas_stroke')) == 1  # the body's outline
+
+
+def jacks(fw, po=0, bal=0):
+    """The 3.5 mm (g_po_status) and 4.4 mm (g_bal_status) jacks: 1 plugged."""
+    fw.var('g_po_status', C.c_ubyte).value = po
+    fw.var('g_bal_status', C.c_ubyte).value = bal
+
+
+@pytest.mark.parametrize('way, po, bal, shown', [
+    (0, 0, 0, 0),  # nothing plugged in: no glyph
+    (0, 1, 0, 14),  # the 3.5 mm jack
+    (0, 0, 1, 14),  # the 4.4 mm jack
+    (2, 0, 0, 14),  # a USB DAC, USB-C headphones among them
+    (1, 1, 0, 0),  # Bluetooth takes the sound, a jack in or not
+    (3, 0, 0, 0),  # the car's USB audio (usb_car.c): no headphones
+])
+def test_wired_headphones_show_while_they_take_the_sound(fw, row, way, po, bal, shown):
+    """The wired slot (the user's, 2026-11-25): Phosphor's headphones while the player's output is a jack or a USB
+    DAC, 14 px wide, GAP left of the slot on its right (Wi-Fi's here); nothing otherwise."""
+    row.wifi(3)
+    row.way = way
+    jacks(fw, po, bal)
+    assert fw.fn('status_row__wired_shown', C.c_int)() == shown
+    assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - (GAP + shown if shown else 0)
+    canvas, names = row.paint()
+    assert ('oled_status_wired_d' in names) == bool(shown)
+
+
+@pytest.mark.parametrize('way, po, wired, rune', [(0, 1, 1, 0), (2, 0, 1, 0), (1, 1, 0, 1)])
+def test_with_a_headset_linked_and_a_wire_in_the_row_shows_where_the_sound_goes(fw, row, way, po, wired, rune):
+    """Bluetooth and a wire both there: the slot of the output the player uses (stock plays to the jack last plugged
+    in, over a linked headset), the other hidden. A guest's phone stays (Guest Play is its own output)."""
+    bt_link(fw, 3)
+    row.way = way
+    jacks(fw, po)
+    assert bool(fw.fn('status_row__wired_shown', C.c_int)()) == bool(wired)
+    assert fw.fn('status_row__headset_shown', C.c_int)() == (RUNE_W if rune else 0)
+
+
+def test_wired_headphones_coming_or_going_repaint_the_row(fw, row):
+    jacks(fw)
+    row.sync_sig()
+    assert row.sync_sig() == 0
+    jacks(fw, po=1)
+    assert row.sync_sig() == 1
+    assert row.sync_sig() == 0
+
+
+def test_a_slot_that_changes_on_stock_s_tick_repaints_the_row(fw, row):
+    """Stock's showface each second (ringnav_showface): a slot that changed (here wired headphones plugged in) repaints
+    the bar then, not at whatever paints it next; a tick with nothing new repaints nothing."""
+    jacks(fw)
+    row.sync()
+    row.dirty.clear()
+    row.sync()
+    assert row.dirty == []
+    jacks(fw, po=1)
+    row.sync()
+    assert row.dirty == [None]
 
 
 def test_the_slot_s_kind_repaints_the_row(fw, row):
@@ -414,31 +477,41 @@ def test_a_tap_on_the_bars_opens_now_playing_after_the_dispatch(fw, row):
 
 
 CLOCK_W = 38  # test_nav_painters.StatusRow's widest clock, "00:00"
-ROOM = (375 - CLOCK_W - 4 + 1) // 2 + CLOCK_W + 4 - 2 + 7  # the strip's left edge: CLOCK_BESIDE past the centred clock
+LEFT_ROOM = 62 + CLOCK_W + 7  # the strip's left edge: CLOCK_BESIDE past the widest clock at the row's left
+ROOM = 214  # a room narrower than the crowd below, for the marquee's tests: 30 px short
 OFFLINE_W = 14  # SR_OFFLINE: cloud-slash's 13.6 px of ink at 11 tall
 
 
-def crowd(fw, row):
+def crowd(fw, row, room=ROOM):
     """Every slot shown: bars 10, Wi-Fi 16, a download's ring 16, a headset 33, the padlock 13 and the offline cloud
-    14, with their six gaps: 138 px left of the battery's body, 30 more than the room from the centred clock."""
+    14, with their six gaps: 138 px left of the battery's body, 30 more than ROOM leaves; the strip's room then set
+    to room."""
     row.wifi(3)
     row.app(2, 500)
     row.ap.a[0].reach = 1
     bt_link(fw, status=3, level=70)
     fw.var('g_keylock_flag', C.c_ubyte).value = 1
     row.place()
+    fw.fn('status_strip_room', None, C.c_int)(room)
     return 10 + WIFI_W + 16 + 33 + 13 + OFFLINE_W + 6 * GAP
 
 
-def test_a_centred_clock_stays_centred_and_the_strip_that_reaches_it_marquees(fw, row):
-    """The clock holds the row's centre however many glyphs show (the user's, 2026-11-19, mock_subsonic_offline.py);
-    the glyphs left of the battery then start CLOCK_BESIDE past it, and the strip, wider than that room, rests with
-    its left end (the first glyph after the clock) in view, the rest under the battery's gap."""
-    over = ROOM - (BODY - crowd(fw, row))
+def test_the_clock_at_the_row_s_left_leaves_every_glyph_room(fw, row):
+    """The clock stands at the row's left (the user's layout D, 2026-11-25): the strip's room starts CLOCK_BESIDE past
+    the widest clock there, so every slot shown at once fits with no marquee."""
+    width = crowd(fw, row, room=0)
     clock = row.place()
-    assert abs(clock.box[0] + clock.box[2] / 2 - 187.5) <= 0.5
+    assert clock.box[0] + 2 == 62
+    assert row.left() == BODY - width and BODY - width > LEFT_ROOM
+    assert fw.fn('status_row__strip_ends', C.c_int)() == 0
+
+
+def test_a_strip_wider_than_its_room_marquees(fw, row):
+    """A strip wider than its room rests with its left end (the first glyph after the clock) in view, the rest under
+    the battery's gap."""
+    over = ROOM - (BODY - crowd(fw, row))
     assert over == 30 and row.left() == ROOM
-    sr_x = (C.c_int * 7).in_dll(fw.lib, 'status_row__sr')
+    sr_x = (C.c_int * 8).in_dll(fw.lib, 'status_row__sr')
     assert sr_x[SLOT_OFFLINE] == ROOM  # at rest: the leftmost glyph at the room's edge
     assert sr_x[SLOT_PLAY] == BODY - GAP - 10 + over  # the bars, past the strip's box, out of sight
 
@@ -547,23 +620,23 @@ def test_no_toast_without_wifi(fw, row):
     assert fw.var('feedback__later', Later).text == b''
 
 
-def test_the_percentage_gives_way_to_the_icon_where_the_glyphs_would_squeeze_the_title_out(fw, st):
-    """batt_room: from the battery's end to the strip's room past the centred clock. Percent alone (42 px) and the play
-    state's bars fit it; with Wi-Fi, a sync and the padlock too they do not, and the icon stays."""
+def test_the_percentage_gives_way_to_the_icon_where_the_glyphs_would_reach_the_clock(fw, st):
+    """batt_room: from the battery's end to the strip's room past the clock at the row's left. Percent alone (42 px)
+    and the play state's bars fit it; with Wi-Fi, a sync and the padlock too they do not, and the icon stays."""
     row = Row(fw, st, 'A Title')
     st('battery').value = 1
     st('pct_digit').value = st('pct_sign').value = 10
-    fw.mock('canvas_measure_text', lambda *_: 80.0)  # the widest clock: a room of 375 - 62 - (146 + 82 + 7) = 78
+    fw.mock('canvas_measure_text', lambda *_: 150.0)  # the widest clock: a room of 375 - 62 - (62 + 150 + 7) = 94
     sync = lambda: fw.fn('navigation__bar_sync', None, C.c_void_p)(row.bar.addr)
     width = lambda: row.w['view_battery'].box[2]
     sync()
     percent = width()
-    assert percent > O['BATT_NUB_W'] + 10  # the digits: the bars alone leave room (16 px of 78)
+    assert percent > O['BATT_NUB_W'] + 10  # the digits: the bars alone leave room (16 px of 94)
     row.wifi(3)
     row.app(1)
     fw.var('g_keylock_flag', C.c_ubyte).value = 1
     sync()
-    assert width() > percent  # 42 + 79 px of glyphs: the icon, the set's body and its nub
+    assert width() > percent  # 42 + 75 px of glyphs: the icon, the set's body and its nub
 
 
 @pytest.mark.parametrize('raw, kind, permille', [(b'\nsync=check\n', 1, 0), (b'\nsync=down 1 4\n', 2, 250),

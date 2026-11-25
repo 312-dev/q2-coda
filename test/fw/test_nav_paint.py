@@ -1088,7 +1088,8 @@ def quick_window(world, **icons):
     return win, view, slider
 
 
-# The bar's title (the system bar's label_title) names the top window.
+# The bar's hidden title (the system bar's label_title) names the top window: the Search bar, the letter strip and
+# Up Next read it, and nothing shows it, so a write repaints nothing.
 
 def bar_title(fw, world, st, **config):
     theme(fw, **config)
@@ -1120,8 +1121,7 @@ def test_a_page_known_by_name_titles_the_bar(fw, world, st, name, title):
     world.add(world.add(win, 'view_navbar'), 'label_name', 'hscroll_label', text='Its own label')
     sync(fw, win)
     assert world[label].text == title
-    (fn, _, ms), = world.timers
-    assert ms == 0 and world.fire(1) == RET_OK and world.invalid == [(label, None)]  # after the paint
+    assert world.timers == [] and world.invalid == []
 
 
 def navbar_page(world, text='Albums', kind='hscroll_label'):
@@ -1162,10 +1162,10 @@ def test_a_stock_page_s_navbar_title_titles_the_bar_and_is_followed(fw, world, s
     sync(fw, win)
     assert world[label].text == 'Albums'
     sync(fw, win)
-    assert len(fw.calls('widget_set_text_utf8')) == 1 and len(world.timers) == 1  # unchanged: not written
+    assert len(fw.calls('widget_set_text_utf8')) == 1  # unchanged: not written
     world.set_text(own, 'Album Artists')
     sync(fw, win)
-    assert world[label].text == 'Album Artists' and len(world.timers) == 2
+    assert world[label].text == 'Album Artists' and len(fw.calls('widget_set_text_utf8')) == 2 and world.timers == []
 
 
 @pytest.mark.parametrize('text, title', [('Channel Balance', 'Channel Balance'), ('(null)', ''), ('', '')])
@@ -1477,7 +1477,7 @@ def test_painting_the_bar_keeps_its_clock_and_title_current(fw, world, st):
     win, _ = navbar_page(world)
     paint_bg(fw, bar, Canvas(fw))
     assert world[title].text == 'Albums'
-    assert st('clock_timer', C.c_uint).value and len(world.timers) >= 2  # the clock's, at once, and the title's
+    assert st('clock_timer', C.c_uint).value and len(world.timers) >= 1  # the clock's, at once
     timers = len(world.timers)
     paint_bg(fw, win, Canvas(fw))  # the top window: the same, but the clock is armed
     assert len(world.timers) == timers

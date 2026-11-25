@@ -851,7 +851,7 @@ void guest_ui_paint(void *w, void *canvas) {
     stock_canvas_set_text_color(canvas, text);
 }
 
-/* The status row's title on these pages; 0 for another. */
+/* The bar's hidden title on these pages; 0 for another. */
 const char *guest_ui_title(const char *name) {
     if (!tk_strcmp(name, "guestnp_page") || !tk_strcmp(name, "guestconnect_page") ||
         !tk_strcmp(name, "guestset_page") || !tk_strcmp(name, "guestfail_page"))

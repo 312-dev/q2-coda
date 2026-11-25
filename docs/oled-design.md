@@ -177,7 +177,7 @@ San Francisco, which cannot ship. See `assets/fonts/` for the files and license.
 
 | Role                                  | Face          | Size  | Color         | Example        |
 | ------------------------------------- | ------------- | ----- | -------------- | -------------- |
-| Status row (page title, the clock)    | Inter Medium  | 15 px | Text Secondary | Playback, 9:41 |
+| Status row (the clock)                | Inter Medium  | 15 px | Text Secondary | 9:41           |
 | Row                                   | Inter Regular | 20 px | Text Primary   | Playlists      |
 | Row value                             | Inter Regular | 20 px | Text Secondary | Off            |
 | Row second line                       | Inter Regular | 15 px | Text Tertiary  | 1,234 Songs    |
@@ -220,7 +220,7 @@ All lists share one grid.
 | List top           | y 58                                         | 28 px under the status row's glyphs                                                |
 | Row pitch          | 32 px                                        | seven rows, y 58 to 282 (see [Corners](#corners))                                  |
 | Two-line row pitch | 52 px                                        | four rows, y 58 to 266                                                             |
-| Text inset (left)  | 24 px                                        | the rows and the art share this column; the status row's title starts at 62        |
+| Text inset (left)  | 24 px                                        | the rows and the art share this column; the status row's clock starts at 62        |
 | Right column       | 28 px from the right edge                    | chevrons and values on every row: they never move between rows                     |
 | Leading art        | 40 px at x 24, 6 px down its row, text at 72 | 4 px corners, in two-line rows                                                     |
 | Bar inset          | 16 px each side, every row                   | no corner stepping: at the bottom row the corner hides 14.5 px                     |
@@ -231,15 +231,11 @@ All lists share one grid.
 ### Status row
 
 - No band: the status row is an overlay on the page's own ground, with no fill or rule, over the 58 px where content does not rest. Its glyphs center on y 23.
-- Left, from x 62: the page's title in Inter Medium 15 px, Text Secondary, ending with an
-  ellipsis 12 px short of the clock's widest ("00:00") centred, however long: a title never moves to a
-  row of its own, so the list keeps its place.
-- The clock, in the same face, size and color, centered across the row (x 187.5) on every full-width row, titled
-  or not, and it never moves for the glyphs (the user's, 2026-11-19, `mock_subsonic_offline.py`); its figures stand
-  on rows 17 to 27, and every glyph beside them is their height. Home, Now Playing and Cover Flow's covers (but an
-  artist's, titled by the artist) have no title. Home in
-  Split puts it at the row's left, over the list, its text starting 62 px in (`STATUS_ROW_INSET`), as the battery ends
-  62 px from the right, in Text Primary where the art runs up under the row (the user's, 2026-11-20,
+- Left: the clock, in Inter Medium 15 px, Text Secondary, its text starting 62 px in (`STATUS_ROW_INSET`), as the
+  battery ends 62 px from the right, on every page; it never moves for the glyphs. Its figures stand on rows 17 to 27.
+  The row names no page, as iOS's names none (layout D of the user's `hpicon/mockup3.png`, 2026-11-25): a page that
+  needs its name says it in its own content (an album's or artist's header). A 12-hour clock has no AM or PM. Home in
+  Split's clock stands over the list, in Text Primary where the art runs up under the row (the user's, 2026-11-20,
   `design/home-clock-left`); the glyphs stay over the art at the right, where they take one ink, white or black, picked once for the row from the art's
   mean lightness under all of them, as iOS's status bar takes one style; the battery's green, red and orange keep
   their hue (`mock_status_icons.py`, the user's, 2026-11-16). Under Split's vignette the top of the art is darkened
@@ -268,8 +264,13 @@ All lists share one grid.
     the 6 px either side match the row's (turning, its corners pass up to 1 px nearer); while it downloads songs, a 14 px ring (1.6 px) in
     `#333333` filling clockwise from 12 o'clock in the accent, Phosphor `arrow-down` (bold, 8 px, Text Primary) in
     it (S2, `mock_sync_status.py`).
-  - **Bluetooth** (P9 in `design/bt-redesign`): nothing while Bluetooth is off or nothing is connected; Phosphor
-    `bluetooth` (bold) in Text Tertiary while a device connects and in Text Primary once one is connected; a
+  - **Wired headphones**, left of the sync: Phosphor `headphones` (regular) in Text Primary, 12 px tall on rows 16 to
+    27 as the battery's body (its ink 13.6 px wide), while the sound goes to a jack (3.5 mm or 4.4 mm) or a USB DAC
+    (USB-C headphones among them); nothing with nothing plugged in (the user's, 2026-11-25, `hpicon/mockup2.png`).
+  - **Bluetooth** (P9 in `design/bt-redesign`), left of wired headphones: nothing while Bluetooth is off or nothing
+    is connected, or while wired headphones take the sound (a jack plugged in over a linked headset plays there, and
+    the row shows where the sound goes: one glyph, never both); Phosphor `bluetooth` (bold, 12 px tall on rows 16 to
+    27 as wired headphones, 8.4 px wide) in Text Tertiary while a device connects and in Text Primary once one is connected; a
     headset that reports its level, `headphones` (bold) and a 15x8 battery 2 px after it, filled to the level as
     the status battery's (red under 20%); a car, `car-profile` (bold, 18.5 px wide at 11 tall). While a guest plays
     ([Guest Play](#guest-play)), `device-mobile` (fill) in the accent, and while it is relayed to the Q2's
@@ -280,14 +281,16 @@ All lists share one grid.
     name that doesn't resolve, a proxy's 502, 503 or 504) and Wi-Fi is connected, until a request to the server
     succeeds; with no Wi-Fi the missing fan already says why. On Now Playing too (`mock_subsonic_offline.py`, the
     user's, 2026-11-19; [internals](internals.md#card-app-reach)).
-- **The strip.** On a full-width row the glyphs left of the battery have the room from 8 px past the widest clock,
-  centred, to the battery. When they need more, that strip (never the battery) scrolls as a marquee: at rest its
+- **The strip.** The glyphs left of the battery have the room from 8 px past the widest clock, at the row's left, to
+  the battery (about 170 px: every slot at once with a headset's battery takes about 145). When they need more, that strip (never the battery) scrolls as a marquee: at rest its
   left end shows, the first glyph after the clock, for 2.75 s; then it slides left at 35 px/s until its right end
   meets the battery's 6 px, holds there 1.5 s and goes back, as Now Playing's lines do. Each end whose glyphs are cut
   fades over 6 px, the house marquee's 12 tightened: the right at rest, both while it slides, the left at its end.
   It runs under Reduce Motion, as every marquee does; only the strip's box repaints as it moves (the user's,
   2026-11-19, `mock_subsonic_offline.py` C and D).
-- Every glyph is 11 px tall, the clock's digits' height, on their rows (17 to 27): the Phosphor ones sized by
+- Every glyph is 11 px tall, the clock's digits' height, on their rows (17 to 27), but the Bluetooth rune and wired
+  headphones, 12 px on rows 16 to 27 as the battery's body, so their ink centres on row 21.5 with the battery's and
+  the fan's (the user's, 2026-11-25): the Phosphor ones sized by
   their ink's height, not its longer side, so a wide one (`wifi-x`, the car) is as tall as the rest; strokes come
   out about 2 px (the fan's bands 2.3, the bars 2, the pause 3). 6 px of black part two glyphs, 8 px the clock
   from the first, as iOS spaces them (`mock_status_icons.py`, the user's, 2026-11-16).
@@ -311,19 +314,20 @@ All lists share one grid.
   the glyphs to its left move over for it.
 - **The volume pill.** A volume change made off Now Playing (a headset's own keys or its AVRCP volume, the Car
   Remote) shows in the clock's place: a Raised (`#1C1C1E`) pill 30 px tall on the row's centre (rows 8 to 37) with
-  15 px round ends, 199 px wide and centred on x 187.5, narrower (still centred) where the glyph slots leave it less
-  room, down to 141 px, which then ends 8 px short of the leftmost slot. Inside, 12 px from each end: the speaker
+  15 px round ends, from x 50, so its speaker starts where the clock's text does, 199 px wide, narrower from its
+  right end where the glyph slots leave it less room, ending 8 px short of the leftmost slot, down to 141 px, which
+  then ends there and moves left (never past x 24). Inside, 12 px from each end: the speaker
   (Phosphor `speaker-simple-high-fill`, 11 px tall as every status glyph, Text Primary), 8 px, a 4 px track in Track
   with round ends filled in Text Primary to the level, 8 px, and the number (0 to 100) in the row's face, Inter
   Medium 15 px, Text Secondary, ending at the pill's inner edge in a 32 px column of tabular digits, so the track
   never moves. At 0, the mute, `speaker-simple-x-fill` and an empty track. The number and fill are the Q2's 0 to 100 in
-  every case: with Link Volume on a headset, its own level read back on that scale, as everywhere else. The clock and the title go out while it
+  every case: with Link Volume on a headset, its own level read back on that scale, as everywhere else. The clock goes out while it
   shows; it follows every change, holds 2 s after the last, then fades out over 250 ms (cubic out) as they fade back
   (a cut under Reduce Motion). Not on Now Playing, the AirPlay or radio player (their own volume band), over Control
   Center (its slider follows) or a video. A change repaints the pill's box alone. Picked as option A from the user's
   `mock.html` on 2026-11-18 ("status pill"). The same pill says a short thing that happened, a glyph (15 px) and
-  words in 15 px Text Primary, as wide as they are, centred, or where the slots leave too little ending 8 px short of
-  them and no nearer the left than x 24 (`vol_pill.c` `status_pill_show`): [adb](#adb)'s "MacBook-Pro allowed". It
+  words in 15 px Text Primary, as wide as they are, from the same x 50, or where the slots leave too little ending 8 px
+  short of them and no nearer the left than x 24 (`vol_pill.c` `status_pill_show`): [adb](#adb)'s "MacBook-Pro allowed". It
   shows on Now Playing too, as it is no volume.
 - A tap on the battery (a 44 x 40 px target round its body, or round the percentage on Percent, so
   at least 40 px round it; where it meets the level bars' target the nearer center has it) toasts
@@ -502,7 +506,7 @@ Home's list.
 - **Entered by** Center held about half a second (550 ms) on the Library or on Home's list (not
   a list a Home row opens), or a finger held as long on a row, which then drags that
   row. Center held again, or Return when no row is lifted, saves and leaves.
-- **In it** the status row reads "Edit Library" or "Edit Home", every row the user can show is
+- **In it** every row the user can show is
   listed, each row's chevron gives way to a grip (three 18x2 px bars 5 px apart, centered where the
   chevron was) in Text Tertiary, On Accent on the selection, and a hint, "Drag ≡ to move ·
   Play/Pause shows or hides", Inter Regular 13 px in Text Tertiary, is centered 14 px above the
@@ -604,7 +608,7 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
 - Which list is which comes from its page: Songs' page (`allmusic_page`, which also holds a genre's songs
   and the other lists stock opens there) is mixed, the artist page's songs (OLED draws that page as the [artist page](#artist-page)) are an artist's, the album page is an
   album, Folder view (`folder_page`) a folder, and an album's tracks opened from Cover Flow are an album too (their
-  status row names the album, with no row of its own above the tracks). Lists Vamp draws itself (Most Played,
+  status row names no page and there is no row above the tracks naming it). Lists Vamp draws itself (Most Played,
   Long Songs, Ratings) keep their own rows.
 - Streaming's rows are one line, 32 px, each service's mark (20 px, monochrome, no disc) centered on x 34 in Text
   Secondary, white on the selection, its name from x 52: Phosphor's `spotify-logo`, `app-window` (a card app without
@@ -839,7 +843,7 @@ as a menu's; a lit row's foot never passes y 282.
 - **Progress:** 6 px, round ends, Track and Accent Blue. Used for playback, scans and
   downloads.
 - **Slider page** (Volume, Resume Songs, Night Shift, Wheel Sensitivity; stock's Max Volume, Default Volume, Channel
-  Balance and Brightness pages keep the form where they still open): the status row names it; a feature with a switch has it as the
+  Balance and Brightness pages keep the form where they still open): a feature with a switch has it as the
   first row, selected; the value in Inter Medium 22 centered on y 150; a 6 px track from the text
   column to the right column with its top at y 186, Track behind and Accent Blue filled to a 14 px
   white knob (Channel Balance fills from the center; in Light Mode, where white is the canvas, the
@@ -883,7 +887,7 @@ Shown for a moment after a mode change (Shuffle, Repeat).
 
 - Centered glyph (Phosphor `shuffle` or `repeat`, bold), 56 px, Accent Blue, centered on y 140;
   label Inter Medium 22 px centered on y 200; count in Text Tertiary 15 px centered on y 228.
-  Nothing else on screen but the status row, which names Now Playing.
+  Nothing else on screen but the status row.
 - Dismisses itself after 1.2 s or on any input, which it takes.
 - Built for shuffles (`patch/feedback.c` `feedback_shuffled`): the Library's Shuffle Songs, Albums and
   Folders, a list's Shuffle row and the hold menu's Shuffle, over the Now Playing they open, with the
@@ -1212,7 +1216,7 @@ Artists list), approved from `mock_album_artist.py` (option 2, header with monog
 `mock_artist_explore.py` (layout B) on 2026-11-15. Built by `patch/artist_page.c` (the header,
 the pair, the rows) and `patch/addon.c` `artist_view` (which reply rows go where).
 
-- **Status row:** no title, the clock centered.
+- **Status row:** the clock at its left, as every page's.
 - **Header** from y 52: a 64 px `#2C2C2E` disc at the text column with the name's first letter in
   Inter Medium 22, white; beside it from x 102 the name in Inter Medium 20 (ellipsis), the counts
   ("4 albums · 3 singles · 62 songs" as the app sends them, else "4 albums" counted from its album
@@ -1266,7 +1270,7 @@ C "Info grid", iOS Files' Info, with Apple Music's quality badge on its own line
 on 2026-11-15. Built by `patch/np_about.c`, which paints it from the details stock fills
 (`tools/ipod.py` `np_info_values` keeps them, hidden, as its source).
 
-- **Status row** titled About.
+- **Status row:** the clock at its left, as every page's.
 - **Header** from y 46: the cover, 56 px with 6 px corners, at the text column (a `#2C2C2E`
   placeholder without one); beside it from x 92 the title in Inter Medium 20, white, the artist
   in Inter Regular 15 Text Secondary and the length in Inter Regular 13 Text Tertiary, centered on
@@ -1300,7 +1304,7 @@ Search's albums or an artist page's Albums: the Library's (stock's album pages, 
 from `mock_album_artist.py` (option 2, header with cover) on 2026-11-15. It shares the artist page's
 header and pair (`patch/artist_page.c`).
 
-- **Status row:** no title, the clock centered.
+- **Status row:** the clock at its left, as every page's.
 - **Header** from y 52: the album's cover, 64 px square with 6 px corners, at the text column (the
   server library's cover for a server album, else Cover Flow's cached one, else a `#2C2C2E`
   placeholder); its top stands over the status row's bottom 6 px, as the artist's disc does. Beside it
@@ -1674,7 +1678,7 @@ Settings > Bluetooth and its pages ([internals](internals.md#bluetooth-page), `p
 - **Centre** on a paired row, connected or not, opens the device's page (the user's, 2026-11-18: a device out of
   range could not be forgotten while only the connected one had a page); on one connecting it stops connecting;
   a found row pairs. Play/Pause held on any paired row opens its page too.
-- **A device's page**: the status row names it; under it the path, "Q2 → WH-1000XM5" in 17 px, and the codec
+- **A device's page**: under the status row the path, "Q2 → WH-1000XM5" in 17 px, and the codec
   line in 14 px Text Tertiary ("LDAC · 96 kHz · 990 kbps", only what is known: the bit rate where the codec
   fixes it; "Not Connected" when it is not), then Battery (when reported), Disconnect, Volume Limit, Volume Curve,
   Rename and Forget This Device in Negative red; not connected, Connect first (selected as the page opens),
@@ -1761,7 +1765,7 @@ A guest's phone plays through the Q2 to what the Q2 plays to ([internals](intern
 <a id="update-library"></a>The library scan (Update Local Music, Scan Music Now, a folder's scan; approved as 27 v4 on
 2026-11-16, `patch/scan_page.c`) is the empty states' stack over stock's dialog: a 60 px figure, 14 px, the title in
 Inter Medium 20, the line in 15 px Text Secondary, 20 px, then the shared [button](#buttons), the whole centered from
-y 40 to the screen's end. The full status row stays, titled "Update Library": stock's dialog covers the bar, so the
+y 40 to the screen's end. The full status row stays: stock's dialog covers the bar, so the
 page paints it first, as Control Center does (`msg_title`).
 
 | State | Figure | Title | Line | Button |
@@ -1801,7 +1805,7 @@ screen, only the toast and the status row. Black in both halves, over the whole 
 
 General's one **Software Update** row ([internals](internals.md#sd-card-update), `patch/sw_update.c`, approved from
 `design/mockups/mock_fwupdate.py` on 2026-11-16 and as 29 v3 the same day) checks online and the SD card at once,
-the status row "Software Update" over mode pages as USB's:
+in mode pages as USB's:
 
 - **Checking for an Update…**, "Looking online and on the SD card" ("Looking on the SD card" with Wi-Fi off, when only
   the card is checked): no circle, a 48 px spinner of twelve round 4 px spokes in
@@ -1833,7 +1837,7 @@ the status row "Software Update" over mode pages as USB's:
 ### Battery History
 
 <a id="battery-history"></a>Power's Battery History (approved as 33 v3 on 2026-11-16 and laid out again from the user's
-mock-up of 2026-11-18, `patch/battery.c`) is a graph over the whole page, under the status row titled "Battery History".
+mock-up of 2026-11-18, `patch/battery.c`) is a graph over the whole page, under the status row.
 The three parts stand as one block from y 57 to the list end (y 282), so nothing reaches the glass's bottom corners. Each
 y here is on the screen; the page's window is the whole screen but the view starts at y 58, so the code takes them from
 the canvas's origin, not the view's own y:
@@ -1889,8 +1893,8 @@ Settings > Car Remote (approved 2026-11-16, `design/carremote-page`, `mock_carre
 
 Home's Radio ([internals](internals.md#radio-home), `patch/radio_tuner.c`), as the approved prototype
 (`~/q2-emu/design/radio-tuner/index.html`, the tuner's redesign approved 2026-11-20; device shots in
-`~/q2-emu/design/radio-tuner/device-shots-v2/`). The status row names the page "Radio" on the tuner, loading and
-error screens, "Near <city>" on the stations list and "Change Location" on the ZIP entry.
+`~/q2-emu/design/radio-tuner/device-shots-v2/`). The page's hidden title (read by Up Next's "From") is "Radio" on
+the tuner, loading and error screens, "Near <city>" on the stations list and "Change Location" on the ZIP entry.
 
 - **Tuner:** the frequency the needle is at in Inter Medium 64 (the one size past the type steps, as the plug-in
   screen's 30 is), its baseline at y 158, centred between the status row and the dial, with "FM" in Inter Medium
@@ -1964,8 +1968,7 @@ interruptible: a turn mid-run starts from where it is.
 
 - **Page push and pop with parallax**, as UINavigationController's: the new page slides in from the right over
   220 ms, `cubic_out`, while the page under drifts 30% of the width left and darkens to a quarter black; a pop is
-  the reverse over 200 ms. The status row stays put; its title is the new page's at once, and over Home in Split
-  shows only over the sliding page, fading as it goes, while Home's raised rows and art drift and darken with Home
+  the reverse over 200 ms. The status row stays put, while Home's raised rows and art drift and darken with Home
   in the row beside it (`PAGE_SLIDE_MS`, stock's
   window animator, `page_parallax.c`; [internals](internals.md#page-parallax)). Home's Settings and Streaming lists slide
   in over the same 220 ms.
@@ -2009,7 +2012,7 @@ interruptible: a turn mid-run starts from where it is.
   back's finger tracking and its finish (the page under it still and undimmed), the selection bar, wheel scroll, Cover Flow's wheel step
   (the scroll itself), the volume, brightness and progress bars, the marquee and its fades, the scroll indicator's and
   A-Z index's fades, and spinners.
-- **Marquee fades.** A scrolling text (the selected row's title, the status row's title, Now
+- **Marquee fades.** A scrolling text (the selected row's title, Now
   Playing's title, artist and album) is clipped to its own column, inside the glass and before any
   value or chevron on its row. A 12 px fade covers its right end while the text goes on past it,
   and its left end while it is scrolled away from its start, so it rests crisp; over it the text
@@ -2071,12 +2074,12 @@ pattern.
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |
 | SD Card Update                      | [Software Update](#software-update) | A spinner while it checks, the confirm, then mode pages                                         |
-| Quick Settings                      | [Control Center](#control-center) | The status row's clock centered, no title                                                        |
+| Quick Settings                      | [Control Center](#control-center) | The status row's clock at its left, as every page's                                              |
 | Search                              | [Text entry](#text-entry)   | The query on the first line, four single-line results, the letter strip ([ipod](ipod.md#search))            |
 | New Playlist, Rename Playlist       | [Text entry](#text-entry)   | The letter strip, the name large over it ([ipod](ipod.md#name-strip))                                       |
 | Keyboard                            | [Text entry](#text-entry)   | None shows: a text box is the letter strip's ([ipod](ipod.md#keyboard))                                    |
 | Buttons locked                      | Own                         | A padlock leftmost in the status row while Buttons Lock is on; a blocked press shows a #1C1C1E card over the page dimmed to 45%: a 56 px padlock, "Buttons Locked" 16 px Medium and the hint 13 px Secondary, for 1.5 s |
-| A card app's QR page (sign-in)      | Own                         | The status row names the app. The code on a white plate (166 px, radius 12) centered under it, the app's note ("Scan with your phone to sign in") 17 px Medium white and "or open ADDR · PIN 482 913" 15 px Text Tertiary under it. Once the app reports a step, a mode page: one solid 92 px circle (Accent for phone and check, #34C759 done, #FF453A fail and error) with a 44 px white Phosphor fill glyph (`device-mobile`, `arrows-clockwise`, `check` bold, `cloud-slash`, `x` bold), the title 22 px Medium and one line 15 px Text Secondary, the stack centered between the status row and the bottom; the wheel does nothing |
+| A card app's QR page (sign-in)      | Own                         | The code on a white plate (166 px, radius 12) centered under the status row, the app's note ("Scan with your phone to sign in") 17 px Medium white and "or open ADDR · PIN 482 913" 15 px Text Tertiary under it. Once the app reports a step, a mode page: one solid 92 px circle (Accent for phone and check, #34C759 done, #FF453A fail and error) with a 44 px white Phosphor fill glyph (`device-mobile`, `arrows-clockwise`, `check` bold, `cloud-slash`, `x` bold), the title 22 px Medium and one line 15 px Text Secondary, the stack centered between the status row and the bottom; the wheel does nothing |
 
 The concept's Apple Music, Apple TV and CD sync pages have no Vamp equivalent and are out of scope; its storage
 page became Settings > Storage. Spotify's pages follow the list patterns.

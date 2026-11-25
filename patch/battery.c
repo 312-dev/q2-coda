@@ -209,8 +209,8 @@ static int bh_touch(void *ctx, void *event) {
     if (b->w && x >= b->x && x < b->x + b->w && y >= b->y && y < b->y + b->h) bh_share();
     return 0;
 }
-/* Power's Battery History row. No history: "Unplug to start". Else the status row's title (a row
- * of the page's list, which stays hidden), and the graph's view over the rest. */
+/* Power's Battery History row. No history: "Unplug to start". Else the bar's hidden title (a
+ * row of the page's list, which stays hidden), and the graph's view over the rest. */
 int battery_history(void *ctx, void *event) {
     if (bh.page || !(bh.page = page_open("battery_page", bh_closed, page_keyup))) return 0;
     bh_load();

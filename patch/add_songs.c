@@ -248,7 +248,7 @@ static void as_dirty(void) {
     if (as.sheet) widget_invalidate_force(as.sheet, (void *)0);
     if (as.page) bar_title_sync(as.page);
 }
-/* The status row's title: the chooser's "Add to <name>", else the level's. */
+/* The bar's hidden title: the chooser's "Add to <name>", else the level's. */
 static void as_title(void) {
     void *t = as.page ? widget_lookup(as.page, PAGE_TITLE, 0) : (void *)0;
     char s[160];
@@ -469,7 +469,7 @@ void add_songs(int dest, const char *name) {
     for (unsigned i = 0; songs && as.was && as.now && i < deque_size(songs) && i < AS_MAX_KEYS; ++i)
         as.was[as.nwas++] = as.now[as.nnow++] = as_key(deque_at(songs, i));
     if (songs) deque_destroy(songs);
-    void *title = text(as.page, 0, bar_foot(as.page), 375, 28); /* what the status row reads */
+    void *title = text(as.page, 0, bar_foot(as.page), 375, 28); /* the bar's title reads it */
     widget_set_name(title, PAGE_TITLE);
     widget_set_visible(title, 0, 0);
     as_title();

@@ -70,7 +70,7 @@ class Geometry:
     set_rows: int = inc('SET_ROWS')
     set_icon: int = inc('SET_ICON')
     stream_row: int = inc('SET_ROW')
-    bar_px: int = 0  # the status row's title and clock px (status_row)
+    bar_px: int = 0  # the status row's clock px (status_row)
     batt_w: int = inc('BATT_BODY_W')  # the slim battery's body (list_marks.c battery_slim), its nub outside
     batt_h: int = inc('BATT_BODY_H')
     text_x: int = 0  # list text's left edge, clear of the glass at the first row (0: stock's)
@@ -92,8 +92,8 @@ class Geometry:
     search_title_h: int = 24
     search_meta_y: int = 41
     search_meta_h: int = 16
-    # The status row in place of a bar band (status_row): its glyphs centred on screen row status_y, the page's title from
-    # STATUS_ROW_INSET in the bar's face and px (bar_px), the clock centred (at the row's left on Home's Split; navigation.c clock_place), the play state and
+    # The status row in place of a bar band (status_row): its glyphs centred on screen row status_y, the clock from
+    # STATUS_ROW_INSET in the bar's face and px (bar_px; navigation.c clock_place), no page title, the play state and
     # battery ending STATUS_ROW_INSET from the screen's right edge; the bar is drawn black, so the row reads as part of the page.
     status_y: int = 0
     right_x: int = 0  # the right column, from the screen's right edge: a row's chevron and value (0: stock's)
@@ -464,14 +464,14 @@ def status_bar(root, g):
 
 STATUS_ROW_RIGHT = STATUS_RIGHT[2:]  # a status row's right group: the battery, its slots left of it the payload's (status_row.c)
 STATUS_ROW_ICON = 16  # stock's status icon canvases (bar_play, bar_pause), their glyph centred
-STATUS_ROW_TITLE_W = 240  # the title's and clock's box from the row's inset, until the payload's first paint moves both (clock_place)
+STATUS_ROW_TITLE_W = 240  # the title's and clock's box from the row's inset, until the payload's first paint sizes the clock's (clock_place)
 
 
 def status_row(root, g, widgets, left, right, eq):
     """The status row: no band, the bar black, its glyphs centred on row status_y, both ends STATUS_ROW_INSET in from
-    the screen's sides, inside the glass's top curve. The title and the clock start in one box whose text starts on
-    that inset, in the bar's face at bar_px in Text Secondary; the payload centres the clock (on Home's Split moves it
-    to the row's left) and ends the title's box short of it (navigation.c clock_place). The right group is the
+    the screen's sides, inside the glass's top curve. The clock's text starts on that inset, in the bar's face at bar_px
+    in Text Secondary (navigation.c clock_place sizes its box). The title, hidden, holds the page's name for the Search
+    bar, the letter strip and Up Next (bar_title_sync): the row names no page. The right group is the
     battery, its nub's last column STATUS_ROW_INSET from the screen's edge; the payload paints the row's other glyphs
     left of it (status_row.c: the level bars, Wi-Fi, a sync, a headset's battery, Buttons Lock's padlock, a server out
     of reach). The play state, Bluetooth, Wi-Fi, EQ and the rest stay, off-screen,
@@ -501,7 +501,8 @@ def status_row(root, g, widgets, left, right, eq):
             for k, v in (('font_size', str(g.bar_px)), ('text_color', STATUS_ROW_INK))}
     for name in ('title', 'clock'):
         root[3].append(['hscroll_label', [inset - 2, top, STATUS_ROW_TITLE_W, STATUS_ROW_LINE],
-                        {'name': 'label_' + name, 'style': 's_scrlabel_white20l', 'only_focus': 'true', 'ellipses': 'true', **text}, []])
+                        {'name': 'label_' + name, 'style': 's_scrlabel_white20l', 'only_focus': 'true', 'ellipses': 'true', **text,
+                         **({'visible': 'false'} if name == 'title' else {})}, []])
 
 
 STATUS_ROW_GAP = 3  # the right group's spacing (the battery's modes, one shown at a time)

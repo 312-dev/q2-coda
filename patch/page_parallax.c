@@ -1,10 +1,7 @@
 /* Page push and pop with parallax (docs/oled-design.md#motion), as UINavigationController's: the
  * new page slides in from the right while the page under drifts PX_UNDER_PCT of the width left and
  * dims to PX_DIM_ALPHA; a pop is the reverse, PAGE_POP_MS against the push's PAGE_SLIDE_MS. The
- * status row is the system bar's own window, painted over the slide in place, so it stays put
- * (ponytail: its title changes to the new page's at once; a cross-fade would draw both pages'
- * titles in the bar). Over Home in Split it shows only over the sliding page, faded with it, as
- * Home's band beside the page holds its own rows (theme_titles_paint.c bar_title_fades).
+ * status row is the system bar's own window, painted over the slide in place, so it stays put.
  *
  * Stock's htranslate window animator (the hint every sliding page carries, tools/ipod.py SLIDE)
  * draws both pages from the snapshots it took at the start: the page under (prev_img) moved the
@@ -18,8 +15,7 @@
  * - parallax_curr: the new page as stock draws it, then the system bar again over both. Every page
  *   is the whole screen (docs/oled-design.md#full-bleed), so the snapshots cover the bar stock
  *   painted first in the frame (window_animator_begin_frame); this paint, with this frame's
- *   percent readable (parallax_slide), keeps the status row on top, its title over the sliding page
- *   alone where Home in Split is under (theme_titles_paint.c bar_title_fades).
+ *   percent readable (parallax_slide), keeps the status row on top.
  * Under Reduce Motion the hint is a fade (ui_kit.c motion_row), so none of this runs. Every window
  * that slides takes it: pages, Now Playing's close, Cover Flow.
  */

@@ -3236,7 +3236,7 @@ def test_the_percentage_is_as_wide_as_its_digits(fw, st, level, digits):
 
 @pytest.mark.parametrize('titled, shown', [(0, '6:05 PM'), (1, '6:05')])
 def test_the_clocks_timer_shows_the_minute_and_rearms(fw, st, titled, shown):
-    """Beside the bar's title the 12-hour clock drops AM and PM, which would reach the title."""
+    """On a status row (a bar with its hidden title) the 12-hour clock drops AM and PM, as iOS's does."""
     ui = Ui(fw)
     bar = ui.window('statusbar', top=False)
     clock = ui.add('label', bar, (150, 0, 75, 26), 'label_clock')
@@ -3254,9 +3254,9 @@ def test_the_clocks_timer_shows_the_minute_and_rearms(fw, st, titled, shown):
     assert not fw.calls('timer_remove')  # the firing timer is done: nothing else to stop
 
 
-# OLED's status row clock (navigation.c clock_place): centred on every full-width row, the title short of it; on Home's
-# Split at the left, its text starting STATUS_ROW_INSET in, as the battery ends that far from the right. Its box
-# is its text's width (canvas_measure_text) and hscroll_label's two 2 px margins.
+# OLED's status row clock (navigation.c clock_place): at the row's left on every page, its text starting
+# STATUS_ROW_INSET in, as the battery ends that far from the right. Its box is its text's width (canvas_measure_text)
+# and hscroll_label's two 2 px margins.
 
 CLOCK_W = 38  # canvas_measure_text's width of "00:00", the widest clock
 INK_ROW = 0xffababab
@@ -3276,32 +3276,27 @@ class StatusRow(Bar):
         fw.mock('canvas_measure_text', lambda *_: float(CLOCK_W))
         fw.mock('timer_add', lambda *_: 5)
         self.sync()  # stock's showface: finds the bar's widgets
-        st('bar_titled').value = int(bool(title))
 
     def place(self):
-        self.fw.fn('navigation__clock_place', None, C.c_void_p, C.c_void_p)(self.bar.addr, self.ui.top.addr)
+        self.fw.fn('navigation__clock_place', None, C.c_void_p)(self.ui.top.addr)
         return self.w['label_clock']
 
 
-def test_an_untitled_page_s_clock_is_centred_across_the_status_row(fw, st):
-    row = StatusRow(fw, st)
+@pytest.mark.parametrize('title', ['', 'A Long Album Name That Runs On Past The Clock'])
+def test_every_page_s_clock_starts_at_the_row_s_inset_and_no_title_moves(fw, st, title):
+    """The clock at the row's left on every page, titled or not (the user's layout D, 2026-11-25): its text from
+    STATUS_ROW_INSET, its box its text; the bar's title, hidden, is neither moved nor sized, and the slots' room starts
+    CLOCK_BESIDE (7) past the widest clock."""
+    row = StatusRow(fw, st, title)
+    title_box = row.w['label_title'].box
     row.ui.set_text(row.w['label_clock'], '9:41')
     clock = row.place()
     x, y, w, _ = clock.box
-    assert w == CLOCK_W + 4 and abs(x + w / 2 - 187.5) <= 0.5 and y == 25  # its text centred on the screen, its line as before
-    assert clock.props['style:normal:text_color'] == i32(INK_ROW)  # Text Secondary, as Home's was
-
-
-def test_a_titled_page_s_clock_holds_the_centre_and_the_title_ends_12_px_short_of_it(fw, st):
-    """The clock holds the row's centre on a titled page too (the user's, 2026-11-19, mock_subsonic_offline.py): its
-    text centred on x 187.5, and the title's ellipsis CLOCK_CLEAR (12 px) short of the widest clock, centred."""
-    row = StatusRow(fw, st, 'A Long Album Name That Runs On Past The Clock')
-    clock = row.place()
-    assert abs(clock.box[0] + clock.box[2] / 2 - 187.5) <= 0.5 and clock.box[2] == CLOCK_W + 4
-    title = row.w['label_title']
-    widest_left = (375 - CLOCK_W - 4 + 1) // 2 + 2  # the widest clock's text, centred
-    assert title.box[0] + title.box[2] - 2 == widest_left - 12
-    assert clock.props['style:normal:text_color'] == i32(INK_ROW)
+    assert x + 2 == O['STATUS_ROW_INSET'] and w == CLOCK_W + 4 and y == 25
+    assert clock.props['style:normal:text_color'] == i32(INK_ROW)  # Text Secondary
+    assert row.w['label_title'].box == title_box
+    sr_room = C.c_int.from_address(C.addressof(C.c_char.in_dll(fw.lib, 'status_row__sr')) + fw.sizes['status_row__sr'] - 16)
+    assert sr_room.value == O['STATUS_ROW_INSET'] + CLOCK_W + 7
 
 
 def test_home_split_s_clock_goes_left_its_inset_the_battery_s_from_the_right(fw, st):

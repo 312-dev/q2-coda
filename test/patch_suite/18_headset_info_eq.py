@@ -721,13 +721,13 @@ for quit,result in ((9,SW_NONE),(13,SW_LATEST),(18,SW_BAD)):
     m=SwMachine(quit=quit); m.call(address=payload_syms['sw_install'],args=(0,0,0,0),gap=0)
     assert ('dialog/checkfw_dialog',) in m.opened and m.nodes[m.top]['name']=='swupdate_page' and m.sw('result')==result,quit
 passed()
-# Stock's checkfw_dialog: its label hidden, the dialog drawn as Restarting to Install with the status row's title, and the
-# bar the unpacked images' share (none here: no files).
+# Stock's checkfw_dialog: its label hidden, the dialog drawn as Restarting to Install with no title over it (the status
+# row names no page), and the bar the unpacked images' share (none here: no files).
 m=SwMachine(); label=m.node('hscroll_label','scrlabel_checkfw',text='Checking FW...'); dlg=m.node('dialog','checkfw_dialog',[label])
 parents(m,dlg); m.word(dlg+O['W_PARENT'],m.wm); place(m,dlg,0,0,375,320); m.top=dlg
 m.handlers[payload_syms['stock_checkfw_trampoline']]='stock_checkfw'
 m.call(address=syms['dialog_checkfw_dialog_init'],args=(dlg,0,0,0),gap=0)
 assert not m.nodes[label]['visible']; texts,images=m.said(dlg)
-assert texts==['Software Update','Restarting to Install',"Don't turn off the Q2"] and images==['restart'],(texts,images)
+assert texts==['Restarting to Install',"Don't turn off the Q2"] and images==['restart'],(texts,images)
 top=40+(320-40-158)//2; assert [r['rect'] for r in m.rounded]==[(375//2-46,top,92,92),(375//2-90,top+172,180,6)],m.rounded; passed()
 print(f'{checks} MIPS execution scenarios passed; toolkit services mocked, stock lock filter executed.')

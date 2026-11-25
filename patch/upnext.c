@@ -101,7 +101,7 @@ void un_source_take(void *q, int at, int type) {
     un.source[0] = 0;
     if (album && *album)
         tk_snprintf(un.source, sizeof un.source, "%s", album);
-    else if (st.bar_title && st.bar_titled)
+    else if (st.bar_title)
         widget_get_text_utf8(st.bar_title, un.source, sizeof un.source);
 }
 

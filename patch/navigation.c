@@ -216,7 +216,6 @@ extern void coverflow_home_bar(void *canvas, void *top, unsigned ground);
 extern int coverflow_home_back(void *top), coverflow_home_owns(void *w);
 extern const char *coverflow_home_title(void);
 extern int coverflow_home_sub(void), coverflow_home_split(void *top);
-extern int coverflow_home_slide(int *open);
 extern void coverflow_home_row(void *surface, void *row, int id, int painting);
 extern void coverflow_paint(void *w, void *canvas), video_poll(void);
 extern int video_on(void), video_click(const char *path);
@@ -456,7 +455,6 @@ void drop_input(void) {
 }
 
 /* The rest of the UI, by area (tools/ci/split_sources.py): one translation unit with the above. */
-static void bar_title_fades(void *w, void *canvas, int begin); /* theme_titles_paint.c */
 #include "nav/home_carousel.c"
 #include "nav/lists.c"
 #include "nav/pull.c"

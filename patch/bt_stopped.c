@@ -81,7 +81,7 @@ int bt_stopped_hold(void *caller) {
     return 1;
 }
 
-/* The status row's title on the page; 0 for another. */
+/* The bar's hidden title, the page's name; 0 for another page. */
 const char *bt_stopped_title(const char *name) {
     return tk_strcmp(name, "btstopped_page") ? (const char *)0 : "Bluetooth";
 }

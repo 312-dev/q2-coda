@@ -167,7 +167,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
               'srvtoast': 0xff9f0a}  # addon.c's server error: cloud-slash in Warning
     inset = [f'batt{n}_{k}' for n in art.BATT_GLYPHS for k in ('d', 'l')]  # list_marks.c battery_slim
     keylock = [f'keylock_{k}' for k in ('d', 'l')]  # status_row.c's padlock (the card's below)
-    status = [f'status_{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bt', 'btdim', 'headphones', 'car', 'down',
+    status = [f'status_{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bt', 'btdim', 'headphones', 'wired', 'car', 'down',
                                           'vol', 'mute', 'offline',
                                           *(f'sync_{f}' for f in range(art.STATUS_SPIN)))
               for k in ('d', 'l')]  # status_row.c's other glyphs: their own test
@@ -252,8 +252,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
 def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(half, primary, secondary, unlit):
     """status_row.c's slots, every one 11 px tall (STATUS_INK, the clock's digits') with its ink's top on STATUS_TOP,
     so on the row it covers rows 17 to 27 with the digits: Wi-Fi iOS's fan, 15.6 x 11 in a 16 px box, its levels
-    lighting the dot and bands over the rest in STATUS_UNLIT, the shape one box in every level; wifi-x, the
-    Bluetooth rune (dim while connecting), headphones, the car and the volume pill's speakers (vol_pill.c) sized by their height (wifi-x and the car are wider
+    lighting the dot and bands over the rest in STATUS_UNLIT, the shape one box in every level; wifi-x, a headset's
+    headphones, the car and the volume pill's speakers (vol_pill.c) sized by their height (wifi-x and the car are wider
     than tall: by the longer side Wi-Fi came out 8 px tall) in Text Primary; the offline cloud in Warning in both halves; the sync arrows' STATUS_SPIN frames in Text Primary (the user's, 2026-11-20: 30 fps, white), 30 to the half turn, each turned from the last."""
     got = art.images(theme.builtins()[0])
     def ink(name, cut=64):
@@ -270,8 +270,8 @@ def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(h
         near = lambda c: any(max(abs(a - b) for a, b in zip(rgb(c), k)) <= 16 for k in colours)  # noqa: E731 (blended edges)
         assert size == (art.STATUS_WIFI_W, art.STATUS_PX) and near(primary) and near(unlit) == (level < 3)
     assert boxes == {(0, 15, 1, 11)}  # 16 columns (15.6 of ink), rows 1 to 11: 11 tall
-    for name, w in (('wifi_x', art.STATUS_WIFI_W), ('bt', art.STATUS_PX), ('headphones', art.STATUS_PX), ('car', art.STATUS_CAR_W),
-                    ('btdim', art.STATUS_PX), ('vol', art.STATUS_PX), ('mute', art.STATUS_PX)):
+    for name, w in (('wifi_x', art.STATUS_WIFI_W), ('headphones', art.STATUS_PX), ('car', art.STATUS_CAR_W),
+                    ('vol', art.STATUS_PX), ('mute', art.STATUS_PX)):
         size, lit, colours = ink(name, 8)
         assert size == (w, art.STATUS_PX) and (name == 'btdim' or colours == {rgb(primary)})
         x0, x1, y0, y1 = box(lit)
@@ -283,6 +283,23 @@ def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(h
     frames = [got[f'oled_status_sync_{f}_{half}'] for f in range(art.STATUS_SPIN)]
     assert art.STATUS_SPIN == 30
     assert len(set(frames)) == art.STATUS_SPIN and all(ink(f'sync_{f}')[2] == {rgb(primary)} for f in range(art.STATUS_SPIN))
+
+
+@pytest.mark.parametrize('half, primary, dim', [('d', 0xffffff, 0x858585), ('l', 0, 0x6e6e6e)])
+def test_the_bluetooth_rune_and_wired_headphones_stand_as_tall_as_the_battery(half, primary, dim):
+    """The Bluetooth rune (dim while connecting) and wired headphones (Phosphor's regular headphones) are 12 px tall,
+    the battery's body's height, from their box's top row: status_row.c puts the box on row 16, so their ink is on rows
+    16 to 27 and centres on row 21.5 with the battery's and Wi-Fi's (the user's mockup, 2026-11-25). Each box is as
+    wide as its ink: the rune 9 (8.4 of ink), the headphones 14 (13.6)."""
+    got = art.images(theme.builtins()[0])
+    for name, w, ink in (('bt', 9, primary), ('btdim', 9, dim), ('wired', art.STATUS_PX, primary)):
+        width, h, at = pixels(got[f'oled_status_{name}_{half}'])
+        lit = [(x, y) for y in range(h) for x in range(width) if at(x, y)[3] > 128]  # over half covered
+        rows = sorted({y for _, y in lit})
+        assert (width, h) == (w, art.STATUS_PX) and (rows[0], rows[-1]) == (0, 11), name
+        assert 16 + (rows[0] + rows[-1]) / 2 == 21.5, name  # on the row: its ink's centre
+        assert {at(x, y)[:3] for x, y in lit if at(x, y)[3] > 250} == {tuple(ink >> s & 255 for s in (16, 8, 0))}, name
+        assert max(x for x, _ in lit) - min(x for x, _ in lit) + 1 >= w - 1, name  # the box hugs the ink
 
 
 def test_the_status_rows_wifi_is_a_fan_of_a_dot_and_two_bands_with_gaps():

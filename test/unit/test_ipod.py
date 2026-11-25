@@ -1465,11 +1465,11 @@ def test_patch_word_wants_the_stock_instruction():
     assert data == program(0x0320f809, 0x0411fc39) and changes == []
 
 
-def test_status_row_names_the_page_inside_the_glass_s_top_curve():
-    """A set's status row (OLED's): the bar black and 58 px, its title and clock sharing one box whose text starts
-    STATUS_ROW_INSET in, in Text Secondary at bar_px, centred on status_y; the battery ending STATUS_ROW_INSET from the
-    edge, not on the list's columns (the payload's slots left of it, status_row.c); the play state, Bluetooth, Wi-Fi
-    and EQ off-screen, still there for stock."""
+def test_status_row_starts_its_clock_inside_the_glass_s_top_curve_and_hides_the_title():
+    """A set's status row (OLED's): the bar black and 58 px, its clock's text starting STATUS_ROW_INSET in, in Text
+    Secondary at bar_px, centred on status_y; the title in the same box, hidden (the row names no page: the payload
+    reads its text); the battery ending STATUS_ROW_INSET from the edge, not on the list's columns (the payload's slots
+    left of it, status_row.c); the play state, Bluetooth, Wi-Fi and EQ off-screen, still there for stock."""
     g = dataclasses.replace(ipod.STOCK_GRID, bar=58, status_y=23, text_x=24, right_x=28, bar_px=18)
     root = bar()
     ipod.status_bar(root, g)
@@ -1482,6 +1482,7 @@ def test_status_row_names_the_page_inside_the_glass_s_top_curve():
     for name in ('label_title', 'label_clock'):
         assert n[name][1] == [60, 11, ipod.STATUS_ROW_TITLE_W, 24]
         assert {n[name][2][f'style:{s}:{k}'] for s in STATES for k in ('font_size', 'text_color')} == {'18', '#ABABAB'}
+    assert n['label_title'][2]['visible'] == 'false' and 'visible' not in n['label_clock'][2]
     assert all(n[k][1][0] == -200 for k in ('img_state', 'img_bt', 'img_wifi', 'label_eq', 'label_idle', *ipod.STATUS_HIDDEN))
     assert root[1][3] == 58
 

@@ -1011,7 +1011,6 @@ int ringnav_paint(void *w, void *canvas) {
         np_stream_paint(w, canvas);
     }
     coverflow_home_clip(w, canvas, 0);
-    bar_title_fades(w, canvas, 0);
     modal_after(w, canvas); /* a menu sheet's header and fades (menu_modal.c) */
     list_fade(w, canvas);
     charge_paint(w, canvas); /* the plug-in screen (charging.c): last, over the page's own paints */
