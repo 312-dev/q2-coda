@@ -197,6 +197,47 @@ for callback,button,pages in (
             assert m.closed==(list(reversed(pages))+['playing_page'] if unwind else [])
             passed()
 
+# Songs of one file name: two server songs of one title (a server row's file name is its title, catalogue.c imp_song)
+# or two card files of one name in two folders. Stock's own player_load_songlist runs here: it answers the first
+# record of the list with the pressed one's file name and CUE start, so a press on the later song started the
+# earlier. The press starts its own row (playback.c ringnav_songlist), from Songs and from an artist's tracks; a CUE
+# image's tracks, which share their file and differ by start, and a name that differs only in case each keep theirs.
+class SameNameMachine(LookupMachine):
+    def __init__(self,rows,selected):
+        super().__init__(['home_page','playing_page','allmusic_page'],selected,False)
+        self.handlers.pop(syms['player_load_songlist'])  # stock's, which copies the list and finds the start
+        self.word(0xa3a0e8,0x1000014); self.handlers[0x1000014]='lookup:malloc'  # lazy-bound malloc, as the Era's
+        self.word(0xa3a270,0x1000010); self.handlers[0x1000010]='lookup:free'
+        self.handlers[payload_syms['catalogue_access']]='lookup:playable'  # a server row that can play now (online)
+        recs=[]
+        for name,path,cue in rows:
+            r=self.song(name); self.word(r+O['REC_PATH'],self.string(path)); self.word(r+O['REC_CUE_START'],cue); recs.append(r)
+        self.word(syms['p_deque_showlist'],self.deque(recs))
+    def hook(self,u,address,size,unused):
+        name=self.handlers.get(address,'')
+        if name=='lookup:malloc': self.returns(self.alloc((u.reg_read(REGS[0])+3)&~3),clobber=True); return
+        if name=='lookup:free': self.returns(0,clobber=True); return
+        if name=='lookup:playable': self.returns(0,clobber=True); return
+        return super().hook(u,address,size,unused)
+    def start_at(self):  # where the list Now Playing was opened with starts
+        page,_,at,_,_=self.opened[-1]; assert page=='playing_page'
+        return at
+SERVER='/mnt/mmc/.subsonic/cat'
+for rows in ([('Downfall',f'{SERVER}/al1/s1.flac',0),('Downfall',f'{SERVER}/al2/s2.flac',0),('Other',f'{SERVER}/al3/s3.flac',0)],
+             [('Downfall',f'{SERVER}/al1/s1.flac',0),('Downfall',f'{SERVER}/al1/s2.flac',0)],  # one album's name and id
+             [('Downfall.flac','/mnt/mmc/A/Downfall.flac',0),('Other.flac','/mnt/mmc/C/Other.flac',0),
+              ('Downfall.flac','/mnt/mmc/B/Downfall.flac',0)],
+             [('Downfall','/mnt/mmc/a.flac',0),('DOWNFALL','/mnt/mmc/b.flac',0)],
+             [('Live.cue','/mnt/mmc/Live.flac',0),('Live.cue','/mnt/mmc/Live.flac',245)]):
+    for callback,button in ((0x4aac14,'row'),(0x4af498,'track')):
+        for selected in range(len(rows)):
+            m=SameNameMachine(rows,selected)
+            w=m.node('button',f'{button}_{selected}'); m.word(w+0x10,m.string(f'{button}_{selected}'))
+            m.word(w+O['ROW_INDEX'],selected); m.word(m.event+O['EVENT_TARGET'],w)
+            assert m.call(address=callback,args=(w,m.event,0,0),gap=0)==0
+            assert m.start_at()==selected,(rows[selected],button,m.start_at())
+            passed()
+
 # Now Playing More's Artist info (stock's 0x5398fc, build.py MORE_ARTIST_CLOSE, #303) closes the artist page and the
 # album page the song was played from before it opens the artist's: stock asked for both by name and closed them by
 # their asset paths, which no window is named, so a second artist page shared the first's record and each close freed it.
