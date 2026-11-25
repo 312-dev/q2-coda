@@ -1,12 +1,19 @@
 /* q2bt's device side (docs/internals.md#bluetooth-link-monitor): q2guard sleeps in bt_sleep, which
- * reads the controller's byte counter at each of q2guard's ticks and, while an A2DP stream runs,
- * wakes every BT_TICK_MS to write a line to the q2-bt log. Each line costs two ioctls, five HCI
- * commands on a raw socket bound only while the stream runs (to the ACL handle listed now: a codec
- * change reconnects on a new one), which also carries the controller's Number Of Completed Packets
- * for each delivered packet, and a few small /proc and /sys reads, bluealsa's encoder
- * thread's schedstat among them, and the player's CPU, I/O counters and open songs with the card's
- * busy time beside them; bluealsa is asked for the codec (dbus-send, in the background) at
- * the start, when its encoder thread changes and every BT_PCMS_MS. Two changes to how the Q2
+ * reads the controller's byte counter and its list of links at each of q2guard's ticks and, while an
+ * A2DP stream runs or any classic link is up, wakes every BT_TICK_MS to write a line to the q2-bt
+ * log. A stream's line costs three ioctls, two HCI reads (RSSI, the AFH map) on a raw socket bound
+ * while a link is up (to the ACL handle listed now: a codec change reconnects on a new one), which
+ * also carries the controller's Number Of Completed Packets for each delivered packet, and a few
+ * small /proc and /sys reads, bluealsa's encoder thread's schedstat among them, and the player's
+ * CPU and open songs with the card's busy time beside them; bluealsa is asked for the codec
+ * (dbus-send, in the background) at the start, when its encoder thread changes and every
+ * BT_PCMS_MS. An idle link's second (the recorder, docs/bluetooth.md's sampler) is files and ioctls
+ * only: the byte counters, Wi-Fi's, the A2DP socket's queue and the UART's error counts. Every
+ * BT_LINK_MS each link's RSSI and AFH map are read (the stream's link from its own line), and once
+ * a handle its role and timeouts and the maximum transmit power; every BT_COEX_MS, while a link is
+ * up, wpa_supplicant's STATUS (the band) and Realtek's coex dump (its moving lines). While a stream
+ * runs the band is asked every BT_LINK_MS too, and BT_PACE_FILE says whether downloads are paced
+ * (bt_pace). With nothing connected a tick is the two ioctls. Two changes to how the Q2
  * streams: the A2DP sink's link (its address from GetPCMs) is sent Change Connection Packet Type,
  * allowing EDR, once to each of its handles while a stream runs; and under Auto with the
  * step-down's setting on (Adapt to Signal), a link the radio cannot keep up with is moved from aptX
@@ -45,6 +52,10 @@
 #endif
 #define GROW_WAIT "/tmp/q2player.wait" /* grow.c's, while a song still arriving is waited for */
 #define SONGS 4                         /* the player's open songs remembered: one and its preload */
+#ifndef WPA_CTRL
+#define WPA_CTRL "/var/run/wpa_supplicant/wlan0" /* its control socket (smart_wifi.c's WPA_SOCK) */
+#endif
+#define WPA_MS 300 /* its STATUS answer waited for this long at most */
 
 static struct {
     card_log *log;
@@ -88,9 +99,9 @@ static struct {
     struct bt_sbc sbc;   /* SBC's bitpool, afresh at each START */
     int sbc_allowed;     /* bt_sbc_allowed's, from config.ini */
     int sbc_failed;      /* bluealsa's byte would not take a write: none until the next START */
-    int pl;              /* the player's pid, 0 not found (looked for at pl_found_at) */
-    unsigned pl_found_at, pl_ticks, io_r, io_w, io_d, dk_ms;
-    int pl_ok, io_ok, dk_ok;  /* pl_ticks, io_* and dk_ms hold the last line's counters */
+    int pl; /* the player's pid, 0 not found (looked for at pl_found_at) */
+    unsigned pl_found_at, pl_ticks, dk_ms;
+    int pl_ok, dk_ok;         /* pl_ticks and dk_ms hold the last line's counters */
     char songs[SONGS][128];   /* the card files the player held at the last line */
     unsigned char first[6];   /* the first ACL link's address at the last acl_handle */
     unsigned char down[6];    /* down_h's address */
@@ -99,6 +110,18 @@ static struct {
     unsigned mgmt_failed_at;
     struct bt_names names;
     struct bt_found found; /* the addresses this discovery has answered from */
+    /* the recorder: the classic links listed at the last tick, and those whose ACLINFO was asked */
+    struct bt_acl links[BT_LINKS];
+    int nlinks, rec; /* links listed; a stream or a link is being recorded (bt.was and bt.at hold) */
+    struct bt_acl told[BT_LINKS];
+    int ntold;
+    unsigned link_at, coex_at; /* the last link pass and Wi-Fi and coex read */
+    int link_due, coex_due;    /* one is due at the next tick (a new link, a stream's start) */
+    unsigned uart[BT_UART_N];  /* the UART's counts at the last line, when uart_ok */
+    int uart_ok;
+    int freq;        /* the Wi-Fi frequency wpa_supplicant last said, 0 none */
+    unsigned freq_at;
+    int paced, pace_said; /* BT_PACE_FILE's state, and whether it has been written */
 } bt;
 
 static void note(const char *what) {
@@ -147,9 +170,9 @@ static void raw_open(void) {
         setsockopt(bt.raw, 0 /* SOL_HCI */, 2 /* HCI_FILTER */, filter, 14))
         close(bt.raw), bt.raw = -1;
 }
-/* Events until the five have answered or ms is up (0: only what is waiting, all of it), completions
- * counted on the way. 1 when the five answered. */
-static int events(int ms, int until_answered) {
+/* Events until k has want answers or ms is up (0: only what is waiting, all of it), completions
+ * counted on the way. 1 when k had them. */
+static int events(int ms, struct bt_link *k, int want) {
     unsigned char b[64];
     unsigned end = now_ms() + (unsigned)ms;
     for (;;) {
@@ -161,6 +184,7 @@ static int events(int ms, int until_answered) {
         if (n <= 0) return 0;
         bt.done += (unsigned)bt_completed(b, n, bt.link.handle);
         bt_event(&bt.link, b, n);
+        if (k && k != &bt.link) bt_event(k, b, n);
         char line[72];
         int said = bt_edr_event(&bt.edr, b, n, line, sizeof line);
         if (said) note(line);
@@ -172,17 +196,17 @@ static int events(int ms, int until_answered) {
             ulog_add(bt.ulog, time(0), now_ms(), 'W', "bt", line);
             bt.down_h = -1;
         }
-        if (until_answered && bt.link.answered >= 5) return 1;
+        if (k && k->answered >= want) return 1;
     }
 }
 static void link_read(void) {
-    static const int ops[5] = { BT_OP_RSSI, BT_OP_LQ, BT_OP_TPL, BT_OP_AFH, BT_OP_FCC };
+    static const int ops[2] = { BT_OP_RSSI, BT_OP_AFH };
     unsigned char c[8];
     char line[32];
     int h = acl_handle(); /* each line: a reconnect (a codec change) brings a new handle */
     /* the link followed until now ended: its Disconnection Complete is waiting, read before the
      * handle is let go */
-    if (bt.raw >= 0 && bt.down_h >= 0 && h != bt.down_h) events(0, 0);
+    if (bt.raw >= 0 && bt.down_h >= 0 && h != bt.down_h) events(0, 0, 0);
     if (h >= 0) bt.down_h = h, memcpy(bt.down, bt.first, 6);
     if (bt_handle_follow(&bt.link, h)) {
         snprintf(line, sizeof line, "LINK h=%d", h), note(line);
@@ -193,10 +217,10 @@ static void link_read(void) {
      * it */
     if (bt.raw >= 0 && bt_edr_step(&bt.edr, bt.sink_h, c)) write(bt.raw, c, 8);
     if (bt.raw < 0 || h < 0) return;
-    events(0, 0); /* the second's completions, and last second's late answers */
+    events(0, 0, 0); /* the second's completions, and last second's late answers */
     bt_link_clear(&bt.link, h);
-    for (int i = 0; i < 5; ++i) write(bt.raw, c, (size_t)bt_cmd(c, ops[i], h));
-    events(ANSWER_MS, 1);
+    for (int i = 0; i < 2; ++i) write(bt.raw, c, (size_t)bt_cmd(c, ops[i], h));
+    events(ANSWER_MS, &bt.link, 2);
 }
 
 /* ---- processes and Wi-Fi ---- */
@@ -295,10 +319,9 @@ static void enc_find(unsigned now) {
 }
 
 /* ---- the player's side ----
- * What fed the encoder: the player's CPU, what it read (rchar, and read_bytes from storage) and
- * wrote (wchar, mostly its PCM into bluealsa's FIFO), the microSD's busy time, grow.c's wait for a
- * song still arriving, and a PLAY note when the player opens a card file it did not hold at the
- * last line (a song, or the next one preloaded under 6 s from the end). Reads only. */
+ * What fed the encoder: the player's CPU, the microSD's busy time, grow.c's wait for a song still
+ * arriving, and a PLAY note when the player opens a card file it did not hold at the last line (a
+ * song, or the next one preloaded under 6 s from the end). Reads only. */
 static void player_songs(void) {
     char p[48], link[160], now_[SONGS][128];
     int n = 0;
@@ -328,12 +351,12 @@ static void player_songs(void) {
     memcpy(bt.songs, now_, (size_t)n * sizeof now_[0]);
 }
 static void player_read(unsigned now, unsigned ms, struct bt_sample *s) {
-    char p[40], b[256];
+    char p[40];
     int ok;
-    unsigned r, w, dr, t;
-    s->pl = s->pr = s->pd = s->pw = -1;
+    unsigned t;
+    s->pl = -1;
     s->gw = bt.pl ? access(GROW_WAIT, F_OK) == 0 : -1;
-    if (!bt.pl && now - bt.pl_found_at >= FIND_MS) bt.pl = find_comm(PLAYER), bt.pl_found_at = now, bt.pl_ok = bt.io_ok = 0;
+    if (!bt.pl && now - bt.pl_found_at >= FIND_MS) bt.pl = find_comm(PLAYER), bt.pl_found_at = now, bt.pl_ok = 0;
     if (!bt.pl) return;
     snprintf(p, sizeof p, "/proc/%d/stat", bt.pl);
     t = ticks_of(p, &ok);
@@ -344,15 +367,6 @@ static void player_read(unsigned now, unsigned ms, struct bt_sample *s) {
     }
     s->pl = bt.pl_ok ? bt_ticks_pct(t - bt.pl_ticks, ms) : -1;
     bt.pl_ticks = t, bt.pl_ok = 1;
-    snprintf(p, sizeof p, "/proc/%d/io", bt.pl);
-    if (slurp(p, b, sizeof b) > 0 && bt_proc_io(b, &r, &w, &dr)) {
-        if (bt.io_ok)
-            s->pr = bt_rate(r - bt.io_r, ms) / 1024, s->pw = bt_rate(w - bt.io_w, ms) / 1024,
-            s->pd = bt_rate(dr - bt.io_d, ms) / 1024;
-        bt.io_r = r, bt.io_w = w, bt.io_d = dr, bt.io_ok = 1;
-    } else {
-        bt.io_ok = 0;
-    }
     player_songs();
 }
 static int card_busy(unsigned ms) { /* the microSD's busy ms in a second since the last line */
@@ -561,7 +575,9 @@ static void begin(unsigned now, const struct bt_counts *c) {
     bt.was = *c, bt.at = now;
     bt.link.handle = acl_handle();
     if (bt.link.handle >= 0) bt_addr_text(bt.first, dev);
-    raw_open();
+    if (bt.raw < 0) raw_open();
+    bt.done_was = bt.done;         /* the raw socket may have been open through an idle spell */
+    bt.freq_at = now - BT_LINK_MS; /* the band asked at once: downloads paced from the start */
     if (!bt.ba || !(ba_ticks(&ok), ok)) bt.ba = find_bluealsa(), bt.found_at = now;
     bt.ba_ticks = ba_ticks(&ok);
     bt.own_ticks = ticks_of("/proc/self/stat", &ok);
@@ -571,7 +587,7 @@ static void begin(unsigned now, const struct bt_counts *c) {
     memset(&bt.sbc, 0, sizeof bt.sbc), bt.sbc_failed = 0;
     allowed_read();
     enc_find(now);
-    bt.pl_ok = bt.io_ok = bt.dk_ok = 0; /* the player's and the card's first rates come a line on */
+    bt.pl_ok = bt.dk_ok = 0;            /* the player's and the card's first rates come a line on */
     memset(bt.songs, 0, sizeof bt.songs);     /* each START notes what the player holds */
     card_busy(1000);
     snprintf(line, sizeof line, "START h=%d mtu=%d bufs=%d raw=%s dev=%s", bt.link.handle,
@@ -585,28 +601,184 @@ static void end(void) {
     note("STOP");
     bt.flush = 1;
     bt_edr_reset(&bt.edr); /* a reconnect in the pause may bring the same handle number back */
+    if (bt.raw >= 0 && !bt.nlinks) close(bt.raw), bt.raw = -1; /* else kept for the idle link's reads */
+}
+
+/* ---- the recorder (docs/bluetooth.md's sampler) ---- */
+/* The UART's error counts since the last line into ue (fe, pe, brk, oe, bo): 1 when read twice running */
+static int uart_delta(int *ue) {
+    char b[768];
+    unsigned v[BT_UART_N];
+    int had = bt.uart_ok;
+    bt.uart_ok = slurp(BT_UART_PROC, b, sizeof b) > 0 && bt_uart_counts(b, BT_UART_PORT, v);
+    if (!bt.uart_ok) return 0;
+    for (int i = 0; i < 5; ++i) ue[i] = (int)(v[2 + i] - bt.uart[2 + i]);
+    memcpy(bt.uart, v, sizeof v);
+    return had;
+}
+static void wifi_rates(unsigned ms, int *wtx, int *wrx) {
+    unsigned tx, rx;
+    *wtx = *wrx = -1;
+    if (!wlan(&tx, &rx)) {
+        bt.wlan = 0;
+        return;
+    }
+    if (bt.wlan) *wtx = bt_rate(tx - bt.wtx, ms) / 1024, *wrx = bt_rate(rx - bt.wrx, ms) / 1024;
+    bt.wtx = tx, bt.wrx = rx, bt.wlan = 1;
+}
+/* An idle link's second: files and ioctls, nothing sent to the controller */
+static void idle_sample(unsigned now, const struct bt_counts *c) {
+    struct bt_idle s;
+    char b[4096], line[160];
+    unsigned ms = now - bt.at;
+    s.wall = time(0), s.up = now / 1000;
+    s.btx = bt_rate(c->byte_tx - bt.was.byte_tx, ms), s.brx = bt_rate(c->byte_rx - bt.was.byte_rx, ms);
+    wifi_rates(ms, &s.wtx, &s.wrx);
+    s.wq = slurp("/proc/net/l2cap", b, sizeof b) > 0 ? bt_l2cap_wmem(b) : -1;
+    s.ue_ok = uart_delta(s.ue);
+    bt_idle_line(line, sizeof line, &s);
+    heat_add(bt.log, line);
+    bt.was = *c, bt.at = now;
+}
+/* The classic links listed now (HCIGETCONNLIST, no radio traffic): a handle told of that is gone is
+ * noted (an idle link's end, which the stream's LINK down does not see) and forgotten; a new one
+ * makes the link pass due at once, so its ACLINFO comes as it connects. */
+static void links_list(void) {
+    unsigned req[1 + 4 * 4] = { 0 }; /* dev_id 0, room for four links */
+    char line[64], dev[18];
+    ((unsigned short *)req)[1] = BT_LINKS;
+    bt.nlinks = ioctl(bt.ctl, HCIGETCONNLIST, req)
+                    ? 0
+                    : bt_acl_links((const unsigned char *)req, BT_LINKS, bt.links, BT_LINKS);
+    for (int i = 0; i < bt.ntold;) {
+        int up = 0;
+        for (int j = 0; j < bt.nlinks && !up; ++j) up = bt.links[j].handle == bt.told[i].handle;
+        if (up) {
+            ++i;
+            continue;
+        }
+        bt_addr_text(bt.told[i].addr, dev);
+        snprintf(line, sizeof line, "ACL gone h=%d dev=%s", bt.told[i].handle, dev);
+        note(line);
+        bt.told[i] = bt.told[--bt.ntold];
+    }
+    for (int j = 0; j < bt.nlinks; ++j) {
+        int known = 0;
+        for (int i = 0; i < bt.ntold && !known; ++i) known = bt.told[i].handle == bt.links[j].handle;
+        if (!known) bt.link_due = 1;
+    }
+}
+/* Every BT_LINK_MS, each link's RSSI and AFH map (the stream's link from its own line, nothing sent
+ * for it), and the first time a handle is seen its role, supervision and flush timeouts and maximum
+ * transmit power: read-only commands, the answers waited for ANSWER_MS a link at most. */
+static void links_pass(unsigned now) {
+    static const int ops[6] = { BT_OP_RSSI, BT_OP_AFH, BT_OP_ROLE, BT_OP_LSTO, BT_OP_FLUSH, BT_OP_TPL };
+    char line[160];
+    unsigned char c[8];
+    if (!bt.nlinks || (!bt.link_due && now - bt.link_at < BT_LINK_MS)) return;
+    bt.link_at = now, bt.link_due = 0;
+    if (bt.raw < 0) raw_open();
+    for (int j = 0; j < bt.nlinks; ++j) {
+        struct bt_link k;
+        int h = bt.links[j].handle, told = 0, streamed = bt.det.on && h == bt.link.handle;
+        for (int i = 0; i < bt.ntold && !told; ++i) told = bt.told[i].handle == h;
+        bt_link_clear(&k, h);
+        int first = streamed ? 2 : 0, last = told ? 2 : 6;
+        if (bt.raw >= 0 && first < last) {
+            for (int i = first; i < last; ++i) write(bt.raw, c, (size_t)bt_cmd(c, ops[i], h));
+            events(ANSWER_MS, &k, last - first);
+        }
+        if (streamed) k.rssi = bt.link.rssi, k.afh = bt.link.afh;
+        bt_acl_line(line, sizeof line, time(0), &k, bt.links[j].addr, 0);
+        heat_add(bt.log, line);
+        if (told || bt.ntold >= BT_LINKS) continue;
+        bt_acl_line(line, sizeof line, time(0), &k, bt.links[j].addr, 1);
+        heat_add(bt.log, line);
+        bt.told[bt.ntold++] = bt.links[j];
+    }
+}
+/* wpa_supplicant's STATUS over its control socket (what wpa_cli asks: its own state, no driver call),
+ * from an autobound address so nothing is left in /tmp: the frequency in MHz, 0 when not joined or
+ * not answering; its wpa_state into state */
+static int wpa_status(char *state, int n) {
+    struct {
+        unsigned short family;
+        char path[108];
+    } to = { AF_UNIX, WPA_CTRL };
+    unsigned short me = AF_UNIX;
+    char b[1024];
+    int got = 0;
+    if (n > 0) state[0] = 0;
+    int s = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    if (s < 0) return 0;
+    if (!bind(s, (void *)&me, sizeof me) && !connect(s, (void *)&to, sizeof to) && send(s, "STATUS", 6, 0) == 6) {
+        struct pollfd p = { s, POLLIN, 0 };
+        int k = poll(&p, 1, WPA_MS) > 0 ? (int)read(s, b, sizeof b - 1) : 0;
+        if (k > 0) b[k] = 0, got = bt_wpa_freq(b, state, n);
+    }
+    close(s);
+    return got;
+}
+/* Every BT_COEX_MS while a link is up: the band and the coex lines that move (a driver-to-firmware
+ * query, so never more often) */
+static void coex_pass(unsigned now) {
+    static char b[8192], f[2048];
+    char state[24], line[256];
+    if (!bt.nlinks || (!bt.coex_due && now - bt.coex_at < BT_COEX_MS)) return;
+    bt.coex_at = now, bt.coex_due = 0;
+    bt.freq = wpa_status(state, sizeof state), bt.freq_at = now;
+    bt_wifi_line(line, sizeof line, time(0), bt.freq, state);
+    heat_add(bt.log, line);
+    if (slurp(BT_COEX_PROC, b, sizeof b) <= 0 || !bt_coex_filter(b, f, sizeof f)) return;
+    for (char *l = f; l && *l;) {
+        char *nl = strchr(l, '\n');
+        if (nl) *nl = 0;
+        snprintf(line, sizeof line, "COEX %s", l);
+        note(line);
+        l = nl ? nl + 1 : 0;
+    }
+}
+/* BT_PACE_FILE, through a temporary file renamed over it, so a reader never sees half of it */
+static void pace_write(int paced, int freq) {
+    char text[64];
+    int n = bt_pace_text(text, sizeof text, paced, freq);
+    int fd = open(PEQ_ROOT BT_PACE_FILE ".tmp", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd < 0) return;
+    int ok = write(fd, text, (size_t)n) == n;
+    close(fd);
+    if (ok && !rename(PEQ_ROOT BT_PACE_FILE ".tmp", PEQ_ROOT BT_PACE_FILE)) bt.paced = paced, bt.pace_said = 1;
+}
+/* While a stream runs, the band every BT_LINK_MS; paced while it is 2.4 GHz (bt_pace), noted at each
+ * change in both logs */
+static void pace_update(unsigned now) {
+    char state[24], line[64];
+    if (bt.det.on && now - bt.freq_at >= BT_LINK_MS) bt.freq = wpa_status(state, sizeof state), bt.freq_at = now;
+    int want = bt_pace(bt.det.on, bt.freq), was = bt.pace_said ? bt.paced : 0;
+    if (bt.pace_said && want == bt.paced) return;
+    pace_write(want, bt.freq);
+    if (!bt.pace_said || want == was) return; /* not written (tried again next tick), or nothing changed */
+    snprintf(line, sizeof line, want ? "PACE on freq=%d" : "PACE off freq=%d", bt.freq);
+    say('I', line);
+}
+/* Bluetooth gone (or the stack stopped): nothing is listed, nothing kept open */
+static void record_off(void) {
+    bt.nlinks = bt.ntold = bt.rec = 0;
     if (bt.raw >= 0) close(bt.raw), bt.raw = -1;
 }
 static void sample(unsigned now, const struct bt_counts *c) {
     struct bt_sample s;
-    unsigned ms = now - bt.at, tx, rx, t;
+    unsigned ms = now - bt.at, t;
     int ok, cores;
     char b[4096], line[288];
     s.wall = time(0), s.up = now / 1000;
     s.kbps = bt_rate(c->byte_tx - bt.was.byte_tx, ms) / 125; /* bytes to kbit */
+    s.brx = bt_rate(c->byte_rx - bt.was.byte_rx, ms) / 125;
     s.acl = bt_rate(c->acl_tx - bt.was.acl_tx, ms);
-    s.err = (int)(c->err_tx - bt.was.err_tx);
     s.wq = slurp("/proc/net/l2cap", b, sizeof b) > 0 ? bt_l2cap_wmem(b) : -1;
     link_read();
-    s.rssi = bt.link.rssi, s.lq = bt.link.lq, s.tpl = bt.link.tpl, s.afh = bt.link.afh;
-    s.wtx = s.wrx = -1;
-    if (wlan(&tx, &rx)) {
-        if (bt.wlan)
-            s.wtx = bt_rate(tx - bt.wtx, ms) / 1024, s.wrx = bt_rate(rx - bt.wrx, ms) / 1024;
-        bt.wtx = tx, bt.wrx = rx, bt.wlan = 1;
-    } else {
-        bt.wlan = 0;
-    }
+    s.rssi = bt.link.rssi, s.afh = bt.link.afh;
+    wifi_rates(ms, &s.wtx, &s.wrx);
+    s.ue_ok = uart_delta(s.ue);
     s.cpu = busy_since(&bt.cpu, &cores);
     t = ba_ticks(&ok);
     s.ba = ok ? bt_ticks_pct(t - bt.ba_ticks, ms) : -1;
@@ -618,7 +790,6 @@ static void sample(unsigned now, const struct bt_counts *c) {
     s.own = ok ? bt_ticks_pct(t - bt.own_ticks, ms) : -1;
     bt.own_ticks = t;
     s.h = bt.link.handle;
-    s.fcc = bt.link.fcc;
     s.done = s.fly = -1;
     if (bt.raw >= 0 && s.h >= 0) {
         s.done = bt_rate(bt.done - bt.done_was, ms);
@@ -631,7 +802,6 @@ static void sample(unsigned now, const struct bt_counts *c) {
         enc_find(now),
             got = 0; /* gone: a codec change, or not found yet; read from the next line */
     s.er = got && got == bt.enc_stat ? bt_rate(run - bt.enc_run, ms) : -1;
-    s.ew = got == 1 && bt.enc_stat == 1 ? bt_rate(wait - bt.enc_wait, ms) : -1;
     if (got) bt.enc_run = run, bt.enc_wait = wait, bt.enc_stat = got;
     unsigned char pb[3];
     int have = pool_read(pb);
@@ -654,20 +824,33 @@ static void tick(unsigned now) {
          * ends here, and the next controller's count is read afresh. Left on, no sample could run, so
          * bt_sleep would find the next one always due and loop without sleeping. */
         if (bt.det.on) bt.det.on = bt.det.have = 0, end();
+        record_off();
+        pace_update(now);
         return;
     }
-    int ev = bt_detect_step(&bt.det, now, c.byte_tx);
+    links_list();
+    int ev = bt_detect_step(&bt.det, now, c.byte_tx), was = bt.rec;
+    bt.rec = bt.det.on || bt.nlinks;
     if (ev == BT_EV_START) {
         begin(now, &c);
-        return;
-    }
-    if (ev == BT_EV_STOP) {
+    } else if (ev == BT_EV_STOP) {
         end();
-        return;
+        bt.was = c, bt.at = now; /* an idle link's seconds from here */
+    } else if (bt.det.on) {
+        sample(now, &c);
+        if (now - bt.pcms_at >= BT_PCMS_MS) pcms_start(now);
+    } else if (bt.rec && was) {
+        idle_sample(now, &c);
+    } else if (bt.rec) { /* a link came: its seconds counted from here */
+        int ue[5];
+        bt.was = c, bt.at = now;
+        uart_delta(ue);
+        bt.coex_due = 1;
     }
-    if (!bt.det.on) return;
-    sample(now, &c);
-    if (now - bt.pcms_at >= BT_PCMS_MS) pcms_start(now);
+    if (!bt.nlinks && !bt.det.on && bt.raw >= 0) close(bt.raw), bt.raw = -1;
+    links_pass(now);
+    coex_pass(now);
+    pace_update(now);
 }
 
 /* ---- a wedged controller (docs/internals.md#bluetooth-controller-watchdog) ----
@@ -906,6 +1089,7 @@ void bt_init(card_log *l, card_log *u) {
     bt.log = l, bt.ulog = u, bt.ctl = bt.raw = bt.mgmt = -1, bt.sink_h = bt.down_h = -1;
     dbus_init(&dbus);
     bt_edr_reset(&bt.edr);
+    pace_write(0, 0); /* a q2guard started again: whatever the last one left said, nothing streams yet */
 }
 int bt_streaming(void) { return bt.det.on; }
 int bt_flush_due(void) {
@@ -921,7 +1105,7 @@ void bt_sleep(unsigned ms) {
         unsigned now = now_ms();
         int left = (int)(end_at - now), step = left;
         if (left <= 0) return;
-        if (bt.det.on) { /* the next sample is due a second after the last */
+        if (bt.rec) { /* the next sample is due a second after the last */
             int due = (int)(bt.at + BT_TICK_MS - now);
             step = due <= 0 ? 0 : due < left ? due : left;
         }
@@ -940,6 +1124,6 @@ void bt_sleep(unsigned ms) {
         }
         if (guard_woke) return; /* a request to answer now (q2guard.c) */
         now = now_ms();
-        if (!bt.det.on || (int)(now - bt.at) >= BT_TICK_MS) tick(now);
+        if (!bt.rec || (int)(now - bt.at) >= BT_TICK_MS) tick(now);
     }
 }

@@ -1,6 +1,11 @@
 /* q2bt: the Bluetooth link monitor, a part of q2guard (docs/internals.md#bluetooth-link-monitor).
  * While an A2DP stream runs it writes one line a second to the card's q2-bt log: what the radio was
- * sent, what is waiting for it, what the controller says of the link, and what else was busy. Two
+ * sent, what is waiting for it, what the controller says of the link, and what else was busy. While
+ * any classic link is up, streaming or idle, it records it too (the recorder, docs/bluetooth.md's
+ * sampler): each link's RSSI and AFH map every 10 s and what the controller agreed for it once, the
+ * UART's error counts, byte counters and the A2DP socket's queue each second, and every minute the
+ * Wi-Fi band and the coex lines that move; and it writes the pacing state downloads obey while A2DP
+ * streams with Wi-Fi on 2.4 GHz (BT_PACE_FILE). Two
  * things it changes: the headset's link is allowed EDR packets (bt_edr_step), once a handle; and
  * under Auto, aptX HD or aptX is stepped down to SBC while the radio cannot keep up
  * (bt_step), and SBC's bitpool lowered (bt_sbc_step), both with Adapt to Signal on. The
@@ -25,6 +30,9 @@
 #define BT_FILES                                                                                   \
     4 /* q2-bt.0 to .3: after a move 3 MB, about 6 hours, and never past 4 MB and a flush */
 #define BT_UNSET (-1000) /* a signed reading not taken */
+#define BT_LINK_MS 10000 /* each classic link's RSSI and AFH map, streaming or idle */
+#define BT_COEX_MS 60000 /* the Wi-Fi band and the coex lines, while a link is up */
+#define BT_LINKS 4       /* links recorded at once: HCIGETCONNLIST is asked for four */
 
 /* ---- is a stream running ----
  * From the controller's byte counter (hci_dev_info's stat.byte_tx), read at each call. */
@@ -41,23 +49,31 @@ int bt_detect_step(struct bt_detect *d, unsigned now, unsigned byte_tx);
 struct bt_counts {
     unsigned acl_tx, byte_tx, err_tx; /* since the controller came up */
     int acl_mtu, acl_pkts;            /* the controller's ACL buffers: their size, how many */
+    unsigned byte_rx;                 /* bytes the controller handed the host */
 };
 void bt_devinfo(const unsigned char *di, struct bt_counts *c);
 /* hci_conn_list_req's answer (HCIGETCONNLIST): the first ACL link's handle, -1 none; its address
  * into bdaddr[6] (bdaddr_t order) unless bdaddr is 0 */
 int bt_acl_handle(const unsigned char *req, int max, unsigned char *bdaddr);
 
-/* ---- what the controller says of one link: five commands on a raw HCI socket ---- */
-#define BT_OP_FCC 0x1401  /* Read Failed Contact Counter */
-#define BT_OP_LQ 0x1403   /* Read Link Quality */
-#define BT_OP_RSSI 0x1405 /* Read RSSI */
-#define BT_OP_AFH 0x1406  /* Read AFH Channel Map */
-#define BT_OP_TPL 0x0c2d  /* Read Transmit Power Level (current) */
+/* ---- what the controller says of one link: read-only commands on a raw HCI socket ----
+ * RSSI and the AFH map each second while it streams and every BT_LINK_MS while idle; the other four
+ * once a link (its handle). Link Quality, the current transmit power and the Failed Contact Counter
+ * are not asked: in 16,390 lines (2026-11-21 to 25) they never moved (docs/bluetooth.md). */
+#define BT_OP_RSSI 0x1405  /* Read RSSI */
+#define BT_OP_AFH 0x1406   /* Read AFH Channel Map */
+#define BT_OP_ROLE 0x0809  /* Role Discovery */
+#define BT_OP_LSTO 0x0c36  /* Read Link Supervision Timeout */
+#define BT_OP_FLUSH 0x0c27 /* Read Automatic Flush Timeout */
+#define BT_OP_TPL 0x0c2d   /* Read Transmit Power Level, asked for the maximum */
 struct bt_link {
     int handle;
-    int rssi, lq, tpl, afh; /* dB, 0-255, dBm, channels in use of 79; BT_UNSET not answered */
-    int fcc;                /* the failed contact counter (flush timeouts in a row); BT_UNSET */
-    int answered;           /* how many of the five have */
+    int rssi, afh; /* dB, channels in use of 79; BT_UNSET not answered */
+    int role;      /* Role Discovery's: 0 the Q2 central, 1 peripheral; BT_UNSET */
+    int lsto;      /* supervision timeout, slots of 0.625 ms; BT_UNSET */
+    int flush;     /* automatic flush timeout, slots of 0.625 ms, 0 none; BT_UNSET */
+    int txmax;     /* the maximum transmit power, dBm; BT_UNSET */
+    int answered;  /* how many of the commands sent have */
 };
 int bt_cmd(unsigned char *out, int op, int handle); /* the command packet into out[8]; its length */
 /* listed (HCIGETCONNLIST's ACL handle, -1 none) taken as k's handle: 1 when it changed. A codec
@@ -65,7 +81,7 @@ int bt_cmd(unsigned char *out, int op, int handle); /* the command packet into o
  * line. */
 int bt_handle_follow(struct bt_link *k, int listed);
 void bt_link_clear(struct bt_link *k, int handle);
-/* An event read from the raw socket (its type byte first): 1 when it answered one of the five */
+/* An event read from the raw socket (its type byte first): 1 when it answered one of the six */
 int bt_event(struct bt_link *k, const unsigned char *p, int n);
 /* Number Of Completed Packets (event 0x13): the packets the controller says it delivered on handle
  */
@@ -226,36 +242,31 @@ int bt_pcms(const char *text, char *codec, int n, unsigned *hz, unsigned *delay)
 
 /* ---- the log line ---- */
 struct bt_sample {
-    long wall;              /* seconds since 1970 */
-    unsigned up;            /* seconds since boot */
-    int kbps;               /* kbit/s handed to the controller; -1 not read */
-    int acl;                /* ACL packets a second handed to it */
-    int wq;                 /* bytes waiting in the A2DP socket */
-    int rssi, lq, tpl, afh; /* struct bt_link's; BT_UNSET none */
-    int err;                /* transmit errors since the last line */
-    int wtx, wrx;           /* wlan0 kB/s each way; -1 down */
-    int cpu;                /* all cores' busy percent */
+    long wall;     /* seconds since 1970 */
+    unsigned up;   /* seconds since boot */
+    int kbps, brx; /* kbit/s handed to the controller, and handed back by it; -1 not read */
+    int acl;       /* ACL packets a second handed to it */
+    int wq;        /* bytes waiting in the A2DP socket */
+    int rssi, afh; /* struct bt_link's; BT_UNSET none */
+    int wtx, wrx;  /* wlan0 kB/s each way; -1 down */
+    int cpu;       /* all cores' busy percent */
     /* bluealsa's and q2guard's own CPU in tenths of a percent of one core (90 is 9.0%); -1 not read
      */
     int ba, own;
-    int h;      /* the ACL handle asked about; -1 none */
-    int er, ew; /* bluealsa's encoder thread, per second: ms on a CPU, ms waiting for one; -1 not
-                   read */
-    int fcc;    /* struct bt_link's; BT_UNSET none */
-    int done;   /* packets a second the controller delivered (Number Of Completed Packets); -1 */
-    int fly;    /* packets in the controller now (bt_fly_step); -1 */
+    int h;    /* the ACL handle asked about; -1 none */
+    int er;   /* bluealsa's encoder thread, ms a second on a CPU; -1 not read */
+    int done; /* packets a second the controller delivered (Number Of Completed Packets); -1 */
+    int fly;  /* packets in the controller now (bt_fly_step); -1 */
     int bp; /* SBC's bitpool on the last frame (BT_SBC_POOL's third byte); -1 not SBC or not read */
     /* the player's side, for the encoder fed short with the radio idle: the player's (hciplayer)
-     * CPU in tenths of a percent of one core; its kB/s read (rchar: files, cached or not, and its
-     * sockets), read from storage (read_bytes) and written (wchar: mostly the PCM to bluealsa);
-     * the microSD's busy ms in the second (io_ticks); 1 while it waits for a song still arriving
-     * (grow.c's wait file), 0 not; -1 each not read */
-    int pl, pr, pd, pw, dk, gw;
+     * CPU in tenths of a percent of one core; the microSD's busy ms in the second (io_ticks); 1
+     * while it waits for a song still arriving (grow.c's wait file), 0 not; -1 each not read */
+    int pl, dk, gw;
+    /* the H5 UART's framing, parity, break and the two overrun counts since the last line, when
+     * ue_ok (bt_uart_counts' fe, pe, brk, oe, bo) */
+    int ue[5], ue_ok;
 };
 int bt_line(char *out, int size, const struct bt_sample *s);
-/* /proc/PID/io's rchar, wchar and read_bytes (each modulo 2^32); 0 without all three (no task
- * I/O accounting) */
-int bt_proc_io(const char *text, unsigned *rchar, unsigned *wchar, unsigned *read_bytes);
 /* /proc/diskstats' io_ticks (ms the device was busy, modulo 2^32) for the device named dev; 0 none */
 int bt_disk_busy(const char *text, const char *dev, unsigned *ms);
 /* 1 when a path the player holds open is a song: a file on the card, not under .q2muse (logs) */
@@ -264,6 +275,48 @@ int bt_song_path(const char *path);
 int bt_rate(unsigned n, unsigned ms);
 /* clock ticks (100 a second) over ms as tenths of a percent of one core */
 int bt_ticks_pct(unsigned ticks, unsigned ms);
+
+/* ---- the recorder: every classic link, streaming or idle (docs/bluetooth.md's sampler) ---- */
+struct bt_acl {
+    int handle;
+    unsigned char addr[6]; /* bdaddr_t: the last byte first */
+};
+/* HCIGETCONNLIST's answer: its classic ACL links (not SCO, not LE) into out, n at most; how many */
+int bt_acl_links(const unsigned char *req, int max, struct bt_acl *out, int n);
+/* "TIME ACL h= dev= rssi= afh=\n" (info 0), or once a link "TIME ACLINFO h= dev= role=central|
+ * peripheral lsto=MSms flush=MSms|none txmax=DBM\n" (info 1); "-" for an answer not had */
+int bt_acl_line(char *out, int size, long wall, const struct bt_link *k, const unsigned char *addr, int info);
+/* An idle link's second, no radio traffic: bytes a second to and from the controller, Wi-Fi's kB/s,
+ * the A2DP socket's queue, the UART's error counts since the last (as bt_sample's ue) */
+struct bt_idle {
+    long wall;
+    unsigned up;
+    int btx, brx, wtx, wrx, wq; /* -1 not read */
+    int ue[5], ue_ok;
+};
+/* "TIME IDLE up= btx= brx= wtx= wrx= wq= ue=fe/pe/brk/oe/bo\n" */
+int bt_idle_line(char *out, int size, const struct bt_idle *s);
+/* Realtek's coex dump (BT_COEX_PROC): the sixteen lines that move (the study's filter: Wi-Fi channel,
+ * band and traffic, power state, throughput, BT status, profiles, role, the BT side's AFH map, TDMA,
+ * coex mode, null frames, TDMA toggles, BT slots, the PTA counts, path owner), each with its runs of
+ * spaces made one and its leading ones gone, joined by newlines into out; how many */
+#define BT_COEX_PROC "/proc/net/rtl8733bs/wlan0/btcoex"
+int bt_coex_filter(const char *text, char *out, int size);
+/* wpa_supplicant's STATUS answer: freq= in MHz (0 none: not joined), wpa_state= into state */
+int bt_wpa_freq(const char *status, char *state, int n);
+/* "TIME WIFI freq= band=2.4|5|6 ch= state=\n", "-" for a freq of 0 */
+int bt_wifi_line(char *out, int size, long wall, int freq, const char *state);
+
+/* ---- pacing (docs/internals.md#bluetooth-coexistence-pacing) ----
+ * While A2DP streams and Wi-Fi is joined on 2.4 GHz, the Q2's own downloads take airtime the headset's
+ * link needs (the stall cluster of 2026-11-24: Wi-Fi receiving 1.5 to 2 MB/s). q2guard writes
+ * BT_PACE_FILE, "paced=1 rate=BYTES freq=MHZ", at each change and at its start; the firmware's
+ * downloads (netupdate.c) and the card apps that read it hold their background transfers to rate
+ * bytes a second while paced=1. */
+#define BT_PACE_FILE "/tmp/q2-bt-coex"
+#define BT_PACE_RATE 204800 /* 200 KB/s: about a tenth of what the stall cluster received */
+int bt_pace(int streaming, int freq);                             /* 1 to pace */
+int bt_pace_text(char *out, int size, int paced, int freq); /* the file's line; its length */
 
 /* ---- a wedged controller (docs/internals.md#bluetooth-controller-watchdog) ----
  * Realtek's H5 UART driver logs each bad packet and carries on, and the kernel logs an HCI command

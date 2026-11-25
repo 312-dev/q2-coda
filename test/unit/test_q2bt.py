@@ -1,5 +1,5 @@
 """q2bt's core (patch/q2bt_core.c, docs/internals.md#bluetooth-link-monitor): when a stream counts as running, the
-kernel's hci_dev_info and connection list as laid out, the four HCI commands and their answers, the A2DP socket's
+kernel's hci_dev_info and connection list as laid out, the HCI reads and their answers, the A2DP socket's
 queue from /proc/net/l2cap, the codec from bluealsa's GetPCMs, the log line and its rotation, the EDR
 packet-type command to the A2DP sink's link, the step-down from aptX HD or aptX to SBC (bt_step, the config it obeys,
 the PCM path SelectCodec goes to, and the commute replayed through it) and SBC's bitpool. Built for this machine
@@ -57,7 +57,6 @@ def L(tmp_path_factory):
     lib.bt_sbc_next.argtypes = [C.c_int, C.c_int, C.c_int]
     lib.bt_sbc_allowed.argtypes = [C.c_char_p]
     lib.flush_every.argtypes = [C.c_int, C.c_int]
-    lib.bt_proc_io.argtypes = [C.c_char_p, C.POINTER(C.c_uint), C.POINTER(C.c_uint), C.POINTER(C.c_uint)]
     lib.bt_disk_busy.argtypes = [C.c_char_p, C.c_char_p, C.POINTER(C.c_uint)]
     lib.bt_song_path.argtypes = [C.c_char_p]
     return lib
@@ -68,7 +67,7 @@ class Detect(C.Structure):
 
 
 class Link(C.Structure):
-    _fields_ = [(n, C.c_int) for n in ('handle', 'rssi', 'lq', 'tpl', 'afh', 'fcc', 'answered')]
+    _fields_ = [(n, C.c_int) for n in ('handle', 'rssi', 'afh', 'role', 'lsto', 'flush', 'txmax', 'answered')]
 
 
 class Fly(C.Structure):
@@ -77,13 +76,13 @@ class Fly(C.Structure):
 
 class Counts(C.Structure):
     _fields_ = [('acl_tx', C.c_uint), ('byte_tx', C.c_uint), ('err_tx', C.c_uint), ('acl_mtu', C.c_int),
-                ('acl_pkts', C.c_int)]
+                ('acl_pkts', C.c_int), ('byte_rx', C.c_uint)]
 
 
 class Sample(C.Structure):
     _fields_ = [('wall', C.c_long), ('up', C.c_uint)] + [(n, C.c_int) for n in (
-        'kbps', 'acl', 'wq', 'rssi', 'lq', 'tpl', 'afh', 'err', 'wtx', 'wrx', 'cpu', 'ba', 'own', 'h', 'er', 'ew',
-        'fcc', 'done', 'fly', 'bp', 'pl', 'pr', 'pd', 'pw', 'dk', 'gw')]
+        'kbps', 'brx', 'acl', 'wq', 'rssi', 'afh', 'wtx', 'wrx', 'cpu', 'ba', 'own', 'h', 'er', 'done', 'fly', 'bp',
+        'pl', 'dk', 'gw')] + [('ue', C.c_int * 5), ('ue_ok', C.c_int)]
 
 
 # ---- is a stream running ----
@@ -146,7 +145,7 @@ def test_hci_dev_info_is_read_where_the_kernel_puts_it(L):
     di.stat.err_tx, di.stat.acl_tx, di.stat.byte_tx, di.stat.byte_rx = 3, 70000, 123456789, 999
     c = Counts()
     L.bt_devinfo(bytes(di), C.byref(c))
-    assert (c.acl_mtu, c.acl_pkts, c.err_tx, c.acl_tx, c.byte_tx) == (1021, 8, 3, 70000, 123456789)
+    assert (c.acl_mtu, c.acl_pkts, c.err_tx, c.acl_tx, c.byte_tx, c.byte_rx) == (1021, 8, 3, 70000, 123456789, 999)
 
 
 class ConnInfo(C.Structure):
@@ -167,7 +166,7 @@ def test_the_first_acl_link_s_handle(L):
     assert L.bt_acl_handle(bytes((C.c_uint16 * 2)(0, 0)), 4, None) == -1
 
 
-# ---- the four commands ----
+# ---- the HCI reads ----
 
 def cmd(L, op, handle):
     out = C.create_string_buffer(8)
@@ -176,11 +175,15 @@ def cmd(L, op, handle):
 
 
 def test_the_commands_are_the_spec_s_bytes(L):
-    assert cmd(L, 0x1405, 0x000c) == bytes([1, 0x05, 0x14, 2, 0x0c, 0])        # Read RSSI
-    assert cmd(L, 0x1403, 0x0e0c) == bytes([1, 0x03, 0x14, 2, 0x0c, 0x0e])     # Read Link Quality, 12 bits
-    assert cmd(L, 0x0c2d, 0x000c) == bytes([1, 0x2d, 0x0c, 3, 0x0c, 0, 0])     # Read Transmit Power Level, current
+    """The two the link is read with each second while it streams and every 10 s while idle, and the four read once
+    a link (docs/bluetooth.md's HCI reads, hcitool's bytes). Link Quality, the current transmit power and the Failed
+    Contact Counter are no longer asked: in 16,390 lines they never moved (lq 0, tpl 4, fcc 0)."""
+    assert cmd(L, 0x1405, 0x0e0c) == bytes([1, 0x05, 0x14, 2, 0x0c, 0x0e])     # Read RSSI, the handle's 12 bits
     assert cmd(L, 0x1406, 0x000c) == bytes([1, 0x06, 0x14, 2, 0x0c, 0])        # Read AFH Channel Map
-    assert cmd(L, 0x1401, 0x000c) == bytes([1, 0x01, 0x14, 2, 0x0c, 0])        # Read Failed Contact Counter
+    assert cmd(L, 0x0809, 0x000c) == bytes([1, 0x09, 0x08, 2, 0x0c, 0])        # Role Discovery
+    assert cmd(L, 0x0c36, 0x000c) == bytes([1, 0x36, 0x0c, 2, 0x0c, 0])        # Read Link Supervision Timeout
+    assert cmd(L, 0x0c27, 0x000c) == bytes([1, 0x27, 0x0c, 2, 0x0c, 0])        # Read Automatic Flush Timeout
+    assert cmd(L, 0x0c2d, 0x000c) == bytes([1, 0x2d, 0x0c, 3, 0x0c, 0, 1])     # Read Transmit Power Level, maximum
 
 
 def complete(op, params):
@@ -192,11 +195,13 @@ def test_the_answers_fill_the_link(L):
     k = Link()
     L.bt_link_clear(C.byref(k), 0x0c)
     afh = [0xff] * 5 + [0] * 4 + [0x80]  # channels 0-39 in use; bit 79 is not a channel
-    for ev in (complete(0x1405, [0, 0x0c, 0, 0xf4]), complete(0x1403, [0, 0x0c, 0, 0xff]),
-               complete(0x0c2d, [0, 0x0c, 0, 4]), complete(0x1406, [0, 0x0c, 0, 1] + afh),
-               complete(0x1401, [0, 0x0c, 0, 0x2c, 0x01])):
+    for ev in (complete(0x1405, [0, 0x0c, 0, 0xf4]), complete(0x1406, [0, 0x0c, 0, 1] + afh),
+               complete(0x0809, [0, 0x0c, 0, 0]), complete(0x0c36, [0, 0x0c, 0, 0, 0x7d]),
+               complete(0x0c27, [0, 0x0c, 0, 0, 0]), complete(0x0c2d, [0, 0x0c, 0, 4])):
         assert L.bt_event(C.byref(k), ev, len(ev)) == 1
-    assert (k.rssi, k.lq, k.tpl, k.afh, k.fcc, k.answered) == (-12, 255, 4, 40, 300, 5)
+    assert (k.rssi, k.afh, k.role, k.lsto, k.flush, k.txmax, k.answered) == (-12, 40, 0, 32000, 0, 4, 6)
+    for old in (complete(0x1403, [0, 0x0c, 0, 0xff]), complete(0x1401, [0, 0x0c, 0, 0x2c, 0x01])):
+        assert L.bt_event(C.byref(k), old, len(old)) == 0  # Link Quality and the counter: not asked, not taken
 
 
 def test_other_events_handles_and_refusals(L):
@@ -292,9 +297,12 @@ def test_no_a2dp_pcm_or_no_codec_is_none(L):
 # ---- the line ----
 
 def line(L, **f):
+    ue = f.pop('ue', None)
     s = Sample(wall=1795464061, up=4242, **{k: f.get(k, -1) for k in (
-        'kbps', 'acl', 'wq', 'err', 'wtx', 'wrx', 'cpu', 'ba', 'own', 'h', 'er', 'ew')},
-        **{k: f.get(k, UNSET) for k in ('rssi', 'lq', 'tpl', 'afh', 'fcc')}, **{k: f.get(k, -1) for k in ('done', 'fly', 'bp', 'pl', 'pr', 'pd', 'pw', 'dk', 'gw')})
+        'kbps', 'brx', 'acl', 'wq', 'wtx', 'wrx', 'cpu', 'ba', 'own', 'h', 'er')},
+        **{k: f.get(k, UNSET) for k in ('rssi', 'afh')}, **{k: f.get(k, -1) for k in ('done', 'fly', 'bp', 'pl', 'dk', 'gw')})
+    if ue is not None:
+        s.ue[:], s.ue_ok = ue, 1
     out = C.create_string_buffer(256)
     n = L.bt_line(out, 256, C.byref(s))
     assert n == len(out.value)
@@ -302,17 +310,21 @@ def line(L, **f):
 
 
 def test_a_line_has_every_field(L):
-    text = line(L, kbps=612, acl=95, wq=2730, rssi=-12, lq=255, tpl=4, afh=40, err=0, wtx=3, wrx=120, cpu=23,
-                ba=81, own=4, h=2, er=88, ew=3, fcc=0, done=96, fly=5, bp=29, pl=25, pr=176, pd=0, pw=172, dk=12, gw=0)
-    assert text == ('2026-11-23T20:01:01Z up=4242 kbps=612 acl=95 wq=2730 rssi=-12 lq=255 tpl=4 afh=40 err=0 wtx=3 '
-                    'wrx=120 cpu=23 ba=8.1 own=0.4 h=2 er=88 ew=3 fcc=0 done=96 fly=5 bp=29 pl=2.5 pr=176 pd=0 pw=172 '
-                    'dk=12 gw=0\n')
-    assert len(text) < 210  # about 5 minutes in the 64 KB ring
+    """lq, tpl, err, fcc, ew, pr, pd and pw are gone: in 16,390 lines (2026-11-21 to 25) the first four never moved
+    and the rest were never readable on the Q2's kernel (docs/bluetooth.md). brx and the UART's error counts came."""
+    text = line(L, kbps=612, brx=3, acl=95, wq=2730, rssi=-12, afh=40, wtx=3, wrx=120, cpu=23, ba=81, own=4, h=2,
+                er=88, done=96, fly=5, bp=29, pl=25, dk=12, gw=0, ue=[0, 1, 0, 0, 0])
+    assert text == ('2026-11-23T20:01:01Z up=4242 kbps=612 brx=3 acl=95 wq=2730 rssi=-12 afh=40 wtx=3 wrx=120 cpu=23 '
+                    'ba=8.1 own=0.4 h=2 er=88 done=96 fly=5 bp=29 pl=2.5 dk=12 gw=0 ue=0/1/0/0/0\n')
+    for gone in ('lq', 'tpl', 'err', 'fcc', 'ew', 'pr', 'pd', 'pw'):
+        assert f' {gone}=' not in text
+    assert len(text) < 180  # about 6 minutes in the 64 KB ring
+    assert line(L, ue=[0, 0, 0, 0, 0]).endswith(' ue=0\n')  # none moved: the usual second, kept short
 
 
 def test_a_field_not_read_is_a_dash(L):
-    assert line(L) == ('2026-11-23T20:01:01Z up=4242 kbps=- acl=- wq=- rssi=- lq=- tpl=- afh=- err=- wtx=- wrx=- '
-                       'cpu=- ba=- own=- h=- er=- ew=- fcc=- done=- fly=- bp=- pl=- pr=- pd=- pw=- dk=- gw=-\n')
+    assert line(L) == ('2026-11-23T20:01:01Z up=4242 kbps=- brx=- acl=- wq=- rssi=- afh=- wtx=- wrx=- cpu=- ba=- '
+                       'own=- h=- er=- done=- fly=- bp=- pl=- dk=- gw=- ue=-\n')
 
 
 def test_rates_and_shares(L):
@@ -1019,19 +1031,7 @@ def test_only_the_followed_links_end_is_noted(L):
     assert down_event(L, ptype_changed(0, 5, 0x0018), 5)[0] == 0
 
 
-# ---- the player's side (docs/internals.md#bluetooth-link-monitor: pl, pr, pd, pw, dk, gw and PLAY) ----
-
-PROC_IO = (b'rchar: 4183209731\nwchar: 912345678\nsyscr: 81234\nsyscw: 70123\nread_bytes: 1052672\n'
-           b'write_bytes: 0\ncancelled_write_bytes: 0\n')
-
-
-def test_the_player_s_io_counters(L):
-    r, w, d = C.c_uint(), C.c_uint(), C.c_uint()
-    assert L.bt_proc_io(PROC_IO, C.byref(r), C.byref(w), C.byref(d)) == 1
-    assert (r.value, w.value, d.value) == (4183209731, 912345678, 1052672)
-    assert L.bt_proc_io(b'rchar: 5\n', C.byref(r), C.byref(w), C.byref(d)) == 0  # no task I/O accounting
-    assert L.bt_proc_io(b'', C.byref(r), C.byref(w), C.byref(d)) == 0
-
+# ---- the player's side (docs/internals.md#bluetooth-link-monitor: pl, dk, gw and PLAY) ----
 
 DISKSTATS = (b' 179       0 mmcblk0 6213 1901 559914 8730 3411 2601 92200 30210 0 9440 38940 0 0 0 0\n'
              b' 179       1 mmcblk0p1 812 0 6496 960 0 0 0 0 0 980 960 0 0 0 0\n'

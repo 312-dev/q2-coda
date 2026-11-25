@@ -39,7 +39,7 @@ int bt_detect_step(struct bt_detect *d, unsigned now, unsigned byte_tx) {
 /* ---- hci_dev_info and hci_conn_info ----
  * include/net/bluetooth/hci_sock.h: dev_id, name[8], bdaddr[6], flags, type, features[8], pkt_type,
  * link_policy, link_mode, acl_mtu (44), acl_pkts (46), sco_mtu, sco_pkts, then hci_dev_stats (52):
- * err_rx, err_tx (56), cmd_tx, evt_rx, acl_tx (68), acl_rx, sco_tx, sco_rx, byte_rx, byte_tx (88).
+ * err_rx, err_tx (56), cmd_tx, evt_rx, acl_tx (68), acl_rx, sco_tx, sco_rx, byte_rx (84), byte_tx (88).
  */
 static unsigned u32_at(const unsigned char *p) {
     unsigned v;
@@ -54,6 +54,7 @@ static int u16_at(const unsigned char *p) {
 void bt_devinfo(const unsigned char *di, struct bt_counts *c) {
     c->acl_mtu = u16_at(di + 44), c->acl_pkts = u16_at(di + 46);
     c->err_tx = u32_at(di + 56), c->acl_tx = u32_at(di + 68), c->byte_tx = u32_at(di + 88);
+    c->byte_rx = u32_at(di + 84);
 }
 /* hci_conn_list_req: dev_id, conn_num, then conn_num hci_conn_info of 16 bytes: handle, bdaddr[6],
  * type (8; ACL_LINK is 1), out, state, link_mode. */
@@ -68,13 +69,13 @@ int bt_acl_handle(const unsigned char *req, int max, unsigned char *bdaddr) {
     return -1;
 }
 
-/* ---- the five commands ---- */
+/* ---- the commands ---- */
 int bt_cmd(unsigned char *out, int op, int handle) {
     int plen = op == BT_OP_TPL ? 3 : 2;
     out[0] = 1; /* HCI_COMMAND_PKT */
     out[1] = (unsigned char)op, out[2] = (unsigned char)(op >> 8), out[3] = (unsigned char)plen;
     out[4] = (unsigned char)handle, out[5] = (unsigned char)(handle >> 8 & 0x0f);
-    out[6] = 0; /* Read Transmit Power Level's type: the current level */
+    out[6] = 1; /* Read Transmit Power Level's type: the maximum */
     return 4 + plen;
 }
 int bt_handle_follow(struct bt_link *k, int listed) {
@@ -84,15 +85,17 @@ int bt_handle_follow(struct bt_link *k, int listed) {
 }
 void bt_link_clear(struct bt_link *k, int handle) {
     k->handle = handle, k->answered = 0;
-    k->rssi = k->lq = k->tpl = k->afh = k->fcc = BT_UNSET;
+    k->rssi = k->afh = k->role = k->lsto = k->flush = k->txmax = BT_UNSET;
 }
-/* Command Complete (0x0e): ncmd, the opcode, then each of the five's return parameters: status, the
- * handle, its value (AFH: its mode, then the 10-byte map, channels 0-78; the counter: 16 bits). A
- * refusal (status not 0) is answered, its value left unset. */
+/* Command Complete (0x0e): ncmd, the opcode, then each command's return parameters: status, the
+ * handle, its value (AFH: its mode, then the 10-byte map, channels 0-78; the two timeouts: 16 bits;
+ * RSSI and the power: signed; the role: a byte). A refusal (status not 0) is answered, its value
+ * left unset. */
 int bt_event(struct bt_link *k, const unsigned char *p, int n) {
     if (n < 9 || p[0] != 4 || p[1] != 0x0e || n < 3 + p[2]) return 0;
     int op = p[4] | p[5] << 8, status = p[6], handle = (p[7] | p[8] << 8) & 0x0fff;
-    if (op != BT_OP_RSSI && op != BT_OP_LQ && op != BT_OP_TPL && op != BT_OP_AFH && op != BT_OP_FCC)
+    if (op != BT_OP_RSSI && op != BT_OP_AFH && op != BT_OP_ROLE && op != BT_OP_LSTO && op != BT_OP_FLUSH &&
+        op != BT_OP_TPL)
         return 0;
     if (handle != k->handle) return 0;
     ++k->answered;
@@ -104,18 +107,17 @@ int bt_event(struct bt_link *k, const unsigned char *p, int n) {
         k->afh = used;
         return 1;
     }
-    if (op == BT_OP_FCC) {
-        if (n >= 11) k->fcc = p[9] | p[10] << 8;
+    if (op == BT_OP_LSTO || op == BT_OP_FLUSH) {
+        if (n >= 11) *(op == BT_OP_LSTO ? &k->lsto : &k->flush) = p[9] | p[10] << 8;
         return 1;
     }
     if (n < 10) return 1;
-    int v = op == BT_OP_LQ ? p[9] : (signed char)p[9];
     if (op == BT_OP_RSSI)
-        k->rssi = v;
-    else if (op == BT_OP_LQ)
-        k->lq = v;
+        k->rssi = (signed char)p[9];
+    else if (op == BT_OP_TPL)
+        k->txmax = (signed char)p[9];
     else
-        k->tpl = v;
+        k->role = p[9];
     return 1;
 }
 
@@ -505,20 +507,27 @@ static int put_tenths(char *b, int at, int size, const char *key, int v) { /* 90
                   : snprintf(b + at, (size_t)(size - at), " %s=%d.%d", key, v / 10, v % 10);
     return n < 0 ? at : at + n;
 }
-/* "TIME up=S kbps= acl= wq= rssi= lq= tpl= afh= err= wtx= wrx= cpu= ba= own= h= er= ew= fcc= done=
- * fly= bp= pl= pr= pd= pw= dk= gw=\n", "-" for not read, ba, own and pl as percent of one core (9.0).
- * The fields after own come last, so a reader that knows only those before them reads a line too. */
+/* " ue=fe/pe/brk/oe/bo", or " ue=0" when none moved (most seconds: the line stays short) */
+static int put_ue(char *b, int at, int size, const int *ue, int ok) {
+    if (at >= size) return at;
+    int none = ok && !(ue[0] | ue[1] | ue[2] | ue[3] | ue[4]);
+    int n = none ? snprintf(b + at, (size_t)(size - at), " ue=0")
+            : ok ? snprintf(b + at, (size_t)(size - at), " ue=%d/%d/%d/%d/%d", ue[0], ue[1], ue[2], ue[3], ue[4])
+               : snprintf(b + at, (size_t)(size - at), " ue=-");
+    return n < 0 ? at : at + n;
+}
+/* "TIME up=S kbps= brx= acl= wq= rssi= afh= wtx= wrx= cpu= ba= own= h= er= done= fly= bp= pl= dk= gw=
+ * ue=\n", "-" for not read, ba, own and pl as percent of one core (9.0). The fields after own come
+ * last, so a reader that knows only those before them reads a line too. */
 int bt_line(char *out, int size, const struct bt_sample *s) {
     char b[260];
     int at = snprintf(b, sizeof b, "up=%u", s->up);
     at = put(b, at, sizeof b, "kbps", s->kbps, -1);
+    at = put(b, at, sizeof b, "brx", s->brx, -1);
     at = put(b, at, sizeof b, "acl", s->acl, -1);
     at = put(b, at, sizeof b, "wq", s->wq, -1);
     at = put(b, at, sizeof b, "rssi", s->rssi, BT_UNSET);
-    at = put(b, at, sizeof b, "lq", s->lq, BT_UNSET);
-    at = put(b, at, sizeof b, "tpl", s->tpl, BT_UNSET);
     at = put(b, at, sizeof b, "afh", s->afh, BT_UNSET);
-    at = put(b, at, sizeof b, "err", s->err, -1);
     at = put(b, at, sizeof b, "wtx", s->wtx, -1);
     at = put(b, at, sizeof b, "wrx", s->wrx, -1);
     at = put(b, at, sizeof b, "cpu", s->cpu, -1);
@@ -526,27 +535,126 @@ int bt_line(char *out, int size, const struct bt_sample *s) {
     at = put_tenths(b, at, sizeof b, "own", s->own);
     at = put(b, at, sizeof b, "h", s->h, -1);
     at = put(b, at, sizeof b, "er", s->er, -1);
-    at = put(b, at, sizeof b, "ew", s->ew, -1);
-    at = put(b, at, sizeof b, "fcc", s->fcc, BT_UNSET);
     at = put(b, at, sizeof b, "done", s->done, -1);
     at = put(b, at, sizeof b, "fly", s->fly, -1);
     at = put(b, at, sizeof b, "bp", s->bp, -1);
     at = put_tenths(b, at, sizeof b, "pl", s->pl);
-    at = put(b, at, sizeof b, "pr", s->pr, -1);
-    at = put(b, at, sizeof b, "pd", s->pd, -1);
-    at = put(b, at, sizeof b, "pw", s->pw, -1);
     at = put(b, at, sizeof b, "dk", s->dk, -1);
-    put(b, at, sizeof b, "gw", s->gw, -1);
+    at = put(b, at, sizeof b, "gw", s->gw, -1);
+    put_ue(b, at, sizeof b, s->ue, s->ue_ok);
     return heat_note(out, size, s->wall, b);
 }
 
-/* ---- the player's side ---- */
-static const char *after_key(const char *text, const char *key) { /* the value after "key" at a line's start */
-    size_t n = strlen(key);
-    for (const char *p = text; p && *p; p = strchr(p, '\n'), p = p ? p + 1 : 0)
-        if (!strncmp(p, key, n)) return p + n;
-    return 0;
+/* ---- the recorder (docs/bluetooth.md's sampler) ---- */
+int bt_acl_links(const unsigned char *req, int max, struct bt_acl *out, int n) {
+    int got = 0, listed = u16_at(req + 2);
+    for (int i = 0; i < listed && i < max && got < n; ++i) {
+        const unsigned char *c = req + 4 + 16 * i;
+        if (c[8] != 1) continue; /* ACL_LINK; SCO is 0, LE 0x80 */
+        out[got].handle = u16_at(c) & 0x0fff;
+        memcpy(out[got].addr, c + 2, 6);
+        ++got;
+    }
+    return got;
 }
+static int put_ms(char *b, int at, int size, const char *key, int slots, const char *zero) {
+    if (at >= size) return at;
+    int n = slots == BT_UNSET ? snprintf(b + at, (size_t)(size - at), " %s=-", key)
+            : !slots && zero  ? snprintf(b + at, (size_t)(size - at), " %s=%s", key, zero)
+                              : snprintf(b + at, (size_t)(size - at), " %s=%dms", key, slots * 5 / 8);
+    return n < 0 ? at : at + n;
+}
+int bt_acl_line(char *out, int size, long wall, const struct bt_link *k, const unsigned char *addr, int info) {
+    char b[160], dev[18];
+    bt_addr_text(addr, dev);
+    int at = snprintf(b, sizeof b, "%s h=%d dev=%s", info ? "ACLINFO" : "ACL", k->handle, dev);
+    if (!info) {
+        at = put(b, at, sizeof b, "rssi", k->rssi, BT_UNSET);
+        put(b, at, sizeof b, "afh", k->afh, BT_UNSET);
+        return heat_note(out, size, wall, b);
+    }
+    if (at < (int)sizeof b) {
+        int n = snprintf(b + at, sizeof b - (size_t)at, " role=%s",
+                         k->role == 0 ? "central" : k->role == 1 ? "peripheral" : "-");
+        at = n < 0 ? at : at + n;
+    }
+    at = put_ms(b, at, sizeof b, "lsto", k->lsto, 0);
+    at = put_ms(b, at, sizeof b, "flush", k->flush, "none");
+    put(b, at, sizeof b, "txmax", k->txmax, BT_UNSET);
+    return heat_note(out, size, wall, b);
+}
+int bt_idle_line(char *out, int size, const struct bt_idle *s) {
+    char b[160];
+    int at = snprintf(b, sizeof b, "IDLE up=%u", s->up);
+    at = put(b, at, sizeof b, "btx", s->btx, -1);
+    at = put(b, at, sizeof b, "brx", s->brx, -1);
+    at = put(b, at, sizeof b, "wtx", s->wtx, -1);
+    at = put(b, at, sizeof b, "wrx", s->wrx, -1);
+    at = put(b, at, sizeof b, "wq", s->wq, -1);
+    put_ue(b, at, sizeof b, s->ue, s->ue_ok);
+    return heat_note(out, size, s->wall, b);
+}
+/* The labels as rtl8733bs.ko prints them, matched at a line's start once its spaces are passed. TDMA
+ * is the one whose label is a word of its own ("TDMA_Now" and the toggles' are other lines). */
+static const char *const coex_keys[] = { "RSSI/ STA_Chnl", "Band/ BW/ Traffic", "Power Status",  "Rx_Tp/ Tx_Tp",
+                                         "BT status/ rssi", "Profiles",          "Role/RoleSwCnt", "AFH MAP",
+                                         "TDMA ",           "Coex_Mode",         "Null All",       "Cnt TDMA_Togg",
+                                         "BT slot avg",     "0x770",             "0x774",          "Path Owner" };
+int bt_coex_filter(const char *text, char *out, int size) {
+    int at = 0, got = 0;
+    if (size > 0) out[0] = 0;
+    for (const char *l = text; l && *l; l = strchr(l, '\n'), l = l ? l + 1 : 0) {
+        while (*l == ' ' || *l == '\t') ++l;
+        int k = 0, nk = (int)(sizeof coex_keys / sizeof *coex_keys);
+        while (k < nk && strncmp(l, coex_keys[k], strlen(coex_keys[k]))) ++k;
+        if (k == nk) continue;
+        if (got && at < size - 1) out[at++] = '\n';
+        for (const char *c = l; *c && *c != '\n' && *c != '\r' && at < size - 1; ++c)
+            if (!(*c == ' ' || *c == '\t') || (c[1] != ' ' && c[1] != '\t' && c[1] != '\n' && c[1])) /* runs of spaces as one */
+                out[at++] = *c == '\t' ? ' ' : *c;
+        out[at] = 0;
+        ++got;
+    }
+    return got;
+}
+int bt_wpa_freq(const char *status, char *state, int n) {
+    int freq = 0;
+    if (n > 0) state[0] = 0;
+    for (const char *l = status; l && *l; l = strchr(l, '\n'), l = l ? l + 1 : 0) {
+        if (!strncmp(l, "freq=", 5))
+            for (const char *d = l + 5; *d >= '0' && *d <= '9'; ++d) freq = freq * 10 + (*d - '0');
+        if (!strncmp(l, "wpa_state=", 10)) {
+            int i = 0;
+            for (const char *d = l + 10; *d && *d != '\n' && *d != '\r' && i < n - 1; ++d) state[i++] = *d;
+            if (n > 0) state[i] = 0;
+        }
+    }
+    return freq;
+}
+int bt_wifi_line(char *out, int size, long wall, int freq, const char *state) {
+    char b[96];
+    const char *band = "-";
+    int ch = -1;
+    if (freq >= 2412 && freq <= 2484) band = "2.4", ch = freq == 2484 ? 14 : (freq - 2407) / 5;
+    else if (freq >= 5955 && freq <= 7115) band = "6", ch = (freq - 5950) / 5;
+    else if (freq >= 5000 && freq < 5955) band = "5", ch = (freq - 5000) / 5;
+    int at = snprintf(b, sizeof b, "WIFI");
+    at = put(b, at, sizeof b, "freq", freq ? freq : -1, -1);
+    if (at < (int)sizeof b) {
+        int k = snprintf(b + at, sizeof b - (size_t)at, " band=%s", band);
+        at = k < 0 ? at : at + k;
+    }
+    at = put(b, at, sizeof b, "ch", ch, -1);
+    if (at < (int)sizeof b) snprintf(b + at, sizeof b - (size_t)at, " state=%s", state && *state ? state : "-");
+    return heat_note(out, size, wall, b);
+}
+int bt_pace(int streaming, int freq) { return streaming && freq >= 2400 && freq < 2500; }
+int bt_pace_text(char *out, int size, int paced, int freq) {
+    int n = snprintf(out, (size_t)size, "paced=%d rate=%d freq=%d\n", paced ? 1 : 0, paced ? BT_PACE_RATE : 0, freq);
+    return n < 0 ? 0 : n;
+}
+
+/* ---- the player's side ---- */
 static int number_at(const char *s, unsigned *v) {
     while (s && *s == ' ') ++s;
     if (!s || *s < '0' || *s > '9') return 0;
@@ -554,10 +662,6 @@ static int number_at(const char *s, unsigned *v) {
     for (; *s >= '0' && *s <= '9'; ++s) n = n * 10 + (unsigned)(*s - '0');
     *v = n;
     return 1;
-}
-int bt_proc_io(const char *text, unsigned *rchar, unsigned *wchar, unsigned *read_bytes) {
-    return number_at(after_key(text, "rchar:"), rchar) && number_at(after_key(text, "wchar:"), wchar) &&
-           number_at(after_key(text, "read_bytes:"), read_bytes);
 }
 int bt_disk_busy(const char *text, const char *dev, unsigned *ms) {
     size_t n = strlen(dev);
