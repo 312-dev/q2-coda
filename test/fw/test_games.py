@@ -1929,15 +1929,16 @@ def test_the_build_ships_the_engines_games_alone(fw):
 def test_an_engine_game_s_row_is_two_lines_with_its_icon_at_the_text_column(fw):
     """docs/oled-design.md#two-line-row: the row's 40 px icon at the text column, 6 px down; its name and kind moved
     beside it to 72, ending before the chevron (316), the kind 5 px up to stand 32 px down the row."""
-    icons, moved = [], []
-    fw.mock('image_create', lambda parent, x, y, w, h, *_: icons.append((x, y, w, h)) or 0x7400 + len(icons))
-    fw.mock('image_base_set_image', lambda w, name, *_: icons.append(C.string_at(name).decode()))
+    boxes: list[tuple[int, int, int, int]] = []
+    urls: list[str] = []
+    moved: list[tuple[int, int, int]] = []
+    fw.mock('image_create', lambda parent, x, y, w, h, *_: boxes.append((x, y, w, h)) or 0x7400 + len(boxes))
+    fw.mock('image_base_set_image', lambda w, name, *_: urls.append(C.string_at(name).decode()))
     fw.mock('widget_move_resize', lambda w, x, y, ww, h, *_: moved.append((x, C.c_int(y).value, ww)))
     Page(fw, card_apps(fw, {}))
     x = fw.fn('page_x', C.c_int)()
-    shown = [i for i in icons if isinstance(i, str) and 'q2games' in i]
-    assert shown == [f'file:///usr/share/q2games/icons/{n}.png' for n in SLUGS]
-    assert [i for i in icons if isinstance(i, tuple) and i[2] == 40] == [(x, 6, 40, 40)] * len(SHIPPED)
+    assert [u for u in urls if 'q2games' in u] == [f'file:///usr/share/q2games/icons/{n}.png' for n in SLUGS]
+    assert [b for b in boxes if b[2] == 40] == [(x, 6, 40, 40)] * len(SHIPPED)
     # each row's two labels (the mock's label stands at y 0): the name where it was, the kind 5 px up
     assert moved.count((x + 48, 0, 268 - x)) == moved.count((x + 48, -5, 268 - x)) == len(SHIPPED)
 

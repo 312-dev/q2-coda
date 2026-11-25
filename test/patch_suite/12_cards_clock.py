@@ -96,6 +96,9 @@ class CardMachine(DepthMachine):
 # the state.
 OWN_GAMES=re.findall(r'^#define GAME_(\w+) (\d)',(ROOT/'patch/peq.h').read_text(),re.M)
 OWN=[n.capitalize() for n,on in OWN_GAMES if on=='1']; SHIPPED=['Games',*OWN,'Pop Stall','Cabin Solitaire','Evening Puzzle','Caller Ten','Ember Garden']
+# the chooser's labels: an engine game's row its name then its kind (games.c game_row), an own game's an empty second line
+KINDS=['Arcade','Cards','Number puzzle','Music quiz','Arcade']
+SHOWN=['Games',*[t for n in OWN for t in (n,'')],*[t for n,k in zip(SHIPPED[1+len(OWN):],KINDS) for t in (n,k)]]
 m=CardMachine({},{})
 G_SCREEN,G_PICKING,G_PAUSED,G_CELL,G_CUR,G_VX=36,44,56,76,157,164
 # labels(w): the texts of the hscroll_labels under w, in node order
@@ -109,7 +112,7 @@ def games_open():  # Home's Games row (2026-11-19; the Library's until then): ga
     m.page=m.top; assert m.nodes[m.page]['name']=='games_page' and m.nodes[m.page]['style:normal:bg_color']==-0x1000000
     return m.nodes[m.page]['children']
 sheet,chooser=games_open(); G=m.get(payload_syms['g'])
-assert labels(chooser)==SHIPPED and not m.nodes[sheet]['visible']
+assert labels(chooser)==SHOWN and not m.nodes[sheet]['visible']
 rows=m.nodes[m.find('scroll_view',chooser)]['children']
 # The wheel stops at both ends of the real chooser, however long the pause.
 w=m.find('scroll_view',chooser); m.paint(w,gap=0)
@@ -165,7 +168,7 @@ if len(OWN)==4:  # Sudoku, Vortex, Solitaire and Snake, each built in only while
     key(O['KEY_PLAY']); assert word(G_PAUSED)==0 and len(frames())==1 and m.get(payload_syms['wheel_raw'])==1
     m.byte(syms['g_backlight_status'],0); m.advance(40); m.byte(syms['g_backlight_status'],1)
     assert word(G_PAUSED)==1 and not frames() and m.get(payload_syms['wheel_raw'])==0
-    key(O['KEY_RETURN']); assert word(G_PAUSED)==2; key(O['KEY_NEXT']); paint(); key(O['KEY_CENTER']); m.advance(0)
+    key(O['KEY_RETURN']); assert word(G_PAUSED)==2; key(O['KEY_PREV']); paint(); key(O['KEY_CENTER']); m.advance(0)
     assert word(G_SCREEN)==0 and not frames() and m.get(payload_syms['wheel_raw'])==0
     assert m.key()==11; passed()  # Return in the chooser after Vortex goes back to the Library
     # Solitaire (piles 0 stock, 1 waste, 2-5 foundations, 6-12 columns; a card suit*13+rank, 64 up): Centre on
@@ -244,9 +247,9 @@ else:
 # 2,000,000 (docs/games-engine.md#budgets).
 CONFIG['ENGINEDEMO']='1'; m=CardMachine({},{}); del CONFIG['ENGINEDEMO']
 sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
-if not manifest.get('dev'): assert labels(chooser)==SHIPPED; m.close()
+if not manifest.get('dev'): assert labels(chooser)==SHOWN; m.close()
 else:
-    assert labels(chooser)==[*SHIPPED,'Engine Demo']
+    assert labels(chooser)==[*SHOWN,'Engine Demo','Test']
     eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
     O_ENG_RECT,O_ENG_STEPS=80,208  # struct eng's rect and steps (patch/engine.c), on MIPS
     ENG_STEP_BOUND,ENG_FRAME_BOUND,ENG_WHOLE_BOUND=600,70_000,780_000  # measured: 499, 61,511 and 703,036
@@ -285,7 +288,7 @@ else:
     key(O['KEY_RETURN']); assert word(G_PAUSED)==0 and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1
     m.byte(syms['g_backlight_status'],0); m.advance(20); m.byte(syms['g_backlight_status'],1)
     assert word(G_PAUSED)==1 and not eframes() and m.get(payload_syms['wheel_raw'])==0
-    key(O['KEY_RETURN']); key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0)
+    key(O['KEY_RETURN']); key(O['KEY_PREV']); key(O['KEY_CENTER']); m.advance(0)
     assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0 and not eframes()
     m.close(); assert m.get(payload_syms['g'])==0
 passed()
@@ -393,7 +396,7 @@ m.u.hook_del(counter)
 assert step_worst<PS_STEP_BOUND and worst<PS_FRAME_BOUND and trio<PS_TRIO_BOUND and star<PS_STAR_BOUND,(step_worst,worst,trio,star)
 assert clear<PS_CLEAR_BOUND and over<PS_OVER_BOUND and pause<PS_PAUSE_BOUND and whole<PS_WHOLE_BOUND,(clear,over,pause,whole)
 print(f'Pop Stall on MIPS: {step_worst} instructions for a frame\'s step at most, {worst} for a second of play\'s dearest frame with its changed rects painted, {trio} for TRIO\'s, {star} for the star\'s ring, {clear} for the level\'s clear and inflate, {over} for the game over, {pause} for the pause or resume, {whole} to paint the whole sheet (payload only; stock\'s text and flush mocked)')
-key(O['KEY_RETURN']); key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0)
+key(O['KEY_RETURN']); key(O['KEY_PREV']); key(O['KEY_CENTER']); m.advance(0)
 assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0 and not eframes()
 m.close(); assert m.get(payload_syms['g'])==0
 passed()
@@ -404,9 +407,9 @@ passed()
 # scripted second of play (the cursor, a card picked up and hovered, dropped, undone, a draw), the dearest move there
 # is (a king-to-ace run of 13 at the tightest fan, lifted to an empty column), the auto-finish and the win board's
 # drop. Bounded in the payload's instructions a little over what they measured, under the brief's 600,000 a frame.
-SOL_ART,SOL_SAVE='/usr/share/q2games/solitaire.bin','/mnt/data/game-solitaire'
-SO_MODE,SO_SEL,SO_ART,SO_NSRC,SO_CUR,SO_HAND,SO_SRC=256,260,264,268,272,276,296  # struct sol (patch/game_solitaire.c)
-SO_FAN_U,SO_NFL,SO_T=544,1604,1648
+SOL_ART,SOL_SAVE,SOL_RUN='/usr/share/q2games/solitaire.bin','/mnt/data/game-solitaire','/mnt/data/game-solitaire.run'
+SO_MODE,SO_SEL,SO_ART,SO_NSRC,SO_CUR,SO_HAND,SO_SRC=256,260,1772,264,268,272,292  # struct sol (patch/game_solitaire.c)
+SO_FAN_U,SO_NFL,SO_T=540,1600,1644
 # measured: the whole sheet 1,993,583 (start board), a frame of play 714,995, a 13-card run 1,115,263, the deal 1,168,977,
 # the auto-finish 1,097,967, the win board's showing 1,199,318. ponytail: all but the whole sheet are over the 600,000 a
 # frame a game is held to (docs/games-engine.md#cabin-solitaire), under the engine's hard 2,000,000.
@@ -432,15 +435,15 @@ DEFAULT=sol_table([(0,[S+12]),(1,[D+6]),(2,[H+11,CL+10]),(3,[D+9,CL+8,H+7]),(4,[
                   [CL+3,D+10,S+6],(3,1,3,2))
 m=CardMachine({},{SOL_ART:bytearray((ROOT/'assets/games/solitaire.bin').read_bytes()),SOL_SAVE:bytearray(DEFAULT)})
 sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
-assert labels(chooser)==SHIPPED
+assert labels(chooser)==SHOWN
 FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
 for o,v in (('LCD_W',375),('LCD_H',320),('LCD_LINE_LENGTH',1500),('LCD_FORMAT',O['LCD_BGRA8888']),('LCD_OFFLINE_FB',FB)): m.word(m.lcd+O[o],v)
 n=[0]; counter=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: n.__setitem__(0,n[0]+size//4),begin=BASE,end=SCRATCH-1)
 pixel=lambda x,y: m.get(FB+4*(y*375+x))
-def sopen():  # Games' row for Cabin Solitaire: its state on the heap
-    pick(len(OWN)+1); en=m.get(payload_syms['en']); assert word(G_SCREEN)==6 and en; return en,en+O_ENG_STATE
+def sopen():  # Games' row for Cabin Solitaire, no game kept (quick resume's run file gone): its state on the heap
+    m.files.pop(SOL_RUN,None); pick(len(OWN)+1); en=m.get(payload_syms['en']); assert word(G_SCREEN)==6 and en; return en,en+O_ENG_STATE
 def squit():  # Return, then Quit: the game paused (saved) and closed
-    key(O['KEY_RETURN']); key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0); assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0
+    key(O['KEY_RETURN']); key(O['KEY_PREV']); key(O['KEY_CENTER']); m.advance(0); assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0
 def sframe(ms=16):  # the frame timer's pass: the rects it invalidated, its instructions (the step and the marks)
     m.now+=ms; m.calls=[]; n[0]=0; m.call(address=payload_syms['eng_frame'],args=(0,0,0,0),gap=0,clear=False)
     made=[c for c in m.calls if c[0]=='widget_invalidate_force']; assert all(c[1]==sheet for c in made)
@@ -467,6 +470,9 @@ whole_table=epaint((0,0,375,320)); assert pixel(19+21,88+20)&0xffffff!=0x1b5c3e 
 # A second of play: the cursor round, a card picked up, hovered to its other place, dropped, undone, a draw.
 play=splay(60,{0:O['KEY_NEXT'],3:O['KEY_PREV'],6:O['KEY_CENTER'],10:O['KEY_NEXT'],20:O['KEY_CENTER'],32:O['KEY_BACK_BTN'],46:O['KEY_PLAY']})
 assert m.get(SO+SO_HAND)==0
+squit()
+run_file=bytes(m.files[SOL_RUN]); assert run_file[:4]==b'RUN1' and struct.unpack_from('<I',run_file,4)[0]==1772  # kept: struct sol to art
+pick(len(OWN)+1); SO=m.get(payload_syms['en'])+O_ENG_STATE; assert m.get(SO+SO_MODE)==2 and m.get(SO+SO_HAND)==0  # quick resume: straight back to the table
 squit()
 # The dearest move: a king to an ace over six face-down cards (the fan at its tightest, 11 px) lifted to an empty column.
 m.files[SOL_SAVE]=bytearray(sol_table([(0,[]),(1,[S+1]),(1,[D+1]),(1,[S+2]),(1,[D+2]),(0,[S+3]),
@@ -598,7 +604,7 @@ print(f'Evening Puzzle on MIPS: {slice_worst} instructions for a generator slice
 assert slice_worst<SD_SLICE_BOUND and frame_worst<SD_FRAME_BOUND and play_worst<SD_PLAY_BOUND and worst<SD_WORST_BOUND and whole<SD_WHOLE_BOUND,(slice_worst,frame_worst,play_worst,worst,whole)
 m.u.hook_del(counter)
 key(O['KEY_RETURN']); assert word(G_PAUSED)==2 and not eframes()
-key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0)
+key(O['KEY_PREV']); key(O['KEY_CENTER']); m.advance(0)
 assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0 and not eframes()
 m.close(); assert m.get(payload_syms['g'])==0
 passed()
@@ -614,7 +620,7 @@ m.word(O['MCL_FD'],-1)  # no player socket: the game's messages to it go nowhere
 sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scroll_view',chooser)]['children']
 eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
 O_ENG_RECT,O_ENG_STATE=80,232  # struct eng (patch/engine.c), on MIPS
-CT_FIELDS=('k h screen phase mode sel t at reduced round rounds wrongs rights streak score shown pts best_new slot stream_dead row:4 '
+CT_FIELDS=('h screen phase mode sel t at reduced round rounds wrongs rights streak score shown pts best_new slot stream_dead row:4 '
            'right pick song missed:10 nmissed top clip_sec clip_on clip_held heard ask replay needle4 needle_from needle_t '
            'turn_t lift lift_dir ring ring_from lamps dim dim_t cut end_t swell fit_px:4 fit_n:4 full_w:4 maxw:4 scroll:4 '
            'scroll_t').split()  # struct ct, a word each on MIPS
@@ -624,7 +630,8 @@ for f in CT_FIELDS:
 CT_STEP_BOUND,CT_FRAME_BOUND,CT_CALL_BOUND,CT_REVEAL_BOUND,CT_SUMMARY_BOUND,CT_WHOLE_BOUND=1_000,520_000,410_000,570_000,350_000,1_400_000  # measured 639, 465,622, 366,256, 513,738, 313,492 and 1,259,741
 pick(len(OWN)+3); EN=m.get(payload_syms['en']); S=EN+O_ENG_STATE
 cw=lambda f,v: m.word(S+CT[f],v); cr=lambda f: signed(m.get(S+CT[f]))
-K=m.get(S); ART=m.get(K)
+CT_K=24252  # its keep pointer, after the kept part: the fields above, the save, and the songs' CT_KEPT (23,892) bytes
+K=m.get(S+CT_K); ART=m.get(K)
 assert word(G_SCREEN)==8 and EN and cr('screen')==1 and cr('h')==320 and ART and m.u.mem_read(ART,len(CT_ART))==CT_ART
 FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
 for o,v in (('LCD_W',375),('LCD_H',320),('LCD_LINE_LENGTH',1500),('LCD_FORMAT',O['LCD_BGRA8888']),('LCD_OFFLINE_FB',FB)): m.word(m.lcd+O[o],v)
@@ -698,7 +705,7 @@ assert whole<CT_WHOLE_BOUND and worst<CT_FRAME_BOUND and step_worst<CT_STEP_BOUN
 print(f'Caller Ten on MIPS: {step_worst} instructions for a frame\'s step at most, {worst} with its changed rects painted (the needle, the clock, the dial), {call} for the call\'s dearest frame, {reveal} for the reveal\'s, {summary} for the summary\'s, {whole} to paint the whole sheet (payload only; stock\'s text and flush mocked)')
 m.u.hook_del(counter)
 key(O['KEY_RETURN']); assert word(G_PAUSED)==2 and not eframes()
-key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0)
+key(O['KEY_PREV']); key(O['KEY_CENTER']); m.advance(0)
 assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0
 m.close(); assert m.get(payload_syms['g'])==0
 passed()
@@ -720,13 +727,13 @@ class EgEmber(ctypes.Structure): _fields_=[(k,ctypes.c_int) for k in 'bx y vx vy
 class EgShot(ctypes.Structure): _fields_=[(k,ctypes.c_int) for k in 'x y ux uy run alive'.split()]
 class EgPuff(ctypes.Structure): _fields_=[(k,ctypes.c_int) for k in 'x y f t size pts alive'.split()]
 class EgState(ctypes.Structure):  # struct eg (patch/game_embergarden.c): ints and bytes alone, so its layout is MIPS's too
-    _fields_=[('art',ctypes.c_uint*(EG_H['EG_ART_BYTES']//4)),('pal',ctypes.c_uint*(320//EG_H['EG_BAND']*256)),
-              ('grow',ctypes.c_ubyte*(8*EG_H['EG_CH_W']*EG_H['EG_CH_H'])),('ok',ctypes.c_int),('em',EgEmber*EG_N),('sh',EgShot*3),
+    _fields_=[('em',EgEmber*EG_N),('sh',EgShot*3),
               ('pf',EgPuff*3),('sky',ctypes.c_short*(3*15)),*((k,ctypes.c_int) for k in 'mode aim recoil spray repeat stop h tick'.split()),('bed',ctypes.c_int*8),
               ('bed_t',ctypes.c_int*8),*((k,ctypes.c_int) for k in 'land_x land_t'.split()),('last',ctypes.c_int*2),('blink',ctypes.c_int),('flame',ctypes.c_ubyte*8),
               *((k,ctypes.c_int) for k in 'wave lull left spawn gap banner cleared light frm k strip dim bolt bolt_x bolt_seed bolt_wait card seq runs wait'.split()),
               ('score',ctypes.c_uint),('seed',ctypes.c_uint),('boxes',ctypes.c_int),('box',ctypes.c_int*256),
-              ('save',ctypes.c_uint*4),('saved',ctypes.c_uint)]
+              ('save',ctypes.c_uint*4),('saved',ctypes.c_uint),('art',ctypes.c_uint*(EG_H['EG_ART_BYTES']//4)),
+              ('pal',ctypes.c_uint*(320//EG_H['EG_BAND']*256)),('grow',ctypes.c_ubyte*(8*EG_H['EG_CH_W']*EG_H['EG_CH_H'])),('ok',ctypes.c_int)]
 eg_off=lambda f: getattr(EgState,f).offset
 eg_em=lambda i,f: eg_off('em')+i*ctypes.sizeof(EgEmber)+getattr(EgEmber,f).offset
 eg_sh=lambda i,f: eg_off('sh')+i*ctypes.sizeof(EgShot)+getattr(EgShot,f).offset
@@ -752,7 +759,7 @@ def epaint(rect): m.clip=rect; n[0]=0; paint(); return n[0]
 def eplay(rects,cost): return cost+sum(epaint(x) for x in rects)
 start=epaint((0,0,375,320))
 pal=lambda y: [m.get(EG+eg_off('pal')+4*((y//EG_H['EG_BAND'])*256+i)) for i in range(256)]
-idx=lambda x,y: m.u.mem_read(EG+m.get(EG+16)+y*375+x,1)[0]  # the scene's index there (the file's first part)
+ART_AT=EG+eg_off('art'); idx=lambda x,y: m.u.mem_read(ART_AT+m.get(ART_AT+16)+y*375+x,1)[0]  # the scene's index there (the file's first part)
 assert pixel(20,300)==pal(300)[idx(20,300)] and pixel(187,8)!=pixel(187,300)  # the scene from the art: the lawn, the canopy
 assert pixel(150,60)==0xffe0503a  # the seed packet's red top
 rects,cost=eframe(); rects,cost=eframe(); assert sum(w*h for _,_,w,h in rects)<=2800  # the title card: only the sky's turn, one thing a step
@@ -807,7 +814,7 @@ assert step_worst<EG_STEP_BOUND and worst<EG_PLAY_BOUND and crowd<EG_CROWD_BOUND
 m.u.hook_del(counter)
 # Return pauses under Games' menu; Quit frees it.
 key(O['KEY_RETURN']); assert word(G_PAUSED)==2 and not eframes() and m.get(payload_syms['wheel_raw'])==0
-key(O['KEY_NEXT']); key(O['KEY_CENTER']); m.advance(0)
+key(O['KEY_PREV']); key(O['KEY_CENTER']); m.advance(0)
 assert word(G_SCREEN)==0 and m.get(payload_syms['en'])==0 and not eframes()
 m.close(); assert m.get(payload_syms['g'])==0
 passed()
