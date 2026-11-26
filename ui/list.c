@@ -514,6 +514,7 @@ void list_event(ui_list *l, const input_t *e) {
     }
 }
 
+int list_last_selected(void) { return traced ? traced->sel : -1; }
 int list_trace(char *out, size_t room) {
     if (!traced) return snprintf(out, room, "-");
     return snprintf(out, room, "sel=%d scroll=%.3f bar=%.3f lean=%.3f press=%.4f knob=%.3f", traced->sel,

@@ -844,7 +844,7 @@ void coda_rc_poll(void) {
     unsigned now = time_now_ms();
     int told = cr.told != cr.told_seen, queued = cr_cmdq_waiting();
     if (!told && !queued && cr.at && now - cr.at < CR_POLL_MS) return;
-    if (!coda_rc_enabled() && !usb_car_on()) {
+    if (!coda_rc_enabled() && !usb_car_on() && !q2ui_on()) {
         char drop[CR_LINE];
         while (cr_cmdq_take(drop)) {} /* a command with neither to take it: dropped, as the file's was */
         if (cr.at && now - cr.at < CR_POLL_MS) return;
@@ -855,7 +855,9 @@ void coda_rc_poll(void) {
         if (!coda_rc_enabled()) {
             /* Car Audio's q2-iap reads Now Playing and sends the car's buttons the same way, with Car Remote on or
              * off (docs/iphone-mode.md#car-audio-in-the-image); no daemon is started for it */
-            if (usb_car_on()) cr_cmdq_start(), cr_now(), cr_settle(), cr_command();
+            /* q2ui plays a row and reads Now Playing through the same queue and file while it has the screen
+             * (docs/ui-rewrite.md#cutover) */
+            if (usb_car_on() || q2ui_on()) cr_cmdq_start(), cr_now(), cr_settle(), cr_command();
             return;
         }
         cr_cmdq_start();

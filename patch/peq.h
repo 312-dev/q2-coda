@@ -492,6 +492,9 @@ int addon_game_input(void *e), addon_is_game(const char *id);
 void ringnav_wdt_long(void);   /* system.c: the watchdog's long count for a long pass */
 int ringnav_smart_awake(void); /* navigation.c: Smart Awake (IPOD KEEPLIT) is on */
 void library_poll(void); /* addon_library.c: an app's library update request, once per addon_poll */
+/* q2ui_gate.c: q2ui has the screen (its pid, or -1 about to start); its pass; an event that is not demo's */
+int q2ui_on(void), q2ui_input(unsigned type, unsigned key);
+void q2ui_poll(void);
 /* spotify.c's Q2SPOT/1 framing (docs/librespot.md), which the card apps speak too */
 int spot_escape(const char *s, char *out, unsigned size);
 int spot_reply(char *buf, unsigned len, char **f, int max);

@@ -555,16 +555,11 @@ LOG_HOOK = (b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.er
             b'        while :; do\n            /release/bin/demo 2>>/tmp/q2-demo.err\n',
             b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.log); [ "${n:-0}" -gt 2000000 ] && cp /tmp/q2-demo.log /tmp/q2-demo.log.1 && : >/tmp/q2-demo.log; done) &\n'
             b'        while :; do\n            /release/bin/demo >>/tmp/q2-demo.log 2>&1\n')
-# --ui-spike only (docs/ui-rewrite.md#cutover): q2ui, the menu UI of Vamp's own (ui/, tools/ui.py), in the
-# root filesystem, and S90play starting it before demo while /mnt/data/ui-target says q2ui. Its Return ends it and
-# the loop below starts demo as in any build, so the choice is one file and demo is always the fallback.
-# The boot animation goes first, as before Rockbox: it draws on the page on screen until demo, which waits for it
-# (patch/splash_hold.c), shows a frame, and q2ui does not wait.
+# --ui-spike only (docs/ui-rewrite.md#cutover): q2ui, the menu UI of Vamp's own (ui/, tools/ui.py), in the root
+# filesystem. Nothing in the boot scripts starts it: demo does, as its child, while /mnt/data/ui-target says q2ui
+# (patch/q2ui_gate.c, which finds no /usr/bin/q2ui in any other build and so does nothing there), and has the screen
+# back whenever q2ui ends. So the choice is one file and demo is always the fallback.
 UI = 'usr/bin/q2ui'
-UI_TARGET = '/mnt/data/ui-target'
-UI_SPIKE_HOOK = (b'        while :; do\n            /release/bin/demo ',
-                 f'        [ "$(cat {UI_TARGET} 2>/dev/null)" = q2ui ] && {{ killall q2splash 2>/dev/null; /{UI} 2>>/tmp/q2ui.err; }}\n'.encode()
-                 + b'        while :; do\n            /release/bin/demo ')
 # --dev only: the wheel's frame log (playback.c wl_flush) and stale-press notes (navigation.c stale_note) go to the
 # card's q2-wheel.log, appended, when the card is up, up to 256 KB. In BOOT_HOOK's start path.
 WHEEL_LOG_HOOK = (b'        rb=/mnt/mmc/.rockbox\n',
@@ -3115,9 +3110,6 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(s90play.count(WHEEL_LOG_HOOK[0]) == 1, 'Unexpected card path')
     check(s90play.count(GUARD_DEV_HOOK[0]) == 1, 'Unexpected q2guard start')
     s90play = s90play.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*USBTRACE_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK) if dev else s90play
-    if ui_spike:
-        check(s90play.count(UI_SPIKE_HOOK[0]) == 1, 'Unexpected demo start')
-        s90play = s90play.replace(*UI_SPIKE_HOOK)
     (out/'S90play').write_bytes(s90play)
     (out/'config.ini').write_bytes(default_config(cat(DEFAULT_CONFIG)))
     s11logo = cat(S11LOGO)
@@ -3385,7 +3377,7 @@ if __name__ == '__main__':
     ap.add_argument('--pwm-idle-clock', action='store_true',
                     help='experimental: cooperative Linux/MCU PWM clock gating (requires --dev)')
     ap.add_argument('--ui-spike', action='store_true',
-                    help='add q2ui, the menu UI of our own, started before demo while /mnt/data/ui-target says q2ui (docs/ui-rewrite.md)')
+                    help='add q2ui, the menu UI of our own, which demo hands the screen to while /mnt/data/ui-target says q2ui (docs/ui-rewrite.md)')
     ap.add_argument('--build-iroh', action='store_true',
                     help='build q2-iroh from remote/iroh-sidecar (Rust nightly) instead of taking the pinned one (tools/iroh.py)')
     a=ap.parse_args()

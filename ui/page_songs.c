@@ -17,7 +17,13 @@ static void row(void *ctx, int i, ui_row *out) {
     out->title = lib_title(i - 1), out->detail = lib_artist(i - 1);
 }
 
+/* Centre: the whole list is the queue, from the song chosen; the Shuffle row shuffles it. */
+static void chosen(void *ctx, int i) {
+    (void)ctx;
+    if (lib_songs()) player_play(lib_ids(), lib_songs(), i ? i - 1 : 0, !i);
+}
+
 void songs_push(void) {
-    ui_source src = { .count = count, .row = row, .pinned = 1, .letters = 1 };
+    ui_source src = { .count = count, .row = row, .chosen = chosen, .pinned = 1, .letters = 1 };
     ui_push(&list_page, &src);
 }

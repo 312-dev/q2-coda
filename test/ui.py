@@ -36,7 +36,7 @@ import ui  # noqa: E402
 ACCENT = (0x21, 0x60, 0xd8)
 W, H = 375, 320
 BAR_H, ROW_H, ROWS = 58, 32, 7
-EV_SYN, EV_KEY, EV_ABS, ABS_X, ABS_PRESSURE, BTN_TOUCH, KEY_RETURN = 0, 1, 3, 0, 0x18, 0x14a, 103
+EV_SYN, EV_KEY, EV_ABS, ABS_X, ABS_PRESSURE, BTN_TOUCH, KEY_RETURN, KEY_CENTRE = 0, 1, 3, 0, 0x18, 0x14a, 103, 116
 TICK_UNITS = 28
 
 
@@ -57,7 +57,7 @@ def folder(work, n):
 
 def base_args(binary, d):
     return [str(binary), '--db', d/'library.db', '--catalogue', '', '--fb', d/'fb', '--fonts', d/'fonts', '--icons', d,
-            '--stats', d/'stats.json']
+            '--stats', d/'stats.json', '--state', d/'state', '--cmdq', d/'cmdq', '--playlist', d/'list', '--backlight', d/'backlight']
 
 
 class Picture:
@@ -116,11 +116,14 @@ def script(binary, work, n, lines, *options):
 class Run:
     """One live q2ui over a library of n songs, with its panel file, inputs and stats in a folder of its own."""
 
-    def __init__(self, binary, work, n, *options):
-        self.dir = folder(work, n)
-        (self.dir/'input').mkdir()
-        for k in (1, 3):
-            os.mkfifo(self.dir/'input'/f'event{k}')
+    def __init__(self, binary, work, n, *options, at=None):
+        self.dir = at or folder(work, n)
+        if not at:
+            (self.dir/'input').mkdir()
+            for k in (1, 3):
+                os.mkfifo(self.dir/'input'/f'event{k}')
+            os.mkfifo(self.dir/'cmdq')
+        self.queue = os.open(self.dir/'cmdq', os.O_RDWR | os.O_NONBLOCK)  # demo's end of the player's queue
         self.proc = subprocess.Popen(base_args(binary, self.dir) + ['--input', self.dir/'input', *options])
         self.wheel = open(self.dir/'input/event3', 'wb', buffering=0)
         self.keys = open(self.dir/'input/event1', 'wb', buffering=0)
@@ -154,9 +157,20 @@ class Run:
     def picture(self):
         return shot.page(self.dir/'fb', self.stats()['page'])
 
+    def key(self, code):
+        self.keys.write(event(EV_KEY, code, 1) + event(EV_SYN, 0, 0) + event(EV_KEY, code, 0) + event(EV_SYN, 0, 0))
+
+    def sent(self):
+        """The commands q2ui has sent the player since the last call, a line each."""
+        try:
+            return os.read(self.queue, 4096).decode().splitlines()
+        except BlockingIOError:
+            return []
+
     def end(self):
-        self.keys.write(event(EV_KEY, KEY_RETURN, 1) + event(EV_SYN, 0, 0) + event(EV_KEY, KEY_RETURN, 0) + event(EV_SYN, 0, 0))
+        self.key(KEY_RETURN)
         code = self.proc.wait(timeout=5)
+        os.close(self.queue)
         return code, self.stats()
 
 
@@ -316,6 +330,50 @@ def live(binary, work):
                   f"{paced['cpu_over_budget']} over, {paced['frames'] - back['frames']} frames, worst draw {paced['draw_us_max']} us")
     code, last = r.end()
     good &= check('Return ends it cleanly', code == 0 and last['ticks'] == 17, f'exit {code}, {last["ticks"]} ticks')
+
+    # Centre plays the row through the player's queue: the list is the queue, from the song chosen
+    r = Run(binary, work, 40)
+    r.rest()
+    r.ticks(2)
+    r.key(KEY_CENTRE)
+    time.sleep(0.4)
+    lines, ids = r.sent(), (r.dir/'list').read_text().split() if (r.dir/'list').exists() else []
+    want = [row[0] for row in sqlite3.connect(r.dir/'library.db').execute('select id from songtable order by name collate nocase, id')]
+    good &= check('Centre on the third song sends one play, from that song, unshuffled',
+                  len(lines) == 1 and lines[0].split()[1:] == ['play', '2', '0', '40'], str(lines))
+    good &= check("the list it names is every song's id in the list's order", ids == [str(i) for i in want], f'{len(ids)} ids')
+    r.ticks(-3)
+    r.key(KEY_CENTRE)
+    time.sleep(0.4)
+    lines = r.sent()
+    good &= check('Centre on Shuffle sends the same list shuffled', len(lines) == 1 and lines[0].split()[1:] == ['play', '0', '1', '40'], str(lines))
+    # ended from outside, as demo ends it for a window of its own: the next start opens on the row it rested on
+    r.ticks(5)
+    r.rest()
+    r.proc.terminate()
+    r.proc.wait(timeout=5)
+    os.close(r.queue)
+    again = Run(binary, work, 40, at=r.dir)
+    again.rest()
+    good &= check('started again, it opens on the row it was ended on', bar_rows(again.picture()) == [5], str(bar_rows(again.picture())))
+    # a dark screen: the press that wakes it moves nothing
+    light = again.dir/'backlight/panel'
+    light.mkdir(parents=True)
+    (light/'bl_power').write_text('4\n')
+    (light/'brightness').write_text('80\n')
+    again.proc.terminate()
+    again.proc.wait(timeout=5)
+    os.close(again.queue)
+    dark = Run(binary, work, 40, at=again.dir)
+    dark.rest()
+    dark.ticks(2)
+    quiet = dark.rest()['ticks']
+    (light/'bl_power').write_text('0\n')
+    time.sleep(0.6)
+    dark.ticks(2)
+    lit = dark.rest()['ticks']
+    good &= check('with the backlight off the wheel moves nothing; lit again, it does', quiet == 0 and lit == 2, f'{quiet} then {lit} ticks')
+    dark.end()
 
     # a server library's catalogue (docs/server-library.md): its songs are listed with the card's
     cat = pathlib.Path(work)/'catalogue.db'

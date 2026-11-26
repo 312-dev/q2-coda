@@ -88,7 +88,7 @@ def test_the_build_takes_the_q2s_binary(monkeypatch, tmp_path):
     monkeypatch.setattr(ui, 'build', lambda target, goal='q2ui': asked.append(target) or binary)
     assert build.ui_binary() == b'\x7fELF q2ui' and asked == ['mips']
     assert build.UI == 'usr/bin/q2ui'
-    old, new = build.UI_SPIKE_HOOK
-    # the hook keeps demo's loop whole after q2ui's line: whatever q2ui does, demo still starts
-    assert new.endswith(old) and new.count(b'\n') == old.count(b'\n') + 1
-    assert b'= q2ui ] && { killall q2splash 2>/dev/null; /usr/bin/q2ui ' in new and build.UI_TARGET.encode() in new
+    # demo starts it (patch/q2ui_gate.c): the gate's path is the image's, and no boot hook names it
+    gate = (pathlib.Path(build.__file__).resolve().parent.parent/'patch/q2ui_gate.c').read_text()
+    assert f'#define Q2UI_BIN "/{build.UI}"' in gate and '#define Q2UI_TARGET "/mnt/data/ui-target"' in gate
+    assert not hasattr(build, 'UI_SPIKE_HOOK')

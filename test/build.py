@@ -643,13 +643,16 @@ def validate_assets(directory):
             assert absent.returncode != 0, f'release rootfs contains {path}'
         for n in USB_SCRIPTS:
             assert read('rootfs.squashfs', 'usr/bin/' + n) == read('stock.squashfs', 'usr/bin/' + n), f'release {n} is not stock\'s'
-    from build import UI, UI_SPIKE_HOOK
-    if 'q2ui_sha256' in manifest:  # an --ui-spike build (docs/ui-rewrite.md#cutover): q2ui, started before demo
+    from build import UI
+    # q2ui is in an --ui-spike build alone, and no boot script starts it in any: demo does (patch/q2ui_gate.c,
+    # docs/ui-rewrite.md#cutover), and with no /usr/bin/q2ui to start, a default build's demo never tries
+    has_ui = subprocess.run(['unsquashfs', '-cat', str(directory/'rootfs.squashfs'), UI],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+    assert has_ui == ('q2ui_sha256' in manifest), 'q2ui in the image and in the manifest disagree'
+    if has_ui:
         q2ui = read('rootfs.squashfs', UI)
         assert sha(q2ui) == manifest['q2ui_sha256'] and q2ui[:4] == b'\x7fELF'
-        expected_start = expected_start.replace(*UI_SPIKE_HOOK)
-    else:
-        assert b'q2ui' not in expected_start
+    assert b'q2ui' not in expected_start
     assert read('rootfs.squashfs', S90PLAY) == expected_start
     assert read('rootfs.squashfs', S11LOGO) == read('stock.squashfs', S11LOGO).replace(*LOGO_HOOK)  # the card's logo, if saved
     # keep-alive 5 s, the source role alone while Guest Play is on, and q2-bip started on the line before bluealsa's

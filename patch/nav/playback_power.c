@@ -577,6 +577,7 @@ int ringnav_sleep(void *loop) {
     POLL(radio_poll);
     POLL(tuner_poll); /* Radio's list and receiver (radio_tuner.c) */
     POLL(addon_poll);
+    POLL(q2ui_poll); /* q2ui's start, its end, and the screen taken back for a window of demo's (q2ui_gate.c) */
     POLL(now_poll); /* the car's Bluetooth told of a radio and of the position (now_source.c) */
     POLL(coda_rc_poll);
     POLL(song_radio_poll);

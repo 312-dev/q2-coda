@@ -3,7 +3,7 @@
 #   make OUT=build/mips CC="mips-mti-linux-gnu-gcc -EL ..." STB=DIR STBI=DIR SQLITE_INC=DIR SQLITE_LIB=ROOTFS/usr/lib/libsqlite3.so.0.8.6
 OUT ?= build/host
 STRIP ?= strip
-SRC := main.c ui.c anim.c fb.c draw.c text.c image.c input.c theme.c status.c lib.c list.c card.c page_songs.c page_depth.c page_gallery.c \
+SRC := main.c ui.c anim.c fb.c draw.c text.c image.c input.c theme.c status.c lib.c player.c list.c card.c page_songs.c page_depth.c page_gallery.c \
        ../patch/wheel_accel.c
 OBJ := $(patsubst %.c,$(OUT)/%.o,$(notdir $(SRC)))
 CFLAGS := -std=c11 -D_GNU_SOURCE -O2 -g -Wall -Wextra -ffunction-sections -fdata-sections -isystem $(STB) -isystem $(STBI) -isystem $(SQLITE_INC)
@@ -25,6 +25,8 @@ $(OUT)/wheel_accel.o: ../patch/wheel_accel.c ../patch/wheel_accel.h | $(OUT)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(OUT)/list.o: ../patch/wheel_accel.h
+
+$(OUT)/player.o: ../patch/coda_rc_cmdq.h
 
 $(OUT):
 	mkdir -p $@

@@ -14,6 +14,7 @@
  * A page opening or closing slides (docs/oled-design.md#motion): both pages are drawn once, each
  * into a canvas of its own, and a frame of the slide is those two pictures placed, the status row
  * over them. */
+#include <dirent.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -80,6 +81,7 @@ void ui_wake_ms(unsigned ms) {
     if (!wake_at || at < wake_at) wake_at = at;
 }
 int ui_depth(void) { return depth; }
+void *ui_top(void) { return depth ? stack[depth - 1].st : 0; }
 int ui_moving(void) { return again; }
 int ui_wake_pending(void) { return wake_at != 0; }
 void ui_quit(int code) { quit = 1, quit_code = code; }
@@ -237,6 +239,39 @@ int ui_frame(const input_t *in, int n) {
 
 static void (*rest_hook)(void);
 void ui_on_rest(void (*fn)(void)) { rest_hook = fn; }
+/* Whether the screen is dark: demo turns the backlight off after its idle time and on at the
+ * next press, which is then a wake and nothing else (docs/internals.md#screen-off-and-wake). q2ui
+ * reads the same keys, so it drops what arrives while the light is off. No backlight to read (a
+ * host run, the emulator) is a lit screen. */
+const char *ui_backlight = "/sys/class/backlight";
+static int dark(void) {
+    static char power[160], level[160];
+    static int found = -1;
+    if (found < 0) {
+        found = 0;
+        char cmd[200];
+        snprintf(cmd, sizeof cmd, "%s", ui_backlight);
+        DIR *d = opendir(cmd);
+        for (struct dirent *e; d && (e = readdir(d));)
+            if (e->d_name[0] != '.' && !found) {
+                snprintf(power, sizeof power, "%s/%.60s/bl_power", ui_backlight, e->d_name);
+                snprintf(level, sizeof level, "%s/%.60s/brightness", ui_backlight, e->d_name);
+                found = 1;
+            }
+        if (d) closedir(d);
+    }
+    if (!found) return 0;
+    char text[16] = "";
+    FILE *f = fopen(power, "r");
+    int off = f && fgets(text, sizeof text, f) && atoi(text) != 0;
+    if (f) fclose(f);
+    if (off) return 1;
+    f = fopen(level, "r");
+    off = f && fgets(text, sizeof text, f) && atoi(text) == 0;
+    if (f) fclose(f);
+    return off;
+}
+
 static int extra_fd = -1;
 static void (*extra_fn)(void);
 void ui_watch(int fd, void (*fn)(void)) { extra_fd = fd, extra_fn = fn; }
@@ -270,6 +305,10 @@ int ui_run(void) {
         if (extra_fd >= 0 && fds[n - 1].revents && extra_fn) extra_fn();
         input_t in[64];
         int got = input_read(in, 64);
+        /* the press that wakes the screen is only that, its release included */
+        static uint64_t quiet_until;
+        if (got && dark()) quiet_until = mono_us() + 400000;
+        if (got && mono_us() < quiet_until) got = 0;
         showed = ui_frame(in, got);
         if (showed) rested = 0;
     }

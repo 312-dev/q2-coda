@@ -3,7 +3,8 @@
  *     q2ui [--db FILE] [--catalogue FILE] [--fb FILE] [--input DIR] [--fonts DIR] [--icons DIR]
  *          [--limit N] [--motion 0|1] [--reduce-motion] [--light] [--panel-bits 8|6|5]
  *          [--text awtk] [--page songs|depth|gallery|card] [--stats FILE] [--bench] [--script FILE]
- *          [--trace FILE] [--clock HH:MM]
+ *          [--trace FILE] [--clock HH:MM] [--state FILE] [--cmdq FIFO] [--playlist FILE]
+ *          [--backlight DIR]
  *
  * --catalogue is the server library's (default /mnt/mmc/.q2pod/catalogue.db; "" for none): its
  * songs are listed with the card's, as the Library lists them. --panel-bits is the depth of the
@@ -12,8 +13,13 @@
  * (ui/page_gallery.c). --text awtk lays text out on whole pixels, as
  * demo does, for comparing screens.
  *
- * Options also come from /mnt/data/q2ui.args (one line), as S90play starts it with none. Return
- * on the first page ends it, and S90play then starts demo (tools/build.py UI_SPIKE_HOOK).
+ * Options also come from /mnt/data/q2ui.args (one line), as demo starts it with none
+ * (patch/q2ui_gate.c). Return on the first page ends it, and demo has the screen again. demo also
+ * ends it, by a signal, when a window of its own must be seen, and starts it again after: so the
+ * row it was on is kept in --state (a file in /tmp: gone at a restart) each time it comes to
+ * rest, and a start within STATE_FRESH_S of that opens on the same row. --cmdq and --playlist are
+ * the player's queue and list file (ui/player.c), --backlight the folder whose state says the
+ * screen is dark; a test names its own.
  *
  * --bench draws and turns frames without the panel's wait and writes their CPU time to the stats
  * file. --script runs a file of input on a clock of its own, a frame every 1/60 s whatever the
@@ -23,13 +29,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "q2ui.h"
 
 #define FRAME_US 16667u
 
 static struct {
-    const char *db, *catalogue, *fb, *input, *fonts, *stats, *script, *trace, *page;
+    const char *db, *catalogue, *fb, *input, *fonts, *stats, *script, *trace, *page, *state;
     int limit, bench, bits;
 } opt = { "/mnt/data/database.db",
           "/mnt/mmc/.q2pod/catalogue.db",
@@ -40,6 +47,7 @@ static struct {
           0,
           0,
           "songs",
+          "/tmp/q2ui.state",
           0,
           0,
           8 };
@@ -69,6 +77,14 @@ static void parse(int argc, char **argv) {
             opt.trace = v, ++i;
         else if (!strcmp(a, "--page"))
             opt.page = v, ++i;
+        else if (!strcmp(a, "--state"))
+            opt.state = v, ++i;
+        else if (!strcmp(a, "--cmdq"))
+            player_queue = v, ++i;
+        else if (!strcmp(a, "--playlist"))
+            player_list = v, ++i;
+        else if (!strcmp(a, "--backlight"))
+            ui_backlight = v, ++i;
         else if (!strcmp(a, "--limit"))
             opt.limit = atoi(v), ++i;
         else if (!strcmp(a, "--motion"))
@@ -124,6 +140,30 @@ static void write_stats(void) {
             text_stats.made, text_stats.evictions, list_motion, fb_bits, fb_page(),
             *bench_json ? ",\n \"bench\": " : "", bench_json);
     fclose(f);
+}
+
+/* The row a q2ui before this one rested on, when that was a moment ago. */
+#define STATE_FRESH_S 600
+static void state_save(void) {
+    FILE *f = list_last_selected() >= 0 ? fopen(opt.state, "w") : 0;
+    if (!f) return;
+    fprintf(f, "%s %d %ld\n", opt.page, list_last_selected(), (long)time(0));
+    fclose(f);
+}
+static void state_restore(void) {
+    char page[32] = "";
+    int sel = -1;
+    long at = 0;
+    FILE *f = fopen(opt.state, "r");
+    if (!f) return;
+    int n = fscanf(f, "%31s %d %ld", page, &sel, &at);
+    fclose(f);
+    if (n == 3 && !strcmp(page, opt.page) && sel >= 0 && time(0) - at < STATE_FRESH_S && !strcmp(opt.page, "songs"))
+        list_select(list_page_list(ui_top()), sel, 0);
+}
+static void at_rest(void) {
+    write_stats();
+    state_save();
 }
 
 static void first_page(void) {
@@ -314,9 +354,10 @@ int main(int argc, char **argv) {
     }
     input_open(opt.input);
     first_page();
+    state_restore();
     ui_frame(0, 0);
     first_ms = (unsigned)((mono_us() - t0) / 1000u);
-    ui_on_rest(write_stats);
+    ui_on_rest(at_rest);
     int code = ui_run();
     write_stats();
     fb_close();

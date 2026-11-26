@@ -222,6 +222,7 @@ void ui_mark_all(void);
 void ui_again(void);     /* something still moves: another frame after this one */
 void ui_wake_ms(unsigned ms); /* nothing moves, but step again in ms (a marquee's hold, a fade's start) */
 int ui_depth(void);
+void *ui_top(void);        /* the top page's state */
 int ui_moving(void);      /* the last frame asked for another */
 int ui_wake_pending(void); /* a wake is set */
 extern int ui_reduce_motion;
@@ -229,6 +230,7 @@ extern int ui_painting; /* 1 while a frame is drawn: marks and state changes are
 int ui_run(void);       /* the loop, until ui_quit; the exit code */
 void ui_on_rest(void (*fn)(void));       /* called once each time the loop comes to rest */
 void ui_watch(int fd, void (*fn)(void)); /* fn when fd is readable (a daemon's message) */
+extern const char *ui_backlight;         /* the folder of backlights whose state says the screen is dark */
 /* One pass by hand, for the bench and a script: events, the step at the frame's time, the draw,
  * the frame. Returns whether a frame went out. */
 int ui_frame(const input_t *in, int n);
@@ -311,12 +313,19 @@ extern const ui_page list_page;
 ui_list *list_page_list(void *st);
 /* the list last stepped, as "sel=N scroll=PX bar=PX lean=PX press=S knob=SHARE": a script's trace */
 int list_trace(char *out, size_t room);
+int list_last_selected(void); /* that list's selection; -1 with none */
 
 /* ---- lib.c: the library, read from stock's database and the server catalogue ---- */
 int lib_open(const char *db, const char *catalogue, int limit);
 int lib_songs(void);
 const char *lib_title(int i);
 const char *lib_artist(int i);
+const int *lib_ids(void); /* each song's row id in its table, in the list's order */
+
+/* ---- player.c: the player, through demo while demo owns it ---- */
+int player_play(const int *ids, int n, int at, int shuffle); /* the list, starting at its song `at`; 0 sent */
+int player_send(const char *verb);                           /* toggle, next, previous, ...; 0 sent */
+extern const char *player_queue, *player_list;               /* the FIFO and the list file (a test's are its own) */
 
 /* ---- pages ---- */
 void songs_push(void);
