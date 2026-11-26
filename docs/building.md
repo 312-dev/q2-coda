@@ -136,6 +136,7 @@ python3 test/patch.py /tmp/q2-build        # the patched MIPS payload, wheel and
 python3 test/chapters.py                   # embedded chapter parsing, both MP4 formats and async extraction
 python3 test/m4b.py /tmp/q2-build          # native TagLib M4B/MP4 metadata dispatch
 python3 test/player/run.py                  # the new player (player/): bit-exact output, the DSP, the click and the socket protocol; builds its FFmpeg on first use, needs ffmpeg, lame and cc, no ZIP
+python3 test/ui.py                          # q2ui, the menu UI spike (ui/), on this machine: ticks, the bar, a rest with no frame; skips without the third-party cache
 python3 test/ldac.py /tmp/q2-build         # shipped LDAC intermediate rates and native adaptive controller
 python3 test/headset_io.py /tmp/q2-build   # real MIPS headset worker with simulated kernel I/O (cc)
 python3 test/bluealsa.py /tmp/q2-build     # the patched bluealsa's DROP paths against stock's, delayed encoder signal; SBC's bitpool; AAC's peak (fdk-aac scripted); the write MTU through each encoder

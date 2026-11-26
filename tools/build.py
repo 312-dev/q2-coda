@@ -555,6 +555,14 @@ LOG_HOOK = (b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.er
             b'        while :; do\n            /release/bin/demo 2>>/tmp/q2-demo.err\n',
             b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.log); [ "${n:-0}" -gt 2000000 ] && cp /tmp/q2-demo.log /tmp/q2-demo.log.1 && : >/tmp/q2-demo.log; done) &\n'
             b'        while :; do\n            /release/bin/demo >>/tmp/q2-demo.log 2>&1\n')
+# --ui-spike only (docs/ui-rewrite.md#cutover): q2ui, the spike of a menu UI of Vamp's own (ui/, tools/ui.py), in the
+# root filesystem, and S90play starting it before demo while /mnt/data/ui-target says q2ui. Its Return ends it and
+# the loop below starts demo as in any build, so the choice is one file and demo is always the fallback.
+UI = 'usr/bin/q2ui'
+UI_TARGET = '/mnt/data/ui-target'
+UI_SPIKE_HOOK = (b'        while :; do\n            /release/bin/demo ',
+                 f'        [ "$(cat {UI_TARGET} 2>/dev/null)" = q2ui ] && /{UI} 2>>/tmp/q2ui.err\n'.encode()
+                 + b'        while :; do\n            /release/bin/demo ')
 # --dev only: the wheel's frame log (playback.c wl_flush) and stale-press notes (navigation.c stale_note) go to the
 # card's q2-wheel.log, appended, when the card is up, up to 256 KB. In BOOT_HOOK's start path.
 WHEEL_LOG_HOOK = (b'        rb=/mnt/mmc/.rockbox\n',
@@ -1604,7 +1612,7 @@ def source_sha256():
                         *ROOT.glob('tools/*.py'), *ROOT.glob('tools/*.c'), *ROOT.glob('tools/*.patch'), ROOT/'tools/stock_map.tsv',
                         *(p for p in ROOT.glob('tools/uac1_module/**/*') if p.is_file() and '__pycache__' not in p.parts),
                         *ROOT.glob('tools/*.h'), *ROOT.glob('tools/*.S'), *ROOT.glob('player/*.[ch]'),
-                        *ROOT.glob('player/Makefile'), *manual]):
+                        *ROOT.glob('player/Makefile'), *ROOT.glob('ui/*.[ch]'), *ROOT.glob('ui/Makefile'), *manual]):
         h.update(str(path.relative_to(ROOT)).encode() + b'\0')
         h.update(path.read_bytes())
     return h.hexdigest()
@@ -2473,6 +2481,12 @@ def compile_helper(out, cat, src, name, rels, sections=None):
         *objs, f'-L{out}', *(f'-l:{lib.name}' for lib in libs), '-o', out/name)  # by name: a rebuilt library may have no SONAME
     return (out/name).read_bytes()
 
+def ui_binary():
+    """--ui-spike builds' q2ui (docs/ui-rewrite.md), built by tools/ui.py for the Q2."""
+    import ui
+    return ui.build('mips').read_bytes()
+
+
 def adbd_binary(out):
     """--dev builds' adbd (docs/adb.md), built by tools/thirdparty.py, stripped into out."""
     import thirdparty
@@ -2696,7 +2710,7 @@ def signing_key(path, dev):
     check(path.is_file(), f'{path}: no release public key (docs/releasing.md#signing-a-release)')
     return public_key(path.read_bytes())
 
-def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, signing_pub=None, apps_dir=APPS_DIR, build_iroh=False):  # pragma: no mutate block
+def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, signing_pub=None, apps_dir=APPS_DIR, build_iroh=False, ui_spike=False):  # pragma: no mutate block
     # Kernel-module experiments: no measured saving (docs/clock-gating.md, pwm-clock-gating.md,
     # audio-notifier.md), none handles suspend/resume, and stock Standby suspends by default; dev only.
     check(not aic_idle_wait or dev, '--aic-idle-wait requires --dev')
@@ -3098,7 +3112,11 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(s90play.count(LOG_HOOK[0]) == 1, 'Unexpected demo loop')
     check(s90play.count(WHEEL_LOG_HOOK[0]) == 1, 'Unexpected card path')
     check(s90play.count(GUARD_DEV_HOOK[0]) == 1, 'Unexpected q2guard start')
-    (out/'S90play').write_bytes(s90play.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*USBTRACE_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK) if dev else s90play)
+    s90play = s90play.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*USBTRACE_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK) if dev else s90play
+    if ui_spike:
+        check(s90play.count(UI_SPIKE_HOOK[0]) == 1, 'Unexpected demo start')
+        s90play = s90play.replace(*UI_SPIKE_HOOK)
+    (out/'S90play').write_bytes(s90play)
     (out/'config.ini').write_bytes(default_config(cat(DEFAULT_CONFIG)))
     s11logo = cat(S11LOGO)
     check(s11logo.count(LOGO_HOOK[0]) == 1, 'Unexpected S11logo_display_shell')
@@ -3230,6 +3248,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                Q2IAP: (HELPER_LIKE, compile_helper(out, cat, Q2IAP_SOURCES, 'q2-iap', CODA_RC_LIBS,
                                                                  sections=False)),  # libc and SQLite (q2_iap_lib.c)
                                UAC1_KO: ('module_driver/soc_aic.ko', uac1.module()),
+                               **({UI: (HELPER_LIKE, ui_binary())} if ui_spike else {}),
                                Q2SEND: (HELPER_LIKE, compile_helper(out, cat, Q2SEND_SOURCES, 'q2send', Q2SEND_LIBS)),
                                RADIOFETCH: (HELPER_LIKE, compile_helper(out, cat, RADIOFETCH_SOURCES, 'q2radiofetch',
                                                                         RADIOFETCH_LIBS)),
@@ -3325,6 +3344,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         demo_sha256=sha(patched), patch_sha256=sha(payload), update_sha256=sha((out/'update.tar').read_bytes()),
         rootfs_sha256=sha(newsq.read_bytes()), kernel_sha256=sha(blobs['recovery-update/xImage']),
         **({'aic_notifier': aic_notifier} if aic_notifier else {}),
+        **({'q2ui_sha256': sha(ui_binary()), 'q2ui_bytes': len(ui_binary())} if ui_spike else {}),
         patch_bytes=len(payload), scratch_free_bytes=scratch_free, ring_step_pixels=RING_STEP,
         audio_extension_calls=[dict(address=hex(a), original='0x0320f809', replacement=hex(jal(ps['ringnav_audio_extension']))) for a in AUDIO_EXTENSION_CALLS],
         version=version, dev=dev, update_repo=repo, signing_key=key.hex(), bluealsa_sha256=sha(bluealsa), bluetoothd_sha256=sha(bluetoothd), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), q2_iroh_sha256=sha((out/'q2-iroh').read_bytes()), q2_iroh_bytes=len((out/'q2-iroh').read_bytes()), q2_guest_sha256=sha((out/'q2-guest').read_bytes()), q2_iap_sha256=sha((out/'q2-iap').read_bytes()), q2_iap_bytes=len((out/'q2-iap').read_bytes()), usb_f_uac1_sha256=sha((out/'usb_f_uac1.ko').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes()), 'q2_usbtrace_sha256': sha((out/'q2-usbtrace').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
@@ -3362,10 +3382,12 @@ if __name__ == '__main__':
                     help=f'where the pinned zips of the card apps the firmware carries are (default {APPS_DIR})')
     ap.add_argument('--pwm-idle-clock', action='store_true',
                     help='experimental: cooperative Linux/MCU PWM clock gating (requires --dev)')
+    ap.add_argument('--ui-spike', action='store_true',
+                    help='add q2ui, the spike of a menu UI of our own, started before demo while /mnt/data/ui-target says q2ui (docs/ui-rewrite.md)')
     ap.add_argument('--build-iroh', action='store_true',
                     help='build q2-iroh from remote/iroh-sidecar (Rust nightly) instead of taking the pinned one (tools/iroh.py)')
     a=ap.parse_args()
     try:
-        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.signing_key,a.apps,a.build_iroh)
+        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.signing_key,a.apps,a.build_iroh,a.ui_spike)
     except (OSError, ValueError, zipfile.BadZipFile, subprocess.CalledProcessError) as exc:
         ap.error(str(exc))

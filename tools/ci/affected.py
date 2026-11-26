@@ -82,10 +82,11 @@ ALL = 'all'
 BUILD_INPUTS = {'build', 'ipod', 'theme', 'art', 'peq', 'aic', 'rotator', 'pwm', 'mcu_park', 'module_elf',
                 'splash', 'player', 'thirdparty', 'signing'}
 # tools/ modules the build imports only to put a pinned file in the image: iroh.binary() is q2-iroh, uac1.module()
-# usb_f_uac1.ko, each taken from the third-party cache by its SHA-256. Neither reaches the payload's code or
+# usb_f_uac1.ko, each taken from the third-party cache by its SHA-256, and ui.build() is q2ui, a program of its own
+# that only a --ui-spike build takes (docs/ui-rewrite.md). None reaches the payload's code or
 # test/fw, so a change runs the build's own checks (test/build.py), not test/patch.py. tools/ci/test_ci.py checks
 # that every tools/ module tools/build.py imports, directly or through another, is here or in BUILD_INPUTS.
-IMAGE_INPUTS = {'iroh', 'uac1'}
+IMAGE_INPUTS = {'iroh', 'uac1', 'ui'}
 # tools/ folders a rule knows (any other, tools/ci/ aside, runs everything): (the test/unit files that read them,
 # the test/X.py suites that do). Neither folder is in source_sha256 or in what tools/build.py reads itself.
 TOOL_DIRS = {
@@ -407,6 +408,9 @@ def plan_for(changes, root=ROOT, patch_source=None):
         elif parts[:2] == ('test', 'player') or parts[0] == 'player':
             p.other.add('test/player/run.py')
             p.why.append(f'{path}: the new player')
+        elif parts[0] == 'ui':
+            p.other.add('test/ui.py')
+            p.why.append(f'{path}: the menu UI spike')
         elif parts[:2] == ('docs', 'manual'):
             p.other.add('test/build.py')
             p.why.append(f'{path}: packaged in the build')
