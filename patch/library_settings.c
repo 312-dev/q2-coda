@@ -3,11 +3,11 @@
  * (navigation.c library_open, ringnav_audioset):
  *   Library    On-The-Go, Sorting >, Artists, Artist View, Playlists >,
  *              Folders >, Scan Song Durations
- *   Sorting    Songs > (a picker), Artist's Albums, Years
+ *   Sorting    Songs > and Playlists > (pickers), Artist's Albums, Years
  *   Playlists  Playlist View, then after a gap Import Playlists and Export Playlists
  *   Folders    Folder Root, Folder Skip (stock's own row), Folder Album Cover
- * The pickers (Songs' order here, Display > Cover Flow's Sort, a Bluetooth device's Volume Curve)
- * are stock's Buttons Lock page opened again (picker_open), its rows ours.
+ * The pickers (Songs' and Playlists' orders here, Display > Cover Flow's Sort, a Bluetooth device's
+ * Volume Curve) are stock's Buttons Lock page opened again (picker_open), its rows ours.
  *
  * A signed-in card app's server songs are always in the Library (catalogue.c; the user's,
  * 2026-11-19: no setting). An older build's [Q2POD] LIBRARYSOURCE is never read. Card apps that
@@ -19,57 +19,73 @@
 #define PICK_SONGS 1
 #define PICK_CF_SORT 2
 #define PICK_BT_CURVE 3
+#define PICK_PLAYLISTS 4
 #define ARROW_UP " \xe2\x86\x91" /* ↑: ascending, as Title's A to Z */
 #define ARROW_DOWN " \xe2\x86\x93"
 
 static struct {
-    void *songs;       /* Sorting's Songs row's label, while its page is open */
-    int pending, kind; /* a picker asked for (picker_open) and which */
-    void *win;         /* the picker's page, once built */
+    void *songs, *lists; /* Sorting's Songs and Playlists rows' labels, while its page is open */
+    int pending, kind;   /* a picker asked for (picker_open) and which */
+    void *win;           /* the picker's page, once built */
 } ls __attribute__((section(".scratch")));
 
 static const char *const song_names[SORT_N] = { "Title", "Artist", "Album", "Recently Added" };
+static const char *const list_names[PLORDER_N] = { "Name", "Recently Added" };
 
-/* Songs' order as a row shows it, with its direction: "Title ↑" */
-static void song_sort_text(char *out, unsigned size, int i) {
-    tk_snprintf(out, size, "%s%s", song_names[i],
-                i != song_sort() ? ""
-                : song_down()    ? ARROW_DOWN
-                                 : ARROW_UP);
+/* Order i of Songs' (lists 0) or Playlists' as a row shows it, the current one with its
+ * direction: "Title ↑" */
+static void sort_text(char *out, unsigned size, int lists, int i) {
+    int now = lists ? playlist_sort() : song_sort(), down = lists ? playlist_down() : song_down();
+    tk_snprintf(out, size, "%s%s", lists ? list_names[i] : song_names[i],
+                i != now ? ""
+                : down   ? ARROW_DOWN
+                         : ARROW_UP);
 }
-static void songs_text(void) {
+/* Sorting's two picker rows, "Songs: Title ↑" and "Playlists: Name ↑" */
+static void sorting_text(void) {
     char t[48], v[40];
-    if (!ls.songs) return;
-    song_sort_text(v, sizeof v, song_sort());
-    tk_snprintf(t, sizeof t, "Songs: %s", v);
-    row_value_text(ls.songs, t);
+    if (ls.songs) {
+        sort_text(v, sizeof v, 0, song_sort());
+        tk_snprintf(t, sizeof t, "Songs: %s", v);
+        row_value_text(ls.songs, t);
+    }
+    if (ls.lists) {
+        sort_text(v, sizeof v, 1, playlist_sort());
+        tk_snprintf(t, sizeof t, "Playlists: %s", v);
+        row_value_text(ls.lists, t);
+    }
 }
-static int songs_gone(void *label, void *event) {
+static int sorting_gone(void *label, void *event) {
     if (ls.songs == label) ls.songs = (void *)0;
+    if (ls.lists == label) ls.lists = (void *)0;
     return 0;
 }
 
 /* ---- The pickers ---- */
 
 static int picker_count(void) {
-    return ls.kind == PICK_SONGS ? SORT_N : ls.kind == PICK_BT_CURVE ? 2 : coverflow_sort_count();
+    return ls.kind == PICK_SONGS       ? SORT_N
+           : ls.kind == PICK_PLAYLISTS ? PLORDER_N
+           : ls.kind == PICK_BT_CURVE  ? 2
+                                       : coverflow_sort_count();
 }
 static int picker_now(void) {
-    return ls.kind == PICK_SONGS      ? song_sort()
-           : ls.kind == PICK_BT_CURVE ? btlim_edit_curve()
-                                      : coverflow_sort_now();
+    return ls.kind == PICK_SONGS       ? song_sort()
+           : ls.kind == PICK_PLAYLISTS ? playlist_sort()
+           : ls.kind == PICK_BT_CURVE  ? btlim_edit_curve()
+                                       : coverflow_sort_now();
 }
 static void picker_text(void *label, int i) {
     char t[40];
-    if (ls.kind == PICK_SONGS)
-        song_sort_text(t, sizeof t, i);
+    if (ls.kind == PICK_SONGS || ls.kind == PICK_PLAYLISTS)
+        sort_text(t, sizeof t, ls.kind == PICK_PLAYLISTS, i);
     else if (ls.kind == PICK_BT_CURVE)
         tk_snprintf(t, sizeof t, "%s", btlim_curve_name(i));
     else
         tk_snprintf(t, sizeof t, "%s", coverflow_sort_at(i));
     widget_set_text_utf8(label, t);
 }
-/* each row's mark and text again: a pick changes the current one, and Songs' direction */
+/* each row's mark and text again: a pick changes the current one, and an order's direction */
 static void picker_marks(void *view) {
     int now = picker_now();
     for (unsigned i = 0; view && i < widget_count_children(view); ++i) {
@@ -78,8 +94,9 @@ static void picker_marks(void *view) {
         picker_text(widget_get_child(button, 1), (int)i);
     }
 }
-/* A pick: Songs' current order again flips its direction, another takes its natural one (titles,
- * artists and albums A to Z, the newest first), and Songs reloads in it when it is on top again;
+/* A pick: Songs' or Playlists' current order again flips its direction, another takes its natural
+ * one (titles, artists, albums and names A to Z, the newest first), and Songs reloads in it when
+ * it is on top again, a list of the playlists at its next load;
  * Cover Flow takes its order at its next open; a device's Volume Curve is saved and sent to it at
  * once when it is connected. The picker stays, as Buttons Lock's does. */
 static int picker_pick(void *ctx, void *event) {
@@ -88,7 +105,11 @@ static int picker_pick(void *ctx, void *event) {
         int again = i == song_sort();
         song_sort_set(i, again ? !song_down() : i == SORT_ADDED);
         song_sort_commit();
-        songs_text();
+        sorting_text();
+    } else if (ls.kind == PICK_PLAYLISTS) {
+        int again = i == playlist_sort();
+        playlist_sort_set(i, again ? !playlist_down() : i == PLORDER_ADDED);
+        sorting_text();
     } else if (ls.kind == PICK_BT_CURVE) {
         btlim_edit_curve_take(i);
     } else {
@@ -112,9 +133,10 @@ int picker_rows(void *win) {
     if (!view) return 0;
     void *nav = widget_lookup(win, "view_navbar", 1), *title = nav ? widget_get_child(nav, 0) : 0;
     if (title)
-        widget_set_text_utf8(title, ls.kind == PICK_SONGS      ? "Songs"
-                                    : ls.kind == PICK_BT_CURVE ? "Volume Curve"
-                                                               : "Sort");
+        widget_set_text_utf8(title, ls.kind == PICK_SONGS       ? "Songs"
+                                    : ls.kind == PICK_PLAYLISTS ? "Playlists"
+                                    : ls.kind == PICK_BT_CURVE  ? "Volume Curve"
+                                                                : "Sort");
     widget_destroy_children(view);
     for (int i = 0, n = picker_count(); i < n; ++i)
         list_row(view, "unselect", picker_pick, (void *)(long)i);
@@ -163,8 +185,10 @@ void library_page(void *win, void *view, int page) {
         caption_row(st.pod_label[POD_SCAN_DURATIONS], "Measures lengths after each update");
     } else if (page == LIB_SORTING) {
         ls.songs = list_row_into(view, icons[0], picker_open, (void *)PICK_SONGS);
-        widget_on(ls.songs, EVT_DESTROY, songs_gone, ls.songs);
-        songs_text();
+        widget_on(ls.songs, EVT_DESTROY, sorting_gone, ls.songs);
+        ls.lists = list_row_into(view, icons[0], picker_open, (void *)PICK_PLAYLISTS);
+        widget_on(ls.lists, EVT_DESTROY, sorting_gone, ls.lists);
+        sorting_text();
         ROWS(POD_ARTIST_AZ, 1);
         ROWS(POD_YEAR_OLD, 1);
     } else if (page == LIB_PLAYLISTS) {

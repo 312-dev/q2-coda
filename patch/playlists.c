@@ -402,6 +402,8 @@ static int playlist_used(void *ctx, int n, char **v, char **names) {
 }
 /* The playlist just made, by name, for pl_first: the list it reloads into opens on it. */
 static char pl_made[64] __attribute__((section(".scratch")));
+/* A new playlist's header, its time_create the time it was made: Recently Added's date for one with
+ * no file on the card (playlist_sort.c). */
 int ringnav_playlist_create(void *list, const char *name) {
     void *db = 0;
     unsigned char used[100] = { 0 };
@@ -435,8 +437,8 @@ int ringnav_playlist_create(void *list, const char *name) {
         goto rollback;
     }
     tk_snprintf(sql, sizeof sql,
-                "insert into playlist values (%d,'%s','','','','','%s','','',0,0,%d,0,0,0,0,0,0);"
-                "select changes()",
+                "insert into playlist values (%d,'%s','','','','','%s','','',0,0,%d,0,0,"
+                "cast(strftime('%%s','now') as integer),0,0,0);select changes()",
                 id, quoted, quoted, id);
     if (sqlite3_exec(db, sql, ple_changed, 0, 0) || sqlite3_exec(db, "commit", 0, 0, 0))
         goto rollback;

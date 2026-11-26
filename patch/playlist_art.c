@@ -179,7 +179,7 @@ unsigned playlist_songs(int cd_num) {
 }
 
 /* name as a file name: the characters FAT refuses become _ */
-static void fat_name(char *out, unsigned size, const char *name) {
+void playlist_fat_name(char *out, unsigned size, const char *name) {
     unsigned i = 0;
     for (; name && name[i] && i + 1 < size; ++i)
         out[i] = (unsigned char)name[i] < 32 || strrchr("\\/:*?\"<>|", name[i]) ? '_' : name[i];
@@ -193,7 +193,7 @@ static unsigned picture(const char *name, const char *server, char *src) {
     static const char *const ext[] = { ".jpg", ".png" };
     char fat[256];
     unsigned st[36];
-    fat_name(fat, sizeof fat, name);
+    playlist_fat_name(fat, sizeof fat, name);
     for (unsigned i = 0; i < 3; ++i) {
         if (i < 2)
             tk_snprintf(src, 600, PL_DIR "/%s%s", fat, ext[i]);
