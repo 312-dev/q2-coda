@@ -1,0 +1,26 @@
+The PCM plugin calls snd_pcm_ioplug_avail(), which alsa-lib has had since 1.1.7. Built against 1.1.6 (the
+Q2's) it compiles with an implicit declaration and then cannot be loaded: alsa-lib opens a plugin with
+RTLD_NOW, and the symbol is not there. Provide it as the plugin already provides snd_pcm_ioplug_hw_avail()
+for alsa-lib before 1.1.6. For upstream (bluez-alsa, MIT).
+
+--- a/src/asound/bluealsa-pcm.c
++++ b/src/asound/bluealsa-pcm.c
+@@ -168,6 +168,18 @@
+ }
+ #endif
+ 
++#if SND_LIB_VERSION < 0x010107
++/**
++ * Get the frames free for writing (playback) or ready for reading (capture).
++ *
++ * This function is available in alsa-lib since version 1.1.7. For older
++ * alsa-lib versions we need to provide our own implementation. */
++static snd_pcm_uframes_t snd_pcm_ioplug_avail(const snd_pcm_ioplug_t * const io,
++		const snd_pcm_uframes_t hw_ptr, const snd_pcm_uframes_t appl_ptr) {
++	return io->buffer_size - snd_pcm_ioplug_hw_avail(io, hw_ptr, appl_ptr);
++}
++#endif
++
+ /**
+  * Helper function for clearing the PCM FIFO. */
+ static ssize_t bluealsa_pcm_clear_fifo(struct bluealsa_pcm *pcm) {

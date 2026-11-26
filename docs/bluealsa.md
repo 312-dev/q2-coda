@@ -158,7 +158,8 @@ And Shanling's changes, which our build must answer where something relies on th
 `python3 tools/thirdparty.py build bluealsa`, like the other rebuilt components ([third-party](third-party.md)):
 pinned by SHA-256, the Codescape toolchain, cached by recipe text. Five recipes:
 
-- `bluealsa`: bluez-alsa 5.0.0 with its own autotools build: `bluealsad`, the two ALSA plugins,
+- `bluealsa`: bluez-alsa 5.0.0, with Vamp's patches (`BLUEALSA_PATCHES`, the files under `tools/bluealsa/`, one so
+  far, [below](#the-first-patch)), by its own autotools build: `bluealsad`, the two ALSA plugins,
   `bluealsa-aplay` and `bluealsactl`. AAC, aptX, aptX HD and LDAC on; no oFono, UPower, MIDI, mSBC, LC3 or
   ASHA (`BLUEALSA_OPTIONS`).
 - `sbc` (2.1), `freeaptx` (libfreeaptx 0.2.2) and `ldac` (Android's libldac 2.0.2.3, encoder and adaptive
@@ -171,11 +172,21 @@ pinned by SHA-256, the Codescape toolchain, cached by recipe text. Five recipes:
   is V1.36's (`BLUEALSA_STOCK_LIBS`). So the binary names the sonames the rootfs has and can import only what
   they export. `gdbus-codegen` comes from the same GLib archive.
 
-Measured: `bluealsad` is 288,116 bytes stripped (stock's 216,728, with SBC in both and aptX and LDAC in ours
+Measured: `bluealsad` is 288,004 bytes as packaged (stock's 216,728, with SBC in both and aptX and LDAC in ours
 alone, which in stock are 93 KB of libraries); it needs `libdbus-1.so.3`, `libfdk-aac.so.2`, `libasound.so.2`,
 `libbluetooth.so.3`, `libgio-2.0.so.0`, `libgobject-2.0.so.0`, `libglib-2.0.so.0` and libc's, all in the
 rootfs, and has stock's ELF flags. The plugins are 69 KB each and `bluealsa-aplay` 65 KB. All four are about
 0.5 MB of a 75 MB partition.
+
+### The first patch
+
+`tools/bluealsa/alsa-1.1.6-ioplug-avail.patch`. 5.0.0's PCM plugin calls `snd_pcm_ioplug_avail`, which alsa-lib
+has had since 1.1.7; the Q2 has 1.1.6. It compiled (an implicit declaration) and could not be loaded: alsa-lib
+opens a plugin with `RTLD_NOW` (read: its `dlmisc.c`), and with every symbol bound at load the plugin failed
+with `undefined symbol: snd_pcm_ioplug_avail` (measured: the plugin preloaded into stock's `aplay` under
+`qemu-mipsel` with `LD_BIND_NOW=1`). The patch gives the plugin its own, as upstream already does for
+`snd_pcm_ioplug_hw_avail` before 1.1.6; with it the same load succeeds. It is for upstream. The daemon,
+`bluealsa-aplay` and the control plugin load with every symbol bound as they are.
 
 The `bluez` branch builds against the same GLib and D-Bus headers but links stubs made from a symbol list;
 this one links the stock files. One of the two ways should be kept when the branches meet. Both add
@@ -207,8 +218,9 @@ directory, which a base with a writable `/var/lib` leaves at upstream's default.
 --own-bluealsa`) adds `/usr/lib/vamp-bluealsa/` with `bluealsad`, `bluealsa-aplay.own` and the two plugins as
 `libasound_module_{pcm,ctl}_bluealsa.own.so`, and records them in `manifest.json` (`own_bluealsa`). Nothing
 starts or loads them: `bluealsa2` still runs stock's, and ALSA still loads stock's plugins. A build without the
-flag is what it was. ponytail: the flag's path through a whole image build has not been run (the disk floor stopped
-builds on 2026-11-26); the recipes it calls have, and `test/unit` passes. Run it before the device plan. The odd names are the spike's: the build stages every added file by its base name, where
+flag is what it was. Measured: a
+`--dev --own-bluealsa` image builds, holds the four files in a folder with `usr/lib`'s mode, and its
+`/usr/bin/bluealsa` and `bluealsa2` are the ones a build without the flag has. The odd names are the spike's: the build stages every added file by its base name, where
 stock's patched `bluealsa` already is. Phase 2 names the daemon `bluealsa`, for demo's `killall`, `q2guard` and
 `q2-guest`.
 

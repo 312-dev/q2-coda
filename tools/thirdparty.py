@@ -531,6 +531,9 @@ GLIBCONFIG = (pathlib.Path(__file__).resolve().parent/'bluez/glibconfig.h').read
 # The base bluealsa is built for: the recipe that stands for the root file system's own libraries. `stocksdk` is
 # V1.36's; another base (docs/bluealsa.md#bases) is another recipe of the same shape, and nothing else changes.
 BLUEALSA_BASE = 'stocksdk'
+# Vamp's changes to bluez-alsa, each a patch file under tools/bluealsa with its reason at its head, in this order
+BLUEALSA_PATCHES = {n: (pathlib.Path(__file__).resolve().parent/'bluealsa'/n).read_text()
+                    for n in ('alsa-1.1.6-ioplug-avail.patch',)}
 BLUEALSA_OPTIONS = ['--enable-aac', '--enable-aptx', '--enable-aptx-hd', '--with-libfreeaptx', '--enable-ldac',
                     '--enable-aplay', '--enable-ctl', '--disable-payloadcheck', '--disable-systemd',
                     # its per-device store (volume, mute, delay) on the tmpfs: /var/lib is read-only on the Q2, and
@@ -678,6 +681,9 @@ def build_bluealsa(src, stage, env, log):
     base = env.deps[BLUEALSA_BASE]
     more = (base/'ldflags').read_text().strip() if (base/'ldflags').exists() else ''
     vars = dict(env.vars, PATH=f'{base}/usr/bin:{env.vars["PATH"]}', LDFLAGS=f'{env.vars["LDFLAGS"]} {more}')
+    for name, text in BLUEALSA_PATCHES.items():
+        (src/name).write_text(text)
+        run('patch', '-p1', '-i', name, cwd=src, log=log)
     run('autoreconf', '--install', '--force', cwd=src, env=vars, log=log)
     run('./configure', f'--host={env.host}', '--prefix=/usr', *BLUEALSA_OPTIONS, cwd=src, env=vars, log=log)
     run('make', f'-j{JOBS}', cwd=src, env=vars, log=log)

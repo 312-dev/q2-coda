@@ -3160,7 +3160,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     lib_dir = need(re.search(rb'^usr/lib D (\d+) (\d+) (\d+) (\d+)$', p, re.M), 'Missing usr/lib pseudo inode')
     program, data_file = need(inode(p, HELPER_LIKE.encode()), 'Missing program inode'), need(inode(p, b'etc/hosts'), 'Missing etc/hosts inode')
     bundled = {}
-    for d in [BUNDLED_DIR, *(f'{BUNDLED_DIR}/{i}' for i in BUNDLED_APPS), RADIO_DATA, GAMES_DATA, *GAMES_DIRS]:
+    for d in [BUNDLED_DIR, *(f'{BUNDLED_DIR}/{i}' for i in BUNDLED_APPS), RADIO_DATA, GAMES_DATA, *GAMES_DIRS,
+              *([OWN_BLUEALSA] if own_bluealsa else [])]:  # --own-bluealsa's folder, as usr/lib is
         p += d.encode() + b' D ' + b' '.join(lib_dir.groups()) + b'\n'
         player_added.append([d.encode(), b'D', *lib_dir.groups()])
     for app_id in BUNDLED_APPS:
