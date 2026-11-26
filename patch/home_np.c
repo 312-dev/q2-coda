@@ -109,7 +109,7 @@ static void hn_words_to(int state) {
 }
 
 /* Whether the row leads with the play state now: Home on top, its main list in sight and the row
- * shown (status_row.c leaves its play slot empty then). */
+ * shown. */
 int home_np_lead(void) {
     void *top = window_manager_get_top_window(window_manager());
     if (!hn.win || top != hn.win || !hn.row || hn.editing || !widget_get_visible(hn.row)) return 0;

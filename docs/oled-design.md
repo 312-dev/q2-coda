@@ -353,8 +353,8 @@ Approved 2026-11-16 (`design/home-np-icon`, 2a and the morph; `patch/home_np.c`)
 - Stock's Now Playing row reads **Playing** while something plays, **Paused** while it is paused and **Guest Play**
   while a guest plays (its click opens the guest's Now Playing); with nothing queued and no guest it is not there.
   Edit Home lists it as Playing.
-- It leads with the play state at the text column (x 28 in Split), moved out of the status row while the row is in
-  sight: Up Next's [level bars](#level-bars) (3 px wide, 4.5 px apart, 5 to 12 px) in the accent while
+- It leads with the play state at the text column (x 28 in Split), kept in the status row too (the user's,
+  2026-11-26): Up Next's [level bars](#level-bars) (3 px wide, 4.5 px apart, 5 to 12 px) in the accent while
   playing, a pause glyph (Phosphor `pause`'s proportions: two 4 x 12 px bars, 2 px apart) in Text Secondary while
   paused, either white on the selection bar; a guest's by the guest's state. Only this row's words move, 18 px on
   (x 46); the other rows keep theirs. The bars stand still under Reduce Motion.

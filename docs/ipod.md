@@ -110,8 +110,8 @@ Games page (`games_open`, [Games](#games)), which the Library held before; Strea
 Playback. **The first row** is stock's Now Playing row named for what plays
 (`patch/home_np.c`; approved 2026-11-16, `design/home-np-icon`): **Playing**, **Paused**, or **Guest Play** while a
 guest plays ([internals](internals.md#guest-play)), when it opens the guest's Now Playing (its click and a short
-Return, `guest_home_np`), else the owner's. It leads with the play state, which leaves the status row while the row
-is in sight (`home_np_lead`, [oled-design](oled-design.md#homes-first-row)), and only its words move, 18 px past the
+Return, `guest_home_np`), else the owner's. It leads with the play state while the row is in sight (`home_np_lead`,
+[oled-design](oled-design.md#homes-first-row)), which the status row shows too (the user's, 2026-11-26), and only its words move, 18 px past the
 glyph; Edit Home lists it as Playing. The row is there only while something is loaded, playing or paused, or a guest plays, as
 on an iPod: with nothing loaded, or once play has stopped for `NP_GONE_MS` (3 s, so the moment
 between two tracks keeps it), the row goes, in Split and Full, and it comes back as play
