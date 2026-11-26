@@ -53,7 +53,7 @@ The owner's ruling on what Vamp OS carries (2026-11-26), binding on every table 
 | **Dropped, not rebuilt**         | Tidal, Spotify (librespot), the AirPlay receiver, Videos, Rockbox dual boot, the VU meter and spectrum displays, stock's Internet Radio                                                                                                                                                                                                |
 | **Deferred** ("remove, for now") | Audiobooks and Podcasts: not in the system, and the natural first apps written on the platform by someone else or by us later ([App model](#app-model-and-packages)): a `browse` app with a catalogue provider for its shelf and a playback source that keeps a place per title, which is the API's test of resume outside the Library |
 
-Not in the ruling and carried by "everything else": card apps and the App Store, the Bluetooth receiver, On-The-Go and playlist editing, Smart Wi-Fi, Charge Limit, Buttons Lock, the boot logo and animation. One open question for the owner: Vamp's **AirPlay sender** ([internals](internals.md#airplay-sender)) is not the receiver the ruling names; this plan keeps it until told otherwise.
+Not in the ruling and carried by "everything else": card apps and the App Store, the Bluetooth receiver, On-The-Go and playlist editing, Smart Wi-Fi, Charge Limit, Buttons Lock, the boot logo and animation. Vamp's **AirPlay sender** ([internals](internals.md#airplay-sender)), playing to AirPlay speakers, is kept (the owner, 2026-11-26: "keep the sender"); only the receiver is dropped.
 
 What the drops save, against a plan that carried them:
 
