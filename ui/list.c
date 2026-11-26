@@ -25,7 +25,7 @@
 #define META_PX 18
 #define META_DY 2     /* the small text's box below the title's (song_rows.c SONG_SMALL_DY) */
 #define ARTIST_MIN 40 /* an artist with less room than this is dropped (SONG_ARTIST_MIN) */
-#define SHUFFLE_X 55
+#define SHUFFLE_X 54
 #define SEL_X 13 /* the bar at rest: the 16 px inset, raised 2% (patch/tilt.c PRESS_FOCUS) */
 #define SEL_W 349
 #define SEL_R 8

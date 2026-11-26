@@ -558,10 +558,12 @@ LOG_HOOK = (b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.er
 # --ui-spike only (docs/ui-rewrite.md#cutover): q2ui, the spike of a menu UI of Vamp's own (ui/, tools/ui.py), in the
 # root filesystem, and S90play starting it before demo while /mnt/data/ui-target says q2ui. Its Return ends it and
 # the loop below starts demo as in any build, so the choice is one file and demo is always the fallback.
+# The boot animation goes first, as before Rockbox: it draws on the page on screen until demo, which waits for it
+# (patch/splash_hold.c), shows a frame, and q2ui does not wait.
 UI = 'usr/bin/q2ui'
 UI_TARGET = '/mnt/data/ui-target'
 UI_SPIKE_HOOK = (b'        while :; do\n            /release/bin/demo ',
-                 f'        [ "$(cat {UI_TARGET} 2>/dev/null)" = q2ui ] && /{UI} 2>>/tmp/q2ui.err\n'.encode()
+                 f'        [ "$(cat {UI_TARGET} 2>/dev/null)" = q2ui ] && {{ killall q2splash 2>/dev/null; /{UI} 2>>/tmp/q2ui.err; }}\n'.encode()
                  + b'        while :; do\n            /release/bin/demo ')
 # --dev only: the wheel's frame log (playback.c wl_flush) and stale-press notes (navigation.c stale_note) go to the
 # card's q2-wheel.log, appended, when the card is up, up to 256 KB. In BOOT_HOOK's start path.

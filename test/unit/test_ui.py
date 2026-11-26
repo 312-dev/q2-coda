@@ -72,4 +72,4 @@ def test_the_build_takes_the_q2s_binary(monkeypatch, tmp_path):
     old, new = build.UI_SPIKE_HOOK
     # the hook keeps demo's loop whole after q2ui's line: whatever q2ui does, demo still starts
     assert new.endswith(old) and new.count(b'\n') == old.count(b'\n') + 1
-    assert b'= q2ui ] && /usr/bin/q2ui ' in new and build.UI_TARGET.encode() in new
+    assert b'= q2ui ] && { killall q2splash 2>/dev/null; /usr/bin/q2ui ' in new and build.UI_TARGET.encode() in new
