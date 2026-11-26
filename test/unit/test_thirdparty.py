@@ -4,6 +4,7 @@ import ast
 import hashlib
 import io
 import json
+import os
 import pathlib
 import subprocess
 import tarfile
@@ -561,6 +562,99 @@ def test_adbd_is_one_program_against_glibc(tmp_path, env, calls, monkeypatch):
     assert (stage/'mincrypt.NOTICE').read_text() == 'bsd' and (stage/'copyright').read_text() == 'apache'
 
 
+# bluetoothd and the headers and stubs it is built against (docs/bluez.md#build)
+
+def test_a_stub_library_carries_the_soname_and_stocks_symbols(env, calls, tmp_path, monkeypatch):
+    monkeypatch.setattr(thirdparty, 'STUBS', 'libx.so.3\tfn\tFUNC\t8\nlibx.so.3\tobj\tOBJECT\t24\nliby.so\tother\tFUNC\t4\n')
+    thirdparty.stub_library(env, 'libx.so.3', tmp_path/'lib')
+    assert (tmp_path/'lib/libx.so.3.stub.c').read_text() == 'void fn(void) {}\nchar obj[24];\n'
+    assert calls == [([*env.cc.split(), '-shared', '-fPIC', '-Wl,-soname,libx.so.3', '-o', tmp_path/'lib/libx.so.3',
+                       tmp_path/'lib/libx.so.3.stub.c'], None, None, None)]
+    assert os.readlink(tmp_path/'lib/libx.so') == 'libx.so.3'
+    thirdparty.stub_library(env, 'liby.so', tmp_path/'lib')  # its own name already: no link
+    assert (tmp_path/'lib/liby.so.stub.c').read_text() == 'void other(void) {}\n' and not (tmp_path/'lib/liby.so').exists()
+
+
+def test_the_stub_table_names_glib_and_dbus_only():
+    rows = [r.split('\t') for r in thirdparty.STUBS.splitlines()]
+    assert {r[0] for r in rows} == {'libglib-2.0.so.0', 'libdbus-1.so.3'} and all(len(r) == 4 for r in rows)
+    assert {r[2] for r in rows} == {'FUNC', 'OBJECT'} and all(r[3].isdigit() for r in rows)
+    names = {r[1] for r in rows}
+    assert {'g_main_loop_run', 'g_key_file_load_from_file', 'dbus_connection_send_with_reply'} <= names
+
+
+def test_glib_is_headers_a_stub_and_a_pkg_config_file(env, calls, tmp_path):
+    src, stage = tmp_path/'src', tmp_path/'stage'
+    for d, names in (('glib', ('glib.h', 'glib-object.h', 'gmain.h', 'gmain.c')), ('glib/deprecated', ('gthread.h',)),
+                     ('gobject', ('gobject.h',))):
+        (src/d).mkdir(parents=True, exist_ok=True)
+        for n in names:
+            (src/d/n).write_text(n)
+    thirdparty.build_glib(src, stage, env, tmp_path/'log')
+    inc = stage/'usr/include/glib-2.0'
+    assert sorted(str(f.relative_to(inc)) for f in inc.rglob('*.[ch]')) == [
+        'glib-object.h', 'glib.h', 'glib/deprecated/gthread.h', 'glib/gmain.h', 'gobject/gobject.h']
+    assert (stage/'usr/lib/glib-2.0/include/glibconfig.h').read_text() == thirdparty.GLIBCONFIG
+    assert '#define GLIB_MINOR_VERSION 74' in thirdparty.GLIBCONFIG and 'G_BYTE_ORDER G_LITTLE_ENDIAN' in thirdparty.GLIBCONFIG
+    assert calls[0][0][-4:-2] == ['-Wl,-soname,libglib-2.0.so.0', '-o'] and len(calls) == 1
+    assert (stage/'usr/lib/pkgconfig/glib-2.0.pc').read_text() == (
+        f"prefix={stage}/usr\nName: GLib\nDescription: stock's GLib\nVersion: 2.74.4\nLibs: -L${{prefix}}/lib -lglib-2.0\n"
+        'Cflags: -I${prefix}/include/glib-2.0 -I${prefix}/lib/glib-2.0/include\n')
+    assert thirdparty.SOURCES['glib'][0] == '2.74.4'
+
+
+def test_dbus_is_headers_a_stub_and_a_pkg_config_file(env, calls, tmp_path):
+    src, stage = tmp_path/'src', tmp_path/'stage'
+    (src/'dbus').mkdir(parents=True)
+    (src/'dbus/dbus.h').write_text('h')
+    (src/'dbus/dbus-internal.c').write_text('c')
+    (src/'dbus/dbus-arch-deps.h.in').write_text(
+        '@DBUS_HAVE_INT64@\n@DBUS_INT64_TYPE@ @DBUS_INT64_CONSTANT@ @DBUS_UINT64_CONSTANT@ @DBUS_INT32_TYPE@ '
+        '@DBUS_INT16_TYPE@\n@DBUS_MAJOR_VERSION@.@DBUS_MINOR_VERSION@.@DBUS_MICRO_VERSION@ @DBUS_VERSION@\n')
+    thirdparty.build_dbus(src, stage, env, tmp_path/'log')
+    assert [f.name for f in (stage/'usr/include/dbus-1.0/dbus').iterdir()] == ['dbus.h']
+    assert (stage/'usr/lib/dbus-1.0/include/dbus/dbus-arch-deps.h').read_text() == (
+        '#define DBUS_HAVE_INT64 1\nlong long (val##LL) (val##ULL) int short\n1.12.28 1.12.28\n')
+    assert calls[0][0][-4:-2] == ['-Wl,-soname,libdbus-1.so.3', '-o'] and len(calls) == 1
+    assert (stage/'usr/lib/pkgconfig/dbus-1.pc').read_text() == (
+        f"prefix={stage}/usr\nName: dbus\nDescription: stock's D-Bus\nVersion: 1.12.28\nLibs: -L${{prefix}}/lib -ldbus-1\n"
+        'Cflags: -I${prefix}/include/dbus-1.0 -I${prefix}/lib/dbus-1.0/include\n')
+    assert thirdparty.SOURCES['dbus'][0] == '1.12.28'
+
+
+def bluez_tree(tmp_path, config):
+    src = tmp_path/'src'
+    (src/'src').mkdir(parents=True)
+    (src/'config.h').write_text(config)
+    for name, text in (('src/bluetoothd', 'elf'), ('src/main.conf', 'conf'), ('COPYING', 'gpl')):
+        (src/name).write_text(text)
+    return src
+
+
+def test_bluez_is_upstreams_daemon_on_the_q2s_store(env, calls, tmp_path):
+    src = bluez_tree(tmp_path, '#define A 1\n#define STORAGEDIR "/var/lib/bluetooth"\n#define B 2\n')
+    stage, log = tmp_path/'stage', tmp_path/'log'
+    thirdparty.build_bluez(src, stage, env, log)
+    vars = dict(env.vars, CFLAGS='-O2 -pipe -fPIC', LDFLAGS=env.vars['LDFLAGS'] + ' -pie -Wl,-z,now')
+    assert calls == [(['./configure', '--host=mipsel-linux-gnu', '--prefix=/usr', *thirdparty.BLUEZ_OPTIONS], src, vars, log),
+                     (['make', '-j7'], src, vars, log)]
+    assert (src/'config.h').read_text() == '#define A 1\n#define STORAGEDIR "/mnt/data/bluetooth"\n#define B 2\n'
+    assert [(stage/f).read_text() for f in ('usr/bin/bluetoothd', 'etc/bluetooth/main.conf', 'COPYING')] == ['elf', 'conf', 'gpl']
+    # stock's plugin set and no more: what a headset or a phone could reach stays what it was
+    off = {o[len('--disable-'):] for o in thirdparty.BLUEZ_OPTIONS if o.startswith('--disable-')}
+    assert {'hid', 'hog', 'network', 'obex', 'mesh', 'bap', 'midi', 'client', 'tools'} <= off and 'hfp' not in off
+    assert not {'a2dp', 'avrcp'} & off and thirdparty.BLUEZ_STORAGE == '/mnt/data/bluetooth'
+    assert thirdparty.SOURCES['bluez'][0] == '5.88' and thirdparty.BLUETOOTHD == 'usr/bin/bluetoothd'
+    assert thirdparty.RECIPES['bluez'] == (thirdparty.build_bluez, ['glib', 'dbus']) and 'bluez' not in thirdparty.INSTALL
+
+
+def test_bluez_stops_when_configure_names_no_store(env, calls, tmp_path):
+    src = bluez_tree(tmp_path, '#define A 1\n')
+    with pytest.raises(SystemExit, match='no STORAGEDIR'):
+        thirdparty.build_bluez(src, tmp_path/'stage', env, tmp_path/'log')
+    assert len(calls) == 1  # configured, never compiled
+
+
 def test_the_adbd_patch_is_the_files_text():
     assert thirdparty.ADBD_PATCH == (ROOT/'tools/adbd.patch').read_text() and 'diff --git a/core/adbd/adb_auth_client.c' in thirdparty.ADBD_PATCH
 
@@ -984,8 +1078,10 @@ def test_replacements_strips_every_install_entry(tmp_path, monkeypatch):
                 for name, entries in thirdparty.INSTALL.items() for path, rel in entries.items()}
     assert files == {path: dst for path, (_, dst) in expected.items()} and sorted(stripped) == sorted(expected.values())
     assert files['usr/lib/libz.so.1.2.11'] == out/'thirdparty/usr/lib/libz.so.1.2.11'
-    # mbedtls and libnl among them; adbd is no replacement (a --dev build's program, docs/adb.md)
-    assert versions == {name: v for name, (v, _, _) in thirdparty.SOURCES.items() if name != 'adbd'}
+    # mbedtls and libnl among them; adbd is no replacement (a --dev build's program, docs/adb.md), nor are
+    # bluez and the glib and dbus headers it is built against (an --own-bluez build's, docs/bluez.md)
+    assert versions == {name: v for name, (v, _, _) in thirdparty.SOURCES.items()
+                        if name not in ('adbd', 'bluez', 'glib', 'dbus')}
 
 
 @pytest.fixture
