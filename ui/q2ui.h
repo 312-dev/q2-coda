@@ -87,7 +87,7 @@ typedef struct {
     const char *(*title)(int i);
     const char *(*artist)(int i);
 } source_t;
-int songs_open(const char *db, source_t *out, int limit);
+int songs_open(const char *db, const char *catalogue, source_t *out, int limit);
 
 /* list.c */
 void list_open(const source_t *src);

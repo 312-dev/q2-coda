@@ -2,9 +2,11 @@
  * the motion or the clock is due, change the state, draw the rects that changed, show the frame.
  * With nothing due it sleeps until input: no timer runs at rest but the clock's minute.
  *
- *     q2ui [--db FILE] [--fb FILE] [--input DIR] [--fonts DIR] [--limit N] [--motion 0|1|2]
- * [--copy]
- *          [--stats FILE] [--bench]
+ *     q2ui [--db FILE] [--catalogue FILE] [--fb FILE] [--input DIR] [--fonts DIR] [--limit N]
+ *          [--motion 0|1|2] [--copy] [--stats FILE] [--bench]
+ *
+ * --catalogue is the server library's (default /mnt/mmc/.q2pod/catalogue.db; "" for none): its
+ * songs are listed with the card's, as the Library lists them.
  *
  * Options also come from /mnt/data/q2ui.args (one line), as S90play starts it with none. Return
  * ends it, and S90play then starts demo (tools/build.py UI_SPIKE_HOOK). --bench draws and turns
@@ -19,9 +21,10 @@
 #include "q2ui.h"
 
 static struct {
-    const char *db, *fb, *input, *fonts, *stats;
+    const char *db, *catalogue, *fb, *input, *fonts, *stats;
     int limit, bench;
 } opt = { "/mnt/data/database.db",
+          "/mnt/mmc/.q2pod/catalogue.db",
           "/dev/fb0",
           "/dev/input",
           "/release/assets/default/raw/fonts",
@@ -50,6 +53,8 @@ static void parse(int argc, char **argv) {
         const char *a = argv[i], *v = i + 1 < argc ? argv[i + 1] : "";
         if (!strcmp(a, "--db"))
             opt.db = v, ++i;
+        else if (!strcmp(a, "--catalogue"))
+            opt.catalogue = v, ++i;
         else if (!strcmp(a, "--fb"))
             opt.fb = v, ++i;
         else if (!strcmp(a, "--input"))
@@ -182,7 +187,7 @@ int main(int argc, char **argv) {
     snprintf(fallback, sizeof fallback, "%s/default.ttf", opt.fonts);
     if (text_open(regular, medium, fallback))
         return fprintf(stderr, "q2ui: no font in %s\n", opt.fonts), 2;
-    if (songs_open(opt.db, &songs, opt.limit))
+    if (songs_open(opt.db, *opt.catalogue ? opt.catalogue : 0, &songs, opt.limit))
         return fprintf(stderr, "q2ui: cannot read %s\n", opt.db), 2;
     if (fb_open(opt.fb)) return fprintf(stderr, "q2ui: cannot use %s\n", opt.fb), 2;
     input_open(opt.input);

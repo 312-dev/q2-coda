@@ -5,7 +5,7 @@ own events, and the frame read back from the file.
 
     python3 test/ui.py
 
-What it holds: the selection follows the ticks one row each, the bar is drawn on the selected row and nowhere
+What it holds: a server library's catalogue is listed with the card's songs, the selection follows the ticks one row each, the bar is drawn on the selected row and nowhere
 else, a scroll drawn by copying rows leaves the same picture as one drawn whole, a list at rest draws no frame and
 is not woken,
 and Return ends the program. Without the build's inputs (stb_truetype and SQLite's header in the third-party
@@ -15,6 +15,7 @@ import json
 import os
 import pathlib
 import shutil
+import sqlite3
 import struct
 import subprocess
 import sys
@@ -134,6 +135,18 @@ def main():
         good &= check('a frame turns only what changed', back['px_turned_per_frame'] < 375 * 320 // 2, str(back['px_turned_per_frame']))
         code, last = r.end()
         good &= check('Return ends it cleanly', code == 0 and last['ticks'] == 5, f'exit {code}, {last["ticks"]} ticks')
+
+        # a server library's catalogue (docs/server-library.md): its songs are listed with the card's
+        cat = pathlib.Path(work)/'catalogue.db'
+        db = sqlite3.connect(cat)
+        db.execute('create table servertable(id integer, name, songer)')
+        db.executemany('insert into servertable values (?, ?, ?)', [(0x40000000 + i, f'Server {i}', 'Artist') for i in range(50)])
+        db.commit()
+        db.close()
+        r = Run(binary, work, 300, '--catalogue', cat)
+        rows = r.rest()['rows']
+        good &= check("a catalogue's 50 songs are listed with the card's 300", rows == 350, str(rows))
+        r.end()
 
         # a scroll drawn whole and one drawn by copying rows: the same picture
         pictures = []
