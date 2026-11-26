@@ -57,7 +57,7 @@ SOURCES = {
     'adbd': ('4.2.2+git20130218', 'https://launchpad.net/ubuntu/+archive/primary/+files/android-tools_4.2.2+git20130218.orig.tar.xz',
              '9bfba987e1351b12aa983787b9ae4424ab752e9e646d8e93771538dc1e5d932f'),
     # Vamp's own bluealsa (docs/bluealsa.md), installed only by a build made with --own-bluealsa: upstream
-    # bluez-alsa, its SBC and aptX encoders linked in (sbc, freeaptx), compiled against the headers of the
+    # bluez-alsa, its SBC, aptX and LDAC encoders linked in (sbc, freeaptx, ldac), compiled against the headers of the
     # libraries the rootfs carries (stocksdk, whose archive here is GLib's; BLUEALSA_HEADERS the rest)
     'bluealsa': ('5.0.0', 'https://github.com/arkq/bluez-alsa/archive/v5.0.0/bluez-alsa-5.0.0.tar.gz',
                  'e1249cbebd24925c977814f62adab71f2ebd771e28e6a4ac58bb1ac97ce3beb5'),
@@ -65,6 +65,8 @@ SOURCES = {
                  '0e82da5ea129b4444227c7e4a9e598f7288d1994bf63f129c44b90cfd2432172'),
     'sbc': ('2.1', 'https://www.kernel.org/pub/linux/bluetooth/sbc-2.1.tar.xz',
             '426633cabd7c798236443516dfa8335b47e004b0ef37ff107e0c7ead3299fcc2'),
+    'ldac': ('2.0.2.3', 'https://github.com/EHfive/ldacBT/releases/download/v2.0.2.3/ldacBT-2.0.2.3.tar.gz',
+             '4bd8eece78bb5c1361fab95743e7100506e2408a25c4a592a0f8d349746dc5b4'),
     'freeaptx': ('0.2.2', 'https://github.com/regularhunter/libfreeaptx/archive/0.2.2/libfreeaptx-0.2.2.tar.gz',
                  '5ab5ebddf3f2eb7ce47a505b87460b00fc1ede99c70010796d3575ab31ea80bf'),
 }
@@ -497,7 +499,7 @@ def build_adbd(src, stage, env, log):
 
 
 # Vamp's own bluealsa (docs/bluealsa.md#build). It links the libraries the rootfs already has (GLib 2.74.4,
-# D-Bus 1.12, ALSA 1.1.6, BlueZ 5.66's libbluetooth, fdk-aac 2.0.2 and Sony's LDAC encoder), which nothing here
+# D-Bus 1.12, ALSA 1.1.6, BlueZ 5.66's libbluetooth and fdk-aac 2.0.2), which nothing here
 # builds: stocksdk is their headers, from each one's own release at the rootfs's version, with a pkg-config file
 # apiece that links the stock library itself, read from an unpacked stock rootfs (STOCKFS) and refused unless it
 # is the file V1.36 ships (BLUEALSA_STOCK_LIBS, SHA-256). So the binary names the sonames the rootfs has and
@@ -510,9 +512,7 @@ BLUEALSA_STOCK_LIBS = {
     'usr/lib/libdbus-1.so.3.19.15': '13664b0698c933830c36087d5a3832f308ed4efe444952d5c8a147c8b9a8b952',
     'usr/lib/libasound.so.2.0.0': '9f125c2164028b8d728168168b9ad90cc38f6758d256ac57f3d87aab406eba46',
     'usr/lib/libbluetooth.so.3.19.8': '09f8aef89eda2924e6fd178beb3773847f5db85d5327364c4efb893220ef329f',
-    'usr/lib/libfdk-aac.so.2.0.2': 'c15d57967908319945f1fb7e7d0583fdfdbea085cac71425b09c01199293d310',
-    'usr/lib/libldacBT.so.2.0.19': '06f6b6dcb2db3285c1c108e8cb50efe7db09df192e48541cf8194af780cee3ac',
-    'usr/lib/libldacBT_ABR.so.2.0.0': '2bb7367adb3a29b62e87b6cb9edd1ada1c363e3c1f1054b160cfb42dc8626e6c'}
+    'usr/lib/libfdk-aac.so.2.0.2': 'c15d57967908319945f1fb7e7d0583fdfdbea085cac71425b09c01199293d310'}
 # The headers stocksdk takes beside GLib's: name: (url, sha256, the directory in the archive)
 BLUEALSA_HEADERS = {
     'dbus': ('https://dbus.freedesktop.org/releases/dbus/dbus-1.12.28.tar.gz',
@@ -523,15 +523,19 @@ BLUEALSA_HEADERS = {
               '39fea64b590c9492984a0c27a89fc203e1cdc74866086efb8f4698677ab2b574', 'bluez-5.66'),
     'fdk-aac': ('https://downloads.sourceforge.net/opencore-amr/fdk-aac-2.0.2.tar.gz',
                 'c9e8630cf9d433f3cead74906a1520d2223f89bcd3fa9254861017440b8eb22f', 'fdk-aac-2.0.2'),
-    'ldac': ('https://github.com/EHfive/ldacBT/releases/download/v2.0.2.3/ldacBT-2.0.2.3.tar.gz',
-             '4bd8eece78bb5c1361fab95743e7100506e2408a25c4a592a0f8d349746dc5b4', 'ldacBT'),
 }
 GLIBCONFIG = (pathlib.Path(__file__).resolve().parent/'bluez/glibconfig.h').read_text()
 # What bluez-alsa is built with: the four codecs stock's has beside SBC (LDAC as a source only: the decoder
 # is not in Sony's published library), bluealsa-aplay (Guest Play's player) and bluealsactl; nothing of
 # oFono, UPower, MIDI, mSBC, LC3 or ASHA, none of which the rootfs has a library or a user for.
+# The base bluealsa is built for: the recipe that stands for the root file system's own libraries. `stocksdk` is
+# V1.36's; another base (docs/bluealsa.md#bases) is another recipe of the same shape, and nothing else changes.
+BLUEALSA_BASE = 'stocksdk'
 BLUEALSA_OPTIONS = ['--enable-aac', '--enable-aptx', '--enable-aptx-hd', '--with-libfreeaptx', '--enable-ldac',
                     '--enable-aplay', '--enable-ctl', '--disable-payloadcheck', '--disable-systemd',
+                    # its per-device store (volume, mute, delay) on the tmpfs: /var/lib is read-only on the Q2, and
+                    # the volume kept from one connection to the next is Vamp's own (BT_VOLUME)
+                    '--localstatedir=/tmp/q2-bluealsa',
                     '--with-alsaplugindir=/usr/lib/alsa-lib', '--with-alsaconfdir=/usr/share/alsa/alsa.conf.d',
                     '--with-dbusconfdir=/etc/dbus-1/system.d']
 
@@ -595,6 +599,8 @@ def build_stocksdk(src, stage, env, log):
     pkgconfig(stage, 'gobject-2.0', '2.74.4', f'{stock} -lgobject-2.0', '', 'glib-2.0')
     pkgconfig(stage, 'gio-2.0', '2.74.4', f'{stock} -lgio-2.0', '', 'gobject-2.0')
     pkgconfig(stage, 'gio-unix-2.0', '2.74.4', '', '-I${prefix}/include/gio-unix-2.0', 'gio-2.0')
+    # the stock libraries' own dependencies (libffi, libpcre2, libz), which the linker looks for and nothing links
+    (stage/'ldflags').write_text(f'-Wl,-rpath-link,{STOCKFS}/usr/lib:{STOCKFS}/lib\n')
     extra = {}
     for name, (url, digest, top) in BLUEALSA_HEADERS.items():
         d = src.parent/name
@@ -622,11 +628,6 @@ def build_stocksdk(src, stage, env, log):
     for d in ('libSYS/include', 'libAACenc/include', 'libAACdec/include'):
         copy_headers(extra['fdk-aac']/d, stage/'usr/include/fdk-aac')
     pkgconfig(stage, 'fdk-aac', '2.0.2', f'{stock} -lfdk-aac', '-I${prefix}/include')
-    for h in ('inc/ldacBT.h', 'abr/inc/ldacBT_abr.h'):
-        (stage/'usr/include/ldac').mkdir(exist_ok=True)
-        shutil.copy(extra['ldac']/'libldac'/h, stage/'usr/include/ldac')
-    pkgconfig(stage, 'ldacBT-enc', '2.0.2.3', f'{stock} -lldacBT', '-I${prefix}/include/ldac')
-    pkgconfig(stage, 'ldacBT-abr', '2.0.2.3', f'{stock} -lldacBT_ABR', '-I${prefix}/include/ldac', 'ldacBT-enc')
 
 
 def build_sbc(src, stage, env, log):
@@ -639,7 +640,8 @@ def build_sbc(src, stage, env, log):
 
 
 def build_freeaptx(src, stage, env, log):
-    # a static library alone, at the Makefile's own -O3: the aptX and aptX HD encoder, bit for bit libopenaptx's
+    # a static library alone, at the Makefile's own -O3: the aptX and aptX HD codec, the fork of libopenaptx 0.2.0
+    # (docs/bluealsa.md#codecs-and-licences)
     (stage/'usr/lib').mkdir(parents=True)
     run(*env.cc.split(), '-O3', '-fPIC', '-I.', '-c', 'freeaptx.c', '-o', 'freeaptx.o', cwd=src, log=log)
     run(env.vars['AR'], 'rcs', stage/'usr/lib/libfreeaptx.a', 'freeaptx.o', cwd=src, log=log)
@@ -648,10 +650,34 @@ def build_freeaptx(src, stage, env, log):
     pkgconfig(stage, 'libfreeaptx', '0.2.2', '-L${prefix}/lib -lfreeaptx', '-I${prefix}/include')
 
 
+def build_ldac(src, stage, env, log):
+    # Sony's encoder and its adaptive bit rate library as Android publishes them, static: the rootfs's
+    # libldacBT_ABR.so.2 is another build of it with another interface (its ldac_ABR_get_handle takes a library's
+    # path and loads it), so upstream bluez-alsa cannot use it (docs/bluealsa.md#shanlings-changes). ldaclib.c and ldacBT.c
+    # include the rest of src/, as Android's own build compiles them.
+    lib = src/'libldac'
+    (stage/'usr/lib').mkdir(parents=True)
+    for name, sources in (('ldacBT_enc', ['src/ldaclib.c', 'src/ldacBT.c']), ('ldacBT_abr', ['abr/src/ldacBT_abr.c'])):
+        objs = []
+        for s in sources:
+            objs.append(pathlib.Path(s).stem + '.o')
+            run(*env.cc.split(), '-O2', '-fPIC', '-Iinc', '-Isrc', '-Iabr/inc', '-c', s, '-o', objs[-1], cwd=lib, log=log)
+        run(env.vars['AR'], 'rcs', stage/f'usr/lib/lib{name}.a', *objs, cwd=lib, log=log)
+    for h in ('inc/ldacBT.h', 'abr/inc/ldacBT_abr.h'):
+        copy_headers(lib/pathlib.Path(h).parent, stage/'usr/include/ldac', pathlib.Path(h).name)
+    for n in ('LICENSE', 'NOTICE'):
+        shutil.copy(lib/n, stage/f'{n}.ldac')
+    pkgconfig(stage, 'ldacBT-enc', '2.0.2.3', '-L${prefix}/lib -lldacBT_enc -lm', '-I${prefix}/include/ldac')
+    pkgconfig(stage, 'ldacBT-abr', '2.0.2.3', '-L${prefix}/lib -lldacBT_abr', '-I${prefix}/include/ldac', 'ldacBT-enc')
+
+
 def build_bluealsa(src, stage, env, log):
-    sdk = env.deps['stocksdk']
-    vars = dict(env.vars, PATH=f'{sdk}/usr/bin:{env.vars["PATH"]}',
-                LDFLAGS=f'{env.vars["LDFLAGS"]} -Wl,-rpath-link,{STOCKFS}/usr/lib:{STOCKFS}/lib')
+    # Nothing here names the stock rootfs: the base is whichever dependency carries the pkg-config files for
+    # alsa, bluez, dbus-1, gio-unix-2.0, glib-2.0 and fdk-aac, gdbus-codegen in its usr/bin, and in `ldflags`
+    # what else its libraries need at link time (BLUEALSA_BASE; docs/bluealsa.md#bases).
+    base = env.deps[BLUEALSA_BASE]
+    more = (base/'ldflags').read_text().strip() if (base/'ldflags').exists() else ''
+    vars = dict(env.vars, PATH=f'{base}/usr/bin:{env.vars["PATH"]}', LDFLAGS=f'{env.vars["LDFLAGS"]} {more}')
     run('autoreconf', '--install', '--force', cwd=src, env=vars, log=log)
     run('./configure', f'--host={env.host}', '--prefix=/usr', *BLUEALSA_OPTIONS, cwd=src, env=vars, log=log)
     run('make', f'-j{JOBS}', cwd=src, env=vars, log=log)
@@ -670,7 +696,8 @@ RECIPES = {'openssl': (build_openssl, []),
            'ffmpeg': (build_ffmpeg, ['openssl', 'zlib']),
            'adbd': (build_adbd, []),
            'stocksdk': (build_stocksdk, []), 'sbc': (build_sbc, []), 'freeaptx': (build_freeaptx, []),
-           'bluealsa': (build_bluealsa, ['stocksdk', 'sbc', 'freeaptx'])}
+           'ldac': (build_ldac, []),
+           'bluealsa': (build_bluealsa, [BLUEALSA_BASE, 'sbc', 'freeaptx', 'ldac'])}
 
 
 # Each top-level function's and class's text as this module was imported (inspect.getsource rereads

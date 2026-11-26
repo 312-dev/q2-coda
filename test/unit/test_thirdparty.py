@@ -984,8 +984,10 @@ def test_replacements_strips_every_install_entry(tmp_path, monkeypatch):
                 for name, entries in thirdparty.INSTALL.items() for path, rel in entries.items()}
     assert files == {path: dst for path, (_, dst) in expected.items()} and sorted(stripped) == sorted(expected.values())
     assert files['usr/lib/libz.so.1.2.11'] == out/'thirdparty/usr/lib/libz.so.1.2.11'
-    # mbedtls and libnl among them; adbd is no replacement (a --dev build's program, docs/adb.md)
-    assert versions == {name: v for name, (v, _, _) in thirdparty.SOURCES.items() if name != 'adbd'}
+    # mbedtls and libnl among them; adbd is no replacement (a --dev build's program, docs/adb.md), nor are the
+    # own bluealsa and what it is built from (a --own-bluealsa build's, docs/bluealsa.md#build)
+    beside = {'adbd', 'bluealsa', 'stocksdk', 'sbc', 'freeaptx', 'ldac'}
+    assert versions == {name: v for name, (v, _, _) in thirdparty.SOURCES.items() if name not in beside}
 
 
 @pytest.fixture
