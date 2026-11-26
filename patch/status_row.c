@@ -365,7 +365,7 @@ static void headset_paint(void *bar, void *canvas, int x, int cy) {
 }
 
 /* Wired headphones: Phosphor's headphones (regular), 12 px tall on rows 16 to 27 (tools/art.py
- * STATUS_TALL_FIT); with no output connected, its ear-slash (regular), the same height and rows. */
+ * STATUS_TALL_FIT); with no output connected, its ear-slash (regular) in Negative, the same height and rows. */
 static void wired_paint(void *bar, void *canvas, int x, int cy) {
     status_art(bar, canvas, wired_on() ? "status_wired" : "status_noaudio", x, cy);
 }

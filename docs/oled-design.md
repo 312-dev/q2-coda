@@ -269,7 +269,7 @@ All lists share one grid.
     (USB-C headphones among them) (the user's, 2026-11-25, `hpicon/mockup2.png`). With no output connected (nothing
     plugged in, no Bluetooth device connected, no guest or AirPlay speaker playing), a deaf ear in the same place:
     Phosphor `ear-slash` (regular), 12 px tall on the same rows, in a 10 px box, its ink as far from the fan's as the
-    headphones' (the user's, 2026-11-25: "a deaf ear icon ... ship it").
+    headphones' (the user's, 2026-11-25: "a deaf ear icon ... ship it"), in Negative (red) in both halves (the user's, 2026-11-26).
   - **Bluetooth** (P9 in `design/bt-redesign`), left of wired headphones: nothing while Bluetooth is off or nothing
     is connected, or while wired headphones take the sound (a jack plugged in over a linked headset plays there, and
     the row shows where the sound goes: one glyph, never both); Phosphor `bluetooth` (bold, 12 px tall on rows 16 to

@@ -329,8 +329,8 @@ STATUS_UNLIT = {'d': 0x3a3a3c, 'l': 0xc7c7cc}
 # their ink centred on row 21.5 with the battery's and the fan's (the user's mockups, 2026-11-25); each box as wide as
 # its ink, so each stands about 6.5 px of ground from the fan's ink (ear-slash's 9.4 px in 10, headphones' 13.6 in 14).
 STATUS_TALL = 12.0
-STATUS_TALL_FIT = {'status_bt': ('bluetooth-bold', 9), 'status_wired': ('headphones', STATUS_PX),
-                   'status_noaudio': ('ear-slash', 10)}
+STATUS_TALL_FIT = {'status_bt': ('bluetooth-bold', 9), 'status_wired': ('headphones', STATUS_PX)}
+STATUS_EAR_W = 10  # the deaf ear's box (status_row.c SR_EAR_W), in Negative in both halves (the user's, 2026-11-26)
 STATUS_SECONDARY = inks('secondary', 'd', 'l')
 STATUS_SPIN = 30  # status_row.c SR_SPIN: a half turn a second at 30 fps
 KEYLOCK_CARD_PX = 56  # Buttons Lock's card's padlock (keylock.c CARD_GLYPH)
@@ -749,6 +749,10 @@ def status_images(prefix):
             for k, c in STATE_INKS.items()}
     out |= {f'{prefix}_status_btdim_{k}': status_glyph('bluetooth-bold', STATUS_TALL_FIT['status_bt'][1], c, STATUS_TALL, 0)
             for k, c in BT_SPIN_INKS.items()}
+    # no output connected (status_row.c wired_paint): the deaf ear, ear-slash at STATUS_TALL in Negative, the same in
+    # both halves
+    out |= {f'{prefix}_status_noaudio_{k}': status_glyph('ear-slash', STATUS_EAR_W, token('negative'), STATUS_TALL, 0)
+            for k in STATE_INKS}
     # a card app's server out of reach (status_row.c SLOT_OFFLINE): cloud-slash in Warning, the same in both halves;
     # its ink 13.6 px wide at 11 tall, so a STATUS_PX box
     out |= {f'{prefix}_status_offline_{k}': status_glyph('cloud-slash-bold', STATUS_PX, token('warning')) for k in STATE_INKS}
