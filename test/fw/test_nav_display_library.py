@@ -612,7 +612,7 @@ def test_songs_picker_flips_the_current_order_and_takes_another_s_natural_direct
 
 def test_playlists_picker_flips_the_current_order_and_takes_recently_added_newest_first(fw):
     """Sorting's Playlists opens its picker: Name (A to Z unless chosen) or Recently Added. Name again flips it to Z
-    to A; Recently Added takes the newest first and again the oldest first; each saved as Q2POD PLAYLISTSORT and
+    to A; Recently Added takes the newest first and again the oldest first; each saved as Q2POD PLAYLISTORDER and
     PLAYLISTDOWN, the picker staying and Sorting's row following."""
     ui = Ui(fw)
     page = library(fw, ui)
@@ -626,10 +626,10 @@ def test_playlists_picker_flips_the_current_order_and_takes_recently_added_newes
     assert marks() == [('Name \u2191', b'select'), ('Recently Added', b'unselect')]
     before = len(writes(fw))
     ui.click(page.view().children[0].children[0])
-    assert marks()[0] == ('Name \u2193', b'select') and writes(fw)[before:] == [('PLAYLISTSORT', 0), ('PLAYLISTDOWN', 1)]
+    assert marks()[0] == ('Name \u2193', b'select') and writes(fw)[before:] == [('PLAYLISTORDER', 0), ('PLAYLISTDOWN', 1)]
     ui.click(page.view().children[1].children[0])
     assert marks() == [('Name', b'unselect'), ('Recently Added \u2193', b'select')]  # the newest first
-    assert writes(fw)[-2:] == [('PLAYLISTSORT', 1), ('PLAYLISTDOWN', 1)]
+    assert writes(fw)[-2:] == [('PLAYLISTORDER', 1), ('PLAYLISTDOWN', 1)]
     assert sorting.children[1].said() == 'Playlists: Recently Added \u2193'
     ui.click(page.view().children[1].children[0])
     assert marks()[1] == ('Recently Added \u2191', b'select') and writes(fw)[-1] == ('PLAYLISTDOWN', 0)
@@ -639,7 +639,7 @@ def test_playlists_picker_flips_the_current_order_and_takes_recently_added_newes
 def test_the_playlists_order_is_read_back_from_the_config(fw):
     """A choice made before a restart: the Sorting row reads it from config.ini."""
     ui = Ui(fw)
-    page = library(fw, ui, PLAYLISTSORT=b'1', PLAYLISTDOWN=b'1')
+    page = library(fw, ui, PLAYLISTORDER=b'1', PLAYLISTDOWN=b'1')
     ui.click(button_of(page.view(), 'Sorting'))
     assert page.texts()[1] == 'Playlists: Recently Added \u2193'
 

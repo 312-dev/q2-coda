@@ -1,5 +1,5 @@
 /* Playlists' order, Playback > Library > Sorting's Playlists picker (library_settings.c): Name or
- * Recently Added, each either way, kept as [Q2POD] PLAYLISTSORT (PLORDER_*) and PLAYLISTDOWN (1: Z
+ * Recently Added, each either way, kept as [Q2POD] PLAYLISTORDER (PLORDER_*) and PLAYLISTDOWN (1: Z
  * to A, or the newest first); nothing chosen is Name, A to Z. Every list of the playlists is
  * getAllPlayList's headers (Library > Playlists as rows or as Cover Flow, Home's Playlists, the
  * Add to Playlist picker), whose query navigation.c library_query ends with playlist_sort_sql's
@@ -27,7 +27,7 @@ static struct {
 
 static void pls_read(void) {
     if (pls.read) return;
-    pls.sort = (unsigned char)config_value("Q2POD", "PLAYLISTSORT", PLORDER_N, PLORDER_NAME);
+    pls.sort = (unsigned char)config_value("Q2POD", "PLAYLISTORDER", PLORDER_N, PLORDER_NAME);
     pls.down = (unsigned char)config_value("Q2POD", "PLAYLISTDOWN", 2, 0);
     pls.read = 1;
 }
@@ -43,7 +43,7 @@ int playlist_down(void) {
 void playlist_sort_set(int sort, int down) {
     pls_read();
     pls.sort = (unsigned char)sort, pls.down = (unsigned char)!!down;
-    write_int_config(pls.sort, "Q2POD", "PLAYLISTSORT");
+    write_int_config(pls.sort, "Q2POD", "PLAYLISTORDER");
     write_int_config(pls.down, "Q2POD", "PLAYLISTDOWN");
 }
 

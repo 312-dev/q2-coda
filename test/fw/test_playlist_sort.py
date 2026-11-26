@@ -89,7 +89,7 @@ def test_name_is_the_default_and_its_sql_is_unchanged(fw, recs):
 
 
 def test_name_z_to_a_is_the_sql_s_order_reversed(fw, recs):
-    Config(fw, PLAYLISTSORT=b'0', PLAYLISTDOWN=b'1')
+    Config(fw, PLAYLISTORDER=b'0', PLAYLISTDOWN=b'1')
     h = Headers(fw, recs, HEADERS_BY_NAME[::-1], CARD)
     h.load()
     assert h.sql == [HEADERS + b' order by name collate nocase desc, id'] and h.stats == []
@@ -98,7 +98,7 @@ def test_name_z_to_a_is_the_sql_s_order_reversed(fw, recs):
 def test_recently_added_puts_the_newest_first_by_file_or_header_date_the_undated_last(fw, recs):
     """Recently Added, newest first: Car Mix's file (…500), Gym's header (…300), Old Rock's file (…200), Mine's header
     (…100, later than its .m3u8), then Unsorted, which has neither, last. One stat per playlist, .m3u then .m3u8."""
-    Config(fw, PLAYLISTSORT=b'1', PLAYLISTDOWN=b'1')
+    Config(fw, PLAYLISTORDER=b'1', PLAYLISTDOWN=b'1')
     h = Headers(fw, recs, HEADERS_BY_NAME, CARD)
     assert h.load() == ['Car Mix', 'Gym', 'Old Rock', 'Mine', 'Unsorted']
     assert h.sql == [BY_NAME]  # the name order under it: its ties' order
@@ -107,7 +107,7 @@ def test_recently_added_puts_the_newest_first_by_file_or_header_date_the_undated
 
 
 def test_recently_added_oldest_first_keeps_the_undated_last_and_ties_by_name(fw, recs):
-    Config(fw, PLAYLISTSORT=b'1', PLAYLISTDOWN=b'0')
+    Config(fw, PLAYLISTORDER=b'1', PLAYLISTDOWN=b'0')
     headers = HEADERS_BY_NAME + [(5, 'Zed', 1700000200)]  # the same date as Old Rock's file: by name after it
     h = Headers(fw, recs, headers, CARD)
     assert h.load() == ['Mine', 'Old Rock', 'Zed', 'Gym', 'Car Mix', 'Unsorted']
@@ -115,14 +115,14 @@ def test_recently_added_oldest_first_keeps_the_undated_last_and_ties_by_name(fw,
 
 def test_a_name_fat_refuses_is_looked_for_as_the_card_holds_it(fw, recs):
     """A playlist named with a character FAT refuses (an export writes it as _): its file found as the card's."""
-    Config(fw, PLAYLISTSORT=b'1', PLAYLISTDOWN=b'1')
+    Config(fw, PLAYLISTORDER=b'1', PLAYLISTDOWN=b'1')
     h = Headers(fw, recs, [(0, 'A', 0), (1, 'AC/DC', 0)], {M3U + 'AC_DC.m3u': 1700000000})
     assert h.load() == ['AC/DC', 'A']
 
 
 def test_the_headers_off_the_ui_thread_keep_the_name_order(fw, recs):
     """Another thread's load (none reads the headers today) is left in the SQL's order: no stat, no reorder."""
-    Config(fw, PLAYLISTSORT=b'1', PLAYLISTDOWN=b'1')
+    Config(fw, PLAYLISTORDER=b'1', PLAYLISTDOWN=b'1')
     fw.mock('fw_pthread_self', lambda *_: 7)  # not ui_thread
     h = Headers(fw, recs, HEADERS_BY_NAME, CARD)
     assert h.load() == ['Car Mix', 'Gym', 'Mine', 'Old Rock', 'Unsorted'] and h.stats == []
@@ -130,7 +130,7 @@ def test_the_headers_off_the_ui_thread_keep_the_name_order(fw, recs):
 
 def test_rows_already_staged_stay_where_they_are(fw, recs):
     """Only the records this load added move: what the staging deque held before stays first, in its order."""
-    Config(fw, PLAYLISTSORT=b'1', PLAYLISTDOWN=b'1')
+    Config(fw, PLAYLISTORDER=b'1', PLAYLISTDOWN=b'1')
     h = Headers(fw, recs, HEADERS_BY_NAME, CARD)
     before = recs(kind=4, disc=9, title='Kept')
     h.rows.push(h.staging.value, before)

@@ -397,7 +397,7 @@ rows dropped, each page's own built; each keeps its own place in position memory
   (`Q2POD SCANDURATIONS`, off; caption "Measures lengths after each update"; durations.c).
 - Sorting: **Songs**, a picker of Title, Artist, Album and Recently Added (`song_sort.c`), the current one's direction
   as an arrow, Center on it again flipping it and another taking its natural one (A to Z, the newest first);
-  **Playlists**, a picker of Name and Recently Added the same way (`playlist_sort.c`, `Q2POD PLAYLISTSORT` and
+  **Playlists**, a picker of Name and Recently Added the same way (`playlist_sort.c`, `Q2POD PLAYLISTORDER` and
   `PLAYLISTDOWN`; Name A to Z unless chosen), which orders every list of the playlists: Library's and Home's
   Playlists, as rows or as Cover Flow, and the Add to Playlist picker. Recently Added dates a playlist by the later of
   when the Q2 made it and its `.m3u` file's time on the card (a sync or an edit on a computer moves it up), the
