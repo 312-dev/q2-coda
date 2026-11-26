@@ -580,7 +580,7 @@ static void np_poll(void) {
     if (np.state != np_sent.state || np.id != np_sent.id || np.shuffle != np_sent.shuffle ||
         np.repeat != np_sent.repeat || np.volume != np_sent.volume || np.hearts != np_sent.hearts ||
         np.radio != np_sent.radio || np.noten != np_sent.noten || strcmp(np.note, np_sent.note) ||
-        strcmp(np.path, np_sent.path) || np.buf != np_sent.buf ||
+        strcmp(np.path, np_sent.path) || np.buf != np_sent.buf || np.find != np_sent.find ||
         /* its bytes: at most twice a second */
         (np.bhave != np_sent.bhave && crc_now_ms() - buf_pushed >= 500) ||
         strcmp(np.title, np_sent.title))

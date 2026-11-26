@@ -207,6 +207,27 @@ def test_find_goes_to_the_shim_and_now_playing_says_it_plays(q2):
     shim.now(radio=0)
 
 
+def test_the_jingle_starting_or_stopping_is_pushed(q2):
+    """The phone's Find button showed Stop for minutes after a button on the Q2 stopped the jingle, and its Stop did not
+    clear it (2026-11-25 00:48): a change of the shim's find= alone, nothing else in Now Playing, reaches a subscribed
+    phone as a NowPlaying push, finding on as the jingle starts and off as it stops."""
+    s, shim = q2
+    s.subscribe(position=False)
+    for find in (1, 0):
+        WAIT(0.3)
+        while s.pushes:  # pushes queued by an earlier test or call
+            s.wait_push(0)
+        shim.now(radio=0, extra=f'find={find}\n')
+        end = time.monotonic() + 3
+        while True:
+            try:
+                np = s.wait_push(max(0.01, end - time.monotonic())).get('now_playing', {})
+            except TimeoutError:
+                raise AssertionError(f'no NowPlaying push with finding {bool(find)}') from None
+            if np and np['finding'] is bool(find):
+                break
+
+
 def test_now_playing_carries_the_q2_muses_toast(q2):
     """CAP_NOTICE: the car showed nothing when the Vamp toasted that a radio could not start (2026-11-18 00:28);
     Android Auto draws no toast. The shim's note and its count (coda_rc_shim.c coda_rc_note) go out as
