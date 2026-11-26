@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Playlists: a long playlist with server songs in it scrolls smoothly with the wheel, and the selected song's long title scrolls steadily, where a playlist of a few hundred songs could take a fifth of a second to draw each step, more the longer it was.
   - Playlists: each playlist can now show its songs newest first. Hold Play/Pause on a playlist in Library > Playlists, choose **Sort**, then **Recently Added** to see the songs you added last at the top, **Oldest First** for the order you added them, or **Title** for A to Z. Each playlist remembers its own choice, and playing the playlist follows it. The Playlists picker in Settings > Playback > Library > Sorting that sorted the list of playlists is gone: playlists are listed by name again.
   - Playlists: after the selection moves off **Add Songs** (or Shuffle, Save as Playlist or Clear), the row's words go back to the accent colour, where they could stay white with their bottom edge blue.
   - Lists: a long song title on the selected row (in Songs, a playlist, an album, an artist or Search) scrolls at a steady reading pace, the same as Now Playing's title, where it could crawl along a few pixels a second after the wheel had been still for a couple of seconds. Other scrolling text in the menus keeps a steady pace the same way.

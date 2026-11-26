@@ -46,6 +46,7 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 | 34  | Boot reads `config.ini` once per key                                                 | runtime   | M      | measured   |
 | 35  | A large library's Songs, Albums and Artists load and sort on every open              | runtime   | M      | measured   |
 | 36  | Periodic wakeups where an event exists ([Polling and wakeups](#polling-and-wakeups)) | power     | M      | in part    |
+| 37  | A list's offline marks asked the whole list once a row (resolved)                    | runtime   | S      | resolved   |
 
 ## Fragile hard-coding
 
@@ -238,6 +239,22 @@ Entries 7 to 17 are costs the code marks itself.
 
 - **State:** the name sort's order is kept, in RAM and on the card ([internals](internals.md#name-order)): the first Songs open after a boot took 534 ms from the load to the first paint, from 1,855-2,930 ms. After a library or catalogue change, Songs, Albums and Artists, once opened, are loaded again and sorted ahead in the UI's quiet, so their next open finds the order kept ([internals](internals.md#name-order), Sorted ahead). A Library list opened within seconds of a change, or after a firmware update (the kept orders carry the firmware's version), still sorts at its open. Nothing repeats a query within one open.
 - **Decision:** three indexes are made at the end of a full scan when `/mnt/data` has 8 MB free (the album grouping's three terms, `album`, and the album-artist expression; [internals](internals.md#coverflow), Indexes): back to back in this emulator the grouping went from 240-347 ms to 171-273 ms and both Unknown checks from 37-67 ms to 0-2 ms, for 1.69 MB of `/mnt/data` (17.7 MB) at 20,103 songs, more with real paths, and 0.5-1.6 s at the end of the scan under QEMU. The rest left as is. The double-press wait is Center's (a second press turns the screen off). A sort that still runs at an open runs on a thread of its own with stock's own call and comparator, the UI thread drawing a spinner over the screen meanwhile; the wait itself is unchanged. ponytail: every open still runs its query and, for Albums, the album split (a kept Albums open's pass 290-650 ms in the emulator, about 1 s on the Q2); keeping the loaded records across opens would save that for about 3 MB of RAM held all the time at 9,212 songs (about 320 bytes a song), which is why it was not done.
+
+### 37. A list's offline marks asked the whole list once a row (resolved)
+
+- **Where:** `patch/nav/row_paint.c` (`offline_x`, `drill`, `more_image`; its callers `grey_rows`, `paint_songs`, `paint_offline`, `paint_chevrons`); [internals](internals.md#server-library).
+- **What it was:** with server songs in the Library, `grey_rows` runs on every paint of a list and gave each row's labels their room clear of the offline mark (`catalogue_fit`), the mark's place coming from `offline_x`. That asked `drill` of the list itself, whose first step (`more_image`) reads the name of every row of the list, so a paint of a list of N rows read about N x N names (N up to 512, the rows `load_rows` collects); `paint_offline` did the same whenever any row was greyed or marked. A playlist's page (`playlist_pages.c`) holds every song as a row, so the cost grew with the square of the playlist's length, and every wheel step or marquee step repaints it.
+- **Seen on the owner's Q2 (2026-11-26):** a playlist's page with server songs, Wi-Fi down: UI passes of 176-214 ms, nearly all in events (paint), about 5 a second while the selected title scrolled or the wheel turned, and demo at one core. The profile's running samples were `more_image <- drill <- offline_x <- ringnav_paint_bg` and the name lookups under it (`widget_get_prop_str`, stock's `widget_get_prop` and `strcmp`; the frames named `wpa_ctrl_detach` and `object_default_clone` are unnamed stock code above those symbols, the widget's own `get_prop`).
+- **Measured in the pool emulator:** a `--dev` build of `integ/q2-1202` with a microsecond probe round each painter, a catalogue of 6,000 server songs offline (`Q2EMU_WIFI=0`) and playlists of 100, 300 and 500 of them; the wheel stepped down and up 48 times on each playlist's page, medians of the painted passes:
+
+  | Playlist | `grey_rows` before | after | UI pass before | after |
+  | -------: | -----------------: | ----: | -------------: | ----: |
+  |      100 |             4.7 ms | 0.4 ms |          27 ms | 21 ms |
+  |      300 |            43.0 ms | 0.9 ms |          69 ms | 22 ms |
+  |      500 |           110.6 ms | 1.9 ms |         134 ms | 24 ms |
+
+  The largest pass on the 500-song page went from 207 ms to 27 ms. The Q2 runs this code about three times slower than the emulator, so its pass on such a page no longer grows with the playlist.
+- **State:** each painter asks `drill` of the list once, not once a row, and `grey_rows`' fitting, `paint_offline`'s marks and `paint_chevrons`' chevrons look at the rows in sight only (a row coming into sight is fitted in the paint that brings it, before it paints). `test_a_long_list_with_greyed_rows_paints_in_lookups_its_rows_in_sight_decide` (`test/fw/test_nav_painters.py`) counts the name lookups of one paint of 20 and of 200 rows. ponytail: what is left grows with the list but once a painter: `load_rows` collects every row on each of its calls (about six a paint) and `drill` still reads every row's name once a painter; at 500 rows that is the 1.9 ms above, and keeping either across a pass would need to know when the rows change, which AWTK does not say.
 
 ### 36. Shuffle sorted the queue into albums and saved it on the UI thread (resolved)
 

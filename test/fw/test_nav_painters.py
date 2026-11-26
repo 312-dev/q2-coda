@@ -3394,6 +3394,55 @@ def test_a_greyed_row_keeps_its_contrast_on_the_selection_and_carries_the_offlin
     assert [label.box[2] for label in labels] == [320, 272, 320, 320]
 
 
+def test_a_long_list_with_greyed_rows_paints_in_lookups_its_rows_in_sight_decide(fw, st):
+    """A list with greyed rows (grey_rows, paint_songs, paint_offline, paint_chevrons) asks the list's own
+    chevron (drill, which walks every row of the list) once a painter, not once a row, and the rows out of
+    sight nothing: a playlist page of some hundreds of server songs, offline, painted in about 200 ms on the
+    owner's Q2, all of it these lookups (docs/inefficiencies.md#37-a-lists-offline-marks-asked-the-whole-list-once-a-row-resolved). The
+    rows in sight stay as they were: the greyed rows' titles end clear of the mark, which each of them carries."""
+    url = C.create_string_buffer(b'/mnt/mmc/.subsonic/cat/al1/s1.flac')
+    record = C.create_string_buffer(O['REC_SIZE'] + 8)
+    struct.pack_into('<Q', record, O['REC_PATH'], C.addressof(url))
+    struct.pack_into('<i', record, O['REC_TYPE'], 8)
+
+    kept: list = []  # every page's widgets live to the end, so no address is reused
+
+    def lookups(rows):
+        page = Page(fw, rows=rows)
+        labels = [b.children[0] for b in page.rows]
+        for label in labels:
+            label.move(10, 0, 320, 48)
+        fw.mock('tk_str_start_with', stock_start_with)
+        for i in (1, 2):  # Local Only: a server row can't play
+            fw.fn('catalogue_mark', None, C.c_void_p, C.c_void_p, C.c_int)(page.rows[i].parent.addr, C.addressof(record), 0)
+        page.paint()
+        for label in labels[:7]:  # each row in sight painted, which the mark takes its ink from
+            text_ink(fw, st, label)
+        count = [0]
+        prop_str = page.ui.prop_str
+
+        def counted(*a):
+            count[0] += 1
+            return prop_str(*a)
+        fw.mock('widget_get_prop_str', counted)
+        page.canvas.px.clear()
+        page.paint()
+        fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(page.view.addr, page.canvas.addr)
+        # the mark's column on the first four rows, above the list's fade at its foot
+        marks = sorted({y // 48 for x, y in page.canvas.px if 300 <= x < 340 and y < 4 * 48})
+        assert [label.box[2] for label in labels[:4]] == [320, 272, 272, 320]  # the mark's room, as before
+        assert marks == [1, 2]
+        for i in (1, 2):  # out of catalogue.c's rows, before the next page's widgets
+            fw.fn('catalogue_forget', None, C.c_void_p)(page.rows[i].parent.addr)
+        kept.append(page)
+        return count[0]
+
+    short, long = lookups(20), lookups(200)
+    # the 180 rows added, all out of sight: at most a few lookups each (load_rows' walk, more_image's), where
+    # asking drill once a row cost about 2 x 200 x 200
+    assert long - short <= 4 * 180, (short, long)
+
+
 def test_oleds_song_rows_end_their_title_and_inline_artist_clear_of_the_offline_mark(fw, st):
     """OLED's one-line song rows (song_rows.c) on Songs' page: a greyed row's title and inline artist end
     SONG_COL_GAP (12 px) short of the offline mark's ink, not on the right column under it; a title with no room

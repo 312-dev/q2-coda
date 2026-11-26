@@ -248,7 +248,9 @@ static void paint_chevrons(void *w, void *canvas) {
         return;
     for (int i = 0; i < g_menu.n; ++i) {
         rect_t r = bounds(&g_menu, i);
-        if (2 * r.w < I(w, W_W) || !drill(g_menu.at[i])) continue;
+        /* the rows in sight only, as the clip draws no others */
+        if (r.y + r.h <= 0 || r.y >= g_menu.height || 2 * r.w < I(w, W_W) || !drill(g_menu.at[i]))
+            continue;
         /* the theme's own, on the right column */
         int sel = st.sel_w == w && i == st.sel_row,
             spin = home && sel && cover_flow_row(g_menu.at[i]) ? coverflow_spinner() : 0;
@@ -263,14 +265,17 @@ static void paint_chevrons(void *w, void *canvas) {
 /* A song list's rows, from the list's background, so before the rows paint:
  * song_rows.c fits each title's box and draws what stands beside it, a greyed row's clear of its
  * offline mark. Here, as the rows and their bounds are this file's. */
-static int offline_x(void *w, int i, const rect_t *r);
+static int offline_x(void *w, int i, const rect_t *r, int *chev);
 static void paint_songs(void *w, void *canvas) {
     if (!w || !kind(w) || !P(canvas, CANVAS_LCD) || !song_list(w) || !load_rows(&g_menu, w)) return;
+    int chev = -1; /* offline_x's, asked once */
     for (int i = 0; i < g_menu.n; ++i) {
         rect_t r = bounds(&g_menu, i);
         if (r.y + r.h > 0 && r.y < I(w, W_H))
             song_row(w, canvas, g_menu.at[i], g_menu.id[i], r, st.sel_w == w && i == st.sel_row,
-                     catalogue_row_greyed(g_menu.at[i]) ? offline_x(w, i, &r) - CAT_MARK_W / 2 : 0);
+                     catalogue_row_greyed(g_menu.at[i])
+                         ? offline_x(w, i, &r, &chev) - CAT_MARK_W / 2
+                         : 0);
     }
 }
 
@@ -287,11 +292,15 @@ static int into_image(void *w, int depth) {
     }
     return 0;
 }
-static int offline_x(void *w, int i, const rect_t *r) {
+/* *chev is drill(w), the list's own answer, -1 until this asks it: drill walks every row of the
+ * list (more_image), so a painter asks it once for all its rows, not once a row
+ * (docs/inefficiencies.md#37-a-lists-offline-marks-asked-the-whole-list-once-a-row-resolved). */
+static int offline_x(void *w, int i, const rect_t *r, int *chev) {
     int sel = st.sel_w == w && i == st.sel_row;
+    if (*chev < 0) *chev = drill(w);
     /* the payload's chevrons (paint_chevrons), or stock's list_into, which shows on the selection
      */
-    int chevron = drill(w) || (sel && into_image(P(g_menu.at[i], W_PARENT), 2));
+    int chevron = *chev || (sel && into_image(P(g_menu.at[i], W_PARENT), 2));
     return r->x + r->w - CHEVRON_W + 25 - (chevron ? 28 : 0);
 }
 /* Before a list's rows paint: an album's songs (albuminfo_page; playerjumpinfo_page, Go to
@@ -299,9 +308,9 @@ static int offline_x(void *w, int i, const rect_t *r) {
  * Played's and the Ratings lists' songs (page_tracks) and Search's results are a scroll_view's
  * rows, one per record in order (the showlist, the page's tracks or Search's results), not a
  * table's, so each that can't play now is greyed here, as ringnav_table_load greys a table's.
- * Then every greyed row's labels end short of its mark (catalogue_fit), their text SONG_COL_GAP
- * clear of its ink as a length is (song_rows.c), and any it narrowed before take their width
- * back. */
+ * Then each greyed row in sight has its labels end short of its mark (catalogue_fit), their text
+ * SONG_COL_GAP clear of its ink as a length is (song_rows.c), and any it narrowed before take
+ * their width back as they come into sight. */
 /* Search's results while they show: p_deque_searchshowlist, which each of its tab_button_group's
  * tabs (Songs, Artists, Albums, Genres) fills with its rows, the Songs tab's the list
  * search_track_row_on_click plays from; *tab the lit one's index. 0 for none (its history). */
@@ -327,32 +336,38 @@ static void grey_rows(void *w) {
                    : page_tracks(win);
     if (!list && g_menu.kind == 1 && catalogue_has()) list = ringnav_search_rows(win, &tab);
     if (list && deque_size(list) != (unsigned)g_menu.rows) list = (void *)0;
+    int chev = -1; /* offline_x's, asked once */
     for (int i = 0; i < g_menu.n; ++i) {
         rect_t r = bounds(&g_menu, i);
-        /* the rows in sight only: a long list's would fill catalogue.c's CAT_GREY_ROWS */
-        if (list && r.y + r.h > 0 && r.y < g_menu.height)
+        /* the rows in sight only: a long list's would fill catalogue.c's CAT_GREY_ROWS, and a row
+         * out of sight is marked and fitted in the paint that brings it in, before it paints */
+        int shown = r.y + r.h > 0 && r.y < g_menu.height;
+        if (list && shown)
             catalogue_mark(g_menu.at[i], deque_at(list, (unsigned)g_menu.id[i]), tab);
         else if (list)
             catalogue_forget(g_menu.at[i]);
-        if (2 * r.w >= I(w, W_W))
+        if (shown && 2 * r.w >= I(w, W_W))
             catalogue_fit(g_menu.at[i], w,
-                          offline_x(w, i, &r) - CAT_MARK_W / 2 - SONG_COL_GAP + HSCROLL_MARGIN +
-                              (g_menu.kind == 1 ? I(w, SCROLL_X) : 0));
+                          offline_x(w, i, &r, &chev) - CAT_MARK_W / 2 - SONG_COL_GAP +
+                              HSCROLL_MARGIN + (g_menu.kind == 1 ? I(w, SCROLL_X) : 0));
     }
 }
 
-/* After the rows: each greyed row's mark, in its text's colour as last painted, and under OLED
- * each marked song row's (catalogue.c catalogue_row_mark). */
+/* After the rows: each greyed row's mark in sight, in its text's colour as last painted, and
+ * under OLED each marked song row's (catalogue.c catalogue_row_mark). */
 static void paint_offline(void *w, void *canvas) {
     rect_t old;
     if (!catalogue_greys() || !kind(w) || !P(canvas, CANVAS_LCD) || !load_rows(&g_menu, w) ||
         !clip_surface(canvas, &g_menu, &old))
         return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+    int chev = -1; /* offline_x's, asked once */
     for (int i = 0; i < g_menu.n; ++i) {
         rect_t r = bounds(&g_menu, i);
-        if (2 * r.w >= I(w, W_W))
-            catalogue_row_mark(w, canvas, g_menu.at[i], offline_x(w, i, &r), r.y + r.h / 2);
+        /* a greyed or marked row in sight: no other carries a mark */
+        if (r.y + r.h > 0 && r.y < g_menu.height && 2 * r.w >= I(w, W_W) &&
+            catalogue_row_greyed(g_menu.at[i]))
+            catalogue_row_mark(w, canvas, g_menu.at[i], offline_x(w, i, &r, &chev), r.y + r.h / 2);
     }
     stock_canvas_set_fill_color(canvas, fill);
     canvas_set_clip_rect(canvas, &old);
