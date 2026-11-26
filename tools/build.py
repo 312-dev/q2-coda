@@ -2490,6 +2490,31 @@ def adb_files(out, cat):
             **{f'usr/bin/{n}': (f'usr/bin/{n}', adb_wrapper(n)) for n in USB_SCRIPTS}}
 
 
+# Vamp's own bluealsa (docs/bluealsa.md), in a build made with --own-bluealsa only: upstream bluez-alsa's daemon, its
+# two ALSA plugins and bluealsa-aplay, in a directory of their own beside stock's, which nothing starts or loads.
+OWN_BLUEALSA = 'usr/lib/vamp-bluealsa'
+OWN_BLUEALSA_FILES = {'bluealsad': 'usr/bin/bluealsad', 'bluealsa-aplay.own': 'usr/bin/bluealsa-aplay',
+                      'libasound_module_pcm_bluealsa.own.so': 'usr/lib/alsa-lib/libasound_module_pcm_bluealsa.so',
+                      'libasound_module_ctl_bluealsa.own.so': 'usr/lib/alsa-lib/libasound_module_ctl_bluealsa.so'}
+
+
+def own_bluealsa_files(out):
+    """--own-bluealsa's files ({rootfs path: (path whose inode metadata it takes, bytes)}), built by
+    tools/thirdparty.py and stripped into out. Each has a name no other packaged file has: the build keeps
+    every added file in out under its base name, where stock's patched bluealsa already is."""
+    import thirdparty
+    stage = thirdparty.build('bluealsa')
+    return {f'{OWN_BLUEALSA}/{name}': (HELPER_LIKE, thirdparty.stripped(stage/rel, out/'own-bluealsa'/name).read_bytes())
+            for name, rel in OWN_BLUEALSA_FILES.items()}
+
+
+def own_bluealsa_record(files):
+    """The manifest's own_bluealsa: bluez-alsa's version and each file's SHA-256 and size."""
+    import thirdparty
+    return dict(version=thirdparty.SOURCES['bluealsa'][0],
+                files={path: dict(sha256=sha(data), bytes=len(data)) for path, (_, data) in files.items()})
+
+
 def adbd_record(out):
     """The manifest's adbd: its version, SHA-256 and size."""
     import thirdparty
@@ -2696,13 +2721,15 @@ def signing_key(path, dev):
     check(path.is_file(), f'{path}: no release public key (docs/releasing.md#signing-a-release)')
     return public_key(path.read_bytes())
 
-def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, signing_pub=None, apps_dir=APPS_DIR, build_iroh=False):  # pragma: no mutate block
+def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, signing_pub=None, apps_dir=APPS_DIR, build_iroh=False, own_bluealsa=False):  # pragma: no mutate block
     # Kernel-module experiments: no measured saving (docs/clock-gating.md, pwm-clock-gating.md,
     # audio-notifier.md), none handles suspend/resume, and stock Standby suspends by default; dev only.
     check(not aic_idle_wait or dev, '--aic-idle-wait requires --dev')
     check(not rotator_lazy_clock or dev, '--rotator-lazy-clock requires --dev')
     check(not pwm_idle_clock or dev, '--pwm-idle-clock requires --dev')
     check(not mcu_idle_sleep or (dev and pwm_idle_clock), '--mcu-idle-sleep requires --dev --pwm-idle-clock')
+    # Vamp's own bluealsa is a spike (docs/bluealsa.md): carried beside stock's for a test by hand, dev only.
+    check(not own_bluealsa or dev, '--own-bluealsa requires --dev')
     check(dev or version_ok(VERSION, BETA), f'VERSION must be three single digits (x.y.z) and BETA 0-9: {VERSION}, {BETA}')
     version = TAG
     check(re.fullmatch(r'[A-Za-z0-9-]+/[A-Za-z0-9._-]+', repo), f'{repo}: not a GitHub owner/name')  # a C string
@@ -3242,6 +3269,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                **{path: (FONT, data) for path, (data, _) in fonts.items()},
                                **{FONT_DIR + n: ('etc/hosts', (ROOT/'assets/fonts'/n).read_bytes()) for n in FONT_NOTICES},
                                **(adb_files(out, cat) if dev else {}),
+                               **(own_files := own_bluealsa_files(out) if own_bluealsa else {}),
                                **({REMOTE: (HELPER_LIKE, compile_helper(out, cat, 'remote', 'q2remote', HELPER_LIBS[:1])),
                                    Q2EQ: (HELPER_LIKE, compile_helper(out, cat, 'q2eq', 'q2eq', HELPER_LIBS[:1])),
                                    USBTRACE: (HELPER_LIKE, compile_helper(out, cat, USBTRACE_SOURCES, 'q2-usbtrace',
@@ -3330,6 +3358,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         version=version, dev=dev, update_repo=repo, signing_key=key.hex(), bluealsa_sha256=sha(bluealsa), bluetoothd_sha256=sha(bluetoothd), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), q2_iroh_sha256=sha((out/'q2-iroh').read_bytes()), q2_iroh_bytes=len((out/'q2-iroh').read_bytes()), q2_guest_sha256=sha((out/'q2-guest').read_bytes()), q2_iap_sha256=sha((out/'q2-iap').read_bytes()), q2_iap_bytes=len((out/'q2-iap').read_bytes()), usb_f_uac1_sha256=sha((out/'usb_f_uac1.ko').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes()), 'q2_usbtrace_sha256': sha((out/'q2-usbtrace').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
         **({'rotator_clock': rotator} if rotator else {}),
         **({'adbd': adbd_record(out)} if dev else {}),
+        **({'own_bluealsa': own_bluealsa_record(own_files)} if own_bluealsa else {}),
         q2player_sha256=sha(q2player.read_bytes()),
         bundled_apps=bundled, rootfs_squashfs_bytes=len(blobs['recovery-update/rootfs.squashfs']),
         **({'pwm_clock': pwm} if pwm else {}),
@@ -3364,8 +3393,10 @@ if __name__ == '__main__':
                     help='experimental: cooperative Linux/MCU PWM clock gating (requires --dev)')
     ap.add_argument('--build-iroh', action='store_true',
                     help='build q2-iroh from remote/iroh-sidecar (Rust nightly) instead of taking the pinned one (tools/iroh.py)')
+    ap.add_argument('--own-bluealsa', action='store_true',
+                    help="experimental: carry Vamp's own bluealsa beside stock's, started by nothing (requires --dev; docs/bluealsa.md)")
     a=ap.parse_args()
     try:
-        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.signing_key,a.apps,a.build_iroh)
+        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.signing_key,a.apps,a.build_iroh,a.own_bluealsa)
     except (OSError, ValueError, zipfile.BadZipFile, subprocess.CalledProcessError) as exc:
         ap.error(str(exc))
