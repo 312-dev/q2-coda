@@ -74,15 +74,14 @@ assert click(2)==[(1,'PLAYSET','ARTISTTYPE')] and m.get(syms['artist_type'])==1 
 assert click(2)==[(0,'PLAYSET','ARTISTTYPE')] and m.get(syms['artist_type'])==0
 # Artist View (Q2POD ARTISTCF), Cover Flow unless chosen: List, Grid, then Cover Flow again
 assert [click(3) for _ in range(3)]==[[(2,'Q2POD','ARTISTCF')],[(0,'Q2POD','ARTISTCF')],[(1,'Q2POD','ARTISTCF')]] and texts()[3]=='Artist View: Cover Flow'; passed()
-# Library > Sorting: Songs and Playlists (their pickers' rows), Artist's Albums (ARTISTAZ) and Years (YEAROLD)
+# Library > Sorting: Songs (its picker's row), Artist's Albums (ARTISTAZ) and Years (YEAROLD)
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13,sub=2)
-assert texts()==['Songs: Title \u2191','Playlists: Name \u2191',"Artist's Albums: Year",'Years: Newest First']
-assert click(2)==[(1,'Q2POD','ARTISTAZ')] and texts()[2]=="Artist's Albums: A–Z"
-assert click(2)==[(0,'Q2POD','ARTISTAZ')] and texts()[2]=="Artist's Albums: Year"
-assert click(3)==[(1,'Q2POD','YEAROLD')] and texts()[3]=='Years: Oldest First'
-assert click(3)==[(0,'Q2POD','YEAROLD')] and texts()[3]=='Years: Newest First'
-assert click(0)==[] and m.opened[-1]==('systemset/keylock_page',None)
-assert click(1)==[] and m.opened[-1]==('systemset/keylock_page',None); passed()
+assert texts()==['Songs: Title \u2191',"Artist's Albums: Year",'Years: Newest First']
+assert click(1)==[(1,'Q2POD','ARTISTAZ')] and texts()[1]=="Artist's Albums: A–Z"
+assert click(1)==[(0,'Q2POD','ARTISTAZ')] and texts()[1]=="Artist's Albums: Year"
+assert click(2)==[(1,'Q2POD','YEAROLD')] and texts()[2]=='Years: Oldest First'
+assert click(2)==[(0,'Q2POD','YEAROLD')] and texts()[2]=='Years: Newest First'
+assert click(0)==[] and m.opened[-1]==('systemset/keylock_page',None); passed()
 # Library > Playlists: Playlist View (PLAYLISTCF, List unless chosen), a gap, then Import and Export Playlists
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13,sub=3)
 assert texts()==['Playlist View: List','Import Playlists','Export Playlists']

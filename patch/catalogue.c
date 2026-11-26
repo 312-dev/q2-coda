@@ -895,8 +895,7 @@ static int pl_twin(const pl_t *p, int list) {
     job_int(o, &same);
     return same == 1;
 }
-/* p's header made in a free id, or -1 when stock's 100 are taken; its time_create the time it
- * first came, Recently Added's date for it (playlist_sort.c). */
+/* p's header made in a free id, or -1 when stock's 100 are taken. */
 static int pl_create(const pl_t *p, unsigned char *used) {
     int list = 0;
     while (list < CAT_PLAYLISTS && used[list]) ++list;
@@ -907,7 +906,7 @@ static int pl_create(const pl_t *p, unsigned char *used) {
     o = sq(o, JEND, p->name);
     PUT(o, JEND, ",'','','','',");
     o = sq(o, JEND, p->name);
-    PUT(o, JEND, ",'','',0,0,%d,0,0,cast(strftime('%%s','now') as integer),0,0,0)", list);
+    PUT(o, JEND, ",'','',0,0,%d,0,0,0,0,0,0)", list);
     return job_run(o) ? -1 : list;
 }
 /* list's items again, in the file's order (serveritem's rowid): a card song as its card row */
