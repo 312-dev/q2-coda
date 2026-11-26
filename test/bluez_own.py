@@ -298,10 +298,11 @@ class Run:
         wait(bus.exists, 'dbus-daemon made no socket')
         self.kernel = Kernel(self.dir / 'mgmt')
         self.log = open(self.dir / 'bluetoothd.log', 'wb')
+        # --die-with-parent: qemu goes when bwrap does, however this script ends.
         # /mnt/data is the store's place and holds nothing else here; the sysroot answers /etc/bluetooth and the
         # libraries. bluetoothd -n logs to stderr.
         self.proc = subprocess.Popen(
-            ['bwrap', '--dev-bind', '/', '/', '--tmpfs', '/mnt', '--bind', str(rig.data), '/mnt/data',
+            ['bwrap', '--die-with-parent', '--dev-bind', '/', '/', '--tmpfs', '/mnt', '--bind', str(rig.data), '/mnt/data',
              'qemu-mipsel', '-L', str(rig.sysroot), '-E', f'LD_PRELOAD={rig.shim}',
              '-E', f'Q2_FAKE_MGMT={self.dir / "mgmt"}', '-E', f'DBUS_SYSTEM_BUS_ADDRESS={self.address}',
              str(binary), '-n', '-d', *rig.options.get(name, [])],
