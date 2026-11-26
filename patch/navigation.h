@@ -984,6 +984,8 @@ int stock_usb_status_trampoline(void);
 /* usb_otg.c: check_otg_status's hook, OTG host power only with no VBUS on the port */
 int ringnav_otg_status(void), stock_otg_status_trampoline(void);
 int ringnav_gpio_value(const char *name), stock_gpio_value_trampoline(const char *name);
+/* jack_detect.c: a jack pin's read as stock's jack poll is given it (docs/internals.md#jack-detect) */
+int jack_read(const char *name, int raw);
 /* usb_volume.c: mclUsbAudioSetVol's hook, a USB DAC's volume in decibels */
 int ringnav_usb_setvol(int v, int right, const char *card), stock_usb_setvol_trampoline(int v, int right, const char *card);
 /* usb_ui.c: a host has configured the gadget (system.c holds Standby on it) */

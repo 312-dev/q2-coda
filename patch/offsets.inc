@@ -425,6 +425,9 @@ static inline int arc_out(int r, int y) {
 /* A wheel turn with the screen off idles neither for this long after a tick (ringnav_sleep). A
  * calibration knob: a turn slower than a tick in this long waits out a dark pass for each. */
 #define DARK_TURN_MS 500
+/* jack_detect.c: an unplugged read of a jack counts once a read this much later is still unplugged.
+ * Past the DAC's 120 ms power-up glitch at Play, below stock's one jack poll a second. */
+#define JACK_UNPLUG_MS 300
 /* Without BlueZ's volume signal (below), Bluetooth absolute volume is read back this often with the
  * screen off and no volume limit to hold (BT_VOLUME_LIMIT_MS with one), and 400 ms lit, so a
  * headset's own volume keys show on the Q2 that late; after the headset refused it, this often
