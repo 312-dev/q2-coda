@@ -1000,7 +1000,8 @@ m=Machine(); view,imgs=home_list(m); click_target(m,imgs[HOME_ROWS.index('coverf
 m.image_loads=[]; m.paint(view)
 CHEV_X=HOME_LIST_W-OLED_G.right_x-5
 def bar(sel):  # Home's chevrons, their row's selected one white
-    rows=[i for i,r in enumerate(HOME_ROWS) if r!='shuffle_songs']
+    top,h=m.get(view+O['SCROLL_Y']),m.get(view+O['W_H'])  # the rows in sight: the clip draws no others
+    rows=[i for i,r in enumerate(HOME_ROWS) if r!='shuffle_songs' and -HOME_ROW<i*HOME_ROW-top<h]
     return ([(CHEV_X,i*HOME_ROW+HOME_ROW//2-m.get(view+O['SCROLL_Y']),(0,0,HOME_LIST_W,7*HOME_ROW)) for i in rows],
             ['oled_chevron_w' if i==sel else 'oled_chevron_d' for i in rows])
 assert (m.icons,m.image_loads)==bar(0) and m.clip==(0,0,375,320); passed()
@@ -1009,13 +1010,13 @@ m.call(); m.image_loads=[]; m.paint(view); assert m.selected(view)==1 and (m.ico
 # multi-select hides its own.
 m.touch(); m.image_loads=[]; m.paint(view); assert (m.icons,m.image_loads)==bar(1) and m.selected(view)==1; passed()
 m.byte(syms['g_navbar_status'],1); m.image_loads=[]; m.paint(view); assert not m.icons and not m.image_loads; passed()
-# Playlists: every row follows the scroll, clipped to the viewport; the half-width
-# Import/Export tiles get none.
+# Playlists: every row in the viewport follows the scroll, clipped to it (a row out of it draws
+# none); the half-width Import/Export tiles get none.
 m=Machine(); w,es=m.page_list(10,height=96,extent=480,name='playlist_page'); window(m,'playlist_page',w)
 tile=m.entry(w,0); m.word(tile+O['W_W'],100); m.nodes[w]['children'].insert(0,tile)
 for top in (0,24):
     m.word(w+O['SCROLL_Y'],top); m.paint(w)
-    assert m.icons==[(240-OLED_G.right_x-5,48*i+24-top,(0,0,240,96)) for i in range(10)]; passed()
+    assert m.icons==[(240-OLED_G.right_x-5,48*i+24-top,(0,0,240,96)) for i in range(10) if -48<48*i-top<96]; passed()
 # Leaf lists, grids and windows whose rows stock already marks draw none.
 for name in ('allmusic_page','albuminfo_page','artistinfo_page','album_page','folder_page',
              'localclass_page','localmusic_page','sysset_page'):
