@@ -643,6 +643,13 @@ def validate_assets(directory):
             assert absent.returncode != 0, f'release rootfs contains {path}'
         for n in USB_SCRIPTS:
             assert read('rootfs.squashfs', 'usr/bin/' + n) == read('stock.squashfs', 'usr/bin/' + n), f'release {n} is not stock\'s'
+    from build import UI, UI_SPIKE_HOOK
+    if 'q2ui_sha256' in manifest:  # an --ui-spike build (docs/ui-rewrite.md#cutover): q2ui, started before demo
+        q2ui = read('rootfs.squashfs', UI)
+        assert sha(q2ui) == manifest['q2ui_sha256'] and q2ui[:4] == b'\x7fELF'
+        expected_start = expected_start.replace(*UI_SPIKE_HOOK)
+    else:
+        assert b'q2ui' not in expected_start
     assert read('rootfs.squashfs', S90PLAY) == expected_start
     assert read('rootfs.squashfs', S11LOGO) == read('stock.squashfs', S11LOGO).replace(*LOGO_HOOK)  # the card's logo, if saved
     # keep-alive 5 s, the source role alone while Guest Play is on, and q2-bip started on the line before bluealsa's
