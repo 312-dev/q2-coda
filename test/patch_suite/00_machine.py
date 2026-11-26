@@ -210,6 +210,7 @@ class Machine:
         self.clock=(18,14)  # local (hour, minute) for time/localtime, or the one of them that fails
         self.clock_minutes=False; self.marquee=False
         self.widget_timers=False  # widget_add_timer schedules (real_hscroll), else it is only recorded
+        self.loop_ms=0  # advance: timers run on a loop pass every loop_ms; 0, on their deadlines
         self.wall=(86400,86400)  # time's result, and the seconds localtime must be given
         self.rockbox_mode=0o100755; self.groovebox_mode=0  # the launchers' binaries: Rockbox on the card, Groovebox not
         self.handlers[syms['__xstat@GLIBC_2.0']]='rockbox_stat'
@@ -757,19 +758,24 @@ class Machine:
             trace('ret',name,render(self,'d' if name=='ringnav_style_color' else 'x',v0),*px)
         return signed(self.u.reg_read(UC_MIPS_REG_V0))
     def advance(self,ms,clear=True):
-        """Run due UI timers deterministically, including the exact deadline; RET_REPEAT re-arms."""
+        """Run due UI timers deterministically, including the exact deadline; RET_REPEAT re-arms from the time it
+        ran, as AWTK's timer_manager_dispatch sets the timer's start to now. With loop_ms a timer runs on the UI
+        loop's next pass at or after its deadline, a pass every loop_ms, as a real loop's idle passes run them."""
         if clear: self.calls=[]
         end=self.now+ms
         while self.timers:
             tid,(due,callback,ctx,period)=min(self.timers.items(),key=lambda item:item[1][0])
-            if due>end: break
-            self.now=due
+            at=-(-due//self.loop_ms)*self.loop_ms if self.loop_ms else due
+            if at>end: break
+            self.now=at
             del self.timers[tid]
             info=self.alloc(0x58)
             self.word(info+0x20,ctx); self.word(info+0x28,tid); self.word(info+0x40,period)  # timer_info_t's duration
+            # its now (timer_info_on_timer, 0x739b70) and start, u64s: when it was added or last ran
+            self.u.mem_write(info+0x30,struct.pack('<QQ',at,due-period))
             ret=self.call(address=callback,args=(info,0,0,0),gap=0,clear=False)
             assert ret in (0,7,8) and (ret!=8 or period>0)  # RET_OK or RET_REMOVE ends it; RET_REPEAT re-arms
-            if ret==8 and tid not in self.timers: self.timers[tid]=(due+period,callback,ctx,period)
+            if ret==8 and tid not in self.timers: self.timers[tid]=(at+period,callback,ctx,period)
         self.now=end
         for a,values in list(self.props.items()):
             if len(values)!=5: continue

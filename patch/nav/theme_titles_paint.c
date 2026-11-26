@@ -560,6 +560,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
     modal_paint(w, canvas);
     confirm_paint(w, canvas); /* the confirmation card (feedback.c) */
     paint_selection(w, canvas);
+    pv_ink(w); /* a playlist's action row's label colour, before the label paints */
     grey_rows(w); /* first: paint_songs reserves the marks of the rows it greys */
     paint_songs(w, canvas);
     paint_modal_rows(w, canvas);

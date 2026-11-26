@@ -1225,8 +1225,9 @@ def timeline(m,t,ms):
         if runs and runs[-1][0]==v: runs[-1][1]+=1
         else: runs.append([v,1])
     return runs
-hold=O['MARQUEE_HOLD_MS']; scroll=int(104/struct.unpack('<f',struct.pack('<I',O['HSCROLL_PACE']))[0])  # 2079: NP's pace
-assert scroll==2079
+PACE_PX_S=1000*struct.unpack('<f',struct.pack('<I',O['HSCROLL_PACE']))[0]
+hold=O['MARQUEE_HOLD_MS']; scroll=int(104*1000/PACE_PX_S)  # 2971: Now Playing's 35 px a second
+assert scroll==2971
 def pass_ok(runs,yoyo=False):
     """Its start held hold (until the second 16 ms tick moves it a whole pixel), a scroll at the pace, its end held hold."""
     assert len(runs)>=3, runs; (s,start),(v,moving),(e,end)=runs[:3]
@@ -1241,13 +1242,23 @@ for kw in (dict(),dict(speed=0.05,delay=1500,lull=1500),dict(speed=0.0)):
     pass_ok(runs); pass_ok(runs[3:]); assert runs[6][0]=='start'
     assert m.get(t+O['HSCROLL_DELAY'])==hold and m.get(t+O['HSCROLL_SPEED'])==O['HSCROLL_PACE']; seen.append(runs)
 assert seen[0]==seen[1]==seen[2]; passed()
+# The pace is the clock's, not the loop's: a tick comes at most once a UI loop pass, and an idle list's passes come
+# about every 45 ms on the emulator (more on a Q2), where stock's 16 ms a tick moved a list row's title at a third of
+# its pace or less (measured on the emulator 18 px/s, on a Q2 5). Each pass moves it by the time since the last.
+for loop in (45,160):
+    m=hscroll_machine(); m.loop_ms=loop; t=hscroll_label(m); m.call(address=syms['hscroll_label_start'],args=(t,),gap=0)
+    runs=timeline(m,t,hold+scroll+hold+400)
+    assert [r[0] for r in runs[:3]]==['start','moving','end'] and abs(runs[0][1]+runs[1][1]-hold-scroll)<=2*loop,(loop,runs)
+    assert abs(104*1000/runs[1][1]-PACE_PX_S)<=PACE_PX_S*2*loop/scroll+1,(loop,runs); passed()
 # A slower label keeps its pace.
 m=hscroll_machine(); t=hscroll_label(m,speed=0.02); m.call(address=syms['hscroll_label_start'],args=(t,),gap=0)
 runs=timeline(m,t,hold+5300); assert runs[1][0]=='moving' and runs[1][1]>5000; passed()
 # A yoyo label scrolls back, holding hold at each end, not its lull as well.
 m=hscroll_machine(); t=hscroll_label(m,yoyo=1); m.call(address=syms['hscroll_label_start'],args=(t,),gap=0)
 runs=timeline(m,t,2*(hold+scroll)+2*hold+100); pass_ok(runs,yoyo=True)
-assert runs[3][0]=='moving' and runs[4][0]=='start' and hold<=runs[4][1]<hold+60,runs; passed()  # its last tick lands on 0
+# its last tick lands on 0: the start holds hold, and the ticks under a pixel at each side of it (2 at 0.56 px a tick)
+under=-(-1//(PACE_PX_S*16/1000))
+assert runs[3][0]=='moving' and runs[4][0]=='start' and hold<=runs[4][1]<=hold+2*16*under,runs; passed()
 # An unfocused only_focus label stops on its first tick, as stock's, and rests on its start.
 m=hscroll_machine(); t=hscroll_label(m,only_focus=1); m.call(address=syms['hscroll_label_start'],args=(t,),gap=0)
 assert timeline(m,t,hold+100)==[['start',hold+15],['rest',85]] and not m.timers and m.get(t+0x90)==0; passed()
@@ -1259,18 +1270,20 @@ for yoyo in (0,1):
     m=hscroll_machine(); t=hscroll_label(m,loop=0,yoyo=yoyo); m.call(address=syms['hscroll_label_start'],args=(t,),gap=0)
     m.advance(100); m.call(address=syms['hscroll_label_start'],args=(t,),gap=0)
     runs=timeline(m,t,hold+scroll+hold+100); runs[0][1]+=100; pass_ok(runs)
-    assert runs[3:]==[['rest',200]] and not m.timers and m.get(t+0x90)==0,runs; passed()
+    # the pass ends on the tick at or after its 2971.4 ms, so it rests the rest of 200 ms less under a tick
+    assert len(runs)==4 and runs[3][0]=='rest' and 200-16<runs[3][1]<=200 and not m.timers and m.get(t+0x90)==0,runs; passed()
 # Stock's label attributes (set_hscroll_label_attribute, run from the image): its speed, lull and ellipsis. Since V1.36 it
 # also gives the label a loop_interval_distance of its width, with which a pass has no end to hold: HSCROLL_GAP drops that
 # call, stock makes it. In Menu Mode alone it sets only_parent_focus, and WHEEL_MODE keeps stock out of Menu Mode.
 from build import HSCROLL_GAP, ALBUM_LABELS, FOCUS_RESTORE
+# its speed is stock's 0.05f px a ms (0x3d4ccccd), which ringnav_hscroll_start caps at HSCROLL_PACE
 for patched in (True,False):
     m=Machine(patched); m.handlers.pop(syms['set_hscroll_label_attribute'],None)
     m.mock('hscroll_label_set_speed','hscroll_label_set_lull','hscroll_label_set_ellipses','widget_set_prop_int','hscroll_label_set_only_parent_focus')
     t=m.node('hscroll_label'); m.word(t+O['W_W'],200)
     for mode in (1,0):
         m.calls=[]; m.byte(syms['g_wheelmode'],mode); m.call(address=syms['set_hscroll_label_attribute'],args=(t,0,0,0),gap=0)
-        want=[('hscroll_label_set_speed',t,O['HSCROLL_PACE']),('hscroll_label_set_lull',t,2000),('hscroll_label_set_ellipses',t,1)]
+        want=[('hscroll_label_set_speed',t,0x3d4ccccd),('hscroll_label_set_lull',t,2000),('hscroll_label_set_ellipses',t,1)]
         gap=[c for c in m.calls if c[0]=='widget_set_prop_int']
         assert [c[:3] for c in m.calls if c[0]!='widget_set_prop_int']==want+[('hscroll_label_set_only_parent_focus',t,1)]*(not mode),(patched,mode,m.calls)
         assert [(m.text(c[2]),c[3]) for c in gap]==[('loop_interval_distance',200)]*(not patched),(patched,gap)
@@ -1322,7 +1335,8 @@ m.paint(w,gap=0); m.advance(1); assert not m.timers; passed()  # passes spent: n
 m,w,labels=marquee_list(); m.advance(hold+100); on=running(m,labels); assert on==[labels[m.selected(w)]] and shown(m,on[0])=='moving'
 m.call(); m.paint(w,gap=0); m.advance(1); assert focus_only(m,on[0])==1 and shown(m,on[0])=='rest'
 assert running(m,labels)==[labels[m.selected(w)]] and shown(m,labels[m.selected(w)])=='start'; passed()
-m.byte(syms['g_backlight_status'],0); m.advance(hold+scroll+hold); assert running(m,labels)==[] and not m.timers
+# the pass ends on the tick at or after its scroll's end, under a 16 ms tick past it
+m.byte(syms['g_backlight_status'],0); m.advance(hold+scroll+16+hold); assert running(m,labels)==[] and not m.timers
 m.byte(syms['g_backlight_status'],1); m.paint(w,gap=0); m.advance(1); assert len(running(m,labels))==1; passed()
 for kw in (dict(over=False),dict(only_focus=0)):
     m,w,labels=marquee_list(**kw); m.advance(hold+1); assert not running(m,labels) and not m.timers; passed()

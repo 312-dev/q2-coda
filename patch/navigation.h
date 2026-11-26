@@ -385,7 +385,8 @@ extern int stock_keyup_trampoline(void *, void *), stock_touch_trampoline(void *
     stock_stream_trampoline(void *, void *), stock_start_player_trampoline(void),
     stock_standby_trampoline(void), stock_device_standby_trampoline(void), stock_cardmount_trampoline(void),
     stock_usbmode_trampoline(void *, void *, void *, void *),
-    stock_hscroll_start_trampoline(void *), stock_wifi_page_trampoline(void *, void *),
+    stock_hscroll_start_trampoline(void *), stock_hscroll_tick_trampoline(void *),
+    stock_wifi_page_trampoline(void *, void *),
     stock_stream_row_trampoline(void *, void *), stock_netservice_row_trampoline(void *, void *),
     stock_online_match_trampoline(void *), stock_wifi_switch_row_trampoline(void *, void *),
     stock_wifi_network_row_trampoline(void *, void *), stock_wifi_rows_trampoline(void *),
@@ -1223,6 +1224,7 @@ int upnext_instead(const char *name);  /* stock's queue page asked for: Up Next 
 int qm_row_under(void *top); /* a row under the selection on top, menu or not (hold_menu.c) */
 int otg_count(void);
 void pv_paint(void *w, void *canvas);
+void pv_ink(void *w); /* an action row's label colour, before it paints (playlist_pages.c) */
 int playlists_transfer(void *ctx, void *event); /* Settings: Import (ctx 0) or Export Playlists */
 void pl_fit(void *button);
 

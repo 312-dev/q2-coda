@@ -2748,6 +2748,20 @@ def test_every_scrolling_label_holds_then_runs_at_most_the_pace(fw, speed, paced
     assert fw.calls('stock_hscroll_start_trampoline')[0][1][0] == C.addressof(label)
 
 
+@pytest.mark.parametrize('paused', [0, 1])
+def test_a_scrolling_labels_tick_counts_the_time_since_the_last(fw, paused):
+    """Stock's tick adds the timer's 16 ms period to the pass; ringnav_hscroll_tick adds the rest of the time since the
+    last tick (now less start), so a tick a 45 ms loop pass late moves the text 45 ms' worth. A paused label's, none."""
+    label, info = C.create_string_buffer(0x100), C.create_string_buffer(0x58)
+    struct.pack_into('<I', label, O['HSCROLL_ELAPSED'], 320)
+    struct.pack_into('<B', label, O['HSCROLL_PAUSED'], paused)
+    C.c_void_p.from_buffer(info, O['TIMER_CTX']).value = C.addressof(label)
+    struct.pack_into('<QQI', info, O['TIMER_NOW'], 0x1_0000_0010, 0xffff_ffe3, 16)  # 45 ms across the low word's wrap
+    fw.fn('ringnav_hscroll_tick', C.c_int, C.c_void_p)(info)
+    assert struct.unpack_from('<I', label, O['HSCROLL_ELAPSED'])[0] == 320 + (0 if paused else 45 - 16)
+    assert fw.calls('stock_hscroll_tick_trampoline')[0][1][0] == C.addressof(info)
+
+
 # The Display settings the list engine reads.
 
 

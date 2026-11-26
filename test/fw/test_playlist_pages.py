@@ -261,3 +261,29 @@ def test_add_songs_row_opens_add_songs_for_the_playlist(fw, ui, pages):
     ui.click(ui.find(pv.view, 'Add Songs'))
     ui.due('pv_run')
     assert ui.nodes[ui.top()].name == 'addsongs_page' and 'Add to Road Trip' in [n.text for n in ui.nodes.values()]
+
+
+def test_an_action_row_s_label_has_its_ink_before_it_paints(fw, ui, pages):
+    """A row paints in stock's order: its background (ringnav_paint_bg), its label, then its border (ringnav_paint).
+    Add Songs' label is white on the selection and the accent off it, and it must be by the time the label paints:
+    written from the border, the colour came after the label had painted with the last one, and that write's
+    invalidate, made during a paint, was lost. So the row the selection had just left kept its white words on the
+    page's black, the accent only where the bar's box painted again under them (a Q2's framebuffer, the emulator)."""
+    from test_nav_paint import Canvas, paint_bg
+    pv = open_page(fw, 3, b'Road Trip')
+    item = ui.find(pv.view, 'Add Songs')
+    label, ink = ui.kid(item, 0), lambda: ui.nodes[label].props.get('style:normal:text_color')
+    accent, canvas = ink(), Canvas(fw)
+    border = fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)
+    rows = ui.kids(pv.view)
+    fw.mock('widget_index_of', lambda w, *_: rows.index(w) if w in rows else -1)
+    ui.set(pv.view, '_ringnav_index', 1)  # a frame with Add Songs selected
+    paint_bg(fw, item, canvas), border(item, canvas.p)
+    assert C.c_uint(ink()).value == 0xffffffff
+    for sel, want in ((2, accent), (1, 0xffffffff)):  # the selection moves off it, then back
+        ui.set(pv.view, '_ringnav_index', sel)
+        paint_bg(fw, item, canvas)
+        assert C.c_uint(ink()).value == C.c_uint(want).value, sel  # what the label paints with
+        border(item, canvas.p)
+        assert C.c_uint(ink()).value == C.c_uint(want).value, sel  # and nothing changes it after
+    assert C.c_uint(accent).value != 0xffffffff

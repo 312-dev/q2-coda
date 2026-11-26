@@ -210,6 +210,8 @@ HOOKS = {
     'list_get_img_pic': (0x50c5fc, 'ringnav_badge', None),
     # Every scrolling label's start: its delay and pace (navigation.c ringnav_hscroll_start)
     'hscroll_label_start': (0x5fb4ac, 'ringnav_hscroll_start', 'hscroll_start'),
+    # ... and its step timer's tick: the pass's time by the clock, not a 16 ms period a tick (ringnav_hscroll_tick)
+    'hscroll_label_on_timer_tick': (0x5fb744, 'ringnav_hscroll_tick', 'hscroll_tick'),
     # Smart Wi-Fi (smart_wifi.c smart_poll): the Wi-Fi page wakes the radio before it reads g_wififlag
     'systemset_wifi_page_init': (0x4d67ac, 'ringnav_wifi_page', 'wifi_page'),
     # Smart Wi-Fi (smart_wifi.c smart_hold): stock actions that check the link once, held while the

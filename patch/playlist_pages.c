@@ -254,14 +254,32 @@ static int pv_lit(void *item) {
     return !st.touch_mode && widget_get_prop_int(list, SEL, -1) == widget_index_of(item);
 }
 
-/* ringnav_paint's, for a row built by pv_row: an action's glyph and its label's accent, and the
- * right-hand text, white on the selection, after the playing song's bars where its row has them
- * (song_rows.c playing_row). The title's label ends PV_GAP short of it. */
-void pv_paint(void *w, void *canvas) {
+/* A row built by pv_row, in its window. */
+static int pv_item(void *w) {
     void *win = pv.page ? window_of(w) : (void *)0;
-    if (!win || win != pv.page || !P(canvas, CANVAS_LCD) ||
-        tk_strcmp(widget_get_type(w), "list_item"))
-        return;
+    return win && win == pv.page && !tk_strcmp(widget_get_type(w), "list_item");
+}
+
+/* ringnav_paint_bg's, for an action row: its label's colour, white on the selection, the accent
+ * off it, written when it differs (the selection's own ink may have changed it). It is set before
+ * the label paints, as the row's background paints before its children: from ringnav_paint, the
+ * border's paint after them, the label had painted with the last colour, and the write's
+ * invalidate, made during a paint, was lost, so the row the selection had just left kept its white
+ * words until something painted it again (only the bar's box did, a strip at its foot). */
+void pv_ink(void *w) {
+    const char *icon = pv_item(w) ? widget_get_prop_str(w, PV_ICON, "") : (void *)0;
+    if (!icon || !*icon) return;
+    void *label = widget_count_children(w) ? widget_get_child(w, 0) : (void *)0;
+    int ink = (int)RGBA(pv_lit(w) ? 0xffffff : scheme()->tones[0]);
+    if (label && widget_get_prop_int(label, "style:normal:text_color", 0) != ink)
+        widget_set_prop_int(label, "style:normal:text_color", ink);
+}
+
+/* ringnav_paint's, for a row built by pv_row: an action's glyph, and the right-hand text, white on
+ * the selection, after the playing song's bars where its row has them (song_rows.c playing_row).
+ * The title's label ends PV_GAP short of it. */
+void pv_paint(void *w, void *canvas) {
+    if (!pv_item(w) || !P(canvas, CANVAS_LCD)) return;
     const char *icon = widget_get_prop_str(w, PV_ICON, ""),
                *right = widget_get_prop_str(w, PV_RIGHT, "");
     int on = pv_lit(w), h = I(w, W_H), end = 375 - geom_val(V_RIGHT_X);
@@ -269,12 +287,8 @@ void pv_paint(void *w, void *canvas) {
     void *label = widget_count_children(w) ? widget_get_child(w, 0) : (void *)0;
     char art[32];
     if (icon && *icon) {
-        int ink = (int)RGBA(on ? 0xffffff : scheme()->tones[0]);
         tk_snprintf(art, sizeof art, "plact_%s_%s", icon, on ? "w" : "a");
         paint_art(w, canvas, theme_art(art), PV_ICON_X, (h - 18) / 2);
-        /* written when it differs: the selection's own ink may have changed it */
-        if (label && widget_get_prop_int(label, "style:normal:text_color", 0) != ink)
-            widget_set_prop_int(label, "style:normal:text_color", ink);
         return;
     }
     end -= playing_row(w, canvas, end - 1, 0, on); /* the playing song's bars (song_rows.c) */
