@@ -84,7 +84,7 @@ class Run:
         return self.stats()
 
     def picture(self):
-        return shot.upright(self.dir/'fb', self.stats()['page'])
+        return shot.page(self.dir/'fb', self.stats()['page'])
 
     def end(self):
         self.keys.write(event(EV_KEY, KEY_RETURN, 1) + event(EV_SYN, 0, 0) + event(EV_KEY, KEY_RETURN, 0) + event(EV_SYN, 0, 0))
@@ -94,8 +94,7 @@ class Run:
 
 def bar_rows(picture):
     """The list rows whose middle holds the accent, by the pixel at x 200, 3 px into the row."""
-    px = picture.load()
-    return [k for k in range(ROWS) if px[200, BAR_H + k * ROW_H + 3] == ACCENT]
+    return [k for k in range(ROWS) if shot.pixel(picture, 200, BAR_H + k * ROW_H + 3) == ACCENT]
 
 
 def check(what, ok, detail=''):
@@ -148,7 +147,7 @@ def main():
         (whole, ws), (copied, cs) = pictures
         good &= check('both runs scrolled to the same row', ws['ticks'] == cs['ticks'] == 23 and bar_rows(whole) == bar_rows(copied) == [2],
                       f"{ws['ticks']} and {cs['ticks']} ticks, bars {bar_rows(whole)} {bar_rows(copied)}")
-        good &= check('a copied scroll leaves the picture a whole redraw does', whole.tobytes() == copied.tobytes())
+        good &= check('a copied scroll leaves the picture a whole redraw does', whole == copied)
     print('q2ui: ' + ('all checks passed' if good else 'FAILED'))
     return 0 if good else 1
 
