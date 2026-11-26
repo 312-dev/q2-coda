@@ -2603,9 +2603,11 @@ def test_a_drill_lists_rows_each_get_a_chevron_lined_up_on_their_middles(fw, ui)
     page, canvas = Page(ui, titles(12), name='playlist_page'), Canvas(fw)
     page.scroll(ROW_H)
     drawn = chevrons(fw, page, canvas)
-    assert len(drawn) == 12 and {name for name, _, _ in drawn} == {f'{OLED["art_id"]}_chevron_d'.encode()}  # list_marks.c chevron_icon
+    shown = [i for i in range(12) if 0 < page.screen_y(i) + ROW_H and page.screen_y(i) < VIEW_H]  # rows 1 to 8
+    assert len(drawn) == len(shown) == 8  # the rows in sight: the clip draws no others
+    assert {name for name, _, _ in drawn} == {f'{OLED["art_id"]}_chevron_d'.encode()}  # list_marks.c chevron_icon
     assert len({x for _, x, _ in drawn}) == 1 and drawn[0][1] > 375 // 2  # one column, at the right
-    assert [y for _, _, y in drawn] == [ROW_H * i - ROW_H + ROW_H // 2 for i in range(12)]
+    assert [y for _, _, y in drawn] == [page.screen_y(i) + ROW_H // 2 for i in shown]
     assert canvas.clips[-1] == canvas.clip
 
 
