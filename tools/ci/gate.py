@@ -216,6 +216,7 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/alsa.py': ['{build}', '{qemu}'],
     'test/bluealsa.py': ['{build}'],
     'test/bluetoothd.py': ['{build}'],
+    'test/bluez_own.py': ['{build}'],  # the own bluetoothd beside stock's under qemu-mipsel; it builds bluez when the cache has none
     'test/build.py': ['--build', '{build}'],
     'test/chapters.py': [],  # --stock-root and --qemu go together and are optional: its parser refuses BUILD
     'test/coda_rc_e2e.py': ['--pool', '{build}'],  # a pooled emulator, Car Remote on for the lease, on its own port

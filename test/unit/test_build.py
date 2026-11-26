@@ -1409,6 +1409,31 @@ def test_adbd_binary_is_thirdpartys_stripped(tmp_path, monkeypatch):
                                                sha256=hashlib.sha256(b'\x7fELF adbd').hexdigest(), bytes=9)
 
 
+def test_the_own_bluetoothd_is_thirdpartys_stripped_and_built_for_stocks_abi(tmp_path, monkeypatch):
+    import thirdparty
+    monkeypatch.setattr(thirdparty, 'build', lambda name: tmp_path/f'stage-{name}')
+    def stripped(src, dst):
+        assert src == tmp_path/'stage-bluez/usr/bin/bluetoothd'
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(b'\x7fELF own')
+        return dst
+    monkeypatch.setattr(thirdparty, 'stripped', stripped)
+    abi = {b'\x7fELF own': (0x70001405, 'hard'), b'\x7fELF stock': (0x70001405, 'hard'), b'\x7fELF soft': (0x70001005, 'soft')}
+    class Elf:
+        def __init__(self, path):
+            self.flags, self.fp = abi[pathlib.Path(path).read_bytes()]
+    monkeypatch.setattr(thirdparty, 'Elf', Elf)
+    path, record = build.own_bluetoothd(tmp_path, b'\x7fELF stock')
+    # a folder of its own: out/bluetoothd is stock's patched binary, the one demo starts
+    assert path == tmp_path/'own-bluez/bluetoothd' and path.read_bytes() == b'\x7fELF own'
+    assert record == dict(version=thirdparty.SOURCES['bluez'][0], path='usr/lib/vamp-bluez/bluetoothd',
+                          sha256=hashlib.sha256(b'\x7fELF own').hexdigest(), bytes=8)
+    assert build.OWN_BLUETOOTHD == 'usr/lib/vamp-bluez/bluetoothd' != build.BLUETOOTHD
+    assert build.OWN_BLUETOOTHD.rsplit('/', 1)[1] == 'bluetoothd'  # the name demo's killall ends
+    with pytest.raises(ValueError, match='not built for stock'):
+        build.own_bluetoothd(tmp_path, b'\x7fELF soft')
+
+
 def test_a_rootfs_over_72_mib_is_refused_and_one_at_it_fits():
     """The recovery writes mtd2 with no size check, so the build is the bound: 72 MiB, 24 of mtd2's 600 blocks spare."""
     assert build.ROOTFS_ROOM == 75_497_472 == 576 * 128 * 1024

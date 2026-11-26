@@ -522,6 +522,11 @@ REMOTE_HOOK = (b'/usr/bin/dbus-daemon --config-file=/etc/dbus-1/system.conf\n',
 # demo, whose first USB check may already want the controller for stock's gadget; adbd is started again if it
 # ends, and its gadget bound once it is up (unless stock's gadget has the controller). After REMOTE_HOOK's line.
 ADBD, ADB_GADGET = 'usr/bin/adbd', 'usr/bin/q2adb-gadget'
+# --own-bluez (docs/bluez.md#the-build-switch): Vamp's own bluetoothd beside stock's, in a folder of its own
+# and off PATH, so demo's `bluetoothd &` still starts stock's and nothing runs this one but a person at a
+# shell. It keeps the name bluetoothd, the one demo's `killall -9 bluetoothd` ends.
+OWN_BLUEZ_DIR = 'usr/lib/vamp-bluez'
+OWN_BLUETOOTHD = OWN_BLUEZ_DIR + '/bluetoothd'
 # --dev only (docs/adb.md#installing-an-update-over-adb, patch/q2update.sh): Software Update's card path from a
 # computer, through demo's q2update_poll (patch/sw_update.c)
 Q2UPDATE = 'usr/bin/q2update'
@@ -2490,6 +2495,20 @@ def adb_files(out, cat):
             **{f'usr/bin/{n}': (f'usr/bin/{n}', adb_wrapper(n)) for n in USB_SCRIPTS}}
 
 
+def own_bluetoothd(out, stock):
+    """--own-bluez builds' bluetoothd (docs/bluez.md), built by tools/thirdparty.py, stripped into out/own-bluez
+    (out/bluetoothd is stock's, patched), and the manifest's record of it. Stopped when its ELF header flags
+    or FP ABI are not those of stock's bluetoothd (its bytes: stock), which would not load; that its imports
+    resolve against the rootfs's libraries is test/bluez_own.py's to show, by running it."""
+    import thirdparty
+    path = thirdparty.stripped(thirdparty.build('bluez')/thirdparty.BLUETOOTHD, out/'own-bluez'/'bluetoothd')
+    (out/'own-bluez'/'stock').write_bytes(stock)
+    ours, theirs = thirdparty.Elf(path), thirdparty.Elf(out/'own-bluez'/'stock')
+    check((ours.flags, ours.fp) == (theirs.flags, theirs.fp), 'The own bluetoothd is not built for stock\'s ABI')
+    data = path.read_bytes()
+    return path, dict(version=thirdparty.SOURCES['bluez'][0], path=OWN_BLUETOOTHD, sha256=sha(data), bytes=len(data))
+
+
 def adbd_record(out):
     """The manifest's adbd: its version, SHA-256 and size."""
     import thirdparty
@@ -2696,7 +2715,7 @@ def signing_key(path, dev):
     check(path.is_file(), f'{path}: no release public key (docs/releasing.md#signing-a-release)')
     return public_key(path.read_bytes())
 
-def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, signing_pub=None, apps_dir=APPS_DIR, build_iroh=False):  # pragma: no mutate block
+def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, signing_pub=None, apps_dir=APPS_DIR, build_iroh=False, own_bluez=False):  # pragma: no mutate block
     # Kernel-module experiments: no measured saving (docs/clock-gating.md, pwm-clock-gating.md,
     # audio-notifier.md), none handles suspend/resume, and stock Standby suspends by default; dev only.
     check(not aic_idle_wait or dev, '--aic-idle-wait requires --dev')
@@ -3133,7 +3152,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     lib_dir = need(re.search(rb'^usr/lib D (\d+) (\d+) (\d+) (\d+)$', p, re.M), 'Missing usr/lib pseudo inode')
     program, data_file = need(inode(p, HELPER_LIKE.encode()), 'Missing program inode'), need(inode(p, b'etc/hosts'), 'Missing etc/hosts inode')
     bundled = {}
-    for d in [BUNDLED_DIR, *(f'{BUNDLED_DIR}/{i}' for i in BUNDLED_APPS), RADIO_DATA, GAMES_DATA, *GAMES_DIRS]:
+    for d in [BUNDLED_DIR, *(f'{BUNDLED_DIR}/{i}' for i in BUNDLED_APPS), RADIO_DATA, GAMES_DATA, *GAMES_DIRS,
+              *([OWN_BLUEZ_DIR] if own_bluez else [])]:
         p += d.encode() + b' D ' + b' '.join(lib_dir.groups()) + b'\n'
         player_added.append([d.encode(), b'D', *lib_dir.groups()])
     for app_id in BUNDLED_APPS:
@@ -3149,6 +3169,11 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         bundled[app_id] = dict(version=app_version, zip=zip_name, sha256=digest, builtin=builtin,
                                bytes=sum(len(d) for d, _ in files.values()),
                                binary_sha256=record[f'q2-{app_id}_sha256'], build=record['build'])
+    if own_bluez:  # beside stock's bluetoothd, with its mode and owner
+        own_bluez = own_bluetoothd(out, cat(BLUETOOTHD))
+        like = need(inode(p, BLUETOOTHD.encode()), 'Missing bluetoothd inode')
+        p += OWN_BLUETOOTHD.encode() + b' F ' + b' '.join(like.groups()) + b' cat ' + shlex.quote(str(own_bluez[0])).encode() + b'\n'
+        player_added.append([OWN_BLUETOOTHD.encode(), b'R', *like.groups()])
     for path, src in ((b'release/bin/demo', out/'demo'), (b'usr/bin/hciplayer', q2player),
                       (BLUEALSA.encode(), out/'bluealsa'), (BLUETOOTHD.encode(), out/'bluetoothd'), (WATCHDOG.encode(), out/'watchdog'),
                       (S90PLAY.encode(), out/'S90play'), (S11LOGO.encode(), out/'S11logo'),
@@ -3330,6 +3355,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         version=version, dev=dev, update_repo=repo, signing_key=key.hex(), bluealsa_sha256=sha(bluealsa), bluetoothd_sha256=sha(bluetoothd), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), q2_iroh_sha256=sha((out/'q2-iroh').read_bytes()), q2_iroh_bytes=len((out/'q2-iroh').read_bytes()), q2_guest_sha256=sha((out/'q2-guest').read_bytes()), q2_iap_sha256=sha((out/'q2-iap').read_bytes()), q2_iap_bytes=len((out/'q2-iap').read_bytes()), usb_f_uac1_sha256=sha((out/'usb_f_uac1.ko').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes()), 'q2_usbtrace_sha256': sha((out/'q2-usbtrace').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
         **({'rotator_clock': rotator} if rotator else {}),
         **({'adbd': adbd_record(out)} if dev else {}),
+        **({'own_bluez': own_bluez[1]} if own_bluez else {}),
         q2player_sha256=sha(q2player.read_bytes()),
         bundled_apps=bundled, rootfs_squashfs_bytes=len(blobs['recovery-update/rootfs.squashfs']),
         **({'pwm_clock': pwm} if pwm else {}),
@@ -3362,10 +3388,12 @@ if __name__ == '__main__':
                     help=f'where the pinned zips of the card apps the firmware carries are (default {APPS_DIR})')
     ap.add_argument('--pwm-idle-clock', action='store_true',
                     help='experimental: cooperative Linux/MCU PWM clock gating (requires --dev)')
+    ap.add_argument('--own-bluez', action='store_true',
+                    help='also install Vamp\'s own bluetoothd (upstream BlueZ, tools/thirdparty.py) beside stock\'s, started by nothing (docs/bluez.md)')
     ap.add_argument('--build-iroh', action='store_true',
                     help='build q2-iroh from remote/iroh-sidecar (Rust nightly) instead of taking the pinned one (tools/iroh.py)')
     a=ap.parse_args()
     try:
-        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.signing_key,a.apps,a.build_iroh)
+        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.signing_key,a.apps,a.build_iroh,a.own_bluez)
     except (OSError, ValueError, zipfile.BadZipFile, subprocess.CalledProcessError) as exc:
         ap.error(str(exc))
