@@ -97,6 +97,8 @@ Off by default, `--dev --pwm-idle-clock`: the paired PWM/MCU clock gating. It ne
 
 All three kernel-module experiments were on by default from 1.5.0 to 1.6.1 and went back to `--dev` in 1.6.2: no battery saving was measured for any of them, and none handles suspend/resume, which stock Standby does by default.
 
+`--own-bluez` is off in every build unless given. It adds Vamp's own bluetoothd (upstream BlueZ, built by `tools/thirdparty.py`) at `/usr/lib/vamp-bluez/bluetoothd`, beside stock's and started by nothing. See [bluez](bluez.md#the-build-switch).
+
 `--dev --mcu-idle-sleep` is off in release builds. It adds an interruptible MCU sleep with an explicit wake handshake. See [MCU sleep](mcu-sleep.md).
 
 Every build installs the player, `q2player` ([player-plan.md](player-plan.md)), as `/usr/bin/hciplayer`, where stock's player was, so demo starts and stops it by that name. It builds `q2player` with `tools/player.py` (FFmpeg on first use, some minutes; the toolchain and mbedTLS that `tools/thirdparty.py` keeps in `~/.cache/q2-thirdparty`) against the image's own `libasound.so.2`, and records `q2player_sha256` in the manifest. The root filesystem holds 75,497,472 bytes (`ROOTFS_ROOM`: mtd2 less a bad-block spare, [hardware](hardware.md#flash-layout)): past that the build stops and says by how much.
@@ -139,6 +141,7 @@ python3 test/player/run.py                  # the new player (player/): bit-exac
 python3 test/ldac.py /tmp/q2-build         # shipped LDAC intermediate rates and native adaptive controller
 python3 test/headset_io.py /tmp/q2-build   # real MIPS headset worker with simulated kernel I/O (cc)
 python3 test/bluealsa.py /tmp/q2-build     # the patched bluealsa's DROP paths against stock's, delayed encoder signal; SBC's bitpool; AAC's peak (fdk-aac scripted); the write MTU through each encoder
+python3 test/bluez_own.py /tmp/q2-build    # the own bluetoothd (tools/thirdparty.py's bluez, or an --own-bluez build's) beside stock's under qemu-mipsel, each on a D-Bus bus and a stand-in kernel of its own: main.conf, the store both ways, the payload's D-Bus calls (bwrap, dbus-daemon, gdbus; docs/bluez.md)
 python3 test/bluetoothd.py /tmp/q2-build   # the patched bluetoothd's GetElementAttributes and its AVRCP record's cover art entry, at a load address of its own, against stock's
 python3 test/alsa.py BUILD QEMU_MIPSEL     # ALSA startup lock regression (see internals.md)
 python3 test/thirdparty.py BUILD QEMU_MIPSEL  # the rebuilt OpenSSL, curl, zlib, SQLite, libpng, BusyBox, wpa_supplicant and FFmpeg in a bwrap chroot of BUILD's rootfs: versions, links, TLS (network; --offline skips it) (third-party.md)
