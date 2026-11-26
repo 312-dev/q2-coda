@@ -167,7 +167,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
               'srvtoast': 0xff9f0a}  # addon.c's server error: cloud-slash in Warning
     inset = [f'batt{n}_{k}' for n in art.BATT_GLYPHS for k in ('d', 'l')]  # list_marks.c battery_slim
     keylock = [f'keylock_{k}' for k in ('d', 'l')]  # status_row.c's padlock (the card's below)
-    status = [f'status_{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bt', 'btdim', 'headphones', 'wired', 'car', 'down',
+    status = [f'status_{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bt', 'btdim', 'headphones', 'wired', 'noaudio', 'car', 'down',
                                           'vol', 'mute', 'offline',
                                           *(f'sync_{f}' for f in range(art.STATUS_SPIN)))
               for k in ('d', 'l')]  # status_row.c's other glyphs: their own test
@@ -287,12 +287,14 @@ def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(h
 
 @pytest.mark.parametrize('half, primary, dim', [('d', 0xffffff, 0x858585), ('l', 0, 0x6e6e6e)])
 def test_the_bluetooth_rune_and_wired_headphones_stand_as_tall_as_the_battery(half, primary, dim):
-    """The Bluetooth rune (dim while connecting) and wired headphones (Phosphor's regular headphones) are 12 px tall,
+    """The Bluetooth rune (dim while connecting), wired headphones (Phosphor's regular headphones) and the deaf ear
+    shown with no output (its regular ear-slash; the user's, 2026-11-25) are 12 px tall,
     the battery's body's height, from their box's top row: status_row.c puts the box on row 16, so their ink is on rows
     16 to 27 and centres on row 21.5 with the battery's and Wi-Fi's (the user's mockup, 2026-11-25). Each box is as
-    wide as its ink: the rune 9 (8.4 of ink), the headphones 14 (13.6)."""
+    wide as its ink: the rune 9 (8.4 of ink), the headphones 14 (13.6), the ear 10 (9.4)."""
     got = art.images(theme.builtins()[0])
-    for name, w, ink in (('bt', 9, primary), ('btdim', 9, dim), ('wired', art.STATUS_PX, primary)):
+    for name, w, ink in (('bt', 9, primary), ('btdim', 9, dim), ('wired', art.STATUS_PX, primary),
+                         ('noaudio', 10, primary)):
         width, h, at = pixels(got[f'oled_status_{name}_{half}'])
         lit = [(x, y) for y in range(h) for x in range(width) if at(x, y)[3] > 128]  # over half covered
         rows = sorted({y for _, y in lit})
