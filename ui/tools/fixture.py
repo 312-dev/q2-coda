@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Make a library database of N made-up songs in stock's schema (songtable and its indexes), for q2ui's
-spike and for timing demo's Songs list against it (docs/ui-rewrite.md#measurements).
+engine and for timing demo's Songs list against it (docs/ui-rewrite.md#measurements).
 
     python3 ui/tools/fixture.py N OUT.db [--seed S]
 

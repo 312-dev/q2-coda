@@ -31,18 +31,18 @@ void ui_clock_fake(uint64_t us) { faked = 1, frame_us = us; }
 int spring_step(spring_t *s, float dt, float response, float damping) {
     if (!spring_moving(s)) return 0;
     if (dt <= 0) return 1;
-    float w = 6.2831853f / response, d = s->x - s->to, x, v;
-    if (damping >= 1) {
-        float c2 = s->v + w * d, e = expf(-w * dt);
-        x = (d + c2 * dt) * e;
-        v = (c2 - w * (d + c2 * dt)) * e;
+    double w = 6.283185307 / (double)response, z = (double)damping, t = (double)dt, d = s->x - s->to, x, v;
+    if (z >= 1) {
+        double c2 = s->v + w * d, e = exp(-w * t);
+        x = (d + c2 * t) * e;
+        v = (c2 - w * (d + c2 * t)) * e;
     } else {
-        float wd = w * sqrtf(1 - damping * damping), e = expf(-damping * w * dt);
-        float c2 = (s->v + damping * w * d) / wd, c = cosf(wd * dt), sn = sinf(wd * dt);
+        double wd = w * sqrt(1 - z * z), e = exp(-z * w * t);
+        double c2 = (s->v + z * w * d) / wd, c = cos(wd * t), sn = sin(wd * t);
         x = e * (d * c + c2 * sn);
-        v = e * ((c2 * wd - damping * w * d) * c - (d * wd + damping * w * c2) * sn);
+        v = e * ((c2 * wd - z * w * d) * c - (d * wd + z * w * c2) * sn);
     }
-    if (fabsf(x) < 0.01f && fabsf(v) < 1.0f) {
+    if (fabs(x) < 0.01 && fabs(v) < 1.0) {
         s->x = s->to, s->v = 0;
         return 0;
     }

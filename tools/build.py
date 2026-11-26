@@ -555,7 +555,7 @@ LOG_HOOK = (b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.er
             b'        while :; do\n            /release/bin/demo 2>>/tmp/q2-demo.err\n',
             b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.log); [ "${n:-0}" -gt 2000000 ] && cp /tmp/q2-demo.log /tmp/q2-demo.log.1 && : >/tmp/q2-demo.log; done) &\n'
             b'        while :; do\n            /release/bin/demo >>/tmp/q2-demo.log 2>&1\n')
-# --ui-spike only (docs/ui-rewrite.md#cutover): q2ui, the spike of a menu UI of Vamp's own (ui/, tools/ui.py), in the
+# --ui-spike only (docs/ui-rewrite.md#cutover): q2ui, the menu UI of Vamp's own (ui/, tools/ui.py), in the
 # root filesystem, and S90play starting it before demo while /mnt/data/ui-target says q2ui. Its Return ends it and
 # the loop below starts demo as in any build, so the choice is one file and demo is always the fallback.
 # The boot animation goes first, as before Rockbox: it draws on the page on screen until demo, which waits for it
@@ -3385,7 +3385,7 @@ if __name__ == '__main__':
     ap.add_argument('--pwm-idle-clock', action='store_true',
                     help='experimental: cooperative Linux/MCU PWM clock gating (requires --dev)')
     ap.add_argument('--ui-spike', action='store_true',
-                    help='add q2ui, the spike of a menu UI of our own, started before demo while /mnt/data/ui-target says q2ui (docs/ui-rewrite.md)')
+                    help='add q2ui, the menu UI of our own, started before demo while /mnt/data/ui-target says q2ui (docs/ui-rewrite.md)')
     ap.add_argument('--build-iroh', action='store_true',
                     help='build q2-iroh from remote/iroh-sidecar (Rust nightly) instead of taking the pinned one (tools/iroh.py)')
     a=ap.parse_args()

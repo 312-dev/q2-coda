@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build q2ui, the spike of a menu UI that is a program of Vamp's own (docs/ui-rewrite.md), from ui/.
+"""Build q2ui, the menu UI that is a program of Vamp's own (docs/ui-rewrite.md), from ui/.
 
 Two builds, as tools/player.py's: `host`, to run and test on this machine against a file standing in for the
 panel, and `mips`, for the Q2 and the emulator, compiled with the toolchain stock was built with (tools/thirdparty.py

@@ -39,24 +39,29 @@ static void springs(void) {
         for (int i = 0; i < 100; ++i) spring_step(&b, 0.001f, 0.2f, damp);
         check(under ? "an underdamped spring is the same in one step or a hundred"
                     : "a spring is the same in one step or a hundred",
-              fabsf(a.x - b.x) < 0.02f && fabsf(a.v - b.v) < 1.0f, "%f %f against %f %f", a.x, a.v, b.x, b.v);
+              fabs(a.x - b.x) < 0.02 && fabs(a.v - b.v) < 1.0, "%f %f against %f %f", a.x, a.v, b.x, b.v);
     }
     spring_t s = { 0, 0, 32 };
-    float last = 0;
+    double last = 0;
     int mono = 1, frames = 0;
     while (spring_step(&s, 1 / 60.0f, 0.2f, 1) && frames < 200) mono &= s.x > last && s.x <= 32, last = s.x, ++frames;
     check("a critically damped spring neither turns back nor passes its target", mono && s.x == 32, "x %f", s.x);
     check("it is at rest in 8 to 24 frames of a 0.2 s response", frames >= 8 && frames <= 24, "%d frames", frames);
     spring_t r = { 0, 0, 32 };
     spring_step(&r, 0.05f, 0.2f, 1);
-    float v = r.v, x = r.x;
+    double v = r.v, x = r.x;
     r.to = 64;
     spring_step(&r, 0.001f, 0.2f, 1);
-    check("a new target keeps the place and the speed", fabsf(r.x - x) < 0.5f && r.v > v * 0.9f, "x %f to %f, v %f to %f", x, r.x, v, r.v);
+    check("a new target keeps the place and the speed", fabs(r.x - x) < 0.5 && r.v > v * 0.9, "x %f to %f, v %f to %f", x, r.x, v, r.v);
+    /* a long list: 9,000 rows down, a spring still comes to rest on its row */
+    spring_t far = { 288000.0 - 20, 0, 288000.0 };
+    int steps = 0;
+    while (spring_step(&far, 1 / 60.0f, 0.2f, 1) && steps < 600) ++steps;
+    check("a spring 288,000 px down a list comes to rest", steps < 60 && far.x == 288000.0, "%d frames, at %f", steps, far.x);
     spring_t u = { 0, 0, 10 };
-    float peak = 0;
+    double peak = 0;
     for (int i = 0; i < 120; ++i) spring_step(&u, 1 / 60.0f, 0.28f, 0.55f), peak = u.x > peak ? u.x : peak;
-    check("an underdamped spring passes its target once and comes to rest on it", peak > 10.2f && u.x == 10, "peak %f, end %f", peak, u.x);
+    check("an underdamped spring passes its target once and comes to rest on it", peak > 10.2 && u.x == 10, "peak %f, end %f", peak, u.x);
 }
 
 /* an edge between pixels is half of each, on any background, and nothing darker or of another

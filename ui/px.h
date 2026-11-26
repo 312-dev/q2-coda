@@ -22,11 +22,24 @@ static inline uint32_t px_mix16(uint32_t dst, uint32_t rgb, unsigned a, unsigned
     return 0xff000000 | r << 16 | g << 8 | b;
 }
 
-/* How far (px) a point |u|, |v| from a box's centre is outside the box of half-size hw, hh with
- * corners of radius r: negative inside. */
-static inline float px_box_dist(float au, float av, float hw, float hh, float r) {
-    float qx = au - (hw - r), qy = av - (hh - r);
-    if (qx > 0 && qy > 0) return __builtin_sqrtf(qx * qx + qy * qy) - r;
+/* Whole-number square root, rounded down. */
+static inline unsigned px_isqrt(unsigned n) {
+    unsigned r = 0, bit = 1u << 30;
+    while (bit > n) bit >>= 2;
+    for (; bit; bit >>= 2)
+        if (n >= r + bit)
+            n -= r + bit, r = (r >> 1) + bit;
+        else
+            r >>= 1;
+    return r;
+}
+/* How far a point |u|, |v| from a box's centre is outside the box of half-size hw, hh with corners
+ * of radius r, all in 1/64 px: negative inside. Whole numbers, so an edge costs a frame the same
+ * on a Q2 as it is measured to under an emulator that counts every float. */
+#define PX_ONE 64
+static inline int px_box_dist(int au, int av, int hw, int hh, int r) {
+    int qx = au - (hw - r), qy = av - (hh - r);
+    if (qx > 0 && qy > 0) return (int)px_isqrt((unsigned)(qx * qx + qy * qy)) - r;
     return (qx > qy ? qx : qy) - r;
 }
 

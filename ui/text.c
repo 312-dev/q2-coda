@@ -9,6 +9,13 @@
  * face's and not a column grid's. text_whole lays text out as AWTK does instead, every advance
  * rounded to a pixel, for comparing a screen with demo's. A run drawn at a place between pixels
  * (a row gliding) is filtered there by the blit (draw.c blit_a8).
+ *
+ * Making a glyph is the one cost here that a frame cannot bound by its changed pixels: a fast
+ * spin brings rows of text no frame has shown. So a frame of a motion may spend text_budget_us
+ * making glyphs and no more; past it a new glyph is left out of its run (the run is pending, and
+ * laid out again when next drawn) and the frame after draws it, which reads as text arriving a
+ * sixtieth of a second late where it would otherwise be a dropped frame. At rest the loop makes
+ * the common ones ahead of need (text_warm), a few milliseconds at a time.
  * A code point the face lacks comes from the fallback face. The cache holds GLYPHS glyphs; full,
  * it drops those no frame has drawn since the last time it filled, and every run is laid out
  * again (run_stale). */
@@ -28,7 +35,8 @@
 #define GLYPHS 2048 /* a power of two */
 #define PHASES 4    /* sub-pixel pen places a glyph is kept at */
 
-int text_whole;
+int text_whole, text_budget_us, text_deferred;
+static uint64_t spent_us;
 
 struct glyph {
     uint32_t key;   /* face << 30 | phase << 28 | px << 21 | code point, 0 an empty slot */
@@ -71,7 +79,7 @@ int text_open(const char *regular, const char *medium, const char *fallback) {
     face_open(FACE_FALLBACK, fallback);
     return 0;
 }
-void text_frame(void) { ++frame; }
+void text_frame(void) { ++frame, spent_us = 0, text_deferred = 0; }
 
 /* The cache is full: every glyph no frame drew since it last filled goes, and the runs with it. */
 static void evict(void) {
@@ -107,6 +115,18 @@ static const struct glyph *glyph_get(int face, int px, unsigned cp, int phase) {
         if (cache[at].key == key) return &cache[at];
         if (!cache[at].key) break;
     }
+    stbtt_fontinfo *f = &faces[face].info;
+    float scale = stbtt_ScaleForPixelHeight(f, (float)px);
+    int adv, lsb, w = 0, h = 0, x0 = 0, y0 = 0;
+    stbtt_GetCodepointHMetrics(f, (int)cp, &adv, &lsb);
+    if (text_budget_us && spent_us >= (uint64_t)text_budget_us) {
+        /* this frame has made its share: the glyph's room is kept and its ink comes next frame */
+        static struct glyph later;
+        later.advance = (int16_t)((float)adv * scale + 0.5f), later.adv = (float)adv * scale;
+        ++text_deferred;
+        return &later;
+    }
+    uint64_t began = text_budget_us ? mono_us() : 0;
     if (text_stats.glyphs >= GLYPHS * 3 / 4) {
         evict();
         if (text_stats.glyphs >= GLYPHS * 3 / 4) { /* a frame that needs them all: start over */
@@ -117,10 +137,6 @@ static const struct glyph *glyph_get(int face, int px, unsigned cp, int phase) {
              at = (at + 1) & (GLYPHS - 1));
     }
     struct glyph *g = &cache[at];
-    stbtt_fontinfo *f = &faces[face].info;
-    float scale = stbtt_ScaleForPixelHeight(f, (float)px);
-    int adv, lsb, w = 0, h = 0, x0 = 0, y0 = 0;
-    stbtt_GetCodepointHMetrics(f, (int)cp, &adv, &lsb);
     g->bits = stbtt_GetCodepointBitmapSubpixel(f, scale, scale, (float)phase / PHASES, 0, (int)cp,
                                                &w, &h, &x0, &y0);
     g->key = key, g->w = (uint16_t)w, g->h = (uint16_t)h, g->x0 = (int16_t)x0, g->y0 = (int16_t)y0;
@@ -130,6 +146,7 @@ static const struct glyph *glyph_get(int face, int px, unsigned cp, int phase) {
     g->adv = (float)adv * scale;
     ++text_stats.glyphs, ++text_stats.made;
     text_stats.bytes += (unsigned)(w * h);
+    if (text_budget_us) spent_us += mono_us() - began;
     return g;
 }
 
@@ -156,6 +173,8 @@ void run_make(run_t *r, int face, int px, const char *s, int max) {
         float pen = 0, cut_pen = 0;
         int cut = 0; /* glyphs that fit with the ellipsis after them */
         s = start, r->n = 0, r->cut = 0, r->made = generation;
+        r->face = (uint8_t)face, r->px = (uint8_t)px;
+        int deferred = text_deferred;
         float dots = max >= 0 ? advance_of(glyph_get(face, px, 0x2026, 0)) : 0;
         while (*s && r->n < sizeof r->at / sizeof *r->at - 1) {
             const struct glyph *g = glyph_get(face, px, utf8(&s), phase_of(pen));
@@ -170,12 +189,33 @@ void run_make(run_t *r, int face, int px, const char *s, int max) {
             }
         }
         r->w = pen;
+        r->pending = text_deferred != deferred;
         /* the cache turned over while this run was laid out: its first glyphs may be gone */
         if (r->made == generation || tries) break;
     }
     r->made = generation;
 }
-int run_stale(const run_t *r) { return r->made != generation; }
+int run_stale(const run_t *r) { return r->made != generation || r->pending; }
+
+/* The glyphs most text is made of, ahead of need: printable ASCII at each size a list uses, at
+ * every phase. Makes them until budget_us has gone; returns whether any are left to make. */
+int text_warm(unsigned budget_us) {
+    static const struct {
+        uint8_t face, px;
+    } sets[] = { { FACE_REGULAR, TYPE(20) }, { FACE_REGULAR, TYPE(15) }, { FACE_MEDIUM, TYPE(15) } };
+    static unsigned next;
+    unsigned total = sizeof sets / sizeof *sets * 95 * PHASES;
+    uint64_t until = mono_us() + budget_us;
+    int budget = text_budget_us;
+    text_budget_us = 0;
+    while (next < total && mono_us() < until) {
+        unsigned set = next / (95 * PHASES), rest = next % (95 * PHASES);
+        glyph_get(sets[set].face, sets[set].px, 0x20 + rest / PHASES, (int)(rest % PHASES));
+        ++next;
+    }
+    text_budget_us = budget;
+    return next < total;
+}
 
 float text_width(int face, int px, const char *s) {
     run_t r;
@@ -187,9 +227,7 @@ void run_draw(const run_t *r, float x, float y, uint32_t rgb, unsigned alpha) {
     if (!r->n || !alpha) return;
     /* the baseline: the line box is px high, the face's ascent from its top, on a whole row of
      * the box so text at rest is as sharp as its glyphs were made */
-    const struct glyph *first = r->at[0].g;
-    int face = (int)(first->key >> 30), px = (int)(first->key >> 21 & 0x7f);
-    float base = y + (float)(int)(faces[face == FACE_FALLBACK ? FACE_REGULAR : face].rise * (float)px + 0.5f);
+    float base = y + (float)(int)(faces[r->face].rise * (float)r->px + 0.5f);
     rect_t c = clip_get();
     for (int i = 0; i < r->n; ++i) {
         struct glyph *g = (struct glyph *)r->at[i].g;

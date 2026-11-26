@@ -15,6 +15,12 @@
 #ifndef Q2UI_H
 #define Q2UI_H
 
+/* The toolkit's interface version (docs/ui-rewrite.md#the-toolkit): the first number changes when
+ * a page written for the last one would no longer build or behave, the second when something is
+ * added. */
+#define Q2UI_API_MAJOR 0
+#define Q2UI_API_MINOR 1
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -59,11 +65,11 @@ uint64_t cpu_ns(void);
  * starts from where it is and how fast. response is the period in seconds (a critically damped
  * one is at rest in about that long); damping 1 is critical, under 1 overshoots. */
 typedef struct {
-    float x, v, to;
+    double x, v, to; /* double: a long list's scroll is hundreds of thousands of px, placed to 1/100 */
 } spring_t;
 /* dt seconds on, exactly (no step size to tune); 1 while it still moves */
 int spring_step(spring_t *s, float dt, float response, float damping);
-static inline void spring_set(spring_t *s, float x) { s->x = s->to = x, s->v = 0; }
+static inline void spring_set(spring_t *s, double x) { s->x = s->to = x, s->v = 0; }
 static inline int spring_moving(const spring_t *s) { return s->x != s->to || s->v != 0; }
 float ease_cubic_out(float t);
 float ease_cubic_in(float t);
@@ -87,9 +93,10 @@ typedef struct {
     float rx, ry;   /* its radii */
     float strength; /* 0 to 1 of white at its centre; 0: none */
 } gleam_t;
+#define RGB_GLEAM_ONLY 0xff000000u /* fill_round's rgb for the gleam alone, over what is there */
 void fill_round(rectf_t r, float radius, float tilt, uint32_t rgb, float alpha, const gleam_t *g);
-/* the soft shadow a raised box casts: rgb at alpha under r, gone blur px out; r's inside is left
- * for the box itself */
+/* the soft shadow a raised box casts: rgb at alpha over r, gone blur px out from it; the box is
+ * drawn after, over it */
 void shadow_round(rectf_t r, float radius, float blur, uint32_t rgb, float alpha);
 /* a stroke with round ends, and a disc, smoothed */
 void stroke_line(float x0, float y0, float x1, float y1, float width, uint32_t rgb, float alpha);
@@ -125,6 +132,23 @@ extern const char *icon_dir;
 /* im over dst, scaled, at a sub-pixel place, bilinear; alpha 0-256; tint >= 0 inks its alpha in
  * that colour instead of its own (an icon). radius rounds dst's corners. tilt as fill_round's. */
 void image_draw(const image_t *im, rectf_t dst, float radius, float tilt, unsigned alpha, long tint);
+/* the same of the part `part` of im (its own pixels): a cover shown larger than its frame and moved in it */
+void image_draw_part(const image_t *im, rectf_t part, rectf_t dst, float radius, float tilt, unsigned alpha, long tint);
+image_t *image_new(int w, int h); /* clear, to be drawn into by hand */
+
+/* ---- card.c: a card of layers at different depths (docs/ui-rewrite.md#cards) ---- */
+typedef struct {
+    const image_t *im; /* the layer's picture; 0: the flat colour rgb */
+    uint32_t rgb;
+    float depth;       /* px the layer moves at a full push: behind the card's face when negative */
+    float zoom;        /* how much larger than its frame a picture is shown, so it has room to move (0: 1) */
+    float inset;       /* px in from the card's edge, each side */
+} ui_layer;
+/* The card in r pushed by `push` (-1 up to 1 down, the lean's share): it leans as a tvOS card
+ * does, casts a shadow that moves the other way, each layer shifts by its depth, and a glint
+ * crosses its face. lift (0 to 1) raises it: larger, its shadow deeper. */
+void card_draw(rectf_t r, float radius, const ui_layer *layers, int n, float push, float lift);
+rect_t card_bounds(rectf_t r); /* everything a card in r can touch at any push and lift */
 
 /* ---- text.c ---- */
 enum { FACE_REGULAR, FACE_MEDIUM, FACE_FALLBACK, FACES };
@@ -132,7 +156,9 @@ int text_open(const char *regular, const char *medium, const char *fallback);
 extern int text_whole; /* 1: advances rounded to whole pixels, as AWTK lays text out (a comparison) */
 typedef struct {
     uint16_t n;    /* glyphs */
-    uint16_t cut;  /* 1: ended in an ellipsis */
+    uint8_t cut;     /* 1: ended in an ellipsis */
+    uint8_t pending; /* 1: some glyphs were left for a later frame to make (text_budget_us) */
+    uint8_t face, px;
     float w;       /* the ink's advance, px */
     uint32_t made; /* the glyph cache's generation the run was laid out in */
     struct run_glyph {
@@ -148,6 +174,9 @@ int run_stale(const run_t *r);
 void run_draw(const run_t *r, float x, float y, uint32_t rgb, unsigned alpha);
 float text_width(int face, int px, const char *s);
 void text_frame(void); /* a frame is over: the cache's clock moves on */
+extern int text_budget_us; /* what a frame may spend making new glyphs, wall time; 0: all it needs */
+extern int text_deferred;  /* glyphs this frame left for the next */
+int text_warm(unsigned budget_us); /* make common glyphs ahead of need; 1 while more are left */
 struct text_stats {
     unsigned glyphs, bytes, made, evictions;
 };
@@ -207,9 +236,11 @@ struct ui_stats {
     unsigned frames, ticks, px, dropped, late;
     uint64_t draw_ns, show_ns, draw_max_ns; /* CPU time */
     uint64_t work_us, work_max_us;          /* wall time from a frame's start to its pan */
-    unsigned over_budget;                   /* frames whose work took longer than a refresh */
+    unsigned over_budget;                   /* frames whose work took longer than a refresh, */
+    unsigned cpu_over;                      /* and those whose CPU time did: the machine's other work left out */
     unsigned hist[8];                       /* work time: under 1, 2, 4, 8, 12, 16.7, 33 ms, more */
     unsigned streak, streak_max;            /* frames shown back to back, each a refresh after the last */
+    unsigned deferred;                      /* glyphs a frame left for the next to make */
 };
 extern struct ui_stats ui_stats;
 void ui_stats_reset(void);
@@ -270,6 +301,7 @@ void list_event(ui_list *l, const input_t *e);
 void list_step(ui_list *l);
 void list_draw(ui_list *l, rect_t r);
 void list_changed(ui_list *l); /* the source's rows changed: lay out again, keep the selection in range */
+void list_reload(ui_list *l);  /* rows changed in place (a switch, a value): read again, the switch slides */
 void list_select(ui_list *l, int i, int animate);
 int list_selected(const ui_list *l);
 float list_scroll(const ui_list *l); /* px scrolled, for a test */
@@ -277,7 +309,7 @@ extern int list_motion; /* 0: every move is at its end at once (a bench, Reduce 
 /* A page that is one list and nothing else. */
 extern const ui_page list_page;
 ui_list *list_page_list(void *st);
-/* the list last stepped, as "sel=N scroll=PX bar=PX lean=PX press=S": a script's trace */
+/* the list last stepped, as "sel=N scroll=PX bar=PX lean=PX press=S knob=SHARE": a script's trace */
 int list_trace(char *out, size_t room);
 
 /* ---- lib.c: the library, read from stock's database and the server catalogue ---- */
@@ -289,5 +321,7 @@ const char *lib_artist(int i);
 /* ---- pages ---- */
 void songs_push(void);
 extern const ui_page page_depth; /* the panel's colour depth test card */
+void gallery_push(void);         /* every kind of row, as a list to try them on */
+extern const ui_page page_card;  /* a card of layers the wheel pushes */
 
 #endif

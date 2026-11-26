@@ -28,6 +28,8 @@
 #define POP_MS 200
 #define DRIFT 0.30f /* how far the page under drifts, of the screen's width */
 #define DARKEN 64   /* and how far it darkens, of 255 */
+#define GLYPH_BUDGET_US 3000 /* what a frame of a motion may spend making glyphs (text.c) */
+#define WARM_US 4000         /* and a pass of the loop at rest, making them ahead */
 
 int ui_reduce_motion, ui_painting;
 struct ui_stats ui_stats;
@@ -169,6 +171,7 @@ static void account(uint64_t start_us, uint64_t draw_ns, uint64_t show_ns, unsig
     if (draw_ns > s->draw_max_ns && s->frames > 2) s->draw_max_ns = draw_ns;
     if (work > s->work_max_us && s->frames > 2) s->work_max_us = work;
     if (work > refresh) ++s->over_budget;
+    if (s->frames > 2 && (draw_ns + show_ns) / 1000u > refresh) ++s->cpu_over;
     /* a frame of a motion follows the last by one refresh; one that took a refresh and a half or
      * more missed that many refreshes */
     if (last_moving && last_shown_us && fb_vsync) {
@@ -204,6 +207,9 @@ int ui_frame(const input_t *in, int n) {
     }
     if (!marks.n && !dmg_count()) return 0;
     uint64_t t0 = cpu_ns();
+    /* a frame that follows another by a refresh is a motion's: it may not stop to make every new
+     * glyph. A page's first frame, from rest, makes all it shows. */
+    text_budget_us = last_moving ? GLYPH_BUDGET_US : 0;
     ui_painting = 1;
     if (slide.dir) {
         rect_t all = { 0, 0, SCREEN_W, SCREEN_H };
@@ -222,6 +228,8 @@ int ui_frame(const input_t *in, int n) {
     marks.n = 0;
     uint64_t t1 = cpu_ns();
     unsigned px = fb_present();
+    if (text_deferred) /* the text left out is drawn with the next frame */
+        ui_stats.deferred += (unsigned)text_deferred, ui_mark_all(), again = 1;
     account(start, t1 - t0, cpu_ns() - t1, px, again);
     text_frame();
     return 1;
@@ -235,7 +243,7 @@ void ui_watch(int fd, void (*fn)(void)) { extra_fd = fd, extra_fn = fn; }
 
 int ui_run(void) {
     struct pollfd fds[5];
-    int keys[3], nfds = input_fds(keys, 3), showed = 0, rested = 0;
+    int keys[3], nfds = input_fds(keys, 3), showed = 0, rested = 0, warm = 1;
     for (int i = 0; i < nfds; ++i) fds[i] = (struct pollfd){ keys[i], POLLIN, 0 };
     while (!quit) {
         int n = nfds;
@@ -251,10 +259,11 @@ int ui_run(void) {
         }
         if (hold >= 0 && (wait < 0 || hold < wait)) wait = hold;
         if (wait < 0) {
-            /* at rest: nothing until input or the clock's next minute */
+            /* at rest: nothing until input or the clock's next minute, once the common glyphs
+             * are made, a slice at a time so input is never kept waiting */
             if (!rested && rest_hook) rest_hook();
             rested = 1;
-            wait = (int)(60 - time(0) % 60) * 1000;
+            wait = !warm ? (int)(60 - time(0) % 60) * 1000 : poll(fds, (nfds_t)n, 0) > 0 ? 0 : (warm = text_warm(WARM_US), 0);
         } else
             rested = 0;
         poll(fds, (nfds_t)n, wait);

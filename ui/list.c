@@ -61,7 +61,7 @@
 #define BAR_S 0.15f       /* the platter's, from row to row */
 #define LEAN_S 0.22f      /* the lean's way back */
 #define LEAN_DAMP 0.78f   /* a little past rest and back, once */
-#define KICK 60.0f        /* px/s a tick throws the lean */
+#define KICK 160.0f       /* px/s a tick throws the lean: about 2.5 px before it turns back */
 #define PRESS_S 0.28f
 #define SB_X 366 /* the indicator: 4 px wide, 5 px from the edge, y 134 to 206 */
 #define SB_W 4
@@ -70,7 +70,8 @@
 #define SB_MIN 8
 #define SB_SHOW_US 1000000u /* shown this long after the last tick (patch/ui_kit.h UI_SHOW_MS), */
 #define SB_FADE_US 200000u  /* the last of it fading */
-#define FOOT_KEEP 150       /* of 255: how bright a row is at the list end, fading to none at the foot */
+#define FOOT_KEEP 182       /* of 255: how bright a row is just past the list end, */
+#define FOOT_END 311        /* fading to nothing by this row of the screen (measured from demo's) */
 #define TOP_CLEAR 14        /* rows under the status row are whole this far above the list top, */
 #define TOP_BLACK 8         /* and gone by this row of the screen */
 #define PIN_FADE 6          /* rows leaving under a pinned row fade over this much of the slot below it */
@@ -114,7 +115,7 @@ static int selectable(ui_list *l, int i) {
 }
 static float row_y(const ui_list *l, int i) {
     if (i < l->src.pinned) return (float)(l->box.y + i * l->row_h);
-    return (float)(l->y0 + (i - l->src.pinned) * l->row_h) - l->scroll.x;
+    return (float)((double)(l->y0 + (i - l->src.pinned) * l->row_h) - l->scroll.x);
 }
 static float bar_to(const ui_list *l) {
     if (l->sel < l->src.pinned) return (float)(l->box.y + l->sel * l->row_h);
@@ -129,11 +130,11 @@ static rect_t sb_rect(void) { return (rect_t){ SB_X, SB_TOP, SB_W, SB_BOTTOM - S
 
 /* The platter now: its row's box grown by the raise, the lean and the press, moved by the lean. */
 static rectf_t platter(const ui_list *l, float *tilt, float *lean_share) {
-    float share = clampf(l->lean.x / LEAN_PX, -1.5f, 1.5f);
-    float scale = 1 + RAISE + LEAN_GROW * fabsf(share) + l->press.x;
+    float share = clampf((float)l->lean.x / LEAN_PX, -1.5f, 1.5f);
+    float scale = 1 + RAISE + LEAN_GROW * fabsf(share) + (float)l->press.x;
     float w = (float)(l->box.w - 2 * SEL_INSET) * scale, h = (float)l->row_h * scale;
     float cx = (float)l->box.x + (float)l->box.w / 2;
-    float cy = l->bar.x + (float)l->row_h / 2 + l->lean.x;
+    float cy = (float)l->bar.x + (float)l->row_h / 2 + share * LEAN_PX;
     if (tilt) *tilt = -share * LEAN_TILT;
     if (lean_share) *lean_share = share;
     return (rectf_t){ cx - w / 2, cy - h / 2, w, h };
@@ -163,10 +164,15 @@ static void retarget(ui_list *l) {
     }
     int last = l->n - l->rows;
     if (l->top > last) l->top = last > p ? last : p;
-    l->scroll.to = (float)((l->top - p) * l->row_h);
+    l->scroll.to = (double)((l->top - p) * l->row_h);
     l->bar.to = bar_to(l);
 }
 
+static unsigned row_text_flags(ui_list *l, int i) {
+    ui_row r = { 0 };
+    l->src.row(l->src.ctx, i, &r);
+    return r.flags;
+}
 static void forget(ui_list *l) {
     for (int i = 0; i < CACHE; ++i) l->rows_c[i].index = -1;
     l->mq_row = -1;
@@ -181,8 +187,11 @@ ui_list *list_new(const ui_source *src) {
     l->rows = (l->box.y + l->box.h - l->y0) / l->row_h;
     l->n = src->count(src->ctx);
     forget(l);
+    /* a list opens on its first row that scrolls: a pinned row (Shuffle) is reached by the wheel */
+    l->sel = src->pinned < l->n ? src->pinned : 0;
     while (l->sel < l->n - 1 && !selectable(l, l->sel)) ++l->sel;
     retarget(l);
+    if (l->n) l->knob.to = row_text_flags(l, l->sel) & ROW_ON ? 1 : 0;
     settle(l);
     l->focus_was = focus_rect(l);
     ui_mark(frame_rect(l));
@@ -193,7 +202,19 @@ void list_free(ui_list *l) {
     free(l);
 }
 int list_selected(const ui_list *l) { return l->sel; }
-float list_scroll(const ui_list *l) { return l->scroll.x; }
+float list_scroll(const ui_list *l) { return (float)l->scroll.x; }
+
+/* Rows changed in place (a switch flipped, a value cycled): the same rows are read again, and the
+ * selected row's switch slides to its new side. */
+void list_reload(ui_list *l) {
+    int on = 0;
+    forget(l);
+    if (l->n) on = row_text_flags(l, l->sel) & ROW_ON;
+    l->knob.to = on ? 1 : 0;
+    if (!list_motion) spring_set(&l->knob, l->knob.to);
+    else kick(l);
+    ui_mark(frame_rect(l));
+}
 
 void list_changed(ui_list *l) {
     l->n = l->src.count(l->src.ctx);
@@ -299,12 +320,12 @@ static void row_paint(ui_list *l, int i, float y, int focused, float dy) {
         return;
     }
     int grey = r->flags & ROW_GREY, accent = r->flags & (ROW_ACCENT | ROW_PLAYING);
-    uint32_t ink = focused ? on : grey ? tok(TOK_TERTIARY) : accent ? tok(TOK_ACCENT_TEXT) : tok(TOK_PRIMARY);
+    uint32_t ink = focused ? on : grey ? tok(TOK_TERTIARY) : accent ? RGB_ACCENT : tok(TOK_PRIMARY);
     uint32_t dim = focused ? on : tok(TOK_TERTIARY);
     uint32_t val = focused ? on : grey ? tok(TOK_TERTIARY) : tok(TOK_SECONDARY);
     if (r->icon)
         image_draw(r->icon, (rectf_t){ (float)(l->box.x + TEXT_X), cy - ICON_PX / 2 + iy, ICON_PX, ICON_PX }, 0, 0,
-                   256, focused ? (long)on : accent ? (long)tok(TOK_ACCENT_TEXT) : (long)tok(TOK_SECONDARY));
+                   256, focused ? (long)on : accent ? (long)RGB_ACCENT : (long)tok(TOK_SECONDARY));
     if (r->art)
         image_draw(r->art, (rectf_t){ (float)(l->box.x + TEXT_X), y + 6 + iy, ART_PX, ART_PX }, 4, 0, 256, -1);
     if (c->lead.n) run_draw(&c->lead, (float)(l->box.x + LEAD_END) - c->lead.w, ty + (h - (float)META_PX) / 2 + META_DY, dim, 256);
@@ -323,11 +344,11 @@ static void row_paint(ui_list *l, int i, float y, int focused, float dy) {
     if (c->value.n)
         run_draw(&c->value, right - c->value.w, two ? ty + 5 + 3 : ty + (h - (float)TITLE_PX) / 2, val, 256);
     else if (r->flags & ROW_SWITCH)
-        toggle(right, cy + iy, i == l->sel ? l->knob.x : r->flags & ROW_ON ? 1.0f : 0.0f, focused);
+        toggle(right, cy + iy, i == l->sel ? (float)l->knob.x : r->flags & ROW_ON ? 1.0f : 0.0f, focused);
     else if (r->flags & ROW_PLAYING)
-        level_bars(right, cy + iy, focused ? on : tok(TOK_ACCENT_TEXT));
+        level_bars(right, cy + iy, focused ? on : RGB_ACCENT);
     else if (r->flags & ROW_CHECK)
-        check(right - 7, cy + iy, focused ? on : tok(TOK_ACCENT_TEXT));
+        check(right - 7, cy + iy, focused ? on : RGB_ACCENT);
     else if (r->flags & ROW_CHEVRON)
         chevron(right - 5, cy + iy, focused ? on : grey ? tok(TOK_TERTIARY) : tok(TOK_CHEVRON));
 }
@@ -337,7 +358,7 @@ static void draw_indicator(const ui_list *l) {
     if (!l->sb_alpha || total <= l->rows) return;
     float track = SB_BOTTOM - SB_TOP, len = track * (float)l->rows / (float)total;
     if (len < SB_MIN) len = SB_MIN;
-    float at = (track - len) * clampf(l->scroll.x / (float)((total - l->rows) * l->row_h), 0, 1);
+    float at = (track - len) * clampf((float)(l->scroll.x / (double)((total - l->rows) * l->row_h)), 0, 1);
     float a = (float)l->sb_alpha / 255;
     fill_round((rectf_t){ SB_X, SB_TOP, SB_W, track }, 2, 0, 0x3a3a3a, a, 0);
     fill_round((rectf_t){ SB_X, SB_TOP + at, SB_W, len }, 2, 0, 0xe5e5e5, a, 0);
@@ -355,7 +376,7 @@ void list_draw(ui_list *l, rect_t r) {
     if (p) rows.h -= l->y0 - rows.y, rows.y = l->y0;
     if (rect_meet(part, rows, &rows) && l->n > p) {
         clip_set(rows);
-        int first = p + (int)floorf((l->scroll.x + (float)(rows.y - l->y0)) / (float)l->row_h);
+        int first = p + (int)floor((l->scroll.x + (double)(rows.y - l->y0)) / (double)l->row_h);
         if (first < p) first = p;
         for (int i = first; i < l->n; ++i) {
             float y = row_y(l, i);
@@ -365,7 +386,8 @@ void list_draw(ui_list *l, rect_t r) {
         /* the list's ends: rows fade into the screen's foot, and into its top once scrolled */
         if (full || p) {
             int foot = l->box.y + l->box.h;
-            shade_rows(foot, frame.y + frame.h, FOOT_KEEP, 0);
+            shade_rows(foot, FOOT_END, FOOT_KEEP, 0);
+            fill((rect_t){ frame.x, FOOT_END, frame.w, SCREEN_H - FOOT_END }, tok(TOK_CANVAS));
         }
         if (p)
             shade_rows(l->y0, l->y0 + PIN_FADE, 0, 255);
@@ -384,7 +406,7 @@ void list_draw(ui_list *l, rect_t r) {
     rect_t on;
     clip_set(r);
     if (!rect_meet(r, focus_rect(l), 0)) return;
-    float pressed = clampf(-l->press.x / PRESS_SINK, 0, 1);
+    float pressed = clampf((float)-l->press.x / PRESS_SINK, 0, 1);
     uint32_t blue = rgb_mix(RGB_ACCENT, RGB_ACCENT_PRESSED, pressed);
     shadow_round((rectf_t){ bar.x + 2, bar.y + 3, bar.w - 4, bar.h }, SEL_R, 7, RGB_ACCENT,
                  (0.30f + 0.25f * fabsf(share)) * (1 - pressed));
@@ -394,15 +416,15 @@ void list_draw(ui_list *l, rect_t r) {
     /* what the platter covers reads in its focused inks, cut to the platter */
     if (!rect_meet(r, rect_of(bar, 0), &on)) return;
     clip_set(on);
-    int near = p + (int)floorf((bar.y - (float)l->y0 + l->scroll.x) / (float)l->row_h);
+    int near = p + (int)floor(((double)(bar.y - (float)l->y0) + l->scroll.x) / (double)l->row_h);
     for (int k = 0; k < p + 4; ++k) {
         int i = k < p ? k : near + k - p - 1;
         if (i < (k < p ? 0 : p) || i >= l->n) continue;
         float y = row_y(l, i);
         if (y >= bar.y + bar.h || y + (float)l->row_h <= bar.y) continue;
         /* how much of the row the platter is over: a row it is leaving moves less with it */
-        float over = clampf(1 - fabsf(y - l->bar.x) / (float)l->row_h, 0, 1);
-        row_paint(l, i, y, 1, l->lean.x * over);
+        float over = clampf(1 - fabsf(y - (float)l->bar.x) / (float)l->row_h, 0, 1);
+        row_paint(l, i, y, 1, share * LEAN_PX * over);
     }
     clip_set(r);
 }
@@ -433,8 +455,11 @@ static void moved(ui_list *l, int old) {
         if (l->src.focus) l->src.focus(l->src.ctx, l->sel);
     }
     if (!list_motion) {
+        double scroll = l->scroll.x;
         settle(l);
-        ui_mark(frame_rect(l));
+        rect_t f = focus_rect(l);
+        ui_mark(l->scroll.x != scroll ? frame_rect(l) : rect_union(f, l->focus_was));
+        l->focus_was = f;
         return;
     }
     kick(l);
@@ -465,7 +490,7 @@ void list_event(ui_list *l, const input_t *e) {
         l->sel = sel;
         /* a tick throws the platter's lean the way it went, at a list's end too, where the
          * selection stays (docs/oled-design.md#selection-bar) */
-        if (list_motion && !ui_reduce_motion) l->lean.v += (float)dir * KICK, kick(l);
+        if (list_motion && !ui_reduce_motion) l->lean.v = (double)dir * KICK, kick(l);
         if (sel != old) moved(l, old);
     } else if (e->type == IN_TUG) {
         if (!list_motion || ui_reduce_motion) return;
@@ -491,9 +516,8 @@ void list_event(ui_list *l, const input_t *e) {
 
 int list_trace(char *out, size_t room) {
     if (!traced) return snprintf(out, room, "-");
-    return snprintf(out, room, "sel=%d scroll=%.3f bar=%.3f lean=%.3f press=%.4f", traced->sel,
-                    (double)traced->scroll.x, (double)traced->bar.x, (double)traced->lean.x,
-                    (double)traced->press.x);
+    return snprintf(out, room, "sel=%d scroll=%.3f bar=%.3f lean=%.3f press=%.4f knob=%.3f", traced->sel,
+                    traced->scroll.x, traced->bar.x, traced->lean.x, traced->press.x, traced->knob.x);
 }
 
 void list_step(ui_list *l) {
@@ -501,7 +525,7 @@ void list_step(ui_list *l) {
     traced = l;
     float dt = now > l->t ? (float)(now - l->t) / 1e6f : 0;
     l->t = now;
-    float scroll = l->scroll.x;
+    double scroll = l->scroll.x;
     int moving = 0;
     if (l->moving) {
         moving |= spring_step(&l->scroll, dt, GLIDE_S, 1);

@@ -2,13 +2,14 @@
  *
  *     q2ui [--db FILE] [--catalogue FILE] [--fb FILE] [--input DIR] [--fonts DIR] [--icons DIR]
  *          [--limit N] [--motion 0|1] [--reduce-motion] [--light] [--panel-bits 8|6|5]
- *          [--text awtk] [--page songs|depth] [--stats FILE] [--bench] [--script FILE]
+ *          [--text awtk] [--page songs|depth|gallery|card] [--stats FILE] [--bench] [--script FILE]
  *          [--trace FILE] [--clock HH:MM]
  *
  * --catalogue is the server library's (default /mnt/mmc/.q2pod/catalogue.db; "" for none): its
  * songs are listed with the card's, as the Library lists them. --panel-bits is the depth of the
  * link to the glass, which every frame is dithered down to (docs/ui-rewrite.md#gradients);
- * --page depth is the card that finds it by eye. --text awtk lays text out on whole pixels, as
+ * --page depth is the card that finds it by eye; gallery and card are the toolkit's examples
+ * (ui/page_gallery.c). --text awtk lays text out on whole pixels, as
  * demo does, for comparing screens.
  *
  * Options also come from /mnt/data/q2ui.args (one line), as S90play starts it with none. Return
@@ -109,16 +110,16 @@ static void write_stats(void) {
             "{\"rows\": %d, \"open_ms\": %u, \"first_frame_ms\": %u, \"frames\": %u, \"ticks\": %u,\n"
             " \"draw_us_per_frame\": %.1f, \"show_us_per_frame\": %.1f, \"draw_us_max\": %.1f, "
             "\"px_turned_per_frame\": %u,\n"
-            " \"work_us_per_frame\": %.1f, \"work_us_max\": %llu, \"over_budget\": %u, \"dropped\": %u, "
-            "\"late\": %u, \"streak_max\": %u, \"refresh_us\": %u,\n"
+            " \"work_us_per_frame\": %.1f, \"work_us_max\": %llu, \"over_budget\": %u, \"cpu_over_budget\": %u, \"dropped\": %u, "
+            "\"late\": %u, \"streak_max\": %u, \"refresh_us\": %u, \"glyphs_deferred\": %u,\n"
             " \"work_hist_ms\": {\"lt1\": %u, \"lt2\": %u, \"lt4\": %u, \"lt8\": %u, \"lt12\": %u, "
             "\"lt16_7\": %u, \"lt33\": %u, \"more\": %u},\n"
             " \"glyphs\": %u, \"glyph_bytes\": %u, \"glyphs_made\": %u, \"glyph_evictions\": %u, "
             "\"motion\": %d, \"panel_bits\": %d, \"page\": %d%s%s}\n",
             lib_songs(), open_ms, first_ms, s->frames, s->ticks, (double)s->draw_ns / frames / 1e3,
             (double)s->show_ns / frames / 1e3, (double)s->draw_max_ns / 1e3, (unsigned)(s->px / frames),
-            (double)s->work_us / frames, (unsigned long long)s->work_max_us, s->over_budget, s->dropped,
-            s->late, s->streak_max, fb_refresh_us(), s->hist[0], s->hist[1], s->hist[2], s->hist[3],
+            (double)s->work_us / frames, (unsigned long long)s->work_max_us, s->over_budget, s->cpu_over, s->dropped,
+            s->late, s->streak_max, fb_refresh_us(), s->deferred, s->hist[0], s->hist[1], s->hist[2], s->hist[3],
             s->hist[4], s->hist[5], s->hist[6], s->hist[7], text_stats.glyphs, text_stats.bytes,
             text_stats.made, text_stats.evictions, list_motion, fb_bits, fb_page(),
             *bench_json ? ",\n \"bench\": " : "", bench_json);
@@ -128,6 +129,10 @@ static void write_stats(void) {
 static void first_page(void) {
     if (!strcmp(opt.page, "depth"))
         ui_push(&page_depth, 0);
+    else if (!strcmp(opt.page, "gallery"))
+        gallery_push();
+    else if (!strcmp(opt.page, "card"))
+        ui_push(&page_card, 0);
     else
         songs_push();
 }
@@ -170,7 +175,7 @@ static void bench(void) {
     int rows = lib_songs(), steps = rows > 420 ? 200 : rows / 3, motion = list_motion;
     fb_vsync = 0;
     strcpy(bench_json, "{");
-    /* as the spike measured them, with no motion: a tick on the page (two rows), a tick that
+    /* with no motion, as phase 1 measured them: a tick on the page (two rows), a tick that
      * scrolls (the list), the whole screen */
     list_motion = 0;
     for (int k = 0; k < 20; ++k) bench_case(0, 5, 1, 1000000, 0), bench_case(0, 5, -1, 1000000, 0);
@@ -244,7 +249,7 @@ static int script(const char *path) {
         if (sscanf(line, "tick %319s", arg) == 1) {
             int n = atoi(arg);
             for (int i = 0; i < abs(n); ++i) {
-                input_t in = { IN_TICK, n > 0 ? 1 : -1, 0, ms };
+                input_t in = { IN_TICK, n > 0 ? 1 : -1, 0, (unsigned)(fake_us / 1000u) };
                 script_frame(&in, 1);
             }
         } else if (sscanf(line, "tug %319s", arg) == 1) {

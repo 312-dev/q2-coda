@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ui/bluenoise.inc: the 64 x 64 blue-noise table q2ui dithers with (ui/draw.c, ui/fb.c dither64).
 
-    python3 ui/tools/bluenoise.py [OUT]    # needs numpy; the table is committed, so a build does not
+    uv run --with numpy python ui/tools/bluenoise.py [OUT]    # needs numpy; the table is committed, so a build does not
 
 Made by filling voids: each next point goes where the points already placed are thinnest, by a
 Gaussian (sigma 1.9) summed round the table's edges, so the pattern tiles and has no low
@@ -32,7 +32,7 @@ def table():
 
 
 def text(values):
-    lines = ['/* tools/bluenoise.py wrote this: 64 x 64 blue noise, each value 0 to 255 sixteen times. */']
+    lines = ['/* ui/tools/bluenoise.py wrote this: 64 x 64 blue noise, each value 0 to 255 sixteen times. */']
     for row in values:
         lines.append(' '.join(f'{v},' for v in row))
     return '\n'.join(lines) + '\n'
