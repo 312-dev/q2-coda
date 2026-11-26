@@ -152,21 +152,26 @@ def test_edit_playlist_keeps_the_stored_order(fw, ui, songs):
 
 # The hold menu on a playlist's row in Library > Playlists: Sort, its value the playlist's order, its choices the
 # three, the current one ticked; a pick saves it for that playlist.
+class PlaylistHold(Hold):
+    """Road Trip (3) as Library > Playlists' one row; open() runs the hold's pass on it: the menu's rows."""
+    def __init__(self, fw, ui, st, recs, mcl):
+        super().__init__(fw, ui, st, recs, mcl)
+        self.road = recs(name='Road Trip', title='Road Trip', disc=3, id_=3, kind=4)
+        fw.var('fw_ctx_p_deque_playlist', C.c_uint).value = self.deques.new([self.road])
+
+    def open(self):
+        st = self.st
+        st('qm_kind').value, st('qm_idx', C.c_uint).value, st('qm_rows', C.c_uint).value = QM_PLAYLIST, 0, 1
+        st('qm_hash', C.c_uint).value = self.fw.fn('navigation__rec_hash', C.c_uint, C.c_void_p)(self.road)
+        self.fw.fn('navigation__qm_open', C.c_int, C.c_void_p)(None)
+        return self.ui.rows(self.view())
+
+
 @pytest.fixture
 def menu(fw, ui, st, recs, mcl):  # noqa: F811
     use_set(st)
-    hold = Hold(fw, ui, st, recs, mcl)
-    road = recs(name='Road Trip', title='Road Trip', disc=3, id_=3, kind=4)
-    fw.var('fw_ctx_p_deque_playlist', C.c_uint).value = hold.deques.new([road])
     flag(fw, 1)
-
-    def open_():
-        st('qm_kind').value, st('qm_idx', C.c_uint).value, st('qm_rows', C.c_uint).value = QM_PLAYLIST, 0, 1
-        st('qm_hash', C.c_uint).value = fw.fn('navigation__rec_hash', C.c_uint, C.c_void_p)(road)
-        fw.fn('navigation__qm_open', C.c_int, C.c_void_p)(None)
-        return ui.rows(hold.view())
-    hold.open = open_
-    return hold
+    return PlaylistHold(fw, ui, st, recs, mcl)
 
 
 def test_a_playlist_s_hold_menu_offers_sort_with_its_order(fw, ui, menu):
