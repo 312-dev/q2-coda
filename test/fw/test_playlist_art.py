@@ -59,7 +59,7 @@ def test_albums_told_apart_as_album_cmp(fw):
 
 
 def test_fat_name(fw):
-    escape = fw.fn('playlist_art__fat_name', None, C.c_char_p, C.c_uint, C.c_char_p)
+    escape = fw.fn('playlist_fat_name', None, C.c_char_p, C.c_uint, C.c_char_p)
     out = C.create_string_buffer(64)
     escape(out, 64, b'a/b:c?')
     assert out.value == b'a_b_c_'

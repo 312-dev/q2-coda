@@ -17,5 +17,8 @@ void playlist_art_stop(void);
 /* A clean end (power-off, Restart): the build stops before its next cover, its note gone. */
 void playlist_art_clean_end(void);
 extern void (*playlist_art_ready)(int cd_num);
+/* name as a file name in _explaylist_data: the characters FAT refuses become _ (playlist_sort.c's
+ * .m3u looks it up so too) */
+void playlist_fat_name(char *out, unsigned size, const char *name);
 
 #endif

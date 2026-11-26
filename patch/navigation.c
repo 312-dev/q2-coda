@@ -150,11 +150,15 @@ static int library_query(int content, const char *db, const char *sql, void *row
         if (n < 0 || (unsigned)n >= sizeof filtered) return -1;
         sql = filtered;
     }
-    /* getAllPlayList's playlist headers: by name, not creation (stock Rename sets name too) */
-    if (sql && !strcmp(sql, "select * from playlist where id <= 100")) {
-        int n = tk_snprintf(filtered, sizeof filtered, "%s order by name collate nocase, id", sql);
+    /* getAllPlayList's playlist headers, in Sorting's Playlists order (playlist_sort.c): by name
+     * either way, not creation (stock Rename sets name too), and Recently Added by date once
+     * loaded */
+    int headers = sql && !strcmp(sql, "select * from playlist where id <= 100");
+    if (headers) {
+        int n = tk_snprintf(filtered, sizeof filtered, "%s%s", sql, playlist_sort_sql());
         if (n < 0 || (unsigned)n >= sizeof filtered) return -1;
         sql = filtered;
+        row = playlist_sort_row(row);
     }
     /* Time added (ascending) would walk songtable_time_create backwards and reverse one second's
      * songs (a CUE image's tracks): id keeps stock's order. aa is free: this SQL has no
@@ -181,6 +185,7 @@ static int library_query(int content, const char *db, const char *sql, void *row
         result = content == 2 ? stock_sorted_query_trampoline(db, query, row, (int)arg)
                  : content    ? stock_content_query_trampoline(db, query, row, arg, sort)
                               : stock_dbquery_trampoline(db, query, row, (int)arg);
+    if (headers) playlist_sort_order();
     if (expanded) free(expanded);
     free(search);
     return result;

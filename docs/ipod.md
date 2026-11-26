@@ -396,20 +396,25 @@ rows dropped, each page's own built; each keeps its own place in position memory
   Cover Flow, see [internals.md](internals.md#artist-view-and-go-to-album-in-coverflow)), Playlists, Folders, and a "Scan Song Durations" switch
   (`Q2POD SCANDURATIONS`, off; caption "Measures lengths after each update"; durations.c).
 - Sorting: **Songs**, a picker of Title, Artist, Album and Recently Added (`song_sort.c`), the current one's direction
-  as an arrow, Center on it again flipping it and another taking its natural one (A to Z, the newest first); "Artist's
-  Albums: Year" or "A–Z" (`Q2POD ARTISTAZ`); "Years: Newest First" or "Oldest First" (`Q2POD YEAROLD`).
+  as an arrow, Center on it again flipping it and another taking its natural one (A to Z, the newest first);
+  **Playlists**, a picker of Name and Recently Added the same way (`playlist_sort.c`, `Q2POD PLAYLISTORDER` and
+  `PLAYLISTDOWN`; Name A to Z unless chosen), which orders every list of the playlists: Library's and Home's
+  Playlists, as rows or as Cover Flow, and the Add to Playlist picker. Recently Added dates a playlist by the later of
+  when the Q2 made it and its `.m3u` file's time on the card (a sync or an edit on a computer moves it up), the
+  undated last ([internals.md](internals.md#playlist-order)); "Artist's Albums: Year" or "A–Z" (`Q2POD ARTISTAZ`);
+  "Years: Newest First" or "Oldest First" (`Q2POD YEAROLD`).
 - Playlists: "Playlist View: List" (`Q2POD PLAYLISTCF`, List (default) or Cover Flow; [Playlists as
   covers](#cover-flow)), then Import Playlists and Export Playlists after a 12 px gap.
 - Folders: Folder Root (`Q2POD FOLDERROOT`, cycling the card's top folders), stock's Folder Skip and Folder Album
   Cover.
 
-The pickers (Songs here, Display > Cover Flow's Sort) are stock's Buttons Lock page opened again (`picker_open`), its
+The pickers (Songs and Playlists here, Display > Cover Flow's Sort) are stock's Buttons Lock page opened again (`picker_open`), its
 rows built by `picker_rows` from `ringnav_keylock_rows`; a pick stays on the page, as Buttons Lock's does. Library is depth 3 below Home
-(Settings, Playback, Library); its Sorting, Playlists and Folders pages are depth 4, and the Songs picker depth 5.
+(Settings, Playback, Library); its Sorting, Playlists and Folders pages are depth 4, and the Songs and Playlists pickers depth 5.
 From Home with Now Playing selected, counting detents and Center presses straight down (Settings is 6 detents and
 Center, Playback, its fourth row, 3 and Center, Library, Playback's second, 1 and Center: 13 to open it), a row's own
 press included: On-The-Go 14, Artists 16, Artist View 17, Scan Song Durations 20; the Songs picker
-16, Artist's Albums 17, Years 18; Playlist View 19; Folder Root 20. Elsewhere: Sleep Timer's page 20, Enlarged Album
+16, the Playlists picker 17, Artist's Albums 18, Years 19; Playlist View 19; Folder Root 20. Elsewhere: Sleep Timer's page 20, Enlarged Album
 Art 20, Cover Flow's Sort picker 20.
 
 Stock's Wireless page (Wi-Fi, Bluetooth and SyncLink) is not reached from Settings, whose own rows open Wi-Fi's and Bluetooth's pages; SyncLink stays off ([internals](internals.md#synclink)).
@@ -531,7 +536,7 @@ The wheel holds the covers directly ([internals](internals.md#coverflow-thumb)) 
 
 Center on a cover opens the album's tracks as a list in the page, the covers hidden behind it ([internals](internals.md#coverflow)); Return comes back to them.
 
-**Playlists as covers.** Display → Cover Flow's **Playlist View: Cover Flow** (`Q2POD PLAYLISTCF`, List by default) opens the Playlists list ([internals.md](internals.md#playlist-art)) as covers, from every entry (Library, Home's list, the shortcut): the page opens veiled, and on the next pass the covers open over it, the playlists in the list's order, stopping at both ends. Return closes both and goes back to where Playlists was opened. With no playlists, or in the Add to Playlist picker, the list shows. A cover is the playlist's art at 160 pixels (a placeholder until it is made): the covers are the view; the caption is its name over "N songs" (or "1 song"), in the album's two lines. There are no letters, no Sort cards and no remembered position. Center opens the playlist's own list over the covers, as a tap on its row does, and Return comes back to them. A song plays in the list's order; Now Playing's More then has no Delete, which for those songs would take the song out of the library, not the playlist, until another queue plays. Edits made from the covers show as they come back to them: after More…'s Rename or Delete a deleted playlist's cover goes and a renamed one shows its new name, a new playlist gets a cover, and a playlist whose songs changed shows its new count and art. Hold Play/Pause on a cover gives Play Next, Add to Queue, Shuffle and More… as on the list's row, then **New Playlist**, which closes the covers for New Playlist's letter strip over the Playlists page, and, on a set with no toolbar (OLED's), **Select Playlists…**, which closes them for its select mode (a set with a toolbar edits from the page's toolbar).
+**Playlists as covers.** Display → Cover Flow's **Playlist View: Cover Flow** (`Q2POD PLAYLISTCF`, List by default) opens the Playlists list ([internals.md](internals.md#playlist-art)) as covers, from every entry (Library, Home's list, the shortcut): the page opens veiled, and on the next pass the covers open over it, the playlists in the list's order (Sorting's Playlists), stopping at both ends. Return closes both and goes back to where Playlists was opened. With no playlists, or in the Add to Playlist picker, the list shows. A cover is the playlist's art at 160 pixels (a placeholder until it is made): the covers are the view; the caption is its name over "N songs" (or "1 song"), in the album's two lines. There are no letters, no Sort cards and no remembered position. Center opens the playlist's own list over the covers, as a tap on its row does, and Return comes back to them. A song plays in the list's order; Now Playing's More then has no Delete, which for those songs would take the song out of the library, not the playlist, until another queue plays. Edits made from the covers show as they come back to them: after More…'s Rename or Delete a deleted playlist's cover goes and a renamed one shows its new name, a new playlist gets a cover, and a playlist whose songs changed shows its new count and art. Hold Play/Pause on a cover gives Play Next, Add to Queue, Shuffle and More… as on the list's row, then **New Playlist**, which closes the covers for New Playlist's letter strip over the Playlists page, and, on a set with no toolbar (OLED's), **Select Playlists…**, which closes them for its select mode (a set with a toolbar edits from the page's toolbar).
 
 ## Rounded corners
 

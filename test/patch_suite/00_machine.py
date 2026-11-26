@@ -392,7 +392,8 @@ class Machine:
         elif name in ('tk_snprintf','snprintf@GLIBC_2.0'):
             fmt=self.text(c); values=iter([d]+[self.get(u.reg_read(UC_MIPS_REG_SP)+off) for off in range(16,80,4)])
             params=[]  # %.*s takes a length, then the string (its bytes)
-            for star,kind in re.findall(r'%(\.\*)?\d*(?:\.\d+)?([sdxXuc])',fmt):  # %.500s: Python's % applies the precision
+            for star,kind in re.findall(r'%(?:%|(\.\*)?\d*(?:\.\d+)?([sdxXuc]))',fmt):  # %.500s: Python's % applies the precision
+                if not kind: continue  # %%, a literal % (strftime's '%%s' in SQL), takes no argument
                 if star: n=next(values); params.append(bytes(self.u.mem_read(next(values),n)).split(b'\0')[0].decode())
                 else: value=next(values); params.append(self.text(value) if kind=='s' else chr(value&255) if kind=='c' else value if kind in 'xXu' else signed(value))
             result=(re.sub(r'%\.\*s','%s',fmt) % tuple(params)).encode(); self.u.mem_write(a,result[:b-1]+b'\0'); ret=len(result)

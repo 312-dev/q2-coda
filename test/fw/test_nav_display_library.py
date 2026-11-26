@@ -573,7 +573,8 @@ def test_playback_s_library_row_opens_the_library_page(fw):
 
 
 @pytest.mark.parametrize('row, title, texts', [
-    ('Sorting', 'Sorting', ['Songs: Title \u2191', "Artist's Albums: Year", 'Years: Newest First']),
+    ('Sorting', 'Sorting', ['Songs: Title \u2191', 'Playlists: Name \u2191', "Artist's Albums: Year",
+                            'Years: Newest First']),
     ('Playlists', 'Playlists', ['Playlist View: List', None, 'Import Playlists', 'Export Playlists']),
     ('Folders', 'Folders', ['Folder Root: Card', 'stock_12', 'playset_foldercover']),  # stock's Folder Skip kept
 ])
@@ -607,6 +608,40 @@ def test_songs_picker_flips_the_current_order_and_takes_another_s_natural_direct
                        ('Recently Added \u2193', b'select')]  # the newest first
     assert ('SORTSELECT', 3) in writes(fw) and sorting.children[0].said() == 'Songs: Recently Added \u2193'
     assert fw.var('g_sort_changeflag', C.c_ubyte).value == 1  # Songs reloads when it is on top again
+
+
+def test_playlists_picker_flips_the_current_order_and_takes_recently_added_newest_first(fw):
+    """Sorting's Playlists opens its picker: Name (A to Z unless chosen) or Recently Added. Name again flips it to Z
+    to A; Recently Added takes the newest first and again the oldest first; each saved as Q2POD PLAYLISTORDER and
+    PLAYLISTDOWN, the picker staying and Sorting's row following."""
+    ui = Ui(fw)
+    page = library(fw, ui)
+    ui.click(button_of(page.view(), 'Sorting'))
+    sorting = page.view()
+    ui.click(button_of(sorting, 'Playlists'))
+    assert page.opened[-1] == 'systemset/keylock_page' and page.title() == 'Playlists'
+
+    def marks():
+        return [(item.labels()[0].text, item.children[0].children[0].props['image']) for item in page.view().children]
+    assert marks() == [('Name \u2191', b'select'), ('Recently Added', b'unselect')]
+    before = len(writes(fw))
+    ui.click(page.view().children[0].children[0])
+    assert marks()[0] == ('Name \u2193', b'select') and writes(fw)[before:] == [('PLAYLISTORDER', 0), ('PLAYLISTDOWN', 1)]
+    ui.click(page.view().children[1].children[0])
+    assert marks() == [('Name', b'unselect'), ('Recently Added \u2193', b'select')]  # the newest first
+    assert writes(fw)[-2:] == [('PLAYLISTORDER', 1), ('PLAYLISTDOWN', 1)]
+    assert sorting.children[1].said() == 'Playlists: Recently Added \u2193'
+    ui.click(page.view().children[1].children[0])
+    assert marks()[1] == ('Recently Added \u2191', b'select') and writes(fw)[-1] == ('PLAYLISTDOWN', 0)
+    assert not [k for k, _ in writes(fw) if k in ('SORTSELECT', 'SONGSORT', 'SONGDOWN')]  # Songs' order untouched
+
+
+def test_the_playlists_order_is_read_back_from_the_config(fw):
+    """A choice made before a restart: the Sorting row reads it from config.ini."""
+    ui = Ui(fw)
+    page = library(fw, ui, PLAYLISTORDER=b'1', PLAYLISTDOWN=b'1')
+    ui.click(button_of(page.view(), 'Sorting'))
+    assert page.texts()[1] == 'Playlists: Recently Added \u2193'
 
 
 def test_cover_flow_sort_opens_its_picker_and_a_pick_is_its_value(fw):
