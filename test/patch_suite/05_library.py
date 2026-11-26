@@ -1335,7 +1335,8 @@ m.paint(w,gap=0); m.advance(1); assert not m.timers; passed()  # passes spent: n
 m,w,labels=marquee_list(); m.advance(hold+100); on=running(m,labels); assert on==[labels[m.selected(w)]] and shown(m,on[0])=='moving'
 m.call(); m.paint(w,gap=0); m.advance(1); assert focus_only(m,on[0])==1 and shown(m,on[0])=='rest'
 assert running(m,labels)==[labels[m.selected(w)]] and shown(m,labels[m.selected(w)])=='start'; passed()
-m.byte(syms['g_backlight_status'],0); m.advance(hold+scroll+hold); assert running(m,labels)==[] and not m.timers
+# the pass ends on the tick at or after its scroll's end, under a 16 ms tick past it
+m.byte(syms['g_backlight_status'],0); m.advance(hold+scroll+16+hold); assert running(m,labels)==[] and not m.timers
 m.byte(syms['g_backlight_status'],1); m.paint(w,gap=0); m.advance(1); assert len(running(m,labels))==1; passed()
 for kw in (dict(over=False),dict(only_focus=0)):
     m,w,labels=marquee_list(**kw); m.advance(hold+1); assert not running(m,labels) and not m.timers; passed()
