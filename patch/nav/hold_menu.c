@@ -527,10 +527,10 @@ static int qm_open(const void *unused) {
 }
 
 /* What holds the row that opens the menu: Play/Pause (0, ringnav_keylong), Centre (KEY_CENTER) or a
- * finger (QM_BY_TOUCH) on a song row (qm_centre_hold, qm_touch_hold, from centre_menu.c). Only
- * Play/Pause's release is latched here (qm_press, play_hold_released); Centre's release and the
- * finger's are centre_menu.c's, and a finger has no key record (qm_key's stand-in is never read).
- */
+ * finger (QM_BY_TOUCH) on a song or playlist row (qm_centre_hold, qm_touch_hold, from
+ * centre_menu.c). Only Play/Pause's release is latched here (qm_press, play_hold_released);
+ * Centre's release and the finger's are centre_menu.c's, and a finger has no key record (qm_key's
+ * stand-in is never read). */
 #define QM_BY_TOUCH 0xffffffffu
 static unsigned qm_hold_key __attribute__((section(".scratch")));
 static char *key_record(unsigned k) {
@@ -607,15 +607,16 @@ int qm_far_hold(void *page, void *list, void (*play)(void)) {
 
 /* The hold: the same gates and row as a centre press, over the stock showlist or Coverflow's
  * own tracks (row count checked), or the album at the centre of Coverflow's covers. Everything
- * else stays stock. With songs, only a song row of a list gets its menu (Centre's hold): no Now
- * Playing, album, artist, folder or playlist row. */
-static int qm_hold(int songs) {
+ * else stays stock. With centre (Centre's hold or a finger's), only a song row of a list and a
+ * playlist, its row in Library > Playlists or its cover, get their menus: no Now Playing, album,
+ * artist or folder row, and no album's cover. */
+static int qm_hold(int centre) {
     st.qm_choice = 0;
     qm_held.page = (void *)0; /* Cover Flow's own tracks, not a page qm_song_hold held */
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);
     const char *name = top ? widget_get_prop_str(top, "name", "") : "";
     int playing = !tk_strcmp(name, "playing_page");
-    if (st.qm_dialog || st.qm_timer || st.qm_playlist || !usable() || (playing && songs) ||
+    if (st.qm_dialog || st.qm_timer || st.qm_playlist || !usable() || (playing && centre) ||
         (!playing && !allowed_top(top)) || window_manager_is_animating(wm) ||
         (qm_hold_key != QM_BY_TOUCH && pointer_down()) || airplayGetFlag() == 2 || g_navbar_status)
         return 0;
@@ -640,7 +641,7 @@ static int qm_hold(int songs) {
     int kind = contexts[context_id(name)].kind;
     void *album = coverflow_album(top), *cover = coverflow_playlist(top);
     char *key = qm_key();
-    if (songs && (cover || album)) return 0;
+    if (centre && album) return 0;
     if (cover)
         return qm_list_hold(playlist_index(I(cover, REC_DISC)), key, cover); /* by its cd_num */
     if (album) {
@@ -660,11 +661,11 @@ static int qm_hold(int songs) {
         return 0;
     int cur = reconcile(&g_menu, !moving(&g_menu));
     if (cur < 0) return 0;
-    /* A playlist row's hold queues its songs; More… opens the page its trailing dots do. The Add
-     * to Playlist picker shares playlist_page's name and keeps stock's hold: its add mode tells
-     * the two apart, as the showlist under it is another page's. */
-    if (!tk_strcmp(name, "playlist_page") && (songs || widget_get_prop_int(top, PL_MODE, 0)))
-        return 0;
+    /* A playlist row's hold, Play/Pause's or Centre's, opens the playlist's menu; More… opens the
+     * page its trailing dots do. The Add to Playlist picker shares playlist_page's name and keeps
+     * stock's hold: its add mode tells the two apart, as the showlist under it is another
+     * page's. */
+    if (!tk_strcmp(name, "playlist_page") && widget_get_prop_int(top, PL_MODE, 0)) return 0;
     if (!tk_strcmp(name, "playlist_page")) {
         /* The row's index counts Import and Export; its dots' name carries the playlist's, else
          * (OLED's rows have none) its button's, as stock names it; On-The-Go's none. */
@@ -690,7 +691,7 @@ static int qm_hold(int songs) {
         qk = QM_ALBUM; /* all albums, and an artist's, composer's or genre's */
     else if (cls >= 0xf004 && cls <= 0xf006)
         qk = QM_GROUP; /* artist, composer and genre lists */
-    if (!qk || (songs && qk != QM_SONG && qk != QM_COVERFLOW) ||
+    if (!qk || (centre && qk != QM_SONG && qk != QM_COVERFLOW) ||
         !(st.qm_timer = timer_add(qm_open, (void *)0, 0)))
         return 0;
     st.qm_kind = qk;
@@ -707,7 +708,8 @@ static int qm_hold(int songs) {
 /* Centre held on top's selected row (centre_menu.c): a song's hold menu, the one Play/Pause's hold
  * opens, on Up Next's queued song (upnext.c un_menu_hold), a payload playlist page's song
  * (playlist_page_song_hold), a song result of Search (search_strip.c search_strip_song_hold) or a
- * list's song row (qm_hold's songs); a card app's row its own menu, the app's (addon.c
+ * list's song row (qm_hold's centre); a playlist's menu on its row in Library > Playlists or its
+ * cover (qm_hold, qm_list_hold); a card app's row its own menu, the app's (addon.c
  * addon_row_hold); 1 when it is on its way. Any other row is left as it was: stock's Centre hold,
  * or the page's own. */
 static int qm_song_row_hold(void *top, unsigned by, int centre) {
@@ -733,7 +735,7 @@ int qm_row_under(void *top) {
 }
 
 /* A finger held still at the UI point (x, y) (centre_menu.c): the row under it becomes the
- * selection and gets the menu Centre's hold gives it; a row that is no song gets its selection
+ * selection and gets the menu Centre's hold gives it; a row with no such menu gets its selection
  * back. 1 when the menu is on its way. */
 int qm_touch_hold(void *top, int x, int y) {
     qm_hold_key = QM_BY_TOUCH; /* Search's results are painted, not rows: its own hit test */

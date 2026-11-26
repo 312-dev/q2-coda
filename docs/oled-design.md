@@ -1346,7 +1346,7 @@ page, On-The-Go) and `patch/add_songs.c`.
   is made from a song's hold menu, and Import and Export are Settings > Playback > Library > Playlists
   rows. An empty list shows the [empty state](#empty-and-offline) under its rows, "No Playlists", "Make one with New
   Playlist".
-- **A playlist's hold menu** ([Menus](#menus)): Play, Shuffle, **Sort**, Rename, then Delete after a gap,
+- **A playlist's hold menu** ([Menus](#menus)), Center held on its row (or Play/Pause): Play, Shuffle, **Sort**, Rename, then Delete after a gap,
   which asks "Delete playlist “name”?" with Cancel first. Rename is the [letter strip](#text-entry),
   titled Rename Playlist, the name prefilled over it with the cursor at its end: submitting (Play/Pause,
   or Center on the return key) saves it, and a held Return leaves the name as it was. Sort (`funnel-simple`) is a

@@ -1319,6 +1319,10 @@ m=PlaylistCoverMachine(); bar_load(m)
 m.word(m.slide+O['SLIDE_INDEX'],1); m.press(100); assert m.hold()==11 and m.release()==0
 rows=[m.nodes[m.nodes[i]['children'][0]]['text'] for i in m.nodes[m.view]['children'] if m.nodes[i]['type']=='list_item']
 assert rows==PL_COVER_MENU and m.nodes[m.title]['text']=='List 1',rows; passed()
+# Center held on a playlist's cover opens the same menu (hold_menu.c qm_centre_hold); on an album's cover, none.
+m=PlaylistCoverMachine(); bar_load(m); m.word(m.slide+O['SLIDE_INDEX'],1); assert centre_hold(m)==1
+assert m.labels()==PL_COVER_MENU and m.nodes[m.title]['text']=='List 1',m.labels(); passed()
+m=CoverflowMachine(); m.open(); assert centre_hold(m)==0 and not any(p[0]=='dialog/sortselect_dialog' for p in m.opened); passed()
 m=PlaylistCoverMachine(); m.word(syms['p_deque_playlist'],m.deque(m.lists[::-1]))  # read again, reordered
 m.press(100); assert m.hold()==11 and m.nodes[m.title]['text']=='List 0'; passed()
 m=PlaylistCoverMachine(); m.word(syms['p_deque_playlist'],m.deque(m.lists[::-1]))  # Play: its songs, by cd_num 10's query

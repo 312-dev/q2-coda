@@ -1,14 +1,16 @@
 """centre_menu.c: Centre or a finger held on a song's row opens the song's hold menu (docs/internals.md#centre-hold-menu),
 half way to stock's Shut Down? hold, through input.c's key and pointer hooks and the hold menu's own code
-(hold_menu.c qm_centre_hold, qm_touch_hold): an album's tracks, Songs, Up Next's queue; rows that are no song, a
-double press, a dark screen, a rim chord, a drag and Edit Library's hold keep what they did."""
+(hold_menu.c qm_centre_hold, qm_touch_hold): an album's tracks, Songs, Up Next's queue, and a playlist's row in
+Library > Playlists, which gets the playlist's menu; rows that are no song or playlist, a double press, a dark screen,
+a rim chord, a drag and Edit Library's hold keep what they did."""
 import ctypes as C
 import struct
 
 import pytest
 
 from conftest import O, claim, ui_name
-from test_nav_hold import (Hold, Ui, cstr, directory, field, recs, scratch, song, st, use_set)  # noqa: F401
+from test_nav_hold import (Hold, Playlists, Ui, cstr, directory, field, recs, scratch, song, st,  # noqa: F401
+                           stock_globals, use_set)
 from test_nav_loop import key_event, stock_bytes  # noqa: F401
 from test_upnext import PAGE, Low, Page, Queue, low  # noqa: F401
 
@@ -473,3 +475,91 @@ def test_play_next_and_play_last_from_an_apps_menu_land_where_the_hold_menus_do(
     queued = [field(r, O['REC_PATH']) for r in hold.deques[hold.queue]]
     assert queued == ['/mnt/mmc/Music/0.flac', '/mnt/mmc/.foo/stream/a/song 0 [s0].flac',
                       '/mnt/mmc/.foo/stream/a/song 1 [s1].flac', '/mnt/mmc/Music/1.flac', '/mnt/mmc/Music/2.flac']
+
+
+# Library > Playlists: Centre held on a playlist's row opens that playlist's menu, the one Play/Pause's hold opens
+# there (hold_menu.c qm_list_hold): Play, Shuffle, Sort, Rename and, after its gap, Delete.
+PLAYLIST_ROWS = ['Play', 'Shuffle', 'Sort', 'Rename', None, 'Delete']
+
+
+@pytest.fixture
+def lists(fw, ui, recs, hold, centre, stock_globals):
+    """Playlists' rows built (stock's hidden tiles, On-The-Go's row, then Gym, Road Trip, Sleep), the selection on
+    Road Trip."""
+    def page(add=0, sel=2):  # rows count the shown ones: On-The-Go 0, Gym 1, Road Trip 2
+        p = Playlists(fw, ui, recs, add=add)
+        p.ring(p.win)
+        for item in ui.kids(p.view):  # stock names a row by its place in the live list; On-The-Go's is none
+            if ui.label(item) in p.names:
+                ui.nodes[ui.kids(item)[0]].name = str(p.names.index(ui.label(item)))
+        shown = [k for k in ui.kids(p.view) if ui.nodes[k].visible]
+        fw.fn('ringnav_select', None, C.c_void_p, C.c_int, C.c_int)(p.view, sel, len(shown))
+        return p
+    return page
+
+
+def test_centre_held_on_a_playlist_row_opens_its_menu_with_sort(lists, hold, centre, ui, st):
+    lists()
+    centre.press()
+    assert armed(ui) == [HOLD_MS]  # the same half second as a song's row
+    centre.wait()
+    assert hold.dialog in ui.stack and ui.rows(hold.view()) == PLAYLIST_ROWS
+    assert st('qm_idx', C.c_uint).value == 1  # Road Trip, in the live list
+    assert not centre.shutdown_pending()  # this press never reaches Shut Down?
+    assert centre.release() == STOP and not st('center_timer').value  # its release opens no playlist
+
+
+def test_a_held_playlist_row_s_sort_offers_the_three_orders(lists, hold, centre, ui):
+    lists()
+    centre.press()
+    centre.wait()
+    hold.pick('Sort')
+    assert hold.title() == 'Sort' and ui.rows(hold.view()) == ['Recently Added', 'Oldest First', 'Title']
+
+
+def test_a_short_press_on_a_playlist_row_still_opens_the_playlist(lists, hold, centre, ui, st):
+    lists()
+    centre.press()
+    centre.release()  # let go before the half second: a press
+    assert armed(ui) == [] and not centre.wait() and hold.dialog not in ui.stack
+    assert st('center_timer').value  # the row opens once DOUBLE_CLICK_MS is up
+
+
+def test_play_pause_s_hold_on_a_playlist_row_opens_the_same_menu(lists, hold, ui, st):
+    lists()
+    assert hold.hold() == STOP and hold.menu() == PLAYLIST_ROWS
+    assert st('qm_press', C.c_ulonglong).value == 0x51  # its release latched, as before
+
+
+def test_the_add_to_playlist_picker_keeps_its_rows_and_never_shuts_down(lists, hold, centre, ui):
+    """The picker shares playlist_page's name; in its add mode a held row is no playlist's menu."""
+    lists(add=1, sel=1)
+    centre.press()
+    centre.wait()
+    assert hold.dialog not in ui.stack
+    ui.due('cm_guard_due')
+    assert not centre.shutdown_pending()  # a hold on a row never ends in Shut Down?
+
+
+def test_on_the_go_s_row_has_no_menu_and_never_shuts_down(lists, hold, centre, ui, fw):
+    """On-The-Go is no header of the live list: its row (pl_otg_row) has no number, so no playlist's menu."""
+    p = lists(sel=0)
+    assert ui.label(ui.kids(p.view)[1]) == 'On-The-Go'  # the first row under stock's hidden tiles (playlists.c)
+    centre.press()
+    centre.wait()
+    assert hold.dialog not in ui.stack
+    ui.due('cm_guard_due')
+    assert not centre.shutdown_pending()
+
+
+def test_a_finger_held_on_a_playlist_row_opens_its_menu(lists, hold, ui, fw, st):
+    p = lists(sel=0)  # on On-The-Go
+    to_local(ui)
+    ui.pressed = 1
+    finger(fw, POINTER_DOWN, 100, 30 + 144 + 20)  # on Road Trip's row
+    ui.due('cm_touch_due')
+    ui.due('qm_open')
+    assert hold.dialog in ui.stack and ui.rows(hold.view()) == PLAYLIST_ROWS
+    assert st('qm_idx', C.c_uint).value == 1 and ui.prop(p.view, '_ringnav_index', -1) == 2
+
+

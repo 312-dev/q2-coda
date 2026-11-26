@@ -435,6 +435,14 @@ assert m.labels()==['Play','Shuffle','Sort','Rename','Delete'] and m.nodes[m.tit
 m=playlist_hold(); assert m.run('Play') is None and m.query[:2]==('getMusicByPlayList',8)
 assert m.opened[-1]==('playing_page',['T1','T2'],0,0xff13,2) and m.get(syms['g_local_classinfo_save']+4)==8; passed()
 m=playlist_hold(1); m.found=[m.song('dir',4)]; assert m.run('Play')=='Queue unchanged' and m.names()==['A','B','C']; passed()
+# Holding Center on a playlist row opens the same menu (hold_menu.c qm_centre_hold, from centre_menu.c, whose release
+# it is): Import's row, no playlist, gets none.
+def centre_hold(m,t=7200):
+    m.word(m.status+O['INPUT_KEYS'],O['KEY_CENTER']); m.word(m.status+O['INPUT_KEYS']+O['INPUT_KEY_TIME'],t)
+    ret=m.call(address=payload_syms['qm_centre_hold'],args=(m.top,0,0,0),gap=0)&0xffffffff; m.advance(0,clear=False)
+    return ret
+m=playlist_hold(); assert centre_hold(m)==1 and m.labels()==['Play','Shuffle','Sort','Rename','Delete'] and m.nodes[m.title]['text']=='List 1'; passed()
+m=playlist_hold(0); assert centre_hold(m)==0 and not m.opened; passed()
 # getMusicByPlayList as the build hooks it (playlist_songs.c, docs/internals.md#playlist-song-order): a stock call
 # reaches the payload, which runs stock's Time added or name query by the playlist's own Sort ([Q2POD] PLAYLISTSONGS,
 # a digit a header id), Recently Added staging the stored order reversed; none chosen (and On-The-Go), stock's flag.
