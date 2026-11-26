@@ -331,10 +331,12 @@ static inline int arc_out(int r, int y) {
 #define HSCROLL_TEXT_W 0x94     /* its measured text width: hscroll_label_get_range */
 #define HSCROLL_LOOP_GAP 0x9c   /* loop_interval_distance: a copy this far after the text, -1 none */
 #define HSCROLL_TIMER 0xa4      /* its running timer's id; 0 stopped (stock paints the ellipsis) */
-/* Every pass's fastest pace, 0.05f px per ms: stock Now Playing's title and artist (0x53d0e8); its
- * set_hscroll_label_attribute sets the same since V1.36 (0.1 before), some pages 0.2. As float bits,
- * which order as their values for any positive float. */
-#define HSCROLL_PACE 0x3d4ccccd
+#define HSCROLL_ELAPSED 0xa8    /* ms of the pass so far, which its tick adds to (0x5fb7a8) */
+#define HSCROLL_PAUSED 0xac     /* a char: its tick leaves it where it is (0x5fb78c) */
+/* Every pass's fastest pace, 0.035f px per ms: Now Playing's lines' (np_marquee.c NPM_PX_S, 35 px a
+ * second). Stock's set_hscroll_label_attribute sets 0.05 since V1.36 (0.1 before), some pages 0.2.
+ * As float bits, which order as their values for any positive float. */
+#define HSCROLL_PACE 0x3d0f5c29
 #define TIMER_CTX 0x20          /* timer_info_t.ctx: stock's hscroll lull reads its label there */
 #define IDLE_CTX 0x20           /* idle_info_t.ctx: dialog_modal's close reads its dialog there */
 /* iPod Now Playing's lyrics (lyrics.c, docs/ipod.md#lyrics): a line of one row is LYRIC_SLOT high,
@@ -596,6 +598,7 @@ static inline int arc_out(int r, int y) {
 #define TM_LIST 0x14
 #define SLIST_DATA 4
 #define TIMER_CTX 0x20
+#define TIMER_NOW 0x30 /* u64: the time its callback runs at (timer_info_on_timer, 0x739b70) */
 #define TIMER_START 0x38
 #define TIMER_DURATION 0x40
 #define TIMER_SUSPEND 0x4c

@@ -387,7 +387,6 @@ demo	0x53bbf4	0x4	playing_page_update_ab_markers	2nd of 3 calls to ab_x, after "
 demo	0x53bc04	0x4	playing_page_update_ab_markers	3rd of 3 calls to ab_x, after "img_repeatb"; tools/build.py AB_X_CALLS
 demo	0x53bc20	0x4	playing_page_update_ab_markers	3rd of 4 calls to widget_move, after "img_repeatb"; tools/build.py AB_MOVE_CALLS
 demo	0x53cafc	0x4	playing_page_fav_on_click	`lw $2, GOT[a page]` (3rd of 3 such), before the only call to manage_myfav, after "play_fav"; patch/nav/hold_menu.c qm_run
-demo	0x53d0e8	0x4	playing_page_update	`lw $5, -0x30($2)`, the delay slot of 2nd of 2 calls to hscroll_label_set_speed, after "scrlabel_artist"; patch/offsets.inc HSCROLL_PACE
 demo	0x53d10c	0x4	playing_page_update	the only call to playing_page_lyrics_rebuild_rows, after "scrlabel_artist"; tools/build.py LYRIC_ROWS
 demo	0x53d308	0x4	playing_page_update	the only call to np_info, after "play_unfav"; tools/build.py NP_INFO_CALL
 demo	0x53d378	0x4	playing_page_update	the load of $25 for 4th of 4 calls to mclGetPlayStatus, after "img_playstate"; tools/build.py NP_TIME_CALLS
@@ -460,6 +459,8 @@ demo	0x5e0850	0x4	sub_5e06ec	1st of 2 calls to window_open_and_close, after "nam
 demo	0x5e0874	0x4	sub_5e06ec	the only call to window_open, after "name != NULL not satisfied."; tools/build.py WINDOW_OPENS
 demo	0x5fb23c	0x4	hscroll_label_text_edge_x	`addiu $6, $zero, 0x2` (2nd of 2 such), before 2nd of 2 calls to style_get_int, after "margin_left"; patch/nav/row_paint.c marq_stop
 demo	0x5fb394	0x4	hscroll_label_step	`lwc1 $f0, 0x8c($16)` (1st of 2 such); patch/offsets.inc HSCROLL_SPEED
+demo	0x5fb78c	0x4	hscroll_label_on_timer_tick	`lbu $2, 0xac($2)`; patch/offsets.inc HSCROLL_PAUSED
+demo	0x5fb7a8	0x4	hscroll_label_on_timer_tick	`sw $2, 0xa8($16)` (1st of 2 such); patch/offsets.inc HSCROLL_ELAPSED
 demo	0x5fb7ac	0x4	hscroll_label_on_timer_tick	`lbu $2, 0x78($16)` (1st of 6 such), before the only call to hscroll_label_stop; patch/nav/row_paint.c marq_gone
 demo	0x5fb7f0	0x4	hscroll_label_on_timer_tick	`lbu $2, 0x79($16)` (2nd of 6 such), before the only call to sub_5fac98; patch/nav/row_paint.c marq_gone
 demo	0x5fb86c	0x4	hscroll_label_on_timer_tick	`lbu $2, 0x7a($16)` (3rd of 6 such), before 1st of 2 calls to sub_5fb2c8; patch/offsets.inc HSCROLL_LOOP
@@ -516,6 +517,7 @@ demo	0x6b3654	0x4	input_device_status_handle_event	`addiu $6, $zero, 0x3e8`, bef
 demo	0x6b3658	0x4	input_device_status_handle_event	the load of $25 for the only call to timer_add, after "double clicked"; tools/build.py HOLD_KEYS
 demo	0x6b3668	0x4	input_device_status_handle_event	the only call to timer_add, after "double clicked"; tools/build.py HOLD_KEYS
 demo	0x6b39b8	0x4	input_device_status_on_long_press_timer	the only call to input_device_status_find_key_long_press_info; tools/build.py HOLD_KEYS
+demo	0x739b70	0x4	timer_info_on_timer	`sw $6, 0x30($4)`, before the only call to a pointer; patch/offsets.inc TIMER_NOW
 bluealsa	0x403f2c	0x4	sub_403940	`lui $2, 0x3` (27th of 32 such), after "v1.3"; tools/build.py BT_AAC_SITES
 bluealsa	0x403f3c	0x4	sub_403940	`addiu $2, $2, 0x5b60` (3rd of 4 such), before the only call to time, after "v1.3"; tools/build.py BT_AAC_SITES
 bluealsa	0x40649c	0x4	sub_4060e0	`bgtz $2, +22 words` (1st of 2 such), before 3rd of 4 calls to __errno_location, after "PCM poll and read error: %s"; tools/build.py BT_PCM_CALLERS

@@ -562,6 +562,19 @@ int ringnav_hscroll_start(void *w) {
     if (!speed || speed > HSCROLL_PACE) I(w, HSCROLL_SPEED) = HSCROLL_PACE;
     return stock_hscroll_start_trampoline(w);
 }
+/* Every hscroll_label's step (hscroll_label_on_timer_tick, HOOKS in tools/build.py). Stock adds the
+ * timer's 16 ms period to the pass's elapsed time on each tick, but a timer runs at most once a UI
+ * loop pass, so the text moved 16 ms' worth a pass however long the pass took: once the loop idled
+ * (2 s after input), an emulator's 45 ms passes ran a list row's title at 18 px a second, a Q2's at
+ * about 5. The tick counts the time since the last one instead (its now less its start, which the
+ * timer manager sets to each run's time), so a pass moves the text by the clock and its pace is
+ * its speed whatever the loop's. A paused label's tick moves nothing, as stock's. */
+int ringnav_hscroll_tick(void *info) {
+    void *w = P(info, TIMER_CTX);
+    if (w && !B(w, HSCROLL_PAUSED))
+        I(w, HSCROLL_ELAPSED) += I(info, TIMER_NOW) - I(info, TIMER_START) - I(info, TIMER_DURATION);
+    return stock_hscroll_tick_trampoline(info);
+}
 /* Stock's Albums rows since V1.36 (ALBUM_LABELS in tools/build.py): the list row's artist line and
  * a grid cell's title take stock's attributes here, then the focus flag V1.34 gave them, which
  * stock now sets in Menu Mode alone. No row's parent has the focus under ringnav, so they stay

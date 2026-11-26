@@ -53,9 +53,10 @@ width. Title styles and ellipsis settings are untouched; the title scrolls only 
 every row's scrolling once as the page opens. The selected row's scrolls, as an iPod's does: once
 the selection settles the payload runs stock's scroller on it (`hscroll_label_start`) as a looping
 label, with every label's holds and pace (docs/internals.md, `ringnav_hscroll_start`): its start
-held `MARQUEE_HOLD_MS`, a scroll at Now Playing's pace, its end held as long, then back to its start.
+held `MARQUEE_HOLD_MS`, a scroll at Now Playing's pace (35 px a second, by the clock), its end held as long, then back to its start.
 The lull at each pass's end counts it, and after `MARQUEE_PASSES` (3) the title rests on its start
-until the selection moves; each pass repaints every 16 ms while it moves. `only_focus` is off while
+until the selection moves; while it moves it repaints on each UI loop pass, every 16 ms at
+most, by the time since the last (`ringnav_hscroll_tick`). `only_focus` is off while
 it runs, since stock's timer (`0x5fb7ac`) stops an unfocused `only_focus` label on its first tick;
 once running, stock's paint (`0x5fbff0`) drops the ellipsis, so the selected title shows its start
 without one as it holds. A paint that moves the selection, to another widget or to another row in the
