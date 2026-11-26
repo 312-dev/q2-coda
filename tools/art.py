@@ -324,11 +324,13 @@ STATUS_FIT = {'status_wifi_x': ('wifi-x-bold', STATUS_WIFI_W),
               # the volume pill's speaker, and muted at 0 (vol_pill.c)
               'status_vol': ('speaker-simple-high-fill', STATUS_PX), 'status_mute': ('speaker-simple-x-fill', STATUS_PX)}
 STATUS_UNLIT = {'d': 0x3a3a3c, 'l': 0xc7c7cc}
-# The Bluetooth rune and wired headphones (status_row.c SR_RUNE_W, SR_GLYPH) stand as tall as the battery's body,
-# STATUS_TALL px from the box's top row, so rows 16 to 27, their ink centred on row 21.5 with the battery's and the
-# fan's (the user's mockup, 2026-11-25); each box as wide as its ink.
+# The Bluetooth rune, wired headphones and the deaf ear shown with no output connected (status_row.c SR_RUNE_W,
+# SR_GLYPH, SR_EAR_W) stand as tall as the battery's body, STATUS_TALL px from the box's top row, so rows 16 to 27,
+# their ink centred on row 21.5 with the battery's and the fan's (the user's mockups, 2026-11-25); each box as wide as
+# its ink, so each stands about 6.5 px of ground from the fan's ink (ear-slash's 9.4 px in 10, headphones' 13.6 in 14).
 STATUS_TALL = 12.0
-STATUS_TALL_FIT = {'status_bt': ('bluetooth-bold', 9), 'status_wired': ('headphones', STATUS_PX)}
+STATUS_TALL_FIT = {'status_bt': ('bluetooth-bold', 9), 'status_wired': ('headphones', STATUS_PX),
+                   'status_noaudio': ('ear-slash', 10)}
 STATUS_SECONDARY = inks('secondary', 'd', 'l')
 STATUS_SPIN = 30  # status_row.c SR_SPIN: a half turn a second at 30 fps
 KEYLOCK_CARD_PX = 56  # Buttons Lock's card's padlock (keylock.c CARD_GLYPH)

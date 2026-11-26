@@ -266,7 +266,10 @@ All lists share one grid.
     it (S2, `mock_sync_status.py`).
   - **Wired headphones**, left of the sync: Phosphor `headphones` (regular) in Text Primary, 12 px tall on rows 16 to
     27 as the battery's body (its ink 13.6 px wide), while the sound goes to a jack (3.5 mm or 4.4 mm) or a USB DAC
-    (USB-C headphones among them); nothing with nothing plugged in (the user's, 2026-11-25, `hpicon/mockup2.png`).
+    (USB-C headphones among them) (the user's, 2026-11-25, `hpicon/mockup2.png`). With no output connected (nothing
+    plugged in, no Bluetooth device connected, no guest or AirPlay speaker playing), a deaf ear in the same place:
+    Phosphor `ear-slash` (regular), 12 px tall on the same rows, in a 10 px box, its ink as far from the fan's as the
+    headphones' (the user's, 2026-11-25: "a deaf ear icon ... ship it").
   - **Bluetooth** (P9 in `design/bt-redesign`), left of wired headphones: nothing while Bluetooth is off or nothing
     is connected, or while wired headphones take the sound (a jack plugged in over a linked headset plays there, and
     the row shows where the sound goes: one glyph, never both); Phosphor `bluetooth` (bold, 12 px tall on rows 16 to
