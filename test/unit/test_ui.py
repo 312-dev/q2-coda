@@ -25,6 +25,21 @@ def test_stb_is_fetched_by_its_pin(monkeypatch, tmp_path):
     assert len(digest) == 64 and url.endswith('/stb_truetype.h')
 
 
+def test_stb_image_is_fetched_by_its_pin(monkeypatch, tmp_path):
+    asked = []
+
+    def fetch(url, digest, name):
+        asked.append((url, digest, name))
+        return tmp_path/name
+
+    monkeypatch.setattr(thirdparty, 'fetch', fetch)
+    assert ui.stb_image() == tmp_path/'stb_image-2.30'
+    version, url, digest = ui.STB_IMAGE
+    assert asked == [(url, digest, f'stb_image-{version}/stb_image.h')]
+    # the same commit as stb_truetype's: one upstream state, two headers
+    assert url.split('/')[5] == ui.STB[1].split('/')[5] and len(digest) == 64 and url.endswith('/stb_image.h')
+
+
 def test_sqlite_include_is_the_newest_built(monkeypatch, tmp_path):
     monkeypatch.setattr(player, 'THIRDPARTY', tmp_path)
     with pytest.raises(SystemExit) as e:
@@ -41,19 +56,23 @@ def test_main(monkeypatch, capsys, tmp_path):
     binary = tmp_path/'q2ui'
     binary.write_bytes(b'x' * 7)
     built = []
-    monkeypatch.setattr(ui, 'build', lambda target: built.append(target) or binary)
+    monkeypatch.setattr(ui, 'build', lambda target, goal: built.append((target, goal)) or binary)
     monkeypatch.setattr(ui.sys, 'argv', ['ui.py', 'build', 'mips'])
     ui.main()
     assert capsys.readouterr().out == f'{binary}\n'
     monkeypatch.setattr(ui.sys, 'argv', ['ui.py', 'size', 'host'])
     ui.main()
-    assert capsys.readouterr().out == f'{binary}: 7 bytes\n' and built == ['mips', 'host']
+    assert capsys.readouterr().out == f'{binary}: 7 bytes\n' and built == [('mips', 'q2ui'), ('host', 'q2ui')]
+    # the toolkit's own checks are another goal of the same build
+    monkeypatch.setattr(ui.sys, 'argv', ['ui.py', 'test', 'host'])
+    ui.main()
+    assert capsys.readouterr().out == f'{binary}\n' and built.pop() == ('host', 'q2ui-test')
     for argv in (['ui.py'], ['ui.py', 'build'], ['ui.py', 'run', 'host'], ['ui.py', 'build', 'arm'], ['ui.py', 'build', 'host', 'x']):
         monkeypatch.setattr(ui.sys, 'argv', argv)
         with pytest.raises(SystemExit) as e:
             ui.main()
         assert e.value.code == ui.__doc__
-    assert built == ['mips', 'host']
+    assert built == [('mips', 'q2ui'), ('host', 'q2ui')]
 
 
 def test_the_host_library_is_a_file_path():
@@ -66,7 +85,7 @@ def test_the_build_takes_the_q2s_binary(monkeypatch, tmp_path):
     binary = tmp_path/'q2ui'
     binary.write_bytes(b'\x7fELF q2ui')
     asked = []
-    monkeypatch.setattr(ui, 'build', lambda target: asked.append(target) or binary)
+    monkeypatch.setattr(ui, 'build', lambda target, goal='q2ui': asked.append(target) or binary)
     assert build.ui_binary() == b'\x7fELF q2ui' and asked == ['mips']
     assert build.UI == 'usr/bin/q2ui'
     old, new = build.UI_SPIKE_HOOK

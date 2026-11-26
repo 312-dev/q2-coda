@@ -2,7 +2,7 @@
  * title, songer the artist) and, when the card has one, the server library's catalogue (attached
  * as cat: servertable has songtable's columns and holds the server rows the Library shows,
  * docs/server-library.md), read once into one block: a row is two offsets into it. The order is
- * the title's, case folded, then the row's id. The spike reads the tables whole;
+ * the title's, case folded, then the row's id. The tables are read whole;
  * docs/ui-rewrite.md (#the-library) has what a library of its own would keep instead. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,11 +29,12 @@ static unsigned keep(const unsigned char *s) {
     lib.used += len;
     return at;
 }
-static const char *title(int i) { return lib.text + lib.row[i][0]; }
-static const char *artist(int i) { return lib.text + lib.row[i][1]; }
+int lib_songs(void) { return lib.n; }
+const char *lib_title(int i) { return lib.text + lib.row[i][0]; }
+const char *lib_artist(int i) { return lib.text + lib.row[i][1]; }
 
 /* catalogue: a server library's catalogue.db, or 0; one that cannot be attached is left out */
-int songs_open(const char *path, const char *catalogue, source_t *out, int limit) {
+int lib_open(const char *path, const char *catalogue, int limit) {
     sqlite3 *db;
     sqlite3_stmt *q;
     if (sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, 0) != SQLITE_OK) return -1;
@@ -66,6 +67,5 @@ int songs_open(const char *path, const char *catalogue, source_t *out, int limit
     if (rc != SQLITE_DONE) fprintf(stderr, "q2ui: songs: %s\n", sqlite3_errmsg(db));
     sqlite3_finalize(q);
     sqlite3_close(db);
-    *out = (source_t){ lib.n, title, artist };
     return 0;
 }

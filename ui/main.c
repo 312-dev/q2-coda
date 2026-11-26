@@ -1,28 +1,35 @@
-/* q2ui's loop (docs/ui-rewrite.md#the-loop): wait in poll for the wheel, a key or the next thing
- * the motion or the clock is due, change the state, draw the rects that changed, show the frame.
- * With nothing due it sleeps until input: no timer runs at rest but the clock's minute.
+/* q2ui's start: options, the library, the panel, the first page, then the loop (ui.c).
  *
- *     q2ui [--db FILE] [--catalogue FILE] [--fb FILE] [--input DIR] [--fonts DIR] [--limit N]
- *          [--motion 0|1|2] [--copy] [--stats FILE] [--bench]
+ *     q2ui [--db FILE] [--catalogue FILE] [--fb FILE] [--input DIR] [--fonts DIR] [--icons DIR]
+ *          [--limit N] [--motion 0|1] [--reduce-motion] [--light] [--panel-bits 8|6|5]
+ *          [--text awtk] [--page songs|depth] [--stats FILE] [--bench] [--script FILE]
+ *          [--trace FILE] [--clock HH:MM]
  *
  * --catalogue is the server library's (default /mnt/mmc/.q2pod/catalogue.db; "" for none): its
- * songs are listed with the card's, as the Library lists them.
+ * songs are listed with the card's, as the Library lists them. --panel-bits is the depth of the
+ * link to the glass, which every frame is dithered down to (docs/ui-rewrite.md#gradients);
+ * --page depth is the card that finds it by eye. --text awtk lays text out on whole pixels, as
+ * demo does, for comparing screens.
  *
  * Options also come from /mnt/data/q2ui.args (one line), as S90play starts it with none. Return
- * ends it, and S90play then starts demo (tools/build.py UI_SPIKE_HOOK). --bench draws and turns
- * frames without the panel's wait and writes their CPU time to the stats file. */
-#include <poll.h>
+ * on the first page ends it, and S90play then starts demo (tools/build.py UI_SPIKE_HOOK).
+ *
+ * --bench draws and turns frames without the panel's wait and writes their CPU time to the stats
+ * file. --script runs a file of input on a clock of its own, a frame every 1/60 s whatever the
+ * machine's speed, for tests and recordings (docs/ui-rewrite.md#scripts); --trace writes a line
+ * a frame of the list's motion while it runs, and --clock fixes the status row's clock so two
+ * runs give the same picture. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
-#include <unistd.h>
 
 #include "q2ui.h"
 
+#define FRAME_US 16667u
+
 static struct {
-    const char *db, *catalogue, *fb, *input, *fonts, *stats;
-    int limit, bench;
+    const char *db, *catalogue, *fb, *input, *fonts, *stats, *script, *trace, *page;
+    int limit, bench, bits;
 } opt = { "/mnt/data/database.db",
           "/mnt/mmc/.q2pod/catalogue.db",
           "/dev/fb0",
@@ -30,23 +37,13 @@ static struct {
           "/release/assets/default/raw/fonts",
           "/mnt/data/q2ui-stats.json",
           0,
-          0 };
-static struct {
-    unsigned frames, ticks, px, open_ms, first_ms, rows;
-    uint64_t draw_ns, show_ns, draw_max_ns;
-} stat;
+          0,
+          "songs",
+          0,
+          0,
+          8 };
+static unsigned open_ms, first_ms;
 static char bench_json[2048];
-
-unsigned now_ms(void) {
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (unsigned)(t.tv_sec * 1000 + t.tv_nsec / 1000000);
-}
-uint64_t cpu_ns(void) {
-    struct timespec t;
-    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t);
-    return (uint64_t)t.tv_sec * 1000000000u + (uint64_t)t.tv_nsec;
-}
 
 static void parse(int argc, char **argv) {
     for (int i = 0; i < argc; ++i) {
@@ -61,14 +58,30 @@ static void parse(int argc, char **argv) {
             opt.input = v, ++i;
         else if (!strcmp(a, "--fonts"))
             opt.fonts = v, ++i;
+        else if (!strcmp(a, "--icons"))
+            icon_dir = v, ++i;
         else if (!strcmp(a, "--stats"))
             opt.stats = v, ++i;
+        else if (!strcmp(a, "--script"))
+            opt.script = v, ++i;
+        else if (!strcmp(a, "--trace"))
+            opt.trace = v, ++i;
+        else if (!strcmp(a, "--page"))
+            opt.page = v, ++i;
         else if (!strcmp(a, "--limit"))
             opt.limit = atoi(v), ++i;
         else if (!strcmp(a, "--motion"))
-            list_motion = atoi(v), ++i;
-        else if (!strcmp(a, "--copy"))
-            list_copy_scroll = 1;
+            list_motion = atoi(v) != 0, ++i;
+        else if (!strcmp(a, "--panel-bits"))
+            opt.bits = atoi(v), ++i;
+        else if (!strcmp(a, "--text"))
+            text_whole = !strcmp(v, "awtk"), ++i;
+        else if (!strcmp(a, "--clock"))
+            status_clock_fixed(v), ++i;
+        else if (!strcmp(a, "--reduce-motion"))
+            ui_reduce_motion = 1;
+        else if (!strcmp(a, "--light"))
+            ui_light = 1;
         else if (!strcmp(a, "--bench"))
             opt.bench = 1;
     }
@@ -89,97 +102,185 @@ static void parse_file(const char *path) {
 
 static void write_stats(void) {
     FILE *f = fopen(opt.stats, "w");
+    const struct ui_stats *s = &ui_stats;
     if (!f) return;
-    fprintf(
-        f,
-        "{\"rows\": %u, \"open_ms\": %u, \"first_frame_ms\": %u, \"frames\": %u, \"ticks\": %u,\n"
-        " \"draw_us_per_frame\": %.1f, \"show_us_per_frame\": %.1f, \"draw_us_max\": %.1f, "
-        "\"px_turned_per_frame\": %u,\n"
-        " \"glyphs\": %u, \"glyph_bytes\": %u, \"glyphs_made\": %u, \"glyph_evictions\": %u, "
-        "\"motion\": %d, \"copy\": %d, \"page\": %d%s%s}\n",
-        stat.rows, stat.open_ms, stat.first_ms, stat.frames, stat.ticks,
-        stat.frames ? (double)stat.draw_ns / stat.frames / 1e3 : 0,
-        stat.frames ? (double)stat.show_ns / stat.frames / 1e3 : 0, (double)stat.draw_max_ns / 1e3,
-        stat.frames ? stat.px / stat.frames : 0, text_stats.glyphs, text_stats.bytes,
-        text_stats.made, text_stats.evictions, list_motion, list_copy_scroll, fb_page(),
-        *bench_json ? ",\n \"bench\": " : "", bench_json);
+    double frames = s->frames ? (double)s->frames : 1;
+    fprintf(f,
+            "{\"rows\": %d, \"open_ms\": %u, \"first_frame_ms\": %u, \"frames\": %u, \"ticks\": %u,\n"
+            " \"draw_us_per_frame\": %.1f, \"show_us_per_frame\": %.1f, \"draw_us_max\": %.1f, "
+            "\"px_turned_per_frame\": %u,\n"
+            " \"work_us_per_frame\": %.1f, \"work_us_max\": %llu, \"over_budget\": %u, \"dropped\": %u, "
+            "\"late\": %u, \"streak_max\": %u, \"refresh_us\": %u,\n"
+            " \"work_hist_ms\": {\"lt1\": %u, \"lt2\": %u, \"lt4\": %u, \"lt8\": %u, \"lt12\": %u, "
+            "\"lt16_7\": %u, \"lt33\": %u, \"more\": %u},\n"
+            " \"glyphs\": %u, \"glyph_bytes\": %u, \"glyphs_made\": %u, \"glyph_evictions\": %u, "
+            "\"motion\": %d, \"panel_bits\": %d, \"page\": %d%s%s}\n",
+            lib_songs(), open_ms, first_ms, s->frames, s->ticks, (double)s->draw_ns / frames / 1e3,
+            (double)s->show_ns / frames / 1e3, (double)s->draw_max_ns / 1e3, (unsigned)(s->px / frames),
+            (double)s->work_us / frames, (unsigned long long)s->work_max_us, s->over_budget, s->dropped,
+            s->late, s->streak_max, fb_refresh_us(), s->hist[0], s->hist[1], s->hist[2], s->hist[3],
+            s->hist[4], s->hist[5], s->hist[6], s->hist[7], text_stats.glyphs, text_stats.bytes,
+            text_stats.made, text_stats.evictions, list_motion, fb_bits, fb_page(),
+            *bench_json ? ",\n \"bench\": " : "", bench_json);
     fclose(f);
 }
 
-/* Draw what the state marked and show it. Returns whether a frame went out. */
-static int frame(void) {
-    rect_t r[8];
-    int n = list_dirty(r, 8);
-    if (!n && !dmg_count()) return 0;
-    uint64_t t0 = cpu_ns();
-    for (int i = 0; i < n; ++i) list_draw(r[i]);
-    uint64_t t1 = cpu_ns();
-    stat.px += fb_present();
-    uint64_t t2 = cpu_ns();
-    text_frame();
-    ++stat.frames;
-    stat.draw_ns += t1 - t0, stat.show_ns += t2 - t1;
-    if (t1 - t0 > stat.draw_max_ns && stat.frames > 2) stat.draw_max_ns = t1 - t0;
-    return 1;
+static void first_page(void) {
+    if (!strcmp(opt.page, "depth"))
+        ui_push(&page_depth, 0);
+    else
+        songs_push();
 }
 
-static void clock_now(void) {
-    char s[8];
-    time_t t = time(0);
-    struct tm *tm = localtime(&t);
-    snprintf(s, sizeof s, "%02d:%02d", tm->tm_hour, tm->tm_min);
-    list_clock(s);
+/* ---- the bench: CPU time a frame, on a clock of its own ---- */
+static uint64_t fake_us = 1000000;
+static void bench_note(const char *name, unsigned frames, uint64_t cpu, uint64_t draw, uint64_t show,
+                       uint64_t worst, unsigned px) {
+    size_t at = strlen(bench_json);
+    if (!frames) return;
+    snprintf(bench_json + at, sizeof bench_json - at,
+             "%s\"%s\": {\"passes\": %u, \"us_per_pass\": %.1f, \"draw_us\": %.1f, \"turn_us\": %.1f, "
+             "\"worst_us\": %.1f, \"px_turned\": %u}",
+             at > 1 ? ", " : "", name, frames, (double)cpu / frames / 1e3, (double)draw / frames / 1e3,
+             (double)show / frames / 1e3, (double)worst / 1e3, px / frames);
 }
-
-/* One case of the bench: `ticks` single ticks, a second apart on the motion's clock so none
- * accelerates, each drawn and turned; the CPU time of a pass and its parts, appended to the
- * bench's JSON under name (not when name is 0: a warm-up). */
-static void bench_case(const char *name, int ticks, int dir, unsigned *clock) {
-    uint64_t d0 = stat.draw_ns, s0 = stat.show_ns, t0 = cpu_ns();
-    unsigned f0 = stat.frames, p0 = stat.px;
+/* `ticks` ticks, `gap_us` apart, each followed by frames a refresh apart until the next is due;
+ * with settle, frames go on after the last until nothing moves. */
+static void bench_case(const char *name, int ticks, int dir, unsigned gap_us, int settle) {
+    struct ui_stats before = ui_stats;
+    uint64_t t0 = cpu_ns(), worst = 0;
     for (int i = 0; i < ticks; ++i) {
-        *clock += 1000;
-        list_tick(dir, *clock);
-        frame();
+        input_t in = { IN_TICK, dir, 0, (unsigned)(fake_us / 1000u) };
+        uint64_t until = fake_us + gap_us;
+        for (int first = 1; fake_us < until || (settle && i == ticks - 1 && ui_moving()); first = 0) {
+            uint64_t f0 = cpu_ns();
+            ui_clock_fake(fake_us);
+            ui_frame(&in, first);
+            if (cpu_ns() - f0 > worst) worst = cpu_ns() - f0;
+            fake_us += FRAME_US;
+            if (!list_motion) break;
+        }
+        if (fake_us < until) fake_us = until;
     }
-    unsigned frames = stat.frames - f0;
-    size_t at = strlen(bench_json);
-    if (name && frames)
-        snprintf(bench_json + at, sizeof bench_json - at,
-                 "%s\"%s\": {\"passes\": %u, \"us_per_pass\": %.1f, \"draw_us\": %.1f, "
-                 "\"turn_us\": %.1f, \"px_turned\": %u}",
-                 at > 1 ? ", " : "", name, frames, (double)(cpu_ns() - t0) / frames / 1e3,
-                 (double)(stat.draw_ns - d0) / frames / 1e3,
-                 (double)(stat.show_ns - s0) / frames / 1e3, (stat.px - p0) / frames);
+    if (name)
+        bench_note(name, ui_stats.frames - before.frames, cpu_ns() - t0, ui_stats.draw_ns - before.draw_ns,
+                   ui_stats.show_ns - before.show_ns, worst, ui_stats.px - before.px);
 }
-static void bench(int rows) {
-    unsigned clock = 1000;
-    int motion = list_motion, steps = rows > 420 ? 200 : rows / 3;
-    fb_vsync = 0, list_motion = LIST_MOTION_OFF;
+static void bench(void) {
+    int rows = lib_songs(), steps = rows > 420 ? 200 : rows / 3, motion = list_motion;
+    fb_vsync = 0;
     strcpy(bench_json, "{");
-    frame(), frame(); /* both pages hold the page now */
-    /* the selection walks down the first page and back: two rows a pass, no scroll */
-    for (int k = 0; k < 20; ++k) bench_case(0, 6, 1, &clock), bench_case(0, 6, -1, &clock);
-    bench_case("move", 6, 1, &clock);
-    /* then on down the list: every tick scrolls a row, drawn whole, then by copying */
-    list_copy_scroll = 0;
-    bench_case("scroll_redraw", steps, 1, &clock);
-    list_copy_scroll = 1;
-    bench_case("scroll_copy", steps, 1, &clock);
-    list_copy_scroll = 0;
-    /* and the whole screen, as a page's first frame is */
+    /* as the spike measured them, with no motion: a tick on the page (two rows), a tick that
+     * scrolls (the list), the whole screen */
+    list_motion = 0;
+    for (int k = 0; k < 20; ++k) bench_case(0, 5, 1, 1000000, 0), bench_case(0, 5, -1, 1000000, 0);
+    bench_case("move", 5, 1, 1000000, 0);
+    bench_case("scroll", steps, 1, 1000000, 0);
     uint64_t t0 = cpu_ns();
-    for (int k = 0; k < 50; ++k) list_open_again(), frame();
+    for (int k = 0; k < 50; ++k) ui_mark_all(), ui_clock_fake(fake_us += FRAME_US), ui_frame(0, 0);
     size_t at = strlen(bench_json);
-    snprintf(bench_json + at, sizeof bench_json - at, ", \"full_us_per_pass\": %.1f}",
-             (double)(cpu_ns() - t0) / 50 / 1e3);
+    snprintf(bench_json + at, sizeof bench_json - at, ", \"full_us_per_pass\": %.1f", (double)(cpu_ns() - t0) / 50 / 1e3);
+    /* and as they run: every frame of a slow tick's glide, and of a fast spin */
+    list_motion = 1;
+    bench_case(0, 4, -1, 400000, 1);
+    bench_case("glide_slow", 20, 1, 400000, 1);
+    bench_case("glide_fast", 100, 1, 27000, 1);
+    bench_case("glide_back", 100, -1, 27000, 1);
+    strcat(bench_json, "}");
     list_motion = motion;
 }
 
+/* ---- a script: input on a clock of its own (docs/ui-rewrite.md#scripts) ---- */
+static FILE *trace;
+static char record_dir[256];
+static unsigned recorded;
+static void ppm(const char *path) {
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    fprintf(f, "P6\n%d %d\n255\n", SCREEN_W, SCREEN_H);
+    for (int i = 0; i < SCREEN_W * SCREEN_H; ++i) {
+        uint8_t rgb[3] = { (uint8_t)(canvas[i] >> 16), (uint8_t)(canvas[i] >> 8), (uint8_t)canvas[i] };
+        fwrite(rgb, 1, 3, f);
+    }
+    fclose(f);
+}
+static void script_frame(const input_t *in, int n) {
+    fake_us += FRAME_US;
+    ui_clock_fake(fake_us);
+    int shown = ui_frame(in, n);
+    if (trace) {
+        char line[160];
+        list_trace(line, sizeof line);
+        fprintf(trace, "t=%llu shown=%d %s\n", (unsigned long long)fake_us, shown, line);
+    }
+    if (shown && *record_dir) {
+        char path[320];
+        snprintf(path, sizeof path, "%s/f%05u.ppm", record_dir, recorded++);
+        ppm(path);
+    }
+}
+static int key_code(const char *name) {
+    return !strcmp(name, "centre")   ? KEY_UI_CENTRE
+           : !strcmp(name, "return") ? KEY_UI_RETURN
+           : !strcmp(name, "play")   ? KEY_UI_PLAY
+           : !strcmp(name, "next")   ? KEY_UI_NEXT
+           : !strcmp(name, "prev")   ? KEY_UI_PREV
+                                     : atoi(name);
+}
+/* Lines: tick N | tug SHARE | key NAME | down NAME | up NAME | hold NAME | run MS | rest |
+ * shot FILE | record DIR | record off | page songs|depth. Each input goes in with the next frame. */
+static int script(const char *path) {
+    FILE *f = fopen(path, "r");
+    char line[400], arg[320];
+    if (!f) return 2;
+    fb_vsync = 0;
+    if (opt.trace) trace = fopen(opt.trace, "w");
+    ui_clock_fake(fake_us);
+    first_page();
+    script_frame(0, 0);
+    while (fgets(line, sizeof line, f)) {
+        unsigned ms = (unsigned)(fake_us / 1000u);
+        *arg = 0;
+        if (sscanf(line, "tick %319s", arg) == 1) {
+            int n = atoi(arg);
+            for (int i = 0; i < abs(n); ++i) {
+                input_t in = { IN_TICK, n > 0 ? 1 : -1, 0, ms };
+                script_frame(&in, 1);
+            }
+        } else if (sscanf(line, "tug %319s", arg) == 1) {
+            input_t in = { IN_TUG, 0, (float)atof(arg), ms };
+            script_frame(&in, 1);
+        } else if (sscanf(line, "key %319s", arg) == 1) {
+            input_t in[2] = { { IN_KEY_DOWN, key_code(arg), 0, ms }, { IN_KEY_UP, key_code(arg), 0, ms } };
+            script_frame(&in[0], 1);
+            script_frame(&in[1], 1);
+        } else if (sscanf(line, "down %319s", arg) == 1 || sscanf(line, "up %319s", arg) == 1 ||
+                   sscanf(line, "hold %319s", arg) == 1) {
+            input_t in = { *line == 'd' ? IN_KEY_DOWN : *line == 'u' ? IN_KEY_UP : IN_KEY_HOLD, key_code(arg), 0, ms };
+            script_frame(&in, 1);
+        } else if (sscanf(line, "run %319s", arg) == 1) {
+            for (uint64_t until = fake_us + (uint64_t)atoi(arg) * 1000u; fake_us < until;) script_frame(0, 0);
+        } else if (!strncmp(line, "rest", 4)) {
+            for (int k = 0; k < 900 && (ui_moving() || ui_wake_pending()); ++k) script_frame(0, 0);
+        } else if (sscanf(line, "shot %319s", arg) == 1) {
+            ppm(arg);
+        } else if (sscanf(line, "record %255s", arg) == 1) {
+            if (!strcmp(arg, "off"))
+                *record_dir = 0;
+            else
+                strcpy(record_dir, arg);
+        }
+        if (!ui_depth()) break;
+    }
+    fclose(f);
+    if (trace) fclose(trace);
+    write_stats();
+    return 0;
+}
+
 int main(int argc, char **argv) {
-    static source_t songs;
     char regular[256], medium[256], fallback[256];
-    unsigned t0 = now_ms();
+    uint64_t t0 = mono_us();
     parse_file("/mnt/data/q2ui.args");
     parse(argc - 1, argv + 1);
     snprintf(regular, sizeof regular, "%s/inter.ttf", opt.fonts);
@@ -187,46 +288,32 @@ int main(int argc, char **argv) {
     snprintf(fallback, sizeof fallback, "%s/default.ttf", opt.fonts);
     if (text_open(regular, medium, fallback))
         return fprintf(stderr, "q2ui: no font in %s\n", opt.fonts), 2;
-    if (songs_open(opt.db, *opt.catalogue ? opt.catalogue : 0, &songs, opt.limit))
+    if (lib_open(opt.db, *opt.catalogue ? opt.catalogue : 0, opt.limit))
         return fprintf(stderr, "q2ui: cannot read %s\n", opt.db), 2;
-    if (fb_open(opt.fb)) return fprintf(stderr, "q2ui: cannot use %s\n", opt.fb), 2;
-    input_open(opt.input);
-    stat.rows = (unsigned)songs.n, stat.open_ms = now_ms() - t0;
-    list_open(&songs);
-    clock_now();
-    frame();
-    stat.first_ms = now_ms() - t0;
+    if (fb_open(opt.fb, opt.bits)) return fprintf(stderr, "q2ui: cannot use %s\n", opt.fb), 2;
+    open_ms = (unsigned)((mono_us() - t0) / 1000u);
+    if (opt.script) {
+        int code = script(opt.script);
+        fb_close();
+        return code;
+    }
     if (opt.bench) {
-        bench(songs.n);
+        ui_clock_fake(fake_us);
+        first_page();
+        ui_frame(0, 0);
+        ui_mark_all(), ui_clock_fake(fake_us += FRAME_US), ui_frame(0, 0); /* both pages hold the page now */
+        bench();
         write_stats();
         fb_close();
         return 0;
     }
-    struct pollfd fds[4];
-    int keys[2], nfds = input_fds(keys, 2), quit = 0, dirty_stats = 1, showed = 0;
-    for (int i = 0; i < nfds; ++i) fds[i] = (struct pollfd){ keys[i], POLLIN, 0 };
-    while (!quit) {
-        unsigned now = now_ms();
-        int wait = list_wait_ms(now);
-        if (wait < 0) {
-            /* at rest: the stats once, then nothing until input or the clock's next minute */
-            if (dirty_stats) write_stats(), dirty_stats = 0;
-            wait = (int)(60 - time(0) % 60) * 1000;
-        }
-        /* a frame just shown waited for the panel: the motion's next step is due now */
-        poll(fds, (nfds_t)nfds, showed && wait <= 16 ? 0 : wait);
-        input_t in[64];
-        int n = input_read(in, 64);
-        for (int i = 0; i < n; ++i) {
-            if (in[i].type == IN_TICK) list_tick(in[i].value, in[i].ms), ++stat.ticks;
-            if (in[i].type == IN_KEY_UP && in[i].value == KEY_UI_RETURN) quit = 1;
-        }
-        list_step(now_ms());
-        clock_now();
-        showed = frame();
-        dirty_stats |= showed;
-    }
+    input_open(opt.input);
+    first_page();
+    ui_frame(0, 0);
+    first_ms = (unsigned)((mono_us() - t0) / 1000u);
+    ui_on_rest(write_stats);
+    int code = ui_run();
     write_stats();
     fb_close();
-    return 0;
+    return code;
 }

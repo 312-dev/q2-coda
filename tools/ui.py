@@ -9,6 +9,7 @@ SHA-256 below; it is not in this repository.
 
     python3 tools/ui.py build host|mips    # build ui/, print the binary
     python3 tools/ui.py size mips          # the stripped binary's size
+    python3 tools/ui.py test host          # build ui/test_engine.c with the toolkit, print the binary
 """
 import os
 import pathlib
@@ -22,6 +23,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # stb_truetype 1.26, the rasteriser AWTK itself uses, so the glyphs are the ones the menus have today
 STB = ('1.26', 'https://raw.githubusercontent.com/nothings/stb/f0569113c93ad095470c54bf34a17b36646bbbb5/stb_truetype.h',
        'ecd30b05e0dd4fea3a13c26810dd9e1992dc379049482c393d5a19e6b5090aab')
+# stb_image 2.30, from the same commit: PNG (the theme's glyphs) and JPEG (covers)
+STB_IMAGE = ('2.30', 'https://raw.githubusercontent.com/nothings/stb/f0569113c93ad095470c54bf34a17b36646bbbb5/stb_image.h',
+             '594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3')
 HOST_SQLITE = pathlib.Path('/usr/lib/x86_64-linux-gnu/libsqlite3.so.0')
 
 
@@ -29,6 +33,13 @@ def stb():
     """The folder holding stb_truetype.h, fetched once."""
     version, url, digest = STB
     path = thirdparty.fetch(url, digest, f'stb_truetype-{version}/stb_truetype.h')
+    return path.parent
+
+
+def stb_image():
+    """The folder holding stb_image.h, fetched once."""
+    version, url, digest = STB_IMAGE
+    path = thirdparty.fetch(url, digest, f'stb_image-{version}/stb_image.h')
     return path.parent
 
 
@@ -41,8 +52,8 @@ def sqlite_include():
     return found[-1].parent
 
 
-def build(target):  # pragma: no mutate block
-    """ui/ compiled and linked for target; the binary's path."""
+def build(target, goal='q2ui'):  # pragma: no mutate block
+    """ui/ compiled and linked for target; the binary's path. goal q2ui-test is the toolkit's own checks."""
     out = ROOT/'ui/build'/target
     if target == 'host':
         cc, strip, lib = ['cc'], 'strip', pathlib.Path(os.environ.get('Q2_HOST_SQLITE') or HOST_SQLITE)
@@ -55,15 +66,15 @@ def build(target):  # pragma: no mutate block
     log = player.CACHE/f'ui-{target}.log'
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text('')
-    player.run('make', '-C', ROOT/'ui', f'OUT={out}', 'CC=' + ' '.join(map(str, cc)), f'STRIP={strip}', f'STB={stb()}',
-               f'SQLITE_INC={sqlite_include()}', f'SQLITE_LIB={lib}', '-j4', log=log)
-    return out/'q2ui'
+    player.run('make', '-C', ROOT/'ui', f'OUT={out}', 'CC=' + ' '.join(map(str, cc)), f'STRIP={strip}', f'STB={stb()}', f'STBI={stb_image()}',
+               f'SQLITE_INC={sqlite_include()}', f'SQLITE_LIB={lib}', '-j4', out/goal, log=log)
+    return out/goal
 
 
 def main():
-    if len(sys.argv) != 3 or sys.argv[1] not in ('build', 'size') or sys.argv[2] not in ('host', 'mips'):
+    if len(sys.argv) != 3 or sys.argv[1] not in ('build', 'size', 'test') or sys.argv[2] not in ('host', 'mips'):
         sys.exit(__doc__)
-    binary = build(sys.argv[2])
+    binary = build(sys.argv[2], 'q2ui-test' if sys.argv[1] == 'test' else 'q2ui')
     print(f'{binary}: {binary.stat().st_size} bytes' if sys.argv[1] == 'size' else binary)
 
 
