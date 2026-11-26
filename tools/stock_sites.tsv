@@ -240,6 +240,7 @@ demo	0x4f29cc	0x4	on_wm_keylong_fun	the only call to navigator_back_to_home, aft
 demo	0x4f2b28	0x4	on_wm_tsmove_fun	`slti $2, $4, 0x1f`; patch/ipod.json event_abi_words, patch/offsets.inc QUICK_EDGE_PX
 demo	0x4f2fc8	0x4	playpause_quick_click	`lw $25, GOT[check_forbid_play_no_headset]` (7th of 10 such), before the only call to check_forbid_play_no_headset, after "dialog/msginfo_dialog"; patch/headset.c ringnav_play_pause
 demo	0x4f2fd8	0x4	playpause_quick_click	`beqz $2, -39 words` (2nd of 2 such), after "dialog/msginfo_dialog"; patch/usb_otg.c OTG_PLAYPAUSE_RET
+demo	0x4f4080	0x4	check_dacoff_state	`slti $2, $2, 0x1f`, before the only call to mclSetDacPwr, after "/tmp/showdacoff"; patch/offsets.inc JACK_DACOFF_AT
 demo	0x4f4278	0x4	on_wm_idle_status	1st of 2 calls to navigator_to_with_context, after "msg_btabnormal"; tools/build.py BT_ABNORMAL_TOASTS
 demo	0x4f4288	0x4	on_wm_idle_status	1st of 2 calls to device_reboot, after "dialog/msginfo_dialog"; patch/system.c BT_ABNORMAL
 demo	0x4f42a4	0x4	on_wm_idle_status	the only call to player_mainscheduling, after "dialog/msginfo_dialog"; tools/build.py MAINSCHEDULING_CALL

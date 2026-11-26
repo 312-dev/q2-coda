@@ -428,6 +428,10 @@ static inline int arc_out(int r, int y) {
 /* jack_detect.c: an unplugged read of a jack counts once a read this much later is still unplugged.
  * Past the DAC's 120 ms power-up glitch at Play, below stock's one jack poll a second. */
 #define JACK_UNPLUG_MS 300
+/* Stock's check_dacoff_state powers the DAC off when g_dacoff_time, its count of once-a-second
+ * passes not playing, reaches this (slti 0x1f at 0x4f4080). jack_detect.c sets the count one
+ * short of it at an unplug that leaves no jack in, so the next pass powers the DAC off. */
+#define JACK_DACOFF_AT 31
 /* Without BlueZ's volume signal (below), Bluetooth absolute volume is read back this often with the
  * screen off and no volume limit to hold (BT_VOLUME_LIMIT_MS with one), and 400 ms lit, so a
  * headset's own volume keys show on the Q2 that late; after the headset refused it, this often

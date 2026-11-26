@@ -765,4 +765,60 @@ m.logs=[]; m.pins['PA07']=0; assert m.poll()==[('3.5',1)] and m.po()==1 and m.lo
 m.logs=[]; m.pins['PA08']=0; assert m.poll()==[('4.4',1)] and m.logs==[('jack','4.4 mm jack plugged')]
 m.pins['PA08']=1; assert m.poll()==[]; assert m.poll(O['JACK_UNPLUG_MS']-1)==[]  # read again too soon: still held
 assert m.poll(1)==[('4.4',0)] and m.logs[-1]==('jack','4.4 mm jack unplugged'); passed()
+# A plug back in after an unplug's pause (docs/internals.md#jack-detect). Measured on the user's Q2 (2026-11-25, Build
+# J): once PA07 has read unplugged with the DAC powered, it reads unplugged with the cable back in for as long as the
+# DAC stays on and muted, and reads true again about 0.6 s after the DAC powers off (or once Play unmutes it). Stock's
+# check_dacoff_state (0x4f3f98), run before the jack poll in each once-a-second on_wm_idle_status pass, powers the DAC
+# off (mclSetDacPwr(0), g_dacoff_time -1) only when its count of seconds not playing reaches 31, so the plug was seen
+# about 31 s late. Both stock functions run here with the pin modelled so; the DAC now powers off at the pass after
+# an unplug that leaves no jack in, and a normal pause keeps stock's 31 s.
+class DacJackMachine(JackMachine):
+    def __init__(self):
+        super().__init__(); self.plugged={'PA07':True,'PA08':False}; self.dac=1; self.off_at=0; self.latched=False
+        self.status=2; self.powers=[]
+        for name,h in (('mclGetPlayStatus','status'),('mclSetDacPwr','dacpwr'),('printf@GLIBC_2.0','nop'),
+                       ('mclGetOutputWay','nop'),('mclSetOutputWay','nop'),('mclSetHeadsetMode','nop')):
+            self.handlers[syms[name]]='jk:'+h
+        self.handlers.pop(syms['config_outputchannel'],None)  # stock's runs: Play's power-up
+        for name in ('bt__recv_pageflag','g_usblink_status','g_usbmode','g_po_status','g_bal_status'): self.byte(syms[name],0)
+        self.byte(syms['g_po_status'],1); self.word(syms['g_dacoff_time'],0)
+    def hook(self,u,address,size,unused):
+        name=self.handlers.get(address,'')
+        if name not in ('jk:pin','jk:status','jk:dacpwr','jk:nop','jk:3.5'): return super().hook(u,address,size,unused)
+        a=u.reg_read(REGS[0]); ret=0
+        if name=='jk:pin':
+            pin=self.text(a); ret=0 if self.plugged[pin] else 1
+            if pin=='PA07':
+                if not self.plugged[pin] and self.dac: self.latched=True
+                if self.latched and self.plugged[pin] and (self.status==2 or (not self.dac and self.now-self.off_at>=600)): self.latched=False
+                ret|=self.latched
+        elif name=='jk:status': ret=self.status
+        elif name=='jk:dacpwr': self.powers.append(a); self.dac=a; self.off_at=self.now
+        elif name=='jk:3.5':
+            self.outputs.append(('3.5',a)); ret=1
+            if not a and self.status==2: self.status=3  # stock's mclSetPause: the DAC stays on, muted
+        self.returns(ret)
+    def tick(self):  # one on_wm_idle_status pass: check_dacoff_state, then check_headset_status
+        self.call(address=syms['check_dacoff_state'],args=(0,0,0,0),gap=1000); return self.poll(gap=0)
+    def dacoff(self): return signed(self.get(syms['g_dacoff_time']))
+    def unplug_pause(self):  # playing, the cable pulled: held one pass, through at the next, and stock pauses
+        self.plugged['PA07']=False; assert self.tick()==[]; assert self.tick()==[('3.5',0)] and self.status==3
+def seconds_to_plug(m):
+    for n in range(1,41):
+        if m.tick()==[('3.5',1)]: return n
+m=DacJackMachine(); m.tick(); m.tick(); assert m.po()==1 and m.dacoff()==0 and m.powers==[]
+m.logs=[]; m.unplug_pause(); m.plugged['PA07']=True  # straight back in, nothing pressed
+n=seconds_to_plug(m); assert n is not None and n<=2, f'the plug back in was seen {n} s after the pause'
+assert m.powers==[0] and m.dacoff()==-1 and m.po()==1
+assert ('jack','3.5 mm jack unplugged with no jack left: the DAC powered off now, not 31 s on, so a plug back in is read') in m.logs, m.logs
+# the next Play: stock's player_play_pause resumes through config_outputchannel(g_headset_output, 2), which powers
+# the DAC (mclSetDacPwr(1)) and starts the count again, as after stock's own 31 s
+m.call(address=syms['config_outputchannel'],args=(0,2,0,0),gap=0); assert m.powers==[0,1] and m.dacoff()==0
+m.status=2; assert m.tick()==[] and m.po()==1 and m.dacoff()==0; passed()
+m=DacJackMachine(); m.tick(); m.status=3  # a person's pause, the cable in: the DAC stays on for stock's 31 s
+for s in range(1,31): assert m.tick()==[] and m.powers==[] and m.dacoff()==s
+assert m.tick()==[] and m.powers==[0] and m.dacoff()==-1 and m.po()==1; passed()
+m=DacJackMachine(); m.plugged['PA08']=True; m.tick(); m.tick(); m.unplug_pause()  # the 4.4 mm jack still in
+for s in range(3): m.tick()
+assert m.powers==[] and m.dacoff()==3; passed()
 print(f'{checks} MIPS execution scenarios passed; toolkit services mocked, stock lock filter executed.')
