@@ -91,6 +91,10 @@ Not a replacement: `--dev` builds add `/usr/bin/adbd` ([adb.md](adb.md)), which 
 
 Newer adbd (Android 5 and later) is C++ against libbase, libcutils and BoringSSL, much more to build for the same shell, sync and authentication; 4.2.2 is the first release with RSA authentication, and its FunctionFS support is what Buildroot ships. What it lacks was added in the patch: `exec:` (adb exec-out), Microsoft OS descriptors, keeping `ep0` open.
 
+## Built beside stock's
+
+`bluealsa` (bluez-alsa 5.0.0, with libsbc 2.1, libfreeaptx 0.2.2 and Android's libldac 2.0.2.3 linked in) is built here too, but replaces nothing: a `--dev --own-bluealsa` build carries it in `/usr/lib/vamp-bluealsa/`, where nothing starts it. Its recipes, the `stocksdk` recipe that lets it link the rootfs's own GLib, D-Bus, ALSA, BlueZ and fdk-aac libraries, and the plan to make it the daemon are in [bluealsa](bluealsa.md#build).
+
 ## Not replaced
 
 - **BlueZ 5.66.** Shanling's bluetoothd is not upstream BlueZ: it adds a `shanling` profile (SyncLink, an RFCOMM remote for Shanling's app), and its AVCTP, AVRCP and A2DP code reads and writes `libbtctl.so`'s globals (`g_play_status`, `g_track_meta`, `g_high_priority_lcodec`, `g_synclink_mode`) and calls its `bluez_main`. Shanling has published no source for these changes, so an upstream bluetoothd would lose headset track info, codec priority and SyncLink. The build changes a few words of it and appends two functions, so the control channel's GetElementAttributes answers and the AVRCP record names cover art ([internals](internals.md#track-metadata), [cover art](internals.md#bluetooth-cover-art)). The scan's BlueZ findings (AVRCP, `CVE-2023-27349` and `CVE-2023-44431`; the PBAP ones are in obexd, which the rootfs does not have) stay. `libbluetooth.so.3` is left with it.
