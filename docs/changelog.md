@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Playlists: after the selection moves off **Add Songs** (or Shuffle, Save as Playlist or Clear), the row's words go back to the accent colour, where they could stay white with their bottom edge blue.
   - Lists: a long song title on the selected row (in Songs, a playlist, an album, an artist or Search) scrolls at a steady reading pace, the same as Now Playing's title, where it could crawl along a few pixels a second after the wheel had been still for a couple of seconds. Other scrolling text in the menus keeps a steady pace the same way.
   - Status row: with nothing to play through (no headphones in the 3.5 or 4.4 mm jack, no USB-C headphones or DAC, no Bluetooth device connected), a crossed-out ear shows where the headphones icon goes, so you can tell at a glance that nothing will be heard. It goes as soon as you plug something in or a Bluetooth device connects.
   - Playlists: you can sort your playlists by **Recently Added**, newest first, in Settings > Playback > Library > Sorting > Playlists. A playlist goes to the top when it is made on the Q2, imported, or its playlist file on the card changes (a sync, or an edit on a computer). Press Center on the current choice to flip it (Z to A, or oldest first). Name, A to Z, stays the default, and the order applies to the Playlists list, Playlists in Cover Flow, Home's Playlists and the Add to Playlist picker. Playlists made before this update with no playlist file on the card go last.

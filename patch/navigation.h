@@ -1224,6 +1224,7 @@ int upnext_instead(const char *name);  /* stock's queue page asked for: Up Next 
 int qm_row_under(void *top); /* a row under the selection on top, menu or not (hold_menu.c) */
 int otg_count(void);
 void pv_paint(void *w, void *canvas);
+void pv_ink(void *w); /* an action row's label colour, before it paints (playlist_pages.c) */
 int playlists_transfer(void *ctx, void *event); /* Settings: Import (ctx 0) or Export Playlists */
 void pl_fit(void *button);
 

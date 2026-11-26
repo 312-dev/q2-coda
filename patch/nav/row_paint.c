@@ -572,7 +572,8 @@ int ringnav_hscroll_start(void *w) {
 int ringnav_hscroll_tick(void *info) {
     void *w = P(info, TIMER_CTX);
     if (w && !B(w, HSCROLL_PAUSED))
-        I(w, HSCROLL_ELAPSED) += I(info, TIMER_NOW) - I(info, TIMER_START) - I(info, TIMER_DURATION);
+        I(w, HSCROLL_ELAPSED) +=
+            I(info, TIMER_NOW) - I(info, TIMER_START) - I(info, TIMER_DURATION);
     return stock_hscroll_tick_trampoline(info);
 }
 /* Stock's Albums rows since V1.36 (ALBUM_LABELS in tools/build.py): the list row's artist line and
