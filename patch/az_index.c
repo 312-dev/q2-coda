@@ -80,18 +80,19 @@ int az_initial(const char *s) {
  * gives them (docs/internals.md#a-z-index).
  * allmusic_page shows lists of both kinds, so there the class and the Sort decide: Recent,
  * Frequent and Recently Added (0xf007 to 0xf009) and Songs under Time added (g_sort_flag 3 or 4,
- * or song_sort.c's own orders) are newest or most played first; a playlist's songs (0xff13) under
- * its Sort's Time added (g_playlistsort_flag not 0) are in the order they were added; an artist's
- * and a genre's songs (0xff07, 0xff09) come as the database holds them. Edit Playlist's songs are
- * as added too (ple_listing); its Add Songs picker is the whole library A to Z. */
+ * or song_sort.c's own orders) are newest or most played first; a playlist's songs (0xff13) not by
+ * Title (playlist_songs.c, its cd_num at classinfo +4) are as added, or the newest first; an
+ * artist's and a genre's songs (0xff07, 0xff09) come as the database holds them. Edit Playlist's
+ * songs are as added too (ple_listing); its Add Songs picker is the whole library A to Z. */
 int name_sorted(const char *page) {
     static const char *const sorted[] = { "localclass_page", "album_page", "artistinfo_page",
                                           "folder_page", "coverflow_page" };
     if (!tk_strcmp(page, "allmusic_page")) {
         int cls = I(g_class_type, 0), sort = I(g_sort_flag, 0);
-        return !((cls >= 0xf007 && cls <= 0xf009) || cls == 0xff07 || cls == 0xff09 ||
-                 (cls == 0xff13 && I(g_playlistsort_flag, 0)) ||
-                 (cls == 0xf001 && (sort == 3 || sort == 4 || song_sort_own())));
+        return !(
+            (cls >= 0xf007 && cls <= 0xf009) || cls == 0xff07 || cls == 0xff09 ||
+            (cls == 0xff13 && playlist_songs_order(I(g_local_classinfo_save, 4)) != PSO_TITLE) ||
+            (cls == 0xf001 && (sort == 3 || sort == 4 || song_sort_own())));
     }
     if (!tk_strcmp(page, "playlistedit_page")) return !ple_listing();
     for (unsigned i = 0; i < sizeof sorted / sizeof *sorted; ++i)

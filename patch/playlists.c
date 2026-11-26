@@ -442,6 +442,7 @@ int ringnav_playlist_create(void *list, const char *name) {
         goto rollback;
     result = id;
     tk_snprintf(pl_made, sizeof pl_made, "%s", title);
+    playlist_songs_set(id, PSO_NONE); /* a new playlist: no old one's Sort (playlist_songs.c) */
     goto done;
 rollback:
     sqlite3_exec(db, "rollback", 0, 0, 0);
@@ -520,7 +521,7 @@ int playlist_rename(int id, const char *name) {
     return 1;
 }
 /* Playlist id (its header there, exactly one) and its entries deleted in one transaction; 1 when
- * it committed. Music files and the queue stay. */
+ * it committed, its Sort forgotten. Music files and the queue stay. */
 int playlist_delete(int id) {
     void *db = 0;
     int ok = 0;
@@ -537,7 +538,10 @@ int playlist_delete(int id) {
         ok = 1;
 done:
     if (db) sqlite3_close(db);
-    if (ok) catalogue_playlist_sync(id, PLS_DELETE, (const char *)0); /* a server one's too */
+    if (ok) {
+        catalogue_playlist_sync(id, PLS_DELETE, (const char *)0); /* a server one's too */
+        playlist_songs_set(id, PSO_NONE); /* its Sort with it (playlist_songs.c) */
+    }
     return ok;
 }
 

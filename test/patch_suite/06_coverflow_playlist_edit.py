@@ -415,7 +415,7 @@ assert m.db.execute('select id from playlist where id=101').fetchall()==[(101,)]
 m=PlaylistLifecycleMachine(); m.answer=0; before=m.db.execute('select * from playlist').fetchall(); m.delete()
 assert m.db.execute('select * from playlist').fetchall()==before and not m.backs and not m.reload_pending(); passed()
 
-# Holding Play/Pause on a playlist row opens its menu sheet: Play, Shuffle, Rename and Delete (hold_menu.c's
+# Holding Play/Pause on a playlist row opens its menu sheet: Play, Shuffle, Sort, Rename and Delete (hold_menu.c's
 # playlist). Play plays its songs (getMusicByPlayList of its cd_num, spoken ones and folders left out as its
 # opened list shows them) as its own list (0xff13). The Add to Playlist picker shares playlist_page's name and
 # keeps stock's hold. The playlist is the index in the dots' name: row positions also count Import/Export.
@@ -431,10 +431,26 @@ def playlist_hold(steps=2):
     return m
 m=playlist_hold(0); m.press(7000); assert m.hold()!=11 and not m.opened  # Import: no dots, stock keeps the hold
 m=playlist_hold(); m.press(7100); assert m.hold()==11 and m.release()==0  # the locked hold's release never toggles playback
-assert m.labels()==['Play','Shuffle','Rename','Delete'] and m.nodes[m.title]['text']=='List 1'; passed()
+assert m.labels()==['Play','Shuffle','Sort','Rename','Delete'] and m.nodes[m.title]['text']=='List 1'; passed()
 m=playlist_hold(); assert m.run('Play') is None and m.query[:2]==('getMusicByPlayList',8)
 assert m.opened[-1]==('playing_page',['T1','T2'],0,0xff13,2) and m.get(syms['g_local_classinfo_save']+4)==8; passed()
 m=playlist_hold(1); m.found=[m.song('dir',4)]; assert m.run('Play')=='Queue unchanged' and m.names()==['A','B','C']; passed()
+# getMusicByPlayList as the build hooks it (playlist_songs.c, docs/internals.md#playlist-song-order): a stock call
+# reaches the payload, which runs stock's Time added or name query by the playlist's own Sort ([Q2POD] PLAYLISTSONGS,
+# a digit a header id), Recently Added staging the stored order reversed; none chosen (and On-The-Go), stock's flag.
+def playlist_songs(stored=None,flag=1,cd=8):
+    m=QueueMachine()
+    for n in ('sort_playlist_addtime','sort_playlist_first_alphabet'): m.handlers[syms[n]]='q:'+n
+    m.handlers.pop(syms['getMusicByPlayList'])  # the patched entry: its hook
+    if stored is not None: m.config['PLAYLISTSONGS']=stored
+    m.word(syms['g_playlistsort_flag'],flag); m.word(syms['tools_pdeq_directory'],m.deque([]))
+    assert m.call(address=HOOKS['getMusicByPlayList'][0],args=(cd,0,0,0),gap=0)==3
+    return m.query[:2],m.names(m.get(syms['tools_pdeq_directory']))
+assert playlist_songs('000000001')==(('sort_playlist_addtime',8),['T2','dir','T1']); passed()
+assert playlist_songs('000000002')==(('sort_playlist_addtime',8),['T1','dir','T2']); passed()
+assert playlist_songs('000000003')[0]==('sort_playlist_first_alphabet',8); passed()
+assert playlist_songs()==(('sort_playlist_addtime',8),['T1','dir','T2']) and playlist_songs(flag=0)[0]==('sort_playlist_first_alphabet',8); passed()
+assert playlist_songs('1'*100,cd=100)[1]==['T1','dir','T2']; passed()  # On-The-Go: no header, stock's flag
 m=playlist_hold(1); m.nodes[m.top]['_pl_mode']=1; m.press(7300)  # the page's own mode, not the global
 assert m.hold()!=11 and not [o for o in m.opened if o[0]=='localmusic/playlistsmore_page']; passed()
 for count in (0,1):

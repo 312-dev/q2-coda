@@ -99,7 +99,7 @@ class QueueMachine(Machine):
         elif name=='calloc@GLIBC_2.0': ret=self.alloc(a*b+4)  # the album ratings' table
         elif name=='qsort@GLIBC_2.0': self.qsort(a,b,c,d)  # Albums' sorted lookups, the payload's comparator run nested
         else:  # the album/folder queries fill the staging deque
-            self.query=(name,a if name=='getMusicByPlayList' else self.text(a) if a else None,(self.text(b) if b else None) if 'And' in name else None,c)
+            self.query=(name,a if name in ('getMusicByPlayList','sort_playlist_addtime','sort_playlist_first_alphabet') else self.text(a) if a else None,(self.text(b) if b else None) if 'And' in name else None,c)
             found=self.listings.get(self.text(a),self.found) if name=='toolsLoadDirectory' else self.found
             if name=='toolsLoadDirectory': self.__dict__.setdefault('loaded_dirs',[]).append(self.text(a))  # read now: a stack buffer
             self.deqs[self.get(syms['tools_pdeq_directory'])][1]=[self.copy('stSongInfo',e) for e in found]; ret=3

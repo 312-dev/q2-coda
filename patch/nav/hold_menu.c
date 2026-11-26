@@ -74,6 +74,11 @@ int np_goto(int album, int go) {
 
 /* Deferred so the dialog is never closed under its own click dispatch. */
 static int qm_open(const void *unused);
+/* A playlist's Sort as a setting's choices (kind QM_SORT, st.qm_choice QM_SORT_CHOICE): PSO_NEWEST,
+ * PSO_OLDEST and PSO_TITLE in turn (playlist_songs.c). */
+#define QM_SORT 3
+#define QM_SORT_CHOICE (QM_SORT + 1)
+static const char *const qm_sorts[] = { "Recently Added", "Oldest First", "Title" };
 
 /* A song's My Fav, its like, changed from the menu, kept as Now Playing's heart keeps it
  * (ratings.c rate_fav_click): its stars stay, the card's copy of the ratings is due, and the server
@@ -101,7 +106,10 @@ static int qm_run(const void *unused) {
      * ringnav_nav_to) */
     if (r && (a == QA_PLAY || a == QA_SHUFFLE || a == QA_RESUME) && check_forbid_play_no_headset(0))
         return 0;
-    if (r && a >= 100) {
+    if (r && a >= 100 && st.qm_choice == QM_SORT_CHOICE) { /* a playlist's Sort */
+        playlist_songs_set(I(r, REC_DISC), a - 100 + PSO_NEWEST);
+        st.qm_choice = 0;
+    } else if (r && a >= 100) {
         if (!playback_set(st.qm_choice - 1, a - 100)) toast("Queue unchanged");
         st.qm_choice = 0;
     } else if (a == QA_OFFLINE) { /* the item worked out for its row (offline.c) */
@@ -127,6 +135,9 @@ static int qm_run(const void *unused) {
         if (rate_saved(rate_keep(1, aid, a == QA_FAV ? 5 : 0))) rate_album_favs(r, a == QA_FAV);
     } else if (r && a >= QA_ADV_SHUFFLE && a <= QA_GROUP) {
         st.qm_choice = a - QA_ADV_SHUFFLE + 1;
+        qm_open(0);
+    } else if (r && a == QA_SORT) {
+        st.qm_choice = QM_SORT_CHOICE;
         qm_open(0);
     } else if (r && a == QA_FAV) { /* tags a folder file as batch-select's Add to My Fav does */
         qm_select();
@@ -234,9 +245,13 @@ static void qm_title(void *dialog, const char *s) {
     widget_set_text_utf8(title, s);
 }
 /* Now Playing's play modes as stock names them, its category as Group by sets it (album or
- * folder): Shuffle's (kind 0), Repeat's (1) and Group by's (2) choices. */
-static int qm_choices(int kind) { return kind == 0 ? 5 : kind == 1 ? 6 : 2; }
+ * folder): Shuffle's (kind 0), Repeat's (1) and Group by's (2) choices; a playlist's Sort's
+ * (QM_SORT). */
+static int qm_choices(int kind) {
+    return kind == 0 ? 5 : kind == 1 ? 6 : kind == QM_SORT ? PSO_N - 1 : 2;
+}
 static const char *qm_choice_name(int kind, int i) {
+    if (kind == QM_SORT) return qm_sorts[i];
     static const char *const shuffle[2][5] = {
         { "Off", "All Songs", "Songs in Album", "Albums", "Albums and Songs" },
         { "Off", "All Songs", "Songs in Folder", "Folders", "Folders and Songs" }
@@ -299,10 +314,18 @@ static int qm_open(const void *unused) {
     widget_on(back, EVT_CLICK, qm_back, dialog);
     widget_on(dialog, EVT_DESTROY, qm_gone, dialog);
     if (st.qm_choice) {
-        int kind = st.qm_choice - 1, count = qm_choices(kind), current = playback_option(kind);
-        const char *setting = kind == 0 ? "Shuffle" : kind == 1 ? "Repeat" : "Group by";
+        int kind = st.qm_choice - 1, count = qm_choices(kind), sort = kind == QM_SORT;
+        int current =
+            sort ? playlist_songs_order(I(r, REC_DISC)) - PSO_NEWEST : playback_option(kind);
+        const char *setting = kind == 0   ? "Shuffle"
+                              : kind == 1 ? "Repeat"
+                              : sort      ? "Sort"
+                                          : "Group by";
         qm_title(dialog, setting);
-        modal_head(setting, now_tag(r, REC_TITLE), r);
+        if (sort) /* the playlist by its name, as its own menu's head, no cover */
+            modal_head(setting, *st.qm_name ? st.qm_name : P(r, REC_TITLE), (void *)0);
+        else
+            modal_head(setting, now_tag(r, REC_TITLE), r);
         widget_destroy_children(view);
         int row = MODAL_PITCH, w = modal_row_w();
         for (int i = 0; i < count; ++i) {
@@ -346,7 +369,7 @@ static int qm_open(const void *unused) {
     if (st.qm_kind == QM_SONG && book_place(qm_list(), r, &at, &off)) acts[n++] = QA_RESUME;
     /* the menu sheet's song (OLED's, docs/oled-design.md#playlists): Play Next, Play Last, Add to
      * On-The-Go (while it is on), Add to Playlist…, Favorite, then the Go to rows; its playlist:
-     * Play, Shuffle, Rename and, after a gap, Delete */
+     * Play, Shuffle, Sort (its songs' order, playlist_songs.c), Rename and, after a gap, Delete */
     int list = st.qm_kind == QM_PLAYLIST, own = song && st.qm_kind != QM_PLAYING;
     /* held: a payload page's song (a playlist's page: a song's whole menu, then its Remove); far:
      * a song not on the card yet (qm_far_hold), Play, Sync Offline and Go to alone */
@@ -369,6 +392,7 @@ static int qm_open(const void *unused) {
     }
     if (own && !far) acts[n++] = QA_PLAYLIST;
     if (!song) acts[n++] = QA_SHUFFLE;
+    if (list && I(r, REC_DISC) >= 0 && I(r, REC_DISC) < ON_THE_GO) acts[n++] = QA_SORT;
     if (list && offl) acts[n++] = QA_OFFLINE;
     if (list) acts[n++] = QA_RENAME, acts[n++] = QA_DELETE;
     if (song && !far) acts[n++] = rate_fav(r) ? QA_UNFAV : QA_FAV;
@@ -395,13 +419,32 @@ static int qm_open(const void *unused) {
     }
     if (held && qm_held.move) acts[n++] = QA_MOVE;    /* the last before the destructive gap */
     if (held && qm_held.extra) acts[n++] = QA_REMOVE; /* destructive, last */
-    static const char *const rows[] = {
-        "Play Next",       "Play Last",   "Shuffle",        "Favorite",         "Unfavorite",
-        "Add to Playlist", "Go to Album", "Go to Artist",   "Shuffle",          "Repeat",
-        "Group by",        "Next Album",  "Previous Album", "Resume",           "View Queue",
-        "Go to Folder",    "Chapters",    "More…",          "Add to On-The-Go", "Play",
-        "Rename",          "Delete",      "Remove",         "Sync Offline",     "Move"
-    };
+    static const char *const rows[] = { "Play Next",
+                                        "Play Last",
+                                        "Shuffle",
+                                        "Favorite",
+                                        "Unfavorite",
+                                        "Add to Playlist",
+                                        "Go to Album",
+                                        "Go to Artist",
+                                        "Shuffle",
+                                        "Repeat",
+                                        "Group by",
+                                        "Next Album",
+                                        "Previous Album",
+                                        "Resume",
+                                        "View Queue",
+                                        "Go to Folder",
+                                        "Chapters",
+                                        "More…",
+                                        "Add to On-The-Go",
+                                        "Play",
+                                        "Rename",
+                                        "Delete",
+                                        "Remove",
+                                        "Sync Offline",
+                                        "Move",
+                                        "Sort" };
     /* the menu sheet's symbols (tools/art.py MENU_ICONS), by row; Unfavorite's filled heart is
      * drawn in Favorite pink-red, white on the bar (art.py menu_heart-fill_*) */
     static const char *const icons[] = { "arrow-bend-down-right",
@@ -428,7 +471,8 @@ static int qm_open(const void *unused) {
                                          "trash",
                                          "trash",
                                          "cloud-arrow-down",
-                                         "grip" };
+                                         "grip",
+                                         "funnel-simple" };
     /* stock sortselect row styles; the menu sheet's rows */
     int pitch = MODAL_PITCH, width = modal_row_w();
     for (int i = 0; i < n; ++i) {
@@ -450,13 +494,15 @@ static int qm_open(const void *unused) {
             widget_set_prop_int(label, "style:normal:text_color", (int)RGBA(RGB_NEGATIVE));
         int kind = acts[i] - QA_ADV_SHUFFLE;
         const char *value = setting ? qm_value_name(kind, playback_option(kind)) : 0;
+        if (acts[i] == QA_SORT) /* a setting too: the playlist's order on the right */
+            setting = 1, value = qm_sorts[playlist_songs_order(I(r, REC_DISC)) - PSO_NEWEST];
         if (acts[i] == QA_DELETE || acts[i] == QA_REMOVE)
             modal_gap(view); /* destructive, last after a gap */
         widget_restack(item, widget_count_children(view) - 1);
         modal_row(item, label, acts[i] == QA_OFFLINE ? offline_icon() : icons[acts[i] - 1], value,
                   setting ? MM_SETTING : MM_ACTION);
         if (acts[i] == QA_DELETE || acts[i] == QA_REMOVE) modal_red(item);
-        if (setting) {
+        if (setting && acts[i] != QA_SORT) { /* qm_values renames these */
             char name[16];
             tk_snprintf(name, sizeof name, "_qm_set%d", kind);
             widget_set_name(item, name);

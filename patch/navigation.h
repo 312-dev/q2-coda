@@ -1287,6 +1287,11 @@ int song_sort_commit(void);
 int song_sort_own(void);
 void song_order(void *list);
 void rec_permute(void *list, unsigned *at);
+/* playlist_songs.c: a playlist's songs in its order, its hold menu's Sort (PSO_NONE: stock's) */
+enum { PSO_NONE, PSO_NEWEST, PSO_OLDEST, PSO_TITLE, PSO_N };
+int playlist_songs_chosen(int cd);
+int playlist_songs_order(int cd);
+void playlist_songs_set(int cd, int order);
 /* name_order.c: a sorted query's records in stock's order, kept across loads (library_query) */
 void name_order(const char *sql, int sort, void *list);
 #define NO_SONGS 1 /* the Library lists name_order_list names, their kept orders loaded ahead */

@@ -1,11 +1,12 @@
 /* A playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists,
  * docs/internals.md#on-the-go): a page of its own, opened from a row of Playlists. Action rows
  * first (Shuffle, Add Songs and, for On-The-Go, Save as Playlist and Clear), each its accent glyph
- * before an accent label, then the songs, each a title with its artist on the right column in
- * Text Tertiary. Centre on a song plays the list from it, as stock plays a playlist's own list
- * (class 0xff13 with its cd_num, so Now Playing's Delete takes it out of this list, not the
- * library); a hold on a song opens its whole menu (Play Next, Play Last, Add to Playlist, Go to
- * Album and Artist), Remove from Playlist (or On-The-Go) last, which the confirmation card asks.
+ * before an accent label, then the songs (in the playlist's Sort order, playlist_songs.c, and
+ * On-The-Go's as added), each a title with its artist on the right column in Text Tertiary.
+ * Centre on a song plays the list from it, as stock plays a playlist's own list (class 0xff13 with
+ * its cd_num, so Now Playing's Delete takes it out of this list, not the library); a hold on a song
+ * opens its whole menu (Play Next, Play Last, Add to Playlist, Go to Album and Artist), Remove from
+ * Playlist (or On-The-Go) last, which the confirmation card asks.
  *
  * On-The-Go's songs are playlist entries under cd_num ON_THE_GO with no header row, so stock's
  * own add (batch_add_file), read (getMusicByPlayList) and Now Playing's Delete take them as any
@@ -47,10 +48,16 @@ int otg_count(void) {
 /* Playlist dest's songs in its own order (stock's Time added, as stored), a staged query; shared
  * with add_songs.c, whose removal takes an entry's ID from it. */
 int playlist_query(void *dest) { return sort_playlist_addtime((int)(long)dest); }
+/* The songs as the page shows and plays them: a playlist's in its Sort's order (getMusicByPlayList,
+ * hooked by playlist_songs.c), On-The-Go's as stored. */
+static int pv_query(void *dest) {
+    int d = (int)(long)dest;
+    return d == ON_THE_GO ? sort_playlist_addtime(d) : getMusicByPlayList(d);
+}
 static void pv_reload(void) {
     int n;
     if (pv.songs) deque_destroy(pv.songs);
-    pv.songs = staged(playlist_query, (void *)(long)pv.dest, &n);
+    pv.songs = staged(pv_query, (void *)(long)pv.dest, &n);
 }
 static int pv_size(void) { return pv.songs ? (int)deque_size(pv.songs) : 0; }
 

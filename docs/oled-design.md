@@ -1346,15 +1346,18 @@ page, On-The-Go) and `patch/add_songs.c`.
   is made from a song's hold menu, and Import and Export are Settings > Playback > Library > Playlists
   rows. An empty list shows the [empty state](#empty-and-offline) under its rows, "No Playlists", "Make one with New
   Playlist".
-- **A playlist's hold menu** ([Menus](#menus)): Play, Shuffle, Rename, then Delete after a gap,
+- **A playlist's hold menu** ([Menus](#menus)): Play, Shuffle, **Sort**, Rename, then Delete after a gap,
   which asks "Delete playlist “name”?" with Cancel first. Rename is the [letter strip](#text-entry),
   titled Rename Playlist, the name prefilled over it with the cursor at its end: submitting (Play/Pause,
-  or Center on the return key) saves it, and a held Return leaves the name as it was. No More menu, no Edit Playlist: reordering is the server's or the phone's.
+  or Center on the return key) saves it, and a held Return leaves the name as it was. Sort (`funnel-simple`) is a
+  setting row, its value on the right: the order of that playlist's songs, its choices Recently Added (the songs
+  added last first), Oldest First and Title, the current one ticked; each playlist keeps its own
+  ([internals](internals.md#playlist-song-order)). No More menu, no Edit Playlist: reordering is the server's or the phone's.
 - **A playlist's page**: Shuffle (Songs' Shuffle row: the accent's glyph, 18 px, at x 26 and the
   label at x 54), Add Songs (`plus-circle`) and its songs, each one line, the artist on the right
   column in 15 px Text Tertiary; no Shuffle row over nothing. Center plays the list from the song;
   a hold opens the song's whole hold menu (below), then **Remove from Playlist** last, after a gap and red, which
-  asks on the confirmation card first (the user's ruling, 2026-11-16). The songs are in the playlist's own order.
+  asks on the confirmation card first (the user's ruling, 2026-11-16). The songs are in the order its Sort chose (On-The-Go's as added), and Center plays them in that order.
 - **On-The-Go** (Settings > Playback > Library > On-The-Go, on by default; off hides its row and Add to On-The-Go):
   Shuffle, Add Songs, Save as Playlist (`arrow-down`), Clear (`x`), then its songs. Save as Playlist
   makes "On-The-Go N", the first number free, with its songs, empties On-The-Go and lands on the new
