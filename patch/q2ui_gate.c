@@ -5,8 +5,8 @@
  * wheel, Centre, Return and touches to it (ringnav_input), as it does for q2video and a card game.
  * Play/Pause and the side buttons stay demo's, so the music's keys work as they do on any page.
  *
- *  - q2ui ends (Return on its first page, or a crash): demo has the screen again, whole.
- *  - Return twice within Q2UI_AGAIN_MS on demo's Home: q2ui starts again.
+ *  - q2ui ends (Return on its first page, or a crash): demo has the screen again, whole, and
+ *    keeps it until the next start of demo. Return on q2ui's first page is the way out of q2ui.
  *  - demo needs the screen (a window other than Home opened by itself: the USB prompt, a pairing
  *    request, Shut Down?): q2ui is ended so the window can be seen and answered, and started
  *    again once Home is back on top.
@@ -19,7 +19,6 @@
 
 #define Q2UI_BIN "/usr/bin/q2ui"
 #define Q2UI_TARGET "/mnt/data/ui-target"
-#define Q2UI_AGAIN_MS 500
 #define Q2UI_DUE (-1) /* to be started on the next pass: already the screen's holder */
 
 static struct {
@@ -27,7 +26,6 @@ static struct {
     char asked;        /* the target was read at start */
     char took, back;   /* demo ended it for a window of its own; start it again on Home */
     char booted;       /* it has been started once: the boot animation is over */
-    unsigned returned; /* time_now_ms of Return's last release on Home, 0 none */
 } qu __attribute__((section(".scratch")));
 
 static int wanted(void) {
@@ -94,21 +92,13 @@ void q2ui_poll(void) {
     }
 }
 
-/* ringnav_input's, for an event of type and key: 1 when it is not demo's to act on. */
+/* ringnav_input's, for an event of type and key: 1 when it is q2ui's, which reads the wheel, Centre,
+ * Return and the touch panel itself; the other keys stay demo's. */
 int q2ui_input(unsigned type, unsigned key) {
+    if (!q2ui_on()) return 0;
     int press = type == EVT_KEY_DOWN || type == EVT_KEY_UP || type == EVT_KEY_LONG;
-    if (q2ui_on()) {
-        int its = (type >= EVT_POINTER_FIRST && type <= EVT_POINTER_ABORT) ||
-                  (press && (key == KEY_PREV || key == KEY_NEXT || key == KEY_CENTER || key == KEY_RETURN));
-        if (its) reset_poweroptions_timer(1, 1, 1); /* the screen stays lit while it is used */
-        return its;
-    }
-    if (type != EVT_KEY_UP || key != KEY_RETURN || !on_home()) return 0;
-    unsigned now = (unsigned)time_now_ms() | 1;
-    if (qu.returned && now - qu.returned < Q2UI_AGAIN_MS && wanted()) {
-        qu.returned = 0, qu.pid = Q2UI_DUE;
-        return 1;
-    }
-    qu.returned = now;
-    return 0;
+    int its = (type >= EVT_POINTER_FIRST && type <= EVT_POINTER_ABORT) ||
+              (press && (key == KEY_PREV || key == KEY_NEXT || key == KEY_CENTER || key == KEY_RETURN));
+    if (its) reset_poweroptions_timer(1, 1, 1); /* the screen stays lit while it is used */
+    return its;
 }

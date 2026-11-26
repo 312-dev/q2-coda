@@ -242,7 +242,7 @@ int ringnav_input(void *wm, void *e) {
         if (e && I(e, EVENT_TYPE) == EVT_KEY_UP) video_key((unsigned)I(e, EVENT_KEY));
         return 0;
     }
-    if (e && q2ui_input(type, key)) return 0; /* q2ui has the screen, or is asked for (q2ui_gate.c) */
+    if (e && q2ui_input(type, key)) return 0; /* q2ui has the screen and reads this itself (q2ui_gate.c) */
     if (addon_game_input(e)) return 0;
     /* the selection bar's press (tilt.c): past the gates that drop a press with its release, and
      * the video and the card game that own every key */
