@@ -730,4 +730,39 @@ m.call(address=syms['dialog_checkfw_dialog_init'],args=(dlg,0,0,0),gap=0)
 assert not m.nodes[label]['visible']; texts,images=m.said(dlg)
 assert texts==['Restarting to Install',"Don't turn off the Q2"] and images==['restart'],(texts,images)
 top=40+(320-40-158)//2; assert [r['rect'] for r in m.rounded]==[(375//2-46,top,92,92),(375//2-90,top+172,180,6)],m.rounded; passed()
+# Jack detect (docs/internals.md#jack-detect): stock's own check_headset_status, run here, reads PA07 (3.5 mm) and
+# PA08 (4.4 mm) through toolsGpioGetValue, 0 plugged. Powering the DAC up at Play read PA07 unplugged for about 120 ms
+# with a cable in (the user's Q2, 2026-11-25, Build I): a poll inside it cleared g_po_status, the headphones glyph
+# went, and config_po_output(0) paused the song just started. An unplug read now counts only when it is still read
+# JACK_UNPLUG_MS later, at stock's next poll; a plug, and the second of two unplugged reads, go through at once.
+class JackMachine(Machine):
+    def __init__(self):
+        super().__init__(); self.pins={'PA07':0,'PA08':1}; self.outputs=[]; self.logs=[]
+        self.handlers.pop(syms['toolsGpioGetValue'],None)  # the patched read runs: its hook, then stock's read, mocked here
+        self.handlers[int(manifest['patch_symbols']['stock_gpio_value_trampoline'],16)]='jk:pin'
+        self.handlers[syms['config_po_output']]='jk:3.5'; self.handlers[syms['config_bal_output']]='jk:4.4'
+        self.handlers[payload_syms['ulog']]='jk:ulog'
+    def hook(self,u,address,size,unused):
+        name=self.handlers.get(address,'')
+        if not name.startswith('jk:'): return super().hook(u,address,size,unused)
+        name=name[3:]; a=u.reg_read(REGS[0]); ret=0
+        if name=='pin': ret=self.pins.get(self.text(a),1)
+        elif name=='ulog': self.logs.append((self.text(u.reg_read(REGS[1])),self.text(u.reg_read(REGS[2]))))
+        else: self.outputs.append((name,a)); ret=1  # config_po_output(0) at an unplug: player_save_stop while it plays
+        self.returns(ret)
+    def poll(self,gap=1000):  # on_wm_idle_status's call, once a second
+        self.outputs=[]; self.call(address=syms['check_headset_status'],args=(0,0,0,0),gap=gap); return self.outputs
+    def po(self): return self.u.mem_read(syms['g_po_status'],1)[0]
+m=JackMachine(); m.byte(syms['g_po_status'],1)
+assert m.poll()==[] and m.po()==1
+m.pins['PA07']=1; assert m.poll()==[] and m.po()==1, (m.outputs, m.po())  # Play's 120 ms glitch, read once: no pause
+m.pins['PA07']=0; assert m.poll()==[] and m.po()==1  # back at the next poll
+assert ('jack','3.5 mm jack: an unplugged read that did not last, ignored') in m.logs; passed()
+m.logs=[]; m.pins['PA07']=1; assert m.poll()==[] and m.po()==1  # a real unplug: the first read is held
+assert m.poll(O['JACK_UNPLUG_MS'])==[('3.5',0)] and m.po()==0  # still unplugged a poll later: stock pauses
+assert m.logs==[('jack','3.5 mm jack unplugged')]; passed()
+m.logs=[]; m.pins['PA07']=0; assert m.poll()==[('3.5',1)] and m.po()==1 and m.logs==[('jack','3.5 mm jack plugged')]; passed()
+m.logs=[]; m.pins['PA08']=0; assert m.poll()==[('4.4',1)] and m.logs==[('jack','4.4 mm jack plugged')]
+m.pins['PA08']=1; assert m.poll()==[]; assert m.poll(O['JACK_UNPLUG_MS']-1)==[]  # read again too soon: still held
+assert m.poll(1)==[('4.4',0)] and m.logs[-1]==('jack','4.4 mm jack unplugged'); passed()
 print(f'{checks} MIPS execution scenarios passed; toolkit services mocked, stock lock filter executed.')

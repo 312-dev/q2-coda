@@ -230,11 +230,12 @@ int usb_otg_own_vbus(void) {
 }
 
 /* toolsGpioGetValue (0x5d1c3c, tools/build.py HOOKS): stock's read of a pin, but PD18 reads 0 inside
- * stock's pass while the host role is kept over an ID high (otg_stock). Only check_otg_status and
- * this file's passes read PD18, all on the UI thread. */
+ * stock's pass while the host role is kept over an ID high (otg_stock), and the jacks' PA07 and PA08
+ * read unplugged only once that lasts (jack_detect.c). Only check_otg_status and this file's passes
+ * read PD18, all on the UI thread. */
 int ringnav_gpio_value(const char *name) {
     if (otg.id_as_low && name && !strcmp(name, "PD18")) return 0;
-    return stock_gpio_value_trampoline(name);
+    return jack_read(name, stock_gpio_value_trampoline(name));
 }
 
 static int host_device(void) {
