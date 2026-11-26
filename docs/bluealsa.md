@@ -192,8 +192,9 @@ The `bluez` branch builds against the same GLib and D-Bus headers but links stub
 this one links the stock files. One of the two ways should be kept when the branches meet. Both add
 `tools/bluez/glibconfig.h`, the same bytes.
 
-ponytail: the five recipes have no tests in `test/unit/test_thirdparty.py` yet, where every other recipe has
-one; phase 2 adds them with the first source patch.
+The recipes and the build switch's two functions have unit tests (`test/unit/test_thirdparty.py`,
+`test/unit/test_build.py`); `test/bluealsa_own.py` is run by hand (`tools/ci/gate.py` says why: it needs the
+daemon built and its path).
 
 ### Bases
 
@@ -370,8 +371,8 @@ and `q2player` are not in this plan on purpose: they need the compatibility serv
 
 In worker-days, phase 2 to a default-on build: callers moved to the object manager 1; the compatibility
 service 2; the source patches (MTU, bitpool and peak with the shared file, silence, drop, each reproduced
-first) 4; the launcher, the plugin choice, the row and `q2guard`'s fallback 2; unit tests for the recipes and
-the harness in the gate 1; the device plan and what it turns up 3 to 5. **13 to 15**, against the 10 to 20
+first) 4; the launcher, the plugin choice, the row and `q2guard`'s fallback 2; the harness made a
+gate suite, with the drop and silence cases, 1; the device plan and what it turns up 3 to 5. **13 to 15**, against the 10 to 20
 [bluetooth](bluetooth.md#options) guessed before this was built.
 
 The first three steps: (1) move `bt_ui.c`, `bt_battery.c`, `q2bt.c` and `q2_guest.c` to `GetManagedObjects`
