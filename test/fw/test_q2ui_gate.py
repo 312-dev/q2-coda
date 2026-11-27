@@ -175,6 +175,16 @@ def test_a_page_q2ui_asks_for_is_opened_and_q2ui_comes_back_when_it_is_left(fw):
     assert g.forks == 2 and g.on() == CHILD
 
 
+@pytest.mark.parametrize('ask', [b'systemset/wifi_page', b'playset/playset_page'])
+def test_a_stock_page_in_a_folder_is_opened_by_its_path(fw, ask):
+    """q2ui's Settings rows name stock's settings pages as stock's own rows open them: their folder, a slash, the page."""
+    g = Gate(fw)
+    g.poll()
+    g.ask, g.status, g.ended = ask, ASKED, 1
+    g.poll()
+    assert g.opened == [ask.decode()] and g.on() == 0
+
+
 def test_a_page_that_never_comes_up_does_not_keep_q2ui_away(fw):
     g = Gate(fw)
     g.poll()
@@ -190,7 +200,9 @@ def test_a_page_that_never_comes_up_does_not_keep_q2ui_away(fw):
     assert g.forks == 2
 
 
-@pytest.mark.parametrize('ask', [b'../etc/passwd', b'games', b'Games_page', b'games_page; reboot', b'_page', None])
+@pytest.mark.parametrize('ask', [b'../etc/passwd', b'games', b'Games_page', b'games_page; reboot', b'_page', None,
+                                 b'/wifi_page', b'a/b/wifi_page', b'system_set/wifi_page', b'systemset/_page',
+                                 b'Systemset/wifi_page', b'systemset/../wifi_page'])
 def test_only_a_stock_pages_name_is_opened(fw, ask):
     g = Gate(fw)
     g.poll()
@@ -259,7 +271,7 @@ def test_every_start_and_end_is_a_line_in_demos_log(fw):
 
 
 @pytest.mark.parametrize('name', ['tuner_page', 'games_page', 'era_page', 'ratings_page', 'mostplayed_page', 'searchstrip_page',
-                                  'coverflow_page'])
+                                  'coverflow_page', 'carremote_page'])
 def test_a_page_the_payload_builds_is_not_opened_by_its_name(fw, name):
     """Those are built by openers of the payload's own (the click of the row that leads to each), which the gate
     calls; a stock page's name would open nothing for them. That each opener then puts its page up is the emulator's
@@ -306,3 +318,13 @@ def test_while_q2ui_runs_demo_tells_it_the_status_rows_states_when_they_change(f
     g.ms += 1000
     g.poll()
     assert len(writes) == 2
+
+
+def test_controls_is_opened_as_homes_controls_row_opens_it(fw):
+    """Settings > Controls is the Display page opened on its Controls part (settings_display.c display_open), not a
+    page of its own name."""
+    g = Gate(fw)
+    g.poll()
+    g.ask, g.status, g.ended = b'controls_page', ASKED, 1
+    g.poll()
+    assert g.opened == ['systemset/display_page'] and g.on() == 0

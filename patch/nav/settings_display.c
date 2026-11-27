@@ -274,6 +274,9 @@ static int display_open(void *ctx, void *event) {
     return 0;
 }
 
+/* Settings > Controls as q2ui's gate opens it (q2ui_gate.c openers): Home's Controls row's own click */
+int controls_open(void *ctx, void *event) { return display_open((void *)DISPLAY_CONTROLS, event); }
+
 static void setting_row(void *view, int i) {
     static const char *const icons[SETTING_OWN] = {
         [SETTING_ACCENT] = "system_display",       [SETTING_HOME] = "playset_covermode",

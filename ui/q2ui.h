@@ -398,6 +398,7 @@ extern const ui_page page_home, page_now;
 /* Leave q2ui for a page of demo's it has not got (docs/ui-rewrite.md#cutover): demo opens the page
  * named, takes the screen, and starts q2ui again where it was when the page is left. */
 void ui_demo_page(const char *name);
+void settings_push(void);         /* Settings: its rows open demo's pages for now (page_settings.c) */
 extern const ui_page page_depth; /* the panel's colour depth test card */
 void gallery_push(void);         /* every kind of row, as a list to try them on */
 extern const ui_page page_card;  /* a card of layers the wheel pushes */

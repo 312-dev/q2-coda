@@ -205,6 +205,8 @@ static void state_restore(void) {
             if (strcmp(seg, opt.page)) break;
         } else if (!strcmp(seg, "now"))
             ui_push(&page_now, 0);
+        else if (!strcmp(seg, "settings"))
+            settings_push();
         else if (!library_route(seg))
             break;
         ui_select_top(atoi(colon + 1));

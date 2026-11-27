@@ -97,17 +97,20 @@ static void said(const char *what, int n) {
 int tuner_open(void *ctx, void *event), games_open(void *ctx, void *event), era_menu(void *ctx, void *event);
 int ratings_menu(void *ctx, void *event), most_played(void *ctx, void *event);
 int library_search_open(void *ctx, void *event), coverflow_row_open(void *ctx, void *event);
+int carremote_open(void *ctx, void *event), controls_open(void *ctx, void *event);
 
 static const struct {
     const char *name;
     int (*open)(void *ctx, void *event);
 } openers[] = { { "tuner_page", tuner_open },     { "games_page", games_open },         { "era_page", era_menu },
                 { "ratings_page", ratings_menu }, { "mostplayed_page", most_played },
-                { "searchstrip_page", library_search_open }, { "coverflow_page", coverflow_row_open } };
+                { "searchstrip_page", library_search_open }, { "coverflow_page", coverflow_row_open },
+                { "carremote_page", carremote_open }, { "controls_page", controls_open } };
 
 /* The page q2ui named as it left, opened: one of the openers' names, else a stock page's name and
- * nothing else (lower case and underscores, ending _page), since what is read here is a file any
- * program can write. */
+ * nothing else (lower case and underscores ending _page, after at most one folder of lower case
+ * letters and a slash: systemset/wifi_page), since what is read here is a file any program can
+ * write. */
 static void open_asked(void) {
     char name[40] = "";
     int fd = open(Q2UI_ASK, 0);
@@ -115,7 +118,16 @@ static void open_asked(void) {
     int n = (int)read(fd, name, sizeof name - 1), ok = n > 5;
     close(fd);
     while (n > 0 && (name[n - 1] == '\n' || name[n - 1] == '\r')) name[--n] = 0;
-    for (int i = 0; i < n; ++i) ok &= (name[i] >= 'a' && name[i] <= 'z') || name[i] == '_';
+    int slash = -1;
+    for (int i = 0; i < n; ++i) {
+        if (name[i] == '/' && slash < 0 && i > 0) {
+            slash = i;
+            continue;
+        }
+        ok &= (name[i] >= 'a' && name[i] <= 'z') || name[i] == '_';
+    }
+    for (int i = 0; i < slash; ++i) ok &= name[i] >= 'a' && name[i] <= 'z'; /* the folder: letters alone */
+    ok &= n - slash - 1 > 5; /* a page's own name after it */
     if (!ok || n < 6 || memcmp(name + n - 5, "_page", 5)) return;
     unsigned k = 0;
     while (k < sizeof openers / sizeof *openers && tk_strcmp(name, openers[k].name)) ++k;
