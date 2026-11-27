@@ -443,7 +443,7 @@ void status_draw(rect_t r) {
     if (!S.run.n || run_stale(&S.run)) run_make(&S.run, FACE_MEDIUM, TYPE(15), S.clock, -1);
     /* on Home the clock stands over the list in Text Primary (docs/oled-design.md#status-row) */
     run_draw(&S.run, INSET, CLOCK_Y, tok(home ? TOK_PRIMARY : TOK_SECONDARY), 256);
-    if (!home) {
+    if (!home || !home_split) {
         glyphs();
         return;
     }
