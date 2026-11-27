@@ -27,7 +27,7 @@ power key turning the screen off and on, and its hold starting init's shutdown.
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
-Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end).
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd).
 """
 import argparse
 import hashlib
@@ -183,7 +183,7 @@ def check_image(build, fs, manifest, perturb=None):
     check(actions.count('sysinit') == 1 and table[0] == '::sysinit:/etc/init.d/rcS'
           and '::respawn:/usr/bin/runsvdir -P /etc/sv' in table, 'inittab: rcS, the one sysinit, then runsvdir over /etc/sv')
     services = sorted(p.name for p in (fs/'etc/sv').iterdir())
-    check(services == ['adb-wifi', 'adbd', 'dhcp', 'q2playd', 'q2player', 'q2sysd', 'q2ui', 'wlan'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
+    check(services == ['adb-wifi', 'adbd', 'dhcp', 'q2libd', 'q2playd', 'q2player', 'q2sysd', 'q2ui', 'wlan'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
           f'services: {", ".join(services)}')
     check(not (fs/'etc/init.d').exists() or sorted(p.name for p in (fs/'etc/init.d').iterdir()) == ['rcK', 'rcS'],
           '/etc/init.d holds rcS and rcK alone')
@@ -212,9 +212,19 @@ def wav(path, seconds=1, rate=44100):
                      + b'data' + st.pack('<I', len(frames)) + frames)
 
 
-def play_check(fs, console, deadline, log):
+def play_check(fs, console, deadline, log, data):
     """(q2player connected, the song came back) through q2playd's Q2PLAY/1 socket in the booted image: a play of
     song 1 (/mnt/mmc/song1.wav), and q2playd's word that q2player played it out or could not (no sound card here)."""
+    lib = data/'vamp/library.db'
+    end, songs = time.monotonic() + 60, []
+    while time.monotonic() < end and not songs:  # q2libd's scan of the card (a bind mount, so in /proc/mounts)
+        try:
+            import sqlite3
+            songs = sqlite3.connect(lib).execute('select id, fileurl, time from songtable').fetchall() if lib.exists() else []
+        except Exception:
+            songs = []
+        time.sleep(0.5)
+    check(songs == [(1, '/mnt/mmc/song1.wav', 60)], f'q2libd: the card scanned into /mnt/data/vamp/library.db through FFmpeg ({songs})')
     connected = False
     while time.monotonic() < deadline and not connected:
         connected = b'q2playd: the player connected' in console.read_bytes() if console.exists() else False
@@ -384,6 +394,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         (fs/'etc/init.d/rcS').write_text(rcs)
     if perturb == 'adb-open':  # Wi-Fi adbd with no key check: an open port
         (fs/'etc/sv/adb-wifi/run').write_text('#!/bin/sh\nexec /usr/bin/adbd --tcp 5555\n')
+    if perturb == 'libd-off':  # no q2libd
+        (fs/'etc/sv/q2libd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'ui-slow':  # q2ui's finish waits 10 s whatever the end, as before hot reload
         (fs/'etc/sv/q2ui/finish').write_text('#!/bin/sh\nsleep 10\n')
     if perturb == 'sysd-off':  # no q2sysd
@@ -435,7 +447,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
     cmd = ['bwrap', '--unshare-pid', '--unshare-uts', '--unshare-ipc', '--as-pid-1', '--die-with-parent',
            '--bind', fs, '/', '--proc', '/proc', '--dev', '/dev', '--bind', fb, '/dev/fb0', '--bind', inp, '/dev/input',
            '--ro-bind', qemu, '/usr/libexec/qemu-binfmt/mipsel-binfmt-P', '--bind', emu, '/emu',
-           '--bind', emu/'record', '/run/vamp/boot.log', *extra, '/sbin/init']
+           '--bind', emu/'record', '/run/vamp/boot.log', '--bind', fs/'mnt/mmc', '/mnt/mmc', *extra, '/sbin/init']
     proc = subprocess.Popen([str(c) for c in cmd], stdout=console, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=NO_PRELOAD)
     drew, played = False, None
     deadline = time.monotonic() + wait_s
@@ -444,7 +456,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
             time.sleep(0.5)
             drew = any(fb.read_bytes())
         if proc.poll() is None:
-            played = play_check(fs, work/'console.log', deadline, emu/'record')
+            played = play_check(fs, work/'console.log', deadline, emu/'record', emu/'data' if card else fs/'mnt/data')
         if adb and not card and proc.poll() is None:
             adb_checks(fs)
         if not card and proc.poll() is None:
@@ -521,7 +533,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     a = ap.parse_args()
     manifest, _ = vamp_os.read_manifest()

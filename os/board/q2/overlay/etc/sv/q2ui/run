@@ -1,6 +1,7 @@
 #!/bin/sh
-# q2ui, the screen and the keys (ui/ on feat/render-engine). Its library is /mnt/data/database.db; without one it
-# ends at once. kill -HUP restarts it in place (the same process, its options read again, its pages kept); any end is
+# q2ui, the screen and the keys (ui/ on feat/render-engine). Its library is q2libd's (docs/libd.md): the card's in
+# /mnt/data/vamp/library.db, which q2libd writes, empty, before anything else, and the servers' in
+# /mnt/mmc/.vamp/catalogue.db. kill -HUP restarts it in place (the same process, its options read again, its pages kept); any end is
 # started again by runsv (finish), while q2playd plays on.
 . /usr/libexec/vamp/log
 if [ ! -e /dev/fb0 ]; then
@@ -9,4 +10,5 @@ if [ ! -e /dev/fb0 ]; then
 fi
 step "q2ui: start"
 exec 2>&1
-exec /usr/bin/q2ui --fonts /usr/share/vamp/fonts --icons /usr/share/vamp/icons
+exec /usr/bin/q2ui --db /mnt/data/vamp/library.db --catalogue /mnt/mmc/.vamp/catalogue.db \
+    --fonts /usr/share/vamp/fonts --icons /usr/share/vamp/icons

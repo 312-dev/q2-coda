@@ -1,7 +1,7 @@
 #!/bin/sh
 # q2playd (docs/playd.md): q2player's server on /tmp/sock_play, the queue and what plays; q2ui's command queue and now
-# file, and Q2PLAY/1 on /run/vamp/play.sock.
+# file, and Q2PLAY/1 on /run/vamp/play.sock. A song's file from q2libd's library (docs/libd.md).
 . /usr/libexec/vamp/log
 step "q2playd: start"
 exec 2>&1
-exec /usr/bin/q2playd
+exec /usr/bin/q2playd --db /mnt/data/vamp/library.db
