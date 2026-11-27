@@ -416,6 +416,7 @@ typedef struct {
     char title[160], artist[160], album[160];
     int playing, paused, pos_ms, len_s, volume, id;
     int shuffle, repeat, hearts; /* the modes (repeat: 0 off, 1 one, 2 all) and the song's hearts, -1 unknown */
+    int radio;                   /* a radio plays (the song's, or the Q2's own): shuffle and repeat are its */
     uint64_t read_us; /* when this was read: the position is that old */
 } ui_now;
 void now_open(void);              /* watch for changes; a change wakes the loop */
