@@ -228,6 +228,72 @@ def test_as_a_service_a_new_playlist_is_read_within_its_look(binary, card):
         p.wait(5)
 
 
+# ---- offline copies (docs/libd.md#offline-copies) ----
+
+COPY = '/mnt/mmc/.subsonic/stream/acct/hi/a/Server Song [sid1].flac'
+
+
+def meta(root):
+    return sqlite3.connect(root/'mnt/mmc/.vamp/catalogue.db').execute(
+        'select id, app, sid, local from servermeta order by id').fetchall()
+
+
+def test_offline_copies_from_the_catalogue_and_catalogue_avail_in_order(binary, card):
+    s3 = 's\tsid3\tThird\tSue\t\tB-Sides\talb2\t0\t0\t2\t100\tPop\tmp3\t/mnt/mmc/.subsonic/stream/x/Third [sid3].mp3\t9\t'
+    s4 = 's\tsid4\tFourth\tSue\t\tB-Sides\talb2\t0\t0\t3\t100\tPop\tmp3\t/mnt/mmc/../etc/passwd\t9\t'
+    catalogue(card, 'subsonic', [S1, S2, s3, s4])
+    (card/'mnt/mmc/.subsonic/catalogue.avail').write_text(
+        f'sid9\t/mnt/mmc/x.flac\nsid2\t/mnt/mmc/.subsonic/old.mp3\n{"sid1"}\t{COPY}\n-sid2\nsid4\t/tmp/off-card.mp3\n'
+        'sid2\t/mnt/mmc/cut-short.mp3')
+    scan(binary, card)
+    assert meta(card) == [(0x40000000, 'subsonic', 'sid1', COPY), (0x40000001, 'subsonic', 'sid2', None),
+                          (0x40000002, 'subsonic', 'sid3', '/mnt/mmc/.subsonic/stream/x/Third [sid3].mp3'),
+                          (0x40000003, 'subsonic', 'sid4', None)], \
+        "the tsv's copy, avail's lines in order, an off-card path none, and a cut last line not yet read"
+
+
+def test_a_server_song_that_is_a_card_song_has_no_offline_copy_row(binary, card):
+    same = 's\tsidA\tAlpha\tAnn\tAnn\tFirst\talbA\t2001\t1\t1\t1\tRock\tflac\t/mnt/mmc/.subsonic/stream/a [sidA].flac'
+    catalogue(card, 'subsonic', [same, S2])
+    scan(binary, card)
+    assert [r[2] for r in meta(card)] == ['sid2']
+
+
+def test_as_a_service_new_avail_lines_are_applied_in_place_within_seconds(binary, card):
+    (card/'proc').mkdir()
+    (card/'proc/mounts').write_text('/dev/mmcblk4p1 /mnt/mmc vfat rw 0 0\n')
+    catalogue(card, 'subsonic', [S1, S2])
+    avail = card/'mnt/mmc/.subsonic/catalogue.avail'
+    avail.write_text('')
+    after = card/'after'
+    p = subprocess.Popen([str(binary), '--root', str(card), '--after', f'echo x >> {after}'], stderr=subprocess.DEVNULL)
+    try:
+        end = time.monotonic() + 15
+        while time.monotonic() < end and not (card/'mnt/mmc/.vamp/catalogue.db').exists():
+            time.sleep(0.2)
+        time.sleep(1)
+        ran = after.read_text()
+        ino = (card/'mnt/mmc/.vamp/catalogue.db').stat().st_ino
+        with avail.open('a') as f:
+            f.write(f'sid1\t{COPY}\n')
+        end = time.monotonic() + 4
+        while time.monotonic() < end and meta(card)[0][3] is None:
+            time.sleep(0.2)
+        assert meta(card)[0][3] == COPY, 'a new line within a few seconds, not at the next 10 s look'
+        with avail.open('a') as f:
+            f.write('-sid1\nsid2\t/mnt/mmc/two.mp3\n')
+        time.sleep(2.5)
+        assert [r[3] for r in meta(card)] == [None, '/mnt/mmc/two.mp3']
+        avail.write_text(f'sid1\t{COPY}\n')  # shorter: read whole again
+        time.sleep(2.5)
+        assert [r[3] for r in meta(card)] == [COPY, '/mnt/mmc/two.mp3']
+        assert (card/'mnt/mmc/.vamp/catalogue.db').stat().st_ino == ino, 'in place: the catalogue not written again'
+        assert after.read_text() == ran, 'nor q2ui told'
+    finally:
+        p.terminate()
+        p.wait(10)
+
+
 # ---- Vamp API 1 (docs/platform/library.md) ----
 
 def test_conformance_library(binary, card):

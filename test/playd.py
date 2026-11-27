@@ -476,14 +476,18 @@ if __name__ == '__main__':
 SERVER = 0x40000000
 
 
-def catalogue(root, listening=True):
-    """the card's catalogue.db with two of navi's server rows; navi's browse socket there while it listens"""
+def catalogue(root, listening=True, copies=None):
+    """the card's catalogue.db with two of navi's server rows, and servermeta with copies' offline copies ({id: path});
+    navi's browse socket there while it listens"""
     (root/'mnt/mmc/.vamp').mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(root/'mnt/mmc/.vamp/catalogue.db')
     db.execute('create table servertable(id integer primary key, fileurl, name, songer, album, track)')
     db.executemany('insert into servertable values (?, ?, ?, ?, ?, 0)', [
         (SERVER + 1, '/mnt/mmc/.navi/cat/al1/s1.flac', 'Cloud One', 'Sky', 'Up'),
         (SERVER + 2, '/mnt/mmc/.navi/cat/al1/s2.flac', 'Cloud Two', 'Sky', 'Up')])
+    db.execute('create table servermeta(id integer primary key, app, sid, local)')
+    db.executemany('insert into servermeta values (?, ?, ?, ?)',
+                   [(i, 'navi', f's{i - SERVER}', (copies or {}).get(i)) for i in (SERVER + 1, SERVER + 2)])
     db.commit()
     db.close()
     if listening:
@@ -536,6 +540,68 @@ def test_a_list_whose_app_is_not_running_plays_its_card_songs_at_once(run):
     pl.pump(1.0)
     assert not (root/'tmp/q2-navi.catplay').exists()
     assert pl.songs() == [('set-songurl', '/mnt/mmc/Music/c%0x7dd.flac')]
+
+
+COPY1 = '/mnt/mmc/.navi/stream/acct/hi/a/Cloud One [s1].flac'
+
+
+def test_a_catplay_unanswered_plays_the_card_songs_and_the_offline_copies(run):
+    """docs/playd.md#offline-copies: the list the firmware plays itself, card rows and server rows by their copies"""
+    root, pl = run
+    sock = catalogue(root, copies={SERVER + 1: COPY1})
+    (root/'mnt/mmc/.navi/covers').mkdir(parents=True)
+    (root/'mnt/mmc/.navi/covers/al1.jpg').write_bytes(b'\xff\xd8 album one')
+    play_list(root, [1, SERVER + 1, SERVER + 2, 2], 1)
+    assert wait_for(root/'tmp/q2-navi.catplay')
+    pl.pump(5.0)
+    assert pl.songs() == [('set-songurl', COPY1)], 'after 4 s, the chosen server song by its copy'
+    n = now(root, 0.3)
+    assert (n['title'], n['artist'], n['album'], n['id']) == ('Cloud One', 'Sky', 'Up', str(SERVER + 1))
+    assert (root/'tmp/externpic.jpg').read_bytes() == b'\xff\xd8 album one', "its server row's cover"
+    pl.say('player-status', 'exit')
+    pl.pump(1.0)
+    assert pl.songs()[-1] == ('set-songurl', '/mnt/mmc/Music/b.mp3'), 'the server song with no copy passed over'
+    sock.close()
+
+
+def test_an_app_whose_server_is_down_has_its_list_played_offline_at_once(run):
+    root, pl = run
+    sock = catalogue(root, copies={SERVER + 1: COPY1})
+    (root/'tmp/q2-navi.state').write_text('status=idle\nserver=down\n')
+    play_list(root, [SERVER + 2, SERVER + 1, 3], 1)
+    pl.pump(1.0)
+    assert not (root/'tmp/q2-navi.catplay').exists(), 'no catplay to an app whose server is gone'
+    assert pl.songs() == [('set-songurl', COPY1)]
+    sock.close()
+
+
+def test_a_server_song_with_no_copy_while_its_server_is_down_is_refused(run):
+    root, pl = run
+    sock = catalogue(root, copies={SERVER + 1: COPY1})
+    (root/'tmp/q2-navi.state').write_text('server=down\n')
+    play_list(root, [2], 0)
+    pl.pump()
+    a = api(root)
+    a.say('play 0 0 2')
+    a.say(str(SERVER + 2))
+    a.say(str(SERVER + 1))
+    assert a.line() == 'err play', 'the chosen song cannot play: Not available offline'
+    pl.pump()
+    assert pl.songs() == [('set-songurl', '/mnt/mmc/Music/b.mp3')] and now(root, 0.3)['id'] == '2', 'what played goes on'
+    sock.close()
+
+
+def test_an_answer_s_copy_named_by_servermeta_shows_its_server_row(run):
+    root, pl = run
+    sock = catalogue(root, copies={SERVER + 2: '/mnt/mmc/.navi/cache/s2.flac'})
+    play_list(root, [SERVER + 2], 0)
+    assert wait_for(root/'tmp/q2-navi.catplay')
+    (root/'tmp/navi.m3u').write_text('/mnt/mmc/.navi/cache/s2.flac\n')
+    (root/'tmp/q2-navi.play').write_text('1 /tmp/navi.m3u\n')
+    pl.pump(1.0)
+    n = now(root, 0.3)
+    assert (n['title'], n['artist'], n['album']) == ('Cloud Two', 'Sky', 'Up')
+    sock.close()
 
 
 class FakePkgd:

@@ -9,11 +9,13 @@
  *     (/mnt/mmc/.<id>/catalogue.tsv, Q2CAT/1, docs/server-library.md), ids from 0x40000000 as the payload gives them.
  *     On the card, as today's Vamp keeps its own (/mnt/data is too small for a large server), but a file of Vamp OS's
  *     own, so today's Vamp's catalogue.db is never touched either. A server song that is a card song is left out
- *     (serverdup names it).
+ *     (serverdup names it). servermeta gives each server song's app, sid and offline copy (docs/libd.md#offline-copies):
+ *     the catalogue's local path, then catalogue.avail's lines.
  *   - Besides: each album's cover in /mnt/mmc/.vamp/covers/ (vamp_cover names each song's), and the card's M3U
  *     playlists (/mnt/mmc/_explaylist_data/) in library.db's playlist, stock's table.
  *
- * Each is written whole beside itself and renamed over it, so a reader never sees half a scan. It scans at its start
+ * Each is written whole beside itself and renamed over it, so a reader never sees half a scan; only catalogue.avail's
+ * new lines change servermeta in place, one transaction each look, looked at every second. It scans at its start
  * once the card is mounted, when the card's mount or a playlist file changes, when an app's catalogue.tsv or credentials change (looked
  * at every 10 s), and at SIGHUP; --once scans and ends. Before the card is there it writes an empty library, so a
  * reader always has one; after each write it runs --after's command (the image: q2ui's restart in place, so its lists
@@ -38,7 +40,7 @@
 #define CAT_ID_BASE 0x40000000u /* server rows' ids, above any card song's (patch/catalogue.c) */
 #define CAT_APP_SPAN 0x01000000u
 #define CAT_APPS 4
-#define LOOK_S 10
+#define LOOK_S 10 /* the card and the catalogues; catalogue.avail every second */
 #define LINE 8192
 
 static char root[256], after[256];
@@ -441,9 +443,20 @@ static int split(char *line, char **f, int max) {
 }
 static int plain(const char *s) { return *s && !strchr(s, '/') && strcmp(s, ".") && strcmp(s, ".."); }
 
-/* One app's catalogue.tsv into servertable (ins), ids from base. Its rows=, counted over s, p and i lines, must be
+/* A path an app names: on the card, with no ".." segment (patch/addon.c card_path) */
+static int card_path(const char *p) {
+    if (strncmp(p, "/mnt/mmc/", 9)) return 0;
+    for (const char *s = p;;) {
+        if (s[0] == '.' && s[1] == '.' && (!s[2] || s[2] == '/')) return 0;
+        if (!(s = strchr(s, '/'))) return 1;
+        ++s;
+    }
+}
+
+/* One app's catalogue.tsv into servertable (ins) and servermeta (meta: its copy, the local path when it is a card
+ * path), ids from base. Its rows=, counted over s, p and i lines, must be
  * met, so a file cut short is not taken for a smaller library: -1 then, and nothing of it is kept. */
-static int import_app(sqlite3 *d, sqlite3_stmt *st, const char *id, unsigned base) {
+static int import_app(sqlite3 *d, sqlite3_stmt *st, sqlite3_stmt *meta, const char *id, unsigned base) {
     char p[300], *line = malloc(LINE + 2), *f[20];
     snprintf(p, sizeof p, "/mnt/mmc/.%s/catalogue.tsv", id);
     FILE *in = line ? fopen(path(p), "r") : 0;
@@ -490,6 +503,13 @@ static int import_app(sqlite3 *d, sqlite3_stmt *st, const char *id, unsigned bas
         sqlite3_bind_int(st, c++, initial(f[2]));
         sqlite3_step(st);
         sqlite3_reset(st);
+        sqlite3_bind_int64(meta, 1, next - 1);
+        sqlite3_bind_text(meta, 2, id, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(meta, 3, f[1], -1, SQLITE_TRANSIENT);
+        if (n > 13 && card_path(f[13])) sqlite3_bind_text(meta, 4, f[13], -1, SQLITE_TRANSIENT);
+        else sqlite3_bind_null(meta, 4);
+        sqlite3_step(meta);
+        sqlite3_reset(meta);
     }
     if (in) fclose(in);
     free(line);
@@ -545,12 +565,82 @@ static void dups(sqlite3 *d) {
                 " on c.name = s.name collate nocase and c.album = s.album collate nocase and c.track = s.track"
                 " and (c.songer = s.songer collate nocase or (c.albumsonger <> '' and c.albumsonger = s.albumsonger collate nocase))"
                 " and c.time > 0 and s.time > 0 and abs(c.time - s.time) <= 2 where s.name <> '';"
-                "delete from servertable where id in (select id from serverdup);commit");
+                "delete from servertable where id in (select id from serverdup);"
+                "delete from servermeta where id in (select id from serverdup);commit");
     sqlite3_stmt *c;
     if (sqlite3_prepare_v2(d, "select count(*) from serverdup", -1, &c, 0) == SQLITE_OK) {
         if (sqlite3_step(c) == SQLITE_ROW && sqlite3_column_int(c, 0)) say("%d server songs are card songs: left out", sqlite3_column_int(c, 0));
         sqlite3_finalize(c);
     }
+}
+
+/* ---- offline copies: catalogue.avail (docs/libd.md#offline-copies) ----
+ * An app appends "<sid>\t<local path>" when a song's copy is whole on the card and "-<sid>" when it is evicted; each
+ * line sets a state, so the lines are applied in order from where the last reading stopped, and from the start when
+ * the file is shorter than that (rewritten) or a catalogue is imported. A cut last line waits for its newline. */
+static char cat_ids[CAT_APPS][64]; /* the apps of the catalogue.db written last, by slot */
+static int cat_n;
+static long avail_at[CAT_APPS]; /* catalogue.avail read this far, by slot */
+
+static long avail_size(int slot) {
+    char p[300];
+    struct stat st;
+    snprintf(p, sizeof p, "/mnt/mmc/.%s/catalogue.avail", cat_ids[slot]);
+    return stat(path(p), &st) ? -1 : (long)st.st_size;
+}
+
+/* slot's catalogue.avail from byte from into d's servermeta; where the reading stopped */
+static long apply_avail(sqlite3 *d, int slot, long from) {
+    char p[300], *line = malloc(LINE + 2), *f[2];
+    snprintf(p, sizeof p, "/mnt/mmc/.%s/catalogue.avail", cat_ids[slot]);
+    FILE *in = line ? fopen(path(p), "r") : 0;
+    sqlite3_stmt *up = 0;
+    if (!in || fseek(in, from, SEEK_SET) ||
+        sqlite3_prepare_v2(d, "update servermeta set local = ?1 where app = ?2 and sid = ?3", -1, &up, 0) != SQLITE_OK) {
+        if (in) fclose(in);
+        return free(line), from;
+    }
+    long at = from;
+    while (fgets(line, LINE + 1, in)) {
+        size_t k = strlen(line);
+        if (k && line[k - 1] != '\n' && k == LINE) { /* too long for a path: passed over once its newline is there */
+            long skip = (long)k;
+            int c;
+            while ((c = fgetc(in)) != EOF && c != '\n') ++skip;
+            if (c == EOF) break;
+            at += skip + 1;
+            continue;
+        }
+        if (!k || line[k - 1] != '\n') break; /* a cut last line waits for its newline */
+        at += (long)k;
+        while (k && (line[k - 1] == '\n' || line[k - 1] == '\r')) line[--k] = 0;
+        int gone = line[0] == '-', n = split(line + gone, f, 2);
+        if (!gone && n >= 2 && card_path(f[1])) sqlite3_bind_text(up, 1, f[1], -1, SQLITE_TRANSIENT);
+        else sqlite3_bind_null(up, 1);
+        sqlite3_bind_text(up, 2, cat_ids[slot], -1, SQLITE_STATIC);
+        sqlite3_bind_text(up, 3, f[0], -1, SQLITE_TRANSIENT);
+        sqlite3_step(up);
+        sqlite3_reset(up);
+    }
+    sqlite3_finalize(up);
+    fclose(in);
+    free(line);
+    return at;
+}
+
+/* the live catalogue.db's servermeta brought up to each app's catalogue.avail, in place */
+static void look_avail(void) {
+    sqlite3 *d = 0;
+    for (int i = 0; i < cat_n; ++i) {
+        long size = avail_size(i);
+        if (size < 0 || size == avail_at[i]) continue;
+        if (!d && (sqlite3_open_v2(path("/mnt/mmc/.vamp/catalogue.db"), &d, SQLITE_OPEN_READWRITE, 0) != SQLITE_OK ||
+                   exec_sql(d, "begin immediate")))
+            break;
+        avail_at[i] = apply_avail(d, i, size < avail_at[i] ? 0 : avail_at[i]);
+    }
+    if (d && exec_sql(d, "commit")) say("catalogue.avail not applied");
+    sqlite3_close(d);
 }
 
 static int scan_catalogue(void) {
@@ -561,20 +651,26 @@ static int scan_catalogue(void) {
     mkdir(path("/mnt/mmc/.vamp"), 0755);
     unlink(tmp);
     sqlite3 *d;
-    sqlite3_stmt *st = 0;
+    sqlite3_stmt *st = 0, *meta = 0;
     if (sqlite3_open(tmp, &d) != SQLITE_OK ||
         exec_sql(d, "create table servertable(id int, filename, fileurl, album, songer, style, name, composer, albumsonger,"
                     " year int, track int, cd_num int, time int, time_end int, time_create int, Initial int, bitdepth int,"
-                    " samprate int); begin") ||
+                    " samprate int); create table servermeta(id integer primary key, app, sid, local);"
+                    " create index servermeta_sid on servermeta(app, sid); begin") ||
+        sqlite3_prepare_v2(d, "insert into servermeta values (?,?,?,?)", -1, &meta, 0) != SQLITE_OK ||
         sqlite3_prepare_v2(d, "insert into servertable(id, filename, fileurl, album, songer, style, name, albumsonger, year, track,"
                               " cd_num, time, Initial) values (?,?,?,?,?,?,?,?,?,?,?,?,?)", -1, &st, 0) != SQLITE_OK)
-        return sqlite3_close(d), -1;
-    for (int i = 0; i < n; ++i) import_app(d, st, ids[i], CAT_ID_BASE + (unsigned)i * CAT_APP_SPAN);
-    sqlite3_finalize(st);
+        return sqlite3_finalize(meta), sqlite3_close(d), -1;
+    memcpy(cat_ids, ids, sizeof ids), cat_n = n;
+    for (int i = 0; i < n; ++i) {
+        import_app(d, st, meta, ids[i], CAT_ID_BASE + (unsigned)i * CAT_APP_SPAN);
+        avail_at[i] = apply_avail(d, i, 0); /* the whole file again: the catalogue's paths, then its lines */
+    }
+    sqlite3_finalize(st), sqlite3_finalize(meta);
     int ok = !exec_sql(d, "commit");
     if (ok) dups(d); /* after the commit: an attach cannot be made inside a transaction */
     sqlite3_close(d);
-    if (!ok || rename(tmp, final)) return -1;
+    if (!ok || rename(tmp, final)) return cat_n = 0, -1; /* the old file's slots are not known: its lines wait */
     return 0;
 }
 
@@ -627,7 +723,10 @@ int main(int argc, char **argv) {
         if (wrote) run_after();
         again = 0;
         if (once) break;
-        sleep(LOOK_S); /* a signal ends the sleep early */
+        for (int s = 0; s < LOOK_S && !again && !stopping; ++s) { /* a signal ends a sleep early */
+            sleep(1);
+            if (mounted) look_avail();
+        }
     }
     return 0;
 }

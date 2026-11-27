@@ -85,6 +85,7 @@ static struct {
     char row_url[1024];          /* a played-as-paths song's library row's fileurl, "" with none */
     char **paths;                /* a server list's answer: the app's m3u, played as paths in place of ids (np of them) */
     int np;
+    int offline;                 /* the list played by q2playd itself: its server rows by their offline copies */
     unsigned seq;                /* moves with every change of what is written */
 } q = {.volume = 24};
 
@@ -95,11 +96,29 @@ static unsigned now_written_seq = ~0u;
 
 #define CAT_ID_BASE 0x40000000 /* server rows' ids (q2libd, patch/catalogue.c) */
 
+/* A server row's offline copy (servermeta's local, docs/libd.md#offline-copies) into out: 1 with one */
+static int copy_of(int id, char *out, size_t room) {
+    sqlite3 *db;
+    sqlite3_stmt *st;
+    int ok = 0;
+    if (sqlite3_open_v2(cat_path, &db, SQLITE_OPEN_READONLY, 0) == SQLITE_OK &&
+        sqlite3_prepare_v2(db, "select local from servermeta where id = ? and local is not null", -1, &st, 0) == SQLITE_OK) {
+        sqlite3_bind_int(st, 1, id);
+        if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_text(st, 0))
+            snprintf(out, room, "%s", (const char *)sqlite3_column_text(st, 0)), ok = 1;
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return ok;
+}
+
+/* id's row into q: its path, title, artist and album. In a list played offline a server row's path is its copy's, and
+ * row_url its own fileurl (its cover's). */
 static int song_lookup(int id) {
     sqlite3 *db;
     sqlite3_stmt *st;
     int ok = 0, server = (unsigned)id >= CAT_ID_BASE;
-    q.title[0] = q.artist[0] = q.album[0] = q.file[0] = 0;
+    q.title[0] = q.artist[0] = q.album[0] = q.file[0] = q.row_url[0] = 0;
     if (sqlite3_open_v2(server ? cat_path : db_path, &db, SQLITE_OPEN_READONLY, 0) != SQLITE_OK) {
         logf_("cannot read %s", server ? cat_path : db_path);
         sqlite3_close(db);
@@ -119,6 +138,9 @@ static int song_lookup(int id) {
         sqlite3_finalize(st);
     }
     sqlite3_close(db);
+    char copy[1024];
+    if (ok && server && q.offline && copy_of(id, copy, sizeof copy))
+        snprintf(q.row_url, sizeof q.row_url, "%s", q.file), snprintf(q.file, sizeof q.file, "%s", copy);
     return ok;
 }
 
@@ -235,14 +257,17 @@ static int row_of(const char *db_file, const char *sql, const char *arg) {
     return ok;
 }
 
-/* A played-as-paths song: its card row's title, artist and album; a Stream Cache copy's its server row's; else the
- * file's name as the title. */
+/* A played-as-paths song: its card row's title, artist and album; an offline copy's (servermeta's local) or a Stream
+ * Cache copy's (by the sid in its name) its server row's; else the file's name as the title. */
 static int path_lookup(int at) {
     const char *p = q.paths[at], *base = strrchr(p, '/');
     char app[64], sid[128], like[300];
     snprintf(q.file, sizeof q.file, "%s", p);
     q.row_url[0] = 0;
     if (row_of(db_path, "select name, songer, album, fileurl from songtable where fileurl = ?1", p)) return 1;
+    if (row_of(cat_path, "select s.name, s.songer, s.album, s.fileurl from servertable s join servermeta m on m.id = s.id"
+                         " where m.local = ?1", p))
+        return 1;
     if (stream_sid(p, app, sizeof app, sid, sizeof sid)) {
         snprintf(like, sizeof like, "/mnt/mmc/.%s/cat/%%/%s.%%", app, sid);
         if (row_of(cat_path, "select name, songer, album, fileurl from servertable where fileurl like ?1", like)) return 1;
@@ -259,7 +284,7 @@ static int start_from(int at, int ss) {
         if (q.paths ? path_lookup(at) : song_lookup(q.ids[q.order[at]])) {
             int cut = q.loaded;
             send_song(cut ? "set-nexturl" : "set-songurl", q.file, ss);
-            set_cover(q.paths ? -1 : q.ids[q.order[at]], q.paths ? q.row_url : q.file);
+            set_cover(q.paths ? -1 : q.ids[q.order[at]], q.paths || *q.row_url ? q.row_url : q.file);
             q.expect_cut = cut;
             q.loaded = 1, q.state = PLAYING, q.pos_ms = ss * 1000, q.len_s = 0;
             ++q.seq;
@@ -278,7 +303,7 @@ static int start_at(int at) { return start_from(at, 0); }
  * aside meanwhile, as it was, and given back when the source ends. holder is the client's slot in cl[]. */
 static struct {
     int on, holder;
-    int ids[QUEUE_MAX], order[QUEUE_MAX], n, at, shuffle, state, pos_ms, len_s;
+    int ids[QUEUE_MAX], order[QUEUE_MAX], n, at, shuffle, offline, state, pos_ms, len_s;
     char **paths;
     int np;
 } src;
@@ -498,10 +523,11 @@ static void output_set(int w, int s) {
  * chosen song's place in the list) and a path a line in play order (a server row's fileurl, a card file's path), written whole, while the app listens
  * (/tmp/q2-<id>.browse.sock). Its answer is /tmp/q2-<id>.play, "<seq> <m3u>": the m3u's card paths (Stream Cache copies
  * for server songs) from the row at <start> on, played in place of the list. No answer within CATPLAY_WAIT_MS: the list
- * is played from its card rows alone. An app that is not listening is started first by q2pkgd (Q2PKG/1 start, the
- * launcher: docs/platform/packages.md#starting-and-stopping-q2pkg1), and the catplay written once its socket is there
- * (an app takes a .catplay there at its start as one answered); q2pkgd refusing, or no socket within CATPLAY_START_MS,
- * and the card rows alone play. */
+ * is played offline, its card rows and its server rows by their offline copies (servermeta, docs/playd.md#offline-copies).
+ * An app that is not listening is started first by q2pkgd (Q2PKG/1 start, the launcher:
+ * docs/platform/packages.md#starting-and-stopping-q2pkg1), and the catplay written once its socket is there (an app
+ * takes a .catplay there at its start as one answered); q2pkgd refusing, or no socket within CATPLAY_START_MS, and the
+ * list is played offline. An app whose state says server=down is handed nothing: its list is played offline at once. */
 #define CATPLAY_WAIT_MS 4000
 #define CATPLAY_START_MS 15000 /* an app started for a catplay has this long to listen (today's Vamp's catalogue.c) */
 #define PKG_ASK_MS 3000        /* q2pkgd's answer to a start, waited for in the loop */
@@ -519,17 +545,21 @@ static void read_small(const char *p, char *out, size_t room) {
     out[n] = 0;
 }
 
-/* the card rows of the queue alone, from the first at or after the one asked for (at) */
+/* the queue as q2playd plays it itself: its card rows and the server rows with an offline copy, from the first of them
+ * at or after the one asked for (at), as the firmware's cat_offline */
 static int play_offline(int at) {
-    int n = 0, start = -1;
-    for (int i = 0; i < q.n; ++i)
-        if ((unsigned)q.ids[q.order[i]] < CAT_ID_BASE) {
+    int n = 0, start = -1, copies = 0;
+    char copy[1024];
+    for (int i = 0; i < q.n; ++i) {
+        int server = (unsigned)q.ids[q.order[i]] >= CAT_ID_BASE;
+        if (!server || copy_of(q.ids[q.order[i]], copy, sizeof copy)) {
             if (i >= at && start < 0) start = n;
-            q.order[n++] = q.order[i];
+            q.order[n++] = q.order[i], copies += server;
         }
-    q.n = n;
-    logf_("server songs left out: %d card songs to play", n);
-    return n && start >= 0 ? start_at(start) : -1;
+    }
+    q.n = n, q.offline = 1;
+    logf_("the list played offline: %d songs, %d of them offline copies", n, copies);
+    return n ? start_at(start < 0 ? 0 : start) : -1;
 }
 
 /* the app of a server row's path, /mnt/mmc/.<id>/cat/... */
@@ -566,7 +596,7 @@ static int pkg_start(const char *app) {
     return 0;
 }
 
-/* the catplay written for cp.app: 0, or the card rows alone played */
+/* the catplay written for cp.app: 0, or the list played offline */
 static int catplay_write(void) {
     char tmp[300], dst[300], play[300];
     snprintf(tmp, sizeof tmp, "/tmp/q2-%s.catplay.q2playd", cp.app), snprintf(dst, sizeof dst, "/tmp/q2-%s.catplay", cp.app);
@@ -580,6 +610,36 @@ static int catplay_write(void) {
     cp.starting = 0, cp.until = now_ms() + CATPLAY_WAIT_MS;
     logf_("list handed to %s (catplay %u)", cp.app, cp.seq);
     return 0;
+}
+
+/* the app's /tmp/q2-<id>.state says server=down (docs/server-library.md: its server is gone) */
+static int server_down(const char *app) {
+    char p[300], s[600];
+    snprintf(p, sizeof p, "/tmp/q2-%s.state", app);
+    read_small(path(p), s, sizeof s);
+    for (char *l = s; l; l = strchr(l, '\n') ? strchr(l, '\n') + 1 : 0)
+        if (!strncmp(l, "server=down", 11) && (!l[11] || l[11] == '\n' || l[11] == '\r')) return 1;
+    return 0;
+}
+
+/* whether a play from ids' at'th song must be refused: a server song with no offline copy while its app's server is
+ * down (the firmware's "Not available offline"); what plays goes on */
+static int unavailable(const int *ids, int at) {
+    sqlite3 *db;
+    sqlite3_stmt *st;
+    char url[1024] = "", app[64], copy[1024];
+    if ((unsigned)ids[at] < CAT_ID_BASE) return 0;
+    if (sqlite3_open_v2(cat_path, &db, SQLITE_OPEN_READONLY, 0) == SQLITE_OK &&
+        sqlite3_prepare_v2(db, "select fileurl from servertable where id = ?", -1, &st, 0) == SQLITE_OK) {
+        sqlite3_bind_int(st, 1, ids[at]);
+        if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_text(st, 0))
+            snprintf(url, sizeof url, "%s", (const char *)sqlite3_column_text(st, 0));
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    if (!*url || app_of(url, app, sizeof app) || !server_down(app) || copy_of(ids[at], copy, sizeof copy)) return 0;
+    logf_("song %d is not available offline: %s's server is down", ids[at], app);
+    return 1;
 }
 
 static int listening(const char *app) {
@@ -596,6 +656,10 @@ static int catplay(int at) {
         if ((unsigned)q.ids[q.order[i]] >= CAT_ID_BASE && song_lookup(q.ids[q.order[i]]) && !app_of(q.file, app, sizeof app)) server = 1;
     if (!server) return 0;
     snprintf(cp.app, sizeof cp.app, "%s", app);
+    if (server_down(app)) {
+        logf_("%s's server is down", app);
+        return play_offline(at), 1;
+    }
     cp.on = 1, cp.at = at;
     if (listening(app)) return catplay_write(), 1;
     if (pkg_start(app)) {
@@ -669,7 +733,7 @@ static int play_ids(const int *ids, int n, int at, int shuffle) {
         }
         at = 0;
     }
-    free_paths(), cp.on = cp.starting = 0;
+    free_paths(), cp.on = cp.starting = 0, q.offline = 0;
     if (catplay(at)) return 0;
     return start_at(at);
 }
@@ -692,6 +756,7 @@ static int command(const char *verb, const int *ids, int n_ids) {
     if (sscanf(verb, "play %d %d %d", &a, &b, &c) == 3) {
         if (!ids) n_ids = read_list(pending_ids), ids = pending_ids;
         if (c != n_ids) logf_("play names %d songs, the list holds %d", c, n_ids);
+        if (n_ids > 0 && a >= 0 && a < n_ids && unavailable(ids, a)) return -1;
         if (n_ids > 0 && a >= 0 && a < n_ids && src.on) source_drop();
         return play_ids(ids, n_ids, a, b);
     }
@@ -852,13 +917,13 @@ static void source_end(const char *why) {
     if (why) tell_holder(why);
     src.on = 0;
     memcpy(q.ids, src.ids, (size_t)src.n * sizeof *q.ids), memcpy(q.order, src.order, (size_t)src.n * sizeof *q.order);
-    q.n = src.n, q.at = src.at, q.shuffle = src.shuffle, q.paths = src.paths, q.np = src.np, src.paths = 0, src.np = 0;
+    q.n = src.n, q.at = src.at, q.shuffle = src.shuffle, q.offline = src.offline, q.paths = src.paths, q.np = src.np, src.paths = 0, src.np = 0;
     q.loaded = 0, q.errors = 0;
     q.state = src.state == STOPPED || (why && !strcmp(why, "stop")) || !q.n ? STOPPED : PAUSED;
     q.pos_ms = q.state == PAUSED ? src.pos_ms : 0, q.len_s = q.state == PAUSED ? src.len_s : 0;
     q.title[0] = q.artist[0] = q.album[0] = q.file[0] = q.row_url[0] = 0;
     if (q.n && (q.paths ? path_lookup(q.at) : song_lookup(q.ids[q.order[q.at]])))
-        set_cover(q.paths ? -1 : q.ids[q.order[q.at]], q.paths ? q.row_url : q.file);
+        set_cover(q.paths ? -1 : q.ids[q.order[q.at]], q.paths || *q.row_url ? q.row_url : q.file);
     else set_cover(-1, "");
     ++q.seq;
 }
@@ -890,7 +955,7 @@ static int source_take(int slot, const char *args) {
     }
     if (!src.on) { /* the queue put aside as it is */
         memcpy(src.ids, q.ids, (size_t)q.n * sizeof *q.ids), memcpy(src.order, q.order, (size_t)q.n * sizeof *q.order);
-        src.n = q.n, src.at = q.at, src.shuffle = q.shuffle, src.state = q.state, src.pos_ms = q.pos_ms, src.len_s = q.len_s;
+        src.n = q.n, src.at = q.at, src.shuffle = q.shuffle, src.offline = q.offline, src.state = q.state, src.pos_ms = q.pos_ms, src.len_s = q.len_s;
         src.paths = q.paths, src.np = q.np, q.paths = 0, q.np = 0;
     } else if (src.holder != slot) tell_holder("taken");
     src.on = 1, src.holder = slot, cp.on = 0;
