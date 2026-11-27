@@ -25,13 +25,12 @@ The gadget has stock's descriptors, learned from its `uac_device_config.sh`, so 
 
 ## Tests
 
-`python3 test/dacloop.py` (pytest) builds `q2dacloop` for this machine against its libasound and runs it between two of alsa-lib's file PCMs: the capture reads frames, each sample its own number, from a FIFO the test feeds in whole reads (a file PCM's short read leaves stale frames, which would look like a fault of the loop's), and the playback writes a file. What the computer sent arrives bit for bit after the 100 ms prebuffer at 96 kHz; a rate change from 44.1 to 192 kHz closes and opens again with a 200 ms prebuffer; a computer not streaming opens nothing; SIGTERM ends it. Copies without the prebuffer's write, without the rate's look or with one prebuffer size each fail it (`Q2DACLOOP_SOURCE`). `test/sysd.py`: `usb dac` stops the player, parks adb, binds the gadget with stock's attributes and starts the loop, and `usb storage` from there takes the loop down before the gadget and comes through adb's. `test/os_image.py`'s boot: the loop's service stays down at boot (`--perturb dac-up`, its `down` file gone, fails it).
+`python3 test/dacloop.py` (pytest) builds `q2dacloop` for this machine against its libasound and runs it between two of alsa-lib's file PCMs: the capture reads frames, each sample its own number, from a FIFO the test feeds in whole reads (a file PCM's short read leaves stale frames, which would look like a fault of the loop's), and the playback writes a file. What the computer sent arrives bit for bit after the 100 ms prebuffer at 96 kHz; a rate change from 44.1 to 192 kHz closes and opens again with a 200 ms prebuffer; a computer not streaming opens nothing; SIGTERM ends it. Copies without the prebuffer's write, without the rate's look or with one prebuffer size each fail it (`Q2DACLOOP_SOURCE`). `test/sysd.py`: `usb dac` stops the player, parks adb, binds the gadget with stock's attributes and starts the loop, and `usb storage` from there takes the loop down before the gadget and comes through adb's; a cable in with USB Audio remembered (`USBPICK=3`) starts the mode and the cable out ends it ([q2sysd: The cable](sysd.md#the-cable)). `test/os_image.py`'s boot: the loop's service stays down at boot (`--perturb dac-up`, its `down` file gone, fails it).
 
 ## What is missing
 
 - **Holding the fill level**: stock tunes the gadget's `Capture Pitch 1000000` control once a second to keep its ring near the prebuffer's target, so the computer's clock and the DAC's never drift apart far enough to overrun or underrun. Here a drift ends in an xrun, recovered.
 - **DSD**: stock reads the gadget's `Capture Bits` (1 is DSD) and tells the DAC its mode through `/dev/shanling_dac`. Here every stream is PCM.
-- **Leaving the mode at an unplug**: q2sysd changes modes on Q2SYS/1's word alone; the cable's events ([usb](usb.md)) are not followed yet.
 
 ## Needs a Q2
 

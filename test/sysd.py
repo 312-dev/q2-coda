@@ -382,5 +382,127 @@ def test_not_a_car_is_adb_once_q2car_has_removed_its_gadget(run):
     assert read(root, '/tools.log').splitlines() == ['q2car start'], 'q2car stopped itself: no stop sent'
 
 
+
+# ---- the cable (docs/sysd.md#the-cable): q2sysd follows ac/online and the USB setting, [Q2POD] USBPICK ----
+
+def cable(root, on):
+    put(root, '/sys/class/power_supply/ac/online', f'{int(on)}\n')
+
+
+def until(fn, timeout=3.0):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        got = fn()
+        if got:
+            return got
+        time.sleep(0.05)
+    return fn()
+
+
+def mode(root):
+    try:
+        a = Api(root)
+    except ConnectionRefusedError:  # bound and not yet listening: q2sysd is still starting
+        return ''
+    a.line()
+    a.say('usb')
+    got = a.line()
+    a.s.close()
+    return got
+
+
+def tools_log(root):
+    p = root/'tools.log'
+    return p.read_text().splitlines() if p.exists() else []
+
+
+def test_a_cable_on_automatic_shows_the_iphone_and_a_computer_gets_the_card(run):
+    root, _ = run
+    usb_tree(root)
+    (root/'tmp').mkdir(exist_ok=True)
+    cable(root, 1)
+    assert until(lambda: 'q2car start' in tools_log(root), 2.0), 'a cable in on Automatic (no USBPICK) is the iPhone within 2 s'
+    assert mode(root) == 'usb car'
+    put(root, '/tmp/q2car.state', 'verdict=computer\ndown=1\n')
+    assert until(lambda: mode(root) == 'usb storage'), 'not a car, a computer: Transfer Files'
+    assert tools_log(root)[1:4] == ['sync ', 'umount /mnt/mmc', 'q2adb-gadget park']
+    cable(root, 0)
+    assert until(lambda: mode(root) == 'usb adb'), 'the cable out: adb again'
+    assert tools_log(root)[-2:] == ['mount /dev/mmcblk4p1 /mnt/mmc', 'q2adb-gadget unpark']
+
+
+def test_a_car_keeps_the_iphone_until_the_cable_is_out(run):
+    root, _ = run
+    usb_tree(root)
+    (root/'tmp').mkdir(exist_ok=True)
+    put(root, '/mnt/data/config.ini', '[Q2POD]\nUSBPICK=0\n')
+    cable(root, 1)
+    assert until(lambda: 'q2car start' in tools_log(root), 2.0)
+    put(root, '/tmp/q2car.state', 'verdict=car\n')
+    time.sleep(1.2)
+    assert mode(root) == 'usb car'
+    cable(root, 0)
+    assert until(lambda: mode(root) == 'usb adb')
+    assert tools_log(root) == ['q2car start', 'q2car stop']
+
+
+def test_a_charger_on_automatic_only_charges(run):
+    root, _ = run
+    usb_tree(root)
+    (root/'tmp').mkdir(exist_ok=True)
+    cable(root, 1)
+    assert until(lambda: 'q2car start' in tools_log(root), 2.0)
+    put(root, '/tmp/q2car.state', 'verdict=silent\ndown=1\n')
+    assert until(lambda: mode(root) == 'usb adb')
+    time.sleep(0.5)
+    assert tools_log(root) == ['q2car start'], 'nothing answered: the card stays the Q2\'s'
+
+
+@pytest.mark.parametrize('pick, want, log', [
+    (2, 'usb storage', ['sync ', 'umount /mnt/mmc', 'q2adb-gadget park']),
+    (3, 'usb dac', ['q2adb-gadget park', 'sv up /etc/sv/q2dacloop']),
+])
+def test_a_remembered_mode_at_the_cable_and_adb_at_its_end(run, pick, want, log):
+    root, _ = run
+    usb_tree(root)
+    put(root, '/mnt/data/config.ini', f'[SYSSET]\nUSBPICK=1\n[Q2POD]\nUSBPICK={pick}\n')
+    cable(root, 1)
+    assert until(lambda: mode(root) == want), f'USBPICK={pick}: {want} at the cable'
+    assert tools_log(root) == log
+    cable(root, 0)
+    assert until(lambda: mode(root) == 'usb adb')
+    assert 'q2adb-gadget unpark' in tools_log(root)
+
+
+@pytest.mark.parametrize('pick', [1, 4, 5])
+def test_charge_only_debugging_and_ask_leave_the_usb_mode(run, pick):
+    root, _ = run
+    usb_tree(root)
+    put(root, '/mnt/data/config.ini', f'[Q2POD]\nUSBPICK={pick}\n')
+    a = Api(root)
+    a.line()
+    a.say('watch')
+    assert a.line() == 'ok'
+    cable(root, 1)
+    got = [a.line() for _ in range(2 if pick == 5 else 1)]
+    assert got[0] == 'battery level=73 mv=3912 status=Discharging cable=1', 'the cable told at once'
+    if pick == 5:
+        assert got[1] == 'usb ask', 'Ask Every Time: the chooser is the UI\'s'
+    time.sleep(1.5)
+    assert mode(root) == 'usb adb' and tools_log(root) == []
+
+
+def test_a_cable_in_at_the_start_is_followed(binary, tree, tools):
+    usb_tree(tree)
+    (tree/'tmp').mkdir(exist_ok=True)
+    put(tree, '/mnt/data/config.ini', '[Q2POD]\nUSBPICK=3\n')
+    cable(tree, 1)
+    p = subprocess.Popen([str(binary), '--root', str(tree)], stderr=subprocess.PIPE)
+    try:
+        assert until(lambda: (tree/'run/vamp/sys.sock').exists() and mode(tree) == 'usb dac'), 'started with a cable in'
+    finally:
+        p.terminate()
+        p.wait(5)
+
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-q', '-p', 'no:cacheprovider']))

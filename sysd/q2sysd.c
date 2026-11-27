@@ -19,6 +19,9 @@
  *     service up to carry its audio to the DAC, docs/dacloop.md) and car (Car Audio: today's Vamp's q2car shows the
  *     host an iPhone and q2-iap decides whether it is a car, docs/car-audio-os.md; anything else is back to adb), and
  *     back.
+ *   - The cable (docs/sysd.md#the-cable): ac/online read every CABLE_MS; a cable in starts the mode the USB setting
+ *     ([Q2POD] USBPICK, the payload's, patch/usb_ui.c) names, Automatic's iPhone ending in storage for a computer,
+ *     and a cable out is adb again.
  *   - Standby: the screen off, the music paused, Wi-Fi off, then the kernel's suspend (/sys/power/state mem) until a
  *     wake source (the power key) resumes it; then the screen on.
  *
@@ -54,6 +57,7 @@
 #define CHARGE_STOP 80   /* Charge Limit's stop and resume levels (the payload's CHARGE_STOP, CHARGE_RESUME) */
 #define CHARGE_RESUME 75
 #define PE22 150         /* the charger's active-low enable: port E (gpiochip4, base 128) line 22 */
+#define CABLE_MS 1000    /* ac/online read this often: the cable's in and out (no event reaches userspace, docs/usb.md) */
 
 static char root[256], poweroff_cmd[256] = "/sbin/poweroff";
 
@@ -278,6 +282,7 @@ enum { USB_ADB, USB_STORAGE, USB_DAC, USB_CAR };
 static int usb_mode;      /* USB_ADB, or the card the computer's, the Q2 its DAC, or an iPhone for a car */
 static const char *const USB_NAMES[] = {"adb", "storage", "dac", "car"};
 static int car_told;      /* the car's verdict told to watchers */
+static int car_auto;      /* the iPhone shown for Automatic at a cable: a computer then gets the card, not adb */
 static char card_dev[64]; /* the card's block device while it is shared, as /proc/mounts named it */
 
 static int find_card(char *dev, size_t room) {
@@ -441,13 +446,14 @@ static int usb_set_car(void) {
     if (usb_mode != USB_ADB) usb_set_adb();
     ask("/run/vamp/play.sock", "Q2PLAY/1", "pause"); /* the song moves to the car's PCM itself if it is a car; nothing jumps */
     if (run_tool("/usr/bin/q2car start")) return say("q2car did not start"), -1;
-    usb_mode = USB_CAR, car_told = 0;
+    usb_mode = USB_CAR, car_told = 0, car_auto = 0;
     say("USB: shown as an iPhone, waiting for q2-iap's verdict");
     tell("usb car");
     return 0;
 }
 
-/* while the iPhone is shown, twice a second: a car stays; anything else, once q2car has removed its gadget, is adb */
+/* while the iPhone is shown, twice a second: a car stays; anything else, once q2car has removed its gadget, is adb,
+ * except a computer while it was shown for Automatic, which gets the card (Transfer Files) as the payload's does */
 static void car_poll(void) {
     char raw[512] = "", *v;
     FILE *f = fopen(path("/tmp/q2car.state"), "r");
@@ -459,8 +465,10 @@ static void car_poll(void) {
     if (!strncmp(v, "car", 3) && (v[3] == '\n' || !v[3])) {
         if (!car_told) say("USB: a car"), tell("car"), car_told = 1;
     } else if (strstr(raw, "down=1")) {
-        say("USB: not a car (%.*s): adb", (int)strcspn(v, "\n"), v);
+        say("USB: not a car (%.*s)", (int)strcspn(v, "\n"), v);
         usb_mode = USB_ADB;
+        if (car_auto && !strncmp(v, "computer", 8) && !usb_set_storage()) return;
+        say("USB: adb");
         tell("usb adb");
     }
 }
@@ -486,6 +494,35 @@ static int usb_set_adb(void) {
     say("USB: adb");
     tell("usb adb");
     return 0;
+}
+
+/* ---- the cable ---- */
+
+/* The USB setting's values, [Q2POD] USBPICK as the payload's USB picker saves them (patch/usb_ui.c); anything else is
+ * Automatic. USB Debugging is adb, which is the mode with no cable already. */
+enum { PICK_AUTO, PICK_CHARGE, PICK_FILES, PICK_AUDIO, PICK_DEBUG, PICK_ASK, PICKS };
+static int cable_in = -1; /* ac/online at the last read: -1 before the first, so a cable in at the start is a plug */
+
+static void cable_poll(void) {
+    int v;
+    if (read_int(path("/sys/class/power_supply/ac/online"), &v)) return;
+    v = v != 0;
+    if (v == cable_in) return;
+    cable_in = v;
+    read_battery(); /* cable= told at once */
+    if (!v) {
+        say("cable out");
+        usb_set_adb();
+        return;
+    }
+    int pick = config_int("Q2POD", "USBPICK", PICK_AUTO);
+    if (pick < 0 || pick >= PICKS) pick = PICK_AUTO;
+    say("cable in, USBPICK %d", pick);
+    if (pick == PICK_AUTO) {
+        if (!usb_set_car()) car_auto = 1;
+    } else if (pick == PICK_FILES) usb_set_storage();
+    else if (pick == PICK_AUDIO) usb_set_dac();
+    else if (pick == PICK_ASK) tell("usb ask"); /* the chooser is the UI's; until it answers, Charge Only */
 }
 
 /* ---- Standby ---- */
@@ -680,7 +717,8 @@ int main(int argc, char **argv) {
     open_inputs();
     read_battery();
     say("%d input device(s) with the power key, backlight %s, screen %s", n_in, backlight[0] ? backlight : "none", screen_on ? "on" : "off");
-    unsigned long long battery_at = now_ms(), scanned_at = now_ms();
+    cable_poll();
+    unsigned long long battery_at = now_ms(), scanned_at = now_ms(), cable_at = now_ms();
     while (!stopping) {
         struct pollfd p[1 + INPUTS + CLIENTS];
         int n = 0;
@@ -694,6 +732,7 @@ int main(int argc, char **argv) {
             if (hold < wait) wait = hold;
         }
         if (!n_in && (long long)(scanned_at + RESCAN_MS) - (long long)t < wait) wait = (long long)(scanned_at + RESCAN_MS) - (long long)t;
+        if ((long long)(cable_at + CABLE_MS) - (long long)t < wait) wait = (long long)(cable_at + CABLE_MS) - (long long)t;
         if (usb_mode == USB_CAR && wait > 500) wait = 500;
         if (wait < 0) wait = 0;
         if (poll(p, (nfds_t)n, (int)wait) < 0 && errno != EINTR) break;
@@ -711,6 +750,7 @@ int main(int argc, char **argv) {
         if (pressed_at && t >= pressed_at + HOLD_MS) power_off();
         if (t >= battery_at + BATTERY_S * 1000ull) read_battery(), battery_at = t;
         if (!n_in && t >= scanned_at + RESCAN_MS) open_inputs(), scanned_at = t;
+        if (t >= cable_at + CABLE_MS) cable_poll(), cable_at = t;
         if (usb_mode == USB_CAR) car_poll();
     }
     unlink(path("/run/vamp/sys.sock"));
