@@ -867,7 +867,10 @@ def test_each_lease_starts_with_the_settings_and_per_run_state_of_the_data_fixtu
     data = emu_pool.copy_dir(1)/'state/data'
     card_tree(data, {'config.ini': '[SYSSET]\nBLUETOOTH=1\nLIGHTMODE=1\n[IPOD]\nKEEPLIT=0\nSONGLENGTH=1\n',
                      'memoryfile': 'old', 'q2-state': 'x', 'ringnav-plays': 'x', 'ringnav-queue': 'x', 'ringnav-ratings': 'x',
-                     'wpa_supplicant.conf': 'wifi', 'q2-defaults': '1\n', 'coda-rc/x': 'pool'})
+                     'wpa_supplicant.conf': 'wifi', 'q2-defaults': '1\n', 'coda-rc/x': 'pool',
+                     # a lease that tried q2ui (docs/ui-rewrite.md#cutover): left there, the next lease's demo hands
+                     # its screen to q2ui and whatever drives demo finds no Home (the smoke test did, 2026-11-27)
+                     'ui-target': 'q2ui\n', 'q2ui.args': '--input /mnt/data/q2ui-input\n', 'q2ui-stats.json': '{}'})
     assert emu_pool.get('/b', 'w', 1, wait=False, avoid=(2,)) == 1
     assert (data/'config.ini').read_text() == clean                     # settings back to the fixture's
     assert os.access(data/'config.ini', os.W_OK) and (data/'config.ini').stat().st_ino != (fx/'config.ini').stat().st_ino
