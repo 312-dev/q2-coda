@@ -16,6 +16,7 @@ usage: vamp [-t TARGET] COMMAND [ARGS]
   key NAME [MS] | wheel N [--step-ms MS] | tap X Y | swipe X1 Y1 X2 Y2 [MS]
   state | wake | devices | events N [S] | reboot [--wait] | prof S [--all] [--build DIR]
   ui-push BINARY                        a new q2ui running at once: pushed, mounted over /usr/bin/q2ui, SIGHUP
+  recovery-stage DIR|--forget           the card's recovery-update made DIR's (stock's), and put back after each install
   pubkey                                this computer's key, an adb_keys line
 
 TARGET (or VAMP_TARGET) is a name `find` lists, HOST or HOST:PORT; without either, the Q2 `connect`
@@ -1158,6 +1159,73 @@ def ui_push(dev, binary, path=UI_BIN, staged=UI_STAGED, wait=UI_WAIT_S, machine=
     raise AdbError(f'no q2ui running {want[:12]} within {wait} s of SIGHUP (`vamp log` shows why)')
 
 
+RECOVERY_DIR = '/mnt/mmc/recovery-update'  # what the recovery boots from with Previous held at power-on (README)
+RECOVERY_FILES = ('xImage', 'rootfs.squashfs')
+CONFIG = STATE.parent / 'config.json'
+
+
+def config_get(name):
+    try:
+        return json.loads(CONFIG.read_text()).get(name)
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def config_set(name, value):
+    try:
+        cfg = json.loads(CONFIG.read_text())
+    except (FileNotFoundError, ValueError):
+        cfg = {}
+    if value is None:
+        cfg.pop(name, None)
+    else:
+        cfg[name] = value
+    CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG.write_text(json.dumps(cfg, indent=1) + '\n')
+
+
+def recovery_files(local):
+    """[(name, path, sha256)] of a recovery-update folder: its kernel and root filesystem, both there."""
+    local = pathlib.Path(local)
+    missing = [n for n in RECOVERY_FILES if not (local / n).is_file()]
+    if missing:
+        raise ValueError(f'{local} is not a recovery-update folder: no {" or ".join(missing)} in it')
+    return [(n, local / n, hashlib.sha256((local / n).read_bytes()).hexdigest()) for n in RECOVERY_FILES]
+
+
+def restage(dev, keep, rc, flags):
+    """After vamp install: the kept recovery-update put back when the install ran and finished (exit 0, the Q2
+    back); a dry run unpacks nothing. rc unchanged, or 1 when the put-back failed."""
+    if not keep or rc or '--dry-run' in flags:
+        return rc
+    if '--no-wait' in flags:
+        print(f'vamp: {RECOVERY_DIR} now holds the new build\'s images; once the Q2 is back: vamp recovery-stage {keep}',
+              file=sys.stderr)
+        return rc
+    try:
+        recovery_stage(dev, keep)
+    except (OSError, AdbError, ValueError) as e:
+        print(f'vamp: installed, but {RECOVERY_DIR} could not be put back ({e}): vamp recovery-stage {keep}',
+              file=sys.stderr)
+        return 1
+    return rc
+
+
+def recovery_stage(dev, local):
+    """The card's recovery-update made local's again, each file through .part and its SHA-256 checked on the Q2.
+    An install unpacks its update.tar on the card, its own recovery-update with it, so the folder the recovery
+    boots when the Q2 will not start is the last build installed until this puts the kept one back."""
+    files = recovery_files(local)
+    q2remote.card_mounted()
+    for name, path, sha in files:
+        remote = push(dev, path, f'{RECOVERY_DIR}/{name}')
+        got = dev.exec_out(f'sha256sum {shlex.quote(remote)}', 300).split()[:1]
+        if got != [sha.encode()]:
+            raise AdbError(f'{remote} on the Q2 is not {path} (sha256 {got[0].decode() if got else "unreadable"})')
+    dev.exec_out('sync', 60)
+    print(f'{RECOVERY_DIR}: {", ".join(n for n, _, _ in files)} from {local}, checked')
+
+
 class FlashAdb:
     """tools/q2flash.py's adb, over vamp: run('push', LOCAL, REMOTE), sh(COMMAND) and state()."""
     def __init__(self, dev):
@@ -1255,6 +1323,16 @@ def main(argv=None):  # pragma: no mutate block
     if cmd == 'ui-push' and len(a) == 1:
         ui_push(dev, a[0])
         return 0
+    if cmd == 'recovery-stage' and len(a) == 1:
+        if a[0] == '--forget':
+            config_set('recovery', None)
+            print('vamp install leaves the card\'s recovery-update as the update leaves it')
+            return 0
+        local = str(pathlib.Path(a[0]).resolve())
+        recovery_stage(dev, local)
+        config_set('recovery', local)
+        print('remembered: vamp install puts it back after each install')
+        return 0
     if cmd == 'install' and a:
         import q2flash
         flags = set(a[1:])
@@ -1265,11 +1343,15 @@ def main(argv=None):  # pragma: no mutate block
             flags -= {'--min-battery', a[i + 1]}
         if flags - {'--dry-run', '--no-wait'}:
             raise ValueError('usage: vamp install UPDATE.TAR|BUILD [--dry-run] [--no-wait] [--min-battery N]')
+        keep = config_get('recovery')
+        if keep:
+            recovery_files(keep)  # a folder that has gone is said before anything is installed
         try:
-            return q2flash.flash(a[0], FlashAdb(dev), '--dry-run' in flags, minimum, '--no-wait' not in flags)
+            rc = q2flash.flash(a[0], FlashAdb(dev), '--dry-run' in flags, minimum, '--no-wait' not in flags)
         except q2flash.Refused as e:
             print(f'vamp: install refused: {e}', file=sys.stderr)
             return 1
+        return restage(dev, keep, rc, flags)
     if cmd in Q2REMOTE_COMMANDS:
         if cmd == 'shot' and '--adb' in a:
             raise ValueError('vamp shot always goes over adb: leave out --adb')

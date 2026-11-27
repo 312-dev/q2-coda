@@ -570,6 +570,15 @@ def tcp_checks(qemu, adbd):
                 rc = vamp.run_streamed(q, 'printf "a\\nb"; exit 3', out)
                 expect('vamp shell COMMAND: streamed, its status kept, its status line gone', (rc, out.getvalue()) == (3, b'a\nb'),
                        (rc, out.getvalue()))
+                kept = work/'recovery-update'
+                kept.mkdir()
+                (kept/'xImage').write_bytes(secrets.token_bytes(5000))
+                (kept/'rootfs.squashfs').write_bytes(secrets.token_bytes(90000))
+                (card/'recovery-update').mkdir()
+                (card/'recovery-update/xImage').write_bytes(b'the last build installed')
+                vamp.recovery_stage(q, kept)
+                expect('vamp recovery-stage: the card\'s recovery-update is the kept one again, through the card\'s mount',
+                       all((card/'recovery-update'/n).read_bytes() == (kept/n).read_bytes() for n in ('xImage', 'rootfs.squashfs')))
             finally:
                 q2remote.TRANSPORT = None
             body = secrets.token_bytes(300000)

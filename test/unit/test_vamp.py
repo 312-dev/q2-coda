@@ -1110,3 +1110,105 @@ def test_find_lists_usb_and_says_when_it_cannot_look(monkeypatch, capsys):
         raise ConnectionError('no libusb 1.0')
     monkeypatch.setattr(vamp, 'usb_devices', no_libusb)
     assert vamp.main(['find']) == 1 and 'USB not looked at: no libusb' in capsys.readouterr().err
+
+
+# ---- recovery-stage ----
+
+class FakeCard:
+    """The Q2's shell for recovery-stage: the card mounted or not (q2remote.card_mounted's mountpoint through
+    q2remote.run's wrapper, its script a stdin file), push's rename and size, sha256sum of what landed."""
+    def __init__(self, adbd, mounted=True, corrupt=None):
+        self.adbd, self.mounted, self.corrupt, self.seen = adbd, mounted, corrupt, []
+        for d in ('tmp', 'mnt/mmc/recovery-update'):
+            (adbd.root / d).mkdir(parents=True, exist_ok=True)
+        adbd.handler = self
+
+    def __call__(self, cmd):
+        self.seen.append(cmd)
+        if m := re.match(r'exec <(/tmp/vamp-in-[0-9a-f]{8}); rm -f \1\n', cmd):
+            script = self.adbd.path(m.group(1)).read_text()
+            return b'\n\0q2rc=%d\n' % (0 if self.mounted or 'mountpoint' not in script else 1)
+        if m := re.match(r"mv -f (\S+) (\S+) && sync && wc -c <\S+$", cmd):
+            os.replace(self.adbd.path(m.group(1)), self.adbd.path(m.group(2)))
+            return b'%d\n' % self.adbd.path(m.group(2)).stat().st_size
+        if m := re.match(r'sha256sum (\S+)$', cmd):
+            data = self.adbd.path(m.group(1)).read_bytes()
+            if self.corrupt and m.group(1).endswith(self.corrupt):
+                data += b'!'
+            return f'{hashlib.sha256(data).hexdigest()}  {m.group(1)}\n'.encode()
+        return b''
+
+
+@pytest.fixture
+def stock(tmp_path):
+    d = tmp_path / 'recovery-update'
+    d.mkdir()
+    (d / 'xImage').write_bytes(b'stock kernel' * 100)
+    (d / 'rootfs.squashfs').write_bytes(b'stock rootfs' * 1000)
+    return d
+
+
+def test_recovery_stage_puts_the_stock_folder_back(adbd, dev, stock, monkeypatch):
+    FakeCard(adbd)
+    monkeypatch.setattr(q2remote, 'TRANSPORT', dev)
+    vamp.recovery_stage(dev, stock)
+    for n in ('xImage', 'rootfs.squashfs'):
+        assert (adbd.root / 'mnt/mmc/recovery-update' / n).read_bytes() == (stock / n).read_bytes()
+
+
+def test_recovery_stage_refusals(adbd, dev, stock, tmp_path, monkeypatch):
+    monkeypatch.setattr(q2remote, 'TRANSPORT', dev)
+    (tmp_path / 'half').mkdir()
+    (tmp_path / 'half/xImage').write_bytes(b'k')
+    with pytest.raises(ValueError, match='no rootfs.squashfs'):
+        vamp.recovery_stage(dev, tmp_path / 'half')
+    card = FakeCard(adbd, mounted=False)
+    with pytest.raises(ValueError, match='USB storage has the card'):
+        vamp.recovery_stage(dev, stock)
+    assert not any(c.startswith('mv -f') for c in card.seen)  # nothing copied
+    FakeCard(adbd, corrupt='rootfs.squashfs')
+    with pytest.raises(vamp.AdbError, match='rootfs.squashfs on the Q2 is not'):
+        vamp.recovery_stage(dev, stock)
+
+
+def test_restage_after_install(adbd, dev, stock, monkeypatch, capsys):
+    monkeypatch.setattr(q2remote, 'TRANSPORT', dev)
+    monkeypatch.setattr(vamp, 'recovery_stage', lambda d, keep: pytest.fail('staged'))
+    assert vamp.restage(dev, None, 0, set()) == 0           # nothing kept
+    assert vamp.restage(dev, str(stock), 1, set()) == 1     # the install failed: leave the card alone
+    assert vamp.restage(dev, str(stock), 0, {'--dry-run'}) == 0  # a dry run unpacks nothing
+    assert vamp.restage(dev, str(stock), 0, {'--no-wait'}) == 0
+    assert f'vamp recovery-stage {stock}' in capsys.readouterr().err
+    staged = []
+    monkeypatch.setattr(vamp, 'recovery_stage', lambda d, keep: staged.append(keep))
+    assert vamp.restage(dev, str(stock), 0, set()) == 0 and staged == [str(stock)]
+
+    def fails(d, keep):
+        raise vamp.AdbError('card full')
+    monkeypatch.setattr(vamp, 'recovery_stage', fails)
+    assert vamp.restage(dev, str(stock), 0, set()) == 1 and 'could not be put back (card full)' in capsys.readouterr().err
+
+
+def test_recovery_stage_command_remembers_and_install_uses_it(adbd, stock, monkeypatch, tmp_path, capsys):
+    import q2flash
+    monkeypatch.setattr(vamp, 'STATE', tmp_path / 'cfg/target.json')
+    monkeypatch.setattr(vamp, 'CONFIG', tmp_path / 'cfg/config.json')
+    monkeypatch.setattr(vamp, 'load_key', lambda: KEY)
+    FakeCard(adbd)
+    t = f'127.0.0.1:{adbd.port}'
+    assert vamp.main(['-t', t, 'recovery-stage', str(stock)]) == 0
+    assert vamp.config_get('recovery') == str(stock.resolve())
+    calls = []
+    monkeypatch.setattr(q2flash, 'flash', lambda *a: calls.append(a) or 0)
+    staged = []
+    monkeypatch.setattr(vamp, 'recovery_stage', lambda d, keep: staged.append(keep))
+    assert vamp.main(['-t', t, 'install', 'u.tar']) == 0 and staged == [str(stock.resolve())]
+    (stock / 'xImage').unlink()
+    with pytest.raises(ValueError, match='no xImage'):  # said before anything is installed
+        vamp.main(['-t', t, 'install', 'u.tar'])
+    assert len(calls) == 1
+    assert vamp.main(['-t', t, 'recovery-stage', '--forget']) == 0 and vamp.config_get('recovery') is None
+    (tmp_path / 'cfg/config.json').write_text('{broken')
+    assert vamp.config_get('recovery') is None
+    vamp.config_set('recovery', '/x')
+    assert vamp.config_get('recovery') == '/x'
