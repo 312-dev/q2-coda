@@ -1281,7 +1281,7 @@ def reload(binary, work):
     r.rest()
     os.set_blocking(pipe[0], False)
     try:
-        said = os.read(pipe[0], 4096).decode().splitlines()
+        said = [s for s in os.read(pipe[0], 4096).decode().splitlines() if not s.startswith('click ')]  # its settings
     except BlockingIOError:
         said = []
     good &= check("after SIGHUP a Control Center switch still reaches demo down that pipe", said == ['set wifi 1'], str(said))
