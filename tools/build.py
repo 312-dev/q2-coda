@@ -2244,6 +2244,10 @@ FUNCTIONS = {
  'networkClearSsid': ('int', 'void'), 'networkGetSsidList': ('int', 'const char *'),
  # a password fit for a scan record's flags (wifi_action_connect's check): not 0 when it is
  'networkCheckSsidPassword': ('int', 'const char *, const char *'),
+ # q2ui's Wi-Fi page (wifi_flows.c): Search Again's search, its results read into a deque (wifi_showlist's), and a
+ # network row's next step by its record's index and a tap's x against the Forget's range (2 joined, 3 join, 4 password)
+ 'wifi_scan': ('int', 'void'), 'networkGetWifiResult': ('int', 'void *'),
+ 'check_wifinextaction': ('int', 'int, int, int, int'),
 }
 # Local stock routines in the SHA-256-pinned V1.36 executable.
 PRIVATE_FUNCTIONS = {

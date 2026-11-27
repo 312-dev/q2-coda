@@ -6,7 +6,7 @@
  *          [--text awtk] [--page home|songs|now|depth|gallery|card] [--stats FILE] [--bench] [--script FILE]
  *          [--trace FILE] [--clock HH:MM] [--state FILE] [--cmdq FIFO] [--ctl FD] [--playlist FILE]
  *          [--backlight DIR] [--ask FILE] [--now FILE] [--cover FILE] [--power DIR] [--wifi FILE]
- *          [--wireless FILE] [--told FILE] [--art DIR] [--config FILE] [--card DIR]
+ *          [--wireless FILE] [--told FILE] [--networks FILE] [--art DIR] [--config FILE] [--card DIR]
  *
  * --catalogue is the server library's (default /mnt/mmc/.q2pod/catalogue.db; "" for none): its
  * songs are listed with the card's, as the Library lists them. --panel-bits is the depth of the
@@ -29,7 +29,7 @@
  * demo names none (ui/now.c), --ask the file a page of demo's is asked for in (ui_demo_page), --backlight the
  * folder whose state says the screen is dark, --power, --wifi and --wireless where the status
  * row reads the battery and Wi-Fi, --told the file demo says the rest of its states in
- * (ui/status.c), --art the folder of Cover Flow's album thumbnails (ui/art.c), --config demo's
+ * (ui/status.c), --networks the one it lists Wi-Fi's networks in (ui/page_wifi.c), --art the folder of Cover Flow's album thumbnails (ui/art.c), --config demo's
  * config.ini, read for Light Mode and Reduce Motion (ui/config.c), --card the card About measures
  * (ui/page_general.c), --library-order the Library's order from demo's Edit Library
  * (ui/page_library.c); a test names its own.
@@ -116,6 +116,8 @@ static void parse(int argc, char **argv) {
             status_wireless = v, ++i;
         else if (!strcmp(a, "--told"))
             status_told = v, ++i;
+        else if (!strcmp(a, "--networks"))
+            wifi_networks_file = v, ++i;
         else if (!strcmp(a, "--art"))
             art_dir = v, ++i;
         else if (!strcmp(a, "--config"))
@@ -356,7 +358,8 @@ static int key_code(const char *name) {
                                      : atoi(name);
 }
 /* Lines: tick N | tug SHARE | key NAME | down NAME | up NAME | hold NAME | run MS | rest |
- * shot FILE | record DIR | record off | plays FILE (what plays is read from FILE from here on).
+ * shot FILE | rows FILE | record DIR | record off | plays FILE (what plays is read from FILE from here on) |
+ * networks FILE (the same for demo's Wi-Fi networks).
  * Each input goes in with the next frame. */
 static int script(const char *path) {
     FILE *f = fopen(path, "r");
@@ -395,6 +398,9 @@ static int script(const char *path) {
         } else if (sscanf(line, "plays %319s", arg) == 1) {
             now_file = strdup(arg); /* what plays is now this file's: as demo writing a new one */
             now_read();
+        } else if (sscanf(line, "networks %319s", arg) == 1) {
+            wifi_networks_file = strdup(arg); /* demo's networks are now this file's: as demo writing them anew */
+            wifi_networks_changed();
         } else if (sscanf(line, "shot %319s", arg) == 1) {
             ppm(arg);
         } else if (sscanf(line, "rows %319s", arg) == 1) {

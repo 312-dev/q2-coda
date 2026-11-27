@@ -185,6 +185,10 @@ void wifi_rows_failed(const char *ssid, int wrong) {
     wa.wrong = (unsigned char)(wrong != 0);
     stop_timer(&wa.settle);
 }
+/* What wifi_flows.c tells q2ui of network ssid's last join: 3 it failed, 4 its password was refused, else 0. */
+int wifi_rows_failed_kind(const char *ssid) {
+    return wa.kind == WA_FAILED && !tk_strcmp(ssid, wa.ssid) ? 3 + wa.wrong : 0;
+}
 /* A scan started (wifi_flows.c, Search Again): a failed network is first no more. */
 void wifi_rows_scanned(void) {
     if (wa.kind == WA_FAILED) wa.kind = WA_NONE;

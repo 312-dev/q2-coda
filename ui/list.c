@@ -48,6 +48,7 @@
 #define META_DY 2      /* the small text's box below the title's (song_rows.c SONG_SMALL_DY) */
 #define DETAIL_MIN 40  /* a detail with less room than this is dropped (SONG_ARTIST_MIN) */
 #define VALUE_GAP 16   /* between a title and the value after it (KV_GAP) */
+#define MARK_STEP 28   /* a right-column glyph and the gap after it (patch/wifi_rows.c WIFI_GLYPH + WIFI_GLYPH_GAP) */
 #define SEL_INSET 16
 #define SEL_R 8
 #define RAISE 0.02f       /* the platter at rest is this much larger than its row */
@@ -290,6 +291,7 @@ static struct rowc *row_text(ui_list *l, int i) {
         end -= 40 + VALUE_GAP;
     else if (r->flags & (ROW_CHEVRON | ROW_CHECK | ROW_PLAYING))
         end -= 20;
+    for (int k = 0; k < 3 && r->marks[k]; ++k) end -= MARK_STEP;
     run_make(&c->title, FACE_REGULAR, TITLE_PX, r->title ? r->title : "", (int)(end - x));
     c->title_x = x, c->text_end = end;
     float left = end - x - c->title.w - gap.w;
@@ -393,6 +395,15 @@ static void row_paint(ui_list *l, int i, float y, int focused, float dy) {
         check(right - 7, cy + iy, focused ? on : RGB_ACCENT);
     else if (r->flags & ROW_CHEVRON)
         chevron(right - 5, cy + iy, focused ? on : grey ? tok(TOK_TERTIARY) : tok(TOK_CHEVRON));
+    for (int k = 0; k < 3 && r->marks[k]; ++k) { /* Text Primary, white on the platter, as demo's (wifi_mark) */
+        char name[24];
+        snprintf(name, sizeof name, "%s_d.", r->marks[k]);
+        const image_t *im = icon(name);
+        float x = right - (float)(ICON_PX + k * MARK_STEP);
+        if (im)
+            image_draw(im, (rectf_t){ x, cy - ICON_PX / 2 + iy, ICON_PX, ICON_PX }, 0, 0, 256,
+                       focused ? (long)on : grey ? (long)tok(TOK_TERTIARY) : (long)tok(TOK_PRIMARY));
+    }
 }
 
 static void draw_indicator(const ui_list *l) {
@@ -570,14 +581,20 @@ void list_event(ui_list *l, const input_t *e) {
 
 int list_last_selected(void) { return traced ? traced->sel : -1; }
 /* The rows of the list last stepped (the page on top) into path, a line each: its title, then a tab
- * and its value when it has one; a script's "rows FILE", for a test to read a page's text. */
+ * and its value when it has one, or with marks, a tab and its value, its detail and its marks
+ * (spaced) each after a tab; a script's "rows FILE", for a test to read a page's text. */
 int list_rows_dump(const char *path) {
     FILE *f = traced ? fopen(path, "w") : 0;
     if (!f) return -1;
     for (int i = 0; i < traced->n; ++i) {
         ui_row r = { 0 };
         traced->src.row(traced->src.ctx, i, &r);
-        fprintf(f, "%s%s%s\n", r.title ? r.title : "", r.value ? "\t" : "", r.value ? r.value : "");
+        if (r.marks[0]) {
+            fprintf(f, "%s\t%s\t%s\t", r.title ? r.title : "", r.value ? r.value : "", r.detail ? r.detail : "");
+            for (int k = 0; k < 3 && r.marks[k]; ++k) fprintf(f, "%s%s", k ? " " : "", r.marks[k]);
+            fputc('\n', f);
+        } else
+            fprintf(f, "%s%s%s\n", r.title ? r.title : "", r.value ? "\t" : "", r.value ? r.value : "");
     }
     return fclose(f);
 }

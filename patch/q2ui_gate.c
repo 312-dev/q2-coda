@@ -22,7 +22,9 @@
  *    line "set NAME VALUE" down a pipe of its own (ctl): demo makes it once, before the first
  *    start, and hands q2ui its write end, the fd's number after --ctl, so no other program, the
  *    phone's daemon among them, can write it. Car Remote's queue takes no "set". Its clicks come
- *    the same way ("click 0|1"), as demo's own wheel and keys would sound them.
+ *    the same way ("click 0|1"), as demo's own wheel and keys would sound them, and its Wi-Fi
+ *    page's search ("scan") and join of a network by its name ("join NAME"), whose networks demo
+ *    tells it in Q2UI_WIFI (wifi_flows.c).
  *  - while q2ui runs, demo says what only it knows for q2ui's status row (where the sound goes,
  *    Bluetooth, Buttons Lock, a card app's sync and server: status_row_state) and Control Center
  *    (its switches' states: q2ui_cc_state) in Q2UI_STATUS, a look every Q2UI_STATUS_MS and a
@@ -48,7 +50,9 @@ int coverflow_opening(void); /* coverflow.c: Cover Flow is loading before its pa
 #define Q2UI_DUE (-1) /* to be started on the next pass: already the screen's holder */
 #define Q2UI_STATUS "/tmp/q2ui.status" /* ui/status.c reads it when it changes (inotify) */
 #define Q2UI_STATUS_MS 500
-#define Q2UI_CTL_LINE 64 /* a line down the pipe, its '\n' included; a longer one is dropped */
+#define Q2UI_CTL_LINE 80 /* a line down the pipe, its '\n' included (a join's: "join ", a network's 32 bytes each escaped, '\n'); a longer one is dropped */
+#define Q2UI_WIFI "/tmp/q2ui.wifi" /* the networks for q2ui's Wi-Fi page (wifi_flows.c wifi_flows_networks) */
+#define Q2UI_WIFI_ROOM 2048
 
 int chapter_pipe2(int *p, int flags); /* chapters.c: demo imports no pipe() */
 int fcntl(int fd, int cmd, ...);
@@ -58,6 +62,8 @@ int fcntl(int fd, int cmd, ...);
 #define CTL_READS 4
 
 unsigned status_row_state(char *b, unsigned room);  /* status_row.c */
+int wifi_flows_scan(void), wifi_flows_join(const char *ssid); /* wifi_flows.c: q2ui's Wi-Fi page's */
+unsigned wifi_flows_networks(char *b, unsigned room);
 unsigned q2ui_cc_state(char *b, unsigned room);     /* control_center.c: q2ui's Control Center's */
 void *queue_now(unsigned *pos, unsigned *n);       /* coverflow.c */
 int song_cover_url(void *r, char *url, unsigned size); /* coverflow.c: a file:// URL, 0 for none */
@@ -72,6 +78,7 @@ static struct {
     unsigned started_at; /* time_now_ms when q2ui was last started */
     unsigned asked_at; /* time_now_ms when it was asked for */
     unsigned told_at, told; /* the status's last look (time_now_ms), and the hash of what was written */
+    unsigned told_wifi;     /* the same for Q2UI_WIFI */
     char piped;        /* ctl holds the pipe's ends: read (demo's), write (q2ui's) */
     int ctl[2];
     unsigned carry;    /* bytes of a line not yet ended, at the start of line */
@@ -191,6 +198,14 @@ static void start(void) {
     if (!qu.pid) widget_invalidate_force(window_manager(), 0);
 }
 
+/* The networks for q2ui's Wi-Fi page, written to their own file when they change (the status's
+ * room is too small for a scan's names), on tell's looks. */
+static void tell_networks(void) {
+    char b[Q2UI_WIFI_ROOM];
+    unsigned n = wifi_flows_networks(b, sizeof b), h = hash_bytes(FNV_SEED, (const unsigned char *)b, n);
+    if (h != qu.told_wifi && blob_io(Q2UI_WIFI, Q2UI_WIFI ".tmp", b, n, 1)) qu.told_wifi = h;
+}
+
 /* The status row's states for q2ui (Q2UI_STATUS), written when they change; looked at every
  * Q2UI_STATUS_MS, so a cable put in shows in q2ui's row within half a second. Then About's
  * product=, version= and firmware= (this build's, as demo's About shows them), and last, cover=, the
@@ -214,12 +229,25 @@ static void tell(void) {
     if (k > 0 && (unsigned)k < sizeof b - n) n += (unsigned)k;
     unsigned h = hash_bytes(FNV_SEED, (const unsigned char *)b, n);
     if (h != qu.told && blob_io(Q2UI_STATUS, Q2UI_STATUS ".tmp", b, n, 1)) qu.told = h;
+    tell_networks();
+}
+
+/* A join's network as q2ui sent it, its \\ and \n undone, into out (SSID_ROOM). */
+#define SSID_ROOM 33
+static void unescape(const char *s, char *out) {
+    unsigned n = 0;
+    for (; *s && n < SSID_ROOM - 1; ++s) {
+        if (*s == '\\' && s[1]) ++s, out[n++] = *s == 'n' ? '\n' : *s;
+        else out[n++] = *s;
+    }
+    out[n] = 0;
 }
 
 /* q2ui's lines down its pipe, each "set NAME VALUE" (control_center.c q2ui_cc_set), acted on in the
  * order sent, or "click 0" (a wheel tick's) or "click 1" (a press's), demo's key click for the wheel
  * and keys q2ui reads itself, at most one of each a pass (the buzzer is busy for a click's length
- * anyway); another verb, or a line too long, is dropped. Read every pass while it runs and after it
+ * anyway), or its Wi-Fi page's "scan" or "join NAME" (wifi_flows.c); another verb, or a line too
+ * long, is dropped. Read every pass while it runs and after it
  * ends, so a setting sent just before leaving for a page of demo's is not lost; at most CTL_READS
  * reads a pass, so a q2ui that writes without end cannot hold demo's loop (the rest waits in the pipe). */
 int q2ui_cc_set(const char *name, int on); /* control_center.c */
@@ -242,6 +270,13 @@ static void ctl(void) {
                 said(what, v);
             } else if (__isoc99_sscanf(qu.line + from, "click %d", &v) == 1)
                 clicks |= v ? 2 : 1;
+            else if (!tk_strcmp(qu.line + from, "scan"))
+                said(wifi_flows_scan() ? "scan refused," : "scan", 0);
+            else if (!memcmp(qu.line + from, "join ", 5)) { /* the network's name is the user's: not logged */
+                char ssid[SSID_ROOM];
+                unescape(qu.line + from + 5, ssid);
+                said(wifi_flows_join(ssid) ? "join refused," : "join", 0);
+            }
             from = i + 1;
         }
         qu.carry = end - from;

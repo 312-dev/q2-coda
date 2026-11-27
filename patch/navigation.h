@@ -542,9 +542,13 @@ void wifi_busy_show(void *win); /* "Searching..." on the section's line while a 
 void wifi_rows_keep(void *view), wifi_rows_follow(const char *ssid), wifi_rows_end(void),
     wifi_rows_scanned(void);
 void wifi_rows_failed(const char *ssid, int wrong);
+int wifi_rows_failed_kind(const char *ssid); /* 3 its join failed, 4 its password refused, else 0 */
 void *wifi_tap_button(void *view, int id); /* the row button of the list's tap target id */
 /* wifi_flows.c: Settings > Wi-Fi's flows past stock's */
 int ringnav_wifi_rows(void *win), wifi_flows_hold(void *top), wifi_flows_cancel_join(void);
+/* ... and for q2ui's Wi-Fi page (q2ui_gate.c): a search, the networks told, a join by name */
+int wifi_flows_scan(void), wifi_flows_join(const char *ssid);
+unsigned wifi_flows_networks(char *b, unsigned room);
 
 /* synclink.c: SyncLink off unless the user turns it on (from ringnav_usb_config) */
 void synclink_default(void);

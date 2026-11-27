@@ -44,6 +44,21 @@ void player_click(int button) {
     if (player_ctl >= 0) (void)!write(player_ctl, button ? "click 1\n" : "click 0\n", 8);
 }
 
+/* The Wi-Fi page's search ("scan") and join of a network by its name ("join NAME", its backslashes and newlines as
+ * \\ and \n), down the same pipe (patch/q2ui_gate.c ctl, patch/wifi_flows.c): one write, whole. */
+int player_wifi(const char *verb, const char *ssid) {
+    char line[80]; /* patch/q2ui_gate.c Q2UI_CTL_LINE */
+    int n = snprintf(line, sizeof line, "%s", verb);
+    for (int i = 0; ssid && ssid[i] && i < 32 && n < (int)sizeof line - 3; ++i) {
+        if (!i) line[n++] = ' ';
+        if (ssid[i] == '\\' || ssid[i] == '\n') line[n++] = '\\';
+        line[n++] = ssid[i] == '\n' ? 'n' : ssid[i];
+    }
+    line[n++] = '\n';
+    if (player_ctl < 0) return -1;
+    return write(player_ctl, line, (size_t)n) == n ? 0 : -1;
+}
+
 int player_play(const int *ids, int n, int at, int shuffle) {
     if (n > PLAY_MAX) { /* the part of the list round the song chosen */
         int from = at - PLAY_MAX / 2 < 0 ? 0 : at - PLAY_MAX / 2;
