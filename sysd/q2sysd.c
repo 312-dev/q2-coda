@@ -33,6 +33,8 @@
  *     music that plays.
  *   - Heat (docs/sysd.md#heat): today's Vamp's overheat guardian, its core and PMIC reader linked in from patch/, its
  *     warnings told and shown through Q2UI/1, its power-off done here; not on a card boot, where today's q2guard runs.
+ *   - The watchdog (docs/sysd.md#the-watchdog): /dev/jz_watchdog started at 60 s and fed each second, stopped across
+ *     Standby and at a clean end.
  *
  * Q2SYS/1 on /run/vamp/sys.sock (docs/platform/system.md): screen on|off|toggle, brightness P, battery, usb, usb adb|storage|dac|car,
  * standby, heat, heat cancel, jack, watch, caps.
@@ -584,6 +586,42 @@ static void cable_poll(void) {
     else if (pick == PICK_ASK) tell("usb ask"); /* the chooser is the UI's; until it answers, Charge Only */
 }
 
+/* ---- the watchdog (docs/sysd.md#the-watchdog) ----
+ *
+ * The X2000's watchdog (soc_watchdog.ko's /dev/jz_watchdog), which stock never starts, through the driver's own ioctls
+ * as today's Vamp drives it (patch/system.c, docs/internals.md#watchdog): started at WDT_MS, fed each second from this
+ * loop, so a kernel or a q2sysd stalled that long restarts the Q2. Its count runs through a suspend, so it is stopped
+ * across Standby; its close is a no-op, so a clean end (a power off, a restart, SIGTERM) stops it first. */
+#define WDT_DEV "/dev/jz_watchdog"
+#define WDT_START 0x8004570d /* an int of milliseconds, by pointer */
+#define WDT_STOP 0x2000570e
+#define WDT_FEED 0x2000570f
+#define WDT_MS 60000
+static int wdt_fd = -1, wdt_on, wdt_said;
+
+static void wdt_start(void) {
+    if (wdt_fd < 0 && (wdt_fd = open(path(WDT_DEV), O_RDWR | O_CLOEXEC)) < 0) {
+        if (!wdt_said++) say("no watchdog (%s: %s)", WDT_DEV, strerror(errno));
+        return;
+    }
+    int ms = WDT_MS;
+    if (ioctl(wdt_fd, WDT_START, &ms)) {
+        if (!wdt_said++) say("the watchdog refused its start (%s)", strerror(errno));
+        return;
+    }
+    if (!wdt_said++) say("watchdog: %d s", WDT_MS / 1000);
+    wdt_on = 1;
+}
+
+static void wdt_feed(void) {
+    if (wdt_on) ioctl(wdt_fd, WDT_FEED);
+}
+
+static void wdt_stop(void) {
+    if (wdt_on) ioctl(wdt_fd, WDT_STOP);
+    wdt_on = 0;
+}
+
 /* ---- Standby ---- */
 
 static int card_boot;
@@ -599,7 +637,10 @@ static int standby(void) {
     run_tool("/bin/sync");
     say("standby");
     tell("standby");
+    int dog = wdt_on;
+    wdt_stop(); /* it would count through the suspend */
     int r = write_text(path("/sys/power/state"), "mem");
+    if (dog) wdt_start();
     say(r ? "standby refused by the kernel" : "resumed");
     if (was_on || !r) set_screen(1);
     if (!card_boot) ask("/run/vamp/net.sock", "Q2NET/1", "wake");
@@ -638,6 +679,7 @@ static void open_inputs(void) {
 
 static void shut(const char *cmd) {
     pressed_at = 0;
+    wdt_stop(); /* a clean end: the shutdown is not a stall */
     pid_t p = fork();
     if (p == 0) {
         execl("/bin/sh", "sh", "-c", cmd, (char *)0);
@@ -1072,6 +1114,7 @@ int main(int argc, char **argv) {
         screen_on ? "on" : "off");
     cable_poll();
     heat_start();
+    wdt_start();
     unsigned long long battery_at = now_ms(), scanned_at = now_ms(), cable_at = now_ms();
     while (!stopping) {
         struct pollfd p[2 + INPUTS + CLIENTS];
@@ -1115,6 +1158,7 @@ int main(int argc, char **argv) {
         if (t >= battery_at + BATTERY_S * 1000ull) read_battery(), battery_at = t;
         if (!n_power && t >= scanned_at + RESCAN_MS) open_inputs(), scanned_at = t;
         if (t >= cable_at + CABLE_MS) {
+            wdt_feed();
             cable_poll(), cable_at = t;
             light_poll();
             if (screen_on && light_s && t >= used_at + (unsigned long long)light_s * 1000) {
@@ -1128,6 +1172,7 @@ int main(int argc, char **argv) {
         heat_poll(t);
         if (usb_mode == USB_CAR) car_poll();
     }
+    wdt_stop();
     unlink(path("/run/vamp/sys.sock"));
     return 0;
 }

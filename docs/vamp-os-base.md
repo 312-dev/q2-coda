@@ -188,7 +188,7 @@ Everything here has been run only under the emulator and on this machine. What o
 
 | Area | What only a Q2 proves | Doc |
 | --- | --- | --- |
-| Boot | The kernel's command line (`init=`), devtmpfs or not, LZO squashfs, UBI and UBIFS as this init assumes; every module loading under it; the watchdog's state with nothing opening it | [What boots](#what-boots), [First boot](#first-boot-on-a-q2) |
+| Boot | The kernel's command line (`init=`), devtmpfs or not, LZO squashfs, UBI and UBIFS as this init assumes; every module loading under it; the watchdog's device under this init and `q2sysd`'s start of it ([q2sysd](sysd.md#needs-a-q2)) | [What boots](#what-boots), [First boot](#first-boot-on-a-q2) |
 | Card boot | Loop devices in the kernel; the chroot over a running stock boot; stopping stock's `mdev` | [Card boot](#card-boot) |
 | Recovery | Shanling's recovery restoring this unit at all: on the owner's Q2 the key combo booted normally (2026-11-27) and U-Boot shows only the `mtd6` mark path, so no flash install until a rescue path is seen working ([First boot](#first-boot-on-a-q2)); and what its `recovery-update/` folder must hold | [First boot](#first-boot-on-a-q2) |
 | adb | The USB controller in device mode with nothing of stock's having set it; the gadget on the real UDC | [adb](#adb) |

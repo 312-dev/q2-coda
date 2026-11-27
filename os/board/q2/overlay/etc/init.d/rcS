@@ -135,8 +135,9 @@ for e in /dev/input/event*; do
     [ -e "$e" ] && step "input: ${e##*/} $(cat "/sys/class/input/${e##*/}/device/name" 2>/dev/null)"
 done
 if [ -e /dev/watchdog ]; then
-    step "watchdog: /dev/watchdog present, $(cat /sys/class/watchdog/watchdog0/state 2>/dev/null || echo state unknown); nothing opens it"
+    step "watchdog: /dev/watchdog present, $(cat /sys/class/watchdog/watchdog0/state 2>/dev/null || echo state unknown)"
 fi
+[ -e /dev/jz_watchdog ] && step "watchdog: /dev/jz_watchdog present (q2sysd starts it, docs/sysd.md#the-watchdog)"
 if [ -e /run/vamp/keep ]; then
     dmesg > /mnt/data/vamp/dmesg.log 2>&1
     cp /run/vamp/modules.log /mnt/data/vamp/modules.log 2>/dev/null

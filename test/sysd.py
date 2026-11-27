@@ -977,5 +977,113 @@ def test_a_cable_in_at_the_start_is_followed(binary, tree, tools):
         p.terminate()
         p.wait(5)
 
+# ---- the watchdog (docs/sysd.md#the-watchdog) ----
+
+@pytest.fixture(scope='session')
+def wdt_shim(tmp_path_factory):
+    out = tmp_path_factory.mktemp('wdt')/'wdt_shim.so'
+    subprocess.run(['cc', '-shared', '-fPIC', '-O2', '-Wall', '-Wextra', '-Werror', '-o', str(out), str(ROOT/'test/wdt_shim.c'), '-ldl'], check=True)
+    return out
+
+
+class Wdt:
+    """q2sysd with the watchdog's stand-in (test/wdt_shim.c): dev/jz_watchdog there, each ioctl in wdt.log"""
+    def __init__(self, binary, tree, shim, device=True, extra=()):
+        self.root, self.log = tree, tree/'wdt.log'
+        if device:
+            put(tree, '/dev/jz_watchdog', '')
+        put(tree, '/sys/power/state', '')
+        env = dict(os.environ, LD_PRELOAD=str(shim), Q2WDT_LOG=str(self.log))
+        self.p = subprocess.Popen([str(binary), '--root', str(tree), '--poweroff', f'cp {self.log} {tree}/log-at-poweroff', *extra],
+                                  stderr=subprocess.PIPE, text=True, env=env)
+        end = time.monotonic() + 5
+        while not (tree/'run/vamp/sys.sock').exists() and time.monotonic() < end:
+            time.sleep(0.02)
+        time.sleep(0.2)
+        self.keys = os.open(tree/'dev/input/event1', os.O_WRONLY)
+
+    def calls(self):
+        return [l.split(' ', 1)[1] for l in self.log.read_text().splitlines()] if self.log.exists() else []
+
+    def end(self):
+        os.close(self.keys)
+        self.p.terminate()
+        code = self.p.wait(5)
+        return code, self.p.stderr.read()
+
+
+def test_the_watchdog_started_at_60_s_and_fed_each_second(binary, tree, tools, wdt_shim):
+    w = Wdt(binary, tree, wdt_shim)
+    time.sleep(3.5)
+    fed = w.calls()
+    code, err = w.end()
+    calls = w.calls()
+    assert calls[:1] == ['start 60000'], calls
+    assert 3 <= fed.count('feed') <= 5, f'a feed a second ({fed})'
+    assert calls[-1] == 'stop' and code == 0, f'a clean end (SIGTERM) stops it: its close is a no-op in the driver ({calls})'
+
+
+def test_the_watchdog_stopped_across_standby(binary, tree, tools, wdt_shim):
+    os.unlink(tree/'sys/power/state') if (tree/'sys/power/state').exists() else None
+    (tree/'sys/power').mkdir(parents=True, exist_ok=True)
+    os.mkfifo(tree/'sys/power/state')  # the kernel's suspend: held open until read
+    w = Wdt.__new__(Wdt)
+    w.root, w.log = tree, tree/'wdt.log'
+    put(tree, '/dev/jz_watchdog', '')
+    env = dict(os.environ, LD_PRELOAD=str(wdt_shim), Q2WDT_LOG=str(w.log))
+    w.p = subprocess.Popen([str(binary), '--root', str(tree), '--poweroff', 'true'], stderr=subprocess.PIPE, text=True, env=env)
+    end = time.monotonic() + 5
+    while not (tree/'run/vamp/sys.sock').exists() and time.monotonic() < end:
+        time.sleep(0.02)
+    time.sleep(0.2)
+    w.keys = os.open(tree/'dev/input/event1', os.O_WRONLY)
+    fd = os.open(tree/'sys/power/state', os.O_RDWR | os.O_NONBLOCK)  # a full pipe: q2sysd's write waits, as the suspend does
+    filled = 0
+    try:
+        while True:
+            filled += os.write(fd, b'x' * 4096)
+    except BlockingIOError:
+        pass
+    c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    c.connect(str(tree/'run/vamp/sys.sock'))
+    c.sendall(b'Q2SYS/1\nstandby\n')
+    time.sleep(1.5)
+    at_suspend = w.calls()  # in the suspend
+    got, end = b'', time.monotonic() + 5
+    while not got.endswith(b'mem') and time.monotonic() < end:  # the resume: the write goes through
+        try:
+            got += os.read(fd, 65536)
+        except BlockingIOError:
+            time.sleep(0.05)
+    got = got[filled:]
+    time.sleep(1.5)
+    os.close(fd)
+    after = w.calls()
+    c.close()
+    code, err = w.end()
+    assert got == b'mem'
+    assert at_suspend[-1:] == ['stop'], f'stopped before the suspend: it counts through it ({at_suspend})'
+    rest = after[len(at_suspend):]
+    assert rest[:1] == ['start 60000'] and 'feed' in rest, f'started again at the resume, and fed ({rest})'
+
+
+def test_the_watchdog_stopped_before_the_power_off(binary, tree, tools, wdt_shim):
+    w = Wdt(binary, tree, wdt_shim)
+    press(w.keys, hold=3.2)  # HOLD_MS: the power off
+    end = time.monotonic() + 5
+    while not (tree/'log-at-poweroff').exists() and time.monotonic() < end:
+        time.sleep(0.1)
+    w.end()
+    at_off = [l.split(' ', 1)[1] for l in (tree/'log-at-poweroff').read_text().splitlines()]
+    assert at_off[0] == 'start 60000' and at_off[-1] == 'stop', f'a clean power off stops it first ({at_off})'
+
+
+def test_no_watchdog_device_is_said_and_nothing_else(binary, tree, tools, wdt_shim):
+    w = Wdt(binary, tree, wdt_shim, device=False)
+    time.sleep(1.5)
+    code, err = w.end()
+    assert code == 0 and 'no watchdog' in err and w.calls() == [], err
+
+
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-q', '-p', 'no:cacheprovider']))

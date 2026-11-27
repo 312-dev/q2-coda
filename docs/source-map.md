@@ -258,7 +258,7 @@ Where this tree is headed (an `os/` Buildroot tree, services of our own in place
 
 | File | For | Enter at | Doc |
 | --- | --- | --- | --- |
-| `q2sysd.c` | `q2sysd`: the power key, the screen's light, the battery, Charge Limit, USB modes and the cable, Standby, Q2SYS/1 on `/run/vamp/sys.sock` | `main`, `read_input`, `set_screen`, `read_battery`, `cable_poll`, `car_poll` | [sysd](sysd.md) |
+| `q2sysd.c` | `q2sysd`: the power key, the screen's light, the battery, Charge Limit, USB modes and the cable, Standby, heat, the jacks, the watchdog, Q2SYS/1 on `/run/vamp/sys.sock` | `main`, `read_input`, `set_screen`, `read_battery`, `cable_poll`, `car_poll`, `wdt_start` | [sysd](sysd.md) |
 | `Makefile` | Its build, for the image (`os/package/q2sysd`) and this machine (`test/sysd.py`) | | [sysd](sysd.md) |
 
 ## dacloop/: Vamp OS's USB DAC mode
@@ -413,7 +413,7 @@ Commands and what each needs are in [building.md](building.md#tests). `BUILD` is
 | Vamp API 1's permissions | `perm.py`: the three services' checks (a member, a refusal, root) and, in a user namespace per uid, packages' users from `q2pkgd app-add` reaching only their services; `q2pkgd`'s users, groups and `app-run` | `cc`, bwrap |
 | q2pkgd's launcher | `launch.py`: `q2pkgd serve` built for this machine with BusyBox's own `runsv` built from Buildroot's tarball: Q2PKG/1's transcripts, the API 0 caps line, stops, an API 1 app through `app-run`, a service kept up, who may ask, and q2playd starting a stopped app for a server play | `cc`, bwrap, `make`, `~/.cache/q2-os/dl` |
 | q2dlnad | `dlnad.py`: q2dlnad built for this machine against stand-ins for Q2PLAY/1 and Q2NET/1, and once the real q2playd: the switch, SSDP, the descriptions, each action, events, the radio's hold | `cc`, python3 |
-| q2sysd | `sysd.py`: q2sysd built for this machine on a stand-in `/sys` and `/dev/input`: the power key's press and hold, the backlight, the battery file, the USB modes and the cable, Q2SYS/1 | `cc` |
+| q2sysd | `sysd.py`: q2sysd built for this machine on a stand-in `/sys` and `/dev/input`: the power key's press and hold, the backlight, the battery file, the USB modes and the cable, Q2SYS/1, the watchdog through `wdt_shim.c` (an `LD_PRELOAD` stand-in for the driver's ioctls) | `cc` |
 | q2dacloop | `dacloop.py`: q2dacloop built for this machine between alsa-lib's file PCMs (bit for bit, the rate, the prebuffer, the pitch file), and `dacloop_pitch.c`'s simulation of the fill level against computers whose clocks are off | `cc`, libasound |
 | q2sendd | `sendd.py`: q2sendd and today's q2send built for this machine beside stand-in Q2UI/1, Q2NET/1 and Q2SYS/1 sockets, a LocalSend sender made in the test over TLS: accepted, declined, no UI, withdrawn, trusted, held, SIGTERM | `cc`, OpenSSL |
 | q2libd | `libd.py`: q2libd built for this machine on a stand-in card of songs ffmpeg makes: tags, ids across scans, catalogues, q2ui's query, the service's first library, Q2LIB/1's transcripts | `cc`, ffmpeg, the host's FFmpeg and SQLite |
