@@ -107,6 +107,11 @@ void ui_select_top(int sel) {
     if (depth && stack[depth - 1].page->select && sel >= 0) stack[depth - 1].page->select(stack[depth - 1].st, sel);
 }
 int ui_moving(void) { return again; }
+int ui_sliding(void) { return slide.dir != 0; }
+int ui_trace(char *out, size_t room) {
+    if (depth && stack[depth - 1].page->trace) return stack[depth - 1].page->trace(stack[depth - 1].st, out, room);
+    return list_trace(out, room);
+}
 int ui_wake_pending(void) { return wake_at != 0; }
 void ui_quit(int code) { quit = 1, quit_code = code; }
 int ui_quitting(int *code) {

@@ -112,6 +112,14 @@ static void word_of(const char *line, const char *key, char *out, size_t room) {
     if (!strncmp(line, key, k) && line[k] == '=') snprintf(out, room, "%.*s", (int)strcspn(line + k + 1, "\r\n"), line + k + 1);
 }
 static void read_told(void);
+/* The link for Control Center's Wi-Fi circle (page_control.c), read again when a second has gone by since it
+ * was, as demo polls it for its own circle (control_center.c cc_wifi_poll) */
+int status_wifi_bars(void) {
+    static uint64_t read_at;
+    if (!read_at || ui_time() - read_at >= 1000000u) read_at = ui_time() | 1, read_glyphs();
+    if (S.told) S.told = 0, read_told();
+    return S.wifi && !S.net ? 4 : S.wifi;
+}
 /* demo's word on key (Control Center's switches too, page_control.c) into out; 0 when it said nothing.
  * The file is read first if it changed since, so a page asking before the first frame (a page a
  * start comes back to, main.c state_restore, counting its rows) has demo's word too. */

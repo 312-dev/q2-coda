@@ -496,6 +496,24 @@ def test_q2uis_brightness_slider_sets_the_backlight_and_is_told_it_with_the_volu
     assert cc(b'bright', 101) == -1 and cc(b'bright', -1) == -1 and lit == [80]
 
 
+def test_q2ui_is_told_airplay_and_a_cable_for_its_control_center_sheet(fw):
+    """q2ui's sheet lights AirPlay's circle by its receiver's flag and shows the USB row only while a cable is in:
+    demo tells airplay= (g_airplayflag) and cable= (usb_ui.c usb_ui_cable), each as it changes."""
+    from conftest import Files
+    files = Files(fw)
+    fw.mock('mclGetOutputWay', lambda *_: 0)
+    air, det = fw.var('g_airplayflag', C.c_ubyte), fw.var('g_usbdet_value', C.c_ubyte)
+    seen, g = [], Gate(fw)
+    for a, c in ((0, 0), (1, 1)):
+        air.value, det.value = a, c
+        g.ms += 60000  # past the gate's pause between looks (Q2UI_STATUS_MS)
+        g.poll()
+        g.poll()
+        said = dict(line.split('=', 1) for line in files.files['/tmp/q2ui.status'].decode().splitlines())
+        seen.append((said.get('airplay'), said.get('cable')))
+    assert seen == [('0', '0'), ('1', '1')]
+
+
 def told_cover(fw, mcl, path, parsed, kind):
     """What demo tells q2ui of the playing song's cover (cover=), path playing and the player's cover thread last done
     with parsed, its type kind."""

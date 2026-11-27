@@ -19,7 +19,7 @@
  * a page written for the last one would no longer build or behave, the second when something is
  * added. */
 #define Q2UI_API_MAJOR 0
-#define Q2UI_API_MINOR 1
+#define Q2UI_API_MINOR 2
 
 #include <stddef.h>
 #include <stdint.h>
@@ -228,6 +228,8 @@ typedef struct ui_page {
      * page is not kept in a route, nor any above it. */
     int (*where)(void *st, char *name, size_t room);
     void (*select)(void *st, int sel);          /* the selection put back, with no motion */
+    /* a script's trace line for the page, "sel=N ..."; 0: the list last stepped's (list_trace) */
+    int (*trace)(void *st, char *out, size_t room);
 } ui_page;
 /* The stack as "name:sel/name:sel", bottom first, as far as its pages say where they are. */
 void ui_route(char *out, size_t room);
@@ -247,6 +249,8 @@ int ui_depth(void);
 void *ui_top(void);        /* the top page's state */
 const char *ui_top_name(void);
 int ui_moving(void);      /* the last frame asked for another */
+int ui_sliding(void);     /* a page is sliding on or off */
+int ui_trace(char *out, size_t room); /* the top page's trace line (ui_page.trace) */
 int ui_wake_pending(void); /* a wake is set */
 extern int ui_reduce_motion;
 extern int ui_painting; /* 1 while a frame is drawn: marks and state changes are refused */
@@ -291,6 +295,7 @@ void status_clock_fixed(const char *hhmm);
 extern const char *status_power, *status_wifi, *status_wireless, *status_told;
 void status_told_changed(void); /* demo's file of the states only it knows changed (now.c's watch) */
 int status_told_value(const char *key, char *out, size_t room); /* demo's word on key; 0 when it said nothing */
+int status_wifi_bars(void); /* the link as the row draws it: 0 not joined, 1 to 3 its fan's lit parts, 4 joined with no internet */
 
 /* ---- list.c: the list every menu is ---- */
 enum {
@@ -338,6 +343,7 @@ void list_pictures_changed(void);
 void list_rows_changed(void); /* any row's words or marks may have changed: every row is asked again, a switch slides,
                                  and the rows are counted again */
 void control_push(void);      /* Control Center (page_control.c) */
+extern const ui_page page_control;
 /* ---- config.c: the settings q2ui reads from demo's config.ini ---- */
 extern const char *config_file;
 extern int config_light_forced, config_motion_forced; /* --light, --reduce-motion */

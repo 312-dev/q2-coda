@@ -12,12 +12,20 @@
  * redraws the screen and has the lists ask their rows again (list_pictures_changed), as it does
  * when a cover a row may hold is let go. A script (main.c --script) reads them in place instead, so a picture it
  * saves is the same on every run. Kept: the last ART_KEPT covers asked for, at twice the row's
- * 40 px for a lean's room. */
+ * 40 px for a lean's room.
+ *
+ * An album found with none is not asked again until Cover Flow's folder changes: demo makes the
+ * thumbnails after a scan, so on a fresh card the rows are drawn before them. While one is known to
+ * have none the idle worker looks at the folder's modification time every ART_LOOK_S, and when it
+ * has moved, every album with none is asked again (the rows drawn again ask). ponytail: on FAT, whose
+ * times are 2 s apart, a write within the window of the read that found none is seen at the next one. */
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "q2ui.h"
@@ -26,6 +34,7 @@
 #define ART_QUEUE 12 /* asked for and not yet read; past it the oldest ask is dropped, asked again when seen */
 #define ART_SIDE 80
 #define PLACEHOLDER 0x2c2c2e /* Raised 2 */
+#define ART_LOOK_S 2
 
 const char *art_dir = "/mnt/mmc/.coverflow";
 int art_sync;
@@ -43,6 +52,24 @@ static pthread_cond_t asked = PTHREAD_COND_INITIALIZER;
 static int queue[ART_QUEUE], queued; /* kept[] slots, the newest last */
 static int done[ART_KEPT], ndone;    /* read by the worker, for the loop to take */
 static int wake[2] = { -1, -1 }, started;
+static int recheck;   /* the folder moved: the loop has the rows ask again */
+static struct timespec seen_at; /* the folder's time when a slot was last found to have none */
+
+static int any_none(void) { /* under the lock */
+    for (int i = 0; i < ART_KEPT; ++i)
+        if (kept[i].state == NONE) return 1;
+    return 0;
+}
+static struct timespec folder_time(void) {
+    struct stat st;
+    struct timespec none = { 0, 0 };
+    if (stat(art_dir, &st)) return none;
+#ifdef __APPLE__
+    return st.st_mtimespec;
+#else
+    return st.st_mtim;
+#endif
+}
 
 static unsigned fnv(unsigned h, const char *s) {
     for (; s && *s; ++s) h = (h ^ (unsigned char)*s) * 16777619u;
@@ -68,16 +95,36 @@ static void *worker(void *arg) {
     (void)arg;
     for (;;) {
         pthread_mutex_lock(&lock);
-        while (!queued) pthread_cond_wait(&asked, &lock);
+        while (!queued) {
+            if (!any_none()) {
+                pthread_cond_wait(&asked, &lock);
+                continue;
+            }
+            /* albums with none: the folder looked at every ART_LOOK_S while nothing is asked */
+            struct timespec until;
+            clock_gettime(CLOCK_REALTIME, &until);
+            until.tv_sec += ART_LOOK_S;
+            if (pthread_cond_timedwait(&asked, &lock, &until) == 0 || queued) continue;
+            struct timespec t = folder_time();
+            if (t.tv_sec == seen_at.tv_sec && t.tv_nsec == seen_at.tv_nsec) continue;
+            for (int i = 0; i < ART_KEPT; ++i)
+                if (kept[i].state == NONE) kept[i].state = EMPTY;
+            recheck = 1;
+            char c = 1;
+            if (write(wake[1], &c, 1) < 0) {}
+        }
         int slot = queue[--queued];
         unsigned keys[ART_TRIES], key = kept[slot].key;
         int n = kept[slot].n;
         memcpy(keys, kept[slot].keys, sizeof keys);
         pthread_mutex_unlock(&lock);
+        struct timespec t = folder_time(); /* before the read: a write after it moves the time on */
         image_t *im = read_cover(keys, n);
         pthread_mutex_lock(&lock);
         if (kept[slot].key == key && kept[slot].state == ASKED) { /* still the same ask */
-            kept[slot].im = im, kept[slot].state = im ? HAVE : NONE, im = 0;
+            kept[slot].im = im, kept[slot].state = im ? HAVE : NONE;
+            if (!im) seen_at = t;
+            im = 0;
             done[ndone++] = slot;
         }
         pthread_mutex_unlock(&lock);
@@ -93,8 +140,8 @@ static void arrived(void) {
     char buf[64];
     while (read(wake[0], buf, sizeof buf) > 0) {}
     pthread_mutex_lock(&lock);
-    int any = ndone;
-    ndone = 0;
+    int any = ndone || recheck;
+    ndone = recheck = 0;
     pthread_mutex_unlock(&lock);
     if (any) list_pictures_changed(), ui_mark_all();
 }
