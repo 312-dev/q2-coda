@@ -1124,6 +1124,7 @@ def sdk(tmp_path, monkeypatch):
                                        "gdbus_headers = files('gdbus.h')\napplication_headers = files()\nsettings_headers = files('gsettings.h')\n")
     for n in ('codegen_main.py', 'config.py.in', 'meson.build'):
         (src/'gio/gdbus-2.0/codegen'/n).write_text(n)
+    (src/'gio/gdbus-2.0/codegen/utils.py').write_text(CODEGEN_UTILS)
     members = {'dbus': [('dbus/dbus.h', b'dbus'), ('dbus/dbus-arch-deps.h.in', b'@DBUS_INT64_TYPE@ @DBUS_VERSION@ @DBUS_HAVE_INT64@')],
                'alsa': [('include/asoundlib.h', b'asound'), ('include/sys.h', b'sys'), ('include/sound/asound.h', b'kernel')],
                'bluez': [('lib/bluetooth.h', b'bt'), ('lib/hci.c', b'c')],
@@ -1141,6 +1142,16 @@ def sdk(tmp_path, monkeypatch):
     return types.SimpleNamespace(src=src, stock=stock, stage=tmp_path/'stage', listed=listed)
 
 
+# the part of GLib 2.74's gio/gdbus-2.0/codegen/utils.py build_stocksdk rewrites (distutils is gone from Python 3.12)
+CODEGEN_UTILS = '''import distutils.version
+
+
+def version_cmp_key(key):
+    v = key[0] or "0"
+    return (distutils.version.LooseVersion(v), key[1])
+'''
+
+
 def test_stocksdk_is_headers_tools_and_links_to_the_stock_libraries(sdk, env, tmp_path):
     thirdparty.build_stocksdk(sdk.src, sdk.stage, env, tmp_path/'log')
     usr = sdk.stage/'usr'
@@ -1155,8 +1166,14 @@ def test_stocksdk_is_headers_tools_and_links_to_the_stock_libraries(sdk, env, tm
     assert (inc/'gio/gioenumtypes.h').read_text().split() == ['glib-mkenums', '--template', 'gioenumtypes.h.template', *sdk.listed,
                                                               'gdbus.h', 'gsettings.h']
     codegen = usr/'share/glib-2.0/codegen'
-    assert sorted(p.name for p in codegen.iterdir()) == ['codegen_main.py', 'config.py']  # no .in, no meson.build
+    assert sorted(p.name for p in codegen.iterdir()) == ['codegen_main.py', 'config.py', 'utils.py']  # no .in, no meson.build
     assert 'VERSION = "2.74.4"' in (codegen/'config.py').read_text()
+    utils = (codegen/'utils.py').read_text()
+    assert 'distutils' not in utils
+    space = {}
+    exec(utils, space)  # numbers compare as numbers, as LooseVersion's: 2.9 before 2.10, "" as 0, before both
+    keys = [('2.10', 'a'), ('', 'b'), ('2.9', 'c'), ('2.9.1', 'd')]
+    assert [k[1] for k in sorted(keys, key=space['version_cmp_key'])] == ['b', 'c', 'd', 'a']
     tool = usr/'bin/gdbus-codegen'
     assert repr(str(codegen.parent)) in tool.read_text() and tool.stat().st_mode & 0o111
     assert (usr/'include/dbus-1.0/dbus/dbus.h').read_text() == 'dbus'
@@ -1247,7 +1264,7 @@ def test_bluealsa_is_patched_and_built_for_its_base(ldflags, calls, tmp_path, mo
     thirdparty.build_bluealsa(src, stage, env, log)
     v = dict(env.vars, PATH=f'{base}/usr/bin:/bin', LDFLAGS=f'{env.vars["LDFLAGS"]} {(ldflags or "").strip()}')
     patches = list(thirdparty.BLUEALSA_PATCHES)
-    assert patches == ['alsa-1.1.6-ioplug-avail.patch']
+    assert patches == ['alsa-1.1.6-ioplug-avail.patch', 'shanling.patch']  # in BLUEALSA_PATCHES's order
     assert calls == [*((['patch', '-p1', '-i', n], src, None, log) for n in patches),
                      (['autoreconf', '--install', '--force'], src, v, log),
                      (['./configure', '--host=mipsel-linux-gnu', '--prefix=/usr', *thirdparty.BLUEALSA_OPTIONS], src, v, log),

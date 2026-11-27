@@ -533,7 +533,7 @@ GLIBCONFIG = (pathlib.Path(__file__).resolve().parent/'bluez/glibconfig.h').read
 BLUEALSA_BASE = 'stocksdk'
 # Vamp's changes to bluez-alsa, each a patch file under tools/bluealsa with its reason at its head, in this order
 BLUEALSA_PATCHES = {n: (pathlib.Path(__file__).resolve().parent/'bluealsa'/n).read_text()
-                    for n in ('alsa-1.1.6-ioplug-avail.patch',)}
+                    for n in ('alsa-1.1.6-ioplug-avail.patch', 'shanling.patch')}
 BLUEALSA_OPTIONS = ['--enable-aac', '--enable-aptx', '--enable-aptx-hd', '--with-libfreeaptx', '--enable-ldac',
                     '--enable-aplay', '--enable-ctl', '--disable-payloadcheck', '--disable-systemd',
                     # its per-device store (volume, mute, delay) on the tmpfs: /var/lib is read-only on the Q2, and
@@ -594,6 +594,16 @@ def build_stocksdk(src, stage, env, log):
     codegen = stage/'usr/share/glib-2.0/codegen'
     shutil.copytree(src/'gio/gdbus-2.0/codegen', codegen, ignore=shutil.ignore_patterns('*.in', 'meson.build'))
     (codegen/'config.py').write_text('VERSION = "2.74.4"\nMAJOR_VERSION = 2\nMINOR_VERSION = 74\n')
+    # 2.74's sorts "since" versions with distutils' LooseVersion, and distutils is gone from Python 3.12 (the Mac
+    # image's): the same ordering from a key of its own, numbers as numbers and the rest as text, as LooseVersion's
+    utils = codegen/'utils.py'
+    text = utils.read_text()
+    need(text.count('import distutils.version\n') == 1 and text.count('distutils.version.LooseVersion(v)') == 1 or None,
+         'stocksdk: gdbus-codegen\'s utils.py has no single distutils use to replace')
+    utils.write_text(text.replace('import distutils.version\n', 'import re as _re\n\n\n'
+                                  'def _loose(v):\n'
+                                  '    return [int(p) if p.isdigit() else p for p in _re.split(r"(\\d+|[a-z]+|\\.)", v) if p and p != "."]\n')
+                     .replace('distutils.version.LooseVersion(v)', '_loose(v)'))
     (tools/'gdbus-codegen').write_text(f'#!/usr/bin/env python3\nimport sys\nsys.path.insert(0, {str(codegen.parent)!r})\n'
                                        'from codegen import codegen_main\nsys.exit(codegen_main.codegen_main())\n')
     (tools/'gdbus-codegen').chmod(0o755)

@@ -152,6 +152,38 @@ against each. Stock's `GetPCMs` holds the same properties as its object list (ca
 read as 0, no PCM found, the car's PCM never seen), and against stock's when a test asks that `GetPCMs` is not
 used. The harness passes only when the daemon sends both signals.
 
+## The compatibility service
+
+`--shanling` serves `shanling.bluealsa` at `/shanling/bluealsa` beside `org.bluealsa`, for stock's demo and
+`libbtctl.so`; a base without them leaves it off. It is `src/shanling.c`, written new with GDBus
+(`tools/bluealsa/shanling.patch`), and every behaviour below was measured on stock's daemon in the harness
+first, then checked on ours by `test/bluealsa_own.py STOCKFS DAEMON --against-stock`, which runs both the same
+way and compares:
+
+- **The interface**, as each describes it in `Introspect`: `SetLDACQuality(i quality)`,
+  `SetSBCQuality(i quality)`, `SetUSBOutput(b enable)`, `StopAlsaplay()`, the signals
+  `StatusChange(i event, ay data)` and `SinkChange(i status, i sinkfd)`.
+- **`StatusChange(257, data)`** when BlueZ sets a configuration, and **`StatusChange(258, data)`** when the
+  headset's absolute volume changes. `data` is 14 bytes: the code as a little-endian int32, the device's
+  address as the kernel holds it (its last byte first), then a little-endian int32 value. The codes: 1 SBC,
+  2 AAC, 3 aptX, 13 aptX HD and 4 LDAC for 257; 10 for the volume, whose value is the level BlueZ gives (0 to
+  127). Stock leaves the last four bytes of a 257 as whatever was in memory; ours writes zeros, and the
+  comparison leaves those four bytes out.
+- **No signal at a refusal.** The page above read 101 for a refused configuration from stock's binary; none of
+  the three refusals tried (a configuration a byte short, one with no frequency or mode bit, a
+  `SelectConfiguration` with nothing in common) sends it, and ours sends nothing either. Where 101 comes from
+  is not known; `SinkChange` was never seen sent.
+- **The quality calls**, for the next stream, as stock's (it reads them only when a stream starts):
+  `SetSBCQuality` 0 low, 1 medium (stock's default), 2 or more high, which at 48 kHz joint stereo are the
+  bitpools 29, 33 and 51 (217, 240 and 351 kbit/s on the wire, both daemons); `SetLDACQuality` 21, 22, 23 the
+  encoder's high, standard and mobile quality (1010, 673 and 336 kbit/s), any other value the adaptive rate
+  (stock started that at standard here). `SetUSBOutput` and `StopAlsaplay` do nothing, in stock's either.
+- **`/tmp/bt_startup`** is made once the name is owned.
+
+The launcher ([Cutover](#cutover-and-fallback), not built yet) is to pass `--shanling --sbc-quality=medium
+--ldac-quality=standard`, so ours starts where stock's does, as the harness starts it. Seen to fail first: today's daemon refused the option; a build that named aptX HD 3 and mapped 1 to high
+failed the signal and the SBC checks. Each harness run takes about four minutes under qemu.
+
 ## The patches
 
 Every way the build changes stock's bluealsa today, and where it goes. "Source" is a change to our copy of
@@ -175,9 +207,9 @@ And Shanling's changes, which our build must answer where something relies on th
 
 | Shanling's                           | In our build                                                                                                                                                                                                                                                                                                                                                          |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `shanling.bluealsa`                  | written new in one source file, with GDBus, from the interface above: the four methods, `StatusChange` at the same three moments with the same bytes, `/tmp/bt_startup`. On only with an option (`--shanling`), so a base without demo's `libbtctl` leaves it off. Not by linking `libbtctl.so`: that would tie our program to a closed library for 200 lines of work |
-| LDAC's quality from the Quality page | `SetLDACQuality` sets what `--ldac-quality` and `--ldac-abr` set, for the next stream, and the running encoder's through the library's own call where it has one. Upstream's adaptive rate uses the same published controller as stock's (thresholds 6, 4, 2 against stock's 12, 8, 4: **needs a Q2** to compare)                                                     |
-| SBC's two qualities                  | `SetSBCQuality` picks the bitpool cap from stock's table ([internals](internals.md#bluetooth-link-monitor))                                                                                                                                                                                                                                                           |
+| `shanling.bluealsa`                  | done: `--shanling` (`tools/bluealsa/shanling.patch`, `src/shanling.c`), written new with GDBus, checked against stock's daemon ([The compatibility service](#the-compatibility-service)). Not by linking `libbtctl.so`: that would tie our program to a closed library |
+| LDAC's quality from the Quality page | done: `SetLDACQuality` sets what `--ldac-quality` and `--ldac-abr` set, for the next stream (stock's takes effect then too). Upstream's adaptive rate uses the same published controller as stock's (thresholds 6, 4, 2 against stock's 12, 8, 4: **needs a Q2** to compare) |
+| SBC's two qualities                  | done: `SetSBCQuality` sets `--sbc-quality`'s low, medium or high for the next stream, by stock's numbering (measured); 5.0.0's table is A2DP's, the same bitpools at 48 kHz as stock's |
 | both A2DP roles with no `-p`         | the launcher names them: `-p a2dp-source`, `a2dp-sink` where stock's receiver page needs it, and `hfp-ag` and `hsp-ag` for the battery level                                                                                                                                                                                                                          |
 | LDAC as a sink                       | not offered: the published library has no decoder. Guest Play's sink is AAC; stock's own receiver page then gets SBC, AAC or aptX from a phone, never LDAC. A stated difference                                                                                                                                                                                       |
 
@@ -186,8 +218,8 @@ And Shanling's changes, which our build must answer where something relies on th
 `python3 tools/thirdparty.py build bluealsa`, like the other rebuilt components ([third-party](third-party.md)):
 pinned by SHA-256, the Codescape toolchain, cached by recipe text. Five recipes:
 
-- `bluealsa`: bluez-alsa 5.0.0, with Vamp's patches (`BLUEALSA_PATCHES`, the files under `tools/bluealsa/`, one so
-  far, [below](#the-first-patch)), by its own autotools build: `bluealsad`, the two ALSA plugins,
+- `bluealsa`: bluez-alsa 5.0.0, with Vamp's patches (`BLUEALSA_PATCHES`, the files under `tools/bluealsa/`: the
+  [first patch](#the-first-patch) and [the compatibility service](#the-compatibility-service)), by its own autotools build: `bluealsad`, the two ALSA plugins,
   `bluealsa-aplay` and `bluealsactl`. AAC, aptX, aptX HD and LDAC on; no oFono, UPower, MIDI, mSBC, LC3 or
   ASHA (`BLUEALSA_OPTIONS`).
 - `sbc` (2.1), `freeaptx` (libfreeaptx 0.2.2) and `ldac` (Android's libldac 2.0.2.3, encoder and adaptive
@@ -382,12 +414,15 @@ and `q2player` are not in this plan on purpose: they need the compatibility serv
 
 ## Needs a device
 
-1. **The callers on a Q2**, with stock's daemon, before anything else changes: the link monitor's `CODEC` line
+1. **The compatibility service with demo** (ours with `--shanling`): the Bluetooth page shows the codec each
+   configuration names, the Quality page's LDAC and SBC rows change the next stream's rate, and the volume
+   event reaches demo as stock's does. And whether demo ever needs the 101 or `SinkChange` stock's binary has.
+2. **The callers on a Q2**, with stock's daemon, before anything else changes: the link monitor's `CODEC` line
    (codec, rate, delay) and its step-down on a weak link, the status bar's battery with the stream's rate
    (`/tmp/q2bt.batt`), Quality's switch on a live link, and a Guest Play session (a phone streams, the car is
    named with its codec line). The text they parse is printed by the Q2's own `dbus-send` and read by BusyBox's
    `sed`, which the harness did not use.
-2. The same with ours, once the launcher exists.
+3. The same with ours, once the launcher exists.
 
 ## Risks
 

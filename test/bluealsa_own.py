@@ -17,6 +17,13 @@ there is no AVDTP, no real MTU, no flow control from a controller, no headset an
 The CPU figure is the host's time in qemu's thread for the encoder, good for comparing two daemons under the
 same emulator and nothing else: it is not the Q2's.
 
+--against-stock runs stock's daemon (STOCKFS/usr/bin/bluealsa) and DAEMON with --shanling the same way and checks
+the compatibility service (docs/bluealsa.md#the-compatibility-service) says what stock's says: the interface as each
+describes it, every StatusChange for a configuration of each codec and a volume change (all 14 bytes, but the last 4
+of a codec event, which stock leaves unset), none for a refused configuration, /tmp/bt_startup made, and the bit
+rate SBC and LDAC then stream at after each SetSBCQuality and SetLDACQuality the Q2 sends. Exit status 0 when all
+match.
+
 --capture DIR writes, for each codec, what the payload's callers read (docs/bluealsa.md#the-callers): the
 daemon's org.freedesktop.DBus.ObjectManager.GetManagedObjects on /org/bluealsa as `dbus-send --print-reply`
 prints it while the PCM exists, as DIR/<stock|own>-<codec>.txt, the fixtures test/unit/test_q2bt.py,
@@ -197,6 +204,28 @@ def fake_bluez(address):
                 dbus.ObjectPath(path), Transport.made[-1].p, dbus_interface='org.bluez.MediaEndpoint1',
                 reply_handler=lambda: say(configured=path, endpoint=found[0]['path']),
                 error_handler=lambda e: say(error=str(e)))
+        elif words[0] == 'volume':  # the headset's absolute volume changed: BlueZ's PropertiesChanged on the transport
+            t = Transport.made[-1]
+            t.p['Volume'] = dbus.UInt16(int(words[1]))
+            t.PropertiesChanged('org.bluez.MediaTransport1', {'Volume': t.p['Volume']}, [])
+            say(volume=int(words[1]))
+        elif words[0] == 'badconfig':  # a configuration the daemon must refuse: CODEC's one byte short, or (zero)
+            octet, ids, config = CODECS[words[1]]  # as long as it should be with no sampling frequency or mode bit set
+            bad = bytes(len(config)) if words[2:] == ['zero'] else config[:-1]
+            found = [e for e in state['endpoints'] if e['uuid'] == SOURCE_UUID and e['codec'] == octet
+                     and (ids is None or vendor(e['caps']) == ids)]
+            path = f'{DEVICE}/fd{len(Transport.made)}'
+            Transport.made.append(Transport(path, octet, bad))
+            bus.get_object(found[0]['owner'], found[0]['path']).SetConfiguration(
+                dbus.ObjectPath(path), Transport.made[-1].p, dbus_interface='org.bluez.MediaEndpoint1',
+                reply_handler=lambda: say(configured=path), error_handler=lambda e: say(refused=str(e)))
+        elif words[0] == 'select':  # SelectConfiguration with capabilities the daemon shares nothing with
+            octet, ids, config = CODECS[words[1]]
+            found = [e for e in state['endpoints'] if e['uuid'] == SOURCE_UUID and e['codec'] == octet
+                     and (ids is None or vendor(e['caps']) == ids)]
+            bus.get_object(found[0]['owner'], found[0]['path']).SelectConfiguration(
+                dbus.ByteArray(bytes(len(config))), dbus_interface='org.bluez.MediaEndpoint1',
+                reply_handler=lambda c: say(selected=bytes(c).hex()), error_handler=lambda e: say(refused=str(e)))
         elif words[0] == 'clear':
             t = Transport.made[-1]
             for e in state['endpoints']:
@@ -282,6 +311,26 @@ def audio(rate, channels, bits, width, seconds):
     return bytes(out)
 
 
+def shanling_signals(path):
+    """[member, int arguments..., hex of the byte array] of each shanling.bluealsa signal dbus-monitor wrote to path"""
+    out, cur, raw = [], None, None
+    for line in pathlib.Path(path).read_text(errors='replace').splitlines():
+        w = line.split()
+        if line.startswith('signal ') and 'interface=shanling.bluealsa;' in line:
+            cur, raw = [line.split('member=')[1].strip()], None
+            out.append(cur)
+        elif line.startswith(('signal ', 'method ', 'error ')):
+            cur = None
+        elif cur is not None and w[:1] == ['int32']:
+            cur.append(int(w[1]))
+        elif cur is not None and w[:3] == ['array', 'of', 'bytes']:
+            raw = []
+            cur.append(raw)
+        elif cur is not None and raw is not None and w and w[0] != ']':
+            raw.extend(w)
+    return [[x if not isinstance(x, list) else ''.join(x) for x in sig] for sig in out]
+
+
 def signals(path):
     """(member, object path) of each org.bluealsa signal dbus-monitor wrote to path"""
     out = []
@@ -292,7 +341,7 @@ def signals(path):
     return out
 
 
-def run(stockfs, daemon, stock, codecs, seconds, qemu, capture=None):
+def run(stockfs, daemon, stock, codecs, seconds, qemu, capture=None, events=False, calls=(), own_defaults=False):
     import dbus
     results, work = {}, pathlib.Path(tempfile.mkdtemp(prefix='q2-bluealsa-'))
     address = f'unix:path={work}/bus'
@@ -310,7 +359,8 @@ def run(stockfs, daemon, stock, codecs, seconds, qemu, capture=None):
         # stock: its launcher's line as Vamp ships it; ours: the same choices, in 5.0.0's words
         options = (['--keep-alive=5', '--aac-afterburner', *names] if stock else
                    ['-p', 'a2dp-source', '--keep-alive=5', '--aac-afterburner', '--aac-vbr', '--aac-bitrate=240000',
-                    '--ldac-quality=high', *names])  # 990 kbps, the rate stock's starts at here
+                    *(['--sbc-quality=medium', '--ldac-quality=standard'] if own_defaults else ['--ldac-quality=high']),
+                    *names] + (['--shanling'] if events or calls or own_defaults else []))  # stock's start, or 990 kbps
         # 5.0.0 keeps each device's volume and delay under its --localstatedir (tools/thirdparty.py BLUEALSA_OPTIONS),
         # and makes only the last directory of that path itself: its launcher makes the rest, as here
         os.makedirs('/tmp/q2-bluealsa/lib', exist_ok=True)
@@ -335,11 +385,24 @@ def run(stockfs, daemon, stock, codecs, seconds, qemu, capture=None):
                                   endpoints=reg['endpoints'], profiles=reg['profiles'], rss_kb=rss_kb(d.pid),
                                   shanling_service=bool(bus.name_has_owner('shanling.bluealsa')))
         manager = dbus.Interface(bus.get_object('org.bluealsa', '/org/bluealsa'), 'org.freedesktop.DBus.ObjectManager')
+        for call in calls:  # the compatibility service's methods, as demo calls them: METHOD=INT (stock, or ours with --shanling)
+            method, value = call.split('=')
+            sl_obj = dbus.Interface(bus.get_object('shanling.bluealsa', '/shanling/bluealsa'), 'shanling.bluealsa')
+            getattr(sl_obj, method)(dbus.Int32(int(value)))
+            results.setdefault('calls', []).append(call)
+        if bus.name_has_owner('shanling.bluealsa'):  # the compatibility service's interface, as it describes itself
+            xml = str(dbus.Interface(bus.get_object('shanling.bluealsa', '/shanling/bluealsa'),
+                                     'org.freedesktop.DBus.Introspectable').Introspect())
+            i = xml.find('<interface name="shanling.bluealsa">')
+            results['shanling_interface'] = ' '.join(xml[i:xml.find('</interface>', i) + 12].split()) if i >= 0 else None
         owner = bus.get_name_owner('org.bluealsa')
         monitor = subprocess.Popen(['dbus-monitor', '--address', address, f"type='signal',sender='{owner}'"],
                                    stdout=open(work/'signals', 'w'), stderr=subprocess.DEVNULL)
         procs.append(monitor)
-        time.sleep(0.3)  # its match in place before the first configuration
+        sl = subprocess.Popen(['dbus-monitor', '--address', address, "type='signal',interface='shanling.bluealsa'"],
+                              stdout=open(work/'shanling', 'w'), stderr=subprocess.DEVNULL)
+        procs.append(sl)
+        time.sleep(0.3)  # their matches in place before the first configuration
         for codec in codecs:
             r = results[codec] = {}
             answer = fake.ask(f'config {codec}')
@@ -359,6 +422,17 @@ def run(stockfs, daemon, stock, codecs, seconds, qemu, capture=None):
                 r['error'] = 'no PCM appeared'
                 continue
             path, p = pcm
+            if events:  # what the compatibility service says: a configuration, a volume change, nothing at a clear
+                time.sleep(0.3)
+                fake.ask('volume 64')
+                time.sleep(0.3)
+                fake.ask('clear')
+                for _ in range(100):
+                    if not any('org.bluealsa.PCM1' in i for i in manager.GetManagedObjects().values()):
+                        break
+                    time.sleep(0.05)
+                r['ok'] = True
+                continue
             if capture:
                 reply = subprocess.run(['dbus-send', '--system', '--print-reply', '--dest=org.bluealsa', '/org/bluealsa',
                                         'org.freedesktop.DBus.ObjectManager.GetManagedObjects'],
@@ -407,8 +481,16 @@ def run(stockfs, daemon, stock, codecs, seconds, qemu, capture=None):
                     break
                 time.sleep(0.05)
             r['ok'] = r['drop'] == 'OK' and r['packets_a_second'] > 0 and d.poll() is None
+        if events:
+            results['badconfig'] = []
+            for how in ('short', 'zero'):
+                results['badconfig'].append('refused' in fake.ask(f'badconfig SBC {how}'))
+                time.sleep(0.5)
+            results['badselect'] = 'refused' in fake.ask('select SBC')
+            time.sleep(0.5)
         results['alive_at_end'] = d.poll() is None
         time.sleep(0.3)
+        results['shanling_signals'] = shanling_signals(work/'shanling')
         results['signals'] = sorted({m for m, path in signals(work/'signals') if path.startswith('/org/bluealsa')}
                                     & {'InterfacesAdded', 'InterfacesRemoved', 'PCMAdded', 'PCMRemoved'})
     finally:
@@ -427,6 +509,51 @@ def run(stockfs, daemon, stock, codecs, seconds, qemu, capture=None):
     return results
 
 
+def against_stock(stockfs, daemon, qemu):
+    """The compatibility service of DAEMON (--shanling) against stock's: 0 when every check matches"""
+    failed = []
+
+    def check(what, ok, detail=''):
+        print(('ok   ' if ok else 'FAIL ') + what + ('' if ok else f': {detail}'), flush=True)
+        if not ok:
+            failed.append(what)
+    stock_bin, codecs = os.path.join(stockfs, 'usr/bin/bluealsa'), list(CODECS)
+    got = {}
+    for who, binary in (('stock', stock_bin), ('own', daemon)):
+        if os.path.exists('/tmp/bt_startup'):
+            os.unlink('/tmp/bt_startup')
+        got[who] = run(stockfs, binary, who == 'stock', codecs, 1, qemu, events=True)
+        got[who]['startup_file'] = os.path.exists('/tmp/bt_startup')
+    s, o = got['stock'], got['own']
+    check('own: owns shanling.bluealsa and makes /tmp/bt_startup', o['startup']['shanling_service'] and o['startup_file'],
+          (o['startup'].get('shanling_service'), o['startup_file']))
+    def members(xml):  # each method's and signal's name and arguments, however the library writes the XML
+        import xml.etree.ElementTree as ET
+        if not xml:
+            return None
+        return sorted((m.tag, m.get('name'), tuple((a.get('type'), a.get('name'), a.get('direction')) for a in m))
+                      for m in ET.fromstring(xml))
+    ours, theirs = members(o.get('shanling_interface')), members(s.get('shanling_interface'))
+    check('the interface, as each describes it, is stock\'s', bool(theirs) and ours == theirs, f'{ours} against {theirs}')
+
+    def comparable(sig):  # a codec event's last 4 bytes are what stock left in memory: compare the first 10
+        return [sig[0], sig[1], sig[2][:20] if sig[1] == 257 else sig[2]] if len(sig) == 3 else sig
+    check('every StatusChange stock sends for five codecs and a volume change, and in order, none at a refusal',
+          [comparable(x) for x in o['shanling_signals']] == [comparable(x) for x in s['shanling_signals']]
+          and len(s['shanling_signals']) == 2 * len(codecs),
+          f"{o['shanling_signals']} against {s['shanling_signals']}")
+    for codec, calls in (('SBC', [None, 'SetSBCQuality=0', 'SetSBCQuality=1', 'SetSBCQuality=2']),
+                         ('LDAC', ['SetLDACQuality=21', 'SetLDACQuality=22', 'SetLDACQuality=23'])):
+        for call in calls:
+            rates = [run(stockfs, b, who == 'stock', [codec], 3, qemu, calls=[call] if call else [],
+                         own_defaults=who == 'own')[codec].get('kbps', 0)
+                     for who, b in (('stock', stock_bin), ('own', daemon))]
+            check(f'{codec} after {call or "no call"}: within 3% of stock\'s bit rate ({rates[0]} kbit/s)',
+                  rates[0] > 0 and abs(rates[1] - rates[0]) <= 0.03 * rates[0], rates)
+    print(f'{len(failed)} failed' if failed else 'all matched')
+    return 1 if failed else 0
+
+
 def main():
     if sys.argv[1:2] == ['--fake-bluez']:
         return fake_bluez(sys.argv[2])
@@ -439,9 +566,15 @@ def main():
     a.add_argument('--qemu', default='qemu-mipsel')
     a.add_argument('--json')
     a.add_argument('--capture')
+    a.add_argument('--events', action='store_true')
+    a.add_argument('--call', action='append', default=[], help='METHOD=INT on shanling.bluealsa before the codecs')
+    a.add_argument('--against-stock', action='store_true')
     args = a.parse_args()
+    if args.against_stock:
+        return against_stock(args.stockfs, args.daemon, args.qemu)
     codecs = args.codecs.split(',')
-    results = run(args.stockfs, args.daemon, args.stock, codecs, args.seconds, args.qemu, args.capture)
+    results = run(args.stockfs, args.daemon, args.stock, codecs, args.seconds, args.qemu, args.capture, args.events,
+                  args.call)
     tail = results.pop('daemon_log_tail')
     print(json.dumps(results, indent=1))
     if args.json:
