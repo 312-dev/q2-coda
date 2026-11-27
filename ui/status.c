@@ -1,6 +1,7 @@
 /* The status row (docs/oled-design.md#status-row): an overlay on every page with no band and no
  * fill, drawn after the page so its glyphs stand over whatever runs under them. The clock is
- * Inter Medium 15 in Text Secondary from x 62, its figures on rows 17 to 27. */
+ * Inter Medium 15 from x 62, its figures on rows 17 to 27, in Text Secondary, and in Text Primary
+ * on Home. */
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -40,5 +41,6 @@ void status_step(void) {
 void status_draw(rect_t r) {
     if (!rect_meet(r, status_rect(), 0)) return;
     if (!S.run.n || run_stale(&S.run)) run_make(&S.run, FACE_MEDIUM, TYPE(15), S.clock, -1);
-    run_draw(&S.run, INSET, CLOCK_Y, tok(TOK_SECONDARY), 256);
+    /* on Home the clock stands over the list in Text Primary (docs/oled-design.md#status-row) */
+    run_draw(&S.run, INSET, CLOCK_Y, tok(strcmp(ui_top_name(), "home") ? TOK_SECONDARY : TOK_PRIMARY), 256);
 }

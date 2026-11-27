@@ -82,6 +82,7 @@ void ui_wake_ms(unsigned ms) {
 }
 int ui_depth(void) { return depth; }
 void *ui_top(void) { return depth ? stack[depth - 1].st : 0; }
+const char *ui_top_name(void) { return depth ? stack[depth - 1].page->name : ""; }
 void ui_route(char *out, size_t room) {
     size_t at = 0;
     *out = 0;

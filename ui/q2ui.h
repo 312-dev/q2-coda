@@ -232,6 +232,7 @@ void ui_again(void);     /* something still moves: another frame after this one 
 void ui_wake_ms(unsigned ms); /* nothing moves, but step again in ms (a marquee's hold, a fade's start) */
 int ui_depth(void);
 void *ui_top(void);        /* the top page's state */
+const char *ui_top_name(void);
 int ui_moving(void);      /* the last frame asked for another */
 int ui_wake_pending(void); /* a wake is set */
 extern int ui_reduce_motion;

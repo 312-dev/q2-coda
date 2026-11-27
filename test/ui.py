@@ -347,7 +347,7 @@ def pages(binary, work):
     trace, pics2, _ = script(binary, work, 60, ['rest', 'shot @playing.ppm', 'tick 9', 'rest'], *home, now=NOW)
     good &= check('Home has one row more while something plays', (idle_rows, trace[-1]['sel'] + 1) == (2, 3), f"{idle_rows} and {trace[-1]['sel'] + 1}")
     good &= check("Home's platter keeps to the list's side and the pane is drawn beside it",
-                  pics['idle'].blue(100, BAR_H + 3) and not pics['idle'].blue(250, BAR_H + 3) and pics['idle'].at(280, 160) != (0, 0, 0))
+                  pics['idle'].blue(100, 40 + 3) and not pics['idle'].blue(250, 40 + 3) and pics['idle'].at(280, 160) != (0, 0, 0))
     good &= check('the two Homes differ where the first row is', pics['idle'].rgb != pics2['playing'].rgb)
     # Centre on Playing is Now Playing: the bar filled to the song's place, the times beside it
     _, pics, _ = script(binary, work, 60, ['rest', 'key centre', 'rest', 'shot @now.ppm'], *home, now=NOW)

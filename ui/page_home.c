@@ -11,6 +11,7 @@
 #include "q2ui.h"
 
 #define LIST_W 196
+#define HOME_TOP 40 /* Home's rows start 18 px above a list page's, as demo's Home has them */
 #define PANE ((rectf_t){ LIST_W, 0, SCREEN_W - LIST_W, SCREEN_H })
 
 static const struct home_row {
@@ -68,7 +69,7 @@ static void *h_open(void *arg) {
     struct home_st *s = calloc(1, sizeof *s);
     s->state = state_now(), s->seen = now_seq(), s->t = ui_time();
     ui_source src = { .count = h_count, .row = h_row, .chosen = h_chosen, .focus = h_focus, .ctx = s,
-                      .box = { 0, 58, LIST_W, 224 } };
+                      .box = { 0, HOME_TOP, LIST_W, 7 * 32 } };
     s->list = list_new(&src);
     ui_mark_all();
     return s;
