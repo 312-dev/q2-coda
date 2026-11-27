@@ -1,15 +1,16 @@
 """q2ui_gate.c: the screen handed to q2ui and taken back (docs/ui-rewrite.md#cutover). demo starts q2ui as its child
 while /mnt/data/ui-target says q2ui and the image has /usr/bin/q2ui, paints nothing and leaves the wheel, Centre,
-Return and touches to it; it takes the screen back for a window of its own and gives it again on Home. With no
-target or no q2ui in the image, which is every default build, the gate never closes."""
+Return and touches to it; it takes the screen back for a window of its own and gives it again on Home; and it opens
+a page of its own that q2ui asks for as it leaves. With no target or no q2ui in the image, which is every default
+build, the gate never closes."""
 import ctypes as C
 
 import pytest
 
 from conftest import O
 
-TARGET, BINARY = b'/mnt/data/ui-target', b'/usr/bin/q2ui'
-CHILD = 4242
+TARGET, BINARY, ASK = b'/mnt/data/ui-target', b'/usr/bin/q2ui', b'/tmp/q2ui.open'
+CHILD, ASKED = 4242, 3 << 8  # q2ui's pid here, and waitpid's status for its exit code 3
 
 
 class Gate:
@@ -21,12 +22,16 @@ class Gate:
         self.ended, self.forks, self.repaints, self.lit = 0, 0, 0, 0
         self.shell: list[str] = []
         self.name = C.create_string_buffer(64)
-        fw.mock('fw_open', lambda path, *_: 9 if target is not None and C.string_at(path) == TARGET else -1)
+        self.ask: bytes | None = None
+        self.status, self.ms, self.opened = 0, 1000, []
+        fw.mock('fw_open', self.open)
         fw.mock('fw_read', self.read)
+        fw.mock('time_now_ms', lambda *_: self.ms)
+        fw.mock('navigator_to', lambda name, *_: self.opened.append(C.string_at(name).decode()))
         fw.mock('fw_close', lambda *_: 0)
         fw.mock('fw_access', lambda path, *_: 0 if binary and C.string_at(path) == BINARY else -1)
         fw.mock('fw_fork', self.fork)
-        fw.mock('fw_waitpid', lambda pid, *_: pid if self.ended and pid == CHILD else 0)
+        fw.mock('fw_waitpid', self.waitpid)
         fw.mock('fw_system', lambda cmd, *_: self.shell.append(C.string_at(cmd).decode()))
         fw.mock('window_manager', lambda *_: 0x1000)
         fw.mock('window_manager_get_top_window', lambda *_: 0x2000 if self.top is not None else 0)
@@ -37,10 +42,22 @@ class Gate:
         self.poll = fw.fn('q2ui_poll', None)
         self.input = fw.fn('q2ui_input', C.c_int, C.c_uint, C.c_uint)
 
+    def open(self, path, *_):
+        name = C.string_at(path)
+        if name == TARGET and self.target is not None:
+            return 9
+        return 10 if name == ASK and self.ask is not None else -1
+
     def read(self, fd, out, room, *_):
-        data = (self.target or b'')[:room]
+        data = ((self.target if fd == 9 else self.ask) or b'')[:room]
         C.memmove(out, data, len(data))
         return len(data)
+
+    def waitpid(self, pid, status, *_):
+        if not self.ended or pid != CHILD:
+            return 0
+        C.c_int.from_address(status).value = self.status
+        return pid
 
     def fork(self, *_):
         self.forks += 1
@@ -126,3 +143,65 @@ def test_with_no_window_yet_demo_is_still_starting_and_q2ui_is_left_alone(fw):
     g.poll()
     g.poll()
     assert g.forks == 1 and not any(c.startswith('kill ') for c in g.shell)
+
+
+def test_now_playing_on_top_is_not_a_window_to_end_q2ui_for(fw):
+    g = Gate(fw)
+    g.poll()
+    g.top = b'playing_page'  # stock opened it for the song q2ui chose; q2ui has its own over it
+    for _ in range(3):
+        g.poll()
+    assert not any(c.startswith('kill ') for c in g.shell) and g.on() == CHILD
+
+
+def test_a_page_q2ui_asks_for_is_opened_and_q2ui_comes_back_when_it_is_left(fw):
+    g = Gate(fw)
+    g.poll()
+    g.ask, g.status, g.ended = b'games_page\n', ASKED, 1
+    g.poll()
+    assert g.opened == ['games_page'] and g.on() == 0 and g.repaints == 1
+    g.ended = 0
+    g.poll()
+    assert g.forks == 1  # Home is still on top: the page is on its way up, not left
+    g.top = b'games_page'
+    g.poll()
+    g.poll()
+    assert g.forks == 1
+    g.top = b'home_page'  # Return from it
+    g.poll()
+    assert g.forks == 2 and g.on() == CHILD
+
+
+def test_a_page_that_never_comes_up_does_not_keep_q2ui_away(fw):
+    g = Gate(fw)
+    g.poll()
+    g.ask, g.status, g.ended = b'games_page', ASKED, 1
+    g.poll()
+    g.ended = 0
+    g.ms += 1400
+    g.poll()
+    assert g.forks == 1
+    g.ms += 200  # a second and a half with Home still on top
+    g.poll()
+    g.poll()
+    assert g.forks == 2
+
+
+@pytest.mark.parametrize('ask', [b'../etc/passwd', b'games', b'Games_page', b'games_page; reboot', b'_page', None])
+def test_only_a_stock_pages_name_is_opened(fw, ask):
+    g = Gate(fw)
+    g.poll()
+    g.ask, g.status, g.ended = ask, ASKED, 1
+    g.poll()
+    g.ended = 0
+    for _ in range(3):
+        g.poll()
+    assert g.opened == [] and g.forks == 1 and g.on() == 0  # demo keeps the screen, as after a plain end
+
+
+def test_a_plain_end_reads_no_request(fw):
+    g = Gate(fw)
+    g.poll()
+    g.ask, g.status, g.ended = b'games_page', 0, 1  # a request left from an earlier run
+    g.poll()
+    assert g.opened == [] and g.on() == 0

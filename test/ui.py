@@ -56,8 +56,10 @@ def folder(work, n):
 
 
 def base_args(binary, d):
-    return [str(binary), '--db', d/'library.db', '--catalogue', '', '--fb', d/'fb', '--fonts', d/'fonts', '--icons', d,
-            '--stats', d/'stats.json', '--state', d/'state', '--cmdq', d/'cmdq', '--playlist', d/'list', '--backlight', d/'backlight']
+    # Songs first, as these checks were written for it (a later --page wins); Home is the program's own first page
+    return [str(binary), '--page', 'songs', '--db', d/'library.db', '--catalogue', '', '--fb', d/'fb', '--fonts', d/'fonts', '--icons', d,
+            '--stats', d/'stats.json', '--state', d/'state', '--cmdq', d/'cmdq', '--playlist', d/'list', '--backlight', d/'backlight',
+            '--now', d/'now', '--cover', d/'cover.jpg', '--ask', d/'ask']
 
 
 class Picture:
@@ -378,8 +380,9 @@ def live(binary, work):
     # a server library's catalogue (docs/server-library.md): its songs are listed with the card's
     cat = pathlib.Path(work)/'catalogue.db'
     db = sqlite3.connect(cat)
-    db.execute('create table servertable(id integer, name, songer)')
-    db.executemany('insert into servertable values (?, ?, ?)', [(0x40000000 + i, f'Server {i}', 'Artist') for i in range(50)])
+    db.execute('create table servertable(id integer, name, songer, album, track integer)')  # songtable's columns that are read
+    db.executemany('insert into servertable values (?, ?, ?, ?, ?)',
+                   [(0x40000000 + i, f'Server {i}', 'Artist', 'Album', i + 1) for i in range(50)])
     db.commit()
     db.close()
     r = Run(binary, work, 300, '--catalogue', cat)

@@ -82,6 +82,20 @@ void ui_wake_ms(unsigned ms) {
 }
 int ui_depth(void) { return depth; }
 void *ui_top(void) { return depth ? stack[depth - 1].st : 0; }
+void ui_route(char *out, size_t room) {
+    size_t at = 0;
+    *out = 0;
+    for (int i = 0; i < depth && stack[i].page->where; ++i) {
+        char name[48] = "";
+        int sel = stack[i].page->where(stack[i].st, name, sizeof name);
+        if (!*name) break;
+        at += (size_t)snprintf(out + at, room - at, "%s%s:%d", i ? "/" : "", name, sel);
+        if (at >= room) break;
+    }
+}
+void ui_select_top(int sel) {
+    if (depth && stack[depth - 1].page->select && sel >= 0) stack[depth - 1].page->select(stack[depth - 1].st, sel);
+}
 int ui_moving(void) { return again; }
 int ui_wake_pending(void) { return wake_at != 0; }
 void ui_quit(int code) { quit = 1, quit_code = code; }

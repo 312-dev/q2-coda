@@ -2,9 +2,9 @@
  *
  *     q2ui [--db FILE] [--catalogue FILE] [--fb FILE] [--input DIR] [--fonts DIR] [--icons DIR]
  *          [--limit N] [--motion 0|1] [--reduce-motion] [--light] [--panel-bits 8|6|5]
- *          [--text awtk] [--page songs|depth|gallery|card] [--stats FILE] [--bench] [--script FILE]
+ *          [--text awtk] [--page home|songs|depth|gallery|card] [--stats FILE] [--bench] [--script FILE]
  *          [--trace FILE] [--clock HH:MM] [--state FILE] [--cmdq FIFO] [--playlist FILE]
- *          [--backlight DIR]
+ *          [--backlight DIR] [--ask FILE] [--now FILE] [--cover FILE]
  *
  * --catalogue is the server library's (default /mnt/mmc/.q2pod/catalogue.db; "" for none): its
  * songs are listed with the card's, as the Library lists them. --panel-bits is the depth of the
@@ -16,10 +16,11 @@
  * Options also come from /mnt/data/q2ui.args (one line), as demo starts it with none
  * (patch/q2ui_gate.c). Return on the first page ends it, and demo has the screen again. demo also
  * ends it, by a signal, when a window of its own must be seen, and starts it again after: so the
- * row it was on is kept in --state (a file in /tmp: gone at a restart) each time it comes to
- * rest, and a start within STATE_FRESH_S of that opens on the same row. --cmdq and --playlist are
- * the player's queue and list file (ui/player.c), --backlight the folder whose state says the
- * screen is dark; a test names its own.
+ * pages it had open and each one's row are kept in --state (a file in /tmp: gone at a restart)
+ * each time it comes to rest, and a start within STATE_FRESH_S of that opens them again. --cmdq and --playlist are
+ * the player's queue and list file (ui/player.c), --now and --cover what plays and its cover
+ * (ui/now.c), --ask the file a page of demo's is asked for in (ui_demo_page), --backlight the
+ * folder whose state says the screen is dark; a test names its own.
  *
  * --bench draws and turns frames without the panel's wait and writes their CPU time to the stats
  * file. --script runs a file of input on a clock of its own, a frame every 1/60 s whatever the
@@ -36,7 +37,7 @@
 #define FRAME_US 16667u
 
 static struct {
-    const char *db, *catalogue, *fb, *input, *fonts, *stats, *script, *trace, *page, *state;
+    const char *db, *catalogue, *fb, *input, *fonts, *stats, *script, *trace, *page, *state, *ask;
     int limit, bench, bits;
 } opt = { "/mnt/data/database.db",
           "/mnt/mmc/.q2pod/catalogue.db",
@@ -46,8 +47,9 @@ static struct {
           "/mnt/data/q2ui-stats.json",
           0,
           0,
-          "songs",
+          "home",
           "/tmp/q2ui.state",
+          "/tmp/q2ui.open",
           0,
           0,
           8 };
@@ -79,6 +81,12 @@ static void parse(int argc, char **argv) {
             opt.page = v, ++i;
         else if (!strcmp(a, "--state"))
             opt.state = v, ++i;
+        else if (!strcmp(a, "--ask"))
+            opt.ask = v, ++i;
+        else if (!strcmp(a, "--now"))
+            now_file = v, ++i;
+        else if (!strcmp(a, "--cover"))
+            now_cover_file = v, ++i;
         else if (!strcmp(a, "--cmdq"))
             player_queue = v, ++i;
         else if (!strcmp(a, "--playlist"))
@@ -142,24 +150,49 @@ static void write_stats(void) {
     fclose(f);
 }
 
-/* The row a q2ui before this one rested on, when that was a moment ago. */
+/* Where a q2ui before this one rested, when that was a moment ago: its pages and each one's row
+ * (ui_route), opened again one over another with no motion. */
 #define STATE_FRESH_S 600
 static void state_save(void) {
-    FILE *f = list_last_selected() >= 0 ? fopen(opt.state, "w") : 0;
+    char route[400];
+    ui_route(route, sizeof route);
+    FILE *f = *route ? fopen(opt.state, "w") : 0;
     if (!f) return;
-    fprintf(f, "%s %d %ld\n", opt.page, list_last_selected(), (long)time(0));
+    fprintf(f, "%ld %s\n", (long)time(0), route);
     fclose(f);
 }
 static void state_restore(void) {
-    char page[32] = "";
-    int sel = -1;
+    char route[400] = "";
     long at = 0;
     FILE *f = fopen(opt.state, "r");
     if (!f) return;
-    int n = fscanf(f, "%31s %d %ld", page, &sel, &at);
+    int n = fscanf(f, "%ld %399s", &at, route);
     fclose(f);
-    if (n == 3 && !strcmp(page, opt.page) && sel >= 0 && time(0) - at < STATE_FRESH_S && !strcmp(opt.page, "songs"))
-        list_select(list_page_list(ui_top()), sel, 0);
+    if (n != 2 || time(0) - at >= STATE_FRESH_S) return;
+    int motion = list_motion, first = 1;
+    list_motion = 0;
+    for (char *seg = strtok(route, "/"); seg; seg = strtok(0, "/"), first = 0) {
+        char *colon = strchr(seg, ':');
+        if (!colon) break;
+        *colon = 0;
+        if (first) { /* the first page is open already: the same one, or the route is another start's */
+            if (strcmp(seg, opt.page)) break;
+        } else if (!strcmp(seg, "now"))
+            ui_push(&page_now, 0);
+        else if (!library_route(seg))
+            break;
+        ui_select_top(atoi(colon + 1));
+    }
+    list_motion = motion;
+}
+
+void ui_demo_page(const char *name) {
+    FILE *f = fopen(opt.ask, "w");
+    if (!f) return;
+    fprintf(f, "%s\n", name);
+    fclose(f);
+    state_save();
+    ui_quit(3); /* demo reads the name on this exit code (patch/q2ui_gate.c) */
 }
 static void at_rest(void) {
     write_stats();
@@ -167,7 +200,9 @@ static void at_rest(void) {
 }
 
 static void first_page(void) {
-    if (!strcmp(opt.page, "depth"))
+    if (!strcmp(opt.page, "home"))
+        ui_push(&page_home, 0);
+    else if (!strcmp(opt.page, "depth"))
         ui_push(&page_depth, 0);
     else if (!strcmp(opt.page, "gallery"))
         gallery_push();
@@ -337,6 +372,7 @@ int main(int argc, char **argv) {
         return fprintf(stderr, "q2ui: cannot read %s\n", opt.db), 2;
     if (fb_open(opt.fb, opt.bits)) return fprintf(stderr, "q2ui: cannot use %s\n", opt.fb), 2;
     open_ms = (unsigned)((mono_us() - t0) / 1000u);
+    now_open();
     if (opt.script) {
         int code = script(opt.script);
         fb_close();

@@ -128,4 +128,4 @@ static void c_close(void *st) {
     image_free(s->cover), image_free(s->badge);
     free(s);
 }
-const ui_page page_card = { "card", c_open, c_event, c_step, c_draw, c_close, 0 };
+const ui_page page_card = { .name = "card", .open = c_open, .event = c_event, .step = c_step, .draw = c_draw, .close = c_close };

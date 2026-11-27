@@ -24,6 +24,6 @@ static void chosen(void *ctx, int i) {
 }
 
 void songs_push(void) {
-    ui_source src = { .count = count, .row = row, .chosen = chosen, .pinned = 1, .letters = 1 };
+    ui_source src = { .count = count, .row = row, .chosen = chosen, .name = "songs", .pinned = 1, .letters = 1 };
     ui_push(&list_page, &src);
 }

@@ -582,12 +582,21 @@ void list_step(ui_list *l) {
 /* ---- a page that is one list ---- */
 struct list_page_st {
     ui_list *list;
+    char name[48];
 };
 static void *lp_open(void *arg) {
     struct list_page_st *s = calloc(1, sizeof *s);
-    s->list = list_new(arg);
+    const ui_source *src = arg;
+    s->list = list_new(src);
+    if (src->name) snprintf(s->name, sizeof s->name, "%s", src->name);
     return s;
 }
+static int lp_where(void *st, char *name, size_t room) {
+    struct list_page_st *s = st;
+    snprintf(name, room, "%s", s->name);
+    return s->list->sel;
+}
+static void lp_select(void *st, int sel) { list_select(((struct list_page_st *)st)->list, sel, 0); }
 static void lp_event(void *st, const input_t *e) {
     struct list_page_st *s = st;
     if (e->type == IN_KEY_UP && e->value == KEY_UI_RETURN) {
@@ -609,5 +618,5 @@ static void lp_shown(void *st) {
     (void)st;
     ui_mark_all();
 }
-const ui_page list_page = { "list", lp_open, lp_event, lp_step, lp_draw, lp_close, lp_shown };
+const ui_page list_page = { "list", lp_open, lp_event, lp_step, lp_draw, lp_close, lp_shown, lp_where, lp_select };
 ui_list *list_page_list(void *st) { return ((struct list_page_st *)st)->list; }

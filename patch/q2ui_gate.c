@@ -7,9 +7,12 @@
  *
  *  - q2ui ends (Return on its first page, or a crash): demo has the screen again, whole, and
  *    keeps it until the next start of demo. Return on q2ui's first page is the way out of q2ui.
- *  - demo needs the screen (a window other than Home opened by itself: the USB prompt, a pairing
- *    request, Shut Down?): q2ui is ended so the window can be seen and answered, and started
- *    again once Home is back on top.
+ *  - demo needs the screen (a window other than Home or Now Playing opened by itself: the USB
+ *    prompt, a pairing request, Shut Down?): q2ui is ended so the window can be seen and
+ *    answered, and started again once Home is back on top. Now Playing is not such a window:
+ *    stock opens it when a song is chosen, and q2ui has its own over it.
+ *  - q2ui asks for a page of demo's it has not got: it names the page in Q2UI_ASK and ends with
+ *    Q2UI_ASKED. demo opens that page, and starts q2ui again when the page has been left.
  *
  * The target is read once, before demo's first paint, so no frame of demo's shows first. With no
  * such file, or no q2ui in the image (any default build), none of this does anything. */
@@ -19,6 +22,9 @@
 
 #define Q2UI_BIN "/usr/bin/q2ui"
 #define Q2UI_TARGET "/mnt/data/ui-target"
+#define Q2UI_ASK "/tmp/q2ui.open"
+#define Q2UI_ASKED 3     /* its exit code with a page named in Q2UI_ASK (ui/main.c ui_demo_page) */
+#define Q2UI_OPEN_MS 1500 /* a page asked for that has not come up by now is not coming */
 #define Q2UI_DUE (-1) /* to be started on the next pass: already the screen's holder */
 
 static struct {
@@ -26,6 +32,8 @@ static struct {
     char asked;        /* the target was read at start */
     char took, back;   /* demo ended it for a window of its own; start it again on Home */
     char booted;       /* it has been started once: the boot animation is over */
+    char opening;      /* a page q2ui asked for is on its way up: Home on top does not yet mean it was left */
+    unsigned asked_at; /* time_now_ms when it was asked for */
 } qu __attribute__((section(".scratch")));
 
 static int wanted(void) {
@@ -45,10 +53,27 @@ int q2ui_on(void) {
     return qu.pid;
 }
 
-/* Home on top, or nothing yet (demo still starting) */
+/* Nothing of demo's on top that the user has to see: Home, Now Playing, or no window yet (demo
+ * still starting) */
 static int on_home(void) {
     void *top = window_manager_get_top_window(window_manager());
-    return !top || !tk_strcmp(widget_get_prop_str(top, "name", ""), "home_page");
+    const char *name = top ? widget_get_prop_str(top, "name", "") : "home_page";
+    return !tk_strcmp(name, "home_page") || !tk_strcmp(name, "playing_page");
+}
+
+/* The page q2ui named as it left, opened: a stock page's name and nothing else (lower case and
+ * underscores, ending _page), since what is read here is a file any program can write. */
+static void open_asked(void) {
+    char name[40] = "";
+    int fd = open(Q2UI_ASK, 0);
+    if (fd < 0) return;
+    int n = (int)read(fd, name, sizeof name - 1), ok = n > 5;
+    close(fd);
+    while (n > 0 && (name[n - 1] == '\n' || name[n - 1] == '\r')) name[--n] = 0;
+    for (int i = 0; i < n; ++i) ok &= (name[i] >= 'a' && name[i] <= 'z') || name[i] == '_';
+    if (!ok || n < 6 || memcmp(name + n - 5, "_page", 5)) return;
+    navigator_to(name);
+    qu.back = 1, qu.opening = 1, qu.asked_at = (unsigned)time_now_ms();
 }
 
 static void start(void) {
@@ -70,8 +95,13 @@ static void start(void) {
 /* every UI loop pass */
 void q2ui_poll(void) {
     if (!q2ui_on()) {
-        if (!qu.back || !on_home()) return;
-        qu.back = 0, qu.pid = Q2UI_DUE; /* the window demo took the screen for has closed */
+        if (!qu.back) return;
+        if (qu.opening) { /* the page asked for comes up a pass or more after it is asked for */
+            if (!on_home() || (unsigned)time_now_ms() - qu.asked_at >= Q2UI_OPEN_MS) qu.opening = 0;
+            return;
+        }
+        if (!on_home()) return;
+        qu.back = 0, qu.pid = Q2UI_DUE; /* the window demo had the screen for has closed */
     }
     if (qu.pid == Q2UI_DUE) {
         start();
@@ -81,6 +111,7 @@ void q2ui_poll(void) {
     if (waitpid(qu.pid, &status, 1)) { /* WNOHANG: it has ended */
         qu.pid = 0;
         qu.back = qu.took;
+        if (!qu.took && status == Q2UI_ASKED << 8) open_asked();
         widget_invalidate_force(window_manager(), 0);
         return;
     }

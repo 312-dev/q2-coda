@@ -169,7 +169,7 @@ static void paint_guard(void) {
     fflush(stdout);
     pid_t pid = fork();
     if (!pid) {
-        static const ui_page bad = { "bad", 0, 0, 0, draw_marks, 0, 0 };
+        static const ui_page bad = { .name = "bad", .draw = draw_marks };
         fclose(stderr);
         ui_push(&bad, 0);
         ui_clock_fake(1000000);
@@ -179,7 +179,7 @@ static void paint_guard(void) {
     int status = 0;
     waitpid(pid, &status, 0);
     check("a draw that marks is aborted", WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT, "status %x", status);
-    static const ui_page good = { "good", 0, 0, 0, draw_none, 0, 0 };
+    static const ui_page good = { .name = "good", .draw = draw_none };
     ui_push(&good, 0);
     ui_clock_fake(1000000);
     check("a draw that only draws is shown", ui_frame(0, 0) == 1 && !ui_painting, "");

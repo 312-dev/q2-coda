@@ -213,7 +213,15 @@ typedef struct ui_page {
     void (*draw)(void *st, rect_t r);           /* everything of the page inside r, from the state alone */
     void (*close)(void *st);
     void (*shown)(void *st);                    /* the page is on top again (a page above it closed) */
+    /* Where the page is, for q2ui to come back to after demo has had the screen: its name (which
+     * the route's reader knows how to open) into `name`, and its selection, -1 with none. 0: the
+     * page is not kept in a route, nor any above it. */
+    int (*where)(void *st, char *name, size_t room);
+    void (*select)(void *st, int sel);          /* the selection put back, with no motion */
 } ui_page;
+/* The stack as "name:sel/name:sel", bottom first, as far as its pages say where they are. */
+void ui_route(char *out, size_t room);
+void ui_select_top(int sel);
 void ui_push(const ui_page *p, void *arg);
 void ui_pop(void); /* the top page closes; the last page's pop ends the program */
 void ui_quit(int code);
@@ -291,6 +299,7 @@ typedef struct ui_source {
     void (*held)(void *ctx, int i);             /* Centre held; 0: nothing */
     void (*focus)(void *ctx, int i);            /* the selection came to row i; 0: nothing */
     void *ctx;
+    const char *name; /* the page's name in a route; 0: not kept */
     int pinned; /* rows at the top that stay put while the rest scroll under them (Songs' Shuffle) */
     int row_h;  /* 32, or 52 for two-line rows; 0 is 32 */
     int letters; /* 1: sorted by title, so a fast spin jumps by letter */
@@ -321,6 +330,27 @@ int lib_songs(void);
 const char *lib_title(int i);
 const char *lib_artist(int i);
 const int *lib_ids(void); /* each song's row id in its table, in the list's order */
+const char *lib_album(int i);
+int lib_track(int i);
+enum { LIB_ARTIST, LIB_ALBUM, LIB_KINDS };
+int lib_groups(int kind);                             /* how many artists, or albums */
+const char *lib_group_name(int kind, int g);
+const char *lib_group_artist(int g);                  /* an album's artist (its first song's) */
+const int *lib_group_songs(int kind, int g, int *n);  /* the group's songs, as numbers for lib_title */
+
+/* ---- now.c: what plays ---- */
+typedef struct {
+    char title[160], artist[160], album[160];
+    int playing, paused, pos_ms, len_s, volume, id;
+    uint64_t read_us; /* when this was read: the position is that old */
+} ui_now;
+void now_open(void);              /* watch for changes; a change wakes the loop */
+void now_read(void);
+const ui_now *now_get(void);
+unsigned now_seq(void);           /* moves when anything of it changed */
+const image_t *now_cover(void);   /* the playing song's cover, 0 with none */
+unsigned now_cover_seq(void);
+extern const char *now_file, *now_cover_file;
 
 /* ---- player.c: the player, through demo while demo owns it ---- */
 int player_play(const int *ids, int n, int at, int shuffle); /* the list, starting at its song `at`; 0 sent */
@@ -329,6 +359,12 @@ extern const char *player_queue, *player_list;               /* the FIFO and the
 
 /* ---- pages ---- */
 void songs_push(void);
+void library_push(void);
+int library_route(const char *name); /* open the Library's page of that route name; 1 when it was one */
+extern const ui_page page_home, page_now;
+/* Leave q2ui for a page of demo's it has not got (docs/ui-rewrite.md#cutover): demo opens the page
+ * named, takes the screen, and starts q2ui again where it was when the page is left. */
+void ui_demo_page(const char *name);
 extern const ui_page page_depth; /* the panel's colour depth test card */
 void gallery_push(void);         /* every kind of row, as a list to try them on */
 extern const ui_page page_card;  /* a card of layers the wheel pushes */

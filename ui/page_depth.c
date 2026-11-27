@@ -56,4 +56,4 @@ static void event(void *st, const input_t *e) {
     (void)st;
     if (e->type == IN_KEY_UP && e->value == KEY_UI_RETURN) ui_pop();
 }
-const ui_page page_depth = { "depth", 0, event, 0, draw, 0, 0 };
+const ui_page page_depth = { .name = "depth", .event = event, .draw = draw };
