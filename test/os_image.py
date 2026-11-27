@@ -338,6 +338,9 @@ def sysd_checks(fs, power_key, log):
         while time.monotonic() < end and not pred():
             time.sleep(0.1)
         return pred()
+    if bl.read_text().strip() == '4':  # dark already: q2sysd's screen off time (30 s unused) ran out first
+        key(1), time.sleep(0.1), key(0)
+        until(lambda: bl.read_text().strip() == '0')
     key(1), time.sleep(0.1), key(0)
     check(until(lambda: bl.read_text().strip() == '4'), 'q2sysd: a press of the power key turns the screen off (bl_power 4)')
     key(1), time.sleep(0.1), key(0)
