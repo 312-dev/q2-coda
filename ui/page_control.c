@@ -23,7 +23,7 @@
  * flips; AirPlay and the USB row close the sheet and open demo's page for them (the gate,
  * ui_demo_page); Now Playing closes it and opens q2ui's Now Playing; on a slider Centre gives it
  * the wheel (an accent ring) and Centre or Return gives it back. A grabbed slider steps as a list's
- * inline slider does (wheel_accel, up to SLIDER_STEPS a tick): Brightness down the pipe ("set
+ * inline slider does, by the wheel's speed (input.c wheel_steps, demo's volume curve): Brightness down the pipe ("set
  * bright N"), Volume down the player's queue ("volume N", as Now Playing sets it) up to demo's top
  * ("volmax"), each shown at once and kept until demo's word says the same, LEVEL_HOLD_US at most.
  * Centre held on a toggle (the toolkit's KEY_HOLD_MS) closes the sheet and opens its settings, as
@@ -40,7 +40,6 @@
 #include <string.h>
 
 #include "q2ui.h"
-#include "../patch/wheel_accel.h"
 
 /* the layout, as control_center.c's CC_* */
 #define X0 20
@@ -87,7 +86,6 @@
 #define RING_US 5000000u
 #define SPRING_MS 280
 #define SPRING_STEP 20
-#define SLIDER_STEPS 10
 #define WANT_HOLD_US 2000000u
 #define LEVEL_HOLD_US 1500000u
 #define LEVEL_EASE 0.06f /* the fills' spring, as Now Playing's bar eases (VOL_EASE_MS) */
@@ -121,7 +119,6 @@ struct cc_st {
     int want[STOPS];  /* a switch flipped or a level set here: shown until demo says so too; -1 none */
     uint64_t set_at[STOPS];
     spring_t fill[2]; /* Brightness's and Volume's fills, 0 to 1 */
-    wheel_accel_t accel;
     int wifi, cable, loaded; /* as last drawn: the Wi-Fi glyph, a cable in, something loaded */
     unsigned now_seen, cover_seen;
     uint64_t t;
@@ -305,8 +302,7 @@ static void cc_event(void *st, const input_t *e) {
         ui_click(0); /* every tick, as on demo's sheet, a dialog whose keys keep stock's click (ringnav_keydown) */
         if (wake(s)) return;
         if (s->grab >= 0) {
-            int step = wheel_accel(&s->accel, s, e->value, e->ms, 0);
-            adjust(s, s->grab, e->value * (step < 1 ? 1 : step > SLIDER_STEPS ? SLIDER_STEPS : step)); /* clockwise is more, as demo's cc_wheel */
+            adjust(s, s->grab, e->value * wheel_steps(e->speed)); /* clockwise is more, by the wheel's speed, as demo's cc_wheel (vol_next, bright_wheel) */
             return;
         }
         int next = s->focus + e->value;

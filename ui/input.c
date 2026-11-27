@@ -38,6 +38,45 @@ static struct {
     int raw_x, raw_y, down, was, sent_x, sent_y;
 } ts;
 
+/* The wheel's speed, measured as demo's wheel thread does (patch/playback.c wheel_speed_sample,
+ * Rockbox's iPod driver): each click of SPEED_CLICK degrees of travel over its time, averaged as
+ * (15 v + new) / 16, and back to 0 on a reversal, a new touch or SPEED_IDLE_MS without travel;
+ * travel in 1/FINE units, the speed in 1/256 degrees a second. A sample is timed by the kernel's
+ * stamp on it, else when it is read. The constants are patch/offsets.inc's WHEEL_SPEED_*. */
+#define FINE 16
+#define SPEED_CLICK 15
+#define SPEED_IDLE_MS 250
+#define SPEED_TOP 4000
+static struct {
+    int speed, dir, moved;
+    unsigned at;
+} sp;
+static void speed_sample(int d, unsigned ms) {
+    if (ms - sp.at >= SPEED_IDLE_MS || (d && sp.dir && (d ^ sp.dir) < 0)) {
+        sp.speed = sp.moved = 0, sp.dir = d;
+        if (d) sp.at = ms;
+        return;
+    }
+    if (!d) return;
+    sp.dir = d;
+    sp.moved += d < 0 ? -d : d;
+    if (sp.moved > 100 * FINE) sp.moved = 100 * FINE;
+    int click = SPEED_CLICK * FINE * 200 / 360, dt = (int)(ms - sp.at);
+    if (sp.moved < click || dt <= 0) return;
+    int v = sp.moved * 225 * 128 / dt;
+    if (v > SPEED_TOP << 8) v = SPEED_TOP << 8;
+    sp.speed += (v - sp.speed) * sp.moved / (15 * click + sp.moved);
+    sp.moved = 0, sp.at = ms;
+}
+
+/* patch/volume.c vol_accel on a tick's speed: (speed / VOL_ACCEL_START)^4 rounded, 1 to
+ * VOL_ACCEL_MAX (patch/offsets.inc's 270, 10, and VOL_ACCEL_TOP 1000 the speed's cap) */
+int wheel_steps(int speed) {
+    unsigned v = speed < 0 ? 0 : speed > 1000 ? 1000 : (unsigned)speed;
+    unsigned r = v * 256 / 270, r2 = r * r >> 8, n = ((r2 * r2 >> 8) + 128) >> 8;
+    return n < 1 ? 1 : n > 10 ? 10 : (int)n;
+}
+
 static unsigned now_ms(void) { return (unsigned)(mono_us() / 1000u); }
 
 int input_open(const char *dir) {
@@ -73,6 +112,7 @@ int input_fds(int *fds, int max) {
 
 static int wheel_event(const struct input_event *e, input_t *out, int max) {
     int n = 0;
+    unsigned at = e->time.tv_sec || e->time.tv_usec ? (unsigned)(e->time.tv_sec * 1000 + e->time.tv_usec / 1000) : now_ms();
     if (e->type == EV_ABS && e->code == ABS_X) x = e->value;
     if ((e->type == EV_KEY && e->code == BTN_TOUCH) ||
         (e->type == EV_ABS && e->code == ABS_PRESSURE)) {
@@ -87,17 +127,19 @@ static int wheel_event(const struct input_event *e, input_t *out, int max) {
     if (e->type != EV_SYN || !touching) return 0;
     if (!have_last) {
         have_last = 1, last_x = x;
+        sp.speed = sp.moved = sp.dir = 0, sp.at = at; /* a new touch starts from rest */
         return 0;
     }
     int d = x - last_x;
     d = d < -WHEEL_TURN / 2 ? d + WHEEL_TURN : d > WHEEL_TURN / 2 ? d - WHEEL_TURN : d;
     last_x = x;
+    speed_sample(d * FINE, at);
     if (d && (d ^ acc) < 0) acc = 0; /* reversed: the carry the other way is dropped */
     acc += d;
     while ((acc >= WHEEL_TICK_UNITS || acc <= -WHEEL_TICK_UNITS) && n < max) {
         int dir = acc > 0 ? 1 : -1;
         acc -= dir * WHEEL_TICK_UNITS;
-        out[n++] = (input_t){ IN_TICK, -dir, 0, now_ms() };
+        out[n++] = (input_t){ IN_TICK, -dir, 0, now_ms(), 0, 0, sp.speed >> 8 };
     }
     if (d && n < max) out[n++] = (input_t){ IN_TUG, 0, (float)-acc / WHEEL_TICK_UNITS, now_ms() };
     return n;

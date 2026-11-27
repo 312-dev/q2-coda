@@ -88,6 +88,8 @@ CASES = {
  'cc-finger-hold-at-once': ('ui/page_control.c', '        ui_time() - s->touch.at >= QUICK_HOLD_MS * 1000u) {', '        1) {', 'pages', 'a shorter touch on EQ is a tap'),
  'cc-no-swipe-close': ('ui/page_control.c', '        if (dy <= -SWIPE_PX && -dy > abs(dx)) return ui_pop(), 1;', '', 'pages', 'a swipe up closes the sheet'),
  'display-no-bright': ('ui/page_display.c', 'static int at(int i) { return i == 0 ? D_BRIGHT : i <= D_BRIGHT ? i - 1 : i; }', 'static int at(int i) { return i; }', 'pages', 'Brightness leads Display'),
+ 'volume-no-speed': ('ui/page_now.c', '+ e->value * wheel_steps(e->speed);', '+ e->value;', 'volume', 'a fast spin 10'),
+ 'speed-never-measured': ('ui/input.c', '    speed_sample(d * FINE, at);\n', '', 'volume', 'spun fast take the volume further'),
  'fan-unlit-grey': ('ui/status.c', 'rgb_mix(*p & 0xffffff, ink, k < lit ? cov : cov * UNLIT);', 'rgb_mix(*p & 0xffffff, k < lit ? ink : tok(TOK_OFF), cov);', 'status', "unlit bands are its ink at 30%"),
  'slider-never-grabs': ('ui/list.c', '            l->grab = l->grab == l->sel ? -1 : l->sel;', '            l->grab = -1;', 'scripts', 'Centre grabs the slider'),
  'slider-track-plain': ('ui/list.c', '#define SLIDER_TRACK_ON 0x7da2ea', '#define SLIDER_TRACK_ON 0x333333', 'scripts', "the grabbed row's track on the bar"),

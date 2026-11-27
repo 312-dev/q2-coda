@@ -209,10 +209,12 @@ typedef struct {
     float share; /* IN_TUG: the share of the next tick turned, -1 to 1 (0: the finger left) */
     unsigned ms;
     int x, y; /* IN_TOUCH_*: where the finger is, 0 to SCREEN_W - 1 and SCREEN_H - 1 (the last place, lifting) */
+    int speed; /* IN_TICK: the wheel's speed as it came, degrees a second (demo's wheel_speed) */
 } input_t;
 int input_open(const char *dir);
 int input_fds(int *fds, int max);
 int input_read(input_t *out, int max); /* what has arrived, without waiting */
+int wheel_steps(int speed); /* a level's steps for a tick at speed: demo's volume curve (patch/volume.c vol_accel) */
 int input_wait_ms(void);               /* until a held key's hold is due; -1: no key is down */
 void input_flush(void);                /* what arrived while another program had the keys is dropped */
 

@@ -86,7 +86,6 @@
 #define MQ_FADE 12
 #define SLIDER_X 190       /* an inline slider's track starts here (docs/oled-design.md#inline-sliders), */
 #define SLIDER_END 62      /* and ends this far short of the right column, where its value ends */
-#define SLIDER_STEPS 10    /* a tick's most steps on a fast spin (patch/offsets.inc VOL_ACCEL_MAX) */
 #define SLIDER_TRACK_ON 0x7da2ea /* its track on the platter, under a white fill */
 #define CACHE 32 /* rows whose text is kept: a power of two, more than a fast glide shows */
 /* A captioned row's caption (patch/settings_pages.c, its CAP_* values): Inter 13 from the title's column, CAP_INSET
@@ -844,8 +843,7 @@ void list_select(ui_list *l, int i, int animate) {
 void list_event(ui_list *l, const input_t *e) {
     if (!l->n) return;
     if (e->type == IN_TICK && l->grab >= 0) { /* a grabbed slider's: the selection stays */
-        int step = wheel_accel(&l->accel, l, e->value, e->ms, 0);
-        step = step < 1 ? 1 : step > SLIDER_STEPS ? SLIDER_STEPS : step;
+        int step = wheel_steps(e->speed); /* by the wheel's speed, as demo's sliders (patch/levels.c wheel_level) */
         ui_row before = { 0 }, after = { 0 };
         l->src.row(l->src.ctx, l->grab, &before);
         if (l->src.adjust) l->src.adjust(l->src.ctx, l->grab, e->value * step); /* clockwise is more, as demo's sliders (patch/inline_slider.c) */
