@@ -12,14 +12,34 @@ static inline uint32_t px_mix(uint32_t dst, uint32_t rgb, unsigned a) {
     uint32_t g = ((rgb & 0xff00) * a + (dst & 0xff00) * (256 - a)) >> 8 & 0xff00;
     return 0xff000000 | rb | g;
 }
-/* The same with a in 1/65536 and noise (0-255) added under the last bit kept, which is what
- * spreads a slow ramp's steps into grain too fine to see as bands. */
+/* The panel's bits for red and blue, and for green (fb.c fb_depth): 8, or fewer on a narrower
+ * panel, whose levels are then every 4th or 8th of the canvas's. */
+extern unsigned px_bits_rb, px_bits_g;
+
+/* A channel's value v, in 1/65536 of a level, brought to the nearest level below it that a panel
+ * of `bits` has, with noise (0-255) of one such level's size added first. */
+static inline unsigned px_level(unsigned v, unsigned noise, unsigned bits) {
+    unsigned top = (0xffu << (8 - bits)) & 0xff, out = (v + (noise << (16 - bits))) >> (24 - bits) << (8 - bits);
+    return out > top ? top : out;
+}
+/* The same blend with a in 1/65536 and noise (0-255) added under the last level kept, which is
+ * what spreads a slow ramp's steps into grain too fine to see as bands. The last level kept is
+ * the panel's, not the canvas's: on a 6-bit panel a ramp is dithered once, from these 16 bits
+ * straight to the panel's 6, and leaves here already on the panel's levels, so nothing dithers it
+ * again on its way out (docs/ui-rewrite.md#gradients). On an 8-bit panel it is the canvas's. */
 static inline uint32_t px_mix16(uint32_t dst, uint32_t rgb, unsigned a, unsigned noise) {
-    unsigned k = 65536 - a, n = noise << 8;
-    unsigned r = ((rgb >> 16 & 0xff) * a + (dst >> 16 & 0xff) * k + n) >> 16;
-    unsigned g = ((rgb >> 8 & 0xff) * a + (dst >> 8 & 0xff) * k + n) >> 16;
-    unsigned b = ((rgb & 0xff) * a + (dst & 0xff) * k + n) >> 16;
+    unsigned k = 65536 - a;
+    unsigned r = px_level((rgb >> 16 & 0xff) * a + (dst >> 16 & 0xff) * k, noise, px_bits_rb);
+    unsigned g = px_level((rgb >> 8 & 0xff) * a + (dst >> 8 & 0xff) * k, noise, px_bits_g);
+    unsigned b = px_level((rgb & 0xff) * a + (dst & 0xff) * k, noise, px_bits_rb);
     return 0xff000000 | r << 16 | g << 8 | b;
+}
+/* A picture's pixel brought to the panel's levels with noise: a cover's own gradients are ramps
+ * too. On an 8-bit panel it is the pixel. */
+static inline uint32_t px_picture(uint32_t rgb, unsigned noise) {
+    if (px_bits_rb == 8) return rgb & 0xffffff;
+    return px_level((rgb >> 16 & 0xff) << 16, noise, px_bits_rb) << 16 | px_level((rgb >> 8 & 0xff) << 16, noise, px_bits_g) << 8 |
+           px_level((rgb & 0xff) << 16, noise, px_bits_rb);
 }
 
 /* Whole-number square root, rounded down. */

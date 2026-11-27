@@ -134,6 +134,7 @@ static void glyphs(void) {
  * for long */
 static void ramps(void) {
     all();
+    fb_depth(8); /* the canvas's own levels: a panel's fewer are flats()' and narrow()'s */
     fill((rect_t){ 0, 0, SCREEN_W, SCREEN_H }, 0x202020);
     shade_rows(100, 200, 255, 0);
     double worst = 0;
@@ -155,6 +156,7 @@ static void ramps(void) {
     for (int i = 0; i < 4096; ++i) ++count[dither64[i]];
     for (int i = 0; i < 256; ++i) uniform &= count[i] == 16;
     check("the noise table holds every value 16 times", uniform, "");
+    fb_depth(6);
 }
 
 static void draw_marks(void *st, rect_t r) {
@@ -187,8 +189,8 @@ static void paint_guard(void) {
     check("with nothing marked no frame goes out", ui_frame(0, 0) == 0, "");
 }
 
-/* the turn to a 6-bit panel: the bits the link drops are clear, black stays black, and a block's
- * mean is the 8-bit colour's */
+/* the turn to a 6-bit panel: the bits the panel drops are clear, black stays black, a flat colour
+ * is the nearest level, and a ramp, dithered where it was drawn, keeps its mean */
 static void narrow(const char *fb) {
     all();
     for (int y = 0; y < SCREEN_H; ++y)
@@ -214,7 +216,7 @@ static void narrow(const char *fb) {
         }
     check("a 6-bit panel is sent no low bits", got == 320 * 375 && !low, "%d pixels with some", low);
     check("black stays black under the dither", !lit, "%d lit", lit);
-    check("0x53 dithered to 6 bits is 0x53 on average", fabs(mean / n - 0x53) < 0.2, "%.3f", mean / n);
+    check("flat 0x53 at 6 bits is 0x54 everywhere, the nearest level", mean / n == 0x54, "%.3f", mean / n);
     /* a ramp slower than the canvas's own levels (8 of them down the screen), which the canvas holds as
      * dither between two levels: brought to 6 bits, its rows must still average what the ramp is there,
      * wherever between two levels that falls. Rows are gathered by which of a 6-bit step's four levels
@@ -255,11 +257,67 @@ static void narrow(const char *fb) {
         for (int ch = 0; ch < 3; ++ch) sums[ch] += page[i] >> (ch * 8) & 0xff;
     }
     fb_depth(6);
-    check("a 565 panel is sent five bits of red and blue and six of green, each averaging the colour",
-          !stray && fabs(sums[0] / (320 * 375) - 0x53) < 0.2 && fabs(sums[1] / (320 * 375) - 0x53) < 0.2 && fabs(sums[2] / (320 * 375) - 0x53) < 0.2,
+    check("a 565 panel is sent five bits of red and blue and six of green, each the nearest level to the colour",
+          !stray && sums[0] / (320 * 375) == 0x50 && sums[1] / (320 * 375) == 0x54 && sums[2] / (320 * 375) == 0x50,
           "%d stray, means %.2f %.2f %.2f", stray, sums[2] / (320 * 375), sums[1] / (320 * 375), sums[0] / (320 * 375));
     check("a ramp between the canvas's levels keeps its mean at 6 bits, wherever between two it is", got == 320 * 375 && worst < 0.12,
           "leans %.3f of a level at level %d of four, quarter %d", lean[at] / rows[at], at / 4, at % 4);
+}
+
+/* The page on screen, read back from the panel file. */
+static uint32_t shown[320 * 375];
+static void read_back(const char *fb) {
+    dmg_all();
+    fb_present();
+    FILE *f = fopen(fb, "rb");
+    fseek(f, (long)(fb_page() * 320 * 375 * 4), SEEK_SET);
+    if (fread(shown, 4, 320 * 375, f) != 320 * 375) memset(shown, 0, sizeof shown);
+    fclose(f);
+}
+static uint32_t shown_at(int x, int y) { return shown[x * 320 + (319 - y)] & 0xffffff; }
+
+/* On a 6-bit panel a flat colour is one colour, the nearest the panel has, and only what is a ramp
+ * is dithered, once (docs/ui-rewrite.md#gradients). */
+static void flats(const char *fb) {
+    all();
+    /* Home's pane and a blank cover are greys off the 6-bit grid: the owner saw their grain */
+    fill((rect_t){ 0, 0, SCREEN_W, 160 }, 0x2a2a2c);
+    fill_round((rectf_t){ 20.5f, 180.5f, 300, 100 }, 8, 0, 0x1c1c1e, 1, 0);
+    read_back(fb);
+    int others = 0, inside = 0;
+    for (int y = 0; y < 160; ++y)
+        for (int x = 0; x < SCREEN_W; ++x) others += shown_at(x, y) != shown_at(0, 0);
+    for (int y = 195; y < 265; ++y)
+        for (int x = 40; x < 300; ++x) inside += shown_at(x, y) != shown_at(40, 195);
+    check("a flat fill off the panel's levels comes out one colour, the nearest it has",
+          !others && shown_at(0, 0) == 0x2c2c2c, "%d pixels of another colour; the first is %06x", others, shown_at(0, 0));
+    check("and so does the inside of a rounded box", !inside && shown_at(40, 195) == 0x1c1c20, "%d of another; %06x", inside, shown_at(40, 195));
+    /* a ramp is still dithered, and its grain is fine: the means of 8 x 8 blocks stay near the ramp. Two
+     * dithers one after the other, whatever their noise, leave coarser grain than one */
+    fill_ramp((rect_t){ 0, 0, SCREEN_W, SCREEN_H }, 0x404040, 0x484848);
+    read_back(fb);
+    int mixed = 0;
+    double grain = 0;
+    unsigned blocks = 0;
+    for (int y = 0; y < SCREEN_H; ++y) {
+        int lo = 255, hi = 0;
+        for (int x = 0; x < SCREEN_W; ++x) {
+            int v = (int)(shown_at(x, y) & 0xff);
+            lo = v < lo ? v : lo, hi = v > hi ? v : hi;
+        }
+        mixed += hi > lo;
+    }
+    for (int by = 0; by + 8 <= SCREEN_H; by += 8)
+        for (int bx = 0; bx + 8 <= SCREEN_W; bx += 8, ++blocks) {
+            double sum = 0, want = 0x40 + 8.0 * (by + 3.5) / (SCREEN_H - 1);
+            for (int y = by; y < by + 8; ++y)
+                for (int x = bx; x < bx + 8; ++x) sum += shown_at(x, y) & 0xff;
+            grain += (sum / 64 - want) * (sum / 64 - want);
+        }
+    grain = sqrt(grain / blocks);
+    check("a ramp is still dithered at 6 bits", mixed > 250, "%d of 320 rows mix levels", mixed);
+    /* measured: 0.072 dithered once from 16 bits to the panel's 6; 0.115 dithered to 8 and then to 6 */
+    check("and finely: the means of 8 x 8 blocks are within 0.09 of a level of the ramp, root mean square", grain < 0.09, "%.3f", grain);
 }
 
 int main(int argc, char **argv) {
@@ -275,6 +333,7 @@ int main(int argc, char **argv) {
     glyphs();
     ramps();
     narrow(argv[1]);
+    flats(argv[1]);
     paint_guard();
     printf("q2ui-test: %s\n", failed ? "FAILED" : "all checks passed");
     return failed;

@@ -302,8 +302,12 @@ static int extra_fd = -1;
 static void (*extra_fn)(void);
 void ui_watch(int fd, void (*fn)(void)) { extra_fd = fd, extra_fn = fn; }
 
-/* SIGHUP: end with UI_EXIT_RELOAD, on which demo's gate starts q2ui again at once (patch/q2ui_gate.c),
- * so options changed in /mnt/data/q2ui.args take effect without a restart of the Q2. */
+/* SIGHUP: q2ui starts itself again in place (ui_restart, set by main.c: the same program file run
+ * anew under the same pid), so options changed in /mnt/data/q2ui.args, or a new q2ui put where the
+ * old one was, take effect with no restart of the Q2 and without demo's gate seeing anything end.
+ * If that cannot be done it ends with UI_EXIT_RELOAD, on which a gate that knows the code starts
+ * it again (patch/q2ui_gate.c). */
+void (*ui_restart)(void);
 static volatile sig_atomic_t reload;
 static void on_hup(int sig) {
     (void)sig;
@@ -348,7 +352,10 @@ int ui_run(void) {
          * screen was dark, and at the first input after a pause long enough for it to have been */
         if (got && (quiet_until > last_input || mono_us() - last_input > WAKE_PAUSE_US)) panel_24bit();
         if (got) last_input = mono_us();
-        if (reload) ui_quit(UI_EXIT_RELOAD);
+        if (reload) {
+            if (ui_restart) ui_restart(); /* does not come back when it works */
+            ui_quit(UI_EXIT_RELOAD);
+        }
         showed = ui_frame(in, got);
         if (showed) rested = 0;
     }

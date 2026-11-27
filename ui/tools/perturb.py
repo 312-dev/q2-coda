@@ -51,7 +51,7 @@ CASES = {
  'panel-no-wait': ('ui/panel.c', "        if (waited == 20) return 0; /* 20 ms and still full: left for the next time */", "        if (waited == 20) break;", 'panel', 'FIFOs that stay full'),
  'panel-keep-ignored': ('ui/panel.c', "    if (panel_keep) return 0;", "", 'panel', '--panel-mode keep'),
  'panel-wrong-word': ('ui/panel.c', "    dsi[GEN_PLD_DATA / 4] = COLMOD | COLMOD_24 << 8;", "    dsi[GEN_PLD_DATA / 4] = COLMOD | 0x55 << 8;", 'panel', 'sent COLMOD 0x77'),
- 'hup-plain-end': ('ui/ui.c', "        if (reload) ui_quit(UI_EXIT_RELOAD);", "        if (reload) ui_quit(0);", 'live', 'SIGHUP ends q2ui with its reload code'),
+ 'hup-ends': ('ui/ui.c', "            if (ui_restart) ui_restart(); /* does not come back when it works */", "", 'live', 'SIGHUP starts q2ui again in place'),
 }
 names = sys.argv[1:] or list(CASES)
 bad = 0

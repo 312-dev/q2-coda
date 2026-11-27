@@ -156,7 +156,7 @@ void image_draw_part(const image_t *im, rectf_t part, rectf_t r, float radius, f
             unsigned a = t >> 24;
             a = ((a + (a >> 7)) * cov >> 8) * alpha >> 8;
             if (!a) continue;
-            uint32_t ink = tint >= 0 ? (uint32_t)tint : t & 0xffffff;
+            uint32_t ink = tint >= 0 ? (uint32_t)tint : px_picture(t, dither64[(y & 63) * 64 + (x & 63)]);
             row[x] = a >= 256 ? 0xff000000 | ink : px_mix(row[x], ink, a);
         }
     }

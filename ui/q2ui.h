@@ -233,7 +233,8 @@ void ui_select_top(int sel);
 void ui_push(const ui_page *p, void *arg);
 void ui_pop(void); /* the top page closes; the last page's pop ends the program */
 #define UI_EXIT_ASK 3    /* its exit code with a page of demo's named (ui_demo_page) */
-#define UI_EXIT_RELOAD 4 /* and to be started again at once: SIGHUP's, for new options */
+#define UI_EXIT_RELOAD 4 /* and to be started again at once: SIGHUP's, when it cannot start itself again */
+extern void (*ui_restart)(void); /* SIGHUP's: start the program again in place; returns only if it could not */
 void ui_quit(int code);
 int ui_quitting(int *code); /* whether ui_quit was called, and with what */
 void ui_mark(rect_t r);  /* r is to be drawn again and shown */

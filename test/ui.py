@@ -481,13 +481,26 @@ def panel(binary, work):
 
 
 def reload(binary, work):
-    """kill -HUP ends q2ui with the code demo's gate starts it again on."""
+    """kill -HUP: q2ui starts itself again in place, the same process, on the pages it had open."""
     r = Run(binary, work, 20, '--page', 'home')
     r.rest()
+    r.key(KEY_CENTRE)  # Library
+    time.sleep(0.6)
+    r.ticks(1)
+    before = r.rest()
+    was = r.picture()
     r.proc.send_signal(signal.SIGHUP)
-    code = r.proc.wait(timeout=5)
+    time.sleep(1.0)
+    after = r.rest()
+    now = r.picture()
+    same = all(shot.pixel(was, x, y) == shot.pixel(now, x, y) for y in range(BAR_H, 320, 3) for x in range(0, 375, 5))
+    good = check('SIGHUP starts q2ui again in place: the same process, counting from nothing, on the page and row it had',
+                 r.proc.poll() is None and before['ticks'] == 1 and after['ticks'] == 0 and same,
+                 f"exit {r.proc.poll()}, ticks {before['ticks']} then {after['ticks']}, same picture {same}")
+    r.proc.terminate()
+    r.proc.wait(timeout=5)
     os.close(r.queue)
-    return check('SIGHUP ends q2ui with its reload code, 4', code == 4, str(code))
+    return good
 
 
 def live(binary, work):

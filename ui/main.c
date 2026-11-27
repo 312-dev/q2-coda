@@ -12,8 +12,8 @@
  * link to the glass, which every frame is dithered down to (docs/ui-rewrite.md#gradients);
  * --panel-mode keep leaves the panel in the 16-bit mode stock set (ui/panel.c puts it in 24
  * otherwise), and --panel-mem is a file standing in for the registers, for a test. kill -HUP
- * ends q2ui with a code on which demo starts it again, so this file's options can be changed
- * with no restart of the Q2.
+ * makes q2ui start itself again in place, so this file's options, or a newer q2ui put at the
+ * same path, take effect with no restart of the Q2.
  * --page depth is the card that finds it by eye; gallery and card are the toolkit's examples
  * (ui/page_gallery.c). --text awtk lays text out on whole pixels, as
  * demo does, for comparing screens.
@@ -36,6 +36,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "q2ui.h"
 
@@ -371,8 +372,21 @@ static int script(const char *path) {
     return code; /* a page that ended the program ends the script, with its code */
 }
 
+/* The program run again in place of this one, with the arguments this one was started with: its
+ * file is read anew (a newer q2ui put at the same path is what runs) and so is
+ * /mnt/data/q2ui.args. Where the pages were is saved first, and what this one had open is closed,
+ * so the new one starts as from a shell. */
+static char **started_with;
+static void restart(void) {
+    state_save();
+    for (int fd = 3; fd < 64; ++fd) close(fd);
+    execv("/proc/self/exe", started_with);
+    execv(started_with[0], started_with);
+}
+
 int main(int argc, char **argv) {
     char regular[256], medium[256], fallback[256];
+    started_with = argv, ui_restart = restart;
     uint64_t t0 = mono_us();
     parse_file("/mnt/data/q2ui.args");
     parse(argc - 1, argv + 1);

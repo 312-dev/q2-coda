@@ -6,11 +6,14 @@
  * The turn takes BAND canvas rows together, so each run of stores fills one cache line of a page
  * row: patch/fb_rotate.c measured that at 0.9 ms a whole frame on a Q2, 3.3 ms a pixel at a time.
  *
- * The canvas is 8 bits a channel whatever the panel's link carries. When the link is narrower
- * (fb_bits 6 or 5, or 565 for five bits of red and blue and six of green: the low bits of each
- * channel are not wired), the turn adds blue noise of one step's size before the low bits go, so a ramp that would show bands of 4 or 8 levels shows
- * none (docs/ui-rewrite.md#gradients). The noise is fixed to the screen, so a still picture is
- * still, and black stays black. */
+ * The canvas is 8 bits a channel whatever the panel shows. When the panel shows fewer (fb_bits 6 or
+ * 5, or 565 for five bits of red and blue and six of green), the turn brings each pixel to the
+ * nearest level the panel has, and adds no noise doing it: a flat colour comes out one colour,
+ * solid, where noise here made every surface off the panel's levels a static grain of the two
+ * beside it. What is a ramp (a fade, a shadow, a gleam, a cover's own shading) was dithered when
+ * it was drawn, from 16 bits straight to the panel's levels (px.h px_mix16, px_picture), and
+ * passes through here unchanged (docs/ui-rewrite.md#gradients).
+ */
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
@@ -113,10 +116,12 @@ void fb_close(void) {
 
 /* c with noise n (0-255) scaled to one step of the panel's depth added to each channel, held at
  * white, and the bits the link drops cleared */
-static unsigned bits_rb = 8, bits_g = 8; /* red and blue's bits, and green's: a 565 link gives green one more */
-static inline uint32_t narrow(uint32_t c, unsigned n) {
-    uint32_t keep_rb = (0xffu << (8 - bits_rb)) & 0xff, keep_g = (0xffu << (8 - bits_g)) & 0xff;
-    uint32_t rb = (c & 0xff00ff) + (n >> bits_rb) * 0x10001u, g = (c & 0xff00) + ((n >> bits_g) << 8);
+unsigned px_bits_rb = 8, px_bits_g = 8; /* red and blue's bits, and green's: a 565 panel gives green one more */
+/* c at the nearest level the panel has for each channel: half a step added, held at white, the bits
+ * the panel drops cleared. No noise: see the note at the top. */
+static inline uint32_t narrow(uint32_t c) {
+    uint32_t keep_rb = (0xffu << (8 - px_bits_rb)) & 0xff, keep_g = (0xffu << (8 - px_bits_g)) & 0xff;
+    uint32_t rb = (c & 0xff00ff) + (0x80u >> px_bits_rb) * 0x10001u, g = (c & 0xff00) + ((0x80u >> px_bits_g) << 8);
     uint32_t orb = rb & 0x1000100u, og = g & 0x10000u;
     rb = (rb | (orb - (orb >> 8))) & (keep_rb * 0x10001u);
     g = (g | (og - (og >> 8))) & (keep_g << 8);
@@ -124,19 +129,13 @@ static inline uint32_t narrow(uint32_t c, unsigned n) {
 }
 void fb_depth(int bits) {
     fb_bits = bits == 5 || bits == 6 || bits == 565 ? bits : 8;
-    bits_rb = fb_bits == 565 ? 5 : (unsigned)fb_bits, bits_g = fb_bits == 565 ? 6 : (unsigned)fb_bits;
+    px_bits_rb = fb_bits == 565 ? 5 : (unsigned)fb_bits, px_bits_g = fb_bits == 565 ? 6 : (unsigned)fb_bits;
 }
 static unsigned turn_narrow(uint32_t *page, rect_t r) {
     for (int y = r.y; y < r.y + r.h; ++y) {
         const uint32_t *src = canvas + y * SCREEN_W + r.x;
-        /* the noise from the table turned on its side and moved, not from the place a ramp's own
-         * dither read it (draw.c): the same value twice would have the two work against each other, each rounding up where the
-         * other already had, and a ramp between two of the canvas's levels would lean by up to
-         * two thirds of a level, in bands (ui/test_engine.c holds that it does not) */
-        const uint8_t *noise = dither64 + ((y + 41) & 63); /* the table turned: its column y + 41 */
         uint32_t *dst = page + r.x * PAGE_W + (PAGE_W - 1 - y);
-        for (int i = 0; i < r.w; ++i, dst += PAGE_W)
-            *dst = src[i] & 0xffffff ? narrow(src[i], noise[((r.x + i + 17) & 63) * 64]) : 0xff000000;
+        for (int i = 0; i < r.w; ++i, dst += PAGE_W) *dst = narrow(src[i]);
     }
     return (unsigned)(r.w * r.h);
 }
