@@ -154,6 +154,9 @@ Everything here has been run only under the emulator and on this machine. What o
 | Screen | `bl_power` turning the panel's light off; the brightness scale; the double tap waking it; q2ui's 24-bit panel mode | [q2sysd](sysd.md#needs-a-q2) |
 | Power | Which devices carry the power button and whether a press arrives twice; `poweroff` reaching the PMIC; the PMIC's own long-press time | [q2sysd](sysd.md#needs-a-q2) |
 | Battery | The CW2015's and the charger's files under this init | [q2sysd](sysd.md#needs-a-q2) |
+| Charging | `PE22` driven through the kernel's GPIO class, and the charger stopping | [q2sysd](sysd.md#needs-a-q2) |
+| USB storage | The mass-storage gadget on the real controller, the card seen by a computer and mounted again | [q2sysd](sysd.md#needs-a-q2) |
+| Standby | `mem` suspend with Vamp OS's services, its wake sources, its current | [q2sysd](sysd.md#needs-a-q2) |
 | Sound | The DAC powered and in PCM mode with no `demo`; the driver's 0-100 volume law in decibels | [q2playd](playd.md#the-volume) |
 | Wi-Fi | Association, DHCP and DNS; the radio's power when `wlan0` is down | [q2netd](netd.md#needs-a-q2) |
 | Library | A real card's first scan time and memory under FFmpeg | [q2libd](libd.md#what-is-missing) |
