@@ -1,0 +1,6 @@
+#!/bin/sh
+# q2scrobd (docs/vamp-os-services.md#scrobbling): each listen heard over Q2PLAY/1 into the card's .scrobbler.log.
+. /usr/libexec/vamp/log
+step "q2scrobd: start"
+exec 2>&1
+exec /usr/bin/q2scrobd
