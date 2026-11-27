@@ -19,6 +19,7 @@ import json
 import os
 import pathlib
 import shutil
+import signal
 import sqlite3
 import struct
 import subprocess
@@ -450,6 +451,58 @@ def routes(binary, work):
     return good
 
 
+def panel(binary, work):
+    """The panel told to take 24 bits a pixel (ui/panel.c), against a file standing in for the DSI host's registers:
+    sent only to a link that reads as the Q2's, only when its FIFOs have room, and never with --panel-mode keep."""
+    good = True
+    CODING, PKT, HDR, PLD, STATUS = 0x10, 0x3c, 0x6c, 0x70, 0x74
+
+    def run(words, *options):
+        d = pathlib.Path(tempfile.mkdtemp(dir=work))
+        regs = bytearray(4096)
+        for at, value in words.items():
+            struct.pack_into('<I', regs, at, value)
+        (d/'dsi').write_bytes(regs)
+        script(binary, work, 1, ['rest'], '--panel-mem', d/'dsi', *options)
+        after = (d/'dsi').read_bytes()
+        changed = {at for at in range(0, 4096, 4) if after[at:at + 4] != bytes(regs[at:at + 4])}
+        return struct.unpack_from('<I', after, PLD)[0], struct.unpack_from('<I', after, HDR)[0], changed
+    q2 = {CODING: 5, PKT: 0x140}
+    pld, hdr, changed = run(q2)
+    good &= check('the panel is sent COLMOD 0x77 as one DCS long write, and no other register is written',
+                  (pld, hdr) == (0x773a, 0x239) and changed == {PLD, HDR}, f'{pld:#x} {hdr:#x} {sorted(changed)}')
+    for what, words, options in (('a link that is not the Q2\'s', {CODING: 0, PKT: 0x140}, ()),
+                                 ('a line of another length', {CODING: 5, PKT: 0x1e0}, ()),
+                                 ('FIFOs that stay full', {**q2, STATUS: 0x0a}, ()),
+                                 ('--panel-mode keep', q2, ('--panel-mode', 'keep'))):
+        _, _, changed = run(words, *options)
+        good &= check(f'with {what} nothing is written', not changed, str(sorted(changed)))
+    return good
+
+
+def reload(binary, work):
+    """kill -HUP: q2ui starts itself again in place, the same process, on the pages it had open."""
+    r = Run(binary, work, 20, '--page', 'home')
+    r.rest()
+    r.key(KEY_CENTRE)  # Library
+    time.sleep(0.6)
+    r.ticks(1)
+    before = r.rest()
+    was = r.picture()
+    r.proc.send_signal(signal.SIGHUP)
+    time.sleep(1.0)
+    after = r.rest()
+    now = r.picture()
+    same = all(shot.pixel(was, x, y) == shot.pixel(now, x, y) for y in range(BAR_H, 320, 3) for x in range(0, 375, 5))
+    good = check('SIGHUP starts q2ui again in place: the same process, counting from nothing, on the page and row it had',
+                 r.proc.poll() is None and before['ticks'] == 1 and after['ticks'] == 0 and same,
+                 f"exit {r.proc.poll()}, ticks {before['ticks']} then {after['ticks']}, same picture {same}")
+    r.proc.terminate()
+    r.proc.wait(timeout=5)
+    os.close(r.queue)
+    return good
+
+
 def live(binary, work):
     good = True
     # the first frame, three ticks, a rest
@@ -560,6 +613,9 @@ def main():
         if not only or 'live' in only:
             good &= live(binary, work)
             good &= routes(binary, work)
+            good &= reload(binary, work)
+        if not only or 'panel' in only:
+            good &= panel(binary, work)
     print('q2ui: ' + ('all checks passed' if good else 'FAILED'))
     return 0 if good else 1
 

@@ -16,6 +16,7 @@
  * over them. */
 #include <dirent.h>
 #include <poll.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,6 +32,7 @@
 #define DARKEN 64   /* and how far it darkens, of 255 */
 #define GLYPH_BUDGET_US 3000 /* what a frame of a motion may spend making glyphs (text.c) */
 #define WARM_US 4000         /* and a pass of the loop at rest, making them ahead */
+#define WAKE_PAUSE_US 3000000u /* no input for this long: the screen may have slept and woken since */
 
 int ui_reduce_motion, ui_painting;
 struct ui_stats ui_stats;
@@ -300,8 +302,21 @@ static int extra_fd = -1;
 static void (*extra_fn)(void);
 void ui_watch(int fd, void (*fn)(void)) { extra_fd = fd, extra_fn = fn; }
 
+/* SIGHUP: q2ui starts itself again in place (ui_restart, set by main.c: the same program file run
+ * anew under the same pid), so options changed in /mnt/data/q2ui.args, or a new q2ui put where the
+ * old one was, take effect with no restart of the Q2 and without demo's gate seeing anything end.
+ * If that cannot be done it ends with UI_EXIT_RELOAD, on which a gate that knows the code starts
+ * it again (patch/q2ui_gate.c). */
+void (*ui_restart)(void);
+static volatile sig_atomic_t reload;
+static void on_hup(int sig) {
+    (void)sig;
+    reload = 1;
+}
+
 int ui_run(void) {
     struct pollfd fds[5];
+    signal(SIGHUP, on_hup);
     int keys[3], nfds = input_fds(keys, 3), showed = 0, rested = 0, warm = 1;
     for (int i = 0; i < nfds; ++i) fds[i] = (struct pollfd){ keys[i], POLLIN, 0 };
     while (!quit) {
@@ -330,9 +345,17 @@ int ui_run(void) {
         input_t in[64];
         int got = input_read(in, 64);
         /* the press that wakes the screen is only that, its release included */
-        static uint64_t quiet_until;
+        static uint64_t quiet_until, last_input;
         if (got && dark()) quiet_until = mono_us() + 400000;
         if (got && mono_us() < quiet_until) got = 0;
+        /* a panel set up again on waking is back at 16 bits a pixel (panel.c): told again when the
+         * screen was dark, and at the first input after a pause long enough for it to have been */
+        if (got && (quiet_until > last_input || mono_us() - last_input > WAKE_PAUSE_US)) panel_24bit();
+        if (got) last_input = mono_us();
+        if (reload) {
+            if (ui_restart) ui_restart(); /* does not come back when it works */
+            ui_quit(UI_EXIT_RELOAD);
+        }
         showed = ui_frame(in, got);
         if (showed) rested = 0;
     }

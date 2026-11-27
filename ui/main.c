@@ -2,6 +2,7 @@
  *
  *     q2ui [--db FILE] [--catalogue FILE] [--fb FILE] [--input DIR] [--fonts DIR] [--icons DIR]
  *          [--limit N] [--motion 0|1] [--reduce-motion] [--light] [--panel-bits 8|6|5|565]
+ *          [--panel-mode 24|keep] [--panel-mem FILE]
  *          [--text awtk] [--page home|songs|depth|gallery|card] [--stats FILE] [--bench] [--script FILE]
  *          [--trace FILE] [--clock HH:MM] [--state FILE] [--cmdq FIFO] [--playlist FILE]
  *          [--backlight DIR] [--ask FILE] [--now FILE] [--cover FILE]
@@ -9,6 +10,10 @@
  * --catalogue is the server library's (default /mnt/mmc/.q2pod/catalogue.db; "" for none): its
  * songs are listed with the card's, as the Library lists them. --panel-bits is the depth of the
  * link to the glass, which every frame is dithered down to (docs/ui-rewrite.md#gradients);
+ * --panel-mode keep leaves the panel in the 16-bit mode stock set (ui/panel.c puts it in 24
+ * otherwise), and --panel-mem is a file standing in for the registers, for a test. kill -HUP
+ * makes q2ui start itself again in place, so this file's options, or a newer q2ui put at the
+ * same path, take effect with no restart of the Q2.
  * --page depth is the card that finds it by eye; gallery and card are the toolkit's examples
  * (ui/page_gallery.c). --text awtk lays text out on whole pixels, as
  * demo does, for comparing screens.
@@ -31,6 +36,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "q2ui.h"
 
@@ -99,6 +105,10 @@ static void parse(int argc, char **argv) {
             list_motion = atoi(v) != 0, ++i;
         else if (!strcmp(a, "--panel-bits"))
             opt.bits = atoi(v), ++i;
+        else if (!strcmp(a, "--panel-mode"))
+            panel_keep = !strcmp(v, "keep"), ++i;
+        else if (!strcmp(a, "--panel-mem"))
+            panel_mem = v, panel_base = 0, ++i;
         else if (!strcmp(a, "--text"))
             text_whole = !strcmp(v, "awtk"), ++i;
         else if (!strcmp(a, "--clock"))
@@ -194,7 +204,7 @@ void ui_demo_page(const char *name) {
     fprintf(f, "%s\n", name);
     fclose(f);
     state_save();
-    ui_quit(3); /* demo reads the name on this exit code (patch/q2ui_gate.c) */
+    ui_quit(UI_EXIT_ASK); /* demo reads the name on this exit code (patch/q2ui_gate.c) */
 }
 static void at_rest(void) {
     write_stats();
@@ -362,8 +372,21 @@ static int script(const char *path) {
     return code; /* a page that ended the program ends the script, with its code */
 }
 
+/* The program run again in place of this one, with the arguments this one was started with: its
+ * file is read anew (a newer q2ui put at the same path is what runs) and so is
+ * /mnt/data/q2ui.args. Where the pages were is saved first, and what this one had open is closed,
+ * so the new one starts as from a shell. */
+static char **started_with;
+static void restart(void) {
+    state_save();
+    for (int fd = 3; fd < 64; ++fd) close(fd);
+    execv("/proc/self/exe", started_with);
+    execv(started_with[0], started_with);
+}
+
 int main(int argc, char **argv) {
     char regular[256], medium[256], fallback[256];
+    started_with = argv, ui_restart = restart;
     uint64_t t0 = mono_us();
     parse_file("/mnt/data/q2ui.args");
     parse(argc - 1, argv + 1);
@@ -375,6 +398,7 @@ int main(int argc, char **argv) {
     if (lib_open(opt.db, *opt.catalogue ? opt.catalogue : 0, opt.limit))
         return fprintf(stderr, "q2ui: cannot read %s\n", opt.db), 2;
     if (fb_open(opt.fb, opt.bits)) return fprintf(stderr, "q2ui: cannot use %s\n", opt.fb), 2;
+    panel_24bit();
     open_ms = (unsigned)((mono_us() - t0) / 1000u);
     now_open();
     if (opt.script) {

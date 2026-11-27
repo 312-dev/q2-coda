@@ -255,6 +255,7 @@ Every file in `patch/` and `tools/`, and `test/` by group: what it is for, where
 | `ui.c`              | Pages and their stack, slides, the loop, each frame's accounting against the refresh    | [The loop](ui-rewrite.md#the-loop)              |
 | `anim.c`            | The frame clock, closed-form springs, curves                                            | [Motion](ui-rewrite.md#motion)                  |
 | `fb.c`              | The canvas, the frame's changed rects, their turn onto the hidden page (dithered to a narrower link), the pan and wait | [The frame](ui-rewrite.md#the-frame) |
+| `panel.c`           | The panel told to take 24 bits a pixel, through the DSI host's packet registers           | [Gradients](ui-rewrite.md#gradients)            |
 | `draw.c`, `px.h`    | Smoothed shapes at sub-pixel places, leaning boxes, shadows, dithered ramps and fades, glyph blits | [Edges](ui-rewrite.md#edges), [Gradients](ui-rewrite.md#gradients) |
 | `text.c`            | The faces (stb_truetype), the glyph cache by quarter-pixel phase, runs, the glyph budget | [Text](ui-rewrite.md#text)                      |
 | `image.c`           | PNG and JPEG (stb_image), scaled and leaning draws, the theme's glyphs by name          | [The toolkit](ui-rewrite.md#the-toolkit)        |

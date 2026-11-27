@@ -145,11 +145,13 @@ def test_with_no_window_yet_demo_is_still_starting_and_q2ui_is_left_alone(fw):
     assert g.forks == 1 and not any(c.startswith('kill ') for c in g.shell)
 
 
-@pytest.mark.parametrize('top', [b'playing_page', b'volume_dialog'])
-def test_now_playing_and_the_volumes_display_are_not_windows_to_end_q2ui_for(fw, top):
+@pytest.mark.parametrize('top', [b'playing_page', b'volume_dialog', b'usbdebug_page'])
+def test_now_playing_the_volumes_display_and_the_usb_debugging_page_are_not_windows_to_end_q2ui_for(fw, top):
     g = Gate(fw)
     g.poll()
-    g.top = top  # stock opened Now Playing for the song q2ui chose; the volume's display comes up at every step
+    # stock opened Now Playing for the song q2ui chose; the volume's display comes up at every step; the USB Debugging
+    # page stands on top from boot while a developer's cable is in (a Q2 so cabled never reached q2ui, 2026-11-27)
+    g.top = top
     for _ in range(3):
         g.poll()
     assert not any(c.startswith('kill ') for c in g.shell) and g.on() == CHILD
@@ -206,3 +208,51 @@ def test_a_plain_end_reads_no_request(fw):
     g.ask, g.status, g.ended = b'games_page', 0, 1  # a request left from an earlier run
     g.poll()
     assert g.opened == [] and g.on() == 0
+
+
+def test_a_q2ui_that_ends_to_be_reloaded_is_started_again_with_no_frame_of_demos(fw):
+    g = Gate(fw)
+    g.poll()
+    g.status, g.ended = 4 << 8, 1  # kill -HUP: q2ui ends with its reload code
+    g.poll()
+    assert g.on() == -1  # still the screen's holder: demo paints nothing meanwhile
+    g.ended = 0
+    g.poll()
+    assert g.forks == 2 and g.on() == CHILD and g.opened == []
+
+
+def test_a_q2ui_killed_from_outside_is_started_again_and_one_that_dies_at_once_is_not(fw):
+    g = Gate(fw)
+    g.poll()
+    g.ms += 60000
+    g.status, g.ended = 15, 1  # SIGTERM from a shell, a minute in
+    g.poll()
+    assert g.on() == -1
+    g.ended = 0
+    g.poll()
+    assert g.forks == 2 and g.on() == CHILD
+    g.ms += 2000
+    g.status, g.ended = 11, 1  # a fault two seconds after that start: it cannot run
+    g.poll()
+    g.ended = 0
+    for _ in range(3):
+        g.poll()
+    assert g.forks == 2 and g.on() == 0 and g.repaints >= 1  # demo keeps the screen rather than loop
+
+
+def test_every_start_and_end_is_a_line_in_demos_log(fw):
+    lines = []
+
+    def write(fd, data, n, *_):  # ulog's line on stderr: "<time> <up> <level> <src> <msg>"
+        text = C.string_at(data, n).decode()
+        if fd == 2 and ' q2ui ' in text:
+            lines.append(text.split(' q2ui ', 1)[1].strip())
+        return n
+    fw.mock('fw_write', write)
+    g = Gate(fw)
+    g.poll()
+    g.top = b'usbmode_page'
+    g.poll()
+    g.status, g.ended = 15, 1
+    g.poll()
+    assert lines[0] == f'started, pid {CHILD}' and lines[1] == 'usbmode_page' and lines[2].startswith("ended for a window of demo's, status")
