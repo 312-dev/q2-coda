@@ -5,7 +5,7 @@ Design for five features the owner kept in Vamp OS's scope ([roadmap: Scope](vam
 | Feature | Today | Vamp OS | Needs first | Fits now |
 | --- | --- | --- | --- | --- |
 | Scrobbling | `patch/nav/playback_power.c` (the listen), `patch/scrobble.c` (the upload, demo's libcurl) | `q2scrobd`: a Q2PLAY/1 watcher writing the same `.scrobbler.log`; the upload a second step | nothing | **yes: built** ([below](#scrobbling)) |
-| LocalSend | `patch/localsend_core.c` (protocol), `localsend.c`, `localsend_ui.c` (demo's side) | `q2sendd`: the core as is, the UI's questions as Q2SYS/1-style notices | TLS (`q2-mbedtls` is in the image), a notice and confirmation channel in `q2ui` | the receive side, once `q2ui` can ask |
+| LocalSend | `patch/localsend_core.c` (protocol), `localsend.c`, `localsend_ui.c` (demo's side) | today's `q2send` on the image's OpenSSL, run by `q2sendd`, which asks its questions over Q2UI/1 | `q2ui` serving Q2UI/1 ([notices](platform/notices.md)) and a LocalSend page that starts it | **the receive side built** ([below](#localsend)); asks nothing until `q2ui` serves the socket |
 | AirPlay sender | the `q2-airplay` card app (cliairplay) and the PEQ tap `/tmp/q2cast` | the card app as a `service` package; `q2player` writes the tap, `q2playd` is its host | nothing in this repository: the app's release with an API 1 manifest | **yes: built** ([q2playd: AirPlay](playd.md#airplay)) |
 | Guest Play | `q2-guest` (BlueZ D-Bus, a second bluealsa), `patch/guest.c` (pausing the owner's music) | `q2-guest` as a service, its pause and resume through Q2PLAY/1 | Bluetooth from source (BlueZ 5.88, bluez-alsa: `feat/bluez-own`, `feat/bluealsa-own`) | no: M2 |
 | DLNA/UPnP renderer | stock's DMR inside `demo` (`dmrAction*`) | `q2dlnad`: a UPnP MediaRenderer (SSDP, the three services' SOAP) handing a URI to `q2playd` as a source | nothing: Q2PLAY/1's `source` and `focus` are built | **yes: built** ([q2dlnad](dlnad.md)) |
@@ -33,7 +33,17 @@ Its permissions as a package would be `playback,library,network-hold,background`
 
 ## LocalSend
 
-The protocol core (`patch/localsend_core.c`) is already free of demo; `localsend.c` is demo's glue (Smart Wi-Fi's hold, the accept dialog, the toasts). In Vamp OS: `q2sendd` runs the core, holds the radio over Q2NET/1 while discoverable, and asks `q2ui` to accept each incoming transfer. Files land where today's do. Blocked on `q2ui`'s notice channel; nothing else is missing.
+Today's daemon, `q2send` (`patch/localsend.c` on `patch/localsend_core.c`, [localsend](localsend.md)), is the protocol on Vamp OS too, unchanged: built with real headers (`LS_HOST`) against Buildroot's OpenSSL 3, which the image now carries for it (the image's mbedTLS is built client-only on purpose, `tools/thirdparty.py` `MBEDTLS_UNSET`, and a port of the server, its certificate making and the client to it could not be checked here against the reference app, whose CLI is x86-64 only). Its identity, its trusted devices and the Received folder are today's (`/mnt/data/q2send/`, `/mnt/mmc/Received/`), so phones know the Q2 under either firmware. `q2sendd` (`sendd/q2sendd.c`, the `q2sendd` service) runs it as a child and is for it what demo's `localsend_ui.c` is today, through the same `/tmp/q2send.*` files:
+
+- **An incoming request** is asked as a Q2UI/1 card ([notices](platform/notices.md)): `ask recv-N Receive%20files? <alias>%20sends%20<n>%20files%20(<size>) Accept Decline`. Only `answer recv-N 1` accepts; any other answer, no `ui.sock`, a refused `ask` or the UI's connection ending declines at once (the sender sees 403), never a wait. A request `q2send` drops first (its sender gone, its 60 s up) withdraws the card.
+- **A trusted sender** is not asked: a `toast Receiving%20from%20<alias>` instead, so a receive is never silent (one shown once its transfer is seen running or done; two identical back-to-back sends inside one 200 ms look show one toast).
+- **The card a computer's** over USB (Q2SYS/1 `usb storage`, read at the start and watched) is `q2send.hold`, so every request is refused; any other mode lifts it.
+- **The radio** is held over Q2NET/1 (`hold 60`, renewed every 30 s) while it runs.
+- **Off by default**: `/etc/sv/q2sendd` has a `down` file; the LocalSend page `q2ui` will have starts it (`sv up`) and stops it, as demo starts `q2send` with its page today. SIGTERM ends `q2send`, then `q2sendd`.
+
+Not here yet: the send side and the page (`q2send`'s `cmd`, `state` and peers are there for `q2ui` to drive), Always Accept on the card (Q2UI/1's card has no switch), and the library scan after a receive. Its permissions as a package would be `network-hold,ask,notices,card`.
+
+**Tests.** `python3 test/sendd.py` (pytest) builds `q2send` and `q2sendd` for this machine and runs them beside stand-ins for Q2UI/1, Q2NET/1 and Q2SYS/1, with a sender made in the test speaking LocalSend v2 over TLS with a client certificate: the card's text and a file taken on its first choice; 2, 0 and `gone` each refused; no UI socket refused in under 5 s; a sender who hangs up withdrawing the card; a trusted sender toasted and not asked; `usb storage` at the start and as an event holding, `usb adb` lifting it; the radio held; SIGTERM ending both. Seven broken copies (`Q2SENDD_SOURCE`) each fail it: any answer taken as yes, no withdraw, no toast, no hold, no radio hold, a missing UI waited on, `q2send` left running. `test/os_image.py` checks the image carries `q2sendd`, `q2send` and `libssl`, with the service down at boot.
 
 ## AirPlay sender
 

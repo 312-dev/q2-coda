@@ -196,8 +196,10 @@ def check_image(build, fs, manifest, perturb=None):
           and ko.exists() and hashlib.sha256(ko.read_bytes()).hexdigest() == uac1.PIN[0], "Car Audio: q2-iap, q2car and tools/uac1.py's pinned usb_f_uac1.ko")
     services = sorted(p.name for p in (fs/'etc/sv').iterdir())
     check(services == ['adb-wifi', 'adbd', 'bluealsa', 'bluetoothd', 'bt-attach', 'dbus', 'q2-airplay', 'q2btd', 'q2dacloop', 'q2dlnad', 'q2libd',
-                       'q2netd', 'q2pkgd', 'q2pkgd-confirm', 'q2playd', 'q2player', 'q2scrobd', 'q2sysd', 'q2ui'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
+                       'q2netd', 'q2pkgd', 'q2pkgd-confirm', 'q2playd', 'q2player', 'q2scrobd', 'q2sendd', 'q2sysd', 'q2ui'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
           f'services: {", ".join(services)}')
+    check(os.access(fs/'usr/bin/q2sendd', os.X_OK) and os.access(fs/'usr/bin/q2send', os.X_OK) and (fs/'etc/sv/q2sendd/down').exists()
+          and any(fs.glob('usr/lib/libssl.so*')), "LocalSend: q2sendd, today's q2send, OpenSSL's libssl, and its service down at boot")
     check(os.readlink(fs/'etc/passwd') == '/run/vamp/passwd' and os.readlink(fs/'etc/group') == '/run/vamp/group'
           and (fs/'etc/passwd.base').read_text().startswith('root:x:0:0:') and (fs/'etc/group.base').read_text().startswith('root:x:0:'),
           "/etc/passwd and /etc/group are links into /run/vamp, the image's own users in the .base files")
@@ -712,6 +714,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
           'rcS puts the rescue copy back in recovery-update/ before the framebuffer and the services')
     check(first('q2dacloop: start') is None and first('q2playd: start') is not None,
           "USB DAC mode's loop stays down at boot (it waits for q2sysd's usb dac)")
+    check(first('q2sendd: start') is None and first('q2playd: start') is not None,
+          'LocalSend stays down at boot (it listens only while its page is open)')
     marks = [('mount proc', first('mount -t proc')), ('mount /dev', first('mount -t tmpfs -o mode=0755,nosuid tmpfs /dev')),
              ('mdev -s', first('mdev -s')), ('mdev -d', first('mdev -d')), ('data', first('data: ')),
              ('first insmod', first('insmod ')), ('last insmod', max((i for i, s in enumerate(order) if s.startswith('insmod ')), default=None)),

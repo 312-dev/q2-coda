@@ -58,7 +58,7 @@ BUILDROOT = ('2026.02.3', 'https://buildroot.org/downloads/buildroot-2026.02.3.t
 PATCHES = ROOT/'os/patches/buildroot'
 # feat/render-engine's ui/ (another worker's; read-only here): moved on by changing this commit
 Q2UI_COMMIT = '817b5fc2'
-VAMP_PATHS = ['os', 'tools', 'player', 'playd', 'sysd', 'libd', 'netd', 'btd', 'pkgd', 'dacloop', 'scrobd', 'dlnad', 'perm', 'patch', 'assets/signing', 'assets/fonts', 'assets/scrobble-ca.pem', 'LICENSE']
+VAMP_PATHS = ['os', 'tools', 'player', 'playd', 'sysd', 'libd', 'netd', 'btd', 'pkgd', 'dacloop', 'scrobd', 'dlnad', 'sendd', 'perm', 'patch', 'assets/signing', 'assets/fonts', 'assets/scrobble-ca.pem', 'LICENSE']
 Q2UI_PATHS = ['ui', 'patch', 'LICENSE']
 MANIFEST = ROOT/'os/vendor/V1.36.tsv'
 # A static qemu-mipsel for the boot test (test/os_image.py), the host's architecture: Ubuntu 24.04's, from
