@@ -29,7 +29,7 @@ must be left alone.
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
-Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot), `pkgd-off` (no `q2pkgd serve`), `heat-card` (q2sysd not told of a card boot), `zone-off` (no zone table: the time zone never set). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot), `pkgd-off` (no `q2pkgd serve`), `heat-card` (q2sysd not told of a card boot), `zone-off` (no zone table: the time zone never set), `light-dark` (with --card-boot: Light Mode saved dark). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
 """
 import argparse
 import hashlib
@@ -357,11 +357,12 @@ def day_zone(fs):
 
 def light_check(fb):
     """q2ui's Light Mode with no [IPOD] LIGHT saved is Auto (the owner's ruling, 2026-11-27; ui/config.c): at midday by the
-    zone q2sysd set, the screen is light. The pixel at (5, 200) is the page's background (test/ui.py light_default's), white
-    when light, black when dark; either of the framebuffer's two pages may be the one shown."""
+    zone q2sysd set, the screen is light (q2ui before 9af5a6f5 draws it dark whatever the hour). The pixel at (5, 50) of
+    the framebuffer (rotated: the home list's margin, above the cover's pane) is the list's background, near white when
+    light, near black when dark; both of its pages."""
     data = fb.read_bytes()
-    px = [data[o:o + 3] for o in (((200 * 320 + 5) * 4), 320 * 375 * 4 + ((200 * 320 + 5) * 4))]
-    check(b'\xff\xff\xff' in px, f"q2ui: Light Mode never chosen is Auto, light at midday (pixel (5, 200): {[p.hex() for p in px]})")
+    px = [data[o:o + 3] for o in ((50 * 320 + 5) * 4, 320 * 375 * 4 + (50 * 320 + 5) * 4)]
+    check(all(min(p) >= 0xe0 for p in px), f"q2ui: Light Mode never chosen is Auto, light at midday (pixel (5, 50): {[p.hex() for p in px]})")
 
 
 def sysd_checks(fs, power_key, log):
@@ -693,7 +694,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         (emu/'data/wpa_supplicant.conf').write_text('network={\n\tssid="Home"\n\tpsk="secret123"\n}\n')  # networks saved
         # a zone chosen and Light Mode never: the zone's clock at midday, so Auto is light (light_check)
         zone_index, zone_want = day_zone(fs)
-        (emu/'data/config.ini').write_text(f'[SYSSET]\nTIMEZONE={zone_index}\n')
+        (emu/'data/config.ini').write_text(f'[SYSSET]\nTIMEZONE={zone_index}\n' + ('[IPOD]\nLIGHT=0\n' if perturb == 'light-dark' else ''))
         (emu/'modules').write_text(''.join(f'{ko[:-3]} 16384 0 - Live 0x00000000\n' for ko, _ in want))
         extra = ['--bind', emu/'data', '/mnt/data', '--ro-bind', emu/'modules', '/proc/modules']
     outer = []
@@ -829,7 +830,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off', 'player-bounce', 'heat-card', 'zone-off'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off', 'player-bounce', 'heat-card', 'zone-off', 'light-dark'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     ap.add_argument('--no-outer-adbd', action='store_true', help='with --card-boot: today\'s Vamp has no adbd running')
     a = ap.parse_args()
