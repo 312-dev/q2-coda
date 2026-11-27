@@ -219,7 +219,9 @@ int now_time(int *sec, int *total) {
 }
 
 void now_get(now_info *n) {
-    char station[256], freq[256], raw[256]; /* tuner_now and radio_now fill each to one cap */
+    /* tuner_now and radio_now fill each to one cap, and nothing when their owner is gone (radio_now with no stream
+     * active): empty then, never what the stack held */
+    char station[256] = "", freq[256] = "", raw[256] = "";
     memset(n, 0, sizeof *n);
     n->pos_ms = n->len_ms = -1;
     n->source = now_owner();
