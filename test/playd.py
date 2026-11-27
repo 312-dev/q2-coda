@@ -679,3 +679,98 @@ def test_q2play1_gives_the_position_in_seconds_and_the_now_file_in_ms(run):
         line = a.line()
     assert fields(line)['pos'] == '42', 'seconds, as docs/platform/playback.md says (q2scrobd counts them so)'
     assert now(root, 0.6)['pos'] == '42000', "the now file keeps the shim's milliseconds"
+
+
+# ---- AirPlay's tap, the host's half (docs/playd.md#airplay) ----
+
+import mmap  # noqa: E402
+import struct  # noqa: E402
+import threading  # noqa: E402
+
+TAP_SIZE = 160 + 262144 * 4
+OFF = {'want': 8, 'state': 16, 'spk': 124, 'beat': 136, 'status': 140, 'volume': 144, 'maxvol': 148, 'track': 152, 'spk_seq': 156}
+
+
+class Tap:
+    """the q2-airplay app's side of /tmp/q2cast: made whole and renamed in, beaten while self.beating"""
+    def __init__(self, root, state=1):
+        tmp = root/'tmp/q2cast.tmp'
+        with open(tmp, 'wb') as f:
+            f.write(struct.pack('<II', 0x31544351, TAP_SIZE) + bytes(TAP_SIZE - 8))
+        os.rename(tmp, root/'tmp/q2cast')
+        self.f = open(root/'tmp/q2cast', 'r+b')
+        self.m = mmap.mmap(self.f.fileno(), TAP_SIZE)
+        self.set('state', state)
+        self.beating = True
+        threading.Thread(target=self.beat, daemon=True).start()
+
+    def set(self, k, v):
+        self.m[OFF[k]:OFF[k] + 4] = struct.pack('<i' if k in ('state', 'spk', 'status', 'volume', 'maxvol') else '<I', v)
+
+    def get(self, k):
+        return struct.unpack('<i' if k in ('state', 'spk', 'status', 'volume', 'maxvol') else '<I', self.m[OFF[k]:OFF[k] + 4])[0]
+
+    def beat(self):
+        while True:
+            if self.beating:
+                self.set('want', (time.clock_gettime_ns(time.CLOCK_MONOTONIC) >> 20) & 0xffffffff)
+            time.sleep(0.2)
+
+
+def test_the_tap_is_told_what_plays_and_beaten(run):
+    root, pl = run
+    tap = Tap(root)
+    play_list(root, [2], 0)
+    pl.pump(1.6)
+    beat = tap.get('beat')
+    assert (tap.get('status'), tap.get('volume'), tap.get('maxvol')) == (2, -1, 80), 'playing; no speaker: -1, the Q2 heard'
+    time.sleep(0.6)
+    assert tap.get('beat') > beat > 0
+    assert (root/'tmp/q2cast.track').read_text() == 'path=/mnt/mmc/Music/b.mp3\ntitle=Beta\nartist=Bob\nalbum=First\nlength=0\n'
+    assert tap.get('track') == 1
+    fifo(root, 'pause')
+    time.sleep(0.6)
+    assert tap.get('status') == 3 and tap.get('track') == 1, 'paused; the same song not written again'
+
+
+def test_a_speaker_takes_the_volume_and_the_earphones_get_theirs_back(run):
+    root, pl = run
+    assert dac(root) == [(37, 37)]
+    tap = Tap(root, state=2)
+    time.sleep(1.5)
+    assert now(root, 0)['volume'] == '35' and tap.get('volume') == 35, "no level from the app: AIRVOL's default"
+    fifo(root, 'volume 90')
+    time.sleep(0.6)
+    assert tap.get('volume') == 90 and dac(root) == [(37, 37)], "Max Volume lifted, the DAC left at the earphones' level"
+    time.sleep(2.5)
+    cfg = (root/'mnt/data/config.ini').read_text()
+    assert 'AIRVOL=90' in cfg and 'VOLUME=37\n' in cfg, "the speaker's saved as AIRVOL, the earphones' kept"
+    tap.set('state', 0)
+    time.sleep(0.8)
+    assert now(root, 0)['volume'] == '37' and dac(root)[-1] == (37, 37) and tap.get('volume') == -1
+
+
+def test_the_speaker_s_own_level_is_taken_and_a_stale_beat_lets_go(run):
+    root, pl = run
+    tap = Tap(root)
+    tap.set('spk', 60), tap.set('spk_seq', 1), tap.set('state', 2)
+    time.sleep(1.5)
+    assert now(root, 0)['volume'] == '60'
+    tap.set('spk', 20), tap.set('spk_seq', 2)
+    time.sleep(0.8)
+    assert now(root, 0)['volume'] == '20', 'a reconnect: the speaker says again'
+    tap.beating = False
+    time.sleep(2.2)
+    assert now(root, 0)['volume'] == '37' and tap.get('volume') == -1, 'the app gone: the earphones back within 1.5 s'
+
+
+def test_the_tap_s_layout_is_peq_h_s():
+    def fields(text):
+        body = text[:text.index('} cast_tap;')]
+        body = body[body.rindex('typedef struct {'):]
+        body = re.sub(r'/\*.*?\*/', '', body, flags=re.S)
+        return re.findall(r'(\w+)(?:\[[^\]]*\])*\s*(?=[,;])', body)
+    peq, ours = (ROOT/'patch/peq.h').read_text(), SOURCE.read_text()
+    assert fields(ours) == fields(peq) and len(fields(peq)) > 20
+    for name in ('CAST_MAGIC', 'CAST_RING', 'CAST_STALE'):
+        assert re.search(rf'#define {name} (\w+)', ours).group(1) == re.search(rf'#define {name} (\w+)', peq).group(1), name

@@ -64,6 +64,15 @@ entry=q2-scrobbler
 permissions=playback,network-hold,background
 ```
 
+```q2app .airplay ok q2-airplay
+name=AirPlay
+api=1
+version=2.0
+kind=service
+entry=q2-airplay
+permissions=playback,network-hold,background
+```
+
 ```q2app .dusk ok
 name=Dusk
 api=1

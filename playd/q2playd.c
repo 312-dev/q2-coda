@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -413,27 +414,32 @@ static void volume_load(void) {
     free(t);
 }
 
-/* VOLUME=q.volume in [PLAYSET], the rest of the file as it was */
-static void volume_save(void) {
-    char *t = read_all(path("/mnt/data/config.ini")), tmp[340], line[32];
+/* KEY=v in [SECTION], the rest of the file as it was */
+static void ini_set(const char *section, const char *key, int v) {
+    char *t = read_all(path("/mnt/data/config.ini")), tmp[340], line[64], head[64], k[40];
     if (!t) return;
-    snprintf(line, sizeof line, "VOLUME=%d", q.volume);
-    char *sec = strstr(t, "[PLAYSET]"), *at = 0, *end = 0;
+    snprintf(line, sizeof line, "%s=%d", key, v), snprintf(head, sizeof head, "[%s]", section), snprintf(k, sizeof k, "%s=", key);
+    char *sec = strstr(t, head), *at = 0, *end = 0;
     for (char *l = sec ? strchr(sec, '\n') : 0; l && *++l && *l != '['; l = strchr(l, '\n'))
-        if (!strncmp(l, "VOLUME=", 7)) { at = l, end = l + strcspn(l, "\r\n"); break; }
+        if (!strncmp(l, k, strlen(k))) { at = l, end = l + strcspn(l, "\r\n"); break; }
     snprintf(tmp, sizeof tmp, "%s.q2playd", path("/mnt/data/config.ini"));
     FILE *f = fopen(tmp, "w");
     if (f) {
         if (at) fprintf(f, "%.*s%s%s", (int)(at - t), t, line, end);
-        else if (sec) { /* no VOLUME line: one after the section's header */
+        else if (sec) { /* no KEY line: one after the section's header */
             char *nl = strchr(sec, '\n');
             if (nl) fprintf(f, "%.*s%s\n%s", (int)(nl + 1 - t), t, line, nl + 1);
             else fprintf(f, "%s\n%s\n", t, line);
-        } else fprintf(f, "%s%s[PLAYSET]\n%s\n", t, *t && t[strlen(t) - 1] != '\n' ? "\n" : "", line);
+        } else fprintf(f, "%s%s%s\n%s\n", t, *t && t[strlen(t) - 1] != '\n' ? "\n" : "", head, line);
         if (!fclose(f)) rename(tmp, path("/mnt/data/config.ini"));
     }
     free(t);
 }
+
+static struct { int on, local, limit; } air_vol; /* a speaker playing: the earphones' level and Max Volume kept */
+
+/* the level saved: the earphones' as PLAYSET VOLUME, an AirPlay speaker's as Q2POD AIRVOL while one plays */
+static void volume_save(void) { air_vol.on ? ini_set("Q2POD", "AIRVOL", q.volume) : ini_set("PLAYSET", "VOLUME", q.volume); }
 
 /* ---- commands: the same verbs from the FIFO and from Q2PLAY/1 ---- */
 
@@ -620,7 +626,7 @@ static int command(const char *verb, const int *ids, int n_ids) {
     if (sscanf(verb, "volume %d", &a) == 1 && a >= 0 && a <= 100) {
         if (a > max_volume) a = max_volume; /* Max Volume's cap */
         if (a != q.volume) q.volume = a, ++q.seq, volume_dirty_at = now_ms() | 1;
-        dac_volume();
+        if (!air_vol.on) dac_volume(); /* a speaker's level is the AirPlay app's to send; the Q2 is silent */
         return 0;
     }
     if (!strcmp(verb, "stop")) {
@@ -870,6 +876,134 @@ static void client_read(struct client *c) {
     if (c->n >= sizeof c->in - 1) { client_say(c, "err line too long"); close(c->fd), c->fd = -1; }
 }
 
+/* ---- AirPlay's tap, the host's half (docs/playd.md#airplay) ----
+ * The q2-airplay app makes /tmp/q2cast (a cast_tap, patch/peq.h) and beats it; q2player's DSP chain (player/dsp.c)
+ * writes what plays into it while the beat is fresh, and keeps the Q2's own output silent while `volume` is 0 or
+ * more. On today's Vamp demo writes the rest (patch/airplay.c airplay_poll); here q2playd does: the player's status,
+ * Max Volume and the volume (the speaker's while one plays, else -1) and its beat, every CAST_BEAT_MS; the playing
+ * song's tags to /tmp/q2cast.track once a song; and the volume's swap, the earphones' level kept while a speaker
+ * plays and given back after. The layout is peq.h's, mirrored as the app mirrors it (test/playd.py compares them). */
+#define CAST_MAGIC 0x31544351u /* "QCT1" */
+#define CAST_RING 262144
+#define CAST_CLOCK(ns) ((unsigned)((unsigned long long)(ns) >> 20)) /* 1.048576 ms ticks */
+#define CAST_STALE 1430                                             /* 1.5 s of ticks: the host lets go first */
+#define CAST_BEAT_MS 250
+#define CAST_LOOK_MS 1000 /* the file looked for this often until the app makes it */
+#define AIR_VOLUME 35     /* a speaker's level when the app gives none and Q2POD AIRVOL is not set */
+enum { CAST_OFF, CAST_CONNECTING, CAST_ON };
+typedef struct {
+    unsigned magic, size;
+    unsigned want; /* the app's: its CAST_CLOCK while it reads */
+    int mute, state, pos_ms;
+    unsigned pos_id, pos_at;
+    int pos_run;
+    char speaker[64];
+    unsigned seq, id; /* the player's */
+    int pts_ms;
+    unsigned jumps, jump_seq;
+    int dsd, spk; /* spk: the app's, the speaker's own level */
+    long long stamp;
+    unsigned beat;      /* the host's: bumped each pass */
+    int status;         /* 1 stopped, 2 playing, 3 paused */
+    int volume, maxvol; /* the speaker's level while one plays, else -1; Max Volume */
+    unsigned track;     /* /tmp/q2cast.track's writes */
+    unsigned spk_seq;   /* the app's, bumped with each spk */
+    short ring[CAST_RING][2];
+} cast_tap;
+_Static_assert(__builtin_offsetof(cast_tap, stamp) == 128 && __builtin_offsetof(cast_tap, ring) == 160, "peq.h's cast_tap layout");
+
+static struct { cast_tap *t; unsigned long long look, beat_at; unsigned spk_seq; char song[1300]; int len; } air;
+
+static unsigned long long mono_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (unsigned long long)ts.tv_sec * 1000000000ull + (unsigned long long)ts.tv_nsec;
+}
+
+static void air_map(void) {
+    unsigned long long t = now_ms();
+    if (air.t || t - air.look < CAST_LOOK_MS) return;
+    air.look = t;
+    int fd = open(path("/tmp/q2cast"), O_RDWR | O_CLOEXEC);
+    if (fd < 0) return;
+    unsigned head[2] = {0, 0}; /* the app's, whole before it renames it in */
+    void *p = MAP_FAILED;
+    if (read(fd, head, sizeof head) == sizeof head && head[0] == CAST_MAGIC && head[1] == sizeof(cast_tap))
+        p = mmap(0, sizeof(cast_tap), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    if (p != MAP_FAILED) air.t = p, logf_("the AirPlay app's tap mapped");
+}
+
+/* the app's state while it beats; CAST_OFF once it stopped */
+static int air_state(void) {
+    return air.t && CAST_CLOCK(mono_ns()) - air.t->want < CAST_STALE ? air.t->state : CAST_OFF;
+}
+
+/* the speaker's level: its own, as the app said, else the one it last had (Q2POD AIRVOL) */
+static int air_speaker(void) {
+    char *c = read_all(path("/mnt/data/config.ini"));
+    int saved = c ? ini_get(c, "Q2POD", "AIRVOL", AIR_VOLUME) : AIR_VOLUME;
+    free(c);
+    air.spk_seq = air.t ? air.t->spk_seq : 0;
+    if (air.t && air.t->spk_seq && air.t->spk >= 0 && air.t->spk <= 100) return air.t->spk;
+    return saved >= 0 && saved <= 100 ? saved : AIR_VOLUME;
+}
+
+/* a speaker starting: the earphones' level and Max Volume kept (the level saved), the limit lifted (it is the
+ * earphones'), the speaker's taken up and the DAC left alone (q2player silences the Q2); stopping: the speaker's
+ * saved as AIRVOL and the earphones' back, set on the DAC and saved */
+static void air_swap(int on) {
+    if (on) {
+        air_vol.local = q.volume, air_vol.limit = max_volume;
+        ini_set("PLAYSET", "VOLUME", q.volume);
+        air_vol.on = 1, max_volume = 100;
+        q.volume = air_speaker();
+    } else {
+        ini_set("Q2POD", "AIRVOL", q.volume);
+        air_vol.on = 0, max_volume = air_vol.limit;
+        q.volume = air_vol.local > max_volume ? max_volume : air_vol.local;
+        dac_volume();
+        ini_set("PLAYSET", "VOLUME", q.volume);
+    }
+    volume_dirty_at = 0, ++q.seq;
+}
+
+/* "key=value" lines of the playing song for the app (the speaker's now-playing), written beside and renamed */
+static void air_track(void) {
+    char id[1300];
+    snprintf(id, sizeof id, "%s\n%s", q.file, q.title);
+    if (!q.loaded || (!strcmp(id, air.song) && q.len_s == air.len)) return;
+    char tmp[340], v[4][800];
+    const char *src[4] = {q.file, q.title, q.artist, q.album};
+    for (int i = 0; i < 4; ++i) field(v[i], sizeof v[i], src[i], 0); /* line ends made spaces */
+    snprintf(tmp, sizeof tmp, "%s.q2playd", path("/tmp/q2cast.track"));
+    FILE *f = fopen(tmp, "w");
+    if (!f) return;
+    fprintf(f, "path=%s\ntitle=%s\nartist=%s\nalbum=%s\nlength=%d\n", v[0], v[1], v[2], v[3], q.len_s);
+    if (fclose(f) || rename(tmp, path("/tmp/q2cast.track"))) { unlink(tmp); return; }
+    snprintf(air.song, sizeof air.song, "%s", id), air.len = q.len_s;
+    ++air.t->track;
+}
+
+/* each pass of the loop, at most every CAST_BEAT_MS */
+static void air_poll(void) {
+    unsigned long long t = now_ms();
+    if (t - air.beat_at < CAST_BEAT_MS) return;
+    air.beat_at = t;
+    air_map();
+    int s = air_state();
+    if (air.t) {
+        air.t->status = q.state == PLAYING ? 2 : q.state == PAUSED ? 3 : 1;
+        air.t->volume = air_vol.on ? q.volume : -1; /* the speaker's once it plays, never the earphones' */
+        air.t->maxvol = max_volume;
+        __atomic_thread_fence(__ATOMIC_RELEASE);
+        ++air.t->beat;
+        if (s != CAST_OFF) air_track();
+    }
+    if ((s == CAST_ON) != air_vol.on) air_swap(s == CAST_ON);
+    else if (air_vol.on && air.t->spk_seq != air.spk_seq) q.volume = air_speaker(), ++q.seq; /* reconnected: the speaker's again */
+}
+
 /* ---- setup ---- */
 
 static int listen_unix(const char *where, int type, int backlog) {
@@ -936,8 +1070,11 @@ int main(int argc, char **argv) {
             if (wait < 0 || w < wait) wait = w;
         }
         if (cp.on && (wait < 0 || wait > 200)) wait = 200;
+        int beat = air.t ? CAST_BEAT_MS : CAST_LOOK_MS; /* AirPlay's tap: its beat, or the look for it */
+        if (wait < 0 || wait > beat) wait = beat;
         if (poll(p, (nfds_t)n, wait) < 0 && errno != EINTR) break;
         catplay_poll();
+        air_poll();
         if (src.on && cl[src.holder].fd < 0) source_release(src.holder); /* its holder gone (here and after the reads): before a new client takes its slot */
         if (p[0].revents & POLLIN) {
             player = accept4(listen_fd, 0, 0, SOCK_CLOEXEC);

@@ -189,7 +189,7 @@ def check_image(build, fs, manifest, perturb=None):
     check(os.access(fs/'usr/bin/q2-iap', os.X_OK) and os.access(fs/'usr/libexec/vamp/q2car', os.X_OK) and os.access(fs/'usr/bin/q2car', os.X_OK)
           and ko.exists() and hashlib.sha256(ko.read_bytes()).hexdigest() == uac1.PIN[0], "Car Audio: q2-iap, q2car and tools/uac1.py's pinned usb_f_uac1.ko")
     services = sorted(p.name for p in (fs/'etc/sv').iterdir())
-    check(services == ['adb-wifi', 'adbd', 'q2dacloop', 'q2dlnad', 'q2libd', 'q2netd', 'q2pkgd-confirm', 'q2playd', 'q2player', 'q2scrobd', 'q2sysd', 'q2ui'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
+    check(services == ['adb-wifi', 'adbd', 'q2-airplay', 'q2dacloop', 'q2dlnad', 'q2libd', 'q2netd', 'q2pkgd-confirm', 'q2playd', 'q2player', 'q2scrobd', 'q2sysd', 'q2ui'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
           f'services: {", ".join(services)}')
     check(os.readlink(fs/'etc/passwd') == '/run/vamp/passwd' and os.readlink(fs/'etc/group') == '/run/vamp/group'
           and (fs/'etc/passwd.base').read_text().startswith('root:x:0:0:') and (fs/'etc/group.base').read_text().startswith('root:x:0:'),

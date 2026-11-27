@@ -6,7 +6,7 @@ Design for five features the owner kept in Vamp OS's scope ([roadmap: Scope](vam
 | --- | --- | --- | --- | --- |
 | Scrobbling | `patch/nav/playback_power.c` (the listen), `patch/scrobble.c` (the upload, demo's libcurl) | `q2scrobd`: a Q2PLAY/1 watcher writing the same `.scrobbler.log`; the upload a second step | nothing | **yes: built** ([below](#scrobbling)) |
 | LocalSend | `patch/localsend_core.c` (protocol), `localsend.c`, `localsend_ui.c` (demo's side) | `q2sendd`: the core as is, the UI's questions as Q2SYS/1-style notices | TLS (`q2-mbedtls` is in the image), a notice and confirmation channel in `q2ui` | the receive side, once `q2ui` can ask |
-| AirPlay sender | the `q2-airplay` card app (cliairplay) and hciplayer's PEQ tap `/tmp/q2cast` | the card app as a `service` package; the tap moved into `q2player`'s output | `q2player` writing the tap, Q2PLAY/1's volume to the speaker | after the tap |
+| AirPlay sender | the `q2-airplay` card app (cliairplay) and the PEQ tap `/tmp/q2cast` | the card app as a `service` package; `q2player` writes the tap, `q2playd` is its host | nothing in this repository: the app's release with an API 1 manifest | **yes: built** ([q2playd: AirPlay](playd.md#airplay)) |
 | Guest Play | `q2-guest` (BlueZ D-Bus, a second bluealsa), `patch/guest.c` (pausing the owner's music) | `q2-guest` as a service, its pause and resume through Q2PLAY/1 | Bluetooth from source (BlueZ 5.88, bluez-alsa: `feat/bluez-own`, `feat/bluealsa-own`) | no: M2 |
 | DLNA/UPnP renderer | stock's DMR inside `demo` (`dmrAction*`) | `q2dlnad`: a UPnP MediaRenderer (SSDP, the three services' SOAP) handing a URI to `q2playd` as a source | nothing: Q2PLAY/1's `source` and `focus` are built | **yes: built** ([q2dlnad](dlnad.md)) |
 
@@ -36,7 +36,7 @@ The protocol core (`patch/localsend_core.c`) is already free of demo; `localsend
 
 ## AirPlay sender
 
-The card app needs a copy of what the Q2 plays. Today hciplayer's PEQ filter writes it into the shared tap `/tmp/q2cast` while the app beats; `q2player` has the same DSP chain (`player/dsp.c`), so the tap moves there, and the app's volume and status come from Q2PLAY/1 in place of demo's writes into the tap's header. The app is then a `service` package (`permissions=playback,network-hold,background`) whose row the ⋯ action declares ([extension points](vamp-os.md#extension-points)).
+The card app needs a copy of what the Q2 plays. `q2player`'s DSP chain (`player/dsp.c`) already writes it into the shared tap `/tmp/q2cast` while the app beats, as today's Vamp does, so nothing in `player/` changes; `demo`'s half of the tap (the status, the volume, the track's tags, the volume's swap to the speaker) is `q2playd`'s ([q2playd: AirPlay](playd.md#airplay)). The app is a `service` package (`permissions=playback,network-hold,background`) run by `/etc/sv/q2-airplay` once added; its row on the ⋯ page is `q2ui`'s to declare ([extension points](vamp-os.md#extension-points)).
 
 ## Guest Play
 

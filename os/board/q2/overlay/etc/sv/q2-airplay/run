@@ -1,0 +1,12 @@
+#!/bin/sh
+# The AirPlay sender (docs/playd.md#airplay): the q2-airplay app, a service package on the card, run as its own user
+# by q2pkgd app-run once it has been added (q2pkgd app-add /mnt/mmc/.airplay). Until then this waits and looks again
+# every minute, so a card without it costs nothing.
+. /usr/libexec/vamp/log
+app=/mnt/mmc/.airplay
+exec 2>&1
+if [ -f "$app/q2app" ] && grep -q '^airplay ' /mnt/data/vamp/apps 2>/dev/null && ! grep -q '^airplay [0-9]* -$' /mnt/data/vamp/apps; then
+    step "q2-airplay: start"
+    exec /usr/bin/q2pkgd app-run "$app"
+fi
+exec sleep 60
