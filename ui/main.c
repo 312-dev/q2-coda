@@ -385,15 +385,18 @@ static int script(const char *path) {
 }
 
 /* The program run again in place of this one, with the arguments this one was started with: its
- * file is read anew (a newer q2ui put at the same path is what runs) and so is
+ * path is run anew (so a newer q2ui put there is what runs) and so is
  * /mnt/data/q2ui.args. Where the pages were is saved first, and what this one had open is closed,
  * so the new one starts as from a shell. */
 static char **started_with;
 static void restart(void) {
     state_save();
     for (int fd = 3; fd < 64; ++fd) close(fd);
+    /* the path, not the file this process was started from: a newer q2ui mounted or moved there
+     * since is the point (/proc/self/exe is still the old one). That file only when the path
+     * cannot be run, or was a bare name found on PATH. */
+    if (strchr(started_with[0], '/')) execv(started_with[0], started_with);
     execv("/proc/self/exe", started_with);
-    execv(started_with[0], started_with);
 }
 
 int main(int argc, char **argv) {
