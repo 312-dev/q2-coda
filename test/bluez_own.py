@@ -163,6 +163,20 @@ int getsockopt(int fd, int level, int name, void *value, socklen_t *len) {
     return 0;
 }
 
+/* a program built with 64-bit time_t against glibc 2.34 or later (Vamp OS's) calls these in place of the two
+ * above; stock's glibc 2.28 has neither, and nothing there calls them */
+int __setsockopt64(int fd, int level, int name, const void *value, socklen_t len) {
+    int (*real)(int, int, int, const void *, socklen_t) = next("__setsockopt64");
+    return ours(fd) && level != SOL_SOCKET ? 0 : real(fd, level, name, value, len);
+}
+
+int __getsockopt64(int fd, int level, int name, void *value, socklen_t *len) {
+    int (*real)(int, int, int, void *, socklen_t *) = next("__getsockopt64");
+    if (!ours(fd) || level == SOL_SOCKET) return real(fd, level, name, value, len);
+    memset(value, 0, *len);
+    return 0;
+}
+
 int getsockname(int fd, struct sockaddr *addr, socklen_t *len) {
     int (*real)(int, struct sockaddr *, socklen_t *) = next("getsockname");
     if (!ours(fd)) return real(fd, addr, len);
