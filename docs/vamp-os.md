@@ -53,6 +53,8 @@ The owner's ruling on what Vamp OS carries (2026-11-26), binding on every table 
 | **Dropped, not rebuilt**         | Tidal, Spotify (librespot), the AirPlay receiver, Videos, Rockbox dual boot, the VU meter and spectrum displays, stock's Internet Radio                                                                                                                                                                                                |
 | **Deferred** ("remove, for now") | Audiobooks and Podcasts: not in the system, and the natural first apps written on the platform by someone else or by us later ([App model](#app-model-and-packages)): a `browse` app with a catalogue provider for its shelf and a playback source that keeps a place per title, which is the API's test of resume outside the Library |
 
+**Priority: developer access over Wi-Fi** (the owner, 2026-11-26: "please make it a priority in VampOS to properly support wireless adb as well, we will stop using their CLI and use our own fully"). Vamp OS ships adbd as a first-class service, over USB and over Wi-Fi (TCP, key-based auth, the Q2 advertised by mDNS so it is found by name on any network), from M1 onward, not as a `--dev` extra. Our own CLI (`vamp`, see [SDK](#platform)) drives it end to end: find, connect, shell, push, pull, install, screenshot, logs, input injection and profiling, so development and testing stop depending on Google's `adb` binary and stock's tools. Until `vamp` covers a command, Google's `adb` speaks to the same adbd.
+
 Not in the ruling and carried by "everything else": card apps and the App Store, the Bluetooth receiver, On-The-Go and playlist editing, Smart Wi-Fi, Charge Limit, Buttons Lock, the boot logo and animation. Vamp's **AirPlay sender** ([internals](internals.md#airplay-sender)), playing to AirPlay speakers, is kept (the owner, 2026-11-26: "keep the sender"); only the receiver is dropped.
 
 What the drops save, against a plan that carried them:
@@ -397,7 +399,7 @@ Each is shippable on its own and has a switch back. Order: what the owner uses e
 
 ### M1. The new UI where you live
 
-Home, the Library's lists and Now Playing in `q2ui`, with `demo` running as a service behind the screen hand-over and the command queue (`docs/ui-rewrite.md`, migration steps 1 to 3). The biggest daily gain there is: a nineteenth of the CPU per tick, gliding rows, tvOS-style focus, no idle wake-ups. **Switch back:** a Settings row and a held key choose `demo`'s UI for a boot, as today's Rockbox choice works. **Q2:** frame pacing and dropped frames, memory with both programs resident, a week of the owner's use.
+Home, the Library's lists and Now Playing in `q2ui`, with `demo` running as a service behind the screen hand-over and the command queue (`docs/ui-rewrite.md`, migration steps 1 to 3). The biggest daily gain there is: a nineteenth of the CPU per tick, gliding rows, tvOS-style focus, no idle wake-ups. **Switch back:** a Settings row and a held key choose `demo`'s UI for a boot, as today's Rockbox choice works. Wireless adb (adbd over Wi-Fi with key auth and mDNS) and the first `vamp` device commands (find, connect, shell, push, screenshot, logs) land here, the owner's priority, since every later milestone is tested through them. **Q2:** frame pacing and dropped frames, memory with both programs resident, a week of the owner's use.
 
 ### M2. Bluetooth from source
 
