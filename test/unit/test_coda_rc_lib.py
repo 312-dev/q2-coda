@@ -540,13 +540,58 @@ def test_vamp_os_has_no_favorites_yet_so_its_list_is_empty(vampos):
 def test_vamp_os_s_library_is_read_again_once_q2libd_has_changed_it(vampos):
     """the tables are kept while the library's file is unchanged (lib_open's key): q2libd's file, not stock's"""
     assert len(titles(vampos.browse('tracks'))) == 4
-    time.sleep(0.01)
+    time.sleep(1.1)  # a row added in place may leave the size as it was: the time must move, and some file systems keep whole seconds
     db = sqlite3.connect(vampos.root / 'mnt/data/vamp/library.db')
     db.execute("insert into songtable(id, filename, fileurl, album, songer, name, time, time_create) "
                "values (7, '7.flac', '/mnt/mmc/c/7.flac', 'Third', 'Cy', 'Echo', 30, 700)")
     db.commit()
     db.close()
     assert titles(vampos.browse('tracks')) == ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo']
+
+
+VAMPOS_SERVER = [('Golf', 'Gus', 'Fourth', 210), ('Hotel', 'Gus', 'Fourth', 220)]
+
+
+def vampos_catalogue(root, songs=VAMPOS_SERVER):
+    """q2libd's catalogue on the card (docs/libd.md#the-server-catalogue): servertable with songtable's columns, its
+    time the length; servermeta by id (app, sid, local); serverpl and serveritem, the servers' playlists"""
+    (root / 'mnt/mmc/.vamp').mkdir(parents=True, exist_ok=True)
+    cat = sqlite3.connect(root / 'mnt/mmc/.vamp/catalogue.db')
+    cat.executescript('create table servertable(id int, filename, fileurl, album, songer, style, name, composer, albumsonger,'
+                      ' year int, track int, cd_num int, time int, time_end int, time_create int, Initial, bitdepth int,'
+                      ' samprate int); create table servermeta(id integer primary key, app, sid, local);'
+                      ' create table serverdup(id integer primary key, fileurl);'
+                      ' create table serverpl(app, pid, name); create table serveritem(app, pid, pos int, sid, path);')
+    for k, (title, artist, album, secs) in enumerate(songs, 1):
+        url = f'/mnt/mmc/.subsonic/cat/{album.lower()}/v{k}.flac'
+        cat.execute('insert into servertable(id, filename, fileurl, album, songer, style, name, albumsonger, year, track, cd_num,'
+                    ' time, time_create) values (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    (0x40000000 + k, f'v{k}.flac', url, album, artist, 'Pop', title, artist, 2003, k, 1, secs, 900 + k))
+        cat.execute('insert into servermeta(id, app, sid, local) values (?,?,?,?)', (0x40000000 + k, 'subsonic', f'v{k}', None))
+    cat.commit()
+    cat.close()
+
+
+def test_vamp_os_s_server_songs_are_q2libd_s_catalogue_with_their_lengths(vampos):
+    """q2libd's catalogue (/mnt/mmc/.vamp/catalogue.db, servermeta by id) beside the card's songs; today's Vamp's
+    .q2pod catalogue still not read"""
+    vampos_catalogue(vampos.root)
+    tracks = vampos.browse('tracks')
+    assert titles(tracks) == ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Golf', 'Hotel'], titles(tracks)
+    assert [i.get('duration_ms') for i in tracks['items']][-2:] == [210000, 220000]
+    assert [i['id'] for i in tracks['items']][-2:] == ['song:c1073741825', 'song:c1073741826']
+    album, = [i for i in vampos.browse('albums')['items'] if i['title'] == 'Fourth']
+    assert titles(vampos.browse(album['id'])) == ['Golf', 'Hotel']
+    assert vampos.browse('playlists')['total'] == 0, 'the playlists list still answers'
+
+
+def test_vamp_os_s_streaming_song_is_its_server_song_in_q2libd_s_catalogue(vampos, lib):
+    vampos_catalogue(vampos.root)
+    lib.lib_stream_song.argtypes = [ctypes.c_char_p, ctypes.POINTER(Song)]
+    s = Song()
+    assert lib.lib_stream_song(STREAM.format('hotel', 'v2').encode(), ctypes.byref(s)) == 1
+    assert (s.id, s.title, s.artist, s.album, s.secs, s.track) == (0x40000002, b'Hotel', b'Gus', b'Fourth', 220, 2)
+    assert lib.lib_stream_song(STREAM.format('foxtrot', 's2').encode(), ctypes.byref(s)) == 0, "not today's catalogue's"
 
 
 def test_the_playlists_list_answers_with_no_server_signed_in(lib, tmp_path):
@@ -561,3 +606,30 @@ def test_the_playlists_list_answers_with_no_server_signed_in(lib, tmp_path):
     listing = q2.browse('playlists')
     assert not isinstance(listing, str) and titles(listing) == ['Road'], listing
 
+
+def test_vamp_os_s_queued_stream_download_is_named_as_its_server_song(vampos):
+    """a card app's stream download in q2playd's queue file (0, its path and blank names) is its server song in
+    q2libd's catalogue, found by the sid in its name through servermeta's id (vmeta)"""
+    vampos_catalogue(vampos.root)
+    (vampos.root / 'tmp/coda-rc.queue').write_text(f'4 0 2\n1\n0\t{STREAM.format("hotel", "v2")}\t\t\n')
+    t, m = vampos.ask(T['GET_QUEUE'], [(1, 0), (2, 10)])
+    items = [client.item(x) for x in m.get(5, [])]
+    assert [(i['id'], i['title'], i.get('subtitle')) for i in items] == [
+        ('song:t1', 'Alpha', 'Ann'), (f'song:c{0x40000002}', 'Hotel', 'Gus')], items
+    assert items[1]['duration_ms'] == 220000
+
+
+def test_vamp_os_has_server_songs_with_no_catalogue_of_today_s_vamp_on_the_card(vampos, lib):
+    """a card that never ran today's Vamp: q2libd's catalogue alone says a server is signed in (lib_has_server)"""
+    (vampos.root / 'mnt/mmc/.q2pod/catalogue.db').unlink()
+    assert lib.lib_has_server() == 0
+    vampos_catalogue(vampos.root)
+    assert lib.lib_has_server() == 1
+    assert titles(vampos.browse('tracks'))[-2:] == ['Golf', 'Hotel']
+
+
+def test_vamp_os_s_catalogue_is_read_again_once_q2libd_has_written_it(vampos):
+    """lib_open's key holds q2libd's catalogue too: one written after a browse is in the next"""
+    assert len(titles(vampos.browse('tracks'))) == 4
+    vampos_catalogue(vampos.root)
+    assert titles(vampos.browse('tracks'))[-2:] == ['Golf', 'Hotel']

@@ -16,10 +16,13 @@
 #define CARD_HOLD "/tmp/mmc_hold" /* demo's pid while it lets the card go (card_release.c) */
 #define DURATIONS "/mnt/data/ringnav-durations-v1"
 /* --library vampos: Vamp OS's library, q2libd's (docs/libd.md): stock's songtable with each song's length in its time
- * column, in seconds, and stock's playlist; no myfav (Favorites empty) and no durations file. Stock's database.db and
- * today's Vamp's catalogue on the card are not read, as Vamp OS leaves both alone; the servers' songs, in q2libd's
- * own catalogue, are not offered yet. */
+ * column, in seconds, and stock's playlist; no myfav (Favorites empty) and no durations file; the servers' songs in
+ * q2libd's catalogue on the card, whose servertable has the length in time too and whose servermeta names a row by its
+ * id, so a temporary view (vmeta) gives it today's shape (fileurl, app, sid, seconds). Stock's database.db and today's
+ * Vamp's catalogue are not read, as Vamp OS leaves both alone; the servers' playlists (q2libd's serverpl and
+ * serveritem, not stock's playlist table) are not offered yet. */
 #define VAMPOS_DB "/mnt/data/vamp/library.db"
+#define VAMPOS_CAT "/mnt/mmc/.vamp/catalogue.db"
 int crc_vampos;
 #define SPLIT 120         /* a list longer than this opens as letter buckets (q2bridge.py SPLIT) */
 #define CAP 500           /* and a bucket longer than this splits again; no list sends more (CAP) */
@@ -117,15 +120,19 @@ int lib_card_held(void) {
 int lib_stream_song(const char *path, lib_song_t *o) {
     char app[64], sid[64], p[256], like[80];
     memset(o, 0, sizeof *o);
-    if (crc_vampos || !stream_sid(path, app, sizeof app, sid, sizeof sid) || lib_card_held()) return 0;
+    if (!stream_sid(path, app, sizeof app, sid, sizeof sid) || lib_card_held()) return 0;
     sqlite3 *c = 0;
     sqlite3_stmt *st;
     int ok = 0;
-    if (sqlite3_open_v2(crc_path(p, sizeof p, CAT), &c, SQLITE_OPEN_READONLY, 0) == SQLITE_OK &&
-        sqlite3_prepare_v2(c, "select s.id, ifnull(nullif(s.name,''),s.filename), ifnull(s.songer,''), "
-                              "ifnull(s.album,''), ifnull(m.seconds,0), ifnull(s.track,0), s.fileurl "
-                              "from servermeta m join servertable s on s.fileurl = m.fileurl "
-                              "where m.sid = ?1 and m.fileurl like ?2 limit 1", -1, &st, 0) == SQLITE_OK) {
+    if (sqlite3_open_v2(crc_path(p, sizeof p, crc_vampos ? VAMPOS_CAT : CAT), &c, SQLITE_OPEN_READONLY, 0) == SQLITE_OK &&
+        sqlite3_prepare_v2(c, crc_vampos ? "select s.id, ifnull(nullif(s.name,''),s.filename), ifnull(s.songer,''), "
+                                           "ifnull(s.album,''), ifnull(s.time,0), ifnull(s.track,0), s.fileurl "
+                                           "from servermeta m join servertable s on s.id = m.id "
+                                           "where m.sid = ?1 and s.fileurl like ?2 limit 1"
+                                         : "select s.id, ifnull(nullif(s.name,''),s.filename), ifnull(s.songer,''), "
+                                           "ifnull(s.album,''), ifnull(m.seconds,0), ifnull(s.track,0), s.fileurl "
+                                           "from servermeta m join servertable s on s.fileurl = m.fileurl "
+                                           "where m.sid = ?1 and m.fileurl like ?2 limit 1", -1, &st, 0) == SQLITE_OK) {
         snprintf(like, sizeof like, "/mnt/mmc/%s/%%", app);
         sqlite3_bind_text(st, 1, sid, -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(st, 2, like, -1, SQLITE_TRANSIENT);
@@ -296,7 +303,7 @@ static void f_dur(sqlite3_context *c, int n, sqlite3_value **v) {
  * they are always in the Library (no setting since 2026-11-19) */
 int lib_has_server(void) {
     char p[256];
-    return !crc_vampos && !lib_card_held() && access(crc_path(p, sizeof p, CAT), 0) == 0;
+    return !lib_card_held() && access(crc_path(p, sizeof p, crc_vampos ? VAMPOS_CAT : CAT), 0) == 0;
 }
 
 /* stock's library filter (offsets.inc MUSIC_WHERE): no audiobooks, podcasts or M4B in the music library */
@@ -323,7 +330,7 @@ typedef struct {
 static lib_key_t lib_key;
 
 static void lib_key_now(lib_key_t *k) {
-    static const char *const files[3] = {DB, CAT, DURATIONS}, *const vampos[3] = {VAMPOS_DB, 0, 0};
+    static const char *const files[3] = {DB, CAT, DURATIONS}, *const vampos[3] = {VAMPOS_DB, VAMPOS_CAT, 0};
     memset(k, 0, sizeof *k);
     int held = lib_card_held(); /* the catalogue counted as absent: the tables made again without it, and after */
     for (int i = 0; i < 3; ++i) {
@@ -386,7 +393,9 @@ static int lib_open(void) {
     int server = lib_has_server();
     if (server) {
         char q[300];
-        snprintf(sql, sizeof sql, "attach '%s' as cat", crc_path(q, sizeof q, CAT));
+        snprintf(sql, sizeof sql, "attach '%s' as cat%s", crc_path(q, sizeof q, crc_vampos ? VAMPOS_CAT : CAT),
+                 crc_vampos ? ";create temp view vmeta as select s.fileurl fileurl, m.app app, m.sid sid, s.time seconds "
+                              "from cat.servertable s join cat.servermeta m on m.id = s.id" : "");
         if (strchr(q, '\'') || sqlite3_exec(db, sql, 0, 0, 0) != SQLITE_OK) server = 0;
     }
     cat_on = server;
@@ -396,9 +405,10 @@ static int lib_open(void) {
                           SONG_COLS("songtable", "t", "ifnull(songtable.time,0)", "0") " from main.songtable where " MUSIC_WHERE
                         : "create temp view songs as " SONG_COLS("songtable", "t", "dur(songtable.fileurl)", "0")
                           " from main.songtable where " MUSIC_WHERE,
-             server ? " union all " SONG_COLS("s", "c", "ifnull(m.seconds,0)", "1")
-                      " from cat.servertable s left join cat.servermeta m on m.fileurl = s.fileurl"
-                    : "",
+             !server       ? ""
+             : crc_vampos ? " union all " SONG_COLS("s", "c", "ifnull(s.time,0)", "1") " from cat.servertable s"
+                          : " union all " SONG_COLS("s", "c", "ifnull(m.seconds,0)", "1")
+                            " from cat.servertable s left join cat.servermeta m on m.fileurl = s.fileurl",
              ";create temp table s2 as select *, akey(url) ak, norm(title) nt, norm(artist) nar, norm(album) nal, "
              "norm(aartist) naa, norm(genre) ng, case when srv then printf('%05d%05d',disc,track)||norm(title) "
              "else filename end ord, case when srv then track else lead(filename) end num from songs;"
@@ -648,7 +658,7 @@ static int list_of(const char *base, const char *sort, list_t *l) {
                  "main.playlist p join s2 on s2.url = p.fileurl where p.id > 100 and p.cd_num = h.id order by p.id "
                  "limit 1), null) c3, %d c4, 1 c5, 0 c6, 0 c7, 0 c8" NO_TAIL("null", "norm(h.name)", "h.id", "0")
                  " from main.playlist h where h.id <= 100",
-                 cat_on ? "(select plart(sl.app, sl.pid) from cat.serverlists sl where sl.list = h.id), " : "",
+                 cat_on && !crc_vampos ? "(select plart(sl.app, sl.pid) from cat.serverlists sl where sl.list = h.id), " : "",
                  ICON_PLAYLISTS_);
     } else if (!strcmp(kind, "dir")) {
         /* a card folder (q2bridge.py index_folders): its subfolders by name, then its songs by file name.
@@ -1144,8 +1154,10 @@ static int queue(crc_session *s, unsigned req_id, const uint8_t *p, size_t n, in
         sqlite3_stmt *st, *dl = 0;
         /* a stream download's server song, by the sid in its name (as lib_stream_song) */
         if (cat_on)
-            sqlite3_prepare_v2(db, "select " TRACK_ITEM " from s2 where url = (select fileurl from cat.servermeta "
-                                   "where sid = ?1 and fileurl like ?2 limit 1)", -1, &dl, 0);
+            sqlite3_prepare_v2(db, crc_vampos ? "select " TRACK_ITEM " from s2 where url = (select fileurl from temp.vmeta "
+                                                "where sid = ?1 and fileurl like ?2 limit 1)"
+                                              : "select " TRACK_ITEM " from s2 where url = (select fileurl from cat.servermeta "
+                                                "where sid = ?1 and fileurl like ?2 limit 1)", -1, &dl, 0);
         if (sqlite3_prepare_v2(db, "select " TRACK_ITEM " from s2 where rid = ?1", -1, &st, 0) == SQLITE_OK) {
             unsigned i = 0;
             for (char *c = line + 1; *c && i < offset + limit; ++i) {
@@ -1284,7 +1296,8 @@ static int flac_picture(const char *path, cover_t *c) {
 static int stream_picture(const char *art, const char *app, size_t appn, cover_t *c) {
     sqlite3_stmt *st;
     int found = 0;
-    if (sqlite3_prepare_v2(db, "select m.sid from s2 join cat.servermeta m on m.fileurl = s2.url where s2.ak = ?1",
+    if (sqlite3_prepare_v2(db, crc_vampos ? "select m.sid from s2 join temp.vmeta m on m.fileurl = s2.url where s2.ak = ?1"
+                                          : "select m.sid from s2 join cat.servermeta m on m.fileurl = s2.url where s2.ak = ?1",
                            -1, &st, 0))
         return 0;
     sqlite3_bind_text(st, 1, art, -1, SQLITE_TRANSIENT);
@@ -1370,7 +1383,7 @@ static int pl_cover_find(const char *pid, cover_t *c) {
     sqlite3_stmt *st;
     char app[16] = "";
     memset(c, 0, sizeof *c);
-    if (!cat_on || sqlite3_prepare_v2(db, "select app from cat.serverlists where pid = ?1 limit 1", -1, &st, 0))
+    if (!cat_on || crc_vampos || sqlite3_prepare_v2(db, "select app from cat.serverlists where pid = ?1 limit 1", -1, &st, 0))
         return 0;
     sqlite3_bind_text(st, 1, pid, -1, SQLITE_TRANSIENT);
     if (sqlite3_step(st) == SQLITE_ROW) snprintf(app, sizeof app, "%s", sqlite3_column_text(st, 0));
