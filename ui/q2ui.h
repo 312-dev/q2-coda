@@ -335,7 +335,8 @@ typedef struct ui_list ui_list;
 /* A picture a row was given (ui_row.art) may have changed or been freed: every list asks its rows
  * with art again before it draws them. Whoever owns the pictures calls it (ui/art.c). */
 void list_pictures_changed(void);
-void list_rows_changed(void); /* any row's words or marks may have changed: every row is asked again, a switch slides */
+void list_rows_changed(void); /* any row's words or marks may have changed: every row is asked again, a switch slides,
+                                 and the rows are counted again */
 void control_push(void);      /* Control Center (page_control.c) */
 /* ---- config.c: the settings q2ui reads from demo's config.ini ---- */
 extern const char *config_file;
@@ -349,6 +350,10 @@ int config_motion_setting(void); /* [IPOD] REDUCEMOTION: 1 on */
 void display_push(void);         /* Settings > Display (page_display.c) */
 void playback_push(void);        /* Settings > Playback (page_playback.c) */
 void general_push(void);         /* Settings > General and its About (page_general.c) */
+void about_push(void);           /* General > About (page_general.c) */
+int settings_route(const char *name); /* a page of Settings' by its route name (page_settings.c); 0 none */
+void wifi_push(void);            /* Settings > Wi-Fi (page_wifi.c) */
+void bluetooth_push(void);       /* Settings > Bluetooth (page_bluetooth.c) */
 extern const char *general_card; /* About's card: --card */
 ui_list *list_new(const ui_source *src);
 void list_free(ui_list *l);
@@ -426,7 +431,7 @@ extern const ui_page page_home, page_now;
 /* Leave q2ui for a page of demo's it has not got (docs/ui-rewrite.md#cutover): demo opens the page
  * named, takes the screen, and starts q2ui again where it was when the page is left. */
 void ui_demo_page(const char *name);
-void settings_push(void);         /* Settings: its rows open demo's pages for now (page_settings.c) */
+void settings_push(void);         /* Settings, its list (page_settings.c) */
 extern const ui_page page_depth; /* the panel's colour depth test card */
 void gallery_push(void);         /* every kind of row, as a list to try them on */
 extern const ui_page page_card;  /* a card of layers the wheel pushes */

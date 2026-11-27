@@ -792,16 +792,16 @@ int cc_key(void *win, unsigned key) {
 
 /* ---- q2ui's Control Center (docs/ui-rewrite.md#cutover): what it shows, and its switches ----
  * q2ui draws a Control Center of its own while it has the screen. The states it shows are added to
- * the status row's in its file (q2ui_gate.c tell): wifi and bt (the switches stock's own pages
+ * the status row's in its file (q2ui_gate.c tell): wifi and bton (the switches stock's own pages
  * show), car (Car Remote), smart (Smart Wi-Fi), eq (on in any mode), usb (the USB setting's value),
  * bright (the backlight, 0 to 100), vol and volmax (the volume and how high it may go: vol_cap).
  * Its switches come back as "set NAME 0|1" down the pipe the gate gives q2ui alone (q2ui_gate.c
  * ctl, q2ui_cc_set), each flipped as this page's circle flips it; q2ui's Display page sets
  * Light Mode ("set light 0|1|2") and Reduce Motion ("set motion 0|1") the same way, its Playback
  * page Gapless ("set gapless 0|1") and Smart Crossfade ("set xfade 0|1"), and its Control
- * Center's Brightness slider the backlight ("set bright 0..100"); Display reads its settings
- * back from config.ini itself (ui/config.c). Bluetooth is not one of them:
- * stock flips it only from its page's row, so q2ui opens that page. */
+ * Center's Brightness slider the backlight ("set bright 0..100"), its Wi-Fi page Wi-Fi ("set
+ * wifi 0|1") and its Bluetooth page Bluetooth ("set bt 0|1", as stock's own switch row does it);
+ * Display reads its settings back from config.ini itself (ui/config.c). */
 unsigned q2ui_cc_state(char *b, unsigned room) {
     eq_state s;
     eq_load(&s);
@@ -810,12 +810,17 @@ unsigned q2ui_cc_state(char *b, unsigned room) {
                         (int)g_lightness, (int)g_volume, vol_cap());
     return n < 0 ? 0 : (unsigned)n >= room ? room - 1 : (unsigned)n;
 }
-/* A switch of q2ui's set to on (1) or off: 0 when done or already so, -1 for a name it has not. */
+/* A switch of q2ui's set to on (1) or off: 0 when done or already so, -1 for a name it has not or
+ * one it cannot set now. */
 int q2ui_cc_set(const char *name, int on) {
     eq_state s;
     if (!tk_strcmp(name, "wifi")) {
         wifi_flows_cancel_join(); /* as the circle: stock's switch ignores a join that is trying */
         if (!g_wififlag != !on) wifi_switch(1);
+    } else if (!tk_strcmp(name, "bt")) { /* q2ui's Bluetooth page: as stock's switch row (0x4c4298, row 0) */
+        if (!g_bluetoothflag == !on) return 0;
+        if (I(bt_initstatus, 0)) return -1; /* the stack is starting: stock's row only says it is busy */
+        switchBluetooth(g_bluetoothflag, 1); /* the other way, and saved */
     } else if (!tk_strcmp(name, "car")) {
         if (!coda_rc_enabled() != !on) coda_rc_toggle();
     } else if (!tk_strcmp(name, "eq")) {

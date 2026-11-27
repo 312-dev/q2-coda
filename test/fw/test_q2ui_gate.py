@@ -389,6 +389,25 @@ def test_q2uis_playback_page_sets_gapless_and_smart_crossfade_through_demo(fw):
     assert cc(b'xfade', 0) == 0 and saved == [('Q2POD', 'XFADE', 0)] and gapless.value == 1
     assert cc(b'xfade', 0) == 0 and saved == [('Q2POD', 'XFADE', 0)]  # already off: nothing written again
 
+def test_q2uis_bluetooth_page_switches_bluetooth_as_stocks_row_does(fw):
+    """q2ui's Settings > Bluetooth: stock's switch row (btmenu_setting_row_on_click, 0x4c4298, row 0) runs
+    switchBluetooth(g_bluetoothflag, 1), which turns it the other way and saves it, and does nothing while the stack is
+    starting (bt_initstatus set) but its busy toast; demo does the same for "set bt 0|1", only when it differs, and
+    refuses it while the stack starts."""
+    calls = []
+    fw.mock('switchBluetooth', lambda on, save, *_: calls.append((on, save)) or 0)
+    cc = fw.fn('q2ui_cc_set', C.c_int, C.c_char_p, C.c_int)
+    fw.var('g_bluetoothflag', C.c_ubyte).value = 1
+    fw.var('fw_ctx_bt_initstatus', C.c_int).value = 0
+    assert cc(b'bt', 1) == 0 and calls == []
+    assert cc(b'bt', 0) == 0 and calls == [(1, 1)]
+    fw.var('g_bluetoothflag', C.c_ubyte).value = 0
+    fw.var('fw_ctx_bt_initstatus', C.c_int).value = -102
+    assert cc(b'bt', 1) == -1 and calls == [(1, 1)]
+    fw.var('fw_ctx_bt_initstatus', C.c_int).value = 0
+    assert cc(b'bt', 1) == 0 and calls == [(1, 1), (0, 1)]
+
+
 class Piped(Gate):
     """The gate with q2ui's settings pipe: pipe2 answers READ and WRITE, and what q2ui wrote is read from READ."""
     READ, WRITE = 20, 21

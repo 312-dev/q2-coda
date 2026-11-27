@@ -504,6 +504,8 @@ def pages(binary, work):
     good &= check("Home > Settings > Car Remote asks demo for its page by the payload's opener", asked == 'carremote_page\n', repr(asked))
     good &= display(binary, work, home)
     good &= playback(binary, work, home)
+    good &= wireless(binary, work, home)
+    good &= comebacks(binary, work, home)
     good &= general(binary, work, home)
     return good
 
@@ -570,26 +572,96 @@ def display(binary, work, home):
 
 
 def playback(binary, work, home):
-    """Settings > Playback, q2ui's own (ui/page_playback.c): EQ as demo says it stands, Gapless and Smart Crossfade as
-    config.ini has them, each set through demo (Smart Crossfade on turns Gapless on, as demo's row does); the Sleep
-    Timer and the rest of demo's Playback page by their paths."""
+    """Settings > Playback, q2ui's own (ui/page_playback.c): EQ first, as demo's Playback has it, opening demo's EQ
+    page; Gapless and Smart Crossfade as config.ini has them, each set through demo (Smart
+    Crossfade on turns Gapless on, as demo's row does); the Sleep Timer and the rest of demo's Playback page by their
+    paths."""
     good = True
     d = pathlib.Path(tempfile.mkdtemp(dir=work))
     (d/'config.ini').write_text('[PLAYSET]\nGAPLESS=1\n[Q2POD]\nXFADE=0\n')
     (d/'told').write_text('eq=1\n')
     to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 3', 'rest', 'key centre', 'rest']  # Home > Settings > Playback
-    lines = to + ['key centre', 'run 100', 'tick 1', 'rest', 'key centre', 'run 100', 'tick 1', 'rest', 'key centre', 'run 100',
+    lines = to + ['rows @playback.txt', 'tick 1', 'rest', 'key centre', 'run 100', 'tick 1', 'rest', 'key centre', 'run 100',
                   'tick -1', 'rest', 'key centre', 'run 100']
     opts = (*home, '--config', d/'config.ini', '--told', d/'told')
-    _, _, _, (sent, _, _), said = script(binary, work, 60, lines, *opts, queue=True, ctl=True)
-    good &= check('EQ (on by demo) goes off, Gapless (on in the file) off, Smart Crossfade on, and Gapless shows on with it again, each '
+    _, _, _, (sent, _, out), said = script(binary, work, 60, lines, *opts, queue=True, ctl=True)
+    rows = (out/'playback.txt').read_text().splitlines() if (out/'playback.txt').exists() else []
+    good &= check("Playback's rows: EQ, the two switches, the Sleep Timer, the rest of demo's page",
+                  rows == ['EQ', 'Gapless', 'Smart Crossfade', 'Sleep Timer', 'More Playback Settings'], str(rows))
+    good &= check('Gapless (on in the file) goes off, Smart Crossfade on, and Gapless shows on with it again, each '
                   "down q2ui's own pipe and none down the queue",
-                  said == ['set eq 0', 'set gapless 0', 'set xfade 1', 'set gapless 0'] and sent == [], f'{said} {sent}')
-    for ticks, page in ((3, 'systemset/sleepshutdown_page'), (4, 'playset/playset_page')):
+                  said == ['set gapless 0', 'set xfade 1', 'set gapless 0'] and sent == [], f'{said} {sent}')
+    for ticks, page in ((0, 'playset/equalizer_page'), (3, 'systemset/sleepshutdown_page'), (4, 'playset/playset_page')):
         _, _, _, (sent, _, out) = script(binary, work, 60, to + [f'tick {ticks}', 'rest', 'key centre', 'run 100'], *opts,
                                          code=3, queue=True)
         asked = (out/'ask').read_text() if (out/'ask').exists() else ''
         good &= check(f"its row {ticks + 1} opens demo's {page}", asked == page + '\n', repr(asked))
+    return good
+
+
+def wireless(binary, work, home):
+    """Settings > Wi-Fi and Settings > Bluetooth, q2ui's own (ui/page_wifi.c, ui/page_bluetooth.c): each page's switch
+    stands as demo says (wifi=, bton= in its status file) and is set through demo ("set wifi|bt 0|1"); off, the switch is
+    the page, as on demo's pages; on, the rows under it open demo's pages for the networks, the devices and their
+    settings."""
+    good = True
+    d = pathlib.Path(tempfile.mkdtemp(dir=work))
+    told = d/'told'
+    wifi = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'key centre', 'rest']  # Home > Settings > Wi-Fi
+    bt = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest']  # Home > Settings > Bluetooth
+    opts = (*home, '--told', told)
+    for name, to, key, on_rows in (
+            ('Wi-Fi', wifi, 'wifi', ['Wi-Fi', 'Networks']),
+            ('Bluetooth', bt, 'bt', ['Bluetooth', 'Devices', 'Quality', 'Bluetooth Headset Volume Control'])):
+        flag = 'wifi' if key == 'wifi' else 'bton'
+        told.write_text(f'{flag}=0\n')
+        _, _, _, (sent, _, out), said = script(binary, work, 60, to + ['rows @off.txt', 'key centre', 'run 100', 'rest',
+                                                                       'rows @on.txt'], *opts, queue=True, ctl=True)
+        off = (out/'off.txt').read_text().splitlines() if (out/'off.txt').exists() else []
+        on = (out/'on.txt').read_text().splitlines() if (out/'on.txt').exists() else []
+        good &= check(f"{name} off is its switch alone; Centre turns it on down q2ui's own pipe and its rows come at once",
+                      off == [name] and said == [f'set {key} 1'] and sent == [] and on == on_rows, f'{off} {said} {sent} {on}')
+        told.write_text(f'{flag}=1\n')
+        _, _, _, (_, _, out), said = script(binary, work, 60, to + ['key centre', 'run 100', 'rest', 'rows @off.txt'], *opts,
+                                            queue=True, ctl=True)
+        off = (out/'off.txt').read_text().splitlines() if (out/'off.txt').exists() else []
+        good &= check(f'{name} on by demo goes off, its rows going with it', said == [f'set {key} 0'] and off == [name],
+                      f'{said} {off}')
+    pages = (('Wi-Fi', wifi, 1, 'systemset/wifi_page'), ('Bluetooth', bt, 1, 'systemset/bluetooth_page'),
+             ('Bluetooth', bt, 2, 'systemset/btquality_page'), ('Bluetooth', bt, 3, 'systemset/btadjustvol_page'))
+    told.write_text('wifi=1\nbton=1\n')
+    for name, to, ticks, page in pages:
+        _, _, _, (_, _, out) = script(binary, work, 60, to + [f'tick {ticks}', 'rest', 'key centre', 'run 100'], *opts,
+                                      code=3, queue=True)
+        asked = (out/'ask').read_text() if (out/'ask').exists() else ''
+        good &= check(f"{name}'s row {ticks + 1} opens demo's {page}", asked == page + '\n', repr(asked))
+    return good
+
+
+def comebacks(binary, work, home):
+    """A page of demo's opened from a page of q2ui's: q2ui, started again when demo's page is left, is back on the page
+    that opened it, on its row, under the pages it had (main.c state_restore), for every page that opens one."""
+    good = True
+    d = pathlib.Path(tempfile.mkdtemp(dir=work))
+    (d/'told').write_text('wifi=1\nbton=1\n')
+    settings = ['rest', 'tick 6', 'rest', 'key centre', 'rest']
+    for name, to, rows in (
+            ('Wi-Fi', settings + ['key centre', 'rest', 'tick 1'], ['Wi-Fi', 'Networks']),
+            ('Bluetooth', settings + ['tick 1', 'rest', 'key centre', 'rest', 'tick 2'],
+             ['Bluetooth', 'Devices', 'Quality', 'Bluetooth Headset Volume Control']),
+            ('General', settings + ['tick 2', 'rest', 'key centre', 'rest', 'tick 1'], ['About', 'More General Settings']),
+            ('Playback', settings + ['tick 3', 'rest', 'key centre', 'rest'],
+             ['EQ', 'Gapless', 'Smart Crossfade', 'Sleep Timer', 'More Playback Settings'])):
+        state = d/f'state-{len(name)}'
+        opts = (*home, '--told', d/'told', '--state', state)
+        script(binary, work, 60, to + ['rest', 'key centre', 'run 100'], *opts, code=3, queue=True)
+        trace, _, _, (_, _, out) = script(binary, work, 60, ['rest', 'rows @top.txt', 'rest'], *opts, queue=True)
+        got = (out/'top.txt').read_text().splitlines() if (out/'top.txt').exists() else []
+        sel = int(trace[-1]['sel']) if trace else -1
+        want_sel = int(to[-1].split()[1]) if to[-1].startswith('tick') else 0
+        ok = got == rows
+        good &= check(f"back from the page of demo's that {name} opened, q2ui is on {name} on the row it was on",
+                      ok and sel == want_sel, f'{got} sel {sel}')
     return good
 
 
@@ -621,7 +693,7 @@ def general(binary, work, home):
 
 def control_center(binary, work, home):
     """Control Center (ui/page_control.c): Return held on any page; its switches stand as demo says (the told file,
-    patch/control_center.c q2ui_cc_state) and are flipped through the queue, turning at once; USB opens demo's picker."""
+    patch/control_center.c q2ui_cc_state) and are flipped down q2ui's own pipe, turning at once; USB opens demo's picker."""
     good = True
     told = pathlib.Path(tempfile.mkdtemp(dir=work))/'told'
     told.write_text('out=other\nwifi=1\nbton=0\ncar=0\nsmart=0\neq=1\nusb=Automatic\n')
