@@ -174,7 +174,7 @@ const image_t *icon(const char *name) {
     if (n == 48 || strlen(name) >= sizeof kept[0].name) return 0;
     char path[320];
     /* a name with its own ending (mode_shuffle_on) is that file; a bare one is its white glyph */
-    snprintf(path, sizeof path, strchr(name, '.') ? "%s/oled_%.*s.png" : "%s/oled_%s_w.png", icon_dir,
+    snprintf(path, sizeof path, strchr(name, '.') ? "%s/oled_%.*s.png" : "%s/oled_%.*s_w.png", icon_dir,
              strchr(name, '.') ? (int)(strchr(name, '.') - name) : (int)strlen(name), name);
     strcpy(kept[n].name, name);
     kept[n].im = image_load(path);
