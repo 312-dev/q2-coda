@@ -139,13 +139,15 @@ static void write_stats(void) {
             " \"work_hist_ms\": {\"lt1\": %u, \"lt2\": %u, \"lt4\": %u, \"lt8\": %u, \"lt12\": %u, "
             "\"lt16_7\": %u, \"lt33\": %u, \"more\": %u},\n"
             " \"glyphs\": %u, \"glyph_bytes\": %u, \"glyphs_made\": %u, \"glyph_evictions\": %u, "
-            "\"motion\": %d, \"panel_bits\": %d, \"page\": %d%s%s}\n",
+            "\"motion\": %d, \"panel_bits\": %d, \"page\": %d,\n"
+            " \"now_seq\": %u, \"now_watched\": %d, \"playing\": %d, \"paused\": %d, \"cover\": %d, \"top\": \"%s\"%s%s}\n",
             lib_songs(), open_ms, first_ms, s->frames, s->ticks, (double)s->draw_ns / frames / 1e3,
             (double)s->show_ns / frames / 1e3, (double)s->draw_max_ns / 1e3, (unsigned)(s->px / frames),
             (double)s->work_us / frames, (unsigned long long)s->work_max_us, s->over_budget, s->cpu_over, s->dropped,
             s->late, s->streak_max, fb_refresh_us(), s->deferred, s->hist[0], s->hist[1], s->hist[2], s->hist[3],
             s->hist[4], s->hist[5], s->hist[6], s->hist[7], text_stats.glyphs, text_stats.bytes,
-            text_stats.made, text_stats.evictions, list_motion, fb_bits, fb_page(),
+            text_stats.made, text_stats.evictions, list_motion, fb_bits, fb_page(), now_seq(), now_watched(),
+            now_get()->playing, now_get()->paused, now_cover() != 0, ui_top_name(),
             *bench_json ? ",\n \"bench\": " : "", bench_json);
     fclose(f);
 }

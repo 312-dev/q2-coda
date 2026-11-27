@@ -350,6 +350,7 @@ void now_open(void);              /* watch for changes; a change wakes the loop 
 void now_read(void);
 const ui_now *now_get(void);
 unsigned now_seq(void);           /* moves when anything of it changed */
+int now_watched(void);            /* whether changes are being watched for (the stats file says) */
 const image_t *now_cover(void);   /* the playing song's cover, 0 with none */
 unsigned now_cover_seq(void);
 extern const char *now_file, *now_cover_file;

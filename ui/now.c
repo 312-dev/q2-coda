@@ -23,6 +23,7 @@ static long cover_size = -1;
 
 const ui_now *now_get(void) { return &now; }
 unsigned now_seq(void) { return seq; }
+int now_watched(void) { return watch >= 0; }
 
 static void field(const char *line, const char *key, char *out, size_t room) {
     size_t k = strlen(key);
@@ -41,7 +42,8 @@ void now_read(void) {
         field(line, "artist", now.artist, sizeof now.artist);
         field(line, "album", now.album, sizeof now.album);
         field(line, "state", num, sizeof num);
-        if (*num) now.playing = atoi(num) == 2, now.paused = atoi(num) == 3;
+        /* 0 stopped, 1 playing, 2 paused: AVRCP's order (patch/now_source.c now_status) */
+        if (*num) now.playing = atoi(num) == 1, now.paused = atoi(num) == 2;
         *num = 0, field(line, "pos", num, sizeof num);
         if (*num) now.pos_ms = atoi(num);
         *num = 0, field(line, "len", num, sizeof num);

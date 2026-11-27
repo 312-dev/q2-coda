@@ -96,7 +96,8 @@ class Picture:
         return sum(rows) / len(rows) if rows else 0
 
 
-NOW = 'seq=3\nstate=2\npos=14000\nlen=180\nid=5\nvolume=40\nsource=library\ntitle=A Made-Up Song\nartist=Its Artist\nalbum=Its Album\n'
+# demo's file for what plays (patch/coda_rc_shim.c cr_now): state is 0 stopped, 1 playing, 2 paused (now_source.c now_status)
+NOW = 'seq=3\nstate=1\npos=14000\nlen=180\nid=5\nvolume=40\nsource=library\ntitle=A Made-Up Song\nartist=Its Artist\nalbum=Its Album\n'
 
 
 def script(binary, work, n, lines, *options, now=None, code=0, queue=False):
@@ -150,9 +151,10 @@ class Run:
         self.wheel = open(self.dir/'input/event3', 'wb', buffering=0)
         self.keys = open(self.dir/'input/event1', 'wb', buffering=0)
         self.x = 100
+        time.sleep(0.4)  # q2ui drops what was pressed before it had the screen: the finger comes down once it runs
         self.wheel.write(event(EV_ABS, ABS_X, self.x) + event(EV_ABS, ABS_PRESSURE, 1) + event(EV_KEY, BTN_TOUCH, 1) +
                          event(EV_SYN, 0, 0))
-        time.sleep(0.3)
+        time.sleep(0.1)
 
     def ticks(self, n, gap=0.16):
         """n ticks down (up when negative), far enough apart that none accelerates (patch/wheel_accel.h WA_RUN_MS)."""
@@ -349,6 +351,10 @@ def pages(binary, work):
     good &= check("Home's platter keeps to the list's side and the pane is drawn beside it",
                   pics['idle'].blue(100, 40 + 3) and not pics['idle'].blue(250, 40 + 3) and pics['idle'].at(280, 160) != (0, 0, 0))
     good &= check('the two Homes differ where the first row is', pics['idle'].rgb != pics2['playing'].rgb)
+    _, paused, _ = script(binary, work, 60, ['rest', 'shot @paused.ppm', 'tick 9', 'rest'], *home, now=NOW.replace('state=1', 'state=2'))
+    _, stopped, _ = script(binary, work, 60, ['rest', 'shot @stopped.ppm'], *home, now=NOW.replace('state=1', 'state=0'))
+    good &= check('a paused song keeps the row, reading Paused, and a stopped one has none',
+                  paused['paused'].rgb not in (pics['idle'].rgb, pics2['playing'].rgb) and stopped['stopped'].rgb == pics['idle'].rgb)
     # Centre on Playing is Now Playing: the bar filled to the song's place, the times beside it
     _, pics, _ = script(binary, work, 60, ['rest', 'key centre', 'rest', 'shot @now.ppm'], *home, now=NOW)
     fill, track = pics['now'].at(36, 231), pics['now'].at(200, 231)
@@ -417,6 +423,24 @@ def routes(binary, work):
     again.proc.terminate()
     again.proc.wait(timeout=5)
     os.close(again.queue)
+
+    # what plays changes while q2ui runs: demo writes its file beside it and renames it into place, and Home shows it
+    r = Run(binary, work, 60, '--page', 'home')
+    idle = r.rest()
+    first = [shot.pixel(r.picture(), x, 40 + 16) for x in range(20, 120)]
+    (r.dir/'now.tmp').write_text(NOW)
+    os.rename(r.dir/'now.tmp', r.dir/'now')
+    time.sleep(0.5)
+    playing = r.rest()
+    row = [shot.pixel(r.picture(), x, 40 + 16) for x in range(20, 120)]
+    good &= check('a song starting while Home is shown puts Playing on its first row, with no key pressed',
+                  playing['frames'] > idle['frames'] and row != first, f"{idle['frames']} frames, then {playing['frames']}")
+    woke = r.wakes()
+    time.sleep(1.0)
+    good &= check('and Home is then at rest again', r.wakes() - woke <= 1, f'{r.wakes() - woke} wakes in 1 s')
+    r.proc.terminate()
+    r.proc.wait(timeout=5)
+    os.close(r.queue)
     return good
 
 
