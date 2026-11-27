@@ -13,7 +13,7 @@
  *   queue writes: play a list of song ids from one of them, or shuffled (ids in
  *   /tmp/coda-rc.list), Play, Pause, Play/Pause, Next, Previous, seek, scan (Car Audio's held Next or Previous: seek.c seek_car), set the volume, set shuffle and
  *   repeat, rate the playing song, like it or not (its heart), play a song of the queue, start or stop a radio
- *   (song_radio.c); and
+ *   (song_radio.c), add listed ids to the queue as Play Next or Play Last (q2ui's hold menu); and
  *   answers each in /tmp/coda-rc.ack (the last CR_ACKS answers, newest first), a Pause or Play once the player
  *   shows it;
  * - starts a card app the daemon named in /tmp/coda-rc.wake, for a cover the car asked for (addon_cover_wake);
@@ -729,6 +729,14 @@ static void cr_run(const char *raw) {
         int before = media_status(), code = cr_jump((unsigned)v, w);
         cr_said(seq, verb + 1, before, code == 3 ? "not that song now" : code ? "refused" : 0);
         cr_ack(seq, code);
+    } else if (verb && __isoc99_sscanf(verb, " queue %4s %d", word, &v) == 2 && (!strcmp(word, "next") || !strcmp(word, "last"))) {
+        /* q2ui's hold menu: the listed ids added as Play Next or Play Last add them (library_pages.c queue_add) */
+        int from = 0;
+        void *dq = cr_songs(-1, &from);
+        int ok = deque_size(dq) && queue_add(dq, word[0] == 'n' ? 1 : 2);
+        cr_said(seq, verb + 1, media_status(), ok ? 0 : "refused");
+        deque_destroy(dq);
+        cr_ack(seq, !ok);
     } else if (!strcmp(word, "find")) {
         /* Find My Vamp (findmy.c): "find" plays the jingle (its minute again if it plays), "find stop" ends it */
         int stop = !strncmp(verb, " find stop", 10), ok = stop ? (findmy_stop(), 1) : findmy_start();

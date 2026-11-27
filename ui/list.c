@@ -623,13 +623,13 @@ static void row_paint(ui_list *l, int i, float y, int focused, float dy) {
     else if (r->flags & ROW_GRIP)
         grip(right - 5, cy + iy, focused ? on : tok(TOK_TERTIARY));
     for (int k = 0; k < 3 && r->marks[k]; ++k) { /* Text Primary, white on the platter, as demo's (wifi_mark) */
-        char name[24];
+        char name[48];
         snprintf(name, sizeof name, "%s_d.", r->marks[k]);
         const image_t *im = icon(name);
         float x = right - (float)(ICON_PX + k * MARK_STEP);
         if (im)
             image_draw(im, (rectf_t){ x, cy - ICON_PX / 2 + iy, ICON_PX, ICON_PX }, 0, 0, 256,
-                       focused ? (long)on : grey ? (long)tok(TOK_TERTIARY) : (long)tok(TOK_PRIMARY));
+                       focused ? (long)on : grey ? (long)tok(TOK_TERTIARY) : r->flags & ROW_SOFT ? (long)tok(TOK_SECONDARY) : (long)tok(TOK_PRIMARY));
     }
 }
 
@@ -649,7 +649,7 @@ static void list_draw_rows(ui_list *l, rect_t r) {
     int p = l->src.pinned, full = l->box.y == LIST_TOP;
     if (!rect_meet(r, frame, &part)) return;
     clip_set(part);
-    fill(part, tok(TOK_CANVAS));
+    if (!l->src.bare) fill(part, tok(TOK_CANVAS));
     /* the scrolling rows, under everything: clipped to the list's frame, which under a pinned
      * row starts at that row's foot */
     rows = frame;
@@ -666,14 +666,14 @@ static void list_draw_rows(ui_list *l, rect_t r) {
             row_paint(l, i, y, 0, 0);
         }
         /* the list's ends: rows fade into the screen's foot, and into its top once scrolled */
-        if (full || p) {
+        if (!l->src.bare && (full || p)) {
             int foot = l->box.y + l->box.h, end = l->src.fade_to ? l->src.fade_to : FOOT_END;
             fade_rows(foot, end, FOOT_KEEP, 0);
             fill((rect_t){ frame.x, end, frame.w, SCREEN_H - end }, tok(TOK_CANVAS));
         }
         if (p)
             fade_rows(l->y0, l->y0 + PIN_FADE, 0, 255);
-        else if (full && l->scroll.x > 0) {
+        else if (!l->src.bare && full && l->scroll.x > 0) {
             fill((rect_t){ frame.x, 0, frame.w, TOP_BLACK }, tok(TOK_CANVAS));
             fade_rows(TOP_BLACK, LIST_TOP - TOP_CLEAR, 0, 255);
         }

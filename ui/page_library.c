@@ -31,6 +31,7 @@ static void s_chosen(void *ctx, int i) {
     struct songs_st *s = ctx;
     if (!player_play(s->ids, s->n, i, 0)) ui_push(&page_now, 0); /* as demo's Now Playing comes up for a song chosen */
 }
+static void s_held(void *ctx, int i) { song_menu(((struct songs_st *)ctx)->songs[i]); }
 static void group_songs_push(int kind, int group) {
     /* the page keeps its source's context for as long as the program runs: a list is opened a
      * few times a session and each is a few words and its ids */
@@ -40,7 +41,7 @@ static void group_songs_push(int kind, int group) {
     s->ids = malloc((size_t)(s->n ? s->n : 1) * sizeof *s->ids);
     for (int i = 0; i < s->n; ++i) s->ids[i] = lib_ids()[s->songs[i]];
     snprintf(s->name, sizeof s->name, "group.%d.%d", kind, group);
-    ui_source src = { .count = s_count, .row = s_row, .chosen = s_chosen, .ctx = s, .name = s->name };
+    ui_source src = { .count = s_count, .row = s_row, .chosen = s_chosen, .held = s_held, .ctx = s, .name = s->name };
     ui_push(&list_page, &src);
 }
 
@@ -56,7 +57,7 @@ static void playlist_push(int list) {
     s->ids = malloc((size_t)(s->n ? s->n : 1) * sizeof *s->ids);
     for (int i = 0; i < s->n; ++i) s->ids[i] = lib_ids()[songs[i]];
     snprintf(s->name, sizeof s->name, "playlist.%d", list);
-    ui_source src = { .count = s_count, .row = s_row, .chosen = s_chosen, .ctx = s, .name = s->name };
+    ui_source src = { .count = s_count, .row = s_row, .chosen = s_chosen, .held = s_held, .ctx = s, .name = s->name };
     ui_push(&list_page, &src);
 }
 static struct {
@@ -108,6 +109,38 @@ static void g_row(void *ctx, int i, ui_row *out) {
     out->flags = ROW_CHEVRON;
 }
 static void g_chosen(void *ctx, int i) { group_songs_push((int)(long)ctx, i); }
+
+/* ---- a song's hold menu (docs/oled-design.md#menus): Centre held on a song's row ---- */
+enum { SM_NEXT, SM_LAST, SM_ALBUM, SM_ARTIST };
+static const menu_row song_rows[] = { { "Play Next", "menu_arrow-bend-down-right" },
+                                      { "Play Last", "menu_queue" },
+                                      { "Go to Album", "menu_vinyl-record" },
+                                      { "Go to Artist", "menu_microphone-stage" } };
+static struct {
+    int song;
+    char line[330];
+    menu_t m;
+} sm;
+/* Play Next and Play Last go to demo's queue (player_enqueue) and say so, as demo's do; Go to Album and Go to Artist
+ * open q2ui's own page of the song's album or artist, over the list it was held on */
+static void sm_picked(void *ctx, int i) {
+    (void)ctx;
+    int id = lib_ids()[sm.song];
+    if (i == SM_NEXT || i == SM_LAST) {
+        if (!player_enqueue(&id, 1, i == SM_NEXT)) notice_toast(i == SM_NEXT ? "Playing Next" : "Playing Last");
+        return;
+    }
+    int kind = i == SM_ALBUM ? LIB_ALBUM : LIB_ARTIST, g = lib_group_of(kind, sm.song);
+    if (g >= 0) group_songs_push(kind, g);
+}
+void song_menu(int song) {
+    if (song < 0 || song >= lib_songs()) return;
+    int g = lib_group_of(LIB_ALBUM, song);
+    sm.song = song;
+    snprintf(sm.line, sizeof sm.line, "%s \xc2\xb7 %s", lib_artist(song), lib_album(song));
+    sm.m = (menu_t){ lib_title(song), sm.line, g >= 0 ? album_cover(g) : 0, song_rows, 4, sm_picked, 0 };
+    menu_push(&sm.m);
+}
 static void groups_push(int kind) {
     ui_source src = { .count = g_count, .row = g_row, .chosen = g_chosen, .ctx = (void *)(long)kind,
                       .name = kind == LIB_ARTIST ? "artists" : "albums", .letters = 1, .row_h = kind == LIB_ALBUM ? 52 : 0 };

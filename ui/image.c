@@ -165,7 +165,7 @@ void image_draw_part(const image_t *im, rectf_t part, rectf_t r, float radius, f
 const char *icon_dir = "/release/assets/default/raw/images/xx";
 const image_t *icon(const char *name) {
     static struct {
-        char name[24];
+        char name[48];
         image_t *im;
     } kept[96]; /* the status row's sync arrows alone are 30 */
     static int n;

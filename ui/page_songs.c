@@ -24,7 +24,13 @@ static void chosen(void *ctx, int i) {
     if (lib_songs() && !player_play(lib_ids(), lib_songs(), i ? i - 1 : 0, !i)) ui_push(&page_now, 0);
 }
 
+/* Centre held on a song: its hold menu (page_library.c song_menu) */
+static void held(void *ctx, int i) {
+    (void)ctx;
+    if (i) song_menu(i - 1);
+}
+
 void songs_push(void) {
-    ui_source src = { .count = count, .row = row, .chosen = chosen, .name = "songs", .pinned = 1, .letters = 1 };
+    ui_source src = { .count = count, .row = row, .chosen = chosen, .held = held, .name = "songs", .pinned = 1, .letters = 1 };
     ui_push(&list_page, &src);
 }

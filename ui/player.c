@@ -62,22 +62,34 @@ int player_line(const char *verb, const char *ssid) {
     return write(player_ctl, line, (size_t)n) == n ? 0 : -1;
 }
 
+/* the ids to the list file, whole or not at all: written beside it and renamed over it */
+static int list_write(const int *ids, int n) {
+    char *text = malloc((size_t)n * 12 + 1), tmp[300];
+    if (!text) return -1;
+    size_t len = 0;
+    for (int i = 0; i < n; ++i) len += (size_t)sprintf(text + len, "%d\n", ids[i]);
+    snprintf(tmp, sizeof tmp, "%s.q2ui", player_list);
+    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600), ok = fd >= 0 && write(fd, text, len) == (ssize_t)len;
+    if (fd >= 0) close(fd);
+    free(text);
+    return !ok || rename(tmp, player_list) ? -1 : 0;
+}
 int player_play(const int *ids, int n, int at, int shuffle) {
+    char verb[48];
     if (n > PLAY_MAX) { /* the part of the list round the song chosen */
         int from = at - PLAY_MAX / 2 < 0 ? 0 : at - PLAY_MAX / 2;
         if (from + PLAY_MAX > n) from = n - PLAY_MAX;
         ids += from, at -= from, n = PLAY_MAX;
     }
-    char *text = malloc((size_t)n * 12 + 1), tmp[300], verb[48];
-    if (!text) return -1;
-    size_t len = 0;
-    for (int i = 0; i < n; ++i) len += (size_t)sprintf(text + len, "%d\n", ids[i]);
-    /* whole or not at all: written beside it and renamed over it */
-    snprintf(tmp, sizeof tmp, "%s.q2ui", player_list);
-    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600), ok = fd >= 0 && write(fd, text, len) == (ssize_t)len;
-    if (fd >= 0) close(fd);
-    free(text);
-    if (!ok || rename(tmp, player_list)) return -1;
+    if (list_write(ids, n)) return -1;
     snprintf(verb, sizeof verb, "play %d %d %d", at, shuffle, n);
+    return player_send(verb);
+}
+/* the hold menu's Play Next and Play Last: the songs added to the queue (patch/coda_rc_shim.c "queue next|last N") */
+int player_enqueue(const int *ids, int n, int next) {
+    char verb[32];
+    if (n > PLAY_MAX) n = PLAY_MAX;
+    if (list_write(ids, n)) return -1;
+    snprintf(verb, sizeof verb, "queue %s %d", next ? "next" : "last", n);
     return player_send(verb);
 }

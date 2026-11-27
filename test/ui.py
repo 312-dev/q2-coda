@@ -1018,6 +1018,53 @@ def edit_library(binary, work, home):
     return good
 
 
+def hold_menu(binary, work):
+    """A song's hold menu (docs/oled-design.md#menus, ui/page_menu.c): Centre held on a song opens the menu sheet over
+    the receding page, rising from the foot, with its grab bar, the song's header and its rows; Play Next and Play
+    Last add the song to demo's queue ("queue next|last 1", patch/coda_rc_shim.c) and toast it; Go to Album opens the
+    song's album; Return closes the sheet back to the list. Under Reduce Motion it stands at once."""
+    good = True
+    grab = (0x5a, 0x5a, 0x5e)
+    near = lambda c, rgb: all(abs(a - b) <= 10 for a, b in zip(c, rgb))
+    lines = ['rest', 'rows @songs.txt', 'down centre', 'hold centre', 'run 90', 'shot @rising.ppm', 'rest', 'shot @menu.ppm',
+             'rows @menu.txt', 'key centre', 'rest', 'run 300']
+    trace, pics, _, (sent, ids, d) = script(binary, work, 60, lines, queue=True)
+    menu = [r.split('\t')[0] for r in (d/'menu.txt').read_text().splitlines()] if (d/'menu.txt').exists() else []
+    songs = (d/'songs.txt').read_text().splitlines() if (d/'songs.txt').exists() else []
+    raw = (d/'trace').read_text()
+    m, r = pics.get('menu'), pics.get('rising')
+    good &= check("Centre held on a song opens its menu: Play Next, Play Last, Go to Album, Go to Artist",
+                  menu == ['Play Next', 'Play Last', 'Go to Album', 'Go to Artist'], str(menu))
+    good &= check('the sheet rises (its grab bar not yet up 90 ms in) to rest with the grab bar at y 46, the page behind '
+                  'receded and dimmed above it, the header beside the cover',
+                  m is not None and near(m.at(187, 48), grab) and not near(r.at(187, 48), grab)
+                  and 60 < max(max(m.at(x, y)) for x in range(55, 115) for y in range(4, 38)) < 140 and any(m.at(x, y)[0] > 200 for x in range(88, 200) for y in range(58, 84)),
+                  f"{m and m.at(187, 48)} {r and r.at(187, 48)} {m and max(max(m.at(x, y)) for x in range(55, 115) for y in range(4, 38))}")
+    good &= check('Play Next adds the song to the queue and says so', len(sent) == 1 and sent[0].split()[1:] == ['queue', 'next', '1']
+                  and len(ids) == 1 and 'toast=on' in raw, f'{sent} {ids}')
+    lines = ['rest', 'down centre', 'hold centre', 'rest', 'tick 2', 'rest', 'key centre', 'rest', 'rows @album.txt',
+             'key return', 'rest', 'rows @back.txt', 'down centre', 'hold centre', 'rest', 'key return', 'rest', 'run 50', 'rows @closed.txt']
+    trace, _, _, (sent, _, d) = script(binary, work, 60, lines, queue=True)
+    album = (d/'album.txt').read_text().splitlines() if (d/'album.txt').exists() else []
+    back = (d/'back.txt').read_text().splitlines() if (d/'back.txt').exists() else []
+    closed = (d/'closed.txt').read_text().splitlines() if (d/'closed.txt').exists() else []
+    good &= check("Go to Album opens the song's album, its songs with the held one among them; Return gives the list "
+                  'back; Return on the menu closes it', songs[1] in album and album != songs and back == songs and closed == songs
+                  and sent == [], f'{album[:3]} {back[:2]} {closed[:2]}')
+    for row, column in ((2, 'album'), (3, 'songer')):  # the held song's album, then its artist (stock's songtable)
+        _, _, _, (_, _, d) = script(binary, work, 60, ['rest', 'down centre', 'hold centre', 'rest', f'tick {row}', 'rest', 'key centre',
+                                                       'rest', 'run 50', 'rows @group.txt'], queue=True)
+        group = sorted((d/'group.txt').read_text().splitlines()) if (d/'group.txt').exists() else []
+        with sqlite3.connect(d/'library.db') as db:
+            want = sorted(t for (t,) in db.execute(f'select name from songtable where {column} = (select {column} from songtable '
+                                                   'where name = ?)', (songs[1],)))
+        good &= check(f"{'Go to Album' if column == 'album' else 'Go to Artist'} opens the page of the held song's "
+                      f"{'album' if column == 'album' else 'artist'}", group == want and len(want) >= 1, f'{group[:3]} {want[:3]}')
+    _, pics, _ = script(binary, work, 60, ['rest', 'down centre', 'hold centre', 'run 20', 'shot @at_once.ppm'], '--reduce-motion')
+    good &= check('under Reduce Motion the sheet stands at once', near(pics['at_once'].at(187, 48), grab), str(pics['at_once'].at(187, 48)))
+    return good
+
+
 def comebacks(binary, work, home):
     """A page of demo's opened from a page of q2ui's: q2ui, started again when demo's page is left, is back on the page
     that opened it, on its row, under the pages it had (main.c state_restore), for every page that opens one."""
@@ -2054,6 +2101,8 @@ def main():
             good &= captions(binary, work, ('--page', 'home'))
         if not only or 'edit' in only:
             good &= edit_library(binary, work, ('--page', 'home'))
+        if not only or 'menu' in only:
+            good &= hold_menu(binary, work)
         if not only or 'notices' in only:
             good &= notices(binary, work)
     print('q2ui: ' + ('all checks passed' if good else 'FAILED'))
