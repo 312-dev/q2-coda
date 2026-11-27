@@ -196,6 +196,12 @@ class Run:
     def picture(self):
         return shot.page(self.dir/'fb', self.stats()['page'])
 
+    def hold(self, code, seconds=0.9):
+        """code held past q2ui's hold (KEY_HOLD_MS, 600 ms), then let go."""
+        self.keys.write(event(EV_KEY, code, 1) + event(EV_SYN, 0, 0))
+        time.sleep(seconds)
+        self.keys.write(event(EV_KEY, code, 0) + event(EV_SYN, 0, 0))
+
     def key(self, code):
         self.keys.write(event(EV_KEY, code, 1) + event(EV_SYN, 0, 0) + event(EV_KEY, code, 0) + event(EV_SYN, 0, 0))
 
@@ -858,6 +864,16 @@ def reload(binary, work):
                  f"exit {r.proc.poll()}, ticks {before['ticks']} then {after['ticks']}, same picture {same}")
     kept = os.path.exists(end) and os.readlink(end) == f'pipe:[{os.fstat(pipe[0]).st_ino}]'
     good &= check("demo's settings pipe is open in q2ui before SIGHUP and still after", held and kept, f'{held} {kept}')
+    r.hold(KEY_RETURN)  # Control Center, in the program started again
+    r.rest()
+    r.key(KEY_CENTRE)   # its Wi-Fi switch, off as no told file says otherwise
+    r.rest()
+    os.set_blocking(pipe[0], False)
+    try:
+        said = os.read(pipe[0], 4096).decode().splitlines()
+    except BlockingIOError:
+        said = []
+    good &= check("after SIGHUP a Control Center switch still reaches demo down that pipe", said == ['set wifi 1'], str(said))
     r.proc.terminate()
     r.proc.wait(timeout=5)
     os.close(r.queue)
