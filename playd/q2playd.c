@@ -91,6 +91,8 @@ static struct {
 } q = {.volume = 24};
 /* the queue file's (queue_write): its gen and content's hash, and its lines' first index into the play order and count */
 static struct { unsigned gen, hash; int start, listed; } ql;
+/* the play mode (docs/playd.md#the-play-mode, pm_shuffle): stock's MCL_MODE and Now Playing's two keys */
+static struct { int mode, shuf_one, rep_off; } pm;
 
 /* A server list's answer as it grows (docs/playd.md#the-answer-as-it-grows): the app's m3u, read again when it changes,
  * its entries taken in order up to the first whose file is not there yet (want), as the firmware's m3u_songs. next
@@ -343,6 +345,9 @@ static void stop(void) {
 }
 
 /* A song ended on its own (played out, or did not open): the next, or the queue's end. */
+static void reshuffle(int first);
+static int pm_shuffle(void);
+
 static void ended(int error) {
     logf_("song %d %s", q.n && !q.paths ? q.ids[q.order[q.at]] : 0, error ? "did not play" : "ended");
     q.loaded = 0;
@@ -351,7 +356,13 @@ static void ended(int error) {
         return;
     }
     q.errors = error ? q.errors + 1 : 0;
+    if (!error && pm.mode == 1 && q.n && !start_at(q.at)) return; /* Repeat One: the song again */
     if (q.errors < ERRORS_MAX && q.at + 1 < q.n && !start_at(q.at + 1)) return;
+    /* Repeat All, and stock's Shuffle, which never ends: the queue again from its first song (a shuffle's drawn again) */
+    if (q.errors < ERRORS_MAX && (pm.mode == 3 || pm.mode == 2) && q.n && !q.paths) {
+        if (q.shuffle) reshuffle(0);
+        if (!start_at(0)) return;
+    }
     if (q.errors < ERRORS_MAX && q.paths && mq.on && *mq.want) { /* the next not there yet: it plays once it lands */
         mq.waiting = 1, q.at = q.n - 1;
         logf_("waiting for %s", mq.want);
@@ -464,6 +475,15 @@ static char *read_all(const char *p) {
     return b;
 }
 
+/* The play mode (docs/playd.md#the-play-mode): stock's MCL_MODE, saved as [PLAYSET] PLAYMODE (0 in order, 1 Repeat
+ * One, 2 Shuffle, 3 Repeat All), and Now Playing's two controls over it as today's Vamp keeps them (np_bar.c): shuffle
+ * under Repeat One ([IPOD] NPSHUFONE) and Off chosen under shuffle ([IPOD] NPREPOFF), since stock's Shuffle never
+ * ends. Read at the start (pm, above). */
+static int pm_shuffle(void) { return pm.mode == 2 || (pm.mode == 1 && pm.shuf_one); }
+static int pm_repeat(void) { /* Car Remote's numbers: 0 Off, 1 One, 2 All */
+    return pm.mode == 1 ? 1 : pm.mode == 3 || (pm.mode == 2 && !pm.rep_off) ? 2 : 0;
+}
+
 static void volume_load(void) {
     char *t = read_all(path("/mnt/data/config.ini"));
     if (!t) return;
@@ -473,6 +493,9 @@ static void volume_load(void) {
     if (v >= 0 && v <= 100) q.volume = v > max_volume ? max_volume : v;
     other_volume = ini_get(t, "PLAYSET", "BT_VOLUME", -1); /* Bluetooth's, while the DAC is the output */
     if (other_volume > 100) other_volume = -1;
+    pm.mode = ini_get(t, "PLAYSET", "PLAYMODE", 0);
+    if (pm.mode < 0 || pm.mode > 3) pm.mode = 0;
+    pm.shuf_one = ini_get(t, "IPOD", "NPSHUFONE", 0) != 0, pm.rep_off = ini_get(t, "IPOD", "NPREPOFF", 0) != 0;
     free(t);
 }
 
@@ -936,10 +959,46 @@ static void catplay_poll(void) {
 static unsigned rnd = 0x9e3779b9u;
 static unsigned next_rand(void) { return rnd = rnd * 1664525u + 1013904223u; }
 
+/* The play order shuffled, the song at order index first first, the rest in a random order; q.at 0 */
+static void reshuffle(int first) {
+    int keep = q.order[first];
+    rnd ^= (unsigned)now_ms();
+    q.order[first] = q.order[0], q.order[0] = keep;
+    for (int i = q.n - 1; i > 1; --i) {
+        int j = 1 + (int)(next_rand() % (unsigned)i), t = q.order[i];
+        q.order[i] = q.order[j], q.order[j] = t;
+    }
+    q.at = 0, q.shuffle = 1, ++q.seq;
+}
+
+/* Car Remote's SetMode, "mode SHUFFLE REPEAT" (shuffle 0 or 1, repeat 0 Off, 1 One, 2 All; -1 leaves either), as
+ * np_bar.c np_mode_set saves Now Playing's two controls: Repeat One plays as 1 whatever shuffle says, shuffle with
+ * Off or All as 2, All alone as 3, neither as 0. The queue playing follows a shuffle turned on (the song playing
+ * first, the rest drawn) or off (its own order, at the song playing). 0 set; -1 refused. */
+static int set_mode(int shuffle, int repeat) {
+    if (shuffle < -1 || shuffle > 1 || repeat < -1 || repeat > 2) return -1;
+    int on = shuffle >= 0 ? shuffle : pm_shuffle(), rep = repeat >= 0 ? repeat : pm_repeat();
+    if (rep != 1 && pm.rep_off != (rep == 0)) pm.rep_off = rep == 0, ini_set("IPOD", "NPREPOFF", pm.rep_off);
+    if (pm.shuf_one != on) pm.shuf_one = on, ini_set("IPOD", "NPSHUFONE", pm.shuf_one);
+    int to = rep == 1 ? 1 : on ? 2 : rep == 2 ? 3 : 0;
+    if (to != pm.mode) pm.mode = to, ini_set("PLAYSET", "PLAYMODE", to);
+    if (q.n && !q.paths && !src.on && on != q.shuffle) {
+        if (on) reshuffle(q.at);
+        else {
+            int id_at = q.order[q.at];
+            for (int i = 0; i < q.n; ++i) q.order[i] = i;
+            q.at = id_at, q.shuffle = 0;
+        }
+    }
+    ++q.seq;
+    return 0;
+}
+
 /* play AT SHUFFLE over ids (n of them): the song at AT first, then on in order, or, shuffled, the rest in a random order */
 static int play_ids(const int *ids, int n, int at, int shuffle) {
     if (n <= 0 || at < 0 || at >= n) return -1;
     if (n > QUEUE_MAX) n = QUEUE_MAX;
+    shuffle = shuffle || pm_shuffle(); /* under Shuffle every play is shuffled, as stock's mode plays it */
     memcpy(q.ids, ids, (size_t)n * sizeof *ids);
     q.n = n, q.shuffle = shuffle, q.errors = 0, ++q.list;
     for (int i = 0; i < n; ++i) q.order[i] = i;
@@ -1107,6 +1166,7 @@ static void cmdq_read(void) {
         char where[8];
         int a, b, r = !verb                                                     ? -1
                       : sscanf(verb + 1, "jump %d %d", &a, &b) == 2               ? jump(a, b)
+                      : sscanf(verb + 1, "mode %d %d", &a, &b) == 2               ? set_mode(a, b)
                       : sscanf(verb + 1, "queue %7s %d", where, &a) == 2 && (!strcmp(where, "next") || !strcmp(where, "last"))
                           ? enqueue(where[0] == 'n', a)
                           : command(verb + 1, 0, 0);
@@ -1199,7 +1259,7 @@ static void queue_write(void) {
 
 /* The now file: seq= first, a count that moves with each change (coda-rc reads the rest only when it moved:
  * coda_rc.c np_read), what plays, then Car Remote's fields as demo's shim writes them (coda_rc_shim.c cr_now): the
- * modes (no repeat here: 0), hearts -1 (no ratings here: a song that cannot be rated), the queue file's place, lines
+ * modes (the play mode's: pm_shuffle, pm_repeat), hearts -1 (no ratings here: a song that cannot be rated), the queue file's place, lines
  * and gen, qlist (the queue itself), and the playing file's path. */
 static void now_write(void) {
     static unsigned writes;
@@ -1209,8 +1269,8 @@ static void now_write(void) {
     snprintf(tmp, sizeof tmp, "%s.q2playd", path(now_path_rel));
     FILE *f = fopen(tmp, "w");
     if (!f) return;
-    fprintf(f, "seq=%u\n%s\nshuffle=%d\nrepeat=0\nhearts=-1\nqpos=%d\nqlen=%d\nqgen=%u\nqlist=%u\npath=", ++writes, text,
-            q.shuffle != 0, q.at - ql.start, ql.listed, ql.gen, q.list);
+    fprintf(f, "seq=%u\n%s\nshuffle=%d\nrepeat=%d\nhearts=-1\nqpos=%d\nqlen=%d\nqgen=%u\nqlist=%u\npath=", ++writes, text,
+            q.shuffle != 0 || pm_shuffle(), pm_repeat(), q.at - ql.start, ql.listed, ql.gen, q.list);
     for (const char *c = q.file; *c; ++c) fputc(*c == '\n' || *c == '\r' ? ' ' : *c, f);
     fputc('\n', f);
     if (fclose(f) == 0) rename(tmp, path(now_path_rel)); /* whole or not at all */

@@ -26,7 +26,7 @@ Car Remote ([remote-protocol](remote-protocol.md), [internals: Car Remote](inter
 ## Not here yet
 
 - **The servers' playlists** on the phone: `q2libd` keeps them in `serverpl` and `serveritem` ([libd](libd.md#the-servers-playlists)), not mirrored into stock's `playlist` table as today's payload does (`serverlists`), so Playlists lists the card's alone.
-- **Commands `q2playd` does not have yet**: SetMode (`mode`), Rate (`rate`), Car Audio's held Next (`scan`), Start Radio (`radio`) and Find My Vamp (`find`) are refused, until `q2playd` has repeat, ratings, scan, song radio and Find My Vamp ([q2playd: What is missing](playd.md#what-is-missing)).
+- **Commands `q2playd` does not have yet**: Rate (`rate`), Car Audio's held Next (`scan`), Start Radio (`radio`) and Find My Vamp (`find`) are refused, until `q2playd` has ratings, scan, song radio and Find My Vamp (SetMode is [the play mode](playd.md#the-play-mode)) ([q2playd: What is missing](playd.md#what-is-missing)).
 - **The car's toasts**: the shim puts the Vamp's last toast in Now Playing for the car (`coda_rc_note`, `note=`); `q2ui`'s toasts do not reach `q2playd`'s now file.
 - **Settings > Car Remote** (the switch, the paired phones, Pair a Phone's QR code in `/tmp/coda-rc.qr`, `carremote_page.c`) is `q2ui`'s to draw.
 - **Across networks**: `q2-iroh` (`remote/iroh-sidecar`) is Rust and waits on the owner's decision about a Rust toolchain in the image; Car Remote works on the LAN and over Bluetooth LE without it.

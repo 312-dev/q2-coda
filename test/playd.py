@@ -1368,3 +1368,76 @@ def test_play_next_into_a_shuffle_comes_next_in_its_order(run):
     pl.say('player-status', 'exit')
     pl.pump()
     assert pl.songs()[-1][1] == '/mnt/mmc/Music/f.flac', pl.songs()
+
+
+# ---- the play mode (docs/playd.md#the-play-mode): stock's [PLAYSET] PLAYMODE, Now Playing's [IPOD] NPSHUFONE, NPREPOFF ----
+
+def ini(root):
+    out, sec = {}, ''
+    for line in (root/'mnt/data/config.ini').read_text().splitlines():
+        if line.startswith('['):
+            sec = line.strip('[]')
+        elif '=' in line:
+            out[f'{sec}.{line.split("=", 1)[0]}'] = line.split('=', 1)[1]
+    return out
+
+
+@pytest.mark.parametrize('config', [CONFIG.replace('[PLAYSET]\n', '[PLAYSET]\nPLAYMODE=1\n')])
+def test_repeat_one_plays_the_song_again_at_its_end_and_next_still_moves_on(run):
+    root, pl = run
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    pl.say('player-status', 'exit')
+    pl.pump()
+    assert [s for _, s in pl.songs()] == ['/mnt/mmc/Music/a.flac', '/mnt/mmc/Music/a.flac'], pl.songs()
+    assert now(root)['repeat'] == '1'
+    fifo(root, 'next')
+    pl.pump()
+    assert pl.songs()[-1][1] == '/mnt/mmc/Music/b.mp3'
+
+
+@pytest.mark.parametrize('config', [CONFIG.replace('[PLAYSET]\n', '[PLAYSET]\nPLAYMODE=3\n')])
+def test_repeat_all_plays_the_queue_again_from_its_first_song(run):
+    root, pl = run
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    for _ in range(2):
+        pl.say('player-status', 'exit')
+        pl.pump()
+    assert [s for _, s in pl.songs()] == ['/mnt/mmc/Music/a.flac', '/mnt/mmc/Music/b.mp3', '/mnt/mmc/Music/a.flac'], pl.songs()
+    assert now(root)['repeat'] == '2' and now(root, 0)['state'] == '1'
+
+
+def test_set_mode_saves_stock_s_keys_as_now_playing_s_two_controls_do(run):
+    """Car Remote's "mode SHUFFLE REPEAT" (-1 leaves one; repeat 0 Off, 1 One, 2 All) as np_bar.c np_mode_set: Repeat
+    One plays as stock's 1 whatever shuffle says (NPSHUFONE keeps it), shuffle with Off or All as 2 (NPREPOFF says
+    which), All alone as 3, neither as 0"""
+    root, pl = run
+    play_list(root, [1, 2, 3], 0)
+    pl.pump()
+    steps = [('mode -1 2', '3', '0', '2'), ('mode 1 -1', '2', '1', '2'), ('mode -1 0', '2', '1', '0'),
+             ('mode -1 1', '1', '1', '1'), ('mode 0 0', '0', '0', '0')]
+    for k, (verb, playmode, shuffle, repeat) in enumerate(steps):
+        send(root, f'{80 + k} {verb}')
+        assert wait_for_value(lambda: acks(root)[:1], [(80 + k, 0)]), (verb, acks(root))
+        n = now(root)
+        assert (ini(root).get('PLAYSET.PLAYMODE'), n['shuffle'], n['repeat']) == (playmode, shuffle, repeat), (verb, ini(root), n)
+    c = ini(root)
+    assert (c['IPOD.NPSHUFONE'], c['IPOD.NPREPOFF']) == ('0', '1'), c
+    send(root, '90 mode 2 0', '91 mode -1 3')
+    assert wait_for_value(lambda: acks(root)[:2], [(91, 1), (90, 1)]), acks(root)
+
+
+def test_shuffle_turned_on_keeps_the_song_playing_first_and_off_gives_the_order_back(run):
+    root, pl = run
+    play_list(root, [1, 2, 3, 5, 6], 1)
+    pl.pump()
+    send(root, '95 mode 1 -1')
+    assert wait_for_value(lambda: acks(root)[:1], [(95, 0)])
+    (_, place, _), ids = queue_file(root)
+    assert (place, ids[0], sorted(ids)) == (0, '2', ['1', '2', '3', '5', '6']), (place, ids)  # the song playing first, the rest drawn
+    assert pl.songs() == [('set-songurl', '/mnt/mmc/Music/b.mp3')], 'it plays on'
+    send(root, '96 mode 0 -1')
+    assert wait_for_value(lambda: acks(root)[:1], [(96, 0)])
+    (_, place, _), ids = queue_file(root)
+    assert (ids, place) == (['1', '2', '3', '5', '6'], 1), (ids, place)
