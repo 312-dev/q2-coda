@@ -8,6 +8,7 @@ import ctypes as C
 import functools
 import os
 import pathlib
+import platform
 import re
 import sys
 import traceback
@@ -82,6 +83,7 @@ libc = C.CDLL(None)
 libc.mmap.restype, libc.mmap.argtypes = C.c_void_p, [C.c_void_p, C.c_size_t, C.c_int, C.c_int, C.c_int, C.c_long]
 libc.mprotect.argtypes = [C.c_void_p, C.c_size_t, C.c_int]
 libc.madvise.argtypes = [C.c_void_p, C.c_size_t, C.c_int]
+libc.munmap.argtypes = [C.c_void_p, C.c_size_t]
 if libc.mmap(STOCK, STOCK_SIZE, 3, 0x100022, -1, 0) != STOCK:  # read/write, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE
     pytest.exit('test/fw needs a position-independent python: 0x400000-0xc00000, stock\'s addresses, is taken '
                             '(a non-PIE python lives there); use one built with -pie, e.g. actions/setup-python\'s or a venv of a PIE build', returncode=4)
@@ -110,6 +112,31 @@ def high_halves(n):
     start, _high = _high, _high + n
     assert _high <= 0x5000, 'out of high halves'
     return range(start, _high)
+
+
+# Memory under 2 GB, for stock's 4-byte pointer fields. On x86-64 Linux MAP_32BIT asks the kernel for exactly that.
+# Rosetta (q2env on an Apple Silicon Mac) accepts the flag and ignores it, handing back an address near 128 TB, and
+# arm64 Linux has no MAP_32BIT at all (0x40 is no flag there, so it is ignored too). low_map then maps at a chosen
+# address instead, with MAP_FIXED_NOREPLACE so it never lands on a mapping already there. LOW_AT holds the candidates:
+# 16 MB steps from 1.5 GB, clear of stock's fixed range (STOCK) and of the fixed low pages other files map (0x10000000,
+# 0x30000000, 0x3e000000, 0x5c000000-0x5e000000), and below AddressSanitizer's shadow (from 0x7fff8000).
+MAP_32BIT, MAP_FIXED_NOREPLACE, MAP_PRIVATE_ANONYMOUS = 0x40, 0x100000, 0x22
+LOW_AT = range(0x60000000, 0x7f000000, 0x1000000)
+
+
+def low_map(size, prot=3):
+    """size bytes of private anonymous memory that ends at or below 2 GB, with protection prot."""
+    failed = C.c_void_p(-1).value
+    if platform.machine() == 'x86_64':
+        p = libc.mmap(0, size, prot, MAP_PRIVATE_ANONYMOUS | MAP_32BIT, -1, 0)
+        if p and p != failed and p + size <= 1 << 31:
+            return p
+        if p and p != failed:  # the flag ignored (Rosetta): the map is somewhere above
+            libc.munmap(p, size)
+    for at in LOW_AT:
+        if at + size <= 1 << 31 and libc.mmap(at, size, prot, MAP_PRIVATE_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0) == at:
+            return at
+    raise AssertionError(f'no free {size:#x} bytes under 2 GB')
 
 
 @pytest.fixture(scope='session')

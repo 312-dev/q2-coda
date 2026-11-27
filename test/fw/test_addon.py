@@ -9,7 +9,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, STRIP_GO, STRIP_SEARCH, Deques, Game, block, claim, high_halves, libc, page_block, strip_return, text
+from conftest import O, STRIP_GO, STRIP_SEARCH, Deques, Game, block, claim, high_halves, libc, low_map, page_block, strip_return, text
 from test_coverflow import png, scratch  # an icon's header; navigation.c's st by field
 from test_netupdate import JOB_INSTALL, JOB_REMOVE, SH_CANCELLED, SH_CARD, SH_NET, SH_OK, Sh, sources as shelf_sources  # test_netupdate.py keeps netupdate.c's App Store mirror
 from test_radio import Rd  # test_radio.py keeps the mirror
@@ -789,15 +789,14 @@ def test_m3u_wakes_for_a_batch_a_rewrite_or_the_song_it_wants(fw):
 class Songs:
     """Stock's song records (stSongInfo) with a name and a path both, as a folder's listing has them. On the Q2
     each is a 4-byte pointer; here P() reads 8, so REC_NAME's high half is REC_PATH's low half. A name below
-    4 GB has a zero high half and a path at a multiple of 4 GB a zero low half: the names share a MAP_32BIT
-    block, wherever the kernel finds room under 2 GB, each path has a page of its own in AddressSanitizer's high
+    4 GB has a zero high half and a path at a multiple of 4 GB a zero low half: the names share a block under
+    2 GB (conftest.low_map), each path has a page of its own in AddressSanitizer's high
     memory, at a high half of this file's (conftest.high_halves)."""
     PATHS = high_halves(0x100)
 
     def __init__(self):
         self.maps, self.records, self.keep, self.used = [], {}, [], 0
-        self.names = libc.mmap(0, 0x10000, 3, 0x62, -1, 0)  # MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT
-        assert self.names and self.names < 1 << 32
+        self.names = low_map(0x10000)
         self.maps.append((self.names, 0x10000))
 
     def map(self, address, size):

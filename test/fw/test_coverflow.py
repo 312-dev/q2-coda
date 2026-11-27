@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 import host
-from conftest import O, Deques, Externpic, Files, ask_cover, high_halves, in_fork, stock_prop_str
+from conftest import O, Deques, Externpic, Files, ask_cover, high_halves, in_fork, low_map, stock_prop_str
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CX, TOP, ART, ONE, MISS = 187, 13, 160, 65536, 99
@@ -143,8 +143,7 @@ class Split:
     @classmethod
     def album(cls, s):
         if not cls.low:
-            cls.low = libc.mmap(0, 1 << 20, 3, 0x62, -1, 0)  # MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT
-            assert cls.low and cls.low < 1 << 32
+            cls.low = low_map(1 << 20)
             cls.at = cls.low
         p, cls.at = cls.at, cls.at + len(s) + 1
         assert cls.at < cls.low + (1 << 20)
