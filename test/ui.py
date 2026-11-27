@@ -929,6 +929,36 @@ def az_index(binary, work):
     return good
 
 
+def captions(binary, work, home):
+    """A captioned row (docs/oled-design.md#list-row): its caption shows only while it is selected, the row growing over
+    150 ms to hold it in the bar, Inter 13 in Caption On Accent from the title's column, 17 px a line and 5 px under the
+    last, the rows below moved down by as much; it shrinks back as the selection leaves. Under Reduce Motion it is at
+    its end at once. A grown row near a list's end scrolls the list by whole rows to keep its foot on the list end."""
+    good = True
+    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 6', 'rest', 'key centre', 'rest']  # Home > Settings > Display
+    lines = to + ['shot @before.ppm', 'tick 1', 'rest', 'shot @grown.ppm', 'tick 1', 'rest', 'shot @shut.ppm']
+    trace, pics, _ = script(binary, work, 60, lines, *home)
+    caps = [t.get('cap', -1) for t in trace]
+    good &= check('Reduce Motion grows by one line (22 px) when selected, over frames between, and back to 0 as the selection '
+                  'leaves', max(caps) == 22 and caps[-1] == 0 and sum(1 for c in caps if 0 < c < 22) >= 3, str(sorted(set(caps))))
+    ink = sum(1 for y in range(124, 140) for x in range(24, 340) if (lambda c: c[0] > 150 and c[2] - c[0] > 20)(pics['grown'].at(x, y)))
+    gone = sum(1 for y in range(124, 140) for x in range(24, 340) if pics['before'].blue(x, y))
+    good &= check("its caption is drawn in the bar under the title, the bar grown to hold it",
+                  ink > 60 and pics['grown'].blue(30, 141) and gone == 0, f'{ink} ink px, blue at 141 {pics["grown"].blue(30, 141)}')
+    below = [pics['before'].ink_y(24, 300, 120, 156)[0], pics['grown'].ink_y(24, 300, 142, 178)[0]]
+    good &= check('the row below moves down by the caption', 20.5 < below[1] - below[0] < 23.5, str(below))
+    back = pics['shut'].ink_y(24, 300, 116, 164)[0]
+    good &= check('the selection moved on to it, the row below is back in its place', abs(back - below[0]) < 1.5, f'{back} {below[0]}')
+    trace, _, _ = script(binary, work, 60, to + ['tick 1', 'rest'], *home, '--reduce-motion')
+    caps = [t.get('cap', -1) for t in trace]
+    good &= check('under Reduce Motion the row is grown at once', max(caps) == 22 and not any(0 < c < 22 for c in caps), str(sorted(set(caps))))
+    # the gallery's last row has a caption of two lines: selected, the list scrolls two rows more than for a plain row
+    trace, _, _ = script(binary, work, 1, ['rest', 'tick 14', 'rest'], '--page', 'gallery')
+    good &= check("a two-line caption on a list's last row: 39 px grown, the list scrolled to keep its foot on the list end",
+                  trace[-1]['sel'] == 13 and trace[-1]['cap'] == 39 and trace[-1]['scroll'] == 9 * ROW_H, str(trace[-1]))
+    return good
+
+
 def comebacks(binary, work, home):
     """A page of demo's opened from a page of q2ui's: q2ui, started again when demo's page is left, is back on the page
     that opened it, on its row, under the pages it had (main.c state_restore), for every page that opens one."""
@@ -1961,6 +1991,8 @@ def main():
             good &= status(binary, work)
         if not only or 'az' in only:
             good &= az_index(binary, work)
+        if not only or 'captions' in only:
+            good &= captions(binary, work, ('--page', 'home'))
         if not only or 'notices' in only:
             good &= notices(binary, work)
     print('q2ui: ' + ('all checks passed' if good else 'FAILED'))

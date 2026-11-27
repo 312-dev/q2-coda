@@ -26,7 +26,8 @@ static void row(void *ctx, int i, ui_row *out) {
         int v = value(D_LIGHT);
         out->title = "Light Mode", out->value = lights[v >= 0 && v <= 2 ? v : 0];
     } else if (i == D_MOTION)
-        out->title = "Reduce Motion", out->flags = ROW_SWITCH | (value(D_MOTION) ? ROW_ON : 0);
+        out->title = "Reduce Motion", out->flags = ROW_SWITCH | (value(D_MOTION) ? ROW_ON : 0),
+        out->caption = "Fades in place of slides, zooms and bounces"; /* patch/settings_pages.c reduce_motion_caption */
     else
         out->title = "More Display Settings", out->flags = ROW_CHEVRON;
 }

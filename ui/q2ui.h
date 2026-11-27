@@ -337,6 +337,7 @@ typedef struct {
     const char *detail;    /* inline after the title, smaller and muted (a song's artist) */
     const char *value;     /* at the right column (a setting's value, a length) */
     const char *sub;       /* the second line of a two-line row */
+    const char *caption;   /* said under the title only while the row is selected, the row growing to hold it */
     const char *lead;      /* small text in the leading column (a track number) */
     const image_t *icon;   /* a 20 px glyph leading the row, inked as the text */
     const image_t *art;    /* leading art of a two-line row */

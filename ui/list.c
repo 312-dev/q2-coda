@@ -9,7 +9,10 @@
  *  - the lean: while the finger turns the wheel short of its next tick the platter leans toward
  *    the row it is heading for, tilts as a tvOS card does, grows and gleams, and a tick kicks it
  *    the same way; it springs back when the finger lets go;
- *  - the press: Centre sinks the platter and brightens it, the release springs it back.
+ *  - the press: Centre sinks the platter and brightens it, the release springs it back;
+ *  - a captioned row's grow: the selected row, when it has a caption (ui_row.caption), grows over
+ *    CAP_US to hold it under its title in the platter, the rows below it moving down as it does,
+ *    and the row the selection left shrinks back the same way (docs/oled-design.md#list-row).
  *
  * Layers, bottom up (docs/ui-rewrite.md#layers): the rows in their resting inks, clipped to the
  * list's own frame and faded at its top and foot; the pinned rows (Songs' Shuffle), which the
@@ -86,6 +89,15 @@
 #define SLIDER_STEPS 10    /* a tick's most steps on a fast spin (patch/offsets.inc VOL_ACCEL_MAX) */
 #define SLIDER_TRACK_ON 0x7da2ea /* its track on the platter, under a white fill */
 #define CACHE 32 /* rows whose text is kept: a power of two, more than a fast glide shows */
+/* A captioned row's caption (patch/settings_pages.c, its CAP_* values): Inter 13 from the title's column, CAP_INSET
+ * past the platter's start, wrapped at words to the platter's end less the same, at most CAP_LINES lines, CAP_LINE a
+ * line and CAP_FOOT under the last; the row grows to it over CAP_US, eased out, at once with no motion. */
+#define CAP_PX TYPE(13)
+#define CAP_LINES 3
+#define CAP_LINE 17
+#define CAP_FOOT 5
+#define CAP_INSET 8
+#define CAP_US 150000u
 /* The A-Z index (docs/oled-design.md#a-z-index), on a list sorted by title (ui_source.letters) of more than AZ_ROWS
  * rows, shown by the wheel spun fast (a tick of two rows or more, wheel_accel): the folded column of letters centred
  * at AZ_X from AZ_TOP to AZ_BOTTOM, the selected row's letter lit on it, and the bubble beside it while the spin goes
@@ -137,6 +149,12 @@ struct ui_list {
     wheel_accel_t accel;
     uint64_t az_at; /* the A-Z index: the last fast tick, 0 hidden */
     int az_in, az_letter; /* the right column's move while it shows; the lit letter, 0 '#', 1 to 26 A to Z */
+    /* captions: the row growing to its caption (-1 none) and its lines; the row shrinking back and how tall its
+     * caption was; the change's start and its share done, 0 to 1 */
+    int cap_open, cap_close, cap_lines;
+    float cap_close_px, cap_k;
+    uint64_t cap_at;
+    run_t cap_run[CAP_LINES];
 };
 
 static int selectable(ui_list *l, int i) {
@@ -144,9 +162,21 @@ static int selectable(ui_list *l, int i) {
     l->src.row(l->src.ctx, i, &r);
     return !(r.flags & (ROW_GREY | ROW_HEADER));
 }
+/* How far row i reaches below its own height now: the caption it is growing to or shrinking from. */
+static float cap_full(const ui_list *l) { return l->cap_lines ? (float)(l->cap_lines * CAP_LINE + CAP_FOOT) : 0; }
+static float row_extra(const ui_list *l, int i) {
+    return i == l->cap_open ? cap_full(l) * l->cap_k : i == l->cap_close ? l->cap_close_px * (1 - l->cap_k) : 0;
+}
+/* the rows above i that have grown push it down */
+static float extra_above(const ui_list *l, int i) {
+    float e = 0;
+    if (l->cap_open >= 0 && l->cap_open < i) e += row_extra(l, l->cap_open);
+    if (l->cap_close >= 0 && l->cap_close < i && l->cap_close != l->cap_open) e += row_extra(l, l->cap_close);
+    return e;
+}
 static float row_y(const ui_list *l, int i) {
-    if (i < l->src.pinned) return (float)(l->box.y + i * l->row_h);
-    return (float)((double)(l->y0 + (i - l->src.pinned) * l->row_h) - l->scroll.x);
+    if (i < l->src.pinned) return (float)(l->box.y + i * l->row_h) + extra_above(l, i);
+    return (float)((double)(l->y0 + (i - l->src.pinned) * l->row_h) - l->scroll.x) + extra_above(l, i);
 }
 static float bar_to(const ui_list *l) {
     if (l->sel < l->src.pinned) return (float)(l->box.y + l->sel * l->row_h);
@@ -164,9 +194,9 @@ static rectf_t platter(const ui_list *l, float *tilt, float *lean_share) {
     float share = clampf((float)l->lean.x / LEAN_PX, -1.5f, 1.5f);
     float scale = 1 + RAISE + LEAN_GROW * fabsf(share) + (float)l->press.x;
     float bw = (float)(l->box.w - 2 * SEL_INSET - (l->az_in ? AZ_BAR_IN : 0));
-    float w = bw * scale, h = (float)l->row_h * scale;
+    float w = bw * scale, h = ((float)l->row_h + row_extra(l, l->sel)) * scale;
     float cx = (float)(l->box.x + SEL_INSET) + bw / 2;
-    float cy = (float)l->bar.x + (float)l->row_h / 2 + share * LEAN_PX;
+    float cy = (float)l->bar.x + ((float)l->row_h + row_extra(l, l->sel)) / 2 + share * LEAN_PX;
     if (tilt) *tilt = -share * LEAN_TILT;
     if (lean_share) *lean_share = share;
     return (rectf_t){ cx - w / 2, cy - h / 2, w, h };
@@ -192,11 +222,15 @@ static void retarget(ui_list *l) {
     /* on a pinned row the rows under it are at their top: the wheel reaches a pinned row from the
      * first of them, whether it stopped there on the way or a fast turn passed over it */
     if (l->top < p || l->sel < p) l->top = p;
+    /* a caption the selected row grows to takes the whole rows it needs under it, so its foot stays on or above the
+     * list's end (patch/settings_pages.c cap_step, nav/lists.c list_grown_foot) */
+    int under = l->sel == l->cap_open ? ((int)cap_full(l) + l->row_h - 1) / l->row_h : 0;
     if (l->sel >= p) {
         if (l->sel < l->top) l->top = l->sel;
-        if (l->sel >= l->top + l->rows) l->top = l->sel - l->rows + 1;
+        if (l->sel + under >= l->top + l->rows) l->top = l->sel + under - l->rows + 1;
     }
     int last = l->n - l->rows;
+    if (l->sel + under - l->rows + 1 > last) last = l->sel + under - l->rows + 1;
     if (l->top > last) l->top = last > p ? last : p;
     l->scroll.to = (double)((l->top - p) * l->row_h);
     l->bar.to = bar_to(l);
@@ -214,6 +248,50 @@ static void forget(ui_list *l) {
 
 /* Bumped by list_pictures_changed and list_rows_changed (below) */
 static unsigned pictures, everything;
+static struct rowc *row_text(ui_list *l, int i);
+
+/* The selected row's caption, if it has one, laid out in lines: greedy at spaces, a word wider than the line cut with
+ * an ellipsis there (patch/settings_pages.c caption_paint). */
+static void cap_layout(ui_list *l, const char *text) {
+    int w = l->box.w - 2 * SEL_INSET - 2 * CAP_INSET;
+    const char *at = text;
+    l->cap_lines = 0;
+    while (*at && l->cap_lines < CAP_LINES) {
+        char line[192];
+        size_t best = 0, end = 0, n = strlen(at);
+        while (end < n) {
+            size_t e = end + 1;
+            while (e < n && at[e] != ' ') ++e;
+            if (e >= sizeof line) break;
+            memcpy(line, at, e), line[e] = 0;
+            if (best && text_width(FACE_REGULAR, CAP_PX, line) > (float)w) break;
+            best = end = e;
+        }
+        if (!best) best = n < sizeof line ? n : sizeof line - 1;
+        memcpy(line, at, best), line[best] = 0;
+        run_make(&l->cap_run[l->cap_lines++], FACE_REGULAR, CAP_PX, line, w);
+        at += best;
+        while (*at == ' ') ++at;
+    }
+}
+/* The selection's row grows to its caption and the row it left shrinks from its own; with no motion both are at their
+ * ends at once. Before retarget, which keeps the grown row's foot in sight. */
+static void cap_to(ui_list *l, int animate) {
+    int open = -1;
+    if (l->n) {
+        struct rowc *c = row_text(l, l->sel);
+        if (c->row.caption && *c->row.caption) open = l->sel;
+        if (open >= 0 && open == l->cap_open) return;
+        if (open < 0 && l->cap_open < 0) return;
+        l->cap_close_px = l->cap_open >= 0 ? row_extra(l, l->cap_open) : 0;
+        l->cap_close = l->cap_open;
+        l->cap_open = open, l->cap_lines = 0;
+        if (open >= 0) cap_layout(l, c->row.caption);
+    } else
+        l->cap_open = l->cap_close = -1, l->cap_lines = 0;
+    l->cap_at = ui_time(), l->cap_k = 0;
+    if (!animate || !list_motion || ui_reduce_motion) l->cap_k = 1, l->cap_close = -1;
+}
 
 ui_list *list_new(const ui_source *src) {
     ui_list *l = calloc(1, sizeof *l);
@@ -224,10 +302,12 @@ ui_list *list_new(const ui_source *src) {
     l->rows = (l->box.y + l->box.h - l->y0) / l->row_h;
     l->n = src->count(src->ctx);
     l->grab = -1;
+    l->cap_open = l->cap_close = -1, l->cap_k = 1;
     forget(l);
     /* a list opens on its first row that scrolls: a pinned row (Shuffle) is reached by the wheel */
     l->sel = src->pinned < l->n ? src->pinned : 0;
     while (l->sel < l->n - 1 && !selectable(l, l->sel)) ++l->sel;
+    cap_to(l, 0);
     retarget(l);
     if (l->n) l->knob.to = row_text_flags(l, l->sel) & ROW_ON ? 1 : 0;
     l->everything_seen = everything;
@@ -257,6 +337,9 @@ void list_reload(ui_list *l) {
     forget(l);
     if (l->n) on = row_text_flags(l, l->sel) & ROW_ON;
     l->knob.to = on ? 1 : 0;
+    cap_to(l, 1); /* a row's caption may have come, gone or changed with it */
+    if (l->cap_open >= 0) cap_layout(l, row_text(l, l->sel)->row.caption);
+    retarget(l);
     if (!list_motion) spring_set(&l->knob, l->knob.to);
     else kick(l);
     ui_mark(frame_rect(l));
@@ -266,6 +349,7 @@ void list_changed(ui_list *l) {
     l->n = l->src.count(l->src.ctx);
     forget(l);
     if (l->sel >= l->n) l->sel = l->n ? l->n - 1 : 0;
+    l->cap_open = l->cap_close = -1, cap_to(l, 0);
     retarget(l);
     settle(l);
     ui_mark(frame_rect(l));
@@ -455,6 +539,7 @@ static void list_draw_rows(ui_list *l, rect_t r) {
     if (rect_meet(part, rows, &rows) && l->n > p) {
         clip_set(rows);
         int first = p + (int)floor((l->scroll.x + (double)(rows.y - l->y0)) / (double)l->row_h);
+        first -= l->cap_open >= 0 || l->cap_close >= 0 ? (CAP_LINES * CAP_LINE + CAP_FOOT) / l->row_h + 1 : 0;
         if (first < p) first = p;
         for (int i = first; i < l->n; ++i) {
             float y = row_y(l, i);
@@ -495,14 +580,21 @@ static void list_draw_rows(ui_list *l, rect_t r) {
     if (!rect_meet(r, rect_of(bar, 0), &on)) return;
     clip_set(on);
     int near = p + (int)floor(((double)(bar.y - (float)l->y0) + l->scroll.x) / (double)l->row_h);
-    for (int k = 0; k < p + 4; ++k) {
-        int i = k < p ? k : near + k - p - 1;
+    for (int k = 0; k < p + 7; ++k) {
+        int i = k < p ? k : near + k - p - 3;
         if (i < (k < p ? 0 : p) || i >= l->n) continue;
         float y = row_y(l, i);
         if (y >= bar.y + bar.h || y + (float)l->row_h <= bar.y) continue;
         /* how much of the row the platter is over: a row it is leaving moves less with it */
         float over = clampf(1 - fabsf(y - (float)l->bar.x) / (float)l->row_h, 0, 1);
         row_paint(l, i, y, 1, share * LEAN_PX * over);
+    }
+    /* the selected row's caption under its title, each line once the platter holds it whole */
+    if (l->sel == l->cap_open) {
+        float y = row_y(l, l->sel) + (float)l->row_h, dy = share * LEAN_PX * CONTENT_DEPTH, foot = y + row_extra(l, l->sel);
+        for (int k = 0; k < l->cap_lines && y + (float)((k + 1) * CAP_LINE) <= foot + 0.01f; ++k)
+            run_draw(&l->cap_run[k], (float)(l->box.x + SEL_INSET + CAP_INSET), y + (float)(k * CAP_LINE) + (CAP_LINE - CAP_PX) / 2.0f + dy,
+                     tok(TOK_CAPTION_ON_ACCENT), 256);
     }
     clip_set(r);
 }
@@ -587,6 +679,7 @@ static int letter_step(ui_list *l, int i, int dir) {
 }
 
 static void moved(ui_list *l, int old) {
+    if (l->sel != old) cap_to(l, 1);
     retarget(l);
     l->mq_row = -1, l->mq_at = 0, l->mq_x = 0;
     spring_set(&l->knob, 0);
@@ -612,6 +705,7 @@ void list_select(ui_list *l, int i, int animate) {
     l->sel = i < 0 ? 0 : i >= l->n ? l->n - 1 : i;
     moved(l, old);
     if (!animate) {
+        l->cap_k = 1, l->cap_close = -1;
         settle(l);
         ui_mark(frame_rect(l));
     }
@@ -698,9 +792,9 @@ int list_rows_dump(const char *path) {
 }
 int list_trace(char *out, size_t room) {
     if (!traced) return snprintf(out, room, "-");
-    return snprintf(out, room, "sel=%d scroll=%.3f bar=%.3f lean=%.3f press=%.4f knob=%.3f grab=%d az=%d azin=%d",
+    return snprintf(out, room, "sel=%d scroll=%.3f bar=%.3f lean=%.3f press=%.4f knob=%.3f grab=%d az=%d azin=%d cap=%.2f",
                     traced->sel, traced->scroll.x, traced->bar.x, traced->lean.x, traced->press.x, traced->knob.x,
-                    traced->grab, traced->az_at ? traced->az_letter : -1, traced->az_in);
+                    traced->grab, traced->az_at ? traced->az_letter : -1, traced->az_in, row_extra(traced, traced->sel));
 }
 
 void list_step(ui_list *l) {
@@ -728,6 +822,15 @@ void list_step(ui_list *l) {
         if (l->scroll.x != scroll) ui_mark(frame_rect(l));
         rect_t f = focus_rect(l);
         ui_mark(rect_union(f, l->focus_was));
+        l->focus_was = f;
+    }
+    if (l->cap_k < 1) { /* a caption's grow, eased out (EASE_QUAD_OUT, as demo's cap_step) */
+        float t = clampf((float)(now - l->cap_at) / (float)CAP_US, 0, 1);
+        l->cap_k = 1 - (1 - t) * (1 - t);
+        if (t >= 1) l->cap_k = 1, l->cap_close = -1;
+        else ui_again();
+        rect_t f = focus_rect(l);
+        ui_mark(frame_rect(l)), ui_mark(rect_union(f, l->focus_was));
         l->focus_was = f;
     }
     if (l->sb_at) {
