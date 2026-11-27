@@ -36,7 +36,7 @@
  * --bench draws and turns frames without the panel's wait and writes their CPU time to the stats
  * file. --script runs a file of input on a clock of its own, a frame every 1/60 s whatever the
  * machine's speed, for tests and recordings (docs/ui-rewrite.md#scripts); --trace writes a line
- * a frame of the list's motion while it runs, and --clock fixes the status row's clock so two
+ * a frame of the list's motion (or the top page's own, ui_page.trace) while it runs, and --clock fixes the status row's clock so two
  * runs give the same picture. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -335,7 +335,7 @@ static void script_frame(const input_t *in, int n) {
     int shown = ui_frame(in, n);
     if (trace) {
         char line[160];
-        list_trace(line, sizeof line);
+        ui_trace(line, sizeof line);
         fprintf(trace, "t=%llu shown=%d %s\n", (unsigned long long)fake_us, shown, line);
     }
     if (shown && *record_dir) {

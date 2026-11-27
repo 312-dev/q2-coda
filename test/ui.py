@@ -106,7 +106,7 @@ NOW = 'seq=3\nstate=1\npos=14000\nlen=180\nid=5\nvolume=40\nsource=library\ntitl
 
 def script(binary, work, n, lines, *options, now=None, code=0, queue=False, ctl=False):
     """q2ui run over a script; the trace (a dict a frame), the pictures it saved by name, and the stats. now is what
-    plays (the text of demo's file for it), code the exit code expected, and with queue the player's queue is a FIFO
+    plays (the text of demo's file for it), code the exit code expected (None: any), and with queue the player's queue is a FIFO
     whose lines come back as a fourth value with the list file's ids. With ctl, q2ui is also given the write end of
     a pipe as demo gives it one for settings (patch/q2ui_gate.c, --ctl FD), and the lines it wrote come back fifth."""
     d = folder(work, n)
@@ -129,7 +129,7 @@ def script(binary, work, n, lines, *options, now=None, code=0, queue=False, ctl=
     settings = os.read(pipe[0], 4096).decode().splitlines() if pipe else []
     if pipe:
         os.close(pipe[0])
-    if done.returncode != code:
+    if code is not None and done.returncode != code:
         raise RuntimeError(f'q2ui --script exited {done.returncode}, not {code}')
     trace = []
     for line in (d/'trace').read_text().splitlines():
@@ -370,6 +370,19 @@ def scripts(binary, work):
                   sum(1 for k in knob if 0.02 < k < 0.98) >= 10 and pics['sliding'].rgb not in (pics['on'].rgb, pics['off'].rgb),
                   f'{sum(1 for k in knob if 0.02 < k < 0.98)} frames between its ends in two flips')
     good &= check('a chevron stands at the right column', pics['on'].at(342, BAR_H + ROW_H + 16) != (0, 0, 0) and pics['open'].at(342, BAR_H + ROW_H + 16) != ACCENT)
+    # an inline slider row (ROW_SLIDER): Centre grabs it and the wheel then sets it (up is more), Centre or Return sets it down
+    lines = ['rest', 'tick 12', 'rest', 'key centre', 'run 50', 'tick -2', 'tick 1', 'run 50', 'shot @grabbed.ppm', 'key centre', 'run 50',
+             'tick -1', 'rest', 'tick 1', 'rest', 'key centre', 'run 50', 'tick -1', 'key return', 'rest', 'rows @rows.txt', 'tick -1',
+             'run 50']
+    trace, pics, _, (_, _, d) = script(binary, work, 1, lines, '--page', 'gallery', queue=True)
+    level = [r for r in (d/'rows.txt').read_text().splitlines() if r.startswith('Level')] if (d/'rows.txt').exists() else []
+    grabs = [t['grab'] for t in trace]
+    good &= check('Centre grabs the slider (the wheel then sets it: up two, down one) and sets it down, the wheel moving the '
+                  'selection again; grabbed once more, up one, Return sets it down with the page kept', level == ['Level\t42%'] and 12 in grabs and grabs[-1] == -1 and trace[-1]['sel'] == 11,
+                  f'{level} {trace[-1]}')
+    g = pics['grabbed']
+    rows = [y for y in range(BAR_H, H) if g.at(205, y) == (255, 255, 255) and g.at(270, y) == (0x7d, 0xa2, 0xea)]
+    good &= check("the grabbed row's track on the bar is #7DA2EA, filled white to 41%", len(rows) >= 2, str(rows))
     _, pics, _ = script(binary, work, 1, ['rest', 'shot @still.ppm', 'tug 1', 'run 900', 'shot @down.ppm'], '--page', 'card')
 
     def badge(p):  # the white disc in front of the cover
@@ -497,7 +510,7 @@ def pages(binary, work):
     trace, _, stats, _ = script(binary, work, 60, ['rest', 'tick 2', 'rest', 'key centre', 'rest', 'key return', 'rest'], queue=True)
     good &= check('Return from that Now Playing is the list again on the same row', stats['top'] != 'now' and trace[-1]['sel'] == 3,
                   f"{stats['top']} {trace[-1]['sel']}")
-    good &= control_center_sliders(binary, work, home)
+    good &= control_center_sheet(binary, work, home)
     # a row whose page is demo's: the page is named for demo and q2ui ends with the code that says so
     _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'tick 1', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
@@ -702,49 +715,130 @@ def general(binary, work, home):
     return good
 
 
-def control_center(binary, work, home):
-    """Control Center (ui/page_control.c): Return held on any page; its switches stand as demo says (the told file,
-    patch/control_center.c q2ui_cc_state) and are flipped down q2ui's own pipe, turning at once; USB opens demo's picker."""
-    good = True
+RAISED, OFF, FILL, GRAB = (0x1c, 0x1c, 0x1e), (0x3a, 0x3a, 0x3c), (0xe5, 0xe5, 0xea), (0x5a, 0x5a, 0x5e)
+# the toggles' circles' centres (docs/oled-design.md#control-center): Wi-Fi, Bluetooth / AirPlay, Car / Smart Wi-Fi, EQ
+CIRCLES = [(66, 68), (132, 68), (66, 134), (132, 134), (66, 200), (132, 200)]
+CC_TOLD = 'out=other\nwifi=1\nbton=0\nairplay=1\ncar=0\nsmart=0\neq=1\nusb=Automatic\nbright=40\nvol=30\nvolmax=33\ncable=0\n'
+
+
+def cc_told(work, text=CC_TOLD):
     told = pathlib.Path(tempfile.mkdtemp(dir=work))/'told'
-    told.write_text('out=other\nwifi=1\nbton=0\ncar=0\nsmart=0\neq=1\nusb=Automatic\n')
-    lines = ['rest', 'tick 2', 'rest', 'hold return', 'rest', 'key centre', 'run 100', 'key centre', 'run 100', 'tick 2', 'rest',
-             'key centre', 'run 600']
-    trace, _, _, (sent, _, _), said = script(binary, work, 60, lines, *home, '--told', told, queue=True, ctl=True)
-    good &= check("the selected switch's knob slides over with it, before demo has said so", trace[-1]['knob'] > 0.99, str(trace[-1]['knob']))
-    good &= check('Return held opens Control Center on any page; Wi-Fi, on by demo, goes off, then on again before demo says '
-                  "so, and Car Remote, off, goes on, each down q2ui's own pipe and none down the queue",
-                  said == ['set wifi 0', 'set wifi 1', 'set car 1'] and sent == [], f'{said} {sent}')
+    told.write_text(text)
+    return told
+
+
+def control_center(binary, work, home):
+    """Control Center (ui/page_control.c) as demo's two-column sheet (docs/oled-design.md#control-center): six circles lit
+    as demo says its switches stand (the told file, patch/control_center.c q2ui_cc_state), Now Playing, two pill sliders,
+    the USB row while a cable is in, the grab bar. The wheel's ring is not there on opening; the first tick shows it on
+    Wi-Fi without moving, and it goes 5 s after the last input. Centre flips a switch down q2ui's own pipe, at once."""
+    good = True
+    told = cc_told(work)
+    lines = ['rest', 'tick 2', 'rest', 'hold return', 'rest', 'shot @open.ppm', 'tick 1', 'run 100', 'shot @ring.ppm', 'key centre',
+             'run 100', 'shot @flipped.ppm', 'tick 1', 'run 100', 'key centre', 'run 5200', 'shot @gone.ppm']
+    # any exit: a fault that has Centre land on a page of demo's is these checks' to report
+    trace, pics, stats, (sent, _, _), said = script(binary, work, 60, lines, *home, '--told', told, code=None, queue=True, ctl=True)
+    p = pics['open']
+    lit = [p.at(x + 15, y) for x, y in CIRCLES]
+    good &= check('Return held opens the sheet: the toggles block, Wi-Fi, AirPlay and EQ lit as demo says, Bluetooth, Car '
+                  'and Smart Wi-Fi off', p.at(25, 100) == RAISED and lit == [ACCENT, OFF, ACCENT, OFF, OFF, ACCENT], f'{p.at(25, 100)} {lit}')
+    good &= check('Now Playing beside it, a grey square for no cover, and no ring anywhere on opening',
+                  p.at(300, 45) == RAISED and p.at(226, 76) == OFF and p.at(87, 68) == RAISED, f'{p.at(300, 45)} {p.at(226, 76)} {p.at(87, 68)}')
+    good &= check("the sliders fill #E5E5EA to demo's levels, Brightness 40, Volume 30, on #3A3A3C",
+                  [p.at(230, 181), p.at(262, 181), p.at(225, 229), p.at(245, 229)] == [FILL, OFF, FILL, OFF],
+                  str([p.at(230, 181), p.at(262, 181), p.at(225, 229), p.at(245, 229)]))
+    good &= check('no cable, no USB row; the grab bar on the foot', p.at(100, 277) == (0, 0, 0) and p.at(187, 311) == GRAB,
+                  f'{p.at(100, 277)} {p.at(187, 311)}')
+    ring = pics['ring'].at(87, 68)
+    good &= check("the first tick shows the white ring on Wi-Fi and does not move", ring == (255, 255, 255) and
+                  trace[-1]['sel'] == 1 and any(t['sel'] == 0 and t.get('ring') == 1 for t in trace), str(ring))
+    good &= check("Centre on Wi-Fi turns its circle off at once, before demo says so", pics['flipped'].at(81, 68) == OFF,
+                  str(pics['flipped'].at(81, 68)))
+    good &= check("Wi-Fi goes off, then the next stop, Bluetooth, on, each down q2ui's own pipe and none down the queue",
+                  said == ['set wifi 0', 'set bt 1'] and sent == [], f'{said} {sent}')
+    good &= check('the ring goes 5 s after the last input', trace[-1]['ring'] == 0 and pics['gone'].at(153, 68) == RAISED,
+                  f"{trace[-1]['ring']} {pics['gone'].at(153, 68)}")
     trace, _, _, (sent, _, _) = script(binary, work, 60, lines, *home, '--told', told, queue=True)
-    good &= check('with no pipe (q2ui not started by demo) a switch sends nothing and stays as demo has it',
-                  sent == [] and trace[-1]['knob'] < 0.01, f"{sent} {trace[-1]['knob']}")
-    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'hold return', 'rest', 'tick 7', 'rest', 'key centre', 'run 100'],
-                                   *home, '--told', told, code=3, queue=True)
-    asked = (d/'ask').read_text() if (d/'ask').exists() else ''
-    good &= check("its USB row opens demo's USB picker", asked == 'usbpick_page\n' and sent == [], repr(asked))
+    good &= check('with no pipe (q2ui not started by demo) a switch sends nothing', sent == [], str(sent))
+    # the stops that open a page: AirPlay by Centre, the USB row (only with a cable in) by Centre, and the toggles held
+    cable = cc_told(work, CC_TOLD.replace('cable=0', 'cable=1'))
+    asks = []
+    for ticks, key, told_file in ((2, 'key centre', told), (9, 'key centre', cable), (5, 'hold centre', told), (3, 'hold centre', told)):
+        walk = ['rest', 'hold return', 'rest', 'tick 1', 'run 50', f'tick {ticks}', 'run 50', 'shot @at.ppm', key, 'run 100']
+        _, pics, _, (sent, _, d) = script(binary, work, 60, walk, *home, '--told', told_file, code=3, queue=True)
+        asks.append(((d/'ask').read_text().strip() if (d/'ask').exists() else '', sent))
+        if ticks == 9:
+            u = pics['at']
+            good &= check('with a cable in, the USB row under the blocks, ringed white 2 px wide 5 px out when the wheel is on it',
+                          u.at(100, 277) == RAISED and u.at(16, 277) == (255, 255, 255), f'{u.at(100, 277)} {u.at(16, 277)}')
+    good &= check("AirPlay's Centre, the USB row's Centre, EQ held and Car held each open demo's page for it",
+                  asks == [('systemset/netservice_page', []), ('usbpick_page', []), ('playset/equalizer_page', []), ('carremote_page', [])], str(asks))
+    rows = {}
+    for name, ticks in (('wifi', 0), ('smart', 4), ('bt', 1)):
+        walk = ['rest', 'hold return', 'rest', 'tick 1', 'run 50', f'tick {ticks}', 'run 50', 'hold centre', 'rest', 'rows @rows.txt']
+        _, _, stats, (sent, _, d) = script(binary, work, 60, walk, *home, '--told', told, queue=True)
+        rows[name] = (d/'rows.txt').read_text().splitlines()[:1] if (d/'rows.txt').exists() else []
+    good &= check("Wi-Fi and Smart Wi-Fi held open q2ui's Wi-Fi page, Bluetooth held its Bluetooth page",
+                  rows == {'wifi': ['Wi-Fi'], 'smart': ['Wi-Fi'], 'bt': ['Bluetooth']}, str(rows))
     return good
 
 
-def control_center_sliders(binary, work, home):
-    """Control Center's Brightness and Volume (ui/page_control.c), the toolkit's inline slider rows (ROW_SLIDER): Centre
-    grabs one, the wheel sets it (up the wheel is more), Centre or Return sets it down and the wheel moves the
-    selection again. Brightness goes down q2ui's pipe, Volume down the player's queue, up to demo's top."""
+def control_center_sheet(binary, work, home):
+    """The sheet's Wi-Fi circle is the link as the status row reads it, its landing springs, Light Mode inks it, and the
+    Now Playing block opens Now Playing."""
     good = True
-    told = pathlib.Path(tempfile.mkdtemp(dir=work))/'told'
-    told.write_text('out=other\nwifi=1\nbton=0\ncar=0\nsmart=0\neq=1\nusb=Automatic\nbright=40\nvol=30\nvolmax=33\n')
-    lines = ['rest', 'hold return', 'rest', 'tick 5', 'rest', 'key centre', 'run 50', 'tick -2', 'tick 1', 'key centre', 'run 50',
-             'tick 1', 'rest', 'key centre', 'run 50', 'tick -5', 'key return', 'rest', 'shot @cc.ppm', 'tick 1', 'rest']
-    trace, pics, _, (sent, _, _), said = script(binary, work, 60, lines, *home, '--told', told, queue=True, ctl=True)
+    icons = pathlib.Path(tempfile.mkdtemp(dir=work))
+    inks = {'wifi_slash': (200, 0, 0), 'wifi_0': (0, 200, 0), 'wifi_3': (0, 0, 200), 'wifi_x': (200, 200, 0)}
+    for name, rgb in inks.items():
+        png(icons/f'oled_cc_{name}.png', 22, 22, rgb)
+    seen = {}
+    for case, text, link in (('off', 'wifi=0\n', None), ('on', 'wifi=1\n', None), ('joined', 'wifi=1\n', 60),
+                             ('joined, no internet', 'wifi=1\nnet=0\n', 60), ('joined, switch off', 'wifi=0\n', 60)):
+        d = pathlib.Path(tempfile.mkdtemp(dir=work))
+        (d/'told').write_text(text)
+        opts = ['--told', d/'told', '--icons', icons]
+        if link:
+            (d/'wifi').write_text('up\n')
+            (d/'wireless').write_text(f'Inter-| sta\n face | tus\n wlan0: 0000   {link}.  -40.  -256\n')
+            opts += ['--wifi', d/'wifi', '--wireless', d/'wireless']
+        _, pics, _ = script(binary, work, 60, ['rest', 'hold return', 'rest', 'shot @cc.ppm'], *home, *opts)
+        seen[case] = (pics['cc'].at(66, 68), pics['cc'].at(81, 68))
+    want = {'off': (inks['wifi_slash'], OFF), 'on': (inks['wifi_0'], ACCENT), 'joined': (inks['wifi_3'], ACCENT),
+            'joined, no internet': (inks['wifi_x'], ACCENT), 'joined, switch off': (inks['wifi_3'], ACCENT)}
+    good &= check("the Wi-Fi circle's glyph is the link's (slash off, none on, the fan joined, x with no internet), lit "
+                  'whenever joined', seen == want, str(seen))
+    told = cc_told(work)
+    trace, _, _ = script(binary, work, 60, ['rest', 'hold return', 'rest'], *home, '--told', told)
+    land = [t['land'] for t in trace if 'land' in t]
+    good &= check('landing open, the blocks overshoot 8 px down, spring back to 2 px short and are still',
+                  land and 7.5 <= max(land) <= 8.5 and -2.5 <= min(land) <= -1.5 and land[-1] == 0, f'{max(land, default=0)} {min(land, default=0)}')
+    trace, _, _ = script(binary, work, 60, ['rest', 'hold return', 'rest'], *home, '--told', told, '--reduce-motion')
+    good &= check('under Reduce Motion they land still', all(t.get('land', 0) == 0 for t in trace), '')
+    _, pics, _ = script(binary, work, 60, ['rest', 'hold return', 'rest', 'shot @light.ppm'], *home, '--told', told, '--light')
+    p = pics['light']
+    good &= check("Light Mode: the block in Raised's light half and the sliders' fill dark, as demo's flip makes them",
+                  p.at(25, 100) == (0xe3, 0xe3, 0xe1) and p.at(230, 181) == (0x1a, 0x1a, 0x15), f'{p.at(25, 100)} {p.at(230, 181)}')
+    # the sliders: Centre on one gives it the wheel (its ring the accent), up the wheel is more, Centre or Return gives it back
+    lines = ['rest', 'hold return', 'rest', 'tick 1', 'run 50', 'tick 6', 'run 50', 'shot @on.ppm', 'key centre', 'run 50', 'shot @grabbed.ppm',
+             'tick -2', 'tick 1', 'key centre', 'run 50', 'tick 1', 'run 50', 'key centre', 'run 50', 'tick -5', 'key return', 'run 300',
+             'shot @set.ppm', 'tick 1', 'run 50']
+    trace, pics, stats, (sent, _, _), said = script(binary, work, 60, lines, *home, '--told', told, queue=True, ctl=True)
     verbs = [line.split(' ', 1)[1] for line in sent]
-    good &= check('Brightness, grabbed, goes up two and down one down the pipe; Volume, grabbed, goes up to demo\'s top (33) '
-                  'down the queue and no further', said == ['set bright 41', 'set bright 42', 'set bright 41'] and
+    good &= check("Brightness, grabbed, goes up two and down one down the pipe; Volume, grabbed, up to demo's top (33) down the "
+                  'queue and no further', said == ['set bright 41', 'set bright 42', 'set bright 41'] and
                   verbs == ['volume 31', 'volume 32', 'volume 33'], f'{said} {verbs}')
-    good &= check('Return set Volume down and stayed on the page; the next tick moved the selection to USB',
-                  trace[-1]['grab'] == -1 and trace[-1]['sel'] == 7, f"{trace[-1]['grab']} {trace[-1]['sel']}")
-    p = pics['cc']
-    fill, knob, rest = p.at(205, 234), p.at(229, 234), p.at(275, 234)
-    good &= check("Brightness's row shows 41%: accent fill to a white knob 41% along its track, Track beyond",
-                  fill == (0x21, 0x60, 0xd8) and knob == (255, 255, 255) and rest == (0x33, 0x33, 0x33), f'{fill} {knob} {rest}')
+    good &= check('Return gave Volume back and the sheet stayed; with no cable the next tick stays on Volume, the last stop',
+                  trace[-1]['grab'] == 0 and trace[-1]['sel'] == 8 and stats['top'] == 'control', f"{trace[-1]} {stats['top']}")
+    rings = (pics['on'].at(186, 181), pics['grabbed'].at(186, 181))
+    good &= check('a slider the wheel is on is ringed white, and in the accent once it has the wheel', rings == ((255, 255, 255), ACCENT), str(rings))
+    q = pics['set']
+    fills = [q.at(250, 181), q.at(262, 181), q.at(240, 229), q.at(250, 229)]
+    good &= check('each fill shows the level set at once: Brightness 41, Volume 33', fills == [FILL, OFF, FILL, OFF], str(fills))
+    walk = ['rest', 'hold return', 'rest', 'shot @np.ppm', 'tick 1', 'run 50', 'tick 6', 'run 50', 'key centre', 'rest']
+    trace, pics, stats = script(binary, work, 60, walk, *home, '--told', told, now=NOW)
+    _, ink = pics['np'].ink_y(250, 350, 60, 82)
+    good &= check("while something plays, the Now Playing block shows its title and is the stop after EQ; Centre on it "
+                  'opens Now Playing', ink > 0 and stats['top'] == 'now', f"{ink} {stats['top']}")
     return good
 
 
@@ -1064,6 +1158,8 @@ def reload(binary, work):
     kept = os.path.exists(end) and os.readlink(end) == f'pipe:[{os.fstat(pipe[0]).st_ino}]'
     good &= check("demo's settings pipe is open in q2ui before SIGHUP and still after", held and kept, f'{held} {kept}')
     r.hold(KEY_RETURN)  # Control Center, in the program started again
+    r.rest()
+    r.key(KEY_CENTRE)   # the wheel's ring, on Wi-Fi
     r.rest()
     r.key(KEY_CENTRE)   # its Wi-Fi switch, off as no told file says otherwise
     r.rest()

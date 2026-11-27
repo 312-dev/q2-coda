@@ -793,7 +793,8 @@ int cc_key(void *win, unsigned key) {
 /* ---- q2ui's Control Center (docs/ui-rewrite.md#cutover): what it shows, and its switches ----
  * q2ui draws a Control Center of its own while it has the screen. The states it shows are added to
  * the status row's in its file (q2ui_gate.c tell): wifi and bton (the switches stock's own pages
- * show), car (Car Remote), smart (Smart Wi-Fi), eq (on in any mode), usb (the USB setting's value),
+ * show), airplay (AirPlay's receiver, which lights its circle), car (Car Remote), smart (Smart
+ * Wi-Fi), eq (on in any mode), usb (the USB setting's value), cable (1 while a cable is in: the USB row),
  * bright (the backlight, 0 to 100), vol and volmax (the volume and how high it may go: vol_cap).
  * Its switches come back as "set NAME 0|1" down the pipe the gate gives q2ui alone (q2ui_gate.c
  * ctl, q2ui_cc_set), each flipped as this page's circle flips it; q2ui's Display page sets
@@ -805,9 +806,10 @@ int cc_key(void *win, unsigned key) {
 unsigned q2ui_cc_state(char *b, unsigned room) {
     eq_state s;
     eq_load(&s);
-    int n = tk_snprintf(b, room, "wifi=%d\nbton=%d\ncar=%d\nsmart=%d\neq=%d\nusb=%s\nbright=%d\nvol=%d\nvolmax=%d\n", !!g_wififlag,
-                        !!g_bluetoothflag, !!coda_rc_enabled(), !!st.smart_wifi, s.mode != EQ_OFF, usb_ui_value(),
-                        (int)g_lightness, (int)g_volume, vol_cap());
+    int n = tk_snprintf(b, room,
+                        "wifi=%d\nbton=%d\nairplay=%d\ncar=%d\nsmart=%d\neq=%d\nusb=%s\ncable=%d\nbright=%d\nvol=%d\nvolmax=%d\n",
+                        !!g_wififlag, !!g_bluetoothflag, !!g_airplayflag, !!coda_rc_enabled(), !!st.smart_wifi,
+                        s.mode != EQ_OFF, usb_ui_value(), usb_ui_cable(), (int)g_lightness, (int)g_volume, vol_cap());
     return n < 0 ? 0 : (unsigned)n >= room ? room - 1 : (unsigned)n;
 }
 /* A switch of q2ui's set to on (1) or off: 0 when done or already so, -1 for a name it has not or
