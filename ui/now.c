@@ -63,6 +63,8 @@ void now_read(void) {
         if (*num) now.repeat = atoi(num);
         *num = 0, field(line, "hearts", num, sizeof num);
         if (*num) now.hearts = atoi(num);
+        *num = 0, field(line, "radio", num, sizeof num);
+        if (*num) now.radio = atoi(num);
     }
     if (f) fclose(f);
     now.read_us = mono_us();

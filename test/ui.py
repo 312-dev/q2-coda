@@ -441,10 +441,11 @@ def pages(binary, work):
     good &= check("Now Playing's bar is filled to 14 s of 180", fill == ACCENT and track == (0x33, 0x33, 0x33), f'{fill} {track}')
     _, later, _ = script(binary, work, 60, ['rest', 'key centre', 'rest', 'shot @now.ppm'], *home, now=NOW.replace('pos=14000', 'pos=120000'))
     good &= check('and further on later in the song', later['now'].at(200, 231) == ACCENT and later['now'].rgb != pics['now'].rgb)
-    _, _, _, (sent, _, _) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'key centre', 'run 100', 'tick 1', 'run 100'], *home, now=NOW, queue=True)
-    good &= check("there Centre is play and pause, and a tick clockwise (down a list) is one step louder, as demo's wheel "
+    _, _, _, (sent, _, _) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick 1', 'run 100'], *home, now=NOW, queue=True)
+    good &= check("there a tick clockwise (down a list) is one step louder, as demo's wheel "
                   '(patch/playback.c: x falling is KEY_NEXT; patch/volume.c vol_next: KEY_NEXT is up)',
-                  [line.split(' ', 1)[1] for line in sent] == ['toggle', 'volume 41'], str(sent))
+                  [line.split(' ', 1)[1] for line in sent] == ['volume 41'], str(sent))
+    good &= now_cycle(binary, work, home)
     # a title too long for its column rests, slides to its end, and comes back
     # a picture every quarter second for ten: at rest 2.75 s, sliding, held 1.5 s at its end, then back at rest
     long = NOW.replace('title=A Made-Up Song', 'title=A Made-Up Song Again X').replace('state=1', 'state=2')
@@ -597,6 +598,57 @@ def pages(binary, work):
     good &= clicks(binary, work)
     good &= comebacks(binary, work, home)
     good &= general(binary, work, home)
+    return good
+
+
+def now_cycle(binary, work, home):
+    """Now Playing's Centre is demo's iPod Centre cycle (patch/nav/now_playing.c np_centre): a press scrubs, the wheel
+    moving the place 5 s a tick (more on a fast spin) with a playing song following it at most every 200 ms; the next
+    press seeks there and rings Shuffle; the wheel walks Shuffle, Repeat and the heart, staying at the ends; Centre
+    steps the ringed one down the queue ("mode"); 3 s with no key or Return ends the cycle; a radio leaves only the
+    heart. Centre never plays or pauses: that is the Play/Pause key's."""
+    good = True
+    words = lambda sent: [line.split(' ', 1)[1] for line in sent]  # noqa: E731
+    to_now = ['rest', 'key centre', 'rest']
+    # slow ticks (300 ms apart, each heard), then a fast spin of 6: 1, 1, 1 steps until 100 ms of spin, then 2 and more
+    lines = to_now + ['key centre', 'run 50', 'tick 1', 'run 300', 'tick 1', 'run 300', 'tick -1', 'run 300']
+    trace, _, _, (sent, _, _) = script(binary, work, 60, lines, *home, now=NOW, queue=True)
+    good &= check('Centre starts the scrub at the song\'s place, each slow tick moves it 5 s and a playing song follows',
+                  trace[-1]['scrub'] == 1 and trace[-1]['to'] == 19 and words(sent) == ['seek 19', 'seek 24', 'seek 19'],
+                  f"{trace[-1]} {sent}")
+    trace, _, _, (sent, _, _) = script(binary, work, 60, to_now + ['key centre', 'run 50'] + ['tick 1', 'run 30'] * 8,
+                                       *home, now=NOW, queue=True)
+    good &= check('a fast spin steps further each tick (patch/navigation.c ramp: 1 until 100 ms, then 2 and up)',
+                  trace[-1]['to'] > 14 + 8 * 5, str(trace[-1]))
+    lines = to_now + ['key centre', 'run 50', 'tick 2', 'run 50', 'key centre', 'run 50', 'tick 1', 'run 50', 'tick 1',
+                      'run 50', 'tick 1', 'run 50', 'tick -1', 'run 50', 'key centre', 'run 50', 'key return', 'run 50']
+    trace, _, _, (sent, _, _) = script(binary, work, 60, lines, *home, now=NOW, queue=True)
+    stages = [int(t['stage']) for t in trace if 'stage' in t]  # Home's lines first
+    good &= check("the next Centre seeks there and rings Shuffle; ticks walk Repeat, the heart and stay; Centre steps "
+                  "Repeat Off to All; Return ends the ring and the page stays",
+                  words(sent)[-2:] == ['seek 24', 'mode -1 2'] and 'toggle' not in words(sent) and 1 in stages
+                  and stages[-1] == 0 and 3 in stages and trace[-1]['scrub'] == 0, f'{sent} {sorted(set(stages))}')
+    # repeat All steps to One, then Off; shuffle on goes off
+    for now, ticks, want in ((NOW.replace('id=5', 'id=5\nrepeat=2'), 1, 'mode -1 1'), (NOW.replace('id=5', 'id=5\nrepeat=1'), 1, 'mode -1 0'),
+                             (NOW.replace('id=5', 'id=5\nshuffle=1'), 0, 'mode 0 -1')):
+        _, _, _, (sent, _, _) = script(binary, work, 60, to_now + ['key centre', 'run 50', 'key centre', 'run 50'] +
+                                       ['tick 1', 'run 50'] * ticks + ['key centre', 'run 50'], *home, now=now, queue=True)
+        good &= check(f'Centre on the ring steps it: {want}', words(sent)[-1:] == [want], str(sent))
+    trace, _, _, (sent, _, _) = script(binary, work, 60, to_now + ['key centre', 'run 3100'], *home, now=NOW, queue=True)
+    good &= check('3 s with no key ends a scrub the wheel never moved, seeking nothing',
+                  trace[-1]['scrub'] == 0 and trace[-1]['stage'] == 0 and sent == [], f'{trace[-1]} {sent}')
+    trace, _, _, _ = script(binary, work, 60, to_now + ['key centre', 'run 50', 'key centre', 'run 50', 'run 3100'], *home,
+                            now=NOW, queue=True)
+    good &= check('and a ring with no key goes after 3 s too', trace[-1]['stage'] == 0, str(trace[-1]))
+    trace, _, _, (sent, _, _) = script(binary, work, 60, to_now + ['key centre', 'run 50', 'key centre', 'run 50', 'tick -1',
+                                                                   'run 50'], *home, now=NOW + 'radio=1\n', queue=True)
+    good &= check('while a radio plays the ring stands on the heart alone', trace[-1]['stage'] == 3, str(trace[-1]))
+    _, pics, _ = script(binary, work, 60, to_now + ['key centre', 'run 50', 'tick 2', 'run 50', 'shot @scrub.ppm'], *home,
+                        now=NOW, queue=True)[:3]
+    # 24 s of 180 on the bar from x 24, 327 px long: the knob's 14 px white disc centred on the fill's end
+    kx = round(24 + 4 + (327 - 4) * 24 / 180)
+    good &= check("the scrub shows demo's white knob on the fill's end", pics['scrub'].at(kx, 231) == (255, 255, 255)
+                  and pics['scrub'].at(kx + 9, 231) != (255, 255, 255), str(pics['scrub'].at(kx, 231)))
     return good
 
 
