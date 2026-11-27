@@ -929,6 +929,21 @@ def comebacks(binary, work, home):
         ok = got == rows
         good &= check(f"back from the page of demo's that {name} opened, q2ui is on {name} on the row it was on",
                       ok and sel == want_sel, f'{got} sel {sel}')
+    # left for demo's Search strip with nothing playing, whose result then played: demo's Now Playing is up as q2ui
+    # starts again (--then now), and Home has gained its Playing row since the row was kept
+    state = d/'state-search'
+    opts = (*home, '--state', state)
+    script(binary, work, 20, ['rest', 'tick 5', 'rest', 'key centre', 'run 100'], *opts, code=3, queue=True)
+    tops = []
+    for lines in (['rest'], ['rest', 'key return', 'rest', 'rows @top.txt']):
+        trace, _, stats, (_, _, out) = script(binary, work, 20, lines, *opts, '--then', 'now', now=NOW, queue=True)
+        tops.append(stats['top'])
+    rows = (out/'top.txt').read_text().splitlines() if (out/'top.txt').exists() else []
+    sel = int(trace[-1]['sel']) if trace else -1
+    on = rows[sel].split('\t')[0] if 0 <= sel < len(rows) else None
+    good &= check("left for demo's Search strip whose result played, q2ui comes back on its own Now Playing (--then now), "
+                  "and Return goes back to Home on the Search row, Home's Playing row come since",
+                  tops == ['now', 'home'] and on == 'Search', f'{tops} on {on!r} ({sel} of {rows})')
     return good
 
 

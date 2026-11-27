@@ -8,7 +8,7 @@
  *          [--backlight DIR] [--ask FILE] [--now FILE] [--cover FILE] [--power DIR] [--wifi FILE]
  *          [--wireless FILE] [--told FILE] [--networks FILE]
  *          [--bt-devices FILE] [--art DIR] [--config FILE] [--card DIR]
- *          [--notices SOCKET] [--apps FILE] [--app-card DIR]
+ *          [--notices SOCKET] [--apps FILE] [--app-card DIR] [--then now]
  *
  * --catalogue is the server library's (default /mnt/mmc/.q2pod/catalogue.db; "" for none): its
  * songs are listed with the card's, as the Library lists them. --panel-bits is the depth of the
@@ -37,6 +37,8 @@
  * (ui/page_general.c), --library-order the Library's order from demo's Edit Library
  * (ui/page_library.c), --notices where Q2UI/1 is served ("" for nowhere) and --apps and --app-card
  * where a caller's app is found to name it on the card (ui/notice.c); a test names its own.
+ * --then now opens Now Playing over the pages come back to: the gate's, when the page of demo's
+ * that q2ui left for ended on demo's Now Playing (a Search result played; patch/q2ui_gate.c).
  *
  * --bench draws and turns frames without the panel's wait and writes their CPU time to the stats
  * file. --script runs a file of input on a clock of its own, a frame every 1/60 s whatever the
@@ -54,7 +56,7 @@
 #define FRAME_US 16667u
 
 static struct {
-    const char *db, *catalogue, *fb, *input, *fonts, *stats, *script, *trace, *page, *state, *ask;
+    const char *db, *catalogue, *fb, *input, *fonts, *stats, *script, *trace, *page, *state, *ask, *then;
     int limit, bench, bits;
 } opt = { "/mnt/data/database.db",
           "/mnt/mmc/.q2pod/catalogue.db",
@@ -67,6 +69,7 @@ static struct {
           "home",
           "/tmp/q2ui.state",
           "/tmp/q2ui.open",
+          0,
           0,
           0,
           6 }; /* the Q2's panel shows 6 bits a channel or fewer (docs/ui-rewrite.md#gradients) */
@@ -130,6 +133,8 @@ static void parse(int argc, char **argv) {
             config_file = v, ++i;
         else if (!strcmp(a, "--library-order"))
             library_order_file = v, ++i;
+        else if (!strcmp(a, "--then"))
+            opt.then = v, ++i;
         else if (!strcmp(a, "--notices"))
             notice_socket = v, ++i;
         else if (!strcmp(a, "--apps"))
@@ -237,6 +242,14 @@ static void state_restore(void) {
             break;
         ui_select_top(atoi(colon + 1));
     }
+    list_motion = motion;
+}
+/* --then now: Now Playing over the pages come back to, with no motion */
+static void then_open(void) {
+    if (!opt.then || strcmp(opt.then, "now") || !strcmp(ui_top_name(), "now")) return;
+    int motion = list_motion;
+    list_motion = 0;
+    ui_push(&page_now, 0);
     list_motion = motion;
 }
 
@@ -393,6 +406,7 @@ static int script(const char *path) {
     notice_said = script_said;
     first_page();
     state_restore(); /* as a start does: a --state another run left is come back to */
+    then_open();
     notice_socket = ""; /* a script's commands are its own lines (notice COMMAND): no socket */
     notice_open();
     script_frame(0, 0);
@@ -507,6 +521,7 @@ int main(int argc, char **argv) {
     input_flush(); /* nothing pressed before it had the screen is its to act on (a FIFO standing in for a device keeps such) */
     first_page();
     state_restore();
+    then_open();
     ui_frame(0, 0);
     first_ms = (unsigned)((mono_us() - t0) / 1000u);
     notice_open();

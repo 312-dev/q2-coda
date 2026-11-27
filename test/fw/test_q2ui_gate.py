@@ -657,3 +657,23 @@ def test_q2uis_screenoff_turns_the_lit_screen_off_as_now_playings_short_hold_doe
     g.sent = b'screenoff\nscreenoff now\n'
     g.poll()
     assert len(fw.calls('on_wm_keyup_fun')) == 1
+
+
+@pytest.mark.parametrize('back, then', [(b'playing_page', [b'--then', b'now']), (b'home_page', [])])
+def test_q2ui_left_for_a_page_that_ends_on_demos_now_playing_comes_back_on_its_own(fw, back, then):
+    """Search's strip is demo's (searchstrip_page): a result chosen there plays and demo opens its Now Playing, which
+    counts as Home for the gate. q2ui started again then opens its own Now Playing over the pages it had ("--then
+    now"), as demo's pick lands on Now Playing; left for Home, it comes back on its pages alone."""
+    ran = []
+    fw.mock('fw_execl', lambda *a: ran.append([C.string_at(p) if p else 0 for p in a[:6]]) or -1)
+    g = Gate(fw)
+    g.poll()
+    g.ask, g.status, g.ended = b'searchstrip_page\n', ASKED, 1
+    g.poll()
+    g.ended = 0
+    g.top = b'searchstrip_page'
+    g.poll()
+    g.top = back
+    fw.mock('fw_fork', lambda *_: 0)  # the child's side this time: what it runs
+    g.poll()
+    assert ran and ran[-1][:2] == [BINARY, BINARY] and ran[-1][2:2 + len(then) + 1] == then + [0]
