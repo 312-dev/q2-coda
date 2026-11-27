@@ -1454,6 +1454,30 @@ def wheel_volume(binary, work):
     return good
 
 
+def playing_row(binary, work):
+    """The playing song's row (docs/oled-design.md): in a song list the song playing or paused, known by its id (demo's
+    now file's id=, never its title), has its title in the accent and four level bars on the right column; Centre on it
+    opens Now Playing and sends nothing, the song playing on. Nothing playing, no row is marked."""
+    good = True
+    probe = folder(work, 60)
+    db = sqlite3.connect(probe/'library.db')
+    order = [r[0] for r in db.execute('select id from songtable order by name collate nocase, id')]
+    k = 3  # row 0 is Shuffle, row 1 the selected first song: the third song plays
+    now = NOW.replace('id=5', f'id={order[k - 1]}')
+    bars = lambda p: sum(1 for x in range(325, 352) if p.at(x, BAR_H + k * ROW_H + 16) == ACCENT)  # noqa: E731 (across the bars' middle row)
+    _, pics, _ = script(binary, work, 60, ['rest', 'shot @list.ppm'], now=now)
+    _, idle, _ = script(binary, work, 60, ['rest', 'shot @list.ppm'], now=now.replace('state=1', 'state=0'))
+    good &= check("the playing song's row has the level bars in the accent on the right; with nothing playing none",
+                  bars(pics['list']) >= 6 and bars(idle['list']) == 0,
+                  f"{bars(pics['list'])} {bars(idle['list'])}")
+    walk = ['rest', f'tick {k - 1}', 'rest', 'key centre', 'rest']
+    _, _, stats, (sent, _, _) = script(binary, work, 60, walk, now=now, queue=True)
+    good &= check('Centre on it opens Now Playing and sends no play', stats['top'] == 'now' and sent == [], f"{stats['top']} {sent}")
+    _, _, stats, (sent, _, _) = script(binary, work, 60, walk, now=now.replace('state=1', 'state=0'), queue=True)
+    good &= check('with nothing playing Centre on the same row plays it', stats['top'] == 'now' and len(sent) == 1, f"{stats['top']} {sent}")
+    return good
+
+
 def album_covers(binary, work, home):
     """Albums' rows lead with their covers (ui/art.c), found as Cover Flow names them; one it has not made shows the
     placeholder. Read in place by a script, and by the worker in a live run."""
@@ -2302,6 +2326,8 @@ def main():
             good &= clock(binary, work)
         if not only or 'night' in only:
             good &= night_shift(binary, work, ('--page', 'home'))
+        if not only or 'playing' in only:
+            good &= playing_row(binary, work)
         if not only or 'volume' in only:
             good &= wheel_volume(binary, work)
         if not only or 'light' in only:

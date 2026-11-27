@@ -32,6 +32,7 @@ static void s_chosen(void *ctx, int i) {
     if (!player_play(s->ids, s->n, i, 0)) ui_push(&page_now, 0); /* as demo's Now Playing comes up for a song chosen */
 }
 static void s_held(void *ctx, int i) { song_menu(((struct songs_st *)ctx)->songs[i]); }
+static int s_song(void *ctx, int i) { return ((struct songs_st *)ctx)->ids[i]; }
 static void group_songs_push(int kind, int group) {
     /* the page keeps its source's context for as long as the program runs: a list is opened a
      * few times a session and each is a few words and its ids */
@@ -41,7 +42,7 @@ static void group_songs_push(int kind, int group) {
     s->ids = malloc((size_t)(s->n ? s->n : 1) * sizeof *s->ids);
     for (int i = 0; i < s->n; ++i) s->ids[i] = lib_ids()[s->songs[i]];
     snprintf(s->name, sizeof s->name, "group.%d.%d", kind, group);
-    ui_source src = { .count = s_count, .row = s_row, .chosen = s_chosen, .held = s_held, .ctx = s, .name = s->name };
+    ui_source src = { .count = s_count, .row = s_row, .chosen = s_chosen, .held = s_held, .song = s_song, .ctx = s, .name = s->name };
     ui_push(&list_page, &src);
 }
 
@@ -57,7 +58,7 @@ static void playlist_push(int list) {
     s->ids = malloc((size_t)(s->n ? s->n : 1) * sizeof *s->ids);
     for (int i = 0; i < s->n; ++i) s->ids[i] = lib_ids()[songs[i]];
     snprintf(s->name, sizeof s->name, "playlist.%d", list);
-    ui_source src = { .count = s_count, .row = s_row, .chosen = s_chosen, .held = s_held, .ctx = s, .name = s->name };
+    ui_source src = { .count = s_count, .row = s_row, .chosen = s_chosen, .held = s_held, .song = s_song, .ctx = s, .name = s->name };
     ui_push(&list_page, &src);
 }
 static struct {

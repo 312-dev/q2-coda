@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - New UI (preview): in Songs, an artist's or album's songs and a playlist, the song that is playing or paused shows its title in blue with level bars on the right, as in the classic menus; pressing Center on it opens Now Playing without starting it again.
   - New UI (preview): spinning the wheel fast changes the volume faster again, as in the classic menus (up to 10 steps a click), on Now Playing and on every slider; turned slowly it still goes one step a click.
   - New UI (preview): Control Center opens with a swipe down from the top of the screen, as in the classic menus, and works by touch: tap a circle to turn it on or off, hold one for its settings, tap Previous, Play/Pause or Next, slide a finger along Brightness or Volume, and swipe up to close it. Holding Return still opens it too. **Brightness** is also the first row of Settings > Display.
   - Status row: the Wi-Fi bars a weak signal leaves unlit are a faint shade of the icon's own colour (faint white on black, faint black in Light Mode), as on an iPhone, where they were a solid grey that stood out in Light Mode.

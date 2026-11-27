@@ -374,6 +374,9 @@ typedef struct ui_source {
     /* A grabbed ROW_SLIDER row turned: steps up (+, clockwise) or down (-), more a tick on a fast spin. The
      * source sets its level and calls list_rows_changed. */
     void (*adjust)(void *ctx, int i, int steps);
+    /* Row i's song, its id as demo's now file names it (ui_now.id), else 0; given, the playing song's row is
+     * marked (ROW_PLAYING) and Centre on it opens Now Playing, the song playing on */
+    int (*song)(void *ctx, int i);
     void *ctx;
     const char *name; /* the page's name in a route; 0: not kept */
     int pinned; /* rows at the top that stay put while the rest scroll under them (Songs' Shuffle) */
