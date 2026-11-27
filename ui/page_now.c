@@ -163,8 +163,10 @@ static void n_draw(void *st, rect_t r) {
         const image_t *im = icon(mode[k]);
         if (im) image_draw(im, (rectf_t){ mode_x[k] - (float)im->w / 2, 286 - (float)im->h / 2, (float)im->w, (float)im->h }, 0, 0, 256, -1);
     }
-    const image_t *heart = icon(n->hearts > 0 ? "np_fav_d." : "np_unfav_d."); /* liked, and not */
-    if (heart && *n->title) image_draw(heart, (rectf_t){ 194, 153, (float)heart->w, (float)heart->h }, 0, 0, 256, -1);
+    /* liked, and not: the image's box at y 146 puts its ink's top on demo's, y 155 (ui/tools/compare.py on the
+     * emulator's shots of the same song, m17c-04 and -09) */
+    const image_t *heart = icon(n->hearts > 0 ? "np_fav_d." : "np_unfav_d.");
+    if (heart && *n->title) image_draw(heart, (rectf_t){ 194, 146, (float)heart->w, (float)heart->h }, 0, 0, 256, -1);
     if (s->volume_at) {
         /* the volume's level in the bar's place: a shorter track between two marks, the level in white */
         float level = (float)s->volume / 100, x0 = BAR_X + 22, w = BAR_W - 44;
