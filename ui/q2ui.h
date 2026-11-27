@@ -319,6 +319,8 @@ void status_draw(rect_t r);
 void status_step(void);
 rect_t status_rect(void);
 void status_clock_fixed(const char *hhmm);
+void status_clock_at(long epoch); /* a script's clock: the time at epoch, in demo's zone and form */
+long status_time(void);           /* the time the clock reads */
 /* where the battery, Wi-Fi's state and its signal are read (a test's are its own files) */
 extern const char *status_power, *status_wifi, *status_wireless, *status_told;
 void status_told_changed(void); /* demo's file of the states only it knows changed (now.c's watch) */

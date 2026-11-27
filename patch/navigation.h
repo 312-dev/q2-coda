@@ -1017,6 +1017,7 @@ int ringnav_timezone(void); /* navigation.c: g_time_zone's TZ set, the clock red
 void autozone_poll(void), autozone_due(void), autozone_off(void),
     autozone_config(const char *section, const char *key);
 int autozone_busy(void), autozone_match(const char *zone), autozone_enabled(void);
+const char *autozone_tz(void);
 void pod_row_at(void *view, int i, const char *icon, unsigned at);
 
 /* config_ini.c: toolsWriteConfig's hook, and the settled keys write_int_config's hook holds */

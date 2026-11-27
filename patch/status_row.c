@@ -219,15 +219,17 @@ static int offline_shown(void) { return addon_offline() ? SR_OFFLINE : 0; }
  *   out=wire|none|other  wired headphones take the sound; nothing does (the deaf ear); else
  *   bt=none|connecting|rune|headset|car|guest, btbatt=N  the Bluetooth slot, a headset's level
  *   relay=none|headphones|car  where a guest's phone plays through the Q2, while one plays
- *   lock=0|1  sync=0|1|2 syncpm=N  offline=0|1  net=0|1 (0: Wi-Fi linked with no internet) */
+  *   lock=0|1  sync=0|1|2 syncpm=N  offline=0|1  net=0|1 (0: Wi-Fi linked with no internet)
+ *   clock24=0|1 tz=TZ  the clock's 24-hour setting and time zone (autozone.c autozone_tz; empty for none) */
 unsigned status_row_state(char *b, unsigned room) {
     static const char *const bt[] = { "none", "connecting", "rune", "headset", "car", "guest" };
     int slot = bt_slot(), permille = 0, sync = addon_sync(&permille);
     const char *relay = slot != BT_SLOT_GUEST || !guest_relayed() ? "none" : linked_w() == SR_CAR_W ? "car" : "headphones";
-    int n = tk_snprintf(b, room, "out=%s\nbt=%s\nbtbatt=%d\nrelay=%s\nlock=%d\nsync=%d\nsyncpm=%d\noffline=%d\nnet=%d\n",
+    int n = tk_snprintf(b, room, "out=%s\nbt=%s\nbtbatt=%d\nrelay=%s\nlock=%d\nsync=%d\nsyncpm=%d\noffline=%d\nnet=%d\n"
+                                 "clock24=%d\ntz=%s\n",
                         wired_on() ? "wire" : no_output() ? "none" : "other", bt[slot],
                         slot == BT_SLOT_HEADSET ? bt_headset_battery() : -1, relay, !!g_keylock_flag, sync,
-                        sync == 2 ? permille : 0, !!addon_offline(), !wifi_offline());
+                        sync == 2 ? permille : 0, !!addon_offline(), !wifi_offline(), !!g_time24h_flag, autozone_tz());
     return n < 0 ? 0 : (unsigned)n >= room ? room - 1 : (unsigned)n;
 }
 

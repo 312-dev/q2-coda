@@ -1065,6 +1065,26 @@ def hold_menu(binary, work):
     return good
 
 
+def clock(binary, work):
+    """The status row's clock in demo's zone and form (nav/lyrics_status_bar.c clock_show; demo says them in
+    /tmp/q2ui.status, patch/status_row.c clock24 and tz): 24-hour "17:13", else "5:13" with no AM or PM, as demo's
+    status row has it; in the zone demo names, read for every localtime, and 24-hour until demo says."""
+    good = True
+
+    def row(told, *options):
+        d = pathlib.Path(tempfile.mkdtemp(dir=work))
+        (d/'told').write_text(told)
+        _, pics, _ = script(binary, work, 5, ['rest', 'shot @row.ppm'], '--told', d/'told', *options)
+        return [pics['row'].at(x, y) for y in range(8, 34) for x in range(55, 140)]
+    at = '1700000000'  # 22:13:20 UTC
+    for told, want in (('tz=EST5\nclock24=0\n', '5:13'), ('tz=EST5\nclock24=1\n', '17:13'), ('tz=<+09>-9\nclock24=0\n', '7:13'),
+                       ('tz=<+09>-9\n', '07:13')):
+        got, ref = row(told, '--clock-at', at), row('', '--clock', want)
+        good &= check(f'told {told.strip()!r}, the clock reads {want}', got == ref and any(max(c) > 100 for c in ref),
+                      f'{sum(a != b for a, b in zip(got, ref))} px differ')
+    return good
+
+
 def comebacks(binary, work, home):
     """A page of demo's opened from a page of q2ui's: q2ui, started again when demo's page is left, is back on the page
     that opened it, on its row, under the pages it had (main.c state_restore), for every page that opens one."""
@@ -2103,6 +2123,8 @@ def main():
             good &= edit_library(binary, work, ('--page', 'home'))
         if not only or 'menu' in only:
             good &= hold_menu(binary, work)
+        if not only or 'clock' in only:
+            good &= clock(binary, work)
         if not only or 'notices' in only:
             good &= notices(binary, work)
     print('q2ui: ' + ('all checks passed' if good else 'FAILED'))

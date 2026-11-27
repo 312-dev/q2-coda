@@ -45,7 +45,7 @@ int config_int(const char *section, const char *key, int def) {
 
 /* Light Mode as the setting and the hour have it; a change draws everything again */
 void config_light_now(void) {
-    time_t t = time(0);
+    time_t t = (time_t)status_time();
     int hour = localtime(&t)->tm_hour;
     int light = config_light_forced || light_setting == 1 || (light_setting == 2 && hour >= LIGHT_FROM && hour < LIGHT_UNTIL);
     if (light == ui_light) return;

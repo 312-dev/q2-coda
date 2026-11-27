@@ -40,6 +40,9 @@ static struct {
     char clock[8];
     run_t run;
     int fixed;
+    long at;          /* the clock's time, a script's (status_clock_at); 0: the system's */
+    int clock24;      /* demo's 24-hour setting: 1 "18:14", 0 "6:14" (no AM or PM, as demo's status row) */
+    char tz[64];      /* demo's time zone, its TZ, as it last said */
     int level, cable; /* the battery's percent, -1 unknown; 1 on a cable that charges or holds it */
     int wifi;         /* 0 not connected, 1 to 3 the fan's lit parts */
     int play;         /* 0 stopped, 1 playing, 2 paused */
@@ -53,7 +56,7 @@ static struct {
     int told;         /* status_told changed since it was read */
     char told_text[1536]; /* the file as last read, for status_told_value: a cover's path is up to 600 */
     int spin;         /* the sync arrows' frame shown */
-} S = { .level = -1, .volume = -1, .btbatt = -1, .net = 1, .told = 1 };
+} S = { .level = -1, .volume = -1, .btbatt = -1, .net = 1, .told = 1, .clock24 = 1 };
 
 #define VOLUME_SHOW_US 1500000u
 #define VOLUME_X 150 /* its track, between the clock and the glyphs */
@@ -65,6 +68,10 @@ void status_clock_fixed(const char *hhmm) {
     snprintf(S.clock, sizeof S.clock, "%s", hhmm);
     S.fixed = 1, S.run.n = 0;
 }
+/* The clock reads the time at epoch, in demo's zone and form: a script's, so the zone and the form are what is tried */
+void status_clock_at(long epoch) { S.at = epoch, S.fixed = 0, S.clock[0] = 0; }
+/* The time the clock reads: a script's, else the system's (Light Mode's and Night Shift's Auto read it too) */
+long status_time(void) { return S.at ? S.at : (long)time(0); }
 
 rect_t status_rect(void) { return (rect_t){ INSET, CLOCK_Y, SCREEN_W - 2 * INSET, 18 }; }
 /* everything right of the clock: the slots take what room they need, right to left */
@@ -145,19 +152,30 @@ static void read_told(void) {
         list_rows_changed(), ui_mark_all();
     }
     if (f) rewind(f);
-    char out[8] = "", bt[12] = "", relay[12] = "";
+    char out[8] = "", bt[12] = "", relay[12] = "", tz[sizeof S.tz] = "", c24[4] = "";
     int v[6] = { -1, 0, 0, 0, 0, 1 }; /* btbatt lock sync syncpm offline net */
     static const char *const keys[] = { "btbatt", "lock", "sync", "syncpm", "offline", "net" };
     while (f && fgets(line, sizeof line, f)) {
         word_of(line, "out", out, sizeof out);
         word_of(line, "bt", bt, sizeof bt);
         word_of(line, "relay", relay, sizeof relay);
+        word_of(line, "tz", tz, sizeof tz);
+        word_of(line, "clock24", c24, sizeof c24);
         for (int k = 0; k < 6; ++k) {
             *num = 0, word_of(line, keys[k], num, sizeof num);
             if (*num) v[k] = atoi(num);
         }
     }
     if (f) fclose(f);
+    /* the clock in demo's zone and form (nav/lyrics_status_bar.c clock_show): a zone it names is set for every
+     * localtime here; none said keeps the one there is */
+    if (*tz && strcmp(tz, S.tz)) {
+        snprintf(S.tz, sizeof S.tz, "%s", tz);
+        setenv("TZ", tz, 1);
+        tzset();
+        S.clock[0] = 0;
+    }
+    if (*c24 && atoi(c24) != S.clock24) S.clock24 = atoi(c24), S.clock[0] = 0;
     if (strcmp(out, S.out) || strcmp(bt, S.bt) || strcmp(relay, S.relay) || v[0] != S.btbatt || v[1] != S.lock ||
         v[2] != S.sync || v[3] != S.syncpm || v[4] != S.offline || v[5] != S.net) {
         snprintf(S.out, sizeof S.out, "%s", out), snprintf(S.bt, sizeof S.bt, "%s", bt);
@@ -213,9 +231,12 @@ void status_step(void) {
         ui_wake_ms((unsigned)((SPIN_US - t % SPIN_US + 999) / 1000));
     }
     if (S.fixed) return;
-    time_t t = time(0);
+    time_t t = (time_t)status_time();
     struct tm *tm = localtime(&t);
-    snprintf(s, sizeof s, "%02d:%02d", tm->tm_hour, tm->tm_min);
+    if (S.clock24)
+        snprintf(s, sizeof s, "%02d:%02d", tm->tm_hour, tm->tm_min);
+    else
+        snprintf(s, sizeof s, "%d:%02d", (tm->tm_hour + 11) % 12 + 1, tm->tm_min);
     if (!strcmp(s, S.clock)) return;
     memcpy(S.clock, s, sizeof S.clock);
     S.run.n = 0;

@@ -157,6 +157,8 @@ static void parse(int argc, char **argv) {
             text_whole = !strcmp(v, "awtk"), ++i;
         else if (!strcmp(a, "--clock"))
             status_clock_fixed(v), ++i;
+        else if (!strcmp(a, "--clock-at"))
+            status_clock_at(atol(v)), ++i;
         else if (!strcmp(a, "--reduce-motion"))
             ui_reduce_motion = config_motion_forced = 1;
         else if (!strcmp(a, "--light"))
