@@ -18,7 +18,8 @@ ubiattach) are stand-ins that record their arguments; the framebuffer is a file 
 in the emulator (~/q2-emu). The boot passes when the record shows rcS's order (file systems, mdev, the data
 partition, every module of Shanling's script in its order with its parameters, the framebuffer) before
 either service starts, q2ui draws a frame, q2player connects to q2playd, and a song asked for over Q2PLAY/1
-reaches q2player and its end comes back; then adb over Wi-Fi's key rules.
+reaches q2player and its end comes back; then adb over Wi-Fi's key rules, and q2sysd's battery file, a press of the
+power key turning the screen off and on, and its hold starting init's shutdown.
 
 --card-boot boots it as today's Vamp starts it from the card (patch/q2vampos.sh): /mnt/data already mounted and
 /proc/modules listing every vendor module, so rcS must keep the one and not run the module script again.
@@ -26,7 +27,7 @@ reaches q2player and its end comes back; then adb over Wi-Fi's key rules.
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
-Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd).
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd).
 """
 import argparse
 import hashlib
@@ -182,7 +183,7 @@ def check_image(build, fs, manifest, perturb=None):
     check(actions.count('sysinit') == 1 and table[0] == '::sysinit:/etc/init.d/rcS'
           and '::respawn:/usr/bin/runsvdir -P /etc/sv' in table, 'inittab: rcS, the one sysinit, then runsvdir over /etc/sv')
     services = sorted(p.name for p in (fs/'etc/sv').iterdir())
-    check(services == ['adb-wifi', 'adbd', 'dhcp', 'q2playd', 'q2player', 'q2ui', 'wlan'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
+    check(services == ['adb-wifi', 'adbd', 'dhcp', 'q2playd', 'q2player', 'q2sysd', 'q2ui', 'wlan'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
           f'services: {", ".join(services)}')
     check(not (fs/'etc/init.d').exists() or sorted(p.name for p in (fs/'etc/init.d').iterdir()) == ['rcK', 'rcS'],
           '/etc/init.d holds rcS and rcK alone')
@@ -237,6 +238,33 @@ def play_check(fs, console, deadline):
         back = re.search(rb'q2playd: song 1 (ended|did not play)', console.read_bytes()) is not None
         time.sleep(0.5)
     return connected, replies == ['Q2PLAY/1 ok', 'ok'] and back, replies
+
+
+def sysd_checks(fs, power_key, log):
+    """q2sysd in the booted image (docs/sysd.md): the battery's file from the CW2015's, a press of the power key on a
+    device of its own (a FIFO: q2ui leaves an unnamed one alone) turning the screen off and on, and a hold of it
+    starting init's shutdown (rcK's line in the boot log). The last check: the system goes down."""
+    import struct as st
+    bl = fs/'sys/class/backlight/lcd/bl_power'
+    text = (fs/'run/vamp/battery').read_text() if (fs/'run/vamp/battery').exists() else ''
+    check('level=64' in text and 'mv=3800' in text, f'q2sysd: /run/vamp/battery from the CW2015 ({text.split() or "none"})')
+    fd = os.open(power_key, os.O_RDWR | os.O_NONBLOCK)
+
+    def key(value):  # the guest's input_event: o32 with a 64-bit time_t gets the kernel's 32-bit longs, 16 bytes
+        os.write(fd, st.pack('<IIHHi', int(time.time()), 0, 1, 116, value))
+
+    def until(pred, s=5):
+        end = time.monotonic() + s
+        while time.monotonic() < end and not pred():
+            time.sleep(0.1)
+        return pred()
+    key(1), time.sleep(0.1), key(0)
+    check(until(lambda: bl.read_text().strip() == '4'), 'q2sysd: a press of the power key turns the screen off (bl_power 4)')
+    key(1), time.sleep(0.1), key(0)
+    check(until(lambda: bl.read_text().strip() == '0'), 'q2sysd: another turns it on again')
+    key(1)
+    check(until(lambda: b'rcK: stopping the services' in log.read_bytes(), 10), 'q2sysd: the power key held starts init\'s shutdown')
+    os.close(fd)
 
 
 def adb_open(port=5555):
@@ -304,6 +332,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         (fs/'etc/init.d/rcS').write_text(rcs)
     if perturb == 'adb-open':  # Wi-Fi adbd with no key check: an open port
         (fs/'etc/sv/adb-wifi/run').write_text('#!/bin/sh\nexec /usr/bin/adbd --tcp 5555\n')
+    if perturb == 'sysd-off':  # no q2sysd
+        (fs/'etc/sv/q2sysd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'playd-off':  # no q2playd
         (fs/'etc/sv/q2playd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'adb-off':  # no Wi-Fi adbd at all
@@ -322,7 +352,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
     fb.write_bytes(bytes(320 * 375 * 4 * 2))
     inp = emu/'input'
     inp.mkdir(exist_ok=True)
-    for n in (1, 3):  # the keys and the wheel, by the emulator's numbering (q2ui's input.c)
+    for n in (1, 2, 3):  # the keys and the wheel, by the emulator's numbering (q2ui's input.c); 2, q2sysd's power key alone
         if not (inp/f'event{n}').exists():
             os.mkfifo(inp/f'event{n}')
     import sqlite3
@@ -333,6 +363,11 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
     db.commit()
     db.close()
     wav(fs/'mnt/mmc/song1.wav')
+    for rel, text in (('sys/class/backlight/lcd/bl_power', '0'), ('sys/class/backlight/lcd/brightness', '200'),
+                      ('sys/class/backlight/lcd/max_brightness', '255'), ('sys/devices/i2c-0/0-0062/cw2015_capacity', '64'),
+                      ('sys/devices/i2c-0/0-0062/cw2015_voltage', '3800'), ('sys/hynitron_debug/hyngescontrol', '0')):
+        (fs/rel).parent.mkdir(parents=True, exist_ok=True)
+        (fs/rel).write_text(text + '\n')
     console = open(work/'console.log', 'wb')
     extra = []
     if card:
@@ -356,6 +391,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
             played = play_check(fs, work/'console.log', deadline)
         if adb and not card and proc.poll() is None:
             adb_checks(fs)
+        if not card and proc.poll() is None:
+            sysd_checks(fs, inp/'event2', emu/'record')
         if card:  # the services' first lines
             time.sleep(3)
     finally:
@@ -421,7 +458,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     a = ap.parse_args()
     manifest, _ = vamp_os.read_manifest()

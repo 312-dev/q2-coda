@@ -1,0 +1,7 @@
+#!/bin/sh
+# q2sysd (docs/sysd.md): the power key (a press: the screen off or on; held 3 s: power off), the screen's light, the
+# battery (/run/vamp/battery), and Q2SYS/1 on /run/vamp/sys.sock.
+. /usr/libexec/vamp/log
+step "q2sysd: start"
+exec 2>&1
+exec /usr/bin/q2sysd
