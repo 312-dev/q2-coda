@@ -20,8 +20,12 @@ root=$(cd "$here/../.." && pwd)
 if [ "${1:-}" = --amd64 ]; then
     shift
     platform=linux/amd64 files=("$here/Dockerfile.amd64" "$here/pidof") name=q2env-amd64
+    player_cache=$HOME/.cache/q2-player
 else
     platform=linux/arm64 files=("$here/Dockerfile" "$here/cc") name=q2env
+    # tools/player.py keys its host builds (test/player's FFmpeg and mbedTLS) by recipe, not by
+    # architecture, so the two images keep separate caches: the arm64 linker skips x86-64 archives.
+    player_cache=$HOME/.cache/q2-player-arm64
 fi
 tag=$(cat "${files[@]}" "$root/requirements.txt" "$root/test/unit/requirements.txt" | shasum -a 256 | cut -c1-12)
 image="$name:$tag"
@@ -48,10 +52,10 @@ tc_sha=$(cd "$root/tools" && python3 -c 'import thirdparty; print(thirdparty.TOO
 # --ulimit core=0: no core dumps, as q2-heavy's runs on GRAYTHINKPAD (a crashed test would leave
 # hundreds of MB in the worktree it ran in).
 run=(docker run --rm --platform "$platform" --user "$(id -u):$(id -g)" --ulimit core=0 --tmpfs /tmp:exec,mode=1777,size=2g
-     --security-opt seccomp=unconfined --security-opt apparmor=unconfined
+     --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined
      -v "$HOME:$HOME" -v "$HOME/.cache/q2-thirdparty:/home/gray/.cache/q2-thirdparty"
      -v q2-toolchain:$tc
-     -e HOME="$HOME" -e USER="$(id -un)" -e Q2_THIRDPARTY_CACHE=/home/gray/.cache/q2-thirdparty)
+     -e HOME="$HOME" -e USER="$(id -un)" -e Q2_THIRDPARTY_CACHE=/home/gray/.cache/q2-thirdparty -e Q2_PLAYER_CACHE="$player_cache")
 mkdir -p "$HOME/.cache/q2-thirdparty/toolchain"  # the volume's mount point
 if ! docker run --rm --platform "$platform" -v q2-toolchain:/v "$image" sh -c "[ -n '$tc_sha' ] && [ \"\$(cat /v/.sha256 2>/dev/null)\" = '$tc_sha' ]"; then
     archive=$HOME/.cache/q2-thirdparty/dl/mti-linux-2020.06-01.tar.gz
@@ -66,5 +70,7 @@ tty=()
 [ -t 0 ] && [ -t 1 ] && tty=(-t)
 [ $# -eq 0 ] && set -- bash
 # seccomp and AppArmor unconfined: bwrap (test/adb.py, test/thirdparty.py) and unshare -Urmn
-# (test/subsonic_seam.py) make user namespaces, which Docker's default profiles refuse.
+# (test/subsonic_seam.py) make user namespaces, which Docker's default profiles refuse. systempaths
+# unconfined: Docker masks parts of /proc, and the kernel refuses a new proc mount (the seam test's
+# unshare --pid --fork --mount-proc) over a proc with paths mounted on it.
 exec "${run[@]}" -i "${tty[@]}" -e TERM="${TERM:-dumb}" -w "$PWD" "$image" "$@"
