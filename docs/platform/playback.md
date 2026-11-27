@@ -17,7 +17,52 @@
 | `focus release` | `ok`, the source stopped and the queue given back; `err focus release` from a connection that holds none |
 | `output` | `output dac`, `output bluetooth` or `output bluetooth soft`: where the music goes |
 | `output dac`, `output bluetooth`, `output bluetooth soft` | `ok`. The DAC, or a Bluetooth headset through bluealsa at unity (its own level is the volume: q2btd's absolute volume) or at the player's gain (`soft`). A song loaded starts again where it is heard; each output keeps its own volume. Sent by [q2btd](bt.md), not meant for apps |
-| `caps` | `caps play toggle pause resume next previous seek volume stop now watch source focus output` |
+| `rating ID` | `rating id=ID stars=S liked=L`: song ID's stars (0 to 5) and like (0 or 1), ID 0 the song playing (its id then, 0 for one played as a path); `err rating` for no such song, or with ID 0 nothing that can be rated playing (a source's URL) |
+| `rate N ID` | `ok`: N stars for song ID (0 the song playing), 0 taking them out; `err rate` for N past 5, no such song, the table full or not written |
+| `like L ID` | `ok`: song ID (0 the song playing) liked (L 1) or not (L 0); asking for what it is already is `ok`; `err like` otherwise |
+| `album N ID` | `ok`: song ID's album made a favourite (N 5), which likes its songs, or not (N 0), which takes them out; `err album` for another N or no such song |
+| `caps` | `caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album` |
+
+## Ratings
+
+A song's stars and its like are apart, as on today's Vamp ([q2playd: Ratings and likes](../playd.md#ratings-and-likes)): stars are set only by `rate`, five stars like nothing, and a like sets no stars. An album has hearts of its own, given only as a favourite (`album 5`) or taken (`album 0`), and its favourite is its songs' like ([Albums' hearts](../playd.md#albums-hearts)). Each change reaches the servers and the card's copy for a computer as one from the Q2's own pages does. Song ids are [the library's](library.md); an album is named by any of its songs (Q2LIB/1's `albums` gives one as `first`).
+
+```conformance
+> Q2PLAY/1
+< Q2PLAY/1 ok
+> play 0 0 2
+> 1
+> 2
+< ok
+> rating 0
+< rating id=1 stars=0 liked=0
+> rate 4 0
+< ok
+> like 1 0
+< ok
+> rating 1
+< rating id=1 stars=4 liked=1
+> like 1 1
+< ok
+> rate 3 2
+< ok
+> rating 2
+< rating id=2 stars=3 liked=0
+> like 0 1
+< ok
+> rate 0 1
+< ok
+> rating 0
+< rating id=1 stars=0 liked=0
+> rate 6 1
+< err rate
+> like 2 1
+< err like
+> rating 999
+< err rating
+> album 3 1
+< err album
+```
 
 ## Audio focus
 
@@ -31,7 +76,7 @@ The holder is told, by a line between answers, when it loses the player for any 
 > Q2PLAY/1
 < Q2PLAY/1 ok
 > caps
-< caps play toggle pause resume next previous seek volume stop now watch source focus output
+< caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album
 > now
 < ~ now title= artist= album= state=0 pos=0 len=0 volume=\d+ id=0
 > play 1 0 3

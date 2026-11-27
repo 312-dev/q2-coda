@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
@@ -650,6 +651,7 @@ static void m3u_poll(void) {
     if (mq.stamp == file_stamp(path(mq.file)) && !(*mq.want && !access(path(mq.want), F_OK))) return;
     int had = q.n;
     m3u_read();
+    if (q.n > had) ++q.seq; /* the now file's qlen and the queue file */
     if (mq.waiting && q.n > had) {
         mq.waiting = 0;
         logf_("%s landed", q.paths[had]);
@@ -1051,10 +1053,12 @@ static int pending_ids[QUEUE_MAX];
 #define RATE_MIN 4096
 #define RATE_SLOTS 16384
 #define RATE_LAYOUT 0x48415356u /* "VSAH", its low bits 6 */
-static const char *ratings_rel = "/mnt/data/ringnav-ratings", *likes_rel = "/mnt/data/vamp/likes.db",
-                  *stock_db_rel = "/mnt/data/database.db";
-static struct { unsigned *t, cap, used; int read; } rt;
+static const char *likes_rel = "/mnt/data/vamp/likes.db", *stock_db_rel = "/mnt/data/database.db";
+/* The two tables, a song's stars and an album's hearts (ringnav-album-ratings, keyed by album_key), alike */
+static struct rtab { unsigned *t, cap, used; int read; const char *rel; } rt[2] = {{.rel = "/mnt/data/ringnav-ratings"},
+                                                                                   {.rel = "/mnt/data/ringnav-album-ratings"}};
 static struct { unsigned key; int v; } lk; /* the song's like as last read (likes.db changes only here) */
+static void ratings_copy_due(unsigned long long t);
 
 static unsigned fnv(unsigned h, const void *p, size_t n) {
     for (size_t i = 0; i < n; ++i) h = (h ^ ((const unsigned char *)p)[i]) * 16777619u;
@@ -1069,12 +1073,12 @@ static void rate_place(unsigned *t, unsigned m, unsigned v, unsigned *used) { /*
     *used += !t[k];
     t[k] = v;
 }
-/* t's n words' ratings (marks and malformed slots passed over) in a new table of cap words; 0 with no memory */
-static unsigned *rate_layout(const unsigned *t, unsigned n, unsigned cap) {
+/* t's n words' ratings (marks and malformed slots passed over) in a new table of cap words for r; 0 with no memory */
+static unsigned *rate_layout(struct rtab *r, const unsigned *t, unsigned n, unsigned cap) {
     unsigned *u = calloc(cap, sizeof *u), used = 0;
     for (unsigned i = 0; u && i < n && used < rate_room(cap); i++)
         if ((t[i] & 7) && (t[i] & 7) <= 5) rate_place(u, cap - 2, t[i], &used);
-    if (u) rt.cap = cap, rt.used = used;
+    if (u) r->cap = cap, r->used = used;
     return u;
 }
 
@@ -1090,19 +1094,19 @@ static int blob_save(const char *p, const void *buf, size_t n) {
     return 1;
 }
 
-static int rate_save(void) {
-    unsigned m = rt.cap - 2;
-    rt.t[m] = RATE_LAYOUT, rt.t[m + 1] = rt.used << 3 | 6;
-    return blob_save(path(ratings_rel), rt.t, rt.cap * sizeof *rt.t);
+static int rate_save(struct rtab *r) {
+    unsigned m = r->cap - 2;
+    r->t[m] = RATE_LAYOUT, r->t[m + 1] = r->used << 3 | 6;
+    return blob_save(path(r->rel), r->t, r->cap * sizeof *r->t);
 }
 
-/* The table, read at its first use (ratings.c rates) */
-static unsigned *rates(void) {
-    if (rt.t || rt.read) return rt.t;
-    rt.read = 1;
+/* r's table, read at its first use (ratings.c rates) */
+static unsigned *rates(struct rtab *r) {
+    if (r->t || r->read) return r->t;
+    r->read = 1;
     unsigned n = 0, room = RATE_MIN, rated = 0, cap = RATE_MIN;
     unsigned *in = calloc(room, sizeof *in);
-    FILE *file = in ? fopen(path(ratings_rel), "rb") : 0;
+    FILE *file = in ? fopen(path(r->rel), "rb") : 0;
     while (file && (n += (unsigned)fread(in + n, sizeof *in, room - n, file)) == room && room < RATE_SLOTS &&
            in[room - 2] != RATE_LAYOUT) {
         unsigned *more = calloc(room * 2, sizeof *more);
@@ -1113,37 +1117,37 @@ static unsigned *rates(void) {
     if (file) fclose(file);
     if (!in) return 0;
     if (n == room && in[n - 2] == RATE_LAYOUT) { /* laid out already */
-        rt.cap = n, rt.used = in[n - 1] >> 3;
-        return rt.t = in;
+        r->cap = n, r->used = in[n - 1] >> 3;
+        return r->t = in;
     }
     for (unsigned i = 0; i < n; i++) rated += (in[i] & 7) && (in[i] & 7) <= 5;
     while (cap < RATE_SLOTS && rate_room(cap) < rated + 1) cap *= 2;
     char v1[700];
-    snprintf(v1, sizeof v1, "%s.v1", path(ratings_rel));
+    snprintf(v1, sizeof v1, "%s.v1", path(r->rel));
     if (rated && access(v1, F_OK)) blob_save(v1, in, n * sizeof *in); /* kept once as it was */
-    rt.t = rate_layout(in, n, cap);
+    r->t = rate_layout(r, in, n, cap);
     free(in);
-    return rt.t;
+    return r->t;
 }
 
-static int rate_grow(void) { /* twice the size, laid out again; 0 at RATE_SLOTS or with no memory */
+static int rate_grow(struct rtab *r) { /* twice the size, laid out again; 0 at RATE_SLOTS or with no memory */
     unsigned *u;
-    if (rt.cap >= RATE_SLOTS || !(u = rate_layout(rt.t, rt.cap - 2, rt.cap * 2))) return 0;
-    free(rt.t), rt.t = u;
+    if (r->cap >= RATE_SLOTS || !(u = rate_layout(r, r->t, r->cap - 2, r->cap * 2))) return 0;
+    free(r->t), r->t = u;
     return 1;
 }
 
 /* key's slot; with room, the first free one on its probe when it has none (the table grown first when a new slot
  * would fill it past its room); -1 when neither */
-static int rate_slot(unsigned key, int room) {
-    unsigned *t = rates(), m = t ? rt.cap - 2 : 0, k = rate_home(key, m | !m);
+static int rate_slot(struct rtab *r, unsigned key, int room) {
+    unsigned *t = rates(r), m = t ? r->cap - 2 : 0, k = rate_home(key, m | !m);
     int empty = -1;
     for (unsigned n = 0; t && n < m; n++, k = (k + 1) % m) {
         if (!t[k]) {
             if (!room) return -1;
             if (empty >= 0) return empty;
-            if (rt.used < rate_room(rt.cap)) return (int)k;
-            return rate_grow() ? rate_slot(key, room) : -1;
+            if (r->used < rate_room(r->cap)) return (int)k;
+            return rate_grow(r) ? rate_slot(r, key, room) : -1;
         }
         if (t[k] == RATE_GONE) {
             if (empty < 0) empty = (int)k;
@@ -1153,22 +1157,24 @@ static int rate_slot(unsigned key, int room) {
     return room ? empty : -1;
 }
 
-static int rate_kept(unsigned key) { /* 1 to 5, else 0 */
-    int i = rate_slot(key, 0), n = i < 0 ? 0 : (int)(rt.t[i] & 7);
+static int table_kept(struct rtab *r, unsigned key) { /* 1 to 5, else 0 */
+    int i = rate_slot(r, key, 0), n = i < 0 ? 0 : (int)(r->t[i] & 7);
     return n <= 5 ? n : 0;
 }
 
-/* n stars for key, none for 0: 1 saved, 0 the table full, -1 not written (the slot as it was) */
-static int rate_keep(unsigned key, int n) {
-    int some = n > 0, i = rate_slot(key, some);
+/* n for key, none for 0: 1 saved, 0 the table full, -1 not written (the slot as it was) */
+static int table_keep(struct rtab *r, unsigned key, int n) {
+    int some = n > 0, i = rate_slot(r, key, some);
     if (i < 0) return !some;
-    unsigned old = rt.t[i];
-    rt.t[i] = some ? (key & ~7u) | (unsigned)n : RATE_GONE;
-    rt.used += !old;
-    if (rate_save()) return 1;
-    rt.t[i] = old, rt.used -= !old;
+    unsigned old = r->t[i];
+    r->t[i] = some ? (key & ~7u) | (unsigned)n : RATE_GONE;
+    r->used += !old;
+    if (rate_save(r)) return 1;
+    r->t[i] = old, r->used -= !old;
     return -1;
 }
+static int rate_kept(unsigned key) { return table_kept(&rt[0], key); }
+static int rate_keep(unsigned key, int n) { return table_keep(&rt[0], key, n); }
 
 /* What is rated: the queue's song, by its server row's fileurl for an offline copy; a source's URL has an empty queue
  * (its own put aside: source_take) */
@@ -1324,8 +1330,7 @@ static int hearts_now(void) { /* the song's stars (the shim's hearts), -1 when n
  * and-favorites): "<listen_key>\t<sid>\t<stars=N|like=0|1>\t<time>" appended to the ratings.out of every app on the
  * card whose q2app says ratings=2 (ratings=1 takes one number and is sent nothing); the sid is the song's server row's
  * (servermeta), or for a card song a duplicate of one names (serverdup), and only in that row's app's line. */
-static void rated_out(const char *what, int v) {
-    const char *p = rated_path();
+static void rated_out_for(const char *p, const char *what, int v) {
     char app[64] = "", sid[256] = "", line[600], q2app[700], out[700];
     if (!p) return;
     sqlite3 *db;
@@ -1362,15 +1367,20 @@ static void rated_out(const char *what, int v) {
 
 /* The FIFO's "rate N ID" (coda_rc_shim.c): 0 set, 1 refused (past 5, the table full or not written), 3 when ID is not
  * the song playing */
-static int rate_cmd(int n, int id) {
-    const char *p = rated_path();
-    if (!p || id != playing_id()) return 3;
+/* n stars for the song p names (its path, or a server row's fileurl): 0 set, 1 refused (past 5, the table full or not
+ * written) */
+static int rate_path(const char *p, int n) {
     if (n < 0 || n > 5) return 1;
     int k = rate_keep(listen_key(p), n);
     if (k <= 0) logf_(k ? "rating not saved" : "ratings are full");
-    if (k > 0) rated_out("stars", n);
+    if (k > 0) rated_out_for(p, "stars", n), ratings_copy_due(now_ms());
     ++q.seq;
     return k > 0 ? 0 : 1;
+}
+static int rate_cmd(int n, int id) {
+    const char *p = rated_path();
+    if (!p || id != playing_id()) return 3;
+    return rate_path(p, n);
 }
 
 /* The FIFO's "like ID" (the pin's coda_rc_shim.c, ratings.c rate_now_like): the like flipped */
@@ -1385,18 +1395,60 @@ static int like_set(sqlite3 *db, const char *p, int on) {
     return ok;
 }
 
-static int like_cmd(int id) {
-    const char *p = rated_path();
-    if (!p || id != playing_id()) return 3;
-    int was = liked_now();
+static int path_liked(const char *p) { /* p's like in likes.db, 0 or 1 */
     sqlite3 *db = likes_open();
-    int ok = like_set(db, p, !was);
+    sqlite3_stmt *st;
+    int v = 0;
+    if (db && sqlite3_prepare_v2(db, "select 1 from myfav where fileurl = ?", -1, &st, 0) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, p, -1, SQLITE_STATIC);
+        v = sqlite3_step(st) == SQLITE_ROW;
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return v;
+}
+
+/* the song p names liked (on 1) or not: 0 done (nothing to change counts), 1 not saved */
+static int like_path(const char *p, int on) {
+    if (path_liked(p) == on) return 0;
+    sqlite3 *db = likes_open();
+    int ok = like_set(db, p, on);
     if (ok) fav_flush(db);
     sqlite3_close(db);
     if (!ok) return logf_("like not saved"), 1;
-    lk.key = listen_key(p), lk.v = !was, ++q.seq;
-    rated_out("like", !was);
+    ++q.seq;
+    rated_out_for(p, "like", on);
+    ratings_copy_due(now_ms());
     return 0;
+}
+
+static int like_cmd(int id) {
+    const char *p = rated_path();
+    if (!p || id != playing_id()) return 3;
+    return like_path(p, !liked_now());
+}
+
+/* What Q2PLAY/1's rating words name: song ID's path (a card song's, or a server row's fileurl), 0 the song playing;
+ * 1 when there is one */
+static int id_path(int id, char *out, size_t room) {
+    if (!id) {
+        const char *p = rated_path();
+        return p && snprintf(out, room, "%s", p) < (int)room;
+    }
+    sqlite3 *db;
+    sqlite3_stmt *st;
+    int ok = 0;
+    *out = 0;
+    if (sqlite3_open_v2((unsigned)id >= CAT_ID_BASE ? cat_path : db_path, &db, SQLITE_OPEN_READONLY, 0) == SQLITE_OK &&
+        sqlite3_prepare_v2(db, (unsigned)id >= CAT_ID_BASE ? "select fileurl from servertable where id = ?"
+                                                           : "select fileurl from songtable where id = ?", -1, &st, 0) == SQLITE_OK) {
+        sqlite3_bind_int(st, 1, id);
+        if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_text(st, 0))
+            ok = snprintf(out, room, "%s", (const char *)sqlite3_column_text(st, 0)) < (int)room && *out;
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return ok;
 }
 
 /* A server's stars and likes coming in (docs/server-library.md#ratings-and-favorites, catalogue.c's ratings.in): each
@@ -1493,9 +1545,369 @@ static void ratings_in_poll(unsigned long long t) {
         if (likes && changed) fav_flush(likes);
         sqlite3_close(likes), sqlite3_close(cat);
         if (!wait) unlink(f);
-        if (changed) lk.key = 0, ++q.seq, logf_("ratings from %s taken", app);
+        if (changed) lk.key = 0, ++q.seq, ratings_copy_due(t), logf_("ratings from %s taken", app);
     }
     if (d) closedir(d);
+}
+
+/* ---- the card's copy of the ratings (docs/playd.md#the-cards-copy) ----
+ * Today's Vamp's /mnt/mmc/.ratings.tsv (patch/ratings.c rc_*, docs/internals.md#ratings "Card copy"), for a computer:
+ * /mnt/data is not on the card that USB storage shows. Two comment lines naming the columns, then "song", stars,
+ * liked, path, a CUE track's start (none here: q2playd has no CUE tracks), and "album", hearts, name, album artist
+ * and, for an album without one of those, its folder. The tables hold hashes, so a pass reads the paths and tags back:
+ * the likes first (liked, with any stars kept for them), then the library's songtable, then the card catalogue's
+ * servertable, a page of rows each time round the loop, the rated still to find sorted for a binary search; a table
+ * is read on only while ratings are still to find. The file is built in memory and written only if it differs (a
+ * temporary name, synced, renamed); a file with more lines is kept as .ratings.tsv.1 once the new one is written,
+ * unless that has more still, so a lost table or a half-built library cannot take the only copy. A pass starts
+ * RC_WAIT_MS after a change of the stars, the likes or an album's hearts, after the start, when the card comes back
+ * and when either library file changes (a scan, a catalogue built); with the card away it waits for the card. A
+ * rating whose song or album is in none of the three has only its hash and stays out until it is back. */
+#define RC_WAIT_MS 5000
+#define RC_PAGE 256
+#define RC_HEADER "#song\tstars\tliked\tpath\tcue_start\n#album\thearts\tname\talbum_artist\tfolder\n"
+static const char *rc_rel = "/mnt/mmc/.ratings.tsv";
+static struct {
+    int due, on, table, card, oom;
+    long long last;           /* the last row id read of the table */
+    unsigned long long at;    /* the last change, or the last look */
+    unsigned *rated[2], n[2]; /* the rated still to find: keys with their stars or hearts, sorted; taken: low bits 0 */
+    unsigned left[2];
+    char *out;
+    size_t len, cap;
+    struct { long long ino, mtime, size; } lib, cat;
+} rc;
+static int card_mounted(void);
+
+static void ratings_copy_due(unsigned long long t) { rc.due = 1, rc.at = t; }
+
+/* coverflow.c album_dir(p, 1): the length of p's folder, a disc folder ("CD2", "Disc 1", "disk2") as its album's */
+static unsigned album_dir(const char *p) {
+    const char *e = strrchr(p, '/');
+    unsigned n = e ? (unsigned)(e - p) : 0, i = n;
+    while (i && p[i - 1] >= '0' && p[i - 1] <= '9') --i;
+    if (i == n) return n;
+    i -= i && (p[i - 1] == ' ' || p[i - 1] == '_' || p[i - 1] == '-');
+    if (i >= 3 && p[i - 3] == '/' && !strncasecmp(p + i - 2, "cd", 2)) return i - 3;
+    if (i >= 5 && p[i - 5] == '/' && !strncasecmp(p + i - 4, "dis", 3) && ((p[i - 1] | 32) == 'c' || (p[i - 1] | 32) == 'k'))
+        return i - 5;
+    return n;
+}
+static unsigned fnv_lower(unsigned h, const char *s) {
+    for (; s && *s; ++s) {
+        unsigned char c = (unsigned char)*s;
+        c += (unsigned char)((unsigned)(c - 'A') < 26u) * 32;
+        h = (h ^ c) * 16777619u;
+    }
+    return h * 16777619u;
+}
+/* coverflow.c album_ident, an album's key in ringnav-album-ratings: the name and the album artist ASCII-lowercased,
+ * else the name and the folder (disc folders as one, case kept); never 0 */
+static unsigned album_key(const char *album, const char *artist, const char *p) {
+    unsigned h = fnv_lower(2166136261u, album);
+    p = p ? p : "";
+    h = album && *album && artist && *artist ? fnv_lower(h, artist) : fnv(h, p, album_dir(p)) * 16777619u;
+    return h | !h;
+}
+static unsigned unknown_album_key(void) { /* coverflow.c album_id's Unknown Album card: fnv(FNV_SEED, "?") */
+    unsigned h = fnv(2166136261u, "?", 1) * 16777619u;
+    return h | !h;
+}
+
+static int rc_cmp(const void *a, const void *b) {
+    unsigned x = *(const unsigned *)a >> 3, y = *(const unsigned *)b >> 3;
+    return x < y ? -1 : x > y;
+}
+/* key's stars or hearts in table a's still to find, taken; 0 when it has none there */
+static int rc_take(int a, unsigned key) {
+    unsigned lo = 0, hi = rc.n[a];
+    while (lo < hi) {
+        unsigned mid = (lo + hi) / 2, w = rc.rated[a][mid] >> 3;
+        if (w == key >> 3) {
+            int v = (int)(rc.rated[a][mid] & 7);
+            rc.rated[a][mid] &= ~7u;
+            rc.left[a] -= v != 0;
+            return v;
+        }
+        if (w < key >> 3) lo = mid + 1;
+        else hi = mid;
+    }
+    return 0;
+}
+
+static void rc_put(const char *s, size_t n) {
+    if (rc.oom) return;
+    if (rc.len + n + 1 > rc.cap) {
+        size_t cap = (rc.cap + n) * 2 + 4096;
+        char *o = realloc(rc.out, cap);
+        if (!o) {
+            rc.oom = 1; /* ends the pass: a copy with rows missing must not replace the last */
+            return;
+        }
+        rc.out = o, rc.cap = cap;
+    }
+    memcpy(rc.out + rc.len, s, n), rc.len += n;
+}
+/* playback_power.c scrobble_tag: s, at most room bytes, its tabs and line ends as spaces, then end */
+static void rc_field(const char *s, size_t room, char end) {
+    char b[1100];
+    size_t n = 0;
+    for (; s && *s && n < room && n < sizeof b; ++s) b[n++] = *s == '\t' || *s == '\n' || *s == '\r' ? ' ' : *s;
+    rc_put(b, n), rc_put(&end, 1);
+}
+static void rc_song(const char *p, int stars, int liked) {
+    char b[32];
+    rc_put(b, (size_t)snprintf(b, sizeof b, "song\t%d\t%d\t", stars, liked));
+    rc_field(p, 1099, '\t');
+    rc_put("\n", 1);
+}
+static void rc_album(const char *name, const char *artist, const char *p, int hearts) {
+    char b[32];
+    rc_put(b, (size_t)snprintf(b, sizeof b, "album\t%d\t", hearts));
+    rc_field(name, 599, '\t');
+    rc_field(artist, 299, '\t');
+    unsigned dir = name && *name && artist && *artist ? 0 : p ? album_dir(p) : 0;
+    rc_field(p, dir < 1100 ? dir : 1100, '\n');
+}
+
+static void rc_end(void) {
+    free(rc.rated[0]), free(rc.rated[1]), free(rc.out);
+    memset(rc.rated, 0, sizeof rc.rated), rc.out = 0, rc.len = rc.cap = 0, rc.on = rc.oom = 0;
+}
+
+/* table a's valid ratings (1 to 5), sorted; 0 with no memory */
+static int rc_rated(int a) {
+    unsigned *t = rates(&rt[a]), m = t ? rt[a].cap - 2 : 0;
+    rc.n[a] = rc.left[a] = 0;
+    if (!(rc.rated[a] = calloc(m + 1, sizeof *rc.rated[a]))) return 0;
+    for (unsigned i = 0; i < m; i++)
+        if ((t[i] & 7) && (t[i] & 7) <= 5u) rc.rated[a][rc.n[a]++] = t[i];
+    qsort(rc.rated[a], rc.n[a], sizeof *rc.rated[a], rc_cmp);
+    rc.left[a] = rc.n[a];
+    return 1;
+}
+
+static void rc_start(void) {
+    int h;
+    if (!rc_rated(0) || !rc_rated(1)) {
+        rc_end();
+        return;
+    }
+    rc.on = 1, rc.table = 0, rc.last = 0;
+    rc_put(RC_HEADER, sizeof RC_HEADER - 1);
+    if ((h = rc_take(1, unknown_album_key()))) rc_album("Unknown Album", "", 0, h);
+}
+
+/* path's lines, 0 with no file; same, if asked, whether it is this copy */
+static unsigned rc_read(const char *p, int *same) {
+    FILE *f = fopen(p, "rb");
+    char b[1024];
+    size_t n, at = 0;
+    unsigned lines = 0;
+    int eq = f != 0;
+    while (f && (n = fread(b, 1, sizeof b, f)) > 0) {
+        eq = eq && at + n <= rc.len && !memcmp(b, rc.out + at, n);
+        at += n;
+        for (size_t i = 0; i < n; i++) lines += b[i] == '\n';
+    }
+    if (f) fclose(f);
+    if (same) *same = eq && at == rc.len;
+    return lines;
+}
+
+static void rc_write(void) {
+    char file[640], tmp[700], one[700];
+    int same;
+    snprintf(file, sizeof file, "%s", path(rc_rel));
+    snprintf(tmp, sizeof tmp, "%s.tmp", file), snprintf(one, sizeof one, "%s.1", file);
+    unsigned lines = rc_read(file, &same), now = 0;
+    if (same) return;
+    FILE *f = fopen(tmp, "wb");
+    int ok = f && fwrite(rc.out, 1, rc.len, f) == rc.len;
+    if (f && (fflush(f) || fsync(fileno(f)))) ok = 0;
+    if (f && fclose(f)) ok = 0;
+    if (!ok) {
+        unlink(tmp);
+        logf_("cannot write %s", file);
+        return;
+    }
+    for (size_t i = 0; i < rc.len; i++) now += rc.out[i] == '\n';
+    if (lines > now && lines >= rc_read(one, 0)) rename(file, one);
+    if (rename(tmp, file)) unlink(tmp);
+}
+
+static void rc_row(sqlite3_stmt *st) { /* a library row: id, fileurl, album, albumsonger */
+    const char *p = (const char *)sqlite3_column_text(st, 1);
+    int v;
+    rc.last = sqlite3_column_int64(st, 0);
+    if (!p) return;
+    if (rc.left[0] && (v = rc_take(0, listen_key(p)))) rc_song(p, v, 0);
+    const char *al = (const char *)sqlite3_column_text(st, 2), *aa = (const char *)sqlite3_column_text(st, 3);
+    if (rc.left[1] && (v = rc_take(1, album_key(al, aa, p)))) rc_album(al, aa, p, v);
+}
+
+/* A page of the pass, then its end: a read that fails leaves the copy as it was, for the next change */
+static void rc_page(void) {
+    if (rc.table == 0) { /* the likes, liked, with any stars kept for them */
+        sqlite3 *db = likes_open();
+        sqlite3_stmt *st;
+        if (!db || sqlite3_prepare_v2(db, "select fileurl from myfav order by rowid", -1, &st, 0) != SQLITE_OK) {
+            sqlite3_close(db);
+            rc_end();
+            return;
+        }
+        while (sqlite3_step(st) == SQLITE_ROW)
+            if (sqlite3_column_text(st, 0)) {
+                const char *p = (const char *)sqlite3_column_text(st, 0);
+                rc_song(p, rc_take(0, listen_key(p)), 1);
+            }
+        sqlite3_finalize(st), sqlite3_close(db);
+        rc.table = 1, rc.last = 0;
+        return;
+    }
+    if (rc.table < 3 && (rc.left[0] || rc.left[1])) {
+        const char *file = rc.table == 1 ? db_path : cat_path,
+                   *table = rc.table == 1 ? "songtable" : "servertable";
+        sqlite3 *db = 0;
+        sqlite3_stmt *st;
+        int rows = 0, there = 0;
+        if (access(file, R_OK) == 0 && sqlite3_open_v2(file, &db, SQLITE_OPEN_READONLY, 0) == SQLITE_OK) {
+            if (sqlite3_prepare_v2(db, "select 1 from sqlite_master where type = 'table' and name = ?", -1, &st, 0) == SQLITE_OK) {
+                sqlite3_bind_text(st, 1, table, -1, SQLITE_STATIC);
+                there = sqlite3_step(st) == SQLITE_ROW;
+                sqlite3_finalize(st);
+            }
+            char *u = sqlite3_mprintf("select id, fileurl, album, albumsonger from %s where id > ? order by id limit %d",
+                                      table, RC_PAGE);
+            if (there && sqlite3_prepare_v2(db, u, -1, &st, 0) != SQLITE_OK) there = -1;
+            else if (there) {
+                sqlite3_bind_int64(st, 1, rc.last);
+                while (sqlite3_step(st) == SQLITE_ROW) rc_row(st), rows++;
+                sqlite3_finalize(st);
+            }
+            sqlite3_free(u);
+        }
+        sqlite3_close(db);
+        if (there < 0) {
+            logf_("cannot read %s for the ratings' copy", file);
+            rc_end();
+            return;
+        }
+        if (rows == RC_PAGE && !rc.oom) return;
+        rc.table++, rc.last = 0;
+        if (rc.table < 3) return;
+    }
+    if (!rc.oom) {
+        if (card_mounted()) rc_write();
+        else rc.due = 1; /* the card away (shared over USB): the pass again once it is back */
+    }
+    rc_end();
+}
+
+static void stamp(const char *p, long long *ino, long long *mtime, long long *size, int *moved) {
+    struct stat s;
+    long long i = 0, m = 0, z = 0;
+    if (!stat(p, &s)) i = (long long)s.st_ino, m = (long long)s.st_mtime, z = (long long)s.st_size;
+    *moved |= i != *ino || m != *mtime || z != *size;
+    *ino = i, *mtime = m, *size = z;
+}
+
+/* Each RC_WAIT_MS: a library file changed, or the card back, makes a pass due; a due one starts once nothing has
+ * changed for RC_WAIT_MS and the card is there. 1 while a pass is under way, for the loop's wait. */
+static int ratings_copy_poll(unsigned long long t) {
+    if (rc.on) return rc_page(), rc.on;
+    if (!rc.at) {
+        rc.due = 1, rc.at = t | !t;
+        stamp(db_path, &rc.lib.ino, &rc.lib.mtime, &rc.lib.size, &rc.due);
+        stamp(cat_path, &rc.cat.ino, &rc.cat.mtime, &rc.cat.size, &rc.due);
+        return 0;
+    }
+    if (t < rc.at + RC_WAIT_MS) return 0;
+    rc.at = t;
+    int card = card_mounted(), moved = 0;
+    stamp(db_path, &rc.lib.ino, &rc.lib.mtime, &rc.lib.size, &moved);
+    stamp(cat_path, &rc.cat.ino, &rc.cat.mtime, &rc.cat.size, &moved);
+    if (moved || (card && !rc.card)) rc.due = 1;
+    rc.card = card;
+    if (!rc.due || !card) return 0;
+    rc.due = 0;
+    rc_start();
+    return rc.on;
+}
+
+/* ---- albums' hearts (docs/playd.md#albums-hearts) ----
+ * Today's Vamp's (patch/ratings.c, docs/internals.md#ratings "Albums"): an album's 0 to 5 hearts in
+ * /mnt/data/ringnav-album-ratings, the song table's format, keyed by album_key. Only Favorite and Unfavorite are given
+ * (5 or 0, the queue menu's; there is no Rate Album, so 1 to 4 kept before stay as they are). An album's favourite is
+ * its songs' like: reaching 5 likes every song of the album (the library's and the card catalogue's rows with its
+ * key), leaving 5 takes them all out of the likes, each written through and told to the servers as any like, their
+ * stars left alone. ponytail: leaving 5 takes out a song liked on its own too, as today's does. */
+
+/* row id's album, album artist and path (cut to their buffers), from the library or for a server id the card catalogue: 1 when found */
+static int album_of(int id, char al[600], char aa[600], char p[1100]) {
+    sqlite3 *db;
+    sqlite3_stmt *st;
+    int found = 0;
+    if (sqlite3_open_v2(id >= CAT_ID_BASE ? cat_path : db_path, &db, SQLITE_OPEN_READONLY, 0) == SQLITE_OK &&
+        sqlite3_prepare_v2(db, id >= CAT_ID_BASE ? "select album, albumsonger, fileurl from servertable where id = ?"
+                                                 : "select album, albumsonger, fileurl from songtable where id = ?",
+                           -1, &st, 0) == SQLITE_OK) {
+        sqlite3_bind_int(st, 1, id);
+        if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_text(st, 2)) {
+            snprintf(al, 600, "%s", sqlite3_column_text(st, 0) ? (const char *)sqlite3_column_text(st, 0) : "");
+            snprintf(aa, 600, "%s", sqlite3_column_text(st, 1) ? (const char *)sqlite3_column_text(st, 1) : "");
+            snprintf(p, 1100, "%s", (const char *)sqlite3_column_text(st, 2));
+            found = 1;
+        }
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return found;
+}
+
+/* every song of album key (its name al) in file's table liked or not; how many changed */
+static int album_likes(sqlite3 *likes, const char *file, const char *table, const char *al, unsigned key, int on) {
+    sqlite3 *db;
+    sqlite3_stmt *st;
+    int n = 0;
+    char *u = sqlite3_mprintf("select fileurl, album, albumsonger from %s where coalesce(album, '') = ? collate nocase "
+                              "order by id", table);
+    if (access(file, R_OK) == 0 && sqlite3_open_v2(file, &db, SQLITE_OPEN_READONLY, 0) == SQLITE_OK) {
+        if (sqlite3_prepare_v2(db, u, -1, &st, 0) == SQLITE_OK) {
+            sqlite3_bind_text(st, 1, al, -1, SQLITE_STATIC);
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                const char *p = (const char *)sqlite3_column_text(st, 0);
+                if (!p || album_key((const char *)sqlite3_column_text(st, 1), (const char *)sqlite3_column_text(st, 2), p) != key)
+                    continue;
+                if (like_set(likes, p, on)) rated_out_for(p, "like", on), ++n;
+            }
+            sqlite3_finalize(st);
+        }
+        sqlite3_close(db);
+    }
+    sqlite3_free(u);
+    return n;
+}
+
+/* The FIFO's "album N ID": song ID's album made a favourite (5) or not (0). 0 done, 1 refused (another N, the table
+ * full, not written), 3 when ID is no song of the library */
+static int album_cmd(int n, int id) {
+    char al[600], aa[600], p[1100];
+    if (n != 0 && n != 5) return 1;
+    if (!album_of(id, al, aa, p)) return 3;
+    unsigned key = album_key(al, aa, p);
+    int was = table_kept(&rt[1], key), k = table_keep(&rt[1], key, n);
+    if (k <= 0) return logf_(k ? "album rating not saved" : "ratings are full"), 1;
+    if ((was == 5) != (n == 5)) {
+        sqlite3 *likes = likes_open();
+        int changed = album_likes(likes, db_path, "songtable", al, key, n == 5) +
+                      album_likes(likes, cat_path, "servertable", al, key, n == 5);
+        if (likes && changed) fav_flush(likes);
+        sqlite3_close(likes);
+    }
+    lk.key = 0, ++q.seq;
+    ratings_copy_due(now_ms());
+    return 0;
 }
 
 /* ---- play counts (docs/playd.md#play-counts) ----
@@ -1712,16 +2124,20 @@ static void resume_flush(unsigned long long t) { /* the ring kept while the card
  * second goes in ringnav-queue-elapsed beside it (the checkpoint: its checksum, the snapshot's, the place, the second)
  * at a pause or a stop and every CHECKPOINT_MS playing, and the snapshot is written again when the queue or its place
  * changes. Kept only while [PLAYSET] MEMORYPLAY (1 Track, 2 Location) or [SYSSET] CARMODE is on, for a queue of
- * library songs (not a source's URL or a server list's answer), at most SAVE_LIMIT songs (past it the kept one is
- * dropped). At the start the queue comes back paused, at its second for Location and from the song's start for Track;
+ * library songs or an app's answer (its songs on the card by path, the rest in the tail beside: tail_write), not a
+ * source's URL, at most SAVE_LIMIT songs (past it the kept one is dropped). At the start the queue comes back paused, at its second for Location and from the song's start for Track;
  * in car mode playing at its second, once the player connects (memeory_startplayer, ringnav_boot). A snapshot with
- * advanced play (version 3, or 2) comes back as its queue's rows; a song no longer in the library is left out. With no
+ * advanced play (version 3, or 2) comes back as its queue's rows; a song no longer in the library is left out; one
+ * holding a Stream Cache copy comes back as the paths whose files are there, and its app is asked for the rest
+ * (stream_ask). With no
  * card copy the flash files of a release before, /mnt/data/ringnav-queue and its -elapsed, are read. */
 #define SAVE_LIMIT 999
 #define SNAP_MAGIC 0x5132524eu
 #define CHECKPOINT_MS 30000
 #define MEMORY_LOOK_MS 500
-static const char *snap_card_rel = "/mnt/mmc/.q2pod/ringnav-queue", *snap_flash_rel = "/mnt/data/ringnav-queue";
+#define TAIL_MAGIC 0x51325254u
+static const char *snap_card_rel = "/mnt/mmc/.q2pod/ringnav-queue", *snap_flash_rel = "/mnt/data/ringnav-queue",
+                  *tail_card_rel = "/mnt/mmc/.q2pod/ringnav-queue-stream";
 static struct {
     int mode;                /* 0 off, 1 Track, 2 Location, 3 car mode */
     long long stamp;         /* config.ini's, when mode was read */
@@ -1741,9 +2157,58 @@ static void memory_mode(void) {
     mp.mode = car == 1 ? 3 : m == 1 || m == 2 ? m : 0;
 }
 
-static unsigned queue_sig(void) { /* the ids in play order */
+/* A streamed queue's songs not on the card at a restore, asked of their app (stream_ask, docs/playd.md#a-streamed-queue-
+ * at-a-restore): the request until it is written, the saved songs after the current one not restored (each with its
+ * NUL), the seq, the app, the queue's list counter then and when the step began */
+enum { SR_NONE, SR_ASK, SR_SENT };
+static struct {
+    int state, woke;
+    char app[64], *req, *rows;
+    size_t size, rows_len;
+    unsigned seq, list, nrows;
+    unsigned long long at;
+} sr;
+
+/* The songs still to come of a stream, for the tail: while the queue is an app's answer, its m3u's entries from the one
+ * waited for on (card paths, as m3u_read takes them); while a restore's ask waits, the saved ones not restored. Each
+ * with its NUL, at most room of them; 0 with none. */
+static char *stream_tail(unsigned room, unsigned *k, size_t *bytes) {
+    char *out = 0, line[1100];
+    size_t len = 0;
+    *k = 0, *bytes = 0;
+    if (sr.state && sr.rows_len) {
+        if (!(out = malloc(sr.rows_len))) return 0;
+        memcpy(out, sr.rows, sr.rows_len);
+        for (const char *p = out; p < out + sr.rows_len && *k < room; p += strlen(p) + 1) ++*k, len = (size_t)(p - out) + strlen(p) + 1;
+        *bytes = len;
+        return out;
+    }
+    FILE *f = mq.on ? fopen(path(mq.file), "r") : 0;
+    for (int entry = 0; f && *k < room && fgets(line, sizeof line, f);) {
+        char *l = line;
+        if (!strncmp(l, "\xEF\xBB\xBF", 3)) l += 3;
+        l[strcspn(l, "\r\n")] = 0;
+        if (!*l || *l == '#' || entry++ < mq.next || !card_path(l)) continue;
+        size_t n = strlen(l) + 1;
+        char *g = realloc(out, len + n);
+        if (!g) break;
+        out = g, memcpy(out + len, l, n), len += n, ++*k;
+    }
+    if (f) fclose(f);
+    if (!*k) free(out), out = 0;
+    *bytes = len;
+    return out;
+}
+static unsigned queue_sig(void) { /* the ids in play order, or the paths and the tail kept beside them */
     unsigned h = fnv(2166136261u, &q.n, sizeof q.n);
-    for (int i = 0; i < q.n; ++i) h = fnv(h, &q.ids[q.order[i]], sizeof *q.ids);
+    for (int i = 0; i < q.n; ++i)
+        h = q.paths ? fnv(h, q.paths[i], strlen(q.paths[i]) + 1) : fnv(h, &q.ids[q.order[i]], sizeof *q.ids);
+    if (q.paths) {
+        unsigned k;
+        size_t bytes;
+        char *tail = stream_tail(SAVE_LIMIT, &k, &bytes);
+        if (tail) h = fnv(h, tail, bytes), free(tail);
+    }
     return h;
 }
 
@@ -1780,6 +2245,26 @@ static void snap_drop(void) {
     unlink(path(snap_card_rel)), unlink(path(rel));
 }
 
+/* The tail beside the snapshot whose checksum is sum (playback.c save_tail): TAIL_MAGIC, a checksum of what follows,
+ * sum, the count, then the paths of the songs still to come of a stream (stream_tail), each with its NUL, at most
+ * SAVE_LIMIT with the queue's n. None: the file goes. */
+static void tail_write(unsigned sum, unsigned n) {
+    unsigned k = 0;
+    size_t bytes = 0;
+    char *paths = q.paths ? stream_tail(SAVE_LIMIT - n, &k, &bytes) : 0;
+    unsigned *buf = paths ? malloc(16 + bytes) : 0;
+    if (!buf) {
+        free(paths);
+        unlink(path(tail_card_rel));
+        return;
+    }
+    buf[0] = TAIL_MAGIC, buf[2] = sum, buf[3] = k;
+    memcpy(buf + 4, paths, bytes);
+    buf[1] = fnv(2166136261u, buf + 2, 8 + bytes);
+    snap_save(tail_card_rel, buf, 16 + bytes);
+    free(buf), free(paths);
+}
+
 /* the queue as a version 4 snapshot: 1 when the card took it */
 static int snap_write(int sec) {
     sqlite3 *db = 0, *cat = 0;
@@ -1793,7 +2278,8 @@ static int snap_write(int sec) {
     int ok = buf != 0;
     char song[1024];
     for (unsigned i = 0; ok && i < n; ++i) {
-        ok = path_of(a, b, q.ids[q.order[i]], song, sizeof song);
+        ok = q.paths ? snprintf(song, sizeof song, "%s", q.paths[i]) < (int)sizeof song
+                     : path_of(a, b, q.ids[q.order[i]], song, sizeof song);
         unsigned id3[3] = {(len = (unsigned)strlen(song)) + 1, 0, 0};
         if (ok) memcpy(p, id3, sizeof id3), memcpy(p + 12, song, len + 1), p += 12 + len + 1;
     }
@@ -1809,7 +2295,7 @@ static int snap_write(int sec) {
         unsigned sum = fnv(2166136261u, buf, size);
         memcpy(buf + 12, &sum, 4);
         ok = snap_save(snap_card_rel, buf, size);
-        if (ok) mp.sum = sum, mp.sec = sec;
+        if (ok) mp.sum = sum, mp.sec = sec, tail_write(sum, n);
     }
     free(buf);
     return ok;
@@ -1820,7 +2306,7 @@ static void memory_poll(unsigned long long t, int last) {
     if (!last && t < mp.looked + MEMORY_LOOK_MS) return;
     mp.looked = t;
     memory_mode();
-    if (!mp.mode || src.on || q.paths || !q.n) return;
+    if (!mp.mode || src.on || !q.n || (q.paths && q.np != q.n)) return;
     unsigned sig = queue_sig();
     int sec = q.pos_ms / 1000;
     if (sig == mp.sig && q.at == mp.at) {
@@ -1841,6 +2327,184 @@ static long snap_read(const char *card_rel, const char *flash_rel, unsigned char
     size_t n = fread(buf, 1, room, f);
     fclose(f);
     return (long)n;
+}
+
+/* ---- a streamed queue at a restore (docs/playd.md#a-streamed-queue-at-a-restore) ----
+ * Today's Vamp's ask (patch/addon.c addon_resume_ask, docs/internals.md#memory-playback-and-a-streamed-queue): Memory
+ * Playback brings back only the songs whose files are on the card, so a stream's others are asked of the app whose
+ * folder holds a saved song, when its q2app says resume=1 and a song after the current one was not restored. Once the
+ * app listens (started through q2pkgd as for a catplay) /tmp/q2-<id>.resume is written whole: "<seq> <index> <seconds>
+ * paused|playing", then every saved song's path a line, the snapshot's then the tail's, index the current song's among
+ * them. The app answers resumeack=<seq> <code> in its state file (0 resumed, 1 not its songs, 2 it cannot) and a .play
+ * of that seq whose m3u starts with the song restored: that song stays where it is (paused stays paused, nothing
+ * loaded) and the m3u's songs after it are the queue's rest, as any answer grows. The app not listening within
+ * SR_START_MS, no .play within SR_WAIT_MS of the request, a code other than 0, an answer starting with another song or
+ * another queue played first: the songs on the card are the queue, and the log says why. */
+#define SR_START_MS 30000
+#define SR_WAIT_MS 30000
+
+/* path's app and sid, a Stream Cache copy's or a server row's (/mnt/mmc/.<id>/cat/<album>/<sid>.<suffix>) */
+static int song_sid(const char *p, char *app, size_t an, char *sid, size_t sn) {
+    if (stream_sid(p, app, an, sid, sn)) return 1;
+    const char *base = strrchr(p, '/'), *dot = base ? strrchr(base, '.') : 0;
+    if (app_of(p, app, an) || !base || !dot || dot == base + 1) return 0;
+    snprintf(sid, sn, "%.*s", (int)(dot - base - 1), base + 1);
+    return 1;
+}
+static int same_song(const char *a, const char *b) { /* catalogue.c catalogue_same_song */
+    char a1[64], s1[128], a2[64], s2[128];
+    return !strcmp(a, b) || (song_sid(a, a1, sizeof a1, s1, sizeof s1) && song_sid(b, a2, sizeof a2, s2, sizeof s2) &&
+                             !strcmp(a1, a2) && !strcmp(s1, s2));
+}
+
+/* the app id in a card path /mnt/mmc/.<id>/..., 1 to 15 of a-z0-9- (patch/addon.c card_id) */
+static int card_app(const char *p, char *id, size_t room) {
+    const char *pre = "/mnt/mmc/.", *s = p + strlen(pre), *e;
+    if (strncmp(p, pre, strlen(pre)) || !(e = strchr(s, '/')) || e == s || e - s > 15 || (size_t)(e - s) >= room) return 0;
+    for (const char *c = s; c < e; ++c)
+        if (!(*c >= 'a' && *c <= 'z') && !(*c >= '0' && *c <= '9') && *c != '-') return 0;
+    snprintf(id, room, "%.*s", (int)(e - s), s);
+    return 1;
+}
+
+static int resumes(const char *app) { /* its q2app says resume=1 */
+    char f[400];
+    snprintf(f, sizeof f, "%s/mnt/mmc/.%s/q2app", root, app);
+    char *m = read_all(f);
+    const char *r = m ? strstr(m, "resume=") : 0;
+    int on = r && (r == m || r[-1] == '\n') && atoi(r + 7) == 1;
+    free(m);
+    return on;
+}
+
+static void stream_end(const char *why) {
+    if (sr.state && why) logf_("resume: %s: %s; the restored songs on the card play as they are", sr.app, why);
+    else if (sr.state) logf_("resume: %s resumed the stream, %u songs to come", sr.app, sr.nrows);
+    free(sr.req), free(sr.rows);
+    sr.req = sr.rows = 0, sr.size = sr.rows_len = 0, sr.nrows = 0, sr.state = SR_NONE;
+}
+
+/* The restored stream's ask: saved, n paths in the snapshot's order, in[i] whether path i was restored, at the index
+ * of the song made current, sec its second; the tail beside the snapshot whose checksum is sum adds its paths. */
+static void stream_ask(const char *const *saved, const unsigned char *in, unsigned n, unsigned at, int sec, unsigned sum) {
+    size_t room = 16 + (size_t)SAVE_LIMIT * 1025;
+    unsigned *tail = card_mounted() ? malloc(room) : 0, k = 0;
+    FILE *f = tail ? fopen(path(tail_card_rel), "rb") : 0;
+    size_t got = f ? fread(tail, 1, room, f) : 0;
+    if (f) fclose(f);
+    if (got < 16 || tail[0] != TAIL_MAGIC || tail[2] != sum || tail[3] > SAVE_LIMIT ||
+        fnv(2166136261u, tail + 2, got - 8) != tail[1] || ((char *)tail)[got - 1])
+        got = 0;
+    for (const char *p = (char *)(tail + 4), *e = (char *)tail + got; got && p < e; p += strlen(p) + 1) ++k;
+    if (got && k != tail[3]) got = 0, k = 0;
+    if (!got) k = 0;
+    char app[64] = "", id[64];
+    unsigned missing = 0;
+    size_t bytes = 64, rows = 0;
+    const char *tp = (const char *)(tail + 4);
+    for (unsigned i = 0; i < n + k; ++i) {
+        const char *p = i < n ? saved[i] : tp;
+        if (i >= n) tp += strlen(tp) + 1;
+        if (strchr(p, '\n') || strchr(p, '\r')) { free(tail); return; } /* a line each */
+        bytes += strlen(p) + 1;
+        if (i > at && (i >= n || !in[i])) ++missing, rows += strlen(p) + 1;
+        if (!*app && card_app(p, id, sizeof id) && resumes(id)) snprintf(app, sizeof app, "%s", id);
+    }
+    stream_end("another restore");
+    if (!*app || !missing || at >= n || !(sr.req = malloc(bytes)) || !(sr.rows = malloc(rows))) {
+        free(sr.req), sr.req = 0, free(tail);
+        return;
+    }
+    sr.seq = (unsigned)now_ms() | 1;
+    size_t len = (size_t)snprintf(sr.req, 64, "%u %u %d %s\n", sr.seq, at, sec, mp.mode == 3 ? "playing" : "paused"), r = 0;
+    tp = (const char *)(tail + 4);
+    for (unsigned i = 0; i < n + k; ++i) {
+        const char *p = i < n ? saved[i] : tp;
+        size_t l = strlen(p);
+        if (i >= n) tp += l + 1;
+        memcpy(sr.req + len, p, l), len += l, sr.req[len++] = '\n';
+        if (i > at && (i >= n || !in[i])) memcpy(sr.rows + r, p, l + 1), r += l + 1;
+    }
+    snprintf(sr.app, sizeof sr.app, "%s", app);
+    sr.size = len, sr.rows_len = r, sr.nrows = missing, sr.state = SR_ASK, sr.woke = 0, sr.at = now_ms();
+    logf_("resume: asking %s to resume %u songs, %u not on the card", app, n + k, missing);
+    free(tail);
+}
+
+/* the app's answer taken: the song playing kept at its place, the m3u's songs after its first the queue's rest */
+static void stream_take(unsigned seq, const char *m3u) {
+    FILE *f = fopen(path(m3u), "r");
+    char line[1100], first[1100] = "";
+    while (f && !*first && fgets(line, sizeof line, f)) {
+        char *l = line;
+        if (!strncmp(l, "\xEF\xBB\xBF", 3)) l += 3;
+        l[strcspn(l, "\r\n")] = 0;
+        if (*l && *l != '#') snprintf(first, sizeof first, "%s", l);
+    }
+    if (f) fclose(f);
+    if (!q.paths || q.at >= q.np || strlen(m3u) >= sizeof mq.file || !same_song(first, q.paths[q.at])) {
+        stream_end("its queue starts with another song");
+        return;
+    }
+    char *keep = q.paths[q.at];
+    for (int i = 0; i < q.np; ++i)
+        if (i != q.at) free(q.paths[i]);
+    q.paths[0] = keep, q.np = q.n = 1, q.at = 0;
+    mq.on = 1, mq.next = 1, mq.waiting = 0, mq.seq = seq;
+    snprintf(mq.app, sizeof mq.app, "%s", sr.app);
+    memcpy(mq.file, m3u, strlen(m3u) + 1);
+    m3u_read();
+    ++q.seq;
+    stream_end(0);
+}
+
+static void stream_poll(void) {
+    if (!sr.state) return;
+    unsigned long long t = now_ms();
+    if (q.list != sr.list) {
+        stream_end("another queue played");
+        return;
+    }
+    if (sr.state == SR_ASK) {
+        if (!sr.woke && (sr.woke = 1) && !listening(sr.app) && pkg_start(sr.app)) {
+            stream_end("the app cannot start");
+            return;
+        }
+        if (listening(sr.app)) {
+            char tmp[300], dst[300];
+            snprintf(tmp, sizeof tmp, "/tmp/q2-%s.resume.q2playd", sr.app), snprintf(dst, sizeof dst, "/tmp/q2-%s.resume", sr.app);
+            FILE *f = fopen(path(tmp), "w");
+            int ok = f && fwrite(sr.req, 1, sr.size, f) == sr.size;
+            if (f && fclose(f)) ok = 0;
+            if (!ok || rename(path(tmp), path(dst))) {
+                unlink(path(tmp));
+                stream_end("the request could not be written");
+                return;
+            }
+            free(sr.req), sr.req = 0, sr.state = SR_SENT, sr.at = t;
+        } else if (t >= sr.at + SR_START_MS)
+            stream_end("the app did not start");
+        return;
+    }
+    char p[300], s[600], m3u[300]; /* mq.file's room */
+    unsigned seq;
+    int code;
+    snprintf(p, sizeof p, "/tmp/q2-%s.state", sr.app);
+    read_small(path(p), s, sizeof s);
+    for (char *l = s; l; l = strchr(l, '\n') ? strchr(l, '\n') + 1 : 0)
+        if (sscanf(l, "resumeack=%u %d", &seq, &code) == 2 && seq == sr.seq && code) {
+            char why[40];
+            snprintf(why, sizeof why, "the app declined (%d)", code);
+            stream_end(why);
+            return;
+        }
+    snprintf(p, sizeof p, "/tmp/q2-%s.play", sr.app);
+    read_small(path(p), s, sizeof s);
+    if (sscanf(s, "%u %299[^\n]", &seq, m3u) == 2 && seq == sr.seq) {
+        stream_take(seq, m3u);
+        return;
+    }
+    if (t >= sr.at + SR_WAIT_MS) stream_end("no queue from the app");
 }
 
 static void memory_restore(void) {
@@ -1868,7 +2532,10 @@ static void memory_restore(void) {
         memcpy(&v, buf + hsize + i * 4, 4);
         if (i >= n * 2 ? v > 1 : v >= n) ok = 0;
     }
-    int at = -1, kept = 0;
+    int at = -1, kept = 0, streamed = 0, *sid = ok ? malloc(n * sizeof *sid) : 0;
+    const char **saved = ok ? malloc(n * sizeof *saved) : 0;
+    char app[64], sd[128];
+    if (ok && (!sid || !saved)) ok = 0;
     sqlite3 *db = 0, *cat = 0;
     sqlite3_stmt *a = 0, *b = 0;
     if (ok && sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, 0) == SQLITE_OK)
@@ -1889,14 +2556,31 @@ static void memory_restore(void) {
             sqlite3_bind_text(st, 1, (const char *)p, -1, SQLITE_STATIC);
             if (sqlite3_step(st) == SQLITE_ROW) id = sqlite3_column_int(st, 0);
         }
-        if (id >= 0) {
-            if (i == pos || (i > pos && at < 0)) at = kept; /* the place's song, else the next kept, else the last */
-            q.ids[kept] = id, q.order[kept] = kept, ++kept;
-        }
+        saved[i] = (const char *)p, sid[i] = id;
+        streamed |= stream_sid((const char *)p, app, sizeof app, sd, sizeof sd);
         p += id3[0];
     }
     sqlite3_finalize(a), sqlite3_finalize(b), sqlite3_close(db), sqlite3_close(cat);
     if (ok && p != end) ok = 0;
+    /* A stream's queue (a Stream Cache copy in it: an app's answer) comes back as the paths whose files are there, as
+     * it played; any other as its library rows */
+    unsigned char *in = ok ? calloc(n, 1) : 0;
+    char **paths = ok && streamed ? calloc(n, sizeof *paths) : 0;
+    int ask_at = -1;
+    if (ok && (!in || (streamed && !paths))) ok = 0;
+    for (unsigned i = 0; ok && i < n; ++i) {
+        int here = streamed ? !access(path(saved[i]), F_OK) && card_path(saved[i]) : sid[i] >= 0;
+        if (!here) continue;
+        if (i == pos || (i > pos && at < 0)) at = kept, ask_at = (int)i; /* the place's song, else the next kept */
+        if (streamed && !(paths[kept] = strdup(saved[i]))) { ok = 0; break; }
+        if (!streamed) q.ids[kept] = sid[i], q.order[kept] = kept;
+        in[i] = 1, ++kept;
+    }
+    if (ok && kept && at < 0) {
+        at = kept - 1;
+        for (int i = (int)n - 1; i >= 0 && ask_at < 0; --i)
+            if (in[i]) ask_at = i;
+    }
     unsigned c[4];
     char rel[64], frel[64];
     snprintf(rel, sizeof rel, "%s-elapsed", snap_card_rel), snprintf(frel, sizeof frel, "%s-elapsed", snap_flash_rel);
@@ -1904,18 +2588,22 @@ static void memory_restore(void) {
     if (ok && snap_read(rel, frel, (unsigned char *)c, sizeof c) == (long)sizeof c && c[1] == h[3] && c[2] == pos &&
         c[3] <= 0x7fffffff && fnv(2166136261u, c + 1, 3 * sizeof *c) == c[0])
         sec = (int)c[3];
-    free(buf);
-    if (ok && kept && at < 0) at = kept - 1;
+    if (mp.mode == 1) sec = 0;
+    if (ok && kept && streamed) stream_ask(saved, in, n, (unsigned)ask_at, sec, h[3]);
+    free(buf), free(sid), free(saved), free(in);
     if (!ok || !kept) {
+        for (int i = 0; paths && i < kept; ++i) free(paths[i]);
+        free(paths);
         if (got >= 0) logf_("the kept queue is not read: %s", ok ? "none of its songs is in the library" : "damaged");
         return;
     }
+    if (streamed) q.paths = paths, q.np = kept;
     q.n = kept, q.at = at, q.shuffle = 0, q.errors = 0, q.loaded = 0, ++q.list, ++q.seq;
-    song_lookup(q.ids[q.at]);
-    set_cover(q.ids[q.at], *q.row_url ? q.row_url : q.file);
-    if (mp.mode == 1) sec = 0;
+    if (streamed) path_lookup(q.at), set_cover(-1, *q.row_url ? q.row_url : q.file);
+    else song_lookup(q.ids[q.at]), set_cover(q.ids[q.at], *q.row_url ? q.row_url : q.file);
     q.state = PAUSED, q.pos_ms = sec * 1000;
     if (mp.mode == 3) mp.go = sec + 1; /* playing once the player is there */
+    if (sr.state) sr.list = q.list;
     mp.sig = queue_sig(), mp.at = q.at, mp.sum = h[3], mp.sec = sec;
     logf_("the kept queue: %d songs, song %d at %d s", kept, q.at + 1, sec);
 }
@@ -2060,6 +2748,7 @@ static void cmdq_read(void) {
                       : sscanf(verb + 1, "mode %d %d", &a, &b) == 2               ? set_mode(a, b)
                       : sscanf(verb + 1, "rate %d %d", &a, &b) == 2               ? rate_cmd(a, b)
                       : sscanf(verb + 1, "like %d", &a) == 1                      ? like_cmd(a)
+                      : sscanf(verb + 1, "album %d %d", &a, &b) == 2              ? album_cmd(a, b)
                       : sscanf(verb + 1, "queue %7s %d", where, &a) == 2 && (!strcmp(where, "next") || !strcmp(where, "last"))
                           ? enqueue(where[0] == 'n', a)
                           : command(verb + 1, 0, 0);
@@ -2313,7 +3002,7 @@ static void client_line(struct client *c, char *line) {
         return;
     }
     if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
-        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch source focus output");
+        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album");
     } else if (!strncmp(line, "source ", 7)) {
         client_say(c, source_take((int)(c - cl), line + 7) ? "err source" : "ok");
     } else if (!strcmp(line, "focus")) {
@@ -2324,6 +3013,18 @@ static void client_line(struct client *c, char *line) {
         char text[2600];
         now_text(text, sizeof text, " ", 1);
         client_say(c, "now %s", text);
+    } else if (sscanf(line, "rating %d%n", &a, &n) == 1 && !line[n]) { /* the stars and like of song a, 0 the one playing */
+        char p[1100];
+        if (!id_path(a, p, sizeof p)) client_say(c, "err rating");
+        else client_say(c, "rating id=%d stars=%d liked=%d", a ? a : playing_id(), rate_kept(listen_key(p)), path_liked(p));
+    } else if (sscanf(line, "rate %d %d%n", &a, &b, &n) == 2 && !line[n]) {
+        char p[1100];
+        client_say(c, !id_path(b, p, sizeof p) || rate_path(p, a) ? "err rate" : "ok");
+    } else if (sscanf(line, "like %d %d%n", &a, &b, &n) == 2 && !line[n]) {
+        char p[1100];
+        client_say(c, (a != 0 && a != 1) || !id_path(b, p, sizeof p) || like_path(p, a) ? "err like" : "ok");
+    } else if (sscanf(line, "album %d %d%n", &a, &b, &n) == 2 && !line[n]) {
+        client_say(c, album_cmd(a, b) ? "err album" : "ok");
     } else if (!strcmp(line, "watch")) {
         c->watch = 1;
         client_say(c, "ok");
@@ -2547,6 +3248,7 @@ int main(int argc, char **argv) {
             if (wait < 0 || w < wait) wait = w;
         }
         if ((cp.on || mq.on) && (wait < 0 || wait > 200)) wait = 200;
+        if (rc.on) wait = 0; /* the ratings' copy: a page each time round */
         int beat = air.t ? CAST_BEAT_MS : CAST_LOOK_MS; /* AirPlay's tap: its beat, or the look for it */
         if (wait < 0 || wait > beat) wait = beat;
         if (poll(p, (nfds_t)n, wait) < 0 && errno != EINTR) break;
@@ -2587,6 +3289,8 @@ int main(int argc, char **argv) {
         likes_poll(t);
         resume_flush(t);
         ratings_in_poll(t);
+        ratings_copy_poll(t);
+        stream_poll();
         if (q.seq != now_written_seq && t >= now_written_at + NOW_EVERY_MS) {
             now_write(), tell_watchers();
             now_written_seq = q.seq, now_written_at = t;

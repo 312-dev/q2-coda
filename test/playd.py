@@ -2342,3 +2342,347 @@ def test_a_ratings_1_app_s_one_number_is_its_star_or_stars(run):
     fifo(root, 'next')
     pl.pump()
     assert (now(root)['hearts'], now(root)['liked']) == ('3', '0')
+
+
+# ---- the card's copy of the ratings (docs/playd.md#the-cards-copy) ----
+
+RC_HEAD = '#song\tstars\tliked\tpath\tcue_start\n#album\thearts\tname\talbum_artist\tfolder\n'
+
+
+def album_dir(p):
+    """coverflow.c album_dir(p, 1): p's folder, a disc folder as its album's"""
+    n = p.rfind('/')
+    n = n if n > 0 else 0
+    i = n
+    while i and p[i - 1].isdigit():
+        i -= 1
+    if i == n:
+        return n
+    i -= 1 if i and p[i - 1] in ' _-' else 0
+    if i >= 3 and p[i - 3] == '/' and p[i - 2:i].lower() == 'cd':
+        return i - 3
+    if i >= 5 and p[i - 5] == '/' and p[i - 4:i - 1].lower() == 'dis' and p[i - 1].lower() in 'ck':
+        return i - 5
+    return n
+
+
+def fnv_lower(h, s):
+    for b in (s or '').encode():
+        b += 32 if 65 <= b <= 90 else 0
+        h = ((h ^ b) * 16777619) & 0xffffffff
+    return (h * 16777619) & 0xffffffff
+
+
+def album_key(album, artist, p):
+    """coverflow.c album_ident: the name and album artist case aside, else the name and the folder"""
+    h = fnv_lower(2166136261, album)
+    if album and artist:
+        h = fnv_lower(h, artist)
+    else:
+        h = fnv_bytes(p.encode()[:album_dir(p)], h) * 16777619 & 0xffffffff
+    return h or 1
+
+
+UNKNOWN_ALBUM = (fnv_bytes(b'?') * 16777619 & 0xffffffff) or 1
+
+
+def album_artists(root, rows):
+    """the library's albumsonger column (q2libd's songtable has it), rows {id: album artist}"""
+    db = sqlite3.connect(root/'mnt/data/database.db')
+    db.execute('alter table songtable add column albumsonger')
+    db.executemany('update songtable set albumsonger = ? where id = ?', [(v, k) for k, v in rows.items()])
+    db.commit()
+    db.close()
+
+
+def rated_card(root, songs=(), albums=(), favs=None):
+    card_in(root)
+    album_artists(root, {1: 'Ann', 2: 'Ann'})
+    (root/'mnt/data/ringnav-ratings').write_bytes(laid_out(4096, [(listen_key(p), n) for p, n in songs]))
+    if albums:
+        (root/'mnt/data/ringnav-album-ratings').write_bytes(laid_out(4096, albums))
+    if favs is not None:
+        stock_myfav(root, favs)
+
+
+def copy_text(root, secs=9.0, want=None):
+    p = root/'mnt/mmc/.ratings.tsv'
+    end = time.time() + secs
+    while time.time() < end:
+        text = p.read_text() if p.exists() else None
+        if text is not None and (want is None or text == want):
+            return text
+        time.sleep(0.1)
+    return p.read_text() if p.exists() else None
+
+
+A, B, CD, E = '/mnt/mmc/Music/a.flac', '/mnt/mmc/Music/b.mp3', '/mnt/mmc/Music/c}d.flac', '/mnt/mmc/Music/e.dsf'
+FIRST, SECOND = album_key('First', 'Ann', A), album_key('Second', '', CD)
+COPY_WANT = (RC_HEAD + 'album\t1\tUnknown Album\t\t\n' + f'song\t4\t1\t{E}\t\n' + 'song\t0\t1\t/mnt/mmc/gone.flac\t\n' +
+             f'song\t3\t0\t{A}\t\n' + 'album\t5\tFirst\tAnn\t\n' + f'song\t5\t0\t{B}\t\n' + 'album\t2\tSecond\t\t/mnt/mmc/Music\n')
+
+
+def full_copy(root):
+    rated_card(root, songs=[(A, 3), (B, 5), (E, 4), ('/mnt/mmc/unscanned.flac', 2)],
+               albums=[(FIRST, 5), (SECOND, 2), (UNKNOWN_ALBUM, 1)], favs=[E, '/mnt/mmc/gone.flac'])
+
+
+@pytest.mark.parametrize('prepare', [full_copy])
+def test_the_card_keeps_today_s_copy_of_the_ratings_for_a_computer(run):
+    """ratings.c rc_*: the column lines, the Unknown Album card's hearts, the likes (liked, their stars kept), then the
+    library's rows in id order, each song's stars and its album's hearts at its first row (the folder only for an
+    album without an album artist); a rating whose song is in no table left out"""
+    root, pl = run
+    assert copy_text(root) == COPY_WANT
+
+
+@pytest.mark.parametrize('prepare', [full_copy])
+def test_the_copy_follows_a_change_and_is_not_written_again_when_the_same(run):
+    root, pl = run
+    assert copy_text(root) == COPY_WANT
+    play_list(root, [2], 0)
+    pl.pump()
+    send(root, '70 rate 1 2')
+    assert wait_for_value(lambda: acks(root)[:1], [(70, 0)])
+    want = COPY_WANT.replace(f'song\t5\t0\t{B}', f'song\t1\t0\t{B}')
+    assert copy_text(root, want=want) == want, 'within RC_WAIT_MS of the change'
+    st = (root/'mnt/mmc/.ratings.tsv').stat()
+    send(root, '71 rate 1 2')
+    assert wait_for_value(lambda: acks(root)[:1], [(71, 0)])
+    time.sleep(7)
+    s2 = (root/'mnt/mmc/.ratings.tsv').stat()
+    assert (s2.st_ino, s2.st_mtime_ns) == (st.st_ino, st.st_mtime_ns), 'the same copy: the card left alone'
+    assert not (root/'mnt/mmc/.ratings.tsv.tmp').exists()
+
+
+def longer_copy(root, one=None):
+    full_copy(root)
+    (root/'mnt/mmc/.ratings.tsv').write_text(RC_HEAD + ''.join(f'song\t2\t0\t/mnt/mmc/old{i}.flac\t\n' for i in range(10)))
+    if one:
+        (root/'mnt/mmc/.ratings.tsv.1').write_text(RC_HEAD + ''.join(f'song\t2\t0\t/mnt/mmc/x{i}.flac\t\n' for i in range(one)))
+
+
+@pytest.mark.parametrize('prepare', [longer_copy])
+def test_a_copy_with_more_lines_is_kept_as_dot_1(run):
+    """ratings.c rc_write: a lost table or a half-built library must not take the only copy"""
+    root, pl = run
+    old = (root/'mnt/mmc/.ratings.tsv').read_text()
+    assert copy_text(root, want=COPY_WANT) == COPY_WANT
+    assert (root/'mnt/mmc/.ratings.tsv.1').read_text() == old
+
+
+@pytest.mark.parametrize('prepare', [lambda root: longer_copy(root, one=20)])
+def test_a_dot_1_with_more_lines_still_is_left_as_it_is(run):
+    root, pl = run
+    one = (root/'mnt/mmc/.ratings.tsv.1').read_text()
+    assert copy_text(root, want=COPY_WANT) == COPY_WANT
+    assert (root/'mnt/mmc/.ratings.tsv.1').read_text() == one
+
+
+def away_card(root):
+    full_copy(root)
+    card_in(root, mounted=False)
+
+
+@pytest.mark.parametrize('prepare', [away_card])
+def test_with_the_card_away_the_copy_waits_for_it(run):
+    root, pl = run
+    assert copy_text(root, secs=8) is None, 'shared over USB meanwhile: nothing written'
+    card_in(root)
+    assert copy_text(root, secs=12) == COPY_WANT, 'written once the card is back'
+
+
+def server_rated(root):
+    rated_card(root, songs=[('/mnt/mmc/.navi/cat/al1/s2.flac', 2)],
+               albums=[(album_key('Up', '', '/mnt/mmc/.navi/cat/al1/s1.flac'), 5)])
+    catalogue(root, listening=False)
+    db = sqlite3.connect(root/'mnt/mmc/.vamp/catalogue.db')
+    db.execute('alter table servertable add column albumsonger')
+    db.commit()
+    db.close()
+
+
+@pytest.mark.parametrize('prepare', [server_rated])
+def test_a_server_song_and_album_are_in_the_copy_by_their_rows(run):
+    """the card catalogue's servertable, after the library: its songs' stars under their row's fileurl"""
+    root, pl = run
+    want = RC_HEAD + 'album\t5\tUp\t\t/mnt/mmc/.navi/cat/al1\n' + 'song\t2\t0\t/mnt/mmc/.navi/cat/al1/s2.flac\t\n'
+    assert copy_text(root) == want
+
+
+# ---- albums' hearts (docs/playd.md#albums-hearts) ----
+
+def album_words(root):
+    data = (root/'mnt/data/ringnav-album-ratings').read_bytes()
+    return list(struct.unpack(f'<{len(data) // 4}I', data))
+
+
+def albums_card(root):
+    rated_card(root, albums=[(SECOND, 2)])
+    apps(root, navi=2)
+    db = sqlite3.connect(root/'mnt/data/database.db')  # another First by Zed, and Second's second disc
+    db.executemany('insert into songtable(id, fileurl, name, songer, album, track, albumsonger) values (?, ?, ?, ?, ?, 0, ?)',
+                   [(7, '/mnt/mmc/Zed/z.flac', 'Zee', 'Zed', 'first', 'Zed'), (8, '/mnt/mmc/Music/CD2/x.flac', 'Ex', 'Cy', 'Second', None)])
+    db.commit()
+    db.close()
+
+
+@pytest.mark.parametrize('prepare', [albums_card])
+def test_an_album_made_a_favourite_likes_its_songs_and_unmade_takes_them_out(run):
+    """ratings.c rate_album_favs: an album at 5 hearts in ringnav-album-ratings (keyed by coverflow.c album_ident) puts
+    its songs in My Fav, each told to the servers as a like; back to 0 takes them out; the stars left alone"""
+    root, pl = run
+    send(root, '72 album 5 1')
+    assert wait_for_value(lambda: acks(root)[:1], [(72, 0)]), acks(root)
+    w = album_words(root)
+    assert len(w) == 4096 and w[4094] == RATE_LAYOUT and rate_find(w, FIRST) == 5 and rate_find(w, SECOND) == 2
+    assert likes(root) == [A, B], 'First by Ann: a.flac and b.mp3, not first by Zed'
+    key = lambda p: '%08x' % listen_key(p)
+    assert [l[:3] for l in out_lines(root, 'navi')] == [[key(A), '', 'like=1'], [key(B), '', 'like=1']]
+    assert rate_find(rate_words(root), listen_key(A)) == 0, 'the songs\' stars left alone'
+    send(root, '73 album 0 2')
+    assert wait_for_value(lambda: acks(root)[:1], [(73, 0)])
+    assert rate_find(album_words(root), FIRST) == 0 and likes(root) == []
+    assert [l[2] for l in out_lines(root, 'navi')][2:] == ['like=0', 'like=0']
+    send(root, '74 album 3 1', '75 album 5 999')
+    assert wait_for_value(lambda: acks(root)[:2], [(75, 3), (74, 1)]), 'no Rate Album; 3 for no such song'
+    assert rate_find(album_words(root), SECOND) == 2, 'a kept 2 stays'
+    want = RC_HEAD + 'album\t2\tSecond\t\t/mnt/mmc/Music\n'
+    assert copy_text(root, want=want) == want, 'the card copy follows'
+    send(root, '77 album 5 3')
+    assert wait_for_value(lambda: acks(root)[:1], [(77, 0)])
+    assert likes(root) == sorted([CD, '/mnt/mmc/Music/CD2/x.flac']), 'a disc folder is its album\'s'
+
+
+def server_album(root):
+    card_in(root)
+    catalogue(root, listening=False)
+    db = sqlite3.connect(root/'mnt/mmc/.vamp/catalogue.db')
+    db.execute('alter table servertable add column albumsonger')
+    db.commit()
+    db.close()
+
+
+@pytest.mark.parametrize('prepare', [server_album])
+def test_a_server_album_s_favourite_likes_its_catalogue_rows(run):
+    root, pl = run
+    send(root, f'76 album 5 {SERVER + 2}')
+    assert wait_for_value(lambda: acks(root)[:1], [(76, 0)]), acks(root)
+    assert rate_find(album_words(root), album_key('Up', '', '/mnt/mmc/.navi/cat/al1/s2.flac')) == 5
+    assert likes(root) == ['/mnt/mmc/.navi/cat/al1/s1.flac', '/mnt/mmc/.navi/cat/al1/s2.flac']
+
+
+# ---- a streamed queue at a restore (docs/playd.md#a-streamed-queue-at-a-restore) ----
+
+S_ONE, S_TWO, S_THREE = (f'/mnt/mmc/.navi/stream/a/hi/x/Cloud {n} [s{i}].flac' for i, n in ((1, 'One'), (2, 'Two'), (3, 'Three')))
+
+
+def read_tail(root):
+    buf = (root/'mnt/mmc/.q2pod/ringnav-queue-stream').read_bytes()
+    magic, check, total, k = struct.unpack('<4I', buf[:16])
+    assert magic == 0x51325254 and check == fnv_bytes(buf[8:]), 'playback.c save_tail\'s magic and checksum'
+    paths = buf[16:].split(b'\0')[:-1]
+    assert len(paths) == k and buf.endswith(b'\0')
+    return total, [p.decode() for p in paths]
+
+
+def tail(total, paths):
+    body = struct.pack('<2I', total, len(paths)) + b''.join(p.encode() + b'\0' for p in paths)
+    return struct.pack('<2I', 0x51325254, fnv_bytes(body)) + body
+
+
+@pytest.mark.parametrize('config', [MEMORY])
+def test_an_answer_s_queue_is_kept_with_its_songs_still_to_come_in_the_tail(run):
+    """playback.c playback_save and save_tail: the songs on the card in the snapshot, the m3u's songs from the one waited
+    for on in .q2pod/ringnav-queue-stream, named by the snapshot's checksum"""
+    root, pl = run
+    card_in(root)
+    sock = catalogue(root)
+    play_list(root, [SERVER + 1, SERVER + 2], 0)
+    assert wait_for(root/'tmp/q2-navi.catplay')
+    land(root, S_ONE)
+    answer(root, S_ONE, S_TWO, S_THREE)
+    pl.pump(1.0)
+    assert pl.songs() == [('set-songurl', S_ONE)]
+    assert wait_for_value(lambda: (root/'mnt/mmc/.q2pod/ringnav-queue-stream').exists() and read_tail(root)[1], [S_TWO, S_THREE])
+    h = read_snapshot(root)
+    assert (h['paths'], h['pos']) == ([S_ONE], 0) and read_tail(root)[0] == h['sum']
+    land(root, S_TWO)
+    assert wait_for_value(lambda: read_snapshot(root)['paths'], [S_ONE, S_TWO]), 'the song landed joins the snapshot'
+    assert wait_for_value(lambda: read_tail(root), (read_snapshot(root)['sum'], [S_THREE]))
+    sock.close()
+
+
+def stream_kept(resume=1, landed=(S_ONE,), tail_=(S_THREE,)):
+    def prep(root):
+        kept([S_ONE, S_TWO], 0, 40)(root)
+        _, total = snapshot([S_ONE, S_TWO], 0, 0)
+        if tail_:
+            (root/'mnt/mmc/.q2pod/ringnav-queue-stream').write_bytes(tail(total, list(tail_)))
+        catalogue(root, listening=False)
+        apps(root, navi=0)
+        (root/'mnt/mmc/.navi/q2app').write_text(f'name=navi\nresume={resume}\n')
+        land(root, *landed)
+        s = socket.socket(socket.AF_UNIX)  # the app listening: its socket file there
+        s.bind(str(root/'tmp/q2-navi.browse.sock'))
+        s.close()
+    return prep
+
+
+def resume_ask(root, secs=4.0):
+    p = root/'tmp/q2-navi.resume'
+    assert wait_for(p, secs), 'the request written once the app listens'
+    lines = p.read_text().splitlines()
+    return lines[0].split(), lines[1:]
+
+
+@pytest.mark.parametrize('config, prepare', [(MEMORY, stream_kept())])
+def test_a_restored_stream_asks_its_app_for_the_songs_not_on_the_card_and_plays_on_from_its_answer(run):
+    """addon.c addon_resume_ask and resume_keeps: the request (seq, the current song's index, its second, paused), every
+    saved song's path; the answer's first song the one restored, kept paused at its place, nothing loaded"""
+    root, pl = run
+    head, paths = resume_ask(root)
+    assert head[1:] == ['0', '40', 'paused'] and paths == [S_ONE, S_TWO, S_THREE], (head, paths)
+    n = now(root, 0.3)
+    assert (n['state'], n['qlen'], n['title']) == ('2', '1', 'Cloud One'), 'the song on the card meanwhile'
+    land(root, S_TWO)
+    (root/'tmp/q2-navi.state').write_text(f'status=idle\nresumeack={head[0]} 0\n')
+    answer(root, S_ONE, S_TWO, S_THREE, seq=head[0])
+    assert wait_for_value(lambda: now(root, 0.2)['qlen'], '2'), 'the answer\'s songs after the first'
+    n = now(root, 0.3)
+    assert (n['state'], n['title']) == ('2', 'Cloud One') and pl.songs() == [], 'still paused at its place, nothing loaded'
+    land(root, S_THREE)
+    assert wait_for_value(lambda: now(root, 0.2)['qlen'], '3'), 'and grows as any answer'
+    fifo(root, 'resume')
+    pl.pump()
+    assert pl.songs()[0] == ('set-songurl', S_ONE) and 'ss=40' in pl.got[0][1]
+
+
+@pytest.mark.parametrize('config, prepare', [(MEMORY, stream_kept())])
+def test_a_declined_resume_leaves_the_songs_on_the_card(run):
+    root, pl = run
+    head, _ = resume_ask(root)
+    (root/'tmp/q2-navi.state').write_text(f'resumeack={head[0]} 2\n')
+    time.sleep(0.5)
+    answer(root, S_ONE, S_TWO, seq=head[0])
+    land(root, S_TWO)
+    time.sleep(1.0)
+    assert now(root)['qlen'] == '1', 'declined: a late .play of that seq is not played'
+
+
+@pytest.mark.parametrize('config, prepare', [(MEMORY, stream_kept())])
+def test_an_answer_starting_with_another_song_is_not_taken(run):
+    root, pl = run
+    head, _ = resume_ask(root)
+    land(root, S_TWO, S_THREE)
+    answer(root, S_TWO, S_THREE, seq=head[0])
+    time.sleep(1.5)
+    n = now(root)
+    assert (n['qlen'], n['title']) == ('1', 'Cloud One')
+
+
+@pytest.mark.parametrize('config, prepare', [(MEMORY, stream_kept(resume=0)), (MEMORY, stream_kept(landed=(S_ONE, S_TWO), tail_=()))])
+def test_no_ask_without_resume_1_or_with_every_saved_song_on_the_card(run):
+    root, pl = run
+    assert not wait_for(root/'tmp/q2-navi.resume', 2.5)
+    assert now(root)['title'] == 'Cloud One'
