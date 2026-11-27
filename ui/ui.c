@@ -54,6 +54,10 @@ static struct {
 } slide;
 extern uint64_t fb_panned_us; /* fb.c: when the last frame's pan was made */
 
+static void (*rest_hook)(void), (*stack_hook)(void);
+void ui_on_rest(void (*fn)(void)) { rest_hook = fn; }
+void ui_on_stack(void (*fn)(void)) { stack_hook = fn; }
+
 void ui_mark(rect_t r) {
     if (ui_painting) {
         fprintf(stderr, "q2ui: ui_mark while a frame is drawn\n");
@@ -258,9 +262,7 @@ int ui_frame(const input_t *in, int n) {
     return 1;
 }
 
-static void (*rest_hook)(void), (*stack_hook)(void);
-void ui_on_rest(void (*fn)(void)) { rest_hook = fn; }
-void ui_on_stack(void (*fn)(void)) { stack_hook = fn; }
+
 /* Whether the screen is dark: demo turns the backlight off after its idle time and on at the
  * next press, which is then a wake and nothing else (docs/internals.md#screen-off-and-wake). q2ui
  * reads the same keys, so it drops what arrives while the light is off. No backlight to read (a
