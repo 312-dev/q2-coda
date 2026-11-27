@@ -145,10 +145,11 @@ def test_with_no_window_yet_demo_is_still_starting_and_q2ui_is_left_alone(fw):
     assert g.forks == 1 and not any(c.startswith('kill ') for c in g.shell)
 
 
-def test_now_playing_on_top_is_not_a_window_to_end_q2ui_for(fw):
+@pytest.mark.parametrize('top', [b'playing_page', b'volume_dialog'])
+def test_now_playing_and_the_volumes_display_are_not_windows_to_end_q2ui_for(fw, top):
     g = Gate(fw)
     g.poll()
-    g.top = b'playing_page'  # stock opened it for the song q2ui chose; q2ui has its own over it
+    g.top = top  # stock opened Now Playing for the song q2ui chose; the volume's display comes up at every step
     for _ in range(3):
         g.poll()
     assert not any(c.startswith('kill ') for c in g.shell) and g.on() == CHILD

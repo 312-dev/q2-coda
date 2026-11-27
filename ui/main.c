@@ -399,6 +399,7 @@ int main(int argc, char **argv) {
     ui_frame(0, 0);
     first_ms = (unsigned)((mono_us() - t0) / 1000u);
     ui_on_rest(at_rest);
+    ui_on_stack(state_save); /* a page that never rests (Now Playing while a song plays) is still come back to */
     int code = ui_run();
     write_stats();
     fb_close();

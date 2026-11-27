@@ -143,6 +143,7 @@ void ui_push(const ui_page *p, void *arg) {
     ++depth;
     ui_mark_all();
     if (from) slide_start(1, from);
+    if (stack_hook) stack_hook();
 }
 void ui_pop(void) {
     if (!depth) return;
@@ -157,6 +158,7 @@ void ui_pop(void) {
     if (stack[depth - 1].page->shown) stack[depth - 1].page->shown(stack[depth - 1].st);
     ui_mark_all();
     if (from) slide_start(-1, from);
+    if (stack_hook) stack_hook();
 }
 
 /* One frame of a slide: the page under at its drift, darkened, and the page over it from its
@@ -256,8 +258,9 @@ int ui_frame(const input_t *in, int n) {
     return 1;
 }
 
-static void (*rest_hook)(void);
+static void (*rest_hook)(void), (*stack_hook)(void);
 void ui_on_rest(void (*fn)(void)) { rest_hook = fn; }
+void ui_on_stack(void (*fn)(void)) { stack_hook = fn; }
 /* Whether the screen is dark: demo turns the backlight off after its idle time and on at the
  * next press, which is then a wake and nothing else (docs/internals.md#screen-off-and-wake). q2ui
  * reads the same keys, so it drops what arrives while the light is off. No backlight to read (a

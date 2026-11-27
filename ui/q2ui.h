@@ -239,6 +239,7 @@ extern int ui_reduce_motion;
 extern int ui_painting; /* 1 while a frame is drawn: marks and state changes are refused */
 int ui_run(void);       /* the loop, until ui_quit; the exit code */
 void ui_on_rest(void (*fn)(void));       /* called once each time the loop comes to rest */
+void ui_on_stack(void (*fn)(void));      /* called when a page has opened or closed */
 void ui_watch(int fd, void (*fn)(void)); /* fn when fd is readable (a daemon's message) */
 extern const char *ui_backlight;         /* the folder of backlights whose state says the screen is dark */
 /* One pass by hand, for the bench and a script: events, the step at the frame's time, the draw,

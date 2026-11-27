@@ -10,7 +10,8 @@
  *  - demo needs the screen (a window other than Home or Now Playing opened by itself: the USB
  *    prompt, a pairing request, Shut Down?): q2ui is ended so the window can be seen and
  *    answered, and started again once Home is back on top. Now Playing is not such a window:
- *    stock opens it when a song is chosen, and q2ui has its own over it.
+ *    stock opens it when a song is chosen, and q2ui has its own over it. Nor is the volume's
+ *    display, which every volume step brings up for a moment.
  *  - q2ui asks for a page of demo's it has not got: it names the page in Q2UI_ASK and ends with
  *    Q2UI_ASKED. demo opens that page, and starts q2ui again when the page has been left.
  *
@@ -53,12 +54,13 @@ int q2ui_on(void) {
     return qu.pid;
 }
 
-/* Nothing of demo's on top that the user has to see: Home, Now Playing, or no window yet (demo
- * still starting) */
+/* Nothing of demo's on top that the user has to see or answer: Home, Now Playing, the volume's
+ * own display (it comes up at every volume step and goes by itself), or no window yet (demo still
+ * starting) */
 static int on_home(void) {
     void *top = window_manager_get_top_window(window_manager());
     const char *name = top ? widget_get_prop_str(top, "name", "") : "home_page";
-    return !tk_strcmp(name, "home_page") || !tk_strcmp(name, "playing_page");
+    return !tk_strcmp(name, "home_page") || !tk_strcmp(name, "playing_page") || !tk_strcmp(name, "volume_dialog");
 }
 
 /* The page q2ui named as it left, opened: a stock page's name and nothing else (lower case and
