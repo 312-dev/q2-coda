@@ -1396,6 +1396,13 @@ def test_adb_hook_starts_adbd_after_q2remote_and_its_gadget_first():
     assert line.endswith(') &\n') and build.USB_SCRIPTS == ('storage_config.sh', 'uac_device_config.sh')
 
 
+def test_adb_wifi_hook_starts_the_supervisor_after_adbd_and_before_the_tracer():
+    old, new = build.ADB_WIFI_HOOK
+    assert old == build.ADB_HOOK[1] and new == old + b'/usr/bin/q2adb-wifi &\n'
+    assert build.USBTRACE_HOOK[0] == new and build.USBTRACE_HOOK[1].startswith(new)
+    assert 'adb_mdns' in build.ADB_MDNS_SOURCES and 'coda_rc_mdns' in build.ADB_MDNS_SOURCES
+
+
 def test_adbd_binary_is_thirdpartys_stripped(tmp_path, monkeypatch):
     import thirdparty
     monkeypatch.setattr(thirdparty, 'build', lambda name: tmp_path/f'stage-{name}')

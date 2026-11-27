@@ -52,10 +52,17 @@ def load_key():
         raise ValueError("set Q2_KEY or Q2_KEY_FILE, or put q2remote.key in the repo root") from None
 
 
+# vamp (tools/vamp.py, docs/adb.md#vamp) runs this module's commands over adb instead of port 2302: it sets
+# TRANSPORT to its Device, whose shell() keeps shell()'s contract, and every command below goes through it.
+TRANSPORT = None
+
+
 def shell(cmd, data=b"", timeout=TIMEOUT, host=None, sink=None, done=None):
     """Run cmd with data on its stdin; its output, or streamed to sink. timeout=None waits forever.
 
     done(reply) ends the read early: a backgrounded job may keep the connection open."""
+    if TRANSPORT is not None:
+        return TRANSPORT.shell(cmd, data, timeout, sink=sink, done=done)
     host = host or os.environ.get("Q2_HOST")
     if not host:
         raise ValueError("set Q2_HOST (`find` lists the Q2s on this network)")

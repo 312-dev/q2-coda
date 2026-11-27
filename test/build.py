@@ -394,7 +394,7 @@ def validate_assets(directory):
     at, old, new = ID_PULL_UP
     assert struct.unpack_from('<I', stock, fileoff(stock, at))[0] == old and struct.unpack_from('<I', demo, fileoff(demo, at))[0] == new
     from build import patch_timezones, TIMEZONES, CJK, english_ui
-    from build import ADB_HOOK, ADBD, ADB_GADGET, Q2UPDATE, USB_SCRIPTS, adb_wrapper, USBTRACE, USBTRACE_HOOK
+    from build import ADB_HOOK, ADB_WIFI_HOOK, ADBD, ADB_GADGET, ADB_WIFI, ADB_MDNS, Q2UPDATE, USB_SCRIPTS, adb_wrapper, USBTRACE, USBTRACE_HOOK
     zones = bytearray(stock)
     patch_timezones(zones)
     start = fileoff(stock, 0x77efb0)
@@ -606,7 +606,7 @@ def validate_assets(directory):
         assert sha(usbtrace) == manifest['q2_usbtrace_sha256'] and usbtrace[:4] == b'\x7fELF'
         assert usbtrace[36:40] == helper[36:40]
         assert b'q2-usbtrace-pd17' in demo  # usb_event.c's forwarding of PD17's edges
-        expected_start = expected_start.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*USBTRACE_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK)
+        expected_start = expected_start.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*ADB_WIFI_HOOK).replace(*USBTRACE_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK)
         assert b'q2-wheel.log' in demo
         # adbd (docs/adb.md): an ELF with the stock binaries' ABI flags and glibc alone, its gadget script, stock's USB
         # scripts wrapped and kept beside the wrappers
@@ -619,6 +619,8 @@ def validate_assets(directory):
         assert sorted(re.findall(r'\(NEEDED\)\s+Shared library: \[(.+)\]', dynamic)) == ['libc.so.6', 'libpthread.so.0']
         assert read('rootfs.squashfs', ADB_GADGET) == (ROOT/'patch/adb_gadget.sh').read_bytes()
         assert read('rootfs.squashfs', Q2UPDATE) == (ROOT/'patch/q2update.sh').read_bytes()
+        assert read('rootfs.squashfs', ADB_WIFI) == (ROOT/'patch/adb_wifi.sh').read_bytes()
+        assert read('rootfs.squashfs', ADB_MDNS)[36:40] == helper[36:40]  # docs/adb.md#adb-over-wi-fi
         for n in USB_SCRIPTS:
             assert read('rootfs.squashfs', 'usr/bin/' + n) == adb_wrapper(n)
             assert read('rootfs.squashfs', 'usr/bin/' + n.replace('.sh', '_stock.sh')) == read('stock.squashfs', 'usr/bin/' + n)
@@ -637,7 +639,7 @@ def validate_assets(directory):
         # No ADB in a release: no adbd, no gadget, stock's USB scripts as they were
         assert 'adbd' not in manifest and not (directory/'adbd').exists()
         assert b'q2update.req' not in demo  # q2update_poll is compiled out
-        for path in (ADBD, ADB_GADGET, Q2UPDATE, *('usr/bin/' + n.replace('.sh', '_stock.sh') for n in USB_SCRIPTS)):
+        for path in (ADBD, ADB_GADGET, ADB_WIFI, ADB_MDNS, Q2UPDATE, *('usr/bin/' + n.replace('.sh', '_stock.sh') for n in USB_SCRIPTS)):
             absent = subprocess.run(['unsquashfs', '-cat', str(directory/'rootfs.squashfs'), path],
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             assert absent.returncode != 0, f'release rootfs contains {path}'
