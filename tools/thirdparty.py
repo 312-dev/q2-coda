@@ -502,6 +502,9 @@ def build_adbd(src, stage, env, log):
 BLUEZ_DIR = pathlib.Path(__file__).resolve().parent/'bluez'
 GLIBCONFIG = (BLUEZ_DIR/'glibconfig.h').read_text()
 STUBS = (BLUEZ_DIR/'stubs.tsv').read_text()
+# Vamp's changes to BlueZ that any base takes (docs/bluez.md#bases): [GATT] Server, so coda-rc keeps the LE
+# attribute channel
+BLUEZ_VAMP_PATCH = (BLUEZ_DIR/'vamp.patch').read_text()
 BLUETOOTHD = 'usr/bin/bluetoothd'  # stock's, whose ELF flags and FP ABI the rebuild must have
 # Where stock's bluetoothd keeps its adapter and device records, pairing keys among them (upstream's default
 # is /var/lib/bluetooth, which is not on the Q2's writable partition): one store for both daemons, so a
@@ -584,6 +587,8 @@ def build_bluez(src, stage, env, log):
     # position independent, as stock's is: by hand, as configure's --enable-pie probe takes this compiler's
     # warning for a refusal and leaves the flags out
     vars = dict(env.vars, CFLAGS=f'{env.vars["CFLAGS"]} -fPIC', LDFLAGS=f'{env.vars["LDFLAGS"]} -pie -Wl,-z,now')
+    (src/'vamp.patch').write_text(BLUEZ_VAMP_PATCH)
+    run('patch', '-p1', '-i', 'vamp.patch', cwd=src, log=log)
     run('./configure', f'--host={env.host}', '--prefix=/usr', *BLUEZ_OPTIONS, cwd=src, env=vars, log=log)
     config = src/'config.h'
     text, n = re.subn(r'^#define STORAGEDIR ".*"$', f'#define STORAGEDIR "{BLUEZ_STORAGE}"', config.read_text(), flags=re.M)

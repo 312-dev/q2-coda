@@ -641,6 +641,10 @@ BT_NAME = (b'\nName = Shanling Q2\n', b'\nName = Vamp\n')
 # bluealsa hands BlueZ the level a headset reports over HFP, so it shows as the device's Battery1 (patch/bt_battery.c,
 # docs/internals.md#headset-battery).
 BT_EXPERIMENTAL = (b'\n#Experimental = false\n', b'\nExperimental = true\n')
+# An --own-bluez build's: no GATT server and no LE advertising manager in Vamp's bluetoothd (tools/bluez/vamp.patch),
+# as stock's has none, so coda-rc keeps the LE attribute channel (docs/bluez.md#the-le-attribute-channel). Stock's
+# 5.66 reads the same file and logs the key as unknown, nothing more.
+BT_GATT_SERVER = (b'\n[GATT]\n', b'\n[GATT]\n# Vamp: no GATT server, no LE advertising manager; coda-rc serves the LE attribute channel\nServer = false\n')
 # Every V1.36 unit has the same root password hash, and init runs a login on the board's serial pad (ttyS3).
 # Nothing on the Q2 logs in (q2remote, --dev only, runs /bin/sh itself), so root is locked and the getty goes;
 # the kernel's and init's messages still reach the console.
@@ -2842,8 +2846,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(gettys == 1 and b'getty' not in inittab, 'Unexpected inittab')
     (out/'inittab').write_bytes(inittab)
     bt_main = cat(BT_MAIN)
-    check(all(bt_main.count(old) == 1 for old, _ in (BT_DISCOVERABLE, BT_NAME, BT_EXPERIMENTAL)), 'Unexpected Bluetooth main.conf')
-    (out/'main.conf').write_bytes(bt_main.replace(*BT_DISCOVERABLE).replace(*BT_NAME).replace(*BT_EXPERIMENTAL))
+    check(all(bt_main.count(old) == 1 for old, _ in (BT_DISCOVERABLE, BT_NAME, BT_EXPERIMENTAL, BT_GATT_SERVER)), 'Unexpected Bluetooth main.conf')
+    bt_main = bt_main.replace(*BT_DISCOVERABLE).replace(*BT_NAME).replace(*BT_EXPERIMENTAL)
+    (out/'main.conf').write_bytes(bt_main.replace(*BT_GATT_SERVER) if own_bluez else bt_main)
     for address, old, new in ARTIST_ALBUMS:
         patch_word(patched, address, old, new, 'artist detail opens on Albums')
     patch_word(patched, *SHUFFLE_CALL, jal(ps['ringnav_shuffle']),

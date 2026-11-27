@@ -20,7 +20,9 @@ what it asks of the kernel, never what a kernel or a radio answers.
 Checked for each daemon: it starts on Vamp's main.conf and owns org.bluez; hci0 carries the interfaces the
 firmware's callers use; the name, class and discoverable timeout come from main.conf; a pairing record in the
 store (/mnt/data/bluetooth, a made-up device) becomes a paired Device1 and its link key is loaded into the
-kernel; the calls the payload makes (docs/bluez.md#what-depends-on-it) are answered. Then the store one
+kernel; the calls the payload makes (docs/bluez.md#what-depends-on-it) are answered; nothing is bound on the LE
+attribute channel (CID 4: the shim records every L2CAP bind), and the own daemon, with main.conf's [GATT]
+Server = false, has no GattManager1 or LEAdvertisingManager1, as stock has none. Then the store one
 daemon has written is read by the other, both ways: the key is loaded again and the alias set under the
 first is the one the second reports.
 """
@@ -46,6 +48,7 @@ NO_PRELOAD = {k: v for k, v in os.environ.items() if k != 'LD_PRELOAD'}
 OWN = 'usr/lib/vamp-bluez/bluetoothd'  # tools/build.py OWN_BLUETOOTHD
 # what the own daemon is started with: the plugins 5.88 compiles in that stock has no like of (docs/bluez.md#build)
 OWN_OPTIONS = ['--noplugin=hfp,rap,fastpair']
+ATT_CID = 4  # the LE attribute channel, which coda-rc serves itself (docs/bluez.md#the-le-attribute-channel)
 ADAPTER = '00:11:22:33:44:55'  # made up, as is the device
 DEVICE = 'AA:BB:CC:DD:EE:01'
 DEVICE_PATH = '/org/bluez/hci0/dev_' + DEVICE.replace(':', '_')
@@ -63,11 +66,11 @@ Key={LINK_KEY}
 Type=4
 PINLength=0
 """
-# Vamp's edits to stock's main.conf (tools/build.py BT_DISCOVERABLE, BT_NAME, BT_EXPERIMENTAL), made here
-# on the stock file the same way
-MAIN_EDITS = ((b'\nDiscoverableTimeout = 0\n', b'\nDiscoverableTimeout = 180\n'),
-              (b'\nName = Shanling Q2\n', b'\nName = Vamp\n'),
-              (b'\n#Experimental = false\n', b'\nExperimental = true\n'))
+# Vamp's edits to stock's main.conf (tools/build.py BT_DISCOVERABLE, BT_NAME, BT_EXPERIMENTAL, and BT_GATT_SERVER
+# for an --own-bluez build), made here on the stock file the same way
+sys.path.insert(1, str(ROOT / 'tools'))
+from build import BT_DISCOVERABLE, BT_NAME, BT_EXPERIMENTAL, BT_GATT_SERVER  # noqa: E402
+MAIN_EDITS = (BT_DISCOVERABLE, BT_NAME, BT_EXPERIMENTAL, BT_GATT_SERVER)
 
 BUS_CONFIG = """<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
  "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
@@ -81,6 +84,7 @@ SHIM = r'''
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -104,10 +108,22 @@ int socket(int domain, int type, int protocol) {
     return fd;
 }
 
-/* struct sockaddr_hci: family u16, device u16, channel u16 */
+/* struct sockaddr_hci: family u16, device u16, channel u16. struct sockaddr_l2: family u16, psm u16, bdaddr 6,
+ * cid u16, bdaddr_type u8: each L2CAP bind is written to Q2_FAKE_BINDS as "PSM CID TYPE", so the test sees which
+ * channels the daemon would have served (CID 4 is the LE attribute channel) */
 int bind(int fd, const struct sockaddr *addr, socklen_t len) {
     int (*real)(int, const struct sockaddr *, socklen_t) = next("bind");
     if (!ours(fd)) return real(fd, addr, len);
+    if (ours(fd) == OTHER && len >= 13 && getenv("Q2_FAKE_BINDS")) {
+        const unsigned char *a = (const void *)addr;
+        char line[48];
+        int out = open(getenv("Q2_FAKE_BINDS"), O_WRONLY | O_CREAT | O_APPEND, 0600);
+        int n = snprintf(line, sizeof line, "%u %u %u\n", a[2] | a[3] << 8, a[10] | a[11] << 8, a[12]);
+        if (out >= 0) {
+            if (write(out, line, n) < 0) {}
+            close(out);
+        }
+    }
     if (ours(fd) == HCI && len >= 6 && ((const unsigned short *)addr)[2] == HCI_CHANNEL_CONTROL) {
         int (*conn)(int, const struct sockaddr *, socklen_t) = next("connect");
         struct sockaddr_un un = {.sun_family = AF_UNIX};
@@ -304,9 +320,15 @@ class Run:
         self.proc = subprocess.Popen(
             ['bwrap', '--die-with-parent', '--dev-bind', '/', '/', '--tmpfs', '/mnt', '--bind', str(rig.data), '/mnt/data',
              'qemu-mipsel', '-L', str(rig.sysroot), '-E', f'LD_PRELOAD={rig.shim}',
-             '-E', f'Q2_FAKE_MGMT={self.dir / "mgmt"}', '-E', f'DBUS_SYSTEM_BUS_ADDRESS={self.address}',
+             '-E', f'Q2_FAKE_MGMT={self.dir / "mgmt"}', '-E', f'Q2_FAKE_BINDS={self.dir / "binds"}',
+             '-E', f'DBUS_SYSTEM_BUS_ADDRESS={self.address}',
              str(binary), '-n', '-d', *rig.options.get(name, [])],
             stdout=self.log, stderr=subprocess.STDOUT, env=NO_PRELOAD)
+
+    def l2cap_binds(self):
+        """[(psm, cid, address type)] of the L2CAP sockets the daemon bound, from the shim's record"""
+        f = self.dir / 'binds'
+        return [tuple(map(int, line.split())) for line in f.read_text().splitlines()] if f.exists() else []
 
     def gdbus(self, *args, check=True):
         r = subprocess.run(['gdbus', *args[:1], '--address', self.address, *args[1:]], capture_output=True, text=True,
@@ -524,13 +546,14 @@ def main(argv):
     runs = []
     rig = Rig(pathlib.Path(args[0]).resolve(), tmp)
     try:
-        faces = {}
+        faces, binds = {}, {}
         order = [only] if only else ['own', 'stock']
         for name in order:
             rig.fresh_store()
             run = rig.start(name)
             runs.append(run)
             faces[name] = exercise(run)
+            binds[name] = run.l2cap_binds()
             run.stop()
             if not only:  # the store this one wrote, under the other, then forgotten there
                 other = rig.start('stock' if name == 'own' else 'own')
@@ -543,10 +566,15 @@ def main(argv):
             missing = sorted(faces['stock'] - faces['own'])
             print(f'hci0 interfaces only the own daemon has: {", ".join(extra) or "none"}')
             check('own: hci0 lacks no interface stock\'s has', not missing, str(missing))
-            # docs/bluez.md#the-le-attribute-channel: upstream serves GATT itself, which stock's build does not
-            check('own: GattManager1 and LEAdvertisingManager1 are there, as upstream serves GATT itself',
-                  {'org.bluez.GattManager1', 'org.bluez.LEAdvertisingManager1'} <= faces['own'])
-            check('stock: neither is there', not {'org.bluez.GattManager1', 'org.bluez.LEAdvertisingManager1'} & faces['stock'])
+            # docs/bluez.md#the-le-attribute-channel: main.conf's [GATT] Server = false (tools/bluez/vamp.patch) leaves
+            # the GATT database and the advertising manager out, as stock's build does, so coda-rc keeps CID 4
+            le = {'org.bluez.GattManager1', 'org.bluez.LEAdvertisingManager1'}
+            check('own: no GattManager1 or LEAdvertisingManager1, as stock has none ([GATT] Server = false)',
+                  not le & faces['own'], str(sorted(le & faces['own'])))
+            check('stock: neither is there', not le & faces['stock'])
+            for name in order:
+                att = [b for b in binds[name] if b[1] == ATT_CID]
+                check(f'{name}: nothing bound on the LE attribute channel (CID 4), coda-rc\'s', not att, str(att))
     except Failed as e:
         check(str(e), False)
         for run in runs:

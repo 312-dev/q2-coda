@@ -1333,6 +1333,14 @@ def test_bluez_experimental_interfaces_are_on():
     assert main.replace(*build.BT_EXPERIMENTAL).endswith(b"\nExperimental = true\n")
 
 
+def test_own_bluez_builds_turn_the_gatt_server_off():
+    main = b"#Cache = always\n\n[GATT]\n# GATT attribute cache.\n"
+    assert main.count(build.BT_GATT_SERVER[0]) == 1
+    edited = main.replace(*build.BT_GATT_SERVER)
+    assert b'\n[GATT]\n' in edited and edited.count(b'\nServer = false\n') == 1
+    assert edited.index(b'[GATT]') < edited.index(b'Server = false')  # in [GATT], where vamp.patch reads it
+
+
 def test_network_time_asks_the_worldwide_pool_in_place():
     servers = b'time.apple.com\0\0cn.pool.ntp.org\0time.windows.com\0'
     assert len(build.NTP_POOL[0]) == len(build.NTP_POOL[1])

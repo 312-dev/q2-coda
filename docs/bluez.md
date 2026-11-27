@@ -75,7 +75,7 @@ description, as a patch `tools/thirdparty.py` applies, with a test of the behavi
 | The remote endpoint a headset configured is registered (`endpoint_setconf_ind`)                                       | to be judged against 5.88, which reworked this path                                         | check first, port only if still needed             |
 | SyncLink's six reads of `g_synclink_mode`                                                                             | SyncLink (off by default, no Settings row) misbehaves beside A2DP                           | hooks, last                                        |
 | The `shanling` plugin's SDP record (`0xcc0c`, RFCOMM 28)                                                              | Shanling's phone app cannot find SyncLink                                                   | a small plugin, last                               |
-| No GATT database, no advertising manager                                                                              | see the next section                                                                        | a `main.conf` switch                               |
+| No GATT database, no advertising manager                                                                              | see the next section                                                                        | done: `[GATT] Server = false` (`tools/bluez/vamp.patch`) |
 | The store at `/mnt/data/bluetooth`                                                                                    | pairings in RAM, gone at power off                                                          | done: `BLUEZ_STORAGE` in the recipe                |
 | Vamp's own patches to stock (`bt_meta.c`, the AVRCP record's cover art entry)                                         | no track on the control channel, no cover art                                               | source changes, with `test/bluetoothd.py`'s cases  |
 
@@ -102,7 +102,19 @@ Two ways through, in this order:
 1. **A `main.conf` switch in our build that leaves the database and the advertising manager out**, as stock
    does and as upstream itself does for a controller without LE (`adapter_register` skips both and every user
    checks for none). One condition, a few lines, and `coda-rc` and SyncLink work as they do today. This is
-   what the cutover needs, as it is what matches stock.
+   what the cutover needs, as it is what matches stock. **Done:** `[GATT] Server` (default true, so a base
+   that wants BlueZ's GATT keeps it) in `tools/bluez/vamp.patch`, the patch for any base, which
+   `build_bluez` applies before configure. `false` takes upstream's own path for a controller without LE
+   (`adapter_register`'s `goto load`), so the advertisement monitor manager goes too, as it does there; every
+   user of the database copes with none (read: `btd_gatt_database_get_db`, `gatt_server_init`, media's
+   `update_features`, `bt_tmap_set_role`). LE scanning, pairing and BlueZ's GATT client stay. An
+   `--own-bluez` build writes `Server = false` under `[GATT]` in the shared `main.conf` (`BT_GATT_SERVER` in
+   `tools/build.py`; stock's 5.66 starts on that file and passes every check of its own in the harness, measured); a build without the flag is unchanged.
+   Measured in `test/bluez_own.py`, whose shim now records each L2CAP bind: before the patch the own daemon
+   bound PSM 0, CID 4 on the LE public address (`[(0, 4, 1)]`) and had `GattManager1` and
+   `LEAdvertisingManager1`; with it, it binds nothing on CID 4 and has neither, as stock (the only interface
+   left that stock lacks is `RangingProviderManager1`). Whether `coda-rc` then gets a phone's connection is
+   the device plan's step 9.
 2. Later, if wanted: `coda-rc` as a `GattManager1` application with an `LEAdvertisement1`, and the switch
    turned off. It gives BlueZ's own GATT client and server to anything else that wants LE, and costs a rewrite
    of `patch/coda_rc_ble.c`'s transport (about 400 of its 667 lines) and its simulator.
@@ -277,12 +289,13 @@ other: stock's bluealsa must work on our bluetoothd, and the own bluealsa on sto
 
 ## What the spike proves, and what it cannot
 
-`python3 test/bluez_own.py BUILD` (3 s, 49 checks) runs our daemon and stock's as MIPS under `qemu-mipsel`,
+`python3 test/bluez_own.py BUILD` (3 s, 51 checks) runs our daemon and stock's as MIPS under `qemu-mipsel`,
 each on a D-Bus bus of its own. A preloaded library gives the daemon UNIX sockets for Bluetooth ones, and a
 stand-in answers the kernel's management protocol for one dual-mode controller and records what it is sent.
 Proven there, for both daemons: start on Vamp's `main.conf`, `org.bluez` owned, the name, class and
 discoverable timeout from the file reaching the adapter and the controller, the interfaces the firmware's
-callers use, the store read and written and exchanged, the payload's D-Bus calls. Each kind of check was seen
+callers use, the store read and written and exchanged, the payload's D-Bus calls, and that neither binds the LE
+attribute channel (the shim records each L2CAP bind) nor has `GattManager1` or `LEAdvertisingManager1`. Each kind of check was seen
 to fail first: a wrong key in the store, a store in another folder, another name in `main.conf`, the
 interface comparison turned round.
 
@@ -319,13 +332,34 @@ Quality page's say, and **Car Remote over BLE** (the attribute channel, above).
 
 The owner's Q2 on V24Ri, the plain 5.88 daemon (`1194d357`'s recipe) pushed to `/tmp` and started by hand with stock's store; steps 1, 2, 3 and part of 4, 5 and 11:
 
-- **Start (step 1):** `org.bluez` owned, `Adapter /org/bluez/hci0 registered`, every paired device in the store loaded, stock's bluealsa registered its endpoints with it. Two refusals from the kernel: `Failed to set privacy: Rejected (0x0b)` and `Failed to set mode: Failed (0x03)`; `hciconfig hci0` read `UP RUNNING PSCAN` where stock's reads `PSCAN ISCAN`, so the Q2 was connectable but not discoverable. Not traced yet.
+- **Start (step 1):** `org.bluez` owned, `Adapter /org/bluez/hci0 registered`, every paired device in the store loaded, stock's bluealsa registered its endpoints with it. Two refusals from the kernel: `Failed to set privacy: Rejected (0x0b)` and `Failed to set mode: Failed (0x03)`; `hciconfig hci0` read `UP RUNNING PSCAN` where stock's reads `PSCAN ISCAN`, so the Q2 was connectable but not discoverable. Traced as far as the source goes ([Not discoverable](#not-discoverable)); one capture settles it.
 - **demo without `shanling.bluez` (step 2):** demo kept running, opened the Bluetooth page and scanned, with no hang or crash line.
 - **Store, stock to ours (step 3):** a headset paired under stock connected with no pairing prompt.
 - **A2DP (step 4, one codec):** the stream went to `TRANSPORT_STATE_ACTIVE` and `SINK_STATE_PLAYING` and the owner heard the music. Which codec was chosen is not read from the log yet (the priority hook is missing).
 - **AVRCP (step 5):** the headset's play, pause and volume keys worked (the owner).
 - **Memory (step 11, at rest after the stream started):** VmRSS 5,120 kB against stock's 7,136 kB measured the same way before the swap.
 - **A trap in the hand start:** run from an `adb shell` with a plain `&`, the daemon died when that shell closed (no crash, no log line, `pidof` empty), and the Q2 then saw no devices at all. Start it with `setsid nohup ... < /dev/null &`.
+
+### Not discoverable
+
+**The cause is not settled; no change is made until a capture shows it.** What the source holds (read: 5.88's and 5.66's `src/adapter.c` and `src/main.c`, Linux 5.10's `net/bluetooth/mgmt.c` and `hci_request.c`):
+
+- **The privacy refusal is not it, and is not new.** Both versions send `Set Privacy` at start when the controller supports it (`read_info_complete`), with the same value from the same `Privacy` key, and the kernel refuses it with Rejected (0x0b) whenever the adapter is already powered, which it is here: demo brings `hci0` up with `hciconfig` before it starts bluetoothd. Harmless: privacy stays off, as it is under stock.
+- **The discoverable path is the same in both versions.** demo sets `Discoverable` through libbtctl (`btctl_set_controller_discoverable`), which bluetoothd turns into `Set Connectable` then `Set Discoverable` with main.conf's timeout (`property_set_mode`, `set_discoverable`); the code that builds the command and reports `Failed to set mode` differs only in how a pending request is answered (5.88's `pending_props`), not in what is sent.
+- **0x03 is the controller's.** On a powered adapter, Linux 5.10's `set_discoverable` passes its own checks (they answer Rejected, Busy, Not Powered or Invalid Parameters, never Failed) and queues `discoverable_update`: one HCI request of Write Current IAC LAP, Write Scan Enable and Write Class of Device, then the advertising data if `HCI_ADVERTISING` is set. Its completion status is the first failing command's HCI error put through `mgmt_status`, which turns the hardware and unspecified errors into Failed (0x03). `PSCAN` without `ISCAN` after it means the request stopped at or before Write Scan Enable: Write Current IAC LAP or Write Scan Enable itself was refused.
+- **What differs at start between the versions** (diff of `read_info_complete`): 5.88 also sends `Set Wideband Speech` when supported (the kernel answers Rejected while powered, not Failed), sends Secure Connections from `SecureConnections` (default the same `on`), registers for two new events, and, without the switch above, registers the GATT database and the advertising managers. None of these sends a command the kernel would put in that request. So the likeliest causes left are the controller's state when the request ran (a command demo's `hciconfig` calls had in flight on the raw socket: `class`, `sspmode`, `auth`, `up`), or something of the first run's that stock never met; neither is clear from source.
+
+What settles it: `btmon` (or `hcidump -X`) on a `--dev` build while ours starts and demo sets Discoverable. The failing command is the one whose Command Complete carries a non-zero status, just before the `Set Discoverable` reply with Failed. Run it once with the [GATT] switch above in place too, and once with Bluetooth started from the page (demo's own order), in the [needs-device list](#needs-a-device).
+
+## Needs a device
+
+What phase 2 has done that only a Q2 can confirm, in the order to try it:
+
+1. **Car Remote over BLE under ours with `[GATT] Server = false`** (step 9): the phone app finds `coda-rc`'s service; `/tmp/coda-rc.log` shows the connection. Also `hciconfig hci0` and `btmgmt info` show LE on, so scanning and the phone's audio pairing are unaffected.
+2. **Not discoverable**: the `btmon` capture of [Not discoverable](#not-discoverable), with the failing command and its status written here.
+3. **Shanling's `hciconfig` calls around ours** (`class`, `sspmode`, `auth`): the class `hciconfig hci0 class` reads after each, and the Q2 still discoverable once the capture's cause is fixed.
+
+`test/bluez_own.py`'s Class checks fail for both daemons when it is run with STOCKFS on the MacBook (the controller is sent `01 04`, not `04 1c`, under both); they did before this change too (measured with the harness at `4fa14209`), and this page's earlier figure of 49 passing was measured with a BUILD. Not traced; inferred to be the harness's or the STOCKFS copy's rather than either daemon's, since both send the same bytes.
 
 ## Risks
 
