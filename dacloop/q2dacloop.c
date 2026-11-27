@@ -9,9 +9,14 @@
  * does not run dry while the computer's packets settle. With no packets for 200 ms the rate is looked at again. A capture overrun or a playback underrun is recovered and
  * counted; a PCM that cannot be opened is tried again each second. SIGTERM ends it, both PCMs closed.
  *
+ * The fill level: once a second the frames between the computer and the DAC (the capture's waiting frames and the
+ * playback's delay, averaged over the second) are held to the prebuffer's size by the gadget's "Capture Pitch 1000000"
+ * control, which scales the rate the Q2's feedback asks the computer for (pitch.h, docs/dacloop.md#holding-the-fill-level).
+ * Nominal at each session's start and end; a kernel without the control is left as it is (--pitch-file FILE writes
+ * the value to a file instead, for test/dacloop.py).
+ *
  * Learned from stock's USB DAC mode (its gadget script and uac2_loopback's behaviour as its usage text gives it); not
- * done here: tuning the gadget's "Capture Pitch 1000000" to hold the fill level, and DSD from "Capture Bits"
- * (docs/dacloop.md#what-is-missing). */
+ * done here: DSD from "Capture Bits" (docs/dacloop.md#what-is-missing). */
 #define _GNU_SOURCE
 #include <errno.h>
 #include <stdarg.h>
@@ -23,6 +28,7 @@
 #include <unistd.h>
 
 #include "alsa_min.h" /* player/alsa_min.h: the Q2's libasound has no headers */
+#include "pitch.h"
 
 enum { STREAM_CAPTURE = 1 };
 typedef struct _snd_ctl snd_ctl_t;
@@ -39,6 +45,16 @@ void snd_ctl_elem_value_set_interface(snd_ctl_elem_value_t *, int iface);
 void snd_ctl_elem_value_set_name(snd_ctl_elem_value_t *, const char *);
 int snd_ctl_elem_read(snd_ctl_t *, snd_ctl_elem_value_t *);
 long snd_ctl_elem_value_get_integer(const snd_ctl_elem_value_t *, unsigned idx);
+void snd_ctl_elem_value_set_integer(snd_ctl_elem_value_t *, unsigned idx, long val);
+int snd_ctl_elem_write(snd_ctl_t *, snd_ctl_elem_value_t *);
+typedef struct _snd_ctl_elem_info snd_ctl_elem_info_t;
+int snd_ctl_elem_info_malloc(snd_ctl_elem_info_t **);
+void snd_ctl_elem_info_free(snd_ctl_elem_info_t *);
+void snd_ctl_elem_info_set_interface(snd_ctl_elem_info_t *, int iface);
+void snd_ctl_elem_info_set_name(snd_ctl_elem_info_t *, const char *);
+int snd_ctl_elem_info(snd_ctl_t *, snd_ctl_elem_info_t *);
+long snd_ctl_elem_info_get_min(const snd_ctl_elem_info_t *);
+long snd_ctl_elem_info_get_max(const snd_ctl_elem_info_t *);
 #define CTL_ELEM_IFACE_PCM 2
 
 #define CHANNELS 2
@@ -47,7 +63,7 @@ long snd_ctl_elem_value_get_integer(const snd_ctl_elem_value_t *, unsigned idx);
 
 static volatile sig_atomic_t stopping;
 static const char *cap_name = "hw:CARD=UAC2Gadget,0", *play_name = "plughw:0,0", *ctl_name = "hw:CARD=UAC2Gadget",
-                  *rate_file;
+                  *rate_file, *pitch_file;
 static unsigned fixed_rate;
 static unsigned long xruns_cap, xruns_play;
 
@@ -91,6 +107,51 @@ static unsigned host_rate(void) {
     return r > 0 ? (unsigned)r : 0;
 }
 
+/* ---- the fill level (pitch.h) ---- */
+
+#define PITCH_NAME "Capture Pitch 1000000" /* the gadget card's control: its feedback scaled, 1000000 nominal */
+
+static snd_ctl_t *pitch_ctl;     /* open while a session has the control; 0 without it */
+static long pitch_lo, pitch_hi;  /* its range */
+static int pitch_now;
+
+/* the control's range, or the file's stand-in; 0 when there is neither (a kernel without the control) */
+static int pitch_open(void) {
+    if (pitch_file) return pitch_lo = PITCH_NOMINAL - PITCH_SPAN_PPM, pitch_hi = PITCH_NOMINAL + PITCH_SPAN_PPM, 1;
+    snd_ctl_elem_info_t *i;
+    if (snd_ctl_open(&pitch_ctl, ctl_name, 0) < 0) return pitch_ctl = 0, 0;
+    int ok = !snd_ctl_elem_info_malloc(&i);
+    if (ok) {
+        snd_ctl_elem_info_set_interface(i, CTL_ELEM_IFACE_PCM);
+        snd_ctl_elem_info_set_name(i, PITCH_NAME);
+        ok = snd_ctl_elem_info(pitch_ctl, i) >= 0;
+        if (ok) pitch_lo = snd_ctl_elem_info_get_min(i), pitch_hi = snd_ctl_elem_info_get_max(i);
+        snd_ctl_elem_info_free(i);
+    }
+    if (!ok) snd_ctl_close(pitch_ctl), pitch_ctl = 0;
+    return ok;
+}
+
+static void pitch_set(int v) {
+    pitch_now = v;
+    if (pitch_file) {
+        FILE *f = fopen(pitch_file, "w");
+        if (f) fprintf(f, "%d\n", v), fclose(f);
+        return;
+    }
+    snd_ctl_elem_value_t *e;
+    if (!pitch_ctl || snd_ctl_elem_value_malloc(&e)) return;
+    snd_ctl_elem_value_set_interface(e, CTL_ELEM_IFACE_PCM);
+    snd_ctl_elem_value_set_name(e, PITCH_NAME);
+    snd_ctl_elem_value_set_integer(e, 0, v);
+    if (snd_ctl_elem_write(pitch_ctl, e) < 0) say("%s: cannot set %d", PITCH_NAME, v);
+    snd_ctl_elem_value_free(e);
+}
+
+static void pitch_close(void) {
+    if (pitch_ctl) snd_ctl_close(pitch_ctl), pitch_ctl = 0;
+}
+
 static snd_pcm_t *open_pcm(const char *name, int stream, unsigned rate) {
     snd_pcm_t *p;
     snd_pcm_hw_params_t *hw;
@@ -124,8 +185,13 @@ static void session(unsigned rate) {
     say("session %u Hz: %s to %s", rate, cap_name, play_name);
     size_t pre = (size_t)rate * prebuffer_ms(rate) / 1000, have = 0, room = pre + CHUNK;
     char *ring = malloc(room * FRAME), buf[CHUNK * FRAME];
-    int fed = 0;
-    unsigned long long look = now_ms() + 200;
+    int fed = 0, pitched = pitch_open();
+    unsigned long long look = now_ms() + 200, pitch_at = 0;
+    struct pitch pc = {0};
+    double fill_sum = 0;
+    unsigned long fill_n = 0;
+    if (pitched) pitch_set(PITCH_NOMINAL);
+    else say("no %s: the fill level is not held", PITCH_NAME);
     snd_pcm_start(cap);
     while (!stopping && ring) {
         if (snd_pcm_wait(cap, 200) == 0) goto look_rate; /* no packets from the computer: look at its rate */
@@ -149,7 +215,7 @@ static void session(unsigned rate) {
                 }
                 off += (size_t)w;
             }
-            fed = 1;
+            fed = 1, pitch_at = now_ms() + 1000;
             say("prebuffered %zu frames (%u ms), feeding", pre, prebuffer_ms(rate));
             goto look_rate;
         }
@@ -161,6 +227,19 @@ static void session(unsigned rate) {
                 continue;
             }
             off += w;
+        }
+        if (pitched) { /* the frames between the computer and the DAC, after this write */
+            snd_pcm_sframes_t d = 0, a = snd_pcm_avail(cap);
+            if (!snd_pcm_delay(play, &d) && a >= 0) fill_sum += (double)(d + a), ++fill_n;
+            unsigned long long t = now_ms();
+            if (t >= pitch_at) {
+                if (fill_n) {
+                    double err = (fill_sum / (double)fill_n - (double)pre) / rate;
+                    int v = pitch_step(&pc, err, (double)(t - pitch_at + 1000) / 1000, pitch_lo, pitch_hi);
+                    if (v != pitch_now) pitch_set(v);
+                }
+                fill_sum = 0, fill_n = 0, pitch_at = t + 1000;
+            }
         }
     look_rate:
         if (now_ms() >= look) {
@@ -175,6 +254,7 @@ static void session(unsigned rate) {
 done:
     free(ring);
     snd_pcm_drop(cap), snd_pcm_close(cap), snd_pcm_drain(play), snd_pcm_close(play);
+    if (pitched) say("pitch %d at the end, back to %d", pitch_now, PITCH_NOMINAL), pitch_set(PITCH_NOMINAL), pitch_close();
     say("session %u Hz closed (overruns %lu, underruns %lu)", rate, xruns_cap, xruns_play);
 }
 
@@ -187,6 +267,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(a, "--ctl")) ctl_name = v;
         else if (!strcmp(a, "--rate-file")) rate_file = v;
         else if (!strcmp(a, "--rate")) fixed_rate = (unsigned)atoi(v);
+        else if (!strcmp(a, "--pitch-file")) pitch_file = v;
         else goto usage;
         ++i;
     }
@@ -199,6 +280,6 @@ int main(int argc, char **argv) {
     }
     return 0;
 usage:
-    fprintf(stderr, "usage: q2dacloop [--capture PCM] [--playback PCM] [--ctl CTL] [--rate-file FILE | --rate HZ]\n");
+    fprintf(stderr, "usage: q2dacloop [--capture PCM] [--playback PCM] [--ctl CTL] [--rate-file FILE | --rate HZ] [--pitch-file FILE]\n");
     return 2;
 }

@@ -3,7 +3,7 @@
 OUT ?= build/host
 CFLAGS ?= -O2
 ALSA ?= -lasound
-$(OUT)/q2dacloop: q2dacloop.c ../player/alsa_min.h | $(OUT)
+$(OUT)/q2dacloop: q2dacloop.c pitch.h ../player/alsa_min.h | $(OUT)
 	$(CC) -std=c11 -Wall -Wextra $(CFLAGS) -I../player -o $@ q2dacloop.c $(LDFLAGS) $(ALSA)
 $(OUT):
 	mkdir -p $@
