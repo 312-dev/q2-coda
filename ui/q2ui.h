@@ -302,6 +302,7 @@ enum {
     ROW_ACCENT = 1 << 5,  /* an action row in the accent (Shuffle) */
     ROW_CHECK = 1 << 6,   /* a picker's current choice */
     ROW_HEADER = 1 << 7,  /* a section header: small tertiary text, never selected */
+    ROW_SLIDER = 1 << 8,  /* a level set in its row (docs/oled-design.md#inline-sliders): level, value */
 };
 typedef struct {
     const char *title;
@@ -312,6 +313,7 @@ typedef struct {
     const image_t *icon;   /* a 20 px glyph leading the row, inked as the text */
     const image_t *art;    /* leading art of a two-line row */
     unsigned flags;
+    float level;           /* ROW_SLIDER: its fill, 0 to 1 */
 } ui_row;
 typedef struct ui_source {
     int (*count)(void *ctx);
@@ -319,6 +321,9 @@ typedef struct ui_source {
     void (*chosen)(void *ctx, int i);           /* Centre */
     void (*held)(void *ctx, int i);             /* Centre held; 0: nothing */
     void (*focus)(void *ctx, int i);            /* the selection came to row i; 0: nothing */
+    /* A grabbed ROW_SLIDER row turned: steps up (+) or down (-), more a tick on a fast spin. The
+     * source sets its level and calls list_rows_changed. */
+    void (*adjust)(void *ctx, int i, int steps);
     void *ctx;
     const char *name; /* the page's name in a route; 0: not kept */
     int pinned; /* rows at the top that stay put while the rest scroll under them (Songs' Shuffle) */
@@ -351,12 +356,14 @@ void list_changed(ui_list *l); /* the source's rows changed: lay out again, keep
 void list_reload(ui_list *l);  /* rows changed in place (a switch, a value): read again, the switch slides */
 void list_select(ui_list *l, int i, int animate);
 int list_selected(const ui_list *l);
+int list_grabbed(const ui_list *l); /* the ROW_SLIDER row Centre grabbed, the wheel's until set down; -1 none */
+int list_set_down(ui_list *l);      /* the grabbed row set down: 1 when one was */
 float list_scroll(const ui_list *l); /* px scrolled, for a test */
 extern int list_motion; /* 0: every move is at its end at once (a bench, Reduce Motion) */
 /* A page that is one list and nothing else. */
 extern const ui_page list_page;
 ui_list *list_page_list(void *st);
-/* the list last stepped, as "sel=N scroll=PX bar=PX lean=PX press=S knob=SHARE": a script's trace */
+/* the list last stepped, as "sel=N scroll=PX bar=PX lean=PX press=S knob=SHARE grab=N": a script's trace */
 int list_trace(char *out, size_t room);
 int list_last_selected(void); /* that list's selection; -1 with none */
 

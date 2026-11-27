@@ -466,6 +466,7 @@ def pages(binary, work):
     good &= album_covers(binary, work, home)
     good &= playlists(binary, work, home)
     good &= control_center(binary, work, home)
+    good &= control_center_sliders(binary, work, home)
     # a row whose page is demo's: the page is named for demo and q2ui ends with the code that says so
     _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'tick 1', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
@@ -562,10 +563,33 @@ def control_center(binary, work, home):
     trace, _, _, (sent, _, _) = script(binary, work, 60, lines, *home, '--told', told, queue=True)
     good &= check('with no pipe (q2ui not started by demo) a switch sends nothing and stays as demo has it',
                   sent == [] and trace[-1]['knob'] < 0.01, f"{sent} {trace[-1]['knob']}")
-    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'hold return', 'rest', 'tick 5', 'rest', 'key centre', 'run 100'],
+    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'hold return', 'rest', 'tick 7', 'rest', 'key centre', 'run 100'],
                                    *home, '--told', told, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
     good &= check("its USB row opens demo's USB picker", asked == 'usbpick_page\n' and sent == [], repr(asked))
+    return good
+
+
+def control_center_sliders(binary, work, home):
+    """Control Center's Brightness and Volume (ui/page_control.c), the toolkit's inline slider rows (ROW_SLIDER): Centre
+    grabs one, the wheel sets it (up the wheel is more), Centre or Return sets it down and the wheel moves the
+    selection again. Brightness goes down q2ui's pipe, Volume down the player's queue, up to demo's top."""
+    good = True
+    told = pathlib.Path(tempfile.mkdtemp(dir=work))/'told'
+    told.write_text('out=other\nwifi=1\nbton=0\ncar=0\nsmart=0\neq=1\nusb=Automatic\nbright=40\nvol=30\nvolmax=33\n')
+    lines = ['rest', 'hold return', 'rest', 'tick 5', 'rest', 'key centre', 'run 50', 'tick -2', 'tick 1', 'key centre', 'run 50',
+             'tick 1', 'rest', 'key centre', 'run 50', 'tick -5', 'key return', 'rest', 'shot @cc.ppm', 'tick 1', 'rest']
+    trace, pics, _, (sent, _, _), said = script(binary, work, 60, lines, *home, '--told', told, queue=True, ctl=True)
+    verbs = [line.split(' ', 1)[1] for line in sent]
+    good &= check('Brightness, grabbed, goes up two and down one down the pipe; Volume, grabbed, goes up to demo\'s top (33) '
+                  'down the queue and no further', said == ['set bright 41', 'set bright 42', 'set bright 41'] and
+                  verbs == ['volume 31', 'volume 32', 'volume 33'], f'{said} {verbs}')
+    good &= check('Return set Volume down and stayed on the page; the next tick moved the selection to USB',
+                  trace[-1]['grab'] == -1 and trace[-1]['sel'] == 7, f"{trace[-1]['grab']} {trace[-1]['sel']}")
+    p = pics['cc']
+    fill, knob, rest = p.at(205, 234), p.at(229, 234), p.at(275, 234)
+    good &= check("Brightness's row shows 41%: accent fill to a white knob 41% along its track, Track beyond",
+                  fill == (0x21, 0x60, 0xd8) and knob == (255, 255, 255) and rest == (0x33, 0x33, 0x33), f'{fill} {knob} {rest}')
     return good
 
 

@@ -436,3 +436,24 @@ def test_without_a_pipe_q2ui_is_started_with_no_ctl(fw):
     g.poll()
     args = [a for n, a in fw.calls() if n == 'fw_execl'][0]
     assert [C.string_at(p) for p in args[:2]] == [BINARY, BINARY] and args[2] == 0
+
+
+def test_q2uis_brightness_slider_sets_the_backlight_and_is_told_it_with_the_volume(fw):
+    """Control Center's sliders in q2ui: demo tells bright, vol and volmax (vol_cap: how high a step may take the volume);
+    "set bright N" is stock's config_lightness for 0 to 100 only."""
+    from conftest import Files
+    files = Files(fw)
+    g = Gate(fw)
+    fw.var('g_lightness', C.c_ubyte).value = 55
+    fw.var('g_volume', C.c_ubyte).value = 30
+    fw.var('g_maxvolume', C.c_ubyte).value = 70
+    fw.mock('mclGetOutputWay', lambda *_: 0)
+    g.poll()
+    g.poll()
+    said = dict(line.split('=', 1) for line in files.files['/tmp/q2ui.status'].decode().splitlines())
+    assert said['bright'] == '55' and said['vol'] == '30' and said['volmax'] == '70'
+    lit = []
+    fw.mock('config_lightness', lambda v, *_: lit.append(v) or 0)
+    cc = fw.fn('q2ui_cc_set', C.c_int, C.c_char_p, C.c_int)
+    assert cc(b'bright', 80) == 0 and lit == [80]
+    assert cc(b'bright', 101) == -1 and cc(b'bright', -1) == -1 and lit == [80]

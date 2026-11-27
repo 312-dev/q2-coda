@@ -792,17 +792,20 @@ int cc_key(void *win, unsigned key) {
 /* ---- q2ui's Control Center (docs/ui-rewrite.md#cutover): what it shows, and its switches ----
  * q2ui draws a Control Center of its own while it has the screen. The states it shows are added to
  * the status row's in its file (q2ui_gate.c tell): wifi and bt (the switches stock's own pages
- * show), car (Car Remote), smart (Smart Wi-Fi), eq (on in any mode), usb (the USB setting's value).
+ * show), car (Car Remote), smart (Smart Wi-Fi), eq (on in any mode), usb (the USB setting's value),
+ * bright (the backlight, 0 to 100), vol and volmax (the volume and how high it may go: vol_cap).
  * Its switches come back as "set NAME 0|1" down the pipe the gate gives q2ui alone (q2ui_gate.c
  * ctl, q2ui_cc_set), each flipped as this page's circle flips it; q2ui's Display page sets
- * Light Mode ("set light 0|1|2") and Reduce Motion ("set motion 0|1") the same way, and reads them
+ * Light Mode ("set light 0|1|2") and Reduce Motion ("set motion 0|1") the same way, and its Control
+ * Center's Brightness slider the backlight ("set bright 0..100"); Display reads its settings
  * back from config.ini itself (ui/config.c). Bluetooth is not one of them:
  * stock flips it only from its page's row, so q2ui opens that page. */
 unsigned q2ui_cc_state(char *b, unsigned room) {
     eq_state s;
     eq_load(&s);
-    int n = tk_snprintf(b, room, "wifi=%d\nbton=%d\ncar=%d\nsmart=%d\neq=%d\nusb=%s\n", !!g_wififlag, !!g_bluetoothflag,
-                        !!coda_rc_enabled(), !!st.smart_wifi, s.mode != EQ_OFF, usb_ui_value());
+    int n = tk_snprintf(b, room, "wifi=%d\nbton=%d\ncar=%d\nsmart=%d\neq=%d\nusb=%s\nbright=%d\nvol=%d\nvolmax=%d\n", !!g_wififlag,
+                        !!g_bluetoothflag, !!coda_rc_enabled(), !!st.smart_wifi, s.mode != EQ_OFF, usb_ui_value(),
+                        (int)g_lightness, (int)g_volume, vol_cap());
     return n < 0 ? 0 : (unsigned)n >= room ? room - 1 : (unsigned)n;
 }
 /* A switch of q2ui's set to on (1) or off: 0 when done or already so, -1 for a name it has not. */
@@ -824,6 +827,8 @@ int q2ui_cc_set(const char *name, int on) {
         st.light = on;
         write_int_config(on, "IPOD", "LIGHT");
         st.light_day = light_day(clock_now(buf)); /* Auto applies from this choice, as Display's row */
+    } else if (!tk_strcmp(name, "bright") && on >= 0 && on <= 100) { /* q2ui's Control Center's slider */
+        config_lightness(on); /* the backlight set and saved, as Display's Brightness row sets a step */
     } else if (!tk_strcmp(name, "motion")) { /* q2ui's Display: Reduce Motion */
         st.reduce_motion = !!on;
         write_int_config(st.reduce_motion, "IPOD", "REDUCEMOTION");
