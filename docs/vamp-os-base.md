@@ -15,8 +15,9 @@ On GRAYTHINKPAD the same commands run without `tools/mac/q2env`. `build` needs L
 | Piece | What |
 | --- | --- |
 | `os/` | The `BR2_EXTERNAL` tree: `configs/vamp_q2_defconfig`, the packages (`package/`), the root filesystem's own files (`board/q2/overlay/`), the post-build step, the vendor manifest (`vendor/V1.36.tsv`), one patch to Buildroot (`patches/buildroot/`) |
-| `tools/vampos.py` | `build`, `compose`, `vendor-manifest`, `qemu` (its docstring). Not `tools/os.py`: a module named `os` in `tools/` is imported in place of Python's own by a script there run with `-S` |
+| `tools/vampos.py` | `build`, `compose`, `vendor-manifest`, `qemu`, `card` (its docstring). Not `tools/os.py`: a module named `os` in `tools/` is imported in place of Python's own by a script there run with `-S` |
 | `test/os_image.py` | The checks below |
+| `patch/q2vampos.sh`, `test/q2vampos.py` | The [card boot](#card-boot) from a `--dev` build of today's Vamp, and its test |
 
 **Pinned.** Buildroot 2026.02.3, the long-term line, by SHA-256 (the one in buildroot.org's signed `.sign`). Every package Buildroot fetches is checked against its `.hash` file; ours carry the hashes `tools/player.py` (FFmpeg 7.1.5), `tools/thirdparty.py` (mbedTLS 3.6.8) and `tools/ui.py` (stb_truetype, stb_image) pin, and `test/os_image.py` fails when the two differ. Vamp's own sources are not read from the working tree: `build` exports `os/`, `tools/`, `player/`, `patch/` and `assets/fonts` at `HEAD`, and `ui/` and `patch/` at `Q2UI_COMMIT` (a commit of `feat/render-engine`, read-only here), and `manifest.json` names both commits. `--worktree` builds the working tree instead and marks the commit `-dirty`. The configure lines of FFmpeg and the mbedTLS settings come from `tools/player.py` and `tools/thirdparty.py` themselves (`os/support/pins.py`), so they have one definition.
 
@@ -31,20 +32,20 @@ Two departures from [the roadmap's toolchain plan](vamp-os.md#toolchain-and-libc
 
 ## What boots
 
-BusyBox `init` (`/sbin/init`, and `/linuxrc` for a kernel line that names it) reads [`/etc/inittab`](../os/board/q2/overlay/etc/inittab): `/etc/init.d/rcS` once, then `runsvdir` over `/etc/sv`, restarted if it ends, and a login on `ttyS3` where the port exists, as stock has. [`rcS`](../os/board/q2/overlay/etc/init.d/rcS) in order:
+BusyBox `init` (`/sbin/init`, and `/linuxrc` for a kernel line that names it) reads [`/etc/inittab`](../os/board/q2/overlay/etc/inittab): `/etc/init.d/rcS` once, then `runsvdir` over `/etc/sv`, restarted if it ends. No login on the serial port and root locked, as today's Vamp has it. [`rcS`](../os/board/q2/overlay/etc/init.d/rcS) in order:
 
 1. `/proc`, `/sys`, a tmpfs `/dev` with `null` and `console`, `devpts`, `/dev/shm`, `/tmp`, `/run`, as stock's inittab makes them (stock's kernel may not have devtmpfs: stock mounts a tmpfs there, so this image does too).
 2. `mdev -s`, then `mdev -d`, its daemon, so the devices the modules make get their nodes. [`/etc/mdev.conf`](../os/board/q2/overlay/etc/mdev.conf) loads no module (no `modprobe` in the image) and mounts the card on `/mnt/mmc` when it comes.
-3. `/mnt/data`: the UBI volume on the partition `/proc/mtd` names `userdata`, attached as `ubi1` as stock's `mount_ubifs.sh` does, mounted `-o sync`. **Never erased or formatted:** stock's script runs `flash_erase` on the partition when the attach or the mount fails; this image has no tool that could (`test/os_image.py` checks), and on any failure `/mnt/data` is a tmpfs for that boot and the boot log says why.
-4. The modules: Shanling's `driver_default_init_script.sh`, unchanged, from `/module_driver` (a link to `/vendor/module_driver`), as stock's `S11module_driver_default` runs it. It is 24 `insmod` lines with their parameters, run by this image's BusyBox. Then each `.ko` there is looked for in `/proc/modules` and the ones missing are logged.
+3. `/mnt/data` (left as it is when it is already mounted, as on a [card boot](#card-boot)): the UBI volume on the partition `/proc/mtd` names `userdata`, attached as `ubi1` as stock's `mount_ubifs.sh` does, mounted `-o sync`. **Never erased or formatted:** stock's script runs `flash_erase` on the partition when the attach or the mount fails; this image has no tool that could (`test/os_image.py` checks), and on any failure `/mnt/data` is a tmpfs for that boot and the boot log says why.
+4. The modules (not run when any of them is loaded already, as on a card boot: the keyboard module takes its keys through a parameter file written once per load): Shanling's `driver_default_init_script.sh`, unchanged, from `/module_driver` (a link to `/vendor/module_driver`), as stock's `S11module_driver_default` runs it. It is 24 `insmod` lines with their parameters, run by this image's BusyBox. Then each `.ko` there is looked for in `/proc/modules` and the ones missing are logged.
 5. A wait of up to 5 s for `/dev/fb0`, and the input devices with their names.
 
 Then init starts `runsvdir`, which starts `q2player` and `q2ui` ([`/etc/sv`](../os/board/q2/overlay/etc/sv)) and starts each again when it ends; a `finish` script waits 10 s after a failure, so a service that cannot run yet does not spin. Each step writes a line to `/run/vamp/boot.log`, and once `/mnt/data` is mounted also to `/mnt/data/vamp/boot.log` (the last boot's kept as `boot.log.1`), with `dmesg.log`, `modules.log` (the module script's output) and `kernel.txt` (`/proc/cmdline`, `/proc/modules`) beside it. Nothing of Shanling's userspace runs: no program of theirs is in the image, and the vendor scripts are shell lines run by BusyBox.
 
 | Service | Runs | What it waits for |
 | --- | --- | --- |
-| `q2player` | `/usr/bin/q2player`, built as every Vamp image's (Car Audio's output on) against this image's alsa-lib, FFmpeg 7.1.5 and mbedTLS | its server on `/tmp/sock_play`, `q2playd`, which does not exist yet: without it the player ends after 5 s and is started again |
-| `q2ui` | `/usr/bin/q2ui --fonts /usr/share/vamp/fonts --icons /usr/share/vamp/icons` | `/mnt/data/database.db`, stock's library, which a Q2 that ran stock has; without it `q2ui` ends at once ("cannot read") |
+| `q2player` | `/usr/bin/q2player`, built as every Vamp image's (Car Audio's output on) against this image's alsa-lib, FFmpeg 7.1.5 and mbedTLS | its server on `/tmp/sock_play`, `q2playd`, which does not exist yet: without it the player ends after 5 s (read: `player/main.c`) and is started again |
+| `q2ui` | `/usr/bin/q2ui --fonts /usr/share/vamp/fonts --icons /usr/share/vamp/icons` | `/mnt/data/database.db`, stock's library, which a Q2 that ran stock has; without it `q2ui` ends at once (read: `ui/main.c`, "cannot read") |
 
 ## The vendor set
 
@@ -61,23 +62,52 @@ The files of Shanling's the image needs at run time: the 24 modules, their 25 sc
 
 | Stands in | Does not stand in |
 | --- | --- |
-| Every program of the image, its dynamic linker and libraries, the ABI (QEMU picks a P5600 for NaN 2008 code) | The kernel: there is none. Shanling's kernel, its configuration, its system calls and their errors are the VM's Linux 6.x seen through QEMU |
+| Every program of the image, its dynamic linker and libraries, the ABI | The kernel: there is none. Shanling's kernel, its configuration, its system calls and their errors are the VM's (Linux 6.8 here) seen through QEMU |
 | `init`, `rcS`, `runsvdir`, `runsv`, the services' scripts, in the image's order | The modules: `insmod`, `mount`, `mknod`, `mdev`, `ubiattach` and `dmesg` are stand-ins that record their arguments. No module is loaded, so whether each loads into Shanling's kernel under this init is a Q2 question |
 | The framebuffer as a file of two 320x375 pages, the keys and the wheel as FIFOs (no ioctl answers: `q2ui` takes the file's size) | `/proc/mtd`, UBI, the card, the panel's timing, vsync, the DAC, ALSA (no sound card: `q2player` never opens one here) |
 | `q2player`'s server, by the test on `/tmp/sock_play` | Power, suspend, the watchdog, the PMIC's keys |
 
 The boot passes when the record shows, in this order: `/proc`, the tmpfs `/dev`, `mdev -s` and `mdev -d`, the data step (here: no `userdata` in `/proc/mtd`, so a tmpfs), the 24 `insmod` calls in the order and with the parameters Shanling's scripts give (read from the vendor files themselves), `modules: done`, `fb0: present` and `rcS: done`, all before either service starts; then `q2player` connects to the test's socket and `q2ui` draws into the framebuffer.
 
+## Card boot
+
+How Vamp OS first runs on a Q2 without writing its root filesystem to flash (the owner's go-ahead, 2026-11-27): a `--dev` build of today's Vamp hands the Q2 over to an image on the card, as it hands it to Rockbox ([boot: Rockbox](boot.md#rockbox)). Release builds do not have it.
+
+| What | Where |
+| --- | --- |
+| The image | `/mnt/mmc/.vamp/os/vampos.squashfs`, a composed image, and `vampos.squashfs.sha256` beside it (`sha256sum`'s line). `tools/vampos.py card --image composed.squashfs --card CARD` writes both and the switch |
+| The switch | `.vamp/os/boot-once` (one boot: removed before anything else is done) or `boot-always` (every boot); `boot-once` wins when both are there |
+| The hand-off | `/usr/bin/q2vampos` (`patch/q2vampos.sh`), run by `S90play` before the boot choice and demo (`tools/build.py` `VAMPOS_HOOK`) |
+| The log | `/mnt/data/vamp/handoff.log`, a line per decision and outcome; Vamp OS's own `boot.log` beside it |
+
+`q2vampos` waits up to 3 s for the card, as the Rockbox choice does (so a `--dev` boot with no card in starts 3 s later than before), then, in order: no switch is the usual boot and writes nothing; `boot-once` is removed (and a `boot-once` that cannot be removed is not used); Play/Pause held at power-on (`q2boot`, Rockbox's key) is the usual boot; the image and its `.sha256` must both be there and agree; the image is loop-mounted read-only at `/tmp/vamp-os-root` and must hold an `rcS` and `runsvdir`; `/mnt/data` and `/mnt/mmc` are bind-mounted into it; stock's splash and its `mdev` daemon are stopped; then the image's `rcS` and `runsvdir` run in a chroot of it. Every failure before `runsvdir` undoes what it did and is the usual boot, with its reason in the log; a Vamp OS that runs and then ends (`runsvdir` exits) reboots the Q2. So **a hang, a crash or a bad image, then a power cycle, is today's Vamp again**, unless `boot-always` is set, when Play/Pause held at power-on is the way out.
+
+It is a chroot and not `switch_root`: `switch_root` must run as PID 1 and replaces an initramfs, and here PID 1 is stock's BusyBox `init` on a squashfs root. So stock's `init` stays PID 1, and what stock's boot started before `S90play` keeps running beside Vamp OS: `dbus-daemon`, `q2guard` (the overheat guardian, which is wanted), and on a `--dev` build `q2remote` and `adbd`, so **adb works while Vamp OS runs** (`adb shell cat /mnt/data/vamp/boot.log`, `ls /tmp/vamp-os-root`). The kernel and the modules are the ones stock's boot loaded; Vamp OS's `rcS` sees them loaded and `/mnt/data` mounted and leaves both ([What boots](#what-boots)). Nothing is written to flash but `/mnt/data/vamp/` (the two logs) and what Vamp OS's programs write in `/mnt/data` (`q2ui`'s `q2ui-stats.json`).
+
+**Tested without a Q2:** `test/q2vampos.py` runs `q2vampos` under the host's `sh` (dash: the Q2 runs BusyBox `ash`) with stand-ins for `mount`, `umount`, `chroot`, `killall`, `q2boot` and `S10mdev`: no switch writes nothing, `boot-once` is gone before the key is read and before any mount, `boot-always` stays, Play/Pause, a missing image or hash file, a wrong or short hash, a failed loop mount, an image that is not Vamp OS, a failed `rcS` and an unremovable `boot-once` each end in the usual boot with their log line, and a hand-off runs the mounts, the stops and the two chroots in that order. Four broken copies of the script (boot-once removed after the mount, no hash compare, a wrong exit status, a log line on every boot) each fail it (`Q2VAMPOS_SCRIPT`). `test/build.py` checks the hook in `S90play` (only exit 2 reboots; 1, 0, 3 and a missing `q2vampos` go on to demo; the old `[ $? = 1 ] ||` form fails it) and, with `--build`, that a `--dev` image ships `q2vampos` and a release has neither it nor the hook. `test/os_image.py --card-boot` boots the image with `/mnt/data` mounted and every vendor module in `/proc/modules`: no `insmod`, no attach, the services after `rcS`. **Not tested:** the loop device (whether the kernel has one is a Q2 question), a real chroot of the image over a running stock boot, and stopping stock's `mdev`.
+
 ## Size and time
 
-RESULTS
+Measured on the MacBook Pro (M-series, `tools/mac/q2env`'s native arm64 image, the Colima VM's 9 CPUs and 11 GB shared with three other workers), 2026-11-27:
+
+| | |
+| --- | --- |
+| `vampos.squashfs` | 6,569,984 bytes (6.3 MiB), 9% of mtd2's 72 MiB (`ROOTFS_ROOM`) |
+| Composed, with `/vendor` | 8,650,752 bytes (8.3 MiB) |
+| Largest files | `q2player` 3.2 MB (FFmpeg and mbedTLS inside), `libc.so.6` 2.0 MB, `sqlite3` (the shell) 1.9 MB, `libsqlite3` 1.2 MB, `libasound` 1.2 MB, `busybox` 1.1 MB, the two Inter faces 0.8 MB, `q2ui` 0.2 MB |
+| A full build from an empty build directory, downloads cached | 929 s and 909 s (two runs, `make clean` before each, `BR2_JLEVEL=4`, niced), most of it the toolchain (binutils, GCC twice, glibc) |
+| A build after a commit, toolchain and FFmpeg built | 8 s to a few minutes, by what changed |
+| The build directory, `/home/gray/.cache/q2-os/out` | 6.7 GB; downloads in `~/.cache/q2-os/dl` 0.95 GB |
+| Under the emulator: `rcS`'s first line to both services started | about 2.5 s (QEMU user mode on the VM; a Q2 is not this) |
+
+**Reproducible, as far as shown:** after `dirclean` of every target package (q2player, its FFmpeg and mbedTLS, q2ui and its headers, the fonts, BusyBox, SQLite, alsa-lib) and a rebuild at the same commit, `vampos.squashfs` was the same bytes (SHA-256 `4d8527be...0570935` both times, commit `f2786f2f`), and composing it twice gave the same image (`54b3121b...7daf76`). Not shown: that a second toolchain build gives the same bytes (the two full builds were of different commits), or that another machine does. The image's bytes follow the commit as well as the sources (`/etc/vamp-release` names it).
 
 ## What is missing
 
 In the order it is needed:
 
-1. **A first boot on a Q2** ([below](#first-boot-on-a-q2)): whether the modules load, whether the kernel has what this init assumes (a tmpfs `/dev` and mdev, UBI, LZO squashfs), whether the watchdog runs.
-2. **A way back in without stock**: adbd over USB and Wi-Fi (the roadmap's priority, M1), and the rescue page. Until then a Vamp OS Q2 is reached by restoring stock.
+1. **A first run on a Q2**, from the card ([below](#first-boot-on-a-q2)): whether the kernel has loop devices, whether `q2ui` and `q2player` run on its kernel, then a boot from flash: whether the modules load under this init, whether the kernel has what it assumes (a tmpfs `/dev` and mdev, UBI, LZO squashfs), whether the watchdog runs.
+2. **A way back in without stock**: adbd over USB and Wi-Fi (the roadmap's priority, M1), and the rescue page. A card boot keeps today's Vamp's adbd; a flash boot has none.
 3. **q2playd**, so `q2player` has a server and `q2ui` a player, and **q2libd**, so `q2ui` has a library on a Q2 that never ran stock. Until then the UI draws its pages and plays nothing.
 4. **q2sysd**: power (the power key does nothing here; whether the PMIC's long press still cuts power is a Q2 question), battery, the jack and the DAC, screen off.
 5. **The installer** (`q2pkgd`'s system half) and the expected-hash check of a composed image on the device: `mksquashfs` in the image and the test that a Q2 and the build machine compose the same bytes.
@@ -86,14 +116,16 @@ In the order it is needed:
 
 ## First boot on a Q2
 
-Not done: the physical Q2 belongs to the main session, and **nothing is installed on it until the recovery path has been tried on that unit.** The plan, in order; each step stops the plan if it fails:
+Not done: the Q2 belongs to the main session, and **nothing goes on it until Shanling's recovery has been tried on that unit.** The card boot comes first; a flash install only after it works. Each step stops the plan if it fails.
 
-1. **Read the unit, change nothing.** Over adb on stock: `cat /proc/cmdline /proc/mtd /proc/filesystems /proc/version`, `ls /dev | head`, `cat /sys/class/watchdog/watchdog0/state` if it exists, `grep -c . /proc/modules`, and `/proc/config.gz` if present. These settle the assumptions above (`init=`, the partition names, squashfs with LZO, ubifs, devtmpfs, the watchdog).
-2. **Prove the recovery path on this unit, with stock.** Put Shanling's own recovery package's `recovery-update/` on a card, hold Previous and power on with Centre ([README](../README.md#restoring-stock-firmware)), and check the unit comes back on stock with `/mnt/data` (settings, pairings) intact. This is the way back from every later step; it is tried before anything of ours is flashed.
-3. **Compare the folder.** List the recovery package's `recovery-update/` (file names, sizes) against stock's `update.tar`'s: whether the recovery needs `xImage` beside `rootfs.squashfs`, and anything else it reads.
-4. **Make the card for Vamp OS**: `tools/vampos.py compose --zip ZIP` on the build machine, then `recovery-update/` with the unit's own `xImage` (from the same ZIP) and the composed image as `rootfs.squashfs`, laid out as step 3 found. A second card keeps the stock recovery folder of step 2.
-5. **Boot it.** Expect a black screen (no splash) for the kernel's few seconds, then `q2ui` if `/mnt/data/database.db` is there. No key powers it off (no q2sysd): hold Power for the PMIC's cut-off, or let the battery run down.
-6. **Read what happened, whatever happened**: restore stock from the second card (step 2's route), then over adb `cat /mnt/data/vamp/boot.log`, `modules.log`, `dmesg.log`, `kernel.txt`. The boot log has a line per step with the time since boot, the modules that did not load, the framebuffer and the input devices, the watchdog's state.
-7. If it boot-loops (the watchdog, or `init` failing), the same route restores stock; the boot log of each attempt is kept (`boot.log`, `boot.log.1`) when `/mnt/data` was mounted.
+1. **Prove the recovery on this unit, with stock.** Put Shanling's own recovery package's `recovery-update/` on a card, hold Previous and power on with Centre ([README](../README.md#restoring-stock-firmware)), and check the unit comes back on stock with `/mnt/data` (settings, pairings) intact. This is the way back from every later step.
+2. **Back up `/mnt/data`**, on whatever firmware the unit then runs, over adb: `adb shell 'tar -C /mnt -cf - data' > q2-data-$(date +%Y%m%d).tar` and `tar tf` it to see `config.ini`, `database.db` and `bluetooth/` in it; keep it off the Q2.
+3. **Read the unit, change nothing**: `cat /proc/cmdline /proc/mtd /proc/filesystems /proc/version /proc/devices`, `ls /dev/loop* /sys/module/loop 2>&1`, `cat /sys/class/watchdog/watchdog0/state`, `/proc/config.gz` if present. No `loop` in `/proc/devices` and no `/dev/loop0` means the card boot cannot work (it would log "loop mount of the image failed" and boot today's Vamp): stop and report.
+4. **Install a `--dev` build of today's Vamp from this branch** (`tools/ci/rebuild.py --dev`, the usual update path). Boot it with no `.vamp/os` on the card: it must behave as before, and `/mnt/data/vamp/handoff.log` must not exist.
+5. **Lay out the card**: on the computer, `tools/vampos.py build`, then `compose --zip ZIP`, then `card --image composed.squashfs --card CARD` (or `adb push` the image and its `.sha256` to `/mnt/mmc/.vamp/os/` and `adb shell touch /mnt/mmc/.vamp/os/boot-once`). Check with `adb shell 'cd /mnt/mmc/.vamp/os && sha256sum -c vampos.squashfs.sha256 && ls'`.
+6. **Try a fallback first**: make the `.sha256` wrong (`adb shell 'echo 0 > /mnt/mmc/.vamp/os/vampos.squashfs.sha256'`), `touch boot-once`, `adb reboot`: today's Vamp, `boot-once` gone, and a "SHA-256 is" line in `handoff.log`. Put the right `.sha256` back.
+7. **The card boot**: `touch boot-once`, `adb reboot`. Expect stock's boot and splash, then a black screen and `q2ui`'s Home (if `/mnt/data/database.db` is there). Over adb, which stays up: `cat /mnt/data/vamp/handoff.log /mnt/data/vamp/boot.log /mnt/data/vamp/kernel.txt`, `ps | grep -E 'q2ui|q2player|runsv'`, `ls /tmp/vamp-os-root/dev/fb0 /tmp/vamp-os-root/dev/input`. `q2player` restarting every 15 s is expected (no `q2playd`).
+8. **Come back**: `adb reboot`, or a power cycle if adb is gone (hold Power for the PMIC's cut-off). Today's Vamp must start (`boot-once` was spent), and `handoff.log` holds the hand-off's lines. If it does not, step 1's card restores stock, and step 2's tar has the data.
+9. **Only after the card boot works, a boot from flash**: `recovery-update/` with the unit's own `xImage` (from the same ZIP) and the composed image as `rootfs.squashfs`, laid out as Shanling's recovery package's folder is (compare names and sizes first: whether the recovery needs `xImage`, and what else it reads), then hold Previous and power on with Centre. Expect a black screen for the kernel's few seconds, then `q2ui`. There is no adb in Vamp OS yet: read what happened by restoring stock or today's Vamp from step 1's card and then `cat /mnt/data/vamp/boot.log modules.log dmesg.log kernel.txt` over adb (the last boot's log is kept as `boot.log.1`).
 
 A second Q2 kept on a known image would halve the cost of each mistake ([M5](vamp-os.md#m5-the-vamp-os-base-and-the-installer)).
