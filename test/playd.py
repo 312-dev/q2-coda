@@ -551,7 +551,7 @@ def test_a_source_plays_its_url_and_gives_the_queue_back_paused_where_it_was(run
     assert pl.names()[-1] == 'mcl-stop'
     a.say('now')
     got = fields(a.line())
-    assert (got['title'], got['state'], got['pos'], got['len'], got['id']) == ('Beta', '2', '42000', '200', '2'), 'paused, where it was'
+    assert (got['title'], got['state'], got['pos'], got['len'], got['id']) == ('Beta', '2', '42', '200', '2'), 'paused, where it was'
     a.say('resume')
     assert a.line() == 'ok'
     pl.pump()
@@ -658,3 +658,19 @@ def test_a_source_the_player_cannot_take_is_refused(run, url):
     assert a.line() == 'err source'
     a.say('focus')
     assert a.line() == 'focus source=0 held=0'
+
+
+def test_q2play1_gives_the_position_in_seconds_and_the_now_file_in_ms(run):
+    root, pl = run
+    a = api(root)
+    a.say('watch')
+    assert a.line() == 'ok'
+    play_list(root, [1], 0)
+    pl.info = '900000|44100|200|42|FLAC|16'
+    pl.pump(1.5)
+    a.say('now')
+    line = a.line()
+    while not line.startswith('now ') or fields(line)['pos'] == '0':
+        line = a.line()
+    assert fields(line)['pos'] == '42', 'seconds, as docs/platform/playback.md says (q2scrobd counts them so)'
+    assert now(root, 0.6)['pos'] == '42000', "the now file keeps the shim's milliseconds"

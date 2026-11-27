@@ -665,12 +665,14 @@ static void field(char *out, size_t room, const char *in, int encode) {
     out[j] = 0;
 }
 
+/* What plays: Q2PLAY/1's now fields (encode 1: free text percent-encoded, pos in seconds), or the now file's (pos in
+ * ms, as demo's shim writes it). */
 static void now_text(char *out, size_t room, const char *sep, int encode) {
     char t[800], a[800], b[800];
     int id = q.n && !q.paths ? q.ids[q.order[q.at]] : 0;
     field(t, sizeof t, q.title, encode), field(a, sizeof a, q.artist, encode), field(b, sizeof b, q.album, encode);
     snprintf(out, room, "title=%s%sartist=%s%salbum=%s%sstate=%d%spos=%d%slen=%d%svolume=%d%sid=%d", t, sep, a, sep, b, sep,
-             q.state, sep, q.pos_ms, sep, q.len_s, sep, q.volume, sep, id);
+             q.state, sep, encode ? q.pos_ms / 1000 : q.pos_ms, sep, q.len_s, sep, q.volume, sep, id);
 }
 
 static void now_write(void) {
