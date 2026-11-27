@@ -29,7 +29,7 @@ static void s_row(void *ctx, int i, ui_row *out) {
 }
 static void s_chosen(void *ctx, int i) {
     struct songs_st *s = ctx;
-    player_play(s->ids, s->n, i, 0);
+    if (!player_play(s->ids, s->n, i, 0)) ui_push(&page_now, 0); /* as demo's Now Playing comes up for a song chosen */
 }
 static void group_songs_push(int kind, int group) {
     /* the page keeps its source's context for as long as the program runs: a list is opened a

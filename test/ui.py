@@ -472,6 +472,18 @@ def pages(binary, work):
     good &= album_covers(binary, work, home)
     good &= playlists(binary, work, home)
     good &= control_center(binary, work, home)
+    # Centre on a song opens Now Playing over the list, as demo's playing_page comes up when a song is chosen
+    tops = []
+    for walk in (['rest', 'tick 2', 'rest', 'key centre', 'rest'],  # Songs (the page these scripts open on)
+                 ['rest', 'key centre', 'rest', 'tick 2', 'rest', 'key centre', 'rest', 'key centre', 'rest', 'key centre', 'rest']):
+        _, _, stats, (sent, _, _) = script(binary, work, 60, walk, *(() if len(walk) == 5 else home), queue=True)
+        tops.append((stats['top'], len(sent)))
+    good &= check("Centre on a song in Songs and in an album plays it and opens Now Playing over the list",
+                  tops == [('now', 1), ('now', 1)], str(tops))
+    # and Return from it gives the list back, where it was
+    trace, _, stats, _ = script(binary, work, 60, ['rest', 'tick 2', 'rest', 'key centre', 'rest', 'key return', 'rest'], queue=True)
+    good &= check('Return from that Now Playing is the list again on the same row', stats['top'] != 'now' and trace[-1]['sel'] == 3,
+                  f"{stats['top']} {trace[-1]['sel']}")
     good &= control_center_sliders(binary, work, home)
     # a row whose page is demo's: the page is named for demo and q2ui ends with the code that says so
     _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'tick 1', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
@@ -953,11 +965,15 @@ def live(binary, work):
     good &= check('Centre on the third song sends one play, from that song, unshuffled',
                   len(lines) == 1 and lines[0].split()[1:] == ['play', '2', '0', '40'], str(lines))
     good &= check("the list it names is every song's id in the list's order", ids == [str(i) for i in want], f'{len(ids)} ids')
+    r.key(KEY_RETURN)  # Now Playing, which the play opened, gives the list back
+    time.sleep(0.6)
     r.ticks(-3)
     r.key(KEY_CENTRE)
     time.sleep(0.4)
     lines = r.sent()
     good &= check('Centre on Shuffle sends the same list shuffled', len(lines) == 1 and lines[0].split()[1:] == ['play', '0', '1', '40'], str(lines))
+    r.key(KEY_RETURN)
+    time.sleep(0.6)
     # ended from outside, as demo ends it for a window of its own: the next start opens on the row it rested on
     r.ticks(5)
     r.rest()
