@@ -936,7 +936,8 @@ static int command(const char *verb, const int *ids, int n_ids) {
     if (src.on && (!strcmp(verb, "next") || !strcmp(verb, "previous"))) return -1; /* a source is one URL */
     if (!strcmp(verb, "next")) {
         if (q.at + 1 < q.n) return start_at(q.at + 1);
-        if (!q.paths || !mq.on || !*mq.want || mq.waiting || src.on) return -1;
+        if (mq.on && mq.waiting && !src.on) return 0; /* already waiting for it: nothing changes, as the firmware's */
+        if (!q.paths || !mq.on || !*mq.want || src.on) return -1;
         stop(); /* the next not there yet: Now Playing on it, played as it lands (the firmware's addon_next_waits) */
         mq.waiting = 1, q.at = q.n - 1, q.state = PLAYING;
         logf_("next: waiting for %s", mq.want);

@@ -809,6 +809,11 @@ def test_next_before_the_next_song_lands_waits_for_it(run):
     assert pl.names()[-1] == 'mcl-stop', 'the song playing stopped'
     n = now(root, 0.3)
     assert (n['state'], n['title']) == ('1', 'Cloud Two')
+    sent = len(pl.got)
+    a.say('next')
+    assert a.line() == 'ok', 'a next while it waits: nothing changes (addon_next_waits answers it the same)'
+    pl.pump(0.3)
+    assert len(pl.got) == sent
     land(root, two)
     pl.pump(1.0)
     assert pl.songs()[-1] == ('set-songurl', two)
