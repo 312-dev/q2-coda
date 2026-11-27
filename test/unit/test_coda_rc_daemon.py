@@ -13,6 +13,7 @@ import shutil
 import socket
 import struct
 import subprocess
+import sysconfig
 import threading
 import time
 
@@ -25,7 +26,7 @@ PATCH = ROOT / 'patch'
 SOURCES = [PATCH / 'coda_rc.c', PATCH / 'coda_rc_core.c', PATCH / 'coda_rc_lib.c', PATCH / 'coda_rc_mdns.c',
            PATCH / 'monocypher/monocypher.c',
            PATCH / 'monocypher/monocypher-ed25519.c', PATCH / 'coda_rc_ble.c']
-SQLITE = '/usr/lib/x86_64-linux-gnu/libsqlite3.so.0'
+SQLITE = f"/usr/lib/{sysconfig.get_config_var('MULTIARCH')}/libsqlite3.so.0"
 CAP_RADIO = 16384
 CAP_IROH_ALLOW = 131072
 CAP_FIND = 262144
