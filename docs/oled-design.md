@@ -154,7 +154,8 @@ add a lighter or darker blue.
 
 ### Light Mode
 
-The concept has no light screens; Vamp's Light Mode exists and must keep working. The light
+The concept has no light screens; Vamp's Light Mode exists and must keep working. It is Auto unless
+chosen (light from 7:00 to 19:00; the owner's default from 2026-11-27, `[IPOD] LIGHT` absent reading as 2). The light
 half flips grays, not hues:
 
 | Token          | Dark      | Light     |

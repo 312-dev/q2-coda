@@ -1,6 +1,6 @@
 /* The settings q2ui takes from /mnt/data/config.ini (docs/internals.md#configini), which demo owns
  * and writes while it owns the settings pages: read here, never written. [IPOD] LIGHT (0 dark, 1
- * Light Mode, 2 Auto: light from 7:00 to 19:00, patch/theme_engine.c light_day) and REDUCEMOTION
+ * Light Mode, 2 Auto: light from 7:00 to 19:00, patch/theme_engine.c light_day; Auto when absent) and REDUCEMOTION
  * (1 on). Read at the start and whenever demo writes the file (a watch of its folder), and Auto
  * again when the minute turns (status.c). --light and --reduce-motion on the command line hold
  * their setting on whatever the file says. */
@@ -55,7 +55,7 @@ void config_light_now(void) {
 }
 
 void config_read(void) {
-    light_setting = config_int("IPOD", "LIGHT", 0);
+    light_setting = config_int("IPOD", "LIGHT", 2); /* Auto unless chosen (the owner's, 2026-11-27) */
     motion_setting = config_int("IPOD", "REDUCEMOTION", 0) == 1;
     list_rows_changed(); /* a page may show a setting (page_display.c) */
     int reduce = config_motion_forced || motion_setting;

@@ -963,7 +963,7 @@ pixels high). The build destroys stock's Lock Screen and Show Navigation Bar row
 Display page again (`display_open`, `display_sub` naming the sub-page while its init runs), which
 drops the stock rows, takes the sub-page's title and builds only its own rows:
 
-- Appearance: the theme's options in its theme.xml's order (`setting_row`), under OLED "Light Mode: Off"
+- Appearance: the theme's options in its theme.xml's order (`setting_row`), under OLED "Light Mode: Auto"
   ([Light Mode](#light-mode)), "Accent: Blue", "Home: Split" and "Battery: Icon" (Icon or
   Percent; see [Status bar and clock](#status-bar-and-clock)), then its own options, "Song Artist: Inline",
   "Song Length: Albums" and "Track Time: Remaining" ([Theme](#theme)). Under OLED (`set_text`) a row shows its
@@ -1219,7 +1219,7 @@ painted it white, which drew the box at rest.
 
 ### Light Mode
 
-**Light Mode: Auto** (`LIGHT=2`) is light from 07:00 to 18:59 by the device clock and dark the rest of the day. The row cycles Off, On, Auto on each click. It switches at 07:00 and 19:00 while the device is on, and the cached images are dropped and an open screen repaints then (`clock_show`, at each minute with the status bar's clock). The boot logo picks its mode by the same hours, in the saved time zone ([boot](boot.md#light-mode)).
+**Light Mode: Auto** (`LIGHT=2`, and with no `LIGHT` key, as after a reset: the owner's default from 2026-11-27) is light from 07:00 to 18:59 by the device clock and dark the rest of the day. The row cycles Off, On, Auto on each click. It switches at 07:00 and 19:00 while the device is on, and the cached images are dropped and an open screen repaints then (`clock_show`, at each minute with the status bar's clock). The boot logo picks its mode by the same hours, in the saved time zone ([boot](boot.md#light-mode)).
 
 **Light Mode: On** (`LIGHT=1`) turns the theme light at runtime, over the same assets. Every
 neutral color (channels within `LIGHT_SPREAD`) flips per channel, black to `LIGHT_PAPER` (`#F4F4F4`)

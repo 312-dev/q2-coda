@@ -55,6 +55,7 @@ def folder(work, n):
     shutil.copy(ROOT/'assets/fonts/Inter-Regular.ttf', d/'fonts/inter.ttf')
     shutil.copy(ROOT/'assets/fonts/Inter-Medium.ttf', d/'fonts/inter-medium.ttf')
     (d/'fb').write_bytes(bytes(320 * 375 * 2 * 4))
+    (d/'config.ini').write_text('[IPOD]\nLIGHT=0\n')  # dark, as these checks were written for (Light Mode is Auto unset)
     return d
 
 
@@ -1082,6 +1083,24 @@ def clock(binary, work):
         got, ref = row(told, '--clock-at', at), row('', '--clock', want)
         good &= check(f'told {told.strip()!r}, the clock reads {want}', got == ref and any(max(c) > 100 for c in ref),
                       f'{sum(a != b for a, b in zip(got, ref))} px differ')
+    return good
+
+
+def light_default(binary, work, home):
+    """Light Mode with no [IPOD] LIGHT in config.ini is Auto (the owner, 2026-11-27: "going forward default ui to Auto"):
+    light at noon and dark at night by the clock, and Display shows Auto."""
+    good = True
+    d = pathlib.Path(tempfile.mkdtemp(dir=work))
+    (d/'config.ini').write_text('[IPOD]\nKEEPLIT=1\n')
+    (d/'told').write_text('tz=UTC0\n')
+    for at, want, what in (('1699964000', (255, 255, 255), 'light at 12:13'), ('1700000000', (0, 0, 0), 'dark at 22:13')):
+        _, pics, _ = script(binary, work, 5, ['rest', 'run 50', 'shot @p.ppm'], '--config', d/'config.ini', '--told', d/'told',
+                            '--clock-at', at)
+        good &= check(f'with no LIGHT key, Light Mode is Auto: {what}', pics['p'].at(5, 200) == want, str(pics['p'].at(5, 200)))
+    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 6', 'rest', 'key centre', 'rest', 'rows @rows.txt']  # Display
+    _, _, _, (_, _, f) = script(binary, work, 60, to, *home, '--config', d/'config.ini', queue=True)
+    rows = (f/'rows.txt').read_text().splitlines() if (f/'rows.txt').exists() else []
+    good &= check("and Display's Light Mode row says Auto", rows[:1] == ['Light Mode\tAuto'], str(rows[:1]))
     return good
 
 
@@ -2125,6 +2144,8 @@ def main():
             good &= hold_menu(binary, work)
         if not only or 'clock' in only:
             good &= clock(binary, work)
+        if not only or 'light' in only:
+            good &= light_default(binary, work, ('--page', 'home'))
         if not only or 'notices' in only:
             good &= notices(binary, work)
     print('q2ui: ' + ('all checks passed' if good else 'FAILED'))
