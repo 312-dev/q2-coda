@@ -22,6 +22,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 
@@ -32,7 +33,7 @@ import coda_rc_client as client  # noqa: E402
 PATCH = ROOT / 'patch'
 SOURCES = ['coda_rc.c', 'coda_rc_core.c', 'coda_rc_lib.c', 'coda_rc_mdns.c', 'monocypher/monocypher.c',
            'monocypher/monocypher-ed25519.c', 'coda_rc_ble.c']
-SQLITE = '/usr/lib/x86_64-linux-gnu/libsqlite3.so.0'
+SQLITE = f"/usr/lib/{sysconfig.get_config_var('MULTIARCH')}/libsqlite3.so.0"
 
 
 def daemon_ports(root):

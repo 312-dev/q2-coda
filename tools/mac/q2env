@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Run a command in Vamp's build and test environment on an Apple Silicon Mac (docs/building.md#building-on-macos):
+#
+#     tools/mac/q2env python3 tools/ci/rebuild.py --dev
+#     tools/mac/q2env              # a shell
+#
+# The container is native linux/arm64 (tools/mac/Dockerfile). The Mac's home is mounted at its own path and
+# is HOME, and the command runs as the Mac's user in the current directory, so a repository path or a
+# ~/.cache/... path is the same file inside and out. The image is built on first use and again when its
+# Dockerfile, tools/mac/cc or the pinned requirements change (its tag is their hash).
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+root=$(cd "$here/../.." && pwd)
+tag=$(cat "$here/Dockerfile" "$here/cc" "$root/requirements.txt" "$root/test/unit/requirements.txt" | shasum -a 256 | cut -c1-12)
+image="q2env:$tag"
+
+if ! docker image inspect "$image" >/dev/null 2>&1; then
+    ctx=$(mktemp -d)
+    trap 'python3 -c "import shutil,sys; shutil.rmtree(sys.argv[1])" "$ctx"' EXIT
+    cp "$here/Dockerfile" "$here/cc" "$ctx/"
+    cp "$root/requirements.txt" "$ctx/requirements.txt"
+    cp "$root/test/unit/requirements.txt" "$ctx/unit-requirements.txt"
+    docker build --platform linux/arm64 --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" \
+        --build-arg USER_HOME="$HOME" -t "$image" "$ctx" >&2
+fi
+
+# ~/.cache/q2-thirdparty is also at /home/gray/.cache/q2-thirdparty, the path its components were built at:
+# tools/thirdparty.py's cache keys and the compiler paths in its output include the cache's path, so only
+# there are they reused and rebuilt to the same bytes.
+#
+# The Codescape toolchain lives in a Docker volume over that cache's toolchain/: the Mac's home is
+# case-insensitive APFS, and the toolchain's sysroots hold 136 pairs of paths that differ only in case
+# (netfilter headers such as xt_MARK.h and xt_mark.h). It is unpacked as tools/thirdparty.py's toolchain()
+# does (tar, then the archive's SHA-256 in .sha256), which then finds it unpacked.
+tc=/home/gray/.cache/q2-thirdparty/toolchain
+tc_sha=$(cd "$root/tools" && python3 -c 'import thirdparty; print(thirdparty.TOOLCHAIN[1])')
+# seccomp and AppArmor unconfined: bwrap and unshare -Ur make user namespaces, which Docker's default
+# profiles refuse. systempaths unconfined: Docker masks parts of /proc, and the kernel refuses the seam
+# test's new proc mount (unshare --mount-proc) over a proc with paths mounted on it.
+# /tmp is a tmpfs: the -m32 test programs run under qemu-i386, and on overlayfs (ext4) a 32-bit readdir
+# there stops at once with EOVERFLOW, as the kernel gives a 64-bit process 64-bit directory offsets.
+# No core dumps: a crashed test would leave hundreds of MB in the worktree it ran in.
+run=(docker run --rm --platform linux/arm64 --user "$(id -u):$(id -g)" --ulimit core=0
+     --tmpfs /tmp:exec,mode=1777,size=2g
+     --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined
+     -v "$HOME:$HOME" -v "$HOME/.cache/q2-thirdparty:/home/gray/.cache/q2-thirdparty" -v q2-toolchain:$tc
+     -e HOME="$HOME" -e USER="$(id -un)" -e Q2_THIRDPARTY_CACHE=/home/gray/.cache/q2-thirdparty)
+mkdir -p "$HOME/.cache/q2-thirdparty/toolchain"  # the volume's mount point
+if ! docker run --rm --platform linux/arm64 -v q2-toolchain:/v "$image" \
+        sh -c "[ \"\$(cat /v/.sha256 2>/dev/null)\" = '$tc_sha' ]"; then
+    archive=$HOME/.cache/q2-thirdparty/dl/mti-linux-2020.06-01.tar.gz
+    if [ -f "$archive" ]; then
+        echo "q2env: unpacking the toolchain into the q2-toolchain volume (once)" >&2
+        docker run --rm --platform linux/arm64 -v q2-toolchain:/v "$image" chown "$(id -u):$(id -g)" /v
+        "${run[@]}" "$image" sh -c "find $tc -mindepth 1 -delete && tar -C $tc -xzf '$archive' && printf %s '$tc_sha' > $tc/.sha256"
+    fi  # else tools/thirdparty.py fetches the archive into dl/, and the next q2env unpacks it
+fi
+
+tty=()
+[ -t 0 ] && [ -t 1 ] && tty=(-t)
+[ $# -eq 0 ] && set -- bash
+exec "${run[@]}" -i "${tty[@]}" -e TERM="${TERM:-dumb}" -w "$PWD" "$image" "$@"
