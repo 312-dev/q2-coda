@@ -103,10 +103,11 @@ class Picture:
 NOW = 'seq=3\nstate=1\npos=14000\nlen=180\nid=5\nvolume=40\nsource=library\ntitle=A Made-Up Song\nartist=Its Artist\nalbum=Its Album\n'
 
 
-def script(binary, work, n, lines, *options, now=None, code=0, queue=False):
+def script(binary, work, n, lines, *options, now=None, code=0, queue=False, ctl=False):
     """q2ui run over a script; the trace (a dict a frame), the pictures it saved by name, and the stats. now is what
     plays (the text of demo's file for it), code the exit code expected, and with queue the player's queue is a FIFO
-    whose lines come back as a fourth value with the list file's ids."""
+    whose lines come back as a fourth value with the list file's ids. With ctl, q2ui is also given the write end of
+    a pipe as demo gives it one for settings (patch/q2ui_gate.c, --ctl FD), and the lines it wrote come back fifth."""
     d = folder(work, n)
     if now:
         (d/'now').write_text(now)
@@ -116,8 +117,17 @@ def script(binary, work, n, lines, *options, now=None, code=0, queue=False):
         fifo = os.open(d/'cmdq', os.O_RDWR | os.O_NONBLOCK)
     text = '\n'.join(lines).replace('@', str(d) + '/') + '\n'
     (d/'script').write_text(text)
-    done = subprocess.run(base_args(binary, d) + ['--script', d/'script', '--trace', d/'trace', '--clock', '12:00', *options],
-                          timeout=120)
+    pipe = os.pipe() if ctl else None
+    given = ['--ctl', str(pipe[1])] if pipe else []
+    try:
+        done = subprocess.run(base_args(binary, d) + ['--script', d/'script', '--trace', d/'trace', '--clock', '12:00', *given,
+                                                      *options], timeout=120, pass_fds=pipe[1:] if pipe else ())
+    finally:
+        if pipe:
+            os.close(pipe[1])
+    settings = os.read(pipe[0], 4096).decode().splitlines() if pipe else []
+    if pipe:
+        os.close(pipe[0])
     if done.returncode != code:
         raise RuntimeError(f'q2ui --script exited {done.returncode}, not {code}')
     trace = []
@@ -136,13 +146,15 @@ def script(binary, work, n, lines, *options, now=None, code=0, queue=False):
         sent = []
     os.close(fifo)
     ids = (d/'list').read_text().split() if (d/'list').exists() else []
+    if ctl:
+        return trace, pictures, stats, (sent, ids, d), settings
     return trace, pictures, stats, (sent, ids, d)
 
 
 class Run:
     """One live q2ui over a library of n songs, with its panel file, inputs and stats in a folder of its own."""
 
-    def __init__(self, binary, work, n, *options, at=None):
+    def __init__(self, binary, work, n, *options, at=None, fds=()):
         self.dir = at or folder(work, n)
         if not at:
             (self.dir/'input').mkdir()
@@ -150,7 +162,7 @@ class Run:
                 os.mkfifo(self.dir/'input'/f'event{k}')
             os.mkfifo(self.dir/'cmdq')
         self.queue = os.open(self.dir/'cmdq', os.O_RDWR | os.O_NONBLOCK)  # demo's end of the player's queue
-        self.proc = subprocess.Popen(base_args(binary, self.dir) + ['--input', self.dir/'input', *options])
+        self.proc = subprocess.Popen(base_args(binary, self.dir) + ['--input', self.dir/'input', *options], pass_fds=fds)
         self.wheel = open(self.dir/'input/event3', 'wb', buffering=0)
         self.keys = open(self.dir/'input/event1', 'wb', buffering=0)
         self.x = 100
@@ -513,10 +525,10 @@ def display(binary, work, home):
     ini.write_text('[IPOD]\nLIGHT=0\nREDUCEMOTION=0\n')
     to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 6', 'rest', 'key centre', 'rest']  # Home > Settings > Display
     lines = to + ['key centre', 'run 100', 'key centre', 'run 100', 'tick 1', 'rest', 'key centre', 'run 100']
-    _, _, _, (sent, _, _) = script(binary, work, 60, lines, *home, '--config', ini, queue=True)
-    verbs = [line.split(' ', 1)[1] for line in sent]
-    good &= check('Light Mode goes Off to On, then on to Auto before demo has written it; Reduce Motion goes on',
-                  verbs == ['set light 1', 'set light 2', 'set motion 1'], str(verbs))
+    _, _, _, (sent, _, _), said = script(binary, work, 60, lines, *home, '--config', ini, queue=True, ctl=True)
+    good &= check('Light Mode goes Off to On, then on to Auto before demo has written it; Reduce Motion goes on, each '
+                  "down q2ui's own pipe and none down the queue", said == ['set light 1', 'set light 2', 'set motion 1'] and sent == [],
+                  f'{said} {sent}')
     _, _, _, (sent, _, d) = script(binary, work, 60, to + ['tick 2', 'rest', 'key centre', 'run 100'], *home, '--config', ini, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
     good &= check("its last row opens the rest of demo's Display page", asked == 'systemset/display_page\n', repr(asked))
@@ -542,11 +554,14 @@ def control_center(binary, work, home):
     told.write_text('out=other\nwifi=1\nbton=0\ncar=0\nsmart=0\neq=1\nusb=Automatic\n')
     lines = ['rest', 'tick 2', 'rest', 'hold return', 'rest', 'key centre', 'run 100', 'key centre', 'run 100', 'tick 2', 'rest',
              'key centre', 'run 600']
-    trace, _, _, (sent, _, _) = script(binary, work, 60, lines, *home, '--told', told, queue=True)
-    verbs = [line.split(' ', 1)[1] for line in sent]
+    trace, _, _, (sent, _, _), said = script(binary, work, 60, lines, *home, '--told', told, queue=True, ctl=True)
     good &= check("the selected switch's knob slides over with it, before demo has said so", trace[-1]['knob'] > 0.99, str(trace[-1]['knob']))
     good &= check('Return held opens Control Center on any page; Wi-Fi, on by demo, goes off, then on again before demo says '
-                  'so, and Car Remote, off, goes on', verbs == ['set wifi 0', 'set wifi 1', 'set car 1'], str(verbs))
+                  "so, and Car Remote, off, goes on, each down q2ui's own pipe and none down the queue",
+                  said == ['set wifi 0', 'set wifi 1', 'set car 1'] and sent == [], f'{said} {sent}')
+    trace, _, _, (sent, _, _) = script(binary, work, 60, lines, *home, '--told', told, queue=True)
+    good &= check('with no pipe (q2ui not started by demo) a switch sends nothing and stays as demo has it',
+                  sent == [] and trace[-1]['knob'] < 0.01, f"{sent} {trace[-1]['knob']}")
     _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'hold return', 'rest', 'tick 5', 'rest', 'key centre', 'run 100'],
                                    *home, '--told', told, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
@@ -796,8 +811,13 @@ def panel(binary, work):
 
 
 def reload(binary, work):
-    """kill -HUP: q2ui starts itself again in place, the same process, on the pages it had open."""
-    r = Run(binary, work, 20, '--page', 'home')
+    """kill -HUP: q2ui starts itself again in place, the same process, on the pages it had open, with demo's settings
+    pipe (--ctl) still open: it has no other way back."""
+    pipe = os.pipe()
+    r = Run(binary, work, 20, '--page', 'home', '--ctl', str(pipe[1]), fds=pipe[1:])
+    os.close(pipe[1])
+    end = f'/proc/{r.proc.pid}/fd/{pipe[1]}'
+    held = os.path.exists(end)
     r.rest()
     r.key(KEY_CENTRE)  # Library
     time.sleep(0.6)
@@ -812,9 +832,12 @@ def reload(binary, work):
     good = check('SIGHUP starts q2ui again in place: the same process, counting from nothing, on the page and row it had',
                  r.proc.poll() is None and before['ticks'] == 1 and after['ticks'] == 0 and same,
                  f"exit {r.proc.poll()}, ticks {before['ticks']} then {after['ticks']}, same picture {same}")
+    kept = os.path.exists(end) and os.readlink(end) == f'pipe:[{os.fstat(pipe[0]).st_ino}]'
+    good &= check("demo's settings pipe is open in q2ui before SIGHUP and still after", held and kept, f'{held} {kept}')
     r.proc.terminate()
     r.proc.wait(timeout=5)
     os.close(r.queue)
+    os.close(pipe[0])
     return good
 
 

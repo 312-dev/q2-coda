@@ -793,8 +793,8 @@ int cc_key(void *win, unsigned key) {
  * q2ui draws a Control Center of its own while it has the screen. The states it shows are added to
  * the status row's in its file (q2ui_gate.c tell): wifi and bt (the switches stock's own pages
  * show), car (Car Remote), smart (Smart Wi-Fi), eq (on in any mode), usb (the USB setting's value).
- * Its switches come back through Car Remote's command queue as "set NAME 0|1" (coda_rc_shim.c
- * cr_run, q2ui_cc_set), each flipped as this page's circle flips it; q2ui's Display page sets
+ * Its switches come back as "set NAME 0|1" down the pipe the gate gives q2ui alone (q2ui_gate.c
+ * ctl, q2ui_cc_set), each flipped as this page's circle flips it; q2ui's Display page sets
  * Light Mode ("set light 0|1|2") and Reduce Motion ("set motion 0|1") the same way, and reads them
  * back from config.ini itself (ui/config.c). Bluetooth is not one of them:
  * stock flips it only from its page's row, so q2ui opens that page. */

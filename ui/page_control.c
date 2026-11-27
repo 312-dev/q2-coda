@@ -1,8 +1,8 @@
 /* Control Center (docs/oled-design.md#control-center), q2ui's own while it has the screen: opened
  * by holding Return on any page (main.c), closed by Return. Its switches are demo's settings,
  * shown as demo says they stand (ui/status.c status_told_value, from patch/control_center.c
- * q2ui_cc_state) and flipped through the command queue ("set NAME 0|1", control_center.c
- * q2ui_cc_set); a row turns at once and keeps its new state until demo's word catches up, half a
+ * q2ui_cc_state) and flipped down q2ui's own pipe to demo ("set NAME 0|1", ui/player.c player_set,
+ * control_center.c q2ui_cc_set); a row turns at once and keeps its new state until demo's word catches up, half a
  * second or so, as status.c has every row asked again when demo's word changes. Bluetooth, USB and the EQ's own page open demo's pages through the gate.
  * ponytail: a list, not demo's two-column sheet of circles, Now Playing and sliders; no
  * Brightness or Volume slider yet (the toolkit has no slider), no AirPlay. */
@@ -52,10 +52,8 @@ static void chosen(void *ctx, int i) {
         ui_demo_page(rows[i].demo);
         return;
     }
-    char verb[32];
     int on = !(cc.want[i] >= 0 ? cc.want[i] : told_on(i));
-    snprintf(verb, sizeof verb, "set %s %d", rows[i].key, on);
-    if (player_send(verb)) return; /* demo did not take it: the row stays as demo has it */
+    if (player_set(rows[i].key, on)) return; /* not sent (no pipe): the row stays as demo has it */
     cc.want[i] = on;
     list_rows_changed(); /* the row asked again: its switch is in what it gave */
     ui_mark_all();

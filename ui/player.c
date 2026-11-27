@@ -2,8 +2,11 @@
  * down the queue Car Remote and Car Audio use (patch/coda_rc_cmdq.h: one line a command,
  * "<seq> <verb>\n", down the FIFO demo's shim reads), and a list to play is the songs' ids, a line
  * each, in the file the shim reads for a play (patch/coda_rc_shim.c cr_songs). demo keeps the
- * queue open while q2ui has the screen (patch/q2ui_gate.c). When q2ui owns the player's socket
- * itself, this file is what changes. */
+ * queue open while q2ui has the screen (patch/q2ui_gate.c). A setting of demo's (Control Center's
+ * switches, Display's choices) goes instead down a pipe demo gives q2ui alone as it starts it, the fd's
+ * number after --ctl, as "set NAME VALUE\n" (patch/q2ui_gate.c ctl): the queue, which the phone's
+ * daemon writes too, takes no settings. When q2ui owns the player's socket itself, this file is what
+ * changes. */
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,6 +27,15 @@ int player_send(const char *verb) {
     if (!seq) seq = (unsigned)(mono_us() / 1000u) | 1; /* never a number an earlier q2ui used */
     int n = snprintf(line, sizeof line, "%u %s\n", ++seq & 0x3fffffff, verb);
     return n > 0 && n < (int)sizeof line ? crc_cmdq_send(player_queue, line, (unsigned)n) : -1;
+}
+
+int player_ctl = -1;
+
+int player_set(const char *name, int value) {
+    char line[64]; /* patch/q2ui_gate.c Q2UI_CTL_LINE: one write, whole */
+    int n = snprintf(line, sizeof line, "set %s %d\n", name, value);
+    if (player_ctl < 0 || n <= 0 || n >= (int)sizeof line) return -1;
+    return write(player_ctl, line, (size_t)n) == n ? 0 : -1;
 }
 
 int player_play(const int *ids, int n, int at, int shuffle) {

@@ -18,6 +18,10 @@
  *    with whatever /mnt/data/q2ui.args now says. No frame of demo's shows between.
  *  - q2ui asks for a page of demo's it has not got: it names the page in Q2UI_ASK and ends with
  *    Q2UI_ASKED. demo opens that page, and starts q2ui again when the page has been left.
+ *  - q2ui asks demo to change a setting (Control Center's switches, its Display page's choices) with a
+ *    line "set NAME VALUE" down a pipe of its own (ctl): demo makes it once, before the first
+ *    start, and hands q2ui its write end, the fd's number after --ctl, so no other program, the
+ *    phone's daemon among them, can write it. Car Remote's queue takes no "set".
  *  - while q2ui runs, demo says what only it knows for q2ui's status row (where the sound goes,
  *    Bluetooth, Buttons Lock, a card app's sync and server: status_row_state) and Control Center
  *    (its switches' states: q2ui_cc_state) in Q2UI_STATUS, a look every Q2UI_STATUS_MS and a
@@ -41,6 +45,14 @@ int coverflow_opening(void); /* coverflow.c: Cover Flow is loading before its pa
 #define Q2UI_DUE (-1) /* to be started on the next pass: already the screen's holder */
 #define Q2UI_STATUS "/tmp/q2ui.status" /* ui/status.c reads it when it changes (inotify) */
 #define Q2UI_STATUS_MS 500
+#define Q2UI_CTL_LINE 64 /* a line down the pipe, its '\n' included; a longer one is dropped */
+
+int chapter_pipe2(int *p, int flags); /* chapters.c: demo imports no pipe() */
+int fcntl(int fd, int cmd, ...);
+#define CTL_NONBLOCK 0x80   /* O_NONBLOCK, MIPS */
+#define CTL_CLOEXEC 0x80000 /* O_CLOEXEC */
+#define CTL_SETFD 2         /* F_SETFD */
+#define CTL_READS 4
 
 unsigned status_row_state(char *b, unsigned room);  /* status_row.c */
 unsigned q2ui_cc_state(char *b, unsigned room);     /* control_center.c: q2ui's Control Center's */
@@ -54,6 +66,10 @@ static struct {
     unsigned started_at; /* time_now_ms when q2ui was last started */
     unsigned asked_at; /* time_now_ms when it was asked for */
     unsigned told_at, told; /* the status's last look (time_now_ms), and the hash of what was written */
+    char piped;        /* ctl holds the pipe's ends: read (demo's), write (q2ui's) */
+    int ctl[2];
+    unsigned carry;    /* bytes of a line not yet ended, at the start of line */
+    char line[Q2UI_CTL_LINE];
 } qu __attribute__((section(".scratch")));
 
 static int wanted(void) {
@@ -147,10 +163,19 @@ static void start(void) {
      * while q2ui has the screen (splash_hold.c): it ends here, as before Rockbox */
     if (!qu.booted) system("killall q2splash 2>/dev/null");
     qu.booted = 1;
+    /* q2ui's pipe for settings: both ends close in every other child demo starts (O_CLOEXEC), and
+     * demo's end never waits (O_NONBLOCK) */
+    if (!qu.piped && !chapter_pipe2(qu.ctl, CTL_NONBLOCK | CTL_CLOEXEC)) qu.piped = 1;
+    char fd[12];
+    tk_snprintf(fd, sizeof fd, "%d", qu.ctl[1]);
     int pid = fork();
     if (!pid) {
         child_oom_first();
-        execl(Q2UI_BIN, Q2UI_BIN, (char *)0);
+        /* the write end stays open across the exec, in q2ui alone */
+        if (qu.piped && !fcntl(qu.ctl[1], CTL_SETFD, 0))
+            execl(Q2UI_BIN, Q2UI_BIN, "--ctl", fd, (char *)0);
+        else
+            execl(Q2UI_BIN, Q2UI_BIN, (char *)0);
         child_exit(127);
     }
     qu.pid = pid > 0 ? pid : 0;
@@ -173,8 +198,37 @@ static void tell(void) {
     if (h != qu.told && blob_io(Q2UI_STATUS, Q2UI_STATUS ".tmp", b, n, 1)) qu.told = h;
 }
 
+/* q2ui's lines down its pipe, each "set NAME VALUE" (control_center.c q2ui_cc_set), acted on in the
+ * order sent; another verb, or a line too long, is dropped. Read every pass while it runs and after it
+ * ends, so a setting sent just before leaving for a page of demo's is not lost; at most CTL_READS
+ * reads a pass, so a q2ui that writes without end cannot hold demo's loop (the rest waits in the pipe). */
+int q2ui_cc_set(const char *name, int on); /* control_center.c */
+static void ctl(void) {
+    char word[12];
+    int v;
+    for (int k = 0; k < CTL_READS; ++k) {
+        int n = (int)read(qu.ctl[0], qu.line + qu.carry, sizeof qu.line - qu.carry);
+        if (n <= 0) return; /* nothing waiting (EAGAIN) */
+        unsigned end = qu.carry + (unsigned)n, from = 0;
+        for (unsigned i = 0; i < end; ++i) {
+            if (qu.line[i] != '\n') continue;
+            qu.line[i] = 0;
+            if (__isoc99_sscanf(qu.line + from, "set %11s %d", word, &v) == 2) {
+                char what[32];
+                tk_snprintf(what, sizeof what, q2ui_cc_set(word, v) ? "set %s refused," : "set %s", word);
+                said(what, v);
+            }
+            from = i + 1;
+        }
+        qu.carry = end - from;
+        if (qu.carry == sizeof qu.line) qu.carry = 0; /* no line is this long: dropped */
+        if (from && qu.carry) memmove(qu.line, qu.line + from, qu.carry);
+    }
+}
+
 /* every UI loop pass */
 void q2ui_poll(void) {
+    if (qu.piped) ctl();
     if (!q2ui_on()) {
         if (!qu.back) return;
         if (qu.opening) { /* the page asked for comes up a pass or more after it is asked for */

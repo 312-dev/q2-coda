@@ -404,6 +404,8 @@ extern const char *now_file, *now_cover_file;
 int player_play(const int *ids, int n, int at, int shuffle); /* the list, starting at its song `at`; 0 sent */
 int player_send(const char *verb);                           /* toggle, next, previous, ...; 0 sent */
 extern const char *player_queue, *player_list;               /* the FIFO and the list file (a test's are its own) */
+int player_set(const char *name, int value); /* a setting of demo's, down q2ui's own pipe; 0 sent */
+extern int player_ctl;                       /* that pipe's write end (--ctl FD), or -1 */
 
 /* ---- pages ---- */
 void songs_push(void);

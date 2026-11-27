@@ -1310,7 +1310,7 @@ extern unsigned long ui_thread; /* playback.c: the UI thread, from its first pas
 /* coda_rc_shim.c: Car Remote (docs/internals.md#car-remote) */
 void coda_rc_poll(void), coda_rc_toggle(void);
 int coda_rc_enabled(void);
-/* control_center.c: q2ui's Control Center's states (q2ui_gate.c tell) and switches (coda_rc_shim.c cr_run) */
+/* control_center.c: q2ui's Control Center's states (q2ui_gate.c tell) and switches (q2ui_gate.c ctl) */
 unsigned q2ui_cc_state(char *b, unsigned room);
 int q2ui_cc_set(const char *name, int on), q2ui_on(void);
 int coda_rc_wants_wifi(void); /* Smart Wi-Fi: Car Remote needs the radio (coda_rc_shim.c) */
