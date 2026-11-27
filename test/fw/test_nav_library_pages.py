@@ -10,7 +10,7 @@ import struct
 import pytest
 
 import host
-from conftest import FNV_PRIME, O, Deques, Files, block, claim, favdir_card, fnv1a, high_halves, in_fork, libc, stock_prop_str, ui_name
+from conftest import FNV_PRIME, O, Deques, Files, block, callback_at, claim, favdir_card, fnv1a, high_halves, in_fork, libc, stock_prop_str, ui_name
 from conftest import Rows as HeldRows  # Rows here is Folder view's list
 
 from test_navigation import Sa  # test_navigation.py keeps the mirror
@@ -1251,13 +1251,12 @@ def test_another_window_s_end_leaves_the_heart(fw, ui, song, mcl, st):
 
 
 def stock_stub(address, result, log):
-    """x86-64 at a fixed stock address: its first three arguments logged, result returned. Only ever in a fork.
-    The code holds log's address, not log: the caller keeps log alive while the stub can run, or the stub
-    writes into whatever Python object took its memory."""
+    """A stand-in at a fixed stock address: its first three arguments logged, result returned. Only ever in a fork."""
     claim(address)
-    code = (b'\x48\xb8' + struct.pack('<Q', C.addressof(log)) + bytes.fromhex('488938 48897008 48895010') +
-            b'\xb8' + struct.pack('<I', result) + b'\xc3')
-    C.memmove(address, code, len(code))
+    def stub(a, b, c):
+        log[0], log[1], log[2] = a, b, c
+        return result & 0xffffffff
+    callback_at(address, stub)
 
 
 @in_fork

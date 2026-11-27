@@ -9,7 +9,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, STRIP_GO, STRIP_SEARCH, Deques, Game, block, claim, high_halves, libc, low_map, page_block, strip_return, text
+from conftest import O, STRIP_GO, STRIP_SEARCH, Deques, Game, block, claim, code_at, high_halves, libc, low_map, page_block, ret_code, strip_return, text
 from test_coverflow import png, scratch  # an icon's header; navigation.c's st by field
 from test_netupdate import JOB_INSTALL, JOB_REMOVE, SH_CANCELLED, SH_CARD, SH_NET, SH_OK, Sh, sources as shelf_sources  # test_netupdate.py keeps netupdate.c's App Store mirror
 from test_radio import Rd  # test_radio.py keeps the mirror
@@ -4560,13 +4560,13 @@ def test_a_url_queue_marks_its_queue_the_apps(fw, mcl, songs):
     free_rec = int(re.findall(r'toolsFreeStSongInfo \(\(void \(\*\)\(void \*\)\)(0x[0-9a-f]+)u\)',
                               (host.ROOT/'patch/tidal.c').read_text())[0], 16)
     claim(free_rec)
-    saved = C.string_at(free_rec, 1)
-    C.memmove(free_rec, b'\xc3', 1)
+    saved = C.string_at(free_rec, len(ret_code()))
+    code_at(free_rec, ret_code())
     try:
         s.step()
         s.step()
     finally:
-        C.memmove(free_rec, saved, 1)
+        code_at(free_rec, saved)
     qa = fw.var('addon__qa', Qa)
     assert s.loaded.value == loads + 1 and qa.app == C.addressof(ap(fw).a[0]) and qa.loads == s.loaded.value
 
@@ -6540,12 +6540,12 @@ def test_up_next_lists_a_radios_songs_not_yet_downloaded_and_one_moves_there(fw,
     free_rec = int(re.findall(r'toolsFreeStSongInfo \(\(void \(\*\)\(void \*\)\)(0x[0-9a-f]+)u\)',
                               (host.ROOT/'patch/addon.c').read_text())[0], 16)
     claim(free_rec)
-    saved = C.string_at(free_rec, 1)
-    C.memmove(free_rec, b'\xc3', 1)
+    saved = C.string_at(free_rec, len(ret_code()))
+    code_at(free_rec, ret_code())
     try:
         pending_jump(fw, mcl, songs)
     finally:
-        C.memmove(free_rec, saved, 1)
+        code_at(free_rec, saved)
 
 
 def pending_jump(fw, mcl, songs):
