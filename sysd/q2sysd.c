@@ -25,11 +25,14 @@
  *     ([Q2POD] USBPICK, the payload's, patch/usb_ui.c) names, Automatic's iPhone ending in storage for a computer,
  *     and a cable out is adb again.
  *   - Standby: the screen off, the music paused, Wi-Fi off, then the kernel's suspend (/sys/power/state mem) until a
- *     wake source (the power key) resumes it; then the screen on.
+ *     wake source (the power key) resumes it; then the screen on. Stock's Auto Standby and Auto Power Off
+ *     ([SYSSET] STANDBYMODE, SAVEPOWERMODE, docs/sysd.md#auto-standby-and-auto-power-off): Standby, or the power off,
+ *     once the Q2 is unused that long with no music playing and no cable in.
  *
  * Q2SYS/1 on /run/vamp/sys.sock (docs/platform/system.md): screen on|off|toggle, brightness P, battery, usb, usb adb|storage|dac|car,
  * standby, watch, caps.
- * --root prefixes every path and --poweroff names the command, for test/sysd.py. */
+ * --root prefixes every path, --poweroff names the command and --time-scale N runs Auto Standby's and Auto Power Off's
+ * times N times faster, for test/sysd.py. */
 #define _GNU_SOURCE
 #include <dirent.h>
 #include <sys/wait.h>
@@ -262,6 +265,10 @@ static int config_int(const char *section, const char *key, int fallback) {
 static const int LIGHT_S[] = {15, 30, 60, 120, 300, 1800};
 static int light_s = 30;
 static long long light_stamp = -1;
+/* Auto Standby (STANDBYMODE 1: setstandby_time's 300 s, else off) and Auto Power Off (SAVEPOWERMODE 1 to 4:
+ * setsavepower_time's table, 1, 3, 5 and 10 minutes, else off), read with LIGHTTIME */
+static const int SAVEPOWER_S[] = {60, 180, 300, 600};
+static int standby_s, savepower_s, time_scale = 1;
 
 static void light_poll(void) {
     struct stat st;
@@ -270,9 +277,11 @@ static void light_poll(void) {
     light_stamp = stamp;
     int v = config_int("SYSSET", "LIGHTTIME", 1);
     light_s = v >= 0 && v < (int)(sizeof LIGHT_S / sizeof *LIGHT_S) ? LIGHT_S[v] : 0;
+    standby_s = config_int("SYSSET", "STANDBYMODE", 0) == 1 ? 300 : 0;
+    v = config_int("SYSSET", "SAVEPOWERMODE", 0);
+    savepower_s = v >= 1 && v <= 4 ? SAVEPOWER_S[v - 1] : 0;
     used_at = now_ms();
-    if (light_s) say("screen off time %d s", light_s);
-    else say("screen off time: never");
+    say("screen off time %d s, auto standby %d s, auto power off %d s (0: never)", light_s, standby_s, savepower_s);
 }
 
 /* the charger on (allow) or held off, through PE22 (active low: 1 holds it off) as the kernel's GPIO class gives it */
@@ -601,8 +610,8 @@ static void open_inputs(void) {
     if (d) closedir(d);
 }
 
-static void power_off(void) {
-    say("power key held %d ms: powering off", HOLD_MS);
+static void power_off(const char *why) {
+    say("%s: powering off", why);
     tell("power off");
     pressed_at = 0;
     pid_t p = fork();
@@ -719,6 +728,34 @@ static void client_read(struct client *c) {
     if (c->n >= sizeof c->in - 1) close(c->fd), c->fd = -1;
 }
 
+/* ---- Auto Standby and Auto Power Off (docs/sysd.md#auto-standby-and-auto-power-off) ---- */
+
+/* q2playd's now file says a song is playing (state=1) */
+static int music_playing(void) {
+    char b[2700];
+    FILE *f = fopen(path("/tmp/coda-rc.now"), "r");
+    size_t n = f ? fread(b, 1, sizeof b - 1, f) : 0;
+    if (f) fclose(f);
+    b[n] = 0;
+    return !strncmp(b, "state=1\n", 8) || strstr(b, "\nstate=1\n") != 0;
+}
+
+static unsigned long long held_at; /* the last second music played or a cable was in */
+
+static void idle_poll(unsigned long long t) {
+    if (!standby_s && !savepower_s) return;
+    if (music_playing() || cable_in == 1) held_at = t;
+    unsigned long long from = held_at > used_at ? held_at : used_at;
+    if (savepower_s && t >= from + (unsigned long long)savepower_s * 1000 / (unsigned)time_scale) {
+        used_at = t;
+        power_off("unused, auto power off");
+    } else if (standby_s && t >= from + (unsigned long long)standby_s * 1000 / (unsigned)time_scale) {
+        say("unused %d s: auto standby", standby_s);
+        standby();
+        used_at = now_ms(); /* resumed: the time from now */
+    }
+}
+
 static volatile sig_atomic_t stopping;
 static void on_term(int s) { (void)s, stopping = 1; }
 
@@ -727,7 +764,8 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "--root") && i + 1 < argc) snprintf(root, sizeof root, "%s", argv[++i]);
         else if (!strcmp(argv[i], "--poweroff") && i + 1 < argc) snprintf(poweroff_cmd, sizeof poweroff_cmd, "%s", argv[++i]);
         else if (!strcmp(argv[i], "--card-boot")) card_boot = 1;
-        else return fprintf(stderr, "usage: q2sysd [--root DIR] [--poweroff COMMAND] [--card-boot]\n"), 2;
+        else if (!strcmp(argv[i], "--time-scale") && i + 1 < argc && atoi(argv[i + 1]) > 0) time_scale = atoi(argv[++i]);
+        else return fprintf(stderr, "usage: q2sysd [--root DIR] [--poweroff COMMAND] [--card-boot] [--time-scale N]\n"), 2;
     }
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, on_term);
@@ -778,7 +816,7 @@ int main(int argc, char **argv) {
         for (int i = 0; i < CLIENTS; ++i)
             if (cl[i].fd >= 0 && p[1 + n_in + i].fd == cl[i].fd && p[1 + n_in + i].revents) client_read(&cl[i]);
         t = now_ms();
-        if (pressed_at && t >= pressed_at + HOLD_MS) power_off();
+        if (pressed_at && t >= pressed_at + HOLD_MS) power_off("the power key held");
         if (t >= battery_at + BATTERY_S * 1000ull) read_battery(), battery_at = t;
         if (!n_power && t >= scanned_at + RESCAN_MS) open_inputs(), scanned_at = t;
         if (t >= cable_at + CABLE_MS) {
@@ -789,6 +827,7 @@ int main(int argc, char **argv) {
                 used_at = t; /* a screen that cannot go off is tried again a whole time later */
                 set_screen(0);
             }
+            idle_poll(t);
         }
         if (usb_mode == USB_CAR) car_poll();
     }

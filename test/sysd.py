@@ -350,6 +350,55 @@ def test_standby_pauses_turns_off_and_resumes(run, card):
     assert net.lines == ([] if card else ['off', 'wake']), "a card boot's Wi-Fi is never turned off"
 
 
+
+# ---- Auto Standby and Auto Power Off (docs/sysd.md#auto-standby-and-auto-power-off) ----
+# --time-scale 20 runs stock's 300 s as 15 s and its 60 s as 3 s; the screen off time is not scaled (LIGHTTIME=6: never)
+
+@pytest.mark.parametrize('run', [['--time-scale', '20']], indirect=True)
+def test_auto_standby_after_five_unused_minutes_held_while_music_plays_or_a_cable_is_in(run):
+    root, keys = run
+    play, net = Service(root/'run/vamp/play.sock', 'Q2PLAY/1'), Service(root/'run/vamp/net.sock', 'Q2NET/1')
+    put(root, '/sys/power/state', '')
+    put(root, '/tmp/coda-rc.now', 'title=A\nstate=1\nid=1\n')
+    put(root, '/mnt/data/config.ini', '[SYSSET]\nSTANDBYMODE=1\nLIGHTTIME=6\n')
+    time.sleep(17)
+    assert read(root, '/sys/power/state') == '', 'music playing holds it'
+    put(root, '/tmp/coda-rc.now', 'title=A\nstate=2\nid=1\n')
+    put(root, '/sys/class/power_supply/ac/online', '1\n')
+    time.sleep(17)
+    assert read(root, '/sys/power/state') == '', 'a cable in holds it'
+    put(root, '/sys/class/power_supply/ac/online', '0\n')
+    time.sleep(12)
+    assert read(root, '/sys/power/state') == '', 'the time runs from the last hold'
+    end = time.monotonic() + 6
+    while read(root, '/sys/power/state') != 'mem' and time.monotonic() < end:
+        time.sleep(0.2)
+    assert read(root, '/sys/power/state') == 'mem' and 'pause' in play.lines, "Standby as Q2SYS/1's standby"
+
+
+@pytest.mark.parametrize('run', [['--time-scale', '20']], indirect=True)
+def test_auto_power_off_after_its_time_unused_and_a_key_holds_it(run):
+    root, keys = run
+    put(root, '/mnt/data/config.ini', '[SYSSET]\nSAVEPOWERMODE=1\nLIGHTTIME=6\n')
+    time.sleep(2)
+    press(keys, KEY_VOLUMEUP)
+    time.sleep(2.2)
+    assert not (root/'powered-off').exists(), 'a key at 2 s: not off at 4.5 s (60 s scaled: 3 s)'
+    end = time.monotonic() + 3
+    while not (root/'powered-off').exists() and time.monotonic() < end:
+        time.sleep(0.1)
+    assert (root/'powered-off').exists(), 'SAVEPOWERMODE 1 is stock\'s 60 s'
+
+
+@pytest.mark.parametrize('run', [['--time-scale', '20']], indirect=True)
+def test_neither_when_stock_s_settings_are_off(run):
+    root, _ = run
+    put(root, '/sys/power/state', '')
+    put(root, '/mnt/data/config.ini', '[SYSSET]\nSTANDBYMODE=0\nSAVEPOWERMODE=0\nLIGHTTIME=6\n')
+    time.sleep(20)
+    assert read(root, '/sys/power/state') == '' and not (root/'powered-off').exists()
+
+
 # ---- Vamp API 1 (docs/platform/system.md) ----
 
 def test_conformance_every_command_is_on_the_page():
