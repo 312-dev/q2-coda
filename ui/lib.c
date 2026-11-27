@@ -80,6 +80,19 @@ const int *lib_group_songs(int kind, int g, int *n) {
     *n = k->first[g + 1] - k->first[g];
     return k->order + k->first[g];
 }
+/* The group song is in: its name's place among the groups, by a search of their first songs' names */
+int lib_group_of(int kind, int song) {
+    struct group *k = group(kind);
+    int lo = 0, hi = k->n - 1;
+    group_kind = kind;
+    const char *key = group_key(song);
+    while (lo < hi) {
+        int mid = (lo + hi + 1) / 2;
+        if (strcasecmp(group_key(k->order[k->first[mid]]), key) <= 0) lo = mid;
+        else hi = mid - 1;
+    }
+    return k->n ? lo : -1;
+}
 const char *lib_title(int i) { return lib.text + lib.row[i][0]; }
 const char *lib_artist(int i) { return lib.text + lib.row[i][1]; }
 

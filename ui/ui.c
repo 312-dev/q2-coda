@@ -154,9 +154,35 @@ static void slide_start(int dir, uint32_t *from) {
     again = 1;
 }
 
+/* The screen as it is now, whole: the top page and the status row over it (a sheet's page behind); 0 with no memory. */
+uint32_t *ui_snapshot_screen(void) {
+    uint32_t *buf = depth ? snapshot() : 0;
+    if (!buf) return 0;
+    rect_t all = { 0, 0, SCREEN_W, SCREEN_H };
+    uint32_t *screen = canvas_swap(buf);
+    ui_painting = 1;
+    clip_set(all);
+    status_draw(all);
+    ui_painting = 0;
+    canvas_swap(screen);
+    return buf;
+}
+int ui_status_hidden;
+static int still; /* the next push or pop has no slide: the page moves itself (a sheet) */
+void ui_push_still(const ui_page *p, void *arg) {
+    still = 1;
+    ui_push(p, arg);
+    still = 0;
+}
+void ui_pop_still(void) {
+    still = 1;
+    ui_pop();
+    still = 0;
+}
+
 void ui_push(const ui_page *p, void *arg) {
     if (depth == STACK) return;
-    uint32_t *from = depth && list_motion && !ui_reduce_motion ? snapshot() : 0;
+    uint32_t *from = depth && list_motion && !ui_reduce_motion && !still ? snapshot() : 0;
     stack[depth].page = p, stack[depth].st = p->open ? p->open(arg) : 0;
     ++depth;
     ui_mark_all();
@@ -165,7 +191,7 @@ void ui_push(const ui_page *p, void *arg) {
 }
 void ui_pop(void) {
     if (!depth) return;
-    uint32_t *from = depth > 1 && list_motion && !ui_reduce_motion ? snapshot() : 0;
+    uint32_t *from = depth > 1 && list_motion && !ui_reduce_motion && !still ? snapshot() : 0;
     --depth;
     if (stack[depth].page->close) stack[depth].page->close(stack[depth].st);
     if (!depth) {
@@ -264,14 +290,14 @@ int ui_frame(const input_t *in, int n) {
         rect_t all = { 0, 0, SCREEN_W, SCREEN_H };
         clip_set(all);
         slide_draw();
-        status_draw(all);
+        if (!ui_status_hidden) status_draw(all);
         notice_draw(all);
     } else
         for (int i = 0; i < marks.n; ++i) {
             clip_set(marks.r[i]);
             stack[depth - 1].page->draw(stack[depth - 1].st, marks.r[i]);
             clip_set(marks.r[i]);
-            status_draw(marks.r[i]);
+            if (!ui_status_hidden) status_draw(marks.r[i]);
             notice_draw(marks.r[i]); /* a toast and the card over the page and its status row */
         }
     ui_painting = 0;

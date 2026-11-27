@@ -1074,3 +1074,26 @@ def test_a_set_down_the_queue_is_not_known_even_while_q2ui_runs(fw, ui, mcl, rec
     q2.files[CMD] = b'34 set smart 1\n'
     q2.tick()
     assert q2.ack() == b'34 1\n' and 'SMARTWIFI' not in saved
+
+
+def test_queue_adds_the_listed_ids_next_or_last_as_the_hold_menus_rows_do(fw, ui, mcl, recs):
+    """q2ui's hold menu: "queue next N" or "queue last N" adds the N listed ids as the hold menu's Play Next and Play
+    Last add them (library_pages.c queue_add): with nothing queued they load as a song list's queue without playing;
+    a list with none of the library's ids, or a word other than next or last, is refused with nothing loaded."""
+    q2 = Q2(fw, ui, recs)
+    loaded = []
+    fw.mock('mclLoadPlayList', lambda q, at, cls, *_: loaded.append(([C.c_int.from_address(r).value for r in ui.deques[q]], at, cls)) or 0)
+    fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = ui.deques.new([])
+    q2.tick()
+    q2.files[LIST] = b'13\n11\n'
+    q2.files[CMD] = b'8 queue next 2\n'
+    q2.tick()
+    assert loaded == [([13, 11], 0, 0xf001)] and q2.ack(keep=True) == b'8 0\n'
+    q2.files[LIST] = b'99\n'
+    q2.files[CMD] = b'9 queue last 1\n'
+    q2.tick()
+    assert len(loaded) == 1 and q2.ack(keep=True) == b'9 1\n'
+    q2.files[LIST] = b'12\n'
+    q2.files[CMD] = b'10 queue soon 1\n'
+    q2.tick()
+    assert len(loaded) == 1 and q2.ack(keep=True) == b'10 1\n'

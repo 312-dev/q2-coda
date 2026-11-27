@@ -267,6 +267,8 @@ Every file in `patch/` and `tools/`, and `test/` by group: what it is for, where
 | `lib.c`             | The library's songs from `database.db` and the server catalogue                         | [The library](ui-rewrite.md#the-library)        |
 | `player.c`          | Play and transport, sent down demo's command queue while demo owns the player           | [Cutover](ui-rewrite.md#cutover)                |
 | `page_songs.c`      | Library > Songs                                                                         | [Parity](ui-rewrite.md#parity)                  |
+| `page_menu.c`       | The menu sheet over a page (a song's hold menu's): its recession, material, header and rows | [Parity](ui-rewrite.md#parity)                |
+| `page_edit.c`       | A list's own order and choice of rows (demo's order files) and Edit Library, its editor | [Parity](ui-rewrite.md#parity)                |
 | `page_gallery.c`, `page_depth.c` | The toolkit's examples (every row kind, a card); the panel's colour depth card | [The toolkit](ui-rewrite.md#the-toolkit), [Gradients](ui-rewrite.md#gradients) |
 | `test_engine.c`     | The toolkit's own checks, built by `tools/ui.py test host`                              |                                                 |
 | `bluenoise.inc`, `tools/bluenoise.py` | The dither's noise table and the script that makes it                  | [Gradients](ui-rewrite.md#gradients)            |

@@ -9,7 +9,10 @@
  *  - the lean: while the finger turns the wheel short of its next tick the platter leans toward
  *    the row it is heading for, tilts as a tvOS card does, grows and gleams, and a tick kicks it
  *    the same way; it springs back when the finger lets go;
- *  - the press: Centre sinks the platter and brightens it, the release springs it back.
+ *  - the press: Centre sinks the platter and brightens it, the release springs it back;
+ *  - a captioned row's grow: the selected row, when it has a caption (ui_row.caption), grows over
+ *    CAP_US to hold it under its title in the platter, the rows below it moving down as it does,
+ *    and the row the selection left shrinks back the same way (docs/oled-design.md#list-row).
  *
  * Layers, bottom up (docs/ui-rewrite.md#layers): the rows in their resting inks, clipped to the
  * list's own frame and faded at its top and foot; the pinned rows (Songs' Shuffle), which the
@@ -27,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "../patch/wheel_accel.h"
 #include "q2ui.h"
@@ -85,6 +89,49 @@
 #define SLIDER_STEPS 10    /* a tick's most steps on a fast spin (patch/offsets.inc VOL_ACCEL_MAX) */
 #define SLIDER_TRACK_ON 0x7da2ea /* its track on the platter, under a white fill */
 #define CACHE 32 /* rows whose text is kept: a power of two, more than a fast glide shows */
+/* A captioned row's caption (patch/settings_pages.c, its CAP_* values): Inter 13 from the title's column, CAP_INSET
+ * past the platter's start, wrapped at words to the platter's end less the same, at most CAP_LINES lines, CAP_LINE a
+ * line and CAP_FOOT under the last; the row grows to it over CAP_US, eased out, at once with no motion. */
+#define CAP_PX TYPE(13)
+#define CAP_LINES 3
+#define CAP_LINE 17
+#define CAP_FOOT 5
+#define CAP_INSET 8
+#define CAP_US 150000u
+/* A row editor's (docs/oled-design.md#edit-library, patch/library_edit.c and list_marks.c): the check circle CIRCLE_D
+ * across centred at CIRCLE_X, its ring CIRCLE_RING wide, the words from ICON_TEXT_X; the grip's three GRIP_W x GRIP_H
+ * bars GRIP_GAP apart, centred where the chevron is; the lifted row's card in the platter's box, LIFT_GROW of a row
+ * tall with LIFT_R corners, its ring and shadow; the rows a moved row passes slide aside over SLIDE_US, cubic out. */
+#define CIRCLE_X 34
+#define CIRCLE_D 16.0f
+#define CIRCLE_RING 1.5f
+#define GRIP_W 18
+#define GRIP_H 2
+#define GRIP_GAP 5
+#define LIFT_GROW 1.08f
+#define LIFT_R 9
+#define LIFT_RING 0x141414
+#define SLIDE_US 150000u
+#define SLIDES 8
+/* The A-Z index (docs/oled-design.md#a-z-index), on a list sorted by title (ui_source.letters) of more than AZ_ROWS
+ * rows, shown by the wheel spun fast (a tick of two rows or more, wheel_accel): the folded column of letters centred
+ * at AZ_X from AZ_TOP to AZ_BOTTOM, the selected row's letter lit on it, and the bubble beside it while the spin goes
+ * on; gone AZ_SHOW_US after the last fast tick, its last AZ_FADE_US fading. While it shows the right column moves in
+ * AZ_IN px and the platter ends AZ_BAR_IN px sooner, and the scroll indicator stays hidden. */
+#define AZ_ROWS 50
+#define AZ_X 362
+#define AZ_TOP 80
+#define AZ_BOTTOM 240
+#define AZ_SHOW_US 1000000u
+#define AZ_FADE_US 200000u
+#define AZ_BUBBLE_US 250000u /* the bubble stays while fast ticks come this close */
+#define AZ_IN 4
+#define AZ_BAR_IN 8
+#define AZ_DISC 16
+#define AZ_BUBBLE_W 52
+#define AZ_BUBBLE_H 48
+#define AZ_BUBBLE_GAP 18 /* the bubble ends this far left of the column, */
+#define AZ_POINTER 7     /* its pointer this long towards it */
 
 int list_motion = 1;
 
@@ -94,6 +141,7 @@ struct rowc {
     ui_row row;
     run_t title, detail, value, sub, lead;
     float title_x, detail_x, text_end; /* where the title's column ends */
+    int az_in; /* the A-Z index's move of the right column when it was laid out */
 };
 
 struct ui_list {
@@ -114,6 +162,23 @@ struct ui_list {
     rect_t focus_was; /* the focus layer's box as last marked */
     struct rowc rows_c[CACHE];
     wheel_accel_t accel;
+    uint64_t az_at; /* the A-Z index: the last fast tick, 0 hidden */
+    int az_in, az_letter; /* the right column's move while it shows; the lit letter, 0 '#', 1 to 26 A to Z */
+    /* captions: the row growing to its caption (-1 none) and its lines; the row shrinking back and how tall its
+     * caption was; the change's start and its share done, 0 to 1 */
+    int cap_open, cap_close, cap_lines;
+    float cap_close_px, cap_k;
+    uint64_t cap_at;
+    run_t cap_run[CAP_LINES];
+    /* a row editor's: the selected row lifted, its words in Inter Medium; the rows sliding aside, each from its start
+     * offset to its place */
+    int lifted;
+    run_t lift_run;
+    struct slide {
+        int row;
+        float from;
+        uint64_t at;
+    } slides[SLIDES];
 };
 
 static int selectable(ui_list *l, int i) {
@@ -121,9 +186,31 @@ static int selectable(ui_list *l, int i) {
     l->src.row(l->src.ctx, i, &r);
     return !(r.flags & (ROW_GREY | ROW_HEADER));
 }
+/* How far row i reaches below its own height now: the caption it is growing to or shrinking from. */
+static float cap_full(const ui_list *l) { return l->cap_lines ? (float)(l->cap_lines * CAP_LINE + CAP_FOOT) : 0; }
+static float row_extra(const ui_list *l, int i) {
+    return i == l->cap_open ? cap_full(l) * l->cap_k : i == l->cap_close ? l->cap_close_px * (1 - l->cap_k) : 0;
+}
+/* the rows above i that have grown push it down */
+static float extra_above(const ui_list *l, int i) {
+    float e = 0;
+    if (l->cap_open >= 0 && l->cap_open < i) e += row_extra(l, l->cap_open);
+    if (l->cap_close >= 0 && l->cap_close < i && l->cap_close != l->cap_open) e += row_extra(l, l->cap_close);
+    return e;
+}
+/* how far row i still is from its place, sliding aside */
+static float slide_of(const ui_list *l, int i) {
+    for (int k = 0; k < SLIDES; ++k) {
+        const struct slide *sl = &l->slides[k];
+        if (!sl->at || sl->row != i) continue;
+        float t = clampf((float)(ui_time() - sl->at) / (float)SLIDE_US, 0, 1);
+        return sl->from * (1 - ease_cubic_out(t));
+    }
+    return 0;
+}
 static float row_y(const ui_list *l, int i) {
-    if (i < l->src.pinned) return (float)(l->box.y + i * l->row_h);
-    return (float)((double)(l->y0 + (i - l->src.pinned) * l->row_h) - l->scroll.x);
+    if (i < l->src.pinned) return (float)(l->box.y + i * l->row_h) + extra_above(l, i) + slide_of(l, i);
+    return (float)((double)(l->y0 + (i - l->src.pinned) * l->row_h) - l->scroll.x) + extra_above(l, i) + slide_of(l, i);
 }
 static float bar_to(const ui_list *l) {
     if (l->sel < l->src.pinned) return (float)(l->box.y + l->sel * l->row_h);
@@ -140,16 +227,17 @@ static rect_t sb_rect(void) { return (rect_t){ SB_X, SB_TOP, SB_W, SB_BOTTOM - S
 static rectf_t platter(const ui_list *l, float *tilt, float *lean_share) {
     float share = clampf((float)l->lean.x / LEAN_PX, -1.5f, 1.5f);
     float scale = 1 + RAISE + LEAN_GROW * fabsf(share) + (float)l->press.x;
-    float w = (float)(l->box.w - 2 * SEL_INSET) * scale, h = (float)l->row_h * scale;
-    float cx = (float)l->box.x + (float)l->box.w / 2;
-    float cy = (float)l->bar.x + (float)l->row_h / 2 + share * LEAN_PX;
+    float bw = (float)(l->box.w - 2 * SEL_INSET - (l->az_in ? AZ_BAR_IN : 0));
+    float w = bw * scale, h = ((float)l->row_h + row_extra(l, l->sel)) * scale;
+    float cx = (float)(l->box.x + SEL_INSET) + bw / 2;
+    float cy = (float)l->bar.x + ((float)l->row_h + row_extra(l, l->sel)) / 2 + share * LEAN_PX;
     if (tilt) *tilt = -share * LEAN_TILT;
     if (lean_share) *lean_share = share;
     return (rectf_t){ cx - w / 2, cy - h / 2, w, h };
 }
 /* everything the focus layer can touch: the platter and its shadow */
 static ui_list *traced;
-static rect_t focus_rect(const ui_list *l) { return rect_of(platter(l, 0, 0), 10); }
+static rect_t focus_rect(const ui_list *l) { return rect_of(platter(l, 0, 0), l->lifted ? 14 : 10); }
 
 static void settle(ui_list *l) {
     spring_set(&l->scroll, l->scroll.to), spring_set(&l->bar, l->bar.to);
@@ -168,11 +256,15 @@ static void retarget(ui_list *l) {
     /* on a pinned row the rows under it are at their top: the wheel reaches a pinned row from the
      * first of them, whether it stopped there on the way or a fast turn passed over it */
     if (l->top < p || l->sel < p) l->top = p;
+    /* a caption the selected row grows to takes the whole rows it needs under it, so its foot stays on or above the
+     * list's end (patch/settings_pages.c cap_step, nav/lists.c list_grown_foot) */
+    int under = l->sel == l->cap_open ? ((int)cap_full(l) + l->row_h - 1) / l->row_h : 0;
     if (l->sel >= p) {
         if (l->sel < l->top) l->top = l->sel;
-        if (l->sel >= l->top + l->rows) l->top = l->sel - l->rows + 1;
+        if (l->sel + under >= l->top + l->rows) l->top = l->sel + under - l->rows + 1;
     }
     int last = l->n - l->rows;
+    if (l->sel + under - l->rows + 1 > last) last = l->sel + under - l->rows + 1;
     if (l->top > last) l->top = last > p ? last : p;
     l->scroll.to = (double)((l->top - p) * l->row_h);
     l->bar.to = bar_to(l);
@@ -190,6 +282,51 @@ static void forget(ui_list *l) {
 
 /* Bumped by list_pictures_changed and list_rows_changed (below) */
 static unsigned pictures, everything;
+static struct rowc *row_text(ui_list *l, int i);
+static void moved(ui_list *l, int old);
+
+/* The selected row's caption, if it has one, laid out in lines: greedy at spaces, a word wider than the line cut with
+ * an ellipsis there (patch/settings_pages.c caption_paint). */
+static void cap_layout(ui_list *l, const char *text) {
+    int w = l->box.w - 2 * SEL_INSET - 2 * CAP_INSET;
+    const char *at = text;
+    l->cap_lines = 0;
+    while (*at && l->cap_lines < CAP_LINES) {
+        char line[192];
+        size_t best = 0, end = 0, n = strlen(at);
+        while (end < n) {
+            size_t e = end + 1;
+            while (e < n && at[e] != ' ') ++e;
+            if (e >= sizeof line) break;
+            memcpy(line, at, e), line[e] = 0;
+            if (best && text_width(FACE_REGULAR, CAP_PX, line) > (float)w) break;
+            best = end = e;
+        }
+        if (!best) best = n < sizeof line ? n : sizeof line - 1;
+        memcpy(line, at, best), line[best] = 0;
+        run_make(&l->cap_run[l->cap_lines++], FACE_REGULAR, CAP_PX, line, w);
+        at += best;
+        while (*at == ' ') ++at;
+    }
+}
+/* The selection's row grows to its caption and the row it left shrinks from its own; with no motion both are at their
+ * ends at once. Before retarget, which keeps the grown row's foot in sight. */
+static void cap_to(ui_list *l, int animate) {
+    int open = -1;
+    if (l->n) {
+        struct rowc *c = row_text(l, l->sel);
+        if (c->row.caption && *c->row.caption) open = l->sel;
+        if (open >= 0 && open == l->cap_open) return;
+        if (open < 0 && l->cap_open < 0) return;
+        l->cap_close_px = l->cap_open >= 0 ? row_extra(l, l->cap_open) : 0;
+        l->cap_close = l->cap_open;
+        l->cap_open = open, l->cap_lines = 0;
+        if (open >= 0) cap_layout(l, c->row.caption);
+    } else
+        l->cap_open = l->cap_close = -1, l->cap_lines = 0;
+    l->cap_at = ui_time(), l->cap_k = 0;
+    if (!animate || !list_motion || ui_reduce_motion) l->cap_k = 1, l->cap_close = -1;
+}
 
 ui_list *list_new(const ui_source *src) {
     ui_list *l = calloc(1, sizeof *l);
@@ -200,10 +337,12 @@ ui_list *list_new(const ui_source *src) {
     l->rows = (l->box.y + l->box.h - l->y0) / l->row_h;
     l->n = src->count(src->ctx);
     l->grab = -1;
+    l->cap_open = l->cap_close = -1, l->cap_k = 1;
     forget(l);
     /* a list opens on its first row that scrolls: a pinned row (Shuffle) is reached by the wheel */
     l->sel = src->pinned < l->n ? src->pinned : 0;
     while (l->sel < l->n - 1 && !selectable(l, l->sel)) ++l->sel;
+    cap_to(l, 0);
     retarget(l);
     if (l->n) l->knob.to = row_text_flags(l, l->sel) & ROW_ON ? 1 : 0;
     l->everything_seen = everything;
@@ -226,6 +365,51 @@ int list_set_down(ui_list *l) {
 }
 float list_scroll(const ui_list *l) { return (float)l->scroll.x; }
 
+void list_lift(ui_list *l, int on) {
+    l->lifted = on && l->n;
+    if (l->lifted) {
+        struct rowc *c = row_text(l, l->sel);
+        run_make(&l->lift_run, FACE_MEDIUM, TITLE_PX, c->row.title ? c->row.title : "", (int)(c->text_end - c->title_x));
+    }
+    ui_mark(frame_rect(l)), ui_mark(l->focus_was);
+}
+int list_lifted(const ui_list *l) { return l->lifted; }
+/* The source moved row from to to: the selection goes with it at once (the card glides there as the platter does), and
+ * each row between, now a row the other way, slides from where it showed to its place; a row still sliding from an
+ * earlier move keeps where it is and slides on from there. */
+void list_moved_row(ui_list *l, int from, int to) {
+    if (from == to || from < 0 || to < 0 || from >= l->n || to >= l->n) return;
+    int dir = to > from ? 1 : -1;
+    float shown[SLIDES];
+    for (int k = 0; k < SLIDES; ++k) { /* where each slide is now, then its row's new number */
+        struct slide *sl = &l->slides[k];
+        shown[k] = sl->at ? slide_of(l, sl->row) : 0;
+        if (!sl->at) continue;
+        if (sl->row == from) sl->row = to;
+        else if ((sl->row - from) * dir > 0 && (sl->row - to) * dir <= 0) sl->row -= dir;
+    }
+    uint64_t now = ui_time();
+    int motion = list_motion && !ui_reduce_motion;
+    for (int i = from; i != to; i += dir) { /* the rows passed, now from to to less one, each a row the other way */
+        int k = 0, free = -1;
+        for (; k < SLIDES && !(l->slides[k].at && l->slides[k].row == i); ++k)
+            if (free < 0 && (!l->slides[k].at || now - l->slides[k].at >= SLIDE_US)) free = k;
+        float from_y = (k < SLIDES ? shown[k] : 0) + (float)(dir * l->row_h);
+        if (k == SLIDES) k = free;
+        if (k < 0) continue;
+        l->slides[k] = (struct slide){ i, motion ? from_y : 0, motion ? now : 0 };
+    }
+    for (int k = 0; k < SLIDES; ++k)
+        if (l->slides[k].at && l->slides[k].row == to) l->slides[k].at = 0; /* the moved row goes at once */
+    forget(l);
+    int old = l->sel;
+    l->sel = to;
+    moved(l, old);
+    if (l->lifted) list_lift(l, 1);
+    ui_mark(frame_rect(l));
+    if (motion) kick(l);
+}
+
 /* Rows changed in place (a switch flipped, a value cycled): the same rows are read again, and the
  * selected row's switch slides to its new side. */
 void list_reload(ui_list *l) {
@@ -233,6 +417,9 @@ void list_reload(ui_list *l) {
     forget(l);
     if (l->n) on = row_text_flags(l, l->sel) & ROW_ON;
     l->knob.to = on ? 1 : 0;
+    cap_to(l, 1); /* a row's caption may have come, gone or changed with it */
+    if (l->cap_open >= 0) cap_layout(l, row_text(l, l->sel)->row.caption);
+    retarget(l);
     if (!list_motion) spring_set(&l->knob, l->knob.to);
     else kick(l);
     ui_mark(frame_rect(l));
@@ -242,6 +429,7 @@ void list_changed(ui_list *l) {
     l->n = l->src.count(l->src.ctx);
     forget(l);
     if (l->sel >= l->n) l->sel = l->n ? l->n - 1 : 0;
+    l->cap_open = l->cap_close = -1, cap_to(l, 0);
     retarget(l);
     settle(l);
     ui_mark(frame_rect(l));
@@ -259,20 +447,21 @@ void list_rows_changed(void) { ++everything; }
 static struct rowc *row_text(ui_list *l, int i) {
     struct rowc *c = &l->rows_c[i & (CACHE - 1)];
     if (c->index == i && !run_stale(&c->title) && !run_stale(&c->detail) && !run_stale(&c->value) &&
-        !run_stale(&c->sub) && !run_stale(&c->lead) && (!c->row.art || c->pictures == pictures) && c->everything == everything)
+        !run_stale(&c->sub) && !run_stale(&c->lead) && (!c->row.art || c->pictures == pictures) && c->everything == everything &&
+        c->az_in == l->az_in)
         return c;
     static run_t gap;
     if (!gap.n || run_stale(&gap)) run_make(&gap, FACE_REGULAR, TITLE_PX, "  ", -1);
     ui_row *r = &c->row;
     memset(r, 0, sizeof *r);
     l->src.row(l->src.ctx, i, r);
-    c->index = i, c->pictures = pictures, c->everything = everything;
+    c->index = i, c->pictures = pictures, c->everything = everything, c->az_in = l->az_in;
     int two = l->row_h > ROW_H && r->sub;
     float x = (float)(l->box.x + TEXT_X + TEXT_MARGIN);
-    if (r->icon) x = (float)(l->box.x + ICON_TEXT_X + TEXT_MARGIN);
+    if (r->icon || r->flags & ROW_CIRCLE) x = (float)(l->box.x + ICON_TEXT_X + TEXT_MARGIN);
     if (r->lead) x = (float)(l->box.x + LEAD_TEXT_X + TEXT_MARGIN);
     if (r->art) x = (float)(l->box.x + ART_TEXT_X + TEXT_MARGIN);
-    float end = (float)(l->box.x + l->box.w - (SCREEN_W - RIGHT_COL)) - TEXT_MARGIN;
+    float end = (float)(l->box.x + l->box.w - (SCREEN_W - RIGHT_COL) - l->az_in) - TEXT_MARGIN;
     c->value.n = c->detail.n = c->sub.n = c->lead.n = 0;
     c->value.made = c->detail.made = c->sub.made = c->lead.made = c->title.made;
     if (r->flags & ROW_HEADER) {
@@ -291,6 +480,8 @@ static struct rowc *row_text(ui_list *l, int i) {
         end -= 40 + VALUE_GAP;
     else if (r->flags & (ROW_CHEVRON | ROW_CHECK | ROW_PLAYING))
         end -= 20;
+    else if (r->flags & ROW_GRIP)
+        end -= GRIP_W + 6;
     for (int k = 0; k < 3 && r->marks[k]; ++k) end -= MARK_STEP;
     run_make(&c->title, FACE_REGULAR, TITLE_PX, r->title ? r->title : "", (int)(end - x));
     c->title_x = x, c->text_end = end;
@@ -313,6 +504,35 @@ static void chevron(float cx, float cy, uint32_t rgb) {
 static void check(float cx, float cy, uint32_t rgb) {
     stroke_line(cx - 5, cy + 0.5f, cx - 1.5f, cy + 4, 2, rgb, 1);
     stroke_line(cx - 1.5f, cy + 4, cx + 5.5f, cy - 4, 2, rgb, 1);
+}
+static void grip(float cx, float cy, uint32_t rgb) {
+    for (int k = -1; k <= 1; ++k) fill_round((rectf_t){ cx - GRIP_W / 2.0f, cy + (float)(k * GRIP_GAP) - 1, GRIP_W, GRIP_H }, 0, 0, rgb, 1, 0);
+}
+/* A row editor's check circle (patch/list_marks.c check_circle): shown, the accent's disc with a white check (on the
+ * selection a white disc, the accent's check); hidden, a ring in Text Tertiary (white on the selection); locked, an Off
+ * disc with a padlock in Text Secondary. */
+static void circle(float cx, float cy, unsigned flags, int focused) {
+    float r = CIRCLE_D / 2;
+    if (flags & ROW_LOCK) {
+        fill_disc(cx, cy, r, tok(TOK_OFF), 1);
+        uint32_t ink = tok(TOK_SECONDARY);
+        fill_round((rectf_t){ cx - 3.5f, cy - 1, 7, 5.5f }, 1, 0, ink, 1, 0); /* its body, */
+        stroke_line(cx - 2, cy - 1, cx - 2, cy - 3, 1.3f, ink, 1);          /* and its shackle */
+        stroke_line(cx + 2, cy - 1, cx + 2, cy - 3, 1.3f, ink, 1);
+        stroke_line(cx - 2, cy - 3, cx, cy - 4.6f, 1.3f, ink, 1);
+        stroke_line(cx, cy - 4.6f, cx + 2, cy - 3, 1.3f, ink, 1);
+        return;
+    }
+    if (!(flags & ROW_ON)) {
+        uint32_t ink = focused ? 0xffffff : tok(TOK_TERTIARY);
+        fill_disc(cx, cy, r, ink, 1);
+        fill_disc(cx, cy, r - CIRCLE_RING, focused ? RGB_ACCENT : tok(TOK_CANVAS), 1);
+        return;
+    }
+    uint32_t disc = focused ? 0xffffff : RGB_ACCENT, mark = focused ? RGB_ACCENT : 0xffffff;
+    fill_disc(cx, cy, r, disc, 1);
+    stroke_line(cx - 3.6f, cy + 0.3f, cx - 1.1f, cy + 2.8f, 1.8f, mark, 1);
+    stroke_line(cx - 1.1f, cy + 2.8f, cx + 3.9f, cy - 2.8f, 1.8f, mark, 1);
 }
 static void level_bars(float right, float cy, uint32_t rgb) {
     static const float high[] = { 8, 12, 5, 10 };
@@ -360,7 +580,9 @@ static void row_paint(ui_list *l, int i, float y, int focused, float dy) {
         run_draw(&c->title, c->title_x, y + h - (float)META_PX - 4, tok(TOK_TERTIARY), 256);
         return;
     }
-    int grey = r->flags & ROW_GREY, accent = r->flags & (ROW_ACCENT | ROW_PLAYING);
+    int grey = r->flags & (ROW_GREY | ROW_DIM), accent = r->flags & (ROW_ACCENT | ROW_PLAYING);
+    int lifted = focused && l->lifted && i == l->sel; /* on its card: the list's inks, the words in Inter Medium */
+    if (lifted) on = tok(TOK_PRIMARY);
     uint32_t ink = focused ? on : grey ? tok(TOK_TERTIARY) : accent ? RGB_ACCENT : tok(TOK_PRIMARY);
     uint32_t dim = focused ? on : tok(TOK_TERTIARY);
     uint32_t val = focused ? on : grey ? tok(TOK_TERTIARY) : tok(TOK_SECONDARY);
@@ -369,10 +591,13 @@ static void row_paint(ui_list *l, int i, float y, int focused, float dy) {
                    256, focused ? (long)on : accent ? (long)RGB_ACCENT : (long)tok(TOK_SECONDARY));
     if (r->art)
         image_draw(r->art, (rectf_t){ (float)(l->box.x + TEXT_X), y + 6 + iy, ART_PX, ART_PX }, 4, 0, 256, -1);
+    if (r->flags & ROW_CIRCLE) circle((float)(l->box.x + CIRCLE_X), cy + iy, r->flags, focused);
     if (c->lead.n) run_draw(&c->lead, (float)(l->box.x + LEAD_END) - c->lead.w, ty + (h - (float)META_PX) / 2 + META_DY, dim, 256);
     int two = c->sub.n > 0;
     float title_y = two ? ty + 5 : ty + (h - (float)TITLE_PX) / 2;
-    if (focused && i == l->mq_row && l->mq_run.n) {
+    if (lifted && l->lift_run.n)
+        run_draw(&l->lift_run, c->title_x, title_y, ink, 256);
+    else if (focused && i == l->mq_row && l->mq_run.n) {
         /* the cut title, whole, sliding in its column with its ends faded */
         fade_set((int)c->title_x, (int)c->text_end, l->mq_x > 0.5f ? MQ_FADE : 0, MQ_FADE);
         run_draw(&l->mq_run, c->title_x - l->mq_x, title_y, ink, 256);
@@ -381,7 +606,7 @@ static void row_paint(ui_list *l, int i, float y, int focused, float dy) {
         run_draw(&c->title, c->title_x, title_y, ink, 256);
     if (c->detail.n) run_draw(&c->detail, c->detail_x, ty + (h - (float)META_PX) / 2 + META_DY, dim, 256);
     if (two) run_draw(&c->sub, c->title_x, ty + 29, dim, 256);
-    float right = (float)(l->box.x + l->box.w - (SCREEN_W - RIGHT_COL));
+    float right = (float)(l->box.x + l->box.w - (SCREEN_W - RIGHT_COL) - l->az_in);
     if (r->flags & ROW_SLIDER) {
         slider((float)(l->box.x + SLIDER_X), right - SLIDER_END, cy + iy, r->level, focused, i == l->grab);
         if (c->value.n) run_draw(&c->value, right - c->value.w, ty + (h - (float)META_PX) / 2, val, 256);
@@ -395,20 +620,22 @@ static void row_paint(ui_list *l, int i, float y, int focused, float dy) {
         check(right - 7, cy + iy, focused ? on : RGB_ACCENT);
     else if (r->flags & ROW_CHEVRON)
         chevron(right - 5, cy + iy, focused ? on : grey ? tok(TOK_TERTIARY) : tok(TOK_CHEVRON));
+    else if (r->flags & ROW_GRIP)
+        grip(right - 5, cy + iy, focused ? on : tok(TOK_TERTIARY));
     for (int k = 0; k < 3 && r->marks[k]; ++k) { /* Text Primary, white on the platter, as demo's (wifi_mark) */
-        char name[24];
+        char name[48];
         snprintf(name, sizeof name, "%s_d.", r->marks[k]);
         const image_t *im = icon(name);
         float x = right - (float)(ICON_PX + k * MARK_STEP);
         if (im)
             image_draw(im, (rectf_t){ x, cy - ICON_PX / 2 + iy, ICON_PX, ICON_PX }, 0, 0, 256,
-                       focused ? (long)on : grey ? (long)tok(TOK_TERTIARY) : (long)tok(TOK_PRIMARY));
+                       focused ? (long)on : grey ? (long)tok(TOK_TERTIARY) : r->flags & ROW_SOFT ? (long)tok(TOK_SECONDARY) : (long)tok(TOK_PRIMARY));
     }
 }
 
 static void draw_indicator(const ui_list *l) {
     int total = l->n - l->src.pinned;
-    if (!l->sb_alpha || total <= l->rows) return;
+    if (!l->sb_alpha || total <= l->rows || l->az_at) return;
     float track = SB_BOTTOM - SB_TOP, len = track * (float)l->rows / (float)total;
     if (len < SB_MIN) len = SB_MIN;
     float at = (track - len) * clampf((float)(l->scroll.x / (double)((total - l->rows) * l->row_h)), 0, 1);
@@ -417,12 +644,12 @@ static void draw_indicator(const ui_list *l) {
     fill_round((rectf_t){ SB_X, SB_TOP + at, SB_W, len }, 2, 0, 0xe5e5e5, a, 0);
 }
 
-void list_draw(ui_list *l, rect_t r) {
+static void list_draw_rows(ui_list *l, rect_t r) {
     rect_t frame = frame_rect(l), part, rows;
     int p = l->src.pinned, full = l->box.y == LIST_TOP;
     if (!rect_meet(r, frame, &part)) return;
     clip_set(part);
-    fill(part, tok(TOK_CANVAS));
+    if (!l->src.bare) fill(part, tok(TOK_CANVAS));
     /* the scrolling rows, under everything: clipped to the list's frame, which under a pinned
      * row starts at that row's foot */
     rows = frame;
@@ -430,6 +657,8 @@ void list_draw(ui_list *l, rect_t r) {
     if (rect_meet(part, rows, &rows) && l->n > p) {
         clip_set(rows);
         int first = p + (int)floor((l->scroll.x + (double)(rows.y - l->y0)) / (double)l->row_h);
+        first -= l->cap_open >= 0 || l->cap_close >= 0 ? (CAP_LINES * CAP_LINE + CAP_FOOT) / l->row_h + 1 : 0;
+        --first; /* a row above sliding aside, down into sight */
         if (first < p) first = p;
         for (int i = first; i < l->n; ++i) {
             float y = row_y(l, i);
@@ -437,14 +666,14 @@ void list_draw(ui_list *l, rect_t r) {
             row_paint(l, i, y, 0, 0);
         }
         /* the list's ends: rows fade into the screen's foot, and into its top once scrolled */
-        if (full || p) {
-            int foot = l->box.y + l->box.h;
-            fade_rows(foot, FOOT_END, FOOT_KEEP, 0);
-            fill((rect_t){ frame.x, FOOT_END, frame.w, SCREEN_H - FOOT_END }, tok(TOK_CANVAS));
+        if (!l->src.bare && (full || p)) {
+            int foot = l->box.y + l->box.h, end = l->src.fade_to ? l->src.fade_to : FOOT_END;
+            fade_rows(foot, end, FOOT_KEEP, 0);
+            fill((rect_t){ frame.x, end, frame.w, SCREEN_H - end }, tok(TOK_CANVAS));
         }
         if (p)
             fade_rows(l->y0, l->y0 + PIN_FADE, 0, 255);
-        else if (full && l->scroll.x > 0) {
+        else if (!l->src.bare && full && l->scroll.x > 0) {
             fill((rect_t){ frame.x, 0, frame.w, TOP_BLACK }, tok(TOK_CANVAS));
             fade_rows(TOP_BLACK, LIST_TOP - TOP_CLEAR, 0, 255);
         }
@@ -459,6 +688,17 @@ void list_draw(ui_list *l, rect_t r) {
     rect_t on;
     clip_set(r);
     if (!rect_meet(r, focus_rect(l), 0)) return;
+    if (l->lifted) { /* a row editor's lifted row on its raised card, in the platter's box, flat, and its contents on it */
+        float bh = (float)l->row_h * LIFT_GROW;
+        rectf_t card = { bar.x + (bar.w - (float)(l->box.w - 2 * SEL_INSET)) / 2, (float)l->bar.x + ((float)l->row_h - bh) / 2,
+                         (float)(l->box.w - 2 * SEL_INSET), bh };
+        shadow_round((rectf_t){ card.x, card.y + 6, card.w, card.h }, LIFT_R, 6, 0x000000, 0.55f);
+        fill_round((rectf_t){ card.x - 1, card.y - 1, card.w + 2, card.h + 2 }, LIFT_R + 1, 0, ui_light ? 0xebebeb : LIFT_RING, 1, 0);
+        fill_round(card, LIFT_R, 0, tok(TOK_RAISED_2), 1, 0);
+        if (rect_meet(r, rect_of(card, 0), &on)) clip_set(on), row_paint(l, l->sel, (float)l->bar.x, 1, 0);
+        clip_set(r);
+        return;
+    }
     float pressed = clampf((float)-l->press.x / PRESS_SINK, 0, 1);
     uint32_t blue = rgb_mix(RGB_ACCENT, RGB_ACCENT_PRESSED, pressed);
     shadow_round((rectf_t){ bar.x + 2, bar.y + 3, bar.w - 4, bar.h }, SEL_R, 7, RGB_ACCENT,
@@ -470,8 +710,8 @@ void list_draw(ui_list *l, rect_t r) {
     if (!rect_meet(r, rect_of(bar, 0), &on)) return;
     clip_set(on);
     int near = p + (int)floor(((double)(bar.y - (float)l->y0) + l->scroll.x) / (double)l->row_h);
-    for (int k = 0; k < p + 4; ++k) {
-        int i = k < p ? k : near + k - p - 1;
+    for (int k = 0; k < p + 7; ++k) {
+        int i = k < p ? k : near + k - p - 3;
         if (i < (k < p ? 0 : p) || i >= l->n) continue;
         float y = row_y(l, i);
         if (y >= bar.y + bar.h || y + (float)l->row_h <= bar.y) continue;
@@ -479,7 +719,78 @@ void list_draw(ui_list *l, rect_t r) {
         float over = clampf(1 - fabsf(y - (float)l->bar.x) / (float)l->row_h, 0, 1);
         row_paint(l, i, y, 1, share * LEAN_PX * over);
     }
+    /* the selected row's caption under its title, each line once the platter holds it whole */
+    if (l->sel == l->cap_open) {
+        float y = row_y(l, l->sel) + (float)l->row_h, dy = share * LEAN_PX * CONTENT_DEPTH, foot = y + row_extra(l, l->sel);
+        for (int k = 0; k < l->cap_lines && y + (float)((k + 1) * CAP_LINE) <= foot + 0.01f; ++k)
+            run_draw(&l->cap_run[k], (float)(l->box.x + SEL_INSET + CAP_INSET), y + (float)(k * CAP_LINE) + (CAP_LINE - CAP_PX) / 2.0f + dy,
+                     tok(TOK_CAPTION_ON_ACCENT), 256);
+    }
     clip_set(r);
+}
+/* A row's place in the index: its title's first letter past "The ", "A " or "An ", A to Z as 1 to 26, anything else
+ * (digits, symbols, other scripts) 0, '#' */
+static int az_of(const char *t) {
+    static const char *const skip[] = { "the ", "a ", "an " };
+    if (!t) return 0;
+    for (int k = 0; k < 3; ++k)
+        if (!strncasecmp(t, skip[k], strlen(skip[k])) && t[strlen(skip[k])]) {
+            t += strlen(skip[k]);
+            break;
+        }
+    int c = (unsigned char)*t | 0x20;
+    return c >= 'a' && c <= 'z' ? c - 'a' + 1 : 0;
+}
+static float az_alpha(const ui_list *l) {
+    uint64_t t = ui_time() - l->az_at;
+    return !l->az_at || t >= AZ_SHOW_US ? 0 : t < AZ_SHOW_US - AZ_FADE_US ? 1 : (float)(AZ_SHOW_US - t) / AZ_FADE_US;
+}
+static rect_t az_rect(void) {
+    return (rect_t){ AZ_X - AZ_DISC / 2 - AZ_BUBBLE_GAP - AZ_BUBBLE_W - 2, AZ_TOP - AZ_BUBBLE_H / 2 - 2,
+                     AZ_BUBBLE_W + AZ_BUBBLE_GAP + AZ_DISC + 4, AZ_BOTTOM - AZ_TOP + AZ_BUBBLE_H + 4 };
+}
+static void az_draw(const ui_list *l) {
+    static const char folded[] = "#DIMQVZ"; /* seven letters with a dot between each two, as iOS folds it */
+    static run_t glyphs[27], big;
+    static char big_s[2];
+    float a = az_alpha(l);
+    if (a <= 0) return;
+    uint32_t ink = ui_light ? 0x000000 : 0xffffff, paper = ui_light ? 0xffffff : 0x000000;
+    unsigned alpha = (unsigned)(a * 256);
+    for (int k = 0; k < 13; ++k) {
+        float y = AZ_TOP + (float)k * (AZ_BOTTOM - AZ_TOP) / 12;
+        if (k & 1) {
+            fill_disc(AZ_X, y, 1.5f, ink, a);
+            continue;
+        }
+        char ch[2] = { folded[k / 2], 0 };
+        int g = ch[0] == '#' ? 0 : ch[0] - 'A' + 1;
+        if (!glyphs[g].n || run_stale(&glyphs[g])) run_make(&glyphs[g], FACE_MEDIUM, TYPE(13), ch, -1);
+        run_draw(&glyphs[g], AZ_X - glyphs[g].w / 2, y - TYPE(13) / 2.0f, ink, alpha);
+    }
+    /* the lit letter at its own place: the 27 map evenly over the column whether or not it is folded */
+    float ly = AZ_TOP + (float)l->az_letter * (AZ_BOTTOM - AZ_TOP) / 26;
+    char lit[2] = { l->az_letter ? (char)('A' + l->az_letter - 1) : '#', 0 };
+    fill_disc(AZ_X, ly, AZ_DISC / 2.0f, ink, a);
+    if (!glyphs[l->az_letter].n || run_stale(&glyphs[l->az_letter])) run_make(&glyphs[l->az_letter], FACE_MEDIUM, TYPE(13), lit, -1);
+    run_draw(&glyphs[l->az_letter], AZ_X - glyphs[l->az_letter].w / 2, ly - TYPE(13) / 2.0f, paper, alpha);
+    if (ui_time() - l->az_at >= AZ_BUBBLE_US) return;
+    /* the bubble while the spin goes on: the letter large, its pointer towards the lit one */
+    float bx = AZ_X - AZ_DISC / 2.0f - AZ_BUBBLE_GAP - AZ_BUBBLE_W, by = ly - AZ_BUBBLE_H / 2.0f;
+    fill_round((rectf_t){ bx, by, AZ_BUBBLE_W, AZ_BUBBLE_H }, 12, 0, tok(TOK_RAISED_2), a, 0);
+    for (int k = 0; k < AZ_POINTER; ++k) /* a triangle as narrowing strokes */
+        stroke_line(bx + AZ_BUBBLE_W + (float)k, ly - (float)(AZ_POINTER - k), bx + AZ_BUBBLE_W + (float)k,
+                    ly + (float)(AZ_POINTER - k), 1, tok(TOK_RAISED_2), a);
+    if (big_s[0] != lit[0] || !big.n || run_stale(&big)) big_s[0] = lit[0], run_make(&big, FACE_MEDIUM, TYPE(22), big_s, -1);
+    run_draw(&big, bx + AZ_BUBBLE_W / 2.0f - big.w / 2, ly - TYPE(22) / 2.0f, 0xffffff, alpha);
+}
+
+void list_draw(ui_list *l, rect_t r) {
+    list_draw_rows(l, r);
+    if (l->az_at && rect_meet(r, az_rect(), 0)) {
+        clip_set(r);
+        az_draw(l);
+    }
 }
 
 /* The first row at or after i, going dir, whose title starts with another letter than row i's */
@@ -498,6 +809,7 @@ static int letter_step(ui_list *l, int i, int dir) {
 }
 
 static void moved(ui_list *l, int old) {
+    if (l->sel != old) cap_to(l, 1);
     retarget(l);
     l->mq_row = -1, l->mq_at = 0, l->mq_x = 0;
     spring_set(&l->knob, 0);
@@ -523,6 +835,7 @@ void list_select(ui_list *l, int i, int animate) {
     l->sel = i < 0 ? 0 : i >= l->n ? l->n - 1 : i;
     moved(l, old);
     if (!animate) {
+        l->cap_k = 1, l->cap_close = -1;
         settle(l);
         ui_mark(frame_rect(l));
     }
@@ -554,6 +867,15 @@ void list_event(ui_list *l, const input_t *e) {
          * selection stays (docs/oled-design.md#selection-bar) */
         if (list_motion && !ui_reduce_motion) l->lean.v = (double)dir * KICK, kick(l);
         if (sel != old) moved(l, old), ui_click(0); /* at an end, where it stays, no click: as demo's lists */
+        if (l->src.letters && l->n - l->src.pinned > AZ_ROWS && (step >= 2 || step == WA_LETTER) && sel >= l->src.pinned) {
+            if (!l->az_in) l->az_in = AZ_IN, ui_mark(frame_rect(l)); /* the right column moves in for it */
+            l->az_at = ui_time();
+        }
+        if (l->az_at) {
+            struct rowc *c = row_text(l, l->sel);
+            l->az_letter = az_of(c->row.title);
+            ui_mark(az_rect());
+        }
     } else if (e->type == IN_TUG) {
         if (!list_motion || ui_reduce_motion) return;
         float a = clampf(fabsf(e->share), 0, 1);
@@ -579,6 +901,12 @@ void list_event(ui_list *l, const input_t *e) {
     }
 }
 
+static float slides_now(const ui_list *l) {
+    float sum = 0;
+    for (int k = 0; k < SLIDES; ++k)
+        if (l->slides[k].at) sum += fabsf(slide_of(l, l->slides[k].row));
+    return sum;
+}
 int list_last_selected(void) { return traced ? traced->sel : -1; }
 /* The rows of the list last stepped (the page on top) into path, a line each: its title, then a tab
  * and its value when it has one, or with marks, a tab and its value, its detail and its marks
@@ -600,8 +928,9 @@ int list_rows_dump(const char *path) {
 }
 int list_trace(char *out, size_t room) {
     if (!traced) return snprintf(out, room, "-");
-    return snprintf(out, room, "sel=%d scroll=%.3f bar=%.3f lean=%.3f press=%.4f knob=%.3f grab=%d", traced->sel,
-                    traced->scroll.x, traced->bar.x, traced->lean.x, traced->press.x, traced->knob.x, traced->grab);
+    return snprintf(out, room, "sel=%d scroll=%.3f bar=%.3f lean=%.3f press=%.4f knob=%.3f grab=%d az=%d azin=%d cap=%.2f slide=%.2f",
+                    traced->sel, traced->scroll.x, traced->bar.x, traced->lean.x, traced->press.x, traced->knob.x,
+                    traced->grab, traced->az_at ? traced->az_letter : -1, traced->az_in, row_extra(traced, traced->sel), slides_now(traced));
 }
 
 void list_step(ui_list *l) {
@@ -631,6 +960,23 @@ void list_step(ui_list *l) {
         ui_mark(rect_union(f, l->focus_was));
         l->focus_was = f;
     }
+    float sliding = 0;
+    for (int k = 0; k < SLIDES; ++k) { /* the rows a moved row passed, sliding aside */
+        struct slide *sl = &l->slides[k];
+        if (!sl->at) continue;
+        if (now - sl->at >= SLIDE_US) sl->at = 0;
+        sliding = 1;
+    }
+    if (sliding) ui_mark(frame_rect(l)), ui_again();
+    if (l->cap_k < 1) { /* a caption's grow, eased out (EASE_QUAD_OUT, as demo's cap_step) */
+        float t = clampf((float)(now - l->cap_at) / (float)CAP_US, 0, 1);
+        l->cap_k = 1 - (1 - t) * (1 - t);
+        if (t >= 1) l->cap_k = 1, l->cap_close = -1;
+        else ui_again();
+        rect_t f = focus_rect(l);
+        ui_mark(frame_rect(l)), ui_mark(rect_union(f, l->focus_was));
+        l->focus_was = f;
+    }
     if (l->sb_at) {
         uint64_t t = now - l->sb_at;
         int a = t < SB_SHOW_US - SB_FADE_US ? 255 : t >= SB_SHOW_US ? 0 : (int)(255 * (SB_SHOW_US - t) / SB_FADE_US);
@@ -641,6 +987,17 @@ void list_step(ui_list *l) {
         else
             ui_wake_ms((unsigned)((SB_SHOW_US - SB_FADE_US - t) / 1000u) + 1);
         if (a != l->sb_alpha) l->sb_alpha = a, ui_mark(sb_rect());
+    }
+    if (l->az_at) {
+        uint64_t t = now - l->az_at;
+        if (t >= AZ_SHOW_US)
+            l->az_at = 0, l->az_in = 0, ui_mark(frame_rect(l)); /* gone: the right column back out */
+        else if (t >= AZ_SHOW_US - AZ_FADE_US)
+            ui_mark(az_rect()), ui_again();
+        else {
+            if (t >= AZ_BUBBLE_US) ui_mark(az_rect()); /* the bubble gone */
+            ui_wake_ms((unsigned)(((t < AZ_BUBBLE_US ? AZ_BUBBLE_US : AZ_SHOW_US - AZ_FADE_US) - t) / 1000u) + 1);
+        }
     }
     if (l->mq_at) {
         /* the selected row's cut title: rest, slide to its end, rest, back to the start */

@@ -374,9 +374,9 @@ def scripts(binary, work):
                   sum(1 for k in knob if 0.02 < k < 0.98) >= 10 and pics['sliding'].rgb not in (pics['on'].rgb, pics['off'].rgb),
                   f'{sum(1 for k in knob if 0.02 < k < 0.98)} frames between its ends in two flips')
     good &= check('a chevron stands at the right column', pics['on'].at(342, BAR_H + ROW_H + 16) != (0, 0, 0) and pics['open'].at(342, BAR_H + ROW_H + 16) != ACCENT)
-    # an inline slider row (ROW_SLIDER): Centre grabs it and the wheel then sets it (clockwise, down a list, is more, as
+    # an inline slider row (ROW_SLIDER), the last but one (the captioned row is last): Centre grabs it and the wheel then sets it (clockwise, down a list, is more, as
     # demo's sliders: patch/inline_slider.c, KEY_NEXT), Centre or Return sets it down
-    lines = ['rest', 'tick 12', 'rest', 'key centre', 'run 50', 'tick 2', 'tick -1', 'run 50', 'shot @grabbed.ppm', 'key centre', 'run 50',
+    lines = ['rest', 'tick 20', 'rest', 'run 300', 'tick -1', 'rest', 'key centre', 'run 50', 'tick 2', 'tick -1', 'run 50', 'shot @grabbed.ppm', 'key centre', 'run 50',
              'tick -1', 'rest', 'tick 1', 'rest', 'key centre', 'run 50', 'tick 1', 'key return', 'rest', 'rows @rows.txt', 'tick -1',
              'run 50']
     trace, pics, _, (_, _, d) = script(binary, work, 1, lines, '--page', 'gallery', queue=True)
@@ -898,6 +898,170 @@ def bt_devices(binary, work, home):
     good &= check('a new list from demo is shown and keeps the selection on its device (moved up into My Devices)',
                   rows('later.txt')[:4] == ['Bluetooth', 'My Devices', 'Fixture Phones\tNot Connected', 'Fixture Back\\sl']
                   and rows('again.txt') == ['Disconnect', 'Forget This Device'], f"{rows('later.txt')} {rows('again.txt')}")
+    return good
+
+
+def az_index(binary, work):
+    """The A-Z index (docs/oled-design.md#a-z-index): on a list sorted by title of more than 50 rows, a fast spin shows
+    the folded column at x 362 with the selected row's letter lit on it and the bubble beside it, the right column 4 px
+    in; a second after the last fast tick it is gone. Slow ticks, or a list of 50 rows or fewer, show none."""
+    good = True
+    fast = ['rest', 'tick 30', 'shot @spin.ppm']
+    trace, pics, _ = script(binary, work, 300, fast + ['run 400', 'shot @still.ppm', 'run 700', 'shot @gone.ppm'])
+    spun = [t for t in trace if t.get('az', -1) >= 0]
+    last = trace[-1]
+    sel_letter = int(spun[-1]['az']) if spun else -1
+    good &= check('a fast spin on 300 songs shows the index, the right column 4 px in, and it goes a second after',
+                  bool(spun) and spun[-1]['azin'] == 4 and last['az'] == -1 and last['azin'] == 0 and 0 <= sel_letter <= 26,
+                  f'{len(spun)} frames with it, last {last}')
+    col = [pics['spin'].at(362, y) for y in range(78, 83)]  # '#' at the column's top
+    lit_y = round(80 + sel_letter * 160 / 26)
+    disc = pics['spin'].at(362 - 6, lit_y)  # the lit letter's white disc, beside its black letter
+    bubble = pics['spin'].at(362 - 8 - 18 - 26, lit_y)  # the bubble's middle while it spins
+    good &= check('the column is drawn, the lit letter a white disc at its place, the bubble beside it while it spins, and '
+                  'the bubble gone once the spin has stopped', any(c[0] > 150 for c in col) and disc == (255, 255, 255) and
+                  bubble == (0x2c, 0x2c, 0x2e) and pics['still'].at(362 - 8 - 18 - 26, lit_y) != (0x2c, 0x2c, 0x2e) and
+                  all(pics['gone'].at(362, y)[0] < 40 for y in range(78, 83)),
+                  f"col {col} disc {disc} bubble {bubble} still {pics['still'].at(362 - 8 - 18 - 26, lit_y)}")
+    slow, _, _ = script(binary, work, 300, ['rest'] + ['tick 1', 'run 300'] * 6)
+    few, _, _ = script(binary, work, 50, ['rest', 'tick 30'])
+    good &= check('slow ticks, or a list of 50 rows, show no index', all(t.get('az', -1) == -1 for t in slow + few))
+    return good
+
+
+def captions(binary, work, home):
+    """A captioned row (docs/oled-design.md#list-row): its caption shows only while it is selected, the row growing over
+    150 ms to hold it in the bar, Inter 13 in Caption On Accent from the title's column, 17 px a line and 5 px under the
+    last, the rows below moved down by as much; it shrinks back as the selection leaves. Under Reduce Motion it is at
+    its end at once. A grown row near a list's end scrolls the list by whole rows to keep its foot on the list end."""
+    good = True
+    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 6', 'rest', 'key centre', 'rest']  # Home > Settings > Display
+    lines = to + ['shot @before.ppm', 'tick 1', 'rest', 'shot @grown.ppm', 'tick 1', 'rest', 'shot @shut.ppm']
+    trace, pics, _ = script(binary, work, 60, lines, *home)
+    caps = [t.get('cap', -1) for t in trace]
+    good &= check('Reduce Motion grows by one line (22 px) when selected, over frames between, and back to 0 as the selection '
+                  'leaves', max(caps) == 22 and caps[-1] == 0 and sum(1 for c in caps if 0 < c < 22) >= 3, str(sorted(set(caps))))
+    ink = sum(1 for y in range(124, 140) for x in range(24, 340) if (lambda c: c[0] > 150 and c[2] - c[0] > 20)(pics['grown'].at(x, y)))
+    gone = sum(1 for y in range(124, 140) for x in range(24, 340) if pics['before'].blue(x, y))
+    good &= check("its caption is drawn in the bar under the title, the bar grown to hold it",
+                  ink > 60 and pics['grown'].blue(30, 141) and gone == 0, f'{ink} ink px, blue at 141 {pics["grown"].blue(30, 141)}')
+    below = [pics['before'].ink_y(24, 300, 120, 156)[0], pics['grown'].ink_y(24, 300, 142, 178)[0]]
+    good &= check('the row below moves down by the caption', 20.5 < below[1] - below[0] < 23.5, str(below))
+    back = pics['shut'].ink_y(24, 300, 116, 164)[0]
+    good &= check('the selection moved on to it, the row below is back in its place', abs(back - below[0]) < 1.5, f'{back} {below[0]}')
+    trace, _, _ = script(binary, work, 60, to + ['tick 1', 'rest'], *home, '--reduce-motion')
+    caps = [t.get('cap', -1) for t in trace]
+    good &= check('under Reduce Motion the row is grown at once', max(caps) == 22 and not any(0 < c < 22 for c in caps), str(sorted(set(caps))))
+    # the gallery's last row has a caption of two lines: selected, the list scrolls two rows more than for a plain row
+    trace, _, _ = script(binary, work, 1, ['rest', 'tick 14', 'rest'], '--page', 'gallery')
+    good &= check("a two-line caption on a list's last row: 39 px grown, the list scrolled to keep its foot on the list end",
+                  trace[-1]['sel'] == 13 and trace[-1]['cap'] == 39 and trace[-1]['scroll'] == 9 * ROW_H, str(trace[-1]))
+    return good
+
+
+def edit_library(binary, work, home):
+    """Edit Library (docs/oled-design.md#edit-library), q2ui's own (ui/page_edit.c): Centre held on the Library opens
+    it, every row listed with its check circle and grip and the hint under them; Centre lifts a row onto a raised card,
+    the wheel carries it a row a click while the row it passes slides aside over 150 ms, Centre puts it down and saves;
+    Return puts a carried row back; Play/Pause hides or shows a row, saved at once; Return or Centre held leaves, the
+    hidden rows leaving the Library. Saved as demo's file (patch/library_edit.c lr_store: every row's letter in order,
+    each led by + or - once shown or hidden, the rows the editor does not list keeping their places)."""
+    good = True
+    lib = ['rest', 'key centre', 'rest']  # Home > Library
+    enter = lib + ['down centre', 'hold centre', 'rest']
+
+    def run(lines, *options):
+        order = pathlib.Path(tempfile.mkdtemp(dir=work))/'ringnav-library-order'
+        trace, pics, _, (_, _, d) = script(binary, work, 60, lines, *home, '--library-order', order, *options, queue=True)
+        saved = order.read_bytes().rstrip(b'\0').decode() if order.exists() else None
+        rows = (d/'rows.txt').read_text().splitlines() if (d/'rows.txt').exists() else []
+        carried = (d/'carried.txt').read_text().splitlines() if (d/'carried.txt').exists() else []
+        return trace, pics, saved, rows, carried
+
+    every = ['Songs', 'Playlists', 'Artists', 'Albums', 'Years', 'Ratings', 'Most Played']
+    trace, pics, saved, rows, _ = run(enter + ['shot @edit.ppm', 'rows @rows.txt'])
+    good &= check('Centre held on the Library opens Edit Library on its rows, nothing saved by opening it',
+                  rows == every and saved is None, f'{rows} {saved!r}')
+    e = pics['edit']
+    near = lambda c, rgb: all(abs(a - b) <= 12 for a, b in zip(c, rgb))
+    good &= check("each row's check circle at x 34 (the accent's disc; white on the selection) and its grip at the "
+                  'right column in Text Tertiary, the hint under the rows',
+                  near(e.at(28, 106), ACCENT) and near(e.at(28, 74), (255, 255, 255)) and near(e.at(342, 106), (0x85, 0x85, 0x85))
+                  and any(e.at(x, y)[0] > 60 for x in range(240, 330) for y in range(293, 304)) and not e.blue(340, 74 + 36),
+                  f'{e.at(28, 106)} {e.at(28, 74)} {e.at(342, 106)}')
+    trace, pics, saved, rows, _ = run(enter + ['key centre', 'run 40', 'shot @lifted.ppm', 'tick 1', 'run 50', 'shot @mid.ppm', 'rest',
+                                            'key centre', 'rest', 'rows @rows.txt'])
+    slides = [t.get('slide', -1) for t in trace]
+    good &= check('Centre lifts Songs onto the raised card (#2C2C2E, not the accent), the wheel carries it below '
+                  'Playlists, Centre puts it down and saves the order over the places they held',
+                  near(pics['lifted'].at(300, 66), (0x2c, 0x2c, 0x2e)) and rows[:2] == ['Playlists', 'Songs']
+                  and saved == 'hpsalgerfncmqiLPAvUu', f"{pics['lifted'].at(300, 66)} {rows[:3]} {saved!r}")
+    good &= check('the row it passes slides aside over frames, and is at rest after',
+                  sum(1 for v in slides if 0 < v < 32) >= 3 and slides[-1] == 0, str(sorted(set(slides))[:8]))
+    trace, _, _, _, carried = run(enter + ['key centre', 'tick 1', 'rest', 'rows @carried.txt'], '--reduce-motion')
+    good &= check('under Reduce Motion it is in its place at once', carried[:2] == ['Playlists', 'Songs'] and
+                  not any(0 < t.get('slide', -1) < 32 for t in trace), str(carried[:2]))
+    trace, _, saved, rows, carried = run(enter + ['key centre', 'tick 2', 'rest', 'rows @carried.txt', 'key return', 'rest', 'rows @rows.txt'])
+    good &= check('Return puts a carried row back where it was, still in the editor, nothing saved',
+                  carried[:3] == ['Playlists', 'Artists', 'Songs'] and rows == every and saved is None and trace[-1]['sel'] == 0,
+                  f'{carried[:3]} {rows} {saved!r}')
+    trace, _, saved, rows, _ = run(enter + ['tick 1', 'rest', 'key play', 'rest', 'key return', 'rest', 'rows @rows.txt'])
+    good &= check('Play/Pause hides Playlists, saved at once; Return leaves and the Library goes without it',
+                  saved == 'hs-palgerfncmqiLPAvUu' and rows == [r for r in every if r != 'Playlists'], f'{rows} {saved!r}')
+    trace, _, saved, rows, _ = run(enter + ['tick 1', 'rest', 'key play', 'rest', 'key play', 'rest', 'down centre', 'hold centre', 'rest',
+                                         'rows @rows.txt'])
+    good &= check('Play/Pause again shows it (the mark kept), and Centre held leaves', saved == 'hs+palgerfncmqiLPAvUu' and rows == every,
+                  f'{rows} {saved!r}')
+    _, _, _, _, said = script(binary, work, 60, enter + ['key return', 'rest'], *home, queue=True, ctl=True)
+    good &= check("it asks demo for Play/Pause as it opens and gives it back as it closes (patch/q2ui_gate.c playkey)",
+                  said == ['playkey 1', 'playkey 0'], str(said))
+    return good
+
+
+def hold_menu(binary, work):
+    """A song's hold menu (docs/oled-design.md#menus, ui/page_menu.c): Centre held on a song opens the menu sheet over
+    the receding page, rising from the foot, with its grab bar, the song's header and its rows; Play Next and Play
+    Last add the song to demo's queue ("queue next|last 1", patch/coda_rc_shim.c) and toast it; Go to Album opens the
+    song's album; Return closes the sheet back to the list. Under Reduce Motion it stands at once."""
+    good = True
+    grab = (0x5a, 0x5a, 0x5e)
+    near = lambda c, rgb: all(abs(a - b) <= 10 for a, b in zip(c, rgb))
+    lines = ['rest', 'rows @songs.txt', 'down centre', 'hold centre', 'run 90', 'shot @rising.ppm', 'rest', 'shot @menu.ppm',
+             'rows @menu.txt', 'key centre', 'rest', 'run 300']
+    trace, pics, _, (sent, ids, d) = script(binary, work, 60, lines, queue=True)
+    menu = [r.split('\t')[0] for r in (d/'menu.txt').read_text().splitlines()] if (d/'menu.txt').exists() else []
+    songs = (d/'songs.txt').read_text().splitlines() if (d/'songs.txt').exists() else []
+    raw = (d/'trace').read_text()
+    m, r = pics.get('menu'), pics.get('rising')
+    good &= check("Centre held on a song opens its menu: Play Next, Play Last, Go to Album, Go to Artist",
+                  menu == ['Play Next', 'Play Last', 'Go to Album', 'Go to Artist'], str(menu))
+    good &= check('the sheet rises (its grab bar not yet up 90 ms in) to rest with the grab bar at y 46, the page behind '
+                  'receded and dimmed above it, the header beside the cover',
+                  m is not None and near(m.at(187, 48), grab) and not near(r.at(187, 48), grab)
+                  and 60 < max(max(m.at(x, y)) for x in range(55, 115) for y in range(4, 38)) < 140 and any(m.at(x, y)[0] > 200 for x in range(88, 200) for y in range(58, 84)),
+                  f"{m and m.at(187, 48)} {r and r.at(187, 48)} {m and max(max(m.at(x, y)) for x in range(55, 115) for y in range(4, 38))}")
+    good &= check('Play Next adds the song to the queue and says so', len(sent) == 1 and sent[0].split()[1:] == ['queue', 'next', '1']
+                  and len(ids) == 1 and 'toast=on' in raw, f'{sent} {ids}')
+    lines = ['rest', 'down centre', 'hold centre', 'rest', 'tick 2', 'rest', 'key centre', 'rest', 'rows @album.txt',
+             'key return', 'rest', 'rows @back.txt', 'down centre', 'hold centre', 'rest', 'key return', 'rest', 'run 50', 'rows @closed.txt']
+    trace, _, _, (sent, _, d) = script(binary, work, 60, lines, queue=True)
+    album = (d/'album.txt').read_text().splitlines() if (d/'album.txt').exists() else []
+    back = (d/'back.txt').read_text().splitlines() if (d/'back.txt').exists() else []
+    closed = (d/'closed.txt').read_text().splitlines() if (d/'closed.txt').exists() else []
+    good &= check("Go to Album opens the song's album, its songs with the held one among them; Return gives the list "
+                  'back; Return on the menu closes it', songs[1] in album and album != songs and back == songs and closed == songs
+                  and sent == [], f'{album[:3]} {back[:2]} {closed[:2]}')
+    for row, column in ((2, 'album'), (3, 'songer')):  # the held song's album, then its artist (stock's songtable)
+        _, _, _, (_, _, d) = script(binary, work, 60, ['rest', 'down centre', 'hold centre', 'rest', f'tick {row}', 'rest', 'key centre',
+                                                       'rest', 'run 50', 'rows @group.txt'], queue=True)
+        group = sorted((d/'group.txt').read_text().splitlines()) if (d/'group.txt').exists() else []
+        with sqlite3.connect(d/'library.db') as db:
+            want = sorted(t for (t,) in db.execute(f'select name from songtable where {column} = (select {column} from songtable '
+                                                   'where name = ?)', (songs[1],)))
+        good &= check(f"{'Go to Album' if column == 'album' else 'Go to Artist'} opens the page of the held song's "
+                      f"{'album' if column == 'album' else 'artist'}", group == want and len(want) >= 1, f'{group[:3]} {want[:3]}')
+    _, pics, _ = script(binary, work, 60, ['rest', 'down centre', 'hold centre', 'run 20', 'shot @at_once.ppm'], '--reduce-motion')
+    good &= check('under Reduce Motion the sheet stands at once', near(pics['at_once'].at(187, 48), grab), str(pics['at_once'].at(187, 48)))
     return good
 
 
@@ -1931,6 +2095,14 @@ def main():
             good &= panel(binary, work)
         if not only or 'status' in only:
             good &= status(binary, work)
+        if not only or 'az' in only:
+            good &= az_index(binary, work)
+        if not only or 'captions' in only:
+            good &= captions(binary, work, ('--page', 'home'))
+        if not only or 'edit' in only:
+            good &= edit_library(binary, work, ('--page', 'home'))
+        if not only or 'menu' in only:
+            good &= hold_menu(binary, work)
         if not only or 'notices' in only:
             good &= notices(binary, work)
     print('q2ui: ' + ('all checks passed' if good else 'FAILED'))

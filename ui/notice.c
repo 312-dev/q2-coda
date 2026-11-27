@@ -322,6 +322,13 @@ static void toast_show(void) {
     ui_mark(toast_rect()), ui_again();
     changed();
 }
+/* q2ui's own toast, as a connection's: queued behind one showing, dropped when the queue is full */
+void notice_toast(const char *text) {
+    if (n_toasts == TOASTS - (toast.on ? 1 : 0)) return;
+    snprintf(toasts[n_toasts++], TOAST_MAX + 1, "%s", text);
+    if (!toast.on && !card.on) toast_show();
+    else changed();
+}
 
 /* ---- commands ---- */
 

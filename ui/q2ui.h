@@ -236,6 +236,10 @@ void ui_route(char *out, size_t room);
 void ui_select_top(int sel);
 void ui_push(const ui_page *p, void *arg);
 void ui_pop(void); /* the top page closes; the last page's pop ends the program */
+void ui_push_still(const ui_page *p, void *arg); /* with no slide: the page moves in itself (a sheet) */
+void ui_pop_still(void);
+uint32_t *ui_snapshot_screen(void); /* the top page and the status row as they are now, malloc'd; 0 with no memory */
+extern int ui_status_hidden;        /* 1: the loop draws no status row (a sheet's page behind has its own in it) */
 #define UI_EXIT_ASK 3    /* its exit code with a page of demo's named (ui_demo_page) */
 #define UI_EXIT_RELOAD 4 /* and to be started again at once: SIGHUP's, when it cannot start itself again */
 extern void (*ui_restart)(void); /* SIGHUP's: start the program again in place; returns only if it could not */
@@ -306,6 +310,7 @@ void notice_line(const char *line); /* a command as a connection's, its answers 
 int notice_event(const input_t *e); /* 1: the card took it */
 void notice_step(void);
 void notice_draw(rect_t r);         /* over the page and the status row */
+void notice_toast(const char *text); /* q2ui's own toast, queued as a connection's */
 int notice_up(void);                /* a question is on the card */
 int notice_trace(char *out, size_t room); /* "notice card=ID lit=N level=X toast=on|leaving|- waiting=N"; 0 with none up */
 void notice_stats(char *out, size_t room); /* the stats file's "card", "card_from", "toast", "toasts_waiting" */
@@ -331,12 +336,19 @@ enum {
     ROW_CHECK = 1 << 6,   /* a picker's current choice */
     ROW_HEADER = 1 << 7,  /* a section header: small tertiary text, never selected */
     ROW_SLIDER = 1 << 8,  /* a level set in its row (docs/oled-design.md#inline-sliders): level, value */
+    /* a row editor's (docs/oled-design.md#edit-library): */
+    ROW_DIM = 1 << 9,     /* its words in Text Tertiary, still selectable (a hidden row) */
+    ROW_CIRCLE = 1 << 10, /* a check circle leading it, filled with a check with ROW_ON, else a ring */
+    ROW_LOCK = 1 << 11,   /* ... a locked one, a padlock in it: always shown */
+    ROW_GRIP = 1 << 12,   /* a grip in the chevron's place */
+    ROW_SOFT = 1 << 13,   /* its marks in Text Secondary, not Primary (a menu's symbols) */
 };
 typedef struct {
     const char *title;
     const char *detail;    /* inline after the title, smaller and muted (a song's artist) */
     const char *value;     /* at the right column (a setting's value, a length) */
     const char *sub;       /* the second line of a two-line row */
+    const char *caption;   /* said under the title only while the row is selected, the row growing to hold it */
     const char *lead;      /* small text in the leading column (a track number) */
     const image_t *icon;   /* a 20 px glyph leading the row, inked as the text */
     const image_t *art;    /* leading art of a two-line row */
@@ -361,6 +373,8 @@ typedef struct ui_source {
     int row_h;  /* 32, or 52 for two-line rows; 0 is 32 */
     int letters; /* 1: sorted by title, so a fast spin jumps by letter */
     rect_t box; /* where the list lives; w 0 is the whole screen under the status row */
+    int fade_to; /* where the rows past the list's end have faded into the ground; 0: the screen's foot's (y 311) */
+    int bare;    /* 1: no ground and no fades of its own, over what the page has drawn (a menu sheet's material) */
 } ui_source;
 typedef struct ui_list ui_list;
 /* A picture a row was given (ui_row.art) may have changed or been freed: every list asks its rows
@@ -403,12 +417,20 @@ void list_select(ui_list *l, int i, int animate);
 int list_selected(const ui_list *l);
 int list_grabbed(const ui_list *l); /* the ROW_SLIDER row Centre grabbed, the wheel's until set down; -1 none */
 int list_set_down(ui_list *l);      /* the grabbed row set down: 1 when one was */
+/* A row editor's: the selected row lifted onto a raised card (its words in Inter Medium, in Text Primary), or put
+ * down; and the source's row `from` moved to `to`, the selection going with it and the rows it passed sliding aside
+ * (docs/oled-design.md#edit-library) */
+void list_lift(ui_list *l, int on);
+int list_lifted(const ui_list *l);
+void list_moved_row(ui_list *l, int from, int to);
 float list_scroll(const ui_list *l); /* px scrolled, for a test */
 extern int list_motion; /* 0: every move is at its end at once (a bench, Reduce Motion) */
 /* A page that is one list and nothing else. */
 extern const ui_page list_page;
 ui_list *list_page_list(void *st);
-/* the list last stepped, as "sel=N scroll=PX bar=PX lean=PX press=S knob=SHARE grab=N": a script's trace */
+/* the list last stepped, as "sel=N scroll=PX bar=PX lean=PX press=S knob=SHARE grab=N az=L azin=PX cap=PX slide=PX":
+ * a script's trace (az: the A-Z index's lit letter, 0 '#', 1 to 26, -1 hidden; cap: how far the selected row has grown to
+ * its caption; slide: how far the rows a moved row passed are still from their places, together) */
 int list_trace(char *out, size_t room);
 int list_rows_dump(const char *path); /* the top list's rows as text, a line each (a script's rows FILE) */
 int list_last_selected(void); /* that list's selection; -1 with none */
@@ -426,6 +448,7 @@ int lib_groups(int kind);                             /* how many artists, or al
 const char *lib_group_name(int kind, int g);
 const char *lib_group_artist(int g);                  /* an album's artist (its first song's) */
 const int *lib_group_songs(int kind, int g, int *n);  /* the group's songs, as numbers for lib_title */
+int lib_group_of(int kind, int song);                 /* the group a song is in, -1 with none */
 int lib_playlists(int *ids, char (*names)[64], int room); /* the playlists, On-The-Go (100) first while it has songs */
 int lib_playlist_songs(int list, int *songs, int room);    /* a playlist's songs in its order, as numbers for lib_title */
 
@@ -458,14 +481,46 @@ extern const char *now_file, *now_cover_file;
 /* ---- player.c: the player, through demo while demo owns it ---- */
 int player_play(const int *ids, int n, int at, int shuffle); /* the list, starting at its song `at`; 0 sent */
 int player_send(const char *verb);                           /* toggle, next, previous, ...; 0 sent */
+int player_enqueue(const int *ids, int n, int next);           /* the songs added as Play Next (1) or Play Last (0); 0 sent */
 extern const char *player_queue, *player_list;               /* the FIFO and the list file (a test's are its own) */
 int player_set(const char *name, int value); /* a setting of demo's, down q2ui's own pipe; 0 sent */
 void player_click(int button);               /* demo's key click for a tick (0) or a press (1), down the same pipe */
 int player_line(const char *verb, const char *arg); /* "scan", "join" a network, "btscan", "btlink" a MAC...: the same pipe; 0 sent */
 extern int player_ctl;                       /* that pipe's write end (--ctl FD), or -1 */
 
+/* ---- page_edit.c: a list's own order and choice of rows (demo's Edit Library file), and its editor ---- */
+#define ORDER_MAX 64 /* the file's bytes, its letters and marks and a NUL: patch/library_edit.c LR_MAX */
+enum { EDIT_SHOWN, EDIT_HIDDEN, EDIT_LOCKED }; /* a row's own rule until the user shows or hides it */
+typedef struct {
+    char letter; /* its letter in the file, by its place in the list's default order */
+    const char *title;
+    int rule;
+} edit_row;
+/* The order in the file saved (its bytes, NUL-ended) against the default def: out the rows' letters (ORDER_MAX), marks
+ * each row's '+', '-' or 0 by its place in def (ORDER_MAX; may be 0); returns out's length. order_read reads file. */
+int order_resolve(const char *def, const char *saved, char *out, char *marks);
+int order_read(const char *file, const char *def, char *out, char *marks);
+int order_shows(int mark, int rule); /* whether a row with that mark and rule shows */
+/* The editor over rows, those of def's a page has: its order saved to file as it changes; done is called as it closes */
+void edit_push(const char *def, const char *file, const edit_row *rows, int n, void (*done)(void));
+
 /* ---- pages ---- */
 void songs_push(void);
+void song_menu(int song); /* a song's hold menu (page_library.c), song a number for lib_title */
+/* ---- page_menu.c: a menu sheet over the page (docs/oled-design.md#menus) ---- */
+typedef struct {
+    const char *title;
+    const char *icon; /* the theme's menu symbol (tools/art.py MENU_ICONS) as icon() names it: "menu_queue" */
+} menu_row;
+typedef struct {
+    const char *name, *line; /* the header: the item's name, and the line under it (0: no header) */
+    const image_t *cover;    /* its cover, 0 for the plain tile */
+    const menu_row *rows;
+    int n;
+    void (*picked)(void *ctx, int i); /* Centre on row i, once the sheet has gone and the page is on top again */
+    void *ctx;
+} menu_t;
+void menu_push(const menu_t *m); /* the strings and rows must outlive the sheet */
 void library_push(void);
 int library_route(const char *name); /* open the Library's page of that route name; 1 when it was one */
 extern const ui_page page_home, page_now;

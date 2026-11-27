@@ -12,12 +12,13 @@ static struct {
     int wifi, lights; /* the switches' state: a page keeps its own */
     int quality, level; /* level: the inline slider's, 0 to 100 */
     char level_s[8];
-} G = { 1, 0, 1, 40, "" };
+    int captioned;
+} G = { 1, 0, 1, 40, "", 0 };
 static const char *const quality[] = { "Low", "High", "Lossless" };
 
 static int g_count(void *ctx) {
     (void)ctx;
-    return 13;
+    return 14;
 }
 static void g_row(void *ctx, int i, ui_row *out) {
     (void)ctx;
@@ -34,6 +35,10 @@ static void g_row(void *ctx, int i, ui_row *out) {
     case 9: out->title = "The current one", out->flags = ROW_CHECK; break;
     case 10: out->title = "A title far too long for its row, which is cut with an ellipsis and slides when selected", out->flags = ROW_CHEVRON; break;
     case 11: out->title = "Shuffle", out->icon = icon("shuffle"), out->flags = ROW_ACCENT; break;
+    case 13:
+        out->title = "Captioned", out->flags = ROW_SWITCH | (G.captioned ? ROW_ON : 0),
+        out->caption = "Said under the row only while it is selected; this one is long enough to wrap at a word";
+        break;
     default:
         snprintf(G.level_s, sizeof G.level_s, "%d%%", G.level);
         out->title = "Level", out->flags = ROW_SLIDER, out->level = (float)G.level / 100, out->value = G.level_s;
@@ -47,7 +52,8 @@ static void g_chosen(void *ctx, int i) {
     if (i == 4) G.wifi = !G.wifi;
     if (i == 5) G.lights = !G.lights;
     if (i == 6) G.quality = (G.quality + 1) % 3;
-    if (i >= 4 && i <= 6) list_reload(g_list);
+    if (i == 13) G.captioned = !G.captioned;
+    if ((i >= 4 && i <= 6) || i == 13) list_reload(g_list);
 }
 /* the slider grabbed and turned: its level moved, and the list asks its rows again */
 static void g_adjust(void *ctx, int i, int steps) {
