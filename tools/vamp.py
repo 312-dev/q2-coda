@@ -15,6 +15,7 @@ usage: vamp [-t TARGET] COMMAND [ARGS]
   log [LINES|-f|--clear]                demo's output
   key NAME [MS] | wheel N [--step-ms MS] | tap X Y | swipe X1 Y1 X2 Y2 [MS]
   state | wake | devices | events N [S] | reboot [--wait] | prof S [--all] [--build DIR]
+  ui-push BINARY                        a new q2ui running at once: pushed, mounted over /usr/bin/q2ui, SIGHUP
   pubkey                                this computer's key, an adb_keys line
 
 TARGET (or VAMP_TARGET) is a name `find` lists, HOST or HOST:PORT; without either, the Q2 `connect`
@@ -44,6 +45,7 @@ import q2remote  # noqa: E402  the Q2's commands (shot, input, log, prof...): va
 PORT = 5555
 TIMEOUT = 30          # seconds without a byte from the Q2 before a command gives up (q2remote.TIMEOUT)
 CONNECT_S = 10        # a TCP connect and the handshake
+RETRIES, RETRY_S = 2, 3  # a Q2 not answering, and not found elsewhere by mDNS, is tried again this often
 AUTH_WAIT_S = 30      # after offering the public key: a USB adbd's Allow this computer? card waits 30 s
 STATE = pathlib.Path(os.environ.get('XDG_CONFIG_HOME') or pathlib.Path.home() / '.config') / 'vamp/target.json'
 
@@ -687,16 +689,28 @@ class Device:
             self.conn = Connection(TcpTransport(self.target['ip'], self.target['port']), self.key)
         except (ConnectionError, TimeoutError) as first:
             ident = self.target.get('id') or (self.target['name'] if not parse_target(self.target['name']) else '')
-            if not ident:
-                raise
-            found = [q for q in browse() if ident.lower() in (q['id'].lower(), q['name'].lower())]
+            try:
+                found = [q for q in browse() if ident.lower() in (q['id'].lower(), q['name'].lower())] if ident else []
+            except OSError:
+                found = []  # no network mDNS can use: the last address is all there is
             if len(found) != 1 or (found[0]['ip'], found[0]['port']) == (self.target['ip'], self.target['port']):
-                raise first
+                return self._retry(first)
             self.target.update(found[0])
             if saved() and saved().get('id') == self.target.get('id'):
                 save(self.target)
             self.conn = Connection(TcpTransport(self.target['ip'], self.target['port']), self.key)
         return self.conn
+
+    def _retry(self, first, tries=RETRIES, gap=RETRY_S):
+        """The same address a few times more (Wi-Fi coming back after sleep), then first's error."""
+        for _ in range(tries):
+            time.sleep(gap)
+            try:
+                self.conn = Connection(TcpTransport(self.target['ip'], self.target['port']), self.key)
+                return self.conn
+            except (ConnectionError, TimeoutError):
+                pass
+        raise first
 
     def drop(self):
         if self.conn:
@@ -862,6 +876,55 @@ def pull(dev, remote, local=None):
     print(f'{local}: {n} bytes')
 
 
+UI_BIN = '/usr/bin/q2ui'            # where demo's gate starts q2ui from (patch/q2ui_gate.c Q2UI_BIN)
+UI_STAGED = '/mnt/data/q2ui.vamp'  # ui-push's copy: /mnt/data is writable and survives a reboot (the mount does not)
+UI_RESTART_MARK = b'/proc/self/exe'  # in a q2ui that restarts itself in place on SIGHUP (ui/main.c restart)
+UI_WAIT_S = 10
+
+
+def ui_push(dev, binary, path=UI_BIN, staged=UI_STAGED, wait=UI_WAIT_S, machine=8):
+    """A new q2ui running, with no restart of the Q2: binary pushed to staged, bind-mounted over path, and the
+    running q2ui sent SIGHUP, on which q2ui (feat/render-engine 817b5fc2 and later) starts itself again in
+    place. Done once the running program's own file (/proc/PID/exe) hashes as binary does. The mount lasts
+    until the Q2 restarts. machine is the ELF e_machine binary must have: MIPS's 8 (test/adb.py's
+    stand-ins are this machine's)."""
+    data = pathlib.Path(binary).read_bytes()
+    if data[:4] != b'\x7fELF' or data[18:20] != struct.pack('<H', machine):
+        raise ValueError(f'{binary} is not a MIPS program (a q2ui built for the Q2: tools/ui.py)')
+    want = hashlib.sha256(data).hexdigest()
+    q = shlex.quote
+    if dev.exec_out(f'[ -e {q(path)} ] && echo yes').strip() != b'yes':
+        raise AdbError(f'this build has no {path}: it is not a --ui-spike build')
+    pid = dev.exec_out(f'pidof {q(posixpath.basename(path))}').split()
+    pid = pid[0].decode() if pid else None
+    running = f'/proc/{pid}/exe' if pid else path
+    if dev.exec_out(f'grep -c {q(UI_RESTART_MARK.decode())} {running}').strip() in (b'', b'0'):
+        raise AdbError('this q2ui does not restart in place on SIGHUP (it predates feat/render-engine 817b5fc2): '
+                       'install a build with a newer q2ui, or push to it and restart the Q2')
+    staged = push(dev, binary, staged)
+    out = dev.exec_out(f'chmod 755 {q(staged)}; umount {q(path)} 2>/dev/null; mount --bind {q(staged)} {q(path)} '
+                       f'&& sha256sum {q(path)}')
+    if out.split()[:1] != [want.encode()]:
+        raise AdbError(f'the bind mount over {path} failed: {out.decode(errors="replace").strip()}')
+    if not pid:
+        print(f'{path} is the new q2ui; none is running, so it starts from it when demo next starts q2ui')
+        return
+    dev.exec_out(f'kill -HUP {pid}')
+    end, now = time.monotonic() + wait, ''
+    while time.monotonic() < end:
+        time.sleep(.5)
+        out = dev.exec_out(f'p=$(pidof {q(posixpath.basename(path))}) && sha256sum /proc/${{p%% *}}/exe; echo "$p"').split()
+        now = out[0].decode() if len(out) > 2 else ''
+        if now == want:
+            print(f'q2ui {want[:12]} running (pid {out[2].decode()})')
+            return
+    if now and now != want:
+        raise AdbError(f'q2ui restarted but still runs {now[:12]}, not {want[:12]}: it starts itself again from '
+                       f'/proc/self/exe, its own file from before the mount, so the new one at {path} is only '
+                       'run when demo starts q2ui afresh. q2ui needs to restart by its path (ui/main.c restart)')
+    raise AdbError(f'no q2ui running {want[:12]} within {wait} s of SIGHUP (`vamp log` shows why)')
+
+
 class FlashAdb:
     """tools/q2flash.py's adb, over vamp: run('push', LOCAL, REMOTE), sh(COMMAND) and state()."""
     def __init__(self, dev):
@@ -919,12 +982,14 @@ def main(argv=None):  # pragma: no mutate block
                   file=sys.stderr)
         return 0 if found else 1
     if cmd == 'connect' and len(a) <= 1:
-        if a:
-            target = resolve(a[0])
+        if a or spec:  # connect NAME, or -t NAME connect
+            target = resolve(a[0] if a else spec)
+        elif saved():  # the last one, at its last address (mDNS may not reach here: WSL's NAT drops it)
+            target = saved()
         else:
             found = browse()
             if len(found) != 1:
-                raise ConnectionError(f'{len(found)} Q2s answered: name one (`vamp find`)')
+                raise ConnectionError(f'{len(found)} Q2s answered: name one (`vamp find`), or give its address')
             target = found[0]
         dev = Device(target)
         tag = dev.exec_out('q2update version 2>/dev/null', 30).split()
@@ -943,6 +1008,9 @@ def main(argv=None):  # pragma: no mutate block
         return 0
     if cmd == 'pull' and len(a) in (1, 2):
         pull(dev, *a)
+        return 0
+    if cmd == 'ui-push' and len(a) == 1:
+        ui_push(dev, a[0])
         return 0
     if cmd == 'install' and a:
         import q2flash

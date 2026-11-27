@@ -6,6 +6,7 @@ works in a directory standing in for the Q2's root. Commands under a real sh are
 adbd. The keys are checked against adb's own format (mincrypt's RSAPublicKey) and against openssl when
 it is installed; mDNS against packets built here. The real MIPS adbd is test/adb.py's (its TCP checks)."""
 import base64
+import hashlib
 import re
 import io
 import os
@@ -749,3 +750,126 @@ def test_push_on_a_terminal_shows_its_progress(adbd, dev, tmp_path, monkeypatch,
     adbd.handler = lambda cmd: b'2000\n' if cmd.startswith('mv -f') else b''
     assert vamp.push(dev, src, '/mnt/a.bin') == '/mnt/a.bin'
     assert '2000 bytes in' in capsys.readouterr().out
+
+
+# ---- ui-push ----
+
+MIPS = b'\x7fELF\x01\x01\x01' + b'\0' * 11 + b'\x08\x00'  # e_machine 8 at offset 18
+
+
+class FakeUi:
+    """The Q2's side of ui-push: /usr/bin/q2ui, a running q2ui and how it restarts on SIGHUP ('path': from the
+    file now at /usr/bin/q2ui; 'self': from its own file, as 817b5fc2's /proc/self/exe; 'gone': it ends)."""
+    def __init__(self, adbd, restart='path', mark=True, has_ui=True, running=True, mount_ok=True):
+        self.adbd, self.restart, self.mark, self.has_ui, self.mount_ok = adbd, restart, mark, has_ui, mount_ok
+        self.old = hashlib.sha256(b'old q2ui').hexdigest()
+        self.at_path, self.exe, self.pid = self.old, (self.old if running else None), (7 if running else None)
+        self.seen = []
+        (adbd.root / 'mnt/data').mkdir(parents=True, exist_ok=True)
+        adbd.handler = self
+
+    def __call__(self, cmd):
+        self.seen.append(cmd)
+        if cmd == "[ -e /usr/bin/q2ui ] && echo yes":
+            return b'yes\n' if self.has_ui else b''
+        if cmd == 'pidof q2ui':
+            return b'%d\n' % self.pid if self.pid else b''
+        if cmd.startswith('grep -c /proc/self/exe '):
+            return b'1\n' if self.mark else b'0\n'
+        if m := re.match(r"mv -f (\S+) (\S+) && sync && wc -c <\S+$", cmd):
+            os.replace(self.adbd.path(m.group(1)), self.adbd.path(m.group(2)))
+            return b'%d\n' % self.adbd.path(m.group(2)).stat().st_size
+        if cmd.startswith('chmod 755 /mnt/data/q2ui.vamp; umount /usr/bin/q2ui 2>/dev/null; mount --bind'):
+            if not self.mount_ok:
+                return b'mount: permission denied\n'
+            self.at_path = hashlib.sha256(self.adbd.path('/mnt/data/q2ui.vamp').read_bytes()).hexdigest()
+            return f'{self.at_path}  /usr/bin/q2ui\n'.encode()
+        if cmd == f'kill -HUP {self.pid}':
+            self.exe = {'path': self.at_path, 'self': self.exe, 'gone': None}[self.restart]
+            self.pid = None if self.restart == 'gone' else self.pid
+            return b''
+        if cmd.startswith('p=$(pidof q2ui) && sha256sum /proc/${p%% *}/exe'):
+            return f'{self.exe}  /proc/{self.pid}/exe\n{self.pid}\n'.encode() if self.pid else b'\n'
+        return b''
+
+
+@pytest.fixture
+def q2ui(tmp_path):
+    f = tmp_path / 'q2ui'
+    f.write_bytes(MIPS + b'new q2ui')
+    return f
+
+
+def test_ui_push_runs_the_new_q2ui(adbd, dev, q2ui, capsys):
+    ui = FakeUi(adbd)
+    vamp.ui_push(dev, q2ui)
+    assert ui.exe == hashlib.sha256(q2ui.read_bytes()).hexdigest()
+    assert 'kill -HUP 7' in ui.seen and 'running (pid 7)' in capsys.readouterr().out
+
+
+def test_ui_push_says_when_q2ui_restarted_its_old_file(adbd, dev, q2ui):
+    FakeUi(adbd, restart='self')
+    with pytest.raises(vamp.AdbError, match='still runs .* /proc/self/exe'):
+        vamp.ui_push(dev, q2ui, wait=.2)
+
+
+def test_ui_push_says_when_no_q2ui_came_back(adbd, dev, q2ui):
+    FakeUi(adbd, restart='gone')
+    with pytest.raises(vamp.AdbError, match='no q2ui running'):
+        vamp.ui_push(dev, q2ui, wait=.2)
+
+
+def test_ui_push_stops_on_an_older_q2ui_before_pushing(adbd, dev, q2ui):
+    ui = FakeUi(adbd, mark=False)
+    with pytest.raises(vamp.AdbError, match='predates feat/render-engine 817b5fc2'):
+        vamp.ui_push(dev, q2ui)
+    assert not (adbd.root / 'mnt/data/q2ui.vamp').exists() and not any('mount' in c for c in ui.seen)
+
+
+def test_ui_push_refusals(adbd, dev, q2ui, tmp_path, capsys):
+    x86 = tmp_path / 'x86'
+    x86.write_bytes(b'\x7fELF' + b'\0' * 14 + b'\x3e\x00')
+    with pytest.raises(ValueError, match='not a MIPS program'):
+        vamp.ui_push(dev, x86)
+    FakeUi(adbd, has_ui=False)
+    with pytest.raises(vamp.AdbError, match='no /usr/bin/q2ui'):
+        vamp.ui_push(dev, q2ui)
+    FakeUi(adbd, mount_ok=False)
+    with pytest.raises(vamp.AdbError, match='bind mount over /usr/bin/q2ui failed'):
+        vamp.ui_push(dev, q2ui)
+    ui = FakeUi(adbd, running=False)
+    vamp.ui_push(dev, q2ui)
+    assert 'none is running' in capsys.readouterr().out and not any('kill' in c for c in ui.seen)
+
+
+# ---- connect: -t, the remembered address, retries ----
+
+def test_a_q2_mdns_cannot_find_is_retried_at_its_address(adbd, monkeypatch):
+    def no_network(*a, **k):
+        raise ConnectionError('no network to look on')
+    monkeypatch.setattr(vamp, 'browse', no_network)
+    adbd.handler = lambda cmd: b'ok'
+    adbd.up = False
+    tries = []
+
+    def back_on(*a):  # the Q2's Wi-Fi comes back between the first try and the retry
+        tries.append(a)
+        adbd.up = True
+    monkeypatch.setattr(vamp.time, 'sleep', back_on)
+    d = vamp.Device({'name': 'Desk', 'ip': '127.0.0.1', 'port': adbd.port, 'id': 'abcd'}, KEY)
+    assert d.exec_out('x') == b'ok' and len(tries) == 1
+    adbd.up = False
+    d.drop()
+    monkeypatch.setattr(vamp.time, 'sleep', lambda s: None)
+    with pytest.raises(ConnectionError, match='cannot reach'):
+        d.connection()
+
+
+def test_connect_takes_t_and_falls_back_to_the_last_q2(adbd, monkeypatch, capsys):
+    monkeypatch.setattr(vamp, 'STATE', adbd.root.parent / 'target.json')
+    monkeypatch.setattr(vamp, 'load_key', lambda: KEY)
+    monkeypatch.setattr(vamp, 'browse', lambda *a, **k: pytest.fail('looked on mDNS'))
+    adbd.handler = lambda cmd: b'1 version V0JZi -\n'  # NONCE WORD INSTALLED UPDATE
+    assert vamp.main(['-t', f'127.0.0.1:{adbd.port}', 'connect']) == 0
+    assert vamp.saved()['ip'] == '127.0.0.1' and 'running V0JZi' in capsys.readouterr().out
+    assert vamp.main(['connect']) == 0  # no name, no -t: the one it remembered, mDNS not asked

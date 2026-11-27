@@ -715,6 +715,98 @@ def mdns_checks(qemu, build):
         expect('q2adb-mdns ends on SIGTERM (after its goodbye)', p.returncode == 0, p.returncode)
 
 
+UI_STANDIN = r"""
+#include <signal.h>
+#include <stdlib.h>
+#include <unistd.h>
+/* q2ui for ui_push_checks: on SIGHUP it starts itself again as RESTART says (817b5fc2's way, /proc/self/exe;
+ * by its path; or, an older q2ui, it ends with UI_EXIT_RELOAD) */
+static char **av;
+static volatile int hup;
+static void on(int s) { (void)s; hup = 1; }
+int main(int c, char **v) {
+    (void)c;
+    av = v;
+    signal(SIGHUP, on);
+    for (;;) {
+        pause();
+        if (!hup) continue;
+#if RESTART == 0
+        execv("/proc/self/exe", av);
+#elif RESTART == 1
+        execv(av[0], av);
+        execv("/proc/self/exe", av);
+#else
+        exit(4);
+#endif
+    }
+}
+"""
+
+
+def ui_push_checks(qemu, adbd):
+    """vamp ui-push against adbd --tcp in a user and mount namespace of its own (unshare -rm: bwrap refuses
+    a bind mount inside), as root there, with /mnt a tmpfs and q2ui stand-ins at /mnt/bin/q2ui built for this
+    machine: one that restarts from /proc/self/exe on SIGHUP, one that restarts by its path, one that predates
+    restarting in place."""
+    import vamp
+    if subprocess.run(['unshare', '-rm', 'true'], capture_output=True).returncode:
+        print('skip ui-push: unshare -rm refused here')
+        return
+    print('vamp ui-push...')
+    key = vamp.Key.generate()
+    machine = None
+    with tempfile.TemporaryDirectory(prefix='q2-ui-push-') as d:
+        d = pathlib.Path(d)
+        (d/'ui.c').write_text(UI_STANDIN)
+        for name, restart in (('self', 0), ('path', 1), ('old', 2), ('new', 1)):
+            subprocess.run(['cc', f'-DRESTART={restart}', '-x', 'c', str(d/'ui.c'), '-o', str(d/name)], check=True)
+        (d/'new').write_bytes((d/'new').read_bytes() + b'\0new')  # another file, the same program
+        machine = struct.unpack_from('<H', (d/'new').read_bytes(), 18)[0]
+        (d/'adb_keys').write_text(key.public_line() + '\n')
+
+        def session(first):
+            port = free_port()
+            # the copies before /tmp is replaced: d is under it
+            script = (f'mount -t tmpfs t /mnt && mkdir -p /mnt/data /mnt/mmc /mnt/bin /mnt/tmp && cp {d}/adb_keys /mnt/data/'
+                      f' && cp {d}/{first} /mnt/bin/q2ui && mount --bind /mnt/tmp /tmp || exit 1;'
+                      f' (cd /mnt/bin && exec ./q2ui) & exec {" ".join(qemu)} {adbd} --tcp {port}')
+            p = subprocess.Popen(['unshare', '-rm', 'sh', '-c', script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            import socket
+            for _ in range(100):
+                try:
+                    socket.create_connection(('127.0.0.1', port), 1).close()
+                    break
+                except OSError:
+                    time.sleep(.1)
+            return p, vamp.Device({'name': '127.0.0.1', 'ip': '127.0.0.1', 'port': port, 'id': ''}, key)
+
+        def push(first):
+            p, dev = session(first)
+            try:
+                vamp.ui_push(dev, d/'new', path='/mnt/bin/q2ui', wait=5, machine=machine)
+                return None, dev.exec_out('sha256sum /proc/$(pidof q2ui)/exe').split()[:1]
+            except vamp.AdbError as e:
+                return str(e), dev.exec_out('ls /mnt/data').split()
+            finally:
+                try:
+                    dev.exec_out('kill -9 $(pidof q2ui)', 10)  # the stand-in, which outlives the namespace's sh
+                except (OSError, vamp.AdbError):
+                    pass
+                p.kill()
+                p.wait()
+        want = hashlib.sha256((d/'new').read_bytes()).hexdigest().encode()
+        err, got = push('path')
+        expect('ui-push: a q2ui that restarts by its path runs the new file (its exe\'s hash)', err is None and got == [want],
+               (err, got))
+        err, _ = push('self')
+        expect('ui-push: a q2ui restarting from /proc/self/exe is caught still running its old file',
+               err is not None and 'still runs' in err and '/proc/self/exe' in err, err)
+        err, files = push('old')
+        expect('ui-push: an older q2ui is refused before anything is pushed', err is not None and '817b5fc2' in err
+               and b'q2ui.vamp' not in files, (err, files))
+
+
 def main(argv):
     args = list(argv)
     qemu = shutil.which('qemu-mipsel')
@@ -744,6 +836,7 @@ def main(argv):
     else:
         adbd_checks([qemu, '-L', str(libs)], adbd)
         tcp_checks([qemu, '-L', str(libs)], adbd)
+        ui_push_checks([qemu, '-L', str(libs)], adbd)
         if args:
             mdns_checks([qemu, '-L', str(libs)], build)
     print(f'{len(failures)} failed' if failures else 'all passed')
