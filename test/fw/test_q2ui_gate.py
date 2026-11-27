@@ -47,7 +47,7 @@ class Gate:
         return CHILD
 
     def prop(self, w, key, default, *_):
-        self.name.value = self.top
+        self.name.value = self.top or b''
         return C.addressof(self.name)
 
     def repaint(self, *_):
