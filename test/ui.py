@@ -206,6 +206,17 @@ def bar_rows(picture):
     return [k for k in range(ROWS) if shot.pixel(picture, 200, BAR_H + k * ROW_H + 3) == ACCENT]
 
 
+def png(path, w, h, rgb):
+    """A w x h picture of one colour, as a PNG (no Pillow here)."""
+    import zlib
+
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+    rows = b''.join(b'\0' + bytes(rgb) * w for _ in range(h))
+    pathlib.Path(path).write_bytes(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)) +
+                                   chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b''))
+
+
 def check(what, ok, detail=''):
     print(('ok   ' if ok else 'FAIL ') + what + (f': {detail}' if detail and not ok else ''))
     return ok
@@ -385,6 +396,20 @@ def pages(binary, work):
     good &= check("at rest its start is whole, and at its end it fades out at the column's left",
                   held is not None and edge(pics['m00']) > 200 and edge(pics[f'm{held:02d}']) < 120,
                   f"{edge(pics['m00'])} {edge(pics[f'm{held:02d}']) if held is not None else None}")
+    # the modes at the foot are marks of what is set, in the theme's own glyphs: made-up ones here, a colour each
+    def glyphs(d):
+        for name, rgb in (('mode_shuffle_d', (90, 90, 90)), ('mode_shuffle_on', (0, 0, 250)), ('mode_repeat_d', (90, 90, 90)),
+                          ('mode_repeat_on', (0, 0, 250)), ('mode_repeat1_on', (0, 250, 0)), ('mode_radio_d', (90, 90, 90)),
+                          ('mode_queue_d', (90, 90, 90)), ('np_fav_d', (250, 0, 0)), ('np_unfav_d', (90, 90, 90))):
+            png(d/f'oled_{name}.png', 16, 16, rgb)
+    icons = pathlib.Path(tempfile.mkdtemp(dir=work))
+    glyphs(icons)
+    marks = {}
+    for what, text in (('off', NOW), ('on', NOW.replace('id=5', 'id=5\nshuffle=1\nrepeat=2\nhearts=1'))):
+        _, pics, _ = script(binary, work, 60, ['rest', 'key centre', 'run 600', 'shot @np.ppm'], *home, '--icons', icons, now=text)
+        marks[what] = [pics['np'].at(64, 286), pics['np'].at(228, 286), pics['np'].at(200, 160)]
+    good &= check("Now Playing's shuffle, repeat and heart are drawn by what is set",
+                  marks['off'] == [(90, 90, 90)] * 3 and marks['on'] == [(0, 0, 250), (0, 250, 0), (250, 0, 0)], str(marks))
     # a tick shows the volume's level in the bar's place, white, and it gives the bar back
     _, pics, _ = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick -1', 'run 200', 'shot @volume.ppm', 'run 2000', 'shot @after.ppm'], *home, now=NOW)
     level, bar = pics['volume'].at(80, 231), pics['after'].at(36, 231)

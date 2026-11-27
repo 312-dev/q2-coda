@@ -60,6 +60,7 @@ CASES = {
  'title-never-slides': ('ui/page_now.c', "            x = (float)(t - MQ_REST_US) / 1e6f * MQ_SPEED, ui_again();", "            ui_again();", 'pages', 'a long title is still for its first two seconds'),
  'title-no-fade': ('ui/page_now.c', "        fade_set(TEXT_X, TEXT_X + room, s->mq_x > 0.5f ? MQ_FADE : 0,", "        fade_set(TEXT_X, TEXT_X + room, 0,", 'pages', "at its end it fades out at the column"),
  'hup-runs-old-file': ('ui/main.c', "    if (strchr(started_with[0], '/')) execv(started_with[0], started_with);", "", 'live', 'the program now at the path runs'),
+ 'modes-always-off': ('ui/page_now.c', '    const char *mode[] = { n->shuffle ? "mode_shuffle_on." : "mode_shuffle_d.", "mode_radio_d.",', '    const char *mode[] = { "mode_shuffle_d.", "mode_radio_d.",', 'pages', "shuffle, repeat and heart are drawn by what is set"),
 }
 names = sys.argv[1:] or list(CASES)
 bad = 0

@@ -134,7 +134,8 @@ image_t *image_mem(const uint8_t *data, size_t n);      /* the same from memory 
 image_t *image_fit(const image_t *src, int w, int h);   /* scaled to cover w x h, cropped, box filtered */
 void image_free(image_t *im);
 /* The theme's glyph `name` (tools/art.py's oled_<name>_w.png, white, in the icons folder), loaded
- * once; 0 when the folder has none. */
+ * once; 0 when the folder has none. A name ending in a dot ("mode_shuffle_on.") is that file as it
+ * is, oled_mode_shuffle_on.png, in its own ink. */
 const image_t *icon(const char *name);
 extern const char *icon_dir;
 /* im over dst, scaled, at a sub-pixel place, bilinear; alpha 0-256; tint >= 0 inks its alpha in
@@ -358,6 +359,7 @@ const int *lib_group_songs(int kind, int g, int *n);  /* the group's songs, as n
 typedef struct {
     char title[160], artist[160], album[160];
     int playing, paused, pos_ms, len_s, volume, id;
+    int shuffle, repeat, hearts; /* the modes (repeat: 0 off, 1 all, 2 one) and the song's hearts, -1 unknown */
     uint64_t read_us; /* when this was read: the position is that old */
 } ui_now;
 void now_open(void);              /* watch for changes; a change wakes the loop */

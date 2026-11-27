@@ -153,6 +153,18 @@ static void n_draw(void *st, rect_t r) {
         run_draw(&s->title, TEXT_X, TITLE_Y, tok(TOK_PRIMARY), 256);
     if (*n->artist) run_draw(&s->artist, TEXT_X, 96, tok(TOK_SECONDARY), 256);
     if (*n->album) run_draw(&s->album, TEXT_X, 120, tok(TOK_SECONDARY), 256);
+    /* the row of modes at the foot, as marks of what is set: shuffle, the song's radio, repeat, Up
+     * Next, each in the theme's own ink for its state (the accent when on). They are not pressed
+     * from here yet: the wheel is the volume and Centre plays. */
+    static const float mode_x[] = { 64, 146, 228, 311 };
+    const char *mode[] = { n->shuffle ? "mode_shuffle_on." : "mode_shuffle_d.", "mode_radio_d.",
+                           n->repeat == 2 ? "mode_repeat1_on." : n->repeat ? "mode_repeat_on." : "mode_repeat_d.", "mode_queue_d." };
+    for (int k = 0; k < 4; ++k) {
+        const image_t *im = icon(mode[k]);
+        if (im) image_draw(im, (rectf_t){ mode_x[k] - (float)im->w / 2, 286 - (float)im->h / 2, (float)im->w, (float)im->h }, 0, 0, 256, -1);
+    }
+    const image_t *heart = icon(n->hearts > 0 ? "np_fav_d." : "np_unfav_d."); /* liked, and not */
+    if (heart && *n->title) image_draw(heart, (rectf_t){ 194, 153, (float)heart->w, (float)heart->h }, 0, 0, 256, -1);
     if (s->volume_at) {
         /* the volume's level in the bar's place: a shorter track between two marks, the level in white */
         float level = (float)s->volume / 100, x0 = BAR_X + 22, w = BAR_W - 44;
