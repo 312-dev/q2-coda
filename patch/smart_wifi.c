@@ -95,7 +95,8 @@ static int net_page_open(void) {
 /* --dev builds: q2remote (remote.c, docs/remote.md) reaches the Q2 over Wi-Fi alone, so it needs
  * the network for REMOTE_HOLD_MS after its last request and for demo's first REMOTE_BOOT_MS
  * (offsets.inc says why). Each authenticated request renames a new REMOTE_USED into place (remote.c
- * mark_used); an inode unlike the last (ino) is a request, timed by demo's own clock (at), so the
+ * mark_used), as the Wi-Fi adbd does for each computer let in and each service opened (adbd.patch
+ * q2_mark_used, docs/adb.md#adb-over-wi-fi); an inode unlike the last (ino) is a request, timed by demo's own clock (at), so the
  * two processes share none, and a stat a second opens nothing. boot: the hold after boot runs. A
  * demo started later takes a file left from before as a request. A log line as each hold starts
  * and as it ends. */

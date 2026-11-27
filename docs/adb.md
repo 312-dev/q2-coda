@@ -1,6 +1,6 @@
-# ADB over USB
+# ADB: USB, Wi-Fi and vamp
 
-A `--dev` build ([building.md](building.md)) runs `adbd`, Android's debug daemon, so a computer with Android's `adb` gets a root shell, file copies and screenshots over the USB cable: no Wi-Fi, no key to type. Release builds contain none of it, and `test/build.py --build` checks that. [q2remote](remote.md) over Wi-Fi stays as it was; adb is the same idea on a cable.
+A `--dev` build ([building.md](building.md)) runs `adbd`, Android's debug daemon, so a computer gets a root shell, file copies and screenshots over the USB cable, and over Wi-Fi once the computer is trusted ([ADB over Wi-Fi](#adb-over-wi-fi)). [`vamp`](#vamp), the project's own client, drives it without Google's `adb`; Google's `adb` works too. Release builds contain none of it, and `test/build.py --build` checks that. [q2remote](remote.md)'s Wi-Fi channel is retired in favour of adb ([vamp: q2remote](#vamp)).
 
 ## Setup on Windows
 
@@ -130,11 +130,83 @@ It writes `NONCE OP` to `/tmp/q2update.req` through a temporary name, mode 0600,
 
 `test/fw/test_q2update.py` runs demo's side in a `--dev` build of the payload's C, `test/q2update.py` the helper under the host's `sh` against a fake demo, and `test/unit/test_q2flash.py` the host tool against a fake adb and Q2. In the emulator (2026-11-19) `q2update` reached demo through the sandbox's namespaces, `q2flash.py --dry-run` ran whole and the toast showed, and `install` reached stock's updater, which stopped at its `tar` (the emulator runs demo in `/release/bin`, not `/`) and answered `failed` with Update Can't Be Used on screen; the flash itself is only tested on a Q2.
 
+## ADB over Wi-Fi
+
+A `--dev` build also runs a second adbd on TCP port 5555, `adbd --tcp 5555`, so a computer reaches the Q2 over Wi-Fi with the same RSA key authentication as on the cable, and advertises it by mDNS, so it is found by name on whatever network it has joined. [`vamp`](#vamp) is the client; Google's `adb connect HOST:5555` speaks to the same adbd.
+
+**Trusting the first key.** The Wi-Fi adbd lets in only a computer whose key the Q2 already trusts, and it never asks: nothing on a network can put Allow this computer? on the Q2's screen, and an unknown key is refused at once (`vamp` says so, and how to fix it). So the first key comes one of the two ways a key comes on the cable ([Authorization](#authorization)):
+
+1. **Over USB, once:** plug in, pick USB Debugging, and connect with any adb client using this computer's key; vamp's key is adb's own file, `~/.android/adbkey`, so `adb devices` from Google's platform-tools does it. On **Allow this computer?** leave **Always allow this computer** on and press Allow: the key goes into `/mnt/data/adb_keys`, and from then on the Q2 takes it over Wi-Fi too.
+2. **Or the card:** `vamp pubkey` prints the key's `adb_keys` line; put it in the card's `adb_keys` (one line a computer) with the card on the computer as a drive, and eject.
+
+**No open port without a trusted key.** `q2adb-wifi` (`patch/adb_wifi.sh`, started by S90play) runs the Wi-Fi adbd and `q2adb-mdns` only while `/mnt/data/adb_keys` or the card's `adb_keys` holds a line and Developer access is on, and stops both as soon as either is not; it looks every 10 s. A Q2 nobody has trusted listens on nothing. A key removed under **Developer Options > Trusted Computers** is refused at the next connection, as on the cable; removing the last one closes the port within 10 s.
+
+**Developer access.** In a `--dev` build it is on unless `config.ini` has `ADBWIFI=0` (in `[Q2POD]`). The design for release builds: the same three programs ship there too, off by default, and a **Developer access** switch in Settings > General writes `ADBWIFI=1` (on) or `0`; turning it on with no trusted computer says to allow one over USB first. That row, and shipping adbd in a release, are not built yet; today a release has none of it (`test/build.py --build`).
+
+**Found by name.** `q2adb-mdns` (`patch/adb_mdns.c`) is coda-rc's mDNS responder ([remote-protocol: Discovery](remote-protocol.md#discovery)) for the service type `_adb._tcp`, the one modern adb's own discovery lists (`adb mdns services`); 4.2.2's adbd has no TLS, so no `_adb-tls-connect._tcp`. It answers for `<name>._adb._tcp.local` (the Bluetooth name, Vamp unless renamed), whose SRV names port 5555 on `q2muse-<6 hex>.local`, the host name Car Remote's responder uses, with the same device id in the TXT record (`id=`, from `/mnt/data/coda-rc/id`), so a Q2 is the same Q2 to both. It sends two announcements when wlan0 gets an address (a new network, a new lease, Wi-Fi back on), a goodbye when the address goes or it is stopped, and otherwise only answers.
+
+**Smart Wi-Fi.** A Q2 whose radio is off can't be reached, and Smart Wi-Fi turns it off after 5 idle minutes ([internals: Smart Wi-Fi](internals.md#smart-wi-fi)). The Wi-Fi adbd counts as needing the network exactly as q2remote does: each computer let in and each service it opens renames a new `/tmp/q2remote.used` into place, which a `--dev` demo takes as a request and holds the radio for 30 minutes after (`REMOTE_HOLD_MS`), and for demo's first 30 minutes after boot (`REMOTE_BOOT_MS`), so a Q2 just installed or restarted is reachable. A session left open with nothing run lets the hold run out; past it, wake the radio on the Q2 (the Wi-Fi page or Streaming), plug in the cable, or turn Smart Wi-Fi off. Keep-alive probes end a connection whose computer slept or left within about 90 s.
+
+**What it costs.** adbd waits in `accept` and wakes only for a connection. `q2adb-mdns` wakes every 5 s to read wlan0's address (one ioctl) and for each mDNS packet on the network, as coda-rc's responder does while Car Remote is on. `q2adb-wifi` wakes every 10 s for a `grep` and a `sleep`. Not yet measured on a Q2 ([device test plan](#device-test-plan)). ponytail: a netlink socket in `q2adb-mdns` and an inotify watch in `q2adb-wifi` would remove both clocks.
+
+**Limits.** adb's traffic is not encrypted (4.2.2 has no TLS): a key keeps others out, but a shell's output and pushed files cross the network as they are, so use it on a network you trust. The Wi-Fi adbd keeps at most 8 connections (`TCP_MAX`, `tools/adbd.patch`); ponytail: a host on the network can hold all 8 unauthorized and lock out the rest until it lets go, which a handshake deadline would end. Messages carry 4096 bytes at most (4.2.2's `MAX_PAYLOAD`) and each waits for its OKAY, so a push moves 4 KB per round trip: on a good Wi-Fi link (a few ms) about 1 MB/s.
+
+## vamp
+
+`vamp` (`tools/vamp.py`) is the project's own client for the Q2's adbd, so development and testing need neither Google's `adb` binary nor stock's tools. It speaks adb's protocol itself: CNXN, AUTH with this computer's RSA key (PKCS#1 v1.5 over the token as adb's `RSA_sign` gives it, the key offered when the signature is refused), OPEN, WRTE, OKAY and CLSE with one write in flight per stream, `exec:` and `shell:`, and `sync:` for push and pull. It finds the Q2 with mDNS, remembers it (`~/.config/vamp/target.json`), and when the remembered address stops answering (a new network, a new lease after sleep) finds it again by its id.
+
+```sh
+ln -s "$PWD/tools/vamp.py" ~/.local/bin/vamp     # or: alias vamp="python3 $PWD/tools/vamp.py"
+vamp find                                        # Desk Q2   192.168.1.23:5555   id=1a2b3c4d5e6f7081
+vamp connect 'Desk Q2'                           # check it answers, and remember it; or an address, HOST[:PORT]
+vamp shell 'cat /proc/meminfo'                   # output as it comes, and the command's exit status
+vamp shell                                       # an interactive root shell (busybox sh on adbd's pty)
+vamp push song.flac /mnt/mmc/Music/              # through .part, renamed once whole, its size checked
+vamp pull /mnt/data/config.ini
+vamp install /tmp/q2-dev                         # update.tar or a build directory: q2flash.py's flow, over Wi-Fi
+vamp shot --settle out.png                       # the screen, upright 375x320
+vamp log -f                                      # demo's output; log 200, log --clear
+vamp key centre; vamp wheel 3; vamp tap 187 160  # input: key, wheel, tap, swipe, as q2remote's
+vamp prof 5 --build /tmp/q2-dev                  # demo's threads sampled, symbolized
+vamp state; vamp wake; vamp devices; vamp events 2 5; vamp reboot --wait
+vamp -t 192.168.1.40 shell id                    # another Q2 for one command (or VAMP_TARGET)
+vamp pubkey                                      # this computer's adb_keys line
+```
+
+- **The key** is adb's own `~/.android/adbkey` (`ANDROID_USER_HOME`, or `VAMP_KEY` for another file), made on first use as adb makes it (2048-bit RSA, PKCS#8 PEM, `adbkey.pub` beside it), so a computer trusted for Google's adb is trusted for vamp and the other way round.
+- **`shell COMMAND`** runs it as q2remote's `sh` does: under `setsid sh -c` with its stdin `/dev/null`, its pid in `/tmp/vamp-*.pid` so Ctrl-C kills its process group, and a last line `\n\0vamprc=STATUS\n` that vamp strips and exits with. adb's own `shell:` drops the status on this adbd.
+- **stdin.** adb's streams cannot be half-closed, so where a command needs its stdin (q2remote's input writers), vamp pushes it to `/tmp/vamp-in-*` first and the command's shell reads and removes it; a command longer than an OPEN's 4096 bytes goes the same way as a script.
+- **`install`** is `tools/q2flash.py`'s `flash` with vamp in adb's place ([Installing an update over adb](#installing-an-update-over-adb)): the file checked as ours, the Q2's build, battery and card, the push to `/mnt/mmc/update.tar.part`, its SHA-256 on the Q2, the rename and its SHA-256 again, `q2update check` naming the tag, `q2update install`, then the wait for the Q2 to leave and come back (a fresh connection each look, found again by id if its address changed) and answer `q2update version` with the new tag. `--dry-run`, `--no-wait` and `--min-battery N` as there. The Q2 has to be on Wi-Fi when it comes back: within the 30 minutes after boot it is.
+
+**q2remote.** The commands vamp shares with [q2remote](remote.md) (shot, log, key, wheel, tap, swipe, state, wake, devices, events, reboot, prof) are q2remote.py's own: vamp sets `q2remote.TRANSPORT` to its connection, and each goes over adb with no change to what it runs on the Q2, so the device-side knowledge (input encodings, the wheel's sensitivity, the framebuffer's rotation, demo's globals, the profiler's symbols) stays in one place. q2remote's port 2302 channel is retired in favour of adb: it sends its key in the clear and has no discovery. It keeps working for now; once the [device test plan](#device-test-plan) has passed on a Q2, S90play stops starting its listener, `q2remote.py`'s socket client and `find` are removed, and the module stays as the device commands vamp drives. The Q2-side helper, `q2remote --shot` and `--prof`, stays: vamp's `shot` and `prof` run it.
+
+**Not yet:** USB. vamp speaks only TCP; a USB transport through libusb (the interface is class `ff`, subclass `42`, protocol `01`, two bulk endpoints) is the next step and would let vamp do the first pairing itself. Until then the first key is trusted with Google's adb once, or with the card's file.
+
+### Tests
+
+`test/unit/test_vamp.py` runs vamp against a fake adbd (over socket pairs: test/unit opens no real socket) that refuses what the Q2's would: a message over 4096 bytes, a WRTE before the OKAY for the last one, a signature that is not PKCS#1 v1.5 over SHA-1's DigestInfo, checked with the public key as mincrypt reads `adbkey.pub`. It checks the key files against openssl's PKCS#8 byte for byte, the public key's layout (`n0inv`, `R^2 mod n`), push, pull and their refusals, the streamed shell's status line, stdin through a file, the reconnect by id, mDNS records, and vamp's coverage is 100%. Mutants of the flow control, the message size, the DigestInfo, the status line, the stdin file and `n0inv` each fail it. `test/unit/test_adb_mdns.py` builds coda-rc's responder for this machine and checks that vamp reads the Q2's `_adb._tcp` announcement and that the responder answers vamp's query. `python3 test/adb.py` runs the MIPS adbd with `--tcp` under qemu-mipsel, driven by vamp, and `q2adb-wifi` under the host's sh (see [Tests](#tests)).
+
+## Device test plan
+
+The main session runs these on a Q2 with a `--dev` build of this branch, the Mac on the same Wi-Fi. Each step says what passes.
+
+1. **The first key, over USB.** Remove the Mac from Developer Options > Trusted Computers if it is there. Before: `vamp find` lists nothing (no port open without a key; `nc -z Q2IP 5555` refused). Plug in, USB Debugging, `adb devices` (Google's, the shared key), Allow with Always allow on. Within 10 s `vamp find` lists the Q2 by its Bluetooth name. Unplug.
+2. **An unknown computer.** From a second computer (or `VAMP_KEY=/tmp/other vamp connect IP`): refused with the "allow over USB" message, and nothing shows on the Q2's screen.
+3. **Connect and shell.** `vamp connect NAME`: prints the build's tag. `vamp shell id` prints `uid=0(root)` and exits 0; `vamp shell 'exit 3'; echo $?` prints 3; `vamp shell` gives a prompt, `ls /mnt/mmc` works, Ctrl-D leaves. `vamp shell 'sleep 100'` then Ctrl-C: `vamp shell 'ps | grep "sleep 100"'` shows none.
+4. **Push and pull.** `vamp push` a 30 MB file to `/mnt/mmc/`: note the MB/s; `vamp pull` it back and `cmp`. With the card lent to the Mac as a drive, `vamp push x /mnt/mmc/` is refused, and works again after Return.
+5. **Screen and input.** `vamp shot --settle a.png` is upright and current; `vamp wheel 3`, `vamp key centre`, `vamp tap 187 160` act as on the cable.
+6. **Install.** `vamp install BUILD --dry-run` passes; then `vamp install BUILD` (a newer `--dev` build): the Q2 restarts, flashes, and vamp reports the new tag with no cable in.
+7. **A new network.** Join the Q2 and the Mac to another network (a phone's hotspot). `vamp find` lists the Q2 there by name; `vamp shell id` works with no `connect` again (found by its id at the new address, `~/.config/vamp/target.json` updated).
+8. **Reconnect after sleep.** Screen off, wait 10 minutes (Smart Wi-Fi on): `vamp shell id` still works (the hold). Then with no command for 35 minutes, Smart Wi-Fi off the radio: vamp fails with "cannot reach"; open the Wi-Fi page on the Q2 and it works again within about 20 s, at a new address if the lease changed. The unified log has the hold's `q2remote:` lines.
+9. **Developer access off.** `vamp shell 'echo ADBWIFI=0 >>/mnt/data/config.ini'` (q2adb-wifi takes the line in any section): within 10 s the port closes and `vamp find` drops the Q2 (its goodbye). Remove the line over USB adb; it comes back.
+10. **Battery cost of the listener.** Two nights, screen off, music stopped, Wi-Fi joined and Smart Wi-Fi off: one with `ADBWIFI=0`, one with it on and a key trusted. Compare the gauge's drop (`cw2015_capacity`) and the wake-ups (`cat /proc/interrupts` and `/proc/PID/stat` for adbd, `q2adb-mdns` and `q2adb-wifi`, before and after). Write the figures here.
+11. **The cable still works.** With Wi-Fi adb connected, plug in and pick Transfer Files: the Mac sees the card, and the Wi-Fi session stays up (its own process). Return: `adb devices` sees the Q2 again on USB.
+
 ## How it works
 
 ### adbd
 
-`adbd` is Android 4.2.2's, as Debian packaged it (`android-tools` 4.2.2+git20130218) and Buildroot builds it for embedded Linux, with `tools/adbd.patch` on top ([third-party.md](third-party.md#adbd)). `tools/thirdparty.py` builds it (`/usr/bin/adbd`, about 64 KB) against the toolchain's glibc, the rootfs's own build, so it needs only `libc.so.6` and `libpthread.so.0`. It listens on USB alone, through the kernel's FunctionFS at `/dev/usb-ffs/adb`: no TCP port, no local socket a program could use instead (only the UI's, below), and it runs as root, so `adb shell` is a root shell once a computer is authorized. It keeps FunctionFS's `ep0` open for as long as it runs: closing it would make the kernel unbind the whole gadget. Its function's descriptors are an ADB interface (class `ff`, subclass `42`, protocol `01`) with Microsoft OS descriptors: compatible ID `WINUSB`, and the `DeviceInterfaceGUID` `{F72FE0D4-CBCB-407D-8814-9ED673D0DD6B}` that `adb.exe` looks for, so Windows binds its WinUSB driver and `adb.exe` finds the Q2 with no INF installed, as with an Android phone.
+`adbd` is Android 4.2.2's, as Debian packaged it (`android-tools` 4.2.2+git20130218) and Buildroot builds it for embedded Linux, with `tools/adbd.patch` on top ([third-party.md](third-party.md#adbd)). `tools/thirdparty.py` builds it (`/usr/bin/adbd`, about 64 KB) against the toolchain's glibc, the rootfs's own build, so it needs only `libc.so.6` and `libpthread.so.0`. It listens on USB alone, through the kernel's FunctionFS at `/dev/usb-ffs/adb`, with no local socket a program could use instead (only the UI's, below); a second process, `adbd --tcp 5555`, is the Wi-Fi one ([ADB over Wi-Fi](#adb-over-wi-fi)), which opens no UI socket, so stock's gadgets taking the controller (which stops the USB adbd) leave a Wi-Fi session alone. Each runs as root, so `adb shell` is a root shell once a computer is authorized. It keeps FunctionFS's `ep0` open for as long as it runs: closing it would make the kernel unbind the whole gadget. Its function's descriptors are an ADB interface (class `ff`, subclass `42`, protocol `01`) with Microsoft OS descriptors: compatible ID `WINUSB`, and the `DeviceInterfaceGUID` `{F72FE0D4-CBCB-407D-8814-9ED673D0DD6B}` that `adb.exe` looks for, so Windows binds its WinUSB driver and `adb.exe` finds the Q2 with no INF installed, as with an Android phone.
 
 S90play makes the gadget (`q2adb-gadget setup`) and starts adbd before demo, and starts adbd again two seconds after it ever ends.
 

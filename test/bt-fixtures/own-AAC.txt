@@ -1,0 +1,78 @@
+method return time=1795762842.425776 sender=:1.2 -> destination=:1.5 serial=65 reply_serial=2
+   array [
+      dict entry(
+         object path "/org/bluealsa/hci0/dev_02_00_00_00_00_01/a2dpsrc/sink"
+         array [
+            dict entry(
+               string "org.bluealsa.PCM1"
+               array [
+                  dict entry(
+                     string "Device"
+                     variant                         object path "/org/bluez/hci0/dev_02_00_00_00_00_01"
+                  )
+                  dict entry(
+                     string "Sequence"
+                     variant                         uint32 1
+                  )
+                  dict entry(
+                     string "Transport"
+                     variant                         string "A2DP-source"
+                  )
+                  dict entry(
+                     string "Mode"
+                     variant                         string "sink"
+                  )
+                  dict entry(
+                     string "Running"
+                     variant                         boolean false
+                  )
+                  dict entry(
+                     string "Format"
+                     variant                         uint16 33296
+                  )
+                  dict entry(
+                     string "Channels"
+                     variant                         byte 2
+                  )
+                  dict entry(
+                     string "ChannelMap"
+                     variant                         array [
+                           string "FL"
+                           string "FR"
+                        ]
+                  )
+                  dict entry(
+                     string "Rate"
+                     variant                         uint32 48000
+                  )
+                  dict entry(
+                     string "Codec"
+                     variant                         string "AAC"
+                  )
+                  dict entry(
+                     string "CodecConfiguration"
+                     variant                         array of bytes [
+                           80 00 84 83 a9 80
+                        ]
+                  )
+                  dict entry(
+                     string "Delay"
+                     variant                         uint16 150
+                  )
+                  dict entry(
+                     string "ClientDelay"
+                     variant                         int16 0
+                  )
+                  dict entry(
+                     string "SoftVolume"
+                     variant                         boolean false
+                  )
+                  dict entry(
+                     string "Volume"
+                     variant                         array of bytes "dd"
+                  )
+               ]
+            )
+         ]
+      )
+   ]

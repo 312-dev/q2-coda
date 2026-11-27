@@ -5,6 +5,7 @@ packet-type command to the A2DP sink's link, the step-down from aptX HD or aptX 
 the PCM path SelectCodec goes to, and the commute replayed through it), SBC's bitpool and AAC's peak. Built for this machine
 with test/unit/q2guard_host.c."""
 import ctypes as C
+import pathlib
 import subprocess
 
 import pytest
@@ -289,6 +290,29 @@ def pcms(L, text):
 
 def test_the_a2dp_source_s_codec_rate_and_delay(L):
     assert pcms(L, PCMS) == (1, 'aptX-HD', 48000, 2357)  # the Px7 on Auto, 2026-11-17
+
+
+# What each daemon answers to GetManagedObjects on /org/bluealsa, as dbus-send prints it, captured from stock's 4.0.0
+# and Vamp's 5.0.0 under qemu by test/bluealsa_own.py --capture (docs/bluealsa.md#the-callers): q2bt.c's
+# PCMS_CMD asks for this, and stock's says Sampling where 5.0.0 says Rate
+FIXTURES = pathlib.Path(__file__).resolve().parents[1] / 'bt-fixtures'
+MANAGED = [(f'{who}-{codec}.txt', codec) for who in ('stock', 'own') for codec in ('SBC', 'AAC')]
+
+
+@pytest.mark.parametrize('name, codec', MANAGED)
+def test_each_daemon_s_object_list_gives_the_codec_rate_path_and_sink(L, name, codec):
+    text = (FIXTURES / name).read_bytes()
+    ok, got, hz, delay = pcms(L, text)
+    assert (ok, got, hz) == (1, codec, 48000) and delay > 0
+    path, addr = C.create_string_buffer(128), (C.c_ubyte * 6)()
+    assert L.bt_pcms_path(text, path, 128) == 1
+    assert path.value == b'/org/bluealsa/hci0/dev_02_00_00_00_00_01/a2dpsrc/sink'
+    assert L.bt_pcms_sink(text, addr) == 1 and bytes(addr) == bytes([1, 0, 0, 0, 0, 2])  # the kernel's order
+
+
+def test_the_command_asks_the_object_manager():
+    src = (ROOT / 'patch/q2bt.c').read_text()
+    assert 'org.freedesktop.DBus.ObjectManager.GetManagedObjects > " PCMS_FILE' in src and 'GetPCMs' not in src
 
 
 def test_no_a2dp_pcm_or_no_codec_is_none(L):

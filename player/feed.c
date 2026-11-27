@@ -36,11 +36,13 @@ static uint8_t ring[FEED_RING * FRAME], part[FRAME];
 static unsigned head, count, nparts; /* frames */
 static int64_t pulled_at, heard_at;
 
-static int64_t mono_ms(void) {
+static int64_t mono_ns(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
-    return (int64_t)t.tv_sec * 1000 + t.tv_nsec / 1000000;
+    return (int64_t)t.tv_sec * 1000000000 + t.tv_nsec;
 }
+
+static int64_t mono_ms(void) { return mono_ns() / 1000000; }
 
 /* bytes from the FIFO into the ring, whole frames, a frame cut by a read kept for the next */
 static void put(const uint8_t *b, unsigned n) {
@@ -71,6 +73,7 @@ static void put(const uint8_t *b, unsigned n) {
 static void *reader(void *arg) {
     int fd = (int)(intptr_t)arg;
     uint8_t b[4096];
+    int64_t due = 0; /* ns: when the frames dropped so far will have played at the source's rate */
     for (;;) {
         /* no timeout: the write end held here means no end of file, so the thread sleeps until a source writes */
         struct pollfd p = {fd, POLLIN, 0};
@@ -83,14 +86,22 @@ static void *reader(void *arg) {
             ssize_t r = read(fd, b, sizeof b);
             if (r > 0) put(b, (unsigned)r);
         } else if (idle >= FEED_IDLE_MS) {
-            /* nobody takes the frames: dropped at the source's rate (each read waited out for as long as it plays),
-             * so the source is neither held nor sped up */
+            /* nobody takes the frames: dropped at the source's rate, so the source is neither held nor sped up. Each
+             * read moves a deadline on by as long as its frames play and the thread sleeps until it, so a wake that
+             * comes late is made up by the next sleep's being shorter, as a sound card's clock keeps on while its
+             * writer is late; the late wakes are not added to the source's time. A deadline more than FEED_RING
+             * behind (the first drop, or a source that paused) starts again from now: the source is never let run
+             * further ahead of its own time than the ring holds. */
             ssize_t r = read(fd, b, sizeof b);
             if (r > 0) {
                 pthread_mutex_lock(&mu);
                 heard_at = mono_ms();
                 pthread_mutex_unlock(&mu);
-                usleep((useconds_t)((int64_t)r / FRAME * 1000000 / FEED_RATE));
+                int64_t now = mono_ns();
+                if (due < now - (int64_t)FEED_RING * 1000000000 / FEED_RATE) due = now;
+                due += (int64_t)r / FRAME * 1000000000 / FEED_RATE;
+                struct timespec t = {(time_t)(due / 1000000000), (long)(due % 1000000000)};
+                while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &t, NULL) == EINTR) {}
             }
         } else {
             usleep(5000); /* the ring is full and the car is taking it: wait for room */

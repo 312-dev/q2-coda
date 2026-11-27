@@ -142,7 +142,8 @@ SEAM_SOURCES = (*CONTRACT_SOURCES, 'patch/playback.c', 'test/fw/seam.py', 'test/
 # tools/coda_rc_client.py as the phone and tools/ci/emu_pool.py's lease; test/iap_probe.py builds q2-iap from its
 # sources and runs it as q2car.sh does; test/peq.py builds the EQ, its editor, games, video, Internet Radio,
 # Spotify, the App Store's list, online lyrics, Tidal and scrobbling on the host and reads OLED's theme; test/coverflow.py
-# the Cover Flow sources with the shared ones they include; test/player/run.py patch/peq.c as the player builds it.
+# the Cover Flow sources with the shared ones they include; test/player/run.py patch/peq.c as the player builds it;
+# test/bt_launch.py runs the Bluetooth launcher and reads the plugins' ALSA file from a build.
 # tools/ci/test_ci.py checks that every source a suite names in its code plans it.
 SUITE_SOURCES = {
     'test/coda_rc_e2e.py': (('patch/coda_rc*', 'remote/coda-rc.proto', 'tools/coda_rc_client.py', 'tools/ci/emu_pool.py'),
@@ -154,6 +155,7 @@ SUITE_SOURCES = {
     'test/coverflow.py': ((*COVERFLOW_SOURCES, 'patch/coverflow_position.c', 'patch/corner_cover.c', 'patch/wheel_accel.c',
                            'patch/hash.c', 'tools/build.py', 'tools/theme.py'), True),
     'test/player/run.py': (('patch/peq.c',), True),
+    'test/bt_launch.py': (('patch/bt_launch.sh', 'assets/alsa/25-vamp-bluealsa.conf'), False),
 }
 # The suites that run the build's payload as test/patch.py does (under Unicorn, test/patch_suite's Machines): any change
 # to the payload or a build input plans them with it.

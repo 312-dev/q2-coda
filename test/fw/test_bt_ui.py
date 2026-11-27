@@ -3,6 +3,7 @@ rows, then the Audio group (Guest Play, Quality, Headset Volume, Resume on Conne
 started by the page itself while it is open; the connected device a two-line row ("Connected · LDAC · 72%")."""
 import ctypes as C
 import os
+import pathlib
 import re
 import subprocess
 
@@ -844,16 +845,34 @@ def test_a_pick_with_nothing_linked_is_stock_s(fw):
     assert quality_pick(fw, 4, 0) == (0, [])  # linked, no codec yet: stock's own second test
 
 
-def test_the_switch_under_sh_takes_the_first_codec_the_headset_has(fw, tmp_path):
-    """The command as sh runs it: bluealsa's A2DP source PCM from GetPCMs, then q2bt-codec for each codec in order
-    until one is taken. A Px7 has no LDAC: bluealsa refuses it at once and aptX HD is next."""
+
+# What each bluealsa answers to GetManagedObjects on /org/bluealsa, as dbus-send prints it: captured from stock's
+# 4.0.0 (Sampling) and Vamp's 5.0.0 (Rate) under qemu by test/bluealsa_own.py --capture (docs/bluealsa.md#the-callers)
+FIXTURES = pathlib.Path(__file__).resolve().parents[1] / 'bt-fixtures'
+
+
+def managed(daemon, *pcms):
+    """daemon's ('stock' or 'own') reply with one A2DP source PCM for each (dev, rate) of pcms, in that order"""
+    text = (FIXTURES / f'{daemon}-SBC.txt').read_text()
+    lines = text.splitlines(keepends=True)
+    head, body = lines[:2], ''.join(lines[2:-1])  # the reply's line and "array [", then its one PCM, then "]"
+    return ''.join(head) + ''.join(body.replace('02_00_00_00_00_01', dev).replace(' 48000\n', f' {rate}\n')
+                                   for dev, rate in pcms) + lines[-1]
+
+
+@pytest.mark.parametrize('daemon', ['stock', 'own'])
+def test_the_switch_under_sh_takes_the_first_codec_the_headset_has(fw, tmp_path, daemon):
+    """The command as sh runs it: bluealsa's A2DP source PCM from its object list (each daemon's own reply), then
+    q2bt-codec for each codec in order until one is taken. A Px7 has no LDAC: bluealsa refuses it at once and aptX HD
+    is next."""
     _, switches = quality_pick(fw, 2, 3)
     bin_ = tmp_path / 'bin'
     bin_.mkdir()
+    (tmp_path / 'reply').write_text(managed(daemon, ('EC_66_D1_CF_59_3F', 48000)))
     (bin_ / 'dbus-send').write_text(
-        '#!/bin/sh\ncat <<E\n   array [\n      dict entry(\n'
-        '         object path "/org/bluealsa/hci0/dev_EC_66_D1_CF_59_3F/hfpag/source"\n      )\n      dict entry(\n'
-        '         object path "/org/bluealsa/hci0/dev_EC_66_D1_CF_59_3F/a2dpsrc/sink"\n      )\n   ]\nE\n')
+        '#!/bin/sh\ncase "$*" in\n'
+        f'*"/org/bluealsa org.freedesktop.DBus.ObjectManager.GetManagedObjects"*) cat {tmp_path}/reply;;\n'
+        '*) exit 1;;\nesac\n')
     calls = tmp_path / 'calls'
     (bin_ / 'q2bt-codec').write_text(
         f'#!/bin/sh\necho "$1 $2" >>{calls}\n[ "$2" = LDAC ] && {{ echo "org.freedesktop.DBus.Error.Failed SEP codec '
@@ -915,7 +934,8 @@ CODEC = {'SBC': 1, 'AAC': 2, 'aptX': 3, 'LDAC': 4, 'aptX-HD': 13}
 
 
 class Bluealsa:
-    """bluealsa and its D-Bus as sh sees them: dbus-send answering GetPCMs (the device's HFP and A2DP source PCMs)
+    """bluealsa and its D-Bus as sh sees them: dbus-send answering GetManagedObjects (Vamp's 5.0.0's reply, the device's
+    A2DP source PCM)
     and GetCodecs (the device's sink endpoints, as dbus-send --print-reply prints a{sa{sv}}), and q2bt-codec, which
     refuses a codec the device lacks as SelectCodec does ("SEP codec not available") and records every call."""
     def __init__(self, tmp_path, mac, codecs):
@@ -927,11 +947,10 @@ class Bluealsa:
             f'      dict entry(\n         string "{c}"\n         array [\n            dict entry(\n'
             '               string "Capabilities"\n               variant                   array of bytes [\n'
             '                     ff ff 02 35\n                  ]\n            )\n         ]\n      )\n' for c in codecs)
+        (tmp_path / 'reply').write_text(managed('own', (dev[4:], 48000)))
         (self.bin / 'dbus-send').write_text(
             '#!/bin/sh\ncase "$*" in\n'
-            '*GetPCMs*) cat <<X\nmethod return time=1 sender=:1.5 -> destination=:1.9 serial=4 reply_serial=2\n'
-            f'   array [\n      dict entry(\n         object path "/org/bluealsa/hci0/{dev}/hfpag/source"\n      )\n'
-            f'      dict entry(\n         object path "{self.pcm}"\n      )\n   ]\nX\n;;\n'
+            f'*"/org/bluealsa org.freedesktop.DBus.ObjectManager.GetManagedObjects"*) cat {tmp_path}/reply;;\n'
             f'*{self.pcm}*GetCodecs*) cat <<X\nmethod return time=1 sender=:1.5 -> destination=:1.9 serial=5 '
             f'reply_serial=2\n   array [\n{entries}   ]\nX\n;;\n*) exit 1;;\nesac\n')
         (self.bin / 'q2bt-codec').write_text(

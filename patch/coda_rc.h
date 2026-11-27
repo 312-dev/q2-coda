@@ -205,6 +205,7 @@ int mdns_query(const mdns_self *me, const uint8_t *p, size_t n);
 /* a response with those records as answers (and what they lead to as additionals) at ttl into out; its size,
  * 0 when it does not fit */
 size_t mdns_reply(const mdns_self *me, unsigned answers, uint32_t ttl, uint8_t *out, size_t cap);
+int mdns_service(const char *label);  /* "_adb": the type answered for, before mdns_start; _q2muse unless set */
 void mdns_start(const char *ifname); /* answer on ifname's address whenever it has one */
 int mdns_fd(void);                   /* the socket to poll for POLLIN, -1 with none */
 void mdns_pace(int quiet);           /* the address looked at every 5 s while no phone is connected, else 1 s */

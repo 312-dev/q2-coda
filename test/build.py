@@ -394,7 +394,7 @@ def validate_assets(directory):
     at, old, new = ID_PULL_UP
     assert struct.unpack_from('<I', stock, fileoff(stock, at))[0] == old and struct.unpack_from('<I', demo, fileoff(demo, at))[0] == new
     from build import patch_timezones, TIMEZONES, CJK, english_ui
-    from build import ADB_HOOK, ADBD, ADB_GADGET, Q2UPDATE, USB_SCRIPTS, adb_wrapper, USBTRACE, USBTRACE_HOOK
+    from build import ADB_HOOK, ADB_WIFI_HOOK, ADBD, ADB_GADGET, ADB_WIFI, ADB_MDNS, Q2UPDATE, USB_SCRIPTS, adb_wrapper, USBTRACE, USBTRACE_HOOK
     zones = bytearray(stock)
     patch_timezones(zones)
     start = fileoff(stock, 0x77efb0)
@@ -606,7 +606,7 @@ def validate_assets(directory):
         assert sha(usbtrace) == manifest['q2_usbtrace_sha256'] and usbtrace[:4] == b'\x7fELF'
         assert usbtrace[36:40] == helper[36:40]
         assert b'q2-usbtrace-pd17' in demo  # usb_event.c's forwarding of PD17's edges
-        expected_start = expected_start.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*USBTRACE_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK)
+        expected_start = expected_start.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*ADB_WIFI_HOOK).replace(*USBTRACE_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK)
         assert b'q2-wheel.log' in demo
         # adbd (docs/adb.md): an ELF with the stock binaries' ABI flags and glibc alone, its gadget script, stock's USB
         # scripts wrapped and kept beside the wrappers
@@ -619,6 +619,8 @@ def validate_assets(directory):
         assert sorted(re.findall(r'\(NEEDED\)\s+Shared library: \[(.+)\]', dynamic)) == ['libc.so.6', 'libpthread.so.0']
         assert read('rootfs.squashfs', ADB_GADGET) == (ROOT/'patch/adb_gadget.sh').read_bytes()
         assert read('rootfs.squashfs', Q2UPDATE) == (ROOT/'patch/q2update.sh').read_bytes()
+        assert read('rootfs.squashfs', ADB_WIFI) == (ROOT/'patch/adb_wifi.sh').read_bytes()
+        assert read('rootfs.squashfs', ADB_MDNS)[36:40] == helper[36:40]  # docs/adb.md#adb-over-wi-fi
         for n in USB_SCRIPTS:
             assert read('rootfs.squashfs', 'usr/bin/' + n) == adb_wrapper(n)
             assert read('rootfs.squashfs', 'usr/bin/' + n.replace('.sh', '_stock.sh')) == read('stock.squashfs', 'usr/bin/' + n)
@@ -637,7 +639,7 @@ def validate_assets(directory):
         # No ADB in a release: no adbd, no gadget, stock's USB scripts as they were
         assert 'adbd' not in manifest and not (directory/'adbd').exists()
         assert b'q2update.req' not in demo  # q2update_poll is compiled out
-        for path in (ADBD, ADB_GADGET, Q2UPDATE, *('usr/bin/' + n.replace('.sh', '_stock.sh') for n in USB_SCRIPTS)):
+        for path in (ADBD, ADB_GADGET, ADB_WIFI, ADB_MDNS, Q2UPDATE, *('usr/bin/' + n.replace('.sh', '_stock.sh') for n in USB_SCRIPTS)):
             absent = subprocess.run(['unsquashfs', '-cat', str(directory/'rootfs.squashfs'), path],
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             assert absent.returncode != 0, f'release rootfs contains {path}'
@@ -676,8 +678,10 @@ def validate_assets(directory):
         assert path in stock_listing and path not in listing, path
     print('Removed from the rootfs:', ' '.join(DEBUG_TOOLS + DEBUG_LINKS))
     # Bluetooth is discoverable for 180 s, not for as long as it is on, named Q2, with BlueZ's experimental interfaces.
-    from build import BT_MAIN, BT_DISCOVERABLE, BT_NAME, BT_EXPERIMENTAL
-    assert read('rootfs.squashfs', BT_MAIN) == read('stock.squashfs', BT_MAIN).replace(*BT_DISCOVERABLE).replace(*BT_NAME).replace(*BT_EXPERIMENTAL)
+    from build import BT_MAIN, BT_DISCOVERABLE, BT_NAME, BT_EXPERIMENTAL, BT_GATT_SERVER
+    edited = read('stock.squashfs', BT_MAIN).replace(*BT_DISCOVERABLE).replace(*BT_NAME).replace(*BT_EXPERIMENTAL)
+    # an --own-bluez build also turns its bluetoothd's GATT server off (docs/bluez.md#the-le-attribute-channel)
+    assert read('rootfs.squashfs', BT_MAIN) == (edited.replace(*BT_GATT_SERVER) if 'own_bluez' in manifest else edited)
     assert b'\nExperimental = true\n' in read('rootfs.squashfs', BT_MAIN)
     assert b'\nDiscoverableTimeout = 180\n' in read('rootfs.squashfs', BT_MAIN)
     assert b'\nName = Vamp\n' in read('rootfs.squashfs', BT_MAIN) and b'Shanling' not in read('rootfs.squashfs', BT_MAIN)
@@ -685,7 +689,8 @@ def validate_assets(directory):
     assert expected_start.count(b'\n        rm -f /mnt/data/baidu_token.conf\n') == 1
     # bluealsa: AAC capability, AAC's peak and VBR mode, the two DROP jumps, the silence sites, and one appended LOAD payload.
     from build import BT_AAC_SITES, BT_DROP, BT_DROP_HANDLER, BT_DROP_PAYLOAD, BT_SILENCE_SITES, patch_bluealsa, segments
-    old, new = read('stock.squashfs', BLUEALSA), read('rootfs.squashfs', BLUEALSA)
+    from build import BLUEALSA_APLAY, BT_LAUNCH, BT_WATCH, stock_program
+    old, new = read('stock.squashfs', BLUEALSA), read('rootfs.squashfs', stock_program(BLUEALSA, manifest))
     header = segments(old)[-1][0]
     allowed = {AAC_44K1, *range(header, header+32)}
     for address, size in ((BT_DROP, 8), (BT_DROP_HANDLER, 8), *((a, 4) for a, *_ in BT_SILENCE_SITES), *((a, 4) for a, *_ in BT_AAC_SITES)):
@@ -701,8 +706,18 @@ def validate_assets(directory):
     check_bluetooth_drop(directory)
     # bluetoothd: the control channel's GetElementAttributes from g_track_meta (tools/bt_meta.c)
     from build import BLUETOOTHD, patch_bluetoothd
-    assert read('rootfs.squashfs', BLUETOOTHD) == patch_bluetoothd(read('stock.squashfs', BLUETOOTHD))
-    assert manifest['bluetoothd_sha256'] == sha(read('rootfs.squashfs', BLUETOOTHD))
+    assert read('rootfs.squashfs', stock_program(BLUETOOTHD, manifest)) == patch_bluetoothd(read('stock.squashfs', BLUETOOTHD))
+    assert manifest['bluetoothd_sha256'] == sha(read('rootfs.squashfs', stock_program(BLUETOOTHD, manifest)))
+    # the launcher (docs/bluez.md#the-launcher) at each stock path the build carries an own daemon for, and its
+    # watcher's copy; stock's bluealsa-aplay moved aside whole. A build without the flags has none of them.
+    launcher = (ROOT/BT_LAUNCH).read_bytes()
+    stands = [BLUETOOTHD] * ('own_bluez' in manifest) + [BLUEALSA, BLUEALSA_APLAY] * ('own_bluealsa' in manifest)
+    for path in (BLUETOOTHD, BLUEALSA, BLUEALSA_APLAY):
+        assert (read('rootfs.squashfs', path) == launcher) == (path in stands), path
+    if stands:
+        assert read('rootfs.squashfs', BT_WATCH) == launcher
+    if 'own_bluealsa' in manifest:
+        assert read('rootfs.squashfs', stock_program(BLUEALSA_APLAY, manifest)) == read('stock.squashfs', BLUEALSA_APLAY)
     from bluetoothd import check as check_bluetoothd
     check_bluetoothd(directory)
     from build import SCROBBLE_CA
