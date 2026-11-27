@@ -10,10 +10,16 @@
  *   - The saved networks: q2netd edits the conf itself (a network={} block added or removed, the rest of the file kept)
  *     and asks wpa_supplicant to read it again (RECONFIGURE), so no update_config line is needed in a file stock wrote.
  *
+ * On a card boot (--card-boot: Vamp OS run in a chroot by today's Vamp, docs/vamp-os-base.md#card-boot) Wi-Fi is how the
+ * developer reaches today's adbd outside the chroot, so it is never turned off: a wpa_supplicant already running
+ * (today's Vamp's) is left exactly as it is, nothing started, stopped or restarted beside it (state "external"); with
+ * none, the radio is brought up on the saved networks and kept up, Smart Wi-Fi and `off` refused.
+ *
  * wpa_supplicant is spoken to over its control socket (/var/run/wpa_supplicant/wlan0: text commands, a datagram each).
  * Q2NET/1 on /run/vamp/net.sock (docs/netd.md#q2net1). --root prefixes paths; --wpa, --dhcp, --up and --down name the
  * commands, for test/netd.py. */
 #define _GNU_SOURCE
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -38,7 +44,7 @@
 
 static char root[256], wpa_cmd[1200], dhcp_cmd[512], up_cmd[256], down_cmd[256], ctrl_dir[256] = "/var/run/wpa_supplicant";
 static const char *iface = "wlan0";
-static int idle_s = IDLE_S, boot_hold_s = BOOT_HOLD_S, smart = 1;
+static int idle_s = IDLE_S, boot_hold_s = BOOT_HOLD_S, smart = 1, card_boot, external;
 
 static char *path(const char *rel) {
     static char b[4][600];
@@ -143,6 +149,7 @@ static unsigned st_seq;
 static void tell(const char *fmt, ...);
 
 static void radio(int on) {
+    if (external || (card_boot && !on)) return; /* a card boot's Wi-Fi is never taken down */
     if (on == radio_on) return;
     if (on) {
         run_cmd(up_cmd);
@@ -321,7 +328,8 @@ static void status_line(char *out, size_t room) {
     char ssid[400];
     enc(ssid, sizeof ssid, st.ssid);
     long long held = held_until > now_ms() ? (long long)(held_until - now_ms()) / 1000 : 0;
-    snprintf(out, room, "status state=%s ssid=%s ip=%s smart=%d held=%lld", radio_on ? st.state : "off", ssid, st.ip, smart, held);
+    snprintf(out, room, "status state=%s ssid=%s ip=%s smart=%d held=%lld", external ? "external" : radio_on ? st.state : "off", ssid, st.ip,
+             smart, held);
 }
 
 static void client_line(struct client *c, char *line) {
@@ -340,11 +348,13 @@ static void client_line(struct client *c, char *line) {
     } else if (sscanf(line, "hold %u", &s) == 1 && s <= 86400) {
         hold(s);
         client_say(c, "ok");
-    } else if (!strcmp(line, "off")) {
-        held_until = 0, radio(0);
+    } else if (!strcmp(line, "off") || !strcmp(line, "smart on")) {
+        if (card_boot) { client_say(c, "err card boot"); return; } /* the developer's way in stays up */
+        if (line[0] == 'o') held_until = 0, radio(0);
+        else smart = 1;
         client_say(c, "ok");
-    } else if (!strcmp(line, "smart on") || !strcmp(line, "smart off")) {
-        smart = line[7] == 'n';
+    } else if (!strcmp(line, "smart off")) {
+        smart = 0;
         client_say(c, "ok");
     } else if (!strcmp(line, "networks")) {
         size_t n;
@@ -404,6 +414,24 @@ static void client_read(struct client *c) {
     if (c->n >= sizeof c->in - 1) close(c->fd), c->fd = -1;
 }
 
+/* Whether a process named name runs that is not one of q2netd's own (today's Vamp's, on a card boot) */
+static int running_elsewhere(const char *name) {
+    DIR *d = opendir(path("/proc"));
+    int found = 0;
+    for (struct dirent *e; d && !found && (e = readdir(d));) {
+        pid_t pid = (pid_t)atoi(e->d_name);
+        if (pid <= 0 || pid == wpa_pid || pid == dhcp_pid) continue;
+        char p[600], comm[64] = "";
+        snprintf(p, sizeof p, "%s/proc/%s/comm", root, e->d_name);
+        FILE *f = fopen(p, "r");
+        if (f && fgets(comm, sizeof comm, f)) comm[strcspn(comm, "\n")] = 0;
+        if (f) fclose(f);
+        found = !strcmp(comm, name);
+    }
+    if (d) closedir(d);
+    return found;
+}
+
 static volatile sig_atomic_t stopping;
 static void on_term(int s) { (void)s, stopping = 1; }
 
@@ -417,6 +445,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--down") && v) snprintf(down_cmd, sizeof down_cmd, "%s", v), ++i;
         else if (!strcmp(argv[i], "--idle") && v) idle_s = atoi(v), ++i;
         else if (!strcmp(argv[i], "--boot-hold") && v) boot_hold_s = atoi(v), ++i;
+        else if (!strcmp(argv[i], "--card-boot")) card_boot = 1;
         else return fprintf(stderr, "usage: q2netd [--root DIR] [--wpa CMD] [--dhcp CMD] [--up CMD] [--down CMD] [--idle S] [--boot-hold S]\n"), 2;
     }
     if (!*wpa_cmd)
@@ -439,7 +468,14 @@ int main(int argc, char **argv) {
     snprintf(st.state, sizeof st.state, "off");
     started_at = now_ms();
     struct stat sb;
-    if (!stat(path("/mnt/data/wpa_supplicant.conf"), &sb)) hold((unsigned)boot_hold_s); /* networks saved: on for the boot hold */
+    if (card_boot) {
+        smart = 0;
+        external = running_elsewhere("wpa_supplicant");
+        say(external ? "card boot: Wi-Fi left to today's Vamp" : "card boot: Wi-Fi up and kept up");
+        if (!external && !stat(path("/mnt/data/wpa_supplicant.conf"), &sb)) radio(1);
+    } else if (!stat(path("/mnt/data/wpa_supplicant.conf"), &sb)) {
+        hold((unsigned)boot_hold_s); /* networks saved: on for the boot hold */
+    }
     struct timespec used = {0, 0};
     ino_t used_ino = 0;
     unsigned seen = st_seq;
@@ -459,7 +495,7 @@ int main(int argc, char **argv) {
         for (int i = 0; i < CLIENTS; ++i)
             if (cl[i].fd >= 0 && p[1 + i].fd == cl[i].fd && p[1 + i].revents) client_read(&cl[i]);
         /* the Wi-Fi adbd's mark: a computer let in (a new inode renamed into place, or a newer time) */
-        if (!stat(path("/tmp/q2remote.used"), &sb) &&
+        if (!external && !stat(path("/tmp/q2remote.used"), &sb) &&
             (sb.st_mtim.tv_sec != used.tv_sec || sb.st_mtim.tv_nsec != used.tv_nsec || sb.st_ino != used_ino)) {
             hold(REMOTE_HOLD_S);
             used = sb.st_mtim, used_ino = sb.st_ino;
@@ -469,7 +505,7 @@ int main(int argc, char **argv) {
         if (radio_on && smart && t >= held_until && t >= started_at && held_until) radio(0);
         if (wpa_pid > 0 && waitpid(wpa_pid, 0, WNOHANG) == wpa_pid) wpa_pid = 0, say("wpa_supplicant ended");
         if (dhcp_pid > 0 && waitpid(dhcp_pid, 0, WNOHANG) == dhcp_pid) dhcp_pid = 0;
-        if (radio_on && wpa_pid == 0 && t >= wpa_at + RESPAWN_MS) wpa_pid = spawn(wpa_cmd), wpa_at = t; /* started again */
+        if (radio_on && !external && wpa_pid == 0 && t >= wpa_at + RESPAWN_MS) wpa_pid = spawn(wpa_cmd), wpa_at = t; /* started again */
         if (st_seq != seen) {
             char s[1200];
             status_line(s, sizeof s);
@@ -477,7 +513,8 @@ int main(int argc, char **argv) {
             seen = st_seq;
         }
     }
-    radio(0);
+    if (!card_boot) radio(0);
+    else if (!external) stop_child(&dhcp_pid), stop_child(&wpa_pid); /* its own, at its end */
     unlink(path("/run/vamp/net.sock"));
     return 0;
 }

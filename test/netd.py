@@ -207,6 +207,48 @@ def test_a_scan_s_networks_with_their_names_encoded(run):
     assert a.until_ok() == (['ap ssid=My%20Net signal=-40 secure=1', 'ap ssid=Cafe%3DFree signal=-70 secure=0'], 'ok')
 
 
+@pytest.fixture
+def outer(tmp_path):
+    """today's Vamp's wpa_supplicant on a card boot: a process of that name (sleep under another name)"""
+    exe = tmp_path/'outer/wpa_supplicant'
+    exe.parent.mkdir()
+    exe.write_bytes(pathlib.Path('/bin/sleep').read_bytes())
+    exe.chmod(0o755)
+    p = subprocess.Popen([str(exe), '1000'])
+    (tmp_path/'proc').symlink_to('/proc')
+    yield p
+    p.kill()
+    p.wait()
+
+
+def test_a_card_boot_leaves_today_s_wifi_exactly_as_it_is(run, outer):
+    root = run('--card-boot', '--boot-hold', '1')
+    a = Api(root)
+    a.line()
+    time.sleep(5)  # past the boot hold and the idle time
+    st = status(a)
+    assert st['state'] == 'external' and st['smart'] == '0'
+    assert not (root/'wpa-started').exists() and not (root/'ifconfig').exists() and not (root/'dhcp-ran').exists()
+    for line in ('off', 'smart on'):
+        a.say(line)
+        assert a.line() == 'err card boot'
+    a.say('wake')
+    assert a.line() == 'ok' and not (root/'ifconfig').exists(), 'a wake starts nothing beside it'
+    assert outer.poll() is None, "today's wpa_supplicant still runs"
+
+
+def test_a_card_boot_with_no_wifi_brings_it_up_and_keeps_it_up(run, tmp_path):
+    (tmp_path/'proc').symlink_to('/proc')
+    root = run('--card-boot', '--boot-hold', '1')
+    a = Api(root)
+    a.line()
+    assert wait_for(lambda: (root/'wpa-started').exists())
+    time.sleep(5)
+    assert status(a)['state'] not in ('off', 'external') and 'down' not in (root/'ifconfig').read_text()
+    a.say('off')
+    assert a.line() == 'err card boot'
+
+
 def test_another_version_is_refused(run):
     root = run(conf=None)
     a = Api(root, 'Q2NET/2')

@@ -4,5 +4,8 @@
 . /usr/libexec/vamp/log
 step "q2netd: start"
 mkdir -p /var/run/wpa_supplicant
+# a card boot (docs/vamp-os-base.md#card-boot): Wi-Fi is the developer's way to today's adbd, never taken down
+card=
+[ -e /run/vamp/card-boot ] && card=--card-boot
 exec 2>&1
-exec /usr/bin/q2netd
+exec /usr/bin/q2netd $card

@@ -20,6 +20,10 @@ Vamp OS's network service ([roadmap: Who owns what](vamp-os.md#who-owns-what)), 
 
 Decision: `q2netd` edits the file rather than `wpa_supplicant`'s `SAVE_CONFIG`, which needs `update_config=1` in a file stock wrote and rewrites the whole file in its own order; editing keeps every line stock and today's Vamp put there ([User data](vamp-os.md#user-data)).
 
+## On a card boot
+
+Run from the card by today's Vamp ([card boot](vamp-os-base.md#card-boot)), Wi-Fi is the developer's way to today's adbd outside the chroot, so `q2netd --card-boot` (the run script passes it when rcS has marked the boot) never takes it down: a `wpa_supplicant` already running (today's Vamp's) is left exactly as it is, with nothing started, stopped or restarted beside it and no `ifconfig` (`status state=external`); with none, the radio comes up on the saved networks and stays up. Either way Smart Wi-Fi's idle off does not apply and `off` and `smart on` answer `err card boot`.
+
 ## Q2NET/1
 
 On `/run/vamp/net.sock` (mode 0600), the shape of [Q2PLAY/1](playd.md#q2play1): `Q2NET/1` first, answered `Q2NET/1 ok`. Free text (SSIDs, passphrases) is percent-encoded both ways, as Q2PLAY/1's fields are.
@@ -36,7 +40,7 @@ On `/run/vamp/net.sock` (mode 0600), the shape of [Q2PLAY/1](playd.md#q2play1): 
 
 ## Tests
 
-`python3 test/netd.py` (pytest) runs `q2netd` for this machine with a stand-in `wpa_supplicant` (a Python program on its control socket: `STATUS`, `SCAN`, `SCAN_RESULTS`, `RECONFIGURE`) and logging commands for `ifconfig` and `udhcpc`: the radio on with a saved network and `udhcpc` only after `COMPLETED`, off with none; Smart Wi-Fi going off after the boot hold, `wake`, `hold`, the use mark's 30 minutes and `smart off`; `add` and `forget` against a file whose other lines must survive, with UTF-8 and spaces in a name and each refusal; a scan's names encoded; another version refused. Copies without the idle off, starting `udhcpc` before association, quoting anything, or ignoring the use mark each fail it (`Q2NETD_SOURCE`). `test/os_image.py`'s boot: the image's `q2netd` answers Q2NET/1, and after the boot's adb check the Wi-Fi adbd's login holds the radio on for about 30 minutes; on a card boot, with nothing saved, the radio is off. `--perturb netd-off` fails that check.
+`python3 test/netd.py` (pytest) runs `q2netd` for this machine with a stand-in `wpa_supplicant` (a Python program on its control socket: `STATUS`, `SCAN`, `SCAN_RESULTS`, `RECONFIGURE`) and logging commands for `ifconfig` and `udhcpc`: the radio on with a saved network and `udhcpc` only after `COMPLETED`, off with none; Smart Wi-Fi going off after the boot hold, `wake`, `hold`, the use mark's 30 minutes and `smart off`; `add` and `forget` against a file whose other lines must survive, with UTF-8 and spaces in a name and each refusal; a scan's names encoded; another version refused. Copies without the idle off, starting `udhcpc` before association, quoting anything, or ignoring the use mark each fail it (`Q2NETD_SOURCE`). Two card-boot cases (today's `wpa_supplicant` running: left alone and `off` refused; none: brought up and kept up past the idle time) are in it too, and copies that ignore the running one or accept `off` fail them. `test/os_image.py`'s boot: the image's `q2netd` answers Q2NET/1, and after the boot's adb check the Wi-Fi adbd's login holds the radio on for about 30 minutes. Its card boot runs as a Q2 would, rcS and `runsvdir` in the sandbox beside stand-ins for today's Vamp's `wpa_supplicant`, `udhcpc` and Wi-Fi adbd on 5555, with networks saved: `q2netd` reports `external`, both stand-ins still run, port 5555 still answers as the outer adbd, there is one `wpa_supplicant` and no `ifconfig` was run. Without `--card-boot` (`--perturb netd-card`) it brings `wlan0` up beside them and both checks fail; `--perturb netd-off` fails the first.
 
 ## Needs a Q2
 

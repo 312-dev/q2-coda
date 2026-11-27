@@ -21,13 +21,15 @@ either service starts, q2ui draws a frame, q2player connects to q2playd, and a s
 reaches q2player and its end comes back; then adb over Wi-Fi's key rules, and q2sysd's battery file, a press of the
 power key turning the screen off and on, and its hold starting init's shutdown.
 
---card-boot boots it as today's Vamp starts it from the card (patch/q2vampos.sh): /mnt/data already mounted and
-/proc/modules listing every vendor module, so rcS must keep the one and not run the module script again.
+--card-boot runs it as today's Vamp starts it from the card (patch/q2vampos.sh): rcS and then runsvdir with no init
+of the image's own, beside stand-ins for today's Wi-Fi and Wi-Fi adbd, /mnt/data already mounted and /proc/modules
+listing every vendor module, so rcS must keep the one and not run the module script again, and Wi-Fi and port 5555
+must be left alone.
 
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
-Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd).
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot).
 """
 import argparse
 import hashlib
@@ -329,6 +331,53 @@ def sysd_checks(fs, power_key, log):
     os.close(fd)
 
 
+def outer_vamp(work):
+    """Stand-ins for what today's Vamp has running when it hands over from the card: wpa_supplicant and udhcpc (a sleep
+    under each name: Wi-Fi associated) and its Wi-Fi adbd on 5555 (a listener that greets with "outer-adbd")."""
+    import threading
+    procs = []
+    for name in ('wpa_supplicant', 'udhcpc'):
+        exe = work/'outer'/name
+        exe.parent.mkdir(exist_ok=True)
+        exe.write_bytes(pathlib.Path('/bin/sleep').read_bytes())
+        exe.chmod(0o755)
+        procs.append(subprocess.Popen([str(exe), '3600']))
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(('127.0.0.1', 5555))
+    srv.listen(8)
+
+    def serve():
+        while True:
+            try:
+                c, _ = srv.accept()
+                c.sendall(b'outer-adbd')
+                c.close()
+            except OSError:
+                return
+    threading.Thread(target=serve, daemon=True).start()
+    return procs + [srv]
+
+
+def outer_check(outer, log):
+    """The card boot left today's Vamp's Wi-Fi and its Wi-Fi adbd alone: both processes still running, port 5555 still
+    the outer adbd's, past Smart Wi-Fi's idle time."""
+    time.sleep(8)
+    alive = all(o.poll() is None for o in outer if hasattr(o, 'poll'))
+    try:
+        c = socket.create_connection(('127.0.0.1', 5555), 3)
+        greet = c.recv(32)
+        c.close()
+    except OSError as e:
+        greet = repr(e).encode()
+    wpas = sum(1 for p in pathlib.Path('/proc').iterdir() if p.name.isdigit() and (p/'comm').exists()
+               and (p/'comm').read_text().strip() == 'wpa_supplicant')
+    touched = [l for l in log.read_text().splitlines() if '$ ifconfig' in l]
+    check(alive and greet == b'outer-adbd' and wpas == 1 and not touched,
+          f"card boot: today's Vamp's wpa_supplicant, udhcpc and its adbd on 5555 left alone, no second wpa_supplicant, "
+          f"no ifconfig ({alive}, {greet}, {wpas}, {touched})")
+
+
 def netd_check(fs, card):
     """q2netd in the booted image: Q2NET/1 answers; with no saved network the radio is off, unless the Wi-Fi adbd let a
     computer in (adb_checks, before this), whose use mark holds it on for 30 minutes (Smart Wi-Fi's rule)"""
@@ -345,10 +394,10 @@ def netd_check(fs, card):
         got = [repr(e), '']
     st = dict(w.split('=', 1) for w in got[1].split()[1:]) if got[1].startswith('status ') else {}
     if card:
-        ok = st.get('state') == 'off'
+        ok = st.get('state') == 'external'
     else:
         ok = st.get('state') != 'off' and int(st.get('held', 0)) > 1000
-    check(got[0] == 'Q2NET/1 ok' and ok, 'q2netd: Q2NET/1 answers; ' + ('the radio off with nothing saved' if card else
+    check(got[0] == 'Q2NET/1 ok' and ok, 'q2netd: Q2NET/1 answers; ' + ("today's Wi-Fi left as it is (external)" if card else
           'the Wi-Fi adbd\'s login holds the radio on (Smart Wi-Fi)') + f' ({got})')
 
 
@@ -398,7 +447,7 @@ def adb_checks(fs, closed_s=15, wait_s=30):
 
 
 STUB = '#!/bin/sh\necho "$(cut -d" " -f1 /proc/uptime) \\$ ${0##*/} $*" >> /emu/record\n'
-STUBBED = ['bin/mount', 'bin/mknod', 'sbin/mdev', 'sbin/insmod', 'usr/sbin/ubiattach', 'bin/dmesg']
+STUBBED = ['bin/mount', 'bin/mknod', 'sbin/mdev', 'sbin/insmod', 'usr/sbin/ubiattach', 'bin/dmesg', 'sbin/ifconfig']
 
 
 def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=False, adb=True):
@@ -417,6 +466,9 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         (fs/'etc/init.d/rcS').write_text(rcs)
     if perturb == 'adb-open':  # Wi-Fi adbd with no key check: an open port
         (fs/'etc/sv/adb-wifi/run').write_text('#!/bin/sh\nexec /usr/bin/adbd --tcp 5555\n')
+    if perturb == 'netd-card':  # q2netd not told it is a card boot
+        run = (fs/'etc/sv/q2netd/run').read_text().replace('card=--card-boot', 'card=')
+        (fs/'etc/sv/q2netd/run').write_text(run)
     if perturb == 'netd-off':  # no q2netd
         (fs/'etc/sv/q2netd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'libd-off':  # no q2libd
@@ -467,12 +519,23 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         # as today's Vamp hands the Q2 over from the card (patch/q2vampos.sh): /mnt/data mounted, stock's modules loaded
         (emu/'data').mkdir(exist_ok=True)
         (emu/'data/database.db').write_bytes((fs/'mnt/data/database.db').read_bytes())
+        (emu/'data/wpa_supplicant.conf').write_text('network={\n\tssid="Home"\n\tpsk="secret123"\n}\n')  # networks saved
         (emu/'modules').write_text(''.join(f'{ko[:-3]} 16384 0 - Live 0x00000000\n' for ko, _ in want))
         extra = ['--bind', emu/'data', '/mnt/data', '--ro-bind', emu/'modules', '/proc/modules']
-    cmd = ['bwrap', '--unshare-pid', '--unshare-uts', '--unshare-ipc', '--as-pid-1', '--die-with-parent',
-           '--bind', fs, '/', '--proc', '/proc', '--dev', '/dev', '--bind', fb, '/dev/fb0', '--bind', inp, '/dev/input',
+    outer = []
+    if card:
+        # as on a Q2: today's Vamp's init stays PID 1 and q2vampos runs Vamp OS's rcS and runsvdir in a chroot, beside
+        # what today's boot started: its Wi-Fi (wpa_supplicant, udhcpc) and its Wi-Fi adbd on 5555, stand-ins here
+        outer = outer_vamp(work)
+        ns, proc_args = [], ['--bind', '/proc', '/proc']
+        first = ['/bin/sh', '-c', '/etc/init.d/rcS && exec /usr/bin/runsvdir -P /etc/sv']
+    else:
+        ns, proc_args = ['--unshare-pid', '--as-pid-1'], ['--proc', '/proc']
+        first = ['/sbin/init']
+    cmd = ['bwrap', *ns, '--unshare-uts', '--unshare-ipc', '--die-with-parent',
+           '--bind', fs, '/', *proc_args, '--dev', '/dev', '--bind', fb, '/dev/fb0', '--bind', inp, '/dev/input',
            '--ro-bind', qemu, '/usr/libexec/qemu-binfmt/mipsel-binfmt-P', '--bind', emu, '/emu',
-           '--bind', emu/'record', '/run/vamp/boot.log', '--bind', fs/'mnt/mmc', '/mnt/mmc', *extra, '/sbin/init']
+           '--bind', emu/'record', '/run/vamp/boot.log', '--bind', fs/'mnt/mmc', '/mnt/mmc', *extra, *first]
     proc = subprocess.Popen([str(c) for c in cmd], stdout=console, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=NO_PRELOAD)
     drew, played = False, None
     deadline = time.monotonic() + wait_s
@@ -486,6 +549,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
             adb_checks(fs)
         if proc.poll() is None:
             netd_check(fs, card)
+        if card and proc.poll() is None:
+            outer_check(outer, emu/'record')
         if not card and proc.poll() is None:
             sysd_checks(fs, inp/'event2', emu/'record')
         if card:  # the services' first lines
@@ -494,6 +559,11 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         proc.kill()
         proc.wait()
         console.close()
+        for o in outer:
+            if hasattr(o, 'kill'):
+                o.kill()
+            else:
+                o.close()
     check(drew, 'q2ui drew into the framebuffer')
     check(bool(played) and played[0], 'q2player connected to q2playd' + ('' if played else ': not reached'))
     check(bool(played) and played[1], 'a song asked for over Q2PLAY/1 plays out through q2playd and q2player (alsa-lib\'s null card)'
@@ -560,7 +630,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     a = ap.parse_args()
     manifest, _ = vamp_os.read_manifest()
