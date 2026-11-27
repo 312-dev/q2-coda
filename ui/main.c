@@ -25,8 +25,8 @@
  * pages it had open and each one's row are kept in --state (a file in /tmp: gone at a restart)
  * each time it comes to rest, and a start within STATE_FRESH_S of that opens them again. --cmdq and --playlist are
  * the player's queue and list file (ui/player.c), --ctl the open fd of the pipe demo takes settings
- * from (demo passes it; patch/q2ui_gate.c), --now and --cover what plays and its cover
- * (ui/now.c), --ask the file a page of demo's is asked for in (ui_demo_page), --backlight the
+ * from (demo passes it; patch/q2ui_gate.c), --now what plays and --cover the cover's file while
+ * demo names none (ui/now.c), --ask the file a page of demo's is asked for in (ui_demo_page), --backlight the
  * folder whose state says the screen is dark, --power, --wifi and --wireless where the status
  * row reads the battery and Wi-Fi, --told the file demo says the rest of its states in
  * (ui/status.c), --art the folder of Cover Flow's album thumbnails (ui/art.c), --config demo's

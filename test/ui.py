@@ -470,6 +470,7 @@ def pages(binary, work):
     good &= check("an album's songs are its tracks in order", len(sent) == 1 and ids == want, f'{ids} for {want}')
     # Library > Albums: two-line rows, each led by its cover from Cover Flow's thumbnails, else the placeholder
     good &= album_covers(binary, work, home)
+    good &= now_covers(binary, work, home)
     good &= playlists(binary, work, home)
     good &= control_center(binary, work, home)
     # Centre on a song opens Now Playing over the list, as demo's playing_page comes up when a song is chosen
@@ -637,6 +638,57 @@ def album_covers(binary, work, home):
         run.rest()
         got = shot.pixel(run.picture(), 44, 84)
         good &= check('live, the worker reads it and the row is drawn again with it', got == (200, 40, 40), str(got))
+    finally:  # Home's Return opens no way out: the program is ended
+        run.proc.kill()
+        run.proc.wait(timeout=5)
+        os.close(run.queue)
+    return good
+
+
+def now_covers(binary, work, home):
+    """Now Playing's art is the file demo names for the playing song (cover= in its status file, patch/q2ui_gate.c
+    tell, from coverflow.c song_cover_url): the player's embedded picture (/tmp/coverpic.jpg), a folder image or a
+    download (/tmp/externpic.jpg), or a card app's cover of a server song's album. None named is the placeholder,
+    whatever file the player left from the song before; demo saying nothing leaves --cover's file."""
+    good = True
+    d = pathlib.Path(tempfile.mkdtemp(dir=work))
+    embedded, folder_image, stale = d/'coverpic.png', d/'externpic.png', d/'stale.png'
+    png(embedded, 300, 300, (200, 40, 40))  # stb reads them by their bytes, whatever the name
+    png(folder_image, 300, 300, (40, 160, 40))
+    png(stale, 300, 300, (40, 40, 200))
+
+    def art(told):
+        (d/'told').write_text(told)
+        _, pics, _ = script(binary, work, 5, ['rest', 'shot @now.ppm'], '--page', 'now', '--cover', stale,
+                            '--told', d/'told', now=NOW)
+        return pics['now'].at(99, 133)  # the middle of the art's card (ui/page_now.c ART)
+
+    def near(got, rgb):
+        return all(abs(a - b) <= 8 for a, b in zip(got, rgb))
+    got = art(f'out=other\ncover={embedded}\n')
+    good &= check("Now Playing shows the embedded picture demo names, not the player's other file", near(got, (200, 40, 40)), str(got))
+    got = art(f'out=other\ncover={folder_image}\n')
+    good &= check('... and a folder image or a download the same way', near(got, (40, 160, 40)), str(got))
+    got = art('out=other\ncover=\n')
+    good &= check("no cover named is the placeholder, not the file a song before left", not near(got, (40, 40, 200)) and
+                  not near(got, (200, 40, 40)), str(got))
+    got = art('out=other\n')
+    good &= check("demo naming none leaves --cover's file", near(got, (40, 40, 200)), str(got))
+    # live: the next song's cover named while Now Playing is up is drawn as the file lands
+    (d/'told').write_text(f'out=other\ncover={embedded}\n')
+    (d/'now').write_text(NOW)
+    run = Run(binary, work, 5, *home, '--now', d/'now', '--cover', stale, '--told', d/'told', '--clock', '12:00')
+    try:
+        run.rest()
+        run.key(KEY_CENTRE)  # Home's Playing row
+        run.rest()
+        before = shot.pixel(run.picture(), 99, 133)
+        (d/'told.tmp').write_text(f'out=other\ncover={folder_image}\n')
+        (d/'told.tmp').rename(d/'told')
+        run.rest()
+        after = shot.pixel(run.picture(), 99, 133)
+        good &= check("live, demo's new cover is drawn as its file lands", near(before, (200, 40, 40)) and near(after, (40, 160, 40)),
+                      f'{before} {after}')
     finally:  # Home's Return opens no way out: the program is ended
         run.proc.kill()
         run.proc.wait(timeout=5)

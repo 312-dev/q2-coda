@@ -25,7 +25,9 @@
  *  - while q2ui runs, demo says what only it knows for q2ui's status row (where the sound goes,
  *    Bluetooth, Buttons Lock, a card app's sync and server: status_row_state) and Control Center
  *    (its switches' states: q2ui_cc_state) in Q2UI_STATUS, a look every Q2UI_STATUS_MS and a
- *    write only when something in it changed.
+ *    write only when something in it changed. It names the playing song's cover file there too
+ *    (cover=, song_cover_url), as the player writes an embedded picture and a folder image or a
+ *    download to two files and leaves the song before's behind (docs/ui-rewrite.md#cutover).
  *
  * The target is read once, before demo's first paint, so no frame of demo's shows first. With no
  * such file, or no q2ui in the image (any default build), none of this does anything. */
@@ -56,6 +58,8 @@ int fcntl(int fd, int cmd, ...);
 
 unsigned status_row_state(char *b, unsigned room);  /* status_row.c */
 unsigned q2ui_cc_state(char *b, unsigned room);     /* control_center.c: q2ui's Control Center's */
+void *queue_now(unsigned *pos, unsigned *n);       /* coverflow.c */
+int song_cover_url(void *r, char *url, unsigned size); /* coverflow.c: a file:// URL, 0 for none */
 
 static struct {
     int pid;           /* q2ui's, Q2UI_DUE, or 0 */
@@ -186,14 +190,22 @@ static void start(void) {
 }
 
 /* The status row's states for q2ui (Q2UI_STATUS), written when they change; looked at every
- * Q2UI_STATUS_MS, so a cable put in shows in q2ui's row within half a second. */
+ * Q2UI_STATUS_MS, so a cable put in shows in q2ui's row within half a second. Last, cover=, the
+ * playing song's cover's file or nothing (ui/now.c now_cover reads it): its bytes change with every
+ * song, which q2ui sees by its watch of the file's folder, so only a change of file is written here.
+ * ponytail: song_cover_url's stat of Cover Flow's copy and access of a card app's each look while
+ * q2ui runs; a key of the queue's song and the player's type would spare them. */
 static void tell(void) {
     unsigned now = (unsigned)time_now_ms();
     if (qu.told_at && now - qu.told_at < Q2UI_STATUS_MS) return;
     qu.told_at = now | !now;
-    char b[320];
-    unsigned n = status_row_state(b, sizeof b);
-    n += q2ui_cc_state(b + n, sizeof b - n);
+    char b[1024], url[600];
+    unsigned pos, count;
+    unsigned n = status_row_state(b, 320);
+    n += q2ui_cc_state(b + n, 320 - n);
+    if (!song_cover_url(queue_now(&pos, &count), url, sizeof url)) url[7] = 0; /* past "file://": none */
+    int k = tk_snprintf(b + n, sizeof b - n, "cover=%s\n", url + 7);
+    if (k > 0 && (unsigned)k < sizeof b - n) n += (unsigned)k;
     unsigned h = hash_bytes(FNV_SEED, (const unsigned char *)b, n);
     if (h != qu.told && blob_io(Q2UI_STATUS, Q2UI_STATUS ".tmp", b, n, 1)) qu.told = h;
 }
