@@ -322,6 +322,8 @@ void notice_stats(char *out, size_t room); /* the stats file's "card", "card_fro
 /* ---- status.c: the status row, an overlay drawn over every page ---- */
 void status_draw(rect_t r);
 #define HOME_PANE_X 196   /* Home's art from here to the right edge, from the top (page_home.c) */
+extern int home_split;      /* Home is laid out Split, its art pane beside the list (page_home.c) */
+extern const char *home_order_file; /* demo's Edit Home order (--home-order) */
 int status_over_ink(void); /* the ink Home's glyphs over the art took: 1 white, 2 black, 0 none yet */
 void status_step(void);
 rect_t status_rect(void);

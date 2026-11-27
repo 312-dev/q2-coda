@@ -388,6 +388,19 @@ def test_q2uis_display_page_sets_song_artist_and_song_length_through_demo(fw):
     assert len(saved) == 2 and artist() == 2 and length() == 1
 
 
+def test_q2uis_display_page_sets_homes_layout_through_demo(fw):
+    """q2ui's Settings > Display: Home's Split (0) or Full (1), stored as Display's own row stores it ([IPOD] HOME)
+    and demo's Home takes it (ipod_home), laid out again at once as that row does; any other value refused."""
+    saved = []
+    fw.mock('write_int_config', lambda v, sec, key, *_: saved.append((C.string_at(sec).decode(), C.string_at(key).decode(), v)) or 0)
+    cc = fw.fn('q2ui_cc_set', C.c_int, C.c_char_p, C.c_int)
+    layout = fw.fn('ipod_home', C.c_int)
+    assert layout() == 0  # the settings read, as demo has them long before q2ui runs
+    assert cc(b'home', 1) == 0 and saved == [('IPOD', 'HOME', 1)] and layout() == 1
+    assert cc(b'home', 2) == -1 and cc(b'home', -1) == -1 and len(saved) == 1 and layout() == 1
+    assert cc(b'home', 0) == 0 and saved[-1] == ('IPOD', 'HOME', 0) and layout() == 0
+
+
 def test_q2uis_playback_page_sets_gapless_and_smart_crossfade_through_demo(fw):
     """q2ui's Settings > Playback: Gapless as stock's own row sets it (0x4bcfa4: PLAYSET GAPLESS, mclSetGaplessMode),
     and Smart Crossfade as its row does (crossfade.c xfade_click: Q2POD XFADE, and on turns Gapless on with it)."""

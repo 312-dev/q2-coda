@@ -1,8 +1,8 @@
 /* Settings > Display, the first of q2ui's own settings pages (docs/ui-rewrite.md, step 4): Brightness
  * first, as demo's page has it (an inline slider, demo's word on it its level: control_center.c
  * q2ui_cc_state's bright=, set as Control Center's slider sets it, "set bright N"), then Light
- * Mode (Off, On, Auto: light from 7:00 to 19:00), Reduce Motion, Night Shift and its Warmth, and the song
- * rows' Song Artist and Song Length, which q2ui itself draws by, then the rest of demo's Display page through
+ * Mode (Off, On, Auto: light from 7:00 to 19:00), Reduce Motion, Night Shift and its Warmth, Home's layout
+ * (Split or Full), and the song rows' Song Artist and Song Length, which q2ui itself draws by, then the rest of demo's Display page through
  * the gate. A setting's value is the file's
  * (ui/config.c reads demo's config.ini whenever it is written); a choice goes to demo, which owns
  * the file, down q2ui's own pipe ("set light N", "set motion N", "set songartist N", ui/player.c player_set,
@@ -13,8 +13,8 @@
 #include "../patch/night_scale.h"
 #include "q2ui.h"
 
-enum { D_LIGHT, D_MOTION, D_NIGHT, D_WARMTH, D_BRIGHT, D_ARTIST, D_LENGTH, D_MORE, D_ROWS };
-static int want[D_MORE] = { -1, -1, -1, -1, -1, -1, -1 }; /* a choice made here, until the file (or demo's word) has it */
+enum { D_LIGHT, D_MOTION, D_NIGHT, D_WARMTH, D_BRIGHT, D_HOME, D_ARTIST, D_LENGTH, D_MORE, D_ROWS };
+static int want[D_MORE] = { -1, -1, -1, -1, -1, -1, -1, -1 }; /* a choice made here, until the file (or demo's word) has it */
 static char warmth[12], bright[8];
 static int told_bright(void) {
     char v[16];
@@ -23,7 +23,7 @@ static int told_bright(void) {
 }
 static int value(int i) {
     int now = i == D_LIGHT ? config_light_setting() : i == D_MOTION ? config_motion_setting()
-              : i == D_NIGHT ? config_night_setting() : i == D_BRIGHT ? told_bright() : i == D_ARTIST ? config_song_artist()
+              : i == D_NIGHT ? config_night_setting() : i == D_BRIGHT ? told_bright() : i == D_HOME ? config_int("IPOD", "HOME", 0) == 1 : i == D_ARTIST ? config_song_artist()
               : i == D_LENGTH ? config_song_length() : config_night_kelvin();
     if (want[i] >= 0 && want[i] == now) want[i] = -1; /* demo has written it */
     return want[i] >= 0 ? want[i] : now;
@@ -56,6 +56,8 @@ static void row(void *ctx, int i, ui_row *out) {
         snprintf(warmth, sizeof warmth, "%d K", k);
         out->title = "Warmth", out->value = warmth, out->level = (float)(k - NS_WARM) / (NS_COOL - NS_WARM);
         out->flags = ROW_SLIDER | (value(D_NIGHT) ? 0 : ROW_GREY);
+    } else if (i == D_HOME) { /* Home's layout: Split, or Full (any value but 1 is Split, docs/ipod.md#home) */
+        out->title = "Home", out->value = value(D_HOME) ? "Full" : "Split";
     } else if (i == D_ARTIST) { /* the song rows' options, OLED's own on demo's page (theme.xml) */
         static const char *const how[] = { "Inline", "Selected Row", "Right", "Off" };
         int v = value(D_ARTIST);
@@ -78,10 +80,11 @@ static void chosen(void *ctx, int i) {
     if (i == D_WARMTH) return; /* Centre grabs it (list.c) */
     int next = i == D_LIGHT    ? (value(D_LIGHT) + 1) % 3
                : i == D_NIGHT  ? (value(D_NIGHT) + 1) % 3
+               : i == D_HOME   ? !value(D_HOME)
                : i == D_ARTIST ? (value(D_ARTIST) + 1) % (SONG_ARTIST_OFF + 1)
                : i == D_LENGTH ? (value(D_LENGTH) + 1) % (SONG_LENGTH_OFF + 1)
                                : !value(D_MOTION);
-    static const char *const verb[] = { [D_LIGHT] = "light", [D_MOTION] = "motion", [D_NIGHT] = "night",
+    static const char *const verb[] = { [D_LIGHT] = "light", [D_MOTION] = "motion", [D_NIGHT] = "night", [D_HOME] = "home",
                                         [D_ARTIST] = "songartist", [D_LENGTH] = "songlength" };
     if (player_set(verb[i], next)) return;
     want[i] = next;

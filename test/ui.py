@@ -67,8 +67,8 @@ def base_args(binary, d):
             '--stats', d/'stats.json', '--state', d/'state', '--cmdq', d/'cmdq', '--playlist', d/'list', '--backlight', d/'backlight',
             '--now', d/'now', '--cover', d/'cover.jpg', '--ask', d/'ask', '--power', d/'power', '--wifi', d/'wifi',
             '--wireless', d/'wireless', '--told', d/'told', '--networks', d/'networks', '--bt-devices', d/'bt', '--config', d/'config.ini',
-            '--library-order', d/'library-order', '--durations', d/'durations', '--notices', d/'ui.sock', '--apps', d/'apps',
-            '--app-card', d]
+            '--library-order', d/'library-order', '--durations', d/'durations', '--home-order', d/'home-order',
+            '--notices', d/'ui.sock', '--apps', d/'apps', '--app-card', d]
 
 
 class Picture:
@@ -739,19 +739,21 @@ def display(binary, work, home):
     good &= check('Light Mode goes Off to On, then on to Auto before demo has written it; Reduce Motion goes on, each '
                   "down q2ui's own pipe and none down the queue", said == ['set light 1', 'set light 2', 'set motion 1'] and sent == [],
                   f'{said} {sent}')
-    _, _, _, (sent, _, d) = script(binary, work, 60, to + ['tick 5', 'rest', 'key centre', 'run 100'], *home, '--config', ini, code=3, queue=True)
+    _, _, _, (sent, _, d) = script(binary, work, 60, to + ['tick 6', 'rest', 'key centre', 'run 100'], *home, '--config', ini, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
     good &= check("its last row opens the rest of demo's Display page", asked == 'systemset/display_page\n', repr(asked))
     # the song rows' options after Warmth (greyed with Night Shift off, so passed over), as config.ini has them, each
     # Centre the next value down q2ui's pipe
     (ini.parent/'songs.ini').write_text('[IPOD]\nLIGHT=0\nSONGARTIST=3\nSONGLENGTH=1\n')
-    lines = to + ['tick 3', 'rest', 'rows @rows.txt', 'key centre', 'run 100', 'key centre', 'run 100', 'tick 1', 'rest', 'key centre', 'run 100']
+    lines = to + ['tick 4', 'rest', 'rows @rows.txt', 'key centre', 'run 100', 'key centre', 'run 100', 'tick 1', 'rest', 'key centre', 'run 100']
     _, _, _, (_, _, d), said = script(binary, work, 60, lines, *home, '--config', ini.parent/'songs.ini', queue=True, ctl=True)
-    shown = (d/'rows.txt').read_text().splitlines()[5:7] if (d/'rows.txt').exists() else []
-    good &= check("Song Artist and Song Length follow Warmth at config.ini's values; Centre steps each on, Off to Inline "
+    shown = (d/'rows.txt').read_text().splitlines()[5:8] if (d/'rows.txt').exists() else []
+    good &= check("Home, Song Artist and Song Length follow Warmth at config.ini's values; Centre steps each on, Off to Inline "
                   "and on to Selected Row before demo has written it, All Lists to Off",
-                  shown == ['Song Artist\tOff', 'Song Length\tAll Lists'] and
+                  shown == ['Home\tSplit', 'Song Artist\tOff', 'Song Length\tAll Lists'] and
                   said == ['set songartist 0', 'set songartist 1', 'set songlength 2'], f'{shown} {said}')
+    _, _, _, _, said = script(binary, work, 60, to + ['tick 3', 'rest', 'key centre', 'run 100'], *home, '--config', ini, queue=True, ctl=True)
+    good &= check("Home's row asks demo for Full", said == ['set home 1'], str(said))
     # Brightness first, as on demo's page: an inline slider at demo's level, set as Control Center's slider sets it
     told = cc_told(work)
     lines = to + ['tick -1', 'rest', 'rows @rows.txt', 'key centre', 'run 50', 'tick 2', 'run 50', 'tick -1', 'run 50', 'key centre', 'rest']
@@ -1648,6 +1650,58 @@ def home_glyphs(binary, work):
     return good
 
 
+def edit_home(binary, work, home):
+    """Home's rows in the user's order with the user's choice of them, demo's Edit Home file (patch/library_edit.c:
+    /mnt/data/ringnav-home-order against lr_home "pltgfcqS"; Settings always shown, Playing only while something is
+    loaded), Old Menus, q2ui's own, last; Centre held on Home opens Edit Home on its rows, saved as demo saves it. And
+    Home's Full layout ([IPOD] HOME 1): the list across the screen from under the status row, no pane."""
+    good = True
+
+    def run(lines, saved=None, ini='', now=None, *more):
+        d = pathlib.Path(tempfile.mkdtemp(dir=work))
+        order = d/'ringnav-home-order'
+        if saved is not None:
+            order.write_bytes(saved.encode().ljust(64, b'\0'))
+        (d/'config.ini').write_text('[IPOD]\nLIGHT=0\n' + ini)
+        _, pics, _, (sent, _, f) = script(binary, work, 60, lines, *home, '--home-order', order, '--config', d/'config.ini', *more,
+                                          now=now, queue=True)
+        got = order.read_bytes().rstrip(b'\0').decode() if order.exists() else None
+        rows = (f/'rows.txt').read_text().splitlines() if (f/'rows.txt').exists() else []
+        return rows, got, pics, sent
+    every = ['Library', 'Radio', 'Games', 'Folders', 'Cover Flow', 'Search', 'Settings', 'Old Menus']
+    rows, _, _, _ = run(['rest', 'rows @rows.txt'])
+    good &= check("with no order saved Home's rows are demo's default order, Old Menus last", rows == every, str(rows))
+    rows, _, _, _ = run(['rest', 'rows @rows.txt'], '-Sl-tgfcqp')
+    good &= check("the saved order: Radio hidden, Settings shown though marked hidden, Old Menus last",
+                  rows == ['Settings', 'Library', 'Games', 'Folders', 'Cover Flow', 'Search', 'Old Menus'], str(rows))
+    rows, _, _, _ = run(['rest', 'rows @rows.txt'], 'lStgfcqp', now=NOW)
+    good &= check('the Playing row in its place in the order while something plays',
+                  rows == ['Library', 'Settings', 'Radio', 'Games', 'Folders', 'Cover Flow', 'Search', 'Playing', 'Old Menus'], str(rows))
+    rows, _, _, _ = run(['rest', 'rows @rows.txt'], '-plStgfcq', now=NOW)
+    good &= check('... and not while the user hides it', 'Playing' not in rows and rows[0] == 'Library', str(rows))
+    enter = ['rest', 'down centre', 'hold centre', 'rest']
+    rows, got, _, _ = run(enter + ['rows @rows.txt'])
+    good &= check('Centre held on Home opens Edit Home on every row of the order, Playing among them, not Old Menus',
+                  rows == ['Playing'] + every[:-1] and got is None, f'{rows} {got!r}')
+    rows, got, _, _ = run(enter + ['tick 2', 'rest', 'key play', 'rest', 'key return', 'rest', 'rows @rows.txt'])
+    good &= check('Play/Pause hides Radio, saved as demo saves it; Return leaves and Home goes without it',
+                  got == 'pl-tgfcqS' and rows == [r for r in every if r != 'Radio'], f'{rows} {got!r}')
+    rows, got, _, _ = run(enter + ['tick 7', 'rest', 'key play', 'rest', 'key return', 'rest', 'rows @rows.txt'])
+    good &= check('Settings cannot be hidden', '-S' not in (got or '') and 'Settings' in rows, f'{rows} {got!r}')
+    rows, got, _, _ = run(enter + ['tick 1', 'rest', 'key centre', 'tick 1', 'rest', 'key centre', 'rest', 'key return', 'rest',
+                                   'rows @rows.txt'])
+    good &= check('Library carried below Radio and put down: saved, and Home in that order',
+                  got == 'ptlgfcqS' and rows[:2] == ['Radio', 'Library'], f'{rows} {got!r}')
+    # the Full layout
+    _, _, split, _ = run(['rest', 'shot @home.ppm'])
+    rows, _, full, _ = run(['rest', 'shot @home.ppm', 'rows @rows.txt'], ini='HOME=1\n')
+    s, f = split['home'], full['home']
+    good &= check('Full: the selection across the screen from y 58, no pane; Split: from y 40 beside the pane',
+                  f.blue(300, 74) and f.blue(30, 74) and not f.blue(30, 52) and s.blue(30, 52) and not s.blue(300, 56) and
+                  rows == every, f'{f.at(300, 74)} {f.at(30, 52)} {s.at(30, 52)}')
+    return good
+
+
 def album_covers(binary, work, home):
     """Albums' rows lead with their covers (ui/art.c), found as Cover Flow names them; one it has not made shows the
     placeholder. Read in place by a script, and by the worker in a live run."""
@@ -2499,6 +2553,8 @@ def main():
             good &= night_shift(binary, work, ('--page', 'home'))
         if not only or 'playing' in only:
             good &= playing_row(binary, work)
+        if not only or 'edithome' in only:
+            good &= edit_home(binary, work, ('--page', 'home'))
         if not only or 'homeglyphs' in only:
             good &= home_glyphs(binary, work)
         if not only or 'songrows' in only:

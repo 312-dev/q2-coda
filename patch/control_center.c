@@ -798,8 +798,8 @@ int cc_key(void *win, unsigned key) {
  * bright (the backlight, 0 to 100), vol and volmax (the volume and how high it may go: vol_cap).
  * Its switches come back as "set NAME 0|1" down the pipe the gate gives q2ui alone (q2ui_gate.c
  * ctl, q2ui_cc_set), each flipped as this page's circle flips it; q2ui's Display page sets
- * Light Mode ("set light 0|1|2"), Reduce Motion ("set motion 0|1"), Song Artist ("set songartist 0..3") and
- * Song Length ("set songlength 0..2") the same way, its Playback
+ * Light Mode ("set light 0|1|2"), Reduce Motion ("set motion 0|1"), Home's layout ("set home 0|1"), Song Artist
+ * ("set songartist 0..3") and Song Length ("set songlength 0..2") the same way, its Playback
  * page Gapless ("set gapless 0|1") and Smart Crossfade ("set xfade 0|1"), and its Control
  * Center's Brightness slider the backlight ("set bright 0..100"), its Wi-Fi page Wi-Fi ("set
  * wifi 0|1") and its Bluetooth page Bluetooth ("set bt 0|1", as stock's own switch row does it);
@@ -871,6 +871,9 @@ int q2ui_cc_set(const char *name, int on) {
     } else if (!tk_strcmp(name, "night") && on >= 0 && on <= 2) { /* q2ui's Display: Night Shift Off, On, Auto */
         night_set(on, night_kelvin()); /* as its page's row, saved as its page saves (nightshift.c) */
         night_save();
+    } else if (!tk_strcmp(name, "home") && on >= 0 && on <= 1) { /* q2ui's Display: Home's Split or Full */
+        write_int_config(st.home = on, "IPOD", "HOME");
+        coverflow_home_layout(); /* as Display's own row: demo's Home takes it at once */
     } else if (!tk_strcmp(name, "songartist") || !tk_strcmp(name, "songlength")) { /* q2ui's Display: the song rows */
         return song_option_set(!tk_strcmp(name, "songlength"), on);
     } else if (!tk_strcmp(name, "nightk") && on >= NS_WARM && on <= NS_COOL && !(on % NS_STEP)) { /* its Warmth */

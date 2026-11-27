@@ -35,9 +35,9 @@
  * (ui/page_wifi.c, ui/page_bluetooth.c), --art the folder of Cover Flow's album thumbnails (ui/art.c), --config demo's
  * config.ini, read for Light Mode, Reduce Motion and the song rows' options (ui/config.c), --card the card About measures
  * (ui/page_general.c), --library-order the Library's order from demo's Edit Library
- * (ui/page_library.c), --durations demo's cache of the songs' lengths (ui/lib.c), --notices where Q2UI/1 is
- * served ("" for nowhere) and --apps and --app-card where a caller's app is found to name it on the card
- * (ui/notice.c); a test names its own.
+ * (ui/page_library.c), --home-order Home's from its Edit Home (ui/page_home.c), --durations demo's cache of
+ * the songs' lengths (ui/lib.c), --notices where Q2UI/1 is served ("" for nowhere) and --apps and --app-card where
+ * a caller's app is found to name it on the card (ui/notice.c); a test names its own.
  * --then now opens Now Playing over the pages come back to: the gate's, when the page of demo's
  * that q2ui left for ended on demo's Now Playing (a Search result played; patch/q2ui_gate.c).
  *
@@ -136,6 +136,8 @@ static void parse(int argc, char **argv) {
             library_order_file = v, ++i;
         else if (!strcmp(a, "--durations"))
             lib_durations_file = v, ++i;
+        else if (!strcmp(a, "--home-order"))
+            home_order_file = v, ++i;
         else if (!strcmp(a, "--then"))
             opt.then = v, ++i;
         else if (!strcmp(a, "--notices"))
