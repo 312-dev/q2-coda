@@ -598,6 +598,9 @@ Its first three steps:
 - Frame pacing and the counts in the stats file (question 3 below).
 - The gate's restart of a q2ui killed from a shell, its lines in `demo`'s log, and q2ui staying up over the USB Debugging page with a developer's cable in.
 - Memory with both programs resident; a play with Car Remote off.
+- The status row's slots `demo` tells q2ui of, on real hardware: the jacks, a USB DAC, a Bluetooth headset (its battery), a car, Buttons Lock, a card app's sync and its server out of reach (the emulator has only the `--dev` stand-ins: `q2-status.fake`'s headphones and bluetooth).
+- Control Center's switches from q2ui: Wi-Fi through stock's `wifi_switch` from the command queue, Car Remote with a phone paired, EQ heard; Bluetooth's and the USB picker's pages opened through the gate and left with real cables and headsets.
+- Settings > Display's Light Mode and Reduce Motion set from q2ui, and `demo`'s own pages drawn right after (they read the setting at their next paint).
 
 **Device questions**, and what a Q2 has answered (2026-11-27, build V25Ki):
 
