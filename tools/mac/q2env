@@ -17,17 +17,23 @@ set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(cd "$here/../.." && pwd)
-tag=$(cat "$here/Dockerfile" "$here/pidof" "$root/requirements.txt" "$root/test/unit/requirements.txt" | shasum -a 256 | cut -c1-12)
-image="q2env:$tag"
+if [ "${1:-}" = --amd64 ]; then
+    shift
+    platform=linux/amd64 files=("$here/Dockerfile.amd64" "$here/pidof") name=q2env-amd64
+else
+    platform=linux/arm64 files=("$here/Dockerfile" "$here/cc") name=q2env
+fi
+tag=$(cat "${files[@]}" "$root/requirements.txt" "$root/test/unit/requirements.txt" | shasum -a 256 | cut -c1-12)
+image="$name:$tag"
 
 if ! docker image inspect "$image" >/dev/null 2>&1; then
     ctx=$(mktemp -d)
     trap 'python3 -c "import shutil,sys; shutil.rmtree(sys.argv[1])" "$ctx"' EXIT
-    cp "$here/Dockerfile" "$here/pidof" "$ctx/"
+    cp "${files[@]}" "$ctx/"
     cp "$root/requirements.txt" "$ctx/requirements.txt"
     cp "$root/test/unit/requirements.txt" "$ctx/unit-requirements.txt"
-    docker build --platform linux/amd64 --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" \
-        --build-arg USER_HOME="$HOME" -t "$image" "$ctx" >&2
+    docker build --platform "$platform" -f "$ctx/$(basename "${files[0]}")" --build-arg UID="$(id -u)" \
+        --build-arg GID="$(id -g)" --build-arg USER_HOME="$HOME" -t "$image" "$ctx" >&2
 fi
 
 # The Codescape toolchain lives in a Docker volume, not under ~/.cache: the Mac's home is a
@@ -41,17 +47,17 @@ tc_sha=$(cd "$root/tools" && python3 -c 'import thirdparty; print(thirdparty.TOO
 # not Rosetta, and the kernel gives a 64-bit process ext4's 64-bit directory offsets; tmpfs's fit in 32 bits.
 # --ulimit core=0: no core dumps, as q2-heavy's runs on GRAYTHINKPAD (a crashed test would leave
 # hundreds of MB in the worktree it ran in).
-run=(docker run --rm --platform linux/amd64 --user "$(id -u):$(id -g)" --ulimit core=0 --tmpfs /tmp:exec,mode=1777,size=2g
+run=(docker run --rm --platform "$platform" --user "$(id -u):$(id -g)" --ulimit core=0 --tmpfs /tmp:exec,mode=1777,size=2g
      --security-opt seccomp=unconfined --security-opt apparmor=unconfined
      -v "$HOME:$HOME" -v "$HOME/.cache/q2-thirdparty:/home/gray/.cache/q2-thirdparty"
      -v q2-toolchain:$tc
      -e HOME="$HOME" -e USER="$(id -un)" -e Q2_THIRDPARTY_CACHE=/home/gray/.cache/q2-thirdparty)
 mkdir -p "$HOME/.cache/q2-thirdparty/toolchain"  # the volume's mount point
-if ! docker run --rm --platform linux/amd64 -v q2-toolchain:/v "$image" sh -c "[ -n '$tc_sha' ] && [ \"\$(cat /v/.sha256 2>/dev/null)\" = '$tc_sha' ]"; then
+if ! docker run --rm --platform "$platform" -v q2-toolchain:/v "$image" sh -c "[ -n '$tc_sha' ] && [ \"\$(cat /v/.sha256 2>/dev/null)\" = '$tc_sha' ]"; then
     archive=$HOME/.cache/q2-thirdparty/dl/mti-linux-2020.06-01.tar.gz
     if [ -f "$archive" ]; then
         echo "q2env: unpacking the toolchain into the q2-toolchain volume (once)" >&2
-        docker run --rm --platform linux/amd64 -v q2-toolchain:/v "$image" chown "$(id -u):$(id -g)" /v
+        docker run --rm --platform "$platform" -v q2-toolchain:/v "$image" chown "$(id -u):$(id -g)" /v
         "${run[@]}" "$image" sh -c "find $tc -mindepth 1 -delete && tar -C $tc -xzf '$archive' && printf %s '$tc_sha' > $tc/.sha256"
     fi  # else tools/thirdparty.py fetches the archive into dl/, and the next q2env unpacks it
 fi

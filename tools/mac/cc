@@ -1,0 +1,7 @@
+#!/bin/sh
+# cc for tools/mac/Dockerfile's arm64 image: with -m32 the i686 cross compiler, whose programs the
+# Colima VM runs under qemu-i386 (test/coverflow.py, test/peq.py); otherwise the system's cc.
+for a; do
+    [ "$a" = -m32 ] && exec i686-linux-gnu-gcc "$@"
+done
+exec /usr/bin/cc "$@"
