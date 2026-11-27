@@ -3,6 +3,7 @@ the clock where a real one would take minutes; the hooks and the scripts run for
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import time
@@ -816,8 +817,13 @@ def test_stop_all_ends_q2_processes_and_nothing_else(tmp_path):
             p.wait()
 
 
-@pytest.mark.skipif(subprocess.run(['systemd-run', '--user', '--scope', '-q', 'true'], capture_output=True).returncode != 0,
-                    reason='no systemd user session')
+def systemd_user_session():
+    # Vamp's Mac container has no systemd at all (docs/building.md#building-on-macos), so no systemd-run either
+    return (shutil.which('systemd-run') is not None
+            and subprocess.run(['systemd-run', '--user', '--scope', '-q', 'true'], capture_output=True).returncode == 0)
+
+
+@pytest.mark.skipif(not systemd_user_session(), reason='no systemd user session: q2-heavy runs its job in a scope')
 def test_q2_heavy_records_its_job_and_stops_it_at_the_deadline(tmp_path):
     # no admission wait: this test is about the record and the deadline, whatever else the machine is doing
     env = {**os.environ, 'Q2_HEAVY_LOCKDIR': str(tmp_path), 'Q2_HEAVY_RAMP': '0', 'Q2_HEAVY_NODUMP_SRC': '/none',
