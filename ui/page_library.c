@@ -115,10 +115,15 @@ static void groups_push(int kind) {
 }
 
 /* ---- the Library's own list ---- */
+/* The rows q2ui has, in demo's default order (patch/library_edit.c lr_default: Songs, Playlists,
+ * Artists, Albums, Genres, Years, Ratings, Recently Added, Recent, Most Played; the ones q2ui has
+ * not are left out). ponytail: not yet the user's own order and choice of rows from Edit Library's
+ * file (library_edit.c LR_FILE). */
+enum { LIB_SONGS, LIB_PLAYLISTS, LIB_ARTISTS, LIB_ALBUMS };
 static const struct {
     const char *title, *demo;
-} lib_rows[] = { { "Songs", 0 },          { "Artists", 0 },  { "Albums", 0 },
-                 { "Playlists", 0 },      { "Years", "era_page" }, { "Ratings", "ratings_page" },
+} lib_rows[] = { { "Songs", 0 },          { "Playlists", 0 },      { "Artists", 0 },
+                 { "Albums", 0 },         { "Years", "era_page" }, { "Ratings", "ratings_page" },
                  { "Most Played", "mostplayed_page" } };
 /* Years, Ratings and Most Played are demo's pages, opened through the gate (page_home.c).
  * Playlists is q2ui's own, read from stock's table: no stock page name opens demo's.
@@ -136,12 +141,12 @@ static void l_chosen(void *ctx, int i) {
     (void)ctx;
     if (lib_rows[i].demo)
         ui_demo_page(lib_rows[i].demo);
-    else if (i == 0)
+    else if (i == LIB_SONGS)
         songs_push();
-    else if (i == 3)
+    else if (i == LIB_PLAYLISTS)
         playlists_push();
     else
-        groups_push(i == 1 ? LIB_ARTIST : LIB_ALBUM);
+        groups_push(i == LIB_ARTISTS ? LIB_ARTIST : LIB_ALBUM);
 }
 void library_push(void) {
     ui_source src = { .count = l_count, .row = l_row, .chosen = l_chosen, .name = "library" };
