@@ -13,6 +13,7 @@ import select
 import struct
 import subprocess
 import sys
+import sysconfig
 import time
 import tty
 
@@ -23,7 +24,7 @@ sys.path.insert(0, str(ROOT/'tools/iap_probe'))
 import probe_build  # noqa: E402  (q2-iap's sources, as tools/build.py's Q2IAP_SOURCES)
 
 SRCS = [ROOT/'patch'/f'{s}.c' for s in probe_build.SOURCES]
-SQLITE = '/usr/lib/x86_64-linux-gnu/libsqlite3.so.0'  # the library on iDrive (q2_iap_lib.c); stock's is 3.54
+SQLITE = f"/usr/lib/{sysconfig.get_config_var('MULTIARCH')}/libsqlite3.so.0"  # the library on iDrive (q2_iap_lib.c); stock's is 3.54
 SETUP, ENABLE, DISABLE = 4, 2, 3
 
 
