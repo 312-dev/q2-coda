@@ -350,7 +350,7 @@ def pages(binary, work):
     trace, pics, _ = script(binary, work, 60, ['rest', 'shot @idle.ppm', 'tick 9', 'rest'], *home)
     idle_rows = trace[-1]['sel'] + 1
     trace, pics2, _ = script(binary, work, 60, ['rest', 'shot @playing.ppm', 'tick 9', 'rest'], *home, now=NOW)
-    good &= check('Home has one row more while something plays', (idle_rows, trace[-1]['sel'] + 1) == (2, 3), f"{idle_rows} and {trace[-1]['sel'] + 1}")
+    good &= check('Home has one row more while something plays', (idle_rows, trace[-1]['sel'] + 1) == (4, 5), f"{idle_rows} and {trace[-1]['sel'] + 1}")
     good &= check("Home's platter keeps to the list's side and the pane is drawn beside it",
                   pics['idle'].blue(100, 40 + 3) and not pics['idle'].blue(250, 40 + 3) and pics['idle'].at(280, 160) != (0, 0, 0))
     good &= check('the two Homes differ where the first row is', pics['idle'].rgb != pics2['playing'].rgb)
@@ -411,9 +411,16 @@ def pages(binary, work):
     _, _, _, (sent, ids, d) = script(binary, work, 60, walk, *home, queue=True)
     want = by['track, name collate nocase, id'][albums[k]]
     good &= check("an album's songs are its tracks in order", len(sent) == 1 and ids == want, f'{ids} for {want}')
+    # a row whose page is demo's: the page is named for demo and q2ui ends with the code that says so
+    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'tick 1', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
+    asked = (d/'ask').read_text() if (d/'ask').exists() else ''
+    good &= check('Centre on Radio asks demo for its page and ends with code 3', asked == 'tuner_page\n' and sent == [], repr(asked))
+    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick 4', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
+    asked = (d/'ask').read_text() if (d/'ask').exists() else ''
+    good &= check("and Ratings, in the Library, for demo's Ratings", asked == 'ratings_page\n', repr(asked))
     # the last row leaves q2ui for demo's menus: the program ends, with the code of a plain end
     trace, _, _ = script(binary, work, 60, ['rest', 'tick 9', 'rest', 'key centre', 'run 100', 'tick -1', 'run 100'], *home, code=0)
-    good &= check('Centre on Old Menus ends q2ui', trace[-1]['sel'] == 1, str(trace[-1]['sel']))
+    good &= check('Centre on Old Menus ends q2ui', trace[-1]['sel'] == 3, str(trace[-1]['sel']))
     return good
 
 

@@ -160,13 +160,13 @@ def test_now_playing_the_volumes_display_and_the_usb_debugging_page_are_not_wind
 def test_a_page_q2ui_asks_for_is_opened_and_q2ui_comes_back_when_it_is_left(fw):
     g = Gate(fw)
     g.poll()
-    g.ask, g.status, g.ended = b'games_page\n', ASKED, 1
+    g.ask, g.status, g.ended = b'folder_page\n', ASKED, 1
     g.poll()
-    assert g.opened == ['games_page'] and g.on() == 0 and g.repaints == 1
+    assert g.opened == ['folder_page'] and g.on() == 0 and g.repaints == 1
     g.ended = 0
     g.poll()
     assert g.forks == 1  # Home is still on top: the page is on its way up, not left
-    g.top = b'games_page'
+    g.top = b'folder_page'
     g.poll()
     g.poll()
     assert g.forks == 1
@@ -178,7 +178,7 @@ def test_a_page_q2ui_asks_for_is_opened_and_q2ui_comes_back_when_it_is_left(fw):
 def test_a_page_that_never_comes_up_does_not_keep_q2ui_away(fw):
     g = Gate(fw)
     g.poll()
-    g.ask, g.status, g.ended = b'games_page', ASKED, 1
+    g.ask, g.status, g.ended = b'folder_page', ASKED, 1
     g.poll()
     g.ended = 0
     g.ms += 1400
@@ -256,3 +256,15 @@ def test_every_start_and_end_is_a_line_in_demos_log(fw):
     g.status, g.ended = 15, 1
     g.poll()
     assert lines[0] == f'started, pid {CHILD}' and lines[1] == 'usbmode_page' and lines[2].startswith("ended for a window of demo's, status")
+
+
+@pytest.mark.parametrize('name', ['tuner_page', 'games_page', 'era_page', 'ratings_page', 'mostplayed_page'])
+def test_a_page_the_payload_builds_is_not_opened_by_its_name(fw, name):
+    """Those five are built by openers of the payload's own (the click of the row that leads to each), which the gate
+    calls; a stock page's name would open nothing for them. That each opener then puts its page up is the emulator's
+    to show (docs/ui-rewrite.md#cutover): here the openers are the real ones, with no window system under them."""
+    g = Gate(fw)
+    g.poll()
+    g.ask, g.status, g.ended = name.encode(), ASKED, 1
+    g.poll()
+    assert g.opened == [] and g.on() == 0

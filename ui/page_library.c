@@ -61,9 +61,11 @@ static void groups_push(int kind) {
 /* ---- the Library's own list ---- */
 static const struct {
     const char *title, *demo;
-} lib_rows[] = { { "Songs", 0 }, { "Artists", 0 }, { "Albums", 0 } };
-/* ponytail: Playlists, Genres, Years, Ratings and the rest of demo's Library are reached through
- * Home's Old Menus until each has a page here or an opener the gate is seen to run (page_home.c). */
+} lib_rows[] = { { "Songs", 0 },          { "Artists", 0 },               { "Albums", 0 },
+                 { "Years", "era_page" }, { "Ratings", "ratings_page" }, { "Most Played", "mostplayed_page" } };
+/* Years, Ratings and Most Played are demo's pages, opened through the gate (page_home.c).
+ * ponytail: Playlists, Genres, Composers, Recently Added and Folders are reached through Home's Old
+ * Menus until each has a page here or an opener the gate is seen to run. */
 static int l_count(void *ctx) {
     (void)ctx;
     return (int)(sizeof lib_rows / sizeof *lib_rows);

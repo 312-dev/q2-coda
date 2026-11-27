@@ -16,11 +16,12 @@
 
 static const struct home_row {
     const char *title, *demo; /* demo: the page of demo's that row opens; 0: a page of q2ui's */
-} rows[] = { { "Library", 0 }, { "Old Menus", "" } };
-/* ponytail: demo's other Home rows (Radio, Games, Folders, Cover Flow, Search, Settings) are not
- * here. Most of their pages are built by the payload's own openers, not by a stock page's name,
- * so each needs its opener called from the gate and seen to work in an emulator before it gets a
- * row; until then they are reached through Old Menus. */
+} rows[] = { { "Library", 0 }, { "Radio", "tuner_page" }, { "Games", "games_page" }, { "Old Menus", "" } };
+/* Radio and Games are demo's pages, opened by the payload's own openers through the gate
+ * (patch/q2ui_gate.c openers).
+ * ponytail: demo's Folders, Cover Flow, Search and Settings are not here: each needs its opener
+ * found and seen to work from the gate in an emulator; until then they are reached through Old
+ * Menus. */
 #define ROWS ((int)(sizeof rows / sizeof *rows))
 
 struct home_st {
