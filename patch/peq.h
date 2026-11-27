@@ -366,10 +366,7 @@ extern int peq_chained; /* peq_ui.c: peq_stock_eq ran this boot */
 void peq_chain(void);   /* crossfade.c: peq_attach once a connect (ringnav_mode), while playing */
 int swap_on(void);
 int mono_on(void);   /* crossfade.c: Mono Audio's setting */
-#define NS_WARM 2000 /* nightshift.c: Night Shift's temperatures, K */
-#define NS_COOL 5000
-#define NS_STEP 100
-#define NS_DEFAULT 3400
+#include "night_scale.h" /* Night Shift's temperatures, K (nightshift.c) */
 int night_on(void), night_kelvin(void); /* night_on: 0 Off, 1 On, 2 Auto */
 void eq_toggle(void); /* peq_ui.c: EQ off, or on as PEQ; Control Center's EQ circle */
 void night_set(int on, int kelvin), night_save(void), night_paint(void *canvas), night_clock(int dark);

@@ -722,7 +722,7 @@ def display(binary, work, home):
     good &= check('Light Mode goes Off to On, then on to Auto before demo has written it; Reduce Motion goes on, each '
                   "down q2ui's own pipe and none down the queue", said == ['set light 1', 'set light 2', 'set motion 1'] and sent == [],
                   f'{said} {sent}')
-    _, _, _, (sent, _, d) = script(binary, work, 60, to + ['tick 2', 'rest', 'key centre', 'run 100'], *home, '--config', ini, code=3, queue=True)
+    _, _, _, (sent, _, d) = script(binary, work, 60, to + ['tick 4', 'rest', 'key centre', 'run 100'], *home, '--config', ini, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
     good &= check("its last row opens the rest of demo's Display page", asked == 'systemset/display_page\n', repr(asked))
     run = Run(binary, work, 60, '--config', ini, '--clock', '12:00')
@@ -1101,6 +1101,37 @@ def light_default(binary, work, home):
     _, _, _, (_, _, f) = script(binary, work, 60, to, *home, '--config', d/'config.ini', queue=True)
     rows = (f/'rows.txt').read_text().splitlines() if (f/'rows.txt').exists() else []
     good &= check("and Display's Light Mode row says Auto", rows[:1] == ['Light Mode\tAuto'], str(rows[:1]))
+    return good
+
+
+def night_shift(binary, work, home):
+    """Night Shift (docs/internals.md#night-shift), q2ui's own: while on, every pixel turned to the panel keeps its red
+    and has green and blue scaled to the temperature's (patch/night_scale.h), as demo's lcd end_frame warms its frames;
+    Auto is on from 19:00 to 7:00 by the clock; read from demo's [Q2POD] NIGHTSHIFT and NIGHTK. Display's Night Shift row
+    cycles Off, On, Auto and its Warmth slider sets the temperature, each through demo ("set night", "set nightk")."""
+    good = True
+
+    def panel(ini_text, *options):
+        d = pathlib.Path(tempfile.mkdtemp(dir=work))
+        (d/'config.ini').write_text(ini_text)
+        (d/'told').write_text('tz=UTC0\n')
+        _, _, stats, (_, _, f) = script(binary, work, 5, ['rest', 'run 50'], '--config', d/'config.ini', '--light', '--told', d/'told',
+                                        *options, queue=True)
+        return shot.pixel(shot.page(f/'fb', stats['page']), 5, 200)
+    cases = (('NIGHTSHIFT=1\nNIGHTK=3400\n', (), (255, 190, 135), 'On at 3400 K'),
+             ('NIGHTSHIFT=1\nNIGHTK=5000\n', (), (255, 228, 206), 'On at 5000 K'),
+             ('NIGHTSHIFT=0\nNIGHTK=3400\n', (), (255, 255, 255), 'Off'),
+             ('NIGHTSHIFT=2\nNIGHTK=2000\n', ('--clock-at', '1700000000'), (255, 137, 14), 'Auto at 22:13'),
+             ('NIGHTSHIFT=2\nNIGHTK=2000\n', ('--clock-at', '1699964000'), (255, 255, 255), 'Auto at 12:13'))
+    for ini, options, want, what in cases:
+        got = panel('[Q2POD]\n' + ini, *options)
+        good &= check(f'Night Shift {what}: white on the panel is {want}', got == want, str(got))
+    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 6', 'rest', 'key centre', 'rest']  # Home > Settings > Display
+    lines = to + ['tick 2', 'rest', 'key centre', 'run 100', 'tick 1', 'rest', 'key centre', 'run 50', 'tick 2', 'run 50', 'key centre',
+                  'run 50']
+    _, _, _, (sent, _, _), said = script(binary, work, 60, lines, *home, queue=True, ctl=True)
+    good &= check("Display's Night Shift row goes Off to On, and its Warmth slider two steps warmer to cooler, each down "
+                  "q2ui's own pipe", said == ['set night 1', 'set nightk 3500', 'set nightk 3600'] and sent == [], f'{said} {sent}')
     return good
 
 
@@ -2144,6 +2175,8 @@ def main():
             good &= hold_menu(binary, work)
         if not only or 'clock' in only:
             good &= clock(binary, work)
+        if not only or 'night' in only:
+            good &= night_shift(binary, work, ('--page', 'home'))
         if not only or 'light' in only:
             good &= light_default(binary, work, ('--page', 'home'))
         if not only or 'notices' in only:

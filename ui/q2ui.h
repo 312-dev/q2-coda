@@ -396,6 +396,9 @@ void config_read(void);
 void config_light_now(void); /* Light Mode's Auto at this hour */
 int config_light_setting(void);  /* [IPOD] LIGHT as the file has it: 0 Off, 1 On, 2 Auto */
 int config_motion_setting(void); /* [IPOD] REDUCEMOTION: 1 on */
+int config_night_setting(void);  /* [Q2POD] NIGHTSHIFT: 0 Off, 1 On, 2 Auto (from 19:00 to 7:00) */
+int config_night_kelvin(void);   /* [Q2POD] NIGHTK, its temperature */
+void fb_warm(int kelvin);        /* Night Shift's warming of every pixel turned to the panel; 0 off (fb.c) */
 void display_push(void);         /* Settings > Display (page_display.c) */
 void playback_push(void);        /* Settings > Playback (page_playback.c) */
 void general_push(void);         /* Settings > General and its About (page_general.c) */
