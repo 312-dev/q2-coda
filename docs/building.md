@@ -122,6 +122,7 @@ The image (`tools/mac/Dockerfile`) is Ubuntu 24.04 arm64 with the [Requirements]
 - **The emulator** ([Emulator pool](#emulator-pool)) execs the MIPS rootfs's programs in a bwrap chroot through a qemu-mipsel binfmt handler at `/usr/libexec/qemu-binfmt/mipsel-binfmt-P`, which the VM registers (below), and `~/q2-emu-server/qemu-mipsel-static` must be the arm64 build, the image's `/usr/bin/qemu-mipsel-static`. The pool's card fixture is `~/.cache/q2-emu-pool/card`.
 - **No `q2-heavy`** (no systemd in the container): the gate runs suites bare, and its memory rule (a 4 GB floor) holds against the VM's memory. A failed suite's second try runs with nothing beside it, so one failure serializes the rest of an `--all` run.
 - **Core dumps are off** (`--ulimit core=0`).
+- **The environment crosses by name.** Only variables named `Q2*` or `VAMP_*` pass from the Mac into the container (each suite's broken-copy variable, `Q2SYSD_SOURCE` and the rest, and settings such as `Q2_STOCK_ZIP`), and `Q2_THIRDPARTY_CACHE` is the container's own. Anything else a command needs inside is given there: `tools/mac/q2env env NAME=VALUE CMD`.
 
 Colima runs the VM (`~/.colima/default/colima.yaml`): `vmType: vz`, `rosetta: true` (the toolchain), `mountType: virtiofs` with the home mounted writable, 9 CPUs and 11 GB (the Mac has 18 GB, shared with an Ollama model of about 9.4 GB when it is loaded), 80 GB of disk, and system provision steps run at every start:
 
