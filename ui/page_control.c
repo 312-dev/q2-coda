@@ -10,8 +10,9 @@
  * The circles are lit as demo says its switches stand (ui/status.c status_told_value, from
  * control_center.c q2ui_cc_state) and flipped down q2ui's own pipe to demo ("set NAME 0|1",
  * ui/player.c player_set, control_center.c q2ui_cc_set): a circle turns at once and keeps its new
- * state until demo's word says the same, or WANT_HOLD_US after the flip if it never does (a
- * Bluetooth stack still starting refuses it). The Wi-Fi circle is the link as the status row reads
+ * state until demo's word says the same, or WANT_HOLD_US after the flip if it never does. Bluetooth
+ * flipped while its stack is still starting (about 3 s after it is turned on) is kept by demo and done
+ * once the stack is up; demo says btbusy=1 till then, and the circle holds its flip all that time. The Wi-Fi circle is the link as the status row reads
  * it (status_wifi_bars), lit while joined whatever the switch says, as demo's cc_lit has it.
  *
  * The wheel walks the stops in demo's order (the toggles by rows, Now Playing while something is
@@ -258,12 +259,17 @@ static void cc_step(void *st) {
     if (dy != s->dy) /* the blocks' band, from 2 px short of rest to the foot */
         s->dy = dy, ui_mark((rect_t){ 0, Y0 - RING - 2, SCREEN_W, SCREEN_H - (Y0 - RING - 2) });
     if (landing) ui_again();
-    for (int i = 0; i < STOPS; ++i)
-        if (i <= EQ && s->want[i] >= 0 &&
-            ((told_int(stops[i].told, 0) == 1) == s->want[i] || ui_time() - s->set_at[i] >= WANT_HOLD_US))
+    for (int i = 0; i < STOPS; ++i) {
+        if (i > EQ || s->want[i] < 0) continue;
+        /* Bluetooth's stack starting (btbusy=1): demo has the flip kept and does it once the stack is up */
+        int busy = i == BT && told_int("btbusy", 0) == 1;
+        if ((told_int(stops[i].told, 0) == 1) == s->want[i] || (!busy && ui_time() - s->set_at[i] >= WANT_HOLD_US))
             s->want[i] = -1, ui_mark_all(); /* demo has caught up, or never will */
-        else if (i <= EQ && s->want[i] >= 0)
+        else if (busy)
+            s->set_at[i] = ui_time(), ui_wake_ms(WANT_HOLD_US / 1000u); /* held from demo's last busy word */
+        else
             ui_wake_ms((unsigned)((s->set_at[i] + WANT_HOLD_US - ui_time()) / 1000u) + 1);
+    }
     for (int k = 0; k < 2; ++k) {
         s->fill[k].to = level(s, BRIGHT + k) / 100.0;
         if (spring_moving(&s->fill[k])) {

@@ -220,6 +220,7 @@ static void tell(void) {
  * ends, so a setting sent just before leaving for a page of demo's is not lost; at most CTL_READS
  * reads a pass, so a q2ui that writes without end cannot hold demo's loop (the rest waits in the pipe). */
 int q2ui_cc_set(const char *name, int on); /* control_center.c */
+void q2ui_cc_poll(void);
 static void ctl(void) {
     char word[12];
     int v;
@@ -245,7 +246,7 @@ static void ctl(void) {
 
 /* every UI loop pass */
 void q2ui_poll(void) {
-    if (qu.piped) ctl();
+    if (qu.piped) ctl(), q2ui_cc_poll(); /* a Bluetooth flip kept while its stack started */
     if (!q2ui_on()) {
         if (!qu.back) return;
         if (qu.opening) { /* the page asked for comes up a pass or more after it is asked for */

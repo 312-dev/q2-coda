@@ -821,6 +821,18 @@ def control_center(binary, work, home):
                   f"{trace[-1]['ring']} {pics['gone'].at(153, 68)}")
     trace, _, _, (sent, _, _) = script(binary, work, 60, lines, *home, '--told', told, queue=True)
     good &= check('with no pipe (q2ui not started by demo) a switch sends nothing', sent == [], str(sent))
+    # Bluetooth flipped while its stack is still starting (about 3 s on a Q2): demo queues the flip and says btbusy=1
+    # until the stack is up and the flip done (patch/control_center.c q2ui_cc_set); a demo that slow stands in here, its
+    # word unchanged for 3 s. The circle shows the flip all that time, and lets go after WANT_HOLD_US only once demo is
+    # not busy and still says otherwise.
+    walk = ['rest', 'hold return', 'rest', 'tick 1', 'run 50', 'tick 1', 'run 50', 'key centre', 'run 3000', 'shot @late.ppm']
+    bt = (CIRCLES[1][0] + 15, CIRCLES[1][1])
+    for busy, want in ((1, OFF), (0, ACCENT)):
+        slow = cc_told(work, CC_TOLD.replace('bton=0', 'bton=1') + ('btbusy=1\n' if busy else ''))
+        _, pics, _, (sent, _, _), said = script(binary, work, 60, walk, *home, '--told', slow, queue=True, ctl=True)
+        good &= check('Bluetooth flipped off while demo is busy starting its stack stays off on the sheet 3 s on' if busy else
+                      'not busy, a flip demo never takes is let go after 2 s', said == ['set bt 0'] and pics['late'].at(*bt) == want,
+                      f"{said} {pics['late'].at(*bt)}")
     # the stops that open a page: AirPlay by Centre, the USB row (only with a cable in) by Centre, and the toggles held
     cable = cc_told(work, CC_TOLD.replace('cable=0', 'cable=1'))
     asks = []
