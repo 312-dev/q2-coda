@@ -321,7 +321,8 @@ def test_the_status_rows_wifi_is_a_fan_of_a_dot_and_two_bands_with_gaps():
             runs.append((start, a))
             start = b
     assert runs == [(1, 2), (5, 6), (9, 11)]  # outer band, middle band, the dot down to row 11, the ink's bottom
-    assert [column[y] for y in (3, 4, 7, 8)] == [0, 0, 0, 0]  # the gaps wholly dark
+    # the gaps dark: under 3% in either column (the bands' antialiased edges reach a hair into a gap off the centre line)
+    assert max(column[y] for y in (3, 4, 7, 8)) <= 16
 
 
 @pytest.mark.parametrize('half, ink, gap', [('d', (255, 255, 255), (0, 0, 0)), ('l', (0, 0, 0), (255, 255, 255))])

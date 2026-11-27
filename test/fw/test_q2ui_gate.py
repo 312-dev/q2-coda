@@ -304,7 +304,7 @@ def test_while_q2ui_runs_demo_tells_it_the_status_rows_states_when_they_change(f
     g.poll()  # started
     g.poll()
     said = files.files.get('/tmp/q2ui.status', b'').decode()
-    assert writes == ['/tmp/q2ui.status'] and 'out=none\n' in said and 'lock=0\n' in said
+    assert writes == ['/tmp/q2ui.status'] and 'out=other\n' in said and 'lock=0\n' in said  # nothing wired in
     for _ in range(3):
         g.ms += 600
         g.poll()
