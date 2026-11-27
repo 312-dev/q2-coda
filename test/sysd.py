@@ -9,6 +9,7 @@ import socket
 import struct
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -48,9 +49,46 @@ def tree(tmp_path):
     return tmp_path
 
 
+TOOL = '#!/bin/sh\necho "$(basename "$0") $*" >> {root}/tools.log\nexit $(cat {root}/$(basename "$0").status 2>/dev/null || echo 0)\n'
+
+
 @pytest.fixture
-def run(binary, tree):
-    p = subprocess.Popen([str(binary), '--root', str(tree), '--poweroff', f'touch {tree}/powered-off'], stderr=subprocess.PIPE)
+def tools(tree):
+    """mount, umount, sync and q2adb-gadget as stand-ins that log to tools.log; NAME.status sets one's exit status"""
+    for rel in ('bin/mount', 'bin/umount', 'bin/sync', 'usr/bin/q2adb-gadget'):
+        put(tree, rel, TOOL.format(root=tree))
+        (tree/rel).chmod(0o755)
+    return tree
+
+
+class Service(threading.Thread):
+    """another service's socket (q2playd's, q2netd's): greets with its version and answers ok, keeping each line"""
+    def __init__(self, path, version):
+        super().__init__(daemon=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.s.bind(str(path))
+        self.s.listen(4)
+        self.version, self.lines = version, []
+        self.start()
+
+    def run(self):
+        while True:
+            c, _ = self.s.accept()
+            f = c.makefile('rw')
+            for line in f:
+                line = line.strip()
+                f.write((f'{self.version} ok' if line == self.version else 'ok') + '\n')
+                f.flush()
+                if line != self.version:
+                    self.lines.append(line)
+            c.close()
+
+
+@pytest.fixture
+def run(binary, tree, tools, request):
+    extra = getattr(request, 'param', [])
+    p = subprocess.Popen([str(binary), '--root', str(tree), '--poweroff', f'touch {tree}/powered-off', *extra], stderr=subprocess.PIPE)
     end = time.monotonic() + 5
     while not (tree/'run/vamp/sys.sock').exists() and time.monotonic() < end:
         time.sleep(0.02)
@@ -158,6 +196,103 @@ def test_q2sys1(run):
     assert a.line() == 'screen off'
     b = Api(root, 'Q2SYS/2')
     assert b.line() == 'err version'
+
+
+def test_charge_limit_holds_at_80_and_allows_at_75(binary, tree, tools):
+    put(tree, '/mnt/data/config.ini', '[Q2POD]\nCHARGELIMIT=1\n')
+    put(tree, '/sys/class/gpio/export', '')
+    put(tree, '/sys/class/gpio/gpio150/direction', 'in')
+    put(tree, '/sys/class/gpio/gpio150/value', '0')
+    p = subprocess.Popen([str(binary), '--root', str(tree)], stderr=subprocess.PIPE)
+    try:
+        time.sleep(0.5)
+        a = Api(tree)
+        a.line()
+        a.say('watch')
+        a.line()
+        assert read(tree, '/sys/class/gpio/gpio150/value') == '0', 'below the limit: left alone'
+        put(tree, '/sys/devices/i2c-0/0-0062/cw2015_capacity', '81\n')
+        a.say('battery')
+        lines = [a.line(), a.line(), a.line()]
+        assert read(tree, '/sys/class/gpio/gpio150/value') == '1' and 'charge held level=81' in lines
+        put(tree, '/sys/devices/i2c-0/0-0062/cw2015_capacity', '76\n')
+        a.say('battery')
+        time.sleep(0.3)
+        assert read(tree, '/sys/class/gpio/gpio150/value') == '1', 'held until 75'
+        put(tree, '/sys/devices/i2c-0/0-0062/cw2015_capacity', '75\n')
+        a.say('battery')
+        time.sleep(0.3)
+        assert read(tree, '/sys/class/gpio/gpio150/value') == '0'
+    finally:
+        p.terminate()
+        p.wait(5)
+
+
+def test_no_charge_limit_never_touches_the_charger(run):
+    root, _ = run
+    put(root, '/sys/devices/i2c-0/0-0062/cw2015_capacity', '95\n')
+    a = Api(root)
+    a.line()
+    a.say('battery')
+    a.line()
+    assert not (root/'sys/class/gpio').exists()
+
+
+def usb_tree(root):
+    put(root, '/proc/mounts', '/dev/mmcblk4p1 /mnt/mmc vfat rw 0 0\n')
+    (root/'sys/kernel/config/usb_gadget').mkdir(parents=True)
+    put(root, '/sys/class/udc/13500000.otg/state', 'configured')
+    return Service(root/'run/vamp/play.sock', 'Q2PLAY/1')
+
+
+def test_usb_storage_stops_the_player_unmounts_the_card_and_shares_it(run):
+    root, _ = run
+    play = usb_tree(root)
+    a = Api(root)
+    a.line()
+    a.say('usb storage')
+    assert a.line() == 'ok'
+    assert play.lines == ['stop']
+    assert read(root, '/tools.log').splitlines()[:3] == ['sync ', 'umount /mnt/mmc', 'q2adb-gadget park']
+    g = root/'sys/kernel/config/usb_gadget/q2storage'
+    assert read(root, str(g/'functions/mass_storage.msg/lun.0/file').replace(str(root), '')) == '/dev/mmcblk4p1'
+    assert (g/'UDC').read_text().strip() == '13500000.otg' and (g/'configs/c.1/mass_storage.msg').is_symlink()
+    a.say('usb')
+    assert a.line() == 'usb storage'
+    a.say('usb adb')
+    assert a.line() == 'ok'
+    assert read(root, '/tools.log').splitlines()[3:] == ['mount /dev/mmcblk4p1 /mnt/mmc', 'q2adb-gadget unpark']
+    assert (g/'UDC').read_text().strip() == ''
+
+
+def test_a_busy_card_is_not_shared(run):
+    root, _ = run
+    usb_tree(root)
+    put(root, '/umount.status', '1')
+    a = Api(root)
+    a.line()
+    a.say('usb storage')
+    assert a.line() == 'err usb'
+    assert 'q2adb-gadget park' not in read(root, '/tools.log') and not (root/'sys/kernel/config/usb_gadget/q2storage').exists()
+    a.say('usb')
+    assert a.line() == 'usb adb'
+
+
+@pytest.mark.parametrize('run, card', [([], False), (['--card-boot'], True)], indirect=['run'])
+def test_standby_pauses_turns_off_and_resumes(run, card):
+    root, _ = run
+    play, net = Service(root/'run/vamp/play.sock', 'Q2PLAY/1'), Service(root/'run/vamp/net.sock', 'Q2NET/1')
+    put(root, '/sys/power/state', '')
+    a = Api(root)
+    a.line()
+    a.say('watch')
+    a.line()
+    a.say('standby')
+    assert a.line() == 'ok'
+    got = [a.line() for _ in range(4)]
+    assert got == ['screen off', 'standby', 'screen on', 'resumed']
+    assert read(root, '/sys/power/state') == 'mem' and play.lines == ['pause']
+    assert net.lines == ([] if card else ['off', 'wake']), "a card boot's Wi-Fi is never turned off"
 
 
 if __name__ == '__main__':
