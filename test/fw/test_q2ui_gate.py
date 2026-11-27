@@ -508,3 +508,16 @@ def test_q2ui_is_told_which_file_holds_the_playing_songs_cover(fw, mcl, kind, sa
 def test_q2ui_is_told_no_cover_while_the_player_has_not_parsed_the_playing_song(fw, mcl):
     """The player's type is the song before's until its cover thread is done with this one (now_cover)."""
     assert told_cover(fw, mcl, b'/mnt/mmc/Music/b.flac', b'/mnt/mmc/Music/a.flac', 1) == ''
+
+
+def test_q2ui_is_told_abouts_versions(fw, mcl):
+    """q2ui's About shows the product and this build's version and the stock firmware's as demo's About does
+    (vamp_version: the version without its " Muse")."""
+    from conftest import Files
+    files = Files(fw)
+    g = Gate(fw)
+    fw.mock('mclGetOutputWay', lambda *_: 0)
+    g.poll()
+    g.poll()
+    said = dict(line.split('=', 1) for line in files.files['/tmp/q2ui.status'].decode().splitlines())
+    assert said['product'] == 'Vamp' and said['firmware'] == 'V1.36' and said['version'] and 'Muse' not in said['version']

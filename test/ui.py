@@ -18,6 +18,7 @@ it prints why it is skipped and passes.
 import json
 import os
 import pathlib
+import re
 import shutil
 import signal
 import sqlite3
@@ -503,6 +504,7 @@ def pages(binary, work):
     good &= check("Home > Settings > Car Remote asks demo for its page by the payload's opener", asked == 'carremote_page\n', repr(asked))
     good &= display(binary, work, home)
     good &= playback(binary, work, home)
+    good &= general(binary, work, home)
     return good
 
 
@@ -588,6 +590,32 @@ def playback(binary, work, home):
                                          code=3, queue=True)
         asked = (out/'ask').read_text() if (out/'ask').exists() else ''
         good &= check(f"its row {ticks + 1} opens demo's {page}", asked == page + '\n', repr(asked))
+    return good
+
+
+def general(binary, work, home):
+    """Settings > General, q2ui's own (ui/page_general.c): About first, then the rest of demo's General page by its
+    path. About lists the product and its version and the stock firmware's as demo says them (its status file), the
+    library's songs, the card's capacity and room left, and Wi-Fi's address."""
+    good = True
+    d = pathlib.Path(tempfile.mkdtemp(dir=work))
+    (d/'card').mkdir()
+    (d/'told').write_text('product=Vamp\nversion=9.8.7 dev test\nfirmware=V1.36\n')
+    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 2', 'rest', 'key centre', 'rest']  # Home > Settings > General
+    opts = (*home, '--told', d/'told', '--card', d/'card')
+    _, _, _, (_, _, out) = script(binary, work, 60, to + ['rows @general.txt', 'key centre', 'rest', 'rows @about.txt'], *opts,
+                                  queue=True)
+    rows = (out/'general.txt').read_text().splitlines() if (out/'general.txt').exists() else []
+    good &= check("General's rows are About, then the rest of demo's page", rows == ['About', 'More General Settings'], str(rows))
+    about = [r.split('\t') for r in ((out/'about.txt').read_text().splitlines() if (out/'about.txt').exists() else [])]
+    want = [['Vamp', '9.8.7 dev test'], ['Firmware', 'V1.36'], ['Songs', '60']]
+    sized = [r for r in about[3:5] if len(r) == 2 and re.fullmatch(r'\d+\.\d\d GB', r[1])]
+    good &= check('About: the product and both versions as demo says them, the songs, the card in GB and Wi-Fi off',
+                  about[:3] == want and [r[0] for r in sized] == ['Capacity', 'Available'] and
+                  about[5:] == [['Wi-Fi Address', 'Not connected']], str(about))
+    _, _, _, (_, _, out) = script(binary, work, 60, to + ['tick 1', 'rest', 'key centre', 'run 100'], *opts, code=3, queue=True)
+    asked = (out/'ask').read_text() if (out/'ask').exists() else ''
+    good &= check("its last row opens demo's General page", asked == 'systemset/sysset_page\n', repr(asked))
     return good
 
 

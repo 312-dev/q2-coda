@@ -348,6 +348,8 @@ int config_light_setting(void);  /* [IPOD] LIGHT as the file has it: 0 Off, 1 On
 int config_motion_setting(void); /* [IPOD] REDUCEMOTION: 1 on */
 void display_push(void);         /* Settings > Display (page_display.c) */
 void playback_push(void);        /* Settings > Playback (page_playback.c) */
+void general_push(void);         /* Settings > General and its About (page_general.c) */
+extern const char *general_card; /* About's card: --card */
 ui_list *list_new(const ui_source *src);
 void list_free(ui_list *l);
 void list_event(ui_list *l, const input_t *e);
@@ -366,6 +368,7 @@ extern const ui_page list_page;
 ui_list *list_page_list(void *st);
 /* the list last stepped, as "sel=N scroll=PX bar=PX lean=PX press=S knob=SHARE grab=N": a script's trace */
 int list_trace(char *out, size_t room);
+int list_rows_dump(const char *path); /* the top list's rows as text, a line each (a script's rows FILE) */
 int list_last_selected(void); /* that list's selection; -1 with none */
 
 /* ---- lib.c: the library, read from stock's database and the server catalogue ---- */

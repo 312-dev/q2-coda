@@ -6,7 +6,7 @@
  *          [--text awtk] [--page home|songs|now|depth|gallery|card] [--stats FILE] [--bench] [--script FILE]
  *          [--trace FILE] [--clock HH:MM] [--state FILE] [--cmdq FIFO] [--ctl FD] [--playlist FILE]
  *          [--backlight DIR] [--ask FILE] [--now FILE] [--cover FILE] [--power DIR] [--wifi FILE]
- *          [--wireless FILE] [--told FILE] [--art DIR] [--config FILE]
+ *          [--wireless FILE] [--told FILE] [--art DIR] [--config FILE] [--card DIR]
  *
  * --catalogue is the server library's (default /mnt/mmc/.q2pod/catalogue.db; "" for none): its
  * songs are listed with the card's, as the Library lists them. --panel-bits is the depth of the
@@ -30,7 +30,8 @@
  * folder whose state says the screen is dark, --power, --wifi and --wireless where the status
  * row reads the battery and Wi-Fi, --told the file demo says the rest of its states in
  * (ui/status.c), --art the folder of Cover Flow's album thumbnails (ui/art.c), --config demo's
- * config.ini, read for Light Mode and Reduce Motion (ui/config.c); a test names its own.
+ * config.ini, read for Light Mode and Reduce Motion (ui/config.c), --card the card About measures
+ * (ui/page_general.c); a test names its own.
  *
  * --bench draws and turns frames without the panel's wait and writes their CPU time to the stats
  * file. --script runs a file of input on a clock of its own, a frame every 1/60 s whatever the
@@ -118,6 +119,8 @@ static void parse(int argc, char **argv) {
             art_dir = v, ++i;
         else if (!strcmp(a, "--config"))
             config_file = v, ++i;
+        else if (!strcmp(a, "--card"))
+            general_card = v, ++i;
         else if (!strcmp(a, "--limit"))
             opt.limit = atoi(v), ++i;
         else if (!strcmp(a, "--motion"))
@@ -393,6 +396,8 @@ static int script(const char *path) {
             now_read();
         } else if (sscanf(line, "shot %319s", arg) == 1) {
             ppm(arg);
+        } else if (sscanf(line, "rows %319s", arg) == 1) {
+            list_rows_dump(arg);
         } else if (sscanf(line, "record %255s", arg) == 1) {
             if (!strcmp(arg, "off"))
                 *record_dir = 0;

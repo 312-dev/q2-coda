@@ -2,15 +2,15 @@
  * Each row opens demo's page for it through the gate (ui_demo_page): stock's settings pages by
  * their path, as stock's own rows open them, and Car Remote and Controls by the payload's openers
  * (patch/q2ui_gate.c openers). As q2ui gets pages of its own (docs/ui-rewrite.md, step 4), a row's
- * demo name gives way to its page: Display (page_display.c) and Playback (page_playback.c) are
- * q2ui's. */
+ * demo name gives way to its page: General (page_general.c), Playback (page_playback.c) and
+ * Display (page_display.c) are q2ui's. */
 #include "q2ui.h"
 
 static const struct {
     const char *title, *demo; /* demo 0: a page of q2ui's, opened by push */
     void (*push)(void);
 } rows[] = { { "Wi-Fi", "systemset/wifi_page" },         { "Bluetooth", "systemset/bluetooth_page" },
-             { "General", "systemset/sysset_page" },     { "Playback", 0, playback_push },
+             { "General", 0, general_push },     { "Playback", 0, playback_push },
              { "Streaming", "stream_page" },             { "Car Remote", "carremote_page" },
              { "Display", 0, display_push },    { "Controls", "controls_page" },
              { "Battery", "systemset/powermanager_page" } };

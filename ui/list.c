@@ -565,6 +565,18 @@ void list_event(ui_list *l, const input_t *e) {
 }
 
 int list_last_selected(void) { return traced ? traced->sel : -1; }
+/* The rows of the list last stepped (the page on top) into path, a line each: its title, then a tab
+ * and its value when it has one; a script's "rows FILE", for a test to read a page's text. */
+int list_rows_dump(const char *path) {
+    FILE *f = traced ? fopen(path, "w") : 0;
+    if (!f) return -1;
+    for (int i = 0; i < traced->n; ++i) {
+        ui_row r = { 0 };
+        traced->src.row(traced->src.ctx, i, &r);
+        fprintf(f, "%s%s%s\n", r.title ? r.title : "", r.value ? "\t" : "", r.value ? r.value : "");
+    }
+    return fclose(f);
+}
 int list_trace(char *out, size_t room) {
     if (!traced) return snprintf(out, room, "-");
     return snprintf(out, room, "sel=%d scroll=%.3f bar=%.3f lean=%.3f press=%.4f knob=%.3f grab=%d", traced->sel,

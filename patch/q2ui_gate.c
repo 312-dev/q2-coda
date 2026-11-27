@@ -60,6 +60,7 @@ unsigned status_row_state(char *b, unsigned room);  /* status_row.c */
 unsigned q2ui_cc_state(char *b, unsigned room);     /* control_center.c: q2ui's Control Center's */
 void *queue_now(unsigned *pos, unsigned *n);       /* coverflow.c */
 int song_cover_url(void *r, char *url, unsigned size); /* coverflow.c: a file:// URL, 0 for none */
+void vamp_version(char *v, unsigned size);            /* nav/chapters_streams_folders.c: About's */
 
 static struct {
     int pid;           /* q2ui's, Q2UI_DUE, or 0 */
@@ -190,7 +191,8 @@ static void start(void) {
 }
 
 /* The status row's states for q2ui (Q2UI_STATUS), written when they change; looked at every
- * Q2UI_STATUS_MS, so a cable put in shows in q2ui's row within half a second. Last, cover=, the
+ * Q2UI_STATUS_MS, so a cable put in shows in q2ui's row within half a second. Then About's
+ * product=, version= and firmware= (this build's, as demo's About shows them), and last, cover=, the
  * playing song's cover's file or nothing (ui/now.c now_cover reads it): its bytes change with every
  * song, which q2ui sees by its watch of the file's folder, so only a change of file is written here.
  * ponytail: song_cover_url's stat of Cover Flow's copy and access of a card app's each look while
@@ -204,7 +206,10 @@ static void tell(void) {
     unsigned n = status_row_state(b, 320);
     n += q2ui_cc_state(b + n, 320 - n);
     if (!song_cover_url(queue_now(&pos, &count), url, sizeof url)) url[7] = 0; /* past "file://": none */
-    int k = tk_snprintf(b + n, sizeof b - n, "cover=%s\n", url + 7);
+    char v[64];
+    vamp_version(v, sizeof v);
+    int k = tk_snprintf(b + n, sizeof b - n, "product=%s\nversion=%s\nfirmware=%s\ncover=%s\n", PRODUCT_NAME, v,
+                        STOCK_VERSION, url + 7);
     if (k > 0 && (unsigned)k < sizeof b - n) n += (unsigned)k;
     unsigned h = hash_bytes(FNV_SEED, (const unsigned char *)b, n);
     if (h != qu.told && blob_io(Q2UI_STATUS, Q2UI_STATUS ".tmp", b, n, 1)) qu.told = h;
