@@ -361,6 +361,7 @@ Commands and what each needs are in [building.md](building.md#tests). `BUILD` is
 | `q2eq` (`--dev`) | `q2eq.py`: the helper built for the host against a fake demo; demo's side is `fw/test_q2eq.py` | host `cc` |
 | `q2update` and `q2flash` (`--dev`) | `q2update.py`: the helper under the host `sh` against a fake demo; demo's side is `fw/test_q2update.py`, the host tool's `unit/test_q2flash.py` | `sh` |
 | Vamp OS's base image | `os_image.py`: the pins, the image's contents and ABI, the composed `/vendor`, and a boot of it under `qemu-mipsel` (and `--card-boot`); `q2vampos.py`: the card boot's hand-off under the host `sh` | `BUILD`, the ZIP, bwrap, `sh` |
+| The card boot end to end | `card_e2e.py`: the image on a stand-in card, the real q2vampos.sh with a stand-in loop mount and chroot, the image's rcS and services up, a song played, the next boot the usual one | `BUILD`, the ZIP, bwrap, sh |
 | q2playd | `playd.py`: q2playd built for this machine against a stand-in q2player: the FIFO and list file, Q2PLAY/1, the now file, ends, cuts and failures | `cc`, the host's SQLite |
 | q2sysd | `sysd.py`: q2sysd built for this machine on a stand-in `/sys` and `/dev/input`: the power key's press and hold, the backlight, the battery file, Q2SYS/1 | `cc` |
 | q2libd | `libd.py`: q2libd built for this machine on a stand-in card of songs ffmpeg makes: tags, ids across scans, catalogues, q2ui's query, the service's first library | `cc`, ffmpeg, the host's FFmpeg and SQLite |
