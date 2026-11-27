@@ -294,7 +294,9 @@ def test_while_q2ui_runs_demo_tells_it_the_status_rows_states_when_they_change(f
     files = Files(fw)
     writes = []
     rename = files.rename
-    fw.mock('fw_rename', lambda a, b, *_: writes.append(C.string_at(b).decode()) or rename(a, b))
+    # the status file's writes (the networks' own file, /tmp/q2ui.wifi, is test_wifi_flows.py's)
+    fw.mock('fw_rename', lambda a, b, *_: (C.string_at(b) == b'/tmp/q2ui.status' and writes.append(C.string_at(b).decode()))
+            or rename(a, b))
     g = Gate(fw)
     fw.var('g_po_status', C.c_ubyte).value = 0
     fw.mock('mclGetOutputWay', lambda *_: 0)

@@ -2187,6 +2187,9 @@ FUNCTIONS = {
  'autoLinkBluetooth': ('int', 'void'),
  'btStartSearch': ('int', 'void'),  # Settings > Bluetooth's scan (bt_ui.c), as stock's Scan now row started it
  'btStopSearch': ('int', 'void'),  # its stop, as stock's row click calls it before a connect (bt_ui.c page_poll)
+ # q2ui's Bluetooth page (bt_ui.c): the paired devices' count (the first in pdeq_btshowlist), and stock's row click's
+ # connect or disconnect of a device by its index there (1: disconnected, the output to go back to a jack)
+ 'getBtPairSize': ('int', 'void'), 'handleBluetoothLink': ('int', 'int'),
  # stock's Bluetooth switch: (1, 0) off, the stack stopped and the radio powered down; (0, 0) on, started again
  # (heatguard.c hg_bt: the controller watchdog's relaunch)
  'switchBluetooth': ('int', 'int, int'),
@@ -2278,6 +2281,10 @@ FUNCTIONS = {
  'networkClearSsid': ('int', 'void'), 'networkGetSsidList': ('int', 'const char *'),
  # a password fit for a scan record's flags (wifi_action_connect's check): not 0 when it is
  'networkCheckSsidPassword': ('int', 'const char *, const char *'),
+ # q2ui's Wi-Fi page (wifi_flows.c): Search Again's search, its results read into a deque (wifi_showlist's), and a
+ # network row's next step by its record's index and a tap's x against the Forget's range (2 joined, 3 join, 4 password)
+ 'wifi_scan': ('int', 'void'), 'networkGetWifiResult': ('int', 'void *'),
+ 'check_wifinextaction': ('int', 'int, int, int, int'),
 }
 # Local stock routines in the SHA-256-pinned V1.36 executable.
 PRIVATE_FUNCTIONS = {

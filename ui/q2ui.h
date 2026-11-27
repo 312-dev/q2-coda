@@ -324,6 +324,9 @@ typedef struct {
     const image_t *art;    /* leading art of a two-line row */
     unsigned flags;
     float level;           /* ROW_SLIDER: its fill, 0 to 1 */
+    /* 20 px glyphs at the right column, from it leftwards (a network's signal, then its lock), by the
+     * theme's dark-half names ("wifi_3", "lock": oled_<name>_d.png), inked as a value is */
+    const char *marks[3];
 } ui_row;
 typedef struct ui_source {
     int (*count)(void *ctx);
@@ -365,6 +368,10 @@ void general_push(void);         /* Settings > General and its About (page_gener
 void about_push(void);           /* General > About (page_general.c) */
 int settings_route(const char *name); /* a page of Settings' by its route name (page_settings.c); 0 none */
 void wifi_push(void);            /* Settings > Wi-Fi (page_wifi.c) */
+extern const char *wifi_networks_file; /* demo's list of the networks for it (--networks) */
+void wifi_networks_changed(void);      /* ... which has changed (now.c's watch) */
+extern const char *bt_devices_file;    /* demo's list of the Bluetooth devices (--bt-devices) */
+void bt_devices_changed(void);
 void bluetooth_push(void);       /* Settings > Bluetooth (page_bluetooth.c) */
 extern const char *general_card; /* About's card: --card */
 ui_list *list_new(const ui_source *src);
@@ -434,6 +441,7 @@ int player_send(const char *verb);                           /* toggle, next, pr
 extern const char *player_queue, *player_list;               /* the FIFO and the list file (a test's are its own) */
 int player_set(const char *name, int value); /* a setting of demo's, down q2ui's own pipe; 0 sent */
 void player_click(int button);               /* demo's key click for a tick (0) or a press (1), down the same pipe */
+int player_line(const char *verb, const char *arg); /* "scan", "join" a network, "btscan", "btlink" a MAC...: the same pipe; 0 sent */
 extern int player_ctl;                       /* that pipe's write end (--ctl FD), or -1 */
 
 /* ---- pages ---- */

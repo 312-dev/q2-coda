@@ -63,7 +63,7 @@ def base_args(binary, d):
     return [str(binary), '--page', 'songs', '--panel-bits', '8', '--db', d/'library.db', '--catalogue', '', '--fb', d/'fb', '--fonts', d/'fonts', '--icons', d,
             '--stats', d/'stats.json', '--state', d/'state', '--cmdq', d/'cmdq', '--playlist', d/'list', '--backlight', d/'backlight',
             '--now', d/'now', '--cover', d/'cover.jpg', '--ask', d/'ask', '--power', d/'power', '--wifi', d/'wifi',
-            '--wireless', d/'wireless', '--told', d/'told', '--config', d/'config.ini',
+            '--wireless', d/'wireless', '--told', d/'told', '--networks', d/'networks', '--bt-devices', d/'bt', '--config', d/'config.ini',
             '--library-order', d/'library-order']
 
 
@@ -592,6 +592,8 @@ def pages(binary, work):
     good &= display(binary, work, home)
     good &= playback(binary, work, home)
     good &= wireless(binary, work, home)
+    good &= wifi_networks(binary, work, home)
+    good &= bt_devices(binary, work, home)
     good &= clicks(binary, work)
     good &= comebacks(binary, work, home)
     good &= general(binary, work, home)
@@ -716,30 +718,109 @@ def wireless(binary, work, home):
     bt = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest']  # Home > Settings > Bluetooth
     opts = (*home, '--told', told)
     for name, to, key, on_rows in (
-            ('Wi-Fi', wifi, 'wifi', ['Wi-Fi', 'Networks']),
-            ('Bluetooth', bt, 'bt', ['Bluetooth', 'Devices', 'Quality', 'Bluetooth Headset Volume Control'])):
+            ('Wi-Fi', wifi, 'wifi', ['Wi-Fi', 'Networks', 'No Networks', 'Search Again', 'More Wi-Fi Settings']),
+            ('Bluetooth', bt, 'bt', ['Bluetooth', 'My Devices', 'Other Devices', 'No Devices', 'Quality', 'Bluetooth Headset Volume Control', 'More Bluetooth Settings'])):
         flag = 'wifi' if key == 'wifi' else 'bton'
         told.write_text(f'{flag}=0\n')
         _, _, _, (sent, _, out), said = script(binary, work, 60, to + ['rows @off.txt', 'key centre', 'run 100', 'rest',
                                                                        'rows @on.txt'], *opts, queue=True, ctl=True)
         off = (out/'off.txt').read_text().splitlines() if (out/'off.txt').exists() else []
         on = (out/'on.txt').read_text().splitlines() if (out/'on.txt').exists() else []
+        searched = ['scan'] if key == 'wifi' else ['btscan']  # coming on asks demo for a search (wifi_networks, bt_devices)
         good &= check(f"{name} off is its switch alone; Centre turns it on down q2ui's own pipe and its rows come at once",
-                      off == [name] and said == [f'set {key} 1'] and sent == [] and on == on_rows, f'{off} {said} {sent} {on}')
+                      off == [name] and said == [f'set {key} 1'] + searched and sent == [] and on == on_rows,
+                      f'{off} {said} {sent} {on}')
         told.write_text(f'{flag}=1\n')
         _, _, _, (_, _, out), said = script(binary, work, 60, to + ['key centre', 'run 100', 'rest', 'rows @off.txt'], *opts,
                                             queue=True, ctl=True)
         off = (out/'off.txt').read_text().splitlines() if (out/'off.txt').exists() else []
-        good &= check(f'{name} on by demo goes off, its rows going with it', said == [f'set {key} 0'] and off == [name],
-                      f'{said} {off}')
-    pages = (('Wi-Fi', wifi, 1, 'systemset/wifi_page'), ('Bluetooth', bt, 1, 'systemset/bluetooth_page'),
-             ('Bluetooth', bt, 2, 'systemset/btquality_page'), ('Bluetooth', bt, 3, 'systemset/btadjustvol_page'))
+        good &= check(f'{name} on by demo goes off, its rows going with it',
+                      said == searched + [f'set {key} 0'] and off == [name], f'{said} {off}')
+    # past the headers and the grey "No Networks" or "No Devices" row (and Wi-Fi's Search Again)
+    pages = (('Wi-Fi', wifi, 2, 'systemset/wifi_page'), ('Bluetooth', bt, 1, 'systemset/btquality_page'),
+             ('Bluetooth', bt, 2, 'systemset/btadjustvol_page'), ('Bluetooth', bt, 3, 'systemset/bluetooth_page'))
     told.write_text('wifi=1\nbton=1\n')
     for name, to, ticks, page in pages:
         _, _, _, (_, _, out) = script(binary, work, 60, to + [f'tick {ticks}', 'rest', 'key centre', 'run 100'], *opts,
                                       code=3, queue=True)
         asked = (out/'ask').read_text() if (out/'ask').exists() else ''
-        good &= check(f"{name}'s row {ticks + 1} opens demo's {page}", asked == page + '\n', repr(asked))
+        good &= check(f"{name}'s row {ticks} down opens demo's {page}", asked == page + '\n', repr(asked))
+    return good
+
+
+NETWORKS = 'scan 0\n4 1 2 Home\n3 0 0 Cafe\n1 1 4 Back\\\\sl\\nash\n2 0 3 Far\n'
+
+
+def wifi_networks(binary, work, home):
+    """Settings > Wi-Fi's networks (ui/page_wifi.c), as demo lists them (--networks, patch/wifi_flows.c
+    wifi_flows_networks): each with its signal and lock at the right column and its join's state after its name, in
+    demo's order; the page asks for a search as it opens; Centre on a network joins it by its name, escaped as demo
+    reads it; a new list keeps the selection on its network; Search Again searches again."""
+    good = True
+    d = pathlib.Path(tempfile.mkdtemp(dir=work))
+    (d/'told').write_text('wifi=1\n')
+    (d/'nets').write_text(NETWORKS)
+    (d/'later').write_text('scan 1\n3 0 1 Cafe\n4 1 0 Home\n')  # Far and the other gone, Cafe joining first
+    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'key centre', 'rest']  # Home > Settings > Wi-Fi
+    lines = to + ['rows @rows.txt', 'tick 3', 'rest', 'key centre', 'rest', 'tick -1', 'rest', 'key centre', 'rest',
+                  f'networks {d/"later"}', 'rest', 'rows @later.txt', 'key centre', 'rest', 'tick 2', 'rest',
+                  'key centre', 'rest']
+    _, _, _, (_, _, out), said = script(binary, work, 60, lines, *home, '--told', d/'told', '--networks', d/'nets',
+                                        queue=True, ctl=True)
+    got = (out/'rows.txt').read_text().splitlines() if (out/'rows.txt').exists() else []
+    rows = ['Wi-Fi', 'Networks', 'Home\t\tConnected\twifi_3 lock', 'Cafe\t\t\twifi_2',
+            'Back\\sl', 'ash\t\tWrong password\twifi_1 lock', "Far\t\tCouldn't connect\twifi_1",
+            'Search Again', 'More Wi-Fi Settings']  # a name's newline splits its line here
+    good &= check("Wi-Fi's networks as demo lists them, each with its signal, its lock and its join's state",
+                  got == rows, repr(got))
+    good &= check('opening the page asks for a search; Centre joins a network by its name, escaped',
+                  said[:3] == ['scan', 'join Back\\\\sl\\nash', 'join Cafe'], repr(said))
+    later = (out/'later.txt').read_text().splitlines() if (out/'later.txt').exists() else []
+    good &= check("a new list from demo is shown and keeps the selection on its network (Cafe, now first); Search "
+                  "Again after the networks asks for a search", later[2:4] == ['Cafe\t\tConnecting\u2026\twifi_2',
+                  'Home\t\t\twifi_3 lock'] and said[3:] == ['join Cafe', 'scan'], f'{later} {said}')
+    return good
+
+
+DEVICES = ('scan 1\n1 2 AA:BB:CC:DD:EE:01 Fixture Phones\n1 0 AA:BB:CC:DD:EE:02 Fixture Car\n'
+           '0 0 AA:BB:CC:DD:EE:03 Fixture Back\\\\sl\\nash\n')
+
+
+def bt_devices(binary, work, home):
+    """Settings > Bluetooth's devices (ui/page_bluetooth.c), as demo lists them (--bt-devices, patch/bt_ui.c
+    bt_q2ui_devices): My Devices with each one's state, Other Devices the ones a scan heard; the page asks for a scan as
+    it opens; a paired device opens its own page, whose Disconnect or Connect and Forget go down the pipe by its MAC;
+    Centre on a found one connects it; a new list keeps the selection on its device."""
+    good = True
+    d = pathlib.Path(tempfile.mkdtemp(dir=work))
+    (d/'told').write_text('bton=1\n')
+    (d/'devs').write_text(DEVICES)
+    # the car forgotten, the found one paired and connected: it moves up into My Devices
+    (d/'later').write_text('scan 0\n1 0 AA:BB:CC:DD:EE:01 Fixture Phones\n1 2 AA:BB:CC:DD:EE:03 Fixture Back\\\\sl\\nash\n')
+    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest']  # Settings > Bluetooth
+    # Phones' page: Disconnect; the found one; Car's page: Forget; then the found one selected as demo's new list comes
+    lines = to + ['rows @rows.txt', 'tick 1', 'rest', 'key centre', 'rest', 'rows @phones.txt', 'key centre', 'rest',
+                  'tick 2', 'rest', 'key centre', 'rest', 'tick -1', 'rest', 'key centre', 'rest', 'rows @car.txt',
+                  'tick 1', 'rest', 'key centre', 'rest', 'tick 1', 'rest',
+                  f'btdevices {d/"later"}', 'rest', 'rows @later.txt', 'key centre', 'rest', 'rows @again.txt']
+    _, _, _, (_, _, out), said = script(binary, work, 60, lines, *home, '--told', d/'told', '--bt-devices', d/'devs',
+                                        queue=True, ctl=True)
+
+    def rows(name):
+        return (out/name).read_text().splitlines() if (out/name).exists() else []
+    want = ['Bluetooth', 'My Devices', 'Fixture Phones\tConnected', 'Fixture Car\tNot Connected', 'Other Devices',
+            'Fixture Back\\sl', 'ash', 'Quality', 'Bluetooth Headset Volume Control', 'More Bluetooth Settings']
+    good &= check("Bluetooth's devices as demo lists them: paired with their state, then the ones a scan heard",
+                  rows('rows.txt') == want, repr(rows('rows.txt')))
+    good &= check("a connected device's page offers Disconnect and Forget, a paired one's Connect",
+                  rows('phones.txt') == ['Disconnect', 'Forget This Device'] and
+                  rows('car.txt') == ['Connect', 'Forget This Device'], f"{rows('phones.txt')} {rows('car.txt')}")
+    good &= check('the page scans as it opens; Disconnect, a found device and Forget go down the pipe by MAC',
+                  said[:4] == ['btscan', 'btlink AA:BB:CC:DD:EE:01', 'btlink AA:BB:CC:DD:EE:03',
+                               'btforget AA:BB:CC:DD:EE:02'], repr(said))
+    good &= check('a new list from demo is shown and keeps the selection on its device (moved up into My Devices)',
+                  rows('later.txt')[:4] == ['Bluetooth', 'My Devices', 'Fixture Phones\tNot Connected', 'Fixture Back\\sl']
+                  and rows('again.txt') == ['Disconnect', 'Forget This Device'], f"{rows('later.txt')} {rows('again.txt')}")
     return good
 
 
@@ -751,9 +832,9 @@ def comebacks(binary, work, home):
     (d/'told').write_text('wifi=1\nbton=1\n')
     settings = ['rest', 'tick 6', 'rest', 'key centre', 'rest']
     for name, to, rows in (
-            ('Wi-Fi', settings + ['key centre', 'rest', 'tick 1'], ['Wi-Fi', 'Networks']),
-            ('Bluetooth', settings + ['tick 1', 'rest', 'key centre', 'rest', 'tick 2'],
-             ['Bluetooth', 'Devices', 'Quality', 'Bluetooth Headset Volume Control']),
+            ('Wi-Fi', settings + ['key centre', 'rest', 'tick 2'], ['Wi-Fi', 'Networks', 'No Networks', 'Search Again',
+                                                                   'More Wi-Fi Settings']),
+            ('Bluetooth', settings + ['tick 1', 'rest', 'key centre', 'rest', 'tick 2'], ['Bluetooth', 'My Devices', 'Other Devices', 'No Devices', 'Quality', 'Bluetooth Headset Volume Control', 'More Bluetooth Settings']),
             ('General', settings + ['tick 2', 'rest', 'key centre', 'rest', 'tick 1'], ['About', 'More General Settings']),
             ('Playback', settings + ['tick 3', 'rest', 'key centre', 'rest'],
              ['EQ', 'Gapless', 'Smart Crossfade', 'Sleep Timer', 'More Playback Settings'])):
@@ -764,6 +845,10 @@ def comebacks(binary, work, home):
         got = (out/'top.txt').read_text().splitlines() if (out/'top.txt').exists() else []
         sel = int(trace[-1]['sel']) if trace else -1
         want_sel = int(to[-1].split()[1]) if to[-1].startswith('tick') else 0
+        if name == 'Wi-Fi':
+            want_sel = 4  # two ticks pass over the header and the grey "No Networks" row
+        if name == 'Bluetooth':
+            want_sel = 5  # past both headers and the grey "No Devices" row
         ok = got == rows
         good &= check(f"back from the page of demo's that {name} opened, q2ui is on {name} on the row it was on",
                       ok and sel == want_sel, f'{got} sel {sel}')

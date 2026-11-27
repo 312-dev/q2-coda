@@ -13,7 +13,7 @@ EVT_CLICK = 0x10c
 STATE_AT = 0xd8  # g_wifiStatus's wpa_state
 
 
-HIGHS = high_halves(4)  # this file's (conftest)
+HIGHS = high_halves(8)  # this file's (conftest): four networks' names and flags
 
 
 def strings(n):
@@ -26,7 +26,7 @@ def strings(n):
 def pages():
     mapped = []
     try:
-        for n in range(2):
+        for n in range(4):
             for at in strings(n):
                 page = at & ~0xfff
                 got = libc.mmap(page, 0x2000, 3, 0x100022, -1, 0)  # read/write, MAP_FIXED_NOREPLACE
@@ -45,11 +45,12 @@ class Page:
     def __init__(self, fw, networks=(('Home', '[WPA2-PSK-CCMP][ESS]'), ('Cafe', '[ESS]')), saved=('Home',)):
         self.fw, self.ui, self.saved = fw, Ui(fw), set(saved)
         self.records = []
-        for n, (ssid, flags) in enumerate(networks):
+        for n, (ssid, flags, *dbm) in enumerate(networks):
             name, fl = strings(n)
             C.memmove(name, ssid.encode() + b'\0', len(ssid) + 1)
             C.memmove(fl, flags.encode() + b'\0', len(flags) + 1)
-            rec = (C.c_uint * 3)(name & 0xffffffff, fl & 0xffffffff, fl >> 32)
+            # the signal in dBm at 0x14 (stock's wifimenu_rows_build reads it for wifi_sig1..4)
+            rec = (C.c_uint * 6)(name & 0xffffffff, fl & 0xffffffff, fl >> 32, 0, 0, (dbm[0] if dbm else -60) & 0xffffffff)
             self.records.append(rec)
         fw.var('fw_ctx_wifi_showlist', C.c_uint).value = self.ui.deques.new(C.addressof(r) for r in self.records)
         fw.var('g_wififlag', C.c_ubyte).value = 1
@@ -286,3 +287,176 @@ def test_reset_network_settings_puts_back_the_shipped_file_and_restarts_wi_fi(fw
                        ('system', 'cp -f /release/assets/default/raw/wpa_supplicant.conf /mnt/data/wpa_supplicant.conf'),
                        ('clear',), ('read', '/mnt/data/wpa_supplicant.conf'), ('wifi_switch', 1)]
     assert fw.var('wifi_searchtime', C.c_ubyte).value == 50 and p.ui.toasts == ['Network Settings Reset']
+
+
+def closed(p):
+    """demo's Wi-Fi page left for Home, as it is while q2ui has the screen."""
+    home = p.ui.new('window_create', 0, 0, 0, 0, 0)
+    p.ui.name[home] = 'home_page'
+
+
+def run_timers(p, fn_name, passes=1):
+    """Each pass, the timers named fn_name as the loop runs them: those answering RET_REPEAT (8) stay."""
+    fn = C.cast(getattr(p.fw.lib, fn_name), C.c_void_p).value
+    for _ in range(passes):
+        for t, (f, ctx, ms) in list(p.ui.timers.items()):
+            if f == fn and C.CFUNCTYPE(C.c_int, C.c_void_p)(f)(ctx) != 8:
+                del p.ui.timers[t]
+
+
+def scanning(fw, p):
+    """Stock's wifi_scan (it sets wifi_searchtime to 10) and its results' read, noted in p.calls."""
+    def scan(*_):
+        p.calls.append(('scan',))
+        fw.var('wifi_searchtime', C.c_ubyte).value = 10
+        return 0
+    fw.mock('wifi_scan', scan)
+    fw.mock('networkGetWifiResult', lambda d, *_: p.calls.append(('result', d)) or 0)
+
+
+def test_q2uis_search_is_stocks_and_its_results_are_read_as_stocks_page_would(fw):
+    """With demo's page closed its timer never reads a search's results: q2ui's "scan" starts stock's search and
+    counts it down as that timer does (200 ms passes from 10), then reads the results into wifi_showlist."""
+    p = Page(fw)
+    closed(p)
+    scanning(fw, p)
+    assert fw.fn('wifi_flows_scan', C.c_int)() == 0
+    run_timers(p, 'wifi_flows__scan_tick')
+    assert p.calls == [('scan',)] and [ms for _, _, ms in p.ui.timers.values()] == [200]
+    run_timers(p, 'wifi_flows__scan_tick', 9)
+    assert p.calls == [('scan',)]
+    run_timers(p, 'wifi_flows__scan_tick')
+    deque = fw.var('fw_ctx_wifi_showlist', C.c_uint).value
+    assert p.calls == [('scan',), ('result', deque)] and not p.ui.timers
+
+
+def test_a_search_asked_for_while_wi_fi_starts_waits_for_it_and_none_is_made_with_wi_fi_off(fw):
+    p = Page(fw)
+    closed(p)
+    scanning(fw, p)
+    fw.var('wifi_initstatus', C.c_ubyte).value = 1
+    assert fw.fn('wifi_flows_scan', C.c_int)() == 0
+    run_timers(p, 'wifi_flows__scan_tick', 5)
+    assert p.calls == []
+    fw.var('wifi_initstatus', C.c_ubyte).value = 0
+    run_timers(p, 'wifi_flows__scan_tick')
+    assert p.calls == [('scan',)]
+    fw.var('g_wififlag', C.c_ubyte).value = 0
+    run_timers(p, 'wifi_flows__scan_tick')
+    assert not p.ui.timers and p.calls == [('scan',)]
+    assert fw.fn('wifi_flows_scan', C.c_int)() == 1 and not p.ui.timers
+
+
+def networks(fw, room=2048):
+    out = C.create_string_buffer(room)
+    n = fw.fn('wifi_flows_networks', C.c_uint, C.c_void_p, C.c_uint)(out, room)
+    return out.raw[:n].decode()
+
+
+def test_q2ui_is_told_each_networks_level_lock_and_join_with_the_joined_one_first(fw):
+    """A line a network, "LEVEL LOCK STATE NAME", in scan order but the one with a state first, as demo's page; the
+    levels stock's signal steps; a backslash and a newline in a name escaped."""
+    nets = (('Cafe', '[ESS]', -72), ('Home', '[WPA2-PSK-CCMP][ESS]', -50), ('A\\\\b\nc', '[WEP]', -78), ('Far', '[ESS]', -90))
+    p = Page(fw, networks=nets)
+    closed(p)
+    assert networks(fw) == 'scan 0\n3 0 0 Cafe\n4 1 0 Home\n2 1 0 A\\\\\\\\b\\nc\n1 0 0 Far\n'
+    fw.var('wifi_connectstatus', C.c_ubyte).value = 2
+    fw.var('fw_ctx_wifi_name', C.c_char * 256).value = b'Home'
+    fw.var('wifi_searchtime', C.c_ubyte).value = 4
+    assert networks(fw) == 'scan 1\n4 1 2 Home\n3 0 0 Cafe\n2 1 0 A\\\\\\\\b\\nc\n1 0 0 Far\n'
+    fw.var('wifi_connectstatus', C.c_ubyte).value = 1
+    assert networks(fw).split('\n')[1] == '4 1 1 Home'
+    assert networks(fw, 30) == 'scan 1\n4 1 1 Home\n3 0 0 Cafe\n'  # whole lines only
+    fw.var('g_wififlag', C.c_ubyte).value = 0
+    assert networks(fw) == 'scan 1\n'
+
+
+def test_q2ui_is_told_a_failed_join_and_a_refused_password(fw):
+    p = Page(fw)
+    closed(p)
+    fw.fn('wifi_rows_failed', None, C.c_char_p, C.c_int)(b'Home', 1)
+    assert networks(fw).split('\n')[1] == '4 1 4 Home'
+    fw.fn('wifi_rows_failed', None, C.c_char_p, C.c_int)(b'Cafe', 0)
+    assert networks(fw).split('\n')[1:3] == ['4 0 3 Cafe', '4 1 0 Home']
+
+
+def nexts(fw, p, answer):
+    fw.mock('check_wifinextaction', lambda at, x, lo, hi, *_: p.calls.append(('next', at, x, lo, hi)) or answer)
+
+
+def test_q2uis_join_by_name_is_stocks_rows_own_steps(fw):
+    """"join NAME": the network found by its name in the scan, then from a timer stock's row's steps for it: a saved
+    or open one joined at once (check_wifinextaction 3)."""
+    p = Page(fw)
+    closed(p)
+    nexts(fw, p, 3)
+    fw.var('wifi_searchtime', C.c_ubyte).value = 6
+    assert fw.fn('wifi_flows_join', C.c_int, C.c_char_p)(b'Cafe') == 0
+    assert p.calls == []  # from a timer, as stock's dialogs open
+    run_timers(p, 'wifi_flows__join_now')
+    assert p.calls == [('next', 1, 0, 276, 375), ('connect', 1)] and fw.var('wifi_searchtime', C.c_ubyte).value == 0
+
+
+def test_a_join_that_needs_a_password_asks_with_stocks_entry_then_joins(fw):
+    p = Page(fw)
+    closed(p)
+    nexts(fw, p, 4)
+    fw.var('fw_ctx_prepare_linkpasswd', C.c_char * 128).value = b'old'
+    assert fw.fn('wifi_flows_join', C.c_int, C.c_char_p)(b'Home') == 0
+    run_timers(p, 'wifi_flows__join_now')
+    assert [w for w, _ in p.went] == ['dialog/kbwifipass_dialog'] and p.calls[-1] == ('connect', 0)
+    assert fw.var('fw_ctx_prepare_linkpasswd', C.c_char * 128).value == b''
+    p.calls.clear()
+    p.answer = 1  # Cancel
+    fw.fn('wifi_flows_join', C.c_int, C.c_char_p)(b'Home')
+    run_timers(p, 'wifi_flows__join_now')
+    assert p.calls == [('next', 0, 0, 276, 375)]
+
+
+def test_a_join_of_a_joined_network_does_nothing_and_one_not_in_the_scan_is_refused(fw):
+    p = Page(fw)
+    closed(p)
+    nexts(fw, p, 2)
+    fw.fn('wifi_flows_join', C.c_int, C.c_char_p)(b'Home')
+    run_timers(p, 'wifi_flows__join_now')
+    assert p.calls == [('next', 0, 0, 276, 375)] and p.went == []
+    assert fw.fn('wifi_flows_join', C.c_int, C.c_char_p)(b'Elsewhere') == 1 and not p.ui.timers
+
+
+def test_a_join_of_the_network_that_is_joining_ends_that_join_and_another_is_refused_meanwhile(fw):
+    p = Page(fw)
+    closed(p)
+    nexts(fw, p, 3)
+    p.joining('Home')
+    assert fw.fn('wifi_flows_join', C.c_int, C.c_char_p)(b'Cafe') == 1
+    assert fw.fn('wifi_flows_join', C.c_int, C.c_char_p)(b'Home') == 0
+    assert p.calls == [('disconnect',)] and fw.var('wifi_connectstatus', C.c_ubyte).value == 0 and not p.ui.timers
+
+
+def test_q2uis_lines_down_its_pipe_search_and_join_and_the_networks_are_told_in_their_own_file(fw):
+    """q2ui_gate.c: "scan" and "join NAME" down q2ui's pipe reach the search and the join, the name's escapes undone;
+    the networks go to /tmp/q2ui.wifi on the status's looks, written only when they change."""
+    from conftest import Files
+    from test_q2ui_gate import Piped
+    files = Files(fw)
+    long = 'Ca\\fe\nX' + '\\' * 25  # 32 bytes, 27 escaped: a line of 65 bytes, past a setting's 64 (the longest, 70)
+    p = Page(fw, networks=(('Home', '[WPA2-PSK-CCMP][ESS]', -50), (long, '[ESS]', -72)))
+    g = Piped(fw)
+    nexts(fw, p, 3)
+    g.poll()  # q2ui started
+    g.sent = b'scan\njoin Ca\\\\fe\\nX' + b'\\\\' * 25 + b'\njoin Nowhere\n'
+    g.poll()
+    assert sorted(ms for _, _, ms in p.ui.timers.values()) == [50, 200]
+    run_timers(p, 'wifi_flows__join_now')
+    assert p.calls[-1] == ('connect', 1)
+    assert files.files['/tmp/q2ui.wifi'].decode() == 'scan 1\n4 1 0 Home\n3 0 0 Ca\\\\fe\\nX' + '\\\\' * 25 + '\n'
+    writes = []
+    rename = files.rename
+    fw.mock('fw_rename', lambda a, b, *_: writes.append(C.string_at(b).decode()) or rename(a, b))
+    g.ms += 600
+    g.poll()
+    assert '/tmp/q2ui.wifi' not in writes  # nothing changed
+    fw.var('g_wififlag', C.c_ubyte).value = 0
+    g.ms += 600
+    g.poll()
+    assert writes.count('/tmp/q2ui.wifi') == 1 and files.files['/tmp/q2ui.wifi'] == b'scan 1\n'
