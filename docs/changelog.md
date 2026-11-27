@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - New UI (preview): Control Center comes down from the top of the screen under your finger as you pull it, and settles open or back up when you let go, instead of sliding in from the side; Return held drops it from the top. Its Brightness and Volume sliders now stay right under your finger while you drag them.
   - New UI (preview): **Genres** and **Recently Added** are in the Library, as in the classic menus: a genre's songs with their artists, and every song newest first. In Artists, Albums and Genres the songs with no name for it are listed last.
   - Status row: the orange crossed-out cloud now shows whenever anything the Q2 fetches from the internet can't be reached while Wi-Fi is connected (scrobbling, online lyrics and covers, updates and the App Store, the time zone, the radio directory), not only a streaming app's server; it goes once that service answers again.
   - Status row: the red crossed-out ear shown with nothing connected to play to is gone; the other icons close up. The Wi-Fi icon's dot and bands have clean dark gaps between them, where they looked blurred.

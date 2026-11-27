@@ -1414,6 +1414,60 @@ def control_center_touch(binary, work, home):
         shut.append((stats['top'], said))
     good &= check('a swipe up closes the sheet, from the grab bar or over the Brightness slider, which it leaves alone',
                   shut == [('home', []), ('home', [])], str(shut))
+    good &= control_center_motion(binary, work, home, told)
+    return good
+
+
+def control_center_motion(binary, work, home, told):
+    """Control Center comes down from the top edge (the owner's, 2026-11-27: "control center is not sliding down, it's
+    coming in from the side"): pulled by a finger, its foot follows the finger (an interactive transition) and on the
+    lift settles open, or back up when let go short of a third of the way moving slowly; Return held drops it from the
+    top and Return sends it back up. A finger on a slider has the fill under it each frame (direct manipulation, no
+    ease while it is down: the owner's "sliders actually move with the finger vs. trailing to catch up"), measured
+    here as input to photon in frames. Two taps on a circle 300 ms apart each flip it."""
+    good = True
+    grab_at = lambda pic: [y for y in range(0, 320) if pic.at(187, y) == GRAB]
+    walk = ['rest', 'shot @home.ppm', 'touch 187 2', 'move 187 30', 'move 187 120', 'run 50', 'shot @at120.ppm', 'move 187 200',
+            'run 50', 'shot @at200.ppm', 'lift', 'rest', 'shot @open.ppm']
+    _, pics, stats = script(binary, work, 60, walk, *home, '--told', told)
+    g120, g200, gopen = grab_at(pics['at120']), grab_at(pics['at200']), grab_at(pics['open'])
+    home_px = [pics['home'].at(x, 260) for x in range(20, 160, 20)]  # the list's side: the art pane pans
+    good &= check("pulled from the top edge the sheet's foot is under the finger: its grab bar's middle 9 px above it at y 120 and "
+                  'at y 200, the page still there below', 111 in g120 and 311 not in g120 and 191 in g200 and 311 not in g200
+                  and [pics['at120'].at(x, 260) for x in range(20, 160, 20)] == home_px, f'{g120} {g200}')
+    good &= check('let go two thirds down, it settles open, the grab bar on the foot', stats['top'] == 'control' and
+                  311 in gopen and len(gopen) <= 5, f"{stats['top']} {gopen}")
+    _, pics, stats = script(binary, work, 60, ['rest', 'touch 187 2', 'move 187 30', 'run 200', 'move 187 60', 'run 300', 'lift', 'rest'],
+                            *home, '--told', told)
+    good &= check('let go a fifth of the way down, moving slowly, it goes back up and the page is left as it was',
+                  stats['top'] == 'home', stats['top'])
+    trace, pics, _ = script(binary, work, 60, ['rest', 'hold return', 'run 80', 'shot @drop.ppm', 'rest', 'shot @dropped.ppm',
+                                              'key return', 'run 80', 'shot @rise.ppm', 'rest'], *home, '--told', told)
+    feet = [t['reveal'] for t in trace if 'reveal' in t]
+    good &= check('Return held drops it from the top: its foot goes down frame by frame to rest open, and Return sends it '
+                  'back up', 311 in grab_at(pics['dropped']) and len(grab_at(pics['dropped'])) <= 5 and 0 < len(grab_at(pics['drop'])) and
+                  grab_at(pics['drop'])[0] < 300 and feet and max(feet) == 320 and
+                  all(b >= a for a, b in zip(feet[:feet.index(320)], feet[1:feet.index(320) + 1])) and
+                  0 < len(grab_at(pics['rise'])) and grab_at(pics['rise'])[0] < 300 and feet[-1] < 320,
+                  f"{grab_at(pics['drop'])} {grab_at(pics['rise'])} {feet[:12]} {feet[-3:]}")
+    # a finger dragged along Brightness: the fill's end against the finger, frame by frame
+    walk = ['rest', 'swipe 187 2 187 150 300', 'rest', 'touch 200 181', 'move 215 181', 'move 230 181', 'move 300 181', 'run 300',
+            'lift', 'rest']
+    trace, _, _, _, _ = script(binary, work, 60, walk, *home, '--told', told, queue=True, ctl=True)
+    want = round((300 - 188) * 1000 / 167)
+    asked = next((i for i, t in enumerate(trace) if t.get('finger') == want), None)
+    shown = next((i for i, t in enumerate(trace) if i >= (asked or 0) and abs(t.get('fill0', -99) - want) <= 6), None)
+    frames = None if asked is None or shown is None else shown - asked
+    print(f'     slider input to photon: {frames} frames after the frame that took the move, '
+          f'{"-" if frames is None else round((frames + 1) * 16.7, 1)} ms to its flip')
+    good &= check('a dragged slider has its fill under the finger in the frame that takes the move (within 1 px)',
+                  frames == 0, f'{frames} frames, asked at {asked}, shown at {shown}')
+    # two taps on Bluetooth 300 ms apart: each flips it, on and back off
+    walk = ['rest', 'swipe 187 2 187 150 300', 'rest', 'touch 132 68', 'lift', 'run 300', 'touch 132 68', 'lift', 'run 100',
+            'shot @twice.ppm']
+    _, pics, _, _, said = script(binary, work, 60, walk, *home, '--told', told, queue=True, ctl=True)
+    good &= check("two taps on Bluetooth 300 ms apart each flip it down q2ui's pipe, on then off, and the circle shows off",
+                  said == ['set bt 1', 'set bt 0'] and pics['twice'].at(147, 68) == OFF, f"{said} {pics['twice'].at(147, 68)}")
     return good
 
 
@@ -2672,6 +2726,8 @@ def main():
             good &= notices(binary, work)
         if not only or 'genres' in only:
             good &= genres_recent(binary, work, ('--page', 'home'))
+        if 'cc' in only:  # Control Center alone ('pages' runs it too)
+            good &= control_center(binary, work, ('--page', 'home')) & control_center_touch(binary, work, ('--page', 'home'))
     print('q2ui: ' + ('all checks passed' if good else 'FAILED'))
     return 0 if good else 1
 

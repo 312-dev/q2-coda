@@ -243,6 +243,7 @@ void ui_pop(void); /* the top page closes; the last page's pop ends the program 
 void ui_push_still(const ui_page *p, void *arg); /* with no slide: the page moves in itself (a sheet) */
 void ui_pop_still(void);
 uint32_t *ui_snapshot_screen(void); /* the top page and the status row as they are now, malloc'd; 0 with no memory */
+uint32_t *ui_snapshot_under(void);  /* the same of the page under the top: what a sheet going away uncovers */
 extern int ui_status_hidden;        /* 1: the loop draws no status row (a sheet's page behind has its own in it) */
 #define UI_EXIT_ASK 3    /* its exit code with a page of demo's named (ui_demo_page) */
 #define UI_EXIT_RELOAD 4 /* and to be started again at once: SIGHUP's, when it cannot start itself again */
@@ -266,7 +267,8 @@ int ui_run(void);       /* the loop, until ui_quit; the exit code */
 void ui_on_rest(void (*fn)(void));       /* called once each time the loop comes to rest */
 void ui_on_stack(void (*fn)(void));      /* called when a page has opened or closed */
 void ui_on_hold(int key, void (*fn)(void)); /* a key held, on any page, is fn's and not the page's (Return: Control Center) */
-void ui_on_pull(void (*fn)(void)); /* a finger pulled down from the screen's top edge, on any page */
+void ui_on_pull(void (*fn)(const input_t *e)); /* a finger pulled down from the screen's top edge, on any page: the
+                                                  move that crossed and the rest of that touch */
 /* The key click (Key Tone): ui_click(0) for a wheel tick that moved something, (1) for a press. The toolkit clicks
  * every Centre and Return press itself; a page clicks its own ticks. ui_clicker sounds it (0: silent): q2ui's is
  * demo's click, down its pipe (ui/player.c player_click). */
@@ -398,7 +400,8 @@ typedef struct ui_list ui_list;
 void list_pictures_changed(void);
 void list_rows_changed(void); /* any row's words or marks may have changed: every row is asked again, a switch slides,
                                  and the rows are counted again */
-void control_push(void);      /* Control Center (page_control.c) */
+void control_push(void);      /* Control Center (page_control.c), dropped from the top */
+void control_pull(const input_t *e); /* ... or pulled down by a finger (ui_on_pull's) */
 extern const ui_page page_control;
 /* ---- config.c: the settings q2ui reads from demo's config.ini ---- */
 extern const char *config_file;

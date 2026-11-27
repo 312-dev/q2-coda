@@ -1612,7 +1612,15 @@ and the blocks, the block and the right column, Now Playing and the sliders, the
 - **Sliders and the wheel**: Volume steps exactly as Now Playing's volume does (1 a tick turned slowly, up to 10
   a tick on a fast spin, `vol_next`), and Brightness by the same curve over its own range, identically here and
   on Settings > Display > Brightness (`bright_wheel`); each fill eases to its level at Now Playing's bar's speed
-  (`VOL_EASE_MS`).
+  (`VOL_EASE_MS`). A finger on a slider is direct manipulation: the fill stands under the finger in the frame that
+  takes each move, with no ease while it is down (the owner's, 2026-11-27); it eases only for the wheel's steps and a
+  tap.
+- **Coming and going** (the owner's, 2026-11-27: it comes down from the top, never in from the side): a finger pulled
+  down from the top edge holds the sheet's foot under it as it moves (an interactive transition), and let go the sheet
+  settles open, or back up when let go less than a third of the way down unless flung down (faster than 300 px/s; a
+  fling up closes it from anywhere). Return held drops it from the top; Return or a swipe up sends it back up. Each
+  settle is cubic out, 260 ms over the whole screen and its share of that for less; under Reduce Motion it stands
+  or goes at once, and a finger still pulls it. The page under it stays as it was.
 - **Now Playing block**: a tap anywhere on it but the transport, or Center on it, closes the page and opens Now
   Playing; Previous, Play/Pause and Next keep their own taps. With nothing loaded it does nothing.
 - **Holds**: a toggle held 550 ms (`QUICK_HOLD_MS`), by a finger or by Center with the ring on it, closes the page
