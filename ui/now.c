@@ -1,7 +1,8 @@
 /* What plays, read from the file demo writes for Car Remote while demo owns the player
  * (/tmp/coda-rc.now, patch/coda_rc_shim.c cr_now: a key=value line each, rewritten when anything
- * in it changes, twice a second at most), and the playing song's cover as stock's cover thread
- * leaves it (/tmp/externpic.jpg). Nothing is polled: the folder is watched (inotify), so a change
+ * in it changes, twice a second at most), and the playing song's cover from the file demo names for
+ * it (cover= in /tmp/q2ui.status, patch/q2ui_gate.c tell: the player's embedded picture, a folder
+ * image or download, or a card app's cover). Nothing is polled: the folder is watched (inotify), so a change
  * wakes the loop and a page's step sees now_seq() move, and at rest nothing runs. The same watch
  * tells the status row when demo's file of the states only it knows changes (ui/status.c
  * status_told). When q2ui owns the player this file reads its own state instead
@@ -22,6 +23,7 @@ static int watch = -1;
 static image_t *cover;
 static struct timespec cover_time;
 static long cover_size = -1;
+static char cover_path[600]; /* the file cover was decoded from */
 
 const ui_now *now_get(void) { return &now; }
 unsigned now_seq(void) { return seq; }
@@ -66,16 +68,22 @@ void now_read(void) {
     if (memcmp(&was, &now, offsetof(ui_now, read_us))) ++seq;
 }
 
-/* The cover, decoded again only when the file changed; 0 with none. */
+/* The cover, decoded again only when its file or the file's bytes changed; 0 with none. The file is
+ * the one demo names (cover=, empty for none), as the player writes an embedded picture and a folder
+ * image to two files and leaves the last song's behind; now_cover_file while demo names none. */
 const image_t *now_cover(void) {
+    char named[sizeof cover_path];
     struct stat st;
-    if (stat(now_cover_file, &st) || !st.st_size) {
+    const char *file = status_told_value("cover", named, sizeof named) ? named : now_cover_file;
+    if (!*file || stat(file, &st) || !st.st_size) {
         if (cover) image_free(cover), cover = 0, cover_size = -1, ++cover_seq;
         return 0;
     }
-    if (st.st_size == cover_size && st.st_mtim.tv_sec == cover_time.tv_sec && st.st_mtim.tv_nsec == cover_time.tv_nsec)
+    if (st.st_size == cover_size && st.st_mtim.tv_sec == cover_time.tv_sec && st.st_mtim.tv_nsec == cover_time.tv_nsec &&
+        !strcmp(file, cover_path))
         return cover;
-    image_t *full = image_load(now_cover_file);
+    snprintf(cover_path, sizeof cover_path, "%s", file);
+    image_t *full = image_load(file);
     image_free(cover);
     /* kept at twice the largest size it is shown, so a lean or a zoom never runs out of picture */
     cover = full ? image_fit(full, 360, 360) : 0;

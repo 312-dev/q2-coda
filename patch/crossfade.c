@@ -77,12 +77,14 @@ void xfade_row(void *label) {
     widget_on(label, EVT_DESTROY, xfade_gone, label);
     xfade_text();
 }
-/* The row's click: Smart Crossfade on or off, saved. On also turns stock's Gapless on, as stock's
- * own row does (0x4bcfa4: PLAYSET GAPLESS, mclSetGaplessMode, its switch's image), so one switch
- * is all a fade needs. */
-int xfade_click(void *ctx, void *event) {
+/* Smart Crossfade set on (1) or off and saved, when it is not so already: the row's click, and
+ * q2ui's Playback page through demo (control_center.c q2ui_cc_set "xfade"). On also turns stock's
+ * Gapless on, as stock's own row does (0x4bcfa4: PLAYSET GAPLESS, mclSetGaplessMode, its switch's
+ * image), so one switch is all a fade needs. */
+void xfade_set(int on) {
     settings();
-    xf.on = !xf.on;
+    if (!on == !xf.on) return;
+    xf.on = !!on;
     write_int_config(xf.on, "Q2POD", "XFADE");
     if (xf.on && !*(volatile unsigned char *)MCL_GAPLESS) {
         write_int_config(1, "PLAYSET", "GAPLESS");
@@ -91,6 +93,11 @@ int xfade_click(void *ctx, void *event) {
         if (sw) image_base_set_image(sw, "switch_on");
     }
     xfade_text();
+}
+/* The row's click: Smart Crossfade flipped. */
+int xfade_click(void *ctx, void *event) {
+    settings();
+    xfade_set(!xf.on);
     return 0;
 }
 

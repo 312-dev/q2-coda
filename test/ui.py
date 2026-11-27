@@ -18,6 +18,7 @@ it prints why it is skipped and passes.
 import json
 import os
 import pathlib
+import re
 import shutil
 import signal
 import sqlite3
@@ -195,6 +196,12 @@ class Run:
 
     def picture(self):
         return shot.page(self.dir/'fb', self.stats()['page'])
+
+    def hold(self, code, seconds=0.9):
+        """code held past q2ui's hold (KEY_HOLD_MS, 600 ms), then let go."""
+        self.keys.write(event(EV_KEY, code, 1) + event(EV_SYN, 0, 0))
+        time.sleep(seconds)
+        self.keys.write(event(EV_KEY, code, 0) + event(EV_SYN, 0, 0))
 
     def key(self, code):
         self.keys.write(event(EV_KEY, code, 1) + event(EV_SYN, 0, 0) + event(EV_KEY, code, 0) + event(EV_SYN, 0, 0))
@@ -464,8 +471,21 @@ def pages(binary, work):
     good &= check("an album's songs are its tracks in order", len(sent) == 1 and ids == want, f'{ids} for {want}')
     # Library > Albums: two-line rows, each led by its cover from Cover Flow's thumbnails, else the placeholder
     good &= album_covers(binary, work, home)
+    good &= now_covers(binary, work, home)
     good &= playlists(binary, work, home)
     good &= control_center(binary, work, home)
+    # Centre on a song opens Now Playing over the list, as demo's playing_page comes up when a song is chosen
+    tops = []
+    for walk in (['rest', 'tick 2', 'rest', 'key centre', 'rest'],  # Songs (the page these scripts open on)
+                 ['rest', 'key centre', 'rest', 'tick 2', 'rest', 'key centre', 'rest', 'key centre', 'rest', 'key centre', 'rest']):
+        _, _, stats, (sent, _, _) = script(binary, work, 60, walk, *(() if len(walk) == 5 else home), queue=True)
+        tops.append((stats['top'], len(sent)))
+    good &= check("Centre on a song in Songs and in an album plays it and opens Now Playing over the list",
+                  tops == [('now', 1), ('now', 1)], str(tops))
+    # and Return from it gives the list back, where it was
+    trace, _, stats, _ = script(binary, work, 60, ['rest', 'tick 2', 'rest', 'key centre', 'rest', 'key return', 'rest'], queue=True)
+    good &= check('Return from that Now Playing is the list again on the same row', stats['top'] != 'now' and trace[-1]['sel'] == 3,
+                  f"{stats['top']} {trace[-1]['sel']}")
     good &= control_center_sliders(binary, work, home)
     # a row whose page is demo's: the page is named for demo and q2ui ends with the code that says so
     _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'tick 1', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
@@ -483,6 +503,8 @@ def pages(binary, work):
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
     good &= check("Home > Settings > Car Remote asks demo for its page by the payload's opener", asked == 'carremote_page\n', repr(asked))
     good &= display(binary, work, home)
+    good &= playback(binary, work, home)
+    good &= general(binary, work, home)
     return good
 
 
@@ -544,6 +566,56 @@ def display(binary, work, home):
         good &= check('demo writing Light Mode on turns q2ui light as the file lands', dark == (0, 0, 0) and light == (255, 255, 255), f'{dark} {light}')
     finally:
         run.end()
+    return good
+
+
+def playback(binary, work, home):
+    """Settings > Playback, q2ui's own (ui/page_playback.c): EQ as demo says it stands, Gapless and Smart Crossfade as
+    config.ini has them, each set through demo (Smart Crossfade on turns Gapless on, as demo's row does); the Sleep
+    Timer and the rest of demo's Playback page by their paths."""
+    good = True
+    d = pathlib.Path(tempfile.mkdtemp(dir=work))
+    (d/'config.ini').write_text('[PLAYSET]\nGAPLESS=1\n[Q2POD]\nXFADE=0\n')
+    (d/'told').write_text('eq=1\n')
+    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 3', 'rest', 'key centre', 'rest']  # Home > Settings > Playback
+    lines = to + ['key centre', 'run 100', 'tick 1', 'rest', 'key centre', 'run 100', 'tick 1', 'rest', 'key centre', 'run 100',
+                  'tick -1', 'rest', 'key centre', 'run 100']
+    opts = (*home, '--config', d/'config.ini', '--told', d/'told')
+    _, _, _, (sent, _, _), said = script(binary, work, 60, lines, *opts, queue=True, ctl=True)
+    good &= check('EQ (on by demo) goes off, Gapless (on in the file) off, Smart Crossfade on, and Gapless shows on with it again, each '
+                  "down q2ui's own pipe and none down the queue",
+                  said == ['set eq 0', 'set gapless 0', 'set xfade 1', 'set gapless 0'] and sent == [], f'{said} {sent}')
+    for ticks, page in ((3, 'systemset/sleepshutdown_page'), (4, 'playset/playset_page')):
+        _, _, _, (sent, _, out) = script(binary, work, 60, to + [f'tick {ticks}', 'rest', 'key centre', 'run 100'], *opts,
+                                         code=3, queue=True)
+        asked = (out/'ask').read_text() if (out/'ask').exists() else ''
+        good &= check(f"its row {ticks + 1} opens demo's {page}", asked == page + '\n', repr(asked))
+    return good
+
+
+def general(binary, work, home):
+    """Settings > General, q2ui's own (ui/page_general.c): About first, then the rest of demo's General page by its
+    path. About lists the product and its version and the stock firmware's as demo says them (its status file), the
+    library's songs, the card's capacity and room left, and Wi-Fi's address."""
+    good = True
+    d = pathlib.Path(tempfile.mkdtemp(dir=work))
+    (d/'card').mkdir()
+    (d/'told').write_text('product=Vamp\nversion=9.8.7 dev test\nfirmware=V1.36\n')
+    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 2', 'rest', 'key centre', 'rest']  # Home > Settings > General
+    opts = (*home, '--told', d/'told', '--card', d/'card')
+    _, _, _, (_, _, out) = script(binary, work, 60, to + ['rows @general.txt', 'key centre', 'rest', 'rows @about.txt'], *opts,
+                                  queue=True)
+    rows = (out/'general.txt').read_text().splitlines() if (out/'general.txt').exists() else []
+    good &= check("General's rows are About, then the rest of demo's page", rows == ['About', 'More General Settings'], str(rows))
+    about = [r.split('\t') for r in ((out/'about.txt').read_text().splitlines() if (out/'about.txt').exists() else [])]
+    want = [['Vamp', '9.8.7 dev test'], ['Firmware', 'V1.36'], ['Songs', '60']]
+    sized = [r for r in about[3:5] if len(r) == 2 and re.fullmatch(r'\d+\.\d\d GB', r[1])]
+    good &= check('About: the product and both versions as demo says them, the songs, the card in GB and Wi-Fi off',
+                  about[:3] == want and [r[0] for r in sized] == ['Capacity', 'Available'] and
+                  about[5:] == [['Wi-Fi Address', 'Not connected']], str(about))
+    _, _, _, (_, _, out) = script(binary, work, 60, to + ['tick 1', 'rest', 'key centre', 'run 100'], *opts, code=3, queue=True)
+    asked = (out/'ask').read_text() if (out/'ask').exists() else ''
+    good &= check("its last row opens demo's General page", asked == 'systemset/sysset_page\n', repr(asked))
     return good
 
 
@@ -619,6 +691,57 @@ def album_covers(binary, work, home):
         run.rest()
         got = shot.pixel(run.picture(), 44, 84)
         good &= check('live, the worker reads it and the row is drawn again with it', got == (200, 40, 40), str(got))
+    finally:  # Home's Return opens no way out: the program is ended
+        run.proc.kill()
+        run.proc.wait(timeout=5)
+        os.close(run.queue)
+    return good
+
+
+def now_covers(binary, work, home):
+    """Now Playing's art is the file demo names for the playing song (cover= in its status file, patch/q2ui_gate.c
+    tell, from coverflow.c song_cover_url): the player's embedded picture (/tmp/coverpic.jpg), a folder image or a
+    download (/tmp/externpic.jpg), or a card app's cover of a server song's album. None named is the placeholder,
+    whatever file the player left from the song before; demo saying nothing leaves --cover's file."""
+    good = True
+    d = pathlib.Path(tempfile.mkdtemp(dir=work))
+    embedded, folder_image, stale = d/'coverpic.png', d/'externpic.png', d/'stale.png'
+    png(embedded, 300, 300, (200, 40, 40))  # stb reads them by their bytes, whatever the name
+    png(folder_image, 300, 300, (40, 160, 40))
+    png(stale, 300, 300, (40, 40, 200))
+
+    def art(told):
+        (d/'told').write_text(told)
+        _, pics, _ = script(binary, work, 5, ['rest', 'shot @now.ppm'], '--page', 'now', '--cover', stale,
+                            '--told', d/'told', now=NOW)
+        return pics['now'].at(99, 133)  # the middle of the art's card (ui/page_now.c ART)
+
+    def near(got, rgb):
+        return all(abs(a - b) <= 8 for a, b in zip(got, rgb))
+    got = art(f'out=other\ncover={embedded}\n')
+    good &= check("Now Playing shows the embedded picture demo names, not the player's other file", near(got, (200, 40, 40)), str(got))
+    got = art(f'out=other\ncover={folder_image}\n')
+    good &= check('... and a folder image or a download the same way', near(got, (40, 160, 40)), str(got))
+    got = art('out=other\ncover=\n')
+    good &= check("no cover named is the placeholder, not the file a song before left", not near(got, (40, 40, 200)) and
+                  not near(got, (200, 40, 40)), str(got))
+    got = art('out=other\n')
+    good &= check("demo naming none leaves --cover's file", near(got, (40, 40, 200)), str(got))
+    # live: the next song's cover named while Now Playing is up is drawn as the file lands
+    (d/'told').write_text(f'out=other\ncover={embedded}\n')
+    (d/'now').write_text(NOW)
+    run = Run(binary, work, 5, *home, '--now', d/'now', '--cover', stale, '--told', d/'told', '--clock', '12:00')
+    try:
+        run.rest()
+        run.key(KEY_CENTRE)  # Home's Playing row
+        run.rest()
+        before = shot.pixel(run.picture(), 99, 133)
+        (d/'told.tmp').write_text(f'out=other\ncover={folder_image}\n')
+        (d/'told.tmp').rename(d/'told')
+        run.rest()
+        after = shot.pixel(run.picture(), 99, 133)
+        good &= check("live, demo's new cover is drawn as its file lands", near(before, (200, 40, 40)) and near(after, (40, 160, 40)),
+                      f'{before} {after}')
     finally:  # Home's Return opens no way out: the program is ended
         run.proc.kill()
         run.proc.wait(timeout=5)
@@ -858,6 +981,16 @@ def reload(binary, work):
                  f"exit {r.proc.poll()}, ticks {before['ticks']} then {after['ticks']}, same picture {same}")
     kept = os.path.exists(end) and os.readlink(end) == f'pipe:[{os.fstat(pipe[0]).st_ino}]'
     good &= check("demo's settings pipe is open in q2ui before SIGHUP and still after", held and kept, f'{held} {kept}')
+    r.hold(KEY_RETURN)  # Control Center, in the program started again
+    r.rest()
+    r.key(KEY_CENTRE)   # its Wi-Fi switch, off as no told file says otherwise
+    r.rest()
+    os.set_blocking(pipe[0], False)
+    try:
+        said = os.read(pipe[0], 4096).decode().splitlines()
+    except BlockingIOError:
+        said = []
+    good &= check("after SIGHUP a Control Center switch still reaches demo down that pipe", said == ['set wifi 1'], str(said))
     r.proc.terminate()
     r.proc.wait(timeout=5)
     os.close(r.queue)
@@ -937,11 +1070,15 @@ def live(binary, work):
     good &= check('Centre on the third song sends one play, from that song, unshuffled',
                   len(lines) == 1 and lines[0].split()[1:] == ['play', '2', '0', '40'], str(lines))
     good &= check("the list it names is every song's id in the list's order", ids == [str(i) for i in want], f'{len(ids)} ids')
+    r.key(KEY_RETURN)  # Now Playing, which the play opened, gives the list back
+    time.sleep(0.6)
     r.ticks(-3)
     r.key(KEY_CENTRE)
     time.sleep(0.4)
     lines = r.sent()
     good &= check('Centre on Shuffle sends the same list shuffled', len(lines) == 1 and lines[0].split()[1:] == ['play', '0', '1', '40'], str(lines))
+    r.key(KEY_RETURN)
+    time.sleep(0.6)
     # ended from outside, as demo ends it for a window of its own: the next start opens on the row it rested on
     r.ticks(5)
     r.rest()

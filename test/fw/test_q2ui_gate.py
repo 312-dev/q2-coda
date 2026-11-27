@@ -4,6 +4,7 @@ Return and touches to it; it takes the screen back for a window of its own and g
 a page of its own that q2ui asks for as it leaves. With no target or no q2ui in the image, which is every default
 build, the gate never closes."""
 import ctypes as C
+import struct
 
 import pytest
 
@@ -371,6 +372,23 @@ def test_q2uis_display_page_sets_light_mode_and_reduce_motion_through_demo(fw):
     assert cc(b'motion', 1) == 0 and saved[-1] == ('IPOD', 'REDUCEMOTION', 1)
 
 
+def test_q2uis_playback_page_sets_gapless_and_smart_crossfade_through_demo(fw):
+    """q2ui's Settings > Playback: Gapless as stock's own row sets it (0x4bcfa4: PLAYSET GAPLESS, mclSetGaplessMode),
+    and Smart Crossfade as its row does (crossfade.c xfade_click: Q2POD XFADE, and on turns Gapless on with it)."""
+    saved = []
+    fw.mock('write_int_config', lambda v, sec, key, *_: saved.append((C.string_at(sec).decode(), C.string_at(key).decode(), v)) or 0)
+    gapless = C.c_ubyte.from_address(O['MCL_GAPLESS'])
+    gapless.value = 0
+    fw.mock('mclSetGaplessMode', lambda on, *_: setattr(gapless, 'value', on))
+    cc = fw.fn('q2ui_cc_set', C.c_int, C.c_char_p, C.c_int)
+    assert cc(b'gapless', 1) == 0 and saved == [('PLAYSET', 'GAPLESS', 1)] and gapless.value == 1
+    assert cc(b'gapless', 0) == 0 and saved[-1] == ('PLAYSET', 'GAPLESS', 0) and gapless.value == 0
+    saved.clear()
+    assert cc(b'xfade', 1) == 0 and saved == [('Q2POD', 'XFADE', 1), ('PLAYSET', 'GAPLESS', 1)] and gapless.value == 1
+    saved.clear()
+    assert cc(b'xfade', 0) == 0 and saved == [('Q2POD', 'XFADE', 0)] and gapless.value == 1
+    assert cc(b'xfade', 0) == 0 and saved == [('Q2POD', 'XFADE', 0)]  # already off: nothing written again
+
 class Piped(Gate):
     """The gate with q2ui's settings pipe: pipe2 answers READ and WRITE, and what q2ui wrote is read from READ."""
     READ, WRITE = 20, 21
@@ -457,3 +475,49 @@ def test_q2uis_brightness_slider_sets_the_backlight_and_is_told_it_with_the_volu
     cc = fw.fn('q2ui_cc_set', C.c_int, C.c_char_p, C.c_int)
     assert cc(b'bright', 80) == 0 and lit == [80]
     assert cc(b'bright', 101) == -1 and cc(b'bright', -1) == -1 and lit == [80]
+
+
+def told_cover(fw, mcl, path, parsed, kind):
+    """What demo tells q2ui of the playing song's cover (cover=), path playing and the player's cover thread last done
+    with parsed, its type kind."""
+    from conftest import Deques, Files
+    files = Files(fw)
+    g = Gate(fw)
+    fw.mock('mclGetOutputWay', lambda *_: 0)
+    r, s = C.create_string_buffer(O['REC_SIZE'] + 8), C.create_string_buffer(path)
+    struct.pack_into('<Q', r, O['REC_PATH'], C.addressof(s))
+    fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = Deques(fw).new([C.addressof(r)])
+    mcl.pos = 0
+    fw.var('fw_ctx_g_lastcover_url', C.c_char * 1024).value = parsed
+    fw.var('g_playcover_type', C.c_ubyte).value = kind
+    g.poll()
+    g.poll()
+    return dict(line.split('=', 1) for line in files.files['/tmp/q2ui.status'].decode().splitlines()).get('cover')
+
+
+@pytest.mark.parametrize('kind, said', ((1, '/tmp/coverpic.jpg'), (2, '/tmp/externpic.jpg'), (4, '/tmp/externpic.jpg'),
+                                        (3, ''), (0, '')))
+def test_q2ui_is_told_which_file_holds_the_playing_songs_cover(fw, mcl, kind, said):
+    """q2ui shows the file demo names for the playing song's cover (coverflow.c song_cover_url): the player writes an
+    embedded picture to /tmp/coverpic.jpg (type 1) and a folder image or a download to /tmp/externpic.jpg (2, 4), and
+    leaves the other file as the song before left it. None found (3), or not parsed yet (0), is cover= alone."""
+    song = b'/mnt/mmc/Music/a.flac'
+    assert told_cover(fw, mcl, song, song, kind) == said
+
+
+def test_q2ui_is_told_no_cover_while_the_player_has_not_parsed_the_playing_song(fw, mcl):
+    """The player's type is the song before's until its cover thread is done with this one (now_cover)."""
+    assert told_cover(fw, mcl, b'/mnt/mmc/Music/b.flac', b'/mnt/mmc/Music/a.flac', 1) == ''
+
+
+def test_q2ui_is_told_abouts_versions(fw, mcl):
+    """q2ui's About shows the product and this build's version and the stock firmware's as demo's About does
+    (vamp_version: the version without its " Muse")."""
+    from conftest import Files
+    files = Files(fw)
+    g = Gate(fw)
+    fw.mock('mclGetOutputWay', lambda *_: 0)
+    g.poll()
+    g.poll()
+    said = dict(line.split('=', 1) for line in files.files['/tmp/q2ui.status'].decode().splitlines())
+    assert said['product'] == 'Vamp' and said['firmware'] == 'V1.36' and said['version'] and 'Muse' not in said['version']

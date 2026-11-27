@@ -2,15 +2,17 @@
  * Each row opens demo's page for it through the gate (ui_demo_page): stock's settings pages by
  * their path, as stock's own rows open them, and Car Remote and Controls by the payload's openers
  * (patch/q2ui_gate.c openers). As q2ui gets pages of its own (docs/ui-rewrite.md, step 4), a row's
- * demo name gives way to its page: Display is q2ui's (page_display.c). */
+ * demo name gives way to its page: General (page_general.c), Playback (page_playback.c) and
+ * Display (page_display.c) are q2ui's. */
 #include "q2ui.h"
 
 static const struct {
-    const char *title, *demo; /* demo 0: a page of q2ui's */
+    const char *title, *demo; /* demo 0: a page of q2ui's, opened by push */
+    void (*push)(void);
 } rows[] = { { "Wi-Fi", "systemset/wifi_page" },         { "Bluetooth", "systemset/bluetooth_page" },
-             { "General", "systemset/sysset_page" },     { "Playback", "playset/playset_page" },
+             { "General", 0, general_push },     { "Playback", 0, playback_push },
              { "Streaming", "stream_page" },             { "Car Remote", "carremote_page" },
-             { "Display", 0 },    { "Controls", "controls_page" },
+             { "Display", 0, display_push },    { "Controls", "controls_page" },
              { "Battery", "systemset/powermanager_page" } };
 #define ROWS ((int)(sizeof rows / sizeof *rows))
 
@@ -25,7 +27,7 @@ static void row(void *ctx, int i, ui_row *out) {
 static void chosen(void *ctx, int i) {
     (void)ctx;
     if (!rows[i].demo)
-        display_push();
+        rows[i].push();
     else
         ui_demo_page(rows[i].demo);
 }

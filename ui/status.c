@@ -51,7 +51,7 @@ static struct {
     char out[8], bt[12], relay[12];
     int btbatt, lock, sync, syncpm, offline, net;
     int told;         /* status_told changed since it was read */
-    char told_text[512]; /* the file as last read, for status_told_value */
+    char told_text[1536]; /* the file as last read, for status_told_value: a cover's path is up to 600 */
     int spin;         /* the sync arrows' frame shown */
 } S = { .level = -1, .volume = -1, .btbatt = -1, .net = 1, .told = 1 };
 
@@ -124,7 +124,7 @@ int status_told_value(const char *key, char *out, size_t room) {
 }
 
 static void read_told(void) {
-    char line[64], num[12], text[sizeof S.told_text];
+    char line[640], num[12], text[sizeof S.told_text]; /* a line: up to the cover's path (now.c) */
     FILE *f = fopen(status_told, "r");
     size_t got = f ? fread(text, 1, sizeof text - 1, f) : 0;
     text[got] = 0;

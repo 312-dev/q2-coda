@@ -1207,6 +1207,27 @@ def test_a_streaming_songs_cover_is_the_players_else_its_apps(rig, fw):
     assert len(forks) == 2  # the app's cover, then the probe; before, the probe alone
 
 
+def test_q2ui_is_told_a_server_songs_cover_as_its_app_keeps_it(rig, fw, mcl):
+    """q2ui's Now Playing shows the file demo names (q2ui_gate.c tell, cover=): for a streaming song with no picture of
+    its own, its app's cover of the album, the one demo's Control Center and modal header show."""
+    from test_q2ui_gate import Gate
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, album_id='al1')])
+    rig.poll()
+    path = '/mnt/mmc/.subsonic/stream/9f3a/original/0/One [s1].flac'
+    rig.files.files['/mnt/mmc/.subsonic/covers/al1.jpg'] = b'jpeg'
+    g = Gate(fw)
+    fw.mock('fw_access', lambda p, mode, *_: 0 if C.string_at(p) == b'/usr/bin/q2ui' else rig.access(p, mode))
+    fw.mock('mclGetOutputWay', lambda *_: 0)
+    fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = rig.rows.new([rig.record(path)])
+    mcl.pos = 0
+    fw.var('fw_ctx_g_lastcover_url', C.c_char * 1024).value = path.encode()
+    fw.var('g_playcover_type', C.c_ubyte).value = 3  # the player found none in the file
+    g.poll()
+    g.poll()
+    said = dict(line.split('=', 1) for line in rig.files.files['/tmp/q2ui.status'].decode().splitlines())
+    assert said['cover'] == '/mnt/mmc/.subsonic/covers/al1.jpg'
+
+
 def group_record(rig, field, name, rid=1):
     """A row of Search's Artists, Albums or Genres tab as its callback fills it: a directory's type, its id
     and the name in its tab's field alone (the others overlap it as host pointers)."""
