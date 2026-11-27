@@ -815,3 +815,46 @@ def test_under_reduce_motion_the_bars_stand_still(fw, st, xf):
     still = xf.bars_of(0)
     xf.now += 400
     assert xf.sync_sig() == 0 and xf.bars_of(0) == still and 33 not in [ms for _, ms in xf.timers]
+
+
+def state(fw):
+    """status_row_state's lines for q2ui (q2ui_gate.c tell), as a dict."""
+    b = C.create_string_buffer(200)
+    n = fw.fn('status_row_state', C.c_uint, C.c_char_p, C.c_uint)(b, 200)
+    text = b.raw[:n].decode()
+    assert text.endswith('\n') and n == len(b.value)
+    return dict(line.split('=', 1) for line in text.splitlines())
+
+
+@pytest.mark.parametrize('way, po, link, level, cls, out, bt, btbatt', [
+    (0, 0, None, None, None, 'none', 'none', '-1'),  # nothing in, nothing linked: the deaf ear
+    (0, 1, None, None, None, 'wire', 'none', '-1'),  # the 3.5 mm jack
+    (2, 0, None, None, None, 'wire', 'none', '-1'),  # a USB DAC
+    (3, 0, None, None, None, 'other', 'none', '-1'),  # the car's USB audio
+    (1, 0, 3, None, None, 'other', 'rune', '-1'),  # a headset linked that says no level
+    (1, 0, 3, 72, 0x240404, 'other', 'headset', '72'),  # one that says its level
+    (1, 0, 3, None, 0x200420, 'other', 'car', '-1'),  # a car
+])
+def test_q2ui_is_told_where_the_sound_goes_and_what_bluetooth_links(fw, row, way, po, link, level, cls, out, bt, btbatt):
+    """q2ui draws its own status row while it has the screen; these are the states it cannot read itself
+    (docs/ui-rewrite.md#cutover), by the same tests demo's row paints from: what the line says is what the slots
+    above show."""
+    row.way = way
+    jacks(fw, po, 0)
+    if link is not None:
+        bt_link(fw, link, level, cls)
+    said = state(fw)
+    assert (said['out'], said['bt'], said['btbatt'], said['relay']) == (out, bt, btbatt, 'none')
+    assert fw.fn('status_row__wired_shown', C.c_int)() == (14 if out == 'wire' else EAR_W if out == 'none' else 0)
+
+
+def test_q2ui_is_told_of_the_lock_a_sync_a_server_out_of_reach_and_wifi_with_no_internet(fw, row):
+    row.wifi(3)
+    said = state(fw)
+    assert (said['lock'], said['sync'], said['syncpm'], said['offline'], said['net']) == ('0', '0', '0', '0', '1')
+    fw.var('g_keylock_flag', C.c_ubyte).value = 1
+    row.app(2, 450)
+    row.ap.a[0].reach = 1
+    row.online = 0
+    said = state(fw)
+    assert (said['lock'], said['sync'], said['syncpm'], said['offline'], said['net']) == ('1', '2', '450', '1', '0')

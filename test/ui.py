@@ -62,7 +62,7 @@ def base_args(binary, d):
     return [str(binary), '--page', 'songs', '--panel-bits', '8', '--db', d/'library.db', '--catalogue', '', '--fb', d/'fb', '--fonts', d/'fonts', '--icons', d,
             '--stats', d/'stats.json', '--state', d/'state', '--cmdq', d/'cmdq', '--playlist', d/'list', '--backlight', d/'backlight',
             '--now', d/'now', '--cover', d/'cover.jpg', '--ask', d/'ask', '--power', d/'power', '--wifi', d/'wifi',
-            '--wireless', d/'wireless']
+            '--wireless', d/'wireless', '--told', d/'told']
 
 
 class Picture:
@@ -541,6 +541,90 @@ def status(binary, work):
     fan = lambda p: sum(1 for y in range(16, 29) for x in range(250, 281) if p.at(x, y) == WHITE)  # noqa: E731
     good &= check("Wi-Fi's fan is lit by its signal: all of it strong, its dot alone weak, none when not connected",
                   fan(strong) > fan(weak) * 2 > 0 and fan(half) == 0, f'{fan(strong)} {fan(weak)} {fan(half)}')
+    return good & told(binary, work)
+
+
+# the status glyphs demo's word draws (tools/art.py status_images), made up here as a colour each, at their boxes' sizes
+TOLD_ART = {'status_wired_d': (14, (0, 200, 0)), 'status_noaudio_d': (10, (200, 0, 0)), 'status_bt_d': (9, (0, 0, 200)),
+            'status_btdim_d': (9, (0, 0, 100)), 'status_car_d': (19, (100, 0, 100)), 'status_headphones_d': (14, (200, 200, 0)),
+            'keylock_d': (14, (0, 200, 200)), 'status_offline_d': (14, (200, 0, 200)), 'status_wifi_x_d': (16, (100, 100, 0))}
+
+
+def told(binary, work):
+    """What only demo knows for the status row (patch/status_row.c status_row_state, written by q2ui_gate.c to
+    /tmp/q2ui.status): where the sound goes, Bluetooth, the lock, a card app's sync and server, Wi-Fi's internet."""
+    good = True
+    icons = pathlib.Path(tempfile.mkdtemp(dir=work))
+    for name, (w, rgb) in TOLD_ART.items():
+        png(icons/f'oled_{name}.png', w, 14, rgb)
+    for f in range(30):  # the sync arrows' frames, a colour each
+        png(icons/f'oled_status_sync_{f}_d.png', 14, 14, (10 + f * 8, 50, 50))
+
+    def row(said, wifi=False):
+        d = pathlib.Path(tempfile.mkdtemp(dir=work))
+        (d/'battery').mkdir()
+        (d/'battery/capacity').write_text('50\n')
+        (d/'battery/status').write_text('Discharging\n')
+        (d/'told').write_text(''.join(f'{k}={v}\n' for k, v in said.items()))
+        if wifi:
+            (d/'operstate').write_text('up\n')
+            (d/'wireless').write_text(' wlan0: 0000   60.  -50.  -256\n')
+        _, pics, _ = script(binary, work, 5, ['rest', 'shot @row.ppm'], '--power', d, '--told', d/'told', '--icons', icons,
+                            '--wifi', d/'operstate', '--wireless', d/'wireless')
+        return pics['row']
+    colour = lambda name: TOLD_ART[name][1]  # noqa: E731
+    # the battery's body starts at 285.5, so the slots end at 279, GAP (6) left of it
+    wire, ear, other = row({'out': 'wire'}), row({'out': 'none'}), row({'out': 'other'})
+    good &= check('wired headphones, the deaf ear with no output, nothing for any other output: each in its box by the battery',
+                  wire.at(272, 22) == colour('status_wired_d') and wire.at(264, 22) == (0, 0, 0) and
+                  ear.at(274, 22) == colour('status_noaudio_d') and ear.at(268, 22) == (0, 0, 0) and
+                  all(other.at(x, 22) == (0, 0, 0) for x in range(200, 280)),
+                  f"{wire.at(272, 22)} {ear.at(274, 22)} {[x for x in range(200, 280) if other.at(x, 22) != (0, 0, 0)]}")
+    rune, dim = row({'out': 'none', 'bt': 'rune'}), row({'out': 'none', 'bt': 'connecting'})
+    good &= check('the Bluetooth rune stands left of the ear, GAP between, and dim while a device connects',
+                  rune.at(274, 22) == colour('status_noaudio_d') and rune.at(258, 22) == colour('status_bt_d') and
+                  dim.at(258, 22) == colour('status_btdim_d'), f'{rune.at(258, 22)} {dim.at(258, 22)}')
+    headset = row({'out': 'other', 'bt': 'headset', 'btbatt': 19})
+    good &= check("a headset that says its level: headphones, then its own battery, red under a fifth",
+                  headset.at(253, 22) == colour('status_headphones_d') and headset.at(265, 23) == (0xff, 0x45, 0x3a),
+                  f'{headset.at(253, 22)} {headset.at(265, 23)}')
+    many = row({'out': 'other', 'sync': 2, 'syncpm': 500, 'lock': 1, 'offline': 1})
+    good &= check("a download's ring half filled clockwise from 12 o'clock, then the padlock, then the cloud",
+                  # the ring's 1.6 px line is mostly edge: its hue, not its whole colour
+                  many.at(278, 23)[2] > 120 > many.at(278, 23)[0] and len(set(many.at(264, 23))) == 1 and many.at(264, 23)[0] > 20 and
+                  many.at(250, 22) == colour('keylock_d') and many.at(231, 22) == colour('status_offline_d'),
+                  f'{many.at(278, 23)} {many.at(264, 23)} {many.at(250, 22)} {many.at(231, 22)}')
+    crossed = row({'out': 'other', 'net': 0}, wifi=True)
+    good &= check('Wi-Fi linked with no internet is the fan crossed out', crossed.at(271, 22) == colour('status_wifi_x_d'), str(crossed.at(271, 22)))
+    # the arrows turn while a card app checks its server: a frame of theirs every 33 ms
+    d = pathlib.Path(tempfile.mkdtemp(dir=work))
+    (d/'told').write_text('out=other\nsync=1\n')
+    lines = ['run 300'] + [f'shot @s{k}.ppm\nrun 70' for k in range(6)]  # no rest: the arrows never stop
+    _, pics, _ = script(binary, work, 5, lines, '--told', d/'told', '--icons', icons)
+    frames = {pics[f's{k}'].at(306, 23) for k in range(6)}  # no battery here: the arrows end at the row's right, 313
+    good &= check('the sync arrows turn, a frame of theirs every 33 ms', len(frames) >= 5, str(frames))
+    # and live, where only the loop's own wake-up moves them: both panel pages read, as a page is never at rest
+    run = Run(binary, work, 5, '--told', d/'told', '--icons', icons, '--clock', '12:00')
+    try:
+        seen = set()
+        for _ in range(8):
+            time.sleep(0.07)
+            seen |= {shot.pixel(shot.page(run.dir/'fb', k), 306, 23) for k in (0, 1)}
+        good &= check('live, the arrows turn by themselves', len(seen) >= 5, str(len(seen)))
+    finally:
+        run.end()
+    # demo writing the file anew is drawn at once, by the watch of its folder: a live run
+    (d/'told').write_text('out=other\n')
+    run = Run(binary, work, 5, '--told', d/'told', '--icons', icons, '--clock', '12:00')
+    try:
+        run.rest()
+        before = shot.pixel(run.picture(), 306, 22)
+        (d/'told.tmp').write_text('out=wire\n')
+        (d/'told.tmp').rename(d/'told')
+        after = shot.pixel(run.picture() if run.rest() else b'', 306, 22)
+        good &= check("demo's new file is drawn as it lands", before == (0, 0, 0) and after == colour('status_wired_d'), f'{before} {after}')
+    finally:
+        run.end()
     return good
 
 

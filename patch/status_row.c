@@ -212,6 +212,25 @@ static int no_output(void) {
 static int wired_shown(void) { return wired_on() ? SR_GLYPH : no_output() ? SR_EAR_W : 0; }
 static int offline_shown(void) { return addon_offline() ? SR_OFFLINE : 0; }
 
+/* The slots' states as q2ui reads them (q2ui_gate.c q2ui_tell, ui/status.c), a key=value line each,
+ * into b; its length. q2ui draws a status row of its own while it has the screen, but where the
+ * sound goes, the Bluetooth link, Buttons Lock, a card app's sync and its server are demo's alone
+ * today, so demo says them, by the same tests its own row paints from:
+ *   out=wire|none|other  wired headphones take the sound; nothing does (the deaf ear); else
+ *   bt=none|connecting|rune|headset|car|guest, btbatt=N  the Bluetooth slot, a headset's level
+ *   relay=none|headphones|car  where a guest's phone plays through the Q2, while one plays
+ *   lock=0|1  sync=0|1|2 syncpm=N  offline=0|1  net=0|1 (0: Wi-Fi linked with no internet) */
+unsigned status_row_state(char *b, unsigned room) {
+    static const char *const bt[] = { "none", "connecting", "rune", "headset", "car", "guest" };
+    int slot = bt_slot(), permille = 0, sync = addon_sync(&permille);
+    const char *relay = slot != BT_SLOT_GUEST || !guest_relayed() ? "none" : linked_w() == SR_CAR_W ? "car" : "headphones";
+    int n = tk_snprintf(b, room, "out=%s\nbt=%s\nbtbatt=%d\nrelay=%s\nlock=%d\nsync=%d\nsyncpm=%d\noffline=%d\nnet=%d\n",
+                        wired_on() ? "wire" : no_output() ? "none" : "other", bt[slot],
+                        slot == BT_SLOT_HEADSET ? bt_headset_battery() : -1, relay, !!g_keylock_flag, sync,
+                        sync == 2 ? permille : 0, !!addon_offline(), !wifi_offline());
+    return n < 0 ? 0 : (unsigned)n >= room ? room - 1 : (unsigned)n;
+}
+
 /* The play state, in Text Primary as every glyph: playing, the level bars (ui_kit.h lvl_h16, the
  * motion Up Next's and Home's share), 2 px wide with round ends, SR_BAR_LO to SR_INK tall at their
  * clock's time and standing on the digits' baseline; paused, the pause, two SR_PAUSE_W bars SR_INK

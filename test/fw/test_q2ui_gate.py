@@ -270,3 +270,39 @@ def test_a_page_the_payload_builds_is_not_opened_by_its_name(fw, name):
     g.poll()
     assert g.opened == [] and g.on() == 0
 
+
+
+def test_while_q2ui_runs_demo_tells_it_the_status_rows_states_when_they_change(fw):
+    """What only demo knows for q2ui's status row (status_row_state: where the sound goes, Bluetooth, the lock, a
+    card app's sync and server) is written to /tmp/q2ui.status, looked at every 500 ms and written only on a change,
+    so at rest nothing is written and q2ui's watch of /tmp never wakes it."""
+    from conftest import Files
+    files = Files(fw)
+    writes = []
+    rename = files.rename
+    fw.mock('fw_rename', lambda a, b, *_: writes.append(C.string_at(b).decode()) or rename(a, b))
+    g = Gate(fw)
+    fw.var('g_po_status', C.c_ubyte).value = 0
+    fw.mock('mclGetOutputWay', lambda *_: 0)
+    assert writes == []  # nothing before q2ui runs
+    g.poll()  # started
+    g.poll()
+    said = files.files.get('/tmp/q2ui.status', b'').decode()
+    assert writes == ['/tmp/q2ui.status'] and 'out=none\n' in said and 'lock=0\n' in said
+    for _ in range(3):
+        g.ms += 600
+        g.poll()
+    assert len(writes) == 1  # the same states: no write
+    fw.var('g_po_status', C.c_ubyte).value = 1  # a jack goes in
+    g.ms += 100
+    g.poll()
+    assert len(writes) == 1  # looked at again only 500 ms on
+    g.ms += 500
+    g.poll()
+    assert len(writes) == 2 and 'out=wire\n' in files.files['/tmp/q2ui.status'].decode()
+    g.ended = 1
+    g.poll()  # q2ui ended: demo has the screen and its own row
+    fw.var('g_po_status', C.c_ubyte).value = 0
+    g.ms += 1000
+    g.poll()
+    assert len(writes) == 2

@@ -167,11 +167,11 @@ const image_t *icon(const char *name) {
     static struct {
         char name[24];
         image_t *im;
-    } kept[48];
+    } kept[96]; /* the status row's sync arrows alone are 30 */
     static int n;
     for (int i = 0; i < n; ++i)
         if (!strcmp(kept[i].name, name)) return kept[i].im;
-    if (n == 48 || strlen(name) >= sizeof kept[0].name) return 0;
+    if (n == 96 || strlen(name) >= sizeof kept[0].name) return 0;
     char path[320];
     /* a name with its own ending (mode_shuffle_on) is that file; a bare one is its white glyph */
     snprintf(path, sizeof path, strchr(name, '.') ? "%s/oled_%.*s.png" : "%s/oled_%.*s_w.png", icon_dir,
