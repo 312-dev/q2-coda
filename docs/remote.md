@@ -2,7 +2,7 @@
 
 `q2remote` gives a developer, or an AI agent working on the project, a root shell, screenshots and input on a Q2 over the local network, so a change can be tried and checked without touching the device. It ships **only in `--dev` builds** ([building.md](building.md)): `tools/build.py --dev` compiles `patch/remote.c` into `/usr/bin/q2remote` and starts it from `S90play` after dbus; release builds don't contain it, and `test/build.py` checks that.
 
-Over a USB cable, `--dev` builds also run `adbd`: see [adb.md](adb.md).
+**Retired in favour of adb.** `--dev` builds run `adbd` over the cable and over Wi-Fi, with RSA keys and discovery by name, and [`vamp`](adb.md#vamp) runs every command below over it: `vamp shot`, `vamp key`, `vamp log` and the rest are this tool's own commands with vamp as their transport (`q2remote.TRANSPORT`). Port 2302 keeps working until the [device test plan](adb.md#device-test-plan) has passed on a Q2; then S90play stops starting its listener and this page's client side goes, while the Q2-side helper (`q2remote --shot`, `--prof`) stays for vamp.
 
 It listens on TCP port 2302 and sends the key and every command **unencrypted**. Use it only on a network you trust, such as your own phone's hotspot, and never leave a key on a card you lend or sell.
 
@@ -34,7 +34,7 @@ Each connection rereads `/mnt/mmc/q2remote.key` while the card is mounted, so re
 
 ## Smart Wi-Fi
 
-With **Smart Wi-Fi** on, the Q2 turns its radio off once nothing has needed the network for 5 minutes, and while it is off q2remote cannot be reached. In a `--dev` build q2remote counts as needing it: Wi-Fi stays on for 30 minutes after each request (`REMOTE_HOLD_MS`; any command that passes the key, `find` not included), and for the first 30 minutes after demo starts (`REMOTE_BOOT_MS`), so a Q2 just updated or restarted can be found. Past both, once Smart Wi-Fi has the radio off, no request can arrive to bring it back: wake it on the Q2 (open Streaming or the Wi-Fi page), plug in the cable, or turn Smart Wi-Fi off. Each hold's start and end is a line in the [unified log](internals.md#unified-log) (`q2remote: ...`, source `wifi`). How it works: [internals: Smart Wi-Fi](internals.md#smart-wi-fi).
+With **Smart Wi-Fi** on, the Q2 turns its radio off once nothing has needed the network for 5 minutes, and while it is off q2remote cannot be reached. In a `--dev` build q2remote counts as needing it: Wi-Fi stays on for 30 minutes after each request (`REMOTE_HOLD_MS`; any command that passes the key, `find` not included), and for the first 30 minutes after demo starts (`REMOTE_BOOT_MS`), so a Q2 just updated or restarted can be found. Past both, once Smart Wi-Fi has the radio off, no request can arrive to bring it back: wake it on the Q2 (open Streaming or the Wi-Fi page), plug in the cable, or turn Smart Wi-Fi off. Each hold's start and end is a line in the [unified log](internals.md#unified-log) (`q2remote: ...`, source `wifi`). The Wi-Fi adbd holds the radio the same way, through the same file ([adb: ADB over Wi-Fi](adb.md#adb-over-wi-fi)). How it works: [internals: Smart Wi-Fi](internals.md#smart-wi-fi).
 
 ## Commands
 

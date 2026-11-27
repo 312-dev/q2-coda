@@ -528,11 +528,17 @@ Q2UPDATE = 'usr/bin/q2update'
 ADB_HOOK = (b'/usr/bin/q2remote &\n',
             b'/usr/bin/q2remote &\n/usr/bin/q2adb-gadget setup && (while :; do /usr/bin/adbd </dev/null >/dev/null 2>&1 &'
             b' /usr/bin/q2adb-gadget bind; wait $!; sleep 2; done) &\n')
+# --dev only (docs/adb.md#adb-over-wi-fi): adb over Wi-Fi, a second adbd on TCP 5555 and its mDNS advertisement,
+# kept running by q2adb-wifi (patch/adb_wifi.sh) while a computer is trusted and ADBWIFI is not 0. After
+# ADB_HOOK's line, before USBTRACE_HOOK's.
+ADB_WIFI, ADB_MDNS = 'usr/bin/q2adb-wifi', 'usr/bin/q2adb-mdns'
+ADB_MDNS_SOURCES = ['adb_mdns', 'coda_rc_mdns']
 # --dev only (docs/internals.md#usb-tracer): q2-usbtrace, after ADB_HOOK's lines. Started again if it ends
 # with an error, three times a boot at most; it ends with 0, and is not started again, when one of its two flag
 # files is there (/mnt/data/q2-usbtrace.off, the card's .q2muse/usbtrace.off), which it checks each second.
-USBTRACE_HOOK = (ADB_HOOK[1],
-                 ADB_HOOK[1] + b'(n=0; while [ $n -lt 4 ]; do /usr/bin/q2-usbtrace </dev/null >/dev/null 2>&1 && break;'
+ADB_WIFI_HOOK = (ADB_HOOK[1], ADB_HOOK[1] + b'/usr/bin/q2adb-wifi &\n')
+USBTRACE_HOOK = (ADB_WIFI_HOOK[1],
+                 ADB_WIFI_HOOK[1] + b'(n=0; while [ $n -lt 4 ]; do /usr/bin/q2-usbtrace </dev/null >/dev/null 2>&1 && break;'
                  b' n=$((n+1)); sleep 5; done) &\n')
 # Stock's USB scripts, which demo runs to start and stop USB storage and the USB DAC: in a --dev build each is
 # wrapped (adb_wrapper) and stock's kept beside it as <name>_stock.sh, so the ADB gadget gives way to stock's.
@@ -2492,10 +2498,12 @@ def adbd_binary(out):
 
 def adb_files(out, cat):
     """A --dev build's ADB files ({rootfs path: (path whose inode metadata it takes, bytes)}): adbd, its gadget
-    script, q2update, and stock's USB scripts wrapped (adb_wrapper), each stock copy before its wrapper, which takes the
+    script, adb over Wi-Fi's supervisor and mDNS responder, q2update, and stock's USB scripts wrapped (adb_wrapper), each stock copy before its wrapper, which takes the
     inode the copy's metadata comes from."""
     return {ADBD: (HELPER_LIKE, adbd_binary(out)),
             ADB_GADGET: (HELPER_LIKE, (ROOT/'patch/adb_gadget.sh').read_bytes()),
+            ADB_WIFI: (HELPER_LIKE, (ROOT/'patch/adb_wifi.sh').read_bytes()),
+            ADB_MDNS: (HELPER_LIKE, compile_helper(out, cat, ADB_MDNS_SOURCES, 'q2adb-mdns', HELPER_LIBS[:1])),
             Q2UPDATE: (HELPER_LIKE, (ROOT/'patch/q2update.sh').read_bytes()),
             **{f'usr/bin/{n.replace(".sh", "_stock.sh")}': (f'usr/bin/{n}', cat(f'usr/bin/{n}')) for n in USB_SCRIPTS},
             **{f'usr/bin/{n}': (f'usr/bin/{n}', adb_wrapper(n)) for n in USB_SCRIPTS}}
@@ -3109,7 +3117,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(s90play.count(LOG_HOOK[0]) == 1, 'Unexpected demo loop')
     check(s90play.count(WHEEL_LOG_HOOK[0]) == 1, 'Unexpected card path')
     check(s90play.count(GUARD_DEV_HOOK[0]) == 1, 'Unexpected q2guard start')
-    s90play = s90play.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*USBTRACE_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK) if dev else s90play
+    s90play = s90play.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*ADB_WIFI_HOOK).replace(*USBTRACE_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK) if dev else s90play
     (out/'S90play').write_bytes(s90play)
     (out/'config.ini').write_bytes(default_config(cat(DEFAULT_CONFIG)))
     s11logo = cat(S11LOGO)
