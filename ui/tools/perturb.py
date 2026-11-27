@@ -80,6 +80,7 @@ CASES = {
  'slider-never-grabs': ('ui/list.c', '            l->grab = l->grab == l->sel ? -1 : l->sel;', '            l->grab = -1;', 'scripts', 'Centre grabs the slider'),
  'slider-track-plain': ('ui/list.c', '#define SLIDER_TRACK_ON 0x7da2ea', '#define SLIDER_TRACK_ON 0x333333', 'scripts', "the grabbed row's track on the bar"),
  'art-never-again': ('ui/art.c', '            if (t.tv_sec == seen_at.tv_sec && t.tv_nsec == seen_at.tv_nsec) continue;', '            continue;', 'pages', 'drawn within seconds'),
+ 'home-narrow': ('ui/page_home.c', '#define LIST_W 204', '#define LIST_W 196', 'pages', "Home's rows run to x 204"),
 }
 names = sys.argv[1:] or list(CASES)
 bad = 0

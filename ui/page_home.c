@@ -10,9 +10,12 @@
 
 #include "q2ui.h"
 
-#define LIST_W 196
+/* demo's Split (docs/oled-design.md, Screens: Home): the rows to x 204, their bar 16 to 188 and chevrons
+ * at 176, and the art from x 196, under the rows' last columns, where they draw nothing */
+#define LIST_W 204
+#define PANE_X 196
 #define HOME_TOP 40 /* Home's rows start 18 px above a list page's, as demo's Home has them */
-#define PANE ((rectf_t){ LIST_W, 0, SCREEN_W - LIST_W, SCREEN_H })
+#define PANE ((rectf_t){ PANE_X, 0, SCREEN_W - PANE_X, SCREEN_H })
 
 static const struct home_row {
     const char *title, *demo; /* demo: the page of demo's that row opens; 0: a page of q2ui's */
@@ -113,6 +116,7 @@ static void h_draw(void *st, rect_t r) {
     struct home_st *s = st;
     rect_t pane = rect_of(PANE, 0), part;
     fill(r, tok(TOK_CANVAS));
+    list_draw(s->list, r); /* first: the pane goes over the ground it lays under its last columns */
     if (rect_meet(r, pane, &part)) {
         const image_t *cover = now_cover();
         clip_set(part);
@@ -126,11 +130,8 @@ static void h_draw(void *st, rect_t r) {
         /* the pane's ends darken into the screen's, and its left edge into the list */
         shade_rows(0, 58, 64, 255);
         shade_rows(SCREEN_H - 40, SCREEN_H, 255, 40);
-        shade_cols(LIST_W, LIST_W + 10, 150, 255);
+        shade_cols(PANE_X, PANE_X + 10, 150, 255);
     }
-    clip_set(r);
-    list_draw(s->list, r);
-    clip_set(r);
 }
 static void h_close(void *st) {
     struct home_st *s = st;
