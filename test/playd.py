@@ -1263,14 +1263,14 @@ def send(root, *lines):
 def test_the_now_file_s_seq_moves_with_each_change_and_carries_car_remote_s_fields(run):
     """coda-rc reads Now Playing again only when seq= moved (coda_rc.c np_read), so q2playd writes it first, as demo's
     shim does (coda_rc_shim.c cr_now), with the queue's place and length, its generation and list, the modes, the
-    path and hearts -1 (a song q2playd cannot rate)"""
+    path and hearts (the stars, 0 for none)"""
     root, pl = run
     play_list(root, [1, 2, 3], 1)
     pl.pump()
     text = (root/'tmp/coda-rc.now').read_text()
     a = now(root)
     assert text.startswith('seq='), text
-    assert (a['qpos'], a['qlen'], a['shuffle'], a['repeat'], a['hearts']) == ('1', '3', '0', '0', '-1'), a
+    assert (a['qpos'], a['qlen'], a['shuffle'], a['repeat'], a['hearts']) == ('1', '3', '0', '0', '0'), a
     assert a['path'] == '/mnt/mmc/Music/b.mp3' and a['qgen'] == str(queue_file(root)[0][0]), a
     assert now(root)['seq'] == a['seq'], 'nothing changed: the same seq'
     fifo(root, 'next')
@@ -1441,3 +1441,209 @@ def test_shuffle_turned_on_keeps_the_song_playing_first_and_off_gives_the_order_
     assert wait_for_value(lambda: acks(root)[:1], [(96, 0)])
     (_, place, _), ids = queue_file(root)
     assert (ids, place) == (['1', '2', '3', '5', '6'], 1), (ids, place)
+
+
+# ---- ratings and likes (docs/playd.md#ratings-and-likes) ----
+
+RATE_LAYOUT = 0x48415356
+
+
+def listen_key(path):
+    """patch/nav/chapters_streams_folders.c listen_key: the path's FNV-1a and coverflow.c fnv's separator, never 0"""
+    h = 2166136261
+    for b in path.encode():
+        h = ((h ^ b) * 16777619) & 0xffffffff
+    h = (h * 16777619) & 0xffffffff
+    return h or 1
+
+
+def rate_words(root):
+    data = (root/'mnt/data/ringnav-ratings').read_bytes()
+    return list(struct.unpack(f'<{len(data) // 4}I', data))
+
+
+def rate_find(words, key):
+    """patch/ratings.c rate_slot's probe over a laid-out table: the key's stars, 0 for none"""
+    m = len(words) - 2
+    k = (((key >> 3) * 2654435761) & 0xffffffff) % m
+    for _ in range(m):
+        if not words[k]:
+            return 0
+        if words[k] != 7 and (words[k] ^ key) < 8:
+            return words[k] & 7
+        k = (k + 1) % m
+    return 0
+
+
+def laid_out(cap, ratings):
+    """a table as today's Vamp writes it (ratings.c rate_io): cap words, each (key, stars) at its probe, the trailer"""
+    t, m = [0] * cap, cap - 2
+    for key, n in ratings:
+        k = (((key >> 3) * 2654435761) & 0xffffffff) % m
+        while t[k]:
+            k = (k + 1) % m
+        t[k] = (key & ~7 & 0xffffffff) | n
+    t[m], t[m + 1] = RATE_LAYOUT, len(ratings) << 3 | 6
+    return struct.pack(f'<{cap}I', *t)
+
+
+def test_rate_keeps_the_playing_song_s_stars_in_today_s_table_and_the_now_file_shows_them(run):
+    """ratings.c rate_keep / rate_io: listen_key with its low 3 bits the stars, a 4096-word table laid out by its hash
+    with the layout mark and the slots in use last; the shim's hearts= the stars (cr_hearts), 0 for none"""
+    root, pl = run
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    assert now(root)['hearts'] == '0', 'a song with no stars'
+    send(root, '80 rate 4 1')
+    assert wait_for_value(lambda: acks(root)[:1], [(80, 0)]), acks(root)
+    w = rate_words(root)
+    assert len(w) == 4096 and w[4094] == RATE_LAYOUT and w[4095] == (1 << 3 | 6), (len(w), w[-2:])
+    assert rate_find(w, listen_key('/mnt/mmc/Music/a.flac')) == 4
+    assert now(root)['hearts'] == '4'
+    send(root, '81 rate 3 2')
+    assert wait_for_value(lambda: acks(root)[:1], [(81, 3)]), 'not the song playing: the shim\'s 3'
+    send(root, '82 rate 6 1')
+    assert wait_for_value(lambda: acks(root)[:1], [(82, 1)]), 'past five: refused'
+    send(root, '83 rate 0 1')
+    assert wait_for_value(lambda: acks(root)[:1], [(83, 0)])
+    w = rate_words(root)
+    assert rate_find(w, listen_key('/mnt/mmc/Music/a.flac')) == 0 and 7 in w, 'taken out: its slot RATE_GONE'
+    assert now(root)['hearts'] == '0'
+    fifo(root, 'next')
+    pl.pump()
+    send(root, '84 rate 5 2')
+    assert wait_for_value(lambda: acks(root)[:1], [(84, 0)])
+    w = rate_words(root)
+    assert w[4095] == (2 << 3 | 6), 'the gone slot still counts as in use, as rate_keep counts it'
+    assert rate_find(w, listen_key('/mnt/mmc/Music/b.mp3')) == 5
+
+
+def test_a_table_today_s_vamp_wrote_is_read_as_it_is_and_an_older_one_kept_beside(run):
+    """ratings.c rates(): a laid-out file as it is; one from before the hashing (ratings from the first slot, 16 KB)
+    laid out at its first use and kept once as ringnav-ratings.v1"""
+    root, pl = run
+    old = struct.pack('<4096I', (listen_key('/mnt/mmc/Music/b.mp3') & ~7 & 0xffffffff) | 3, *[0] * 4095)
+    (root/'mnt/data/ringnav-ratings').write_bytes(old)
+    play_list(root, [1, 2], 1)
+    pl.pump()
+    assert now(root)['hearts'] == '3', 'the older file\'s stars'
+    send(root, '85 rate 2 2')
+    assert wait_for_value(lambda: acks(root)[:1], [(85, 0)])
+    assert (root/'mnt/data/ringnav-ratings.v1').read_bytes() == old
+    w = rate_words(root)
+    assert w[4094] == RATE_LAYOUT and rate_find(w, listen_key('/mnt/mmc/Music/b.mp3')) == 2
+
+
+def test_a_laid_out_table_is_read_as_is_and_grows_past_three_quarters(run):
+    """ratings.c rate_slot/rate_grow: a new rating past three quarters of the slots in use doubles the table"""
+    root, pl = run
+    a = listen_key('/mnt/mmc/Music/a.flac')
+    filler = [(((i + 1) << 3) & 0xffffffff, 1) for i in range(3068)] + [(a, 2)]
+    (root/'mnt/data/ringnav-ratings').write_bytes(laid_out(4096, filler))
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    assert now(root)['hearts'] == '2', 'read as it is'
+    fifo(root, 'next')
+    pl.pump()
+    send(root, '86 rate 4 2')
+    assert wait_for_value(lambda: acks(root)[:1], [(86, 0)])
+    w = rate_words(root)
+    assert len(w) == 8192 and w[8191] >> 3 == 3070, (len(w), w[-1] >> 3)
+    assert rate_find(w, a) == 2 and rate_find(w, listen_key('/mnt/mmc/Music/b.mp3')) == 4
+
+
+def test_a_full_table_refuses_a_new_song_and_keeps_a_kept_one_s_change(run):
+    """at RATE_SLOTS (16384 words, 12285 ratings) a new song's rating is refused and nothing written"""
+    root, pl = run
+    a = listen_key('/mnt/mmc/Music/a.flac')
+    full = laid_out(16384, [(((i + 1) << 3) & 0xffffffff, 1) for i in range(12284)] + [(a, 2)])
+    (root/'mnt/data/ringnav-ratings').write_bytes(full)
+    play_list(root, [2, 1], 0)
+    pl.pump()
+    send(root, '87 rate 4 2')
+    assert wait_for_value(lambda: acks(root)[:1], [(87, 1)]), 'Ratings are full'
+    assert (root/'mnt/data/ringnav-ratings').read_bytes() == full
+    fifo(root, 'next')
+    pl.pump()
+    send(root, '88 rate 5 1')
+    assert wait_for_value(lambda: acks(root)[:1], [(88, 0)]), 'a kept song\'s can still change'
+    assert rate_find(rate_words(root), a) == 5
+
+
+def test_a_server_song_by_its_offline_copy_is_rated_under_its_server_row(run):
+    """catalogue.c catalogue_song_key: a server song playing from its copy keeps its stars under its row's fileurl"""
+    root, pl = run
+    sock = catalogue(root, copies={SERVER + 1: COPY1})
+    (root/'tmp/q2-navi.state').write_text('status=idle\nserver=down\n')
+    play_list(root, [SERVER + 1, 2], 0)
+    pl.pump(1.0)
+    assert pl.songs() == [('set-songurl', COPY1)]
+    send(root, f'89 rate 3 {SERVER + 1}')
+    assert wait_for_value(lambda: acks(root)[:1], [(89, 0)])
+    w = rate_words(root)
+    assert rate_find(w, listen_key('/mnt/mmc/.navi/cat/al1/s1.flac')) == 3 and rate_find(w, listen_key(COPY1)) == 0
+    sock.close()
+
+
+def likes(root):
+    db = sqlite3.connect(root/'mnt/data/vamp/likes.db')
+    try:
+        return sorted(r[0] for r in db.execute('select fileurl from myfav'))
+    finally:
+        db.close()
+
+
+def test_like_flips_the_heart_apart_from_the_stars(run):
+    """the pin's shim (9af5a6f5 coda_rc_shim.c "like ID", ratings.c rate_now_like): the like flipped, the stars left
+    alone; liked= in the now file after hearts=; 3 when the id is not the song playing"""
+    root, pl = run
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    send(root, '90 rate 2 1')
+    assert wait_for_value(lambda: acks(root)[:1], [(90, 0)])
+    assert now(root)['liked'] == '0'
+    send(root, '91 like 1')
+    assert wait_for_value(lambda: acks(root)[:1], [(91, 0)])
+    assert likes(root) == ['/mnt/mmc/Music/a.flac']
+    n = now(root)
+    assert (n['liked'], n['hearts']) == ('1', '2'), n
+    send(root, '92 like 2')
+    assert wait_for_value(lambda: acks(root)[:1], [(92, 3)])
+    send(root, '93 like 1')
+    assert wait_for_value(lambda: acks(root)[:1], [(93, 0)])
+    assert likes(root) == [] and now(root)['liked'] == '0'
+    text = (root/'tmp/coda-rc.now').read_text()
+    assert text.index('\nhearts=') < text.index('\nliked='), text
+
+
+def test_stock_s_favorites_are_taken_as_likes_once(run):
+    """going to Vamp OS loses nothing: stock's and today's Vamp's My Fav (database.db's myfav) seeds likes.db when it
+    is made, read only; database.db is not written"""
+    root, pl = run
+    db = sqlite3.connect(root/'mnt/data/database.db')
+    db.execute('create table myfav(id integer primary key, filename, fileurl, album, songer, name)')
+    db.execute("insert into myfav(fileurl) values ('/mnt/mmc/Music/b.mp3')")
+    db.commit()
+    db.close()
+    before = (root/'mnt/data/database.db').read_bytes()
+    play_list(root, [2, 1], 0)
+    pl.pump()
+    assert now(root)['liked'] == '1'
+    assert likes(root) == ['/mnt/mmc/Music/b.mp3']
+    send(root, '94 like 2')
+    assert wait_for_value(lambda: acks(root)[:1], [(94, 0)])
+    assert likes(root) == [] and now(root)['liked'] == '0', 'not seeded again'
+    assert (root/'mnt/data/database.db').read_bytes() == before
+
+
+def test_a_source_s_url_has_no_stars_and_refuses_rate_and_like(run):
+    root, pl = run
+    a = api(root)
+    a.say('source http://192.0.2.1/a.flac title=Far')
+    assert a.line() == 'ok'
+    pl.pump()
+    n = now(root)
+    assert (n['hearts'], n['liked']) == ('-1', '-1'), n
+    send(root, '95 rate 3 0', '96 like 0')
+    assert wait_for_value(lambda: acks(root)[:2], [(96, 3), (95, 3)]), acks(root)
+

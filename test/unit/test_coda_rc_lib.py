@@ -532,9 +532,30 @@ def test_vamp_os_s_library_is_q2libd_s_with_its_lengths_and_nothing_of_stock_s(v
     assert vampos.play('tracks') == ['1', '2', '3', '4']
 
 
-def test_vamp_os_has_no_favorites_yet_so_its_list_is_empty(vampos):
-    """q2libd keeps no myfav: Favorites is an empty list, not an error"""
+def test_vamp_os_with_no_likes_yet_has_an_empty_favorites_list(vampos):
+    """q2libd keeps no myfav and q2playd has made no likes.db: Favorites is an empty list, not an error, and not
+    stock's database.db's myfav"""
     assert vampos.browse('favorites')['total'] == 0
+
+
+def test_vamp_os_s_favorites_are_q2playd_s_likes(vampos):
+    """docs/playd.md#ratings-and-likes: /mnt/data/vamp/likes.db's myfav, by path, attached once q2playd has made it
+    (after the tables were: lib_key counts it); a like made after that is in the next list"""
+    assert vampos.browse('favorites')['total'] == 0
+    time.sleep(1.1)
+    db = sqlite3.connect(vampos.root / 'mnt/data/vamp/likes.db')
+    db.execute('create table myfav(fileurl text primary key)')
+    db.execute('insert into myfav values (?)', ('/mnt/mmc/' + SONGS[1][1],))
+    db.commit()
+    db.close()
+    assert titles(vampos.browse('favorites')) == [SONGS[1][2]]
+    assert len(titles(vampos.browse('tracks'))) == 4
+    time.sleep(1.1)  # the file's time must move (whole seconds on some file systems)
+    db = sqlite3.connect(vampos.root / 'mnt/data/vamp/likes.db')
+    db.execute('insert into myfav values (?)', ('/mnt/mmc/' + SONGS[3][1],))
+    db.commit()
+    db.close()
+    assert titles(vampos.browse('favorites')) == sorted([SONGS[1][2], SONGS[3][2]])
 
 
 def test_vamp_os_s_library_is_read_again_once_q2libd_has_changed_it(vampos):

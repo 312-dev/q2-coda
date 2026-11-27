@@ -1029,6 +1029,229 @@ static int read_list(int *ids) {
 static int pending_ids[QUEUE_MAX];
 
 /* One command. 0 done; -1 refused. */
+/* ---- ratings and likes (docs/playd.md#ratings-and-likes) ----
+ * A song's 0 to 5 stars in today's Vamp's table (patch/ratings.c, docs/internals.md#ratings), so either system reads
+ * what the other wrote: /mnt/data/ringnav-ratings, words each holding a song's listen_key with its low three bits the
+ * stars (0 a free slot, RATE_GONE a rating taken out), placed by the key's hash (rate_home) and probed on from there;
+ * RATE_MIN words to start, doubled whenever a new rating would put more than three quarters of the slots in use, up
+ * to RATE_SLOTS; the last two words the layout mark and the slots in use, written whole on each change. An older file,
+ * its ratings from the first slot, is laid out at its first use and kept once as it was, ringnav-ratings.v1. The like
+ * (the heart) is apart from the stars, as today's is stock's My Fav: q2libd's library has no myfav and stock's
+ * database.db is not written, so likes are /mnt/data/vamp/likes.db's myfav (stock's table's fileurl column alone),
+ * seeded from stock's myfav when it is made. A song is keyed by its path, a server song playing from its offline copy
+ * by its server row's fileurl (catalogue.c catalogue_song_key). A source's URL has neither. */
+#define RATE_GONE 7u
+#define RATE_MIN 4096
+#define RATE_SLOTS 16384
+#define RATE_LAYOUT 0x48415356u /* "VSAH", its low bits 6 */
+static const char *ratings_rel = "/mnt/data/ringnav-ratings", *likes_rel = "/mnt/data/vamp/likes.db",
+                  *stock_db_rel = "/mnt/data/database.db";
+static struct { unsigned *t, cap, used; int read; } rt;
+static struct { unsigned key; int v; } lk; /* the song's like as last read (likes.db changes only here) */
+
+static unsigned fnv(unsigned h, const void *p, size_t n) {
+    for (size_t i = 0; i < n; ++i) h = (h ^ ((const unsigned char *)p)[i]) * 16777619u;
+    return h;
+}
+
+static unsigned rate_room(unsigned cap) { return (cap - 2) / 4 * 3; } /* slots in use at most */
+static unsigned rate_home(unsigned key, unsigned m) { return ((key >> 3) * 2654435761u) % m; }
+static void rate_place(unsigned *t, unsigned m, unsigned v, unsigned *used) { /* v at its key's place in t's m slots */
+    unsigned k = rate_home(v, m);
+    for (unsigned n = 0; n < m && t[k] && (t[k] ^ v) >= 8; n++) k = (k + 1) % m;
+    *used += !t[k];
+    t[k] = v;
+}
+/* t's n words' ratings (marks and malformed slots passed over) in a new table of cap words; 0 with no memory */
+static unsigned *rate_layout(const unsigned *t, unsigned n, unsigned cap) {
+    unsigned *u = calloc(cap, sizeof *u), used = 0;
+    for (unsigned i = 0; u && i < n && used < rate_room(cap); i++)
+        if ((t[i] & 7) && (t[i] & 7) <= 5) rate_place(u, cap - 2, t[i], &used);
+    if (u) rt.cap = cap, rt.used = used;
+    return u;
+}
+
+/* buf written whole to p through p.tmp, synced and renamed: 1 when it was */
+static int blob_save(const char *p, const void *buf, size_t n) {
+    char tmp[700];
+    snprintf(tmp, sizeof tmp, "%s.tmp", p);
+    FILE *f = fopen(tmp, "wb");
+    if (!f) return 0;
+    int ok = fwrite(buf, 1, n, f) == n;
+    if (fflush(f) || fsync(fileno(f))) ok = 0;
+    if (fclose(f) || !ok || rename(tmp, p)) return unlink(tmp), 0;
+    return 1;
+}
+
+static int rate_save(void) {
+    unsigned m = rt.cap - 2;
+    rt.t[m] = RATE_LAYOUT, rt.t[m + 1] = rt.used << 3 | 6;
+    return blob_save(path(ratings_rel), rt.t, rt.cap * sizeof *rt.t);
+}
+
+/* The table, read at its first use (ratings.c rates) */
+static unsigned *rates(void) {
+    if (rt.t || rt.read) return rt.t;
+    rt.read = 1;
+    unsigned n = 0, room = RATE_MIN, rated = 0, cap = RATE_MIN;
+    unsigned *in = calloc(room, sizeof *in);
+    FILE *file = in ? fopen(path(ratings_rel), "rb") : 0;
+    while (file && (n += (unsigned)fread(in + n, sizeof *in, room - n, file)) == room && room < RATE_SLOTS &&
+           in[room - 2] != RATE_LAYOUT) {
+        unsigned *more = calloc(room * 2, sizeof *more);
+        if (!more) break;
+        memcpy(more, in, room * sizeof *in);
+        free(in), in = more, room *= 2;
+    }
+    if (file) fclose(file);
+    if (!in) return 0;
+    if (n == room && in[n - 2] == RATE_LAYOUT) { /* laid out already */
+        rt.cap = n, rt.used = in[n - 1] >> 3;
+        return rt.t = in;
+    }
+    for (unsigned i = 0; i < n; i++) rated += (in[i] & 7) && (in[i] & 7) <= 5;
+    while (cap < RATE_SLOTS && rate_room(cap) < rated + 1) cap *= 2;
+    char v1[700];
+    snprintf(v1, sizeof v1, "%s.v1", path(ratings_rel));
+    if (rated && access(v1, F_OK)) blob_save(v1, in, n * sizeof *in); /* kept once as it was */
+    rt.t = rate_layout(in, n, cap);
+    free(in);
+    return rt.t;
+}
+
+static int rate_grow(void) { /* twice the size, laid out again; 0 at RATE_SLOTS or with no memory */
+    unsigned *u;
+    if (rt.cap >= RATE_SLOTS || !(u = rate_layout(rt.t, rt.cap - 2, rt.cap * 2))) return 0;
+    free(rt.t), rt.t = u;
+    return 1;
+}
+
+/* key's slot; with room, the first free one on its probe when it has none (the table grown first when a new slot
+ * would fill it past its room); -1 when neither */
+static int rate_slot(unsigned key, int room) {
+    unsigned *t = rates(), m = t ? rt.cap - 2 : 0, k = rate_home(key, m | !m);
+    int empty = -1;
+    for (unsigned n = 0; t && n < m; n++, k = (k + 1) % m) {
+        if (!t[k]) {
+            if (!room) return -1;
+            if (empty >= 0) return empty;
+            if (rt.used < rate_room(rt.cap)) return (int)k;
+            return rate_grow() ? rate_slot(key, room) : -1;
+        }
+        if (t[k] == RATE_GONE) {
+            if (empty < 0) empty = (int)k;
+        } else if ((t[k] ^ key) < 8)
+            return (int)k;
+    }
+    return room ? empty : -1;
+}
+
+static int rate_kept(unsigned key) { /* 1 to 5, else 0 */
+    int i = rate_slot(key, 0), n = i < 0 ? 0 : (int)(rt.t[i] & 7);
+    return n <= 5 ? n : 0;
+}
+
+/* n stars for key, none for 0: 1 saved, 0 the table full, -1 not written (the slot as it was) */
+static int rate_keep(unsigned key, int n) {
+    int some = n > 0, i = rate_slot(key, some);
+    if (i < 0) return !some;
+    unsigned old = rt.t[i];
+    rt.t[i] = some ? (key & ~7u) | (unsigned)n : RATE_GONE;
+    rt.used += !old;
+    if (rate_save()) return 1;
+    rt.t[i] = old, rt.used -= !old;
+    return -1;
+}
+
+/* What is rated: the queue's song (not a source's URL), by its server row's fileurl for an offline copy */
+static const char *rated_path(void) { return src.on || !q.n || !*q.file ? 0 : *q.row_url ? q.row_url : q.file; }
+static unsigned listen_key(const char *p) { /* listen_key's: the path's FNV-1a and fnv's separator, never 0 */
+    unsigned k = fnv(2166136261u, p, strlen(p)) * 16777619u;
+    return k | !k;
+}
+static int playing_id(void) { return q.n && !q.paths ? q.ids[q.order[q.at]] : 0; } /* the now file's id= */
+
+/* likes.db, made with stock's favorites in it the first time; 0 when it cannot be opened */
+static sqlite3 *likes_open(void) {
+    sqlite3 *db;
+    char dir[640], attach[760];
+    snprintf(dir, sizeof dir, "%s/mnt/data/vamp", root);
+    mkdir(dir, 0755);
+    int fresh = access(path(likes_rel), F_OK) != 0;
+    if (sqlite3_open_v2(path(likes_rel), &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_URI, 0) != SQLITE_OK ||
+        sqlite3_exec(db, "create table if not exists myfav(fileurl text primary key)", 0, 0, 0) != SQLITE_OK) {
+        logf_("cannot open %s", path(likes_rel));
+        sqlite3_close(db);
+        return 0;
+    }
+    sqlite3_busy_timeout(db, 500);
+    if (fresh && access(path(stock_db_rel), R_OK) == 0) {
+        snprintf(attach, sizeof attach, "file:%s?mode=ro", path(stock_db_rel));
+        char *u = sqlite3_mprintf("attach %Q as stock;"
+                            "insert or ignore into myfav select fileurl from stock.myfav where fileurl is not null;"
+                            "detach stock",
+                            attach);
+        if (sqlite3_exec(db, u, 0, 0, 0) == SQLITE_OK) logf_("likes: stock's favorites taken");
+        sqlite3_free(u);
+    }
+    return db;
+}
+
+static int liked_now(void) { /* the song's like, 0 or 1, -1 when nothing is rated */
+    const char *p = rated_path();
+    if (!p) return -1;
+    unsigned key = listen_key(p);
+    if (lk.key == key) return lk.v;
+    sqlite3 *db = likes_open();
+    sqlite3_stmt *st;
+    int v = 0;
+    if (db && sqlite3_prepare_v2(db, "select 1 from myfav where fileurl = ?", -1, &st, 0) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, p, -1, SQLITE_STATIC);
+        v = sqlite3_step(st) == SQLITE_ROW;
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    if (db) lk.key = key, lk.v = v;
+    return v;
+}
+
+static int hearts_now(void) { /* the song's stars (the shim's hearts), -1 when nothing is rated */
+    const char *p = rated_path();
+    return p ? rate_kept(listen_key(p)) : -1;
+}
+
+/* The FIFO's "rate N ID" (coda_rc_shim.c): 0 set, 1 refused (past 5, the table full or not written), 3 when ID is not
+ * the song playing */
+static int rate_cmd(int n, int id) {
+    const char *p = rated_path();
+    if (!p || id != playing_id()) return 3;
+    if (n < 0 || n > 5) return 1;
+    int k = rate_keep(listen_key(p), n);
+    if (k <= 0) logf_(k ? "rating not saved" : "ratings are full");
+    ++q.seq;
+    return k > 0 ? 0 : 1;
+}
+
+/* The FIFO's "like ID" (the pin's coda_rc_shim.c, ratings.c rate_now_like): the like flipped */
+static int like_cmd(int id) {
+    const char *p = rated_path();
+    if (!p || id != playing_id()) return 3;
+    int was = liked_now();
+    sqlite3 *db = likes_open();
+    sqlite3_stmt *st;
+    int ok = 0;
+    if (db && sqlite3_prepare_v2(db, was ? "delete from myfav where fileurl = ?" : "insert or ignore into myfav values (?)",
+                                 -1, &st, 0) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, p, -1, SQLITE_STATIC);
+        ok = sqlite3_step(st) == SQLITE_DONE;
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    if (!ok) return logf_("like not saved"), 1;
+    lk.key = listen_key(p), lk.v = !was, ++q.seq;
+    return 0;
+}
+
 static int command(const char *verb, const int *ids, int n_ids) {
     int a = 0, b = 0, c = 0;
     if (sscanf(verb, "play %d %d %d", &a, &b, &c) == 3) {
@@ -1167,6 +1390,8 @@ static void cmdq_read(void) {
         int a, b, r = !verb                                                     ? -1
                       : sscanf(verb + 1, "jump %d %d", &a, &b) == 2               ? jump(a, b)
                       : sscanf(verb + 1, "mode %d %d", &a, &b) == 2               ? set_mode(a, b)
+                      : sscanf(verb + 1, "rate %d %d", &a, &b) == 2               ? rate_cmd(a, b)
+                      : sscanf(verb + 1, "like %d", &a) == 1                      ? like_cmd(a)
                       : sscanf(verb + 1, "queue %7s %d", where, &a) == 2 && (!strcmp(where, "next") || !strcmp(where, "last"))
                           ? enqueue(where[0] == 'n', a)
                           : command(verb + 1, 0, 0);
@@ -1200,7 +1425,7 @@ static void field(char *out, size_t room, const char *in, int encode) {
  * ms, as demo's shim writes it). */
 static void now_text(char *out, size_t room, const char *sep, int encode) {
     char t[800], a[800], b[800];
-    int id = q.n && !q.paths ? q.ids[q.order[q.at]] : 0;
+    int id = playing_id();
     field(t, sizeof t, q.title, encode), field(a, sizeof a, q.artist, encode), field(b, sizeof b, q.album, encode);
     snprintf(out, room, "title=%s%sartist=%s%salbum=%s%sstate=%d%spos=%d%slen=%d%svolume=%d%sid=%d", t, sep, a, sep, b, sep,
              q.state, sep, encode ? q.pos_ms / 1000 : q.pos_ms, sep, q.len_s, sep, q.volume, sep, id);
@@ -1213,11 +1438,6 @@ static void now_text(char *out, size_t room, const char *sep, int encode) {
  * moved, only when that changes; the now file's qpos, qlen and qgen are its place, lines and gen. */
 #define QUEUE_LISTED 5000 /* coda_rc_shim.c CR_QUEUE_MAX */
 static const char *queue_rel = "/tmp/coda-rc.queue";
-
-static unsigned fnv(unsigned h, const void *p, size_t n) {
-    for (size_t i = 0; i < n; ++i) h = (h ^ ((const unsigned char *)p)[i]) * 16777619u;
-    return h;
-}
 
 static void queue_write(void) {
     int n = q.n, start = 0, listed = n < QUEUE_LISTED ? n : QUEUE_LISTED;
@@ -1259,8 +1479,9 @@ static void queue_write(void) {
 
 /* The now file: seq= first, a count that moves with each change (coda-rc reads the rest only when it moved:
  * coda_rc.c np_read), what plays, then Car Remote's fields as demo's shim writes them (coda_rc_shim.c cr_now): the
- * modes (the play mode's: pm_shuffle, pm_repeat), hearts -1 (no ratings here: a song that cannot be rated), the queue file's place, lines
- * and gen, qlist (the queue itself), and the playing file's path. */
+ * modes (the play mode's: pm_shuffle, pm_repeat), hearts (the song's stars, 0 for none) and liked (its like, the pin's
+ * shim's), each -1 for a source's URL, which cannot be rated, the queue file's place, lines and gen, qlist (the queue
+ * itself), and the playing file's path. */
 static void now_write(void) {
     static unsigned writes;
     char text[2600], tmp[340];
@@ -1269,8 +1490,9 @@ static void now_write(void) {
     snprintf(tmp, sizeof tmp, "%s.q2playd", path(now_path_rel));
     FILE *f = fopen(tmp, "w");
     if (!f) return;
-    fprintf(f, "seq=%u\n%s\nshuffle=%d\nrepeat=%d\nhearts=-1\nqpos=%d\nqlen=%d\nqgen=%u\nqlist=%u\npath=", ++writes, text,
-            q.shuffle != 0 || pm_shuffle(), pm_repeat(), q.at - ql.start, ql.listed, ql.gen, q.list);
+    fprintf(f, "seq=%u\n%s\nshuffle=%d\nrepeat=%d\nhearts=%d\nliked=%d\nqpos=%d\nqlen=%d\nqgen=%u\nqlist=%u\npath=", ++writes,
+            text, q.shuffle != 0 || pm_shuffle(), pm_repeat(), hearts_now(), liked_now(), q.at - ql.start, ql.listed, ql.gen,
+            q.list);
     for (const char *c = q.file; *c; ++c) fputc(*c == '\n' || *c == '\r' ? ' ' : *c, f);
     fputc('\n', f);
     if (fclose(f) == 0) rename(tmp, path(now_path_rel)); /* whole or not at all */

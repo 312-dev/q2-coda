@@ -23,6 +23,7 @@
  * serveritem, not stock's playlist table) are not offered yet. */
 #define VAMPOS_DB "/mnt/data/vamp/library.db"
 #define VAMPOS_CAT "/mnt/mmc/.vamp/catalogue.db"
+#define VAMPOS_LIKES "/mnt/data/vamp/likes.db" /* q2playd's likes (docs/playd.md#ratings-and-likes): stock's myfav, its fileurl */
 int crc_vampos;
 #define SPLIT 120         /* a list longer than this opens as letter buckets (q2bridge.py SPLIT) */
 #define CAP 500           /* and a bucket longer than this splits again; no list sends more (CAP) */
@@ -328,9 +329,10 @@ typedef struct {
     long long size[3], mtime[3];
 } lib_key_t;
 static lib_key_t lib_key;
+static int fav_on; /* likes.db attached as fav (Vamp OS) */
 
 static void lib_key_now(lib_key_t *k) {
-    static const char *const files[3] = {DB, CAT, DURATIONS}, *const vampos[3] = {VAMPOS_DB, VAMPOS_CAT, 0};
+    static const char *const files[3] = {DB, CAT, DURATIONS}, *const vampos[3] = {VAMPOS_DB, VAMPOS_CAT, VAMPOS_LIKES};
     memset(k, 0, sizeof *k);
     int held = lib_card_held(); /* the catalogue counted as absent: the tables made again without it, and after */
     for (int i = 0; i < 3; ++i) {
@@ -399,6 +401,11 @@ static int lib_open(void) {
         if (strchr(q, '\'') || sqlite3_exec(db, sql, 0, 0, 0) != SQLITE_OK) server = 0;
     }
     cat_on = server;
+    fav_on = 0; /* Vamp OS's likes, attached while q2playd has made them; a like moves lib_key, so they are attached again */
+    if (crc_vampos && access(crc_path(p, sizeof p, VAMPOS_LIKES), 0) == 0 && !strchr(p, '\'')) {
+        snprintf(sql, sizeof sql, "attach '%s' as fav", p);
+        fav_on = sqlite3_exec(db, sql, 0, 0, 0) == SQLITE_OK;
+    }
     /* no format string: MUSIC_WHERE's LIKE patterns hold '%' */
     snprintf(sql, sizeof sql, "%s%s%s",
              crc_vampos ? "create temp table myfav(fileurl);create temp view songs as "
@@ -583,14 +590,14 @@ static int list_of(const char *base, const char *sort, list_t *l) {
         l->order = order_of("tracks", l->sort, &l->bucketed, &l->years, &bk);
         snprintf(l->src, sizeof l->src, "select " TRACK_ITEM TAIL("%s", "0") " from s2 where %s", bk, where);
     } else if (!strcmp(kind, "favorites")) {
-        /* the hearted songs: stock's My Fav (five hearts, docs/internals.md#ratings), by path */
+        /* the liked songs: stock's My Fav (docs/internals.md#ratings), by path; under Vamp OS q2playd's likes */
         l->sorts = FAV_SORTS;
         l->actions = 3;
         l->sort = pick(l->sorts, sort)->key;
         l->order = order_of("tracks", l->sort, &l->bucketed, &l->years, &bk);
         snprintf(l->title, sizeof l->title, "Favorites");
         snprintf(l->src, sizeof l->src, "select " TRACK_ITEM TAIL("%s", "0")
-                 " from s2 where url in (select fileurl from %s.myfav)", bk, crc_vampos ? "temp" : "main");
+                 " from s2 where url in (select fileurl from %s.myfav)", bk, fav_on ? "fav" : crc_vampos ? "temp" : "main");
     } else if (!strcmp(kind, "recent")) {
         /* the RECENT_CAP songs added last, newest first; one order, so no letters */
         l->actions = 3;
