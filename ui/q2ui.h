@@ -252,7 +252,7 @@ extern int ui_painting; /* 1 while a frame is drawn: marks and state changes are
 int ui_run(void);       /* the loop, until ui_quit; the exit code */
 void ui_on_rest(void (*fn)(void));       /* called once each time the loop comes to rest */
 void ui_on_stack(void (*fn)(void));      /* called when a page has opened or closed */
-void ui_watch(int fd, void (*fn)(void)); /* fn when fd is readable (a daemon's message) */
+void ui_watch(int fd, void (*fn)(void)); /* fn when fd is readable (a daemon's message); four at most */
 extern const char *ui_backlight;         /* the folder of backlights whose state says the screen is dark */
 /* One pass by hand, for the bench and a script: events, the step at the frame's time, the draw,
  * the frame. Returns whether a frame went out. */
@@ -286,7 +286,8 @@ void status_step(void);
 rect_t status_rect(void);
 void status_clock_fixed(const char *hhmm);
 /* where the battery, Wi-Fi's state and its signal are read (a test's are its own files) */
-extern const char *status_power, *status_wifi, *status_wireless;
+extern const char *status_power, *status_wifi, *status_wireless, *status_told;
+void status_told_changed(void); /* demo's file of the states only it knows changed (now.c's watch) */
 
 /* ---- list.c: the list every menu is ---- */
 enum {
@@ -323,6 +324,9 @@ typedef struct ui_source {
     rect_t box; /* where the list lives; w 0 is the whole screen under the status row */
 } ui_source;
 typedef struct ui_list ui_list;
+/* A picture a row was given (ui_row.art) may have changed or been freed: every list asks its rows
+ * with art again before it draws them. Whoever owns the pictures calls it (ui/art.c). */
+void list_pictures_changed(void);
 ui_list *list_new(const ui_source *src);
 void list_free(ui_list *l);
 void list_event(ui_list *l, const input_t *e);
@@ -368,6 +372,14 @@ const ui_now *now_get(void);
 unsigned now_seq(void);           /* moves when anything of it changed */
 int now_watched(void);            /* whether changes are being watched for (the stats file says) */
 const image_t *now_cover(void);   /* the playing song's cover, 0 with none */
+/* ---- art.c: album covers for rows, Cover Flow's thumbnails on the card ---- */
+#define ART_TRIES 4 /* the artists a row's album is looked for under */
+unsigned art_key(const char *artist, const char *album); /* patch/coverflow.c tags_key */
+/* the cover under the first of keys there (keys[0] names the ask), else the placeholder; one not
+ * read yet is asked for, and the screen drawn again when it comes */
+const image_t *art_cover(const unsigned *keys, int n);
+extern const char *art_dir;
+extern int art_sync; /* read in place, not by the worker: a script's, so its pictures repeat */
 unsigned now_cover_seq(void);
 extern const char *now_file, *now_cover_file;
 

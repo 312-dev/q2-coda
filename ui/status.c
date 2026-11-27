@@ -2,16 +2,20 @@
  * fill, drawn after the page so its glyphs stand over whatever runs under them. At the left the
  * clock, Inter Medium 15 from x 62, its figures on rows 17 to 27, in Text Secondary, and in Text
  * Primary on Home. At the right, right to left, each only while it has something to say: the
- * battery, its nub ending 62 px from the edge; the play state; Wi-Fi's fan. Between them, for a
- * moment after the volume changes, its level.
+ * battery, its nub ending 62 px from the edge; the play state; Wi-Fi's fan; a card app's sync;
+ * wired headphones, or the deaf ear with no output; Bluetooth; Buttons Lock's padlock; a card
+ * app's server out of reach. Between them, for a moment after the volume changes, its level.
  *
- * Where each comes from, all read here with no help from demo: the battery from the kernel's
- * power supply files; the play state from what plays (now.c); Wi-Fi from wlan0's state and its
- * line in /proc/net/wireless. They are read when the minute turns and when what plays changes,
- * never on a timer of their own, so the row costs nothing at rest; a cable put in shows within
- * the minute. ponytail: the output's glyph (wired headphones, the deaf ear with none), Bluetooth,
- * the lock, sync and offline marks are not here: each needs a state that demo alone holds today
- * (docs/ui-rewrite.md#parity). */
+ * Where each comes from: the battery from the kernel's power supply files; the play state from
+ * what plays (now.c); Wi-Fi from wlan0's state and its line in /proc/net/wireless; all read here.
+ * The rest are demo's alone while it owns the services, so demo says them in a file of
+ * key=value lines (status_told, /tmp/q2ui.status, patch/q2ui_gate.c tell and status_row.c
+ * status_row_state), written when they change and read here when it is (now.c's watch of its
+ * folder). The kernel's files are read when the minute turns and when what plays changes, never on
+ * a timer of their own, so the row costs nothing at rest; a cable put in shows within the minute.
+ * Only the sync's arrows move, 30 frames a second while a card app checks its server. The
+ * theme's glyphs are tools/art.py's PNGs, in the half for Light Mode. ponytail: a strip too wide
+ * for its room is cut at the clock, not slid as demo's marquee slides it. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,7 +35,7 @@
 #define LOW 20 /* under this the charge is red */
 
 const char *status_power = "/sys/class/power_supply", *status_wifi = "/sys/class/net/wlan0/operstate",
-           *status_wireless = "/proc/net/wireless";
+           *status_wireless = "/proc/net/wireless", *status_told = "/tmp/q2ui.status";
 static struct {
     char clock[8];
     run_t run;
@@ -42,7 +46,13 @@ static struct {
     int volume;       /* the level last seen, -1 before the first */
     uint64_t volume_at; /* when it last changed on a page with no display of its own, 0: not shown */
     unsigned seen;    /* now_seq() when play was read */
-} S = { .level = -1, .volume = -1 };
+    /* demo's word (status_told): where the sound goes, the Bluetooth slot and a headset's level,
+     * a guest's relay, the lock, a sync and its permille, a server out of reach, Wi-Fi's internet */
+    char out[8], bt[12], relay[12];
+    int btbatt, lock, sync, syncpm, offline, net;
+    int told;         /* status_told changed since it was read */
+    int spin;         /* the sync arrows' frame shown */
+} S = { .level = -1, .volume = -1, .btbatt = -1, .net = 1, .told = 1 };
 
 #define VOLUME_SHOW_US 1500000u
 #define VOLUME_X 150 /* its track, between the clock and the glyphs */
@@ -56,7 +66,9 @@ void status_clock_fixed(const char *hhmm) {
 }
 
 rect_t status_rect(void) { return (rect_t){ INSET, CLOCK_Y, SCREEN_W - 2 * INSET, 18 }; }
-static rect_t glyphs_rect(void) { return (rect_t){ RIGHT - 80, CLOCK_Y, 80, 18 }; }
+/* everything right of the clock: the slots take what room they need, right to left */
+#define STRIP_X (INSET + CLOCK_W + 8)
+static rect_t glyphs_rect(void) { return (rect_t){ STRIP_X, CLOCK_Y, RIGHT - STRIP_X, 18 }; }
 
 static int file_word(const char *path, char *out, size_t room) {
     FILE *f = fopen(path, "r");
@@ -91,6 +103,60 @@ static void read_glyphs(void) {
     }
 }
 
+/* demo's file changed (now.c's watch): read it at the next step */
+void status_told_changed(void) { S.told = 1; }
+
+static void word_of(const char *line, const char *key, char *out, size_t room) {
+    size_t k = strlen(key);
+    if (!strncmp(line, key, k) && line[k] == '=') snprintf(out, room, "%.*s", (int)strcspn(line + k + 1, "\r\n"), line + k + 1);
+}
+static void read_told(void) {
+    char line[64], num[12];
+    FILE *f = fopen(status_told, "r");
+    char out[8] = "", bt[12] = "", relay[12] = "";
+    int v[6] = { -1, 0, 0, 0, 0, 1 }; /* btbatt lock sync syncpm offline net */
+    static const char *const keys[] = { "btbatt", "lock", "sync", "syncpm", "offline", "net" };
+    while (f && fgets(line, sizeof line, f)) {
+        word_of(line, "out", out, sizeof out);
+        word_of(line, "bt", bt, sizeof bt);
+        word_of(line, "relay", relay, sizeof relay);
+        for (int k = 0; k < 6; ++k) {
+            *num = 0, word_of(line, keys[k], num, sizeof num);
+            if (*num) v[k] = atoi(num);
+        }
+    }
+    if (f) fclose(f);
+    if (strcmp(out, S.out) || strcmp(bt, S.bt) || strcmp(relay, S.relay) || v[0] != S.btbatt || v[1] != S.lock ||
+        v[2] != S.sync || v[3] != S.syncpm || v[4] != S.offline || v[5] != S.net) {
+        snprintf(S.out, sizeof S.out, "%s", out), snprintf(S.bt, sizeof S.bt, "%s", bt);
+        snprintf(S.relay, sizeof S.relay, "%s", relay);
+        S.btbatt = v[0], S.lock = v[1], S.sync = v[2], S.syncpm = v[3], S.offline = v[4], S.net = v[5];
+        ui_mark(glyphs_rect());
+    }
+}
+
+/* The slots' boxes, patch/status_row.c's SR_* (tools/art.py's widths) */
+#define WIFI_W 16
+#define GLYPH 14   /* a glyph's box: wired headphones, the offline cloud */
+#define EAR_W 10   /* the deaf ear */
+#define RUNE_W 9   /* the Bluetooth rune */
+#define CAR_W 19
+#define LOCK_W 13
+#define RING_W 16  /* the download's ring */
+#define SPIN_W 12  /* the turning arrows */
+#define BT_GAP 2   /* between headphones and the headset's battery, and round a guest's relay */
+#define HS_BATT_W 15
+#define HS_NUB 2
+#define RELAY_W 8
+/* Where the slots left of the battery start: the battery's body on whole pixels and GAP before it,
+ * so the glyphs' 2 and 3 px strokes do not straddle pixels. */
+static float after_battery(void) { return S.level >= 0 ? floorf(RIGHT - 2.5f - BATT_W) - GAP : RIGHT; }
+/* ... and demo's slots, past the play state and Wi-Fi */
+static float sync_right(void) { return after_battery() - (S.play ? 10 + GAP : 0) - (S.wifi ? WIFI_W + GAP : 0); }
+
+#define SPIN_FRAMES 30 /* tools/art.py STATUS_SPIN: the arrows' frames a half turn, a half turn a second */
+#define SPIN_US (1000000u / SPIN_FRAMES)
+
 void status_step(void) {
     char s[8];
     int play = now_get()->playing ? 1 : now_get()->paused ? 2 : 0;
@@ -107,6 +173,13 @@ void status_step(void) {
     if (volume >= 0) S.volume = volume;
     if (S.volume_at && ui_time() - S.volume_at >= VOLUME_SHOW_US) S.volume_at = 0, ui_mark(volume_rect());
     if (!read_once) read_once = 1, read_glyphs();
+    if (S.told) S.told = 0, read_told();
+    if (S.sync == 1) { /* the arrows turn: their box alone again at each frame of theirs, 30 a second */
+        uint64_t t = ui_time();
+        int frame = (int)(t / SPIN_US % SPIN_FRAMES);
+        if (frame != S.spin) S.spin = frame, ui_mark((rect_t){ (int)sync_right() - SPIN_W - 2, CLOCK_Y, SPIN_W + 4, 18 });
+        ui_wake_ms((unsigned)((SPIN_US - t % SPIN_US + 999) / 1000));
+    }
     if (S.fixed) return;
     time_t t = time(0);
     struct tm *tm = localtime(&t);
@@ -139,6 +212,46 @@ static void fan(float right, float base, int lit, uint32_t ink) {
         }
 }
 
+/* A theme glyph of the status row in the light's half (tools/art.py status_images: oled_<stem>_d or
+ * _l; a stem ending in '.' is the one file both halves share), its box's left at x and its top on
+ * y: on row 16 a 14 px box's ink stands on the digits' rows. A theme without it draws nothing. */
+static void art(const char *stem, float x, float y) {
+    char name[32];
+    snprintf(name, sizeof name, strchr(stem, '.') ? "%s" : "%s_%c.", stem, ui_light ? 'l' : 'd');
+    const image_t *im = icon(name);
+    if (im) image_draw(im, (rectf_t){ x, y, (float)im->w, (float)im->h }, 0, 0, 256, -1);
+}
+
+/* The download's ring: a 14 px ring (1.6 px) in #333333 filling clockwise from 12 o'clock in the
+ * accent to permille, its arrow in it (demo's sync_paint) */
+static void ring(float left, int permille) {
+    float cx = left + 8, cy = 23, share = (float)permille / 1000;
+    rect_t c, box = { (int)left, 14, 17, 18 };
+    if (!rect_meet(box, clip_get(), &c)) return;
+    for (int y = c.y; y < c.y + c.h; ++y)
+        for (int x = c.x; x < c.x + c.w; ++x) {
+            float dx = (float)x + 0.5f - cx, dy = (float)y + 0.5f - cy, r = sqrtf(dx * dx + dy * dy);
+            float cov = clampf(0.8f + 0.5f - fabsf(r - 7.0f), 0, 1);
+            if (cov <= 0) continue;
+            float turn = atan2f(dx, -dy) / 6.2831853f; /* 0 at 12 o'clock, clockwise */
+            if (turn < 0) turn += 1;
+            uint32_t *p = canvas + y * SCREEN_W + x;
+            *p = 0xff000000 | rgb_mix(*p & 0xffffff, turn < share ? RGB_ACCENT : 0x333333, cov);
+        }
+    const image_t *down = icon(ui_light ? "status_down_l." : "status_down_d.");
+    if (down) image_draw(down, (rectf_t){ cx - (float)down->w / 2, cy - (float)down->h / 2, (float)down->w, (float)down->h }, 0, 0, 256, -1);
+}
+
+/* A headset's own battery: a 15 x 8 body with a 1 px outline, filled 2 px inside it to the level,
+ * red under a fifth, and its nub (patch/list_marks.c battery_slim) */
+static void slim(float x, int level) {
+    fill_round((rectf_t){ x, 19, 15, 8 }, 4, 0, 0x6e6e6e, 1, 0);
+    fill_round((rectf_t){ x + 1, 20, 13, 6 }, 3, 0, tok(TOK_CANVAS), 1, 0);
+    float full = 11 * clampf((float)level / 100, 0, 1);
+    if (full > 0) fill_round((rectf_t){ x + 2, 21, full, 4 }, full < 4.4f ? full / 2 : 2.2f, 0, level < LOW ? tok(TOK_NEGATIVE) : tok(TOK_PRIMARY), 1, 0);
+    fill_round((rectf_t){ x + 16, 20.8f, 1.5f, 4.4f }, 0.8f, 0, 0x6e6e6e, 1, 0);
+}
+
 void status_draw(rect_t r) {
     if (!rect_meet(r, status_rect(), 0)) return;
     int home = !strcmp(ui_top_name(), "home");
@@ -161,16 +274,50 @@ void status_draw(rect_t r) {
         float full = (body.w - 4) * clampf((float)S.level / 100, 0.08f, 1);
         uint32_t charge = S.cable ? tok(TOK_POSITIVE) : S.level < LOW ? tok(TOK_NEGATIVE) : ink;
         fill_round((rectf_t){ body.x + 2, body.y + 2, full, body.h - 4 }, 2.2f, 0, charge, 1, 0);
-        x = floorf(body.x) - GAP; /* the glyphs left of it on whole pixels: their strokes are 2 and 3 px */
     }
+    x = after_battery();
     if (S.play == 1) { /* three level bars standing on the digits' baseline */
         static const float high[] = { 7, 11, 5 };
         for (int k = 0; k < 3; ++k) fill_round((rectf_t){ x - 10 + (float)k * 4, 28 - high[k], 2, high[k] }, 1, 0, ink, 1, 0);
-        x -= 10 + GAP;
     } else if (S.play == 2) { /* the pause: two 3 px bars */
         fill_round((rectf_t){ x - 10, 17, 3, 11 }, 0.9f, 0, ink, 1, 0);
         fill_round((rectf_t){ x - 4, 17, 3, 11 }, 0.9f, 0, ink, 1, 0);
-        x -= 10 + GAP;
     }
-    if (S.wifi) fan(x, 28, S.wifi, ink);
+    if (S.play) x -= 10 + GAP;
+    if (S.wifi && !S.net) /* linked, with no internet: the fan crossed out */
+        art("status_wifi_x", x - WIFI_W, 16);
+    else if (S.wifi)
+        fan(x, 28, S.wifi, ink);
+    /* demo's word from here (status_told), right to left, GAP between */
+    x = sync_right();
+    if (S.sync == 2)
+        ring(x - RING_W, S.syncpm), x -= RING_W + GAP;
+    else if (S.sync == 1) {
+        char stem[24];
+        snprintf(stem, sizeof stem, "status_sync_%d", S.spin);
+        art(stem, x - SPIN_W - 1, 16), x -= SPIN_W + GAP; /* frame 0's ink is 12 px of its 14 px box */
+    }
+    if (!strcmp(S.out, "wire"))
+        art("status_wired", x - GLYPH, 16), x -= GLYPH + GAP;
+    else if (!strcmp(S.out, "none"))
+        art("status_noaudio", x - EAR_W, 16), x -= EAR_W + GAP;
+    if (!strcmp(S.bt, "connecting") || !strcmp(S.bt, "rune"))
+        art(S.bt[0] == 'c' ? "status_btdim" : "status_bt", x - RUNE_W, 16), x -= RUNE_W + GAP;
+    else if (!strcmp(S.bt, "car"))
+        art("status_car", x - CAR_W, 16), x -= CAR_W + GAP;
+    else if (!strcmp(S.bt, "headset")) { /* headphones, then the headset's own battery */
+        slim(x - HS_BATT_W - HS_NUB, S.btbatt);
+        art("status_headphones", x - HS_BATT_W - HS_NUB - BT_GAP - GLYPH, 16);
+        x -= GLYPH + BT_GAP + HS_BATT_W + HS_NUB + GAP;
+    } else if (!strcmp(S.bt, "guest")) { /* a guest's phone in the accent, then › and where it plays */
+        float w = !strcmp(S.relay, "car") ? CAR_W : !strcmp(S.relay, "headphones") ? GLYPH : 0;
+        if (w) {
+            art(w == CAR_W ? "status_car" : "status_headphones", x - w, 16);
+            art("status_relay", x - w - BT_GAP - RELAY_W, 19); /* 8 px, on the row's centre */
+            x -= w + BT_GAP + RELAY_W + BT_GAP;
+        }
+        art("status_guest.", x - GLYPH, 16), x -= GLYPH + GAP;
+    }
+    if (S.lock) art("keylock", x - LOCK_W, 16), x -= LOCK_W + GAP;
+    if (S.offline) art("status_offline", x - GLYPH, 16);
 }

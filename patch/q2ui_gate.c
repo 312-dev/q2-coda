@@ -18,6 +18,9 @@
  *    with whatever /mnt/data/q2ui.args now says. No frame of demo's shows between.
  *  - q2ui asks for a page of demo's it has not got: it names the page in Q2UI_ASK and ends with
  *    Q2UI_ASKED. demo opens that page, and starts q2ui again when the page has been left.
+ *  - while q2ui runs, demo says what only it knows for q2ui's status row (where the sound goes,
+ *    Bluetooth, Buttons Lock, a card app's sync and server: status_row_state) in Q2UI_STATUS, a
+ *    look every Q2UI_STATUS_MS and a write only when something in it changed.
  *
  * The target is read once, before demo's first paint, so no frame of demo's shows first. With no
  * such file, or no q2ui in the image (any default build), none of this does anything. */
@@ -35,6 +38,10 @@ int coverflow_opening(void); /* coverflow.c: Cover Flow is loading before its pa
 #define Q2UI_OPEN_MS 1500 /* a page asked for that has not come up by now is not coming */
 #define Q2UI_RAN_MS 10000 /* a q2ui a signal ended is started again if it had run this long */
 #define Q2UI_DUE (-1) /* to be started on the next pass: already the screen's holder */
+#define Q2UI_STATUS "/tmp/q2ui.status" /* ui/status.c reads it when it changes (inotify) */
+#define Q2UI_STATUS_MS 500
+
+unsigned status_row_state(char *b, unsigned room); /* status_row.c */
 
 static struct {
     int pid;           /* q2ui's, Q2UI_DUE, or 0 */
@@ -44,6 +51,7 @@ static struct {
     char opening;      /* a page q2ui asked for is on its way up: Home on top does not yet mean it was left */
     unsigned started_at; /* time_now_ms when q2ui was last started */
     unsigned asked_at; /* time_now_ms when it was asked for */
+    unsigned told_at, told; /* the status's last look (time_now_ms), and the hash of what was written */
 } qu __attribute__((section(".scratch")));
 
 static int wanted(void) {
@@ -137,6 +145,17 @@ static void start(void) {
     if (!qu.pid) widget_invalidate_force(window_manager(), 0);
 }
 
+/* The status row's states for q2ui (Q2UI_STATUS), written when they change; looked at every
+ * Q2UI_STATUS_MS, so a cable put in shows in q2ui's row within half a second. */
+static void tell(void) {
+    unsigned now = (unsigned)time_now_ms();
+    if (qu.told_at && now - qu.told_at < Q2UI_STATUS_MS) return;
+    qu.told_at = now | !now;
+    char b[200];
+    unsigned n = status_row_state(b, sizeof b), h = hash_bytes(FNV_SEED, (const unsigned char *)b, n);
+    if (h != qu.told && blob_io(Q2UI_STATUS, Q2UI_STATUS ".tmp", b, n, 1)) qu.told = h;
+}
+
 /* every UI loop pass */
 void q2ui_poll(void) {
     if (!q2ui_on()) {
@@ -167,6 +186,7 @@ void q2ui_poll(void) {
         widget_invalidate_force(window_manager(), 0);
         return;
     }
+    tell();
     if (!qu.took && !on_home()) {
         char cmd[24];
         tk_snprintf(cmd, sizeof cmd, "kill %d", qu.pid); /* demo imports no kill() */

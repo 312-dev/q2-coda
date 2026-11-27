@@ -45,16 +45,31 @@ static void group_songs_push(int kind, int group) {
 
 /* ---- Artists, Albums ---- */
 static int g_count(void *ctx) { return lib_groups((int)(long)ctx); }
+/* An album's cover, under each artist its songs name until one is there (ui/art.c) */
+static const image_t *album_cover(int g) {
+    int n, k = 0;
+    const int *songs = lib_group_songs(LIB_ALBUM, g, &n);
+    const char *seen[ART_TRIES];
+    unsigned keys[ART_TRIES];
+    const char *album = lib_album(songs[0]);
+    for (int i = 0; i < n && k < ART_TRIES; ++i) {
+        const char *artist = lib_artist(songs[i]);
+        int dup = 0;
+        for (int j = 0; j < k; ++j) dup |= !strcmp(seen[j], artist);
+        if (!dup) seen[k] = artist, keys[k++] = art_key(artist, album);
+    }
+    return art_cover(keys, k);
+}
 static void g_row(void *ctx, int i, ui_row *out) {
     int kind = (int)(long)ctx;
     out->title = lib_group_name(kind, i);
-    if (kind == LIB_ALBUM) out->detail = lib_group_artist(i);
+    if (kind == LIB_ALBUM) out->sub = lib_group_artist(i), out->art = album_cover(i); /* two lines, the cover leading */
     out->flags = ROW_CHEVRON;
 }
 static void g_chosen(void *ctx, int i) { group_songs_push((int)(long)ctx, i); }
 static void groups_push(int kind) {
     ui_source src = { .count = g_count, .row = g_row, .chosen = g_chosen, .ctx = (void *)(long)kind,
-                      .name = kind == LIB_ARTIST ? "artists" : "albums", .letters = 1 };
+                      .name = kind == LIB_ARTIST ? "artists" : "albums", .letters = 1, .row_h = kind == LIB_ALBUM ? 52 : 0 };
     ui_push(&list_page, &src);
 }
 

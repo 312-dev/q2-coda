@@ -2,8 +2,10 @@
  * (/tmp/coda-rc.now, patch/coda_rc_shim.c cr_now: a key=value line each, rewritten when anything
  * in it changes, twice a second at most), and the playing song's cover as stock's cover thread
  * leaves it (/tmp/externpic.jpg). Nothing is polled: the folder is watched (inotify), so a change
- * wakes the loop and a page's step sees now_seq() move, and at rest nothing runs. When q2ui owns
- * the player this file reads its own state instead (docs/ui-rewrite.md#cutover). */
+ * wakes the loop and a page's step sees now_seq() move, and at rest nothing runs. The same watch
+ * tells the status row when demo's file of the states only it knows changes (ui/status.c
+ * status_told). When q2ui owns the player this file reads its own state instead
+ * (docs/ui-rewrite.md#cutover). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -83,17 +85,29 @@ const image_t *now_cover(void) {
 }
 unsigned now_cover_seq(void) { return cover_seq; }
 
+static const char *base(const char *path) { return strrchr(path, '/') ? strrchr(path, '/') + 1 : path; }
 static void changed(void) {
-    char buf[1024];
-    while (read(watch, buf, sizeof buf) > 0) {}
+    char buf[1024] __attribute__((aligned(__alignof__(struct inotify_event))));
+    for (ssize_t n; (n = read(watch, buf, sizeof buf)) > 0;)
+        for (char *at = buf; at < buf + n;) {
+            const struct inotify_event *e = (const struct inotify_event *)at;
+            if (e->len && !strcmp(e->name, base(status_told))) status_told_changed();
+            at += sizeof *e + e->len;
+        }
     now_read();
 }
+/* path's folder into dir: "." for a bare name */
+static const char *folder(const char *path, char *dir, size_t room) {
+    snprintf(dir, room, "%.*s", strrchr(path, '/') ? (int)(strrchr(path, '/') - path) : 0, path);
+    return *dir ? dir : strrchr(path, '/') ? "/" : ".";
+}
 void now_open(void) {
-    char dir[256];
-    snprintf(dir, sizeof dir, "%s", now_file);
-    char *slash = strrchr(dir, '/');
-    if (slash) *slash = 0;
+    char dir[256], other[256];
     watch = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
-    if (watch >= 0 && inotify_add_watch(watch, slash ? dir : ".", IN_MOVED_TO | IN_CLOSE_WRITE) >= 0) ui_watch(watch, changed);
+    int ok = watch >= 0 && inotify_add_watch(watch, folder(now_file, dir, sizeof dir), IN_MOVED_TO | IN_CLOSE_WRITE) >= 0;
+    /* demo's status file, when a test puts it in a folder of its own */
+    if (ok && strcmp(folder(status_told, other, sizeof other), folder(now_file, dir, sizeof dir)))
+        inotify_add_watch(watch, other, IN_MOVED_TO | IN_CLOSE_WRITE);
+    if (ok) ui_watch(watch, changed);
     now_read();
 }
