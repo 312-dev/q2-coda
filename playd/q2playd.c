@@ -303,7 +303,9 @@ static void path_lookup_want(void) {
 }
 
 /* The queue's song at `at` from ss seconds (a queue given back after a source starts where it was put aside). */
+static void resume_leave(void);
 static int start_from(int at, int ss) {
+    resume_leave(); /* the song read before keeps its place; the one started is read anew */
     while (at >= 0 && at < q.n) {
         q.at = at;
         if (q.paths ? path_lookup(at) : song_lookup(q.ids[q.order[at]])) {
@@ -374,7 +376,7 @@ static void ended(int error) {
     ++q.seq;
 }
 
-static void listen_tick(int sec, int len);
+static void listen_tick(int sec, int len), resume_tick(int sec, int len);
 
 static void player_message(const char *name, const char *arg) {
     if (!strcmp(name, "player-status")) {
@@ -389,7 +391,7 @@ static void player_message(const char *name, const char *arg) {
         if (sscanf(arg, "%*d|%d|%d|%d", &rate, &len, &pos) == 3 && q.loaded) {
             if (len != q.len_s) q.len_s = len, ++q.seq;
             if (pos * 1000 != q.pos_ms) q.pos_ms = pos * 1000, ++q.seq;
-            listen_tick(pos, len);
+            listen_tick(pos, len), resume_tick(pos, len);
         }
     }
 }
@@ -1446,6 +1448,121 @@ static void plays_flush(unsigned long long t) { /* counts kept while the card wa
     if (card_mounted() && plays_card_save()) pc.held = 0, pc.moved = 1;
 }
 
+/* ---- Resume (docs/playd.md#resume) ----
+ * Today's Vamp's long-song places (docs/internals.md#resume, playback_power.c resume_poll), in its file: a song at
+ * least [Q2POD] RESUMEMIN minutes long (20 to 120 in fives, 30 by default, 0 Off), or spoken (an M4B, or under the
+ * card's Podcasts or Audiobooks) whatever its length, keeps its place by its path's hash (listen_key's with no CUE start)
+ * in RESUME_SLOTS key/second pairs, 4 KB, the card's .q2pod/ringnav-resume, the most recent first, written whole: each
+ * RESUME_SAVE_S of movement, once the second stands still two reads (a pause) and as another song starts. A place
+ * within RESUME_EDGE_S of either end is forgotten. A long song with a place that starts playing under RESUME_START_S
+ * seeks there (paused, it waits for Play). A song's first second read only notes it, so the song before's time never
+ * counts for it. The flash file of a release before is read until the card has one; with the card away the ring is
+ * kept here for it, as the play counts are. */
+#define RESUME_SLOTS 512
+#define RESUME_EDGE_S 30
+#define RESUME_SAVE_S 60
+#define RESUME_START_S 5
+static const char *resume_card_rel = "/mnt/mmc/.q2pod/ringnav-resume", *resume_flash_rel = "/mnt/data/ringnav-resume";
+static struct { unsigned key; int sec; } spots[RESUME_SLOTS];
+static struct {
+    int read, held, min;
+    unsigned key;                            /* the song read, 0 none: its first second then only noted */
+    int settle, on, sec, saved, still, pending, total;
+    unsigned long long looked;
+} rs;
+
+static int resume_min(void) { /* Resume Songs' minutes, 0 Off (crossfade.c resume_min) */
+    char *t = read_all(path("/mnt/data/config.ini"));
+    int n = t ? ini_get(t, "Q2POD", "RESUMEMIN", 30) : 30;
+    free(t);
+    return !n ? 0 : n >= 20 && n <= 120 && !(n % 5) ? n : 30;
+}
+
+static void spots_load(void) {
+    if (rs.read) return;
+    rs.read = 1, rs.min = resume_min();
+    int card = card_mounted(), n = -1;
+    FILE *f = card ? fopen(path(resume_card_rel), "rb") : 0;
+    if (!f) f = fopen(path(resume_flash_rel), "rb");
+    if (f) n = (int)fread(spots, 1, sizeof spots, f), fclose(f);
+    if (n != (int)sizeof spots) memset(spots, 0, sizeof spots);
+}
+
+static void spots_write(void) {
+    char dir[640];
+    snprintf(dir, sizeof dir, "%s/mnt/mmc/.q2pod", root);
+    if (card_mounted() && (mkdir(dir, 0755), blob_save(path(resume_card_rel), spots, sizeof spots))) rs.held = 0;
+    else rs.held = 1;
+}
+
+static int spot_at(unsigned key) {
+    for (int i = 0; i < RESUME_SLOTS; ++i)
+        if (spots[i].key == key) return spots[i].sec;
+    return 0;
+}
+
+/* key's place moved first at sec, or forgotten near either end (playback_power.c spot_keep) */
+static void spot_keep(unsigned key, int sec, int total) {
+    int i = 0, keep = sec >= RESUME_EDGE_S && sec < total - RESUME_EDGE_S;
+    while (i < RESUME_SLOTS - 1 && spots[i].key != key) i++;
+    if (keep ? !i && spots[0].key == key && spots[0].sec == sec : spots[i].key != key) return;
+    if (keep) {
+        for (; i > 0; i--) spots[i] = spots[i - 1];
+        spots[0].key = key, spots[0].sec = sec;
+    } else {
+        for (; i < RESUME_SLOTS - 1; i++) spots[i] = spots[i + 1];
+        spots[i].key = 0, spots[i].sec = 0;
+    }
+    spots_write();
+}
+
+/* the song read before: its place kept as another starts (start_from) */
+static void resume_leave(void) {
+    if (rs.key && rs.on && !rs.pending) spot_keep(rs.key, rs.sec, rs.total);
+    rs.key = 0;
+}
+
+/* The player's second for the song playing (media-info's), len its length */
+static void resume_tick(int sec, int len) {
+    if (!q.n || !*q.file || len <= 0) return;
+    unsigned key = listen_key(q.file);
+    if (key != rs.key) {
+        resume_leave();
+        rs.key = key, rs.on = 0, rs.settle = 1;
+        return;
+    }
+    if (rs.settle) {
+        rs.settle = 0;
+        spots_load();
+        rs.on = (rs.min && len >= rs.min * 60) || spoken(q.file);
+        rs.pending = rs.on ? spot_at(key) : 0;
+        rs.sec = rs.saved = sec, rs.still = 0;
+    }
+    rs.total = len;
+    if (rs.pending) {
+        if (sec < 1 || q.state != PLAYING) return; /* a paused start waits for Play */
+        if (sec < RESUME_START_S) {
+            char s[16];
+            snprintf(s, sizeof s, "%d", rs.pending);
+            player_send("mcl-seek", s);
+            sec = rs.pending, q.pos_ms = sec * 1000, ++q.seq;
+        }
+        rs.pending = 0, rs.sec = rs.saved = sec;
+        return;
+    }
+    if (!rs.on) return;
+    rs.still = sec == rs.sec ? rs.still + 1 : 0;
+    rs.sec = sec;
+    int moved = sec - rs.saved;
+    if (moved && (rs.still >= 2 || moved >= RESUME_SAVE_S || moved <= -RESUME_SAVE_S)) rs.saved = sec, spot_keep(key, sec, len);
+}
+
+static void resume_flush(unsigned long long t) { /* the ring kept while the card was away */
+    if (!rs.held || t < rs.looked + CARD_LOOK_MS) return;
+    rs.looked = t;
+    if (card_mounted() && blob_save(path(resume_card_rel), spots, sizeof spots)) rs.held = 0;
+}
+
 /* ---- Memory Playback (docs/playd.md#memory-playback) ----
  * Today's Vamp's queue snapshot (playback.c playback_save, docs/internals.md#memory-playback-and-a-streamed-queue), in
  * its format, so either system brings back what the other kept: the card's .q2pod/ringnav-queue, version 4 (a queue
@@ -2327,6 +2444,7 @@ int main(int argc, char **argv) {
         plays_flush(t);
         memory_poll(t, 0);
         likes_poll(t);
+        resume_flush(t);
         if (q.seq != now_written_seq && t >= now_written_at + NOW_EVERY_MS) {
             now_write(), tell_watchers();
             now_written_seq = q.seq, now_written_at = t;

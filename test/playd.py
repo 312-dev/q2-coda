@@ -2090,3 +2090,148 @@ def test_a_like_whose_row_is_on_a_card_away_waits_for_the_card(run):
     assert wait_for_value(lambda: stock_favs(root), [('/mnt/mmc/.navi/cat/al1/s1.flac', 'Cloud One', 'Sky', 'Up')], 6)
     sock.close()
 
+
+# ---- Resume (docs/playd.md#resume) ----
+
+def path_key(path):
+    """playback_power.c rs_file: the path's FNV-1a with fnv's separator (listen_key with no CUE start)"""
+    return listen_key(path)
+
+
+def spots(root, rel='mnt/mmc/.q2pod/ringnav-resume'):
+    data = (root/rel).read_bytes()
+    w = struct.unpack(f'<{len(data) // 4}I', data)
+    return [(w[i], w[i + 1]) for i in range(0, len(w), 2)]
+
+
+def ring(entries):
+    w = [x for e in entries for x in e] + [0] * (1024 - 2 * len(entries))
+    return struct.pack('<1024I', *w)
+
+
+def test_a_long_song_s_place_is_kept_every_minute_of_play_and_at_a_pause(run):
+    """docs/internals.md#resume: a song of at least Resume Songs' minutes (30 by default) keeps its place by its path's
+    hash in the card's .q2pod/ringnav-resume, 512 places, 4 KB, the most recent first: each 60 s of movement and once
+    the second stands still two reads (a pause)"""
+    root, pl = run
+    card_in(root)
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    heard(root, pl, 3600, range(0, 58, 3))
+    assert not (root/'mnt/mmc/.q2pod/ringnav-resume').exists()
+    heard(root, pl, 3600, [60, 63, 66])
+    r = spots(root)
+    assert len(r) == 512 and r[0] == (path_key('/mnt/mmc/Music/a.flac'), 63) and r[1] == (0, 0), r[:2]  # 60 s on from 3 s, where it was first read
+    heard(root, pl, 3600, [70, 70, 70])
+    assert spots(root)[0] == (path_key('/mnt/mmc/Music/a.flac'), 70), 'paused at 70 s'
+
+
+def test_a_kept_place_is_jumped_to_as_the_song_starts(run):
+    """a long song with a place, started near its beginning (under 5 s), seeks there"""
+    root, pl = run
+    card_in(root)
+    (root/'mnt/mmc/.q2pod').mkdir(parents=True)
+    (root/'mnt/mmc/.q2pod/ringnav-resume').write_bytes(ring([(path_key('/mnt/mmc/Music/b.mp3'), 500)]))
+    play_list(root, [2], 0)
+    pl.pump()
+    heard(root, pl, 3600, [0, 1, 2])
+    assert ('mcl-seek', '500') in pl.got, pl.got
+
+
+def test_a_place_near_either_end_is_forgotten_and_a_short_song_keeps_none(run):
+    root, pl = run
+    card_in(root)
+    a, b = path_key('/mnt/mmc/Music/a.flac'), path_key('/mnt/mmc/Music/b.mp3')
+    (root/'mnt/mmc/.q2pod').mkdir(parents=True)
+    (root/'mnt/mmc/.q2pod/ringnav-resume').write_bytes(ring([(b, 40), (a, 900)]))
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    heard(root, pl, 3600, [1000, 3575, 3578, 3578, 3578])
+    assert a not in [k for k, _ in spots(root)], 'within 30 s of the end: forgotten'
+    fifo(root, 'next')
+    pl.pump()
+    heard(root, pl, 600, [0, 1, 2, 70, 73, 140, 140, 140])
+    assert ('mcl-seek', '40') not in pl.got and spots(root)[0] == (b, 40), 'a 10 minute song: neither kept nor jumped to'
+
+
+@pytest.mark.parametrize('config', [CONFIG.replace('THEME=0\n', 'THEME=0\nRESUMEMIN=20\n')])
+def test_resume_songs_minutes_are_q2pod_resumemin(run):
+    root, pl = run
+    card_in(root)
+    play_list(root, [1], 0)
+    pl.pump()
+    heard(root, pl, 1200, [90, 95, 100, 100, 100])
+    assert spots(root)[0] == (path_key('/mnt/mmc/Music/a.flac'), 100)
+
+
+@pytest.mark.parametrize('config', [CONFIG.replace('THEME=0\n', 'THEME=0\nRESUMEMIN=0\n')])
+def test_resume_songs_off_keeps_no_place_but_for_spoken_files(run):
+    root, pl = run
+    card_in(root)
+    db = sqlite3.connect(root/'mnt/data/database.db')
+    db.execute("insert into songtable values (21, '/mnt/mmc/Music/book.M4B', 'Book', 'Au', 'B', 0)")
+    db.commit()
+    db.close()
+    play_list(root, [1, 21], 0)
+    pl.pump()
+    heard(root, pl, 3600, [90, 95, 100, 100, 100])
+    assert not (root/'mnt/mmc/.q2pod/ringnav-resume').exists()
+    fifo(root, 'next')
+    pl.pump()
+    heard(root, pl, 900, [0, 95, 100, 100, 100])
+    assert spots(root)[0] == (path_key('/mnt/mmc/Music/book.M4B'), 100), 'an M4B is long whatever its length'
+
+
+def test_a_song_s_place_is_kept_as_the_next_one_starts(run):
+    root, pl = run
+    card_in(root)
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    heard(root, pl, 3600, [0, 3, 6, 9, 40, 43])
+    fifo(root, 'next')
+    pl.pump()
+    heard(root, pl, 200, [0])
+    assert spots(root)[0] == (path_key('/mnt/mmc/Music/a.flac'), 43)
+
+
+def test_the_flash_ring_of_a_release_before_is_read_until_the_card_has_one(run):
+    root, pl = run
+    card_in(root)
+    (root/'mnt/data/ringnav-resume').write_bytes(ring([(path_key('/mnt/mmc/Music/a.flac'), 321)]))
+    play_list(root, [1], 0)
+    pl.pump()
+    heard(root, pl, 3600, [0, 1, 2])
+    assert ('mcl-seek', '321') in pl.got
+
+
+def test_a_paused_start_waits_for_play_before_it_jumps(run):
+    """resume_poll: not playing yet (a paused Memory Playback start, a pause near the start) waits for Play"""
+    root, pl = run
+    card_in(root)
+    (root/'mnt/mmc/.q2pod').mkdir(parents=True)
+    (root/'mnt/mmc/.q2pod/ringnav-resume').write_bytes(ring([(path_key('/mnt/mmc/Music/b.mp3'), 500)]))
+    play_list(root, [2], 0)
+    pl.pump()
+    fifo(root, 'pause')
+    pl.pump()
+    heard(root, pl, 3600, [0, 1, 2])
+    assert ('mcl-seek', '500') not in pl.got
+    fifo(root, 'resume')
+    pl.pump()
+    heard(root, pl, 3600, [2, 3])
+    assert ('mcl-seek', '500') in pl.got
+
+
+def kept_with_place(root):
+    kept(THREE, 2, 77)(root)
+    (root/'mnt/mmc/.q2pod/ringnav-resume').write_bytes(ring([(path_key('/mnt/mmc/Music/c}d.flac'), 500)]))
+
+
+@pytest.mark.parametrize('config, prepare', [(MEMORY, kept_with_place)])
+def test_a_song_started_past_its_first_seconds_keeps_where_it_starts(run):
+    """only a start under 5 s jumps: Memory Playback's Location start at 77 s stays there"""
+    root, pl = run
+    fifo(root, 'resume')
+    pl.pump()
+    heard(root, pl, 3600, [77, 78, 79])
+    assert ('mcl-seek', '500') not in pl.got, pl.got
