@@ -61,7 +61,8 @@ def base_args(binary, d):
     # 8 bits to the panel file, so its pixels are the canvas's own: the Q2's default dithers them to 6
     return [str(binary), '--page', 'songs', '--panel-bits', '8', '--db', d/'library.db', '--catalogue', '', '--fb', d/'fb', '--fonts', d/'fonts', '--icons', d,
             '--stats', d/'stats.json', '--state', d/'state', '--cmdq', d/'cmdq', '--playlist', d/'list', '--backlight', d/'backlight',
-            '--now', d/'now', '--cover', d/'cover.jpg', '--ask', d/'ask']
+            '--now', d/'now', '--cover', d/'cover.jpg', '--ask', d/'ask', '--power', d/'power', '--wifi', d/'wifi',
+            '--wireless', d/'wireless']
 
 
 class Picture:
@@ -451,6 +452,40 @@ def routes(binary, work):
     return good
 
 
+def status(binary, work):
+    """The status row's glyphs (ui/status.c): the battery by its level and its cable, the play state, Wi-Fi's fan."""
+    good = True
+
+    def row(level=None, state='Discharging', wifi=None, now=None):
+        d = pathlib.Path(tempfile.mkdtemp(dir=work))
+        if level is not None:
+            (d/'battery').mkdir()
+            (d/'battery/capacity').write_text(f'{level}\n')
+            (d/'battery/status').write_text(state + '\n')
+        if wifi is not None:
+            (d/'operstate').write_text('up\n')
+            (d/'wireless').write_text(f'Inter-| sta-|\n face | tus |\n wlan0: 0000   {wifi}.  -50.  -256\n')
+        _, pics, _ = script(binary, work, 5, ['rest', 'shot @row.ppm'], '--power', d, '--wifi', d/'operstate', '--wireless', d/'wireless', now=now)
+        return pics['row']
+    WHITE, GREEN, RED = (255, 255, 255), (0x34, 0xc7, 0x59), (0xff, 0x45, 0x3a)
+    none, half = row(), row(50)
+    lit = [x for x in range(280, 313) if half.at(x, 22) == WHITE]
+    good &= check('with no battery to read, nothing stands at the right of the row', all(none.at(x, 22) == (0, 0, 0) for x in range(230, 320)))
+    good &= check("half a charge fills the battery's left half in the text's ink", lit and min(lit) < 292 and 296 < max(lit) < 302, str(lit))
+    good &= check('under a fifth it is red, and on a cable green',
+                  any(row(12).at(x, 22) == RED for x in range(284, 292)) and any(row(60, 'Charging').at(x, 22) == GREEN for x in range(284, 296)))
+    playing, paused = row(50, now=NOW), row(50, now=NOW.replace('state=1', 'state=2'))
+    box = lambda p: [(x, y) for y in range(16, 29) for x in range(266, 281) if p.at(x, y) == WHITE]  # noqa: E731
+    good &= check('a song playing puts three bars left of the battery, a paused one two wider bars, nothing stopped',
+                  len({x for x, _ in box(playing)}) == 6 and len({x for x, _ in box(paused)}) == 6 and box(playing) != box(paused) and not box(half),
+                  f'{sorted({x for x, _ in box(playing)})} {sorted({x for x, _ in box(paused)})}')
+    strong, weak = row(50, wifi=60), row(50, wifi=10)
+    fan = lambda p: sum(1 for y in range(16, 29) for x in range(250, 281) if p.at(x, y) == WHITE)  # noqa: E731
+    good &= check("Wi-Fi's fan is lit by its signal: all of it strong, its dot alone weak, none when not connected",
+                  fan(strong) > fan(weak) * 2 > 0 and fan(half) == 0, f'{fan(strong)} {fan(weak)} {fan(half)}')
+    return good
+
+
 def panel(binary, work):
     """The panel told to take 24 bits a pixel (ui/panel.c), against a file standing in for the DSI host's registers:
     sent only to a link that reads as the Q2's, only when its FIFOs have room, and never with --panel-mode keep."""
@@ -616,6 +651,8 @@ def main():
             good &= reload(binary, work)
         if not only or 'panel' in only:
             good &= panel(binary, work)
+        if not only or 'status' in only:
+            good &= status(binary, work)
     print('q2ui: ' + ('all checks passed' if good else 'FAILED'))
     return 0 if good else 1
 

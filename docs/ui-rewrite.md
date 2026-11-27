@@ -336,7 +336,7 @@ By what is used most and coupled least. Each step ships behind the switch and is
 | `ui/input.c`                                   | the wheel, its tug and the keys from evdev                                          |
 | `ui/list.c`                                    | the list: rows, selection, glide, the focus layer, the indicator, the marquee       |
 | `ui/card.c`                                    | a card of layers                                                                    |
-| `ui/status.c`, `ui/theme.c`                    | the status row (the clock so far); the tokens                                       |
+| `ui/status.c`, `ui/theme.c`                    | the status row (clock, battery, play state, Wi-Fi); the tokens                      |
 | `ui/lib.c`                                     | the library's songs from SQLite                                                     |
 | `ui/player.c`                                  | play and transport, through `demo`'s command queue                                  |
 | `ui/page_songs.c`                              | Library > Songs                                                                     |
@@ -497,7 +497,8 @@ What a user sees and can do in `demo` today, against q2ui. The scope is the owne
 |                     | Touch: drag, fling, tap                                                                | not yet                                                                                       |
 |                     | The hold menu (Centre held)                                                            | the hold reaches the page (`held`); no menu yet                                               |
 | Status row          | The clock, Inter Medium 15, Text Secondary, from x 62                                  | done; reads the system's time, not yet `demo`'s time zone and 12-hour setting                 |
-|                     | Battery, play state, Wi-Fi, headphones, Bluetooth, lock, sync, offline; the strip      | not yet                                                                                       |
+|                     | The battery (its level, red under a fifth, green on a cable), the play state, Wi-Fi's fan | done, read from the kernel's files and what plays, with no help from `demo`; refreshed when the minute turns, so a cable shows within the minute; the play bars stand still, the charging bolt is not drawn |
+|                     | Wired headphones and the deaf ear, Bluetooth, lock, sync, offline; the strip's marquee  | not yet: each needs a state `demo` alone holds today                                          |
 | Songs               | The Shuffle row pinned, its glyph, the accent's ink; the list opens on the first song  | done                                                                                          |
 |                     | Title, then the artist inline in 15 px Text Tertiary, cut to fit or dropped under 40 px | done                                                                                          |
 |                     | The card's songs and the server catalogue's in one list by title                       | done                                                                                          |

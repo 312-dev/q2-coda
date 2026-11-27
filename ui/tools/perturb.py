@@ -52,6 +52,10 @@ CASES = {
  'panel-keep-ignored': ('ui/panel.c', "    if (panel_keep) return 0;", "", 'panel', '--panel-mode keep'),
  'panel-wrong-word': ('ui/panel.c', "    dsi[GEN_PLD_DATA / 4] = COLMOD | COLMOD_24 << 8;", "    dsi[GEN_PLD_DATA / 4] = COLMOD | 0x55 << 8;", 'panel', 'sent COLMOD 0x77'),
  'hup-ends': ('ui/ui.c', "            if (ui_restart) ui_restart(); /* does not come back when it works */", "", 'live', 'SIGHUP starts q2ui again in place'),
+ 'battery-always-full': ('ui/status.c', "        float full = (body.w - 4) * clampf((float)S.level / 100, 0.08f, 1);", "        float full = (body.w - 4);", 'status', "half a charge fills the battery's left half"),
+ 'battery-never-red': ('ui/status.c', "S.cable ? tok(TOK_POSITIVE) : S.level < LOW ? tok(TOK_NEGATIVE) : ink;", "S.cable ? tok(TOK_POSITIVE) : ink;", 'status', 'under a fifth it is red'),
+ 'no-play-glyph': ('ui/status.c', "    if (play != S.play) S.play = play, ui_mark(glyphs_rect());", "    (void)play;", 'status', 'a song playing puts three bars'),
+ 'fan-always-full': ('ui/status.c', "        wifi = quality >= 45 ? 3 : quality >= 25 ? 2 : 1;", "        wifi = 3;", 'status', "Wi-Fi's fan is lit by its signal"),
 }
 names = sys.argv[1:] or list(CASES)
 bad = 0

@@ -284,6 +284,8 @@ void status_draw(rect_t r);
 void status_step(void);
 rect_t status_rect(void);
 void status_clock_fixed(const char *hhmm);
+/* where the battery, Wi-Fi's state and its signal are read (a test's are its own files) */
+extern const char *status_power, *status_wifi, *status_wireless;
 
 /* ---- list.c: the list every menu is ---- */
 enum {
