@@ -358,3 +358,13 @@ def test_q2uis_switches_flip_only_what_differs(fw):
     assert cc(b'wifi', 0) == 0 and flips == [1]
     assert cc(b'smart', 1) == 0 and saved[-1] == ('SMARTWIFI', 1)
     assert cc(b'reboot', 1) == -1
+
+
+def test_q2uis_display_page_sets_light_mode_and_reduce_motion_through_demo(fw):
+    """q2ui's Settings > Display: demo writes [IPOD] LIGHT (0 to 2 only) and REDUCEMOTION, which q2ui reads back."""
+    saved = []
+    fw.mock('write_int_config', lambda v, sec, key, *_: saved.append((C.string_at(sec).decode(), C.string_at(key).decode(), v)) or 0)
+    cc = fw.fn('q2ui_cc_set', C.c_int, C.c_char_p, C.c_int)
+    assert cc(b'light', 2) == 0 and saved[-1] == ('IPOD', 'LIGHT', 2)
+    assert cc(b'light', 3) == -1 and len(saved) == 1
+    assert cc(b'motion', 1) == 0 and saved[-1] == ('IPOD', 'REDUCEMOTION', 1)

@@ -463,10 +463,11 @@ def pages(binary, work):
     trace, _, _ = script(binary, work, 60, ['rest', 'tick 9', 'rest', 'key centre', 'run 100', 'tick -1', 'run 100'], *home, code=0)
     good &= check('Centre on Old Menus ends q2ui', trace[-1]['sel'] == 7, str(trace[-1]['sel']))
     # Settings is q2ui's list, in demo's order; its rows ask for demo's pages, a stock one by its path
-    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 6', 'rest', 'key centre', 'run 100'],
+    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 5', 'rest', 'key centre', 'run 100'],
                                    *home, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
-    good &= check("Home > Settings > Display asks demo for stock's Display page by its path", asked == 'systemset/display_page\n', repr(asked))
+    good &= check("Home > Settings > Car Remote asks demo for its page by the payload's opener", asked == 'carremote_page\n', repr(asked))
+    good &= display(binary, work, home)
     return good
 
 
@@ -500,6 +501,35 @@ def playlists(binary, work, home):
     _, _, _, (sent, ids, _) = script(binary, work, 60, lines, *home, '--db', d/'library.db', queue=True)
     return check("Playlists lists On-The-Go and then Road; Centre on Road's second song plays Road's songs in its order from it",
                  len(sent) == 1 and sent[0].split()[1:3] == ['play', '1'] and ids == want, f'{sent} {ids} for {want}')
+
+
+def display(binary, work, home):
+    """Settings > Display, q2ui's own (ui/page_display.c): Light Mode and Reduce Motion as config.ini has them, set
+    through demo, and applied when demo writes the file; the rest of demo's Display page by its path."""
+    good = True
+    ini = pathlib.Path(tempfile.mkdtemp(dir=work))/'config.ini'
+    ini.write_text('[IPOD]\nLIGHT=0\nREDUCEMOTION=0\n')
+    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 6', 'rest', 'key centre', 'rest']  # Home > Settings > Display
+    lines = to + ['key centre', 'run 100', 'key centre', 'run 100', 'tick 1', 'rest', 'key centre', 'run 100']
+    _, _, _, (sent, _, _) = script(binary, work, 60, lines, *home, '--config', ini, queue=True)
+    verbs = [line.split(' ', 1)[1] for line in sent]
+    good &= check('Light Mode goes Off to On, then on to Auto before demo has written it; Reduce Motion goes on',
+                  verbs == ['set light 1', 'set light 2', 'set motion 1'], str(verbs))
+    _, _, _, (sent, _, d) = script(binary, work, 60, to + ['tick 2', 'rest', 'key centre', 'run 100'], *home, '--config', ini, code=3, queue=True)
+    asked = (d/'ask').read_text() if (d/'ask').exists() else ''
+    good &= check("its last row opens the rest of demo's Display page", asked == 'systemset/display_page\n', repr(asked))
+    run = Run(binary, work, 60, '--config', ini, '--clock', '12:00')
+    try:
+        run.rest()
+        dark = shot.pixel(run.picture(), 5, 200)
+        (ini.parent/'config.tmp').write_text('[IPOD]\nLIGHT=1\n')
+        (ini.parent/'config.tmp').rename(ini)
+        run.rest()
+        light = shot.pixel(run.picture(), 5, 200)
+        good &= check('demo writing Light Mode on turns q2ui light as the file lands', dark == (0, 0, 0) and light == (255, 255, 255), f'{dark} {light}')
+    finally:
+        run.end()
+    return good
 
 
 def control_center(binary, work, home):

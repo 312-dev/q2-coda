@@ -794,7 +794,9 @@ int cc_key(void *win, unsigned key) {
  * the status row's in its file (q2ui_gate.c tell): wifi and bt (the switches stock's own pages
  * show), car (Car Remote), smart (Smart Wi-Fi), eq (on in any mode), usb (the USB setting's value).
  * Its switches come back through Car Remote's command queue as "set NAME 0|1" (coda_rc_shim.c
- * cr_run, q2ui_cc_set), each flipped as this page's circle flips it. Bluetooth is not one of them:
+ * cr_run, q2ui_cc_set), each flipped as this page's circle flips it; q2ui's Display page sets
+ * Light Mode ("set light 0|1|2") and Reduce Motion ("set motion 0|1") the same way, and reads them
+ * back from config.ini itself (ui/config.c). Bluetooth is not one of them:
  * stock flips it only from its page's row, so q2ui opens that page. */
 unsigned q2ui_cc_state(char *b, unsigned room) {
     eq_state s;
@@ -817,6 +819,14 @@ int q2ui_cc_set(const char *name, int on) {
     } else if (!tk_strcmp(name, "smart")) {
         st.smart_wifi = !!on;
         write_int_config(st.smart_wifi, "Q2POD", "SMARTWIFI");
+    } else if (!tk_strcmp(name, "light") && on >= 0 && on <= 2) { /* q2ui's Display: Off, On, Auto */
+        int buf[11];
+        st.light = on;
+        write_int_config(on, "IPOD", "LIGHT");
+        st.light_day = light_day(clock_now(buf)); /* Auto applies from this choice, as Display's row */
+    } else if (!tk_strcmp(name, "motion")) { /* q2ui's Display: Reduce Motion */
+        st.reduce_motion = !!on;
+        write_int_config(st.reduce_motion, "IPOD", "REDUCEMOTION");
     } else
         return -1;
     return 0;

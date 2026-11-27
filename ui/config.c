@@ -19,7 +19,9 @@
 
 const char *config_file = "/mnt/data/config.ini";
 int config_light_forced, config_motion_forced;
-static int light_setting, watch = -1;
+static int light_setting, motion_setting, watch = -1;
+int config_light_setting(void) { return light_setting; }
+int config_motion_setting(void) { return motion_setting; }
 
 /* [section] key=value's number; def when the file, the section or the key is not there */
 int config_int(const char *section, const char *key, int def) {
@@ -54,7 +56,9 @@ void config_light_now(void) {
 
 void config_read(void) {
     light_setting = config_int("IPOD", "LIGHT", 0);
-    int reduce = config_motion_forced || config_int("IPOD", "REDUCEMOTION", 0) == 1;
+    motion_setting = config_int("IPOD", "REDUCEMOTION", 0) == 1;
+    list_rows_changed(); /* a page may show a setting (page_display.c) */
+    int reduce = config_motion_forced || motion_setting;
     if (reduce != ui_reduce_motion) ui_reduce_motion = reduce, ui_mark_all();
     config_light_now();
 }
