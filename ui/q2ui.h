@@ -331,6 +331,13 @@ typedef struct ui_list ui_list;
 void list_pictures_changed(void);
 void list_rows_changed(void); /* any row's words or marks may have changed: every row is asked again */
 void control_push(void);      /* Control Center (page_control.c) */
+/* ---- config.c: the settings q2ui reads from demo's config.ini ---- */
+extern const char *config_file;
+extern int config_light_forced, config_motion_forced; /* --light, --reduce-motion */
+int config_int(const char *section, const char *key, int def);
+void config_open(void);      /* read it, and again whenever it is written */
+void config_read(void);
+void config_light_now(void); /* Light Mode's Auto at this hour */
 ui_list *list_new(const ui_source *src);
 void list_free(ui_list *l);
 void list_event(ui_list *l, const input_t *e);

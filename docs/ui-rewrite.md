@@ -268,6 +268,7 @@ Kept short on purpose, and each with what removes it, so q2ui can move to a base
 | The server catalogue's schema (`servertable`)        | `ui/lib.c`                                        | Nothing: it is Vamp's own ([server-library](server-library.md))                                                        |
 | Fonts and glyphs at stock's asset paths              | `ui/main.c` (`--fonts`, `--icons` defaults)       | The files are Vamp's (Inter, `tools/art.py`'s PNGs); only the folder is stock's layout. Two options already move them |
 | `demo`, for every duty not yet moved                 | the hand-over ([Cutover](#cutover))               | Each step of [Migration order](#migration-order); q2ui's own code calls nothing in `demo`                             |
+| `demo`'s `config.ini` as the settings' store, written by `demo` alone | `ui/config.c`                               | q2ui's own Settings pages writing it (step 4), with an atomic writer                                                  |
 | `demo`'s word on the status row's states (`/tmp/q2ui.status`) | `ui/status.c`, `patch/q2ui_gate.c`            | Vamp OS's services (`q2sysd`, `q2btd`) sending the same states as events                                              |
 | `demo`'s command queue and its files in `/tmp`       | `ui/player.c`                                     | q2ui owning the player's socket (step 5); the one file to change                                                      |
 | The kernel's `jzfb` and input drivers                | `ui/fb.c`, `ui/input.c`                           | Stays: the kernel is Shanling's in Vamp OS too. The interfaces used are the stock Linux ones (fbdev, evdev)           |
@@ -340,6 +341,7 @@ By what is used most and coupled least. Each step ships behind the switch and is
 | `ui/card.c`                                    | a card of layers                                                                    |
 | `ui/status.c`, `ui/theme.c`                    | the status row (clock, battery, play state, Wi-Fi, and the slots `demo` tells it of); the tokens                      |
 | `ui/lib.c`                                     | the library's songs from SQLite                                                     |
+| `ui/config.c`                                  | the settings q2ui takes from `demo`'s `config.ini`, read, never written              |
 | `ui/art.c`                                     | album covers for rows: Cover Flow's thumbnails, read by a worker thread              |
 | `ui/player.c`                                  | play and transport, through `demo`'s command queue                                  |
 | `ui/page_songs.c`                              | Library > Songs                                                                     |
@@ -519,8 +521,8 @@ What a user sees and can do in `demo` today, against q2ui. The scope is the owne
 |                     | The playing song's row; where a song lives                                             | not yet                                                                                       |
 |                     | Song Artist and Song Length options; Sorting                                           | not yet                                                                                       |
 | Page slides         | Push and pop with parallax, the status row still                                       | done between q2ui's pages                                                                     |
-| Light Mode          | The tokens' light half                                                                 | done for what is built (`--light`); not yet read from the setting                             |
-| Reduce Motion       | No lean, no slides; the glide and the bar stay                                         | done (`--reduce-motion`); not yet read from the setting                                       |
+| Light Mode          | The tokens' light half                                                                 | done for what is built: read from `demo`'s setting (`[IPOD] LIGHT` in `config.ini`: on, off, or Auto from 7:00 to 19:00) at the start, whenever `demo` writes the file and, for Auto, as the hour turns (`ui/config.c`); `--light` holds it on |
+| Reduce Motion       | No lean, no slides; the glide and the bar stay                                         | done, read from `demo`'s setting (`[IPOD] REDUCEMOTION`) the same way; `--reduce-motion` holds it on |
 | Night Shift         |                                                                                        | not yet                                                                                       |
 | Songs               | A fast turn up to the pinned Shuffle row leaves the songs at their top                 | done (a fault the owner met on a Q2, 2026-11-26: a step that passed over the first song left the list a row down) |
 | Home                | Split: the list at the left, the playing cover over the pane at the right              | done: held by `test/ui.py` and walked in the emulator; its rows begin at y 40 as `demo`'s do    |

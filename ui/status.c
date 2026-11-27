@@ -209,6 +209,7 @@ void status_step(void) {
     S.run.n = 0;
     ui_mark((rect_t){ INSET, CLOCK_Y, CLOCK_W, 18 });
     read_glyphs(); /* the minute turned: the loop is awake anyway */
+    config_light_now(); /* Light Mode's Auto turns on the hour */
 }
 
 /* Wi-Fi's fan: a quarter circle standing on its point, cut into a dot and two bands, the lit ones

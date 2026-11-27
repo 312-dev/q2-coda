@@ -62,7 +62,7 @@ def base_args(binary, d):
     return [str(binary), '--page', 'songs', '--panel-bits', '8', '--db', d/'library.db', '--catalogue', '', '--fb', d/'fb', '--fonts', d/'fonts', '--icons', d,
             '--stats', d/'stats.json', '--state', d/'state', '--cmdq', d/'cmdq', '--playlist', d/'list', '--backlight', d/'backlight',
             '--now', d/'now', '--cover', d/'cover.jpg', '--ask', d/'ask', '--power', d/'power', '--wifi', d/'wifi',
-            '--wireless', d/'wireless', '--told', d/'told']
+            '--wireless', d/'wireless', '--told', d/'told', '--config', d/'config.ini']
 
 
 class Picture:
@@ -315,6 +315,11 @@ def scripts(binary, work):
     trace, _, _ = script(binary, work, 300, to_foot + ['tug 1', 'run 300', 'tick 1', 'run 600'], '--reduce-motion')
     glide = [t['scroll'] for t in trace]
     good &= check('Reduce Motion leans nothing and still glides', all(t['lean'] == 0 for t in trace) and len([s for s in glide if 0 < s < ROW_H]) >= 8)
+    # ... and demo's setting for it, [IPOD] REDUCEMOTION in config.ini (ui/config.c), the same
+    ini = pathlib.Path(tempfile.mkdtemp(dir=work))/'config.ini'
+    ini.write_text('[SYSSET]\nVOLUME=20\n[IPOD]\nACCENT=0\nREDUCEMOTION=1\n')
+    trace, _, _ = script(binary, work, 300, to_foot + ['tug 1', 'run 300', 'tick 1', 'run 600'], '--config', ini)
+    good &= check("demo's Reduce Motion setting leans nothing", all(t['lean'] == 0 for t in trace))
     trace, _, _ = script(binary, work, 300, to_foot + ['tick 1', 'run 100'], '--motion', '0')
     good &= check('--motion 0 is at its end at once', all(t['scroll'] in (0, ROW_H) for t in trace) and trace[-1]['scroll'] == ROW_H)
 
@@ -350,6 +355,13 @@ def scripts(binary, work):
     # Light Mode: paper under the same list
     _, pics, _ = script(binary, work, 30, ['rest', 'shot @light.ppm'], '--light')
     good &= check('Light Mode is black on white, the platter still blue', pics['light'].at(5, 200) == (255, 255, 255) and pics['light'].blue(200, BAR_H + ROW_H + 3))
+    ini = pathlib.Path(tempfile.mkdtemp(dir=work))/'config.ini'
+    ini.write_text('[IPOD]\nLIGHT=1\n')
+    _, pics, _ = script(binary, work, 30, ['rest', 'shot @light.ppm'], '--config', ini)
+    good &= check("demo's Light Mode setting, [IPOD] LIGHT=1 in config.ini, is Light Mode", pics['light'].at(5, 200) == (255, 255, 255))
+    ini.write_text('[IPOD]\nLIGHT=0\n[OTHER]\nLIGHT=1\n')
+    _, pics, _ = script(binary, work, 30, ['rest', 'shot @light.ppm'], '--config', ini)
+    good &= check('another section of the same key is not it', pics['light'].at(5, 200) == (0, 0, 0))
     return good
 
 
