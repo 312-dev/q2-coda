@@ -254,22 +254,65 @@ The plan for the whole is `docs/vamp-os.md` (branch `docs/vamp-os`), not written
 ## The build switch
 
 `tools/build.py --own-bluez` (off by default; `python3 tools/ci/rebuild.py --dev -- --own-bluez`) adds
-`/usr/lib/vamp-bluez/bluetoothd` and records it in `manifest.json` (`own_bluez`). Nothing starts it: demo's
-`bluetoothd &` still finds stock's on `PATH`. It keeps the name `bluetoothd` so demo's `killall -9 bluetoothd`
-ends it. A build without the flag is byte for byte what it was.
+`/usr/lib/vamp-bluez/bluetoothd` and records it in `manifest.json` (`own_bluez`), and puts the
+[launcher](#the-launcher) at `/usr/bin/bluetoothd`, with stock's moved to `/usr/lib/bluez-stock/bluetoothd`. It
+keeps the name `bluetoothd` so demo's `killall -9 bluetoothd` ends it. A build without the flag is byte for byte
+what it was.
+
+## The launcher
+
+`patch/bt_launch.sh`, one script for both daemons ([bluealsa](bluealsa.md#cutover-and-fallback) is the other).
+An `--own-bluez` build installs it at `/usr/bin/bluetoothd`, where demo's `bluetoothd &` finds it on `PATH`, so
+demo, its start and its stop are unchanged. Each start it reads `[Q2POD] BLUEZ` in `/mnt/data/config.ini` (the
+first such line under a `[Q2POD]` header, as stock reads a key), default off:
+
+- **Off** (no key, or anything but `1`), or a fallback marker this boot (`/tmp/q2-bt/bluez.fallback`):
+  `exec /usr/lib/bluez-stock/bluetoothd` with the arguments demo gave (none). Nothing else runs and nothing is
+  logged: the process is stock's daemon, with stock's name, as before the build changed.
+- **`BLUEZ=1`**: ours, `/usr/lib/vamp-bluez/bluetoothd --noplugin=hfp,rap,fastpair`, as the child of the same
+  script exec'd again as `/usr/lib/vamp-bt/bt-watch`. The name matters: `killall` and `pidof` match a process by
+  its name, so demo's `killall -9 bluetoothd` and `q2-guest`'s `pidof bluetoothd` find the daemon alone, and a
+  watcher of that name would be killed with it and could not tell Bluetooth off from a crash.
+
+The watcher's rules (`UP`, `CRASHES`, `WINDOW` in the script):
+
+- **Not up**: `org.bluez` not owned by the daemon's own pid (`GetConnectionUnixProcessID`, so a stock daemon left
+  running does not count) 20 s after its start. The daemon is killed, the marker written, and the watcher
+  `exec`s stock's in its place, so Bluetooth comes up on stock's within the same Bluetooth on.
+- **A crash**: the daemon ends other than by SIGKILL. It is started again; the third end within 120 s is the
+  fallback, as above.
+- **SIGKILL** is demo's Bluetooth off (and `q2-guest`'s restart of bluealsa): the watcher ends with it.
+- The marker is in `/tmp`, so the next boot tries ours again; a fallback lasts the boot.
+- Every start, name taken, crash and fallback is a [unified log](internals.md#unified-log) line on the
+  watcher's stderr, which is demo's, so `q2guard` copies it to the card: `I bt bluez: Vamp's
+  /usr/lib/vamp-bluez/bluetoothd, pid N`, `I bt bluez: org.bluez up after Ns`, `W bt bluez: Vamp's daemon ended
+  (status N), started again`, `E bt bluez: org.bluez not taken 20s after its start; stock's for the rest of this
+  boot`.
+
+Why the launcher and not `q2guard`, which the plan had for the fallback: the launcher is the one place that knows
+the daemon's pid and its exit status from the moment it starts, and needs no change to the payload; `q2guard`
+would have had to tell a crash from demo's own `killall` by timing. Twenty seconds is the plan's figure; three
+crashes in two minutes leaves room for one real crash and a retry before a boot gives up on ours.
+
+**Tested without a Q2**: `test/bt_launch.py BUILD` runs the build's own root filesystem in a `bwrap` chroot, every
+program MIPS under `qemu-mipsel` through binfmt: the image's `dbus-daemon`, BusyBox and `dbus-send`, the launcher
+started as demo starts it (`bluetoothd &`, then the image's `bluealsa2 &`, with one stderr), and both real
+daemons, `bluetoothd` on `test/bluez_own.py`'s stand-in for the management socket. Its scenarios: the setting
+off (stock's daemons exec'd with their callers' arguments, nothing watching, nothing logged, `killall -9` leaves
+nothing), on (ours with its options under a `bt-watch`, which `killall` does not match, the start and the name
+logged, Bluetooth off ends both, no fallback), a stand-in for ours that never takes `org.bluez` (stock's owns it
+after 20 s, the fallback logged and marked, and the next Bluetooth on is stock's directly), one that exits at once
+(started again twice, then stock's), and one that exits once and then runs (started again, up, no fallback). Every
+line the launcher writes must parse as a unified log line. Each check was seen to fail on a broken copy of the
+script (`--launcher`): the setting ignored, the fallback left out, and the stock path watched.
 
 ## Cutover and fallback
 
-Phase 2 builds this; it is not in the tree.
-
-1. `/usr/bin/bluetoothd` becomes a three-line launcher that `exec`s one of two binaries, each still named
-   `bluetoothd`: stock's, moved to `/usr/lib/bluez-stock/`, or ours. It reads one key, `[Q2POD] BLUEZ` in
-   `config.ini`, and a marker in `/tmp`. demo's start and stop lines do not change.
-2. **Opt-in** (`--dev` builds, then a Settings row under Bluetooth): default stock.
-3. **Default ours, stock the fallback**: by the row, and by a guard in `q2guard`, which already watches the
-   controller ([internals](internals.md#bluetooth-controller-watchdog)): ours gone, or `org.bluez` not owned
-   20 s after its start, twice in a boot, writes the marker, restarts Bluetooth on stock's and logs it to the
-   unified log. Until then both daemons are in the image (1.7 MB).
+1. **The launcher** ([above](#the-launcher)): built, and `[Q2POD] BLUEZ` read at each start.
+2. **Opt-in** (`--dev --own-bluez` builds, the key set by hand over adb; then a Settings row under Bluetooth):
+   default stock. The steps for the owner's Q2 are [bt-own-plan](bt-own-plan.md).
+3. **Default ours, stock the fallback**: the key's default turned round once the plan has passed, with the
+   launcher's fallback as it is. Until then both daemons are in the image (1.7 MB).
 4. **Stock's removed**, with `patch_bluetoothd`, `tools/bt_meta.c` and `test/bluetoothd.py`, once the
    [device plan](#on-a-q2) has passed and a week of ordinary use has shown no fallback.
 
@@ -380,6 +423,9 @@ The owner's Q2 on V24Ri, the plain 5.88 daemon (`1194d357`'s recipe) pushed to `
 What settles it: `btmon` (or `hcidump -X`) on a `--dev` build while ours starts and demo sets Discoverable. The failing command is the one whose Command Complete carries a non-zero status, just before the `Set Discoverable` reply with Failed. Run it once with the [GATT] switch above in place too, and once with Bluetooth started from the page (demo's own order), in the [needs-device list](#needs-a-device).
 
 ## Needs a device
+
+Every row below, with the launcher's own and in the order to run them on the owner's Q2, is in
+[bt-own-plan](bt-own-plan.md).
 
 What phase 2 has done that only a Q2 can confirm, in the order to try it:
 

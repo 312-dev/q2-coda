@@ -1688,23 +1688,56 @@ def test_every_hook_is_where_a_record_not_made_from_hooks_says():
         build.hook_address_check({'nowhere': (1, 'x', None)}, {}, mapped)
 
 
-def test_own_bluealsa_files_are_thirdpartys_stripped_under_names_of_their_own(tmp_path, monkeypatch):
+def fake_elf(loads, tag=b''):
+    """A 32-bit little-endian ELF header and program headers: one PT_LOAD per (vaddr, memsz), then tag"""
+    head = bytearray(52)
+    head[:4] = b'\x7fELF'
+    struct.pack_into('<I', head, 0x1c, 52)
+    struct.pack_into('<HH', head, 0x2a, 32, len(loads))
+    return bytes(head) + b''.join(struct.pack('<8I', 1, 0, v, v, 0, m, 5, 0x10000) for v, m in loads) + tag
+
+
+# the own bluealsad's two segments as 5.0.0 builds them (llvm-readelf -l, 2026-11-27)
+OWN_BLUEALSA_LOADS = [(0x400000, 0x41a40), (0x451a40, 0x11c0)]
+
+
+def test_own_bluealsa_files_are_thirdpartys_stripped_into_a_folder_of_their_own(tmp_path, monkeypatch):
     import thirdparty
     monkeypatch.setattr(thirdparty, 'build', lambda name: tmp_path/f'stage-{name}')
     def stripped(src, dst):
         assert src.is_relative_to(tmp_path/'stage-bluealsa') and dst.parent == tmp_path/'own-bluealsa'
         dst.parent.mkdir(exist_ok=True)
-        dst.write_bytes(b'\x7fELF ' + src.name.encode())
+        dst.write_bytes(fake_elf(OWN_BLUEALSA_LOADS, src.name.encode()))
         return dst
     monkeypatch.setattr(thirdparty, 'stripped', stripped)
     files = build.own_bluealsa_files(tmp_path)
-    assert files == {'usr/lib/vamp-bluealsa/bluealsad': (build.HELPER_LIKE, b'\x7fELF bluealsad'),
-                     'usr/lib/vamp-bluealsa/bluealsa-aplay.own': (build.HELPER_LIKE, b'\x7fELF bluealsa-aplay'),
-                     'usr/lib/vamp-bluealsa/libasound_module_pcm_bluealsa.own.so': (build.HELPER_LIKE, b'\x7fELF libasound_module_pcm_bluealsa.so'),
-                     'usr/lib/vamp-bluealsa/libasound_module_ctl_bluealsa.own.so': (build.HELPER_LIKE, b'\x7fELF libasound_module_ctl_bluealsa.so')}
-    # the build keeps each added file in its output folder by base name: none may be stock's bluealsa's or bluealsa-aplay's
-    names = [p.rsplit('/', 1)[1] for p in files]
-    assert len(set(names)) == 4 and not {'bluealsa', 'bluealsa-aplay', 'bluealsa2'} & set(names)
+    # stock's names, which killall, q2guard and the launcher go by; staged in out/own-bluealsa, not out, where
+    # out/bluealsa is stock's patched daemon
+    own = tmp_path/'own-bluealsa'
+    assert files == {'usr/lib/vamp-bluealsa/bluealsa': (build.HELPER_LIKE, own/'bluealsa'),
+                     'usr/lib/vamp-bluealsa/bluealsa-aplay': (build.HELPER_LIKE, own/'bluealsa-aplay'),
+                     'usr/lib/vamp-bluealsa/libasound_module_pcm_bluealsa.so': (build.HELPER_LIKE, own/'libasound_module_pcm_bluealsa.so'),
+                     'usr/lib/vamp-bluealsa/libasound_module_ctl_bluealsa.so': (build.HELPER_LIKE, own/'libasound_module_ctl_bluealsa.so')}
+    assert (own/'bluealsa').read_bytes().endswith(b'bluealsad')
     assert build.own_bluealsa_record(files) == dict(
         version=thirdparty.SOURCES['bluealsa'][0],
-        files={p: dict(sha256=hashlib.sha256(d).hexdigest(), bytes=len(d)) for p, (_, d) in files.items()})
+        files={p: dict(sha256=hashlib.sha256(d := f.read_bytes()).hexdigest(), bytes=len(d)) for p, (_, f) in files.items()})
+    # a daemon whose data reached q2guard's bytes would take its writes meant for stock's
+    OWN_BLUEALSA_LOADS[1] = (0x450000, 0x2000)
+    try:
+        with pytest.raises(ValueError, match='maps the bytes q2guard writes'):
+            build.own_bluealsa_files(tmp_path)
+    finally:
+        OWN_BLUEALSA_LOADS[1] = (0x451a40, 0x11c0)
+
+
+def test_elf_maps_rounds_each_load_out_to_4_kb_pages():
+    pool = build.BT_SBC_POOL
+    assert pool == 0x450600 and build.BT_AAC_RATE + 4 - pool == 8  # patch/q2bt.h's
+    assert not build.elf_maps(fake_elf(OWN_BLUEALSA_LOADS), pool, 8)
+    assert build.elf_maps(fake_elf([(0x451000, 0x10)]), 0x451000, 1)
+    assert build.elf_maps(fake_elf([(0x450000, 0x601)]), pool, 8)    # its end, in the same page
+    assert build.elf_maps(fake_elf([(0x44f000, 0x10)]), 0x44fff0, 1)  # its last page
+    assert not build.elf_maps(fake_elf([(0x44f000, 0x1000)]), 0x450000, 8)
+    assert build.elf_maps(fake_elf([(0x450fff, 1)]), pool, 8)        # its start, rounded down
+    assert not build.elf_maps(fake_elf([(0x451000, 1)]), pool, 8)

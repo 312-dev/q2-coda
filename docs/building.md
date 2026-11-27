@@ -98,7 +98,7 @@ Off by default, `--dev --pwm-idle-clock`: the paired PWM/MCU clock gating. It ne
 
 All three kernel-module experiments were on by default from 1.5.0 to 1.6.1 and went back to `--dev` in 1.6.2: no battery saving was measured for any of them, and none handles suspend/resume, which stock Standby does by default.
 
-`--own-bluez` is off in every build unless given. It adds Vamp's own bluetoothd (upstream BlueZ, built by `tools/thirdparty.py`) at `/usr/lib/vamp-bluez/bluetoothd`, beside stock's and started by nothing. See [bluez](bluez.md#the-build-switch).
+`--own-bluez` is off in every build unless given. It adds Vamp's own bluetoothd (upstream BlueZ, built by `tools/thirdparty.py`) at `/usr/lib/vamp-bluez/bluetoothd`, beside stock's, and the Bluetooth launcher at `/usr/bin/bluetoothd`, which starts stock's unless `config.ini` has `[Q2POD] BLUEZ=1`. `--dev --own-bluealsa` does the same for bluealsa (`BLUEALSA=1`). See [bluez](bluez.md#the-launcher).
 
 `--dev --mcu-idle-sleep` is off in release builds. It adds an interruptible MCU sleep with an explicit wake handshake. See [MCU sleep](mcu-sleep.md).
 

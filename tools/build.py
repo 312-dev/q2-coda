@@ -523,10 +523,19 @@ REMOTE_HOOK = (b'/usr/bin/dbus-daemon --config-file=/etc/dbus-1/system.conf\n',
 # ends, and its gadget bound once it is up (unless stock's gadget has the controller). After REMOTE_HOOK's line.
 ADBD, ADB_GADGET = 'usr/bin/adbd', 'usr/bin/q2adb-gadget'
 # --own-bluez (docs/bluez.md#the-build-switch): Vamp's own bluetoothd beside stock's, in a folder of its own
-# and off PATH, so demo's `bluetoothd &` still starts stock's and nothing runs this one but a person at a
-# shell. It keeps the name bluetoothd, the one demo's `killall -9 bluetoothd` ends.
+# and off PATH. It keeps the name bluetoothd, the one demo's `killall -9 bluetoothd` ends.
 OWN_BLUEZ_DIR = 'usr/lib/vamp-bluez'
 OWN_BLUETOOTHD = OWN_BLUEZ_DIR + '/bluetoothd'
+# The launcher (patch/bt_launch.sh, docs/bluez.md#the-launcher), in an --own-bluez or --own-bluealsa build: at
+# stock's path for each daemon the build carries an own one of (bluetoothd; bluealsa and bluealsa-aplay), so demo,
+# bluealsa2 and q2-guest start it by the names they use, and it starts stock's (moved to these folders) or ours by
+# config.ini's [Q2POD] BLUEZ and BLUEALSA; a copy at BT_WATCH is the name it watches our daemon under.
+BT_LAUNCH = 'patch/bt_launch.sh'
+BT_WATCH = 'usr/lib/vamp-bt/bt-watch'
+STOCK_BLUEZ_DIR, STOCK_BLUEALSA_DIR = 'usr/lib/bluez-stock', 'usr/lib/bluealsa-stock'
+BLUEALSA_APLAY = 'usr/bin/bluealsa-aplay'
+# ... and which ALSA plugins `bluealsa` loads: the links in /tmp the launcher points at stock's pair or ours
+BT_PLUGINS_CONF = 'usr/share/alsa/alsa.conf.d/25-vamp-bluealsa.conf'
 # --dev only (docs/adb.md#installing-an-update-over-adb, patch/q2update.sh): Software Update's card path from a
 # computer, through demo's q2update_poll (patch/sw_update.c)
 Q2UPDATE = 'usr/bin/q2update'
@@ -2516,26 +2525,45 @@ def own_bluetoothd(out, stock):
 # Vamp's own bluealsa (docs/bluealsa.md), in a build made with --own-bluealsa only: upstream bluez-alsa's daemon, its
 # two ALSA plugins and bluealsa-aplay, in a directory of their own beside stock's, which nothing starts or loads.
 OWN_BLUEALSA = 'usr/lib/vamp-bluealsa'
-OWN_BLUEALSA_FILES = {'bluealsad': 'usr/bin/bluealsad', 'bluealsa-aplay.own': 'usr/bin/bluealsa-aplay',
-                      'libasound_module_pcm_bluealsa.own.so': 'usr/lib/alsa-lib/libasound_module_pcm_bluealsa.so',
-                      'libasound_module_ctl_bluealsa.own.so': 'usr/lib/alsa-lib/libasound_module_ctl_bluealsa.so'}
+# Each under stock's name, which demo's `killall -9 bluealsa`, q2guard's search by name and the launcher's choice of
+# plugin and bluealsa-aplay go by (the daemon is upstream's bluealsad).
+OWN_BLUEALSA_FILES = {'bluealsa': 'usr/bin/bluealsad', 'bluealsa-aplay': 'usr/bin/bluealsa-aplay',
+                      'libasound_module_pcm_bluealsa.so': 'usr/lib/alsa-lib/libasound_module_pcm_bluealsa.so',
+                      'libasound_module_ctl_bluealsa.so': 'usr/lib/alsa-lib/libasound_module_ctl_bluealsa.so'}
 
 
 def own_bluealsa_files(out):
-    """--own-bluealsa's files ({rootfs path: (path whose inode metadata it takes, bytes)}), built by
-    tools/thirdparty.py and stripped into out. Each has a name no other packaged file has: the build keeps
-    every added file in out under its base name, where stock's patched bluealsa already is."""
+    """--own-bluealsa's files ({rootfs path: (path whose inode metadata it takes, the file holding its bytes)}),
+    built by tools/thirdparty.py and stripped into out/own-bluealsa: not out itself, where the build keeps every
+    other added file under its base name and stock's patched bluealsa already is. Stopped when the daemon maps
+    the bytes q2guard writes into stock's (BT_SBC_POOL to BT_AAC_RATE's four, patch/q2bt.h): its reads must
+    fail there, as for a bluealsa without them (pool_read in patch/q2bt.c), not land in ours."""
     import thirdparty
     stage = thirdparty.build('bluealsa')
-    return {f'{OWN_BLUEALSA}/{name}': (HELPER_LIKE, thirdparty.stripped(stage/rel, out/'own-bluealsa'/name).read_bytes())
-            for name, rel in OWN_BLUEALSA_FILES.items()}
+    files = {f'{OWN_BLUEALSA}/{name}': (HELPER_LIKE, thirdparty.stripped(stage/rel, out/'own-bluealsa'/name))
+             for name, rel in OWN_BLUEALSA_FILES.items()}
+    check(not elf_maps(files[f'{OWN_BLUEALSA}/bluealsa'][1].read_bytes(), BT_SBC_POOL, BT_AAC_RATE + 4 - BT_SBC_POOL),
+          'The own bluealsa maps the bytes q2guard writes into stock\'s')
+    return files
+
+
+def elf_maps(data, addr, size, page=4096):
+    """Whether a 32-bit little-endian ELF program's loadable segments, rounded out to pages (the Q2's are
+    4 KB), cover any of [addr, addr + size)."""
+    phoff, = struct.unpack_from('<I', data, 0x1c)
+    phentsize, phnum = struct.unpack_from('<HH', data, 0x2a)
+    for i in range(phnum):
+        kind, _, vaddr, _, _, memsz = struct.unpack_from('<6I', data, phoff + i*phentsize)
+        if kind == 1 and vaddr // page * page < addr + size and addr < -(-(vaddr + memsz) // page) * page:
+            return True
+    return False
 
 
 def own_bluealsa_record(files):
     """The manifest's own_bluealsa: bluez-alsa's version and each file's SHA-256 and size."""
     import thirdparty
     return dict(version=thirdparty.SOURCES['bluealsa'][0],
-                files={path: dict(sha256=sha(data), bytes=len(data)) for path, (_, data) in files.items()})
+                files={path: dict(sha256=sha(data := src.read_bytes()), bytes=len(data)) for path, (_, src) in files.items()})
 
 
 def adbd_record(out):
@@ -3185,8 +3213,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     program, data_file = need(inode(p, HELPER_LIKE.encode()), 'Missing program inode'), need(inode(p, b'etc/hosts'), 'Missing etc/hosts inode')
     bundled = {}
     for d in [BUNDLED_DIR, *(f'{BUNDLED_DIR}/{i}' for i in BUNDLED_APPS), RADIO_DATA, GAMES_DATA, *GAMES_DIRS,
-              *([OWN_BLUEZ_DIR] if own_bluez else []),
-              *([OWN_BLUEALSA] if own_bluealsa else [])]:  # --own-bluealsa's folder, as usr/lib is
+              *([OWN_BLUEZ_DIR, STOCK_BLUEZ_DIR] if own_bluez else []),
+              *([OWN_BLUEALSA, STOCK_BLUEALSA_DIR] if own_bluealsa else []),  # --own-bluealsa's folders, as usr/lib is
+              *([BT_WATCH.rsplit('/', 1)[0]] if own_bluez or own_bluealsa else [])]:
         p += d.encode() + b' D ' + b' '.join(lib_dir.groups()) + b'\n'
         player_added.append([d.encode(), b'D', *lib_dir.groups()])
     for app_id in BUNDLED_APPS:
@@ -3202,13 +3231,29 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         bundled[app_id] = dict(version=app_version, zip=zip_name, sha256=digest, builtin=builtin,
                                bytes=sum(len(d) for d, _ in files.values()),
                                binary_sha256=record[f'q2-{app_id}_sha256'], build=record['build'])
-    if own_bluez:  # beside stock's bluetoothd, with its mode and owner
+    # The launcher at stock's paths and stock's programs moved aside (BT_LAUNCH), each with the mode and owner of the
+    # program it stands for
+    launch = out/'bt-launch'
+    beside = []  # (path, the stock program whose inode metadata it takes, the file)
+    if own_bluez:
         own_bluez = own_bluetoothd(out, cat(BLUETOOTHD))
-        like = need(inode(p, BLUETOOTHD.encode()), 'Missing bluetoothd inode')
-        p += OWN_BLUETOOTHD.encode() + b' F ' + b' '.join(like.groups()) + b' cat ' + shlex.quote(str(own_bluez[0])).encode() + b'\n'
-        player_added.append([OWN_BLUETOOTHD.encode(), b'R', *like.groups()])
+        beside += [(OWN_BLUETOOTHD, BLUETOOTHD, own_bluez[0]), (f'{STOCK_BLUEZ_DIR}/bluetoothd', BLUETOOTHD, out/'bluetoothd')]
+    if own_bluealsa:
+        (out/'bluealsa-aplay.stock').write_bytes(cat(BLUEALSA_APLAY))
+        beside += [(f'{STOCK_BLUEALSA_DIR}/bluealsa', BLUEALSA, out/'bluealsa'),
+                   (f'{STOCK_BLUEALSA_DIR}/bluealsa-aplay', BLUEALSA_APLAY, out/'bluealsa-aplay.stock')]
+    if own_bluez or own_bluealsa:
+        launch.write_bytes((ROOT/BT_LAUNCH).read_bytes())
+        beside.append((BT_WATCH, BLUETOOTHD, launch))
+    for path, like_path, src in beside:
+        like = need(inode(p, like_path.encode()), f'Missing {like_path} inode')
+        p += path.encode() + b' F ' + b' '.join(like.groups()) + b' cat ' + shlex.quote(str(src)).encode() + b'\n'
+        player_added.append([path.encode(), b'R', *like.groups()])
+    if own_bluealsa:
+        p = swap_inode(p, BLUEALSA_APLAY.encode(), launch)
     for path, src in ((b'release/bin/demo', out/'demo'), (b'usr/bin/hciplayer', q2player),
-                      (BLUEALSA.encode(), out/'bluealsa'), (BLUETOOTHD.encode(), out/'bluetoothd'), (WATCHDOG.encode(), out/'watchdog'),
+                      (BLUEALSA.encode(), launch if own_bluealsa else out/'bluealsa'),
+                      (BLUETOOTHD.encode(), launch if own_bluez else out/'bluetoothd'), (WATCHDOG.encode(), out/'watchdog'),
                       (S90PLAY.encode(), out/'S90play'), (S11LOGO.encode(), out/'S11logo'),
                       (BLUEALSA2.encode(), out/'bluealsa2'), (DEFAULT_CONFIG.encode(), out/'config.ini'),
                       (LOGO.encode(), logo)):
@@ -3301,12 +3346,18 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                **{FONT_DIR + n: ('etc/hosts', (ROOT/'assets/fonts'/n).read_bytes()) for n in FONT_NOTICES},
                                **(adb_files(out, cat) if dev else {}),
                                **(own_files := own_bluealsa_files(out) if own_bluealsa else {}),
+                               **({BT_PLUGINS_CONF: ('usr/share/alsa/alsa.conf.d/20-bluealsa.conf',
+                                                     (ROOT/'assets/alsa/25-vamp-bluealsa.conf').read_bytes())} if own_bluealsa else {}),
                                **({REMOTE: (HELPER_LIKE, compile_helper(out, cat, 'remote', 'q2remote', HELPER_LIBS[:1])),
                                    Q2EQ: (HELPER_LIKE, compile_helper(out, cat, 'q2eq', 'q2eq', HELPER_LIBS[:1])),
                                    USBTRACE: (HELPER_LIKE, compile_helper(out, cat, USBTRACE_SOURCES, 'q2-usbtrace',
                                                                           HELPER_LIBS[:1]))} if dev else {})}.items():
         stock = need(inode(p, like.encode()), f'Missing stock inode for {path}')
         name = path.rsplit('/', 1)[-1]
+        if isinstance(data, pathlib.Path):  # staged in a folder of its own (own_bluealsa_files)
+            p += path.encode()+b' F '+b' '.join(stock.groups())+b' cat '+shlex.quote(str(data)).encode()+b'\n'
+            added.append([path.encode(), b'R', *stock.groups()])
+            continue
         if path not in (HELPER, BOOT, SPLASH, REMOTE, Q2EQ, USBTRACE, CODA_RC, GUEST, Q2SEND, RADIOFETCH, Q2IAP): (out/name).write_bytes(data)  # package the hashed bytes, as the logo
         if inode(p, path.encode()):  # stock has a file of that name: ours takes its inode
             changed_assets[path] = dict(original_sha256=sha(cat(path)), sha256=sha(data))
@@ -3424,11 +3475,11 @@ if __name__ == '__main__':
     ap.add_argument('--pwm-idle-clock', action='store_true',
                     help='experimental: cooperative Linux/MCU PWM clock gating (requires --dev)')
     ap.add_argument('--own-bluez', action='store_true',
-                    help='also install Vamp\'s own bluetoothd (upstream BlueZ, tools/thirdparty.py) beside stock\'s, started by nothing (docs/bluez.md)')
+                    help='also install Vamp\'s own bluetoothd (upstream BlueZ, tools/thirdparty.py) beside stock\'s, and the launcher that starts it for [Q2POD] BLUEZ=1 (docs/bluez.md)')
     ap.add_argument('--build-iroh', action='store_true',
                     help='build q2-iroh from remote/iroh-sidecar (Rust nightly) instead of taking the pinned one (tools/iroh.py)')
     ap.add_argument('--own-bluealsa', action='store_true',
-                    help="experimental: carry Vamp's own bluealsa beside stock's, started by nothing (requires --dev; docs/bluealsa.md)")
+                    help="experimental: carry Vamp's own bluealsa beside stock's, and the launcher that starts it for [Q2POD] BLUEALSA=1 (requires --dev; docs/bluealsa.md)")
     a=ap.parse_args()
     try:
         build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.signing_key,a.apps,a.build_iroh,a.own_bluez,a.own_bluealsa)

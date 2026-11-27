@@ -97,7 +97,7 @@ Newer adbd (Android 5 and later) is C++ against libbase, libcutils and BoringSSL
 
 ## Built beside stock's
 
-`bluealsa` (bluez-alsa 5.0.0, with libsbc 2.1, libfreeaptx 0.2.2 and Android's libldac 2.0.2.3 linked in) is built here too, but replaces nothing: a `--dev --own-bluealsa` build carries it in `/usr/lib/vamp-bluealsa/`, where nothing starts it. Its recipes, the `stocksdk` recipe that lets it link the rootfs's own GLib, D-Bus, ALSA, BlueZ and fdk-aac libraries, and the plan to make it the daemon are in [bluealsa](bluealsa.md#build).
+`bluealsa` (bluez-alsa 5.0.0, with libsbc 2.1, libfreeaptx 0.2.2 and Android's libldac 2.0.2.3 linked in) is built here too, but replaces nothing by default: a `--dev --own-bluealsa` build carries it in `/usr/lib/vamp-bluealsa/`, which the Bluetooth launcher starts in place of stock's only with `[Q2POD] BLUEALSA=1` ([bluealsa](bluealsa.md#cutover-and-fallback)). Its recipes, the `stocksdk` recipe that lets it link the rootfs's own GLib, D-Bus, ALSA, BlueZ and fdk-aac libraries, and the plan to make it the daemon are in [bluealsa](bluealsa.md#build).
 
 ## Not replaced
 

@@ -180,8 +180,8 @@ way and compares:
   (stock started that at standard here). `SetUSBOutput` and `StopAlsaplay` do nothing, in stock's either.
 - **`/tmp/bt_startup`** is made once the name is owned.
 
-The launcher ([Cutover](#cutover-and-fallback), not built yet) is to pass `--shanling --sbc-quality=medium
---ldac-quality=standard`, so ours starts where stock's does, as the harness starts it. Seen to fail first: today's daemon refused the option; a build that named aptX HD 3 and mapped 1 to high
+The launcher ([Cutover](#cutover-and-fallback)) passes `--shanling --sbc-quality=medium
+--ldac-quality=standard` to the main daemon, so ours starts where stock's does, as the harness starts it. Seen to fail first: today's daemon refused the option; a build that named aptX HD 3 and mapped 1 to high
 failed the signal and the SBC checks. Each harness run takes about four minutes under qemu.
 
 ## The patches
@@ -276,32 +276,49 @@ directory, which a base with a writable `/var/lib` leaves at upstream's default.
 ## The build switch
 
 `tools/build.py --own-bluealsa` (off by default, `--dev` only; `python3 tools/ci/rebuild.py --dev --
---own-bluealsa`) adds `/usr/lib/vamp-bluealsa/` with `bluealsad`, `bluealsa-aplay.own` and the two plugins as
-`libasound_module_{pcm,ctl}_bluealsa.own.so`, and records them in `manifest.json` (`own_bluealsa`). Nothing
-starts or loads them: `bluealsa2` still runs stock's, and ALSA still loads stock's plugins. A build without the
-flag is what it was. Measured: a
-`--dev --own-bluealsa` image builds, holds the four files in a folder with `usr/lib`'s mode, and its
-`/usr/bin/bluealsa` and `bluealsa2` are the ones a build without the flag has. The odd names are the spike's: the build stages every added file by its base name, where
-stock's patched `bluealsa` already is. Phase 2 names the daemon `bluealsa`, for demo's `killall`, `q2guard` and
-`q2-guest`.
+--own-bluealsa`) adds `/usr/lib/vamp-bluealsa/` with upstream's `bluealsad` as `bluealsa`, `bluealsa-aplay` and
+the two plugins under stock's names (`libasound_module_{pcm,ctl}_bluealsa.so`), and records them in
+`manifest.json` (`own_bluealsa`). Stock's names matter: demo's `killall -9 bluealsa`, `q2guard`'s search by name
+and `q2-guest`'s `pidof bluealsa` find ours by them. The build stages these four in `out/own-bluealsa/`, since it
+keeps every other added file in `out/` by its base name, where stock's patched `bluealsa` already is. It also
+installs the [launcher](#cutover-and-fallback) at `/usr/bin/bluealsa` and `/usr/bin/bluealsa-aplay` and the
+plugins' ALSA file; a build without the flag is what it was.
 
 ## Cutover and fallback
 
-Phase 2 builds this; it is not in the tree. It mirrors the bluetoothd plan's cutover ([bluez](bluez.md#cutover-and-fallback)).
-
-1. `bluealsa2`, already a script the build rewrites, chooses: stock's `/usr/bin/bluealsa` with stock's
-   plugins, or `/usr/lib/vamp-bluealsa/bluealsa` with ours. It reads one key, `[Q2POD] BLUEALSA` in
-   `config.ini`, and a marker in `/tmp`. Guest Play's second daemon and `bluealsa-aplay` follow the same
-   choice.
-2. **The plugins follow the daemon.** A plugin reads its own daemon's properties, so each pair stays whole.
-   A file the build adds to `alsa.conf.d` (as it adds `30-q2car.conf`) loads, without failing when it is absent,
-   a file the launcher writes on the tmpfs that points `pcm_type.bluealsa` and `ctl_type.bluealsa` at our two libraries;
-   no file, stock's. Every client keeps opening `bluealsa`.
-3. **Opt-in** (`--dev` builds, then a row under Bluetooth): default stock.
-4. **Default ours, stock the fallback**: by the row, and by `q2guard`, which already finds the daemon each
-   second: ours gone while Bluetooth is on, or `org.bluealsa` not owned 10 s after its start, twice in a boot,
-   writes the marker, restarts through `bluealsa2` on stock's and says so in the unified log.
-5. **Stock's removed**, with `patch_bluealsa`, `tools/bt_silence.S`, `test/bluealsa.py`, `test/ldac.py` and
+1. **The launcher**, built: the same script as bluetoothd's ([bluez: The launcher](bluez.md#the-launcher)), which an
+   `--own-bluealsa` build installs at `/usr/bin/bluealsa` and `/usr/bin/bluealsa-aplay`, with stock's two moved
+   to `/usr/lib/bluealsa-stock/`. So `bluealsa2`'s `bluealsa ...` line, Guest Play's second daemon
+   (`bluealsa -B sink -p a2dp-sink -c AAC`) and its `bluealsa-aplay` all go through it unchanged. It reads
+   `[Q2POD] BLUEALSA` in `config.ini` (default off) and the marker `/tmp/q2-bt/bluealsa.fallback`. Off: stock's,
+   exec'd with the caller's arguments. `BLUEALSA=1`: ours, `/usr/lib/vamp-bluealsa/bluealsa`, under a
+   `bt-watch`, with the caller's arguments and what stock did without being asked: with no `-p`, `-p a2dp-source
+   -p a2dp-sink -p hfp-ag -p hsp-ag`; with no `-B` (the main daemon), `--shanling --sbc-quality=medium
+   --ldac-quality=standard` ([The compatibility service](#the-compatibility-service)); and always `--aac-vbr
+   --aac-bitrate=240000` ([The patches](#the-patches), `BT_AAC_SITES`). It makes `/tmp/q2-bluealsa/lib`, the
+   per-device store's parent. The watcher falls back to stock's when `org.bluealsa` (or `org.bluealsa.NAME`
+   for `-B NAME`) is not taken by ours 20 s after its start, or ours has ended three times in 120 s, and logs
+   each start, crash and fallback in the unified log, as bluetoothd's.
+2. **The plugins follow the daemon.** A plugin reads its own daemon's interface, so each pair stays whole.
+   `/usr/share/alsa/alsa.conf.d/25-vamp-bluealsa.conf` (`assets/alsa/`, in `--own-bluealsa` builds) points
+   `pcm_type.bluealsa` and `ctl_type.bluealsa` at two links in `/tmp/q2-bt`, which each start of a bluealsa
+   points at stock's pair (`/usr/lib/alsa-lib`) or ours (`/usr/lib/vamp-bluealsa`), and `bluealsa-aplay` runs the
+   one of the daemon started last (`/tmp/q2-bt/bluealsa.which`). Every client keeps opening `bluealsa`.
+   ponytail: alsa-lib keeps a plugin it has loaded for the life of the process, by its path (the link's), so a
+   client that opened `bluealsa` before a fallback keeps ours until it starts again; lifted by a fallback that
+   restarts the clients, or none mid-session. And before the first Bluetooth on of a boot the links are not
+   there, so a client that opens `bluealsa` then is told the plugin cannot be loaded rather than that no daemon
+   answers; both are failures to open, and nothing opens it with Bluetooth off.
+3. **`q2guard`'s bytes.** The link monitor writes SBC's bitpool and AAC's peak into stock's bluealsa at fixed
+   addresses through `/proc/PID/mem` (`BT_SBC_POOL`, `BT_AAC_RATE`) and finds the daemon by its name, which ours
+   shares. Ours does not map those addresses (its two segments end and start either side of them: 0x441a40
+   and 0x451a40), so the monitor's read fails and it leaves ours alone, as for a bluealsa without them; the build
+   refuses an own bluealsa that maps them (`own_bluealsa_files`, `elf_maps`). The step-down for ours is the
+   shared file of [The patches](#the-patches), not built.
+4. **Opt-in** (`--dev --own-bluealsa` builds, the key set by hand; then a row under Bluetooth): default stock. The
+   steps for the owner's Q2 are [bt-own-plan](bt-own-plan.md).
+5. **Default ours, stock the fallback**: the key's default turned round once the plan has passed.
+6. **Stock's removed**, with `patch_bluealsa`, `tools/bt_silence.S`, `test/bluealsa.py`, `test/ldac.py` and
    stock's `libopenaptx` and LDAC libraries, once the [device plan](#on-a-q2) has passed and a week of ordinary
    use has shown no fallback.
 
@@ -398,21 +415,24 @@ each codec. Before each step note the UTC time; after it pull the unified log an
 | #   | Step                                                                                                                                                                                                                                                                                                         | Pass                                                                                                                                                                                                                              |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | Bluetooth on, headset connected, playing on stock's daemon. `ps` and `cat /proc/$(pidof bluealsa)/status`; note the `q2-bt` line's `ba=` and `er=` for a minute                                                                                                                                              | the baseline: `VmRSS`, CPU, codec                                                                                                                                                                                                 |
-| 2   | Stop playback. `killall -9 bluealsa`; `mkdir -p /tmp/q2-bluealsa/lib`; `/usr/lib/vamp-bluealsa/bluealsad -p a2dp-source -p hfp-ag -p hsp-ag --keep-alive=5 --aac-afterburner --aac-vbr --aac-bitrate=240000 --ldac-abr -c LDAC -c aptX-HD -c aptX -c AAC 2>/tmp/ba.log &`                                    | it stays up; `dbus-send --system --print-reply --dest=org.bluealsa /org/bluealsa org.freedesktop.DBus.ObjectManager.GetManagedObjects` lists nothing yet and fails nothing; `/tmp/ba.log` has no error from `RegisterApplication` |
+| 2   | Stop playback. `killall -9 bluealsa`; `mkdir -p /tmp/q2-bluealsa/lib`; `/usr/lib/vamp-bluealsa/bluealsa -p a2dp-source -p hfp-ag -p hsp-ag --keep-alive=5 --aac-afterburner --aac-vbr --aac-bitrate=240000 --ldac-abr -c LDAC -c aptX-HD -c aptX -c AAC 2>/tmp/ba.log &`                                    | it stays up; `dbus-send --system --print-reply --dest=org.bluealsa /org/bluealsa org.freedesktop.DBus.ObjectManager.GetManagedObjects` lists nothing yet and fails nothing; `/tmp/ba.log` has no error from `RegisterApplication` |
 | 3   | Disconnect and connect the headset from the Q2                                                                                                                                                                                                                                                               | a PCM appears in the same call, `Codec` and `Rate` set; **which codec** stock's bluetoothd chose, against the Quality page's choice (the codec priority question)                                                                 |
-| 4   | `bluealsa-aplay.own` is not the test: play a WAV with stock's `aplay` through our plugin: `printf 'pcm_type.bluealsa { lib "/usr/lib/vamp-bluealsa/libasound_module_pcm_bluealsa.own.so" }\n' > /tmp/own.conf; ALSA_CONFIG_PATH=/usr/share/alsa/alsa.conf:/tmp/own.conf aplay -D bluealsa /mnt/mmc/test.wav` | audio in the headset, clean for a minute; `VmRSS` and the encoder thread's CPU (`top -H`) against step 1                                                                                                                          |
+| 4   | `bluealsa-aplay` is not the test: play a WAV with stock's `aplay` through our plugin: `printf 'pcm_type.bluealsa { lib "/usr/lib/vamp-bluealsa/libasound_module_pcm_bluealsa.so" }\n' > /tmp/own.conf; ALSA_CONFIG_PATH=/usr/share/alsa/alsa.conf:/tmp/own.conf aplay -D bluealsa /mnt/mmc/test.wav` | audio in the headset, clean for a minute; `VmRSS` and the encoder thread's CPU (`top -H`) against step 1                                                                                                                          |
 | 5   | The same with `bluealsactl codec PCM-PATH NAME` for SBC, AAC, aptX, aptX HD and LDAC in turn (as the headset allows)                                                                                                                                                                                         | each plays; LDAC at 990, 660 and adaptive (`--ldac-quality`, `--ldac-abr`) holds without break-up at arm's length, and steps down when the Q2 is carried away                                                                     |
 | 6   | The headset's volume keys while step 4 plays; then `dbus-send` a `Volume` read of BlueZ's transport                                                                                                                                                                                                          | the level moves in the headset and in BlueZ; bluealsa's log shows it following and writing nothing back; the PCM's audio is not scaled twice (full-scale tone, level by ear against step 1)                                       |
 | 7   | An AirPods-like headset out of its case, so it opens the stream itself                                                                                                                                                                                                                                       | the rate it chose (`Rate`); play 44.1 kHz and 48 kHz files: clean, or the 8% frame loss of [internals](internals.md#bluetooth-aac)                                                                                                |
 | 8   | A headset that reports its battery over HFP                                                                                                                                                                                                                                                                  | BlueZ's `Battery1` for the device has a level                                                                                                                                                                                     |
 | 9   | Pause `aplay` (Ctrl-Z) for 30 s and resume; kill it and start it again within 5 s, and after 10 s                                                                                                                                                                                                            | the keep-alive: one AVDTP start for the first, a new one for the last (the `q2-bt` log's `idle` and `active` lines)                                                                                                               |
-| 10  | `killall bluealsad`; start Bluetooth again from the Q2's page                                                                                                                                                                                                                                                | stock's daemon back, playing: the fallback is a restart                                                                                                                                                                           |
+| 10  | `killall bluealsa`; start Bluetooth again from the Q2's page                                                                                                                                                                                                                                                | stock's daemon back, playing: the fallback is a restart                                                                                                                                                                           |
 
 Steps 1 to 5 decide the cutover's shape; 6 to 9 are what phase 2's source changes are measured against. demo
 and `q2player` are not in this plan on purpose: they need the compatibility service and the callers' move to
 `GetManagedObjects`, phase 2's first two steps.
 
 ## Needs a device
+
+Every row below, with the launcher's own and in the order to run them on the owner's Q2, is in
+[bt-own-plan](bt-own-plan.md).
 
 1. **The compatibility service with demo** (ours with `--shanling`): the Bluetooth page shows the codec each
    configuration names, the Quality page's LDAC and SBC rows change the next stream's rate, and the volume
