@@ -49,7 +49,7 @@ Then init starts `runsvdir`, which starts the services below ([`/etc/sv`](../os/
 | `adb-wifi` | `q2adb-wifi`, which runs `adbd --tcp 5555` and `q2adb-mdns` only while a computer is trusted | a key in `/mnt/data/adb_keys` or the card's `adb_keys` |
 | `q2netd` | `/usr/bin/q2netd` ([q2netd](netd.md)): Wi-Fi on the saved networks, DHCP, Smart Wi-Fi, Q2NET/1 | `wlan0` (the radio's module), `/mnt/data/wpa_supplicant.conf` |
 | `q2libd` | `/usr/bin/q2libd` ([q2libd](libd.md)): the card's songs into `/mnt/data/vamp/library.db` and the signed-in apps' catalogues into `/mnt/mmc/.vamp/catalogue.db`, `q2ui` restarted in place after each | the card's mount |
-| `q2playd` | `/usr/bin/q2playd` ([q2playd](playd.md)): the server on `/tmp/sock_play`, the queue, what plays; `q2ui`'s command queue and now file, and Q2PLAY/1 | `/mnt/data/database.db` for a song's file |
+| `q2playd` | `/usr/bin/q2playd` ([q2playd](playd.md)): the server on `/tmp/sock_play`, the queue, what plays; `q2ui`'s command queue and now file, and Q2PLAY/1 | `/mnt/data/vamp/library.db` for a card song's file, the card's `.vamp/catalogue.db` for a server song's |
 | `q2player` | `/usr/bin/q2player`, built as every Vamp image's (Car Audio's output on) against this image's alsa-lib, FFmpeg 7.1.5 and mbedTLS | `q2playd` on `/tmp/sock_play` (it waits for it up to 5 s, then `finish` waits 10 s before the next try) |
 | `q2sysd` | `/usr/bin/q2sysd` ([q2sysd](sysd.md)): the power key (a press: the screen off or on; held 3 s: power off), the backlight, the battery (`/run/vamp/battery`), Q2SYS/1 | the input devices with `KEY_POWER`, `/sys/class/backlight`, the CW2015 |
 | `q2ui` | `/usr/bin/q2ui --db /mnt/data/vamp/library.db --catalogue /mnt/mmc/.vamp/catalogue.db --fonts /usr/share/vamp/fonts --icons /usr/share/vamp/icons` | `q2libd`'s library, which is there (empty at first) before anything else |
@@ -136,7 +136,7 @@ In the order it is needed:
 
 1. **A first run on a Q2**, from the card ([below](#first-boot-on-a-q2)): whether the kernel has loop devices, whether `q2ui` and `q2player` run on its kernel, then a boot from flash: whether the modules load under this init, whether the kernel has what it assumes (a tmpfs `/dev` and mdev, UBI, LZO squashfs), whether the watchdog runs.
 2. **The rescue page**, and a first-key Allow card in `q2ui`: until then a Q2 that trusts no computer is reached only by putting a key in the card's `adb_keys` ([adb](#adb)).
-3. The rest of `q2playd` and `q2libd` ([q2playd](playd.md#what-is-missing), [q2libd](libd.md#what-is-missing)): server songs played through their app, duplicates, playlists.
+3. The rest of `q2playd` and `q2libd` ([q2playd](playd.md#what-is-missing), [q2libd](libd.md#what-is-missing)): the rest of server songs, duplicates, playlists.
 4. **The rest of q2sysd** ([Needs a Q2](sysd.md#needs-a-q2) first): Standby, the screen's idle timeout, the jack and the DAC's power and volume, Charge Limit, heat, USB modes.
 5. **The rest of the installer** ([q2pkgd](pkgd.md)): its first slice checks, composes and stages a signed release (the image's own `mksquashfs` composes the build machine's bytes under QEMU); the download, the automatic hand-off to the recovery and packages are not built.
 6. q2ui's icons: it looks for `oled_*_w.png` in `--icons`, stock's art, which the image does not have; the pages draw without them.

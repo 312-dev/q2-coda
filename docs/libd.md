@@ -39,6 +39,6 @@ At its start: an empty library first when there is none, so `q2ui` always has on
 
 ## What is missing
 
-- Server songs are listed and cannot be played yet: `q2playd` looks ids up in `library.db` alone, and a server row plays through its app (the payload's catplay hand-off, [server-library](server-library.md)), which `q2playd` does not do.
+- Server songs play through their app by `q2playd`'s catplay ([q2playd: Server songs](playd.md#server-songs)); starting a stopped app for it and the offline copies are not done yet.
 - Duplicates between the card and a server (the payload's `cat_match`), the catalogue's playlists, `catalogue.avail`'s offline copies, covers.
 - Scans driven by inotify instead of a 10 s look, and progress for a long first scan: measured under QEMU only, not on a Q2's card.
