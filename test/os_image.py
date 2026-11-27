@@ -93,6 +93,12 @@ def check_pins():
           and got.get(deb_url.rsplit('/', 1)[1]) == deb_digest and deb_url in mk('q2-adbd')
           and all(got.get(n) == d for n, d in thirdparty.ADBD_MINCRYPT_FILES.items())
           and thirdparty.ADBD_MINCRYPT.rstrip('/') in mk('q2-adbd'), f'adbd {version} as tools/thirdparty.py pins it')
+    # Bluetooth (docs/vamp-os-base.md#bluetooth): each package's release and tarball are thirdparty's
+    for name, package, var in (('bluez', 'vamp-bluez', 'VAMP_BLUEZ'), ('bluealsa', 'vamp-bluealsa', 'VAMP_BLUEALSA'),
+                               ('freeaptx', 'q2-freeaptx', 'Q2_FREEAPTX'), ('ldac', 'q2-ldac', 'Q2_LDAC')):
+        version, url, digest = thirdparty.SOURCES[name]
+        check(f'{var}_VERSION = {version}\n' in mk(package) and hashes(pkg/package).get(url.rsplit('/', 1)[1]) == digest,
+              f'{name} {version} as tools/thirdparty.py pins it')
     got = hashes(pkg/'q2ui-stb')
     # tools/ui.py is on q2ui's branch: its STB and STB_IMAGE at the commit the image builds
     text = subprocess.check_output([*vamp_os.GIT, 'show', f'{vamp_os.Q2UI_COMMIT}:tools/ui.py'], text=True)
