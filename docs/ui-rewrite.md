@@ -423,7 +423,15 @@ Read with these in mind:
 - **Live**, with the wheel's own events sent by `ui/tools/measure.py` (same build, same loaded machine): 778 frames for 20 slow ticks and two 100-tick spins; draw 1.5 ms a frame on average and 7.6 ms at worst, by CPU; 771 of them shown in under 8 ms of wall time. A slow tick is now about 22 frames (the glide, the lean and the indicator's fade, every one drawn) and 45 ms of CPU on this load, against 5.5 ms for the spike's 15 frames and `demo`'s 53 to 58 ms on a quiet machine. At rest: 0.0 ms in 5 s, no frame.
 - **The estimates are estimates.** They rest on two ratios from one Q2 run of other code. What they are for is deciding whether the design fits a refresh, which it does with room; the figures to trust come from the device ([Phase 2](#phase-2), device questions).
 - **To do when the machine is quiet**: the same table, and `demo` beside it, in one sitting.
-- **Not timed**: Home, the Library's group lists and Now Playing. They were written after the move to a machine whose build image cannot yet run the emulator ([Phase 2](#phase-2)), and a host's figures are not on this table's scale. Home's frame while the selection moves is its list's 196 px and the pane beside it (a cover drawn scaled, 179 x 320); Now Playing at rest draws its bar and times four times a second while a song plays, and nothing while it is paused.
+- **Home and Now Playing**, 2026-11-27, `--bench --page home` and `--page now` under the Mac's emulator (another machine and another qemu than the table above: on it Songs' glide frames are 716 us drawn and 552 us turned for the same 104,403 pixels, which puts its turn at 5.3 ns a pixel against a Q2's 12, a factor of 2.3 used for both columns below, more roughly than the table's two factors):
+
+  | Page, every frame of slow ticks | Pixels turned | Drawn, CPU | Turned | Worst pass | A Q2, estimated | Worst |
+  | ------------------------------- | ------------: | ---------: | -----: | ---------: | --------------: | ----: |
+  | Songs (for scale)               |       104,403 |     716 us | 552 us |   2,612 us |          2.9 ms | 6.0 ms |
+  | Home: the list's side and the cover's pane | 25,312 | 674 us | 140 us |   3,052 us |          1.9 ms | 7.0 ms |
+  | Now Playing: the cover's card pushed, the bar | 41,422 | 2,026 us | 268 us | 3,583 us |      5.3 ms | 8.2 ms |
+
+  Now Playing's frame is the dearest per pixel: its cover is drawn scaled, leaning and dithered, every pixel of it filtered from four. It is a third of a refresh by the estimate. No pass on any of the three took a refresh of CPU. The Library's group lists are the same list Songs is.
 
 ### Measured on a Q2
 

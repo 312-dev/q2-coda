@@ -3,7 +3,7 @@
  *     q2ui [--db FILE] [--catalogue FILE] [--fb FILE] [--input DIR] [--fonts DIR] [--icons DIR]
  *          [--limit N] [--motion 0|1] [--reduce-motion] [--light] [--panel-bits 8|6|5|565]
  *          [--panel-mode 24|keep] [--panel-mem FILE]
- *          [--text awtk] [--page home|songs|depth|gallery|card] [--stats FILE] [--bench] [--script FILE]
+ *          [--text awtk] [--page home|songs|now|depth|gallery|card] [--stats FILE] [--bench] [--script FILE]
  *          [--trace FILE] [--clock HH:MM] [--state FILE] [--cmdq FIFO] [--playlist FILE]
  *          [--backlight DIR] [--ask FILE] [--now FILE] [--cover FILE] [--power DIR] [--wifi FILE]
  *          [--wireless FILE]
@@ -222,6 +222,8 @@ static void at_rest(void) {
 static void first_page(void) {
     if (!strcmp(opt.page, "home"))
         ui_push(&page_home, 0);
+    else if (!strcmp(opt.page, "now"))
+        ui_push(&page_now, 0);
     else if (!strcmp(opt.page, "depth"))
         ui_push(&page_depth, 0);
     else if (!strcmp(opt.page, "gallery"))
