@@ -1,6 +1,7 @@
 #!/bin/sh
 # q2libd (docs/libd.md): the card's songs into /mnt/data/vamp/library.db and the signed-in apps' catalogues into
-# /mnt/mmc/.vamp/catalogue.db; after each write q2ui restarts in place (kill -HUP) to show them.
+# /mnt/mmc/.vamp/catalogue.db; after each write q2ui restarts in place (kill -HUP) to show them. It serves Q2LIB/1 on
+# /run/vamp/lib.sock (docs/platform/library.md).
 . /usr/libexec/vamp/log
 step "q2libd: start"
 exec 2>&1

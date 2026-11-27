@@ -3,7 +3,7 @@
 OUT ?= build/host
 CFLAGS ?= -O2
 LIBS ?= -lavformat -lavcodec -lavutil -lsqlite3
-$(OUT)/q2libd: q2libd.c | $(OUT)
-	$(CC) -std=c11 -Wall -Wextra $(CFLAGS) $(if $(SQLITE_INC),-isystem $(SQLITE_INC)) -o $@ q2libd.c $(LDFLAGS) $(LIBS)
+$(OUT)/q2libd: q2libd.c ../perm/q2perm.h | $(OUT)
+	$(CC) -std=c11 -Wall -Wextra $(CFLAGS) -I../perm $(if $(SQLITE_INC),-isystem $(SQLITE_INC)) -o $@ q2libd.c $(LDFLAGS) $(LIBS) -pthread
 $(OUT):
 	mkdir -p $@

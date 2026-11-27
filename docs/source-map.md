@@ -280,7 +280,7 @@ Where this tree is headed (an `os/` Buildroot tree, services of our own in place
 
 | File | For | Enter at | Doc |
 | --- | --- | --- | --- |
-| `q2libd.c` | `q2libd`: the card's songs (tags through FFmpeg) into `/mnt/data/vamp/library.db`, the signed-in apps' catalogues into `/mnt/mmc/.vamp/catalogue.db` | `main`, `scan_card`, `add_file`, `import_app` | [libd](libd.md) |
+| `q2libd.c` | `q2libd`: the card's songs (tags through FFmpeg) into `/mnt/data/vamp/library.db`, the signed-in apps' catalogues into `/mnt/mmc/.vamp/catalogue.db`; Q2LIB/1 on `/run/vamp/lib.sock` from a thread | `main`, `scan_card`, `lib_command`, `add_file`, `import_app` | [libd](libd.md) |
 | `Makefile` | Its build, for the image (`os/package/q2libd`) and this machine (`test/libd.py`) | | [libd](libd.md) |
 
 ## netd/: Vamp OS's network service
@@ -416,7 +416,7 @@ Commands and what each needs are in [building.md](building.md#tests). `BUILD` is
 | q2sysd | `sysd.py`: q2sysd built for this machine on a stand-in `/sys` and `/dev/input`: the power key's press and hold, the backlight, the battery file, the USB modes and the cable, Q2SYS/1 | `cc` |
 | q2dacloop | `dacloop.py`: q2dacloop built for this machine between alsa-lib's file PCMs (bit for bit, the rate, the prebuffer, the pitch file), and `dacloop_pitch.c`'s simulation of the fill level against computers whose clocks are off | `cc`, libasound |
 | q2sendd | `sendd.py`: q2sendd and today's q2send built for this machine beside stand-in Q2UI/1, Q2NET/1 and Q2SYS/1 sockets, a LocalSend sender made in the test over TLS: accepted, declined, no UI, withdrawn, trusted, held, SIGTERM | `cc`, OpenSSL |
-| q2libd | `libd.py`: q2libd built for this machine on a stand-in card of songs ffmpeg makes: tags, ids across scans, catalogues, q2ui's query, the service's first library | `cc`, ffmpeg, the host's FFmpeg and SQLite |
+| q2libd | `libd.py`: q2libd built for this machine on a stand-in card of songs ffmpeg makes: tags, ids across scans, catalogues, q2ui's query, the service's first library, Q2LIB/1's transcripts | `cc`, ffmpeg, the host's FFmpeg and SQLite |
 | q2netd | `netd.py`: q2netd built for this machine with a stand-in wpa_supplicant: the radio, DHCP, Smart Wi-Fi's holds, the saved networks, scans, Q2NET/1 | `cc`, python3 |
 | q2btd | `btd.py`: q2btd built for this machine against `btd_standin.c` (BlueZ and bluez-alsa on a bus of the test's) and a stand-in q2playd: power, the auto-reconnect, pairing and the agent, the codec, the battery, the output, absolute volume, the buttons, Q2BT/1; `os_bt.py` runs it in the image beside the image's own daemons under QEMU | `cc`, libdbus-1's headers, `dbus-daemon` |
 | q2pkgd | `pkgd.py`: a release made and signed with a test key, staged from stock's and Vamp OS's layouts byte for byte as the build composes, the image's own mksquashfs under QEMU, each refusal; `download` from a local HTTPS feed shaped as GitHub's, and its refusals | `BUILD`, the ZIP, openssl, mksquashfs, the host mbedTLS |

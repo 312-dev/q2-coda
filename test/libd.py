@@ -8,6 +8,7 @@ the songs. Run it as python3 test/libd.py (pytest). Q2LIBD_SOURCE builds another
 import os
 import pathlib
 import platform
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -32,8 +33,8 @@ def binary(tmp_path_factory):
     src.write_bytes(SOURCE.read_bytes())
     inc = sorted(pathlib.Path(os.environ.get('Q2_THIRDPARTY_CACHE', pathlib.Path.home()/'.cache/q2-thirdparty')).glob('out/sqlite-*/usr/include'))
     lib = next(pathlib.Path('/usr/lib').glob('*-linux-gnu/libsqlite3.so.0'))
-    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', *(['-isystem', str(inc[-1])] if inc else []), '-o',
-                    str(out/'q2libd'), str(src), '-lavformat', '-lavcodec', '-lavutil', str(lib)], check=True)
+    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', *(['-isystem', str(inc[-1])] if inc else []), '-I', str(conformance.PERM),
+                    '-o', str(out/'q2libd'), str(src), '-lavformat', '-lavcodec', '-lavutil', str(lib), '-pthread'], check=True)
     return out/'q2libd'
 
 
@@ -328,6 +329,116 @@ def test_conformance_library(binary, card):
     assert ids and max(ids) < 0x40000000
     server = [r[0] for r in sqlite3.connect(files['catalogue.db']).execute('select id from servertable')]
     assert server and all(0x40000000 <= i < 0x40000000 + 4 * 0x01000000 for i in server)
+
+
+# ---- Q2LIB/1 (docs/platform/library.md#q2lib1-the-library-socket) ----
+
+class Served:
+    """q2libd running (not --once) on the conformance page's stand-in card, its socket up and its first scan written"""
+    def __init__(self, binary, root, perms=conformance.PERMISSIONS):
+        m = root/'mnt/mmc'
+        picture(m/'Music/Ann/First/cover.jpg', 'blue')
+        d = m/'_explaylist_data'
+        d.mkdir(parents=True)
+        (d/'Road.m3u').write_text('/mnt/mmc/Music/Bob/b.mp3\n../Music/Ann/First/01 Alpha.flac\n')
+        catalogue(root, 'subsonic', [S1, S2, 'p\tpl1\tMix', 'i\tpl1\tsid1\t'])
+        (root/'proc').mkdir()
+        (root/'proc/mounts').write_text('/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n')
+        conformance.accounts(root, perms)
+        self.sock = root/'run/vamp/lib.sock'
+        self.p = subprocess.Popen([str(binary), '--root', str(root)], stderr=subprocess.PIPE, text=True)
+        end = time.monotonic() + 30
+        while time.monotonic() < end and not (self.sock.exists() and (root/'mnt/mmc/.vamp/catalogue.db').exists()):
+            time.sleep(0.1)
+        assert self.sock.exists(), 'no /run/vamp/lib.sock'
+
+    def stop(self):
+        self.p.terminate()
+        self.p.wait(10)
+
+
+@pytest.fixture
+def served(binary, card):
+    s = Served(binary, card)
+    yield s
+    s.stop()
+
+
+def lines(sock, *sent, want=1, timeout=8):
+    import socket
+    c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    c.connect(str(sock))
+    c.settimeout(timeout)
+    f = c.makefile('rw')
+    got = []
+    for line in sent:
+        f.write(line + '\n')
+        f.flush()
+    try:
+        while len(got) < want:
+            got.append(f.readline().rstrip('\n'))
+    finally:
+        c.close()
+    return got
+
+
+def test_conformance_q2lib_every_command_is_on_the_page():
+    conformance.check_coverage('library.md')
+
+
+@pytest.mark.parametrize('n', range(len(conformance.blocks('library.md'))))
+def test_conformance_q2lib(served, n):
+    conformance.replay(served.sock, conformance.blocks('library.md')[n])
+
+
+def test_q2lib_refuses_a_caller_without_the_library_permission(binary, card):
+    s = Served(binary, card, perms=[p for p in conformance.PERMISSIONS if p != 'library'])
+    try:
+        if os.getuid() == 0:
+            pytest.skip('root may use every socket')
+        assert lines(s.sock, 'Q2LIB/1') == ['err permission']
+        assert oct(s.sock.stat().st_mode & 0o777) == '0o660'
+    finally:
+        s.stop()
+
+
+def test_q2lib_watch_tells_each_file_written_again(served, card):
+    import socket
+    c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    c.connect(str(served.sock))
+    c.settimeout(8)
+    f = c.makefile('rw')
+    f.write('Q2LIB/1\nwatch\n')
+    f.flush()
+    assert [f.readline().strip() for _ in range(2)] == ['Q2LIB/1 ok', 'ok']
+    served.p.send_signal(signal.SIGHUP)  # a scan of both
+    got = sorted(f.readline().strip() for _ in range(2))
+    assert got == ['changed catalogue', 'changed library']
+    (card/'mnt/mmc/.subsonic/catalogue.avail').write_text('sid2\t/mnt/mmc/.subsonic/cache/sid2.mp3\n')  # an offline copy, in place
+    assert f.readline().strip() == 'changed catalogue'
+    c.close()
+
+
+def test_q2lib_answers_while_a_scan_runs(served, card):
+    import shutil
+    m = card/'mnt/mmc/Many'
+    m.mkdir()
+    one = card/'mnt/mmc/Music/Ann/First/01 Alpha.flac'
+    for i in range(3000):
+        shutil.copyfile(one, m/f'{i:04}.flac')
+    db = card/'mnt/data/vamp/library.db'
+    before = db.stat().st_ino
+    served.p.send_signal(signal.SIGHUP)
+    t0, waits, during = time.monotonic(), [], 0
+    while db.stat().st_ino == before and time.monotonic() - t0 < 60:  # asked again and again until the scan writes
+        t = time.monotonic()
+        got = lines(served.sock, 'Q2LIB/1', 'song 2', want=2)
+        waits.append(time.monotonic() - t)
+        during += db.stat().st_ino == before
+        assert got[1].startswith('song id=2 title=Beta '), got
+    scan = time.monotonic() - t0
+    assert during >= 3, f'the scan ({scan:.1f} s, {during} answers in it) was too short to show anything'
+    assert max(waits) < 0.5, f'an answer waited for the scan ({max(waits):.1f} s of a {scan:.1f} s scan)'
 
 
 if __name__ == '__main__':

@@ -1,4 +1,4 @@
-/* q2libd: Vamp OS's library service (docs/vamp-os.md#who-owns-what, docs/libd.md), its second slice. It keeps two
+/* q2libd: Vamp OS's library service (docs/vamp-os.md#who-owns-what, docs/libd.md). It keeps two
  * databases in the shapes q2ui and q2playd already read, so they need no change:
  *
  *   - /mnt/data/vamp/library.db: the card's songs, a songtable with stock's columns (id, filename, fileurl, album,
@@ -20,7 +20,10 @@
  * once the card is mounted, when the card's mount or a playlist file changes, when an app's catalogue.tsv or credentials change (looked
  * at every 10 s), and at SIGHUP; --once scans and ends. Before the card is there it writes an empty library, so a
  * reader always has one; after each write it runs --after's command (the image: q2ui's restart in place, so its lists
- * are the new ones). --root prefixes every path, for test/libd.py. */
+ * are the new ones). --root prefixes every path, for test/libd.py.
+ *
+ * Unless --once, it serves Q2LIB/1 on /run/vamp/lib.sock (docs/platform/library.md#q2lib1-the-library-socket) from a
+ * thread: queries of the two files, read-only, for callers with the library permission. */
 #define _GNU_SOURCE
 #include <ctype.h>
 #include <dirent.h>
@@ -37,6 +40,13 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+
+#include <poll.h>
+#include <pthread.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+
+#include "q2perm.h" /* perm/: the library permission's check */
 
 #define CAT_ID_BASE 0x40000000u /* server rows' ids, above any card song's (patch/catalogue.c) */
 #define CAT_APP_SPAN 0x01000000u
@@ -696,6 +706,417 @@ static int scan_catalogue(void) {
     return 0;
 }
 
+/* ---- Q2LIB/1: the library socket (docs/platform/library.md#q2lib1-the-library-socket) ----
+ *
+ * A thread of its own, so a scan never holds an answer up. Each command opens the two files as they are (read-only,
+ * catalogue.db attached as cat) through the temp view s, card and server songs alike. It uses none of the scan's
+ * state: its paths are made once at its start (path()'s buffers are the main thread's). */
+
+#define LIB_CLIENTS 8
+#define PAGE_DEFAULT 100
+#define PAGE_MAX 500
+
+static struct lclient { int fd, hello, watch; size_t n; char in[513]; } lc[LIB_CLIENTS];
+static char lib_db[600], cat_db[600], lib_passwd[600], lib_group[600], lib_sock[600];
+
+static void lenc(char *out, size_t room, const char *in) { /* Vamp API 1's percent-encoding (docs/platform/README.md) */
+    static const char hex[] = "0123456789ABCDEF";
+    size_t j = 0;
+    for (const unsigned char *p = (const unsigned char *)(in ? in : ""); *p && j + 4 < room; ++p)
+        if (*p < 0x21 || *p == '%' || *p == '"' || *p == '=' || *p == 0x7f) out[j++] = '%', out[j++] = hex[*p >> 4], out[j++] = hex[*p & 15];
+        else out[j++] = (char)*p;
+    out[j] = 0;
+}
+
+static void ldec(char *s) {
+    char *o = s;
+    for (; *s; ++s)
+        if (*s == '%' && hexv(s[1]) >= 0 && hexv(s[2]) >= 0) *o++ = (char)(hexv(s[1]) << 4 | hexv(s[2])), s += 2;
+        else *o++ = *s;
+    *o = 0;
+}
+
+static void lsay(struct lclient *c, const char *fmt, ...) { /* a whole line, or the client closed (2 s at most: SO_SNDTIMEO) */
+    char line[4096];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(line, sizeof line - 1, fmt, ap);
+    va_end(ap);
+    if (n < 0 || c->fd < 0) return;
+    if (n > (int)sizeof line - 2) n = (int)sizeof line - 2;
+    line[n++] = '\n';
+    for (int off = 0; off < n;) {
+        ssize_t w = send(c->fd, line + off, (size_t)(n - off), MSG_NOSIGNAL);
+        if (w <= 0) {
+            close(c->fd), c->fd = -1;
+            return;
+        }
+        off += (int)w;
+    }
+}
+
+/* SQLite's file: URI for a path (its %, ? and # escaped), read-only */
+static void ro_uri(char *out, size_t room, const char *p) {
+    size_t j = (size_t)snprintf(out, room, "file:");
+    for (; *p && j + 4 < room; ++p)
+        if (*p == '%' || *p == '?' || *p == '#') j += (size_t)snprintf(out + j, room - j, "%%%02X", (unsigned char)*p);
+        else out[j++] = *p;
+    snprintf(out + j, room - j, "?mode=ro");
+}
+
+static sqlite3 *lib_open(void) {
+    char uri[1400];
+    sqlite3 *d = 0;
+    ro_uri(uri, sizeof uri, lib_db);
+    if (sqlite3_open_v2(uri, &d, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, 0) != SQLITE_OK) return sqlite3_close(d), (sqlite3 *)0;
+    sqlite3_busy_timeout(d, 2000);
+    struct stat st;
+    sqlite3_stmt *at = 0;
+    ro_uri(uri, sizeof uri, cat_db);
+    int cat = !stat(cat_db, &st) && sqlite3_prepare_v2(d, "attach database ? as cat", -1, &at, 0) == SQLITE_OK &&
+              sqlite3_bind_text(at, 1, uri, -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_step(at) == SQLITE_DONE;
+    sqlite3_finalize(at);
+    if (!cat && exec_sql(d, "attach database ':memory:' as cat; create table cat.servertable(id int, filename, fileurl, album,"
+                            " songer, style, name, composer, albumsonger, year int, track int, cd_num int, time int);"
+                            " create table cat.servermeta(id integer primary key, app, sid, local);"
+                            " create table cat.serverpl(app, pid, name); create table cat.serveritem(app, pid, pos int, sid, path)"))
+        return sqlite3_close(d), (sqlite3 *)0;
+    if (exec_sql(d, "create temp view s as"
+                    " select id, name, songer, albumsonger, album, style, composer, year, track, cd_num, time, 'card' as source,"
+                    " fileurl, coalesce(nullif(albumsonger, ''), songer, '') as aa from main.songtable"
+                    " union all select t.id, t.name, t.songer, t.albumsonger, t.album, t.style, t.composer, t.year, t.track,"
+                    " t.cd_num, t.time, coalesce(m.app, ''), t.fileurl, coalesce(nullif(t.albumsonger, ''), t.songer, '')"
+                    " from cat.servertable t left join cat.servermeta m on m.id = t.id"))
+        return sqlite3_close(d), (sqlite3 *)0;
+    return d;
+}
+
+#define SONG_COLS "s.id, s.name, s.songer, s.albumsonger, s.album, s.style, s.composer, s.year, s.track, s.cd_num, s.time, s.source"
+#define SONG_ORDER " order by s.aa collate nocase, s.album collate nocase, s.cd_num, s.track, s.name collate nocase, s.id"
+
+static const char *col(sqlite3_stmt *st, int i) {
+    const unsigned char *t = sqlite3_column_text(st, i);
+    return t ? (const char *)t : "";
+}
+
+static void song_line(struct lclient *c, sqlite3_stmt *st) {
+    char t[6][1200];
+    for (int i = 0; i < 6; ++i) lenc(t[i], sizeof t[i], col(st, 1 + i));
+    char src[200];
+    lenc(src, sizeof src, col(st, 11));
+    lsay(c, "song id=%lld title=%s artist=%s albumartist=%s album=%s genre=%s composer=%s year=%d track=%d disc=%d time=%d source=%s",
+         sqlite3_column_int64(st, 0), t[0], t[1], t[2], t[3], t[4], t[5], sqlite3_column_int(st, 7), sqlite3_column_int(st, 8),
+         sqlite3_column_int(st, 9), sqlite3_column_int(st, 10), src);
+}
+
+/* a command's key=value words: each key one of keys (vals[i] its value, decoded, or 0), from and count numbers; -1 when
+ * a word is not one of them or a number is not one */
+struct largs { const char *v[8]; long from, count; };
+static int largs(char *rest, const char *const *keys, struct largs *a) {
+    memset(a, 0, sizeof *a), a->count = PAGE_DEFAULT;
+    for (char *w = strtok(rest, " "); w; w = strtok(0, " ")) {
+        char *eq = strchr(w, '=');
+        if (!eq || eq == w) return -1;
+        *eq++ = 0;
+        if (!strcmp(w, "from") || !strcmp(w, "count")) {
+            char *end;
+            long n = strtol(eq, &end, 10);
+            if (!*eq || *end || !isdigit((unsigned char)*eq) || n < 0 || (!strcmp(w, "count") && (n < 1 || n > PAGE_MAX))) return -1;
+            *(w[0] == 'f' ? &a->from : &a->count) = n;
+            continue;
+        }
+        int k = 0;
+        while (keys[k] && strcmp(keys[k], w)) ++k;
+        if (!keys[k]) return -1;
+        ldec(eq), a->v[k] = eq;
+    }
+    return 0;
+}
+
+/* runs sql (its ?s: the given texts in order, then the page's count and from when page), a song line a row */
+static int songs_of(struct lclient *c, sqlite3 *d, const char *sql, const char *const *texts, int nt, const struct largs *page) {
+    sqlite3_stmt *st = 0;
+    if (sqlite3_prepare_v2(d, sql, -1, &st, 0) != SQLITE_OK) return say("Q2LIB/1: %s", sqlite3_errmsg(d)), -1;
+    int b = 1;
+    for (int i = 0; i < nt; ++i) sqlite3_bind_text(st, b++, texts[i], -1, SQLITE_TRANSIENT);
+    if (page) sqlite3_bind_int64(st, b++, page->count), sqlite3_bind_int64(st, b++, page->from);
+    while (c->fd >= 0 && sqlite3_step(st) == SQLITE_ROW) song_line(c, st);
+    sqlite3_finalize(st);
+    return 0;
+}
+
+static void lib_command(struct lclient *c, char *line) {
+    char *rest = strchr(line, ' ');
+    if (rest) *rest++ = 0;
+    else rest = line + strlen(line);
+    if (!strcmp(line, "caps")) return lsay(c, "caps songs song albums artists genres playlists playlist search art watch");
+    if (!strcmp(line, "watch")) return c->watch = 1, lsay(c, "ok");
+    static const char *const SONG_KEYS[] = {"album", "artist", "genre", "source", 0}, *const NONE[] = {0},
+                             *const ALBUM_KEYS[] = {"artist", 0}, *const PL_KEYS[] = {"id", "app", "pid", 0};
+    int known = !strcmp(line, "songs") || !strcmp(line, "song") || !strcmp(line, "albums") || !strcmp(line, "artists") ||
+                !strcmp(line, "genres") || !strcmp(line, "playlists") || !strcmp(line, "playlist") || !strcmp(line, "search") ||
+                !strcmp(line, "art");
+    if (!known) return lsay(c, "err command");
+    struct largs a;
+    char q[1500], *end;
+    long long id = 0;
+    char text[600] = "";
+    if (!strcmp(line, "song") || !strcmp(line, "art")) {
+        id = strtoll(rest, &end, 10);
+        if (!isdigit((unsigned char)*rest) || *end) return lsay(c, "err argument");
+    } else if (!strcmp(line, "search")) {
+        char *sp = strchr(rest, ' ');
+        if (sp) *sp++ = 0;
+        snprintf(text, sizeof text, "%s", rest);
+        ldec(text);
+        if (!*text || largs(sp ? sp : rest + strlen(rest), NONE, &a)) return lsay(c, "err argument");
+    } else if (largs(rest, !strcmp(line, "songs") ? SONG_KEYS : !strcmp(line, "albums") ? ALBUM_KEYS : !strcmp(line, "playlist") ? PL_KEYS : NONE, &a)) {
+        return lsay(c, "err argument");
+    }
+    sqlite3 *d = lib_open();
+    if (!d) return lsay(c, "err library");
+    sqlite3_stmt *st = 0;
+    if (!strcmp(line, "songs")) {
+        static const char *const where[] = {" and s.album = ?%d collate nocase", " and (s.songer = ?%d collate nocase or s.albumsonger = ?%d collate nocase)",
+                                            " and s.style = ?%d collate nocase", " and s.source = ?%d"};
+        const char *texts[4];
+        int nt = 0;
+        size_t k = (size_t)snprintf(q, sizeof q, "select " SONG_COLS " from s where 1");
+        for (int i = 0; i < 4; ++i)
+            if (a.v[i]) texts[nt++] = a.v[i], k += (size_t)snprintf(q + k, sizeof q - k, where[i], nt, nt);
+        snprintf(q + k, sizeof q - k, SONG_ORDER " limit ?%d offset ?%d", nt + 1, nt + 2);
+        if (!songs_of(c, d, q, texts, nt, &a)) lsay(c, "ok");
+        else lsay(c, "err library");
+    } else if (!strcmp(line, "song")) {
+        if (sqlite3_prepare_v2(d, "select " SONG_COLS " from s where s.id = ?", -1, &st, 0) == SQLITE_OK) {
+            sqlite3_bind_int64(st, 1, id);
+            if (sqlite3_step(st) == SQLITE_ROW) song_line(c, st);
+            else lsay(c, "err none");
+        }
+    } else if (!strcmp(line, "search")) {
+        char pat[1300];
+        size_t j = 0;
+        pat[j++] = '%';
+        for (const char *p = text; *p && j + 4 < sizeof pat; ++p) {
+            if (*p == '%' || *p == '_' || *p == '\\') pat[j++] = '\\';
+            pat[j++] = *p;
+        }
+        pat[j++] = '%', pat[j] = 0;
+        const char *texts[] = {pat};
+        if (!songs_of(c, d, "select " SONG_COLS " from s where s.name like ?1 escape '\\' or s.songer like ?1 escape '\\'"
+                            " or s.albumsonger like ?1 escape '\\' or s.album like ?1 escape '\\'" SONG_ORDER " limit ?2 offset ?3",
+                      texts, 1, &a))
+            lsay(c, "ok");
+        else lsay(c, "err library");
+    } else if (!strcmp(line, "albums")) {
+        snprintf(q, sizeof q, "select s.album, s.aa, max(s.year), count(*) from s where coalesce(s.album, '') != ''%s"
+                              " group by s.aa collate nocase, s.album collate nocase order by s.aa collate nocase, s.album collate nocase"
+                              " limit ? offset ?", a.v[0] ? " and s.aa = ? collate nocase" : "");
+        sqlite3_stmt *first = 0;
+        if (sqlite3_prepare_v2(d, q, -1, &st, 0) == SQLITE_OK &&
+            sqlite3_prepare_v2(d, "select s.id from s where s.album = ?1 collate nocase and s.aa = ?2 collate nocase"
+                                  " order by s.cd_num, s.track, s.name collate nocase, s.id limit 1", -1, &first, 0) == SQLITE_OK) {
+            int b = 1;
+            if (a.v[0]) sqlite3_bind_text(st, b++, a.v[0], -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int64(st, b++, a.count), sqlite3_bind_int64(st, b, a.from);
+            while (c->fd >= 0 && sqlite3_step(st) == SQLITE_ROW) {
+                char al[1200], aa[1200];
+                lenc(al, sizeof al, col(st, 0)), lenc(aa, sizeof aa, col(st, 1));
+                sqlite3_reset(first);
+                sqlite3_bind_text(first, 1, col(st, 0), -1, SQLITE_TRANSIENT), sqlite3_bind_text(first, 2, col(st, 1), -1, SQLITE_TRANSIENT);
+                long long f = sqlite3_step(first) == SQLITE_ROW ? sqlite3_column_int64(first, 0) : 0;
+                lsay(c, "album name=%s artist=%s year=%d songs=%d first=%lld", al, aa, sqlite3_column_int(st, 2), sqlite3_column_int(st, 3), f);
+            }
+            lsay(c, "ok");
+        } else lsay(c, "err library");
+        sqlite3_finalize(first);
+    } else if (!strcmp(line, "artists") || !strcmp(line, "genres")) {
+        int artists = line[0] == 'a';
+        if (sqlite3_prepare_v2(d, artists ? "select s.aa, count(distinct case when coalesce(s.album, '') != '' then lower(s.album) end), count(*)"
+                                            " from s where s.aa != '' group by s.aa collate nocase order by s.aa collate nocase limit ? offset ?"
+                                          : "select s.style, 0, count(*) from s where coalesce(s.style, '') != '' group by s.style collate nocase"
+                                            " order by s.style collate nocase limit ? offset ?", -1, &st, 0) == SQLITE_OK) {
+            sqlite3_bind_int64(st, 1, a.count), sqlite3_bind_int64(st, 2, a.from);
+            while (c->fd >= 0 && sqlite3_step(st) == SQLITE_ROW) {
+                char n[1200];
+                lenc(n, sizeof n, col(st, 0));
+                if (artists) lsay(c, "artist name=%s albums=%d songs=%d", n, sqlite3_column_int(st, 1), sqlite3_column_int(st, 2));
+                else lsay(c, "genre name=%s songs=%d", n, sqlite3_column_int(st, 2));
+            }
+            lsay(c, "ok");
+        } else lsay(c, "err library");
+    } else if (!strcmp(line, "playlists")) {
+        if (sqlite3_prepare_v2(d, "select p.cd_num, p.name, (select count(*) from main.playlist i join s on s.fileurl = i.fileurl and"
+                                  " s.source = 'card' where i.cd_num = p.cd_num and i.id > 100) from main.playlist p where p.id <= 100"
+                                  " order by p.cd_num", -1, &st, 0) == SQLITE_OK) {
+            while (c->fd >= 0 && sqlite3_step(st) == SQLITE_ROW) {
+                char n[1200];
+                lenc(n, sizeof n, col(st, 1));
+                lsay(c, "playlist id=%d name=%s songs=%d", sqlite3_column_int(st, 0), n, sqlite3_column_int(st, 2));
+            }
+        }
+        sqlite3_finalize(st), st = 0;
+        if (sqlite3_prepare_v2(d, "select p.app, p.pid, p.name, (select count(*) from cat.serveritem i join s on (coalesce(i.path, '') != ''"
+                                  " and s.source = 'card' and s.fileurl = i.path) or (coalesce(i.path, '') = '' and s.id = (select m.id from"
+                                  " cat.servermeta m where m.app = i.app and m.sid = i.sid)) where i.app = p.app and i.pid = p.pid)"
+                                  " from cat.serverpl p order by p.app, p.rowid", -1, &st, 0) == SQLITE_OK) {
+            while (c->fd >= 0 && sqlite3_step(st) == SQLITE_ROW) {
+                char ap[200], pid[600], n[1200];
+                lenc(ap, sizeof ap, col(st, 0)), lenc(pid, sizeof pid, col(st, 1)), lenc(n, sizeof n, col(st, 2));
+                lsay(c, "playlist app=%s pid=%s name=%s songs=%d", ap, pid, n, sqlite3_column_int(st, 3));
+            }
+        }
+        lsay(c, "ok");
+    } else if (!strcmp(line, "playlist")) {
+        const char *texts[2] = {0, 0};
+        int card = a.v[0] && !a.v[1] && !a.v[2], server = !a.v[0] && a.v[1] && a.v[2];
+        long n = card ? strtol(a.v[0], &end, 10) : 0;
+        if ((!card && !server) || (card && (*end || !isdigit((unsigned char)*a.v[0])))) {
+            lsay(c, "err argument");
+        } else {
+            if (card) snprintf(q, sizeof q, "select count(*) from main.playlist where id <= 100 and cd_num = %ld", n);
+            else snprintf(q, sizeof q, "select count(*) from cat.serverpl where app = ?1 and pid = ?2");
+            int there = 0;
+            if (sqlite3_prepare_v2(d, q, -1, &st, 0) == SQLITE_OK) {
+                if (server) sqlite3_bind_text(st, 1, a.v[1], -1, SQLITE_TRANSIENT), sqlite3_bind_text(st, 2, a.v[2], -1, SQLITE_TRANSIENT);
+                there = sqlite3_step(st) == SQLITE_ROW && sqlite3_column_int(st, 0) > 0;
+            }
+            if (!there) {
+                lsay(c, "err none");
+            } else if (card) {
+                snprintf(q, sizeof q, "select " SONG_COLS " from main.playlist i join s on s.fileurl = i.fileurl and s.source = 'card'"
+                                      " where i.cd_num = %ld and i.id > 100 order by i.id limit ?1 offset ?2", n);
+                if (!songs_of(c, d, q, texts, 0, &a)) lsay(c, "ok");
+                else lsay(c, "err library");
+            } else {
+                texts[0] = a.v[1], texts[1] = a.v[2];
+                if (!songs_of(c, d, "select " SONG_COLS " from cat.serveritem i join s on (coalesce(i.path, '') != '' and s.source = 'card'"
+                                    " and s.fileurl = i.path) or (coalesce(i.path, '') = '' and s.id = (select m.id from cat.servermeta m"
+                                    " where m.app = i.app and m.sid = i.sid)) where i.app = ?1 and i.pid = ?2 order by i.pos limit ?3 offset ?4",
+                              texts, 2, &a))
+                    lsay(c, "ok");
+                else lsay(c, "err library");
+            }
+        }
+    } else if (!strcmp(line, "art")) {
+        if (sqlite3_prepare_v2(d, "select c.file from main.vamp_cover c join main.songtable t on t.id = c.id where c.id = ?"
+                                  " and coalesce(c.file, '') != ''", -1, &st, 0) == SQLITE_OK) {
+            sqlite3_bind_int64(st, 1, id);
+            if (sqlite3_step(st) == SQLITE_ROW) {
+                char f[1200];
+                lenc(f, sizeof f, col(st, 0));
+                lsay(c, "art id=%lld file=%s", id, f);
+            } else {
+                lsay(c, "err none");
+            }
+        }
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(d);
+}
+
+static void lib_line(struct lclient *c, char *line) {
+    if (!c->hello) {
+        if (strcmp(line, "Q2LIB/1")) return lsay(c, "err version"), (void)(c->fd >= 0 && close(c->fd)), (void)(c->fd = -1);
+        char who[100];
+        if (!q2perm_allowed(c->fd, lib_passwd, lib_group, "library", who, sizeof who)) {
+            say("refused %s: no library permission", who); /* docs/platform/packages.md#users-and-groups */
+            lsay(c, "err permission");
+            if (c->fd >= 0) close(c->fd), c->fd = -1;
+            return;
+        }
+        c->hello = 1;
+        return lsay(c, "Q2LIB/1 ok");
+    }
+    lib_command(c, line);
+}
+
+static void lib_read(struct lclient *c) {
+    ssize_t got = recv(c->fd, c->in + c->n, sizeof c->in - 1 - c->n, 0);
+    if (got <= 0) {
+        close(c->fd), c->fd = -1;
+        return;
+    }
+    c->n += (size_t)got;
+    char *p = c->in, *nl;
+    while (c->fd >= 0 && (nl = memchr(p, '\n', c->n - (size_t)(p - c->in)))) {
+        *nl = 0;
+        if (nl > p && nl[-1] == '\r') nl[-1] = 0;
+        lib_line(c, p);
+        p = nl + 1;
+    }
+    if (c->fd < 0) return;
+    c->n -= (size_t)(p - c->in);
+    memmove(c->in, p, c->n);
+    if (c->n >= sizeof c->in - 1) close(c->fd), c->fd = -1; /* a line past 512 bytes */
+}
+
+struct fstamp { ino_t ino; long long size, sec, nsec; };
+static struct fstamp stamp_of(const char *p) {
+    struct stat st;
+    if (stat(p, &st)) return (struct fstamp){0, -1, 0, 0};
+    return (struct fstamp){st.st_ino, (long long)st.st_size, (long long)st.st_mtim.tv_sec, (long long)st.st_mtim.tv_nsec};
+}
+
+static void *lib_serve(void *arg) {
+    int lfd = *(int *)arg;
+    struct fstamp seen[2] = {stamp_of(lib_db), stamp_of(cat_db)};
+    for (int i = 0; i < LIB_CLIENTS; ++i) lc[i].fd = -1;
+    for (;;) {
+        struct pollfd p[1 + LIB_CLIENTS];
+        p[0] = (struct pollfd){.fd = lfd, .events = POLLIN};
+        for (int i = 0; i < LIB_CLIENTS; ++i) p[1 + i] = (struct pollfd){.fd = lc[i].fd, .events = POLLIN};
+        poll(p, 1 + LIB_CLIENTS, 1000);
+        if (p[0].revents & POLLIN) {
+            int fd = accept4(lfd, 0, 0, SOCK_CLOEXEC), i = 0;
+            while (fd >= 0 && i < LIB_CLIENTS && lc[i].fd >= 0) ++i;
+            if (fd >= 0 && i == LIB_CLIENTS) close(fd);
+            else if (fd >= 0) {
+                struct timeval tv = {2, 0};
+                setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+                lc[i] = (struct lclient){.fd = fd};
+            }
+        }
+        for (int i = 0; i < LIB_CLIENTS; ++i)
+            if (lc[i].fd >= 0 && p[1 + i].fd == lc[i].fd && p[1 + i].revents) lib_read(&lc[i]);
+        const char *files[2] = {lib_db, cat_db}, *names[2] = {"library", "catalogue"};
+        for (int f = 0; f < 2; ++f) { /* written again: a new file renamed over it, or changed in place */
+            struct fstamp now = stamp_of(files[f]);
+            if (!memcmp(&now, &seen[f], sizeof now)) continue;
+            seen[f] = now;
+            for (int i = 0; i < LIB_CLIENTS; ++i)
+                if (lc[i].fd >= 0 && lc[i].watch) lsay(&lc[i], "changed %s", names[f]);
+        }
+    }
+    return 0;
+}
+
+/* the socket, 0660 and the library group's, and its thread; signals stay the main thread's */
+static void lib_start(void) {
+    static int lfd;
+    snprintf(lib_db, sizeof lib_db, "%s", path("/mnt/data/vamp/library.db"));
+    snprintf(cat_db, sizeof cat_db, "%s", path("/mnt/mmc/.vamp/catalogue.db"));
+    snprintf(lib_passwd, sizeof lib_passwd, "%s", path("/etc/passwd"));
+    snprintf(lib_group, sizeof lib_group, "%s", path("/etc/group"));
+    snprintf(lib_sock, sizeof lib_sock, "%s", path("/run/vamp/lib.sock"));
+    mkdir(path("/run"), 0755), mkdir(path("/run/vamp"), 0755);
+    struct sockaddr_un a = {.sun_family = AF_UNIX};
+    if (strlen(lib_sock) >= sizeof a.sun_path) return say("Q2LIB/1: %s too long", lib_sock);
+    memcpy(a.sun_path, lib_sock, strlen(lib_sock) + 1);
+    unlink(lib_sock);
+    lfd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (lfd < 0 || bind(lfd, (struct sockaddr *)&a, sizeof a) || listen(lfd, LIB_CLIENTS))
+        return say("Q2LIB/1: %s: %s", lib_sock, strerror(errno));
+    q2perm_socket(lib_sock, lib_group, "library");
+    sigset_t all, old;
+    sigfillset(&all);
+    pthread_sigmask(SIG_BLOCK, &all, &old);
+    pthread_t t;
+    if (pthread_create(&t, 0, lib_serve, &lfd)) say("Q2LIB/1: no thread");
+    else pthread_detach(t);
+    pthread_sigmask(SIG_SETMASK, &old, 0);
+}
+
 /* ---- when ---- */
 
 static void run_after(void) {
@@ -725,6 +1146,8 @@ int main(int argc, char **argv) {
     signal(SIGHUP, on_hup);
     signal(SIGTERM, on_term);
     signal(SIGINT, on_term);
+    signal(SIGPIPE, SIG_IGN);
+    if (!once) lib_start(); /* Q2LIB/1 */
     char card[600] = "", seen_card[600] = "-", cat[1024], seen_cat[1024] = "-", ids[CAT_APPS][64], pls[2048], seen_pls[2048] = "-";
     struct stat st;
     if (!once && stat(path("/mnt/data/vamp/library.db"), &st) && !scan_card(0)) run_after(); /* none yet: an empty one */

@@ -471,6 +471,26 @@ def launch_check(fs):
     check((fs/'run/vamp/sv/navi/supervise/stat').exists(), 'q2pkgd: the app ran under a runsv of its own, /run/vamp/sv/navi')
 
 
+def lib_check(fs):
+    """q2libd's Q2LIB/1 in the booted image (docs/platform/library.md#q2lib1-the-library-socket): its caps, and the
+    card's one song (song1.wav, scanned for play_check) asked by id, as a client of the socket"""
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(15)
+        s.connect(str(fs/'run/vamp/lib.sock'))
+        f = s.makefile('rw')
+        out = []
+        for line in ('Q2LIB/1', 'caps', 'song 1'):
+            f.write(line + '\n')
+            f.flush()
+            out.append(f.readline().strip())
+        s.close()
+    except OSError as e:
+        return check(False, f'q2libd: Q2LIB/1 on /run/vamp/lib.sock ({e!r})')
+    check(out[:2] == ['Q2LIB/1 ok', 'caps songs song albums artists genres playlists playlist search art watch'] and
+          out[2].startswith('song id=1 title=song1 ') and out[2].endswith(' time=60 source=card'), f'q2libd: Q2LIB/1 answers on the image ({out})')
+
+
 def netd_check(fs, card):
     """q2netd in the booted image: Q2NET/1 answers; with no saved network the radio is off, unless the Wi-Fi adbd let a
     computer in (adb_checks, before this), whose use mark holds it on for 30 minutes (Smart Wi-Fi's rule)"""
@@ -671,6 +691,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
             played = play_check(fs, work/'console.log', deadline, emu/'record', emu/'data' if card else fs/'mnt/data')
         if adb and not card and proc.poll() is None:
             adb_checks(fs)
+        if proc.poll() is None:
+            lib_check(fs)
         if proc.poll() is None:
             netd_check(fs, card)
         if not card and proc.poll() is None:

@@ -8,7 +8,7 @@ The API Vamp OS offers a program that is not part of it ([roadmap: Platform](../
 | System: screen, battery, USB, standby | `q2sysd` | `/run/vamp/sys.sock` | [Q2SYS/1](system.md) | `settings`, `screen` |
 | Network | `q2netd` | `/run/vamp/net.sock` | [Q2NET/1](network.md) | `network-hold` |
 | Bluetooth | `q2btd` | `/run/vamp/bt.sock` | [Q2BT/1](bt.md) | `bluetooth` |
-| Media library | `q2libd` | two SQLite files, read-only | [Library 1](library.md) | `library` |
+| Media library | `q2libd` | two SQLite files, read-only; `/run/vamp/lib.sock` | [Library 1](library.md), [Q2LIB/1](library.md#q2lib1-the-library-socket) | `library` |
 | Packages: the manifest, users, starting and stopping | `q2pkgd` | the card; `/run/vamp/pkg.sock` | [Packages](packages.md), [Q2PKG/1](packages.md#starting-and-stopping-q2pkg1) | none: each command checks the caller's uid |
 | Notices and questions (designed, not served) | `q2ui` | `/run/vamp/ui.sock` | [Q2UI/1 notices](notices.md) | `notices`, `ask` |
 
