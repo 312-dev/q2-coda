@@ -502,6 +502,7 @@ def pages(binary, work):
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
     good &= check("Home > Settings > Car Remote asks demo for its page by the payload's opener", asked == 'carremote_page\n', repr(asked))
     good &= display(binary, work, home)
+    good &= playback(binary, work, home)
     return good
 
 
@@ -563,6 +564,30 @@ def display(binary, work, home):
         good &= check('demo writing Light Mode on turns q2ui light as the file lands', dark == (0, 0, 0) and light == (255, 255, 255), f'{dark} {light}')
     finally:
         run.end()
+    return good
+
+
+def playback(binary, work, home):
+    """Settings > Playback, q2ui's own (ui/page_playback.c): EQ as demo says it stands, Gapless and Smart Crossfade as
+    config.ini has them, each set through demo (Smart Crossfade on turns Gapless on, as demo's row does); the Sleep
+    Timer and the rest of demo's Playback page by their paths."""
+    good = True
+    d = pathlib.Path(tempfile.mkdtemp(dir=work))
+    (d/'config.ini').write_text('[PLAYSET]\nGAPLESS=1\n[Q2POD]\nXFADE=0\n')
+    (d/'told').write_text('eq=1\n')
+    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 3', 'rest', 'key centre', 'rest']  # Home > Settings > Playback
+    lines = to + ['key centre', 'run 100', 'tick 1', 'rest', 'key centre', 'run 100', 'tick 1', 'rest', 'key centre', 'run 100',
+                  'tick -1', 'rest', 'key centre', 'run 100']
+    opts = (*home, '--config', d/'config.ini', '--told', d/'told')
+    _, _, _, (sent, _, _), said = script(binary, work, 60, lines, *opts, queue=True, ctl=True)
+    good &= check('EQ (on by demo) goes off, Gapless (on in the file) off, Smart Crossfade on, and Gapless shows on with it again, each '
+                  "down q2ui's own pipe and none down the queue",
+                  said == ['set eq 0', 'set gapless 0', 'set xfade 1', 'set gapless 0'] and sent == [], f'{said} {sent}')
+    for ticks, page in ((3, 'systemset/sleepshutdown_page'), (4, 'playset/playset_page')):
+        _, _, _, (sent, _, out) = script(binary, work, 60, to + [f'tick {ticks}', 'rest', 'key centre', 'run 100'], *opts,
+                                         code=3, queue=True)
+        asked = (out/'ask').read_text() if (out/'ask').exists() else ''
+        good &= check(f"its row {ticks + 1} opens demo's {page}", asked == page + '\n', repr(asked))
     return good
 
 

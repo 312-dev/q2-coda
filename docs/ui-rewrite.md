@@ -347,8 +347,9 @@ By what is used most and coupled least. Each step ships behind the switch and is
 | `ui/player.c`                                  | play and transport, through `demo`'s command queue                                  |
 | `ui/page_songs.c`                              | Library > Songs                                                                     |
 | `ui/page_settings.c`                           | Settings' list, its rows opening `demo`'s pages                                     |
-| `ui/page_control.c`                            | Control Center: `demo`'s switches through the queue, its pages through the gate     |
+| `ui/page_control.c`                            | Control Center: `demo`'s switches down q2ui's own pipe, its pages through the gate  |
 | `ui/page_display.c`                            | Settings > Display: Light Mode and Reduce Motion, set through `demo`                |
+| `ui/page_playback.c`                           | Settings > Playback: EQ, Gapless and Smart Crossfade, set through `demo`            |
 | `ui/page_gallery.c`, `ui/page_depth.c`         | the examples; the panel's colour depth card                                         |
 | `ui/bluenoise.inc`, `ui/tools/bluenoise.py`    | the dither's noise table and what makes it                                          |
 | `ui/test_engine.c`                             | the toolkit's own checks                                                            |
@@ -549,7 +550,7 @@ What a user sees and can do in `demo` today, against q2ui. The scope is the owne
 |                     | The title's marquee; the heart and the row of shuffle, radio, repeat and Up Next         | done as `demo` draws them, by what is set; the marks are not pressed from q2ui yet, and the artist and album lines do not slide |
 |                     | More, lyrics, the rating page                                                           | not yet                                                                                       |
 |                     | The volume's own display, a track change's slide, the cover's flight from Home          | not yet                                                                                       |
-| Settings            | Its pages                                                                              | Display is q2ui's first (`ui/page_display.c`): Light Mode (Off, On, Auto) and Reduce Motion, as `config.ini` has them, set through `demo` (`set light N`, `set motion N`), which owns the file, and applied as the file lands; its last row opens the rest of `demo`'s Display page. Held by `test/ui.py` `display` and `test/fw/test_q2ui_gate.py`. Every other page is still `demo`'s until step 4 moves it |
+| Settings            | Its pages                                                                              | Display is q2ui's first (`ui/page_display.c`): Light Mode (Off, On, Auto) and Reduce Motion, as `config.ini` has them, set through `demo` (`set light N`, `set motion N`), which owns the file, and applied as the file lands; its last row opens the rest of `demo`'s Display page. Held by `test/ui.py` `display` and `test/fw/test_q2ui_gate.py`. Playback is q2ui's (`ui/page_playback.c`): EQ, Gapless and Smart Crossfade as switches (EQ as `demo` says it stands, the other two as `config.ini` has them), set through `demo` (`set eq|gapless|xfade 0|1`) as `demo`'s own rows set them, Smart Crossfade on turning Gapless on with it; then the Sleep Timer and the rest of `demo`'s Playback page by their paths. Held by `test/ui.py` `playback` and `test/fw/test_q2ui_gate.py`. Every other page is still `demo`'s until step 4 moves it |
 
 ## What carries over
 

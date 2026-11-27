@@ -372,6 +372,23 @@ def test_q2uis_display_page_sets_light_mode_and_reduce_motion_through_demo(fw):
     assert cc(b'motion', 1) == 0 and saved[-1] == ('IPOD', 'REDUCEMOTION', 1)
 
 
+def test_q2uis_playback_page_sets_gapless_and_smart_crossfade_through_demo(fw):
+    """q2ui's Settings > Playback: Gapless as stock's own row sets it (0x4bcfa4: PLAYSET GAPLESS, mclSetGaplessMode),
+    and Smart Crossfade as its row does (crossfade.c xfade_click: Q2POD XFADE, and on turns Gapless on with it)."""
+    saved = []
+    fw.mock('write_int_config', lambda v, sec, key, *_: saved.append((C.string_at(sec).decode(), C.string_at(key).decode(), v)) or 0)
+    gapless = C.c_ubyte.from_address(O['MCL_GAPLESS'])
+    gapless.value = 0
+    fw.mock('mclSetGaplessMode', lambda on, *_: setattr(gapless, 'value', on))
+    cc = fw.fn('q2ui_cc_set', C.c_int, C.c_char_p, C.c_int)
+    assert cc(b'gapless', 1) == 0 and saved == [('PLAYSET', 'GAPLESS', 1)] and gapless.value == 1
+    assert cc(b'gapless', 0) == 0 and saved[-1] == ('PLAYSET', 'GAPLESS', 0) and gapless.value == 0
+    saved.clear()
+    assert cc(b'xfade', 1) == 0 and saved == [('Q2POD', 'XFADE', 1), ('PLAYSET', 'GAPLESS', 1)] and gapless.value == 1
+    saved.clear()
+    assert cc(b'xfade', 0) == 0 and saved == [('Q2POD', 'XFADE', 0)] and gapless.value == 1
+    assert cc(b'xfade', 0) == 0 and saved == [('Q2POD', 'XFADE', 0)]  # already off: nothing written again
+
 class Piped(Gate):
     """The gate with q2ui's settings pipe: pipe2 answers READ and WRITE, and what q2ui wrote is read from READ."""
     READ, WRITE = 20, 21

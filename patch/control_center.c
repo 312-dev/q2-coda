@@ -39,6 +39,7 @@ extern int ui_text(void *canvas, const char *s, int medium, int px, unsigned rgb
                    int y, int w, int align);
 extern void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind); /* artist_page.c */
 extern void coda_rc_toggle(void);                                              /* coda_rc_shim.c */
+extern void xfade_set(int on);                                                  /* crossfade.c */
 extern unsigned now_cover_written(const char *file);                           /* coverflow.c */
 
 /* The layout, in the window's (the screen's) pixels, as mock_cc4_tight.py draws it at 1x: one
@@ -796,7 +797,8 @@ int cc_key(void *win, unsigned key) {
  * bright (the backlight, 0 to 100), vol and volmax (the volume and how high it may go: vol_cap).
  * Its switches come back as "set NAME 0|1" down the pipe the gate gives q2ui alone (q2ui_gate.c
  * ctl, q2ui_cc_set), each flipped as this page's circle flips it; q2ui's Display page sets
- * Light Mode ("set light 0|1|2") and Reduce Motion ("set motion 0|1") the same way, and its Control
+ * Light Mode ("set light 0|1|2") and Reduce Motion ("set motion 0|1") the same way, its Playback
+ * page Gapless ("set gapless 0|1") and Smart Crossfade ("set xfade 0|1"), and its Control
  * Center's Brightness slider the backlight ("set bright 0..100"); Display reads its settings
  * back from config.ini itself (ui/config.c). Bluetooth is not one of them:
  * stock flips it only from its page's row, so q2ui opens that page. */
@@ -832,6 +834,11 @@ int q2ui_cc_set(const char *name, int on) {
     } else if (!tk_strcmp(name, "motion")) { /* q2ui's Display: Reduce Motion */
         st.reduce_motion = !!on;
         write_int_config(st.reduce_motion, "IPOD", "REDUCEMOTION");
+    } else if (!tk_strcmp(name, "gapless")) { /* q2ui's Playback: as stock's own row (0x4bcfa4) */
+        write_int_config(!!on, "PLAYSET", "GAPLESS");
+        mclSetGaplessMode(!!on);
+    } else if (!tk_strcmp(name, "xfade")) { /* q2ui's Playback: Smart Crossfade */
+        xfade_set(on);
     } else
         return -1;
     return 0;
