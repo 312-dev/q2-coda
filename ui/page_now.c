@@ -18,6 +18,13 @@
 #define BAR_H 4
 #define TIMES_Y 240
 #define VOLUME_SHOW_US 1500000u
+/* a title too long for its column: at rest for MQ_REST_US, then slid left at MQ_SPEED until its end
+ * meets the column's, held MQ_END_US, and back (docs/oled-design.md#motion) */
+#define MQ_REST_US 2750000u
+#define MQ_END_US 1500000u
+#define MQ_SPEED 35.0f
+#define MQ_FADE 12
+#define TITLE_Y 64
 
 struct now_st {
     spring_t push, lift;
@@ -25,7 +32,9 @@ struct now_st {
     unsigned seen, cover_seen;
     int pos_s, volume;   /* volume: the level last shown, -1 before the first read */
     uint64_t volume_at;  /* when it last changed, 0: the bar is the song's */
-    run_t title, artist, album, left, right;
+    run_t title, artist, album, left, right, whole; /* whole: the title uncut, when it is too long */
+    uint64_t mq_at;                               /* when the title's turn began, 0: it fits */
+    float mq_x;
     char title_s[160], artist_s[160], album_s[160];
 };
 
@@ -82,7 +91,8 @@ static void n_step(void *st) {
             snprintf(s->title_s, sizeof s->title_s, "%s", n->title);
             snprintf(s->artist_s, sizeof s->artist_s, "%s", n->artist);
             snprintf(s->album_s, sizeof s->album_s, "%s", n->album);
-            s->title.n = s->artist.n = s->album.n = 0;
+            s->title.n = s->artist.n = s->album.n = s->whole.n = 0;
+            s->mq_at = 0, s->mq_x = 0;
             ui_mark((rect_t){ TEXT_X, 58, SCREEN_W - TEXT_X, 100 });
         }
         ui_mark((rect_t){ 0, BAR_Y - 2, SCREEN_W, 40 });
@@ -96,6 +106,20 @@ static void n_step(void *st) {
         }
     }
     if (s->volume_at && ui_time() - s->volume_at >= VOLUME_SHOW_US) s->volume_at = 0, ui_mark((rect_t){ 0, BAR_Y - 6, SCREEN_W, 44 });
+    if (s->title.n && s->title.cut && !s->mq_at) s->mq_at = ui_time(); /* laid out and found too long */
+    if (s->mq_at && s->whole.n) {
+        float over = s->whole.w - (float)(SCREEN_W - TEXT_X - 24), x = 0;
+        uint64_t t = ui_time() - s->mq_at, slide = over > 0 ? (uint64_t)(over / MQ_SPEED * 1e6f) : 0;
+        if (t < MQ_REST_US)
+            ui_wake_ms((unsigned)((MQ_REST_US - t) / 1000u) + 1);
+        else if (t < MQ_REST_US + slide)
+            x = (float)(t - MQ_REST_US) / 1e6f * MQ_SPEED, ui_again();
+        else if (t < MQ_REST_US + slide + MQ_END_US)
+            x = over, ui_wake_ms((unsigned)((MQ_REST_US + slide + MQ_END_US - t) / 1000u) + 1);
+        else
+            s->mq_at = ui_time(), ui_wake_ms(MQ_REST_US / 1000u);
+        if (x != s->mq_x) s->mq_x = x, ui_mark((rect_t){ TEXT_X, TITLE_Y, SCREEN_W - TEXT_X, 30 });
+    }
     now_cover();
     if (now_cover_seq() != s->cover_seen) s->cover_seen = now_cover_seq(), ui_mark(card_bounds(ART));
     int pos = position_ms() / 1000;
@@ -119,9 +143,28 @@ static void n_draw(void *st, rect_t r) {
     if (!s->title.n) run_make(&s->title, FACE_MEDIUM, TYPE(22), *n->title ? n->title : "Not Playing", room);
     if (!s->artist.n && *n->artist) run_make(&s->artist, FACE_REGULAR, TYPE(18), n->artist, room);
     if (!s->album.n && *n->album) run_make(&s->album, FACE_REGULAR, TYPE(18), n->album, room);
-    run_draw(&s->title, TEXT_X, 64, tok(TOK_PRIMARY), 256);
+    if (s->title.cut) {
+        /* the title whole, slid in its column with its ends faded while it is away from them */
+        if (!s->whole.n) run_make(&s->whole, FACE_MEDIUM, TYPE(22), n->title, -1);
+        fade_set(TEXT_X, TEXT_X + room, s->mq_x > 0.5f ? MQ_FADE : 0, s->whole.w - s->mq_x > (float)room + 0.5f ? MQ_FADE : 0);
+        run_draw(&s->whole, TEXT_X - s->mq_x, TITLE_Y, tok(TOK_PRIMARY), 256);
+        fade_clear();
+    } else
+        run_draw(&s->title, TEXT_X, TITLE_Y, tok(TOK_PRIMARY), 256);
     if (*n->artist) run_draw(&s->artist, TEXT_X, 96, tok(TOK_SECONDARY), 256);
     if (*n->album) run_draw(&s->album, TEXT_X, 120, tok(TOK_SECONDARY), 256);
+    /* the row of modes at the foot, as marks of what is set: shuffle, the song's radio, repeat, Up
+     * Next, each in the theme's own ink for its state (the accent when on). They are not pressed
+     * from here yet: the wheel is the volume and Centre plays. */
+    static const float mode_x[] = { 64, 146, 228, 311 };
+    const char *mode[] = { n->shuffle ? "mode_shuffle_on." : "mode_shuffle_d.", "mode_radio_d.",
+                           n->repeat == 2 ? "mode_repeat1_on." : n->repeat ? "mode_repeat_on." : "mode_repeat_d.", "mode_queue_d." };
+    for (int k = 0; k < 4; ++k) {
+        const image_t *im = icon(mode[k]);
+        if (im) image_draw(im, (rectf_t){ mode_x[k] - (float)im->w / 2, 286 - (float)im->h / 2, (float)im->w, (float)im->h }, 0, 0, 256, -1);
+    }
+    const image_t *heart = icon(n->hearts > 0 ? "np_fav_d." : "np_unfav_d."); /* liked, and not */
+    if (heart && *n->title) image_draw(heart, (rectf_t){ 194, 153, (float)heart->w, (float)heart->h }, 0, 0, 256, -1);
     if (s->volume_at) {
         /* the volume's level in the bar's place: a shorter track between two marks, the level in white */
         float level = (float)s->volume / 100, x0 = BAR_X + 22, w = BAR_W - 44;

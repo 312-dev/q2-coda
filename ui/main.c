@@ -3,9 +3,10 @@
  *     q2ui [--db FILE] [--catalogue FILE] [--fb FILE] [--input DIR] [--fonts DIR] [--icons DIR]
  *          [--limit N] [--motion 0|1] [--reduce-motion] [--light] [--panel-bits 8|6|5|565]
  *          [--panel-mode 24|keep] [--panel-mem FILE]
- *          [--text awtk] [--page home|songs|depth|gallery|card] [--stats FILE] [--bench] [--script FILE]
+ *          [--text awtk] [--page home|songs|now|depth|gallery|card] [--stats FILE] [--bench] [--script FILE]
  *          [--trace FILE] [--clock HH:MM] [--state FILE] [--cmdq FIFO] [--playlist FILE]
- *          [--backlight DIR] [--ask FILE] [--now FILE] [--cover FILE]
+ *          [--backlight DIR] [--ask FILE] [--now FILE] [--cover FILE] [--power DIR] [--wifi FILE]
+ *          [--wireless FILE]
  *
  * --catalogue is the server library's (default /mnt/mmc/.q2pod/catalogue.db; "" for none): its
  * songs are listed with the card's, as the Library lists them. --panel-bits is the depth of the
@@ -25,7 +26,8 @@
  * each time it comes to rest, and a start within STATE_FRESH_S of that opens them again. --cmdq and --playlist are
  * the player's queue and list file (ui/player.c), --now and --cover what plays and its cover
  * (ui/now.c), --ask the file a page of demo's is asked for in (ui_demo_page), --backlight the
- * folder whose state says the screen is dark; a test names its own.
+ * folder whose state says the screen is dark, --power, --wifi and --wireless where the status
+ * row reads the battery and Wi-Fi (ui/status.c); a test names its own.
  *
  * --bench draws and turns frames without the panel's wait and writes their CPU time to the stats
  * file. --script runs a file of input on a clock of its own, a frame every 1/60 s whatever the
@@ -99,6 +101,12 @@ static void parse(int argc, char **argv) {
             player_list = v, ++i;
         else if (!strcmp(a, "--backlight"))
             ui_backlight = v, ++i;
+        else if (!strcmp(a, "--power"))
+            status_power = v, ++i;
+        else if (!strcmp(a, "--wifi"))
+            status_wifi = v, ++i;
+        else if (!strcmp(a, "--wireless"))
+            status_wireless = v, ++i;
         else if (!strcmp(a, "--limit"))
             opt.limit = atoi(v), ++i;
         else if (!strcmp(a, "--motion"))
@@ -214,6 +222,8 @@ static void at_rest(void) {
 static void first_page(void) {
     if (!strcmp(opt.page, "home"))
         ui_push(&page_home, 0);
+    else if (!strcmp(opt.page, "now"))
+        ui_push(&page_now, 0);
     else if (!strcmp(opt.page, "depth"))
         ui_push(&page_depth, 0);
     else if (!strcmp(opt.page, "gallery"))
@@ -320,7 +330,8 @@ static int key_code(const char *name) {
                                      : atoi(name);
 }
 /* Lines: tick N | tug SHARE | key NAME | down NAME | up NAME | hold NAME | run MS | rest |
- * shot FILE | record DIR | record off | page songs|depth. Each input goes in with the next frame. */
+ * shot FILE | record DIR | record off | plays FILE (what plays is read from FILE from here on).
+ * Each input goes in with the next frame. */
 static int script(const char *path) {
     FILE *f = fopen(path, "r");
     char line[400], arg[320];
@@ -354,6 +365,9 @@ static int script(const char *path) {
             for (uint64_t until = fake_us + (uint64_t)atoi(arg) * 1000u; fake_us < until;) script_frame(0, 0);
         } else if (!strncmp(line, "rest", 4)) {
             for (int k = 0; k < 900 && (ui_moving() || ui_wake_pending()); ++k) script_frame(0, 0);
+        } else if (sscanf(line, "plays %319s", arg) == 1) {
+            now_file = strdup(arg); /* what plays is now this file's: as demo writing a new one */
+            now_read();
         } else if (sscanf(line, "shot %319s", arg) == 1) {
             ppm(arg);
         } else if (sscanf(line, "record %255s", arg) == 1) {
@@ -373,15 +387,18 @@ static int script(const char *path) {
 }
 
 /* The program run again in place of this one, with the arguments this one was started with: its
- * file is read anew (a newer q2ui put at the same path is what runs) and so is
+ * path is run anew (so a newer q2ui put there is what runs) and so is
  * /mnt/data/q2ui.args. Where the pages were is saved first, and what this one had open is closed,
  * so the new one starts as from a shell. */
 static char **started_with;
 static void restart(void) {
     state_save();
     for (int fd = 3; fd < 64; ++fd) close(fd);
+    /* the path, not the file this process was started from: a newer q2ui mounted or moved there
+     * since is the point (/proc/self/exe is still the old one). That file only when the path
+     * cannot be run, or was a bare name found on PATH. */
+    if (strchr(started_with[0], '/')) execv(started_with[0], started_with);
     execv("/proc/self/exe", started_with);
-    execv(started_with[0], started_with);
 }
 
 int main(int argc, char **argv) {

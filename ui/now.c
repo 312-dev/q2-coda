@@ -52,6 +52,12 @@ void now_read(void) {
         if (*num) now.volume = atoi(num);
         *num = 0, field(line, "id", num, sizeof num);
         if (*num) now.id = atoi(num);
+        *num = 0, field(line, "shuffle", num, sizeof num);
+        if (*num) now.shuffle = atoi(num);
+        *num = 0, field(line, "repeat", num, sizeof num);
+        if (*num) now.repeat = atoi(num);
+        *num = 0, field(line, "hearts", num, sizeof num);
+        if (*num) now.hearts = atoi(num);
     }
     if (f) fclose(f);
     now.read_us = mono_us();

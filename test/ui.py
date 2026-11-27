@@ -61,7 +61,8 @@ def base_args(binary, d):
     # 8 bits to the panel file, so its pixels are the canvas's own: the Q2's default dithers them to 6
     return [str(binary), '--page', 'songs', '--panel-bits', '8', '--db', d/'library.db', '--catalogue', '', '--fb', d/'fb', '--fonts', d/'fonts', '--icons', d,
             '--stats', d/'stats.json', '--state', d/'state', '--cmdq', d/'cmdq', '--playlist', d/'list', '--backlight', d/'backlight',
-            '--now', d/'now', '--cover', d/'cover.jpg', '--ask', d/'ask']
+            '--now', d/'now', '--cover', d/'cover.jpg', '--ask', d/'ask', '--power', d/'power', '--wifi', d/'wifi',
+            '--wireless', d/'wireless']
 
 
 class Picture:
@@ -203,6 +204,17 @@ class Run:
 def bar_rows(picture):
     """The list rows whose middle holds the accent, by the pixel at x 200, 3 px into the row."""
     return [k for k in range(ROWS) if shot.pixel(picture, 200, BAR_H + k * ROW_H + 3) == ACCENT]
+
+
+def png(path, w, h, rgb):
+    """A w x h picture of one colour, as a PNG (no Pillow here)."""
+    import zlib
+
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+    rows = b''.join(b'\0' + bytes(rgb) * w for _ in range(h))
+    pathlib.Path(path).write_bytes(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)) +
+                                   chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b''))
 
 
 def check(what, ok, detail=''):
@@ -349,7 +361,7 @@ def pages(binary, work):
     trace, pics, _ = script(binary, work, 60, ['rest', 'shot @idle.ppm', 'tick 9', 'rest'], *home)
     idle_rows = trace[-1]['sel'] + 1
     trace, pics2, _ = script(binary, work, 60, ['rest', 'shot @playing.ppm', 'tick 9', 'rest'], *home, now=NOW)
-    good &= check('Home has one row more while something plays', (idle_rows, trace[-1]['sel'] + 1) == (2, 3), f"{idle_rows} and {trace[-1]['sel'] + 1}")
+    good &= check('Home has one row more while something plays', (idle_rows, trace[-1]['sel'] + 1) == (7, 8), f"{idle_rows} and {trace[-1]['sel'] + 1}")
     good &= check("Home's platter keeps to the list's side and the pane is drawn beside it",
                   pics['idle'].blue(100, 40 + 3) and not pics['idle'].blue(250, 40 + 3) and pics['idle'].at(280, 160) != (0, 0, 0))
     good &= check('the two Homes differ where the first row is', pics['idle'].rgb != pics2['playing'].rgb)
@@ -366,6 +378,38 @@ def pages(binary, work):
     _, _, _, (sent, _, _) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'key centre', 'run 100', 'tick 1', 'run 100'], *home, now=NOW, queue=True)
     good &= check('there Centre is play and pause, and a tick down the wheel is one step quieter',
                   [line.split(' ', 1)[1] for line in sent] == ['toggle', 'volume 39'], str(sent))
+    # a title too long for its column rests, slides to its end, and comes back
+    # a picture every quarter second for ten: at rest 2.75 s, sliding, held 1.5 s at its end, then back at rest
+    long = NOW.replace('title=A Made-Up Song', 'title=A Made-Up Song Again X').replace('state=1', 'state=2')
+    lines = ['rest', 'key centre', 'run 500']  # no rest after: a title that slides never does
+    for k in range(40):
+        lines += [f'shot @m{k:02d}.ppm', 'run 250']
+    _, pics, _ = script(binary, work, 60, lines, *home, now=long)
+    title = lambda p: bytes(v for y in range(64, 92) for x in range(192, 352) for v in p.at(x, y))  # noqa: E731
+    edge = lambda p: max(max(p.at(x, y)) for y in range(66, 90) for x in range(192, 196))  # noqa: E731
+    seen = [title(pics[f'm{k:02d}']) for k in range(40)]
+    still = next((k for k in range(40) if seen[k] != seen[0]), 40)       # the first picture that has moved
+    held = next((k for k in range(still, 37) if seen[k] == seen[k + 1] == seen[k + 2]), None)  # three alike after it
+    back = held is not None and any(seen[k] == seen[0] for k in range(held, 40))
+    good &= check('a long title is still for its first two seconds and more, slides, holds at its end, and comes back',
+                  7 <= still <= 10 and held is not None and seen[held] != seen[0] and back, f'moved at shot {still}, held at {held}, back {back}')
+    good &= check("at rest its start is whole, and at its end it fades out at the column's left",
+                  held is not None and edge(pics['m00']) > 200 and edge(pics[f'm{held:02d}']) < 120,
+                  f"{edge(pics['m00'])} {edge(pics[f'm{held:02d}']) if held is not None else None}")
+    # the modes at the foot are marks of what is set, in the theme's own glyphs: made-up ones here, a colour each
+    def glyphs(d):
+        for name, rgb in (('mode_shuffle_d', (90, 90, 90)), ('mode_shuffle_on', (0, 0, 250)), ('mode_repeat_d', (90, 90, 90)),
+                          ('mode_repeat_on', (0, 0, 250)), ('mode_repeat1_on', (0, 250, 0)), ('mode_radio_d', (90, 90, 90)),
+                          ('mode_queue_d', (90, 90, 90)), ('np_fav_d', (250, 0, 0)), ('np_unfav_d', (90, 90, 90))):
+            png(d/f'oled_{name}.png', 16, 16, rgb)
+    icons = pathlib.Path(tempfile.mkdtemp(dir=work))
+    glyphs(icons)
+    marks = {}
+    for what, text in (('off', NOW), ('on', NOW.replace('id=5', 'id=5\nshuffle=1\nrepeat=2\nhearts=1'))):
+        _, pics, _ = script(binary, work, 60, ['rest', 'key centre', 'run 600', 'shot @np.ppm'], *home, '--icons', icons, now=text)
+        marks[what] = [pics['np'].at(64, 286), pics['np'].at(228, 286), pics['np'].at(200, 160)]
+    good &= check("Now Playing's shuffle, repeat and heart are drawn by what is set",
+                  marks['off'] == [(90, 90, 90)] * 3 and marks['on'] == [(0, 0, 250), (0, 250, 0), (250, 0, 0)], str(marks))
     # a tick shows the volume's level in the bar's place, white, and it gives the bar back
     _, pics, _ = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick -1', 'run 200', 'shot @volume.ppm', 'run 2000', 'shot @after.ppm'], *home, now=NOW)
     level, bar = pics['volume'].at(80, 231), pics['after'].at(36, 231)
@@ -392,9 +436,16 @@ def pages(binary, work):
     _, _, _, (sent, ids, d) = script(binary, work, 60, walk, *home, queue=True)
     want = by['track, name collate nocase, id'][albums[k]]
     good &= check("an album's songs are its tracks in order", len(sent) == 1 and ids == want, f'{ids} for {want}')
+    # a row whose page is demo's: the page is named for demo and q2ui ends with the code that says so
+    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'tick 1', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
+    asked = (d/'ask').read_text() if (d/'ask').exists() else ''
+    good &= check('Centre on Radio asks demo for its page and ends with code 3', asked == 'tuner_page\n' and sent == [], repr(asked))
+    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick 4', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
+    asked = (d/'ask').read_text() if (d/'ask').exists() else ''
+    good &= check("and Ratings, in the Library, for demo's Ratings", asked == 'ratings_page\n', repr(asked))
     # the last row leaves q2ui for demo's menus: the program ends, with the code of a plain end
     trace, _, _ = script(binary, work, 60, ['rest', 'tick 9', 'rest', 'key centre', 'run 100', 'tick -1', 'run 100'], *home, code=0)
-    good &= check('Centre on Old Menus ends q2ui', trace[-1]['sel'] == 1, str(trace[-1]['sel']))
+    good &= check('Centre on Old Menus ends q2ui', trace[-1]['sel'] == 6, str(trace[-1]['sel']))
     return good
 
 
@@ -451,6 +502,48 @@ def routes(binary, work):
     return good
 
 
+def status(binary, work):
+    """The status row's glyphs (ui/status.c): the battery by its level and its cable, the play state, Wi-Fi's fan."""
+    good = True
+
+    def row(level=None, state='Discharging', wifi=None, now=None):
+        d = pathlib.Path(tempfile.mkdtemp(dir=work))
+        if level is not None:
+            (d/'battery').mkdir()
+            (d/'battery/capacity').write_text(f'{level}\n')
+            (d/'battery/status').write_text(state + '\n')
+        if wifi is not None:
+            (d/'operstate').write_text('up\n')
+            (d/'wireless').write_text(f'Inter-| sta-|\n face | tus |\n wlan0: 0000   {wifi}.  -50.  -256\n')
+        _, pics, _ = script(binary, work, 5, ['rest', 'shot @row.ppm'], '--power', d, '--wifi', d/'operstate', '--wireless', d/'wireless', now=now)
+        return pics['row']
+    WHITE, GREEN, RED = (255, 255, 255), (0x34, 0xc7, 0x59), (0xff, 0x45, 0x3a)
+    none, half = row(), row(50)
+    lit = [x for x in range(280, 313) if half.at(x, 22) == WHITE]
+    good &= check('with no battery to read, nothing stands at the right of the row', all(none.at(x, 22) == (0, 0, 0) for x in range(230, 320)))
+    good &= check("half a charge fills the battery's left half in the text's ink", lit and min(lit) < 292 and 296 < max(lit) < 302, str(lit))
+    good &= check('under a fifth it is red, and on a cable green',
+                  any(row(12).at(x, 22) == RED for x in range(284, 292)) and any(row(60, 'Charging').at(x, 22) == GREEN for x in range(284, 296)))
+    playing, paused = row(50, now=NOW), row(50, now=NOW.replace('state=1', 'state=2'))
+    box = lambda p: [(x, y) for y in range(16, 29) for x in range(266, 281) if p.at(x, y) == WHITE]  # noqa: E731
+    good &= check('a song playing puts three bars left of the battery, a paused one two wider bars, nothing stopped',
+                  len({x for x, _ in box(playing)}) == 6 and len({x for x, _ in box(paused)}) == 6 and box(playing) != box(paused) and not box(half),
+                  f'{sorted({x for x, _ in box(playing)})} {sorted({x for x, _ in box(paused)})}')
+    # the volume changed from elsewhere (a side button): its level shows in the row for a moment, on a list
+    d = pathlib.Path(tempfile.mkdtemp(dir=work))
+    (d/'louder').write_text(NOW.replace('volume=40', 'volume=80'))
+    _, pics, _ = script(binary, work, 5, ['rest', 'shot @before.ppm', f'plays {d}/louder', 'run 200', 'shot @shown.ppm', 'run 2000', 'shot @after.ppm'], now=NOW)
+    bar = lambda p: [x for x in range(150, 226) if p.at(x, 23) == WHITE]  # noqa: E731
+    good &= check('a volume change shows its level in the status row, four fifths of the track, and then goes',
+                  not bar(pics['before']) and 55 <= len(bar(pics['shown'])) <= 64 and not bar(pics['after']),
+                  f"{len(bar(pics['before']))} {len(bar(pics['shown']))} {len(bar(pics['after']))}")
+    strong, weak = row(50, wifi=60), row(50, wifi=10)
+    fan = lambda p: sum(1 for y in range(16, 29) for x in range(250, 281) if p.at(x, y) == WHITE)  # noqa: E731
+    good &= check("Wi-Fi's fan is lit by its signal: all of it strong, its dot alone weak, none when not connected",
+                  fan(strong) > fan(weak) * 2 > 0 and fan(half) == 0, f'{fan(strong)} {fan(weak)} {fan(half)}')
+    return good
+
+
 def panel(binary, work):
     """The panel told to take 24 bits a pixel (ui/panel.c), against a file standing in for the DSI host's registers:
     sent only to a link that reads as the Q2's, only when its FIFOs have room, and never with --panel-mode keep."""
@@ -500,6 +593,38 @@ def reload(binary, work):
     r.proc.terminate()
     r.proc.wait(timeout=5)
     os.close(r.queue)
+    return good
+
+
+def swap(binary, work):
+    """A newer program put at q2ui's path is what runs after SIGHUP: the path is run again, not the file the process
+    was started from (a `vamp ui-push` mounts the new one there)."""
+    d = folder(work, 5)
+    path = d/'q2ui'
+    shutil.copy(binary, path)
+    (d/'input').mkdir()
+    for k in (1, 3):
+        os.mkfifo(d/'input'/f'event{k}')
+    proc = subprocess.Popen(base_args(path, d) + ['--input', d/'input'])
+    for _ in range(50):  # until it has drawn and come to rest: its loop is where the signal is acted on
+        if (d/'stats.json').exists():
+            break
+        time.sleep(0.1)
+    time.sleep(0.3)
+    stand_in = d/'q2ui.new'  # stands in for the newer q2ui: it says it ran, with what it was given, and stays
+    stand_in.write_text(f'#!/bin/sh\necho "$@" > {d}/ran\nexec sleep 20\n')
+    stand_in.chmod(0o755)
+    os.rename(stand_in, path)
+    proc.send_signal(signal.SIGHUP)
+    for _ in range(50):  # up to five seconds: this machine may be busy
+        if (d/'ran').exists() and (d/'ran').read_text():
+            break
+        time.sleep(0.1)
+    ran = (d/'ran').read_text() if (d/'ran').exists() else None
+    good = check('after SIGHUP the program now at the path runs, in the same process, with the same arguments',
+                 ran is not None and '--input' in ran and proc.poll() is None, f'ran: {ran!r}, exit {proc.poll()}')
+    proc.kill()
+    proc.wait(timeout=5)
     return good
 
 
@@ -614,8 +739,11 @@ def main():
             good &= live(binary, work)
             good &= routes(binary, work)
             good &= reload(binary, work)
+            good &= swap(binary, work)
         if not only or 'panel' in only:
             good &= panel(binary, work)
+        if not only or 'status' in only:
+            good &= status(binary, work)
     print('q2ui: ' + ('all checks passed' if good else 'FAILED'))
     return 0 if good else 1
 
