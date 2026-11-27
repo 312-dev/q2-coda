@@ -7,7 +7,9 @@ bwrap chroot of the image, with test/bluez_own.py's stand-in for the kernel's ma
 
 IMAGE is a vampos.squashfs with the Bluetooth packages, or a directory holding one unpacked. Only the five
 Bluetooth services run (from a copy of /etc/sv holding them alone): the rest of the boot is test/os_image.py's.
-Two things are changed in the test's copy only: D-Bus's system.conf loses its <user> (the sandbox maps one user,
+Before them the driver composes the accounts as rcS does (q2pkgd accounts: /etc/passwd and /etc/group are links
+into /run/vamp, so without it no user name resolves and dbus-daemon refuses its own policy). Two things are changed
+in the test's copy only: D-Bus's system.conf loses its <user> (the sandbox maps one user,
 so the bus cannot drop to dbus), and bluetoothd's Bluetooth sockets reach the stand-in through bluez_own.py's
 preloaded shim. Checked: the bus runs; bluetoothd owns org.bluez and gives the controller main.conf's name and
 class, with no GattManager1 or LEAdvertisingManager1 on hci0 ([GATT] Server = false); bluealsa owns org.bluealsa
@@ -47,6 +49,9 @@ def check(ok, what, detail=''):
 
 DRIVER = r'''
 mkdir -p /run/vamp /run/runit /emu-out
+# the accounts as rcS leaves them before runsvdir: /etc/passwd and /etc/group are links into /run/vamp, which
+# q2pkgd accounts composes from the image's .base files (and the packages' users: none here)
+/usr/bin/q2pkgd accounts || echo 'q2pkgd accounts failed' > /emu-out/accounts
 for s in /etc/sv-bt/*; do mkdir -p "/run/runit/supervise.${s##*/}"; rm -f "$s/supervise"; ln -s "/run/runit/supervise.${s##*/}" "$s/supervise"; done
 : > /run/vamp/boot.log
 runsvdir -P /etc/sv-bt > /emu-out/runsvdir.log 2>&1 &
