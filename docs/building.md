@@ -91,7 +91,7 @@ Software Update's download and the App Store take only what the q2-coda release 
 
 Development builds also start `q2remote`, a key-gated root shell with screenshots and input over Wi-Fi, for developers and agents; see [remote.md](remote.md).
 
-They also run `adbd`, Android's debug daemon, so `adb` gets a root shell, file copies and screenshots over the USB cable once the computer is authorized, from its own USB gadget that gives way to stock's USB storage and DAC; see [adb.md](adb.md). It is built by `tools/thirdparty.py` ([third-party.md](third-party.md#adbd)), and the manifest records its version, SHA-256 and size under `adbd`. Release builds have neither adbd, its gadget script nor the wrapped USB scripts, and `test/build.py --build` checks that.
+They also run `adbd`, Android's debug daemon, so `adb` or [`vamp`](adb.md#vamp) gets a root shell, file copies and screenshots over the USB cable once the computer is authorized, and over Wi-Fi once its key is trusted, from its own USB gadget that gives way to stock's USB storage and DAC; see [adb.md](adb.md). It is built by `tools/thirdparty.py` ([third-party.md](third-party.md#adbd)), and the manifest records its version, SHA-256 and size under `adbd`. Release builds have neither adbd, its gadget script nor the wrapped USB scripts, and `test/build.py --build` checks that.
 
 Off by default, `--dev --rotator-lazy-clock`: the rotator clock is held only from its first conversion. See [clock gating](clock-gating.md) for the exact module guard and tests.
 
@@ -176,7 +176,7 @@ python3 test/q2eq.py                       # the q2eq helper (adb.md#q2eq) again
 python3 test/q2update.py                   # the q2update helper (adb.md#installing-an-update-over-adb) under sh against a fake demo: the request, the wait, the words
 python3 test/q2_guest.py                   # Guest Play's q2-hotspot under sh, then q2-guest (internals.md#guest-play) on a private bus against stand-in BlueZ and bluealsa daemons: prompts, Trusted Guests, the relay's processes, the car's track record (host cc, dbus-daemon, dbus-python)
 python3 test/q2bip.py                      # q2-bip (internals.md#bluetooth-cover-art) built for this machine: a controller over a UNIX packet socket, a stand-in and a real ffmpeg (200 x 200, 4:2:2), the L2CAP socket where the kernel has Bluetooth
-python3 test/adb.py [BUILD]                # adbd under qemu-mipsel in bwrap (descriptors, authorization and the prompt's socket, shell, exec, push, pull) and q2adb-gadget on a stand-in configfs (adb.md)
+python3 test/adb.py [BUILD]                # adbd under qemu-mipsel in bwrap (descriptors, authorization and the prompt's socket, shell, exec, push, pull; --tcp through vamp) and q2adb-gadget and q2adb-wifi on stand-ins (adb.md)
 python3 test/coda_rc_e2e.py --emu DIR [--build BUILD] [--shots DIR]  # coda-rc end to end over TCP against a q2-emu copy with CARREMOTE=1: pair, browse (album numbers, NOT_FOUND), play an album, State pushes, Pause and Play acked once played, Next, Previous, a cover (docs/remote-protocol.md)
 python3 test/coda_rc_e2e.py --pool BUILD     # the same on a pooled emulator it leases, Car Remote turned on for the lease, on that copy's own port (the gate's way)
 python3 test/subsonic_seam.py [--app DIR | --commit SHA] [--mips QEMU]  # the bundled Subsonic app, built here, against a fake server and the firmware's own C (Seam test); needs Go, ~/repos/q2-subsonic, unshare

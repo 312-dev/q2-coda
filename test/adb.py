@@ -11,7 +11,11 @@ key in the card's adb_keys authenticates, that its copy on /mnt/data serves whil
 the card's file does; shell:, exec: (byte for byte), sync: push and pull, and that the services the patch removes
 are refused. A key `adb keygen` makes is checked too when adb and openssl are installed. q2adb-gadget
 (patch/adb_gadget.sh) runs under the host's sh against a directory tree, with mount, umount, mountpoint and
-usleep stubbed: the gadget it makes, park, unpark, and that a parked gadget is never bound. Needs bwrap and a
+usleep stubbed: the gadget it makes, park, unpark, and that a parked gadget is never bound. adb over Wi-Fi: the
+same adbd with --tcp on a loopback port, driven by tools/vamp.py's client (authorization, no UI socket, the
+Smart Wi-Fi use file, exec:, q2remote's commands through vamp, push and pull, the 8-connection cap), and
+q2adb-wifi (patch/adb_wifi.sh) under the host's sh with stand-ins for adbd and q2adb-mdns; with BUILD, its
+q2adb-mdns too, found by vamp's browse. Needs bwrap and a
 qemu-mipsel (qemu-user) for adbd; unsquashfs with BUILD.
 """
 import base64, hashlib, os, pathlib, secrets, shutil, struct, subprocess, sys, tempfile, threading, time
@@ -488,6 +492,229 @@ def wrapper_checks():
             expect(f'storage_config.sh {args[0]}: {", then ".join(calls)}; stock\'s status kept', got == calls and r.returncode == 3, got)
 
 
+class TcpAdbd:
+    """`adbd --tcp PORT` under qemu-mipsel in bwrap, on the network this machine has (no USB stand-in), with
+    the card at /mnt/mmc, /mnt/data from data and /tmp from work/tmp."""
+    def __init__(self, qemu, adbd, work, card, data, port):
+        env = dict(os.environ)
+        preload = env.pop('LD_PRELOAD', None)
+        keep = ['--setenv', 'LD_PRELOAD', preload] if preload else []
+        mmc = ['--bind', str(card), '/mnt/mmc'] if card else ['--dir', '/mnt/mmc']
+        self.p = subprocess.Popen(['bwrap', '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/mnt',
+                                   *mmc, '--bind', str(data), '/mnt/data', '--bind', str(work/'tmp'), '/tmp', *keep,
+                                   '--die-with-parent', qemu[0], '-U', 'LD_PRELOAD', *qemu[1:], str(adbd), '--tcp', str(port)],
+                                  env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        import socket
+        end = time.monotonic() + 20
+        while time.monotonic() < end and self.p.poll() is None:
+            try:
+                socket.create_connection(('127.0.0.1', port), 1).close()
+                break
+            except OSError:
+                time.sleep(.1)
+        if self.p.poll() is not None:
+            raise RuntimeError(f'adbd --tcp ended at start ({self.p.returncode})')
+
+    def stop(self):
+        self.p.kill()
+        self.p.wait()
+
+
+def free_port():
+    import socket
+    with socket.socket() as s:
+        s.bind(('127.0.0.1', 0))
+        return s.getsockname()[1]
+
+
+def tcp_checks(qemu, adbd):
+    """adb over Wi-Fi (docs/adb.md#adb-over-wi-fi): the MIPS adbd's TCP mode, driven by tools/vamp.py's client."""
+    import socket
+    import io
+    import vamp, q2remote
+    print('adbd --tcp, through vamp...')
+    for bad in ('0', '70000', 'x'):
+        r = subprocess.run([*qemu, str(adbd), '--tcp', bad], capture_output=True, timeout=30)
+        expect(f'adbd --tcp {bad} is refused (exit 2)', r.returncode == 2, r.returncode)
+    key, other = vamp.Key.generate(), vamp.Key.generate()
+    with tempfile.TemporaryDirectory(prefix='q2-adb-tcp-') as d:
+        work = pathlib.Path(d)
+        card, data = work/'card', work/'data'
+        for p in (card, data, work/'tmp/files'):
+            p.mkdir(parents=True)
+        (data/'adb_keys').write_text(key.public_line() + '\n')
+        port = free_port()
+        dev = TcpAdbd(qemu, adbd, work, card, data, port)
+        try:
+            target = {'name': '127.0.0.1', 'ip': '127.0.0.1', 'port': port, 'id': ''}
+            used = work/'tmp/q2remote.used'
+            expect('nothing marks a use before a computer is in', not used.exists())
+            q = vamp.Device(dict(target), key)
+            conn = q.connection()
+            expect('a trusted key connects over TCP (CNXN device::)', conn.device.startswith('device'), conn.device)
+            expect('the TCP adbd keeps 4096-byte messages', conn.max == 4096, conn.max)
+            expect('it opens no UI socket: the USB adbd\'s stays its own', not (work/'tmp/q2adb-ui').exists())
+            first = used.stat().st_ino if used.exists() else None
+            expect('a computer let in renames /tmp/q2remote.used into place (Smart Wi-Fi\'s hold)', first is not None
+                   and used.read_text().strip().isdigit())
+            expect('exec: over TCP', q.exec_out('echo q2') == b'q2\n')
+            expect('each service opened renames it again', used.exists() and used.stat().st_ino != first)
+            q2remote.TRANSPORT = q
+            try:
+                expect('q2remote.run over vamp: output and exit status', q2remote.run('echo out; exit 7') == (b'out\n', 7))
+                expect('q2remote.shell over vamp: stdin through a file', q2remote.shell('cat; echo .', b'from stdin\n') == b'from stdin\n.\n')
+                long = 'echo ' + 'y' * 6000
+                expect('a command past an OPEN\'s 4096 bytes runs whole', q.shell(long) == b'y' * 6000 + b'\n')
+                expect('the temporary files are gone', not list((work/'tmp').glob('vamp-*')))
+                out = io.BytesIO()
+                rc = vamp.run_streamed(q, 'printf "a\\nb"; exit 3', out)
+                expect('vamp shell COMMAND: streamed, its status kept, its status line gone', (rc, out.getvalue()) == (3, b'a\nb'),
+                       (rc, out.getvalue()))
+            finally:
+                q2remote.TRANSPORT = None
+            body = secrets.token_bytes(300000)
+            src = work/'src.bin'
+            src.write_bytes(body)
+            start = time.monotonic()
+            path = vamp.push(q, src, '/tmp/files/')
+            took = time.monotonic() - start
+            expect('vamp push: the file whole, renamed from .part', path == '/tmp/files/src.bin'
+                   and (work/'tmp/files/src.bin').read_bytes() == body and not (work/'tmp/files/src.bin.part').exists())
+            print(f'     (300 KB pushed in {took:.2f} s under qemu)')
+            vamp.pull(q, '/tmp/files/src.bin', work/'back.bin')
+            expect('vamp pull: byte for byte', (work/'back.bin').read_bytes() == body)
+            try:
+                q.call(lambda c: c.push([b'x'], '/proc/nope/x'))
+                failed = None
+            except vamp.AdbError as e:
+                failed = str(e)
+            expect('a refused push carries adbd\'s reason', failed is not None and 'failed' in failed, failed)
+            q.drop()
+            try:
+                vamp.Connection(vamp.TcpTransport('127.0.0.1', port), other, auth_wait=3)
+                refused = None
+            except vamp.Unauthorized as e:
+                refused = str(e)
+            expect('an unknown key is refused over TCP, with how to trust it', refused is not None and 'USB' in refused, refused)
+            expect('...and nothing on the Q2 was asked', not (work/'tmp/q2adb-ui').exists())
+            (card/'adb_keys').write_text(other.public_line() + '\n')
+            expect('the card\'s adb_keys lets a computer in over TCP too',
+                   vamp.Connection(vamp.TcpTransport('127.0.0.1', port), other).device.startswith('device'))
+            held = [socket.create_connection(('127.0.0.1', port), 5) for _ in range(8)]
+            time.sleep(1)
+            ninth = socket.create_connection(('127.0.0.1', port), 5)
+            ninth.settimeout(5)
+            try:
+                closed = ninth.recv(1) == b''
+            except OSError:
+                closed = True
+            expect('a ninth connection is closed at once (8 at most)', closed)
+            for s in held + [ninth]:
+                s.close()
+            ok, last = False, None
+            for _ in range(20):
+                time.sleep(.5)
+                try:
+                    ok = vamp.Connection(vamp.TcpTransport('127.0.0.1', port), key).device.startswith('device')
+                    break
+                except (OSError, vamp.AdbError) as e:
+                    last = e
+            expect('once they go, a computer gets in again (the count comes down)', ok, repr(last))
+            expect('adbd --tcp is still running at the end', dev.p.poll() is None)
+        finally:
+            dev.stop()
+
+
+def wifi_checks():
+    """q2adb-wifi (patch/adb_wifi.sh) under this machine's sh, with adbd and q2adb-mdns stand-ins that record
+    their arguments and run until killed."""
+    script = ROOT/'patch/adb_wifi.sh'
+    print('q2adb-wifi...')
+    with tempfile.TemporaryDirectory(prefix='q2-adb-wifi-') as d:
+        d = pathlib.Path(d)
+        for name in ('adbd', 'mdns'):
+            (d/name).write_text(f'#!/bin/sh\necho "$$ $*" >> {d}/{name}.log\nexec sleep 1000\n')
+            (d/name).chmod(0o755)
+        env = dict(os.environ, Q2ADB_KEYS=str(d/'adb_keys'), Q2ADB_CARD_KEYS=str(d/'card_keys'),
+                   Q2ADB_CONFIG=str(d/'config.ini'), Q2ADB_EVERY='0.2', Q2ADB_ADBD=str(d/'adbd'), Q2ADB_MDNS=str(d/'mdns'))
+        p = subprocess.Popen(['sh', str(script)], env=env)
+
+        def running(name):
+            log = d/f'{name}.log'
+            if not log.exists():
+                return []
+            return [line.split()[0] for line in log.read_text().splitlines()
+                    if os.path.exists(f'/proc/{line.split()[0]}') and
+                    open(f'/proc/{line.split()[0]}/cmdline', 'rb').read().startswith(b'sleep')]
+
+        def settle():
+            time.sleep(1)
+        try:
+            settle()
+            expect('no trusted key: no port open, nothing advertised', running('adbd') == [] and running('mdns') == [])
+            (d/'adb_keys').write_text('')
+            settle()
+            expect('an empty adb_keys trusts no one: still nothing', running('adbd') == [])
+            (d/'adb_keys').write_text('AAAA test@laptop\n')
+            settle()
+            args = (d/'adbd.log').read_text().split() if (d/'adbd.log').exists() else []
+            expect('a key trusted: adbd --tcp 5555 and q2adb-mdns --port 5555 start', len(running('adbd')) == 1 and
+                   len(running('mdns')) == 1 and args[1:] == ['--tcp', '5555'] and
+                   (d/'mdns.log').read_text().split()[1:] == ['--port', '5555'], args)
+            first = running('adbd')[0]
+            os.kill(int(first), 9)
+            settle()
+            expect('an adbd that ends is started again', len(running('adbd')) == 1 and running('adbd')[0] != first)
+            (d/'config.ini').write_text('[Q2POD]\nADBWIFI=0\n')
+            settle()
+            expect('ADBWIFI=0 (Developer access off): both stopped', running('adbd') == [] and running('mdns') == [])
+            (d/'config.ini').write_text('[Q2POD]\nADBWIFI=1\n')
+            (d/'adb_keys').unlink()
+            (d/'card_keys').write_text('AAAA test@laptop\n')
+            settle()
+            expect('the card\'s adb_keys alone counts too', len(running('adbd')) == 1)
+            p.terminate()
+            p.wait(5)
+            time.sleep(.3)
+            expect('SIGTERM stops q2adb-wifi and both it started', running('adbd') == [] and running('mdns') == [])
+        finally:
+            if p.poll() is None:
+                p.kill()
+            for name in ('adbd', 'mdns'):
+                for pid in running(name):
+                    os.kill(int(pid), 9)
+
+
+def mdns_checks(qemu, build):
+    """BUILD's q2adb-mdns under qemu-mipsel, found by vamp's browse by its Bluetooth name. On this machine's
+    first IPv4 interface, not loopback: qemu-user refuses IP_MULTICAST_IF, so its answers leave by the route."""
+    import vamp
+    out = subprocess.run(['ip', '-4', '-o', 'addr', 'show', 'scope', 'global'], capture_output=True, text=True).stdout.split()
+    if 'inet' not in out:
+        print('skip q2adb-mdns: no IPv4 interface but loopback')
+        return
+    ifname, addr = out[1], out[out.index('inet') + 1].split('/')[0]
+    with tempfile.TemporaryDirectory(prefix='q2-adb-mdns-') as d:
+        d = pathlib.Path(d)
+        (d/'mnt/data').mkdir(parents=True)
+        (d/'mnt/data/config.ini').write_text('[Q2POD]\nBTNAME=Desk Q2\n')
+        m = d/'q2adb-mdns'
+        m.write_bytes(subprocess.run(['unsquashfs', '-cat', str(build/'rootfs.squashfs'), 'usr/bin/q2adb-mdns'],
+                                     capture_output=True, check=True).stdout)
+        m.chmod(0o755)
+        p = subprocess.Popen([*qemu, str(m), '--if', ifname, '--root', str(d)], stderr=subprocess.DEVNULL)
+        try:
+            time.sleep(2)
+            found = vamp.browse(3.0, [addr])
+            ident = (d/'mnt/data/coda-rc/id').read_bytes().hex() if (d/'mnt/data/coda-rc/id').exists() else None
+            expect('q2adb-mdns: vamp finds the Q2 by its Bluetooth name, port 5555, its id Car Remote\'s',
+                   [(q['name'], q['ip'], q['port'], q['id']) for q in found] == [('Desk Q2', addr, 5555, ident)], found)
+        finally:
+            p.terminate()
+            p.wait(10)
+        expect('q2adb-mdns ends on SIGTERM (after its goodbye)', p.returncode == 0, p.returncode)
+
+
 def main(argv):
     args = list(argv)
     qemu = shutil.which('qemu-mipsel')
@@ -495,6 +722,7 @@ def main(argv):
         i = args.index('--qemu'); qemu = args[i + 1]; del args[i:i + 2]
     gadget_checks()
     wrapper_checks()
+    wifi_checks()
     if args:  # BUILD's adbd, with BUILD's libraries
         build = pathlib.Path(args[0])
         image = build/'rootfs.squashfs'
@@ -514,6 +742,9 @@ def main(argv):
         failures.append('qemu-mipsel')
     else:
         adbd_checks([qemu, '-L', str(libs)], adbd)
+        tcp_checks([qemu, '-L', str(libs)], adbd)
+        if args:
+            mdns_checks([qemu, '-L', str(libs)], build)
     print(f'{len(failures)} failed' if failures else 'all passed')
     return 1 if failures else 0
 

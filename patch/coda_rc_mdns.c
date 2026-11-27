@@ -17,6 +17,10 @@
  * API), and librespot on the card brings its own; each binds 5353 with SO_REUSEADDR, as this does, and Linux
  * hands every one of them each multicast packet.
  *
+ * The service type is _q2muse unless mdns_service names another: q2adb-mdns (patch/adb_mdns.c) runs this
+ * same responder for _adb._tcp, the Wi-Fi adbd's (docs/adb.md#adb-over-wi-fi), with the same host name
+ * and device id, so the two agree on the Q2's A record.
+ *
  * The packet half (mdns_query, mdns_reply) is pure and bounds-checked, for test/unit/test_coda_rc_mdns.py.
  * ponytail: no probing or conflict resolution (RFC 6762 section 9): two Q2s with the same Bluetooth name on
  * one network claim one instance name, and the phone lists one of them; renaming either fixes it. No answer
@@ -35,7 +39,8 @@
 
 enum { DNS_A = 1, DNS_PTR = 12, DNS_TXT = 16, DNS_SRV = 33, DNS_ANY = 255, DNS_IN = 1, DNS_FLUSH = 0x8000 };
 
-static const uint8_t SVC[] = "\x07_q2muse\x04_tcp\x05local";
+static uint8_t SVC[32] = "\x07_q2muse\x04_tcp\x05local"; /* mdns_service changes the first label */
+static const uint8_t TCP_LOCAL[] = "\x04_tcp\x05local";
 static const uint8_t ENUM_NAME[] = "\x09_services\x07_dns-sd\x04_udp\x05local";
 static const uint8_t LOCAL[] = "\x05local";
 
@@ -96,6 +101,16 @@ static int name_read(const uint8_t *p, size_t n, size_t *at, uint8_t *out) {
             return 1;
         }
     }
+}
+
+/* the service type's label, with its underscore ("_adb"): _<label>._tcp.local from now on; 0 when it does not
+ * fit, and the type is left as it was */
+int mdns_service(const char *label) {
+    uint8_t w[256];
+    size_t n = wire_join(w, label, TCP_LOCAL);
+    if (!n || n > sizeof SVC || label[0] != '_') return 0;
+    memcpy(SVC, w, n);
+    return 1;
 }
 
 /* ---- the packet half ---- */
