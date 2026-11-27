@@ -17,6 +17,9 @@
 #define BAR_Y 229
 #define BAR_W (SCREEN_W - 48)
 #define BAR_H 4
+#define VOL_INSET 24 /* patch/offsets.inc VOL_SPK_INSET, VOL_SPK_X, VOL_SPK_PX */
+#define VOL_SPK_X 8
+#define VOL_SPK 16
 #define TIMES_Y 240
 #define VOLUME_SHOW_US 1500000u
 /* a title too long for its column: at rest for MQ_REST_US, then slid left at MQ_SPEED until its end
@@ -73,11 +76,12 @@ static void n_event(void *st, const input_t *e) {
         ui_demo_page("playermore_page"); /* a dialog over demo's page under q2ui (patch/onlinematch.c) */
     } else if (e->type == IN_TICK) {
         char verb[24];
-        /* a tick down the wheel is quieter, as on a list it is further down */
-        int to = (s->volume < 0 ? now_get()->volume : s->volume) - e->value;
+        /* clockwise (a tick down a list) is louder, as on demo's Now Playing (patch/volume.c vol_next) */
+        int to = (s->volume < 0 ? now_get()->volume : s->volume) + e->value;
         to = to < 0 ? 0 : to > 100 ? 100 : to;
         snprintf(verb, sizeof verb, "volume %d", to);
         player_send(verb);
+        ui_click(0); /* each tick, as stock's volume clicks on every key */
         /* shown at once: the player's answer comes a moment later and says the same */
         s->volume = to, s->volume_at = ui_time();
         ui_mark((rect_t){ 0, BAR_Y - 6, SCREEN_W, 44 });
@@ -193,12 +197,16 @@ static void n_draw(void *st, rect_t r) {
     if (more && *n->title)
         image_draw(more, (rectf_t){ MORE_X - (float)more->w / 2, MORE_Y - (float)more->h / 2, (float)more->w, (float)more->h }, 0, 0, 256, -1);
     if (s->volume_at) {
-        /* the volume's level in the bar's place: a shorter track between two marks, the level in white */
-        float level = (float)s->volume / 100, x0 = BAR_X + 22, w = BAR_W - 44;
+        /* the volume's level in the bar's place, as demo's (patch/volume.c vol_paint): the track VOL_INSET in from
+         * each end, the level in white, and demo's quiet and loud speakers (tools/art.py vol_lo, vol_hi), VOL_SPK px,
+         * centred VOL_SPK_X in from each end of the bar */
+        float level = (float)s->volume / 100, x0 = BAR_X + VOL_INSET, w = BAR_W - 2 * VOL_INSET, cy = BAR_Y + BAR_H / 2.0f;
         fill_round((rectf_t){ x0, BAR_Y, w, BAR_H }, 2, 0, tok(TOK_TRACK), 1, 0);
         if (level > 0) fill_round((rectf_t){ x0, BAR_Y, BAR_H + (w - BAR_H) * level, BAR_H }, 2, 0, tok(TOK_PRIMARY), 1, 0);
-        fill_disc(BAR_X + 5, BAR_Y + 2, 3, tok(TOK_SECONDARY), 1);                 /* quiet */
-        fill_disc(BAR_X + BAR_W - 7, BAR_Y + 2, 5, tok(TOK_SECONDARY), 1);          /* loud */
+        const image_t *lo = icon(ui_light ? "vol_lo_l." : "vol_lo_d."), *hi = icon(ui_light ? "vol_hi_l." : "vol_hi_d.");
+        if (lo) image_draw(lo, (rectf_t){ BAR_X + VOL_SPK_X - VOL_SPK / 2, cy - VOL_SPK / 2, VOL_SPK, VOL_SPK }, 0, 0, 256, -1);
+        if (hi)
+            image_draw(hi, (rectf_t){ BAR_X + BAR_W - VOL_SPK_X - VOL_SPK / 2, cy - VOL_SPK / 2, VOL_SPK, VOL_SPK }, 0, 0, 256, -1);
         return;
     }
     /* the bar: its fill ends between pixels, so it creeps and never steps */

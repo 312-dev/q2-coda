@@ -103,7 +103,7 @@ static void parse(int argc, char **argv) {
         else if (!strcmp(a, "--cmdq"))
             player_queue = v, ++i;
         else if (!strcmp(a, "--ctl"))
-            player_ctl = atoi(v), ++i;
+            player_ctl = atoi(v), ui_clicker = player_click, ++i;
         else if (!strcmp(a, "--playlist"))
             player_list = v, ++i;
         else if (!strcmp(a, "--backlight"))

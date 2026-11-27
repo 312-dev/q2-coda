@@ -522,7 +522,11 @@ void list_event(ui_list *l, const input_t *e) {
     if (e->type == IN_TICK && l->grab >= 0) { /* a grabbed slider's: the selection stays */
         int step = wheel_accel(&l->accel, l, e->value, e->ms, 0);
         step = step < 1 ? 1 : step > SLIDER_STEPS ? SLIDER_STEPS : step;
-        if (l->src.adjust) l->src.adjust(l->src.ctx, l->grab, -e->value * step); /* down the wheel is less */
+        ui_row before = { 0 }, after = { 0 };
+        l->src.row(l->src.ctx, l->grab, &before);
+        if (l->src.adjust) l->src.adjust(l->src.ctx, l->grab, e->value * step); /* clockwise is more, as demo's sliders (patch/inline_slider.c) */
+        l->src.row(l->src.ctx, l->grab, &after);
+        if (after.level != before.level) ui_click(0); /* as demo's slider: only a change clicks */
         ui_mark(l->focus_was);
     } else if (e->type == IN_TICK) {
         int dir = e->value, step = wheel_accel(&l->accel, l, dir, e->ms, l->n), old = l->sel;
@@ -538,7 +542,7 @@ void list_event(ui_list *l, const input_t *e) {
         /* a tick throws the platter's lean the way it went, at a list's end too, where the
          * selection stays (docs/oled-design.md#selection-bar) */
         if (list_motion && !ui_reduce_motion) l->lean.v = (double)dir * KICK, kick(l);
-        if (sel != old) moved(l, old);
+        if (sel != old) moved(l, old), ui_click(0); /* at an end, where it stays, no click: as demo's lists */
     } else if (e->type == IN_TUG) {
         if (!list_motion || ui_reduce_motion) return;
         float a = clampf(fabsf(e->share), 0, 1);

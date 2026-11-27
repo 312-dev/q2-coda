@@ -803,25 +803,46 @@ int cc_key(void *win, unsigned key) {
  * Center's Brightness slider the backlight ("set bright 0..100"), its Wi-Fi page Wi-Fi ("set
  * wifi 0|1") and its Bluetooth page Bluetooth ("set bt 0|1", as stock's own switch row does it);
  * Display reads its settings back from config.ini itself (ui/config.c). */
+/* q2ui's Bluetooth flip that came while the stack was starting (bt_initstatus 1, about 3 s after it is
+ * turned on, when stock's switch does nothing): 1 off, 2 on, 0 none; the last one sent stands, and
+ * q2ui_cc_poll does it once the stack is up. */
+static unsigned char bt_queued __attribute__((section(".scratch")));
+#define BT_STARTING (I(bt_initstatus, 0) > 0) /* below 0 is stock's "abnormal" (BT_ABNORMAL): no start to wait for */
+
 unsigned q2ui_cc_state(char *b, unsigned room) {
     eq_state s;
     eq_load(&s);
+    /* btbusy: Bluetooth's stack is starting or a flip waits for it, so q2ui keeps showing its own flip */
     int n = tk_snprintf(b, room,
-                        "wifi=%d\nbton=%d\nairplay=%d\ncar=%d\nsmart=%d\neq=%d\nusb=%s\ncable=%d\nbright=%d\nvol=%d\nvolmax=%d\n",
-                        !!g_wififlag, !!g_bluetoothflag, !!g_airplayflag, !!coda_rc_enabled(), !!st.smart_wifi,
-                        s.mode != EQ_OFF, usb_ui_value(), usb_ui_cable(), (int)g_lightness, (int)g_volume, vol_cap());
+                        "wifi=%d\nbton=%d\nbtbusy=%d\nairplay=%d\ncar=%d\nsmart=%d\neq=%d\nusb=%s\ncable=%d\nbright=%d\nvol=%d\nvolmax=%d\n",
+                        !!g_wififlag, !!g_bluetoothflag, BT_STARTING || bt_queued, !!g_airplayflag, !!coda_rc_enabled(),
+                        !!st.smart_wifi, s.mode != EQ_OFF, usb_ui_value(), usb_ui_cable(), (int)g_lightness, (int)g_volume,
+                        vol_cap());
     return n < 0 ? 0 : (unsigned)n >= room ? room - 1 : (unsigned)n;
 }
-/* A switch of q2ui's set to on (1) or off: 0 when done or already so, -1 for a name it has not or
- * one it cannot set now. */
+/* q2ui_poll's, every pass while the pipe is open: a Bluetooth flip kept while the stack started, done
+ * once it is up (as q2ui_cc_set would), or dropped when Bluetooth already stands so. */
+void q2ui_cc_poll(void) {
+    if (!bt_queued || BT_STARTING) return;
+    int on = bt_queued == 2;
+    bt_queued = 0;
+    if (!g_bluetoothflag != !on && !I(bt_initstatus, 0)) switchBluetooth(g_bluetoothflag, 1);
+}
+/* A switch of q2ui's set to on (1) or off: 0 when done, already so or (Bluetooth while its stack
+ * starts) kept to be done, -1 for a name it has not or one it cannot set now. */
 int q2ui_cc_set(const char *name, int on) {
     eq_state s;
     if (!tk_strcmp(name, "wifi")) {
         wifi_flows_cancel_join(); /* as the circle: stock's switch ignores a join that is trying */
         if (!g_wififlag != !on) wifi_switch(1);
     } else if (!tk_strcmp(name, "bt")) { /* q2ui's Bluetooth page: as stock's switch row (0x4c4298, row 0) */
+        if (BT_STARTING) { /* stock's row only says it is busy: kept for q2ui_cc_poll */
+            bt_queued = (unsigned char)(on ? 2 : 1);
+            return 0;
+        }
+        bt_queued = 0;
         if (!g_bluetoothflag == !on) return 0;
-        if (I(bt_initstatus, 0)) return -1; /* the stack is starting: stock's row only says it is busy */
+        if (I(bt_initstatus, 0)) return -1; /* abnormal: stock's row does nothing either */
         switchBluetooth(g_bluetoothflag, 1); /* the other way, and saved */
     } else if (!tk_strcmp(name, "car")) {
         if (!coda_rc_enabled() != !on) coda_rc_toggle();

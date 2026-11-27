@@ -258,6 +258,11 @@ int ui_run(void);       /* the loop, until ui_quit; the exit code */
 void ui_on_rest(void (*fn)(void));       /* called once each time the loop comes to rest */
 void ui_on_stack(void (*fn)(void));      /* called when a page has opened or closed */
 void ui_on_hold(int key, void (*fn)(void)); /* a key held, on any page, is fn's and not the page's (Return: Control Center) */
+/* The key click (Key Tone): ui_click(0) for a wheel tick that moved something, (1) for a press. The toolkit clicks
+ * every Centre and Return press itself; a page clicks its own ticks. ui_clicker sounds it (0: silent): q2ui's is
+ * demo's click, down its pipe (ui/player.c player_click). */
+void ui_click(int button);
+extern void (*ui_clicker)(int button);
 void ui_watch(int fd, void (*fn)(void)); /* fn when fd is readable (a daemon's message); four at most */
 extern const char *ui_backlight;         /* the folder of backlights whose state says the screen is dark */
 /* One pass by hand, for the bench and a script: events, the step at the frame's time, the draw,
@@ -326,7 +331,7 @@ typedef struct ui_source {
     void (*chosen)(void *ctx, int i);           /* Centre */
     void (*held)(void *ctx, int i);             /* Centre held; 0: nothing */
     void (*focus)(void *ctx, int i);            /* the selection came to row i; 0: nothing */
-    /* A grabbed ROW_SLIDER row turned: steps up (+) or down (-), more a tick on a fast spin. The
+    /* A grabbed ROW_SLIDER row turned: steps up (+, clockwise) or down (-), more a tick on a fast spin. The
      * source sets its level and calls list_rows_changed. */
     void (*adjust)(void *ctx, int i, int steps);
     void *ctx;
@@ -428,6 +433,7 @@ int player_play(const int *ids, int n, int at, int shuffle); /* the list, starti
 int player_send(const char *verb);                           /* toggle, next, previous, ...; 0 sent */
 extern const char *player_queue, *player_list;               /* the FIFO and the list file (a test's are its own) */
 int player_set(const char *name, int value); /* a setting of demo's, down q2ui's own pipe; 0 sent */
+void player_click(int button);               /* demo's key click for a tick (0) or a press (1), down the same pipe */
 extern int player_ctl;                       /* that pipe's write end (--ctl FD), or -1 */
 
 /* ---- pages ---- */

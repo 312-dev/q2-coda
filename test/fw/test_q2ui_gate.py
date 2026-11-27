@@ -408,6 +408,39 @@ def test_q2uis_bluetooth_page_switches_bluetooth_as_stocks_row_does(fw):
     assert cc(b'bt', 1) == 0 and calls == [(1, 1), (0, 1)]
 
 
+def test_a_bluetooth_flip_while_its_stack_starts_is_queued_and_done_once_it_is_up(fw):
+    """Bluetooth turned on starts its stack for about 3 s (bt_initstatus 1, "bt stack status 1" in demo's log), in which
+    stock's switch does nothing. A "set bt" from q2ui then is kept, the last one winning, and done by q2ui_cc_poll once
+    the stack is up; demo says btbusy=1 meanwhile, so q2ui's switch keeps showing the flip."""
+    calls = []
+    fw.mock('switchBluetooth', lambda on, save, *_: calls.append((on, save)) or 0)
+    cc = fw.fn('q2ui_cc_set', C.c_int, C.c_char_p, C.c_int)
+    poll = fw.fn('q2ui_cc_poll', None)
+    state = fw.fn('q2ui_cc_state', C.c_uint, C.c_char_p, C.c_uint)
+    flag, init = fw.var('g_bluetoothflag', C.c_ubyte), fw.var('fw_ctx_bt_initstatus', C.c_int)
+
+    def told():
+        b = C.create_string_buffer(400)
+        state(b, 400)
+        return dict(line.split('=', 1) for line in b.value.decode().splitlines())
+    flag.value, init.value = 1, 1
+    assert cc(b'bt', 0) == 0 and calls == []
+    assert cc(b'bt', 1) == 0 and cc(b'bt', 0) == 0 and calls == []  # taps in a row: the last one stands
+    poll()
+    assert calls == [] and told().get('btbusy') == '1'
+    init.value = 0
+    poll()
+    assert calls == [(1, 1)]
+    flag.value = 0
+    poll()
+    assert calls == [(1, 1)] and told().get('btbusy') == '0'
+    flag.value, init.value = 0, 1
+    assert cc(b'bt', 0) == 0  # already as asked: nothing queued
+    init.value = 0
+    poll()
+    assert calls == [(1, 1)]
+
+
 class Piped(Gate):
     """The gate with q2ui's settings pipe: pipe2 answers READ and WRITE, and what q2ui wrote is read from READ."""
     READ, WRITE = 20, 21
@@ -558,3 +591,26 @@ def test_q2ui_is_told_abouts_versions(fw, mcl):
     g.poll()
     said = dict(line.split('=', 1) for line in files.files['/tmp/q2ui.status'].decode().splitlines())
     assert said['product'] == 'Vamp' and said['firmware'] == 'V1.36' and said['version'] and 'Muse' not in said['version']
+
+
+def test_q2uis_clicks_down_its_pipe_are_demos_key_tone_one_a_pass(fw):
+    """q2ui reads the wheel and the keys itself, so demo's own click (buzzeer_switch, hooked as ringnav_buzzer: Key
+    Tone, the Clicker's route) never runs for them: q2ui sends "click 0" for a wheel tick and "click 1" for a press,
+    and demo clicks as it would have, a press as a button's sound (clicker_kind). A fast spin's clicks that reach one
+    pass are one click, as the buzzer is busy for them anyway."""
+    kind = fw.var('clicker_kind', C.c_int)
+    clicks = []
+    fw.mock('buzzeer_switch', lambda on, *_: clicks.append((on, kind.value)) or 0)
+    g = Piped(fw)
+    g.poll()
+    g.sent = b'click 0\nclick 0\nclick 0\n'
+    g.poll()
+    assert clicks == [(1, 0)]
+    g.sent = b'click 1\n'
+    g.poll()
+    assert clicks == [(1, 0), (1, 2)] and kind.value == 0
+    g.sent = b'click 0\nclick 1\n'  # both in one pass: one of each
+    g.poll()
+    assert clicks[2:] == [(1, 0), (1, 2)]
+    g.poll()
+    assert len(clicks) == 4
