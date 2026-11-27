@@ -167,6 +167,34 @@ def now(root, wait=1.0):
     return dict(line.split('=', 1) for line in text.splitlines())
 
 
+def acks(root):
+    p = root/'tmp/coda-rc.ack'
+    return [tuple(map(int, l.split())) for l in p.read_text().splitlines()] if p.exists() else []
+
+
+def test_each_fifo_command_is_answered_in_the_ack_file_as_demo_s_shim_answers(run):
+    """coda_rc_shim.c cr_ack: "<seq> <code>" for a command and the three before it, newest first; 0 done, 1 not done.
+    coda-rc and q2-iap wait for their seq there (coda_rc.c ack_poll)"""
+    root, pl = run
+    (root/'tmp/coda-rc.list').write_text('1\n2\n')
+    fd = os.open(root/'tmp/coda-rc.cmdq', os.O_WRONLY | os.O_NONBLOCK)
+    os.write(fd, b'1342177281 play 0 0 2\n')  # q2-iap's numbers start at 0x51000000
+    os.close(fd)
+    pl.pump()
+    assert wait_for_value(lambda: acks(root), [(1342177281, 0)]), acks(root)
+    fd = os.open(root/'tmp/coda-rc.cmdq', os.O_WRONLY | os.O_NONBLOCK)
+    os.write(fd, b'70 bogus\n71 pause\n72 resume\n73 next\n')
+    os.close(fd)
+    assert wait_for_value(lambda: acks(root), [(73, 0), (72, 0), (71, 0), (70, 1)]), acks(root)
+
+
+def wait_for_value(get, want, s=5):
+    end = time.monotonic() + s
+    while time.monotonic() < end and get() != want:
+        time.sleep(0.05)
+    return get() == want
+
+
 def test_a_play_from_q2ui_starts_its_song_with_demo_s_fields(run):
     root, pl = run
     play_list(root, [1, 2, 3], 1)

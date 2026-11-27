@@ -1036,7 +1036,26 @@ static int command(const char *verb, const int *ids, int n_ids) {
     return -1;
 }
 
-/* The FIFO: "<seq> <verb>\n" lines (patch/coda_rc_cmdq.h). */
+/* The FIFO: "<seq> <verb>\n" lines (patch/coda_rc_cmdq.h). Each is answered in /tmp/coda-rc.ack as demo's shim answers
+ * it (coda_rc_shim.c cr_ack): a "<seq> <code>" line for it and the three before it, newest first, the file replaced
+ * whole, so the coda-rc daemon and q2-iap, which wait for their seq there (coda_rc.c ack_poll), each find theirs though
+ * they read it once for several. The code is 0 done, 1 not done. */
+#define ACKS 4 /* coda_rc_shim.c CR_ACKS */
+static const char *ack_rel = "/tmp/coda-rc.ack";
+static unsigned long acks[ACKS][2];
+static void ack(unsigned long seq, int code) {
+    char b[ACKS * 24], tmp[340];
+    int n = 0;
+    memmove(acks[1], acks[0], sizeof acks - sizeof acks[0]);
+    acks[0][0] = seq, acks[0][1] = (unsigned long)code;
+    for (int i = 0; i < ACKS && (i == 0 || acks[i][0]); ++i) n += snprintf(b + n, sizeof b - (size_t)n, "%lu %lu\n", acks[i][0], acks[i][1]);
+    snprintf(tmp, sizeof tmp, "%s.q2playd", path(ack_rel));
+    FILE *f = fopen(tmp, "w");
+    if (!f) return;
+    fwrite(b, 1, (size_t)n, f);
+    if (fclose(f) == 0) rename(tmp, path(ack_rel));
+}
+
 static char cq[2048];
 static size_t cq_n;
 static void cmdq_read(void) {
@@ -1047,7 +1066,9 @@ static void cmdq_read(void) {
     while ((nl = memchr(p, '\n', cq_n - (size_t)(p - cq)))) {
         *nl = 0;
         char *verb = strchr(p, ' ');
-        if (verb && command(verb + 1, 0, 0)) logf_("refused: %s", verb + 1);
+        int r = verb ? command(verb + 1, 0, 0) : -1;
+        if (verb && r) logf_("refused: %s", verb + 1);
+        if (verb) ack(strtoul(p, 0, 10), r ? 1 : 0);
         p = nl + 1;
     }
     cq_n -= (size_t)(p - cq);
