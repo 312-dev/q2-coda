@@ -31,7 +31,7 @@ Every card app folder `/mnt/mmc/.<id>` holding both `catalogue.tsv` and `credent
 
 ## The servers' playlists
 
-Each app's `p` rows (`p <pid> <name>`) are `serverpl` rows (`app`, `pid`, `name`), and its `i` rows (`i <pid> <sid> [card path]`) `serveritem` rows (`app`, `pid`, `pos`, `sid`, `path`), `pos` counting each playlist's items from 0 in the file's order. An item's `path` is a synced song's card file, which has no `s` row ([server-library](server-library.md)); empty, or off the card, it is NULL and the song is the app's `servertable` row of that `sid` (`servermeta` names it). A cut-short catalogue keeps none of its playlists. What shows them is `q2ui`'s; the payload's mirror of them into stock's playlists (`serverlists`) is not done here.
+Each app's `p` rows (`p <pid> <name>`) are `serverpl` rows (`app`, `pid`, `name`), and its `i` rows (`i <pid> <sid> [card path]`) `serveritem` rows (`app`, `pid`, `pos`, `sid`, `path`), `pos` counting each playlist's items from 0 in the file's order. An item's `path` is a synced song's card file, which has no `s` row ([server-library](server-library.md)); empty, or off the card, it is NULL and the song is the app's `servertable` row of that `sid` (`servermeta` names it). A cut-short catalogue keeps none of its playlists. What shows them is `q2ui`'s, and Car Remote's `coda-rc --library vampos` reads them as they are ([carrd](carrd.md#the-library)); the payload's mirror of them into stock's playlists (`serverlists`) is not done here.
 
 ## Offline copies
 

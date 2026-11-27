@@ -606,6 +606,57 @@ def test_vamp_os_s_server_songs_are_q2libd_s_catalogue_with_their_lengths(vampos
     assert vampos.browse('playlists')['total'] == 0, 'the playlists list still answers'
 
 
+def vamp_os_server_playlist(root):
+    """a card playlist in q2libd's library.db and a server playlist in its catalogue (docs/libd.md#the-servers-playlists):
+    a server song by its sid, a synced song by its card path, and a sid the catalogue does not have"""
+    vampos_catalogue(root)
+    db = sqlite3.connect(root / 'mnt/data/vamp/library.db')
+    db.executemany('insert into playlist values (?,?,?,?,?)', [(1, 'Road', '', '', 1), (101, '', '1.flac', '/mnt/mmc/a/1.flac', 1)])
+    db.commit()
+    db.close()
+    cat = sqlite3.connect(root / 'mnt/mmc/.vamp/catalogue.db')
+    cat.execute("insert into serverpl values ('subsonic', 'pl7', 'Gus Mix')")
+    cat.executemany('insert into serveritem values (?,?,?,?,?)', [
+        ('subsonic', 'pl7', 0, 'v2', None), ('subsonic', 'pl7', 1, 'x', '/mnt/mmc/b/3.flac'),
+        ('subsonic', 'pl7', 2, 'v9', None), ('subsonic', 'pl7', 3, 'v1', None)])
+    cat.commit()
+    cat.close()
+
+
+def test_vamp_os_s_server_playlists_are_listed_beside_the_card_s(vampos):
+    """docs/carrd.md#the-library: q2libd's serverpl after the card's playlists, each item its server song (its sid's
+    servermeta row) or its synced card file, in the server's order; an item the catalogue lacks left out"""
+    vamp_os_server_playlist(vampos.root)
+    listing = vampos.browse('playlists')
+    assert sorted(titles(listing)) == ['Gus Mix', 'Road'], titles(listing)
+    mix, = [i for i in listing['items'] if i['title'] == 'Gus Mix']
+    items = vampos.browse(mix['id'])
+    assert items['title'] == 'Gus Mix' and titles(items) == ['Hotel', 'Charlie', 'Golf'], (items.get('title'), titles(items))
+    assert [i['id'] for i in items['items']] == ['song:c1073741826', 'song:t3', 'song:c1073741825']
+
+
+def test_vamp_os_s_server_playlist_art_is_its_server_cover_once_there(vampos):
+    """as today's (test_a_server_playlist_s_art_is_its_server_cover): the app's covers/pl-<pid>.jpg, else the first
+    song's album's"""
+    vamp_os_server_playlist(vampos.root)
+    def art():
+        return {i['title']: i.get('art') for i in vampos.browse('playlists')['items']}['Gus Mix']
+    first = art()
+    assert first and not first.startswith('p'), first
+    collage = b'\xff\xd8' + bytes(range(256)) * 4 + b'\xff\xd9'
+    cover = vampos.root / 'mnt/mmc/.subsonic/covers/pl-pl7.jpg'
+    cover.parent.mkdir(parents=True)
+    cover.write_bytes(collage)
+    assert art() == 'ppl7'
+    t, m = vampos.ask(T['GET_COVER'], [(1, 'ppl7'), (2, 0), (3, 4096), (4, 96)])
+    assert t == T['COVER'] and client.one(m, 1) == len(collage) and client.one(m, 3) == collage
+
+
+def test_vamp_os_s_unknown_server_playlist_is_not_found(vampos):
+    vamp_os_server_playlist(vampos.root)
+    assert vampos.browse('pl:150') == 'NOT_FOUND'
+
+
 def test_vamp_os_s_streaming_song_is_its_server_song_in_q2libd_s_catalogue(vampos, lib):
     vampos_catalogue(vampos.root)
     lib.lib_stream_song.argtypes = [ctypes.c_char_p, ctypes.POINTER(Song)]

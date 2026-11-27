@@ -19,8 +19,8 @@
  * column, in seconds, and stock's playlist; no myfav (Favorites empty) and no durations file; the servers' songs in
  * q2libd's catalogue on the card, whose servertable has the length in time too and whose servermeta names a row by its
  * id, so a temporary view (vmeta) gives it today's shape (fileurl, app, sid, seconds). Stock's database.db and today's
- * Vamp's catalogue are not read, as Vamp OS leaves both alone; the servers' playlists (q2libd's serverpl and
- * serveritem, not stock's playlist table) are not offered yet. */
+ * Vamp's catalogue are not read, as Vamp OS leaves both alone; the servers' playlists are q2libd's serverpl and
+ * serveritem (VAMPOS_PLS), not stock's playlist table. */
 #define VAMPOS_DB "/mnt/data/vamp/library.db"
 #define VAMPOS_CAT "/mnt/mmc/.vamp/catalogue.db"
 #define VAMPOS_LIKES "/mnt/data/vamp/likes.db" /* q2playd's likes (docs/playd.md#ratings-and-likes): stock's myfav, its fileurl */
@@ -564,6 +564,18 @@ static const char *arg_ok(const char *a) {
 #define TAIL(bk, pos) ", " bk " bk, nt, ord, " pos " pos, nal, nar, naa, added, year, ak"
 #define NO_TAIL(bk, nt, pos, year) ", " bk " bk, " nt " nt, '' ord, " pos " pos, '' nal, '' nar, '' naa, 0 added, " year " year, '' ak"
 
+/* Vamp OS's server playlists (q2libd's serverpl and serveritem, docs/libd.md#the-servers-playlists), after the card's:
+ * each "pl:" 100 plus its serverpl rowid (a card playlist's id is at most 100), its art its server's cover once its app
+ * has it, else its first song's album's. An item is its synced card file (path) or its sid's server song (vmeta). */
+#define VAMPOS_STR_(x) #x
+#define VAMPOS_STR(x) VAMPOS_STR_(x)
+#define VAMPOS_ITEM_URL "coalesce(i.path, (select m.fileurl from temp.vmeta m where m.app = i.app and m.sid = i.sid))"
+#define VAMPOS_PLS                                                                                                   \
+    " union all select 'pl:'||(100+sp.rowid) c0, sp.name c1, '' c2, coalesce(plart(sp.app, sp.pid), (select s2.ak "  \
+    "from cat.serveritem i join s2 on s2.url = " VAMPOS_ITEM_URL " where i.app = sp.app and i.pid = sp.pid order by " \
+    "i.pos limit 1)) c3, " VAMPOS_STR(ICON_PLAYLISTS_) " c4, 1 c5, 0 c6, 0 c7, 0 c8" NO_TAIL("null", "norm(sp.name)", "100+sp.rowid", "0")          \
+    " from cat.serverpl sp"
+
 /* Fills l for a node's base id (no bucket). 0 when the id names no list. */
 static int list_of(const char *base, const char *sort, list_t *l) {
     char kind[24], cond[400];
@@ -616,14 +628,19 @@ static int list_of(const char *base, const char *sort, list_t *l) {
     } else if (!strcmp(kind, "pl")) {
         char *end;
         unsigned long n = strtoul(arg, &end, 10);
-        if (*end || !*arg || n > 100) return 0;
+        if (*end || !*arg || (n > 100 && !(cat_on && crc_vampos))) return 0;
         l->sorts = PL_SORTS;
         l->actions = 7;
         l->sort = pick(l->sorts, sort)->key;
         l->order = order_of("pl", l->sort, &l->bucketed, &l->years, &bk);
         /* a playlist row's place is its row id, so a song listed twice keeps both places */
-        snprintf(l->src, sizeof l->src, "select " TRACK_ITEM TAIL("%s", "pid") " from (select s2.*, p.id pid from "
-                 "main.playlist p join s2 on s2.url = p.fileurl where p.id > 100 and p.cd_num = %lu)", bk, n);
+        if (n > 100) /* a server's (Vamp OS): its items in the server's order */
+            snprintf(l->src, sizeof l->src, "select " TRACK_ITEM TAIL("%s", "pid") " from (select s2.*, i.pos pid from "
+                     "cat.serverpl sp join cat.serveritem i on i.app = sp.app and i.pid = sp.pid join s2 on s2.url = "
+                     VAMPOS_ITEM_URL " where sp.rowid = %lu)", bk, n - 100);
+        else
+            snprintf(l->src, sizeof l->src, "select " TRACK_ITEM TAIL("%s", "pid") " from (select s2.*, p.id pid from "
+                     "main.playlist p join s2 on s2.url = p.fileurl where p.id > 100 and p.cd_num = %lu)", bk, n);
     } else if (!strcmp(kind, "albums") || !strcmp(kind, "year") || !strcmp(kind, "genre") || !strcmp(kind, "artist")) {
         int all = kind[1] == 'l';
         l->sorts = all ? ALBUM_SORTS : 0;
@@ -664,9 +681,9 @@ static int list_of(const char *base, const char *sort, list_t *l) {
         snprintf(l->src, sizeof l->src, "select 'pl:'||h.id c0, h.name c1, '' c2, coalesce(%s(select s2.ak from "
                  "main.playlist p join s2 on s2.url = p.fileurl where p.id > 100 and p.cd_num = h.id order by p.id "
                  "limit 1), null) c3, %d c4, 1 c5, 0 c6, 0 c7, 0 c8" NO_TAIL("null", "norm(h.name)", "h.id", "0")
-                 " from main.playlist h where h.id <= 100",
+                 " from main.playlist h where h.id <= 100%s",
                  cat_on && !crc_vampos ? "(select plart(sl.app, sl.pid) from cat.serverlists sl where sl.list = h.id), " : "",
-                 ICON_PLAYLISTS_);
+                 ICON_PLAYLISTS_, cat_on && crc_vampos ? VAMPOS_PLS : "");
     } else if (!strcmp(kind, "dir")) {
         /* a card folder (q2bridge.py index_folders): its subfolders by name, then its songs by file name.
          * Server songs live in hidden folders, and hidden folders are left out. */
@@ -704,7 +721,9 @@ static void title_of(const char *kind, const char *arg, list_t *l) {
         snprintf(sql, sizeof sql, "select aartist from s2 where 'r'||hkey(naa) = '%s' limit 1", arg);
     else if (!strcmp(kind, "genre") || !strcmp(kind, "genre-tracks"))
         snprintf(sql, sizeof sql, "select genre from s2 where 'g'||hkey(ng) = '%s' limit 1", arg);
-    else if (!strcmp(kind, "pl")) snprintf(sql, sizeof sql, "select name from main.playlist where id = %d", atoi(arg));
+    else if (!strcmp(kind, "pl"))
+        snprintf(sql, sizeof sql, atoi(arg) > 100 ? "select name from cat.serverpl where rowid = %d - 100"
+                                                  : "select name from main.playlist where id = %d", atoi(arg));
     else if (!strcmp(kind, "year")) { snprintf(l->title, sizeof l->title, "%s", atoi(arg) ? arg : "Unknown year"); return; }
     else return;
     if (sqlite3_prepare_v2(db, sql, -1, &st, 0) != SQLITE_OK) return;
@@ -798,7 +817,8 @@ static int browse(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
     if (!total && (bucket || (colon && strcmp(base, "dir:")))) {
         int none = 1;
         if (!bucket && !strcmp(kind, "pl")) {
-            snprintf(sql, sizeof sql, "select count(*) from main.playlist where id = %d", atoi(colon + 1));
+            snprintf(sql, sizeof sql, atoi(colon + 1) > 100 ? "select count(*) from cat.serverpl where rowid = %d - 100"
+                                                            : "select count(*) from main.playlist where id = %d", atoi(colon + 1));
             none = count_of(sql) <= 0;
         }
         if (none) {
@@ -1390,7 +1410,8 @@ static int pl_cover_find(const char *pid, cover_t *c) {
     sqlite3_stmt *st;
     char app[16] = "";
     memset(c, 0, sizeof *c);
-    if (!cat_on || crc_vampos || sqlite3_prepare_v2(db, "select app from cat.serverlists where pid = ?1 limit 1", -1, &st, 0))
+    if (!cat_on || sqlite3_prepare_v2(db, crc_vampos ? "select app from cat.serverpl where pid = ?1 limit 1"
+                                                     : "select app from cat.serverlists where pid = ?1 limit 1", -1, &st, 0))
         return 0;
     sqlite3_bind_text(st, 1, pid, -1, SQLITE_TRANSIENT);
     if (sqlite3_step(st) == SQLITE_ROW) snprintf(app, sizeof app, "%s", sqlite3_column_text(st, 0));
