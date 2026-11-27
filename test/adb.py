@@ -728,6 +728,7 @@ def main(argv):
         image = build/'rootfs.squashfs'
         adbd = build/'adbd'
         adbd.write_bytes(subprocess.run(['unsquashfs', '-cat', str(image), 'usr/bin/adbd'], capture_output=True, check=True).stdout)
+        adbd.chmod(0o755)  # qemu-user's loader refuses a file without an execute bit, and says nothing
         libs = pathlib.Path.home()/'.cache/q2-adb-test'/hashlib.sha256(image.read_bytes()).hexdigest()[:16]
         if not (libs/'lib').is_dir():
             shutil.rmtree(libs, ignore_errors=True)
