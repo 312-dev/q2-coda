@@ -2,7 +2,6 @@
 own outside advanced play), Playing Next under its heading and Clear, a row's tap, the bump (a Play/Pause hold or a
 tap on the arrow), lifting a queued row with Centre held, and the rows following the queue as it plays."""
 import ctypes as C
-import mmap
 import pathlib
 import re
 import struct
@@ -10,7 +9,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, Deques, libc, stock_prop_str
+from conftest import O, Deques, libc, low_map, stock_prop_str
 from test_nav_hold import recs  # noqa: F401
 
 # navigation.h's: a handler's RET_STOP, and the travel a tap stays within (AWTK's drag threshold)
@@ -22,7 +21,6 @@ _PAGE = C.create_string_buffer(0x400)
 PAGE = C.addressof(_PAGE)
 EVT_CLICK, EVT_DESTROY, SEL, COUNT = O['EVT_CLICK'], O['EVT_DESTROY'], b'_ringnav_index', b'_ringnav_count'
 KEY_CENTER, KEY_NEXT, KEY_PREV, KEY_RETURN = O['KEY_CENTER'], O['KEY_NEXT'], O['KEY_PREV'], O['KEY_RETURN']
-MAP_32BIT = 0x40
 NAMES = [b'%02d Song.flac' % k for k in range(8)]
 
 
@@ -31,8 +29,7 @@ class Low:
     here reads 8, so a field reads whole only with an empty cell after it. A record keeps its file name (REC_NAME;
     REC_PATH's cell after it stays empty, so track_name shows the name, as for an untagged file) and its artist."""
     def __init__(self, size=1 << 16):
-        self.base = libc.mmap(None, size, 3, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_32BIT, -1, 0)
-        assert self.base and self.base + size < 1 << 32
+        self.base = low_map(size)
         self.at, self.size = self.base, size
 
     def take(self, data):
