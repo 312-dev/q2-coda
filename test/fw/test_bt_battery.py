@@ -161,10 +161,26 @@ def test_another_device_s_none_or_a_bad_level_is_none(fw, text):
     assert b.at(RETRY_MS) == -1 and b.at(500) == -1
 
 
-def test_the_run_under_sh(fw, tmp_path):
+
+# What each bluealsa answers to GetManagedObjects on /org/bluealsa, as dbus-send prints it: captured from stock's
+# 4.0.0 (Sampling) and Vamp's 5.0.0 (Rate) under qemu by test/bluealsa_own.py --capture (docs/bluealsa.md#the-callers)
+FIXTURES = pathlib.Path(__file__).resolve().parents[1] / 'bt-fixtures'
+
+
+def managed(daemon, *pcms):
+    """daemon's ('stock' or 'own') reply with one A2DP source PCM for each (dev, rate) of pcms, in that order"""
+    text = (FIXTURES / f'{daemon}-SBC.txt').read_text()
+    lines = text.splitlines(keepends=True)
+    head, body = lines[:2], ''.join(lines[2:-1])  # the reply's line and "array [", then its one PCM, then "]"
+    return ''.join(head) + ''.join(body.replace('02_00_00_00_00_01', dev).replace(' 48000\n', f' {rate}\n')
+                                   for dev, rate in pcms) + lines[-1]
+
+
+@pytest.mark.parametrize('daemon', ['stock', 'own'])
+def test_the_run_under_sh(fw, tmp_path, daemon):
     """The command, a stand-in dbus-send answering as BlueZ does: Percentage 80, the Class, the Alias, and bluealsa's
-    PCMs with this device's A2DP source at 96 kHz. It writes "MAC 80 96000 CLASS NAME"; a later run the level and
-    rate alone."""
+    PCMs (each daemon's own reply) with this device's A2DP source at 96 kHz. It writes "MAC 80 96000 CLASS NAME"; a
+    later run the level and rate alone."""
     b = Bt(fw)
     b.level()
     bin_ = tmp_path / 'bin'
@@ -172,20 +188,15 @@ def test_the_run_under_sh(fw, tmp_path):
     out = tmp_path / 'btbatt'
     (bin_ / 'dbus-send').write_text(
         '#!/bin/sh\n'
-        f'[ "$4" = /org/bluealsa ] && [ "$5" = org.bluealsa.Manager1.GetPCMs ] && cat {tmp_path}/pcms && exit 0\n'
+        f'[ "$4" = /org/bluealsa ] && [ "$5" = org.freedesktop.DBus.ObjectManager.GetManagedObjects ] && cat {tmp_path}/pcms && exit 0\n'
         f'[ "$4" = /org/bluez/hci0/dev_AA_BB_CC_DD_EE_0F ] || exit 1\n'
         'case "$7" in\n'
         '  string:Class) echo "   variant       uint32 2360324";;\n'
         '  string:Alias) echo \'   variant       string "Gray\'"\'"\'s \\"Buds\\""\';;\n'
         '  string:Percentage) echo "method return time=1 sender=:1.2"; echo "   variant       byte 80";;\n'
         'esac\n')
-    # bluealsa's GetPCMs: another device's PCM first (its Sampling 44100), then this one's A2DP source at 96 kHz
-    pcm = ('   dict entry(\n      object path "/org/bluealsa/hci0/dev_{}/a2dpsrc/sink"\n      array [\n'
-           '         dict entry(\n            string "Device"\n            variant object path "/org/bluez/hci0/dev_{}"\n'
-           '         )\n         dict entry(\n            string "Sampling"\n            variant uint32 {}\n         )\n'
-           '      ]\n   )\n')
-    (tmp_path / 'pcms').write_text('method return\n   array [\n' + pcm.format('11_22_33_44_55_66', '11_22_33_44_55_66', 44100)
-                                   + pcm.format('AA_BB_CC_DD_EE_0F', 'AA_BB_CC_DD_EE_0F', 96000) + '   ]\n')
+    # another device's PCM first, at 44100, then this one's A2DP source at 96 kHz
+    (tmp_path / 'pcms').write_text(managed(daemon, ('11_22_33_44_55_66', 44100), ('AA_BB_CC_DD_EE_0F', 96000)))
     (bin_ / 'dbus-send').chmod(0o755)
     env = {**os.environ, 'PATH': f'{bin_}:{os.environ["PATH"]}'}
     subprocess.run(['sh', '-c', b.commands[0].replace(FILE, str(out))], check=True, env=env)

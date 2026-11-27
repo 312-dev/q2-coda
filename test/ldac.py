@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Exercise the shipped LDAC encoder's intermediate rates and bluealsa's Auto dispatch."""
-import pathlib, subprocess, sys
+import json, pathlib, subprocess, sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'tools'))
-from build import machine, read, word
+from build import machine, read, stock_program, word
 from unicorn import UC_HOOK_CODE
 from unicorn.mips_const import *
 
@@ -35,7 +35,7 @@ for expected in (4, 3, 1, 0):
     assert call(encoder, 0x217c, handle, 1) == 0
     assert read(encoder, handle+0x58) == expected
 
-daemon = machine(image('usr/bin/bluealsa'), 0x2000000)
+daemon = machine(image(stock_program('usr/bin/bluealsa', json.loads((directory/'manifest.json').read_text()))), 0x2000000)
 # SetLDACQuality converts the wire values 0x15/16/17/18 to 0/1/2/3.
 for quality, eqmid, adaptive in ((0,0,0), (1,1,0), (2,2,0), (3,1,1)):
     word(daemon, 0x441a50, quality)

@@ -1,0 +1,312 @@
+--shanling: the D-Bus service shanling.bluealsa that the Shanling Q2's own UI (demo, through Shanling's
+libbtctl.so) calls and listens to, written anew in one file (src/shanling.c) from what the Q2's bluealsa 4.0.0
+does on the bus, as test/bluealsa_own.py --against-stock measures it (Vamp's docs/bluealsa.md, The
+compatibility service): its interface, StatusChange at a configuration and at a volume change with the same
+bytes, the quality calls' numbering, and /tmp/bt_startup. Off unless asked for, so a base without the Q2's
+UI leaves it out. Vamp's, not for upstream (bluez-alsa, MIT).
+
+diff --git a/src/Makefile.am b/src/Makefile.am
+index 8b68826..ff474fe 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -58,6 +58,7 @@ libbluealsad_la_SOURCES = \
+ 	rtp.c \
+ 	sco.c \
+ 	sco-cvsd.c \
++	shanling.c \
+ 	storage.c \
+ 	utils.c
+ 
+diff --git a/src/ba-config.h b/src/ba-config.h
+index c0a439f..92ae6c4 100644
+--- a/src/ba-config.h
++++ b/src/ba-config.h
+@@ -27,6 +27,9 @@
+ 
+ struct ba_config {
+ 
++	/* --shanling: the Shanling Q2's own D-Bus service beside ours (shanling.c) */
++	bool shanling;
++
+ 	/* set of enabled profiles */
+ 	struct {
+ 		bool a2dp_source;
+diff --git a/src/bluez.c b/src/bluez.c
+index aa55ad8..47fdbac 100644
+--- a/src/bluez.c
++++ b/src/bluez.c
+@@ -34,6 +34,7 @@
+ #include "a2dp.h"
+ #include "ba-adapter.h"
+ #include "ba-config.h"
++#include "shanling.h"
+ #include "ba-device.h"
+ #include "ba-transport.h"
+ #include "ba-transport-pcm.h"
+@@ -608,6 +609,9 @@ static void bluez_endpoint_set_configuration(GDBusMethodInvocation *inv, void *u
+ 
+ 	ba_transport_set_media_state(t, state);
+ 
++	if (config.shanling)
++		shanling_configured(t);
++
+ 	bluez_dbus_object_data_device_set(dbus_obj, d);
+ 	dbus_obj->connected = true;
+ 
+@@ -1716,6 +1720,8 @@ static void bluez_signal_transport_changed(GDBusConnection *conn, const char *se
+ 				g_variant_validate_value(value, G_VARIANT_TYPE_UINT16, property)) {
+ 			/* received volume is in range [0, 127] */
+ 			uint16_t volume = t->media.volume = g_variant_get_uint16(value);
++			if (config.shanling)
++				shanling_volume(t, volume);
+ 			if (t->profile & BA_TRANSPORT_PROFILE_A2DP_SOURCE &&
+ 					t->media.pcm.soft_volume)
+ 				debug("Skipping A2DP volume update: %u", volume);
+diff --git a/src/main.c b/src/main.c
+index 9062fd4..36e3622 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -42,6 +42,7 @@
+ #include "a2dp-sbc.h"
+ #include "audio.h"
+ #include "ba-config.h"
++#include "shanling.h"
+ #include "bluealsa-dbus.h"
+ #include "bluealsa-iface.h"
+ #include "bluez.h"
+@@ -218,6 +219,7 @@ int main(int argc, char **argv) {
+ 		{ "midi-adv-name", required_argument, NULL, 811 },
+ #endif
+ 		{ "xapl-resp-name", required_argument, NULL, 16 },
++		{ "shanling", no_argument, NULL, 900 },
+ 		{ 0, 0, 0, 0 },
+ 	};
+ 
+@@ -374,6 +376,8 @@ int main(int argc, char **argv) {
+ #endif
+ 					"\nHFP/HSP options:\n"
+ 					"      --xapl-resp-name=NAME\tset product name for Apple extension; default: %s\n"
++					"\nShanling Q2:\n"
++					"      --shanling\t\tserve the Q2's own D-Bus service, shanling.bluealsa\n"
+ 					"\nAvailable BT profiles:\n"
+ 					"  - a2dp-source\tAdvanced Audio Source (v1.4)\n"
+ 					"  - a2dp-sink\tAdvanced Audio Sink (v1.4)\n"
+@@ -749,6 +753,10 @@ int main(int argc, char **argv) {
+ 			config.hfp.xapl_product_name = optarg;
+ 			break;
+ 
++		case 900 /* --shanling */ :
++			config.shanling = true;
++			break;
++
+ 		default:
+ 			fprintf(stderr, "Try '%s --help' for more information.\n", argv[0]);
+ 			return EXIT_FAILURE;
+@@ -822,6 +830,9 @@ int main(int argc, char **argv) {
+ 	g_unix_signal_add(SIGINT, main_loop_shutdown_handler, loop);
+ 	g_unix_signal_add(SIGTERM, main_loop_shutdown_handler, loop);
+ 
++	if (config.shanling && shanling_init(config.dbus) == -1)
++		return EXIT_FAILURE;
++
+ 	/* Register well-known service name. */
+ 	g_bus_own_name_on_connection(config.dbus,
+ 			dbus_service, G_BUS_NAME_OWNER_FLAGS_DO_NOT_QUEUE,
+diff --git a/src/shanling.c b/src/shanling.c
+new file mode 100644
+index 0000000..207dd45
+--- /dev/null
++++ b/src/shanling.c
+@@ -0,0 +1,151 @@
++/*
++ * BlueALSA - shanling.c (Vamp)
++ * SPDX-License-Identifier: MIT
++ *
++ * --shanling: the D-Bus service shanling.bluealsa, at /shanling/bluealsa, which the Shanling Q2's own UI (demo,
++ * through Shanling's libbtctl.so) calls and listens to. Written anew from what the Q2's bluealsa 4.0.0 does on
++ * the bus, as test/bluealsa_own.py measures it (Vamp's docs/bluealsa.md#the-compatibility-service): its
++ * interface as it describes itself; StatusChange(257, data) when a stream is configured, data naming the codec,
++ * and StatusChange(258, data) with code 10 and the level when the headset's absolute volume changes; the two
++ * quality calls taking effect at the next stream; SetUSBOutput and StopAlsaplay doing nothing; and the file
++ * /tmp/bt_startup once the name is owned. Nothing of Shanling's library is linked.
++ */
++
++#include "shanling.h"
++
++#include <fcntl.h>
++#include <string.h>
++#include <unistd.h>
++
++#include "ba-config.h"
++#include "ba-device.h"
++#include "codec-sbc.h"
++#include "shared/bluetooth-a2dp.h"
++#include "shared/log.h"
++
++#if ENABLE_LDAC
++# include <ldacBT.h>
++#endif
++
++#define SHANLING_NAME "shanling.bluealsa"
++#define SHANLING_PATH "/shanling/bluealsa"
++#define SHANLING_IFACE "shanling.bluealsa"
++#define SHANLING_STARTUP "/tmp/bt_startup"
++
++static const char introspection[] =
++	"<node><interface name='" SHANLING_IFACE "'>"
++	"<method name='SetLDACQuality'><arg type='i' name='quality' direction='in'/></method>"
++	"<method name='SetSBCQuality'><arg type='i' name='quality' direction='in'/></method>"
++	"<method name='SetUSBOutput'><arg type='b' name='enable' direction='in'/></method>"
++	"<method name='StopAlsaplay'/>"
++	"<signal name='SinkChange'><arg type='i' name='status'/><arg type='i' name='sinkfd'/></signal>"
++	"<signal name='StatusChange'><arg type='i' name='event'/><arg type='ay' name='data'/></signal>"
++	"</interface></node>";
++
++static GDBusConnection *shanling_conn;
++
++void shanling_sbc_quality(int32_t quality) {
++	/* the Q2's: 0 low, 1 medium (its default), 2 and above high (measured with 2 and 3) */
++	config.sbc_quality = quality <= 0 ? SBC_QUALITY_LOW : quality == 1 ? SBC_QUALITY_MEDIUM : SBC_QUALITY_HIGH;
++	debug("Shanling SBC quality %d: %u", quality, config.sbc_quality);
++}
++
++void shanling_ldac_quality(int32_t quality) {
++#if ENABLE_LDAC
++	/* the Q2's: 21, 22 and 23 the encoder's high, standard and mobile quality, anything else adaptive */
++	config.ldac_abr = quality < 21 || quality > 23;
++	if (!config.ldac_abr)
++		config.ldac_eqmid = quality == 21 ? LDACBT_EQMID_HQ : quality == 22 ? LDACBT_EQMID_SQ : LDACBT_EQMID_MQ;
++	debug("Shanling LDAC quality %d: %s %u", quality, config.ldac_abr ? "adaptive from" : "fixed", config.ldac_eqmid);
++#else
++	(void)quality;
++#endif
++}
++
++static void shanling_call(GDBusConnection *conn, const char *sender, const char *path, const char *iface,
++		const char *method, GVariant *params, GDBusMethodInvocation *inv, void *userdata) {
++	(void)conn; (void)sender; (void)path; (void)iface; (void)userdata;
++	int32_t v = 0;
++	if (strcmp(method, "SetLDACQuality") == 0)
++		g_variant_get(params, "(i)", &v), shanling_ldac_quality(v);
++	else if (strcmp(method, "SetSBCQuality") == 0)
++		g_variant_get(params, "(i)", &v), shanling_sbc_quality(v);
++	/* SetUSBOutput and StopAlsaplay do nothing in the Q2's bluealsa either */
++	g_dbus_method_invocation_return_value(inv, NULL);
++}
++
++static void shanling_acquired(GDBusConnection *conn, const char *name, void *userdata) {
++	(void)conn; (void)name; (void)userdata;
++	int fd = open(SHANLING_STARTUP, O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
++	if (fd != -1)
++		close(fd);
++	debug("Acquired D-Bus service name: %s", SHANLING_NAME);
++}
++
++int shanling_init(GDBusConnection *conn) {
++	static const GDBusInterfaceVTable vtable = { .method_call = shanling_call };
++	GError *err = NULL;
++	GDBusNodeInfo *info = g_dbus_node_info_new_for_xml(introspection, &err);
++	if (info == NULL) {
++		error("Couldn't parse %s's interface: %s", SHANLING_NAME, err->message);
++		g_error_free(err);
++		return -1;
++	}
++	guint id = g_dbus_connection_register_object(conn, SHANLING_PATH, info->interfaces[0], &vtable,
++			NULL, NULL, &err);
++	g_dbus_node_info_unref(info);
++	if (id == 0) {
++		error("Couldn't export %s: %s", SHANLING_PATH, err->message);
++		g_error_free(err);
++		return -1;
++	}
++	shanling_conn = conn;
++	g_bus_own_name_on_connection(conn, SHANLING_NAME, G_BUS_NAME_OWNER_FLAGS_NONE,
++			shanling_acquired, NULL, NULL, NULL);
++	return 0;
++}
++
++int shanling_codec_code(uint32_t codec_id) {
++	switch (codec_id) {
++	case A2DP_CODEC_SBC:
++		return 1;
++	case A2DP_CODEC_MPEG24:
++		return 2;
++	case A2DP_CODEC_VENDOR_ID(APTX_VENDOR_ID, APTX_CODEC_ID):
++		return 3;
++	case A2DP_CODEC_VENDOR_ID(LDAC_VENDOR_ID, LDAC_CODEC_ID):
++		return 4;
++	case A2DP_CODEC_VENDOR_ID(APTX_HD_VENDOR_ID, APTX_HD_CODEC_ID):
++		return 13;
++	}
++	return 0;
++}
++
++void shanling_data(uint8_t data[14], int32_t code, const bdaddr_t *addr, int32_t value) {
++	/* little-endian, as the Q2's MIPS reads them; the address as bdaddr_t holds it, its last byte first. The Q2's
++	 * bluealsa leaves the value of a codec event as whatever was there: zero here. */
++	for (int i = 0; i < 4; i++) {
++		data[i] = (uint8_t)((uint32_t)code >> (8 * i));
++		data[10 + i] = (uint8_t)((uint32_t)value >> (8 * i));
++	}
++	memcpy(data + 4, addr->b, 6);
++}
++
++static void shanling_status(int32_t event, int32_t code, const bdaddr_t *addr, int32_t value) {
++	if (shanling_conn == NULL)
++		return;
++	uint8_t data[14];
++	shanling_data(data, code, addr, value);
++	g_dbus_connection_emit_signal(shanling_conn, NULL, SHANLING_PATH, SHANLING_IFACE, "StatusChange",
++			g_variant_new("(i@ay)", event, g_variant_new_fixed_array(G_VARIANT_TYPE_BYTE, data, 14, 1)), NULL);
++}
++
++void shanling_configured(const struct ba_transport *t) {
++	int code = shanling_codec_code(ba_transport_get_codec(t));
++	if (code != 0)
++		shanling_status(SHANLING_EVENT_CODEC, code, &t->d->addr, 0);
++}
++
++void shanling_volume(const struct ba_transport *t, uint16_t volume) {
++	shanling_status(SHANLING_EVENT_VALUE, SHANLING_CODE_VOLUME, &t->d->addr, volume);
++}
+diff --git a/src/shanling.h b/src/shanling.h
+new file mode 100644
+index 0000000..0d05bbc
+--- /dev/null
++++ b/src/shanling.h
+@@ -0,0 +1,35 @@
++/*
++ * BlueALSA - shanling.h (Vamp)
++ * SPDX-License-Identifier: MIT
++ *
++ * --shanling: the D-Bus service shanling.bluealsa which the Shanling Q2's own UI (demo, through libbtctl.so)
++ * calls and listens to, written anew from what that firmware's bluealsa does on the bus.
++ */
++
++#pragma once
++#ifndef BLUEALSA_SHANLING_H_
++#define BLUEALSA_SHANLING_H_
++
++#include <stdint.h>
++
++#include <gio/gio.h>
++
++#include "ba-transport.h"
++
++/* StatusChange's first argument, and the code in its data */
++#define SHANLING_EVENT_CODEC  257 /* a stream was configured: the code names the codec */
++#define SHANLING_EVENT_VALUE  258 /* a value changed: the code names which */
++#define SHANLING_CODE_VOLUME  10  /* the headset's absolute volume, 0 to 127 */
++
++int shanling_init(GDBusConnection *conn);
++/* the codec code StatusChange names a transport's codec by: 1 SBC, 2 AAC, 3 aptX, 4 LDAC, 13 aptX HD; 0 none */
++int shanling_codec_code(uint32_t codec_id);
++void shanling_configured(const struct ba_transport *t);
++void shanling_volume(const struct ba_transport *t, uint16_t volume);
++/* the 14 bytes of StatusChange's data: the code, the device's address and a value */
++void shanling_data(uint8_t data[14], int32_t code, const bdaddr_t *addr, int32_t value);
++/* SetSBCQuality's and SetLDACQuality's argument into the encoders' settings for the next stream */
++void shanling_sbc_quality(int32_t quality);
++void shanling_ldac_quality(int32_t quality);
++
++#endif

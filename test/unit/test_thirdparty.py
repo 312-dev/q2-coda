@@ -4,6 +4,7 @@ import ast
 import hashlib
 import io
 import json
+import os
 import pathlib
 import subprocess
 import tarfile
@@ -561,6 +562,127 @@ def test_adbd_is_one_program_against_glibc(tmp_path, env, calls, monkeypatch):
     assert (stage/'mincrypt.NOTICE').read_text() == 'bsd' and (stage/'copyright').read_text() == 'apache'
 
 
+# bluetoothd and the headers and stubs it is built against (docs/bluez.md#build)
+
+def test_a_stub_library_carries_the_soname_and_stocks_symbols(env, calls, tmp_path, monkeypatch):
+    monkeypatch.setattr(thirdparty, 'STUBS', 'libx.so.3\tfn\tFUNC\t8\nlibx.so.3\tobj\tOBJECT\t24\nliby.so\tother\tFUNC\t4\n')
+    thirdparty.stub_library(env, 'libx.so.3', tmp_path/'lib')
+    assert (tmp_path/'lib/libx.so.3.stub.c').read_text() == 'void fn(void) {}\nchar obj[24];\n'
+    assert calls == [([*env.cc.split(), '-shared', '-fPIC', '-Wl,-soname,libx.so.3', '-o', tmp_path/'lib/libx.so.3',
+                       tmp_path/'lib/libx.so.3.stub.c'], None, None, None)]
+    assert os.readlink(tmp_path/'lib/libx.so') == 'libx.so.3'
+    thirdparty.stub_library(env, 'liby.so', tmp_path/'lib')  # its own name already: no link
+    assert (tmp_path/'lib/liby.so.stub.c').read_text() == 'void other(void) {}\n' and not (tmp_path/'lib/liby.so').exists()
+
+
+def test_the_stub_table_names_glib_dbus_and_libbtctl_only():
+    rows = [r.split('\t') for r in thirdparty.STUBS.splitlines()]
+    assert {r[0] for r in rows} == {'libglib-2.0.so.0', 'libdbus-1.so.3', 'libbtctl.so'} and all(len(r) == 4 for r in rows)
+    assert {r[2] for r in rows} == {'FUNC', 'OBJECT'} and all(r[3].isdigit() for r in rows)
+    names = {r[1] for r in rows}
+    assert {'g_main_loop_run', 'g_key_file_load_from_file', 'dbus_connection_send_with_reply'} <= names
+
+
+def test_glib_is_headers_a_stub_and_a_pkg_config_file(env, calls, tmp_path):
+    src, stage = tmp_path/'src', tmp_path/'stage'
+    for d, names in (('glib', ('glib.h', 'glib-object.h', 'gmain.h', 'gmain.c')), ('glib/deprecated', ('gthread.h',)),
+                     ('gobject', ('gobject.h',))):
+        (src/d).mkdir(parents=True, exist_ok=True)
+        for n in names:
+            (src/d/n).write_text(n)
+    thirdparty.build_glib(src, stage, env, tmp_path/'log')
+    inc = stage/'usr/include/glib-2.0'
+    assert sorted(str(f.relative_to(inc)) for f in inc.rglob('*.[ch]')) == [
+        'glib-object.h', 'glib.h', 'glib/deprecated/gthread.h', 'glib/gmain.h', 'gobject/gobject.h']
+    assert (stage/'usr/lib/glib-2.0/include/glibconfig.h').read_text() == thirdparty.GLIBCONFIG
+    assert '#define GLIB_MINOR_VERSION 74' in thirdparty.GLIBCONFIG and 'G_BYTE_ORDER G_LITTLE_ENDIAN' in thirdparty.GLIBCONFIG
+    assert calls[0][0][-4:-2] == ['-Wl,-soname,libglib-2.0.so.0', '-o'] and len(calls) == 1
+    assert (stage/'usr/lib/pkgconfig/glib-2.0.pc').read_text() == (
+        f"prefix={stage}/usr\nName: GLib\nDescription: stock's GLib\nVersion: 2.74.4\nLibs: -L${{prefix}}/lib -lglib-2.0\n"
+        'Cflags: -I${prefix}/include/glib-2.0 -I${prefix}/lib/glib-2.0/include\n')
+    assert thirdparty.SOURCES['glib'][0] == '2.74.4'
+
+
+def test_dbus_is_headers_a_stub_and_a_pkg_config_file(env, calls, tmp_path):
+    src, stage = tmp_path/'src', tmp_path/'stage'
+    (src/'dbus').mkdir(parents=True)
+    (src/'dbus/dbus.h').write_text('h')
+    (src/'dbus/dbus-internal.c').write_text('c')
+    (src/'dbus/dbus-arch-deps.h.in').write_text(
+        '@DBUS_HAVE_INT64@\n@DBUS_INT64_TYPE@ @DBUS_INT64_CONSTANT@ @DBUS_UINT64_CONSTANT@ @DBUS_INT32_TYPE@ '
+        '@DBUS_INT16_TYPE@\n@DBUS_MAJOR_VERSION@.@DBUS_MINOR_VERSION@.@DBUS_MICRO_VERSION@ @DBUS_VERSION@\n')
+    thirdparty.build_dbus(src, stage, env, tmp_path/'log')
+    assert [f.name for f in (stage/'usr/include/dbus-1.0/dbus').iterdir()] == ['dbus.h']
+    assert (stage/'usr/lib/dbus-1.0/include/dbus/dbus-arch-deps.h').read_text() == (
+        '#define DBUS_HAVE_INT64 1\nlong long (val##LL) (val##ULL) int short\n1.12.28 1.12.28\n')
+    assert calls[0][0][-4:-2] == ['-Wl,-soname,libdbus-1.so.3', '-o'] and len(calls) == 1
+    assert (stage/'usr/lib/pkgconfig/dbus-1.pc').read_text() == (
+        f"prefix={stage}/usr\nName: dbus\nDescription: stock's D-Bus\nVersion: 1.12.28\nLibs: -L${{prefix}}/lib -ldbus-1\n"
+        'Cflags: -I${prefix}/include/dbus-1.0 -I${prefix}/lib/dbus-1.0/include\n')
+    assert thirdparty.SOURCES['dbus'][0] == '1.12.28'
+
+
+def bluez_tree(tmp_path, config):
+    src = tmp_path/'src'
+    (src/'src').mkdir(parents=True)
+    (src/'config.h').write_text(config)
+    for name, text in (('src/bluetoothd', 'elf'), ('src/main.conf', 'conf'), ('COPYING', 'gpl')):
+        (src/name).write_text(text)
+    return src
+
+
+def test_bluez_is_upstreams_daemon_on_the_q2s_store(env, calls, tmp_path, monkeypatch):
+    # a base other than stock's: Vamp's patch alone, then configure and make (docs/bluez.md#bases)
+    monkeypatch.setattr(thirdparty, 'BLUEZ_BASE', 'buildroot')
+    src = bluez_tree(tmp_path, '#define A 1\n#define STORAGEDIR "/var/lib/bluetooth"\n#define B 2\n')
+    stage, log = tmp_path/'stage', tmp_path/'log'
+    thirdparty.build_bluez(src, stage, env, log)
+    vars = dict(env.vars, CFLAGS='-O2 -pipe -fPIC', LDFLAGS=env.vars['LDFLAGS'] + ' -pie -Wl,-z,now')
+    assert calls == [(['patch', '-p1', '-i', 'vamp.patch'], src, None, log),
+                     (['./configure', '--host=mipsel-linux-gnu', '--prefix=/usr', *thirdparty.BLUEZ_OPTIONS], src, vars, log),
+                     (['make', '-j7'], src, vars, log)]
+    assert (src/'vamp.patch').read_text() == thirdparty.BLUEZ_VAMP_PATCH and not (src/'shanling.patch').exists()
+    assert (src/'config.h').read_text() == '#define A 1\n#define STORAGEDIR "/mnt/data/bluetooth"\n#define B 2\n'
+    assert [(stage/f).read_text() for f in ('usr/bin/bluetoothd', 'etc/bluetooth/main.conf', 'COPYING')] == ['elf', 'conf', 'gpl']
+    # stock's plugin set and no more: what a headset or a phone could reach stays what it was
+    off = {o[len('--disable-'):] for o in thirdparty.BLUEZ_OPTIONS if o.startswith('--disable-')}
+    assert {'hid', 'hog', 'network', 'obex', 'mesh', 'bap', 'midi', 'client', 'tools'} <= off and 'hfp' not in off
+    assert not {'a2dp', 'avrcp'} & off and thirdparty.BLUEZ_STORAGE == '/mnt/data/bluetooth'
+    assert thirdparty.SOURCES['bluez'][0] == '5.88' and thirdparty.BLUETOOTHD == 'usr/bin/bluetoothd'
+    assert thirdparty.RECIPES['bluez'] == (thirdparty.build_bluez, ['glib', 'dbus']) and 'bluez' not in thirdparty.INSTALL
+
+
+def test_bluez_for_the_stock_base_takes_shanlings_hooks_and_libbtctl(env, calls, tmp_path):
+    """Vamp's patch, then Shanling's (tools/bluez/shanling.patch), autoreconf for the sources and libraries it adds
+    to Makefile.am, a stub of each library stock's bluetoothd names, and the link told where they are."""
+    assert thirdparty.BLUEZ_BASE == 'stock'
+    src = bluez_tree(tmp_path, '#define STORAGEDIR "/var/lib/bluetooth"\n')
+    stage, log = tmp_path/'stage', tmp_path/'log'
+    thirdparty.build_bluez(src, stage, env, log)
+    stubs = src/'q2-stubs'
+    assert [c[0][:4] for c in calls[:3]] == [['patch', '-p1', '-i', 'vamp.patch'], ['patch', '-p1', '-i', 'shanling.patch'],
+                                              ['autoreconf', '-fi']]
+    assert (src/'shanling.patch').read_text() == thirdparty.BLUEZ_SHANLING_PATCH
+    linked = [c[0][c[0].index('-o') + 1] for c in calls if '-shared' in c[0]]
+    assert linked == [stubs/lib for lib in thirdparty.BLUEZ_SHANLING_STUBS]
+    configure = [c for c in calls if c[0][0] == './configure'][0]
+    assert configure[2]['LDFLAGS'].endswith(f' -pie -Wl,-z,now -L{stubs}')
+    # stock's bluetoothd's NEEDED, less what every build links (glib, dbus, libc's)
+    assert set(thirdparty.BLUEZ_SHANLING_STUBS) == {'libbtctl.so', 'libncurses.so.6', 'libgio-2.0.so.0', 'libgmodule-2.0.so.0',
+                                                    'libgobject-2.0.so.0', 'libpcre2-8.so.0', 'libffi.so.8', 'libgthread-2.0.so.0'}
+    stubbed = {row.split('\t')[1] for row in thirdparty.STUBS.splitlines() if row.startswith('libbtctl.so\t')}
+    assert {'bluez_main', 'bluez_play_info_signal', 'g_play_status', 'g_track_meta', 'g_notify_mutex', 'g_avrcp_event_fun',
+            'g_high_priority_lcodec', 'g_synclink_mode'} <= stubbed  # what shanling.patch calls and reads
+    assert 'coda-rc' not in thirdparty.BLUEZ_SHANLING_PATCH.split('diff --git', 1)[1]  # browsing stays out
+
+
+def test_bluez_stops_when_configure_names_no_store(env, calls, tmp_path):
+    src = bluez_tree(tmp_path, '#define A 1\n')
+    with pytest.raises(SystemExit, match='no STORAGEDIR'):
+        thirdparty.build_bluez(src, tmp_path/'stage', env, tmp_path/'log')
+    assert calls[-1][0][0] == './configure'  # configured, never compiled
+
+
 def test_the_adbd_patch_is_the_files_text():
     assert thirdparty.ADBD_PATCH == (ROOT/'tools/adbd.patch').read_text() and 'diff --git a/core/adbd/adb_auth_client.c' in thirdparty.ADBD_PATCH
 
@@ -984,8 +1106,11 @@ def test_replacements_strips_every_install_entry(tmp_path, monkeypatch):
                 for name, entries in thirdparty.INSTALL.items() for path, rel in entries.items()}
     assert files == {path: dst for path, (_, dst) in expected.items()} and sorted(stripped) == sorted(expected.values())
     assert files['usr/lib/libz.so.1.2.11'] == out/'thirdparty/usr/lib/libz.so.1.2.11'
-    # mbedtls and libnl among them; adbd is no replacement (a --dev build's program, docs/adb.md)
-    assert versions == {name: v for name, (v, _, _) in thirdparty.SOURCES.items() if name != 'adbd'}
+    # mbedtls and libnl among them; adbd is no replacement (a --dev build's program, docs/adb.md), nor are
+    # bluez and the glib and dbus headers it is built against (an --own-bluez build's, docs/bluez.md), nor the
+    # own bluealsa and what it is built from (an --own-bluealsa build's, docs/bluealsa.md#build)
+    beside = {'adbd', 'bluez', 'glib', 'dbus', 'bluealsa', 'stocksdk', 'sbc', 'freeaptx', 'ldac'}
+    assert versions == {name: v for name, (v, _, _) in thirdparty.SOURCES.items() if name not in beside}
 
 
 @pytest.fixture
@@ -1069,3 +1194,206 @@ def test_main_usage(argv, monkeypatch, capsys):
     monkeypatch.setattr(thirdparty, 'replacements', lambda out: pytest.fail(out))
     assert thirdparty.main(argv) == 2
     assert capsys.readouterr() == ('', thirdparty.__doc__ + '\n')
+
+
+# the own bluealsa and what it is built from (docs/bluealsa.md#build)
+def test_pkgconfig_names_the_stage(tmp_path):
+    thirdparty.pkgconfig(tmp_path, 'alsa', '1.1.6', '-L/x -lasound', '-I${prefix}/include', 'glib-2.0')
+    thirdparty.pkgconfig(tmp_path, 'sbc', '2.1', '-lsbc', '')  # into the directory made before
+    assert (tmp_path/'usr/lib/pkgconfig/alsa.pc').read_text() == (
+        f'prefix={tmp_path}/usr\nName: alsa\nDescription: alsa for the Q2\nVersion: 1.1.6\nRequires: glib-2.0\n'
+        'Libs: -L/x -lasound\nCflags: -I${prefix}/include\n')
+    assert 'Requires: \nLibs: -lsbc\n' in (tmp_path/'usr/lib/pkgconfig/sbc.pc').read_text()
+
+
+def test_copy_headers_takes_the_pattern_alone(tmp_path):
+    src = tmp_path/'src'
+    src.mkdir()
+    for n in ('a.h', 'gunixfd.h', 'a.c'):
+        (src/n).write_text(n)
+    thirdparty.copy_headers(src, tmp_path/'all/deep')
+    thirdparty.copy_headers(src, tmp_path/'unix', 'gunix*.h')
+    assert sorted(p.name for p in (tmp_path/'all/deep').iterdir()) == ['a.h', 'gunixfd.h']
+    assert [p.name for p in (tmp_path/'unix').iterdir()] == ['gunixfd.h']
+
+
+def test_meson_files_reads_a_list_and_what_is_added_to_it():
+    text = "gio_headers = files(\n  'a.h',\n  'b.h',\n)\nother = files('x.h')\ngio_headers += files('c.h')\n"
+    assert thirdparty.meson_files(text, 'gio_headers') == ['a.h', 'b.h', 'c.h']
+    assert thirdparty.meson_files(text, 'other') == ['x.h'] and thirdparty.meson_files(text, 'none') == []
+
+
+@pytest.fixture
+def sdk(tmp_path, monkeypatch):
+    """A stand-in GLib tree, the other libraries' archives and a stock rootfs, as build_stocksdk reads them."""
+    src = tmp_path/'work/src/glib-2.74.4'
+    for d in ('glib/deprecated', 'gobject', 'gio/gdbus-2.0/codegen', 'gmodule'):
+        (src/d).mkdir(parents=True)
+    for h in ('glib/glib.h', 'glib/glib-object.h', 'glib/glib-unix.h', 'glib/gunicode.h', 'glib/deprecated/gold.h',
+              'gobject/gobject.h', 'gio/gio.h', 'gio/gunixfdlist.h', 'gmodule/gmodule.h'):
+        (src/h).write_text(h)
+    (src/'gobject/glib-mkenums.in').write_text('#!/usr/bin/env @PYTHON@\n# @VERSION@\n')
+
+    def mkenums(argv, check, stdout):
+        # GLib's glib-mkenums, not run here: what it was asked for, so the test sees which headers each enum header is from
+        tool = pathlib.Path(argv[1])
+        assert check and stdout == subprocess.PIPE and tool.read_text() == '#!/usr/bin/env python3\n# 2.74.4\n'
+        return types.SimpleNamespace(stdout=(' '.join([tool.name, argv[2], *(pathlib.Path(a).name for a in argv[3:])]) + '\n').encode())
+    monkeypatch.setattr(thirdparty.subprocess, 'run', mkenums)
+    for t in ('gobject/glib-enumtypes.h.template', 'gio/gioenumtypes.h.template'):
+        (src/t).write_text('')
+    listed = [f'g{i}.h' for i in range(151)]
+    (src/'gio/meson.build').write_text('gio_headers = files(\n' + ''.join(f"  '{h}',\n" for h in listed) + ')\n'
+                                       "gdbus_headers = files('gdbus.h')\napplication_headers = files()\nsettings_headers = files('gsettings.h')\n")
+    for n in ('codegen_main.py', 'config.py.in', 'meson.build'):
+        (src/'gio/gdbus-2.0/codegen'/n).write_text(n)
+    (src/'gio/gdbus-2.0/codegen/utils.py').write_text(CODEGEN_UTILS)
+    members = {'dbus': [('dbus/dbus.h', b'dbus'), ('dbus/dbus-arch-deps.h.in', b'@DBUS_INT64_TYPE@ @DBUS_VERSION@ @DBUS_HAVE_INT64@')],
+               'alsa': [('include/asoundlib.h', b'asound'), ('include/sys.h', b'sys'), ('include/sound/asound.h', b'kernel')],
+               'bluez': [('lib/bluetooth.h', b'bt'), ('lib/hci.c', b'c')],
+               'fdk-aac': [('libSYS/include/FDK_audio.h', b'sys'), ('libAACenc/include/aacenc_lib.h', b'enc'),
+                           ('libAACdec/include/aacdecoder_lib.h', b'dec')]}
+    archives = {}
+    for name, (url, digest, top) in thirdparty.BLUEALSA_HEADERS.items():
+        archives[url] = tarball(tmp_path/f'{name}.tar.gz', [(f'{top}/{n}', data, 0) for n, data in members[name]])
+    monkeypatch.setattr(thirdparty, 'fetch', lambda url, digest, name: archives[url])
+    stock = tmp_path/'stockfs'
+    (stock/'usr/lib').mkdir(parents=True)
+    (stock/'usr/lib/libglib.so').write_bytes(b'glib')
+    monkeypatch.setattr(thirdparty, 'STOCKFS', stock)
+    monkeypatch.setattr(thirdparty, 'BLUEALSA_STOCK_LIBS', {'usr/lib/libglib.so': hashlib.sha256(b'glib').hexdigest()})
+    return types.SimpleNamespace(src=src, stock=stock, stage=tmp_path/'stage', listed=listed)
+
+
+# the part of GLib 2.74's gio/gdbus-2.0/codegen/utils.py build_stocksdk rewrites (distutils is gone from Python 3.12)
+CODEGEN_UTILS = '''import distutils.version
+
+
+def version_cmp_key(key):
+    v = key[0] or "0"
+    return (distutils.version.LooseVersion(v), key[1])
+'''
+
+
+def test_stocksdk_is_headers_tools_and_links_to_the_stock_libraries(sdk, env, tmp_path):
+    thirdparty.build_stocksdk(sdk.src, sdk.stage, env, tmp_path/'log')
+    usr = sdk.stage/'usr'
+    inc = usr/'include/glib-2.0'
+    for top in ('glib.h', 'glib-object.h', 'glib-unix.h', 'gmodule.h', 'glib/gunicode.h', 'glib/deprecated/gold.h',
+                'gobject/gobject.h', 'gio/gio.h', 'gio/gunixfdlist.h'):
+        assert (inc/top).is_file(), top
+    assert not (inc/'glib/glib.h').exists()  # moved up, as GLib installs it
+    assert [p.name for p in (usr/'include/gio-unix-2.0/gio').iterdir()] == ['gunixfdlist.h']
+    assert (usr/'lib/glib-2.0/include/glibconfig.h').read_text() == thirdparty.GLIBCONFIG
+    assert (inc/'gobject/glib-enumtypes.h').read_text() == 'glib-mkenums --template glib-enumtypes.h.template gunicode.h\n'
+    assert (inc/'gio/gioenumtypes.h').read_text().split() == ['glib-mkenums', '--template', 'gioenumtypes.h.template', *sdk.listed,
+                                                              'gdbus.h', 'gsettings.h']
+    codegen = usr/'share/glib-2.0/codegen'
+    assert sorted(p.name for p in codegen.iterdir()) == ['codegen_main.py', 'config.py', 'utils.py']  # no .in, no meson.build
+    assert 'VERSION = "2.74.4"' in (codegen/'config.py').read_text()
+    utils = (codegen/'utils.py').read_text()
+    assert 'distutils' not in utils
+    space = {}
+    exec(utils, space)  # numbers compare as numbers, as LooseVersion's: 2.9 before 2.10, "" as 0, before both
+    keys = [('2.10', 'a'), ('', 'b'), ('2.9', 'c'), ('2.9.1', 'd')]
+    assert [k[1] for k in sorted(keys, key=space['version_cmp_key'])] == ['b', 'c', 'd', 'a']
+    tool = usr/'bin/gdbus-codegen'
+    assert repr(str(codegen.parent)) in tool.read_text() and tool.stat().st_mode & 0o111
+    assert (usr/'include/dbus-1.0/dbus/dbus.h').read_text() == 'dbus'
+    assert (usr/'lib/dbus-1.0/include/dbus/dbus-arch-deps.h').read_text() == 'long long 1.12.28 #define DBUS_HAVE_INT64 1'
+    assert (usr/'include/alsa/asoundlib.h').read_text() == 'asound' and (usr/'include/alsa/sound/asound.h').read_text() == 'kernel'
+    assert (usr/'include/sys/asoundlib.h').read_text() == 'sys'
+    assert [p.name for p in (usr/'include/bluetooth').iterdir()] == ['bluetooth.h']
+    assert sorted(p.name for p in (usr/'include/fdk-aac').iterdir()) == ['FDK_audio.h', 'aacdecoder_lib.h', 'aacenc_lib.h']
+    pcs = {p.stem: p.read_text() for p in (usr/'lib/pkgconfig').iterdir()}
+    assert sorted(pcs) == ['alsa', 'bluez', 'dbus-1', 'fdk-aac', 'gio-2.0', 'gio-unix-2.0', 'glib-2.0', 'gobject-2.0']
+    for name, lib in (('alsa', 'asound'), ('bluez', 'bluetooth'), ('dbus-1', 'dbus-1'), ('fdk-aac', 'fdk-aac'),
+                      ('gio-2.0', 'gio-2.0'), ('glib-2.0', 'glib-2.0'), ('gobject-2.0', 'gobject-2.0')):
+        assert f'Libs: -L{sdk.stock}/usr/lib -l{lib}\n' in pcs[name], name
+    assert 'Requires: gio-2.0\nLibs: \n' in pcs['gio-unix-2.0'] and 'Requires: gobject-2.0\n' in pcs['gio-2.0']
+    assert (sdk.stage/'ldflags').read_text() == f'-Wl,-rpath-link,{sdk.stock}/usr/lib:{sdk.stock}/lib\n'
+
+
+def test_stocksdk_refuses_a_missing_or_another_stock_library(sdk, env, tmp_path):
+    (sdk.stock/'usr/lib/libglib.so').write_bytes(b'another build')
+    with pytest.raises(SystemExit, match="is not V1.36's"):
+        thirdparty.build_stocksdk(sdk.src, sdk.stage, env, tmp_path/'log')
+    (sdk.stock/'usr/lib/libglib.so').unlink()
+    with pytest.raises(SystemExit, match='no stock rootfs to link against'):
+        thirdparty.build_stocksdk(sdk.src, sdk.stage, env, tmp_path/'log')
+    assert not sdk.stage.exists()
+
+
+def test_stocksdk_refuses_a_glib_whose_header_list_it_cannot_read(sdk, env, tmp_path):
+    (sdk.src/'gio/meson.build').write_text("gio_headers = files('a.h')\n")
+    with pytest.raises(SystemExit, match='does not list its headers'):
+        thirdparty.build_stocksdk(sdk.src, sdk.stage, env, tmp_path/'log')
+
+
+def test_sbc_is_a_static_library(env, calls, tmp_path):
+    src, stage, log = tmp_path/'src', tmp_path/'stage', tmp_path/'log'
+    thirdparty.build_sbc(src, stage, env, log)
+    assert calls == [(['./configure', '--host=mipsel-linux-gnu', '--prefix=/usr', '--enable-static', '--disable-shared',
+                       '--with-pic', '--disable-tools', '--disable-tester'], src, env.vars, log),
+                     (['make', '-j7'], src, env.vars, log), (['make', 'install', f'DESTDIR={stage}'], src, env.vars, log)]
+    assert 'Libs: -L${prefix}/lib -lsbc\n' in (stage/'usr/lib/pkgconfig/sbc.pc').read_text()
+
+
+def test_freeaptx_is_one_object_in_an_archive(env, calls, tmp_path):
+    src, stage, log = tmp_path/'src', tmp_path/'stage', tmp_path/'log'
+    src.mkdir()
+    for n in ('freeaptx.h', 'COPYING'):
+        (src/n).write_text(n)
+    thirdparty.build_freeaptx(src, stage, env, log)
+    assert calls == [([*env.cc.split(), '-O3', '-fPIC', '-I.', '-c', 'freeaptx.c', '-o', 'freeaptx.o'], src, None, log),
+                     ([f'{GCC}ar', 'rcs', stage/'usr/lib/libfreeaptx.a', 'freeaptx.o'], src, None, log)]
+    assert (stage/'usr/include/freeaptx.h').read_text() == 'freeaptx.h' and (stage/'COPYING.freeaptx').read_text() == 'COPYING'
+    assert 'Libs: -L${prefix}/lib -lfreeaptx\n' in (stage/'usr/lib/pkgconfig/libfreeaptx.pc').read_text()
+
+
+def test_ldac_is_the_encoder_and_its_rate_control(env, calls, tmp_path):
+    src, stage, log = tmp_path/'src', tmp_path/'stage', tmp_path/'log'
+    lib = src/'libldac'
+    for h in ('inc/ldacBT.h', 'abr/inc/ldacBT_abr.h', 'inc/other.h', 'LICENSE', 'NOTICE'):
+        (lib/h).parent.mkdir(parents=True, exist_ok=True)
+        (lib/h).write_text(h)
+    thirdparty.build_ldac(src, stage, env, log)
+    cc = [*env.cc.split(), '-O2', '-fPIC', '-Iinc', '-Isrc', '-Iabr/inc', '-c']
+    assert calls == [([*cc, 'src/ldaclib.c', '-o', 'ldaclib.o'], lib, None, log), ([*cc, 'src/ldacBT.c', '-o', 'ldacBT.o'], lib, None, log),
+                     ([f'{GCC}ar', 'rcs', stage/'usr/lib/libldacBT_enc.a', 'ldaclib.o', 'ldacBT.o'], lib, None, log),
+                     ([*cc, 'abr/src/ldacBT_abr.c', '-o', 'ldacBT_abr.o'], lib, None, log),
+                     ([f'{GCC}ar', 'rcs', stage/'usr/lib/libldacBT_abr.a', 'ldacBT_abr.o'], lib, None, log)]
+    assert sorted(p.name for p in (stage/'usr/include/ldac').iterdir()) == ['ldacBT.h', 'ldacBT_abr.h']
+    assert (stage/'LICENSE.ldac').read_text() == 'LICENSE' and (stage/'NOTICE.ldac').read_text() == 'NOTICE'
+    pc = stage/'usr/lib/pkgconfig'
+    assert 'Libs: -L${prefix}/lib -lldacBT_enc -lm\n' in (pc/'ldacBT-enc.pc').read_text()
+    assert 'Requires: ldacBT-enc\nLibs: -L${prefix}/lib -lldacBT_abr\n' in (pc/'ldacBT-abr.pc').read_text()
+
+
+@pytest.mark.parametrize('ldflags', ['-Wl,-rpath-link,/stock/usr/lib\n', None])
+def test_bluealsa_is_patched_and_built_for_its_base(ldflags, calls, tmp_path, monkeypatch):
+    monkeypatch.setattr(thirdparty, 'toolchain', lambda: TC)
+    monkeypatch.setattr(thirdparty, 'JOBS', '7')
+    monkeypatch.setenv('PATH', '/bin')
+    base = tmp_path/'base'
+    base.mkdir()
+    if ldflags:
+        (base/'ldflags').write_text(ldflags)
+    env = thirdparty.Env({thirdparty.BLUEALSA_BASE: base, 'sbc': pathlib.Path('/dep/sbc')}, 1234)
+    src, stage, log = tmp_path/'src', tmp_path/'stage', tmp_path/'log'
+    src.mkdir()
+    stage.mkdir()
+    (src/'LICENSE').write_text('MIT')
+    thirdparty.build_bluealsa(src, stage, env, log)
+    v = dict(env.vars, PATH=f'{base}/usr/bin:/bin', LDFLAGS=f'{env.vars["LDFLAGS"]} {(ldflags or "").strip()}')
+    patches = list(thirdparty.BLUEALSA_PATCHES)
+    assert patches == ['alsa-1.1.6-ioplug-avail.patch', 'shanling.patch']  # in BLUEALSA_PATCHES's order
+    assert calls == [*((['patch', '-p1', '-i', n], src, None, log) for n in patches),
+                     (['autoreconf', '--install', '--force'], src, v, log),
+                     (['./configure', '--host=mipsel-linux-gnu', '--prefix=/usr', *thirdparty.BLUEALSA_OPTIONS], src, v, log),
+                     (['make', '-j7'], src, v, log), (['make', 'install', f'DESTDIR={stage}'], src, v, log)]
+    for n in patches:
+        assert (src/n).read_text() == (ROOT/'tools/bluealsa'/n).read_text() and '\n--- a/src/' in (src/n).read_text()
+    assert (stage/'LICENSE').read_text() == 'MIT'
+    assert {'--enable-aac', '--enable-aptx', '--enable-aptx-hd', '--with-libfreeaptx', '--enable-ldac'} <= set(thirdparty.BLUEALSA_OPTIONS)
+    assert thirdparty.RECIPES['bluealsa'] == (thirdparty.build_bluealsa, [thirdparty.BLUEALSA_BASE, 'sbc', 'freeaptx', 'ldac'])
