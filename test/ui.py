@@ -609,7 +609,8 @@ def now_cycle(binary, work, home):
     moving the place 5 s a tick (more on a fast spin) with a playing song following it at most every 200 ms; the next
     press seeks there and rings Shuffle; the wheel walks Shuffle, Repeat and the heart, staying at the ends; Centre
     steps the ringed one down the queue ("mode"); 3 s with no key or Return ends the cycle; a radio leaves only the
-    heart. Centre never plays or pauses: that is the Play/Pause key's."""
+    heart. Centre never plays or pauses: that is the Play/Pause key's. A second press within 250 ms of the one that
+    started the scrub is the double that turns the screen off, so presses meant as two are 300 ms apart."""
     good = True
     words = lambda sent: [line.split(' ', 1)[1] for line in sent]  # noqa: E731
     to_now = ['rest', 'key centre', 'rest']
@@ -635,18 +636,32 @@ def now_cycle(binary, work, home):
     for now, ticks, want in ((NOW.replace('id=5', 'id=5\nrepeat=2'), 1, 'mode -1 1'), (NOW.replace('id=5', 'id=5\nrepeat=1'), 1, 'mode -1 0'),
                              (NOW.replace('id=5', 'id=5\nshuffle=1'), 0, 'mode 0 -1'), (NOW.replace('id=5', 'id=5\nliked=0'), 2, 'like 5'),
                              (NOW.replace('id=5', 'id=5\nliked=1'), 2, 'like 5')):
-        _, _, _, (sent, _, _) = script(binary, work, 60, to_now + ['key centre', 'run 50', 'key centre', 'run 50'] +
+        _, _, _, (sent, _, _) = script(binary, work, 60, to_now + ['key centre', 'run 300', 'key centre', 'run 50'] +
                                        ['tick 1', 'run 50'] * ticks + ['key centre', 'run 50'], *home, now=now, queue=True)
         good &= check(f'Centre on the ring steps it: {want}', words(sent)[-1:] == [want], str(sent))
     trace, _, _, (sent, _, _) = script(binary, work, 60, to_now + ['key centre', 'run 3100'], *home, now=NOW, queue=True)
     good &= check('3 s with no key ends a scrub the wheel never moved, seeking nothing',
                   trace[-1]['scrub'] == 0 and trace[-1]['stage'] == 0 and sent == [], f'{trace[-1]} {sent}')
-    trace, _, _, _ = script(binary, work, 60, to_now + ['key centre', 'run 50', 'key centre', 'run 50', 'run 3100'], *home,
+    trace, _, _, _ = script(binary, work, 60, to_now + ['key centre', 'run 300', 'key centre', 'run 50', 'run 3100'], *home,
                             now=NOW, queue=True)
     good &= check('and a ring with no key goes after 3 s too', trace[-1]['stage'] == 0, str(trace[-1]))
-    trace, _, _, (sent, _, _) = script(binary, work, 60, to_now + ['key centre', 'run 50', 'key centre', 'run 50', 'tick -1',
+    trace, _, _, (sent, _, _) = script(binary, work, 60, to_now + ['key centre', 'run 300', 'key centre', 'run 50', 'tick -1',
                                                                    'run 50'], *home, now=NOW + 'radio=1\n', queue=True)
     good &= check('while a radio plays the ring stands on the heart alone', trace[-1]['stage'] == 3, str(trace[-1]))
+    # the screen off as demo's (np_centre): Centre held 400 ms (short of More's 600) with no scrub, or a second press within
+    # 250 ms of the release that started a scrub with the wheel still; neither seeks, both end the cycle
+    for name, keys, off, scrub in (('held 450 ms', ['down centre', 'run 450', 'up centre'], True, 0),
+                                   ('held 300 ms', ['down centre', 'run 300', 'up centre'], False, 1),
+                                   ('pressed twice 100 ms apart', ['key centre', 'run 100', 'key centre'], True, 0),
+                                   ('pressed twice 300 ms apart', ['key centre', 'run 300', 'key centre'], False, 0),
+                                   ('pressed twice, the wheel turned between', ['key centre', 'run 30', 'tick 1', 'key centre'], False, 0),
+                                   ('held 450 ms while scrubbing', ['key centre', 'run 300', 'tick 1', 'down centre', 'run 450', 'up centre'],
+                                    False, 0)):
+        trace, _, _, (sent, _, _), said = script(binary, work, 60, to_now + keys + ['run 50'], *home, now=NOW, queue=True, ctl=True)
+        rang = trace[-1]['stage'] != 0
+        good &= check(f"Now Playing's Centre {name}: " + ('the screen off, unseeked, the cycle ended' if off else 'no screen off'),
+                      (said == ['screenoff']) == off and (not off or ('seek' not in ' '.join(sent) and not rang)) and
+                      trace[-1]['scrub'] == scrub, f'{said} {sent} {trace[-1]}')
     _, pics, _ = script(binary, work, 60, to_now + ['key centre', 'run 50', 'tick 2', 'run 50', 'shot @scrub.ppm'], *home,
                         now=NOW, queue=True)[:3]
     # a radio plays: demo's pill, 92 x 34 in the accent between x 112 and 204 (patch/np_bar.c np_modes), grown in 200 ms

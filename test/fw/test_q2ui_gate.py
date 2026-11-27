@@ -639,3 +639,21 @@ def test_q2uis_wake_lights_the_dark_screen_as_a_press_would(fw):
     g.sent = b'wake up\nwak\n'
     g.poll()
     assert woke == [0]
+
+
+def test_q2uis_screenoff_turns_the_lit_screen_off_as_now_playings_short_hold_does(fw):
+    """q2ui's Now Playing reads Centre itself, so its short hold or double press sends "screenoff": demo replays a
+    Centre release to stock's on_wm_keyup_fun as its own Now Playing does (nav/now_playing.c np_single), only while
+    the screen is lit."""
+    lit = fw.var('g_backlight_status', C.c_ubyte)
+    g = Piped(fw)
+    g.poll()
+    lit.value = 1
+    g.sent = b'screenoff\n'
+    g.poll()
+    keys = [C.c_int.from_address(c[1][1] + O['EVENT_KEY']).value for c in fw.calls('on_wm_keyup_fun')]
+    assert keys == [O['KEY_CENTER']]  # the one key on_wm_keyup_fun reads
+    lit.value = 0
+    g.sent = b'screenoff\nscreenoff now\n'
+    g.poll()
+    assert len(fw.calls('on_wm_keyup_fun')) == 1

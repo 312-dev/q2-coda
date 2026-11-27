@@ -1070,6 +1070,7 @@ unsigned rate_song_key(void *r); /* a server song's offline copy: its row's */
 int rate_fav(void *r);           /* My Fav, a server song's offline copy by its row */
 int rate_now_set(int n);         /* n stars for the playing track; 1 kept */
 int rate_now(void);              /* the playing track's 0-5 stars, -1 when it can't be rated */
+void np_screen_off(void);        /* the screen off as Now Playing's short Centre hold turns it off (nav/now_playing.c) */
 int rate_now_liked(void);        /* the playing song's like: 1, 0, -1 when it has no heart here */
 int rate_now_like(void);         /* ... flipped with no page open: the new like, -1 none, -2 an app refused */
 int rate_saved(int k);

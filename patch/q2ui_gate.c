@@ -257,12 +257,14 @@ static void unescape(const char *s, char *out) {
  * and keys q2ui reads itself, at most one of each a pass (the buzzer is busy for a click's length
  * anyway), or its Wi-Fi page's "scan" or "join NAME" (wifi_flows.c), or its Bluetooth page's
  * "btscan", "btlink MAC" or "btforget MAC" (bt_ui.c), or "wake", a question of its notice socket's
- * lighting the dark screen as a press would (awake_screen; ui/notice.c); another verb, a MAC that is not one, or a line
+ * lighting the dark screen as a press would (awake_screen; ui/notice.c), or "screenoff", its Now Playing's
+ * short Centre hold or double press turning the lit screen off as demo's does (np_screen_off); another verb, a MAC that is not one, or a line
  * too long, is dropped. Read every pass while it runs and after it
  * ends, so a setting sent just before leaving for a page of demo's is not lost; at most CTL_READS
  * reads a pass, so a q2ui that writes without end cannot hold demo's loop (the rest waits in the pipe). */
 int q2ui_cc_set(const char *name, int on); /* control_center.c */
 void q2ui_cc_poll(void);
+void np_screen_off(void);  /* nav/now_playing.c */
 extern int clicker_kind;    /* clicker.c: navigation.h CLICK_KIND_*, 0 the wheel's */
 #define CLICK_BUTTON 2      /* CLICK_KIND_BUTTON */
 static void ctl(void) {
@@ -293,7 +295,10 @@ static void ctl(void) {
                 said(bt_q2ui_link(word2) ? "btlink refused," : "btlink", 0);
             else if (__isoc99_sscanf(qu.line + from, "btforget %17s", word2) == 1 && bt_mac_ok(word2))
                 said(bt_q2ui_forget(word2) ? "btforget refused," : "btforget", 0);
-            else if (!tk_strcmp(qu.line + from, "wake")) {
+            else if (!tk_strcmp(qu.line + from, "screenoff")) {
+                said("screenoff, lit", g_backlight_status);
+                np_screen_off();
+            } else if (!tk_strcmp(qu.line + from, "wake")) {
                 said("wake, dark", !g_backlight_status);
                 if (!g_backlight_status) awake_screen();
             }
