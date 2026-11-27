@@ -977,6 +977,81 @@ def test_a_cable_in_at_the_start_is_followed(binary, tree, tools):
         p.terminate()
         p.wait(5)
 
+# ---- a low battery (docs/sysd.md#a-low-battery) ----
+
+def batt(root, level=None, mv=None, cable=None):
+    if level is not None:
+        put(root, '/sys/devices/i2c-0/0-0062/cw2015_capacity', f'{level}\n')
+    if mv is not None:
+        put(root, '/sys/devices/i2c-0/0-0062/cw2015_voltage', f'{mv}\n')
+    if cable is not None:
+        put(root, '/sys/class/power_supply/ac/online', f'{cable}\n')
+
+
+def low_start(root, keys):
+    """19%: the screen's change reads it (else 30 s), and below 20% the battery is read each second from then"""
+    batt(root, 19, 3700)
+    press(keys)
+    press(keys)
+
+
+def test_under_16_percent_lights_the_screen_and_says_low_battery_once(run):
+    root, keys = run
+    ui, w = FakeUi(root), Watch(root)
+    low_start(root, keys)
+    press(keys)  # dark
+    assert read(root, '/sys/class/backlight/lcd/bl_power') == '4'
+    batt(root, 15)
+    assert until(lambda: 'lowbattery warn' in w.lines, 3), w.lines
+    assert until(lambda: 'toast Low%20Battery' in ui.lines, 2), ui.lines
+    assert read(root, '/sys/class/backlight/lcd/bl_power') == '0', "stock's awake_screen with the warning"
+    time.sleep(3)
+    assert w.lines.count('lowbattery warn') == 1, 'once a discharge'
+    batt(root, 17)
+    time.sleep(2)
+    batt(root, 15)
+    assert until(lambda: w.lines.count('lowbattery warn') == 2, 3), 'again once it has been 16% or more'
+    assert not (root/'powered-off').exists()
+
+
+@pytest.mark.parametrize('level, mv', [(19, 3400), (0, 3700)])
+def test_five_seconds_at_3400_mv_or_0_percent_power_off(run, level, mv):
+    root, keys = run
+    ui, w = FakeUi(root), Watch(root)
+    low_start(root, keys)
+    batt(root, level, mv)
+    time.sleep(3)
+    assert not (root/'powered-off').exists(), 'five readings first'
+    assert until(lambda: (root/'powered-off').exists(), 5), "check_lowbattery_state's fifth: the power off"
+    assert 'lowbattery off' in w.lines and 'toast Shutdown' in ui.lines, (w.lines, ui.lines)
+
+
+def test_a_cable_in_holds_the_low_battery_power_off(run):
+    root, keys = run
+    low_start(root, keys)
+    batt(root, 19, 3300, cable=1)
+    time.sleep(8)
+    assert not (root/'powered-off').exists()
+
+
+def test_a_good_reading_starts_the_count_again(run):
+    root, keys = run
+    low_start(root, keys)
+    for mv, secs in ((3300, 3), (3700, 1.5), (3300, 3)):
+        batt(root, 19, mv)
+        time.sleep(secs)
+    assert not (root/'powered-off').exists(), 'five low readings in a row, not in all'
+    assert until(lambda: (root/'powered-off').exists(), 4)
+
+
+def test_no_voltage_to_read_powers_nothing_off(run):
+    root, keys = run
+    low_start(root, keys)
+    (root/'sys/devices/i2c-0/0-0062/cw2015_voltage').unlink()
+    time.sleep(7)
+    assert not (root/'powered-off').exists(), 'a reading that failed is not a low one'
+
+
 # ---- the watchdog (docs/sysd.md#the-watchdog) ----
 
 @pytest.fixture(scope='session')

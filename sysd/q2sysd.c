@@ -33,6 +33,8 @@
  *     music that plays.
  *   - Heat (docs/sysd.md#heat): today's Vamp's overheat guardian, its core and PMIC reader linked in from patch/, its
  *     warnings told and shown through Q2UI/1, its power-off done here; not on a card boot, where today's q2guard runs.
+ *   - A low battery (docs/sysd.md#a-low-battery): stock's warning under 16% and its power off after five readings at
+ *     3400 mV or 0% with no cable.
  *   - The watchdog (docs/sysd.md#the-watchdog): /dev/jz_watchdog started at 60 s and fed each second, stopped across
  *     Standby and at a clean end.
  *
@@ -813,6 +815,48 @@ static void client_read(struct client *c) {
     if (c->n >= sizeof c->in - 1) close(c->fd), c->fd = -1;
 }
 
+/* ---- a low battery (docs/sysd.md#a-low-battery) ----
+ *
+ * Stock's check_lowbattery_state (0x4f3b38, once a second from on_wm_idle_status) on the latest reading: with no cable,
+ * LOW_SECONDS readings in a row at LOW_MV or under, or at 0%, power the Q2 off ("Shutdown", 0x4f1a54, then
+ * poweroff_page); a first reading under LOW_WARN lights the screen and says "Low Battery" (on_wm_timer_dialog), once
+ * until a reading is LOW_WARN again. Any other reading starts the count again. Below LOW_FLOOR the battery is read each
+ * second, as today's Vamp reads it there (BATT_DARK_FLOOR, docs/internals.md#battery). */
+#define LOW_MV 3400
+#define LOW_WARN 16
+#define LOW_FLOOR 20
+#define LOW_SECONDS 5
+static int low_count, low_warned;
+static void ui_say(const char *line);
+
+static void low_poll(void) {
+    if (bat.level < 0 || bat.mv < 0) return; /* a read that failed: nothing to go by */
+    if (cable_in != 1) {
+        if (bat.mv <= LOW_MV || bat.level == 0) {
+            if (++low_count < LOW_SECONDS) return;
+            low_count = 0;
+            say("battery %d%% %d mV: shutting down", bat.level, bat.mv);
+            tell("lowbattery off");
+            ui_say("toast Shutdown");
+            power_off("the battery is empty");
+            return;
+        }
+        if (!low_warned) {
+            if (bat.level < LOW_WARN) {
+                low_warned = 1;
+                say("battery %d%%: low", bat.level);
+                tell("lowbattery warn");
+                if (!screen_on) set_screen(1);
+                ui_say("toast Low%20Battery");
+            }
+            low_count = 0;
+            return;
+        }
+    }
+    if (low_warned && bat.level >= LOW_WARN) low_warned = 0;
+    low_count = 0;
+}
+
 /* ---- Auto Standby and Auto Power Off (docs/sysd.md#auto-standby-and-auto-power-off) ---- */
 
 /* q2playd's now file says a song is playing (state=1) */
@@ -1160,6 +1204,8 @@ int main(int argc, char **argv) {
         if (t >= cable_at + CABLE_MS) {
             wdt_feed();
             cable_poll(), cable_at = t;
+            if (bat.level >= 0 && bat.level < LOW_FLOOR) read_battery(), battery_at = t;
+            low_poll();
             light_poll();
             if (screen_on && light_s && t >= used_at + (unsigned long long)light_s * 1000) {
                 say("unused %d s: the screen off", light_s);
