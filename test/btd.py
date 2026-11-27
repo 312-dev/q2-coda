@@ -387,6 +387,8 @@ def test_headset_buttons_and_track_display(q2):
         q.play.got.wait(lambda l, v=verb: l == v, start=n)
     q.play.push(title='Gamma', state=1)
     q.out.wait(lambda l: l == 'player-changed status=Playing title=Gamma')
+    q.play.push(title='Delta', state=1)  # the next song, still playing: the title alone changed
+    q.out.wait(lambda l: l == 'player-changed status=Playing title=Delta')
 
 
 def test_forget(q2):
