@@ -63,7 +63,7 @@ def base_args(binary, d):
     return [str(binary), '--page', 'songs', '--panel-bits', '8', '--db', d/'library.db', '--catalogue', '', '--fb', d/'fb', '--fonts', d/'fonts', '--icons', d,
             '--stats', d/'stats.json', '--state', d/'state', '--cmdq', d/'cmdq', '--playlist', d/'list', '--backlight', d/'backlight',
             '--now', d/'now', '--cover', d/'cover.jpg', '--ask', d/'ask', '--power', d/'power', '--wifi', d/'wifi',
-            '--wireless', d/'wireless', '--told', d/'told', '--networks', d/'networks', '--config', d/'config.ini',
+            '--wireless', d/'wireless', '--told', d/'told', '--networks', d/'networks', '--bt-devices', d/'bt', '--config', d/'config.ini',
             '--library-order', d/'library-order']
 
 
@@ -593,6 +593,7 @@ def pages(binary, work):
     good &= playback(binary, work, home)
     good &= wireless(binary, work, home)
     good &= wifi_networks(binary, work, home)
+    good &= bt_devices(binary, work, home)
     good &= clicks(binary, work)
     good &= comebacks(binary, work, home)
     good &= general(binary, work, home)
@@ -718,14 +719,14 @@ def wireless(binary, work, home):
     opts = (*home, '--told', told)
     for name, to, key, on_rows in (
             ('Wi-Fi', wifi, 'wifi', ['Wi-Fi', 'Networks', 'No Networks', 'Search Again', 'More Wi-Fi Settings']),
-            ('Bluetooth', bt, 'bt', ['Bluetooth', 'Devices', 'Quality', 'Bluetooth Headset Volume Control'])):
+            ('Bluetooth', bt, 'bt', ['Bluetooth', 'My Devices', 'Other Devices', 'No Devices', 'Quality', 'Bluetooth Headset Volume Control', 'More Bluetooth Settings'])):
         flag = 'wifi' if key == 'wifi' else 'bton'
         told.write_text(f'{flag}=0\n')
         _, _, _, (sent, _, out), said = script(binary, work, 60, to + ['rows @off.txt', 'key centre', 'run 100', 'rest',
                                                                        'rows @on.txt'], *opts, queue=True, ctl=True)
         off = (out/'off.txt').read_text().splitlines() if (out/'off.txt').exists() else []
         on = (out/'on.txt').read_text().splitlines() if (out/'on.txt').exists() else []
-        searched = ['scan'] if key == 'wifi' else []  # Wi-Fi coming on asks demo for a search (wifi_networks)
+        searched = ['scan'] if key == 'wifi' else ['btscan']  # coming on asks demo for a search (wifi_networks, bt_devices)
         good &= check(f"{name} off is its switch alone; Centre turns it on down q2ui's own pipe and its rows come at once",
                       off == [name] and said == [f'set {key} 1'] + searched and sent == [] and on == on_rows,
                       f'{off} {said} {sent} {on}')
@@ -735,8 +736,9 @@ def wireless(binary, work, home):
         off = (out/'off.txt').read_text().splitlines() if (out/'off.txt').exists() else []
         good &= check(f'{name} on by demo goes off, its rows going with it',
                       said == searched + [f'set {key} 0'] and off == [name], f'{said} {off}')
-    pages = (('Wi-Fi', wifi, 2, 'systemset/wifi_page'),  # past the header, "No Networks" and Search Again ('Bluetooth', bt, 1, 'systemset/bluetooth_page'),
-             ('Bluetooth', bt, 2, 'systemset/btquality_page'), ('Bluetooth', bt, 3, 'systemset/btadjustvol_page'))
+    # past the headers and the grey "No Networks" or "No Devices" row (and Wi-Fi's Search Again)
+    pages = (('Wi-Fi', wifi, 2, 'systemset/wifi_page'), ('Bluetooth', bt, 1, 'systemset/btquality_page'),
+             ('Bluetooth', bt, 2, 'systemset/btadjustvol_page'), ('Bluetooth', bt, 3, 'systemset/bluetooth_page'))
     told.write_text('wifi=1\nbton=1\n')
     for name, to, ticks, page in pages:
         _, _, _, (_, _, out) = script(binary, work, 60, to + [f'tick {ticks}', 'rest', 'key centre', 'run 100'], *opts,
@@ -780,6 +782,48 @@ def wifi_networks(binary, work, home):
     return good
 
 
+DEVICES = ('scan 1\n1 2 AA:BB:CC:DD:EE:01 Fixture Phones\n1 0 AA:BB:CC:DD:EE:02 Fixture Car\n'
+           '0 0 AA:BB:CC:DD:EE:03 Fixture Back\\\\sl\\nash\n')
+
+
+def bt_devices(binary, work, home):
+    """Settings > Bluetooth's devices (ui/page_bluetooth.c), as demo lists them (--bt-devices, patch/bt_ui.c
+    bt_q2ui_devices): My Devices with each one's state, Other Devices the ones a scan heard; the page asks for a scan as
+    it opens; a paired device opens its own page, whose Disconnect or Connect and Forget go down the pipe by its MAC;
+    Centre on a found one connects it; a new list keeps the selection on its device."""
+    good = True
+    d = pathlib.Path(tempfile.mkdtemp(dir=work))
+    (d/'told').write_text('bton=1\n')
+    (d/'devs').write_text(DEVICES)
+    # the car forgotten, the found one paired and connected: it moves up into My Devices
+    (d/'later').write_text('scan 0\n1 0 AA:BB:CC:DD:EE:01 Fixture Phones\n1 2 AA:BB:CC:DD:EE:03 Fixture Back\\\\sl\\nash\n')
+    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest']  # Settings > Bluetooth
+    # Phones' page: Disconnect; the found one; Car's page: Forget; then the found one selected as demo's new list comes
+    lines = to + ['rows @rows.txt', 'tick 1', 'rest', 'key centre', 'rest', 'rows @phones.txt', 'key centre', 'rest',
+                  'tick 2', 'rest', 'key centre', 'rest', 'tick -1', 'rest', 'key centre', 'rest', 'rows @car.txt',
+                  'tick 1', 'rest', 'key centre', 'rest', 'tick 1', 'rest',
+                  f'btdevices {d/"later"}', 'rest', 'rows @later.txt', 'key centre', 'rest', 'rows @again.txt']
+    _, _, _, (_, _, out), said = script(binary, work, 60, lines, *home, '--told', d/'told', '--bt-devices', d/'devs',
+                                        queue=True, ctl=True)
+
+    def rows(name):
+        return (out/name).read_text().splitlines() if (out/name).exists() else []
+    want = ['Bluetooth', 'My Devices', 'Fixture Phones\tConnected', 'Fixture Car\tNot Connected', 'Other Devices',
+            'Fixture Back\\sl', 'ash', 'Quality', 'Bluetooth Headset Volume Control', 'More Bluetooth Settings']
+    good &= check("Bluetooth's devices as demo lists them: paired with their state, then the ones a scan heard",
+                  rows('rows.txt') == want, repr(rows('rows.txt')))
+    good &= check("a connected device's page offers Disconnect and Forget, a paired one's Connect",
+                  rows('phones.txt') == ['Disconnect', 'Forget This Device'] and
+                  rows('car.txt') == ['Connect', 'Forget This Device'], f"{rows('phones.txt')} {rows('car.txt')}")
+    good &= check('the page scans as it opens; Disconnect, a found device and Forget go down the pipe by MAC',
+                  said[:4] == ['btscan', 'btlink AA:BB:CC:DD:EE:01', 'btlink AA:BB:CC:DD:EE:03',
+                               'btforget AA:BB:CC:DD:EE:02'], repr(said))
+    good &= check('a new list from demo is shown and keeps the selection on its device (moved up into My Devices)',
+                  rows('later.txt')[:4] == ['Bluetooth', 'My Devices', 'Fixture Phones\tNot Connected', 'Fixture Back\\sl']
+                  and rows('again.txt') == ['Disconnect', 'Forget This Device'], f"{rows('later.txt')} {rows('again.txt')}")
+    return good
+
+
 def comebacks(binary, work, home):
     """A page of demo's opened from a page of q2ui's: q2ui, started again when demo's page is left, is back on the page
     that opened it, on its row, under the pages it had (main.c state_restore), for every page that opens one."""
@@ -790,8 +834,7 @@ def comebacks(binary, work, home):
     for name, to, rows in (
             ('Wi-Fi', settings + ['key centre', 'rest', 'tick 2'], ['Wi-Fi', 'Networks', 'No Networks', 'Search Again',
                                                                    'More Wi-Fi Settings']),
-            ('Bluetooth', settings + ['tick 1', 'rest', 'key centre', 'rest', 'tick 2'],
-             ['Bluetooth', 'Devices', 'Quality', 'Bluetooth Headset Volume Control']),
+            ('Bluetooth', settings + ['tick 1', 'rest', 'key centre', 'rest', 'tick 2'], ['Bluetooth', 'My Devices', 'Other Devices', 'No Devices', 'Quality', 'Bluetooth Headset Volume Control', 'More Bluetooth Settings']),
             ('General', settings + ['tick 2', 'rest', 'key centre', 'rest', 'tick 1'], ['About', 'More General Settings']),
             ('Playback', settings + ['tick 3', 'rest', 'key centre', 'rest'],
              ['EQ', 'Gapless', 'Smart Crossfade', 'Sleep Timer', 'More Playback Settings'])):
@@ -804,6 +847,8 @@ def comebacks(binary, work, home):
         want_sel = int(to[-1].split()[1]) if to[-1].startswith('tick') else 0
         if name == 'Wi-Fi':
             want_sel = 4  # two ticks pass over the header and the grey "No Networks" row
+        if name == 'Bluetooth':
+            want_sel = 5  # past both headers and the grey "No Devices" row
         ok = got == rows
         good &= check(f"back from the page of demo's that {name} opened, q2ui is on {name} on the row it was on",
                       ok and sel == want_sel, f'{got} sel {sel}')

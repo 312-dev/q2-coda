@@ -5,7 +5,8 @@
  * image or download, or a card app's cover). Nothing is polled: the folder is watched (inotify), so a change
  * wakes the loop and a page's step sees now_seq() move, and at rest nothing runs. The same watch
  * tells the status row when demo's file of the states only it knows changes (ui/status.c
- * status_told), and the Wi-Fi page when its file of the networks does (ui/page_wifi.c). When q2ui owns the player this file reads its own state instead
+ * status_told), and the Wi-Fi and Bluetooth pages when demo's files of the networks and devices do (ui/page_wifi.c,
+ * ui/page_bluetooth.c). When q2ui owns the player this file reads its own state instead
  * (docs/ui-rewrite.md#cutover). */
 #include <stdio.h>
 #include <stdlib.h>
@@ -101,6 +102,7 @@ static void changed(void) {
             const struct inotify_event *e = (const struct inotify_event *)at;
             if (e->len && !strcmp(e->name, base(status_told))) status_told_changed();
             if (e->len && !strcmp(e->name, base(wifi_networks_file))) wifi_networks_changed();
+            if (e->len && !strcmp(e->name, base(bt_devices_file))) bt_devices_changed();
             at += sizeof *e + e->len;
         }
     now_read();
@@ -119,6 +121,7 @@ void now_open(void) {
         inotify_add_watch(watch, other, IN_MOVED_TO | IN_CLOSE_WRITE);
     /* and its file of the networks (a folder already watched is not watched twice) */
     if (ok) inotify_add_watch(watch, folder(wifi_networks_file, other, sizeof other), IN_MOVED_TO | IN_CLOSE_WRITE);
+    if (ok) inotify_add_watch(watch, folder(bt_devices_file, other, sizeof other), IN_MOVED_TO | IN_CLOSE_WRITE);
     if (ok) ui_watch(watch, changed);
     now_read();
 }

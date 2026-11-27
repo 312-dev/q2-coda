@@ -370,6 +370,8 @@ int settings_route(const char *name); /* a page of Settings' by its route name (
 void wifi_push(void);            /* Settings > Wi-Fi (page_wifi.c) */
 extern const char *wifi_networks_file; /* demo's list of the networks for it (--networks) */
 void wifi_networks_changed(void);      /* ... which has changed (now.c's watch) */
+extern const char *bt_devices_file;    /* demo's list of the Bluetooth devices (--bt-devices) */
+void bt_devices_changed(void);
 void bluetooth_push(void);       /* Settings > Bluetooth (page_bluetooth.c) */
 extern const char *general_card; /* About's card: --card */
 ui_list *list_new(const ui_source *src);
@@ -439,7 +441,7 @@ int player_send(const char *verb);                           /* toggle, next, pr
 extern const char *player_queue, *player_list;               /* the FIFO and the list file (a test's are its own) */
 int player_set(const char *name, int value); /* a setting of demo's, down q2ui's own pipe; 0 sent */
 void player_click(int button);               /* demo's key click for a tick (0) or a press (1), down the same pipe */
-int player_wifi(const char *verb, const char *ssid); /* "scan", or "join" network ssid, down the same pipe; 0 sent */
+int player_line(const char *verb, const char *arg); /* "scan", "join" a network, "btscan", "btlink" a MAC...: the same pipe; 0 sent */
 extern int player_ctl;                       /* that pipe's write end (--ctl FD), or -1 */
 
 /* ---- pages ---- */

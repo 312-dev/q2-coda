@@ -2153,6 +2153,9 @@ FUNCTIONS = {
  'autoLinkBluetooth': ('int', 'void'),
  'btStartSearch': ('int', 'void'),  # Settings > Bluetooth's scan (bt_ui.c), as stock's Scan now row started it
  'btStopSearch': ('int', 'void'),  # its stop, as stock's row click calls it before a connect (bt_ui.c page_poll)
+ # q2ui's Bluetooth page (bt_ui.c): the paired devices' count (the first in pdeq_btshowlist), and stock's row click's
+ # connect or disconnect of a device by its index there (1: disconnected, the output to go back to a jack)
+ 'getBtPairSize': ('int', 'void'), 'handleBluetoothLink': ('int', 'int'),
  # stock's Bluetooth switch: (1, 0) off, the stack stopped and the radio powered down; (0, 0) on, started again
  # (heatguard.c hg_bt: the controller watchdog's relaunch)
  'switchBluetooth': ('int', 'int, int'),

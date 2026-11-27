@@ -98,9 +98,9 @@ static void chosen(void *ctx, int i) {
         list_rows_changed();
         ui_mark_all();
     } else if (net >= 0 && net < n_nets)
-        player_wifi("join", nets[net].ssid);
+        player_line("join", nets[net].ssid);
     else if (net == shown())
-        player_wifi("scan", 0);
+        player_line("scan", 0);
     else if (net == shown() + 1)
         ui_demo_page("systemset/wifi_page");
 }
@@ -120,7 +120,7 @@ void wifi_networks_changed(void) {
 /* The page's step: a search asked for as Wi-Fi comes on (the page opened on, or switched on). */
 static void step(void) {
     int now = on();
-    if (now && was_on != 1) player_wifi("scan", 0);
+    if (now && was_on != 1) player_line("scan", 0);
     was_on = now;
 }
 

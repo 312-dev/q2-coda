@@ -185,40 +185,53 @@ static void forget_link(const char *mac) {
     toolsWriteConfig("/mnt/data/config.ini", "SYSSET", "BTLINKMAC", "");
 }
 
-/* The forget, once the card's Forget Device is chosen: stock's row click's own steps after its
- * dialog's OK (btmenu_item_on_click, 0x4c44b8 to 0x4c45b4), then the saved link. */
-static void forget(void *ctx, int row, int toggle_on) {
-    (void)ctx, (void)toggle_on;
+/* The output back to a jack, as stock's row click does after a device that was the output is
+ * unpaired or disconnected (btmenu_item_on_click's check_outputdevice and config_outputchannel).
+ * Shared with q2ui's connect (bt_ui.c bt_q2ui_link). */
+void bt_output_back(void) {
+    int out = check_outputdevice((signed char)g_headset_output, 2);
+    if ((signed char)g_headset_output != out) {
+        g_headset_output = (unsigned char)out;
+        if (mclGetSavePlayStatus() != 1) config_outputchannel((signed char)g_headset_output, 3);
+    }
+}
+
+/* Device mac forgotten: stock's row click's own steps after its Unpair? dialog's OK
+ * (btmenu_item_on_click, 0x4c44b8 to 0x4c45b4), then the saved link. 1 when it was. Shared with
+ * q2ui's Bluetooth page (bt_ui.c bt_q2ui_forget). */
+int bt_forget(const char *mac) {
     char b[96];
-    int dev = bt_dev_find(bd.mac), r = 0;
+    int dev = bt_dev_find(mac), r = 0;
     /* each answer a bt line (docs/internals.md#bluetooth-connection-trace): on 2026-11-19 a Forget
      * took two taps and nothing said why */
-    if (row != 1)
-        tk_snprintf(b, sizeof b, "forget %s: Cancel chosen", bd.mac);
-    else if (dev < 0)
-        tk_snprintf(b, sizeof b, "forget %s: not in the device list now, nothing done", bd.mac);
+    if (dev < 0)
+        tk_snprintf(b, sizeof b, "forget %s: not in the device list now, nothing done", mac);
     else if ((r = handleBluetoothPair(dev)) != 1 && r != 2)
-        tk_snprintf(b, sizeof b, "forget %s: stock's unpair refused it (%d), nothing done", bd.mac,
-                    r);
+        tk_snprintf(b, sizeof b, "forget %s: stock's unpair refused it (%d), nothing done", mac, r);
     else
-        tk_snprintf(b, sizeof b, "forget %s: %s", bd.mac,
-                    r == 2 ? "disconnected and unpaired" : "unpaired");
-    ulog(row == 1 && r != 1 && r != 2 ? 'W' : 'I', "bt", b);
-    if (r != 1 && r != 2) return;
-    if (r == 2) { /* it was the output: back to a jack */
-        int out = check_outputdevice((signed char)g_headset_output, 2);
-        if ((signed char)g_headset_output != out) {
-            g_headset_output = (unsigned char)out;
-            if (mclGetSavePlayStatus() != 1) config_outputchannel((signed char)g_headset_output, 3);
-        }
-    }
-    forget_link(bd.mac);
-    btlim_forget(bd.mac);
+        tk_snprintf(b, sizeof b, "forget %s: %s", mac, r == 2 ? "disconnected and unpaired" : "unpaired");
+    ulog(r != 1 && r != 2 ? 'W' : 'I', "bt", b);
+    if (r != 1 && r != 2) return 0;
+    if (r == 2) bt_output_back(); /* it was the output: back to a jack */
+    forget_link(mac);
+    btlim_forget(mac);
     toast("Device Forgotten");
     getSearchResult();
     player_save_start(1);
     g_btsetting_flag = 1; /* the Bluetooth page's timer rebuilds its list */
-    if (bd.page) window_close(bd.page);
+    return 1;
+}
+
+/* The forget, once the card's Forget Device is chosen; the page closes. */
+static void forget(void *ctx, int row, int toggle_on) {
+    (void)ctx, (void)toggle_on;
+    if (row != 1) {
+        char b[96];
+        tk_snprintf(b, sizeof b, "forget %s: Cancel chosen", bd.mac);
+        ulog('I', "bt", b);
+        return;
+    }
+    if (bt_forget(bd.mac) && bd.page) window_close(bd.page);
 }
 
 /* Forget This Device's question (the confirmation card, docs/oled-design.md#confirmation-card). */

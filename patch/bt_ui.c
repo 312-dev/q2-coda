@@ -84,6 +84,7 @@ static struct {
     int n_found, n_heard;
     unsigned heard[BT_FOUND_MAX]; /* ... those BlueZ had an RSSI for since the page opened */
     unsigned seen_ask, seen_hash, seen_at, seen_file; /* the last ask: its number, what, when */
+    int q2scan, q2waits; /* q2ui's scan: 1 asked for, 2 counted down (q2ui_tick); passes it may wait to start */
 } bt __attribute__((section(".scratch")));
 
 /* ---- the devices ---- */
@@ -1187,6 +1188,117 @@ static void page_poll(unsigned now) {
     btStartSearch();
     bt.read_at = now;
     g_btsetting_flag = 1; /* the page's timer rebuilds the list from the scan's first results */
+}
+
+/* ---- q2ui's Bluetooth page (ui/page_bluetooth.c, docs/ui-rewrite.md#cutover) ----
+ * Stock's page is not open under q2ui, and its timer (every BT_Q2UI_TICK_MS) is what counts a scan
+ * down from 50 (btStartSearch), reads its results at 25 and stops it at 1 (btStopSearch,
+ * getSearchResult), so a scan q2ui asks for is counted here the same way, its results read each
+ * second as page_poll reads them; a found device is told once BlueZ heard it, as the page lists it
+ * (seen_fetch, seen_read). */
+#define BT_Q2UI_TICK_MS 200  /* stock's Bluetooth page's timer */
+#define BT_Q2UI_WAIT_TICKS 150 /* a scan asked for while the stack starts or a connect runs waits 30 s */
+
+/* The found devices in stock's list now (past the paired ones, getSearchResult puts them first),
+ * asked of BlueZ whether a scan heard them. */
+static void q2ui_found(void) {
+    const char *m;
+    bt.n_found = 0;
+    for (int i = getBtPairSize(); (m = dev_at(i, 0)) && bt.n_found < BT_FOUND_MAX; ++i)
+        if (bt_mac_ok(m)) tk_snprintf(bt.found[bt.n_found++], sizeof bt.found[0], "%s", m);
+    seen_fetch(time_now_ms());
+    seen_read();
+}
+static int q2ui_tick(const void *unused) {
+    (void)unused;
+    void *win = bt.view ? window_of(bt.view) : (void *)0;
+    if (!g_bluetoothflag || win) return bt.q2scan = 0; /* off, or stock's page has it: RET_REMOVE */
+    if (bt.q2scan == 1) {
+        if (bt_searchtime || I(bt_initstatus, 0) || I(bt_connectstatus, 0) == 1)
+            return --bt.q2waits > 0 ? 8 : (bt.q2scan = 0); /* RET_REPEAT */
+        bt.n_heard = 0, bt.seen_hash = 0; /* what the scan heard, from this one on */
+        btStartSearch();
+        q2ui_found();
+        bt.q2scan = 2;
+        return 8;
+    }
+    if (I(bt_initstatus, 0)) return 8; /* stock's timer waits for the stack too */
+    if ((signed char)bt_searchtime <= 0) {
+        q2ui_found();
+        return bt.q2scan = 0;
+    }
+    if (--bt_searchtime == 1) { /* the scan's end, as stock's */
+        btStopSearch();
+        getSearchResult();
+        q2ui_found();
+    } else if (bt_searchtime % 5 == 0) { /* each second (stock's own read at 25 among them) */
+        getSearchResult();
+        q2ui_found();
+    }
+    return 8;
+}
+
+/* q2ui's "btscan" (q2ui_gate.c ctl): 0 when a scan is under way or set going, 1 with Bluetooth off. */
+int bt_q2ui_scan(void) {
+    if (!g_bluetoothflag) return 1;
+    if (bt.q2scan) return 0;
+    bt.q2scan = 1, bt.q2waits = BT_Q2UI_WAIT_TICKS;
+    if (!timer_add(q2ui_tick, 0, BT_Q2UI_TICK_MS)) bt.q2scan = 0;
+    return !bt.q2scan;
+}
+
+/* q2ui's list of the devices (q2ui_gate.c tell, its own file): "scan 1" while a scan runs, else
+ * "scan 0", then with Bluetooth on a line a device, "PAIRED STATE MAC NAME", the paired ones first
+ * (stock's order) and a found one only once a scan heard it; STATE 2 connected, 1 connecting, else 0
+ * (bt_dev_state); the name last, its backslashes and newlines as \\ and \n. Whole lines only, as
+ * many as fit room. Its length. */
+unsigned bt_q2ui_devices(char *b, unsigned room) {
+    int k = tk_snprintf(b, room, "scan %d\n", bt.q2scan || (signed char)bt_searchtime > 1);
+    unsigned n = k > 0 && (unsigned)k < room ? (unsigned)k : 0;
+    int paired = g_bluetoothflag ? getBtPairSize() : 0;
+    const char *m;
+    for (int i = 0; g_bluetoothflag && (m = dev_at(i, 0)); ++i) {
+        if (!bt_mac_ok(m) || (i >= paired && !heard(m))) continue;
+        int state = bt_dev_state(i);
+        char line[32 + 2 * 64];
+        unsigned at = (unsigned)tk_snprintf(line, sizeof line, "%d %d %s ", i < paired,
+                                            state == BT_ROW_CONNECTED ? 2 : state == BT_ROW_CONNECTING, m);
+        const char *name = dev_at(i, 1);
+        for (unsigned j = 0; name[j] && j < 63 && at < sizeof line - 3; ++j) {
+            if (name[j] == '\\' || name[j] == '\n') line[at++] = '\\';
+            line[at++] = name[j] == '\n' ? 'n' : name[j];
+        }
+        line[at++] = '\n';
+        if (n + at > room) break;
+        memcpy(b + n, line, at);
+        n += at;
+    }
+    return n;
+}
+
+/* q2ui's "btlink MAC": stock's row click's own steps on device mac (btmenu_item_on_click at x 0):
+ * a scan stopped, then handleBluetoothLink, which connects a paired or found one (a found one is
+ * paired first) and disconnects the connected one, the output back to a jack after a disconnect
+ * (its 1), the list read again. One connecting stops connecting, as its row on the page does
+ * (cancel_connect). 1 when nothing was done: Bluetooth off or starting, another connect running, or
+ * no such device. */
+int bt_q2ui_link(const char *mac) {
+    int dev = bt_dev_find(mac);
+    if (!g_bluetoothflag || I(bt_initstatus, 0) || dev < 0) return 1;
+    if (I(bt_connectstatus, 0) == 1) return !cancel_connect(mac);
+    bt_trace_why("q2ui", mac); /* the connect it may start, in the log (bt_trace.c) */
+    btStopSearch();
+    if (handleBluetoothLink(dev) == 1) bt_output_back();
+    getSearchResult();
+    g_btsetting_flag = 1;
+    return 0;
+}
+
+/* q2ui's "btforget MAC": Forget This Device's steps (bt_detail.c bt_forget), asked on q2ui's side. 1
+ * when nothing was done. */
+int bt_q2ui_forget(const char *mac) {
+    if (!g_bluetoothflag || I(bt_initstatus, 0) || I(bt_connectstatus, 0) == 1) return 1;
+    return !bt_forget(mac);
 }
 
 /* ---- the connection toasts (docs/oled-design.md#dialogs-and-toasts) ---- */
