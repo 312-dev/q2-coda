@@ -57,6 +57,9 @@ CASES = {
  'no-play-glyph': ('ui/status.c', "    if (play != S.play) S.play = play, ui_mark(glyphs_rect());", "    (void)play;", 'status', 'a song playing puts three bars'),
  'fan-always-full': ('ui/status.c', "        wifi = quality >= 45 ? 3 : quality >= 25 ? 2 : 1;", "        wifi = 3;", 'status', "Wi-Fi's fan is lit by its signal"),
  'no-volume-in-row': ('ui/status.c', "        S.volume_at = ui_time();\n        ui_mark(volume_rect());", "        ui_mark(volume_rect());", 'status', 'a volume change shows its level'),
+ 'title-never-slides': ('ui/page_now.c', "            x = (float)(t - MQ_REST_US) / 1e6f * MQ_SPEED, ui_again();", "            ui_again();", 'pages', 'a long title is still for its first two seconds'),
+ 'title-no-fade': ('ui/page_now.c', "        fade_set(TEXT_X, TEXT_X + room, s->mq_x > 0.5f ? MQ_FADE : 0,", "        fade_set(TEXT_X, TEXT_X + room, 0,", 'pages', "at its end it fades out at the column"),
+ 'hup-runs-old-file': ('ui/main.c', "    if (strchr(started_with[0], '/')) execv(started_with[0], started_with);", "", 'live', 'the program now at the path runs'),
 }
 names = sys.argv[1:] or list(CASES)
 bad = 0

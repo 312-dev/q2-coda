@@ -367,6 +367,24 @@ def pages(binary, work):
     _, _, _, (sent, _, _) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'key centre', 'run 100', 'tick 1', 'run 100'], *home, now=NOW, queue=True)
     good &= check('there Centre is play and pause, and a tick down the wheel is one step quieter',
                   [line.split(' ', 1)[1] for line in sent] == ['toggle', 'volume 39'], str(sent))
+    # a title too long for its column rests, slides to its end, and comes back
+    # a picture every quarter second for ten: at rest 2.75 s, sliding, held 1.5 s at its end, then back at rest
+    long = NOW.replace('title=A Made-Up Song', 'title=A Made-Up Song Again X').replace('state=1', 'state=2')
+    lines = ['rest', 'key centre', 'run 500']  # no rest after: a title that slides never does
+    for k in range(40):
+        lines += [f'shot @m{k:02d}.ppm', 'run 250']
+    _, pics, _ = script(binary, work, 60, lines, *home, now=long)
+    title = lambda p: bytes(v for y in range(64, 92) for x in range(192, 352) for v in p.at(x, y))  # noqa: E731
+    edge = lambda p: max(max(p.at(x, y)) for y in range(66, 90) for x in range(192, 196))  # noqa: E731
+    seen = [title(pics[f'm{k:02d}']) for k in range(40)]
+    still = next((k for k in range(40) if seen[k] != seen[0]), 40)       # the first picture that has moved
+    held = next((k for k in range(still, 37) if seen[k] == seen[k + 1] == seen[k + 2]), None)  # three alike after it
+    back = held is not None and any(seen[k] == seen[0] for k in range(held, 40))
+    good &= check('a long title is still for its first two seconds and more, slides, holds at its end, and comes back',
+                  7 <= still <= 10 and held is not None and seen[held] != seen[0] and back, f'moved at shot {still}, held at {held}, back {back}')
+    good &= check("at rest its start is whole, and at its end it fades out at the column's left",
+                  held is not None and edge(pics['m00']) > 200 and edge(pics[f'm{held:02d}']) < 120,
+                  f"{edge(pics['m00'])} {edge(pics[f'm{held:02d}']) if held is not None else None}")
     # a tick shows the volume's level in the bar's place, white, and it gives the bar back
     _, pics, _ = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick -1', 'run 200', 'shot @volume.ppm', 'run 2000', 'shot @after.ppm'], *home, now=NOW)
     level, bar = pics['volume'].at(80, 231), pics['after'].at(36, 231)
@@ -546,6 +564,31 @@ def reload(binary, work):
     return good
 
 
+def swap(binary, work):
+    """A newer program put at q2ui's path is what runs after SIGHUP: the path is run again, not the file the process
+    was started from (a `vamp ui-push` mounts the new one there)."""
+    d = folder(work, 5)
+    path = d/'q2ui'
+    shutil.copy(binary, path)
+    (d/'input').mkdir()
+    for k in (1, 3):
+        os.mkfifo(d/'input'/f'event{k}')
+    proc = subprocess.Popen(base_args(path, d) + ['--input', d/'input'])
+    time.sleep(1.0)
+    stand_in = d/'q2ui.new'  # stands in for the newer q2ui: it says it ran, with what it was given, and stays
+    stand_in.write_text(f'#!/bin/sh\necho "$@" > {d}/ran\nexec sleep 20\n')
+    stand_in.chmod(0o755)
+    os.rename(stand_in, path)
+    proc.send_signal(signal.SIGHUP)
+    time.sleep(1.0)
+    ran = (d/'ran').read_text() if (d/'ran').exists() else None
+    good = check('after SIGHUP the program now at the path runs, in the same process, with the same arguments',
+                 ran is not None and '--input' in ran and proc.poll() is None, f'ran: {ran!r}, exit {proc.poll()}')
+    proc.kill()
+    proc.wait(timeout=5)
+    return good
+
+
 def live(binary, work):
     good = True
     # the first frame, three ticks, a rest
@@ -657,6 +700,7 @@ def main():
             good &= live(binary, work)
             good &= routes(binary, work)
             good &= reload(binary, work)
+            good &= swap(binary, work)
         if not only or 'panel' in only:
             good &= panel(binary, work)
         if not only or 'status' in only:
