@@ -46,8 +46,7 @@ Then init starts `runsvdir`, which starts the services below ([`/etc/sv`](../os/
 | --- | --- | --- |
 | `adbd` | adb over USB ([adb](#adb)): `q2adb-gadget setup`, then `adbd`, and `q2adb-gadget bind` once it has written its descriptors | configfs and FunctionFS in the kernel, the USB controller |
 | `adb-wifi` | `q2adb-wifi`, which runs `adbd --tcp 5555` and `q2adb-mdns` only while a computer is trusted | a key in `/mnt/data/adb_keys` or the card's `adb_keys` |
-| `wlan` | `wpa_supplicant -Dnl80211 -iwlan0 -c/mnt/data/wpa_supplicant.conf`, as stock's `wifi_connect.sh` starts it | the networks stock or today's Vamp saved, and `wlan0` (the radio's module) |
-| `dhcp` | BusyBox `udhcpc -f -i wlan0` | `wlan0` |
+| `q2netd` | `/usr/bin/q2netd` ([q2netd](netd.md)): Wi-Fi on the saved networks, DHCP, Smart Wi-Fi, Q2NET/1 | `wlan0` (the radio's module), `/mnt/data/wpa_supplicant.conf` |
 | `q2libd` | `/usr/bin/q2libd` ([q2libd](libd.md)): the card's songs into `/mnt/data/vamp/library.db` and the signed-in apps' catalogues into `/mnt/mmc/.vamp/catalogue.db`, `q2ui` restarted in place after each | the card's mount |
 | `q2playd` | `/usr/bin/q2playd` ([q2playd](playd.md)): the server on `/tmp/sock_play`, the queue, what plays; `q2ui`'s command queue and now file, and Q2PLAY/1 | `/mnt/data/database.db` for a song's file |
 | `q2player` | `/usr/bin/q2player`, built as every Vamp image's (Car Audio's output on) against this image's alsa-lib, FFmpeg 7.1.5 and mbedTLS | `q2playd` on `/tmp/sock_play` (it waits for it up to 5 s, then `finish` waits 10 s before the next try) |
@@ -60,7 +59,7 @@ The image is reachable for debugging on its own, with no `demo` and no today's V
 
 - **Keys**: a computer gets in only with its key in `/mnt/data/adb_keys` (a computer trusted with Always Allow under today's Vamp is trusted here too: the file is the same) or in the card's `adb_keys`. Nothing in the image answers adbd's prompt socket, so an unknown key is refused at once over USB too; there is no Allow card until `q2ui` has one. A first key on a Q2 that never trusted one comes on the card ([adb: Trusting the first key](adb.md#adb-over-wi-fi)).
 - **No open port without a trusted key**: `q2adb-wifi` starts the Wi-Fi adbd and the `_adb._tcp` responder only while one of those files holds a line and `config.ini` has no `ADBWIFI=0`, and stops both within 10 s of that ending.
-- **Wi-Fi itself**, until `q2netd`: the `wlan` and `dhcp` services join the networks in `/mnt/data/wpa_supplicant.conf` (Buildroot's `wpa_supplicant` 2.11, nl80211, its internal TLS) and take an address. No Smart Wi-Fi, no scanning UI.
+- **Wi-Fi itself** is `q2netd`'s ([q2netd](netd.md)): the saved networks, DHCP, and Smart Wi-Fi, which a computer let in over Wi-Fi holds on for 30 minutes.
 - **On a card boot** both adb services leave the job to today's Vamp's adbd, already running outside the chroot (rcS marks the boot `/run/vamp/card-boot`): two Wi-Fi adbds cannot share port 5555.
 
 **Tested without a Q2.** `test/os_image.py`'s boot: no port 5555 for 15 s with no key; a key written to `/mnt/data/adb_keys` opens it and lets `vamp` in, which reads the image's own `/etc/vamp-release` over `exec:`; another key is refused; the port closes once the file is gone; on a card boot neither adb service starts. `--perturb adb-open` (the Wi-Fi adbd with no key check) and `adb-off` fail it, and the card-boot check fails on the image built before the services yielded. `test/adb.py` run on this image (a folder holding `vampos.squashfs` as `rootfs.squashfs`, `--qemu` the pinned one) passes its 93 checks with this image's adbd and glibc: the FunctionFS descriptors, key refusal, the card's keys, `shell:`, `exec:`, push and pull, the refused services, adbd `--tcp` driven by `vamp`, `q2adb-wifi`, and `q2adb-mdns` found by `vamp`'s browse. **Needs a Q2**: whether the USB controller is in device mode with nothing of stock's having set it (today `demo` runs stock's USB code), the gadget on the real UDC, `wlan0` associating, and DHCP.
@@ -141,6 +140,24 @@ In the order it is needed:
 5. **The installer** (`q2pkgd`'s system half) and the expected-hash check of a composed image on the device: `mksquashfs` in the image and the test that a Q2 and the build machine compose the same bytes.
 6. q2ui's icons: it looks for `oled_*_w.png` in `--icons`, stock's art, which the image does not have; the pages draw without them.
 7. Bluetooth, Wi-Fi, USB modes, the MCU's firmware load, the splash.
+
+## Needs a device
+
+Everything here has been run only under the emulator and on this machine. What only a Q2 can prove, in one list (each item's detail is in the doc named):
+
+| Area | What only a Q2 proves | Doc |
+| --- | --- | --- |
+| Boot | The kernel's command line (`init=`), devtmpfs or not, LZO squashfs, UBI and UBIFS as this init assumes; every module loading under it; the watchdog's state with nothing opening it | [What boots](#what-boots), [First boot](#first-boot-on-a-q2) |
+| Card boot | Loop devices in the kernel; the chroot over a running stock boot; stopping stock's `mdev` | [Card boot](#card-boot) |
+| Recovery | Shanling's recovery restoring this unit, and what its `recovery-update/` folder must hold | [First boot](#first-boot-on-a-q2) |
+| adb | The USB controller in device mode with nothing of stock's having set it; the gadget on the real UDC | [adb](#adb) |
+| Screen | `bl_power` turning the panel's light off; the brightness scale; the double tap waking it; q2ui's 24-bit panel mode | [q2sysd](sysd.md#needs-a-q2) |
+| Power | Which devices carry the power button and whether a press arrives twice; `poweroff` reaching the PMIC; the PMIC's own long-press time | [q2sysd](sysd.md#needs-a-q2) |
+| Battery | The CW2015's and the charger's files under this init | [q2sysd](sysd.md#needs-a-q2) |
+| Sound | The DAC powered and in PCM mode with no `demo`; the driver's 0-100 volume law in decibels | [q2playd](playd.md#the-volume) |
+| Wi-Fi | Association, DHCP and DNS; the radio's power when `wlan0` is down | [q2netd](netd.md#needs-a-q2) |
+| Library | A real card's first scan time and memory under FFmpeg | [q2libd](libd.md#what-is-missing) |
+| Hot reload | `kill -HUP`'s in-place restart (QEMU's `/proc/self/exe` is QEMU) | [Hot reload](#hot-reload) |
 
 ## First boot on a Q2
 

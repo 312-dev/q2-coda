@@ -1,0 +1,8 @@
+#!/bin/sh
+# q2netd (docs/netd.md): Wi-Fi on the networks saved in /mnt/data/wpa_supplicant.conf (wpa_supplicant and udhcpc as
+# its children), Smart Wi-Fi's idle off, and Q2NET/1 on /run/vamp/net.sock.
+. /usr/libexec/vamp/log
+step "q2netd: start"
+mkdir -p /var/run/wpa_supplicant
+exec 2>&1
+exec /usr/bin/q2netd

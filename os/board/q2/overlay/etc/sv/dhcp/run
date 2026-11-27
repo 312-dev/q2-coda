@@ -1,7 +1,0 @@
-#!/bin/sh
-# An address for wlan0 (BusyBox udhcpc, its default script writing /etc/resolv.conf), until q2netd.
-. /usr/libexec/vamp/log
-[ -e /sys/class/net/wlan0 ] || exec sleep 30
-step "dhcp: start"
-exec 2>&1
-exec /sbin/udhcpc -f -i wlan0 -S

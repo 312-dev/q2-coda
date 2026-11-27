@@ -27,7 +27,7 @@ power key turning the screen off and on, and its hold starting init's shutdown.
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
-Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd).
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd).
 """
 import argparse
 import hashlib
@@ -183,7 +183,7 @@ def check_image(build, fs, manifest, perturb=None):
     check(actions.count('sysinit') == 1 and table[0] == '::sysinit:/etc/init.d/rcS'
           and '::respawn:/usr/bin/runsvdir -P /etc/sv' in table, 'inittab: rcS, the one sysinit, then runsvdir over /etc/sv')
     services = sorted(p.name for p in (fs/'etc/sv').iterdir())
-    check(services == ['adb-wifi', 'adbd', 'dhcp', 'q2libd', 'q2playd', 'q2player', 'q2sysd', 'q2ui', 'wlan'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
+    check(services == ['adb-wifi', 'adbd', 'q2libd', 'q2netd', 'q2playd', 'q2player', 'q2sysd', 'q2ui'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
           f'services: {", ".join(services)}')
     check(not (fs/'etc/init.d').exists() or sorted(p.name for p in (fs/'etc/init.d').iterdir()) == ['rcK', 'rcS'],
           '/etc/init.d holds rcS and rcK alone')
@@ -329,6 +329,29 @@ def sysd_checks(fs, power_key, log):
     os.close(fd)
 
 
+def netd_check(fs, card):
+    """q2netd in the booted image: Q2NET/1 answers; with no saved network the radio is off, unless the Wi-Fi adbd let a
+    computer in (adb_checks, before this), whose use mark holds it on for 30 minutes (Smart Wi-Fi's rule)"""
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(5)
+        s.connect(str(fs/'run/vamp/net.sock'))
+        f = s.makefile('rw')
+        f.write('Q2NET/1\nstatus\n')
+        f.flush()
+        got = [f.readline().strip(), f.readline().strip()]
+        s.close()
+    except OSError as e:
+        got = [repr(e), '']
+    st = dict(w.split('=', 1) for w in got[1].split()[1:]) if got[1].startswith('status ') else {}
+    if card:
+        ok = st.get('state') == 'off'
+    else:
+        ok = st.get('state') != 'off' and int(st.get('held', 0)) > 1000
+    check(got[0] == 'Q2NET/1 ok' and ok, 'q2netd: Q2NET/1 answers; ' + ('the radio off with nothing saved' if card else
+          'the Wi-Fi adbd\'s login holds the radio on (Smart Wi-Fi)') + f' ({got})')
+
+
 def adb_open(port=5555):
     """Whether something accepts on 127.0.0.1:port (the sandbox shares this machine's network)."""
     import socket as sk
@@ -394,6 +417,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         (fs/'etc/init.d/rcS').write_text(rcs)
     if perturb == 'adb-open':  # Wi-Fi adbd with no key check: an open port
         (fs/'etc/sv/adb-wifi/run').write_text('#!/bin/sh\nexec /usr/bin/adbd --tcp 5555\n')
+    if perturb == 'netd-off':  # no q2netd
+        (fs/'etc/sv/q2netd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'libd-off':  # no q2libd
         (fs/'etc/sv/q2libd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'ui-slow':  # q2ui's finish waits 10 s whatever the end, as before hot reload
@@ -459,6 +484,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
             played = play_check(fs, work/'console.log', deadline, emu/'record', emu/'data' if card else fs/'mnt/data')
         if adb and not card and proc.poll() is None:
             adb_checks(fs)
+        if proc.poll() is None:
+            netd_check(fs, card)
         if not card and proc.poll() is None:
             sysd_checks(fs, inp/'event2', emu/'record')
         if card:  # the services' first lines
@@ -533,7 +560,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     a = ap.parse_args()
     manifest, _ = vamp_os.read_manifest()

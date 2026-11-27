@@ -267,6 +267,13 @@ Where this tree is headed (an `os/` Buildroot tree, services of our own in place
 | `q2libd.c` | `q2libd`: the card's songs (tags through FFmpeg) into `/mnt/data/vamp/library.db`, the signed-in apps' catalogues into `/mnt/mmc/.vamp/catalogue.db` | `main`, `scan_card`, `add_file`, `import_app` | [libd](libd.md) |
 | `Makefile` | Its build, for the image (`os/package/q2libd`) and this machine (`test/libd.py`) | | [libd](libd.md) |
 
+## netd/: Vamp OS's network service
+
+| File | For | Enter at | Doc |
+| --- | --- | --- | --- |
+| `q2netd.c` | `q2netd`: Wi-Fi on the saved networks through `wpa_supplicant`'s control socket, `udhcpc`, Smart Wi-Fi, the saved networks in stock's file, Q2NET/1 | `main`, `radio`, `poll_status`, `add_network`, `client_line` | [netd](netd.md) |
+| `Makefile` | Its build, for the image (`os/package/q2netd`) and this machine (`test/netd.py`) | | [netd](netd.md) |
+
 ## tools/
 
 | File                                                      | For                                                                                                                                     | Enter at                                                            | Doc                                                                                                 |
@@ -350,6 +357,7 @@ Commands and what each needs are in [building.md](building.md#tests). `BUILD` is
 | q2playd | `playd.py`: q2playd built for this machine against a stand-in q2player: the FIFO and list file, Q2PLAY/1, the now file, ends, cuts and failures | `cc`, the host's SQLite |
 | q2sysd | `sysd.py`: q2sysd built for this machine on a stand-in `/sys` and `/dev/input`: the power key's press and hold, the backlight, the battery file, Q2SYS/1 | `cc` |
 | q2libd | `libd.py`: q2libd built for this machine on a stand-in card of songs ffmpeg makes: tags, ids across scans, catalogues, q2ui's query, the service's first library | `cc`, ffmpeg, the host's FFmpeg and SQLite |
+| q2netd | `netd.py`: q2netd built for this machine with a stand-in wpa_supplicant: the radio, DHCP, Smart Wi-Fi's holds, the saved networks, scans, Q2NET/1 | `cc`, python3 |
 | Guest Play (`q2-guest`, `q2-hotspot`) | `q2_guest.py`: `q2-hotspot` under `sh` with stand-in wpa_supplicant, wpa_cli, ifconfig and udhcpd, then the daemon built for the host on a private bus against `guest/fake_bluez.py` (BlueZ, bluetoothd's `shanling.bluez`, both bluealsa daemons) and stand-in `bluealsa` and `bluealsa-aplay`; demo's side is `fw/test_guest.py` | host `cc`, `dbus-daemon`, dbus-python |
 | Cover art over Bluetooth (`q2-bip`) | `q2bip.py`: the daemon built for the host, a controller over a UNIX packet socket, a stand-in ffmpeg and a real one, the L2CAP listening socket; `unit/test_q2bip.py`: OBEX and BIP packet by packet; `fw/test_bt_cover.py`: demo's file | host `clang`, `ffmpeg` for one test |
 | ADB over USB and Wi-Fi (`--dev`), `vamp` | `adb.py`: adbd under `qemu-mipsel` in bwrap with a stand-in FunctionFS, `adbd --tcp` driven by `vamp`, `q2adb-gadget` on a stand-in configfs and `q2adb-wifi` with stand-ins; `unit/test_vamp.py` against a fake adbd, `unit/test_adb_mdns.py` | `qemu-mipsel`, bwrap; `BUILD` optional |

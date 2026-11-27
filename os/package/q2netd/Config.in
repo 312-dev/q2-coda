@@ -1,0 +1,6 @@
+config BR2_PACKAGE_Q2NETD
+	bool "q2netd"
+	select BR2_PACKAGE_WPA_SUPPLICANT
+	help
+	  Vamp OS's network service (netd/, docs/netd.md), its first slice: Wi-Fi on the saved networks,
+	  DHCP, Smart Wi-Fi's idle off, and Q2NET/1 on /run/vamp/net.sock.
