@@ -439,6 +439,7 @@ def pages(binary, work):
     # Library > Albums: two-line rows, each led by its cover from Cover Flow's thumbnails, else the placeholder
     good &= album_covers(binary, work, home)
     good &= playlists(binary, work, home)
+    good &= control_center(binary, work, home)
     # a row whose page is demo's: the page is named for demo and q2ui ends with the code that says so
     _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'tick 1', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
@@ -487,6 +488,25 @@ def playlists(binary, work, home):
     _, _, _, (sent, ids, _) = script(binary, work, 60, lines, *home, '--db', d/'library.db', queue=True)
     return check("Playlists lists On-The-Go and then Road; Centre on Road's second song plays Road's songs in its order from it",
                  len(sent) == 1 and sent[0].split()[1:3] == ['play', '1'] and ids == want, f'{sent} {ids} for {want}')
+
+
+def control_center(binary, work, home):
+    """Control Center (ui/page_control.c): Return held on any page; its switches stand as demo says (the told file,
+    patch/control_center.c q2ui_cc_state) and are flipped through the queue, turning at once; USB opens demo's picker."""
+    good = True
+    told = pathlib.Path(tempfile.mkdtemp(dir=work))/'told'
+    told.write_text('out=other\nwifi=1\nbton=0\ncar=0\nsmart=0\neq=1\nusb=Automatic\n')
+    lines = ['rest', 'tick 2', 'rest', 'hold return', 'rest', 'key centre', 'run 100', 'key centre', 'run 100', 'tick 2', 'rest',
+             'key centre', 'run 100']
+    _, _, _, (sent, _, _) = script(binary, work, 60, lines, *home, '--told', told, queue=True)
+    verbs = [line.split(' ', 1)[1] for line in sent]
+    good &= check('Return held opens Control Center on any page; Wi-Fi, on by demo, goes off, then on again before demo says '
+                  'so, and Car Remote, off, goes on', verbs == ['set wifi 0', 'set wifi 1', 'set car 1'], str(verbs))
+    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'hold return', 'rest', 'tick 5', 'rest', 'key centre', 'run 100'],
+                                   *home, '--told', told, code=3, queue=True)
+    asked = (d/'ask').read_text() if (d/'ask').exists() else ''
+    good &= check("its USB row opens demo's USB picker", asked == 'usbpick_page\n' and sent == [], repr(asked))
+    return good
 
 
 def album_covers(binary, work, home):

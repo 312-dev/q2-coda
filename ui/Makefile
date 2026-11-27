@@ -3,7 +3,7 @@
 #   make OUT=build/mips CC="mips-mti-linux-gnu-gcc -EL ..." STB=DIR STBI=DIR SQLITE_INC=DIR SQLITE_LIB=ROOTFS/usr/lib/libsqlite3.so.0.8.6
 OUT ?= build/host
 STRIP ?= strip
-SRC := main.c ui.c anim.c fb.c panel.c draw.c text.c image.c input.c theme.c status.c lib.c player.c now.c art.c list.c card.c page_songs.c page_library.c page_settings.c page_home.c page_now.c page_depth.c page_gallery.c \
+SRC := main.c ui.c anim.c fb.c panel.c draw.c text.c image.c input.c theme.c status.c lib.c player.c now.c art.c list.c card.c page_songs.c page_library.c page_settings.c page_control.c page_home.c page_now.c page_depth.c page_gallery.c \
        ../patch/wheel_accel.c
 OBJ := $(patsubst %.c,$(OUT)/%.o,$(notdir $(SRC)))
 CFLAGS := -std=c11 -D_GNU_SOURCE -O2 -g -Wall -Wextra -ffunction-sections -fdata-sections -isystem $(STB) -isystem $(STBI) -isystem $(SQLITE_INC)

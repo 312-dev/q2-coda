@@ -252,6 +252,7 @@ extern int ui_painting; /* 1 while a frame is drawn: marks and state changes are
 int ui_run(void);       /* the loop, until ui_quit; the exit code */
 void ui_on_rest(void (*fn)(void));       /* called once each time the loop comes to rest */
 void ui_on_stack(void (*fn)(void));      /* called when a page has opened or closed */
+void ui_on_hold(int key, void (*fn)(void)); /* a key held, on any page, is fn's and not the page's (Return: Control Center) */
 void ui_watch(int fd, void (*fn)(void)); /* fn when fd is readable (a daemon's message); four at most */
 extern const char *ui_backlight;         /* the folder of backlights whose state says the screen is dark */
 /* One pass by hand, for the bench and a script: events, the step at the frame's time, the draw,
@@ -288,6 +289,7 @@ void status_clock_fixed(const char *hhmm);
 /* where the battery, Wi-Fi's state and its signal are read (a test's are its own files) */
 extern const char *status_power, *status_wifi, *status_wireless, *status_told;
 void status_told_changed(void); /* demo's file of the states only it knows changed (now.c's watch) */
+int status_told_value(const char *key, char *out, size_t room); /* demo's word on key; 0 when it said nothing */
 
 /* ---- list.c: the list every menu is ---- */
 enum {
@@ -327,6 +329,8 @@ typedef struct ui_list ui_list;
 /* A picture a row was given (ui_row.art) may have changed or been freed: every list asks its rows
  * with art again before it draws them. Whoever owns the pictures calls it (ui/art.c). */
 void list_pictures_changed(void);
+void list_rows_changed(void); /* any row's words or marks may have changed: every row is asked again */
+void control_push(void);      /* Control Center (page_control.c) */
 ui_list *list_new(const ui_source *src);
 void list_free(ui_list *l);
 void list_event(ui_list *l, const input_t *e);

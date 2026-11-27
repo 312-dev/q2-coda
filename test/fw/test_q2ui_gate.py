@@ -328,3 +328,33 @@ def test_controls_is_opened_as_homes_controls_row_opens_it(fw):
     g.ask, g.status, g.ended = b'controls_page', ASKED, 1
     g.poll()
     assert g.opened == ['systemset/display_page'] and g.on() == 0
+
+
+def test_q2ui_is_told_its_control_centers_switches(fw):
+    """q2ui's Control Center shows demo's settings as demo has them (control_center.c q2ui_cc_state)."""
+    from conftest import Files
+    files = Files(fw)
+    g = Gate(fw)
+    fw.var('g_wififlag', C.c_ubyte).value = 1
+    g.poll()
+    g.poll()
+    said = dict(line.split('=', 1) for line in files.files['/tmp/q2ui.status'].decode().splitlines())
+    assert said['wifi'] == '1' and said['bton'] == '0' and said['car'] == '0' and said['smart'] == '0' and 'usb' in said
+    fw.var('g_wififlag', C.c_ubyte).value = 0
+    g.ms += 600
+    g.poll()
+    assert 'wifi=0\n' in files.files['/tmp/q2ui.status'].decode()
+
+
+def test_q2uis_switches_flip_only_what_differs(fw):
+    """control_center.c q2ui_cc_set, which "set NAME 0|1" from q2ui's queue runs: Wi-Fi through stock's own switch,
+    only when it is not already so; Smart Wi-Fi saved; a name it has not is refused."""
+    flips, saved = [], []
+    fw.mock('wifi_switch', lambda v, *_: flips.append(v) or 0)
+    fw.mock('write_int_config', lambda v, sec, key, *_: saved.append((C.string_at(key).decode(), v)) or 0)
+    cc = fw.fn('q2ui_cc_set', C.c_int, C.c_char_p, C.c_int)
+    fw.var('g_wififlag', C.c_ubyte).value = 1
+    assert cc(b'wifi', 1) == 0 and flips == []
+    assert cc(b'wifi', 0) == 0 and flips == [1]
+    assert cc(b'smart', 1) == 0 and saved[-1] == ('SMARTWIFI', 1)
+    assert cc(b'reboot', 1) == -1

@@ -63,17 +63,20 @@ static struct {
     int n, ids[PLAYLISTS_MAX];
     char names[PLAYLISTS_MAX][64];
 } pls;
+/* with none, one greyed row says so (demo's empty state, docs/oled-design.md#empty-and-offline, is a
+ * glyph and words over the page: ponytail) */
 static int p_count(void *ctx) {
     (void)ctx;
-    return pls.n;
+    return pls.n ? pls.n : 1;
 }
 static void p_row(void *ctx, int i, ui_row *out) {
     (void)ctx;
-    out->title = pls.names[i], out->flags = ROW_CHEVRON;
+    if (!pls.n) out->title = "No Playlists", out->flags = ROW_GREY;
+    else out->title = pls.names[i], out->flags = ROW_CHEVRON;
 }
 static void p_chosen(void *ctx, int i) {
     (void)ctx;
-    playlist_push(pls.ids[i]);
+    if (pls.n) playlist_push(pls.ids[i]);
 }
 static void playlists_push(void) {
     pls.n = lib_playlists(pls.ids, pls.names, PLAYLISTS_MAX); /* read again each time: demo edits them */

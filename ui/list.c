@@ -85,7 +85,7 @@ int list_motion = 1;
 
 struct rowc {
     int index; /* -1: empty */
-    unsigned pictures; /* list_pictures when a row with art was asked for */
+    unsigned pictures, everything; /* list_pictures and list_rows_changed's count when the row was asked for */
     ui_row row;
     run_t title, detail, value, sub, lead;
     float title_x, detail_x, text_end; /* where the title's column ends */
@@ -234,20 +234,21 @@ void list_changed(ui_list *l) {
  * is dropped; a value keeps its width at the right column and the title is cut to leave it. */
 /* Bumped by list_pictures_changed: a row's art is asked for again, as the picture it was given
  * may have been replaced (a cover read) or freed. */
-static unsigned pictures;
+static unsigned pictures, everything;
 void list_pictures_changed(void) { ++pictures; }
+void list_rows_changed(void) { ++everything; }
 
 static struct rowc *row_text(ui_list *l, int i) {
     struct rowc *c = &l->rows_c[i & (CACHE - 1)];
     if (c->index == i && !run_stale(&c->title) && !run_stale(&c->detail) && !run_stale(&c->value) &&
-        !run_stale(&c->sub) && !run_stale(&c->lead) && (!c->row.art || c->pictures == pictures))
+        !run_stale(&c->sub) && !run_stale(&c->lead) && (!c->row.art || c->pictures == pictures) && c->everything == everything)
         return c;
     static run_t gap;
     if (!gap.n || run_stale(&gap)) run_make(&gap, FACE_REGULAR, TITLE_PX, "  ", -1);
     ui_row *r = &c->row;
     memset(r, 0, sizeof *r);
     l->src.row(l->src.ctx, i, r);
-    c->index = i, c->pictures = pictures;
+    c->index = i, c->pictures = pictures, c->everything = everything;
     int two = l->row_h > ROW_H && r->sub;
     float x = (float)(l->box.x + TEXT_X + TEXT_MARGIN);
     if (r->icon) x = (float)(l->box.x + ICON_TEXT_X + TEXT_MARGIN);

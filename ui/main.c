@@ -227,6 +227,14 @@ static void at_rest(void) {
     state_save();
 }
 
+/* Return held, on any page: Control Center, unless it is on top already */
+static void control_center(void) {
+    char route[256];
+    ui_route(route, sizeof route);
+    const char *last = strrchr(route, '/') ? strrchr(route, '/') + 1 : route;
+    if (strncmp(last, "control:", 8)) control_push();
+}
+
 static void first_page(void) {
     if (!strcmp(opt.page, "home"))
         ui_push(&page_home, 0);
@@ -427,6 +435,7 @@ int main(int argc, char **argv) {
     open_ms = (unsigned)((mono_us() - t0) / 1000u);
     now_open();
     art_sync = opt.script || opt.bench; /* covers read in place: a script's pictures and a bench's times repeat */
+    ui_on_hold(KEY_UI_RETURN, control_center);
     if (opt.script) {
         int code = script(opt.script);
         fb_close();
