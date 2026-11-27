@@ -25,7 +25,8 @@ q2playd) and q2ui draws a frame.
 
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
-before the modules), `module` (the framebuffer's insmod dropped from the copy's module script).
+before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd).
 """
 import argparse
 import hashlib
@@ -44,6 +45,7 @@ sys.path.insert(0, str(ROOT/'tools'))
 import player  # noqa: E402
 import thirdparty  # noqa: E402
 import vampos as vamp_os  # noqa: E402
+import vamp  # noqa: E402
 
 NO_PRELOAD = {k: v for k, v in os.environ.items() if k != 'LD_PRELOAD'}
 FAILS = []
@@ -81,6 +83,13 @@ def check_pins():
     version, url, digest = thirdparty.SOURCES['mbedtls']
     check(f'Q2_MBEDTLS_VERSION = {version}\n' in mk('q2-mbedtls')
           and hashes(pkg/'q2-mbedtls').get(url.rsplit('/', 1)[1]) == digest, f'mbedTLS {version} as tools/thirdparty.py pins it')
+    version, url, digest = thirdparty.SOURCES['adbd']
+    got = hashes(pkg/'q2-adbd')
+    deb_url, deb_digest = thirdparty.ADBD_DEBIAN
+    check(f'Q2_ADBD_VERSION = {version}\n' in mk('q2-adbd') and got.get(url.rsplit('/', 1)[1]) == digest
+          and got.get(deb_url.rsplit('/', 1)[1]) == deb_digest and deb_url in mk('q2-adbd')
+          and all(got.get(n) == d for n, d in thirdparty.ADBD_MINCRYPT_FILES.items())
+          and thirdparty.ADBD_MINCRYPT.rstrip('/') in mk('q2-adbd'), f'adbd {version} as tools/thirdparty.py pins it')
     got = hashes(pkg/'q2ui-stb')
     # tools/ui.py is on q2ui's branch: its STB and STB_IMAGE at the commit the image builds
     text = subprocess.check_output([*vamp_os.GIT, 'show', f'{vamp_os.Q2UI_COMMIT}:tools/ui.py'], text=True)
@@ -173,7 +182,7 @@ def check_image(build, fs, manifest, perturb=None):
     check(actions.count('sysinit') == 1 and table[0] == '::sysinit:/etc/init.d/rcS'
           and '::respawn:/usr/bin/runsvdir -P /etc/sv' in table, 'inittab: rcS, the one sysinit, then runsvdir over /etc/sv')
     services = sorted(p.name for p in (fs/'etc/sv').iterdir())
-    check(services == ['q2player', 'q2ui'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
+    check(services == ['adb-wifi', 'adbd', 'dhcp', 'q2player', 'q2ui', 'wlan'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
           f'services: {", ".join(services)}')
     check(not (fs/'etc/init.d').exists() or sorted(p.name for p in (fs/'etc/init.d').iterdir()) == ['rcK', 'rcS'],
           '/etc/init.d holds rcS and rcK alone')
@@ -192,11 +201,56 @@ def expected_modules(fs):
 
 # Each stand-in's line goes into the boot log itself (bound over /run/vamp/boot.log), so the commands and rcS's
 # steps are in one file in the order they happened.
+def adb_open(port=5555):
+    """Whether something accepts on 127.0.0.1:port (the sandbox shares this machine's network)."""
+    import socket as sk
+    try:
+        sk.create_connection(('127.0.0.1', port), 1).close()
+        return True
+    except OSError:
+        return False
+
+
+def adb_checks(fs, closed_s=15, wait_s=30):
+    """adb over Wi-Fi in the booted image (docs/vamp-os-base.md#adb): no port while no computer is trusted; a key put
+    in /mnt/data/adb_keys opens it within q2adb-wifi's 10 s and lets that key in (exec: reads the image's own
+    /etc/vamp-release), refuses another key, and closes the port again once the file is gone."""
+    keys = fs/'mnt/data/adb_keys'
+    end = time.monotonic() + closed_s
+    opened = False
+    while time.monotonic() < end and not opened:
+        opened = adb_open()
+        time.sleep(1)
+    check(not opened, f'adb: no port 5555 for {closed_s} s while no computer is trusted')
+    key, other = vamp.Key.generate(), vamp.Key.generate()
+    keys.write_text(key.public_line() + '\n')
+    target = {'name': '127.0.0.1', 'ip': '127.0.0.1', 'port': 5555, 'id': ''}
+    got, end = None, time.monotonic() + wait_s
+    while time.monotonic() < end and got is None:
+        try:
+            got = vamp.Device(dict(target), key).exec_out('cat /etc/vamp-release')
+        except (OSError, vamp.AdbError, TimeoutError):
+            time.sleep(1)
+    want = (fs/'etc/vamp-release').read_bytes()
+    check(got == want, f'adb: a trusted key gets in over Wi-Fi and reads the image\'s /etc/vamp-release{"" if got == want else ": " + repr(got)}')
+    try:
+        vamp.Device(dict(target), other).exec_out('id')
+        refused = False
+    except (vamp.Unauthorized, vamp.AdbError, OSError, TimeoutError):
+        refused = True
+    check(refused, 'adb: an untrusted key is refused')
+    keys.unlink()
+    end = time.monotonic() + wait_s
+    while time.monotonic() < end and adb_open():
+        time.sleep(1)
+    check(not adb_open(), 'adb: the port closes once no computer is trusted')
+
+
 STUB = '#!/bin/sh\necho "$(cut -d" " -f1 /proc/uptime) \\$ ${0##*/} $*" >> /emu/record\n'
 STUBBED = ['bin/mount', 'bin/mknod', 'sbin/mdev', 'sbin/insmod', 'usr/sbin/ubiattach', 'bin/dmesg']
 
 
-def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=False):
+def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=False, adb=True):
     work = pathlib.Path(keep or tempfile.mkdtemp(prefix='vamp-os-boot-', dir='/tmp'))
     work.mkdir(parents=True, exist_ok=True)
     fs = unpack(composed, work/'fs')
@@ -210,6 +264,10 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         rcs = (fs/'etc/init.d/rcS').read_text()
         rcs = rcs.replace('    step "modules: start"\n', '    step "modules: start"\n    step "rcS: done, starting the services"\n')
         (fs/'etc/init.d/rcS').write_text(rcs)
+    if perturb == 'adb-open':  # Wi-Fi adbd with no key check: an open port
+        (fs/'etc/sv/adb-wifi/run').write_text('#!/bin/sh\nexec /usr/bin/adbd --tcp 5555\n')
+    if perturb == 'adb-off':  # no Wi-Fi adbd at all
+        (fs/'etc/sv/adb-wifi/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'module':
         md = fs/'vendor/module_driver/driver_default_init_script.sh'
         md.write_text(md.read_text().replace('sh soc_fb.sh\n', ''))
@@ -263,6 +321,10 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
             else:
                 time.sleep(0.5)
             drew = drew or any(fb.read_bytes())
+        if adb and not card and proc.poll() is None:
+            adb_checks(fs)
+        if card:  # the services' first lines
+            time.sleep(3)
     finally:
         proc.kill()
         proc.wait()
@@ -288,6 +350,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
               'card boot: the module script is not run again over loaded modules')
         check(first('data: already mounted') is not None and not any(s.startswith(('ubiattach', 'mount -t tmpfs -o mode=0755 tmpfs /mnt/data')) for s in order),
               'card boot: /mnt/data is kept as mounted')
+        check(first("adbd: left to today's Vamp (card boot)") is not None and first("adb-wifi: left to today's Vamp (card boot)") is not None
+              and first('adbd: start') is None and first('adb-wifi: start') is None, "card boot: adb is left to today's Vamp's adbd")
         idx = [first('rcS: done'), first('q2player: start'), first('q2ui: start')]
         check(None not in idx and idx[0] < min(idx[1:]), 'card boot: rcS done, then the services')
         print(f'boot: {logs or work} (console.log, timeline.txt)')
@@ -322,7 +386,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     a = ap.parse_args()
     manifest, _ = vamp_os.read_manifest()

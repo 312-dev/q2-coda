@@ -5,4 +5,6 @@ source "$BR2_EXTERNAL_VAMP_PATH/package/q2player/Config.in"
 source "$BR2_EXTERNAL_VAMP_PATH/package/q2ui-stb/Config.in"
 source "$BR2_EXTERNAL_VAMP_PATH/package/q2ui/Config.in"
 source "$BR2_EXTERNAL_VAMP_PATH/package/vamp-assets/Config.in"
+source "$BR2_EXTERNAL_VAMP_PATH/package/q2-adbd/Config.in"
+source "$BR2_EXTERNAL_VAMP_PATH/package/q2adb/Config.in"
 endmenu

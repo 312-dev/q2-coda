@@ -1,0 +1,13 @@
+#!/bin/sh
+# adb over Wi-Fi (docs/adb.md#adb-over-wi-fi): q2adb-wifi keeps `adbd --tcp 5555` and the _adb._tcp responder
+# running only while a computer is trusted (/mnt/data/adb_keys or the card's adb_keys) and config.ini has no
+# ADBWIFI=0, and stops both otherwise: no port is open on a network until a key is trusted.
+. /usr/libexec/vamp/log
+if [ -e /run/vamp/card-boot ]; then
+    # started from the card (docs/vamp-os-base.md#card-boot): today's Vamp's adbd, outside the chroot, already has
+    # the Wi-Fi side, and keeps serving it
+    step "adb-wifi: left to today's Vamp (card boot)"
+    exec sleep 2147483647
+fi
+step "adb-wifi: start"
+exec /usr/bin/q2adb-wifi

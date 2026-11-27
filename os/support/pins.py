@@ -3,14 +3,20 @@
 
     pins.py ffmpeg-configure PREFIX   tools/player.py's configure_args(PREFIX), quoted for a shell
     pins.py mbedtls-unset             tools/thirdparty.py's MBEDTLS_UNSET, one per word
+    pins.py adbd SRC DL CC            tools/thirdparty.py's build_adbd on the unpacked source SRC, its other files
+                                      taken from Buildroot's download folder DL (each checked against its pin), compiled
+                                      with CC; the program in SRC/stage/usr/bin/adbd
+    pins.py adb-mdns-sources          tools/build.py's ADB_MDNS_SOURCES
 
 Run from the tree tools/vampos.py exported, so the settings are those of the commit the image names.
 """
+import ast
 import pathlib
 import shlex
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]/'tools'))
+TOOLS = pathlib.Path(__file__).resolve().parents[2]/'tools'
+sys.path.insert(0, str(TOOLS))
 import player  # noqa: E402
 import thirdparty  # noqa: E402
 
@@ -18,5 +24,26 @@ if sys.argv[1:2] == ['ffmpeg-configure'] and len(sys.argv) == 3:
     print(' '.join(shlex.quote(a) for a in player.configure_args(sys.argv[2])))
 elif sys.argv[1:] == ['mbedtls-unset']:
     print(' '.join(thirdparty.MBEDTLS_UNSET))
+elif sys.argv[1:2] == ['adbd'] and len(sys.argv) == 5:
+    src, dl, cc = pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3]), sys.argv[4]
+
+    def fetch(url, digest, name):  # Buildroot fetched it, by its last path part, into dl
+        path = dl/url.rsplit('/', 1)[-1]
+        if thirdparty.sha256(path) != digest:
+            sys.exit(f'pins: {path} does not have SHA-256 {digest}')
+        return path
+    thirdparty.fetch = fetch
+
+    class Env:
+        pass
+    env = Env()
+    env.cc = cc
+    log = src/'q2-adbd.log'
+    log.write_text('')
+    thirdparty.build_adbd(src, src/'stage', env, log)
+elif sys.argv[1:] == ['adb-mdns-sources']:
+    tree = ast.parse((TOOLS/'build.py').read_text())
+    value = next(n.value for n in tree.body if isinstance(n, ast.Assign) and any(getattr(t, 'id', None) == 'ADB_MDNS_SOURCES' for t in n.targets))
+    print(' '.join(ast.literal_eval(value)))
 else:
     sys.exit(__doc__)

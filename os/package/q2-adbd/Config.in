@@ -1,0 +1,6 @@
+config BR2_PACKAGE_Q2_ADBD
+	bool "q2-adbd"
+	help
+	  Android 4.2.2's adbd as today's --dev builds have it (docs/adb.md#adbd): Debian's android-tools
+	  source, its patches, libmincrypt and tools/adbd.patch, built by tools/thirdparty.py's build_adbd
+	  against this image's glibc.

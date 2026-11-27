@@ -1,0 +1,20 @@
+#!/bin/sh
+# adbd over USB (docs/adb.md#adbd, docs/vamp-os-base.md#adb): the q2adb gadget made, adbd started, and the gadget
+# put on the controller once adbd has written its descriptors (q2adb-gadget bind waits for them). A computer gets in
+# only with a key in /mnt/data/adb_keys or the card's adb_keys: nothing here answers adbd's prompt socket, so an
+# unknown key is refused at once.
+. /usr/libexec/vamp/log
+if [ -e /run/vamp/card-boot ]; then
+    # started from the card (docs/vamp-os-base.md#card-boot): today's Vamp's adbd, outside the chroot, already has
+    # the USB side, and keeps serving it
+    step "adbd: left to today's Vamp (card boot)"
+    exec sleep 2147483647
+fi
+if ! /usr/bin/q2adb-gadget setup; then
+    step "adbd: no USB gadget (configfs or FunctionFS refused)"
+    exec sleep 30
+fi
+/usr/bin/q2adb-gadget bind &
+step "adbd: start"
+exec 2>&1
+exec /usr/bin/adbd

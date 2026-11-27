@@ -53,6 +53,7 @@ data() {
     # started from the card by today's Vamp (docs/vamp-os-base.md#card-boot), which has it mounted already
     if grep -q ' /mnt/data ' /proc/mounts; then
         step "data: already mounted"
+        : > /run/vamp/card-boot  # the services read it: today's Vamp's adbd serves this boot
         return 0
     fi
     num=$(sed -n 's/^mtd\([0-9]*\):.*"userdata"$/\1/p' /proc/mtd 2>/dev/null)
