@@ -1,0 +1,289 @@
+#!/usr/bin/env python3
+"""q2playd (playd/q2playd.c, docs/playd.md) built for this machine, with a stand-in for q2player on its socket:
+what it sends the player for each command from q2ui's FIFO and list file and from Q2PLAY/1, how it moves on when a
+song ends, is cut or fails, what it writes for q2ui in /tmp/coda-rc.now, and what Q2PLAY/1's watchers are told.
+The player's side, the real q2player against q2playd, is test/os_image.py's boot. Run it as python3 test/playd.py
+(pytest). Q2PLAYD_SOURCE builds another copy of q2playd.c, to show a broken one fails here."""
+import os
+import pathlib
+import re
+import socket
+import sqlite3
+import subprocess
+import sys
+import time
+
+import pytest
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+SOURCE = pathlib.Path(os.environ.get('Q2PLAYD_SOURCE') or ROOT/'playd/q2playd.c')
+SONGS = [(1, '/mnt/mmc/Music/a.flac', 'Alpha', 'Ann', 'First'), (2, '/mnt/mmc/Music/b.mp3', 'Beta', 'Bob', 'First'),
+         (3, '/mnt/mmc/Music/c}d.flac', 'Gamma', 'Cy', 'Second'), (5, '/mnt/mmc/Music/e.dsf', 'Epsilon', 'Eve', 'Third')]
+
+
+@pytest.fixture(scope='session')
+def binary(tmp_path_factory):
+    out = tmp_path_factory.mktemp('playd')
+    inc = sorted(pathlib.Path(os.environ.get('Q2_THIRDPARTY_CACHE', pathlib.Path.home()/'.cache/q2-thirdparty')).glob('out/sqlite-*/usr/include'))
+    lib = next(pathlib.Path('/usr/lib').glob('*-linux-gnu/libsqlite3.so.0'))
+    src = out/'q2playd.c'
+    src.write_bytes(SOURCE.read_bytes())
+    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', *(['-isystem', str(inc[-1])] if inc else []),
+                    '-o', str(out/'q2playd'), str(src), str(lib)], check=True)
+    return out/'q2playd'
+
+
+class Player:
+    """q2player's side of /tmp/sock_play: what it was sent, and what it says."""
+    def __init__(self, root):
+        self.s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        end = time.monotonic() + 5
+        while True:
+            try:
+                self.s.connect(str(root/'tmp/sock_play'))
+                break
+            except OSError:
+                if time.monotonic() > end:
+                    raise
+                time.sleep(0.02)
+        self.s.settimeout(0.05)
+        self.got, self.buf = [], b''
+        self.info = '0|0|0|0|FLAC|16'
+
+    def pump(self, seconds=0.3):
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            try:
+                data = self.s.recv(4096)
+            except socket.timeout:
+                continue
+            if not data:
+                break
+            self.buf += data
+            for m in re.finditer(rb'\{([^\\}]*)\\([^}]*)\}', self.buf):
+                name, arg = m.group(1).decode(), m.group(2).decode()
+                if name == 'player-status':
+                    self.say('player-status', 'playing')
+                elif name == 'media-info':
+                    self.say('media-info', self.info)
+                else:
+                    self.got.append((name, arg))
+            self.buf = self.buf[self.buf.rfind(b'}') + 1:]
+
+    def say(self, name, arg):
+        self.s.sendall(('{%s\\%s}' % (name, arg)).encode())
+
+    def songs(self):
+        return [(n, a.split('|')[0]) for n, a in self.got if n in ('set-songurl', 'set-nexturl')]
+
+    def names(self):
+        return [n for n, _ in self.got]
+
+
+@pytest.fixture
+def run(binary, tmp_path):
+    for d in ('tmp', 'run', 'mnt/data'):
+        (tmp_path/d).mkdir(parents=True)
+    db = sqlite3.connect(tmp_path/'mnt/data/database.db')
+    db.execute('create table songtable(id integer primary key, fileurl, name, songer, album, track)')
+    db.executemany('insert into songtable values (?, ?, ?, ?, ?, 0)', SONGS)
+    db.commit()
+    db.close()
+    p = subprocess.Popen([str(binary), '--root', str(tmp_path)], stderr=subprocess.PIPE)
+    player = Player(tmp_path)
+    yield tmp_path, player
+    p.terminate()
+    assert p.wait(5) == 0, 'q2playd ends on SIGTERM'
+
+
+def fifo(root, *lines):
+    fd = os.open(root/'tmp/coda-rc.cmdq', os.O_WRONLY | os.O_NONBLOCK)
+    for i, line in enumerate(lines):
+        os.write(fd, f'{i + 1} {line}\n'.encode())
+    os.close(fd)
+
+
+def play_list(root, ids, at, shuffle=0):
+    (root/'tmp/coda-rc.list').write_text(''.join(f'{i}\n' for i in ids))
+    fifo(root, f'play {at} {shuffle} {len(ids)}')
+
+
+def now(root, wait=1.0):
+    time.sleep(wait)
+    text = (root/'tmp/coda-rc.now').read_text()
+    return dict(line.split('=', 1) for line in text.splitlines())
+
+
+def test_a_play_from_q2ui_starts_its_song_with_demo_s_fields(run):
+    root, pl = run
+    play_list(root, [1, 2, 3], 1)
+    pl.pump()
+    assert pl.got[0] == ('set-songurl', '/mnt/mmc/Music/b.mp3|ss=0|512|20|0|17|90')
+    n = now(root)
+    assert (n['title'], n['artist'], n['album'], n['state'], n['id']) == ('Beta', 'Bob', 'First', '1', '2')
+
+
+def test_the_cache_follows_the_file_kind_and_a_brace_is_escaped(run):
+    root, pl = run
+    play_list(root, [3, 5], 0)
+    pl.pump()
+    assert pl.got[0] == ('set-songurl', '/mnt/mmc/Music/c%0x7dd.flac|ss=0|1024|20|0|17|90')
+    pl.say('player-status', 'exit')
+    pl.pump()
+    assert pl.got[1] == ('set-songurl', '/mnt/mmc/Music/e.dsf|ss=0|4096|50|0|17|90')
+
+
+def test_a_song_s_end_plays_the_next_and_the_queue_s_end_stops(run):
+    root, pl = run
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    pl.say('player-status', 'exit')
+    pl.pump()
+    pl.say('player-status', 'exit')
+    pl.pump()
+    assert pl.songs() == [('set-songurl', '/mnt/mmc/Music/a.flac'), ('set-songurl', '/mnt/mmc/Music/b.mp3')]
+    assert pl.names()[-1] == 'mcl-orderstop' and now(root)['state'] == '0'
+
+
+def test_a_song_that_fails_is_passed_over(run):
+    root, pl = run
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    pl.say('player-status', 'error')
+    pl.pump()
+    assert pl.songs()[-1] == ('set-songurl', '/mnt/mmc/Music/b.mp3')
+
+
+def test_an_id_not_in_the_library_is_passed_over(run):
+    root, pl = run
+    play_list(root, [99, 2], 0)
+    pl.pump()
+    assert pl.songs() == [('set-songurl', '/mnt/mmc/Music/b.mp3')]
+
+
+def test_next_cuts_the_song_and_its_close_is_no_end(run):
+    root, pl = run
+    play_list(root, [1, 2, 3], 0)
+    pl.pump()
+    fifo(root, 'next')
+    pl.pump()
+    pl.say('player-nextstatus', 'exit')  # the cut song's close (docs/player.md#events)
+    pl.pump()
+    assert pl.songs() == [('set-songurl', '/mnt/mmc/Music/a.flac'), ('set-nexturl', '/mnt/mmc/Music/b.mp3')]
+    assert now(root)['id'] == '2'
+
+
+def test_toggle_pauses_and_plays(run):
+    root, pl = run
+    play_list(root, [1], 0)
+    pl.pump()
+    fifo(root, 'toggle')
+    pl.pump()
+    assert pl.names()[-1] == 'mcl-pause' and now(root)['state'] == '2'
+    fifo(root, 'toggle')
+    pl.pump()
+    assert pl.names()[-1] == 'mcl-play' and now(root)['state'] == '1'
+
+
+def test_previous_restarts_a_song_past_three_seconds_else_goes_back(run):
+    root, pl = run
+    play_list(root, [1, 2], 1)
+    pl.info = '900000|44100|200|12|FLAC|16'
+    pl.pump(1.5)  # a status poll: 12 s in
+    fifo(root, 'previous')
+    pl.pump()
+    assert pl.got[-1] == ('mcl-seek', '0')
+    fifo(root, 'previous')
+    pl.pump()
+    assert pl.songs()[-1] == ('set-nexturl', '/mnt/mmc/Music/a.flac')
+
+
+def test_the_position_and_length_come_from_media_info(run):
+    root, pl = run
+    play_list(root, [1], 0)
+    pl.info = '900000|44100|200|42|FLAC|16'
+    pl.pump(1.5)
+    n = now(root, 0.6)
+    assert (n['pos'], n['len']) == ('42000', '200')
+
+
+def test_the_volume_is_kept_and_shown(run):
+    root, pl = run
+    fifo(root, 'volume 61')
+    assert now(root)['volume'] == '61'
+    fifo(root, 'volume 101')
+    assert now(root)['volume'] == '61'
+
+
+def test_a_player_that_goes_away_leaves_nothing_playing_and_the_next_is_taken(run):
+    root, pl = run
+    play_list(root, [1], 0)
+    pl.pump()
+    pl.s.close()
+    assert now(root)['state'] == '0'
+    again = Player(root)
+    fifo(root, 'resume')
+    again.pump()
+    assert again.songs() == [('set-songurl', '/mnt/mmc/Music/a.flac')]
+
+
+def test_shuffle_starts_with_the_chosen_song_and_plays_each_once(run):
+    root, pl = run
+    play_list(root, [1, 2, 3, 5], 2, shuffle=1)
+    pl.pump()
+    for _ in range(3):
+        pl.say('player-status', 'exit')
+        pl.pump()
+    files = [f for _, f in pl.songs()]
+    assert files[0] == '/mnt/mmc/Music/c%0x7dd.flac' and len(files) == 4 and len(set(files)) == 4
+
+
+class Api:
+    def __init__(self, root, hello='Q2PLAY/1'):
+        self.s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.s.connect(str(root/'run/vamp/play.sock'))
+        self.s.settimeout(3)
+        self.f = self.s.makefile('rw')
+        if hello:
+            self.say(hello)
+
+    def say(self, line):
+        self.f.write(line + '\n')
+        self.f.flush()
+
+    def line(self):
+        return self.f.readline().rstrip('\n')
+
+
+def test_q2play1_greets_refuses_another_version_and_plays(run):
+    root, pl = run
+    a = Api(root)
+    assert a.line() == 'Q2PLAY/1 ok'
+    a.say('play 0 0 2')
+    a.say('5')
+    a.say('1')
+    assert a.line() == 'ok'
+    pl.pump()
+    assert pl.songs() == [('set-songurl', '/mnt/mmc/Music/e.dsf')]
+    a.say('now')
+    assert a.line().startswith('now title=Epsilon artist=Eve album=Third state=1 ')
+    a.say('bogus')
+    assert a.line() == 'err bogus'
+    b = Api(root, 'Q2PLAY/2')
+    assert b.line() == 'err version' and b.line() == ''
+
+
+def test_q2play1_watchers_hear_each_change(run):
+    root, pl = run
+    a = Api(root)
+    assert a.line() == 'Q2PLAY/1 ok'
+    a.say('watch')
+    assert a.line() == 'ok'
+    play_list(root, [2], 0)
+    pl.pump()
+    line = a.line()
+    assert line.startswith('now title=Beta ') and ' state=1 ' in line and line.endswith(' id=2')
+
+
+if __name__ == '__main__':
+    sys.exit(pytest.main([__file__, '-q', '-p', 'no:cacheprovider']))

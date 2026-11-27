@@ -1,0 +1,6 @@
+config BR2_PACKAGE_Q2PLAYD
+	bool "q2playd"
+	select BR2_PACKAGE_SQLITE
+	help
+	  Vamp OS's playback service (playd/, docs/playd.md): the server end of q2player's socket, the
+	  queue, what plays, and the command queue and now file q2ui uses, beside its own Q2PLAY/1 socket.

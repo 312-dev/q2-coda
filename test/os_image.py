@@ -17,8 +17,8 @@ host's binfmt_misc entry for mipsel at its "-binfmt-P" interpreter path. No kern
 ubiattach) are stand-ins that record their arguments; the framebuffer is a file and the keys are FIFOs, as
 in the emulator (~/q2-emu). The boot passes when the record shows rcS's order (file systems, mdev, the data
 partition, every module of Shanling's script in its order with its parameters, the framebuffer) before
-either service starts, q2player connects to /tmp/sock_play (served by this test, standing in for
-q2playd) and q2ui draws a frame.
+either service starts, q2ui draws a frame, q2player connects to q2playd, and a song asked for over Q2PLAY/1
+reaches q2player and its end comes back; then adb over Wi-Fi's key rules.
 
 --card-boot boots it as today's Vamp starts it from the card (patch/q2vampos.sh): /mnt/data already mounted and
 /proc/modules listing every vendor module, so rcS must keep the one and not run the module script again.
@@ -26,7 +26,7 @@ q2playd) and q2ui draws a frame.
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
-Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd).
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd).
 """
 import argparse
 import hashlib
@@ -182,7 +182,7 @@ def check_image(build, fs, manifest, perturb=None):
     check(actions.count('sysinit') == 1 and table[0] == '::sysinit:/etc/init.d/rcS'
           and '::respawn:/usr/bin/runsvdir -P /etc/sv' in table, 'inittab: rcS, the one sysinit, then runsvdir over /etc/sv')
     services = sorted(p.name for p in (fs/'etc/sv').iterdir())
-    check(services == ['adb-wifi', 'adbd', 'dhcp', 'q2player', 'q2ui', 'wlan'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
+    check(services == ['adb-wifi', 'adbd', 'dhcp', 'q2playd', 'q2player', 'q2ui', 'wlan'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
           f'services: {", ".join(services)}')
     check(not (fs/'etc/init.d').exists() or sorted(p.name for p in (fs/'etc/init.d').iterdir()) == ['rcK', 'rcS'],
           '/etc/init.d holds rcS and rcK alone')
@@ -201,6 +201,44 @@ def expected_modules(fs):
 
 # Each stand-in's line goes into the boot log itself (bound over /run/vamp/boot.log), so the commands and rcS's
 # steps are in one file in the order they happened.
+def wav(path, seconds=1, rate=44100):
+    """A short 16-bit stereo WAV of silence and a tone, for the player to open."""
+    import struct as st
+    import math
+    frames = b''.join(st.pack('<hh', *(2 * [int(8000 * math.sin(2 * math.pi * 440 * i / rate))])) for i in range(seconds * rate))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b'RIFF' + st.pack('<I', 36 + len(frames)) + b'WAVEfmt ' + st.pack('<IHHIIHH', 16, 1, 2, rate, rate * 4, 4, 16)
+                     + b'data' + st.pack('<I', len(frames)) + frames)
+
+
+def play_check(fs, console, deadline):
+    """(q2player connected, the song came back) through q2playd's Q2PLAY/1 socket in the booted image: a play of
+    song 1 (/mnt/mmc/song1.wav), and q2playd's word that q2player played it out or could not (no sound card here)."""
+    connected = False
+    while time.monotonic() < deadline and not connected:
+        connected = b'q2playd: the player connected' in console.read_bytes() if console.exists() else False
+        time.sleep(0.5)
+    sock = fs/'run/vamp/play.sock'
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(10)
+        s.connect(str(sock))
+        f = s.makefile('rw')
+        for line in ('Q2PLAY/1', 'play 0 0 1', '1'):
+            f.write(line + '\n')
+        f.flush()
+        replies = [f.readline().strip(), f.readline().strip()]
+        s.close()
+    except OSError as e:
+        return connected, False, repr(e)
+    end = time.monotonic() + 30
+    back = False
+    while time.monotonic() < end and not back:
+        back = re.search(rb'q2playd: song 1 (ended|did not play)', console.read_bytes()) is not None
+        time.sleep(0.5)
+    return connected, replies == ['Q2PLAY/1 ok', 'ok'] and back, replies
+
+
 def adb_open(port=5555):
     """Whether something accepts on 127.0.0.1:port (the sandbox shares this machine's network)."""
     import socket as sk
@@ -266,6 +304,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         (fs/'etc/init.d/rcS').write_text(rcs)
     if perturb == 'adb-open':  # Wi-Fi adbd with no key check: an open port
         (fs/'etc/sv/adb-wifi/run').write_text('#!/bin/sh\nexec /usr/bin/adbd --tcp 5555\n')
+    if perturb == 'playd-off':  # no q2playd
+        (fs/'etc/sv/q2playd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'adb-off':  # no Wi-Fi adbd at all
         (fs/'etc/sv/adb-wifi/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'module':
@@ -287,15 +327,12 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
             os.mkfifo(inp/f'event{n}')
     import sqlite3
     db = sqlite3.connect(fs/'mnt/data/database.db')
-    db.execute('create table songtable (name text, songer text, id integer, album text, track integer)')
-    db.executemany('insert into songtable values (?, ?, ?, ?, ?)',
-                   [(f'Song {i}', 'Artist', i, 'Album', i) for i in range(1, 21)])
+    db.execute('create table songtable (name text, songer text, id integer, album text, track integer, fileurl text)')
+    db.executemany('insert into songtable values (?, ?, ?, ?, ?, ?)',
+                   [(f'Song {i}', 'Artist', i, 'Album', i, f'/mnt/mmc/song{i}.wav') for i in range(1, 21)])
     db.commit()
     db.close()
-    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    srv.bind(str(fs/'tmp/sock_play'))
-    srv.listen(1)
-    srv.settimeout(1)
+    wav(fs/'mnt/mmc/song1.wav')
     console = open(work/'console.log', 'wb')
     extra = []
     if card:
@@ -309,18 +346,14 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
            '--ro-bind', qemu, '/usr/libexec/qemu-binfmt/mipsel-binfmt-P', '--bind', emu, '/emu',
            '--bind', emu/'record', '/run/vamp/boot.log', *extra, '/sbin/init']
     proc = subprocess.Popen([str(c) for c in cmd], stdout=console, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=NO_PRELOAD)
-    conn, drew = None, False
+    drew, played = False, None
     deadline = time.monotonic() + wait_s
     try:
-        while time.monotonic() < deadline and proc.poll() is None and not (conn and drew):
-            if conn is None:
-                try:
-                    conn, _ = srv.accept()
-                except socket.timeout:
-                    pass
-            else:
-                time.sleep(0.5)
-            drew = drew or any(fb.read_bytes())
+        while time.monotonic() < deadline and proc.poll() is None and not drew:
+            time.sleep(0.5)
+            drew = any(fb.read_bytes())
+        if proc.poll() is None:
+            played = play_check(fs, work/'console.log', deadline)
         if adb and not card and proc.poll() is None:
             adb_checks(fs)
         if card:  # the services' first lines
@@ -329,8 +362,10 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         proc.kill()
         proc.wait()
         console.close()
-    check(conn is not None, 'q2player connected to /tmp/sock_play')
     check(drew, 'q2ui drew into the framebuffer')
+    check(bool(played) and played[0], 'q2player connected to q2playd' + ('' if played else ': not reached'))
+    check(bool(played) and played[1], 'a song asked for over Q2PLAY/1 reaches q2player through q2playd, and its end comes back'
+          + ('' if played and played[1] else f': {played}'))
     lines = (emu/'record').read_text().splitlines()
     events = [(l.split(None, 1)[1][2:], 'cmd') if l.split(None, 1)[1].startswith('$ ') else (l.split(None, 1)[1], 'log')
               for l in lines if len(l.split(None, 1)) == 2]
@@ -386,7 +421,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     a = ap.parse_args()
     manifest, _ = vamp_os.read_manifest()

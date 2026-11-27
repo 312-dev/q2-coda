@@ -246,6 +246,13 @@ Where this tree is headed (an `os/` Buildroot tree, services of our own in place
 | `q2player.h` | What the files share: `struct ctl`, the song and format records                              | [player-plan.md](player-plan.md#architecture)   |
 | `Makefile`   | Compile and link for `host` or `mips`; run through `tools/player.py`                         |                                                 |
 
+## playd/: Vamp OS's playback service
+
+| File | For | Enter at | Doc |
+| --- | --- | --- | --- |
+| `q2playd.c` | `q2playd`: q2player's server on `/tmp/sock_play`, the queue, what plays; q2ui's command queue and now file; Q2PLAY/1 on `/run/vamp/play.sock` | `main`, `command`, `player_message`, `client_line` | [playd](playd.md) |
+| `Makefile` | Its build, for the image (`os/package/q2playd`) and this machine (`test/playd.py`) | | [playd](playd.md) |
+
 ## tools/
 
 | File                                                      | For                                                                                                                                     | Enter at                                                            | Doc                                                                                                 |
@@ -326,6 +333,7 @@ Commands and what each needs are in [building.md](building.md#tests). `BUILD` is
 | `q2eq` (`--dev`) | `q2eq.py`: the helper built for the host against a fake demo; demo's side is `fw/test_q2eq.py` | host `cc` |
 | `q2update` and `q2flash` (`--dev`) | `q2update.py`: the helper under the host `sh` against a fake demo; demo's side is `fw/test_q2update.py`, the host tool's `unit/test_q2flash.py` | `sh` |
 | Vamp OS's base image | `os_image.py`: the pins, the image's contents and ABI, the composed `/vendor`, and a boot of it under `qemu-mipsel` (and `--card-boot`); `q2vampos.py`: the card boot's hand-off under the host `sh` | `BUILD`, the ZIP, bwrap, `sh` |
+| q2playd | `playd.py`: q2playd built for this machine against a stand-in q2player: the FIFO and list file, Q2PLAY/1, the now file, ends, cuts and failures | `cc`, the host's SQLite |
 | Guest Play (`q2-guest`, `q2-hotspot`) | `q2_guest.py`: `q2-hotspot` under `sh` with stand-in wpa_supplicant, wpa_cli, ifconfig and udhcpd, then the daemon built for the host on a private bus against `guest/fake_bluez.py` (BlueZ, bluetoothd's `shanling.bluez`, both bluealsa daemons) and stand-in `bluealsa` and `bluealsa-aplay`; demo's side is `fw/test_guest.py` | host `cc`, `dbus-daemon`, dbus-python |
 | Cover art over Bluetooth (`q2-bip`) | `q2bip.py`: the daemon built for the host, a controller over a UNIX packet socket, a stand-in ffmpeg and a real one, the L2CAP listening socket; `unit/test_q2bip.py`: OBEX and BIP packet by packet; `fw/test_bt_cover.py`: demo's file | host `clang`, `ffmpeg` for one test |
 | ADB over USB and Wi-Fi (`--dev`), `vamp` | `adb.py`: adbd under `qemu-mipsel` in bwrap with a stand-in FunctionFS, `adbd --tcp` driven by `vamp`, `q2adb-gadget` on a stand-in configfs and `q2adb-wifi` with stand-ins; `unit/test_vamp.py` against a fake adbd, `unit/test_adb_mdns.py` | `qemu-mipsel`, bwrap; `BUILD` optional |
