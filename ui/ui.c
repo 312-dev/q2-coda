@@ -306,7 +306,10 @@ void ui_watch(int fd, void (*fn)(void)) { extra_fd = fd, extra_fn = fn; }
  * anew under the same pid), so options changed in /mnt/data/q2ui.args, or a new q2ui put where the
  * old one was, take effect with no restart of the Q2 and without demo's gate seeing anything end.
  * If that cannot be done it ends with UI_EXIT_RELOAD, on which a gate that knows the code starts
- * it again (patch/q2ui_gate.c). */
+ * it again (patch/q2ui_gate.c). The signal is held back everywhere but in the loop's wait
+ * (ppoll), so it always ends a wait and is seen at once: let in anywhere else, one that came
+ * between the loop's look at it and its next wait was seen only when that wait ended, at rest up
+ * to a minute later. */
 void (*ui_restart)(void);
 static volatile sig_atomic_t reload;
 static void on_hup(int sig) {
@@ -316,7 +319,11 @@ static void on_hup(int sig) {
 
 int ui_run(void) {
     struct pollfd fds[5];
+    sigset_t hup, open_mask;
+    sigemptyset(&hup), sigaddset(&hup, SIGHUP);
     signal(SIGHUP, on_hup);
+    sigprocmask(SIG_BLOCK, &hup, &open_mask); /* open_mask: as it was, SIGHUP let in */
+    sigdelset(&open_mask, SIGHUP);
     int keys[3], nfds = input_fds(keys, 3), showed = 0, rested = 0, warm = 1;
     for (int i = 0; i < nfds; ++i) fds[i] = (struct pollfd){ keys[i], POLLIN, 0 };
     while (!quit) {
@@ -340,7 +347,8 @@ int ui_run(void) {
             wait = !warm ? (int)(60 - time(0) % 60) * 1000 : poll(fds, (nfds_t)n, 0) > 0 ? 0 : (warm = text_warm(WARM_US), 0);
         } else
             rested = 0;
-        poll(fds, (nfds_t)n, wait);
+        struct timespec ts = { wait / 1000, (long)(wait % 1000) * 1000000L };
+        ppoll(fds, (nfds_t)n, wait >= 0 ? &ts : 0, &open_mask);
         if (extra_fd >= 0 && fds[n - 1].revents && extra_fn) extra_fn();
         input_t in[64];
         int got = input_read(in, 64);
@@ -353,6 +361,7 @@ int ui_run(void) {
         if (got && (quiet_until > last_input || mono_us() - last_input > WAKE_PAUSE_US)) panel_24bit();
         if (got) last_input = mono_us();
         if (reload) {
+            sigprocmask(SIG_SETMASK, &open_mask, 0); /* the program run next starts with it let in */
             if (ui_restart) ui_restart(); /* does not come back when it works */
             ui_quit(UI_EXIT_RELOAD);
         }
