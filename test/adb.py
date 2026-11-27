@@ -610,15 +610,15 @@ def tcp_checks(qemu, adbd):
             expect('a ninth connection is closed at once (8 at most)', closed)
             for s in held + [ninth]:
                 s.close()
-            ok = False
+            ok, last = False, None
             for _ in range(20):
                 time.sleep(.5)
                 try:
                     ok = vamp.Connection(vamp.TcpTransport('127.0.0.1', port), key).device.startswith('device')
                     break
-                except (OSError, vamp.AdbError):
-                    pass
-            expect('once they go, a computer gets in again (the count comes down)', ok)
+                except (OSError, vamp.AdbError) as e:
+                    last = e
+            expect('once they go, a computer gets in again (the count comes down)', ok, repr(last))
             expect('adbd --tcp is still running at the end', dev.p.poll() is None)
         finally:
             dev.stop()

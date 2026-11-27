@@ -14,7 +14,9 @@ capset and prctl) and then the Q2's changes:
   never asks the UI, and each computer let in and each service it opens renames a new
   /tmp/q2remote.used into place for Smart Wi-Fi's hold); no smartsocket on 5037, no JDWP socket, no
   privilege drop (a root shell, behind authorization), umask 022, the keys reloaded at each CNXN.
-- transport_local.c: the Wi-Fi adbd keeps at most 8 connections, each with TCP keep-alive.
+- transport_local.c: the Wi-Fi adbd keeps at most 8 connections, each with TCP keep-alive, and its
+  remote_close leaves the transport's socketpair end to the registration's remove, which closes it (a
+  second close there shut a newer connection's socket, or the listening one).
 - usb_linux_client.c: FunctionFS v2 descriptors with Microsoft OS descriptors (compatible ID WINUSB,
   DeviceInterfaceGUID adb's), so Windows binds WinUSB itself; ep0 kept open for adbd's lifetime, as
   closing it makes the kernel unbind the gadget; host control requests answered.
@@ -1226,7 +1228,7 @@ index 9fd6cc2..88eda09 100644
          if (t->product)
              free(t->product);
 diff --git a/core/adbd/transport_local.c b/core/adbd/transport_local.c
-index ee5e498..12f4d39 100644
+index ee5e498..9aebde7 100644
 --- a/core/adbd/transport_local.c
 +++ b/core/adbd/transport_local.c
 @@ -151,6 +151,26 @@ static void *client_socket_thread(void *x)
@@ -1276,11 +1278,18 @@ index ee5e498..12f4d39 100644
              register_socket_transport(fd, "host", port, 1);
          }
      }
-@@ -355,6 +388,12 @@ static void remote_kick(atransport *t)
+@@ -354,7 +387,19 @@ static void remote_kick(atransport *t)
+ 
  static void remote_close(atransport *t)
  {
++#if ADB_HOST
      adb_close(t->fd);
-+#if !ADB_HOST
++#else
++    /* Q2: not t->fd here. The socket went in remote_kick, and transport_registration_func closes t->fd
++     * when it removes the transport, after this; closing it here too closed whatever socket had been given
++     * that number in between, a new computer's or the listening one (seen with 9 connections opened and
++     * closed: slots lost, then adbd refusing every connection). 4.2.2's USB adbd never has two transports,
++     * so it never showed there. */
 +    adb_mutex_lock(&tcp_live_lock);
 +    if (tcp_live > 0)
 +        tcp_live--;
