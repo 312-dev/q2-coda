@@ -14,7 +14,7 @@
 | `usb dac` | `ok`, or `err usb`: the Q2 a USB DAC for the computer, the player stopped ([dacloop](../dacloop.md)); capability word `usb-dac` |
 | `usb car` | `ok`, or `err usb`: Car Audio, the Q2 shown to the host as an iPhone until q2-iap decides; a car stays (a `car` event), anything else ends in `usb adb` ([Car Audio on Vamp OS](../car-audio-os.md)); capability word `usb-car`. q2sysd also changes the mode itself at a cable in and out ([q2sysd: The cable](../sysd.md#the-cable)), each change told as below |
 | `standby` | `ok`, before the Q2 suspends |
-| `watch` | `ok`; then `screen on`, `screen off`, `battery ...`, `charge held level=N`, `charge allowed level=N`, `usb adb`, `usb storage`, `usb dac`, `usb car`, `car`, `usb ask` (a cable in on Ask Every Time: the chooser's to draw), `standby`, `resumed` and `power off` lines as they happen |
+| `watch` | `ok`; then `screen on`, `screen off`, `battery ...`, `charge held level=N`, `charge allowed level=N`, `usb adb`, `usb storage`, `usb dac`, `usb car`, `car`, `usb ask` (a cable in on Ask Every Time: the chooser's to draw), `standby`, `resumed`, `charge wait` (Auto Power Off with a cable in: the Q2 stays on until the cable is out or the battery is full, [q2sysd](../sysd.md#auto-standby-and-auto-power-off); the charge screen is the UI's to draw), `power off` and `reboot` lines as they happen |
 | `caps` | `caps screen awake brightness usb usb-dac usb-car standby battery watch` |
 
 ```conformance

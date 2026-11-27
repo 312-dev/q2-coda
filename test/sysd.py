@@ -94,12 +94,13 @@ class Service(threading.Thread):
 
 @pytest.fixture
 def run(binary, tree, tools, request):
-    extra = getattr(request, 'param', [])
+    extra = [a.format(root=tree) for a in getattr(request, 'param', [])]
     p = subprocess.Popen([str(binary), '--root', str(tree), '--poweroff', f'touch {tree}/powered-off', *extra], stderr=subprocess.PIPE)
     end = time.monotonic() + 5
     while not (tree/'run/vamp/sys.sock').exists() and time.monotonic() < end:
         time.sleep(0.02)
     time.sleep(0.2)
+    assert p.poll() is None, 'q2sysd took its arguments'  # else the FIFO's open below waits for a reader forever
     keys = os.open(tree/'dev/input/event1', os.O_WRONLY)
     yield tree, keys
     os.close(keys)
@@ -397,6 +398,149 @@ def test_neither_when_stock_s_settings_are_off(run):
     put(root, '/mnt/data/config.ini', '[SYSSET]\nSTANDBYMODE=0\nSAVEPOWERMODE=0\nLIGHTTIME=6\n')
     time.sleep(20)
     assert read(root, '/sys/power/state') == '' and not (root/'powered-off').exists()
+
+
+class Watch(threading.Thread):
+    """a Q2SYS/1 watcher keeping every event line"""
+    def __init__(self, root):
+        super().__init__(daemon=True)
+        self.a, self.lines = Api(root), []
+        self.a.line()
+        self.a.say('watch')
+        self.a.line()
+        self.a.s.settimeout(None)
+        self.start()
+
+    def run(self):
+        for line in self.a.f:
+            self.lines.append(line.rstrip('\n'))
+
+
+def until_file(root, rel, want, secs):
+    end = time.monotonic() + secs
+    while time.monotonic() < end:
+        p = root/rel.lstrip('/')
+        if p.exists() and p.read_text().strip() == want:
+            return True
+        time.sleep(0.1)
+    return False
+
+
+# stock's check_to_poweroption (0x4f3c90) counts down only while nothing holds it, and a hold stops the count where it
+# is: music that plays for a while leaves the rest of the time, not a whole one, once it ends
+@pytest.mark.parametrize('run', [['--time-scale', '20']], indirect=True)
+def test_music_stops_auto_standby_s_count_and_does_not_start_it_again(run):
+    root, _ = run
+    Service(root/'run/vamp/play.sock', 'Q2PLAY/1'), Service(root/'run/vamp/net.sock', 'Q2NET/1')
+    put(root, '/sys/power/state', '')
+    put(root, '/mnt/data/config.ini', '[SYSSET]\nSTANDBYMODE=1\nLIGHTTIME=6\n')
+    time.sleep(9)
+    put(root, '/tmp/coda-rc.now', 'title=A\nstate=1\nid=1\n')
+    time.sleep(10)
+    assert read(root, '/sys/power/state') == '', 'music playing holds it'
+    put(root, '/tmp/coda-rc.now', 'title=A\nstate=2\nid=1\n')
+    assert until_file(root, '/sys/power/state', 'mem', 9), 'the 6 s left of 15 when the music began, not 15 again'
+
+
+# stock's screen_action starts the times again only as the screen comes on: the screen off time darkening it is no use
+@pytest.mark.parametrize('run', [['--time-scale', '15']], indirect=True)
+def test_the_screen_going_off_by_itself_does_not_start_auto_standby_again(run):
+    root, _ = run
+    Service(root/'run/vamp/play.sock', 'Q2PLAY/1'), Service(root/'run/vamp/net.sock', 'Q2NET/1')
+    put(root, '/sys/power/state', '')
+    put(root, '/mnt/data/config.ini', '[SYSSET]\nSTANDBYMODE=1\nLIGHTTIME=0\n')
+    assert until(lambda: not lit(root), 17), 'LIGHTTIME 0: dark at 15 s'
+    assert until_file(root, '/sys/power/state', 'mem', 8), '300 s scaled is 20 s from the last use, not from the dark'
+
+
+# stock's Standby gate ends on g_charge_state, usb_detect's cable: a charger holds it (Charge Only: no USB mode to hold it)
+@pytest.mark.parametrize('run', [['--time-scale', '40']], indirect=True)
+def test_a_charger_holds_auto_standby(run):
+    root, _ = run
+    Service(root/'run/vamp/play.sock', 'Q2PLAY/1'), Service(root/'run/vamp/net.sock', 'Q2NET/1')
+    put(root, '/sys/power/state', '')
+    put(root, '/mnt/data/config.ini', '[SYSSET]\nSTANDBYMODE=1\nLIGHTTIME=6\nUSBPICK=1\n[Q2POD]\nUSBPICK=1\n')
+    cable(root, 1)
+    time.sleep(10)
+    assert read(root, '/sys/power/state') == '' and mode(root) == 'usb adb', '300 s scaled is 7.5 s: held by the charger'
+    cable(root, 0)
+    assert until_file(root, '/sys/power/state', 'mem', 10), 'the cable out: Standby 7.5 s later'
+
+
+# Auto Power Off is not held by a cable (stock has no g_charge_state in its gate): with one in, stock's poweroff_page
+# stops the music and the radios and waits on the charge, then powers off at Full or the cable out
+@pytest.mark.parametrize('run', [['--time-scale', '20', '--reboot', 'touch {root}/rebooted']], indirect=True)
+def test_auto_power_off_on_a_cable_waits_for_the_charge_and_ends_at_full(run):
+    root, _ = run
+    play, net = Service(root/'run/vamp/play.sock', 'Q2PLAY/1'), Service(root/'run/vamp/net.sock', 'Q2NET/1')
+    w = Watch(root)
+    put(root, '/mnt/data/config.ini', '[SYSSET]\nSAVEPOWERMODE=1\nLIGHTTIME=6\n[Q2POD]\nUSBPICK=1\n')
+    put(root, '/sys/class/power_supply/battery/status', 'Charging\n')
+    cable(root, 1)
+    assert until(lambda: 'charge wait' in w.lines, 6), 'a cable in: the charge wait at 60 s scaled (3 s)'
+    assert 'pause' in play.lines and net.lines == ['off'], "stock's into_poweroff: the music and Wi-Fi stopped"
+    time.sleep(3)
+    assert not (root/'powered-off').exists(), 'still charging: still on'
+    put(root, '/sys/class/power_supply/battery/status', 'Full\n')
+    assert until(lambda: (root/'powered-off').exists(), 3), 'Full: off'
+    assert 'power off' in w.lines
+
+
+@pytest.mark.parametrize('run', [['--time-scale', '20', '--reboot', 'touch {root}/rebooted']], indirect=True)
+def test_the_charge_wait_ends_at_the_cable_out(run):
+    root, _ = run
+    Service(root/'run/vamp/play.sock', 'Q2PLAY/1'), Service(root/'run/vamp/net.sock', 'Q2NET/1')
+    w = Watch(root)
+    put(root, '/mnt/data/config.ini', '[SYSSET]\nSAVEPOWERMODE=1\nLIGHTTIME=6\n[Q2POD]\nUSBPICK=1\n')
+    put(root, '/sys/class/power_supply/battery/status', 'Charging\n')
+    cable(root, 1)
+    assert until(lambda: 'charge wait' in w.lines, 6)
+    cable(root, 0)
+    assert until(lambda: (root/'powered-off').exists(), 3), 'the cable out: off'
+
+
+# stock's get_battery_capacity makes both times whole at a change of the cable, in as well as out
+@pytest.mark.parametrize('run', [['--time-scale', '10']], indirect=True)
+def test_a_cable_in_starts_auto_power_off_s_time_again(run):
+    root, _ = run
+    Service(root/'run/vamp/play.sock', 'Q2PLAY/1'), Service(root/'run/vamp/net.sock', 'Q2NET/1')
+    w = Watch(root)
+    put(root, '/mnt/data/config.ini', '[SYSSET]\nSAVEPOWERMODE=1\nLIGHTTIME=6\n[Q2POD]\nUSBPICK=1\n')
+    put(root, '/sys/class/power_supply/battery/status', 'Charging\n')
+    time.sleep(4)
+    cable(root, 1)
+    time.sleep(4)
+    assert 'charge wait' not in w.lines, '60 s scaled is 6 s from the cable, not from the setting'
+    assert until(lambda: 'charge wait' in w.lines, 4)
+
+
+# stock's poweroff_page takes a long press as device_reboot: the Q2 on again, not off
+@pytest.mark.parametrize('run', [['--time-scale', '20', '--reboot', 'touch {root}/rebooted']], indirect=True)
+def test_a_hold_in_the_charge_wait_restarts(run):
+    root, keys = run
+    Service(root/'run/vamp/play.sock', 'Q2PLAY/1'), Service(root/'run/vamp/net.sock', 'Q2NET/1')
+    w = Watch(root)
+    put(root, '/mnt/data/config.ini', '[SYSSET]\nSAVEPOWERMODE=1\nLIGHTTIME=6\n[Q2POD]\nUSBPICK=1\n')
+    put(root, '/sys/class/power_supply/battery/status', 'Charging\n')
+    cable(root, 1)
+    assert until(lambda: 'charge wait' in w.lines, 6)
+    press(keys, hold=3.3)
+    assert until(lambda: (root/'rebooted').exists(), 2) and not (root/'powered-off').exists()
+    assert 'reboot' in w.lines
+
+
+# stock's gate also waits while USB storage (g_usblink_status 2) or Car Audio holds the Q2
+@pytest.mark.parametrize('run', [['--time-scale', '20']], indirect=True)
+def test_usb_storage_holds_auto_power_off(run):
+    root, _ = run
+    usb_tree(root)
+    Service(root/'run/vamp/net.sock', 'Q2NET/1')
+    w = Watch(root)
+    put(root, '/mnt/data/config.ini', '[SYSSET]\nSAVEPOWERMODE=1\nLIGHTTIME=6\nUSBPICK=1\n[Q2POD]\nUSBPICK=2\n')
+    cable(root, 1)
+    assert until(lambda: mode(root) == 'usb storage')
+    time.sleep(6)
+    assert 'charge wait' not in w.lines and not (root/'powered-off').exists()
 
 
 # ---- Vamp API 1 (docs/platform/system.md) ----
