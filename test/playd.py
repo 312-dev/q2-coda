@@ -819,6 +819,84 @@ def test_next_before_the_next_song_lands_waits_for_it(run):
     assert pl.songs()[-1] == ('set-songurl', two)
     sock.close()
 
+# ---- Download Ahead (docs/server-library.md#download-ahead-and-the-streaming-state, docs/playd.md#download-ahead) ----
+
+def ahead(root, secs=2.0, want=None):
+    """navi's .ahead as (seq, n, lines), waited for until it is want when one is given"""
+    p = root/'tmp/q2-navi.ahead'
+    end = time.time() + secs
+    while True:
+        got = None
+        if p.exists():
+            head, *lines = p.read_text().splitlines()
+            f = dict(x.split('=', 1) for x in head.split('\t')[1:])
+            assert head.split('\t')[0] == '#Q2AHEAD/1'
+            got = (int(f['seq']), int(f['n']), lines)
+        if want is None or got == want or time.time() >= end:
+            return got
+        time.sleep(0.05)
+
+
+def test_download_ahead_is_written_before_the_catplay_with_n_and_no_songs(run):
+    root, pl = run
+    sock = catalogue(root)
+    play_list(root, [SERVER + 1, SERVER + 2], 0)
+    assert wait_for(root/'tmp/q2-navi.catplay')
+    assert ahead(root, 0) == (1, 2, []), "the catplay's seq, the default 2, and no songs: the queue holds none yet"
+    sock.close()
+
+
+def test_download_ahead_names_the_songs_after_the_one_playing_as_they_land_and_move(run):
+    root, pl = run
+    sock = catalogue(root)
+    play_list(root, [SERVER + 1, SERVER + 2], 0)
+    assert wait_for(root/'tmp/q2-navi.catplay')
+    one, two, three = (f'/mnt/mmc/.navi/stream/a/hi/x/S{i} [s{i}].flac' for i in (1, 2, 3))
+    land(root, one, two)
+    answer(root, one, two, three)
+    pl.pump(1.0)
+    assert ahead(root, want=(1, 2, [two])) == (1, 2, [two]), 'only the songs the queue holds: three is not there yet'
+    land(root, three)
+    pl.pump(0.6)
+    assert ahead(root, want=(1, 2, [two, three])) == (1, 2, [two, three]), 'three landed: queued, so named'
+    pl.say('player-status', 'exit')
+    pl.pump(0.6)
+    assert ahead(root, want=(1, 2, [three])) == (1, 2, [three]), 'two playing: the one after it'
+    sock.close()
+
+
+@pytest.mark.parametrize('config, n', [(CONFIG + 'AHEAD=0\n', 0), (CONFIG + 'AHEAD=1\n', 1), (CONFIG + 'AHEAD=3\n', 3),
+                                       (CONFIG + 'AHEAD=4\n', 2)])
+def test_download_ahead_s_setting_is_stock_s_q2pod_ahead(run, n):
+    root, pl = run
+    sock = catalogue(root)
+    play_list(root, [SERVER + 1, SERVER + 2], 0)
+    assert wait_for(root/'tmp/q2-navi.catplay')
+    assert ahead(root, 0)[1] == n, 'Off, 1, 2 or 3; anything else the default 2'
+    songs = [f'/mnt/mmc/.navi/stream/a/hi/x/S{i} [s{i}].flac' for i in range(1, 6)]
+    land(root, *songs)
+    answer(root, *songs)
+    pl.pump(1.0)
+    assert ahead(root, want=(1, n, songs[1:1 + n])) == (1, n, songs[1:1 + n])
+    sock.close()
+
+
+def test_a_change_of_download_ahead_is_written_while_the_list_plays(run):
+    root, pl = run
+    sock = catalogue(root)
+    play_list(root, [SERVER + 1, SERVER + 2], 0)
+    assert wait_for(root/'tmp/q2-navi.catplay')
+    songs = [f'/mnt/mmc/.navi/stream/a/hi/x/S{i} [s{i}].flac' for i in range(1, 5)]
+    land(root, *songs)
+    answer(root, *songs)
+    pl.pump(1.0)
+    assert ahead(root, want=(1, 2, songs[1:3])) == (1, 2, songs[1:3])
+    (root/'mnt/data/config.ini').write_text(CONFIG + 'AHEAD=1\n')
+    pl.pump(1.2)
+    assert ahead(root, want=(1, 1, songs[1:2])) == (1, 1, songs[1:2])
+    sock.close()
+
+
 def test_an_answer_with_nothing_there_yet_plays_its_first_as_it_lands(run):
     root, pl = run
     sock = catalogue(root)

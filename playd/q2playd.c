@@ -97,6 +97,8 @@ static struct {
     int on, next, waiting;
     char file[300], want[360];
     long long stamp;
+    char app[64];  /* whose answer it is, and the seq its .play carried: Download Ahead's .ahead is written for them */
+    unsigned seq;
 } mq;
 
 static unsigned long long now_written_at;
@@ -624,6 +626,61 @@ static void m3u_poll(void) {
     }
 }
 
+/* ---- Download Ahead (docs/server-library.md#download-ahead-and-the-streaming-state, docs/playd.md#download-ahead) ----
+ * Streaming > Configuration's Download Ahead, [Q2POD] AHEAD (0 Off, 1 to 3 songs; anything else 2, the firmware's
+ * stream_state.c ahead_n), told to the app in /tmp/q2-<id>.ahead: "#Q2AHEAD/1\tseq=<the .play's seq>\tn=<n>", then
+ * the card paths of the songs the queue holds after the one playing, at most n. Written whole (beside and renamed), and
+ * only when it would change. */
+#define AHEAD_DEFAULT 2
+#define AHEAD_MAX 3
+static struct {
+    int n;
+    long long stamp;
+    char last[2200]; /* what was written last, its app's id first */
+} ah = {.stamp = -2};
+
+static int ahead_n(void) {
+    long long st = file_stamp(path("/mnt/data/config.ini"));
+    if (st != ah.stamp) {
+        char *text = read_all(path("/mnt/data/config.ini"));
+        int v = text ? ini_get(text, "Q2POD", "AHEAD", AHEAD_DEFAULT) : AHEAD_DEFAULT;
+        free(text);
+        ah.n = v >= 0 && v <= AHEAD_MAX ? v : AHEAD_DEFAULT, ah.stamp = st;
+    }
+    return ah.n;
+}
+
+static void ahead_write(const char *app, const char *text) {
+    char key[sizeof ah.last], tmp[300], dst[300];
+    snprintf(key, sizeof key, "%s\n%s", app, text);
+    if (!strcmp(key, ah.last)) return;
+    snprintf(dst, sizeof dst, "/tmp/q2-%s.ahead", app), snprintf(tmp, sizeof tmp, "/tmp/q2-%s.ahead.q2playd", app);
+    FILE *f = fopen(path(tmp), "w");
+    if (!f) return;
+    fputs(text, f);
+    if (fclose(f) || rename(path(tmp), path(dst))) return;
+    memcpy(ah.last, key, strlen(key) + 1);
+}
+
+/* a list handed to app (before its .catplay of seq): n and no songs, as the queue holds none of it yet (ahead_start) */
+static void ahead_start(const char *app, unsigned seq) {
+    char text[64];
+    snprintf(text, sizeof text, "#Q2AHEAD/1\tseq=%u\tn=%d\n", seq, ahead_n());
+    ahead_write(app, text);
+}
+
+/* while the queue is an app's answer: the songs after the one playing (ahead_poll) */
+static void ahead_poll(void) {
+    if (!mq.on || src.on) return;
+    char text[sizeof ah.last - 80];
+    int n = ahead_n(), len = snprintf(text, sizeof text, "#Q2AHEAD/1\tseq=%u\tn=%d\n", mq.seq, n);
+    for (int i = q.at + 1; i <= q.at + n && i < q.np; ++i) {
+        if (len + strlen(q.paths[i]) + 2 > sizeof text) break;
+        len += snprintf(text + len, sizeof text - (size_t)len, "%s\n", q.paths[i]);
+    }
+    ahead_write(mq.app, text);
+}
+
 static void read_small(const char *p, char *out, size_t room) {
     FILE *f = fopen(p, "r");
     size_t n = f ? fread(out, 1, room - 1, f) : 0;
@@ -727,6 +784,7 @@ static int catplay_write(void) {
     read_small(path(play), cp.before, sizeof cp.before);
     FILE *f = fopen(path(tmp), "w");
     if (!f) return cp.on = 0, play_offline(cp.at), -1;
+    ahead_start(cp.app, cp.seq + 1); /* before the catplay, so the app never runs the list on its default */
     fprintf(f, "%u %d\n", ++cp.seq, cp.at);
     for (int i = 0; i < q.n; ++i) fprintf(f, "%s\n", song_lookup(q.ids[q.order[i]]) ? q.file : "");
     if (fclose(f) || rename(path(tmp), path(dst))) return cp.on = 0, play_offline(cp.at), -1;
@@ -849,7 +907,8 @@ static void catplay_poll(void) {
     if (strcmp(now, cp.before) && sscanf(now, "%u %511[^\n]", &seq, m3u) == 2 && seq == cp.seq) {
         cp.on = 0;
         free_paths();
-        mq.on = 1, mq.next = 0, mq.waiting = 0;
+        mq.on = 1, mq.next = 0, mq.waiting = 0, mq.seq = seq;
+        snprintf(mq.app, sizeof mq.app, "%s", cp.app);
         if (strlen(m3u) >= sizeof mq.file) m3u[0] = 0; /* no such path here: an empty answer */
         memcpy(mq.file, m3u, strlen(m3u) + 1);
         m3u_read();
@@ -1417,6 +1476,7 @@ int main(int argc, char **argv) {
         if (poll(p, (nfds_t)n, wait) < 0 && errno != EINTR) break;
         catplay_poll();
         m3u_poll();
+        ahead_poll();
         air_poll();
         if (src.on && cl[src.holder].fd < 0) source_release(src.holder); /* its holder gone (here and after the reads): before a new client takes its slot */
         if (p[0].revents & POLLIN) {

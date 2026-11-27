@@ -645,8 +645,9 @@ static int app_remove(const char *id) {
 
 /* The capability line an API 0 app reads once at its start (/tmp/q2-addon.caps, today's Vamp's ADDON_CAPS): only the
  * words this image serves. catalogue: q2libd reads the app's catalogue.tsv and q2playd hands it the Library's plays
- * (.catplay); playlist: q2playd plays the m3u its .play names. The rest of today's words are its UI's, Q2SPOT/1's pages. */
-#define API0_CAPS "catalogue playlist"
+ * (.catplay); playlist: q2playd plays the m3u its .play names; ahead: q2playd writes Download Ahead's .ahead (the app's
+ * .stream is the UI's to read). The rest of today's words are its UI's, Q2SPOT/1's pages. */
+#define API0_CAPS "catalogue playlist ahead"
 #define PKG_CLIENTS 8
 #define PKG_LINE 512
 #define RUNSV_UP_MS 2000 /* a new runsv has this long to open its control */
