@@ -21,8 +21,10 @@ SOURCE = pathlib.Path(os.environ.get('Q2NETD_SOURCE') or ROOT/'netd/q2netd.c')
 CONF = 'ctrl_interface=/var/run/wpa_supplicant\nupdate_config=0\n\nnetwork={\n\tssid="Home"\n\tpsk="secret123"\n}\n'
 
 FAKE_WPA = r'''
-import os, socket, sys
+import os, socket, sys, time
 root = sys.argv[1]
+if os.path.exists(root + '/wpa-delay'):  # a slow start: the control socket made this many seconds late
+    time.sleep(float(open(root + '/wpa-delay').read()))
 d = root + '/var/run/wpa_supplicant'
 os.makedirs(d, exist_ok=True)
 path = d + '/wlan0'
@@ -210,6 +212,24 @@ def test_a_scan_s_networks_with_their_names_encoded(run):
     assert wait_for(lambda: (root/'wpa-started').exists())
     a.say('scan')
     assert a.until_ok() == (['ap ssid=My%20Net signal=-40 secure=1', 'ap ssid=Cafe%3DFree signal=-70 secure=0'], 'ok')
+
+
+@pytest.mark.parametrize('delay, answer', [(1.5, 'ok'), (8, 'err scan')])
+def test_a_scan_as_the_radio_comes_on_waits_for_wpa_supplicant(run, tmp_path, delay, answer):
+    """wpa_supplicant's control socket comes some time after it starts: a scan then waits for it (WPA_READY_MS), and
+    one that never comes is answered err scan"""
+    (tmp_path/'wpa-delay').write_text(str(delay))
+    root = run('--boot-hold', '60')
+    a = Api(root)
+    a.line()
+    a.say('scan')
+    start = time.monotonic()
+    lines, last = a.until_ok() if answer == 'ok' else ([], a.line())
+    assert last == answer
+    if answer == 'ok':
+        assert lines == ['ap ssid=My%20Net signal=-40 secure=1', 'ap ssid=Cafe%3DFree signal=-70 secure=0']
+    else:
+        assert 4.5 < time.monotonic() - start < 7, 'given up after 5 s'
 
 
 @pytest.fixture

@@ -5,7 +5,7 @@
 | Command | Answer |
 | --- | --- |
 | `status` | `status state=off\|searching\|scanning\|associated\|connected ssid=... ip=... smart=0\|1 held=SECONDS` |
-| `scan` | the radio on (a 5 minute hold), then an `ap ssid=... signal=DBM secure=0\|1` line for each network heard, and `ok` |
+| `scan` | the radio on (a 5 minute hold), then an `ap ssid=... signal=DBM secure=0\|1` line for each network heard, and `ok`; with the radio just on it first waits up to 5 s for `wpa_supplicant`, the connection's later lines answered after; `err scan` when it does not answer |
 | `networks` | a `network ssid=...` line for each saved network, and `ok` |
 | `add SSID PASSPHRASE`, `add SSID` (an open network) | `ok`, `err saved already`, `err network` |
 | `forget SSID` | `ok`, `err no such network` |

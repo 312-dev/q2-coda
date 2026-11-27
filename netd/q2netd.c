@@ -41,6 +41,7 @@
 #define REMOTE_HOLD_S 1800  /* a computer let in over Wi-Fi holds the radio 30 minutes (REMOTE_HOLD_MS) */
 #define BOOT_HOLD_S 1800    /* and the first 30 minutes after the start (REMOTE_BOOT_MS) */
 #define STATUS_EVERY_MS 3000
+#define WPA_READY_MS 5000 /* a scan as the radio comes on waits this long for wpa_supplicant's control socket */
 #define RESPAWN_MS 10000 /* a wpa_supplicant that ended is started again at most this often (no wlan0: it ends at once) */
 #define CLIENTS 8
 
@@ -285,7 +286,8 @@ static int forget_network(const char *ssid) {
 
 /* ---- Q2NET/1 ---- */
 
-static struct client { int fd, hello, watch; char in[512]; size_t n; } cl[CLIENTS];
+/* scan_until: a scan waits for wpa_supplicant's control socket until then (0: none); the client's next lines wait too */
+static struct client { int fd, hello, watch; char in[512]; size_t n; unsigned long long scan_until; } cl[CLIENTS];
 static int api = -1;
 
 /* percent-encoding of a free-text value, Vamp API 1's (docs/platform/README.md#the-common-shape) */
@@ -334,6 +336,26 @@ static void status_line(char *out, size_t room) {
              smart, held);
 }
 
+/* scan's answer: wpa_supplicant's last results, an ap line each, then ok; err scan when it does not answer */
+static void scan(struct client *c) {
+    char a[8192], b[400], e[400];
+    if (wpa("SCAN", b, sizeof b) || wpa("SCAN_RESULTS", a, sizeof a)) { client_say(c, "err scan"); return; }
+    /* bssid / frequency / signal level / flags / ssid, a tab between, after a header line */
+    for (char *l = strchr(a, '\n'); l && *++l;) {
+        char *nl = strchr(l, '\n');
+        if (nl) *nl = 0;
+        char *f[5] = {l};
+        for (int i = 1; i < 5 && f[i - 1]; ++i) f[i] = strchr(f[i - 1], '\t') ? strchr(f[i - 1], '\t') + 1 : 0;
+        if (f[4]) {
+            for (int i = 0; i < 4; ++i) *strchr(f[i], '\t') = 0;
+            enc(e, sizeof e, f[4]);
+            client_say(c, "ap ssid=%s signal=%s secure=%d", e, f[2], strstr(f[3], "WPA") || strstr(f[3], "WEP") ? 1 : 0);
+        }
+        l = nl;
+    }
+    client_say(c, "ok");
+}
+
 static void client_line(struct client *c, char *line) {
     char a[8192], b[400], e[400];
     unsigned s;
@@ -376,21 +398,8 @@ static void client_line(struct client *c, char *line) {
         client_say(c, "ok");
     } else if (!strcmp(line, "scan")) {
         hold((unsigned)idle_s);
-        if (wpa("SCAN", b, sizeof b) || wpa("SCAN_RESULTS", a, sizeof a)) { client_say(c, "err scan"); return; }
-        /* bssid / frequency / signal level / flags / ssid, a tab between, after a header line */
-        for (char *l = strchr(a, '\n'); l && *++l;) {
-            char *nl = strchr(l, '\n');
-            if (nl) *nl = 0;
-            char *f[5] = {l};
-            for (int i = 1; i < 5 && f[i - 1]; ++i) f[i] = strchr(f[i - 1], '\t') ? strchr(f[i - 1], '\t') + 1 : 0;
-            if (f[4]) {
-                for (int i = 0; i < 4; ++i) *strchr(f[i], '\t') = 0;
-                enc(e, sizeof e, f[4]);
-                client_say(c, "ap ssid=%s signal=%s secure=%d", e, f[2], strstr(f[3], "WPA") || strstr(f[3], "WEP") ? 1 : 0);
-            }
-            l = nl;
-        }
-        client_say(c, "ok");
+        if (ctrl_open()) c->scan_until = now_ms() + WPA_READY_MS; /* the radio just on: its socket comes soon */
+        else scan(c);
     } else if (!strncmp(line, "add ", 4)) {
         char *sp = strchr(line + 4, ' ');
         if (sp) *sp = 0;
@@ -495,8 +504,12 @@ int main(int argc, char **argv) {
         struct pollfd p[1 + CLIENTS];
         int n = 0;
         p[n++] = (struct pollfd){.fd = api, .events = POLLIN};
-        for (int i = 0; i < CLIENTS; ++i) p[n++] = (struct pollfd){.fd = cl[i].fd, .events = POLLIN};
-        poll(p, (nfds_t)n, 1000);
+        int waiting = 0;
+        for (int i = 0; i < CLIENTS; ++i) { /* a client whose scan waits is not read meanwhile */
+            p[n++] = (struct pollfd){.fd = cl[i].scan_until ? -1 : cl[i].fd, .events = POLLIN};
+            waiting |= cl[i].fd >= 0 && cl[i].scan_until;
+        }
+        poll(p, (nfds_t)n, waiting ? 100 : 1000);
         if (p[0].revents & POLLIN) {
             int fd = accept4(api, 0, 0, SOCK_CLOEXEC), i = 0;
             while (fd >= 0 && i < CLIENTS && cl[i].fd >= 0) ++i;
@@ -505,6 +518,11 @@ int main(int argc, char **argv) {
         }
         for (int i = 0; i < CLIENTS; ++i)
             if (cl[i].fd >= 0 && p[1 + i].fd == cl[i].fd && p[1 + i].revents) client_read(&cl[i]);
+        for (int i = 0; i < CLIENTS; ++i) /* scans waiting for the control socket: done once it answers, refused at WPA_READY_MS */
+            if (cl[i].fd >= 0 && cl[i].scan_until) {
+                if (!ctrl_open()) cl[i].scan_until = 0, scan(&cl[i]);
+                else if (now_ms() >= cl[i].scan_until) cl[i].scan_until = 0, client_say(&cl[i], "err scan");
+            }
         /* the Wi-Fi adbd's mark: a computer let in (a new inode renamed into place, or a newer time) */
         if (!external && !stat(path("/tmp/q2remote.used"), &sb) &&
             (sb.st_mtim.tv_sec != used.tv_sec || sb.st_mtim.tv_nsec != used.tv_nsec || sb.st_ino != used_ino)) {
