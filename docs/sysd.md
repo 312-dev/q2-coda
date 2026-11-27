@@ -34,7 +34,7 @@ On `/run/vamp/sys.sock`: its protocol is Vamp API 1's system page, [Q2SYS/1](pla
 - Whether `PE22` can be driven through the kernel's GPIO class at all (stock drives it through `soc_gpio.ko`'s own ioctl, bypassing gpiolib), and the AXP2101's charging stopping when it is high.
 - The storage gadget on the real controller beside q2adb's park, a computer seeing the card, and the card mounting again after.
 - The UAC2 gadget and USB DAC mode's sound ([dacloop: Needs a Q2](dacloop.md#needs-a-q2)).
-- `mem` suspend under Vamp OS: what the drivers do with our services running, which wake sources the kernel arms (the power key, a cable: [usb: Standby](usb.md#standby-limit)), and the current drawn.
+- `mem` suspend under Vamp OS: what the drivers do with our services running, which wake sources the kernel arms (the power key, a cable: [internals: Standby and the USB link](internals.md#standby-and-the-usb-link)), and the current drawn.
 
 - Which input devices carry the power button (watching every device with `KEY_POWER` covers both candidates), and whether one press arrives on two of them, which would turn the screen off and on again at once. ponytail: a press seen on two devices within a few milliseconds would then have to count once.
 - Whether `bl_power` 4 turns this panel's light off at all, or stock blanks the framebuffer (`FBIOBLANK`) or powers the panel down (`lcd_h0209s`) instead; the brightness scale; and the double tap waking a dark screen through `hyngescontrol`.

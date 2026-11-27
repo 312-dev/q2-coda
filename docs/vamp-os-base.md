@@ -56,6 +56,7 @@ Then init starts `runsvdir`, which starts the services below ([`/etc/sv`](../os/
 | `q2pkgd-confirm` | After an install ([q2pkgd](pkgd.md#the-rescue-copy)), a minute after the boot: `q2pkgd confirm`, the install no longer pending | a minute |
 | `q2dacloop` | `/usr/bin/q2dacloop` ([dacloop](dacloop.md)): USB DAC mode's audio, the gadget's capture to the DAC. Down at boot (its `down` file) | q2sysd's `usb dac` (`sv up`) |
 | `q2scrobd` | `/usr/bin/q2scrobd` ([scrobbling](vamp-os-services.md#scrobbling)): each listen heard over Q2PLAY/1 into the card's `.scrobbler.log` | Q2PLAY/1 (tried every 2 s) |
+| `q2dlnad` | `/usr/bin/q2dlnad` ([dlnad](dlnad.md)): the DLNA renderer, listening only while `[SYSSET] DLNA=1` (stock's switch, off by default) | Q2PLAY/1 (tried every 2 s) |
 
 ## adb
 
@@ -145,7 +146,7 @@ In the order it is needed:
 6. **The rest of the installer** ([q2pkgd](pkgd.md)): its first slice checks, composes and stages a signed release (the image's own `mksquashfs` composes the build machine's bytes under QEMU); the download, the automatic hand-off to the recovery and packages are not built.
 7. q2ui's icons: it looks for `oled_*_w.png` in `--icons`, stock's art, which the image does not have; the pages draw without them.
 8. Bluetooth, Wi-Fi, USB modes, the MCU's firmware load, the splash.
-9. **The remaining services** ([vamp-os-services](vamp-os-services.md)): scrobbling's log is built; its upload, LocalSend, the AirPlay sender, Guest Play and a DLNA renderer each wait on what that page names first.
+9. **The remaining services** ([vamp-os-services](vamp-os-services.md)): scrobbling's log and the DLNA renderer ([q2dlnad](dlnad.md)) are built; the scrobble upload, LocalSend, the AirPlay sender and Guest Play each wait on what that page names first.
 
 ## Needs a device
 
@@ -167,6 +168,7 @@ Everything here has been run only under the emulator and on this machine. What o
 | Standby | `mem` suspend with Vamp OS's services, its wake sources, its current | [q2sysd](sysd.md#needs-a-q2) |
 | Sound | The DAC powered and in PCM mode with no `demo`; the driver's 0-100 volume law in decibels | [q2playd](playd.md#the-volume) |
 | Wi-Fi | Association, DHCP and DNS; the radio's power when `wlan0` is down | [q2netd](netd.md#needs-a-q2) |
+| DLNA | SSDP's multicast on `wlan0` with no `demo`; a real control point playing to it | [q2dlnad](dlnad.md#needs-a-q2) |
 | Library | A real card's first scan time and memory under FFmpeg | [q2libd](libd.md#what-is-missing) |
 | Updates | Shanling's recovery's folder contract, and that it removes the folder after flashing (inferred from installs); `mksquashfs`'s time and memory on the Q2 | [q2pkgd](pkgd.md#needs-a-q2) |
 | Hot reload | `kill -HUP`'s in-place restart (QEMU's `/proc/self/exe` is QEMU) | [Hot reload](#hot-reload) |

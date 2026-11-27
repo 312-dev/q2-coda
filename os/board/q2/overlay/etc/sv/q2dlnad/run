@@ -1,0 +1,6 @@
+#!/bin/sh
+# q2dlnad (docs/dlnad.md): the DLNA renderer. It runs always and listens only while [SYSSET] DLNA=1.
+. /usr/libexec/vamp/log
+step "q2dlnad: start"
+exec 2>&1
+exec /usr/bin/q2dlnad

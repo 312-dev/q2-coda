@@ -274,6 +274,20 @@ Where this tree is headed (an `os/` Buildroot tree, services of our own in place
 | `q2netd.c` | `q2netd`: Wi-Fi on the saved networks through `wpa_supplicant`'s control socket, `udhcpc`, Smart Wi-Fi, the saved networks in stock's file, Q2NET/1 | `main`, `radio`, `poll_status`, `add_network`, `client_line` | [netd](netd.md) |
 | `Makefile` | Its build, for the image (`os/package/q2netd`) and this machine (`test/netd.py`) | | [netd](netd.md) |
 
+## scrobd/: Vamp OS's scrobble log
+
+| File | For | Enter at | Doc |
+| --- | --- | --- | --- |
+| `q2scrobd.c` | `q2scrobd`: listens heard over Q2PLAY/1 into the card's `.scrobbler.log` | `main`, `now_line` | [vamp-os-services](vamp-os-services.md#scrobbling) |
+| `Makefile` | Its build, for the image (`os/package/q2scrobd`) and this machine (`test/scrobd.py`) | | [vamp-os-services](vamp-os-services.md#scrobbling) |
+
+## dlnad/: Vamp OS's DLNA renderer
+
+| File | For | Enter at | Doc |
+| --- | --- | --- | --- |
+| `q2dlnad.c` | `q2dlnad`: a UPnP MediaRenderer (SSDP, AVTransport, RenderingControl, ConnectionManager, GENA) playing its URLs as Q2PLAY/1 sources | `main`, `avtransport`, `play_line`, `ssdp_read` | [dlnad](dlnad.md) |
+| `Makefile` | Its build, for the image (`os/package/q2dlnad`) and this machine (`test/dlnad.py`) | | [dlnad](dlnad.md) |
+
 ## pkgd/: Vamp OS's update service
 
 | File | For | Enter at | Doc |
@@ -363,6 +377,7 @@ Commands and what each needs are in [building.md](building.md#tests). `BUILD` is
 | Vamp OS's base image | `os_image.py`: the pins, the image's contents and ABI, the composed `/vendor`, and a boot of it under `qemu-mipsel` (and `--card-boot`); `q2vampos.py`: the card boot's hand-off under the host `sh` | `BUILD`, the ZIP, bwrap, `sh` |
 | The card boot end to end | `card_e2e.py`: the image on a stand-in card, the real q2vampos.sh with a stand-in loop mount and chroot, the image's rcS and services up, a song played, the next boot the usual one | `BUILD`, the ZIP, bwrap, sh |
 | q2playd | `playd.py`: q2playd built for this machine against a stand-in q2player: the FIFO and list file, Q2PLAY/1, the now file, ends, cuts and failures | `cc`, the host's SQLite |
+| q2dlnad | `dlnad.py`: q2dlnad built for this machine against stand-ins for Q2PLAY/1 and Q2NET/1, and once the real q2playd: the switch, SSDP, the descriptions, each action, events, the radio's hold | `cc`, python3 |
 | q2sysd | `sysd.py`: q2sysd built for this machine on a stand-in `/sys` and `/dev/input`: the power key's press and hold, the backlight, the battery file, Q2SYS/1 | `cc` |
 | q2libd | `libd.py`: q2libd built for this machine on a stand-in card of songs ffmpeg makes: tags, ids across scans, catalogues, q2ui's query, the service's first library | `cc`, ffmpeg, the host's FFmpeg and SQLite |
 | q2netd | `netd.py`: q2netd built for this machine with a stand-in wpa_supplicant: the radio, DHCP, Smart Wi-Fi's holds, the saved networks, scans, Q2NET/1 | `cc`, python3 |

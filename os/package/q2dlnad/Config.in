@@ -1,0 +1,5 @@
+config BR2_PACKAGE_Q2DLNAD
+	bool "q2dlnad"
+	help
+	  The DLNA renderer (dlnad/, docs/dlnad.md): a UPnP MediaRenderer whose URLs play
+	  as Q2PLAY/1 sources, on while [SYSSET] DLNA=1.

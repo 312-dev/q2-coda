@@ -8,7 +8,7 @@ Design for five features the owner kept in Vamp OS's scope ([roadmap: Scope](vam
 | LocalSend | `patch/localsend_core.c` (protocol), `localsend.c`, `localsend_ui.c` (demo's side) | `q2sendd`: the core as is, the UI's questions as Q2SYS/1-style notices | TLS (`q2-mbedtls` is in the image), a notice and confirmation channel in `q2ui` | the receive side, once `q2ui` can ask |
 | AirPlay sender | the `q2-airplay` card app (cliairplay) and hciplayer's PEQ tap `/tmp/q2cast` | the card app as a `service` package; the tap moved into `q2player`'s output | `q2player` writing the tap, Q2PLAY/1's volume to the speaker | after the tap |
 | Guest Play | `q2-guest` (BlueZ D-Bus, a second bluealsa), `patch/guest.c` (pausing the owner's music) | `q2-guest` as a service, its pause and resume through Q2PLAY/1 | Bluetooth from source (BlueZ 5.88, bluez-alsa: `feat/bluez-own`, `feat/bluealsa-own`) | no: M2 |
-| DLNA/UPnP renderer | stock's DMR inside `demo` (`dmrAction*`) | `q2dlnad`: a UPnP MediaRenderer (SSDP, the three services' SOAP) handing a URI to `q2playd` as a source | Q2PLAY/1 playing a URL (`q2player` streams already), audio focus between sources | after the source verb |
+| DLNA/UPnP renderer | stock's DMR inside `demo` (`dmrAction*`) | `q2dlnad`: a UPnP MediaRenderer (SSDP, the three services' SOAP) handing a URI to `q2playd` as a source | nothing: Q2PLAY/1's `source` and `focus` are built | **yes: built** ([q2dlnad](dlnad.md)) |
 
 ## Rules for all five
 
@@ -44,4 +44,4 @@ The card app needs a copy of what the Q2 plays. Today hciplayer's PEQ filter wri
 
 ## DLNA/UPnP renderer
 
-Stock's renderer lives in demo, so Vamp OS needs its own: SSDP announcements and the MediaRenderer's AVTransport, RenderingControl and ConnectionManager services, small enough to write against the UPnP AV specification (gmrender-resurrect is the model, GStreamer the part it cannot bring). A `SetAVTransportURI` and `Play` become a Q2PLAY/1 source: a verb to play a URL with its metadata, which Q2PLAY/1 lacks, and audio focus so the Library's queue is paused and given back. Those two Q2PLAY/1 additions come first ([Capabilities](platform/README.md#capabilities): new words, nothing changed).
+Stock's renderer lives in demo, so Vamp OS has its own, `q2dlnad` ([q2dlnad](dlnad.md)): SSDP announcements and the MediaRenderer's AVTransport, RenderingControl and ConnectionManager services, written against the UPnP AV specification with no library. A `SetAVTransportURI` and `Play` become a Q2PLAY/1 source ([Audio focus](platform/playback.md#audio-focus)): the URL with its DIDL-Lite title, artist and album, the Library's queue put aside and given back paused. Its permissions as a package would be `playback,network-hold,background`; it listens only while stock's `[SYSSET] DLNA` switch is on.

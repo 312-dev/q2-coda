@@ -28,7 +28,11 @@ SONGS = [(1, '/mnt/mmc/Music/a.flac', 'Alpha', 'Ann', 'First'), (2, '/mnt/mmc/Mu
 
 @pytest.fixture(scope='session')
 def binary(tmp_path_factory):
-    out = tmp_path_factory.mktemp('playd')
+    return build(tmp_path_factory.mktemp('playd'))
+
+
+def build(out):
+    """q2playd from SOURCE into the folder out (test/dlnad.py builds it this way too)"""
     inc = sorted(pathlib.Path(os.environ.get('Q2_THIRDPARTY_CACHE', pathlib.Path.home()/'.cache/q2-thirdparty')).glob('out/sqlite-*/usr/include'))
     lib = next(pathlib.Path('/usr/lib').glob('*-linux-gnu/libsqlite3.so.0'))
     src = out/'q2playd.c'
