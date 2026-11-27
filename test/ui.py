@@ -645,6 +645,12 @@ def now_cycle(binary, work, home):
     good &= check('while a radio plays the ring stands on the heart alone', trace[-1]['stage'] == 3, str(trace[-1]))
     _, pics, _ = script(binary, work, 60, to_now + ['key centre', 'run 50', 'tick 2', 'run 50', 'shot @scrub.ppm'], *home,
                         now=NOW, queue=True)[:3]
+    # a radio plays: demo's pill, 92 x 34 in the accent between x 112 and 204 (patch/np_bar.c np_modes), grown in 200 ms
+    _, radio, _ = script(binary, work, 60, to_now + ['run 300', 'shot @r.ppm'], *home, now=NOW + 'radio=1\n')
+    _, plain, _ = script(binary, work, 60, to_now + ['run 300', 'shot @r.ppm'], *home, now=NOW)
+    pill = [radio['r'].at(x, 286) for x in (116, 200)] + [radio['r'].at(158, 271)]
+    good &= check("while a radio plays its button is demo's pill in the accent, 112 to 204 across, 34 high",
+                  pill == [ACCENT] * 3 and radio['r'].at(110, 286) != ACCENT and plain['r'].at(116, 286) != ACCENT, str(pill))
     # 24 s of 180 on the bar from x 24, 327 px long: the knob's 14 px white disc centred on the fill's end
     kx = round(24 + 4 + (327 - 4) * 24 / 180)
     good &= check("the scrub shows demo's white knob on the fill's end", pics['scrub'].at(kx, 231) == (255, 255, 255)
