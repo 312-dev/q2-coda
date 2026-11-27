@@ -471,7 +471,13 @@ int addon_wake(const char *id), addon_ready(const char *id);
  * docs/internals.md#card-app-sync): 0 nothing, 1 checking, 2 downloading with *permille (unless 0)
  * how far */
 int addon_sync(int *permille);
-int addon_offline(void); /* a running app's server out of reach (status_row.c) */
+int addon_offline(void); /* a running app's server out of reach (cloud_reach.c) */
+/* cloud_reach.c (docs/internals.md#cloud-reach): the services whose transfers note their outcome,
+ * the note (curl_easy_perform's result and, when 0, the HTTP status), and the OR the status row's
+ * offline glyph shows */
+enum { REACH_SCROBBLE, REACH_ONLINE, REACH_UPDATES, REACH_ZONE, REACH_RADIO, REACH_TIDAL, REACH_N };
+void reach_note(int service, int rc, long http);
+int reach_is_down(int service), cloud_offline(void);
 int addon_offline_ok(const char *id), addon_offline_ask(const char *id, int add, const char *key);
 /* addon.c's card games (q2app game=1), Games' rows after its own: how many (a scan), one's name,
  * its start over the screen (1 when it runs), whether one runs, and ringnav_input's events for it

@@ -280,10 +280,12 @@ All lists share one grid.
     Bluetooth device a `›` (8 px, Text Secondary) and that device's glyph.
   - **Buttons Lock**: the padlock (Phosphor `lock-simple`, fill, 13 px, Text Primary).
   - **Offline**, the leftmost, so it reads first after the clock: Phosphor `cloud-slash` (bold) in Warning
-    `#FF9F0A`, 14 px wide at 11 tall, while a card app (Subsonic) says its server can't be reached (no answer, a
-    name that doesn't resolve, a proxy's 502, 503 or 504) and Wi-Fi is connected, until a request to the server
-    succeeds; with no Wi-Fi the missing fan already says why. On Now Playing too (`mock_subsonic_offline.py`, the
-    user's, 2026-11-19; [internals](internals.md#card-app-reach)).
+    `#FF9F0A`, 14 px wide at 11 tall, while Wi-Fi is connected and any cloud service can't be reached (the owner's,
+    2026-11-27: one glyph for all of them): a card app's server (Subsonic: no answer, a name that doesn't resolve,
+    a proxy's 502, 503 or 504), scrobbling, online lyrics and covers, updates and the App Store, the time zone
+    lookup, the radio directory; each until a request to it is answered. With no Wi-Fi the missing fan already
+    says why. On Now Playing too (`mock_subsonic_offline.py`, the user's, 2026-11-19;
+    [internals](internals.md#cloud-reach)).
 - **The strip.** The glyphs left of the battery have the room from 8 px past the widest clock, at the row's left, to
   the battery (about 170 px: every slot at once with a headset's battery takes about 145). When they need more, that strip (never the battery) scrolls as a marquee: at rest its
   left end shows, the first glyph after the clock, for 2.75 s; then it slides left at 35 px/s until its right end

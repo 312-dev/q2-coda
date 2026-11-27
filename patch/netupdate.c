@@ -440,7 +440,8 @@ static void *easy(const char *url, long connect_s) {
     return c;
 }
 
-/* The asset to file, its progress in xfer. */
+/* The asset to file, its progress in xfer. Each transfer here (fetch, head) notes its outcome as
+ * the update services' reach (cloud_reach.c REACH_UPDATES): Software Update's and the App Store's. */
 static int fetch(const char *url, void *file, long *code, volatile int *xfer) {
     void *c = easy(url, 15);
     if (!c) return 1;
@@ -453,7 +454,8 @@ static int fetch(const char *url, void *file, long *code, volatile int *xfer) {
     curl_easy_setopt(c, 10057, xfer);     /* XFERINFODATA */
     curl_easy_setopt(c, 43, 0L);          /* NOPROGRESS off, for it */
     /* curl itself fails a body shorter than its Content-Length (PARTIAL_FILE). */
-    int err = curl_easy_perform(c) || curl_easy_getinfo(c, 0x200002, code); /* RESPONSE_CODE */
+    int rc = curl_easy_perform(c), err = rc || curl_easy_getinfo(c, 0x200002, code); /* RESPONSE_CODE */
+    reach_note(REACH_UPDATES, rc, rc ? 0 : *code);
     curl_easy_cleanup(c);
     return err;
 }
@@ -468,8 +470,9 @@ static int head(const char *url, long secs, char *tag, unsigned n, unsigned *kb,
     curl_easy_setopt(c, 44, 1L);   /* NOBODY */
     curl_easy_setopt(c, 13, secs); /* TIMEOUT */
     if (kb) curl_easy_setopt(c, 52, 1L);
-    int err = curl_easy_perform(c) || curl_easy_getinfo(c, 0x200002, code); /* RESPONSE_CODE */
-    if (!err && tag && !curl_easy_getinfo(c, 0x10001f, &location)) {        /* REDIRECT_URL */
+    int rc = curl_easy_perform(c), err = rc || curl_easy_getinfo(c, 0x200002, code); /* RESPONSE_CODE */
+    reach_note(REACH_UPDATES, rc, rc ? 0 : *code);
+    if (!err && tag && !curl_easy_getinfo(c, 0x10001f, &location)) { /* REDIRECT_URL */
         const char *t = netupdate_tag(location);
         tk_snprintf(tag, n, "%s", t ? t : "");
     }
