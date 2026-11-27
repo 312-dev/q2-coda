@@ -31,7 +31,7 @@ class Row(StatusRow):
         self.online = 1
         fw.mock('networkGetConnectStatus', lambda *_: self.online)
         # the player's output: 0 the Q2's DAC (its jacks), 1 Bluetooth, 2 a USB DAC, 3 the car's USB audio: an output
-        # with no glyph of its own, so the other slots lay out alone (0 with nothing in would show the deaf ear)
+        # with no glyph of its own, so the other slots lay out alone
         self.way = 3
         fw.mock('mclGetOutputWay', lambda *_: self.way)
         self.timers: list = []
@@ -188,8 +188,7 @@ def jacks(fw, po=0, bal=0):
 ])
 def test_wired_headphones_show_while_they_take_the_sound(fw, row, way, po, bal, shown):
     """The wired slot (the user's, 2026-11-25): Phosphor's headphones while the player's output is a jack or a USB
-    DAC, 14 px wide, GAP left of the slot on its right (Wi-Fi's here); not otherwise (here a headset is linked, so no
-    deaf ear either: the test below)."""
+    DAC, 14 px wide, GAP left of the slot on its right (Wi-Fi's here); not otherwise."""
     bt_link(fw, 3)
     row.wifi(3)
     row.way = way
@@ -201,9 +200,6 @@ def test_wired_headphones_show_while_they_take_the_sound(fw, row, way, po, bal, 
     assert 'oled_status_noaudio_d' not in names
 
 
-EAR_W = 10  # SR_EAR_W: ear-slash 12 px tall is 9.4 wide (tools/art.py STATUS_TALL_FIT)
-
-
 class Air(C.Structure):
     """patch/airplay.c's air, whole (fw.var checks its size): on is a speaker playing."""
     _fields_ = [('t', C.c_void_p), ('look', C.c_uint), ('on', C.c_int), ('local', C.c_int), ('limit', C.c_int),
@@ -212,60 +208,23 @@ class Air(C.Structure):
 
 
 @pytest.mark.parametrize('way, po, bal, art, width', [
-    (0, 0, 0, 'oled_status_noaudio_d', EAR_W),  # nothing plugged in, nothing linked: the deaf ear
+    (0, 0, 0, None, 0),  # nothing plugged in, nothing linked: nothing (no deaf ear: the owner's, 2026-11-27)
     (0, 1, 0, 'oled_status_wired_d', 14),  # the 3.5 mm jack: headphones
     (0, 0, 1, 'oled_status_wired_d', 14),  # the 4.4 mm jack
     (2, 0, 0, 'oled_status_wired_d', 14),  # a USB DAC
-    (3, 0, 0, None, 0),  # the car's USB audio (usb_car.c) plays: no ear
-    (1, 1, 0, 'oled_status_noaudio_d', EAR_W),  # Bluetooth's way with no device linked plays to no one: the ear
+    (3, 0, 0, None, 0),  # the car's USB audio (usb_car.c)
+    (1, 1, 0, None, 0),  # Bluetooth's way with no device linked
 ])
-def test_with_no_output_connected_the_wired_slot_shows_a_deaf_ear(fw, row, way, po, bal, art, width):
-    """The user's, 2026-11-25 ("a deaf ear icon ... ship it"): with no jack, no USB DAC and no Bluetooth device
-    connected, Phosphor's ear-slash (regular) in the wired slot, EAR_W wide, GAP left of Wi-Fi; any output connected,
-    the slot is as before."""
+def test_the_wired_slot_shows_headphones_alone_and_no_ear(fw, row, way, po, bal, art, width):
+    """The owner's, 2026-11-27 ("do away with the deaf icon"): with no output connected the wired slot is empty and the
+    slots left of it close up; headphones while a jack or a USB DAC takes the sound."""
     row.wifi(3)
     row.way = way
     jacks(fw, po, bal)
     assert fw.fn('status_row__wired_shown', C.c_int)() == width
     assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - (GAP + width if width else 0)
     canvas, names = row.paint()
-    shown = [n for n in names if n in ('oled_status_noaudio_d', 'oled_status_wired_d')]
-    assert shown == ([art] if art else [])
-
-
-@pytest.mark.parametrize('status, thread, ear', [(3, 0, 0), (1, 1, 1), (None, 0, 1)])
-def test_a_bluetooth_device_connected_takes_the_ear_away(fw, row, status, thread, ear):
-    """Connected (the rune, a headset, a car) is an output: no ear. Connecting is not yet: the ear and the dim rune."""
-    row.way = 0
-    jacks(fw)
-    bt_link(fw, status, None, None, thread)
-    assert fw.fn('status_row__wired_shown', C.c_int)() == (EAR_W if ear else 0)
-
-
-def test_a_guest_or_an_airplay_speaker_playing_takes_the_ear_away(fw, row):
-    """A guest's phone plays through the Q2 (Guest Play), and an AirPlay speaker is an output of its own."""
-    row.way = 0
-    jacks(fw)
-    assert fw.fn('status_row__wired_shown', C.c_int)() == EAR_W
-    air = fw.var('airplay__air', Air)
-    air.on = 1
-    assert fw.fn('status_row__wired_shown', C.c_int)() == 0
-    air.on = 0
-    from test_guest import Rig
-    rig = Rig(fw)
-    rig.state(state='playing', out='jack')
-    rig.poll()
-    assert fw.fn('status_row__wired_shown', C.c_int)() == 0
-
-
-def test_the_ear_coming_or_going_repaints_the_row(fw, row):
-    """The car's USB audio stopping (way 3 to 0) changes nothing else the signature holds but the ear."""
-    jacks(fw)
-    row.sync_sig()
-    assert row.sync_sig() == 0
-    row.way = 0
-    assert row.sync_sig() == 1
-    assert row.sync_sig() == 0
+    assert [n for n in names if n in ('oled_status_noaudio_d', 'oled_status_wired_d')] == ([art] if art else [])
 
 
 @pytest.mark.parametrize('way, po, wired, rune', [(0, 1, 1, 0), (2, 0, 1, 0), (1, 1, 0, 1)])
@@ -828,7 +787,7 @@ def state(fw):
 
 
 @pytest.mark.parametrize('way, po, link, level, cls, out, bt, btbatt', [
-    (0, 0, None, None, None, 'none', 'none', '-1'),  # nothing in, nothing linked: the deaf ear
+    (0, 0, None, None, None, 'other', 'none', '-1'),  # nothing in, nothing linked: no glyph
     (0, 1, None, None, None, 'wire', 'none', '-1'),  # the 3.5 mm jack
     (2, 0, None, None, None, 'wire', 'none', '-1'),  # a USB DAC
     (3, 0, None, None, None, 'other', 'none', '-1'),  # the car's USB audio
@@ -846,7 +805,7 @@ def test_q2ui_is_told_where_the_sound_goes_and_what_bluetooth_links(fw, row, way
         bt_link(fw, link, level, cls)
     said = state(fw)
     assert (said['out'], said['bt'], said['btbatt'], said['relay']) == (out, bt, btbatt, 'none')
-    assert fw.fn('status_row__wired_shown', C.c_int)() == (14 if out == 'wire' else EAR_W if out == 'none' else 0)
+    assert fw.fn('status_row__wired_shown', C.c_int)() == (14 if out == 'wire' else 0)
 
 
 def test_q2ui_is_told_of_the_lock_a_sync_a_server_out_of_reach_and_wifi_with_no_internet(fw, row):

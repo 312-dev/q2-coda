@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Status row: the red crossed-out ear shown with nothing connected to play to is gone; the other icons close up. The Wi-Fi icon's dot and bands have clean dark gaps between them, where they looked blurred.
   - New UI (preview): the touch screen works on a Q2: swiping down from the top opens Control Center and its circles, sliders and buttons take taps, where the new UI saw no touches at all.
   - New UI (preview): **Edit Home** works: hold Center on Home to reorder its rows or hide them with Play/Pause, as in the classic menus (the same saved order, so both menus agree). **Home: Split / Full** is on Settings > Display, and Full shows Home as a full-width list.
   - New UI (preview): on Home, the status icons over the cover turn black over a light cover and white over a dark one, as in the classic menus, in Light Mode too, and the row under Settings peeks out at the bottom of the list, fading away.
