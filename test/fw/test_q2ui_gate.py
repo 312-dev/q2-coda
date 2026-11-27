@@ -17,7 +17,9 @@ class Gate:
 
     def __init__(self, fw, target=b'q2ui\n', binary=True):
         self.fw, self.target, self.binary = fw, target, binary
-        self.top, self.ended, self.forks, self.shell, self.repaints, self.lit = b'home_page', 0, 0, [], 0, 0
+        self.top: bytes | None = b'home_page'
+        self.ended, self.forks, self.repaints, self.lit = 0, 0, 0, 0
+        self.shell: list[str] = []
         self.name = C.create_string_buffer(64)
         fw.mock('fw_open', lambda path, *_: 9 if target is not None and C.string_at(path) == TARGET else -1)
         fw.mock('fw_read', self.read)
