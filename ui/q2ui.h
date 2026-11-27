@@ -321,6 +321,8 @@ int notice_trace(char *out, size_t room); /* "notice card=ID lit=N level=X toast
 void notice_stats(char *out, size_t room); /* the stats file's "card", "card_from", "toast", "toasts_waiting" */
 /* ---- status.c: the status row, an overlay drawn over every page ---- */
 void status_draw(rect_t r);
+#define HOME_PANE_X 196   /* Home's art from here to the right edge, from the top (page_home.c) */
+int status_over_ink(void); /* the ink Home's glyphs over the art took: 1 white, 2 black, 0 none yet */
 void status_step(void);
 rect_t status_rect(void);
 void status_clock_fixed(const char *hhmm);
@@ -384,7 +386,8 @@ typedef struct ui_source {
     int row_h;  /* 32, or 52 for two-line rows; 0 is 32 */
     int letters; /* 1: sorted by title, so a fast spin jumps by letter */
     rect_t box; /* where the list lives; w 0 is the whole screen under the status row */
-    int fade_to; /* where the rows past the list's end have faded into the ground; 0: the screen's foot's (y 311) */
+    int fade_to; /* where the rows past the list's end have faded into the ground; 0: the screen's foot's (y 311).
+                    Given, a list that starts lower than a list page's runs on to the screen's foot (Home's eighth row) */
     int bare;    /* 1: no ground and no fades of its own, over what the page has drawn (a menu sheet's material) */
 } ui_source;
 typedef struct ui_list ui_list;

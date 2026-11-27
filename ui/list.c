@@ -237,6 +237,8 @@ static float bar_to(const ui_list *l) {
 static rect_t frame_rect(const ui_list *l) {
     /* a list under the status row runs on under it to the screen's top and down to its foot */
     if (l->box.y == LIST_TOP) return (rect_t){ l->box.x, 0, l->box.w, SCREEN_H };
+    /* one that names where its rows fade (Home's) runs on to the screen's foot, the row past its end fading there */
+    if (l->src.fade_to) return (rect_t){ l->box.x, l->box.y, l->box.w, SCREEN_H - l->box.y };
     return l->box;
 }
 static rect_t sb_rect(void) { return (rect_t){ SB_X, SB_TOP, SB_W, SB_BOTTOM - SB_TOP }; }
@@ -724,7 +726,7 @@ static void list_draw_rows(ui_list *l, rect_t r) {
             row_paint(l, i, y, 0, 0);
         }
         /* the list's ends: rows fade into the screen's foot, and into its top once scrolled */
-        if (!l->src.bare && (full || p)) {
+        if (!l->src.bare && (full || p || l->src.fade_to)) {
             int foot = l->box.y + l->box.h, end = l->src.fade_to ? l->src.fade_to : FOOT_END;
             fade_rows(foot, end, FOOT_KEEP, 0);
             fill((rect_t){ frame.x, end, frame.w, SCREEN_H - end }, tok(TOK_CANVAS));

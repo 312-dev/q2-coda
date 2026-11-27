@@ -13,8 +13,9 @@
 /* demo's Split (docs/oled-design.md, Screens: Home): the rows to x 204, their bar 16 to 188 and chevrons
  * at 176, and the art from x 196, under the rows' last columns, where they draw nothing */
 #define LIST_W 204
-#define PANE_X 196
+#define PANE_X HOME_PANE_X
 #define HOME_TOP 40 /* Home's rows start 18 px above a list page's, as demo's Home has them */
+#define HOME_FOOT 311 /* seven rows whole, and the eighth fading into the screen's foot by here, as a list's (list.c) */
 #define PANE ((rectf_t){ PANE_X, 0, SCREEN_W - PANE_X, SCREEN_H })
 
 static const struct home_row {
@@ -77,7 +78,7 @@ static void *h_open(void *arg) {
     struct home_st *s = calloc(1, sizeof *s);
     s->state = state_now(), s->seen = now_seq(), s->t = ui_time();
     ui_source src = { .count = h_count, .row = h_row, .chosen = h_chosen, .focus = h_focus, .ctx = s,
-                      .box = { 0, HOME_TOP, LIST_W, 7 * 32 } };
+                      .box = { 0, HOME_TOP, LIST_W, 7 * 32 }, .fade_to = HOME_FOOT };
     s->list = list_new(&src);
     ui_mark_all();
     return s;

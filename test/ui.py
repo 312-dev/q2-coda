@@ -1587,6 +1587,67 @@ def song_rows(binary, work, home):
     return good
 
 
+def home_glyphs(binary, work):
+    """Home's status glyphs over the art (docs/oled-design.md#status-row): in one ink for the row, white or black by
+    the WCAG contrast against the art under them (its top darkened by the pane's vignette), held 0.03 past the bound
+    against flicker; a status colour keeps its hue; and in Light Mode too, over a dark cover, white. Also Home's
+    eighth row standing under the seventh, fading into the screen's foot."""
+    good = True
+    power = pathlib.Path(tempfile.mkdtemp(dir=work))
+    (power/'battery').mkdir()
+    (power/'battery/status').write_text('Discharging\n')
+
+    def charge(level, rgb, light='0'):
+        (power/'battery/capacity').write_text(f'{level}\n')
+        cover = pathlib.Path(tempfile.mkdtemp(dir=work))/'cover.png'
+        png(cover, 300, 300, rgb)
+        ini = cover.parent/'config.ini'
+        ini.write_text(f'[IPOD]\nLIGHT={light}\n')
+        _, pics, _ = script(binary, work, 60, ['rest', 'shot @home.ppm'], '--page', 'home', '--cover', cover, '--power', power,
+                            '--config', ini, now=NOW)
+        return pics['home'].at(293 if level > 30 else 288, 22), pics['home']  # inside the charge's fill
+    WHITE, BLACK, RED = (255, 255, 255), (0, 0, 0), (0xff, 0x45, 0x3a)
+    over_white, _ = charge(60, (255, 255, 255))
+    over_dark, home = charge(60, (20, 20, 30))
+    good &= check("over a white cover the battery's charge is black, over a dark one white", over_white == BLACK and over_dark == WHITE,
+                  f'{over_white} {over_dark}')
+    light, _ = charge(60, (20, 20, 30), '1')
+    good &= check('in Light Mode over a dark cover the glyphs are white too', light == WHITE, str(light))
+    low, _ = charge(12, (255, 255, 255))
+    good &= check('a low charge stays red over the art, whatever the ink', low == RED, str(low))
+    # the eighth row (Old Menus, with something playing the ninth) under the seventh, fading into the foot
+    ink = lambda y: max(max(home.at(x, y)) for x in range(24, 150))  # noqa: E731
+    good &= check("Home's eighth row stands under the seventh and fades into the screen's foot",
+                  ink(280) > 60 and ink(280) < 255 and ink(300) < ink(280) and ink(314) == 0, f'{ink(280)} {ink(300)} {ink(314)}')
+    # held against flicker: a cover between the bounds keeps the ink the row had, black from white and white from dark
+    d = folder(work, 60)
+    (d/'now').write_text(NOW)
+    (d/'input').mkdir()
+    for k in (1, 2, 3):
+        os.mkfifo(d/'input'/f'event{k}')
+    os.mkfifo(d/'cmdq')
+    cover = d/'cover.png'
+    (power/'battery/capacity').write_text('60\n')
+
+    def cover_now(rgb):
+        png(d/'next.png', 300, 300, rgb)
+        (d/'next.png').rename(cover)
+        time.sleep(1.5)
+        return shot.pixel(run.picture(), 293, 22)
+    png(cover, 300, 300, (255, 255, 255))
+    run = Run(binary, work, 60, '--page', 'home', '--cover', cover, '--power', power, '--clock', '12:00', at=d)
+    try:
+        run.rest()
+        seen = [shot.pixel(run.picture(), 293, 22), cover_now((218, 218, 218)), cover_now((20, 20, 30)), cover_now((218, 218, 218))]
+        good &= check('a grey cover between the bounds keeps black after white and white after dark',
+                      seen == [BLACK, BLACK, WHITE, WHITE], str(seen))
+    finally:
+        run.proc.kill()
+        run.proc.wait(timeout=5)
+        os.close(run.queue)
+    return good
+
+
 def album_covers(binary, work, home):
     """Albums' rows lead with their covers (ui/art.c), found as Cover Flow names them; one it has not made shows the
     placeholder. Read in place by a script, and by the worker in a live run."""
@@ -2437,6 +2498,8 @@ def main():
             good &= night_shift(binary, work, ('--page', 'home'))
         if not only or 'playing' in only:
             good &= playing_row(binary, work)
+        if not only or 'homeglyphs' in only:
+            good &= home_glyphs(binary, work)
         if not only or 'songrows' in only:
             good &= song_rows(binary, work, ('--page', 'home'))
         if not only or 'volume' in only:
