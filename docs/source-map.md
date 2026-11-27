@@ -2,6 +2,8 @@
 
 Every file in `patch/` and `tools/`, and `test/` by group: what it is for, where to enter it, and the doc that explains it. [architecture.md](architecture.md) says how they fit together. Check the list against the tree with `git ls-files patch tools`.
 
+Where this tree is headed (an `os/` Buildroot tree, services of our own in place of the payload, and which of these files port or go) is in [vamp-os.md](vamp-os.md).
+
 "UI" below is the payload inside `demo`, built from `NAVIGATION` (`tools/build.py`) and `UI_SOURCES` (`tools/peq.py`); "player" is `q2player` (`player/`), which compiles `patch/peq.c` in.
 
 ## patch/: the UI's core

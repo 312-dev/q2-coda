@@ -47,8 +47,11 @@ Read [docs/architecture.md](docs/architecture.md) first (20 minutes: the payload
 | Tests                                     | `test/`                                                                                                                  | [building: Tests](docs/building.md#tests), [source map: test/](docs/source-map.md#test)                                                                                                                                                               |
 | The hardware                              |                                                                                                                          | [hardware](docs/hardware.md) (buses, pins, the USB port, the radio), [firmware](docs/firmware.md) (every component's version and what can be updated), [usb](docs/usb.md) (USB detection), [bluetooth](docs/bluetooth.md) (connectivity) |
 | Known costs and fragile spots             |                                                                                                                          | [inefficiencies](docs/inefficiencies.md)                                                                                                                                                                                                              |
+| Vamp OS: the end goal (a plan) | none yet: `os/` and the services arrive with their milestones | [vamp-os](docs/vamp-os.md): [scope](docs/vamp-os.md#scope), [target architecture](docs/vamp-os.md#target-architecture), [inventory](docs/vamp-os.md#inventory), [installer](docs/vamp-os.md#installer-and-updates), [platform](docs/vamp-os.md#platform), [milestones](docs/vamp-os.md#milestones), and the [study rules](docs/vamp-os.md#study-hygiene) every brief carries |
 
 ## Plans
+
+Where the firmware is headed: [docs/vamp-os.md](docs/vamp-os.md), the roadmap to Vamp OS (every userspace piece our own or open source, on Shanling's kernel and modules; the owner's scope, the installer, the platform for other developers, milestones M0 to M8).
 
 Work planned but not built: [docs/backlog.md](docs/backlog.md) (the ordered list), [docs/oled-design.md](docs/oled-design.md) (the OLED theme), [docs/server-library.md](docs/server-library.md) (server songs in the Library), [docs/localsend.md](docs/localsend.md) (LocalSend in place of Wi-Fi Transfer).
 
