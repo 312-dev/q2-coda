@@ -1,6 +1,9 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - New UI (preview): Control Center opens with a swipe down from the top of the screen, as in the classic menus, and works by touch: tap a circle to turn it on or off, hold one for its settings, tap Previous, Play/Pause or Next, slide a finger along Brightness or Volume, and swipe up to close it. Holding Return still opens it too. **Brightness** is also the first row of Settings > Display.
+  - Status row: the Wi-Fi bars a weak signal leaves unlit are a faint shade of the icon's own colour (faint white on black, faint black in Light Mode), as on an iPhone, where they were a solid grey that stood out in Light Mode.
+  - Light Mode: a Q2 that has never chosen a Light Mode (a new install, or after Reset Settings) is now on **Auto**, light from 7:00 to 19:00 and dark at night, instead of dark all day. A Light Mode you chose stays as you set it.
   - Scanning: letting go of a held Previous or Next, or changing the scan's direction, is heard within about 0.15 s, where it could take half a second, so the song goes on nearer where you let go.
   - Car Audio: Radio, Internet Radio and Videos keep their own speed while the car is not taking the sound, where each short pause the Q2 took added up and could slow them down.
   - Development builds: adb works over Wi-Fi as well as the cable, for a computer you have allowed once over USB (or whose key is on the card), and the Q2 is found by name on any network. `vamp`, the project's own command-line tool, finds it and gives a shell, file copies, installs, screenshots, logs, input and profiling without Google's `adb`.

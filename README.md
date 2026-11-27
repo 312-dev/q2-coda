@@ -25,7 +25,7 @@
   </tr>
   <tr valign="top">
     <td><b>Display</b></td>
-    <td>The OLED theme: white type on black, one blue accent. Light Mode with an Auto schedule, Night Shift for the evening, and Smart Awake.</td>
+    <td>The OLED theme: white type on black, one blue accent. Light Mode on an Auto schedule by default, Night Shift for the evening, and Smart Awake.</td>
   </tr>
   <tr valign="top">
     <td><b>Wheel</b></td>

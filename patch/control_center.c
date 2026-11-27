@@ -867,6 +867,12 @@ int q2ui_cc_set(const char *name, int on) {
         mclSetGaplessMode(!!on);
     } else if (!tk_strcmp(name, "xfade")) { /* q2ui's Playback: Smart Crossfade */
         xfade_set(on);
+    } else if (!tk_strcmp(name, "night") && on >= 0 && on <= 2) { /* q2ui's Display: Night Shift Off, On, Auto */
+        night_set(on, night_kelvin()); /* as its page's row, saved as its page saves (nightshift.c) */
+        night_save();
+    } else if (!tk_strcmp(name, "nightk") && on >= NS_WARM && on <= NS_COOL && !(on % NS_STEP)) { /* its Warmth */
+        night_set(night_on(), on);
+        night_save();
     } else
         return -1;
     return 0;

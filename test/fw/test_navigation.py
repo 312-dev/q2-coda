@@ -407,7 +407,9 @@ def test_artists_default_to_album_artist(fw):
 
 
 @pytest.mark.parametrize('values, home, light', [
-    ({}, 0, 0), (dict(HOME=b'1', LIGHT=b'1'), 1, 1), (dict(HOME=b'2', LIGHT=b'1'), 0, 1), (dict(HOME=b'3', LIGHT=b'3'), 0, 0),
+    # nothing stored, or a LIGHT out of range: Auto (the owner's default, 2026-11-27), light by the clock fixture's day
+    ({}, 0, 1), (dict(HOME=b'1', LIGHT=b'1'), 1, 1), (dict(HOME=b'2', LIGHT=b'1'), 0, 1), (dict(HOME=b'3', LIGHT=b'3'), 0, 1),
+    (dict(LIGHT=b'0'), 0, 0),
 ])
 def test_display_settings(fw, clock, values, home, light):
     Config(fw, **values)

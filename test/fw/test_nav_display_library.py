@@ -360,8 +360,9 @@ def test_oled_appearance_rows_read_title_and_value_in_its_order(fw):
     assert read['Accent'] == accent_name(t, host.tools_theme.accent_default(t))
     own = [o for o in t['opts'] if o['setting'] == 'SETTING_OWN']
     assert own and [read[o['label']] for o in own] == [o['names'][o['def']] for o in own]  # each at its default
-    # nothing stored: the payload's own defaults (dark, Split, Battery's Icon); no Shortcut row
-    assert (read['Light Mode'], read['Home'], read['Battery']) == ('Off', 'Split', 'Icon') and 'Shortcut' not in read
+    # nothing stored: the payload's own defaults (Light Mode's Auto, the owner's 2026-11-27; Split, Battery's Icon); no
+    # Shortcut row
+    assert (read['Light Mode'], read['Home'], read['Battery']) == ('Auto', 'Split', 'Icon') and 'Shortcut' not in read
 
 
 def clicks_of(fw, ui, page, title, n):

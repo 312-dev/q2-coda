@@ -234,8 +234,8 @@ static void tell(void) {
     qu.told_at = now | !now;
     char b[1024], url[600];
     unsigned pos, count;
-    unsigned n = status_row_state(b, 320);
-    n += q2ui_cc_state(b + n, 320 - n);
+    unsigned n = status_row_state(b, 448); /* the slots, the clock's zone and form, and Control Center's states */
+    n += q2ui_cc_state(b + n, 448 - n);
     if (!song_cover_url(queue_now(&pos, &count), url, sizeof url)) url[7] = 0; /* past "file://": none */
     char v[64];
     vamp_version(v, sizeof v);

@@ -701,3 +701,18 @@ def test_play_pause_is_q2uis_only_while_its_row_editor_asks_for_it(fw):
     g.ended = 0
     g.poll()
     assert g.forks == 2 and g.on() == CHILD and g.input(UP, KEYS['KEY_PLAY']) == 0
+
+
+def test_q2uis_display_page_sets_night_shift_and_its_warmth_through_demo(fw):
+    """q2ui's Settings > Display: Night Shift's Off, On or Auto and its warmth, set and saved as its own page does
+    (nightshift.c night_set, night_save: Q2POD NIGHTSHIFT and NIGHTK), only a mode it has or a temperature on its steps."""
+    saved = []
+    fw.mock('write_int_config', lambda v, sec, key, *_: saved.append((C.string_at(sec).decode(), C.string_at(key).decode(), v)) or 0)
+    cc = fw.fn('q2ui_cc_set', C.c_int, C.c_char_p, C.c_int)
+    on = fw.fn('night_on', C.c_int)
+    kelvin = fw.fn('night_kelvin', C.c_int)
+    assert cc(b'night', 2) == 0 and ('Q2POD', 'NIGHTSHIFT', 2) in saved and on() == 2
+    assert cc(b'night', 3) == -1 and on() == 2
+    saved.clear()
+    assert cc(b'nightk', 2700) == 0 and saved == [('Q2POD', 'NIGHTK', 2700)] and kelvin() == 2700 and on() == 2
+    assert cc(b'nightk', 2750) == -1 and cc(b'nightk', 5100) == -1 and cc(b'nightk', 1900) == -1 and kelvin() == 2700

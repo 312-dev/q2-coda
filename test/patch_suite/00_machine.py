@@ -31,7 +31,9 @@ assert ACCENTS[O['MINIMAL_ACCENT']]==ACCENTS[0]
 def color_t(rgb): return 0xff000000|(rgb&255)<<16|(rgb>>8&255)<<8|rgb>>16
 O_GLYPH=re.search(r'#define BT_GLYPH "(\w+)"',INC)[1]  # the plain Bluetooth glyph a codec badge fades into
 CONFIG={}  # config.ini [IPOD] keys a new Machine starts with; the payload reads them on first use
-SEED={}  # values a Machine reads for a missing key in place of the payload's default
+# values a Machine reads for a missing key in place of the payload's default. LIGHT: the checks were written for the dark
+# half, and the payload's default, Auto (theme_engine.c settings_read), follows the host's clock: light by day.
+SEED={'LIGHT':'0'}
 # Reduce Motion's flat selection bar, for the checks that pin the bar's shape and place: the bar's rest lift and press
 # (tilt.c, docs/internals.md#row-press) widen it and cast a shadow, and test/fw/test_tilt.py pins those.
 FLAT={'REDUCEMOTION':'1'}

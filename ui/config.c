@@ -1,6 +1,6 @@
 /* The settings q2ui takes from /mnt/data/config.ini (docs/internals.md#configini), which demo owns
  * and writes while it owns the settings pages: read here, never written. [IPOD] LIGHT (0 dark, 1
- * Light Mode, 2 Auto: light from 7:00 to 19:00, patch/theme_engine.c light_day) and REDUCEMOTION
+ * Light Mode, 2 Auto: light from 7:00 to 19:00, patch/theme_engine.c light_day; Auto when absent) and REDUCEMOTION
  * (1 on). Read at the start and whenever demo writes the file (a watch of its folder), and Auto
  * again when the minute turns (status.c). --light and --reduce-motion on the command line hold
  * their setting on whatever the file says. */
@@ -12,6 +12,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "../patch/night_scale.h"
 #include "q2ui.h"
 
 #define LIGHT_FROM 7
@@ -19,8 +20,10 @@
 
 const char *config_file = "/mnt/data/config.ini";
 int config_light_forced, config_motion_forced;
-static int light_setting, motion_setting, watch = -1;
+static int light_setting, motion_setting, night_setting, night_k = NS_DEFAULT, watch = -1;
 int config_light_setting(void) { return light_setting; }
+int config_night_setting(void) { return night_setting; }
+int config_night_kelvin(void) { return night_k; }
 int config_motion_setting(void) { return motion_setting; }
 
 /* [section] key=value's number; def when the file, the section or the key is not there */
@@ -45,9 +48,13 @@ int config_int(const char *section, const char *key, int def) {
 
 /* Light Mode as the setting and the hour have it; a change draws everything again */
 void config_light_now(void) {
-    time_t t = time(0);
+    time_t t = (time_t)status_time();
     int hour = localtime(&t)->tm_hour;
     int light = config_light_forced || light_setting == 1 || (light_setting == 2 && hour >= LIGHT_FROM && hour < LIGHT_UNTIL);
+    /* Night Shift: on, or Auto in Light Mode's Auto's dark hours (patch/nightshift.c lit) */
+    int night = night_setting == 1 || (night_setting == 2 && !(hour >= LIGHT_FROM && hour < LIGHT_UNTIL));
+    static int warm = -1;
+    if ((night ? night_k : 0) != warm) warm = night ? night_k : 0, fb_warm(warm), ui_mark_all();
     if (light == ui_light) return;
     ui_light = light;
     list_rows_changed();
@@ -55,8 +62,12 @@ void config_light_now(void) {
 }
 
 void config_read(void) {
-    light_setting = config_int("IPOD", "LIGHT", 0);
+    light_setting = config_int("IPOD", "LIGHT", 2); /* Auto unless chosen (the owner's, 2026-11-27) */
     motion_setting = config_int("IPOD", "REDUCEMOTION", 0) == 1;
+    night_setting = config_int("Q2POD", "NIGHTSHIFT", 0);
+    night_setting = night_setting >= 0 && night_setting <= 2 ? night_setting : 0;
+    int k = config_int("Q2POD", "NIGHTK", 0); /* patch/nightshift.c settings: a temperature off its steps is the default */
+    night_k = k >= NS_WARM && k <= NS_COOL && !(k % NS_STEP) ? k : NS_DEFAULT;
     list_rows_changed(); /* a page may show a setting (page_display.c) */
     int reduce = config_motion_forced || motion_setting;
     if (reduce != ui_reduce_motion) ui_reduce_motion = reduce, ui_mark_all();

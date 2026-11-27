@@ -674,15 +674,15 @@ for label_name in ('label_del','label_rename'):
 passed()
 
 m=Machine(); style_color(m,red)
-# config_value passes its default in decimal; IPOD SHORTCUT is not a setting and is never read
-assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY')]+[('/mnt/data/config.ini','IPOD','LIGHT','0'),('/mnt/data/config.ini','IPOD','KEEPLIT','1'),('/mnt/data/config.ini','IPOD','CLICKER','0'),('/mnt/data/config.ini','IPOD','REDUCEMOTION','0')]+[('/mnt/data/config.ini','IPOD',key,str(d)) for key,(_,d,_) in theme_keys(theme_builtins()).items()]; passed()  # the theme's own, in table order
+# config_value passes its default in decimal (LIGHT's Auto, 2); IPOD SHORTCUT is not a setting and is never read
+assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY')]+[('/mnt/data/config.ini','IPOD','LIGHT','2'),('/mnt/data/config.ini','IPOD','KEEPLIT','1'),('/mnt/data/config.ini','IPOD','CLICKER','0'),('/mnt/data/config.ini','IPOD','REDUCEMOTION','0')]+[('/mnt/data/config.ini','IPOD',key,str(d)) for key,(_,d,_) in theme_keys(theme_builtins()).items()]; passed()  # the theme's own, in table order
 # theme()/scheme(): OLED, the one built-in (themes[0]), and its Blue scheme, settings read on first use; THEME is no
 # setting the engine reads. Light Mode's On picks the light half's row (oled_light), Auto by the clock, Off the dark
 # one; both point at oled_tones and derive their half (SCHEME_DERIVE, scheme_t.mode @4).
 SCHEME_SIZE=(payload_syms['oled_light']-payload_syms['oled_schemes'])//len(OLED['schemes'])
 for config,half in (({},'oled_schemes'),({'OLED_ACCENT':'7'},'oled_schemes'),({'THEME':'1'},'oled_schemes'),({'THEME':'0','ACCENT':'3'},'oled_schemes'),
                     ({'OLED_ACCENT':'12'},'oled_schemes'),({'LIGHT':'1'},'oled_light'),({'LIGHT':'1','OLED_ACCENT':'1'},'oled_light')):
-    k=Machine(); k.config=dict(config); k.seed={}
+    k=Machine(); k.config=dict(config); k.seed={'LIGHT':'0'}  # no LIGHT key is Auto, by the host's clock: these are Off's
     t=k.call(address=payload_syms['theme'],args=(0,0,0,0),gap=0)&0xffffffff
     assert t==payload_syms['themes'] and len(k.config_reads)==CONFIG_READS,config
     s=k.call(address=payload_syms['scheme'],args=(0,0,0,0),gap=0)&0xffffffff

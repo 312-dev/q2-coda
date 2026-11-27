@@ -5,6 +5,7 @@ import ctypes as C
 import struct
 
 import pytest
+import host
 
 from conftest import O, Files, threads_now
 from test_addon import Ap
@@ -858,3 +859,18 @@ def test_q2ui_is_told_of_the_lock_a_sync_a_server_out_of_reach_and_wifi_with_no_
     row.online = 0
     said = state(fw)
     assert (said['lock'], said['sync'], said['syncpm'], said['offline'], said['net']) == ('1', '2', '450', '1', '0')
+
+
+def test_q2ui_is_told_the_clocks_zone_and_24_hour_setting(fw, row):
+    """q2ui's clock follows demo's time zone and 24-hour setting (nav/lyrics_status_bar.c clock_show): demo says the
+    zone's TZ (tools/build.py TIMEZONES, by stock's saved index g_time_zone) and the setting, as it says the slots."""
+    names = [tz for _, tz in host.tools_build.TIMEZONES]
+    zone, hours = fw.var('g_time_zone', C.c_ubyte), fw.var('g_time24h_flag', C.c_ubyte)
+    zone.value, hours.value = names.index('America/New_York'), 0
+    said = state(fw)
+    assert (said['tz'], said['clock24']) == ('America/New_York', '0')
+    zone.value, hours.value = names.index('UTC'), 1
+    said = state(fw)
+    assert (said['tz'], said['clock24']) == ('UTC', '1')
+    zone.value = 250  # an index no row has: no zone said, so q2ui keeps the one it has
+    assert state(fw)['tz'] == ''

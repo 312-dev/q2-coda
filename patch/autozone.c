@@ -135,6 +135,9 @@ static void az_apply(int i) {
     az.quiet = 0;
 }
 
+/* The saved zone's TZ (g_time_zone's in TIMEZONES), "" for an index no row has: q2ui's clock's (status_row.c) */
+const char *autozone_tz(void) { return g_time_zone < TZ_COUNT ? tz_names[g_time_zone] : ""; }
+
 /* The switch turned on: a lookup at the next poll with the link up, whenever the last was. */
 void autozone_due(void) { az.due = 1; }
 

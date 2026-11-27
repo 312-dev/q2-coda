@@ -24,6 +24,7 @@
 
 #include <linux/fb.h>
 
+#include "../patch/night_scale.h"
 #include "q2ui.h"
 
 #define PAGE_W SCREEN_H
@@ -127,6 +128,22 @@ static inline uint32_t narrow(uint32_t c) {
     g = (g | (og - (og >> 8))) & (keep_g << 8);
     return 0xff000000 | rb | g;
 }
+/* Night Shift (docs/internals.md#night-shift, demo's patch/nightshift.c): while on, each pixel turned to the panel
+ * keeps its red and has green and blue scaled to the temperature's (night_scale.h), then is narrowed as any is */
+static unsigned char warm_g[256], warm_b[256];
+static int warming;
+void fb_warm(int kelvin) {
+    static const unsigned char green[] = NS_GREEN, blue[] = NS_BLUE;
+    int on = kelvin >= NS_WARM && kelvin <= NS_COOL;
+    if (on) {
+        unsigned i = (unsigned)(kelvin - NS_WARM) / NS_STEP;
+        for (unsigned v = 0; v < 256; ++v)
+            warm_g[v] = (unsigned char)((v * green[i] + 127) / 255), warm_b[v] = (unsigned char)((v * blue[i] + 127) / 255);
+    }
+    if (on || warming) add(&now, (rect_t){ 0, 0, SCREEN_W, SCREEN_H }), add(&last, (rect_t){ 0, 0, SCREEN_W, SCREEN_H });
+    warming = on;
+}
+static inline uint32_t warm(uint32_t c) { return (c & 0xff0000) | (uint32_t)warm_g[c >> 8 & 255] << 8 | warm_b[c & 255]; }
 void fb_depth(int bits) {
     fb_bits = bits == 5 || bits == 6 || bits == 565 ? bits : 8;
     px_bits_rb = fb_bits == 565 ? 5 : (unsigned)fb_bits, px_bits_g = fb_bits == 565 ? 6 : (unsigned)fb_bits;
@@ -135,14 +152,17 @@ static unsigned turn_narrow(uint32_t *page, rect_t r) {
     for (int y = r.y; y < r.y + r.h; ++y) {
         const uint32_t *src = canvas + y * SCREEN_W + r.x;
         uint32_t *dst = page + r.x * PAGE_W + (PAGE_W - 1 - y);
-        for (int i = 0; i < r.w; ++i, dst += PAGE_W) *dst = narrow(src[i]);
+        if (warming)
+            for (int i = 0; i < r.w; ++i, dst += PAGE_W) *dst = narrow(warm(src[i]));
+        else
+            for (int i = 0; i < r.w; ++i, dst += PAGE_W) *dst = narrow(src[i]);
     }
     return (unsigned)(r.w * r.h);
 }
 
 /* r of the canvas onto page: canvas (x, y) to page (319 - y, x), BAND rows at a time */
 static unsigned turn(uint32_t *page, rect_t r) {
-    if (fb_bits != 8) return turn_narrow(page, r);
+    if (fb_bits != 8 || warming) return turn_narrow(page, r);
     int y = r.y;
     for (; y + BAND <= r.y + r.h; y += BAND) {
         const uint32_t *src = canvas + y * SCREEN_W + r.x;

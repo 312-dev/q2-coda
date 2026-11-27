@@ -23,14 +23,9 @@
 
 #define NS_DONE 0xf7u
 
-/* Green and blue's scale, of 255, from NS_WARM to NS_COOL by NS_STEP: Tanner Helland's fit to the
- * black-body colours, where red stays 255 below 6600K. */
-static const unsigned char ns_green[] = { 137, 142, 146, 151, 155, 159, 163, 167, 170, 174, 177,
-                                          180, 184, 187, 190, 193, 195, 198, 201, 203, 206, 208,
-                                          211, 213, 215, 218, 220, 222, 224, 226, 228 };
-static const unsigned char ns_blue[] = { 14,  27,  39,  50,  61,  70,  79,  87,  95,  103, 110,
-                                         117, 123, 129, 135, 141, 146, 151, 157, 161, 166, 171,
-                                         175, 179, 183, 187, 191, 195, 199, 202, 206 };
+/* Green and blue's scale, of 255, from NS_WARM to NS_COOL by NS_STEP (night_scale.h, q2ui's too) */
+static const unsigned char ns_green[] = NS_GREEN;
+static const unsigned char ns_blue[] = NS_BLUE;
 _Static_assert(sizeof ns_green == (NS_COOL - NS_WARM) / NS_STEP + 1, "a scale per step");
 _Static_assert(sizeof ns_blue == sizeof ns_green, "a blue per green");
 

@@ -175,7 +175,7 @@ void light_apply(const int *tm) {
 __attribute__((noinline)) static void settings_read(void) {
     for (int i = 0; i < 3; ++i)
         *setting_values[i] = config_value("IPOD", setting_keys[i], setting_counts[i], 0);
-    st.light = config_value("IPOD", "LIGHT", 3, 0); /* dark unless chosen; 2 Auto */
+    st.light = config_value("IPOD", "LIGHT", 3, 2); /* Auto unless chosen (the owner's, 2026-11-27); 0 dark, 1 light */
     /* Smart Awake on unless chosen (tools/build.py DEFAULT_IPOD writes it so after a reset) */
     st.keep_lit = config_value("IPOD", "KEEPLIT", 2, 1);
     st.clicker = config_value("IPOD", "CLICKER", 3, 0);      /* Both unless chosen (clicker.c) */

@@ -154,7 +154,8 @@ add a lighter or darker blue.
 
 ### Light Mode
 
-The concept has no light screens; Vamp's Light Mode exists and must keep working. The light
+The concept has no light screens; Vamp's Light Mode exists and must keep working. It is Auto unless
+chosen (light from 7:00 to 19:00; the owner's default from 2026-11-27, `[IPOD] LIGHT` absent reading as 2). The light
 half flips grays, not hues:
 
 | Token          | Dark      | Light     |
@@ -255,8 +256,8 @@ All lists share one grid.
     row](#homes-first-row)).
   - **Wi-Fi**, left of the play state: iOS's fan, a 90 degree sector 11 px in radius from an apex on the digits'
     baseline (15.6 x 11 px), cut into a dot (radius 3.6) and two bands (5.0 to 7.3, 8.7 to 11) with 1.4 px gaps;
-    the signal lights the dot, then the bands, in Text Primary and the rest is `#3A3A3C` (`#C7C7CC` in Light
-    Mode), so the shape keeps its size; Phosphor `wifi-x` (bold) connected with no internet; nothing with Wi-Fi
+    the signal lights the dot, then the bands, in Text Primary and the rest is Text Primary at 30% (iOS's rule,
+    the owner's, 2026-11-27: faint white on black, faint black in Light Mode), so the shape keeps its size; Phosphor `wifi-x` (bold) connected with no internet; nothing with Wi-Fi
     off or not connected (`mock_wifi_status.py`, `mock_status_icons.py`).
   - **Sync**, left of the glyph before it: while a card app checks its server or its metadata, Phosphor
     `arrows-clockwise` (bold) turning in Text Primary, 30 frames a second, a half turn a second (S1, the user's
