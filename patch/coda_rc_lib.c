@@ -643,10 +643,10 @@ static int list_of(const char *base, const char *sort, list_t *l) {
         l->sort = pick(l->sorts, sort)->key;
         l->order = !strcmp(l->sort, "name") ? "nt, pos" : "pos";
         /* a server playlist's art is its server's cover (Navidrome's collage) once its app has it, else, as a
-         * card playlist's, its first song's album's */
+         * card playlist's, its first song's album's; the null keeps coalesce() at two arguments with no catalogue */
         snprintf(l->src, sizeof l->src, "select 'pl:'||h.id c0, h.name c1, '' c2, coalesce(%s(select s2.ak from "
                  "main.playlist p join s2 on s2.url = p.fileurl where p.id > 100 and p.cd_num = h.id order by p.id "
-                 "limit 1)) c3, %d c4, 1 c5, 0 c6, 0 c7, 0 c8" NO_TAIL("null", "norm(h.name)", "h.id", "0")
+                 "limit 1), null) c3, %d c4, 1 c5, 0 c6, 0 c7, 0 c8" NO_TAIL("null", "norm(h.name)", "h.id", "0")
                  " from main.playlist h where h.id <= 100",
                  cat_on ? "(select plart(sl.app, sl.pid) from cat.serverlists sl where sl.list = h.id), " : "",
                  ICON_PLAYLISTS_);

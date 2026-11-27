@@ -547,3 +547,17 @@ def test_vamp_os_s_library_is_read_again_once_q2libd_has_changed_it(vampos):
     db.commit()
     db.close()
     assert titles(vampos.browse('tracks')) == ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo']
+
+
+def test_the_playlists_list_answers_with_no_server_signed_in(lib, tmp_path):
+    """the art's coalesce() has the server's cover first only with a catalogue attached: without one it must still be
+    a call SQLite takes (one argument is refused: "wrong number of arguments to function coalesce()")"""
+    q2 = Q2(lib, tmp_path)
+    db = sqlite3.connect(tmp_path / 'mnt/data/database.db')
+    db.execute("insert into playlist values (1, 'Road', '', 1)")
+    db.execute("insert into playlist values (101, 'Alpha', '/mnt/mmc/a/1.flac', 1)")
+    db.commit()
+    db.close()
+    listing = q2.browse('playlists')
+    assert not isinstance(listing, str) and titles(listing) == ['Road'], listing
+
