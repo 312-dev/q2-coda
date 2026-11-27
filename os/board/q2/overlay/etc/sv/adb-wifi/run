@@ -3,11 +3,11 @@
 # running only while a computer is trusted (/mnt/data/adb_keys or the card's adb_keys) and config.ini has no
 # ADBWIFI=0, and stops both otherwise: no port is open on a network until a key is trusted.
 . /usr/libexec/vamp/log
-if [ -e /run/vamp/card-boot ]; then
-    # started from the card (docs/vamp-os-base.md#card-boot): today's Vamp's adbd, outside the chroot, already has
-    # the Wi-Fi side, and keeps serving it
-    step "adb-wifi: left to today's Vamp (card boot)"
-    exec sleep 2147483647
+. /usr/libexec/vamp/outer
+if outer_tcp_adbd 5555; then
+    # another adbd listens on 5555 (today's Vamp's, outside a card boot's chroot): looked at again in 30 s
+    step "adb-wifi: an outer adbd listens on 5555, left to it"
+    exec sleep 30
 fi
 step "adb-wifi: start"
 exec /usr/bin/q2adb-wifi

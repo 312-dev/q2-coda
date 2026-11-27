@@ -29,7 +29,7 @@ must be left alone.
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
-Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot).
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
 """
 import argparse
 import hashlib
@@ -331,20 +331,22 @@ def sysd_checks(fs, power_key, log):
     os.close(fd)
 
 
-def outer_vamp(work):
+def outer_vamp(work, adbd=True):
     """Stand-ins for what today's Vamp has running when it hands over from the card: wpa_supplicant and udhcpc (a sleep
     under each name: Wi-Fi associated) and its Wi-Fi adbd on 5555 (a listener that greets with "outer-adbd")."""
     import threading
     procs = []
-    for name in ('wpa_supplicant', 'udhcpc'):
+    for name in ('wpa_supplicant', 'udhcpc') + (('adbd',) if adbd else ()):
         exe = work/'outer'/name
         exe.parent.mkdir(exist_ok=True)
         exe.write_bytes(pathlib.Path('/bin/sleep').read_bytes())
         exe.chmod(0o755)
         procs.append(subprocess.Popen([str(exe), '3600']))
+    if not adbd:
+        return procs
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind(('127.0.0.1', 5555))
+    srv.bind(('0.0.0.0', 5555))
     srv.listen(8)
 
     def serve():
@@ -359,10 +361,19 @@ def outer_vamp(work):
     return procs + [srv]
 
 
-def outer_check(outer, log):
-    """The card boot left today's Vamp's Wi-Fi and its Wi-Fi adbd alone: both processes still running, port 5555 still
-    the outer adbd's, past Smart Wi-Fi's idle time."""
+def outer_check(outer, log, adbd=True):
+    """The card boot left today's Vamp's Wi-Fi and its adbd alone: the processes still running, port 5555 still the
+    outer adbd's, past Smart Wi-Fi's idle time; with no outer adbd, the image's own adbd over USB and over Wi-Fi."""
     time.sleep(8)
+    text = log.read_text()
+    if adbd:
+        check('adbd: an outer adbd serves USB, left to it' in text and 'adb-wifi: an outer adbd listens on 5555, left to it' in text
+              and 'adbd: start' not in text and 'adb-wifi: start' not in text, "card boot: the image's adb stays off beside an outer adbd")
+    else:
+        # USB's adbd tries: its gadget is refused here (no configfs), which is its own line, not a yield
+        check('left to it' not in text and 'adb-wifi: start' in text and ('adbd: start' in text or 'adbd: no USB gadget' in text),
+              "card boot, no outer adbd: the image's adbd starts on USB and Wi-Fi")
+        return
     alive = all(o.poll() is None for o in outer if hasattr(o, 'poll'))
     try:
         c = socket.create_connection(('127.0.0.1', 5555), 3)
@@ -411,11 +422,11 @@ def adb_open(port=5555):
         return False
 
 
-def adb_checks(fs, closed_s=15, wait_s=30):
+def adb_checks(fs, keys=None, closed_s=15, wait_s=30):
     """adb over Wi-Fi in the booted image (docs/vamp-os-base.md#adb): no port while no computer is trusted; a key put
     in /mnt/data/adb_keys opens it within q2adb-wifi's 10 s and lets that key in (exec: reads the image's own
     /etc/vamp-release), refuses another key, and closes the port again once the file is gone."""
-    keys = fs/'mnt/data/adb_keys'
+    keys = keys or fs/'mnt/data/adb_keys'
     end = time.monotonic() + closed_s
     opened = False
     while time.monotonic() < end and not opened:
@@ -450,7 +461,7 @@ STUB = '#!/bin/sh\necho "$(cut -d" " -f1 /proc/uptime) \\$ ${0##*/} $*" >> /emu/
 STUBBED = ['bin/mount', 'bin/mknod', 'sbin/mdev', 'sbin/insmod', 'usr/sbin/ubiattach', 'bin/dmesg', 'sbin/ifconfig']
 
 
-def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=False, adb=True):
+def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=False, adb=True, outer_adbd=True):
     work = pathlib.Path(keep or tempfile.mkdtemp(prefix='vamp-os-boot-', dir='/tmp'))
     work.mkdir(parents=True, exist_ok=True)
     fs = unpack(composed, work/'fs')
@@ -466,6 +477,11 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         (fs/'etc/init.d/rcS').write_text(rcs)
     if perturb == 'adb-open':  # Wi-Fi adbd with no key check: an open port
         (fs/'etc/sv/adb-wifi/run').write_text('#!/bin/sh\nexec /usr/bin/adbd --tcp 5555\n')
+    if perturb == 'adb-marker':  # the adb services yield on a card boot whatever runs (the rule before this one)
+        for svc in ('adbd', 'adb-wifi'):
+            run = (fs/'etc/sv'/svc/'run').read_text()
+            run = run.replace('if outer_usb_adbd; then', 'if [ -e /run/vamp/card-boot ]; then').replace('if outer_tcp_adbd 5555; then', 'if [ -e /run/vamp/card-boot ]; then')
+            (fs/'etc/sv'/svc/'run').write_text(run)
     if perturb == 'netd-card':  # q2netd not told it is a card boot
         run = (fs/'etc/sv/q2netd/run').read_text().replace('card=--card-boot', 'card=')
         (fs/'etc/sv/q2netd/run').write_text(run)
@@ -526,7 +542,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
     if card:
         # as on a Q2: today's Vamp's init stays PID 1 and q2vampos runs Vamp OS's rcS and runsvdir in a chroot, beside
         # what today's boot started: its Wi-Fi (wpa_supplicant, udhcpc) and its Wi-Fi adbd on 5555, stand-ins here
-        outer = outer_vamp(work)
+        outer = outer_vamp(work, outer_adbd)
         ns, proc_args = [], ['--bind', '/proc', '/proc']
         first = ['/bin/sh', '-c', '/etc/init.d/rcS && exec /usr/bin/runsvdir -P /etc/sv']
     else:
@@ -550,7 +566,9 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         if proc.poll() is None:
             netd_check(fs, card)
         if card and proc.poll() is None:
-            outer_check(outer, emu/'record')
+            outer_check(outer, emu/'record', outer_adbd)
+            if not outer_adbd:
+                adb_checks(fs, emu/'data/adb_keys')
         if not card and proc.poll() is None:
             sysd_checks(fs, inp/'event2', emu/'record')
         if card:  # the services' first lines
@@ -594,8 +612,6 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
               'card boot: the module script is not run again over loaded modules')
         check(first('data: already mounted') is not None and not any(s.startswith(('ubiattach', 'mount -t tmpfs -o mode=0755 tmpfs /mnt/data')) for s in order),
               'card boot: /mnt/data is kept as mounted')
-        check(first("adbd: left to today's Vamp (card boot)") is not None and first("adb-wifi: left to today's Vamp (card boot)") is not None
-              and first('adbd: start') is None and first('adb-wifi: start') is None, "card boot: adb is left to today's Vamp's adbd")
         idx = [first('rcS: done'), first('q2player: start'), first('q2ui: start')]
         check(None not in idx and idx[0] < min(idx[1:]), 'card boot: rcS done, then the services')
         print(f'boot: {logs or work} (console.log, timeline.txt)')
@@ -630,8 +646,9 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
+    ap.add_argument('--no-outer-adbd', action='store_true', help='with --card-boot: today\'s Vamp has no adbd running')
     a = ap.parse_args()
     manifest, _ = vamp_os.read_manifest()
     check_pins()
@@ -651,7 +668,7 @@ def main():
             check(not bad, f'/vendor holds the {len(manifest)} files of the manifest, byte for byte{": " + ", ".join(bad[:5]) if bad else ""}')
             check(composed.stat().st_size <= vamp_os.ROOTFS_ROOM, f'composed image is {composed.stat().st_size:,} bytes, within mtd2')
         if not a.no_boot:
-            boot(composed, a.qemu or vamp_os.qemu(), a.keep, logs=a.build/('boot-card' if a.card_boot else 'boot'), perturb=a.perturb, card=a.card_boot)
+            boot(composed, a.qemu or vamp_os.qemu(), a.keep, logs=a.build/(('boot-card-noadb' if a.no_outer_adbd else 'boot-card') if a.card_boot else 'boot'), perturb=a.perturb, card=a.card_boot, outer_adbd=not a.no_outer_adbd)
     print(f'{len(FAILS)} failed' if FAILS else 'all passed')
     sys.exit(1 if FAILS else 0)
 

@@ -4,11 +4,11 @@
 # only with a key in /mnt/data/adb_keys or the card's adb_keys: nothing here answers adbd's prompt socket, so an
 # unknown key is refused at once.
 . /usr/libexec/vamp/log
-if [ -e /run/vamp/card-boot ]; then
-    # started from the card (docs/vamp-os-base.md#card-boot): today's Vamp's adbd, outside the chroot, already has
-    # the USB side, and keeps serving it
-    step "adbd: left to today's Vamp (card boot)"
-    exec sleep 2147483647
+. /usr/libexec/vamp/outer
+if outer_usb_adbd; then
+    # another adbd has the USB side (today's Vamp's, outside a card boot's chroot): looked at again in 30 s
+    step "adbd: an outer adbd serves USB, left to it"
+    exec sleep 30
 fi
 if ! /usr/bin/q2adb-gadget setup; then
     step "adbd: no USB gadget (configfs or FunctionFS refused)"

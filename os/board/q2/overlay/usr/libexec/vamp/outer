@@ -1,0 +1,20 @@
+# Sourced by the adb services' scripts: whether an adbd that is not Vamp OS's is already serving (today's Vamp's, outside
+# the chroot of a card boot, docs/vamp-os-base.md#card-boot), decided by what is running and listening, not by what
+# kind of boot this is.
+#   outer_usb_adbd: a process named adbd running without --tcp (the USB one)
+#   outer_tcp_adbd PORT: something listening on TCP PORT (on 0.0.0.0 or ::)
+outer_usb_adbd() {
+    local d c
+    for d in /proc/[0-9]*; do
+        [ "$(cat "$d/comm" 2>/dev/null)" = adbd ] || continue
+        c=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null)
+        case "$c" in *--tcp*) ;; *) return 0 ;; esac
+    done
+    return 1
+}
+outer_tcp_adbd() {
+    local hex
+    hex=$(printf '%04X' "$1")
+    # /proc/net/tcp's local address ends :PORT in hex, state 0A is LISTEN
+    grep -qE "^ *[0-9]+: [0-9A-F]+:$hex [0-9A-F]+:[0-9A-F]+ 0A " /proc/net/tcp /proc/net/tcp6 2>/dev/null
+}
