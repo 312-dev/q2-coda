@@ -1373,6 +1373,57 @@ def control_center_touch(binary, work, home):
     return good
 
 
+# A Q2's own hyn_ts, recorded from /dev/input/event2 on the owner's Q2 (2026-11-27) while a finger pulled down from the
+# screen's top edge: (ms from the first, type, code, value). The panel says a finger only by ABS_PRESSURE 1 and 0, never
+# BTN_TOUCH, on its portrait axes: ABS_X from 320 at the upright screen's top edge, ABS_Y across it.
+HYN_PULL = [(0, 3, 0, 308), (0, 3, 1, 73), (0, 3, 24, 1), (0, 0, 0, 0), (11, 3, 0, 303), (11, 0, 0, 0), (22, 3, 0, 292),
+            (22, 3, 1, 74), (22, 0, 0, 0), (34, 3, 0, 274), (34, 0, 0, 0), (45, 3, 0, 245), (45, 0, 0, 0), (56, 3, 0, 216),
+            (56, 0, 0, 0), (68, 3, 0, 180), (68, 0, 0, 0), (78, 3, 24, 0), (78, 0, 0, 0)]
+
+
+def touch_device(binary, work, home):
+    """The touch panel as a Q2's own sends it (HYN_PULL, recorded on one): a finger is ABS_PRESSURE alone, no
+    BTN_TOUCH. Replayed through q2ui's reader (ui/input.c), the pull down from the top edge opens Control Center, and
+    a tap made the same way (Bluetooth's circle, upright (132, 68): ABS_X 251, ABS_Y 132) flips Bluetooth."""
+    good = True
+    told = cc_told(work)
+    r, w = os.pipe()
+    os.set_blocking(r, False)
+    run = Run(binary, work, 60, *home, '--told', told, '--ctl', str(w), '--clock', '12:00', fds=(w,))
+    os.close(w)
+
+    def send(events):
+        t = 0
+        for ms, kind, code, value in events:
+            if ms > t:
+                time.sleep((ms - t) / 1000)
+                t = ms
+            run.touch.write(event(kind, code, value))
+    try:
+        run.rest()
+        before = run.picture()
+        send(HYN_PULL)
+        run.rest()
+        after = run.picture()
+        # the sheet over Home: most of the screen changed (the live stats are written as a list rests, not the sheet)
+        changed = sum(shot.pixel(before, x, y) != shot.pixel(after, x, y) for x in range(5, 375, 10) for y in range(40, 320, 10))
+        good &= check("the recorded pull down from the top edge opens Control Center over Home", changed > 500, str(changed))
+        send([(0, 3, 0, 251), (0, 3, 1, 132), (0, 3, 24, 1), (0, 0, 0, 0), (60, 3, 24, 0), (60, 0, 0, 0)])
+        run.rest()
+        try:
+            said = os.read(r, 4096).decode().split('\n')
+        except BlockingIOError:
+            said = []
+        said = [line for line in said if line and not line.startswith('click ')]
+        good &= check("a tap the panel's way on Bluetooth's circle turns it on", said == ['set bt 1'], str(said))
+    finally:
+        run.proc.kill()
+        run.proc.wait(timeout=5)
+        os.close(run.queue)
+        os.close(r)
+    return good
+
+
 def control_center_sheet(binary, work, home):
     """The sheet's Wi-Fi circle is the link as the status row reads it, its landing springs, Light Mode inks it, and the
     Now Playing block opens Now Playing."""
@@ -2553,6 +2604,8 @@ def main():
             good &= night_shift(binary, work, ('--page', 'home'))
         if not only or 'playing' in only:
             good &= playing_row(binary, work)
+        if not only or 'touchdev' in only:
+            good &= touch_device(binary, work, ('--page', 'home'))
         if not only or 'edithome' in only:
             good &= edit_home(binary, work, ('--page', 'home'))
         if not only or 'homeglyphs' in only:

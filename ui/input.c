@@ -9,7 +9,8 @@
  * (docs/oled-design.md#selection-bar); the finger leaving is a tug of 0. A key held KEY_HOLD_MS
  * is IN_KEY_HOLD once, and its release is then not a key up: a hold and a press are two acts.
  *
- * The touchscreen is "hyn_ts": BTN_TOUCH, ABS_X and ABS_Y on the panel's own 320 x 375 portrait axes,
+ * The touchscreen is "hyn_ts": ABS_PRESSURE 1 and 0 for a finger down and up (a Q2's sends no BTN_TOUCH; the
+ * emulator's stand-in sends both, either is taken), ABS_X and ABS_Y on the panel's own 320 x 375 portrait axes,
  * which the upright screen turns a quarter (tools/q2remote.py touch_xy): upright x is the panel's y,
  * upright y is 319 less its x. A finger is IN_TOUCH_DOWN at its first place, IN_TOUCH_MOVE at each
  * new one and IN_TOUCH_UP where it was last. */
@@ -148,7 +149,9 @@ static int wheel_event(const struct input_event *e, input_t *out, int max) {
 static int touch_event(const struct input_event *e, input_t *out, int max) {
     if (e->type == EV_ABS && e->code == ABS_X) ts.raw_x = e->value;
     if (e->type == EV_ABS && e->code == ABS_Y) ts.raw_y = e->value;
-    if (e->type == EV_KEY && e->code == BTN_TOUCH) ts.down = e->value != 0;
+    /* a Q2's panel says a finger by ABS_PRESSURE alone (recorded on one, 2026-11-27: no BTN_TOUCH, though it lists
+     * EV_KEY); the emulator's stand-in sends both */
+    if ((e->type == EV_KEY && e->code == BTN_TOUCH) || (e->type == EV_ABS && e->code == ABS_PRESSURE)) ts.down = e->value != 0;
     if (e->type != EV_SYN || max < 1) return 0;
     int x = ts.raw_y, y = SCREEN_H - 1 - ts.raw_x, was = ts.was;
     x = x < 0 ? 0 : x >= SCREEN_W ? SCREEN_W - 1 : x;
