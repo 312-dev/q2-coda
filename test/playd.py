@@ -503,3 +503,158 @@ def test_an_answer_to_an_older_catplay_is_not_taken(run):
     pl.pump(1.0)
     assert pl.songs() == []
     sock.close()
+
+
+# ---- sources and audio focus (docs/playd.md#sources-and-audio-focus) ----
+
+def api(root):
+    a = Api(root)
+    assert a.line() == 'Q2PLAY/1 ok'
+    return a
+
+
+def queue_at_42(root, pl):
+    """songs 1 and 2 queued, song 2 playing 42 s in"""
+    play_list(root, [1, 2], 1)
+    pl.info = '900000|44100|200|42|FLAC|16'
+    pl.pump(1.5)
+    assert now(root, 0.6)['pos'] == '42000'
+
+
+def test_a_source_plays_its_url_and_gives_the_queue_back_paused_where_it_was(run):
+    root, pl = run
+    queue_at_42(root, pl)
+    a = api(root)
+    a.say('source http://10.0.0.9:8200/22.mp3?id%3D7 title=Delta%20Dawn artist=Dee album=Phone')
+    assert a.line() == 'ok'
+    pl.pump()
+    assert pl.got[-1] == ('set-nexturl', 'http://10.0.0.9:8200/22.mp3?id=7|ss=0|512|20|0|17|90'), 'the URL decoded, a cut'
+    pl.say('player-nextstatus', 'exit')
+    a.say('now')
+    got = fields(a.line())
+    assert (got['title'], got['artist'], got['album'], got['state'], got['id']) == ('Delta Dawn', 'Dee', 'Phone', '1', '0')
+    a.say('next')
+    assert a.line() == 'err next', 'a source is one URL'
+    pl.pump(1.5)  # a status poll: 42 s in
+    a.say('previous')
+    assert a.line() == 'err previous', 'not a restart of the URL'
+    a.say('focus')
+    assert a.line() == 'focus source=1 held=1'
+    b = api(root)
+    b.say('focus')
+    assert b.line() == 'focus source=1 held=0'
+    b.say('focus release')
+    assert b.line() == 'err focus release', 'only its holder gives it back'
+    a.say('focus release')
+    assert a.line() == 'ok'
+    pl.pump()
+    assert pl.names()[-1] == 'mcl-stop'
+    a.say('now')
+    got = fields(a.line())
+    assert (got['title'], got['state'], got['pos'], got['len'], got['id']) == ('Beta', '2', '42000', '200', '2'), 'paused, where it was'
+    a.say('resume')
+    assert a.line() == 'ok'
+    pl.pump()
+    assert pl.got[-1] == ('set-songurl', '/mnt/mmc/Music/b.mp3|ss=42|512|20|0|17|90'), 'from where it was put aside'
+
+
+def test_a_source_that_plays_out_tells_its_holder_and_gives_the_queue_back(run):
+    root, pl = run
+    queue_at_42(root, pl)
+    a = api(root)
+    a.say('source https://radio.example/live')
+    assert a.line() == 'ok'
+    pl.pump()
+    pl.say('player-nextstatus', 'exit')
+    pl.pump()
+    a.say('now')
+    assert fields(a.line())['title'] == 'live', "no title: the URL's last part"
+    pl.say('player-status', 'exit')
+    assert a.line() == 'focus lost why=end'
+    n = now(root)
+    assert (n['title'], n['state'], n['pos']) == ('Beta', '2', '42000')
+    assert pl.songs()[-1] == ('set-nexturl', 'https://radio.example/live'), 'the queue is not started again on its own'
+
+
+def test_a_source_that_does_not_open_says_error(run):
+    root, pl = run
+    a = api(root)
+    a.say('source http://h/x.flac')
+    assert a.line() == 'ok'
+    pl.pump()
+    assert pl.got[-1] == ('set-songurl', 'http://h/x.flac|ss=0|1024|20|0|17|90'), 'nothing played: no cut'
+    pl.say('player-status', 'error')
+    assert a.line() == 'focus lost why=error'
+    assert now(root)['state'] == '0', 'an empty queue comes back stopped'
+
+
+def test_a_play_takes_the_focus_and_the_queue_put_aside_is_dropped(run):
+    root, pl = run
+    queue_at_42(root, pl)
+    a = api(root)
+    a.say('source http://h/x.mp3')
+    assert a.line() == 'ok'
+    play_list(root, [3], 0)
+    assert a.line() == 'focus lost why=taken'
+    pl.pump()
+    assert pl.songs()[-1] == ('set-nexturl', '/mnt/mmc/Music/c%0x7dd.flac')
+    a.say('focus')
+    assert a.line() == 'focus source=0 held=0'
+    a.say('focus release')
+    assert a.line() == 'err focus release'
+    assert now(root)['id'] == '3'
+
+
+def test_another_source_takes_it_and_the_first_queue_still_comes_back(run):
+    root, pl = run
+    queue_at_42(root, pl)
+    a, b = api(root), api(root)
+    a.say('source http://h/a.mp3')
+    assert a.line() == 'ok'
+    b.say('source http://h/b.mp3')
+    assert b.line() == 'ok'
+    assert a.line() == 'focus lost why=taken'
+    b.say('source http://h/c.mp3')
+    assert b.line() == 'ok', 'its holder moves on with no word'
+    b.say('focus release')
+    assert b.line() == 'ok'
+    n = now(root)
+    assert (n['title'], n['state'], n['pos']) == ('Beta', '2', '42000')
+
+
+def test_a_stop_ends_the_source_and_the_queue_comes_back_stopped(run):
+    root, pl = run
+    queue_at_42(root, pl)
+    a = api(root)
+    a.say('source http://h/a.mp3')
+    assert a.line() == 'ok'
+    fifo(root, 'stop')
+    assert a.line() == 'focus lost why=stop'
+    n = now(root)
+    assert (n['title'], n['state'], n['pos'], n['id']) == ('Beta', '0', '0', '2')
+    fifo(root, 'resume')
+    pl.pump()
+    assert pl.got[-1] == ('set-songurl', '/mnt/mmc/Music/b.mp3|ss=0|512|20|0|17|90')
+
+
+def test_a_holder_that_goes_away_gives_the_queue_back(run):
+    root, pl = run
+    queue_at_42(root, pl)
+    a = api(root)
+    a.say('source http://h/a.mp3')
+    assert a.line() == 'ok'
+    a.f.close(), a.s.close()  # the file holds the socket open too
+    n = now(root)
+    assert (n['title'], n['state'], n['pos']) == ('Beta', '2', '42000')
+    pl.pump()
+    assert pl.names()[-1] == 'mcl-stop'
+
+
+@pytest.mark.parametrize('url', ['ftp://h/a.mp3', '/mnt/mmc/Music/a.flac', 'http://h/a%20b.mp3', 'http://h/a%7Cb.mp3', 'http://h/a%0Ab'])
+def test_a_source_the_player_cannot_take_is_refused(run, url):
+    root, pl = run
+    a = api(root)
+    a.say(f'source {url} title=X')
+    assert a.line() == 'err source'
+    a.say('focus')
+    assert a.line() == 'focus source=0 held=0'

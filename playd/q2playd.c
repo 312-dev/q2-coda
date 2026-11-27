@@ -179,9 +179,10 @@ static void player_send(const char *name, const char *arg) {
     if (send(player, m, (size_t)n, MSG_NOSIGNAL) != n) logf_("send to the player failed: %s", strerror(errno));
 }
 
-/* set-songurl or set-nexturl as demo's mclStartPlayer builds it (docs/player.md#commands): the start, the cache in
- * KB by the file's kind and its fill percent, Gapless off (no preload in this slice), the Q2's hardware type 17. */
-static void send_song(const char *cmd, const char *file) {
+/* set-songurl or set-nexturl as demo's mclStartPlayer builds it (docs/player.md#commands): the start (ss, seconds), the
+ * cache in KB by the file's kind and its fill percent, Gapless off (no preload in this slice), the Q2's hardware type
+ * 17. */
+static void send_song(const char *cmd, const char *file, int ss) {
     char url[1100], arg[1200];
     size_t j = 0;
     for (const char *p = file; *p && j + 6 < sizeof url; ++p)
@@ -192,7 +193,7 @@ static void send_song(const char *cmd, const char *file) {
     int cache = 512, fill = 20;
     if (dot && (!strcasecmp(dot, ".ape") || !strcasecmp(dot, ".flac"))) cache = 1024;
     if (dot && (!strcasecmp(dot, ".dff") || !strcasecmp(dot, ".dsf") || !strcasecmp(dot, ".iso"))) cache = 4096, fill = 50;
-    snprintf(arg, sizeof arg, "%s|ss=0|%d|%d|0|17|90", url, cache, fill);
+    snprintf(arg, sizeof arg, "%s|ss=%d|%d|%d|0|17|90", url, ss, cache, fill);
     player_send(cmd, arg);
 }
 
@@ -248,24 +249,38 @@ static int path_lookup(int at) {
     return 1;
 }
 
-static int start_at(int at) {
+/* The queue's song at `at` from ss seconds (a queue given back after a source starts where it was put aside). */
+static int start_from(int at, int ss) {
     while (at >= 0 && at < q.n) {
         q.at = at;
         if (q.paths ? path_lookup(at) : song_lookup(q.ids[q.order[at]])) {
             int cut = q.loaded;
-            send_song(cut ? "set-nexturl" : "set-songurl", q.file);
+            send_song(cut ? "set-nexturl" : "set-songurl", q.file, ss);
             set_cover(q.paths ? -1 : q.ids[q.order[at]], q.paths ? q.row_url : q.file);
             q.expect_cut = cut;
-            q.loaded = 1, q.state = PLAYING, q.pos_ms = 0, q.len_s = 0;
+            q.loaded = 1, q.state = PLAYING, q.pos_ms = ss * 1000, q.len_s = 0;
             ++q.seq;
             return 0;
         }
         logf_("no song %d in the library", q.ids[q.order[at]]);
         if (++q.errors >= ERRORS_MAX) break;
-        ++at;
+        ++at, ss = 0;
     }
     return -1;
 }
+
+static int start_at(int at) { return start_from(at, 0); }
+
+/* A source (docs/playd.md#sources-and-audio-focus): one URL a Q2PLAY/1 client plays with audio focus, the queue put
+ * aside meanwhile, as it was, and given back when the source ends. holder is the client's slot in cl[]. */
+static struct {
+    int on, holder;
+    int ids[QUEUE_MAX], order[QUEUE_MAX], n, at, shuffle, state, pos_ms, len_s;
+    char **paths;
+    int np;
+} src;
+static void source_end(const char *why);
+static void source_drop(void);
 
 static void stop(void) {
     if (q.loaded) {
@@ -280,6 +295,10 @@ static void stop(void) {
 static void ended(int error) {
     logf_("song %d %s", q.n && !q.paths ? q.ids[q.order[q.at]] : 0, error ? "did not play" : "ended");
     q.loaded = 0;
+    if (src.on) { /* a source's URL: its holder is told and the queue given back */
+        source_end(error ? "error" : "end");
+        return;
+    }
     q.errors = error ? q.errors + 1 : 0;
     if (q.errors < ERRORS_MAX && q.at + 1 < q.n && !start_at(q.at + 1)) return;
     player_send("mcl-orderstop", "null");
@@ -310,6 +329,7 @@ static void player_read(void) {
         logf_("the player went away");
         close(player), player = -1, rx_n = 0;
         if (q.loaded) q.loaded = 0, q.state = STOPPED, ++q.seq; /* runsv starts it again; nothing plays */
+        if (src.on) source_end("error");
         return;
     }
     rx_n += (size_t)got;
@@ -558,6 +578,7 @@ static int command(const char *verb, const int *ids, int n_ids) {
     if (sscanf(verb, "play %d %d %d", &a, &b, &c) == 3) {
         if (!ids) n_ids = read_list(pending_ids), ids = pending_ids;
         if (c != n_ids) logf_("play names %d songs, the list holds %d", c, n_ids);
+        if (n_ids > 0 && a >= 0 && a < n_ids && src.on) source_drop();
         return play_ids(ids, n_ids, a, b);
     }
     if (!strcmp(verb, "toggle")) return command(q.state == PLAYING ? "pause" : "resume", 0, 0);
@@ -568,6 +589,7 @@ static int command(const char *verb, const int *ids, int n_ids) {
         return 0;
     }
     if (!strcmp(verb, "resume")) {
+        if (q.state == PAUSED && !q.loaded) return start_from(q.at, q.pos_ms / 1000); /* a queue given back */
         if (q.state == PAUSED) {
             player_send("mcl-play", "null");
             q.state = PLAYING, ++q.seq;
@@ -575,6 +597,7 @@ static int command(const char *verb, const int *ids, int n_ids) {
         }
         return q.state == STOPPED && q.n ? start_at(q.at) : 0;
     }
+    if (src.on && (!strcmp(verb, "next") || !strcmp(verb, "previous"))) return -1; /* a source is one URL */
     if (!strcmp(verb, "next")) return q.at + 1 < q.n ? start_at(q.at + 1) : -1;
     if (!strcmp(verb, "previous")) {
         if (q.loaded && q.pos_ms > 3000) {
@@ -600,6 +623,7 @@ static int command(const char *verb, const int *ids, int n_ids) {
     }
     if (!strcmp(verb, "stop")) {
         stop();
+        if (src.on) source_end("stop");
         return 0;
     }
     return -1;
@@ -661,6 +685,7 @@ static void now_write(void) {
 
 static struct client { int fd, hello, watch; char in[LINE]; size_t n; int want_ids, got_ids, a, b; } cl[CLIENTS];
 #define SAY_MAX 2700 /* a line out: three encoded fields at most 3 x 255 x 3 bytes, and the rest */
+static void client_say(struct client *c, const char *fmt, ...);
 
 static void client_say(struct client *c, const char *fmt, ...) {
     char line[SAY_MAX];
@@ -679,6 +704,97 @@ static void tell_watchers(void) {
     now_text(text, sizeof text, " ", 1);
     for (int i = 0; i < CLIENTS; ++i)
         if (cl[i].fd >= 0 && cl[i].watch) client_say(&cl[i], "now %s", text);
+}
+
+/* ---- sources and audio focus (docs/playd.md#sources-and-audio-focus) ---- */
+
+/* a Q2PLAY/1 free-text value back to its bytes: %XX decoded, the rest as it is */
+static void unfield(char *out, size_t room, const char *in, size_t len) {
+    size_t j = 0;
+    static const char hex[] = "0123456789abcdef";
+    for (size_t i = 0; i < len && j + 1 < room; ++i) {
+        const char *h, *l;
+        if (in[i] == '%' && i + 2 < len && in[i + 1] && in[i + 2] && (h = strchr(hex, tolower((unsigned char)in[i + 1]))) &&
+            (l = strchr(hex, tolower((unsigned char)in[i + 2]))))
+            out[j++] = (char)((h - hex) << 4 | (l - hex)), i += 2;
+        else out[j++] = in[i];
+    }
+    out[j] = 0;
+}
+
+static void tell_holder(const char *why) {
+    if (cl[src.holder].fd >= 0) client_say(&cl[src.holder], "focus lost why=%s", why);
+}
+
+/* the source's URL has stopped playing (why: end, error, stop; NULL for the holder's own release): the holder told,
+ * and the queue back as it was put aside, paused where it was (stopped, if it was), its song shown again */
+static void source_end(const char *why) {
+    if (!src.on) return;
+    if (why) tell_holder(why);
+    src.on = 0;
+    memcpy(q.ids, src.ids, (size_t)src.n * sizeof *q.ids), memcpy(q.order, src.order, (size_t)src.n * sizeof *q.order);
+    q.n = src.n, q.at = src.at, q.shuffle = src.shuffle, q.paths = src.paths, q.np = src.np, src.paths = 0, src.np = 0;
+    q.loaded = 0, q.errors = 0;
+    q.state = src.state == STOPPED || (why && !strcmp(why, "stop")) || !q.n ? STOPPED : PAUSED;
+    q.pos_ms = q.state == PAUSED ? src.pos_ms : 0, q.len_s = q.state == PAUSED ? src.len_s : 0;
+    q.title[0] = q.artist[0] = q.album[0] = q.file[0] = q.row_url[0] = 0;
+    if (q.n && (q.paths ? path_lookup(q.at) : song_lookup(q.ids[q.order[q.at]])))
+        set_cover(q.paths ? -1 : q.ids[q.order[q.at]], q.paths ? q.row_url : q.file);
+    else set_cover(-1, "");
+    ++q.seq;
+}
+
+/* a new play replaces the queue put aside: the holder told, the queue not given back */
+static void source_drop(void) {
+    tell_holder("taken");
+    src.on = 0;
+    for (int i = 0; i < src.np; ++i) free(src.paths[i]);
+    free(src.paths), src.paths = 0, src.np = 0;
+}
+
+/* source URL [title=T] [artist=A] [album=B]: 0 played, -1 refused (not http:// or https://, or a byte the player's
+ * message cannot carry) */
+static int source_take(int slot, const char *args) {
+    char url[sizeof q.file], t[256] = "", a[256] = "", b[256] = "";
+    const char *sp = strchr(args, ' ');
+    size_t ul = sp ? (size_t)(sp - args) : strlen(args);
+    unfield(url, sizeof url, args, ul);
+    if (strncmp(url, "http://", 7) && strncmp(url, "https://", 8)) return -1;
+    for (const unsigned char *p = (const unsigned char *)url; *p; ++p)
+        if (*p < 0x21 || *p == '|' || *p == 0x7f) return -1;
+    for (const char *w = sp; w && *w; w = strchr(w, ' ')) { /* the fields; a key this service does not know is passed over */
+        const char *k = ++w, *eq = strchr(k, '='), *end = strchr(k, ' ');
+        size_t n = end ? (size_t)(end - k) : strlen(k);
+        if (!eq || (end && eq > end)) continue;
+        char *dst = !strncmp(k, "title=", 6) ? t : !strncmp(k, "artist=", 7) ? a : !strncmp(k, "album=", 6) ? b : 0;
+        if (dst) unfield(dst, 256, eq + 1, n - (size_t)(eq + 1 - k));
+    }
+    if (!src.on) { /* the queue put aside as it is */
+        memcpy(src.ids, q.ids, (size_t)q.n * sizeof *q.ids), memcpy(src.order, q.order, (size_t)q.n * sizeof *q.order);
+        src.n = q.n, src.at = q.at, src.shuffle = q.shuffle, src.state = q.state, src.pos_ms = q.pos_ms, src.len_s = q.len_s;
+        src.paths = q.paths, src.np = q.np, q.paths = 0, q.np = 0;
+    } else if (src.holder != slot) tell_holder("taken");
+    src.on = 1, src.holder = slot, cp.on = 0;
+    q.n = 0, q.at = 0;
+    snprintf(q.file, sizeof q.file, "%s", url);
+    const char *base = strrchr(url, '/');
+    snprintf(q.title, sizeof q.title, "%s", *t ? t : base + 1);
+    snprintf(q.artist, sizeof q.artist, "%s", a), snprintf(q.album, sizeof q.album, "%s", b);
+    int cut = q.loaded;
+    send_song(cut ? "set-nexturl" : "set-songurl", url, 0);
+    set_cover(-1, "");
+    q.expect_cut = cut;
+    q.loaded = 1, q.state = PLAYING, q.pos_ms = 0, q.len_s = 0;
+    ++q.seq;
+    return 0;
+}
+
+/* focus release: the holder's source stopped and the queue given back */
+static int source_release(int slot) {
+    if (!src.on || src.holder != slot) return -1;
+    if (q.loaded) player_send("mcl-stop", "null"), q.expect_cut = 1;
+    source_end(0);
+    return 0;
 }
 
 /* One Q2PLAY/1 line (docs/platform/playback.md). */
@@ -707,7 +823,13 @@ static void client_line(struct client *c, char *line) {
         return;
     }
     if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
-        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch");
+        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch source focus");
+    } else if (!strncmp(line, "source ", 7)) {
+        client_say(c, source_take((int)(c - cl), line + 7) ? "err source" : "ok");
+    } else if (!strcmp(line, "focus")) {
+        client_say(c, "focus source=%d held=%d", src.on, src.on && src.holder == (int)(c - cl));
+    } else if (!strcmp(line, "focus release")) {
+        client_say(c, source_release((int)(c - cl)) ? "err focus release" : "ok");
     } else if (!strcmp(line, "now")) {
         char text[2600];
         now_text(text, sizeof text, " ", 1);
@@ -804,6 +926,7 @@ int main(int argc, char **argv) {
         if (cp.on && (wait < 0 || wait > 200)) wait = 200;
         if (poll(p, (nfds_t)n, wait) < 0 && errno != EINTR) break;
         catplay_poll();
+        if (src.on && cl[src.holder].fd < 0) source_release(src.holder); /* its holder gone (here and after the reads): before a new client takes its slot */
         if (p[0].revents & POLLIN) {
             player = accept4(listen_fd, 0, 0, SOCK_CLOEXEC);
             if (player >= 0) logf_("the player connected");
@@ -825,6 +948,7 @@ int main(int argc, char **argv) {
         }
         for (int i = 0; i < CLIENTS; ++i)
             if (cl[i].fd >= 0 && p[5 + i].fd == cl[i].fd && p[5 + i].revents) client_read(&cl[i]);
+        if (src.on && cl[src.holder].fd < 0) source_release(src.holder);
         t = now_ms();
         if (q.loaded && t >= polled + POLL_MS) ask_status(), polled = t;
         if (volume_dirty_at && t >= volume_dirty_at + VOLUME_SAVE_MS) volume_save(), volume_dirty_at = 0;
