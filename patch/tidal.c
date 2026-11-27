@@ -165,7 +165,9 @@ static void *download(void *unused) {
             curl_easy_setopt(c, 10065, TIDAL_CA);    /* CAINFO */
             curl_easy_setopt(c, 64, 1L);             /* SSL_VERIFYPEER */
             curl_easy_setopt(c, 81, 2L);             /* SSL_VERIFYHOST */
-            ok = !curl_easy_perform(c) && !curl_easy_getinfo(c, 0x200002, &code) && code == 200; /* RESPONSE_CODE */
+            int rc = curl_easy_perform(c);
+            ok = !rc && !curl_easy_getinfo(c, 0x200002, &code) && code == 200; /* RESPONSE_CODE */
+            reach_note(REACH_TIDAL, rc, code);                                   /* cloud_reach.c */
             curl_easy_cleanup(c);
         }
         if (f) {

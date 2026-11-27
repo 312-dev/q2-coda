@@ -581,27 +581,29 @@ def pages(binary, work):
     _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'tick 1', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
     good &= check('Centre on Radio asks demo for its page and ends with code 3', asked == 'tuner_page\n' and sent == [], repr(asked))
-    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick 5', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
+    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick 6', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
     good &= check("and Ratings, in the Library, for demo's Ratings", asked == 'ratings_page\n', repr(asked))
     _, _, _, (_, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'rows @rows.txt'], *home, queue=True)
     rows = (d/'rows.txt').read_text().split() if (d/'rows.txt').exists() else []
     good &= check("the Library's rows in demo's default order (patch/library_edit.c lr_default), for the ones q2ui has",
-                  rows == ['Songs', 'Playlists', 'Artists', 'Albums', 'Years', 'Ratings', 'Most', 'Played'], str(rows))
+                  rows == ['Songs', 'Playlists', 'Artists', 'Albums', 'Genres', 'Years', 'Ratings', 'Recently', 'Added', 'Most', 'Played'],
+                  str(rows))
     # the user's own order and hidden rows from demo's Edit Library (patch/library_edit.c LR_FILE: the rows' letters in
     # order, each led by + or - once shown or hidden; a row it does not name goes in after the one before it by default).
-    # Most Played moved first, Playlists hidden, Songs moved after Albums: Years and Ratings follow Albums, Songs last
+    # Most Played moved first, Playlists hidden, Songs moved after Albums: Genres, Years, Ratings and Recently Added
+    # follow Albums (each after the row before it by default), Songs last
     order = pathlib.Path(tempfile.mkdtemp(dir=work))/'ringnav-library-order'
     order.write_bytes(b'm-pals'.ljust(64, b'\0'))
     _, _, _, (_, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'rows @rows.txt'], *home, '--library-order', order,
                                 queue=True)
     rows = (d/'rows.txt').read_text().split() if (d/'rows.txt').exists() else []
     good &= check("the Library's rows in the user's own order from Edit Library, a row they hid left out",
-                  rows == ['Most', 'Played', 'Artists', 'Albums', 'Years', 'Ratings', 'Songs'], str(rows))
-    _, _, _, (_, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick 5', 'rest', 'key centre', 'rest',
+                  rows == ['Most', 'Played', 'Artists', 'Albums', 'Genres', 'Years', 'Ratings', 'Recently', 'Added', 'Songs'], str(rows))
+    _, _, _, (_, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick 7', 'rest', 'key centre', 'rest',
                                                    'rows @songs.txt'], *home, '--library-order', order, queue=True)
     rows = (d/'songs.txt').read_text().split() if (d/'songs.txt').exists() else []
-    good &= check('and each row opens its own page there: the sixth, Songs, opens Songs (its Shuffle row first)',
+    good &= check('and each row opens its own page there: the eighth, Songs, opens Songs (its Shuffle row first)',
                   rows[:1] == ['Shuffle'], str(rows[:4]))
     # the last row leaves q2ui for demo's menus: the program ends, with the code of a plain end
     trace, _, _ = script(binary, work, 60, ['rest', 'tick 9', 'rest', 'key centre', 'run 100', 'tick -1', 'run 100'], *home, code=0)
@@ -725,6 +727,48 @@ def playlists(binary, work, home):
     _, _, _, (sent, ids, _) = script(binary, work, 60, lines, *home, '--db', d/'library.db', queue=True)
     return check("Playlists lists On-The-Go and then Road; Centre on Road's second song plays Road's songs in its order from it",
                  len(sent) == 1 and sent[0].split()[1:3] == ['play', '1'] and ids == want, f'{sent} {ids} for {want}')
+
+
+def genres_recent(binary, work, home):
+    """Library > Genres and Recently Added (ui/page_library.c, ui/lib.c), q2ui's own from stock's songtable: the
+    genres (its style) by name, case folded, the songs with none last as demo's Unknown row (patch: getAllGenre's
+    trailing id -1); a genre's songs by title with each artist inline, as demo shows a genre's songs on Songs' page;
+    Recently Added every song, the newest the scan found first and songs of one second in the list's order (demo's
+    getAllMusic(3), time_create descending over its index); Centre plays the list from the row."""
+    good = True
+    styles = ('Rock', 'jazz', 'Ambient', '')
+
+    def made(d):
+        db = sqlite3.connect(d/'library.db')
+        ids = [i for (i,) in db.execute('select id from songtable order by id')]
+        for i in ids:  # times out of id order, with pairs of one second
+            db.execute('update songtable set style = ?, time_create = ? where id = ?', (styles[i % 4], 1794857326 + (i * 37) % 23, i))
+        db.commit()
+        jazz = [str(i) for (i,) in db.execute("select id from songtable where style = 'jazz' order by name collate nocase, id")]
+        recent = [str(i) for (i,) in db.execute('select id from songtable order by time_create desc, id')]
+        return jazz, recent
+    jazz, recent = made(folder(work, 60))  # the made-up library is the same every time
+    lib = ['rest', 'key centre', 'rest']  # Home > Library
+
+    def run(lines):
+        d = folder(work, 60)
+        made(d)
+        _, _, _, (sent, ids, d) = script(binary, work, 60, lines, *home, '--db', d/'library.db', queue=True)
+        rows = [r.split('\t')[0] for r in (d/'rows.txt').read_text().splitlines()] if (d/'rows.txt').exists() else []
+        laid = [r.split('\t') for r in (d/'layout.txt').read_text().splitlines()] if (d/'layout.txt').exists() else []
+        return sent, ids, rows, laid
+    sent, _, rows, _ = run(lib + ['tick 4', 'rest', 'key centre', 'rest', 'rows @rows.txt'])
+    good &= check('Genres lists each genre once by name, case folded, and the songs with none last as Unknown Genre',
+                  rows == ['Ambient', 'jazz', 'Rock', 'Unknown Genre'], str(rows))
+    sent, ids, rows, laid = run(lib + ['tick 4', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest', 'rows @rows.txt',
+                                       'layout @layout.txt', 'key centre', 'run 200'])
+    inline = [float(r[2].split()[1]) > 0 for r in laid]
+    good &= check("a genre's songs by title, each with its artist inline; Centre on the first plays the genre's songs from it",
+                  len(sent) == 1 and ids == jazz and len(rows) == len(jazz) and inline and all(inline), f'{sent} {ids} for {jazz} {inline}')
+    sent, ids, rows, _ = run(lib + ['tick 7', 'rest', 'key centre', 'rest', 'rows @rows.txt', 'key centre', 'run 200'])
+    good &= check('Recently Added lists every song, the newest first and one second\'s songs in id order; Centre plays them from the row',
+                  len(sent) == 1 and ids == recent and len(rows) == 60, f'{sent} {ids[:6]} for {recent[:6]} {len(rows)}')
+    return good
 
 
 def display(binary, work, home):
@@ -1016,7 +1060,7 @@ def edit_library(binary, work, home):
         carried = (d/'carried.txt').read_text().splitlines() if (d/'carried.txt').exists() else []
         return trace, pics, saved, rows, carried
 
-    every = ['Songs', 'Playlists', 'Artists', 'Albums', 'Years', 'Ratings', 'Most Played']
+    every = ['Songs', 'Playlists', 'Artists', 'Albums', 'Genres', 'Years', 'Ratings', 'Recently Added', 'Most Played']
     trace, pics, saved, rows, _ = run(enter + ['shot @edit.ppm', 'rows @rows.txt'])
     good &= check('Centre held on the Library opens Edit Library on its rows, nothing saved by opening it',
                   rows == every and saved is None, f'{rows} {saved!r}')
@@ -2246,8 +2290,9 @@ def live(binary, work):
     cat = pathlib.Path(work)/'catalogue.db'
     db = sqlite3.connect(cat)
     # songtable's columns that are read (servertable has them all: patch/catalogue.c makes it from serverall)
-    db.execute('create table servertable(id integer, name, songer, album, track integer, fileurl, time integer, time_end integer)')
-    db.executemany('insert into servertable values (?, ?, ?, ?, ?, ?, 0, 0)',
+    db.execute('create table servertable(id integer, name, songer, album, track integer, fileurl, time integer, time_end integer, '
+               'style, time_create integer)')
+    db.executemany("insert into servertable values (?, ?, ?, ?, ?, ?, 0, 0, '', 0)",
                    [(0x40000000 + i, f'Server {i}', 'Artist', 'Album', i + 1, f'http://server/{i}') for i in range(50)])
     db.commit()
     db.close()
@@ -2625,6 +2670,8 @@ def main():
             good &= light_default(binary, work, ('--page', 'home'))
         if not only or 'notices' in only:
             good &= notices(binary, work)
+        if not only or 'genres' in only:
+            good &= genres_recent(binary, work, ('--page', 'home'))
     print('q2ui: ' + ('all checks passed' if good else 'FAILED'))
     return 0 if good else 1
 

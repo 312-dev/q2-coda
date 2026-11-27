@@ -72,7 +72,9 @@ static void *az_worker(void *unused) {
         curl_easy_setopt(c, 10065, AZ_CA);     /* CAINFO */
         curl_easy_setopt(c, 64, 1L);           /* SSL_VERIFYPEER */
         curl_easy_setopt(c, 81, 2L);           /* SSL_VERIFYHOST */
-        if (!curl_easy_perform(c)) curl_easy_getinfo(c, 0x200002, &code); /* RESPONSE_CODE */
+        int rc = curl_easy_perform(c);
+        if (!rc) curl_easy_getinfo(c, 0x200002, &code); /* RESPONSE_CODE */
+        reach_note(REACH_ZONE, rc, code);                 /* cloud_reach.c: the last service asked */
         curl_easy_cleanup(c);
         if (code == 200 && zone_name(az.body)) memcpy(az.zone, az.body, AZ_NAME);
     }

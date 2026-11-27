@@ -180,8 +180,9 @@ static unsigned got(const char *data, unsigned size, unsigned n, void *ctx) {
     return size * n;
 }
 
-/* POST body; the HTTP status, 0 when no reply. Credentials are sent only over verified TLS;
- * the firmware's CA bundle supplies roots missing from the stock image. */
+/* POST body; the HTTP status, 0 when no reply, the outcome noted as scrobbling's reach
+ * (cloud_reach.c). Credentials are sent only over verified TLS; the firmware's CA bundle supplies
+ * roots missing from the stock image. */
 static long post(const char *url, const char *body, const char *auth, reply_t *r) {
     void *c = curl_easy_init(), *h = 0;
     long code = 0;
@@ -200,7 +201,9 @@ static long post(const char *url, const char *body, const char *auth, reply_t *r
     curl_easy_setopt(c, 10065, CA_FILE);              /* CAINFO */
     curl_easy_setopt(c, 64, 1L);                 /* SSL_VERIFYPEER */
     curl_easy_setopt(c, 81, 2L);             /* SSL_VERIFYHOST */
-    if (!curl_easy_perform(c)) curl_easy_getinfo(c, 0x200002, &code); /* RESPONSE_CODE */
+    int rc = curl_easy_perform(c);
+    if (!rc) curl_easy_getinfo(c, 0x200002, &code); /* RESPONSE_CODE */
+    reach_note(REACH_SCROBBLE, rc, code);
     curl_easy_cleanup(c);
     curl_slist_free_all(h);
     return code;

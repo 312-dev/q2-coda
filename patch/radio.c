@@ -696,7 +696,9 @@ static void *fetch_worker(void *unused) {
         curl_easy_setopt(c, 10065, RADIO_CA);       /* CAINFO */
         curl_easy_setopt(c, 64, 1L);                /* SSL_VERIFYPEER */
         curl_easy_setopt(c, 81, 2L);                /* SSL_VERIFYHOST */
-        if (!curl_easy_perform(c)) curl_easy_getinfo(c, 0x200002, &fx.code); /* RESPONSE_CODE */
+        int rc = curl_easy_perform(c);
+        if (!rc) curl_easy_getinfo(c, 0x200002, &fx.code); /* RESPONSE_CODE */
+        reach_note(REACH_RADIO, rc, rc ? 0 : fx.code);    /* cloud_reach.c */
         curl_easy_cleanup(c);
     }
     fx.done = 1;

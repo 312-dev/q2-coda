@@ -474,10 +474,11 @@ int lib_track(int i);
 /* a song's length in seconds (a CUE track's, a server row's, or its file's in demo's durations cache), -1 unknown;
  * and as Now Playing writes it ("3:45", "1:02:05"), empty when unknown */
 int lib_seconds(int i);
+const int *lib_recent(void); /* every song as numbers for lib_title, the newest added first (Recently Added) */
 const char *lib_length(int i, char *out, size_t room);
 extern const char *lib_durations_file; /* demo's durations cache (--durations) */
-enum { LIB_ARTIST, LIB_ALBUM, LIB_KINDS };
-int lib_groups(int kind);                             /* how many artists, or albums */
+enum { LIB_ARTIST, LIB_ALBUM, LIB_GENRE, LIB_KINDS };
+int lib_groups(int kind);                             /* how many artists, albums or genres */
 const char *lib_group_name(int kind, int g);
 const char *lib_group_artist(int g);                  /* an album's artist (its first song's) */
 const int *lib_group_songs(int kind, int g, int *n);  /* the group's songs, as numbers for lib_title */

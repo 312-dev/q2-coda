@@ -1,7 +1,7 @@
 /* The status row's glyph slots (docs/oled-design.md#status-row,
  * docs/internals.md#status-row-slots): right to left the battery, the play state's level bars,
  * Wi-Fi, a card app's sync, wired headphones, Bluetooth (its
- * link, a headset's battery, a car), Buttons Lock's padlock and a card app's server out of reach.
+ * link, a headset's battery, a car), Buttons Lock's padlock and a cloud service out of reach.
  * Each slot that shows takes its box and the gap before the one on its right. The clock stands at
  * the row's left (navigation.c clock_place) and the slots left of the battery are a strip with the
  * room from the clock to the battery (status_strip_room); a strip wider than that scrolls in it as
@@ -204,11 +204,11 @@ static int wired_on(void) {
 /* The wired slot: headphones while they take the sound; nothing otherwise, with no output connected too (the owner's,
  * 2026-11-27: no deaf ear) */
 static int wired_shown(void) { return wired_on() ? SR_GLYPH : 0; }
-static int offline_shown(void) { return addon_offline() ? SR_OFFLINE : 0; }
+static int offline_shown(void) { return cloud_offline() ? SR_OFFLINE : 0; }
 
 /* The slots' states as q2ui reads them (q2ui_gate.c q2ui_tell, ui/status.c), a key=value line each,
  * into b; its length. q2ui draws a status row of its own while it has the screen, but where the
- * sound goes, the Bluetooth link, Buttons Lock, a card app's sync and its server are demo's alone
+ * sound goes, the Bluetooth link, Buttons Lock, a card app's sync and the cloud's reach are demo's alone
  * today, so demo says them, by the same tests its own row paints from:
  *   out=wire|other  wired headphones take the sound, or not
  *   bt=none|connecting|rune|headset|car|guest, btbatt=N  the Bluetooth slot, a headset's level
@@ -223,7 +223,7 @@ unsigned status_row_state(char *b, unsigned room) {
                                  "clock24=%d\ntz=%s\n",
                         wired_on() ? "wire" : "other", bt[slot],
                         slot == BT_SLOT_HEADSET ? bt_headset_battery() : -1, relay, !!g_keylock_flag, sync,
-                        sync == 2 ? permille : 0, !!addon_offline(), !wifi_offline(), !!g_time24h_flag, autozone_tz());
+                        sync == 2 ? permille : 0, !!cloud_offline(), !wifi_offline(), !!g_time24h_flag, autozone_tz());
     return n < 0 ? 0 : (unsigned)n >= room ? room - 1 : (unsigned)n;
 }
 
@@ -387,8 +387,8 @@ static void lock_paint(void *bar, void *canvas, int x, int cy) {
     glyph(bar, canvas, "keylock", x, SR_LOCK, cy, SR_LOCK);
 }
 
-/* A card app's server out of reach (addon.c addon_offline): Phosphor's cloud-slash (bold) in
- * Warning, in both halves. */
+/* A service out of reach, a card app's server or one of demo's own (cloud_reach.c cloud_offline):
+ * Phosphor's cloud-slash (bold) in Warning, in both halves. */
 static void offline_paint(void *bar, void *canvas, int x, int cy) {
     status_art(bar, canvas, "status_offline", x, cy);
 }
@@ -658,7 +658,7 @@ static int sr_strip_frame(void) {
  * it newly does), the arrows' loop while lit and they turn; 1 when what the slots show changed
  * (which slots, the play state, Wi-Fi's level or its internet, the sync's kind and its ring to the
  * 50th, wired headphones, the Bluetooth slot's kind and the headset's level, the
- * lock, a server out of reach, the strip scrolling or not), so the bar repaints whole after the
+ * lock, a cloud service out of reach, the strip scrolling or not), so the bar repaints whole after the
  * frame. */
 int status_row_sync(void) {
 #if Q2POD_DEV
@@ -681,7 +681,7 @@ int status_row_sync(void) {
                                            : head)
                        << 14 |
                    (unsigned)!!g_keylock_flag << 21 | 1u << 22 | (unsigned)bt_slot() << 23 |
-                   (unsigned)addon_offline() << 27 |
+                   (unsigned)cloud_offline() << 27 |
                    (unsigned)!!sr.over << 28 | (unsigned)wired_on() << 29;
     if (sig == sr.sig) return 0;
     sr.sig = sig;
