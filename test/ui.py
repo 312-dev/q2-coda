@@ -57,7 +57,8 @@ def folder(work, n):
 
 def base_args(binary, d):
     # Songs first, as these checks were written for it (a later --page wins); Home is the program's own first page
-    return [str(binary), '--page', 'songs', '--db', d/'library.db', '--catalogue', '', '--fb', d/'fb', '--fonts', d/'fonts', '--icons', d,
+    # 8 bits to the panel file, so its pixels are the canvas's own: the Q2's default dithers them to 6
+    return [str(binary), '--page', 'songs', '--panel-bits', '8', '--db', d/'library.db', '--catalogue', '', '--fb', d/'fb', '--fonts', d/'fonts', '--icons', d,
             '--stats', d/'stats.json', '--state', d/'state', '--cmdq', d/'cmdq', '--playlist', d/'list', '--backlight', d/'backlight',
             '--now', d/'now', '--cover', d/'cover.jpg', '--ask', d/'ask']
 
@@ -364,6 +365,11 @@ def pages(binary, work):
     _, _, _, (sent, _, _) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'key centre', 'run 100', 'tick 1', 'run 100'], *home, now=NOW, queue=True)
     good &= check('there Centre is play and pause, and a tick down the wheel is one step quieter',
                   [line.split(' ', 1)[1] for line in sent] == ['toggle', 'volume 39'], str(sent))
+    # a tick shows the volume's level in the bar's place, white, and it gives the bar back
+    _, pics, _ = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick -1', 'run 200', 'shot @volume.ppm', 'run 2000', 'shot @after.ppm'], *home, now=NOW)
+    level, bar = pics['volume'].at(80, 231), pics['after'].at(36, 231)
+    good &= check('a tick on Now Playing shows the volume in the bar, then the bar comes back',
+                  level == (255, 255, 255) and pics['volume'].at(36, 231) != ACCENT and bar == ACCENT, f'{level} {bar}')
     # Library > Artists > the first artist's songs > Centre on the second: that artist's songs are the queue
     walk = ['rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'run 200']
     _, _, _, (sent, ids, d) = script(binary, work, 60, walk, *home, queue=True)

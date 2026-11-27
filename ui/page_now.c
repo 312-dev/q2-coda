@@ -1,6 +1,8 @@
 /* Now Playing (docs/oled-design.md#now-playing): the cover as a card at the left, the title, artist
  * and album beside it, the progress bar and the times under them. Centre plays and pauses, the
- * wheel is the volume, Return leaves. The cover is a card of layers (docs/ui-rewrite.md#cards):
+ * wheel is the volume, Return leaves. While the volume changes, by the wheel here or the side
+ * buttons, its level takes the bar's place for VOLUME_SHOW_US, white on the same track, and the
+ * times stand aside (demo shows its own volume window then, which q2ui's page is over). The cover is a card of layers (docs/ui-rewrite.md#cards):
  * it lifts as the page opens, settles smaller on pause, and each wheel tick pushes it. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,12 +17,14 @@
 #define BAR_W (SCREEN_W - 48)
 #define BAR_H 4
 #define TIMES_Y 240
+#define VOLUME_SHOW_US 1500000u
 
 struct now_st {
     spring_t push, lift;
     uint64_t t;
     unsigned seen, cover_seen;
-    int pos_s, volume;
+    int pos_s, volume;   /* volume: the level last shown, -1 before the first read */
+    uint64_t volume_at;  /* when it last changed, 0: the bar is the song's */
     run_t title, artist, album, left, right;
     char title_s[160], artist_s[160], album_s[160];
 };
@@ -36,7 +40,7 @@ static int position_ms(void) {
 static void *n_open(void *arg) {
     (void)arg;
     struct now_st *s = calloc(1, sizeof *s);
-    s->seen = ~0u, s->t = ui_time() - fb_refresh_us();
+    s->seen = ~0u, s->t = ui_time() - fb_refresh_us(), s->volume = -1;
     s->lift.to = now_get()->paused ? 0 : 1;
     ui_again();
     return s;
@@ -50,10 +54,14 @@ static void n_event(void *st, const input_t *e) {
     } else if (e->type == IN_TICK) {
         char verb[24];
         /* a tick down the wheel is quieter, as on a list it is further down */
-        s->volume = now_get()->volume - e->value;
-        s->volume = s->volume < 0 ? 0 : s->volume > 100 ? 100 : s->volume;
-        snprintf(verb, sizeof verb, "volume %d", s->volume);
+        int to = (s->volume < 0 ? now_get()->volume : s->volume) - e->value;
+        to = to < 0 ? 0 : to > 100 ? 100 : to;
+        snprintf(verb, sizeof verb, "volume %d", to);
         player_send(verb);
+        /* shown at once: the player's answer comes a moment later and says the same */
+        s->volume = to, s->volume_at = ui_time();
+        ui_mark((rect_t){ 0, BAR_Y - 6, SCREEN_W, 44 });
+        ui_wake_ms(VOLUME_SHOW_US / 1000u);
         s->push.v = e->value * 7.0;
         ui_again();
     } else if (e->type == IN_TUG) {
@@ -78,7 +86,16 @@ static void n_step(void *st) {
             ui_mark((rect_t){ TEXT_X, 58, SCREEN_W - TEXT_X, 100 });
         }
         ui_mark((rect_t){ 0, BAR_Y - 2, SCREEN_W, 40 });
+        if (s->volume < 0)
+            s->volume = n->volume; /* the level the page opened at: nothing changed */
+        else if (n->volume != s->volume && ui_time() - s->volume_at > 600000u) {
+            /* changed from elsewhere (the side buttons); a wheel tick's own echo arrives within the 600 ms */
+            s->volume = n->volume, s->volume_at = ui_time();
+            ui_mark((rect_t){ 0, BAR_Y - 6, SCREEN_W, 44 });
+            ui_wake_ms(VOLUME_SHOW_US / 1000u);
+        }
     }
+    if (s->volume_at && ui_time() - s->volume_at >= VOLUME_SHOW_US) s->volume_at = 0, ui_mark((rect_t){ 0, BAR_Y - 6, SCREEN_W, 44 });
     now_cover();
     if (now_cover_seq() != s->cover_seen) s->cover_seen = now_cover_seq(), ui_mark(card_bounds(ART));
     int pos = position_ms() / 1000;
@@ -105,6 +122,15 @@ static void n_draw(void *st, rect_t r) {
     run_draw(&s->title, TEXT_X, 64, tok(TOK_PRIMARY), 256);
     if (*n->artist) run_draw(&s->artist, TEXT_X, 96, tok(TOK_SECONDARY), 256);
     if (*n->album) run_draw(&s->album, TEXT_X, 120, tok(TOK_SECONDARY), 256);
+    if (s->volume_at) {
+        /* the volume's level in the bar's place: a shorter track between two marks, the level in white */
+        float level = (float)s->volume / 100, x0 = BAR_X + 22, w = BAR_W - 44;
+        fill_round((rectf_t){ x0, BAR_Y, w, BAR_H }, 2, 0, tok(TOK_TRACK), 1, 0);
+        if (level > 0) fill_round((rectf_t){ x0, BAR_Y, BAR_H + (w - BAR_H) * level, BAR_H }, 2, 0, tok(TOK_PRIMARY), 1, 0);
+        fill_disc(BAR_X + 5, BAR_Y + 2, 3, tok(TOK_SECONDARY), 1);                 /* quiet */
+        fill_disc(BAR_X + BAR_W - 7, BAR_Y + 2, 5, tok(TOK_SECONDARY), 1);          /* loud */
+        return;
+    }
     /* the bar: its fill ends between pixels, so it creeps and never steps */
     int pos = position_ms();
     float share = n->len_s ? clampf((float)pos / ((float)n->len_s * 1000), 0, 1) : 0;

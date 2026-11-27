@@ -44,6 +44,9 @@ CASES = {
  'album-by-title': ('ui/lib.c', '    if (group_kind == LIB_ALBUM && lib.track[x] != lib.track[y]) return lib.track[x] - lib.track[y];', '', 'pages', "its tracks in order"),
  'old-menus-stays': ('ui/page_home.c', '        ui_quit(0); /* demo', '        (void)0; /* demo', 'pages', 'Centre on Old Menus ends q2ui'),
  'route-forgotten': ('ui/main.c', '        else if (!library_route(seg))\n            break;', '        else\n            break;', 'live', 'on the page and the row it was ended on'),
+ 'no-volume-bar': ('ui/page_now.c', '        s->volume = to, s->volume_at = ui_time();', '        s->volume = to;', 'pages', 'shows the volume in the bar'),
+ 'volume-bar-stays': ('ui/page_now.c', '    if (s->volume_at && ui_time() - s->volume_at >= VOLUME_SHOW_US) s->volume_at = 0,', '    if (0 && s->volume_at) s->volume_at = 0,', 'pages', 'shows the volume in the bar'),
+ 'dithers-share-noise': ('ui/fb.c', 'narrow(src[i], noise[((r.x + i + 17) & 63) * 64])', 'narrow(src[i], dither64[(y & 63) * 64 + ((r.x + i) & 63)])', 'engine', 'keeps its mean at 6 bits'),
 }
 names = sys.argv[1:] or list(CASES)
 bad = 0

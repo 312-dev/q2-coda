@@ -36,8 +36,10 @@ typedef struct {
 
 /* ---- fb.c: the panel ---- */
 extern uint32_t *canvas; /* SCREEN_W x SCREEN_H, 0xffRRGGBB; draw.c draws into it */
-/* bits: the panel link's bits a channel (8, 6 or 5); under 8 the turn dithers down to it */
+/* bits: the panel link's bits a channel (8, 6 or 5, or 565 for red 5, green 6, blue 5); under 8
+ * the turn dithers down to it */
 int fb_open(const char *path, int bits);
+void fb_depth(int bits); /* the same, changed while it runs */
 void fb_close(void);
 void dmg_add(rect_t r); /* r changed: turned and shown with the next frame */
 int dmg_count(void);
@@ -47,7 +49,7 @@ void dmg_all(void); /* both pages are stale (the screen came back from another p
 unsigned fb_present(void);
 int fb_page(void);      /* the page on screen, 0 or 1 */
 extern int fb_vsync;    /* 0: fb_present does not wait (the bench, a script's clock) */
-extern int fb_bits;     /* the panel's bits a channel */
+extern int fb_bits;     /* the panel's bits a channel, as given */
 unsigned fb_refresh_us(void); /* the panel's refresh period, from its timings (16667 unknown) */
 /* A second canvas a page is drawn into for a slide: canvas_swap makes it the one draw.c draws
  * into and returns the other. */
