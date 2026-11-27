@@ -177,6 +177,10 @@ In the order it is needed:
 8. The rest of Bluetooth ([btd: What is missing](btd.md#what-is-missing)): the pairing notice in `q2ui` and a Bluetooth page there, receiver mode, today's per-device settings, and AAC; Wi-Fi, USB modes, the MCU's firmware load, the splash.
 9. **The remaining services** ([vamp-os-services](vamp-os-services.md)): scrobbling with its upload, the DLNA renderer ([q2dlnad](dlnad.md)) and the AirPlay sender's host ([q2playd: AirPlay](playd.md#airplay)) are built; LocalSend and Guest Play each wait on what that page names first.
 
+## Broken copies, re-run
+
+Every suite's broken copies ("each fail it", `Q2*_SOURCE` and the rest) were re-run on 2026-11-27 at `d9b7edca`, after it turned out that `tools/mac/q2env` had been passing no environment into its container, so a perturbation given as `VAR=COPY tools/mac/q2env ...` had tested the tree, not the copy (it passes every `Q2*` and `VAMP_*` variable since `ccc2aee0`: [building: Building on macOS](building.md#building-on-macos)). Each kept copy was first carried onto today's source (most were made against an earlier commit, and an old whole copy would fail newer tests for the wrong reason), and the 16 of `q2btd.c`, which were not kept, were made again from [btd](btd.md#tests)'s list. All 147 went red in the suite their break belongs to: playd 35, sysd 19, pkgd 18 (three of them in `test/apps.py`), btd 16, scrobd 14, dlnad 13, libd 9, netd 9, dacloop 7, `q2vampos.sh` 4 (`test/q2vampos.py`, `test/card_e2e.py`), `perm/` 2, the API pages 1; so did `test/os_image.py`'s 12 `--perturb` modes (`adb-marker` with `--card-boot --no-outer-adbd`, the case it is for) and `test/os_bt.py`'s 3. One hole was found and closed: a `q2btd.c` that sent no track change passed, because the track check's new title came with a change of state ([btd](btd.md#tests)).
+
 ## Needs a device
 
 Everything here has been run only under the emulator and on this machine. What only a Q2 can prove, in one list (each item's detail is in the doc named):
