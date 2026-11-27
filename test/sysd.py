@@ -27,7 +27,10 @@ def binary(tmp_path_factory):
     out = tmp_path_factory.mktemp('sysd')
     src = out/'q2sysd.c'
     src.write_bytes(SOURCE.read_bytes())
-    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', '-I', str(conformance.PERM), '-o', str(out/'q2sysd'), str(src)], check=True)
+    patch = ROOT/'patch'
+    guard = [str(patch/f) for f in ('q2guard_core.c', 'q2guard_pmic.c', 'card_store.c')]  # as sysd/Makefile builds it
+    subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-O2', '-DQ2GUARD_HOST', '-I', str(conformance.PERM),
+                    '-I', str(patch), '-o', str(out/'q2sysd'), str(src), *guard, '-pthread'], check=True)
     return out/'q2sysd'
 
 
@@ -47,6 +50,7 @@ def tree(tmp_path):
     put(tmp_path, '/sys/devices/i2c-0/0-0062/cw2015_voltage', '3912\n')
     put(tmp_path, '/sys/class/power_supply/battery/status', 'Discharging\n')
     put(tmp_path, '/sys/class/power_supply/ac/online', '0\n')
+    put(tmp_path, '/tmp/heat', '400\n')  # --heat-file's reading from the first tick, so none reads as a sensor lost
     (tmp_path/'dev/input').mkdir(parents=True)
     os.mkfifo(tmp_path/'dev/input/event1')
     conformance.accounts(tmp_path)
@@ -541,6 +545,177 @@ def test_usb_storage_holds_auto_power_off(run):
     assert until(lambda: mode(root) == 'usb storage')
     time.sleep(6)
     assert 'charge wait' not in w.lines and not (root/'powered-off').exists()
+
+
+# ---- heat (docs/sysd.md#heat): today's Vamp's guardian, its readings from --heat-file in place of the PMIC ----
+# --time-scale 50: its 5 s tick is 100 ms, the load warning's 60 s 1.2 s, the power-off card's 10 s 0.2 s
+
+HEAT = ['--time-scale', '50', '--heat-file', '/tmp/heat']
+
+
+class Load(threading.Thread):
+    """a stand-in /proc/stat whose counters move at a busy share of pct"""
+    def __init__(self, root, pct):
+        super().__init__(daemon=True)
+        self.root, self.pct, self.all, self.idle, self.stop = root, pct, 1000, 500, False
+        self.write()
+        self.start()
+
+    def write(self):
+        put(self.root, '/proc/stat.tmp', f'cpu  {self.all - self.idle} 0 0 {self.idle} 0 0 0 0 0 0\ncpu0 0 0 0 0\n')
+        os.replace(self.root/'proc/stat.tmp', self.root/'proc/stat')
+
+    def run(self):
+        while not self.stop:
+            self.all += 100
+            self.idle += 100 - self.pct
+            self.write()
+            time.sleep(0.02)
+
+
+def heat(root, v):
+    put(root, '/tmp/heat', f'{v}\n')
+
+
+class FakeUi(threading.Thread):
+    """q2ui's Q2UI/1 socket: answers ok, keeps each line, and answers an ask as told (answer_with)"""
+    def __init__(self, root):
+        super().__init__(daemon=True)
+        p = root/'run/vamp/ui.sock'
+        p.parent.mkdir(parents=True, exist_ok=True)
+        self.s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.s.bind(str(p))
+        self.s.listen(4)
+        self.lines, self.conn = [], None
+        self.start()
+
+    def run(self):
+        c, _ = self.s.accept()
+        self.conn = c
+        f = c.makefile('rw')
+        for line in f:
+            line = line.strip()
+            f.write(('Q2UI/1 ok' if line == 'Q2UI/1' else 'ok') + '\n')
+            f.flush()
+            if line != 'Q2UI/1':
+                self.lines.append(line)
+
+    def answer_with(self, text):
+        self.conn.sendall((text + '\n').encode())
+
+
+@pytest.mark.parametrize('run', [HEAT], indirect=True)
+def test_three_readings_at_55_c_warn_once(run):
+    root, _ = run
+    ui, w = FakeUi(root), Watch(root)
+    for v in (530, 531, 543, 556):  # under 3 C a reading: a die moves slowly, and a jump is a misread
+        heat(root, v)
+        time.sleep(0.25)
+    assert until(lambda: 'heat warn' in w.lines, 2), 'three readings at 55 C or more: the warning'
+    assert until(lambda: any(l.startswith('toast Q2') for l in ui.lines), 1)
+    time.sleep(1)
+    assert w.lines.count('heat warn') == 1, 'once, until it has fallen below 50 C'
+
+
+@pytest.mark.parametrize('run', [HEAT], indirect=True)
+def test_62_c_pauses_the_music_and_powers_off_after_the_card(run):
+    root, _ = run
+    play, w = Service(root/'run/vamp/play.sock', 'Q2PLAY/1'), Watch(root)
+    for v in (580, 590, 600, 610):
+        heat(root, v)
+        time.sleep(0.15)
+    heat(root, 625)
+    assert until(lambda: 'heat off' in w.lines, 2)
+    assert 'pause' in play.lines and not (root/'powered-off').exists(), 'the music paused, the card counting down'
+    assert until(lambda: (root/'powered-off').exists(), 2), 'off once the card has counted down'
+
+
+@pytest.mark.parametrize('run', [HEAT], indirect=True)
+def test_a_sensor_that_reads_nothing_is_said_and_one_that_comes_back_too(run):
+    root, _ = run
+    ui, w = FakeUi(root), Watch(root)
+    heat(root, 'none')
+    assert until(lambda: 'heat nosensor' in w.lines, 2), 'three readings with none: no sensor'
+    assert until(lambda: any(l.startswith('ask heat-sensor ') for l in ui.lines), 1)
+    for v in (400, 402, 404):
+        heat(root, v)
+        time.sleep(0.15)
+    assert until(lambda: 'heat ok' in w.lines, 2) and until(lambda: 'withdraw heat-sensor' in ui.lines, 1)
+
+
+@pytest.mark.parametrize('run', [HEAT], indirect=True)
+def test_hard_work_with_no_sensor_warns_and_cancel_holds_it_off(run):
+    root, _ = run
+    ui, w = FakeUi(root), Watch(root)
+    heat(root, 'none')
+    load = Load(root, 95)
+    assert until(lambda: 'heat loadwarn left=60' in w.lines, 6), "two minutes' window at 85% or more: the warning"
+    assert until(lambda: any(l.startswith('ask heat-load ') for l in ui.lines), 1)
+    ui.answer_with('answer heat-load 1')
+    assert until(lambda: 'heat cancelled' in w.lines, 2), "the card's Cancel"
+    time.sleep(1.5)
+    assert not (root/'powered-off').exists(), 'past the 60 s: cancelled, still on'
+    load.stop = True
+
+
+@pytest.mark.parametrize('run', [HEAT], indirect=True)
+def test_q2sys1_heat_cancel_holds_the_load_warning_off(run):
+    root, _ = run
+    w = Watch(root)
+    heat(root, 'none')
+    load = Load(root, 95)
+    assert until(lambda: 'heat loadwarn left=60' in w.lines, 6)
+    a = Api(root)
+    a.line()
+    a.say('heat cancel')
+    assert a.line() == 'ok'
+    assert until(lambda: 'heat cancelled' in w.lines, 2), 'Q2SYS/1 heat cancel, with no q2ui'
+    load.stop = True
+
+
+@pytest.mark.parametrize('run', [HEAT], indirect=True)
+def test_hard_work_left_alone_powers_off_and_shut_down_at_once(run):
+    root, _ = run
+    ui, w = FakeUi(root), Watch(root)
+    play = Service(root/'run/vamp/play.sock', 'Q2PLAY/1')
+    heat(root, 'none')
+    load = Load(root, 95)
+    assert until(lambda: 'heat loadwarn left=60' in w.lines, 6)
+    assert until(lambda: 'heat off' in w.lines, 3), "the load warning's 60 s (1.2 s scaled) run out: the power-off"
+    assert until(lambda: (root/'powered-off').exists(), 2) and 'pause' in play.lines
+    load.stop = True
+
+
+@pytest.mark.parametrize('run', [HEAT], indirect=True)
+def test_shut_down_on_the_load_warning_powers_off_at_once(run):
+    root, _ = run
+    ui, w = FakeUi(root), Watch(root)
+    heat(root, 'none')
+    load = Load(root, 95)
+    assert until(lambda: any(l.startswith('ask heat-load ') for l in ui.lines), 6)
+    ui.answer_with('answer heat-load 2')
+    assert until(lambda: (root/'powered-off').exists(), 0.6), "the card's Shut Down: off now, not after its 60 s"
+    load.stop = True
+
+
+# a Standby between two readings leaves the last one too old to hold the next to (q2guard_core.c sensor_read): a die
+# cooler after a suspend is no jump
+@pytest.mark.parametrize('run', [HEAT], indirect=True)
+def test_a_cooler_reading_after_standby_is_no_jump(run):
+    root, _ = run
+    Service(root/'run/vamp/play.sock', 'Q2PLAY/1'), Service(root/'run/vamp/net.sock', 'Q2NET/1')
+    w = Watch(root)
+    put(root, '/sys/power/state', '')
+    for v in (401, 402, 403):
+        heat(root, v)
+        time.sleep(0.15)
+    a = Api(root)
+    a.line()
+    heat(root, 343)
+    a.say('standby')
+    assert a.line() == 'ok'
+    time.sleep(1)
+    assert 'heat nosensor' not in w.lines, '6 C cooler after the suspend: taken, not three jumps'
 
 
 # ---- Vamp API 1 (docs/platform/system.md) ----

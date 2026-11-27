@@ -29,13 +29,16 @@
  *     ([SYSSET] STANDBYMODE, SAVEPOWERMODE, docs/sysd.md#auto-standby-and-auto-power-off): Standby, or the power off,
  *     once the Q2 is unused that long, counted as stock's check_to_poweroption counts (music, Car Audio and USB
  *     storage hold both, any cable holds Standby); Auto Power Off with a cable in waits on the charge first.
+ *   - Heat (docs/sysd.md#heat): today's Vamp's overheat guardian, its core and PMIC reader linked in from patch/, its
+ *     warnings told and shown through Q2UI/1, its power-off done here; not on a card boot, where today's q2guard runs.
  *
  * Q2SYS/1 on /run/vamp/sys.sock (docs/platform/system.md): screen on|off|toggle, brightness P, battery, usb, usb adb|storage|dac|car,
- * standby, watch, caps.
- * --root prefixes every path, --poweroff and --reboot name the commands and --time-scale N runs Auto Standby's and Auto Power Off's
+ * standby, heat, heat cancel, watch, caps.
+ * --root prefixes every path, --poweroff and --reboot name the commands, --heat-file F gives the temperature in place of the PMIC and --time-scale N runs Auto Standby's and Auto Power Off's
  * times N times faster, for test/sysd.py. */
 #define _GNU_SOURCE
 #include <dirent.h>
+#include <pthread.h>
 #include <sys/wait.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -54,6 +57,15 @@
 #include <unistd.h>
 
 #include "q2perm.h" /* perm/: the permission check */
+/* patch/: the overheat guardian's decisions and the PMIC's reader (Q2GUARD_HOST). Its header also declares q2guard.c's
+ * own helpers, which q2sysd has its own of: renamed out of the way, as the core uses none of them. */
+#define now_ms q2guard_now_ms
+#define read_int q2guard_read_int
+#define slurp q2guard_slurp
+#include "q2guard.h"
+#undef now_ms
+#undef read_int
+#undef slurp
 
 #define HOLD_MS 3000    /* the power key held this long powers off */
 #define BATTERY_S 30    /* the battery read this often */
@@ -124,6 +136,10 @@ static int power_fresh = 1; /* a use or a cable change since the last tick: Auto
                              * whole again, as stock's reset_poweroptions_timer(1, 1, 1) */
 
 static void use_now(void) { used_at = now_ms(), power_fresh = 1; }
+
+/* heat's (below): the guardian's state, its Cancel asked, a suspend since its last step, whether it watches */
+static struct guard guard;
+static int heat_cancel, heat_slept, heat_on;
 
 static void find_backlight(void) {
     DIR *d = opendir(path("/sys/class/backlight"));
@@ -584,6 +600,7 @@ static int standby(void) {
     say(r ? "standby refused by the kernel" : "resumed");
     if (was_on || !r) set_screen(1);
     if (!card_boot) ask("/run/vamp/net.sock", "Q2NET/1", "wake");
+    heat_slept = 1; /* the die's last reading is too old to hold the next to (q2guard_core.c) */
     tell("resumed");
     return r;
 }
@@ -695,7 +712,7 @@ static void client_line(struct client *c, const char *line) {
         c->hello = 1;
         client_say(c, "Q2SYS/1 ok");
     } else if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
-        client_say(c, "caps screen awake brightness usb usb-dac usb-car standby battery watch");
+        client_say(c, "caps screen awake brightness usb usb-dac usb-car standby heat battery watch");
     } else if (!strcmp(line, "battery")) {
         char text[160];
         read_battery();
@@ -706,6 +723,11 @@ static void client_line(struct client *c, const char *line) {
     } else if (!strcmp(line, "screen on") || !strcmp(line, "screen off") || !strcmp(line, "screen toggle")) {
         int on = line[7] == 't' ? !screen_on : line[8] == 'n';
         client_say(c, on == screen_on || !set_screen(on) ? "ok" : "err screen");
+    } else if (!strcmp(line, "heat")) { /* the guardian's state (docs/sysd.md#heat) */
+        client_say(c, "heat %s", heat_on ? guard_state(&guard) : "off");
+    } else if (!strcmp(line, "heat cancel")) { /* the load warning's Cancel, from a UI that is not Q2UI/1's */
+        heat_cancel = 1;
+        client_say(c, "ok");
     } else if (!strcmp(line, "awake")) { /* a use, as a key is: the screen off time starts again */
         use_now();
         client_say(c, "ok");
@@ -799,6 +821,173 @@ static void idle_poll(unsigned long long t) {
     }
 }
 
+/* ---- heat (docs/sysd.md#heat): today's Vamp's overheat guardian (patch/q2guard_core.c, q2guard_pmic.c), its
+ * device side and demo's side in one. A sample every GUARD_TICK_MS: the AXP2101's die through its I2C window (on a
+ * thread of its own, as each window waits 1 s), the CPU's busy share, the charger's state; guard_step decides. Its
+ * events are told to watchers (heat warn|nosensor|ok|loadwarn left=S|cancelled|off) and shown through Q2UI/1 when
+ * q2ui serves it; a power-off pauses the music and powers off GUARD_CARD_MS later, as demo's card does. On a card
+ * boot today's Vamp's own q2guard runs beside us and owns the PMIC's window: nothing here then. */
+#define GUARD_TICK_MS 5000
+#define PMIC_DEV "/dev/i2c-6"
+#define PMIC_ADDR 0x34
+#define I2C_SLAVE_FORCE 0x0706
+#define I2C_SMBUS 0x0720
+#define I2C_SMBUS_BYTE_DATA 2
+int card_mounted(void) { return 0; } /* card_store.c's question: q2sysd keeps no heat log */
+static char heat_file[128];          /* --heat-file: a temperature in tenths, or "none", in place of the PMIC */
+static struct guard guard;
+static struct pmic pmic;
+static int pmic_fd = -1, heat_die = GUARD_NONE, heat_cancel, heat_slept, heat_on;
+static pthread_mutex_t heat_mu = PTHREAD_MUTEX_INITIALIZER;
+static unsigned long long heat_at, heat_off_ms;
+static unsigned long long cpu_all, cpu_idle;
+
+struct smbus_args { char read_write; unsigned char command; unsigned size; unsigned char *data; };
+static int smbus(int rw, int reg, unsigned char *d) {
+    struct smbus_args a = {(char)rw, (unsigned char)reg, I2C_SMBUS_BYTE_DATA, d};
+    return ioctl(pmic_fd, I2C_SMBUS, &a);
+}
+static int bus_rd(void *c, int reg) { (void)c; unsigned char d[34]; return smbus(1, reg, d) < 0 ? -1 : d[0]; }
+static int bus_wr(void *c, int reg, int v) { (void)c; unsigned char d[34] = {(unsigned char)v}; return smbus(0, reg, d) < 0 ? -1 : 0; }
+static void bus_sleep(void *c, int ms) { (void)c, usleep((unsigned)ms * 1000u); }
+static const struct pmic_bus pmic_bus = {bus_rd, bus_wr, bus_sleep, 0};
+
+static void *pmic_thread(void *arg) {
+    (void)arg;
+    for (;;) {
+        int adc = -1, t = pmic_sample(&pmic_bus, &pmic, &adc);
+        if (pmic.note[0]) say("%s", pmic.note), pmic.note[0] = 0;
+        pthread_mutex_lock(&heat_mu);
+        heat_die = t;
+        pthread_mutex_unlock(&heat_mu);
+        if (pmic.state == PMIC_OFF) return 0;
+        usleep((GUARD_TICK_MS - PMIC_WINDOW_MS) * 1000u / (unsigned)time_scale);
+    }
+}
+
+static void heat_start(void) {
+    if (heat_file[0]) { heat_on = 1; return; }
+    if (card_boot) { say("heat: a card boot, today's Vamp's q2guard guards"); return; }
+    pmic_fd = open(path(PMIC_DEV), O_RDWR | O_CLOEXEC);
+    if (pmic_fd < 0 || ioctl(pmic_fd, I2C_SLAVE_FORCE, PMIC_ADDR) < 0) {
+        say("heat: %s %s: the CPU's load watched instead", PMIC_DEV, pmic_fd < 0 ? "does not open" : "refuses 0x34");
+        pmic.state = PMIC_OFF;
+    } else {
+        pthread_t th;
+        if (pthread_create(&th, 0, pmic_thread, 0)) pmic.state = PMIC_OFF; else pthread_detach(th);
+    }
+    heat_on = 1;
+}
+
+static int busy_now(void) {
+    char b[512];
+    FILE *f = fopen(path("/proc/stat"), "r");
+    size_t n = f ? fread(b, 1, sizeof b - 1, f) : 0;
+    if (f) fclose(f);
+    b[n] = 0;
+    unsigned long long v[8] = {0}, all = 0;
+    if (strncmp(b, "cpu ", 4)) return -1;
+    const char *p = b + 4;
+    for (int i = 0; i < 8; ++i) { while (*p == ' ') ++p; while (*p >= '0' && *p <= '9') v[i] = v[i] * 10 + (unsigned)(*p++ - '0'); }
+    for (int i = 0; i < 8; ++i) all += v[i];
+    unsigned long long idle = v[3] + v[4], da = all - cpu_all, di = idle - cpu_idle;
+    int first = !cpu_all;
+    cpu_all = all, cpu_idle = idle;
+    return first || !da ? -1 : (int)(100 - di * 100 / da);
+}
+
+static void ui_say(const char *line); /* Q2UI/1, when q2ui serves it */
+
+static void heat_poll(unsigned long long t) {
+    if (!heat_on || t < heat_at + GUARD_TICK_MS / (unsigned)time_scale) return;
+    heat_at = t;
+    int temp = GUARD_NONE;
+    if (heat_file[0]) {
+        char b[16] = "";
+        FILE *f = fopen(path(heat_file), "r");
+        if (f && fgets(b, sizeof b, f)) temp = b[0] == '-' || (b[0] >= '0' && b[0] <= '9') ? atoi(b) : GUARD_NONE;
+        if (f) fclose(f);
+    } else {
+        pthread_mutex_lock(&heat_mu);
+        temp = heat_die;
+        pthread_mutex_unlock(&heat_mu);
+    }
+    struct guard_in in = {(unsigned)(t * (unsigned)time_scale), temp, busy_now(), heat_cancel, guard.off, 1,
+                          (cable_in == 1 ? GUARD_CHARGE_CABLE : 0) | (!strcmp(bat.status, "Charging") ? GUARD_CHARGE_CHARGING : 0),
+                          heat_slept};
+    heat_cancel = heat_slept = 0;
+    struct guard_out o;
+    guard_step(&guard, &in, &o);
+    switch (o.event) {
+    case EV_WARN: say("heat: warm (%d.%d C)", temp / 10, temp % 10), tell("heat warn"), ui_say("toast Q2%20is%20getting%20hot"); break;
+    case EV_SENSOR_DOWN:
+        say("heat: no sensor usable: %s", guard_why(&guard)), tell("heat nosensor");
+        ui_say("ask heat-sensor No%20Temperature%20Sensor Overheat%20protection%20watches%20the%20load%20instead OK");
+        break;
+    case EV_SENSOR_OK: say("heat: the sensor is back"), tell("heat ok"), ui_say("withdraw heat-sensor"); break;
+    case EV_LOAD_WARN:
+        say("heat: working hard with no sensor"), tell("heat loadwarn left=%d", GUARD_LOAD_MS / 1000);
+        ui_say("ask heat-load Q2%20has%20been%20working%20hard It%20shuts%20down%20in%2060%20s%20to%20cool%20off Cancel Shut%20Down");
+        break;
+    case EV_LOAD_CANCELLED: say("heat: the load warning cancelled"), tell("heat cancelled"), ui_say("withdraw heat-load"); break;
+    case EV_OFF:
+        say("heat: %s: powering off in %d s", guard.off_why == 'L' ? "the load with no sensor" : "too hot", GUARD_CARD_MS / 1000);
+        ask("/run/vamp/play.sock", "Q2PLAY/1", "pause");
+        tell("heat off");
+        ui_say("toast Q2%20is%20too%20hot.%20Shutting%20down%20to%20cool%20off.");
+        heat_off_ms = t + GUARD_CARD_MS / (unsigned)time_scale;
+        break;
+    }
+    static int powered;
+    if (!powered && (o.power_off || (heat_off_ms && t >= heat_off_ms))) powered = 1, heat_off_ms = 0, power_off("heat");
+}
+
+/* Q2UI/1 (docs/platform/notices.md), held open while q2ui serves it: a line sent, an ask's answer read later in the
+ * loop. Without the socket a line goes nowhere: the watchers' heat lines are told anyway. */
+static int ui_fd = -1;
+static char ui_in[256];
+static size_t ui_n;
+
+static void ui_say(const char *line) {
+    if (ui_fd < 0) {
+        struct sockaddr_un a = {.sun_family = AF_UNIX};
+        snprintf(a.sun_path, sizeof a.sun_path, "%s", path("/run/vamp/ui.sock"));
+        ui_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+        if (ui_fd < 0 || connect(ui_fd, (struct sockaddr *)&a, sizeof a)) {
+            if (ui_fd >= 0) close(ui_fd), ui_fd = -1;
+            return;
+        }
+        ui_n = 0;
+        if (send(ui_fd, "Q2UI/1\n", 7, MSG_NOSIGNAL) != 7) { close(ui_fd), ui_fd = -1; return; }
+    }
+    char b[300];
+    int n = snprintf(b, sizeof b, "%s\n", line);
+    if (n < 0 || n >= (int)sizeof b || send(ui_fd, b, (size_t)n, MSG_NOSIGNAL) != n) close(ui_fd), ui_fd = -1;
+}
+
+/* the UI's lines: its oks, and an ask's answer (heat-load 1 Cancel, 2 Shut Down) */
+static void ui_read(void) {
+    ssize_t got = recv(ui_fd, ui_in + ui_n, sizeof ui_in - 1 - ui_n, MSG_DONTWAIT);
+    if (got <= 0) {
+        if (got == 0 || (errno != EAGAIN && errno != EWOULDBLOCK)) close(ui_fd), ui_fd = -1;
+        return;
+    }
+    ui_n += (size_t)got;
+    ui_in[ui_n] = 0;
+    for (char *nl; (nl = strchr(ui_in, '\n'));) {
+        *nl = 0;
+        if (!strcmp(ui_in, "answer heat-load 1")) heat_cancel = 1;
+        else if (!strcmp(ui_in, "answer heat-load 2") && !guard.off) {
+            say("heat: Shut Down on the load warning");
+            ask("/run/vamp/play.sock", "Q2PLAY/1", "pause");
+            power_off("heat, Shut Down");
+        }
+        ui_n -= (size_t)(nl + 1 - ui_in);
+        memmove(ui_in, nl + 1, ui_n + 1);
+    }
+    if (ui_n >= sizeof ui_in - 1) ui_n = 0, ui_in[0] = 0;
+}
+
 static volatile sig_atomic_t stopping;
 static void on_term(int s) { (void)s, stopping = 1; }
 
@@ -806,10 +995,11 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--root") && i + 1 < argc) snprintf(root, sizeof root, "%s", argv[++i]);
         else if (!strcmp(argv[i], "--poweroff") && i + 1 < argc) snprintf(poweroff_cmd, sizeof poweroff_cmd, "%s", argv[++i]);
+        else if (!strcmp(argv[i], "--heat-file") && i + 1 < argc) snprintf(heat_file, sizeof heat_file, "%s", argv[++i]);
         else if (!strcmp(argv[i], "--reboot") && i + 1 < argc) snprintf(reboot_cmd, sizeof reboot_cmd, "%s", argv[++i]);
         else if (!strcmp(argv[i], "--card-boot")) card_boot = 1;
         else if (!strcmp(argv[i], "--time-scale") && i + 1 < argc && atoi(argv[i + 1]) > 0) time_scale = atoi(argv[++i]);
-        else return fprintf(stderr, "usage: q2sysd [--root DIR] [--poweroff COMMAND] [--reboot COMMAND] [--card-boot] [--time-scale N]\n"), 2;
+        else return fprintf(stderr, "usage: q2sysd [--root DIR] [--poweroff COMMAND] [--reboot COMMAND] [--card-boot] [--time-scale N] [--heat-file F]\n"), 2;
     }
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, on_term);
@@ -831,13 +1021,16 @@ int main(int argc, char **argv) {
     say("%d input device(s), %d with the power key, backlight %s, screen %s", n_in, n_power, backlight[0] ? backlight : "none",
         screen_on ? "on" : "off");
     cable_poll();
+    heat_start();
     unsigned long long battery_at = now_ms(), scanned_at = now_ms(), cable_at = now_ms();
     while (!stopping) {
-        struct pollfd p[1 + INPUTS + CLIENTS];
+        struct pollfd p[2 + INPUTS + CLIENTS];
         int n = 0;
         p[n++] = (struct pollfd){.fd = api_fd, .events = POLLIN};
         for (int i = 0; i < n_in; ++i) p[n++] = (struct pollfd){.fd = in_fd[i], .events = POLLIN};
         for (int i = 0; i < CLIENTS; ++i) p[n++] = (struct pollfd){.fd = cl[i].fd, .events = POLLIN};
+        int ui_at = n;
+        p[n++] = (struct pollfd){.fd = ui_fd, .events = POLLIN}; /* -1 with none: poll passes over it */
         unsigned long long t = now_ms();
         long long wait = (long long)(battery_at + BATTERY_S * 1000ull) - (long long)t;
         if (pressed_at) {
@@ -847,6 +1040,10 @@ int main(int argc, char **argv) {
         if (!n_power && (long long)(scanned_at + RESCAN_MS) - (long long)t < wait) wait = (long long)(scanned_at + RESCAN_MS) - (long long)t;
         if ((long long)(cable_at + CABLE_MS) - (long long)t < wait) wait = (long long)(cable_at + CABLE_MS) - (long long)t;
         if (usb_mode == USB_CAR && wait > 500) wait = 500;
+        if (heat_on) {
+            long long h = (long long)(heat_at + GUARD_TICK_MS / (unsigned)time_scale) - (long long)t;
+            if (h < wait) wait = h;
+        }
         if (wait < 0) wait = 0;
         if (poll(p, (nfds_t)n, (int)wait) < 0 && errno != EINTR) break;
         if (p[0].revents & POLLIN) {
@@ -859,6 +1056,7 @@ int main(int argc, char **argv) {
             if (p[1 + i].revents) read_input(in_fd[i]);
         for (int i = 0; i < CLIENTS; ++i)
             if (cl[i].fd >= 0 && p[1 + n_in + i].fd == cl[i].fd && p[1 + n_in + i].revents) client_read(&cl[i]);
+        if (ui_fd >= 0 && p[ui_at].fd == ui_fd && p[ui_at].revents) ui_read();
         t = now_ms();
         if (pressed_at && t >= pressed_at + HOLD_MS) {
             if (charge_wait) reboot_now();
@@ -876,6 +1074,7 @@ int main(int argc, char **argv) {
             }
             idle_poll(t);
         }
+        heat_poll(t);
         if (usb_mode == USB_CAR) car_poll();
     }
     unlink(path("/run/vamp/sys.sock"));

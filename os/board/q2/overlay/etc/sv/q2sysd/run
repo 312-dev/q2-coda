@@ -1,9 +1,10 @@
 #!/bin/sh
 # q2sysd (docs/sysd.md): the power key (a press: the screen off or on; held 3 s: power off), the screen's light, the
-# battery (/run/vamp/battery), Charge Limit, USB modes, Standby, and Q2SYS/1 on /run/vamp/sys.sock.
+# battery (/run/vamp/battery), Charge Limit, USB modes, Standby, heat, and Q2SYS/1 on /run/vamp/sys.sock.
 . /usr/libexec/vamp/log
 step "q2sysd: start"
-# a card boot (docs/vamp-os-base.md#card-boot): Standby leaves Wi-Fi, the developer's way in, alone
+# a card boot (docs/vamp-os-base.md#card-boot): Standby leaves Wi-Fi, the developer's way in, alone, and heat is
+# today's Vamp's q2guard's, running outside the image
 card=
 [ -e /run/vamp/card-boot ] && card=--card-boot
 exec 2>&1

@@ -29,7 +29,7 @@ must be left alone.
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
-Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot), `pkgd-off` (no `q2pkgd serve`). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot), `pkgd-off` (no `q2pkgd serve`), `heat-card` (q2sysd not told of a card boot). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
 """
 import argparse
 import hashlib
@@ -328,6 +328,8 @@ def sysd_checks(fs, power_key, log):
     bl = fs/'sys/class/backlight/lcd/bl_power'
     text = (fs/'run/vamp/battery').read_text() if (fs/'run/vamp/battery').exists() else ''
     check('level=64' in text and 'mv=3800' in text, f'q2sysd: /run/vamp/battery from the CW2015 ({text.split() or "none"})')
+    check(b'q2sysd: heat: /dev/i2c-6 does not open' in log.read_bytes(),
+          "q2sysd: heat watches the load with no PMIC to read (the emulator's)")
     fd = os.open(power_key, os.O_RDWR | os.O_NONBLOCK)
 
     def key(value):  # the guest's input_event: o32 with a 64-bit time_t gets the kernel's 32-bit longs, 16 bytes
@@ -560,6 +562,9 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         (fs/'etc/sv/q2ui/finish').write_text('#!/bin/sh\nsleep 10\n')
     if perturb == 'player-bounce':  # q2player stopped as q2ui restarts: the hot reload check's player gone away
         (fs/'etc/sv/q2ui/finish').write_text('#!/bin/sh\nsv restart /etc/sv/q2player\n')
+    if perturb == 'heat-card':  # q2sysd not told it is a card boot: its heat beside today's q2guard
+        r = fs/'etc/sv/q2sysd/run'
+        r.write_text(r.read_text().replace('&& card=--card-boot', '&& card='))
     if perturb == 'sysd-off':  # no q2sysd
         (fs/'etc/sv/q2sysd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'playd-off':  # no q2playd
@@ -654,6 +659,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
             launch_check(fs)
         if card and proc.poll() is None:
             outer_check(outer, emu/'record', outer_adbd)
+            check(b'q2sysd: heat: a card boot' in (emu/'record').read_bytes(),
+                  "q2sysd: no heat of its own on a card boot (today's Vamp's q2guard owns the PMIC's window)")
             if not outer_adbd:
                 adb_checks(fs, emu/'data/adb_keys')
         if not card and proc.poll() is None:
@@ -744,7 +751,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off', 'player-bounce'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off', 'player-bounce', 'heat-card'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     ap.add_argument('--no-outer-adbd', action='store_true', help='with --card-boot: today\'s Vamp has no adbd running')
     a = ap.parse_args()
