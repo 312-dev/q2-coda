@@ -194,6 +194,17 @@ class Run:
         time.sleep(1.5)
         return self.stats()
 
+    def quiet_second(self):
+        """Wakes and frames over one second clear of the minute's turn, when q2ui at rest wakes to draw the clock: a
+        wake from its wait and another as the frame waits for the panel (its wait is in whole seconds, so it can come
+        up to a second after :00). The second starts at :01.5 at the earliest and ends before :58."""
+        at = time.time() % 60
+        if at > 57 or at < 1.5:
+            time.sleep((61.5 - at) % 60)
+        frames, woke = self.stats()['frames'], self.wakes()
+        time.sleep(1.0)
+        return self.wakes() - woke, self.stats()['frames'] - frames
+
     def picture(self):
         return shot.page(self.dir/'fb', self.stats()['page'])
 
@@ -865,9 +876,8 @@ def routes(binary, work):
     row = [shot.pixel(r.picture(), x, 40 + 16) for x in range(20, 120)]
     good &= check('a song starting while Home is shown puts Playing on its first row, with no key pressed',
                   playing['frames'] > idle['frames'] and row != first, f"{idle['frames']} frames, then {playing['frames']}")
-    woke = r.wakes()
-    time.sleep(1.0)
-    good &= check('and Home is then at rest again', r.wakes() - woke <= 1, f'{r.wakes() - woke} wakes in 1 s')
+    woke, drew = r.quiet_second()
+    good &= check('and Home is then at rest again', woke == 0 and drew == 0, f'{woke} wakes, {drew} frames in 1 s')
     r.proc.terminate()
     r.proc.wait(timeout=5)
     os.close(r.queue)
@@ -1113,12 +1123,11 @@ def live(binary, work):
     moved = r.rest()
     good &= check('three ticks are three rows', moved['ticks'] == 3 and bar_rows(r.picture()) == [4],
                   f"{moved['ticks']} ticks, platter on {bar_rows(r.picture())}")
-    woke = r.wakes()
-    time.sleep(1.0)
-    good &= check('a list at rest draws no frame', r.stats()['frames'] == moved['frames'],
+    # asleep in poll until input or the clock's next minute, which this second is clear of
+    woke, drew = r.quiet_second()
+    good &= check('a list at rest draws no frame', drew == 0 and r.stats()['frames'] == moved['frames'],
                   f"{moved['frames']} then {r.stats()['frames']}")
-    # asleep in poll until input or the clock's next minute: one wake at most in this second
-    good &= check('a list at rest does not wake', r.wakes() - woke <= 1, f'{r.wakes() - woke} wakes in 1 s')
+    good &= check('a list at rest does not wake', woke == 0, f'{woke} wakes in 1 s')
     r.ticks(-2)
     back = r.rest()
     good &= check('two ticks back are two rows up', bar_rows(r.picture()) == [2], str(bar_rows(r.picture())))
