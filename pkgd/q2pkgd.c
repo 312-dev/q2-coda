@@ -240,9 +240,10 @@ static char *slurp(const char *path, size_t *n) {
 
 /* where a stock path lives under /vendor (tools/vampos.py VENDOR_PLACES) */
 static int place(const char *stock, char *out, size_t room) {
+    /* tools/vampos.py's VENDOR_PLACES, in the same order (test/pkgd.py stages both layouts) */
     static const char *const map[][2] = {{"module_driver/", "vendor/module_driver/"}, {"firmware/", "vendor/firmware/"},
-                                         {"usr/data/", "vendor/mcu/"}};
-    for (unsigned i = 0; i < 3; ++i)
+                                         {"usr/data/", "vendor/mcu/"}, {"usr/bin/rtk_hciattach", "vendor/bin/rtk_hciattach"}};
+    for (unsigned i = 0; i < sizeof map / sizeof *map; ++i)
         if (!strncmp(stock, map[i][0], strlen(map[i][0]))) return snprintf(out, room, "%s%s", map[i][1], stock + strlen(map[i][0])), 0;
     return -1;
 }
@@ -311,7 +312,8 @@ static int stage(const char *dir, const char *rootfs, const char *out) { /* out:
     snprintf(q, sizeof q, "%s/stage", tmp);
     for (int i = 0; i < rel.n; ++i) {
         char where[300], dst[1200];
-        place(rel.file[i].path, where, sizeof where);
+        if (place(rel.file[i].path, where, sizeof where))
+            return remove_tree(tmp), fail("%s has no place under /vendor", rel.file[i].path);
         snprintf(p, sizeof p, "%s/%s", rootfs, rel.file[i].path);
         if (hash_file(p, 0, h, 0) || strcmp(h, rel.file[i].sha256)) { /* not at its stock path: Vamp OS keeps it in /vendor */
             snprintf(p, sizeof p, "%s/%s", rootfs, where);
