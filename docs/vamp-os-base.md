@@ -17,6 +17,7 @@ On GRAYTHINKPAD the same commands run without `tools/mac/q2env`. `build` needs L
 | `os/` | The `BR2_EXTERNAL` tree: `configs/vamp_q2_defconfig`, the packages (`package/`), the root filesystem's own files (`board/q2/overlay/`), the post-build step, the vendor manifest (`vendor/V1.36.tsv`), one patch to Buildroot (`patches/buildroot/`) |
 | `tools/vampos.py` | `build`, `compose`, `vendor-manifest`, `qemu`, `card` (its docstring). Not `tools/os.py`: a module named `os` in `tools/` is imported in place of Python's own by a script there run with `-S` |
 | `test/os_image.py` | The checks below |
+| `test/os_bt.py` | The Bluetooth services under the emulator ([Bluetooth](#bluetooth)) |
 | `patch/q2vampos.sh`, `test/q2vampos.py` | The [card boot](#card-boot) from a `--dev` build of today's Vamp, and its test |
 
 **Pinned.** Buildroot 2026.02.3, the long-term line, by SHA-256 (the one in buildroot.org's signed `.sign`). Every package Buildroot fetches is checked against its `.hash` file; ours carry the hashes `tools/player.py` (FFmpeg 7.1.5), `tools/thirdparty.py` (mbedTLS 3.6.8) and `tools/ui.py` (stb_truetype, stb_image) pin, and `test/os_image.py` fails when the two differ. Vamp's own sources are not read from the working tree: `build` exports `os/`, `tools/`, `player/`, `patch/` and `assets/fonts` at `HEAD`, and `ui/` and `patch/` at `Q2UI_COMMIT` (a commit of `feat/render-engine`, read-only here), and `manifest.json` names both commits. `--worktree` builds the working tree instead and marks the commit `-dirty`. The configure lines of FFmpeg and the mbedTLS settings come from `tools/player.py` and `tools/thirdparty.py` themselves (`os/support/pins.py`), so they have one definition.
@@ -41,7 +42,7 @@ BusyBox `init` (`/sbin/init`, and `/linuxrc` for a kernel line that names it) re
 5. After an install ([q2pkgd](pkgd.md#the-rescue-copy)), the card's rescue copy put back in `recovery-update/` (`q2pkgd restore`) as soon as the card is mounted, before anything else that can fail: Shanling's recovery removes the folder once it has flashed.
 6. A wait of up to 5 s for `/dev/fb0`, and the input devices with their names.
 
-Then init starts `runsvdir`, which starts the services below ([`/etc/sv`](../os/board/q2/overlay/etc/sv)) and starts each again when it ends; a `finish` script waits 10 s after a failure, so a service that cannot run yet does not spin. Each step writes a line to `/run/vamp/boot.log`, and once `/mnt/data` is mounted also to `/mnt/data/vamp/boot.log` (the last boot's kept as `boot.log.1`), with `dmesg.log`, `modules.log` (the module script's output) and `kernel.txt` (`/proc/cmdline`, `/proc/modules`) beside it. Nothing of Shanling's userspace runs: no program of theirs is in the image, and the vendor scripts are shell lines run by BusyBox.
+Then init starts `runsvdir`, which starts the services below ([`/etc/sv`](../os/board/q2/overlay/etc/sv)) and starts each again when it ends; a `finish` script waits 10 s after a failure, so a service that cannot run yet does not spin. Each step writes a line to `/run/vamp/boot.log`, and once `/mnt/data` is mounted also to `/mnt/data/vamp/boot.log` (the last boot's kept as `boot.log.1`), with `dmesg.log`, `modules.log` (the module script's output) and `kernel.txt` (`/proc/cmdline`, `/proc/modules`) beside it. Of Shanling's userspace only `rtk_hciattach` runs, from the vendor set ([Bluetooth](#bluetooth)); the vendor scripts are shell lines run by BusyBox.
 
 | Service | Runs | What it waits for |
 | --- | --- | --- |
@@ -52,6 +53,10 @@ Then init starts `runsvdir`, which starts the services below ([`/etc/sv`](../os/
 | `q2playd` | `/usr/bin/q2playd` ([q2playd](playd.md)): the server on `/tmp/sock_play`, the queue, what plays; `q2ui`'s command queue and now file, and Q2PLAY/1 | `/mnt/data/vamp/library.db` for a card song's file, the card's `.vamp/catalogue.db` for a server song's |
 | `q2player` | `/usr/bin/q2player`, built as every Vamp image's (Car Audio's output on) against this image's alsa-lib, FFmpeg 7.1.5 and mbedTLS | `q2playd` on `/tmp/sock_play` (it waits for it up to 5 s, then `finish` waits 10 s before the next try) |
 | `q2sysd` | `/usr/bin/q2sysd` ([q2sysd](sysd.md)): the power key (a press: the screen off or on; held 3 s: power off), the backlight, the battery (`/run/vamp/battery`), Q2SYS/1 | the input devices with `KEY_POWER`, `/sys/class/backlight`, the CW2015 |
+| `dbus` | `dbus-daemon --system` ([Bluetooth](#bluetooth)), its machine id made on `/run` each boot | nothing |
+| `bt-attach` | Shanling's `/vendor/bin/rtk_hciattach -n -s 115200 ttyS0 rtk_h5`, which loads the radio's Bluetooth firmware and makes `hci0` | `/dev/ttyS0` and the H5 module; on a card boot an `hci0` already there is left to the outer system |
+| `bluetoothd` | Vamp's BlueZ 5.88, `/usr/libexec/bluetooth/bluetoothd -n --noplugin=hfp,rap,fastpair`, the store `/mnt/data/bluetooth` | the system bus; it takes `hci0` whenever that appears |
+| `bluealsa` | Vamp's bluez-alsa 5.0.0, `bluealsa -p a2dp-source -p a2dp-sink -p hfp-ag -p hsp-ag --keep-alive=5 -c LDAC -c aptX-HD -c aptX` (and AAC when the build has it) | the system bus |
 | `q2ui` | `/usr/bin/q2ui --db /mnt/data/vamp/library.db --catalogue /mnt/mmc/.vamp/catalogue.db --fonts /usr/share/vamp/fonts --icons /usr/share/vamp/icons` | `q2libd`'s library, which is there (empty at first) before anything else |
 
 ## adb
@@ -83,6 +88,27 @@ The files of Shanling's the image needs at run time: the 24 modules, their 25 sc
 - `--rootfs DIR`: an unpacked root filesystem, which on a Q2 is its own `/`: the installer's step 2 ([How an image is made on the device](vamp-os.md#how-an-image-is-made-on-the-device)). A file whose hash is not the manifest's stops the compose with its name.
 
 `/vendor/module_driver`, `/vendor/firmware`, `/vendor/mcu` and `/vendor/bin` hold them; `/module_driver` and `/firmware` are links there, the paths the scripts, the Wi-Fi driver and `rtk_hciattach` name. `cmd_mcu` is not in the set yet: nothing here starts the MCU.
+
+## Bluetooth
+
+The image carries its own Bluetooth stack, built from source by the same recipes as today's Vamp's [own bluetoothd](bluez.md) and [own bluealsa](bluealsa.md), on this image's glibc 2.42, D-Bus 1.14.10, GLib 2.86.5 and alsa-lib: the "newer base" column of [bluez: Bases](bluez.md#bases) and [bluealsa: Bases](bluealsa.md#bases). Nothing of Shanling's userspace takes part but `rtk_hciattach`, a vendor file ([The vendor set](#the-vendor-set)).
+
+| Package | What |
+| --- | --- |
+| `vamp-bluez` | BlueZ 5.88 at `tools/thirdparty.py`'s `SOURCES["bluez"]`, configured with its `BLUEZ_OPTIONS` and `tools/bluez/vamp.patch` (no Shanling hooks, no `libbtctl`), the store compiled in as `/mnt/data/bluetooth` (`BLUEZ_STORAGE`), and `libbluetooth` for bluealsa. `main.conf` is the overlay's ([`etc/bluetooth/main.conf`](../os/board/q2/overlay/etc/bluetooth/main.conf)): Vamp's name, class `0x20041C`, `Experimental`, stock's reconnect policy, and `[GATT] Server = false` (coda-rc serves the LE attribute channel) |
+| `vamp-bluealsa` | bluez-alsa 5.0.0 at `SOURCES["bluealsa"]` with `BLUEALSA_OPTIONS` and `BLUEALSA_PATCHES`; upstream's `bluealsad` installed as `bluealsa`, with `bluealsa-aplay`, `bluealsactl` and the two ALSA plugins. `--shanling` is compiled in and never passed (only stock's `demo` calls that service) |
+| `q2-freeaptx`, `q2-ldac` | libfreeaptx 0.2.2 and ldacBT 2.0.2.3, static, built by `tools/thirdparty.py`'s own `build_freeaptx` and `build_ldac` (`os/support/pins.py`) |
+| `dbus` | Buildroot's D-Bus, for the system bus BlueZ and bluez-alsa speak; nothing of Vamp's own uses it |
+
+`test/os_image.py` checks each package's version and tarball hash against `tools/thirdparty.py`'s (a changed version or hash fails it: measured by editing `vamp-bluez.mk`'s version and `q2-ldac.hash`).
+
+Two things the Buildroot build needed that today's build does not, each seen failing first: bluez-alsa's `src/Makefile.am` ends `AM_CFLAGS` with `-static`, which Buildroot's patched libtool turns into a fully static link ("attempted static link of dynamic object `libdbus-1.so`"), so the package takes it out with its line's continuation; and `bluetoothd` and `bluealsa`, built with 64-bit `time_t` against glibc 2.42, call `__setsockopt64` and `__getsockopt64`, so `test/bluez_own.py`'s socket shim wraps those too.
+
+**AAC is off.** fdk-aac is C++, and this image's toolchain is built without C++ (`BR2_TOOLCHAIN_BUILDROOT_CXX` unset: no `g++` and no `libstdc++` in `/home/gray/.cache/q2-os/out/host`), so `BR2_PACKAGE_VAMP_BLUEALSA_AAC` cannot be chosen and the image has SBC, aptX, aptX HD and LDAC. Decision (2026-11-27): leave AAC out for now. Turning it on is not a setting of the package: it is `BR2_TOOLCHAIN_BUILDROOT_CXX=y` in `vamp_q2_defconfig`, which rebuilds the toolchain (GCC is most of a full build's 15 minutes, [Size and time](#size-and-time)) and puts `libstdc++` in the image (its size not measured here), a change to every package's toolchain and so its own decision. `/etc/sv/bluealsa/run` asks `bluealsa --help` for AAC (its options are listed only in a build that has it) and adds `-c AAC` with today's AAC options when it is there, so an image built with C++ needs no other change. Until then a headset that offers only SBC and AAC plays SBC.
+
+**What is not built**: the client. Nothing in the image pairs, answers a pairing agent, turns Bluetooth on or off, or points `q2player` at a headset's PCM; today `demo` does all of it. That is `q2btd` ([What is missing](#what-is-missing)). `/mnt/data/bluetooth` is the path stock and today's Vamp keep their pairings in, so a unit's pairings are there for it.
+
+**Tested without a Q2.** `test/os_bt.py ROOT` runs the four services under the image's own `runsvdir`, every program MIPS under QEMU in a `bwrap` chroot, with `test/bluez_own.py`'s stand-in for the kernel's management socket. Run 2026-11-27 on the packages built over this image's toolchain (an external-toolchain Buildroot output beside `/home/gray/.cache/q2-os`, packages only) copied over the image of `feat/vamp-os-base` at `0b0da784`, the base this branch was made from, with the overlay's four services and `main.conf`: 8 of 8 checks. The system bus runs; `bluetoothd` owns `org.bluez` with `--noplugin=hfp,rap,fastpair`; `main.conf`'s name and class reach the controller; `hci0` has `Adapter1` and no `GattManager1` or `LEAdvertisingManager1`; `bluealsa` owns `org.bluealsa` with its four roles and no `--shanling`; `bt-attach`, with no `/dev/ttyS0` and no vendor file, says so and tries every 10 s (4 tries in 36 s); the store is `/mnt/data/bluetooth`. (`bluetoothd`'s log also shows `bluealsa`'s SBC, aptX, aptX HD and LDAC endpoints registered on `hci0`; no check reads it.) Each check was seen to fail: a `main.conf` with another name, class and `Server = true`, `bluetoothd` without `--noplugin`, `bluealsa` with `--shanling` and a `bt-attach/finish` that does not wait fail the six checks they touch (6 of 8 red); a `bluetoothd` pointed elsewhere (`STATE_DIRECTORY`) fails the store's; a `dbus` service that exits fails all 8. Before the shim's fix the same tree failed 3 of 8 (`bluetoothd` aborted). `test/bluez_own.py` on the `--own-bluez` build is as before the shim's change (51 of 53; its two Class checks fail with or without it). Not tested: a full image built with the packages (the run above is the packages over a built image), `rtk_hciattach`, the radio, a kernel's L2CAP, RFCOMM and SCO, a headset.
 
 ## The emulator, and what it cannot stand in for
 
@@ -163,6 +189,8 @@ Everything here has been run only under the emulator and on this machine. What o
 | Wi-Fi | Association, DHCP and DNS; the radio's power when `wlan0` is down | [q2netd](netd.md#needs-a-q2) |
 | Library | A real card's first scan time and memory under FFmpeg | [q2libd](libd.md#what-is-missing) |
 | Updates | Shanling's recovery's folder contract, and that it removes the folder after flashing (inferred from installs); `mksquashfs`'s time and memory on the Q2 | [q2pkgd](pkgd.md#needs-a-q2) |
+| Bluetooth attach | `rtk_hciattach` loading `/firmware/rtlbt` and attaching on `ttyS0` under this init, with the H5 module rcS loads; `hci0` appearing; the attach on a card boot left to the outer system | [Bluetooth](#bluetooth) |
+| Bluetooth | `bluetoothd` 5.88 and `bluealsa` on Shanling's kernel (L2CAP options, RFCOMM, SCO); the unit's pairings in `/mnt/data/bluetooth` read by this image's daemon; A2DP to a headset with each of SBC, aptX, aptX HD and LDAC once a client exists | [Bluetooth](#bluetooth), [bt-own-plan](bt-own-plan.md) |
 | Hot reload | `kill -HUP`'s in-place restart (QEMU's `/proc/self/exe` is QEMU) | [Hot reload](#hot-reload) |
 | App isolation | Which of mount and network namespaces, cgroups and seccomp the kernel has, for what a package's permissions can hold | [Packages: Permissions](platform/packages.md#permissions) |
 
