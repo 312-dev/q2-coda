@@ -271,7 +271,7 @@ static void at_rest(void) {
 /* a question asked with the screen dark lights it, as a wake would: demo's, down its pipe (patch/q2ui_gate.c) */
 static void wake_screen(void) { player_line("wake", 0); }
 
-/* Return held, on any page: Control Center, unless it is on top already */
+/* Return held, or a finger pulled down from the top edge, on any page: Control Center, unless it is on top already */
 static void control_center(void) {
     char route[256];
     ui_route(route, sizeof route);
@@ -393,7 +393,9 @@ static int key_code(const char *name) {
 /* Lines: tick N | tug SHARE | key NAME | down NAME | up NAME | hold NAME | run MS | rest |
  * shot FILE | rows FILE | record DIR | record off | plays FILE (what plays is read from FILE from here on) |
  * networks FILE and btdevices FILE (the same for demo's Wi-Fi networks and Bluetooth devices) |
- * notice COMMAND (a Q2UI/1 command, as a connection's: its answers go to the trace, "said ...").
+ * notice COMMAND (a Q2UI/1 command, as a connection's: its answers go to the trace, "said ...") |
+ * touch X Y | move X Y | lift (a finger on the upright screen, as ui/input.c reads hyn_ts) |
+ * swipe X0 Y0 X1 Y1 MS (a finger down, moved a frame at a time over MS, lifted).
  * Each input goes in with the next frame. */
 static void script_said(const char *line) {
     if (trace) fprintf(trace, "t=%llu said %s\n", (unsigned long long)fake_us, line);
@@ -401,6 +403,7 @@ static void script_said(const char *line) {
 static int script(const char *path) {
     FILE *f = fopen(path, "r");
     char line[400], arg[320];
+    int tx = 0, ty = 0, tx1, ty1, tms; /* a finger's: lift is where it last was */
     if (!f) return 2;
     fb_vsync = 0;
     if (opt.trace) trace = fopen(opt.trace, "w");
@@ -432,6 +435,19 @@ static int script(const char *path) {
                    sscanf(line, "hold %319s", arg) == 1) {
             input_t in = { *line == 'd' ? IN_KEY_DOWN : *line == 'u' ? IN_KEY_UP : IN_KEY_HOLD, key_code(arg), 0, ms };
             script_frame(&in, 1);
+        } else if (sscanf(line, "touch %d %d", &tx, &ty) == 2 || sscanf(line, "move %d %d", &tx, &ty) == 2 ||
+                   !strncmp(line, "lift", 4)) {
+            input_t in = { *line == 't' ? IN_TOUCH_DOWN : *line == 'm' ? IN_TOUCH_MOVE : IN_TOUCH_UP, 0, 0, ms, tx, ty };
+            script_frame(&in, 1);
+        } else if (sscanf(line, "swipe %d %d %d %d %d", &tx, &ty, &tx1, &ty1, &tms) == 5) {
+            int frames = tms * 1000 / (int)FRAME_US;
+            frames = frames < 1 ? 1 : frames;
+            for (int k = 0; k <= frames + 1; ++k) {
+                int at = k > frames ? frames : k;
+                input_t in = { !k ? IN_TOUCH_DOWN : k > frames ? IN_TOUCH_UP : IN_TOUCH_MOVE, 0, 0, (unsigned)(fake_us / 1000u),
+                               tx + (tx1 - tx) * at / frames, ty + (ty1 - ty) * at / frames };
+                script_frame(&in, 1);
+            }
         } else if (sscanf(line, "run %319s", arg) == 1) {
             for (uint64_t until = fake_us + (uint64_t)atoi(arg) * 1000u; fake_us < until;) script_frame(0, 0);
         } else if (!strncmp(line, "rest", 4)) {
@@ -504,6 +520,7 @@ int main(int argc, char **argv) {
     config_open();
     art_sync = opt.script || opt.bench; /* covers read in place: a script's pictures and a bench's times repeat */
     ui_on_hold(KEY_UI_RETURN, control_center);
+    ui_on_pull(control_center);
     if (opt.script) {
         int code = script(opt.script);
         fb_close();

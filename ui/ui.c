@@ -61,6 +61,28 @@ void ui_on_rest(void (*fn)(void)) { rest_hook = fn; }
 static int hold_key;
 static void (*hold_fn)(void);
 void ui_on_hold(int key, void (*fn)(void)) { hold_key = key, hold_fn = fn; }
+/* A finger that lands above PULL_Y and goes PULL_PX down: pull_fn, on every page (stock's pull-down,
+ * on_wm_tsmove_fun: g_pressdown_y under 31, 20 px down); the rest of that touch is nobody's. */
+#define PULL_Y 31
+#define PULL_PX 20
+static void (*pull_fn)(void);
+static struct {
+    int y0, pulled;
+} pull;
+void ui_on_pull(void (*fn)(void)) { pull_fn = fn; }
+static int pulled(const input_t *e) {
+    if (e->type == IN_TOUCH_DOWN) pull.y0 = e->y, pull.pulled = 0;
+    if (e->type < IN_TOUCH_DOWN) return 0;
+    int was = pull.pulled;
+    if (e->type == IN_TOUCH_UP) pull.pulled = 0;
+    if (was) return 1;
+    if (e->type == IN_TOUCH_MOVE && pull_fn && pull.y0 < PULL_Y && e->y - pull.y0 >= PULL_PX) {
+        pull.pulled = 1;
+        pull_fn();
+        return 1;
+    }
+    return 0;
+}
 void (*ui_clicker)(int button);
 void ui_click(int button) {
     if (ui_clicker) ui_clicker(button);
@@ -263,6 +285,7 @@ int ui_frame(const input_t *in, int n) {
         if (in[i].type == IN_KEY_DOWN && (in[i].value == KEY_UI_CENTRE || in[i].value == KEY_UI_RETURN)) ui_click(1);
         if (notice_event(&in[i])) /* a question on the card takes every input while it asks (notice.c) */
             continue;
+        if (pulled(&in[i])) continue;
         if (in[i].type == IN_KEY_HOLD && hold_fn && in[i].value == hold_key)
             hold_fn();
         else if (stack[depth - 1].page->event)

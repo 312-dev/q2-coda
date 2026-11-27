@@ -193,7 +193,8 @@ struct text_stats {
 extern struct text_stats text_stats;
 
 /* ---- input.c ---- */
-enum { IN_NONE, IN_TICK, IN_TUG, IN_KEY_DOWN, IN_KEY_UP, IN_KEY_HOLD };
+/* IN_TOUCH_*: a finger on the screen (hyn_ts), at x, y on the upright screen */
+enum { IN_NONE, IN_TICK, IN_TUG, IN_KEY_DOWN, IN_KEY_UP, IN_KEY_HOLD, IN_TOUCH_DOWN, IN_TOUCH_MOVE, IN_TOUCH_UP };
 enum {
     KEY_UI_CENTRE = 116,
     KEY_UI_RETURN = 103,
@@ -207,6 +208,7 @@ typedef struct {
     int value;   /* IN_TICK: +1 down the list, -1 up; a key: its code */
     float share; /* IN_TUG: the share of the next tick turned, -1 to 1 (0: the finger left) */
     unsigned ms;
+    int x, y; /* IN_TOUCH_*: where the finger is, 0 to SCREEN_W - 1 and SCREEN_H - 1 (the last place, lifting) */
 } input_t;
 int input_open(const char *dir);
 int input_fds(int *fds, int max);
@@ -262,6 +264,7 @@ int ui_run(void);       /* the loop, until ui_quit; the exit code */
 void ui_on_rest(void (*fn)(void));       /* called once each time the loop comes to rest */
 void ui_on_stack(void (*fn)(void));      /* called when a page has opened or closed */
 void ui_on_hold(int key, void (*fn)(void)); /* a key held, on any page, is fn's and not the page's (Return: Control Center) */
+void ui_on_pull(void (*fn)(void)); /* a finger pulled down from the screen's top edge, on any page */
 /* The key click (Key Tone): ui_click(0) for a wheel tick that moved something, (1) for a press. The toolkit clicks
  * every Centre and Return press itself; a page clicks its own ticks. ui_clicker sounds it (0: silent): q2ui's is
  * demo's click, down its pipe (ui/player.c player_click). */

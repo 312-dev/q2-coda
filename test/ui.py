@@ -40,6 +40,7 @@ ACCENT = (0x21, 0x60, 0xd8)
 W, H = 375, 320
 BAR_H, ROW_H, ROWS = 58, 32, 7
 EV_SYN, EV_KEY, EV_ABS, ABS_X, ABS_PRESSURE, BTN_TOUCH, KEY_RETURN, KEY_CENTRE = 0, 1, 3, 0, 0x18, 0x14a, 103, 116
+ABS_Y = 1
 TICK_UNITS = 28
 
 
@@ -164,13 +165,14 @@ class Run:
         self.dir = at or folder(work, n)
         if not at:
             (self.dir/'input').mkdir()
-            for k in (1, 3):
+            for k in (1, 2, 3):
                 os.mkfifo(self.dir/'input'/f'event{k}')
             os.mkfifo(self.dir/'cmdq')
         self.queue = os.open(self.dir/'cmdq', os.O_RDWR | os.O_NONBLOCK)  # demo's end of the player's queue
         self.proc = subprocess.Popen(base_args(binary, self.dir) + ['--input', self.dir/'input', *options], pass_fds=fds)
         self.wheel = open(self.dir/'input/event3', 'wb', buffering=0)
         self.keys = open(self.dir/'input/event1', 'wb', buffering=0)
+        self.touch = open(self.dir/'input/event2', 'wb', buffering=0)
         self.x = 100
         time.sleep(0.4)  # q2ui drops what was pressed before it had the screen: the finger comes down once it runs
         self.wheel.write(event(EV_ABS, ABS_X, self.x) + event(EV_ABS, ABS_PRESSURE, 1) + event(EV_KEY, BTN_TOUCH, 1) +
@@ -218,6 +220,19 @@ class Run:
         self.keys.write(event(EV_KEY, code, 1) + event(EV_SYN, 0, 0))
         time.sleep(seconds)
         self.keys.write(event(EV_KEY, code, 0) + event(EV_SYN, 0, 0))
+
+    def swipe(self, points, gap=0.016):
+        """A finger down at the first upright (x, y), moved through the rest and lifted, written as hyn_ts reports it:
+        the panel's portrait axes, x its 319 - y and y its x (tools/q2remote.py touch_xy)."""
+        raw = [(319 - y, x) for x, y in points]
+        (x, y), *moves = raw
+        self.touch.write(event(EV_ABS, ABS_X, x) + event(EV_ABS, ABS_Y, y) + event(EV_ABS, ABS_PRESSURE, 1) +
+                         event(EV_KEY, BTN_TOUCH, 1) + event(EV_SYN, 0, 0))
+        for x, y in moves:
+            time.sleep(gap)
+            self.touch.write(event(EV_ABS, ABS_X, x) + event(EV_ABS, ABS_Y, y) + event(EV_SYN, 0, 0))
+        time.sleep(gap)
+        self.touch.write(event(EV_ABS, ABS_PRESSURE, 0) + event(EV_KEY, BTN_TOUCH, 0) + event(EV_SYN, 0, 0))
 
     def key(self, code):
         self.keys.write(event(EV_KEY, code, 1) + event(EV_SYN, 0, 0) + event(EV_KEY, code, 0) + event(EV_SYN, 0, 0))
@@ -560,6 +575,7 @@ def pages(binary, work):
     good &= check('Return from that Now Playing is the list again on the same row', stats['top'] != 'now' and trace[-1]['sel'] == 3,
                   f"{stats['top']} {trace[-1]['sel']}")
     good &= control_center_sheet(binary, work, home)
+    good &= control_center_touch(binary, work, home)
     # a row whose page is demo's: the page is named for demo and q2ui ends with the code that says so
     _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'tick 1', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
@@ -716,7 +732,7 @@ def display(binary, work, home):
     good = True
     ini = pathlib.Path(tempfile.mkdtemp(dir=work))/'config.ini'
     ini.write_text('[IPOD]\nLIGHT=0\nREDUCEMOTION=0\n')
-    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 6', 'rest', 'key centre', 'rest']  # Home > Settings > Display
+    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 1', 'rest']  # Home > Settings > Display, Light Mode
     lines = to + ['key centre', 'run 100', 'key centre', 'run 100', 'tick 1', 'rest', 'key centre', 'run 100']
     _, _, _, (sent, _, _), said = script(binary, work, 60, lines, *home, '--config', ini, queue=True, ctl=True)
     good &= check('Light Mode goes Off to On, then on to Auto before demo has written it; Reduce Motion goes on, each '
@@ -725,6 +741,13 @@ def display(binary, work, home):
     _, _, _, (sent, _, d) = script(binary, work, 60, to + ['tick 4', 'rest', 'key centre', 'run 100'], *home, '--config', ini, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
     good &= check("its last row opens the rest of demo's Display page", asked == 'systemset/display_page\n', repr(asked))
+    # Brightness first, as on demo's page: an inline slider at demo's level, set as Control Center's slider sets it
+    told = cc_told(work)
+    lines = to + ['tick -1', 'rest', 'rows @rows.txt', 'key centre', 'run 50', 'tick 2', 'run 50', 'tick -1', 'run 50', 'key centre', 'rest']
+    _, _, _, (_, _, d), said = script(binary, work, 60, lines, *home, '--config', ini, '--told', told, queue=True, ctl=True)
+    first = (d/'rows.txt').read_text().splitlines()[:2] if (d/'rows.txt').exists() else []
+    good &= check("Brightness leads Display at demo's level; grabbed, it goes up two and back one down q2ui's pipe",
+                  first == ['Brightness\t40%', 'Light Mode\tOff'] and said == ['set bright 41', 'set bright 42', 'set bright 41'], f'{first} {said}')
     run = Run(binary, work, 60, '--config', ini, '--clock', '12:00')
     try:
         run.rest()
@@ -936,19 +959,20 @@ def captions(binary, work, home):
     last, the rows below moved down by as much; it shrinks back as the selection leaves. Under Reduce Motion it is at
     its end at once. A grown row near a list's end scrolls the list by whole rows to keep its foot on the list end."""
     good = True
-    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 6', 'rest', 'key centre', 'rest']  # Home > Settings > Display
+    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 1', 'rest']  # Home > Settings > Display, Light Mode
     lines = to + ['shot @before.ppm', 'tick 1', 'rest', 'shot @grown.ppm', 'tick 1', 'rest', 'shot @shut.ppm']
     trace, pics, _ = script(binary, work, 60, lines, *home)
+    D = ROW_H  # Reduce Motion is Display's third row, under Brightness and Light Mode
     caps = [t.get('cap', -1) for t in trace]
     good &= check('Reduce Motion grows by one line (22 px) when selected, over frames between, and back to 0 as the selection '
                   'leaves', max(caps) == 22 and caps[-1] == 0 and sum(1 for c in caps if 0 < c < 22) >= 3, str(sorted(set(caps))))
-    ink = sum(1 for y in range(124, 140) for x in range(24, 340) if (lambda c: c[0] > 150 and c[2] - c[0] > 20)(pics['grown'].at(x, y)))
-    gone = sum(1 for y in range(124, 140) for x in range(24, 340) if pics['before'].blue(x, y))
+    ink = sum(1 for y in range(124 + D, 140 + D) for x in range(24, 340) if (lambda c: c[0] > 150 and c[2] - c[0] > 20)(pics['grown'].at(x, y)))
+    gone = sum(1 for y in range(124 + D, 140 + D) for x in range(24, 340) if pics['before'].blue(x, y))
     good &= check("its caption is drawn in the bar under the title, the bar grown to hold it",
-                  ink > 60 and pics['grown'].blue(30, 141) and gone == 0, f'{ink} ink px, blue at 141 {pics["grown"].blue(30, 141)}')
-    below = [pics['before'].ink_y(24, 300, 120, 156)[0], pics['grown'].ink_y(24, 300, 142, 178)[0]]
+                  ink > 60 and pics['grown'].blue(30, 141 + D) and gone == 0, f'{ink} ink px, blue at 141 {pics["grown"].blue(30, 141 + D)}')
+    below = [pics['before'].ink_y(24, 300, 120 + D, 156 + D)[0], pics['grown'].ink_y(24, 300, 142 + D, 178 + D)[0]]
     good &= check('the row below moves down by the caption', 20.5 < below[1] - below[0] < 23.5, str(below))
-    back = pics['shut'].ink_y(24, 300, 116, 164)[0]
+    back = pics['shut'].ink_y(24, 300, 116 + D, 164 + D)[0]
     good &= check('the selection moved on to it, the row below is back in its place', abs(back - below[0]) < 1.5, f'{back} {below[0]}')
     trace, _, _ = script(binary, work, 60, to + ['tick 1', 'rest'], *home, '--reduce-motion')
     caps = [t.get('cap', -1) for t in trace]
@@ -1100,7 +1124,7 @@ def light_default(binary, work, home):
     to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 6', 'rest', 'key centre', 'rest', 'rows @rows.txt']  # Display
     _, _, _, (_, _, f) = script(binary, work, 60, to, *home, '--config', d/'config.ini', queue=True)
     rows = (f/'rows.txt').read_text().splitlines() if (f/'rows.txt').exists() else []
-    good &= check("and Display's Light Mode row says Auto", rows[:1] == ['Light Mode\tAuto'], str(rows[:1]))
+    good &= check("and Display's Light Mode row, under Brightness, says Auto", rows[1:2] == ['Light Mode\tAuto'], str(rows[:2]))
     return good
 
 
@@ -1126,7 +1150,7 @@ def night_shift(binary, work, home):
     for ini, options, want, what in cases:
         got = panel('[Q2POD]\n' + ini, *options)
         good &= check(f'Night Shift {what}: white on the panel is {want}', got == want, str(got))
-    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 6', 'rest', 'key centre', 'rest']  # Home > Settings > Display
+    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 1', 'rest']  # Home > Settings > Display, Light Mode
     lines = to + ['tick 2', 'rest', 'key centre', 'run 100', 'tick 1', 'rest', 'key centre', 'run 50', 'tick 2', 'run 50', 'key centre',
                   'run 50']
     _, _, _, (sent, _, _), said = script(binary, work, 60, lines, *home, queue=True, ctl=True)
@@ -1284,6 +1308,55 @@ def control_center(binary, work, home):
         rows[name] = (d/'rows.txt').read_text().splitlines()[:1] if (d/'rows.txt').exists() else []
     good &= check("Wi-Fi and Smart Wi-Fi held open q2ui's Wi-Fi page, Bluetooth held its Bluetooth page",
                   rows == {'wifi': ['Wi-Fi'], 'smart': ['Wi-Fi'], 'bt': ['Bluetooth']}, str(rows))
+    return good
+
+
+def control_center_touch(binary, work, home):
+    """Control Center by a finger, as demo's sheet takes one (patch/control_center.c, docs/oled-design.md#control-center):
+    a swipe down from the top edge opens it on any page (stock's pull-down: a touch landing above y 31 that goes 20 px
+    down), a tap flips a circle or presses the transport, a finger on a slider sets the level where it is, a toggle held
+    550 ms opens its settings, the Now Playing block opens Now Playing, and a swipe up closes the sheet."""
+    good = True
+    told = cc_told(work)
+    tops = []
+    for walk in (['rest', 'swipe 187 2 187 150 300', 'rest'], ['rest', 'swipe 187 40 187 200 300', 'rest'],
+                 ['rest', 'key centre', 'rest', 'swipe 100 5 100 120 200', 'rest']):
+        _, _, stats = script(binary, work, 60, walk, *home, '--told', told)
+        tops.append(stats['top'])
+    good &= check('a finger pulled down from the top edge opens Control Center, on Home and in the Library; one landing '
+                  'under the edge does not', tops == ['control', 'home', 'control'], str(tops))
+    opened = ['rest', 'swipe 187 2 187 150 300', 'rest']
+    walk = opened + ['touch 132 68', 'run 50', 'lift', 'run 100', 'shot @tapped.ppm', 'touch 289 181', 'lift', 'run 100']
+    trace, pics, _, (sent, _, _), said = script(binary, work, 60, walk, *home, '--told', told, queue=True, ctl=True)
+    good &= check("a tap on Bluetooth turns it on at once down q2ui's pipe; a tap on Brightness 60% along sets 60",
+                  said == ['set bt 1', 'set bright 60'] and pics['tapped'].at(147, 68) == ACCENT, f"{said} {pics['tapped'].at(147, 68)}")
+    good &= check('touch brings no ring', all(t.get('ring', 0) == 0 for t in trace), '')
+    walk = opened + ['touch 200 229', 'move 215 229', 'move 230 229', 'move 260 229', 'run 50', 'lift', 'run 100', 'shot @dragged.ppm']
+    _, pics, _, (sent, _, _), said = script(binary, work, 60, walk, *home, '--told', told, queue=True, ctl=True)
+    verbs = [line.split(' ', 1)[1] for line in sent]
+    good &= check("a finger dragged along Volume sets it where it is, up to demo's top (33), down the queue",
+                  verbs and verbs[-1] == 'volume 33' and 'volume 16' in verbs and said == [], f'{verbs} {said}')
+    walk = opened + ['touch 271 125', 'lift', 'run 50', 'touch 317 125', 'lift', 'run 50', 'touch 225 125', 'lift', 'run 50']
+    _, _, stats, (sent, _, _) = script(binary, work, 60, walk, *home, '--told', told, now=NOW, queue=True)
+    verbs = [line.split(' ', 1)[1] for line in sent]
+    good &= check('the transport: Play/Pause, Next and Previous by their taps, the sheet staying',
+                  verbs == ['toggle', 'next', 'previous'] and stats['top'] == 'control', f"{verbs} {stats['top']}")
+    _, _, stats = script(binary, work, 60, opened + ['touch 300 60', 'lift', 'rest'], *home, '--told', told, now=NOW)
+    good &= check('a tap on the Now Playing block opens Now Playing', stats['top'] == 'now', stats['top'])
+    _, _, _, (_, _, d) = script(binary, work, 60, opened + ['touch 132 200', 'run 700', 'lift', 'run 100'], *home, '--told', told,
+                                code=None, queue=True)
+    asked = (d/'ask').read_text().strip() if (d/'ask').exists() else ''
+    good &= check("EQ held 550 ms by a finger opens demo's EQ page", asked == 'playset/equalizer_page', repr(asked))
+    _, _, stats, _, said = script(binary, work, 60, opened + ['touch 132 200', 'run 300', 'lift', 'run 100'], *home, '--told', told,
+                                  code=None, queue=True, ctl=True)
+    good &= check('a shorter touch on EQ is a tap: it flips EQ off and the sheet stays', said == ['set eq 0'] and stats['top'] == 'control',
+                  f"{said} {stats['top']}")
+    shut = []
+    for swipe in ('swipe 187 300 187 200 200', 'swipe 288 181 288 100 200'):
+        _, _, stats, _, said = script(binary, work, 60, opened + [swipe, 'rest'], *home, '--told', told, queue=True, ctl=True)
+        shut.append((stats['top'], said))
+    good &= check('a swipe up closes the sheet, from the grab bar or over the Brightness slider, which it leaves alone',
+                  shut == [('home', []), ('home', [])], str(shut))
     return good
 
 
@@ -1768,6 +1841,18 @@ def live(binary, work):
                   f"{paced['cpu_over_budget']} over, {paced['frames'] - back['frames']} frames, worst draw {paced['draw_us_max']} us")
     code, last = r.end()
     good &= check('Return ends it cleanly', code == 0 and last['ticks'] == 17, f'exit {code}, {last["ticks"]} ticks')
+
+    # the touchscreen read on its own axes: a finger pulled down from the top edge opens Control Center
+    r = Run(binary, work, 40)
+    r.rest()
+    r.swipe([(187, 2 + 10 * k) for k in range(15)])
+    time.sleep(1.5)  # the sheet polls the link every second, so it never rests to write its stats: read the panel's pages
+    blocks = [shot.pixel(shot.page(r.dir/'fb', k), 25, 100) for k in (0, 1)]
+    good &= check('a finger pulled down on the glass from the top edge opens Control Center (its toggles block)',
+                  RAISED in blocks, str(blocks))
+    r.proc.kill()
+    r.proc.wait(timeout=5)
+    os.close(r.queue)
 
     # Centre plays the row through the player's queue: the list is the queue, from the song chosen
     r = Run(binary, work, 40)

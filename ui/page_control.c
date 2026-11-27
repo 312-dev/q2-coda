@@ -87,6 +87,13 @@
 #define WANT_HOLD_US 2000000u
 #define LEVEL_HOLD_US 1500000u
 #define LEVEL_EASE 0.06f /* the fills' spring, as Now Playing's bar eases (VOL_EASE_MS) */
+/* a finger's, as demo's sheet takes it: a toggle held QUICK_HOLD_MS opens its settings; a touch that
+ * goes SLIDE_PX sideways on a slider drags it (rows_settings.c), one that goes SWIPE_PX up closes the
+ * sheet; a slider's level goes to demo at most every WRITE_MS while dragged (CC_VOL_WRITE_MS) */
+#define QUICK_HOLD_MS 550
+#define SLIDE_PX 10
+#define SWIPE_PX 20
+#define WRITE_MS 30
 
 enum { WIFI, BT, AIRPLAY, CAR, SMART, EQ, NOW, BRIGHT, VOLUME, USB, STOPS, PREV = STOPS, PLAY, NEXT };
 static const struct {
@@ -116,6 +123,10 @@ struct cc_st {
     uint64_t t;
     run_t names[EQ + 1], title, artist, usb, usb_value;
     char usb_s[24];
+    struct {
+        int on, stop, x0, y0, moved, dragging, held, want; /* want: a dragged level not yet sent, -1 none */
+        uint64_t at, sent_at;
+    } touch;
 };
 
 static int told_int(const char *key, int def) {
@@ -192,15 +203,78 @@ static void hold(int i) {
     else if (i == CAR) ui_demo_page("carremote_page");
     else if (i == EQ) ui_demo_page("playset/equalizer_page");
 }
-/* a grabbed slider's level moved by steps, sent, and shown at once */
-static void adjust(struct cc_st *s, int i, int steps) {
-    int from = level(s, i), to = from + steps, top = i == VOLUME ? told_int("volmax", 100) : 100;
+/* slider i's level set to `to` (kept to its range), sent, and shown at once */
+static void set_level(struct cc_st *s, int i, int to) {
+    int top = i == VOLUME ? told_int("volmax", 100) : 100;
     to = to < 0 ? 0 : to > top ? top : to;
-    if (to == from) return;
+    if (to == level(s, i)) return;
     char verb[24];
     snprintf(verb, sizeof verb, "volume %d", to);
     if (i == BRIGHT ? player_set("bright", to) : player_send(verb)) return; /* not sent: as demo has it */
     s->want[i] = to, s->set_at[i] = ui_time();
+}
+/* a grabbed slider's level moved by steps */
+static void adjust(struct cc_st *s, int i, int steps) { set_level(s, i, level(s, i) + steps); }
+
+/* the stop under a finger at x, y: a transport glyph before the Now Playing block round it; -1 none */
+static int hit(int x, int y) {
+    for (int i = 0; i <= NEXT; ++i) {
+        if (i == NOW || (i == USB && !cable())) continue;
+        rect_t r = box(i);
+        if (i >= PREV) r.x -= 8, r.y -= 8, r.w += 16, r.h += 16; /* a finger's room round a glyph */
+        if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return i;
+    }
+    rect_t r = box(NOW);
+    return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h ? NOW : -1;
+}
+/* a finger at x on slider i: the level there, as stock's slider reads a press and a drag */
+static int level_at(int i, int x) {
+    rect_t r = box(i);
+    int at = x - r.x;
+    return (at < 0 ? 0 : at > r.w ? r.w : at) * 100 / r.w;
+}
+static void drag_send(struct cc_st *s, int force) {
+    if (s->touch.want < 0 || (!force && ui_time() - s->touch.sent_at < WRITE_MS * 1000u)) return;
+    set_level(s, s->touch.stop, s->touch.want);
+    s->touch.want = -1, s->touch.sent_at = ui_time();
+}
+/* a finger on the sheet; 1 when the sheet is gone */
+static int touch(struct cc_st *s, const input_t *e) {
+    int dx = e->x - s->touch.x0, dy = e->y - s->touch.y0, slider = s->touch.stop == BRIGHT || s->touch.stop == VOLUME;
+    if (e->type == IN_TOUCH_DOWN) {
+        s->touch.on = 1, s->touch.stop = hit(e->x, e->y), s->touch.x0 = e->x, s->touch.y0 = e->y, s->touch.at = ui_time();
+        s->touch.moved = s->touch.dragging = s->touch.held = 0, s->touch.want = -1;
+        if (s->touch.stop >= 0 && s->touch.stop <= EQ) ui_wake_ms(QUICK_HOLD_MS);
+        return 0;
+    }
+    if (!s->touch.on) return 0;
+    if (!s->touch.moved && (abs(dx) >= SLIDE_PX || abs(dy) >= SLIDE_PX))
+        s->touch.moved = 1, s->touch.dragging = slider && abs(dx) > abs(dy);
+    if (s->touch.dragging) {
+        s->touch.want = level_at(s->touch.stop, e->x);
+        drag_send(s, e->type == IN_TOUCH_UP);
+        if (s->touch.want >= 0) ui_wake_ms(WRITE_MS);
+    }
+    if (e->type != IN_TOUCH_UP) return 0;
+    s->touch.on = 0;
+    if (s->touch.held || s->touch.dragging) return 0;
+    if (s->touch.moved) {
+        if (dy <= -SWIPE_PX && -dy > abs(dx)) return ui_pop(), 1; /* a swipe up closes the sheet, as demo's */
+        return 0;
+    }
+    int i = s->touch.stop;
+    if (i < 0) return 0;
+    if (slider) {
+        set_level(s, i, level_at(i, e->x));
+    } else if (i >= PREV) {
+        player_send(i == PREV ? "previous" : i == NEXT ? "next" : "toggle");
+    } else {
+        int closes = i == AIRPLAY || i == USB || (i == NOW && loaded());
+        act(s, i);
+        if (closes) return 1;
+    }
+    ui_mark_all();
+    return 0;
 }
 /* a tick or key: 1 when the ring was not showing, which the input only brings up */
 static int wake(struct cc_st *s) {
@@ -213,6 +287,10 @@ static int wake(struct cc_st *s) {
 
 static void cc_event(void *st, const input_t *e) {
     struct cc_st *s = st;
+    if (e->type >= IN_TOUCH_DOWN) {
+        touch(s, e); /* touch never brings the ring */
+        return;
+    }
     if (e->type == IN_KEY_UP && e->value == KEY_UI_RETURN) {
         if (s->grab < 0) {
             ui_pop();
@@ -253,6 +331,13 @@ static int spring_dy(const struct cc_st *s) {
 }
 static void cc_step(void *st) {
     struct cc_st *s = st;
+    if (s->touch.on && !s->touch.moved && !s->touch.held && s->touch.stop >= 0 && s->touch.stop <= EQ &&
+        ui_time() - s->touch.at >= QUICK_HOLD_MS * 1000u) {
+        s->touch.held = 1;
+        hold(s->touch.stop); /* the sheet is gone */
+        return;
+    }
+    if (s->touch.dragging) drag_send(s, 0);
     float dt = (float)(ui_time() - s->t) / 1e6f;
     s->t = ui_time();
     if (!s->landed && !ui_sliding()) s->landed = ui_time(); /* at rest open: the landing starts */
