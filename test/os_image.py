@@ -20,6 +20,9 @@ partition, every module of Shanling's script in its order with its parameters, t
 either service starts, q2player connects to /tmp/sock_play (served by this test, standing in for
 q2playd) and q2ui draws a frame.
 
+--card-boot boots it as today's Vamp starts it from the card (patch/q2vampos.sh): /mnt/data already mounted and
+/proc/modules listing every vendor module, so rcS must keep the one and not run the module script again.
+
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script).
@@ -193,7 +196,7 @@ STUB = '#!/bin/sh\necho "$(cut -d" " -f1 /proc/uptime) \\$ ${0##*/} $*" >> /emu/
 STUBBED = ['bin/mount', 'bin/mknod', 'sbin/mdev', 'sbin/insmod', 'usr/sbin/ubiattach', 'bin/dmesg']
 
 
-def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None):
+def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=False):
     work = pathlib.Path(keep or tempfile.mkdtemp(prefix='vamp-os-boot-', dir='/tmp'))
     work.mkdir(parents=True, exist_ok=True)
     fs = unpack(composed, work/'fs')
@@ -236,10 +239,17 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None):
     srv.listen(1)
     srv.settimeout(1)
     console = open(work/'console.log', 'wb')
+    extra = []
+    if card:
+        # as today's Vamp hands the Q2 over from the card (patch/q2vampos.sh): /mnt/data mounted, stock's modules loaded
+        (emu/'data').mkdir(exist_ok=True)
+        (emu/'data/database.db').write_bytes((fs/'mnt/data/database.db').read_bytes())
+        (emu/'modules').write_text(''.join(f'{ko[:-3]} 16384 0 - Live 0x00000000\n' for ko, _ in want))
+        extra = ['--bind', emu/'data', '/mnt/data', '--ro-bind', emu/'modules', '/proc/modules']
     cmd = ['bwrap', '--unshare-pid', '--unshare-uts', '--unshare-ipc', '--as-pid-1', '--die-with-parent',
            '--bind', fs, '/', '--proc', '/proc', '--dev', '/dev', '--bind', fb, '/dev/fb0', '--bind', inp, '/dev/input',
            '--ro-bind', qemu, '/usr/libexec/qemu-binfmt/mipsel-binfmt-P', '--bind', emu, '/emu',
-           '--bind', emu/'record', '/run/vamp/boot.log', '/sbin/init']
+           '--bind', emu/'record', '/run/vamp/boot.log', *extra, '/sbin/init']
     proc = subprocess.Popen([str(c) for c in cmd], stdout=console, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=NO_PRELOAD)
     conn, drew = None, False
     deadline = time.monotonic() + wait_s
@@ -273,6 +283,15 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None):
     def at(pred):
         return next((i for i, s in enumerate(order) if pred(s)), None)
     first = lambda prefix: at(lambda s: s.startswith(prefix))  # noqa: E731
+    if card:
+        check(not any(s.startswith('insmod ') for s in order) and first('modules: already loaded, not run again; not loaded: none') is not None,
+              'card boot: the module script is not run again over loaded modules')
+        check(first('data: already mounted') is not None and not any(s.startswith(('ubiattach', 'mount -t tmpfs -o mode=0755 tmpfs /mnt/data')) for s in order),
+              'card boot: /mnt/data is kept as mounted')
+        idx = [first('rcS: done'), first('q2player: start'), first('q2ui: start')]
+        check(None not in idx and idx[0] < min(idx[1:]), 'card boot: rcS done, then the services')
+        print(f'boot: {logs or work} (console.log, timeline.txt)')
+        return work
     loaded = [s.split()[1:] for s in order if s.startswith('insmod ')]
     wanted = [[ko, *params] for ko, params in want]
 
@@ -304,6 +323,7 @@ def main():
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
     ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module'])
+    ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     a = ap.parse_args()
     manifest, _ = vamp_os.read_manifest()
     check_pins()
@@ -323,7 +343,7 @@ def main():
             check(not bad, f'/vendor holds the {len(manifest)} files of the manifest, byte for byte{": " + ", ".join(bad[:5]) if bad else ""}')
             check(composed.stat().st_size <= vamp_os.ROOTFS_ROOM, f'composed image is {composed.stat().st_size:,} bytes, within mtd2')
         if not a.no_boot:
-            boot(composed, a.qemu or vamp_os.qemu(), a.keep, logs=a.build/'boot', perturb=a.perturb)
+            boot(composed, a.qemu or vamp_os.qemu(), a.keep, logs=a.build/('boot-card' if a.card_boot else 'boot'), perturb=a.perturb, card=a.card_boot)
     print(f'{len(FAILS)} failed' if FAILS else 'all passed')
     sys.exit(1 if FAILS else 0)
 

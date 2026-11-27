@@ -2,9 +2,11 @@
 # Vamp OS's start, run once by init before any service (docs/vamp-os-base.md#what-boots), in this order:
 #   1. the kernel's file systems and a tmpfs /dev, as stock's inittab makes them; mdev, then its daemon;
 #   2. /mnt/data, the UBIFS on the "userdata" partition: attached and mounted, never erased or formatted
-#      (on any failure it is a tmpfs for this boot, and the boot log says why);
+#      (on any failure it is a tmpfs for this boot, and the boot log says why), or left as it is when already
+#      mounted (a boot from the card, docs/vamp-os-base.md#card-boot);
 #   3. Shanling's own module script, /vendor/module_driver/driver_default_init_script.sh, run unchanged from
-#      its folder, as stock's S11module_driver_default runs it; then what loaded, against the .ko files there;
+#      its folder, as stock's S11module_driver_default runs it; then what loaded, against the .ko files there.
+#      Not run when any of them is loaded already (a boot from the card);
 #   4. a wait for /dev/fb0, and the input devices found.
 # Then init starts runsvdir (/etc/inittab). Nothing of Shanling's userspace runs: the scripts in /vendor are
 # insmod lines run by this image's BusyBox.
@@ -48,6 +50,11 @@ wait_for() {
 
 data() {
     local num ubi d
+    # started from the card by today's Vamp (docs/vamp-os-base.md#card-boot), which has it mounted already
+    if grep -q ' /mnt/data ' /proc/mounts; then
+        step "data: already mounted"
+        return 0
+    fi
     num=$(sed -n 's/^mtd\([0-9]*\):.*"userdata"$/\1/p' /proc/mtd 2>/dev/null)
     if [ -z "$num" ]; then
         step "data: no \"userdata\" partition in /proc/mtd"
@@ -75,16 +82,28 @@ else
     step "data: a tmpfs for this boot, nothing written is kept"
 fi
 
-if [ -f /module_driver/driver_default_init_script.sh ]; then
-    step "modules: start"
-    (cd /module_driver && sh ./driver_default_init_script.sh) > /run/vamp/modules.log 2>&1
-    missing=
+# loaded: which of /module_driver's modules /proc/modules has; missing: which it has not
+modules() {
+    local ko name
+    loaded= missing=
     for ko in /module_driver/*.ko; do
         name=${ko##*/}
         name=${name%.ko}
-        grep -q "^$name " /proc/modules || missing="$missing $name"
+        if grep -q "^$name " /proc/modules; then loaded="$loaded $name"; else missing="$missing $name"; fi
     done
-    step "modules: done, not loaded:${missing:- none}"
+}
+if [ -f /module_driver/driver_default_init_script.sh ]; then
+    modules
+    if [ "$loaded" ]; then
+        # a boot from the card, after stock's own boot loaded them: the script is not run twice (its keyboard
+        # module takes its keys through a parameter file, written once per load)
+        step "modules: already loaded, not run again; not loaded:${missing:- none}"
+    else
+        step "modules: start"
+        (cd /module_driver && sh ./driver_default_init_script.sh) > /run/vamp/modules.log 2>&1
+        modules
+        step "modules: done, not loaded:${missing:- none}"
+    fi
 else
     step "modules: no /vendor/module_driver (an image composed without the vendor set)"
 fi

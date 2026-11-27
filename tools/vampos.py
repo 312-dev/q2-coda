@@ -5,6 +5,7 @@
     python3 tools/vampos.py compose --image vampos.squashfs (--zip ZIP | --rootfs DIR) --out composed.squashfs
     python3 tools/vampos.py vendor-manifest ZIP                       # (re)write os/vendor/V1.36.tsv
     python3 tools/vampos.py qemu                                      # the static qemu-mipsel test/os_image.py boots with
+    python3 tools/vampos.py card --image composed.squashfs --card DIR [--always | --no-switch]
 
 `build` runs Buildroot (BUILDROOT, pinned by SHA-256, with os/patches/buildroot applied) over os/ as a
 BR2_EXTERNAL tree. Its sources are exported from git first: this tree's os/, tools/, player/, patch/ and
@@ -12,6 +13,10 @@ assets/fonts at HEAD, and q2ui's ui/ and patch/ at Q2UI_COMMIT, so the image is 
 it names (manifest.json); --worktree exports the working tree instead, for a try, and says so. It needs
 Linux and a case-sensitive file system: on a Mac it runs under tools/mac/q2env, whose q2-os volume holds
 CACHE. Downloads go to DL.
+
+`card` lays a composed image out on a card (DIR, its root) for the card boot of a --dev build of today's Vamp
+(patch/q2vampos.sh, docs/vamp-os-base.md#card-boot): .vamp/os/vampos.squashfs, its .sha256, and boot-once (one
+boot, removed before the hand-off), boot-always, or no switch.
 
 `vampos.squashfs` holds no file of Shanling's. `compose` appends /vendor to a copy of it: the files
 os/vendor/V1.36.tsv names, each checked against its SHA-256, taken from the user's own stock firmware ZIP or
@@ -271,6 +276,20 @@ def compose(image, out, zip_path=None, rootfs=None):
     print(f'{out}: {size:,} bytes, sha256 {sha256(out)}')
 
 
+def card(image, root, switch='boot-once'):
+    d = pathlib.Path(root)/'.vamp/os'
+    d.mkdir(parents=True, exist_ok=True)
+    for name in ('boot-once', 'boot-always'):
+        if (d/name).exists():
+            (d/name).unlink()
+    shutil.copyfile(image, d/'vampos.squashfs.part')
+    (d/'vampos.squashfs.part').replace(d/'vampos.squashfs')
+    (d/'vampos.squashfs.sha256').write_text(f'{sha256(d/"vampos.squashfs")}  vampos.squashfs\n')
+    if switch:
+        (d/switch).write_text('')
+    print(f'{d}: vampos.squashfs, vampos.squashfs.sha256{", " + switch if switch else ""}')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -287,11 +306,19 @@ def main():
     v = sub.add_parser('vendor-manifest')
     v.add_argument('zip', type=pathlib.Path)
     sub.add_parser('qemu')
+    k = sub.add_parser('card')
+    k.add_argument('--image', type=pathlib.Path, required=True)
+    k.add_argument('--card', type=pathlib.Path, required=True)
+    s = k.add_mutually_exclusive_group()
+    s.add_argument('--always', action='store_true')
+    s.add_argument('--no-switch', action='store_true')
     a = ap.parse_args()
     if a.cmd == 'build':
         build(a.out, a.worktree, a.jobs)
     elif a.cmd == 'compose':
         compose(a.image, a.out, a.zip, a.rootfs)
+    elif a.cmd == 'card':
+        card(a.image, a.card, None if a.no_switch else 'boot-always' if a.always else 'boot-once')
     elif a.cmd == 'qemu':
         print(qemu())
     else:

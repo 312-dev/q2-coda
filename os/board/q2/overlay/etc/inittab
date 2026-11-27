@@ -1,8 +1,8 @@
 # Vamp OS: BusyBox init (docs/vamp-os-base.md#what-boots). rcS brings up the kernel's file systems, /dev,
 # /mnt/data, the modules, the framebuffer and the input devices; only then does init start runsvdir, which
-# starts each service in /etc/sv and starts it again when it ends.
+# starts each service in /etc/sv and starts it again when it ends. No login on the serial port and root locked,
+# as in today's Vamp (tools/build.py SERIAL_GETTY); the kernel's and init's messages still reach the console.
 ::sysinit:/etc/init.d/rcS
 ::respawn:/usr/bin/runsvdir -P /etc/sv
-::respawn:/usr/libexec/vamp/serial-getty
 ::shutdown:/etc/init.d/rcK
 ::restart:/sbin/init
