@@ -412,6 +412,45 @@ def test_a_stream_cache_copy_shows_its_server_row_and_cover(run):
 
 # ---- Vamp API 1 (docs/platform/playback.md) ----
 
+def test_the_output_moves_the_song_where_it_is_and_keeps_a_level_each(run):
+    """q2btd's `output` (docs/playd.md#the-output): the player told its way, the song started again where it is heard
+    (paused if it was), Bluetooth at unity in the player (absolute volume) or at the player's gain (soft), and each
+    output's own level kept in stock's file, VOLUME the DAC's and BT_VOLUME Bluetooth's"""
+    root, pl = run
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    fifo(root, 'seek 42')
+    pl.pump()
+    pl.got.clear()
+    fifo(root, 'output bluetooth')
+    pl.pump()
+    assert pl.got == [('mcl-setoutputway', '1'), ('mcl-setvol', str(100 << 8 | 100)), ('mcl-stop', 'null'),
+                      ('set-songurl', '/mnt/mmc/Music/a.flac|ss=42|1024|20|0|17|90')], pl.got
+    assert now(root)['volume'] == '37', 'no Bluetooth level saved yet: the DAC\'s'
+    before = dac(root)
+    fifo(root, 'volume 20')
+    pl.pump()
+    assert dac(root) == before, 'the DAC left alone on Bluetooth'
+    time.sleep(2.5)
+    text = (root/'mnt/data/config.ini').read_text()
+    assert 'BT_VOLUME=20' in text and 'VOLUME=37' in text.replace('BT_VOLUME', ''), text
+    fifo(root, 'pause')
+    pl.pump()
+    pl.got.clear()
+    fifo(root, 'output dac')
+    pl.pump()
+    assert [n for n, _ in pl.got] == ['mcl-setoutputway', 'mcl-stop', 'set-songurl', 'mcl-pause'], pl.got
+    assert now(root)['volume'] == '37' and dac(root)[-1] == (37, 37), "the DAC's level back"
+    pl.got.clear()
+    fifo(root, 'output bluetooth soft')
+    pl.pump()
+    assert ('mcl-setvol', str(20 << 8 | 20)) in pl.got and now(root)['volume'] == '20', 'soft: the player\'s gain at the Bluetooth level'
+    pl.got.clear()
+    fifo(root, 'output bluetooth soft')
+    pl.pump()
+    assert pl.got == [], 'the output it has: nothing sent'
+
+
 def test_conformance_every_command_is_on_the_page():
     conformance.check_coverage('playback.md')
 

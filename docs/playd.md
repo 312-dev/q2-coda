@@ -16,7 +16,7 @@ Vamp OS's playback service ([roadmap: Who owns what](vamp-os.md#who-owns-what)):
 | `q2player`'s status push | `/tmp/q2player.push` | A datagram socket it binds: each push makes it ask `player-status` and `media-info`; besides, it asks once a second while a song is loaded, never while none is |
 | `q2ui` today | `/tmp/coda-rc.cmdq`, `/tmp/coda-rc.list` | The FIFO and list file `ui/player.c` writes for `demo`'s shim (`patch/coda_rc_cmdq.h`): `q2playd` makes the FIFO and reads it, so `q2ui` needs no change |
 | `q2ui` today | `/tmp/coda-rc.now` | What plays, as `demo`'s shim writes it (`ui/now.c` reads it): `title`, `artist`, `album`, `state` (0 stopped, 1 playing, 2 paused), `pos` (ms), `len` (s), `volume`, `id`, a `key=value` line each, rewritten whole (a temporary name, then renamed) on a change, twice a second at most |
-| Clients to come | `/run/vamp/play.sock` | [Q2PLAY/1](#q2play1) |
+| `q2btd`, and clients to come | `/run/vamp/play.sock` | [Q2PLAY/1](#q2play1); `q2btd` sends `output` and, for a headset's keys and its own volume, the transport verbs and `volume` ([btd](btd.md#where-the-music-goes)) |
 | The library | `/mnt/data/database.db` | Stock's `songtable`: a song's `fileurl`, `name`, `songer`, `album` by its `id`, the id `q2ui` lists |
 
 ## Commands
@@ -29,10 +29,11 @@ The same verbs from the FIFO (`<seq> <verb>`) and from Q2PLAY/1:
 | `toggle`, `pause`, `resume` | Pause and play; `resume` with nothing loaded starts the queue's current song again | `mcl-pause`, `mcl-play`, or a song |
 | `next`, `previous` | The next or the previous song; `previous` more than 3 s into a song starts it again | `set-nexturl`, or `mcl-seek 0` |
 | `seek S` | To S seconds | `mcl-seek` |
-| `volume V` | 0 to 100, capped at Max Volume, set on the DAC ([The volume](#the-volume)) and saved | nothing: the DAC's own ioctl |
+| `volume V` | 0 to 100, capped at Max Volume, set on the output ([The volume](#the-volume), [The output](#the-output)) and saved | nothing on the DAC (its own ioctl); on Bluetooth `mcl-setvol` |
+| `output dac`, `output bluetooth`, `output bluetooth soft` | Where the music goes ([The output](#the-output)) | `mcl-setoutputway`, `mcl-setvol`, and a song loaded again where it is |
 | `stop` | Nothing plays | `mcl-stop` |
 
-A song's `set-songurl` is built as `demo`'s `mclStartPlayer` builds it: the path (a `}` written `%0x7d`), `ss=0`, the cache by kind (512 KB, 1024 for `.flac` and `.ape`, 4096 with a 50% fill for `.dff`, `.dsf`, `.iso`), Gapless 0, the Q2's hardware type 17, and 90. When the player says a song ended (`{player-status\exit}`) the next plays; when it did not open (`error`) it is passed over, and after 20 in a row, or an id not in the library 20 times, the queue stops; at the queue's end it sends `mcl-orderstop` and nothing plays. A cut's own close (`player-nextstatus`, `player-stopstatus`) is no end. A player that goes away leaves nothing playing; `runsv` starts it again and `q2playd` takes its connection.
+A song's `set-songurl` is built as `demo`'s `mclStartPlayer` builds it: the path (a `}` written `%0x7d`), `ss=0` (the second heard, for a song started again on another output), the cache by kind (512 KB, 1024 for `.flac` and `.ape`, 4096 with a 50% fill for `.dff`, `.dsf`, `.iso`), Gapless 0, the Q2's hardware type 17, and 90. When the player says a song ended (`{player-status\exit}`) the next plays; when it did not open (`error`) it is passed over, and after 20 in a row, or an id not in the library 20 times, the queue stops; at the queue's end it sends `mcl-orderstop` and nothing plays. A cut's own close (`player-nextstatus`, `player-stopstatus`) is no end. A player that goes away leaves nothing playing; `runsv` starts it again and `q2playd` takes its connection.
 
 ## Q2PLAY/1
 
@@ -55,7 +56,15 @@ Balance is not here: it is a separate ioctl (`config_balance`).
 
 Decision: the volume is set by `q2playd`, which owns its level, rather than by `q2sysd` as the roadmap's table has it ([Who owns what](vamp-os.md#who-owns-what)): stock does it in its player module (`mcl`), it is one ioctl, and splitting it across two processes would make every wheel tick a message. The DAC's power and its gain and filter stay `q2sysd`'s.
 
-**Needs a Q2**: the driver's law, 0 to 100 into decibels (measured with a level meter at the jack, or read from the driver's register writes over I2C with `i2cget`); whether the ioctl does anything before the DAC is powered and in PCM mode with no `demo` to do that; and the line-out, USB and Bluetooth cases above, which are not built.
+**Needs a Q2**: the driver's law, 0 to 100 into decibels (measured with a level meter at the jack, or read from the driver's register writes over I2C with `i2cget`); whether the ioctl does anything before the DAC is powered and in PCM mode with no `demo` to do that; and the line-out and USB cases above, which are not built; Bluetooth's is [The output](#the-output).
+
+## The output
+
+Where the music goes, as `q2btd` says it ([btd: Where the music goes](btd.md#where-the-music-goes)): `output dac` (the start), `output bluetooth` (a headset with absolute volume: the player at unity, the level the headset's, which `q2btd` writes) or `output bluetooth soft` (a speaker or a car: the player's own gain at the level). At a change `q2playd` sends `q2player` `{mcl-setoutputway\0}` or `{mcl-setoutputway\1}` and the level, as stock's `mclSetBtVol` does: `{mcl-setvol\L<<8|R}` with the level on both on `soft`, 100 on both (unity, the volume filter out, [player: Output](player.md#output)) otherwise. `q2player` takes a new way only at its next song, so a song loaded is started again where it is heard, as demo's restart after an output change does: `mcl-stop`, then `set-songurl` with `ss=` the second heard, then `mcl-pause` if it was paused. A `q2player` that connects again while the output is Bluetooth is told the way again.
+
+**A level each.** As on today's Vamp, Bluetooth keeps its own volume, `[PLAYSET] BT_VOLUME`, beside `VOLUME`, the DAC's: at a change the departing level is saved (at once, if a change waits for its 2 s) and the incoming one taken, capped at Max Volume, and a Bluetooth level never saved is the DAC's. On Bluetooth the DAC's ioctl is not sent.
+
+`test/playd.py` `test_the_output_moves_the_song_where_it_is_and_keeps_a_level_each`: the messages and their order at each change, the song started at 42 s and paused when it was, unity and the soft level, the two keys in the file, nothing sent for the output already in use. Five broken copies (no restart, one key for both, no unity, the pause lost, the DAC set on Bluetooth) each fail it (`Q2PLAYD_SOURCE`).
 
 ## Server songs
 
@@ -77,6 +86,6 @@ At each song's start its cover is copied to `/tmp/externpic.jpg`, where stock's 
 
 ## What is missing
 
-- **The volume's other outputs**: line out fixed, USB DACs, Bluetooth ([The volume](#the-volume)), and Balance.
+- **The volume's other outputs**: line out fixed and USB DACs ([The volume](#the-volume)), and Balance; Bluetooth's is [The output](#the-output), its per-device limits and curve still today's Vamp's alone.
 - **The DAC's power and mode before a song**: `demo` powers the DAC and sets its PCM mode before each track (`dac_take`, [internals: Videos](internals.md#videos)). Whether `q2player`'s own `/dev/shanling_dac` handling is enough for sound on a Q2 with no `demo` is a Q2 question.
 - Gapless (`set-gapless` near a song's end), CUE tracks, resume (Memory Playback's files), play counts and ratings, repeat, the rest of server songs ([Server songs](#server-songs)), audio focus between sources.

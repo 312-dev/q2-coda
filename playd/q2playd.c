@@ -181,7 +181,7 @@ static void player_send(const char *name, const char *arg) {
 
 /* set-songurl or set-nexturl as demo's mclStartPlayer builds it (docs/player.md#commands): the start, the cache in
  * KB by the file's kind and its fill percent, Gapless off (no preload in this slice), the Q2's hardware type 17. */
-static void send_song(const char *cmd, const char *file) {
+static void send_song(const char *cmd, const char *file, int ss) {
     char url[1100], arg[1200];
     size_t j = 0;
     for (const char *p = file; *p && j + 6 < sizeof url; ++p)
@@ -192,7 +192,7 @@ static void send_song(const char *cmd, const char *file) {
     int cache = 512, fill = 20;
     if (dot && (!strcasecmp(dot, ".ape") || !strcasecmp(dot, ".flac"))) cache = 1024;
     if (dot && (!strcasecmp(dot, ".dff") || !strcasecmp(dot, ".dsf") || !strcasecmp(dot, ".iso"))) cache = 4096, fill = 50;
-    snprintf(arg, sizeof arg, "%s|ss=0|%d|%d|0|17|90", url, cache, fill);
+    snprintf(arg, sizeof arg, "%s|ss=%d|%d|%d|0|17|90", url, ss, cache, fill);
     player_send(cmd, arg);
 }
 
@@ -253,7 +253,7 @@ static int start_at(int at) {
         q.at = at;
         if (q.paths ? path_lookup(at) : song_lookup(q.ids[q.order[at]])) {
             int cut = q.loaded;
-            send_song(cut ? "set-nexturl" : "set-songurl", q.file);
+            send_song(cut ? "set-nexturl" : "set-songurl", q.file, 0);
             set_cover(q.paths ? -1 : q.ids[q.order[at]], q.paths ? q.row_url : q.file);
             q.expect_cut = cut;
             q.loaded = 1, q.state = PLAYING, q.pos_ms = 0, q.len_s = 0;
@@ -339,7 +339,8 @@ static void ask_status(void) {
 /* ---- the DAC's volume (docs/playd.md#the-volume) ----
  * The CS43131s' volume, as stock's mclSetLocalVol sets it: one ioctl on /dev/shanling_dac (codec_cs43131.ko), its
  * argument the left channel's level in bits 8-15 and the right's in bits 0-7, each on the same 0 to 100 scale as the
- * volume itself; the driver maps that to the chips' attenuation. Sent at the start and at each change. */
+ * volume itself; the driver maps that to the chips' attenuation. Sent at the start and at each change while the DAC is
+ * the output. */
 #define DAC_SET_VOLUME 0xc0044d00u
 
 static void dac_volume(void) {
@@ -359,6 +360,11 @@ static void dac_volume(void) {
 #define VOLUME_SAVE_MS 2000
 static int max_volume = 100;
 static unsigned long long volume_dirty_at;
+/* The output (docs/playd.md#the-output): 0 the DAC, 1 Bluetooth, as q2player's mcl-setoutputway; on Bluetooth soft is
+ * the player's own gain, else unity in the player and the level the headset's (absolute volume, q2btd's). Each output
+ * keeps its own level, as today's Vamp does: [PLAYSET] VOLUME the DAC's, BT_VOLUME Bluetooth's (-1 until saved: the
+ * DAC's then). */
+static int way, soft, other_volume = -1;
 
 static int ini_get(const char *text, const char *section, const char *key, int fallback) {
     char head[64];
@@ -388,22 +394,25 @@ static void volume_load(void) {
     if (max_volume < 0 || max_volume > 100) max_volume = 100;
     int v = ini_get(t, "PLAYSET", "BOOTVOLFLAG", 0) ? ini_get(t, "PLAYSET", "BOOTVOLUME", -1) : ini_get(t, "PLAYSET", "VOLUME", -1);
     if (v >= 0 && v <= 100) q.volume = v > max_volume ? max_volume : v;
+    other_volume = ini_get(t, "PLAYSET", "BT_VOLUME", -1); /* Bluetooth's, while the DAC is the output */
+    if (other_volume > 100) other_volume = -1;
     free(t);
 }
 
-/* VOLUME=q.volume in [PLAYSET], the rest of the file as it was */
+/* VOLUME=q.volume (BT_VOLUME= on Bluetooth) in [PLAYSET], the rest of the file as it was */
 static void volume_save(void) {
-    char *t = read_all(path("/mnt/data/config.ini")), tmp[340], line[32];
+    char *t = read_all(path("/mnt/data/config.ini")), tmp[340], line[32], key[16];
     if (!t) return;
-    snprintf(line, sizeof line, "VOLUME=%d", q.volume);
+    snprintf(key, sizeof key, "%s=", way ? "BT_VOLUME" : "VOLUME");
+    snprintf(line, sizeof line, "%s%d", key, q.volume);
     char *sec = strstr(t, "[PLAYSET]"), *at = 0, *end = 0;
     for (char *l = sec ? strchr(sec, '\n') : 0; l && *++l && *l != '['; l = strchr(l, '\n'))
-        if (!strncmp(l, "VOLUME=", 7)) { at = l, end = l + strcspn(l, "\r\n"); break; }
+        if (!strncmp(l, key, strlen(key))) { at = l, end = l + strcspn(l, "\r\n"); break; }
     snprintf(tmp, sizeof tmp, "%s.q2playd", path("/mnt/data/config.ini"));
     FILE *f = fopen(tmp, "w");
     if (f) {
         if (at) fprintf(f, "%.*s%s%s", (int)(at - t), t, line, end);
-        else if (sec) { /* no VOLUME line: one after the section's header */
+        else if (sec) { /* no such line: one after the section's header */
             char *nl = strchr(sec, '\n');
             if (nl) fprintf(f, "%.*s%s\n%s", (int)(nl + 1 - t), t, line, nl + 1);
             else fprintf(f, "%s\n%s\n", t, line);
@@ -411,6 +420,44 @@ static void volume_save(void) {
         if (!fclose(f)) rename(tmp, path("/mnt/data/config.ini"));
     }
     free(t);
+}
+
+/* The level where the output takes it: the DAC's ioctl, or on Bluetooth the player's mcl-setvol (L << 8 | R): the
+ * level itself with soft, else 100, which takes the player's volume filter out (docs/player.md#output). */
+static void volume_apply(void) {
+    char a[16];
+    if (!way) {
+        dac_volume();
+        return;
+    }
+    snprintf(a, sizeof a, "%d", soft ? q.volume << 8 | q.volume : 100 << 8 | 100);
+    player_send("mcl-setvol", a);
+}
+
+/* The output moved: the departing level saved, the incoming one's restored, the player told, and a song loaded
+ * started again where it is heard (q2player takes a new way at its next song: docs/player.md#commands), paused if
+ * it was. */
+static void output_set(int w, int s) {
+    if (w == way && s == soft) return;
+    if (w != way) {
+        if (volume_dirty_at) volume_save(), volume_dirty_at = 0;
+        int incoming = other_volume >= 0 ? other_volume : q.volume;
+        other_volume = q.volume;
+        way = w;
+        q.volume = incoming > max_volume ? max_volume : incoming;
+        ++q.seq;
+    }
+    soft = s;
+    logf_("output %s%s, volume %d", way ? "bluetooth" : "dac", way && soft ? " soft" : "", q.volume);
+    player_send("mcl-setoutputway", way ? "1" : "0");
+    volume_apply();
+    if (q.loaded) {
+        int state = q.state, pos = q.pos_ms / 1000;
+        player_send("mcl-stop", "null");
+        q.expect_cut = 1;
+        send_song("set-songurl", q.file, pos);
+        if (state == PAUSED) player_send("mcl-pause", "null");
+    }
 }
 
 /* ---- commands: the same verbs from the FIFO and from Q2PLAY/1 ---- */
@@ -595,13 +642,16 @@ static int command(const char *verb, const int *ids, int n_ids) {
     if (sscanf(verb, "volume %d", &a) == 1 && a >= 0 && a <= 100) {
         if (a > max_volume) a = max_volume; /* Max Volume's cap */
         if (a != q.volume) q.volume = a, ++q.seq, volume_dirty_at = now_ms() | 1;
-        dac_volume();
+        volume_apply();
         return 0;
     }
     if (!strcmp(verb, "stop")) {
         stop();
         return 0;
     }
+    if (!strcmp(verb, "output dac")) return output_set(0, 0), 0;
+    if (!strcmp(verb, "output bluetooth")) return output_set(1, 0), 0;
+    if (!strcmp(verb, "output bluetooth soft")) return output_set(1, 1), 0;
     return -1;
 }
 
@@ -707,7 +757,7 @@ static void client_line(struct client *c, char *line) {
         return;
     }
     if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
-        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch");
+        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch output");
     } else if (!strcmp(line, "now")) {
         char text[2600];
         now_text(text, sizeof text, " ", 1);
@@ -715,6 +765,8 @@ static void client_line(struct client *c, char *line) {
     } else if (!strcmp(line, "watch")) {
         c->watch = 1;
         client_say(c, "ok");
+    } else if (!strcmp(line, "output")) {
+        client_say(c, "output %s", !way ? "dac" : soft ? "bluetooth soft" : "bluetooth");
     } else {
         client_say(c, command(line, 0, 0) ? "err %s" : "ok", line);
     }
@@ -807,6 +859,7 @@ int main(int argc, char **argv) {
         if (p[0].revents & POLLIN) {
             player = accept4(listen_fd, 0, 0, SOCK_CLOEXEC);
             if (player >= 0) logf_("the player connected");
+            if (player >= 0 && way) player_send("mcl-setoutputway", "1"), volume_apply(); /* a player started again: the output it had */
         }
         if (player >= 0 && p[1].fd == player && p[1].revents) player_read();
         if (p[2].revents & POLLIN) {

@@ -12,7 +12,9 @@
 | `stop` | `ok`; nothing plays |
 | `now` | a `now` line |
 | `watch` | `ok`; then a `now` line at each change, at most twice a second |
-| `caps` | `caps play toggle pause resume next previous seek volume stop now watch` |
+| `output` | `output dac`, `output bluetooth` or `output bluetooth soft`: where the music goes |
+| `output dac`, `output bluetooth`, `output bluetooth soft` | `ok`. The DAC, or a Bluetooth headset through bluealsa at unity (its own level is the volume: q2btd's absolute volume) or at the player's gain (`soft`). A song loaded starts again where it is heard; each output keeps its own volume. Sent by [q2btd](bt.md), not meant for apps |
+| `caps` | `caps play toggle pause resume next previous seek volume stop now watch output` |
 
 **`now`** is `now` and these fields, in this order: `title`, `artist`, `album` (free text, percent-encoded), `state` (0 stopped, 1 playing, 2 paused), `pos` (seconds), `len` (seconds, 0 until the player knows), `volume`, `id` (the song's library id, 0 for a song played from an app's list of paths). Song ids are [the library's](library.md): a card song's from `songtable`, a server song's from `servertable` (ids from `0x40000000`), which plays through its app ([q2playd: Server songs](../playd.md#server-songs)).
 
@@ -20,7 +22,7 @@
 > Q2PLAY/1
 < Q2PLAY/1 ok
 > caps
-< caps play toggle pause resume next previous seek volume stop now watch
+< caps play toggle pause resume next previous seek volume stop now watch output
 > now
 < ~ now title= artist= album= state=0 pos=0 len=0 volume=\d+ id=0
 > play 1 0 3
@@ -46,6 +48,14 @@
 < ok
 > volume 101
 < err volume 101
+> output
+< output dac
+> output bluetooth
+< ok
+> output
+< output bluetooth
+> output dac
+< ok
 > watch
 < ok
 > stop
