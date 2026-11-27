@@ -16,12 +16,16 @@
 
 static const struct home_row {
     const char *title, *demo; /* demo: the page of demo's that row opens; 0: a page of q2ui's */
-} rows[] = { { "Library", 0 }, { "Radio", "tuner_page" }, { "Games", "games_page" }, { "Old Menus", "" } };
-/* Radio and Games are demo's pages, opened by the payload's own openers through the gate
- * (patch/q2ui_gate.c openers).
- * ponytail: demo's Folders, Cover Flow, Search and Settings are not here: each needs its opener
- * found and seen to work from the gate in an emulator; until then they are reached through Old
- * Menus. */
+} rows[] = { { "Library", 0 },                  { "Radio", "tuner_page" },     { "Games", "games_page" },
+             { "Folders", "folder_page" },      { "Cover Flow", "coverflow_page" }, { "Search", "searchstrip_page" },
+             { "Old Menus", "" } };
+/* Every row but Library is demo's, as demo's Home has them in this order: opened through the gate by
+ * the payload's own openers, or by name for a stock page (patch/q2ui_gate.c openers). Old Menus,
+ * which demo has not, leaves q2ui.
+ * ponytail: Settings is not here. It is no page of demo's but Home's own second list in Home's
+ * window; the gate opened it (the row's click) in the emulator on 2026-11-27, and Return then did
+ * not leave it, so there was no way back to q2ui. It is reached through Old Menus until q2ui has
+ * Settings of its own (docs/ui-rewrite.md, step 4). */
 #define ROWS ((int)(sizeof rows / sizeof *rows))
 
 struct home_st {

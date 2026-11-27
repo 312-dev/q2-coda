@@ -25,6 +25,8 @@
 #include "peq.h"
 #include "stock.h"
 
+int coverflow_opening(void); /* coverflow.c: Cover Flow is loading before its page comes up */
+
 #define Q2UI_BIN "/usr/bin/q2ui"
 #define Q2UI_TARGET "/mnt/data/ui-target"
 #define Q2UI_ASK "/tmp/q2ui.open"
@@ -86,11 +88,14 @@ static void said(const char *what, int n) {
  * the click of the Home or Library row that leads to it, and takes nothing from the click. */
 int tuner_open(void *ctx, void *event), games_open(void *ctx, void *event), era_menu(void *ctx, void *event);
 int ratings_menu(void *ctx, void *event), most_played(void *ctx, void *event);
+int library_search_open(void *ctx, void *event), coverflow_row_open(void *ctx, void *event);
+
 static const struct {
     const char *name;
     int (*open)(void *ctx, void *event);
 } openers[] = { { "tuner_page", tuner_open },     { "games_page", games_open },         { "era_page", era_menu },
-                { "ratings_page", ratings_menu }, { "mostplayed_page", most_played } };
+                { "ratings_page", ratings_menu }, { "mostplayed_page", most_played },
+                { "searchstrip_page", library_search_open }, { "coverflow_page", coverflow_row_open } };
 
 /* The page q2ui named as it left, opened: one of the openers' names, else a stock page's name and
  * nothing else (lower case and underscores, ending _page), since what is read here is a file any
@@ -137,7 +142,8 @@ void q2ui_poll(void) {
     if (!q2ui_on()) {
         if (!qu.back) return;
         if (qu.opening) { /* the page asked for comes up a pass or more after it is asked for */
-            if (!on_home() || (unsigned)time_now_ms() - qu.asked_at >= Q2UI_OPEN_MS) qu.opening = 0;
+            /* Cover Flow may load for seconds before its page comes up: it is still on its way */
+            if (!on_home() || (!coverflow_opening() && (unsigned)time_now_ms() - qu.asked_at >= Q2UI_OPEN_MS)) qu.opening = 0;
             return;
         }
         if (!on_home()) return;

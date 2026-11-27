@@ -350,7 +350,7 @@ def pages(binary, work):
     trace, pics, _ = script(binary, work, 60, ['rest', 'shot @idle.ppm', 'tick 9', 'rest'], *home)
     idle_rows = trace[-1]['sel'] + 1
     trace, pics2, _ = script(binary, work, 60, ['rest', 'shot @playing.ppm', 'tick 9', 'rest'], *home, now=NOW)
-    good &= check('Home has one row more while something plays', (idle_rows, trace[-1]['sel'] + 1) == (4, 5), f"{idle_rows} and {trace[-1]['sel'] + 1}")
+    good &= check('Home has one row more while something plays', (idle_rows, trace[-1]['sel'] + 1) == (7, 8), f"{idle_rows} and {trace[-1]['sel'] + 1}")
     good &= check("Home's platter keeps to the list's side and the pane is drawn beside it",
                   pics['idle'].blue(100, 40 + 3) and not pics['idle'].blue(250, 40 + 3) and pics['idle'].at(280, 160) != (0, 0, 0))
     good &= check('the two Homes differ where the first row is', pics['idle'].rgb != pics2['playing'].rgb)
@@ -420,7 +420,7 @@ def pages(binary, work):
     good &= check("and Ratings, in the Library, for demo's Ratings", asked == 'ratings_page\n', repr(asked))
     # the last row leaves q2ui for demo's menus: the program ends, with the code of a plain end
     trace, _, _ = script(binary, work, 60, ['rest', 'tick 9', 'rest', 'key centre', 'run 100', 'tick -1', 'run 100'], *home, code=0)
-    good &= check('Centre on Old Menus ends q2ui', trace[-1]['sel'] == 3, str(trace[-1]['sel']))
+    good &= check('Centre on Old Menus ends q2ui', trace[-1]['sel'] == 6, str(trace[-1]['sel']))
     return good
 
 
@@ -581,13 +581,20 @@ def swap(binary, work):
     for k in (1, 3):
         os.mkfifo(d/'input'/f'event{k}')
     proc = subprocess.Popen(base_args(path, d) + ['--input', d/'input'])
-    time.sleep(1.0)
+    for _ in range(50):  # until it has drawn and come to rest: its loop is where the signal is acted on
+        if (d/'stats.json').exists():
+            break
+        time.sleep(0.1)
+    time.sleep(0.3)
     stand_in = d/'q2ui.new'  # stands in for the newer q2ui: it says it ran, with what it was given, and stays
     stand_in.write_text(f'#!/bin/sh\necho "$@" > {d}/ran\nexec sleep 20\n')
     stand_in.chmod(0o755)
     os.rename(stand_in, path)
     proc.send_signal(signal.SIGHUP)
-    time.sleep(1.0)
+    for _ in range(50):  # up to five seconds: this machine may be busy
+        if (d/'ran').exists() and (d/'ran').read_text():
+            break
+        time.sleep(0.1)
     ran = (d/'ran').read_text() if (d/'ran').exists() else None
     good = check('after SIGHUP the program now at the path runs, in the same process, with the same arguments',
                  ran is not None and '--input' in ran and proc.poll() is None, f'ran: {ran!r}, exit {proc.poll()}')

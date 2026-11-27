@@ -258,9 +258,10 @@ def test_every_start_and_end_is_a_line_in_demos_log(fw):
     assert lines[0] == f'started, pid {CHILD}' and lines[1] == 'usbmode_page' and lines[2].startswith("ended for a window of demo's, status")
 
 
-@pytest.mark.parametrize('name', ['tuner_page', 'games_page', 'era_page', 'ratings_page', 'mostplayed_page'])
+@pytest.mark.parametrize('name', ['tuner_page', 'games_page', 'era_page', 'ratings_page', 'mostplayed_page', 'searchstrip_page',
+                                  'coverflow_page'])
 def test_a_page_the_payload_builds_is_not_opened_by_its_name(fw, name):
-    """Those five are built by openers of the payload's own (the click of the row that leads to each), which the gate
+    """Those are built by openers of the payload's own (the click of the row that leads to each), which the gate
     calls; a stock page's name would open nothing for them. That each opener then puts its page up is the emulator's
     to show (docs/ui-rewrite.md#cutover): here the openers are the real ones, with no window system under them."""
     g = Gate(fw)
@@ -268,3 +269,4 @@ def test_a_page_the_payload_builds_is_not_opened_by_its_name(fw, name):
     g.ask, g.status, g.ended = name.encode(), ASKED, 1
     g.poll()
     assert g.opened == [] and g.on() == 0
+

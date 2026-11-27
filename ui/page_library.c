@@ -64,8 +64,10 @@ static const struct {
 } lib_rows[] = { { "Songs", 0 },          { "Artists", 0 },               { "Albums", 0 },
                  { "Years", "era_page" }, { "Ratings", "ratings_page" }, { "Most Played", "mostplayed_page" } };
 /* Years, Ratings and Most Played are demo's pages, opened through the gate (page_home.c).
- * ponytail: Playlists, Genres, Composers, Recently Added and Folders are reached through Home's Old
- * Menus until each has a page here or an opener the gate is seen to run. */
+ * ponytail: Playlists, Genres, Composers, Recently Added and Long Songs are reached through Home's
+ * Old Menus until each has a page here or an opener the gate is seen to run. Playlists was tried
+ * by its stock name in the emulator on 2026-11-27 and no page came up: stock builds it another
+ * way. */
 static int l_count(void *ctx) {
     (void)ctx;
     return (int)(sizeof lib_rows / sizeof *lib_rows);
