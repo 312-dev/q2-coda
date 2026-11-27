@@ -362,7 +362,8 @@ static void ask_status(void) {
 /* ---- the DAC's volume (docs/playd.md#the-volume) ----
  * The CS43131s' volume, as stock's mclSetLocalVol sets it: one ioctl on /dev/shanling_dac (codec_cs43131.ko), its
  * argument the left channel's level in bits 8-15 and the right's in bits 0-7, each on the same 0 to 100 scale as the
- * volume itself; the driver maps that to the chips' attenuation. Sent at the start and at each change. */
+ * volume itself; the driver maps that to the chips' attenuation. Sent at the start and at each change while the DAC is
+ * the output. */
 #define DAC_SET_VOLUME 0xc0044d00u
 
 static void dac_volume(void) {
@@ -382,6 +383,11 @@ static void dac_volume(void) {
 #define VOLUME_SAVE_MS 2000
 static int max_volume = 100;
 static unsigned long long volume_dirty_at;
+/* The output (docs/playd.md#the-output): 0 the DAC, 1 Bluetooth, as q2player's mcl-setoutputway; on Bluetooth soft is
+ * the player's own gain, else unity in the player and the level the headset's (absolute volume, q2btd's). Each output
+ * keeps its own level, as today's Vamp does: [PLAYSET] VOLUME the DAC's, BT_VOLUME Bluetooth's (-1 until saved: the
+ * DAC's then). */
+static int way, soft, other_volume = -1;
 
 static int ini_get(const char *text, const char *section, const char *key, int fallback) {
     char head[64];
@@ -411,6 +417,8 @@ static void volume_load(void) {
     if (max_volume < 0 || max_volume > 100) max_volume = 100;
     int v = ini_get(t, "PLAYSET", "BOOTVOLFLAG", 0) ? ini_get(t, "PLAYSET", "BOOTVOLUME", -1) : ini_get(t, "PLAYSET", "VOLUME", -1);
     if (v >= 0 && v <= 100) q.volume = v > max_volume ? max_volume : v;
+    other_volume = ini_get(t, "PLAYSET", "BT_VOLUME", -1); /* Bluetooth's, while the DAC is the output */
+    if (other_volume > 100) other_volume = -1;
     free(t);
 }
 
@@ -438,8 +446,50 @@ static void ini_set(const char *section, const char *key, int v) {
 
 static struct { int on, local, limit; } air_vol; /* a speaker playing: the earphones' level and Max Volume kept */
 
-/* the level saved: the earphones' as PLAYSET VOLUME, an AirPlay speaker's as Q2POD AIRVOL while one plays */
-static void volume_save(void) { air_vol.on ? ini_set("Q2POD", "AIRVOL", q.volume) : ini_set("PLAYSET", "VOLUME", q.volume); }
+/* the level saved: the earphones' as PLAYSET VOLUME (BT_VOLUME on Bluetooth), an AirPlay speaker's as Q2POD AIRVOL
+ * while one plays */
+static void volume_save(void) {
+    if (air_vol.on) ini_set("Q2POD", "AIRVOL", q.volume);
+    else ini_set("PLAYSET", way ? "BT_VOLUME" : "VOLUME", q.volume);
+}
+
+/* The level where the output takes it: the DAC's ioctl, or on Bluetooth the player's mcl-setvol (L << 8 | R): the
+ * level itself with soft, else 100, which takes the player's volume filter out (docs/player.md#output). */
+static void volume_apply(void) {
+    char a[16];
+    if (!way) {
+        dac_volume();
+        return;
+    }
+    snprintf(a, sizeof a, "%d", soft ? q.volume << 8 | q.volume : 100 << 8 | 100);
+    player_send("mcl-setvol", a);
+}
+
+/* The output moved: the departing level saved, the incoming one's restored, the player told, and a song loaded
+ * started again where it is heard (q2player takes a new way at its next song: docs/player.md#commands), paused if
+ * it was. */
+static void output_set(int w, int s) {
+    if (w == way && s == soft) return;
+    if (w != way) {
+        if (volume_dirty_at) volume_save(), volume_dirty_at = 0;
+        int incoming = other_volume >= 0 ? other_volume : q.volume;
+        other_volume = q.volume;
+        way = w;
+        q.volume = incoming > max_volume ? max_volume : incoming;
+        ++q.seq;
+    }
+    soft = s;
+    logf_("output %s%s, volume %d", way ? "bluetooth" : "dac", way && soft ? " soft" : "", q.volume);
+    player_send("mcl-setoutputway", way ? "1" : "0");
+    volume_apply();
+    if (q.loaded) {
+        int state = q.state, pos = q.pos_ms / 1000;
+        player_send("mcl-stop", "null");
+        q.expect_cut = 1;
+        send_song("set-songurl", q.file, pos);
+        if (state == PAUSED) player_send("mcl-pause", "null");
+    }
+}
 
 /* ---- commands: the same verbs from the FIFO and from Q2PLAY/1 ---- */
 
@@ -682,7 +732,7 @@ static int command(const char *verb, const int *ids, int n_ids) {
     if (sscanf(verb, "volume %d", &a) == 1 && a >= 0 && a <= 100) {
         if (a > max_volume) a = max_volume; /* Max Volume's cap */
         if (a != q.volume) q.volume = a, ++q.seq, volume_dirty_at = now_ms() | 1;
-        if (!air_vol.on) dac_volume(); /* a speaker's level is the AirPlay app's to send; the Q2 is silent */
+        if (!air_vol.on) volume_apply(); /* a speaker's level is the AirPlay app's to send; the Q2 is silent */
         return 0;
     }
     if (!strcmp(verb, "stop")) {
@@ -690,6 +740,9 @@ static int command(const char *verb, const int *ids, int n_ids) {
         if (src.on) source_end("stop");
         return 0;
     }
+    if (!strcmp(verb, "output dac")) return output_set(0, 0), 0;
+    if (!strcmp(verb, "output bluetooth")) return output_set(1, 0), 0;
+    if (!strcmp(verb, "output bluetooth soft")) return output_set(1, 1), 0;
     return -1;
 }
 
@@ -896,7 +949,7 @@ static void client_line(struct client *c, char *line) {
         return;
     }
     if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
-        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch source focus");
+        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch source focus output");
     } else if (!strncmp(line, "source ", 7)) {
         client_say(c, source_take((int)(c - cl), line + 7) ? "err source" : "ok");
     } else if (!strcmp(line, "focus")) {
@@ -910,6 +963,8 @@ static void client_line(struct client *c, char *line) {
     } else if (!strcmp(line, "watch")) {
         c->watch = 1;
         client_say(c, "ok");
+    } else if (!strcmp(line, "output")) {
+        client_say(c, "output %s", !way ? "dac" : soft ? "bluetooth soft" : "bluetooth");
     } else {
         client_say(c, command(line, 0, 0) ? "err %s" : "ok", line);
     }
@@ -1135,6 +1190,7 @@ int main(int argc, char **argv) {
         if (p[0].revents & POLLIN) {
             player = accept4(listen_fd, 0, 0, SOCK_CLOEXEC);
             if (player >= 0) logf_("the player connected");
+            if (player >= 0 && way) player_send("mcl-setoutputway", "1"), volume_apply(); /* a player started again: the output it had */
         }
         if (player >= 0 && p[1].fd == player && p[1].revents) player_read();
         if (p[2].revents & POLLIN) {

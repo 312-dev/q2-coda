@@ -10,6 +10,14 @@
     pins.py release-key               the release key's public half (assets/signing/q2-coda-release.pub) as a C array
     pins.py uac1                      Car Audio's usb_f_uac1.ko: tools/uac1.py's pinned module in the third-party cache,
                                       its SHA-256 checked; the build stops when it is not there
+    pins.py bluez-options             tools/thirdparty.py's BLUEZ_OPTIONS, one per word
+    pins.py bluez-patch SRC           tools/bluez/vamp.patch applied to the unpacked BlueZ in SRC (the patch any base
+                                      takes; shanling.patch is the stock base's alone, docs/bluez.md#bases)
+    pins.py bluez-storage SRC         SRC/config.h's STORAGEDIR made BLUEZ_STORAGE, as build_bluez makes it
+    pins.py bluealsa-options          tools/thirdparty.py's BLUEALSA_OPTIONS, one per word
+    pins.py bluealsa-patch SRC        tools/thirdparty.py's BLUEALSA_PATCHES applied in order to bluez-alsa in SRC
+    pins.py freeaptx SRC CC AR        tools/thirdparty.py's build_freeaptx on SRC with CC and AR; staged in SRC/stage
+    pins.py ldac SRC CC AR            tools/thirdparty.py's build_ldac the same way
 
 Run from the tree tools/vampos.py exported, so the settings are those of the commit the image names.
 """
@@ -59,5 +67,34 @@ elif sys.argv[1:] == ['release-key']:
     import signing
     key = signing.public_key(signing.PUBLIC_KEY.read_bytes())
     print('{' + ','.join(f'0x{b:02x}' for b in key) + '}')
+elif sys.argv[1:] == ['bluez-options']:
+    print(' '.join(thirdparty.BLUEZ_OPTIONS))
+elif sys.argv[1:2] == ['bluez-patch'] and len(sys.argv) == 3:
+    import subprocess
+    subprocess.run(['patch', '-p1', '-d', sys.argv[2]], input=thirdparty.BLUEZ_VAMP_PATCH, text=True, check=True)
+elif sys.argv[1:2] == ['bluez-storage'] and len(sys.argv) == 3:
+    import re
+    config = pathlib.Path(sys.argv[2])/'config.h'
+    text, n = re.subn(r'^#define STORAGEDIR ".*"$', f'#define STORAGEDIR "{thirdparty.BLUEZ_STORAGE}"', config.read_text(),
+                      flags=re.M)
+    if n != 1:
+        sys.exit('pins: config.h has no STORAGEDIR to point at the Q2\'s store')
+    config.write_text(text)
+elif sys.argv[1:] == ['bluealsa-options']:
+    print(' '.join(thirdparty.BLUEALSA_OPTIONS))
+elif sys.argv[1:2] == ['bluealsa-patch'] and len(sys.argv) == 3:
+    import subprocess
+    for text in thirdparty.BLUEALSA_PATCHES.values():
+        subprocess.run(['patch', '-p1', '-d', sys.argv[2]], input=text, text=True, check=True)
+elif sys.argv[1:2] in (['freeaptx'], ['ldac']) and len(sys.argv) == 5:
+    src = pathlib.Path(sys.argv[2])
+
+    class Env:
+        pass
+    env = Env()
+    env.cc, env.vars = sys.argv[3], {'AR': sys.argv[4]}
+    log = src/f'q2-{sys.argv[1]}.log'
+    log.write_text('')
+    (thirdparty.build_freeaptx if sys.argv[1] == 'freeaptx' else thirdparty.build_ldac)(src, src/'stage', env, log)
 else:
     sys.exit(__doc__)

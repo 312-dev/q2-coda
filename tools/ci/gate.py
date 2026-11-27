@@ -215,7 +215,13 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/aic_build.py': ['{stockfs}'],  # no builds: it checks the guard, the module's ABI and its packaging
     'test/alsa.py': ['{build}', '{qemu}'],
     'test/bluealsa.py': ['{build}'],
+    'test/bluealsa_own.py': "needs the own bluealsa built first (tools/thirdparty.py build bluealsa, minutes) and its path; a spike's "
+                             'check, run by hand (docs/bluealsa.md#what-the-emulator-shows)',
     'test/bluetoothd.py': ['{build}'],
+    'test/bluez_emu.py': "test/bluez_port.py's Unicorn machine for bluetoothd's hooks, a library and no suite",
+    'test/bluez_own.py': ['{build}'],  # the own bluetoothd beside stock's under qemu-mipsel; it builds bluez when the cache has none
+    'test/bluez_port.py': [],  # Shanling's hooks in the own bluetoothd under Unicorn, from tools/thirdparty.py's build
+    'test/bt_launch.py': ['{build}'],  # the Bluetooth launcher in the build's own rootfs; skips a build without it
     'test/build.py': ['--build', '{build}'],
     'test/chapters.py': [],  # --stock-root and --qemu go together and are optional: its parser refuses BUILD
     'test/coda_rc_e2e.py': ['--pool', '{build}'],  # a pooled emulator, Car Remote on for the lease, on its own port

@@ -1,0 +1,5 @@
+config BR2_PACKAGE_Q2_FREEAPTX
+	bool "q2-freeaptx"
+	help
+	  The aptX and aptX HD codec bluez-alsa links (libfreeaptx, static), built by tools/thirdparty.py's
+	  own recipe (docs/bluealsa.md#codecs-and-licences).

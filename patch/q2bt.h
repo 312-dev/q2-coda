@@ -102,7 +102,7 @@ int bt_fly_step(struct bt_fly *f, unsigned sent, unsigned done);
  * not. */
 #define BT_OP_CPT 0x040f    /* Change Connection Packet Type (OGF 1, OCF 0x000F) */
 #define BT_PTYPE_EDR 0x0018 /* DM1|DH1; the 2-DHx and 3-DHx bits left clear: EDR allowed */
-/* The A2DP sink's address, from GetPCMs's a2dpsrc PCM ("/dev_EC_66_D1_CF_59_3F/a2dpsrc"), into
+/* The A2DP sink's address, from bluealsa's a2dpsrc PCM ("/dev_EC_66_D1_CF_59_3F/a2dpsrc"), into
  * bdaddr[6] in the kernel's order (bdaddr_t: the last byte first); 0 none (no headset, or the Q2 is
  * the sink: a phone streaming to it is an a2dpsnk PCM). */
 int bt_pcms_sink(const char *text, unsigned char *bdaddr);
@@ -179,7 +179,7 @@ int bt_step(struct bt_step *s, unsigned now, int allowed, int rank, const struct
 /* config.ini's text: 1 Auto with the setting on, 0 Auto with it off, -1 another choice
  * (or none saved) */
 int bt_step_allowed(const char *ini);
-/* GetPCMs (as bt_pcms reads it): the A2DP source PCM's object path, which SelectCodec is sent to,
+/* bluealsa's PCMs (as bt_pcms reads them): the A2DP source PCM's object path, which SelectCodec is sent to,
  * into path (n bytes); 0 none, or one holding anything but letters, digits, _ and / */
 int bt_pcms_path(const char *text, char *path, int n);
 /* dbus-send --print-reply's text: the first byte array after key (itself the first after after, when after is not 0)
@@ -255,9 +255,11 @@ int bt_l2cap_wmem(const char *text);
 int bt_encoder_thread(const char *comm);
 int bt_schedstat(const char *text, unsigned *run_ms, unsigned *wait_ms);
 
-/* ---- the codec, from bluealsa's GetPCMs as dbus-send prints it ----
- * The A2DP source PCM's Codec into codec (n bytes), Sampling in Hz and Delay in tenths of a ms; 0
- * for none. */
+/* ---- the codec, from bluealsa's PCMs as dbus-send prints them ----
+ * text is org.freedesktop.DBus.ObjectManager's GetManagedObjects on /org/bluealsa (q2bt.c PCMS_CMD), which
+ * stock's bluealsa 4.0.0 and Vamp's 5.0.0 both answer (docs/bluealsa.md#the-callers); 4.0.0's GetPCMs, its one
+ * level of nesting fewer, reads the same. The A2DP source PCM's Codec into codec (n bytes), its rate in Hz (4.0.0
+ * calls it Sampling, 5.0.0 Rate) and Delay in tenths of a ms; 0 for none. */
 int bt_pcms(const char *text, char *codec, int n, unsigned *hz, unsigned *delay);
 
 /* ---- the log line ---- */

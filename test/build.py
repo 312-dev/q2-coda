@@ -688,8 +688,10 @@ def validate_assets(directory):
         assert path in stock_listing and path not in listing, path
     print('Removed from the rootfs:', ' '.join(DEBUG_TOOLS + DEBUG_LINKS))
     # Bluetooth is discoverable for 180 s, not for as long as it is on, named Q2, with BlueZ's experimental interfaces.
-    from build import BT_MAIN, BT_DISCOVERABLE, BT_NAME, BT_EXPERIMENTAL
-    assert read('rootfs.squashfs', BT_MAIN) == read('stock.squashfs', BT_MAIN).replace(*BT_DISCOVERABLE).replace(*BT_NAME).replace(*BT_EXPERIMENTAL)
+    from build import BT_MAIN, BT_DISCOVERABLE, BT_NAME, BT_EXPERIMENTAL, BT_GATT_SERVER
+    edited = read('stock.squashfs', BT_MAIN).replace(*BT_DISCOVERABLE).replace(*BT_NAME).replace(*BT_EXPERIMENTAL)
+    # an --own-bluez build also turns its bluetoothd's GATT server off (docs/bluez.md#the-le-attribute-channel)
+    assert read('rootfs.squashfs', BT_MAIN) == (edited.replace(*BT_GATT_SERVER) if 'own_bluez' in manifest else edited)
     assert b'\nExperimental = true\n' in read('rootfs.squashfs', BT_MAIN)
     assert b'\nDiscoverableTimeout = 180\n' in read('rootfs.squashfs', BT_MAIN)
     assert b'\nName = Vamp\n' in read('rootfs.squashfs', BT_MAIN) and b'Shanling' not in read('rootfs.squashfs', BT_MAIN)

@@ -1,0 +1,11 @@
+config BR2_PACKAGE_VAMP_BLUEZ
+	bool "vamp-bluez"
+	depends on BR2_USE_WCHAR # libglib2
+	depends on BR2_TOOLCHAIN_HAS_THREADS # dbus, libglib2
+	depends on BR2_USE_MMU # dbus, libglib2
+	select BR2_PACKAGE_DBUS
+	select BR2_PACKAGE_LIBGLIB2
+	help
+	  Vamp's own bluetoothd (docs/bluez.md): upstream BlueZ at tools/thirdparty.py's version, with
+	  tools/bluez/vamp.patch (the [GATT] Server switch) and the store at /mnt/data/bluetooth, built
+	  against this image's glibc, D-Bus and GLib; and libbluetooth, which bluez-alsa links.

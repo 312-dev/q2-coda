@@ -99,6 +99,8 @@ Off by default, `--dev --pwm-idle-clock`: the paired PWM/MCU clock gating. It ne
 
 All three kernel-module experiments were on by default from 1.5.0 to 1.6.1 and went back to `--dev` in 1.6.2: no battery saving was measured for any of them, and none handles suspend/resume, which stock Standby does by default.
 
+`--own-bluez` is off in every build unless given. It adds Vamp's own bluetoothd (upstream BlueZ, built by `tools/thirdparty.py`) at `/usr/lib/vamp-bluez/bluetoothd`, beside stock's, and the Bluetooth launcher at `/usr/bin/bluetoothd`, which starts stock's unless `config.ini` has `[Q2POD] BLUEZ=1`. `--dev --own-bluealsa` does the same for bluealsa (`BLUEALSA=1`). See [bluez](bluez.md#the-launcher).
+
 `--dev --mcu-idle-sleep` is off in release builds. It adds an interruptible MCU sleep with an explicit wake handshake. See [MCU sleep](mcu-sleep.md).
 
 Every build installs the player, `q2player` ([player-plan.md](player-plan.md)), as `/usr/bin/hciplayer`, where stock's player was, so demo starts and stops it by that name. It builds `q2player` with `tools/player.py` (FFmpeg on first use, some minutes; the toolchain and mbedTLS that `tools/thirdparty.py` keeps in `~/.cache/q2-thirdparty`) against the image's own `libasound.so.2`, and records `q2player_sha256` in the manifest. The root filesystem holds 75,497,472 bytes (`ROOTFS_ROOM`: mtd2 less a bad-block spare, [hardware](hardware.md#flash-layout)): past that the build stops and says by how much.
@@ -112,7 +114,7 @@ B=$(tools/mac/q2env python3 tools/ci/rebuild.py --dev | tail -1)
 tools/mac/q2env python3 tools/ci/affected.py --run "$B"              # or --all
 ```
 
-The image (`tools/mac/Dockerfile`) is Ubuntu 24.04 arm64 with the [Requirements](#requirements) (clang and lld 18.1.3, squashfs-tools 4.6.1, ImageMagick 6.9.12, qemu-user 8.2.2, bwrap 0.9.0, Go 1.22.2, ccache 4.9.1) and a venv of `requirements.txt`, `test/unit/requirements.txt`, pytest-xdist and mypy made from the arm64 PIE Python 3.12.16 that `actions/setup-python` installs ([Firmware tests](#firmware-tests) refuse a non-PIE one). `q2env` builds it on first use and again when the Dockerfile, `tools/mac/cc` or the pinned requirements change.
+The image (`tools/mac/Dockerfile`) is Ubuntu 24.04 arm64 with the [Requirements](#requirements) (clang and lld 18.1.3, squashfs-tools 4.6.1, ImageMagick 6.9.12, qemu-user 8.2.2, bwrap 0.9.0, Go 1.22.2, ccache 4.9.1) and a venv of `requirements.txt`, `test/unit/requirements.txt`, pytest-xdist and mypy made from the arm64 PIE Python 3.12.16 that `actions/setup-python` installs ([Firmware tests](#firmware-tests) refuse a non-PIE one). The system `/usr/bin/python3` has Ubuntu's dbus-python and PyGObject (`python3-dbus`, `python3-gi`), for the suites whose stand-in daemons run on D-Bus: `test/q2_guest.py`, `test/bluealsa_own.py`. `q2env` builds it on first use and again when the Dockerfile, `tools/mac/cc` or the pinned requirements change.
 
 - **The same paths inside and out.** The Mac's home is mounted at its own path and is `HOME`, and the command runs as the Mac's user, so a worktree, `~/.cache/q2-builds/...` or `~/q2-stock/Q2 Firmware V1.36.zip` (`rebuild.py`'s default ZIP) is the same file in either shell.
 - **`~/.cache/q2-thirdparty` is also at `/home/gray/.cache/q2-thirdparty`**, where its components were built, and `Q2_THIRDPARTY_CACHE` names it: `tools/thirdparty.py`'s cache keys and its output's compiler paths include the cache's path (`REPRODUCIBLE`), so only there are they reused and rebuilt to the same bytes.
@@ -190,6 +192,8 @@ python3 test/player/run.py                  # the new player (player/): bit-exac
 python3 test/ldac.py /tmp/q2-build         # shipped LDAC intermediate rates and native adaptive controller
 python3 test/headset_io.py /tmp/q2-build   # real MIPS headset worker with simulated kernel I/O (cc)
 python3 test/bluealsa.py /tmp/q2-build     # the patched bluealsa's DROP paths against stock's, delayed encoder signal; SBC's bitpool; AAC's peak (fdk-aac scripted); the write MTU through each encoder
+python3 test/bluez_own.py /tmp/q2-build    # the own bluetoothd (tools/thirdparty.py's bluez, or an --own-bluez build's) beside stock's under qemu-mipsel, each on a D-Bus bus and a stand-in kernel of its own: main.conf, the store both ways, the payload's D-Bus calls, the LE attribute channel left free, shanling.bluez (bwrap, dbus-daemon, gdbus; docs/bluez.md)
+python3 test/bluez_port.py [BLUETOOTHD]   # Shanling's hooks in the own bluetoothd (tools/bluez/shanling.patch), each as MIPS under Unicorn (test/bluez_emu.py; docs/bluez.md#shanlings-changes)
 python3 test/bluetoothd.py /tmp/q2-build   # the patched bluetoothd's GetElementAttributes and its AVRCP record's cover art entry, at a load address of its own, against stock's
 python3 test/alsa.py BUILD QEMU_MIPSEL     # ALSA startup lock regression (see internals.md)
 python3 test/thirdparty.py BUILD QEMU_MIPSEL  # the rebuilt OpenSSL, curl, zlib, SQLite, libpng, BusyBox, wpa_supplicant and FFmpeg in a bwrap chroot of BUILD's rootfs: versions, links, TLS (network; --offline skips it) (third-party.md)

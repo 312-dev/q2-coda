@@ -15,7 +15,9 @@
 | `source URL [title=T] [artist=A] [album=B]` | `ok`, or `err source` for a URL that is not `http://` or `https://` or holds a byte below `0x21`, `\|` or `0x7f` once decoded. Plays the URL with [audio focus](#audio-focus), the queue put aside; the URL and the fields are free text, percent-encoded (a URL's `=` and `%` too), a field this service does not know passed over |
 | `focus` | `focus source=S held=H`: S 1 while a source plays, H 1 when it is this connection's |
 | `focus release` | `ok`, the source stopped and the queue given back; `err focus release` from a connection that holds none |
-| `caps` | `caps play toggle pause resume next previous seek volume stop now watch source focus` |
+| `output` | `output dac`, `output bluetooth` or `output bluetooth soft`: where the music goes |
+| `output dac`, `output bluetooth`, `output bluetooth soft` | `ok`. The DAC, or a Bluetooth headset through bluealsa at unity (its own level is the volume: q2btd's absolute volume) or at the player's gain (`soft`). A song loaded starts again where it is heard; each output keeps its own volume. Sent by [q2btd](bt.md), not meant for apps |
+| `caps` | `caps play toggle pause resume next previous seek volume stop now watch source focus output` |
 
 ## Audio focus
 
@@ -29,7 +31,7 @@ The holder is told, by a line between answers, when it loses the player for any 
 > Q2PLAY/1
 < Q2PLAY/1 ok
 > caps
-< caps play toggle pause resume next previous seek volume stop now watch source focus
+< caps play toggle pause resume next previous seek volume stop now watch source focus output
 > now
 < ~ now title= artist= album= state=0 pos=0 len=0 volume=\d+ id=0
 > play 1 0 3
@@ -55,6 +57,14 @@ The holder is told, by a line between answers, when it loses the player for any 
 < ok
 > volume 101
 < err volume 101
+> output
+< output dac
+> output bluetooth
+< ok
+> output
+< output bluetooth
+> output dac
+< ok
 > watch
 < ok
 > stop

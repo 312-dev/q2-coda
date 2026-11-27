@@ -1,0 +1,89 @@
+Vamp's own changes to BlueZ 5.88 for any base (docs/bluez.md#bases), applied by tools/thirdparty.py's
+build_bluez. Licensed as the code it changes, GPL-2.0-or-later. Nothing here names libbtctl or any of
+Shanling's code: their hooks are a patch of their own, applied only for the stock base.
+
+- main.conf [GATT] Server (default true): false leaves out the GATT database, the LE advertising manager
+  and the advertisement monitor manager on every adapter, through the path upstream already takes for a
+  controller without LE, so nothing listens on the LE attribute channel (L2CAP CID 4) and coda-rc serves
+  it and advertises through the kernel itself, as under stock's bluetoothd
+  (docs/bluez.md#the-le-attribute-channel). LE scanning, pairing and the GATT client stay.
+
+diff --git a/src/adapter.c b/src/adapter.c
+index 6588a6e..bbff13c 100644
+--- a/src/adapter.c
++++ b/src/adapter.c
+@@ -9918,10 +9918,13 @@ static int adapter_register(struct btd_adapter *adapter)
+ 		btd_ranging_provider_manager_create(adapter);
+ 
+ 	/* Don't start GATT database and advertising managers on
+-	 * non-LE controllers.
++	 * non-LE controllers, nor where main.conf's [GATT] Server is false:
++	 * then another program may serve the LE attribute channel and
++	 * advertise through the kernel itself.
+ 	 */
+ 	if (!(adapter->supported_settings & MGMT_SETTING_LE) ||
+-					btd_opts.mode == BT_MODE_BREDR)
++					btd_opts.mode == BT_MODE_BREDR ||
++					!btd_opts.gatt_server)
+ 		goto load;
+ 
+ 	adapter->database = btd_gatt_database_new(adapter);
+diff --git a/src/btd.h b/src/btd.h
+index b059ab8..7b9a018 100644
+--- a/src/btd.h
++++ b/src/btd.h
+@@ -165,6 +165,7 @@ struct btd_opts {
+ 	uint16_t	gatt_mtu;
+ 	uint8_t		gatt_channels;
+ 	bool		gatt_client;
++	bool		gatt_server;
+ 	int		gatt_mnotify;
+ 	enum bt_gatt_export_t gatt_export;
+ 	bool		gatt_seclevel;
+diff --git a/src/main.c b/src/main.c
+index 8e58b6b..60682d5 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -151,6 +151,7 @@ static const char *gatt_options[] = {
+ 	"ExchangeMTU",
+ 	"Channels",
+ 	"Client",
++	"Server",
+ 	"NotifyMultiple",
+ 	"ExportClaimedServices",
+ 	"Security",
+@@ -1229,6 +1230,7 @@ static void parse_gatt(GKeyFile *config)
+ 	parse_config_u8(config, "GATT", "Channels", &btd_opts.gatt_channels,
+ 				1, 6);
+ 	parse_config_bool(config, "GATT", "Client", &btd_opts.gatt_client);
++	parse_config_bool(config, "GATT", "Server", &btd_opts.gatt_server);
+ 	parse_gatt_mnotify(config);
+ 	parse_gatt_export(config);
+ 	parse_gatt_seclevel(config);
+@@ -1456,6 +1458,7 @@ static void init_defaults(void)
+ 	btd_opts.gatt_mtu = BT_ATT_MAX_LE_MTU;
+ 	btd_opts.gatt_channels = 1;
+ 	btd_opts.gatt_client = true;
++	btd_opts.gatt_server = true;
+ 	btd_opts.gatt_mnotify = 0;
+ 	btd_opts.gatt_export = BT_GATT_EXPORT_READ_ONLY;
+ 	btd_opts.gatt_seclevel = BT_ATT_SECURITY_AUTO;
+diff --git a/src/main.conf b/src/main.conf
+index 12028e1..d03806f 100644
+--- a/src/main.conf
++++ b/src/main.conf
+@@ -270,6 +270,14 @@
+ # Defaults to 'true'.
+ #Client = true
+ 
++# Enable/Disable the local GATT server, and with it the LE advertising and
++# advertisement monitor managers, as for a controller without LE. Disabling it
++# leaves the LE attribute channel to another program, which can then serve
++# GATT and advertise through the kernel itself; LE scanning, pairing and the
++# GATT client are unaffected.
++# Defaults to 'true'.
++#Server = true
++
+ # Controls the use of GATT Notify Multiple when acting as a server and the
+ # remote client supports it. Multiple notifications are buffered for up to
+ # the given timeout so they can be sent in a single PDU, this improves

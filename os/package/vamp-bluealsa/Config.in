@@ -1,0 +1,25 @@
+config BR2_PACKAGE_VAMP_BLUEALSA
+	bool "vamp-bluealsa"
+	depends on BR2_PACKAGE_VAMP_BLUEZ
+	select BR2_PACKAGE_ALSA_LIB
+	select BR2_PACKAGE_SBC
+	select BR2_PACKAGE_Q2_FREEAPTX
+	select BR2_PACKAGE_Q2_LDAC
+	help
+	  Vamp's own bluealsa (docs/bluealsa.md): upstream bluez-alsa at tools/thirdparty.py's version and
+	  patches, as bluealsa with bluealsa-aplay and the two ALSA plugins, against this image's glibc,
+	  alsa-lib, D-Bus, GLib and vamp-bluez's libbluetooth.
+
+config BR2_PACKAGE_VAMP_BLUEALSA_AAC
+	bool "AAC (fdk-aac)"
+	default y
+	depends on BR2_PACKAGE_VAMP_BLUEALSA
+	depends on BR2_INSTALL_LIBSTDCPP # fdk-aac
+	select BR2_PACKAGE_FDK_AAC
+	help
+	  AAC through fdk-aac, which is C++: only with a toolchain that has C++
+	  (BR2_TOOLCHAIN_BUILDROOT_CXX). Without it, the other four codecs.
+
+comment "AAC needs a toolchain w/ C++"
+	depends on BR2_PACKAGE_VAMP_BLUEALSA
+	depends on !BR2_INSTALL_LIBSTDCPP

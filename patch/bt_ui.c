@@ -475,7 +475,7 @@ static int sink_fetch(const char *mac) {
     tk_snprintf(
         cmd, sizeof cmd,
         "(p=$(dbus-send --system --print-reply --dest=org.bluealsa /org/bluealsa "
-        "org.bluealsa.Manager1.GetPCMs 2>/dev/null | sed -n "
+        "org.freedesktop.DBus.ObjectManager.GetManagedObjects 2>/dev/null | sed -n "
         "'s|.*object path \"\\(/org/bluealsa/[A-Za-z0-9_]*/dev_%s/a2dpsrc/[A-Za-z0-9_/]*\\)\".*"
         "|\\1|p' | head -n 1); [ -n \"$p\" ] && { echo %s; dbus-send --system --print-reply "
         "--dest=org.bluealsa \"$p\" org.bluealsa.PCM1.GetCodecs 2>/dev/null | sed -n "
@@ -1302,7 +1302,7 @@ int bt_quality_linked(int row) {
     /* the PCM's object path through a pattern of what one holds, as it goes to the shell */
     tk_snprintf(cmd, sizeof cmd,
                 "(p=$(dbus-send --system --print-reply --dest=org.bluealsa /org/bluealsa "
-                "org.bluealsa.Manager1.GetPCMs 2>/dev/null | sed -n "
+                "org.freedesktop.DBus.ObjectManager.GetManagedObjects 2>/dev/null | sed -n "
                 "'s|.*object path \"\\(/org/bluealsa/[A-Za-z0-9_/]*/a2dpsrc/[A-Za-z0-9_/]*\\)\".*"
                 "|\\1|p' | head -n 1); [ -n \"$p\" ] && for c in %s; do q2bt-codec \"$p\" $c && "
                 "echo $c && break; done) >" BT_PICK_FILE " 2>&1",

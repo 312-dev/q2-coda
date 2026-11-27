@@ -93,6 +93,12 @@ def check_pins():
           and got.get(deb_url.rsplit('/', 1)[1]) == deb_digest and deb_url in mk('q2-adbd')
           and all(got.get(n) == d for n, d in thirdparty.ADBD_MINCRYPT_FILES.items())
           and thirdparty.ADBD_MINCRYPT.rstrip('/') in mk('q2-adbd'), f'adbd {version} as tools/thirdparty.py pins it')
+    # Bluetooth (docs/vamp-os-base.md#bluetooth): each package's release and tarball are thirdparty's
+    for name, package, var in (('bluez', 'vamp-bluez', 'VAMP_BLUEZ'), ('bluealsa', 'vamp-bluealsa', 'VAMP_BLUEALSA'),
+                               ('freeaptx', 'q2-freeaptx', 'Q2_FREEAPTX'), ('ldac', 'q2-ldac', 'Q2_LDAC')):
+        version, url, digest = thirdparty.SOURCES[name]
+        check(f'{var}_VERSION = {version}\n' in mk(package) and hashes(pkg/package).get(url.rsplit('/', 1)[1]) == digest,
+              f'{name} {version} as tools/thirdparty.py pins it')
     got = hashes(pkg/'q2ui-stb')
     # tools/ui.py is on q2ui's branch: its STB and STB_IMAGE at the commit the image builds
     text = subprocess.check_output([*vamp_os.GIT, 'show', f'{vamp_os.Q2UI_COMMIT}:tools/ui.py'], text=True)
@@ -189,7 +195,8 @@ def check_image(build, fs, manifest, perturb=None):
     check(os.access(fs/'usr/bin/q2-iap', os.X_OK) and os.access(fs/'usr/libexec/vamp/q2car', os.X_OK) and os.access(fs/'usr/bin/q2car', os.X_OK)
           and ko.exists() and hashlib.sha256(ko.read_bytes()).hexdigest() == uac1.PIN[0], "Car Audio: q2-iap, q2car and tools/uac1.py's pinned usb_f_uac1.ko")
     services = sorted(p.name for p in (fs/'etc/sv').iterdir())
-    check(services == ['adb-wifi', 'adbd', 'q2-airplay', 'q2dacloop', 'q2dlnad', 'q2libd', 'q2netd', 'q2pkgd', 'q2pkgd-confirm', 'q2playd', 'q2player', 'q2scrobd', 'q2sysd', 'q2ui'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
+    check(services == ['adb-wifi', 'adbd', 'bluealsa', 'bluetoothd', 'bt-attach', 'dbus', 'q2-airplay', 'q2btd', 'q2dacloop', 'q2dlnad', 'q2libd',
+                       'q2netd', 'q2pkgd', 'q2pkgd-confirm', 'q2playd', 'q2player', 'q2scrobd', 'q2sysd', 'q2ui'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
           f'services: {", ".join(services)}')
     check(os.readlink(fs/'etc/passwd') == '/run/vamp/passwd' and os.readlink(fs/'etc/group') == '/run/vamp/group'
           and (fs/'etc/passwd.base').read_text().startswith('root:x:0:0:') and (fs/'etc/group.base').read_text().startswith('root:x:0:'),

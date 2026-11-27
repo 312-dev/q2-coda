@@ -58,7 +58,7 @@ BUILDROOT = ('2026.02.3', 'https://buildroot.org/downloads/buildroot-2026.02.3.t
 PATCHES = ROOT/'os/patches/buildroot'
 # feat/render-engine's ui/ (another worker's; read-only here): moved on by changing this commit
 Q2UI_COMMIT = '817b5fc2'
-VAMP_PATHS = ['os', 'tools', 'player', 'playd', 'sysd', 'libd', 'netd', 'pkgd', 'dacloop', 'scrobd', 'dlnad', 'perm', 'patch', 'assets/signing', 'assets/fonts', 'assets/scrobble-ca.pem', 'LICENSE']
+VAMP_PATHS = ['os', 'tools', 'player', 'playd', 'sysd', 'libd', 'netd', 'btd', 'pkgd', 'dacloop', 'scrobd', 'dlnad', 'perm', 'patch', 'assets/signing', 'assets/fonts', 'assets/scrobble-ca.pem', 'LICENSE']
 Q2UI_PATHS = ['ui', 'patch', 'LICENSE']
 MANIFEST = ROOT/'os/vendor/V1.36.tsv'
 # A static qemu-mipsel for the boot test (test/os_image.py), the host's architecture: Ubuntu 24.04's, from
@@ -70,7 +70,10 @@ STOCK_ZIP_MEMBER = 'Q2 Firmware V1.36/update.tar'
 STOCK_ROOTFS_MEMBER = 'recovery-update/rootfs.squashfs'
 # Stock path prefix -> its place under /vendor
 VENDOR_PLACES = [('module_driver/', 'vendor/module_driver/'), ('firmware/', 'vendor/firmware/'),
-                 ('usr/data/', 'vendor/mcu/')]
+                 ('usr/data/', 'vendor/mcu/'), ('usr/bin/rtk_hciattach', 'vendor/bin/rtk_hciattach')]
+# Shanling's programs in the set: rtk_hciattach, the RTL8733BS's Bluetooth attach (its firmware loader and line
+# discipline set-up), which nothing of Vamp's replaces yet (docs/vamp-os-base.md#bluetooth)
+VENDOR_PROGRAMS = ['usr/bin/rtk_hciattach']
 
 
 def sha256(path):
@@ -209,7 +212,8 @@ def vendor_manifest(zip_path):
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)
         sq = stock_rootfs(zip_path, tmp)
-        run('unsquashfs', '-q', '-n', '-d', tmp/'fs', sq, 'module_driver', 'firmware', 'usr/data/libmcu-bare.bin')
+        run('unsquashfs', '-q', '-n', '-d', tmp/'fs', sq, 'module_driver', 'firmware', 'usr/data/libmcu-bare.bin',
+            *VENDOR_PROGRAMS)
         rows = []
         for f in sorted((tmp/'fs').rglob('*')):
             if f.is_file() and not f.is_symlink():

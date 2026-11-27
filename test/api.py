@@ -8,5 +8,5 @@ import sys
 import pytest
 
 T = pathlib.Path(__file__).resolve().parent
-sys.exit(pytest.main([str(T/'playd.py'), str(T/'sysd.py'), str(T/'netd.py'), str(T/'libd.py'), str(T/'launch.py'), '-q', '-p', 'no:cacheprovider',
+sys.exit(pytest.main([str(T/'playd.py'), str(T/'sysd.py'), str(T/'netd.py'), str(T/'btd.py'), str(T/'libd.py'), str(T/'launch.py'), '-q', '-p', 'no:cacheprovider',
                       '-k', 'conformance']))

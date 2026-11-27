@@ -1,0 +1,8 @@
+config BR2_PACKAGE_Q2BTD
+	bool "q2btd"
+	depends on BR2_PACKAGE_VAMP_BLUEALSA
+	select BR2_PACKAGE_DBUS
+	help
+	  Vamp OS's Bluetooth service (btd/, docs/btd.md): the client of vamp-bluez and vamp-bluealsa
+	  over D-Bus, the pairing agent, auto-reconnect, the output q2playd plays to, and Q2BT/1 on
+	  /run/vamp/bt.sock.

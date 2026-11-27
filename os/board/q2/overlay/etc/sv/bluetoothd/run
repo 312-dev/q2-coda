@@ -1,0 +1,13 @@
+#!/bin/sh
+# Vamp's own bluetoothd (docs/bluez.md, the vamp-bluez package): the store on /mnt/data, shared with stock and
+# today's Vamp, and the plugins stock has no like of left out, as today's launcher starts it (patch/bt_launch.sh).
+# It finds hci0 when bt-attach has made it, whenever that is.
+. /usr/libexec/vamp/log
+if [ ! -S /run/dbus/system_bus_socket ]; then
+    step "bluetoothd: no system bus yet"
+    exit 1
+fi
+mkdir -p -m 0700 /mnt/data/bluetooth
+step "bluetoothd: start"
+exec 2>&1
+exec /usr/libexec/bluetooth/bluetoothd -n --noplugin=hfp,rap,fastpair

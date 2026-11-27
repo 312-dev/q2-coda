@@ -1,0 +1,4 @@
+#!/bin/sh
+. /usr/libexec/vamp/log
+step "bt-attach: ended, status $1, signal ${2:-0}"
+[ "$1" = 0 ] || sleep 10

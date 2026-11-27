@@ -1,0 +1,11 @@
+#!/bin/sh
+# q2btd (docs/btd.md): BlueZ's and bluealsa's client, the pairing agent, auto-reconnect, where q2playd's audio goes,
+# and Q2BT/1 on /run/vamp/bt.sock. It waits for nothing but the bus: org.bluez and org.bluealsa are taken when they come.
+. /usr/libexec/vamp/log
+if [ ! -S /run/dbus/system_bus_socket ]; then
+    step "q2btd: no system bus yet"
+    exit 1
+fi
+step "q2btd: start"
+exec 2>&1
+exec /usr/bin/q2btd
