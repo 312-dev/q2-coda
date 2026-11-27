@@ -54,7 +54,7 @@ def binary(tmp_path_factory):
     out = tmp_path_factory.mktemp('netd')
     src = out/'q2netd.c'
     src.write_bytes(SOURCE.read_bytes())
-    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', '-o', str(out/'q2netd'), str(src)], check=True)
+    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', '-I', str(conformance.PERM), '-o', str(out/'q2netd'), str(src)], check=True)
     (out/'fake_wpa.py').write_text(FAKE_WPA)
     return out
 
@@ -62,6 +62,8 @@ def binary(tmp_path_factory):
 def start(binary, root, *extra, conf=CONF):
     for d in ('mnt/data', 'tmp', 'run'):
         (root/d).mkdir(parents=True, exist_ok=True)
+    if not (root/'etc/group').exists():
+        conformance.accounts(root)
     if conf is not None:
         (root/'mnt/data/wpa_supplicant.conf').write_text(conf)
     cmd = [str(binary/'q2netd'), '--root', str(root), '--wpa', f'exec python3 {binary}/fake_wpa.py {root} -iwlan0',

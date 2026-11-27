@@ -274,6 +274,12 @@ Where this tree is headed (an `os/` Buildroot tree, services of our own in place
 | `q2netd.c` | `q2netd`: Wi-Fi on the saved networks through `wpa_supplicant`'s control socket, `udhcpc`, Smart Wi-Fi, the saved networks in stock's file, Q2NET/1 | `main`, `radio`, `poll_status`, `add_network`, `client_line` | [netd](netd.md) |
 | `Makefile` | Its build, for the image (`os/package/q2netd`) and this machine (`test/netd.py`) | | [netd](netd.md) |
 
+## perm/: Vamp API 1's permissions
+
+| File | For | Enter at | Doc |
+| --- | --- | --- | --- |
+| `q2perm.h` | The permissions' groups and gids, and the check q2playd, q2sysd and q2netd make of a caller (`SO_PEERCRED`, then `/etc/passwd` and `/etc/group`); q2pkgd's groups | `q2perm_allowed`, `Q2PERM_GROUPS` | [packages](platform/packages.md#users-and-groups) |
+
 ## scrobd/: Vamp OS's scrobble log
 
 | File | For | Enter at | Doc |
@@ -377,6 +383,7 @@ Commands and what each needs are in [building.md](building.md#tests). `BUILD` is
 | Vamp OS's base image | `os_image.py`: the pins, the image's contents and ABI, the composed `/vendor`, and a boot of it under `qemu-mipsel` (and `--card-boot`); `q2vampos.py`: the card boot's hand-off under the host `sh` | `BUILD`, the ZIP, bwrap, `sh` |
 | The card boot end to end | `card_e2e.py`: the image on a stand-in card, the real q2vampos.sh with a stand-in loop mount and chroot, the image's rcS and services up, a song played, the next boot the usual one | `BUILD`, the ZIP, bwrap, sh |
 | q2playd | `playd.py`: q2playd built for this machine against a stand-in q2player: the FIFO and list file, Q2PLAY/1, the now file, ends, cuts and failures | `cc`, the host's SQLite |
+| Vamp API 1's permissions | `perm.py`: the three services' checks (a member, a refusal, root) and, in a user namespace per uid, packages' users from `q2pkgd app-add` reaching only their services; `q2pkgd`'s users, groups and `app-run` | `cc`, bwrap |
 | q2dlnad | `dlnad.py`: q2dlnad built for this machine against stand-ins for Q2PLAY/1 and Q2NET/1, and once the real q2playd: the switch, SSDP, the descriptions, each action, events, the radio's hold | `cc`, python3 |
 | q2sysd | `sysd.py`: q2sysd built for this machine on a stand-in `/sys` and `/dev/input`: the power key's press and hold, the backlight, the battery file, Q2SYS/1 | `cc` |
 | q2libd | `libd.py`: q2libd built for this machine on a stand-in card of songs ffmpeg makes: tags, ids across scans, catalogues, q2ui's query, the service's first library | `cc`, ffmpeg, the host's FFmpeg and SQLite |

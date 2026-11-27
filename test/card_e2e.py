@@ -55,7 +55,8 @@ CHROOT = r'''#!/bin/sh
 echo "chroot $*" >> "$E/q2vampos.record"
 new=$1; shift
 binds=; while read -r a b; do binds="$binds --bind $a ${b#$new}"; done < "$E/binds"
-exec bwrap --bind "$new" / --bind /proc /proc --dev /dev --bind "$E/fb0" /dev/fb0 --bind "$E/input" /dev/input \
+# uid 0 in a user namespace, as root is on a Q2: the services take root's connections (perm/q2perm.h)
+exec bwrap --unshare-user --uid 0 --gid 0 --bind "$new" / --bind /proc /proc --dev /dev --bind "$E/fb0" /dev/fb0 --bind "$E/input" /dev/input \
     --ro-bind "$QEMU" /usr/libexec/qemu-binfmt/mipsel-binfmt-P --bind "$E/record" /run/vamp/boot.log --bind "$E" /emu $binds \
     --ro-bind "$E/modules" /proc/modules "$@"
 '''

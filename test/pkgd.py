@@ -44,7 +44,7 @@ def build(work, pub):
     mono = ROOT/'patch/monocypher'
     key = '{' + ','.join(str(b) for b in pub) + '}'
     out = work/'q2pkgd'
-    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', f'-I{mono}', f'-DRELEASE_KEY={key}', '-o', str(out), str(src),
+    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', f'-I{mono}', '-I', str(ROOT/'perm'), f'-DRELEASE_KEY={key}', '-o', str(out), str(src),
                     str(mono/'monocypher.c'), str(mono/'monocypher-ed25519.c')], check=True)
     return out
 

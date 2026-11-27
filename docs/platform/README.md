@@ -11,7 +11,7 @@ The API Vamp OS offers a program that is not part of it ([roadmap: Platform](../
 | Packages | `q2pkgd` | the card | [Packages](packages.md) | |
 | Notices and questions (designed, not served) | `q2ui` | `/run/vamp/ui.sock` | [Q2UI/1 notices](notices.md) | `notices`, `ask` |
 
-Not in API 1 yet: the declarative UI (Q2SPOT/1 stays API 0, served by today's Vamp; Vamp OS has no shim for it yet), `libvampui`, the canvas, input, a settings namespace, storage folders, power holds and notices, and the permission checks themselves ([Packages: Permissions](packages.md#permissions)).
+Not in API 1 yet: the declarative UI (Q2SPOT/1 stays API 0, served by today's Vamp; Vamp OS has no shim for it yet), `libvampui`, the canvas, input, a settings namespace, storage folders, power holds and notices, and the checks of the permissions no socket guards yet ([Packages: Users and groups](packages.md#users-and-groups)).
 
 ## The common shape
 
@@ -22,7 +22,7 @@ Every API 1 socket is the same ([roadmap: Process model](../vamp-os.md#process-m
 - **An answer to every command**: `ok`, `err WHY` (the command, or a word naming what failed), or the command's own line (`now ...`, `status ...`). A command with several lines of answer ends them with `ok`.
 - **Subscriptions, not polling.** `watch` answers `ok`; from then on the service writes its event lines as things change, between answers to commands.
 - **Fields.** An answer's values are `key=value` words separated by single spaces. Free text (titles, SSIDs, the kernel's battery text) is percent-encoded: every byte below `0x21`, `%`, `"`, `=` and `0x7f` is `%` and two upper-case hex digits, every other byte (UTF-8 included) as it is. A client splits on spaces, each field at its first `=`, and URL-decodes the value. Numbers are plain decimal. Where a command carries free text (Q2NET/1's SSIDs and passphrases) it is encoded the same way.
-- **Sockets** are mode 0600, root's, until the per-permission groups exist.
+- **Permissions.** A service whose socket a permission guards answers the hello of a caller without it `err permission` and closes the connection; each such socket is mode 0660 and its permission's group's ([Packages: Users and groups](packages.md#users-and-groups)).
 
 ## Capabilities
 

@@ -27,7 +27,7 @@ def binary(tmp_path_factory):
     out = tmp_path_factory.mktemp('sysd')
     src = out/'q2sysd.c'
     src.write_bytes(SOURCE.read_bytes())
-    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', '-o', str(out/'q2sysd'), str(src)], check=True)
+    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', '-I', str(conformance.PERM), '-o', str(out/'q2sysd'), str(src)], check=True)
     return out/'q2sysd'
 
 
@@ -49,6 +49,7 @@ def tree(tmp_path):
     put(tmp_path, '/sys/class/power_supply/ac/online', '0\n')
     (tmp_path/'dev/input').mkdir(parents=True)
     os.mkfifo(tmp_path/'dev/input/event1')
+    conformance.accounts(tmp_path)
     return tmp_path
 
 

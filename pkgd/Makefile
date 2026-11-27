@@ -3,7 +3,7 @@
 OUT ?= build/host
 CFLAGS ?= -O2
 MONO := ../patch/monocypher
-$(OUT)/q2pkgd: q2pkgd.c $(MONO)/monocypher.c $(MONO)/monocypher-ed25519.c | $(OUT)
-	$(CC) -std=c11 -Wall -Wextra $(CFLAGS) -I$(MONO) '-DRELEASE_KEY=$(KEY)' -o $@ q2pkgd.c $(MONO)/monocypher.c $(MONO)/monocypher-ed25519.c $(LDFLAGS)
+$(OUT)/q2pkgd: q2pkgd.c ../perm/q2perm.h $(MONO)/monocypher.c $(MONO)/monocypher-ed25519.c | $(OUT)
+	$(CC) -std=c11 -Wall -Wextra $(CFLAGS) -I$(MONO) -I../perm '-DRELEASE_KEY=$(KEY)' -o $@ q2pkgd.c $(MONO)/monocypher.c $(MONO)/monocypher-ed25519.c $(LDFLAGS)
 $(OUT):
 	mkdir -p $@

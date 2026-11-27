@@ -20,7 +20,7 @@ PAGE = pathlib.Path(os.environ.get('Q2API_DOCS') or ROOT/'docs/platform')/'packa
 def binary(tmp_path_factory):
     out = tmp_path_factory.mktemp('pkgd')/'q2pkgd'
     mono = ROOT/'patch/monocypher'
-    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', f'-I{mono}', '-DRELEASE_KEY={0}', '-o', str(out), str(SOURCE),
+    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', f'-I{mono}', '-I', str(ROOT/'perm'), '-DRELEASE_KEY={0}', '-o', str(out), str(SOURCE),
                     str(mono/'monocypher.c'), str(mono/'monocypher-ed25519.c')], check=True)
     return out
 
@@ -44,6 +44,11 @@ GOOD = 'name=Radio\napi=1\nversion=1.2.0\nkind=browse\nentry=q2-radio --quiet\np
 
 def test_an_api_0_app_is_run_as_today(binary, tmp_path):
     assert check(binary, app(tmp_path, 'name=Subsonic\ncatalogue=1\ncovers=1\n')) == (0, 'app radio: Subsonic, API 0 (a card app as today)')
+
+
+def test_the_notice_permissions_are_known(binary, tmp_path):
+    assert check(binary, app(tmp_path, GOOD.replace('playback,network-hold', 'notices,ask'))) == (
+        0, 'app radio: Radio 1.2.0, a browse for API 1, may use: notices,ask')
 
 
 def test_a_good_manifest_says_what_the_app_may_do(binary, tmp_path):

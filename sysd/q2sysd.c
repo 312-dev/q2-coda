@@ -44,6 +44,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "q2perm.h" /* perm/: the permission check */
+
 #define HOLD_MS 3000    /* the power key held this long powers off */
 #define BATTERY_S 30    /* the battery read this often */
 #define INPUTS 8        /* input devices watched */
@@ -595,6 +597,13 @@ static void client_line(struct client *c, const char *line) {
     int v;
     if (!c->hello) {
         if (strcmp(line, "Q2SYS/1")) { client_say(c, "err version"); close(c->fd), c->fd = -1; return; }
+        char who[100];
+        if (!q2perm_allowed(c->fd, path("/etc/passwd"), path("/etc/group"), "settings", who, sizeof who)) {
+            say("refused %s: no settings permission", who); /* docs/platform/packages.md#users-and-groups */
+            client_say(c, "err permission");
+            close(c->fd), c->fd = -1;
+            return;
+        }
         c->hello = 1;
         client_say(c, "Q2SYS/1 ok");
     } else if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
@@ -665,7 +674,7 @@ int main(int argc, char **argv) {
     unlink(a.sun_path);
     api_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (api_fd < 0 || bind(api_fd, (struct sockaddr *)&a, sizeof a) || listen(api_fd, CLIENTS)) say("%s: %s", a.sun_path, strerror(errno));
-    chmod(a.sun_path, 0600);
+    q2perm_socket(a.sun_path, path("/etc/group"), "settings"); /* 0660, the settings group's */
     charge_limit = config_int("Q2POD", "CHARGELIMIT", 0);
     find_backlight();
     open_inputs();

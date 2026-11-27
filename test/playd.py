@@ -37,7 +37,7 @@ def build(out):
     lib = next(pathlib.Path('/usr/lib').glob('*-linux-gnu/libsqlite3.so.0'))
     src = out/'q2playd.c'
     src.write_bytes(SOURCE.read_bytes())
-    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', *(['-isystem', str(inc[-1])] if inc else []),
+    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', '-I', str(conformance.PERM), *(['-isystem', str(inc[-1])] if inc else []),
                     '-o', str(out/'q2playd'), str(src), str(lib)], check=True)
     return out/'q2playd'
 
@@ -134,6 +134,7 @@ def run(binary, shim, tmp_path, config):
         (tmp_path/d).mkdir(parents=True)
     (tmp_path/'dev/shanling_dac').write_text('')
     (tmp_path/'mnt/data/config.ini').write_text(config)
+    conformance.accounts(tmp_path)
     db = sqlite3.connect(tmp_path/'mnt/data/database.db')
     db.execute('create table songtable(id integer primary key, fileurl, name, songer, album, track)')
     db.executemany('insert into songtable values (?, ?, ?, ?, ?, 0)', SONGS)

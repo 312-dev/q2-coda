@@ -8,7 +8,24 @@ import pathlib
 import re
 import socket
 
+PERM = pathlib.Path(os.environ.get('Q2PERM_DIR') or pathlib.Path(__file__).resolve().parents[1]/'perm')  # q2perm.h's folder; another, to show a gap fails
 DOCS = pathlib.Path(os.environ.get('Q2API_DOCS') or pathlib.Path(__file__).resolve().parents[1]/'docs/platform')  # another copy, to show a gap fails
+
+
+PERMISSIONS = ['playback', 'library', 'library-write', 'settings', 'network-hold', 'screen', 'music-files', 'background',
+               'notices', 'ask']  # perm/q2perm.h's groups
+
+
+def accounts(root, perms=PERMISSIONS, uid=None, name='tester'):
+    """root's etc/passwd and etc/group as q2pkgd composes them, naming this process's uid (or uid) a package user in
+    the groups of perms: a service under --root then checks the suite's own connections as a package's
+    (perm/q2perm.h); the default, every permission, lets a suite's client do all it did"""
+    uid = os.getuid() if uid is None else uid
+    (root/'etc').mkdir(parents=True, exist_ok=True)
+    (root/'etc/passwd').write_text(f'root:x:0:0:root:/root:/bin/sh\n{name}:x:{uid}:{uid}::/:/bin/false\n')
+    gids = dict(zip(PERMISSIONS, range(2000, 2010)))
+    (root/'etc/group').write_text('root:x:0:\n' + f'{name}:x:{uid}:\n' +
+                                  ''.join(f'{p}:x:{g}:{name if p in perms else ""}\n' for p, g in gids.items()))
 
 
 def blocks(page):

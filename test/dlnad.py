@@ -418,6 +418,7 @@ def test_with_q2playd_the_url_reaches_the_player_and_its_end_stops_the_transport
     for d in ('tmp', 'run/vamp', 'mnt/data', 'dev', 'sys/class/net/wlan0'):
         (tmp_path/d).mkdir(parents=True, exist_ok=True)
     (tmp_path/'mnt/data/config.ini').write_text(CONFIG_ON)
+    playd.conformance.accounts(tmp_path)
     q2playd = subprocess.Popen([str(pbin), '--root', str(tmp_path)], stderr=subprocess.DEVNULL)
     player = playd.Player(tmp_path)
     port, ssdp = free_port(), free_port(socket.SOCK_DGRAM)

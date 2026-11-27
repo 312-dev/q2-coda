@@ -31,6 +31,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "q2perm.h" /* perm/: the permission check */
+
 #define QUEUE_MAX 20000  /* ids one play may queue (q2ui's PLAY_MAX, coda_rc_shim.c CR_LIST_MAX) */
 #define CLIENTS 8        /* Q2PLAY/1 connections at once */
 #define LINE 512         /* a Q2PLAY/1 line */
@@ -803,6 +805,13 @@ static int source_release(int slot) {
 static void client_line(struct client *c, char *line) {
     if (!c->hello) {
         if (strcmp(line, "Q2PLAY/1")) { client_say(c, "err version"); close(c->fd), c->fd = -1; return; }
+        char who[100];
+        if (!q2perm_allowed(c->fd, path("/etc/passwd"), path("/etc/group"), "playback", who, sizeof who)) {
+            logf_("refused %s: no playback permission", who); /* docs/platform/packages.md#users-and-groups */
+            client_say(c, "err permission");
+            close(c->fd), c->fd = -1;
+            return;
+        }
         c->hello = 1;
         client_say(c, "Q2PLAY/1 ok");
         return;
@@ -897,6 +906,7 @@ int main(int argc, char **argv) {
     push_fd = listen_unix(path(push_rel), SOCK_DGRAM, 0);
     mkdir(path("/run/vamp"), 0755);
     api_fd = listen_unix(path(api_rel), SOCK_STREAM, CLIENTS);
+    q2perm_socket(path(api_rel), path("/etc/group"), "playback"); /* 0660, the playback group's */
     unlink(path(cmdq_rel));
     if (mkfifo(path(cmdq_rel), 0600)) logf_("%s: %s", path(cmdq_rel), strerror(errno));
     cmdq_fd = open(path(cmdq_rel), O_RDWR | O_NONBLOCK | O_CLOEXEC); /* RDWR: never an EOF when a writer leaves */

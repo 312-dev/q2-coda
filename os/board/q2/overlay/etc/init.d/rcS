@@ -3,7 +3,8 @@
 #   1. the kernel's file systems and a tmpfs /dev, as stock's inittab makes them; mdev, then its daemon;
 #   2. /mnt/data, the UBIFS on the "userdata" partition: attached and mounted, never erased or formatted
 #      (on any failure it is a tmpfs for this boot, and the boot log says why), or left as it is when already
-#      mounted (a boot from the card, docs/vamp-os-base.md#card-boot);
+#      mounted (a boot from the card, docs/vamp-os-base.md#card-boot); then the accounts, the packages' users
+#      added to the image's (q2pkgd accounts);
 #   3. Shanling's own module script, /vendor/module_driver/driver_default_init_script.sh, run unchanged from
 #      its folder, as stock's S11module_driver_default runs it; then what loaded, against the .ko files there.
 #      Not run when any of them is loaded already (a boot from the card);
@@ -31,6 +32,10 @@ ln -sf /proc/self/fd/1 /dev/stdout
 ln -sf /proc/self/fd/2 /dev/stderr
 mkdir -p /run/vamp /run/runit
 for s in /etc/sv/*; do mkdir -p "/run/runit/supervise.${s##*/}"; done
+# /etc/passwd and /etc/group are links here: the image's own users first (mdev names groups), the packages' after
+# /mnt/data (q2pkgd accounts, below)
+cp /etc/passwd.base /run/vamp/passwd
+cp /etc/group.base /run/vamp/group
 hostname -F /etc/hostname
 
 . /usr/libexec/vamp/log
@@ -83,6 +88,12 @@ if data; then
 else
     mount -t tmpfs -o mode=0755 tmpfs /mnt/data
     step "data: a tmpfs for this boot, nothing written is kept"
+fi
+# each package's user and the permissions' groups (docs/platform/packages.md#permissions), from /mnt/data/vamp/apps
+if /usr/bin/q2pkgd accounts; then
+    step "accounts: $(grep -c '^app-' /run/vamp/passwd) package users"
+else
+    step "accounts: q2pkgd accounts FAILED, the image's users alone"
 fi
 
 # loaded: which of /module_driver's modules /proc/modules has; missing: which it has not

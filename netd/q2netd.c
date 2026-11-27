@@ -35,6 +35,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "q2perm.h" /* perm/: the permission check */
+
 #define IDLE_S 300          /* Smart Wi-Fi: 5 idle minutes */
 #define REMOTE_HOLD_S 1800  /* a computer let in over Wi-Fi holds the radio 30 minutes (REMOTE_HOLD_MS) */
 #define BOOT_HOLD_S 1800    /* and the first 30 minutes after the start (REMOTE_BOOT_MS) */
@@ -337,6 +339,13 @@ static void client_line(struct client *c, char *line) {
     unsigned s;
     if (!c->hello) {
         if (strcmp(line, "Q2NET/1")) { client_say(c, "err version"); close(c->fd), c->fd = -1; return; }
+        char who[100];
+        if (!q2perm_allowed(c->fd, path("/etc/passwd"), path("/etc/group"), "network-hold", who, sizeof who)) {
+            say("refused %s: no network-hold permission", who); /* docs/platform/packages.md#users-and-groups */
+            client_say(c, "err permission");
+            close(c->fd), c->fd = -1;
+            return;
+        }
         c->hello = 1;
         client_say(c, "Q2NET/1 ok");
     } else if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
@@ -466,7 +475,7 @@ int main(int argc, char **argv) {
     unlink(a.sun_path);
     api = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (api < 0 || bind(api, (struct sockaddr *)&a, sizeof a) || listen(api, CLIENTS)) say("%s: %s", a.sun_path, strerror(errno));
-    chmod(a.sun_path, 0600);
+    q2perm_socket(a.sun_path, path("/etc/group"), "network-hold"); /* 0660, the network-hold group's */
     snprintf(st.state, sizeof st.state, "off");
     started_at = now_ms();
     struct stat sb;

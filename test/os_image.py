@@ -191,6 +191,9 @@ def check_image(build, fs, manifest, perturb=None):
     services = sorted(p.name for p in (fs/'etc/sv').iterdir())
     check(services == ['adb-wifi', 'adbd', 'q2dacloop', 'q2dlnad', 'q2libd', 'q2netd', 'q2pkgd-confirm', 'q2playd', 'q2player', 'q2scrobd', 'q2sysd', 'q2ui'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
           f'services: {", ".join(services)}')
+    check(os.readlink(fs/'etc/passwd') == '/run/vamp/passwd' and os.readlink(fs/'etc/group') == '/run/vamp/group'
+          and (fs/'etc/passwd.base').read_text().startswith('root:x:0:0:') and (fs/'etc/group.base').read_text().startswith('root:x:0:'),
+          "/etc/passwd and /etc/group are links into /run/vamp, the image's own users in the .base files")
     check(not (fs/'etc/init.d').exists() or sorted(p.name for p in (fs/'etc/init.d').iterdir()) == ['rcK', 'rcS'],
           '/etc/init.d holds rcS and rcK alone')
 
@@ -563,7 +566,9 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
     else:
         ns, proc_args = ['--unshare-pid', '--as-pid-1'], ['--proc', '/proc']
         first = ['/sbin/init']
-    cmd = ['bwrap', *ns, '--unshare-uts', '--unshare-ipc', '--die-with-parent',
+    # uid 0 in a user namespace of its own: on a Q2 the services and q2ui are root, and the services take root's
+    # connections without a package's groups (perm/q2perm.h)
+    cmd = ['bwrap', *ns, '--unshare-user', '--uid', '0', '--gid', '0', '--unshare-uts', '--unshare-ipc', '--die-with-parent',
            '--bind', fs, '/', *proc_args, '--dev', '/dev', '--bind', fb, '/dev/fb0', '--bind', inp, '/dev/input',
            '--ro-bind', qemu, '/usr/libexec/qemu-binfmt/mipsel-binfmt-P', '--bind', emu, '/emu',
            '--bind', emu/'record', '/run/vamp/boot.log', '--bind', fs/'mnt/mmc', '/mnt/mmc', *extra, *first]
@@ -622,6 +627,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
     def at(pred):
         return next((i for i, s in enumerate(order) if pred(s)), None)
     first = lambda prefix: at(lambda s: s.startswith(prefix))  # noqa: E731
+    check(first('accounts: 0 package users') is not None and (first('data: ') or 0) < first('accounts: '),
+          'rcS composes the accounts (q2pkgd accounts) once /mnt/data is there')
     if card:
         check(not any(s.startswith('insmod ') for s in order) and first('modules: already loaded, not run again; not loaded: none') is not None,
               'card boot: the module script is not run again over loaded modules')

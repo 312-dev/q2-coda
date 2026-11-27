@@ -5,6 +5,9 @@
  *     q2pkgd restore [--card DIR]                             at boot, first: the rescue copy put back in recovery-update/
  *     q2pkgd confirm [--card DIR]                             after a good boot: the same, and the install no longer pending
  *     q2pkgd app-check DIR                                    an app's folder and its q2app manifest (docs/platform/packages.md)
+ *     q2pkgd app-add DIR | app-remove ID [--root DIR]         a package's user and groups made, or retired
+ *     q2pkgd accounts [--root DIR]                            /run/vamp/passwd and group composed (rcS, at each boot)
+ *     q2pkgd app-run DIR [--root DIR]                         the package's entry, run as its user
  *
  * The card's recovery-update/ (xImage and rootfs.squashfs, stock's) is the owner's only way back when a boot fails:
  * hold Previous and power on with Centre, and Shanling's recovery flashes it. So nothing here leaves the card without a
@@ -34,6 +37,21 @@
  *            api=1, a version of dotted numbers, a known kind, an entry that is a program in the folder (for every kind
  *            but theme and language), and only known permissions, screen for a game alone and background for every
  *            service. It says what the app is and may do, or the first thing wrong. It installs nothing.
+ *
+ * Package users (docs/platform/packages.md#permissions, perm/q2perm.h):
+ *
+ *   app-add     an API 1 app's folder, checked as app-check does, given a user "app-<id>" (a uid from 10000, the
+ *               same one again for an id added before) in /mnt/data/vamp/apps, "<id> <uid> <permissions>" a line,
+ *               and a data folder /mnt/data/vamp/app/<id> of its own (0700); then the accounts composed. An API 0 app
+ *               gets no user: it runs as today.
+ *   app-remove  its line kept with "-" for its permissions, so the uid and the data folder stay its own and are never
+ *               given to another package; then the accounts composed.
+ *   accounts    /etc/passwd.base and /etc/group.base (the image's, Buildroot's users) and the registry into
+ *               /run/vamp/passwd and /run/vamp/group, where the image's /etc/passwd and /etc/group point: each package's
+ *               user and its own group, and each permission's group listing the users that may use it.
+ *   app-run     the entry of an added app as its user: the groups of its permissions as the registry has them (what
+ *               was approved at app-add, not what the manifest says now), then its gid and uid; when any of those does
+ *               not take, or uid 0 could be taken back, it runs nothing. HOME is its data folder.
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -47,7 +65,11 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <grp.h>
+#include <sys/types.h>
+
 #include "monocypher-ed25519.h"
+#include "q2perm.h" /* perm/: the permissions' groups */
 
 #ifndef RELEASE_KEY /* the release key's public half, from assets/signing/q2-coda-release.pub (os/package/q2pkgd) */
 #error RELEASE_KEY
@@ -381,8 +403,6 @@ static int restore(const char *card, int and_confirm) {
 
 #define API_SERVED 1
 static const char *const KINDS[] = {"browse", "toolkit", "game", "service", "theme", "language", "provider", 0};
-static const char *const PERMISSIONS[] = {"playback", "library", "library-write", "settings", "network-hold",
-                                          "screen", "music-files", "background", 0};
 
 static int listed(const char *const *list, const char *w, size_t n) {
     for (int i = 0; list[i]; ++i)
@@ -390,10 +410,19 @@ static int listed(const char *const *list, const char *w, size_t n) {
     return 0;
 }
 
-static int app_check(const char *dir) {
+static int known_permission(const char *w, size_t n) {
+    for (int i = 0; Q2PERM_GROUPS[i].name; ++i)
+        if (strlen(Q2PERM_GROUPS[i].name) == n && !strncmp(Q2PERM_GROUPS[i].name, w, n)) return 1;
+    return 0;
+}
+
+struct manifest { char name[200], api[16], version[64], kind[32], entry[600], permissions[400]; long api_n; int new_keys; };
+
+/* dir's manifest into m, checked; 0 good (an API 0 app has m->new_keys 0) */
+static int manifest(const char *dir, struct manifest *mp) {
     char path[700], *text;
     const char *base = strrchr(dir, '/') ? strrchr(dir, '/') + 1 : dir;
-    struct { char name[200], api[16], version[64], kind[32], entry[600], permissions[400]; int api_n, new_keys; } m = {0};
+    struct manifest m = {0};
     if (base[0] != '.' || !base[1]) return fail("%s: an app's folder is .<id>", dir);
     for (const char *c = base + 1; *c; ++c)
         if (!(*c >= 'a' && *c <= 'z') && !(*c >= '0' && *c <= '9') && *c != '-') return fail("%s: an app id is a-z, 0-9 and -", dir);
@@ -415,7 +444,7 @@ static int app_check(const char *dir) {
     }
     free(text);
     if (!*m.name) return fail("q2app: no name=");
-    if (!m.new_keys) return printf("app %s: %s, API 0 (a card app as today)\n", base + 1, m.name), 0;
+    if (!m.new_keys) return *mp = m, 0;
     char *end;
     long api = strtol(m.api, &end, 10);
     if (!*m.api || *end || api < 1) return fail("q2app: api= is the lowest Vamp API it needs, a number from 1");
@@ -439,22 +468,216 @@ static int app_check(const char *dir) {
     int screen = 0, background = 0;
     for (const char *w = m.permissions; *w;) {
         size_t k = strcspn(w, ",");
-        if (!k || !listed(PERMISSIONS, w, k)) return fail("q2app: %.*s is not a permission", (int)(k ? k : 1), k ? w : ",");
+        if (!k || !known_permission(w, k)) return fail("q2app: %.*s is not a permission", (int)(k ? k : 1), k ? w : ",");
         screen |= k == 6 && !strncmp(w, "screen", 6), background |= k == 10 && !strncmp(w, "background", 10);
         w += k + (w[k] == ',');
     }
     if (screen && strcmp(m.kind, "game")) return fail("q2app: screen is a game's permission alone");
     if (!strcmp(m.kind, "service") && !background) return fail("q2app: a service runs in the background: it needs permissions=background");
-    printf("app %s: %s %s, a %s for API %ld, may use: %s\n", base + 1, m.name, m.version, m.kind, api, *m.permissions ? m.permissions : "nothing");
+    m.api_n = api;
+    *mp = m;
     return 0;
+}
+
+static const char *app_id(const char *dir) {
+    const char *base = strrchr(dir, '/') ? strrchr(dir, '/') + 1 : dir;
+    return base + 1;
+}
+
+static int app_check(const char *dir) {
+    struct manifest m;
+    if (manifest(dir, &m)) return 1;
+    if (!m.new_keys) return printf("app %s: %s, API 0 (a card app as today)\n", app_id(dir), m.name), 0;
+    printf("app %s: %s %s, a %s for API %ld, may use: %s\n", app_id(dir), m.name, m.version, m.kind, m.api_n,
+           *m.permissions ? m.permissions : "nothing");
+    return 0;
+}
+
+/* ---- package users (docs/platform/packages.md#permissions) ---- */
+
+#define APPS_MAX 256
+#define ID_MAX 27 /* "app-" and the id: 31 bytes, under the 32 a user name may be */
+static char proot[256];
+static struct app { char id[64]; long uid; char perms[400]; } apps[APPS_MAX];
+static int n_apps;
+
+static char *rp(const char *rel) { /* rel under --root */
+    static char b[4][700];
+    static int i;
+    i = (i + 1) & 3;
+    snprintf(b[i], sizeof b[i], "%s%s", proot, rel);
+    return b[i];
+}
+
+/* /mnt/data/vamp/apps: "<id> <uid> <permissions>" a line; "." no permissions, "-" removed */
+static void apps_read(void) {
+    FILE *f = fopen(rp("/mnt/data/vamp/apps"), "r");
+    char l[600];
+    n_apps = 0;
+    while (f && n_apps < APPS_MAX && fgets(l, sizeof l, f)) {
+        struct app *a = &apps[n_apps];
+        if (sscanf(l, "%63s %ld %399s", a->id, &a->uid, a->perms) == 3 && a->uid >= Q2PERM_UID_MIN) ++n_apps;
+    }
+    if (f) fclose(f);
+}
+
+static int write_whole(const char *dst, const char *text, mode_t mode) {
+    char tmp[720];
+    snprintf(tmp, sizeof tmp, "%s.q2pkgd", dst);
+    FILE *f = fopen(tmp, "w");
+    if (!f) return fail("%s: %s", tmp, strerror(errno));
+    int bad = fputs(text, f) < 0;
+    bad |= fclose(f) != 0;
+    if (bad || chmod(tmp, mode) || rename(tmp, dst)) return unlink(tmp), fail("%s: %s", dst, strerror(errno));
+    return 0;
+}
+
+static int apps_write(void) {
+    char *text = calloc(APPS_MAX, 600), *o = text;
+    if (!text) return fail("out of memory");
+    for (int i = 0; i < n_apps; ++i) o += sprintf(o, "%s %ld %s\n", apps[i].id, apps[i].uid, apps[i].perms);
+    mkdir(rp("/mnt/data/vamp"), 0755);
+    int r = write_whole(rp("/mnt/data/vamp/apps"), text, 0644);
+    free(text);
+    return r;
+}
+
+static int has_perm(const struct app *a, const char *perm) {
+    size_t k = strlen(perm);
+    for (const char *w = a->perms; *w; w += strcspn(w, ",") + (w[strcspn(w, ",")] == ','))
+        if (strcspn(w, ",") == k && !strncmp(w, perm, k)) return 1;
+    return 0;
+}
+
+static int accounts(void) {
+    size_t pn = 0, gn = 0;
+    char *pw = slurp(rp("/etc/passwd.base"), &pn), *gr = slurp(rp("/etc/group.base"), &gn);
+    if (!pw || !gr) return free(pw), free(gr), fail("no %s or %s", rp("/etc/passwd.base"), rp("/etc/group.base"));
+    apps_read();
+    size_t room = pn + gn + (size_t)n_apps * 200 + 64 * 1024;
+    char *p = malloc(room), *g = malloc(room), *po = p, *go = g;
+    if (!p || !g) return free(pw), free(gr), free(p), free(g), fail("out of memory");
+    po += sprintf(po, "%.*s%s", (int)pn, pw, pn && pw[pn - 1] != '\n' ? "\n" : "");
+    go += sprintf(go, "%.*s%s", (int)gn, gr, gn && gr[gn - 1] != '\n' ? "\n" : "");
+    for (int i = 0; i < n_apps; ++i) {
+        if (!strcmp(apps[i].perms, "-")) continue;
+        po += sprintf(po, "app-%s:x:%ld:%ld:%s:/mnt/data/vamp/app/%s:/bin/false\n", apps[i].id, apps[i].uid, apps[i].uid, apps[i].id, apps[i].id);
+        go += sprintf(go, "app-%s:x:%ld:\n", apps[i].id, apps[i].uid);
+    }
+    for (int k = 0; Q2PERM_GROUPS[k].name; ++k) {
+        int first = 1;
+        go += sprintf(go, "%s:x:%d:", Q2PERM_GROUPS[k].name, Q2PERM_GROUPS[k].gid);
+        for (int i = 0; i < n_apps; ++i)
+            if (strcmp(apps[i].perms, "-") && has_perm(&apps[i], Q2PERM_GROUPS[k].name))
+                go += sprintf(go, "%sapp-%s", first ? "" : ",", apps[i].id), first = 0;
+        *go++ = '\n', *go = 0;
+    }
+    mkdir(rp("/run"), 0755), mkdir(rp("/run/vamp"), 0755);
+    int r = write_whole(rp("/run/vamp/passwd"), p, 0644) || write_whole(rp("/run/vamp/group"), g, 0644);
+    free(pw), free(gr), free(p), free(g);
+    return r;
+}
+
+static struct app *app_find(const char *id) {
+    for (int i = 0; i < n_apps; ++i)
+        if (!strcmp(apps[i].id, id)) return &apps[i];
+    return 0;
+}
+
+static int app_add(const char *dir) {
+    struct manifest m;
+    const char *id = app_id(dir);
+    if (manifest(dir, &m)) return 1;
+    if (!m.new_keys) return printf("app %s: API 0, run as today with no user of its own\n", id), 0;
+    if (strlen(id) > ID_MAX) return fail("%s: an app id of more than %d bytes has no user name", id, ID_MAX);
+    apps_read();
+    struct app *a = app_find(id);
+    if (!a) {
+        long uid = Q2PERM_UID_MIN - 1;
+        for (int i = 0; i < n_apps; ++i)
+            if (apps[i].uid > uid) uid = apps[i].uid;
+        if (n_apps == APPS_MAX) return fail("%d packages: no room for another", APPS_MAX);
+        a = &apps[n_apps++];
+        snprintf(a->id, sizeof a->id, "%s", id), a->uid = uid + 1;
+    }
+    snprintf(a->perms, sizeof a->perms, "%s", *m.permissions ? m.permissions : ".");
+    char data[700];
+    snprintf(data, sizeof data, "%s", rp("/mnt/data/vamp/app"));
+    mkdir(rp("/mnt/data"), 0755), mkdir(rp("/mnt/data/vamp"), 0755), mkdir(data, 0755);
+    snprintf(data, sizeof data, "%s/%s", rp("/mnt/data/vamp/app"), id);
+    if (mkdir(data, 0700) && errno != EEXIST) return fail("%s: %s", data, strerror(errno));
+    if (chown(data, (uid_t)a->uid, (gid_t)a->uid) && geteuid() == 0) return fail("%s: %s", data, strerror(errno));
+    chmod(data, 0700);
+    if (apps_write() || accounts()) return 1;
+    printf("app %s: user app-%s (uid %ld), groups: %s\n", id, id, a->uid, strcmp(a->perms, ".") ? a->perms : "none");
+    return 0;
+}
+
+static int app_remove(const char *id) {
+    apps_read();
+    struct app *a = app_find(id);
+    if (!a || !strcmp(a->perms, "-")) return fail("%s: not added", id);
+    snprintf(a->perms, sizeof a->perms, "-");
+    if (apps_write() || accounts()) return 1;
+    printf("app %s: removed; uid %ld and its data folder stay its own\n", id, a->uid);
+    return 0;
+}
+
+static int app_run(const char *dir) {
+    struct manifest m;
+    const char *id = app_id(dir);
+    if (manifest(dir, &m)) return 1;
+    if (!m.new_keys || !*m.entry) return fail("%s: not an API 1 app with an entry", id);
+    apps_read();
+    struct app *a = app_find(id);
+    if (!a || !strcmp(a->perms, "-")) return fail("%s: not added (q2pkgd app-add)", id);
+    gid_t gids[16];
+    int n = 0;
+    gids[n++] = (gid_t)a->uid;
+    for (int k = 0; Q2PERM_GROUPS[k].name && n < 16; ++k)
+        if (has_perm(a, Q2PERM_GROUPS[k].name)) gids[n++] = (gid_t)Q2PERM_GROUPS[k].gid;
+    uid_t u = (uid_t)a->uid;
+    if (setgroups((size_t)n, gids) || setgid(u) || setuid(u)) return fail("cannot become app-%s: %s; nothing run", id, strerror(errno));
+    if (getuid() != u || geteuid() != u || getgid() != u || getegid() != u || !setuid(0))
+        return fail("app-%s's ids did not all take; nothing run", id);
+    char data[700], home[720], *argv[32], *e = m.entry, prog[700];
+    int c = 0;
+    snprintf(data, sizeof data, "/mnt/data/vamp/app/%s", id);
+    if (chdir(dir)) return fail("%s: %s", dir, strerror(errno));
+    for (char *w = strtok(e, " "); w && c < 31; w = strtok(0, " ")) argv[c++] = w;
+    argv[c] = 0;
+    snprintf(prog, sizeof prog, "./%s", argv[0]);
+    snprintf(home, sizeof home, "HOME=%s", data);
+    char *env[] = {home, "PATH=/usr/bin:/bin", 0};
+    execve(prog, argv, env);
+    return fail("%s: %s", prog, strerror(errno));
+}
+
+static int apps_main(int argc, char **argv) {
+    const char *arg = 0;
+    for (int i = 2; i < argc; ++i) {
+        if (!strcmp(argv[i], "--root") && i + 1 < argc) snprintf(proot, sizeof proot, "%s", argv[++i]);
+        else if (!arg && argv[i][0] != '-') arg = argv[i];
+        else return fprintf(stderr, "q2pkgd: %s: unknown argument %s\n", argv[1], argv[i]), 2;
+    }
+    if (!strcmp(argv[1], "accounts")) return arg ? 2 : accounts();
+    if (!arg) return fprintf(stderr, "q2pkgd: %s needs %s\n", argv[1], strcmp(argv[1], "app-remove") ? "DIR" : "ID"), 2;
+    if (!strcmp(argv[1], "app-add")) return app_add(arg);
+    if (!strcmp(argv[1], "app-remove")) return app_remove(arg);
+    if (!strcmp(argv[1], "app-run")) return app_run(arg);
+    return 2;
 }
 
 int main(int argc, char **argv) {
     const char *rootfs = "/", *card = "/mnt/mmc", *usage =
         "usage: q2pkgd stage RELEASE_DIR [--rootfs DIR] [--card DIR] | install | restore | confirm [--card DIR]"
-        " | app-check DIR\n";
+        " | app-check DIR | app-add DIR | app-remove ID | app-run DIR | accounts [--root DIR]\n";
     if (argc < 2) return fputs(usage, stderr), 2;
     if (!strcmp(argv[1], "app-check")) return argc == 3 ? app_check(argv[2]) : (fputs(usage, stderr), 2);
+    if (!strcmp(argv[1], "app-add") || !strcmp(argv[1], "app-remove") || !strcmp(argv[1], "app-run") || !strcmp(argv[1], "accounts")) {
+        int r = apps_main(argc, argv);
+        return r == 2 ? (fputs(usage, stderr), 2) : r;
+    }
     int first = !strcmp(argv[1], "stage") ? 3 : 2;
     if (first > argc) return fputs(usage, stderr), 2;
     for (int i = first; i < argc; ++i) {

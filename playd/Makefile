@@ -4,7 +4,7 @@
 OUT ?= build/host
 CFLAGS ?= -O2
 SQLITE_LIB ?= -lsqlite3
-$(OUT)/q2playd: q2playd.c | $(OUT)
-	$(CC) -std=c11 -Wall -Wextra $(CFLAGS) $(if $(SQLITE_INC),-isystem $(SQLITE_INC)) -o $@ q2playd.c $(LDFLAGS) $(SQLITE_LIB)
+$(OUT)/q2playd: q2playd.c ../perm/q2perm.h | $(OUT)
+	$(CC) -std=c11 -Wall -Wextra -I../perm $(CFLAGS) $(if $(SQLITE_INC),-isystem $(SQLITE_INC)) -o $@ q2playd.c $(LDFLAGS) $(SQLITE_LIB)
 $(OUT):
 	mkdir -p $@
