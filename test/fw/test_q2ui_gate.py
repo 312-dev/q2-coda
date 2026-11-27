@@ -677,3 +677,27 @@ def test_q2ui_left_for_a_page_that_ends_on_demos_now_playing_comes_back_on_its_o
     fw.mock('fw_fork', lambda *_: 0)  # the child's side this time: what it runs
     g.poll()
     assert ran and ran[-1][:2] == [BINARY, BINARY] and ran[-1][2:2 + len(then) + 1] == then + [0]
+
+
+def test_play_pause_is_q2uis_only_while_its_row_editor_asks_for_it(fw):
+    """q2ui's Edit Library shows and hides a row by Play/Pause (docs/oled-design.md#edit-library), which is otherwise
+    demo's (the music's key): "playkey 1" down q2ui's pipe makes its presses q2ui's until "playkey 0", and a q2ui
+    started again begins with them demo's, so one that ended inside its editor cannot keep the key."""
+    g = Piped(fw)
+    g.poll()
+    assert g.input(UP, KEYS['KEY_PLAY']) == 0
+    g.sent = b'playkey 1\n'
+    g.poll()
+    assert g.input(DOWN, KEYS['KEY_PLAY']) == 1 and g.input(UP, KEYS['KEY_PLAY']) == 1
+    assert g.input(UP, KEYS['KEY_PREV']) == 1  # the wheel's stay q2ui's
+    g.sent = b'playkey 0\n'
+    g.poll()
+    assert g.input(UP, KEYS['KEY_PLAY']) == 0
+    g.sent = b'playkey 1\n'
+    g.poll()
+    g.ms += 60000
+    g.status, g.ended = 15, 1  # ended from outside, a minute in: started again
+    g.poll()
+    g.ended = 0
+    g.poll()
+    assert g.forks == 2 and g.on() == CHILD and g.input(UP, KEYS['KEY_PLAY']) == 0

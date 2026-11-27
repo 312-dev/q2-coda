@@ -131,54 +131,33 @@ static const struct {
  * ponytail: Genres, Composers, Recently Added and Long Songs are reached through Home's Old Menus
  * until each has a page here or an opener the gate is seen to run. */
 
-/* The user's order and choice of rows, as demo's Library shows them: Edit Library's file (demo's,
- * written as the user moves or hides a row) holds the rows' letters in order, each led by '+' or
- * '-' once the user has shown or hidden it; read against demo's default order as its lr_resolve_in
- * does, a letter it doesn't know dropped and a row it doesn't name put after the row before it in
- * the default order. Each of q2ui's rows shows unless hidden: demo's rule for them is shown. */
+/* The user's order and choice of rows, as demo's Library shows them: Edit Library's file (written by demo's editor or
+ * q2ui's, ui/page_edit.c) read against demo's default order (order_read). Each of q2ui's rows shows unless hidden:
+ * demo's rule for them is shown. */
 const char *library_order_file = "/mnt/data/ringnav-library-order";
 static const char lr_default[] = "hspalgerfncmqiLPAvUu";
 static int lib_shown[LIB_ROWS], lib_n; /* lib_rows' indexes in the order shown */
+static edit_row lib_edit[LIB_ROWS];
 
-static int find(const char *s, int n, int c) {
-    for (int i = 0; i < n; ++i)
-        if (s[i] == c) return i;
-    return -1;
-}
 static void lib_order(void) {
-    char saved[64] = "", out[64], hidden[64] = "";
-    int n = 0, h = 0, mark = 0, def = (int)strlen(lr_default);
-    FILE *f = fopen(library_order_file, "rb");
-    if (f) saved[fread(saved, 1, sizeof saved - 1, f)] = 0, fclose(f);
-    for (int i = 0; saved[i]; ++i) {
-        int c = saved[i];
-        if (c == '+' || c == '-') {
-            mark = c;
-            continue;
-        }
-        if (find(lr_default, def, c) >= 0 && find(out, n, c) < 0) {
-            out[n++] = (char)c;
-            if (mark == '-') hidden[h++] = (char)c;
-        }
-        mark = 0;
-    }
-    for (int i = 0; i < def; ++i) {
-        if (find(out, n, lr_default[i]) >= 0) continue;
-        int at = 0;
-        for (int j = i; j-- > 0;) {
-            int k = find(out, n, lr_default[j]);
-            if (k >= 0) {
-                at = k + 1;
-                break;
-            }
-        }
-        for (int k = n++; k > at; --k) out[k] = out[k - 1];
-        out[at] = lr_default[i];
-    }
+    char out[ORDER_MAX], marks[ORDER_MAX];
+    int n = order_read(library_order_file, lr_default, out, marks);
     lib_n = 0;
     for (int i = 0; i < n; ++i)
         for (int k = 0; k < LIB_ROWS; ++k)
-            if (lib_rows[k].letter == out[i] && find(hidden, h, out[i]) < 0) lib_shown[lib_n++] = k;
+            if (lib_rows[k].letter == out[i] && order_shows(marks[strchr(lr_default, out[i]) - lr_default], EDIT_SHOWN))
+                lib_shown[lib_n++] = k;
+}
+/* Edit Library closed: the rows as it left them, every list asking its rows again */
+static void lib_edited(void) {
+    lib_order();
+    list_rows_changed();
+}
+/* Centre held: Edit Library, on the rows q2ui has */
+static void l_held(void *ctx, int i) {
+    (void)ctx, (void)i;
+    for (int k = 0; k < LIB_ROWS; ++k) lib_edit[k] = (edit_row){ lib_rows[k].letter, lib_rows[k].title, EDIT_SHOWN };
+    edit_push(lr_default, library_order_file, lib_edit, LIB_ROWS, lib_edited);
 }
 static int l_count(void *ctx) {
     (void)ctx;
@@ -202,7 +181,7 @@ static void l_chosen(void *ctx, int i) {
 }
 void library_push(void) {
     lib_order(); /* read at each open: demo's Edit Library may have changed it while q2ui was away */
-    ui_source src = { .count = l_count, .row = l_row, .chosen = l_chosen, .name = "library" };
+    ui_source src = { .count = l_count, .row = l_row, .chosen = l_chosen, .held = l_held, .name = "library" };
     ui_push(&list_page, &src);
 }
 

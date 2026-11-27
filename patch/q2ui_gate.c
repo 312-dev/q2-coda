@@ -3,7 +3,8 @@
  * /usr/bin/q2ui, demo starts it as its child and runs on under it as the owner of every service
  * (the player, Bluetooth, Wi-Fi, USB, power), painting nothing (ringnav_wm_paint) and leaving the
  * wheel, Centre, Return and touches to it (ringnav_input), as it does for q2video and a card game.
- * Play/Pause and the side buttons stay demo's, so the music's keys work as they do on any page.
+ * Play/Pause and the side buttons stay demo's, so the music's keys work as they do on any page; Play/Pause is
+ * q2ui's only while its row editor has asked for it (playkey).
  *
  *  - q2ui ends by itself (its Old Menus row): demo has the screen again, whole, and keeps it
  *    until the next start of demo.
@@ -81,6 +82,7 @@ static struct {
     char booted;       /* it has been started once: the boot animation is over */
     char opening;      /* a page q2ui asked for is on its way up: Home on top does not yet mean it was left */
     char then_now;     /* that page was left for demo's Now Playing (a Search result played): q2ui opens its own */
+    char playkey;      /* Play/Pause is q2ui's ("playkey 1", its row editor's): from a start, demo's until asked */
     unsigned started_at; /* time_now_ms when q2ui was last started */
     unsigned asked_at; /* time_now_ms when it was asked for */
     unsigned told_at, told; /* the status's last look (time_now_ms), and the hash of what was written */
@@ -201,6 +203,7 @@ static void start(void) {
     }
     qu.pid = pid > 0 ? pid : 0;
     qu.took = 0, qu.then_now = 0; /* once: a later start is on q2ui's own pages */
+    qu.playkey = 0;
     qu.started_at = (unsigned)time_now_ms();
     said("started, pid", qu.pid);
     if (!qu.pid) widget_invalidate_force(window_manager(), 0);
@@ -261,7 +264,8 @@ static void unescape(const char *s, char *out) {
  * anyway), or its Wi-Fi page's "scan" or "join NAME" (wifi_flows.c), or its Bluetooth page's
  * "btscan", "btlink MAC" or "btforget MAC" (bt_ui.c), or "wake", a question of its notice socket's
  * lighting the dark screen as a press would (awake_screen; ui/notice.c), or "screenoff", its Now Playing's
- * short Centre hold or double press turning the lit screen off as demo's does (np_screen_off); another verb, a MAC that is not one, or a line
+ * short Centre hold or double press turning the lit screen off as demo's does (np_screen_off), or "playkey 1" or
+ * "playkey 0", Play/Pause's presses q2ui's while its row editor is open (q2ui_input; ui/page_edit.c); another verb, a MAC that is not one, or a line
  * too long, is dropped. Read every pass while it runs and after it
  * ends, so a setting sent just before leaving for a page of demo's is not lost; at most CTL_READS
  * reads a pass, so a q2ui that writes without end cannot hold demo's loop (the rest waits in the pipe). */
@@ -298,6 +302,8 @@ static void ctl(void) {
                 said(bt_q2ui_link(word2) ? "btlink refused," : "btlink", 0);
             else if (__isoc99_sscanf(qu.line + from, "btforget %17s", word2) == 1 && bt_mac_ok(word2))
                 said(bt_q2ui_forget(word2) ? "btforget refused," : "btforget", 0);
+            else if (__isoc99_sscanf(qu.line + from, "playkey %d", &v) == 1)
+                qu.playkey = v == 1;
             else if (!tk_strcmp(qu.line + from, "screenoff")) {
                 said("screenoff, lit", g_backlight_status);
                 np_screen_off();
@@ -361,12 +367,13 @@ void q2ui_poll(void) {
 }
 
 /* ringnav_input's, for an event of type and key: 1 when it is q2ui's, which reads the wheel, Centre,
- * Return and the touch panel itself; the other keys stay demo's. */
+ * Return and the touch panel itself, and Play/Pause while it has asked (playkey); the other keys stay demo's. */
 int q2ui_input(unsigned type, unsigned key) {
     if (!q2ui_on()) return 0;
     int press = type == EVT_KEY_DOWN || type == EVT_KEY_UP || type == EVT_KEY_LONG;
     int its = (type >= EVT_POINTER_FIRST && type <= EVT_POINTER_ABORT) ||
-              (press && (key == KEY_PREV || key == KEY_NEXT || key == KEY_CENTER || key == KEY_RETURN));
+              (press && (key == KEY_PREV || key == KEY_NEXT || key == KEY_CENTER || key == KEY_RETURN ||
+                         (key == KEY_PLAY && qu.playkey)));
     if (its) reset_poweroptions_timer(1, 1, 1); /* the screen stays lit while it is used */
     return its;
 }

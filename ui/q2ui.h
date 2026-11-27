@@ -331,6 +331,11 @@ enum {
     ROW_CHECK = 1 << 6,   /* a picker's current choice */
     ROW_HEADER = 1 << 7,  /* a section header: small tertiary text, never selected */
     ROW_SLIDER = 1 << 8,  /* a level set in its row (docs/oled-design.md#inline-sliders): level, value */
+    /* a row editor's (docs/oled-design.md#edit-library): */
+    ROW_DIM = 1 << 9,     /* its words in Text Tertiary, still selectable (a hidden row) */
+    ROW_CIRCLE = 1 << 10, /* a check circle leading it, filled with a check with ROW_ON, else a ring */
+    ROW_LOCK = 1 << 11,   /* ... a locked one, a padlock in it: always shown */
+    ROW_GRIP = 1 << 12,   /* a grip in the chevron's place */
 };
 typedef struct {
     const char *title;
@@ -362,6 +367,7 @@ typedef struct ui_source {
     int row_h;  /* 32, or 52 for two-line rows; 0 is 32 */
     int letters; /* 1: sorted by title, so a fast spin jumps by letter */
     rect_t box; /* where the list lives; w 0 is the whole screen under the status row */
+    int fade_to; /* where the rows past the list's end have faded into the ground; 0: the screen's foot's (y 311) */
 } ui_source;
 typedef struct ui_list ui_list;
 /* A picture a row was given (ui_row.art) may have changed or been freed: every list asks its rows
@@ -404,13 +410,20 @@ void list_select(ui_list *l, int i, int animate);
 int list_selected(const ui_list *l);
 int list_grabbed(const ui_list *l); /* the ROW_SLIDER row Centre grabbed, the wheel's until set down; -1 none */
 int list_set_down(ui_list *l);      /* the grabbed row set down: 1 when one was */
+/* A row editor's: the selected row lifted onto a raised card (its words in Inter Medium, in Text Primary), or put
+ * down; and the source's row `from` moved to `to`, the selection going with it and the rows it passed sliding aside
+ * (docs/oled-design.md#edit-library) */
+void list_lift(ui_list *l, int on);
+int list_lifted(const ui_list *l);
+void list_moved_row(ui_list *l, int from, int to);
 float list_scroll(const ui_list *l); /* px scrolled, for a test */
 extern int list_motion; /* 0: every move is at its end at once (a bench, Reduce Motion) */
 /* A page that is one list and nothing else. */
 extern const ui_page list_page;
 ui_list *list_page_list(void *st);
-/* the list last stepped, as "sel=N scroll=PX bar=PX lean=PX press=S knob=SHARE grab=N az=L azin=PX": a script's trace
- * (az: the A-Z index's lit letter, 0 '#', 1 to 26, -1 hidden) */
+/* the list last stepped, as "sel=N scroll=PX bar=PX lean=PX press=S knob=SHARE grab=N az=L azin=PX cap=PX slide=PX":
+ * a script's trace (az: the A-Z index's lit letter, 0 '#', 1 to 26, -1 hidden; cap: how far the selected row has grown to
+ * its caption; slide: how far the rows a moved row passed are still from their places, together) */
 int list_trace(char *out, size_t room);
 int list_rows_dump(const char *path); /* the top list's rows as text, a line each (a script's rows FILE) */
 int list_last_selected(void); /* that list's selection; -1 with none */
@@ -465,6 +478,22 @@ int player_set(const char *name, int value); /* a setting of demo's, down q2ui's
 void player_click(int button);               /* demo's key click for a tick (0) or a press (1), down the same pipe */
 int player_line(const char *verb, const char *arg); /* "scan", "join" a network, "btscan", "btlink" a MAC...: the same pipe; 0 sent */
 extern int player_ctl;                       /* that pipe's write end (--ctl FD), or -1 */
+
+/* ---- page_edit.c: a list's own order and choice of rows (demo's Edit Library file), and its editor ---- */
+#define ORDER_MAX 64 /* the file's bytes, its letters and marks and a NUL: patch/library_edit.c LR_MAX */
+enum { EDIT_SHOWN, EDIT_HIDDEN, EDIT_LOCKED }; /* a row's own rule until the user shows or hides it */
+typedef struct {
+    char letter; /* its letter in the file, by its place in the list's default order */
+    const char *title;
+    int rule;
+} edit_row;
+/* The order in the file saved (its bytes, NUL-ended) against the default def: out the rows' letters (ORDER_MAX), marks
+ * each row's '+', '-' or 0 by its place in def (ORDER_MAX; may be 0); returns out's length. order_read reads file. */
+int order_resolve(const char *def, const char *saved, char *out, char *marks);
+int order_read(const char *file, const char *def, char *out, char *marks);
+int order_shows(int mark, int rule); /* whether a row with that mark and rule shows */
+/* The editor over rows, those of def's a page has: its order saved to file as it changes; done is called as it closes */
+void edit_push(const char *def, const char *file, const edit_row *rows, int n, void (*done)(void));
 
 /* ---- pages ---- */
 void songs_push(void);

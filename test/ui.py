@@ -374,9 +374,9 @@ def scripts(binary, work):
                   sum(1 for k in knob if 0.02 < k < 0.98) >= 10 and pics['sliding'].rgb not in (pics['on'].rgb, pics['off'].rgb),
                   f'{sum(1 for k in knob if 0.02 < k < 0.98)} frames between its ends in two flips')
     good &= check('a chevron stands at the right column', pics['on'].at(342, BAR_H + ROW_H + 16) != (0, 0, 0) and pics['open'].at(342, BAR_H + ROW_H + 16) != ACCENT)
-    # an inline slider row (ROW_SLIDER): Centre grabs it and the wheel then sets it (clockwise, down a list, is more, as
+    # an inline slider row (ROW_SLIDER), the last but one (the captioned row is last): Centre grabs it and the wheel then sets it (clockwise, down a list, is more, as
     # demo's sliders: patch/inline_slider.c, KEY_NEXT), Centre or Return sets it down
-    lines = ['rest', 'tick 12', 'rest', 'key centre', 'run 50', 'tick 2', 'tick -1', 'run 50', 'shot @grabbed.ppm', 'key centre', 'run 50',
+    lines = ['rest', 'tick 20', 'rest', 'run 300', 'tick -1', 'rest', 'key centre', 'run 50', 'tick 2', 'tick -1', 'run 50', 'shot @grabbed.ppm', 'key centre', 'run 50',
              'tick -1', 'rest', 'tick 1', 'rest', 'key centre', 'run 50', 'tick 1', 'key return', 'rest', 'rows @rows.txt', 'tick -1',
              'run 50']
     trace, pics, _, (_, _, d) = script(binary, work, 1, lines, '--page', 'gallery', queue=True)
@@ -956,6 +956,65 @@ def captions(binary, work, home):
     trace, _, _ = script(binary, work, 1, ['rest', 'tick 14', 'rest'], '--page', 'gallery')
     good &= check("a two-line caption on a list's last row: 39 px grown, the list scrolled to keep its foot on the list end",
                   trace[-1]['sel'] == 13 and trace[-1]['cap'] == 39 and trace[-1]['scroll'] == 9 * ROW_H, str(trace[-1]))
+    return good
+
+
+def edit_library(binary, work, home):
+    """Edit Library (docs/oled-design.md#edit-library), q2ui's own (ui/page_edit.c): Centre held on the Library opens
+    it, every row listed with its check circle and grip and the hint under them; Centre lifts a row onto a raised card,
+    the wheel carries it a row a click while the row it passes slides aside over 150 ms, Centre puts it down and saves;
+    Return puts a carried row back; Play/Pause hides or shows a row, saved at once; Return or Centre held leaves, the
+    hidden rows leaving the Library. Saved as demo's file (patch/library_edit.c lr_store: every row's letter in order,
+    each led by + or - once shown or hidden, the rows the editor does not list keeping their places)."""
+    good = True
+    lib = ['rest', 'key centre', 'rest']  # Home > Library
+    enter = lib + ['down centre', 'hold centre', 'rest']
+
+    def run(lines, *options):
+        order = pathlib.Path(tempfile.mkdtemp(dir=work))/'ringnav-library-order'
+        trace, pics, _, (_, _, d) = script(binary, work, 60, lines, *home, '--library-order', order, *options, queue=True)
+        saved = order.read_bytes().rstrip(b'\0').decode() if order.exists() else None
+        rows = (d/'rows.txt').read_text().splitlines() if (d/'rows.txt').exists() else []
+        carried = (d/'carried.txt').read_text().splitlines() if (d/'carried.txt').exists() else []
+        return trace, pics, saved, rows, carried
+
+    every = ['Songs', 'Playlists', 'Artists', 'Albums', 'Years', 'Ratings', 'Most Played']
+    trace, pics, saved, rows, _ = run(enter + ['shot @edit.ppm', 'rows @rows.txt'])
+    good &= check('Centre held on the Library opens Edit Library on its rows, nothing saved by opening it',
+                  rows == every and saved is None, f'{rows} {saved!r}')
+    e = pics['edit']
+    near = lambda c, rgb: all(abs(a - b) <= 12 for a, b in zip(c, rgb))
+    good &= check("each row's check circle at x 34 (the accent's disc; white on the selection) and its grip at the "
+                  'right column in Text Tertiary, the hint under the rows',
+                  near(e.at(28, 106), ACCENT) and near(e.at(28, 74), (255, 255, 255)) and near(e.at(342, 106), (0x85, 0x85, 0x85))
+                  and any(e.at(x, y)[0] > 60 for x in range(240, 330) for y in range(293, 304)) and not e.blue(340, 74 + 36),
+                  f'{e.at(28, 106)} {e.at(28, 74)} {e.at(342, 106)}')
+    trace, pics, saved, rows, _ = run(enter + ['key centre', 'run 40', 'shot @lifted.ppm', 'tick 1', 'run 50', 'shot @mid.ppm', 'rest',
+                                            'key centre', 'rest', 'rows @rows.txt'])
+    slides = [t.get('slide', -1) for t in trace]
+    good &= check('Centre lifts Songs onto the raised card (#2C2C2E, not the accent), the wheel carries it below '
+                  'Playlists, Centre puts it down and saves the order over the places they held',
+                  near(pics['lifted'].at(300, 66), (0x2c, 0x2c, 0x2e)) and rows[:2] == ['Playlists', 'Songs']
+                  and saved == 'hpsalgerfncmqiLPAvUu', f"{pics['lifted'].at(300, 66)} {rows[:3]} {saved!r}")
+    good &= check('the row it passes slides aside over frames, and is at rest after',
+                  sum(1 for v in slides if 0 < v < 32) >= 3 and slides[-1] == 0, str(sorted(set(slides))[:8]))
+    trace, _, _, _, carried = run(enter + ['key centre', 'tick 1', 'rest', 'rows @carried.txt'], '--reduce-motion')
+    good &= check('under Reduce Motion it is in its place at once', carried[:2] == ['Playlists', 'Songs'] and
+                  not any(0 < t.get('slide', -1) < 32 for t in trace), str(carried[:2]))
+    trace, _, saved, rows, carried = run(enter + ['key centre', 'tick 2', 'rest', 'rows @carried.txt', 'key return', 'rest', 'rows @rows.txt'])
+    good &= check('Return puts a carried row back where it was, still in the editor, nothing saved',
+                  carried[:3] == ['Playlists', 'Artists', 'Songs'] and rows == every and saved is None and trace[-1]['sel'] == 0,
+                  f'{carried[:3]} {rows} {saved!r}')
+    trace, _, saved, rows, _ = run(enter + ['tick 1', 'rest', 'key play', 'rest', 'key return', 'rest', 'rows @rows.txt'])
+    good &= check('Play/Pause hides Playlists, saved at once; Return leaves and the Library goes without it',
+                  saved == 'hs-palgerfncmqiLPAvUu' and rows == [r for r in every if r != 'Playlists'], f'{rows} {saved!r}')
+    trace, _, saved, rows, _ = run(enter + ['tick 1', 'rest', 'key play', 'rest', 'key play', 'rest', 'down centre', 'hold centre', 'rest',
+                                         'rows @rows.txt'])
+    good &= check('Play/Pause again shows it (the mark kept), and Centre held leaves', saved == 'hs+palgerfncmqiLPAvUu' and rows == every,
+                  f'{rows} {saved!r}')
+    _, _, _, _, said = script(binary, work, 60, enter + ['key return', 'rest'], *home, queue=True, ctl=True)
+    good &= check("it asks demo for Play/Pause as it opens and gives it back as it closes (patch/q2ui_gate.c playkey)",
+                  said == ['playkey 1', 'playkey 0'], str(said))
     return good
 
 
@@ -1993,6 +2052,8 @@ def main():
             good &= az_index(binary, work)
         if not only or 'captions' in only:
             good &= captions(binary, work, ('--page', 'home'))
+        if not only or 'edit' in only:
+            good &= edit_library(binary, work, ('--page', 'home'))
         if not only or 'notices' in only:
             good &= notices(binary, work)
     print('q2ui: ' + ('all checks passed' if good else 'FAILED'))
