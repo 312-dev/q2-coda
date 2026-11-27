@@ -185,7 +185,7 @@ Everything here has been run only under the emulator and on this machine. What o
 | --- | --- | --- |
 | Boot | The kernel's command line (`init=`), devtmpfs or not, LZO squashfs, UBI and UBIFS as this init assumes; every module loading under it; the watchdog's state with nothing opening it | [What boots](#what-boots), [First boot](#first-boot-on-a-q2) |
 | Card boot | Loop devices in the kernel; the chroot over a running stock boot; stopping stock's `mdev` | [Card boot](#card-boot) |
-| Recovery | Shanling's recovery restoring this unit, and what its `recovery-update/` folder must hold | [First boot](#first-boot-on-a-q2) |
+| Recovery | Shanling's recovery restoring this unit at all: on the owner's Q2 the key combo booted normally (2026-11-27) and U-Boot shows only the `mtd6` mark path, so no flash install until a rescue path is seen working ([First boot](#first-boot-on-a-q2)); and what its `recovery-update/` folder must hold | [First boot](#first-boot-on-a-q2) |
 | adb | The USB controller in device mode with nothing of stock's having set it; the gadget on the real UDC | [adb](#adb) |
 | Screen | `bl_power` turning the panel's light off; the brightness scale; the double tap waking it; q2ui's 24-bit panel mode | [q2sysd](sysd.md#needs-a-q2) |
 | Power | Which devices carry the power button and whether a press arrives twice; `poweroff` reaching the PMIC; the PMIC's own long-press time | [q2sysd](sysd.md#needs-a-q2) |
@@ -207,6 +207,8 @@ Everything here has been run only under the emulator and on this machine. What o
 | App isolation | Which of mount and network namespaces, cgroups and seccomp the kernel has, for what a package's permissions can hold; a package run by `q2pkgd app-run` as its own uid refused by a root service, and one started over Q2PKG/1 running as its own uid (a laptop has one uid for both ends: there `app-run` cannot drop to the package's user, and runs nothing); `PR_SET_CHILD_SUBREAPER` for an API 0 app's loop (QEMU refuses it) | [Packages: Users and groups](platform/packages.md#users-and-groups) |
 
 ## First boot on a Q2
+
+**Recovery is unproven on the owner's Q2 (measured 2026-11-27, unit V26Qi): no flash install of Vamp OS on the device.** The documented combo (hold Previous, power on with Centre for 1 to 2 s) booted normally, and `recovery-update/` (stock V1.36's `xImage` and `rootfs.squashfs`) was still on the card afterwards, so the recovery did not run. U-Boot's strings (`mtd0`, read-only) show only the `ota:kernel2` mark path (`====into recovery====`), the one stock's updater takes through `mtd6`; a key-triggered recovery is not shown to exist on this unit (a longer hold is still to be tried). Until a rescue path has been seen working on that Q2, Vamp OS is tried there only by [card boot](#card-boot), and nothing that writes its flash is run: no `q2pkgd install`, no `mtd6` mark, no step 9 below.
 
 Not done: the Q2 belongs to the main session, and **nothing goes on it until Shanling's recovery has been tried on that unit.** The card boot comes first; a flash install only after it works. Each step stops the plan if it fails.
 
