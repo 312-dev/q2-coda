@@ -408,7 +408,8 @@ extern int list_motion; /* 0: every move is at its end at once (a bench, Reduce 
 /* A page that is one list and nothing else. */
 extern const ui_page list_page;
 ui_list *list_page_list(void *st);
-/* the list last stepped, as "sel=N scroll=PX bar=PX lean=PX press=S knob=SHARE grab=N": a script's trace */
+/* the list last stepped, as "sel=N scroll=PX bar=PX lean=PX press=S knob=SHARE grab=N az=L azin=PX": a script's trace
+ * (az: the A-Z index's lit letter, 0 '#', 1 to 26, -1 hidden) */
 int list_trace(char *out, size_t room);
 int list_rows_dump(const char *path); /* the top list's rows as text, a line each (a script's rows FILE) */
 int list_last_selected(void); /* that list's selection; -1 with none */

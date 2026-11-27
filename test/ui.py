@@ -901,6 +901,34 @@ def bt_devices(binary, work, home):
     return good
 
 
+def az_index(binary, work):
+    """The A-Z index (docs/oled-design.md#a-z-index): on a list sorted by title of more than 50 rows, a fast spin shows
+    the folded column at x 362 with the selected row's letter lit on it and the bubble beside it, the right column 4 px
+    in; a second after the last fast tick it is gone. Slow ticks, or a list of 50 rows or fewer, show none."""
+    good = True
+    fast = ['rest', 'tick 30', 'shot @spin.ppm']
+    trace, pics, _ = script(binary, work, 300, fast + ['run 400', 'shot @still.ppm', 'run 700', 'shot @gone.ppm'])
+    spun = [t for t in trace if t.get('az', -1) >= 0]
+    last = trace[-1]
+    sel_letter = int(spun[-1]['az']) if spun else -1
+    good &= check('a fast spin on 300 songs shows the index, the right column 4 px in, and it goes a second after',
+                  bool(spun) and spun[-1]['azin'] == 4 and last['az'] == -1 and last['azin'] == 0 and 0 <= sel_letter <= 26,
+                  f'{len(spun)} frames with it, last {last}')
+    col = [pics['spin'].at(362, y) for y in range(78, 83)]  # '#' at the column's top
+    lit_y = round(80 + sel_letter * 160 / 26)
+    disc = pics['spin'].at(362 - 6, lit_y)  # the lit letter's white disc, beside its black letter
+    bubble = pics['spin'].at(362 - 8 - 18 - 26, lit_y)  # the bubble's middle while it spins
+    good &= check('the column is drawn, the lit letter a white disc at its place, the bubble beside it while it spins, and '
+                  'the bubble gone once the spin has stopped', any(c[0] > 150 for c in col) and disc == (255, 255, 255) and
+                  bubble == (0x2c, 0x2c, 0x2e) and pics['still'].at(362 - 8 - 18 - 26, lit_y) != (0x2c, 0x2c, 0x2e) and
+                  all(pics['gone'].at(362, y)[0] < 40 for y in range(78, 83)),
+                  f"col {col} disc {disc} bubble {bubble} still {pics['still'].at(362 - 8 - 18 - 26, lit_y)}")
+    slow, _, _ = script(binary, work, 300, ['rest'] + ['tick 1', 'run 300'] * 6)
+    few, _, _ = script(binary, work, 50, ['rest', 'tick 30'])
+    good &= check('slow ticks, or a list of 50 rows, show no index', all(t.get('az', -1) == -1 for t in slow + few))
+    return good
+
+
 def comebacks(binary, work, home):
     """A page of demo's opened from a page of q2ui's: q2ui, started again when demo's page is left, is back on the page
     that opened it, on its row, under the pages it had (main.c state_restore), for every page that opens one."""
@@ -1931,6 +1959,8 @@ def main():
             good &= panel(binary, work)
         if not only or 'status' in only:
             good &= status(binary, work)
+        if not only or 'az' in only:
+            good &= az_index(binary, work)
         if not only or 'notices' in only:
             good &= notices(binary, work)
     print('q2ui: ' + ('all checks passed' if good else 'FAILED'))

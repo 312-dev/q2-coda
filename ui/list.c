@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "../patch/wheel_accel.h"
 #include "q2ui.h"
@@ -85,6 +86,25 @@
 #define SLIDER_STEPS 10    /* a tick's most steps on a fast spin (patch/offsets.inc VOL_ACCEL_MAX) */
 #define SLIDER_TRACK_ON 0x7da2ea /* its track on the platter, under a white fill */
 #define CACHE 32 /* rows whose text is kept: a power of two, more than a fast glide shows */
+/* The A-Z index (docs/oled-design.md#a-z-index), on a list sorted by title (ui_source.letters) of more than AZ_ROWS
+ * rows, shown by the wheel spun fast (a tick of two rows or more, wheel_accel): the folded column of letters centred
+ * at AZ_X from AZ_TOP to AZ_BOTTOM, the selected row's letter lit on it, and the bubble beside it while the spin goes
+ * on; gone AZ_SHOW_US after the last fast tick, its last AZ_FADE_US fading. While it shows the right column moves in
+ * AZ_IN px and the platter ends AZ_BAR_IN px sooner, and the scroll indicator stays hidden. */
+#define AZ_ROWS 50
+#define AZ_X 362
+#define AZ_TOP 80
+#define AZ_BOTTOM 240
+#define AZ_SHOW_US 1000000u
+#define AZ_FADE_US 200000u
+#define AZ_BUBBLE_US 250000u /* the bubble stays while fast ticks come this close */
+#define AZ_IN 4
+#define AZ_BAR_IN 8
+#define AZ_DISC 16
+#define AZ_BUBBLE_W 52
+#define AZ_BUBBLE_H 48
+#define AZ_BUBBLE_GAP 18 /* the bubble ends this far left of the column, */
+#define AZ_POINTER 7     /* its pointer this long towards it */
 
 int list_motion = 1;
 
@@ -94,6 +114,7 @@ struct rowc {
     ui_row row;
     run_t title, detail, value, sub, lead;
     float title_x, detail_x, text_end; /* where the title's column ends */
+    int az_in; /* the A-Z index's move of the right column when it was laid out */
 };
 
 struct ui_list {
@@ -114,6 +135,8 @@ struct ui_list {
     rect_t focus_was; /* the focus layer's box as last marked */
     struct rowc rows_c[CACHE];
     wheel_accel_t accel;
+    uint64_t az_at; /* the A-Z index: the last fast tick, 0 hidden */
+    int az_in, az_letter; /* the right column's move while it shows; the lit letter, 0 '#', 1 to 26 A to Z */
 };
 
 static int selectable(ui_list *l, int i) {
@@ -140,8 +163,9 @@ static rect_t sb_rect(void) { return (rect_t){ SB_X, SB_TOP, SB_W, SB_BOTTOM - S
 static rectf_t platter(const ui_list *l, float *tilt, float *lean_share) {
     float share = clampf((float)l->lean.x / LEAN_PX, -1.5f, 1.5f);
     float scale = 1 + RAISE + LEAN_GROW * fabsf(share) + (float)l->press.x;
-    float w = (float)(l->box.w - 2 * SEL_INSET) * scale, h = (float)l->row_h * scale;
-    float cx = (float)l->box.x + (float)l->box.w / 2;
+    float bw = (float)(l->box.w - 2 * SEL_INSET - (l->az_in ? AZ_BAR_IN : 0));
+    float w = bw * scale, h = (float)l->row_h * scale;
+    float cx = (float)(l->box.x + SEL_INSET) + bw / 2;
     float cy = (float)l->bar.x + (float)l->row_h / 2 + share * LEAN_PX;
     if (tilt) *tilt = -share * LEAN_TILT;
     if (lean_share) *lean_share = share;
@@ -259,20 +283,21 @@ void list_rows_changed(void) { ++everything; }
 static struct rowc *row_text(ui_list *l, int i) {
     struct rowc *c = &l->rows_c[i & (CACHE - 1)];
     if (c->index == i && !run_stale(&c->title) && !run_stale(&c->detail) && !run_stale(&c->value) &&
-        !run_stale(&c->sub) && !run_stale(&c->lead) && (!c->row.art || c->pictures == pictures) && c->everything == everything)
+        !run_stale(&c->sub) && !run_stale(&c->lead) && (!c->row.art || c->pictures == pictures) && c->everything == everything &&
+        c->az_in == l->az_in)
         return c;
     static run_t gap;
     if (!gap.n || run_stale(&gap)) run_make(&gap, FACE_REGULAR, TITLE_PX, "  ", -1);
     ui_row *r = &c->row;
     memset(r, 0, sizeof *r);
     l->src.row(l->src.ctx, i, r);
-    c->index = i, c->pictures = pictures, c->everything = everything;
+    c->index = i, c->pictures = pictures, c->everything = everything, c->az_in = l->az_in;
     int two = l->row_h > ROW_H && r->sub;
     float x = (float)(l->box.x + TEXT_X + TEXT_MARGIN);
     if (r->icon) x = (float)(l->box.x + ICON_TEXT_X + TEXT_MARGIN);
     if (r->lead) x = (float)(l->box.x + LEAD_TEXT_X + TEXT_MARGIN);
     if (r->art) x = (float)(l->box.x + ART_TEXT_X + TEXT_MARGIN);
-    float end = (float)(l->box.x + l->box.w - (SCREEN_W - RIGHT_COL)) - TEXT_MARGIN;
+    float end = (float)(l->box.x + l->box.w - (SCREEN_W - RIGHT_COL) - l->az_in) - TEXT_MARGIN;
     c->value.n = c->detail.n = c->sub.n = c->lead.n = 0;
     c->value.made = c->detail.made = c->sub.made = c->lead.made = c->title.made;
     if (r->flags & ROW_HEADER) {
@@ -381,7 +406,7 @@ static void row_paint(ui_list *l, int i, float y, int focused, float dy) {
         run_draw(&c->title, c->title_x, title_y, ink, 256);
     if (c->detail.n) run_draw(&c->detail, c->detail_x, ty + (h - (float)META_PX) / 2 + META_DY, dim, 256);
     if (two) run_draw(&c->sub, c->title_x, ty + 29, dim, 256);
-    float right = (float)(l->box.x + l->box.w - (SCREEN_W - RIGHT_COL));
+    float right = (float)(l->box.x + l->box.w - (SCREEN_W - RIGHT_COL) - l->az_in);
     if (r->flags & ROW_SLIDER) {
         slider((float)(l->box.x + SLIDER_X), right - SLIDER_END, cy + iy, r->level, focused, i == l->grab);
         if (c->value.n) run_draw(&c->value, right - c->value.w, ty + (h - (float)META_PX) / 2, val, 256);
@@ -408,7 +433,7 @@ static void row_paint(ui_list *l, int i, float y, int focused, float dy) {
 
 static void draw_indicator(const ui_list *l) {
     int total = l->n - l->src.pinned;
-    if (!l->sb_alpha || total <= l->rows) return;
+    if (!l->sb_alpha || total <= l->rows || l->az_at) return;
     float track = SB_BOTTOM - SB_TOP, len = track * (float)l->rows / (float)total;
     if (len < SB_MIN) len = SB_MIN;
     float at = (track - len) * clampf((float)(l->scroll.x / (double)((total - l->rows) * l->row_h)), 0, 1);
@@ -417,7 +442,7 @@ static void draw_indicator(const ui_list *l) {
     fill_round((rectf_t){ SB_X, SB_TOP + at, SB_W, len }, 2, 0, 0xe5e5e5, a, 0);
 }
 
-void list_draw(ui_list *l, rect_t r) {
+static void list_draw_rows(ui_list *l, rect_t r) {
     rect_t frame = frame_rect(l), part, rows;
     int p = l->src.pinned, full = l->box.y == LIST_TOP;
     if (!rect_meet(r, frame, &part)) return;
@@ -480,6 +505,70 @@ void list_draw(ui_list *l, rect_t r) {
         row_paint(l, i, y, 1, share * LEAN_PX * over);
     }
     clip_set(r);
+}
+/* A row's place in the index: its title's first letter past "The ", "A " or "An ", A to Z as 1 to 26, anything else
+ * (digits, symbols, other scripts) 0, '#' */
+static int az_of(const char *t) {
+    static const char *const skip[] = { "the ", "a ", "an " };
+    if (!t) return 0;
+    for (int k = 0; k < 3; ++k)
+        if (!strncasecmp(t, skip[k], strlen(skip[k])) && t[strlen(skip[k])]) {
+            t += strlen(skip[k]);
+            break;
+        }
+    int c = (unsigned char)*t | 0x20;
+    return c >= 'a' && c <= 'z' ? c - 'a' + 1 : 0;
+}
+static float az_alpha(const ui_list *l) {
+    uint64_t t = ui_time() - l->az_at;
+    return !l->az_at || t >= AZ_SHOW_US ? 0 : t < AZ_SHOW_US - AZ_FADE_US ? 1 : (float)(AZ_SHOW_US - t) / AZ_FADE_US;
+}
+static rect_t az_rect(void) {
+    return (rect_t){ AZ_X - AZ_DISC / 2 - AZ_BUBBLE_GAP - AZ_BUBBLE_W - 2, AZ_TOP - AZ_BUBBLE_H / 2 - 2,
+                     AZ_BUBBLE_W + AZ_BUBBLE_GAP + AZ_DISC + 4, AZ_BOTTOM - AZ_TOP + AZ_BUBBLE_H + 4 };
+}
+static void az_draw(const ui_list *l) {
+    static const char folded[] = "#DIMQVZ"; /* seven letters with a dot between each two, as iOS folds it */
+    static run_t glyphs[27], big;
+    static char big_s[2];
+    float a = az_alpha(l);
+    if (a <= 0) return;
+    uint32_t ink = ui_light ? 0x000000 : 0xffffff, paper = ui_light ? 0xffffff : 0x000000;
+    unsigned alpha = (unsigned)(a * 256);
+    for (int k = 0; k < 13; ++k) {
+        float y = AZ_TOP + (float)k * (AZ_BOTTOM - AZ_TOP) / 12;
+        if (k & 1) {
+            fill_disc(AZ_X, y, 1.5f, ink, a);
+            continue;
+        }
+        char ch[2] = { folded[k / 2], 0 };
+        int g = ch[0] == '#' ? 0 : ch[0] - 'A' + 1;
+        if (!glyphs[g].n || run_stale(&glyphs[g])) run_make(&glyphs[g], FACE_MEDIUM, TYPE(13), ch, -1);
+        run_draw(&glyphs[g], AZ_X - glyphs[g].w / 2, y - TYPE(13) / 2.0f, ink, alpha);
+    }
+    /* the lit letter at its own place: the 27 map evenly over the column whether or not it is folded */
+    float ly = AZ_TOP + (float)l->az_letter * (AZ_BOTTOM - AZ_TOP) / 26;
+    char lit[2] = { l->az_letter ? (char)('A' + l->az_letter - 1) : '#', 0 };
+    fill_disc(AZ_X, ly, AZ_DISC / 2.0f, ink, a);
+    if (!glyphs[l->az_letter].n || run_stale(&glyphs[l->az_letter])) run_make(&glyphs[l->az_letter], FACE_MEDIUM, TYPE(13), lit, -1);
+    run_draw(&glyphs[l->az_letter], AZ_X - glyphs[l->az_letter].w / 2, ly - TYPE(13) / 2.0f, paper, alpha);
+    if (ui_time() - l->az_at >= AZ_BUBBLE_US) return;
+    /* the bubble while the spin goes on: the letter large, its pointer towards the lit one */
+    float bx = AZ_X - AZ_DISC / 2.0f - AZ_BUBBLE_GAP - AZ_BUBBLE_W, by = ly - AZ_BUBBLE_H / 2.0f;
+    fill_round((rectf_t){ bx, by, AZ_BUBBLE_W, AZ_BUBBLE_H }, 12, 0, tok(TOK_RAISED_2), a, 0);
+    for (int k = 0; k < AZ_POINTER; ++k) /* a triangle as narrowing strokes */
+        stroke_line(bx + AZ_BUBBLE_W + (float)k, ly - (float)(AZ_POINTER - k), bx + AZ_BUBBLE_W + (float)k,
+                    ly + (float)(AZ_POINTER - k), 1, tok(TOK_RAISED_2), a);
+    if (big_s[0] != lit[0] || !big.n || run_stale(&big)) big_s[0] = lit[0], run_make(&big, FACE_MEDIUM, TYPE(22), big_s, -1);
+    run_draw(&big, bx + AZ_BUBBLE_W / 2.0f - big.w / 2, ly - TYPE(22) / 2.0f, 0xffffff, alpha);
+}
+
+void list_draw(ui_list *l, rect_t r) {
+    list_draw_rows(l, r);
+    if (l->az_at && rect_meet(r, az_rect(), 0)) {
+        clip_set(r);
+        az_draw(l);
+    }
 }
 
 /* The first row at or after i, going dir, whose title starts with another letter than row i's */
@@ -554,6 +643,15 @@ void list_event(ui_list *l, const input_t *e) {
          * selection stays (docs/oled-design.md#selection-bar) */
         if (list_motion && !ui_reduce_motion) l->lean.v = (double)dir * KICK, kick(l);
         if (sel != old) moved(l, old), ui_click(0); /* at an end, where it stays, no click: as demo's lists */
+        if (l->src.letters && l->n - l->src.pinned > AZ_ROWS && (step >= 2 || step == WA_LETTER) && sel >= l->src.pinned) {
+            if (!l->az_in) l->az_in = AZ_IN, ui_mark(frame_rect(l)); /* the right column moves in for it */
+            l->az_at = ui_time();
+        }
+        if (l->az_at) {
+            struct rowc *c = row_text(l, l->sel);
+            l->az_letter = az_of(c->row.title);
+            ui_mark(az_rect());
+        }
     } else if (e->type == IN_TUG) {
         if (!list_motion || ui_reduce_motion) return;
         float a = clampf(fabsf(e->share), 0, 1);
@@ -600,8 +698,9 @@ int list_rows_dump(const char *path) {
 }
 int list_trace(char *out, size_t room) {
     if (!traced) return snprintf(out, room, "-");
-    return snprintf(out, room, "sel=%d scroll=%.3f bar=%.3f lean=%.3f press=%.4f knob=%.3f grab=%d", traced->sel,
-                    traced->scroll.x, traced->bar.x, traced->lean.x, traced->press.x, traced->knob.x, traced->grab);
+    return snprintf(out, room, "sel=%d scroll=%.3f bar=%.3f lean=%.3f press=%.4f knob=%.3f grab=%d az=%d azin=%d",
+                    traced->sel, traced->scroll.x, traced->bar.x, traced->lean.x, traced->press.x, traced->knob.x,
+                    traced->grab, traced->az_at ? traced->az_letter : -1, traced->az_in);
 }
 
 void list_step(ui_list *l) {
@@ -641,6 +740,17 @@ void list_step(ui_list *l) {
         else
             ui_wake_ms((unsigned)((SB_SHOW_US - SB_FADE_US - t) / 1000u) + 1);
         if (a != l->sb_alpha) l->sb_alpha = a, ui_mark(sb_rect());
+    }
+    if (l->az_at) {
+        uint64_t t = now - l->az_at;
+        if (t >= AZ_SHOW_US)
+            l->az_at = 0, l->az_in = 0, ui_mark(frame_rect(l)); /* gone: the right column back out */
+        else if (t >= AZ_SHOW_US - AZ_FADE_US)
+            ui_mark(az_rect()), ui_again();
+        else {
+            if (t >= AZ_BUBBLE_US) ui_mark(az_rect()); /* the bubble gone */
+            ui_wake_ms((unsigned)(((t < AZ_BUBBLE_US ? AZ_BUBBLE_US : AZ_SHOW_US - AZ_FADE_US) - t) / 1000u) + 1);
+        }
     }
     if (l->mq_at) {
         /* the selected row's cut title: rest, slide to its end, rest, back to the start */
