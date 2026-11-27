@@ -265,7 +265,7 @@ Every file in `patch/` and `tools/`, and `test/` by group: what it is for, where
 | `list.c`            | The list: row kinds, selection, the glide, the platter's lean and press, the focus layer | [Lists](ui-rewrite.md#lists-and-scrolling), [Layers](ui-rewrite.md#layers) |
 | `card.c`            | A card of layers at different depths                                                    | [Cards](ui-rewrite.md#cards)                    |
 | `status.c`, `theme.c` | The status row; the theme's tokens                                                    | [Themes](ui-rewrite.md#themes-light-mode-night-shift) |
-| `lib.c`             | The library's songs from `database.db` and the server catalogue                         | [The library](ui-rewrite.md#the-library)        |
+| `lib.c`             | The library's songs from `database.db` and the server catalogue, and their lengths      | [The library](ui-rewrite.md#the-library)        |
 | `player.c`          | Play and transport, sent down demo's command queue while demo owns the player           | [Cutover](ui-rewrite.md#cutover)                |
 | `page_songs.c`      | Library > Songs                                                                         | [Parity](ui-rewrite.md#parity)                  |
 | `page_menu.c`       | The menu sheet over a page (a song's hold menu's): its recession, material, header and rows | [Parity](ui-rewrite.md#parity)                |

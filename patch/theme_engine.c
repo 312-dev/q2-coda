@@ -232,6 +232,15 @@ static int theme_own(int k) { return option_of(theme(), SETTING_OWN + k) ? st.ow
  * SONG_LENGTH_* (navigation.h) in theme.xml's order */
 int song_artist(void) { return theme_own(OWN_SONGARTIST); }
 int song_length(void) { return theme_own(OWN_SONGLENGTH); }
+/* q2ui's Display page's choice of either ("set songartist N", "set songlength N": control_center.c q2ui_cc_set),
+ * stored as Display's own row stores it: 0, or -1 for a value outside the option's or a theme without it */
+int song_option_set(int length, int v) {
+    int k = length ? OWN_SONGLENGTH : OWN_SONGARTIST;
+    if (!option_of(theme(), SETTING_OWN + k) || v < 0 || v >= theme_keys[k].n) return -1;
+    st.own[k] = v;
+    write_int_config(v, "IPOD", theme_keys[k].key);
+    return 0;
+}
 /* OLED's Track Time (np_bar.c np_sync): 1 when Now Playing's right-hand time is the track's length,
  * 0 for what is left of it */
 int np_time_total(void) { return theme_own(OWN_NPTIME); }

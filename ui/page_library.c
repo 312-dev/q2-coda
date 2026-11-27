@@ -13,7 +13,7 @@ struct songs_st {
     int kind, group, n;
     const int *songs; /* indices into the library's songs */
     int *ids;
-    char lead[12];
+    char lead[12], len[16];
 };
 static int s_count(void *ctx) { return ((struct songs_st *)ctx)->n; }
 static void s_row(void *ctx, int i, ui_row *out) {
@@ -24,7 +24,13 @@ static void s_row(void *ctx, int i, ui_row *out) {
         int track = lib_track(s->songs[i]);
         snprintf(s->lead, sizeof s->lead, "%d", track > 0 ? track : i + 1);
         out->lead = s->lead;
-    } else if (s->kind < 0)
+    }
+    /* the length on the right column: an album's under Song Length's Albums or All Lists, an artist's under All Lists
+     * (patch/song_rows.c song_row); a playlist's song has its artist there instead */
+    int lengths = config_song_length();
+    if (s->kind >= 0 && (lengths == SONG_LENGTH_ALL || (lengths == SONG_LENGTH_ALBUMS && s->kind == LIB_ALBUM)))
+        out->length = lib_length(s->songs[i], s->len, sizeof s->len);
+    else if (s->kind < 0)
         out->value = lib_artist(s->songs[i]); /* a playlist's: its artist on the right column */
 }
 static void s_chosen(void *ctx, int i) {

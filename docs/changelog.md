@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - New UI (preview): **Song Artist** and **Song Length** work as in the classic menus and are on Settings > Display: song lengths beside an album's tracks (or in every song list, or nowhere), and the artist beside the title, on the right, on the selected song only, or hidden.
   - New UI (preview): in Songs, an artist's or album's songs and a playlist, the song that is playing or paused shows its title in blue with level bars on the right, as in the classic menus; pressing Center on it opens Now Playing without starting it again.
   - New UI (preview): spinning the wheel fast changes the volume faster again, as in the classic menus (up to 10 steps a click), on Now Playing and on every slider; turned slowly it still goes one step a click.
   - New UI (preview): Control Center opens with a swipe down from the top of the screen, as in the classic menus, and works by touch: tap a circle to turn it on or off, hold one for its settings, tap Previous, Play/Pause or Next, slide a finger along Brightness or Volume, and swipe up to close it. Holding Return still opens it too. **Brightness** is also the first row of Settings > Display.

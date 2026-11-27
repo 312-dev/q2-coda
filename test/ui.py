@@ -67,7 +67,8 @@ def base_args(binary, d):
             '--stats', d/'stats.json', '--state', d/'state', '--cmdq', d/'cmdq', '--playlist', d/'list', '--backlight', d/'backlight',
             '--now', d/'now', '--cover', d/'cover.jpg', '--ask', d/'ask', '--power', d/'power', '--wifi', d/'wifi',
             '--wireless', d/'wireless', '--told', d/'told', '--networks', d/'networks', '--bt-devices', d/'bt', '--config', d/'config.ini',
-            '--library-order', d/'library-order', '--notices', d/'ui.sock', '--apps', d/'apps', '--app-card', d]
+            '--library-order', d/'library-order', '--durations', d/'durations', '--notices', d/'ui.sock', '--apps', d/'apps',
+            '--app-card', d]
 
 
 class Picture:
@@ -738,9 +739,19 @@ def display(binary, work, home):
     good &= check('Light Mode goes Off to On, then on to Auto before demo has written it; Reduce Motion goes on, each '
                   "down q2ui's own pipe and none down the queue", said == ['set light 1', 'set light 2', 'set motion 1'] and sent == [],
                   f'{said} {sent}')
-    _, _, _, (sent, _, d) = script(binary, work, 60, to + ['tick 4', 'rest', 'key centre', 'run 100'], *home, '--config', ini, code=3, queue=True)
+    _, _, _, (sent, _, d) = script(binary, work, 60, to + ['tick 5', 'rest', 'key centre', 'run 100'], *home, '--config', ini, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
     good &= check("its last row opens the rest of demo's Display page", asked == 'systemset/display_page\n', repr(asked))
+    # the song rows' options after Warmth (greyed with Night Shift off, so passed over), as config.ini has them, each
+    # Centre the next value down q2ui's pipe
+    (ini.parent/'songs.ini').write_text('[IPOD]\nLIGHT=0\nSONGARTIST=3\nSONGLENGTH=1\n')
+    lines = to + ['tick 3', 'rest', 'rows @rows.txt', 'key centre', 'run 100', 'key centre', 'run 100', 'tick 1', 'rest', 'key centre', 'run 100']
+    _, _, _, (_, _, d), said = script(binary, work, 60, lines, *home, '--config', ini.parent/'songs.ini', queue=True, ctl=True)
+    shown = (d/'rows.txt').read_text().splitlines()[5:7] if (d/'rows.txt').exists() else []
+    good &= check("Song Artist and Song Length follow Warmth at config.ini's values; Centre steps each on, Off to Inline "
+                  "and on to Selected Row before demo has written it, All Lists to Off",
+                  shown == ['Song Artist\tOff', 'Song Length\tAll Lists'] and
+                  said == ['set songartist 0', 'set songartist 1', 'set songlength 2'], f'{shown} {said}')
     # Brightness first, as on demo's page: an inline slider at demo's level, set as Control Center's slider sets it
     told = cc_told(work)
     lines = to + ['tick -1', 'rest', 'rows @rows.txt', 'key centre', 'run 50', 'tick 2', 'run 50', 'tick -1', 'run 50', 'key centre', 'rest']
@@ -1475,6 +1486,104 @@ def playing_row(binary, work):
     good &= check('Centre on it opens Now Playing and sends no play', stats['top'] == 'now' and sent == [], f"{stats['top']} {sent}")
     _, _, stats, (sent, _, _) = script(binary, work, 60, walk, now=now.replace('state=1', 'state=0'), queue=True)
     good &= check('with nothing playing Centre on the same row plays it', stats['top'] == 'now' and len(sent) == 1, f"{stats['top']} {sent}")
+    return good
+
+
+def fnv64(text):
+    h = 0xcbf29ce484222325
+    for b in text.encode():
+        h = ((h ^ b) * 0x100000001b3) & 0xffffffffffffffff
+    return h
+
+
+def durations(path, seconds):
+    """demo's durations cache (patch/durations.c): "Q2DUR2" and its NUL, then a record a file ascending by its path's
+    FNV-1a 64 (the key, the file's size, mtime and ns, and its seconds)."""
+    recs = sorted((fnv64(p), s) for p, s in seconds.items())
+    pathlib.Path(path).write_bytes(b'Q2DUR2\0\0' + b''.join(struct.pack('<QIIIi', k, 1000, 1, 0, s) for k, s in recs))
+
+
+def layout(text):
+    """A script's layout FILE (list.c list_layout_dump), by row: title, detail and length as (x0, x1), the bars' end,
+    and the length shown."""
+    out = {}
+    for line in text.splitlines():
+        i, title, detail, length, bars, words = line.split('\t')
+        pair = lambda f: tuple(float(v) for v in f.split()) if f != '0.0 0.0' else ()  # noqa: E731 (a part it has not: empty)
+        out[int(i)] = (pair(title), pair(detail), pair(length), float(bars), words)
+    return out
+
+
+def song_rows(binary, work, home):
+    """Song rows by the Song Artist and Song Length options (docs/oled-design.md#song-rows, [IPOD] SONGARTIST and
+    SONGLENGTH as demo writes them): a song's length from a CUE track's start and end or its file's record in demo's
+    durations cache, as Now Playing writes one, on the right column of an album's tracks (Albums, the default) or every
+    song list (All Lists), or none (Off); the artist inline after the title, on the right column (Right, and Selected
+    Row on the selection alone), inline again beside a length, or not at all (Off)."""
+    good = True
+    d = pathlib.Path(tempfile.mkdtemp(dir=work))
+    fixture.make(60, d/'library.db')
+    db = sqlite3.connect(d/'library.db')
+    order = [r for r in db.execute('select id, fileurl from songtable order by name collate nocase, id')]
+    secs = {url: 100 + k for k, (_, url) in enumerate(order)}
+    secs[order[0][1]], secs[order[1][1]], secs[order[4][1]], secs[order[5][1]] = 225, 3725, 0, 200
+    del secs[order[2][1]]  # no record: no length
+    db.execute('update songtable set time = 30, time_end = 100 where id = ?', (order[3][0],))  # a CUE track, 30 s to 100 s
+    db.execute('update songtable set time = 20, time_end = 0 where id = ?', (order[5][0],))  # the last of a CUE: to the file's end
+    db.commit()
+    durations(d/'durations', secs)
+    want = ['3:45', '1:02:05', '', '1:10', '', '3:00', '1:46']
+
+    def ran(ini, lines=('rest', 'layout @layout.txt'), *more, now=None):
+        (d/'config.ini').write_text('[IPOD]\nLIGHT=0\n' + ini)
+        _, _, _, (_, _, folder_) = script(binary, work, 60, list(lines), '--db', d/'library.db', '--durations', d/'durations',
+                                          '--config', d/'config.ini', *more, now=now, queue=True)
+        return layout((folder_/'layout.txt').read_text()) if (folder_/'layout.txt').exists() else {}
+
+    rows = ran('')
+    good &= check('Songs by default: no lengths (Albums), the artist inline after each title',
+                  bool(rows) and all(not r[2] for r in rows.values()) and sum(bool(r[1]) for r in rows.values()) >= 5 and
+                  all(0 < r[1][0] - r[0][1] < 12 for r in rows.values() if r[1]),
+                  str(rows.get(1)))
+    rows = ran('SONGLENGTH=1\n')
+    got = [rows[i][4] for i in range(1, 8)] if all(i in rows for i in range(1, 8)) else rows
+    good &= check("All Lists: Songs' lengths on the right column, a CUE track's by its start and end, none for a file "
+                  'with no record or a length of nothing, as Now Playing writes them', got == want, f'{got}')
+    good &= check('... the length ends at the right column and the artist stays inline before it',
+                  bool(rows) and rows[1][2][1] == 347 and rows[1][1][1] < rows[1][2][0] - 11, str(rows.get(1)))
+    rows = ran('SONGARTIST=2\nSONGLENGTH=2\n')
+    good &= check('Right: the artist ends at the right column, the title before it',
+                  bool(rows) and all(r[1] and r[1][1] > 340 and r[1][0] > r[0][1] for i, r in rows.items() if i), str(rows.get(2)))
+    rows = ran('SONGARTIST=2\nSONGLENGTH=1\n')
+    good &= check('Right beside a length: inline after the title again',
+                  bool(rows and rows[1][1] and rows[1][2]) and rows[1][1][0] - rows[1][0][1] < 12, str(rows.get(1)))
+    rows = ran('SONGARTIST=1\nSONGLENGTH=2\n', ('rest', 'layout @layout.txt'))
+    after = ran('SONGARTIST=1\nSONGLENGTH=2\n', ('rest', 'tick 1', 'rest', 'layout @layout.txt'))
+    good &= check('Selected Row: the artist on the right column of the selected row alone, and it moves with the selection',
+                  bool(rows and after and rows[1][1] and after[2][1]) and rows[1][1][1] > 340 and not rows[2][1] and not after[1][1],
+                  f'{rows.get(1)} {rows.get(2)} / {after.get(1)} {after.get(2)}')
+    rows = ran('SONGARTIST=3\n')
+    good &= check('Off: no artist on any row', bool(rows) and all(not r[1] for r in rows.values()), str(rows.get(1)))
+    rows = ran('SONGARTIST=9\nSONGLENGTH=7\n')
+    good &= check('a value outside an option reads as its default: the artist inline, no lengths',
+                  bool(rows and rows[1][1]) and 0 < rows[1][1][0] - rows[1][0][1] < 12 and not rows[1][2], str(rows.get(1)))
+    # the playing song beside its length (B), its bars SONG_COL_GAP before it and the title 12 px before them
+    now = NOW.replace('id=5', f'id={order[0][0]}')
+    rows = ran('SONGLENGTH=1\n', ('rest', 'layout @layout.txt'), now=now)
+    good &= check("the playing song's bars stand 12 px before its length, the title ending before them (B)",
+                  bool(rows) and rows[1][3] == rows[1][2][0] - 12 and rows[1][0][1] <= rows[1][3] - 16 - 12, str(rows.get(1)))
+    # an album's tracks: lengths under the default (Albums), none under Off
+    to_album = ['rest', 'key centre', 'rest', 'tick 3', 'rest', 'key centre', 'rest', 'key centre', 'rest', 'layout @layout.txt']
+    album = db.execute('select album from songtable order by album collate nocase limit 1').fetchone()[0]
+    text = lambda t: '' if t <= 0 else f'{t // 3600}:{t // 60 % 60:02d}:{t % 60:02d}' if t >= 3600 else f'{t // 60}:{t % 60:02d}'  # noqa: E731
+    lengths = sorted(text(secs.get(url, 0) - start if time_end <= start else time_end - start)
+                     for url, start, time_end in db.execute('select fileurl, time, time_end from songtable where album = ?', (album,)))
+    rows = ran('', to_album, *home)
+    shown = sorted(r[4] for r in rows.values())
+    good &= check("an album's tracks have their lengths by default (Albums)", bool(rows) and any(shown) and shown == lengths[:8],
+                  f'{shown} {lengths}')
+    rows = ran('SONGLENGTH=2\n', to_album, *home)
+    good &= check("... and none under Off", bool(rows) and not any(r[4] for r in rows.values()), str(rows))
     return good
 
 
@@ -2328,6 +2437,8 @@ def main():
             good &= night_shift(binary, work, ('--page', 'home'))
         if not only or 'playing' in only:
             good &= playing_row(binary, work)
+        if not only or 'songrows' in only:
+            good &= song_rows(binary, work, ('--page', 'home'))
         if not only or 'volume' in only:
             good &= wheel_volume(binary, work)
         if not only or 'light' in only:

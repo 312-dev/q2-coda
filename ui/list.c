@@ -138,9 +138,11 @@ struct rowc {
     int index; /* -1: empty */
     unsigned pictures, everything; /* list_pictures and list_rows_changed's count when the row was asked for */
     ui_row row;
-    run_t title, detail, value, sub, lead;
+    run_t title, detail, value, sub, lead, length;
     float title_x, detail_x, text_end; /* where the title's column ends */
+    float bars_right; /* the playing song's bars end here: the right column's, or before a length (B) */
     int az_in; /* the A-Z index's move of the right column when it was laid out */
+    int sel; /* Song Artist's Selected Row: whether it was the selection when laid out (-1 not asked) */
 };
 
 struct ui_list {
@@ -181,6 +183,9 @@ struct ui_list {
     } slides[SLIDES];
 };
 
+#define SONG_COL_GAP 12   /* a song row's columns apart (patch/navigation.h) */
+#define PLAY_BARS_W 16    /* the playing song's four bars' ink */
+#define PLAY_TITLE_MIN 80 /* the least room B leaves the title beside the bars and the length (song_rows.c) */
 #define PLAYING_W 28.5f /* the level bars' 16.5 px and SONG_COL_GAP's 12 before them */
 /* The playing song's id, playing or paused, 0 for none (ui/now.c: demo's file's id=, the song's row) */
 static int playing_id(void) {
@@ -460,30 +465,48 @@ void list_rows_changed(void) { ++everything; }
 static struct rowc *row_text(ui_list *l, int i) {
     struct rowc *c = &l->rows_c[i & (CACHE - 1)];
     if (c->index == i && !run_stale(&c->title) && !run_stale(&c->detail) && !run_stale(&c->value) &&
-        !run_stale(&c->sub) && !run_stale(&c->lead) && (!c->row.art || c->pictures == pictures) && c->everything == everything &&
-        c->az_in == l->az_in)
+        !run_stale(&c->sub) && !run_stale(&c->lead) && !run_stale(&c->length) && (!c->row.art || c->pictures == pictures) &&
+        c->everything == everything && c->az_in == l->az_in && (c->sel < 0 || c->sel == (i == l->sel)))
         return c;
     static run_t gap;
     if (!gap.n || run_stale(&gap)) run_make(&gap, FACE_REGULAR, TITLE_PX, "  ", -1);
     ui_row *r = &c->row;
     memset(r, 0, sizeof *r);
     get_row(l, i, r);
-    c->index = i, c->pictures = pictures, c->everything = everything, c->az_in = l->az_in;
+    c->index = i, c->pictures = pictures, c->everything = everything, c->az_in = l->az_in, c->sel = -1;
+    /* a song row's artist (detail) and length by the Song Artist and Song Length options (docs/oled-design.md#song-rows) */
+    int how = l->src.song && r->detail && *r->detail ? config_song_artist() : SONG_ARTIST_INLINE;
+    if (how == SONG_ARTIST_OFF) r->detail = 0;
+    if (how == SONG_ARTIST_SELECTED) c->sel = i == l->sel;
+    if (how == SONG_ARTIST_SELECTED && !c->sel) r->detail = 0;
     int two = l->row_h > ROW_H && r->sub;
     float x = (float)(l->box.x + TEXT_X + TEXT_MARGIN);
     if (r->icon || r->flags & ROW_CIRCLE) x = (float)(l->box.x + ICON_TEXT_X + TEXT_MARGIN);
     if (r->lead) x = (float)(l->box.x + LEAD_TEXT_X + TEXT_MARGIN);
     if (r->art) x = (float)(l->box.x + ART_TEXT_X + TEXT_MARGIN);
     float end = (float)(l->box.x + l->box.w - (SCREEN_W - RIGHT_COL) - l->az_in) - TEXT_MARGIN;
-    c->value.n = c->detail.n = c->sub.n = c->lead.n = 0;
-    c->value.made = c->detail.made = c->sub.made = c->lead.made = c->title.made;
+    c->value.n = c->detail.n = c->sub.n = c->lead.n = c->length.n = 0;
+    c->bars_right = end + TEXT_MARGIN;
+    c->value.made = c->detail.made = c->sub.made = c->lead.made = c->length.made = c->title.made;
     if (r->flags & ROW_HEADER) {
         run_make(&c->title, FACE_REGULAR, META_PX, r->title ? r->title : "", (int)(end - x));
         c->title_x = x, c->text_end = end;
-        c->value.made = c->detail.made = c->sub.made = c->lead.made = c->title.made;
+        c->value.made = c->detail.made = c->sub.made = c->lead.made = c->length.made = c->title.made;
         return c;
     }
-    if (r->flags & ROW_SLIDER) { /* the title before the track; the value after it, in small text */
+    if (r->length && *r->length) { /* right-aligned on the right column; the playing song's bars before it (B) while
+                                      the title keeps PLAY_TITLE_MIN beside both, else in its place (A) */
+        run_make(&c->length, FACE_REGULAR, META_PX, r->length, -1);
+        float column = end + TEXT_MARGIN;
+        if (r->flags & ROW_PLAYING && column - c->length.w - 2 * SONG_COL_GAP - PLAY_BARS_W - x < PLAY_TITLE_MIN)
+            c->length.n = 0;
+        else if (r->flags & ROW_PLAYING)
+            c->bars_right = column - c->length.w - SONG_COL_GAP, end = c->bars_right - PLAYING_W;
+        else
+            end = column - c->length.w - SONG_COL_GAP;
+    }
+    if (c->length.n) {
+    } else if (r->flags & ROW_SLIDER) { /* the title before the track; the value after it, in small text */
         if (r->value) run_make(&c->value, FACE_REGULAR, META_PX, r->value, SLIDER_END - 8);
         end = (float)(l->box.x + SLIDER_X) - VALUE_GAP;
     } else if (r->value && *r->value) {
@@ -497,16 +520,32 @@ static struct rowc *row_text(ui_list *l, int i) {
     else if (r->flags & ROW_GRIP)
         end -= GRIP_W + 6;
     for (int k = 0; k < 3 && r->marks[k]; ++k) end -= MARK_STEP;
-    run_make(&c->title, FACE_REGULAR, TITLE_PX, r->title ? r->title : "", (int)(end - x));
-    c->title_x = x, c->text_end = end;
-    float left = end - x - c->title.w - gap.w;
-    if (!two && r->detail && *r->detail && left >= DETAIL_MIN) {
-        run_make(&c->detail, FACE_REGULAR, META_PX, r->detail, (int)left);
-        c->detail_x = x + c->title.w + gap.w;
+    /* Right, and Selected Row on the selection, put the artist on the right column, taking at most half the room
+     * from the title (song_rows.c song_fit); a length or the playing song's bars there turn it inline beside them */
+    if (!two && r->detail && *r->detail && how != SONG_ARTIST_INLINE && !c->length.n && !(r->flags & ROW_PLAYING) &&
+        !(r->value && *r->value)) {
+        float room = end - x;
+        run_make(&c->title, FACE_REGULAR, TITLE_PX, r->title ? r->title : "", -1);
+        run_make(&c->detail, FACE_REGULAR, META_PX, r->detail, -1);
+        float a = room - gap.w - (c->title.w < room / 2 ? c->title.w : room / 2);
+        if (a > c->detail.w) a = c->detail.w;
+        if (a < DETAIL_MIN) c->detail.n = 0, a = 0;
+        else run_make(&c->detail, FACE_REGULAR, META_PX, r->detail, (int)a);
+        run_make(&c->title, FACE_REGULAR, TITLE_PX, r->title ? r->title : "", (int)(a ? room - a - gap.w : room));
+        c->title_x = x, c->text_end = a ? end - a - gap.w : end;
+        c->detail_x = end - c->detail.w;
+    } else {
+        run_make(&c->title, FACE_REGULAR, TITLE_PX, r->title ? r->title : "", (int)(end - x));
+        c->title_x = x, c->text_end = end;
+        float left = end - x - c->title.w - gap.w;
+        if (!two && r->detail && *r->detail && left >= DETAIL_MIN) {
+            run_make(&c->detail, FACE_REGULAR, META_PX, r->detail, (int)left);
+            c->detail_x = x + c->title.w + gap.w;
+        }
     }
     if (two) run_make(&c->sub, FACE_REGULAR, META_PX, r->sub, (int)(end - x));
     if (r->lead) run_make(&c->lead, FACE_REGULAR, META_PX, r->lead, -1);
-    c->value.made = c->detail.made = c->sub.made = c->lead.made = c->title.made;
+    c->value.made = c->detail.made = c->sub.made = c->lead.made = c->length.made = c->title.made;
     return c;
 }
 
@@ -621,7 +660,10 @@ static void row_paint(ui_list *l, int i, float y, int focused, float dy) {
     if (c->detail.n) run_draw(&c->detail, c->detail_x, ty + (h - (float)META_PX) / 2 + META_DY, dim, 256);
     if (two) run_draw(&c->sub, c->title_x, ty + 29, dim, 256);
     float right = (float)(l->box.x + l->box.w - (SCREEN_W - RIGHT_COL) - l->az_in);
-    if (r->flags & ROW_SLIDER) {
+    if (c->length.n) {
+        run_draw(&c->length, right - c->length.w, ty + (h - (float)META_PX) / 2 + META_DY, dim, 256);
+        if (r->flags & ROW_PLAYING) level_bars(c->bars_right, cy + iy, focused ? on : RGB_ACCENT);
+    } else if (r->flags & ROW_SLIDER) {
         slider((float)(l->box.x + SLIDER_X), right - SLIDER_END, cy + iy, r->level, focused, i == l->grab);
         if (c->value.n) run_draw(&c->value, right - c->value.w, ty + (h - (float)META_PX) / 2, val, 256);
     } else if (c->value.n) {
@@ -940,6 +982,21 @@ int list_rows_dump(const char *path) {
             fputc('\n', f);
         } else
             fprintf(f, "%s%s%s\n", r.title ? r.title : "", r.value ? "\t" : "", r.value ? r.value : "");
+    }
+    return fclose(f);
+}
+int list_layout_dump(const char *path) {
+    FILE *f = traced ? fopen(path, "w") : 0;
+    if (!f) return -1;
+    float right = (float)(traced->box.x + traced->box.w - (SCREEN_W - RIGHT_COL) - traced->az_in);
+    for (int i = traced->top; i < traced->n && i < traced->top + traced->rows + 1; ++i) {
+        struct rowc *c = row_text(traced, i);
+        ui_row r = { 0 };
+        get_row(traced, i, &r); /* its length's words: a source's buffer holds only the row asked last */
+        float dx = c->detail.n ? c->detail_x : 0, lx = c->length.n ? right - c->length.w : 0;
+        fprintf(f, "%d\t%.1f %.1f\t%.1f %.1f\t%.1f %.1f\t%.1f\t%s\n", i, c->title_x, c->title_x + c->title.w, dx,
+                c->detail.n ? dx + c->detail.w : 0, lx, c->length.n ? right : 0, c->row.flags & ROW_PLAYING ? c->bars_right : 0,
+                c->length.n && r.length ? r.length : "");
     }
     return fclose(f);
 }

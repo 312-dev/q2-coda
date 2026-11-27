@@ -33,10 +33,11 @@
  * row reads the battery and Wi-Fi, --told the file demo says the rest of its states in
  * (ui/status.c), --networks and --bt-devices the ones it lists Wi-Fi's networks and Bluetooth's devices in
  * (ui/page_wifi.c, ui/page_bluetooth.c), --art the folder of Cover Flow's album thumbnails (ui/art.c), --config demo's
- * config.ini, read for Light Mode and Reduce Motion (ui/config.c), --card the card About measures
+ * config.ini, read for Light Mode, Reduce Motion and the song rows' options (ui/config.c), --card the card About measures
  * (ui/page_general.c), --library-order the Library's order from demo's Edit Library
- * (ui/page_library.c), --notices where Q2UI/1 is served ("" for nowhere) and --apps and --app-card
- * where a caller's app is found to name it on the card (ui/notice.c); a test names its own.
+ * (ui/page_library.c), --durations demo's cache of the songs' lengths (ui/lib.c), --notices where Q2UI/1 is
+ * served ("" for nowhere) and --apps and --app-card where a caller's app is found to name it on the card
+ * (ui/notice.c); a test names its own.
  * --then now opens Now Playing over the pages come back to: the gate's, when the page of demo's
  * that q2ui left for ended on demo's Now Playing (a Search result played; patch/q2ui_gate.c).
  *
@@ -133,6 +134,8 @@ static void parse(int argc, char **argv) {
             config_file = v, ++i;
         else if (!strcmp(a, "--library-order"))
             library_order_file = v, ++i;
+        else if (!strcmp(a, "--durations"))
+            lib_durations_file = v, ++i;
         else if (!strcmp(a, "--then"))
             opt.then = v, ++i;
         else if (!strcmp(a, "--notices"))
@@ -391,7 +394,7 @@ static int key_code(const char *name) {
                                      : atoi(name);
 }
 /* Lines: tick N | tug SHARE | key NAME | down NAME | up NAME | hold NAME | run MS | rest |
- * shot FILE | rows FILE | record DIR | record off | plays FILE (what plays is read from FILE from here on) |
+ * shot FILE | rows FILE | layout FILE (the rows in sight as laid out, list_layout_dump) | record DIR | record off | plays FILE (what plays is read from FILE from here on) |
  * networks FILE and btdevices FILE (the same for demo's Wi-Fi networks and Bluetooth devices) |
  * notice COMMAND (a Q2UI/1 command, as a connection's: its answers go to the trace, "said ...") |
  * touch X Y | move X Y | lift (a finger on the upright screen, as ui/input.c reads hyn_ts) |
@@ -473,6 +476,8 @@ static int script(const char *path) {
             ppm(arg);
         } else if (sscanf(line, "rows %319s", arg) == 1) {
             list_rows_dump(arg);
+        } else if (sscanf(line, "layout %319s", arg) == 1) {
+            list_layout_dump(arg);
         } else if (sscanf(line, "record %255s", arg) == 1) {
             if (!strcmp(arg, "off"))
                 *record_dir = 0;

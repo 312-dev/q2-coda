@@ -374,6 +374,20 @@ def test_q2uis_display_page_sets_light_mode_and_reduce_motion_through_demo(fw):
     assert cc(b'motion', 1) == 0 and saved[-1] == ('IPOD', 'REDUCEMOTION', 1)
 
 
+def test_q2uis_display_page_sets_song_artist_and_song_length_through_demo(fw):
+    """q2ui's Settings > Display: Song Artist (Inline, Selected Row, Right, Off) and Song Length (Albums, All Lists,
+    Off), OLED's own options, stored as Display's own row stores them ([IPOD] SONGARTIST, SONGLENGTH) and drawn by
+    demo's song rows from then; a value outside an option's is refused."""
+    saved = []
+    fw.mock('write_int_config', lambda v, sec, key, *_: saved.append((C.string_at(sec).decode(), C.string_at(key).decode(), v)) or 0)
+    cc = fw.fn('q2ui_cc_set', C.c_int, C.c_char_p, C.c_int)
+    artist, length = fw.fn('song_artist', C.c_int), fw.fn('song_length', C.c_int)
+    assert cc(b'songartist', 2) == 0 and saved == [('IPOD', 'SONGARTIST', 2)] and artist() == 2
+    assert cc(b'songlength', 1) == 0 and saved[-1] == ('IPOD', 'SONGLENGTH', 1) and length() == 1
+    assert cc(b'songartist', 4) == -1 and cc(b'songlength', 3) == -1 and cc(b'songartist', -1) == -1
+    assert len(saved) == 2 and artist() == 2 and length() == 1
+
+
 def test_q2uis_playback_page_sets_gapless_and_smart_crossfade_through_demo(fw):
     """q2ui's Settings > Playback: Gapless as stock's own row sets it (0x4bcfa4: PLAYSET GAPLESS, mclSetGaplessMode),
     and Smart Crossfade as its row does (crossfade.c xfade_click: Q2POD XFADE, and on turns Gapless on with it)."""
