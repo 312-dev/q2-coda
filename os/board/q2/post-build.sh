@@ -9,6 +9,12 @@ test ! -e "$t/vendor"
 ln -sfn /vendor/module_driver "$t/module_driver"
 ln -sfn /vendor/firmware "$t/firmware"
 mkdir -p "$t/mnt/data" "$t/mnt/mmc"
+# D-Bus's machine id (/etc/sv/dbus/run makes it each boot): /var/lib/dbus on the tmpfs, the root being read-only
+if [ -x "$t/usr/bin/dbus-daemon" ]; then
+    mkdir -p "$t/var/lib"
+    rm -rf "$t/var/lib/dbus"
+    ln -sfn /run/dbus "$t/var/lib/dbus"
+fi
 # runsv keeps its state in each service's supervise/, on the read-only image a link into /run (rcS makes them)
 for s in "$t"/etc/sv/*; do
     ln -sfn "/run/runit/supervise.${s##*/}" "$s/supervise"

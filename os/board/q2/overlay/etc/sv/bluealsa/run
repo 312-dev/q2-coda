@@ -1,0 +1,16 @@
+#!/bin/sh
+# Vamp's own bluealsa (docs/bluealsa.md, the vamp-bluealsa package): the roles and options today's launcher gives
+# it (patch/bt_launch.sh, BLUEALSA_PROFILES and BLUEALSA_OPTIONS, with tools/build.py's BT_KEEPALIVE), less
+# --shanling, which only stock's demo calls. AAC only when the image has it (fdk-aac needs a C++ toolchain).
+. /usr/libexec/vamp/log
+if [ ! -S /run/dbus/system_bus_socket ]; then
+    step "bluealsa: no system bus yet"
+    exit 1
+fi
+mkdir -p /tmp/q2-bluealsa/lib # its per-device store's parent
+codecs='-c LDAC -c aptX-HD -c aptX'
+bluealsa --help 2>&1 | grep -qw AAC && codecs="$codecs -c AAC --aac-afterburner --aac-vbr --aac-bitrate=240000"
+step "bluealsa: start"
+exec 2>&1
+# shellcheck disable=SC2086 # codecs is words
+exec bluealsa -p a2dp-source -p a2dp-sink -p hfp-ag -p hsp-ag --keep-alive=5 $codecs

@@ -1,0 +1,18 @@
+#!/bin/sh
+# The radio's Bluetooth side (docs/vamp-os-base.md#bluetooth): Shanling's rtk_hciattach, a vendor file, loads the
+# RTL8733BS's firmware (/firmware/rtlbt) and attaches it on ttyS0 with the H5 line discipline
+# (hci_uart_h5_kernel_5_10_21.ko, loaded by rcS with the other modules), as stock's demo does at Bluetooth on;
+# hci0 then appears. -n keeps it in the foreground, under runsv. On a card boot an hci0 that is already there was
+# attached by the system outside, and is left to it.
+. /usr/libexec/vamp/log
+if [ -e /sys/class/bluetooth/hci0 ]; then
+    step "bt-attach: hci0 is there already, left as it is"
+    exec tail -f /dev/null
+fi
+if [ ! -x /vendor/bin/rtk_hciattach ] || [ ! -c /dev/ttyS0 ]; then
+    step "bt-attach: no /vendor/bin/rtk_hciattach or no /dev/ttyS0"
+    exit 1
+fi
+step "bt-attach: start"
+exec 2>&1
+exec /vendor/bin/rtk_hciattach -n -s 115200 ttyS0 rtk_h5

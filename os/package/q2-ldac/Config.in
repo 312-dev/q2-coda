@@ -1,0 +1,5 @@
+config BR2_PACKAGE_Q2_LDAC
+	bool "q2-ldac"
+	help
+	  Sony's LDAC encoder and its adaptive bit rate library as Android publishes them, static, for
+	  bluez-alsa (docs/bluealsa.md#codecs-and-licences), built by tools/thirdparty.py's own recipe.

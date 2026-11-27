@@ -1,0 +1,9 @@
+#!/bin/sh
+# The system bus (docs/vamp-os-base.md#bluetooth): BlueZ and bluez-alsa speak D-Bus, and nothing of Vamp's own
+# does. Its machine id is made on /run each boot, the root being read-only (/var/lib/dbus is a link there).
+. /usr/libexec/vamp/log
+step "dbus: start"
+mkdir -p /run/dbus
+dbus-uuidgen --ensure
+exec 2>&1
+exec dbus-daemon --system --nofork --nopidfile

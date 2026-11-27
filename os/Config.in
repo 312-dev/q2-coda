@@ -12,4 +12,8 @@ source "$BR2_EXTERNAL_VAMP_PATH/package/q2ui/Config.in"
 source "$BR2_EXTERNAL_VAMP_PATH/package/vamp-assets/Config.in"
 source "$BR2_EXTERNAL_VAMP_PATH/package/q2-adbd/Config.in"
 source "$BR2_EXTERNAL_VAMP_PATH/package/q2adb/Config.in"
+source "$BR2_EXTERNAL_VAMP_PATH/package/vamp-bluez/Config.in"
+source "$BR2_EXTERNAL_VAMP_PATH/package/q2-freeaptx/Config.in"
+source "$BR2_EXTERNAL_VAMP_PATH/package/q2-ldac/Config.in"
+source "$BR2_EXTERNAL_VAMP_PATH/package/vamp-bluealsa/Config.in"
 endmenu
