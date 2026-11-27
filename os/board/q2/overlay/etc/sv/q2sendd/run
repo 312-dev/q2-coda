@@ -1,7 +1,8 @@
 #!/bin/sh
 # q2sendd (docs/vamp-os-services.md#localsend): LocalSend's receive side. Down at boot (its down file): LocalSend
-# listens on the network only while its page is open, so q2ui's page brings it up (sv up) and down again.
+# listens on the network only while its page is open, so q2ui's page brings it up (sv up) and down again. A receive
+# done asks q2libd for a scan (SIGHUP), so the songs received are in the Library.
 . /usr/libexec/vamp/log
 step "q2sendd: start"
 exec 2>&1
-exec /usr/bin/q2sendd
+exec /usr/bin/q2sendd --after-receive "sv hup /etc/sv/q2libd"

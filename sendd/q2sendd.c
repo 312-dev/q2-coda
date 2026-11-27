@@ -3,19 +3,22 @@
  * (patch/localsend_ui.c) is for it today, through the same files in --run:
  *
  *   - an incoming request (q2send.ask) is asked of the owner as a Q2UI/1 card (docs/platform/notices.md):
- *     "Receive files?", "<alias> sends <n> files (<size>)", Accept and Decline. Only `answer ID 1` accepts
- *     (q2send.answer "<id> 1"); any other answer, no UI socket, a refused ask or the UI's connection ending is a
- *     decline at once, never a wait. A request q2send drops first (its sender gone, its 60 s up) withdraws the card.
+ *     "Receive files?", "<alias> sends <n> files (<size>)", Accept, Decline and Always Accept. `answer ID 1` accepts
+ *     (q2send.answer "<id> 1") and `answer ID 3` accepts and trusts the sender (demo's card's Always Accept switch,
+ *     "<id> 1 trust"); any other answer, no UI socket, a refused ask or the UI's connection ending is a decline at
+ *     once, never a wait. A request q2send drops first (its sender gone, its 60 s up) withdraws the card.
  *   - a trusted sender (q2send's data/trusted) is not asked: a toast "Receiving from <alias>" instead, so a receive
  *     is never silent.
  *   - the card a computer's over USB (Q2SYS/1 `usb storage`, at the start and as watched) is q2send.hold, which
  *     refuses every request; any other mode takes it away.
  *   - the radio held over Q2NET/1 while it runs (`hold`, renewed before it lapses), as Smart Wi-Fi's hold for
  *     LocalSend's page is today.
+ *   - a receive done runs --after-receive's command (the image: sv hup /etc/sv/q2libd, a library scan, so songs
+ *     received are in the Library), once a receive.
  *
  * SIGTERM ends q2send, then q2sendd; q2send ending ends q2sendd with its status. Usage:
  *
- *     q2sendd [--sockets DIR] [--q2send PATH] [--run DIR] [q2send's other options...]
+ *     q2sendd [--sockets DIR] [--q2send PATH] [--run DIR] [--after-receive COMMAND] [q2send's other options...]
  *
  * --sockets is where ui.sock, net.sock and sys.sock are (/run/vamp); --run is q2send's own (/tmp), passed on. */
 #define _GNU_SOURCE
@@ -37,7 +40,7 @@
 #define LOOK_MS 200   /* q2send's files looked at this often */
 #define RETRY_MS 2000 /* Q2SYS/1's connection tried again this often while it is not there */
 
-static char socks[256] = "/run/vamp", run_dir[256] = "/tmp";
+static char socks[256] = "/run/vamp", run_dir[256] = "/tmp", after_receive[256];
 static volatile sig_atomic_t stopping;
 static void on_term(int s) { (void)s, stopping = 1; }
 
@@ -176,12 +179,13 @@ static char done_id[96];    /* the last one answered, its ask file not yet gone 
 static char card[32];       /* the card's Q2UI/1 id, recv-N */
 static int cards;
 
+/* yes: 0 declines, 1 accepts, 2 accepts and trusts the sender (Always Accept) */
 static void answer(const char *id, int yes) {
     char text[128];
-    snprintf(text, sizeof text, "%s %d\n", id, yes);
+    snprintf(text, sizeof text, "%s %d%s\n", id, yes > 0, yes == 2 ? " trust" : "");
     snprintf(done_id, sizeof done_id, "%s", id);
     write_text(run_path("answer"), text);
-    say("%s: %s", id, yes ? "accepted" : "declined");
+    say("%s: %s", id, yes == 2 ? "accepted, the sender trusted" : yes ? "accepted" : "declined");
 }
 
 static void size_text(char *out, size_t room, long long b) {
@@ -214,7 +218,7 @@ static void look_ask(void) {
     snprintf(body, sizeof body, "%s sends %d file%s (%s)", who, files, files == 1 ? "" : "s", size);
     encode(title, sizeof title, "Receive files?"), encode(b_enc, sizeof b_enc, body);
     if (ui.fd < 0) sock_open(&ui, "ui.sock", "Q2UI/1");
-    if (sock_say(&ui, "ask %s %s %s Accept Decline", card, title, b_enc)) {
+    if (sock_say(&ui, "ask %s %s %s Accept Decline Always%%20Accept", card, title, b_enc)) {
         say("no Q2UI/1 to ask on");
         answer(asked_id, 0), asked_id[0] = 0;
     }
@@ -228,7 +232,7 @@ static void read_ui(void) {
         char id[40], what[16];
         if (!strncmp(line, "err", 3) && asked_id[0]) say("Q2UI/1: %s", line), answer(asked_id, 0), asked_id[0] = 0;
         else if (sscanf(line, "answer %39s %15s", id, what) == 2 && asked_id[0] && !strcmp(id, card))
-            answer(asked_id, !strcmp(what, "1")), asked_id[0] = 0;
+            answer(asked_id, !strcmp(what, "1") ? 1 : !strcmp(what, "3") ? 2 : 0), asked_id[0] = 0;
     }
     if (r < 0 && asked_id[0]) say("Q2UI/1 went away"), answer(asked_id, 0), asked_id[0] = 0;
 }
@@ -251,6 +255,10 @@ static void look_state(void) {
                 char text[120];
                 snprintf(text, sizeof text, "Receiving from %s", f[6]);
                 toast(text);
+            }
+            if (!strcmp(f[1], "done") && strcmp(recv_phase, "done") && n >= 3 && atoi(f[2]) > 0 && *after_receive) {
+                say("received %s files: %s", f[2], after_receive); /* the library scan, so they are in the Library */
+                if (system(after_receive) != 0) say("%s failed", after_receive);
             }
             snprintf(recv_phase, sizeof recv_phase, "%s", f[1]);
             return;
@@ -289,6 +297,7 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "--sockets") && i + 1 < argc) snprintf(socks, sizeof socks, "%s", argv[++i]);
         else if (!strcmp(argv[i], "--q2send") && i + 1 < argc) q2send = argv[++i];
         else if (!strcmp(argv[i], "--run") && i + 1 < argc) snprintf(run_dir, sizeof run_dir, "%s", argv[++i]);
+        else if (!strcmp(argv[i], "--after-receive") && i + 1 < argc) snprintf(after_receive, sizeof after_receive, "%s", argv[++i]);
         else if (na < 60) args[na++] = argv[i];
     }
     args[0] = (char *)q2send, args[na++] = "--run", args[na++] = run_dir, args[na] = 0;

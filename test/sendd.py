@@ -99,7 +99,8 @@ class Q2:
         self.port = free_port()
         self.p = subprocess.Popen([str(self.out/'q2sendd'), '--sockets', str(self.socks), '--q2send', str(self.out/'q2send'),
                                    '--run', str(tmp/'run'), '--data', str(tmp/'data'), '--recv', str(tmp/'card/Received'),
-                                   '--port', str(self.port), '--alias', 'Vamp'], stderr=subprocess.PIPE, text=True)
+                                   '--port', str(self.port), '--alias', 'Vamp', '--after-receive', f'echo x >> {tmp}/after'],
+                                  stderr=subprocess.PIPE, text=True)
         end = time.monotonic() + 15
         while time.monotonic() < end and not port_open(self.port):
             time.sleep(0.1)
@@ -182,8 +183,32 @@ def until(fn, timeout=5.0):
 def test_accepted_on_the_card_s_first_choice(q2):
     m = q2(answer='1')
     assert m.send(body=b'hello') == (200, 200)
-    assert m.ui.lines[0] == 'ask recv-1 Receive%20files? Pixel%20sends%201%20file%20(5%20B) Accept Decline', m.ui.lines
+    assert m.ui.lines[0] == 'ask recv-1 Receive%20files? Pixel%20sends%201%20file%20(5%20B) Accept Decline Always%20Accept', m.ui.lines
     assert until(lambda: (m.tmp/'card/Received/song.txt').exists()) and (m.tmp/'card/Received/song.txt').read_bytes() == b'hello'
+    assert not (m.tmp/'data/trusted').exists() or not (m.tmp/'data/trusted').read_text().strip(), 'Accept trusts no one'
+
+
+def test_always_accept_trusts_the_sender_and_the_next_send_is_not_asked(q2, build):
+    m = q2(answer='3')
+    assert m.send(body=b'one') == (200, 200)
+    assert until(lambda: (m.tmp/'data/trusted').exists() and build[1] in (m.tmp/'data/trusted').read_text()), \
+        "the card's third choice: q2send.answer '<id> 1 trust'"
+    asks = sum(x.startswith('ask ') for x in m.ui.lines)
+    m.answer = '2'
+    assert m.send(name='two.txt', body=b'two') == (200, 200), 'trusted now: taken without a card'
+    assert sum(x.startswith('ask ') for x in m.ui.lines) == asks
+
+
+def test_a_receive_runs_the_library_scan_once_and_a_refusal_none(q2):
+    m = q2(answer='2')
+    assert m.send() == (403, None)
+    time.sleep(1)
+    assert not (m.tmp/'after').exists(), 'nothing received: no scan'
+    m.answer = '1'
+    assert m.send(body=b'hello') == (200, 200)
+    assert until(lambda: (m.tmp/'after').exists()), '--after-receive once the receive is done'
+    time.sleep(1)
+    assert (m.tmp/'after').read_text() == 'x\n', 'once a receive'
 
 
 @pytest.mark.parametrize('answer', ['2', '0', 'gone'])
